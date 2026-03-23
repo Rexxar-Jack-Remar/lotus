@@ -13,13 +13,13 @@
 // include STL
 #include <vector>
 
-namespace framework {
-std::vector<framework::Value::Fields>
+namespace fitx {
+std::vector<fitx::Value::Fields>
 decodeGetElementPtrInst(llvm::GetElementPtrInst *get_element_ptr_inst) {
   llvm::Type *Ty = get_element_ptr_inst->getPointerOperandType();
   /* llvm::Type *Ty = get_element_ptr_inst->getSourceElementType(); */
   std::vector<long> indice = getValueIndices(get_element_ptr_inst);
-  std::vector<framework::Value::Fields> decoded;
+  std::vector<fitx::Value::Fields> decoded;
 
   for (long ind : indice) {
     long index = ind;
@@ -31,7 +31,7 @@ decodeGetElementPtrInst(llvm::GetElementPtrInst *get_element_ptr_inst) {
               llvm::cast<llvm::StructType>(getRootElementType(Ty)), index);
         }
       }
-      decoded.push_back(framework::Value::Fields(Ty, index));
+      decoded.push_back(fitx::Value::Fields(Ty, index));
       if (auto *StTy = llvm::dyn_cast<llvm::StructType>(getRootElementType(Ty)))
         Ty = StTy->getElementType(index);
       /* if (auto StTy = llvm::dyn_cast<llvm::StructType>(Ty)) */
@@ -47,7 +47,7 @@ decodeGetElementPtrInst(llvm::GetElementPtrInst *get_element_ptr_inst) {
 long arrayElementNum(llvm::GetElementPtrInst *get_element_ptr_inst) {
   const unsigned num_ops = get_element_ptr_inst->getNumOperands();
   if (num_ops < 2)
-    return framework::Value::kArbitaryArrayElement;
+    return fitx::Value::kArbitaryArrayElement;
 
   if (get_element_ptr_inst->getSourceElementType()->isArrayTy()) {
     // Use the last index (array element index); idx_end() is past-the-end.
@@ -56,18 +56,18 @@ long arrayElementNum(llvm::GetElementPtrInst *get_element_ptr_inst) {
       if (const_int->getBitWidth() > 0)
         return const_int->getSExtValue();
     }
-    return framework::Value::kArbitaryArrayElement;
+    return fitx::Value::kArbitaryArrayElement;
   }
 
   llvm::Value *first_idx_val = get_element_ptr_inst->getOperand(1);
   if (auto *const_int = llvm::dyn_cast<llvm::ConstantInt>(first_idx_val)) {
     if (const_int->getBitWidth() == 0)
-      return framework::Value::kArbitaryArrayElement;
+      return fitx::Value::kArbitaryArrayElement;
     if (const_int->isZero())
-      return framework::Value::kNonArrayElement;
+      return fitx::Value::kNonArrayElement;
     return const_int->getSExtValue();
   }
-  return framework::Value::kArbitaryArrayElement;
+  return fitx::Value::kArbitaryArrayElement;
 }
 
 std::vector<long> getValueIndices(llvm::GetElementPtrInst *inst) {
@@ -112,8 +112,8 @@ const llvm::StructLayout *getStructLayout(llvm::Instruction *instruction,
   return llvm_module->getDataLayout().getStructLayout(STy);
 }
 
-bool isInPredecessor(std::shared_ptr<framework::BasicBlock> target,
-                     std::shared_ptr<framework::BasicBlock> block, int depth) {
+bool isInPredecessor(std::shared_ptr<fitx::BasicBlock> target,
+                     std::shared_ptr<fitx::BasicBlock> block, int depth) {
   if (depth < 0)
     return false;
 
@@ -129,4 +129,4 @@ bool isInPredecessor(std::shared_ptr<framework::BasicBlock> target,
   return false;
 }
 
-} // namespace framework
+} // namespace fitx

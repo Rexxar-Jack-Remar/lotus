@@ -6,5 +6,5 @@
 #include <vector>
 
 namespace UseAfterFree {
-void defineStates(framework::StateManager &manager);
+void defineStates(fitx::StateManager &manager);
 } // namespace UseAfterFree

@@ -11,7 +11,7 @@
 #include "Checker/FiTx/Core/Instructions.h"
 #include "Checker/FiTx/Core/Utils.h"
 
-namespace framework {
+namespace fitx {
 
 Converter &Converter::GetInstance() {
   // We use static local variable in order to achieve singleton here
@@ -23,13 +23,13 @@ struct Converter::ValueSignature
 Converter::GetSignitureFromDefinition(llvm::Value *value) {
   bool finish_update = false;
 
-  ValueSignature signature{value, framework::Value::kNonArrayElement,
-                           std::vector<framework::Value::Fields>()};
+  ValueSignature signature{value, fitx::Value::kNonArrayElement,
+                           std::vector<fitx::Value::Fields>()};
   llvm::LoadInst *found_load_inst = nullptr;
   llvm::Value *start_value = value;
 
   auto UpdateFields =
-      [&signature](std::vector<framework::Value::Fields> new_fields) {
+      [&signature](std::vector<fitx::Value::Fields> new_fields) {
         return signature.fields.empty() ? new_fields : signature.fields;
       };
 
@@ -117,7 +117,7 @@ Converter::GetSignitureFromDefinition(llvm::Value *value) {
       auto *get_element_ptr_inst = llvm::cast<llvm::GetElementPtrInst>(inst);
       auto decode_types = decodeGetElementPtrInst(get_element_ptr_inst);
       signature.array_element_num =
-          signature.array_element_num != framework::Value::kNonArrayElement
+          signature.array_element_num != fitx::Value::kNonArrayElement
               ? signature.array_element_num
               : arrayElementNum(get_element_ptr_inst);
 
@@ -168,56 +168,56 @@ Converter::GetSignitureFromDefinition(llvm::Value *value) {
   return signature;
 }
 
-std::shared_ptr<framework::Value> Converter::Convert(llvm::Value *llvm_value) {
+std::shared_ptr<fitx::Value> Converter::Convert(llvm::Value *llvm_value) {
   auto signature = GetSignitureFromDefinition(llvm_value);
   if (llvm::isa<llvm::Instruction>(signature.value))
     return ConvertInstruction(signature);
   return ConvertValue(signature);
 }
 
-std::shared_ptr<framework::Instruction>
+std::shared_ptr<fitx::Instruction>
 Converter::ConvertInstruction(ValueSignature signature) {
   auto *llvm_instruction = llvm::cast<llvm::Instruction>(signature.value);
 
   if (auto managed_instruction =
-          getManagedInst<framework::Instruction>(signature))
+          getManagedInst<fitx::Instruction>(signature))
     return managed_instruction;
 
   // If the value is instruction, we should create a corresponding value
   if (auto *inst = llvm::dyn_cast<llvm::CallInst>(signature.value)) {
-    return framework::CallInst::Create(inst, signature.fields,
+    return fitx::CallInst::Create(inst, signature.fields,
                                        signature.array_element_num);
   }
 
-  auto value = std::make_shared<framework::Instruction>(
+  auto value = std::make_shared<fitx::Instruction>(
       llvm_instruction, signature.fields, signature.array_element_num);
   manageValue(signature.value, value);
   return value;
 }
 
-std::shared_ptr<framework::Value>
+std::shared_ptr<fitx::Value>
 Converter::ConvertValue(ValueSignature signature) {
   /* add to signiture list */
   if (auto managed_value = getManagedValue(signature))
     return managed_value;
 
-  std::shared_ptr<framework::Value> value;
+  std::shared_ptr<fitx::Value> value;
   switch (signature.value->getValueID()) {
   case llvm::Value::ConstantIntVal:
-    value = std::make_shared<framework::ConstValue>(
+    value = std::make_shared<fitx::ConstValue>(
         llvm::cast<llvm::ConstantInt>(signature.value));
     break;
   case llvm::Value::ConstantPointerNullVal:
-    value = std::make_shared<framework::NullValue>(
+    value = std::make_shared<fitx::NullValue>(
         llvm::cast<llvm::ConstantPointerNull>(signature.value));
     break;
   case llvm::Value::ArgumentVal:
-    value = std::make_shared<framework::Argument>(
+    value = std::make_shared<fitx::Argument>(
         llvm::cast<llvm::Argument>(signature.value), signature.fields,
         signature.array_element_num);
     break;
   default:
-    value = std::make_shared<framework::Value>(
+    value = std::make_shared<fitx::Value>(
         signature.value, signature.fields, signature.array_element_num);
   }
 
@@ -226,25 +226,25 @@ Converter::ConvertValue(ValueSignature signature) {
 }
 
 void Converter::manageValue(llvm::Value *value,
-                            std::shared_ptr<framework::Value> framework_value) {
+                            std::shared_ptr<fitx::Value> framework_value) {
   ManagedValues::GetInstance().addValue(framework_value);
   managed_values_[value].push_back(framework_value);
 }
 
-std::shared_ptr<framework::Value>
+std::shared_ptr<fitx::Value>
 Converter::getManagedValue(llvm::Value *value, long array_element_num,
-                           std::vector<framework::Value::Fields> fields) {
+                           std::vector<fitx::Value::Fields> fields) {
   return getManagedValue(ValueSignature{value, array_element_num, fields});
 }
 
-std::shared_ptr<framework::Value>
+std::shared_ptr<fitx::Value>
 Converter::getManagedValue(ValueSignature signature) {
   auto managed = managed_values_.find(signature.value);
   if (managed != managed_values_.end()) {
     auto &values = managed->second;
     auto found_value = std::find_if(
         values.begin(), values.end(),
-        [&signature](std::shared_ptr<framework::Value> value) {
+        [&signature](std::shared_ptr<fitx::Value> value) {
           return &value->getLLVMValue_() == signature.value &&
                  value->ArrayElementNum() == signature.array_element_num &&
                  value->GetFields() == signature.fields;
@@ -253,7 +253,7 @@ Converter::getManagedValue(ValueSignature signature) {
       return *found_value;
   }
 
-  return std::shared_ptr<framework::Value>();
+  return std::shared_ptr<fitx::Value>();
 }
 
-} // namespace framework
+} // namespace fitx

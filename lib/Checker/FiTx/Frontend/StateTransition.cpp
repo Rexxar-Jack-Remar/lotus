@@ -36,7 +36,7 @@
 #include <string>
 #include <vector>
 
-namespace framework {
+namespace fitx {
 // TransitionRule Class
 TransitionRule::TransitionRule(TransitionTrigger trigger) : trigger_(trigger) {}
 
@@ -82,4 +82,4 @@ UseValueTransitionRule::UseValueTransitionRule()
 
 AliasValueTransitionRule::AliasValueTransitionRule()
     : TransitionRule(TransitionTrigger::ALIASED_VALUE) {}
-} // namespace framework
+} // namespace fitx

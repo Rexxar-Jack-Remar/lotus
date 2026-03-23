@@ -6,9 +6,9 @@
 #include "Checker/FiTx/Frontend/State.h"
 
 namespace {
-class UseAfterFreeDetector : public framework::FrameworkPass {
+class UseAfterFreeDetector : public fitx::FrameworkPass {
   virtual void defineStates() override {
-    framework::StateManager manager;
+    fitx::StateManager manager;
     UseAfterFree::defineStates(manager);  // init, free, BUG; free_func, use, store_any.
     addStateManager(manager);
   }
@@ -16,5 +16,5 @@ class UseAfterFreeDetector : public framework::FrameworkPass {
 
 }  // namespace
 
-std::vector<framework::FrameworkPass *> framework::FrameworkPass::passes = {
+std::vector<fitx::FrameworkPass *> fitx::FrameworkPass::passes = {
     new UseAfterFreeDetector()};

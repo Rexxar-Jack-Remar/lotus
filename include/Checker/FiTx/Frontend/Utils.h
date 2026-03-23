@@ -35,10 +35,10 @@
 #include <string>
 #include <vector>
 
-namespace framework {
+namespace fitx {
 void generateWarning(llvm::Instruction *Inst, std::string war);
 void generateWarning(llvm::Instruction *Inst, llvm::Value *val);
 void generateWarning(llvm::Instruction *Inst, llvm::Type *type);
 void generateError(llvm::Instruction *Inst, std::string warn);
 std::string getDebugInfo(llvm::Instruction *inst);
-} // namespace framework
+} // namespace fitx

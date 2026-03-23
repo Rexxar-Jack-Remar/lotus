@@ -39,7 +39,7 @@
 #include <string>
 #include <vector>
 
-namespace framework {
+namespace fitx {
 void generateWarning(llvm::Instruction *Inst, std::string war);
 void generateWarning(llvm::Instruction *Inst, llvm::Value *val);
 void generateWarning(llvm::Instruction *Inst, llvm::Type *type);
@@ -55,18 +55,18 @@ bool findFunctionName(const std::string &function_name,
 
 llvm::Type *getRootElementType(llvm::Type *type);
 
-void generateWarning(framework::Instruction *Inst, std::string warn);
-void generateWarning(framework::Instruction *Inst, framework::Value *val);
-void generateWarning(framework::Instruction *Inst, llvm::Type *type);
-void generateWarning(framework::BasicBlock *basic_block, std::string warn);
+void generateWarning(fitx::Instruction *Inst, std::string warn);
+void generateWarning(fitx::Instruction *Inst, fitx::Value *val);
+void generateWarning(fitx::Instruction *Inst, llvm::Type *type);
+void generateWarning(fitx::BasicBlock *basic_block, std::string warn);
 
-void generateError(llvm::raw_ostream &stream, framework::Instruction *Inst,
+void generateError(llvm::raw_ostream &stream, fitx::Instruction *Inst,
                    std::string warn);
-void generateError(llvm::raw_ostream &stream, framework::Instruction *Inst,
-                   framework::Value *value);
-std::string getDebugInfo(framework::Instruction *inst);
+void generateError(llvm::raw_ostream &stream, fitx::Instruction *Inst,
+                   fitx::Value *value);
+std::string getDebugInfo(fitx::Instruction *inst);
 
-void generateLog(llvm::raw_ostream &stream, framework::Instruction *Inst,
+void generateLog(llvm::raw_ostream &stream, fitx::Instruction *Inst,
                  std::string warn);
 
-} // namespace framework
+} // namespace fitx

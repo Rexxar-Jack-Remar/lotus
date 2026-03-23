@@ -15,7 +15,7 @@
 
 #include <vector>
 
-namespace framework {
+namespace fitx {
 
 struct FunctionSigniture {
   llvm::Type *return_type;
@@ -26,20 +26,20 @@ struct FunctionSigniture {
 class Operands {
 public:
   Operands() = default;
-  Operands(std::vector<std::shared_ptr<framework::Value>> values);
+  Operands(std::vector<std::shared_ptr<fitx::Value>> values);
   Operands(
-      std::vector<std::shared_ptr<std::shared_ptr<framework::Value>>> values);
+      std::vector<std::shared_ptr<std::shared_ptr<fitx::Value>>> values);
 
-  std::shared_ptr<std::shared_ptr<framework::Value>>
+  std::shared_ptr<std::shared_ptr<fitx::Value>>
   operator[](const int index);
 
-  void add(std::shared_ptr<std::shared_ptr<framework::Value>> value);
-  void add(std::shared_ptr<framework::Value> value);
+  void add(std::shared_ptr<std::shared_ptr<fitx::Value>> value);
+  void add(std::shared_ptr<fitx::Value> value);
 
   size_t size() const;
 
 private:
-  std::vector<std::shared_ptr<std::shared_ptr<framework::Value>>> values_;
+  std::vector<std::shared_ptr<std::shared_ptr<fitx::Value>>> values_;
 };
 
 /// Maps instructions to operand values and store–call alias (which store
@@ -56,24 +56,24 @@ public:
   Operands getValues(llvm::Instruction *value);
   bool exists(llvm::Instruction *value);
 
-  void setValues(framework::Instruction instruction, Operands operand_values);
-  Operands getValues(framework::Instruction value);
-  bool exists(framework::Instruction value);
+  void setValues(fitx::Instruction instruction, Operands operand_values);
+  Operands getValues(fitx::Instruction value);
+  bool exists(fitx::Instruction value);
 
-  Operands getAliasedValues(framework::Instruction value);
+  Operands getAliasedValues(fitx::Instruction value);
   void setStoreAlias(llvm::StoreInst *store_inst, llvm::CallInst *call_inst);
 
-  framework::Instruction getAliasedStore(llvm::CallInst *call_inst);
-  framework::Instruction getAliasedStore(framework::Instruction instruction);
+  fitx::Instruction getAliasedStore(llvm::CallInst *call_inst);
+  fitx::Instruction getAliasedStore(fitx::Instruction instruction);
 
   bool InstructionAliasExists(llvm::CallInst *call_inst);
-  bool InstructionAliasExists(framework::Instruction instruction);
-  std::shared_ptr<std::map<framework::Instruction, Operands>> AliasedValue() {
+  bool InstructionAliasExists(fitx::Instruction instruction);
+  std::shared_ptr<std::map<fitx::Instruction, Operands>> AliasedValue() {
     return aliased_value_;
   };
 
 private:
-  std::shared_ptr<std::map<framework::Instruction, Operands>> aliased_value_;
-  std::map<framework::Instruction, framework::Instruction> store_alias_;
+  std::shared_ptr<std::map<fitx::Instruction, Operands>> aliased_value_;
+  std::map<fitx::Instruction, fitx::Instruction> store_alias_;
 };
-} // namespace framework
+} // namespace fitx

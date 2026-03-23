@@ -61,7 +61,7 @@ static llvm::cl::opt<bool>
 static llvm::cl::opt<bool> MeasureTime("measure",
                                        llvm::cl::desc("Measure analysis time"));
 
-namespace framework {
+namespace fitx {
 
 struct AnalyzerInfo {
   Analyzer *inner_analyzer;
@@ -99,10 +99,10 @@ bool FrameworkPass::runOnModule(llvm::Module &M) {
 
   // Create analyzers and spawn threads
   std::vector<AnalyzerInfo> analyzers;
-  for (framework::StateManager &manager : manager_) {
+  for (fitx::StateManager &manager : manager_) {
     LoggingClient *client = new LoggingClient();
     AnalyzerInfo info =
-        AnalyzerInfo(new framework::Analyzer(M, manager, *client));
+        AnalyzerInfo(new fitx::Analyzer(M, manager, *client));
     analyzers.push_back(info);
     server.addClient(client);
   }
@@ -133,17 +133,17 @@ bool FrameworkPass::runOnModule(llvm::Module &M) {
 
   return false;
 }
-} // namespace framework
+} // namespace fitx
 
-char framework::FrameworkPass::ID = 0;
+char fitx::FrameworkPass::ID = 0;
 
-static llvm::RegisterPass<framework::FrameworkPass>
+static llvm::RegisterPass<fitx::FrameworkPass>
     X("framework", "framework", false /* Only looks at CFG */,
       false /* Analysis Pass */);
 
 static void registerFrameworkPass(const llvm::PassManagerBuilder &,
                                   llvm::legacy::PassManagerBase &PM) {
-  for (auto &analysis_pass : framework::FrameworkPass::passes)
+  for (auto &analysis_pass : fitx::FrameworkPass::passes)
     PM.add(analysis_pass);
 }
 

@@ -14,7 +14,7 @@
 #include "Checker/FiTx/Core/Casting.h"
 #include "Checker/FiTx/Core/Value.h"
 
-namespace framework {
+namespace fitx {
 // TODO: Remove this if possible
 class BasicBlock;
 /// Wrapper around llvm::Instruction with line/column and parent block for
@@ -35,18 +35,18 @@ public:
   Instruction(std::shared_ptr<Instruction> instruction,
               std::vector<Fields> fields, long array_element_num);
 
-  bool operator<=(const framework::Instruction &instruction) const;
+  bool operator<=(const fitx::Instruction &instruction) const;
 
   bool operator<(llvm::Instruction *instruction) const;
-  bool operator<(const framework::Instruction &instruction) const;
+  bool operator<(const fitx::Instruction &instruction) const;
 
   bool operator==(llvm::Instruction *instruction) const;
-  bool operator==(const framework::Instruction &instruction) const;
+  bool operator==(const fitx::Instruction &instruction) const;
   friend llvm::raw_ostream &
   operator<<(llvm::raw_ostream &ostream,
-             const framework::Instruction &instruction);
+             const fitx::Instruction &instruction);
 
-  bool isInSameLine(framework::Instruction inst);
+  bool isInSameLine(fitx::Instruction inst);
   bool emptyInstruction();
 
   const unsigned int Line() { return line_; };
@@ -56,12 +56,12 @@ public:
     return llvm::Instruction::getOpcodeName(opcode_);
   }
   const llvm::Module *Module() const { return module_; }
-  const std::weak_ptr<framework::BasicBlock> Parent() const { return parent_; }
+  const std::weak_ptr<fitx::BasicBlock> Parent() const { return parent_; }
 
   const llvm::DebugLoc &getDebugLoc() { return debug_loc_; };
   llvm::Instruction *LLVMInstruction() { return llvm_instruction_; };
 
-  static bool classof(const framework::Value *value) {
+  static bool classof(const fitx::Value *value) {
     // Methods for support type inquiry through isa, cast, and dyn_cast:
     return value->getValueID() >= llvm::Value::InstructionVal;
   }
@@ -69,7 +69,7 @@ public:
 private:
   llvm::Instruction *llvm_instruction_;
   llvm::Module *module_;
-  std::weak_ptr<framework::BasicBlock> parent_;
+  std::weak_ptr<fitx::BasicBlock> parent_;
 
   llvm::DebugLoc debug_loc_;
 
@@ -77,4 +77,4 @@ private:
   unsigned int column_;
   unsigned int line_;
 };
-} // namespace framework
+} // namespace fitx

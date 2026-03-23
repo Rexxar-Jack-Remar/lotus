@@ -5,5 +5,5 @@
 #include <vector>
 
 namespace DoubleFree {
-void define_states(framework::StateManager &manager);
+void define_states(fitx::StateManager &manager);
 } // namespace DoubleFree

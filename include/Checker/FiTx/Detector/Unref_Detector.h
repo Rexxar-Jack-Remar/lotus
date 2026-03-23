@@ -6,5 +6,5 @@
 #include <vector>
 
 namespace UnreferenceCounter {
-void defineStates(framework::StateManager &manager);
+void defineStates(fitx::StateManager &manager);
 } // namespace UnreferenceCounter

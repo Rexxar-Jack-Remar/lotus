@@ -7,7 +7,7 @@ FiTx is a **typestate analysis framework** for daily development–friendly bug 
 ```
 LLVM Module
     ↓ IRGenerator (FunctionPass)
-framework::Function (Core IR: blocks, instructions, ordered blocks)
+fitx::Function (Core IR: blocks, instructions, ordered blocks)
     ↓ FrameworkPass (ModulePass)
 defineStates() → StateManagers (one per checker)
     ↓ Analyzer::analyze()

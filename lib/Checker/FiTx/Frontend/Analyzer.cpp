@@ -56,14 +56,14 @@
 #include <llvm/IR/Instructions.h>
 #include <llvm/Support/raw_ostream.h>
 
-namespace framework {
+namespace fitx {
 Analyzer::Analyzer(llvm::Module &llvm_module,
-                   framework::StateManager &state_manager,
-                   framework::LoggingClient &client)
+                   fitx::StateManager &state_manager,
+                   fitx::LoggingClient &client)
     : llvm_module_(llvm_module), state_manager_(state_manager), log_(client) {}
 
 // --- Top-level: analyze all functions in this module ---
-// framework_ir_ maps each LLVM Module to a list of framework::Function (our
+// framework_ir_ maps each LLVM Module to a list of fitx::Function (our
 // CFG + IR). We analyze one compilation unit at a time (paper: single-TU
 // scope).
 void Analyzer::analyze() {
@@ -76,25 +76,25 @@ void Analyzer::analyze() {
   log_.flush();
 }
 
-void Analyzer::analyzeFunction(std::shared_ptr<framework::Function> function) {
+void Analyzer::analyzeFunction(std::shared_ptr<fitx::Function> function) {
   // Bottom-up summary-based analysis (paper ยง4.3): each function analyzed
   // once; states summarized per return code for caller propagation.
   if (!functionInformationExists(function))
     function_info_[function] =
-        std::make_shared<framework::FunctionInformation>(function);
+        std::make_shared<fitx::FunctionInformation>(function);
 
   auto func_info = function_info_[function];
   if (func_info->Stat() != FunctionInformation::UNANALYZED)
     return;
   func_info->setAnalysisStat(
-      framework::FunctionInformation::AnalysisStat::IN_PROGRESS);
+      fitx::FunctionInformation::AnalysisStat::IN_PROGRESS);
 
   analyzing_function_.push(function);
   // Process blocks in order; createBasicBlockInfo merges states from all
   // predecessors (paper ยง4.2: "collect the state from the predecessor").
   auto target_blocks = function->OrderedBasicBlocks();
-  std::queue<std::shared_ptr<framework::BasicBlock>> block_queue(
-      std::deque<std::shared_ptr<framework::BasicBlock>>(target_blocks.begin(),
+  std::queue<std::shared_ptr<fitx::BasicBlock>> block_queue(
+      std::deque<std::shared_ptr<fitx::BasicBlock>>(target_blocks.begin(),
                                                          target_blocks.end()));
 
   while (!block_queue.empty()) {
@@ -149,7 +149,7 @@ void Analyzer::analyzeFunction(std::shared_ptr<framework::Function> function) {
 
   analyzing_function_.pop();
   func_info->setAnalysisStat(
-      framework::FunctionInformation::AnalysisStat::ANALYZED);
+      fitx::FunctionInformation::AnalysisStat::ANALYZED);
 }
 
 // --- Predecessor merge & branch-dependent transitions ---
@@ -159,19 +159,19 @@ void Analyzer::analyzeFunction(std::shared_ptr<framework::Function> function) {
 // Also used for return-code aware propagation: branch on return value selects
 // which callee return codes we propagate (paper ยง4.3).
 void Analyzer::analyzePrevBlockBranch(
-    std::shared_ptr<framework::BasicBlock> block) {
+    std::shared_ptr<fitx::BasicBlock> block) {
   for (auto pred_reference : block->Predecessors()) {
     auto preds = pred_reference.lock();
     if (!preds ||
         !currentFunctionInformation()->getBasicBlockInformation(preds))
       continue;
     /* passthrough_blocks (unused): could refine which pred we use */
-    /*     std::vector<std::shared_ptr<framework::BasicBlock>>(); */
+    /*     std::vector<std::shared_ptr<fitx::BasicBlock>>(); */
 
     /* auto weak_blocks = preds->getPassthroughBlock(block); */
     /* std::transform(weak_blocks.begin(), weak_blocks.end(), */
     /*                std::back_inserter(passthrough_blocks), */
-    /*                [](const std::weak_ptr<framework::BasicBlock> block) {
+    /*                [](const std::weak_ptr<fitx::BasicBlock> block) {
      */
     /*                  return block.lock(); */
     /*                }); */
@@ -183,19 +183,19 @@ void Analyzer::analyzePrevBlockBranch(
       continue;
 
     auto condition_inst =
-        shared_dyn_cast<framework::CompareInst>(branch_inst->Condition());
+        shared_dyn_cast<fitx::CompareInst>(branch_inst->Condition());
     if (!condition_inst)
       continue;
 
     // Identify the compared value and whether the condition involves NULL.
     bool null_exists = false;
-    std::shared_ptr<framework::Value> comp_value = nullptr;
+    std::shared_ptr<fitx::Value> comp_value = nullptr;
     for (auto operand : condition_inst->Operands()) {
-      if (shared_isa<framework::NullValue>(operand)) {
+      if (shared_isa<fitx::NullValue>(operand)) {
         null_exists = true;
         continue;
       }
-      if (shared_isa<framework::ConstValue>(operand))
+      if (shared_isa<fitx::ConstValue>(operand))
         continue;
       comp_value = operand;
     }
@@ -233,14 +233,14 @@ void Analyzer::analyzePrevBlockBranch(
 
     auto transitions =
         state_manager_.TransitionManager()->getStoreArgTransitions(
-            framework::StoreValueTransitionRule::NULL_BRANCH_CONSIDERED_ANY);
+            fitx::StoreValueTransitionRule::NULL_BRANCH_CONSIDERED_ANY);
 
     transitions.insert(transitions.end(), possible_transitions.begin(),
                        possible_transitions.end());
 
     // Apply to comp_value and all values that may alias it (intra-procedural
     // alias; paper ยง3).
-    std::set<std::shared_ptr<framework::Value>> related_values =
+    std::set<std::shared_ptr<fitx::Value>> related_values =
         currentFunctionInformation()->GetValueCollection().getRelatedValues(
             comp_value);
     related_values.insert(comp_value);
@@ -260,7 +260,7 @@ void Analyzer::analyzePrevBlockBranch(
     // For return-code summary: don't treat this path as returning the other
     // branch's code.
     int remove_ret_val =
-        type == framework::StoreValueTransitionRule::NULL_VAL ? 0 : -1;
+        type == fitx::StoreValueTransitionRule::NULL_VAL ? 0 : -1;
     bb_info_->removeReturnvalue(remove_ret_val);
     /* } */
   }
@@ -272,8 +272,8 @@ void Analyzer::analyzePrevBlockBranch(
 // 3) If callee is defined in this TU: analyze callee (bottom-up), then
 // copyFunctionValues
 //    to apply its summary (arg/return states) to the caller.
-void Analyzer::analyzeCallInst(std::shared_ptr<framework::Instruction> I) {
-  auto call_inst = std::static_pointer_cast<framework::CallInst>(I);
+void Analyzer::analyzeCallInst(std::shared_ptr<fitx::Instruction> I) {
+  auto call_inst = std::static_pointer_cast<fitx::CallInst>(I);
 
   // Apply typestate transitions triggered by "call F with arg i" (e.g. kfree,
   // malloc).
@@ -284,7 +284,7 @@ void Analyzer::analyzeCallInst(std::shared_ptr<framework::Instruction> I) {
   if (!function) {
     // Indirect call: paper does not consider indirect calls (FiT analysis).
     for (auto value : call_inst->Arguments()) {
-      std::set<std::shared_ptr<framework::Value>> related_values =
+      std::set<std::shared_ptr<fitx::Value>> related_values =
           currentFunctionInformation()->GetValueCollection().getRelatedValues(
               value);
       related_values.insert(value);
@@ -295,7 +295,7 @@ void Analyzer::analyzeCallInst(std::shared_ptr<framework::Instruction> I) {
     return;
   }
 
-  if (framework::Function::IsDebugDeclareFunction(function)) {
+  if (fitx::Function::IsDebugDeclareFunction(function)) {
     bb_info_->resetValueState(call_inst->Arguments()[0], I);
     return;
   }
@@ -306,13 +306,13 @@ void Analyzer::analyzeCallInst(std::shared_ptr<framework::Instruction> I) {
   // Special Case where memset is called. This is semantically the same as
   // storing something to the target value, so we collect for such info..
   if (Function::IsMemSetFunction(function) && !call_inst->Arguments().empty()) {
-    std::vector<framework::Transition> transitions;
+    std::vector<fitx::Transition> transitions;
     /* auto target_value = */
-    /*     shared_dyn_cast<framework::ConstValue>(call_inst->Arguments()[1]); */
+    /*     shared_dyn_cast<fitx::ConstValue>(call_inst->Arguments()[1]); */
     /* if (target_value && target_value->getConstValue() == 0) { */
     /*   auto possible_transitions = */
     /*       state_manager_.TransitionManager()->getStoreArgTransitions( */
-    /*           framework::StoreValueTransitionRule::NULL_VAL); */
+    /*           fitx::StoreValueTransitionRule::NULL_VAL); */
 
     /*   transitions.insert(transitions.end(), possible_transitions.begin(), */
     /*                      possible_transitions.end()); */
@@ -320,12 +320,12 @@ void Analyzer::analyzeCallInst(std::shared_ptr<framework::Instruction> I) {
 
     auto possible_transitions =
         state_manager_.TransitionManager()->getStoreArgTransitions(
-            framework::StoreValueTransitionRule::ANY);
+            fitx::StoreValueTransitionRule::ANY);
 
     transitions.insert(transitions.end(), possible_transitions.begin(),
                        possible_transitions.end());
 
-    std::set<std::shared_ptr<framework::Value>> related_values =
+    std::set<std::shared_ptr<fitx::Value>> related_values =
         currentFunctionInformation()->GetValueCollection().getRelatedValues(
             call_inst->Arguments()[0]);
     related_values.insert(call_inst->Arguments()[0]);
@@ -340,7 +340,7 @@ void Analyzer::analyzeCallInst(std::shared_ptr<framework::Instruction> I) {
   // (conservative).
   if (function->isDeclaration()) {
     for (auto value : call_inst->Arguments()) {
-      std::set<std::shared_ptr<framework::Value>> related_values =
+      std::set<std::shared_ptr<fitx::Value>> related_values =
           currentFunctionInformation()->GetValueCollection().getRelatedValues(
               value);
       related_values.insert(value);
@@ -368,21 +368,21 @@ void Analyzer::analyzeCallInst(std::shared_ptr<framework::Instruction> I) {
 // NON), result of a specific call (Store Const / CALL_FUNC, e.g. malloc), or
 // any (Store ANY). Paper Table 5: Store NULL/NON/Const/ANY trigger typestate
 // updates on the stored-to location.
-void Analyzer::analyzeStoreInst(std::shared_ptr<framework::Instruction> I) {
-  auto store_inst = std::static_pointer_cast<framework::StoreInst>(I);
-  std::vector<framework::Transition> transitions;
+void Analyzer::analyzeStoreInst(std::shared_ptr<fitx::Instruction> I) {
+  auto store_inst = std::static_pointer_cast<fitx::StoreInst>(I);
+  std::vector<fitx::Transition> transitions;
 
   auto value_operand = store_inst->ValueOperand();
-  if (framework::shared_isa<framework::NullValue>(value_operand)) {
+  if (fitx::shared_isa<fitx::NullValue>(value_operand)) {
     auto possible_transitions =
         state_manager_.TransitionManager()->getStoreArgTransitions(
-            framework::StoreValueTransitionRule::NULL_VAL);
+            fitx::StoreValueTransitionRule::NULL_VAL);
     transitions.insert(transitions.end(), possible_transitions.begin(),
                        possible_transitions.end());
   } else {
     auto possible_transitions =
         state_manager_.TransitionManager()->getStoreArgTransitions(
-            framework::StoreValueTransitionRule::NON_NULL_VAL);
+            fitx::StoreValueTransitionRule::NON_NULL_VAL);
     transitions.insert(transitions.end(), possible_transitions.begin(),
                        possible_transitions.end());
   }
@@ -390,12 +390,12 @@ void Analyzer::analyzeStoreInst(std::shared_ptr<framework::Instruction> I) {
   // If storing result of a known function (e.g. kmalloc), add CALL_FUNC
   // transitions.
   if (auto call_inst =
-          framework::shared_dyn_cast<framework::CallInst>(value_operand)) {
+          fitx::shared_dyn_cast<fitx::CallInst>(value_operand)) {
     auto called_func = call_inst->CalledFunction();
     if (called_func) {
       auto possible_transitions =
           state_manager_.TransitionManager()->getStoreArgTransitions(
-              framework::StoreValueTransitionRule::CALL_FUNC,
+              fitx::StoreValueTransitionRule::CALL_FUNC,
               called_func->Name());
       transitions.insert(transitions.end(), possible_transitions.begin(),
                          possible_transitions.end());
@@ -404,12 +404,12 @@ void Analyzer::analyzeStoreInst(std::shared_ptr<framework::Instruction> I) {
 
   auto possible_transitions =
       state_manager_.TransitionManager()->getStoreArgTransitions(
-          framework::StoreValueTransitionRule::ANY);
+          fitx::StoreValueTransitionRule::ANY);
   transitions.insert(transitions.end(), possible_transitions.begin(),
                      possible_transitions.end());
 
   // Apply to the stored-to pointer and related (e.g. same base) values.
-  std::set<std::shared_ptr<framework::Value>> related_values =
+  std::set<std::shared_ptr<fitx::Value>> related_values =
       currentFunctionInformation()->GetValueCollection().getRelatedValues(
           store_inst->PointerOperand());
   related_values.insert(store_inst->PointerOperand());
@@ -424,7 +424,7 @@ void Analyzer::analyzeStoreInst(std::shared_ptr<framework::Instruction> I) {
 // Record may-alias (pointer_operand = value_operand) in current block's
 // AliasValues, then apply alias transitions to pointer + related + aliased
 // values. Alias is intra-procedural and built during analysis (paper ยง3).
-void Analyzer::checkAlias(std::shared_ptr<framework::StoreInst> store_inst) {
+void Analyzer::checkAlias(std::shared_ptr<fitx::StoreInst> store_inst) {
   auto value_operand = store_inst->ValueOperand();
 
   const ValueCollection *aliased = currentFunctionInformation()
@@ -437,17 +437,17 @@ void Analyzer::checkAlias(std::shared_ptr<framework::StoreInst> store_inst) {
       ->getAliasValues()
       .addAlias(store_inst->PointerOperand(), store_inst->ValueOperand());
 
-  if (shared_isa<framework::ConstValue>(value_operand) ||
-      shared_isa<framework::NullValue>(value_operand) ||
-      (shared_isa<framework::CallInst>(value_operand) && !aliased))
+  if (shared_isa<fitx::ConstValue>(value_operand) ||
+      shared_isa<fitx::NullValue>(value_operand) ||
+      (shared_isa<fitx::CallInst>(value_operand) && !aliased))
     return;
 
-  std::set<std::shared_ptr<framework::Value>> related_values =
+  std::set<std::shared_ptr<fitx::Value>> related_values =
       currentFunctionInformation()->GetValueCollection().getRelatedValues(
           store_inst->PointerOperand());
   related_values.insert(store_inst->PointerOperand());
 
-  if (!shared_isa<framework::CallInst>(value_operand)) {
+  if (!shared_isa<fitx::CallInst>(value_operand)) {
     auto value_related =
         currentFunctionInformation()->GetValueCollection().getRelatedValues(
             value_operand);
@@ -470,15 +470,15 @@ void Analyzer::checkAlias(std::shared_ptr<framework::StoreInst> store_inst) {
 
 // --- Load: apply "Use" transitions (paper Table 5: Use load loadee) ---
 // e.g. for UAF typestate, using a freed pointer triggers the bug state.
-void Analyzer::analyzeLoadInst(std::shared_ptr<framework::Instruction> I) {
-  auto load_inst = std::static_pointer_cast<framework::LoadInst>(I);
+void Analyzer::analyzeLoadInst(std::shared_ptr<fitx::Instruction> I) {
+  auto load_inst = std::static_pointer_cast<fitx::LoadInst>(I);
   auto transitions =
       state_manager_.TransitionManager()->getUseValueTransitions();
   changeValueState(transitions, load_inst->LoadValue(), I);
 }
 
 bool Analyzer::functionInformationExists(
-    std::shared_ptr<framework::Function> function) {
+    std::shared_ptr<fitx::Function> function) {
   return function_info_.find(function) != function_info_.end();
 }
 
@@ -488,16 +488,16 @@ bool Analyzer::functionInformationExists(
 // worklist.
 void Analyzer::changeValueState(std::vector<Transition> transitions,
                                 std::shared_ptr<Value> value,
-                                std::shared_ptr<framework::Instruction> inst) {
+                                std::shared_ptr<fitx::Instruction> inst) {
   if (value->isGlobalVar() || transitions.empty())
     return;
   if (currentFunctionInformation()
           ->getCurrentBasicBlockInformation()
           ->changeValueState(transitions, value, inst)) {
     currentFunctionInformation()->addValue(value);
-    framework::generateWarning(inst.get(),
+    fitx::generateWarning(inst.get(),
                                "[Value Change] Change Value State: ");
-    framework::generateWarning(inst.get(), value.get());
+    fitx::generateWarning(inst.get(), value.get());
   }
 }
 
@@ -507,7 +507,7 @@ void Analyzer::changeValueState(std::vector<Transition> transitions,
 // ยง4.2: priority/distance to bug state used when merging predecessors).
 void Analyzer::generateError(
     BugNotificationTiming timing,
-    const std::set<std::shared_ptr<framework::Value>> values) {
+    const std::set<std::shared_ptr<fitx::Value>> values) {
   for (auto state : state_manager_.getBugStates()) {
     if (state.NotificationTiming() != timing)
       continue;
@@ -527,13 +527,13 @@ void Analyzer::generateError(
         continue;
       }
 
-      if (framework::CommandLineArgs::Flex ||
+      if (fitx::CommandLineArgs::Flex ||
           !value.first->isArbitaryArrayElement()) {
         llvm::raw_string_ostream log_stream(log_.getBuffer());
-        framework::generateError(log_stream,
+        fitx::generateError(log_stream,
                                  value.second->CurrentInstruction().get(),
                                  "--- [" + state.Name() + "] ---");
-        framework::generateError(log_stream,
+        fitx::generateError(log_stream,
                                  value.second->CurrentInstruction().get(),
                                  value.first.get());
         value.second->generateLog(log_stream);
@@ -550,8 +550,8 @@ void Analyzer::generateError(
 // states from all "success" blocks of the callee and apply to caller (paper
 // ยง4.3).
 void Analyzer::copyFunctionValues(
-    std::shared_ptr<framework::Function> called_func,
-    std::shared_ptr<framework::CallInst> call_inst) {
+    std::shared_ptr<fitx::Function> called_func,
+    std::shared_ptr<fitx::CallInst> call_inst) {
   if (!functionInformationExists(called_func))
     return;
   auto called_func_info = function_info_[called_func];
@@ -611,7 +611,7 @@ void Analyzer::copyFunctionValues(
     for (auto value : pending_states.getValueStateForArg(i)) {
       auto new_value = Value::CreateAppend(operand, value.first);
       if (called_func->ProtectedRefcountValue() &&
-          framework::shared_isa<framework::Argument>(new_value))
+          fitx::shared_isa<fitx::Argument>(new_value))
         continue;
       changeValueState(value.second, new_value, call_inst);
     }
@@ -622,8 +622,8 @@ void Analyzer::copyFunctionValues(
 // used in a branch (e.g. if (err)), propagate only the states for the return
 // codes that satisfy that branch (e.g. error path gets error-return states).
 bool Analyzer::addPendingFunctionValues(
-    std::shared_ptr<framework::Function> called_func,
-    std::shared_ptr<framework::CallInst> call_inst) {
+    std::shared_ptr<fitx::Function> called_func,
+    std::shared_ptr<fitx::CallInst> call_inst) {
   auto branch_inst =
       currentFunctionInformation()->currentBasicBlock()->getBranchInst();
   if (!branch_inst || !branch_inst->Condition())
@@ -631,11 +631,11 @@ bool Analyzer::addPendingFunctionValues(
 
   generateWarning(call_inst.get(), "Found BranchInst");
 
-  int compared_value = framework::FunctionInformation::kSuccessCode;
+  int compared_value = fitx::FunctionInformation::kSuccessCode;
   llvm::CmpInst::Predicate predicate = llvm::CmpInst::Predicate::ICMP_NE;
   bool is_null_value = false;
 
-  if (auto compare_inst = framework::shared_dyn_cast<framework::CompareInst>(
+  if (auto compare_inst = fitx::shared_dyn_cast<fitx::CompareInst>(
           branch_inst->Condition())) {
     if (!compare_inst->operandExists(call_inst)) {
       return false;
@@ -652,12 +652,12 @@ bool Analyzer::addPendingFunctionValues(
       return false;
 
     if (auto const_value =
-            framework::shared_dyn_cast<framework::ConstValue>(*operand)) {
+            fitx::shared_dyn_cast<fitx::ConstValue>(*operand)) {
       compared_value = const_value->getConstValue();
-    } else if (framework::shared_isa<framework::NullValue>(*operand)) {
+    } else if (fitx::shared_isa<fitx::NullValue>(*operand)) {
       is_null_value = true;
     }
-  } else if (framework::shared_isa<framework::CallInst>(
+  } else if (fitx::shared_isa<fitx::CallInst>(
                  branch_inst->Condition())) {
     if (call_inst != branch_inst->Condition())
       return false;
@@ -716,7 +716,7 @@ bool Analyzer::addPendingFunctionValues(
                                             ? branch_inst->TruePathNodes()
                                             : branch_inst->FalsePathNodes();
     for (auto successor_node : nodes) {
-      auto ret_value = std::make_shared<framework::ConstValue>(ret.first);
+      auto ret_value = std::make_shared<fitx::ConstValue>(ret.first);
       auto locked = successor_node.lock();
       for (auto success_block_ref : ret.second) {
         auto success_block = success_block_ref.lock();
@@ -753,7 +753,7 @@ bool Analyzer::addPendingFunctionValues(
 // initโ��free) and apply to the argument value (and optionally parent/related
 // values).
 bool Analyzer::analyzeFunctionCall(
-    std::shared_ptr<framework::CallInst> call_inst) {
+    std::shared_ptr<fitx::CallInst> call_inst) {
   auto function = call_inst->CalledFunction();
   if (!function || call_inst->Arguments().empty())
     return false;
@@ -761,13 +761,13 @@ bool Analyzer::analyzeFunctionCall(
   bool changed = false;
   for (int arg = 0; arg < call_inst->Arguments().size(); arg++) {
     const std::pair<FunctionArgTransitionRule::FunctionArg,
-                    std::vector<framework::Transition>>
+                    std::vector<fitx::Transition>>
         transitions =
             state_manager_.TransitionManager()->getFunctionArgTransitions(
                 function->Name(), arg);
     changed = changed || !transitions.second.empty();
 
-    std::set<std::shared_ptr<framework::Value>> args;
+    std::set<std::shared_ptr<fitx::Value>> args;
     if (transitions.first.consider_parent) {
       args = currentFunctionInformation()->GetValueCollection().getParentValues(
           call_inst->Arguments()[arg]);
@@ -785,7 +785,7 @@ bool Analyzer::analyzeFunctionCall(
 // (paper ยง4.3). Constant return values (e.g. 0, -ENOMEM) are used to key
 // summarized states so callers can propagate the right state per branch.
 void Analyzer::analyzeReturnValue(
-    std::shared_ptr<framework::Function> function) {
+    std::shared_ptr<fitx::Function> function) {
   auto return_block = function->ReturnBlock();
   auto func_info = getFunctionInformation(function);
   if (!return_block || !func_info)
@@ -797,7 +797,7 @@ void Analyzer::analyzeReturnValue(
     return;
   }
 
-  std::set<std::weak_ptr<framework::BasicBlock>> pred_block(
+  std::set<std::weak_ptr<fitx::BasicBlock>> pred_block(
       return_block->Predecessors());
 
   // Bug fix: the original logic cleared pred_block when the return block had
@@ -832,19 +832,19 @@ void Analyzer::analyzeReturnValue(
       }
 
       for (auto return_value : block_info->ReturnValues()) {
-        if (auto const_int = framework::shared_dyn_cast<framework::ConstValue>(
+        if (auto const_int = fitx::shared_dyn_cast<fitx::ConstValue>(
                 return_value)) {
           auto value = const_int->getConstValue();
           generateWarning(std::to_string(value));
           if (block_info->ReturnValueSatisfiable(value))
             func_info->addReturnValueInfo(value, pred);
         } else if (auto const_null =
-                       framework::shared_dyn_cast<framework::NullValue>(
+                       fitx::shared_dyn_cast<fitx::NullValue>(
                            return_value)) {
           func_info->addReturnValueInfo(FunctionInformation::kErrorCode, pred);
           // Add the value to the list
         } else if (auto call_inst =
-                       framework::shared_dyn_cast<framework::CallInst>(
+                       fitx::shared_dyn_cast<fitx::CallInst>(
                            return_value)) {
           auto called_function = call_inst->CalledFunction();
           if (called_function) {
@@ -888,11 +888,11 @@ void Analyzer::analyzeReturnValue(
 }
 
 std::shared_ptr<FunctionInformation> Analyzer::getFunctionInformation(
-    std::shared_ptr<framework::Function> function) {
+    std::shared_ptr<fitx::Function> function) {
   auto func_info = function_info_.find(function);
   if (func_info != function_info_.end())
     return func_info->second;
   return nullptr;
 }
 
-} // namespace framework
+} // namespace fitx

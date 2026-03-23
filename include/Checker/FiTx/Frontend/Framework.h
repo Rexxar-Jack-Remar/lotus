@@ -25,7 +25,7 @@
 #include <string>
 #include <vector>
 
-namespace framework {
+namespace fitx {
 
 /// Main FiTx pass: runs typestate-based bug checkers per compilation unit.
 /// Each checker is defined by a StateManager (typestate FSM); the pass
@@ -34,7 +34,7 @@ namespace framework {
 class FrameworkPass : public llvm::ModulePass {
 public:
   static char ID;
-  static std::vector<framework::FrameworkPass *> passes;
+  static std::vector<fitx::FrameworkPass *> passes;
 
   FrameworkPass();
   virtual void getAnalysisUsage(llvm::AnalysisUsage &AU) const override;
@@ -46,13 +46,13 @@ public:
   /// Override to define states and transitions for a bug pattern (paper §4.1,
   /// Table 5).
   virtual void defineStates() {};
-  void createTransitions(framework::StateManager &manager);
+  void createTransitions(fitx::StateManager &manager);
 
-  void addStateManager(framework::StateManager manager) {
+  void addStateManager(fitx::StateManager manager) {
     manager_.push_back(manager);
   }
 
 private:
-  std::vector<framework::StateManager> manager_;
+  std::vector<fitx::StateManager> manager_;
 }; // end of struct
-} // namespace framework
+} // namespace fitx

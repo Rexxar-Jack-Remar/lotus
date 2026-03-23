@@ -41,17 +41,17 @@
 #include <string>
 #include <vector>
 
-namespace framework {
+namespace fitx {
 // An interface class to be used to restrict the state propagtion on
 // certain situations. Should be overwritten by developers if necessary.
 class StatefulConstraint {
 public:
   StatefulConstraint() = default;
   virtual bool
-  shouldPropagateOnCallInst(std::shared_ptr<framework::CallInst> inst) {
+  shouldPropagateOnCallInst(std::shared_ptr<fitx::CallInst> inst) {
     return true;
   }
 
   virtual void propagate() {}
 };
-}; // namespace framework
+}; // namespace fitx

@@ -44,7 +44,7 @@
 static llvm::cl::opt<bool> Debug("fitx-debug",
                                  llvm::cl::desc("Print FiTx debug warnings"));
 
-namespace framework {
+namespace fitx {
 void generateWarning(llvm::Instruction *Inst, std::string warn) {
   if (!Debug)
     return;
@@ -116,7 +116,7 @@ llvm::Type *getRootElementType(llvm::Type *type) {
 }
 
 // Framework Instruction Version
-void generateWarning(framework::Instruction *Inst, std::string warn) {
+void generateWarning(fitx::Instruction *Inst, std::string warn) {
   if (!Debug)
     return;
   llvm::errs() << "[WARNING] ";
@@ -124,7 +124,7 @@ void generateWarning(framework::Instruction *Inst, std::string warn) {
   llvm::errs() << warn << "\n";
 }
 
-void generateWarning(framework::Instruction *Inst, framework::Value *val) {
+void generateWarning(fitx::Instruction *Inst, fitx::Value *val) {
   if (!Debug)
     return;
   llvm::errs() << "[WARNING] ";
@@ -132,7 +132,7 @@ void generateWarning(framework::Instruction *Inst, framework::Value *val) {
   llvm::errs() << *val << "\n";
 }
 
-void generateWarning(framework::Instruction *Inst, llvm::Type *type) {
+void generateWarning(fitx::Instruction *Inst, llvm::Type *type) {
   if (!Debug)
     return;
   llvm::errs() << "[WARNING] ";
@@ -140,14 +140,14 @@ void generateWarning(framework::Instruction *Inst, llvm::Type *type) {
   llvm::errs() << *type << "\n";
 }
 
-void generateError(llvm::raw_ostream &stream, framework::Instruction *Inst,
+void generateError(llvm::raw_ostream &stream, fitx::Instruction *Inst,
                    std::string warn) {
   stream << "[ERROR] ";
   stream << getDebugInfo(Inst);
   stream << warn << "\n";
 }
 
-void generateWarning(framework::BasicBlock *basic_block, std::string warn) {
+void generateWarning(fitx::BasicBlock *basic_block, std::string warn) {
   if (!Debug)
     return;
   llvm::errs() << "[WARNING] ";
@@ -156,21 +156,21 @@ void generateWarning(framework::BasicBlock *basic_block, std::string warn) {
   llvm::errs() << warn << "\n";
 }
 
-void generateError(llvm::raw_ostream &stream, framework::Instruction *Inst,
-                   framework::Value *value) {
+void generateError(llvm::raw_ostream &stream, fitx::Instruction *Inst,
+                   fitx::Value *value) {
   stream << "[ERROR] ";
   stream << getDebugInfo(Inst);
   stream << *value << "\n";
 }
 
-void generateLog(llvm::raw_ostream &stream, framework::Instruction *Inst,
+void generateLog(llvm::raw_ostream &stream, fitx::Instruction *Inst,
                  std::string warn) {
   stream << "  [LOG] ";
   stream << getDebugInfo(Inst);
   stream << warn << "\n";
 }
 
-std::string getDebugInfo(framework::Instruction *inst) {
+std::string getDebugInfo(fitx::Instruction *inst) {
   if (const llvm::DebugLoc &Loc = inst->getDebugLoc()) {
     unsigned line = Loc.getLine();
     unsigned col = Loc.getCol();
@@ -179,4 +179,4 @@ std::string getDebugInfo(framework::Instruction *inst) {
   }
   return std::string();
 }
-}; // namespace framework
+}; // namespace fitx

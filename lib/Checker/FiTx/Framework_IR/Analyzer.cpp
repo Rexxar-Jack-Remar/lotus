@@ -1,4 +1,4 @@
-// FiTx framework IR builder: converts llvm::Function to framework::Function
+// FiTx framework IR builder: converts llvm::Function to fitx::Function
 // (basic blocks, ordered block list, call/store/load/ret instructions, return
 // assignments). No typestate; that is done by Frontend::Analyzer (paper
 // §4.2, 4.3).
@@ -25,17 +25,17 @@
 namespace ir_generator {
 Analyzer::Analyzer() {}
 
-// Build framework::Function: create blocks, iterate instructions to build
+// Build fitx::Function: create blocks, iterate instructions to build
 // CallInst/StoreInst/LoadInst and collect return assignments; set ordered
 // block list for Frontend CFG traversal (paper §4.2).
 void Analyzer::analyze(llvm::Function &function, llvm::LoopInfo &loop_info) {
-  framework_function_ = framework::Function::createManagedFunction(
+  framework_function_ = fitx::Function::createManagedFunction(
       &function, std::make_unique<llvm::LoopInfo>(std::move(loop_info)));
 
-  std::vector<std::shared_ptr<framework::BasicBlock>> block;
+  std::vector<std::shared_ptr<fitx::BasicBlock>> block;
   for (auto &basic_block : function) {
     auto framework_block = framework_function_->getBasicBlock(&basic_block);
-    if (framework_block->Id() == framework::BasicBlock::kNoId) {
+    if (framework_block->Id() == fitx::BasicBlock::kNoId) {
       framework_block->setId(block.size());
       block.push_back(framework_block);
     }
@@ -67,10 +67,10 @@ void Analyzer::analyzeCallInst(llvm::Instruction *instruction) {
   auto *call_inst = llvm::cast<llvm::CallInst>(instruction);
   auto framework_block =
       framework_function_->getBasicBlock(instruction->getParent());
-  auto framework_call = framework::CallInst::Create(call_inst);
+  auto framework_call = fitx::CallInst::Create(call_inst);
 
   if (framework_call->CalledFunction()) {
-    if (framework::Function::IsDebugValueFunction(
+    if (fitx::Function::IsDebugValueFunction(
             framework_call->CalledFunction())) {
       auto return_block = framework_function_->ReturnBlock();
       const auto &args = framework_call->Arguments();
@@ -80,13 +80,13 @@ void Analyzer::analyzeCallInst(llvm::Instruction *instruction) {
     }
 
     if ((framework_call->CalledFunction()->isDebugFunction() &&
-         !framework::Function::IsDebugDeclareFunction(
+         !fitx::Function::IsDebugDeclareFunction(
              framework_call->CalledFunction())) ||
-        framework::Function::IsLifetimeEndFunction(
+        fitx::Function::IsLifetimeEndFunction(
             framework_call->CalledFunction()))
       return;
 
-    if (framework::Function::IsRefcountDecrementFunction(
+    if (fitx::Function::IsRefcountDecrementFunction(
             framework_call->CalledFunction())) {
       framework_function_->setProtectedRefcountValue(
           framework_call->Arguments()[0]);
@@ -111,9 +111,9 @@ void Analyzer::analyzeStoreInst(llvm::Instruction *inst) {
       llvm::isa<llvm::AllocaInst>(store_inst->getPointerOperand()))
     return;
 
-  auto created_store = framework::StoreInst::Create(store_inst);
+  auto created_store = fitx::StoreInst::Create(store_inst);
   framework_block->addInstruction(created_store);
-  if (auto call_inst = framework::shared_dyn_cast<framework::CallInst>(
+  if (auto call_inst = fitx::shared_dyn_cast<fitx::CallInst>(
           created_store->ValueOperand())) {
     auto branch_inst = framework_block->getBranchInst();
     if (!branch_inst || !branch_inst->Condition())
@@ -123,7 +123,7 @@ void Analyzer::analyzeStoreInst(llvm::Instruction *inst) {
         !call_inst->CalledFunction()->ReturnType()->isIntegerTy())
       return;
 
-    if (auto compare_inst = framework::shared_dyn_cast<framework::CompareInst>(
+    if (auto compare_inst = fitx::shared_dyn_cast<fitx::CompareInst>(
             branch_inst->Condition())) {
       compare_inst->replaceOperand(created_store->PointerOperand(),
                                    created_store->ValueOperand());
@@ -135,7 +135,7 @@ void Analyzer::analyzeLoadInst(llvm::Instruction *inst) {
   auto *load_inst = llvm::cast<llvm::LoadInst>(inst);
 
   auto framework_block = framework_function_->getBasicBlock(inst->getParent());
-  auto framework_load = framework::LoadInst::Create(load_inst);
+  auto framework_load = fitx::LoadInst::Create(load_inst);
 
   // TODO: this is a simple check of the load inst.
   std::deque<llvm::User *> users(inst->user_begin(), inst->user_end());
@@ -170,7 +170,7 @@ void Analyzer::analyzeReturnInst(llvm::Instruction *instruction) {
   if (!return_value || !framework_function_->ReturnType()->isIntOrPtrTy())
     return;
 
-  auto framework_value = framework::Value::CreateFromDefinition(return_value);
+  auto framework_value = fitx::Value::CreateFromDefinition(return_value);
   framework_function_->setReturnValue(framework_value);
 
   std::vector<llvm::Instruction *> visited_inst{return_inst};
@@ -182,7 +182,7 @@ void Analyzer::analyzeReturnInst(llvm::Instruction *instruction) {
 // return-code aware propagation at call sites.
 bool Analyzer::collectPossibleReturnValues(
     llvm::Value *V, std::vector<llvm::Instruction *> &visited_inst) {
-  auto framework_value = framework::Value::CreateFromDefinition(V);
+  auto framework_value = fitx::Value::CreateFromDefinition(V);
   bool add_return_value = false;
 
   if (auto *instruction = llvm::dyn_cast<llvm::Instruction>(V)) {

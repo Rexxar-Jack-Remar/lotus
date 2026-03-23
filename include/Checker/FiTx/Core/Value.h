@@ -34,7 +34,7 @@
 #include <set>
 #include <vector>
 
-namespace framework {
+namespace fitx {
 
 class Instruction;
 class Value {
@@ -77,10 +77,10 @@ public:
   static std::shared_ptr<Value> CreateAppend(std::shared_ptr<Value> src,
                                              std::shared_ptr<Value> target);
   static std::shared_ptr<Value>
-  CreateManagedValue(std::shared_ptr<framework::Instruction> value);
+  CreateManagedValue(std::shared_ptr<fitx::Instruction> value);
 
   Value(llvm::Value *value, std::vector<Fields> fields, long array_element_num);
-  Value(std::shared_ptr<framework::Value> value, std::vector<Fields> fields,
+  Value(std::shared_ptr<fitx::Value> value, std::vector<Fields> fields,
         long array_element_num);
   Value(const Value &value);
 
@@ -101,7 +101,7 @@ public:
   bool operator==(const Value &V) const;
   bool operator==(const llvm::Value *V) const;
   friend llvm::raw_ostream &operator<<(llvm::raw_ostream &ostream,
-                                       const framework::Value &value);
+                                       const fitx::Value &value);
 
   llvm::Value &getLLVMValue_() const;
   llvm::Type &getLLVMType_() const;
@@ -127,11 +127,11 @@ public:
 
   const bool isRoot() const { return fields_.empty(); }
 
-  void addUser(std::shared_ptr<framework::Value> user) {
+  void addUser(std::shared_ptr<fitx::Value> user) {
     users_.push_back(user);
   }
 
-  std::vector<std::weak_ptr<framework::Value>> Users() { return users_; }
+  std::vector<std::weak_ptr<fitx::Value>> Users() { return users_; }
 
   void setManagedId(size_t id) { managed_id_ = id; }
   size_t ManagedId() { return managed_id_; }
@@ -147,7 +147,7 @@ private:
   bool is_global_var_;
   bool is_return_value_;
   std::vector<Fields> fields_;
-  std::vector<std::weak_ptr<framework::Value>> users_;
+  std::vector<std::weak_ptr<fitx::Value>> users_;
 };
 
 class ConstValue : public Value {
@@ -158,7 +158,7 @@ public:
 
   int64_t getConstValue() { return const_value_; }
 
-  static bool classof(const framework::Value *value) {
+  static bool classof(const fitx::Value *value) {
     // Methods for support type inquiry through isa, cast, and dyn_cast:
     return value->getValueID() == llvm::Value::ConstantIntVal;
   }
@@ -172,7 +172,7 @@ public:
   NullValue(llvm::ConstantPointerNull *value);
   NullValue(std::shared_ptr<NullValue> value);
 
-  static bool classof(const framework::Value *value) {
+  static bool classof(const fitx::Value *value) {
     // Methods for support type inquiry through isa, cast, and dyn_cast:
     return value->getValueID() == llvm::Value::ConstantPointerNullVal;
   }
@@ -188,7 +188,7 @@ public:
 
   uint64_t ArgNum() const { return arg_num_; }
 
-  static bool classof(const framework::Value *value) {
+  static bool classof(const fitx::Value *value) {
     // Methods for support type inquiry through isa, cast, and dyn_cast:
     return value->getValueID() == llvm::Value::ArgumentVal;
   }
@@ -213,7 +213,7 @@ public:
 
   const std::set<std::shared_ptr<Value>> &Values() const { return values_; };
 
-  bool exists(framework::Value value);
+  bool exists(fitx::Value value);
   bool exists(std::shared_ptr<Value> val);
 
   bool add(std::shared_ptr<Value> val);
@@ -244,19 +244,19 @@ class AliasValues {
 public:
   AliasValues();
 
-  void addAlias(std::shared_ptr<framework::Value> src,
-                std::shared_ptr<framework::Value> target);
+  void addAlias(std::shared_ptr<fitx::Value> src,
+                std::shared_ptr<fitx::Value> target);
 
   void addAlias(AliasValues &collection);
 
   /// Returns the set of values that may alias \p value, or nullptr if none.
-  const ValueCollection *getAliasInfo(std::shared_ptr<framework::Value> value);
+  const ValueCollection *getAliasInfo(std::shared_ptr<fitx::Value> value);
 
-  const std::vector<std::shared_ptr<framework::Value>> &UpdatedValues() {
+  const std::vector<std::shared_ptr<fitx::Value>> &UpdatedValues() {
     return updated_values_;
   };
 
-  const std::map<std::shared_ptr<framework::Value>, ValueCollection> &
+  const std::map<std::shared_ptr<fitx::Value>, ValueCollection> &
   AliasInfo() {
     return alias_info_;
   };
@@ -264,9 +264,9 @@ public:
   size_t Size() { return alias_size_; }
 
 private:
-  std::map<std::shared_ptr<framework::Value>, ValueCollection> alias_info_;
+  std::map<std::shared_ptr<fitx::Value>, ValueCollection> alias_info_;
 
-  std::vector<std::shared_ptr<framework::Value>> updated_values_;
+  std::vector<std::shared_ptr<fitx::Value>> updated_values_;
   size_t alias_size_;
 };
 
@@ -280,16 +280,16 @@ public:
 
   size_t Size() { return managed_values_.size(); }
 
-  void addValue(std::shared_ptr<framework::Value> value) {
+  void addValue(std::shared_ptr<fitx::Value> value) {
     value->setManagedId(Size());
     return managed_values_.push_back(value);
   }
 
-  std::shared_ptr<framework::Value> getValueFromID(size_t id);
+  std::shared_ptr<fitx::Value> getValueFromID(size_t id);
 
 private:
   ManagedValues();
-  std::vector<std::shared_ptr<framework::Value>> managed_values_;
+  std::vector<std::shared_ptr<fitx::Value>> managed_values_;
 };
 
-}; // namespace framework
+}; // namespace fitx

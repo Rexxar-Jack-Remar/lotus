@@ -11,12 +11,12 @@
 #include "Checker/FiTx/Core/SFG/Converter.h"
 #include "Checker/FiTx/Core/Value.h"
 
-namespace framework {
+namespace fitx {
 std::shared_ptr<Instruction>
 Instruction::Create(std::shared_ptr<Instruction> inst,
                     std::vector<Fields> field, long array_element_num) {
   auto created =
-      Converter::GetInstance().createManagedInst<framework::Instruction>(
+      Converter::GetInstance().createManagedInst<fitx::Instruction>(
           inst, array_element_num, field);
   return created;
 }
@@ -54,7 +54,7 @@ Instruction::Instruction(llvm::Instruction *instruction,
   opcode_ = llvm_instruction_->getOpcode();
 
   llvm::BasicBlock *block = llvm_instruction_->getParent();
-  parent_ = framework::Function::createManagedFunction(block->getParent())
+  parent_ = fitx::Function::createManagedFunction(block->getParent())
                 ->getBasicBlock(block);
 
   if (const llvm::DebugLoc &Loc = llvm_instruction_->getDebugLoc()) {
@@ -77,7 +77,7 @@ Instruction::Instruction(std::shared_ptr<Instruction> instruction,
   parent_ = instruction->Parent();
 }
 
-bool Instruction::operator<=(const framework::Instruction &instruction) const {
+bool Instruction::operator<=(const fitx::Instruction &instruction) const {
   if (llvm_instruction_ == instruction.llvm_instruction_)
     return true;
 
@@ -98,7 +98,7 @@ bool Instruction::operator<(llvm::Instruction *instruction) const {
   return true;
 }
 
-bool Instruction::operator<(const framework::Instruction &instruction) const {
+bool Instruction::operator<(const fitx::Instruction &instruction) const {
   if (module_ != instruction.module_)
     return module_ < instruction.module_;
 
@@ -119,7 +119,7 @@ bool Instruction::operator==(llvm::Instruction *instruction) const {
   return false;
 }
 
-bool Instruction::operator==(const framework::Instruction &instruction) const {
+bool Instruction::operator==(const fitx::Instruction &instruction) const {
   if (llvm_instruction_ == instruction.llvm_instruction_)
     return true;
 
@@ -128,8 +128,8 @@ bool Instruction::operator==(const framework::Instruction &instruction) const {
 }
 
 llvm::raw_ostream &operator<<(llvm::raw_ostream &ostream,
-                              const framework::Instruction &instruction) {
-  ostream << "[framework::Instruction] ";
+                              const fitx::Instruction &instruction) {
+  ostream << "[fitx::Instruction] ";
   ostream << llvm::Instruction::getOpcodeName(instruction.opcode_);
   ostream << " (" << instruction.opcode_ << ") ";
   ostream << "in " << instruction.module_->getName();
@@ -140,8 +140,8 @@ llvm::raw_ostream &operator<<(llvm::raw_ostream &ostream,
 
 bool Instruction::emptyInstruction() { return !llvm_instruction_; }
 
-bool Instruction::isInSameLine(framework::Instruction inst) {
+bool Instruction::isInSameLine(fitx::Instruction inst) {
   return line_ == inst.Line();
 }
 
-} // namespace framework
+} // namespace fitx

@@ -26,7 +26,7 @@ public:
   void analyzeStoreInst(llvm::Instruction *store_inst);
   void analyzeLoadInst(llvm::Instruction *load_inst);
 
-  std::shared_ptr<framework::Function> FrameworkFunction() {
+  std::shared_ptr<fitx::Function> FrameworkFunction() {
     return framework_function_;
   }
 
@@ -35,7 +35,7 @@ public:
                               std::vector<llvm::Instruction *> &visited_inst);
 
 private:
-  std::shared_ptr<framework::Function> framework_function_;
+  std::shared_ptr<fitx::Function> framework_function_;
 };
 
 } // namespace ir_generator

@@ -39,7 +39,7 @@ lotus/
 - **CMake**: Root `CMakeLists.txt` configures LLVM, Z3, optional Boost/CLAM/SeaHorn
 - **Libraries**: Static libs prefixed `Canary*` (e.g., `CanaryDyckAA`, `CanaryPDG`) — legacy naming
 - **Tools**: Binaries go to `build/bin/` (e.g., `lotus-aa`, `lotus-kint`, `clam`)
-- **Tests**: Use `add_lotus_test()` / `add_lotus_pdg_test()`; run from `build/` with `ctest`
+- **Tests**: Unit tests are organized under `tests/unit/`; shared unit-test CMake helpers live in `tests/unit/UnitTestHelpers.cmake`
 
 ```bash
 mkdir build && cd build
@@ -102,10 +102,14 @@ LLVM (Module, Function, BasicBlock, Instruction) | Solvers
 
 ## Testing
 
-- Tests live under `tests/unit/` (Pointer, IR, Verification, DataFlow, etc.)
-- Use GTest: `add_lotus_test(name source.cpp)` or `add_lotus_pdg_test` for PDG-heavy tests
-- Tests link `lotus_test_utils` (includes common libs)
-- Run: `cd build && ctest --output-on-failure`
+- Tests live under `tests/unit/` and are grouped by subsystem (`Analysis`, `Checker`, `Concurrency`, `ControlFlow`, `DataFlow`, `Fuzzing`, `IR`, `Pointer`, `Solvers`, `TypeHierarchy`, `Utils`, `Verification`).
+- Shared unit-test build helpers are defined in `tests/unit/UnitTestHelpers.cmake`, which is included by `tests/unit/CMakeLists.txt`.
+- Add new tests with the subsystem-specific helpers from `tests/unit/UnitTestHelpers.cmake`, e.g. `add_lotus_analysis_test`, `add_lotus_concurrency_test`, `add_lotus_ir_test`, `add_lotus_pointer_test`, `add_lotus_verification_test`.
+- Use `add_lotus_targeted_test(...)` only when no existing subsystem helper fits; keep the link set minimal and add subsystem-specific libraries explicitly.
+- `add_lotus_pdg_test(...)` is still available for PDG-heavy tests that need the extra LLVM transform utilities.
+- Shared test support targets include `lotus_test_utils` and `lotus_test_harness_utils`; prefer them over reintroducing large catch-all link bundles.
+- Run all tests with `cd build && ctest --output-on-failure`, or build specific test targets with `cmake --build build --target <test_name>`.
+- If a test gains new linker dependencies after CMake cleanup, prefer fixing the relevant subsystem helper in `tests/unit/UnitTestHelpers.cmake` instead of restoring a global "link everything" pattern.
 - Clangd warning: ignore all "C++ versions less than C++17 are not supported" warnnings in the test files.
 
 

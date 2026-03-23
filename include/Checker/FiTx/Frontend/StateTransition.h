@@ -41,7 +41,7 @@
 #include <string>
 #include <vector>
 
-namespace framework {
+namespace fitx {
 
 /// Hook instruction kinds for typestate transitions (paper Table 5).
 /// FUNCTION_ARG = call with arg; STORE_VALUE = store; USE_VALUE = load;
@@ -147,4 +147,4 @@ public:
   AliasValueTransitionRule();
 };
 
-}; // namespace framework
+}; // namespace fitx

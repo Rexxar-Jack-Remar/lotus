@@ -14,8 +14,8 @@
 // include STL
 #include <vector>
 
-namespace framework {
-std::vector<framework::Value::Fields>
+namespace fitx {
+std::vector<fitx::Value::Fields>
 decodeGetElementPtrInst(llvm::GetElementPtrInst *get_element_ptr_inst);
 long arrayElementNum(llvm::GetElementPtrInst *get_element_ptr_inst);
 
@@ -25,6 +25,6 @@ static long getMemberIndiceFromByte(llvm::Instruction *instruction,
 static const llvm::StructLayout *getStructLayout(llvm::Instruction *instruction,
                                                  llvm::StructType *STy);
 
-bool isInPredecessor(std::shared_ptr<framework::BasicBlock> target,
-                     std::shared_ptr<framework::BasicBlock> block, int depth);
-} // namespace framework
+bool isInPredecessor(std::shared_ptr<fitx::BasicBlock> target,
+                     std::shared_ptr<fitx::BasicBlock> block, int depth);
+} // namespace fitx

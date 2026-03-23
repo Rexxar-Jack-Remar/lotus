@@ -45,9 +45,9 @@
 #include <string>
 #include <vector>
 
-namespace framework {
+namespace fitx {
 FunctionInformation::FunctionInformation(
-    std::shared_ptr<framework::Function> function, AnalysisStat stat)
+    std::shared_ptr<fitx::Function> function, AnalysisStat stat)
     : framework_function_(function), stat_(stat) {}
 
 void FunctionInformation::setAnalysisStat(
@@ -56,7 +56,7 @@ void FunctionInformation::setAnalysisStat(
 }
 
 void FunctionInformation::setAnayzingBasicBlock(
-    std::shared_ptr<framework::BasicBlock> basic_block) {
+    std::shared_ptr<fitx::BasicBlock> basic_block) {
   current_basicblock_ = basic_block;
 }
 
@@ -67,7 +67,7 @@ FunctionInformation::getCurrentBasicBlockInformation() {
 
 std::shared_ptr<BasicBlockInformation>
 FunctionInformation::createBasicBlockInfo(
-    std::shared_ptr<framework::BasicBlock> basic_block,
+    std::shared_ptr<fitx::BasicBlock> basic_block,
     const std::set<State> &states) {
   int time_to_live = BasicBlockInformation::kMaxTimeToLive;
 
@@ -93,12 +93,12 @@ FunctionInformation::createBasicBlockInfo(
         continue;
       }
       auto passthrough_blocks =
-          std::vector<std::shared_ptr<framework::BasicBlock>>();
+          std::vector<std::shared_ptr<fitx::BasicBlock>>();
 
       auto weak_blocks = preds->getPassthroughBlock(basic_block);
       std::transform(weak_blocks.begin(), weak_blocks.end(),
                      std::back_inserter(passthrough_blocks),
-                     [](const std::weak_ptr<framework::BasicBlock> block) {
+                     [](const std::weak_ptr<fitx::BasicBlock> block) {
                        return block.lock();
                      });
       if (!passthrough_blocks.size())
@@ -184,7 +184,7 @@ FunctionInformation::createBasicBlockInfo(
 
         /* generateWarning(pred_block_info->BasicBlock().get() ,"---"); */
         /* for (auto ret_val : current_block_info->ReturnValues()) { */
-        /*   if (auto cv = framework::shared_dyn_cast<ConstValue>(ret_val)) { */
+        /*   if (auto cv = fitx::shared_dyn_cast<ConstValue>(ret_val)) { */
         /*     generateWarning(current_block_info->BasicBlock().get(),
          * std::to_string(cv->getConstValue())); */
         /*   } */
@@ -215,7 +215,7 @@ void FunctionInformation::addValues(const ValueCollection &collection) {
 
 std::shared_ptr<BasicBlockInformation>
 FunctionInformation::getBasicBlockInformation(
-    std::shared_ptr<framework::BasicBlock> basic_block) {
+    std::shared_ptr<fitx::BasicBlock> basic_block) {
   if (basicBlockInfoExists(basic_block))
     return basic_block_info_[basic_block];
   return nullptr;
@@ -223,19 +223,19 @@ FunctionInformation::getBasicBlockInformation(
 
 std::shared_ptr<BasicBlockInformation>
 FunctionInformation::getBasicBlockPrevInformation(
-    std::shared_ptr<framework::BasicBlock> basic_block) {
+    std::shared_ptr<fitx::BasicBlock> basic_block) {
   if (basicBlockPrevInfoExists(basic_block))
     return prev_basic_block_info_[basic_block];
   return nullptr;
 }
 
 bool FunctionInformation::basicBlockInfoExists(
-    std::shared_ptr<framework::BasicBlock> basic_block) {
+    std::shared_ptr<fitx::BasicBlock> basic_block) {
   return basic_block_info_.find(basic_block) != basic_block_info_.end();
 }
 
 bool FunctionInformation::basicBlockPrevInfoExists(
-    std::shared_ptr<framework::BasicBlock> basic_block) {
+    std::shared_ptr<fitx::BasicBlock> basic_block) {
   return prev_basic_block_info_.find(basic_block) !=
          prev_basic_block_info_.end();
 }
@@ -251,7 +251,7 @@ FunctionInformation::getSuccessBlock() {
 }
 
 bool FunctionInformation::basicBlockInfoChanged(
-    std::shared_ptr<framework::BasicBlock> block) {
+    std::shared_ptr<fitx::BasicBlock> block) {
   auto current_info = getBasicBlockInformation(block);
   auto prev_info = getBasicBlockPrevInformation(block);
   if (!current_info || !prev_info)
@@ -270,7 +270,7 @@ bool FunctionInformation::basicBlockInfoChanged(
 }
 
 void FunctionInformation::addReturnValueInfo(
-    int64_t value, std::weak_ptr<framework::BasicBlock> block) {
+    int64_t value, std::weak_ptr<fitx::BasicBlock> block) {
   /* auto block_info = getBasicBlockInformation(block.lock()); */
   /* if (!block_info) return; */
   /* if (block_info->ReturnValueSatisfiable(value)) */
@@ -287,15 +287,15 @@ void FunctionInformation::addReturnValueInfo(int64_t value,
 }
 
 bool FunctionInformation::existsInRefcountFunctions(
-    std::shared_ptr<framework::Function> function) {
+    std::shared_ptr<fitx::Function> function) {
   return std::find(called_refcount_functions_.begin(),
                    called_refcount_functions_.end(),
                    function) != called_refcount_functions_.end();
 }
 
 void FunctionInformation::addRefcountFunction(
-    std::shared_ptr<framework::Function> function) {
+    std::shared_ptr<fitx::Function> function) {
   called_refcount_functions_.push_back(function);
 }
 
-}; // namespace framework
+}; // namespace fitx

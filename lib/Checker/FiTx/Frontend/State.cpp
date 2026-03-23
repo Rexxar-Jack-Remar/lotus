@@ -40,7 +40,7 @@
 #include <string>
 #include <vector>
 
-namespace framework {
+namespace fitx {
 
 /* State Class */
 State::State(int ID, std::string name, StateType type, StateMergeMethod method,
@@ -96,7 +96,7 @@ StateManager::StateManager()
     : early_state_transition_(false), init_state_(nullptr),
       propagation_constraint_(nullptr) {
   StateArgs init_args =
-      framework::StateArgs("init", framework::StateType::INIT);
+      fitx::StateArgs("init", fitx::StateType::INIT);
   init_state_ = &createState(init_args);
 
   transition_manager_ = std::make_shared<StateTransitionManager>();
@@ -106,7 +106,7 @@ StateManager::StateManager()
 StateManager::StateManager(std::set<State> states)
     : states_(states), early_state_transition_(false) {
   StateArgs init_args =
-      framework::StateArgs("init", framework::StateType::INIT);
+      fitx::StateArgs("init", fitx::StateType::INIT);
   init_state_ = &createState(init_args);
 
   transition_manager_ = std::make_shared<StateTransitionManager>();
@@ -150,14 +150,14 @@ State &StateManager::getByName(const std::string &name) {
   return const_cast<State &>(*state);
 }
 
-std::shared_ptr<framework::StateTransitionManager>
+std::shared_ptr<fitx::StateTransitionManager>
 StateManager::TransitionManager() {
   return transition_manager_;
 }
 
 void StateManager::addTransition(State &source, State &target,
                                  TransitionRule &rule) {
-  framework::Transition transition =
+  fitx::Transition transition =
       transition_manager_->createTransition(source, target);
 
   transition_manager_->addTransitionRule(transition, rule);
@@ -216,7 +216,7 @@ bool Transition::operator==(const Transition &transition) const {
 }
 
 llvm::raw_ostream &operator<<(llvm::raw_ostream &ostream,
-                              const framework::Transition &transition) {
+                              const fitx::Transition &transition) {
   ostream << transition.Source().Name() << " to " << transition.Target().Name();
   return ostream;
 }
@@ -230,7 +230,7 @@ TransitionLogs::TransitionLogs(const TransitionLogs &logs)
 }
 
 TransitionLogs::TransitionLogs(
-    Transition transition, std::shared_ptr<framework::Instruction> instruction)
+    Transition transition, std::shared_ptr<fitx::Instruction> instruction)
     : transition_logs_{Log{transition, instruction}} {
   least_significant_source_ = transition.Source();
   most_significant_target_ = transition.Target();
@@ -243,8 +243,8 @@ const State &TransitionLogs::CurrentState() const {
 }
 
 void TransitionLogs::addTransition(
-    framework::Transition &transition,
-    std::shared_ptr<framework::Instruction> instruction) {
+    fitx::Transition &transition,
+    std::shared_ptr<fitx::Instruction> instruction) {
   transition_logs_.push_back(Log{transition, instruction});
 
   if (!least_significant_source_ ||
@@ -261,14 +261,14 @@ void TransitionLogs::setWarned() { warned_ = true; }
 void TransitionLogs::generateLog(llvm::raw_ostream &stream) const {
   for (auto log : transition_logs_) {
     auto transition = log.transition;
-    framework::generateLog(stream, log.instruction.get(),
+    fitx::generateLog(stream, log.instruction.get(),
                            "[Transition] " + transition.Source().Name() +
                                " to " + transition.Target().Name());
   }
 }
 
 void TransitionLogs::logicalTerminate(
-    std::shared_ptr<framework::Instruction> instruction) {
+    std::shared_ptr<fitx::Instruction> instruction) {
   auto null_transition = Transition(transition_logs_.back().transition.Target(),
                                     NullState::GetInstance());
   addTransition(null_transition, instruction);
@@ -339,15 +339,15 @@ void StateTransitionManager::addTransitionRule(Transition &transition,
 
 void StateTransitionManager::registerFunctionArgTransition(
     const FunctionArgTransitionRule::FunctionArg &arg,
-    framework::Transition transition) {
+    fitx::Transition transition) {
   if (!existsInFunctionArgTransition(arg))
-    function_transitions_[arg] = std::vector<framework::Transition>();
+    function_transitions_[arg] = std::vector<fitx::Transition>();
   function_transitions_[arg].push_back(transition);
 }
 
 void StateTransitionManager::registerFunctionArgTransition(
     const std::vector<FunctionArgTransitionRule::FunctionArg> &args,
-    framework::Transition transition) {
+    fitx::Transition transition) {
   for (auto arg : args) {
     registerFunctionArgTransition(arg, transition);
   }
@@ -355,38 +355,38 @@ void StateTransitionManager::registerFunctionArgTransition(
 
 void StateTransitionManager::registerStoreTransition(
     std::shared_ptr<StoreValueTransitionRule> rule,
-    framework::Transition transition) {
+    fitx::Transition transition) {
   if (store_transitions_.find(rule->Type()) == store_transitions_.end())
-    store_transitions_[rule->Type()] = std::vector<framework::Transition>();
+    store_transitions_[rule->Type()] = std::vector<fitx::Transition>();
   store_transitions_[rule->Type()].push_back(transition);
 
-  if (rule->Type() == framework::StoreValueTransitionRule::CALL_FUNC) {
+  if (rule->Type() == fitx::StoreValueTransitionRule::CALL_FUNC) {
     for (auto func : rule->FunctionNames()) {
       if (call_store_transitions_.find(func) == call_store_transitions_.end())
-        call_store_transitions_[func] = std::vector<framework::Transition>();
+        call_store_transitions_[func] = std::vector<fitx::Transition>();
       call_store_transitions_[func].push_back(transition);
     }
   }
 
   if (rule->ConsiderNullBranch()) {
     auto new_rule =
-        static_cast<framework::StoreValueTransitionRule::StoreValueType>(
+        static_cast<fitx::StoreValueTransitionRule::StoreValueType>(
             rule->Type() + 4);
     if (store_transitions_.find(new_rule) == store_transitions_.end())
-      store_transitions_[new_rule] = std::vector<framework::Transition>();
+      store_transitions_[new_rule] = std::vector<fitx::Transition>();
     store_transitions_[new_rule].push_back(transition);
   }
 }
 
 void StateTransitionManager::registerUseTransition(
     std::shared_ptr<UseValueTransitionRule> rule,
-    framework::Transition transition) {
+    fitx::Transition transition) {
   use_transitions_.push_back(transition);
 }
 
 void StateTransitionManager::registerAliasTransition(
     std::shared_ptr<AliasValueTransitionRule> rule,
-    framework::Transition transition) {
+    fitx::Transition transition) {
   alias_transitions_.push_back(transition);
 }
 
@@ -396,39 +396,39 @@ bool StateTransitionManager::existsInFunctionArgTransition(
 }
 
 const std::pair<FunctionArgTransitionRule::FunctionArg,
-                std::vector<framework::Transition>>
-/* const std::vector<framework::Transition> */
+                std::vector<fitx::Transition>>
+/* const std::vector<fitx::Transition> */
 StateTransitionManager::getFunctionArgTransitions(const std::string &name,
                                                   unsigned int arg_num) {
   FunctionArgTransitionRule::FunctionArg arg(name, arg_num);
   if (existsInFunctionArgTransition(arg)) {
     return *function_transitions_.find(arg);
   }
-  return std::make_pair(arg, std::vector<framework::Transition>());
+  return std::make_pair(arg, std::vector<fitx::Transition>());
 }
 
-std::vector<framework::Transition>
+std::vector<fitx::Transition>
 StateTransitionManager::getStoreArgTransitions(
-    framework::StoreValueTransitionRule::StoreValueType type,
+    fitx::StoreValueTransitionRule::StoreValueType type,
     const std::string &name) {
-  std::vector<framework::Transition> transitions;
-  if (type == framework::StoreValueTransitionRule::CALL_FUNC) {
+  std::vector<fitx::Transition> transitions;
+  if (type == fitx::StoreValueTransitionRule::CALL_FUNC) {
     if (call_store_transitions_.find(name) != call_store_transitions_.end())
       return call_store_transitions_[name];
   } else {
     if (store_transitions_.find(type) != store_transitions_.end())
       return store_transitions_[type];
   }
-  return std::vector<framework::Transition>();
+  return std::vector<fitx::Transition>();
 }
 
-std::vector<framework::Transition>
+std::vector<fitx::Transition>
 StateTransitionManager::getUseValueTransitions() {
   return use_transitions_;
 }
 
-std::vector<framework::Transition>
+std::vector<fitx::Transition>
 StateTransitionManager::getAliasTransitions() {
   return alias_transitions_;
 }
-}; // namespace framework
+}; // namespace fitx

@@ -4,53 +4,53 @@
 #include <string>
 #include <vector>
 
-const std::vector<framework::FunctionArgTransitionRule::FunctionArg>
+const std::vector<fitx::FunctionArgTransitionRule::FunctionArg>
     lock_funcs = {
-        framework::FunctionArgTransitionRule::FunctionArg("spin_lock"),
-        framework::FunctionArgTransitionRule::FunctionArg("spin_lock_irq"),
-        framework::FunctionArgTransitionRule::FunctionArg("spin_lock_irqsave"),
-        framework::FunctionArgTransitionRule::FunctionArg("mutex_lock"),
-        framework::FunctionArgTransitionRule::FunctionArg("mutex_lock_nested"),
-        framework::FunctionArgTransitionRule::FunctionArg(
+        fitx::FunctionArgTransitionRule::FunctionArg("spin_lock"),
+        fitx::FunctionArgTransitionRule::FunctionArg("spin_lock_irq"),
+        fitx::FunctionArgTransitionRule::FunctionArg("spin_lock_irqsave"),
+        fitx::FunctionArgTransitionRule::FunctionArg("mutex_lock"),
+        fitx::FunctionArgTransitionRule::FunctionArg("mutex_lock_nested"),
+        fitx::FunctionArgTransitionRule::FunctionArg(
             "mutex_lock_interruptible"),
-        framework::FunctionArgTransitionRule::FunctionArg(
+        fitx::FunctionArgTransitionRule::FunctionArg(
             "mutex_lock_interruptible_nested"),
-        framework::FunctionArgTransitionRule::FunctionArg(
+        fitx::FunctionArgTransitionRule::FunctionArg(
             "mutex_lock_killable"),
-        framework::FunctionArgTransitionRule::FunctionArg(
+        fitx::FunctionArgTransitionRule::FunctionArg(
             "refcount_dec_and_mutex_lock", 1),
-        framework::FunctionArgTransitionRule::FunctionArg("atomic_dec_and_lock",
+        fitx::FunctionArgTransitionRule::FunctionArg("atomic_dec_and_lock",
                                                           1),
-        framework::FunctionArgTransitionRule::FunctionArg(
+        fitx::FunctionArgTransitionRule::FunctionArg(
             "_atomic_dec_and_lock", 1),
 };
 
-const std::vector<framework::FunctionArgTransitionRule::FunctionArg>
+const std::vector<fitx::FunctionArgTransitionRule::FunctionArg>
     try_lock_funcs = {
-        framework::FunctionArgTransitionRule::FunctionArg("spin_trylock"),
-        framework::FunctionArgTransitionRule::FunctionArg("mutex_trylock"),
+        fitx::FunctionArgTransitionRule::FunctionArg("spin_trylock"),
+        fitx::FunctionArgTransitionRule::FunctionArg("mutex_trylock"),
 };
 
-const std::vector<framework::FunctionArgTransitionRule::FunctionArg>
+const std::vector<fitx::FunctionArgTransitionRule::FunctionArg>
     lock_funcs_w_try = {
-        framework::FunctionArgTransitionRule::FunctionArg("spin_lock"),
-        framework::FunctionArgTransitionRule::FunctionArg("spin_trylock"),
-        framework::FunctionArgTransitionRule::FunctionArg("spin_lock_irq"),
-        framework::FunctionArgTransitionRule::FunctionArg("spin_lock_irqsave"),
-        framework::FunctionArgTransitionRule::FunctionArg("mutex_lock"),
-        framework::FunctionArgTransitionRule::FunctionArg("mutex_lock_nested"),
-        framework::FunctionArgTransitionRule::FunctionArg("mutex_trylock"),
-        framework::FunctionArgTransitionRule::FunctionArg(
+        fitx::FunctionArgTransitionRule::FunctionArg("spin_lock"),
+        fitx::FunctionArgTransitionRule::FunctionArg("spin_trylock"),
+        fitx::FunctionArgTransitionRule::FunctionArg("spin_lock_irq"),
+        fitx::FunctionArgTransitionRule::FunctionArg("spin_lock_irqsave"),
+        fitx::FunctionArgTransitionRule::FunctionArg("mutex_lock"),
+        fitx::FunctionArgTransitionRule::FunctionArg("mutex_lock_nested"),
+        fitx::FunctionArgTransitionRule::FunctionArg("mutex_trylock"),
+        fitx::FunctionArgTransitionRule::FunctionArg(
             "mutex_lock_interruptible"),
-        framework::FunctionArgTransitionRule::FunctionArg(
+        fitx::FunctionArgTransitionRule::FunctionArg(
             "mutex_lock_interruptible_nested"),
-        framework::FunctionArgTransitionRule::FunctionArg(
+        fitx::FunctionArgTransitionRule::FunctionArg(
             "mutex_lock_killable"),
-        framework::FunctionArgTransitionRule::FunctionArg(
+        fitx::FunctionArgTransitionRule::FunctionArg(
             "refcount_dec_and_mutex_lock", 1),
-        framework::FunctionArgTransitionRule::FunctionArg("atomic_dec_and_lock",
+        fitx::FunctionArgTransitionRule::FunctionArg("atomic_dec_and_lock",
                                                           1),
-        framework::FunctionArgTransitionRule::FunctionArg(
+        fitx::FunctionArgTransitionRule::FunctionArg(
             "_atomic_dec_and_lock", 1),
 };
 

@@ -19,7 +19,7 @@ void IRGenerator::getAnalysisUsage(llvm::AnalysisUsage &AU) const {
   AU.addRequired<llvm::LoopInfoWrapperPass>();
 }
 
-// Build framework::Function for F (blocks, ordered blocks, instructions) and
+// Build fitx::Function for F (blocks, ordered blocks, instructions) and
 // register in framework_ir_[F.getParent()] for the typestate Analyzer.
 bool IRGenerator::runOnFunction(llvm::Function &F) {
   auto &loop_info = getAnalysis<llvm::LoopInfoWrapperPass>().getLoopInfo();
@@ -31,10 +31,10 @@ bool IRGenerator::runOnFunction(llvm::Function &F) {
 
 }; // namespace ir_generator
 
-std::map<llvm::Module *, std::set<std::shared_ptr<framework::Function>>>
+std::map<llvm::Module *, std::set<std::shared_ptr<fitx::Function>>>
     ir_generator::IRGenerator::framework_ir_ =
         std::map<llvm::Module *,
-                 std::set<std::shared_ptr<framework::Function>>>();
+                 std::set<std::shared_ptr<fitx::Function>>>();
 
 char ir_generator::IRGenerator::ID = 1;
 
