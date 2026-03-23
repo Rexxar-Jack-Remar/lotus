@@ -343,6 +343,59 @@ TEST_F(OpenMPSemanticsTest,
   EXPECT_NE(taskgroup_id, parallel_region_id);
 }
 
+TEST_F(OpenMPSemanticsTest, ExplicitGNUParallelEndKeepsRegionOpenUntilBoundary) {
+  const char *source = R"(
+    declare void @GOMP_parallel(void ()*, i8*, i32, i32)
+    declare void @GOMP_parallel_end()
+    declare void @__kmpc_taskgroup(i8*, i32)
+    declare void @__kmpc_end_taskgroup(i8*, i32)
+
+    define void @worker() {
+    entry:
+      ret void
+    }
+
+    define i32 @main() {
+    entry:
+      call void @GOMP_parallel(void ()* @worker, i8* null, i32 1, i32 0)
+      call void @__kmpc_taskgroup(i8* null, i32 0)
+      call void @__kmpc_end_taskgroup(i8* null, i32 0)
+      call void @GOMP_parallel_end()
+      call void @__kmpc_taskgroup(i8* null, i32 0)
+      call void @__kmpc_end_taskgroup(i8* null, i32 0)
+      ret i32 0
+    }
+  )";
+
+  auto module = parseModule(source);
+  ASSERT_NE(module, nullptr);
+
+  OpenMPSemantics semantics(*module);
+  semantics.analyze();
+
+  size_t root_context_id = 0;
+  size_t parallel_region_id = 0;
+  std::vector<size_t> taskgroup_parent_ids;
+  for (const SemanticEntity &entity : semantics.getSemanticEntities()) {
+    if (entity.kind == SemanticEntityKind::SchedulingContext &&
+        entity.function == module->getFunction("main")) {
+      root_context_id = entity.id;
+    } else if (entity.kind == SemanticEntityKind::ParallelRegion &&
+               entity.function == module->getFunction("main")) {
+      parallel_region_id = entity.id;
+    } else if (entity.kind == SemanticEntityKind::Taskgroup &&
+               entity.function == module->getFunction("main")) {
+      taskgroup_parent_ids.push_back(entity.parent_id);
+    }
+  }
+
+  ASSERT_NE(root_context_id, 0u);
+  ASSERT_NE(parallel_region_id, 0u);
+  ASSERT_EQ(taskgroup_parent_ids.size(), 2u);
+  EXPECT_EQ(taskgroup_parent_ids[0], parallel_region_id);
+  EXPECT_EQ(taskgroup_parent_ids[1], root_context_id);
+}
+
 TEST_F(OpenMPSemanticsTest, ValidSectionsAndReduceDoNotTriggerMalformedRegionCounters) {
   const char *source = R"(
     declare i32 @__kmpc_sections_init(i8*, i32)

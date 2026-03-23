@@ -836,8 +836,8 @@ void HappensBeforeAnalysis::buildSynchronizesWith() {
         continue;
       }
 
-	      const Function *callee = threadAPI->getCallee(call);
-	      ThreadAPI::TD_TYPE type = threadAPI->getType(call);
+      const Function *callee = threadAPI->getCallee(call);
+      ThreadAPI::TD_TYPE type = threadAPI->getType(call);
 
       if (type == ThreadAPI::TD_BAR_INIT && call->arg_size() >= 3) {
         if (const Value *barrier = threadAPI->getBarrierVal(inst)) {
@@ -1271,11 +1271,15 @@ void HappensBeforeAnalysis::buildSynchronizesWith() {
     }
 
     bool has_release_sequence = false;
+    bool ambiguous_release_sequence = false;
     std::vector<const AtomicEvent *> release_sequence_events;
     for (size_t idx : entry.second) {
       const AtomicEvent &event = atomic_events[idx];
       if (event.inst != release_candidates.front().second && event.is_store_like &&
           event.is_rmw && (!event.is_cmpxchg || event.has_success_witness)) {
+        if (!release_sequence_events.empty()) {
+          ambiguous_release_sequence = true;
+        }
         has_release_sequence = true;
         release_sequence_events.push_back(&event);
       }
@@ -1296,6 +1300,11 @@ void HappensBeforeAnalysis::buildSynchronizesWith() {
 
       bool supported_release_sequence = false;
       if (has_release_sequence) {
+        if (ambiguous_release_sequence || release_sequence_events.size() != 1) {
+          ++deferred_release_sequence_relations;
+          ++m_deferred_sync_counts["atomic_release_sequence_tail_ambiguous"];
+          continue;
+        }
         const ConstantInt *initial_value =
             getAtomicInitialConstant(release_candidates.front().second);
         const ConstantInt *sequence_value =

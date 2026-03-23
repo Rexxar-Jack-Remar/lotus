@@ -236,6 +236,25 @@ inline bool isJthreadDetach(const llvm::StringRef& funcName) {
   return funcName.contains("jthread") && funcName.contains("detachEv");
 }
 
+inline bool isJthreadDestructor(const llvm::StringRef& funcName) {
+  return funcName.contains("jthread") && containsDtorCode(funcName);
+}
+
+inline bool isAtomicWait(const llvm::StringRef& funcName) {
+  return funcName.contains("_ZNSt") && funcName.contains("atomic") &&
+         funcName.contains("wait");
+}
+
+inline bool isAtomicNotifyOne(const llvm::StringRef& funcName) {
+  return funcName.contains("_ZNSt") && funcName.contains("atomic") &&
+         funcName.contains("notify_one");
+}
+
+inline bool isAtomicNotifyAll(const llvm::StringRef& funcName) {
+  return funcName.contains("_ZNSt") && funcName.contains("atomic") &&
+         funcName.contains("notify_all");
+}
+
 // C++20 std::latch
 inline bool isLatchCountDown(const llvm::StringRef& funcName) {
   return funcName.contains("latch") && funcName.contains("count_down");

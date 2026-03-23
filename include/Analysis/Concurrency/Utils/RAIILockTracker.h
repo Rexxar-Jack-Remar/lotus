@@ -46,6 +46,9 @@ struct LockLifetime {
   std::vector<bool> sharedModes;                      ///< Per-lock mode: true for shared/read, false for exclusive
   OwnershipKind ownership = OwnershipKind::Immediate; ///< Constructor ownership policy
   bool isScoped;                          ///< True for scoped_lock (multi-lock)
+  bool hasPreciseLifetimeEnd = false;    ///< Explicit destructor or lifetime.end was found
+  const llvm::Instruction *impreciseLifetimeBoundary =
+      nullptr; ///< First instruction after the last visible lock-object use
 };
 
 /**

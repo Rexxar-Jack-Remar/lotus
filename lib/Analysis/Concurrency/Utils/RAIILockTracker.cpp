@@ -11,12 +11,65 @@
 #include "Analysis/Concurrency/Utils/CppThreading.h"
 
 #include <algorithm>
+#include <deque>
+#include <unordered_set>
 
 #include <llvm/IR/InstIterator.h>
 #include <llvm/IR/Instructions.h>
 #include <llvm/IR/IntrinsicInst.h>
 
 namespace RAIILock {
+
+namespace {
+
+const llvm::Instruction *
+findImpreciseLifetimeBoundary(const llvm::AllocaInst *lockAlloca,
+                              const llvm::Function *F) {
+  if (!lockAlloca || !F) {
+    return nullptr;
+  }
+
+  std::deque<const llvm::Value *> worklist;
+  std::unordered_set<const llvm::Value *> visited;
+  std::unordered_set<const llvm::Instruction *> use_insts;
+  const llvm::Instruction *last_use = nullptr;
+
+  worklist.push_back(lockAlloca);
+  visited.insert(lockAlloca);
+
+  while (!worklist.empty()) {
+    const llvm::Value *current = worklist.front();
+    worklist.pop_front();
+
+    for (const llvm::User *user : current->users()) {
+      const llvm::Value *derived = llvm::dyn_cast<llvm::Value>(user);
+      if (!derived || !visited.insert(derived).second) {
+        continue;
+      }
+
+      if (const auto *inst = llvm::dyn_cast<llvm::Instruction>(user)) {
+        use_insts.insert(inst);
+      }
+
+      if (llvm::isa<llvm::BitCastInst>(user) || llvm::isa<llvm::GetElementPtrInst>(user) ||
+          llvm::isa<llvm::PHINode>(user) || llvm::isa<llvm::SelectInst>(user)) {
+        worklist.push_back(derived);
+      }
+    }
+  }
+
+  for (llvm::const_inst_iterator I = llvm::inst_begin(F), E = llvm::inst_end(F);
+       I != E; ++I) {
+    const llvm::Instruction *inst = &*I;
+    if (use_insts.count(inst) != 0) {
+      last_use = inst;
+    }
+  }
+
+  return last_use ? last_use->getNextNode() : nullptr;
+}
+
+} // namespace
 
 bool RAIILockTracker::isRAIILockConstructor(const llvm::Instruction *inst) {
   const auto *call = llvm::dyn_cast<llvm::CallBase>(inst);
@@ -165,6 +218,7 @@ RAIILockTracker::findDestructorsForLockObject(
     const llvm::AllocaInst *lockAlloca, const llvm::Function *F) {
   std::vector<const llvm::Instruction *> destructors;
   bool hasExplicitDestructor = false;
+  bool hasLifetimeEnd = false;
 
   if (!lockAlloca || !F)
     return destructors;
@@ -214,19 +268,10 @@ RAIILockTracker::findDestructorsForLockObject(
       if (const auto *intrinsic = llvm::dyn_cast<llvm::IntrinsicInst>(inst)) {
         if (intrinsic->getIntrinsicID() == llvm::Intrinsic::lifetime_end) {
           if (intrinsic->getArgOperand(1)->stripPointerCasts() == lockAlloca) {
+            hasLifetimeEnd = true;
             addIfMissing(inst);
           }
         }
-      }
-
-      // Function returns are implicit destructor points when no explicit
-      // lifetime end or destructor call is visible. Treat exceptional exits
-      // conservatively as end-of-lifetime points as well so must-lock
-      // reasoning does not survive an unwind-only scope exit.
-      if (llvm::isa<llvm::ReturnInst>(inst)) {
-        addIfMissing(inst);
-      } else if (llvm::isa<llvm::ResumeInst>(inst)) {
-        addIfMissing(inst);
       }
     }
   }
@@ -261,6 +306,13 @@ void RAIILockTracker::processConstructor(const llvm::CallBase *ctor,
 
   // Find all destructor calls for this lock object
   lifetime.destructors = findDestructorsForLockObject(lockObj, F);
+  lifetime.hasPreciseLifetimeEnd = !lifetime.destructors.empty();
+  if (!lifetime.hasPreciseLifetimeEnd) {
+    if (ctor->getParent() != &F->getEntryBlock()) {
+      lifetime.impreciseLifetimeBoundary =
+          findImpreciseLifetimeBoundary(lockObj, F);
+    }
+  }
 
   lockLifetimes[lockObj] = lifetime;
 }

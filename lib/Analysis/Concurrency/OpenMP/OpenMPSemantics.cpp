@@ -1031,6 +1031,8 @@ void OpenMPSemantics::scanSchedulingContext(const Function *func,
           } else {
             ++m_summary.nested_parallelism_flat_regions;
           }
+          const bool explicit_parallel_end =
+              callee && api->hasTrait(callee, "parallel-explicit-end");
           TraversalState::RegionFrame frame =
               pushRegion(WaitBoundaryInfo::Kind::Unknown,
                          SemanticEntityKind::ParallelRegion, call);
@@ -1048,7 +1050,9 @@ void OpenMPSemantics::scanSchedulingContext(const Function *func,
             std::set<const Function *> nested_call_stack;
             scanSchedulingContext(fork_target, fork_state, nested_call_stack);
           }
-          popRegion(WaitBoundaryInfo::Kind::Unknown, call);
+          if (!explicit_parallel_end) {
+            popRegion(WaitBoundaryInfo::Kind::Unknown, call);
+          }
           continue;
         }
 
@@ -1064,6 +1068,9 @@ void OpenMPSemantics::scanSchedulingContext(const Function *func,
                                                      : state.taskgroup_stack.back(),
                        currentRegionId(), boundary.semantic_entity_id, nullptr,
                        WaitBoundaryInfo::Kind::Barrier);
+          if (callee && api->hasTrait(callee, "parallel-end")) {
+            popRegion(WaitBoundaryInfo::Kind::Unknown, call);
+          }
           advanceCurrentPhase();
           continue;
         }

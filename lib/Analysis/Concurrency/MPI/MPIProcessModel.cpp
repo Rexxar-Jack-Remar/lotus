@@ -1751,6 +1751,7 @@ void MPIProcessModel::extractRMASyncDetails(
   }
 
   if (tag.equals("win-lock")) {
+    op.rma_lock_all = false;
     const Value *target_rank_arg = getOperandBySignedIndex(cb, 1);
     if (target_rank_arg) {
       int value = -1;
@@ -1762,16 +1763,23 @@ void MPIProcessModel::extractRMASyncDetails(
       }
     }
     op.window = getOperandBySignedIndex(cb, 3);
+    if (op.target_rank < 0 && op.target_rank_min < 0 && op.target_rank_max < 0) {
+      op.semantic_relation.kind = concurrency::RelationKind::UnknownDueToModelGap;
+      op.semantic_relation.proof = concurrency::ProofStrength::Unknown;
+      op.semantic_relation.reason = "mpi_rma_lock_target_unresolved";
+    }
     return;
   }
 
   if (tag.equals("win-lock-all")) {
+    op.rma_lock_all = true;
     op.window = getOperandBySignedIndex(cb, 1);
     return;
   }
 
   if (tag.equals("win-unlock") || tag.equals("win-flush") ||
       tag.equals("win-flush-local")) {
+    op.rma_lock_all = false;
     const Value *target_rank_arg = getOperandBySignedIndex(cb, 0);
     if (target_rank_arg) {
       int value = -1;
@@ -1789,6 +1797,7 @@ void MPIProcessModel::extractRMASyncDetails(
 
   if (tag.equals("win-unlock-all") || tag.equals("win-flush-all") ||
       tag.equals("win-flush-local-all")) {
+    op.rma_lock_all = true;
     op.window = getOperandBySignedIndex(cb, 0);
     op.rma_local_completion_only = tag.equals("win-flush-local-all");
     return;
@@ -2714,8 +2723,7 @@ void MPIProcessModel::buildSemanticEvents() {
       event.rma.byte_length = op.byte_length;
       event.rma.epoch_kind = op.rma_epoch_kind;
       event.rma.local_completion_only = op.rma_local_completion_only;
-      event.rma.lock_all =
-          op.td_type == ThreadAPI::TD_MPI_WIN_LOCK && op.target_rank < 0;
+      event.rma.lock_all = op.rma_lock_all;
     }
 
     if (isNonBlockingRequestKind(op.kind) || op.kind == MPIOpKind::WAIT ||

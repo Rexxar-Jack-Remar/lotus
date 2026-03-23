@@ -247,36 +247,52 @@ LockSet LockSetAnalysis::getMayWriteLockSetAt(const Instruction *inst) const {
 }
 
 LockSet LockSetAnalysis::getMustLockSetAt(const Instruction *inst) const {
+  auto applyImpreciseBoundary = [this, inst](LockSet lockset) {
+    for (LockID lock : getImpreciseRAIILocksEndingAt(inst)) {
+      lockset.erase(lock);
+    }
+    return lockset;
+  };
   if (inst && !isa<CallBase>(inst) && !getRAIILocksReleasedAt(inst).empty()) {
     auto it_exit = m_must_locksets_exit.find(inst);
     if (it_exit != m_must_locksets_exit.end()) {
-      return it_exit->second;
+      return applyImpreciseBoundary(it_exit->second);
     }
   }
   auto it = m_must_locksets_entry.find(inst);
   if (it != m_must_locksets_entry.end())
-    return it->second;
+    return applyImpreciseBoundary(it->second);
   // Fallback: entry at inst = exit of prev on linear path (so double-lock sees
   // held lock)
   if (const Instruction *prev = inst->getPrevNode()) {
     auto it_exit = m_must_locksets_exit.find(prev);
     if (it_exit != m_must_locksets_exit.end())
-      return it_exit->second;
+      return applyImpreciseBoundary(it_exit->second);
   }
   return LockSet();
 }
 
 LockSet LockSetAnalysis::getMustReadLockSetAt(const Instruction *inst) const {
   auto it = m_must_read_locks_entry.find(inst);
-  if (it != m_must_read_locks_entry.end())
-    return it->second;
+  if (it != m_must_read_locks_entry.end()) {
+    LockSet result = it->second;
+    for (LockID lock : getImpreciseRAIILocksEndingAt(inst)) {
+      result.erase(lock);
+    }
+    return result;
+  }
   return LockSet();
 }
 
 LockSet LockSetAnalysis::getMustWriteLockSetAt(const Instruction *inst) const {
   auto it = m_must_write_locks_entry.find(inst);
-  if (it != m_must_write_locks_entry.end())
-    return it->second;
+  if (it != m_must_write_locks_entry.end()) {
+    LockSet result = it->second;
+    for (LockID lock : getImpreciseRAIILocksEndingAt(inst)) {
+      result.erase(lock);
+    }
+    return result;
+  }
   return LockSet();
 }
 
@@ -911,6 +927,9 @@ LockSet LockSetAnalysis::transfer(const Instruction *inst,
     eraseReleasedLocks(raii_releases);
     return out_set;
   }
+  if (is_must) {
+    eraseReleasedLocks(getImpreciseRAIILocksEndingAt(inst));
+  }
 
   const CallBase *call = dyn_cast<CallBase>(inst);
   ThreadAPI::TD_TYPE call_type =
@@ -1256,6 +1275,9 @@ void LockSetAnalysis::transferReadWrite(const Instruction *inst,
     eraseReleasedLocks(raii_releases);
     return;
   }
+  if (is_must) {
+    eraseReleasedLocks(getImpreciseRAIILocksEndingAt(inst));
+  }
 
   const CallBase *call = dyn_cast<CallBase>(inst);
   ThreadAPI::TD_TYPE call_type =
@@ -1536,15 +1558,15 @@ void LockSetAnalysis::transferReadWrite(const Instruction *inst,
                         summary.may_read_acquire_delta.end());
         out_write.insert(summary.may_write_acquire_delta.begin(),
                          summary.may_write_acquire_delta.end());
-        for (LockID lock : summary.may_release_delta) {
-          out_read.erase(lock);
-          out_write.erase(lock);
-        }
       } else {
         out_read.insert(summary.must_read_acquire_delta.begin(),
                         summary.must_read_acquire_delta.end());
         out_write.insert(summary.must_write_acquire_delta.begin(),
                          summary.must_write_acquire_delta.end());
+        for (LockID lock : summary.may_release_delta) {
+          out_read.erase(lock);
+          out_write.erase(lock);
+        }
       }
 
       for (LockID lock : summary.must_release_delta) {
@@ -1658,6 +1680,14 @@ void LockSetAnalysis::identifyLocks() {
           m_all_locks.insert(lock);
           m_lock_acquires[lock].push_back(inst);
 
+          LockSet entry_locks = getMayLockSetAt(inst);
+          for (const auto *held : entry_locks) {
+            if (held == lock || mayAlias(held, lock)) {
+              m_reentrant_locks.insert(getCanonicalLock(lock));
+              break;
+            }
+          }
+
           // Check for try-lock
           if (m_thread_api->isTryLock(inst))
             m_lock_try_acquires[lock].push_back(inst);
@@ -1701,10 +1731,34 @@ void LockSetAnalysis::trackLockOrdering() {
                         locks_held.begin(), locks_held.end(),
                         std::inserter(newly_acquired, newly_acquired.begin()));
 
-    for (LockID new_lock : newly_acquired) {
-      if (locks_held.find(new_lock) != locks_held.end()) {
-        m_reentrant_locks.insert(new_lock);
+    auto markIfReentrantAcquire = [&](LockID acquired_lock) {
+      if (!acquired_lock) {
+        return;
       }
+      for (const auto *held_lock : locks_held) {
+        if (held_lock == acquired_lock || mayAlias(held_lock, acquired_lock)) {
+          m_reentrant_locks.insert(getCanonicalLock(acquired_lock));
+          return;
+        }
+      }
+    };
+
+    if (isLockOperation(inst)) {
+      if (LockID op_lock = getLockValue(inst)) {
+        const auto *call = dyn_cast<CallBase>(inst);
+        const ThreadAPI::TD_TYPE type =
+            call ? m_thread_api->getType(call) : ThreadAPI::TD_DUMMY;
+        if (type != ThreadAPI::TD_SHARED_RDLOCK &&
+            type != ThreadAPI::TD_SHARED_WRLOCK &&
+            type != ThreadAPI::TD_SHARED_LOCK_CTOR &&
+            type != ThreadAPI::TD_SHARED_UNLOCK) {
+          markIfReentrantAcquire(op_lock);
+        }
+      }
+    }
+
+    for (LockID new_lock : newly_acquired) {
+      markIfReentrantAcquire(new_lock);
 
       for (const auto *held_lock : locks_held) {
         if (held_lock != new_lock) {
@@ -1828,6 +1882,70 @@ LockSetAnalysis::getRAIILocksReleasedAt(const Instruction *inst) const {
       continue;
     }
 
+    for (const Value *lock : lifetime.underlyingLocks) {
+      if (LockID canonical = getCanonicalLock(lock)) {
+        locks.push_back(canonical);
+      }
+    }
+  }
+
+  return locks;
+}
+
+std::vector<LockID>
+LockSetAnalysis::getImpreciseRAIILocksEndingAt(const Instruction *inst) const {
+  std::vector<LockID> locks;
+  if (!inst) {
+    return locks;
+  }
+
+  const Function *parent_func = inst->getFunction();
+  auto raii_it = m_raii_locks.find(parent_func);
+  if (raii_it == m_raii_locks.end()) {
+    return locks;
+  }
+
+  for (const auto &entry : raii_it->second) {
+    const RAIILock::LockLifetime &lifetime = entry.second;
+    if (lifetime.hasPreciseLifetimeEnd) {
+      continue;
+    }
+    const bool at_unknown_boundary =
+        lifetime.impreciseLifetimeBoundary &&
+        lifetime.impreciseLifetimeBoundary == inst;
+    const bool at_function_exit_without_precise_lifetime =
+        !lifetime.impreciseLifetimeBoundary &&
+        (isa<ReturnInst>(inst) || isa<ResumeInst>(inst));
+    if (!at_unknown_boundary && !at_function_exit_without_precise_lifetime) {
+      continue;
+    }
+    for (const Value *lock : lifetime.underlyingLocks) {
+      if (LockID canonical = getCanonicalLock(lock)) {
+        locks.push_back(canonical);
+      }
+    }
+  }
+
+  return locks;
+}
+
+std::vector<LockID>
+LockSetAnalysis::getImpreciseRAIILocksInFunction(const Function *func) const {
+  std::vector<LockID> locks;
+  if (!func) {
+    return locks;
+  }
+
+  auto raii_it = m_raii_locks.find(func);
+  if (raii_it == m_raii_locks.end()) {
+    return locks;
+  }
+
+  for (const auto &entry : raii_it->second) {
+    const RAIILock::LockLifetime &lifetime = entry.second;
+    if (lifetime.hasPreciseLifetimeEnd || !lifetime.impreciseLifetimeBoundary) {
+      continue;
+    }
     for (const Value *lock : lifetime.underlyingLocks) {
       if (LockID canonical = getCanonicalLock(lock)) {
         locks.push_back(canonical);
@@ -2147,10 +2265,7 @@ void LockSetAnalysis::computeFunctionSummary(Function *func) {
     }
     return saw_binary_semaphore;
   };
-  PostDominatorTree post_dom(*func);
-  auto isGuaranteedOnNormalExit = [&](const Instruction *inst) {
-    return inst && post_dom.dominates(inst->getParent(), &func->getEntryBlock());
-  };
+  DominatorTree dom(*func);
 
   auto intersectMustSets = [&](const LockSet &lhs, const LockSet &rhs) {
     std::vector<LockSet> inputs;
@@ -2167,20 +2282,77 @@ void LockSetAnalysis::computeFunctionSummary(Function *func) {
     }
   }
 
-  auto mayHoldOnExit = [&](LockID lock) {
-    for (const auto *ret : returns) {
-      auto it = m_may_locksets_exit.find(ret);
-      if (it == m_may_locksets_exit.end()) {
-        continue;
-      }
-      for (LockID held : it->second) {
-        if (matchesLock(held, lock)) {
-          return true;
+  auto returnMayObserveUnmatchedRelease =
+      [&](const ReturnInst *ret,
+          const std::vector<const Instruction *> &release_sites) {
+        if (!ret) {
+          return false;
         }
-      }
-    }
-    return false;
-  };
+        auto blockCanReach = [](const BasicBlock *from, const BasicBlock *to) {
+          if (!from || !to) {
+            return false;
+          }
+          if (from == to) {
+            return true;
+          }
+          std::queue<const BasicBlock *> worklist;
+          std::set<const BasicBlock *> visited;
+          worklist.push(from);
+          visited.insert(from);
+          while (!worklist.empty()) {
+            const BasicBlock *current = worklist.front();
+            worklist.pop();
+            for (const BasicBlock *succ : successors(current)) {
+              if (!visited.insert(succ).second) {
+                continue;
+              }
+              if (succ == to) {
+                return true;
+              }
+              worklist.push(succ);
+            }
+          }
+          return false;
+        };
+        for (const Instruction *release_inst : release_sites) {
+          if (!release_inst || release_inst->getFunction() != func) {
+            continue;
+          }
+          if (release_inst->getParent() == ret->getParent()) {
+            if (release_inst->comesBefore(ret)) {
+              return true;
+            }
+            continue;
+          }
+          if (blockCanReach(release_inst->getParent(), ret->getParent())) {
+            return true;
+          }
+        }
+        return false;
+      };
+
+  auto returnMustObserveUnmatchedRelease =
+      [&](const ReturnInst *ret,
+          const std::vector<const Instruction *> &release_sites) {
+        if (!ret) {
+          return false;
+        }
+        for (const Instruction *release_inst : release_sites) {
+          if (!release_inst || release_inst->getFunction() != func) {
+            continue;
+          }
+          if (release_inst->getParent() == ret->getParent()) {
+            if (release_inst->comesBefore(ret)) {
+              return true;
+            }
+            continue;
+          }
+          if (dom.dominates(release_inst->getParent(), ret->getParent())) {
+            return true;
+          }
+        }
+        return false;
+      };
 
   if (!returns.empty()) {
     // Preserve read-vs-write mode so callers do not accidentally turn a held
@@ -2264,17 +2436,14 @@ void LockSetAnalysis::computeFunctionSummary(Function *func) {
   // Track only releases that are not definitely matched by an in-callee
   // acquisition on all paths to the release site. Balanced internal
   // acquire/release pairs should not destroy caller must-lock certainty.
+  std::unordered_map<LockID, std::vector<const Instruction *>> unmatched_releases;
   for (inst_iterator I = inst_begin(func), E = inst_end(func); I != E; ++I) {
     Instruction *inst = &*I;
     std::vector<LockID> released = getRAIILocksReleasedAt(inst);
     if (!released.empty()) {
       for (LockID lock : released) {
-        if (isGuaranteedOnNormalExit(inst) && !isPossiblyHeldAt(inst, lock) &&
-            !mayHoldOnExit(lock)) {
-          summary.may_release_delta.insert(lock);
-        }
-        if (!isDefinitelyHeldAt(inst, lock)) {
-          summary.must_release_delta.insert(lock);
+        if (!isPossiblyHeldAt(inst, lock)) {
+          unmatched_releases[getCanonicalLock(lock)].push_back(inst);
         }
       }
       continue;
@@ -2284,15 +2453,37 @@ void LockSetAnalysis::computeFunctionSummary(Function *func) {
     }
     if (m_thread_api->isTDRelease(inst) && !m_thread_api->isTDAcquire(inst)) {
       if (LockID lock = getLockValue(inst)) {
-        if (isGuaranteedOnNormalExit(inst) && !isPossiblyHeldAt(inst, lock) &&
-            !mayHoldOnExit(lock)) {
-          summary.may_release_delta.insert(lock);
-        }
-        if (!isDefinitelyHeldAt(inst, lock)) {
-          summary.must_release_delta.insert(lock);
+        if (!isPossiblyHeldAt(inst, lock)) {
+          unmatched_releases[getCanonicalLock(lock)].push_back(inst);
         }
       }
     }
+  }
+
+  for (const auto &entry : unmatched_releases) {
+    LockID lock = entry.first;
+    bool reaches_any_return = false;
+    bool covers_all_returns = !returns.empty();
+    for (const ReturnInst *ret : returns) {
+      reaches_any_return |= returnMayObserveUnmatchedRelease(ret, entry.second);
+      covers_all_returns &=
+          returnMustObserveUnmatchedRelease(ret, entry.second);
+    }
+    if (reaches_any_return) {
+      summary.may_release_delta.insert(lock);
+    }
+    if (covers_all_returns) {
+      summary.must_release_delta.insert(lock);
+    }
+  }
+
+  for (LockID lock : getImpreciseRAIILocksInFunction(func)) {
+    summary.may_acquire_delta.erase(lock);
+    summary.may_read_acquire_delta.erase(lock);
+    summary.may_write_acquire_delta.erase(lock);
+    summary.must_acquire_delta.erase(lock);
+    summary.must_read_acquire_delta.erase(lock);
+    summary.must_write_acquire_delta.erase(lock);
   }
 
   summary.is_analyzed = true;
@@ -2330,23 +2521,25 @@ void LockSetAnalysis::applyFunctionSummary(const CallBase *call,
 
   // Apply lock releases (remove from locksets)
   for (LockID lock : summary.may_release_delta) {
-    may_locks.erase(lock);
+    must_locks.erase(lock);
 
     // Also remove aliases if alias analysis is available
     if (m_alias_analysis) {
       LockSet to_remove;
-      for (const auto *l : may_locks) {
+      to_remove.clear();
+      for (const auto *l : must_locks) {
         if (mayAlias(l, lock)) {
           to_remove.insert(l);
         }
       }
       for (const auto *l : to_remove) {
-        may_locks.erase(l);
+        must_locks.erase(l);
       }
     }
   }
 
   for (LockID lock : summary.must_release_delta) {
+    may_locks.erase(lock);
     must_locks.erase(lock);
 
     // Also remove aliases if alias analysis is available

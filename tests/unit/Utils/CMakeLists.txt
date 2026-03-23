@@ -1,17 +1,14 @@
 # Utility Unit Tests
 
-add_lotus_test(graph_slicer_test GraphSlicerTest.cpp)
+add_lotus_utils_test(graph_slicer_test GraphSlicerTest.cpp)
 
 # Other Tests
-add_lotus_test(egraph_test EGraphTest.cpp)
-add_lotus_test(string_utils_test StringUtilsTest.cpp)
-add_lotus_test(path_expressions_test PathExpressionsTest.cpp)
-add_lotus_test(pipeline_scheduler_test PipelineSchedulerTest.cpp)
-add_lotus_test(pipeline_scheduler_timeout_test PipelineSchedulerTimeoutTest.cpp)
-add_lotus_test(thread_safe_test ThreadSafeTest.cpp)
-
-set(THREAD_POOL_HARNESS_LIBS ${COMMON_LIBS})
-list(REMOVE_ITEM THREAD_POOL_HARNESS_LIBS GTest::gtest_main)
+add_lotus_utils_test(egraph_test EGraphTest.cpp)
+add_lotus_utils_test(string_utils_test StringUtilsTest.cpp)
+add_lotus_utils_test(path_expressions_test PathExpressionsTest.cpp)
+add_lotus_utils_test(pipeline_scheduler_test PipelineSchedulerTest.cpp)
+add_lotus_utils_test(pipeline_scheduler_timeout_test PipelineSchedulerTimeoutTest.cpp)
+add_lotus_utils_test(thread_safe_test ThreadSafeTest.cpp)
 
 add_executable(thread_pool_harness_test ThreadPoolHarnessTest.cpp)
 set_target_properties(thread_pool_harness_test PROPERTIES
@@ -21,7 +18,9 @@ set_target_properties(thread_pool_harness_test PROPERTIES
   CXX_EXTENSIONS OFF
 )
 target_include_directories(thread_pool_harness_test PRIVATE ${COMMON_INCLUDES})
-target_link_libraries(thread_pool_harness_test ${THREAD_POOL_HARNESS_LIBS})
+target_link_libraries(thread_pool_harness_test
+  lotus_test_harness_utils
+  CanaryParallel)
 
 add_test(NAME thread_pool_harness_serial_test
   COMMAND ${LOTUS_TEST_BIN_DIR}/thread_pool_harness_test -nworkers=0)
@@ -37,9 +36,6 @@ set_tests_properties(thread_pool_harness_parallel_test PROPERTIES
   WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
 )
 
-set(PARALLEL_TABULATION_HARNESS_LIBS ${COMMON_LIBS} CanaryCSIndex)
-list(REMOVE_ITEM PARALLEL_TABULATION_HARNESS_LIBS GTest::gtest_main)
-
 add_executable(parallel_tabulation_harness_test ParallelTabulationHarnessTest.cpp)
 set_target_properties(parallel_tabulation_harness_test PROPERTIES
   RUNTIME_OUTPUT_DIRECTORY ${LOTUS_TEST_BIN_DIR}
@@ -49,7 +45,9 @@ set_target_properties(parallel_tabulation_harness_test PROPERTIES
 )
 target_include_directories(parallel_tabulation_harness_test PRIVATE ${COMMON_INCLUDES})
 target_link_libraries(parallel_tabulation_harness_test
-  ${PARALLEL_TABULATION_HARNESS_LIBS})
+  lotus_test_harness_utils
+  CanaryParallel
+  CanaryCSIndex)
 
 add_test(NAME parallel_tabulation_harness_serial_test
   COMMAND ${LOTUS_TEST_BIN_DIR}/parallel_tabulation_harness_test -nworkers=0)
@@ -65,9 +63,6 @@ set_tests_properties(parallel_tabulation_harness_parallel_test PROPERTIES
   WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
 )
 
-set(PIPELINE_SCHEDULER_HARNESS_LIBS ${COMMON_LIBS})
-list(REMOVE_ITEM PIPELINE_SCHEDULER_HARNESS_LIBS GTest::gtest_main)
-
 add_executable(pipeline_scheduler_harness_test PipelineSchedulerHarnessTest.cpp)
 set_target_properties(pipeline_scheduler_harness_test PROPERTIES
   RUNTIME_OUTPUT_DIRECTORY ${LOTUS_TEST_BIN_DIR}
@@ -77,7 +72,8 @@ set_target_properties(pipeline_scheduler_harness_test PROPERTIES
 )
 target_include_directories(pipeline_scheduler_harness_test PRIVATE ${COMMON_INCLUDES})
 target_link_libraries(pipeline_scheduler_harness_test
-  ${PIPELINE_SCHEDULER_HARNESS_LIBS})
+  lotus_test_harness_utils
+  CanaryParallel)
 
 add_test(NAME pipeline_scheduler_harness_parallel_test
   COMMAND ${LOTUS_TEST_BIN_DIR}/pipeline_scheduler_harness_test -nworkers=2)

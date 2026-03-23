@@ -58,14 +58,15 @@ __tgt_target_enter_data TD_OMP_TARGET_DATA_BEGIN library=openmp semantic=target-
 __tgt_target_exit_data TD_OMP_TARGET_DATA_END library=openmp semantic=target-exit-data traits=omp-target-op,omp-target-data-op
 __tgt_target_update TD_OMP_TARGET_DATA_UPDATE library=openmp semantic=target-update traits=omp-target-op,omp-target-data-op
 GOMP_barrier TD_BAR_WAIT library=openmp semantic=barrier traits=omp-task-op,barrier-wait-like
-GOMP_parallel TD_FORK library=openmp semantic=fork
-GOMP_parallel_start TD_FORK library=openmp semantic=fork
-GOMP_parallel_end TD_BAR_WAIT library=openmp semantic=barrier traits=omp-task-op,barrier-wait-like
+GOMP_parallel TD_FORK library=openmp semantic=fork traits=parallel-explicit-end
+GOMP_parallel_start TD_FORK library=openmp semantic=fork traits=parallel-explicit-end
+GOMP_parallel_end TD_BAR_WAIT library=openmp semantic=parallel-end-barrier traits=omp-task-op,barrier-wait-like,parallel-end
 GOMP_taskwait TD_OMP_TASKWAIT library=openmp semantic=taskwait traits=omp-task-op
 GOMP_taskgroup_start TD_OMP_TASKGROUP_START library=openmp semantic=taskgroup-start traits=omp-task-op
 GOMP_taskgroup_end TD_OMP_TASKGROUP_END library=openmp semantic=taskgroup-end traits=omp-task-op
 GOMP_task TD_OMP_TASK library=openmp semantic=task traits=omp-task-op
 GOMP_taskyield TD_OMP_TASKYIELD library=openmp semantic=taskyield traits=omp-task-op
+GOMP_taskloop TD_OMP_TASKLOOP library=openmp semantic=taskloop traits=omp-task-op match=prefix
 
 # OpenMP prefix matches
 __kmpc_omp_task_with_deps TD_OMP_TASK_WITH_DEPS library=openmp semantic=task-with-deps traits=omp-task-op match=prefix

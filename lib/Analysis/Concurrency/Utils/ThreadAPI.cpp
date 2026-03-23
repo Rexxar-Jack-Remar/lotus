@@ -612,6 +612,10 @@ ThreadAPI::RuntimeLibrary ThreadAPI::inferLibrary(TD_TYPE type) const {
   case TD_SHARED_LOCK_DTOR:
   case TD_JTHREAD_FORK:
   case TD_JTHREAD_JOIN:
+  case TD_JTHREAD_DTOR:
+  case TD_ATOMIC_WAIT:
+  case TD_ATOMIC_NOTIFY_ONE:
+  case TD_ATOMIC_NOTIFY_ALL:
   case TD_LATCH_COUNT_DOWN:
   case TD_LATCH_WAIT:
   case TD_LATCH_ARRIVE_WAIT:
@@ -988,6 +992,7 @@ bool isMHPThreadType(TD type) {
   case TD::TD_BAR_WAIT:
   case TD::TD_JTHREAD_FORK:
   case TD::TD_JTHREAD_JOIN:
+  case TD::TD_JTHREAD_DTOR:
   case TD::TD_ASYNC:
   case TD::HARE_PAR_FOR:
     return true;
@@ -1043,6 +1048,16 @@ LoweringInfo makeLoweringInfo(TD type, ThreadAPI::RuntimeLibrary library,
   if (type == TD::TD_ASYNC) {
     return {LoweringKind::Deferred, "async-launch-policy-witness",
             ownerMask(Owner::HB, Owner::MHP)};
+  }
+  if (type == TD::TD_ATOMIC_WAIT) {
+    return {LoweringKind::RecognizedButUnmodeled,
+            "cpp-atomic-wait-runtime-unmodeled",
+            ownerMask(Owner::ExplicitFallback)};
+  }
+  if (type == TD::TD_ATOMIC_NOTIFY_ONE || type == TD::TD_ATOMIC_NOTIFY_ALL) {
+    return {LoweringKind::RecognizedButUnmodeled,
+            "cpp-atomic-notify-runtime-unmodeled",
+            ownerMask(Owner::ExplicitFallback)};
   }
   if (isSemaphoreTypeForLowering(type)) {
     return {LoweringKind::RecognizedButUnmodeled,
@@ -1244,13 +1259,12 @@ ThreadAPI::getSemanticLoweringInfo(const Function *F) const {
   const bool is_binary_semaphore =
       llvm::is_contained(description.traits, std::string("binary-semaphore")) ||
       F->getName().contains("binary_semaphore");
-  if (isSemaphoreTypeForLowering(description.type) || has_semaphore_trait) {
+    if (isSemaphoreTypeForLowering(description.type) || has_semaphore_trait) {
     if (is_binary_semaphore) {
       info.kind = SemanticLoweringKind::Modeled;
       info.reason = "modeled";
       info.owners = semanticLoweringOwnerMask(SemanticLoweringOwner::LockSet,
-                                              SemanticLoweringOwner::MHP,
-                                              SemanticLoweringOwner::HB);
+                                              SemanticLoweringOwner::MHP);
     } else {
       info.kind = SemanticLoweringKind::RecognizedButUnmodeled;
       info.reason = "counting-semaphore-runtime-unmodeled";
@@ -1356,6 +1370,16 @@ ThreadAPI::TD_TYPE ThreadAPI::getType(const Function *F) const {
       return TD_JTHREAD_FORK;
     if (CppThreadingModel::isJthreadJoin(name))
       return TD_JTHREAD_JOIN;
+    if (CppThreadingModel::isJthreadDestructor(name))
+      return TD_JTHREAD_DTOR;
+
+    // C++20 atomic wait/notify
+    if (CppThreadingModel::isAtomicWait(name))
+      return TD_ATOMIC_WAIT;
+    if (CppThreadingModel::isAtomicNotifyOne(name))
+      return TD_ATOMIC_NOTIFY_ONE;
+    if (CppThreadingModel::isAtomicNotifyAll(name))
+      return TD_ATOMIC_NOTIFY_ALL;
 
     // C++20 latch
     if (CppThreadingModel::isLatchCountDown(name))
@@ -1775,6 +1799,14 @@ const char *ThreadAPI::tdTypeToString(TD_TYPE t) {
     return "TD_JTHREAD_FORK";
   case TD_JTHREAD_JOIN:
     return "TD_JTHREAD_JOIN";
+  case TD_JTHREAD_DTOR:
+    return "TD_JTHREAD_DTOR";
+  case TD_ATOMIC_WAIT:
+    return "TD_ATOMIC_WAIT";
+  case TD_ATOMIC_NOTIFY_ONE:
+    return "TD_ATOMIC_NOTIFY_ONE";
+  case TD_ATOMIC_NOTIFY_ALL:
+    return "TD_ATOMIC_NOTIFY_ALL";
   case TD_LATCH_COUNT_DOWN:
     return "TD_LATCH_COUNT_DOWN";
   case TD_LATCH_WAIT:

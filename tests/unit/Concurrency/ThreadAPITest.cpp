@@ -669,6 +669,23 @@ TEST_F(ThreadAPITest, RecognizesGNUOpenMPParallelForkAndBarrierVariants) {
   EXPECT_TRUE(api->isTDBarWait(end));
 }
 
+TEST_F(ThreadAPITest, RecognizesGNUOpenMPTaskloopPrefixVariants) {
+  const char *source = R"(
+    declare void @GOMP_taskloop(i8*)
+    declare void @GOMP_taskloop_ull(i8*)
+  )";
+
+  auto module = parseModule(source);
+  ASSERT_NE(module, nullptr);
+
+  ThreadAPI::resetThreadAPI();
+  ThreadAPI *api = ThreadAPI::getThreadAPI();
+  EXPECT_EQ(api->getType(module->getFunction("GOMP_taskloop")),
+            ThreadAPI::TD_OMP_TASKLOOP);
+  EXPECT_EQ(api->getType(module->getFunction("GOMP_taskloop_ull")),
+            ThreadAPI::TD_OMP_TASKLOOP);
+}
+
 TEST_F(ThreadAPITest, MapsOpenMPTaskwaitWithDepsVariants) {
   const char *source = R"(
     declare i32 @__kmpc_omp_taskwait(i8*, i32)
@@ -999,6 +1016,7 @@ TEST_F(ThreadAPITest, ReportsExplicitSemanticLoweringStatus) {
       api->getSemanticLoweringInfo(ThreadAPI::TD_OMP_TASK_COMPLETE);
   auto doacross_submit =
       api->getSemanticLoweringInfo(ThreadAPI::TD_OMP_DOACROSS_SUBMIT);
+  auto atomic_wait = api->getSemanticLoweringInfo(ThreadAPI::TD_ATOMIC_WAIT);
 
   EXPECT_EQ(async.kind, ThreadAPI::SemanticLoweringKind::Deferred);
   EXPECT_STREQ(async.reason, "async-launch-policy-witness");
@@ -1021,6 +1039,9 @@ TEST_F(ThreadAPITest, ReportsExplicitSemanticLoweringStatus) {
   EXPECT_STREQ(doacross_submit.reason, "modeled");
   EXPECT_TRUE(api->hasSemanticLoweringOwner(
       ThreadAPI::TD_OMP_DOACROSS_SUBMIT, ThreadAPI::SemanticLoweringOwner::HB));
+  EXPECT_EQ(atomic_wait.kind,
+            ThreadAPI::SemanticLoweringKind::RecognizedButUnmodeled);
+  EXPECT_STREQ(atomic_wait.reason, "cpp-atomic-wait-runtime-unmodeled");
 }
 
 TEST_F(ThreadAPITest, OpenMPBarrierUsesSiteIdentityInsteadOfMetadataOperand) {
@@ -1079,6 +1100,9 @@ TEST_F(ThreadAPITest, SpecialSemanticLoweringStatesStayExplicitlyEnumerated) {
       ThreadAPI::TD_SEMAPHORE_ACQUIRE,
       ThreadAPI::TD_SEMAPHORE_RELEASE,
       ThreadAPI::TD_SEMAPHORE_TRY_ACQUIRE,
+      ThreadAPI::TD_ATOMIC_WAIT,
+      ThreadAPI::TD_ATOMIC_NOTIFY_ONE,
+      ThreadAPI::TD_ATOMIC_NOTIFY_ALL,
       ThreadAPI::TD_MPI_SESSION_GET_INFO,
       ThreadAPI::TD_MPI_SESSION_GET_NUM_ERRCODES,
       ThreadAPI::TD_MPI_SESSION_GET_ERRHANDLER,
@@ -1252,6 +1276,40 @@ TEST_F(ThreadAPITest, SemaphoreLoweringIsExplicitForBinaryAndCountingForms) {
       api->getSemanticLoweringInfo(ThreadAPI::TD_SEMAPHORE_ACQUIRE);
   EXPECT_EQ(generic_info.kind,
             ThreadAPI::SemanticLoweringKind::RecognizedButUnmodeled);
+}
+
+TEST_F(ThreadAPITest, RecognizesCppAtomicWaitNotifyAndJthreadDestructor) {
+  const char *source = R"(
+    declare void @_ZNSt6atomicIiE4waitEi(i8*, i32)
+    declare void @_ZNSt6atomicIiE10notify_oneEv(i8*)
+    declare void @_ZNSt6atomicIiE10notify_allEv(i8*)
+    declare void @_ZNSt7jthreadD1Ev(i8*)
+  )";
+
+  auto module = parseModule(source);
+  ASSERT_NE(module, nullptr);
+
+  ThreadAPI::resetThreadAPI();
+  ThreadAPI *api = ThreadAPI::getThreadAPI();
+  const Function *atomic_wait = module->getFunction("_ZNSt6atomicIiE4waitEi");
+  const Function *notify_one =
+      module->getFunction("_ZNSt6atomicIiE10notify_oneEv");
+  const Function *notify_all =
+      module->getFunction("_ZNSt6atomicIiE10notify_allEv");
+  const Function *jthread_dtor = module->getFunction("_ZNSt7jthreadD1Ev");
+  ASSERT_NE(atomic_wait, nullptr);
+  ASSERT_NE(notify_one, nullptr);
+  ASSERT_NE(notify_all, nullptr);
+  ASSERT_NE(jthread_dtor, nullptr);
+
+  EXPECT_EQ(api->getType(atomic_wait), ThreadAPI::TD_ATOMIC_WAIT);
+  EXPECT_EQ(api->getType(notify_one), ThreadAPI::TD_ATOMIC_NOTIFY_ONE);
+  EXPECT_EQ(api->getType(notify_all), ThreadAPI::TD_ATOMIC_NOTIFY_ALL);
+  EXPECT_EQ(api->getType(jthread_dtor), ThreadAPI::TD_JTHREAD_DTOR);
+  EXPECT_EQ(api->getSemanticLoweringInfo(atomic_wait).kind,
+            ThreadAPI::SemanticLoweringKind::RecognizedButUnmodeled);
+  EXPECT_TRUE(api->hasSemanticLoweringOwner(
+      jthread_dtor, ThreadAPI::SemanticLoweringOwner::MHP));
 }
 
 TEST_F(ThreadAPITest, MPIConfiguredAPIsHaveConsistentLoweringLibraries) {

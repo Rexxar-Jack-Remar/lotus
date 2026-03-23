@@ -583,6 +583,7 @@ struct MPIOperation {
   int target_rank_max = -1;
   int64_t target_disp = -1;
   int64_t byte_length = -1;
+  bool rma_lock_all = false;
   bool rma_local_completion_only = false;
 
   const llvm::Value *datatype = nullptr;

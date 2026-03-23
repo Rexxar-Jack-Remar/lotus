@@ -357,9 +357,8 @@ private:
     LockSet must_acquire_delta; ///< Locks newly held on all normal exit paths
     LockSet must_read_acquire_delta;  ///< Read locks newly held on all exits
     LockSet must_write_acquire_delta; ///< Write locks newly held on all exits
-    LockSet may_release_delta;  ///< Locks definitely absent on all exits
-    LockSet must_release_delta; ///< Locks maybe released without a definitely
-                                ///< matched in-callee acquisition
+    LockSet may_release_delta;  ///< Locks maybe released on some returning path
+    LockSet must_release_delta; ///< Locks definitely released on all returning paths
     bool is_analyzed;     ///< Whether function has been analyzed
 
     FunctionSummary() : is_analyzed(false) {}
@@ -438,6 +437,10 @@ private:
                                              const llvm::Value *lock_obj) const;
   std::vector<LockID>
   getRAIILocksReleasedAt(const llvm::Instruction *inst) const;
+  std::vector<LockID>
+  getImpreciseRAIILocksEndingAt(const llvm::Instruction *inst) const;
+  std::vector<LockID>
+  getImpreciseRAIILocksInFunction(const llvm::Function *func) const;
 
   /**
    * @brief Resolve the lock identity for explicit C++ wrapper operations

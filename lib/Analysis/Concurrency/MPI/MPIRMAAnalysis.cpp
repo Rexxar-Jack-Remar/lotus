@@ -42,7 +42,7 @@ bool rangesOverlap(int lhs_min, int lhs_max, int rhs_min, int rhs_max) {
 }
 
 bool isLockAllOperation(const MPIOperation &op) {
-  return op.td_type == ThreadAPI::TD_MPI_WIN_LOCK && op.target_rank < 0;
+  return op.rma_lock_all;
 }
 
 struct EpochKey {
@@ -226,6 +226,7 @@ void MPIRMAAnalysis::annotateOperationsInMachine(
     rma_op.sync_start = machine.start;
     rma_op.sync_end = end_inst;
     rma_op.epoch_id = machine.epoch_id;
+    rma_op.lock_all = machine.state == EpochState::LockAllOpen;
     rma_op.local_completion_only = machine.local_completion_only;
     rma_op.flush_completed = machine.remote_completion_observed;
     rma_op.exposure_epoch_observed = machine.exposure_epoch_observed;
@@ -470,8 +471,7 @@ void MPIRMAAnalysis::analyzeRMA() {
       rma_op.target_disp = op.target_disp;
       rma_op.byte_length = op.byte_length;
       rma_op.rma_epoch_kind = RMAEpochKind::Access;
-      rma_op.lock_all =
-          op.td_type == ThreadAPI::TD_MPI_WIN_LOCK && op.target_rank < 0;
+      rma_op.lock_all = false;
 
       size_t op_index = rma_operations_.size();
       rma_operations_.push_back(rma_op);
@@ -526,8 +526,7 @@ void MPIRMAAnalysis::analyzeRMA() {
           op.td_type == ThreadAPI::TD_MPI_WIN_SYNC || isLockAllOperation(op) ||
           ((op.td_type == ThreadAPI::TD_MPI_WIN_UNLOCK ||
             op.td_type == ThreadAPI::TD_MPI_WIN_FLUSH) &&
-           op.target_rank < 0 && op.target_rank_min < 0 &&
-           op.target_rank_max < 0);
+           op.rma_lock_all);
 
       std::vector<EpochMachine *> candidate_machines;
       if (all_targets) {

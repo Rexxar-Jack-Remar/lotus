@@ -125,6 +125,10 @@ public:
     // C++20 Additional Primitives
     TD_JTHREAD_FORK,          ///< std::jthread constructor (fork)
     TD_JTHREAD_JOIN,          ///< std::jthread::join
+    TD_JTHREAD_DTOR,          ///< std::jthread destructor auto-join
+    TD_ATOMIC_WAIT,           ///< std::atomic::wait
+    TD_ATOMIC_NOTIFY_ONE,     ///< std::atomic::notify_one
+    TD_ATOMIC_NOTIFY_ALL,     ///< std::atomic::notify_all
     TD_LATCH_COUNT_DOWN,      ///< std::latch::count_down
     TD_LATCH_WAIT,            ///< std::latch::wait
     TD_LATCH_ARRIVE_WAIT,     ///< std::latch::arrive_and_wait
@@ -865,7 +869,7 @@ public:
   //@{
   inline bool isJoinLike(const llvm::Instruction *inst) const {
     TD_TYPE t = getType(getCallee(inst));
-    return t == TD_JOIN || t == TD_JTHREAD_JOIN;
+    return t == TD_JOIN || t == TD_JTHREAD_JOIN || t == TD_JTHREAD_DTOR;
   }
   inline bool isJoinLike(const llvm::CallBase *cb) const {
     return isJoinLike(llvm::dyn_cast<llvm::Instruction>(cb));
@@ -1391,7 +1395,8 @@ public:
   inline bool isAtomicSyncOp(const llvm::Instruction *inst) const {
     TD_TYPE t = getType(getCallee(inst));
     return t == TD_CALL_ONCE || t == TD_FUTURE_GET || t == TD_FUTURE_WAIT ||
-           t == TD_PROMISE_SET || t == TD_ASYNC;
+           t == TD_PROMISE_SET || t == TD_ASYNC || t == TD_ATOMIC_WAIT ||
+           t == TD_ATOMIC_NOTIFY_ONE || t == TD_ATOMIC_NOTIFY_ALL;
   }
 
   /// True for any MPI collective or barrier (synchronization point).
