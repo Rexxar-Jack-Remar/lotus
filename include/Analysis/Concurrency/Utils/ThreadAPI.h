@@ -509,6 +509,13 @@ private:
   /// Return true if this std::async call is a definite asynchronous launch.
   bool isDefiniteAsyncLaunch(const llvm::Instruction *inst) const;
 
+  /// Return true if this std::async call is provably deferred-only.
+  bool isProvablyDeferredAsyncLaunch(const llvm::Instruction *inst) const;
+
+  /// Return the first operand index where a callable/payload may appear for
+  /// std::thread-like APIs.
+  unsigned getCppForkCallableSearchStart(const llvm::Instruction *inst) const;
+
   /// Safely fetch a call operand, returning nullptr when the argument is
   /// absent.
   const llvm::Value *getCallArg(const llvm::Instruction *inst,
@@ -710,7 +717,7 @@ public:
   inline bool isForkLike(const llvm::Instruction *inst) const {
     TD_TYPE t = getType(getCallee(inst));
     return t == TD_FORK || t == TD_JTHREAD_FORK ||
-           (t == TD_ASYNC && isDefiniteAsyncLaunch(inst));
+           (t == TD_ASYNC && !isProvablyDeferredAsyncLaunch(inst));
   }
   inline bool isForkLike(const llvm::CallBase *cb) const {
     return isForkLike(llvm::dyn_cast<llvm::Instruction>(cb));
@@ -829,23 +836,26 @@ public:
       return payload_args;
     }
 
-    unsigned callable_idx = 1;
-    if (getType(callee) == TD_ASYNC) {
-      callable_idx = isDefiniteAsyncLaunch(inst) ? 1 : 0;
+    const unsigned search_start = getCppForkCallableSearchStart(inst);
+    unsigned payload_start = cb->arg_size();
+    for (unsigned idx = search_start; idx < cb->arg_size(); ++idx) {
+      const llvm::Value *arg = cb->getArgOperand(idx);
+      const llvm::Value *stripped = arg ? arg->stripPointerCasts() : nullptr;
+      if (llvm::isa<llvm::Function>(stripped)) {
+        payload_start = idx + 1;
+        break;
+      }
     }
 
-    bool saw_callable = false;
-    for (unsigned idx = callable_idx; idx < cb->arg_size(); ++idx) {
-      const llvm::Value *arg = cb->getArgOperand(idx);
-      if (!saw_callable) {
-        const llvm::Value *stripped = arg ? arg->stripPointerCasts() : nullptr;
-        if (llvm::isa<llvm::Function>(stripped)) {
-          saw_callable = true;
-          continue;
-        }
-      } else {
-        payload_args.push_back(arg);
-      }
+    if (payload_start == cb->arg_size()) {
+      // No direct function operand was recovered. Conservatively treat every
+      // remaining operand as potentially captured by a spawned task. This keeps
+      // escape/TLS reasoning sound for functor/lambda launches.
+      payload_start = search_start;
+    }
+
+    for (unsigned idx = payload_start; idx < cb->arg_size(); ++idx) {
+      payload_args.push_back(cb->getArgOperand(idx));
     }
 
     return payload_args;

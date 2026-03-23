@@ -787,8 +787,8 @@ void OpenMPSemantics::buildTaskRelations() {
                 }
               }
               for (const Dependency &rhs_dep : rhs->dependencies) {
-                if (classifyDependencyConflict(rhs_dep, wait_dep) !=
-                    DependencyConflict::NoConflict) {
+                if (classifyDependencyConflict(rhs_dep, wait_dep) ==
+                    DependencyConflict::MustConflict) {
                   rhs_selected = true;
                   break;
                 }

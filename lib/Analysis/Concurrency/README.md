@@ -9,7 +9,7 @@ Headers live under `include/Analysis/Concurrency/`, sources under `lib/Analysis/
 | **Utils/** | ThreadAPI, ThreadFlowGraph, ThreadInfo, BVClock, FBVClock, CppAtomics, RAIILockTracker, LanguageModel/ (CppThreading, OpenMP, MPI, LinuxKernel) |
 | **MHP/** | MHPAnalysis, StaticVectorClockMHP, HappensBeforeAnalysis |
 | **LockSet/** | LockSetAnalysis |
-| **Memory/** | EscapeAnalysis, StaticThreadSharingAnalysis, MemUseDefAnalysis |
+| **Memory/** | EscapeAnalysis, StaticThreadSharingAnalysis |
 | **JoinTarget/** | JoinTargetAnalysis |
 | **MPI/** | MPIAnalysis (process model, collective analysis, RMA analysis) |
 
@@ -28,7 +28,6 @@ Include paths use these subdirs, e.g. `Analysis/Concurrency/Utils/ThreadAPI.h`, 
 - **MHPAnalysis**: Implements pure may-happen-in-parallel overlap analysis to determine which instructions can execute concurrently.
 - **StaticVectorClockMHP**: Implements a static vector clock-based approach for MHP analysis.
 - **StaticThreadSharingAnalysis**: Analyzes which memory locations are shared between threads using static analysis.
-- **MemUseDefAnalysis**: Performs memory use-def analysis based on MemorySSA to track memory dependencies.
 - **EscapeAnalysis**: Determines which values escape their thread-local scope and become shared between threads.
 - **JoinTargetAnalysis**: For each pthread_join, computes the set of pthread_create calls that may be joined (join's arg0 may alias fork's arg0). Supports unambiguous-join reasoning for MHP refinement.
 

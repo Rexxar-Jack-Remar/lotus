@@ -467,6 +467,7 @@ private:
    * @brief Get callees at a call site using CallGraph
    */
   std::set<llvm::Function *> getCallees(const llvm::CallBase *call) const;
+  bool hasUnresolvedCalleeTarget(const llvm::CallBase *call) const;
   bool shouldInvalidateMustLockState(const llvm::CallBase *call) const;
 
   /**

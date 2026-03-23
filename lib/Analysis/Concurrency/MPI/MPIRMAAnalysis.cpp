@@ -309,7 +309,6 @@ bool MPIRMAAnalysis::transitionEpochMachine(EpochMachine &machine,
     }
     return false;
   case ThreadAPI::TD_MPI_WIN_FLUSH:
-  case ThreadAPI::TD_MPI_WIN_SYNC:
     if (machine.state != EpochState::LockOpen &&
         machine.state != EpochState::LockAllOpen) {
       return false;
@@ -325,6 +324,17 @@ bool MPIRMAAnalysis::transitionEpochMachine(EpochMachine &machine,
         op.rma_local_completion_only ? "mpi_rma_flush_local_completion"
                                      : "mpi_rma_flush_completion",
         false);
+    return true;
+  case ThreadAPI::TD_MPI_WIN_SYNC:
+    if (machine.state != EpochState::LockOpen &&
+        machine.state != EpochState::LockAllOpen) {
+      return false;
+    }
+    machine.remote_completion_observed = false;
+    machine.local_completion_only = true;
+    annotateOperationsInMachine(
+        machine, op.inst, concurrency::ProofStrength::Must,
+        "mpi_rma_win_sync_local_completion", false);
     return true;
   case ThreadAPI::TD_MPI_WIN_START:
     if (machine.state != EpochState::Idle) {

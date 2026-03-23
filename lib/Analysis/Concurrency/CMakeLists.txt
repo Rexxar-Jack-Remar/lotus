@@ -16,7 +16,6 @@ set(Concurrency_SOURCES
   LockSet/LockSetAnalysis.cpp
   Memory/EscapeAnalysis.cpp
   Memory/StaticThreadSharingAnalysis.cpp
-  Memory/MemUseDefAnalysis.cpp
   JoinTarget/JoinTargetAnalysis.cpp
   MPI/MPIAnalysis.cpp
   MPI/MPIAbstractState.cpp

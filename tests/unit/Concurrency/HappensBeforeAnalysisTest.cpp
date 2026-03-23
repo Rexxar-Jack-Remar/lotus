@@ -307,6 +307,48 @@ TEST_F(HappensBeforeAnalysisTest, PromiseFutureTracksSharedState) {
   EXPECT_TRUE(hb.happensBefore(store_shared, load_shared));
 }
 
+TEST_F(HappensBeforeAnalysisTest, AsyncFutureGetOrdersAsyncTaskCompletion) {
+  const char *source = R"(
+    @shared = global i32 0, align 4
+
+    declare i8* @_ZNSt5async12launch_asyncEv(i32, i8* (i8*)*, i8*)
+    declare void @_ZNSt6future3getEv(i8*)
+
+    define i8* @worker(i8* %unused) {
+    entry:
+      store i32 77, i32* @shared, align 4
+      ret i8* null
+    }
+
+    define i32 @main() {
+    entry:
+      %future = call i8* @_ZNSt5async12launch_asyncEv(
+          i32 1, i8* (i8*)* @worker, i8* null)
+      call void @_ZNSt6future3getEv(i8* %future)
+      %val = load i32, i32* @shared, align 4
+      ret i32 %val
+    }
+  )";
+
+  auto module = parseModule(source);
+  ASSERT_NE(module, nullptr);
+
+  MHPAnalysis mhp(*module);
+  mhp.analyze();
+
+  HappensBeforeAnalysis hb(*module, mhp);
+  hb.analyze();
+
+  const Instruction *store_shared =
+      &module->getFunction("worker")->getEntryBlock().front();
+  const Instruction *load_shared =
+      findInstructionByName(*module->getFunction("main"), "val");
+  ASSERT_NE(store_shared, nullptr);
+  ASSERT_NE(load_shared, nullptr);
+
+  EXPECT_TRUE(hb.happensBefore(store_shared, load_shared));
+}
+
 TEST_F(HappensBeforeAnalysisTest,
        DetachedTaskCompletionOrdersDetachedTaskBeforeFollowerTask) {
   const char *source = R"(
@@ -1461,7 +1503,66 @@ TEST_F(HappensBeforeAnalysisTest,
   EXPECT_TRUE(hb.happensBefore(store_data, load_data));
 }
 
-TEST_F(HappensBeforeAnalysisTest, ReleaseSequenceThroughRmwCreatesHB) {
+TEST_F(HappensBeforeAnalysisTest,
+       BranchWitnessMustMatchConcreteReleaseValue) {
+  const char *source = R"(
+    @data = global i32 0, align 4
+    @flag = global i32 0, align 4
+
+    declare i32 @pthread_create(i8*, i8*, i8* (i8*)*, i8*)
+
+    define i8* @writer(i8* %arg) {
+    entry:
+      store i32 9, i32* @data, align 4
+      store atomic i32 1, i32* @flag release, align 4
+      ret i8* null
+    }
+
+    define i8* @reader(i8* %arg) {
+    entry:
+      %seen = load atomic i32, i32* @flag acquire, align 4
+      %ready = icmp eq i32 %seen, 2
+      br i1 %ready, label %read, label %exit
+
+    read:
+      %val = load i32, i32* @data, align 4
+      br label %exit
+
+    exit:
+      ret i8* null
+    }
+
+    define i32 @main() {
+    entry:
+      %tid1 = alloca i8
+      %tid2 = alloca i8
+      call i32 @pthread_create(i8* %tid1, i8* null, i8* (i8*)* @writer, i8* null)
+      call i32 @pthread_create(i8* %tid2, i8* null, i8* (i8*)* @reader, i8* null)
+      ret i32 0
+    }
+  )";
+
+  auto module = parseModule(source);
+  ASSERT_NE(module, nullptr);
+
+  MHPAnalysis mhp(*module);
+  mhp.analyze();
+
+  HappensBeforeAnalysis hb(*module, mhp);
+  hb.analyze();
+
+  const Instruction *store_data =
+      &module->getFunction("writer")->getEntryBlock().front();
+  const Instruction *load_data =
+      findInstructionByName(*module->getFunction("reader"), "val");
+  ASSERT_NE(store_data, nullptr);
+  ASSERT_NE(load_data, nullptr);
+
+  EXPECT_FALSE(hb.happensBefore(store_data, load_data));
+}
+
+TEST_F(HappensBeforeAnalysisTest,
+       ReleaseSequenceWithoutReadsFromProofStaysDeferred) {
   const char *source = R"(
     @data = global i32 0, align 4
     @flag = global i32 0, align 4
@@ -1523,7 +1624,7 @@ TEST_F(HappensBeforeAnalysisTest, ReleaseSequenceThroughRmwCreatesHB) {
   ASSERT_NE(store_data, nullptr);
   ASSERT_NE(load_data, nullptr);
 
-  EXPECT_TRUE(hb.happensBefore(store_data, load_data));
+  EXPECT_FALSE(hb.happensBefore(store_data, load_data));
 }
 
 TEST_F(HappensBeforeAnalysisTest,

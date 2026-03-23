@@ -413,6 +413,99 @@ TEST_F(OpenMPSemanticsTest,
 }
 
 TEST_F(OpenMPSemanticsTest,
+       PartialWaitDoesNotInventMustOrderingFromMayConflictFollower) {
+  const char *source = R"(
+    %kmp_depend_info = type { i8*, i64, i8 }
+
+    @shared = global i32 0, align 4
+    @slot = global i8* bitcast (i32* @shared to i8*)
+
+    declare i32 @__kmpc_omp_task_with_deps(i8*, i32, i8*, i32,
+                                           %kmp_depend_info*, i32,
+                                           %kmp_depend_info*)
+    declare i32 @__kmpc_omp_wait_deps(i8*, i32, i32, %kmp_depend_info*, i32,
+                                      %kmp_depend_info*)
+
+    define i32 @main() {
+    entry:
+      %lhsdeps = alloca [1 x %kmp_depend_info], align 8
+      %waitdeps = alloca [1 x %kmp_depend_info], align 8
+      %rhsdeps = alloca [1 x %kmp_depend_info], align 8
+      %slotval = load i8*, i8** @slot, align 8
+
+      %l0 = getelementptr inbounds [1 x %kmp_depend_info],
+          [1 x %kmp_depend_info]* %lhsdeps, i64 0, i64 0, i32 0
+      %l1 = getelementptr inbounds [1 x %kmp_depend_info],
+          [1 x %kmp_depend_info]* %lhsdeps, i64 0, i64 0, i32 1
+      %l2 = getelementptr inbounds [1 x %kmp_depend_info],
+          [1 x %kmp_depend_info]* %lhsdeps, i64 0, i64 0, i32 2
+      store i8* bitcast (i32* @shared to i8*), i8** %l0, align 8
+      store i64 4, i64* %l1, align 8
+      store i8 2, i8* %l2, align 1
+
+      %w0 = getelementptr inbounds [1 x %kmp_depend_info],
+          [1 x %kmp_depend_info]* %waitdeps, i64 0, i64 0, i32 0
+      %w1 = getelementptr inbounds [1 x %kmp_depend_info],
+          [1 x %kmp_depend_info]* %waitdeps, i64 0, i64 0, i32 1
+      %w2 = getelementptr inbounds [1 x %kmp_depend_info],
+          [1 x %kmp_depend_info]* %waitdeps, i64 0, i64 0, i32 2
+      store i8* bitcast (i32* @shared to i8*), i8** %w0, align 8
+      store i64 4, i64* %w1, align 8
+      store i8 2, i8* %w2, align 1
+
+      %r0 = getelementptr inbounds [1 x %kmp_depend_info],
+          [1 x %kmp_depend_info]* %rhsdeps, i64 0, i64 0, i32 0
+      %r1 = getelementptr inbounds [1 x %kmp_depend_info],
+          [1 x %kmp_depend_info]* %rhsdeps, i64 0, i64 0, i32 1
+      %r2 = getelementptr inbounds [1 x %kmp_depend_info],
+          [1 x %kmp_depend_info]* %rhsdeps, i64 0, i64 0, i32 2
+      store i8* %slotval, i8** %r0, align 8
+      store i64 4, i64* %r1, align 8
+      store i8 2, i8* %r2, align 1
+
+      %lhs = getelementptr inbounds [1 x %kmp_depend_info],
+          [1 x %kmp_depend_info]* %lhsdeps, i64 0, i64 0
+      %wait = getelementptr inbounds [1 x %kmp_depend_info],
+          [1 x %kmp_depend_info]* %waitdeps, i64 0, i64 0
+      %rhs = getelementptr inbounds [1 x %kmp_depend_info],
+          [1 x %kmp_depend_info]* %rhsdeps, i64 0, i64 0
+
+      call i32 @__kmpc_omp_task_with_deps(i8* null, i32 0, i8* null, i32 1,
+                                          %kmp_depend_info* %lhs, i32 0,
+                                          %kmp_depend_info* null)
+      call i32 @__kmpc_omp_wait_deps(i8* null, i32 0, i32 1,
+                                     %kmp_depend_info* %wait, i32 0,
+                                     %kmp_depend_info* null)
+      call i32 @__kmpc_omp_task_with_deps(i8* null, i32 0, i8* null, i32 1,
+                                          %kmp_depend_info* %rhs, i32 0,
+                                          %kmp_depend_info* null)
+      ret i32 0
+    }
+  )";
+
+  auto module = parseModule(source);
+  ASSERT_NE(module, nullptr);
+
+  OpenMPSemantics semantics(*module);
+  semantics.analyze();
+
+  ASSERT_EQ(semantics.getTasks().size(), 2u);
+  ASSERT_EQ(semantics.getRelations().size(), 1u);
+  bool saw_selective_hb = false;
+  bool saw_unknown_gap = false;
+  for (const auto &entry : semantics.getRelations()) {
+    saw_selective_hb =
+        saw_selective_hb ||
+        entry.second.kind == concurrency::RelationKind::SelectiveHappenBefore;
+    saw_unknown_gap =
+        saw_unknown_gap ||
+        entry.second.kind == concurrency::RelationKind::UnknownDueToModelGap;
+  }
+  EXPECT_FALSE(saw_selective_hb);
+  EXPECT_TRUE(saw_unknown_gap);
+}
+
+TEST_F(OpenMPSemanticsTest,
        TargetDataUpdateDoesNotCreateTaskOrderingBoundary) {
   const char *source = R"(
     declare i32 @__kmpc_omp_task(i8*, i32, i8*)

@@ -552,6 +552,46 @@ TEST_F(LockSetAnalysisTest, IndirectInvokeDoesNotInheritOtherCallersCallees) {
   EXPECT_FALSE(lsa.mustHoldLock(after, lock));
 }
 
+TEST_F(LockSetAnalysisTest,
+       PartiallyUnresolvedIndirectCallKeepsMayButDropsMustLockState) {
+  const char *source = R"(
+    declare i32 @pthread_mutex_lock(i8*)
+    declare void @external_effect(i8*)
+
+    @lock = global i8 0
+
+    define void @lock_helper(i8* %m) {
+    entry:
+      call i32 @pthread_mutex_lock(i8* %m)
+      ret void
+    }
+
+    define void @main(i1 %cond) {
+    entry:
+      %fn = select i1 %cond, void (i8*)* @lock_helper,
+                         void (i8*)* @external_effect
+      call void %fn(i8* @lock)
+      %after = add i32 1, 2
+      ret void
+    }
+  )";
+
+  auto module = parseModule(source);
+  ASSERT_NE(module, nullptr);
+
+  LockSetAnalysis lsa(*module);
+  lsa.analyze();
+
+  const Instruction *after =
+      findInstructionByName(*module->getFunction("main"), "after");
+  const GlobalVariable *lock = module->getNamedGlobal("lock");
+  ASSERT_NE(after, nullptr);
+  ASSERT_NE(lock, nullptr);
+
+  EXPECT_TRUE(lsa.mayHoldLock(after, lock));
+  EXPECT_FALSE(lsa.mustHoldLock(after, lock));
+}
+
 TEST_F(LockSetAnalysisTest, UniqueLockDeferDoesNotAcquireAtConstruction) {
   const char *source = R"(
     declare void @fake_unique_lock_defer_lock_C1E(i8*, i8*, i8*)

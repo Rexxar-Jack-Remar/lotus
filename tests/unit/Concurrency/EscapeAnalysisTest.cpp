@@ -145,6 +145,70 @@ TEST_F(EscapeAnalysisTest, CppThreadLikeForkEscapesPointerPayload) {
   EXPECT_TRUE(analysis.isEscaped(payload));
 }
 
+TEST_F(EscapeAnalysisTest, AsyncWithUnknownPolicyEscapesPointerPayload) {
+  const char *source = R"(
+    declare void @_ZNSt5async12launch_asyncEiPFvPvES1_(i32, i8* (i8*)*, i8*)
+
+    define i8* @worker(i8* %arg) {
+    entry:
+      ret i8* %arg
+    }
+
+    define void @main(i32 %policy) {
+    entry:
+      %payload = alloca i8, align 1
+      call void @_ZNSt5async12launch_asyncEiPFvPvES1_(
+          i32 %policy, i8* (i8*)* @worker, i8* %payload)
+      ret void
+    }
+  )";
+
+  auto module = parseModule(source);
+  ASSERT_NE(module, nullptr);
+
+  EscapeAnalysis analysis(*module);
+  analysis.analyze();
+
+  const Function *main_func = module->getFunction("main");
+  ASSERT_NE(main_func, nullptr);
+  const auto *payload = dyn_cast<AllocaInst>(&main_func->getEntryBlock().front());
+  ASSERT_NE(payload, nullptr);
+  EXPECT_TRUE(analysis.isEscaped(payload));
+}
+
+TEST_F(EscapeAnalysisTest, FunctorStyleThreadLaunchEscapesFunctorAndPayload) {
+  const char *source = R"(
+    declare void @_ZNSt6threadC1ER8FunctorPi(i8*, i8*, i32*)
+
+    define void @main() {
+    entry:
+      %thread_obj = alloca i8, align 1
+      %functor = alloca i8, align 1
+      %payload = alloca i32, align 4
+      call void @_ZNSt6threadC1ER8FunctorPi(i8* %thread_obj, i8* %functor,
+                                            i32* %payload)
+      ret void
+    }
+  )";
+
+  auto module = parseModule(source);
+  ASSERT_NE(module, nullptr);
+
+  EscapeAnalysis analysis(*module);
+  analysis.analyze();
+
+  const Function *main_func = module->getFunction("main");
+  ASSERT_NE(main_func, nullptr);
+  auto it = main_func->getEntryBlock().begin();
+  ++it;
+  const auto *functor = dyn_cast<AllocaInst>(&*it++);
+  const auto *payload = dyn_cast<AllocaInst>(&*it);
+  ASSERT_NE(functor, nullptr);
+  ASSERT_NE(payload, nullptr);
+  EXPECT_TRUE(analysis.isEscaped(functor));
+  EXPECT_TRUE(analysis.isEscaped(payload));
+}
+
 TEST_F(EscapeAnalysisTest, ThreadHandleStorageDoesNotEscapeAtForkSite) {
   const char *source = R"(
     declare i32 @pthread_create(i8*, i8*, i8* (i8*)*, i8*)

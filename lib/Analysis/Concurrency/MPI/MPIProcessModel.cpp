@@ -50,9 +50,11 @@ const Value *getOperandBySignedIndex(const CallBase *cb, int index) {
 
 bool isMPIWildcardValue(int value) { return value == -1 || value == -2; }
 
-bool isMPIValidRankLikeValue(int value) {
+bool isMPIValidRecvRankLikeValue(int value) {
   return value >= 0 || value == -1 || value == -2;
 }
+
+bool isMPIValidSendRankLikeValue(int value) { return value >= 0 || value == -2; }
 
 bool isLikelyNullHandle(const Value *value) {
   if (!value) {
@@ -232,6 +234,46 @@ bool sameCommunicatorForProof(const MPIOperation &lhs,
   }
   return classifyCommunicatorAlias(lhs.communicator, rhs.communicator, module) ==
          CommunicatorAliasResult::MustAlias;
+}
+
+bool getCommunicatorRankUpperBound(const MPIOperation &op,
+                                   const MPI::MPIRankAnalysis *rank_analysis,
+                                   int &upper_bound) {
+  if (!rank_analysis || !op.communicator) {
+    return false;
+  }
+
+  int min_size = 0;
+  int max_size = 0;
+  if (!rank_analysis->getCommunicatorSizeRange(op.communicator, min_size,
+                                               max_size) ||
+      max_size <= 0) {
+    return false;
+  }
+
+  upper_bound = max_size - 1;
+  return true;
+}
+
+bool rankValueDefinitelyOutOfBounds(int rank_value, int max_rank,
+                                    bool allow_any_source) {
+  if (allow_any_source) {
+    if (!isMPIValidRecvRankLikeValue(rank_value)) {
+      return true;
+    }
+  } else if (!isMPIValidSendRankLikeValue(rank_value)) {
+    return true;
+  }
+
+  return rank_value >= 0 && max_rank >= 0 && rank_value > max_rank;
+}
+
+bool rankRangeDefinitelyOutOfBounds(int min_rank, int max_rank,
+                                    int communicator_max_rank) {
+  if (min_rank < 0 || max_rank < 0 || communicator_max_rank < 0) {
+    return false;
+  }
+  return min_rank > communicator_max_rank;
 }
 
 const Value *canonicalMemoryBase(const Value *value) {
@@ -4140,17 +4182,28 @@ std::vector<const Instruction *> MPIProcessModel::findRankOutOfBounds() const {
       continue;
     }
 
-    if ((op.kind == MPIOpKind::SEND_BLOCKING ||
-         op.kind == MPIOpKind::SEND_NONBLOCKING) &&
-        op.dest_rank < -2) {
-      out_of_bounds.push_back(op.inst);
-      continue;
+    int communicator_max_rank = -1;
+    getCommunicatorRankUpperBound(op, rank_analysis_.get(), communicator_max_rank);
+
+    if (op.kind == MPIOpKind::SEND_BLOCKING ||
+        op.kind == MPIOpKind::SEND_NONBLOCKING) {
+      if (rankValueDefinitelyOutOfBounds(op.dest_rank, communicator_max_rank,
+                                         false) ||
+          rankRangeDefinitelyOutOfBounds(op.dest_rank_min, op.dest_rank_max,
+                                         communicator_max_rank)) {
+        out_of_bounds.push_back(op.inst);
+        continue;
+      }
     }
 
-    if ((op.kind == MPIOpKind::RECV_BLOCKING ||
-         op.kind == MPIOpKind::RECV_NONBLOCKING) &&
-        op.source_rank < -2) {
-      out_of_bounds.push_back(op.inst);
+    if (op.kind == MPIOpKind::RECV_BLOCKING ||
+        op.kind == MPIOpKind::RECV_NONBLOCKING) {
+      if (rankValueDefinitelyOutOfBounds(op.source_rank, communicator_max_rank,
+                                         true) ||
+          rankRangeDefinitelyOutOfBounds(op.source_rank_min, op.source_rank_max,
+                                         communicator_max_rank)) {
+        out_of_bounds.push_back(op.inst);
+      }
     }
   }
 
@@ -4327,7 +4380,15 @@ std::vector<const Instruction *> MPIProcessModel::findNegativeRoot() const {
         if (root_arg >= 0 && static_cast<unsigned>(root_arg) < cb->arg_size()) {
           if (const auto *ci =
                   dyn_cast<ConstantInt>(cb->getArgOperand(root_arg))) {
-            if (ci->getSExtValue() < 0) {
+            int64_t root = ci->getSExtValue();
+            if (root < 0) {
+              issues.push_back(op.inst);
+              continue;
+            }
+            int communicator_max_rank = -1;
+            if (getCommunicatorRankUpperBound(op, rank_analysis_.get(),
+                                              communicator_max_rank) &&
+                root > communicator_max_rank) {
               issues.push_back(op.inst);
             }
           }
@@ -4377,17 +4438,28 @@ std::vector<const Instruction *> MPIProcessModel::findInvalidRanks() const {
       continue;
     }
 
-    if ((op.kind == MPIOpKind::SEND_BLOCKING ||
-         op.kind == MPIOpKind::SEND_NONBLOCKING) &&
-        op.dest_rank < -2) {
-      issues.push_back(op.inst);
-      continue;
+    int communicator_max_rank = -1;
+    getCommunicatorRankUpperBound(op, rank_analysis_.get(), communicator_max_rank);
+
+    if (op.kind == MPIOpKind::SEND_BLOCKING ||
+        op.kind == MPIOpKind::SEND_NONBLOCKING) {
+      if (rankValueDefinitelyOutOfBounds(op.dest_rank, communicator_max_rank,
+                                         false) ||
+          rankRangeDefinitelyOutOfBounds(op.dest_rank_min, op.dest_rank_max,
+                                         communicator_max_rank)) {
+        issues.push_back(op.inst);
+        continue;
+      }
     }
 
-    if ((op.kind == MPIOpKind::RECV_BLOCKING ||
-         op.kind == MPIOpKind::RECV_NONBLOCKING) &&
-        !isMPIValidRankLikeValue(op.source_rank)) {
-      issues.push_back(op.inst);
+    if (op.kind == MPIOpKind::RECV_BLOCKING ||
+        op.kind == MPIOpKind::RECV_NONBLOCKING) {
+      if (rankValueDefinitelyOutOfBounds(op.source_rank, communicator_max_rank,
+                                         true) ||
+          rankRangeDefinitelyOutOfBounds(op.source_rank_min, op.source_rank_max,
+                                         communicator_max_rank)) {
+        issues.push_back(op.inst);
+      }
     }
   }
 

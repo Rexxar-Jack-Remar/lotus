@@ -176,6 +176,98 @@ const BasicBlock *getWitnessSuccessor(const Instruction *inst) {
   return choose(!is_zero);
 }
 
+struct AtomicSyncWitness {
+  const BasicBlock *successor = nullptr;
+  const ConstantInt *constant = nullptr;
+  bool requires_nonzero = false;
+  bool valid = false;
+};
+
+AtomicSyncWitness getAtomicSyncWitness(const Instruction *inst) {
+  AtomicSyncWitness witness;
+  const auto *branch = getBranchWitness(inst);
+  if (!branch) {
+    return witness;
+  }
+
+  const auto *cmp = dyn_cast<ICmpInst>(branch->getCondition());
+  if (!cmp) {
+    return witness;
+  }
+  if (cmp->getPredicate() != ICmpInst::ICMP_EQ &&
+      cmp->getPredicate() != ICmpInst::ICMP_NE) {
+    return witness;
+  }
+
+  const Value *lhs = cmp->getOperand(0);
+  const Value *rhs = cmp->getOperand(1);
+  const auto *lhs_const = dyn_cast<ConstantInt>(lhs);
+  const auto *rhs_const = dyn_cast<ConstantInt>(rhs);
+  const ConstantInt *constant = lhs_const ? lhs_const : rhs_const;
+  if (!constant) {
+    return witness;
+  }
+
+  witness.successor = getWitnessSuccessor(inst);
+  witness.constant = constant;
+  witness.requires_nonzero = constant->isZero();
+  witness.valid = witness.successor != nullptr;
+  return witness;
+}
+
+const ConstantInt *getAtomicStoredConstant(const Instruction *inst) {
+  if (!inst) {
+    return nullptr;
+  }
+  if (const auto *store = dyn_cast<StoreInst>(inst)) {
+    return dyn_cast<ConstantInt>(store->getValueOperand());
+  }
+  if (const auto *cmpxchg = dyn_cast<AtomicCmpXchgInst>(inst)) {
+    return dyn_cast<ConstantInt>(cmpxchg->getNewValOperand());
+  }
+  if (const auto *rmw = dyn_cast<AtomicRMWInst>(inst)) {
+    if (rmw->getOperation() == AtomicRMWInst::Xchg) {
+      return dyn_cast<ConstantInt>(rmw->getValOperand());
+    }
+  }
+  return nullptr;
+}
+
+bool constantIntsEqual(const ConstantInt *lhs, const ConstantInt *rhs) {
+  if (!lhs || !rhs) {
+    return false;
+  }
+  const unsigned width =
+      std::max(lhs->getValue().getBitWidth(), rhs->getValue().getBitWidth());
+  return lhs->getValue().zextOrTrunc(width) == rhs->getValue().zextOrTrunc(width);
+}
+
+bool releaseMatchesAcquireWitness(const Instruction *release_inst,
+                                  const Instruction *acquire_anchor) {
+  if (!release_inst || !acquire_anchor) {
+    return false;
+  }
+
+  if (!isa<LoadInst>(acquire_anchor)) {
+    return true;
+  }
+
+  const AtomicSyncWitness witness = getAtomicSyncWitness(acquire_anchor);
+  if (!witness.valid) {
+    return false;
+  }
+
+  const ConstantInt *release_value = getAtomicStoredConstant(release_inst);
+  if (!release_value) {
+    return false;
+  }
+
+  if (witness.requires_nonzero) {
+    return !release_value->isZero();
+  }
+  return constantIntsEqual(release_value, witness.constant);
+}
+
 struct AtomicLocationKey {
   const Value *base = nullptr;
   int64_t offset = 0;
@@ -547,6 +639,7 @@ void HappensBeforeAnalysis::buildSynchronizesWith() {
   std::vector<const Instruction *> promise_sets;
   std::vector<const Instruction *> future_gets;
   std::vector<const Instruction *> call_once_ops;
+  std::vector<const Instruction *> async_launches;
   std::vector<const Instruction *> latch_countdowns;
   std::vector<const Instruction *> latch_waits;
   std::vector<const Instruction *> barrier_arrives;
@@ -673,6 +766,11 @@ void HappensBeforeAnalysis::buildSynchronizesWith() {
           m_future_shared_state[call] = promise_obj;
         }
       }
+      if (type == ThreadAPI::TD_ASYNC && threadAPI->isForkLike(call)) {
+        // Use the async call result as the future shared-state witness so
+        // future::get()/wait() can recover the associated spawned task.
+        m_future_shared_state[call] = call;
+      }
 
       switch (type) {
       case ThreadAPI::TD_PROMISE_SET:
@@ -684,6 +782,11 @@ void HappensBeforeAnalysis::buildSynchronizesWith() {
         break;
       case ThreadAPI::TD_CALL_ONCE:
         call_once_ops.push_back(inst);
+        break;
+      case ThreadAPI::TD_ASYNC:
+        if (threadAPI->isForkLike(call)) {
+          async_launches.push_back(inst);
+        }
         break;
       case ThreadAPI::TD_LATCH_COUNT_DOWN:
       case ThreadAPI::TD_LATCH_ARRIVE_WAIT:
@@ -744,6 +847,49 @@ void HappensBeforeAnalysis::buildSynchronizesWith() {
       if (samePromiseFuturePair(P, F)) {
         addSyncEdge(P, F);
       }
+    }
+  }
+
+  auto sameAsyncFuturePair = [&](const Instruction *async_launch,
+                                 const Instruction *future_wait) {
+    const CallBase *future_cb = dyn_cast<CallBase>(future_wait);
+    if (!async_launch || !future_cb || future_cb->arg_size() == 0) {
+      return false;
+    }
+    const Value *future_state = traceSharedState(future_cb->getArgOperand(0));
+    return future_state == async_launch;
+  };
+
+  for (const Instruction *async_launch : async_launches) {
+    mhp::ThreadID async_tid = 0;
+    mhp::ThreadID launch_tid = m_mhp.getThreadID(async_launch);
+    const mhp::ThreadFlowGraph &tfg = m_mhp.getThreadFlowGraph();
+    std::vector<mhp::SyncNode *> launch_nodes =
+        launch_tid == std::numeric_limits<mhp::ThreadID>::max()
+            ? tfg.getNodes(async_launch)
+            : tfg.getNodes(async_launch, launch_tid);
+    for (mhp::SyncNode *launch_node : launch_nodes) {
+      if (launch_node && launch_node->getForkedThread() != 0) {
+        async_tid = launch_node->getForkedThread();
+        break;
+      }
+    }
+    if (!async_tid) {
+      continue;
+    }
+
+    const mhp::SyncNode *async_exit = tfg.getThreadExitNode(async_tid);
+    const Instruction *async_exit_inst =
+        async_exit ? async_exit->getInstruction() : nullptr;
+    if (!async_exit_inst) {
+      continue;
+    }
+
+    for (const Instruction *future_wait : future_gets) {
+      if (!sameAsyncFuturePair(async_launch, future_wait)) {
+        continue;
+      }
+      addSyncEdge(async_exit_inst, future_wait);
     }
   }
 
@@ -1042,6 +1188,13 @@ void HappensBeforeAnalysis::buildSynchronizesWith() {
     }
 
     std::vector<AtomicTarget> targets = getAcquireTargets(location);
+    if (has_release_sequence) {
+      deferred_release_sequence_relations += targets.size();
+      m_deferred_sync_counts["atomic_release_sequence_requires_reads_from_proof"] +=
+          targets.size();
+      continue;
+    }
+
     for (const AtomicTarget &target : targets) {
       const Instruction *sync_target =
           target.is_fence_target ? target.anchor : target.target;
@@ -1050,6 +1203,13 @@ void HappensBeforeAnalysis::buildSynchronizesWith() {
       }
       if (m_mhp.getThreadID(release_candidates.front().first) ==
           m_mhp.getThreadID(sync_target)) {
+        continue;
+      }
+      if (!target.is_fence_target &&
+          !releaseMatchesAcquireWitness(release_candidates.front().second,
+                                        target.target)) {
+        ++deferred_direct_atomic_relations;
+        ++m_deferred_sync_counts["atomic_witness_value_incompatible"];
         continue;
       }
       size_t before = m_sync_with.size();

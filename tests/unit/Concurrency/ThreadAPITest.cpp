@@ -169,6 +169,80 @@ TEST_F(ThreadAPITest, PreservesMangledCppAsyncNamesDuringClassification) {
   EXPECT_EQ(api->getType(async_func), ThreadAPI::TD_ASYNC);
 }
 
+TEST_F(ThreadAPITest, AsyncWithUnknownPolicyStillLooksForkLike) {
+  const char *source = R"(
+    declare void @_ZNSt5async12launch_asyncEiPFvPvES1_(i32, i8* (i8*)*, i8*)
+
+    define i8* @worker(i8* %arg) {
+    entry:
+      ret i8* null
+    }
+
+    define void @main(i32 %policy) {
+    entry:
+      %payload = alloca i8, align 1
+      call void @_ZNSt5async12launch_asyncEiPFvPvES1_(
+          i32 %policy, i8* (i8*)* @worker, i8* %payload)
+      ret void
+    }
+  )";
+
+  auto module = parseModule(source);
+  ASSERT_NE(module, nullptr);
+
+  ThreadAPI::resetThreadAPI();
+  ThreadAPI *api = ThreadAPI::getThreadAPI();
+  const Function *main_func = module->getFunction("main");
+  ASSERT_NE(main_func, nullptr);
+  const Instruction *call = main_func->getEntryBlock().getTerminator()->getPrevNode();
+  ASSERT_NE(call, nullptr);
+
+  EXPECT_TRUE(api->isTDFork(call));
+  EXPECT_EQ(api->getForkedFun(call)->stripPointerCasts(),
+            module->getFunction("worker"));
+  auto payloads = api->getForkPayloadArgs(call);
+  ASSERT_EQ(payloads.size(), 1u);
+  EXPECT_EQ(payloads[0], &main_func->getEntryBlock().front());
+}
+
+TEST_F(ThreadAPITest, FunctorStyleThreadLaunchStillReturnsPayloadArgs) {
+  const char *source = R"(
+    declare void @_ZNSt6threadC1ER8FunctorPi(i8*, i8*, i32*)
+
+    define void @main() {
+    entry:
+      %thread_obj = alloca i8, align 1
+      %functor = alloca i8, align 1
+      %payload = alloca i32, align 4
+      call void @_ZNSt6threadC1ER8FunctorPi(i8* %thread_obj, i8* %functor,
+                                            i32* %payload)
+      ret void
+    }
+  )";
+
+  auto module = parseModule(source);
+  ASSERT_NE(module, nullptr);
+
+  ThreadAPI::resetThreadAPI();
+  ThreadAPI *api = ThreadAPI::getThreadAPI();
+  const Function *main_func = module->getFunction("main");
+  ASSERT_NE(main_func, nullptr);
+  auto it = main_func->getEntryBlock().begin();
+  const Instruction *thread_obj = &*it++;
+  const Instruction *functor = &*it++;
+  const Instruction *payload = &*it++;
+  const Instruction *call = &*it;
+  ASSERT_NE(call, nullptr);
+
+  EXPECT_TRUE(api->isTDFork(call));
+  EXPECT_EQ(api->getForkedFun(call), nullptr);
+  auto payloads = api->getForkPayloadArgs(call);
+  ASSERT_EQ(payloads.size(), 2u);
+  EXPECT_EQ(payloads[0], functor);
+  EXPECT_EQ(payloads[1], payload);
+  EXPECT_NE(thread_obj, nullptr);
+}
+
 TEST_F(ThreadAPITest, RecognizesExtendedOpenMPTargetDataVariantsAndHelpers) {
   const char *source = R"(
     declare void @__tgt_target_data_update(i64, i8*)

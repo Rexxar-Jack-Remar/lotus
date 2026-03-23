@@ -45,6 +45,41 @@ bool isNonBinarySemaphoreOp(const ThreadAPI *thread_api,
          !thread_api->isBinarySemaphoreOp(inst);
 }
 
+void collectDefinedFunctionTargets(const Value *called,
+                                   std::set<Function *> &callees,
+                                   std::unordered_set<const Value *> &visited) {
+  if (!called) {
+    return;
+  }
+  called = called->stripPointerCasts();
+  if (!visited.insert(called).second) {
+    return;
+  }
+
+  if (const auto *func = dyn_cast<Function>(called)) {
+    if (!func->isDeclaration()) {
+      callees.insert(const_cast<Function *>(func));
+    }
+    return;
+  }
+  if (const auto *select = dyn_cast<SelectInst>(called)) {
+    collectDefinedFunctionTargets(select->getTrueValue(), callees, visited);
+    collectDefinedFunctionTargets(select->getFalseValue(), callees, visited);
+    return;
+  }
+  if (const auto *phi = dyn_cast<PHINode>(called)) {
+    for (const Value *incoming : phi->incoming_values()) {
+      collectDefinedFunctionTargets(incoming, callees, visited);
+    }
+    return;
+  }
+  if (const auto *ce = dyn_cast<ConstantExpr>(called)) {
+    if (ce->isCast() && ce->getNumOperands() > 0) {
+      collectDefinedFunctionTargets(ce->getOperand(0), callees, visited);
+    }
+  }
+}
+
 } // namespace
 
 // ============================================================================
@@ -1197,6 +1232,9 @@ LockSet LockSetAnalysis::transfer(const Instruction *inst,
           continue;
         (void)applySummaryIfPresent(callee);
       }
+      if (is_must && shouldInvalidateMustLockState(call)) {
+        out_set.clear();
+      }
     }
   }
 
@@ -1535,16 +1573,14 @@ void LockSetAnalysis::transferReadWrite(const Instruction *inst,
     };
 
     auto callees = getCallees(call);
-    bool applied_summary = false;
     for (Function *callee : callees) {
       if (!callee || callee->isDeclaration()) {
         continue;
       }
-      applied_summary |= applySummaryToReadWrite(callee);
+      (void)applySummaryToReadWrite(callee);
     }
 
-    if (!applied_summary && callees.empty() && is_must &&
-        shouldInvalidateMustLockState(call)) {
+    if (is_must && shouldInvalidateMustLockState(call)) {
       out_read.clear();
       out_write.clear();
     }
@@ -1953,6 +1989,9 @@ std::set<Function *> LockSetAnalysis::getCallees(const CallBase *call) const {
       }
       return callees;
     }
+
+    std::unordered_set<const Value *> visited_values;
+    collectDefinedFunctionTargets(called, callees, visited_values);
   }
 
   // For indirect calls, use call graph if available
@@ -1991,10 +2030,54 @@ bool LockSetAnalysis::shouldInvalidateMustLockState(
     return false;
   }
 
-  // If we could not resolve a definition or summarize the call, keep
-  // may-locks unchanged but drop must-lock certainty to avoid suppressing
-  // races after hidden unlocks or helper-mediated lock state changes.
-  return getCallees(call).empty();
+  // If any potential target remains unresolved, keep may-locks unchanged but
+  // drop must-lock certainty to avoid suppressing races after hidden unlocks or
+  // helper-mediated lock state changes.
+  return getCallees(call).empty() || hasUnresolvedCalleeTarget(call);
+}
+
+bool LockSetAnalysis::hasUnresolvedCalleeTarget(const CallBase *call) const {
+  if (!call) {
+    return false;
+  }
+
+  if (Function *direct = call->getCalledFunction()) {
+    return direct->isDeclaration() && !direct->isIntrinsic();
+  }
+
+  if (const Value *called = call->getCalledOperand()) {
+    if (const auto *direct_target =
+            dyn_cast<Function>(called->stripPointerCasts())) {
+      return direct_target->isDeclaration() && !direct_target->isIntrinsic();
+    }
+  }
+
+  if (!m_call_graph) {
+    return true;
+  }
+
+  Function *caller = const_cast<Function *>(call->getFunction());
+  if (CallGraphNode *cgNode = (*m_call_graph)[caller]) {
+    bool matched_record = false;
+    for (auto &callRecord : *cgNode) {
+      if (!callRecord.first.hasValue() ||
+          dyn_cast_or_null<CallBase>(*callRecord.first) != call) {
+        continue;
+      }
+      matched_record = true;
+      CallGraphNode *callee_node = callRecord.second;
+      if (!callee_node) {
+        return true;
+      }
+      Function *callee = callee_node->getFunction();
+      if (!callee || (callee->isDeclaration() && !callee->isIntrinsic())) {
+        return true;
+      }
+    }
+    return !matched_record;
+  }
+
+  return true;
 }
 
 void LockSetAnalysis::computeFunctionSummary(Function *func) {

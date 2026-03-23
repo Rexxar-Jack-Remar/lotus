@@ -286,6 +286,47 @@ bool ThreadAPI::isDefiniteAsyncLaunch(const Instruction *inst) const {
   return (launch_bits->getZExtValue() & 0x1ULL) != 0;
 }
 
+bool ThreadAPI::isProvablyDeferredAsyncLaunch(const Instruction *inst) const {
+  const CallBase *cb = getLLVMCallSite(inst);
+  const Function *callee = getCallee(inst);
+  if (!cb || !callee || getType(callee) != TD_ASYNC || cb->arg_size() == 0) {
+    return false;
+  }
+
+  const Value *policy = cb->getArgOperand(0)->stripPointerCasts();
+  const auto *launch_bits = dyn_cast<ConstantInt>(policy);
+  if (!launch_bits) {
+    return false;
+  }
+
+  return (launch_bits->getZExtValue() & 0x1ULL) == 0;
+}
+
+unsigned
+ThreadAPI::getCppForkCallableSearchStart(const Instruction *inst) const {
+  const CallBase *cb = getLLVMCallSite(inst);
+  const Function *callee = getCallee(inst);
+  if (!cb || !callee) {
+    return 1;
+  }
+  if (getType(callee) != TD_ASYNC) {
+    return 1;
+  }
+  if (cb->arg_size() == 0) {
+    return 0;
+  }
+
+  const Value *first_arg = cb->getArgOperand(0);
+  if (!first_arg) {
+    return 0;
+  }
+  first_arg = first_arg->stripPointerCasts();
+  if (isa<ConstantInt>(first_arg) || first_arg->getType()->isIntegerTy()) {
+    return 1;
+  }
+  return 0;
+}
+
 const Value *ThreadAPI::getCallArg(const Instruction *inst,
                                    unsigned idx) const {
   const CallBase *cb = getLLVMCallSite(inst);
@@ -299,12 +340,7 @@ const Value *ThreadAPI::getCppThreadCallable(const Instruction *inst) const {
   if (!cb)
     return nullptr;
 
-  unsigned first_callable_idx = 1;
-  if (const Function *callee = getCallee(inst)) {
-    if (getType(callee) == TD_ASYNC) {
-      first_callable_idx = isDefiniteAsyncLaunch(inst) ? 1 : 0;
-    }
-  }
+  const unsigned first_callable_idx = getCppForkCallableSearchStart(inst);
 
   // Skip the constructor `this` parameter and look for a direct function-like
   // operand. If none exists, callers fall back to unresolved-fork conservatism.

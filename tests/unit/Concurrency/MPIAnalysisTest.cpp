@@ -2311,6 +2311,68 @@ TEST_F(MPIAnalysisTest, InvalidNegativeRankIsReported) {
   EXPECT_EQ(analysis.getResults().rank_out_of_bounds.size(), 1u);
 }
 
+TEST_F(MPIAnalysisTest, InvalidSendAnySourceRankIsReported) {
+  const char *source = R"(
+    declare i32 @MPI_Send(i8*, i32, i32, i32, i32, i8*)
+
+    define i32 @main(i8* %comm) {
+    entry:
+      call i32 @MPI_Send(i8* null, i32 1, i32 0, i32 -1, i32 7, i8* %comm)
+      ret i32 0
+    }
+  )";
+
+  auto module = parseModule(source);
+  ASSERT_NE(module, nullptr);
+
+  MPIAnalysis analysis(*module);
+  analysis.runAnalysis();
+
+  EXPECT_EQ(analysis.getResults().invalid_ranks.size(), 1u);
+  EXPECT_EQ(analysis.getResults().rank_out_of_bounds.size(), 1u);
+}
+
+TEST_F(MPIAnalysisTest, RankBeyondKnownCommunicatorBoundIsReported) {
+  const char *source = R"(
+    declare i32 @MPI_Send(i8*, i32, i32, i32, i32, i8*)
+
+    define i32 @main(i8* %comm) {
+    entry:
+      call i32 @MPI_Send(i8* null, i32 1, i32 0, i32 2048, i32 7, i8* %comm)
+      ret i32 0
+    }
+  )";
+
+  auto module = parseModule(source);
+  ASSERT_NE(module, nullptr);
+
+  MPIAnalysis analysis(*module);
+  analysis.runAnalysis();
+
+  EXPECT_EQ(analysis.getResults().invalid_ranks.size(), 1u);
+  EXPECT_EQ(analysis.getResults().rank_out_of_bounds.size(), 1u);
+}
+
+TEST_F(MPIAnalysisTest, RootBeyondKnownCommunicatorBoundIsReported) {
+  const char *source = R"(
+    declare i32 @MPI_Bcast(i8*, i32, i32, i32, i8*)
+
+    define i32 @main(i8* %comm) {
+    entry:
+      call i32 @MPI_Bcast(i8* null, i32 1, i32 0, i32 2048, i8* %comm)
+      ret i32 0
+    }
+  )";
+
+  auto module = parseModule(source);
+  ASSERT_NE(module, nullptr);
+
+  MPIAnalysis analysis(*module);
+  analysis.runAnalysis();
+
+  EXPECT_EQ(analysis.getResults().negative_root.size(), 1u);
+}
+
 TEST_F(MPIAnalysisTest, SymbolicRankRangeAllowsMayMatchClassification) {
   const char *source = R"(
     declare i32 @MPI_Comm_rank(i8*, i32*)
@@ -3662,6 +3724,49 @@ TEST_F(MPIAnalysisTest, AbstractStateExposesCommunicatorFactsAndSummaries) {
   EXPECT_GT(main_summary->expanded_operation_indices.size(),
             main_summary->direct_operation_indices.size());
   EXPECT_TRUE(main_summary->reaches_fixed_point);
+}
+
+TEST_F(MPIAnalysisTest, WinSyncRemainsLocalOnlyCompletion) {
+  const char *source = R"(
+    @win = global i8 0
+
+    declare i32 @MPI_Win_create(i8*, i64, i32, i8*, i8*)
+    declare i32 @MPI_Win_lock(i32, i32, i32, i8*)
+    declare i32 @MPI_Put(i8*, i32, i32, i32, i64, i32, i32, i8*)
+    declare i32 @MPI_Win_sync(i8*)
+    declare i32 @MPI_Win_unlock(i32, i8*)
+
+    define i32 @main(i8* %comm) {
+    entry:
+      call i32 @MPI_Win_create(i8* null, i64 16, i32 4, i8* %comm, i8* @win)
+      call i32 @MPI_Win_lock(i32 0, i32 1, i32 0, i8* @win)
+      call i32 @MPI_Put(i8* null, i32 1, i32 0, i32 1, i64 0, i32 1, i32 0,
+                        i8* @win)
+      call i32 @MPI_Win_sync(i8* @win)
+      call i32 @MPI_Win_unlock(i32 1, i8* @win)
+      ret i32 0
+    }
+  )";
+
+  auto module = parseModule(source);
+  ASSERT_NE(module, nullptr);
+
+  MPIAnalysis analysis(*module);
+  analysis.runAnalysis();
+
+  bool saw_local_completion = false;
+  bool saw_remote_completion = false;
+  for (const auto &fact : analysis.getResults().rma_synchronization_facts) {
+    if (fact.completion == MPIRMACompletionStrength::Local) {
+      saw_local_completion = true;
+      EXPECT_EQ(fact.relation.kind,
+                concurrency::RelationKind::LocalOnlySynchronizationCompletion);
+    } else if (fact.completion == MPIRMACompletionStrength::Remote) {
+      saw_remote_completion = true;
+    }
+  }
+  EXPECT_TRUE(saw_local_completion);
+  EXPECT_FALSE(saw_remote_completion);
 }
 
 TEST_F(MPIAnalysisTest, AbstractStateExposesRequestFactsAndChannelAutomata) {
