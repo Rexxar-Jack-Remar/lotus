@@ -1009,9 +1009,6 @@ LockSet LockSetAnalysis::transfer(const Instruction *inst,
         case RAIILock::OwnershipKind::Try:
           return !is_must;
         case RAIILock::OwnershipKind::Adopt:
-          if (!is_must) {
-            return true;
-          }
           for (const auto *held : in_set) {
             if (held == lock || mayAlias(held, lock)) {
               return true;
@@ -1405,8 +1402,7 @@ void LockSetAnalysis::transferReadWrite(const Instruction *inst,
             if (!held && is_must) {
               continue;
             }
-            if (!held && !is_must) {
-              out_read.insert(lock);
+            if (!held) {
               continue;
             }
           }
@@ -1449,8 +1445,7 @@ void LockSetAnalysis::transferReadWrite(const Instruction *inst,
             if (!held && is_must) {
               continue;
             }
-            if (!held && !is_must) {
-              out_write.insert(lock);
+            if (!held) {
               continue;
             }
           }
@@ -1522,8 +1517,10 @@ void LockSetAnalysis::transferReadWrite(const Instruction *inst,
 
       const FunctionSummary &summary = it->second;
       if (!is_must) {
-        out_write.insert(summary.may_acquire_delta.begin(),
-                         summary.may_acquire_delta.end());
+        out_read.insert(summary.may_read_acquire_delta.begin(),
+                        summary.may_read_acquire_delta.end());
+        out_write.insert(summary.may_write_acquire_delta.begin(),
+                         summary.may_write_acquire_delta.end());
         for (LockID lock : summary.may_release_delta) {
           out_read.erase(lock);
           out_write.erase(lock);
@@ -2024,6 +2021,8 @@ void LockSetAnalysis::computeFunctionSummary(Function *func) {
   computeIntraproceduralLockSets(func);
 
   summary.may_acquire_delta.clear();
+  summary.may_read_acquire_delta.clear();
+  summary.may_write_acquire_delta.clear();
   summary.may_release_delta.clear();
   summary.must_release_delta.clear();
 
@@ -2077,17 +2076,31 @@ void LockSetAnalysis::computeFunctionSummary(Function *func) {
   }
 
   if (!returns.empty()) {
-    // Compute may-acquire delta using the locks that may be held at return.
+    // Preserve read-vs-write mode so callers do not accidentally turn a held
+    // shared lock into an exclusive one.
     for (const auto *ret : returns) {
-      auto it = m_may_locksets_exit.find(ret);
-      if (it != m_may_locksets_exit.end()) {
-        for (LockID lock : it->second) {
+      auto it_read = m_may_read_locks_exit.find(ret);
+      if (it_read != m_may_read_locks_exit.end()) {
+        for (LockID lock : it_read->second) {
           if (!isBinarySemaphoreOnlyLockInFunction(lock)) {
-            summary.may_acquire_delta.insert(lock);
+            summary.may_read_acquire_delta.insert(lock);
+          }
+        }
+      }
+
+      auto it_write = m_may_write_locks_exit.find(ret);
+      if (it_write != m_may_write_locks_exit.end()) {
+        for (LockID lock : it_write->second) {
+          if (!isBinarySemaphoreOnlyLockInFunction(lock)) {
+            summary.may_write_acquire_delta.insert(lock);
           }
         }
       }
     }
+
+    summary.may_acquire_delta = summary.may_read_acquire_delta;
+    summary.may_acquire_delta.insert(summary.may_write_acquire_delta.begin(),
+                                     summary.may_write_acquire_delta.end());
   }
 
   // Track only releases that are not definitely matched by an in-callee

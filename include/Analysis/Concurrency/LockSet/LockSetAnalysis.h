@@ -352,6 +352,8 @@ private:
   // Interprocedural analysis data structures
   struct FunctionSummary {
     LockSet may_acquire_delta;  ///< Locks newly held on some exit path
+    LockSet may_read_acquire_delta;  ///< Read locks newly held on some exit path
+    LockSet may_write_acquire_delta; ///< Write locks newly held on some exit path
     LockSet may_release_delta;  ///< Locks definitely absent on all exits
     LockSet must_release_delta; ///< Locks maybe released without a definitely
                                 ///< matched in-callee acquisition

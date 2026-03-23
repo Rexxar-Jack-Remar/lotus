@@ -1195,6 +1195,74 @@ TEST_F(AtomicHappensBeforeTest, ReleaseSequenceThroughRmwSynchronizes) {
   EXPECT_TRUE(mhp.mayHappenInParallel(store_data, load_data));
 }
 
+TEST_F(AtomicHappensBeforeTest,
+       MonotonicRmwWithoutReleaseHeadDoesNotSynchronize) {
+  const char *source = R"(
+    @data = global i32 0, align 4
+    @flag = global i32 0, align 4
+
+    declare i32 @pthread_create(i8*, i8*, i8* (i8*)*, i8*)
+
+    define i8* @writer(i8* %arg) {
+    entry:
+      store i32 91, i32* @data, align 4
+      ret i8* null
+    }
+
+    define i8* @updater(i8* %arg) {
+    entry:
+      %old = atomicrmw add i32* @flag, i32 1 monotonic
+      ret i8* null
+    }
+
+    define i8* @reader(i8* %arg) {
+    entry:
+      %seen = load atomic i32, i32* @flag acquire, align 4
+      %ready = icmp ne i32 %seen, 0
+      br i1 %ready, label %read, label %exit
+
+    read:
+      %val = load i32, i32* @data, align 4
+      br label %exit
+
+    exit:
+      ret i8* null
+    }
+
+    define i32 @main() {
+    entry:
+      %tid1 = alloca i8
+      %tid2 = alloca i8
+      %tid3 = alloca i8
+      call i32 @pthread_create(i8* %tid1, i8* null, i8* (i8*)* @writer, i8* null)
+      call i32 @pthread_create(i8* %tid2, i8* null, i8* (i8*)* @updater, i8* null)
+      call i32 @pthread_create(i8* %tid3, i8* null, i8* (i8*)* @reader, i8* null)
+      ret i32 0
+    }
+  )";
+
+  auto module = parseModule(source);
+  ASSERT_NE(module, nullptr);
+
+  const Function *writer_func = module->getFunction("writer");
+  const Function *reader_func = module->getFunction("reader");
+  ASSERT_NE(writer_func, nullptr);
+  ASSERT_NE(reader_func, nullptr);
+
+  const Instruction *store_data = findStoreToGlobal(*writer_func, "data");
+  const Instruction *load_data = findInstructionByName(*reader_func, "val");
+  ASSERT_NE(store_data, nullptr);
+  ASSERT_NE(load_data, nullptr);
+
+  MHPAnalysis mhp(*module);
+  mhp.analyze();
+  HappensBeforeAnalysis hb(*module, mhp);
+  hb.analyze();
+
+  EXPECT_FALSE(hb.mustPrecede(store_data, load_data));
+  EXPECT_TRUE(mhp.mayHappenInParallel(store_data, load_data));
+}
+
 TEST_F(AtomicHappensBeforeTest, AtomicRmwFenceWitnessEstablishesHB) {
   const char *source = R"(
     @data = global i32 0, align 4

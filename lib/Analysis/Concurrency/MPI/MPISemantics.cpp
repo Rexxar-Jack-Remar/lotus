@@ -74,15 +74,31 @@ MPIBlockingMode classifyBlockingMode(TD type, llvm::StringRef canonical_name) {
   return MPIBlockingMode::Blocking;
 }
 
-MPIRequestArity classifyRequestArity(TD type) {
+MPIRequestArity classifyRequestArity(TD type, llvm::StringRef canonical_name) {
   switch (type) {
+  case TD::TD_MPI_ISEND:
+  case TD::TD_MPI_IRECV:
+  case TD::TD_MPI_BARRIER:
+  case TD::TD_MPI_BCAST:
+  case TD::TD_MPI_SCATTER:
+  case TD::TD_MPI_GATHER:
+  case TD::TD_MPI_ALLGATHER:
+  case TD::TD_MPI_ALLTOALL:
+  case TD::TD_MPI_REDUCE:
+  case TD::TD_MPI_ALLREDUCE:
+  case TD::TD_MPI_REDUCE_SCATTER:
+  case TD::TD_MPI_SCAN:
+    return canonical_name.startswith("MPI_I") ? MPIRequestArity::Single
+                                              : MPIRequestArity::None;
   case TD::TD_MPI_WAIT:
   case TD::TD_MPI_TEST:
-  case TD::TD_MPI_REQUEST_START:
   case TD::TD_MPI_REQUEST_FREE:
   case TD::TD_MPI_CANCEL:
   case TD::TD_MPI_IMRECV:
     return MPIRequestArity::Single;
+  case TD::TD_MPI_REQUEST_START:
+    return canonical_name.equals("MPI_Startall") ? MPIRequestArity::Array
+                                                 : MPIRequestArity::Single;
   case TD::TD_MPI_WAITALL:
   case TD::TD_MPI_WAITANY:
   case TD::TD_MPI_WAITSOME:
@@ -611,7 +627,7 @@ MPIEffect buildMPIEffect(const llvm::Instruction *inst, ThreadAPI *api) {
 
   effect.send_mode = classifySendMode(canonical_name);
   effect.blocking_mode = classifyBlockingMode(effect.type, canonical_name);
-  effect.request_arity = classifyRequestArity(effect.type);
+  effect.request_arity = classifyRequestArity(effect.type, canonical_name);
   effect.collective_variant =
       classifyCollectiveVariant(effect.type, effect.semantic_tag);
   effect.collective_shape =

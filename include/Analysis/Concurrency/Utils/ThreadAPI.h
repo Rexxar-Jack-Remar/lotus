@@ -517,6 +517,13 @@ private:
   /// Best-effort extraction of a direct callable passed to std::thread.
   const llvm::Value *getCppThreadCallable(const llvm::Instruction *inst) const;
 
+  /// Return true when the callee is a std::condition_variable_any member.
+  bool isConditionVariableAny(const llvm::Function *F) const;
+
+  /// Return the mutex identity associated with a condition-variable wait.
+  const llvm::Value *
+  getConditionVariableWaitMutex(const llvm::Instruction *inst) const;
+
   /// API map, from a string to threadAPI type
   TDAPIMap tdAPIMap;
   std::unordered_map<std::string, ForkArgIndices> m_fork_args;
@@ -1233,10 +1240,7 @@ public:
   /// Second argument of pthread_cond_wait
   inline const llvm::Value *getCondMutex(const llvm::Instruction *inst) const {
     assert(isTDCondWait(inst) && "not a condition wait function");
-    const llvm::CallBase *cb = getLLVMCallSite(inst);
-    if (!cb || cb->arg_size() < 2)
-      return nullptr;
-    return cb->getArgOperand(1);
+    return getConditionVariableWaitMutex(inst);
   }
   inline const llvm::Value *getCondMutex(const llvm::CallBase *cb) const {
     return getCondMutex(llvm::dyn_cast<llvm::Instruction>(cb));

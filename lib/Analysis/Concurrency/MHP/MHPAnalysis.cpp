@@ -789,6 +789,7 @@ void MHPAnalysis::processFunction(const Function *func, ThreadID tid,
 
           if (!callee) {
             bool resolved_indirect_target = false;
+            bool has_unresolved_indirect_target = false;
             // Indirect call: use call graph to find possible callees
             if (m_call_graph) {
               CallGraphNode *cgNode = (*m_call_graph)[cb->getFunction()];
@@ -798,39 +799,47 @@ void MHPAnalysis::processFunction(const Function *func, ThreadID tid,
                   if (callRecord.first.hasValue() &&
                       dyn_cast_or_null<CallBase>(*callRecord.first) == cb) {
                     CallGraphNode *calleeNode = callRecord.second;
-                    if (calleeNode) {
-                      Function *possibleCallee = calleeNode->getFunction();
-                      if (possibleCallee && !possibleCallee->isDeclaration()) {
-                        resolved_indirect_target = true;
-                        CallContextID callee_ctx = node->getNodeID();
-                        m_has_multi_context_nodes = true;
-                        // Process this possible callee
-                        processFunction(possibleCallee, tid, callee_ctx);
-                        SyncNode *callee_entry = m_tfg->getNode(
-                            &possibleCallee->front().front(), tid, callee_ctx);
-                        if (callee_entry) {
-                          m_tfg->addCallEdge(node, callee_entry);
+                    if (!calleeNode) {
+                      has_unresolved_indirect_target = true;
+                      continue;
+                    }
+                    Function *possibleCallee = calleeNode->getFunction();
+                    if (!possibleCallee) {
+                      has_unresolved_indirect_target = true;
+                      continue;
+                    }
+                    if (possibleCallee->isDeclaration()) {
+                      has_unresolved_indirect_target = true;
+                      continue;
+                    }
+                    resolved_indirect_target = true;
+                    CallContextID callee_ctx = node->getNodeID();
+                    m_has_multi_context_nodes = true;
+                    // Process this possible callee
+                    processFunction(possibleCallee, tid, callee_ctx);
+                    SyncNode *callee_entry = m_tfg->getNode(
+                        &possibleCallee->front().front(), tid, callee_ctx);
+                    if (callee_entry) {
+                      m_tfg->addCallEdge(node, callee_entry);
+                    }
+                    SyncNode *callee_exit = m_tfg->getFunctionExitNode(
+                        tid, possibleCallee, callee_ctx);
+                    if (callee_exit) {
+                      const Instruction *next_inst = inst.getNextNode();
+                      if (next_inst) {
+                        if (SyncNode *return_site =
+                                m_tfg->getNode(next_inst, tid, ctx)) {
+                          m_tfg->addRetEdge(callee_exit, return_site);
                         }
-                        SyncNode *callee_exit = m_tfg->getFunctionExitNode(
-                            tid, possibleCallee, callee_ctx);
-                        if (callee_exit) {
-                          const Instruction *next_inst = inst.getNextNode();
-                          if (next_inst) {
-                            if (SyncNode *return_site =
-                                    m_tfg->getNode(next_inst, tid, ctx)) {
-                              m_tfg->addRetEdge(callee_exit, return_site);
-                            }
-                          } else if (inst.isTerminator()) {
-                            for (const BasicBlock *succ :
-                                 successors(inst.getParent())) {
-                              if (succ->empty()) {
-                                continue;
-                              }
-                              if (SyncNode *return_site = m_tfg->getNode(
-                                      &succ->front(), tid, ctx)) {
-                                m_tfg->addRetEdge(callee_exit, return_site);
-                              }
-                            }
+                      } else if (inst.isTerminator()) {
+                        for (const BasicBlock *succ :
+                             successors(inst.getParent())) {
+                          if (succ->empty()) {
+                            continue;
+                          }
+                          if (SyncNode *return_site = m_tfg->getNode(
+                                  &succ->front(), tid, ctx)) {
+                            m_tfg->addRetEdge(callee_exit, return_site);
                           }
                         }
                       }
@@ -839,7 +848,7 @@ void MHPAnalysis::processFunction(const Function *func, ThreadID tid,
                 }
               }
             }
-            if (!resolved_indirect_target) {
+            if (!resolved_indirect_target || has_unresolved_indirect_target) {
               // Conservatively assume an unresolved indirect call could hide a
               // thread entry and avoid proving non-overlap through optimistic
               // single-thread reasoning.

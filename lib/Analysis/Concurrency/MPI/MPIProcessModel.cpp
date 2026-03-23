@@ -464,11 +464,6 @@ bool isPotentialChannelPair(const MPIOperation &send, const MPIOperation &recv,
   if (!isSendOperationKind(send.kind) || !isRecvOperationKind(recv.kind)) {
     return false;
   }
-  if (send.participant_set.predicate_class_id != 0 &&
-      recv.participant_set.predicate_class_id != 0 &&
-      !send.participant_set.mayOverlap(recv.participant_set)) {
-    return false;
-  }
   if (send.communicator_class_id != 0 && recv.communicator_class_id != 0 &&
       send.communicator_class_id == recv.communicator_class_id) {
     return true;
@@ -2289,6 +2284,17 @@ MPIProcessModel::collectRequestOperands(const Value *request_arg,
     return requests;
   }
 
+  const bool likely_request_array =
+      (request_arg->getType()->isPointerTy() &&
+       request_arg->getType()->getPointerElementType()->isPointerTy()) ||
+      (canonicalMemoryBase(request_arg) &&
+       ((isa<AllocaInst>(canonicalMemoryBase(request_arg)) &&
+         cast<AllocaInst>(canonicalMemoryBase(request_arg))
+             ->getAllocatedType()
+             ->isArrayTy()) ||
+        (isa<GlobalVariable>(canonicalMemoryBase(request_arg)) &&
+         cast<GlobalVariable>(canonicalMemoryBase(request_arg))->getValueType()->isArrayTy())));
+
   const Value *base = canonicalMemoryBase(request_arg);
 
   if (const auto *gv = dyn_cast<GlobalVariable>(base)) {
@@ -2354,6 +2360,9 @@ MPIProcessModel::collectRequestOperands(const Value *request_arg,
   }
 
   if (requests.empty()) {
+    if (likely_request_array) {
+      return {};
+    }
     requests.push_back(request_arg->stripPointerCasts());
   }
   return requests;
@@ -3595,9 +3604,9 @@ MPIProcessModel::classifyCommunicationMatch(const MPIOperation &op1,
     if (!isMPIWildcardValue(send.dest_rank) &&
         !isMPIWildcardValue(recv.source_rank) &&
         send.dest_rank != recv.source_rank) {
-      if (send.function && recv.function && send.function == recv.function) {
-        return MPICommunicationMatch::NoMatch;
-      }
+      // In SPMD MPI, one function body is executed by many ranks. Same-function
+      // send/recv pairs are therefore still viable unless rank/participant
+      // facts prove them incompatible.
       precise = false;
     } else if (!rangesOverlap(send.dest_rank_min, send.dest_rank_max,
                               recv.source_rank_min, recv.source_rank_max)) {

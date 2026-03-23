@@ -22,3 +22,7 @@ spin_unlock TD_KERNEL_SPIN_UNLOCK
 kthread_run TD_FORK 0 1 2
 kthread_stop TD_JOIN 0 1
 schedule TD_DUMMY
+
+# GNU OpenMP runtime
+GOMP_parallel TD_FORK 99 0 1
+GOMP_parallel_start TD_FORK 99 0 1

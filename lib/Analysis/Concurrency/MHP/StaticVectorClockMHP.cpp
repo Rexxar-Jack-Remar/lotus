@@ -666,6 +666,13 @@ void StaticVectorClockMHP::computeMHPPairs() {
       const Instruction *a = all_insts[i];
       const Instruction *b = all_insts[j];
 
+      ThreadID tid_a = getThreadID(a);
+      ThreadID tid_b = getThreadID(b);
+      if (tid_a != kUnknownThread && tid_a == tid_b &&
+          !m_multi_instance_threads.count(tid_a)) {
+        continue;
+      }
+
       if (happensBefore(a, b) || happensBefore(b, a)) {
         continue;
       }
@@ -679,6 +686,13 @@ bool StaticVectorClockMHP::mayHappenInParallel(const Instruction *i1,
                                                const Instruction *i2) const {
   if (!i1 || !i2 || i1 == i2)
     return false;
+
+  ThreadID tid1 = getThreadID(i1);
+  ThreadID tid2 = getThreadID(i2);
+  if (tid1 != kUnknownThread && tid1 == tid2 &&
+      !m_multi_instance_threads.count(tid1)) {
+    return false;
+  }
 
   if (m_mhp_pairs.count({i1, i2}) || m_mhp_pairs.count({i2, i1}))
     return true;
@@ -932,19 +946,32 @@ void StaticVectorClockMHP::processFunction(const Function *func, ThreadID tid,
             processCallee(direct);
           } else if (m_call_graph) {
             bool resolved_indirect_target = false;
+            bool has_unresolved_indirect_target = false;
             if (CallGraphNode *cgNode = (*m_call_graph)[cb->getFunction()]) {
               for (auto &callRecord : *cgNode) {
                 if (!callRecord.first.hasValue() ||
                     dyn_cast_or_null<CallBase>(*callRecord.first) != cb) {
                   continue;
                 }
-                if (CallGraphNode *calleeNode = callRecord.second) {
-                  resolved_indirect_target = true;
-                  processCallee(calleeNode->getFunction());
+                CallGraphNode *calleeNode = callRecord.second;
+                if (!calleeNode) {
+                  has_unresolved_indirect_target = true;
+                  continue;
                 }
+                Function *callee = calleeNode->getFunction();
+                if (!callee) {
+                  has_unresolved_indirect_target = true;
+                  continue;
+                }
+                if (callee->isDeclaration()) {
+                  has_unresolved_indirect_target = true;
+                  continue;
+                }
+                resolved_indirect_target = true;
+                processCallee(callee);
               }
             }
-            if (!resolved_indirect_target) {
+            if (!resolved_indirect_target || has_unresolved_indirect_target) {
               enableIndirectForkConservatism();
             }
           } else {

@@ -617,6 +617,44 @@ TEST_F(StaticVectorClockMHPTest, ParallelInstructionsMatchesQueries) {
 }
 
 TEST_F(StaticVectorClockMHPTest,
+       SameThreadExclusiveBranchesAreNotParallel) {
+  const char *source = R"(
+    define i32 @main() {
+    entry:
+      %cond = icmp eq i32 0, 1
+      br i1 %cond, label %then, label %else
+
+    then:
+      %then_inst = add i32 1, 2
+      br label %merge
+
+    else:
+      %else_inst = add i32 3, 4
+      br label %merge
+
+    merge:
+      %retv = phi i32 [%then_inst, %then], [%else_inst, %else]
+      ret i32 %retv
+    }
+  )";
+
+  auto module = parseModule(source);
+  ASSERT_NE(module, nullptr);
+
+  StaticVectorClockMHP svc(*module);
+  svc.analyze();
+
+  const Instruction *then_inst =
+      findInstructionByName(*module->getFunction("main"), "then_inst");
+  const Instruction *else_inst =
+      findInstructionByName(*module->getFunction("main"), "else_inst");
+  ASSERT_NE(then_inst, nullptr);
+  ASSERT_NE(else_inst, nullptr);
+
+  EXPECT_FALSE(svc.mayHappenInParallel(then_inst, else_inst));
+}
+
+TEST_F(StaticVectorClockMHPTest,
        UnresolvedIndirectCallEnablesConservativeForkFallback) {
   const char *source = R"(
     @hook = external global void ()*

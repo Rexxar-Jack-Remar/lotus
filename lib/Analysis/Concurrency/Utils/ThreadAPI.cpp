@@ -319,6 +319,85 @@ const Value *ThreadAPI::getCppThreadCallable(const Instruction *inst) const {
   return nullptr;
 }
 
+bool ThreadAPI::isConditionVariableAny(const Function *F) const {
+  if (!F) {
+    return false;
+  }
+  return normalizeAPIName(F->getName()).find("condition_variable_any") !=
+         std::string::npos;
+}
+
+const Value *
+ThreadAPI::getConditionVariableWaitMutex(const Instruction *inst) const {
+  const CallBase *cb = getLLVMCallSite(inst);
+  if (!cb || cb->arg_size() < 2) {
+    return nullptr;
+  }
+
+  const Function *callee = getCallee(inst);
+  const Value *lock_or_mutex = cb->getArgOperand(1);
+  if (!lock_or_mutex || !isConditionVariableAny(callee)) {
+    return lock_or_mutex;
+  }
+
+  const Value *lock_object = lock_or_mutex->stripPointerCasts();
+  const Function *parent = inst ? inst->getFunction() : nullptr;
+  if (!lock_object || !parent || parent->isDeclaration()) {
+    return lock_or_mutex;
+  }
+
+  const Value *resolved_mutex = nullptr;
+  auto recordCandidate = [&](const Value *candidate) -> bool {
+    candidate = candidate ? candidate->stripPointerCasts() : nullptr;
+    if (!candidate) {
+      return false;
+    }
+    if (!resolved_mutex) {
+      resolved_mutex = candidate;
+      return true;
+    }
+    return resolved_mutex == candidate;
+  };
+
+  for (const Instruction &cursor : instructions(*parent)) {
+    if (&cursor == inst) {
+      break;
+    }
+
+    const auto *candidate_call = dyn_cast<CallBase>(&cursor);
+    if (!candidate_call) {
+      continue;
+    }
+
+    const Function *candidate_callee = getCallee(candidate_call);
+    if (!candidate_callee) {
+      continue;
+    }
+
+    TD_TYPE type = getType(candidate_callee);
+    if (type != TD_LOCK_GUARD_CTOR && type != TD_UNIQUE_LOCK_CTOR &&
+        type != TD_SHARED_LOCK_CTOR) {
+      continue;
+    }
+
+    if (candidate_call->arg_size() < 2) {
+      continue;
+    }
+
+    const Value *wrapper_object =
+        candidate_call->getArgOperand(0)->stripPointerCasts();
+    if (wrapper_object != lock_object) {
+      continue;
+    }
+
+    if (!recordCandidate(candidate_call->getArgOperand(1))) {
+      return lock_or_mutex;
+    }
+  }
+
+  return resolved_mutex ? resolved_mutex : lock_or_mutex;
+}
+
 ThreadAPI::TD_TYPE ThreadAPI::stringToType(StringRef s) {
   static const auto *type_map =
       []() -> std::unordered_map<std::string, ThreadAPI::TD_TYPE> * {

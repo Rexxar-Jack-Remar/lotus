@@ -494,6 +494,44 @@ TEST_F(ThreadAPITest, RecognizesLibcxxJoinDetachManglings) {
             ThreadAPI::TD_DETACH);
 }
 
+TEST_F(ThreadAPITest, UnwrapsConditionVariableAnyWaitMutexFromUniqueLock) {
+  const char *source = R"(
+    declare void @fake_unique_lockC1E(i8*, i8*)
+    declare void @_ZNSt22condition_variable_any4waitERSt11unique_lockISt5mutexE(i8*, i8*)
+
+    @cv = global i8 0
+    @lock = global i8 0
+
+    define void @main() {
+    entry:
+      %wrapper = alloca i8
+      call void @fake_unique_lockC1E(i8* %wrapper, i8* @lock)
+      call void @_ZNSt22condition_variable_any4waitERSt11unique_lockISt5mutexE(i8* @cv, i8* %wrapper)
+      ret void
+    }
+  )";
+
+  auto module = parseModule(source);
+  ASSERT_NE(module, nullptr);
+
+  ThreadAPI::resetThreadAPI();
+  ThreadAPI *api = ThreadAPI::getThreadAPI();
+
+  const Function *main_func = module->getFunction("main");
+  ASSERT_NE(main_func, nullptr);
+  const Function *wait_func = module->getFunction(
+      "_ZNSt22condition_variable_any4waitERSt11unique_lockISt5mutexE");
+  ASSERT_NE(wait_func, nullptr);
+  EXPECT_EQ(api->getType(wait_func), ThreadAPI::TD_COND_WAIT);
+  auto it = main_func->getEntryBlock().begin();
+  ++it;
+  ++it;
+  const Instruction *wait = &*it;
+  ASSERT_TRUE(api->isTDCondWait(wait));
+  EXPECT_EQ(api->getCondVal(wait), module->getNamedGlobal("cv"));
+  EXPECT_EQ(api->getCondMutex(wait), module->getNamedGlobal("lock"));
+}
+
 TEST_F(ThreadAPITest, StdJthreadMoveConstructorIsNotFork) {
   const char *source = R"(
     declare void @_ZNSt7jthreadC1EOS_(i8*, i8*)
@@ -515,6 +553,46 @@ TEST_F(ThreadAPITest, StdJthreadMoveConstructorIsNotFork) {
   const Function *move_ctor = module->getFunction("_ZNSt7jthreadC1EOS_");
   ASSERT_NE(move_ctor, nullptr);
   EXPECT_EQ(api->getType(move_ctor), ThreadAPI::TD_DUMMY);
+}
+
+TEST_F(ThreadAPITest, RecognizesGNUOpenMPParallelForkAndBarrierVariants) {
+  const char *source = R"(
+    declare void @GOMP_parallel(void ()*, i8*, i32, i32)
+    declare void @GOMP_parallel_end()
+
+    define void @worker() {
+    entry:
+      ret void
+    }
+
+    define void @main() {
+    entry:
+      call void @GOMP_parallel(void ()* @worker, i8* null, i32 1, i32 0)
+      call void @GOMP_parallel_end()
+      ret void
+    }
+  )";
+
+  auto module = parseModule(source);
+  ASSERT_NE(module, nullptr);
+
+  ThreadAPI::resetThreadAPI();
+  ThreadAPI *api = ThreadAPI::getThreadAPI();
+  EXPECT_EQ(api->getType(module->getFunction("GOMP_parallel")),
+            ThreadAPI::TD_FORK);
+  EXPECT_EQ(api->getType(module->getFunction("GOMP_parallel_end")),
+            ThreadAPI::TD_BAR_WAIT);
+
+  const Function *main_func = module->getFunction("main");
+  ASSERT_NE(main_func, nullptr);
+  auto it = main_func->getEntryBlock().begin();
+  const Instruction *fork = &*it++;
+  const Instruction *end = &*it++;
+
+  EXPECT_TRUE(api->isTDFork(fork));
+  EXPECT_EQ(api->getForkedThread(fork), nullptr);
+  EXPECT_EQ(api->getForkedFun(fork), module->getFunction("worker"));
+  EXPECT_TRUE(api->isTDBarWait(end));
 }
 
 TEST_F(ThreadAPITest, MapsOpenMPTaskwaitWithDepsVariants) {

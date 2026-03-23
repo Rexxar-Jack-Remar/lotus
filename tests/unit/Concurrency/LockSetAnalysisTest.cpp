@@ -644,6 +644,75 @@ TEST_F(LockSetAnalysisTest, SharedLockCountsAsReadLockOnly) {
   EXPECT_TRUE(lsa.getMayWriteLockSetAt(after).count(lock) == 0);
 }
 
+TEST_F(LockSetAnalysisTest,
+       SharedLockSummaryPreservesReadModeAcrossCalls) {
+  const char *source = R"(
+    declare i32 @pthread_rwlock_rdlock(i8*)
+
+    @lock = global i8 0
+
+    define void @helper() {
+    entry:
+      call i32 @pthread_rwlock_rdlock(i8* @lock)
+      ret void
+    }
+
+    define i32 @main() {
+    entry:
+      call void @helper()
+      %after = add i32 1, 2
+      ret i32 %after
+    }
+  )";
+
+  auto module = parseModule(source);
+  ASSERT_NE(module, nullptr);
+
+  LockSetAnalysis lsa(*module);
+  lsa.analyze();
+
+  const Instruction *after =
+      findInstructionByName(*module->getFunction("main"), "after");
+  const GlobalVariable *lock = module->getNamedGlobal("lock");
+  ASSERT_NE(after, nullptr);
+  ASSERT_NE(lock, nullptr);
+
+  EXPECT_TRUE(lsa.mayHoldLock(after, lock));
+  EXPECT_TRUE(lsa.getMayReadLockSetAt(after).count(lock) > 0);
+  EXPECT_TRUE(lsa.getMayWriteLockSetAt(after).count(lock) == 0);
+}
+
+TEST_F(LockSetAnalysisTest, AdoptLockDoesNotSynthesizeAcquisition) {
+  const char *source = R"(
+    declare void @fake_unique_lock_adopt_lock_C1E(i8*, i8*)
+
+    @lock = global i8 0
+
+    define i32 @main() {
+    entry:
+      %ul = alloca i8
+      call void @fake_unique_lock_adopt_lock_C1E(i8* %ul, i8* @lock)
+      %after = add i32 1, 2
+      ret i32 %after
+    }
+  )";
+
+  auto module = parseModule(source);
+  ASSERT_NE(module, nullptr);
+
+  LockSetAnalysis lsa(*module);
+  lsa.analyze();
+
+  const Instruction *after =
+      findInstructionByName(*module->getFunction("main"), "after");
+  const GlobalVariable *lock = module->getNamedGlobal("lock");
+  ASSERT_NE(after, nullptr);
+  ASSERT_NE(lock, nullptr);
+
+  EXPECT_FALSE(lsa.mayHoldLock(after, lock));
+  EXPECT_FALSE(lsa.mustHoldLock(after, lock));
+}
+
 TEST_F(LockSetAnalysisTest, OpenMPCriticalUsesNamedAnalysisIdentity) {
   const char *source = R"(
     @crit = global [8 x i32] zeroinitializer

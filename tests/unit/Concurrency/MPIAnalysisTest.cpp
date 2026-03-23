@@ -55,13 +55,31 @@ TEST_F(MPIAnalysisTest, SendRecvCreatesSendAndReceiveOperations) {
 
 TEST_F(MPIAnalysisTest, RankIncompatiblePointToPointDoesNotMatch) {
   const char *source = R"(
+    declare i32 @MPI_Comm_rank(i8*, i32*)
     declare i32 @MPI_Send(i8*, i32, i32, i32, i32, i8*)
     declare i32 @MPI_Recv(i8*, i32, i32, i32, i32, i8*, i8*)
 
     define i32 @main(i8* %comm) {
     entry:
+      %rank = alloca i32, align 4
+      call i32 @MPI_Comm_rank(i8* %comm, i32* %rank)
+      %rankv = load i32, i32* %rank, align 4
+      %is_one = icmp eq i32 %rankv, 1
+      br i1 %is_one, label %send, label %check_recv
+
+    send:
       call i32 @MPI_Send(i8* null, i32 1, i32 0, i32 0, i32 7, i8* %comm)
+      br label %join
+
+    check_recv:
+      %is_zero = icmp eq i32 %rankv, 0
+      br i1 %is_zero, label %recv, label %join
+
+    recv:
       call i32 @MPI_Recv(i8* null, i32 1, i32 0, i32 2, i32 7, i8* %comm, i8* null)
+      br label %join
+
+    join:
       ret i32 0
     }
   )";
@@ -398,6 +416,35 @@ TEST_F(MPIAnalysisTest, RequestFreeTerminatesOutstandingRequest) {
   EXPECT_TRUE(analysis.getResults().orphaned_requests.empty());
 }
 
+TEST_F(MPIAnalysisTest, NonblockingCollectiveUsesSingleRequestArity) {
+  const char *source = R"(
+    declare i32 @MPI_Ibarrier(i8*, i8*)
+
+    define i32 @main(i8* %comm) {
+    entry:
+      %req = alloca i8, align 1
+      call i32 @MPI_Ibarrier(i8* %comm, i8* %req)
+      ret i32 0
+    }
+  )";
+
+  auto module = parseModule(source);
+  ASSERT_NE(module, nullptr);
+
+  MPIAnalysis analysis(*module);
+  analysis.runAnalysis();
+
+  const auto &request_sets = analysis.getRequestSetFacts();
+  auto issued = std::find_if(
+      request_sets.begin(), request_sets.end(),
+      [](const MPIRequestSetFact &fact) {
+        return fact.provenance == "mpi_request_set_issue";
+      });
+  ASSERT_NE(issued, request_sets.end());
+  EXPECT_EQ(issued->arity, MPIRequestArity::Single);
+  EXPECT_EQ(issued->kind, MPIRequestSetKind::Collective);
+}
+
 TEST_F(MPIAnalysisTest, SemanticEventsCaptureCollectiveAndRequestSemantics) {
   const char *source = R"(
     declare i32 @MPI_Isend(i8*, i32, i32, i32, i32, i8*, i8*)
@@ -639,6 +686,63 @@ TEST_F(MPIAnalysisTest, StartallActivatesPersistentRequestArrays) {
   analysis.runAnalysis();
 
   EXPECT_EQ(analysis.getResults().orphaned_requests.size(), 2u);
+  const auto &request_sets = analysis.getRequestSetFacts();
+  auto activation = std::find_if(
+      request_sets.begin(), request_sets.end(),
+      [](const MPIRequestSetFact &fact) {
+        return fact.provenance == "mpi_request_set_activate";
+      });
+  ASSERT_NE(activation, request_sets.end());
+  EXPECT_EQ(activation->arity, MPIRequestArity::Array);
+  EXPECT_EQ(activation->completion_scope,
+            MPIRequestCompletionScopeKind::AllOfSet);
+}
+
+TEST_F(MPIAnalysisTest,
+       UnresolvedRequestArrayDoesNotCreateSyntheticSingletonRequest) {
+  const char *source = R"(
+    declare i32 @MPI_Isend(i8*, i32, i32, i32, i32, i8*, i8*)
+    declare i32 @MPI_Waitall(i32, i8**, i8*)
+
+    define i32 @main(i8* %comm, i1 %cond) {
+    entry:
+      %req1 = alloca i8, align 1
+      %req2 = alloca i8, align 1
+      %reqs = alloca [1 x i8*], align 8
+      %slot0 = getelementptr inbounds [1 x i8*], [1 x i8*]* %reqs, i64 0, i64 0
+      call i32 @MPI_Isend(i8* null, i32 1, i32 0, i32 1, i32 7, i8* %comm, i8* %req1)
+      call i32 @MPI_Isend(i8* null, i32 1, i32 0, i32 2, i32 8, i8* %comm, i8* %req2)
+      br i1 %cond, label %lhs, label %rhs
+
+    lhs:
+      store i8* %req1, i8** %slot0, align 8
+      br label %join
+
+    rhs:
+      store i8* %req2, i8** %slot0, align 8
+      br label %join
+
+    join:
+      call i32 @MPI_Waitall(i32 1, i8** %slot0, i8* null)
+      ret i32 0
+    }
+  )";
+
+  auto module = parseModule(source);
+  ASSERT_NE(module, nullptr);
+
+  MPIAnalysis analysis(*module);
+  analysis.runAnalysis();
+
+  EXPECT_EQ(analysis.getRequestSetFacts().size(), 2u);
+  bool saw_storage_gap = false;
+  for (const MPIModelGap &gap : analysis.getResults().model_gaps) {
+    if (gap.code == "mpi_request_storage_escaped") {
+      saw_storage_gap = true;
+      break;
+    }
+  }
+  EXPECT_TRUE(saw_storage_gap);
 }
 
 TEST_F(MPIAnalysisTest,
@@ -831,6 +935,57 @@ TEST_F(MPIAnalysisTest, RankRestrictedCollectivesUseDistinctProtocolSlots) {
             collectives[1].participant_class_id);
   EXPECT_EQ(collectives[0].protocol_sequence_id, 0u);
   EXPECT_EQ(collectives[1].protocol_sequence_id, 1u);
+}
+
+TEST_F(MPIAnalysisTest, SameFunctionRankPartitionedPointToPointStillMatches) {
+  const char *source = R"(
+    declare i32 @MPI_Comm_rank(i8*, i32*)
+    declare i32 @MPI_Send(i8*, i32, i32, i32, i32, i8*)
+    declare i32 @MPI_Recv(i8*, i32, i32, i32, i32, i8*, i8*)
+
+    define i32 @main(i8* %comm) {
+    entry:
+      %rank = alloca i32, align 4
+      call i32 @MPI_Comm_rank(i8* %comm, i32* %rank)
+      %rankv = load i32, i32* %rank, align 4
+      %is_zero = icmp eq i32 %rankv, 0
+      br i1 %is_zero, label %send, label %check_recv
+
+    send:
+      call i32 @MPI_Send(i8* null, i32 1, i32 0, i32 1, i32 7, i8* %comm)
+      br label %join
+
+    check_recv:
+      %is_one = icmp eq i32 %rankv, 1
+      br i1 %is_one, label %recv, label %join
+
+    recv:
+      call i32 @MPI_Recv(i8* null, i32 1, i32 0, i32 0, i32 7, i8* %comm, i8* null)
+      br label %join
+
+    join:
+      ret i32 0
+    }
+  )";
+
+  auto module = parseModule(source);
+  ASSERT_NE(module, nullptr);
+
+  MPIAnalysis analysis(*module);
+  analysis.runAnalysis();
+
+  auto sends =
+      analysis.getProcessModel().getOperationsByKind(MPIOpKind::SEND_BLOCKING);
+  auto recvs =
+      analysis.getProcessModel().getOperationsByKind(MPIOpKind::RECV_BLOCKING);
+  ASSERT_EQ(sends.size(), 1u);
+  ASSERT_EQ(recvs.size(), 1u);
+  EXPECT_TRUE(
+      analysis.getProcessModel().canCommunicate(sends.front(), recvs.front()));
+  EXPECT_NE(analysis.getProcessModel().classifyCommunicationMatch(
+                sends.front(), recvs.front()),
+            MPICommunicationMatch::NoMatch);
+  EXPECT_FALSE(analysis.getResults().channel_obligations.empty());
 }
 
 TEST_F(MPIAnalysisTest, FlushMarksTrackedRMACompletion) {

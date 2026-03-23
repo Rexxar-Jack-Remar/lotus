@@ -808,7 +808,8 @@ void HappensBeforeAnalysis::buildSynchronizesWith() {
     const Instruction *representative = atomic_events[loc_it->second.front()].inst;
 
     const AtomicEvent *release_head = nullptr;
-    std::vector<const AtomicEvent *> rmw_candidates;
+    std::vector<const AtomicEvent *> release_rmw_events;
+    std::vector<const AtomicEvent *> release_sequence_tails;
     bool has_non_release_store_like = false;
     for (const auto &bucket : events_by_location) {
       if (bucket.second.empty()) {
@@ -827,7 +828,7 @@ void HappensBeforeAnalysis::buildSynchronizesWith() {
         }
         if (!event.has_release) {
           if (event.is_rmw) {
-            rmw_candidates.push_back(&event);
+            release_sequence_tails.push_back(&event);
             continue;
           }
           has_non_release_store_like = true;
@@ -839,7 +840,7 @@ void HappensBeforeAnalysis::buildSynchronizesWith() {
           continue;
         }
         if (event.is_rmw) {
-          rmw_candidates.push_back(&event);
+          release_rmw_events.push_back(&event);
           continue;
         }
         if (release_head) {
@@ -851,40 +852,54 @@ void HappensBeforeAnalysis::buildSynchronizesWith() {
     }
 
     if (has_non_release_store_like &&
-        (release_head != nullptr || !rmw_candidates.empty())) {
+        (release_head != nullptr || !release_rmw_events.empty() ||
+         !release_sequence_tails.empty())) {
       ++m_deferred_sync_counts["atomic_nonrelease_store_competes_with_release"];
       candidates.clear();
       return candidates;
     }
 
-    if (release_head) {
-      for (const AtomicEvent *rmw_candidate : rmw_candidates) {
-        if (hasProgramOrder(rmw_candidate->inst, release_head->inst)) {
+    const AtomicEvent *effective_release_head = release_head;
+    if (effective_release_head) {
+      for (const AtomicEvent *release_rmw : release_rmw_events) {
+        if (hasProgramOrder(release_rmw->inst, effective_release_head->inst)) {
+          candidates.clear();
+          return candidates;
+        }
+        release_sequence_tails.push_back(release_rmw);
+      }
+    } else {
+      if (release_rmw_events.size() == 1) {
+        effective_release_head = release_rmw_events.front();
+      } else if (release_rmw_events.size() > 1) {
+        candidates.clear();
+        return candidates;
+      }
+    }
+
+    if (effective_release_head) {
+      for (const AtomicEvent *rmw_candidate : release_sequence_tails) {
+        if (hasProgramOrder(rmw_candidate->inst, effective_release_head->inst)) {
           candidates.clear();
           return candidates;
         }
       }
-    } else if (rmw_candidates.size() == 1) {
-      candidates.emplace_back(rmw_candidates.front()->inst,
-                              rmw_candidates.front()->inst);
-    } else if (rmw_candidates.size() > 1) {
-      candidates.clear();
-      return candidates;
     }
 
     for (const auto &entry : release_fence_anchor) {
       if (!sameAtomicLocation(entry.second, representative)) {
         continue;
       }
-      if (release_head || !candidates.empty()) {
+      if (effective_release_head || !candidates.empty()) {
         candidates.clear();
         return candidates;
       }
       candidates.emplace_back(entry.first, entry.second);
     }
 
-    if (release_head) {
-      candidates.emplace_back(release_head->inst, release_head->inst);
+    if (effective_release_head) {
+      candidates.emplace_back(effective_release_head->inst,
+                              effective_release_head->inst);
     }
 
     return candidates;
@@ -918,7 +933,7 @@ void HappensBeforeAnalysis::buildSynchronizesWith() {
           ++m_deferred_sync_counts["atomic_cmpxchg_acquire_missing_success_witness"];
           continue;
         }
-        if (!event.is_rmw && !hasBranchWitness(event.inst)) {
+        if (!hasBranchWitness(event.inst)) {
           ++deferred_direct_atomic_relations;
           ++m_deferred_sync_counts["atomic_direct_missing_branch_witness"];
           continue;
