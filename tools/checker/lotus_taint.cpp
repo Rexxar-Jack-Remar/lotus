@@ -8,10 +8,6 @@
 #include "Utils/LLVM/Demangle.h"
 #include "lotus_taint_microbench.h"
 
-#include <Alias/AliasAnalysisWrapper/AliasAnalysisWrapper.h>
-#include <Dataflow/IFDS/Clients/IFDSTaintAnalysis.h>
-#include <Dataflow/IFDS/Core/IFDSFramework.h>
-#include <Dataflow/IFDS/Solvers/IFDSSolver.h>
 #include <llvm/ADT/Statistic.h>
 #include <llvm/IR/InstIterator.h>
 #include <llvm/IR/LLVMContext.h>
@@ -25,6 +21,10 @@
 #include <llvm/Support/MemoryBuffer.h>
 #include <llvm/Support/SourceMgr.h>
 #include <llvm/Support/raw_ostream.h>
+#include <Alias/AliasAnalysisWrapper/AliasAnalysisWrapper.h>
+#include <Dataflow/IFDS/Clients/IFDSTaintAnalysis.h>
+#include <Dataflow/IFDS/Core/IFDSFramework.h>
+#include <Dataflow/IFDS/Solvers/IFDSSolver.h>
 
 // #include <iostream>
 #include <chrono>

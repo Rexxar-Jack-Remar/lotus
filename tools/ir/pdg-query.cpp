@@ -665,11 +665,14 @@ static bool executeAnalysis(ProgramGraph &pdg, const Module &module,
   PDGCriteria baseline;
 
   if (!CriteriaQuery.empty())
-    criteria.cypher_selections.push_back(CypherSelection{CriteriaQuery, ""});
+    criteria.cypher_selections.push_back(
+        CypherSelection{CriteriaQuery.getValue(), ""});
   if (!TargetQuery.empty())
-    targets.cypher_selections.push_back(CypherSelection{TargetQuery, ""});
+    targets.cypher_selections.push_back(
+        CypherSelection{TargetQuery.getValue(), ""});
   if (!BaselineQuery.empty())
-    baseline.cypher_selections.push_back(CypherSelection{BaselineQuery, ""});
+    baseline.cypher_selections.push_back(
+        CypherSelection{BaselineQuery.getValue(), ""});
 
   if (!PropertyFile.empty()) {
     PropertySpec spec;

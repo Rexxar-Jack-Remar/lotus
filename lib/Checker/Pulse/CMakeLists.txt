@@ -31,3 +31,10 @@ set(PulseChecker_SOURCES
 )
 
 add_library(PulseChecker STATIC ${PulseChecker_SOURCES})
+
+target_link_libraries(PulseChecker
+  PUBLIC
+    CanaryAliasAnalysisWrapper
+    CanaryReport
+    ${Z3_LIBRARIES}
+)

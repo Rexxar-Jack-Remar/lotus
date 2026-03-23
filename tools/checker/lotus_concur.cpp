@@ -86,7 +86,7 @@ int main(int argc, char **argv) {
   // Config-driven activation: --checks=race,deadlock,... overrides individual
   // flags (Goblint-style)
   if (!ChecksList.empty()) {
-    std::string list = ChecksList;
+    const std::string &list = ChecksList.getValue();
     checker.enableDataRaceCheck(list.find("race") != std::string::npos);
     checker.enableDeadlockCheck(list.find("deadlock") != std::string::npos);
     checker.enableAtomicityCheck(list.find("atomicity") != std::string::npos);
