@@ -141,8 +141,35 @@ TEST_F(OpenMPSemanticsTest, ExtractsNormalizedTaskAndBoundaryEvents) {
   EXPECT_EQ(task_events[2].kind, OpenMPTaskEvent::Kind::Taskwait);
   EXPECT_EQ(task_events[3].kind, OpenMPTaskEvent::Kind::TaskgroupEnd);
   EXPECT_EQ(task_events[1].scheduling_context_id, task_events[2].scheduling_context_id);
-  EXPECT_EQ(task_events[2].sequence_index, task_events[1].sequence_index + 1);
+  EXPECT_LT(task_events[1].event_order, task_events[2].event_order);
   EXPECT_EQ(task_events[3].taskgroup_id, task_events[0].taskgroup_id);
+}
+
+TEST_F(OpenMPSemanticsTest, EventOrderStaysMonotonicAcrossConsecutiveBoundaries) {
+  const char *source = R"(
+    declare i32 @__kmpc_omp_task(i8*, i32, i8*)
+    declare i32 @__kmpc_omp_taskwait(i8*, i32)
+    declare void @__kmpc_barrier(i8*, i32)
+
+    define i32 @main() {
+    entry:
+      call i32 @__kmpc_omp_task(i8* null, i32 0, i8* null)
+      call i32 @__kmpc_omp_taskwait(i8* null, i32 0)
+      call void @__kmpc_barrier(i8* null, i32 0)
+      ret i32 0
+    }
+  )";
+
+  auto module = parseModule(source);
+  ASSERT_NE(module, nullptr);
+
+  OpenMPSemantics semantics(*module);
+  semantics.analyze();
+
+  const auto &task_events = semantics.getTaskEvents();
+  ASSERT_EQ(task_events.size(), 3u);
+  EXPECT_LT(task_events[0].event_order, task_events[1].event_order);
+  EXPECT_LT(task_events[1].event_order, task_events[2].event_order);
 }
 
 TEST_F(OpenMPSemanticsTest, NormalizesPartialBoundaryEventsAcrossKinds) {
@@ -265,6 +292,55 @@ TEST_F(OpenMPSemanticsTest, MismatchedNestedRegionEndsAreDeferredExplicitly) {
   auto unmatched_it = reasons.find("omp_region_end_unmatched");
   ASSERT_NE(unmatched_it, reasons.end());
   EXPECT_GT(unmatched_it->second, 0u);
+}
+
+TEST_F(OpenMPSemanticsTest,
+       ParallelRegionFrameDoesNotLeakIntoLaterCallerEntities) {
+  const char *source = R"(
+    declare void @__kmpc_fork_call(i8*, i32, void ()*)
+    declare void @__kmpc_taskgroup(i8*, i32)
+    declare void @__kmpc_end_taskgroup(i8*, i32)
+
+    define void @outlined() {
+    entry:
+      ret void
+    }
+
+    define i32 @main() {
+    entry:
+      call void @__kmpc_fork_call(i8* null, i32 0, void ()* @outlined)
+      call void @__kmpc_taskgroup(i8* null, i32 0)
+      call void @__kmpc_end_taskgroup(i8* null, i32 0)
+      ret i32 0
+    }
+  )";
+
+  auto module = parseModule(source);
+  ASSERT_NE(module, nullptr);
+
+  OpenMPSemantics semantics(*module);
+  semantics.analyze();
+
+  size_t root_context_id = 0;
+  size_t parallel_region_id = 0;
+  size_t taskgroup_id = 0;
+  for (const SemanticEntity &entity : semantics.getSemanticEntities()) {
+    if (entity.kind == SemanticEntityKind::SchedulingContext &&
+        entity.function == module->getFunction("main")) {
+      root_context_id = entity.id;
+    } else if (entity.kind == SemanticEntityKind::ParallelRegion &&
+               entity.function == module->getFunction("main")) {
+      parallel_region_id = entity.id;
+    } else if (entity.kind == SemanticEntityKind::Taskgroup &&
+               entity.function == module->getFunction("main")) {
+      taskgroup_id = entity.parent_id;
+    }
+  }
+
+  ASSERT_NE(root_context_id, 0u);
+  ASSERT_NE(parallel_region_id, 0u);
+  EXPECT_EQ(taskgroup_id, root_context_id);
+  EXPECT_NE(taskgroup_id, parallel_region_id);
 }
 
 TEST_F(OpenMPSemanticsTest, ValidSectionsAndReduceDoNotTriggerMalformedRegionCounters) {

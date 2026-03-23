@@ -550,13 +550,14 @@ bool isKnownWorldCommunicatorHandle(const Value *value) {
 
 const Value *getCommunicatorOperand(const CallBase *cb,
                                     const MPIEffect &effect) {
-  if (!cb || !effect.descriptor) {
+  if (!cb || !effect.has_descriptor) {
     return nullptr;
   }
-  const MPISemanticDescriptor &descriptor = *effect.descriptor;
+  const MPISemanticDescriptor &descriptor = effect.descriptor;
   switch (effect.family) {
   case MPISemanticFamily::PointToPoint:
   case MPISemanticFamily::Probe:
+  case MPISemanticFamily::Communicator:
     return getOperandBySignedIndex(cb, descriptor.communicator_arg);
   case MPISemanticFamily::Request:
     if (effect.type == ThreadAPI::TD_MPI_PERSISTENT_SEND_INIT ||
@@ -574,10 +575,16 @@ const Value *getCommunicatorOperand(const CallBase *cb,
     return getOperandBySignedIndex(cb, comm_index);
   }
   case MPISemanticFamily::RMAWindow:
-    if (effect.semantic_tag == "win-create" ||
-        effect.semantic_tag == "win-allocate" ||
-        effect.semantic_tag == "win-allocate-shared") {
-      return getOperandBySignedIndex(cb, -2);
+  case MPISemanticFamily::RMAData:
+  case MPISemanticFamily::RMASync:
+    if (descriptor.communicator_arg != -1) {
+      int comm_index = descriptor.communicator_arg;
+      if ((effect.semantic_tag == "win-allocate" ||
+           effect.semantic_tag == "win-allocate-shared") &&
+          cb->arg_size() >= 6) {
+        comm_index = -3;
+      }
+      return getOperandBySignedIndex(cb, comm_index);
     }
     return nullptr;
   default:
@@ -1628,8 +1635,15 @@ void MPIProcessModel::extractRMAWindowDetails(
       StringRef(semantic_tag).equals("win-allocate") ||
       StringRef(semantic_tag).equals("win-allocate-shared")) {
     if (cb->arg_size() >= 2) {
-      const Value *comm_arg = getOperandBySignedIndex(cb, -2);
-      const Value *window_arg = getOperandBySignedIndex(cb, -1);
+      int comm_index = descriptor.communicator_arg;
+      if ((semantic_tag.equals("win-allocate") ||
+           semantic_tag.equals("win-allocate-shared")) &&
+          cb->arg_size() >= 6) {
+        comm_index = -3;
+      }
+      const Value *comm_arg = getOperandBySignedIndex(cb, comm_index);
+      const Value *window_arg =
+          getOperandBySignedIndex(cb, descriptor.result_handle_arg);
       op.communicator = canonicalizeCommunicator(comm_arg);
       op.window = window_arg;
     }
@@ -1874,50 +1888,52 @@ void MPIProcessModel::extractDatatypeDetails(MPIOperation &op,
   }
 }
 
-void MPIProcessModel::extractOperationDetails(MPIOperation &op) {
+void MPIProcessModel::extractOperationDetails(MPIOperation &op,
+                                             const MPIEffect &effect) {
   const CallBase *cb = dyn_cast<CallBase>(op.inst);
   if (!cb) {
     return;
   }
-  const Function *callee = cb->getCalledFunction();
-  const std::string semantic_tag_storage =
-      callee ? thread_api_->getSemanticTag(callee) : std::string();
-  const StringRef semantic_tag = semantic_tag_storage;
-
-  const MPISemanticDescriptor *descriptor = lookupMPISemantic(op.td_type);
-  if (!descriptor) {
+  if (!effect.has_descriptor) {
     return;
   }
+  const StringRef semantic_tag = effect.semantic_tag;
+  const MPISemanticDescriptor &descriptor = effect.descriptor;
+  op.request_lifecycle_issue_nonblocking =
+      descriptor.request_lifecycle_issue_nonblocking;
+  if (descriptor.request_arg != -1) {
+    op.request = getOperandBySignedIndex(cb, descriptor.request_arg);
+  }
 
-  switch (descriptor->family) {
+  switch (descriptor.family) {
   case MPISemanticFamily::PointToPoint:
-    if (descriptor->split_into_sendrecv) {
+    if (descriptor.split_into_sendrecv) {
       extractSendrecvDetails(op, cb);
     } else {
-      extractPointToPointDetails(op, cb, *descriptor);
+      extractPointToPointDetails(op, cb, descriptor);
     }
     break;
   case MPISemanticFamily::Probe:
-    extractProbeDetails(op, cb, *descriptor);
+    extractProbeDetails(op, cb, descriptor);
     break;
   case MPISemanticFamily::Request:
     if (op.td_type == ThreadAPI::TD_MPI_PERSISTENT_SEND_INIT ||
         op.td_type == ThreadAPI::TD_MPI_PERSISTENT_RECV_INIT) {
-      extractPointToPointDetails(op, cb, *descriptor);
+      extractPointToPointDetails(op, cb, descriptor);
     }
-    extractRequestDetails(op, cb, *descriptor);
+    extractRequestDetails(op, cb, descriptor);
     break;
   case MPISemanticFamily::Collective:
-    extractCollectiveDetails(op, cb, semantic_tag, *descriptor);
+    extractCollectiveDetails(op, cb, semantic_tag, descriptor);
     break;
   case MPISemanticFamily::RMAWindow:
-    extractRMAWindowDetails(op, cb, semantic_tag, *descriptor);
+    extractRMAWindowDetails(op, cb, semantic_tag, descriptor);
     break;
   case MPISemanticFamily::RMAData:
-    extractRMADataDetails(op, cb, semantic_tag, *descriptor);
+    extractRMADataDetails(op, cb, semantic_tag, descriptor);
     break;
   case MPISemanticFamily::RMASync:
-    extractRMASyncDetails(op, cb, semantic_tag, *descriptor);
+    extractRMASyncDetails(op, cb, semantic_tag, descriptor);
     break;
   case MPISemanticFamily::Datatype:
     extractDatatypeDetails(op, cb, semantic_tag);
@@ -1974,7 +1990,7 @@ void MPIProcessModel::analyzeModule() {
 
       MPIEffect effect = buildMPIEffect(I, thread_api_);
       ThreadAPI::TD_TYPE type = effect.type;
-      if (type == ThreadAPI::TD_DUMMY)
+      if (type == ThreadAPI::TD_DUMMY || !effect.has_descriptor)
         continue;
       normalization_confidence_counts_[effect.confidence]++;
       const auto *cb = dyn_cast<CallBase>(I);
@@ -1984,8 +2000,8 @@ void MPIProcessModel::analyzeModule() {
           traceCommunicatorValue(communicator_operand, &module_).state ==
               CommunicatorTraceState::Ambiguous;
 
-      const MPISemanticDescriptor *descriptor = effect.descriptor;
-      if (descriptor && descriptor->split_into_sendrecv) {
+      const MPISemanticDescriptor &descriptor = effect.descriptor;
+      if (descriptor.split_into_sendrecv) {
         MPIOperation send_op(I, MPIOpKind::SEND_BLOCKING, type);
         send_op.normalization_confidence = effect.confidence;
         send_op.send_mode = effect.send_mode;
@@ -1996,7 +2012,7 @@ void MPIProcessModel::analyzeModule() {
         send_op.rma_access_kind = effect.rma_access_kind;
         send_op.rma_sync_kind = effect.rma_sync_kind;
         send_op.rma_local_completion_only = effect.rma_local_completion_only;
-        extractOperationDetails(send_op);
+        extractOperationDetails(send_op, effect);
         annotateRankConstraints(send_op);
         if (send_op.communicator) {
           send_op.communicator_class_id = assignCommunicatorClass(
@@ -2033,7 +2049,7 @@ void MPIProcessModel::analyzeModule() {
         recv_op.rma_access_kind = effect.rma_access_kind;
         recv_op.rma_sync_kind = effect.rma_sync_kind;
         recv_op.rma_local_completion_only = effect.rma_local_completion_only;
-        extractOperationDetails(recv_op);
+        extractOperationDetails(recv_op, effect);
         annotateRankConstraints(recv_op);
         if (recv_op.communicator) {
           recv_op.communicator_class_id = assignCommunicatorClass(
@@ -2062,7 +2078,7 @@ void MPIProcessModel::analyzeModule() {
         continue;
       }
 
-      MPIOpKind kind = classifyOperation(I, type);
+      MPIOpKind kind = effect.kind;
       if (kind == MPIOpKind::UNKNOWN)
         continue;
 
@@ -2076,7 +2092,7 @@ void MPIProcessModel::analyzeModule() {
       op.rma_access_kind = effect.rma_access_kind;
       op.rma_sync_kind = effect.rma_sync_kind;
       op.rma_local_completion_only = effect.rma_local_completion_only;
-      extractOperationDetails(op);
+      extractOperationDetails(op, effect);
 
       if (kind == MPIOpKind::INIT && callee) {
         std::string semantic_tag_storage = thread_api_->getSemanticTag(callee);
@@ -2136,44 +2152,61 @@ void MPIProcessModel::analyzeModule() {
       if (kind == MPIOpKind::COMM_MANAGEMENT ||
           kind == MPIOpKind::INTERCOMM_CREATION) {
         if (const auto *cb = dyn_cast<CallBase>(I)) {
-          const Value *root =
-              cb->arg_size() >= 1 ? cb->getArgOperand(0) : nullptr;
+          const Value *root = getOperandBySignedIndex(cb, descriptor.communicator_arg);
+          const Value *derived_handle =
+              getOperandBySignedIndex(cb, descriptor.result_handle_arg);
+          MPICommunicatorCreationKind descriptor_creation_kind =
+              MPICommunicatorCreationKind::Unknown;
+          switch (descriptor.communicator_semantic) {
+          case MPICommunicatorSemanticKind::Duplicate:
+            descriptor_creation_kind = MPICommunicatorCreationKind::Dup;
+            break;
+          case MPICommunicatorSemanticKind::Split:
+            descriptor_creation_kind = MPICommunicatorCreationKind::Split;
+            break;
+          case MPICommunicatorSemanticKind::Create:
+            descriptor_creation_kind = MPICommunicatorCreationKind::Create;
+            break;
+          case MPICommunicatorSemanticKind::IntercommunicatorCreate:
+            descriptor_creation_kind =
+                MPICommunicatorCreationKind::IntercommCreate;
+            break;
+          case MPICommunicatorSemanticKind::TopologyCreate:
+            descriptor_creation_kind = MPICommunicatorCreationKind::Topology;
+            break;
+          case MPICommunicatorSemanticKind::Free:
+          case MPICommunicatorSemanticKind::None:
+            break;
+          }
           std::string semantic_tag_storage =
               callee ? thread_api_->getSemanticTag(callee) : std::string();
           StringRef semantic_tag = semantic_tag_storage;
 
-          if (kind == MPIOpKind::INTERCOMM_CREATION && cb->arg_size() >= 1) {
-            recordCommunicatorCreation(cb->getArgOperand(cb->arg_size() - 1), root,
-                                       MPICommunicatorCreationKind::IntercommCreate,
+          if (kind == MPIOpKind::INTERCOMM_CREATION && derived_handle) {
+            recordCommunicatorCreation(derived_handle, root,
+                                       descriptor_creation_kind,
                                        nullptr, "", true);
-            registerCommunicatorAlias(cb->getArgOperand(cb->arg_size() - 1),
-                                      root);
-          } else if (type == ThreadAPI::TD_MPI_COMM_DUP &&
-                     cb->arg_size() >= 2) {
-            unsigned newcomm_idx =
-                semantic_tag.equals("comm-dup-with-info")
-                    ? static_cast<unsigned>(cb->arg_size() - 1)
-                    : 1U;
-            recordCommunicatorCreation(cb->getArgOperand(newcomm_idx), root,
-                                       MPICommunicatorCreationKind::Dup);
-            registerCommunicatorAlias(cb->getArgOperand(newcomm_idx), root);
+            registerCommunicatorAlias(derived_handle, root);
+          } else if (type == ThreadAPI::TD_MPI_COMM_DUP && derived_handle) {
+            recordCommunicatorCreation(derived_handle, root,
+                                       descriptor_creation_kind);
+            registerCommunicatorAlias(derived_handle, root);
             size_t subgroup_id = getCommunicatorSubgroupID(root);
             if (subgroup_id != 0) {
               const CommunicatorTraceResult alias_trace =
-                  traceCommunicatorValue(cb->getArgOperand(newcomm_idx), &module_);
+                  traceCommunicatorValue(derived_handle, &module_);
               const Value *alias_key = alias_trace.root;
               if (!alias_key) {
-                alias_key = cb->getArgOperand(newcomm_idx)->stripPointerCasts();
+                alias_key = derived_handle->stripPointerCasts();
               }
               communicator_subgroup_ids_[alias_key] = subgroup_id;
               communicator_subgroup_token_kinds_[alias_key] =
                   getCommunicatorSubgroupTokenKind(root);
             }
-          } else if (type == ThreadAPI::TD_MPI_COMM_SPLIT &&
-                     cb->arg_size() >= 4) {
+          } else if (type == ThreadAPI::TD_MPI_COMM_SPLIT && derived_handle) {
             if (semantic_tag.equals("comm-split-type")) {
               registerCommunicatorSubgroup(
-                  cb->getArgOperand(cb->arg_size() - 1), root,
+                  derived_handle, root,
                   MPICommunicatorSubgroupTokenKind::SplitColorUnknown);
               MPIProcessSetFact subgroup;
               subgroup.communicator = canonicalizeCommunicator(root);
@@ -2185,9 +2218,8 @@ void MPIProcessModel::analyzeModule() {
               subgroup.provenance = "comm-split-type";
               subgroup.subgroup_token_kind =
                   MPICommunicatorSubgroupTokenKind::SplitColorUnknown;
-              subgroup.subgroup_id = getCommunicatorSubgroupID(
-                  cb->getArgOperand(cb->arg_size() - 1));
-              recordCommunicatorCreation(cb->getArgOperand(cb->arg_size() - 1), root,
+              subgroup.subgroup_id = getCommunicatorSubgroupID(derived_handle);
+              recordCommunicatorCreation(derived_handle, root,
                                          MPICommunicatorCreationKind::Split,
                                          &subgroup);
               MPIModelGap gap;
@@ -2211,30 +2243,28 @@ void MPIProcessModel::analyzeModule() {
                 assignCommunicatorClass(subgroup.communicator);
             subgroup.unknown = false;
             subgroup.universal = true;
-            subgroup.scope_kind = MPIProcessSetScopeKind::All;
-            subgroup.provenance = "comm-split";
-            if (tryReadScalarInt(cb->getArgOperand(1), color, I)) {
-              registerCommunicatorSubgroup(
-                  cb->getArgOperand(cb->arg_size() - 1), root,
-                  MPICommunicatorSubgroupTokenKind::SplitColorConst, color);
-              subgroup.subgroup_token_kind =
-                  MPICommunicatorSubgroupTokenKind::SplitColorConst;
-              subgroup.subgroup_id = getCommunicatorSubgroupID(
-                  cb->getArgOperand(cb->arg_size() - 1));
-              recordCommunicatorCreation(cb->getArgOperand(cb->arg_size() - 1), root,
-                                         MPICommunicatorCreationKind::Split,
-                                         &subgroup);
-            } else {
-              registerCommunicatorSubgroup(
-                  cb->getArgOperand(cb->arg_size() - 1), root,
-                  MPICommunicatorSubgroupTokenKind::SplitColorUnknown);
-              subgroup.subgroup_token_kind =
-                  MPICommunicatorSubgroupTokenKind::SplitColorUnknown;
-              subgroup.subgroup_id = getCommunicatorSubgroupID(
-                  cb->getArgOperand(cb->arg_size() - 1));
-              recordCommunicatorCreation(cb->getArgOperand(cb->arg_size() - 1), root,
-                                         MPICommunicatorCreationKind::Split,
-                                         &subgroup);
+              subgroup.scope_kind = MPIProcessSetScopeKind::All;
+              subgroup.provenance = "comm-split";
+              if (tryReadScalarInt(cb->getArgOperand(1), color, I)) {
+                registerCommunicatorSubgroup(
+                    derived_handle, root,
+                    MPICommunicatorSubgroupTokenKind::SplitColorConst, color);
+                subgroup.subgroup_token_kind =
+                    MPICommunicatorSubgroupTokenKind::SplitColorConst;
+                subgroup.subgroup_id = getCommunicatorSubgroupID(derived_handle);
+                recordCommunicatorCreation(derived_handle, root,
+                                           MPICommunicatorCreationKind::Split,
+                                           &subgroup);
+              } else {
+                registerCommunicatorSubgroup(
+                    derived_handle, root,
+                    MPICommunicatorSubgroupTokenKind::SplitColorUnknown);
+                subgroup.subgroup_token_kind =
+                    MPICommunicatorSubgroupTokenKind::SplitColorUnknown;
+                subgroup.subgroup_id = getCommunicatorSubgroupID(derived_handle);
+                recordCommunicatorCreation(derived_handle, root,
+                                           MPICommunicatorCreationKind::Split,
+                                           &subgroup);
               MPIModelGap gap;
               gap.domain = MPIModelGapDomain::Communicator;
               gap.inst = I;
@@ -2249,31 +2279,28 @@ void MPIProcessModel::analyzeModule() {
               model_gaps_.push_back(gap);
             }
             }
-          } else if (type == ThreadAPI::TD_MPI_COMM_CREATE &&
-                     cb->arg_size() >= 3) {
+          } else if (type == ThreadAPI::TD_MPI_COMM_CREATE && derived_handle) {
             MPICommunicatorCreationKind creation_kind =
                 semantic_tag.startswith("topology-")
                     ? MPICommunicatorCreationKind::Topology
-                    : MPICommunicatorCreationKind::Create;
-            recordCommunicatorCreation(cb->getArgOperand(cb->arg_size() - 1), root,
+                    : descriptor_creation_kind;
+            recordCommunicatorCreation(derived_handle, root,
                                        creation_kind, nullptr,
                                        creation_kind ==
                                                MPICommunicatorCreationKind::Topology
                                            ? semantic_tag
                                            : "");
-            registerCommunicatorAlias(cb->getArgOperand(cb->arg_size() - 1),
-                                      root);
+            registerCommunicatorAlias(derived_handle, root);
           } else if ((type == ThreadAPI::TD_MPI_CART_CREATE ||
                       type == ThreadAPI::TD_MPI_CART_SUB ||
                       type == ThreadAPI::TD_MPI_DIST_GRAPH_CREATE ||
                       type == ThreadAPI::TD_MPI_DIST_GRAPH_CREATE_ADJACENT ||
                       type == ThreadAPI::TD_MPI_GRAPH_CREATE) &&
-                     cb->arg_size() >= 2) {
-            recordCommunicatorCreation(cb->getArgOperand(cb->arg_size() - 1), root,
-                                       MPICommunicatorCreationKind::Topology,
+                     derived_handle) {
+            recordCommunicatorCreation(derived_handle, root,
+                                       descriptor_creation_kind,
                                        nullptr, semantic_tag);
-            registerCommunicatorAlias(cb->getArgOperand(cb->arg_size() - 1),
-                                      root);
+            registerCommunicatorAlias(derived_handle, root);
           }
         }
       }
@@ -2693,10 +2720,16 @@ void MPIProcessModel::buildSemanticEvents() {
 
     if (isNonBlockingRequestKind(op.kind) || op.kind == MPIOpKind::WAIT ||
         op.kind == MPIOpKind::TEST ||
+        (op.kind == MPIOpKind::COMM_MANAGEMENT &&
+         op.request_lifecycle_issue_nonblocking) ||
         op.kind == MPIOpKind::REQUEST_MANAGEMENT) {
       event.has_request_semantics = true;
       event.request.arity = op.request_arity;
       if (isNonBlockingRequestKind(op.kind) && op.request) {
+        event.request.action = MPIRequestActionKind::IssueNonBlocking;
+        event.request.requests.push_back(op.request);
+      } else if (op.kind == MPIOpKind::COMM_MANAGEMENT &&
+                 op.request_lifecycle_issue_nonblocking && op.request) {
         event.request.action = MPIRequestActionKind::IssueNonBlocking;
         event.request.requests.push_back(op.request);
       } else if (op.kind == MPIOpKind::REQUEST_MANAGEMENT && op.request) {

@@ -24,9 +24,9 @@ shared data.
 
 #include "llvm/Analysis/CallGraph.h"
 #include "llvm/Analysis/LoopInfo.h"
+#include "llvm/IR/Dominators.h"
 #include "llvm/IR/InstIterator.h"
 #include "llvm/IR/Instructions.h"
-#include "llvm/IR/Dominators.h"
 #include "llvm/Support/Debug.h"
 #include "llvm/Support/raw_ostream.h"
 
@@ -34,6 +34,7 @@ shared data.
 #include "Alias/seadsa/Global.hh"
 #include "Alias/seadsa/Graph.hh"
 #include "Analysis/Concurrency/Utils/ThreadAPI.h"
+#include "Analysis/Concurrency/Utils/ThreadMultiplicity.h"
 
 using namespace llvm;
 using namespace seadsa;
@@ -139,6 +140,8 @@ bool StaticThreadSharingAnalysis::runOnModule(Module &M) {
 
 void StaticThreadSharingAnalysis::findStaticThreads(Module &M) {
   ThreadAPI *api = ThreadAPI::getThreadAPI();
+  concurrency::ThreadMultiplicityAnalysis multiplicity(
+      M, &getAnalysis<CallGraphWrapperPass>().getCallGraph());
 
   auto recordThreadEntry = [this](const Function *entryFunc, bool may_repeat) {
     if (!entryFunc) {
@@ -164,10 +167,8 @@ void StaticThreadSharingAnalysis::findStaticThreads(Module &M) {
     for (inst_iterator I = inst_begin(F), E = inst_end(F); I != E; ++I) {
       if (api->isTDFork(&*I)) {
         const Value *entry = api->getForkedFun(&*I);
-        DominatorTree DT(F);
-        LoopInfo LI;
-        LI.analyze(DT);
-        const bool may_repeat = LI.getLoopFor(I->getParent()) != nullptr;
+        const bool may_repeat =
+            multiplicity.instructionMayExecuteMultipleTimes(&*I);
         if (!entry) {
           m_threads_complete = false;
           continue;

@@ -68,6 +68,7 @@ struct Task {
   size_t phase_id = 0;
   size_t sibling_group = 0;
   size_t sequence_index = 0;
+  size_t event_order = 0;
   size_t region_id = 0;
   size_t semantic_entity_id = 0;
   std::vector<Dependency> dependencies;
@@ -104,6 +105,7 @@ struct WaitBoundaryInfo {
   const llvm::Instruction *inst = nullptr;
   size_t scheduling_context_id = 0;
   size_t sequence_index = 0;
+  size_t event_order = 0;
   size_t phase_id = 0;
   size_t taskgroup_id = 0;
   size_t region_id = 0;
@@ -117,6 +119,7 @@ struct WaitBoundaryRecord {
   const llvm::Instruction *inst = nullptr;
   size_t scheduling_context_id = 0;
   size_t sequence_index = 0;
+  size_t event_order = 0;
   size_t sibling_group = 0;
   size_t taskgroup_id = 0;
   size_t semantic_entity_id = 0;
@@ -174,6 +177,7 @@ struct SemanticEvent {
   const llvm::Instruction *inst = nullptr;
   size_t scheduling_context_id = 0;
   size_t sequence_index = 0;
+  size_t event_order = 0;
   size_t region_id = 0;
   size_t phase_id = 0;
   bool is_partial = false;
@@ -200,6 +204,7 @@ struct OpenMPTaskEvent {
   const Task *task = nullptr;
   size_t scheduling_context_id = 0;
   size_t sequence_index = 0;
+  size_t event_order = 0;
   size_t phase_id = 0;
   size_t taskgroup_id = 0;
   size_t region_id = 0;
@@ -319,6 +324,7 @@ private:
     size_t next_phase_token = 1;
     size_t next_region_id = 1;
     size_t sequence_index = 0;
+    size_t next_event_order = 1;
     const llvm::Instruction *anchor_inst = nullptr;
     std::vector<size_t> taskgroup_stack;
     std::vector<size_t> phase_stack;
@@ -363,8 +369,26 @@ private:
                    size_t taskgroup_id);
   void addEvent(SemanticEventKind kind, const llvm::Instruction *inst,
                 size_t entity_id, size_t scheduling_context_id,
-                size_t sequence_index, size_t region_id, size_t phase_id,
+                size_t sequence_index, size_t event_order, size_t region_id,
+                size_t phase_id,
                 bool is_partial = false);
+  void addEvent(SemanticEventKind kind, const llvm::Instruction *inst,
+                size_t entity_id, size_t scheduling_context_id,
+                size_t sequence_index, size_t region_id, size_t phase_id,
+                bool is_partial = false) {
+    addEvent(kind, inst, entity_id, scheduling_context_id, sequence_index,
+             sequence_index, region_id, phase_id, is_partial);
+  }
+  void addTaskEvent(OpenMPTaskEvent::Kind kind, const llvm::Instruction *inst,
+                    size_t scheduling_context_id, size_t sequence_index,
+                    size_t event_order,
+                    size_t phase_id, size_t taskgroup_id, size_t region_id,
+                    size_t semantic_entity_id, const Task *task = nullptr,
+                    WaitBoundaryInfo::Kind boundary_kind =
+                        WaitBoundaryInfo::Kind::Unknown,
+                    bool is_partial_wait = false,
+                    bool is_taskgroup_end = false,
+                    std::vector<Dependency> dependencies = {});
   void addTaskEvent(OpenMPTaskEvent::Kind kind, const llvm::Instruction *inst,
                     size_t scheduling_context_id, size_t sequence_index,
                     size_t phase_id, size_t taskgroup_id, size_t region_id,
@@ -373,7 +397,12 @@ private:
                         WaitBoundaryInfo::Kind::Unknown,
                     bool is_partial_wait = false,
                     bool is_taskgroup_end = false,
-                    std::vector<Dependency> dependencies = {});
+                    std::vector<Dependency> dependencies = {}) {
+    addTaskEvent(kind, inst, scheduling_context_id, sequence_index,
+                 sequence_index, phase_id, taskgroup_id, region_id,
+                 semantic_entity_id, task, boundary_kind, is_partial_wait,
+                 is_taskgroup_end, std::move(dependencies));
+  }
   DependencyConflict classifyDependencyConflict(const Dependency &d1,
                                                const Dependency &d2) const;
   bool dependenciesConflict(const Dependency &d1, const Dependency &d2) const;

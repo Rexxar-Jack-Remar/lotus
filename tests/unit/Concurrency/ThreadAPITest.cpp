@@ -1002,15 +1002,25 @@ TEST_F(ThreadAPITest, ReportsExplicitSemanticLoweringStatus) {
 
   EXPECT_EQ(async.kind, ThreadAPI::SemanticLoweringKind::Deferred);
   EXPECT_STREQ(async.reason, "async-launch-policy-witness");
+  EXPECT_NE(async.owners, 0u);
   EXPECT_EQ(future_get.kind, ThreadAPI::SemanticLoweringKind::Modeled);
   EXPECT_STREQ(future_get.reason, "modeled");
+  EXPECT_TRUE(api->hasSemanticLoweringOwner(
+      ThreadAPI::TD_FUTURE_GET, ThreadAPI::SemanticLoweringOwner::HB));
   EXPECT_EQ(omp_atomic.kind,
             ThreadAPI::SemanticLoweringKind::RecognizedButUnmodeled);
   EXPECT_STREQ(omp_atomic.reason, "openmp-atomic-runtime-unmodeled");
+  EXPECT_TRUE(api->hasSemanticLoweringOwner(
+      ThreadAPI::TD_OMP_ATOMIC_START,
+      ThreadAPI::SemanticLoweringOwner::ExplicitFallback));
   EXPECT_EQ(task_complete.kind, ThreadAPI::SemanticLoweringKind::Modeled);
   EXPECT_STREQ(task_complete.reason, "modeled");
+  EXPECT_TRUE(api->hasSemanticLoweringOwner(
+      ThreadAPI::TD_OMP_TASK_COMPLETE, ThreadAPI::SemanticLoweringOwner::OpenMP));
   EXPECT_EQ(doacross_submit.kind, ThreadAPI::SemanticLoweringKind::Modeled);
   EXPECT_STREQ(doacross_submit.reason, "modeled");
+  EXPECT_TRUE(api->hasSemanticLoweringOwner(
+      ThreadAPI::TD_OMP_DOACROSS_SUBMIT, ThreadAPI::SemanticLoweringOwner::HB));
 }
 
 TEST_F(ThreadAPITest, OpenMPBarrierUsesSiteIdentityInsteadOfMetadataOperand) {
@@ -1115,10 +1125,54 @@ TEST_F(ThreadAPITest, SpecialSemanticLoweringStatesStayExplicitlyEnumerated) {
 
     if (expected_non_modeled.count(type) != 0) {
       EXPECT_NE(info.kind, ThreadAPI::SemanticLoweringKind::Modeled) << name;
+      EXPECT_NE(info.owners & ThreadAPI::semanticLoweringOwnerMask(
+                                ThreadAPI::SemanticLoweringOwner::ExplicitFallback),
+                0u)
+          << name;
     } else {
       EXPECT_EQ(info.kind, ThreadAPI::SemanticLoweringKind::Modeled) << name;
+      EXPECT_NE(info.owners, 0u) << name;
     }
   }
+}
+
+TEST_F(ThreadAPITest, ModeledConcurrencyFunctionsExposeConcreteLoweringOwners) {
+  const char *source = R"(
+    declare void @__kmpc_critical(i8*, i32, [8 x i32]*)
+    declare i32 @MPI_Comm_idup(i8*, i8*, i8*)
+
+    @crit = global [8 x i32] zeroinitializer
+
+    define void @main(i8* %comm, i8* %newcomm, i8* %req) {
+    entry:
+      call void @__kmpc_critical(i8* null, i32 0, [8 x i32]* @crit)
+      call i32 @MPI_Comm_idup(i8* %comm, i8* %newcomm, i8* %req)
+      ret void
+    }
+  )";
+
+  auto module = parseModule(source);
+  ASSERT_NE(module, nullptr);
+
+  ThreadAPI::resetThreadAPI();
+  ThreadAPI *api = ThreadAPI::getThreadAPI();
+  const Function *critical = module->getFunction("__kmpc_critical");
+  const Function *idup = module->getFunction("MPI_Comm_idup");
+  ASSERT_NE(critical, nullptr);
+  ASSERT_NE(idup, nullptr);
+
+  ThreadAPI::SemanticLoweringInfo critical_info =
+      api->getSemanticLoweringInfo(critical);
+  EXPECT_EQ(critical_info.kind, ThreadAPI::SemanticLoweringKind::Modeled);
+  EXPECT_TRUE(api->hasSemanticLoweringOwner(
+      critical, ThreadAPI::SemanticLoweringOwner::OpenMP));
+  EXPECT_TRUE(api->hasSemanticLoweringOwner(
+      critical, ThreadAPI::SemanticLoweringOwner::LockSet));
+
+  ThreadAPI::SemanticLoweringInfo idup_info = api->getSemanticLoweringInfo(idup);
+  EXPECT_EQ(idup_info.kind, ThreadAPI::SemanticLoweringKind::Modeled);
+  EXPECT_TRUE(api->hasSemanticLoweringOwner(
+      idup, ThreadAPI::SemanticLoweringOwner::MPI));
 }
 
 TEST_F(ThreadAPITest, LongestPrefixRuleWinsForOpenMPDoacross) {

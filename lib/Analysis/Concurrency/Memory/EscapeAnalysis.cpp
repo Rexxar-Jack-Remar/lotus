@@ -6,6 +6,7 @@
 
 #include "Analysis/Concurrency/Utils/ThreadAPI.h"
 
+#include <llvm/Analysis/ValueTracking.h>
 #include <llvm/IR/InstIterator.h>
 #include <llvm/IR/Instructions.h>
 #include <llvm/Support/raw_ostream.h>
@@ -42,7 +43,17 @@ bool EscapeAnalysis::isEscaped(const Value *val) const {
   // Globals are always escaped (shared)
   if (isa<GlobalValue>(val))
     return true;
-  return m_escaped_values.count(val);
+  if (m_escaped_values.count(val)) {
+    return true;
+  }
+  const Value *stripped = val->stripPointerCasts();
+  if (m_escaped_values.count(stripped)) {
+    return true;
+  }
+  if (const Value *root = getUnderlyingObject(stripped)) {
+    return m_escaped_values.count(root->stripPointerCasts()) != 0;
+  }
+  return false;
 }
 
 bool EscapeAnalysis::isThreadLocal(const Value *val) const {
@@ -51,14 +62,37 @@ bool EscapeAnalysis::isThreadLocal(const Value *val) const {
 
 void EscapeAnalysis::runEscapeAnalysis() {
   std::vector<const Value *> worklist;
+  auto enqueueEscaped = [&](const Value *value) {
+    if (!value) {
+      return;
+    }
+
+    std::vector<const Value *> candidates;
+    candidates.push_back(value);
+    const Value *stripped = value->stripPointerCasts();
+    if (stripped != value) {
+      candidates.push_back(stripped);
+    }
+    if (const auto *gep = dyn_cast<GetElementPtrInst>(stripped)) {
+      candidates.push_back(gep->getPointerOperand()->stripPointerCasts());
+    }
+    if (const Value *root = getUnderlyingObject(stripped)) {
+      candidates.push_back(root->stripPointerCasts());
+    }
+
+    for (const Value *candidate : candidates) {
+      if (candidate && m_escaped_values.insert(candidate).second) {
+        worklist.push_back(candidate);
+      }
+    }
+  };
 
   // 1. Identify sources of escape
   // - Global variables
   // - Arguments to thread creation functions (pthread_create)
 
   for (const GlobalValue &gv : m_module.globals()) {
-    m_escaped_values.insert(&gv);
-    worklist.push_back(&gv);
+    enqueueEscaped(&gv);
   }
 
   auto *threadAPI = ThreadAPI::getThreadAPI();
@@ -79,9 +113,7 @@ void EscapeAnalysis::runEscapeAnalysis() {
             continue;
           }
 
-          if (m_escaped_values.insert(arg).second) {
-            worklist.push_back(arg);
-          }
+          enqueueEscaped(arg);
         }
       }
 
@@ -92,9 +124,7 @@ void EscapeAnalysis::runEscapeAnalysis() {
 
         // If we store a value into an escaped pointer, the value escapes
         if (isEscaped(ptr)) {
-          if (m_escaped_values.insert(val).second) {
-            worklist.push_back(val);
-          }
+          enqueueEscaped(val);
         }
       } else if (auto *call = dyn_cast<CallBase>(inst)) {
         Function *callee = call->getCalledFunction();
@@ -118,8 +148,8 @@ void EscapeAnalysis::runEscapeAnalysis() {
             escapes_via_call = !call->doesNotCapture(arg_idx);
           }
 
-          if (escapes_via_call && m_escaped_values.insert(arg).second) {
-            worklist.push_back(arg);
+          if (escapes_via_call) {
+            enqueueEscaped(arg);
           }
         }
       }
@@ -139,9 +169,7 @@ void EscapeAnalysis::runEscapeAnalysis() {
         if (auto *CB = dyn_cast<CallBase>(U)) {
           if (resolveInternalCallee(CB) == F) {
             const Value *actualArg = CB->getArgOperand(argNo);
-            if (m_escaped_values.insert(actualArg).second) {
-              worklist.push_back(actualArg);
-            }
+            enqueueEscaped(actualArg);
           }
         }
       }
@@ -157,9 +185,7 @@ void EscapeAnalysis::runEscapeAnalysis() {
                 continue;
               }
               const Value *actualArg = CB->getArgOperand(argNo);
-              if (m_escaped_values.insert(actualArg).second) {
-                worklist.push_back(actualArg);
-              }
+              enqueueEscaped(actualArg);
             }
           }
         }
@@ -179,16 +205,12 @@ void EscapeAnalysis::runEscapeAnalysis() {
           if (!actual_arg || !actual_arg->getType()->isPointerTy()) {
             continue;
           }
-          if (m_escaped_values.insert(actual_arg).second) {
-            worklist.push_back(actual_arg);
-          }
+          enqueueEscaped(actual_arg);
         }
         for (const BasicBlock &BB : *callee) {
           if (auto *ret = dyn_cast<ReturnInst>(BB.getTerminator())) {
             if (const Value *retVal = ret->getReturnValue()) {
-              if (m_escaped_values.insert(retVal).second) {
-                worklist.push_back(retVal);
-              }
+              enqueueEscaped(retVal);
             }
           }
         }
@@ -219,35 +241,23 @@ void EscapeAnalysis::runEscapeAnalysis() {
           } else if (store->getPointerOperand() == curr) {
             // Storing into an escaped pointer -> value escapes
             const Value *val = store->getValueOperand();
-            if (m_escaped_values.insert(val).second) {
-              worklist.push_back(val);
-            }
+            enqueueEscaped(val);
           }
         } else if (auto *load = dyn_cast<LoadInst>(inst)) {
           // Loading from an escaped pointer -> result escapes
-          if (m_escaped_values.insert(load).second) {
-            worklist.push_back(load);
-          }
+          enqueueEscaped(load);
         } else if (auto *gep = dyn_cast<GetElementPtrInst>(inst)) {
           // GEP of escaped pointer -> result escapes
-          if (m_escaped_values.insert(gep).second) {
-            worklist.push_back(gep);
-          }
+          enqueueEscaped(gep);
         } else if (auto *cast = dyn_cast<CastInst>(inst)) {
           // Cast of escaped value -> result escapes
-          if (m_escaped_values.insert(cast).second) {
-            worklist.push_back(cast);
-          }
+          enqueueEscaped(cast);
         } else if (auto *phi = dyn_cast<PHINode>(inst)) {
           // PHI node with escaped operand -> result escapes
-          if (m_escaped_values.insert(phi).second) {
-            worklist.push_back(phi);
-          }
+          enqueueEscaped(phi);
         } else if (auto *select = dyn_cast<SelectInst>(inst)) {
           // Select with escaped operand -> result escapes
-          if (m_escaped_values.insert(select).second) {
-            worklist.push_back(select);
-          }
+          enqueueEscaped(select);
         } else if (auto *call = dyn_cast<CallBase>(inst)) {
           // Propagate from Actual Argument -> Formal Argument
           const Function *callee = resolveInternalCallee(call);
@@ -257,9 +267,7 @@ void EscapeAnalysis::runEscapeAnalysis() {
                 if (i < callee->arg_size()) {
                   Argument *formalArg =
                       const_cast<Function *>(callee)->getArg(i);
-                  if (m_escaped_values.insert(formalArg).second) {
-                    worklist.push_back(formalArg);
-                  }
+                  enqueueEscaped(formalArg);
                 }
               }
             }
@@ -270,9 +278,7 @@ void EscapeAnalysis::runEscapeAnalysis() {
           for (const User *U : F->users()) {
             if (auto *CB = dyn_cast<CallBase>(U)) {
               if (resolveInternalCallee(CB) == F) {
-                if (m_escaped_values.insert(CB).second) {
-                  worklist.push_back(CB);
-                }
+                enqueueEscaped(CB);
               }
             }
           }

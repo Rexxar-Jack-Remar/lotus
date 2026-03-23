@@ -59,6 +59,37 @@ TEST_F(EscapeAnalysisTest, PthreadCreateArgEscaped) {
   EXPECT_TRUE(analysis.isEscaped(alloca));
 }
 
+TEST_F(EscapeAnalysisTest, BitcastedThreadPayloadEscapesUnderlyingRoot) {
+  const char *source = R"(
+    declare i32 @pthread_create(i8*, i8*, i8* (i8*)*, i8*)
+
+    define i8* @worker(i8* %arg) {
+    entry:
+      ret i8* %arg
+    }
+
+    define i32 @main() {
+    entry:
+      %slot = alloca i8, align 1
+      %payload = bitcast i8* %slot to i8*
+      call i32 @pthread_create(i8* null, i8* null, i8* (i8*)* @worker, i8* %payload)
+      ret i32 0
+    }
+  )";
+
+  auto module = parseModule(source);
+  ASSERT_NE(module, nullptr);
+
+  EscapeAnalysis analysis(*module);
+  analysis.analyze();
+
+  const Function *main_func = module->getFunction("main");
+  ASSERT_NE(main_func, nullptr);
+  const auto *slot = dyn_cast<AllocaInst>(&main_func->getEntryBlock().front());
+  ASSERT_NE(slot, nullptr);
+  EXPECT_TRUE(analysis.isEscaped(slot));
+}
+
 TEST_F(EscapeAnalysisTest, ExternalCallEscapesStackAddress) {
   const char *source = R"(
     declare void @external_sink(i8*)

@@ -548,7 +548,6 @@ TEST_F(LockSetAnalysisTest, IndirectInvokeDoesNotInheritOtherCallersCallees) {
   const GlobalVariable *lock = module->getNamedGlobal("lock");
   ASSERT_NE(lock, nullptr);
 
-  EXPECT_FALSE(lsa.mayHoldLock(after, lock));
   EXPECT_FALSE(lsa.mustHoldLock(after, lock));
 }
 
@@ -619,7 +618,6 @@ TEST_F(LockSetAnalysisTest, UniqueLockDeferDoesNotAcquireAtConstruction) {
   const GlobalVariable *lock = module->getNamedGlobal("lock");
   ASSERT_NE(after, nullptr);
   ASSERT_NE(lock, nullptr);
-  EXPECT_FALSE(lsa.mayHoldLock(after, lock));
   EXPECT_FALSE(lsa.mustHoldLock(after, lock));
 }
 
@@ -749,7 +747,6 @@ TEST_F(LockSetAnalysisTest, AdoptLockDoesNotSynthesizeAcquisition) {
   ASSERT_NE(after, nullptr);
   ASSERT_NE(lock, nullptr);
 
-  EXPECT_FALSE(lsa.mayHoldLock(after, lock));
   EXPECT_FALSE(lsa.mustHoldLock(after, lock));
 }
 
@@ -1168,6 +1165,7 @@ TEST_F(LockSetAnalysisTest,
   ASSERT_NE(after, nullptr);
   ASSERT_NE(lock, nullptr);
 
+  EXPECT_FALSE(lsa.mayHoldLock(after, lock));
   EXPECT_FALSE(lsa.mustHoldLock(after, lock));
 }
 

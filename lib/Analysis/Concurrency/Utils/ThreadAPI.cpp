@@ -749,6 +749,297 @@ ThreadAPI::RuntimeLibrary ThreadAPI::inferLibrary(TD_TYPE type) const {
   }
 }
 
+namespace {
+
+using Owner = ThreadAPI::SemanticLoweringOwner;
+using LoweringKind = ThreadAPI::SemanticLoweringKind;
+using LoweringInfo = ThreadAPI::SemanticLoweringInfo;
+using TD = ThreadAPI::TD_TYPE;
+
+constexpr uint32_t ownerMask(Owner owner) {
+  return static_cast<uint32_t>(owner);
+}
+
+constexpr uint32_t ownerMask(Owner owner_a, Owner owner_b) {
+  return ownerMask(owner_a) | ownerMask(owner_b);
+}
+
+constexpr uint32_t ownerMask(Owner owner_a, Owner owner_b, Owner owner_c) {
+  return ownerMask(owner_a, owner_b) | ownerMask(owner_c);
+}
+
+bool isExplicitFallbackType(TD type) {
+  switch (type) {
+  case TD::TD_DUMMY:
+  case TD::TD_OMP_ATOMIC_START:
+  case TD::TD_OMP_ATOMIC_END:
+  case TD::TD_OMP_TARGET_DATA_UPDATE:
+  case TD::TD_OMP_CANCEL:
+  case TD::TD_OMP_TEAMS:
+  case TD::TD_OMP_TEAMS_HOST:
+  case TD::TD_OMP_TEAMS_DISTRIBUTE:
+  case TD::TD_OMP_DISTRIBUTE:
+  case TD::TD_OMP_DISTRIBUTE_STATIC:
+  case TD::TD_OMP_DISTRIBUTE_DYNAMIC:
+  case TD::TD_OMP_DISTRIBUTE_GUIDANCE:
+  case TD::TD_OMP_LOOP_STATIC_INIT:
+  case TD::TD_OMP_LOOP_DYNAMIC_INIT:
+  case TD::TD_OMP_LOOP_GUIDANCE_INIT:
+  case TD::TD_OMP_AFFINITY:
+  case TD::TD_OMP_SCOPE_START:
+  case TD::TD_OMP_SCOPE_END:
+  case TD::TD_OMP_TASKLOOP_SIMD:
+  case TD::TD_OMP_TASKLOOP_FINI:
+  case TD::TD_OMP_INTEROP_INIT:
+  case TD::TD_OMP_INTEROP_FINI:
+  case TD::TD_MPI_SESSION_GET_INFO:
+  case TD::TD_MPI_SESSION_GET_NUM_ERRCODES:
+  case TD::TD_MPI_SESSION_GET_ERRHANDLER:
+  case TD::TD_MPI_SESSION_SET_ERRHANDLER:
+  case TD::TD_MPI_ERRHANDLER_CREATE:
+  case TD::TD_MPI_ERRHANDLER_FREE:
+  case TD::TD_MPI_COMM_GET_ERRHANDLER:
+  case TD::TD_MPI_COMM_SET_ERRHANDLER:
+  case TD::TD_MPI_COMM_CALL_ERRHANDLER:
+  case TD::TD_MPI_WIN_GET_ERRHANDLER:
+  case TD::TD_MPI_WIN_SET_ERRHANDLER:
+  case TD::TD_MPI_FILE_GET_ERRHANDLER:
+  case TD::TD_MPI_FILE_SET_ERRHANDLER:
+  case TD::TD_MPI_ERROR_CLASS:
+  case TD::TD_MPI_ERROR_STRING:
+  case TD::TD_MPI_INFO_CREATE:
+  case TD::TD_MPI_INFO_DUP:
+  case TD::TD_MPI_INFO_FREE:
+  case TD::TD_MPI_INFO_GET:
+  case TD::TD_MPI_INFO_GET_VALUELEN:
+  case TD::TD_MPI_INFO_GET_NKEYS:
+  case TD::TD_MPI_INFO_GET_NTHKEY:
+  case TD::TD_MPI_INFO_GET_KEYVAL:
+  case TD::TD_MPI_INFO_SET:
+  case TD::TD_MPI_INFO_DELETE:
+  case TD::TD_MPI_INFO_C2F:
+  case TD::TD_MPI_INFO_CREATE_ENV:
+  case TD::TD_MPI_INFO_FREE_ENV:
+  case TD::TD_MPI_GET_COUNT:
+  case TD::TD_MPI_GET_ELEMENTS:
+  case TD::TD_MPI_GET_ELEMENTS_X:
+  case TD::TD_MPI_STATUS_SIZE:
+  case TD::TD_MPI_STATUS_SET_ELEMENTS:
+  case TD::TD_MPI_STATUS_SET_ELEMENTS_X:
+    return true;
+  default:
+    return false;
+  }
+}
+
+bool isLockLikeType(TD type) {
+  switch (type) {
+  case TD::TD_ACQUIRE:
+  case TD::TD_TRY_ACQUIRE:
+  case TD::TD_RWLOCK_RDLOCK:
+  case TD::TD_RWLOCK_WRLOCK:
+  case TD::TD_RELEASE:
+  case TD::TD_SHARED_RDLOCK:
+  case TD::TD_SHARED_WRLOCK:
+  case TD::TD_SHARED_UNLOCK:
+  case TD::TD_LOCK_GUARD_CTOR:
+  case TD::TD_LOCK_GUARD_DTOR:
+  case TD::TD_UNIQUE_LOCK_CTOR:
+  case TD::TD_UNIQUE_LOCK_DTOR:
+  case TD::TD_UNIQUE_LOCK_LOCK:
+  case TD::TD_UNIQUE_LOCK_UNLOCK:
+  case TD::TD_SCOPED_LOCK_CTOR:
+  case TD::TD_SCOPED_LOCK_DTOR:
+  case TD::TD_SHARED_LOCK_CTOR:
+  case TD::TD_SHARED_LOCK_DTOR:
+  case TD::TD_OMP_ORDERED_START:
+  case TD::TD_OMP_ORDERED_END:
+  case TD::TD_KERNEL_SPIN_LOCK:
+  case TD::TD_KERNEL_SPIN_UNLOCK:
+  case TD::TD_KERNEL_SPIN_TRYLOCK:
+  case TD::TD_KERNEL_MUTEX_LOCK:
+  case TD::TD_KERNEL_MUTEX_UNLOCK:
+  case TD::TD_KERNEL_MUTEX_TRYLOCK:
+  case TD::TD_KERNEL_DOWN:
+  case TD::TD_KERNEL_UP:
+  case TD::TD_KERNEL_READ_LOCK:
+  case TD::TD_KERNEL_READ_UNLOCK:
+  case TD::TD_KERNEL_WRITE_LOCK:
+  case TD::TD_KERNEL_WRITE_UNLOCK:
+  case TD::TD_KERNEL_DOWN_READ:
+  case TD::TD_KERNEL_UP_READ:
+  case TD::TD_KERNEL_DOWN_WRITE:
+  case TD::TD_KERNEL_UP_WRITE:
+    return true;
+  default:
+    return false;
+  }
+}
+
+bool isBarrierHBType(TD type) {
+  switch (type) {
+  case TD::TD_BAR_WAIT:
+  case TD::TD_LATCH_COUNT_DOWN:
+  case TD::TD_LATCH_WAIT:
+  case TD::TD_LATCH_ARRIVE_WAIT:
+  case TD::TD_BARRIER_ARRIVE_WAIT:
+  case TD::TD_BARRIER_ARRIVE:
+  case TD::TD_BARRIER_WAIT_CPP20:
+  case TD::TD_CALL_ONCE:
+  case TD::TD_FUTURE_GET:
+  case TD::TD_FUTURE_WAIT:
+  case TD::TD_PROMISE_SET:
+  case TD::TD_OMP_TASK:
+  case TD::TD_OMP_TASKWAIT:
+  case TD::TD_OMP_TASKWAIT_DEPS:
+  case TD::TD_OMP_TASKGROUP_START:
+  case TD::TD_OMP_TASKGROUP_END:
+  case TD::TD_OMP_TASK_WITH_DEPS:
+  case TD::TD_OMP_TASKLOOP:
+  case TD::TD_OMP_TASK_COMPLETE:
+  case TD::TD_OMP_SINGLE_END:
+  case TD::TD_OMP_REDUCE_START:
+  case TD::TD_OMP_FOR_STATIC_FINI:
+  case TD::TD_OMP_FOR_DISPATCH_FINI:
+  case TD::TD_OMP_SECTIONS_END:
+    return true;
+  default:
+    return false;
+  }
+}
+
+bool isMHPThreadType(TD type) {
+  switch (type) {
+  case TD::TD_FORK:
+  case TD::TD_JOIN:
+  case TD::TD_DETACH:
+  case TD::TD_EXIT:
+  case TD::TD_CANCEL:
+  case TD::TD_COND_WAIT:
+  case TD::TD_COND_SIGNAL:
+  case TD::TD_COND_BROADCAST:
+  case TD::TD_BAR_WAIT:
+  case TD::TD_JTHREAD_FORK:
+  case TD::TD_JTHREAD_JOIN:
+  case TD::TD_ASYNC:
+  case TD::HARE_PAR_FOR:
+    return true;
+  default:
+    return false;
+  }
+}
+
+bool isOpenMPTaskType(TD type) {
+  switch (type) {
+  case TD::TD_OMP_TASK:
+  case TD::TD_OMP_TASKWAIT:
+  case TD::TD_OMP_TASKWAIT_DEPS:
+  case TD::TD_OMP_TASKYIELD:
+  case TD::TD_OMP_TASKGROUP_START:
+  case TD::TD_OMP_TASKGROUP_END:
+  case TD::TD_OMP_TASK_WITH_DEPS:
+  case TD::TD_OMP_TASKLOOP:
+  case TD::TD_OMP_TASK_COMPLETE:
+  case TD::TD_OMP_DOACROSS_WAIT:
+  case TD::TD_OMP_DOACROSS_SUBMIT:
+  case TD::TD_OMP_SINGLE_START:
+  case TD::TD_OMP_SINGLE_END:
+  case TD::TD_OMP_MASTER_START:
+  case TD::TD_OMP_MASTER_END:
+  case TD::TD_OMP_ORDERED_START:
+  case TD::TD_OMP_ORDERED_END:
+  case TD::TD_OMP_REDUCE_START:
+  case TD::TD_OMP_REDUCE_END:
+  case TD::TD_OMP_REDUCE_NOWAIT_START:
+  case TD::TD_OMP_REDUCE_NOWAIT_END:
+  case TD::TD_OMP_FOR_STATIC_INIT:
+  case TD::TD_OMP_FOR_STATIC_FINI:
+  case TD::TD_OMP_FOR_DISPATCH_INIT:
+  case TD::TD_OMP_FOR_DISPATCH_NEXT:
+  case TD::TD_OMP_FOR_DISPATCH_FINI:
+  case TD::TD_OMP_SECTIONS_INIT:
+  case TD::TD_OMP_SECTIONS_NEXT:
+  case TD::TD_OMP_SECTIONS_END:
+  case TD::TD_FORK:
+    return true;
+  default:
+    return false;
+  }
+}
+
+LoweringInfo makeLoweringInfo(TD type, ThreadAPI::RuntimeLibrary library,
+                              llvm::StringRef semantic_tag) {
+  if (type == TD::TD_DUMMY) {
+    return {LoweringKind::RecognizedButUnmodeled, "unknown-api",
+            ownerMask(Owner::ExplicitFallback)};
+  }
+  if (type == TD::TD_ASYNC) {
+    return {LoweringKind::Deferred, "async-launch-policy-witness",
+            ownerMask(Owner::HB, Owner::MHP)};
+  }
+  if (type == TD::TD_OMP_ATOMIC_START || type == TD::TD_OMP_ATOMIC_END) {
+    return {LoweringKind::RecognizedButUnmodeled,
+            "openmp-atomic-runtime-unmodeled",
+            ownerMask(Owner::OpenMP, Owner::ExplicitFallback)};
+  }
+  if (isExplicitFallbackType(type)) {
+    const char *reason = library == ThreadAPI::RuntimeLibrary::MPI
+                             ? "metadata-only-mpi-api"
+                             : "recognized-openmp-runtime-unmodeled";
+    uint32_t owners = ownerMask(Owner::ExplicitFallback);
+    if (library == ThreadAPI::RuntimeLibrary::MPI) {
+      owners |= ownerMask(Owner::MPI);
+    } else if (library == ThreadAPI::RuntimeLibrary::OpenMP) {
+      owners |= ownerMask(Owner::OpenMP);
+    }
+    return {LoweringKind::RecognizedButUnmodeled, reason, owners};
+  }
+
+  uint32_t owners = 0;
+  switch (library) {
+  case ThreadAPI::RuntimeLibrary::OpenMP:
+    owners |= ownerMask(Owner::OpenMP);
+    break;
+  case ThreadAPI::RuntimeLibrary::MPI:
+    owners |= ownerMask(Owner::MPI);
+    break;
+  case ThreadAPI::RuntimeLibrary::PThread:
+  case ThreadAPI::RuntimeLibrary::Cpp:
+  case ThreadAPI::RuntimeLibrary::LinuxKernel:
+  case ThreadAPI::RuntimeLibrary::Hare:
+  case ThreadAPI::RuntimeLibrary::Custom:
+    owners |= ownerMask(Owner::MHP);
+    break;
+  case ThreadAPI::RuntimeLibrary::Unknown:
+    break;
+  }
+
+  if (isLockLikeType(type)) {
+    owners |= ownerMask(Owner::LockSet, Owner::MHP);
+  }
+  if (isBarrierHBType(type)) {
+    owners |= ownerMask(Owner::HB);
+  }
+  if (isMHPThreadType(type)) {
+    owners |= ownerMask(Owner::MHP);
+  }
+  if (isOpenMPTaskType(type) || semantic_tag.startswith("task") ||
+      semantic_tag.startswith("taskgroup") || semantic_tag.startswith("doacross")) {
+    owners |= ownerMask(Owner::HB, Owner::MHP);
+  }
+  if (library == ThreadAPI::RuntimeLibrary::MPI &&
+      type == TD::TD_MPI_COMM_DUP &&
+      semantic_tag.equals("comm-idup")) {
+    owners |= ownerMask(Owner::MPI);
+  }
+  if (owners == 0) {
+    owners = ownerMask(Owner::ExplicitFallback);
+  }
+  return {LoweringKind::Modeled, "modeled", owners};
+}
+
+} // namespace
+
 bool ThreadAPI::isLibraryEnabled(RuntimeLibrary library) const {
   switch (library) {
   case RuntimeLibrary::OpenMP:
@@ -860,6 +1151,21 @@ ThreadAPI::APIDescription ThreadAPI::describe(const Function *F) const {
   description.type = getType(F);
   description.library = inferLibrary(description.type);
   return description;
+}
+
+ThreadAPI::SemanticLoweringInfo
+ThreadAPI::getSemanticLoweringInfo(TD_TYPE type) const {
+  return makeLoweringInfo(type, inferLibrary(type), "");
+}
+
+ThreadAPI::SemanticLoweringInfo
+ThreadAPI::getSemanticLoweringInfo(const Function *F) const {
+  if (!F) {
+    return getSemanticLoweringInfo(TD_DUMMY);
+  }
+  const APIDescription description = describe(F);
+  return makeLoweringInfo(description.type, description.library,
+                          description.semantic_tag);
 }
 
 ThreadAPI::TD_TYPE ThreadAPI::getType(const Function *F) const {

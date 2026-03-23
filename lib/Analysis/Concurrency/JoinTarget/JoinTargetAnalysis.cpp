@@ -5,9 +5,10 @@
 
 #include "Analysis/Concurrency/JoinTarget/JoinTargetAnalysis.h"
 #include "Alias/AliasAnalysisWrapper/AliasAnalysisWrapper.h"
+#include "Analysis/Concurrency/Utils/ThreadMultiplicity.h"
 
-#include <llvm/Analysis/LoopInfo.h>
 #include <llvm/ADT/SmallVector.h>
+#include <llvm/Analysis/LoopInfo.h>
 #include <llvm/IR/CFG.h>
 #include <llvm/IR/Dominators.h>
 #include <llvm/IR/InstIterator.h>
@@ -469,15 +470,7 @@ JoinTargetAnalysis::filterTemporallyFeasibleForks(
     return rootsMatch(traceThreadHandleRoot(actual, &m_module), singleJoinRoot);
   };
 
-  auto callSiteMayRepeat = [](const Instruction *callSite) {
-    if (!callSite || !callSite->getFunction()) {
-      return true;
-    }
-    DominatorTree DT(const_cast<Function &>(*callSite->getFunction()));
-    LoopInfo LI;
-    LI.analyze(DT);
-    return LI.getLoopFor(callSite->getParent()) != nullptr;
-  };
+  concurrency::ThreadMultiplicityAnalysis multiplicity(m_module);
 
   for (const Instruction *forkInst : forks) {
     if (!forkInst || !joinInst) {
@@ -513,7 +506,7 @@ JoinTargetAnalysis::filterTemporallyFeasibleForks(
             joinMayReachForkInFunction(joinInst, &inst)) {
           continue;
         }
-        if (callSiteMayRepeat(&inst)) {
+        if (multiplicity.instructionMayExecuteMultipleTimes(&inst)) {
           matchingCallSites.clear();
           break;
         }

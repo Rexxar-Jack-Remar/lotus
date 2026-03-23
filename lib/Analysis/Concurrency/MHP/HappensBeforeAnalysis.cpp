@@ -654,6 +654,7 @@ void HappensBeforeAnalysis::buildSynchronizesWith() {
   std::unordered_map<const Instruction *, const Instruction *>
       acquire_fence_anchor;
   std::unordered_map<const Instruction *, size_t> barrier_phase_index;
+  std::unordered_map<const Value *, size_t> barrier_expected_counts;
 
   std::set<std::pair<const Instruction *, const Instruction *>> seen_sync_edges;
   auto addSyncEdge = [&](const Instruction *from, const Instruction *to,
@@ -756,10 +757,19 @@ void HappensBeforeAnalysis::buildSynchronizesWith() {
         continue;
       }
 
-      const Function *callee = threadAPI->getCallee(call);
-      ThreadAPI::TD_TYPE type = threadAPI->getType(call);
+	      const Function *callee = threadAPI->getCallee(call);
+	      ThreadAPI::TD_TYPE type = threadAPI->getType(call);
 
-      if (callee && callee->getName().contains("get_future") &&
+      if (type == ThreadAPI::TD_BAR_INIT && call->arg_size() >= 3) {
+        if (const Value *barrier = threadAPI->getBarrierVal(inst)) {
+          if (const auto *count = dyn_cast<ConstantInt>(call->getArgOperand(2))) {
+            barrier_expected_counts[barrier->stripPointerCasts()] =
+                static_cast<size_t>(count->getZExtValue());
+          }
+        }
+      }
+
+	      if (callee && callee->getName().contains("get_future") &&
           call->arg_size() >= 1) {
         const Value *promise_obj = traceSharedState(call->getArgOperand(0));
         if (promise_obj) {
@@ -878,10 +888,8 @@ void HappensBeforeAnalysis::buildSynchronizesWith() {
       continue;
     }
 
-    const mhp::SyncNode *async_exit = tfg.getThreadExitNode(async_tid);
-    const Instruction *async_exit_inst =
-        async_exit ? async_exit->getInstruction() : nullptr;
-    if (!async_exit_inst) {
+    std::vector<mhp::SyncNode *> async_exits = tfg.getThreadExitNodes(async_tid);
+    if (async_exits.empty()) {
       continue;
     }
 
@@ -889,7 +897,13 @@ void HappensBeforeAnalysis::buildSynchronizesWith() {
       if (!sameAsyncFuturePair(async_launch, future_wait)) {
         continue;
       }
-      addSyncEdge(async_exit_inst, future_wait);
+      for (const mhp::SyncNode *async_exit : async_exits) {
+        const Instruction *async_exit_inst =
+            async_exit ? async_exit->getInstruction() : nullptr;
+        if (async_exit_inst) {
+          addSyncEdge(async_exit_inst, future_wait);
+        }
+      }
     }
   }
 
@@ -1339,6 +1353,7 @@ void HappensBeforeAnalysis::buildSynchronizesWith() {
   auto hasAmbiguousSplitPhaseBarrier = [&](const Instruction *inst) {
     std::unordered_map<mhp::ThreadID, size_t> arrive_counts;
     std::unordered_map<mhp::ThreadID, size_t> wait_counts;
+    std::unordered_set<mhp::ThreadID> distinct_threads;
     auto phase_it = barrier_phase_index.find(inst);
     const bool filter_by_phase = phase_it != barrier_phase_index.end();
     const size_t phase = filter_by_phase ? phase_it->second : 0;
@@ -1350,6 +1365,7 @@ void HappensBeforeAnalysis::buildSynchronizesWith() {
       }
       if (sameBarrier(inst, candidate)) {
         ++arrive_counts[m_mhp.getThreadID(candidate)];
+        distinct_threads.insert(m_mhp.getThreadID(candidate));
       }
     }
     for (const Instruction *candidate : barrier_waits) {
@@ -1360,7 +1376,17 @@ void HappensBeforeAnalysis::buildSynchronizesWith() {
       }
       if (sameBarrier(inst, candidate)) {
         ++wait_counts[m_mhp.getThreadID(candidate)];
+        distinct_threads.insert(m_mhp.getThreadID(candidate));
       }
+    }
+    const Value *barrier =
+        threadAPI->getBarrierVal(inst)
+            ? threadAPI->getBarrierVal(inst)->stripPointerCasts()
+            : nullptr;
+    auto expected_it = barrier_expected_counts.find(barrier);
+    if (expected_it != barrier_expected_counts.end() &&
+        distinct_threads.size() < expected_it->second) {
+      return true;
     }
     for (const auto &entry : arrive_counts) {
       if (entry.second > 1) {
@@ -1660,7 +1686,7 @@ bool HappensBeforeAnalysis::sameAtomicLocation(
   if (p1 == p2) {
     return true;
   }
-  return m_alias_analysis && m_alias_analysis->mayAlias(p1, p2);
+  return m_alias_analysis && m_alias_analysis->mustAlias(p1, p2);
 }
 
 bool HappensBeforeAnalysis::isFenceAnchorCompatibleInstruction(

@@ -70,6 +70,61 @@ TEST_F(HappensBeforeAnalysisTest, TwoThreadsNoSync_NeitherHappensBefore) {
   EXPECT_FALSE(hb.happensBefore(store_a, store_a));
 }
 
+TEST_F(HappensBeforeAnalysisTest, MultiExitWorkerStillHappensBeforePostJoin) {
+  const char *source = R"(
+    declare i32 @pthread_create(i8*, i8*, i8* (i8*)*, i8*)
+    declare i32 @pthread_join(i8*, i8*)
+
+    define i8* @worker(i8* %arg) {
+    entry:
+      %cond = icmp eq i8* %arg, null
+      br i1 %cond, label %left, label %right
+
+    left:
+      %left_work = add i32 1, 2
+      ret i8* null
+
+    right:
+      %right_work = add i32 3, 4
+      ret i8* null
+    }
+
+    define i32 @main() {
+    entry:
+      %tid = alloca i8
+      call i32 @pthread_create(i8* %tid, i8* null, i8* (i8*)* @worker, i8* undef)
+      call i32 @pthread_join(i8* %tid, i8* null)
+      %post = add i32 5, 6
+      ret i32 0
+    }
+  )";
+
+  auto module = parseModule(source);
+  ASSERT_NE(module, nullptr);
+
+  MHPAnalysis mhp(*module);
+  mhp.analyze();
+
+  HappensBeforeAnalysis hb(*module, mhp);
+  hb.analyze();
+
+  const Function *worker_func = module->getFunction("worker");
+  const Function *main_func = module->getFunction("main");
+  ASSERT_NE(worker_func, nullptr);
+  ASSERT_NE(main_func, nullptr);
+
+  const Instruction *left_work = findInstructionByName(*worker_func, "left_work");
+  const Instruction *right_work =
+      findInstructionByName(*worker_func, "right_work");
+  const Instruction *post = findInstructionByName(*main_func, "post");
+  ASSERT_NE(left_work, nullptr);
+  ASSERT_NE(right_work, nullptr);
+  ASSERT_NE(post, nullptr);
+
+  EXPECT_TRUE(hb.happensBefore(left_work, post));
+  EXPECT_TRUE(hb.happensBefore(right_work, post));
+}
+
 TEST_F(HappensBeforeAnalysisTest, CallOnceDoesNotCreateBidirectionalHB) {
   const char *source = R"(
     @flag = global i8 0
@@ -689,6 +744,61 @@ TEST_F(HappensBeforeAnalysisTest, BarrierWaitSynchronizesAfterArrival) {
   ASSERT_NE(load_shared, nullptr);
 
   EXPECT_TRUE(hb.happensBefore(store_shared, load_shared));
+}
+
+TEST_F(HappensBeforeAnalysisTest,
+       IncompleteBarrierPhaseDoesNotSynchronizeAfterWait) {
+  const char *source = R"(
+    @bar = global i8 0
+    @shared = global i32 0
+
+    declare i32 @pthread_create(i8*, i8*, i8* (i8*)*, i8*)
+    declare i32 @pthread_barrier_init(i8*, i8*, i32)
+    declare i32 @pthread_barrier_wait(i8*)
+
+    define i8* @writer(i8* %arg) {
+    entry:
+      call i32 @pthread_barrier_wait(i8* @bar)
+      %writer_store = add i32 1, 2
+      store i32 %writer_store, i32* @shared, align 4
+      ret i8* null
+    }
+
+    define i8* @reader(i8* %arg) {
+    entry:
+      call i32 @pthread_barrier_wait(i8* @bar)
+      %reader_load = load i32, i32* @shared, align 4
+      ret i8* null
+    }
+
+    define i32 @main() {
+    entry:
+      %tid1 = alloca i8
+      %tid2 = alloca i8
+      call i32 @pthread_barrier_init(i8* @bar, i8* null, i32 3)
+      call i32 @pthread_create(i8* %tid1, i8* null, i8* (i8*)* @writer, i8* null)
+      call i32 @pthread_create(i8* %tid2, i8* null, i8* (i8*)* @reader, i8* null)
+      ret i32 0
+    }
+  )";
+
+  auto module = parseModule(source);
+  ASSERT_NE(module, nullptr);
+
+  MHPAnalysis mhp(*module);
+  mhp.analyze();
+
+  HappensBeforeAnalysis hb(*module, mhp);
+  hb.analyze();
+
+  const Instruction *store_shared =
+      findInstructionByName(*module->getFunction("writer"), "writer_store");
+  const Instruction *load_shared =
+      findInstructionByName(*module->getFunction("reader"), "reader_load");
+  ASSERT_NE(store_shared, nullptr);
+  ASSERT_NE(load_shared, nullptr);
+
+  EXPECT_FALSE(hb.happensBefore(store_shared, load_shared));
 }
 
 TEST_F(HappensBeforeAnalysisTest, SplitPhaseBarrierArriveSynchronizesWithWait) {

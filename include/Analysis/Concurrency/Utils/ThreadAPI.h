@@ -29,6 +29,7 @@
 
 #include "Analysis/Concurrency/ConcurrencyConfig.h"
 
+#include <cstdint>
 #include <string>
 #include <unordered_map>
 #include <vector>
@@ -473,9 +474,20 @@ public:
     RecognizedButUnmodeled
   };
 
+  enum class SemanticLoweringOwner : uint32_t {
+    None = 0,
+    LockSet = 1u << 0,
+    MHP = 1u << 1,
+    HB = 1u << 2,
+    OpenMP = 1u << 3,
+    MPI = 1u << 4,
+    ExplicitFallback = 1u << 5
+  };
+
   struct SemanticLoweringInfo {
     SemanticLoweringKind kind = SemanticLoweringKind::RecognizedButUnmodeled;
     const char *reason = "unclassified";
+    uint32_t owners = 0;
   };
 
   enum class MatchKind { Exact, Prefix };
@@ -598,79 +610,31 @@ public:
   std::string getSemanticTag(const llvm::Function *F) const {
     return describe(F).semantic_tag;
   }
-  SemanticLoweringInfo getSemanticLoweringInfo(TD_TYPE type) const {
-    switch (type) {
-    case TD_DUMMY:
-      return {SemanticLoweringKind::RecognizedButUnmodeled, "unknown-api"};
-    case TD_ASYNC:
-      return {SemanticLoweringKind::Deferred, "async-launch-policy-witness"};
-    case TD_OMP_ATOMIC_START:
-    case TD_OMP_ATOMIC_END:
-      return {SemanticLoweringKind::RecognizedButUnmodeled,
-              "openmp-atomic-runtime-unmodeled"};
-    case TD_OMP_TARGET_DATA_UPDATE:
-    case TD_OMP_CANCEL:
-    case TD_OMP_TEAMS:
-    case TD_OMP_TEAMS_HOST:
-    case TD_OMP_TEAMS_DISTRIBUTE:
-    case TD_OMP_DISTRIBUTE:
-    case TD_OMP_DISTRIBUTE_STATIC:
-    case TD_OMP_DISTRIBUTE_DYNAMIC:
-    case TD_OMP_DISTRIBUTE_GUIDANCE:
-    case TD_OMP_LOOP_STATIC_INIT:
-    case TD_OMP_LOOP_DYNAMIC_INIT:
-    case TD_OMP_LOOP_GUIDANCE_INIT:
-    case TD_OMP_AFFINITY:
-    case TD_OMP_SCOPE_START:
-    case TD_OMP_SCOPE_END:
-    case TD_OMP_TASKLOOP_SIMD:
-    case TD_OMP_TASKLOOP_FINI:
-    case TD_OMP_INTEROP_INIT:
-    case TD_OMP_INTEROP_FINI:
-      return {SemanticLoweringKind::RecognizedButUnmodeled,
-              "recognized-openmp-runtime-unmodeled"};
-    case TD_MPI_SESSION_GET_INFO:
-    case TD_MPI_SESSION_GET_NUM_ERRCODES:
-    case TD_MPI_SESSION_GET_ERRHANDLER:
-    case TD_MPI_SESSION_SET_ERRHANDLER:
-    case TD_MPI_ERRHANDLER_CREATE:
-    case TD_MPI_ERRHANDLER_FREE:
-    case TD_MPI_COMM_GET_ERRHANDLER:
-    case TD_MPI_COMM_SET_ERRHANDLER:
-    case TD_MPI_COMM_CALL_ERRHANDLER:
-    case TD_MPI_WIN_GET_ERRHANDLER:
-    case TD_MPI_WIN_SET_ERRHANDLER:
-    case TD_MPI_FILE_GET_ERRHANDLER:
-    case TD_MPI_FILE_SET_ERRHANDLER:
-    case TD_MPI_ERROR_CLASS:
-    case TD_MPI_ERROR_STRING:
-    case TD_MPI_INFO_CREATE:
-    case TD_MPI_INFO_DUP:
-    case TD_MPI_INFO_FREE:
-    case TD_MPI_INFO_GET:
-    case TD_MPI_INFO_GET_VALUELEN:
-    case TD_MPI_INFO_GET_NKEYS:
-    case TD_MPI_INFO_GET_NTHKEY:
-    case TD_MPI_INFO_GET_KEYVAL:
-    case TD_MPI_INFO_SET:
-    case TD_MPI_INFO_DELETE:
-    case TD_MPI_INFO_C2F:
-    case TD_MPI_INFO_CREATE_ENV:
-    case TD_MPI_INFO_FREE_ENV:
-    case TD_MPI_GET_COUNT:
-    case TD_MPI_GET_ELEMENTS:
-    case TD_MPI_GET_ELEMENTS_X:
-    case TD_MPI_STATUS_SIZE:
-    case TD_MPI_STATUS_SET_ELEMENTS:
-    case TD_MPI_STATUS_SET_ELEMENTS_X:
-      return {SemanticLoweringKind::RecognizedButUnmodeled,
-              "metadata-only-mpi-api"};
-    default:
-      return {SemanticLoweringKind::Modeled, "modeled"};
-    }
+  static constexpr uint32_t
+  semanticLoweringOwnerMask(SemanticLoweringOwner owner) {
+    return static_cast<uint32_t>(owner);
   }
-  SemanticLoweringInfo getSemanticLoweringInfo(const llvm::Function *F) const {
-    return getSemanticLoweringInfo(getType(F));
+  static constexpr uint32_t semanticLoweringOwnerMask(
+      SemanticLoweringOwner owner_a, SemanticLoweringOwner owner_b) {
+    return semanticLoweringOwnerMask(owner_a) |
+           semanticLoweringOwnerMask(owner_b);
+  }
+  static constexpr uint32_t semanticLoweringOwnerMask(
+      SemanticLoweringOwner owner_a, SemanticLoweringOwner owner_b,
+      SemanticLoweringOwner owner_c) {
+    return semanticLoweringOwnerMask(owner_a, owner_b) |
+           semanticLoweringOwnerMask(owner_c);
+  }
+  SemanticLoweringInfo getSemanticLoweringInfo(TD_TYPE type) const;
+  SemanticLoweringInfo getSemanticLoweringInfo(const llvm::Function *F) const;
+  bool hasSemanticLoweringOwner(TD_TYPE type, SemanticLoweringOwner owner) const {
+    return (getSemanticLoweringInfo(type).owners & semanticLoweringOwnerMask(owner)) !=
+           0;
+  }
+  bool hasSemanticLoweringOwner(const llvm::Function *F,
+                                SemanticLoweringOwner owner) const {
+    return (getSemanticLoweringInfo(F).owners & semanticLoweringOwnerMask(owner)) !=
+           0;
   }
   bool hasSemanticTag(const llvm::Function *F, llvm::StringRef tag) const {
     return describe(F).semantic_tag == tag;

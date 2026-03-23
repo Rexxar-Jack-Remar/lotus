@@ -27,9 +27,12 @@ StaticVectorClockMHP::StaticVectorClockMHP(Module &module)
 void StaticVectorClockMHP::analyze() {
   m_ctx_to_stid.clear();
   m_static_threads.clear();
-  m_node_to_static_thread.clear();
-  m_inst_to_static_thread.clear();
-  m_node_clocks.clear();
+  m_sync_node_to_static_nodes.clear();
+  m_inst_to_static_nodes.clear();
+  m_static_node_predecessors.clear();
+  m_static_node_successors.clear();
+  m_static_node_keys.clear();
+  m_static_node_clocks.clear();
   m_mhp_pairs.clear();
   m_thread_instruction_cache.clear();
   m_parallel_instruction_cache.clear();
@@ -42,6 +45,7 @@ void StaticVectorClockMHP::analyze() {
   m_thread_children.clear();
   m_fork_to_thread.clear();
   m_join_to_thread.clear();
+  m_detached_threads.clear();
   m_pthread_value_to_threads.clear();
   m_thread_to_pthread_value.clear();
   m_visited_functions_by_thread.clear();
@@ -50,6 +54,7 @@ void StaticVectorClockMHP::analyze() {
   m_barrier_waits.clear();
   m_barrier_phase_by_thread.clear();
   m_pending_split_barrier_phase_by_thread.clear();
+  m_barrier_expected_counts.clear();
   m_multi_instance_threads.clear();
   m_thread_entry_candidates.clear();
   m_has_unresolved_fork = false;
@@ -58,9 +63,12 @@ void StaticVectorClockMHP::analyze() {
   m_tfg = std::make_unique<ThreadFlowGraph>();
   m_call_graph = std::make_unique<CallGraph>(m_module);
   m_join_target_analysis = std::make_unique<JoinTargetAnalysis>(m_module);
+  m_thread_multiplicity = std::make_unique<concurrency::ThreadMultiplicityAnalysis>(
+      m_module, m_call_graph.get());
   buildThreadFlowGraph();
   buildStaticThreads();
   computeReachabilityPerStaticThread();
+  buildStaticEdges();
   initializeNodeClocks();
   computeStaticVectorClocks();
   computeMHPPairs();
@@ -132,9 +140,12 @@ StaticThreadID StaticVectorClockMHP::getOrCreateStaticThread(const Context &ctx,
 void StaticVectorClockMHP::buildStaticThreads() {
   m_static_threads.clear();
   m_ctx_to_stid.clear();
-  m_node_to_static_thread.clear();
-  m_inst_to_static_thread.clear();
-  m_node_clocks.clear();
+  m_sync_node_to_static_nodes.clear();
+  m_inst_to_static_nodes.clear();
+  m_static_node_predecessors.clear();
+  m_static_node_successors.clear();
+  m_static_node_keys.clear();
+  m_static_node_clocks.clear();
   m_node_id_to_node.clear();
 
   if (!m_tfg)
@@ -164,10 +175,12 @@ void StaticVectorClockMHP::buildStaticThreads() {
 
     StaticThread &st = m_static_threads[stid];
     st.nodes.push_back(node);
-    m_node_to_static_thread[node] = stid;
+    StaticNodeKey key{node, stid};
+    m_static_node_keys.push_back(key);
+    m_sync_node_to_static_nodes[node].push_back(key);
     m_node_id_to_node[node->getNodeID()] = node;
     if (const Instruction *inst = node->getInstruction()) {
-      m_inst_to_static_thread[inst] = stid;
+      m_inst_to_static_nodes[inst].push_back(key);
     }
 
     for (SyncNode *succ : node->getSuccessors()) {
@@ -196,25 +209,113 @@ void StaticVectorClockMHP::buildStaticThreads() {
   }
 }
 
+void StaticVectorClockMHP::buildStaticEdges() {
+  m_static_node_predecessors.clear();
+  m_static_node_successors.clear();
+
+  auto pushUnique = [](StaticNodeList &list, const StaticNodeKey &key) {
+    if (std::find(list.begin(), list.end(), key) == list.end()) {
+      list.push_back(key);
+    }
+  };
+  auto addEdge = [&](const StaticNodeKey &from, const StaticNodeKey &to) {
+    pushUnique(m_static_node_successors[from], to);
+    pushUnique(m_static_node_predecessors[to], from);
+  };
+
+  for (const StaticThread &st : m_static_threads) {
+    std::unordered_set<const SyncNode *> nodes_in_thread(st.nodes.begin(),
+                                                         st.nodes.end());
+    for (const SyncNode *node : st.nodes) {
+      StaticNodeKey current{node, st.id};
+      for (SyncNode *succ : node->getSuccessors()) {
+        EdgeKind kind = m_tfg->getEdgeKind(node, succ);
+        const auto succ_it = m_sync_node_to_static_nodes.find(succ);
+        if (succ_it == m_sync_node_to_static_nodes.end()) {
+          continue;
+        }
+
+        if (succ->getThreadID() == st.base_tid) {
+          for (const StaticNodeKey &candidate : succ_it->second) {
+            if (candidate.stid == st.id && nodes_in_thread.count(candidate.node)) {
+              addEdge(current, candidate);
+            }
+          }
+          continue;
+        }
+
+        if (kind == EdgeKind::Create) {
+          Context child_ctx;
+          child_ctx.call_sites = st.ctx.call_sites;
+          child_ctx.fork_sites = st.ctx.fork_sites;
+          child_ctx.fork_sites.push_back(node->getNodeID());
+          auto child_it = m_ctx_to_stid.find(child_ctx);
+          if (child_it == m_ctx_to_stid.end()) {
+            continue;
+          }
+          for (const StaticNodeKey &candidate : succ_it->second) {
+            if (candidate.stid == child_it->second) {
+              addEdge(current, candidate);
+            }
+          }
+          continue;
+        }
+
+        if (kind == EdgeKind::Join) {
+          std::vector<size_t> parent_forks = st.ctx.fork_sites;
+          if (!parent_forks.empty()) {
+            parent_forks.pop_back();
+          }
+          for (const StaticNodeKey &candidate : succ_it->second) {
+            const StaticThread &succ_st = m_static_threads[candidate.stid];
+            if (succ_st.base_tid != succ->getThreadID()) {
+              continue;
+            }
+            if (succ_st.ctx.call_sites == st.ctx.call_sites &&
+                succ_st.ctx.fork_sites == parent_forks) {
+              addEdge(current, candidate);
+            }
+          }
+          continue;
+        }
+
+        if (kind == EdgeKind::Signal || kind == EdgeKind::Barrier) {
+          for (const StaticNodeKey &candidate : succ_it->second) {
+            const StaticThread &succ_st = m_static_threads[candidate.stid];
+            if (succ_st.base_tid != succ->getThreadID()) {
+              continue;
+            }
+            if (succ_st.ctx.call_sites == st.ctx.call_sites) {
+              addEdge(current, candidate);
+            }
+          }
+        }
+      }
+    }
+  }
+}
+
 void StaticVectorClockMHP::initializeNodeClocks() {
-  for (const auto &kv : m_node_to_static_thread) {
-    const SyncNode *node = kv.first;
-    StaticThreadID stid = kv.second;
-    if (stid < m_static_threads.size()) {
-      m_node_clocks[node] = initialClockFor(m_static_threads[stid]);
+  for (const StaticNodeKey &key : m_static_node_keys) {
+    if (key.stid < m_static_threads.size()) {
+      m_static_node_clocks[key] = initialClockFor(m_static_threads[key.stid]);
     }
   }
 }
 
 StaticVectorClockMHP::StaticVectorClock
-StaticVectorClockMHP::mergePredecessorClocks(const SyncNode *node) const {
+StaticVectorClockMHP::mergePredecessorClocks(const StaticNodeKey &key) const {
   StaticVectorClock merged;
-  if (!node)
+  if (!key.node)
     return merged;
 
-  for (auto *pred : node->getPredecessors()) {
-    auto it = m_node_clocks.find(pred);
-    if (it != m_node_clocks.end()) {
+  auto pred_it = m_static_node_predecessors.find(key);
+  if (pred_it == m_static_node_predecessors.end()) {
+    return merged;
+  }
+  for (const StaticNodeKey &pred_key : pred_it->second) {
+    auto it = m_static_node_clocks.find(pred_key);
+    if (it != m_static_node_clocks.end()) {
       merged.mergeFrom(it->second);
     }
   }
@@ -477,13 +578,13 @@ StaticVectorClockMHP::getDescendantThreadIDs(ThreadID tid) const {
   return result;
 }
 
-void StaticVectorClockMHP::addEventToClock(const SyncNode *node,
+void StaticVectorClockMHP::addEventToClock(const StaticNodeKey &key,
                                            StaticVectorClock &sv) const {
-  auto st_it = m_node_to_static_thread.find(node);
-  if (st_it == m_node_to_static_thread.end())
+  if (!key.node || key.stid >= m_static_threads.size())
     return;
 
-  StaticThreadID stid = st_it->second;
+  const SyncNode *node = key.node;
+  StaticThreadID stid = key.stid;
   sv.entries[stid].insert({LogicClockElem::Kind::Node, node->getNodeID()});
 
   if (node->getType() == SyncNodeType::THREAD_EXIT) {
@@ -512,28 +613,33 @@ void StaticVectorClockMHP::addEventToClock(const SyncNode *node,
 }
 
 StaticVectorClockMHP::StaticVectorClock
-StaticVectorClockMHP::mergePredecessorClocksWithRules(const SyncNode *node) const {
+StaticVectorClockMHP::mergePredecessorClocksWithRules(
+    const StaticNodeKey &key) const {
   StaticVectorClock merged;
-  if (!node)
+  if (!key.node)
     return merged;
 
   // Paper [JOIN]/[SIGNAL]: SVn2@c = SVMax(SVn1@Ø, SVn2@c)[...]. We must first
   // merge all intra-thread predecessors (⊓), then apply SVMax with join/signal.
-  for (SyncNode *pred : node->getPredecessors()) {
-    auto it = m_node_clocks.find(pred);
-    if (it == m_node_clocks.end())
+  auto pred_it = m_static_node_predecessors.find(key);
+  if (pred_it == m_static_node_predecessors.end()) {
+    return merged;
+  }
+  for (const StaticNodeKey &pred_key : pred_it->second) {
+    auto it = m_static_node_clocks.find(pred_key);
+    if (it == m_static_node_clocks.end())
       continue;
-    EdgeKind kind = m_tfg->getEdgeKind(pred, node);
+    EdgeKind kind = m_tfg->getEdgeKind(pred_key.node, key.node);
     if (kind == EdgeKind::Join || kind == EdgeKind::Signal ||
         kind == EdgeKind::Barrier)
       continue;
     merged.mergeFrom(it->second);
   }
-  for (SyncNode *pred : node->getPredecessors()) {
-    auto it = m_node_clocks.find(pred);
-    if (it == m_node_clocks.end())
+  for (const StaticNodeKey &pred_key : pred_it->second) {
+    auto it = m_static_node_clocks.find(pred_key);
+    if (it == m_static_node_clocks.end())
       continue;
-    EdgeKind kind = m_tfg->getEdgeKind(pred, node);
+    EdgeKind kind = m_tfg->getEdgeKind(pred_key.node, key.node);
     if (kind != EdgeKind::Join && kind != EdgeKind::Signal &&
         kind != EdgeKind::Barrier)
       continue;
@@ -544,13 +650,17 @@ StaticVectorClockMHP::mergePredecessorClocksWithRules(const SyncNode *node) cons
   return merged;
 }
 
-bool StaticVectorClockMHP::shouldAddEventAtNode(const SyncNode *node) const {
+bool StaticVectorClockMHP::shouldAddEventAtNode(const StaticNodeKey &key) const {
   // Paper Figure 4: [CALL] SV_n2@c' = SV_n1@c (no add); [RET] SV_n2@c = SV_n1@c' (no add);
   // [CREATE] at child entry SV_n2@Ø = SV_before[...] (no add). Only [DEFAULT], [JOIN], [SIGNAL] add the current event.
-  if (!node || !m_tfg)
+  if (!key.node || !m_tfg)
     return true;
-  for (SyncNode *pred : node->getPredecessors()) {
-    EdgeKind kind = m_tfg->getEdgeKind(pred, node);
+  auto pred_it = m_static_node_predecessors.find(key);
+  if (pred_it == m_static_node_predecessors.end()) {
+    return true;
+  }
+  for (const StaticNodeKey &pred_key : pred_it->second) {
+    EdgeKind kind = m_tfg->getEdgeKind(pred_key.node, key.node);
     if (kind == EdgeKind::Control || kind == EdgeKind::Join ||
         kind == EdgeKind::Signal || kind == EdgeKind::Barrier)
       return true;
@@ -558,24 +668,23 @@ bool StaticVectorClockMHP::shouldAddEventAtNode(const SyncNode *node) const {
   return false;
 }
 
-bool StaticVectorClockMHP::transfer(const SyncNode *node) {
-  if (!node)
+bool StaticVectorClockMHP::transfer(const StaticNodeKey &key) {
+  if (!key.node)
     return false;
 
   // Figure 4: merge/Max from predecessors; then add current event only when not Call/Ret/Create target.
-  StaticVectorClock incoming = mergePredecessorClocksWithRules(node);
+  StaticVectorClock incoming = mergePredecessorClocksWithRules(key);
 
   if (incoming.entries.empty()) {
-    auto st_it = m_node_to_static_thread.find(node);
-    if (st_it != m_node_to_static_thread.end()) {
-      incoming = initialClockFor(m_static_threads[st_it->second]);
+    if (key.stid < m_static_threads.size()) {
+      incoming = initialClockFor(m_static_threads[key.stid]);
     }
   }
 
-  if (shouldAddEventAtNode(node))
-    addEventToClock(node, incoming);
+  if (shouldAddEventAtNode(key))
+    addEventToClock(key, incoming);
 
-  StaticVectorClock &current = m_node_clocks[node];
+  StaticVectorClock &current = m_static_node_clocks[key];
   bool changed = !incoming.leq(current) || !current.leq(incoming);
   if (changed) {
     current = incoming;
@@ -590,9 +699,8 @@ void StaticVectorClockMHP::computeStaticVectorClocks() {
   bool changed = true;
   while (changed) {
     changed = false;
-    for (const auto &pair : m_node_clocks) {
-      const SyncNode *node = pair.first;
-      changed |= transfer(node);
+    for (const StaticNodeKey &key : m_static_node_keys) {
+      changed |= transfer(key);
     }
   }
 }
@@ -621,22 +729,25 @@ bool StaticVectorClockMHP::happensBefore(const Instruction *i1,
     return false;
   }
 
-  std::vector<SyncNode *> n1s = m_tfg->getNodes(i1, tid1->second);
-  std::vector<SyncNode *> n2s = m_tfg->getNodes(i2, tid2->second);
-  if (n1s.empty() || n2s.empty())
+  auto keys_it1 = m_inst_to_static_nodes.find(i1);
+  auto keys_it2 = m_inst_to_static_nodes.find(i2);
+  if (keys_it1 == m_inst_to_static_nodes.end() ||
+      keys_it2 == m_inst_to_static_nodes.end() ||
+      keys_it1->second.empty() || keys_it2->second.empty()) {
     return false;
+  }
 
-  for (const SyncNode *n1 : n1s) {
-    auto it1 = m_node_clocks.find(n1);
-    if (it1 == m_node_clocks.end()) {
+  for (const StaticNodeKey &key1 : keys_it1->second) {
+    auto it1 = m_static_node_clocks.find(key1);
+    if (it1 == m_static_node_clocks.end()) {
       return false;
     }
-    for (const SyncNode *n2 : n2s) {
-      auto it2 = m_node_clocks.find(n2);
-      if (it2 == m_node_clocks.end()) {
+    for (const StaticNodeKey &key2 : keys_it2->second) {
+      auto it2 = m_static_node_clocks.find(key2);
+      if (it2 == m_static_node_clocks.end()) {
         return false;
       }
-      if (!m_tfg->canReach(n1, n2)) {
+      if (!m_tfg->canReach(key1.node, key2.node)) {
         return false;
       }
       if (!(svcLeq(it1->second, it2->second) &&
@@ -677,7 +788,9 @@ void StaticVectorClockMHP::computeMHPPairs() {
         continue;
       }
 
-      m_mhp_pairs.insert({a, b});
+      const Instruction *first = a < b ? a : b;
+      const Instruction *second = a < b ? b : a;
+      m_mhp_pairs.insert({first, second});
     }
   }
 }
@@ -694,7 +807,9 @@ bool StaticVectorClockMHP::mayHappenInParallel(const Instruction *i1,
     return false;
   }
 
-  if (m_mhp_pairs.count({i1, i2}) || m_mhp_pairs.count({i2, i1}))
+  const Instruction *a = i1 < i2 ? i1 : i2;
+  const Instruction *b = i1 < i2 ? i2 : i1;
+  if (m_mhp_pairs.count({a, b}))
     return true;
 
   return !happensBefore(i1, i2) && !happensBefore(i2, i1);
@@ -705,7 +820,9 @@ bool StaticVectorClockMHP::isPrecomputedMHP(const Instruction *i1,
   if (!i1 || !i2) {
     return false;
   }
-  return m_mhp_pairs.count({i1, i2}) || m_mhp_pairs.count({i2, i1});
+  const Instruction *a = i1 < i2 ? i1 : i2;
+  const Instruction *b = i1 < i2 ? i2 : i1;
+  return m_mhp_pairs.count({a, b}) != 0;
 }
 
 InstructionSet
@@ -734,6 +851,10 @@ ThreadID StaticVectorClockMHP::getThreadID(const Instruction *inst) const {
   return it != m_inst_to_thread.end() ? it->second : kUnknownThread;
 }
 
+bool StaticVectorClockMHP::isMultiInstanceThread(ThreadID tid) const {
+  return m_multi_instance_threads.count(tid) != 0;
+}
+
 InstructionSet
 StaticVectorClockMHP::getInstructionsInThread(ThreadID tid) const {
   auto cache_it = m_thread_instruction_cache.find(tid);
@@ -753,7 +874,7 @@ StaticVectorClockMHP::getInstructionsInThread(ThreadID tid) const {
 
 void StaticVectorClockMHP::printStatistics(raw_ostream &os) const {
   size_t num_static_threads = m_static_threads.size();
-  size_t num_nodes = m_node_clocks.size();
+  size_t num_nodes = m_static_node_clocks.size();
 
   os << "SVC-MHP Statistics:\n";
   os << "===================\n";
@@ -816,6 +937,14 @@ void StaticVectorClockMHP::processFunction(const Function *func, ThreadID tid,
 
       if (const CallBase *cb = dyn_cast<CallBase>(&inst)) {
         ThreadAPI::TD_TYPE type = m_thread_api->getType(cb);
+        if (type == ThreadAPI::TD_BAR_INIT && cb->arg_size() >= 3) {
+          if (const Value *barrier = m_thread_api->getBarrierVal(&inst)) {
+            if (const auto *count = dyn_cast<ConstantInt>(cb->getArgOperand(2))) {
+              m_barrier_expected_counts[barrier->stripPointerCasts()] =
+                  static_cast<size_t>(count->getZExtValue());
+            }
+          }
+        }
         if (m_thread_api->isTDFork(&inst)) {
           node_type = SyncNodeType::THREAD_FORK;
         } else if (m_thread_api->isTDJoin(&inst)) {
@@ -851,16 +980,12 @@ void StaticVectorClockMHP::processFunction(const Function *func, ThreadID tid,
     }
   }
 
-  SyncNode *exit_node = nullptr;
-
   for (const BasicBlock &bb : *func) {
     for (const Instruction &inst : bb) {
       SyncNode *node = m_tfg->getNode(&inst, tid, ctx);
       if (!node) {
         continue;
       }
-
-      exit_node = node;
 
       if (&inst != &bb.front()) {
         const Instruction *prev_inst = inst.getPrevNode();
@@ -903,6 +1028,8 @@ void StaticVectorClockMHP::processFunction(const Function *func, ThreadID tid,
                    type == ThreadAPI::TD_BARRIER_ARRIVE ||
                    m_thread_api->isTDBarWait(&inst)) {
           handleBarrier(&inst, node);
+        } else if (type == ThreadAPI::TD_DETACH) {
+          handleThreadDetach(&inst);
         } else {
           auto processCallee = [&](const Function *callee) {
             if (!callee || callee->isDeclaration())
@@ -915,9 +1042,9 @@ void StaticVectorClockMHP::processFunction(const Function *func, ThreadID tid,
             if (callee_entry) {
               m_tfg->addCallEdge(node, callee_entry);
             }
-            SyncNode *callee_exit =
-                m_tfg->getFunctionExitNode(tid, callee, callee_ctx);
-            if (!callee_exit) {
+            std::vector<SyncNode *> callee_exits =
+                m_tfg->getFunctionExitNodes(tid, callee, callee_ctx);
+            if (callee_exits.empty()) {
               return;
             }
 
@@ -925,7 +1052,9 @@ void StaticVectorClockMHP::processFunction(const Function *func, ThreadID tid,
             if (next_inst) {
               SyncNode *return_site = m_tfg->getNode(next_inst, tid, ctx);
               if (return_site) {
-                m_tfg->addRetEdge(callee_exit, return_site);
+                for (SyncNode *callee_exit : callee_exits) {
+                  m_tfg->addRetEdge(callee_exit, return_site);
+                }
                 m_ret_to_call[return_site] = node;
               }
             } else if (inst.isTerminator()) {
@@ -935,7 +1064,9 @@ void StaticVectorClockMHP::processFunction(const Function *func, ThreadID tid,
                 }
                 SyncNode *return_site = m_tfg->getNode(&succ->front(), tid, ctx);
                 if (return_site) {
-                  m_tfg->addRetEdge(callee_exit, return_site);
+                  for (SyncNode *callee_exit : callee_exits) {
+                    m_tfg->addRetEdge(callee_exit, return_site);
+                  }
                   m_ret_to_call[return_site] = node;
                 }
               }
@@ -979,14 +1110,14 @@ void StaticVectorClockMHP::processFunction(const Function *func, ThreadID tid,
           }
         }
       }
-    }
-  }
 
-  if (exit_node) {
-    if (!m_tfg->getThreadExitNode(tid)) {
-      m_tfg->setThreadExitNode(tid, exit_node);
+      if (isa<ReturnInst>(inst) || m_thread_api->isTDExit(&inst)) {
+        m_tfg->setFunctionExitNode(tid, func, node, ctx);
+        if (ctx == 0 && m_tfg->getThreadEntry(tid) == func) {
+          m_tfg->setThreadExitNode(tid, node);
+        }
+      }
     }
-    m_tfg->setFunctionExitNode(tid, func, exit_node, ctx);
   }
 }
 
@@ -1019,6 +1150,10 @@ void StaticVectorClockMHP::mapInstructionToThread(const Instruction *inst,
 bool StaticVectorClockMHP::isInstructionThreadAmbiguous(
     const Instruction *inst) const {
   if (!inst) {
+    return true;
+  }
+  auto static_it = m_inst_to_static_nodes.find(inst);
+  if (static_it == m_inst_to_static_nodes.end() || static_it->second.empty()) {
     return true;
   }
   auto it = m_inst_to_thread.find(inst);
@@ -1102,14 +1237,11 @@ void StaticVectorClockMHP::handleThreadFork(const Instruction *fork_inst,
                                             ThreadID parent_tid) {
   ThreadID new_tid = allocateThreadID();
 
-  bool in_loop = false;
-  if (fork_inst && fork_inst->getFunction()) {
-    llvm::DominatorTree DT(const_cast<Function &>(*fork_inst->getFunction()));
-    llvm::LoopInfo LI;
-    LI.analyze(DT);
-    in_loop = (LI.getLoopFor(fork_inst->getParent()) != nullptr);
-  }
-  if (in_loop) {
+  const bool multi_instance =
+      (fork_inst && m_thread_multiplicity &&
+       m_thread_multiplicity->instructionMayExecuteMultipleTimes(fork_inst)) ||
+      isMultiInstanceThread(parent_tid);
+  if (multi_instance) {
     m_multi_instance_threads.insert(new_tid);
   }
 
@@ -1135,6 +1267,7 @@ void StaticVectorClockMHP::handleThreadFork(const Instruction *fork_inst,
     }
   } else {
     enableIndirectForkConservatism();
+    m_multi_instance_threads.insert(new_tid);
   }
 }
 
@@ -1153,7 +1286,8 @@ void StaticVectorClockMHP::handleThreadJoin(const Instruction *join_inst,
         JoinTargetAnalysis::traceThreadHandleRoot(joined_thread_val, &m_module);
     auto it = m_pthread_value_to_threads.find(root ? root : joined_thread_val);
     if (it != m_pthread_value_to_threads.end() && it->second.size() == 1 &&
-        !m_multi_instance_threads.count(*it->second.begin())) {
+        !isMultiInstanceThread(*it->second.begin()) &&
+        !m_detached_threads.count(*it->second.begin())) {
       joined_tid = *it->second.begin();
       found = true;
     }
@@ -1165,8 +1299,8 @@ void StaticVectorClockMHP::handleThreadJoin(const Instruction *join_inst,
           m_join_target_analysis->getFeasibleJoinedForks(join_inst);
       if (possible_forks.size() == 1) {
         auto it = m_fork_to_thread.find(possible_forks.front());
-        if (it != m_fork_to_thread.end() &&
-            !m_multi_instance_threads.count(it->second)) {
+        if (it != m_fork_to_thread.end() && !isMultiInstanceThread(it->second) &&
+            !m_detached_threads.count(it->second)) {
           joined_tid = it->second;
           found = true;
         }
@@ -1175,8 +1309,11 @@ void StaticVectorClockMHP::handleThreadJoin(const Instruction *join_inst,
   }
 
   auto add_join_edge = [&](ThreadID tid) {
-    if (SyncNode *child_exit = m_tfg->getThreadExitNode(tid)) {
-      m_tfg->addInterThreadEdge(child_exit, node, EdgeKind::Join);
+    std::vector<SyncNode *> child_exits = m_tfg->getThreadExitNodes(tid);
+    if (!child_exits.empty()) {
+      for (SyncNode *child_exit : child_exits) {
+        m_tfg->addInterThreadEdge(child_exit, node, EdgeKind::Join);
+      }
       node->setJoinedThread(tid);
       m_join_to_thread[join_inst] = tid;
     }
@@ -1186,6 +1323,35 @@ void StaticVectorClockMHP::handleThreadJoin(const Instruction *join_inst,
     add_join_edge(joined_tid);
   } else {
     (void)parent_tid;
+  }
+}
+
+void StaticVectorClockMHP::handleThreadDetach(const Instruction *detach_inst) {
+  const auto *call = dyn_cast<CallBase>(detach_inst);
+  if (!call || call->arg_size() < 1) {
+    return;
+  }
+
+  const Value *detached_thread_val = call->getArgOperand(0);
+  std::unordered_set<const Value *> detached_roots;
+  JoinTargetAnalysis::traceThreadHandleRoots(detached_thread_val, &m_module,
+                                             detached_roots);
+  if (detached_roots.empty()) {
+    if (const Value *root =
+            JoinTargetAnalysis::traceThreadHandleRoot(detached_thread_val,
+                                                      &m_module)) {
+      detached_roots.insert(root);
+    } else if (detached_thread_val) {
+      detached_roots.insert(detached_thread_val->stripPointerCasts());
+    }
+  }
+
+  for (const Value *root : detached_roots) {
+    auto it = m_pthread_value_to_threads.find(root);
+    if (it == m_pthread_value_to_threads.end()) {
+      continue;
+    }
+    m_detached_threads.insert(it->second.begin(), it->second.end());
   }
 }
 
@@ -1255,20 +1421,36 @@ void StaticVectorClockMHP::handleBarrier(const Instruction *barrier_inst,
     phase = next_phase++;
   }
   auto &participants = m_barrier_waits[barrier][phase];
+  std::unordered_set<ThreadID> distinct_threads;
+  for (const BarrierParticipant &previous : participants) {
+    if (previous.arrival) {
+      distinct_threads.insert(previous.arrival->getThreadID());
+    }
+  }
+  distinct_threads.insert(node->getThreadID());
+  const Value *barrier_key = barrier ? barrier->stripPointerCasts() : nullptr;
+  const size_t expected_count =
+      barrier_key && m_barrier_expected_counts.count(barrier_key)
+          ? m_barrier_expected_counts.at(barrier_key)
+          : 0;
+  const bool phase_complete =
+      expected_count == 0 || distinct_threads.size() >= expected_count;
   for (const BarrierParticipant &previous : participants) {
     if (!previous.arrival ||
         previous.arrival->getThreadID() == node->getThreadID()) {
       continue;
     }
 
-    for (SyncNode *cont : current.continuations) {
-      if (cont) {
-        m_tfg->addInterThreadEdge(previous.arrival, cont, EdgeKind::Barrier);
+    if (phase_complete) {
+      for (SyncNode *cont : current.continuations) {
+        if (cont) {
+          m_tfg->addInterThreadEdge(previous.arrival, cont, EdgeKind::Barrier);
+        }
       }
-    }
-    for (SyncNode *cont : previous.continuations) {
-      if (cont) {
-        m_tfg->addInterThreadEdge(node, cont, EdgeKind::Barrier);
+      for (SyncNode *cont : previous.continuations) {
+        if (cont) {
+          m_tfg->addInterThreadEdge(node, cont, EdgeKind::Barrier);
+        }
       }
     }
   }

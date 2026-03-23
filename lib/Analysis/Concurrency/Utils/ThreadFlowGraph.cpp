@@ -209,7 +209,13 @@ void ThreadFlowGraph::setThreadEntryNode(ThreadID tid, SyncNode *entry) {
 }
 
 void ThreadFlowGraph::setThreadExitNode(ThreadID tid, SyncNode *exit) {
-  m_thread_exit_nodes[tid] = exit;
+  if (!exit) {
+    return;
+  }
+  std::vector<SyncNode *> &exits = m_thread_exit_nodes[tid];
+  if (std::find(exits.begin(), exits.end(), exit) == exits.end()) {
+    exits.push_back(exit);
+  }
 }
 
 SyncNode *ThreadFlowGraph::getThreadEntryNode(ThreadID tid) const {
@@ -219,7 +225,15 @@ SyncNode *ThreadFlowGraph::getThreadEntryNode(ThreadID tid) const {
 
 SyncNode *ThreadFlowGraph::getThreadExitNode(ThreadID tid) const {
   auto it = m_thread_exit_nodes.find(tid);
-  return it != m_thread_exit_nodes.end() ? it->second : nullptr;
+  if (it == m_thread_exit_nodes.end() || it->second.size() != 1) {
+    return nullptr;
+  }
+  return it->second.front();
+}
+
+std::vector<SyncNode *> ThreadFlowGraph::getThreadExitNodes(ThreadID tid) const {
+  auto it = m_thread_exit_nodes.find(tid);
+  return it != m_thread_exit_nodes.end() ? it->second : std::vector<SyncNode *>();
 }
 
 void ThreadFlowGraph::addIntraThreadEdge(SyncNode *from, SyncNode *to) {
@@ -273,7 +287,13 @@ void ThreadFlowGraph::setFunctionExitNode(ThreadID tid,
                                           const llvm::Function *func,
                                           SyncNode *exit_node,
                                           CallContextID ctx) {
-  m_func_exit_nodes[{tid, func, ctx}] = exit_node;
+  if (!exit_node) {
+    return;
+  }
+  std::vector<SyncNode *> &exits = m_func_exit_nodes[{tid, func, ctx}];
+  if (std::find(exits.begin(), exits.end(), exit_node) == exits.end()) {
+    exits.push_back(exit_node);
+  }
 }
 
 SyncNode *
@@ -281,7 +301,18 @@ ThreadFlowGraph::getFunctionExitNode(ThreadID tid,
                                      const llvm::Function *func,
                                      CallContextID ctx) const {
   auto it = m_func_exit_nodes.find({tid, func, ctx});
-  return it != m_func_exit_nodes.end() ? it->second : nullptr;
+  if (it == m_func_exit_nodes.end() || it->second.size() != 1) {
+    return nullptr;
+  }
+  return it->second.front();
+}
+
+std::vector<SyncNode *>
+ThreadFlowGraph::getFunctionExitNodes(ThreadID tid,
+                                      const llvm::Function *func,
+                                      CallContextID ctx) const {
+  auto it = m_func_exit_nodes.find({tid, func, ctx});
+  return it != m_func_exit_nodes.end() ? it->second : std::vector<SyncNode *>();
 }
 
 std::vector<SyncNode *>

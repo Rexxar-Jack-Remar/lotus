@@ -170,6 +170,7 @@ public:
   void setThreadExitNode(ThreadID tid, SyncNode *exit);
   SyncNode *getThreadEntryNode(ThreadID tid) const;
   SyncNode *getThreadExitNode(ThreadID tid) const;
+  std::vector<SyncNode *> getThreadExitNodes(ThreadID tid) const;
 
   // Graph construction helpers
   void addIntraThreadEdge(SyncNode *from, SyncNode *to);
@@ -184,6 +185,9 @@ public:
                            SyncNode *exit_node, CallContextID ctx = 0);
   SyncNode *getFunctionExitNode(ThreadID tid, const llvm::Function *func,
                                 CallContextID ctx = 0) const;
+  std::vector<SyncNode *> getFunctionExitNodes(ThreadID tid,
+                                               const llvm::Function *func,
+                                               CallContextID ctx = 0) const;
 
   // Query interface
   std::vector<SyncNode *> getNodesOfType(SyncNodeType type) const;
@@ -232,10 +236,11 @@ private:
       m_inst_to_nodes;
   std::unordered_map<ThreadID, const llvm::Function *> m_thread_entries;
   std::unordered_map<ThreadID, SyncNode *> m_thread_entry_nodes;
-  std::unordered_map<ThreadID, SyncNode *> m_thread_exit_nodes;
+  std::unordered_map<ThreadID, std::vector<SyncNode *>> m_thread_exit_nodes;
   std::map<std::pair<const SyncNode *, const SyncNode *>, EdgeKind>
       m_edge_kinds;
-  std::map<std::tuple<ThreadID, const llvm::Function *, CallContextID>, SyncNode *>
+  std::map<std::tuple<ThreadID, const llvm::Function *, CallContextID>,
+           std::vector<SyncNode *>>
       m_func_exit_nodes;
 
   // Reachability index structures

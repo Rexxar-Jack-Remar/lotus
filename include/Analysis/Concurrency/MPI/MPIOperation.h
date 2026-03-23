@@ -553,6 +553,7 @@ struct MPIOperation {
   MPIParticipantSet participant_set;
   std::string rank_path_summary;
   bool is_intercommunicator = false;
+  bool request_lifecycle_issue_nonblocking = false;
 
   MPISendMode send_mode = MPISendMode::Unknown;
   MPIBlockingMode blocking_mode = MPIBlockingMode::Unknown;

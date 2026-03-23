@@ -29,6 +29,7 @@
 #include "Analysis/Concurrency/Utils/CppAtomics.h"
 #include "Analysis/Concurrency/Utils/ThreadAPI.h"
 #include "Analysis/Concurrency/Utils/ThreadFlowGraph.h"
+#include "Analysis/Concurrency/Utils/ThreadMultiplicity.h"
 
 namespace ThreadLocal {
 class ThreadLocalAnalysis;
@@ -336,6 +337,8 @@ private:
   // Call Graph for interprocedural analysis
   std::unique_ptr<llvm::CallGraph> m_call_graph;
   std::unique_ptr<mhp::JoinTargetAnalysis> m_join_target_analysis;
+  std::unique_ptr<concurrency::ThreadMultiplicityAnalysis>
+      m_thread_multiplicity;
 
   // Thread ID allocation
   ThreadID m_next_thread_id = 1; // 0 is reserved for main thread
@@ -353,6 +356,7 @@ private:
       m_fork_to_thread; // Fork inst -> created thread
   std::unordered_map<const llvm::Instruction *, ThreadID>
       m_join_to_thread; // Join inst -> joined thread
+  std::unordered_set<ThreadID> m_detached_threads;
 
   // Value tracking for pthread_t variables
   std::unordered_map<const llvm::Value *, std::unordered_set<ThreadID>>
@@ -385,6 +389,7 @@ private:
   std::unordered_map<const llvm::Value *,
                      std::unordered_map<ThreadID, size_t>>
       m_pending_split_barrier_phase_by_thread;
+  std::unordered_map<const llvm::Value *, size_t> m_barrier_expected_counts;
 
   // Per-thread set of functions already processed to avoid reprocessing
   std::unordered_map<ThreadID,
@@ -476,6 +481,7 @@ private:
                         ThreadID parent_tid);
   void handleThreadJoin(const llvm::Instruction *join_inst, SyncNode *node,
                         ThreadID parent_tid);
+  void handleThreadDetach(const llvm::Instruction *detach_inst);
 
   // Value-tracing helper for pthread_t
   const llvm::Value *tracePthreadT(const llvm::Value *val) const;
@@ -502,6 +508,7 @@ private:
   bool isJoinSite(const llvm::Instruction *inst) const;
   ThreadID getForkedThreadID(const llvm::Instruction *fork_inst) const;
   ThreadID getJoinedThreadID(const llvm::Instruction *join_inst) const;
+  bool isMultiInstanceThread(ThreadID tid) const;
 
   // Dominator helpers (intra-function)
   const llvm::DominatorTree &getDomTree(const llvm::Function *func) const;

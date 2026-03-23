@@ -246,7 +246,7 @@ private:
 
   MPIOpKind classifyOperation(const llvm::Instruction *inst,
                               ThreadAPI::TD_TYPE type) const;
-  void extractOperationDetails(MPIOperation &op);
+  void extractOperationDetails(MPIOperation &op, const MPIEffect &effect);
   bool tryGetConstantInt(const llvm::Value *value, int &out) const;
   bool tryGetScalarRange(const llvm::Value *value, int &min_out,
                          int &max_out) const;

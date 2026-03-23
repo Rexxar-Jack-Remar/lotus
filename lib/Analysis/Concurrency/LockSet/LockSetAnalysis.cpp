@@ -2132,6 +2132,19 @@ void LockSetAnalysis::computeFunctionSummary(Function *func) {
     return false;
   };
 
+  auto isPossiblyHeldAt = [&](const Instruction *inst, LockID lock) {
+    auto it = m_may_locksets_entry.find(inst);
+    if (it == m_may_locksets_entry.end()) {
+      return false;
+    }
+    for (LockID held : it->second) {
+      if (matchesLock(held, lock)) {
+        return true;
+      }
+    }
+    return false;
+  };
+
   auto isBinarySemaphoreOnlyLockInFunction = [&](LockID lock) {
     bool saw_binary_semaphore = false;
     for (const Instruction &inst : instructions(*func)) {
@@ -2157,6 +2170,21 @@ void LockSetAnalysis::computeFunctionSummary(Function *func) {
       returns.push_back(ret);
     }
   }
+
+  auto mayHoldOnExit = [&](LockID lock) {
+    for (const auto *ret : returns) {
+      auto it = m_may_locksets_exit.find(ret);
+      if (it == m_may_locksets_exit.end()) {
+        continue;
+      }
+      for (LockID held : it->second) {
+        if (matchesLock(held, lock)) {
+          return true;
+        }
+      }
+    }
+    return false;
+  };
 
   if (!returns.empty()) {
     // Preserve read-vs-write mode so callers do not accidentally turn a held
@@ -2194,6 +2222,9 @@ void LockSetAnalysis::computeFunctionSummary(Function *func) {
     std::vector<LockID> released = getRAIILocksReleasedAt(inst);
     if (!released.empty()) {
       for (LockID lock : released) {
+        if (!isPossiblyHeldAt(inst, lock) && !mayHoldOnExit(lock)) {
+          summary.may_release_delta.insert(lock);
+        }
         if (!isDefinitelyHeldAt(inst, lock)) {
           summary.must_release_delta.insert(lock);
         }
@@ -2205,6 +2236,9 @@ void LockSetAnalysis::computeFunctionSummary(Function *func) {
     }
     if (m_thread_api->isTDRelease(inst) && !m_thread_api->isTDAcquire(inst)) {
       if (LockID lock = getLockValue(inst)) {
+        if (!isPossiblyHeldAt(inst, lock) && !mayHoldOnExit(lock)) {
+          summary.may_release_delta.insert(lock);
+        }
         if (!isDefinitelyHeldAt(inst, lock)) {
           summary.must_release_delta.insert(lock);
         }

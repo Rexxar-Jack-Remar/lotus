@@ -665,6 +665,55 @@ TEST_F(StaticThreadSharingAnalysisTest,
             StaticThreadSharingAnalysis::SharingClassification::MaybeShared);
 }
 
+TEST_F(StaticThreadSharingAnalysisTest,
+       HelperMediatedRepeatedSpawnMarksWorkerOnlyGlobalAsShared) {
+  const char *source = R"(
+    @g = global i32 0, align 4
+
+    declare i32 @pthread_create(i8*, i8*, i8* (i8*)*, i8*)
+
+    define i8* @worker(i8* %arg) {
+    entry:
+      store i32 1, i32* @g, align 4
+      ret i8* null
+    }
+
+    define void @spawn_once() {
+    entry:
+      %tid = alloca i8, align 1
+      call i32 @pthread_create(i8* %tid, i8* null,
+                               i8* (i8*)* @worker, i8* null)
+      ret void
+    }
+
+    define i32 @main() {
+    entry:
+      call void @spawn_once()
+      call void @spawn_once()
+      ret i32 0
+    }
+  )";
+
+  auto module = parseModule(source);
+  ASSERT_NE(module, nullptr);
+
+  ensurePassesInitialized();
+  ThreadAPI::resetThreadAPI();
+  StaticThreadSharingAnalysis::SharingClassification observed =
+      StaticThreadSharingAnalysis::SharingClassification::DefinitelyThreadLocal;
+
+  legacy::PassManager PM;
+  PM.add(new seadsa::DsaAnalysis());
+  PM.add(new StaticThreadSharingAnalysis());
+  PM.add(new StaticSharingProbePass("worker", "g",
+                                    StaticSharingProbePass::QueryKind::Value,
+                                    &observed));
+  PM.run(*module);
+
+  EXPECT_EQ(observed,
+            StaticThreadSharingAnalysis::SharingClassification::DefinitelyShared);
+}
+
 int main(int argc, char **argv) {
   ::testing::InitGoogleTest(&argc, argv);
   return RUN_ALL_TESTS();
