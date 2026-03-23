@@ -195,6 +195,83 @@ TEST_F(StaticVectorClockMHPTest, SplitPhaseBarrierOrdersPostBarrierContinuation)
 }
 
 TEST_F(StaticVectorClockMHPTest,
+       ReusedSplitPhaseBarrierKeepsBarrierCyclesSeparated) {
+  const char *source = R"(
+    declare i32 @pthread_create(i8*, i8*, i8* (i8*)*, i8*)
+    declare void @std_barrier_arriveEv(i8*)
+    declare void @std_barrier_waitEv(i8*)
+
+    @barrier = global i8 0
+    @first = global i32 0, align 4
+    @second = global i32 0, align 4
+
+    define i8* @writer(i8* %arg) {
+    entry:
+      store i32 1, i32* @first, align 4
+      call void @std_barrier_arriveEv(i8* @barrier)
+      call void @std_barrier_waitEv(i8* @barrier)
+      store i32 2, i32* @second, align 4
+      call void @std_barrier_arriveEv(i8* @barrier)
+      call void @std_barrier_waitEv(i8* @barrier)
+      ret i8* null
+    }
+
+    define i8* @reader(i8* %arg) {
+    entry:
+      call void @std_barrier_waitEv(i8* @barrier)
+      %first_load = load i32, i32* @first, align 4
+      call void @std_barrier_waitEv(i8* @barrier)
+      %second_load = load i32, i32* @second, align 4
+      ret i8* null
+    }
+
+    define i32 @main() {
+    entry:
+      %tid1 = alloca i8
+      %tid2 = alloca i8
+      call i32 @pthread_create(i8* %tid1, i8* null, i8* (i8*)* @writer, i8* null)
+      call i32 @pthread_create(i8* %tid2, i8* null, i8* (i8*)* @reader, i8* null)
+      ret i32 0
+    }
+  )";
+
+  auto module = parseModule(source);
+  ASSERT_NE(module, nullptr);
+
+  StaticVectorClockMHP svc(*module);
+  svc.analyze();
+
+  const Function *writer = module->getFunction("writer");
+  const Function *reader = module->getFunction("reader");
+  ASSERT_NE(writer, nullptr);
+  ASSERT_NE(reader, nullptr);
+
+  const Instruction *store_first = nullptr;
+  const Instruction *store_second = nullptr;
+  for (const Instruction &inst : instructions(*writer)) {
+    const auto *store = dyn_cast<StoreInst>(&inst);
+    if (!store) {
+      continue;
+    }
+    if (store->getPointerOperand() == module->getNamedGlobal("first")) {
+      store_first = &inst;
+    } else if (store->getPointerOperand() == module->getNamedGlobal("second")) {
+      store_second = &inst;
+    }
+  }
+  const Instruction *first_load = findInstructionByName(*reader, "first_load");
+  const Instruction *second_load = findInstructionByName(*reader, "second_load");
+  ASSERT_NE(store_first, nullptr);
+  ASSERT_NE(store_second, nullptr);
+  ASSERT_NE(first_load, nullptr);
+  ASSERT_NE(second_load, nullptr);
+
+  EXPECT_TRUE(svc.happensBefore(store_first, first_load));
+  EXPECT_TRUE(svc.happensBefore(store_second, second_load));
+  EXPECT_FALSE(svc.happensBefore(store_second, first_load));
+}
+
+TEST_F(StaticVectorClockMHPTest,
        SplitPhaseBarrierArriveDoesNotOrderPostArriveCode) {
   const char *source = R"(
     declare i32 @pthread_create(i8*, i8*, i8* (i8*)*, i8*)

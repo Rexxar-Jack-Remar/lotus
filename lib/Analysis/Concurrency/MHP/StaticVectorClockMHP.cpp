@@ -49,6 +49,7 @@ void StaticVectorClockMHP::analyze() {
   m_condvar_waits.clear();
   m_barrier_waits.clear();
   m_barrier_phase_by_thread.clear();
+  m_pending_split_barrier_phase_by_thread.clear();
   m_multi_instance_threads.clear();
   m_thread_entry_candidates.clear();
   m_has_unresolved_fork = false;
@@ -1124,7 +1125,8 @@ void StaticVectorClockMHP::handleThreadJoin(const Instruction *join_inst,
     const Value *root =
         JoinTargetAnalysis::traceThreadHandleRoot(joined_thread_val, &m_module);
     auto it = m_pthread_value_to_threads.find(root ? root : joined_thread_val);
-    if (it != m_pthread_value_to_threads.end() && it->second.size() == 1) {
+    if (it != m_pthread_value_to_threads.end() && it->second.size() == 1 &&
+        !m_multi_instance_threads.count(*it->second.begin())) {
       joined_tid = *it->second.begin();
       found = true;
     }
@@ -1136,7 +1138,8 @@ void StaticVectorClockMHP::handleThreadJoin(const Instruction *join_inst,
           m_join_target_analysis->getFeasibleJoinedForks(join_inst);
       if (possible_forks.size() == 1) {
         auto it = m_fork_to_thread.find(possible_forks.front());
-        if (it != m_fork_to_thread.end()) {
+        if (it != m_fork_to_thread.end() &&
+            !m_multi_instance_threads.count(it->second)) {
           joined_tid = it->second;
           found = true;
         }
@@ -1203,7 +1206,27 @@ void StaticVectorClockMHP::handleBarrier(const Instruction *barrier_inst,
   if (type != ThreadAPI::TD_BARRIER_ARRIVE) {
     current.continuations = getBarrierContinuations(barrier_inst);
   }
-  size_t phase = m_barrier_phase_by_thread[barrier][node->getThreadID()]++;
+  auto &next_phase_by_thread = m_barrier_phase_by_thread[barrier];
+  auto &pending_phase_by_thread =
+      m_pending_split_barrier_phase_by_thread[barrier];
+  size_t &next_phase = next_phase_by_thread[node->getThreadID()];
+  size_t phase = next_phase;
+
+  if (type == ThreadAPI::TD_BARRIER_ARRIVE) {
+    pending_phase_by_thread[node->getThreadID()] = phase;
+  } else if (type == ThreadAPI::TD_BARRIER_WAIT_CPP20) {
+    auto pending_it = pending_phase_by_thread.find(node->getThreadID());
+    if (pending_it != pending_phase_by_thread.end()) {
+      phase = pending_it->second;
+      pending_phase_by_thread.erase(pending_it);
+      next_phase = std::max(next_phase, phase + 1);
+    } else {
+      phase = next_phase++;
+    }
+  } else {
+    pending_phase_by_thread.erase(node->getThreadID());
+    phase = next_phase++;
+  }
   auto &participants = m_barrier_waits[barrier][phase];
   for (const BarrierParticipant &previous : participants) {
     if (!previous.arrival ||
@@ -1248,15 +1271,25 @@ StaticVectorClockMHP::getBarrierContinuations(const Instruction *barrier_inst) c
     return continuations;
   }
 
+  bool stopped_at_next_wait = false;
   if (const Instruction *next = barrier_inst->getNextNode()) {
-    for (SyncNode *next_node : m_tfg->getNodes(next, m_inst_to_thread.at(barrier_inst))) {
-      continuations.push_back(next_node);
+    if (m_thread_api->isTDBarWait(next)) {
+      stopped_at_next_wait = true;
+    } else {
+      for (SyncNode *next_node :
+           m_tfg->getNodes(next, m_inst_to_thread.at(barrier_inst))) {
+        continuations.push_back(next_node);
+      }
     }
   }
 
   if (barrier_inst->isTerminator()) {
     for (const BasicBlock *succ : successors(barrier_inst->getParent())) {
       if (succ->empty()) {
+        continue;
+      }
+      if (m_thread_api->isTDBarWait(&succ->front())) {
+        stopped_at_next_wait = true;
         continue;
       }
       for (SyncNode *succ_node :
@@ -1266,7 +1299,7 @@ StaticVectorClockMHP::getBarrierContinuations(const Instruction *barrier_inst) c
     }
   }
 
-  if (continuations.empty()) {
+  if (continuations.empty() && !stopped_at_next_wait) {
     for (SyncNode *self :
          m_tfg->getNodes(barrier_inst, m_inst_to_thread.at(barrier_inst))) {
       continuations.push_back(self);

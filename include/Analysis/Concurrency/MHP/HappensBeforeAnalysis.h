@@ -87,6 +87,7 @@ private:
   bool isInstructionThreadAmbiguous(const llvm::Instruction *inst) const;
   void addExtraHBEdge(const llvm::Instruction *from,
                       const llvm::Instruction *to);
+  void addExtraHBEdge(const mhp::SyncNode *from, const mhp::SyncNode *to);
   void addExplicitHBClosure(const llvm::Instruction *from,
                             const llvm::Instruction *to);
   void addExplicitHBPair(const llvm::Instruction *from,

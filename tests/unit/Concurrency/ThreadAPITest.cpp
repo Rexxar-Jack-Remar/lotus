@@ -665,6 +665,42 @@ TEST_F(ThreadAPITest, DistinguishesOpenMPDoacrossRuntimeVariants) {
             ThreadAPI::TD_OMP_DOACROSS_SUBMIT);
 }
 
+TEST_F(ThreadAPITest, LongestPrefixRuleWinsForSpecializedOpenMPRuntimeFamilies) {
+  const char *source = R"(
+    declare void @__kmpc_teams_host(i8*, i32)
+    declare void @__kmpc_teams_distribute_nowait_4(i8*, i32, i32*)
+    declare void @__kmpc_distribute_static_init_4(i8*, i32, i32*)
+    declare void @__kmpc_distribute_dynamic_init_4(i8*, i32, i32*)
+    declare void @__kmpc_distribute_guidance_init_4(i8*, i32, i32*)
+    declare void @__kmpc_loop_static_4(i8*, i32, i32*)
+    declare void @__kmpc_loop_dynamic_4(i8*, i32, i32*)
+    declare void @__kmpc_loop_guidance_4(i8*, i32, i32*)
+  )";
+
+  auto module = parseModule(source);
+  ASSERT_NE(module, nullptr);
+
+  ThreadAPI::resetThreadAPI();
+  ThreadAPI *api = ThreadAPI::getThreadAPI();
+
+  EXPECT_EQ(api->getType(module->getFunction("__kmpc_teams_host")),
+            ThreadAPI::TD_OMP_TEAMS_HOST);
+  EXPECT_EQ(api->getType(module->getFunction("__kmpc_teams_distribute_nowait_4")),
+            ThreadAPI::TD_OMP_TEAMS_DISTRIBUTE);
+  EXPECT_EQ(api->getType(module->getFunction("__kmpc_distribute_static_init_4")),
+            ThreadAPI::TD_OMP_DISTRIBUTE_STATIC);
+  EXPECT_EQ(api->getType(module->getFunction("__kmpc_distribute_dynamic_init_4")),
+            ThreadAPI::TD_OMP_DISTRIBUTE_DYNAMIC);
+  EXPECT_EQ(api->getType(module->getFunction("__kmpc_distribute_guidance_init_4")),
+            ThreadAPI::TD_OMP_DISTRIBUTE_GUIDANCE);
+  EXPECT_EQ(api->getType(module->getFunction("__kmpc_loop_static_4")),
+            ThreadAPI::TD_OMP_LOOP_STATIC_INIT);
+  EXPECT_EQ(api->getType(module->getFunction("__kmpc_loop_dynamic_4")),
+            ThreadAPI::TD_OMP_LOOP_DYNAMIC_INIT);
+  EXPECT_EQ(api->getType(module->getFunction("__kmpc_loop_guidance_4")),
+            ThreadAPI::TD_OMP_LOOP_GUIDANCE_INIT);
+}
+
 TEST_F(ThreadAPITest, MapsOpenMPRegionRuntimeVariants) {
   const char *source = R"(
     declare i32 @__kmpc_single(i8*, i32)
@@ -807,6 +843,10 @@ TEST_F(ThreadAPITest, ReportsExplicitSemanticLoweringStatus) {
   auto async = api->getSemanticLoweringInfo(ThreadAPI::TD_ASYNC);
   auto future_get = api->getSemanticLoweringInfo(ThreadAPI::TD_FUTURE_GET);
   auto omp_atomic = api->getSemanticLoweringInfo(ThreadAPI::TD_OMP_ATOMIC_START);
+  auto task_complete =
+      api->getSemanticLoweringInfo(ThreadAPI::TD_OMP_TASK_COMPLETE);
+  auto doacross_submit =
+      api->getSemanticLoweringInfo(ThreadAPI::TD_OMP_DOACROSS_SUBMIT);
 
   EXPECT_EQ(async.kind, ThreadAPI::SemanticLoweringKind::Deferred);
   EXPECT_STREQ(async.reason, "async-launch-policy-witness");
@@ -815,6 +855,10 @@ TEST_F(ThreadAPITest, ReportsExplicitSemanticLoweringStatus) {
   EXPECT_EQ(omp_atomic.kind,
             ThreadAPI::SemanticLoweringKind::RecognizedButUnmodeled);
   EXPECT_STREQ(omp_atomic.reason, "openmp-atomic-runtime-unmodeled");
+  EXPECT_EQ(task_complete.kind, ThreadAPI::SemanticLoweringKind::Modeled);
+  EXPECT_STREQ(task_complete.reason, "modeled");
+  EXPECT_EQ(doacross_submit.kind, ThreadAPI::SemanticLoweringKind::Modeled);
+  EXPECT_STREQ(doacross_submit.reason, "modeled");
 }
 
 TEST_F(ThreadAPITest, OpenMPBarrierUsesSiteIdentityInsteadOfMetadataOperand) {
@@ -851,7 +895,6 @@ TEST_F(ThreadAPITest, SpecialSemanticLoweringStatesStayExplicitlyEnumerated) {
       ThreadAPI::TD_ASYNC,
       ThreadAPI::TD_OMP_ATOMIC_START,
       ThreadAPI::TD_OMP_ATOMIC_END,
-      ThreadAPI::TD_OMP_TASK_COMPLETE,
       ThreadAPI::TD_OMP_CANCEL,
       ThreadAPI::TD_OMP_TARGET_DATA_UPDATE,
       ThreadAPI::TD_OMP_TEAMS,
@@ -871,7 +914,6 @@ TEST_F(ThreadAPITest, SpecialSemanticLoweringStatesStayExplicitlyEnumerated) {
       ThreadAPI::TD_OMP_TASKLOOP_FINI,
       ThreadAPI::TD_OMP_INTEROP_INIT,
       ThreadAPI::TD_OMP_INTEROP_FINI,
-      ThreadAPI::TD_OMP_DOACROSS_SUBMIT,
       ThreadAPI::TD_MPI_SESSION_GET_INFO,
       ThreadAPI::TD_MPI_SESSION_GET_NUM_ERRCODES,
       ThreadAPI::TD_MPI_SESSION_GET_ERRHANDLER,

@@ -1562,12 +1562,27 @@ LockSet LockSetAnalysis::merge(const std::vector<LockSet> &sets,
 
   if (is_must) {
     // Must-analysis: intersection
+    auto matchesLock = [this](LockID lhs, LockID rhs) {
+      const LockID clhs = getCanonicalLock(lhs);
+      const LockID crhs = getCanonicalLock(rhs);
+      if (clhs && crhs && clhs == crhs) {
+        return true;
+      }
+      return m_alias_analysis && clhs && crhs &&
+             m_alias_analysis->mustAlias(clhs, crhs);
+    };
+
     LockSet result = sets[0];
     for (size_t i = 1; i < sets.size(); ++i) {
       LockSet intersection;
-      std::set_intersection(result.begin(), result.end(), sets[i].begin(),
-                            sets[i].end(),
-                            std::inserter(intersection, intersection.begin()));
+      for (LockID lhs : result) {
+        for (LockID rhs : sets[i]) {
+          if (matchesLock(lhs, rhs)) {
+            intersection.insert(getCanonicalLock(lhs));
+            break;
+          }
+        }
+      }
       result = intersection;
     }
     return result;

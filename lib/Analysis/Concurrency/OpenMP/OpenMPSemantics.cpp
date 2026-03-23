@@ -293,6 +293,20 @@ OpenMPSemantics::getTaskForCreate(const Instruction *inst) const {
   return it != m_inst_to_task.end() ? it->second : nullptr;
 }
 
+const Task *OpenMPSemantics::getTaskForHandle(const Value *value) const {
+  const Value *handle = canonicalizeTaskHandle(value);
+  if (!handle) {
+    return nullptr;
+  }
+  for (const auto &task_uptr : m_tasks) {
+    const Task *task = task_uptr.get();
+    if (task && task->task_handle == handle) {
+      return task;
+    }
+  }
+  return nullptr;
+}
+
 bool OpenMPSemantics::isNestedRegion(size_t region_id) const {
   auto it = m_region_nesting_depth.find(region_id);
   if (it == m_region_nesting_depth.end()) {
@@ -390,6 +404,7 @@ void OpenMPSemantics::rebuildWaitBoundaryViews() {
 
   for (const OpenMPTaskEvent &event : m_task_events) {
     switch (event.kind) {
+    case OpenMPTaskEvent::Kind::TaskComplete:
     case OpenMPTaskEvent::Kind::Taskwait:
     case OpenMPTaskEvent::Kind::TaskwaitDeps:
     case OpenMPTaskEvent::Kind::TaskgroupEnd:
@@ -573,6 +588,52 @@ void OpenMPSemantics::buildTaskRelations() {
     return false;
   };
 
+  auto hasUniqueMatchingDoacrossSubmit = [&](const OpenMPTaskEvent &boundary) {
+    if (boundary.boundary_kind != WaitBoundaryInfo::Kind::DoacrossWait ||
+        boundary.dependencies.empty()) {
+      return true;
+    }
+
+    const OpenMPTaskEvent *match = nullptr;
+    for (const OpenMPTaskEvent &event : m_task_events) {
+      if (event.kind != OpenMPTaskEvent::Kind::DoacrossSubmit ||
+          event.scheduling_context_id != boundary.scheduling_context_id ||
+          !event.inst || !boundary.inst ||
+          !mustHappenBefore(event.inst, boundary.inst)) {
+        continue;
+      }
+
+      bool conflicts = false;
+      for (const Dependency &submit_dep : event.dependencies) {
+        for (const Dependency &wait_dep : boundary.dependencies) {
+          if (classifyDependencyConflict(submit_dep, wait_dep) ==
+              DependencyConflict::MustConflict) {
+            conflicts = true;
+            break;
+          }
+        }
+        if (conflicts) {
+          break;
+        }
+      }
+
+      if (!conflicts) {
+        continue;
+      }
+      if (match) {
+        ++m_deferred_reason_counts["omp_doacross_submit_ambiguous"];
+        return false;
+      }
+      match = &event;
+    }
+
+    if (!match) {
+      ++m_deferred_reason_counts["omp_doacross_submit_missing"];
+      return false;
+    }
+    return true;
+  };
+
   for (size_t i = 0; i < m_tasks.size(); ++i) {
     Task *task_i = m_tasks[i].get();
     for (size_t j = i + 1; j < m_tasks.size(); ++j) {
@@ -706,7 +767,15 @@ void OpenMPSemantics::buildTaskRelations() {
               rhs->phase_id <= boundary.phase_id) {
             continue;
           }
-          if (boundary.is_partial_wait) {
+      if (boundary.is_partial_wait) {
+            if (boundary.boundary_kind == WaitBoundaryInfo::Kind::DoacrossWait &&
+                !hasUniqueMatchingDoacrossSubmit(boundary)) {
+              recordRelation(lhs.get(), rhs.get(),
+                             concurrency::RelationKind::UnknownDueToModelGap,
+                             concurrency::ProofStrength::Unknown,
+                             "omp_doacross_submit_missing");
+              continue;
+            }
             bool lhs_selected = false;
             bool rhs_selected = false;
             for (const Dependency &wait_dep : boundary.dependencies) {
@@ -767,6 +836,33 @@ void OpenMPSemantics::buildTaskRelations() {
           }
         }
       }
+  }
+
+  for (const OpenMPTaskEvent &event : m_task_events) {
+    if (event.kind != OpenMPTaskEvent::Kind::TaskComplete || !event.task ||
+        !event.inst) {
+      continue;
+    }
+    Task *completed_task = const_cast<Task *>(event.task);
+    if (!completed_task) {
+      continue;
+    }
+    for (const auto &rhs : m_tasks) {
+      if (!rhs || rhs.get() == event.task ||
+          rhs->scheduling_context_id != event.scheduling_context_id ||
+          rhs->sequence_index < event.sequence_index) {
+        continue;
+      }
+      if (!mustHappenBefore(event.inst, taskOrderingSite(rhs.get()))) {
+        continue;
+      }
+      completed_task->successors.insert(rhs.get());
+      rhs->predecessors.insert(completed_task);
+      recordRelation(completed_task, rhs.get(),
+                     concurrency::RelationKind::MustHappenBefore,
+                     concurrency::ProofStrength::Must,
+                     "omp_detached_task_completion");
+    }
   }
 }
 
@@ -958,8 +1054,10 @@ void OpenMPSemantics::scanSchedulingContext(const Function *func,
         if (type == ThreadAPI::TD_OMP_CANCEL) {
           if (api->hasSemanticTag(callee, "cancellation-point")) {
             ++m_summary.cancellation_point_count;
+            ++m_deferred_reason_counts["omp_cancellation_point_runtime_unmodeled"];
           } else {
             ++m_summary.cancel_count;
+            ++m_deferred_reason_counts["omp_cancel_runtime_unmodeled"];
           }
           continue;
         }
@@ -1164,10 +1262,48 @@ void OpenMPSemantics::scanSchedulingContext(const Function *func,
       }
       if (type == ThreadAPI::TD_OMP_DOACROSS_SUBMIT) {
         ++m_summary.doacross_submit_count;
+        std::vector<Dependency> dependencies;
+        if (call->arg_size() >= 3) {
+          const Value *witness = stripValue(call->getArgOperand(2));
+          if (witness) {
+            Dependency dep;
+            dep.address = witness;
+            dep.type = DependType::INOUT;
+            dep.size = 0;
+            dep.source_kind = DependencySourceKind::Iterator;
+            dep.proof = DependencyProof::Possible;
+            int64_t offset = 0;
+            bool precise = false;
+            dep.canonical_base = canonicalizeDependencyAddress(
+                witness, m_module.getDataLayout(), offset, precise);
+            dep.offset = offset;
+            dep.has_precise_offset = precise;
+            dependencies.push_back(dep);
+          }
+        }
+        addTaskEvent(OpenMPTaskEvent::Kind::DoacrossSubmit, call,
+                     state.scheduling_context_id, state.sequence_index,
+                     currentPhaseToken(),
+                     state.taskgroup_stack.empty() ? 0
+                                                   : state.taskgroup_stack.back(),
+                     currentRegionId(), currentRegionEntityId(), nullptr,
+                     WaitBoundaryInfo::Kind::Unknown, false, false,
+                     std::move(dependencies));
         continue;
       }
       if (type == ThreadAPI::TD_OMP_TASK_COMPLETE) {
         ++m_summary.detach_completion_count;
+        const Task *completed_task =
+            call->arg_size() >= 3 ? getTaskForHandle(call->getArgOperand(2)) : nullptr;
+        if (!completed_task) {
+          ++m_deferred_reason_counts["omp_detached_task_completion_unresolved"];
+        }
+        addTaskEvent(OpenMPTaskEvent::Kind::TaskComplete, call,
+                     state.scheduling_context_id, state.sequence_index,
+                     currentPhaseToken(),
+                     state.taskgroup_stack.empty() ? 0
+                                                   : state.taskgroup_stack.back(),
+                     currentRegionId(), currentRegionEntityId(), completed_task);
         continue;
       }
       if (type == ThreadAPI::TD_OMP_TEAMS ||
@@ -1304,6 +1440,7 @@ void OpenMPSemantics::scanSchedulingContext(const Function *func,
         auto task = std::make_unique<Task>();
         task->task_create = call;
         task->task_function = extractTaskFunction(call);
+        task->task_handle = canonicalizeTaskHandle(call->getArgOperand(2));
         applyTaskExecutionHints(*task, call);
         task->parent_context = func;
         task->generating_context = state.anchor_inst ? state.anchor_inst : call;
@@ -1587,6 +1724,22 @@ const CallBase *OpenMPSemantics::findTaskAllocCall(const Value *task_value) cons
   }
 
   return nullptr;
+}
+
+const Value *OpenMPSemantics::canonicalizeTaskHandle(const Value *task_value) const {
+  if (!task_value) {
+    return nullptr;
+  }
+
+  task_value = task_value->stripPointerCasts();
+  if (const CallBase *task_alloc = findTaskAllocCall(task_value)) {
+    return task_alloc;
+  }
+
+  if (const Value *underlying = getUnderlyingObject(task_value)) {
+    return underlying->stripPointerCasts();
+  }
+  return task_value;
 }
 
 const Function *

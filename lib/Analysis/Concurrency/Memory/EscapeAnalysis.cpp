@@ -137,10 +137,29 @@ void EscapeAnalysis::runEscapeAnalysis() {
       unsigned argNo = arg->getArgNo();
       for (const User *U : F->users()) {
         if (auto *CB = dyn_cast<CallBase>(U)) {
-          if (CB->getCalledFunction() == F) {
+          if (resolveInternalCallee(CB) == F) {
             const Value *actualArg = CB->getArgOperand(argNo);
             if (m_escaped_values.insert(actualArg).second) {
               worklist.push_back(actualArg);
+            }
+          }
+        }
+      }
+      if (F) {
+        for (const Function &caller : m_module) {
+          for (const BasicBlock &bb : caller) {
+            for (const Instruction &inst : bb) {
+              const auto *CB = dyn_cast<CallBase>(&inst);
+              if (!CB || argNo >= CB->arg_size()) {
+                continue;
+              }
+              if (resolveInternalCallee(CB) != F) {
+                continue;
+              }
+              const Value *actualArg = CB->getArgOperand(argNo);
+              if (m_escaped_values.insert(actualArg).second) {
+                worklist.push_back(actualArg);
+              }
             }
           }
         }

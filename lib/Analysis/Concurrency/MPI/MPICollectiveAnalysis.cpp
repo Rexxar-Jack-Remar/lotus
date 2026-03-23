@@ -29,23 +29,6 @@ namespace mpi {
 
 namespace {
 
-bool communicatorsMayAlias(CommunicatorID lhs, CommunicatorID rhs) {
-  if (!lhs || !rhs) {
-    return false;
-  }
-  if (lhs == rhs) {
-    return true;
-  }
-
-  const auto *lhs_arg = dyn_cast<Argument>(lhs);
-  const auto *rhs_arg = dyn_cast<Argument>(rhs);
-  if (lhs_arg && rhs_arg && lhs_arg->getParent() == rhs_arg->getParent() &&
-      lhs_arg->getArgNo() == rhs_arg->getArgNo()) {
-    return true;
-  }
-  return false;
-}
-
 bool disablesDeterministicMPIOrdering(int provided_level) {
   return provided_level >= 2;
 }
@@ -409,7 +392,7 @@ bool MPICollectiveAnalysis::areCollectivesCompatible(
   }
   if (c1.communicator_class_id != 0 && c2.communicator_class_id != 0 &&
       c1.communicator_class_id == c2.communicator_class_id) {
-  } else if (!communicatorsMayAlias(c1.comm, c2.comm)) {
+  } else if (!process_model_.communicatorsMayAlias(c1.comm, c2.comm)) {
     return true;
   }
 
@@ -495,7 +478,7 @@ MPICollectiveAnalysis::findMismatchedCollectives() const {
         const CollectiveCall &c1 = *calls[i];
         const CollectiveCall &c2 = *calls[j];
 
-        if (!communicatorsMayAlias(c1.comm, c2.comm) &&
+        if (!process_model_.communicatorsMayAlias(c1.comm, c2.comm) &&
             !(c1.communicator_class_id != 0 &&
               c1.communicator_class_id == c2.communicator_class_id)) {
           continue;

@@ -448,6 +448,8 @@ MemoryLdStMapClass::FuncParamInfoClass MemoryLdStMapClass::FuncParamInfo;
 
 void MemoryLdStMapClass::resetGlobalState() {
   MemdefToCall.clear();
+  FuncParamInfo = FuncParamInfoClass();
+  OmpDiagnosticsLocationInfo = DebugLocation();
 }
 
 void MemoryLdStMapClass::insertEntry(ConstInstrPtr LdSt, ConstValuePtr Mem) {

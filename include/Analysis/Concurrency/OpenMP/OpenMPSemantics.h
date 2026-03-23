@@ -56,6 +56,7 @@ struct Dependency {
 struct Task {
   const llvm::Instruction *task_create;
   const llvm::Function *task_function;
+  const llvm::Value *task_handle = nullptr;
   TaskExecutionMode execution_mode = TaskExecutionMode::Deferred;
   bool is_final = false;
   bool is_untied = false;
@@ -181,6 +182,7 @@ struct SemanticEvent {
 struct OpenMPTaskEvent {
   enum class Kind {
     TaskCreate,
+    TaskComplete,
     Taskwait,
     TaskwaitDeps,
     TaskgroupBegin,
@@ -188,6 +190,7 @@ struct OpenMPTaskEvent {
     Barrier,
     Flush,
     DoacrossWait,
+    DoacrossSubmit,
     TargetBoundary,
     ReductionNowaitBoundary
   };
@@ -261,6 +264,7 @@ public:
 
   const std::vector<std::unique_ptr<Task>> &getTasks() const { return m_tasks; }
   const Task *getTaskForCreate(const llvm::Instruction *inst) const;
+  const Task *getTaskForHandle(const llvm::Value *value) const;
   const std::vector<WaitBoundaryInfo> &getWaitBoundaryInfos() const {
     return m_wait_boundary_infos;
   }
@@ -350,6 +354,7 @@ private:
                                                      unsigned ndeps_arg_idx,
                                                      unsigned dep_arg_idx);
   const llvm::CallBase *findTaskAllocCall(const llvm::Value *task_value) const;
+  const llvm::Value *canonicalizeTaskHandle(const llvm::Value *task_value) const;
   const llvm::Function *extractTaskFunction(const llvm::CallBase *task_call);
   void applyTaskExecutionHints(Task &task, const llvm::CallBase *task_call);
   size_t addEntity(SemanticEntityKind kind, const llvm::Instruction *anchor_inst,

@@ -40,16 +40,23 @@ public:
       return false;
     }
 
-    const Instruction *target = findInstructionByName(*F, m_symbol_name);
-    if (!target) {
-      return false;
-    }
-
     auto &sharing = getAnalysis<StaticThreadSharingAnalysis>();
     if (m_query_kind == QueryKind::Instruction) {
+      const Instruction *target = findInstructionByName(*F, m_symbol_name);
+      if (!target) {
+        return false;
+      }
       *m_result = sharing.classify(target);
     } else {
-      *m_result = sharing.classify(static_cast<const Value *>(target));
+      if (const Instruction *target = findInstructionByName(*F, m_symbol_name)) {
+        *m_result = sharing.classify(static_cast<const Value *>(target));
+        return false;
+      }
+      if (const GlobalVariable *global = M.getNamedGlobal(m_symbol_name)) {
+        *m_result = sharing.classify(static_cast<const Value *>(global));
+        return false;
+      }
+      return false;
     }
     return false;
   }
@@ -90,16 +97,23 @@ public:
       return false;
     }
 
-    const Instruction *target = findInstructionByName(*F, m_symbol_name);
-    if (!target) {
-      return false;
-    }
-
     auto &sharing = getAnalysis<StaticThreadSharingAnalysis>();
     if (m_query_kind == QueryKind::Instruction) {
+      const Instruction *target = findInstructionByName(*F, m_symbol_name);
+      if (!target) {
+        return false;
+      }
       *m_result = sharing.isShared(target);
     } else {
-      *m_result = sharing.isShared(static_cast<const Value *>(target));
+      if (const Instruction *target = findInstructionByName(*F, m_symbol_name)) {
+        *m_result = sharing.isShared(static_cast<const Value *>(target));
+        return false;
+      }
+      if (const GlobalVariable *global = M.getNamedGlobal(m_symbol_name)) {
+        *m_result = sharing.isShared(static_cast<const Value *>(global));
+        return false;
+      }
+      return false;
     }
     return false;
   }
@@ -252,6 +266,57 @@ TEST_F(StaticThreadSharingAnalysisTest,
 
   EXPECT_EQ(observed, StaticThreadSharingAnalysis::SharingClassification::
                           DefinitelyThreadLocal);
+}
+
+TEST_F(StaticThreadSharingAnalysisTest,
+       LoopSpawnedWorkerWriteIsNotClassifiedThreadLocal) {
+  const char *source = R"(
+    @g = global i32 0, align 4
+
+    declare i32 @pthread_create(i8*, i8*, i8* (i8*)*, i8*)
+
+    define i8* @worker(i8* %arg) {
+    entry:
+      store i32 1, i32* @g, align 4
+      ret i8* null
+    }
+
+    define i32 @main() {
+    entry:
+      %tid = alloca i8, align 1
+      br label %loop
+
+    loop:
+      %i = phi i32 [ 0, %entry ], [ %next, %loop ]
+      call i32 @pthread_create(i8* %tid, i8* null, i8* (i8*)* @worker,
+                               i8* null)
+      %next = add i32 %i, 1
+      %cond = icmp slt i32 %next, 2
+      br i1 %cond, label %loop, label %exit
+
+    exit:
+      ret i32 0
+    }
+  )";
+
+  auto module = parseModule(source);
+  ASSERT_NE(module, nullptr);
+
+  ensurePassesInitialized();
+  ThreadAPI::resetThreadAPI();
+  StaticThreadSharingAnalysis::SharingClassification observed =
+      StaticThreadSharingAnalysis::SharingClassification::DefinitelyThreadLocal;
+
+  legacy::PassManager PM;
+  PM.add(new seadsa::DsaAnalysis());
+  PM.add(new StaticThreadSharingAnalysis());
+  PM.add(new StaticSharingProbePass(
+      "worker", "g", StaticSharingProbePass::QueryKind::Value, &observed));
+  PM.run(*module);
+
+  EXPECT_EQ(
+      observed,
+      StaticThreadSharingAnalysis::SharingClassification::DefinitelyShared);
 }
 
 TEST_F(StaticThreadSharingAnalysisTest,

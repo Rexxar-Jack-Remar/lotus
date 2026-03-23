@@ -783,6 +783,38 @@ MPIProcessModel::getCommunicatorClassID(CommunicatorID communicator) const {
   return it != communicator_class_ids_.end() ? it->second : 0;
 }
 
+bool MPIProcessModel::communicatorsMayAlias(CommunicatorID lhs,
+                                            CommunicatorID rhs) const {
+  if (!lhs || !rhs) {
+    return false;
+  }
+
+  const size_t lhs_class = getCommunicatorClassID(lhs);
+  const size_t rhs_class = getCommunicatorClassID(rhs);
+  if (lhs_class != 0 && rhs_class != 0) {
+    return lhs_class == rhs_class;
+  }
+
+  return classifyCommunicatorAlias(lhs, rhs, &module_) !=
+         CommunicatorAliasResult::NoAlias;
+}
+
+bool MPIProcessModel::communicatorsMustAlias(CommunicatorID lhs,
+                                             CommunicatorID rhs) const {
+  if (!lhs || !rhs) {
+    return false;
+  }
+
+  const size_t lhs_class = getCommunicatorClassID(lhs);
+  const size_t rhs_class = getCommunicatorClassID(rhs);
+  if (lhs_class != 0 && rhs_class != 0) {
+    return lhs_class == rhs_class;
+  }
+
+  return classifyCommunicatorAlias(lhs, rhs, &module_) ==
+         CommunicatorAliasResult::MustAlias;
+}
+
 size_t
 MPIProcessModel::getCommunicatorSubgroupID(const Value *communicator) const {
   if (!communicator) {

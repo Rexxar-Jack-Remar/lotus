@@ -606,7 +606,7 @@ TEST_F(MHPAnalysisTest, SplitPhaseBarrierOrdersPreAndPostRegions) {
   hb.analyze();
 
   EXPECT_TRUE(hb.mustPrecede(store_shared, load_shared));
-  EXPECT_TRUE(mhp.mayHappenInParallel(store_shared, load_shared));
+  EXPECT_FALSE(mhp.mayHappenInParallel(store_shared, load_shared));
 }
 
 TEST_F(MHPAnalysisTest, SplitPhaseBarrierArriveDoesNotOrderPostArriveCode) {

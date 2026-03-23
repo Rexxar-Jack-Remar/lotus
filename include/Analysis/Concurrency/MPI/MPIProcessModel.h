@@ -156,6 +156,8 @@ public:
   }
 
   size_t getCommunicatorClassID(CommunicatorID communicator) const;
+  bool communicatorsMayAlias(CommunicatorID lhs, CommunicatorID rhs) const;
+  bool communicatorsMustAlias(CommunicatorID lhs, CommunicatorID rhs) const;
 
   std::vector<MPIOperation> getOperationsByKind(MPIOpKind kind) const;
 

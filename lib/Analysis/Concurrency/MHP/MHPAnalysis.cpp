@@ -364,6 +364,7 @@ void MHPAnalysis::analyze() {
   m_condvar_waits.clear();
   m_barrier_waits.clear();
   m_barrier_phase_by_thread.clear();
+  m_pending_split_barrier_phase_by_thread.clear();
   m_visited_functions_by_thread.clear();
   m_pre_fork_main_nodes.clear();
   m_thread_entry_candidates.clear();
@@ -605,6 +606,26 @@ void MHPAnalysis::lowerOpenMPTasks(const OpenMP::OpenMPSemantics &semantics) {
       }
     }
   }
+
+  for (const OpenMP::OpenMPTaskEvent &event : semantics.getTaskEvents()) {
+    if (event.kind != OpenMP::OpenMPTaskEvent::Kind::TaskComplete || !event.task ||
+        !event.task->task_create || !event.inst) {
+      continue;
+    }
+
+    ThreadID task_tid = getTaskThread(event.task);
+    if (!task_tid) {
+      continue;
+    }
+
+    SyncNode *task_exit = m_tfg->getThreadExitNode(task_tid);
+    ThreadID parent_tid = getThreadID(event.inst);
+    SyncNode *completion_node =
+        parent_tid == kUnknownThread ? nullptr : m_tfg->getNode(event.inst, parent_tid);
+    if (task_exit && completion_node) {
+      m_tfg->addInterThreadEdge(task_exit, completion_node);
+    }
+  }
 }
 
 void MHPAnalysis::processFunction(const Function *func, ThreadID tid,
@@ -643,6 +664,7 @@ void MHPAnalysis::processFunction(const Function *func, ThreadID tid,
         } else if (m_thread_api->isTDCondSignal(&inst)) {
           node_type = SyncNodeType::COND_SIGNAL;
         } else if (type == ThreadAPI::TD_LATCH_ARRIVE_WAIT ||
+                   type == ThreadAPI::TD_BARRIER_ARRIVE ||
                    m_thread_api->isTDBarWait(&inst)) {
           node_type = SyncNodeType::BARRIER_WAIT;
         }
@@ -710,6 +732,7 @@ void MHPAnalysis::processFunction(const Function *func, ThreadID tid,
                    m_thread_api->isTDCondBroadcast(&inst)) {
           handleCondSignal(&inst, node);
         } else if (type == ThreadAPI::TD_LATCH_ARRIVE_WAIT ||
+                   type == ThreadAPI::TD_BARRIER_ARRIVE ||
                    m_thread_api->isTDBarWait(&inst)) {
           handleBarrier(&inst, node);
         } else {
@@ -961,7 +984,8 @@ void MHPAnalysis::handleThreadJoin(const Instruction *join_inst, SyncNode *node,
 
     if (pthread_t_origin) {
       auto it = m_pthread_value_to_threads.find(pthread_t_origin);
-      if (it != m_pthread_value_to_threads.end() && it->second.size() == 1) {
+      if (it != m_pthread_value_to_threads.end() && it->second.size() == 1 &&
+          !m_multi_instance_threads.count(*it->second.begin())) {
         joined_tid = *it->second.begin();
         found_thread = true;
         // Cache only unambiguous results for the original value.
@@ -978,7 +1002,8 @@ void MHPAnalysis::handleThreadJoin(const Instruction *join_inst, SyncNode *node,
           m_join_target_analysis->getFeasibleJoinedForks(join_inst);
       if (possible_forks.size() == 1) {
         auto it = m_fork_to_thread.find(possible_forks.front());
-        if (it != m_fork_to_thread.end()) {
+        if (it != m_fork_to_thread.end() &&
+            !m_multi_instance_threads.count(it->second)) {
           joined_tid = it->second;
           found_thread = true;
         }
@@ -1043,9 +1068,34 @@ void MHPAnalysis::handleBarrier(const Instruction *barrier_inst,
 
   BarrierParticipant current;
   current.arrival = node;
-  current.continuations = getBarrierContinuations(barrier_inst);
+  const auto *call = dyn_cast<CallBase>(barrier_inst);
+  const ThreadAPI::TD_TYPE type =
+      call ? m_thread_api->getType(call) : ThreadAPI::TD_DUMMY;
+  if (type != ThreadAPI::TD_BARRIER_ARRIVE) {
+    current.continuations = getBarrierContinuations(barrier_inst);
+  }
 
-  size_t phase = m_barrier_phase_by_thread[barrier][node->getThreadID()]++;
+  auto &next_phase_by_thread = m_barrier_phase_by_thread[barrier];
+  auto &pending_phase_by_thread =
+      m_pending_split_barrier_phase_by_thread[barrier];
+  size_t &next_phase = next_phase_by_thread[node->getThreadID()];
+  size_t phase = next_phase;
+
+  if (type == ThreadAPI::TD_BARRIER_ARRIVE) {
+    pending_phase_by_thread[node->getThreadID()] = phase;
+  } else if (type == ThreadAPI::TD_BARRIER_WAIT_CPP20) {
+    auto pending_it = pending_phase_by_thread.find(node->getThreadID());
+    if (pending_it != pending_phase_by_thread.end()) {
+      phase = pending_it->second;
+      pending_phase_by_thread.erase(pending_it);
+      next_phase = std::max(next_phase, phase + 1);
+    } else {
+      phase = next_phase++;
+    }
+  } else {
+    pending_phase_by_thread.erase(node->getThreadID());
+    phase = next_phase++;
+  }
   m_barrier_waits[barrier][phase].push_back(std::move(current));
 }
 
@@ -1069,7 +1119,7 @@ void MHPAnalysis::finalizeBarrierPhases() {
           }
           for (SyncNode *cont : rhs.continuations) {
             if (cont) {
-              m_tfg->addInterThreadEdge(lhs.arrival, cont);
+              m_tfg->addInterThreadEdge(lhs.arrival, cont, EdgeKind::Barrier);
             }
           }
         }
@@ -1724,16 +1774,25 @@ MHPAnalysis::getBarrierContinuations(const Instruction *barrier_inst) const {
     return continuations;
   }
 
+  bool stopped_at_next_wait = false;
   if (const Instruction *next = barrier_inst->getNextNode()) {
-    for (SyncNode *next_node :
-         m_tfg->getNodes(next, getThreadID(barrier_inst))) {
-      continuations.push_back(next_node);
+    if (m_thread_api->isTDBarWait(next)) {
+      stopped_at_next_wait = true;
+    } else {
+      for (SyncNode *next_node :
+           m_tfg->getNodes(next, getThreadID(barrier_inst))) {
+        continuations.push_back(next_node);
+      }
     }
   }
 
   if (barrier_inst->isTerminator()) {
     for (const BasicBlock *succ : successors(barrier_inst->getParent())) {
       if (succ->empty()) {
+        continue;
+      }
+      if (m_thread_api->isTDBarWait(&succ->front())) {
+        stopped_at_next_wait = true;
         continue;
       }
       for (SyncNode *succ_node :
@@ -1743,7 +1802,7 @@ MHPAnalysis::getBarrierContinuations(const Instruction *barrier_inst) const {
     }
   }
 
-  if (continuations.empty()) {
+  if (continuations.empty() && !stopped_at_next_wait) {
     for (SyncNode *self :
          m_tfg->getNodes(barrier_inst, getThreadID(barrier_inst))) {
       continuations.push_back(self);

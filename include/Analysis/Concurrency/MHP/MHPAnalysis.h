@@ -382,6 +382,9 @@ private:
   std::unordered_map<const llvm::Value *,
                      std::unordered_map<ThreadID, size_t>>
       m_barrier_phase_by_thread;
+  std::unordered_map<const llvm::Value *,
+                     std::unordered_map<ThreadID, size_t>>
+      m_pending_split_barrier_phase_by_thread;
 
   // Per-thread set of functions already processed to avoid reprocessing
   std::unordered_map<ThreadID,

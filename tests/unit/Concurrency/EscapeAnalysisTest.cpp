@@ -235,6 +235,38 @@ TEST_F(EscapeAnalysisTest, BitcastedInternalCallPropagatesEscape) {
   EXPECT_TRUE(analysis.isEscaped(slot));
 }
 
+TEST_F(EscapeAnalysisTest, BitcastedInternalHelperPropagatesEscapedFormalBackToCaller) {
+  const char *source = R"(
+    declare void @external_sink(i8*)
+
+    define void @helper(i8* %arg) {
+    entry:
+      call void @external_sink(i8* %arg)
+      ret void
+    }
+
+    define void @main() {
+    entry:
+      %slot = alloca i8, align 1
+      %callee = bitcast void (i8*)* @helper to void (i8*)*
+      call void %callee(i8* %slot)
+      ret void
+    }
+  )";
+
+  auto module = parseModule(source);
+  ASSERT_NE(module, nullptr);
+
+  EscapeAnalysis analysis(*module);
+  analysis.analyze();
+
+  const Function *main_func = module->getFunction("main");
+  ASSERT_NE(main_func, nullptr);
+  const auto *slot = dyn_cast<AllocaInst>(&main_func->getEntryBlock().front());
+  ASSERT_NE(slot, nullptr);
+  EXPECT_TRUE(analysis.isEscaped(slot));
+}
+
 int main(int argc, char **argv) {
   ::testing::InitGoogleTest(&argc, argv);
   return RUN_ALL_TESTS();

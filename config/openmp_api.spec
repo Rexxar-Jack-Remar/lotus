@@ -72,8 +72,16 @@ __kmpc_dispatch_fini TD_OMP_FOR_DISPATCH_FINI library=openmp semantic=dispatch-f
 __tgt_target TD_OMP_TARGET library=openmp semantic=target traits=omp-target-op match=prefix
 
 # OpenMP 5.0+ Teams and Distribute prefix matches
+__kmpc_teams_host TD_OMP_TEAMS_HOST library=openmp semantic=teams-host match=prefix
+__kmpc_teams_distribute TD_OMP_TEAMS_DISTRIBUTE library=openmp semantic=teams-distribute match=prefix
 __kmpc_teams TD_OMP_TEAMS library=openmp semantic=teams match=prefix
+__kmpc_distribute_static TD_OMP_DISTRIBUTE_STATIC library=openmp semantic=distribute-static match=prefix
+__kmpc_distribute_dynamic TD_OMP_DISTRIBUTE_DYNAMIC library=openmp semantic=distribute-dynamic match=prefix
+__kmpc_distribute_guidance TD_OMP_DISTRIBUTE_GUIDANCE library=openmp semantic=distribute-guidance match=prefix
 __kmpc_distribute TD_OMP_DISTRIBUTE library=openmp semantic=distribute match=prefix
+__kmpc_loop_static TD_OMP_LOOP_STATIC_INIT library=openmp semantic=loop-static-init match=prefix
+__kmpc_loop_dynamic TD_OMP_LOOP_DYNAMIC_INIT library=openmp semantic=loop-dynamic-init match=prefix
+__kmpc_loop_guidance TD_OMP_LOOP_GUIDANCE_INIT library=openmp semantic=loop-guidance-init match=prefix
 __kmpc_loop TD_OMP_LOOP_STATIC_INIT library=openmp semantic=loop-static-init match=prefix
 __kmpc_affinity TD_OMP_AFFINITY library=openmp semantic=affinity match=prefix
 __kmpc_scope TD_OMP_SCOPE_START library=openmp semantic=scope-start match=prefix

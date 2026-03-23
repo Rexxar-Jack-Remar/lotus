@@ -182,6 +182,74 @@ TEST_F(HappensBeforeAnalysisTest, CallOnceCallbackSynchronizesWithFollowers) {
   EXPECT_TRUE(hb.happensBefore(store_shared, load_shared));
 }
 
+TEST_F(HappensBeforeAnalysisTest,
+       ReusedCallOnceCallbackDoesNotLeakHBToDirectCalls) {
+  const char *source = R"(
+    @flag = global i8 0
+    @shared = global i32 0
+
+    declare i32 @pthread_create(i8*, i8*, i8* (i8*)*, i8*)
+    declare void @std_call_once(i8*, void ()*)
+
+    define void @init_once() {
+    entry:
+      store i32 7, i32* @shared
+      ret void
+    }
+
+    define i8* @once_worker(i8* %arg) {
+    entry:
+      call void @std_call_once(i8* @flag, void ()* @init_once)
+      ret i8* null
+    }
+
+    define i8* @direct_worker(i8* %arg) {
+    entry:
+      call void @init_once()
+      ret i8* null
+    }
+
+    define i8* @reader(i8* %arg) {
+    entry:
+      call void @std_call_once(i8* @flag, void ()* @init_once)
+      %v = load i32, i32* @shared
+      ret i8* null
+    }
+
+    define i32 @main() {
+    entry:
+      %tid1 = alloca i8
+      %tid2 = alloca i8
+      %tid3 = alloca i8
+      call i32 @pthread_create(i8* %tid1, i8* null, i8* (i8*)* @once_worker, i8* null)
+      call i32 @pthread_create(i8* %tid2, i8* null, i8* (i8*)* @direct_worker, i8* null)
+      call i32 @pthread_create(i8* %tid3, i8* null, i8* (i8*)* @reader, i8* null)
+      ret i32 0
+    }
+  )";
+
+  auto module = parseModule(source);
+  ASSERT_NE(module, nullptr);
+
+  MHPAnalysis mhp(*module);
+  mhp.analyze();
+
+  HappensBeforeAnalysis hb(*module, mhp);
+  hb.analyze();
+
+  const Function *init_once = module->getFunction("init_once");
+  const Function *reader = module->getFunction("reader");
+  ASSERT_NE(init_once, nullptr);
+  ASSERT_NE(reader, nullptr);
+
+  const Instruction *store_shared = &init_once->getEntryBlock().front();
+  const Instruction *load_shared = findInstructionByName(*reader, "v");
+  ASSERT_NE(store_shared, nullptr);
+  ASSERT_NE(load_shared, nullptr);
+
+  EXPECT_FALSE(hb.happensBefore(store_shared, load_shared));
+}
+
 TEST_F(HappensBeforeAnalysisTest, PromiseFutureTracksSharedState) {
   const char *source = R"(
     @shared = global i32 0, align 4
@@ -233,6 +301,58 @@ TEST_F(HappensBeforeAnalysisTest, PromiseFutureTracksSharedState) {
 
   const Instruction *store_shared = &producer->getEntryBlock().front();
   const Instruction *load_shared = findInstructionByName(*consumer, "val");
+  ASSERT_NE(store_shared, nullptr);
+  ASSERT_NE(load_shared, nullptr);
+
+  EXPECT_TRUE(hb.happensBefore(store_shared, load_shared));
+}
+
+TEST_F(HappensBeforeAnalysisTest,
+       DetachedTaskCompletionOrdersDetachedTaskBeforeFollowerTask) {
+  const char *source = R"(
+    declare i8* @__kmpc_omp_task_alloc(i8*, i32, i32, i64, i64, void ()*)
+    declare i32 @__kmpc_omp_task(i8*, i32, i8*)
+    declare void @__kmpc_omp_task_complete_if0(i8*, i32, i8*)
+
+    @shared = global i32 0
+
+    define internal void @detached_body() {
+    entry:
+      store i32 17, i32* @shared
+      ret void
+    }
+
+    define internal void @follower_body() {
+    entry:
+      %v = load i32, i32* @shared
+      ret void
+    }
+
+    define i32 @main() {
+    entry:
+      %detached = call i8* @__kmpc_omp_task_alloc(
+          i8* null, i32 0, i32 65, i64 32, i64 0, void ()* @detached_body)
+      call i32 @__kmpc_omp_task(i8* null, i32 0, i8* %detached)
+      call void @__kmpc_omp_task_complete_if0(i8* null, i32 0, i8* %detached)
+      call i32 @__kmpc_omp_task(i8* null, i32 0,
+          i8* bitcast (void ()* @follower_body to i8*))
+      ret i32 0
+    }
+  )";
+
+  auto module = parseModule(source);
+  ASSERT_NE(module, nullptr);
+
+  MHPAnalysis mhp(*module);
+  mhp.analyze();
+
+  HappensBeforeAnalysis hb(*module, mhp);
+  hb.analyze();
+
+  const Instruction *store_shared =
+      &module->getFunction("detached_body")->getEntryBlock().front();
+  const Instruction *load_shared =
+      findInstructionByName(*module->getFunction("follower_body"), "v");
   ASSERT_NE(store_shared, nullptr);
   ASSERT_NE(load_shared, nullptr);
 
@@ -582,6 +702,86 @@ TEST_F(HappensBeforeAnalysisTest, SplitPhaseBarrierArriveSynchronizesWithWait) {
   ASSERT_NE(load_shared, nullptr);
 
   EXPECT_TRUE(hb.happensBefore(store_shared, load_shared));
+}
+
+TEST_F(HappensBeforeAnalysisTest,
+       ReusedSplitPhaseBarrierKeepsBarrierCyclesSeparated) {
+  const char *source = R"(
+    @first = global i32 0, align 4
+    @second = global i32 0, align 4
+    @barrier = global i8 0
+
+    declare i32 @pthread_create(i8*, i8*, i8* (i8*)*, i8*)
+    declare void @std_barrier_arriveEv(i8*)
+    declare void @std_barrier_waitEv(i8*)
+
+    define i8* @writer(i8* %unused) {
+    entry:
+      store i32 1, i32* @first, align 4
+      call void @std_barrier_arriveEv(i8* @barrier)
+      call void @std_barrier_waitEv(i8* @barrier)
+      store i32 2, i32* @second, align 4
+      call void @std_barrier_arriveEv(i8* @barrier)
+      call void @std_barrier_waitEv(i8* @barrier)
+      ret i8* null
+    }
+
+    define i8* @reader(i8* %unused) {
+    entry:
+      call void @std_barrier_waitEv(i8* @barrier)
+      %first_load = load i32, i32* @first, align 4
+      call void @std_barrier_waitEv(i8* @barrier)
+      %second_load = load i32, i32* @second, align 4
+      ret i8* null
+    }
+
+    define i32 @main() {
+    entry:
+      %tid1 = alloca i8
+      %tid2 = alloca i8
+      call i32 @pthread_create(i8* %tid1, i8* null, i8* (i8*)* @writer, i8* null)
+      call i32 @pthread_create(i8* %tid2, i8* null, i8* (i8*)* @reader, i8* null)
+      ret i32 0
+    }
+  )";
+
+  auto module = parseModule(source);
+  ASSERT_NE(module, nullptr);
+
+  MHPAnalysis mhp(*module);
+  mhp.analyze();
+
+  HappensBeforeAnalysis hb(*module, mhp);
+  hb.analyze();
+
+  const Function *writer = module->getFunction("writer");
+  const Function *reader = module->getFunction("reader");
+  ASSERT_NE(writer, nullptr);
+  ASSERT_NE(reader, nullptr);
+
+  const Instruction *store_first = nullptr;
+  const Instruction *store_second = nullptr;
+  for (const Instruction &inst : instructions(*writer)) {
+    const auto *store = dyn_cast<StoreInst>(&inst);
+    if (!store) {
+      continue;
+    }
+    if (store->getPointerOperand() == module->getNamedGlobal("first")) {
+      store_first = &inst;
+    } else if (store->getPointerOperand() == module->getNamedGlobal("second")) {
+      store_second = &inst;
+    }
+  }
+  const Instruction *first_load = findInstructionByName(*reader, "first_load");
+  const Instruction *second_load = findInstructionByName(*reader, "second_load");
+  ASSERT_NE(store_first, nullptr);
+  ASSERT_NE(store_second, nullptr);
+  ASSERT_NE(first_load, nullptr);
+  ASSERT_NE(second_load, nullptr);
+
+  EXPECT_TRUE(hb.happensBefore(store_first, first_load));
+  EXPECT_TRUE(hb.happensBefore(store_second, second_load));
+  EXPECT_FALSE(hb.happensBefore(store_second, first_load));
 }
 
 TEST_F(HappensBeforeAnalysisTest,
@@ -1453,6 +1653,72 @@ TEST_F(HappensBeforeAnalysisTest, ReleaseFenceStoreAcquireFenceCreatesHB) {
 
   EXPECT_TRUE(hb.happensBefore(store_data, load_data));
   EXPECT_FALSE(hb.happensBefore(load_data, store_data));
+}
+
+TEST_F(HappensBeforeAnalysisTest,
+       ReleaseFenceStoreAcquireFenceDoesNotOrderWitnessLoad) {
+  const char *source = R"(
+    @data = global i32 0, align 4
+    @flag = global i32 0, align 4
+
+    declare i32 @pthread_create(i8*, i8*, i8* (i8*)*, i8*)
+
+    define i8* @writer(i8* %arg) {
+    entry:
+      store i32 9, i32* @data, align 4
+      fence release
+      store atomic i32 1, i32* @flag monotonic, align 4
+      ret i8* null
+    }
+
+    define i8* @reader(i8* %arg) {
+    entry:
+      %seen = load atomic i32, i32* @flag monotonic, align 4
+      fence acquire
+      %ready = icmp ne i32 %seen, 0
+      br i1 %ready, label %read, label %exit
+
+    read:
+      %val = load i32, i32* @data, align 4
+      br label %exit
+
+    exit:
+      ret i8* null
+    }
+
+    define i32 @main() {
+    entry:
+      %tid1 = alloca i8
+      %tid2 = alloca i8
+      call i32 @pthread_create(i8* %tid1, i8* null, i8* (i8*)* @writer, i8* null)
+      call i32 @pthread_create(i8* %tid2, i8* null, i8* (i8*)* @reader, i8* null)
+      ret i32 0
+    }
+  )";
+
+  auto module = parseModule(source);
+  ASSERT_NE(module, nullptr);
+
+  MHPAnalysis mhp(*module);
+  mhp.analyze();
+
+  HappensBeforeAnalysis hb(*module, mhp);
+  hb.analyze();
+
+  const Function *writer = module->getFunction("writer");
+  const Function *reader = module->getFunction("reader");
+  ASSERT_NE(writer, nullptr);
+  ASSERT_NE(reader, nullptr);
+
+  const Instruction *store_data = &writer->getEntryBlock().front();
+  const Instruction *seen = findInstructionByName(*reader, "seen");
+  const Instruction *load_data = findInstructionByName(*reader, "val");
+  ASSERT_NE(store_data, nullptr);
+  ASSERT_NE(seen, nullptr);
+  ASSERT_NE(load_data, nullptr);
+
+  EXPECT_FALSE(hb.happensBefore(store_data, seen));
+  EXPECT_TRUE(hb.happensBefore(store_data, load_data));
 }
 
 TEST_F(HappensBeforeAnalysisTest,

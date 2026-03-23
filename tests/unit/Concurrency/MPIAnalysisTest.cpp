@@ -2871,6 +2871,81 @@ TEST_F(MPIAnalysisTest, HelperCommunicatorReusedFromSameRootStillUnifies) {
   EXPECT_FALSE(saw_ambiguous_gap);
 }
 
+TEST_F(MPIAnalysisTest, LoadedCommunicatorStillParticipatesInCollectiveMismatchChecks) {
+  const char *source = R"(
+    declare i32 @MPI_Bcast(i8*, i32, i32, i32, i8*)
+    declare i32 @MPI_Reduce(i8*, i8*, i32, i32, i32, i32, i8*)
+
+    define void @rank0(i8** %comm_slot) {
+    entry:
+      %comm = load i8*, i8** %comm_slot
+      call i32 @MPI_Bcast(i8* null, i32 1, i32 0, i32 0, i8* %comm)
+      ret void
+    }
+
+    define void @rank1(i8** %comm_slot) {
+    entry:
+      %comm = load i8*, i8** %comm_slot
+      call i32 @MPI_Reduce(i8* null, i8* null, i32 1, i32 0, i32 0, i32 0, i8* %comm)
+      ret void
+    }
+
+    define i32 @main(i8* %comm) {
+    entry:
+      %slot = alloca i8*
+      store i8* %comm, i8** %slot
+      call void @rank0(i8** %slot)
+      call void @rank1(i8** %slot)
+      ret i32 0
+    }
+  )";
+
+  auto module = parseModule(source);
+  ASSERT_NE(module, nullptr);
+
+  MPIAnalysis analysis(*module);
+  analysis.runAnalysis();
+
+  EXPECT_EQ(analysis.getResults().mismatched_collectives.size(), 1u);
+}
+
+TEST_F(MPIAnalysisTest, LoadedCommunicatorStillParticipatesInWrongRootChecks) {
+  const char *source = R"(
+    declare i32 @MPI_Bcast(i8*, i32, i32, i32, i8*)
+
+    define void @rank0(i8** %comm_slot) {
+    entry:
+      %comm = load i8*, i8** %comm_slot
+      call i32 @MPI_Bcast(i8* null, i32 1, i32 0, i32 0, i8* %comm)
+      ret void
+    }
+
+    define void @rank1(i8** %comm_slot) {
+    entry:
+      %comm = load i8*, i8** %comm_slot
+      call i32 @MPI_Bcast(i8* null, i32 1, i32 0, i32 1, i8* %comm)
+      ret void
+    }
+
+    define i32 @main(i8* %comm) {
+    entry:
+      %slot = alloca i8*
+      store i8* %comm, i8** %slot
+      call void @rank0(i8** %slot)
+      call void @rank1(i8** %slot)
+      ret i32 0
+    }
+  )";
+
+  auto module = parseModule(source);
+  ASSERT_NE(module, nullptr);
+
+  MPIAnalysis analysis(*module);
+  analysis.runAnalysis();
+
+  EXPECT_EQ(analysis.getResults().wrong_root_ranks.size(), 1u);
+}
+
 TEST_F(MPIAnalysisTest, NonWorldCommunicatorIsNotMarkedAsWorldByClassOrder) {
   const char *source = R"(
     declare i32 @MPI_Bcast(i8*, i32, i32, i32, i8*)

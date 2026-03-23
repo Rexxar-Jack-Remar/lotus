@@ -6,6 +6,7 @@
 #include <algorithm>
 #include <deque>
 #include <limits>
+#include <map>
 #include <set>
 
 #include <llvm/Analysis/ValueTracking.h>
@@ -271,6 +272,18 @@ void HappensBeforeAnalysis::addExtraHBEdge(const Instruction *from,
   }
 }
 
+void HappensBeforeAnalysis::addExtraHBEdge(const mhp::SyncNode *from,
+                                           const mhp::SyncNode *to) {
+  if (!from || !to || from == to) {
+    return;
+  }
+
+  auto &succs = m_extra_hb_successors[from];
+  if (std::find(succs.begin(), succs.end(), to) == succs.end()) {
+    succs.push_back(const_cast<mhp::SyncNode *>(to));
+  }
+}
+
 void HappensBeforeAnalysis::addExplicitHBPair(const Instruction *from,
                                               const Instruction *to) {
   if (!from || !to || from == to) {
@@ -363,7 +376,52 @@ HappensBeforeAnalysis::collectHBRelevantSuffixInstructions(
     return ordered;
   }
 
+  ThreadAPI *threadAPI = ThreadAPI::getThreadAPI();
+  const bool barrier_wait_like = threadAPI && threadAPI->isTDBarWait(inst);
+  auto hasInterveningBarrierWait = [&](const Instruction *candidate) {
+    if (!barrier_wait_like || !candidate) {
+      return false;
+    }
+    if (inst->getFunction() != candidate->getFunction() ||
+        inst->getParent() != candidate->getParent()) {
+      return false;
+    }
+    bool seen_sync = false;
+    for (const Instruction &cursor : *inst->getParent()) {
+      if (&cursor == inst) {
+        seen_sync = true;
+        continue;
+      }
+      if (!seen_sync) {
+        continue;
+      }
+      if (&cursor == candidate) {
+        return false;
+      }
+      if (threadAPI->isTDBarWait(&cursor)) {
+        return true;
+      }
+    }
+    return false;
+  };
+
   std::set<const Instruction *> collected;
+  if (barrier_wait_like && inst->getParent()) {
+    bool stopped_at_next_wait = false;
+    for (const Instruction *cursor = inst->getNextNode(); cursor;
+         cursor = cursor->getNextNode()) {
+      if (threadAPI->isTDBarWait(cursor)) {
+        stopped_at_next_wait = true;
+        break;
+      }
+      collected.insert(cursor);
+    }
+    if (stopped_at_next_wait) {
+      ordered.assign(collected.begin(), collected.end());
+      return ordered;
+    }
+    collected.clear();
+  }
   if (const BasicBlock *sync_successor = getWitnessSuccessor(inst)) {
     std::deque<const BasicBlock *> worklist;
     std::unordered_set<const BasicBlock *> visited;
@@ -387,6 +445,9 @@ HappensBeforeAnalysis::collectHBRelevantSuffixInstructions(
     const mhp::ThreadFlowGraph &tfg = m_mhp.getThreadFlowGraph();
     for (const Instruction *candidate : collectThreadSuffixInstructions(inst)) {
       if (!candidate || candidate == inst) {
+        continue;
+      }
+      if (hasInterveningBarrierWait(candidate)) {
         continue;
       }
       if (!isPostSyncInstruction(inst, candidate)) {
@@ -499,15 +560,28 @@ void HappensBeforeAnalysis::buildSynchronizesWith() {
       release_fence_anchor;
   std::unordered_map<const Instruction *, const Instruction *>
       acquire_fence_anchor;
+  std::unordered_map<const Instruction *, size_t> barrier_phase_index;
 
   std::set<std::pair<const Instruction *, const Instruction *>> seen_sync_edges;
-  auto addSyncEdge = [&](const Instruction *from, const Instruction *to) {
+  auto addSyncEdge = [&](const Instruction *from, const Instruction *to,
+                         const Instruction *suffix_anchor = nullptr) {
     if (!from || !to || from == to) {
       return;
     }
     if (seen_sync_edges.emplace(from, to).second) {
       m_sync_with.emplace_back(from, to);
-      addExplicitHBClosure(from, to);
+      if (!suffix_anchor) {
+        addExplicitHBClosure(from, to);
+        return;
+      }
+
+      for (const Instruction *prefix : collectThreadPrefixInstructions(from)) {
+        addExplicitHBPair(prefix, to);
+        for (const Instruction *suffix :
+             collectHBRelevantSuffixInstructions(suffix_anchor)) {
+          addExplicitHBPair(prefix, suffix);
+        }
+      }
     }
   };
 
@@ -656,6 +730,7 @@ void HappensBeforeAnalysis::buildSynchronizesWith() {
       case ThreadAPI::TD_OMP_FOR_DISPATCH_NEXT:
       case ThreadAPI::TD_OMP_FOR_DISPATCH_FINI:
       case ThreadAPI::TD_OMP_FLUSH:
+      case ThreadAPI::TD_OMP_DOACROSS_SUBMIT:
         omp_task_ops.push_back(inst);
         break;
       default:
@@ -751,6 +826,10 @@ void HappensBeforeAnalysis::buildSynchronizesWith() {
           continue;
         }
         if (!event.has_release) {
+          if (event.is_rmw) {
+            rmw_candidates.push_back(&event);
+            continue;
+          }
           has_non_release_store_like = true;
           continue;
         }
@@ -857,11 +936,71 @@ void HappensBeforeAnalysis::buildSynchronizesWith() {
         ++m_deferred_sync_counts["atomic_mixed_fence_missing_branch_witness"];
         continue;
       }
-      targets.push_back({entry.second, entry.second, true});
+      targets.push_back({entry.first, entry.second, true});
     }
 
     return targets;
   };
+
+  {
+    auto getBarrierPhaseKey = [&](const Instruction *inst) {
+      const Value *identity = threadAPI->getBarrierVal(inst);
+      identity = identity ? identity->stripPointerCasts() : nullptr;
+      return std::make_pair(identity ? identity : static_cast<const Value *>(inst),
+                            m_mhp.getThreadID(inst));
+    };
+
+    std::map<std::pair<const Value *, mhp::ThreadID>, size_t> next_phase;
+    std::map<std::pair<const Value *, mhp::ThreadID>, size_t> pending_arrive;
+
+    for (Function &F : m_module) {
+      if (F.isDeclaration()) {
+        continue;
+      }
+      for (inst_iterator I = inst_begin(F), E = inst_end(F); I != E; ++I) {
+        const Instruction *inst = &*I;
+        const auto *call = dyn_cast<CallBase>(inst);
+        if (!call) {
+          continue;
+        }
+
+        const ThreadAPI::TD_TYPE type = threadAPI->getType(call);
+        if (type != ThreadAPI::TD_BARRIER_ARRIVE &&
+            type != ThreadAPI::TD_BARRIER_WAIT_CPP20 &&
+            type != ThreadAPI::TD_BARRIER_ARRIVE_WAIT &&
+            type != ThreadAPI::TD_BAR_WAIT) {
+          continue;
+        }
+
+        mhp::ThreadID tid = m_mhp.getThreadID(inst);
+        if (tid == std::numeric_limits<mhp::ThreadID>::max()) {
+          continue;
+        }
+
+        auto key = getBarrierPhaseKey(inst);
+        size_t &phase_cursor = next_phase[key];
+        size_t phase = phase_cursor;
+
+        if (type == ThreadAPI::TD_BARRIER_ARRIVE) {
+          pending_arrive[key] = phase;
+        } else if (type == ThreadAPI::TD_BARRIER_WAIT_CPP20) {
+          auto pending_it = pending_arrive.find(key);
+          if (pending_it != pending_arrive.end()) {
+            phase = pending_it->second;
+            pending_arrive.erase(pending_it);
+            phase_cursor = std::max(phase_cursor, phase + 1);
+          } else {
+            phase = phase_cursor++;
+          }
+        } else {
+          pending_arrive.erase(key);
+          phase = phase_cursor++;
+        }
+
+        barrier_phase_index[inst] = phase;
+      }
+    }
+  }
 
   for (const auto &entry : events_by_location) {
     const AtomicLocationKey &location = entry.first;
@@ -899,7 +1038,8 @@ void HappensBeforeAnalysis::buildSynchronizesWith() {
         continue;
       }
       size_t before = m_sync_with.size();
-      addSyncEdge(release_candidates.front().first, sync_target);
+      addSyncEdge(release_candidates.front().first, sync_target,
+                  target.is_fence_target ? target.target : nullptr);
       bool modeled = m_sync_with.size() != before;
       if (!modeled) {
         ++m_deferred_sync_counts["atomic_release_candidate_unresolved"];
@@ -927,24 +1067,60 @@ void HappensBeforeAnalysis::buildSynchronizesWith() {
         continue;
       }
       bool emitted = false;
-      for (const Instruction *call_once :
-           {call_once_ops[i], call_once_ops[j]}) {
-        const auto *cb = dyn_cast<CallBase>(call_once);
-        const Function *callable = findCallOnceCallable(cb);
-        if (!callable) {
-          continue;
+      const mhp::ThreadFlowGraph &tfg = m_mhp.getThreadFlowGraph();
+      auto wireCallOnceSite = [&](const Instruction *source_call_once,
+                                  const Instruction *target_call_once) {
+        const auto *source_cb = dyn_cast<CallBase>(source_call_once);
+        const Function *callable = findCallOnceCallable(source_cb);
+        if (!callable || isInstructionThreadAmbiguous(source_call_once) ||
+            isInstructionThreadAmbiguous(target_call_once)) {
+          return;
         }
+
+        const mhp::ThreadID source_tid = m_mhp.getThreadID(source_call_once);
+        const mhp::ThreadID target_tid = m_mhp.getThreadID(target_call_once);
+        std::vector<mhp::SyncNode *> source_nodes =
+            tfg.getNodes(source_call_once, source_tid);
+        std::vector<mhp::SyncNode *> target_nodes =
+            tfg.getNodes(target_call_once, target_tid);
+        if (source_nodes.empty() || target_nodes.empty()) {
+          return;
+        }
+
         for (const Instruction &callback_inst : instructions(*callable)) {
-          for (const Instruction *suffix :
-               collectThreadSuffixInstructions(call_once)) {
-            if (suffix == call_once) {
-              continue;
+          for (mhp::SyncNode *source_node : source_nodes) {
+            const mhp::CallContextID callback_ctx = source_node->getNodeID();
+            for (mhp::SyncNode *callback_node :
+                 tfg.getNodes(&callback_inst, source_tid)) {
+              if (callback_node->getCallContextID() != callback_ctx) {
+                continue;
+              }
+              for (mhp::SyncNode *target_node : target_nodes) {
+                for (const Instruction *suffix :
+                     collectThreadSuffixInstructions(target_call_once)) {
+                  if (suffix == target_call_once) {
+                    continue;
+                  }
+                  for (mhp::SyncNode *suffix_node :
+                       tfg.getNodes(suffix, target_tid)) {
+                    if (suffix_node->getCallContextID() !=
+                        target_node->getCallContextID()) {
+                      continue;
+                    }
+                    addExtraHBEdge(callback_node, suffix_node);
+                    emitted = true;
+                  }
+                }
+              }
             }
-            addExplicitHBPair(&callback_inst, suffix);
-            emitted = true;
           }
         }
-      }
+      };
+
+      wireCallOnceSite(call_once_ops[i], call_once_ops[i]);
+      wireCallOnceSite(call_once_ops[i], call_once_ops[j]);
+      wireCallOnceSite(call_once_ops[j], call_once_ops[i]);
+      wireCallOnceSite(call_once_ops[j], call_once_ops[j]);
       if (emitted) {
         ++call_once_edges;
       } else {
@@ -988,12 +1164,25 @@ void HappensBeforeAnalysis::buildSynchronizesWith() {
   auto hasAmbiguousSplitPhaseBarrier = [&](const Instruction *inst) {
     std::unordered_map<mhp::ThreadID, size_t> arrive_counts;
     std::unordered_map<mhp::ThreadID, size_t> wait_counts;
+    auto phase_it = barrier_phase_index.find(inst);
+    const bool filter_by_phase = phase_it != barrier_phase_index.end();
+    const size_t phase = filter_by_phase ? phase_it->second : 0;
     for (const Instruction *candidate : barrier_arrives) {
+      auto candidate_phase_it = barrier_phase_index.find(candidate);
+      if (filter_by_phase && candidate_phase_it != barrier_phase_index.end() &&
+          candidate_phase_it->second != phase) {
+        continue;
+      }
       if (sameBarrier(inst, candidate)) {
         ++arrive_counts[m_mhp.getThreadID(candidate)];
       }
     }
     for (const Instruction *candidate : barrier_waits) {
+      auto candidate_phase_it = barrier_phase_index.find(candidate);
+      if (filter_by_phase && candidate_phase_it != barrier_phase_index.end() &&
+          candidate_phase_it->second != phase) {
+        continue;
+      }
       if (sameBarrier(inst, candidate)) {
         ++wait_counts[m_mhp.getThreadID(candidate)];
       }
@@ -1014,6 +1203,13 @@ void HappensBeforeAnalysis::buildSynchronizesWith() {
     for (const Instruction *wait : barrier_waits) {
       if (!sameBarrier(arrive, wait) ||
           m_mhp.getThreadID(arrive) == m_mhp.getThreadID(wait)) {
+        continue;
+      }
+      auto arrive_phase_it = barrier_phase_index.find(arrive);
+      auto wait_phase_it = barrier_phase_index.find(wait);
+      if (arrive_phase_it != barrier_phase_index.end() &&
+          wait_phase_it != barrier_phase_index.end() &&
+          arrive_phase_it->second != wait_phase_it->second) {
         continue;
       }
       if (!hasAmbiguousSplitPhaseBarrier(arrive) &&
@@ -1445,14 +1641,18 @@ bool HappensBeforeAnalysis::sameLatch(const Instruction *inst1,
 
 bool HappensBeforeAnalysis::sameBarrier(const Instruction *inst1,
                                         const Instruction *inst2) const {
-  const CallBase *c1 = dyn_cast<CallBase>(inst1);
-  const CallBase *c2 = dyn_cast<CallBase>(inst2);
-  if (!c1 || !c2 || c1->arg_size() < 1 || c2->arg_size() < 1) {
+  ThreadAPI *threadAPI = ThreadAPI::getThreadAPI();
+  if (!inst1 || !inst2 || !threadAPI) {
     return false;
   }
 
-  const Value *barrier1 = c1->getArgOperand(0)->stripPointerCasts();
-  const Value *barrier2 = c2->getArgOperand(0)->stripPointerCasts();
+  const Value *barrier1 = threadAPI->getBarrierVal(inst1);
+  const Value *barrier2 = threadAPI->getBarrierVal(inst2);
+  if (!barrier1 || !barrier2) {
+    return false;
+  }
+  barrier1 = barrier1->stripPointerCasts();
+  barrier2 = barrier2->stripPointerCasts();
   if (barrier1 == barrier2) {
     return true;
   }

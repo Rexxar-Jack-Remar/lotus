@@ -23,8 +23,10 @@ shared data.
 #include "Analysis/Concurrency/Memory/StaticThreadSharingAnalysis.h"
 
 #include "llvm/Analysis/CallGraph.h"
+#include "llvm/Analysis/LoopInfo.h"
 #include "llvm/IR/InstIterator.h"
 #include "llvm/IR/Instructions.h"
+#include "llvm/IR/Dominators.h"
 #include "llvm/Support/Debug.h"
 #include "llvm/Support/raw_ostream.h"
 
@@ -138,11 +140,15 @@ bool StaticThreadSharingAnalysis::runOnModule(Module &M) {
 void StaticThreadSharingAnalysis::findStaticThreads(Module &M) {
   ThreadAPI *api = ThreadAPI::getThreadAPI();
 
-  auto recordThreadEntry = [this](const Function *entryFunc) {
+  auto recordThreadEntry = [this](const Function *entryFunc, bool may_repeat) {
     if (!entryFunc) {
       return;
     }
     ++m_thread_spawn_counts[entryFunc];
+    if (may_repeat) {
+      m_thread_spawn_counts[entryFunc] =
+          std::max<unsigned>(m_thread_spawn_counts[entryFunc], 2);
+    }
     if (std::find(m_threads.begin(), m_threads.end(), entryFunc) ==
         m_threads.end()) {
       m_threads.push_back(entryFunc);
@@ -158,16 +164,20 @@ void StaticThreadSharingAnalysis::findStaticThreads(Module &M) {
     for (inst_iterator I = inst_begin(F), E = inst_end(F); I != E; ++I) {
       if (api->isTDFork(&*I)) {
         const Value *entry = api->getForkedFun(&*I);
+        DominatorTree DT(F);
+        LoopInfo LI;
+        LI.analyze(DT);
+        const bool may_repeat = LI.getLoopFor(I->getParent()) != nullptr;
         if (!entry) {
           m_threads_complete = false;
           continue;
         }
         if (const Function *entryFunc = dyn_cast<Function>(entry)) {
-          recordThreadEntry(entryFunc);
+          recordThreadEntry(entryFunc, may_repeat);
         } else {
           const Value *stripped = entry->stripPointerCasts();
           if (const Function *f = dyn_cast<Function>(stripped)) {
-            recordThreadEntry(f);
+            recordThreadEntry(f, may_repeat);
           } else {
             m_threads_complete = false;
           }

@@ -594,7 +594,6 @@ public:
     case TD_OMP_ATOMIC_END:
       return {SemanticLoweringKind::RecognizedButUnmodeled,
               "openmp-atomic-runtime-unmodeled"};
-    case TD_OMP_TASK_COMPLETE:
     case TD_OMP_TARGET_DATA_UPDATE:
     case TD_OMP_CANCEL:
     case TD_OMP_TEAMS:
@@ -614,7 +613,6 @@ public:
     case TD_OMP_TASKLOOP_FINI:
     case TD_OMP_INTEROP_INIT:
     case TD_OMP_INTEROP_FINI:
-    case TD_OMP_DOACROSS_SUBMIT:
       return {SemanticLoweringKind::RecognizedButUnmodeled,
               "recognized-openmp-runtime-unmodeled"};
     case TD_MPI_SESSION_GET_INFO:

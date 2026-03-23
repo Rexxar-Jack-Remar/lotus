@@ -270,6 +270,9 @@ private:
       m_barrier_waits;
   std::unordered_map<const llvm::Value *,
                      std::unordered_map<ThreadID, size_t>> m_barrier_phase_by_thread;
+  std::unordered_map<const llvm::Value *,
+                     std::unordered_map<ThreadID, size_t>>
+      m_pending_split_barrier_phase_by_thread;
   std::unordered_set<ThreadID> m_multi_instance_threads;
 
   // Indirect fork handling (conservative)

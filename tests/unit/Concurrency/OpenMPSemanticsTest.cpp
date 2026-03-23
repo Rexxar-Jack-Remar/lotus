@@ -325,6 +325,93 @@ TEST_F(OpenMPSemanticsTest, AtomicRuntimeFallbackIsReportedExplicitly) {
   EXPECT_EQ(it->second, 1u);
 }
 
+TEST_F(OpenMPSemanticsTest, CancellationRuntimeRemainsExplicitModelGap) {
+  const char *source = R"(
+    declare i32 @__kmpc_cancel(i8*, i32, i32)
+    declare i32 @__kmpc_cancellationpoint(i8*, i32, i32)
+
+    define i32 @main() {
+    entry:
+      call i32 @__kmpc_cancel(i8* null, i32 0, i32 0)
+      call i32 @__kmpc_cancellationpoint(i8* null, i32 0, i32 0)
+      ret i32 0
+    }
+  )";
+
+  auto module = parseModule(source);
+  ASSERT_NE(module, nullptr);
+
+  OpenMPSemantics semantics(*module);
+  semantics.analyze();
+
+  EXPECT_EQ(semantics.getSummary().cancel_count, 1u);
+  EXPECT_EQ(semantics.getSummary().cancellation_point_count, 1u);
+  const auto &reasons = semantics.getDeferredReasonCounts();
+  auto cancel_it = reasons.find("omp_cancel_runtime_unmodeled");
+  ASSERT_NE(cancel_it, reasons.end());
+  EXPECT_EQ(cancel_it->second, 1u);
+  auto point_it = reasons.find("omp_cancellation_point_runtime_unmodeled");
+  ASSERT_NE(point_it, reasons.end());
+  EXPECT_EQ(point_it->second, 1u);
+}
+
+TEST_F(OpenMPSemanticsTest,
+       DoacrossSubmitWitnessesSelectiveWaitRelationsAndTaskCompletionResolves) {
+  const char *source = R"(
+    declare i8* @__kmpc_omp_task_alloc(i8*, i32, i32, i64, i64, void ()*)
+    declare i32 @__kmpc_omp_task(i8*, i32, i8*)
+    declare i32 @__kmpc_omp_wait_deps(i8*, i32, i32, i8*, i32, i8*)
+    declare void @__kmpc_doacross_submit(i8*, i32, i64*)
+    declare void @__kmpc_omp_task_complete_if0(i8*, i32, i8*)
+
+    @dep = global i64 0
+
+    define internal void @detached_body() {
+    entry:
+      ret void
+    }
+
+    define i32 @main() {
+    entry:
+      %detached = call i8* @__kmpc_omp_task_alloc(
+          i8* null, i32 0, i32 65, i64 32, i64 0, void ()* @detached_body)
+      call i32 @__kmpc_omp_task(i8* null, i32 0, i8* %detached)
+      call void @__kmpc_doacross_submit(i8* null, i32 0, i64* @dep)
+      call i32 @__kmpc_omp_wait_deps(i8* null, i32 0, i32 1, i8* bitcast (i64* @dep to i8*), i32 0, i8* null)
+      call void @__kmpc_omp_task_complete_if0(i8* null, i32 0, i8* %detached)
+      call i32 @__kmpc_omp_task(i8* null, i32 0, i8* bitcast (void ()* @detached_body to i8*))
+      ret i32 0
+    }
+  )";
+
+  auto module = parseModule(source);
+  ASSERT_NE(module, nullptr);
+
+  OpenMPSemantics semantics(*module);
+  semantics.analyze();
+
+  ASSERT_EQ(semantics.getTasks().size(), 2u);
+  bool saw_doacross_submit = false;
+  bool saw_task_complete = false;
+  for (const OpenMPTaskEvent &event : semantics.getTaskEvents()) {
+    if (event.kind == OpenMPTaskEvent::Kind::DoacrossSubmit) {
+      saw_doacross_submit = !event.dependencies.empty();
+    } else if (event.kind == OpenMPTaskEvent::Kind::TaskComplete) {
+      saw_task_complete = event.task != nullptr;
+    }
+  }
+  EXPECT_TRUE(saw_doacross_submit);
+  EXPECT_TRUE(saw_task_complete);
+
+  bool saw_detached_completion_relation = false;
+  for (const auto &entry : semantics.getRelations()) {
+    if (entry.second.reason == "omp_detached_task_completion") {
+      saw_detached_completion_relation = true;
+    }
+  }
+  EXPECT_TRUE(saw_detached_completion_relation);
+}
+
 TEST_F(OpenMPSemanticsTest,
        TargetDataUpdateDoesNotCreateTaskOrderingBoundary) {
   const char *source = R"(
