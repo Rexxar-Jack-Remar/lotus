@@ -14,31 +14,20 @@
 #include "Dataflow/Mono/Solver/InterSolver.h"
 #include "Dataflow/Mono/Solver/IntraSolver.h"
 #include "Dataflow/Mono/Support/Result.h"
+#include "TestUtils/LLVMHelpers.h"
 
 #include <vector>
 
-#include <llvm/AsmParser/Parser.h>
 #include <llvm/IR/Instructions.h>
 #include <llvm/IR/LLVMContext.h>
 #include <llvm/IR/Module.h>
-#include <llvm/Support/SourceMgr.h>
 #include <gtest/gtest.h>
 
 using namespace llvm;
 using namespace mono;
 
-class MonoTest : public ::testing::Test {
+class MonoTest : public lotus::unittest::LlvmModuleTest {
 protected:
-  LLVMContext context;
-  std::unique_ptr<Module> parseModule(const char *source) {
-    SMDiagnostic err;
-    auto module = parseAssemblyString(source, err, context);
-    if (!module) {
-      err.print("MonoTest", errs());
-    }
-    return module;
-  }
-
   template <typename InstT> InstT *findFirst(Function *F) {
     for (auto &BB : *F) {
       for (auto &I : BB) {

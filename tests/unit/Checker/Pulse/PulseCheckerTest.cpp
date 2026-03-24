@@ -13,32 +13,23 @@
 #include "Checker/Pulse/Report/PulseDiagnostic.h"
 #include "Checker/Pulse/Report/PulseReport.h"
 #include "Checker/Report/BugReportMgr.h"
+#include "TestUtils/LLVMHelpers.h"
 
 #include <llvm/ADT/StringRef.h>
 #include <llvm/Analysis/LoopInfo.h>
-#include <llvm/AsmParser/Parser.h>
 #include <llvm/IR/Dominators.h>
 #include <llvm/IR/Instructions.h>
 #include <llvm/IR/LLVMContext.h>
 #include <llvm/IR/Module.h>
-#include <llvm/Support/SourceMgr.h>
 #include <gtest/gtest.h>
 
 #include <iterator>
 
 using namespace llvm;
 using namespace pulse;
+using lotus::unittest::parseModule;
 
 namespace {
-
-std::unique_ptr<Module> parseModule(LLVMContext &context, const char *source) {
-  SMDiagnostic err;
-  auto module = parseAssemblyString(source, err, context);
-  if (!module) {
-    err.print("PulseCheckerTest", errs());
-  }
-  return module;
-}
 
 size_t getReportCountForType(BugReportMgr &mgr, StringRef bugTypeName) {
   int bugTypeId = mgr.find_bug_type(bugTypeName);

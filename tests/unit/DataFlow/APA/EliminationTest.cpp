@@ -27,10 +27,6 @@ class APATest : public ::testing::Test {
 protected:
   llvm::LLVMContext Context;
 
-  std::unique_ptr<llvm::Module> parseModule(const char *Source) {
-    return lotus::unittest::parseModule(Context, Source, "APATest");
-  }
-
   llvm::Instruction *findInstructionByName(llvm::Function *F,
                                            llvm::StringRef Name) {
     return lotus::unittest::findInstructionByName(F, Name);
@@ -508,7 +504,7 @@ TEST_F(APATest, LLVMReachabilitySkipsUnreachableBlock) {
     }
   )";
 
-  auto Module = parseModule(Source);
+  auto Module = lotus::unittest::parseModule(Context, Source, "APATest");
   ASSERT_NE(Module, nullptr);
 
   auto *F = Module->getFunction("test");
@@ -542,7 +538,7 @@ TEST_F(APATest, LLVMConstantPropagationTracksFoldedValuesAtReturn) {
     }
   )";
 
-  auto Module = parseModule(Source);
+  auto Module = lotus::unittest::parseModule(Context, Source, "APATest");
   ASSERT_NE(Module, nullptr);
 
   auto *F = Module->getFunction("test");
@@ -577,7 +573,7 @@ TEST_F(APATest, LLVMLiveVariablesMergesFactsAcrossMultipleReturns) {
     }
   )";
 
-  auto Module = parseModule(Source);
+  auto Module = lotus::unittest::parseModule(Context, Source, "APATest");
   ASSERT_NE(Module, nullptr);
 
   auto *F = Module->getFunction("test");

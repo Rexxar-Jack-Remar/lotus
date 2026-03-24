@@ -361,7 +361,9 @@ TEST_F(ConcurrencyFacadeTest, PrintsOpenMPSummaryReport) {
             std::string::npos);
 }
 
+#ifndef LOTUS_GTEST_NO_MAIN
 int main(int argc, char **argv) {
   ::testing::InitGoogleTest(&argc, argv);
   return RUN_ALL_TESTS();
 }
+#endif

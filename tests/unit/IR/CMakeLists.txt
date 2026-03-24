@@ -1,16 +1,18 @@
-add_lotus_ir_test(pdg_query_test PDGQueryTest.cpp)
-add_lotus_ir_test(pdg_support_utils_test PDGSupportUtilsTest.cpp)
-add_lotus_ir_test(cypher_query_test CypherQueryTest.cpp)
-add_lotus_ir_test(property_baased_slicing_test PropertyBasedSlicingTest.cpp)
-add_lotus_ir_test(svfg_serializer_test SVFGSerializerTest.cpp)
-add_lotus_ir_test(svfg_memoryssa_test SVFGMemorySSATest.cpp)
-add_lotus_ir_test(gsa_test GSATest.cpp)
-add_lotus_ir_test(guarded_value_flow_test GuardedValueFlowTest.cpp)
-add_lotus_ir_test(guarded_value_flow_adapter_shape_test GuardedValueFlowAdapterShapeTest.cpp)
-add_lotus_ir_test(guarded_value_flow_parity_test GuardedValueFlowParityTest.cpp)
-add_lotus_ir_test(guarded_value_flow_solver_test GuardedValueFlowSolverTest.cpp)
-target_link_libraries(gsa_test CanaryGSA)
-target_link_libraries(guarded_value_flow_test CanaryGuardedValueFlow)
-target_link_libraries(guarded_value_flow_adapter_shape_test CanaryGuardedValueFlow)
-target_link_libraries(guarded_value_flow_parity_test CanaryGuardedValueFlow)
-target_link_libraries(guarded_value_flow_solver_test CanaryGuardedValueFlow)
+add_lotus_ir_test_suite(ir_pdg_tests
+  PDGQueryTest.cpp
+  PDGSupportUtilsTest.cpp
+  CypherQueryTest.cpp
+  PropertyBasedSlicingTest.cpp)
+
+add_lotus_svfg_test_suite(ir_svfg_tests
+  SVFGSerializerTest.cpp
+  SVFGMemorySSATest.cpp)
+
+add_lotus_gsa_test_suite(ir_gsa_tests
+  GSATest.cpp)
+
+add_lotus_gvfg_test_suite(ir_gvfg_tests
+  GuardedValueFlowTest.cpp
+  GuardedValueFlowAdapterShapeTest.cpp
+  GuardedValueFlowParityTest.cpp
+  GuardedValueFlowSolverTest.cpp)

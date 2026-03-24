@@ -3,14 +3,13 @@
 #include "Utils/Parallel/ThreadPool.h"
 #include "Utils/Platform/ProgressBar.h"
 
+#include "TestUtils/LLVMHelpers.h"
+
 #include <chrono>
 #include <memory>
 #include <string>
 
-#include <llvm/AsmParser/Parser.h>
 #include <llvm/IR/LLVMContext.h>
-#include <llvm/Support/SourceMgr.h>
-#include <llvm/Support/raw_ostream.h>
 
 #define private public
 #include "Utils/Parallel/Scheduler/PipelineScheduler.h"
@@ -19,15 +18,6 @@
 #include <gtest/gtest.h>
 
 namespace {
-
-std::unique_ptr<llvm::Module> parseAssembly(llvm::LLVMContext &Ctx,
-                                            const char *IR) {
-  llvm::SMDiagnostic Err;
-  auto M = llvm::parseAssemblyString(IR, Err, Ctx);
-  if (!M)
-    Err.print("PipelineSchedulerTimeoutTest", llvm::errs());
-  return M;
-}
 
 TEST(PipelineSchedulerTimeoutTest, WaitTaskUsesSecondBasedTimeouts) {
   static constexpr const char *IR = R"IR(
@@ -38,7 +28,8 @@ TEST(PipelineSchedulerTimeoutTest, WaitTaskUsesSecondBasedTimeouts) {
   )IR";
 
   llvm::LLVMContext Ctx;
-  auto M = parseAssembly(Ctx, IR);
+  auto M =
+      lotus::unittest::parseAssembly(Ctx, IR, "PipelineSchedulerTimeoutTest");
   ASSERT_TRUE(M);
 
   llvm::CallGraph CG(*M);

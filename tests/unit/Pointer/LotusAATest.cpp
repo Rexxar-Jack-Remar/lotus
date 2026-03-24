@@ -1,8 +1,9 @@
+#include "TestUtils/LLVMHelpers.h"
+
 #include <llvm/AsmParser/Parser.h>
 #include <llvm/IR/InstIterator.h>
 #include <llvm/IR/Instructions.h>
 #include <llvm/IR/LegacyPassManager.h>
-#include <llvm/Support/SourceMgr.h>
 #include <gtest/gtest.h>
 
 #define private public
@@ -14,16 +15,9 @@
 #undef private
 
 using namespace llvm;
+using lotus::unittest::parseAssembly;
 
 namespace {
-
-std::unique_ptr<Module> parseAssembly(LLVMContext &Ctx, const char *IR) {
-  SMDiagnostic Err;
-  auto M = parseAssemblyString(IR, Err, Ctx);
-  if (!M)
-    Err.print("LotusAATest", errs());
-  return M;
-}
 
 LotusAA *runLotusAA(Module &M) {
   auto *PM = new legacy::PassManager();

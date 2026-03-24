@@ -150,7 +150,9 @@ TEST_F(DataSharingAnalysisTest,
   EXPECT_EQ(analysis.getAttribute(g), DataSharingAttribute::Firstprivate);
 }
 
+#ifndef LOTUS_GTEST_NO_MAIN
 int main(int argc, char **argv) {
   ::testing::InitGoogleTest(&argc, argv);
   return RUN_ALL_TESTS();
 }
+#endif

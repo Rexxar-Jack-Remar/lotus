@@ -1,5 +1,7 @@
 #include "Utils/Parallel/Scheduler/PipelineScheduler.h"
 
+#include "TestUtils/LLVMHelpers.h"
+
 #include <chrono>
 #include <memory>
 #include <set>
@@ -7,22 +9,10 @@
 #include <string>
 #include <vector>
 
-#include <llvm/AsmParser/Parser.h>
 #include <llvm/IR/LLVMContext.h>
-#include <llvm/Support/SourceMgr.h>
-#include <llvm/Support/raw_ostream.h>
 #include <gtest/gtest.h>
 
 namespace {
-
-std::unique_ptr<llvm::Module> parseAssembly(llvm::LLVMContext &Ctx,
-                                            const char *IR) {
-  llvm::SMDiagnostic Err;
-  auto M = llvm::parseAssemblyString(IR, Err, Ctx);
-  if (!M)
-    Err.print("PipelineSchedulerTest", llvm::errs());
-  return M;
-}
 
 class LeafFailure : public std::runtime_error {
 public:
@@ -50,7 +40,7 @@ TEST(PipelineSchedulerTest, BottomUpSchedulingRespectsAcyclicDependencies) {
   )IR";
 
   llvm::LLVMContext Ctx;
-  auto M = parseAssembly(Ctx, IR);
+  auto M = lotus::unittest::parseAssembly(Ctx, IR, "PipelineSchedulerTest");
   ASSERT_TRUE(M);
 
   llvm::CallGraph CG(*M);
@@ -91,7 +81,7 @@ TEST(PipelineSchedulerTest, BottomUpSchedulingHandlesRecursiveCycles) {
   )IR";
 
   llvm::LLVMContext Ctx;
-  auto M = parseAssembly(Ctx, IR);
+  auto M = lotus::unittest::parseAssembly(Ctx, IR, "PipelineSchedulerTest");
   ASSERT_TRUE(M);
 
   llvm::CallGraph CG(*M);
@@ -131,7 +121,7 @@ TEST(PipelineSchedulerTest, TopDownSchedulingRespectsAcyclicDependencies) {
   )IR";
 
   llvm::LLVMContext Ctx;
-  auto M = parseAssembly(Ctx, IR);
+  auto M = lotus::unittest::parseAssembly(Ctx, IR, "PipelineSchedulerTest");
   ASSERT_TRUE(M);
 
   llvm::CallGraph CG(*M);
@@ -178,7 +168,7 @@ TEST(PipelineSchedulerTest, BottomUpSchedulingHandlesMixedLeafAndRecursiveScc) {
   )IR";
 
   llvm::LLVMContext Ctx;
-  auto M = parseAssembly(Ctx, IR);
+  auto M = lotus::unittest::parseAssembly(Ctx, IR, "PipelineSchedulerTest");
   ASSERT_TRUE(M);
 
   llvm::CallGraph CG(*M);
@@ -226,7 +216,7 @@ TEST(PipelineSchedulerTest, FlushesTrailingGarbageCollectionBatch) {
   )IR";
 
   llvm::LLVMContext Ctx;
-  auto M = parseAssembly(Ctx, IR);
+  auto M = lotus::unittest::parseAssembly(Ctx, IR, "PipelineSchedulerTest");
   ASSERT_TRUE(M);
 
   llvm::CallGraph CG(*M);
@@ -259,7 +249,7 @@ TEST(PipelineSchedulerTest, LocalSchedulingRunsGarbageCollectionCallbacks) {
   )IR";
 
   llvm::LLVMContext Ctx;
-  auto M = parseAssembly(Ctx, IR);
+  auto M = lotus::unittest::parseAssembly(Ctx, IR, "PipelineSchedulerTest");
   ASSERT_TRUE(M);
 
   llvm::CallGraph CG(*M);
@@ -298,7 +288,7 @@ TEST(PipelineSchedulerTest, TopDownSchedulerCanBeReusedAcrossRuns) {
   )IR";
 
   llvm::LLVMContext Ctx;
-  auto M = parseAssembly(Ctx, IR);
+  auto M = lotus::unittest::parseAssembly(Ctx, IR, "PipelineSchedulerTest");
   ASSERT_TRUE(M);
 
   llvm::CallGraph CG(*M);
@@ -338,7 +328,7 @@ TEST(PipelineSchedulerTest, BottomUpFailureDoesNotWaitForUnschedulableSCCs) {
   )IR";
 
   llvm::LLVMContext Ctx;
-  auto M = parseAssembly(Ctx, IR);
+  auto M = lotus::unittest::parseAssembly(Ctx, IR, "PipelineSchedulerTest");
   ASSERT_TRUE(M);
 
   llvm::CallGraph CG(*M);
@@ -378,7 +368,7 @@ TEST(PipelineSchedulerTest, SchedulerCanRecoverAfterFailedRun) {
   )IR";
 
   llvm::LLVMContext Ctx;
-  auto M = parseAssembly(Ctx, IR);
+  auto M = lotus::unittest::parseAssembly(Ctx, IR, "PipelineSchedulerTest");
   ASSERT_TRUE(M);
 
   llvm::CallGraph CG(*M);
@@ -408,7 +398,7 @@ TEST(PipelineSchedulerTest, DumpStatusEmitsCurrentSnapshot) {
   )IR";
 
   llvm::LLVMContext Ctx;
-  auto M = parseAssembly(Ctx, IR);
+  auto M = lotus::unittest::parseAssembly(Ctx, IR, "PipelineSchedulerTest");
   ASSERT_TRUE(M);
 
   llvm::CallGraph CG(*M);

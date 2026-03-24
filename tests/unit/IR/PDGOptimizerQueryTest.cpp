@@ -293,7 +293,9 @@ TEST_F(PDGOptimizerQueryTest, SchedulingLevelsRespectSccCondensationOrder) {
   EXPECT_TRUE(levels[1].count(d));
 }
 
+#ifndef LOTUS_GTEST_NO_MAIN
 int main(int argc, char **argv) {
   ::testing::InitGoogleTest(&argc, argv);
   return RUN_ALL_TESTS();
 }
+#endif

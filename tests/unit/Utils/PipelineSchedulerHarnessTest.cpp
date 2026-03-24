@@ -1,5 +1,7 @@
 #include "Utils/Parallel/Scheduler/PipelineScheduler.h"
 
+#include "TestUtils/LLVMHelpers.h"
+
 #include <atomic>
 #include <chrono>
 #include <condition_variable>
@@ -11,23 +13,11 @@
 #include <thread>
 #include <vector>
 
-#include <llvm/AsmParser/Parser.h>
 #include <llvm/IR/LLVMContext.h>
 #include <llvm/Support/CommandLine.h>
-#include <llvm/Support/SourceMgr.h>
-#include <llvm/Support/raw_ostream.h>
 #include <gtest/gtest.h>
 
 namespace {
-
-std::unique_ptr<llvm::Module> parseAssembly(llvm::LLVMContext &Ctx,
-                                            const char *IR) {
-  llvm::SMDiagnostic Err;
-  auto M = llvm::parseAssemblyString(IR, Err, Ctx);
-  if (!M)
-    Err.print("PipelineSchedulerHarnessTest", llvm::errs());
-  return M;
-}
 
 TEST(PipelineSchedulerHarnessTest,
      ActiveWorkerTaskDoesNotTripSchedulerTimeout) {
@@ -55,7 +45,8 @@ TEST(PipelineSchedulerHarnessTest,
   )IR";
 
   llvm::LLVMContext Ctx;
-  auto M = parseAssembly(Ctx, IR);
+  auto M =
+      lotus::unittest::parseAssembly(Ctx, IR, "PipelineSchedulerHarnessTest");
   ASSERT_TRUE(M);
 
   llvm::CallGraph CG(*M);
@@ -93,7 +84,8 @@ TEST(PipelineSchedulerHarnessTest, BottomUpStillSchedulesAllFunctions) {
   )IR";
 
   llvm::LLVMContext Ctx;
-  auto M = parseAssembly(Ctx, IR);
+  auto M =
+      lotus::unittest::parseAssembly(Ctx, IR, "PipelineSchedulerHarnessTest");
   ASSERT_TRUE(M);
 
   llvm::CallGraph CG(*M);
@@ -138,7 +130,8 @@ TEST(PipelineSchedulerHarnessTest,
   )IR";
 
   llvm::LLVMContext Ctx;
-  auto M = parseAssembly(Ctx, IR);
+  auto M =
+      lotus::unittest::parseAssembly(Ctx, IR, "PipelineSchedulerHarnessTest");
   ASSERT_TRUE(M);
 
   llvm::CallGraph CG(*M);
@@ -231,7 +224,8 @@ TEST(PipelineSchedulerHarnessTest, QueuedTasksDoNotTimeoutBeforeWorkersPickThemU
   )IR";
 
   llvm::LLVMContext Ctx;
-  auto M = parseAssembly(Ctx, IR);
+  auto M =
+      lotus::unittest::parseAssembly(Ctx, IR, "PipelineSchedulerHarnessTest");
   ASSERT_TRUE(M);
 
   llvm::CallGraph CG(*M);
@@ -299,7 +293,8 @@ TEST(PipelineSchedulerHarnessTest, QueuedTasksTimeoutWhenWorkersNeverFreeUp) {
   )IR";
 
   llvm::LLVMContext Ctx;
-  auto M = parseAssembly(Ctx, IR);
+  auto M =
+      lotus::unittest::parseAssembly(Ctx, IR, "PipelineSchedulerHarnessTest");
   ASSERT_TRUE(M);
 
   llvm::CallGraph CG(*M);

@@ -23,14 +23,6 @@ using namespace lotus::unittest;
 
 namespace {
 
-std::unique_ptr<Module> parseFile(LLVMContext &Ctx, const std::string &Path) {
-  SMDiagnostic Err;
-  auto M = parseIRFile(Path, Err, Ctx);
-  if (!M)
-    Err.print("DFPATest", errs());
-  return M;
-}
-
 DFPAResult runDFPA(Module &M, DFPAConfig Config = DFPAConfig(),
                    bool Preprocess = false) {
   legacy::PassManager PM;
@@ -398,8 +390,9 @@ TEST(DFPA, DemandRefinesDirectCallerBinding) {
 
 TEST(DFPA, RegressFunptrSimpleSmoke) {
   LLVMContext Ctx;
-  auto M = parseFile(Ctx, std::string(CMAKE_SOURCE_DIR) +
-                              "/tests/regress/PTATestCases/funptr-simple.ll");
+  auto M = loadModule(std::string(CMAKE_SOURCE_DIR) +
+                          "/tests/regress/PTATestCases/funptr-simple.ll",
+                      Ctx, "DFPATest");
   ASSERT_NE(M, nullptr);
 
   DFPAResult Result = runDFPA(*M, DFPAConfig(), true);
@@ -408,8 +401,9 @@ TEST(DFPA, RegressFunptrSimpleSmoke) {
 
 TEST(DFPA, RegressFunptrStructSmoke) {
   LLVMContext Ctx;
-  auto M = parseFile(Ctx, std::string(CMAKE_SOURCE_DIR) +
-                              "/tests/regress/PTATestCases/funptr-struct.ll");
+  auto M = loadModule(std::string(CMAKE_SOURCE_DIR) +
+                          "/tests/regress/PTATestCases/funptr-struct.ll",
+                      Ctx, "DFPATest");
   ASSERT_NE(M, nullptr);
 
   DFPAResult Result = runDFPA(*M, DFPAConfig(), true);
@@ -418,8 +412,9 @@ TEST(DFPA, RegressFunptrStructSmoke) {
 
 TEST(DFPA, RegressGlobalInitializerSmoke) {
   LLVMContext Ctx;
-  auto M = parseFile(Ctx, std::string(CMAKE_SOURCE_DIR) +
-                              "/tests/regress/PTATestCases/global-initializer.ll");
+  auto M = loadModule(std::string(CMAKE_SOURCE_DIR) +
+                          "/tests/regress/PTATestCases/global-initializer.ll",
+                      Ctx, "DFPATest");
   ASSERT_NE(M, nullptr);
 
   DFPAResult Result = runDFPA(*M, DFPAConfig(), true);
@@ -428,8 +423,9 @@ TEST(DFPA, RegressGlobalInitializerSmoke) {
 
 TEST(DFPA, RegressFunptrNestedCallSmoke) {
   LLVMContext Ctx;
-  auto M = parseFile(Ctx, std::string(CMAKE_SOURCE_DIR) +
-                              "/tests/regress/PTATestCases/funptr-nested-call.ll");
+  auto M = loadModule(std::string(CMAKE_SOURCE_DIR) +
+                          "/tests/regress/PTATestCases/funptr-nested-call.ll",
+                      Ctx, "DFPATest");
   ASSERT_NE(M, nullptr);
 
   DFPAConfig Config;

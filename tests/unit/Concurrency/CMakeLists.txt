@@ -1,22 +1,29 @@
-add_lotus_concurrency_test(mhp_analysis_test MHPAnalysisTest.cpp)
-add_lotus_concurrency_test(static_vector_clock_mhp_test StaticVectorClockMHPTest.cpp)
-add_lotus_concurrency_test(lockset_analysis_test LockSetAnalysisTest.cpp)
-add_lotus_concurrency_test(escape_analysis_test EscapeAnalysisTest.cpp)
-add_lotus_concurrency_test(static_thread_sharing_analysis_test StaticThreadSharingAnalysisTest.cpp)
-add_lotus_concurrency_test(simple_atomic_test AtomicTest.cpp)
-add_lotus_concurrency_test(happens_before_test HappensBeforeAnalysisTest.cpp)
-add_lotus_concurrency_test(thread_local_analysis_test ThreadLocalAnalysisTest.cpp)
-add_lotus_concurrency_test(openmp_task_graph_test OpenMPTaskGraphTest.cpp)
-add_lotus_concurrency_test(openmp_semantics_test OpenMPSemanticsTest.cpp)
-add_lotus_concurrency_test(data_sharing_analysis_test DataSharingAnalysisTest.cpp)
-add_lotus_concurrency_test(thread_api_test ThreadAPITest.cpp)
-add_lotus_concurrency_test(join_target_analysis_test JoinTargetAnalysisTest.cpp)
-add_lotus_concurrency_test(mpi_analysis_test MPIAnalysisTest.cpp)
-add_lotus_concurrency_test(mpi_analysis_collectives_test MPIAnalysisTest_Collectives.cpp)
-add_lotus_concurrency_test(mpi_analysis_rma_test MPIAnalysisTest_RMA.cpp)
-add_lotus_concurrency_test(mpi_analysis_communicators_test MPIAnalysisTest_Communicators.cpp)
-add_lotus_concurrency_test(mpi_analysis_state_test MPIAnalysisTest_State.cpp)
-add_lotus_concurrency_test(mpi_rank_analysis_test_basic MPIRankAnalysisTest_Basic.cpp)
-add_lotus_concurrency_test(mpi_rank_analysis_test_range MPIRankAnalysisTest_Range.cpp)
-add_lotus_concurrency_test(mpi_rank_analysis_test_predicate MPIRankAnalysisTest_Predicate.cpp)
-add_lotus_concurrency_test(concurrency_facade_test ConcurrencyFacadeTest.cpp)
+add_lotus_concurrency_test_suite(concurrency_core_tests
+  MHPAnalysisTest.cpp
+  StaticVectorClockMHPTest.cpp
+  HappensBeforeAnalysisTest.cpp
+  AtomicTest.cpp
+  LockSetAnalysisTest.cpp
+  EscapeAnalysisTest.cpp
+  StaticThreadSharingAnalysisTest.cpp
+  ThreadLocalAnalysisTest.cpp
+  ThreadAPITest.cpp
+  JoinTargetAnalysisTest.cpp)
+
+add_lotus_concurrency_test_suite(concurrency_openmp_tests
+  OpenMPTaskGraphTest.cpp
+  OpenMPSemanticsTest.cpp
+  DataSharingAnalysisTest.cpp
+  ConcurrencyFacadeTest.cpp)
+
+add_lotus_concurrency_test_suite(concurrency_mpi_tests
+  MPIAnalysisTest.cpp
+  MPIAnalysisTest_Collectives.cpp
+  MPIAnalysisTest_RMA.cpp
+  MPIAnalysisTest_Communicators.cpp
+  MPIAnalysisTest_State.cpp)
+
+add_lotus_concurrency_test_suite(concurrency_mpi_rank_tests
+  MPIRankAnalysisTest_Basic.cpp
+  MPIRankAnalysisTest_Range.cpp
+  MPIRankAnalysisTest_Predicate.cpp)

@@ -3657,7 +3657,9 @@ TEST_F(HappensBeforeAnalysisTest,
   EXPECT_GT(it->second, 0u);
 }
 
+#ifndef LOTUS_GTEST_NO_MAIN
 int main(int argc, char **argv) {
   ::testing::InitGoogleTest(&argc, argv);
   return RUN_ALL_TESTS();
 }
+#endif

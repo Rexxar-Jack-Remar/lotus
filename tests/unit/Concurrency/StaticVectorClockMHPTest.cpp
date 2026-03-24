@@ -896,7 +896,9 @@ TEST_F(StaticVectorClockMHPTest,
   EXPECT_EQ(svc.getThreadID(worker_inst), std::numeric_limits<ThreadID>::max());
 }
 
+#ifndef LOTUS_GTEST_NO_MAIN
 int main(int argc, char **argv) {
   ::testing::InitGoogleTest(&argc, argv);
   return RUN_ALL_TESTS();
 }
+#endif

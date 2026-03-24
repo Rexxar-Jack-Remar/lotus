@@ -1,25 +1,15 @@
 #include "Analysis/DebugInfo/DebugInfoAnalysis.h"
+#include "TestUtils/LLVMHelpers.h"
 
 #include <llvm/ADT/StringRef.h>
-#include <llvm/AsmParser/Parser.h>
 #include <llvm/IR/Instruction.h>
 #include <llvm/IR/LLVMContext.h>
 #include <llvm/IR/Module.h>
-#include <llvm/Support/SourceMgr.h>
-#include <llvm/Support/raw_ostream.h>
 #include <gtest/gtest.h>
 
 namespace {
 
-std::unique_ptr<llvm::Module> parseModule(llvm::LLVMContext &context,
-                                          const char *source) {
-  llvm::SMDiagnostic err;
-  auto module = llvm::parseAssemblyString(source, err, context);
-  if (!module) {
-    err.print("DebugInfoAnalysisTest", llvm::errs());
-  }
-  return module;
-}
+using lotus::unittest::parseModule;
 
 const llvm::Instruction *findInstruction(const llvm::Function *function,
                                          llvm::StringRef name) {

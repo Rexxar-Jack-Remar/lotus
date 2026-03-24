@@ -59,6 +59,25 @@ inline std::unique_ptr<Module> parseAssembly(LLVMContext &context,
   return parseModule(context, source, diag_owner);
 }
 
+inline std::unique_ptr<Module> loadModule(StringRef path,
+                                          LLVMContext &context,
+                                          StringRef diag_owner =
+                                              "LLVMHelpers") {
+  SMDiagnostic err;
+  auto module = parseIRFile(path, err, context);
+  if (!module) {
+    err.print(diag_owner.data(), errs());
+  }
+  return module;
+}
+
+inline std::unique_ptr<Module> loadModule(const std::string &path,
+                                          LLVMContext &context,
+                                          StringRef diag_owner =
+                                              "LLVMHelpers") {
+  return loadModule(StringRef(path), context, diag_owner);
+}
+
 inline Instruction *findInstructionByName(Function &func, StringRef name) {
   for (auto &bb : func) {
     for (auto &inst : bb) {

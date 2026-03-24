@@ -21,13 +21,9 @@
 
 using namespace llvm;
 using namespace lotus::analysis;
+using lotus::unittest::parseModule;
 
 namespace {
-
-std::unique_ptr<Module> parseModule(LLVMContext &context, const char *source) {
-  return lotus::unittest::parseModule(context, source,
-                                      "SaberConditionAllocatorTest");
-}
 
 const BasicBlock *getBlock(const Module &module, StringRef functionName,
                            StringRef blockName) {

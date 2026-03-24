@@ -10,13 +10,12 @@
 
 #include "Analysis/TypeHirarchy/DIBasedTypeHierarchy.h"
 #include "Analysis/TypeHirarchy/DIBasedTypeHierarchyData.h"
+#include "TestUtils/LLVMHelpers.h"
 
 #include <gtest/gtest.h>
 
 #include "llvm/IR/LLVMContext.h"
 #include "llvm/IR/Module.h"
-#include "llvm/IRReader/IRReader.h"
-#include "llvm/Support/SourceMgr.h"
 #include "llvm/Support/raw_ostream.h"
 
 using namespace llvm;
@@ -24,17 +23,7 @@ using namespace lotus;
 
 namespace {
 
-// Helper function to load a module from a file
-std::unique_ptr<Module> loadModule(const std::string &Filename,
-                                    LLVMContext &Context) {
-  SMDiagnostic Err;
-  auto M = parseIRFile(Filename, Err, Context);
-  if (!M) {
-    Err.print("DIBasedTypeHierarchySerializationTest", errs());
-    return nullptr;
-  }
-  return M;
-}
+using lotus::unittest::loadModule;
 
 // Helper function to get test file path
 std::string getTestFilePath(const std::string &FileName) {
