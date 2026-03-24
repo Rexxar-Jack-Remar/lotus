@@ -984,6 +984,84 @@ TEST_F(LockSetAnalysisTest,
   EXPECT_TRUE(lsa.getMustWriteLockSetAt(after).count(lock) == 0);
 }
 
+TEST_F(LockSetAnalysisTest, BlockHeadMustReadLockSetUsesPredecessorMeet) {
+  const char *source = R"(
+    declare i32 @pthread_rwlock_rdlock(i8*)
+
+    @lock = global i8 0
+
+    define i32 @main(i1 %cond) {
+    entry:
+      br i1 %cond, label %left, label %right
+
+    left:
+      call i32 @pthread_rwlock_rdlock(i8* @lock)
+      br label %merge
+
+    right:
+      call i32 @pthread_rwlock_rdlock(i8* @lock)
+      br label %merge
+
+    merge:
+      %access = add i32 1, 2
+      ret i32 %access
+    }
+  )";
+
+  auto module = parseModule(source);
+  ASSERT_NE(module, nullptr);
+
+  LockSetAnalysis lsa(*module);
+  lsa.analyze();
+
+  const Instruction *access =
+      findInstructionByName(*module->getFunction("main"), "access");
+  const GlobalVariable *lock = module->getNamedGlobal("lock");
+  ASSERT_NE(access, nullptr);
+  ASSERT_NE(lock, nullptr);
+
+  EXPECT_TRUE(lsa.getMustReadLockSetAt(access).count(lock) > 0);
+}
+
+TEST_F(LockSetAnalysisTest, BlockHeadMustWriteLockSetUsesPredecessorMeet) {
+  const char *source = R"(
+    declare i32 @pthread_rwlock_wrlock(i8*)
+
+    @lock = global i8 0
+
+    define i32 @main(i1 %cond) {
+    entry:
+      br i1 %cond, label %left, label %right
+
+    left:
+      call i32 @pthread_rwlock_wrlock(i8* @lock)
+      br label %merge
+
+    right:
+      call i32 @pthread_rwlock_wrlock(i8* @lock)
+      br label %merge
+
+    merge:
+      %access = add i32 1, 2
+      ret i32 %access
+    }
+  )";
+
+  auto module = parseModule(source);
+  ASSERT_NE(module, nullptr);
+
+  LockSetAnalysis lsa(*module);
+  lsa.analyze();
+
+  const Instruction *access =
+      findInstructionByName(*module->getFunction("main"), "access");
+  const GlobalVariable *lock = module->getNamedGlobal("lock");
+  ASSERT_NE(access, nullptr);
+  ASSERT_NE(lock, nullptr);
+
+  EXPECT_TRUE(lsa.getMustWriteLockSetAt(access).count(lock) > 0);
+}
+
 TEST_F(LockSetAnalysisTest, ReaderWriterModesDoNotPretendExclusion) {
   const char *source = R"(
     declare i32 @pthread_rwlock_rdlock(i8*)

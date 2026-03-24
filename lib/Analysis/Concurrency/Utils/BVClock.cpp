@@ -4,13 +4,11 @@
 */
 #include "Analysis/Concurrency/Utils/BVClock.h"
 #include "Analysis/Concurrency/Utils/FBVClock.h"
-#include "Utils/LLVM/Log.h"
 
 #include <algorithm>
 #include <string>
 
 BVClock BVClock::operator+(const BVClock &vc) const{
-  WARN << "BVClock can be implemented more efficiently with bitwise operations.\n";
   BVClock rv;
   if(vec.size() < vc.vec.size()){
     rv.vec = vc.vec;

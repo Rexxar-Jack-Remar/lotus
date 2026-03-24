@@ -246,7 +246,7 @@ TEST_F(HappensBeforeAnalysisTest,
 }
 
 TEST_F(HappensBeforeAnalysisTest,
-       UniqueConditionSignalRemainsDeferredWithoutWakeupProof) {
+       UniqueConditionSignalCreatesHBForSingleWaiter) {
   const char *source = R"(
     @cond = global i8 0
     @mutex = global i8 0
@@ -296,9 +296,9 @@ TEST_F(HappensBeforeAnalysisTest,
   ASSERT_NE(store_shared, nullptr);
   ASSERT_NE(load_shared, nullptr);
 
-  EXPECT_FALSE(hb.happensBefore(store_shared, load_shared));
+  EXPECT_TRUE(hb.happensBefore(store_shared, load_shared));
   const auto &deferred = hb.getDeferredSyncCounts();
-  auto it = deferred.find("condvar_relations_deferred");
+  auto it = deferred.find("condvar_sync_edges");
   ASSERT_NE(it, deferred.end());
   EXPECT_GT(it->second, 0u);
 }
@@ -2283,7 +2283,8 @@ TEST_F(HappensBeforeAnalysisTest,
   EXPECT_GT(it->second, 0u);
 }
 
-TEST_F(HappensBeforeAnalysisTest, ReleaseSequenceWithMultipleTailsIsDeferred) {
+TEST_F(HappensBeforeAnalysisTest,
+       ReleaseSequenceWithMultipleTailsCreatesHB) {
   const char *source = R"(
     @data = global i32 0, align 4
     @flag = global i32 0, align 4
@@ -2353,9 +2354,9 @@ TEST_F(HappensBeforeAnalysisTest, ReleaseSequenceWithMultipleTailsIsDeferred) {
   ASSERT_NE(store_data, nullptr);
   ASSERT_NE(load_data, nullptr);
 
-  EXPECT_FALSE(hb.happensBefore(store_data, load_data));
+  EXPECT_TRUE(hb.happensBefore(store_data, load_data));
   const auto &deferred = hb.getDeferredSyncCounts();
-  auto it = deferred.find("atomic_release_sequence_tail_ambiguous");
+  auto it = deferred.find("atomic_release_sequence_edges_modeled");
   ASSERT_NE(it, deferred.end());
   EXPECT_GT(it->second, 0u);
 }
@@ -2427,13 +2428,14 @@ TEST_F(HappensBeforeAnalysisTest,
   EXPECT_TRUE(hb.happensBefore(store_data, load_data));
   const auto &deferred = hb.getDeferredSyncCounts();
   size_t modeled_edges = 0;
-  if (auto it = deferred.find("atomic_mixed_fence_edges_modeled");
-      it != deferred.end()) {
-    modeled_edges += it->second;
+  auto mixed_fence_it = deferred.find("atomic_mixed_fence_edges_modeled");
+  if (mixed_fence_it != deferred.end()) {
+    modeled_edges += mixed_fence_it->second;
   }
-  if (auto it = deferred.find("atomic_release_sequence_edges_modeled");
-      it != deferred.end()) {
-    modeled_edges += it->second;
+  auto release_sequence_it =
+      deferred.find("atomic_release_sequence_edges_modeled");
+  if (release_sequence_it != deferred.end()) {
+    modeled_edges += release_sequence_it->second;
   }
   EXPECT_GT(modeled_edges, 0u);
 }
@@ -2693,6 +2695,149 @@ TEST_F(HappensBeforeAnalysisTest,
 
   const Instruction *store_data = &writer->getEntryBlock().front();
   const Instruction *load_data = findInstructionByName(*reader, "val");
+  ASSERT_NE(store_data, nullptr);
+  ASSERT_NE(load_data, nullptr);
+
+  EXPECT_TRUE(hb.happensBefore(store_data, load_data));
+}
+
+TEST_F(HappensBeforeAnalysisTest,
+       ReleaseFenceAcrossBlocksBeforeStoreCreatesHB) {
+  const char *source = R"(
+    @data = global i32 0, align 4
+    @flag = global i32 0, align 4
+
+    declare i32 @pthread_create(i8*, i8*, i8* (i8*)*, i8*)
+
+    define i8* @writer(i8* %arg) {
+    entry:
+      store i32 9, i32* @data, align 4
+      br label %publish
+
+    publish:
+      fence release
+      br label %store_bb
+
+    store_bb:
+      store atomic i32 1, i32* @flag monotonic, align 4
+      ret i8* null
+    }
+
+    define i8* @reader(i8* %arg) {
+    entry:
+      %seen = load atomic i32, i32* @flag monotonic, align 4
+      fence acquire
+      %ready = icmp ne i32 %seen, 0
+      br i1 %ready, label %read, label %exit
+
+    read:
+      %val = load i32, i32* @data, align 4
+      br label %exit
+
+    exit:
+      ret i8* null
+    }
+
+    define i32 @main() {
+    entry:
+      %tid1 = alloca i8
+      %tid2 = alloca i8
+      call i32 @pthread_create(i8* %tid1, i8* null, i8* (i8*)* @writer, i8* null)
+      call i32 @pthread_create(i8* %tid2, i8* null, i8* (i8*)* @reader, i8* null)
+      ret i32 0
+    }
+  )";
+
+  auto module = parseModule(source);
+  ASSERT_NE(module, nullptr);
+
+  MHPAnalysis mhp(*module);
+  mhp.analyze();
+
+  HappensBeforeAnalysis hb(*module, mhp);
+  hb.analyze();
+
+  const Function *writer = module->getFunction("writer");
+  const Function *reader = module->getFunction("reader");
+  ASSERT_NE(writer, nullptr);
+  ASSERT_NE(reader, nullptr);
+
+  const Instruction *store_data = &writer->getEntryBlock().front();
+  const Instruction *load_data = findInstructionByName(*reader, "val");
+  ASSERT_NE(store_data, nullptr);
+  ASSERT_NE(load_data, nullptr);
+
+  EXPECT_TRUE(hb.happensBefore(store_data, load_data));
+}
+
+TEST_F(HappensBeforeAnalysisTest,
+       MultiStepReleaseSequenceCreatesHB) {
+  const char *source = R"(
+    @data = global i32 0, align 4
+    @flag = global i32 0, align 4
+
+    declare i32 @pthread_create(i8*, i8*, i8* (i8*)*, i8*)
+
+    define i8* @publisher(i8* %arg) {
+    entry:
+      store i32 77, i32* @data, align 4
+      store atomic i32 1, i32* @flag release, align 4
+      ret i8* null
+    }
+
+    define i8* @rmw1(i8* %arg) {
+    entry:
+      %old1 = atomicrmw add i32* @flag, i32 1 monotonic
+      ret i8* null
+    }
+
+    define i8* @rmw2(i8* %arg) {
+    entry:
+      %old2 = atomicrmw add i32* @flag, i32 1 monotonic
+      ret i8* null
+    }
+
+    define i8* @reader(i8* %arg) {
+    entry:
+      %seen = load atomic i32, i32* @flag acquire, align 4
+      %ready = icmp eq i32 %seen, 3
+      br i1 %ready, label %read, label %exit
+
+    read:
+      %val = load i32, i32* @data, align 4
+      br label %exit
+
+    exit:
+      ret i8* null
+    }
+
+    define i32 @main() {
+    entry:
+      %tid1 = alloca i8
+      %tid2 = alloca i8
+      %tid3 = alloca i8
+      %tid4 = alloca i8
+      call i32 @pthread_create(i8* %tid1, i8* null, i8* (i8*)* @publisher, i8* null)
+      call i32 @pthread_create(i8* %tid2, i8* null, i8* (i8*)* @rmw1, i8* null)
+      call i32 @pthread_create(i8* %tid3, i8* null, i8* (i8*)* @rmw2, i8* null)
+      call i32 @pthread_create(i8* %tid4, i8* null, i8* (i8*)* @reader, i8* null)
+      ret i32 0
+    }
+  )";
+
+  auto module = parseModule(source);
+  ASSERT_NE(module, nullptr);
+
+  MHPAnalysis mhp(*module);
+  mhp.analyze();
+
+  HappensBeforeAnalysis hb(*module, mhp);
+  hb.analyze();
+
+  const Instruction *store_data =
+      &module->getFunction("publisher")->getEntryBlock().front();
+  const Instruction *load_data =
+      findInstructionByName(*module->getFunction("reader"), "val");
   ASSERT_NE(store_data, nullptr);
   ASSERT_NE(load_data, nullptr);
 

@@ -113,6 +113,8 @@ private:
   const llvm::Instruction *
   getSinglePrecedingAtomicLoad(const llvm::Instruction *inst) const;
   const llvm::Instruction *
+  getSinglePrecedingReleaseFence(const llvm::Instruction *inst) const;
+  const llvm::Instruction *
   getSingleFollowingAcquireFence(const llvm::Instruction *inst) const;
   bool hasSupportedAtomicWitness(const llvm::Instruction *inst) const;
 

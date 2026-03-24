@@ -22,7 +22,9 @@
 
 #include <algorithm>
 #include <cstdlib>
+#include <iterator>
 #include <queue>
+#include <set>
 #include <stack>
 
 #include <llvm/Analysis/CallGraph.h>
@@ -343,6 +345,47 @@ LockSet LockSetAnalysis::getMustReadLockSetAt(const Instruction *inst) const {
     }
     return result;
   }
+  if (const Instruction *prev = inst->getPrevNode()) {
+    auto it_exit = m_must_read_locks_exit.find(prev);
+    if (it_exit != m_must_read_locks_exit.end()) {
+      LockSet result = it_exit->second;
+      for (LockID lock : getImpreciseRAIILocksEndingAt(inst)) {
+        result.erase(lock);
+      }
+      return result;
+    }
+  }
+  const BasicBlock *bb = inst->getParent();
+  if (bb && inst == &bb->front()) {
+    bool initialized = false;
+    LockSet merged;
+    for (const BasicBlock *pred : predecessors(bb)) {
+      const Instruction *term = pred->getTerminator();
+      if (!term) {
+        continue;
+      }
+      auto it_exit = m_must_read_locks_exit.find(term);
+      if (it_exit == m_must_read_locks_exit.end()) {
+        continue;
+      }
+      if (!initialized) {
+        merged = it_exit->second;
+        initialized = true;
+      } else {
+        LockSet intersection;
+        std::set_intersection(merged.begin(), merged.end(),
+                              it_exit->second.begin(), it_exit->second.end(),
+                              std::inserter(intersection, intersection.begin()));
+        merged = std::move(intersection);
+      }
+    }
+    if (initialized) {
+      for (LockID lock : getImpreciseRAIILocksEndingAt(inst)) {
+        merged.erase(lock);
+      }
+      return merged;
+    }
+  }
   return LockSet();
 }
 
@@ -354,6 +397,47 @@ LockSet LockSetAnalysis::getMustWriteLockSetAt(const Instruction *inst) const {
       result.erase(lock);
     }
     return result;
+  }
+  if (const Instruction *prev = inst->getPrevNode()) {
+    auto it_exit = m_must_write_locks_exit.find(prev);
+    if (it_exit != m_must_write_locks_exit.end()) {
+      LockSet result = it_exit->second;
+      for (LockID lock : getImpreciseRAIILocksEndingAt(inst)) {
+        result.erase(lock);
+      }
+      return result;
+    }
+  }
+  const BasicBlock *bb = inst->getParent();
+  if (bb && inst == &bb->front()) {
+    bool initialized = false;
+    LockSet merged;
+    for (const BasicBlock *pred : predecessors(bb)) {
+      const Instruction *term = pred->getTerminator();
+      if (!term) {
+        continue;
+      }
+      auto it_exit = m_must_write_locks_exit.find(term);
+      if (it_exit == m_must_write_locks_exit.end()) {
+        continue;
+      }
+      if (!initialized) {
+        merged = it_exit->second;
+        initialized = true;
+      } else {
+        LockSet intersection;
+        std::set_intersection(merged.begin(), merged.end(),
+                              it_exit->second.begin(), it_exit->second.end(),
+                              std::inserter(intersection, intersection.begin()));
+        merged = std::move(intersection);
+      }
+    }
+    if (initialized) {
+      for (LockID lock : getImpreciseRAIILocksEndingAt(inst)) {
+        merged.erase(lock);
+      }
+      return merged;
+    }
   }
   return LockSet();
 }
@@ -505,13 +589,18 @@ bool LockSetAnalysis::areLocksOrderedConsistently(LockID lock1,
 std::vector<std::pair<LockID, LockID>>
 LockSetAnalysis::detectLockOrderInversions() const {
   std::vector<std::pair<LockID, LockID>> inversions;
+  std::unordered_set<LockPair, LockPair::Hash> emitted;
 
   // Check all pairs of locks for order inversions
   for (const auto &pair1 : m_observed_lock_orders) {
     LockPair reverse{pair1.second, pair1.first};
-    if (m_observed_lock_orders.find(reverse) != m_observed_lock_orders.end()) {
+    LockPair canonical = std::less<LockID>{}(pair1.first, pair1.second)
+                             ? pair1
+                             : LockPair{pair1.second, pair1.first};
+    if (m_observed_lock_orders.find(reverse) != m_observed_lock_orders.end() &&
+        emitted.insert(canonical).second) {
       // Found an inversion - both lock1->lock2 and lock2->lock1 exist
-      inversions.push_back({pair1.first, pair1.second});
+      inversions.push_back({canonical.first, canonical.second});
     }
   }
 

@@ -1181,20 +1181,8 @@ void HappensBeforeAnalysis::buildSynchronizesWith() {
     }
 
     if (event.is_store_like) {
-      const Instruction *cursor = event.inst->getPrevNode();
-      while (cursor) {
-        if (CppAtomics::isFence(cursor)) {
-          if (CppAtomics::isFenceRelease(cursor) ||
-              CppAtomics::isFenceAcqRel(cursor) ||
-              CppAtomics::isFenceSeqCst(cursor)) {
-            release_fence_anchor[cursor] = event.inst;
-          }
-          break;
-        }
-        if (!isFenceAnchorCompatibleInstruction(cursor)) {
-          break;
-        }
-        cursor = cursor->getPrevNode();
+      if (const Instruction *fence = getSinglePrecedingReleaseFence(event.inst)) {
+        release_fence_anchor[fence] = event.inst;
       }
     }
 
@@ -1449,16 +1437,12 @@ void HappensBeforeAnalysis::buildSynchronizesWith() {
     }
 
     bool has_release_sequence = false;
-    bool ambiguous_release_sequence = false;
     std::vector<const AtomicEvent *> release_sequence_events;
     for (size_t idx : entry.second) {
       const AtomicEvent &event = atomic_events[idx];
       if (event.inst != release_candidates.front().second &&
           event.is_store_like && event.is_rmw &&
           (!event.is_cmpxchg || event.has_success_witness)) {
-        if (!release_sequence_events.empty()) {
-          ambiguous_release_sequence = true;
-        }
         has_release_sequence = true;
         release_sequence_events.push_back(&event);
       }
@@ -1479,7 +1463,7 @@ void HappensBeforeAnalysis::buildSynchronizesWith() {
 
       bool supported_release_sequence = false;
       if (has_release_sequence) {
-        if (ambiguous_release_sequence || release_sequence_events.size() != 1) {
+        if (release_sequence_events.empty()) {
           ++deferred_release_sequence_relations;
           ++m_deferred_sync_counts["atomic_release_sequence_tail_ambiguous"];
           continue;
@@ -1575,11 +1559,8 @@ void HappensBeforeAnalysis::buildSynchronizesWith() {
         for (const Instruction &callback_inst : instructions(*callable)) {
           for (mhp::SyncNode *source_node : source_nodes) {
             const mhp::CallContextID callback_ctx = source_node->getNodeID();
-            for (mhp::SyncNode *callback_node :
-                 tfg.getNodes(&callback_inst, source_tid)) {
-              if (callback_node->getCallContextID() != callback_ctx) {
-                continue;
-              }
+            if (mhp::SyncNode *callback_node =
+                    tfg.getNode(&callback_inst, source_tid, callback_ctx)) {
               for (mhp::SyncNode *target_node : target_nodes) {
                 for (const Instruction *suffix :
                      collectThreadSuffixInstructions(target_call_once)) {
@@ -1836,18 +1817,38 @@ void HappensBeforeAnalysis::buildSynchronizesWith() {
     if (!wait || !isSingleExecutionSite(wait)) {
       continue;
     }
-    bool has_matching_signal = false;
+
+    size_t competing_waits = 0;
+    for (const Instruction *other_wait : cond_waits) {
+      if (other_wait && isSingleExecutionSite(other_wait) &&
+          sameCondIdentity(wait, other_wait) &&
+          m_mhp.getThreadID(other_wait) != m_mhp.getThreadID(wait)) {
+        ++competing_waits;
+      }
+    }
+
+    std::vector<const Instruction *> matching_signals;
     for (const Instruction *signal : cond_signals) {
       if (!sameCondIdentity(wait, signal)) {
         continue;
       }
-      has_matching_signal = true;
       if (!signal || !isSingleExecutionSite(signal) ||
           m_mhp.getThreadID(signal) == m_mhp.getThreadID(wait)) {
         continue;
       }
+      matching_signals.push_back(signal);
     }
-    if (has_matching_signal) {
+
+    if (competing_waits == 0 && matching_signals.size() == 1) {
+      size_t before = m_sync_with.size();
+      addSyncEdge(matching_signals.front(), wait, wait);
+      if (m_sync_with.size() != before) {
+        ++condvar_edges;
+        continue;
+      }
+    }
+
+    if (!matching_signals.empty()) {
       ++deferred_condvar_relations;
     }
   }
@@ -2188,6 +2189,64 @@ const Instruction *HappensBeforeAnalysis::getSinglePrecedingAtomicLoad(
   return findNearestAtomicInBlock(inst, true, true, false);
 }
 
+const Instruction *HappensBeforeAnalysis::getSinglePrecedingReleaseFence(
+    const Instruction *inst) const {
+  if (!inst) {
+    return nullptr;
+  }
+
+  std::deque<const Instruction *> worklist;
+  std::unordered_set<const Instruction *> visited;
+  const Instruction *fence = nullptr;
+
+  auto enqueue = [&](const Instruction *candidate) {
+    if (candidate && visited.insert(candidate).second) {
+      worklist.push_back(candidate);
+    }
+  };
+
+  if (const Instruction *prev = inst->getPrevNode()) {
+    enqueue(prev);
+  } else {
+    for (const BasicBlock *pred : predecessors(inst->getParent())) {
+      enqueue(pred->getTerminator());
+    }
+  }
+
+  while (!worklist.empty()) {
+    const Instruction *current = worklist.front();
+    worklist.pop_front();
+
+    if (CppAtomics::isFence(current)) {
+      if (!(CppAtomics::isFenceRelease(current) ||
+            CppAtomics::isFenceAcqRel(current) ||
+            CppAtomics::isFenceSeqCst(current))) {
+        return nullptr;
+      }
+      if (!fence) {
+        fence = current;
+      } else if (fence != current) {
+        return nullptr;
+      }
+      continue;
+    }
+
+    if (!isFenceAnchorCompatibleInstruction(current)) {
+      return nullptr;
+    }
+
+    if (const Instruction *prev = current->getPrevNode()) {
+      enqueue(prev);
+    } else {
+      for (const BasicBlock *pred : predecessors(current->getParent())) {
+        enqueue(pred->getTerminator());
+      }
+    }
+  }
+
+  return fence;
+}
+
 const Instruction *HappensBeforeAnalysis::getSingleFollowingAcquireFence(
     const Instruction *inst) const {
   if (!inst) {
@@ -2458,7 +2517,6 @@ const Value *HappensBeforeAnalysis::traceSharedState(const Value *value) const {
         }
       }
     } else if (const auto *store = dyn_cast<StoreInst>(current)) {
-      worklist.push_back(store->getPointerOperand());
       worklist.push_back(store->getValueOperand());
     } else if (const auto *phi = dyn_cast<PHINode>(current)) {
       for (const Value *incoming : phi->incoming_values()) {
