@@ -1,7 +1,3 @@
-#include <llvm/IR/BasicBlock.h>
-#include <llvm/IR/Constants.h>
-#include <llvm/IR/Function.h>
-#include <llvm/IR/IRBuilder.h>
 #include <llvm/IR/Instructions.h>
 #include <llvm/IR/LLVMContext.h>
 #include <llvm/IR/Module.h>
@@ -10,6 +6,7 @@
 #include <Dataflow/IFDS/Core/IFDSFramework.h>
 #include <Dataflow/IFDS/Solvers/IDESolver.h>
 #include <Dataflow/IFDS/Solvers/IFDSSolver.h>
+#include <TestUtils/LLVMHelpers.h>
 
 namespace ifds {
 namespace {
@@ -25,84 +22,66 @@ struct InvokeFixture {
 
 InvokeFixture buildInternalInvokeFixture() {
   InvokeFixture fixture;
-  fixture.module =
-      std::make_unique<llvm::Module>("internal_invoke_fixture", *fixture.ctx);
+  fixture.module = lotus::unittest::parseModule(*fixture.ctx, R"(
+    declare i32 @__gxx_personality_v0(...)
 
-  auto *i32 = llvm::Type::getInt32Ty(*fixture.ctx);
-  auto *i8ptr = llvm::Type::getInt8PtrTy(*fixture.ctx);
-  auto *personality_ty = llvm::FunctionType::get(i32, true);
-  auto *personality =
-      llvm::Function::Create(personality_ty, llvm::Function::ExternalLinkage,
-                             "__gxx_personality_v0", fixture.module.get());
-  auto *callee_ty = llvm::FunctionType::get(i32, {}, false);
-  auto *callee =
-      llvm::Function::Create(callee_ty, llvm::Function::InternalLinkage,
-                             "returns_normally", fixture.module.get());
-  auto *main_ty = llvm::FunctionType::get(i32, {}, false);
-  auto *main_fn = llvm::Function::Create(
-      main_ty, llvm::Function::ExternalLinkage, "main", fixture.module.get());
-  main_fn->setPersonalityFn(personality);
+    define internal i32 @returns_normally() {
+    entry:
+      ret i32 7
+    }
 
-  auto *callee_entry = llvm::BasicBlock::Create(*fixture.ctx, "entry", callee);
-  llvm::IRBuilder<> callee_builder(callee_entry);
-  callee_builder.CreateRet(llvm::ConstantInt::get(i32, 7));
+    define i32 @main() personality i32 (...)* @__gxx_personality_v0 {
+    entry:
+      %inv = invoke i32 @returns_normally()
+              to label %normal unwind label %lpad
 
-  auto *entry = llvm::BasicBlock::Create(*fixture.ctx, "entry", main_fn);
-  auto *normal = llvm::BasicBlock::Create(*fixture.ctx, "normal", main_fn);
-  auto *lpad = llvm::BasicBlock::Create(*fixture.ctx, "lpad", main_fn);
+    normal:
+      ret i32 0
 
-  llvm::IRBuilder<> entry_builder(entry);
-  fixture.invoke = entry_builder.CreateInvoke(callee, normal, lpad, {}, "inv");
+    lpad:
+      %lp = landingpad { i8*, i32 }
+              cleanup
+      ret i32 1
+    }
+  )", "ReturnSiteAndConfigTest");
 
-  llvm::IRBuilder<> normal_builder(normal);
-  fixture.normal_site =
-      normal_builder.CreateRet(llvm::ConstantInt::get(i32, 0));
-
-  llvm::IRBuilder<> lpad_builder(lpad);
-  auto *lpad_ty = llvm::StructType::get(i8ptr, i32);
-  auto *landing_pad = lpad_builder.CreateLandingPad(lpad_ty, 0);
-  landing_pad->setCleanup(true);
-  fixture.unwind_site = lpad_builder.CreateRet(llvm::ConstantInt::get(i32, 1));
+  auto *main_fn = fixture.module->getFunction("main");
+  auto normal_bb = std::next(main_fn->begin());
+  fixture.invoke = llvm::cast<llvm::InvokeInst>(
+      lotus::unittest::findInstructionByName(*main_fn, "inv"));
+  fixture.normal_site = normal_bb->getTerminator();
+  fixture.unwind_site = main_fn->back().getTerminator();
 
   return fixture;
 }
 
 InvokeFixture buildInvokeFixture() {
   InvokeFixture fixture;
-  fixture.module =
-      std::make_unique<llvm::Module>("invoke_fixture", *fixture.ctx);
+  fixture.module = lotus::unittest::parseModule(*fixture.ctx, R"(
+    declare i32 @__gxx_personality_v0(...)
+    declare i32 @may_throw()
 
-  auto *i32 = llvm::Type::getInt32Ty(*fixture.ctx);
-  auto *i8ptr = llvm::Type::getInt8PtrTy(*fixture.ctx);
-  auto *personality_ty = llvm::FunctionType::get(i32, true);
-  auto *personality =
-      llvm::Function::Create(personality_ty, llvm::Function::ExternalLinkage,
-                             "__gxx_personality_v0", fixture.module.get());
-  auto *callee_ty = llvm::FunctionType::get(i32, {}, false);
-  auto *callee =
-      llvm::Function::Create(callee_ty, llvm::Function::ExternalLinkage,
-                             "may_throw", fixture.module.get());
-  auto *main_ty = llvm::FunctionType::get(i32, {}, false);
-  auto *main_fn = llvm::Function::Create(
-      main_ty, llvm::Function::ExternalLinkage, "main", fixture.module.get());
-  main_fn->setPersonalityFn(personality);
+    define i32 @main() personality i32 (...)* @__gxx_personality_v0 {
+    entry:
+      %inv = invoke i32 @may_throw()
+              to label %normal unwind label %lpad
 
-  auto *entry = llvm::BasicBlock::Create(*fixture.ctx, "entry", main_fn);
-  auto *normal = llvm::BasicBlock::Create(*fixture.ctx, "normal", main_fn);
-  auto *lpad = llvm::BasicBlock::Create(*fixture.ctx, "lpad", main_fn);
+    normal:
+      ret i32 0
 
-  llvm::IRBuilder<> entry_builder(entry);
-  fixture.invoke = entry_builder.CreateInvoke(callee, normal, lpad, {}, "inv");
+    lpad:
+      %lp = landingpad { i8*, i32 }
+              cleanup
+      ret i32 1
+    }
+  )", "ReturnSiteAndConfigTest");
 
-  llvm::IRBuilder<> normal_builder(normal);
-  fixture.normal_site =
-      normal_builder.CreateRet(llvm::ConstantInt::get(i32, 0));
-
-  llvm::IRBuilder<> lpad_builder(lpad);
-  auto *lpad_ty = llvm::StructType::get(i8ptr, i32);
-  auto *landing_pad = lpad_builder.CreateLandingPad(lpad_ty, 0);
-  landing_pad->setCleanup(true);
-  fixture.unwind_site = lpad_builder.CreateRet(llvm::ConstantInt::get(i32, 1));
+  auto *main_fn = fixture.module->getFunction("main");
+  auto normal_bb = std::next(main_fn->begin());
+  fixture.invoke = llvm::cast<llvm::InvokeInst>(
+      lotus::unittest::findInstructionByName(*main_fn, "inv"));
+  fixture.normal_site = normal_bb->getTerminator();
+  fixture.unwind_site = main_fn->back().getTerminator();
 
   return fixture;
 }
@@ -162,8 +141,8 @@ public:
   }
 
   FactSet call_flow(const llvm::CallBase *, const llvm::Function *,
-                    const ReturnSiteFact &) override {
-    return {};
+                    const ReturnSiteFact &fact) override {
+    return {fact};
   }
 
   FactSet return_flow(const llvm::CallBase *, const llvm::Instruction *,
@@ -251,10 +230,17 @@ public:
     return call_to_return_flow(nullptr, return_site, {}, exit_fact);
   }
 
-  FactSet call_to_return_flow(const llvm::CallBase *, const llvm::Instruction *,
+  FactSet call_to_return_flow(const llvm::CallBase *,
+                              const llvm::Instruction *return_site,
                               llvm::ArrayRef<const llvm::Function *>,
                               const ReturnSiteFact &fact) override {
-    return {fact};
+    FactSet out{fact};
+    if (return_site && return_site->getParent()->getName() == "normal") {
+      out.insert(ReturnSiteFact::normal());
+    } else {
+      out.insert(ReturnSiteFact::exceptional());
+    }
+    return out;
   }
 
   FactSet initial_facts(const llvm::Function *) override {
@@ -387,10 +373,12 @@ TEST(ReturnSiteAwareSolverTest, IFDSSummaryEdgesUseCallerReturnFact) {
     if (summary.call_site != fixture.invoke) {
       continue;
     }
-    if (summary.return_site == fixture.normal_site) {
+    if (summary.return_site && summary.return_site->getParent() &&
+        summary.return_site->getParent()->getName() == "normal") {
       saw_normal_fact |= summary.return_fact == ReturnSiteFact::normal();
     }
-    if (summary.return_site == fixture.unwind_site) {
+    if (summary.return_site && summary.return_site->getParent() &&
+        summary.return_site->getParent()->getName() == "lpad") {
       saw_exceptional_fact |=
           summary.return_fact == ReturnSiteFact::exceptional();
     }
@@ -418,10 +406,12 @@ TEST(ReturnSiteAwareSolverTest, IDESummaryEdgesUseCallerReturnFact) {
     if (summary.call_site != fixture.invoke) {
       continue;
     }
-    if (summary.return_site == fixture.normal_site) {
+    if (summary.return_site && summary.return_site->getParent() &&
+        summary.return_site->getParent()->getName() == "normal") {
       saw_normal_fact |= summary.return_fact == ReturnSiteFact::normal();
     }
-    if (summary.return_site == fixture.unwind_site) {
+    if (summary.return_site && summary.return_site->getParent() &&
+        summary.return_site->getParent()->getName() == "lpad") {
       saw_exceptional_fact |=
           summary.return_fact == ReturnSiteFact::exceptional();
     }
@@ -433,17 +423,18 @@ TEST(ReturnSiteAwareSolverTest, IDESummaryEdgesUseCallerReturnFact) {
 
 TEST(IDEConfigTest, ComputeValuesFalseSkipsValueMaterialization) {
   llvm::LLVMContext ctx;
-  auto module = std::make_unique<llvm::Module>("compute_values_disabled", ctx);
-  auto *i32 = llvm::Type::getInt32Ty(ctx);
-  auto *main_ty = llvm::FunctionType::get(i32, {}, false);
-  auto *main_fn = llvm::Function::Create(
-      main_ty, llvm::Function::ExternalLinkage, "main", module.get());
-  auto *entry = llvm::BasicBlock::Create(ctx, "entry", main_fn);
-  llvm::IRBuilder<> builder(entry);
-  auto *slot = builder.CreateAlloca(i32, nullptr, "x");
-  builder.CreateStore(llvm::ConstantInt::get(i32, 4), slot);
-  auto *load = builder.CreateLoad(i32, slot, "load");
-  auto *ret = builder.CreateRet(load);
+  auto module = lotus::unittest::parseModule(ctx, R"(
+    define i32 @main() {
+    entry:
+      %x = alloca i32
+      store i32 4, i32* %x
+      %load = load i32, i32* %x
+      ret i32 %load
+    }
+  )", "ReturnSiteAndConfigTest");
+  auto *main_fn = module->getFunction("main");
+  auto *load = lotus::unittest::findInstructionByName(*main_fn, "load");
+  auto *ret = main_fn->back().getTerminator();
 
   IDEConstantPropagation problem;
   IDESolver<IDEConstantPropagation> solver(problem);
@@ -459,18 +450,19 @@ TEST(IDEConfigTest, ComputeValuesFalseSkipsValueMaterialization) {
 
 TEST(IDEConfigTest, DisablingCachesPreservesResults) {
   llvm::LLVMContext ctx;
-  auto module = std::make_unique<llvm::Module>("cache_toggle", ctx);
-  auto *i32 = llvm::Type::getInt32Ty(ctx);
-  auto *main_ty = llvm::FunctionType::get(i32, {}, false);
-  auto *main_fn = llvm::Function::Create(
-      main_ty, llvm::Function::ExternalLinkage, "main", module.get());
-  auto *entry = llvm::BasicBlock::Create(ctx, "entry", main_fn);
-  llvm::IRBuilder<> builder(entry);
-  auto *slot = builder.CreateAlloca(i32, nullptr, "x");
-  builder.CreateStore(llvm::ConstantInt::get(i32, 5), slot);
-  auto *load = builder.CreateLoad(i32, slot, "load");
-  auto *add = builder.CreateAdd(load, llvm::ConstantInt::get(i32, 7), "sum");
-  auto *ret = builder.CreateRet(add);
+  auto module = lotus::unittest::parseModule(ctx, R"(
+    define i32 @main() {
+    entry:
+      %x = alloca i32
+      store i32 5, i32* %x
+      %load = load i32, i32* %x
+      %sum = add i32 %load, 7
+      ret i32 %sum
+    }
+  )", "ReturnSiteAndConfigTest");
+  auto *main_fn = module->getFunction("main");
+  auto *add = lotus::unittest::findInstructionByName(*main_fn, "sum");
+  auto *ret = main_fn->back().getTerminator();
 
   IDEConstantPropagation baseline_problem;
   IDESolver<IDEConstantPropagation> baseline(baseline_problem);

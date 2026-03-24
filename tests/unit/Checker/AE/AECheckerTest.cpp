@@ -16,7 +16,6 @@
 #ifndef GTEST_INTERNAL_CPLUSPLUS_LANG
 #define GTEST_INTERNAL_CPLUSPLUS_LANG 201703L
 #endif
-#include <llvm/IR/IRBuilder.h>
 #include <llvm/IR/Instructions.h>
 #include <llvm/IR/LLVMContext.h>
 #include <llvm/IR/Module.h>
@@ -61,8 +60,8 @@ protected:
       Function *Main =
           Function::Create(MainTy, Function::ExternalLinkage, "main", module);
       BasicBlock *Entry = BasicBlock::Create(context, "entry", Main);
-      IRBuilder<> B(Entry);
-      B.CreateRet(ConstantInt::get(Type::getInt32Ty(context), 0));
+      ReturnInst::Create(context, ConstantInt::get(Type::getInt32Ty(context), 0),
+                         Entry);
     }
 
     AbstractInterpretation &ae = AbstractInterpretation::getAEInstance();

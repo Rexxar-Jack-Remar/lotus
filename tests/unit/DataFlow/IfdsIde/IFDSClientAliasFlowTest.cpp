@@ -1,17 +1,13 @@
 #include <Dataflow/IFDS/Clients/IFDSConstAnalysis.h>
 #include <Dataflow/IFDS/Clients/IFDSReachingDefinitions.h>
+#include <TestUtils/LLVMHelpers.h>
 
 #include <gtest/gtest.h>
 
-#include <llvm/IR/BasicBlock.h>
-#include <llvm/IR/Constants.h>
-#include <llvm/IR/Function.h>
 #include <llvm/IR/GlobalVariable.h>
-#include <llvm/IR/IRBuilder.h>
 #include <llvm/IR/Instructions.h>
 #include <llvm/IR/LLVMContext.h>
 #include <llvm/IR/Module.h>
-#include <llvm/IR/Type.h>
 
 #include <memory>
 
@@ -34,41 +30,38 @@ struct IFDSFlowFixtureIR {
 IFDSFlowFixtureIR buildIFDSFlowFixture() {
   IFDSFlowFixtureIR IR;
   IR.Ctx = std::make_unique<llvm::LLVMContext>();
-  IR.Mod = std::make_unique<llvm::Module>("ifds_client_alias_flow_test", *IR.Ctx);
+  IR.Mod = lotus::unittest::parseModule(*IR.Ctx, R"(
+    @g = global i8 0
 
-  auto *I8Ty = llvm::Type::getInt8Ty(*IR.Ctx);
-  auto *I8PtrTy = llvm::Type::getInt8PtrTy(*IR.Ctx);
-  auto *I32Ty = llvm::Type::getInt32Ty(*IR.Ctx);
+    define i8* @callee(i8* %formal) {
+    entry:
+      ret i8* %formal
+    }
 
-  IR.Global = new llvm::GlobalVariable(
-      *IR.Mod, I8Ty, false, llvm::GlobalValue::ExternalLinkage,
-      llvm::ConstantInt::get(I8Ty, 0), "g");
+    declare void @ext(i8*)
 
-  auto *CalleeTy = llvm::FunctionType::get(I8PtrTy, {I8PtrTy}, false);
-  auto *Callee = llvm::Function::Create(CalleeTy, llvm::Function::ExternalLinkage,
-                                        "callee", IR.Mod.get());
+    define i32 @main() {
+    entry:
+      %actual = alloca i8
+      %call = call i8* @callee(i8* %actual)
+      call void @ext(i8* %actual)
+      ret i32 0
+    }
+  )", "IFDSClientAliasFlowTest");
+
+  auto *Callee = IR.Mod->getFunction("callee");
+  auto *Main = IR.Mod->getFunction("main");
+  IR.Global = IR.Mod->getNamedGlobal("g");
   IR.Callee = Callee;
-  IR.Formal = &*Callee->arg_begin();
-
-  auto *CalleeEntry = llvm::BasicBlock::Create(*IR.Ctx, "entry", Callee);
-  llvm::IRBuilder<> CB(CalleeEntry);
-  IR.CalleeEntryInst = CB.CreateRet(IR.Formal);
-
-  auto *ExtTy = llvm::FunctionType::get(llvm::Type::getVoidTy(*IR.Ctx), {I8PtrTy}, false);
-  auto *Ext = llvm::Function::Create(ExtTy, llvm::Function::ExternalLinkage, "ext", IR.Mod.get());
-
-  auto *MainTy = llvm::FunctionType::get(I32Ty, {}, false);
-  auto *Main = llvm::Function::Create(MainTy, llvm::Function::ExternalLinkage,
-                                      "main", IR.Mod.get());
-  auto *Entry = llvm::BasicBlock::Create(*IR.Ctx, "entry", Main);
-  llvm::IRBuilder<> B(Entry);
-  auto *Alloca = B.CreateAlloca(I8Ty, nullptr, "actual");
-  IR.Actual = Alloca;
-  IR.Call = B.CreateCall(Callee, {Alloca});
-  IR.ExtCall = B.CreateCall(Ext, {Alloca});
-  auto *Ret = B.CreateRet(llvm::ConstantInt::get(I32Ty, 0));
+  IR.Formal = Callee != nullptr ? &*Callee->arg_begin() : nullptr;
+  IR.CalleeEntryInst = Callee != nullptr ? Callee->getEntryBlock().getTerminator()
+                                         : nullptr;
+  IR.Actual = lotus::unittest::findInstructionByName(*Main, "actual");
+  IR.Call = llvm::cast<llvm::CallBase>(
+      lotus::unittest::findInstructionByName(*Main, "call"));
+  IR.ExtCall = lotus::unittest::findCallTo(*Main, "ext");
   IR.CallReturnSite = IR.ExtCall;
-  IR.ExtCallReturnSite = Ret;
+  IR.ExtCallReturnSite = Main->back().getTerminator();
 
   return IR;
 }

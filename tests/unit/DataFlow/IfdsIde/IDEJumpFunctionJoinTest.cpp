@@ -1,14 +1,10 @@
 #include <set>
 
-#include <llvm/IR/BasicBlock.h>
-#include <llvm/IR/Constants.h>
-#include <llvm/IR/Function.h>
-#include <llvm/IR/IRBuilder.h>
 #include <llvm/IR/LLVMContext.h>
 #include <llvm/IR/Module.h>
-#include <llvm/IR/Type.h>
 #include <gtest/gtest.h>
 #include <Dataflow/IFDS/Solvers/IDESolver.h>
+#include <TestUtils/LLVMHelpers.h>
 
 namespace ifds {
 namespace {
@@ -203,40 +199,30 @@ public:
 
 TEST(IDEJumpFunctionJoinTest, JoinsFunctionsFromDistinctPaths) {
   llvm::LLVMContext Ctx;
-  auto M = std::make_unique<llvm::Module>("jump_join", Ctx);
-  auto *I32 = llvm::Type::getInt32Ty(Ctx);
-  auto *I1 = llvm::Type::getInt1Ty(Ctx);
-  auto *FTy = llvm::FunctionType::get(I32, {I1}, false);
-  auto *F = llvm::Function::Create(FTy, llvm::Function::ExternalLinkage, "main",
-                                   M.get());
+  auto M = lotus::unittest::parseModule(Ctx, R"(
+    define i32 @main(i1 %cond) {
+    entry:
+      br i1 %cond, label %then, label %else
 
-  auto *argIt = F->arg_begin();
-  llvm::Value *Cond = &*argIt;
+    then:
+      %then_slot = alloca i32
+      store i32 1, i32* %then_slot
+      %then_ld = load i32, i32* %then_slot
+      %then_add = add i32 %then_ld, 1
+      br label %merge
 
-  auto *Entry = llvm::BasicBlock::Create(Ctx, "entry", F);
-  auto *ThenBB = llvm::BasicBlock::Create(Ctx, "then", F);
-  auto *ElseBB = llvm::BasicBlock::Create(Ctx, "else", F);
-  auto *MergeBB = llvm::BasicBlock::Create(Ctx, "merge", F);
+    else:
+      %else_slot = alloca i32
+      store i32 2, i32* %else_slot
+      %else_ld = load i32, i32* %else_slot
+      %else_add = add i32 %else_ld, 2
+      br label %merge
 
-  llvm::IRBuilder<> B(Entry);
-  B.CreateCondBr(Cond, ThenBB, ElseBB);
-
-  B.SetInsertPoint(ThenBB);
-  auto *ThenSlot = B.CreateAlloca(I32, nullptr, "then_slot");
-  B.CreateStore(llvm::ConstantInt::get(I32, 1), ThenSlot);
-  auto *ThenLoad = B.CreateLoad(I32, ThenSlot, "then_ld");
-  B.CreateAdd(ThenLoad, llvm::ConstantInt::get(I32, 1), "then_add");
-  B.CreateBr(MergeBB);
-
-  B.SetInsertPoint(ElseBB);
-  auto *ElseSlot = B.CreateAlloca(I32, nullptr, "else_slot");
-  B.CreateStore(llvm::ConstantInt::get(I32, 2), ElseSlot);
-  auto *ElseLoad = B.CreateLoad(I32, ElseSlot, "else_ld");
-  B.CreateAdd(ElseLoad, llvm::ConstantInt::get(I32, 2), "else_add");
-  B.CreateBr(MergeBB);
-
-  B.SetInsertPoint(MergeBB);
-  auto *Ret = B.CreateRet(llvm::ConstantInt::get(I32, 0));
+    merge:
+      ret i32 0
+    }
+  )", "IDEJumpFunctionJoinTest");
+  auto *Ret = M->getFunction("main")->back().getTerminator();
 
   JumpJoinProblem Problem;
   IDESolver<JumpJoinProblem> Solver(Problem);
@@ -251,30 +237,22 @@ TEST(IDEJumpFunctionJoinTest, JoinsFunctionsFromDistinctPaths) {
 
 TEST(IDEJumpFunctionJoinTest, EquivalentLoopFunctionsReachFixpoint) {
   llvm::LLVMContext Ctx;
-  auto M = std::make_unique<llvm::Module>("equivalent_loop", Ctx);
-  auto *I32 = llvm::Type::getInt32Ty(Ctx);
-  auto *I1 = llvm::Type::getInt1Ty(Ctx);
-  auto *FTy = llvm::FunctionType::get(I32, {I1}, false);
-  auto *F = llvm::Function::Create(FTy, llvm::Function::ExternalLinkage, "main",
-                                   M.get());
+  auto M = lotus::unittest::parseModule(Ctx, R"(
+    define i32 @main(i1 %cond) {
+    entry:
+      br label %loop
 
-  auto *Cond = &*F->arg_begin();
-  auto *Entry = llvm::BasicBlock::Create(Ctx, "entry", F);
-  auto *Loop = llvm::BasicBlock::Create(Ctx, "loop", F);
-  auto *Exit = llvm::BasicBlock::Create(Ctx, "exit", F);
+    loop:
+      %slot = alloca i32
+      %loop_ld = load i32, i32* %slot
+      %loop_add = add i32 %loop_ld, 1
+      br i1 %cond, label %loop, label %exit
 
-  llvm::IRBuilder<> B(Entry);
-  B.CreateBr(Loop);
-
-  B.SetInsertPoint(Loop);
-  auto *Slot = B.CreateAlloca(I32, nullptr, "slot");
-  auto *Load = B.CreateLoad(I32, Slot, "loop_ld");
-  auto *Add = B.CreateAdd(Load, llvm::ConstantInt::get(I32, 1), "loop_add");
-  (void)Add;
-  B.CreateCondBr(Cond, Loop, Exit);
-
-  B.SetInsertPoint(Exit);
-  auto *Ret = B.CreateRet(llvm::ConstantInt::get(I32, 0));
+    exit:
+      ret i32 0
+    }
+  )", "IDEJumpFunctionJoinTest");
+  auto *Ret = M->getFunction("main")->back().getTerminator();
 
   EquivalentLoopProblem Problem;
   IDESolver<EquivalentLoopProblem> Solver(Problem);

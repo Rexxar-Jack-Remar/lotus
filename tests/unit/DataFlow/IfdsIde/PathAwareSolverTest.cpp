@@ -1,7 +1,3 @@
-#include <llvm/IR/BasicBlock.h>
-#include <llvm/IR/Constants.h>
-#include <llvm/IR/Function.h>
-#include <llvm/IR/IRBuilder.h>
 #include <llvm/IR/Instructions.h>
 #include <llvm/IR/LLVMContext.h>
 #include <llvm/IR/Module.h>
@@ -9,6 +5,7 @@
 #include <Dataflow/IFDS/Clients/IFDSTaintAnalysis.h>
 #include <Dataflow/IFDS/Solvers/IFDSSolver.h>
 #include <Dataflow/IFDS/Solvers/PathAwareIFDSSolver.h>
+#include <TestUtils/LLVMHelpers.h>
 #include <set>
 
 namespace ifds {
@@ -114,115 +111,75 @@ protected:
   std::unique_ptr<llvm::LLVMContext> ctx = std::make_unique<llvm::LLVMContext>();
 
   std::unique_ptr<llvm::Module> createIdentityFlowModule() {
-    auto m = std::make_unique<llvm::Module>("pathaware_identity", *ctx);
-    auto *i32 = llvm::Type::getInt32Ty(*ctx);
-    auto *mainTy = llvm::FunctionType::get(i32, {}, false);
-    auto *sourceTy = llvm::FunctionType::get(i32, {}, false);
-    auto *identityTy = llvm::FunctionType::get(i32, {i32}, false);
-    auto *sinkTy = llvm::FunctionType::get(llvm::Type::getVoidTy(*ctx), {i32}, false);
+    return lotus::unittest::parseModuleChecked(*ctx, R"(
+      declare i32 @source()
+      declare void @sink(i32)
 
-    auto *mainFn =
-        llvm::Function::Create(mainTy, llvm::Function::ExternalLinkage, "main", m.get());
-    auto *sourceFn = llvm::Function::Create(sourceTy, llvm::Function::ExternalLinkage,
-                                            "source", m.get());
-    auto *identityFn = llvm::Function::Create(identityTy, llvm::Function::InternalLinkage,
-                                              "identity", m.get());
-    auto *sinkFn = llvm::Function::Create(sinkTy, llvm::Function::ExternalLinkage, "sink",
-                                          m.get());
+      define internal i32 @identity(i32 %arg) {
+      entry:
+        ret i32 %arg
+      }
 
-    auto *entry = llvm::BasicBlock::Create(*ctx, "entry", mainFn);
-    llvm::IRBuilder<> b(entry);
-    auto *tainted = b.CreateCall(sourceTy, sourceFn, {});
-    auto *pass = b.CreateCall(identityTy, identityFn, {tainted});
-    b.CreateCall(sinkTy, sinkFn, {pass});
-    b.CreateRet(llvm::ConstantInt::get(i32, 0));
-
-    auto *idEntry = llvm::BasicBlock::Create(*ctx, "entry", identityFn);
-    llvm::IRBuilder<> ib(idEntry);
-    ib.CreateRet(identityFn->getArg(0));
-
-    return m;
+      define i32 @main() {
+      entry:
+        %tainted = call i32 @source()
+        %pass = call i32 @identity(i32 %tainted)
+        call void @sink(i32 %pass)
+        ret i32 0
+      }
+    )", "pathaware_identity");
   }
 
   std::unique_ptr<llvm::Module> createMultiReturnIdentityModule() {
-    auto m = std::make_unique<llvm::Module>("pathaware_multireturn", *ctx);
-    auto *i32 = llvm::Type::getInt32Ty(*ctx);
-    auto *mainTy = llvm::FunctionType::get(i32, {}, false);
-    auto *sourceTy = llvm::FunctionType::get(i32, {}, false);
-    auto *identityTy = llvm::FunctionType::get(i32, {i32}, false);
-    auto *sinkTy =
-        llvm::FunctionType::get(llvm::Type::getVoidTy(*ctx), {i32}, false);
+    return lotus::unittest::parseModuleChecked(*ctx, R"(
+      declare i32 @source()
+      declare void @sink(i32)
 
-    auto *mainFn = llvm::Function::Create(mainTy, llvm::Function::ExternalLinkage,
-                                          "main", m.get());
-    auto *sourceFn = llvm::Function::Create(sourceTy, llvm::Function::ExternalLinkage,
-                                            "source", m.get());
-    auto *identityFn =
-        llvm::Function::Create(identityTy, llvm::Function::InternalLinkage,
-                               "identity", m.get());
-    auto *sinkFn = llvm::Function::Create(sinkTy, llvm::Function::ExternalLinkage,
-                                          "sink", m.get());
+      define internal i32 @identity(i32 %arg) {
+      entry:
+        %cond = icmp eq i32 %arg, 0
+        br i1 %cond, label %then, label %else
 
-    auto *entry = llvm::BasicBlock::Create(*ctx, "entry", mainFn);
-    llvm::IRBuilder<> b(entry);
-    auto *tainted = b.CreateCall(sourceTy, sourceFn, {});
-    auto *pass = b.CreateCall(identityTy, identityFn, {tainted});
-    b.CreateCall(sinkTy, sinkFn, {pass});
-    b.CreateRet(llvm::ConstantInt::get(i32, 0));
+      then:
+        ret i32 %arg
 
-    auto *idEntry = llvm::BasicBlock::Create(*ctx, "entry", identityFn);
-    auto *idThen = llvm::BasicBlock::Create(*ctx, "then", identityFn);
-    auto *idElse = llvm::BasicBlock::Create(*ctx, "else", identityFn);
-    llvm::IRBuilder<> ib(idEntry);
-    auto *cond = ib.CreateICmpEQ(identityFn->getArg(0), llvm::ConstantInt::get(i32, 0));
-    ib.CreateCondBr(cond, idThen, idElse);
-    llvm::IRBuilder<> thenBuilder(idThen);
-    thenBuilder.CreateRet(identityFn->getArg(0));
-    llvm::IRBuilder<> elseBuilder(idElse);
-    elseBuilder.CreateRet(identityFn->getArg(0));
+      else:
+        ret i32 %arg
+      }
 
-    return m;
+      define i32 @main() {
+      entry:
+        %tainted = call i32 @source()
+        %pass = call i32 @identity(i32 %tainted)
+        call void @sink(i32 %pass)
+        ret i32 0
+      }
+    )", "pathaware_multireturn");
   }
 
   std::unique_ptr<llvm::Module> createSimplePropagationModule() {
-    auto m = std::make_unique<llvm::Module>("pathaware_simple", *ctx);
-    auto *i32 = llvm::Type::getInt32Ty(*ctx);
-    auto *mainTy = llvm::FunctionType::get(i32, {}, false);
-    auto *mainFn = llvm::Function::Create(
-        mainTy, llvm::Function::ExternalLinkage, "main", m.get());
-
-    auto *entry = llvm::BasicBlock::Create(*ctx, "entry", mainFn);
-    llvm::IRBuilder<> b(entry);
-    auto *tmp = b.CreateAdd(llvm::ConstantInt::get(i32, 1),
-                            llvm::ConstantInt::get(i32, 2), "tmp");
-    b.CreateRet(tmp);
-
-    return m;
+    return lotus::unittest::parseModuleChecked(*ctx, R"(
+      define i32 @main() {
+      entry:
+        %tmp = add i32 1, 2
+        ret i32 %tmp
+      }
+    )", "pathaware_simple");
   }
 
   std::unique_ptr<llvm::Module> createSummaryProjectionModule() {
-    auto m = std::make_unique<llvm::Module>("pathaware_summary_projection", *ctx);
-    auto *i32 = llvm::Type::getInt32Ty(*ctx);
-    auto *mainTy = llvm::FunctionType::get(i32, {}, false);
-    auto *calleeTy = llvm::FunctionType::get(i32, {i32}, false);
+    return lotus::unittest::parseModuleChecked(*ctx, R"(
+      define internal i32 @project(i32 %arg) {
+      entry:
+        ret i32 %arg
+      }
 
-    auto *mainFn = llvm::Function::Create(mainTy, llvm::Function::ExternalLinkage,
-                                          "main", m.get());
-    auto *calleeFn = llvm::Function::Create(calleeTy, llvm::Function::InternalLinkage,
-                                            "project", m.get());
-
-    auto *entry = llvm::BasicBlock::Create(*ctx, "entry", mainFn);
-    llvm::IRBuilder<> b(entry);
-    auto *call = b.CreateCall(calleeTy, calleeFn,
-                              {llvm::ConstantInt::get(i32, 1)}, "projected");
-    (void)call;
-    b.CreateRet(llvm::ConstantInt::get(i32, 0));
-
-    auto *calleeEntry = llvm::BasicBlock::Create(*ctx, "entry", calleeFn);
-    llvm::IRBuilder<> cb(calleeEntry);
-    cb.CreateRet(calleeFn->getArg(0));
-
-    return m;
+      define i32 @main() {
+      entry:
+        %projected = call i32 @project(i32 1)
+        ret i32 0
+      }
+    )", "pathaware_summary_projection");
   }
 
   FlowNodes collectFlowNodes(const llvm::Module &m) {

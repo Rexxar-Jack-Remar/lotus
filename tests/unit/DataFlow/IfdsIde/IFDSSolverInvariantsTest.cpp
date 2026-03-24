@@ -1,13 +1,10 @@
-#include <llvm/IR/BasicBlock.h>
-#include <llvm/IR/Constants.h>
-#include <llvm/IR/Function.h>
-#include <llvm/IR/IRBuilder.h>
 #include <llvm/IR/Instructions.h>
 #include <llvm/IR/LLVMContext.h>
 #include <llvm/IR/Module.h>
 #include <gtest/gtest.h>
 #include <Dataflow/IFDS/Clients/IFDSTaintAnalysis.h>
 #include <Dataflow/IFDS/Solvers/IFDSSolver.h>
+#include <TestUtils/LLVMHelpers.h>
 #include <unordered_set>
 
 namespace ifds {
@@ -85,61 +82,40 @@ protected:
   std::unique_ptr<llvm::LLVMContext> ctx = std::make_unique<llvm::LLVMContext>();
 
   std::unique_ptr<llvm::Module> createLoopModule() {
-    auto m = std::make_unique<llvm::Module>("ifds_invariants", *ctx);
-    auto *i32 = llvm::Type::getInt32Ty(*ctx);
-    auto *mainTy = llvm::FunctionType::get(i32, {}, false);
-    auto *sourceTy = llvm::FunctionType::get(i32, {}, false);
-    auto *sinkTy = llvm::FunctionType::get(llvm::Type::getVoidTy(*ctx), {i32}, false);
+    return lotus::unittest::parseModuleChecked(*ctx, R"(
+      declare i32 @source()
+      declare void @sink(i32)
 
-    auto *mainFn =
-        llvm::Function::Create(mainTy, llvm::Function::ExternalLinkage, "main", m.get());
-    auto *sourceFn = llvm::Function::Create(sourceTy, llvm::Function::ExternalLinkage,
-                                            "source", m.get());
-    auto *sinkFn = llvm::Function::Create(sinkTy, llvm::Function::ExternalLinkage, "sink",
-                                          m.get());
+      define i32 @main() {
+      entry:
+        %seed = call i32 @source()
+        %cond = icmp eq i32 %seed, 0
+        br i1 %cond, label %body, label %exit
 
-    auto *entry = llvm::BasicBlock::Create(*ctx, "entry", mainFn);
-    auto *body = llvm::BasicBlock::Create(*ctx, "body", mainFn);
-    auto *exit = llvm::BasicBlock::Create(*ctx, "exit", mainFn);
+      body:
+        call void @sink(i32 %seed)
+        br label %exit
 
-    llvm::IRBuilder<> be(entry);
-    auto *seed = be.CreateCall(sourceTy, sourceFn, {});
-    auto *cond = be.CreateICmpEQ(seed, llvm::ConstantInt::get(i32, 0));
-    be.CreateCondBr(cond, body, exit);
-
-    llvm::IRBuilder<> bb(body);
-    bb.CreateCall(sinkTy, sinkFn, {seed});
-    bb.CreateBr(exit);
-
-    llvm::IRBuilder<> bx(exit);
-    bx.CreateRet(llvm::ConstantInt::get(i32, 0));
-
-    return m;
+      exit:
+        ret i32 0
+      }
+    )", "ifds_invariants");
   }
 
   std::unique_ptr<llvm::Module> createSeededCalleeModule() {
-    auto m = std::make_unique<llvm::Module>("ifds_seeded_callee", *ctx);
-    auto *i32 = llvm::Type::getInt32Ty(*ctx);
-    auto *calleeTy = llvm::FunctionType::get(i32, {}, false);
-    auto *mainTy = llvm::FunctionType::get(i32, {}, false);
+    return lotus::unittest::parseModuleChecked(*ctx, R"(
+      define internal i32 @seeded() {
+      entry:
+        %tmp = add i32 1, 2
+        ret i32 %tmp
+      }
 
-    auto *callee = llvm::Function::Create(calleeTy, llvm::Function::InternalLinkage,
-                                          "seeded", m.get());
-    auto *mainFn =
-        llvm::Function::Create(mainTy, llvm::Function::ExternalLinkage, "main", m.get());
-
-    auto *calleeEntry = llvm::BasicBlock::Create(*ctx, "entry", callee);
-    llvm::IRBuilder<> cb(calleeEntry);
-    auto *tmp = cb.CreateAdd(llvm::ConstantInt::get(i32, 1),
-                             llvm::ConstantInt::get(i32, 2), "tmp");
-    cb.CreateRet(tmp);
-
-    auto *entry = llvm::BasicBlock::Create(*ctx, "entry", mainFn);
-    llvm::IRBuilder<> b(entry);
-    b.CreateCall(calleeTy, callee, {});
-    b.CreateRet(llvm::ConstantInt::get(i32, 0));
-
-    return m;
+      define i32 @main() {
+      entry:
+        %call = call i32 @seeded()
+        ret i32 0
+      }
+    )", "ifds_seeded_callee");
   }
 };
 

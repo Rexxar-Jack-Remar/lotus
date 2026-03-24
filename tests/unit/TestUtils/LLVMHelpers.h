@@ -45,6 +45,22 @@ inline std::unique_ptr<Module> parseModule(LLVMContext &context,
   return parseModule(context, source.c_str(), diag_owner);
 }
 
+inline std::unique_ptr<Module> parseModuleChecked(LLVMContext &context,
+                                                  const char *source,
+                                                  StringRef diag_owner =
+                                                      "LLVMHelpers") {
+  auto module = parseModule(context, source, diag_owner);
+  EXPECT_NE(module, nullptr);
+  return module;
+}
+
+inline std::unique_ptr<Module> parseModuleChecked(LLVMContext &context,
+                                                  const std::string &source,
+                                                  StringRef diag_owner =
+                                                      "LLVMHelpers") {
+  return parseModuleChecked(context, source.c_str(), diag_owner);
+}
+
 inline std::unique_ptr<Module> parseAssembly(LLVMContext &context,
                                              const char *source,
                                              StringRef diag_owner =
@@ -57,6 +73,20 @@ inline std::unique_ptr<Module> parseAssembly(LLVMContext &context,
                                              StringRef diag_owner =
                                                  "LLVMHelpers") {
   return parseModule(context, source, diag_owner);
+}
+
+inline std::unique_ptr<Module> parseAssemblyChecked(LLVMContext &context,
+                                                    const char *source,
+                                                    StringRef diag_owner =
+                                                        "LLVMHelpers") {
+  return parseModuleChecked(context, source, diag_owner);
+}
+
+inline std::unique_ptr<Module> parseAssemblyChecked(LLVMContext &context,
+                                                    const std::string &source,
+                                                    StringRef diag_owner =
+                                                        "LLVMHelpers") {
+  return parseModuleChecked(context, source, diag_owner);
 }
 
 inline std::unique_ptr<Module> loadModule(StringRef path,

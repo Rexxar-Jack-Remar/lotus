@@ -1,14 +1,11 @@
 #include "Dataflow/WPDS/Clients/WPDSLivenessAnalysis.h"
 #include "Dataflow/WPDS/Clients/WPDSUninitializedVariables.h"
 #include "Dataflow/WPDS/InterProceduralDataFlow.h"
+#include "TestUtils/LLVMHelpers.h"
 
-#include <llvm/IR/BasicBlock.h>
 #include <llvm/IR/Constants.h>
-#include <llvm/IR/Function.h>
-#include <llvm/IR/IRBuilder.h>
 #include <llvm/IR/Instructions.h>
 #include <llvm/IR/LLVMContext.h>
-#include <llvm/IR/Module.h>
 #include <llvm/IR/Type.h>
 #include <gtest/gtest.h>
 
@@ -48,304 +45,225 @@ protected:
                                                       Flow);
   }
 
-  std::unique_ptr<Module> createLinearModule() {
-    auto M = std::make_unique<Module>("linear", *Ctx);
-    auto *I32 = Type::getInt32Ty(*Ctx);
-    auto *MainTy = FunctionType::get(I32, {}, false);
-    auto *Main =
-        Function::Create(MainTy, Function::ExternalLinkage, "main", M.get());
-    auto *Entry = BasicBlock::Create(*Ctx, "entry", Main);
-    IRBuilder<> B(Entry);
-    auto *First = BinaryOperator::CreateAdd(ConstantInt::get(I32, 1),
-                                            ConstantInt::get(I32, 2), "first",
-                                            Entry);
-    auto *Second = BinaryOperator::CreateAdd(
-        First, ConstantInt::get(I32, 3), "second", Entry);
-    (void)Second;
-    B.CreateRet(ConstantInt::get(I32, 0));
+  std::unique_ptr<Module> parseTestModule(const char *Name,
+                                          const char *Source) {
+    auto M = lotus::unittest::parseModule(*Ctx, Source, Name);
+    EXPECT_NE(M, nullptr);
     return M;
+  }
+
+  std::unique_ptr<Module> createLinearModule() {
+    return parseTestModule("linear", R"(
+      define i32 @main() {
+      entry:
+        %first = add i32 1, 2
+        %second = add i32 %first, 3
+        ret i32 0
+      }
+    )");
   }
 
   std::unique_ptr<Module> createBranchJoinModule() {
-    auto M = std::make_unique<Module>("branch_join", *Ctx);
-    auto *I32 = Type::getInt32Ty(*Ctx);
-    auto *MainTy = FunctionType::get(I32, {}, false);
-    auto *Main =
-        Function::Create(MainTy, Function::ExternalLinkage, "main", M.get());
+    return parseTestModule("branch_join", R"(
+      define i32 @main() {
+      entry:
+        br i1 true, label %then, label %else
 
-    auto *Entry = BasicBlock::Create(*Ctx, "entry", Main);
-    auto *ThenBB = BasicBlock::Create(*Ctx, "then", Main);
-    auto *ElseBB = BasicBlock::Create(*Ctx, "else", Main);
-    auto *MergeBB = BasicBlock::Create(*Ctx, "merge", Main);
+      then:
+        %then_fact = add i32 4, 5
+        br label %merge
 
-    IRBuilder<> EntryBuilder(Entry);
-    EntryBuilder.CreateCondBr(ConstantInt::getTrue(*Ctx), ThenBB, ElseBB);
+      else:
+        br label %merge
 
-    IRBuilder<> ThenBuilder(ThenBB);
-    BinaryOperator::CreateAdd(ConstantInt::get(I32, 4), ConstantInt::get(I32, 5),
-                              "then_fact", ThenBB);
-    ThenBuilder.CreateBr(MergeBB);
-
-    IRBuilder<> ElseBuilder(ElseBB);
-    ElseBuilder.CreateBr(MergeBB);
-
-    IRBuilder<> MergeBuilder(MergeBB);
-    MergeBuilder.CreateRet(ConstantInt::get(I32, 0));
-    return M;
+      merge:
+        ret i32 0
+      }
+    )");
   }
 
   std::unique_ptr<Module> createAliasLimitationModule() {
-    auto M = std::make_unique<Module>("alias_limitation", *Ctx);
-    auto *I32 = Type::getInt32Ty(*Ctx);
-    auto *MainTy = FunctionType::get(I32, {}, false);
-    auto *Main =
-        Function::Create(MainTy, Function::ExternalLinkage, "main", M.get());
-    auto *Entry = BasicBlock::Create(*Ctx, "entry", Main);
-    IRBuilder<> B(Entry);
-
-    auto *P = B.CreateAlloca(I32, nullptr, "p");
-    auto *Q = cast<Instruction>(B.CreateGEP(
-        I32, P, ConstantInt::get(Type::getInt32Ty(*Ctx), 0), "q"));
-    B.CreateStore(ConstantInt::get(I32, 1), P);
-    auto *Load = B.CreateLoad(I32, Q, "load_q");
-    B.CreateRet(Load);
-    return M;
+    return parseTestModule("alias_limitation", R"(
+      define i32 @main() {
+      entry:
+        %p = alloca i32
+        %q = getelementptr i32, i32* %p, i32 0
+        store i32 1, i32* %p
+        %load_q = load i32, i32* %q
+        ret i32 %load_q
+      }
+    )");
   }
 
   std::unique_ptr<Module> createGlobalStoreLoadModule() {
-    auto M = std::make_unique<Module>("global_store_load", *Ctx);
-    auto *I32 = Type::getInt32Ty(*Ctx);
-    auto *Global = new GlobalVariable(
-        *M, I32, false, GlobalValue::ExternalLinkage,
-        ConstantInt::get(I32, 0), "g");
-    (void)Global;
+    return parseTestModule("global_store_load", R"(
+      @g = global i32 0
 
-    auto *MainTy = FunctionType::get(I32, {}, false);
-    auto *Main =
-        Function::Create(MainTy, Function::ExternalLinkage, "main", M.get());
-    auto *Entry = BasicBlock::Create(*Ctx, "entry", Main);
-    IRBuilder<> B(Entry);
-    auto *Store = B.CreateStore(ConstantInt::get(I32, 9), M->getNamedGlobal("g"));
-    (void)Store;
-    auto *Load = B.CreateLoad(I32, M->getNamedGlobal("g"), "load_g");
-    B.CreateRet(Load);
-    return M;
+      define i32 @main() {
+      entry:
+        store i32 9, i32* @g
+        %load_g = load i32, i32* @g
+        ret i32 %load_g
+      }
+    )");
   }
 
   std::unique_ptr<Module> createUnknownCallModule() {
-    auto M = std::make_unique<Module>("unknown_call", *Ctx);
-    auto *I32 = Type::getInt32Ty(*Ctx);
-    auto *PtrTy = PointerType::getUnqual(I32);
-    new GlobalVariable(*M, I32, false, GlobalValue::ExternalLinkage,
-                       ConstantInt::get(I32, 0), "g");
+    return parseTestModule("unknown_call", R"(
+      @g = global i32 0
 
-    auto *ExtTy = FunctionType::get(I32, {PtrTy}, false);
-    auto *Ext =
-        Function::Create(ExtTy, Function::ExternalLinkage, "ext", M.get());
+      declare i32 @ext(i32*)
 
-    auto *MainTy = FunctionType::get(I32, {}, false);
-    auto *Main =
-        Function::Create(MainTy, Function::ExternalLinkage, "main", M.get());
-    auto *Entry = BasicBlock::Create(*Ctx, "entry", Main);
-    IRBuilder<> B(Entry);
-    auto *P = B.CreateAlloca(I32, nullptr, "p");
-    auto *Call = B.CreateCall(ExtTy, Ext, {P}, "ext_result");
-    B.CreateRet(Call);
-    return M;
+      define i32 @main() {
+      entry:
+        %p = alloca i32
+        %ext_result = call i32 @ext(i32* %p)
+        ret i32 %ext_result
+      }
+    )");
   }
 
   std::unique_ptr<Module> createReadOnlyCallModule() {
-    auto M = std::make_unique<Module>("readonly_call", *Ctx);
-    auto *I32 = Type::getInt32Ty(*Ctx);
-    auto *PtrTy = PointerType::getUnqual(I32);
+    return parseTestModule("readonly_call", R"(
+      declare i32 @reader(i32*)
 
-    auto *ReaderTy = FunctionType::get(I32, {PtrTy}, false);
-    auto *Reader = Function::Create(ReaderTy, Function::ExternalLinkage,
-                                    "reader", M.get());
-
-    auto *MainTy = FunctionType::get(I32, {}, false);
-    auto *Main =
-        Function::Create(MainTy, Function::ExternalLinkage, "main", M.get());
-    auto *Entry = BasicBlock::Create(*Ctx, "entry", Main);
-    IRBuilder<> B(Entry);
-    auto *P = B.CreateAlloca(I32, nullptr, "p");
-    auto *Call = B.CreateCall(ReaderTy, Reader, {P}, "reader_result");
-    (void)Call;
-    auto *Load = B.CreateLoad(I32, P, "load_p");
-    B.CreateRet(Load);
-    return M;
+      define i32 @main() {
+      entry:
+        %p = alloca i32
+        %reader_result = call i32 @reader(i32* %p)
+        %load_p = load i32, i32* %p
+        ret i32 %load_p
+      }
+    )");
   }
 
   std::unique_ptr<Module> createMultiCalleeResolverModule() {
-    auto M = std::make_unique<Module>("multi_callee", *Ctx);
-    auto *I32 = Type::getInt32Ty(*Ctx);
-    auto *PtrTy = PointerType::getUnqual(I32);
-    new GlobalVariable(*M, I32, false, GlobalValue::ExternalLinkage,
-                       ConstantInt::get(I32, 1), "g1");
-    new GlobalVariable(*M, I32, false, GlobalValue::ExternalLinkage,
-                       ConstantInt::get(I32, 2), "g2");
+    return parseTestModule("multi_callee", R"(
+      @g1 = global i32 1
+      @g2 = global i32 2
 
-    auto *DispatchTy = FunctionType::get(PtrTy, {}, false);
-    auto *Dispatch = Function::Create(DispatchTy, Function::ExternalLinkage,
-                                      "dispatch", M.get());
+      declare i32* @dispatch()
 
-    auto *Left = Function::Create(DispatchTy, Function::InternalLinkage, "left",
-                                  M.get());
-    auto *LeftBB = BasicBlock::Create(*Ctx, "entry", Left);
-    IRBuilder<> LeftBuilder(LeftBB);
-    LeftBuilder.CreateRet(M->getNamedGlobal("g1"));
+      define internal i32* @left() {
+      entry:
+        ret i32* @g1
+      }
 
-    auto *Right = Function::Create(DispatchTy, Function::InternalLinkage, "right",
-                                   M.get());
-    auto *RightBB = BasicBlock::Create(*Ctx, "entry", Right);
-    IRBuilder<> RightBuilder(RightBB);
-    RightBuilder.CreateRet(M->getNamedGlobal("g2"));
+      define internal i32* @right() {
+      entry:
+        ret i32* @g2
+      }
 
-    auto *Main = Function::Create(DispatchTy, Function::ExternalLinkage, "main",
-                                  M.get());
-    auto *Entry = BasicBlock::Create(*Ctx, "entry", Main);
-    IRBuilder<> B(Entry);
-    auto *Call = B.CreateCall(DispatchTy, Dispatch, {}, "dispatch_result");
-    auto *After = B.CreatePtrToInt(Call, I32, "after_call");
-    B.CreateRet(After);
-    return M;
+      define i32 @main() {
+      entry:
+        %dispatch_result = call i32* @dispatch()
+        %after_call = ptrtoint i32* %dispatch_result to i32
+        ret i32 %after_call
+      }
+    )");
   }
 
   std::unique_ptr<Module> createMixedCalleeResolverModule() {
-    auto M = std::make_unique<Module>("mixed_callee", *Ctx);
-    auto *I32 = Type::getInt32Ty(*Ctx);
-    auto *PtrTy = PointerType::getUnqual(I32);
-    auto *KnownGlobal = new GlobalVariable(
-        *M, I32, false, GlobalValue::ExternalLinkage,
-        ConstantInt::get(I32, 1), "known_g");
-    new GlobalVariable(*M, I32, false, GlobalValue::ExternalLinkage,
-                       ConstantInt::get(I32, 2), "unknown_g");
+    return parseTestModule("mixed_callee", R"(
+      @known_g = global i32 1
+      @unknown_g = global i32 2
 
-    auto *DispatchTy = FunctionType::get(PtrTy, {PtrTy}, false);
-    auto *Dispatch = Function::Create(DispatchTy, Function::ExternalLinkage,
-                                      "dispatch", M.get());
+      declare i32* @dispatch(i32*)
 
-    auto *Known = Function::Create(DispatchTy, Function::InternalLinkage,
-                                   "known", M.get());
-    Known->arg_begin()->setName("arg");
-    auto *KnownBB = BasicBlock::Create(*Ctx, "entry", Known);
-    IRBuilder<> KnownBuilder(KnownBB);
-    KnownBuilder.CreateRet(KnownGlobal);
+      define internal i32* @known(i32* %arg) {
+      entry:
+        ret i32* @known_g
+      }
 
-    auto *Main = Function::Create(DispatchTy, Function::ExternalLinkage, "main",
-                                  M.get());
-    auto *Entry = BasicBlock::Create(*Ctx, "entry", Main);
-    IRBuilder<> B(Entry);
-    auto *P = B.CreateAlloca(I32, nullptr, "p");
-    auto *Call = B.CreateCall(DispatchTy, Dispatch, {P}, "dispatch_result");
-    auto *After = B.CreatePtrToInt(Call, I32, "after_call");
-    B.CreateRet(After);
-    return M;
+      define i32 @main() {
+      entry:
+        %p = alloca i32
+        %dispatch_result = call i32* @dispatch(i32* %p)
+        %after_call = ptrtoint i32* %dispatch_result to i32
+        ret i32 %after_call
+      }
+    )");
   }
 
   std::unique_ptr<Module> createTwoFunctionModule() {
-    auto M = std::make_unique<Module>("two_functions", *Ctx);
-    auto *I32 = Type::getInt32Ty(*Ctx);
-    new GlobalVariable(*M, I32, false, GlobalValue::ExternalLinkage,
-                       ConstantInt::get(I32, 1), "seed");
+    return parseTestModule("two_functions", R"(
+      @seed = global i32 1
 
-    auto *FnTy = FunctionType::get(I32, {}, false);
-    auto *Main =
-        Function::Create(FnTy, Function::ExternalLinkage, "main", M.get());
-    auto *MainBB = BasicBlock::Create(*Ctx, "entry", Main);
-    IRBuilder<> MainBuilder(MainBB);
-    auto *MainInst = BinaryOperator::CreateAdd(ConstantInt::get(I32, 1),
-                                               ConstantInt::get(I32, 2),
-                                               "main_inst", MainBB);
-    (void)MainInst;
-    MainBuilder.CreateRet(ConstantInt::get(I32, 0));
+      define i32 @main() {
+      entry:
+        %main_inst = add i32 1, 2
+        ret i32 0
+      }
 
-    auto *Helper =
-        Function::Create(FnTy, Function::InternalLinkage, "helper", M.get());
-    auto *HelperBB = BasicBlock::Create(*Ctx, "entry", Helper);
-    IRBuilder<> HelperBuilder(HelperBB);
-    auto *HelperInst = BinaryOperator::CreateAdd(ConstantInt::get(I32, 3),
-                                                 ConstantInt::get(I32, 4),
-                                                 "helper_inst", HelperBB);
-    (void)HelperInst;
-    HelperBuilder.CreateRet(ConstantInt::get(I32, 0));
-    return M;
+      define internal i32 @helper() {
+      entry:
+        %helper_inst = add i32 3, 4
+        ret i32 0
+      }
+    )");
   }
 
   std::unique_ptr<Module> createReturnThroughCalleeModule() {
-    auto M = std::make_unique<Module>("return_through_callee", *Ctx);
-    auto *I32 = Type::getInt32Ty(*Ctx);
+    return parseTestModule("return_through_callee", R"(
+      define internal i32 @id(i32 %arg) {
+      entry:
+        ret i32 %arg
+      }
 
-    auto *CalleeTy = FunctionType::get(I32, {I32}, false);
-    auto *Callee = Function::Create(CalleeTy, Function::InternalLinkage, "id",
-                                    M.get());
-    Callee->arg_begin()->setName("arg");
-    auto *CalleeBB = BasicBlock::Create(*Ctx, "entry", Callee);
-    IRBuilder<> CalleeBuilder(CalleeBB);
-    CalleeBuilder.CreateRet(&*Callee->arg_begin());
-
-    auto *MainTy = FunctionType::get(I32, {}, false);
-    auto *Main =
-        Function::Create(MainTy, Function::ExternalLinkage, "main", M.get());
-    auto *Entry = BasicBlock::Create(*Ctx, "entry", Main);
-    IRBuilder<> B(Entry);
-    auto *Seed = BinaryOperator::CreateAdd(ConstantInt::get(I32, 1),
-                                           ConstantInt::get(I32, 2), "seed",
-                                           Entry);
-    auto *Call = B.CreateCall(CalleeTy, Callee, {Seed}, "call_id");
-    B.CreateRet(Call);
-    (void)Call;
-    return M;
+      define i32 @main() {
+      entry:
+        %seed = add i32 1, 2
+        %call_id = call i32 @id(i32 %seed)
+        ret i32 %call_id
+      }
+    )");
   }
 
   std::unique_ptr<Module> createUninitializedLoadValueModule() {
-    auto M = std::make_unique<Module>("uninit_load_value", *Ctx);
-    auto *I32 = Type::getInt32Ty(*Ctx);
-    auto *MainTy = FunctionType::get(I32, {}, false);
-    auto *Main =
-        Function::Create(MainTy, Function::ExternalLinkage, "main", M.get());
-    auto *Entry = BasicBlock::Create(*Ctx, "entry", Main);
-    IRBuilder<> B(Entry);
-    auto *P = B.CreateAlloca(I32, nullptr, "p");
-    auto *Loaded = B.CreateLoad(I32, P, "loaded");
-    auto *Use = B.CreateAdd(Loaded, ConstantInt::get(I32, 1), "use_loaded");
-    B.CreateRet(Use);
-    return M;
+    return parseTestModule("uninit_load_value", R"(
+      define i32 @main() {
+      entry:
+        %p = alloca i32
+        %loaded = load i32, i32* %p
+        %use_loaded = add i32 %loaded, 1
+        ret i32 %use_loaded
+      }
+    )");
   }
 
   std::unique_ptr<Module> createUnnamedLivenessModule() {
-    auto M = std::make_unique<Module>("liveness", *Ctx);
-    auto *I32 = Type::getInt32Ty(*Ctx);
-    auto *MainTy = FunctionType::get(I32, {}, false);
-    auto *Main =
-        Function::Create(MainTy, Function::ExternalLinkage, "main", M.get());
-    auto *Entry = BasicBlock::Create(*Ctx, "entry", Main);
-    IRBuilder<> B(Entry);
-    auto *Tmp = BinaryOperator::CreateAdd(ConstantInt::get(I32, 1),
-                                          ConstantInt::get(I32, 2), "", Entry);
-    auto *Ret = B.CreateRet(Tmp);
-    UnnamedDef = Tmp;
-    RetInst = Ret;
+    auto M = parseTestModule("liveness", R"(
+      define i32 @main() {
+      entry:
+        %tmp = add i32 1, 2
+        ret i32 %tmp
+      }
+    )");
+    UnnamedDef = findInstructionByName(*M, "tmp");
+    EXPECT_NE(UnnamedDef, nullptr);
+    if (UnnamedDef != nullptr) {
+      UnnamedDef->setName("");
+    }
+    RetInst = cast<ReturnInst>(M->getFunction("main")->back().getTerminator());
     return M;
   }
 
   std::unique_ptr<Module> createStorePointerUseModule() {
-    auto M = std::make_unique<Module>("store_pointer_use", *Ctx);
-    auto *I32 = Type::getInt32Ty(*Ctx);
-    auto *MainTy = FunctionType::get(I32, {}, false);
-    auto *Main =
-        Function::Create(MainTy, Function::ExternalLinkage, "main", M.get());
-    auto *Entry = BasicBlock::Create(*Ctx, "entry", Main);
-    IRBuilder<> B(Entry);
-    auto *P = B.CreateAlloca(I32, nullptr, "p");
-    auto *Store = B.CreateStore(ConstantInt::get(I32, 1), P);
-    auto *Cast = B.CreatePtrToInt(P, Type::getInt64Ty(*Ctx), "ptr_use");
-    auto *Trunc = B.CreateTrunc(Cast, I32, "ptr_use32");
-    (void)Trunc;
-    B.CreateRet(ConstantInt::get(I32, 0));
-    StoreInstForLiveness = cast<StoreInst>(Store);
-    PointerAllocaForLiveness = P;
-    PtrUseInst = cast<Instruction>(Cast);
+    auto M = parseTestModule("store_pointer_use", R"(
+      define i32 @main() {
+      entry:
+        %p = alloca i32
+        store i32 1, i32* %p
+        %ptr_use = ptrtoint i32* %p to i64
+        %ptr_use32 = trunc i64 %ptr_use to i32
+        ret i32 0
+      }
+    )");
+    StoreInstForLiveness = cast<StoreInst>(&*std::next(M->getFunction("main")
+                                                           ->front()
+                                                           .begin()));
+    PointerAllocaForLiveness = findInstructionByName(*M, "p");
+    PtrUseInst = findInstructionByName(*M, "ptr_use");
     return M;
   }
 

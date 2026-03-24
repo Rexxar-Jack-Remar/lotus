@@ -1,12 +1,8 @@
-#include <llvm/IR/BasicBlock.h>
-#include <llvm/IR/Constants.h>
-#include <llvm/IR/Function.h>
-#include <llvm/IR/IRBuilder.h>
 #include <llvm/IR/LLVMContext.h>
 #include <llvm/IR/Module.h>
-#include <llvm/IR/Type.h>
 #include <gtest/gtest.h>
 #include <Dataflow/IFDS/Solvers/IDESolver.h>
+#include <TestUtils/LLVMHelpers.h>
 
 namespace ifds {
 namespace {
@@ -139,15 +135,13 @@ TEST(IDEEdgeFunctionTest, EquivalenceIsConservativeWhenTopEqualsBottom) {
 
 TEST(IDEEdgeFunctionTest, ExplicitSeedValuesPropagate) {
   llvm::LLVMContext Ctx;
-  auto M = std::make_unique<llvm::Module>("seed_values", Ctx);
-  auto *I32 = llvm::Type::getInt32Ty(Ctx);
-  auto *FTy = llvm::FunctionType::get(I32, {}, false);
-  auto *F = llvm::Function::Create(FTy, llvm::Function::ExternalLinkage, "main",
-                                   M.get());
-
-  auto *Entry = llvm::BasicBlock::Create(Ctx, "entry", F);
-  llvm::IRBuilder<> B(Entry);
-  auto *Ret = B.CreateRet(llvm::ConstantInt::get(I32, 0));
+  auto M = lotus::unittest::parseModule(Ctx, R"(
+    define i32 @main() {
+    entry:
+      ret i32 0
+    }
+  )", "IDEEdgeFunctionTest");
+  auto *Ret = M->getFunction("main")->back().getTerminator();
 
   SeedValueProblem Problem;
   IDESolver<SeedValueProblem> Solver(Problem);

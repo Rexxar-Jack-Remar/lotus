@@ -5,13 +5,10 @@
 #include <Dataflow/IFDS/Clients/IDEInstInteractionAnalysis.h>
 #include <Dataflow/IFDS/Clients/IDESecureHeapPropagation.h>
 #include <Dataflow/IFDS/Solvers/IDESolver.h>
+#include <TestUtils/LLVMHelpers.h>
 
-#include <llvm/IR/BasicBlock.h>
-#include <llvm/IR/Function.h>
-#include <llvm/IR/IRBuilder.h>
 #include <llvm/IR/LLVMContext.h>
 #include <llvm/IR/Module.h>
-#include <llvm/IR/Type.h>
 
 namespace ifds {
 namespace {
@@ -23,19 +20,19 @@ protected:
 };
 
 TEST_F(IDENewAnalysesTest, ExtendedTaintMarksSourceCallResultTainted) {
-  auto M = std::make_unique<llvm::Module>("ide_ext_taint", *Ctx);
-  auto *I8Ptr = llvm::Type::getInt8PtrTy(*Ctx);
-  auto *MainTy = llvm::FunctionType::get(llvm::Type::getInt32Ty(*Ctx), {}, false);
-  auto *RecvTy = llvm::FunctionType::get(I8Ptr, {}, false);
-  auto *Recv =
-      llvm::Function::Create(RecvTy, llvm::Function::ExternalLinkage, "recv", M.get());
-  auto *Main =
-      llvm::Function::Create(MainTy, llvm::Function::ExternalLinkage, "main", M.get());
+  auto M = lotus::unittest::parseModuleChecked(*Ctx, R"(
+    declare i8* @recv()
 
-  auto *Entry = llvm::BasicBlock::Create(*Ctx, "entry", Main);
-  llvm::IRBuilder<> B(Entry);
-  auto *CallRecv = B.CreateCall(RecvTy, Recv, {}, "recv_val");
-  B.CreateRet(llvm::ConstantInt::get(llvm::Type::getInt32Ty(*Ctx), 0));
+    define i32 @main() {
+    entry:
+      %recv_val = call i8* @recv()
+      ret i32 0
+    }
+  )", "ide_ext_taint");
+  auto *Recv = M->getFunction("recv");
+  auto *CallRecv = llvm::cast<llvm::CallBase>(
+      lotus::unittest::findInstructionByName(*M->getFunction("main"),
+                                             "recv_val"));
 
   IDEExtendedTaintAnalysis Problem;
   auto SF = Problem.summary_flow(CallRecv, Recv, Problem.zero_fact());
@@ -48,19 +45,19 @@ TEST_F(IDENewAnalysesTest, ExtendedTaintMarksSourceCallResultTainted) {
 }
 
 TEST_F(IDENewAnalysesTest, FeatureTaintAssignsSourceFeatureBit) {
-  auto M = std::make_unique<llvm::Module>("ide_feature_taint", *Ctx);
-  auto *I8Ptr = llvm::Type::getInt8PtrTy(*Ctx);
-  auto *MainTy = llvm::FunctionType::get(llvm::Type::getInt32Ty(*Ctx), {}, false);
-  auto *RecvTy = llvm::FunctionType::get(I8Ptr, {}, false);
-  auto *Recv =
-      llvm::Function::Create(RecvTy, llvm::Function::ExternalLinkage, "recv", M.get());
-  auto *Main =
-      llvm::Function::Create(MainTy, llvm::Function::ExternalLinkage, "main", M.get());
+  auto M = lotus::unittest::parseModuleChecked(*Ctx, R"(
+    declare i8* @recv()
 
-  auto *Entry = llvm::BasicBlock::Create(*Ctx, "entry", Main);
-  llvm::IRBuilder<> B(Entry);
-  auto *CallRecv = B.CreateCall(RecvTy, Recv, {}, "recv_val");
-  B.CreateRet(llvm::ConstantInt::get(llvm::Type::getInt32Ty(*Ctx), 0));
+    define i32 @main() {
+    entry:
+      %recv_val = call i8* @recv()
+      ret i32 0
+    }
+  )", "ide_feature_taint");
+  auto *Recv = M->getFunction("recv");
+  auto *CallRecv = llvm::cast<llvm::CallBase>(
+      lotus::unittest::findInstructionByName(*M->getFunction("main"),
+                                             "recv_val"));
 
   IDEFeatureTaintAnalysis Problem;
   auto SF = Problem.summary_flow(CallRecv, Recv, Problem.zero_fact());
@@ -74,22 +71,18 @@ TEST_F(IDENewAnalysesTest, FeatureTaintAssignsSourceFeatureBit) {
 }
 
 TEST_F(IDENewAnalysesTest, SecureHeapMarksAllocatorResultAllocated) {
-  auto M = std::make_unique<llvm::Module>("ide_secure_heap", *Ctx);
-  auto *I8Ptr = llvm::Type::getInt8PtrTy(*Ctx);
-  auto *MainTy = llvm::FunctionType::get(llvm::Type::getInt32Ty(*Ctx), {}, false);
-  auto *MallocTy =
-      llvm::FunctionType::get(I8Ptr, {llvm::Type::getInt64Ty(*Ctx)}, false);
-  auto *Malloc = llvm::Function::Create(MallocTy, llvm::Function::ExternalLinkage,
-                                        "malloc", M.get());
-  auto *Main =
-      llvm::Function::Create(MainTy, llvm::Function::ExternalLinkage, "main", M.get());
+  auto M = lotus::unittest::parseModuleChecked(*Ctx, R"(
+    declare i8* @malloc(i64)
 
-  auto *Entry = llvm::BasicBlock::Create(*Ctx, "entry", Main);
-  llvm::IRBuilder<> B(Entry);
-  auto *CallMalloc = B.CreateCall(
-      MallocTy, Malloc,
-      {llvm::ConstantInt::get(llvm::Type::getInt64Ty(*Ctx), 16)}, "buf");
-  B.CreateRet(llvm::ConstantInt::get(llvm::Type::getInt32Ty(*Ctx), 0));
+    define i32 @main() {
+    entry:
+      %buf = call i8* @malloc(i64 16)
+      ret i32 0
+    }
+  )", "ide_secure_heap");
+  auto *Malloc = M->getFunction("malloc");
+  auto *CallMalloc = llvm::cast<llvm::CallBase>(
+      lotus::unittest::findInstructionByName(*M->getFunction("main"), "buf"));
 
   IDESecureHeapPropagation Problem;
   auto SF = Problem.summary_flow(CallMalloc, Malloc, Problem.zero_fact());
@@ -102,20 +95,16 @@ TEST_F(IDENewAnalysesTest, SecureHeapMarksAllocatorResultAllocated) {
 }
 
 TEST_F(IDENewAnalysesTest, InstInteractionMarksLoadAsRead) {
-  auto M = std::make_unique<llvm::Module>("ide_inst_interaction", *Ctx);
-  auto *I32 = llvm::Type::getInt32Ty(*Ctx);
-  auto *I32Ptr = llvm::Type::getInt32PtrTy(*Ctx);
-  auto *MainTy = llvm::FunctionType::get(I32, {I32Ptr}, false);
-  auto *Main =
-      llvm::Function::Create(MainTy, llvm::Function::ExternalLinkage, "main", M.get());
-
-  auto *argIt = Main->arg_begin();
-  llvm::Value *PtrArg = &*argIt;
-
-  auto *Entry = llvm::BasicBlock::Create(*Ctx, "entry", Main);
-  llvm::IRBuilder<> B(Entry);
-  auto *Load = B.CreateLoad(I32, PtrArg, "loaded");
-  auto *Ret = B.CreateRet(Load);
+  auto M = lotus::unittest::parseModuleChecked(*Ctx, R"(
+    define i32 @main(i32* %ptr) {
+    entry:
+      %loaded = load i32, i32* %ptr
+      ret i32 %loaded
+    }
+  )", "ide_inst_interaction");
+  auto *Main = M->getFunction("main");
+  auto *Load = lotus::unittest::findInstructionByName(*Main, "loaded");
+  auto *Ret = Main->back().getTerminator();
 
   IDEInstInteractionAnalysis Problem;
   IDESolver<IDEInstInteractionAnalysis> Solver(Problem);
@@ -127,18 +116,16 @@ TEST_F(IDENewAnalysesTest, InstInteractionMarksLoadAsRead) {
 }
 
 TEST_F(IDENewAnalysesTest, GeneralizedLCAComputesConstantSet) {
-  auto M = std::make_unique<llvm::Module>("ide_glca", *Ctx);
-  auto *I32 = llvm::Type::getInt32Ty(*Ctx);
-  auto *MainTy = llvm::FunctionType::get(I32, {}, false);
-  auto *Main =
-      llvm::Function::Create(MainTy, llvm::Function::ExternalLinkage, "main", M.get());
-
-  auto *Entry = llvm::BasicBlock::Create(*Ctx, "entry", Main);
-  llvm::IRBuilder<> B(Entry);
-  auto *C3 = llvm::ConstantInt::get(I32, 3);
-  auto *C4 = llvm::ConstantInt::get(I32, 4);
-  auto *Add = llvm::BinaryOperator::CreateAdd(C3, C4, "sum", Entry);
-  auto *Ret = B.CreateRet(Add);
+  auto M = lotus::unittest::parseModuleChecked(*Ctx, R"(
+    define i32 @main() {
+    entry:
+      %sum = add i32 3, 4
+      ret i32 %sum
+    }
+  )", "ide_glca");
+  auto *Main = M->getFunction("main");
+  auto *Add = lotus::unittest::findInstructionByName(*Main, "sum");
+  auto *Ret = Main->back().getTerminator();
 
   IDEGeneralizedLCA Problem;
   IDESolver<IDEGeneralizedLCA> Solver(Problem);

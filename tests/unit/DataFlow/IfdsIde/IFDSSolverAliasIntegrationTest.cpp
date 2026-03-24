@@ -3,18 +3,14 @@
 #include <Dataflow/IFDS/Clients/IFDSReachingDefinitions.h>
 #include <Dataflow/IFDS/Clients/IFDSTaintAnalysis.h>
 #include <Dataflow/IFDS/Solvers/IFDSSolver.h>
+#include <TestUtils/LLVMHelpers.h>
 
 #include <gtest/gtest.h>
 
-#include <llvm/IR/BasicBlock.h>
-#include <llvm/IR/Constants.h>
-#include <llvm/IR/Function.h>
 #include <llvm/IR/GlobalVariable.h>
-#include <llvm/IR/IRBuilder.h>
 #include <llvm/IR/Instructions.h>
 #include <llvm/IR/LLVMContext.h>
 #include <llvm/IR/Module.h>
-#include <llvm/IR/Type.h>
 
 #include <memory>
 
@@ -32,34 +28,28 @@ struct InternalCallIR {
 InternalCallIR buildInternalCallIR() {
   InternalCallIR IR;
   IR.Ctx = std::make_unique<llvm::LLVMContext>();
-  IR.Mod = std::make_unique<llvm::Module>("ifds_solver_alias_internal", *IR.Ctx);
+  IR.Mod = lotus::unittest::parseModule(*IR.Ctx, R"(
+    define i8* @callee(i8* %arg) {
+    entry:
+      ret i8* %arg
+    }
 
-  auto *I8Ty = llvm::Type::getInt8Ty(*IR.Ctx);
-  auto *I8PtrTy = llvm::Type::getInt8PtrTy(*IR.Ctx);
-  auto *I32Ty = llvm::Type::getInt32Ty(*IR.Ctx);
-  auto *I64Ty = llvm::Type::getInt64Ty(*IR.Ctx);
-
-  auto *CalleeTy = llvm::FunctionType::get(I8PtrTy, {I8PtrTy}, false);
-  auto *Callee = llvm::Function::Create(CalleeTy, llvm::Function::ExternalLinkage,
-                                        "callee", IR.Mod.get());
-  auto *CalleeEntry = llvm::BasicBlock::Create(*IR.Ctx, "entry", Callee);
-  llvm::IRBuilder<> CB(CalleeEntry);
-  IR.CalleeRetInst = CB.CreateRet(Callee->getArg(0));
-
-  auto *MainTy = llvm::FunctionType::get(I32Ty, {}, false);
-  auto *Main = llvm::Function::Create(MainTy, llvm::Function::ExternalLinkage,
-                                      "main", IR.Mod.get());
-  auto *Entry = llvm::BasicBlock::Create(*IR.Ctx, "entry", Main);
-  llvm::IRBuilder<> B(Entry);
-
-  auto *Alloca = B.CreateAlloca(I8Ty, nullptr, "local");
-  IR.AllocaInst = Alloca;
-
-  IR.Call = B.CreateCall(Callee, {Alloca});
-  IR.AfterCall = llvm::cast<llvm::Instruction>(
-      B.CreatePtrToInt(IR.Call, I64Ty, "after_call"));
-
-  B.CreateRet(llvm::ConstantInt::get(I32Ty, 0));
+    define i32 @main() {
+    entry:
+      %local = alloca i8
+      %call = call i8* @callee(i8* %local)
+      %after_call = ptrtoint i8* %call to i64
+      ret i32 0
+    }
+  )", "IFDSSolverAliasIntegrationTest");
+  auto *Main = IR.Mod->getFunction("main");
+  auto *Callee = IR.Mod->getFunction("callee");
+  IR.AllocaInst = lotus::unittest::findInstructionByName(*Main, "local");
+  IR.Call = llvm::cast<llvm::CallInst>(
+      lotus::unittest::findInstructionByName(*Main, "call"));
+  IR.AfterCall = lotus::unittest::findInstructionByName(*Main, "after_call");
+  IR.CalleeRetInst = Callee != nullptr ? Callee->getEntryBlock().getTerminator()
+                                       : nullptr;
 
   return IR;
 }
@@ -75,33 +65,30 @@ struct ExternalCallIR {
 ExternalCallIR buildExternalCallIR() {
   ExternalCallIR IR;
   IR.Ctx = std::make_unique<llvm::LLVMContext>();
-  IR.Mod = std::make_unique<llvm::Module>("ifds_solver_alias_external", *IR.Ctx);
+  IR.Mod = lotus::unittest::parseModule(*IR.Ctx, R"(
+    @g = global i8 0
 
-  auto *I8Ty = llvm::Type::getInt8Ty(*IR.Ctx);
-  auto *I8PtrTy = llvm::Type::getInt8PtrTy(*IR.Ctx);
-  auto *I32Ty = llvm::Type::getInt32Ty(*IR.Ctx);
-  auto *I64Ty = llvm::Type::getInt64Ty(*IR.Ctx);
+    declare void @ext(i8*)
 
-  IR.Global = new llvm::GlobalVariable(
-      *IR.Mod, I8Ty, false, llvm::GlobalValue::ExternalLinkage,
-      llvm::ConstantInt::get(I8Ty, 0), "g");
-
-  auto *ExtTy = llvm::FunctionType::get(llvm::Type::getVoidTy(*IR.Ctx), {I8PtrTy}, false);
-  auto *Ext = llvm::Function::Create(ExtTy, llvm::Function::ExternalLinkage, "ext", IR.Mod.get());
-
-  auto *MainTy = llvm::FunctionType::get(I32Ty, {}, false);
-  auto *Main = llvm::Function::Create(MainTy, llvm::Function::ExternalLinkage,
-                                      "main", IR.Mod.get());
-  auto *Entry = llvm::BasicBlock::Create(*IR.Ctx, "entry", Main);
-  llvm::IRBuilder<> B(Entry);
-
-  auto *Alloca = B.CreateAlloca(I8Ty, nullptr, "local");
-  IR.GlobalStore = B.CreateStore(llvm::ConstantInt::get(I8Ty, 1),
-                                 const_cast<llvm::GlobalVariable *>(IR.Global));
-  B.CreateCall(Ext, {Alloca});
-  IR.AfterExtCall = llvm::cast<llvm::Instruction>(
-      B.CreatePtrToInt(Alloca, I64Ty, "after_ext_call"));
-  B.CreateRet(llvm::ConstantInt::get(I32Ty, 0));
+    define i32 @main() {
+    entry:
+      %local = alloca i8
+      store i8 1, i8* @g
+      call void @ext(i8* %local)
+      %after_ext_call = ptrtoint i8* %local to i64
+      ret i32 0
+    }
+  )", "IFDSSolverAliasIntegrationTest");
+  auto *Main = IR.Mod->getFunction("main");
+  IR.Global = IR.Mod->getNamedGlobal("g");
+  IR.AfterExtCall =
+      lotus::unittest::findInstructionByName(*Main, "after_ext_call");
+  for (auto &Inst : Main->getEntryBlock()) {
+    if (auto *Store = llvm::dyn_cast<llvm::StoreInst>(&Inst)) {
+      IR.GlobalStore = Store;
+      break;
+    }
+  }
 
   return IR;
 }
@@ -116,35 +103,24 @@ struct TaintAliasIR {
 TaintAliasIR buildTaintAliasIR() {
   TaintAliasIR IR;
   IR.Ctx = std::make_unique<llvm::LLVMContext>();
-  IR.Mod = std::make_unique<llvm::Module>("ifds_solver_alias_taint", *IR.Ctx);
+  IR.Mod = lotus::unittest::parseModule(*IR.Ctx, R"(
+    declare i8 @source()
+    declare void @sink(i8)
 
-  auto *I8Ty = llvm::Type::getInt8Ty(*IR.Ctx);
-  auto *I8PtrTy = llvm::Type::getInt8PtrTy(*IR.Ctx);
-  auto *I32Ty = llvm::Type::getInt32Ty(*IR.Ctx);
-  auto *I64Ty = llvm::Type::getInt64Ty(*IR.Ctx);
-
-  auto *SourceTy = llvm::FunctionType::get(I8Ty, {}, false);
-  auto *SinkTy = llvm::FunctionType::get(llvm::Type::getVoidTy(*IR.Ctx),
-                                         {I8Ty}, false);
-  auto *Source = llvm::Function::Create(SourceTy, llvm::Function::ExternalLinkage,
-                                        "source", IR.Mod.get());
-  auto *Sink = llvm::Function::Create(SinkTy, llvm::Function::ExternalLinkage,
-                                      "sink", IR.Mod.get());
-
-  auto *MainTy = llvm::FunctionType::get(I32Ty, {}, false);
-  auto *Main = llvm::Function::Create(MainTy, llvm::Function::ExternalLinkage,
-                                      "main", IR.Mod.get());
-  auto *Entry = llvm::BasicBlock::Create(*IR.Ctx, "entry", Main);
-  llvm::IRBuilder<> B(Entry);
-
-  auto *Alloca = B.CreateAlloca(I8Ty, nullptr, "p");
-  auto *AliasPtr =
-      B.CreateGEP(I8Ty, Alloca, llvm::ConstantInt::get(I64Ty, 0), "q");
-  auto *SourceCall = B.CreateCall(Source, {});
-  B.CreateStore(SourceCall, Alloca);
-  IR.LoadInst = B.CreateLoad(I8Ty, AliasPtr, "loaded");
-  IR.SinkCall = B.CreateCall(Sink, {IR.LoadInst});
-  B.CreateRet(llvm::ConstantInt::get(I32Ty, 0));
+    define i32 @main() {
+    entry:
+      %p = alloca i8
+      %q = getelementptr i8, i8* %p, i64 0
+      %source_val = call i8 @source()
+      store i8 %source_val, i8* %p
+      %loaded = load i8, i8* %q
+      call void @sink(i8 %loaded)
+      ret i32 0
+    }
+  )", "IFDSSolverAliasIntegrationTest");
+  auto *Main = IR.Mod->getFunction("main");
+  IR.LoadInst = lotus::unittest::findInstructionByName(*Main, "loaded");
+  IR.SinkCall = lotus::unittest::findCallTo(*Main, "sink");
 
   return IR;
 }
@@ -159,24 +135,28 @@ struct ConstAliasIR {
 ConstAliasIR buildConstAliasIR() {
   ConstAliasIR IR;
   IR.Ctx = std::make_unique<llvm::LLVMContext>();
-  IR.Mod = std::make_unique<llvm::Module>("ifds_solver_alias_const", *IR.Ctx);
-
-  auto *I8Ty = llvm::Type::getInt8Ty(*IR.Ctx);
-  auto *I32Ty = llvm::Type::getInt32Ty(*IR.Ctx);
-  auto *I64Ty = llvm::Type::getInt64Ty(*IR.Ctx);
-
-  auto *MainTy = llvm::FunctionType::get(I32Ty, {}, false);
-  auto *Main = llvm::Function::Create(MainTy, llvm::Function::ExternalLinkage,
-                                      "main", IR.Mod.get());
-  auto *Entry = llvm::BasicBlock::Create(*IR.Ctx, "entry", Main);
-  llvm::IRBuilder<> B(Entry);
-
-  auto *Alloca = B.CreateAlloca(I8Ty, nullptr, "p");
-  IR.AliasPtr =
-      B.CreateGEP(I8Ty, Alloca, llvm::ConstantInt::get(I64Ty, 0), "q");
-  B.CreateStore(llvm::ConstantInt::get(I8Ty, 1), Alloca);
-  IR.SecondStore = B.CreateStore(llvm::ConstantInt::get(I8Ty, 2), IR.AliasPtr);
-  B.CreateRet(llvm::ConstantInt::get(I32Ty, 0));
+  IR.Mod = lotus::unittest::parseModule(*IR.Ctx, R"(
+    define i32 @main() {
+    entry:
+      %p = alloca i8
+      %q = getelementptr i8, i8* %p, i64 0
+      store i8 1, i8* %p
+      store i8 2, i8* %q
+      ret i32 0
+    }
+  )", "IFDSSolverAliasIntegrationTest");
+  auto *Main = IR.Mod->getFunction("main");
+  IR.AliasPtr = lotus::unittest::findInstructionByName(*Main, "q");
+  unsigned storeIndex = 0;
+  for (auto &Inst : Main->getEntryBlock()) {
+    if (auto *Store = llvm::dyn_cast<llvm::StoreInst>(&Inst)) {
+      ++storeIndex;
+      if (storeIndex == 2) {
+        IR.SecondStore = Store;
+        break;
+      }
+    }
+  }
 
   return IR;
 }

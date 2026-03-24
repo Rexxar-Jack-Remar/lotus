@@ -1,17 +1,12 @@
 #include <llvm/IR/Constants.h>
-#include <llvm/IR/IRBuilder.h>
 #include <llvm/IR/Instructions.h>
 #include <llvm/IR/LLVMContext.h>
 #include <llvm/IR/Module.h>
-#include <llvm/IR/Type.h>
-#include <llvm/IRReader/IRReader.h>
-#include <llvm/Support/MemoryBuffer.h>
-#include <llvm/Support/SourceMgr.h>
-#include <llvm/Support/raw_ostream.h>
 #include <gtest/gtest.h>
 #include <Dataflow/IFDS/Clients/IFDSTaintAnalysis.h>
 #include <Dataflow/IFDS/Core/IFDSFramework.h>
 #include <Dataflow/IFDS/Solvers/IFDSSolver.h>
+#include <TestUtils/LLVMHelpers.h>
 
 using namespace ifds;
 using namespace llvm;
@@ -20,7 +15,7 @@ using namespace llvm;
 // Taint Analysis Unit Tests
 // ============================================================================
 
-class TaintAnalysisTest : public ::testing::Test {
+class IFDSTaintAnalysisUnitTest : public ::testing::Test {
 protected:
   void SetUp() override { context = std::make_unique<LLVMContext>(); }
 
@@ -28,42 +23,17 @@ protected:
 
   // Helper function to create a simple module for testing
   std::unique_ptr<Module> createSimpleModule() {
-    auto module = std::make_unique<Module>("test_module", *context);
+    auto module = lotus::unittest::parseModule(*context, R"(
+      declare i32 @source()
+      declare void @sink(i32)
 
-    // Create function types
-    auto *intType = Type::getInt32Ty(*context);
-    auto *voidType = Type::getVoidTy(*context);
-
-    // Create source function (returns int)
-    auto *sourceType = FunctionType::get(intType, {}, false);
-    auto *sourceFunc = Function::Create(
-        sourceType, GlobalValue::ExternalLinkage, "source", *module);
-
-    // Create sink function (takes int, returns void)
-    auto *sinkType = FunctionType::get(voidType, {intType}, false);
-    auto *sinkFunc = Function::Create(sinkType, GlobalValue::ExternalLinkage,
-                                      "sink", *module);
-
-    // Create main function
-    auto *mainType = FunctionType::get(intType, {}, false);
-    auto *mainFunc = Function::Create(mainType, GlobalValue::ExternalLinkage,
-                                      "main", *module);
-
-    // Create basic block and instructions for main
-    auto *entryBB = BasicBlock::Create(*context, "entry", mainFunc);
-    IRBuilder<> builder(*context);
-    builder.SetInsertPoint(entryBB);
-
-    // Call source function
-    auto *sourceCall = builder.CreateCall(sourceType, sourceFunc, {});
-
-    // Call sink function with the result
-    auto *sinkCall = builder.CreateCall(sinkType, sinkFunc, {sourceCall});
-
-    // Return 0
-    auto *retVal = ConstantInt::get(intType, 0);
-    builder.CreateRet(retVal);
-
+      define i32 @main() {
+      entry:
+        %source_val = call i32 @source()
+        call void @sink(i32 %source_val)
+        ret i32 0
+      }
+    )", "IFDSTaintAnalysisUnitTest");
     return module;
   }
 };
@@ -72,7 +42,7 @@ protected:
 // TaintFact Tests
 // ============================================================================
 
-TEST_F(TaintAnalysisTest, TaintFactCreation) {
+TEST_F(IFDSTaintAnalysisUnitTest, TaintFactCreation) {
   // Test zero fact creation
   auto zero = TaintFact::zero();
   EXPECT_TRUE(zero.is_zero()) << "Zero fact should be zero";
@@ -99,7 +69,7 @@ TEST_F(TaintAnalysisTest, TaintFactCreation) {
       << "Memory location should match";
 }
 
-TEST_F(TaintAnalysisTest, TaintFactEquality) {
+TEST_F(IFDSTaintAnalysisUnitTest, TaintFactEquality) {
   // Test equality of zero facts
   auto zero1 = TaintFact::zero();
   auto zero2 = TaintFact::zero();
@@ -121,7 +91,7 @@ TEST_F(TaintAnalysisTest, TaintFactEquality) {
   // not be equal";
 }
 
-TEST_F(TaintAnalysisTest, TaintFactOrdering) {
+TEST_F(IFDSTaintAnalysisUnitTest, TaintFactOrdering) {
   // Test ordering of different fact types
   auto zero = TaintFact::zero();
   auto *intType = Type::getInt32Ty(*context);
@@ -140,7 +110,7 @@ TEST_F(TaintAnalysisTest, TaintFactOrdering) {
 // TaintAnalysis Tests
 // ============================================================================
 
-TEST_F(TaintAnalysisTest, TaintAnalysisCreation) {
+TEST_F(IFDSTaintAnalysisUnitTest, TaintAnalysisCreation) {
   TaintAnalysis analysis;
 
   // Test that analysis can be created
@@ -151,7 +121,7 @@ TEST_F(TaintAnalysisTest, TaintAnalysisCreation) {
   EXPECT_TRUE(zero.is_zero()) << "Zero fact should be zero";
 }
 
-TEST_F(TaintAnalysisTest, TaintAnalysisConfiguration) {
+TEST_F(IFDSTaintAnalysisUnitTest, TaintAnalysisConfiguration) {
   TaintAnalysis analysis;
 
   // Test adding source and sink functions
@@ -164,7 +134,7 @@ TEST_F(TaintAnalysisTest, TaintAnalysisConfiguration) {
   EXPECT_TRUE(true) << "Source and sink functions should be addable";
 }
 
-TEST_F(TaintAnalysisTest, SimpleModuleAnalysis) {
+TEST_F(IFDSTaintAnalysisUnitTest, SimpleModuleAnalysis) {
   // Create a simple module for testing
   auto module = createSimpleModule();
   ASSERT_NE(module, nullptr) << "Module should be created successfully";
@@ -207,7 +177,7 @@ TEST_F(TaintAnalysisTest, SimpleModuleAnalysis) {
 // IFDS Framework Tests
 // ============================================================================
 
-TEST_F(TaintAnalysisTest, IFDSSolverCreation) {
+TEST_F(IFDSTaintAnalysisUnitTest, IFDSSolverCreation) {
   TaintAnalysis analysis;
 
   // Test that IFDS solver can be created
@@ -216,7 +186,7 @@ TEST_F(TaintAnalysisTest, IFDSSolverCreation) {
   EXPECT_TRUE(true) << "IFDS solver should be creatable";
 }
 
-TEST_F(TaintAnalysisTest, IFDSSolverWithModule) {
+TEST_F(IFDSTaintAnalysisUnitTest, IFDSSolverWithModule) {
   // Create a simple module
   auto module = createSimpleModule();
   ASSERT_NE(module, nullptr) << "Module should be created successfully";

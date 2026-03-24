@@ -1,16 +1,14 @@
 #include <memory>
 #include <set>
 
-#include <llvm/IR/BasicBlock.h>
 #include <llvm/IR/Constants.h>
-#include <llvm/IR/Function.h>
-#include <llvm/IR/IRBuilder.h>
+#include <llvm/IR/Argument.h>
 #include <llvm/IR/Instructions.h>
 #include <llvm/IR/LLVMContext.h>
 #include <llvm/IR/Module.h>
-#include <llvm/IR/Type.h>
 #include <gtest/gtest.h>
 #include <Dataflow/IFDS/Utils/LLVMFlowHelpers.h>
+#include <TestUtils/LLVMHelpers.h>
 
 namespace {
 
@@ -26,34 +24,28 @@ struct MappingFixtureIR {
 MappingFixtureIR buildMappingFixture() {
   MappingFixtureIR IR;
   IR.Ctx = std::make_unique<llvm::LLVMContext>();
-  IR.Mod =
-      std::make_unique<llvm::Module>("llvm_flow_helper_mapping_test", *IR.Ctx);
+  IR.Mod = lotus::unittest::parseModule(*IR.Ctx, R"(
+    define i32 @callee(i32 %arg) {
+    entry:
+      ret i32 %arg
+    }
 
-  auto *I32Ty = llvm::Type::getInt32Ty(*IR.Ctx);
+    define i32 @main() {
+    entry:
+      %actual = add i32 1, 2
+      %call = call i32 @callee(i32 %actual)
+      ret i32 %call
+    }
+  )", "LLVMFlowHelpersMappingTest");
 
-  auto *CalleeTy = llvm::FunctionType::get(I32Ty, {I32Ty}, false);
-  auto *Callee = llvm::Function::Create(
-      CalleeTy, llvm::Function::ExternalLinkage, "callee", IR.Mod.get());
-
-  auto *MainTy = llvm::FunctionType::get(I32Ty, {}, false);
-  auto *Main = llvm::Function::Create(MainTy, llvm::Function::ExternalLinkage,
-                                      "main", IR.Mod.get());
-
-  auto *MainEntry = llvm::BasicBlock::Create(*IR.Ctx, "entry", Main);
-  llvm::IRBuilder<> BMain(MainEntry);
-  auto *Actual = BMain.CreateAdd(llvm::ConstantInt::get(I32Ty, 1),
-                                 llvm::ConstantInt::get(I32Ty, 2), "actual");
-  auto *Call = BMain.CreateCall(Callee, {Actual});
-  BMain.CreateRet(Call);
-
-  auto *CalleeEntry = llvm::BasicBlock::Create(*IR.Ctx, "entry", Callee);
-  llvm::IRBuilder<> BCallee(CalleeEntry);
-  BCallee.CreateRet(Callee->getArg(0));
-
-  IR.Call = Call;
-  IR.Callee = Callee;
-  IR.ActualArg = Actual;
-  IR.FormalArg = &*Callee->arg_begin();
+  IR.Callee = IR.Mod->getFunction("callee");
+  IR.Call = llvm::cast<llvm::CallBase>(
+      lotus::unittest::findInstructionByName(*IR.Mod->getFunction("main"),
+                                             "call"));
+  IR.ActualArg =
+      lotus::unittest::findInstructionByName(*IR.Mod->getFunction("main"),
+                                             "actual");
+  IR.FormalArg = IR.Callee != nullptr ? &*IR.Callee->arg_begin() : nullptr;
   return IR;
 }
 
