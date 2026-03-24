@@ -230,6 +230,20 @@ void GuardedValueFlowGraph::mapCallSite(Instruction *inst,
     call_sites_[inst] = site;
 }
 
+GuardedValueFlowNode *
+GuardedValueFlowGraph::findSyntheticGuardNode(Instruction *inst,
+                                              BasicBlock *successor) const {
+  auto it = synthetic_guard_nodes_.find(std::make_pair(inst, successor));
+  return it == synthetic_guard_nodes_.end() ? nullptr : it->second;
+}
+
+void GuardedValueFlowGraph::mapSyntheticGuardNode(Instruction *inst,
+                                                  BasicBlock *successor,
+                                                  GuardedValueFlowNode *node) {
+  if (inst && successor)
+    synthetic_guard_nodes_[std::make_pair(inst, successor)] = node;
+}
+
 GuardedValueFlowRegionNode *
 GuardedValueFlowGraph::findRegion(BasicBlock *block) const {
   auto it = regions_.find(block);
@@ -645,4 +659,111 @@ GuardedValueFlowGraph::getSummaryReturnNodes(unsigned ap_depth) const {
 void GuardedValueFlowGraph::refreshNodeRegions() {
   for (const auto &node_ptr : nodes_)
     assignNodeRegion(node_ptr.get());
+}
+
+void GuardedValueFlowGraph::addDiagnostic(Diagnostic diagnostic) {
+  if (!diagnostic.block && diagnostic.instruction)
+    diagnostic.block = diagnostic.instruction->getParent();
+  diagnostics_.push_back(std::move(diagnostic));
+}
+
+bool GuardedValueFlowGraph::isDegraded() const {
+  return std::any_of(diagnostics_.begin(), diagnostics_.end(),
+                     [](const Diagnostic &diagnostic) {
+                       return diagnostic.severity != Diagnostic::Severity::Note;
+                     });
+}
+
+std::vector<GuardedValueFlowNode *>
+GuardedValueFlowGraph::getDirectDataDependencies(
+    const GuardedValueFlowNode *node) const {
+  std::vector<GuardedValueFlowNode *> result;
+  if (!node)
+    return result;
+
+  for (const auto &edge : node->children()) {
+    if (edge.target)
+      result.push_back(edge.target);
+  }
+
+  if (auto *phi_node = dyn_cast<const GuardedValueFlowPhiNode>(node)) {
+    for (const auto &incoming : phi_node->incoming()) {
+      if (incoming.condition_node)
+        result.push_back(incoming.condition_node);
+    }
+  }
+
+  return result;
+}
+
+std::vector<GuardedValueFlowGraph::BlockCondition>
+GuardedValueFlowGraph::getEffectiveControlDependencies(
+    const GuardedValueFlowNode *node) const {
+  if (!node || !node->getParentBasicBlock())
+    return {};
+  auto conditions = getBlockConditions(node->getParentBasicBlock());
+  return std::vector<BlockCondition>(conditions.begin(), conditions.end());
+}
+
+std::vector<GuardedValueFlowGraph::MemoryProducer>
+GuardedValueFlowGraph::getMemoryProducers(const GuardedValueFlowNode *node) const {
+  std::vector<MemoryProducer> result;
+  if (!node)
+    return result;
+
+  const GuardedValueFlowNode *memory_node = node;
+  if (node->getKind() != GuardedValueFlowNode::Kind::LoadMemory &&
+      node->children().size() == 1 &&
+      node->children().front().target &&
+      node->children().front().target->getKind() ==
+          GuardedValueFlowNode::Kind::LoadMemory) {
+    memory_node = node->children().front().target;
+  }
+
+  if (!memory_node ||
+      memory_node->getKind() != GuardedValueFlowNode::Kind::LoadMemory) {
+    return result;
+  }
+
+  for (const auto &edge : memory_node->children()) {
+    GuardedValueFlowNode *producer_mem = edge.target;
+    if (!producer_mem)
+      continue;
+
+    GuardedValueFlowNode *producer_value =
+        producer_mem->children().empty() ? nullptr : producer_mem->children().front().target;
+    bool is_summary =
+        producer_value &&
+        producer_value->getKind() == GuardedValueFlowNode::Kind::CallSiteReturnSummary;
+    bool is_unknown =
+        producer_value &&
+        producer_value->getKind() == GuardedValueFlowNode::Kind::Unknown;
+
+    result.push_back({producer_mem,
+                      producer_value,
+                      memory_node->getMatchingRegion(producer_mem),
+                      edge.condition,
+                      edge.confidence,
+                      is_summary,
+                      is_unknown});
+  }
+
+  return result;
+}
+
+std::vector<GuardedValueFlowGraph::CallTargetInfo>
+GuardedValueFlowGraph::getResolvedCallTargets(
+    const GuardedValueFlowCallSite *site) const {
+  std::vector<CallTargetInfo> result;
+  if (!site)
+    return result;
+
+  for (Function *callee : site->getCallees()) {
+    result.push_back({callee,
+                      site->getCalleeCondition(callee),
+                      site->getCalleeConditionRegion(callee),
+                      site->isBackEdge(callee)});
+  }
+
+  return result;
 }

@@ -18,6 +18,7 @@ class GuardedValueFlowTest : public LlvmModuleTest {
 protected:
   struct Pipeline {
     std::unique_ptr<legacy::PassManager> pm;
+    LotusAA *lotus{nullptr};
     GuardedValueFlowGraphBuilderPass *builder{nullptr};
   };
 
@@ -41,6 +42,21 @@ protected:
     pipeline.pm->add(new gsa::ControlDependenceAnalysisPass());
     pipeline.pm->add(new gsa::GateAnalysisPass());
     pipeline.pm->add(pipeline.builder);
+    pipeline.pm->run(M);
+    return pipeline;
+  }
+
+  Pipeline runAdapter(Module &M) {
+    initializePassInfra();
+    Pipeline pipeline;
+    pipeline.pm = std::make_unique<legacy::PassManager>();
+    pipeline.lotus = new LotusAA();
+    pipeline.builder = new GuardedValueFlowGraphBuilderPass();
+    pipeline.pm->add(new gsa::ControlDependenceAnalysisPass());
+    pipeline.pm->add(new gsa::GateAnalysisPass());
+    pipeline.pm->add(pipeline.lotus);
+    pipeline.pm->add(pipeline.builder);
+    pipeline.pm->add(new LotusGuardedValueFlowAdapterPass());
     pipeline.pm->run(M);
     return pipeline;
   }
@@ -311,6 +327,56 @@ TEST_F(GuardedValueFlowTest, StoresSummaryNodesPerCalleeWithoutOverwrite) {
   EXPECT_EQ(site->getInputSummaryNode(callee_b, 1), input_b);
   EXPECT_EQ(site->getOutputSummaryNode(callee_a, 2), output_a);
   EXPECT_EQ(site->getOutputSummaryNode(callee_b, 2), output_b);
+}
+
+TEST_F(GuardedValueFlowTest, ExposesHighLevelQueryHelpersForClients) {
+  const char *source = R"(
+    define i32 @test(i32* %p, i32 %v) {
+    entry:
+      store i32 %v, i32* %p
+      %loaded = load i32, i32* %p
+      ret i32 %loaded
+    }
+  )";
+
+  auto module = parseModule(source);
+  ASSERT_NE(module, nullptr);
+
+  Function *F = module->getFunction("test");
+  ASSERT_NE(F, nullptr);
+
+  auto pipeline = runAdapter(*module);
+  ASSERT_TRUE(pipeline.builder->hasGraphFor(*F));
+  GuardedValueFlowGraph &graph = pipeline.builder->getGraph(*F);
+
+  LoadInst *load = nullptr;
+  StoreInst *store = nullptr;
+  for (Instruction &I : instructions(*F)) {
+    if (auto *LI = dyn_cast<LoadInst>(&I))
+      load = LI;
+    if (auto *SI = dyn_cast<StoreInst>(&I))
+      store = SI;
+  }
+  ASSERT_NE(load, nullptr);
+  ASSERT_NE(store, nullptr);
+
+  auto *load_node = graph.findNode(load);
+  ASSERT_NE(load_node, nullptr);
+
+  auto direct_dependencies = graph.getDirectDataDependencies(load_node);
+  ASSERT_EQ(direct_dependencies.size(), 1u);
+  EXPECT_EQ(direct_dependencies.front()->getKind(),
+            GuardedValueFlowNode::Kind::LoadMemory);
+
+  auto memory_producers = graph.getMemoryProducers(load_node);
+  ASSERT_EQ(memory_producers.size(), 1u);
+  EXPECT_EQ(memory_producers.front().producer_memory,
+            graph.findStoreMemoryNode(store->getValueOperand(), store));
+  ASSERT_NE(memory_producers.front().producer_value, nullptr);
+  EXPECT_EQ(memory_producers.front().producer_value, graph.findNode(F->getArg(1)));
+
+  auto control_dependencies = graph.getEffectiveControlDependencies(load_node);
+  EXPECT_TRUE(control_dependencies.empty());
 }
 
 TEST_F(GuardedValueFlowTest,

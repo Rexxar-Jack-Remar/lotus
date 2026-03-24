@@ -13,6 +13,7 @@ add_lotus_gsa_test_suite(ir_gsa_tests
 
 add_lotus_gvfg_test_suite(ir_gvfg_tests
   GuardedValueFlowTest.cpp
+  GuardedValueFlowSerializerTest.cpp
   GuardedValueFlowAdapterShapeTest.cpp
   GuardedValueFlowParityTest.cpp
   GuardedValueFlowSolverTest.cpp)

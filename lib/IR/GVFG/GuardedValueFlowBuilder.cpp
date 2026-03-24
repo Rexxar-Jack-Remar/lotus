@@ -18,6 +18,20 @@ using namespace lotus::gvfg;
 
 namespace {
 
+static void recordBuilderDiagnostic(GuardedValueFlowGraph &graph,
+                                    GuardedValueFlowGraph::Diagnostic::Severity severity,
+                                    const Twine &message,
+                                    Instruction *inst = nullptr,
+                                    BasicBlock *block = nullptr) {
+  GuardedValueFlowGraph::Diagnostic diagnostic;
+  diagnostic.origin = GuardedValueFlowGraph::Diagnostic::Origin::Builder;
+  diagnostic.severity = severity;
+  diagnostic.message = message.str();
+  diagnostic.instruction = inst;
+  diagnostic.block = block;
+  graph.addDiagnostic(std::move(diagnostic));
+}
+
 static BasicBlock *getValueBlock(Value *V, Function &F) {
   if (auto *I = dyn_cast<Instruction>(V))
     return I->getParent();
@@ -136,6 +150,23 @@ createOpcodeNode(GuardedValueFlowGraph &graph,
 }
 
 static GuardedValueFlowNode *
+findOrCreateSyntheticGuardNode(GuardedValueFlowGraph &graph, Instruction *inst,
+                               BasicBlock *successor, StringRef description) {
+  if (!inst || !successor)
+    return nullptr;
+  if (auto *existing = graph.findSyntheticGuardNode(inst, successor))
+    return existing;
+
+  auto *node = graph.createNode<GuardedValueFlowNode>(
+      GuardedValueFlowNode::Kind::SimpleOperand,
+      Type::getInt1Ty(inst->getContext()), &graph, inst->getParent(), nullptr,
+      inst);
+  node->setDescription(description.str());
+  graph.mapSyntheticGuardNode(inst, successor, node);
+  return node;
+}
+
+static GuardedValueFlowNode *
 findOrCreateValueNode(GuardedValueFlowGraph &graph, Value *V, Function &F);
 
 static GuardedValueFlowNode *
@@ -250,6 +281,11 @@ createBinaryWithIntConst(GuardedValueFlowGraph &graph,
 static GuardedValueFlowNode *modelConstantExpr(ConstantExpr *CE,
                                                GuardedValueFlowGraph &graph,
                                                Function &F, bool &failed);
+
+static GuardedValueFlowNode *
+findOrCreateSwitchCasePredicate(GuardedValueFlowGraph &graph, SwitchInst *SI,
+                                BasicBlock *successor, Function &F,
+                                bool &failed);
 
 static GuardedValueFlowNode *getOrCreateOperandRepresentation(
     GuardedValueFlowGraph &graph, Value *V, Function &F, bool &failed) {
@@ -435,12 +471,125 @@ static GuardedValueFlowNode *modelConstantExpr(ConstantExpr *CE,
     break;
   default:
     failed = true;
-    errs() << "[gvfg-builder] Unsupported constant expression in function "
-           << F.getName() << ": " << *CE << "\n";
+    recordBuilderDiagnostic(
+        graph, GuardedValueFlowGraph::Diagnostic::Severity::Warning,
+        Twine("Unsupported constant expression in function ") + F.getName() +
+            ": " + Twine(CE->getOpcodeName()),
+        dyn_cast<Instruction>(CE), getValueBlock(CE, F));
     break;
   }
 
   return result;
+}
+
+static GuardedValueFlowNode *
+createSwitchCaseCompare(GuardedValueFlowGraph &graph, SwitchInst *SI,
+                        ConstantInt *case_value, Function &F, bool &failed) {
+  auto *switch_value =
+      getOrCreateOperandRepresentation(graph, SI->getCondition(), F, failed);
+  auto *case_node = getOrCreateOperandRepresentation(graph, case_value, F, failed);
+  auto *opcode = createOpcodeNode(graph,
+                                  GuardedValueFlowOpcodeNode::OpcodeKind::ICmp,
+                                  Type::getInt1Ty(SI->getContext()),
+                                  SI->getParent(),
+                                  GuardedValueFlowNode::Kind::SimpleOpcode,
+                                  "switch.case.eq");
+  opcode->setCmpPredicate(CmpInst::ICMP_EQ);
+  opcode->addChild(switch_value);
+  opcode->addChild(case_node);
+
+  auto *result = graph.createNode<GuardedValueFlowNode>(
+      GuardedValueFlowNode::Kind::SimpleOperand,
+      Type::getInt1Ty(SI->getContext()), &graph, SI->getParent(), nullptr, SI);
+  result->setDescription("switch.case.guard");
+  result->addChild(opcode);
+  return result;
+}
+
+static GuardedValueFlowNode *
+findOrCreateSwitchCasePredicate(GuardedValueFlowGraph &graph, SwitchInst *SI,
+                                BasicBlock *successor, Function &F,
+                                bool &failed) {
+  if (!SI || !successor)
+    return nullptr;
+  if (auto *existing = graph.findSyntheticGuardNode(SI, successor))
+    return existing;
+
+  SmallVector<ConstantInt *, 4> matching_cases;
+  for (auto case_it = SI->case_begin(); case_it != SI->case_end(); ++case_it) {
+    if (case_it->getCaseSuccessor() == successor)
+      matching_cases.push_back(case_it->getCaseValue());
+  }
+
+  GuardedValueFlowNode *predicate = nullptr;
+  if (!matching_cases.empty()) {
+    for (ConstantInt *case_value : matching_cases) {
+      auto *case_guard = createSwitchCaseCompare(graph, SI, case_value, F, failed);
+      if (!predicate) {
+        predicate = case_guard;
+        continue;
+      }
+
+      auto *or_opcode = createOpcodeNode(
+          graph, GuardedValueFlowOpcodeNode::OpcodeKind::Or,
+          Type::getInt1Ty(SI->getContext()), SI->getParent(),
+          GuardedValueFlowNode::Kind::SimpleOpcode, "switch.case.or");
+      or_opcode->addChild(predicate);
+      or_opcode->addChild(case_guard);
+      auto *or_value = graph.createNode<GuardedValueFlowNode>(
+          GuardedValueFlowNode::Kind::SimpleOperand,
+          Type::getInt1Ty(SI->getContext()), &graph, SI->getParent(), nullptr,
+          SI);
+      or_value->setDescription("switch.case.guard");
+      or_value->addChild(or_opcode);
+      predicate = or_value;
+    }
+  } else if (SI->getDefaultDest() == successor) {
+    SmallVector<GuardedValueFlowNode *, 4> case_guards;
+    for (auto case_it = SI->case_begin(); case_it != SI->case_end(); ++case_it) {
+      case_guards.push_back(
+          createSwitchCaseCompare(graph, SI, case_it->getCaseValue(), F, failed));
+    }
+
+    if (case_guards.empty()) {
+      predicate = getOrCreateOperandRepresentation(
+          graph, ConstantInt::getTrue(SI->getContext()), F, failed);
+    } else {
+      GuardedValueFlowNode *covered = case_guards.front();
+      for (size_t idx = 1; idx < case_guards.size(); ++idx) {
+        auto *or_opcode = createOpcodeNode(
+            graph, GuardedValueFlowOpcodeNode::OpcodeKind::Or,
+            Type::getInt1Ty(SI->getContext()), SI->getParent(),
+            GuardedValueFlowNode::Kind::SimpleOpcode, "switch.default.covered");
+        or_opcode->addChild(covered);
+        or_opcode->addChild(case_guards[idx]);
+        auto *or_value = graph.createNode<GuardedValueFlowNode>(
+            GuardedValueFlowNode::Kind::SimpleOperand,
+            Type::getInt1Ty(SI->getContext()), &graph, SI->getParent(), nullptr,
+            SI);
+        or_value->setDescription("switch.default.covered");
+        or_value->addChild(or_opcode);
+        covered = or_value;
+      }
+
+      auto *not_opcode = createOpcodeNode(
+          graph, GuardedValueFlowOpcodeNode::OpcodeKind::Xor,
+          Type::getInt1Ty(SI->getContext()), SI->getParent(),
+          GuardedValueFlowNode::Kind::SimpleOpcode, "switch.default.not");
+      not_opcode->setIntConstant(-1);
+      not_opcode->addChild(covered);
+      predicate = graph.createNode<GuardedValueFlowNode>(
+          GuardedValueFlowNode::Kind::SimpleOperand,
+          Type::getInt1Ty(SI->getContext()), &graph, SI->getParent(), nullptr,
+          SI);
+      predicate->setDescription("switch.default.guard");
+      predicate->addChild(not_opcode);
+    }
+  }
+
+  if (predicate)
+    graph.mapSyntheticGuardNode(SI, successor, predicate);
+  return predicate;
 }
 
 template <typename GEPValueT>
@@ -450,8 +599,10 @@ static GuardedValueFlowNode *modelGEPOperator(GEPValueT *GEP, BasicBlock *block,
                                               GuardedValueFlowGEPReferenceSite *gep_site) {
   if (GEP->getType()->isVectorTy()) {
     failed = true;
-    errs() << "[gvfg-builder] Unsupported vector GEP in function " << F.getName()
-           << ": " << *GEP << "\n";
+    recordBuilderDiagnostic(
+        graph, GuardedValueFlowGraph::Diagnostic::Severity::Warning,
+        Twine("Unsupported vector GEP in function ") + F.getName(),
+        dyn_cast<Instruction>(GEP), block);
     return nullptr;
   }
 
@@ -603,12 +754,15 @@ static GuardedValueFlowNode *modelGEPOperator(GEPValueT *GEP, BasicBlock *block,
 }
 
 static bool computeGuardForControlledBlock(gsa::ControlDependenceAnalysis &cda,
-                                          Instruction *term, BasicBlock *target,
-                                          ConditionRef &cond,
-                                          Value *&cond_value, bool &sense,
-                                          BasicBlock *&guard_successor) {
+                                          GuardedValueFlowGraph &graph,
+                                          Function &F, Instruction *term,
+                                          BasicBlock *target, ConditionRef &cond,
+                                          GuardedValueFlowNode *&cond_node,
+                                          bool &sense,
+                                          BasicBlock *&guard_successor,
+                                          bool &failed) {
   cond = ConditionRef::none();
-  cond_value = nullptr;
+  cond_node = nullptr;
   sense = true;
   guard_successor = nullptr;
   if (!term || !target)
@@ -627,10 +781,40 @@ static bool computeGuardForControlledBlock(gsa::ControlDependenceAnalysis &cda,
       return false;
     sense = succ0_reaches;
     guard_successor = sense ? succ0 : succ1;
-    cond_value = br->getCondition();
+    cond_node = getOrCreateOperandRepresentation(graph, br->getCondition(), F,
+                                                 failed);
     cond = ConditionRef::fromGuard(
         sense ? gsa::GuardKind::BranchTrue : gsa::GuardKind::BranchFalse,
         br->getParent(), guard_successor, br->getCondition());
+    return true;
+  }
+
+  if (auto *si = dyn_cast<SwitchInst>(term)) {
+    SmallVector<BasicBlock *, 4> reaching_successors;
+    for (unsigned idx = 0; idx < si->getNumSuccessors(); ++idx) {
+      BasicBlock *succ = si->getSuccessor(idx);
+      if (succ == target || cda.isReachable(succ, target))
+        reaching_successors.push_back(succ);
+    }
+    if (reaching_successors.size() != 1)
+      return false;
+
+    guard_successor = reaching_successors.front();
+    cond_node = findOrCreateSwitchCasePredicate(graph, si, guard_successor, F,
+                                                failed);
+    if (!cond_node)
+      return false;
+
+    ConstantInt *case_value = nullptr;
+    for (auto case_it = si->case_begin(); case_it != si->case_end(); ++case_it) {
+      if (case_it->getCaseSuccessor() == guard_successor) {
+        case_value = case_it->getCaseValue();
+        break;
+      }
+    }
+    cond = ConditionRef::fromGuard(
+        case_value ? gsa::GuardKind::SwitchCase : gsa::GuardKind::SwitchDefault,
+        si->getParent(), guard_successor, si->getCondition(), case_value);
     return true;
   }
 
@@ -654,16 +838,15 @@ static void collectBlockConditions(GuardedValueFlowGraph &graph, Function &F,
   for (BasicBlock *BB : blocks) {
     for (BasicBlock *dep : cda.getCDBlocks(BB)) {
       ConditionRef cond;
-      Value *cond_value = nullptr;
+      GuardedValueFlowNode *cond_node = nullptr;
       bool sense = true;
       BasicBlock *guard_successor = nullptr;
-      if (!computeGuardForControlledBlock(cda, dep ? dep->getTerminator() : nullptr,
-                                          BB, cond, cond_value, sense,
-                                          guard_successor)) {
+      if (!computeGuardForControlledBlock(cda, graph, F,
+                                          dep ? dep->getTerminator() : nullptr,
+                                          BB, cond, cond_node, sense,
+                                          guard_successor, failed)) {
         continue;
       }
-
-      auto *cond_node = getOrCreateOperandRepresentation(graph, cond_value, F, failed);
       graph.addBlockCondition(BB, {cond_node, dep, guard_successor, cond, sense});
     }
   }
@@ -758,6 +941,32 @@ static bool modelIntrinsicCall(CallBase &call, GuardedValueFlowGraph &graph,
   }
 }
 
+static GuardedValueFlowNode *
+findOrCreateUnknownInstructionNode(GuardedValueFlowGraph &graph, Instruction &I,
+                                   StringRef description) {
+  if (I.getType()->isVoidTy())
+    return nullptr;
+  if (auto *existing = graph.findNode(&I))
+    return existing;
+
+  auto *node = graph.createNode<GuardedValueFlowNode>(
+      GuardedValueFlowNode::Kind::Unknown, I.getType(), &graph, I.getParent(), &I,
+      &I);
+  node->setDescription(description.str());
+  graph.mapValueNode(&I, node);
+  return node;
+}
+
+static void recordUnsupportedInstruction(GuardedValueFlowGraph &graph,
+                                         Function &F, Instruction &I,
+                                         StringRef detail) {
+  recordBuilderDiagnostic(
+      graph, GuardedValueFlowGraph::Diagnostic::Severity::Warning,
+      Twine("Partially modeled instruction in function ") + F.getName() + ": " +
+          detail,
+      &I, I.getParent());
+}
+
 static bool buildInstruction(GuardedValueFlowGraph &graph, Instruction &I,
                              Function &F, bool &failed) {
   auto *block = I.getParent();
@@ -767,9 +976,8 @@ static bool buildInstruction(GuardedValueFlowGraph &graph, Instruction &I,
     auto *br = dyn_cast<BranchInst>(&I);
     if (!br) {
       failed = true;
-      errs() << "[gvfg-builder] Expected branch instruction in function "
-             << F.getName() << ": " << I << "\n";
-      return false;
+      recordUnsupportedInstruction(graph, F, I, "invalid branch");
+      return true;
     }
     if (br->isConditional()) {
       auto *cond_node = getOrCreateOperandRepresentation(graph, br->getCondition(),
@@ -810,8 +1018,41 @@ static bool buildInstruction(GuardedValueFlowGraph &graph, Instruction &I,
   }
   case Instruction::Unreachable:
     return true;
-  case Instruction::Switch:
-  case Instruction::Invoke:
+  case Instruction::Switch: {
+    auto *si = dyn_cast<SwitchInst>(&I);
+    if (!si) {
+      failed = true;
+      recordUnsupportedInstruction(graph, F, I, "invalid switch");
+      return true;
+    }
+    for (unsigned idx = 0; idx < si->getNumSuccessors(); ++idx)
+      (void)findOrCreateSwitchCasePredicate(graph, si, si->getSuccessor(idx), F,
+                                            failed);
+    return true;
+  }
+  case Instruction::Invoke: {
+    auto *invoke = dyn_cast<InvokeInst>(&I);
+    if (!invoke) {
+      failed = true;
+      recordUnsupportedInstruction(graph, F, I, "invalid invoke");
+      return true;
+    }
+    auto *site = graph.findCallSite(invoke);
+    if (!site) {
+      site = graph.createSite<GuardedValueFlowCallSite>(&graph, invoke);
+      graph.mapCallSite(invoke, site);
+    }
+    if (Function *callee = invoke->getCalledFunction())
+      site->addCallee(callee);
+    if (!invoke->getType()->isVoidTy())
+      (void)findOrCreateCallOutputNode(graph, *invoke, F);
+    for (Value *arg : invoke->args())
+      site->addCommonInput(getOrCreateOperandRepresentation(graph, arg, F, failed));
+    recordUnsupportedInstruction(
+        graph, F, I,
+        "invoke control effects are degraded to a callsite-only model");
+    return true;
+  }
   case Instruction::LandingPad:
   case Instruction::Resume:
   case Instruction::IndirectBr:
@@ -820,11 +1061,32 @@ static bool buildInstruction(GuardedValueFlowGraph &graph, Instruction &I,
   case Instruction::ShuffleVector:
   case Instruction::AtomicRMW:
   case Instruction::AtomicCmpXchg:
-  case Instruction::Fence:
+  case Instruction::Fence: {
     failed = true;
-    errs() << "[gvfg-builder] Unsupported instruction in function " << F.getName()
-           << ": " << I << "\n";
-    return false;
+    (void)findOrCreateUnknownInstructionNode(
+        graph, I, (Twine("unsupported.") + I.getOpcodeName()).str());
+    (void)graph.createSite<GuardedValueFlowSite>(
+        GuardedValueFlowSite::Kind::Unknown, &graph, &I);
+    recordUnsupportedInstruction(
+        graph, F, I,
+        (Twine("unsupported opcode lowered to unknown: ") + I.getOpcodeName())
+            .str());
+    return true;
+  }
+  case Instruction::FNeg: {
+    auto *result = findOrCreateValueNode(graph, &I, F);
+    auto *operand =
+        getOrCreateOperandRepresentation(graph, I.getOperand(0), F, failed);
+    auto *zero = getOrCreateOperandRepresentation(
+        graph, ConstantFP::get(I.getType(), 0.0), F, failed);
+    auto *opcode = createOpcodeNode(
+        graph, GuardedValueFlowOpcodeNode::OpcodeKind::FSub, I.getType(), block,
+        GuardedValueFlowNode::Kind::SimpleOpcode, "fneg");
+    opcode->addChild(zero);
+    opcode->addChild(operand);
+    result->addChild(opcode);
+    return true;
+  }
   case Instruction::URem:
   case Instruction::FRem:
   case Instruction::SRem:
@@ -955,13 +1217,16 @@ static bool buildInstruction(GuardedValueFlowGraph &graph, Instruction &I,
     auto *gep_inst = dyn_cast<GetElementPtrInst>(&I);
     if (!gep_inst) {
       failed = true;
-      errs() << "[gvfg-builder] Expected GEP instruction in function "
-             << F.getName() << ": " << I << "\n";
-      return false;
+      recordUnsupportedInstruction(graph, F, I, "invalid GEP");
+      return true;
     }
     auto *opcode = modelGEPOperator(gep_inst, block, graph, F, failed, site);
-    if (!opcode)
-      return false;
+    if (!opcode) {
+      recordUnsupportedInstruction(
+          graph, F, I, "GEP degraded to an unknown value representation");
+      (void)findOrCreateUnknownInstructionNode(graph, I, "gep.unknown");
+      return true;
+    }
     result->addChild(opcode);
     result->addUseSite(site);
     site->setResultNode(result);
@@ -988,9 +1253,8 @@ static bool buildInstruction(GuardedValueFlowGraph &graph, Instruction &I,
     auto *cmp = dyn_cast<CmpInst>(&I);
     if (!cmp) {
       failed = true;
-      errs() << "[gvfg-builder] Expected compare instruction in function "
-             << F.getName() << ": " << I << "\n";
-      return false;
+      recordUnsupportedInstruction(graph, F, I, "invalid compare");
+      return true;
     }
     opcode->setCmpPredicate(cmp->getPredicate());
     opcode->addChild(lhs);
@@ -1010,9 +1274,8 @@ static bool buildInstruction(GuardedValueFlowGraph &graph, Instruction &I,
     auto *phi = dyn_cast<PHINode>(&I);
     if (!phi_node || !phi) {
       failed = true;
-      errs() << "[gvfg-builder] Expected phi instruction in function "
-             << F.getName() << ": " << I << "\n";
-      return false;
+      recordUnsupportedInstruction(graph, F, I, "invalid phi");
+      return true;
     }
     for (unsigned idx = 0; idx < phi->getNumIncomingValues(); ++idx) {
       auto *incoming_value =
@@ -1020,7 +1283,6 @@ static bool buildInstruction(GuardedValueFlowGraph &graph, Instruction &I,
                                            failed);
       BasicBlock *incoming_bb = phi->getIncomingBlock(idx);
       ConditionRef cond = ConditionRef::none();
-      Value *cond_value = nullptr;
       bool sense = true;
       GuardedValueFlowNode *cond_node = nullptr;
       if (auto *br = dyn_cast<BranchInst>(incoming_bb->getTerminator())) {
@@ -1031,16 +1293,40 @@ static bool buildInstruction(GuardedValueFlowGraph &graph, Instruction &I,
             sense = succ0_reaches;
             BasicBlock *guard_successor =
                 sense ? br->getSuccessor(0) : br->getSuccessor(1);
-            cond_value = br->getCondition();
+            cond_node = getOrCreateOperandRepresentation(graph, br->getCondition(),
+                                                         F, failed);
             cond = ConditionRef::fromGuard(
                 sense ? gsa::GuardKind::BranchTrue
                       : gsa::GuardKind::BranchFalse,
                 incoming_bb, guard_successor, br->getCondition());
           }
         }
+      } else if (auto *si = dyn_cast<SwitchInst>(incoming_bb->getTerminator())) {
+        BasicBlock *guard_successor = nullptr;
+        for (unsigned succ_idx = 0; succ_idx < si->getNumSuccessors(); ++succ_idx) {
+          BasicBlock *succ = si->getSuccessor(succ_idx);
+          if (succ == block) {
+            guard_successor = succ;
+            break;
+          }
+        }
+        if (guard_successor) {
+          cond_node = findOrCreateSwitchCasePredicate(graph, si, guard_successor, F,
+                                                      failed);
+          ConstantInt *case_value = nullptr;
+          for (auto case_it = si->case_begin(); case_it != si->case_end();
+               ++case_it) {
+            if (case_it->getCaseSuccessor() == guard_successor) {
+              case_value = case_it->getCaseValue();
+              break;
+            }
+          }
+          cond = ConditionRef::fromGuard(
+              case_value ? gsa::GuardKind::SwitchCase
+                         : gsa::GuardKind::SwitchDefault,
+              incoming_bb, guard_successor, si->getCondition(), case_value);
+        }
       }
-      if (cond_value)
-        cond_node = getOrCreateOperandRepresentation(graph, cond_value, F, failed);
       // PHI incoming metadata keeps the immediate edge-local guard in addition
       // to the enclosing block region, which is what downstream path-sensitive
       // users need for precise merge semantics.
@@ -1052,12 +1338,11 @@ static bool buildInstruction(GuardedValueFlowGraph &graph, Instruction &I,
     auto *call = dyn_cast<CallBase>(&I);
     if (!call) {
       failed = true;
-      errs() << "[gvfg-builder] Expected call instruction in function "
-             << F.getName() << ": " << I << "\n";
-      return false;
+      recordUnsupportedInstruction(graph, F, I, "invalid call");
+      return true;
     }
     if (modelIntrinsicCall(*call, graph, F, failed))
-      return !failed;
+      return true;
 
     auto *site = graph.findCallSite(call);
     if (!site) {
@@ -1096,9 +1381,13 @@ static bool buildInstruction(GuardedValueFlowGraph &graph, Instruction &I,
   }
   default:
     failed = true;
-    errs() << "[gvfg-builder] Unsupported instruction in function " << F.getName()
-           << ": " << I << "\n";
-    return false;
+    (void)findOrCreateUnknownInstructionNode(
+        graph, I, (Twine("unsupported.") + I.getOpcodeName()).str());
+    recordUnsupportedInstruction(
+        graph, F, I,
+        (Twine("unsupported opcode lowered to unknown: ") + I.getOpcodeName())
+            .str());
+    return true;
   }
 }
 
@@ -1153,7 +1442,6 @@ GuardedValueFlowGraphBuilderPass::buildGraph(Function &F) {
   auto graph = std::make_unique<GuardedValueFlowGraph>(&F);
   auto &cda =
       getAnalysis<gsa::ControlDependenceAnalysisPass>().getControlDependenceAnalysis(F);
-  bool failed = false;
 
   unsigned common_arg_index = 0;
   for (Argument &arg : F.args()) {
@@ -1172,22 +1460,16 @@ GuardedValueFlowGraphBuilderPass::buildGraph(Function &F) {
 
   // Regions are built before instructions so nodes created during instruction
   // modeling inherit their block-level path condition immediately.
-  buildRegions(*graph, F, cda, failed);
-  if (failed)
-    return nullptr;
+  bool region_degraded = false;
+  buildRegions(*graph, F, cda, region_degraded);
   graph->refreshNodeRegions();
 
   for (BasicBlock &BB : F) {
     for (Instruction &I : BB) {
-      if (!buildInstruction(*graph, I, F, failed))
-        break;
+      bool instruction_degraded = false;
+      (void)buildInstruction(*graph, I, F, instruction_degraded);
     }
-    if (failed)
-      break;
   }
-
-  if (failed)
-    return nullptr;
 
   graph->refreshNodeRegions();
 

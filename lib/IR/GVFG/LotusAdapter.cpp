@@ -1265,9 +1265,13 @@ bool LotusGuardedValueFlowAdapterPass::adaptFunction(
     GuardedValueFlowGraph &graph, IntraLotusAA &pta, LotusAA &lotus,
     GuardedValueFlowGraphBuilderPass &builder) {
   auto fail = [&](const std::string &reason) {
-    errs() << "[gvfg-adapter] Failed to adapt function "
+    errs() << "[gvfg-adapter] Partially adapted function "
            << graph.getBaseFunction()->getName() << ": " << reason << "\n";
-    builder.invalidateGraph(*graph.getBaseFunction());
+    GuardedValueFlowGraph::Diagnostic diagnostic;
+    diagnostic.origin = GuardedValueFlowGraph::Diagnostic::Origin::Adapter;
+    diagnostic.severity = GuardedValueFlowGraph::Diagnostic::Severity::Warning;
+    diagnostic.message = reason;
+    graph.addDiagnostic(std::move(diagnostic));
     return false;
   };
 

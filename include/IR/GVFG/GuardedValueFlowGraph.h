@@ -34,6 +34,25 @@ using llvm::path_cond_t;
 // structure after the structural builder and optional LotusAA adapter have run.
 class GuardedValueFlowGraph {
 public:
+  struct Diagnostic {
+    enum class Origin {
+      Builder,
+      Adapter,
+    };
+
+    enum class Severity {
+      Note,
+      Warning,
+      Error,
+    };
+
+    Origin origin{Origin::Builder};
+    Severity severity{Severity::Warning};
+    std::string message;
+    Instruction *instruction{nullptr};
+    BasicBlock *block{nullptr};
+  };
+
   struct BlockCondition {
     // `control_block` contributes a guard to `block`; `guard_successor` names
     // the successor that makes `sense` true for `condition_node`.
@@ -77,6 +96,10 @@ public:
 
   GuardedValueFlowCallSite *findCallSite(Instruction *inst) const;
   void mapCallSite(Instruction *inst, GuardedValueFlowCallSite *site);
+  GuardedValueFlowNode *findSyntheticGuardNode(Instruction *inst,
+                                               BasicBlock *successor) const;
+  void mapSyntheticGuardNode(Instruction *inst, BasicBlock *successor,
+                             GuardedValueFlowNode *node);
 
   GuardedValueFlowRegionNode *findRegion(BasicBlock *block) const;
   void mapRegion(BasicBlock *block, GuardedValueFlowRegionNode *node);
@@ -147,6 +170,37 @@ public:
   ArrayRef<GuardedValueFlowNode *> getSummaryReturnNodes(unsigned ap_depth) const;
   void refreshNodeRegions();
 
+  void addDiagnostic(Diagnostic diagnostic);
+  ArrayRef<Diagnostic> diagnostics() const { return diagnostics_; }
+  bool hasDiagnostics() const { return !diagnostics_.empty(); }
+  bool isDegraded() const;
+
+  struct MemoryProducer {
+    GuardedValueFlowNode *producer_memory{nullptr};
+    GuardedValueFlowNode *producer_value{nullptr};
+    GuardedValueFlowRegionNode *region{nullptr};
+    ConditionRef condition;
+    float confidence{1.0f};
+    bool is_summary{false};
+    bool is_unknown{false};
+  };
+
+  struct CallTargetInfo {
+    Function *callee{nullptr};
+    ConditionRef condition;
+    GuardedValueFlowRegionNode *region{nullptr};
+    bool is_back_edge{false};
+  };
+
+  std::vector<GuardedValueFlowNode *>
+  getDirectDataDependencies(const GuardedValueFlowNode *node) const;
+  std::vector<BlockCondition>
+  getEffectiveControlDependencies(const GuardedValueFlowNode *node) const;
+  std::vector<MemoryProducer>
+  getMemoryProducers(const GuardedValueFlowNode *node) const;
+  std::vector<CallTargetInfo>
+  getResolvedCallTargets(const GuardedValueFlowCallSite *site) const;
+
   ArrayRef<std::unique_ptr<GuardedValueFlowNode>> nodes() const { return nodes_; }
   ArrayRef<std::unique_ptr<GuardedValueFlowSite>> sites() const { return sites_; }
 
@@ -174,6 +228,13 @@ private:
     }
   };
 
+  struct InstBlockPairLess {
+    bool operator()(const std::pair<Instruction *, BasicBlock *> &lhs,
+                    const std::pair<Instruction *, BasicBlock *> &rhs) const {
+      return lhs < rhs;
+    }
+  };
+
   Function *base_function_;
   unsigned next_node_id_{0};
   std::vector<std::unique_ptr<GuardedValueFlowNode>> nodes_;
@@ -183,6 +244,9 @@ private:
   DenseMap<Value *, GuardedValueFlowNode *> pseudo_argument_sources_;
   DenseMap<Instruction *, GuardedValueFlowCallSite *> call_sites_;
   DenseMap<Instruction *, GuardedValueFlowReturnSite *> return_sites_;
+  std::map<std::pair<Instruction *, BasicBlock *>, GuardedValueFlowNode *,
+           InstBlockPairLess>
+      synthetic_guard_nodes_;
   DenseMap<BasicBlock *, GuardedValueFlowRegionNode *> regions_;
   DenseMap<Instruction *, GuardedValueFlowNode *> load_memory_nodes_;
   DenseMap<BasicBlock *, std::vector<BlockCondition>> block_conditions_;
@@ -212,6 +276,7 @@ private:
   GuardedValueFlowRegionNode *always_true_region_{nullptr};
   GuardedValueFlowRegionNode *always_false_region_{nullptr};
   std::vector<Value *> owned_synthetic_values_;
+  std::vector<Diagnostic> diagnostics_;
 
   void assignNodeRegion(GuardedValueFlowNode *node);
 };

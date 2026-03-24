@@ -764,7 +764,8 @@ TEST_F(GuardedValueFlowParityTest,
             1);
 }
 
-TEST_F(GuardedValueFlowParityTest, RejectsUnsupportedSwitchFunctions) {
+TEST_F(GuardedValueFlowParityTest,
+       BuildsSwitchFunctionsWithDiagnosticsAndStructuredGuards) {
   const char *source = R"(
     define i32 @test(i32 %x) {
     entry:
@@ -783,10 +784,31 @@ TEST_F(GuardedValueFlowParityTest, RejectsUnsupportedSwitchFunctions) {
   ASSERT_NE(F, nullptr);
 
   auto pipeline = runBuilder(*module);
-  EXPECT_FALSE(pipeline.builder->hasGraphFor(*F));
+  ASSERT_TRUE(pipeline.builder->hasGraphFor(*F));
+  GuardedValueFlowGraph &graph = pipeline.builder->getGraph(*F);
+
+  BasicBlock *one_bb = nullptr;
+  BasicBlock *default_bb = nullptr;
+  for (BasicBlock &BB : *F) {
+    if (BB.getName() == "one")
+      one_bb = &BB;
+    if (BB.getName() == "default")
+      default_bb = &BB;
+  }
+  ASSERT_NE(one_bb, nullptr);
+  ASSERT_NE(default_bb, nullptr);
+
+  auto *switch_inst = cast<SwitchInst>(F->getEntryBlock().getTerminator());
+  auto *case_guard = graph.findSyntheticGuardNode(switch_inst, one_bb);
+  auto *default_guard = graph.findSyntheticGuardNode(switch_inst, default_bb);
+  ASSERT_NE(case_guard, nullptr);
+  ASSERT_NE(default_guard, nullptr);
+  EXPECT_FALSE(graph.getBlockConditions(one_bb).empty());
+  EXPECT_FALSE(graph.getBlockConditions(default_bb).empty());
+  EXPECT_TRUE(graph.diagnostics().empty());
 }
 
-TEST_F(GuardedValueFlowParityTest, RejectsUnsupportedFNegFunctions) {
+TEST_F(GuardedValueFlowParityTest, ModelsFNegWithoutDroppingTheGraph) {
   const char *source = R"(
     define float @test(float %x) {
     entry:
@@ -802,7 +824,62 @@ TEST_F(GuardedValueFlowParityTest, RejectsUnsupportedFNegFunctions) {
   ASSERT_NE(F, nullptr);
 
   auto pipeline = runBuilder(*module);
-  EXPECT_FALSE(pipeline.builder->hasGraphFor(*F));
+  ASSERT_TRUE(pipeline.builder->hasGraphFor(*F));
+  GuardedValueFlowGraph &graph = pipeline.builder->getGraph(*F);
+
+  Instruction *fneg_inst = nullptr;
+  for (Instruction &I : instructions(*F)) {
+    if (I.getOpcode() == Instruction::FNeg) {
+      fneg_inst = &I;
+      break;
+    }
+  }
+  ASSERT_NE(fneg_inst, nullptr);
+
+  auto *neg_node = graph.findNode(fneg_inst);
+  ASSERT_NE(neg_node, nullptr);
+  ASSERT_EQ(neg_node->children().size(), 1u);
+  auto *opcode =
+      dyn_cast<GuardedValueFlowOpcodeNode>(neg_node->children().front().target);
+  ASSERT_NE(opcode, nullptr);
+  EXPECT_EQ(opcode->getOpcodeKind(),
+            GuardedValueFlowOpcodeNode::OpcodeKind::FSub);
+  EXPECT_TRUE(graph.diagnostics().empty());
+}
+
+TEST_F(GuardedValueFlowParityTest,
+       KeepsGraphsForUnsupportedInstructionsUsingUnknownNodesAndDiagnostics) {
+  const char *source = R"(
+    define i32 @test({i32, i32} %pair) {
+    entry:
+      %field = extractvalue {i32, i32} %pair, 0
+      ret i32 %field
+    }
+  )";
+
+  auto module = parseModule(source);
+  ASSERT_NE(module, nullptr);
+
+  Function *F = module->getFunction("test");
+  ASSERT_NE(F, nullptr);
+
+  auto pipeline = runBuilder(*module);
+  ASSERT_TRUE(pipeline.builder->hasGraphFor(*F));
+  GuardedValueFlowGraph &graph = pipeline.builder->getGraph(*F);
+
+  Instruction *extract_inst = nullptr;
+  for (Instruction &I : instructions(*F)) {
+    if (I.getOpcode() == Instruction::ExtractValue) {
+      extract_inst = &I;
+      break;
+    }
+  }
+  ASSERT_NE(extract_inst, nullptr);
+
+  auto *field_node = graph.findNode(extract_inst);
+  ASSERT_NE(field_node, nullptr);
+  EXPECT_EQ(field_node->getKind(), GuardedValueFlowNode::Kind::Unknown);
+  EXPECT_TRUE(graph.hasDiagnostics());
 }
 
 } // namespace

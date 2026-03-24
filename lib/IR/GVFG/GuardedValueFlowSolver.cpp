@@ -46,6 +46,7 @@ static bool isResultLikeNode(const GuardedValueFlowNode *node) {
          isa<GuardedValueFlowCallOutputNode>(node) ||
          isa<GuardedValueFlowCallSummaryNode>(node) ||
          node->getKind() == GuardedValueFlowNode::Kind::SimpleOperand ||
+         node->getKind() == GuardedValueFlowNode::Kind::Unknown ||
          node->getKind() == GuardedValueFlowNode::Kind::UndefValue ||
          node->getKind() == GuardedValueFlowNode::Kind::LoadMemory ||
          node->getKind() == GuardedValueFlowNode::Kind::StoreMemory ||

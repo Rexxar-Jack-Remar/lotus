@@ -884,64 +884,44 @@ void LockSetAnalysis::computeIntraproceduralLockSets(Function *func) {
             auto it_mw = m_may_write_locks_exit.find(pred_term);
             auto it_ur = m_must_read_locks_exit.find(pred_term);
             auto it_uw = m_must_write_locks_exit.find(pred_term);
-            // Use exit sets when available; otherwise treat as empty and ensure
-            // predecessor is processed first so we re-visit this block with
-            // full data.
-            if (it_may == m_may_locksets_exit.end() &&
-                in_worklist.find(pred_term) == in_worklist.end()) {
-              worklist.push(pred_term);
-              in_worklist.insert(pred_term);
+
+            if (it_may != m_may_locksets_exit.end()) {
+              may_inputs.push_back(it_may->second);
+              must_inputs.push_back(it_must != m_must_locksets_exit.end() ? it_must->second : all_locks_in_function);
+              may_read_inputs.push_back(it_mr != m_may_read_locks_exit.end() ? it_mr->second : LockSet());
+              may_write_inputs.push_back(it_mw != m_may_write_locks_exit.end() ? it_mw->second : LockSet());
+              must_read_inputs.push_back(it_ur != m_must_read_locks_exit.end() ? it_ur->second : all_locks_in_function);
+              must_write_inputs.push_back(it_uw != m_must_write_locks_exit.end() ? it_uw->second : all_locks_in_function);
+            } else {
+              // Predecessor not yet processed. For must-analysis, we must be conservative.
+              // If we haven't visited the predecessor, we can't assume any locks are held.
+              // However, intersection with "all locks" is the neutral element.
+              must_inputs.push_back(all_locks_in_function);
+              must_read_inputs.push_back(all_locks_in_function);
+              must_write_inputs.push_back(all_locks_in_function);
             }
-            may_inputs.push_back(it_may != m_may_locksets_exit.end()
-                                     ? it_may->second
-                                     : LockSet());
-            must_inputs.push_back(it_must != m_must_locksets_exit.end()
-                                      ? it_must->second
-                                      : all_locks_in_function);
-            may_read_inputs.push_back(it_mr != m_may_read_locks_exit.end()
-                                          ? it_mr->second
-                                          : LockSet());
-            may_write_inputs.push_back(it_mw != m_may_write_locks_exit.end()
-                                           ? it_mw->second
-                                           : LockSet());
-            must_read_inputs.push_back(it_ur != m_must_read_locks_exit.end()
-                                           ? it_ur->second
-                                           : all_locks_in_function);
-            must_write_inputs.push_back(it_uw != m_must_write_locks_exit.end()
-                                            ? it_uw->second
-                                            : all_locks_in_function);
           }
         }
       } else {
         const Instruction *prev = inst->getPrevNode();
-        auto it_may =
-            prev ? m_may_locksets_exit.find(prev) : m_may_locksets_exit.end();
-        auto it_must =
-            prev ? m_must_locksets_exit.find(prev) : m_must_locksets_exit.end();
-        auto it_mr = prev ? m_may_read_locks_exit.find(prev)
-                          : m_may_read_locks_exit.end();
-        auto it_mw = prev ? m_may_write_locks_exit.find(prev)
-                          : m_may_write_locks_exit.end();
-        auto it_ur = prev ? m_must_read_locks_exit.find(prev)
-                          : m_must_read_locks_exit.end();
-        auto it_uw = prev ? m_must_write_locks_exit.find(prev)
-                          : m_must_write_locks_exit.end();
-        may_inputs.push_back(
-            it_may != m_may_locksets_exit.end() ? it_may->second : LockSet());
-        must_inputs.push_back(it_must != m_must_locksets_exit.end()
-                                  ? it_must->second
-                                  : LockSet());
-        may_read_inputs.push_back(
-            it_mr != m_may_read_locks_exit.end() ? it_mr->second : LockSet());
-        may_write_inputs.push_back(
-            it_mw != m_may_write_locks_exit.end() ? it_mw->second : LockSet());
-        must_read_inputs.push_back(
-            it_ur != m_must_read_locks_exit.end() ? it_ur->second : LockSet());
-        must_write_inputs.push_back(
-            it_uw != m_must_write_locks_exit.end() ? it_uw->second : LockSet());
+        if (prev) {
+          auto it_may = m_may_locksets_exit.find(prev);
+          if (it_may != m_may_locksets_exit.end()) {
+            may_inputs.push_back(it_may->second);
+            auto it_must = m_must_locksets_exit.find(prev);
+            must_inputs.push_back(it_must != m_must_locksets_exit.end() ? it_must->second : all_locks_in_function);
+            auto it_mr = m_may_read_locks_exit.find(prev);
+            may_read_inputs.push_back(it_mr != m_may_read_locks_exit.end() ? it_mr->second : LockSet());
+            auto it_mw = m_may_write_locks_exit.find(prev);
+            may_write_inputs.push_back(it_mw != m_may_write_locks_exit.end() ? it_mw->second : LockSet());
+            auto it_ur = m_must_read_locks_exit.find(prev);
+            must_read_inputs.push_back(it_ur != m_must_read_locks_exit.end() ? it_ur->second : all_locks_in_function);
+            auto it_uw = m_must_write_locks_exit.find(prev);
+            must_write_inputs.push_back(it_uw != m_must_write_locks_exit.end() ? it_uw->second : all_locks_in_function);
+          }
+        }
       }
     }
-
     LockSet may_read_in =
         may_read_inputs.empty() ? LockSet() : merge(may_read_inputs, false);
     LockSet may_write_in =

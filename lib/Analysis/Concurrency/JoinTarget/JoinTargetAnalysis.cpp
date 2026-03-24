@@ -357,13 +357,19 @@ void JoinTargetAnalysis::analyze() {
     if (classifyJoinForks(feasible_forks) == CandidateCountKind::One &&
         joinRoots.size() == 1 &&
         classifyJoinForks(feasible_exact_matches) == CandidateCountKind::One) {
-      feasible_forks = std::move(feasible_exact_matches);
-      m_unambiguousJoins.insert(joinInst);
+      const Instruction *targetFork = feasible_exact_matches.front();
+      if (m_threadMultiplicity && !m_threadMultiplicity->instructionMayExecuteMultipleTimes(targetFork)) {
+        feasible_forks = std::move(feasible_exact_matches);
+        m_unambiguousJoins.insert(joinInst);
+      }
     } else if (classifyJoinForks(feasible_forks) == CandidateCountKind::One &&
                classifyJoinForks(feasible_definite_matches) ==
                CandidateCountKind::One) {
-      feasible_forks = std::move(feasible_definite_matches);
-      m_unambiguousJoins.insert(joinInst);
+      const Instruction *targetFork = feasible_definite_matches.front();
+      if (m_threadMultiplicity && !m_threadMultiplicity->instructionMayExecuteMultipleTimes(targetFork)) {
+        feasible_forks = std::move(feasible_definite_matches);
+        m_unambiguousJoins.insert(joinInst);
+      }
     }
 
     m_joinToForks[joinInst] = std::move(forks);

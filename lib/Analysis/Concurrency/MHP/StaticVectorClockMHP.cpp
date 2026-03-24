@@ -1449,17 +1449,14 @@ void StaticVectorClockMHP::handleBarrier(const Instruction *barrier_inst,
 void StaticVectorClockMHP::wireSynchronizationEdges() {
   if (!m_tfg)
     return;
-  // Do not synthesize definite condition-variable HB edges here. Without
-  // waiter queue / phase analysis, connecting a signal to all waits can hide
-  // real races by ordering waits that are resumed by a different signal or
-  // that start waiting later.
-  // B12 fix: barrier semantics require that every arrival HB every other
-  // arrival, but adding edges in BOTH directions between the same pair
-  // creates a cycle in the HB graph (n_i HB n_j AND n_j HB n_i).
-  // Fix: only add the edge i→j for i < j (one direction per pair).
-  // The SVC transfer function treats Barrier edges with SVMax, so a single
-  // directed edge per pair is sufficient to enforce the all-before-all
-  // barrier semantics without introducing cycles.
+
+  errs() << "Wiring synchronization edges for SVC-MHP...\n";
+  // Barrier edges are added in handleBarrier only when the phase is complete.
+  // Rewiring all recorded participants here would over-order incomplete phases.
+  //
+  // Condition variable and atomic synchronization stay in HappensBeforeAnalysis.
+  // Adding unconditional TFG edges here would be stronger than the witness-
+  // based HB model and can suppress real MHP/race candidates.
 }
 
 std::vector<SyncNode *> StaticVectorClockMHP::getBarrierContinuations(

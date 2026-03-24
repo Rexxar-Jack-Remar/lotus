@@ -1424,6 +1424,8 @@ void HappensBeforeAnalysis::buildSynchronizesWith() {
 
   for (const auto &entry : events_by_location) {
     const AtomicLocationKey &location = entry.first;
+    const Instruction *representative =
+        atomic_events[entry.second.front()].inst;
     auto release_candidates = getReleaseCandidates(location);
     if (release_candidates.size() != 1) {
       ++m_deferred_sync_counts["atomic_release_candidate_unresolved"];

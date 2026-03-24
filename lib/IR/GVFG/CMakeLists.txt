@@ -4,6 +4,7 @@ add_library(CanaryGuardedValueFlow STATIC
   GuardedValueFlowSites.cpp
   GuardedValueFlowGraph.cpp
   GuardedValueFlowBuilder.cpp
+  GuardedValueFlowSerializer.cpp
   GuardedValueFlowSolver.cpp
   LotusAdapter.cpp
 )
