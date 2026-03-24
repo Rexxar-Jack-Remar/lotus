@@ -3,18 +3,18 @@
 #include "Alias/LotusAA/MemoryModel/Types.h"
 #include "IR/GSA/GSA.h"
 
+#include <string>
+
 #include <llvm/IR/BasicBlock.h>
 #include <llvm/IR/Value.h>
-
-#include <string>
 
 namespace lotus {
 namespace gvfg {
 
 using llvm::BasicBlock;
 using llvm::ConstantInt;
-using llvm::Value;
 using llvm::path_cond_t;
+using llvm::Value;
 
 class ConditionRef {
 public:

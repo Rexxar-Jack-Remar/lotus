@@ -30,7 +30,8 @@ void GuardedValueFlowCallSite::addPseudoOutput(Function *callee,
 }
 
 void GuardedValueFlowCallSite::setCalleeCondition(
-    Function *callee, ConditionRef condition, GuardedValueFlowRegionNode *region) {
+    Function *callee, ConditionRef condition,
+    GuardedValueFlowRegionNode *region) {
   if (!callee)
     return;
   callee_conditions_[callee] = condition;
@@ -55,14 +56,13 @@ GuardedValueFlowCallSite::getPseudoOutput(Function *callee,
   return nullptr;
 }
 
-unsigned
-GuardedValueFlowCallSite::getNumPseudoInputs(Function *callee) const {
+unsigned GuardedValueFlowCallSite::getNumPseudoInputs(Function *callee) const {
   auto it = pseudo_inputs_.find(callee);
-  return it == pseudo_inputs_.end() ? 0u : static_cast<unsigned>(it->second.size());
+  return it == pseudo_inputs_.end() ? 0u
+                                    : static_cast<unsigned>(it->second.size());
 }
 
-unsigned
-GuardedValueFlowCallSite::getNumPseudoOutputs(Function *callee) const {
+unsigned GuardedValueFlowCallSite::getNumPseudoOutputs(Function *callee) const {
   auto it = pseudo_outputs_.find(callee);
   return it == pseudo_outputs_.end() ? 0u
                                      : static_cast<unsigned>(it->second.size());

@@ -1,8 +1,8 @@
 #ifndef GRAPH_H
 #define GRAPH_H
 
-#include "CFL/MutualRefinement/grammar.h"
-#include "CFL/MutualRefinement/hasher.h"
+#include "CFL/MutualRefinement/Grammar.h"
+#include "CFL/MutualRefinement/Hasher.h"
 #include <unordered_map>
 #include <unordered_set>
 #include <vector>

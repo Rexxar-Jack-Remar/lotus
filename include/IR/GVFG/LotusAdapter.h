@@ -26,12 +26,10 @@ public:
   // Replaces placeholder memory edges with LotusAA-backed producers and
   // materializes call-boundary interface nodes, summary nodes, imported path
   // conditions, and back-edge metadata.
-  static GuardedValueFlowNode *safeLink(GuardedValueFlowGraph &graph,
-                                        GuardedValueFlowNode *parent,
-                                        GuardedValueFlowNode *child,
-                                        float confidence = 1.0f,
-                                        ConditionRef condition =
-                                            ConditionRef::none());
+  static GuardedValueFlowNode *
+  safeLink(GuardedValueFlowGraph &graph, GuardedValueFlowNode *parent,
+           GuardedValueFlowNode *child, float confidence = 1.0f,
+           ConditionRef condition = ConditionRef::none());
   StringRef getPassName() const override {
     return "LotusGuardedValueFlowAdapterPass";
   }

@@ -147,8 +147,8 @@ static const char *siteKindName(GuardedValueFlowSite::Kind kind) {
   return "Unknown";
 }
 
-static const char *diagnosticOriginName(
-    GuardedValueFlowGraph::Diagnostic::Origin origin) {
+static const char *
+diagnosticOriginName(GuardedValueFlowGraph::Diagnostic::Origin origin) {
   switch (origin) {
   case GuardedValueFlowGraph::Diagnostic::Origin::Builder:
     return "builder";
@@ -158,8 +158,8 @@ static const char *diagnosticOriginName(
   return "builder";
 }
 
-static const char *diagnosticSeverityName(
-    GuardedValueFlowGraph::Diagnostic::Severity severity) {
+static const char *
+diagnosticSeverityName(GuardedValueFlowGraph::Diagnostic::Severity severity) {
   switch (severity) {
   case GuardedValueFlowGraph::Diagnostic::Severity::Note:
     return "note";
@@ -208,13 +208,14 @@ static const char *dotShapeForNode(const GuardedValueFlowNode *node) {
 
 } // namespace
 
-std::string GuardedValueFlowSerializer::toText(
-    const GuardedValueFlowGraph &graph) {
+std::string
+GuardedValueFlowSerializer::toText(const GuardedValueFlowGraph &graph) {
   std::ostringstream out;
   out << "GVFG-TEXT-V1\n";
-  out << "function " << std::quoted(graph.getBaseFunction()
-                                        ? graph.getBaseFunction()->getName().str()
-                                        : std::string("<none>"))
+  out << "function "
+      << std::quoted(graph.getBaseFunction()
+                         ? graph.getBaseFunction()->getName().str()
+                         : std::string("<none>"))
       << "\n";
   out << "diagnostics " << graph.diagnostics().size() << "\n";
   for (const auto &diagnostic : graph.diagnostics()) {
@@ -245,8 +246,8 @@ std::string GuardedValueFlowSerializer::toText(
     const auto *node = node_ptr.get();
     for (const auto &edge : node->children()) {
       out << "edge " << node->getNodeId() << " "
-          << (edge.target ? edge.target->getNodeId() : 0) << " "
-          << std::fixed << std::setprecision(3) << edge.confidence << " "
+          << (edge.target ? edge.target->getNodeId() : 0) << " " << std::fixed
+          << std::setprecision(3) << edge.confidence << " "
           << std::quoted(edge.condition.render()) << "\n";
     }
   }
@@ -261,17 +262,18 @@ std::string GuardedValueFlowSerializer::toText(
   return out.str();
 }
 
-std::string GuardedValueFlowSerializer::toDot(
-    const GuardedValueFlowGraph &graph) {
+std::string
+GuardedValueFlowSerializer::toDot(const GuardedValueFlowGraph &graph) {
   std::ostringstream out;
   const std::string function_name =
-      graph.getBaseFunction() ? graph.getBaseFunction()->getName().str() : "<none>";
+      graph.getBaseFunction() ? graph.getBaseFunction()->getName().str()
+                              : "<none>";
 
   out << "digraph \"gvfg." << escapeDotLabel(function_name) << "\" {\n";
   out << "  rankdir=LR;\n";
   out << "  labelloc=t;\n";
-  out << "  label=\"GVFG: " << escapeDotLabel(function_name) << "\\nDiagnostics: "
-      << graph.diagnostics().size() << "\";\n";
+  out << "  label=\"GVFG: " << escapeDotLabel(function_name)
+      << "\\nDiagnostics: " << graph.diagnostics().size() << "\";\n";
 
   for (const auto &node_ptr : graph.nodes()) {
     const auto *node = node_ptr.get();
@@ -280,7 +282,8 @@ std::string GuardedValueFlowSerializer::toDot(
     if (!node->getDescription().empty())
       label << "\\n" << escapeDotLabel(node->getDescription());
     if (node->getParentBasicBlock())
-      label << "\\nBB=" << escapeDotLabel(renderBlockName(node->getParentBasicBlock()));
+      label << "\\nBB="
+            << escapeDotLabel(renderBlockName(node->getParentBasicBlock()));
     out << "  n" << node->getNodeId() << " [shape=" << dotShapeForNode(node)
         << ", label=\"" << label.str() << "\"];\n";
   }
@@ -315,7 +318,8 @@ std::string GuardedValueFlowSerializer::toDot(
     std::ostringstream label;
     label << siteKindName(site->getKind());
     if (site->getInstruction())
-      label << "\\n" << escapeDotLabel(renderInstruction(site->getInstruction()));
+      label << "\\n"
+            << escapeDotLabel(renderInstruction(site->getInstruction()));
     out << "  s" << site_id
         << " [shape=note, style=dashed, color=gray40, label=\"" << label.str()
         << "\"];\n";
@@ -338,9 +342,8 @@ std::string GuardedValueFlowSerializer::toDot(
     label << diagnosticOriginName(diagnostic.origin) << " "
           << diagnosticSeverityName(diagnostic.severity) << "\\n"
           << escapeDotLabel(diagnostic.message);
-    out << "  d" << idx
-        << " [shape=note, color=red, fontcolor=red, label=\"" << label.str()
-        << "\"];\n";
+    out << "  d" << idx << " [shape=note, color=red, fontcolor=red, label=\""
+        << label.str() << "\"];\n";
   }
 
   out << "}\n";

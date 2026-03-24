@@ -58,11 +58,11 @@ public:
     method_name = "PATHTREE";
     GraphUtil::topological_sort(g, topoid);
     // for original graph labeling
-    cout << "GRAIL labeling dim=" << dim << endl;
+    cout << "GRAIL labeling dim=" << dim << '\n';
     computeMultiLabelsQuickRej(dim); // actually call mutipleLabeling()
     initMaterialization();
     sortLoutDFSorder();
-    cout << "converting labels..." << endl;
+    cout << "converting labels..." << '\n';
     labelconversion();
 
 #ifdef PATHTREE_DEBUG
@@ -86,24 +86,24 @@ public:
     method_name = "PATHTREE";
     GraphUtil::topological_sort(g, topoid);
     // for original graph labeling
-    cout << "GRAIL labeling dim=" << dim << endl;
+    cout << "GRAIL labeling dim=" << dim << '\n';
     struct timeval after_time, before_time;
     float query_time = 0;
     gettimeofday(&before_time, NULL);
     computeMultiLabelsQuickRej(dim); // actually call mutipleLabeling()
     if (mat) {
-      cout << "init materialization ..." << endl;
+      cout << "init materialization ..." << '\n';
       initMaterialization();
     }
     gettimeofday(&after_time, NULL);
     query_time = (after_time.tv_sec - before_time.tv_sec) * 1000.0 +
                  (after_time.tv_usec - before_time.tv_usec) * 1.0 / 1000.0;
-    cout << "#GRAIL labeling time:" << query_time << " (ms)" << endl;
-    cout << "sort lout DFS order ..." << endl;
+    cout << "#GRAIL labeling time:" << query_time << " (ms)" << '\n';
+    cout << "sort lout DFS order ..." << '\n';
     sortLoutDFSorder();
-    cout << "converting labels..." << endl;
+    cout << "converting labels..." << '\n';
     labelconversion();
-    cout << " done " << endl;
+    cout << " done " << '\n';
 #ifdef PATHTREE_DEBUG
     displayIndex(cout);
     displayLabels(cout);
@@ -125,7 +125,7 @@ public:
     method_name = "PATHTREE";
     GraphUtil::topological_sort(g, topoid);
     // for original graph labeling
-    //		cout << "GRAIL labeling dim=" << dim << endl;
+    //		cout << "GRAIL labeling dim=" << dim << '\n';
     struct timeval after_time, before_time;
     float query_time = 0;
     gettimeofday(&before_time, NULL);
@@ -138,7 +138,7 @@ public:
                  (after_time.tv_usec - before_time.tv_usec) * 1.0 / 1000.0;
     *grail_label_duration = query_time;
     //		cout << "#GRAIL labeling time:" << query_time << " (ms)" <<
-    //endl;
+    //'\n';
     sortLoutDFSorder();
     labelconversion();
 #ifdef PATHTREE_DEBUG
@@ -293,7 +293,7 @@ public:
   // query version using materalized data and bidirectional BFS
   bool reach(int src, int trg) {
 #ifdef PATHTREE_DEBUG
-    cout << "check " << src << "->" << trg << endl;
+    cout << "check " << src << "->" << trg << '\n';
 #endif
     if (src == trg)
       return true;
@@ -515,7 +515,7 @@ public:
   // query version using materalized data
   bool reachWithoutBiBFS(int src, int trg) {
 #ifdef PATHTREE_DEBUG
-    cout << "check " << src << "->" << trg << endl;
+    cout << "check " << src << "->" << trg << '\n';
 #endif
     if (src == trg)
       return true;
@@ -676,7 +676,7 @@ public:
   // query version based on including high indegree vertices in the gate graph
   bool reachIndegGate(int src, int trg) {
 #ifdef PATHTREE_DEBUG
-    cout << "check " << src << "->" << trg << endl;
+    cout << "check " << src << "->" << trg << '\n';
 #endif
     if (src == trg)
       return true;
@@ -725,7 +725,7 @@ public:
               check = true;
               totalingates++;
 #ifdef PATHTREE_DEBUG
-              cout << "ingate=" << nid << endl;
+              cout << "ingate=" << nid << '\n';
 #endif
               continue;
             }
@@ -800,7 +800,7 @@ public:
   // query version without sorting
   bool reachWithoutMat(int src, int trg) {
 #ifdef PATHTREE_DEBUG
-    cout << "check " << src << "->" << trg << endl;
+    cout << "check " << src << "->" << trg << '\n';
 #endif
     if (src == trg)
       return true;
@@ -849,7 +849,7 @@ public:
               check = true;
               totalingates++;
 #ifdef PATHTREE_DEBUG
-              cout << "ingate=" << nid << endl;
+              cout << "ingate=" << nid << '\n';
 #endif
               continue;
             }
@@ -911,7 +911,7 @@ public:
               if (visited[nid] == QueryCnt)
                 return true;
 #ifdef PATHTREE_DEBUG
-              cout << "outgate=" << nid << endl;
+              cout << "outgate=" << nid << '\n';
 #endif
               checkoutgates++;
               for (initer = ingates.begin(); initer != ingates.end();
@@ -949,7 +949,7 @@ public:
 
   bool reachBeforeImprovement(int src, int trg) {
 #ifdef PATHTREE_DEBUG
-    cout << "check " << src << "->" << trg << endl;
+    cout << "check " << src << "->" << trg << '\n';
 #endif
     if (src == trg)
       return true;

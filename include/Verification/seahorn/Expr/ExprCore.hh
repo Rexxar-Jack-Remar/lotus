@@ -185,7 +185,7 @@ public:
   }
   void dump() const {
     Print(std::cerr, 0, false);
-    std::cerr << std::endl;
+    std::cerr << '\n';
   }
 
   friend class ExprFactory;

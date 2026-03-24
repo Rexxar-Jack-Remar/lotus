@@ -1,7 +1,7 @@
 #ifndef GRAMMAR_H
 #define GRAMMAR_H
 
-#include "CFL/MutualRefinement/hasher.h"
+#include "CFL/MutualRefinement/Hasher.h"
 #include <unordered_map>
 #include <unordered_set>
 #include <utility>

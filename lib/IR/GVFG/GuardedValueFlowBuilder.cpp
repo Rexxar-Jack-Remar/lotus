@@ -1,6 +1,7 @@
+#include "IR/GSA/GSA.h"
 #include "IR/GVFG/GuardedValueFlowGraph.h"
 
-#include "IR/GSA/GSA.h"
+#include <algorithm>
 
 #include <llvm/ADT/SmallVector.h>
 #include <llvm/IR/Constants.h>
@@ -11,18 +12,16 @@
 #include <llvm/Support/Casting.h>
 #include <llvm/Support/raw_ostream.h>
 
-#include <algorithm>
-
 using namespace llvm;
 using namespace lotus::gvfg;
 
 namespace {
 
-static void recordBuilderDiagnostic(GuardedValueFlowGraph &graph,
-                                    GuardedValueFlowGraph::Diagnostic::Severity severity,
-                                    const Twine &message,
-                                    Instruction *inst = nullptr,
-                                    BasicBlock *block = nullptr) {
+static void
+recordBuilderDiagnostic(GuardedValueFlowGraph &graph,
+                        GuardedValueFlowGraph::Diagnostic::Severity severity,
+                        const Twine &message, Instruction *inst = nullptr,
+                        BasicBlock *block = nullptr) {
   GuardedValueFlowGraph::Diagnostic diagnostic;
   diagnostic.origin = GuardedValueFlowGraph::Diagnostic::Origin::Builder;
   diagnostic.severity = severity;
@@ -56,8 +55,7 @@ static void setValueDescription(GuardedValueFlowNode *node, Value *value) {
   node->setDescription(os.str());
 }
 
-static GuardedValueFlowOpcodeNode::OpcodeKind
-translateOpcode(unsigned opcode) {
+static GuardedValueFlowOpcodeNode::OpcodeKind translateOpcode(unsigned opcode) {
   switch (opcode) {
   case Instruction::URem:
     return GuardedValueFlowOpcodeNode::OpcodeKind::URem;
@@ -166,8 +164,8 @@ findOrCreateSyntheticGuardNode(GuardedValueFlowGraph &graph, Instruction *inst,
   return node;
 }
 
-static GuardedValueFlowNode *
-findOrCreateValueNode(GuardedValueFlowGraph &graph, Value *V, Function &F);
+static GuardedValueFlowNode *findOrCreateValueNode(GuardedValueFlowGraph &graph,
+                                                   Value *V, Function &F);
 
 static GuardedValueFlowNode *
 findOrCreateSimpleNode(GuardedValueFlowGraph &graph, Value *V, Function &F,
@@ -178,7 +176,8 @@ findOrCreateSimpleNode(GuardedValueFlowGraph &graph, Value *V, Function &F,
     return existing;
 
   auto *node = graph.createNode<GuardedValueFlowNode>(
-      kind, V->getType(), &graph, getValueBlock(V, F), V, dyn_cast<Instruction>(V));
+      kind, V->getType(), &graph, getValueBlock(V, F), V,
+      dyn_cast<Instruction>(V));
   setValueDescription(node, V);
   graph.mapValueNode(V, node);
   return node;
@@ -187,8 +186,8 @@ findOrCreateSimpleNode(GuardedValueFlowGraph &graph, Value *V, Function &F,
 static GuardedValueFlowCallOutputNode *
 findOrCreateCallOutputNode(GuardedValueFlowGraph &graph, CallBase &call,
                            Function &F) {
-  if (auto *existing =
-          dyn_cast_or_null<GuardedValueFlowCallOutputNode>(graph.findNode(&call))) {
+  if (auto *existing = dyn_cast_or_null<GuardedValueFlowCallOutputNode>(
+          graph.findNode(&call))) {
     return existing;
   }
 
@@ -207,8 +206,8 @@ findOrCreateCallOutputNode(GuardedValueFlowGraph &graph, CallBase &call,
   return output;
 }
 
-static GuardedValueFlowNode *
-findOrCreateValueNode(GuardedValueFlowGraph &graph, Value *V, Function &F) {
+static GuardedValueFlowNode *findOrCreateValueNode(GuardedValueFlowGraph &graph,
+                                                   Value *V, Function &F) {
   if (!V)
     return nullptr;
 
@@ -262,8 +261,9 @@ findOrCreateValueNode(GuardedValueFlowGraph &graph, Value *V, Function &F) {
                                 GuardedValueFlowNode::Kind::SimpleOperand);
 }
 
-static GuardedValueFlowNode *createConcatAggregate(
-    GuardedValueFlowGraph &graph, Value *aggregate, Function &F, bool &failed);
+static GuardedValueFlowNode *createConcatAggregate(GuardedValueFlowGraph &graph,
+                                                   Value *aggregate,
+                                                   Function &F, bool &failed);
 
 static GuardedValueFlowNode *
 createBinaryWithIntConst(GuardedValueFlowGraph &graph,
@@ -287,8 +287,9 @@ findOrCreateSwitchCasePredicate(GuardedValueFlowGraph &graph, SwitchInst *SI,
                                 BasicBlock *successor, Function &F,
                                 bool &failed);
 
-static GuardedValueFlowNode *getOrCreateOperandRepresentation(
-    GuardedValueFlowGraph &graph, Value *V, Function &F, bool &failed) {
+static GuardedValueFlowNode *
+getOrCreateOperandRepresentation(GuardedValueFlowGraph &graph, Value *V,
+                                 Function &F, bool &failed) {
   if (!V)
     return nullptr;
   // Constants that behave like fully materialized values stay as ordinary
@@ -299,14 +300,16 @@ static GuardedValueFlowNode *getOrCreateOperandRepresentation(
     return findOrCreateValueNode(graph, V, F);
   if (isa<ConstantExpr>(V))
     return modelConstantExpr(cast<ConstantExpr>(V), graph, F, failed);
-  if (isa<ConstantArray>(V) || isa<ConstantStruct>(V) || isa<ConstantVector>(V) ||
+  if (isa<ConstantArray>(V) || isa<ConstantStruct>(V) ||
+      isa<ConstantVector>(V) ||
       (isa<Constant>(V) && V->getType()->isAggregateType()))
     return createConcatAggregate(graph, V, F, failed);
   return findOrCreateValueNode(graph, V, F);
 }
 
-static GuardedValueFlowNode *createConcatAggregate(
-    GuardedValueFlowGraph &graph, Value *aggregate, Function &F, bool &failed) {
+static GuardedValueFlowNode *createConcatAggregate(GuardedValueFlowGraph &graph,
+                                                   Value *aggregate,
+                                                   Function &F, bool &failed) {
   auto *result = findOrCreateValueNode(graph, aggregate, F);
   if (!result)
     return nullptr;
@@ -320,20 +323,24 @@ static GuardedValueFlowNode *createConcatAggregate(
 
   if (auto *CA = dyn_cast<ConstantArray>(aggregate)) {
     for (Value *operand : CA->operands())
-      opcode->addChild(getOrCreateOperandRepresentation(graph, operand, F, failed));
+      opcode->addChild(
+          getOrCreateOperandRepresentation(graph, operand, F, failed));
   } else if (auto *CV = dyn_cast<ConstantVector>(aggregate)) {
     for (Value *operand : CV->operands())
-      opcode->addChild(getOrCreateOperandRepresentation(graph, operand, F, failed));
+      opcode->addChild(
+          getOrCreateOperandRepresentation(graph, operand, F, failed));
   } else if (auto *CS = dyn_cast<ConstantStruct>(aggregate)) {
     for (Value *operand : CS->operands())
-      opcode->addChild(getOrCreateOperandRepresentation(graph, operand, F, failed));
+      opcode->addChild(
+          getOrCreateOperandRepresentation(graph, operand, F, failed));
   } else if (auto *CDS = dyn_cast<ConstantDataSequential>(aggregate)) {
     for (unsigned idx = 0; idx < CDS->getNumElements(); ++idx)
       opcode->addChild(getOrCreateOperandRepresentation(
           graph, CDS->getElementAsConstant(idx), F, failed));
   } else if (auto *C = dyn_cast<Constant>(aggregate)) {
     for (Value *operand : C->operands())
-      opcode->addChild(getOrCreateOperandRepresentation(graph, operand, F, failed));
+      opcode->addChild(
+          getOrCreateOperandRepresentation(graph, operand, F, failed));
   }
 
   result->addChild(opcode);
@@ -341,10 +348,10 @@ static GuardedValueFlowNode *createConcatAggregate(
 }
 
 template <typename GEPValueT>
-static GuardedValueFlowNode *modelGEPOperator(GEPValueT *GEP, BasicBlock *block,
-                                              GuardedValueFlowGraph &graph,
-                                              Function &F, bool &failed,
-                                              GuardedValueFlowGEPReferenceSite *gep_site = nullptr);
+static GuardedValueFlowNode *
+modelGEPOperator(GEPValueT *GEP, BasicBlock *block,
+                 GuardedValueFlowGraph &graph, Function &F, bool &failed,
+                 GuardedValueFlowGEPReferenceSite *gep_site = nullptr);
 
 static GuardedValueFlowNode *modelConstantExpr(ConstantExpr *CE,
                                                GuardedValueFlowGraph &graph,
@@ -357,14 +364,14 @@ static GuardedValueFlowNode *modelConstantExpr(ConstantExpr *CE,
 
   auto *block = getValueBlock(CE, F);
   auto addBinaryExpr = [&](unsigned opcode) {
-    auto *node = createOpcodeNode(graph, translateOpcode(opcode), CE->getType(),
-                                  block,
-                                  GuardedValueFlowNode::Kind::SimpleOpcode,
-                                  Instruction::getOpcodeName(opcode));
-    node->addChild(getOrCreateOperandRepresentation(graph, CE->getOperand(0), F,
-                                                    failed));
-    node->addChild(getOrCreateOperandRepresentation(graph, CE->getOperand(1), F,
-                                                    failed));
+    auto *node =
+        createOpcodeNode(graph, translateOpcode(opcode), CE->getType(), block,
+                         GuardedValueFlowNode::Kind::SimpleOpcode,
+                         Instruction::getOpcodeName(opcode));
+    node->addChild(
+        getOrCreateOperandRepresentation(graph, CE->getOperand(0), F, failed));
+    node->addChild(
+        getOrCreateOperandRepresentation(graph, CE->getOperand(1), F, failed));
     result->addChild(node);
   };
 
@@ -386,8 +393,8 @@ static GuardedValueFlowNode *modelConstantExpr(ConstantExpr *CE,
         createOpcodeNode(graph, translateOpcode(CE->getOpcode()), CE->getType(),
                          block, GuardedValueFlowNode::Kind::CastOpcode,
                          Instruction::getOpcodeName(CE->getOpcode()));
-    opcode->addChild(getOrCreateOperandRepresentation(graph, CE->getOperand(0),
-                                                      F, failed));
+    opcode->addChild(
+        getOrCreateOperandRepresentation(graph, CE->getOperand(0), F, failed));
     const DataLayout &DL = F.getParent()->getDataLayout();
     Type *src_ty = CE->getOperand(0)->getType();
     Type *dst_ty = CE->getType();
@@ -398,47 +405,47 @@ static GuardedValueFlowNode *modelConstantExpr(ConstantExpr *CE,
     break;
   }
   case Instruction::Select: {
-    auto *opcode =
-        createOpcodeNode(graph, GuardedValueFlowOpcodeNode::OpcodeKind::Select,
-                         CE->getType(), block,
-                         GuardedValueFlowNode::Kind::SimpleOpcode, "select");
-    opcode->addChild(getOrCreateOperandRepresentation(graph, CE->getOperand(0),
-                                                      F, failed));
-    opcode->addChild(getOrCreateOperandRepresentation(graph, CE->getOperand(1),
-                                                      F, failed));
-    opcode->addChild(getOrCreateOperandRepresentation(graph, CE->getOperand(2),
-                                                      F, failed));
+    auto *opcode = createOpcodeNode(
+        graph, GuardedValueFlowOpcodeNode::OpcodeKind::Select, CE->getType(),
+        block, GuardedValueFlowNode::Kind::SimpleOpcode, "select");
+    opcode->addChild(
+        getOrCreateOperandRepresentation(graph, CE->getOperand(0), F, failed));
+    opcode->addChild(
+        getOrCreateOperandRepresentation(graph, CE->getOperand(1), F, failed));
+    opcode->addChild(
+        getOrCreateOperandRepresentation(graph, CE->getOperand(2), F, failed));
     result->addChild(opcode);
     break;
   }
   case Instruction::InsertElement:
   case Instruction::ExtractElement: {
-    auto *opcode = createOpcodeNode(
-        graph, translateOpcode(CE->getOpcode()), CE->getType(), block,
-        GuardedValueFlowNode::Kind::SimpleOpcode,
-        Instruction::getOpcodeName(CE->getOpcode()));
+    auto *opcode =
+        createOpcodeNode(graph, translateOpcode(CE->getOpcode()), CE->getType(),
+                         block, GuardedValueFlowNode::Kind::SimpleOpcode,
+                         Instruction::getOpcodeName(CE->getOpcode()));
     for (Value *operand : CE->operands())
-      opcode->addChild(getOrCreateOperandRepresentation(graph, operand, F, failed));
+      opcode->addChild(
+          getOrCreateOperandRepresentation(graph, operand, F, failed));
     result->addChild(opcode);
     break;
   }
   case Instruction::GetElementPtr: {
-    if (auto *gep_node = modelGEPOperator(cast<GEPOperator>(CE), block, graph, F,
-                                          failed, nullptr))
+    if (auto *gep_node = modelGEPOperator(cast<GEPOperator>(CE), block, graph,
+                                          F, failed, nullptr))
       result->addChild(gep_node);
     break;
   }
   case Instruction::ICmp:
   case Instruction::FCmp: {
-    auto *opcode = createOpcodeNode(
-        graph, translateOpcode(CE->getOpcode()), CE->getType(), block,
-        GuardedValueFlowNode::Kind::SimpleOpcode,
-        Instruction::getOpcodeName(CE->getOpcode()));
+    auto *opcode =
+        createOpcodeNode(graph, translateOpcode(CE->getOpcode()), CE->getType(),
+                         block, GuardedValueFlowNode::Kind::SimpleOpcode,
+                         Instruction::getOpcodeName(CE->getOpcode()));
     opcode->setCmpPredicate(CE->getPredicate());
-    opcode->addChild(getOrCreateOperandRepresentation(graph, CE->getOperand(0),
-                                                      F, failed));
-    opcode->addChild(getOrCreateOperandRepresentation(graph, CE->getOperand(1),
-                                                      F, failed));
+    opcode->addChild(
+        getOrCreateOperandRepresentation(graph, CE->getOperand(0), F, failed));
+    opcode->addChild(
+        getOrCreateOperandRepresentation(graph, CE->getOperand(1), F, failed));
     result->addChild(opcode);
     break;
   }
@@ -487,13 +494,12 @@ createSwitchCaseCompare(GuardedValueFlowGraph &graph, SwitchInst *SI,
                         ConstantInt *case_value, Function &F, bool &failed) {
   auto *switch_value =
       getOrCreateOperandRepresentation(graph, SI->getCondition(), F, failed);
-  auto *case_node = getOrCreateOperandRepresentation(graph, case_value, F, failed);
-  auto *opcode = createOpcodeNode(graph,
-                                  GuardedValueFlowOpcodeNode::OpcodeKind::ICmp,
-                                  Type::getInt1Ty(SI->getContext()),
-                                  SI->getParent(),
-                                  GuardedValueFlowNode::Kind::SimpleOpcode,
-                                  "switch.case.eq");
+  auto *case_node =
+      getOrCreateOperandRepresentation(graph, case_value, F, failed);
+  auto *opcode = createOpcodeNode(
+      graph, GuardedValueFlowOpcodeNode::OpcodeKind::ICmp,
+      Type::getInt1Ty(SI->getContext()), SI->getParent(),
+      GuardedValueFlowNode::Kind::SimpleOpcode, "switch.case.eq");
   opcode->setCmpPredicate(CmpInst::ICMP_EQ);
   opcode->addChild(switch_value);
   opcode->addChild(case_node);
@@ -524,7 +530,8 @@ findOrCreateSwitchCasePredicate(GuardedValueFlowGraph &graph, SwitchInst *SI,
   GuardedValueFlowNode *predicate = nullptr;
   if (!matching_cases.empty()) {
     for (ConstantInt *case_value : matching_cases) {
-      auto *case_guard = createSwitchCaseCompare(graph, SI, case_value, F, failed);
+      auto *case_guard =
+          createSwitchCaseCompare(graph, SI, case_value, F, failed);
       if (!predicate) {
         predicate = case_guard;
         continue;
@@ -546,9 +553,10 @@ findOrCreateSwitchCasePredicate(GuardedValueFlowGraph &graph, SwitchInst *SI,
     }
   } else if (SI->getDefaultDest() == successor) {
     SmallVector<GuardedValueFlowNode *, 4> case_guards;
-    for (auto case_it = SI->case_begin(); case_it != SI->case_end(); ++case_it) {
-      case_guards.push_back(
-          createSwitchCaseCompare(graph, SI, case_it->getCaseValue(), F, failed));
+    for (auto case_it = SI->case_begin(); case_it != SI->case_end();
+         ++case_it) {
+      case_guards.push_back(createSwitchCaseCompare(
+          graph, SI, case_it->getCaseValue(), F, failed));
     }
 
     if (case_guards.empty()) {
@@ -593,10 +601,10 @@ findOrCreateSwitchCasePredicate(GuardedValueFlowGraph &graph, SwitchInst *SI,
 }
 
 template <typename GEPValueT>
-static GuardedValueFlowNode *modelGEPOperator(GEPValueT *GEP, BasicBlock *block,
-                                              GuardedValueFlowGraph &graph,
-                                              Function &F, bool &failed,
-                                              GuardedValueFlowGEPReferenceSite *gep_site) {
+static GuardedValueFlowNode *
+modelGEPOperator(GEPValueT *GEP, BasicBlock *block,
+                 GuardedValueFlowGraph &graph, Function &F, bool &failed,
+                 GuardedValueFlowGEPReferenceSite *gep_site) {
   if (GEP->getType()->isVectorTy()) {
     failed = true;
     recordBuilderDiagnostic(
@@ -607,8 +615,8 @@ static GuardedValueFlowNode *modelGEPOperator(GEPValueT *GEP, BasicBlock *block,
   }
 
   const DataLayout &DL = F.getParent()->getDataLayout();
-  auto *base_node =
-      getOrCreateOperandRepresentation(graph, GEP->getPointerOperand(), F, failed);
+  auto *base_node = getOrCreateOperandRepresentation(
+      graph, GEP->getPointerOperand(), F, failed);
   auto *orig_base = base_node;
   int64_t accumulated_offset = 0;
   Type *current_type = GEP->getSourceElementType();
@@ -624,13 +632,15 @@ static GuardedValueFlowNode *modelGEPOperator(GEPValueT *GEP, BasicBlock *block,
         int64_t field_idx = CI->getSExtValue();
         if (field_idx >= 0 &&
             static_cast<unsigned>(field_idx) < struct_ty->getNumElements())
-          element_ty = struct_ty->getElementType(static_cast<unsigned>(field_idx));
+          element_ty =
+              struct_ty->getElementType(static_cast<unsigned>(field_idx));
       }
     } else if (auto *array_ty = dyn_cast_or_null<ArrayType>(agg_or_ptr_ty)) {
       element_ty = array_ty->getElementType();
     } else if (auto *vector_ty = dyn_cast_or_null<VectorType>(agg_or_ptr_ty)) {
       element_ty = vector_ty->getElementType();
-    } else if (auto *pointer_ty = dyn_cast_or_null<PointerType>(agg_or_ptr_ty)) {
+    } else if (auto *pointer_ty =
+                   dyn_cast_or_null<PointerType>(agg_or_ptr_ty)) {
       element_ty = pointer_ty->getPointerElementType();
     }
     if (!element_ty)
@@ -653,8 +663,9 @@ static GuardedValueFlowNode *modelGEPOperator(GEPValueT *GEP, BasicBlock *block,
           }
         }
       } else {
-        accumulated_offset += const_index *
-                              static_cast<int64_t>(DL.getTypeSizeInBits(element_ty));
+        accumulated_offset +=
+            const_index *
+            static_cast<int64_t>(DL.getTypeSizeInBits(element_ty));
       }
       current_type = element_ty;
       continue;
@@ -682,15 +693,15 @@ static GuardedValueFlowNode *modelGEPOperator(GEPValueT *GEP, BasicBlock *block,
     Type *base_ptr_ty = GEP->getPointerOperandType();
     if (base_ptr_ty->isPointerTy() && index_value->getType()->isSized() &&
         base_ptr_ty->isSized() &&
-        DL.getTypeSizeInBits(base_ptr_ty) != DL.getTypeSizeInBits(index_value->getType())) {
-      auto opcode_kind =
-          DL.getTypeSizeInBits(base_ptr_ty) <
-                  DL.getTypeSizeInBits(index_value->getType())
-              ? GuardedValueFlowOpcodeNode::OpcodeKind::Trunc
-              : GuardedValueFlowOpcodeNode::OpcodeKind::SExt;
-      auto *cast_node = createOpcodeNode(
-          graph, opcode_kind, base_ptr_ty, block,
-          GuardedValueFlowNode::Kind::CastOpcode, "gep.index.cast");
+        DL.getTypeSizeInBits(base_ptr_ty) !=
+            DL.getTypeSizeInBits(index_value->getType())) {
+      auto opcode_kind = DL.getTypeSizeInBits(base_ptr_ty) <
+                                 DL.getTypeSizeInBits(index_value->getType())
+                             ? GuardedValueFlowOpcodeNode::OpcodeKind::Trunc
+                             : GuardedValueFlowOpcodeNode::OpcodeKind::SExt;
+      auto *cast_node = createOpcodeNode(graph, opcode_kind, base_ptr_ty, block,
+                                         GuardedValueFlowNode::Kind::CastOpcode,
+                                         "gep.index.cast");
       cast_node->addChild(non_const_index);
       cast_node->setCastWidths(DL.getTypeSizeInBits(index_value->getType()),
                                DL.getTypeSizeInBits(base_ptr_ty));
@@ -703,24 +714,23 @@ static GuardedValueFlowNode *modelGEPOperator(GEPValueT *GEP, BasicBlock *block,
     }
 
     auto *mul = createBinaryWithIntConst(
-        graph, GuardedValueFlowOpcodeNode::OpcodeKind::Mul, GEP->getType(), block,
-        non_const_index, static_cast<int64_t>(DL.getTypeSizeInBits(element_ty)));
+        graph, GuardedValueFlowOpcodeNode::OpcodeKind::Mul, GEP->getType(),
+        block, non_const_index,
+        static_cast<int64_t>(DL.getTypeSizeInBits(element_ty)));
     auto *offset_node = graph.createNode<GuardedValueFlowNode>(
-        GuardedValueFlowNode::Kind::SimpleOperand, GEP->getType(), &graph, block,
-        nullptr, dyn_cast<Instruction>(GEP));
+        GuardedValueFlowNode::Kind::SimpleOperand, GEP->getType(), &graph,
+        block, nullptr, dyn_cast<Instruction>(GEP));
     offset_node->setDescription("gep.dynamic.offset");
     offset_node->addChild(mul);
 
-    auto *add = createOpcodeNode(graph,
-                                 GuardedValueFlowOpcodeNode::OpcodeKind::Add,
-                                 GEP->getType(), block,
-                                 GuardedValueFlowNode::Kind::SimpleOpcode,
-                                 "gep.add");
+    auto *add = createOpcodeNode(
+        graph, GuardedValueFlowOpcodeNode::OpcodeKind::Add, GEP->getType(),
+        block, GuardedValueFlowNode::Kind::SimpleOpcode, "gep.add");
     add->addChild(base_node);
     add->addChild(offset_node);
     auto *next_base = graph.createNode<GuardedValueFlowNode>(
-        GuardedValueFlowNode::Kind::SimpleOperand, GEP->getType(), &graph, block,
-        nullptr, dyn_cast<Instruction>(GEP));
+        GuardedValueFlowNode::Kind::SimpleOperand, GEP->getType(), &graph,
+        block, nullptr, dyn_cast<Instruction>(GEP));
     next_base->setDescription("gep.base.next");
     next_base->addChild(add);
     base_node = next_base;
@@ -729,19 +739,19 @@ static GuardedValueFlowNode *modelGEPOperator(GEPValueT *GEP, BasicBlock *block,
 
   if (accumulated_offset != 0) {
     auto *add_const = createBinaryWithIntConst(
-        graph, GuardedValueFlowOpcodeNode::OpcodeKind::Add, GEP->getType(), block,
-        base_node, accumulated_offset);
+        graph, GuardedValueFlowOpcodeNode::OpcodeKind::Add, GEP->getType(),
+        block, base_node, accumulated_offset);
     auto *offset_base = graph.createNode<GuardedValueFlowNode>(
-        GuardedValueFlowNode::Kind::SimpleOperand, GEP->getType(), &graph, block,
-        nullptr, dyn_cast<Instruction>(GEP));
+        GuardedValueFlowNode::Kind::SimpleOperand, GEP->getType(), &graph,
+        block, nullptr, dyn_cast<Instruction>(GEP));
     offset_base->setDescription("gep.offset.final");
     offset_base->addChild(add_const);
     base_node = offset_base;
   }
 
   auto *gep_opcode = createOpcodeNode(
-      graph, GuardedValueFlowOpcodeNode::OpcodeKind::GetElementPtr, GEP->getType(),
-      block, GuardedValueFlowNode::Kind::SimpleOpcode, "gep");
+      graph, GuardedValueFlowOpcodeNode::OpcodeKind::GetElementPtr,
+      GEP->getType(), block, GuardedValueFlowNode::Kind::SimpleOpcode, "gep");
   gep_opcode->addChild(orig_base);
   gep_opcode->addChild(base_node);
 
@@ -753,14 +763,11 @@ static GuardedValueFlowNode *modelGEPOperator(GEPValueT *GEP, BasicBlock *block,
   return gep_opcode;
 }
 
-static bool computeGuardForControlledBlock(gsa::ControlDependenceAnalysis &cda,
-                                          GuardedValueFlowGraph &graph,
-                                          Function &F, Instruction *term,
-                                          BasicBlock *target, ConditionRef &cond,
-                                          GuardedValueFlowNode *&cond_node,
-                                          bool &sense,
-                                          BasicBlock *&guard_successor,
-                                          bool &failed) {
+static bool computeGuardForControlledBlock(
+    gsa::ControlDependenceAnalysis &cda, GuardedValueFlowGraph &graph,
+    Function &F, Instruction *term, BasicBlock *target, ConditionRef &cond,
+    GuardedValueFlowNode *&cond_node, bool &sense, BasicBlock *&guard_successor,
+    bool &failed) {
   cond = ConditionRef::none();
   cond_node = nullptr;
   sense = true;
@@ -781,8 +788,8 @@ static bool computeGuardForControlledBlock(gsa::ControlDependenceAnalysis &cda,
       return false;
     sense = succ0_reaches;
     guard_successor = sense ? succ0 : succ1;
-    cond_node = getOrCreateOperandRepresentation(graph, br->getCondition(), F,
-                                                 failed);
+    cond_node =
+        getOrCreateOperandRepresentation(graph, br->getCondition(), F, failed);
     cond = ConditionRef::fromGuard(
         sense ? gsa::GuardKind::BranchTrue : gsa::GuardKind::BranchFalse,
         br->getParent(), guard_successor, br->getCondition());
@@ -800,13 +807,14 @@ static bool computeGuardForControlledBlock(gsa::ControlDependenceAnalysis &cda,
       return false;
 
     guard_successor = reaching_successors.front();
-    cond_node = findOrCreateSwitchCasePredicate(graph, si, guard_successor, F,
-                                                failed);
+    cond_node =
+        findOrCreateSwitchCasePredicate(graph, si, guard_successor, F, failed);
     if (!cond_node)
       return false;
 
     ConstantInt *case_value = nullptr;
-    for (auto case_it = si->case_begin(); case_it != si->case_end(); ++case_it) {
+    for (auto case_it = si->case_begin(); case_it != si->case_end();
+         ++case_it) {
       if (case_it->getCaseSuccessor() == guard_successor) {
         case_value = case_it->getCaseValue();
         break;
@@ -841,13 +849,13 @@ static void collectBlockConditions(GuardedValueFlowGraph &graph, Function &F,
       GuardedValueFlowNode *cond_node = nullptr;
       bool sense = true;
       BasicBlock *guard_successor = nullptr;
-      if (!computeGuardForControlledBlock(cda, graph, F,
-                                          dep ? dep->getTerminator() : nullptr,
-                                          BB, cond, cond_node, sense,
-                                          guard_successor, failed)) {
+      if (!computeGuardForControlledBlock(
+              cda, graph, F, dep ? dep->getTerminator() : nullptr, BB, cond,
+              cond_node, sense, guard_successor, failed)) {
         continue;
       }
-      graph.addBlockCondition(BB, {cond_node, dep, guard_successor, cond, sense});
+      graph.addBlockCondition(BB,
+                              {cond_node, dep, guard_successor, cond, sense});
     }
   }
 }
@@ -914,8 +922,8 @@ static bool modelIntrinsicCall(CallBase &call, GuardedValueFlowGraph &graph,
   }
   case Intrinsic::expect: {
     auto *result = findOrCreateValueNode(graph, &call, F);
-    result->addChild(getOrCreateOperandRepresentation(graph, call.getArgOperand(0),
-                                                      F, failed));
+    result->addChild(getOrCreateOperandRepresentation(
+        graph, call.getArgOperand(0), F, failed));
     return true;
   }
   case Intrinsic::bswap: {
@@ -950,8 +958,8 @@ findOrCreateUnknownInstructionNode(GuardedValueFlowGraph &graph, Instruction &I,
     return existing;
 
   auto *node = graph.createNode<GuardedValueFlowNode>(
-      GuardedValueFlowNode::Kind::Unknown, I.getType(), &graph, I.getParent(), &I,
-      &I);
+      GuardedValueFlowNode::Kind::Unknown, I.getType(), &graph, I.getParent(),
+      &I, &I);
   node->setDescription(description.str());
   graph.mapValueNode(&I, node);
   return node;
@@ -960,11 +968,11 @@ findOrCreateUnknownInstructionNode(GuardedValueFlowGraph &graph, Instruction &I,
 static void recordUnsupportedInstruction(GuardedValueFlowGraph &graph,
                                          Function &F, Instruction &I,
                                          StringRef detail) {
-  recordBuilderDiagnostic(
-      graph, GuardedValueFlowGraph::Diagnostic::Severity::Warning,
-      Twine("Partially modeled instruction in function ") + F.getName() + ": " +
-          detail,
-      &I, I.getParent());
+  recordBuilderDiagnostic(graph,
+                          GuardedValueFlowGraph::Diagnostic::Severity::Warning,
+                          Twine("Partially modeled instruction in function ") +
+                              F.getName() + ": " + detail,
+                          &I, I.getParent());
 }
 
 static bool buildInstruction(GuardedValueFlowGraph &graph, Instruction &I,
@@ -980,8 +988,8 @@ static bool buildInstruction(GuardedValueFlowGraph &graph, Instruction &I,
       return true;
     }
     if (br->isConditional()) {
-      auto *cond_node = getOrCreateOperandRepresentation(graph, br->getCondition(),
-                                                         F, failed);
+      auto *cond_node = getOrCreateOperandRepresentation(
+          graph, br->getCondition(), F, failed);
       (void)graph.findOrCreateUnitRegion(
           cond_node, true, br->getSuccessor(0),
           ConditionRef::fromGuard(gsa::GuardKind::BranchTrue, block,
@@ -1047,7 +1055,8 @@ static bool buildInstruction(GuardedValueFlowGraph &graph, Instruction &I,
     if (!invoke->getType()->isVoidTy())
       (void)findOrCreateCallOutputNode(graph, *invoke, F);
     for (Value *arg : invoke->args())
-      site->addCommonInput(getOrCreateOperandRepresentation(graph, arg, F, failed));
+      site->addCommonInput(
+          getOrCreateOperandRepresentation(graph, arg, F, failed));
     recordUnsupportedInstruction(
         graph, F, I,
         "invoke control effects are degraded to a callsite-only model");
@@ -1106,19 +1115,24 @@ static bool buildInstruction(GuardedValueFlowGraph &graph, Instruction &I,
   case Instruction::Add:
   case Instruction::Sub: {
     auto *result = findOrCreateValueNode(graph, &I, F);
-    auto *lhs = getOrCreateOperandRepresentation(graph, I.getOperand(0), F, failed);
-    auto *rhs = getOrCreateOperandRepresentation(graph, I.getOperand(1), F, failed);
-    auto *opcode = createOpcodeNode(
-        graph, translateOpcode(I.getOpcode()), I.getType(), block,
-        GuardedValueFlowNode::Kind::SimpleOpcode,
-        Instruction::getOpcodeName(I.getOpcode()));
+    auto *lhs =
+        getOrCreateOperandRepresentation(graph, I.getOperand(0), F, failed);
+    auto *rhs =
+        getOrCreateOperandRepresentation(graph, I.getOperand(1), F, failed);
+    auto *opcode =
+        createOpcodeNode(graph, translateOpcode(I.getOpcode()), I.getType(),
+                         block, GuardedValueFlowNode::Kind::SimpleOpcode,
+                         Instruction::getOpcodeName(I.getOpcode()));
     opcode->addChild(lhs);
     opcode->addChild(rhs);
     result->addChild(opcode);
 
-    if (I.getOpcode() == Instruction::URem || I.getOpcode() == Instruction::FRem ||
-        I.getOpcode() == Instruction::SRem || I.getOpcode() == Instruction::UDiv ||
-        I.getOpcode() == Instruction::SDiv || I.getOpcode() == Instruction::FDiv) {
+    if (I.getOpcode() == Instruction::URem ||
+        I.getOpcode() == Instruction::FRem ||
+        I.getOpcode() == Instruction::SRem ||
+        I.getOpcode() == Instruction::UDiv ||
+        I.getOpcode() == Instruction::SDiv ||
+        I.getOpcode() == Instruction::FDiv) {
       auto *site = graph.createSite<GuardedValueFlowDivSite>(&graph, &I);
       site->setLhsOperand(lhs);
       site->setRhsOperand(rhs);
@@ -1142,10 +1156,10 @@ static bool buildInstruction(GuardedValueFlowGraph &graph, Instruction &I,
     auto *result = findOrCreateValueNode(graph, &I, F);
     auto *operand =
         getOrCreateOperandRepresentation(graph, I.getOperand(0), F, failed);
-    auto *opcode = createOpcodeNode(
-        graph, translateOpcode(I.getOpcode()), I.getType(), block,
-        GuardedValueFlowNode::Kind::CastOpcode,
-        Instruction::getOpcodeName(I.getOpcode()));
+    auto *opcode =
+        createOpcodeNode(graph, translateOpcode(I.getOpcode()), I.getType(),
+                         block, GuardedValueFlowNode::Kind::CastOpcode,
+                         Instruction::getOpcodeName(I.getOpcode()));
     opcode->addChild(operand);
     const DataLayout &DL = F.getParent()->getDataLayout();
     Type *src_ty = I.getOperand(0)->getType();
@@ -1159,12 +1173,13 @@ static bool buildInstruction(GuardedValueFlowGraph &graph, Instruction &I,
   case Instruction::ExtractElement:
   case Instruction::InsertElement: {
     auto *result = findOrCreateValueNode(graph, &I, F);
-    auto *opcode = createOpcodeNode(
-        graph, translateOpcode(I.getOpcode()), I.getType(), block,
-        GuardedValueFlowNode::Kind::SimpleOpcode,
-        Instruction::getOpcodeName(I.getOpcode()));
+    auto *opcode =
+        createOpcodeNode(graph, translateOpcode(I.getOpcode()), I.getType(),
+                         block, GuardedValueFlowNode::Kind::SimpleOpcode,
+                         Instruction::getOpcodeName(I.getOpcode()));
     for (Value *operand : I.operands())
-      opcode->addChild(getOrCreateOperandRepresentation(graph, operand, F, failed));
+      opcode->addChild(
+          getOrCreateOperandRepresentation(graph, operand, F, failed));
     result->addChild(opcode);
     return true;
   }
@@ -1192,9 +1207,8 @@ static bool buildInstruction(GuardedValueFlowGraph &graph, Instruction &I,
     // Store-memory nodes are keyed by the stored value and producing
     // instruction. Later adaptation may repopulate the producer chain, but the
     // structural location of the store remains anchored here.
-    auto *mem_node = graph.findOrCreateStoreMemoryNode(I.getOperand(0), &I,
-                                                       I.getOperand(0)->getType(),
-                                                       block);
+    auto *mem_node = graph.findOrCreateStoreMemoryNode(
+        I.getOperand(0), &I, I.getOperand(0)->getType(), block);
     mem_node->addChild(stored);
     auto *site = graph.createSite<GuardedValueFlowDereferenceSite>(&graph, &I);
     auto *ptr_node =
@@ -1243,13 +1257,15 @@ static bool buildInstruction(GuardedValueFlowGraph &graph, Instruction &I,
   }
   case Instruction::ICmp:
   case Instruction::FCmp: {
-    auto *lhs = getOrCreateOperandRepresentation(graph, I.getOperand(0), F, failed);
-    auto *rhs = getOrCreateOperandRepresentation(graph, I.getOperand(1), F, failed);
+    auto *lhs =
+        getOrCreateOperandRepresentation(graph, I.getOperand(0), F, failed);
+    auto *rhs =
+        getOrCreateOperandRepresentation(graph, I.getOperand(1), F, failed);
     auto *result = findOrCreateValueNode(graph, &I, F);
-    auto *opcode = createOpcodeNode(
-        graph, translateOpcode(I.getOpcode()), I.getType(), block,
-        GuardedValueFlowNode::Kind::SimpleOpcode,
-        Instruction::getOpcodeName(I.getOpcode()));
+    auto *opcode =
+        createOpcodeNode(graph, translateOpcode(I.getOpcode()), I.getType(),
+                         block, GuardedValueFlowNode::Kind::SimpleOpcode,
+                         Instruction::getOpcodeName(I.getOpcode()));
     auto *cmp = dyn_cast<CmpInst>(&I);
     if (!cmp) {
       failed = true;
@@ -1278,9 +1294,8 @@ static bool buildInstruction(GuardedValueFlowGraph &graph, Instruction &I,
       return true;
     }
     for (unsigned idx = 0; idx < phi->getNumIncomingValues(); ++idx) {
-      auto *incoming_value =
-          getOrCreateOperandRepresentation(graph, phi->getIncomingValue(idx), F,
-                                           failed);
+      auto *incoming_value = getOrCreateOperandRepresentation(
+          graph, phi->getIncomingValue(idx), F, failed);
       BasicBlock *incoming_bb = phi->getIncomingBlock(idx);
       ConditionRef cond = ConditionRef::none();
       bool sense = true;
@@ -1293,17 +1308,19 @@ static bool buildInstruction(GuardedValueFlowGraph &graph, Instruction &I,
             sense = succ0_reaches;
             BasicBlock *guard_successor =
                 sense ? br->getSuccessor(0) : br->getSuccessor(1);
-            cond_node = getOrCreateOperandRepresentation(graph, br->getCondition(),
-                                                         F, failed);
-            cond = ConditionRef::fromGuard(
-                sense ? gsa::GuardKind::BranchTrue
-                      : gsa::GuardKind::BranchFalse,
-                incoming_bb, guard_successor, br->getCondition());
+            cond_node = getOrCreateOperandRepresentation(
+                graph, br->getCondition(), F, failed);
+            cond = ConditionRef::fromGuard(sense ? gsa::GuardKind::BranchTrue
+                                                 : gsa::GuardKind::BranchFalse,
+                                           incoming_bb, guard_successor,
+                                           br->getCondition());
           }
         }
-      } else if (auto *si = dyn_cast<SwitchInst>(incoming_bb->getTerminator())) {
+      } else if (auto *si =
+                     dyn_cast<SwitchInst>(incoming_bb->getTerminator())) {
         BasicBlock *guard_successor = nullptr;
-        for (unsigned succ_idx = 0; succ_idx < si->getNumSuccessors(); ++succ_idx) {
+        for (unsigned succ_idx = 0; succ_idx < si->getNumSuccessors();
+             ++succ_idx) {
           BasicBlock *succ = si->getSuccessor(succ_idx);
           if (succ == block) {
             guard_successor = succ;
@@ -1311,8 +1328,8 @@ static bool buildInstruction(GuardedValueFlowGraph &graph, Instruction &I,
           }
         }
         if (guard_successor) {
-          cond_node = findOrCreateSwitchCasePredicate(graph, si, guard_successor, F,
-                                                      failed);
+          cond_node = findOrCreateSwitchCasePredicate(
+              graph, si, guard_successor, F, failed);
           ConstantInt *case_value = nullptr;
           for (auto case_it = si->case_begin(); case_it != si->case_end();
                ++case_it) {
@@ -1330,7 +1347,8 @@ static bool buildInstruction(GuardedValueFlowGraph &graph, Instruction &I,
       // PHI incoming metadata keeps the immediate edge-local guard in addition
       // to the enclosing block region, which is what downstream path-sensitive
       // users need for precise merge semantics.
-      phi_node->addIncoming(incoming_value, incoming_bb, cond_node, sense, cond);
+      phi_node->addIncoming(incoming_value, incoming_bb, cond_node, sense,
+                            cond);
     }
     return true;
   }
@@ -1357,21 +1375,22 @@ static bool buildInstruction(GuardedValueFlowGraph &graph, Instruction &I,
       (void)findOrCreateCallOutputNode(graph, *call, F);
 
     for (Value *arg : call->args())
-      site->addCommonInput(getOrCreateOperandRepresentation(graph, arg, F, failed));
+      site->addCommonInput(
+          getOrCreateOperandRepresentation(graph, arg, F, failed));
 
     return true;
   }
   case Instruction::Select: {
     auto *result = findOrCreateValueNode(graph, &I, F);
     auto *opcode = createOpcodeNode(
-        graph, GuardedValueFlowOpcodeNode::OpcodeKind::Select, I.getType(), block,
-        GuardedValueFlowNode::Kind::SimpleOpcode, "select");
-    opcode->addChild(getOrCreateOperandRepresentation(graph, I.getOperand(0), F,
-                                                      failed));
-    opcode->addChild(getOrCreateOperandRepresentation(graph, I.getOperand(1), F,
-                                                      failed));
-    opcode->addChild(getOrCreateOperandRepresentation(graph, I.getOperand(2), F,
-                                                      failed));
+        graph, GuardedValueFlowOpcodeNode::OpcodeKind::Select, I.getType(),
+        block, GuardedValueFlowNode::Kind::SimpleOpcode, "select");
+    opcode->addChild(
+        getOrCreateOperandRepresentation(graph, I.getOperand(0), F, failed));
+    opcode->addChild(
+        getOrCreateOperandRepresentation(graph, I.getOperand(1), F, failed));
+    opcode->addChild(
+        getOrCreateOperandRepresentation(graph, I.getOperand(2), F, failed));
     result->addChild(opcode);
     return true;
   }
@@ -1400,7 +1419,8 @@ static RegisterPass<GuardedValueFlowGraphBuilderPass>
 GuardedValueFlowGraphBuilderPass::GuardedValueFlowGraphBuilderPass()
     : ModulePass(ID) {}
 
-void GuardedValueFlowGraphBuilderPass::getAnalysisUsage(AnalysisUsage &AU) const {
+void GuardedValueFlowGraphBuilderPass::getAnalysisUsage(
+    AnalysisUsage &AU) const {
   AU.setPreservesAll();
   AU.addRequired<gsa::ControlDependenceAnalysisPass>();
   AU.addRequired<gsa::GateAnalysisPass>();
@@ -1440,8 +1460,8 @@ void GuardedValueFlowGraphBuilderPass::invalidateGraph(const Function &F) {
 std::unique_ptr<GuardedValueFlowGraph>
 GuardedValueFlowGraphBuilderPass::buildGraph(Function &F) {
   auto graph = std::make_unique<GuardedValueFlowGraph>(&F);
-  auto &cda =
-      getAnalysis<gsa::ControlDependenceAnalysisPass>().getControlDependenceAnalysis(F);
+  auto &cda = getAnalysis<gsa::ControlDependenceAnalysisPass>()
+                  .getControlDependenceAnalysis(F);
 
   unsigned common_arg_index = 0;
   for (Argument &arg : F.args()) {
@@ -1453,8 +1473,8 @@ GuardedValueFlowGraphBuilderPass::buildGraph(Function &F) {
 
   if (!F.getReturnType()->isVoidTy()) {
     auto *ret_node = graph->createNode<GuardedValueFlowReturnNode>(
-        GuardedValueFlowNode::Kind::CommonReturn, F.getReturnType(), graph.get(),
-        F.empty() ? nullptr : &F.getEntryBlock());
+        GuardedValueFlowNode::Kind::CommonReturn, F.getReturnType(),
+        graph.get(), F.empty() ? nullptr : &F.getEntryBlock());
     ret_node->setDescription("return.common");
   }
 

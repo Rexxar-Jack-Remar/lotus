@@ -346,26 +346,26 @@ bool Grail::contains(int src, int trg) {
       g[src].post->size() == 0 || g[trg].post->size() == 0) {
     return false;
   }
-  //	std::cout << g[src].pre->size() << std::endl;
-  //	std::cout << g[src].post->size() << std::endl;
-  //	std::cout << g[trg].pre->size() << std::endl;
-  //	std::cout << g[trg].post->size() << std::endl;
+  //	std::cout << g[src].pre->size() << '\n';
+  //	std::cout << g[src].post->size() << '\n';
+  //	std::cout << g[trg].pre->size() << '\n';
+  //	std::cout << g[trg].post->size() << '\n';
 
   //	for(int i = 0; i < g[src].pre->size(); i++){
-  //		std::cout << g[src].pre->at(i) << std::endl;
+  //		std::cout << g[src].pre->at(i) << '\n';
   //	}
   //	cout << '\n';
   //	for(int i = 0; i < g[trg].pre->size(); i++){
-  //		std::cout << g[trg].pre->at(i) << std::endl;
+  //		std::cout << g[trg].pre->at(i) << '\n';
   //	}
   //	cout << '\n';
   //
   //	for(int i = 0; i < g[src].post->size(); i++){
-  //		std::cout << g[src].post->at(i) << std::endl;
+  //		std::cout << g[src].post->at(i) << '\n';
   //	}
   //	cout << '\n';
   //	for(int i = 0; i < g[trg].post->size(); i++){
-  //		std::cout << g[trg].post->at(i) << std::endl;
+  //		std::cout << g[trg].post->at(i) << '\n';
   //	}
 
   int i, j;

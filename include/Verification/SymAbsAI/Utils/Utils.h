@@ -42,8 +42,6 @@ using std::make_unique;
 using std::shared_ptr;
 using std::unique_ptr;
 
-using std::endl;
-
 // forward declarations
 class AbstractValue;
 class Analyzer;

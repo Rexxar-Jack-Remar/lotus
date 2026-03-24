@@ -1,4 +1,5 @@
 #include "IR/GVFG/GuardedValueFlowNodes.h"
+
 #include "IR/GVFG/GuardedValueFlowSites.h"
 
 #include <algorithm>
@@ -8,8 +9,8 @@ using namespace lotus::gvfg;
 
 namespace {
 
-static bool isArithmeticFlowOpcode(
-    GuardedValueFlowOpcodeNode::OpcodeKind opcode_kind) {
+static bool
+isArithmeticFlowOpcode(GuardedValueFlowOpcodeNode::OpcodeKind opcode_kind) {
   switch (opcode_kind) {
   case GuardedValueFlowOpcodeNode::OpcodeKind::URem:
   case GuardedValueFlowOpcodeNode::OpcodeKind::FRem:
@@ -95,14 +96,13 @@ GuardedValueFlowNode::GuardedValueFlowNode(Kind kind, Type *type,
       llvm_value_(llvm_value), dbg_inst_(dbg_inst) {}
 
 void GuardedValueFlowNode::addChild(GuardedValueFlowNode *child,
-                                    float confidence,
-                                    ConditionRef condition) {
+                                    float confidence, ConditionRef condition) {
   if (!child)
     return;
   children_.push_back({child, confidence, condition});
-  auto parent_it = std::find_if(
-      child->parents_.begin(), child->parents_.end(),
-      [&](const Edge &edge) { return edge.target == this; });
+  auto parent_it =
+      std::find_if(child->parents_.begin(), child->parents_.end(),
+                   [&](const Edge &edge) { return edge.target == this; });
   if (parent_it != child->parents_.end()) {
     parent_it->confidence = confidence;
     parent_it->condition = condition;
@@ -116,12 +116,11 @@ void GuardedValueFlowNode::clearChildren() {
     if (!edge.target)
       continue;
     auto &parents = edge.target->parents_;
-    parents.erase(
-        std::remove_if(parents.begin(), parents.end(),
-                       [&](const Edge &parent_edge) {
-                         return parent_edge.target == this;
-                       }),
-        parents.end());
+    parents.erase(std::remove_if(parents.begin(), parents.end(),
+                                 [&](const Edge &parent_edge) {
+                                   return parent_edge.target == this;
+                                 }),
+                  parents.end());
   }
   children_.clear();
 }
@@ -163,8 +162,7 @@ void GuardedValueFlowNode::addMatchingRegion(GuardedValueFlowNode *producer,
   matching_regions_.push_back({producer, region, provenance});
 }
 
-GuardedValueFlowRegionNode *
-GuardedValueFlowNode::getMatchingRegion(
+GuardedValueFlowRegionNode *GuardedValueFlowNode::getMatchingRegion(
     const GuardedValueFlowNode *producer) const {
   for (const auto &entry : matching_regions_) {
     if (entry.producer == producer)
@@ -199,8 +197,7 @@ void GuardedValueFlowReturnNode::addReturnValueSitePair(
     addUseSite(site);
 }
 
-GuardedValueFlowReturnSite *
-GuardedValueFlowReturnNode::getReturnSite(
+GuardedValueFlowReturnSite *GuardedValueFlowReturnNode::getReturnSite(
     const GuardedValueFlowNode *value_node) const {
   auto it = return_sites_.find(value_node);
   return it == return_sites_.end() ? nullptr : it->second;

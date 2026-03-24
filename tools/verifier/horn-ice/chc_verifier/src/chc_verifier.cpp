@@ -240,7 +240,7 @@ void learn2(z3::context &ctx, const problem &p, bool do_horndini_prephase,
   std::cout << "Success (checked " << checked_chcs << " CHCs, invoked learner "
             << learner_invocations << " times)" << '\n';
   for (const auto &c : previous_conjectures) {
-    std::cout << c.first << " => " << c.second << std::endl;
+    std::cout << c.first << " => " << c.second << '\n';
   }
 }
 

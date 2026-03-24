@@ -3,15 +3,15 @@
 #include "IR/GVFG/GuardedValueFlowNodes.h"
 #include "IR/GVFG/GuardedValueFlowSites.h"
 
+#include <map>
+#include <memory>
+#include <unordered_map>
+
 #include <llvm/ADT/ArrayRef.h>
 #include <llvm/ADT/DenseMap.h>
 #include <llvm/ADT/StringRef.h>
 #include <llvm/IR/Argument.h>
 #include <llvm/Pass.h>
-
-#include <map>
-#include <memory>
-#include <unordered_map>
 
 namespace lotus {
 namespace gvfg {
@@ -25,10 +25,10 @@ using llvm::Function;
 using llvm::Instruction;
 using llvm::Module;
 using llvm::ModulePass;
+using llvm::path_cond_t;
 using llvm::StringRef;
 using llvm::Type;
 using llvm::Value;
-using llvm::path_cond_t;
 
 // GuardedValueFlowGraph stores one function's value, memory, and path-sensitive
 // structure after the structural builder and optional LotusAA adapter have run.
@@ -68,7 +68,8 @@ public:
 
   Function *getBaseFunction() const { return base_function_; }
 
-  template <typename NodeT, typename... Args> NodeT *createNode(Args &&...args) {
+  template <typename NodeT, typename... Args>
+  NodeT *createNode(Args &&...args) {
     auto node = std::make_unique<NodeT>(std::forward<Args>(args)...);
     NodeT *raw = node.get();
     raw->node_id_ = next_node_id_++;
@@ -77,7 +78,8 @@ public:
     return raw;
   }
 
-  template <typename SiteT, typename... Args> SiteT *createSite(Args &&...args) {
+  template <typename SiteT, typename... Args>
+  SiteT *createSite(Args &&...args) {
     auto site = std::make_unique<SiteT>(std::forward<Args>(args)...);
     SiteT *raw = site.get();
     sites_.push_back(std::move(site));
@@ -137,12 +139,14 @@ public:
                                             Instruction *inst) const;
   void mapStoreMemoryNode(Value *value, Instruction *inst,
                           GuardedValueFlowNode *node);
-  GuardedValueFlowNode *findOrCreateStoreMemoryNode(
-      Value *value, Instruction *inst, Type *type, BasicBlock *block,
-      StringRef description = "store.mem");
-  GuardedValueFlowNode *createAnonymousStoreMemoryNode(
-      Type *type, BasicBlock *block, Instruction *inst,
-      StringRef description = "store.mem");
+  GuardedValueFlowNode *
+  findOrCreateStoreMemoryNode(Value *value, Instruction *inst, Type *type,
+                              BasicBlock *block,
+                              StringRef description = "store.mem");
+  GuardedValueFlowNode *
+  createAnonymousStoreMemoryNode(Type *type, BasicBlock *block,
+                                 Instruction *inst,
+                                 StringRef description = "store.mem");
 
   GuardedValueFlowReturnSite *findReturnSite(Instruction *inst) const;
   void mapReturnSite(Instruction *inst, GuardedValueFlowReturnSite *site);
@@ -157,17 +161,20 @@ public:
   GuardedValueFlowNode *getPseudoArgument(unsigned idx) const;
   GuardedValueFlowReturnNode *getPseudoReturn(unsigned idx) const;
   GuardedValueFlowNode *findFunctionSummaryArgumentNode(unsigned ap_depth,
-                                                       Value *source) const;
+                                                        Value *source) const;
   void mapFunctionSummaryArgumentNode(unsigned ap_depth, Value *source,
                                       GuardedValueFlowNode *node);
   GuardedValueFlowNode *findFunctionSummaryReturnNode(unsigned ap_depth) const;
   void mapFunctionSummaryReturnNode(unsigned ap_depth,
                                     GuardedValueFlowNode *node);
   void resetFunctionSummaryInterface();
-  void registerSummaryArgumentNode(unsigned ap_depth, GuardedValueFlowNode *node);
+  void registerSummaryArgumentNode(unsigned ap_depth,
+                                   GuardedValueFlowNode *node);
   void registerSummaryReturnNode(unsigned ap_depth, GuardedValueFlowNode *node);
-  ArrayRef<GuardedValueFlowNode *> getSummaryArgumentNodes(unsigned ap_depth) const;
-  ArrayRef<GuardedValueFlowNode *> getSummaryReturnNodes(unsigned ap_depth) const;
+  ArrayRef<GuardedValueFlowNode *>
+  getSummaryArgumentNodes(unsigned ap_depth) const;
+  ArrayRef<GuardedValueFlowNode *>
+  getSummaryReturnNodes(unsigned ap_depth) const;
   void refreshNodeRegions();
 
   void addDiagnostic(Diagnostic diagnostic);
@@ -201,8 +208,12 @@ public:
   std::vector<CallTargetInfo>
   getResolvedCallTargets(const GuardedValueFlowCallSite *site) const;
 
-  ArrayRef<std::unique_ptr<GuardedValueFlowNode>> nodes() const { return nodes_; }
-  ArrayRef<std::unique_ptr<GuardedValueFlowSite>> sites() const { return sites_; }
+  ArrayRef<std::unique_ptr<GuardedValueFlowNode>> nodes() const {
+    return nodes_;
+  }
+  ArrayRef<std::unique_ptr<GuardedValueFlowSite>> sites() const {
+    return sites_;
+  }
 
 private:
   struct PointerPairLess {
@@ -257,19 +268,22 @@ private:
   std::map<std::pair<unsigned, Value *>, GuardedValueFlowNode *>
       function_summary_argument_nodes_;
   std::map<unsigned, GuardedValueFlowNode *> function_summary_return_nodes_;
-  std::map<unsigned, std::vector<GuardedValueFlowNode *>> summary_argument_nodes_;
+  std::map<unsigned, std::vector<GuardedValueFlowNode *>>
+      summary_argument_nodes_;
   std::map<unsigned, std::vector<GuardedValueFlowNode *>> summary_return_nodes_;
   std::map<std::pair<Value *, Instruction *>, GuardedValueFlowNode *,
            PointerPairLess>
       store_memory_nodes_;
-  std::map<std::pair<GuardedValueFlowNode *, bool>, GuardedValueFlowRegionNode *,
-           NodeBoolPairLess>
+  std::map<std::pair<GuardedValueFlowNode *, bool>,
+           GuardedValueFlowRegionNode *, NodeBoolPairLess>
       unit_regions_;
-  std::map<std::pair<GuardedValueFlowRegionNode *, GuardedValueFlowRegionNode *>,
-           GuardedValueFlowRegionNode *, RegionPairLess>
+  std::map<
+      std::pair<GuardedValueFlowRegionNode *, GuardedValueFlowRegionNode *>,
+      GuardedValueFlowRegionNode *, RegionPairLess>
       and_regions_;
-  std::map<std::pair<GuardedValueFlowRegionNode *, GuardedValueFlowRegionNode *>,
-           GuardedValueFlowRegionNode *, RegionPairLess>
+  std::map<
+      std::pair<GuardedValueFlowRegionNode *, GuardedValueFlowRegionNode *>,
+      GuardedValueFlowRegionNode *, RegionPairLess>
       or_regions_;
   DenseMap<GuardedValueFlowRegionNode *, GuardedValueFlowRegionNode *>
       not_regions_;

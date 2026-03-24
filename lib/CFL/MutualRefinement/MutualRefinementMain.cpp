@@ -1,6 +1,6 @@
-#include "CFL/MutualRefinement/grammar.h"
-#include "CFL/MutualRefinement/graph.h"
-#include "CFL/MutualRefinement/hasher.h"
+#include "CFL/MutualRefinement/Grammar.h"
+#include "CFL/MutualRefinement/Graph.h"
+#include "CFL/MutualRefinement/Hasher.h"
 #include <cassert>
 #include <cctype>
 #include <chrono>

@@ -5,13 +5,13 @@
 #include "Solvers/SMT/LIBSMT/SMTSolver.h"
 #include "Utils/ADT/PushPopCache.h"
 
-#include <llvm/IR/BasicBlock.h>
-#include <llvm/IR/Dominators.h>
-
 #include <string>
 #include <unordered_map>
 #include <unordered_set>
 #include <vector>
+
+#include <llvm/IR/BasicBlock.h>
+#include <llvm/IR/Dominators.h>
 
 namespace lotus {
 namespace gvfg {
@@ -34,7 +34,8 @@ public:
 
 protected:
   std::unordered_map<const GuardedValueFlowNode *, SMTExpr> NodeExprMap;
-  std::unordered_map<std::string, const GuardedValueFlowNode *> NodeSymbolNameMap;
+  std::unordered_map<std::string, const GuardedValueFlowNode *>
+      NodeSymbolNameMap;
 
   const DataLayout &DL;
 
@@ -43,25 +44,25 @@ public:
   virtual ~GuardedValueFlowSolver();
 
   SMTExprVec getCtrlDeps(const GuardedValueFlowNode *node,
-                        const QueryContext *context = nullptr);
+                         const QueryContext *context = nullptr);
   SMTExprVec getCtrlDeps(BasicBlock *block, const GuardedValueFlowGraph *graph,
-                        const QueryContext *context = nullptr);
+                         const QueryContext *context = nullptr);
   std::pair<SMTExprVec, SMTExprVec>
   getCtrlDepsPair(BasicBlock *block, const GuardedValueFlowGraph *graph,
                   const QueryContext *context = nullptr);
 
   SMTExprVec getDataDeps(const GuardedValueFlowNode *node,
-                        const QueryContext *context = nullptr);
+                         const QueryContext *context = nullptr);
 
   SMTExprVec getPhiGated(const GuardedValueFlowPhiNode *phi_node,
-                        GuardedValueFlowPhiNode::Incoming incoming,
-                        const QueryContext *context = nullptr);
+                         GuardedValueFlowPhiNode::Incoming incoming,
+                         const QueryContext *context = nullptr);
   SMTExprVec getPhiGated(const GuardedValueFlowPhiNode *phi_node,
-                        const GuardedValueFlowNode *value, BasicBlock *block,
-                        const QueryContext *context = nullptr);
+                         const GuardedValueFlowNode *value, BasicBlock *block,
+                         const QueryContext *context = nullptr);
   SMTExprVec getPhiGated(const GuardedValueFlowPhiNode *phi_node,
-                        const GuardedValueFlowNode *value,
-                        const QueryContext *context = nullptr);
+                         const GuardedValueFlowNode *value,
+                         const QueryContext *context = nullptr);
 
   virtual SMTExprVec getDeps(const GuardedValueFlowNode *node,
                              const GuardedValueFlowNode *child);
@@ -93,16 +94,20 @@ public:
   SMTExpr getOrInsertExpr(const GuardedValueFlowNode *node);
 
   SMTExpr encodeOpcodeNode(const GuardedValueFlowOpcodeNode *node);
-  virtual SMTExpr encodeBinaryOpcodeNode(const GuardedValueFlowOpcodeNode *node);
-  virtual SMTExpr encodeCompareOpcodeNode(const GuardedValueFlowOpcodeNode *node);
+  virtual SMTExpr
+  encodeBinaryOpcodeNode(const GuardedValueFlowOpcodeNode *node);
+  virtual SMTExpr
+  encodeCompareOpcodeNode(const GuardedValueFlowOpcodeNode *node);
   virtual SMTExpr encodeCastOpcodeNode(const GuardedValueFlowOpcodeNode *node);
   virtual SMTExpr encodeGEPOpcodeNode(const GuardedValueFlowOpcodeNode *node);
   virtual SMTExpr
   encodeExtractElementOpcodeNode(const GuardedValueFlowOpcodeNode *node);
   virtual SMTExpr
   encodeInsertElementOpcodeNode(const GuardedValueFlowOpcodeNode *node);
-  virtual SMTExpr encodeSelectOpcodeNode(const GuardedValueFlowOpcodeNode *node);
-  virtual SMTExpr encodeConcatOpcodeNode(const GuardedValueFlowOpcodeNode *node);
+  virtual SMTExpr
+  encodeSelectOpcodeNode(const GuardedValueFlowOpcodeNode *node);
+  virtual SMTExpr
+  encodeConcatOpcodeNode(const GuardedValueFlowOpcodeNode *node);
 
 protected:
   PushPopCache<const GuardedValueFlowNode *> ConstraintCache;
@@ -115,8 +120,8 @@ protected:
   computePhiGatedPair(const GuardedValueFlowPhiNode *phi_node,
                       GuardedValueFlowPhiNode::Incoming incoming,
                       const QueryContext *context);
-  virtual SMTExprVec
-  computeDataDeps(const GuardedValueFlowNode *node, const QueryContext *context);
+  virtual SMTExprVec computeDataDeps(const GuardedValueFlowNode *node,
+                                     const QueryContext *context);
 
 private:
   PushPopCache<const GuardedValueFlowNode *> FunctionArgumentCache;
@@ -128,12 +133,11 @@ private:
 
   std::pair<SMTExprVec, SMTExprVec>
   _getCtrlDeps(BasicBlock *block, const GuardedValueFlowGraph *graph,
-                size_t depth = 0);
+               size_t depth = 0);
   std::pair<SMTExprVec, SMTExprVec>
   _getPhiGated(const GuardedValueFlowPhiNode *phi_node,
-                GuardedValueFlowPhiNode::Incoming incoming);
-  SMTExprVec _getDataDeps(const GuardedValueFlowNode *node,
-                           size_t depth = 0);
+               GuardedValueFlowPhiNode::Incoming incoming);
+  SMTExprVec _getDataDeps(const GuardedValueFlowNode *node, size_t depth = 0);
 };
 
 // Dominator-aware variant that suppresses control constraints already implied
@@ -162,23 +166,22 @@ protected:
   computePhiGatedPair(const GuardedValueFlowPhiNode *phi_node,
                       GuardedValueFlowPhiNode::Incoming incoming,
                       const QueryContext *context) override;
-  SMTExprVec
-  computeDataDeps(const GuardedValueFlowNode *node,
-                  const QueryContext *context) override;
+  SMTExprVec computeDataDeps(const GuardedValueFlowNode *node,
+                             const QueryContext *context) override;
 
 private:
   std::pair<SMTExprVec, SMTExprVec>
   _getCtrlDepsWrapper(BasicBlock *block, const GuardedValueFlowGraph *graph,
-                       BasicBlock *prev_block);
+                      BasicBlock *prev_block);
   std::pair<SMTExprVec, SMTExprVec>
   _getCtrlDeps(BasicBlock *block, const GuardedValueFlowGraph *graph,
-                BasicBlock *prev_block);
+               BasicBlock *prev_block);
   std::pair<SMTExprVec, SMTExprVec>
   _getPhiGated(const GuardedValueFlowPhiNode *phi_node,
-                GuardedValueFlowPhiNode::Incoming incoming,
-                BasicBlock *prev_block);
+               GuardedValueFlowPhiNode::Incoming incoming,
+               BasicBlock *prev_block);
   SMTExprVec _getDataDeps(const GuardedValueFlowNode *node,
-                           BasicBlock *prev_block);
+                          BasicBlock *prev_block);
 };
 
 } // namespace gvfg

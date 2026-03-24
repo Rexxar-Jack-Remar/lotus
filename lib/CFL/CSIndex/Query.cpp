@@ -249,9 +249,9 @@ vector<string> Query::makeggfilename(const char *filestem) {
   int ps = (int)(preselectratio * 1000);
   filestr += "." + to_string(epsilon) + to_string(ps);
   string gatefilename = filestr + "gates";
-  //	std::cout << "gates file name: " << gatefilename << std::endl;
+  //	std::cout << "gates file name: " << gatefilename << '\n';
   string ggfilename = filestr + "gg";
-  //	std::cout << "gg file name: " << ggfilename << std::endl;
+  //	std::cout << "gg file name: " << ggfilename << '\n';
   vector<string> result;
   result.push_back(gatefilename);
   result.push_back(ggfilename);

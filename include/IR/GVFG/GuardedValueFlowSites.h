@@ -2,15 +2,15 @@
 
 #include "IR/GVFG/ConditionRef.h"
 
-#include <llvm/ADT/ArrayRef.h>
-#include <llvm/IR/BasicBlock.h>
-#include <llvm/IR/Function.h>
-#include <llvm/IR/Instruction.h>
-
 #include <algorithm>
 #include <map>
 #include <set>
 #include <vector>
+
+#include <llvm/ADT/ArrayRef.h>
+#include <llvm/IR/BasicBlock.h>
+#include <llvm/IR/Function.h>
+#include <llvm/IR/Instruction.h>
 
 namespace lotus {
 namespace gvfg {
@@ -114,7 +114,8 @@ public:
   void setCalleeCondition(Function *callee, ConditionRef condition,
                           GuardedValueFlowRegionNode *region = nullptr);
   bool hasCalleeCondition(Function *callee) const {
-    return callee && callee_conditions_.find(callee) != callee_conditions_.end();
+    return callee &&
+           callee_conditions_.find(callee) != callee_conditions_.end();
   }
   ConditionRef getCalleeCondition(Function *callee) const {
     auto it = callee_conditions_.find(callee);
@@ -147,10 +148,13 @@ private:
 
 class GuardedValueFlowDereferenceSite : public GuardedValueFlowSite {
 public:
-  GuardedValueFlowDereferenceSite(GuardedValueFlowGraph *graph, Instruction *inst)
+  GuardedValueFlowDereferenceSite(GuardedValueFlowGraph *graph,
+                                  Instruction *inst)
       : GuardedValueFlowSite(Kind::DereferenceSite, graph, inst) {}
 
-  void setPointerOperand(GuardedValueFlowNode *node) { pointer_operand_ = node; }
+  void setPointerOperand(GuardedValueFlowNode *node) {
+    pointer_operand_ = node;
+  }
   void setValueOperand(GuardedValueFlowNode *node) { value_operand_ = node; }
   GuardedValueFlowNode *getPointerOperand() const { return pointer_operand_; }
   GuardedValueFlowNode *getValueOperand() const { return value_operand_; }
@@ -174,9 +178,13 @@ public:
                                    Instruction *inst)
       : GuardedValueFlowSite(Kind::GEP, graph, inst) {}
 
-  void setPointerOperand(GuardedValueFlowNode *node) { pointer_operand_ = node; }
+  void setPointerOperand(GuardedValueFlowNode *node) {
+    pointer_operand_ = node;
+  }
   GuardedValueFlowNode *getPointerOperand() const { return pointer_operand_; }
-  void addOffsetOperand(GuardedValueFlowNode *node) { offset_operands_.push_back(node); }
+  void addOffsetOperand(GuardedValueFlowNode *node) {
+    offset_operands_.push_back(node);
+  }
   ArrayRef<GuardedValueFlowNode *> getOffsetOperands() const {
     return offset_operands_;
   }

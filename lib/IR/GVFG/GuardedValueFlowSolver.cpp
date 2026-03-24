@@ -1,5 +1,7 @@
 #include "IR/GVFG/GuardedValueFlowSolver.h"
 
+#include <climits>
+
 #include <llvm/ADT/StringExtras.h>
 #include <llvm/ADT/Twine.h>
 #include <llvm/IR/Constants.h>
@@ -8,28 +10,29 @@
 #include <llvm/Support/CommandLine.h>
 #include <llvm/Support/Debug.h>
 
-#include <climits>
-
 using namespace llvm;
 using namespace lotus::gvfg;
 
 #define DEBUG_TYPE "gvfg-solver"
 
-static cl::opt<unsigned>
-    GVFGDDMaxDepth("gvfg-solver-dd-max-depth", cl::init(UINT_MAX),
-                   cl::desc("The max searching depth for guarded value-flow data dependencies."));
+static cl::opt<unsigned> GVFGDDMaxDepth(
+    "gvfg-solver-dd-max-depth", cl::init(UINT_MAX),
+    cl::desc(
+        "The max searching depth for guarded value-flow data dependencies."));
 
 static cl::opt<unsigned>
     GVFGCDMaxDepth("gvfg-solver-cd-max-depth", cl::init(UINT_MAX),
-                   cl::desc("The max searching depth for guarded value-flow control dependencies."));
+                   cl::desc("The max searching depth for guarded value-flow "
+                            "control dependencies."));
 
 static cl::opt<bool> GVFGUseRegionAsCtrlDep(
     "gvfg-solver-use-region", cl::init(false),
     cl::desc("Use region nodes directly when computing control dependencies."));
 
-static cl::opt<bool> GVFGIgnoreBitVecOverflow(
-    "gvfg-solver-ignore-bv-overflow", cl::init(true),
-    cl::desc("Ignore bitvector overflow heuristically for mul/div/shift operations."));
+static cl::opt<bool>
+    GVFGIgnoreBitVecOverflow("gvfg-solver-ignore-bv-overflow", cl::init(true),
+                             cl::desc("Ignore bitvector overflow heuristically "
+                                      "for mul/div/shift operations."));
 
 namespace {
 
@@ -70,7 +73,7 @@ static std::string buildNodeSymbol(const GuardedValueFlowNode *node) {
 }
 
 static bool shouldExcludeSummaryBackedChild(const GuardedValueFlowNode *current,
-                                           const GuardedValueFlowNode *child) {
+                                            const GuardedValueFlowNode *child) {
   if (!current || !child ||
       current->getKind() != GuardedValueFlowNode::Kind::LoadMemory) {
     return false;
@@ -147,9 +150,10 @@ SMTExprVec GuardedValueFlowSolver::getCtrlDeps(const GuardedValueFlowNode *node,
   return getCtrlDeps(block, graph, context);
 }
 
-SMTExprVec GuardedValueFlowSolver::getCtrlDeps(BasicBlock *block,
-                                               const GuardedValueFlowGraph *graph,
-                                               const QueryContext *context) {
+SMTExprVec
+GuardedValueFlowSolver::getCtrlDeps(BasicBlock *block,
+                                    const GuardedValueFlowGraph *graph,
+                                    const QueryContext *context) {
   auto pair = getCtrlDepsPair(block, graph, context);
   return SMTExprVec::merge(pair.first.copy(), pair.second);
 }
@@ -161,9 +165,10 @@ GuardedValueFlowSolver::getCtrlDepsPair(BasicBlock *block,
   return computeCtrlDepsPair(block, graph, context);
 }
 
-SMTExprVec GuardedValueFlowSolver::getPhiGated(
-    const GuardedValueFlowPhiNode *phi_node,
-    GuardedValueFlowPhiNode::Incoming incoming, const QueryContext *context) {
+SMTExprVec
+GuardedValueFlowSolver::getPhiGated(const GuardedValueFlowPhiNode *phi_node,
+                                    GuardedValueFlowPhiNode::Incoming incoming,
+                                    const QueryContext *context) {
   auto pair = computePhiGatedPair(phi_node, incoming, context);
   return SMTExprVec::merge(pair.first.copy(), pair.second);
 }
@@ -178,9 +183,10 @@ SMTExprVec GuardedValueFlowSolver::getPhiGated(
   llvm_unreachable("Requested PHI gating for a non-incoming value/block pair");
 }
 
-SMTExprVec GuardedValueFlowSolver::getPhiGated(
-    const GuardedValueFlowPhiNode *phi_node, const GuardedValueFlowNode *value,
-    const QueryContext *context) {
+SMTExprVec
+GuardedValueFlowSolver::getPhiGated(const GuardedValueFlowPhiNode *phi_node,
+                                    const GuardedValueFlowNode *value,
+                                    const QueryContext *context) {
   SMTExprVec gated = Factory->createEmptySMTExprVec();
   SMTExprVec ors = Factory->createEmptySMTExprVec();
   for (const auto &incoming : phi_node->incoming()) {
@@ -196,14 +202,15 @@ SMTExprVec GuardedValueFlowSolver::getDataDeps(const GuardedValueFlowNode *node,
   return computeDataDeps(node, context);
 }
 
-SMTExpr GuardedValueFlowSolver::getOrInsertExpr(
-    const GuardedValueFlowNode *node) {
+SMTExpr
+GuardedValueFlowSolver::getOrInsertExpr(const GuardedValueFlowNode *node) {
   assert(node);
 
   if (isa<GuardedValueFlowArgumentNode>(node) &&
       !FunctionArgumentCache.contains(node)) {
     FunctionArgumentCache.add(node);
-  } else if (auto *call_output = dyn_cast<GuardedValueFlowCallOutputNode>(node)) {
+  } else if (auto *call_output =
+                 dyn_cast<GuardedValueFlowCallOutputNode>(node)) {
     if (!CallSiteOutputCache.contains(call_output))
       CallSiteOutputCache.add(call_output);
   }
@@ -219,13 +226,14 @@ SMTExpr GuardedValueFlowSolver::getOrInsertExpr(
   if (isTerminalNode(node) && !isa<GuardedValueFlowOpcodeNode>(node)) {
     if (Value *value = node->getLLVMValue()) {
       if (auto *constant_int = dyn_cast<ConstantInt>(value)) {
-        result =
-            Factory->createBitVecVal(llvm::toString(constant_int->getValue(), 10, false),
-                                     DL.getTypeSizeInBits(node->getType()));
+        result = Factory->createBitVecVal(
+            llvm::toString(constant_int->getValue(), 10, false),
+            DL.getTypeSizeInBits(node->getType()));
         NodeExprMap.insert({node, result});
         return result;
       }
-      if (isa<ConstantPointerNull>(value) || isa<ConstantAggregateZero>(value)) {
+      if (isa<ConstantPointerNull>(value) ||
+          isa<ConstantAggregateZero>(value)) {
         result =
             Factory->createBitVecVal(0, DL.getTypeSizeInBits(node->getType()));
         NodeExprMap.insert({node, result});
@@ -233,8 +241,9 @@ SMTExpr GuardedValueFlowSolver::getOrInsertExpr(
       }
       if (auto *constant_fp = dyn_cast<ConstantFP>(value)) {
         APInt bits = constant_fp->getValueAPF().bitcastToAPInt();
-        result = Factory->createBitVecVal(llvm::toString(bits, 10, false),
-                                          DL.getTypeSizeInBits(node->getType()));
+        result =
+            Factory->createBitVecVal(llvm::toString(bits, 10, false),
+                                     DL.getTypeSizeInBits(node->getType()));
         NodeExprMap.insert({node, result});
         return result;
       }
@@ -242,8 +251,8 @@ SMTExpr GuardedValueFlowSolver::getOrInsertExpr(
         Type *element_type = cds->getElementType();
         if (!element_type->isFloatTy() && !element_type->isDoubleTy() &&
             !element_type->isIntegerTy()) {
-          result = Factory->createBitVecConst(symbol,
-                                              DL.getTypeSizeInBits(node->getType()));
+          result = Factory->createBitVecConst(
+              symbol, DL.getTypeSizeInBits(node->getType()));
         } else {
           unsigned element_num = cds->getNumElements();
           uint64_t elem_size =
@@ -267,7 +276,8 @@ SMTExpr GuardedValueFlowSolver::getOrInsertExpr(
     }
   }
 
-  result = Factory->createBitVecConst(symbol, DL.getTypeSizeInBits(node->getType()));
+  result =
+      Factory->createBitVecConst(symbol, DL.getTypeSizeInBits(node->getType()));
   NodeExprMap.insert({node, result});
   return result;
 }
@@ -519,8 +529,10 @@ SMTExpr GuardedValueFlowSolver::encodeSelectOpcodeNode(
   SMTExpr cond = getOrInsertExpr(node->children()[0].target);
   SMTExpr true_value = getOrInsertExpr(node->children()[1].target);
   SMTExpr false_value = getOrInsertExpr(node->children()[2].target);
-  unsigned elem_num = getVectorElementCount(node->children()[0].target->getType());
-  return getOrInsertExpr(node) == cond.array_ite(true_value, false_value, elem_num);
+  unsigned elem_num =
+      getVectorElementCount(node->children()[0].target->getType());
+  return getOrInsertExpr(node) ==
+         cond.array_ite(true_value, false_value, elem_num);
 }
 
 SMTExpr GuardedValueFlowSolver::encodeExtractElementOpcodeNode(
@@ -529,7 +541,8 @@ SMTExpr GuardedValueFlowSolver::encodeExtractElementOpcodeNode(
   SMTExpr vec = getOrInsertExpr(node->children()[0].target);
   const GuardedValueFlowNode *index_node = node->children()[1].target;
   Value *index_value = index_node ? index_node->getLLVMValue() : nullptr;
-  unsigned elem_num = getVectorElementCount(node->children()[0].target->getType());
+  unsigned elem_num =
+      getVectorElementCount(node->children()[0].target->getType());
 
   if (auto *constant_index = dyn_cast_or_null<ConstantInt>(index_value))
     return self == vec.array_elmt(elem_num, constant_index->getZExtValue());
@@ -607,21 +620,21 @@ std::pair<SMTExprVec, SMTExprVec> GuardedValueFlowSolver::_getPhiGated(
   if (incoming.condition_node) {
     SMTExpr cond_expr = getOrInsertExpr(incoming.condition_node).bv12bool();
     gated_ctrl.push_back(incoming.condition_sense ? cond_expr : !cond_expr);
-    gated_data = SMTExprVec::merge(gated_data, _getDataDeps(incoming.condition_node));
+    gated_data =
+        SMTExprVec::merge(gated_data, _getDataDeps(incoming.condition_node));
   }
   return {gated_ctrl, gated_data};
 }
 
 std::pair<SMTExprVec, SMTExprVec>
-GuardedValueFlowSolver::computeCtrlDepsPair(
-    BasicBlock *block, const GuardedValueFlowGraph *graph,
-    const QueryContext *context) {
+GuardedValueFlowSolver::computeCtrlDepsPair(BasicBlock *block,
+                                            const GuardedValueFlowGraph *graph,
+                                            const QueryContext *context) {
   (void)context;
   return _getCtrlDeps(block, graph);
 }
 
-std::pair<SMTExprVec, SMTExprVec>
-GuardedValueFlowSolver::computePhiGatedPair(
+std::pair<SMTExprVec, SMTExprVec> GuardedValueFlowSolver::computePhiGatedPair(
     const GuardedValueFlowPhiNode *phi_node,
     GuardedValueFlowPhiNode::Incoming incoming, const QueryContext *context) {
   (void)context;
@@ -640,9 +653,11 @@ std::pair<SMTExprVec, SMTExprVec> GuardedValueFlowSolver::_getCtrlDeps(
   assert(block && graph);
 
   if (GVFGUseRegionAsCtrlDep.getValue()) {
-    auto *region = const_cast<GuardedValueFlowGraph *>(graph)->findRegion(block);
+    auto *region =
+        const_cast<GuardedValueFlowGraph *>(graph)->findRegion(block);
     if (!region)
-      region = const_cast<GuardedValueFlowGraph *>(graph)->getAlwaysTrueRegion();
+      region =
+          const_cast<GuardedValueFlowGraph *>(graph)->getAlwaysTrueRegion();
     SMTExprVec ctrl = Factory->createEmptySMTExprVec();
     SMTExprVec data = _getDataDeps(region);
     ctrl.push_back(getOrInsertExpr(region).bv12bool());
@@ -652,7 +667,8 @@ std::pair<SMTExprVec, SMTExprVec> GuardedValueFlowSolver::_getCtrlDeps(
   if (depth >= GVFGCDMaxDepth) {
     SMTExprVec ctrl = Factory->createEmptySMTExprVec();
     SMTExprVec data = Factory->createEmptySMTExprVec();
-    ctrl.push_back(Factory->createBoolConst((Twine("BB") + Twine(reinterpret_cast<uintptr_t>(block))).str()));
+    ctrl.push_back(Factory->createBoolConst(
+        (Twine("BB") + Twine(reinterpret_cast<uintptr_t>(block))).str()));
     return {ctrl, data};
   }
 
@@ -665,7 +681,8 @@ std::pair<SMTExprVec, SMTExprVec> GuardedValueFlowSolver::_getCtrlDeps(
       return {ctrl, data};
 
     std::unordered_set<BasicBlock *> visited;
-    SmallVector<std::pair<const GuardedValueFlowGraph::BlockCondition *, size_t>, 8>
+    SmallVector<
+        std::pair<const GuardedValueFlowGraph::BlockCondition *, size_t>, 8>
         data_dep_nodes;
     for (const auto &cond : graph->getBlockConditions(block))
       data_dep_nodes.push_back({&cond, depth});
@@ -678,7 +695,8 @@ std::pair<SMTExprVec, SMTExprVec> GuardedValueFlowSolver::_getCtrlDeps(
         continue;
 
       visited.insert(data_dep_node->control_block);
-      data = SMTExprVec::merge(data, _getDataDeps(data_dep_node->condition_node));
+      data =
+          SMTExprVec::merge(data, _getDataDeps(data_dep_node->condition_node));
 
       BasicBlock *control_block = data_dep_node->control_block;
       if (control_block && !BBCache.contains(control_block)) {
@@ -719,8 +737,9 @@ std::pair<SMTExprVec, SMTExprVec> GuardedValueFlowSolver::_getCtrlDeps(
   return {ctrl, data};
 }
 
-SMTExprVec GuardedValueFlowSolver::_getDataDeps(const GuardedValueFlowNode *node,
-                                                 size_t depth) {
+SMTExprVec
+GuardedValueFlowSolver::_getDataDeps(const GuardedValueFlowNode *node,
+                                     size_t depth) {
   SMTExprVec ret = Factory->createEmptySMTExprVec();
   if (!node)
     return ret;
@@ -753,9 +772,9 @@ SMTExprVec GuardedValueFlowSolver::_getDataDeps(const GuardedValueFlowNode *node
       for (const auto &edge : return_node->children()) {
         auto *child = edge.target;
         auto *site = return_node->getReturnSite(child);
-        BasicBlock *site_block =
-            site && site->getInstruction() ? site->getInstruction()->getParent()
-                                           : return_node->getParentBasicBlock();
+        BasicBlock *site_block = site && site->getInstruction()
+                                     ? site->getInstruction()->getParent()
+                                     : return_node->getParentBasicBlock();
         auto gated = _getCtrlDeps(site_block, return_node->getGraph());
         ret.push_back(!gated.first.toAndExpr() ||
                       self == getOrInsertExpr(child));
@@ -767,7 +786,8 @@ SMTExprVec GuardedValueFlowSolver::_getDataDeps(const GuardedValueFlowNode *node
         if (!child || shouldExcludeSummaryBackedChild(node, child))
           continue;
         SMTExpr cond_expr = getMatchingRegionExpr(*this, node, child);
-        ret = SMTExprVec::merge(ret, _getDataDeps(node->getMatchingRegion(child)));
+        ret = SMTExprVec::merge(ret,
+                                _getDataDeps(node->getMatchingRegion(child)));
         ret.push_back((!cond_expr) || (self == getOrInsertExpr(child)));
       }
     }
@@ -810,7 +830,8 @@ SMTExprVec GuardedValueFlowSolver::getDeps(const GuardedValueFlowNode *node,
   SMTExprVec ret = Factory->createEmptySMTExprVec();
   if (isa<GuardedValueFlowOpcodeNode>(node) || !child) {
     if (auto *opcode_node = dyn_cast<GuardedValueFlowOpcodeNode>(node)) {
-      if (opcode_node->getOpcodeKind() == GuardedValueFlowOpcodeNode::OpcodeKind::Select &&
+      if (opcode_node->getOpcodeKind() ==
+              GuardedValueFlowOpcodeNode::OpcodeKind::Select &&
           child) {
         ConstraintCache.add(node);
         SMTExpr node_expr = getOrInsertExpr(node);
@@ -883,7 +904,8 @@ GuardedValueFlowSolver::getDepsPair(const GuardedValueFlowNode *node,
         ctrl.push_back(getOrInsertExpr(region).bv12bool());
     }
   } else if (auto *opcode_node = dyn_cast<GuardedValueFlowOpcodeNode>(node)) {
-    if (opcode_node->getOpcodeKind() == GuardedValueFlowOpcodeNode::OpcodeKind::Select &&
+    if (opcode_node->getOpcodeKind() ==
+            GuardedValueFlowOpcodeNode::OpcodeKind::Select &&
         child) {
       if (node->children()[1].target == child)
         ctrl.push_back(getOrInsertExpr(node->children()[0].target) == 1);
@@ -932,16 +954,14 @@ GuardedValueFlowSolver::SMTResultType GuardedValueFlowSolver::check() {
   return SMTSolver::check();
 }
 
-std::pair<SMTExprVec, SMTExprVec>
-DTGuardedValueFlowSolver::computeCtrlDepsPair(
+std::pair<SMTExprVec, SMTExprVec> DTGuardedValueFlowSolver::computeCtrlDepsPair(
     BasicBlock *block, const GuardedValueFlowGraph *graph,
     const QueryContext *context) {
   BasicBlock *prev_block = context ? context->previous_block : nullptr;
   return _getCtrlDepsWrapper(block, graph, prev_block);
 }
 
-std::pair<SMTExprVec, SMTExprVec>
-DTGuardedValueFlowSolver::computePhiGatedPair(
+std::pair<SMTExprVec, SMTExprVec> DTGuardedValueFlowSolver::computePhiGatedPair(
     const GuardedValueFlowPhiNode *phi_node,
     GuardedValueFlowPhiNode::Incoming incoming, const QueryContext *context) {
   assert(context && context->previous_block);
@@ -955,13 +975,12 @@ DTGuardedValueFlowSolver::computeDataDeps(const GuardedValueFlowNode *node,
   return _getDataDeps(node, context->previous_block);
 }
 
-std::pair<SMTExprVec, SMTExprVec>
-DTGuardedValueFlowSolver::_getPhiGated(
+std::pair<SMTExprVec, SMTExprVec> DTGuardedValueFlowSolver::_getPhiGated(
     const GuardedValueFlowPhiNode *phi_node,
     GuardedValueFlowPhiNode::Incoming incoming, BasicBlock *prev_block) {
   assert(prev_block && incoming.incoming_block);
   auto pair = _getCtrlDepsWrapper(incoming.incoming_block, phi_node->getGraph(),
-                                   prev_block);
+                                  prev_block);
   SMTExprVec ctrl = pair.first.copy();
   SMTExprVec data = pair.second;
   if (incoming.condition_node) {
@@ -973,8 +992,9 @@ DTGuardedValueFlowSolver::_getPhiGated(
   return {ctrl, data};
 }
 
-SMTExprVec DTGuardedValueFlowSolver::_getDataDeps(
-    const GuardedValueFlowNode *node, BasicBlock *prev_block) {
+SMTExprVec
+DTGuardedValueFlowSolver::_getDataDeps(const GuardedValueFlowNode *node,
+                                       BasicBlock *prev_block) {
   assert(prev_block);
   if (ConstraintCache.contains(node))
     return Factory->createEmptySMTExprVec();
@@ -1001,7 +1021,8 @@ SMTExprVec DTGuardedValueFlowSolver::_getDataDeps(
       if (!cases.empty())
         ret.push_back(cases.toOrExpr());
       for (const auto &edge : node->children()) {
-        if (edge.target && !shouldExcludeSummaryBackedChild(node, edge.target) &&
+        if (edge.target &&
+            !shouldExcludeSummaryBackedChild(node, edge.target) &&
             !isTerminalNode(edge.target))
           ret = SMTExprVec::merge(ret, _getDataDeps(edge.target, prev_block));
       }
@@ -1016,9 +1037,9 @@ SMTExprVec DTGuardedValueFlowSolver::_getDataDeps(
   return ret;
 }
 
-std::pair<SMTExprVec, SMTExprVec>
-DTGuardedValueFlowSolver::_getCtrlDepsWrapper(
-    BasicBlock *block, const GuardedValueFlowGraph *graph, BasicBlock *prev_block) {
+std::pair<SMTExprVec, SMTExprVec> DTGuardedValueFlowSolver::_getCtrlDepsWrapper(
+    BasicBlock *block, const GuardedValueFlowGraph *graph,
+    BasicBlock *prev_block) {
   if (!prev_block)
     prev_block = &block->getParent()->getEntryBlock();
 
@@ -1027,8 +1048,10 @@ DTGuardedValueFlowSolver::_getCtrlDepsWrapper(
   return _getCtrlDeps(block, graph, prev_block);
 }
 
-std::pair<SMTExprVec, SMTExprVec> DTGuardedValueFlowSolver::_getCtrlDeps(
-    BasicBlock *block, const GuardedValueFlowGraph *graph, BasicBlock *prev_block) {
+std::pair<SMTExprVec, SMTExprVec>
+DTGuardedValueFlowSolver::_getCtrlDeps(BasicBlock *block,
+                                       const GuardedValueFlowGraph *graph,
+                                       BasicBlock *prev_block) {
   assert(block && graph && prev_block && DT);
 
   SMTExprVec data = Factory->createEmptySMTExprVec();
@@ -1041,7 +1064,8 @@ std::pair<SMTExprVec, SMTExprVec> DTGuardedValueFlowSolver::_getCtrlDeps(
     BasicBlock *cached_prev = pair.second;
 
     if (!BBCache.contains(block)) {
-      SmallVector<const GuardedValueFlowGraph::BlockCondition *, 8> data_dep_nodes;
+      SmallVector<const GuardedValueFlowGraph::BlockCondition *, 8>
+          data_dep_nodes;
       DenseSet<BasicBlock *> visited;
       for (const auto &cond : graph->getBlockConditions(block)) {
         if (cond.control_block && DT->dominates(prev_block, cond.control_block))
@@ -1096,7 +1120,8 @@ std::pair<SMTExprVec, SMTExprVec> DTGuardedValueFlowSolver::_getCtrlDeps(
       BBCache.add(block);
       for (const auto &cond : block_conditions) {
         if (cond.control_block && DT->dominates(prev_block, cond.control_block))
-          data = SMTExprVec::merge(data, _getDataDeps(cond.condition_node, prev_block));
+          data = SMTExprVec::merge(
+              data, _getDataDeps(cond.condition_node, prev_block));
       }
     }
   }
@@ -1105,11 +1130,12 @@ std::pair<SMTExprVec, SMTExprVec> DTGuardedValueFlowSolver::_getCtrlDeps(
   return {ctrl, data};
 }
 
-SMTExprVec DTGuardedValueFlowSolver::getDeps(const GuardedValueFlowNode *node,
-                                             const GuardedValueFlowNode *child) {
+SMTExprVec
+DTGuardedValueFlowSolver::getDeps(const GuardedValueFlowNode *node,
+                                  const GuardedValueFlowNode *child) {
   BasicBlock *current_block = node->getParentBasicBlock();
-  BasicBlock *prev_block =
-      child ? child->getParentBasicBlock() : &current_block->getParent()->getEntryBlock();
+  BasicBlock *prev_block = child ? child->getParentBasicBlock()
+                                 : &current_block->getParent()->getEntryBlock();
 
   SMTExprVec ret = Factory->createEmptySMTExprVec();
   if (isa<GuardedValueFlowOpcodeNode>(node) || !child) {

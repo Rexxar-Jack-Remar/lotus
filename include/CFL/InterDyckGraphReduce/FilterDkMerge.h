@@ -1,7 +1,10 @@
+#ifndef filterDkMerge_h
+#define filterDkMerge_h
+
 #include "CFL/InterDyckGraphReduce/CFLReach.h"
 #include "CFL/InterDyckGraphReduce/FastDLL.h"
-//#include <bitset>
-//#include <deque>
+#include <bitset>
+#include <deque>
 #include <fstream>
 #include <iostream>
 #include <queue>
@@ -10,7 +13,7 @@
 #include <sys/time.h>
 #include <unordered_map>
 #include <utility>
-//#include <vector>
+#include <vector>
 
 using namespace std;
 
@@ -18,6 +21,7 @@ using namespace std;
 string edge_merge_result = "tmp_edge_merge_result.txt";
 string interNd_result =
     "tmp_dkMerge_nodes_representing_cannot_remove_edges.txt";
+string redmerge_result = "tmp_red_merge_result.txt";
 
 // yuanbo modify
 class MergedEdges {
@@ -27,7 +31,12 @@ public:
   unsigned bfrom;
   unsigned bto;
   unsigned eid;
-  MergedEdges(unsigned af, unsigned at, unsigned bf, unsigned bt, unsigned e) : afrom(af), ato(at), bfrom(bf), bto(bt), eid(e) {
+  MergedEdges(unsigned af, unsigned at, unsigned bf, unsigned bt, unsigned e) {
+    afrom = af;
+    ato = at;
+    bfrom = bf;
+    bto = bt;
+    eid = e;
   }
 };
 
@@ -40,7 +49,8 @@ int usearray = 1;
 // ifstream in("filelist/pldi2007/linux");
 
 string version = "Dyck Reach";
-string colorreach_graph = "tmp_color_reach_dk_graph.dot";
+// colorreach_graph already defined
+// string colorreach_graph = "tmp_color_reach_dk_graph.dot";
 
 // unsigned S_edge = 0;
 
@@ -473,17 +483,19 @@ void arrayreach(CFLHashMap &cm, unordered_map<string, unsigned> &edgeStrToID,
 
   unordered_map<unsigned, unsigned> mergedTo;
 
+  ofstream outNodeResult(redmerge_result);
   for (unordered_map<unsigned, list<unsigned>>::iterator sit = s_sets.begin();
        sit != s_sets.end(); sit++) {
     unsigned nid = sit->first;
-    // cout << "id " << nid << " has " << sit->second.size() << " nodes\n";
-    cout << nodeid2str[nid] << ": ";
+    // outNodeResult << "id " << nid << " has " << sit->second.size() << "
+    // nodes\n";
+    outNodeResult << nodeid2str[nid] << ": ";
     for (list<unsigned>::iterator listit = sit->second.begin();
          listit != sit->second.end(); listit++) {
       mergedTo[*listit] = nid;
-      cout << nodeid2str[*listit] << " ";
+      outNodeResult << nodeid2str[*listit] << " ";
     }
-    cout << '\n';
+    outNodeResult << '\n';
   }
 
   unordered_map<unsigned, string> edgeIDToStr;
@@ -604,7 +616,7 @@ int arrayversion() {
   return 0;
 }
 
-int main() {
+int dkmerge_main() {
 
   // readgrammar();
 
@@ -612,3 +624,4 @@ int main() {
 
   return 0;
 }
+#endif

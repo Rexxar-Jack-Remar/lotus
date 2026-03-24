@@ -1,5 +1,5 @@
-#include "CFL/MutualRefinement/grammar.h"
-#include "CFL/MutualRefinement/hasher.h"
+#include "CFL/MutualRefinement/Grammar.h"
+#include "CFL/MutualRefinement/Hasher.h"
 #include <utility>
 
 void Grammar::addTerminal(int t) { terminals.insert(t); }

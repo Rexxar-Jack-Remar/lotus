@@ -2,20 +2,19 @@
 
 #include "IR/GVFG/ConditionRef.h"
 
-#include <llvm/ADT/ArrayRef.h>
-#include <llvm/IR/BasicBlock.h>
-#include <llvm/IR/Function.h>
-#include <llvm/IR/Instruction.h>
-#include <llvm/IR/Type.h>
-#include <llvm/IR/Value.h>
-
+#include <cassert>
 #include <map>
 #include <memory>
 #include <string>
 #include <utility>
 #include <vector>
 
-#include <cassert>
+#include <llvm/ADT/ArrayRef.h>
+#include <llvm/IR/BasicBlock.h>
+#include <llvm/IR/Function.h>
+#include <llvm/IR/Instruction.h>
+#include <llvm/IR/Type.h>
+#include <llvm/IR/Value.h>
 
 namespace lotus {
 namespace gvfg {
@@ -26,9 +25,9 @@ using llvm::dyn_cast;
 using llvm::dyn_cast_or_null;
 using llvm::Function;
 using llvm::Instruction;
+using llvm::path_cond_t;
 using llvm::Type;
 using llvm::Value;
-using llvm::path_cond_t;
 
 class GuardedValueFlowGraph;
 class GuardedValueFlowSite;
@@ -149,7 +148,9 @@ public:
   void clearChildren();
   ArrayRef<Edge> children() const { return children_; }
   ArrayRef<Edge> parents() const { return parents_; }
-  unsigned getNumParents() const { return static_cast<unsigned>(parents_.size()); }
+  unsigned getNumParents() const {
+    return static_cast<unsigned>(parents_.size());
+  }
   bool containsParent(const GuardedValueFlowNode *parent) const;
   std::vector<GuardedValueFlowNode *>
   getValueFlowParents(bool enable_arithmetic_flow = false) const;
@@ -174,8 +175,7 @@ public:
                          ConditionRef provenance = ConditionRef::none());
   GuardedValueFlowRegionNode *
   getMatchingRegion(const GuardedValueFlowNode *producer) const;
-  ConditionRef
-  getMatchingCondition(const GuardedValueFlowNode *producer) const;
+  ConditionRef getMatchingCondition(const GuardedValueFlowNode *producer) const;
   void clearMatchingRegions() { matching_regions_.clear(); }
   ArrayRef<MatchingRegion> getMatchingRegions() const {
     return matching_regions_;
@@ -204,8 +204,8 @@ protected:
 class GuardedValueFlowArgumentNode : public GuardedValueFlowNode {
 public:
   GuardedValueFlowArgumentNode(Kind kind, Type *type,
-                               GuardedValueFlowGraph *graph,
-                               BasicBlock *block, Value *llvm_value)
+                               GuardedValueFlowGraph *graph, BasicBlock *block,
+                               Value *llvm_value)
       : GuardedValueFlowNode(kind, type, graph, block, llvm_value,
                              dyn_cast<Instruction>(llvm_value)) {}
 
@@ -303,14 +303,22 @@ public:
   GuardedValueFlowNode *getConditionNode() const { return condition_node_; }
   bool getConditionSense() const { return condition_sense_; }
   const ConditionRef &getRegionCondition() const { return region_condition_; }
-  Function *getInterfaceOwnerFunction() const { return interface_owner_function_; }
+  Function *getInterfaceOwnerFunction() const {
+    return interface_owner_function_;
+  }
   Function *getInterfaceOriginFunction() const {
     return interface_origin_function_;
   }
-  path_cond_t getInterfacePathCondition() const { return interface_path_condition_; }
-  path_cond_t getImportedSourceCondition() const { return imported_source_condition_; }
+  path_cond_t getInterfacePathCondition() const {
+    return interface_path_condition_;
+  }
+  path_cond_t getImportedSourceCondition() const {
+    return imported_source_condition_;
+  }
   bool isSatisfiable() const { return is_satisfiable_; }
-  const ConstraintState &getConstraintState() const { return constraint_state_; }
+  const ConstraintState &getConstraintState() const {
+    return constraint_state_;
+  }
   void setInterfaceMetadata(Function *owner_function, Function *origin_function,
                             path_cond_t interface_path_condition,
                             path_cond_t imported_source_condition) {
@@ -477,8 +485,9 @@ public:
 
 class GuardedValueFlowReturnNode : public GuardedValueFlowNode {
 public:
-  GuardedValueFlowReturnNode(Kind kind, Type *type, GuardedValueFlowGraph *graph,
-                             BasicBlock *block, Value *llvm_value = nullptr)
+  GuardedValueFlowReturnNode(Kind kind, Type *type,
+                             GuardedValueFlowGraph *graph, BasicBlock *block,
+                             Value *llvm_value = nullptr)
       : GuardedValueFlowNode(kind, type, graph, block, llvm_value,
                              dyn_cast_or_null<Instruction>(llvm_value)) {}
 

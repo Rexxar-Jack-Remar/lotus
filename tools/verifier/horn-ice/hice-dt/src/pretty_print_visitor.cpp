@@ -19,7 +19,7 @@ void pretty_print_visitor::visit(categorical_node &n) {
 
   ++_indent;
   for (const auto &child : n.children()) {
-    _out << std::endl;
+    _out << '\n';
     if (child) {
       child->accept(*this);
     } else {
@@ -43,7 +43,7 @@ void pretty_print_visitor::visit(int_node &n) {
 
   ++_indent;
   for (const auto &child : n.children()) {
-    _out << std::endl;
+    _out << '\n';
     if (child) {
       child->accept(*this);
     } else {

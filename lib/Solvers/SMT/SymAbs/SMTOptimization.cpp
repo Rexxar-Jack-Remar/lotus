@@ -305,8 +305,8 @@ bool opt_solver::solve_with_binary_search(expr &pre_cond, expr &query,
       // cur_mid = cur_min + ((cur_max - cur_min) >> 1)
       if (m_verbose_lvl) {
         // std::cout << "min, mid, max: " << cur_min << ", " << cur_mid << ", "
-        // <<  cur_max << std::endl; std::cout << "current upper: " << upper <<
-        // std::endl;
+        // <<  cur_max << '\n'; std::cout << "current upper: " << upper <<
+        // '\n';
       }
       expr cur_min_expr = ctx.bv_val(cur_min, sz);
       expr cur_mid_expr = ctx.bv_val(cur_mid, sz);
@@ -414,8 +414,8 @@ bool opt_solver::solve_with_compact_search(expr &pre_cond, expr_vector &queries,
             sound_max_all(pre_cond, queries, sound_max_res);
             sound_min_all(pre_cond, queries, sound_min_res);
             for (unsigned i = 0; i < queries.size(); i++) {
-                std::cout << queries[i] << " upper: " << sound_max_res[i] << std::endl;
-                std::cout << queries[i] << " lower: " << sound_min_res[i] << std::endl;
+                std::cout << queries[i] << " upper: " << sound_max_res[i] << '\n';
+                std::cout << queries[i] << " lower: " << sound_min_res[i] << '\n';
             }
         }
 #endif
@@ -485,7 +485,7 @@ bool opt_solver::solve_with_compact_search(expr &pre_cond, expr_vector &queries,
       if (all_finished) {
         // std:cout << " All finished\n";
         // for (unsigned i = 0; i < qsz; i++) {
-        //  std::cout << queries[i] << ": " << queries_bounds[i] << std::endl;
+        //  std::cout << queries[i] << ": " << queries_bounds[i] << '\n';
         //}
         break;
       }

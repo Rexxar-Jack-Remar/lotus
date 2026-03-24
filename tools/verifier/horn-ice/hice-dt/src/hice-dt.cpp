@@ -116,10 +116,10 @@ decision_tree horndini_prephase(
  */
 void print_help(std::ostream &out, const char *name) {
 
-  out << "Usage: " << name << " [options] file_stem" << std::endl;
-  out << "Options are:" << std::endl;
-  out << "  -b\t\tBound the learner" << std::endl;
-  out << "  -h\t\tRun Horndini pre-phase" << std::endl;
+  out << "Usage: " << name << " [options] file_stem\n";
+  out << "Options are:\n";
+  out << "  -b\t\tBound the learner\n";
+  out << "  -h\t\tRun Horndini pre-phase\n";
 }
 
 /**
@@ -155,7 +155,7 @@ int main(int argc, char *argv[]) {
   }
 
   if (optind != argc - 1) {
-    std::cout << "file_stem not specified" << std::endl;
+    std::cout << "file_stem not specified\n";
     print_help(std::cout, argv[0]);
     return EXIT_FAILURE;
   }
@@ -458,10 +458,10 @@ int main(int argc, char *argv[]) {
   // Handle exceptions (basically exit gracefully)
   //
   catch (const std::exception &ex) {
-    std::cerr << ex.what() << std::endl;
+    std::cerr << ex.what() << '\n';
     return EXIT_FAILURE;
   } catch (...) {
-    std::cerr << "The learner crashed due to an unknown reason" << std::endl;
+    std::cerr << "The learner crashed due to an unknown reason\n";
     return EXIT_FAILURE;
   }
 }

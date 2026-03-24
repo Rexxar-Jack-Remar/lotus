@@ -1,4 +1,4 @@
-#include "CFL/MutualRefinement/hasher.h"
+#include "CFL/MutualRefinement/Hasher.h"
 
 #include <cstddef>
 #include <functional>

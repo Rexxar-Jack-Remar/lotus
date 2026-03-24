@@ -3,6 +3,8 @@
 #include "Alias/LotusAA/Engine/IntraProceduralAnalysis.h"
 #include "IR/GVFG/ConditionRef.h"
 
+#include <string>
+
 #include <llvm/ADT/DenseMap.h>
 #include <llvm/ADT/SmallPtrSet.h>
 #include <llvm/ADT/SmallVector.h>
@@ -14,8 +16,6 @@
 #include <llvm/IR/Instructions.h>
 #include <llvm/Support/Debug.h>
 
-#include <string>
-
 using namespace llvm;
 using namespace lotus::gvfg;
 
@@ -23,8 +23,8 @@ using namespace lotus::gvfg;
 
 namespace {
 
-static GuardedValueFlowOpcodeNode::OpcodeKind
-chooseCastOpcode(Type *src_ty, Type *dst_ty) {
+static GuardedValueFlowOpcodeNode::OpcodeKind chooseCastOpcode(Type *src_ty,
+                                                               Type *dst_ty) {
   if (!src_ty || !dst_ty)
     return GuardedValueFlowOpcodeNode::OpcodeKind::Invalid;
 
@@ -48,8 +48,9 @@ chooseCastOpcode(Type *src_ty, Type *dst_ty) {
   if (dst_ty->isFloatingPointTy() && src_ty->isFloatingPointTy()) {
     if (dst_bits == src_bits)
       return GuardedValueFlowOpcodeNode::OpcodeKind::BitCast;
-    return dst_bits > src_bits ? GuardedValueFlowOpcodeNode::OpcodeKind::FPExt
-                               : GuardedValueFlowOpcodeNode::OpcodeKind::FPTrunc;
+    return dst_bits > src_bits
+               ? GuardedValueFlowOpcodeNode::OpcodeKind::FPExt
+               : GuardedValueFlowOpcodeNode::OpcodeKind::FPTrunc;
   }
   if (dst_ty->isFloatingPointTy() && src_ty->isIntegerTy())
     return GuardedValueFlowOpcodeNode::OpcodeKind::SIToFP;
@@ -113,8 +114,8 @@ static GuardedValueFlowNode *ensureValueNode(GuardedValueFlowGraph &graph,
 }
 
 static GuardedValueFlowNode *
-createInterfaceArgumentNode(GuardedValueFlowGraph &graph, Value *value, Type *type,
-                            BasicBlock *bb, StringRef desc) {
+createInterfaceArgumentNode(GuardedValueFlowGraph &graph, Value *value,
+                            Type *type, BasicBlock *bb, StringRef desc) {
   if (!value)
     return nullptr;
 
@@ -125,18 +126,22 @@ createInterfaceArgumentNode(GuardedValueFlowGraph &graph, Value *value, Type *ty
   return node;
 }
 
-static GuardedValueFlowRegionNode *translatePathCondToRegion(
-    GuardedValueFlowGraphBuilderPass &builder, GuardedValueFlowGraph &graph,
-    path_cond_t cond, BasicBlock *fallback_block);
+static GuardedValueFlowRegionNode *
+translatePathCondToRegion(GuardedValueFlowGraphBuilderPass &builder,
+                          GuardedValueFlowGraph &graph, path_cond_t cond,
+                          BasicBlock *fallback_block);
 
-static GuardedValueFlowNode *resolveOriginConditionNode(
-    GuardedValueFlowGraphBuilderPass &builder, path_cond_t cond);
-static GuardedValueFlowNode *resolveProducerValueNode(
-    GuardedValueFlowGraph &graph, Value *value, Type *type, BasicBlock *bb);
+static GuardedValueFlowNode *
+resolveOriginConditionNode(GuardedValueFlowGraphBuilderPass &builder,
+                           path_cond_t cond);
+static GuardedValueFlowNode *
+resolveProducerValueNode(GuardedValueFlowGraph &graph, Value *value, Type *type,
+                         BasicBlock *bb);
 
-static void setAccessPathFromSegments(lotus::gvfg::AccessPath &path,
-                                      ArrayRef<std::pair<Value *, int64_t>> segments,
-                                      bool is_from_return) {
+static void
+setAccessPathFromSegments(lotus::gvfg::AccessPath &path,
+                          ArrayRef<std::pair<Value *, int64_t>> segments,
+                          bool is_from_return) {
   path.reset(nullptr);
   for (size_t idx = 0; idx < segments.size(); ++idx) {
     const auto &segment = segments[idx];
@@ -168,9 +173,8 @@ static void setNodeAccessPathFromOutputIndex(GuardedValueFlowNode *node,
 }
 
 static Type *getStableSummaryNodeType(LLVMContext &ctx) {
-  return PTGraph::DEFAULT_NON_POINTER_TYPE
-             ? PTGraph::DEFAULT_NON_POINTER_TYPE
-             : Type::getInt64Ty(ctx);
+  return PTGraph::DEFAULT_NON_POINTER_TYPE ? PTGraph::DEFAULT_NON_POINTER_TYPE
+                                           : Type::getInt64Ty(ctx);
 }
 
 static mem_value_t makeFallbackValues(Value *value, Instruction *pos = nullptr,
@@ -266,13 +270,11 @@ findOrCreateReturnSite(GuardedValueFlowGraph &graph, ReturnInst *ret) {
   return site;
 }
 
-static GuardedValueFlowNode *
-createSpecialProducerNode(GuardedValueFlowGraph &graph,
-                          GuardedValueFlowNode::Kind kind, Type *type,
-                          BasicBlock *bb, Instruction *inst,
-                          StringRef description) {
-  auto *node =
-      graph.createNode<GuardedValueFlowNode>(kind, type, &graph, bb, nullptr, inst);
+static GuardedValueFlowNode *createSpecialProducerNode(
+    GuardedValueFlowGraph &graph, GuardedValueFlowNode::Kind kind, Type *type,
+    BasicBlock *bb, Instruction *inst, StringRef description) {
+  auto *node = graph.createNode<GuardedValueFlowNode>(kind, type, &graph, bb,
+                                                      nullptr, inst);
   node->setDescription(description.str());
   return node;
 }
@@ -312,8 +314,9 @@ static GuardedValueFlowNode *createSummaryProducerNode(
   return summary_node;
 }
 
-static GuardedValueFlowNode *detachReusableLoadMemoryChild(
-    GuardedValueFlowNode *node, StringRef description) {
+static GuardedValueFlowNode *
+detachReusableLoadMemoryChild(GuardedValueFlowNode *node,
+                              StringRef description) {
   if (!node)
     return nullptr;
 
@@ -336,7 +339,8 @@ static GuardedValueFlowNode *detachReusableLoadMemoryChild(
   return load_mem;
 }
 
-static BasicBlock *getValueBlockOrEntry(GuardedValueFlowGraph &graph, Value *value) {
+static BasicBlock *getValueBlockOrEntry(GuardedValueFlowGraph &graph,
+                                        Value *value) {
   if (auto *inst = dyn_cast_or_null<Instruction>(value))
     return inst->getParent();
   return getEntryBlockOrNull(graph);
@@ -350,10 +354,9 @@ findOrCreateConditionNode(GuardedValueFlowGraph &graph, Value *value) {
     return existing;
   if (auto *existing = graph.findInterfaceNode(value))
     return existing;
-  return ensureValueNode(graph, value, value->getType(),
-                         getValueBlockOrEntry(graph, value),
-                         GuardedValueFlowNode::Kind::SimpleOperand,
-                         "path.cond");
+  return ensureValueNode(
+      graph, value, value->getType(), getValueBlockOrEntry(graph, value),
+      GuardedValueFlowNode::Kind::SimpleOperand, "path.cond");
 }
 
 static GuardedValueFlowRegionNode *
@@ -378,10 +381,9 @@ translateLocalPathCondToRegion(GuardedValueFlowGraph &graph, path_cond_t cond,
     auto *condition_node = findOrCreateConditionNode(graph, cond->getValue());
     if (!condition_node)
       return nullptr;
-    BasicBlock *block =
-        condition_node->getParentBasicBlock()
-            ? condition_node->getParentBasicBlock()
-            : getValueBlockOrEntry(graph, cond->getValue());
+    BasicBlock *block = condition_node->getParentBasicBlock()
+                            ? condition_node->getParentBasicBlock()
+                            : getValueBlockOrEntry(graph, cond->getValue());
     return graph.findOrCreateUnitRegion(condition_node, cond->getSense(), block,
                                         ConditionRef::fromPathCond(cond));
   }
@@ -406,8 +408,8 @@ translateLocalPathCondToRegion(GuardedValueFlowGraph &graph, path_cond_t cond,
     }
     return nullptr;
   case PathCond::Kind::Not: {
-    auto *input = translateLocalPathCondToRegion(graph, cond->getLhs(),
-                                                 fallback_block);
+    auto *input =
+        translateLocalPathCondToRegion(graph, cond->getLhs(), fallback_block);
     return input ? graph.findOrCreateNotRegion(input, fallback_block) : nullptr;
   }
   case PathCond::Kind::And: {
@@ -439,9 +441,10 @@ translateLocalPathCondToRegion(GuardedValueFlowGraph &graph, path_cond_t cond,
   return nullptr;
 }
 
-static GuardedValueFlowRegionNode *translatePathCondToRegion(
-    GuardedValueFlowGraphBuilderPass &builder, GuardedValueFlowGraph &graph,
-    path_cond_t cond, BasicBlock *fallback_block) {
+static GuardedValueFlowRegionNode *
+translatePathCondToRegion(GuardedValueFlowGraphBuilderPass &builder,
+                          GuardedValueFlowGraph &graph, path_cond_t cond,
+                          BasicBlock *fallback_block) {
   if (!cond)
     return graph.getAlwaysTrueRegion();
   if (auto *structural =
@@ -454,13 +457,11 @@ static GuardedValueFlowRegionNode *translatePathCondToRegion(
       cond, fallback_block, resolveOriginConditionNode(builder, cond));
 }
 
-static GuardedValueFlowNode *
-ensureStoreMemoryNode(GuardedValueFlowGraph &graph, Value *value,
-                      Instruction *inst, Type *memory_type, BasicBlock *bb,
-                      SummaryValueMode summary_value_mode =
-                          SummaryValueMode::CallsiteProducer,
-                      const SummarySentinelProvenance *summary_provenance =
-                          nullptr) {
+static GuardedValueFlowNode *ensureStoreMemoryNode(
+    GuardedValueFlowGraph &graph, Value *value, Instruction *inst,
+    Type *memory_type, BasicBlock *bb,
+    SummaryValueMode summary_value_mode = SummaryValueMode::CallsiteProducer,
+    const SummarySentinelProvenance *summary_provenance = nullptr) {
   if (value == LocValue::FREE_VARIABLE || value == LocValue::NO_VALUE)
     return nullptr;
 
@@ -492,7 +493,8 @@ ensureStoreMemoryNode(GuardedValueFlowGraph &graph, Value *value,
                                                      summary_node);
   } else {
     auto *value_node = resolveProducerValueNode(graph, value, memory_type, bb);
-    (void)LotusGuardedValueFlowAdapterPass::safeLink(graph, mem_node, value_node);
+    (void)LotusGuardedValueFlowAdapterPass::safeLink(graph, mem_node,
+                                                     value_node);
   }
 
   return mem_node;
@@ -510,22 +512,19 @@ static GuardedValueFlowRegionNode *resolveMatchingRegion(
   return graph.getAlwaysTrueRegion();
 }
 
-static void linkMemoryValue(GuardedValueFlowGraph &graph,
-                            GuardedValueFlowNode *load_mem_node,
-                            const mem_value_item_t &item, BasicBlock *bb,
-                            GuardedValueFlowGraphBuilderPass &builder,
-                            SummaryValueMode summary_value_mode =
-                                SummaryValueMode::CallsiteProducer,
-                            const SummarySentinelProvenance *summary_provenance =
-                                nullptr) {
+static void linkMemoryValue(
+    GuardedValueFlowGraph &graph, GuardedValueFlowNode *load_mem_node,
+    const mem_value_item_t &item, BasicBlock *bb,
+    GuardedValueFlowGraphBuilderPass &builder,
+    SummaryValueMode summary_value_mode = SummaryValueMode::CallsiteProducer,
+    const SummarySentinelProvenance *summary_provenance = nullptr) {
   Value *value = item.val;
-  auto cond = item.cond ? ConditionRef::fromPathCond(item.cond)
-                        : ConditionRef::none();
+  auto cond =
+      item.cond ? ConditionRef::fromPathCond(item.cond) : ConditionRef::none();
   Instruction *producer_inst = item.pos;
-  auto *producer_mem = ensureStoreMemoryNode(graph, value, producer_inst,
-                                             load_mem_node->getType(), bb,
-                                             summary_value_mode,
-                                             summary_provenance);
+  auto *producer_mem = ensureStoreMemoryNode(
+      graph, value, producer_inst, load_mem_node->getType(), bb,
+      summary_value_mode, summary_provenance);
   if (!producer_mem)
     return;
   auto *linked_producer = LotusGuardedValueFlowAdapterPass::safeLink(
@@ -535,23 +534,20 @@ static void linkMemoryValue(GuardedValueFlowGraph &graph,
   // Matching regions are recorded on the load-memory node even when the actual
   // incoming edge has to pass through an adapter-inserted cast.
   load_mem_node->addMatchingRegion(
-      linked_producer, resolveMatchingRegion(builder, graph, producer_mem, item),
-      cond);
+      linked_producer,
+      resolveMatchingRegion(builder, graph, producer_mem, item), cond);
 }
 
-static void populateLoadMemoryNode(GuardedValueFlowGraph &graph,
-                                   GuardedValueFlowNode *load_mem_node,
-                                   const mem_value_t &values, BasicBlock *bb,
-                                   GuardedValueFlowGraphBuilderPass &builder,
-                                   SummaryValueMode summary_value_mode =
-                                       SummaryValueMode::CallsiteProducer,
-                                   const SummarySentinelProvenance *summary_provenance =
-                                       nullptr) {
+static void populateLoadMemoryNode(
+    GuardedValueFlowGraph &graph, GuardedValueFlowNode *load_mem_node,
+    const mem_value_t &values, BasicBlock *bb,
+    GuardedValueFlowGraphBuilderPass &builder,
+    SummaryValueMode summary_value_mode = SummaryValueMode::CallsiteProducer,
+    const SummarySentinelProvenance *summary_provenance = nullptr) {
   load_mem_node->clearChildren();
   load_mem_node->clearMatchingRegions();
   for (const auto &item : values)
-    linkMemoryValue(graph, load_mem_node, item, bb, builder,
-                    summary_value_mode,
+    linkMemoryValue(graph, load_mem_node, item, bb, builder, summary_value_mode,
                     item.val == LocValue::SUMMARY_VALUE ? summary_provenance
                                                         : nullptr);
 }
@@ -563,7 +559,8 @@ static mem_value_t importSummaryValues(IntraLotusAA &pta, Instruction *callsite,
   imported.reserve(summary_values.size());
   for (const auto &item : summary_values) {
     path_cond_t imported_cond =
-        item.cond ? pta.importSummaryCond(item.cond, callsite, callee) : nullptr;
+        item.cond ? pta.importSummaryCond(item.cond, callsite, callee)
+                  : nullptr;
     imported.emplace_back(imported_cond, item.pos, item.val, item.confidence);
   }
   return imported;
@@ -575,8 +572,9 @@ static path_cond_t getImportedSource(path_cond_t cond) {
   return cond->getImportedSource();
 }
 
-static GuardedValueFlowNode *resolveOriginConditionNode(
-    GuardedValueFlowGraphBuilderPass &builder, path_cond_t cond) {
+static GuardedValueFlowNode *
+resolveOriginConditionNode(GuardedValueFlowGraphBuilderPass &builder,
+                           path_cond_t cond) {
   path_cond_t imported_source = getImportedSource(cond);
   if (!imported_source)
     return nullptr;
@@ -586,8 +584,9 @@ static GuardedValueFlowNode *resolveOriginConditionNode(
     return nullptr;
 
   auto &origin_graph = builder.getGraph(*origin_func);
-  auto *origin_region = translatePathCondToRegion(
-      builder, origin_graph, imported_source, getFunctionEntryBlockOrNull(origin_func));
+  auto *origin_region =
+      translatePathCondToRegion(builder, origin_graph, imported_source,
+                                getFunctionEntryBlockOrNull(origin_func));
   if (origin_region && origin_region->getConditionNode())
     return origin_region->getConditionNode();
 
@@ -620,9 +619,10 @@ resolveFunctionSummarySourceNode(GuardedValueFlowGraph &graph, Value *value) {
   return graph.findNode(value);
 }
 
-static GuardedValueFlowNode *findOrCreateFunctionSummaryArgumentNode(
-    GuardedValueFlowGraph &graph, unsigned ap_depth, Value *source, Type *type,
-    BasicBlock *entry_block) {
+static GuardedValueFlowNode *
+findOrCreateFunctionSummaryArgumentNode(GuardedValueFlowGraph &graph,
+                                        unsigned ap_depth, Value *source,
+                                        Type *type, BasicBlock *entry_block) {
   auto *summary_node = graph.findFunctionSummaryArgumentNode(ap_depth, source);
   if (!summary_node) {
     summary_node = graph.createNode<GuardedValueFlowNode>(
@@ -637,9 +637,10 @@ static GuardedValueFlowNode *findOrCreateFunctionSummaryArgumentNode(
   return summary_node;
 }
 
-static GuardedValueFlowNode *findOrCreateFunctionSummaryReturnNode(
-    GuardedValueFlowGraph &graph, unsigned ap_depth, Type *type,
-    BasicBlock *entry_block) {
+static GuardedValueFlowNode *
+findOrCreateFunctionSummaryReturnNode(GuardedValueFlowGraph &graph,
+                                      unsigned ap_depth, Type *type,
+                                      BasicBlock *entry_block) {
   auto *summary_node = graph.findFunctionSummaryReturnNode(ap_depth);
   if (!summary_node) {
     summary_node = graph.createNode<GuardedValueFlowNode>(
@@ -732,8 +733,7 @@ static void materializeStoreParity(GuardedValueFlowGraph &graph,
     if (!store)
       continue;
 
-    auto *mem_node =
-        graph.findStoreMemoryNode(store->getValueOperand(), store);
+    auto *mem_node = graph.findStoreMemoryNode(store->getValueOperand(), store);
     if (!mem_node)
       continue;
 
@@ -741,13 +741,15 @@ static void materializeStoreParity(GuardedValueFlowGraph &graph,
     auto *value_node = resolveProducerValueNode(
         graph, store->getValueOperand(), store->getValueOperand()->getType(),
         store->getParent());
-    (void)LotusGuardedValueFlowAdapterPass::safeLink(graph, mem_node, value_node);
+    (void)LotusGuardedValueFlowAdapterPass::safeLink(graph, mem_node,
+                                                     value_node);
   }
 }
 
-static void materializeFunctionSummaryInterface(
-    GuardedValueFlowGraph &graph, IntraLotusAA &pta,
-    GuardedValueFlowGraphBuilderPass &builder) {
+static void
+materializeFunctionSummaryInterface(GuardedValueFlowGraph &graph,
+                                    IntraLotusAA &pta,
+                                    GuardedValueFlowGraphBuilderPass &builder) {
   BasicBlock *entry_block = getEntryBlockOrNull(graph);
   Type *summary_type = getStableSummaryNodeType(pta.getFunc()->getContext());
   graph.resetFunctionSummaryInterface();
@@ -790,16 +792,17 @@ static void materializeFunctionSummaryInterface(
           (Twine("summary.ret.mem.") + Twine(bucket)).str());
     }
 
-    (void)LotusGuardedValueFlowAdapterPass::safeLink(graph, summary_node, load_mem);
-    populateLoadMemoryNode(graph, load_mem, *summary_bucket, entry_block, builder,
-                           SummaryValueMode::OpaqueProducer);
+    (void)LotusGuardedValueFlowAdapterPass::safeLink(graph, summary_node,
+                                                     load_mem);
+    populateLoadMemoryNode(graph, load_mem, *summary_bucket, entry_block,
+                           builder, SummaryValueMode::OpaqueProducer);
     graph.registerSummaryReturnNode(bucket, summary_node);
   }
 }
 
-static void materializeFunctionOutputs(GuardedValueFlowGraph &graph,
-                                       IntraLotusAA &pta,
-                                       GuardedValueFlowGraphBuilderPass &builder) {
+static void
+materializeFunctionOutputs(GuardedValueFlowGraph &graph, IntraLotusAA &pta,
+                           GuardedValueFlowGraphBuilderPass &builder) {
   const auto &outputs = pta.getOutputs();
   // Output index 0 is the direct SSA return channel and stays on CommonReturn.
   // Remaining outputs are modeled as pseudo returns with per-return memory
@@ -815,7 +818,8 @@ static void materializeFunctionOutputs(GuardedValueFlowGraph &graph,
           GuardedValueFlowNode::Kind::PseudoReturn, output->getType(), &graph,
           pta.getFunc()->empty() ? nullptr : &pta.getFunc()->getEntryBlock(),
           pseudo_value);
-      pseudo_return->setDescription((Twine("pseudo.return.") + Twine(idx)).str());
+      pseudo_return->setDescription(
+          (Twine("pseudo.return.") + Twine(idx)).str());
       pseudo_return->setIndex(static_cast<unsigned>(idx - 1));
       graph.mapInterfaceNode(pseudo_value, pseudo_return);
       graph.registerPseudoReturn(pseudo_return);
@@ -835,11 +839,13 @@ static void materializeFunctionOutputs(GuardedValueFlowGraph &graph,
       auto *site = findOrCreateReturnSite(graph, ret_inst);
       auto *load_mem = graph.createNode<GuardedValueFlowNode>(
           GuardedValueFlowNode::Kind::LoadMemory, output->getType(), &graph,
-          ret_inst ? ret_inst->getParent() : pseudo_return->getParentBasicBlock(),
+          ret_inst ? ret_inst->getParent()
+                   : pseudo_return->getParentBasicBlock(),
           nullptr, ret_inst);
       load_mem->setDescription(
           (Twine("return.mem.") + Twine(idx) + "." +
-           Twine(ret_inst ? ret_inst->getParent()->getName() : StringRef("entry")))
+           Twine(ret_inst ? ret_inst->getParent()->getName()
+                          : StringRef("entry")))
               .str());
       auto *linked_ret = LotusGuardedValueFlowAdapterPass::safeLink(
           graph, pseudo_return, load_mem);
@@ -856,10 +862,9 @@ static void materializeFunctionOutputs(GuardedValueFlowGraph &graph,
   }
 }
 
-static bool materializeCallsiteSummaryNodes(GuardedValueFlowGraph &graph,
-                                            IntraLotusAA &pta, LotusAA &lotus,
-                                            GuardedValueFlowGraphBuilderPass &builder,
-                                            std::string &failure) {
+static bool materializeCallsiteSummaryNodes(
+    GuardedValueFlowGraph &graph, IntraLotusAA &pta, LotusAA &lotus,
+    GuardedValueFlowGraphBuilderPass &builder, std::string &failure) {
   const auto &call_arg_bindings = pta.getCallArgBindings();
   BasicBlock *entry_block = getEntryBlockOrNull(graph);
   Function *caller = graph.getBaseFunction();
@@ -878,12 +883,14 @@ static bool materializeCallsiteSummaryNodes(GuardedValueFlowGraph &graph,
       if (caller && lotus.isBackEdge(caller, callee))
         continue;
 
-      auto *callee_graph = dyn_cast_or_null<IntraLotusAA>(pta.getPtGraph(callee));
+      auto *callee_graph =
+          dyn_cast_or_null<IntraLotusAA>(pta.getPtGraph(callee));
       if (!callee_graph)
         continue;
 
       auto call_bind_it = call_arg_bindings.find(call);
-      const std::map<Value *, mem_value_t, llvm_cmp> *callee_input_bindings = nullptr;
+      const std::map<Value *, mem_value_t, llvm_cmp> *callee_input_bindings =
+          nullptr;
       if (call_bind_it != call_arg_bindings.end()) {
         auto callee_it = call_bind_it->second.find(callee);
         if (callee_it != call_bind_it->second.end())
@@ -924,19 +931,19 @@ static bool materializeCallsiteSummaryNodes(GuardedValueFlowGraph &graph,
           auto binding_it = callee_input_bindings->find(summary_input);
           if (binding_it == callee_input_bindings->end()) {
             return setAdapterFailure(
-                failure,
-                Twine("Missing summary-input binding for caller ") +
-                    caller->getName() + " -> " + callee->getName() +
-                    ", bucket " + Twine(bucket));
+                failure, Twine("Missing summary-input binding for caller ") +
+                             caller->getName() + " -> " + callee->getName() +
+                             ", bucket " + Twine(bucket));
           }
           aggregated.insert(aggregated.end(), binding_it->second.begin(),
                             binding_it->second.end());
         }
 
-        SummarySentinelProvenance summary_provenance{
-            call, callee, bucket, SummaryDirection::Input};
+        SummarySentinelProvenance summary_provenance{call, callee, bucket,
+                                                     SummaryDirection::Input};
         auto *load_mem = detachReusableLoadMemoryChild(
-            summary_node, (Twine("call.input.summary.mem.") + Twine(bucket)).str());
+            summary_node,
+            (Twine("call.input.summary.mem.") + Twine(bucket)).str());
 
         if (!load_mem) {
           load_mem = graph.createNode<GuardedValueFlowNode>(
@@ -947,21 +954,19 @@ static bool materializeCallsiteSummaryNodes(GuardedValueFlowGraph &graph,
         }
         (void)LotusGuardedValueFlowAdapterPass::safeLink(graph, summary_node,
                                                          load_mem);
-        populateLoadMemoryNode(graph, load_mem, aggregated, entry_block, builder,
-                               SummaryValueMode::CallsiteProducer,
+        populateLoadMemoryNode(graph, load_mem, aggregated, entry_block,
+                               builder, SummaryValueMode::CallsiteProducer,
                                &summary_provenance);
       }
-
     }
   }
 
   return true;
 }
 
-static bool materializeCallsiteInterfaces(GuardedValueFlowGraph &graph,
-                                          IntraLotusAA &pta, LotusAA &lotus,
-                                          GuardedValueFlowGraphBuilderPass &builder,
-                                          std::string &failure) {
+static bool materializeCallsiteInterfaces(
+    GuardedValueFlowGraph &graph, IntraLotusAA &pta, LotusAA &lotus,
+    GuardedValueFlowGraphBuilderPass &builder, std::string &failure) {
   const auto &call_arg_bindings = pta.getCallArgBindings();
   const auto &call_ret_bindings = pta.getCallReturnBindings();
   BasicBlock *entry_block = getEntryBlockOrNull(graph);
@@ -983,12 +988,14 @@ static bool materializeCallsiteInterfaces(GuardedValueFlowGraph &graph,
 
       site->addCallee(callee);
 
-      auto *callee_graph = dyn_cast_or_null<IntraLotusAA>(pta.getPtGraph(callee));
+      auto *callee_graph =
+          dyn_cast_or_null<IntraLotusAA>(pta.getPtGraph(callee));
       if (!callee_graph)
         continue;
 
       auto call_bind_it = call_arg_bindings.find(call);
-      const std::map<Value *, mem_value_t, llvm_cmp> *callee_input_bindings = nullptr;
+      const std::map<Value *, mem_value_t, llvm_cmp> *callee_input_bindings =
+          nullptr;
       if (call_bind_it != call_arg_bindings.end()) {
         auto callee_it = call_bind_it->second.find(callee);
         if (callee_it != call_bind_it->second.end())
@@ -1006,7 +1013,8 @@ static bool materializeCallsiteInterfaces(GuardedValueFlowGraph &graph,
           callee_graph->getInputs().size(), {nullptr, nullptr});
       for (const auto &input_item : callee_graph->getInputs()) {
         Value *formal_value = input_item.first;
-        int raw_pseudo_input_index = callee_graph->getPseudoInputIndex(formal_value);
+        int raw_pseudo_input_index =
+            callee_graph->getPseudoInputIndex(formal_value);
         if (raw_pseudo_input_index < 0 ||
             static_cast<size_t>(raw_pseudo_input_index) >=
                 ordered_pseudo_inputs.size() ||
@@ -1021,8 +1029,8 @@ static bool materializeCallsiteInterfaces(GuardedValueFlowGraph &graph,
           if (binding_it != callee_input_bindings->end())
             binding_values = &binding_it->second;
         }
-        ordered_pseudo_inputs[raw_pseudo_input_index] =
-            {formal_value, binding_values};
+        ordered_pseudo_inputs[raw_pseudo_input_index] = {formal_value,
+                                                         binding_values};
       }
       for (const auto &ordered_input : ordered_pseudo_inputs) {
         if (!ordered_input.first)
@@ -1036,7 +1044,8 @@ static bool materializeCallsiteInterfaces(GuardedValueFlowGraph &graph,
         Value *formal_value = ordered_pseudo_inputs[raw_index].first;
         if (!formal_value)
           continue;
-        const mem_value_t *binding_values = ordered_pseudo_inputs[raw_index].second;
+        const mem_value_t *binding_values =
+            ordered_pseudo_inputs[raw_index].second;
         if (!binding_values) {
           return setAdapterFailure(
               failure, Twine("Missing pseudo-input binding for caller ") +
@@ -1069,14 +1078,15 @@ static bool materializeCallsiteInterfaces(GuardedValueFlowGraph &graph,
         // Pseudo inputs behave like a callsite-local value whose only child is
         // a load-memory node populated from the caller-to-callee binding.
         auto *load_mem = graph.createNode<GuardedValueFlowNode>(
-            GuardedValueFlowNode::Kind::LoadMemory, formal_value->getType(), &graph,
-            call->getParent(), nullptr, call);
+            GuardedValueFlowNode::Kind::LoadMemory, formal_value->getType(),
+            &graph, call->getParent(), nullptr, call);
         load_mem->setDescription(
             (Twine("call.input.mem.") + Twine(raw_index)).str());
         (void)LotusGuardedValueFlowAdapterPass::safeLink(graph, pseudo_input,
                                                          load_mem);
         mem_value_t values = *binding_values;
-        populateLoadMemoryNode(graph, load_mem, values, call->getParent(), builder);
+        populateLoadMemoryNode(graph, load_mem, values, call->getParent(),
+                               builder);
       }
 
       auto ret_bind_it = call_ret_bindings.find(call);
@@ -1108,7 +1118,8 @@ static bool materializeCallsiteInterfaces(GuardedValueFlowGraph &graph,
       for (size_t idx = 1; idx < outputs.size(); ++idx) {
         auto *pseudo_output = dyn_cast_or_null<GuardedValueFlowCallOutputNode>(
             site->getPseudoOutput(callee, static_cast<unsigned>(idx - 1)));
-        Value *pseudo_value = pseudo_output ? pseudo_output->getLLVMValue() : nullptr;
+        Value *pseudo_value =
+            pseudo_output ? pseudo_output->getLLVMValue() : nullptr;
         if (!pseudo_value && pseudo_outputs && idx < pseudo_outputs->size())
           pseudo_value = (*pseudo_outputs)[idx];
         if (!pseudo_value) {
@@ -1130,12 +1141,12 @@ static bool materializeCallsiteInterfaces(GuardedValueFlowGraph &graph,
         setNodeAccessPathFromOutputIndex(pseudo_output, *callee_graph,
                                          static_cast<unsigned>(idx));
 
-        // Pseudo outputs mirror the function-output shape: the interface node is
-        // anchored at entry, while the backing store-memory node is anchored at
-        // the callsite that materializes the effect.
-        auto *store_mem = ensureStoreMemoryNode(graph, pseudo_value, call,
-                                                outputs[idx]->getType(),
-                                                call->getParent());
+        // Pseudo outputs mirror the function-output shape: the interface node
+        // is anchored at entry, while the backing store-memory node is anchored
+        // at the callsite that materializes the effect.
+        auto *store_mem =
+            ensureStoreMemoryNode(graph, pseudo_value, call,
+                                  outputs[idx]->getType(), call->getParent());
         (void)LotusGuardedValueFlowAdapterPass::safeLink(graph, store_mem,
                                                          pseudo_output);
       }
@@ -1145,9 +1156,9 @@ static bool materializeCallsiteInterfaces(GuardedValueFlowGraph &graph,
   return true;
 }
 
-static void materializeCallTargetConditions(GuardedValueFlowGraph &graph,
-                                            IntraLotusAA &pta,
-                                            GuardedValueFlowGraphBuilderPass &builder) {
+static void
+materializeCallTargetConditions(GuardedValueFlowGraph &graph, IntraLotusAA &pta,
+                                GuardedValueFlowGraphBuilderPass &builder) {
   for (const auto &cg_item : pta.getResolvedCallTargets()) {
     auto *call = dyn_cast<CallBase>(cg_item.first);
     auto *site = call ? graph.findCallSite(call) : nullptr;

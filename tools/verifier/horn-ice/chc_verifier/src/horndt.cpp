@@ -151,38 +151,38 @@ public:
 };
 
 void display_usage(const std::string &program_name) {
-  std::cout << "Usage: " << program_name << " [options] file_stem" << std::endl;
+  std::cout << "Usage: " << program_name << " [options] file_stem\n";
   std::cout << "Runs the decision tree learner on the files specidifed by the "
                "file stem. If no"
-            << std::endl;
+            << '\n';
   std::cout << "options are given, uses bfs as node selection method and "
                "default as the"
-            << std::endl;
-  std::cout << "entropy method." << std::endl;
+            << '\n';
+  std::cout << "entropy method.\n";
 
-  std::cout << "Options are:" << std::endl;
+  std::cout << "Options are:\n";
 
   std::cout << "  -c\t\t\t\tBiases the learner to prefer splits that"
-            << std::endl;
-  std::cout << "\t\t\t\tproduce conjunctions." << std::endl;
+            << '\n';
+  std::cout << "\t\t\t\tproduce conjunctions.\n";
 
   std::cout << "  -n <node selection method> \tSelects the method used to "
                "determine in which"
-            << std::endl;
+            << '\n';
   std::cout << "\t\t\t\torder the tree is constructed. Valid options are"
-            << std::endl;
-  std::cout << "\t\t\t\tbfs, dfs, random, max_entropy," << std::endl;
-  std::cout << "\t\t\t\tmax_weighted_entropy, min_entropy," << std::endl;
-  std::cout << "\t\t\t\tand min_weighted_entropy." << std::endl;
+            << '\n';
+  std::cout << "\t\t\t\tbfs, dfs, random, max_entropy,\n";
+  std::cout << "\t\t\t\tmax_weighted_entropy, min_entropy,\n";
+  std::cout << "\t\t\t\tand min_weighted_entropy.\n";
 
   std::cout << "  -e <entropy method> \t\tSelects the method used to compute "
                "the score"
-            << std::endl;
+            << '\n';
   std::cout << "\t\t\t\t(or entropy) of a node when splitting. Valid"
-            << std::endl;
-  std::cout << "\t\t\t\toptions are default, penalty, and horn." << std::endl;
+            << '\n';
+  std::cout << "\t\t\t\toptions are default, penalty, and horn.\n";
 
-  std::cout << "  -h -? \t\t\tDisplays this help message." << std::endl;
+  std::cout << "  -h -? \t\t\tDisplays this help message.\n";
 }
 
 /**
@@ -239,7 +239,7 @@ int main(int argc, char *argv[]) {
       } else if (arg == "min_weighted_entropy") {
         node_selection = NodeSelection::MIN_WEIGHTED_ENTROPY;
       } else {
-        std::cout << "Invalid option " << arg << std::endl;
+        std::cout << "Invalid option " << arg << '\n';
         return EXIT_FAILURE;
       }
 
@@ -258,7 +258,7 @@ int main(int argc, char *argv[]) {
       } else if (arg == "horn") {
         entropy_computation = EntropyComputation::HORN_ASSIGNMENTS;
       } else {
-        std::cout << "Invalid option " << arg << std::endl;
+        std::cout << "Invalid option " << arg << '\n';
         return EXIT_FAILURE;
       }
 
@@ -276,7 +276,7 @@ int main(int argc, char *argv[]) {
 
   // Get file stem
   if (optind != argc - 1) {
-    std::cout << "Invalid file stem given" << std::endl;
+    std::cout << "Invalid file stem given\n";
     return EXIT_FAILURE;
   }
   auto file_stem = std::string(argv[optind]);
@@ -287,9 +287,9 @@ int main(int argc, char *argv[]) {
   if (true) {
 
     std::ofstream opt_file(file_stem + ".options");
-    opt_file << "node=" << node_selection << std::endl;
-    opt_file << "entropy=" << entropy_computation << std::endl;
-    opt_file << "conjunctive" << prefer_conjunctions << std::endl;
+    opt_file << "node=" << node_selection << '\n';
+    opt_file << "entropy=" << entropy_computation << '\n';
+    opt_file << "conjunctive" << prefer_conjunctions << '\n';
     opt_file.close();
   }
 
@@ -323,7 +323,7 @@ int main(int argc, char *argv[]) {
     do {
 
       ++iteration;
-      std::cerr << current_bound << std::endl;
+      std::cerr << current_bound << '\n';
 
       //
       // Read input from files
@@ -435,7 +435,7 @@ int main(int argc, char *argv[]) {
         //
         auto consistent =
             l.is_consistent(decision_tree, datapoint_ptrs, horn_constraints);
-        std::cout << "Is consistent? " << consistent << std::endl;
+        std::cout << "Is consistent? " << consistent << '\n';
         assert(consistent);
 
         //
@@ -452,7 +452,7 @@ int main(int argc, char *argv[]) {
       //
       catch (const sample_error &err) {
 
-        std::cerr << err.what() << std::endl;
+        std::cerr << err.what() << '\n';
 
         // Increase bounds
         current_bound.increase();
@@ -464,7 +464,7 @@ int main(int argc, char *argv[]) {
       //
       catch (const split_not_possible_error &err) {
 
-        std::cerr << err.what() << std::endl;
+        std::cerr << err.what() << '\n';
 
         // Increase bounds
         current_bound.increase();
@@ -485,10 +485,10 @@ int main(int argc, char *argv[]) {
   // Handle exceptions (basically exit gracefully)
   //
   catch (const std::exception &ex) {
-    std::cerr << ex.what() << std::endl;
+    std::cerr << ex.what() << '\n';
     return EXIT_FAILURE;
   } catch (...) {
-    std::cerr << "The learner crahsed due to an unknown reason" << std::endl;
+    std::cerr << "The learner crahsed due to an unknown reason\n";
     return EXIT_FAILURE;
   }
 }

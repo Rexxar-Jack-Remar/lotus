@@ -234,7 +234,7 @@ int main(int argc, char *argv[]) {
   }
 
   std::cout << "Test completed and total elapsed time is:"
-            << horn_solver_object.elapsed_time << std::endl;
+            << horn_solver_object.elapsed_time << '\n';
 
   return 0;
 }
