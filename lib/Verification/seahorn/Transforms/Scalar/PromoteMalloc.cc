@@ -52,7 +52,7 @@ public:
         }
 
         if (!nv) {
-          auto ai = new AllocaInst(v->getType()->getPointerElementType(),
+          auto *ai = new AllocaInst(v->getType()->getPointerElementType(),
                                    addrSpace, CI.getOperand(0), "malloc", &I);
           // -- set alignment based on stack, not alignment of the type
           ai->setAlignment(F.getParent()->getDataLayout().getStackAlignment());

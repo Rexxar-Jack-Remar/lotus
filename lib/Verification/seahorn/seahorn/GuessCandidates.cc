@@ -197,4 +197,4 @@ namespace seahorn
     return bins;
   }
 
-}
+} // namespace seahorn

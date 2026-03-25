@@ -306,6 +306,6 @@ namespace seahorn
     return (it->second)[id];
   }
 
-}
+} // namespace seahorn
 static llvm::RegisterPass<seahorn::CutPointGraph> X ("cpg", "Construct Cut Point Graph",
                                                      true, true);

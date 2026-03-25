@@ -6,9 +6,9 @@
 #include "seahorn/HornClauseDB.hh"
 #include "seahorn/Expr/Expr.hh"
 
-#include <boost/iterator/transform_iterator.hpp>
 #include <boost/graph/graph_traits.hpp>
 #include <boost/graph/properties.hpp>
+#include <boost/iterator/transform_iterator.hpp>
 
 namespace seahorn
 {
@@ -52,8 +52,8 @@ namespace seahorn
       }
     };  
     
-  }
-}
+  } // namespace bgl
+} // namespace seahorn
 
 
 namespace boost
@@ -102,7 +102,7 @@ namespace boost
     typedef typename graph_traits<seahorn::HornClauseDBCallGraph>::out_edge_iterator out_eit;
     typedef typename graph_traits<seahorn::HornClauseDBCallGraph>::in_edge_iterator in_eit;
     typedef typename graph_traits<seahorn::HornClauseDBCallGraph>::vertex_iterator vit;
-  }
+  } // namespace
     
   inline std::pair<out_eit,out_eit> out_edges (expr::Expr e, const seahorn::HornClauseDBCallGraph &callgraph)
   {
@@ -135,5 +135,5 @@ namespace boost
   inline size_t num_vertices (const seahorn::HornClauseDBCallGraph &callgraph)
   { return callgraph.db().getRelations().size(); }
 
-}
+} // namespace boost
 #endif  /*  _HCDB_BOOST_GRAPH_TRAITS_HPP__ */

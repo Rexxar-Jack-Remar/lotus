@@ -1,10 +1,10 @@
 /// Core of the Expr library
 #pragma once
 
+#include "seahorn/boost_ptr_vector.hh"
 #include <boost/functional/hash_fwd.hpp>
 #include <boost/intrusive_ptr.hpp>
 #include <boost/pool/pool.hpp>
-#include "seahorn/boost_ptr_vector.hh"
 
 #include <iostream>
 #include <map>

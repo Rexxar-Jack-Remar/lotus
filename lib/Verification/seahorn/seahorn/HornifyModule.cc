@@ -63,7 +63,7 @@ enum Step {
   FLAT_LARGE_STEP,
   INC_SMALL_STEP
 };
-}
+} // namespace hm_detail
 
 static llvm::cl::opt<enum hm_detail::Step> Step(
     "horn-step", llvm::cl::desc("Step to use for the encoding"),
@@ -322,7 +322,7 @@ bool HornifyModule::runOnModule(Module &M) {
     if (it.hasCycle() || scc.size() > 1) {
       errs() << "WARNING RECURSION at " << (f ? f->getName() : "nil") << "\n";
       errs() << "SCC is: ";
-      for (auto sccn : scc) {
+      for (auto *sccn : scc) {
         Function *g = sccn->getFunction();
         if (g)
           errs() << g->getName() << " ";

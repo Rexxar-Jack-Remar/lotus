@@ -12,8 +12,8 @@
 #include "seahorn/config.h"
 
 #ifdef HAVE_CLAM
-#include "seahorn/clam_Clam.hh"
 #include "seahorn/Analysis/CutPointGraph.hh"
+#include "seahorn/clam_Clam.hh"
 #endif
 
 #include "llvm/ADT/DenseMap.h"

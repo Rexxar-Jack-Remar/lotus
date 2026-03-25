@@ -82,4 +82,4 @@ namespace seahorn
       dbModel.addDef(fapp, def_app);
     }
   }
-}
+} // namespace seahorn
