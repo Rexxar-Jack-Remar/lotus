@@ -27,11 +27,11 @@
 #include <set>
 #include <stack>
 
+#include <llvm/ADT/APInt.h>
 #include <llvm/Analysis/CallGraph.h>
 #include <llvm/Analysis/MemoryLocation.h>
 #include <llvm/Analysis/PostDominators.h>
 #include <llvm/Analysis/ValueTracking.h>
-#include <llvm/ADT/APInt.h>
 #include <llvm/IR/CFG.h>
 #include <llvm/IR/DataLayout.h>
 #include <llvm/IR/InstIterator.h>

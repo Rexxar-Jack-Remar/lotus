@@ -5,13 +5,15 @@
 
 #include "Analysis/Concurrency/Utils/ThreadLocalAnalysis.h"
 #include "Analysis/Concurrency/Utils/ThreadAPI.h"
+
+#include <deque>
+#include <unordered_set>
+#include <vector>
+
 #include <llvm/Analysis/ValueTracking.h>
 #include <llvm/IR/Constants.h>
 #include <llvm/IR/Instructions.h>
 #include <llvm/Support/raw_ostream.h>
-#include <deque>
-#include <unordered_set>
-#include <vector>
 
 using namespace llvm;
 using namespace ThreadLocal;

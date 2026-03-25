@@ -7,17 +7,17 @@
 #include "Alias/AliasAnalysisWrapper/AliasAnalysisWrapper.h"
 #include "Analysis/Concurrency/Utils/ThreadMultiplicity.h"
 
+#include <algorithm>
+#include <deque>
+#include <set>
+#include <unordered_set>
+
 #include <llvm/ADT/SmallVector.h>
 #include <llvm/Analysis/LoopInfo.h>
 #include <llvm/IR/CFG.h>
 #include <llvm/IR/Dominators.h>
 #include <llvm/IR/InstIterator.h>
 #include <llvm/IR/Instructions.h>
-
-#include <algorithm>
-#include <deque>
-#include <set>
-#include <unordered_set>
 
 using namespace llvm;
 using namespace lotus;

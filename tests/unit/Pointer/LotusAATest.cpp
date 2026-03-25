@@ -1,5 +1,7 @@
 #include "TestUtils/LLVMHelpers.h"
 
+#include "Alias/AliasAnalysisWrapper/AliasAnalysisWrapper.h"
+
 #include <llvm/AsmParser/Parser.h>
 #include <llvm/IR/InstIterator.h>
 #include <llvm/IR/Instructions.h>
@@ -172,6 +174,23 @@ TEST(LotusAATest, AssignsDenseExplicitPseudoInputIndices) {
               static_cast<int>(expected_index));
     ++expected_index;
   }
+}
+
+TEST(AliasAnalysisWrapperTest, RejectsUnimplementedAserPTAConfig) {
+  const char *IR = R"(
+    define i32 @test(i32* %p) {
+    entry:
+      %v = load i32, i32* %p
+      ret i32 %v
+    }
+  )";
+
+  LLVMContext Ctx;
+  auto M = parseAssembly(Ctx, IR);
+  ASSERT_NE(M, nullptr);
+
+  lotus::AliasAnalysisWrapper Wrapper(*M, lotus::AAConfig::AserPTA_NoCtx());
+  EXPECT_FALSE(Wrapper.isInitialized());
 }
 
 IntraLotusAA::OutputItem *findOutputItem(IntraLotusAA *PTG, Value *parent,

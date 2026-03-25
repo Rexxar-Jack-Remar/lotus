@@ -97,8 +97,8 @@ auto aa = AliasAnalysisFactory::create(M, c);
 - **AliasAnalysisWrapperBackend.cpp**: Backend routing
 - **AliasAnalysisFactory.cpp**: Factory and helpers
 
-## Future
+## Current Limitations
 
-- **AserPTA**: The API accepts `AserPTA_*` configs, but the implementation still runs **SparrowAA** (Andersen) under the hood and logs a fallback warning. Full AserPTA integration is planned.
+- **AserPTA**: The API accepts `AserPTA_*` configs, but the wrapper backend does not execute a fallback analysis anymore. It now fails initialization explicitly until full AserPTA integration is implemented.
 - Field-sensitivity toggles, adaptive context sensitivity (TPA)
 - More AserPTA solver options, config validation

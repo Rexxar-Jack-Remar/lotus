@@ -7,12 +7,6 @@
 
 #pragma once
 
-#include <llvm/IR/BasicBlock.h>
-#include <llvm/IR/Constants.h>
-#include <llvm/IR/Function.h>
-#include <llvm/IR/Instructions.h>
-#include <llvm/IR/Value.h>
-#include <llvm/Support/raw_ostream.h>
 #include <algorithm>
 #include <cstdint>
 #include <map>
@@ -20,6 +14,13 @@
 #include <string>
 #include <tuple>
 #include <vector>
+
+#include <llvm/IR/BasicBlock.h>
+#include <llvm/IR/Constants.h>
+#include <llvm/IR/Function.h>
+#include <llvm/IR/Instructions.h>
+#include <llvm/IR/Value.h>
+#include <llvm/Support/raw_ostream.h>
 
 namespace llvm {
 

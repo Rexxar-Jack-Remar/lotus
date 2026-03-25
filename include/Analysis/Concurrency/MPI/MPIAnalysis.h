@@ -14,8 +14,8 @@
 #ifndef MPI_ANALYSIS_H
 #define MPI_ANALYSIS_H
 
-#include "Analysis/Concurrency/MPI/MPICollectiveAnalysis.h"
 #include "Analysis/Concurrency/MPI/MPIAbstractState.h"
+#include "Analysis/Concurrency/MPI/MPICollectiveAnalysis.h"
 #include "Analysis/Concurrency/MPI/MPIModel.h"
 #include "Analysis/Concurrency/MPI/MPINormalization.h"
 #include "Analysis/Concurrency/MPI/MPIOperation.h"

@@ -13,8 +13,8 @@
 #ifndef MPI_PROCESS_MODEL_H
 #define MPI_PROCESS_MODEL_H
 
-#include "Analysis/Concurrency/MPI/MPINormalization.h"
 #include "Analysis/Concurrency/MPI/MPIAbstractState.h"
+#include "Analysis/Concurrency/MPI/MPINormalization.h"
 #include "Analysis/Concurrency/MPI/MPIOperation.h"
 #include "Analysis/Concurrency/MPI/MPIRankAnalysis.h"
 #include "Analysis/Concurrency/MPI/MPISemanticEvent.h"

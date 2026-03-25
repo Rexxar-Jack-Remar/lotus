@@ -16,14 +16,14 @@
 #include "Analysis/Concurrency/Utils/ThreadAPI.h"
 #include "Analysis/Concurrency/Utils/ThreadMultiplicity.h"
 
-#include <llvm/Analysis/PostDominators.h>
-#include <llvm/IR/Instruction.h>
-#include <llvm/IR/Module.h>
-
 #include <memory>
 #include <unordered_map>
 #include <unordered_set>
 #include <vector>
+
+#include <llvm/Analysis/PostDominators.h>
+#include <llvm/IR/Instruction.h>
+#include <llvm/IR/Module.h>
 
 namespace lotus {
 class AliasAnalysisWrapper;

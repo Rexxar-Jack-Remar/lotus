@@ -1,17 +1,17 @@
 #ifndef STATIC_THREAD_SHARING_ANALYSIS_H
 #define STATIC_THREAD_SHARING_ANALYSIS_H
 
+#include <map>
+#include <set>
+#include <unordered_map>
+#include <vector>
+
 #include "llvm/ADT/DenseMap.h"
 #include "llvm/ADT/SmallPtrSet.h"
 #include "llvm/IR/Function.h"
 #include "llvm/IR/Instructions.h"
 #include "llvm/IR/Module.h"
 #include "llvm/Pass.h"
-
-#include <map>
-#include <set>
-#include <unordered_map>
-#include <vector>
 
 namespace seadsa {
 class Graph;
@@ -77,7 +77,7 @@ private:
   void visitMethod(const llvm::Function *F, const llvm::Function *ThreadEntry,
                    std::set<const llvm::Function *> &Visited);
 
-  void recordAccess(const llvm::Instruction *Inst, bool isWrite,
+  void recordAccess(const llvm::Value *Ptr, bool isWrite,
                     const llvm::Function *ThreadEntry, seadsa::Graph &G);
 
   // Helper to check if a thread runs multiple times (heuristic)

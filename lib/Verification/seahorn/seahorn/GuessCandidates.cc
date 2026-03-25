@@ -1,9 +1,10 @@
 #include "seahorn/GuessCandidates.hh"
 #include "seahorn/Expr/Expr.hh"
 #include "seahorn/Expr/Smt/EZ3.hh"
+
+#include <boost/tokenizer.hpp>
 #include <fstream>
 #include <iostream>
-#include <boost/tokenizer.hpp>
 
 namespace seahorn
 {

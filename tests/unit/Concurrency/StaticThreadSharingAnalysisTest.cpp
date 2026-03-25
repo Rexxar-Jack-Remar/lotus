@@ -56,6 +56,12 @@ public:
         *m_result = sharing.classify(static_cast<const Value *>(global));
         return false;
       }
+      for (const Argument &arg : F->args()) {
+        if (arg.getName() == m_symbol_name) {
+          *m_result = sharing.classify(static_cast<const Value *>(&arg));
+          return false;
+        }
+      }
       return false;
     }
     return false;
@@ -112,6 +118,12 @@ public:
       if (const GlobalVariable *global = M.getNamedGlobal(m_symbol_name)) {
         *m_result = sharing.isShared(static_cast<const Value *>(global));
         return false;
+      }
+      for (const Argument &arg : F->args()) {
+        if (arg.getName() == m_symbol_name) {
+          *m_result = sharing.isShared(static_cast<const Value *>(&arg));
+          return false;
+        }
       }
       return false;
     }
@@ -570,7 +582,7 @@ TEST_F(StaticThreadSharingAnalysisTest,
 }
 
 TEST_F(StaticThreadSharingAnalysisTest,
-       MultiRunDistinctHeapPayloadsDoNotBecomeDefinitelyShared) {
+       MultiRunDistinctHeapPayloadsFollowPaperMultiRunRule) {
   const char *source = R"(
     declare i8* @malloc(i64)
     declare i32 @pthread_create(i8*, i8*, i8* (i8*)*, i8*)
@@ -602,17 +614,107 @@ TEST_F(StaticThreadSharingAnalysisTest,
   ensurePassesInitialized();
   ThreadAPI::resetThreadAPI();
   StaticThreadSharingAnalysis::SharingClassification observed =
-      StaticThreadSharingAnalysis::SharingClassification::DefinitelyShared;
+      StaticThreadSharingAnalysis::SharingClassification::DefinitelyThreadLocal;
 
   legacy::PassManager PM;
   PM.add(new seadsa::DsaAnalysis());
   PM.add(new StaticThreadSharingAnalysis());
-  PM.add(new StaticSharingProbePass("main", "alloc1",
+  PM.add(new StaticSharingProbePass("worker", "arg",
                                     StaticSharingProbePass::QueryKind::Value,
                                     &observed));
   PM.run(*module);
 
-  EXPECT_NE(observed,
+  EXPECT_EQ(observed,
+            StaticThreadSharingAnalysis::SharingClassification::DefinitelyShared);
+}
+
+TEST_F(StaticThreadSharingAnalysisTest,
+       ConstantIndexedArrayAccessesCollapseToSingleSharedArrayField) {
+  const char *source = R"(
+    @arr = global [2 x i32] zeroinitializer, align 4
+
+    declare i32 @pthread_create(i8*, i8*, i8* (i8*)*, i8*)
+
+    define i8* @worker(i8* %arg) {
+    entry:
+      %slot1 = getelementptr inbounds [2 x i32], [2 x i32]* @arr, i64 0, i64 1
+      store i32 1, i32* %slot1, align 4
+      ret i8* null
+    }
+
+    define i32 @main() {
+    entry:
+      %spawn = call i32 @pthread_create(i8* null, i8* null,
+                                        i8* (i8*)* @worker, i8* null)
+      %slot0 = getelementptr inbounds [2 x i32], [2 x i32]* @arr, i64 0, i64 0
+      %main_load = load i32, i32* %slot0, align 4
+      ret i32 %main_load
+    }
+  )";
+
+  auto module = parseModule(source);
+  ASSERT_NE(module, nullptr);
+
+  ensurePassesInitialized();
+  ThreadAPI::resetThreadAPI();
+  StaticThreadSharingAnalysis::SharingClassification observed =
+      StaticThreadSharingAnalysis::SharingClassification::DefinitelyThreadLocal;
+
+  legacy::PassManager PM;
+  PM.add(new seadsa::DsaAnalysis());
+  PM.add(new StaticThreadSharingAnalysis());
+  PM.add(new StaticSharingProbePass(
+      "main", "main_load", StaticSharingProbePass::QueryKind::Instruction,
+      &observed));
+  PM.run(*module);
+
+  EXPECT_EQ(observed,
+            StaticThreadSharingAnalysis::SharingClassification::DefinitelyShared);
+}
+
+TEST_F(StaticThreadSharingAnalysisTest,
+       MemsetWritesParticipateInSharingClassification) {
+  const char *source = R"(
+    @g = global [4 x i8] zeroinitializer, align 1
+
+    declare i32 @pthread_create(i8*, i8*, i8* (i8*)*, i8*)
+    declare void @llvm.memset.p0i8.i64(i8*, i8, i64, i1)
+
+    define i8* @worker(i8* %arg) {
+    entry:
+      %dst = bitcast [4 x i8]* @g to i8*
+      call void @llvm.memset.p0i8.i64(i8* %dst, i8 7, i64 4, i1 false)
+      ret i8* null
+    }
+
+    define i32 @main() {
+    entry:
+      %spawn = call i32 @pthread_create(i8* null, i8* null,
+                                        i8* (i8*)* @worker, i8* null)
+      %slot0 = getelementptr inbounds [4 x i8], [4 x i8]* @g, i64 0, i64 0
+      %main_load = load i8, i8* %slot0, align 1
+      %ext = zext i8 %main_load to i32
+      ret i32 %ext
+    }
+  )";
+
+  auto module = parseModule(source);
+  ASSERT_NE(module, nullptr);
+
+  ensurePassesInitialized();
+  ThreadAPI::resetThreadAPI();
+  StaticThreadSharingAnalysis::SharingClassification observed =
+      StaticThreadSharingAnalysis::SharingClassification::DefinitelyThreadLocal;
+
+  legacy::PassManager PM;
+  PM.add(new seadsa::DsaAnalysis());
+  PM.add(new StaticThreadSharingAnalysis());
+  PM.add(new StaticSharingProbePass(
+      "main", "main_load", StaticSharingProbePass::QueryKind::Instruction,
+      &observed));
+  PM.run(*module);
+
+  EXPECT_EQ(observed,
             StaticThreadSharingAnalysis::SharingClassification::DefinitelyShared);
 }
 

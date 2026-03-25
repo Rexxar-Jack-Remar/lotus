@@ -21,18 +21,18 @@
 #ifndef THREADAPI_H
 #define THREADAPI_H
 
-#include "llvm/ADT/StringMap.h"
-#include "llvm/IR/Constants.h"
-#include "llvm/IR/Function.h"
-#include "llvm/IR/Instructions.h"
-#include "llvm/IR/Module.h"
-
 #include "Analysis/Concurrency/ConcurrencyConfig.h"
 
 #include <cstdint>
 #include <string>
 #include <unordered_map>
 #include <vector>
+
+#include "llvm/ADT/StringMap.h"
+#include "llvm/IR/Constants.h"
+#include "llvm/IR/Function.h"
+#include "llvm/IR/Instructions.h"
+#include "llvm/IR/Module.h"
 
 // Do NOT use `using namespace llvm` in headers — it pollutes every TU that
 // includes this file.  All LLVM types are qualified explicitly below.

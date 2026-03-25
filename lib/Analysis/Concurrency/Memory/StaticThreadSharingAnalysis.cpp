@@ -22,10 +22,13 @@ shared data.
 */
 #include "Analysis/Concurrency/Memory/StaticThreadSharingAnalysis.h"
 
+#include "llvm/ADT/SmallVector.h"
 #include "llvm/Analysis/CallGraph.h"
 #include "llvm/Analysis/LoopInfo.h"
+#include "llvm/Analysis/ValueTracking.h"
 #include "llvm/IR/Dominators.h"
 #include "llvm/IR/InstIterator.h"
+#include "llvm/IR/IntrinsicInst.h"
 #include "llvm/IR/Instructions.h"
 #include "llvm/Support/Debug.h"
 #include "llvm/Support/raw_ostream.h"
@@ -41,6 +44,13 @@ using namespace seadsa;
 
 namespace {
 
+constexpr int kSummaryField = -1;
+
+struct MemoryAccess {
+  const Value *Ptr = nullptr;
+  bool IsWrite = false;
+};
+
 const Value *getGlobalAccessKey(const Value *V) {
   if (!V) {
     return nullptr;
@@ -52,6 +62,25 @@ const Value *getGlobalAccessKey(const Value *V) {
     }
   }
   return dyn_cast<GlobalValue>(V);
+}
+
+const Value *getAccessKey(const Value *V) {
+  if (!V) {
+    return nullptr;
+  }
+  V = V->stripPointerCasts();
+  if (const auto *CE = dyn_cast<ConstantExpr>(V)) {
+    if (CE->isCast()) {
+      V = CE->getOperand(0)->stripPointerCasts();
+    }
+  }
+  return V;
+}
+
+bool isStableAccessKey(const Value *V) {
+  V = getAccessKey(V);
+  return V && (isa<Argument>(V) || isa<AllocaInst>(V) || isa<GlobalValue>(V) ||
+               isa<CallBase>(V));
 }
 
 std::vector<const Value *> collectAccessKeys(const Value *Ptr, Node *N,
@@ -82,22 +111,97 @@ std::vector<const Value *> collectAccessKeys(const Value *Ptr, Node *N,
     }
   }
 
+  if (keys.empty()) {
+    if (isStableAccessKey(Ptr)) {
+      const Value *ptrKey = getAccessKey(Ptr);
+      keys.insert(ptrKey);
+    }
+    if (const Value *obj = getUnderlyingObject(Ptr)) {
+      if (isStableAccessKey(obj)) {
+        const Value *objKey = getAccessKey(obj);
+        keys.insert(objKey);
+      }
+    }
+  }
+
   return std::vector<const Value *>(keys.begin(), keys.end());
 }
 
-bool isPerInstanceThreadLocalAllocSite(const Value *alloc_site) {
-  if (!alloc_site) {
+bool isPerInstanceThreadLocalAllocSite(const Value *allocSite) {
+  if (!allocSite) {
     return false;
   }
-  return isa<AllocaInst>(alloc_site->stripPointerCasts());
+  return isa<AllocaInst>(allocSite->stripPointerCasts());
 }
 
-bool isStableSharedStorageAllocSite(const Value *alloc_site) {
-  if (!alloc_site) {
-    return false;
+SmallVector<MemoryAccess, 2> collectMemoryAccesses(const Instruction &I) {
+  SmallVector<MemoryAccess, 2> accesses;
+
+  if (const auto *LI = dyn_cast<LoadInst>(&I)) {
+    accesses.push_back({LI->getPointerOperand(), false});
+    return accesses;
   }
-  alloc_site = alloc_site->stripPointerCasts();
-  return isa<GlobalValue>(alloc_site);
+  if (const auto *SI = dyn_cast<StoreInst>(&I)) {
+    accesses.push_back({SI->getPointerOperand(), true});
+    return accesses;
+  }
+  if (const auto *RMW = dyn_cast<AtomicRMWInst>(&I)) {
+    accesses.push_back({RMW->getPointerOperand(), false});
+    accesses.push_back({RMW->getPointerOperand(), true});
+    return accesses;
+  }
+  if (const auto *CmpXchg = dyn_cast<AtomicCmpXchgInst>(&I)) {
+    accesses.push_back({CmpXchg->getPointerOperand(), false});
+    accesses.push_back({CmpXchg->getPointerOperand(), true});
+    return accesses;
+  }
+  if (const auto *MemSet = dyn_cast<MemSetInst>(&I)) {
+    accesses.push_back({MemSet->getDest(), true});
+    return accesses;
+  }
+  if (const auto *Transfer = dyn_cast<MemTransferInst>(&I)) {
+    accesses.push_back({Transfer->getSource(), false});
+    accesses.push_back({Transfer->getDest(), true});
+    return accesses;
+  }
+
+  return accesses;
+}
+
+bool isArrayLikeAccess(const Value *Ptr, const Node &N) {
+  if (N.isArray()) {
+    return true;
+  }
+
+  const Value *current = Ptr;
+  while (current) {
+    current = current->stripPointerCasts();
+    if (const auto *GEP = dyn_cast<GEPOperator>(current)) {
+      if (GEP->getSourceElementType()->isArrayTy()) {
+        return true;
+      }
+      current = GEP->getPointerOperand();
+      continue;
+    }
+    break;
+  }
+
+  if (const Value *obj = getUnderlyingObject(Ptr)) {
+    if (Type *type = obj->getType()) {
+      if (type->isPointerTy() && type->getPointerElementType()->isArrayTy()) {
+        return true;
+      }
+    }
+  }
+
+  return false;
+}
+
+int getAccessFieldKey(const Value *Ptr, const Cell &C, const Node &N) {
+  if (N.isOffsetCollapsed() || isArrayLikeAccess(Ptr, N)) {
+    return kSummaryField;
+  }
+  return static_cast<int>(C.getOffset());
 }
 
 } // namespace
@@ -205,7 +309,9 @@ void StaticThreadSharingAnalysis::visitMethod(
   Visited.insert(F);
 
   // Access analysis
-  if (m_dsa->hasGraph(*F)) {
+  if (!m_dsa->hasGraph(*F)) {
+    m_access_paths_complete = false;
+  } else {
     Graph &G = m_dsa->getGraph(*F);
     for (const BasicBlock &BB : *F) {
       for (const Instruction &I : BB) {
@@ -220,16 +326,8 @@ void StaticThreadSharingAnalysis::visitMethod(
             m_access_paths_complete = false;
           }
         }
-        if (isa<LoadInst>(I)) {
-          recordAccess(&I, false, ThreadEntry, G);
-        } else if (isa<StoreInst>(I) || isa<AtomicRMWInst>(I)) {
-          recordAccess(&I, true, ThreadEntry, G);
-        } else if (isa<AtomicCmpXchgInst>(I)) {
-          // CAS both observes and updates shared state. Treating it as a
-          // read-only access can incorrectly classify CAS-only synchronization
-          // objects as immutable thread-local data.
-          recordAccess(&I, false, ThreadEntry, G);
-          recordAccess(&I, true, ThreadEntry, G);
+        for (const MemoryAccess &access : collectMemoryAccesses(I)) {
+          recordAccess(access.Ptr, access.IsWrite, ThreadEntry, G);
         }
       }
     }
@@ -251,34 +349,33 @@ void StaticThreadSharingAnalysis::visitMethod(
   }
 }
 
-void StaticThreadSharingAnalysis::recordAccess(const Instruction *Inst,
-                                               bool isWrite,
+void StaticThreadSharingAnalysis::recordAccess(const Value *Ptr, bool isWrite,
                                                const Function *ThreadEntry,
                                                Graph &G) {
-  const Value *Ptr = nullptr;
-  if (const LoadInst *LI = dyn_cast<LoadInst>(Inst))
-    Ptr = LI->getPointerOperand();
-  else if (const StoreInst *SI = dyn_cast<StoreInst>(Inst))
-    Ptr = SI->getPointerOperand();
-  else if (const AtomicRMWInst *RMW = dyn_cast<AtomicRMWInst>(Inst))
-    Ptr = RMW->getPointerOperand();
-  else if (const AtomicCmpXchgInst *CmpXchg = dyn_cast<AtomicCmpXchgInst>(Inst))
-    Ptr = CmpXchg->getPointerOperand();
-
-  if (!Ptr)
+  if (!Ptr) {
+    m_access_paths_complete = false;
     return;
+  }
 
-  if (!G.hasCell(*Ptr))
+  if (!G.hasCell(*Ptr)) {
+    m_access_paths_complete = false;
     return;
+  }
   const Cell &C = G.getCell(*Ptr);
   Node *N = C.getNode();
-  if (!N)
+  if (!N) {
+    m_access_paths_complete = false;
     return;
+  }
 
-  unsigned Offset = C.getOffset();
+  const int fieldKey = getAccessFieldKey(Ptr, C, *N);
   std::vector<const Value *> accessKeys = collectAccessKeys(Ptr, N, G);
+  if (accessKeys.empty()) {
+    m_access_paths_complete = false;
+    return;
+  }
   for (const Value *Alloc : accessKeys) {
-    AccessInfo &Info = m_allocAccesses[Alloc][static_cast<int>(Offset)];
+    AccessInfo &Info = m_allocAccesses[Alloc][fieldKey];
     if (isWrite)
       Info.Writers.insert(ThreadEntry);
     else
@@ -328,10 +425,6 @@ StaticThreadSharingAnalysis::classify(const Value *AllocSite) const {
       // immutable data... our algorithm also distinguishes between reads and
       // writes"
       if (writerCount > 0) {
-        if (multi_run_writer && allThreads.size() <= 1 &&
-            !isStableSharedStorageAllocSite(AllocSite)) {
-          return SharingClassification::MaybeShared;
-        }
         return SharingClassification::DefinitelyShared;
       }
     }
@@ -354,42 +447,41 @@ StaticThreadSharingAnalysis::classify(const Instruction *Inst) const {
     return SharingClassification::MaybeShared;
 
   Graph &G = m_dsa->getGraph(*F);
-  const Value *Ptr = nullptr;
-
-  if (const LoadInst *LI = dyn_cast<LoadInst>(Inst))
-    Ptr = LI->getPointerOperand();
-  else if (const StoreInst *SI = dyn_cast<StoreInst>(Inst))
-    Ptr = SI->getPointerOperand();
-  else if (const AtomicRMWInst *RMW = dyn_cast<AtomicRMWInst>(Inst))
-    Ptr = RMW->getPointerOperand();
-  else if (const AtomicCmpXchgInst *CmpXchg = dyn_cast<AtomicCmpXchgInst>(Inst))
-    Ptr = CmpXchg->getPointerOperand();
-
-  if (!Ptr || !G.hasCell(*Ptr))
-    return SharingClassification::MaybeShared;
-
-  const Cell &C = G.getCell(*Ptr);
-  Node *N = C.getNode();
-  if (!N)
-    return SharingClassification::MaybeShared;
-
-  std::vector<const Value *> accessKeys = collectAccessKeys(Ptr, N, G);
-  if (accessKeys.empty() && N->getNodeType().global) {
-    return SharingClassification::MaybeShared;
-  }
-  if (accessKeys.empty()) {
-    return SharingClassification::MaybeShared;
-  }
-
   SharingClassification strongest =
       SharingClassification::DefinitelyThreadLocal;
-  for (const Value *Alloc : accessKeys) {
-    SharingClassification classification = classify(Alloc);
-    if (classification == SharingClassification::DefinitelyShared) {
-      return classification;
-    }
-    if (classification == SharingClassification::MaybeShared) {
+
+  SmallVector<MemoryAccess, 2> accesses = collectMemoryAccesses(*Inst);
+  if (accesses.empty()) {
+    return SharingClassification::DefinitelyThreadLocal;
+  }
+
+  for (const MemoryAccess &access : accesses) {
+    if (!access.Ptr || !G.hasCell(*access.Ptr)) {
       strongest = SharingClassification::MaybeShared;
+      continue;
+    }
+
+    const Cell &C = G.getCell(*access.Ptr);
+    Node *N = C.getNode();
+    if (!N) {
+      strongest = SharingClassification::MaybeShared;
+      continue;
+    }
+
+    std::vector<const Value *> accessKeys = collectAccessKeys(access.Ptr, N, G);
+    if (accessKeys.empty()) {
+      strongest = SharingClassification::MaybeShared;
+      continue;
+    }
+
+    for (const Value *Alloc : accessKeys) {
+      SharingClassification classification = classify(Alloc);
+      if (classification == SharingClassification::DefinitelyShared) {
+        return classification;
+      }
+      if (classification == SharingClassification::MaybeShared) {
+        strongest = SharingClassification::MaybeShared;
+      }
     }
   }
 

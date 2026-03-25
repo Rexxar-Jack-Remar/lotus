@@ -2,16 +2,16 @@
 
 #include "Analysis/Concurrency/Utils/ThreadAPI.h"
 
+#include <memory>
+#include <set>
+#include <unordered_map>
+#include <unordered_set>
+
 #include <llvm/Analysis/CallGraph.h>
 #include <llvm/Analysis/LoopInfo.h>
 #include <llvm/IR/Dominators.h>
 #include <llvm/IR/InstIterator.h>
 #include <llvm/IR/Instructions.h>
-
-#include <memory>
-#include <set>
-#include <unordered_map>
-#include <unordered_set>
 
 namespace concurrency {
 

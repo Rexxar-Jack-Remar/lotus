@@ -13,13 +13,14 @@
 #ifndef RAII_LOCK_TRACKER_H
 #define RAII_LOCK_TRACKER_H
 
+#include <map>
+#include <set>
+#include <vector>
+
 #include <llvm/IR/Function.h>
 #include <llvm/IR/Instruction.h>
 #include <llvm/IR/Instructions.h>
 #include <llvm/IR/Value.h>
-#include <map>
-#include <set>
-#include <vector>
 
 namespace RAIILock {
 

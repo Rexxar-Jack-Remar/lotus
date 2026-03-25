@@ -86,9 +86,9 @@
 
 #pragma once
 
+#include "IR/ICFG/ICFG.h"
 #include "IR/ICFG/CallGraph.h"
 #include "IR/SVFG/SVFGBase.h"
-#include "IR/ICFG/ICFG.h"
 #include "IR/SVFG/SVFGEdge.h"
 #include "IR/SVFG/SVFGNode.h"
 #include <map>

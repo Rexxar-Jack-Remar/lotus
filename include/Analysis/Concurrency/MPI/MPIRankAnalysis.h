@@ -10,15 +10,15 @@
 
 #pragma once
 
-#include <llvm/IR/Instruction.h>
-#include <llvm/IR/Instructions.h>
-#include <llvm/IR/Module.h>
-#include <llvm/IR/Value.h>
-
 #include <map>
 #include <set>
 #include <string>
 #include <utility>
+
+#include <llvm/IR/Instruction.h>
+#include <llvm/IR/Instructions.h>
+#include <llvm/IR/Module.h>
+#include <llvm/IR/Value.h>
 
 namespace MPI {
 

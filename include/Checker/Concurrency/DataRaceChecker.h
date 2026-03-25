@@ -5,8 +5,8 @@
 #include "Analysis/Concurrency/MHP/IMHPAnalysis.h"
 #include "Analysis/Concurrency/Memory/EscapeAnalysis.h"
 #include "Analysis/Concurrency/Memory/StaticThreadSharingAnalysis.h"
-#include "Analysis/Concurrency/Utils/ThreadLocalAnalysis.h"
 #include "Analysis/Concurrency/Utils/ThreadAPI.h"
+#include "Analysis/Concurrency/Utils/ThreadLocalAnalysis.h"
 #include "Checker/Concurrency/ConcurrencyBugReport.h"
 
 #include <string>
