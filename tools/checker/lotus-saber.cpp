@@ -6,17 +6,22 @@
 //===----------------------------------------------------------------------===//
 
 #include "Checker/Report/BugReportMgr.h"
+#include "Checker/Report/ReportOptions.h"
+#include "Checker/Report/SuppressionManager.h"
 #include "Checker/Saber/DoubleFreeChecker.h"
 #include "Checker/Saber/FileChecker.h"
 #include "Checker/Saber/LeakChecker.h"
 #include "Checker/Saber/SaberOptions.h"
+#include "Fuzzing/TargetGeneration.h"
 #include "Utils/LLVM/RecursiveTimer.h"
 
 #include <llvm/IRReader/IRReader.h>
 #include <llvm/Support/CommandLine.h>
+#include <llvm/Support/FileSystem.h>
 #include <llvm/Support/PrettyStackTrace.h>
 #include <llvm/Support/Signals.h>
 #include <llvm/Support/SourceMgr.h>
+#include <llvm/Support/raw_ostream.h>
 
 using namespace llvm;
 
@@ -42,17 +47,22 @@ static cl::opt<bool> DFreeCheck(
 static cl::opt<bool>
     AllChecks("all", cl::desc("Run all checkers (leak, double-free, file)"),
               cl::init(false));
+static cl::opt<bool> VerboseReports(
+    "v", cl::desc("Print trace and IR details for reported bugs"),
+    cl::init(false));
 
 int main(int argc, char **argv) {
   sys::PrintStackTraceOnErrorSignal(argv[0]);
   PrettyStackTraceProgram X(argc, argv);
   llvm_shutdown_obj Y;
+  report_options::initializeReportOptions();
 
   cl::ParseCommandLineOptions(
       argc, argv,
       "Source-Sink Bug Detector (Saber)\n"
       "  [options] <input-bitcode>\n"
-      "  By default, runs leak checker. Use --all to run all checkers.\n");
+      "  By default, runs leak checker. Use --all to run all checkers.\n"
+      "  Use --report-json=<file> or --report-sarif=<file> for output.\n");
   RecursiveTimer::setEnabled(lotus::analysis::SaberOptions::verbose());
 
   // Force linkage of SaberOptions symbols from static library
@@ -187,11 +197,63 @@ int main(int argc, char **argv) {
 
   // Print bug report summary
   BugReportMgr &mgr = BugReportMgr::get_instance();
+
+  if (!report_options::SuppressionFile.empty()) {
+    SuppressionManager suppMgr;
+    if (suppMgr.loadFromFile(report_options::SuppressionFile)) {
+      mgr.setSuppressionManager(&suppMgr);
+      mgr.filterSuppressed();
+    } else {
+      errs() << "Warning: Could not load suppressions from: "
+             << report_options::SuppressionFile << "\n";
+    }
+  }
+
+  mgr.deduplicate_reports(true);
   if (mgr.get_total_reports() > 0) {
-    outs() << "\n";
-    mgr.print_summary(outs());
-  } else if (checkerCount > 1) {
+    mgr.print_detailed_reports(outs(), VerboseReports,
+                               report_options::MinConfidenceScore,
+                               report_options::ShowInvalidReports);
+  } else {
     outs() << "\nNo bugs found.\n";
+  }
+
+  if (!report_options::TargetsOutputFile.empty()) {
+    lotus::fuzzing::TargetGenerationOptions options;
+    options.min_confidence_score = report_options::MinConfidenceScore;
+    options.include_invalid_reports = report_options::ShowInvalidReports;
+    auto findings = lotus::fuzzing::collectFindings(mgr, options);
+    auto targets = lotus::fuzzing::collectTargets(findings);
+
+    std::string errorMessage;
+    if (!lotus::fuzzing::writeTargetsToFile(targets,
+                                            report_options::TargetsOutputFile,
+                                            &errorMessage)) {
+      errs() << "Error writing fuzz targets: " << errorMessage << "\n";
+      return 1;
+    }
+  }
+
+  if (!report_options::JsonOutputFile.empty()) {
+    std::error_code EC;
+    raw_fd_ostream json_out(report_options::JsonOutputFile, EC,
+                            sys::fs::OF_None);
+    if (!EC) {
+      mgr.generate_json_report(json_out, report_options::MinConfidenceScore);
+    } else {
+      errs() << "Error writing JSON report: " << EC.message() << "\n";
+    }
+  }
+
+  if (!report_options::SarifOutputFile.empty()) {
+    std::error_code EC;
+    raw_fd_ostream sarif_out(report_options::SarifOutputFile, EC,
+                             sys::fs::OF_None);
+    if (!EC) {
+      mgr.generate_sarif_report(sarif_out, report_options::MinConfidenceScore);
+    } else {
+      errs() << "Error writing SARIF report: " << EC.message() << "\n";
+    }
   }
 
   if (checkerCount > 1) {

@@ -71,6 +71,7 @@ public:
    * Get bug type information by ID
    */
   const BugType &get_bug_type_info(int ty_id) const;
+  size_t get_num_bug_types() const { return bug_types.size(); }
 
   /**
    * Insert a bug report with deduplication
@@ -125,6 +126,9 @@ public:
    * Print summary statistics to console
    */
   void print_summary(llvm::raw_ostream &OS) const;
+  void print_detailed_reports(llvm::raw_ostream &OS, bool verbose = false,
+                              int min_score = 0,
+                              bool show_invalid = false) const;
 
   /**
    * Get total number of reports across all types

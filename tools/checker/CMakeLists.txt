@@ -54,6 +54,7 @@ target_link_libraries(lotus-pulse PRIVATE
 add_executable(lotus-fitx lotus_fitx.cpp)
 target_link_libraries(lotus-fitx PRIVATE
   FiTxChecker
+  CanaryReport
   ${LLVM_LINK_COMPONENTS}
 )
 # LoopInfoWrapperPass and legacy pass manager for running FiTx pipeline
@@ -66,6 +67,8 @@ llvm_map_components_to_libnames(_saber_components IRReader Support)
 target_link_libraries(lotus-saber PRIVATE
   ${_saber_components}
   ${LLVM_LINK_COMPONENTS}
+  CanaryReport
+  CanaryFuzzing
 )
 # Force linkage of all symbols from Saber library (needed for cl::opt variables)
 # This ensures that cl::opt global variables in SaberOptions.cpp are linked
@@ -92,6 +95,8 @@ llvm_map_components_to_libnames(_ae_components IRReader Support)
 target_link_libraries(lotus-ae PRIVATE
   ${_ae_components}
   ${LLVM_LINK_COMPONENTS}
+  CanaryReport
+  CanaryFuzzing
 )
 # Force linkage of all symbols from AE library
 if(APPLE)

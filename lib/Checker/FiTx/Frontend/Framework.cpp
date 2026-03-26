@@ -97,7 +97,8 @@ bool FrameworkPass::runOnModule(llvm::Module &M) {
   start = std::chrono::system_clock::now();
   defineStates(); // Detectors (UAF, Leak, etc.) add StateManagers here.
 
-  // Create analyzers and spawn threads
+  // Create analyzers. Execution stays in-process so structured bug reports are
+  // preserved in BugReportMgr.
   std::vector<AnalyzerInfo> analyzers;
   for (fitx::StateManager &manager : manager_) {
     LoggingClient *client = new LoggingClient();
@@ -107,17 +108,13 @@ bool FrameworkPass::runOnModule(llvm::Module &M) {
     server.addClient(client);
   }
 
-  for (auto analyzer = analyzers.begin() + 1; analyzer != analyzers.end();
-       analyzer++) {
-    analyzer->start_analyzer_process();
+  if (Async) {
+    llvm::errs() << "FiTx warning: --async is ignored while structured "
+                    "reporting is enabled.\n";
   }
 
-  // Start the first process here
-  analyzers.begin()->run_analyzer();
-
-  // Wait until the processes are done
-  for (int i = 0; !Async && i < analyzers.size() - 1; i++) {
-    wait(nullptr);
+  for (AnalyzerInfo &analyzer : analyzers) {
+    analyzer.run_analyzer();
   }
 
   end = std::chrono::system_clock::now();

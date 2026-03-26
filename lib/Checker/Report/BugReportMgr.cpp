@@ -10,6 +10,81 @@
 
 static llvm::ManagedStatic<BugReportMgr> global_bug_report_mgr;
 
+namespace {
+const BugDiagStep *findPreferredStep(const BugReport *report, bool preferLast) {
+  if (!report) {
+    return nullptr;
+  }
+
+  const auto &steps = report->get_steps();
+  if (preferLast) {
+    for (auto it = steps.rbegin(); it != steps.rend(); ++it) {
+      if (*it && !(*it)->src_file.empty()) {
+        return *it;
+      }
+    }
+    return steps.empty() ? nullptr : steps.back();
+  }
+
+  for (const BugDiagStep *step : steps) {
+    if (step && !step->src_file.empty()) {
+      return step;
+    }
+  }
+  return steps.empty() ? nullptr : steps.front();
+}
+
+bool sameStepIdentity(const BugDiagStep *a, const BugDiagStep *b) {
+  if (a == nullptr || b == nullptr) {
+    return a == b;
+  }
+
+  return a->src_file == b->src_file && a->src_line == b->src_line &&
+         a->src_column == b->src_column && a->tip == b->tip;
+}
+
+bool reportsEquivalent(const BugReport *a, const BugReport *b, bool useTrace) {
+  if (a == nullptr || b == nullptr) {
+    return a == b;
+  }
+
+  if (useTrace) {
+    const auto &stepsA = a->get_steps();
+    const auto &stepsB = b->get_steps();
+    if (stepsA.size() != stepsB.size()) {
+      return false;
+    }
+
+    for (size_t i = 0; i < stepsA.size(); ++i) {
+      if (!sameStepIdentity(stepsA[i], stepsB[i])) {
+        return false;
+      }
+    }
+    return true;
+  }
+
+  return sameStepIdentity(findPreferredStep(a, true), findPreferredStep(b, true));
+}
+
+bool shouldIncludeReport(const BugReport *report, int minScore,
+                         bool showInvalid) {
+  return report != nullptr && report->get_conf_score() >= minScore &&
+         (showInvalid || report->is_valid());
+}
+
+std::string formatLocationString(const BugDiagStep *step) {
+  if (step == nullptr || step->src_file.empty()) {
+    return "unknown location";
+  }
+
+  std::string location = step->src_file + ":" + std::to_string(step->src_line);
+  if (step->src_column > 0) {
+    location += ":" + std::to_string(step->src_column);
+  }
+  return location;
+}
+} // namespace
+
 BugReportMgr &BugReportMgr::get_instance() { return *global_bug_report_mgr; }
 
 BugReportMgr::BugReportMgr() {}
@@ -103,6 +178,12 @@ bool BugReportMgr::insert_report(int ty_id, BugReport *report,
 
   reports[ty_id].push_back(report);
 
+  for (const BugDiagStep *step : report->get_steps()) {
+    if (step && !step->src_file.empty()) {
+      get_src_file_id(step->src_file);
+    }
+  }
+
   // Track hash for future deduplication
   if (deduplicate_by_trace) {
     size_t hash = report->compute_hash(deduplicate_by_trace);
@@ -123,7 +204,8 @@ bool BugReportMgr::is_duplicate(int ty_id, const BugReport *report,
 
   // Check if we've seen this hash before
   auto it = report_hashes.find(hash);
-  if (it != report_hashes.end()) {
+  if (it != report_hashes.end() &&
+      reportsEquivalent(it->second, report, use_trace)) {
     return true;
   }
 
@@ -131,8 +213,8 @@ bool BugReportMgr::is_duplicate(int ty_id, const BugReport *report,
   auto reports_it = reports.find(ty_id);
   if (reports_it != reports.end()) {
     for (const BugReport *existing : reports_it->second) {
-      size_t existing_hash = existing->compute_hash(use_trace);
-      if (existing_hash == hash) {
+      if (existing->compute_hash(use_trace) == hash &&
+          reportsEquivalent(existing, report, use_trace)) {
         return true;
       }
     }
@@ -144,9 +226,8 @@ bool BugReportMgr::is_duplicate(int ty_id, const BugReport *report,
 BugReportMgr::Location
 BugReportMgr::getPrimaryLocation(const BugReport *report) const {
   Location loc;
-  const auto &steps = report->get_steps();
-  if (!steps.empty()) {
-    const BugDiagStep *primary = steps[0];
+  const BugDiagStep *primary = findPreferredStep(report, true);
+  if (primary != nullptr) {
     loc.file = primary->src_file;
     loc.line = primary->src_line;
     loc.column = primary->src_column;
@@ -157,11 +238,9 @@ BugReportMgr::getPrimaryLocation(const BugReport *report) const {
 std::vector<BugReportMgr::Location>
 BugReportMgr::getTraceEndLocations(const BugReport *report) const {
   std::vector<Location> endLocs;
-  const auto &steps = report->get_steps();
 
-  // Get the last step (end of trace)
-  if (!steps.empty()) {
-    const BugDiagStep *last = steps.back();
+  const BugDiagStep *last = findPreferredStep(report, true);
+  if (last != nullptr) {
     Location loc;
     loc.file = last->src_file;
     loc.line = last->src_line;
@@ -194,14 +273,14 @@ void BugReportMgr::sortByDecreasingPreference(
 
               // Finally by primary location
               Location locA, locB;
-              if (!a->get_steps().empty()) {
-                const auto *stepA = a->get_steps()[0];
+              const BugDiagStep *stepA = findPreferredStep(a, true);
+              const BugDiagStep *stepB = findPreferredStep(b, true);
+              if (stepA != nullptr) {
                 locA.file = stepA->src_file;
                 locA.line = stepA->src_line;
                 locA.column = stepA->src_column;
               }
-              if (!b->get_steps().empty()) {
-                const auto *stepB = b->get_steps()[0];
+              if (stepB != nullptr) {
                 locB.file = stepB->src_file;
                 locB.line = stepB->src_line;
                 locB.column = stepB->src_column;
@@ -269,7 +348,9 @@ void BugReportMgr::deduplicate_reports(bool use_trace) {
       if (!isDuplicate) {
         // Also check hash-based deduplication
         size_t hash = report->compute_hash(use_trace);
-        if (report_hashes.find(hash) == report_hashes.end()) {
+        auto existing = report_hashes.find(hash);
+        if (existing == report_hashes.end() ||
+            !reportsEquivalent(existing->second, report, use_trace)) {
           deduplicated.push_back(report);
           report_hashes[hash] = report;
         } else {
@@ -440,6 +521,99 @@ void BugReportMgr::print_summary(llvm::raw_ostream &OS) const {
   OS << "==================================================\n\n";
 }
 
+void BugReportMgr::print_detailed_reports(llvm::raw_ostream &OS, bool verbose,
+                                          int min_score,
+                                          bool show_invalid) const {
+  int total = 0;
+  for (size_t ty_id = 0; ty_id < bug_types.size(); ++ty_id) {
+    const auto *reportList = get_reports_for_type(ty_id);
+    if (!reportList) {
+      continue;
+    }
+    for (const BugReport *report : *reportList) {
+      if (shouldIncludeReport(report, min_score, show_invalid)) {
+        ++total;
+      }
+    }
+  }
+
+  if (total == 0) {
+    OS << "\nNo findings.\n";
+    return;
+  }
+
+  OS << "\nFindings (" << total << ")\n";
+  OS << "================\n";
+
+  int index = 1;
+  for (size_t ty_id = 0; ty_id < bug_types.size(); ++ty_id) {
+    const auto *reportList = get_reports_for_type(ty_id);
+    if (!reportList) {
+      continue;
+    }
+
+    const BugType &bugType = get_bug_type_info(ty_id);
+    for (const BugReport *report : *reportList) {
+      if (!shouldIncludeReport(report, min_score, show_invalid)) {
+        continue;
+      }
+
+      const BugDiagStep *primary = findPreferredStep(report, true);
+      OS << "\n" << index++ << ". " << bugType.bug_name;
+      if (primary != nullptr) {
+        OS << "\n   Location: " << formatLocationString(primary);
+        if (!primary->func_name.empty()) {
+          OS << " in " << primary->func_name;
+        }
+      }
+
+      std::string message = report->render_primary_message();
+      if (!message.empty()) {
+        OS << "\n   Message: " << message;
+      }
+
+      if (primary != nullptr && !primary->source_code.empty()) {
+        OS << "\n   Source: " << primary->source_code;
+      }
+
+      const BugReportExtras *extras = report->get_extras();
+      if (extras != nullptr && !extras->suggestion.empty()) {
+        OS << "\n   Suggestion: " << extras->suggestion;
+      }
+
+      if (verbose && primary != nullptr && !primary->llvm_ir.empty()) {
+        OS << "\n   LLVM IR: " << primary->llvm_ir;
+      }
+
+      if (verbose && extras != nullptr && !extras->metadata.empty()) {
+        for (const auto &entry : extras->metadata) {
+          OS << "\n   " << entry.first << ": " << entry.second;
+        }
+      }
+
+      if (verbose) {
+        const auto &steps = report->get_steps();
+        if (steps.size() > 1) {
+          OS << "\n   Trace:";
+          for (const BugDiagStep *step : steps) {
+            if (step == nullptr) {
+              continue;
+            }
+            OS << "\n     - ";
+            if (!step->src_file.empty()) {
+              OS << formatLocationString(step) << ": ";
+            }
+            std::string stepMessage = report->render_step_message(*step);
+            OS << (stepMessage.empty() ? step->tip : stepMessage);
+          }
+        }
+      }
+
+      OS << "\n";
+    }
+  }
+}
+
 int BugReportMgr::get_total_reports() const {
   int total = 0;
   for (const auto &pair : reports) {
@@ -483,7 +657,10 @@ void BugReportMgr::generate_sarif_report(llvm::raw_ostream &OS,
         continue;
 
       // Create SARIF result
-      std::string message = steps[0]->tip;
+      std::string message = report->render_primary_message();
+      if (message.empty()) {
+        message = bugType.bug_name.str();
+      }
       if (report->get_extras() && !report->get_extras()->suggestion.empty()) {
         message += ". Suggestion: " + report->get_extras()->suggestion;
       }
@@ -524,7 +701,8 @@ void BugReportMgr::generate_sarif_report(llvm::raw_ostream &OS,
           if (!step->func_name.empty()) {
             tflLoc.function = step->func_name;
           }
-          sarif::ThreadFlowLocation tfl(tflLoc, step->tip);
+          sarif::ThreadFlowLocation tfl(tflLoc,
+                                        report->render_step_message(*step));
           tfl.nestingLevel = step->trace_level;
           tfl.executionOrder = static_cast<int>(i);
           if (!step->func_name.empty()) {

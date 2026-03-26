@@ -54,6 +54,7 @@ static cl::opt<bool> NoSMT("no-smt",
 int main(int argc, char **argv) {
   sys::PrintStackTraceOnErrorSignal(argv[0]);
   PrettyStackTraceProgram X(argc, argv);
+  report_options::initializeReportOptions();
   cl::ParseCommandLineOptions(argc, argv, "Pulse Bug Finder\n");
 
   // Configure logging
@@ -132,10 +133,11 @@ int main(int argc, char **argv) {
   // 2. Final deduplication (enhanced algorithm)
   mgr.deduplicate_reports(true);
 
-  // 3. Print bug summary
+  // 3. Print detailed bug reports
   if (mgr.get_total_reports() > 0) {
-    outs() << "\n";
-    mgr.print_summary(outs());
+    mgr.print_detailed_reports(
+        outs(), Verbose, std::max(MinScore, report_options::MinConfidenceScore),
+        report_options::ShowInvalidReports);
   }
 
   // 4. Generate JSON report if requested
@@ -158,16 +160,19 @@ int main(int argc, char **argv) {
            << " (" << targets.size() << " targets)\n";
   }
 
-  if (!JsonOutput.empty()) {
+  std::string jsonOutputFile = !report_options::JsonOutputFile.empty()
+                                   ? report_options::JsonOutputFile
+                                   : JsonOutput;
+  if (!jsonOutputFile.empty()) {
     std::error_code EC;
-    raw_fd_ostream json_out(JsonOutput, EC);
+    raw_fd_ostream json_out(jsonOutputFile, EC);
     if (EC) {
       errs() << "Error opening JSON output file: " << EC.message() << "\n";
       return 1;
     }
     mgr.generate_json_report(json_out, MinScore);
     json_out.close();
-    outs() << "\nJSON report written to: " << JsonOutput << "\n";
+    outs() << "\nJSON report written to: " << jsonOutputFile << "\n";
   }
 
   // 5. Generate SARIF report if requested

@@ -329,6 +329,11 @@ void LeakChecker::reportBug(ProgSlice *slice) {
   }
   if (!neverFree)
     appendPathConditionEvents(report, slice);
+  if (reportSource) {
+    report->append_step(const_cast<Value *>(reportSource),
+                        neverFree ? "Allocated memory is never freed"
+                                  : "Allocated memory may leak on some paths");
+  }
 
   mgr.insert_report(bugTypeId, report, false);
 

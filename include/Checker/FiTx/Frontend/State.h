@@ -107,9 +107,9 @@ public:
   TriggerConstraint getTriggerConstraint() const { return trigger_constraint_; }
   bool isTriggerConstraintSet(TriggerConstraint constraint);
 
-  const fitx::StateMergeMethod MergeMethod() { return method_; };
+  fitx::StateMergeMethod MergeMethod() const { return method_; };
 
-  const fitx::BugNotificationTiming NotificationTiming() {
+  fitx::BugNotificationTiming NotificationTiming() const {
     return timing_;
   }
 
@@ -175,6 +175,11 @@ private:
 /// positives).
 class TransitionLogs {
 public:
+  struct TraceEntry {
+    fitx::Transition transition;
+    std::shared_ptr<fitx::Instruction> instruction;
+  };
+
   TransitionLogs();
   TransitionLogs(const TransitionLogs &logs);
   TransitionLogs(Transition transition,
@@ -195,6 +200,7 @@ public:
 
   void generateLog(llvm::raw_ostream &stream) const;
   void logicalTerminate(std::shared_ptr<fitx::Instruction> instruction);
+  std::vector<TraceEntry> getTraceEntries() const;
 
   /// Farthest-from-bug state in the history; used to require "real" init path
   /// for reports.
@@ -261,19 +267,19 @@ private:
   /// Arg).
   void registerFunctionArgTransition(
       const FunctionArgTransitionRule::FunctionArg &arg,
-      fitx::Transition transition);
+      const fitx::Transition &transition);
   void registerFunctionArgTransition(
       const std::vector<FunctionArgTransitionRule::FunctionArg> &arg,
-      fitx::Transition transition);
+      const fitx::Transition &transition);
 
   void registerStoreTransition(std::shared_ptr<StoreValueTransitionRule> rule,
-                               fitx::Transition transition);
+                               const fitx::Transition &transition);
 
   void registerUseTransition(std::shared_ptr<UseValueTransitionRule> rule,
-                             fitx::Transition transition);
+                             const fitx::Transition &transition);
 
   void registerAliasTransition(std::shared_ptr<AliasValueTransitionRule> rule,
-                               fitx::Transition transition);
+                               const fitx::Transition &transition);
 
   std::map<FunctionArgTransitionRule::FunctionArg,
            std::vector<fitx::Transition>>

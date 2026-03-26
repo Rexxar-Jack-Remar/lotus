@@ -66,6 +66,11 @@ void FileChecker::reportBug(ProgSlice *slice) {
   }
   if (!neverClose)
     appendPathConditionEvents(report, slice);
+  if (reportSource) {
+    report->append_step(const_cast<Value *>(reportSource),
+                        neverClose ? "File descriptor is never closed"
+                                   : "File descriptor may leak on some paths");
+  }
 
   mgr.insert_report(bugTypeId, report, false);
 

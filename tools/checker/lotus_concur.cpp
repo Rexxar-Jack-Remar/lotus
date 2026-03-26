@@ -54,6 +54,9 @@ static cl::opt<bool> AnalysisOnly(
     "analysis-only",
     cl::desc("Run analysis only (no bug checking), dump analysis results"),
     cl::init(false));
+static cl::opt<bool> VerboseReports(
+    "v", cl::desc("Print trace and IR details for reported bugs"),
+    cl::init(false));
 static cl::opt<std::string>
     AnalysisJsonOutput("analysis-json",
                        cl::desc("Output analysis results as JSON to specified "
@@ -227,8 +230,10 @@ int main(int argc, char **argv) {
   // 2. Final deduplication (enhanced algorithm)
   mgr.deduplicate_reports(true);
 
-  // 3. Print bug report summary (shared pattern - applies to all checkers)
-  mgr.print_summary(outs());
+  // 3. Print detailed bug reports
+  mgr.print_detailed_reports(outs(), VerboseReports,
+                             report_options::MinConfidenceScore,
+                             report_options::ShowInvalidReports);
 
   // 4. Handle centralized output formats (applies to all checkers)
   if (!report_options::TargetsOutputFile.empty()) {

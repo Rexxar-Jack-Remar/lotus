@@ -40,6 +40,8 @@
 #include "Checker/FiTx/Frontend/CommandlineArgs.h"
 #include "Checker/FiTx/Frontend/Function.h"
 #include "Checker/FiTx/Frontend/PropagationConstraint.h"
+#include "Checker/Report/BugReport.h"
+#include "Checker/Report/BugReportMgr.h"
 
 #include <algorithm>
 #include <ctime>
@@ -55,6 +57,209 @@
 
 #include <llvm/IR/Instructions.h>
 #include <llvm/Support/raw_ostream.h>
+
+namespace {
+struct FiTxBugSpec {
+  const char *bug_name;
+  BugDescription::BugImportance importance;
+  BugDescription::BugClassification classification;
+  const char *description;
+  const char *suggestion;
+};
+
+FiTxBugSpec getFiTxBugSpec(llvm::StringRef state_name) {
+  if (state_name == "UBI") {
+    return {"Use of Uninitialized Value", BugDescription::BI_HIGH,
+            BugDescription::BC_ERROR, "Value may be used before initialization",
+            "Initialize the value on all paths before it is read."};
+  }
+  if (state_name == "Used") {
+    return {"Use After Free", BugDescription::BI_HIGH,
+            BugDescription::BC_SECURITY,
+            "Value may be dereferenced after it has been freed",
+            "Ensure the value is not used after the free-like operation."};
+  }
+  if (state_name == "used") {
+    return {"Null Pointer Dereference", BugDescription::BI_HIGH,
+            BugDescription::BC_ERROR,
+            "Value may be dereferenced after becoming null",
+            "Guard the dereference or guarantee the value is non-null."};
+  }
+  if (state_name == "double free") {
+    return {"Double Free", BugDescription::BI_HIGH,
+            BugDescription::BC_SECURITY,
+            "Value may be freed more than once",
+            "Ensure ownership is transferred once and the free path is not repeated."};
+  }
+  if (state_name == "double locked") {
+    return {"Double Lock", BugDescription::BI_MEDIUM,
+            BugDescription::BC_ERROR,
+            "Lock may be acquired twice without an intervening unlock",
+            "Check lock ownership and ensure each acquisition has a matching release."};
+  }
+  if (state_name == "double unlocked") {
+    return {"Double Unlock", BugDescription::BI_MEDIUM,
+            BugDescription::BC_ERROR,
+            "Lock may be released twice",
+            "Track lock ownership so each unlock corresponds to one held lock."};
+  }
+  if (state_name == "allocated") {
+    return {"Memory Leak", BugDescription::BI_MEDIUM,
+            BugDescription::BC_PERFORMANCE,
+            "Allocated memory may escape without being released",
+            "Ensure the allocation is released on all non-returning paths."};
+  }
+  if (state_name.substr(0, 8) == "counted ") {
+    return {"Reference Count Imbalance", BugDescription::BI_MEDIUM,
+            BugDescription::BC_ERROR,
+            "Reference count may end in an imbalanced state",
+            "Review retain/release pairs and verify the final reference count."};
+  }
+  if (state_name.substr(0, 10) == "uncounted ") {
+    return {"Reference Count Underflow", BugDescription::BI_HIGH,
+            BugDescription::BC_ERROR,
+            "Reference count may be decremented too many times",
+            "Ensure decrements are paired with successful increments."};
+  }
+  return {"FiTx Finding", BugDescription::BI_MEDIUM, BugDescription::BC_WARNING,
+          "FiTx detected a typestate violation",
+          "Inspect the trace and verify the relevant state transitions."};
+}
+
+int getOrRegisterFiTxBugType(const fitx::State &state) {
+  static std::map<std::string, int> bug_type_ids;
+
+  auto found = bug_type_ids.find(state.Name());
+  if (found != bug_type_ids.end()) {
+    return found->second;
+  }
+
+  const FiTxBugSpec spec = getFiTxBugSpec(state.Name());
+  BugReportMgr &mgr = BugReportMgr::get_instance();
+  int bug_type_id = mgr.register_bug_type(spec.bug_name, spec.importance,
+                                          spec.classification, spec.description);
+  bug_type_ids.emplace(state.Name(), bug_type_id);
+  return bug_type_id;
+}
+
+std::string renderFiTxValue(const std::shared_ptr<fitx::Value> &value) {
+  if (!value) {
+    return "tracked value";
+  }
+
+  std::string rendered;
+  llvm::raw_string_ostream stream(rendered);
+  stream << *value;
+  return stream.str();
+}
+
+std::string renderTransitionTip(const fitx::TransitionLogs::TraceEntry &entry) {
+  const std::string &source = entry.transition.Source().Name();
+  const std::string &target = entry.transition.Target().Name();
+
+  if (target == "allocated") {
+    return "The value becomes allocated here.";
+  }
+  if (target == "free") {
+    return "The value is released here.";
+  }
+  if (target == "null") {
+    return "The value becomes null here.";
+  }
+  if (target == "Used") {
+    return "The previously freed value is used here.";
+  }
+  if (target == "used") {
+    return "The null value is used here.";
+  }
+  if (target == "UBI") {
+    return "The analysis reaches a use of an uninitialized value here.";
+  }
+
+  return "State changes from " + source + " to " + target + ".";
+}
+
+std::string renderPrimaryTip(const fitx::State &state,
+                             const std::shared_ptr<fitx::Value> &value) {
+  const std::string state_name = state.Name();
+  (void)value;
+
+  if (state_name == "UBI") {
+    return "Potential use of uninitialized value";
+  }
+  if (state_name == "Used") {
+    return "Potential use-after-free";
+  }
+  if (state_name == "used") {
+    return "Potential null pointer dereference";
+  }
+  if (state_name == "double free") {
+    return "Potential double free";
+  }
+  if (state_name == "double locked") {
+    return "Potential double lock";
+  }
+  if (state_name == "double unlocked") {
+    return "Potential double unlock";
+  }
+  if (state_name == "allocated") {
+    return "Potential memory leak";
+  }
+  if (state_name.rfind("counted ", 0) == 0) {
+    return "Potential reference count imbalance";
+  }
+  if (state_name.rfind("uncounted ", 0) == 0) {
+    return "Potential reference count underflow";
+  }
+
+  return "Potential FiTx bug (" + state_name + ")";
+}
+
+int inferConfidenceScore(const fitx::State &state,
+                         const std::shared_ptr<fitx::Value> &value) {
+  int score = 90;
+  if (state.NotificationTiming() == fitx::MODULE_END) {
+    score = 75;
+  } else if (state.NotificationTiming() == fitx::FUNCTION_END) {
+    score = 80;
+  }
+  if (value && value->isArbitaryArrayElement()) {
+    score -= 10;
+  }
+  return std::max(0, score);
+}
+
+void appendFiTxReport(const fitx::State &state,
+                      const std::shared_ptr<fitx::Value> &value,
+                      const fitx::TransitionLogs &logs) {
+  int bug_type_id = getOrRegisterFiTxBugType(state);
+  auto *report = new BugReport(bug_type_id);
+  const FiTxBugSpec spec = getFiTxBugSpec(state.Name());
+
+  for (const fitx::TransitionLogs::TraceEntry &entry : logs.getTraceEntries()) {
+    llvm::Instruction *llvm_inst =
+        entry.instruction ? entry.instruction->LLVMInstruction() : nullptr;
+    report->append_step(llvm_inst, renderTransitionTip(entry));
+  }
+
+  llvm::Instruction *bug_inst =
+      logs.CurrentInstruction() ? logs.CurrentInstruction()->LLVMInstruction()
+                                : nullptr;
+  report->append_step(bug_inst, renderPrimaryTip(state, value), 0,
+                      {NodeTag::NONE});
+  report->set_conf_score(inferConfidenceScore(state, value));
+  report->set_suggestion(spec.suggestion);
+  report->add_metadata("fitx_state", state.Name());
+  report->add_metadata("fitx_value", renderFiTxValue(value));
+
+  std::string reduced_transition;
+  llvm::raw_string_ostream transition_stream(reduced_transition);
+  transition_stream << logs.ReducedTransition();
+  report->add_metadata("fitx_transition", transition_stream.str());
+
+  BugReportMgr::get_instance().insert_report(bug_type_id, report, true);
+}
+} // namespace
 
 namespace fitx {
 Analyzer::Analyzer(llvm::Module &llvm_module,
@@ -529,14 +734,7 @@ void Analyzer::generateError(
 
       if (fitx::CommandLineArgs::Flex ||
           !value.first->isArbitaryArrayElement()) {
-        llvm::raw_string_ostream log_stream(log_.getBuffer());
-        fitx::generateError(log_stream,
-                                 value.second->CurrentInstruction().get(),
-                                 "--- [" + state.Name() + "] ---");
-        fitx::generateError(log_stream,
-                                 value.second->CurrentInstruction().get(),
-                                 value.first.get());
-        value.second->generateLog(log_stream);
+        appendFiTxReport(state, value.first, *value.second);
       }
       value.second->logicalTerminate(value.second->CurrentInstruction());
     }

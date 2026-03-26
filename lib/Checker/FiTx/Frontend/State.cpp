@@ -267,6 +267,15 @@ void TransitionLogs::generateLog(llvm::raw_ostream &stream) const {
   }
 }
 
+std::vector<TransitionLogs::TraceEntry> TransitionLogs::getTraceEntries() const {
+  std::vector<TraceEntry> entries;
+  entries.reserve(transition_logs_.size());
+  for (const Log &log : transition_logs_) {
+    entries.push_back(TraceEntry{log.transition, log.instruction});
+  }
+  return entries;
+}
+
 void TransitionLogs::logicalTerminate(
     std::shared_ptr<fitx::Instruction> instruction) {
   auto null_transition = Transition(transition_logs_.back().transition.Target(),
@@ -339,7 +348,7 @@ void StateTransitionManager::addTransitionRule(Transition &transition,
 
 void StateTransitionManager::registerFunctionArgTransition(
     const FunctionArgTransitionRule::FunctionArg &arg,
-    fitx::Transition transition) {
+    const fitx::Transition &transition) {
   if (!existsInFunctionArgTransition(arg))
     function_transitions_[arg] = std::vector<fitx::Transition>();
   function_transitions_[arg].push_back(transition);
@@ -347,15 +356,15 @@ void StateTransitionManager::registerFunctionArgTransition(
 
 void StateTransitionManager::registerFunctionArgTransition(
     const std::vector<FunctionArgTransitionRule::FunctionArg> &args,
-    fitx::Transition transition) {
-  for (auto arg : args) {
+    const fitx::Transition &transition) {
+  for (const auto &arg : args) {
     registerFunctionArgTransition(arg, transition);
   }
 }
 
 void StateTransitionManager::registerStoreTransition(
     std::shared_ptr<StoreValueTransitionRule> rule,
-    fitx::Transition transition) {
+    const fitx::Transition &transition) {
   if (store_transitions_.find(rule->Type()) == store_transitions_.end())
     store_transitions_[rule->Type()] = std::vector<fitx::Transition>();
   store_transitions_[rule->Type()].push_back(transition);
@@ -380,13 +389,13 @@ void StateTransitionManager::registerStoreTransition(
 
 void StateTransitionManager::registerUseTransition(
     std::shared_ptr<UseValueTransitionRule> rule,
-    fitx::Transition transition) {
+    const fitx::Transition &transition) {
   use_transitions_.push_back(transition);
 }
 
 void StateTransitionManager::registerAliasTransition(
     std::shared_ptr<AliasValueTransitionRule> rule,
-    fitx::Transition transition) {
+    const fitx::Transition &transition) {
   alias_transitions_.push_back(transition);
 }
 

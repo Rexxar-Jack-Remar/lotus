@@ -162,6 +162,12 @@ public:
   // Export to JSON format
   void export_json(llvm::raw_ostream &OS) const;
 
+  // Render a human-readable message for a single diagnostic step.
+  std::string render_step_message(const BugDiagStep &step) const;
+
+  // Render the best available primary diagnostic message for the report.
+  std::string render_primary_message() const;
+
   // Compute hash for deduplication (based on location or trace)
   size_t compute_hash(bool use_trace = false) const;
 

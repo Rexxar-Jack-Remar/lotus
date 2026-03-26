@@ -174,40 +174,7 @@ bool TaintOperations::checkSink(AbductiveDomain &astate, AbstractValue v,
 
   BugReport *report = new BugReport(typeId);
 
-  // Add sink step with detailed information
-  std::string sink_msg = "Tainted data flows into sink '";
-  sink_msg += sink_name;
-  sink_msg += "'";
-  if (sink_name == "system" || sink_name == "exec" || sink_name == "popen") {
-    sink_msg += " (command injection risk)";
-  } else if (sink_name == "printf" || sink_name == "sprintf") {
-    sink_msg += " (format string vulnerability)";
-  } else if (sink_name == "strcpy" || sink_name == "strcat") {
-    sink_msg += " (buffer overflow risk)";
-  }
-
-  report->append_step(const_cast<llvm::Instruction *>(sink_loc), sink_msg, 0,
-                      {}, "sink");
-
-  // Add trace from history (production-ready: show full propagation path)
-  const auto &events = item.history.getEvents();
-  unsigned step_num = 1;
-  for (auto it = events.rbegin(); it != events.rend(); ++it) {
-    if (it->location) {
-      std::string trace_msg = "Taint propagated here";
-      if (it->kind == ValueHistory::EventKind::Store) {
-        trace_msg += " (via store)";
-      } else if (it->kind == ValueHistory::EventKind::Load) {
-        trace_msg += " (via load)";
-      } else if (it->kind == ValueHistory::EventKind::FunctionCall) {
-        trace_msg += " (via function call)";
-      }
-      report->append_step(const_cast<llvm::Instruction *>(it->location),
-                          trace_msg, step_num++, {}, "trace");
-    }
-  }
-
-  // Add source step with detailed information
+  // Describe the source first so the final step remains the sink/bug site.
   if (item.source_instruction) {
     std::string src_msg = "Taint source: ";
     TaintKind primary = item.getPrimaryKind();
@@ -226,9 +193,45 @@ bool TaintOperations::checkSink(AbductiveDomain &astate, AbstractValue v,
     }
 
     report->append_step(
-        const_cast<llvm::Instruction *>(item.source_instruction), src_msg,
-        step_num++, {}, "source");
+        const_cast<llvm::Instruction *>(item.source_instruction), src_msg, 0,
+        {}, "source");
   }
+
+  // Add propagation trace from source to sink.
+  const auto &events = item.history.getEvents();
+  unsigned step_num = 1;
+  for (const auto &event : events) {
+    if (event.location == nullptr ||
+        event.location == item.source_instruction) {
+      continue;
+    }
+
+    std::string trace_msg = "Taint propagated here";
+    if (event.kind == ValueHistory::EventKind::Store) {
+      trace_msg += " (via store)";
+    } else if (event.kind == ValueHistory::EventKind::Load) {
+      trace_msg += " (via load)";
+    } else if (event.kind == ValueHistory::EventKind::FunctionCall) {
+      trace_msg += " (via function call)";
+    }
+    report->append_step(const_cast<llvm::Instruction *>(event.location),
+                        trace_msg, step_num++, {}, "trace");
+  }
+
+  // Add the sink as the final bug step.
+  std::string sink_msg = "Tainted data flows into sink '";
+  sink_msg += sink_name;
+  sink_msg += "'";
+  if (sink_name == "system" || sink_name == "exec" || sink_name == "popen") {
+    sink_msg += " (command injection risk)";
+  } else if (sink_name == "printf" || sink_name == "sprintf") {
+    sink_msg += " (format string vulnerability)";
+  } else if (sink_name == "strcpy" || sink_name == "strcat") {
+    sink_msg += " (buffer overflow risk)";
+  }
+
+  report->append_step(const_cast<llvm::Instruction *>(sink_loc), sink_msg, 0,
+                      {}, "sink");
 
   // Set confidence score based on taint kind and sink type
   int confidence = 80;

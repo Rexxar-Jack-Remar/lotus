@@ -21,6 +21,11 @@
 using namespace llvm;
 using namespace lotus::analysis;
 
+static const llvm::Value *getReportValue(const SVFGNode *node) {
+  return node ? static_cast<const llvm::Value *>(node->getInstruction())
+              : nullptr;
+}
+
 static void appendPathConditionEvents(BugReport *report,
                                       const ProgSlice *slice) {
   if (!report || !slice)
@@ -45,6 +50,10 @@ void DoubleFreeChecker::reportBug(ProgSlice *slice) {
   const llvm::Value *reportSource =
       sourceCall ? static_cast<const llvm::Value *>(sourceCall)
                  : static_cast<const llvm::Value *>(source->getInstruction());
+  const llvm::Value *reportSink = nullptr;
+  if (slice && slice->sinksBegin() != slice->sinksEnd()) {
+    reportSink = getReportValue(*slice->sinksBegin());
+  }
 
   // Match SVF: only report when a double-free path exists (two free sinks
   // reachable on the same path).
@@ -62,6 +71,13 @@ void DoubleFreeChecker::reportBug(ProgSlice *slice) {
                         "Memory allocated here");
   }
   appendPathConditionEvents(report, slice);
+  if (reportSink) {
+    report->append_step(const_cast<Value *>(reportSink),
+                        "Memory may be freed again here");
+  } else if (reportSource) {
+    report->append_step(const_cast<Value *>(reportSource),
+                        "Memory may be freed twice on this path");
+  }
 
   mgr.insert_report(bugTypeId, report, false);
 

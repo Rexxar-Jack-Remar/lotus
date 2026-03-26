@@ -3,6 +3,8 @@
 
 #include "Analysis/DebugInfo/DebugInfoAnalysis.h"
 
+#include <algorithm>
+#include <cctype>
 #include <functional>
 #include <unordered_set>
 
@@ -39,6 +41,78 @@ static std::string nodeTagToString(NodeTag tag) {
   default:
     return "NONE";
   }
+}
+
+static bool hasNodeTag(const BugDiagStep &step, NodeTag tag) {
+  return std::find(step.node_tags.begin(), step.node_tags.end(), tag) !=
+         step.node_tags.end();
+}
+
+static bool startsWithTagNarrative(StringRef text) {
+  return text.startswith("Enter function ") ||
+         text.startswith("Return from function ") ||
+         text.startswith("Select the true branch") ||
+         text.startswith("Select the false branch") ||
+         text.startswith("Begin procedure ") ||
+         text.startswith("Exit procedure ") ||
+         text.startswith("Exceptional control flow") ||
+         text.startswith("Access ");
+}
+
+static bool isSuggestionText(StringRef text) {
+  return text.ltrim().startswith("Suggestion:");
+}
+
+static std::string normalizeSnippet(StringRef text, size_t maxLen = 140) {
+  std::string result;
+  result.reserve(std::min(text.size(), maxLen));
+
+  bool previousWasSpace = false;
+  for (char c : text.trim()) {
+    if (std::isspace(static_cast<unsigned char>(c))) {
+      if (!result.empty() && !previousWasSpace) {
+        result.push_back(' ');
+      }
+      previousWasSpace = true;
+      continue;
+    }
+
+    previousWasSpace = false;
+    result.push_back(c);
+    if (result.size() >= maxLen) {
+      result.append("...");
+      break;
+    }
+  }
+
+  return result;
+}
+
+static std::string renderSourceLead(const BugDiagStep &step) {
+  std::string source = normalizeSnippet(step.source_code);
+  if (!source.empty()) {
+    return "Source: " + source + ". ";
+  }
+
+  if (!step.var_name.empty()) {
+    return "Variable: " + step.var_name + ". ";
+  }
+
+  return "";
+}
+
+static std::string joinNarrativeParts(const std::vector<std::string> &parts) {
+  std::string out;
+  for (const auto &part : parts) {
+    if (part.empty()) {
+      continue;
+    }
+    if (!out.empty()) {
+      out += ". ";
+    }
+    out += part;
+  }
+  return out;
 }
 
 // Helper to infer node tags from instruction type
@@ -154,6 +228,104 @@ void BugReport::add_metadata(const std::string &key, const std::string &value) {
   extras->metadata[key] = value;
 }
 
+std::string BugReport::render_step_message(const BugDiagStep &step) const {
+  std::vector<std::string> narrativeParts;
+
+  if (hasNodeTag(step, NodeTag::CALL_SITE)) {
+    if (!step.func_name.empty()) {
+      narrativeParts.push_back("Enter function " + step.func_name);
+    } else {
+      narrativeParts.push_back("Enter function call");
+    }
+  }
+
+  if (hasNodeTag(step, NodeTag::RETURN_SITE)) {
+    if (!step.func_name.empty()) {
+      narrativeParts.push_back("Return from function " + step.func_name);
+    } else {
+      narrativeParts.push_back("Return from function call");
+    }
+  }
+
+  if (hasNodeTag(step, NodeTag::CONDITION_TRUE)) {
+    narrativeParts.push_back("Select the true branch at this point");
+  }
+
+  if (hasNodeTag(step, NodeTag::CONDITION_FALSE)) {
+    narrativeParts.push_back("Select the false branch at this point");
+  }
+
+  if (hasNodeTag(step, NodeTag::PROCEDURE_START) && !step.func_name.empty()) {
+    narrativeParts.push_back("Begin procedure " + step.func_name);
+  }
+
+  if (hasNodeTag(step, NodeTag::PROCEDURE_END) && !step.func_name.empty()) {
+    narrativeParts.push_back("Exit procedure " + step.func_name);
+  }
+
+  if (hasNodeTag(step, NodeTag::EXCEPTION)) {
+    narrativeParts.push_back("Exceptional control flow reaches this point");
+  }
+
+  if (!step.access.empty()) {
+    if (!step.var_name.empty()) {
+      narrativeParts.push_back("Access " + step.access + " through " +
+                               step.var_name);
+    } else {
+      narrativeParts.push_back("Access " + step.access);
+    }
+  }
+
+  std::string narrative = joinNarrativeParts(narrativeParts);
+  StringRef tip(step.tip);
+  std::string sourceLead = renderSourceLead(step);
+
+  if (tip.empty()) {
+    if (!sourceLead.empty() && !narrative.empty()) {
+      return sourceLead + narrative;
+    }
+    return narrative.empty() ? sourceLead : narrative;
+  }
+
+  std::string body;
+  if (narrative.empty() || tip == narrative || startsWithTagNarrative(tip)) {
+    body = step.tip;
+  } else {
+    body = narrative + ". " + step.tip;
+  }
+
+  if (sourceLead.empty() || isSuggestionText(tip)) {
+    return body;
+  }
+
+  return sourceLead + body;
+}
+
+std::string BugReport::render_primary_message() const {
+  const BugDiagStep *fallback = nullptr;
+
+  for (auto it = trigger_steps.rbegin(); it != trigger_steps.rend(); ++it) {
+    if (*it == nullptr) {
+      continue;
+    }
+    if (fallback == nullptr) {
+      fallback = *it;
+    }
+    if (isSuggestionText((*it)->tip)) {
+      continue;
+    }
+    std::string rendered = render_step_message(**it);
+    if (!rendered.empty()) {
+      return rendered;
+    }
+  }
+
+  if (fallback != nullptr) {
+    return render_step_message(*fallback);
+  }
+  return "";
+}
+
 size_t BugReport::compute_hash(bool use_trace) const {
   std::hash<std::string> hasher;
   size_t hash = 0;
@@ -263,6 +435,12 @@ void BugReport::export_json(raw_ostream &OS) const {
 
     if (step->node_id >= 0) {
       OS << "          \"NodeID\": " << step->node_id << ",\n";
+    }
+
+    std::string renderedMessage = render_step_message(*step);
+    if (!renderedMessage.empty()) {
+      OS << "          \"Narrative\": \"" << escapeJSON(renderedMessage)
+         << "\",\n";
     }
 
     OS << "          \"Tip\": \"" << escapeJSON(step->tip) << "\"\n";
