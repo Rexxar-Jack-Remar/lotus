@@ -21,6 +21,7 @@
 #include "Alias/LotusAA/Support/Compat.h"
 #include "Alias/LotusAA/Support/FunctionPointerResults.h"
 #include "Alias/Spec/AliasSpecManager.h"
+#include "IR/GSA/GSA.h"
 
 #include <llvm/IR/Dominators.h>
 #include <llvm/IR/Module.h>
@@ -73,6 +74,7 @@ public:
   
   // Access to spec manager
   lotus::alias::AliasSpecManager &getSpecManager() { return specManager_; }
+  gsa::ControlDependenceAnalysis *getControlDependenceAnalysis(Function *F);
 
 private:
   // Data layout

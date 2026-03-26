@@ -30,6 +30,8 @@
 #include "Alias/LotusAA/Engine/IntraProceduralAnalysis.h"
 
 #include <llvm/ADT/APInt.h>
+#include <llvm/ADT/Optional.h>
+#include <llvm/ADT/SmallPtrSet.h>
 #include <llvm/IR/Constants.h>
 #include <llvm/IR/Instructions.h>
 #include <llvm/IR/Operator.h>
@@ -76,6 +78,196 @@ static int64_t getElementTypeSizeInBits(Type *type, const DataLayout &DL) {
   return type ? static_cast<int64_t>(DL.getTypeSizeInBits(type)) : 0;
 }
 
+static Optional<APInt> applyIntegerCast(unsigned opcode, const APInt &value,
+                                        Type *target_type) {
+  auto *int_ty = dyn_cast_or_null<IntegerType>(target_type);
+  if (!int_ty)
+    return None;
+
+  unsigned target_width = int_ty->getBitWidth();
+  switch (opcode) {
+  case Instruction::SExt:
+    return value.sext(target_width);
+  case Instruction::ZExt:
+    return value.zext(target_width);
+  case Instruction::Trunc:
+    return value.trunc(target_width);
+  case Instruction::BitCast:
+    if (value.getBitWidth() == target_width)
+      return value;
+    return None;
+  default:
+    return None;
+  }
+}
+
+static Optional<APInt> applyIntegerBinary(unsigned opcode, const APInt &lhs,
+                                          const APInt &rhs) {
+  APInt rhs_cast = rhs;
+  if (lhs.getBitWidth() != rhs.getBitWidth())
+    rhs_cast = rhs.sextOrTrunc(lhs.getBitWidth());
+
+  switch (opcode) {
+  case Instruction::Add:
+    return lhs + rhs_cast;
+  case Instruction::Sub:
+    return lhs - rhs_cast;
+  case Instruction::Mul:
+    return lhs * rhs_cast;
+  case Instruction::And:
+    return lhs & rhs_cast;
+  case Instruction::Or:
+    return lhs | rhs_cast;
+  case Instruction::Xor:
+    return lhs ^ rhs_cast;
+  case Instruction::Shl: {
+    uint64_t shift = rhs_cast.getLimitedValue();
+    if (shift >= lhs.getBitWidth())
+      return None;
+    return lhs.shl(static_cast<unsigned>(shift));
+  }
+  case Instruction::LShr: {
+    uint64_t shift = rhs_cast.getLimitedValue();
+    if (shift >= lhs.getBitWidth())
+      return None;
+    return lhs.lshr(static_cast<unsigned>(shift));
+  }
+  case Instruction::AShr: {
+    uint64_t shift = rhs_cast.getLimitedValue();
+    if (shift >= lhs.getBitWidth())
+      return None;
+    return lhs.ashr(static_cast<unsigned>(shift));
+  }
+  case Instruction::UDiv:
+    if (rhs_cast == 0)
+      return None;
+    return lhs.udiv(rhs_cast);
+  case Instruction::SDiv:
+    if (rhs_cast == 0)
+      return None;
+    return lhs.sdiv(rhs_cast);
+  case Instruction::URem:
+    if (rhs_cast == 0)
+      return None;
+    return lhs.urem(rhs_cast);
+  case Instruction::SRem:
+    if (rhs_cast == 0)
+      return None;
+    return lhs.srem(rhs_cast);
+  default:
+    return None;
+  }
+}
+
+static Optional<APInt> applyIntegerCompare(CmpInst::Predicate predicate,
+                                           const APInt &lhs,
+                                           const APInt &rhs) {
+  APInt rhs_cast = rhs;
+  if (lhs.getBitWidth() != rhs.getBitWidth())
+    rhs_cast = rhs.sextOrTrunc(lhs.getBitWidth());
+  return APInt(1, ICmpInst::compare(lhs, rhs_cast, predicate) ? 1 : 0);
+}
+
+static Optional<APInt>
+tryEvaluateIntegerValueImpl(Value *value, SmallPtrSetImpl<Value *> &visiting) {
+  if (!value)
+    return None;
+
+  if (!visiting.insert(value).second)
+    return None;
+
+  Optional<APInt> result = None;
+
+  if (auto *const_int = dyn_cast<ConstantInt>(value)) {
+    result = const_int->getValue();
+  } else if (auto *const_expr = dyn_cast<ConstantExpr>(value)) {
+    if (Instruction::isCast(const_expr->getOpcode())) {
+      if (Optional<APInt> operand =
+              tryEvaluateIntegerValueImpl(const_expr->getOperand(0), visiting)) {
+        result = applyIntegerCast(const_expr->getOpcode(), *operand,
+                                  const_expr->getType());
+      }
+    } else if (Instruction::isBinaryOp(const_expr->getOpcode()) &&
+               const_expr->getNumOperands() == 2) {
+      Optional<APInt> lhs =
+          tryEvaluateIntegerValueImpl(const_expr->getOperand(0), visiting);
+      Optional<APInt> rhs =
+          tryEvaluateIntegerValueImpl(const_expr->getOperand(1), visiting);
+      if (lhs && rhs)
+        result = applyIntegerBinary(const_expr->getOpcode(), *lhs, *rhs);
+    }
+  } else if (auto *cast = dyn_cast<CastInst>(value)) {
+    if (Optional<APInt> operand =
+            tryEvaluateIntegerValueImpl(cast->getOperand(0), visiting)) {
+      result = applyIntegerCast(cast->getOpcode(), *operand, cast->getType());
+    }
+  } else if (auto *bin = dyn_cast<BinaryOperator>(value)) {
+    Optional<APInt> lhs =
+        tryEvaluateIntegerValueImpl(bin->getOperand(0), visiting);
+    Optional<APInt> rhs =
+        tryEvaluateIntegerValueImpl(bin->getOperand(1), visiting);
+    if (lhs && rhs)
+      result = applyIntegerBinary(bin->getOpcode(), *lhs, *rhs);
+  } else if (auto *icmp = dyn_cast<ICmpInst>(value)) {
+    Optional<APInt> lhs =
+        tryEvaluateIntegerValueImpl(icmp->getOperand(0), visiting);
+    Optional<APInt> rhs =
+        tryEvaluateIntegerValueImpl(icmp->getOperand(1), visiting);
+    if (lhs && rhs)
+      result = applyIntegerCompare(icmp->getPredicate(), *lhs, *rhs);
+  } else if (auto *phi = dyn_cast<PHINode>(value)) {
+    Optional<APInt> merged = None;
+    bool consistent = true;
+    for (Value *incoming : phi->incoming_values()) {
+      Optional<APInt> current =
+          tryEvaluateIntegerValueImpl(incoming, visiting);
+      if (!current) {
+        consistent = false;
+        break;
+      }
+      if (!merged) {
+        merged = *current;
+      } else if (*merged != *current) {
+        consistent = false;
+        break;
+      }
+    }
+    if (consistent)
+      result = merged;
+  } else if (auto *select = dyn_cast<SelectInst>(value)) {
+    Optional<APInt> cond_value =
+        tryEvaluateIntegerValueImpl(select->getCondition(), visiting);
+    if (cond_value) {
+      Value *chosen_value = cond_value->isZero() ? select->getFalseValue()
+                                                 : select->getTrueValue();
+      result = tryEvaluateIntegerValueImpl(chosen_value, visiting);
+    }
+
+    if (result) {
+      visiting.erase(value);
+      return result;
+    }
+
+    Optional<APInt> true_value =
+        tryEvaluateIntegerValueImpl(select->getTrueValue(), visiting);
+    Optional<APInt> false_value =
+        tryEvaluateIntegerValueImpl(select->getFalseValue(), visiting);
+    if (true_value && false_value && *true_value == *false_value)
+      result = true_value;
+  }
+
+  visiting.erase(value);
+  return result;
+}
+
+static Optional<int64_t> tryEvaluateIntegerValue(Value *value) {
+  SmallPtrSet<Value *, 16> visiting;
+  Optional<APInt> result = tryEvaluateIntegerValueImpl(value, visiting);
+  if (!result || !result->isSignedIntN(64))
+    return None;
+  return result->getSExtValue();
+}
+
 static int64_t getLegacyStyleInboundOffset(GEPOperator *gep, unsigned start_idx,
                                            Type *start_type,
                                            const DataLayout &DL) {
@@ -84,8 +276,8 @@ static int64_t getLegacyStyleInboundOffset(GEPOperator *gep, unsigned start_idx,
 
   for (unsigned idx = start_idx; idx < gep->getNumOperands(); ++idx) {
     Value *index_val = gep->getOperand(idx);
-    if (auto *const_idx = dyn_cast<ConstantInt>(index_val)) {
-      int64_t field_idx = const_idx->getSExtValue();
+    if (Optional<int64_t> field_idx_opt = tryEvaluateIntegerValue(index_val)) {
+      int64_t field_idx = *field_idx_opt;
 
       if (Type *elem_type = getSequentialElementType(type)) {
         type = elem_type;
@@ -131,8 +323,8 @@ static int64_t getLegacyStyleGepOffset(GEPOperator *gep,
   int64_t pointer_offset = 0;
   if (gep->getNumOperands() >= 2) {
     Value *outer_index = gep->getOperand(1);
-    if (auto *const_idx = dyn_cast<ConstantInt>(outer_index)) {
-      pointer_offset = const_idx->getSExtValue() *
+    if (Optional<int64_t> outer_idx = tryEvaluateIntegerValue(outer_index)) {
+      pointer_offset = *outer_idx *
                        getElementTypeSizeInBits(base_type, DL);
     }
   }
@@ -143,8 +335,8 @@ static int64_t getLegacyStyleGepOffset(GEPOperator *gep,
   } else if (Type *elem_type = getSequentialElementType(base_type)) {
     if (gep->getNumOperands() >= 3) {
       Value *inner_index = gep->getOperand(2);
-      if (auto *const_idx = dyn_cast<ConstantInt>(inner_index)) {
-        inbound_offset = const_idx->getSExtValue() *
+      if (Optional<int64_t> inner_idx = tryEvaluateIntegerValue(inner_index)) {
+        inbound_offset = *inner_idx *
                          getElementTypeSizeInBits(elem_type, DL);
       } else {
         // Symbolic array/vector indices collapse to element 0.

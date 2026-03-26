@@ -163,6 +163,7 @@ LotusAA::~LotusAA() {
 
 void LotusAA::getAnalysisUsage(AnalysisUsage &AU) const {
   AU.setPreservesAll();
+  AU.addRequired<gsa::ControlDependenceAnalysisPass>();
   // Dominator trees are computed and cached on-demand in getDomTree().
   // We do NOT declare DominatorTreeWrapperPass as required because we manage
   // our own DominatorTree objects (one per function) rather than using the
@@ -530,6 +531,17 @@ DominatorTree *LotusAA::getDomTree(Function *F) {
   DominatorTree *DT = new DominatorTree(*F);
   dominatorTrees_[F] = DT;
   return DT;
+}
+
+gsa::ControlDependenceAnalysis *
+LotusAA::getControlDependenceAnalysis(Function *F) {
+  if (!F || F->isDeclaration())
+    return nullptr;
+
+  auto &cd_pass = getAnalysis<gsa::ControlDependenceAnalysisPass>();
+  if (!cd_pass.hasAnalysisFor(*F))
+    return nullptr;
+  return &cd_pass.getControlDependenceAnalysis(*F);
 }
 
 bool LotusAA::isBackEdge(Function *caller, Function *callee) {

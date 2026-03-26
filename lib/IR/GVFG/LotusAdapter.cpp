@@ -716,8 +716,7 @@ static void materializeLoadParity(GuardedValueFlowGraph &graph,
       continue;
 
     mem_value_t load_values;
-    pta.getLoadValues(representative->getPointerOperand(), representative,
-                      load_values);
+    pta.collectGuardedValueFlowLoadValues(representative, load_values);
     if (load_values.empty())
       collectExactPointerStoreFallbacks(*pta.getFunc(), representative,
                                         load_values);
@@ -865,7 +864,6 @@ materializeFunctionOutputs(GuardedValueFlowGraph &graph, IntraLotusAA &pta,
 static bool materializeCallsiteSummaryNodes(
     GuardedValueFlowGraph &graph, IntraLotusAA &pta, LotusAA &lotus,
     GuardedValueFlowGraphBuilderPass &builder, std::string &failure) {
-  const auto &call_arg_bindings = pta.getCallArgBindings();
   BasicBlock *entry_block = getEntryBlockOrNull(graph);
   Function *caller = graph.getBaseFunction();
 
@@ -879,84 +877,49 @@ static bool materializeCallsiteSummaryNodes(
       continue;
 
     SmallVector<Function *, 4> callees = collectCallees(*site, *call, pta);
-    for (Function *callee : callees) {
-      if (caller && lotus.isBackEdge(caller, callee))
-        continue;
+    if (callees.empty())
+      continue;
 
-      auto *callee_graph =
-          dyn_cast_or_null<IntraLotusAA>(pta.getPtGraph(callee));
-      if (!callee_graph)
-        continue;
+    std::vector<mem_value_t> summary_values;
+    pta.collectGuardedValueFlowCallsiteSummaryInputs(call, summary_values);
 
-      auto call_bind_it = call_arg_bindings.find(call);
-      const std::map<Value *, mem_value_t, llvm_cmp> *callee_input_bindings =
-          nullptr;
-      if (call_bind_it != call_arg_bindings.end()) {
-        auto callee_it = call_bind_it->second.find(callee);
-        if (callee_it != call_bind_it->second.end())
-          callee_input_bindings = &callee_it->second;
+    int start_ap_depth = 0;
+    if (Function *direct_callee = call->getCalledFunction()) {
+      if (auto *direct_callee_graph =
+              dyn_cast_or_null<IntraLotusAA>(pta.getPtGraph(direct_callee))) {
+        if (!direct_callee_graph->isConsideredAsLibrary())
+          start_ap_depth = direct_callee_graph->getInlineApDepth();
       }
+    }
 
-      const auto &summary_inputs = callee_graph->getSummaryInputs();
-      // Only input-side callsite summary wrappers are materialized here. Output
-      // summaries stay function-level in the current adapter contract.
-      for (unsigned bucket = 0; bucket < summary_inputs.size(); ++bucket) {
-        const auto *summary_bucket = summary_inputs[bucket];
-        if (!summary_bucket || summary_bucket->empty())
-          continue;
-        Type *summary_type = getStableSummaryNodeType(call->getContext());
-        auto *summary_node = dyn_cast_or_null<GuardedValueFlowCallSummaryNode>(
-            site->getInputSummaryNode(callee, bucket));
-        if (!summary_node) {
-          summary_node = graph.createNode<GuardedValueFlowCallSummaryNode>(
-              GuardedValueFlowNode::Kind::CallSiteArgumentSummary, summary_type,
-              &graph, call->getParent(), call, callee, bucket);
-          summary_node->setDescription(
-              (Twine("call.input.summary.") + Twine(bucket)).str());
-          site->setInputSummaryNode(callee, bucket, summary_node);
-        }
+    for (unsigned bucket = 1; bucket < summary_values.size(); ++bucket) {
+      Type *summary_type = getStableSummaryNodeType(call->getContext());
+      auto *summary_node = graph.createNode<GuardedValueFlowCallSummaryNode>(
+          GuardedValueFlowNode::Kind::CallSiteArgumentSummary, summary_type,
+          &graph, call->getParent(), call, nullptr, bucket);
+      summary_node->setDescription(
+          (Twine("call.input.summary.") + Twine(bucket)).str());
 
-        if (static_cast<int>(bucket) <= callee_graph->getInlineApDepth())
-          continue;
-
-        if (!callee_input_bindings) {
-          return setAdapterFailure(
-              failure, Twine("Missing summary-input bindings for caller ") +
-                           caller->getName() + " -> " + callee->getName() +
-                           ", bucket " + Twine(bucket));
-        }
-
-        mem_value_t aggregated;
-        for (Value *summary_input : *summary_bucket) {
-          auto binding_it = callee_input_bindings->find(summary_input);
-          if (binding_it == callee_input_bindings->end()) {
-            return setAdapterFailure(
-                failure, Twine("Missing summary-input binding for caller ") +
-                             caller->getName() + " -> " + callee->getName() +
-                             ", bucket " + Twine(bucket));
-          }
-          aggregated.insert(aggregated.end(), binding_it->second.begin(),
-                            binding_it->second.end());
-        }
-
-        SummarySentinelProvenance summary_provenance{call, callee, bucket,
+      if (static_cast<int>(bucket) > start_ap_depth) {
+        SummarySentinelProvenance summary_provenance{call, nullptr, bucket,
                                                      SummaryDirection::Input};
-        auto *load_mem = detachReusableLoadMemoryChild(
-            summary_node,
+        auto *load_mem = graph.createNode<GuardedValueFlowNode>(
+            GuardedValueFlowNode::Kind::LoadMemory, summary_type, &graph,
+            entry_block, nullptr, call);
+        load_mem->setDescription(
             (Twine("call.input.summary.mem.") + Twine(bucket)).str());
-
-        if (!load_mem) {
-          load_mem = graph.createNode<GuardedValueFlowNode>(
-              GuardedValueFlowNode::Kind::LoadMemory, summary_type, &graph,
-              entry_block, nullptr, call);
-          load_mem->setDescription(
-              (Twine("call.input.summary.mem.") + Twine(bucket)).str());
-        }
         (void)LotusGuardedValueFlowAdapterPass::safeLink(graph, summary_node,
                                                          load_mem);
-        populateLoadMemoryNode(graph, load_mem, aggregated, entry_block,
-                               builder, SummaryValueMode::CallsiteProducer,
+        populateLoadMemoryNode(graph, load_mem, summary_values[bucket],
+                               entry_block, builder,
+                               SummaryValueMode::CallsiteProducer,
                                &summary_provenance);
+      }
+
+      for (Function *callee : callees) {
+        if (caller && lotus.isBackEdge(caller, callee))
+          continue;
+        site->setInputSummaryNode(callee, bucket, summary_node);
       }
     }
   }

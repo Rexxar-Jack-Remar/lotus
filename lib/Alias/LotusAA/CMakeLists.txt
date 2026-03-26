@@ -42,4 +42,5 @@ add_library(LotusAA STATIC ${LOTUSAA_SOURCES})
 target_link_libraries(LotusAA PUBLIC
   LLVMAnalysis
   AliasSpecManager
+  CanaryGSA
 )

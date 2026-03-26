@@ -64,6 +64,110 @@ PTGraph *IntraLotusAA::getPtGraph(Function *F) {
   return lotus_aa->getPtGraph(F);
 }
 
+void IntraLotusAA::collectGuardedValueFlowLoadValues(LoadInst *load,
+                                                     mem_value_t &result) {
+  result.clear();
+  if (!load)
+    return;
+
+  loadPtrAt(load->getPointerOperand(), load, result, false, 0, 0,
+            func_obj ? func_obj->findLocator(0, false) : nullptr, true);
+  refineResult(result);
+}
+
+void IntraLotusAA::collectGuardedValueFlowCallsiteSummaryInputs(
+    CallBase *call, std::vector<mem_value_t> &summary_values) {
+  summary_values.clear();
+  if (!call || IntraLotusAAConfig::lotus_restrict_summary_ap_depth < 1)
+    return;
+
+  summary_values.emplace_back();
+
+  std::set<MemObject *, mem_obj_cmp> visited;
+  std::map<MemObject *, path_cond_t, mem_obj_cmp> cur_ap_level_object;
+  mem_value_t cur_ap_level_value;
+  int cur_ap_level = 0;
+
+  for (MemObject *global_object : global_objects) {
+    cur_ap_level_object[global_object] = getEmptyCond();
+    visited.insert(global_object);
+  }
+
+  for (unsigned i = 0; i < call->arg_size(); i++) {
+    Value *arg = call->getArgOperand(i);
+    PTResult *pts_result = findPTResult(arg, false);
+    if (!pts_result)
+      continue;
+
+    PTResultIterator result_iter(pts_result, this);
+    for (auto &pts : result_iter) {
+      MemObject *pt_obj = pts.first->getObj();
+      auto it = cur_ap_level_object.find(pt_obj);
+      if (it != cur_ap_level_object.end()) {
+        it->second = findOrCreateOrRegion(it->second, pts.second);
+      } else {
+        cur_ap_level_object[pt_obj] = pts.second;
+      }
+      visited.insert(pt_obj);
+    }
+  }
+
+  while (true) {
+    cur_ap_level++;
+    cur_ap_level_value.clear();
+
+    for (auto &obj_item : cur_ap_level_object) {
+      MemObject *cur_obj = obj_item.first;
+      path_cond_t cur_cond = obj_item.second;
+      auto &updated_offsets = cur_obj->getUpdatedOffset();
+      for (auto &offset_iter : updated_offsets) {
+        int64_t offset = offset_iter.first;
+        ObjectLocator *locator = cur_obj->findLocator(offset, false);
+        if (!locator)
+          continue;
+
+        if (IntraLotusAAConfig::lotus_enable_summary_value) {
+          locator->getValues(call, cur_cond, cur_ap_level_value, nullptr,
+                             ObjectLocator::FUNC_LEVEL_UNDEFINED, true,
+                             func_obj ? func_obj->findLocator(0, false)
+                                      : nullptr,
+                             true);
+        } else {
+          locator->getValues(call, cur_cond, cur_ap_level_value);
+        }
+      }
+    }
+
+    refineResult(cur_ap_level_value);
+    summary_values.push_back(cur_ap_level_value);
+
+    if (cur_ap_level >= IntraLotusAAConfig::lotus_restrict_summary_ap_depth)
+      break;
+
+    cur_ap_level_object.clear();
+    for (mem_value_item_t &value_item : cur_ap_level_value) {
+      Value *val = value_item.val;
+      PTResult *pts_result = findPTResult(val, false);
+      if (!pts_result)
+        continue;
+
+      PTResultIterator result_iter(pts_result, this);
+      for (auto &pts : result_iter) {
+        MemObject *pt_obj = pts.first->getObj();
+        auto it = cur_ap_level_object.find(pt_obj);
+        if (it != cur_ap_level_object.end()) {
+          it->second = findOrCreateOrRegion(it->second, pts.second);
+        } else if (!visited.count(pt_obj)) {
+          cur_ap_level_object[pt_obj] = pts.second;
+        }
+      }
+    }
+
+    if (cur_ap_level_object.empty())
+      break;
+  }
+}
+
 // Clear intermediate results for memory efficiency
 void IntraLotusAA::clearIntermediatePtsResult() {
   lotus_clear_hash(&escape_source);

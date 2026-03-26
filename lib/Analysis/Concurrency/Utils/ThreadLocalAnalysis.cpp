@@ -201,7 +201,7 @@ bool ThreadLocalAnalysis::escapesThread(const Value *val) const {
         }
         
         // Storing to a global = escape
-        if (base && isa<GlobalVariable>(base)) {
+        if (isa_and_nonnull<GlobalVariable>(base)) {
           return true;
         }
         

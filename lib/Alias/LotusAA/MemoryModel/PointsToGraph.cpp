@@ -599,18 +599,26 @@ bool PTGraph::isSameValue(Value *ptr1, Instruction *pos1, Value *ptr2,
   if (iter1.size() != iter2.size() || iter1.size() == 0)
     return false;
 
-  // Check if all locations match
-  set<ObjectLocator *, obj_loc_cmp> locs1, locs2;
+  std::map<ObjectLocator *, path_cond_t, obj_loc_cmp> adjusted1, adjusted2;
   for (auto &item : iter1)
-    locs1.insert(item.first->offsetBy(offset1));
+    adjusted1[item.first->offsetBy(offset1)] = item.second;
   for (auto &item : iter2)
-    locs2.insert(item.first->offsetBy(offset2));
+    adjusted2[item.first->offsetBy(offset2)] = item.second;
 
-  if (locs1 != locs2)
+  if (adjusted1.size() != adjusted2.size())
     return false;
 
-  // Check if versions match
-  for (auto *loc : locs1) {
+  for (const auto &item : adjusted1) {
+    ObjectLocator *loc = item.first;
+    auto other = adjusted2.find(loc);
+    if (other == adjusted2.end())
+      return false;
+
+    // Load-load matching is path-sensitive in Falcon: the reaching-condition
+    // for each matched locator must also agree, not just the locator/version.
+    if (item.second != other->second)
+      return false;
+
     MemObject *obj = loc->getObj();
     if (obj->isNull() || obj->isUnknown())
       continue;
@@ -799,6 +807,62 @@ void PTGraph::buildControlDependenceInfo() {
 
   control_dep_cache_.clear();
   unit_region_cache_.clear();
+
+  if (lotus_aa) {
+    if (gsa::ControlDependenceAnalysis *cda =
+            lotus_aa->getControlDependenceAnalysis(analyzed_func)) {
+      for (BasicBlock &BB : *analyzed_func) {
+        if (!cda->isTracked(BB))
+          continue;
+
+        auto *target_node =
+            post_dom_tree ? post_dom_tree->getNode(&BB) : nullptr;
+        for (BasicBlock *controller : cda->getCDBlocks(&BB)) {
+          path_cond_t combined_cond = nullptr;
+          auto *controller_node =
+              post_dom_tree ? post_dom_tree->getNode(controller) : nullptr;
+          for (BasicBlock *succ : successors(controller)) {
+            if (!succ)
+              continue;
+
+            path_cond_t edge_cond = getCFGEdgeCond(controller, succ);
+            if (!isSatisfiable(edge_cond))
+              continue;
+
+            bool include_edge = false;
+            if (target_node && controller_node) {
+              if (post_dom_tree->dominates(controller, succ))
+                continue;
+
+              for (auto *succ_node = post_dom_tree->getNode(succ);
+                   succ_node && succ_node != controller_node;
+                   succ_node = succ_node->getIDom()) {
+                if (succ_node == target_node) {
+                  include_edge = true;
+                  break;
+                }
+              }
+            } else if (succ == &BB || cda->isReachable(succ, &BB)) {
+              include_edge = true;
+            }
+
+            if (include_edge) {
+              combined_cond = combined_cond
+                                  ? findOrCreateOrRegion(combined_cond,
+                                                         edge_cond)
+                                  : edge_cond;
+            }
+          }
+
+          if (combined_cond)
+            control_dep_cache_[&BB][controller] = combined_cond;
+        }
+      }
+
+      control_dep_ready_ = true;
+      return;
+    }
+  }
 
   if (!post_dom_tree) {
     control_dep_ready_ = true;

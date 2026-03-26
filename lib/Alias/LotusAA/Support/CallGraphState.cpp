@@ -62,7 +62,7 @@ const FunctionSet &CallGraphState::getCallers(Function *func) const {
 }
 
 void CallGraphState::addEdge(Function *caller, Function *callee) {
-  if (caller && callee && !isBackEdge(caller, callee)) {
+  if (caller && callee) {
     topDown_[caller].insert(callee);
     bottomUp_[callee].insert(caller);
   }
@@ -86,6 +86,9 @@ void CallGraphState::initializeForFunctions(
 }
 
 void CallGraphState::detectBackEdges(std::set<Function *> &changedFuncs) {
+  std::map<Function *, FunctionSet, llvm_cmp> old_back_edges = backEdges_;
+  backEdges_.clear();
+
   std::set<Function *, llvm_cmp> notVisited, visiting;
 
   // Initialize with all functions
@@ -99,12 +102,26 @@ void CallGraphState::detectBackEdges(std::set<Function *> &changedFuncs) {
     visiting.clear();
     detectBackEdgesRecursive(notVisited, visiting, func, changedFuncs);
   }
+
+  std::set<Function *, llvm_cmp> affected;
+  for (const auto &item : old_back_edges) {
+    auto it = backEdges_.find(item.first);
+    if (it == backEdges_.end() || it->second != item.second)
+      affected.insert(item.first);
+  }
+  for (const auto &item : backEdges_) {
+    auto it = old_back_edges.find(item.first);
+    if (it == old_back_edges.end() || it->second != item.second)
+      affected.insert(item.first);
+  }
+  changedFuncs.insert(affected.begin(), affected.end());
 }
 
 void CallGraphState::detectBackEdgesRecursive(
     std::set<Function *, llvm_cmp> &notVisited,
     std::set<Function *, llvm_cmp> &visiting, Function *currentFunc,
-    std::set<Function *> &changedFuncs) {
+    std::set<Function *> &changed_funcs) {
+  (void)changed_funcs;
 
   notVisited.erase(currentFunc);
   visiting.insert(currentFunc);
@@ -114,11 +131,10 @@ void CallGraphState::detectBackEdgesRecursive(
     for (Function *child : topDown_[currentFunc]) {
       if (notVisited.count(child)) {
         // Forward edge: recurse
-        detectBackEdgesRecursive(notVisited, visiting, child, changedFuncs);
+        detectBackEdgesRecursive(notVisited, visiting, child, changed_funcs);
       } else if (visiting.count(child)) {
         // Back edge found: child is already on the DFS path
         backEdges_[currentFunc].insert(child);
-        changedFuncs.insert(currentFunc);
       }
     }
   }

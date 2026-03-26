@@ -283,6 +283,7 @@ public:
   bool isPure();
   bool isPseudoInput(Value *val);
   bool isSameInterface(IntraLotusAA *to_compare);
+  bool isConsideredAsLibrary() const { return is_considered_as_library; }
 
   int getSequenceNum(Value *val) override;
   int getInlineApDepth() override;
@@ -313,6 +314,9 @@ public:
   const std::vector<std::set<Value *, llvm_cmp> *> &getSummaryInputs() const {
     return summary_inputs;
   }
+  void collectGuardedValueFlowLoadValues(LoadInst *load, mem_value_t &result);
+  void collectGuardedValueFlowCallsiteSummaryInputs(
+      CallBase *call, std::vector<mem_value_t> &summary_values);
   int getPseudoInputIndex(Value *value) const {
     auto it = pseudo_input_indices.find(value);
     return it == pseudo_input_indices.end() ? -1

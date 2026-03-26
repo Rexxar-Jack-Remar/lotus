@@ -71,7 +71,7 @@ private:
       std::set<Function *, llvm_cmp> &notVisited,
       std::set<Function *, llvm_cmp> &visiting,
       Function *currentFunc,
-      std::set<Function *> &changedFuncs);
+      std::set<Function *> &changed_funcs);
 
 private:
   /// Caller -> Callees mapping (top-down traversal)
@@ -85,4 +85,3 @@ private:
 };
 
 } // namespace llvm
-

@@ -621,7 +621,8 @@ private:
       summary_ = makeAtomicSummary(makeBooleanLiteral(value_), sense_);
       break;
     case Kind::BranchAtom:
-      summary_ = makeAtomicSummary(makeBooleanLiteral(value_), sense_);
+      summary_ = makeAtomicSummary(
+          Literal(Literal::Kind::Branch, value_, block_, successor_), true);
       break;
     case Kind::SwitchCaseAtom:
       summary_ = makeAtomicSummary(
