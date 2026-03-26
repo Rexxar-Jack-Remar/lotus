@@ -125,13 +125,13 @@ const Value *resolveRegionKey(const Value *value, const DataLayout &DL,
 
 } // namespace
 
-DataRaceChecker::DataRaceChecker(Module &module, IMHPAnalysis *mhpAnalysis,
-                                 LockSetAnalysis *locksetAnalysis,
-                                 EscapeAnalysis *escapeAnalysis,
-                                 ThreadLocal::ThreadLocalAnalysis *threadLocalAnalysis,
-                                 lotus::StaticThreadSharingAnalysis *staticThreadSharingAnalysis,
-                                 AliasAnalysisWrapper *aliasAnalysis,
-                                 HappensBeforeAnalysis *happensBeforeAnalysis)
+DataRaceChecker::DataRaceChecker(
+    Module &module, IMHPAnalysis *mhpAnalysis, LockSetAnalysis *locksetAnalysis,
+    EscapeAnalysis *escapeAnalysis,
+    ThreadLocal::ThreadLocalAnalysis *threadLocalAnalysis,
+    lotus::StaticThreadSharingAnalysis *staticThreadSharingAnalysis,
+    AliasAnalysisWrapper *aliasAnalysis,
+    HappensBeforeAnalysis *happensBeforeAnalysis)
     : m_module(module), m_mhpAnalysis(mhpAnalysis),
       m_locksetAnalysis(locksetAnalysis), m_escapeAnalysis(escapeAnalysis),
       m_threadLocalAnalysis(threadLocalAnalysis),
@@ -254,7 +254,12 @@ bool DataRaceChecker::wouldReportDataRace(const Instruction *inst1,
     return false;
 
   if (m_locksetAnalysis) {
-    if (m_locksetAnalysis->mustHoldCommonLock(inst1, inst2)) {
+    const auto access_kind = [this](const Instruction *inst) {
+      return isWriteAccess(inst) ? mhp::MemoryAccessKind::Write
+                                 : mhp::MemoryAccessKind::Read;
+    };
+    if (m_locksetAnalysis->mustMutuallyExclude(inst1, access_kind(inst1), inst2,
+                                               access_kind(inst2))) {
       return false;
     }
 
@@ -540,7 +545,8 @@ bool DataRaceChecker::isOpenMPPrivateLikeAccess(const Instruction *inst,
 
   int64_t offset = 0;
   bool precise = false;
-  const Value *base = resolveRegionKey(loc, m_module.getDataLayout(), offset, precise);
+  const Value *base =
+      resolveRegionKey(loc, m_module.getDataLayout(), offset, precise);
   if (!base) {
     base = stripValue(loc);
   }

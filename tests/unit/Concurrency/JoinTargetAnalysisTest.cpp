@@ -59,6 +59,7 @@ TEST_F(JoinTargetAnalysisTest, ResolvesJoinThroughPhi) {
   EXPECT_TRUE(analysis.isUnambiguousJoin(join_inst));
   auto forks = analysis.getPossibleJoinedForks(join_inst);
   EXPECT_EQ(forks.size(), 1u);
+  EXPECT_NE(analysis.getDefiniteFeasibleJoinedFork(join_inst), nullptr);
 }
 
 TEST_F(JoinTargetAnalysisTest, LeavesAmbiguousJoinAmbiguous) {
@@ -111,6 +112,7 @@ TEST_F(JoinTargetAnalysisTest, LeavesAmbiguousJoinAmbiguous) {
   EXPECT_FALSE(analysis.isUnambiguousJoin(join_inst));
   auto forks = analysis.getPossibleJoinedForks(join_inst);
   EXPECT_EQ(forks.size(), 2u);
+  EXPECT_EQ(analysis.getDefiniteFeasibleJoinedFork(join_inst), nullptr);
 }
 
 TEST_F(JoinTargetAnalysisTest, ResolvesJoinThroughLoadAndBitcastToSingleFork) {
@@ -158,6 +160,7 @@ TEST_F(JoinTargetAnalysisTest, ResolvesJoinThroughLoadAndBitcastToSingleFork) {
   ASSERT_NE(join_inst, nullptr);
   EXPECT_TRUE(analysis.isUnambiguousJoin(join_inst));
   EXPECT_EQ(analysis.getPossibleJoinedForks(join_inst).size(), 1u);
+  EXPECT_NE(analysis.getDefiniteFeasibleJoinedFork(join_inst), nullptr);
 }
 
 TEST_F(JoinTargetAnalysisTest, ExactRootsBeatAliasFallbackAmbiguity) {
@@ -209,6 +212,7 @@ TEST_F(JoinTargetAnalysisTest, ExactRootsBeatAliasFallbackAmbiguity) {
   ASSERT_NE(join_inst, nullptr);
   EXPECT_TRUE(analysis.isUnambiguousJoin(join_inst));
   EXPECT_EQ(analysis.getPossibleJoinedForks(join_inst).size(), 1u);
+  EXPECT_NE(analysis.getDefiniteFeasibleJoinedFork(join_inst), nullptr);
 }
 
 TEST_F(JoinTargetAnalysisTest, ForeignJoinHandleDoesNotInventSingleTarget) {
@@ -252,6 +256,7 @@ TEST_F(JoinTargetAnalysisTest, ForeignJoinHandleDoesNotInventSingleTarget) {
   ASSERT_NE(join_inst, nullptr);
   EXPECT_FALSE(analysis.isUnambiguousJoin(join_inst));
   EXPECT_TRUE(analysis.getPossibleJoinedForks(join_inst).empty());
+  EXPECT_EQ(analysis.getDefiniteFeasibleJoinedFork(join_inst), nullptr);
 }
 
 TEST_F(JoinTargetAnalysisTest, ReusedHandleAcrossPhasesRejectsLaterCreate) {
@@ -302,9 +307,11 @@ TEST_F(JoinTargetAnalysisTest, ReusedHandleAcrossPhasesRejectsLaterCreate) {
   EXPECT_TRUE(analysis.isUnambiguousJoin(join_inst));
   EXPECT_EQ(analysis.getPossibleJoinedForks(join_inst).size(), 2u);
   EXPECT_EQ(analysis.getFeasibleJoinedForks(join_inst).size(), 1u);
+  EXPECT_NE(analysis.getDefiniteFeasibleJoinedFork(join_inst), nullptr);
 }
 
-TEST_F(JoinTargetAnalysisTest, LoopRecreateHandleStaysAmbiguousAfterFeasibility) {
+TEST_F(JoinTargetAnalysisTest,
+       LoopRecreateHandleStaysAmbiguousAfterFeasibility) {
   const char *source = R"(
     declare i32 @pthread_create(i8*, i8*, i8* (i8*)*, i8*)
     declare i32 @pthread_join(i8*, i8*)
@@ -351,6 +358,7 @@ TEST_F(JoinTargetAnalysisTest, LoopRecreateHandleStaysAmbiguousAfterFeasibility)
   ASSERT_NE(join_inst, nullptr);
   EXPECT_FALSE(analysis.isUnambiguousJoin(join_inst));
   EXPECT_TRUE(analysis.getFeasibleJoinedForks(join_inst).empty());
+  EXPECT_EQ(analysis.getDefiniteFeasibleJoinedFork(join_inst), nullptr);
 }
 
 TEST_F(JoinTargetAnalysisTest,
@@ -408,8 +416,7 @@ TEST_F(JoinTargetAnalysisTest,
   EXPECT_TRUE(analysis.getFeasibleJoinedForks(join_inst).empty());
 }
 
-TEST_F(JoinTargetAnalysisTest,
-       UnresolvedHelperForkRootKeepsJoinAmbiguous) {
+TEST_F(JoinTargetAnalysisTest, UnresolvedHelperForkRootKeepsJoinAmbiguous) {
   const char *source = R"(
     declare i32 @pthread_create(i8*, i8*, i8* (i8*)*, i8*)
     declare i32 @pthread_join(i8*, i8*)
@@ -467,8 +474,7 @@ TEST_F(JoinTargetAnalysisTest,
   EXPECT_EQ(analysis.getFeasibleJoinedForks(join_inst).size(), 2u);
 }
 
-TEST_F(JoinTargetAnalysisTest,
-       RepeatedHelperCallsOnSameHandleStayAmbiguous) {
+TEST_F(JoinTargetAnalysisTest, RepeatedHelperCallsOnSameHandleStayAmbiguous) {
   const char *source = R"(
     declare i32 @pthread_create(i8*, i8*, i8* (i8*)*, i8*)
     declare i32 @pthread_join(i8*, i8*)
@@ -518,8 +524,7 @@ TEST_F(JoinTargetAnalysisTest,
   EXPECT_TRUE(analysis.getFeasibleJoinedForks(join_inst).empty());
 }
 
-TEST_F(JoinTargetAnalysisTest,
-       MutuallyExclusiveHelperCallsRemainConservative) {
+TEST_F(JoinTargetAnalysisTest, MutuallyExclusiveHelperCallsRemainConservative) {
   const char *source = R"(
     declare i32 @pthread_create(i8*, i8*, i8* (i8*)*, i8*)
     declare i32 @pthread_join(i8*, i8*)

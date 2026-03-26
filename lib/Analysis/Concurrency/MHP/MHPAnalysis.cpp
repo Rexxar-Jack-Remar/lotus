@@ -1073,11 +1073,8 @@ void MHPAnalysis::handleThreadJoin(const Instruction *join_inst, SyncNode *node,
   const Value *joined_thread_val = m_thread_api->getJoinedThread(join_inst);
   ThreadID joined_tid = 0;
   bool found_thread = false;
-  std::unordered_set<const Value *> joined_roots;
 
   if (joined_thread_val) {
-    JoinTargetAnalysis::traceThreadHandleRoots(joined_thread_val, &m_module,
-                                               joined_roots);
     // Use the improved tracing function to find the origin of the pthread_t
     // value.
     const Value *pthread_t_origin = tracePthreadT(joined_thread_val);
@@ -1093,18 +1090,15 @@ void MHPAnalysis::handleThreadJoin(const Instruction *join_inst, SyncNode *node,
     }
   }
 
-  if (!found_thread && joined_roots.size() <= 1 && m_join_target_analysis) {
-    if (m_join_target_analysis->isUnambiguousJoin(join_inst)) {
-      std::vector<const Instruction *> possible_forks =
-          m_join_target_analysis->getFeasibleJoinedForks(join_inst);
-      if (possible_forks.size() == 1) {
-        auto it = m_fork_to_thread.find(possible_forks.front());
-        if (it != m_fork_to_thread.end() &&
-            !isMultiInstanceThread(it->second) &&
-            !m_detached_threads.count(it->second)) {
-          joined_tid = it->second;
-          found_thread = true;
-        }
+  if (!found_thread && m_join_target_analysis) {
+    const Instruction *definite_fork =
+        m_join_target_analysis->getDefiniteFeasibleJoinedFork(join_inst);
+    if (definite_fork) {
+      auto it = m_fork_to_thread.find(definite_fork);
+      if (it != m_fork_to_thread.end() && !isMultiInstanceThread(it->second) &&
+          !m_detached_threads.count(it->second)) {
+        joined_tid = it->second;
+        found_thread = true;
       }
     }
   }

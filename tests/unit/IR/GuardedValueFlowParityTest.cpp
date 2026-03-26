@@ -848,7 +848,7 @@ TEST_F(GuardedValueFlowParityTest, ModelsFNegWithoutDroppingTheGraph) {
 }
 
 TEST_F(GuardedValueFlowParityTest,
-       KeepsGraphsForUnsupportedInstructionsUsingUnknownNodesAndDiagnostics) {
+       RejectsUnsupportedInstructionsByWithholdingGraphs) {
   const char *source = R"(
     define i32 @test({i32, i32} %pair) {
     entry:
@@ -864,22 +864,7 @@ TEST_F(GuardedValueFlowParityTest,
   ASSERT_NE(F, nullptr);
 
   auto pipeline = runBuilder(*module);
-  ASSERT_TRUE(pipeline.builder->hasGraphFor(*F));
-  GuardedValueFlowGraph &graph = pipeline.builder->getGraph(*F);
-
-  Instruction *extract_inst = nullptr;
-  for (Instruction &I : instructions(*F)) {
-    if (I.getOpcode() == Instruction::ExtractValue) {
-      extract_inst = &I;
-      break;
-    }
-  }
-  ASSERT_NE(extract_inst, nullptr);
-
-  auto *field_node = graph.findNode(extract_inst);
-  ASSERT_NE(field_node, nullptr);
-  EXPECT_EQ(field_node->getKind(), GuardedValueFlowNode::Kind::Unknown);
-  EXPECT_TRUE(graph.hasDiagnostics());
+  EXPECT_FALSE(pipeline.builder->hasGraphFor(*F));
 }
 
 } // namespace

@@ -6,6 +6,7 @@
 #include <llvm/ADT/SmallVector.h>
 #include <llvm/IR/Constants.h>
 #include <llvm/IR/DataLayout.h>
+#include <llvm/IR/InstIterator.h>
 #include <llvm/IR/Instructions.h>
 #include <llvm/IR/Intrinsics.h>
 #include <llvm/IR/Operator.h>
@@ -975,6 +976,24 @@ static void recordUnsupportedInstruction(GuardedValueFlowGraph &graph,
                           &I, I.getParent());
 }
 
+static bool isHardUnsupportedInstruction(const Instruction &I) {
+  switch (I.getOpcode()) {
+  case Instruction::Invoke:
+  case Instruction::LandingPad:
+  case Instruction::Resume:
+  case Instruction::IndirectBr:
+  case Instruction::ExtractValue:
+  case Instruction::InsertValue:
+  case Instruction::ShuffleVector:
+  case Instruction::AtomicRMW:
+  case Instruction::AtomicCmpXchg:
+  case Instruction::Fence:
+    return true;
+  default:
+    return false;
+  }
+}
+
 static bool buildInstruction(GuardedValueFlowGraph &graph, Instruction &I,
                              Function &F, bool &failed) {
   auto *block = I.getParent();
@@ -1038,30 +1057,6 @@ static bool buildInstruction(GuardedValueFlowGraph &graph, Instruction &I,
                                             failed);
     return true;
   }
-  case Instruction::Invoke: {
-    auto *invoke = dyn_cast<InvokeInst>(&I);
-    if (!invoke) {
-      failed = true;
-      recordUnsupportedInstruction(graph, F, I, "invalid invoke");
-      return true;
-    }
-    auto *site = graph.findCallSite(invoke);
-    if (!site) {
-      site = graph.createSite<GuardedValueFlowCallSite>(&graph, invoke);
-      graph.mapCallSite(invoke, site);
-    }
-    if (Function *callee = invoke->getCalledFunction())
-      site->addCallee(callee);
-    if (!invoke->getType()->isVoidTy())
-      (void)findOrCreateCallOutputNode(graph, *invoke, F);
-    for (Value *arg : invoke->args())
-      site->addCommonInput(
-          getOrCreateOperandRepresentation(graph, arg, F, failed));
-    recordUnsupportedInstruction(
-        graph, F, I,
-        "invoke control effects are degraded to a callsite-only model");
-    return true;
-  }
   case Instruction::LandingPad:
   case Instruction::Resume:
   case Instruction::IndirectBr:
@@ -1071,16 +1066,15 @@ static bool buildInstruction(GuardedValueFlowGraph &graph, Instruction &I,
   case Instruction::AtomicRMW:
   case Instruction::AtomicCmpXchg:
   case Instruction::Fence: {
-    failed = true;
-    (void)findOrCreateUnknownInstructionNode(
-        graph, I, (Twine("unsupported.") + I.getOpcodeName()).str());
     (void)graph.createSite<GuardedValueFlowSite>(
         GuardedValueFlowSite::Kind::Unknown, &graph, &I);
     recordUnsupportedInstruction(
         graph, F, I,
-        (Twine("unsupported opcode lowered to unknown: ") + I.getOpcodeName())
+        (Twine("unsupported opcode requires lowering before GVFG construction: ") +
+         I.getOpcodeName())
             .str());
-    return true;
+    failed = true;
+    return false;
   }
   case Instruction::FNeg: {
     auto *result = findOrCreateValueNode(graph, &I, F);
@@ -1462,6 +1456,18 @@ GuardedValueFlowGraphBuilderPass::buildGraph(Function &F) {
   auto graph = std::make_unique<GuardedValueFlowGraph>(&F);
   auto &cda = getAnalysis<gsa::ControlDependenceAnalysisPass>()
                   .getControlDependenceAnalysis(F);
+
+  for (Instruction &I : instructions(F)) {
+    if (!isHardUnsupportedInstruction(I))
+      continue;
+    recordBuilderDiagnostic(
+        *graph, GuardedValueFlowGraph::Diagnostic::Severity::Warning,
+        Twine("Skipping GVFG construction for function ") + F.getName() +
+            " because it contains unsupported instruction: " +
+            I.getOpcodeName(),
+        &I, I.getParent());
+    return nullptr;
+  }
 
   unsigned common_arg_index = 0;
   for (Argument &arg : F.args()) {

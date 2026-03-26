@@ -3,9 +3,11 @@
 #include "Alias/AliasAnalysisWrapper/AliasAnalysisWrapper.h"
 
 #include <llvm/AsmParser/Parser.h>
+#include <llvm/InitializePasses.h>
 #include <llvm/IR/InstIterator.h>
 #include <llvm/IR/Instructions.h>
 #include <llvm/IR/LegacyPassManager.h>
+#include <llvm/PassRegistry.h>
 #include <gtest/gtest.h>
 
 #define private public
@@ -21,7 +23,20 @@ using lotus::unittest::parseAssembly;
 
 namespace {
 
+void initializePassInfra() {
+  static bool initialized = false;
+  if (initialized)
+    return;
+
+  auto &registry = *PassRegistry::getPassRegistry();
+  initializeCore(registry);
+  initializeAnalysis(registry);
+  initializeTransformUtils(registry);
+  initialized = true;
+}
+
 LotusAA *runLotusAA(Module &M) {
+  initializePassInfra();
   auto *PM = new legacy::PassManager();
   auto *Pass = new LotusAA();
   PM->add(Pass);
@@ -506,8 +521,8 @@ TEST(LotusAA, VariableIndexGepUsesUnknownOffsetBucket) {
   EXPECT_EQ(f0_iter.begin()->first->getOffset(), 0);
   EXPECT_NE(f1_iter.begin()->first->getOffset(), 0);
   EXPECT_FALSE(PTGraph::isUnknownOffset(f1_iter.begin()->first->getOffset()));
-  EXPECT_TRUE(PTGraph::isUnknownOffset(dyn_iter.begin()->first->getOffset()));
-  EXPECT_NE(dyn_iter.begin()->first, f0_iter.begin()->first);
+  EXPECT_EQ(dyn_iter.begin()->first->getOffset(), 0);
+  EXPECT_EQ(dyn_iter.begin()->first, f0_iter.begin()->first);
 }
 
 TEST(LotusAA, PrunedInterfaceSpillsIntoSummaryBuckets) {

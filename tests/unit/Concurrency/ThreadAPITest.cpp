@@ -164,7 +164,8 @@ TEST_F(ThreadAPITest, PreservesMangledCppAsyncNamesDuringClassification) {
 
   ThreadAPI::resetThreadAPI();
   ThreadAPI *api = ThreadAPI::getThreadAPI();
-  const Function *async_func = module->getFunction("_ZNSt5async12launch_asyncEv");
+  const Function *async_func =
+      module->getFunction("_ZNSt5async12launch_asyncEv");
   ASSERT_NE(async_func, nullptr);
   EXPECT_EQ(api->getType(async_func), ThreadAPI::TD_ASYNC);
 }
@@ -194,7 +195,8 @@ TEST_F(ThreadAPITest, AsyncWithUnknownPolicyStillLooksForkLike) {
   ThreadAPI *api = ThreadAPI::getThreadAPI();
   const Function *main_func = module->getFunction("main");
   ASSERT_NE(main_func, nullptr);
-  const Instruction *call = main_func->getEntryBlock().getTerminator()->getPrevNode();
+  const Instruction *call =
+      main_func->getEntryBlock().getTerminator()->getPrevNode();
   ASSERT_NE(call, nullptr);
 
   EXPECT_TRUE(api->isTDFork(call));
@@ -791,6 +793,59 @@ TEST_F(ThreadAPITest, SharedLockPredicatesAreConsistentAcrossOverloads) {
             api->isWriteLockAcquire(&*exclusive_call));
 }
 
+TEST_F(ThreadAPITest, LockSemanticDescriptorCapturesModeAndOperation) {
+  const char *source = R"(
+    declare i32 @pthread_rwlock_rdlock(i8*)
+    declare i32 @pthread_rwlock_wrlock(i8*)
+    declare i32 @pthread_mutex_trylock(i8*)
+    declare i32 @pthread_rwlock_unlock(i8*)
+
+    define void @main(i8* %lock) {
+    entry:
+      call i32 @pthread_rwlock_rdlock(i8* %lock)
+      call i32 @pthread_rwlock_wrlock(i8* %lock)
+      call i32 @pthread_mutex_trylock(i8* %lock)
+      call i32 @pthread_rwlock_unlock(i8* %lock)
+      ret void
+    }
+  )";
+
+  auto module = parseModule(source);
+  ASSERT_NE(module, nullptr);
+
+  ThreadAPI::resetThreadAPI();
+  ThreadAPI *api = ThreadAPI::getThreadAPI();
+  const Function *main_func = module->getFunction("main");
+  ASSERT_NE(main_func, nullptr);
+
+  auto it = main_func->getEntryBlock().begin();
+  const Instruction *rdlock = &*it++;
+  const Instruction *wrlock = &*it++;
+  const Instruction *trylock = &*it++;
+  const Instruction *unlock = &*it++;
+
+  ThreadAPI::LockSemantics rd = api->describeLockSemantics(rdlock);
+  ThreadAPI::LockSemantics wr = api->describeLockSemantics(wrlock);
+  ThreadAPI::LockSemantics tr = api->describeLockSemantics(trylock);
+  ThreadAPI::LockSemantics un = api->describeLockSemantics(unlock);
+
+  EXPECT_TRUE(rd.is_lock_api);
+  EXPECT_TRUE(rd.is_acquire);
+  EXPECT_EQ(rd.mode, ThreadAPI::LockMode::Shared);
+
+  EXPECT_TRUE(wr.is_lock_api);
+  EXPECT_TRUE(wr.is_acquire);
+  EXPECT_EQ(wr.mode, ThreadAPI::LockMode::Exclusive);
+
+  EXPECT_TRUE(tr.is_lock_api);
+  EXPECT_TRUE(tr.is_acquire);
+  EXPECT_TRUE(tr.is_try);
+  EXPECT_EQ(tr.mode, ThreadAPI::LockMode::Exclusive);
+
+  EXPECT_TRUE(un.is_lock_api);
+  EXPECT_TRUE(un.is_release);
+}
+
 TEST_F(ThreadAPITest, MapsOpenMPTaskRuntimeVariants) {
   const char *source = R"(
     declare i32 @__kmpc_omp_task_begin_if0(i8*, i32, i8*)
@@ -834,7 +889,8 @@ TEST_F(ThreadAPITest, DistinguishesOpenMPDoacrossRuntimeVariants) {
             ThreadAPI::TD_OMP_DOACROSS_SUBMIT);
 }
 
-TEST_F(ThreadAPITest, LongestPrefixRuleWinsForSpecializedOpenMPRuntimeFamilies) {
+TEST_F(ThreadAPITest,
+       LongestPrefixRuleWinsForSpecializedOpenMPRuntimeFamilies) {
   const char *source = R"(
     declare void @__kmpc_teams_host(i8*, i32)
     declare void @__kmpc_teams_distribute_nowait_4(i8*, i32, i32*)
@@ -854,14 +910,18 @@ TEST_F(ThreadAPITest, LongestPrefixRuleWinsForSpecializedOpenMPRuntimeFamilies) 
 
   EXPECT_EQ(api->getType(module->getFunction("__kmpc_teams_host")),
             ThreadAPI::TD_OMP_TEAMS_HOST);
-  EXPECT_EQ(api->getType(module->getFunction("__kmpc_teams_distribute_nowait_4")),
-            ThreadAPI::TD_OMP_TEAMS_DISTRIBUTE);
-  EXPECT_EQ(api->getType(module->getFunction("__kmpc_distribute_static_init_4")),
-            ThreadAPI::TD_OMP_DISTRIBUTE_STATIC);
-  EXPECT_EQ(api->getType(module->getFunction("__kmpc_distribute_dynamic_init_4")),
-            ThreadAPI::TD_OMP_DISTRIBUTE_DYNAMIC);
-  EXPECT_EQ(api->getType(module->getFunction("__kmpc_distribute_guidance_init_4")),
-            ThreadAPI::TD_OMP_DISTRIBUTE_GUIDANCE);
+  EXPECT_EQ(
+      api->getType(module->getFunction("__kmpc_teams_distribute_nowait_4")),
+      ThreadAPI::TD_OMP_TEAMS_DISTRIBUTE);
+  EXPECT_EQ(
+      api->getType(module->getFunction("__kmpc_distribute_static_init_4")),
+      ThreadAPI::TD_OMP_DISTRIBUTE_STATIC);
+  EXPECT_EQ(
+      api->getType(module->getFunction("__kmpc_distribute_dynamic_init_4")),
+      ThreadAPI::TD_OMP_DISTRIBUTE_DYNAMIC);
+  EXPECT_EQ(
+      api->getType(module->getFunction("__kmpc_distribute_guidance_init_4")),
+      ThreadAPI::TD_OMP_DISTRIBUTE_GUIDANCE);
   EXPECT_EQ(api->getType(module->getFunction("__kmpc_loop_static_4")),
             ThreadAPI::TD_OMP_LOOP_STATIC_INIT);
   EXPECT_EQ(api->getType(module->getFunction("__kmpc_loop_dynamic_4")),
@@ -1005,13 +1065,59 @@ TEST_F(ThreadAPITest, WrapperOperationsShareAnalysisLockIdentity) {
   EXPECT_EQ(identity, api->getAnalysisLockIdentity(dtor));
 }
 
+TEST_F(ThreadAPITest, ReportsSharedVsExclusiveLockSemantics) {
+  const char *source = R"(
+    @lock = global i8 0
+
+    declare i32 @pthread_rwlock_rdlock(i8*)
+    declare i32 @pthread_rwlock_wrlock(i8*)
+    declare i32 @pthread_rwlock_unlock(i8*)
+
+    define void @main() {
+    entry:
+      call i32 @pthread_rwlock_rdlock(i8* @lock)
+      call i32 @pthread_rwlock_wrlock(i8* @lock)
+      call i32 @pthread_rwlock_unlock(i8* @lock)
+      ret void
+    }
+  )";
+
+  auto module = parseModule(source);
+  ASSERT_NE(module, nullptr);
+
+  ThreadAPI::resetThreadAPI();
+  ThreadAPI *api = ThreadAPI::getThreadAPI();
+  const Function *main_func = module->getFunction("main");
+  ASSERT_NE(main_func, nullptr);
+
+  std::vector<const Instruction *> calls;
+  for (const Instruction &inst : main_func->getEntryBlock()) {
+    if (isa<CallBase>(&inst)) {
+      calls.push_back(&inst);
+    }
+  }
+  ASSERT_EQ(calls.size(), 3u);
+
+  const auto read_info = api->getLockSemanticInfo(calls[0]);
+  const auto write_info = api->getLockSemanticInfo(calls[1]);
+  const auto unlock_info = api->getLockSemanticInfo(calls[2]);
+
+  EXPECT_TRUE(read_info.isShared());
+  EXPECT_TRUE(write_info.isExclusive());
+  EXPECT_TRUE(unlock_info.isRelease());
+  EXPECT_EQ(read_info.identity, module->getNamedGlobal("lock"));
+  EXPECT_EQ(write_info.identity, module->getNamedGlobal("lock"));
+  EXPECT_EQ(unlock_info.identity, module->getNamedGlobal("lock"));
+}
+
 TEST_F(ThreadAPITest, ReportsExplicitSemanticLoweringStatus) {
   ThreadAPI::resetThreadAPI();
   ThreadAPI *api = ThreadAPI::getThreadAPI();
 
   auto async = api->getSemanticLoweringInfo(ThreadAPI::TD_ASYNC);
   auto future_get = api->getSemanticLoweringInfo(ThreadAPI::TD_FUTURE_GET);
-  auto omp_atomic = api->getSemanticLoweringInfo(ThreadAPI::TD_OMP_ATOMIC_START);
+  auto omp_atomic =
+      api->getSemanticLoweringInfo(ThreadAPI::TD_OMP_ATOMIC_START);
   auto task_complete =
       api->getSemanticLoweringInfo(ThreadAPI::TD_OMP_TASK_COMPLETE);
   auto doacross_submit =
@@ -1033,8 +1139,9 @@ TEST_F(ThreadAPITest, ReportsExplicitSemanticLoweringStatus) {
       ThreadAPI::SemanticLoweringOwner::ExplicitFallback));
   EXPECT_EQ(task_complete.kind, ThreadAPI::SemanticLoweringKind::Modeled);
   EXPECT_STREQ(task_complete.reason, "modeled");
-  EXPECT_TRUE(api->hasSemanticLoweringOwner(
-      ThreadAPI::TD_OMP_TASK_COMPLETE, ThreadAPI::SemanticLoweringOwner::OpenMP));
+  EXPECT_TRUE(
+      api->hasSemanticLoweringOwner(ThreadAPI::TD_OMP_TASK_COMPLETE,
+                                    ThreadAPI::SemanticLoweringOwner::OpenMP));
   EXPECT_EQ(doacross_submit.kind, ThreadAPI::SemanticLoweringKind::Modeled);
   EXPECT_STREQ(doacross_submit.reason, "modeled");
   EXPECT_TRUE(api->hasSemanticLoweringOwner(
@@ -1154,8 +1261,9 @@ TEST_F(ThreadAPITest, SpecialSemanticLoweringStatesStayExplicitlyEnumerated) {
       EXPECT_NE(info.kind, ThreadAPI::SemanticLoweringKind::Modeled) << name;
       if (type != ThreadAPI::TD_ASYNC &&
           info.kind != ThreadAPI::SemanticLoweringKind::Deferred) {
-        EXPECT_NE(info.owners & ThreadAPI::semanticLoweringOwnerMask(
-                                  ThreadAPI::SemanticLoweringOwner::ExplicitFallback),
+        EXPECT_NE(info.owners &
+                      ThreadAPI::semanticLoweringOwnerMask(
+                          ThreadAPI::SemanticLoweringOwner::ExplicitFallback),
                   0u)
             << name;
       }
@@ -1199,7 +1307,8 @@ TEST_F(ThreadAPITest, ModeledConcurrencyFunctionsExposeConcreteLoweringOwners) {
   EXPECT_TRUE(api->hasSemanticLoweringOwner(
       critical, ThreadAPI::SemanticLoweringOwner::LockSet));
 
-  ThreadAPI::SemanticLoweringInfo idup_info = api->getSemanticLoweringInfo(idup);
+  ThreadAPI::SemanticLoweringInfo idup_info =
+      api->getSemanticLoweringInfo(idup);
   EXPECT_EQ(idup_info.kind, ThreadAPI::SemanticLoweringKind::Modeled);
   EXPECT_TRUE(api->hasSemanticLoweringOwner(
       idup, ThreadAPI::SemanticLoweringOwner::MPI));
@@ -1346,14 +1455,12 @@ TEST_F(ThreadAPITest, MPIConfiguredAPIsHaveConsistentLoweringLibraries) {
   EXPECT_NE(api->getType(extent), ThreadAPI::TD_DUMMY);
   EXPECT_NE(api->getType(cart), ThreadAPI::TD_DUMMY);
 
-  auto session_type_info =
-      api->getSemanticLoweringInfo(api->getType(session));
+  auto session_type_info = api->getSemanticLoweringInfo(api->getType(session));
   auto session_func_info = api->getSemanticLoweringInfo(session);
   EXPECT_EQ(session_type_info.kind, session_func_info.kind);
   EXPECT_EQ(session_type_info.owners, session_func_info.owners);
 
-  auto extent_type_info =
-      api->getSemanticLoweringInfo(api->getType(extent));
+  auto extent_type_info = api->getSemanticLoweringInfo(api->getType(extent));
   auto extent_func_info = api->getSemanticLoweringInfo(extent);
   EXPECT_EQ(extent_type_info.kind, extent_func_info.kind);
   EXPECT_EQ(extent_type_info.owners, extent_func_info.owners);

@@ -7,7 +7,6 @@
 
 #include "Alias/AliasAnalysisWrapper/AliasAnalysisWrapper.h"
 #include "Analysis/Concurrency/Utils/RAIILockTracker.h"
-
 #include "TestUtils/LLVMHelpers.h"
 
 #include <algorithm>
@@ -114,8 +113,7 @@ TEST_F(LockSetAnalysisTest, TryLockIsMayOnly) {
   EXPECT_FALSE(lsa.mustHoldLock(after, lock));
 }
 
-TEST_F(LockSetAnalysisTest,
-       ConditionalHelperUnlockClearsCallerMustButNotMay) {
+TEST_F(LockSetAnalysisTest, ConditionalHelperUnlockClearsCallerMustButNotMay) {
   const char *source = R"(
     declare i32 @pthread_mutex_lock(i8*)
     declare i32 @pthread_mutex_unlock(i8*)
@@ -403,8 +401,7 @@ TEST_F(LockSetAnalysisTest, ScopedLockTracksAllUnderlyingMutexes) {
   EXPECT_TRUE(lsa.mustHoldLock(after, lock2));
 }
 
-TEST_F(LockSetAnalysisTest,
-       ImpreciseRaiiScopeDoesNotLeakMustLockPastBoundary) {
+TEST_F(LockSetAnalysisTest, ImpreciseRaiiScopeDoesNotLeakMustLockPastBoundary) {
   const char *source = R"(
     declare void @fake_unique_lock_C1E(i8*, i8*)
 
@@ -943,8 +940,7 @@ TEST_F(LockSetAnalysisTest, SharedLockCountsAsReadLockOnly) {
   EXPECT_TRUE(lsa.getMayWriteLockSetAt(after).count(lock) == 0);
 }
 
-TEST_F(LockSetAnalysisTest,
-       SharedLockSummaryPreservesReadModeAcrossCalls) {
+TEST_F(LockSetAnalysisTest, SharedLockSummaryPreservesReadModeAcrossCalls) {
   const char *source = R"(
     declare i32 @pthread_rwlock_rdlock(i8*)
 
@@ -1062,7 +1058,7 @@ TEST_F(LockSetAnalysisTest, BlockHeadMustWriteLockSetUsesPredecessorMeet) {
   EXPECT_TRUE(lsa.getMustWriteLockSetAt(access).count(lock) > 0);
 }
 
-TEST_F(LockSetAnalysisTest, ReaderWriterModesDoNotPretendExclusion) {
+TEST_F(LockSetAnalysisTest, ReaderWriterModesNeedAccessSensitiveExclusion) {
   const char *source = R"(
     declare i32 @pthread_rwlock_rdlock(i8*)
     declare i32 @pthread_rwlock_wrlock(i8*)
@@ -1099,6 +1095,60 @@ TEST_F(LockSetAnalysisTest, ReaderWriterModesDoNotPretendExclusion) {
 
   EXPECT_FALSE(lsa.mayHoldCommonLock(read_access, write_access));
   EXPECT_FALSE(lsa.mustHoldCommonLock(read_access, write_access));
+  EXPECT_TRUE(lsa.mustMutuallyExclude(read_access, MemoryAccessKind::Read,
+                                      write_access, MemoryAccessKind::Write));
+}
+
+TEST_F(LockSetAnalysisTest,
+       AccessSensitiveMutualExclusionDistinguishesReadReadAndWriteRead) {
+  const char *source = R"(
+    declare i32 @pthread_rwlock_rdlock(i8*)
+    declare i32 @pthread_rwlock_wrlock(i8*)
+
+    @lock = global i8 0
+
+    define void @reader1() {
+    entry:
+      call i32 @pthread_rwlock_rdlock(i8* @lock)
+      %read1 = add i32 1, 2
+      ret void
+    }
+
+    define void @reader2() {
+    entry:
+      call i32 @pthread_rwlock_rdlock(i8* @lock)
+      %read2 = add i32 3, 4
+      ret void
+    }
+
+    define void @writer() {
+    entry:
+      call i32 @pthread_rwlock_wrlock(i8* @lock)
+      %write = add i32 5, 6
+      ret void
+    }
+  )";
+
+  auto module = parseModule(source);
+  ASSERT_NE(module, nullptr);
+
+  LockSetAnalysis lsa(*module);
+  lsa.analyze();
+
+  const Instruction *read1 =
+      findInstructionByName(*module->getFunction("reader1"), "read1");
+  const Instruction *read2 =
+      findInstructionByName(*module->getFunction("reader2"), "read2");
+  const Instruction *write =
+      findInstructionByName(*module->getFunction("writer"), "write");
+  ASSERT_NE(read1, nullptr);
+  ASSERT_NE(read2, nullptr);
+  ASSERT_NE(write, nullptr);
+
+  EXPECT_FALSE(lsa.mustMutuallyExclude(read1, MemoryAccessKind::Read, read2,
+                                       MemoryAccessKind::Read));
+  EXPECT_TRUE(lsa.mustMutuallyExclude(read1, MemoryAccessKind::Read, write,
+                                      MemoryAccessKind::Write));
 }
 
 TEST_F(LockSetAnalysisTest, AdoptLockDoesNotSynthesizeAcquisition) {
@@ -1471,8 +1521,7 @@ TEST_F(LockSetAnalysisTest,
   EXPECT_EQ(lsa.getStatistics().num_releases, 1u);
 }
 
-TEST_F(LockSetAnalysisTest,
-       UnwindFromInnerScopeDoesNotReleaseOuterRaiiLock) {
+TEST_F(LockSetAnalysisTest, UnwindFromInnerScopeDoesNotReleaseOuterRaiiLock) {
   const char *source = R"(
     declare void @fake_lock_guard_C1E(i8*, i8*)
     declare void @fake_lock_guard_D1Ev(i8*)
@@ -1576,8 +1625,7 @@ TEST_F(LockSetAnalysisTest, ImplicitRaiiUnwindExitClearsMustLockState) {
   EXPECT_FALSE(lsa.mustHoldLock(resume_inst, lock));
 }
 
-TEST_F(LockSetAnalysisTest,
-       BalancedRaiiHelperDoesNotClearCallerMustLockState) {
+TEST_F(LockSetAnalysisTest, BalancedRaiiHelperDoesNotClearCallerMustLockState) {
   const char *source = R"(
     declare i32 @pthread_mutex_lock(i8*)
     declare void @fake_unique_lock_C1E(i8*, i8*)

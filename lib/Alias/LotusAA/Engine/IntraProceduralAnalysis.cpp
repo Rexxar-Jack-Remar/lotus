@@ -32,7 +32,7 @@
 ///
 /// **Configuration Options:**
 /// - `lotus_restrict_inline_depth`: Max inter-procedural inlining depth
-/// (default: 2)
+///   (default: unbounded, Falcon-compatible sentinel `-2`)
 /// - `lotus_restrict_cg_size`: Max indirect call targets (default: 5)
 /// - `lotus_restrict_inline_size`: Max summary size (default: 100)
 /// - `lotus_restrict_ap_level`: Max access path depth (default: 2)
@@ -59,6 +59,8 @@ using namespace llvm;
 using namespace std;
 
 namespace {
+
+static const int LOTUS_INLINE_LEVEL_UNDEFINED = -2;
 
 static void topSortCFG(std::vector<BasicBlock *> &bb_sorted, Function *F) {
   unordered_map<BasicBlock *, int> in_deg;
@@ -96,7 +98,8 @@ static void topSortCFG(std::vector<BasicBlock *> &bb_sorted, Function *F) {
 } // namespace
 
 // Configuration
-int IntraLotusAAConfig::lotus_restrict_inline_depth = 2;
+int IntraLotusAAConfig::lotus_restrict_inline_depth =
+    LOTUS_INLINE_LEVEL_UNDEFINED;
 int IntraLotusAAConfig::lotus_restrict_summary_ap_depth = 10;
 double IntraLotusAAConfig::lotus_timeout = 10.0;
 int IntraLotusAAConfig::lotus_restrict_cg_size = 5;
@@ -118,7 +121,7 @@ int IntraLotusAAConfig::lotus_restrict_inter_structure = -1;
 static cl::opt<int> lotus_restrict_inline_depth_cl(
     "lotus-restrict-inline-depth",
     cl::desc("Maximum inlining depth for inter-procedural analysis"),
-    cl::init(2), cl::Hidden);
+    cl::init(LOTUS_INLINE_LEVEL_UNDEFINED), cl::Hidden);
 
 static cl::opt<int> lotus_restrict_cg_size_cl(
     "lotus-restrict-cg-size",

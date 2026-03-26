@@ -61,7 +61,7 @@ lotus-aa [options] <input bitcode file>
 
 ### Configuration Options
 
-- `lotus_restrict_inline_depth`: Max inter-procedural inlining depth (default: 2)
+- `lotus_restrict_inline_depth`: Max inter-procedural inlining depth (default: unbounded via Falcon-compatible sentinel `-2`)
 - `lotus_restrict_cg_size`: Max indirect call targets (default: 5)
 - `lotus_restrict_inline_size`: Max summary size (default: 100)
 - `lotus_restrict_ap_level`: Max access path depth (default: 2)

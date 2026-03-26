@@ -32,19 +32,24 @@ class AliasAnalysisWrapper;
 namespace mhp {
 
 /**
- * @brief For each pthread_join, the set of pthread_create calls that may be joined
+ * @brief For each pthread_join, the set of pthread_create calls that may be
+ * joined
  */
 class JoinTargetAnalysis {
 public:
-  explicit JoinTargetAnalysis(llvm::Module &module,
-                              lotus::AliasAnalysisWrapper *aliasAnalysis = nullptr);
+  explicit JoinTargetAnalysis(
+      llvm::Module &module,
+      lotus::AliasAnalysisWrapper *aliasAnalysis = nullptr);
 
   void analyze();
 
-  void setAliasAnalysis(lotus::AliasAnalysisWrapper *aa) { m_aliasAnalysis = aa; }
+  void setAliasAnalysis(lotus::AliasAnalysisWrapper *aa) {
+    m_aliasAnalysis = aa;
+  }
 
   /**
-   * @brief Fork instructions that may be joined by this join (join's arg0 may alias fork's arg0)
+   * @brief Fork instructions that may be joined by this join (join's arg0 may
+   * alias fork's arg0)
    */
   std::vector<const llvm::Instruction *>
   getPossibleJoinedForks(const llvm::Instruction *joinInst) const;
@@ -59,7 +64,17 @@ public:
   getFeasibleJoinedForks(const llvm::Instruction *joinInst) const;
 
   /**
-   * @brief True if this join has exactly one possible target fork (unambiguous join)
+   * @brief Return the single definite feasible fork for joinInst when provable.
+   *
+   * Returns nullptr unless joinInst is proven unambiguous and has exactly one
+   * feasible target fork.
+   */
+  const llvm::Instruction *
+  getDefiniteFeasibleJoinedFork(const llvm::Instruction *joinInst) const;
+
+  /**
+   * @brief True if this join has exactly one possible target fork (unambiguous
+   * join)
    */
   bool isUnambiguousJoin(const llvm::Instruction *joinInst) const;
 
@@ -69,13 +84,15 @@ public:
    * Supports load/phi/select/bitcast/gep forwarding and, when a module is
    * provided, walks direct callers to map formal arguments back to actuals.
    */
-  static const llvm::Value *traceThreadHandleRoot(const llvm::Value *value,
-                                                  const llvm::Module *module = nullptr);
+  static const llvm::Value *
+  traceThreadHandleRoot(const llvm::Value *value,
+                        const llvm::Module *module = nullptr);
 
-  /// Collect all allocas/globals reachable from value (for phi/select gives multiple roots).
-  static void traceThreadHandleRoots(const llvm::Value *value,
-                                     const llvm::Module *module,
-                                     std::unordered_set<const llvm::Value *> &roots);
+  /// Collect all allocas/globals reachable from value (for phi/select gives
+  /// multiple roots).
+  static void
+  traceThreadHandleRoots(const llvm::Value *value, const llvm::Module *module,
+                         std::unordered_set<const llvm::Value *> &roots);
 
 private:
   enum class CandidateCountKind { Zero, One, Many };
@@ -83,9 +100,9 @@ private:
   void collectForksAndJoins();
   CandidateCountKind
   classifyJoinForks(const std::vector<const llvm::Instruction *> &forks) const;
-  std::vector<const llvm::Instruction *>
-  filterTemporallyFeasibleForks(const llvm::Instruction *joinInst,
-                                const std::vector<const llvm::Instruction *> &forks) const;
+  std::vector<const llvm::Instruction *> filterTemporallyFeasibleForks(
+      const llvm::Instruction *joinInst,
+      const std::vector<const llvm::Instruction *> &forks) const;
   bool forkMayReachJoinInFunction(const llvm::Instruction *forkInst,
                                   const llvm::Instruction *joinInst) const;
   bool joinMayReachForkInFunction(const llvm::Instruction *joinInst,
@@ -101,7 +118,8 @@ private:
   std::vector<const llvm::Instruction *> m_joinInsts;
   std::unordered_map<const llvm::Instruction *, const llvm::Value *>
       m_forkToRoot;
-  std::unordered_map<const llvm::Instruction *, std::vector<const llvm::Instruction *>>
+  std::unordered_map<const llvm::Instruction *,
+                     std::vector<const llvm::Instruction *>>
       m_joinToForks;
   std::unordered_map<const llvm::Instruction *,
                      std::vector<const llvm::Instruction *>>

@@ -62,6 +62,8 @@ namespace mhp {
 using LockID = const llvm::Value *;
 using LockSet = std::set<LockID>;
 
+enum class MemoryAccessKind { Read, Write };
+
 // ============================================================================
 // Lock Set Analysis
 // ============================================================================
@@ -192,8 +194,20 @@ public:
   bool mayHoldCommonLock(const llvm::Instruction *i1,
                          const llvm::Instruction *i2) const;
 
+  /**
+   * @brief Check if two instructions are definitely mutually excluded by the
+   * same lock identity, taking shared-vs-exclusive modes into account.
+   */
+  bool mustMutuallyExclude(const llvm::Instruction *i1,
+                           const llvm::Instruction *i2) const;
+
   bool mustHoldCommonLock(const llvm::Instruction *i1,
                           const llvm::Instruction *i2) const;
+
+  bool mustMutuallyExclude(const llvm::Instruction *i1,
+                           MemoryAccessKind access1,
+                           const llvm::Instruction *i2,
+                           MemoryAccessKind access2) const;
 
   /**
    * @brief Get all locks that may be held in a function
@@ -345,21 +359,22 @@ private:
   std::unordered_set<LockID> m_reentrant_locks;
 
   // RAII lock tracking per function (type alias avoids C++11 >> parse issue)
-  typedef std::map<const llvm::Value *, RAIILock::LockLifetime>
-      RAIILockMap;
+  typedef std::map<const llvm::Value *, RAIILock::LockLifetime> RAIILockMap;
   std::unordered_map<const llvm::Function *, RAIILockMap> m_raii_locks;
 
   // Interprocedural analysis data structures
   struct FunctionSummary {
-    LockSet may_acquire_delta;  ///< Locks newly held on some exit path
-    LockSet may_read_acquire_delta;  ///< Read locks newly held on some exit path
-    LockSet may_write_acquire_delta; ///< Write locks newly held on some exit path
-    LockSet must_acquire_delta; ///< Locks newly held on all normal exit paths
+    LockSet may_acquire_delta;      ///< Locks newly held on some exit path
+    LockSet may_read_acquire_delta; ///< Read locks newly held on some exit path
+    LockSet
+        may_write_acquire_delta; ///< Write locks newly held on some exit path
+    LockSet must_acquire_delta;  ///< Locks newly held on all normal exit paths
     LockSet must_read_acquire_delta;  ///< Read locks newly held on all exits
     LockSet must_write_acquire_delta; ///< Write locks newly held on all exits
     LockSet may_release_delta;  ///< Locks maybe released on some returning path
-    LockSet must_release_delta; ///< Locks definitely released on all returning paths
-    bool is_analyzed;     ///< Whether function has been analyzed
+    LockSet must_release_delta; ///< Locks definitely released on all returning
+                                ///< paths
+    bool is_analyzed;           ///< Whether function has been analyzed
 
     FunctionSummary() : is_analyzed(false) {}
   };
@@ -422,6 +437,8 @@ private:
    * @brief Check if two locks may alias
    */
   bool mayAlias(LockID lock1, LockID lock2) const;
+
+  bool locksMustMatch(LockID lock1, LockID lock2) const;
 
   /**
    * @brief Get canonical lock value (handling aliases)

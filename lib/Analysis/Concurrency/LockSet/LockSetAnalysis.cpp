@@ -373,9 +373,10 @@ LockSet LockSetAnalysis::getMustReadLockSetAt(const Instruction *inst) const {
         initialized = true;
       } else {
         LockSet intersection;
-        std::set_intersection(merged.begin(), merged.end(),
-                              it_exit->second.begin(), it_exit->second.end(),
-                              std::inserter(intersection, intersection.begin()));
+        std::set_intersection(
+            merged.begin(), merged.end(), it_exit->second.begin(),
+            it_exit->second.end(),
+            std::inserter(intersection, intersection.begin()));
         merged = std::move(intersection);
       }
     }
@@ -426,9 +427,10 @@ LockSet LockSetAnalysis::getMustWriteLockSetAt(const Instruction *inst) const {
         initialized = true;
       } else {
         LockSet intersection;
-        std::set_intersection(merged.begin(), merged.end(),
-                              it_exit->second.begin(), it_exit->second.end(),
-                              std::inserter(intersection, intersection.begin()));
+        std::set_intersection(
+            merged.begin(), merged.end(), it_exit->second.begin(),
+            it_exit->second.end(),
+            std::inserter(intersection, intersection.begin()));
         merged = std::move(intersection);
       }
     }
@@ -506,24 +508,58 @@ bool LockSetAnalysis::mayHoldCommonLock(const Instruction *i1,
   return commonWithDisjointFields(w1, w2) || commonWithDisjointFields(r1, r2);
 }
 
+bool LockSetAnalysis::locksMustMatch(LockID a, LockID b) const {
+  const LockID ca = getCanonicalLock(a);
+  const LockID cb = getCanonicalLock(b);
+  if (ca && cb && ca == cb) {
+    return true;
+  }
+  return m_alias_analysis && ca && cb && m_alias_analysis->mustAlias(ca, cb);
+}
+
 bool LockSetAnalysis::mustHoldCommonLock(const Instruction *i1,
                                          const Instruction *i2) const {
-  auto matches = [this](LockID a, LockID b) {
-    const LockID ca = getCanonicalLock(a);
-    const LockID cb = getCanonicalLock(b);
-    if (ca && cb && ca == cb)
-      return true;
-    return m_alias_analysis && ca && cb && m_alias_analysis->mustAlias(ca, cb);
+  return mustMutuallyExclude(i1, i2);
+}
+
+bool LockSetAnalysis::mustMutuallyExclude(const Instruction *i1,
+                                          const Instruction *i2) const {
+  return mustMutuallyExclude(i1, MemoryAccessKind::Write, i2,
+                             MemoryAccessKind::Write);
+}
+
+bool LockSetAnalysis::mustMutuallyExclude(const Instruction *i1,
+                                          MemoryAccessKind access1,
+                                          const Instruction *i2,
+                                          MemoryAccessKind access2) const {
+  LockSet must_read_1 = getMustReadLockSetAt(i1);
+  LockSet must_write_1 = getMustWriteLockSetAt(i1);
+  LockSet must_read_2 = getMustReadLockSetAt(i2);
+  LockSet must_write_2 = getMustWriteLockSetAt(i2);
+
+  auto eligibleLocks = [](MemoryAccessKind access_kind,
+                          const LockSet &read_locks,
+                          const LockSet &write_locks) {
+    LockSet eligible = write_locks;
+    if (access_kind == MemoryAccessKind::Read) {
+      eligible.insert(read_locks.begin(), read_locks.end());
+    }
+    return eligible;
   };
 
-  LockSet write1 = getMustWriteLockSetAt(i1);
-  LockSet write2 = getMustWriteLockSetAt(i2);
+  const LockSet eligible_1 = eligibleLocks(access1, must_read_1, must_write_1);
+  const LockSet eligible_2 = eligibleLocks(access2, must_read_2, must_write_2);
 
-  for (LockID lock1 : write1) {
-    for (LockID lock2 : write2) {
-      if (!matches(lock1, lock2))
+  for (LockID lock1 : eligible_1) {
+    const bool first_is_exclusive = must_write_1.count(lock1) != 0;
+    for (LockID lock2 : eligible_2) {
+      if (!locksMustMatch(lock1, lock2)) {
         continue;
-      return true;
+      }
+      const bool second_is_exclusive = must_write_2.count(lock2) != 0;
+      if (first_is_exclusive || second_is_exclusive) {
+        return true;
+      }
     }
   }
 
@@ -887,15 +923,26 @@ void LockSetAnalysis::computeIntraproceduralLockSets(Function *func) {
 
             if (it_may != m_may_locksets_exit.end()) {
               may_inputs.push_back(it_may->second);
-              must_inputs.push_back(it_must != m_must_locksets_exit.end() ? it_must->second : all_locks_in_function);
-              may_read_inputs.push_back(it_mr != m_may_read_locks_exit.end() ? it_mr->second : LockSet());
-              may_write_inputs.push_back(it_mw != m_may_write_locks_exit.end() ? it_mw->second : LockSet());
-              must_read_inputs.push_back(it_ur != m_must_read_locks_exit.end() ? it_ur->second : all_locks_in_function);
-              must_write_inputs.push_back(it_uw != m_must_write_locks_exit.end() ? it_uw->second : all_locks_in_function);
+              must_inputs.push_back(it_must != m_must_locksets_exit.end()
+                                        ? it_must->second
+                                        : all_locks_in_function);
+              may_read_inputs.push_back(it_mr != m_may_read_locks_exit.end()
+                                            ? it_mr->second
+                                            : LockSet());
+              may_write_inputs.push_back(it_mw != m_may_write_locks_exit.end()
+                                             ? it_mw->second
+                                             : LockSet());
+              must_read_inputs.push_back(it_ur != m_must_read_locks_exit.end()
+                                             ? it_ur->second
+                                             : all_locks_in_function);
+              must_write_inputs.push_back(it_uw != m_must_write_locks_exit.end()
+                                              ? it_uw->second
+                                              : all_locks_in_function);
             } else {
-              // Predecessor not yet processed. For must-analysis, we must be conservative.
-              // If we haven't visited the predecessor, we can't assume any locks are held.
-              // However, intersection with "all locks" is the neutral element.
+              // Predecessor not yet processed. For must-analysis, we must be
+              // conservative. If we haven't visited the predecessor, we can't
+              // assume any locks are held. However, intersection with "all
+              // locks" is the neutral element.
               must_inputs.push_back(all_locks_in_function);
               must_read_inputs.push_back(all_locks_in_function);
               must_write_inputs.push_back(all_locks_in_function);
@@ -909,15 +956,25 @@ void LockSetAnalysis::computeIntraproceduralLockSets(Function *func) {
           if (it_may != m_may_locksets_exit.end()) {
             may_inputs.push_back(it_may->second);
             auto it_must = m_must_locksets_exit.find(prev);
-            must_inputs.push_back(it_must != m_must_locksets_exit.end() ? it_must->second : all_locks_in_function);
+            must_inputs.push_back(it_must != m_must_locksets_exit.end()
+                                      ? it_must->second
+                                      : all_locks_in_function);
             auto it_mr = m_may_read_locks_exit.find(prev);
-            may_read_inputs.push_back(it_mr != m_may_read_locks_exit.end() ? it_mr->second : LockSet());
+            may_read_inputs.push_back(it_mr != m_may_read_locks_exit.end()
+                                          ? it_mr->second
+                                          : LockSet());
             auto it_mw = m_may_write_locks_exit.find(prev);
-            may_write_inputs.push_back(it_mw != m_may_write_locks_exit.end() ? it_mw->second : LockSet());
+            may_write_inputs.push_back(it_mw != m_may_write_locks_exit.end()
+                                           ? it_mw->second
+                                           : LockSet());
             auto it_ur = m_must_read_locks_exit.find(prev);
-            must_read_inputs.push_back(it_ur != m_must_read_locks_exit.end() ? it_ur->second : all_locks_in_function);
+            must_read_inputs.push_back(it_ur != m_must_read_locks_exit.end()
+                                           ? it_ur->second
+                                           : all_locks_in_function);
             auto it_uw = m_must_write_locks_exit.find(prev);
-            must_write_inputs.push_back(it_uw != m_must_write_locks_exit.end() ? it_uw->second : all_locks_in_function);
+            must_write_inputs.push_back(it_uw != m_must_write_locks_exit.end()
+                                            ? it_uw->second
+                                            : all_locks_in_function);
           }
         }
       }
@@ -1693,8 +1750,8 @@ void LockSetAnalysis::transferReadWrite(const Instruction *inst,
     }
 
     auto applySummaryToReadWrite = [&](const Function *callee,
-                                      LockSet &candidate_read,
-                                      LockSet &candidate_write) -> bool {
+                                       LockSet &candidate_read,
+                                       LockSet &candidate_write) -> bool {
       auto it = m_function_summaries.find(callee);
       if (it == m_function_summaries.end() || !it->second.is_analyzed) {
         return false;
@@ -1794,9 +1851,8 @@ void LockSetAnalysis::identifyLocks() {
   auto process_func = [this](Function &func) {
     for (inst_iterator I = inst_begin(func), E = inst_end(func); I != E; ++I) {
       Instruction *inst = &*I;
-      const auto *call = dyn_cast<CallBase>(inst);
-      const ThreadAPI::TD_TYPE type =
-          call ? m_thread_api->getType(call) : ThreadAPI::TD_DUMMY;
+      const ThreadAPI::LockSemantics lock_semantics =
+          m_thread_api->describeLockSemantics(inst);
 
       if (isNonBinarySemaphoreOp(m_thread_api, inst)) {
         continue;
@@ -1814,21 +1870,8 @@ void LockSetAnalysis::identifyLocks() {
         continue;
       }
 
-      const bool is_acquire =
-          m_thread_api->isTDAcquire(inst) || type == ThreadAPI::TD_SHARED_RDLOCK ||
-          type == ThreadAPI::TD_SHARED_WRLOCK ||
-          type == ThreadAPI::TD_LOCK_GUARD_CTOR ||
-          type == ThreadAPI::TD_UNIQUE_LOCK_CTOR ||
-          type == ThreadAPI::TD_SCOPED_LOCK_CTOR ||
-          type == ThreadAPI::TD_SHARED_LOCK_CTOR ||
-          type == ThreadAPI::TD_UNIQUE_LOCK_LOCK;
-      const bool is_release =
-          m_thread_api->isTDRelease(inst) || type == ThreadAPI::TD_SHARED_UNLOCK ||
-          type == ThreadAPI::TD_LOCK_GUARD_DTOR ||
-          type == ThreadAPI::TD_UNIQUE_LOCK_DTOR ||
-          type == ThreadAPI::TD_SCOPED_LOCK_DTOR ||
-          type == ThreadAPI::TD_SHARED_LOCK_DTOR ||
-          type == ThreadAPI::TD_UNIQUE_LOCK_UNLOCK;
+      const bool is_acquire = lock_semantics.is_acquire;
+      const bool is_release = lock_semantics.is_release;
 
       if (is_acquire) {
         LockID lock = getLockValue(inst);
@@ -2087,9 +2130,8 @@ LockSetAnalysis::getImpreciseRAIILocksEndingAt(const Instruction *inst) const {
     if (lifetime.hasPreciseLifetimeEnd) {
       continue;
     }
-    const bool at_unknown_boundary =
-        lifetime.impreciseLifetimeBoundary &&
-        lifetime.impreciseLifetimeBoundary == inst;
+    const bool at_unknown_boundary = lifetime.impreciseLifetimeBoundary &&
+                                     lifetime.impreciseLifetimeBoundary == inst;
     const bool at_function_exit_without_precise_lifetime =
         !lifetime.impreciseLifetimeBoundary &&
         (isa<ReturnInst>(inst) || isa<ResumeInst>(inst));
@@ -2577,8 +2619,8 @@ void LockSetAnalysis::computeFunctionSummary(Function *func) {
           must_write_intersection = it_must_write->second;
           seeded_must_write = true;
         } else {
-          must_write_intersection = intersectMustSets(
-              must_write_intersection, it_must_write->second);
+          must_write_intersection =
+              intersectMustSets(must_write_intersection, it_must_write->second);
         }
       } else {
         must_write_intersection.clear();

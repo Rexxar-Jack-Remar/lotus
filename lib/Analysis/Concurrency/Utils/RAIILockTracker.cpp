@@ -9,6 +9,7 @@
 #include "Analysis/Concurrency/Utils/RAIILockTracker.h"
 
 #include "Analysis/Concurrency/Utils/CppThreading.h"
+#include "Analysis/Concurrency/Utils/ThreadAPI.h"
 
 #include <algorithm>
 #include <deque>
@@ -52,7 +53,8 @@ findImpreciseLifetimeBoundary(const llvm::Value *lockObject,
         use_insts.insert(inst);
       }
 
-      if (llvm::isa<llvm::BitCastInst>(user) || llvm::isa<llvm::GetElementPtrInst>(user) ||
+      if (llvm::isa<llvm::BitCastInst>(user) ||
+          llvm::isa<llvm::GetElementPtrInst>(user) ||
           llvm::isa<llvm::PHINode>(user) || llvm::isa<llvm::SelectInst>(user)) {
         worklist.push_back(derived);
       }
@@ -113,19 +115,10 @@ bool RAIILockTracker::isRAIILockDestructor(const llvm::Instruction *inst) {
 }
 
 bool RAIILockTracker::isSharedLock(const llvm::Instruction *inst) {
-  const auto *call = llvm::dyn_cast<llvm::CallBase>(inst);
-  if (!call)
-    return false;
-
-  const auto *func = call->getCalledFunction();
-  if (!func) {
-    func = llvm::dyn_cast<llvm::Function>(
-        call->getCalledOperand()->stripPointerCasts());
-  }
-  if (!func || !func->hasName())
-    return false;
-
-  return CppThreadingModel::isSharedLockConstructor(func->getName());
+  ThreadAPI *thread_api = ThreadAPI::getThreadAPI();
+  const ThreadAPI::LockSemantics semantics =
+      thread_api->describeLockSemantics(inst);
+  return semantics.is_acquire && semantics.mode == ThreadAPI::LockMode::Shared;
 }
 
 OwnershipKind RAIILockTracker::getOwnershipKind(const llvm::CallBase *ctor) {
@@ -204,11 +197,10 @@ RAIILockTracker::extractUnderlyingLocks(const llvm::CallBase *ctor) {
 }
 
 std::vector<const llvm::Instruction *>
-RAIILockTracker::findDestructorsForLockObject(
-    const llvm::Value *lockObject, const llvm::Function *F) {
+RAIILockTracker::findDestructorsForLockObject(const llvm::Value *lockObject,
+                                              const llvm::Function *F) {
   std::vector<const llvm::Instruction *> destructors;
   bool hasExplicitDestructor = false;
-  bool hasLifetimeEnd = false;
 
   if (!lockObject || !F)
     return destructors;
@@ -260,12 +252,13 @@ RAIILockTracker::findDestructorsForLockObject(
       // Check for llvm.lifetime.end
       if (const auto *intrinsic = llvm::dyn_cast<llvm::IntrinsicInst>(inst)) {
         if (intrinsic->getIntrinsicID() == llvm::Intrinsic::lifetime_end) {
-          llvm::Value *tracked = intrinsic->getArgOperand(1)->stripPointerCasts();
-          if (const llvm::Value *base = llvm::getUnderlyingObject(tracked, 32)) {
+          llvm::Value *tracked =
+              intrinsic->getArgOperand(1)->stripPointerCasts();
+          if (const llvm::Value *base =
+                  llvm::getUnderlyingObject(tracked, 32)) {
             tracked = const_cast<llvm::Value *>(base->stripPointerCasts());
           }
           if (tracked == lockObject) {
-            hasLifetimeEnd = true;
             addIfMissing(inst);
           }
         }

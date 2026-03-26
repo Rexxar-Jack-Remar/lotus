@@ -21,18 +21,18 @@
 #ifndef THREADAPI_H
 #define THREADAPI_H
 
+#include "llvm/ADT/StringMap.h"
+#include "llvm/IR/Constants.h"
+#include "llvm/IR/Function.h"
+#include "llvm/IR/Instructions.h"
+#include "llvm/IR/Module.h"
+
 #include "Analysis/Concurrency/ConcurrencyConfig.h"
 
 #include <cstdint>
 #include <string>
 #include <unordered_map>
 #include <vector>
-
-#include "llvm/ADT/StringMap.h"
-#include "llvm/IR/Constants.h"
-#include "llvm/IR/Function.h"
-#include "llvm/IR/Instructions.h"
-#include "llvm/IR/Module.h"
 
 // Do NOT use `using namespace llvm` in headers — it pollutes every TU that
 // includes this file.  All LLVM types are qualified explicitly below.
@@ -66,6 +66,18 @@ public:
     LinuxKernel,
     Hare,
     Custom
+  };
+
+  enum class LockSemanticKind { None, Shared, Exclusive, Release };
+
+  struct LockSemanticInfo {
+    const llvm::Value *identity = nullptr;
+    LockSemanticKind kind = LockSemanticKind::None;
+    bool is_try = false;
+
+    bool isShared() const { return kind == LockSemanticKind::Shared; }
+    bool isExclusive() const { return kind == LockSemanticKind::Exclusive; }
+    bool isRelease() const { return kind == LockSemanticKind::Release; }
   };
 
   /**
@@ -472,11 +484,7 @@ public:
     bool from_config = false;
   };
 
-  enum class SemanticLoweringKind {
-    Modeled,
-    Deferred,
-    RecognizedButUnmodeled
-  };
+  enum class SemanticLoweringKind { Modeled, Deferred, RecognizedButUnmodeled };
 
   enum class SemanticLoweringOwner : uint32_t {
     None = 0,
@@ -495,6 +503,18 @@ public:
   };
 
   enum class MatchKind { Exact, Prefix };
+
+  enum class LockMode { Unknown, Shared, Exclusive };
+
+  struct LockSemantics {
+    bool is_lock_api = false;
+    bool is_acquire = false;
+    bool is_release = false;
+    bool is_try = false;
+    bool is_semaphore = false;
+    bool is_binary_semaphore = false;
+    LockMode mode = LockMode::Unknown;
+  };
 
   /// Map type for API name to TD_TYPE conversion
   using TDAPIMap = llvm::StringMap<TD_TYPE>;
@@ -618,27 +638,30 @@ public:
   semanticLoweringOwnerMask(SemanticLoweringOwner owner) {
     return static_cast<uint32_t>(owner);
   }
-  static constexpr uint32_t semanticLoweringOwnerMask(
-      SemanticLoweringOwner owner_a, SemanticLoweringOwner owner_b) {
+  static constexpr uint32_t
+  semanticLoweringOwnerMask(SemanticLoweringOwner owner_a,
+                            SemanticLoweringOwner owner_b) {
     return semanticLoweringOwnerMask(owner_a) |
            semanticLoweringOwnerMask(owner_b);
   }
-  static constexpr uint32_t semanticLoweringOwnerMask(
-      SemanticLoweringOwner owner_a, SemanticLoweringOwner owner_b,
-      SemanticLoweringOwner owner_c) {
+  static constexpr uint32_t
+  semanticLoweringOwnerMask(SemanticLoweringOwner owner_a,
+                            SemanticLoweringOwner owner_b,
+                            SemanticLoweringOwner owner_c) {
     return semanticLoweringOwnerMask(owner_a, owner_b) |
            semanticLoweringOwnerMask(owner_c);
   }
   SemanticLoweringInfo getSemanticLoweringInfo(TD_TYPE type) const;
   SemanticLoweringInfo getSemanticLoweringInfo(const llvm::Function *F) const;
-  bool hasSemanticLoweringOwner(TD_TYPE type, SemanticLoweringOwner owner) const {
-    return (getSemanticLoweringInfo(type).owners & semanticLoweringOwnerMask(owner)) !=
-           0;
+  bool hasSemanticLoweringOwner(TD_TYPE type,
+                                SemanticLoweringOwner owner) const {
+    return (getSemanticLoweringInfo(type).owners &
+            semanticLoweringOwnerMask(owner)) != 0;
   }
   bool hasSemanticLoweringOwner(const llvm::Function *F,
                                 SemanticLoweringOwner owner) const {
-    return (getSemanticLoweringInfo(F).owners & semanticLoweringOwnerMask(owner)) !=
-           0;
+    return (getSemanticLoweringInfo(F).owners &
+            semanticLoweringOwnerMask(owner)) != 0;
   }
   bool hasSemanticTag(const llvm::Function *F, llvm::StringRef tag) const {
     return describe(F).semantic_tag == tag;
@@ -1115,6 +1138,36 @@ public:
     return getAnalysisLockIdentity(llvm::dyn_cast<llvm::Instruction>(cb));
   }
 
+  inline LockSemanticInfo
+  getLockSemanticInfo(const llvm::Instruction *inst) const {
+    LockSemanticInfo info;
+    if (!inst) {
+      return info;
+    }
+
+    info.identity = getAnalysisLockIdentity(inst);
+    if (!info.identity) {
+      return info;
+    }
+
+    if (isTDRelease(inst)) {
+      info.kind = LockSemanticKind::Release;
+      return info;
+    }
+
+    info.is_try = isTryLock(inst);
+    if (isReadLockAcquire(inst)) {
+      info.kind = LockSemanticKind::Shared;
+    } else if (isWriteLockAcquire(inst) || isTDAcquire(inst)) {
+      info.kind = LockSemanticKind::Exclusive;
+    }
+    return info;
+  }
+
+  inline LockSemanticInfo getLockSemanticInfo(const llvm::CallBase *cb) const {
+    return getLockSemanticInfo(llvm::dyn_cast<llvm::Instruction>(cb));
+  }
+
   /// Return true if this call waits for a barrier
   //@{
   inline bool isTDBarWait(const llvm::Instruction *inst) const {
@@ -1233,6 +1286,44 @@ public:
   // sites)
   // ========================================================================
 
+  inline LockSemantics
+  describeLockSemantics(const llvm::Instruction *inst) const {
+    LockSemantics semantics;
+    if (!inst) {
+      return semantics;
+    }
+
+    const TD_TYPE t = getType(getCallee(inst));
+    const bool shared_acquire =
+        t == TD_RWLOCK_RDLOCK || t == TD_SHARED_RDLOCK ||
+        t == TD_SHARED_LOCK_CTOR || t == TD_KERNEL_READ_LOCK ||
+        t == TD_KERNEL_DOWN_READ;
+    const bool shared_release =
+        t == TD_SHARED_UNLOCK || t == TD_SHARED_LOCK_DTOR ||
+        t == TD_KERNEL_READ_UNLOCK || t == TD_KERNEL_UP_READ;
+    const bool exclusive_acquire = isExclusiveLockAcquire(inst);
+    const bool exclusive_release = isExclusiveLockRelease(inst);
+
+    semantics.is_acquire = exclusive_acquire || shared_acquire;
+    semantics.is_release = exclusive_release || shared_release;
+    semantics.is_lock_api = semantics.is_acquire || semantics.is_release;
+    semantics.is_try = isTryLock(inst);
+    semantics.is_semaphore = isSemaphoreOp(inst);
+    semantics.is_binary_semaphore = isBinarySemaphoreOp(inst);
+
+    if (shared_acquire || shared_release) {
+      semantics.mode = LockMode::Shared;
+    } else if (exclusive_acquire || exclusive_release) {
+      semantics.mode = LockMode::Exclusive;
+    }
+
+    return semantics;
+  }
+
+  inline LockSemantics describeLockSemantics(const llvm::CallBase *cb) const {
+    return describeLockSemantics(llvm::dyn_cast<llvm::Instruction>(cb));
+  }
+
   inline bool isExclusiveLockAcquire(const llvm::Instruction *inst) const {
     const llvm::Function *callee = getCallee(inst);
     TD_TYPE t = getType(callee);
@@ -1241,9 +1332,9 @@ public:
     return ((t == TD_ACQUIRE || t == TD_TRY_ACQUIRE) &&
             !(callee && hasTrait(callee, "semaphore"))) ||
            t == TD_RWLOCK_WRLOCK || t == TD_SHARED_WRLOCK ||
-           t == TD_OMP_ORDERED_START ||
-           t == TD_LOCK_GUARD_CTOR || t == TD_UNIQUE_LOCK_CTOR ||
-           t == TD_UNIQUE_LOCK_LOCK || t == TD_SCOPED_LOCK_CTOR ||
+           t == TD_OMP_ORDERED_START || t == TD_LOCK_GUARD_CTOR ||
+           t == TD_UNIQUE_LOCK_CTOR || t == TD_UNIQUE_LOCK_LOCK ||
+           t == TD_SCOPED_LOCK_CTOR ||
            ((isSemaphoreType(t) || (callee && hasTrait(callee, "semaphore"))) &&
             binary_semaphore) ||
            t == TD_KERNEL_SPIN_LOCK || t == TD_KERNEL_SPIN_TRYLOCK ||
@@ -1262,14 +1353,14 @@ public:
     const bool binary_semaphore =
         callee && hasTrait(callee, "binary-semaphore") && isSemaphoreOp(inst);
     return (t == TD_RELEASE && !(callee && hasTrait(callee, "semaphore"))) ||
-           t == TD_OMP_ORDERED_END ||
-           t == TD_LOCK_GUARD_DTOR || t == TD_UNIQUE_LOCK_DTOR ||
-           t == TD_UNIQUE_LOCK_UNLOCK || t == TD_SCOPED_LOCK_DTOR ||
+           t == TD_OMP_ORDERED_END || t == TD_LOCK_GUARD_DTOR ||
+           t == TD_UNIQUE_LOCK_DTOR || t == TD_UNIQUE_LOCK_UNLOCK ||
+           t == TD_SCOPED_LOCK_DTOR ||
            ((isSemaphoreType(t) || (callee && hasTrait(callee, "semaphore"))) &&
             binary_semaphore) ||
-           t == TD_KERNEL_SPIN_UNLOCK ||
-           t == TD_KERNEL_MUTEX_UNLOCK || t == TD_KERNEL_UP ||
-           t == TD_KERNEL_WRITE_UNLOCK || t == TD_KERNEL_UP_WRITE;
+           t == TD_KERNEL_SPIN_UNLOCK || t == TD_KERNEL_MUTEX_UNLOCK ||
+           t == TD_KERNEL_UP || t == TD_KERNEL_WRITE_UNLOCK ||
+           t == TD_KERNEL_UP_WRITE;
   }
 
   inline bool isExclusiveLockRelease(const llvm::CallBase *cb) const {

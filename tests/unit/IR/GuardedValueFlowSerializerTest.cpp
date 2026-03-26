@@ -125,7 +125,8 @@ TEST_F(GuardedValueFlowSerializerTest, EmitsTextAndDotForAdaptedGraph) {
   sys::fs::remove(dot_path);
 }
 
-TEST_F(GuardedValueFlowSerializerTest, PersistsDiagnosticsAndUnknownNodes) {
+TEST_F(GuardedValueFlowSerializerTest,
+       RejectsUnsupportedInstructionsByWithholdingGraphs) {
   const char *source = R"(
     define i32 @test({i32, i32} %pair) {
     entry:
@@ -141,18 +142,7 @@ TEST_F(GuardedValueFlowSerializerTest, PersistsDiagnosticsAndUnknownNodes) {
   ASSERT_NE(F, nullptr);
 
   auto pipeline = runBuilder(*module);
-  ASSERT_TRUE(pipeline.builder->hasGraphFor(*F));
-  GuardedValueFlowGraph &graph = pipeline.builder->getGraph(*F);
-  ASSERT_TRUE(graph.hasDiagnostics());
-
-  std::string text = GuardedValueFlowSerializer::toText(graph);
-  EXPECT_NE(text.find("diagnostic"), std::string::npos);
-  EXPECT_NE(text.find("Unknown"), std::string::npos);
-  EXPECT_NE(text.find("extractvalue"), std::string::npos);
-
-  std::string dot = GuardedValueFlowSerializer::toDot(graph);
-  EXPECT_NE(dot.find("d0"), std::string::npos);
-  EXPECT_NE(dot.find("octagon"), std::string::npos);
+  EXPECT_FALSE(pipeline.builder->hasGraphFor(*F));
 }
 
 } // namespace

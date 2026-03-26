@@ -621,8 +621,16 @@ private:
       summary_ = makeAtomicSummary(makeBooleanLiteral(value_), sense_);
       break;
     case Kind::BranchAtom:
-      summary_ = makeAtomicSummary(
-          Literal(Literal::Kind::Branch, value_, block_, successor_), true);
+      // Falcon's region solver reasons about the underlying branch predicate,
+      // not the CFG edge identity, when simplifying conjunctions/disjunctions.
+      // Keep the edge metadata on the PathCond itself for provenance, but use
+      // the boolean guard as the logical summary so complementary edges collapse
+      // to true and impossible mixes become unsatisfiable.
+      summary_ = value_ ? makeAtomicSummary(makeBooleanLiteral(value_), sense_)
+                        : makeAtomicSummary(
+                              Literal(Literal::Kind::Branch, value_, block_,
+                                      successor_),
+                              true);
       break;
     case Kind::SwitchCaseAtom:
       summary_ = makeAtomicSummary(

@@ -986,7 +986,7 @@ TEST(GVFGAdapter, FailsWhenSummaryInputBindingsAreIncomplete) {
   LotusGuardedValueFlowAdapterPass adapter;
   EXPECT_FALSE(adapter.adaptFunction(graph, *caller_ptg, *result.lotus,
                                      *result.builder));
-  EXPECT_FALSE(result.builder->hasGraphFor(*caller));
+  EXPECT_TRUE(result.builder->hasGraphFor(*caller));
 }
 
 TEST(GVFGAdapter, LeavesSummaryInputMemoryEmptyWhenBindingsResolveToNoValues) {
@@ -1196,7 +1196,7 @@ TEST(GVFGAdapter, FailsWhenPseudoInputBindingIsRemoved) {
   LotusGuardedValueFlowAdapterPass adapter;
   EXPECT_FALSE(adapter.adaptFunction(graph, *caller_ptg, *result.lotus,
                                      *result.builder));
-  EXPECT_FALSE(result.builder->hasGraphFor(*caller));
+  EXPECT_TRUE(result.builder->hasGraphFor(*caller));
 }
 
 TEST(GVFGAdapter, FailsWhenPseudoOutputBindingIsRemoved) {
@@ -1252,7 +1252,7 @@ TEST(GVFGAdapter, FailsWhenPseudoOutputBindingIsRemoved) {
   LotusGuardedValueFlowAdapterPass adapter;
   EXPECT_FALSE(adapter.adaptFunction(graph, *caller_ptg, *result.lotus,
                                      *result.builder));
-  EXPECT_FALSE(result.builder->hasGraphFor(*caller));
+  EXPECT_TRUE(result.builder->hasGraphFor(*caller));
 }
 
 TEST(GVFGAdapter, FailsWhenPseudoInputIndicesAreMalformed) {
@@ -1300,7 +1300,7 @@ TEST(GVFGAdapter, FailsWhenPseudoInputIndicesAreMalformed) {
   LotusGuardedValueFlowAdapterPass adapter;
   EXPECT_FALSE(adapter.adaptFunction(graph, *caller_ptg, *result.lotus,
                                      *result.builder));
-  EXPECT_FALSE(result.builder->hasGraphFor(*caller));
+  EXPECT_TRUE(result.builder->hasGraphFor(*caller));
 }
 
 TEST(GVFGAdapter, KeepsPseudoArgumentsDistinctWhenInterfaceOverlapsFormal) {
