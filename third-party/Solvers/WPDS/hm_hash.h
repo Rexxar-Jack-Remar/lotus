@@ -42,8 +42,8 @@
  */
 #ifndef HASH_MAP_DEFAULTS_H_
 #define HASH_MAP_DEFAULTS_H_
-#include <cstring> // for hm_equal< char * >
 #include "common.h" // for wpds_size_t
+#include <cstring> // for hm_equal< char * >
 
 
 /* These were taken from Thomas Wang

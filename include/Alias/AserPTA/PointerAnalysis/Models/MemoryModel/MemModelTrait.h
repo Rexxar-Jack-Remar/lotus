@@ -8,20 +8,17 @@ namespace aser {
 
 // this class handles static object modelling,
 // e.g., field sensitive
-template <typename MemModel>
-struct MemModelTrait {
-    // context type
-    using CtxTy = typename MemModel::UnknownTypeError;
+template <typename MemModel> struct MemModelTrait {
+  // context type
+  using CtxTy = typename MemModel::UnknownTypeError;
 
-    using ObjectTy = typename MemModel::UnknownTypeError;
+  using ObjectTy = typename MemModel::UnknownTypeError;
 
-    // CGObjNode<MemModel>* allocateNullObj();
+  // CGObjNode<MemModel>* allocateNullObj();
 
-    // CGObjNode<MemModel>* allocateUniObj();
+  // CGObjNode<MemModel>* allocateUniObj();
 };
 
-
-
-}  // namespace aser
+} // namespace aser
 
 #endif

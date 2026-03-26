@@ -7,12 +7,13 @@
  *
  * @author peiming
  */
-#include <llvm/ADT/StringRef.h>
+#include "Alias/AserPTA/PointerAnalysis/Models/LanguageModel/DefaultLangModel/DefaultExtFunctions.h"
 
 #include <set>
 
-#include "Alias/AserPTA/PointerAnalysis/Models/LanguageModel/DefaultLangModel/DefaultExtFunctions.h"
+#include <llvm/ADT/StringRef.h>
 
 using namespace llvm;
 
-const std::set<StringRef> aser::DefaultExtFunctions::THREAD_CREATIONS{"pthread_create"};
+const std::set<StringRef> aser::DefaultExtFunctions::THREAD_CREATIONS{
+    "pthread_create"};

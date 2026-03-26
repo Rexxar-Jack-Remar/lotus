@@ -41,10 +41,10 @@
 #ifndef wpds_DICTIONARY_H_
 #define wpds_DICTIONARY_H_ 1
 
-#include <vector>
 #include "common.h"
 #include "HashMap.h"
 #include "key_source.h"
+#include <vector>
 
 namespace wpds
 {

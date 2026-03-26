@@ -41,13 +41,13 @@
 #ifndef wpds_RULE_H_
 #define wpds_RULE_H_ 1
 
-#include <iostream>
 #include "semiring.h"
-#include "ref_ptr.h"
-#include "common.h"
-#include "UTIL.h"
-#include "inst_counter.h"
 #include "Traits.h"
+#include "UTIL.h"
+#include "common.h"
+#include "inst_counter.h"
+#include "ref_ptr.h"
+#include <iostream>
 
 namespace wpds
 {
@@ -227,7 +227,7 @@ namespace wpds
             sem_elem_t se;
     };
 
-} // namespace
+} // namespace wpds
 
 #endif  // wpds_RULE_H_
 /* Yo, Emacs!

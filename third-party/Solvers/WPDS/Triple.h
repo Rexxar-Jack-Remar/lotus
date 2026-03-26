@@ -58,7 +58,7 @@ namespace wpds {
             V third;
         };
 
-    }
+    } // namespace util
 
-}
+} // namespace wpds
 #endif  // WPDS_UTIL_TRIPLE_H_

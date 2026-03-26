@@ -43,11 +43,11 @@
 #ifndef wpds_ERULE_H_
 #define wpds_ERULE_H_
 #include "../ref_ptr.h"
+#include "../Rule.h"
+#include "../Traits.h"
+#include "confluence_functions.h"
 #include "../inst_counter.h"
 #include "../semiring.h"
-#include "../Traits.h"
-#include "../Rule.h"
-#include "confluence_functions.h"
 #include <iostream>
 
 
@@ -121,6 +121,6 @@ namespace wpds {
   private:
     conf_fn_t cf;
   };
-}
+} // namespace wpds
 
 #endif

@@ -5,10 +5,10 @@
 #ifndef ASER_PTA_CALLSITE_H
 #define ASER_PTA_CALLSITE_H
 
+#include "Alias/AserPTA/Util/Util.h"
+
 #include <llvm/IR/InstrTypes.h>
 #include <llvm/IR/Instructions.h>
-
-#include "Alias/AserPTA/Util/Util.h"
 
 namespace aser {
 
@@ -16,92 +16,97 @@ namespace aser {
 // but resolve constant expression evaluated to a function
 class CallSite {
 private:
-    const llvm::CallBase* CB;
-    static const llvm::Function* resolveTargetFunction(const llvm::Value*);
+  const llvm::CallBase *CB;
+  static const llvm::Function *resolveTargetFunction(const llvm::Value *);
 
 public:
-    explicit CallSite(const llvm::Instruction* I) : CB(llvm::dyn_cast<llvm::CallBase>(I)) {}
+  explicit CallSite(const llvm::Instruction *I)
+      : CB(llvm::dyn_cast<llvm::CallBase>(I)) {}
 
-    [[nodiscard]] inline bool isCallOrInvoke() const { 
-        return CB && (llvm::isa<llvm::CallInst>(CB) || llvm::isa<llvm::InvokeInst>(CB));
+  [[nodiscard]] inline bool isCallOrInvoke() const {
+    return CB &&
+           (llvm::isa<llvm::CallInst>(CB) || llvm::isa<llvm::InvokeInst>(CB));
+  }
+
+  [[nodiscard]] inline bool isIndirectCall() const {
+    if (!CB)
+      return false;
+    if (CB->isIndirectCall()) {
+      return true;
     }
 
-    [[nodiscard]] inline bool isIndirectCall() const {
-        if (!CB) return false;
-        if (CB->isIndirectCall()) {
-            return true;
-        }
+    if (CB->getCalledFunction() != nullptr) {
+      return false;
+    }
 
-        if (CB->getCalledFunction() != nullptr) {
-            return false;
-        }
+    if (resolveTargetFunction(CB->getCalledOperand()) != nullptr) {
+      return false;
+    }
 
-        if (resolveTargetFunction(CB->getCalledOperand()) != nullptr) {
-            return false;
-        }
-
-        auto *V = CB->getCalledOperand();
-        if (auto *C = llvm::dyn_cast<llvm::Constant>(V)) {
-            if (C->isNullValue()) {
-                return true;
-            }
-        }
-
+    auto *V = CB->getCalledOperand();
+    if (auto *C = llvm::dyn_cast<llvm::Constant>(V)) {
+      if (C->isNullValue()) {
         return true;
+      }
     }
 
-    [[nodiscard]] inline const llvm::Value* getCalledValue() const { 
-        return CB ? CB->getCalledOperand() : nullptr;
+    return true;
+  }
+
+  [[nodiscard]] inline const llvm::Value *getCalledValue() const {
+    return CB ? CB->getCalledOperand() : nullptr;
+  }
+
+  [[nodiscard]] inline const llvm::Function *getCalledFunction() const {
+    return this->getTargetFunction();
+  }
+
+  [[nodiscard]] inline const llvm::Function *getTargetFunction() const {
+    if (!CB || this->isIndirectCall()) {
+      return nullptr;
+    }
+    auto *targetFunction = CB->getCalledFunction();
+    if (targetFunction != nullptr) {
+      return targetFunction;
     }
 
-    [[nodiscard]] inline const llvm::Function* getCalledFunction() const { 
-        return this->getTargetFunction();
-    }
+    return resolveTargetFunction(CB->getCalledOperand());
+  }
 
-    [[nodiscard]] inline const llvm::Function* getTargetFunction() const {
-        if (!CB || this->isIndirectCall()) {
-            return nullptr;
-        }
-        auto *targetFunction = CB->getCalledFunction();
-        if (targetFunction != nullptr) {
-            return targetFunction;
-        }
+  [[nodiscard]]
+  inline const llvm::Value *getReturnedArgOperand() const {
+    return CB ? CB->getReturnedArgOperand() : nullptr;
+  }
 
-        return resolveTargetFunction(CB->getCalledOperand());
-    }
+  [[nodiscard]]
+  inline const llvm::Instruction *getInstruction() const {
+    return CB;
+  }
 
-    [[nodiscard]]
-    inline const llvm::Value* getReturnedArgOperand() const { 
-        return CB ? CB->getReturnedArgOperand() : nullptr;
-    }
+  [[nodiscard]]
+  unsigned int getNumArgOperands() const {
+    return CB ? CB->arg_size() : 0;
+  }
 
-    [[nodiscard]]
-    inline const llvm::Instruction* getInstruction() const { 
-        return CB;
-    }
+  const llvm::Value *getArgOperand(unsigned int i) const {
+    return CB ? CB->getArgOperand(i) : nullptr;
+  }
 
-    [[nodiscard]]
-    unsigned int getNumArgOperands() const { 
-        return CB ? CB->arg_size() : 0;
-    }
+  inline auto args() const { return CB->args(); }
 
-    const llvm::Value* getArgOperand(unsigned int i) const { 
-        return CB ? CB->getArgOperand(i) : nullptr;
-    }
+  [[nodiscard]]
+  inline auto arg_begin() const {
+    return CB->arg_begin();
+  }
 
-    inline auto args() const { return CB->args(); }
+  [[nodiscard]]
+  inline auto arg_end() const {
+    return CB->arg_end();
+  }
 
-    [[nodiscard]]
-    inline auto arg_begin() const { return CB->arg_begin(); }
-
-    [[nodiscard]]
-    inline auto arg_end() const { return CB->arg_end(); }
-
-    inline llvm::Type* getType() const { 
-        return CB ? CB->getType() : nullptr;
-    }
+  inline llvm::Type *getType() const { return CB ? CB->getType() : nullptr; }
 };
 
-}  // namespace aser
+} // namespace aser
 
 #endif

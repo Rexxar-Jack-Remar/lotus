@@ -43,10 +43,10 @@
 #ifndef WPDS_UTIL_RULE_ACTION_FUNCTOR_H_
 #define WPDS_UTIL_RULE_ACTION_FUNCTOR_H_
 
-#include <iostream>
 #include "HashMap.h"
-#include "myallocator.h"
 #include "Traits.h"
+#include "myallocator.h"
+#include <iostream>
 
 namespace wpds {
 

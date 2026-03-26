@@ -69,7 +69,7 @@ namespace wpds {
     Query Query::POSTSTAR(WPDS_POSTSTAR);
     Query Query::BOTH(WPDS_BOTH);
 
-}
+} // namespace wpds
 
 #ifdef DBGWPDS
 int b_wpds_debug = 1;

@@ -160,8 +160,8 @@ private:
 template <typename Resolution = std::chrono::nanoseconds, std::size_t iter = 1,
           std::size_t run = 100, bool timePerIter = true, typename TFunc>
 Stats microbenchStats(TFunc &&func) {
-  static_assert(run >= 1);
-  static_assert(iter >= 1);
+  static_assert(run >= 1, "microbenchStats requires at least one run");
+  static_assert(iter >= 1, "microbenchStats requires at least one iteration");
 
   std::vector<double> results(run);
   for (std::size_t i = 0; i < run; ++i) {

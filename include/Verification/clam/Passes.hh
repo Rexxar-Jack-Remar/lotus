@@ -5,7 +5,7 @@
 
 namespace clam {
 class ClamGlobalAnalysis;
-} // end namespace
+} // namespace clam
 
 namespace clam {
 // Preprocessor passes
@@ -57,6 +57,8 @@ inline llvm::FunctionPass *createInstCombine() {
 }
 } // namespace clam
 #else
+#include "llvm/Transforms/InstCombine/InstCombine.h"
+
 namespace clam {
 inline llvm::FunctionPass *createInstCombine() {
   return llvm::createInstructionCombiningPass();

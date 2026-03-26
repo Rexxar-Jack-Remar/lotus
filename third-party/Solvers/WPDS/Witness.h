@@ -43,18 +43,18 @@
 
 
 #include "common.h"
+#include "HashMap.h"
+#include "UTIL.h"
 #include "inst_counter.h"
+#include "key_source.h"
+#include "myallocator.h"
 #include "ref_ptr.h"
 #include "semiring.h"
-#include "UTIL.h"
-#include "key_source.h"
-#include "HashMap.h"
-#include "myallocator.h"
-#include <set>
-#include <list>
-#include <utility>                          /* pair<T1,T2> */
 #include <iostream>
+#include <list>
+#include <set>
 #include <stack>
+#include <utility>                          /* pair<T1,T2> */
 
 namespace wpds
 {
@@ -893,7 +893,7 @@ namespace wpds
                 STDLIST(const DAGWitnessForPath<T> *) worklist;
                 const DAGWitnessForPath<T> * dag_curr;
 
-                o << "digraph post_witness_dag {" << std::endl;
+                o << "digraph post_witness_dag {" << '\n';
 
                 visited.insert(this);
                 worklist.push_front(this);
@@ -903,7 +903,7 @@ namespace wpds
 
                     o << "  n" << ((int)dag_curr) << "[label = \"";
                     dag_curr->wit->print(o);
-                    o << "\"];" << std::endl;
+                    o << "\"];" << '\n';
 
                     typename STDLIST(witness_dag_t)::const_iterator i;
                     for( i  = dag_curr->succs.begin();
@@ -911,7 +911,7 @@ namespace wpds
                             ++i ) {
                         DAGWitnessForPath * dag_succ = (*i).get_ptr();
                         o << "  n" << (int)dag_curr << " -> "
-                            << 'n' << (int)dag_succ << ';' << std::endl;
+                            << 'n' << (int)dag_succ << ';' << '\n';
                         if( visited.find(dag_succ) == visited.end() ) {
                             visited.insert(dag_succ);
                             worklist.push_front(dag_succ);
@@ -919,7 +919,7 @@ namespace wpds
                     }
                 }
 
-                o << "};" << std::endl;
+                o << "};" << '\n';
                 return o;
             }
 
@@ -937,7 +937,8 @@ namespace wpds
             // unsigned count;
     };
 
-}   /* namespace */
+} // namespace wpds
+
 
 #endif
 

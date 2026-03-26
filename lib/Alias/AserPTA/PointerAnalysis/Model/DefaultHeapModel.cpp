@@ -9,10 +9,11 @@
  * @author peiming
  */
 #include "Alias/AserPTA/PointerAnalysis/Models/DefaultHeapModel.h"
+
 #include "Alias/AserPTA/Util/Util.h"
 
-#include <llvm/IR/Instructions.h>
 #include <Alias/AserPTA/PointerAnalysis/Program/CallSite.h>
+#include <llvm/IR/Instructions.h>
 
 using namespace llvm;
 using namespace aser;
@@ -28,24 +29,25 @@ using namespace aser;
  * @return The destination type of the bitcast, or nullptr if not found
  */
 static Type *getNextBitCastDestType(const Instruction *allocSite) {
-    // a call instruction
-    const Instruction *nextInst = nullptr;
-    if (auto* call = dyn_cast<CallInst>(allocSite)) {
-        nextInst = call->getNextNode();
-    } else if (auto* invoke = dyn_cast<InvokeInst>(allocSite)) {
-        // skip the exception handler code
-        nextInst = invoke->getNormalDest()->getFirstNonPHIOrDbgOrLifetime();
-    }
+  // a call instruction
+  const Instruction *nextInst = nullptr;
+  if (auto *call = dyn_cast<CallInst>(allocSite)) {
+    nextInst = call->getNextNode();
+  } else if (auto *invoke = dyn_cast<InvokeInst>(allocSite)) {
+    // skip the exception handler code
+    nextInst = invoke->getNormalDest()->getFirstNonPHIOrDbgOrLifetime();
+  }
 
-    if (isa_and_nonnull<BitCastInst>(nextInst)) {
-        Type *destTy = cast<BitCastInst>(nextInst)->getDestTy()->getPointerElementType();
-        if (destTy->isSized()) {
-            // only when the dest type is sized
-            return destTy;
-        }
+  if (isa_and_nonnull<BitCastInst>(nextInst)) {
+    Type *destTy =
+        cast<BitCastInst>(nextInst)->getDestTy()->getPointerElementType();
+    if (destTy->isSized()) {
+      // only when the dest type is sized
+      return destTy;
     }
+  }
 
-    return nullptr;
+  return nullptr;
 }
 
 /**
@@ -61,30 +63,31 @@ static Type *getNextBitCastDestType(const Instruction *allocSite) {
  * @param sizeArgNo Argument number for element size
  * @return Inferred array type, or nullptr if inference fails
  */
-Type *DefaultHeapModel::inferCallocType(const Function *fun, const Instruction *allocSite,
+Type *DefaultHeapModel::inferCallocType(const Function *fun,
+                                        const Instruction *allocSite,
                                         int numArgNo, int sizeArgNo) {
-    if (auto* elemType = getNextBitCastDestType(allocSite)) {
-        assert(elemType->isSized());
+  if (auto *elemType = getNextBitCastDestType(allocSite)) {
+    assert(elemType->isSized());
 
-        aser::CallSite CS(allocSite);
-        const DataLayout &DL = fun->getParent()->getDataLayout();
-        const size_t elemSize = DL.getTypeAllocSize(elemType);
-        const Value *elementNum = CS.getArgOperand(numArgNo);
-        const Value *elementSize = CS.getArgOperand(sizeArgNo);
+    aser::CallSite CS(allocSite);
+    const DataLayout &DL = fun->getParent()->getDataLayout();
+    const size_t elemSize = DL.getTypeAllocSize(elemType);
+    const Value *elementNum = CS.getArgOperand(numArgNo);
+    const Value *elementSize = CS.getArgOperand(sizeArgNo);
 
-        if (auto* size = dyn_cast<ConstantInt>(elementSize)) {
-            if (elemSize == size->getSExtValue()) {
-                // GREAT, we are sure that the element type is the bitcast type
-                if (auto* elemNum = dyn_cast<ConstantInt>(elementNum)) {
-                    return getBoundedArrayTy(elemType, elemNum->getSExtValue());
-                } else {
-                    // the element number can not be determined
-                    return getUnboundedArrayTy(elemType);
-                }
-            }
+    if (auto *size = dyn_cast<ConstantInt>(elementSize)) {
+      if (elemSize == size->getSExtValue()) {
+        // GREAT, we are sure that the element type is the bitcast type
+        if (auto *elemNum = dyn_cast<ConstantInt>(elementNum)) {
+          return getBoundedArrayTy(elemType, elemNum->getSExtValue());
+        } else {
+          // the element number can not be determined
+          return getUnboundedArrayTy(elemType);
         }
+      }
     }
-    return nullptr;
+  }
+  return nullptr;
 }
 
 /**
@@ -102,44 +105,45 @@ Type *DefaultHeapModel::inferCallocType(const Function *fun, const Instruction *
  * @param sizeArgNo Argument number for size (-1 to treat as unbounded array)
  * @return Inferred type, or nullptr if inference fails
  */
-Type *DefaultHeapModel::inferMallocType(const Function *fun, const Instruction *allocSite,
+Type *DefaultHeapModel::inferMallocType(const Function *fun,
+                                        const Instruction *allocSite,
                                         int sizeArgNo) {
 
-    if (auto* elemType = getNextBitCastDestType(allocSite)) {
-        assert(elemType->isSized());
+  if (auto *elemType = getNextBitCastDestType(allocSite)) {
+    assert(elemType->isSized());
 
-        // if the sizeArgNo is not specified, treat it as unbounded array
-        if (sizeArgNo < 0) {
-            return getUnboundedArrayTy(elemType);
-        }
-
-        aser::CallSite CS(allocSite);
-        const DataLayout &DL = fun->getParent()->getDataLayout();
-        const size_t elemSize = DL.getTypeAllocSize(elemType);
-        const Value *totalSize = CS.getArgOperand(sizeArgNo);
-
-        // the allocated object size is known statically
-        if (auto* constSize = dyn_cast<ConstantInt>(totalSize)) {
-            size_t memSize = constSize->getValue().getSExtValue();
-            if (memSize == elemSize) {
-                // GREAT!
-                return elemType;
-            } else if (memSize % elemSize == 0) {
-                return getBoundedArrayTy(elemType, memSize / elemSize);
-            }
-            return nullptr;
-        } else {
-            // the size of allocated heap memory is unknown.
-            // treat is an array with infinite elements and the ty
-            if (DL.getTypeAllocSize(elemType) == 1) {
-                // a int8_t[] is equal to a field-insensitive object.
-                return nullptr;
-            } else {
-                return getUnboundedArrayTy(elemType);
-            }
-        }
+    // if the sizeArgNo is not specified, treat it as unbounded array
+    if (sizeArgNo < 0) {
+      return getUnboundedArrayTy(elemType);
     }
 
-    // we can not resolve the type
-    return nullptr;
+    aser::CallSite CS(allocSite);
+    const DataLayout &DL = fun->getParent()->getDataLayout();
+    const size_t elemSize = DL.getTypeAllocSize(elemType);
+    const Value *totalSize = CS.getArgOperand(sizeArgNo);
+
+    // the allocated object size is known statically
+    if (auto *constSize = dyn_cast<ConstantInt>(totalSize)) {
+      size_t memSize = constSize->getValue().getSExtValue();
+      if (memSize == elemSize) {
+        // GREAT!
+        return elemType;
+      } else if (memSize % elemSize == 0) {
+        return getBoundedArrayTy(elemType, memSize / elemSize);
+      }
+      return nullptr;
+    } else {
+      // the size of allocated heap memory is unknown.
+      // treat is an array with infinite elements and the ty
+      if (DL.getTypeAllocSize(elemType) == 1) {
+        // a int8_t[] is equal to a field-insensitive object.
+        return nullptr;
+      } else {
+        return getUnboundedArrayTy(elemType);
+      }
+    }
+  }
+
+  // we can not resolve the type
+  return nullptr;
 }

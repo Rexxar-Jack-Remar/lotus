@@ -41,11 +41,11 @@
 #ifndef KEY_SOURCE_DEFINED
 #define KEY_SOURCE_DEFINED 1
 
+#include "common.h"
+#include "hm_hash.h"
+#include "inst_counter.h"
 #include <iostream>
 #include <string>
-#include "common.h"
-#include "inst_counter.h"
-#include "hm_hash.h"
 
 /* FIXME: because dynamic cast is not working */
 class pdg_vertex_src;
@@ -220,7 +220,7 @@ namespace wpds
     };
 
 
-};
+} // namespace wpds
 
 #endif /* KEY_SOURCE_DEFINED */
 

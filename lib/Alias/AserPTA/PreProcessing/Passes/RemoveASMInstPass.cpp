@@ -10,9 +10,9 @@
  */
 #include "Alias/AserPTA/PreProcessing/Passes/RemoveASMInstPass.h"
 
-#include <llvm/IR/Instructions.h>
-#include <llvm/IR/InstrTypes.h>
 #include <llvm/IR/IRBuilder.h>
+#include <llvm/IR/InstrTypes.h>
+#include <llvm/IR/Instructions.h>
 #include <llvm/IR/NoFolder.h>
 
 using namespace aser;
@@ -29,23 +29,23 @@ using namespace llvm;
  * @return true if any ASM instructions were removed, false otherwise
  */
 static bool destroyASMInst(Function &F, IRBuilder<NoFolder> &builder) {
-    std::vector<Instruction *> removeThese;
-    for (auto &BB : F) {
-        for (auto &I : BB) {
-            if (auto *callInst = dyn_cast<CallBase>(&I)) {
-                auto *V = callInst->getCalledOperand();
-                if (V != nullptr && isa<InlineAsm>(V)) {
-                    removeThese.push_back(callInst);
-                }
-            }
+  std::vector<Instruction *> removeThese;
+  for (auto &BB : F) {
+    for (auto &I : BB) {
+      if (auto *callInst = dyn_cast<CallBase>(&I)) {
+        auto *V = callInst->getCalledOperand();
+        if (V != nullptr && isa<InlineAsm>(V)) {
+          removeThese.push_back(callInst);
         }
+      }
     }
+  }
 
-    for (auto *I : removeThese) {
-        I->replaceAllUsesWith(llvm::UndefValue::get(I->getType()));
-        I->eraseFromParent();
-    }
-    return !removeThese.empty();
+  for (auto *I : removeThese) {
+    I->replaceAllUsesWith(llvm::UndefValue::get(I->getType()));
+    I->eraseFromParent();
+  }
+  return !removeThese.empty();
 }
 
 /**
@@ -55,12 +55,11 @@ static bool destroyASMInst(Function &F, IRBuilder<NoFolder> &builder) {
  * @return true if any changes were made, false otherwise
  */
 bool RemoveASMInstPass::runOnFunction(llvm::Function &F) {
-    IRBuilder<NoFolder> builder(F.getContext());
+  IRBuilder<NoFolder> builder(F.getContext());
 
-    bool changed = destroyASMInst(F, builder);
-    return changed;
+  bool changed = destroyASMInst(F, builder);
+  return changed;
 }
-
 
 char RemoveASMInstPass::ID = 0;
 static RegisterPass<RemoveASMInstPass> CIP("", "Remove ASM Instruction",

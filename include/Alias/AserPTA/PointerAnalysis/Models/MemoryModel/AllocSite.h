@@ -9,57 +9,57 @@
 
 namespace aser {
 
-//forward declaration
-template <typename ctx>
-class FIObject;
+// forward declaration
+template <typename ctx> class FIObject;
 
-template <typename ctx>
-class MemBlock;
+template <typename ctx> class MemBlock;
 
 enum class AllocType : uint8_t {
-    Stack = 0,
-    Heap = 1,
-    Functions = 2,
-    Globals = 3,
-    Anonymous = 4,  // logically exist, but does not have a concrete allocation site (e.g., argument passed to main)
-    Null = 5,
-    Universal = 6,
+  Stack = 0,
+  Heap = 1,
+  Functions = 2,
+  Globals = 3,
+  Anonymous = 4, // logically exist, but does not have a concrete allocation
+                 // site (e.g., argument passed to main)
+  Null = 5,
+  Universal = 6,
 };
 
-template <typename ctx>
-class AllocSite {
+template <typename ctx> class AllocSite {
 private:
-    // allocated context
-    const ctx *const context;
-    // the llvm value that allocates the memory block
-    const llvm::Value *const value;
-    // allocate type
-    const AllocType type;
-        // can only be created by allocating a new memory block
-    // there is only one instance of AllocSite per ctx+value
-    AllocSite(const ctx *c, const llvm::Value *v, const AllocType t)
-        : context(c), value(v), type(t) {
-        assert(value != nullptr || type == AllocType::Anonymous);
-    }
+  // allocated context
+  const ctx *const context;
+  // the llvm value that allocates the memory block
+  const llvm::Value *const value;
+  // allocate type
+  const AllocType type;
+  // can only be created by allocating a new memory block
+  // there is only one instance of AllocSite per ctx+value
+  AllocSite(const ctx *c, const llvm::Value *v, const AllocType t)
+      : context(c), value(v), type(t) {
+    assert(value != nullptr || type == AllocType::Anonymous);
+  }
 
 public:
-    // making a copy of an allocation site is not allowed.
-    AllocSite(const AllocSite<ctx> &) = delete;
-    AllocSite(AllocSite<ctx> &&) = delete;
-    AllocSite<ctx> &operator=(const AllocSite<ctx> &) = delete;
-    AllocSite<ctx> &operator=(AllocSite<ctx> &&) = delete;
+  // making a copy of an allocation site is not allowed.
+  AllocSite(const AllocSite<ctx> &) = delete;
+  AllocSite(AllocSite<ctx> &&) = delete;
+  AllocSite<ctx> &operator=(const AllocSite<ctx> &) = delete;
+  AllocSite<ctx> &operator=(AllocSite<ctx> &&) = delete;
 
-    // getters
-    [[nodiscard]] inline const ctx *getContext() const { return this->context; }
+  // getters
+  [[nodiscard]] inline const ctx *getContext() const { return this->context; }
 
-    [[nodiscard]] inline const llvm::Value *getValue() const { return this->value; }
+  [[nodiscard]] inline const llvm::Value *getValue() const {
+    return this->value;
+  }
 
-    [[nodiscard]] inline AllocType getAllocType() const { return this->type; }
+  [[nodiscard]] inline AllocType getAllocType() const { return this->type; }
 
-    friend FIObject<ctx>;
-    friend MemBlock<ctx>;
+  friend FIObject<ctx>;
+  friend MemBlock<ctx>;
 };
 
-}  // namespace aser
+} // namespace aser
 
 #endif

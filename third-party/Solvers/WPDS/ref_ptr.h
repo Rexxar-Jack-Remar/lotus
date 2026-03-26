@@ -41,10 +41,10 @@
 #ifndef REF_PTR_H_
 #define REF_PTR_H_ 1
 
-#include <cstdio>
 #include <cassert>
-#include <limits.h>
+#include <cstdio>
 #include <iostream>
+#include <limits.h>
 #include <vector>
 
 /* A reference counting pointer class

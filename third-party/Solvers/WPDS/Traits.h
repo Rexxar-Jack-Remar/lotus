@@ -41,11 +41,11 @@
 #ifndef WPDS_TRAITS_GUARD
 #define WPDS_TRAITS_GUARD 1
 
+#include "ref_ptr.h"
+#include "common.h"
+#include "myallocator.h"
 #include <list>
 #include <set>
-#include "ref_ptr.h"
-#include "myallocator.h"
-#include "common.h"
 
 /*! @struct wpds::Traits
  *

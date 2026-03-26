@@ -41,13 +41,13 @@
 #ifndef wpds_CONFIGURATION_H_
 #define wpds_CONFIGURATION_H_ 1
 
-#include <iostream>
 #include "common.h"
+#include "Traits.h"
+#include "UTIL.h"
 #include "inst_counter.h"
 #include "ref_ptr.h"
 #include "semiring.h"
-#include "UTIL.h"
-#include "Traits.h"
+#include <iostream>
 #if defined(GENERIC_WITNESSES)
 #include "TWitness.h"
 #define COMBINE_WITNESSES(se,w1,w2) combine_twitnesses< ref_ptr<CATransition<T> >, sem_elem_t, const Rule<T>* >( se,w1,w2)
@@ -67,7 +67,7 @@ namespace wpds
     namespace util {
         template< typename T > struct InsertTransActionFunctor;
         template< typename T > struct ClearWitnessTransActionFunctor;
-    }
+    } // namespace util
 
     using namespace util;
 
@@ -342,7 +342,7 @@ namespace wpds
     }
 #endif // DWPDS
 
-}   // namespace
+} // namespace wpds
 
 #endif  // wpds_CONFIGURATION_H_
 /* Yo, Emacs!

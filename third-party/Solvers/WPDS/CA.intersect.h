@@ -44,9 +44,12 @@
 #include "ref_ptr.h"
 #include "key_source.h"
 #include "keys.h"
+#include "TransActionFunctor.h"
 
 namespace wpds
 {
+    template< typename T > class CA;
+
     namespace util
     {
         /*

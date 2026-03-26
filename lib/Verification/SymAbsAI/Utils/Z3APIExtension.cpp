@@ -150,10 +150,10 @@ std::vector<expr> expr_constants(const expr &e) {
   std::function<void(const expr &)> recur = [&recur, &syms,
                                              &ctx](const expr &e) {
     assert(Z3_is_app(ctx, e));
-    auto app = Z3_to_app(ctx, e);
+    auto *app = Z3_to_app(ctx, e);
     unsigned n_args = Z3_get_app_num_args(ctx, app);
 
-    auto fdecl = Z3_get_app_decl(ctx, app);
+    auto *fdecl = Z3_get_app_decl(ctx, app);
     if (n_args == 0 && Z3_get_decl_kind(ctx, fdecl) == Z3_OP_UNINTERPRETED)
       syms.insert(e);
 

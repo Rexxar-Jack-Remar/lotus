@@ -41,10 +41,10 @@
 #ifndef WPDS_COMMON_H_
 #define WPDS_COMMON_H_ 1
 
+#include "wpds_sysdep.h"
 #include <cstdio>
 #include <iostream>
 #include <string>
-#include "wpds_sysdep.h"
 /**************************************************/
 /*            MACROS                                  */
 /**************************************************/
@@ -158,7 +158,7 @@ namespace wpds {
             static Query BASE,PRESTAR,POSTSTAR,BOTH;
     };
 
-}
+} // namespace wpds
 
 /**************************************************/
 /*            VAR DECLS                              */
@@ -193,7 +193,7 @@ namespace wpds {
         printf("Mh Count\t: %d\n",mhCount);
     }
 
-}
+} // namespace wpds
 
 /**************************************************/
 /*             METHOD DECLS                          */

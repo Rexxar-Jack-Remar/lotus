@@ -8,6 +8,7 @@
  * @author peiming
  */
 #include "Alias/AserPTA/Util/Util.h"
+
 #include "Alias/AserPTA/PointerAnalysis/Program/CallSite.h"
 
 using namespace llvm;
@@ -23,17 +24,19 @@ using namespace aser;
  * @param os The output stream
  */
 void aser::prettyFunctionPrinter(const Function *func, raw_ostream &os) {
-    os << *func->getReturnType() << " @" << func->getName() << "(";
-    auto *funcType = func->getFunctionType();
-    for (unsigned I = 0, E = funcType->getNumParams(); I != E; ++I) {
-        if (I) os << ", ";
-        os << *funcType->getParamType(I);
-    }
-    if (funcType->isVarArg()) {
-        if (funcType->getNumParams()) os << ", ";
-        os << "...";  // Output varargs portion of signature!
-    }
-    os << ")";
+  os << *func->getReturnType() << " @" << func->getName() << "(";
+  auto *funcType = func->getFunctionType();
+  for (unsigned I = 0, E = funcType->getNumParams(); I != E; ++I) {
+    if (I)
+      os << ", ";
+    os << *funcType->getParamType(I);
+  }
+  if (funcType->isVarArg()) {
+    if (funcType->getNumParams())
+      os << ", ";
+    os << "..."; // Output varargs portion of signature!
+  }
+  os << ")";
 }
 
 /**
@@ -48,40 +51,41 @@ void aser::prettyFunctionPrinter(const Function *func, raw_ostream &os) {
  * @param target The potential target function
  * @return true if the call is compatible with the target, false otherwise
  */
-bool aser::isCompatibleCall(const llvm::Instruction *indirectCall, const llvm::Function *target) {
-    aser::CallSite CS(indirectCall);
-    assert(CS.isIndirectCall());
+bool aser::isCompatibleCall(const llvm::Instruction *indirectCall,
+                            const llvm::Function *target) {
+  aser::CallSite CS(indirectCall);
+  assert(CS.isIndirectCall());
 
-    // fast path, the same type
-    if (CS.getCalledValue()->getType() == target->getType()) {
-        return true;
-    }
-
-    if (CS.getType() != target->getReturnType()) {
-        return false;
-    }
-
-    if (CS.getNumArgOperands() != target->arg_size() && !target->isVarArg()) {
-        // two non-vararg function should at have same number of parameters
-        return false;
-    }
-
-    if (target->isVarArg() && target->arg_size() > CS.getNumArgOperands()) {
-        // calling a varargs function, the callsite should offer at least the
-        // same number of parameters required by var-args
-        return false;
-    }
-
-    // LLVM IR is strongly typed, so ensure every actually argument is of the
-    // same type as the formal arguments.
-    const auto *fit = CS.arg_begin();
-    for (const Argument &arg : target->args()) {
-        const Value *param = *fit;
-        if (param->getType()->isPointerTy() != arg.getType()->isPointerTy()) {
-            return false;
-        }
-        fit++;
-    }
-
+  // fast path, the same type
+  if (CS.getCalledValue()->getType() == target->getType()) {
     return true;
+  }
+
+  if (CS.getType() != target->getReturnType()) {
+    return false;
+  }
+
+  if (CS.getNumArgOperands() != target->arg_size() && !target->isVarArg()) {
+    // two non-vararg function should at have same number of parameters
+    return false;
+  }
+
+  if (target->isVarArg() && target->arg_size() > CS.getNumArgOperands()) {
+    // calling a varargs function, the callsite should offer at least the
+    // same number of parameters required by var-args
+    return false;
+  }
+
+  // LLVM IR is strongly typed, so ensure every actually argument is of the
+  // same type as the formal arguments.
+  const auto *fit = CS.arg_begin();
+  for (const Argument &arg : target->args()) {
+    const Value *param = *fit;
+    if (param->getType()->isPointerTy() != arg.getType()->isPointerTy()) {
+      return false;
+    }
+    fit++;
+  }
+
+  return true;
 }

@@ -50,6 +50,6 @@ namespace wpds {
 
         virtual void add_rules(WPDS< T >&, wpds_key_t, wpds_key_t) = 0;
     };
-}
+} // namespace wpds
 
 #endif /* RULE_EXTENDER_DEFINED */

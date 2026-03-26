@@ -41,11 +41,11 @@
 #ifndef WPDS_SCHEMA_H_
 #define WPDS_SCHEMA_H_ 1
 
-#include <string>
-#include <iostream>
 #include "semiring.h"
-#include "common.h"
 #include "UTIL.h"
+#include "common.h"
+#include <iostream>
+#include <string>
 
 namespace wpds
 {

@@ -41,14 +41,14 @@
 #ifndef wpds_CA_H_
 #define wpds_CA_H_ 1
 
-#include <algorithm>
-#include <set>
-#include <list>
 #include "common.h"
-#include "inst_counter.h"
-#include "catransition.h"
-#include "UTIL.h"
 #include "Traits.h"
+#include "UTIL.h"
+#include "catransition.h"
+#include "inst_counter.h"
+#include <algorithm>
+#include <list>
+#include <set>
 
 /*
  * Modify these to adjust the initial number
@@ -1047,7 +1047,7 @@ namespace wpds
         return ca.print(o);
     }
 
-}   // namespace
+} // namespace wpds
 
 #endif  // WPDS_CA_H_
 

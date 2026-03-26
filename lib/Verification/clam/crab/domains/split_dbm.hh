@@ -1,8 +1,8 @@
 #pragma once
 
-#include <crab/domains/split_dbm.hpp>
-#include <crab/domains/fixed_tvpi_domain.hpp>
 #include "crab_defs.hh"
+#include <crab/domains/fixed_tvpi_domain.hpp>
+#include <crab/domains/split_dbm.hpp>
 
 namespace clam {
 /// To choose DBM parameters

@@ -14,20 +14,20 @@ enum class UseCFLAA { None, Steensgaard, Andersen, Both };
 // inspired by llvm::PassManagerBuilder
 class PreProcPassManagerBuilder {
 private:
-    UseCFLAA useCFL;
-    bool runInstCombine;
-    bool enableLoopUnswitch;
-    bool enableSimpleLoopUnswitch;
+  UseCFLAA useCFL;
+  bool runInstCombine;
+  bool enableLoopUnswitch;
+  bool enableSimpleLoopUnswitch;
 
-    void addFunctionSimplificationPasses(llvm::legacy::PassManagerBase &MPM);
+  void addFunctionSimplificationPasses(llvm::legacy::PassManagerBase &MPM);
 
 public:
-    PreProcPassManagerBuilder();
+  PreProcPassManagerBuilder();
 
-    void populateModulePassManager(llvm::legacy::PassManagerBase &MPM);
-    void populateFunctionPassManager(llvm::legacy::FunctionPassManager &FPM);
+  void populateModulePassManager(llvm::legacy::PassManagerBase &MPM);
+  void populateFunctionPassManager(llvm::legacy::FunctionPassManager &FPM);
 };
 
 } // namespace aser
 
-#endif  // ASER_PTA_PREPROCPASSMANAGERBUILDER_H
+#endif // ASER_PTA_PREPROCPASSMANAGERBUILDER_H

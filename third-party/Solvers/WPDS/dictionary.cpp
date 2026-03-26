@@ -126,7 +126,7 @@ namespace wpds {
             (f)(*iter);
     }
 
-} // namespace
+} // namespace wpds
 
 /* Yo, Emacs!
 ;;; Local Variables: ***

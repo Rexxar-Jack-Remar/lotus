@@ -8,17 +8,16 @@
 #include <llvm/IR/LegacyPassManager.h>
 #include <llvm/IR/Module.h>
 
-
 namespace aser {
 
-// maybe just a PreprocessingModule function is enough, we make it as a class in case in the future
-// we might want to configure it.
+// maybe just a PreprocessingModule function is enough, we make it as a class in
+// case in the future we might want to configure it.
 class IRPreProcessor {
 public:
-    IRPreProcessor() = default;
-    void runOnModule(llvm::Module &M);
+  IRPreProcessor() = default;
+  void runOnModule(llvm::Module &M);
 };
 
 } // namespace aser
 
-#endif  // ASER_PTA_IRPREPROCESSOR_H
+#endif // ASER_PTA_IRPREPROCESSOR_H

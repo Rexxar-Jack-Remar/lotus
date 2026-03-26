@@ -7,6 +7,6 @@ namespace aser {
 
 using DefaultPtsTy = BitVectorPTS;
 
-}  // namespace aser
+} // namespace aser
 
 #endif

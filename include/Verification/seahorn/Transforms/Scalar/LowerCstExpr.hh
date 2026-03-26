@@ -2,11 +2,11 @@
 #define _LOWER_CONSTANT_EXPRESSIONS__HH__
 
 #include "llvm/Pass.h"
-#include "llvm/IR/Module.h"
 #include "llvm/IR/Function.h"
 #include "llvm/IR/GlobalVariable.h"
 #include "llvm/IR/IRBuilder.h"
 #include "llvm/IR/InstIterator.h"
+#include "llvm/IR/Module.h"
 
 #include <set>
 
@@ -38,6 +38,6 @@ namespace seahorn
     StringRef getPassName () const override {return "LowerCstExpr";}
   };
 
-} 
+} // namespace seahorn 
 
 #endif 

@@ -48,10 +48,10 @@
  */
 
 #include "Triple.h"
+#include "CA.intersect.h"
 #include "KeyPair.h"
 #include "RuleActionFunctor.h"
 #include "TransActionFunctor.h"
-#include "CA.intersect.h"
 
 #ifdef SWPDS
 #   include "SchemaActionFunctor.h"

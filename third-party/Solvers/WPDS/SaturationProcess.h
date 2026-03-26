@@ -42,16 +42,16 @@
  */
 #ifndef wpds_SATURATION_PROCESS_H_
 #define wpds_SATURATION_PROCESS_H_
-#include <map>
-#include <list>
-#include <vector>
-#include <string>
 #include "common.h"
+#include "CA.h"
+#include "Traits.h"
+#include "myallocator.h"
 #include "ref_ptr.h"
 #include "semiring.h"
-#include "CA.h"
-#include "myallocator.h"
-#include "Traits.h"
+#include <list>
+#include <map>
+#include <string>
+#include <vector>
 
 /* class SaturationProcess
  *
@@ -1042,7 +1042,7 @@ namespace wpds {
         return ca_out;
     }
 
-}   // wpds
+} // namespace wpds
 
 #endif  // wpds_SATURATION_PROCESS_H_
 /* Yo, Emacs!

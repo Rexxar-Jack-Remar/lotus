@@ -1,13 +1,13 @@
 #include "llvm/Analysis/TargetLibraryInfo.h"
 #include "llvm/Support/CommandLine.h"
 
-#include "seahorn/clam_CfgBuilder.hh"
-#include "seahorn/clam_Clam.hh"
 #include "clam/ClamQueryAPI.hh"
 #include "clam/CrabDomainParser.hh"
 #include "clam/SeaDsaHeapAbstraction.hh"
 #include "crab/domains/abstract_domain_params.hpp"
 #include "crab/support/stats.hpp"
+#include "seahorn/clam_CfgBuilder.hh"
+#include "seahorn/clam_Clam.hh"
 
 #include "seahorn/Analysis/CrabAnalysis.hh"
 #include "seahorn/Support/SeaDebug.h"
@@ -18,7 +18,7 @@
 
 namespace {
 clam::CrabDomain::Type CrabDom;
-}
+} // namespace
 
 // Crab reason natively about sea.is_dereferenceable without any
 // lowering.

@@ -617,5 +617,5 @@ namespace wpds {
       // set ca_out.query to Query::prestar()
       ca_out.set_query (Query::prestar());
     }
-}
+} // namespace wpds
 #endif

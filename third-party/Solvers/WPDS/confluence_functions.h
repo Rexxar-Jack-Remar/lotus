@@ -115,6 +115,6 @@ namespace wpds {
     conf_fn_t cf_data;
     sem_elem_t sr_data;
   };
-}
+} // namespace wpds
 
 #endif

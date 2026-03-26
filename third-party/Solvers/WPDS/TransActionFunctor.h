@@ -43,8 +43,8 @@
 #ifndef WPDS_UTIL_TRANS_ACTION_FUNCTOR_H_
 #define WPDS_UTIL_TRANS_ACTION_FUNCTOR_H_
 
-#include <iostream>
 #include "Traits.h"
+#include <iostream>
 
 namespace wpds {
 
