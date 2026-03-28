@@ -12,12 +12,14 @@ The Checker Framework provides a unified infrastructure for static bug detection
 Overview
 --------
 
-The Checker Framework consists of four main checker categories, all unified through a centralized bug reporting system:
+The Checker Framework consists of several checker categories, all unified through a centralized bug reporting system:
 
+* **AE Checkers** – Abstract-execution-based memory-safety bug detection
 * **FiTx Checkers** – Daily development-friendly bug detection using typestate analysis (path-insensitive, return-code aware; see Suzuki et al., USENIX ATC 2024)
 * **KINT Checkers** – Numerical bugs (overflow, division by zero, array bounds) using range analysis and SMT solving
 * **Concurrency Checkers** – Thread safety and parallel-runtime issues (data races, deadlocks, atomicity violations, OpenMP bugs, MPI bugs) using MHP, lock set, OpenMP, and MPI analyses
 * **Pulse Checker** – Memory safety and other bugs using biabductive analysis with path-sensitive interprocedural reasoning
+* **Saber Checkers** – Source-sink bug detection over sparse value-flow graphs
 
 All checkers report bugs through the centralized ``BugReportMgr`` system, enabling unified output formats (JSON, SARIF) and consistent bug reporting across all analysis tools.
 
@@ -32,6 +34,12 @@ Components
 * ``AtomicityChecker.cpp`` – Atomicity violation detection
 * ``OpenMPChecker.cpp`` – Dedicated OpenMP bug checks built on OpenMP task analysis
 * ``MPIChecker.cpp`` – Dedicated MPI bug checks built on MPI communication/RMA analysis
+
+**AE Checkers** (``lib/Checker/AE/``):
+
+* ``AbstractInterpretation.cpp`` – Fixpoint engine for abstract execution
+* ``AEDetector.cpp`` – Bug-specific detector integration
+* ``AbstractState.*`` / ``AbstractValue.*`` – State and value abstractions
 
 **FiTx Bug Checkers** (``lib/Checker/FiTx/``):
 
@@ -64,6 +72,13 @@ Components
 * ``PulseModels.cpp`` – Library function models
 * ``PulseDiagnostic.cpp`` – Rich diagnostic reporting with traces
 
+**Saber Checker** (``lib/Checker/Saber/``):
+
+* ``LeakChecker.cpp`` – Leak detection over source-sink flows
+* ``DoubleFreeChecker.cpp`` – Double-free detection
+* ``FileChecker.cpp`` – File-descriptor leak checking
+* ``SaberCheckerAPI.cpp`` – Reusable checker API surface
+
 **Report System** (``lib/Checker/Report/``):
 
 * ``BugReport.cpp`` – Bug report data structures with source location information
@@ -81,10 +96,12 @@ Build Targets
 
 * ``FiTxChecker`` – FiTx typestate-based bug checker library
 * ``PulseChecker`` – Pulse biabductive analysis checker library
+* ``lotus-ae`` – AE abstract-execution bug checker (``tools/checker/lotus-ae.cpp``)
 * ``lotus-fitx`` – FiTx daily development-friendly bug checker (``tools/checker/lotus_fitx.cpp``)
 * ``lotus-kint`` – KINT numerical bug detection tool (``tools/checker/lotus_kint.cpp``)
 * ``lotus-concur`` – Concurrency checker tool (``tools/checker/lotus_concur.cpp``)
 * ``lotus-pulse`` – Pulse biabductive analysis tool (``tools/checker/lotus_pulse.cpp``)
+* ``lotus-saber`` – Saber source-sink bug detector (``tools/checker/lotus-saber.cpp``)
 * ``lotus-taint`` – Taint analysis tool (``tools/checker/lotus_taint.cpp``)
 
 Usage
@@ -156,7 +173,9 @@ See Also
 .. toctree::
    :maxdepth: 1
 
+   ae
    concurrency
    fitx
    kint
    pulse
+   saber

@@ -7,11 +7,11 @@
 
 // C++ includes
 #include <list>
-#include <memory>
-#include <unordered_set>
-#include <stdexcept>
-#include <vector>
 #include <map>
+#include <memory>
+#include <stdexcept>
+#include <unordered_set>
+#include <vector>
 
 // C includes
 #include <cassert>
@@ -736,7 +736,7 @@ namespace horn_verification
 
 				// Count number of lhs in slice1
 				unsigned num_lhs_in_slice = 0;
-				for (const auto dp : horn_clause._premises)
+				for (auto *const dp : horn_clause._premises)
 				{
 					
 					for (std::size_t i = left_index1; i <= right_index1; ++i)

@@ -19,10 +19,14 @@ At a glance:
   multi-threaded code (MHP, lock sets, thread modeling). See :doc:`concurrency`.
 - **Crypto** (``lib/Analysis/Crypto``): Constant-time programming analysis for
   cryptographic code. See :doc:`crypto`.
+- **DebugInfo** (``lib/Analysis/DebugInfo``): Source-location and metadata
+  extraction support. See :doc:`debug_info`.
 - **NullPointer** (``lib/Analysis/NullPointer``): A family of nullness and
   null-flow analyses. See :doc:`null_pointer`.
 - **Spectre** (``lib/Analysis/Spectre``): Cache speculation analysis for
   detecting Spectre vulnerabilities. See :doc:`spectre`.
+- **TypeHirarchy** (``lib/Analysis/TypeHirarchy``): Type-hierarchy and vtable
+  recovery for object-oriented code. See :doc:`type_hierarchy`.
 
 
 Higher-level analyzers such as CLAM and SymAbsAI build on these components;
@@ -35,5 +39,7 @@ details.
    cfg
    concurrency
    crypto
+   debug_info
    null_pointer
    spectre
+   type_hierarchy

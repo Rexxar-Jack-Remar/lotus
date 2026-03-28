@@ -7,11 +7,11 @@
 #include "llvm/Support/MemoryBuffer.h"
 #include "llvm/Support/raw_ostream.h"
 
-#include <memory>
-#include <vector>
-#include <random>
 #include <algorithm>
 #include <chrono>
+#include <memory>
+#include <random>
+#include <vector>
 
 using namespace llvm;
 using namespace lotus;

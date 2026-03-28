@@ -10,6 +10,9 @@ This section covers the various alias analysis algorithms implemented in Lotus.
    allocaa
    sparrowaa
    aserpta
+   cclyzeraa
+   dda
+   dfpa
    dyckaa
    seadsa
    fpa
@@ -18,3 +21,4 @@ This section covers the various alias analysis algorithms implemented in Lotus.
    dynaa
    sraa
    tpa
+   typequalifier

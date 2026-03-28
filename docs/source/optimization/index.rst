@@ -145,4 +145,5 @@ These optimization passes can be used to prepare code for analysis:
 .. toctree::
    :maxdepth: 2
 
+   pe
    swprefetching

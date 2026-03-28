@@ -5,7 +5,6 @@
 
 #include <llvm/IR/Instructions.h>
 #include <llvm/IR/LegacyPassManager.h>
-#include <gtest/gtest.h>
 
 using namespace lotus::unittest;
 

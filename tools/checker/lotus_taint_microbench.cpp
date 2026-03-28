@@ -6,10 +6,10 @@
 #include <string>
 #include <vector>
 
-#include <Dataflow/IFDS/Clients/IFDSTaintAnalysis.h>
-#include <Dataflow/IFDS/Solvers/IFDSSolver.h>
 #include <llvm/IR/Instructions.h>
 #include <llvm/Support/raw_ostream.h>
+#include <Dataflow/IFDS/Clients/IFDSTaintAnalysis.h>
+#include <Dataflow/IFDS/Solvers/IFDSSolver.h>
 
 namespace {
 

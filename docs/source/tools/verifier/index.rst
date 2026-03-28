@@ -51,6 +51,25 @@ compositional way.
 
 For detailed documentation, see :doc:`symabs-ai/index`.
 
+Sifa – Symbolic Interpretation with Fluid Abstractions
+------------------------------------------------------
+
+Sifa is a symbolic-interpretation verifier with configurable abstract domains
+and optional SymAbs-backed reasoning.
+
+**Binary**: ``sifa``
+**Location**: ``tools/verifier/sifa/``
+
+**Quick Start**:
+
+.. code-block:: bash
+
+   ./build/bin/sifa program.bc
+   ./build/bin/sifa program.bc --function=foo --block=loop.header
+   ./build/bin/sifa program.bc --symabs --abstract-domain=Octagon
+
+For detailed documentation, see :doc:`sifa/index`.
+
 SeaHorn – Verification Framework
 ---------------------------------
 
@@ -93,3 +112,11 @@ learning capabilities.
 
 For detailed documentation, see :doc:`horn-ice/index`.
 
+.. toctree::
+   :maxdepth: 1
+
+   clam/index
+   sifa/index
+   symabs-ai/index
+   seahorn/index
+   horn-ice/index

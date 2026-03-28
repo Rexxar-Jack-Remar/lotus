@@ -11,6 +11,6 @@ This section covers the intermediate representations used in Lotus.
    ssi
    vssa
    svfg
+   gvfg
    gsa
    memoryssa
-

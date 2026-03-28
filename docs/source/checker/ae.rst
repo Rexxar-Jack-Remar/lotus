@@ -1,0 +1,61 @@
+Abstract Execution Checker
+==========================
+
+The ``AE`` subsystem provides abstract-execution-based bug detection.
+
+**Headers**: ``include/Checker/AE/``
+
+**Implementation**: ``lib/Checker/AE/``
+
+**Tool**: ``lotus-ae`` in ``tools/checker/lotus-ae.cpp``
+
+Overview
+--------
+
+AE runs abstract interpretation and specialized detectors to report memory
+safety issues such as buffer overflows, null dereferences, use-after-free, and
+invalid frees.
+
+Main components
+---------------
+
+- ``AbstractInterpretation`` drives the fixpoint analysis.
+- ``AEDetector`` and its concrete detectors implement bug-specific checks.
+- Value abstractions such as ``AbstractValue``, ``NumericValue``, and
+  ``AbstractState`` model execution state during analysis.
+- ``RelationSolver`` and related utilities support symbolic reasoning in the
+  abstract domain.
+
+Checks supported
+----------------
+
+- Buffer overflow
+- Null pointer dereference
+- Use-after-free
+- Invalid free
+- Memory leak
+
+Command-line usage
+------------------
+
+.. code-block:: bash
+
+   ./build/bin/lotus-ae --all input.bc
+   ./build/bin/lotus-ae --overflow --null-deref input.bc
+   ./build/bin/lotus-ae --handle-recur=widen-narrow --widen-delay=5 input.bc
+
+Important options
+-----------------
+
+- ``--all`` enables all AE bug detectors.
+- ``--overflow``, ``--null-deref``, ``--use-after-free``, ``--invalid-free``,
+  and ``--mem-leak`` enable individual checks.
+- ``--handle-recur`` chooses the recursion strategy.
+- ``--widen-delay`` delays widening in loops.
+- ``-v`` prints more detailed traces for findings.
+
+See also
+--------
+
+- See :doc:`../tools/checker/index` for the front-end overview.
+- See :doc:`pulse` and :doc:`kint` for other checker families.

@@ -67,6 +67,29 @@ The tool detects various integer-related bugs:
    # Quiet mode with output to file
    ./build/bin/lotus-kint -quiet -log-to-file=analysis.log input.ll
 
+lotus-ae – Abstract Execution Bug Checker
+-----------------------------------------
+
+Abstract-execution-based bug detection for memory-safety issues.
+
+**Binary**: ``lotus-ae``  
+**Location**: ``tools/checker/lotus-ae.cpp``
+
+**Usage**:
+
+.. code-block:: bash
+
+   ./build/bin/lotus-ae --all input.bc
+   ./build/bin/lotus-ae --overflow --null-deref input.bc
+
+Key options:
+
+- ``--all``
+- ``--overflow``, ``--null-deref``, ``--use-after-free``,
+  ``--invalid-free``, ``--mem-leak``
+- ``--handle-recur=top|widen-only|widen-narrow``
+- ``--widen-delay=<N>``
+
 lotus-taint – Taint Analysis
 ----------------------------
 
@@ -136,3 +159,19 @@ Typical workflow:
 
 Detailed concurrency examples and recommended patterns are in
 :doc:`../../user_guide/bug_detection`.
+
+lotus-saber – Source-Sink Resource Checker
+------------------------------------------
+
+Saber-based bug detection over sparse value-flow graphs.
+
+**Binary**: ``lotus-saber``  
+**Location**: ``tools/checker/lotus-saber.cpp``
+
+**Usage**:
+
+.. code-block:: bash
+
+   ./build/bin/lotus-saber input.bc
+   ./build/bin/lotus-saber --all input.bc
+   ./build/bin/lotus-saber --double-free --file input.bc

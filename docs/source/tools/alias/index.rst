@@ -116,6 +116,52 @@ sensitivities and solver algorithms.
    # 1-CFA with deep solver
    ./build/bin/aser-aa -analysis-mode=1-cfa -solver=deep input.bc
 
+DFPA (dfpa)
+-----------
+
+Demand-refined function-pointer analysis for indirect-call resolution.
+
+**Binary**: ``dfpa``
+**Location**: ``tools/alias/dfpa.cpp``
+
+**Usage**:
+
+.. code-block:: bash
+
+   ./build/bin/dfpa [options] input.bc
+
+Key options:
+
+- ``-indirect-ctx-k=<N>`` – selective context depth on indirect edges
+- ``-refine-ambiguous-only=<bool>`` – refine only unresolved indirect calls
+- ``-max-offset-depth=<N>`` – bound offset-path depth
+- ``-max-demand-states=<N>`` – demand refinement state budget
+- ``-enable-signature-filter=<bool>`` – intersect candidates with signature matches
+- ``-output-file=<path|cout>`` – dump refined targets
+
+Call Graph Construction (call-graph)
+------------------------------------
+
+Unified call-graph construction tool that can drive several underlying pointer
+or call-graph analyses.
+
+**Binary**: ``call-graph``
+**Location**: ``tools/alias/call-graph.cpp``
+
+**Usage**:
+
+.. code-block:: bash
+
+   ./build/bin/call-graph -cg-type=dyck input.bc
+   ./build/bin/call-graph -cg-type=dfpa -emit-cg-as-json input.bc
+
+Key options:
+
+- ``-cg-type=dyck|lotus|dfpa|fpa-flta|fpa-mlta|fpa-mltadf|fpa-kelp|aserpta-ci|aserpta-1cfa|aserpta-2cfa``
+- ``-emit-cg-as-dot`` or ``-emit-cg-as-json``
+- ``-o <file>`` – output destination
+- ``-S`` – compute graph statistics
+
 DyckAA (dyck-aa)
 ----------------
 
@@ -271,4 +317,3 @@ Dynamic checker that validates static alias analyses against runtime behavior.
 - Support research on alias analysis accuracy
 
 See also the detailed description in ``tools/alias/dynaa/README.md``.
-

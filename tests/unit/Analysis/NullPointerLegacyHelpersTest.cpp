@@ -2,10 +2,10 @@
 #include "Analysis/NullPointer/NullFlowAnalysis.h"
 #include "TestUtils/LLVMHelpers.h"
 
-#include <climits>
-#include <cstdint>
 #include <llvm/IR/Instructions.h>
 #include <gtest/gtest.h>
+#include <climits>
+#include <cstdint>
 
 using namespace lotus::unittest;
 

@@ -21,6 +21,7 @@ The documentation is organized to match the ``tools/`` directory structure:
    alias/index
    cfl/index
    checker/index
+   dataflow/index
    ir/index
    mcp/index
    optimization/index
