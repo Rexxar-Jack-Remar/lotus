@@ -60,17 +60,6 @@ void TypeMapBuilder::insertTypeMap(Type *type, size_t size,
 size_t TypeMapBuilder::getTypeSize(Type *type, const DataLayout &dataLayout) {
   if (isa<FunctionType>(type))
     return dataLayout.getPointerSize();
-  // Bug fix: the previous implementation drilled down through nested ArrayTypes
-  // to the innermost element type and returned its size, ignoring all array
-  // dimensions. For example, [4 x [3 x i32]] would return sizeof(i32)=4 instead
-  // of the correct 48 bytes. This caused TypeLayout sizes to be wrong for
-  // nested arrays, making offsetMemory() incorrectly return Universal for valid
-  // in-bounds accesses.
-  //
-  // Zero-element arrays ([0 x T]) have an alloc size of 0 from DataLayout,
-  // which is correct for our purposes (they model flexible array members; the
-  // memory model treats them as byte arrays anyway via the opaque-type path
-  // above).
   return dataLayout.getTypeAllocSize(type);
 }
 

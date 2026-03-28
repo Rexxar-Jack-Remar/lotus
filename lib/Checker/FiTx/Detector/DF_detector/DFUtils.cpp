@@ -36,10 +36,6 @@ class OneshotCallConstraint : public fitx::StatefulConstraint {
     }
 
     const auto& visited_insts = visited_funcs_[parent][called_func];
-    // Bug fix: previously used *stored < *inst (source-location ordering) as a
-    // "visited" check, which suppressed any call site that came after an
-    // earlier call to the same function — causing false negatives for
-    // double-free across multiple call sites. Use pointer identity instead.
     if (std::find_if(visited_insts.begin(), visited_insts.end(),
                      [inst](auto stored) {
                        return stored == inst;

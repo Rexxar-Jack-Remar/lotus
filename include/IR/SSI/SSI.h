@@ -81,7 +81,6 @@ struct SSIfy : public FunctionPass {
   DenseMap<Value *, SmallPtrSet<Instruction *, 4>> versions;
 
   // Side-table sets that identify SSI-inserted nodes without relying on names.
-  // Fix for bug #2: name-based classification is fragile.
   DenseSet<const Instruction *> ssiPhiSet;
   DenseSet<const Instruction *> ssiSigmaSet;
   DenseSet<const Instruction *> ssiCopySet;
@@ -109,26 +108,13 @@ struct SSIfy : public FunctionPass {
   void split(Instruction *V, const std::set<ProgramPoint> &Iup,
              const std::set<ProgramPoint> &Idown);
 
-  // Returns true when inserting an SSI node at insert_point for V would be
-  // provably useless (no use of V or any of its existing versions is dominated
-  // by insert_point).  Fix for bug #18: now also checks existing versions.
   bool isNotNecessary(const Instruction *insert_point, const Value *V) const;
 
   /*
    * Renaming function.
-   * Called after the creation of new variables (split function).
-   * Fix for bug #5: starts from the function entry block so that all uses
-   * reachable from the entry are visited, not just those in the subtree
-   * rooted at V's defining block.
    */
   void rename_initial(Instruction *V);
 
-  /*
-   * Passes through all instructions in BB to update uses of the
-   * variable V to its most recent definition, as well as registering
-   * new definitions when it takes place.
-   * Fix for bug #6: stack depth is saved/restored around child recursion.
-   */
   void rename(BasicBlock *BB, RenamingStack &stack);
 
   /*
@@ -140,12 +126,6 @@ struct SSIfy : public FunctionPass {
   /*
    * Renames uses of the variable V in the instruction inst to its last
    * definition according to the stack of definitions.
-   *
-   * Fix for bug #7: uses a read-only scan of the stack instead of
-   * destructively popping entries.
-   *
-   * from stands for pointer to the predecessor block. It is used when renaming
-   * variables inside a SSI_phi to tell which incoming value should be renamed.
    */
   void set_use(RenamingStack &stack, Instruction *inst,
                BasicBlock *from = nullptr);
@@ -157,11 +137,6 @@ struct SSIfy : public FunctionPass {
    */
   void clean();
 
-  /*
-   * These functions check whether an instruction is of the custom types that
-   * we create in this pass.
-   * Fix for bug #2: checks the side-table sets, not instruction names.
-   */
   bool is_SSIphi(const Instruction *I) const;
   bool is_SSIsigma(const Instruction *I) const;
   bool is_SSIcopy(const Instruction *I) const;
@@ -174,17 +149,15 @@ struct SSIfy : public FunctionPass {
   bool is_actual(const Instruction *I) const;
 
   // For a given BasicBlock, return its iterated dominance frontier as a set.
-  // Fix for bug #3: guards against missing entries in DFmap.
   SmallPtrSet<BasicBlock *, 8> get_iterated_df(BasicBlock *BB) const;
 
   // For a given BasicBlock, return its iterated post-dominance frontier as a
-  // set.  Fix for bug #3: guards against missing entries in PDFmap.
+  // set.  
   SmallPtrSet<BasicBlock *, 8> get_iterated_pdf(BasicBlock *BB) const;
 
   /*
    * Creates a topological sorting of instructions in to_be_erased,
    * based on relations from this->versions.
-   * Fix for bug #8: uses a proper three-colour DFS with cycle detection.
    */
   SmallVector<Instruction *, 8>
   get_topsort_versions(const SmallPtrSet<Instruction *, 16> &to_be_erased) const;
@@ -292,12 +265,6 @@ public:
   bool hasEdge(Value *from, Value *to);
 };
 
-/// PostDominanceFrontier Class - Concrete subclass of DominanceFrontier that is
-/// used to compute the post-dominance frontier.
-///
-/// Fix for bug #4: calculate_frontiers now correctly populates Roots and
-/// recurses through the entire post-dominator tree so that the frontier map
-/// is fully built before any query is made.
 struct PostDominanceFrontier {
   static char ID;
 
@@ -401,8 +368,6 @@ public:
     return false;
   }
 
-  // Fix for bug #4: properly populate Roots and recurse through the full
-  // post-dominator tree so that every block's frontier is computed.
   bool calculate_frontiers(PostDominatorTree *PDT) {
     Frontiers.clear();
     Roots.clear();
@@ -437,9 +402,6 @@ private:
   // Public entry point: dispatches to calculateVirtualRoot or calculateNode.
   const DomSetType &calculate(const PostDominatorTree &DT,
                                const DomTreeNode *Node);
-
-  // Fix for bug G: split into two helpers to avoid returning a reference to
-  // a shared mutable static object for the virtual-root case.
 
   // Handles the virtual root (null block): recurses into real children.
   void calculateVirtualRoot(const PostDominatorTree &DT,

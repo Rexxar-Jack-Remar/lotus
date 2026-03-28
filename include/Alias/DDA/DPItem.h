@@ -105,11 +105,6 @@ public:
 
 /// Flow-sensitive DP item: (current node ID, current SVFG location).
 ///
-/// operator< and operator== compare both `cur` and `curloc` so that two items
-/// at the same variable but different program points are treated as distinct.
-/// This is the fix for Bug 7: the base DPItem only compared `cur`, which would
-/// cause std::set/std::map to silently drop the second of two items that share
-/// the same cur but have different curloc values.
 template <class LocCond> class StmtDPItem : public DPItem {
 protected:
   const LocCond *curloc;

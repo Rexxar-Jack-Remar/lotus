@@ -204,8 +204,6 @@ Transition &Transition::operator=(const Transition &transition) {
 }
 
 bool Transition::operator<(const Transition &transition) const {
-  // Bug fix: must compare both source and target so that transitions with the
-  // same target but different sources are not treated as equal in std::set.
   if (source_ == transition.source_)
     return target_ < transition.target_;
   return source_ < transition.source_;

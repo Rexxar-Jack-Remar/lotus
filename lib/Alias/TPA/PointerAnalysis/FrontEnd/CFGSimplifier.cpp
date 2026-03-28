@@ -182,13 +182,6 @@ void CFGSimplifier::adjustDefUseChain(
       for (auto *useNode : node->uses())
         defNode->insertDefUseEdge(useNode);
     }
-    // Bug fix: when def_size() == 0, the redundant node has no definition
-    // driving it (e.g., it was assigned null/universal). In this case we
-    // cannot rewire the def-use edges to a parent def. The use nodes that
-    // depended on this redundant node will lose their def-use connection.
-    // To avoid leaving them completely disconnected (which would cause
-    // premature fixpoints), we connect them to the CFG entry node, which
-    // acts as the universal definition root for constants and externals.
     else if (node->use_size() > 0u) {
       auto *entryNode = cfg.getEntryNode();
       for (auto *useNode : node->uses())

@@ -90,10 +90,6 @@ using namespace analysis;
 static bool hasFunctionPtrParam(Function *F) {
   FunctionType *FTy = F->getFunctionType();
   for (unsigned i = 0, e = FTy->getNumParams(); i < e; ++i) {
-    // Fix Bug 5: getPointerElementType() is deprecated in LLVM 14 with opaque
-    // pointers. Use the function type's parameter type directly via
-    // isFunctionTy() on the pointee, obtained through the function type
-    // attribute rather than pointer element type.
     Type *ParamTy = FTy->getParamType(i);
     if (ParamTy->isPointerTy()) {
       // In opaque-pointer mode we cannot inspect the pointee type.
@@ -144,15 +140,11 @@ class IPDeadStoreElimination : public ModulePass {
       std::size_t seed = 0;
       hashCombine(seed, std::hash<const void *>{}(shadowMemInst));
       hashCombine(seed, std::hash<const void *>{}(storeInstOrGvInit));
-      // Fix Bug 6: include length in the hash so that the same (inst, value)
-      // pair at different chain lengths is treated as a distinct worklist item.
       hashCombine(seed, std::hash<unsigned>{}(length));
       return seed;
     }
 
     bool operator==(const QueueElem &o) const {
-      // Fix Bug 6: include length in equality so shorter paths can re-explore
-      // the same (shadowMemInst, storeInstOrGvInit) pair.
       return (shadowMemInst == o.shadowMemInst &&
               storeInstOrGvInit == o.storeInstOrGvInit && length == o.length);
     }
@@ -181,9 +173,6 @@ class IPDeadStoreElimination : public ModulePass {
   //   false   -> registered as removable candidate
   //   true    -> proven needed (must keep)
   //
-  // Fix Bug 2: use an explicit enum/optional instead of relying on DenseMap's
-  // default bool initialisation (which is false, indistinguishable from
-  // "marked removable").
   enum class StoreState { Removable, Keep };
   DenseMap<Value *, StoreState> m_valueMap;
 
@@ -283,9 +272,6 @@ public:
     }
 
     // --- collect all global initializers
-    // Fix Bug 7: scan all functions for global init markers, not just main's
-    // entry block. Global constructors may be in __attribute__((constructor))
-    // functions or in functions other than main.
     auto collectGlobalInits = [&](Function *F) {
       if (!F || F->isDeclaration()) {
         return;

@@ -1,4 +1,4 @@
-// Bug 17 fix: All function/class definitions and the RegisterPass<> object
+// All function/class definitions and the RegisterPass<> object
 // have been moved to CodeMetrics.cpp. This header now contains only
 // declarations and inline helpers, so it is safe to include from multiple
 // translation units without ODR violations or duplicate-pass-registration

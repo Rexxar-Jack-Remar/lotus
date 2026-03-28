@@ -45,7 +45,7 @@ MemoryManager::MemoryManager(size_t pSize)
 
 // Internal factory for MemoryObjects.
 // Interns the object in `objSet` to ensure pointer uniqueness.
-// Fix #8: Also maintains the blockToObjects index so that
+// Also maintains the blockToObjects index so that
 // getReachableMemoryObjects() can look up objects by block in O(k) time
 // instead of scanning all objects in O(n).
 const MemoryObject *MemoryManager::getMemoryObject(const MemoryBlock *memBlock,
@@ -216,7 +216,7 @@ MemoryManager::getReachablePointerObjects(const MemoryObject *obj,
 // Returns all abstract memory objects that belong to the same MemoryBlock
 // as 'obj' and are currently instantiated in the manager.
 //
-// Fix #8: Use the blockToObjects index (populated in getMemoryObject) to
+// Use the blockToObjects index (populated in getMemoryObject) to
 // look up objects by block in O(k) time instead of scanning all objects in
 // O(n). This is a significant performance improvement for large programs
 // where the total number of memory objects can be in the millions.

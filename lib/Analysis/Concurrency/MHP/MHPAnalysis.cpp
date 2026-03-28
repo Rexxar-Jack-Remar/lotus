@@ -1176,8 +1176,6 @@ void MHPAnalysis::handleCondWait(const Instruction *wait_inst, SyncNode *node) {
 
 void MHPAnalysis::handleCondSignal(const Instruction *signal_inst,
                                    SyncNode *node) {
-  // B2 fix: use getCondVal (not getLockVal) for the condition variable.
-  // getLockVal asserts isTDAcquire||isTDRelease and would crash on a signal.
   const Value *cond = m_thread_api->getCondVal(signal_inst);
   node->setCondValue(cond);
   // Record the signal/broadcast as a region boundary only.
@@ -1274,9 +1272,6 @@ void MHPAnalysis::analyzeLockSets() {
   errs() << "Analyzing Lock Sets...\n";
   m_lockset = std::make_unique<LockSetAnalysis>(m_module);
   m_lockset->setAliasAnalysis(m_alias_analysis.get());
-  // B10 fix: use the module-owned CallGraph (m_call_graph) instead of a
-  // local CG that would be destroyed at the end of this function, leaving
-  // m_lockset with a dangling pointer.
   m_lockset->setCallGraph(m_call_graph.get());
   m_lockset->analyze();
 }

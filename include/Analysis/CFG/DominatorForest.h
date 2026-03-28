@@ -35,7 +35,7 @@ public:
 
   DominatorForest(DominatorForest &DTS, std::set<BasicBlock *> &bbSubset);
 
-  // Bug 10 fix: declare explicit deep-copy constructor and copy-assignment
+  // declare explicit deep-copy constructor and copy-assignment
   // operator. The compiler-generated versions perform a shallow copy of the
   // raw DominatorNode* pointers in `nodes`, causing double-free on
   // destruction. Deep copies clone every node and rebuild the bbNodeMap.
@@ -53,7 +53,7 @@ public:
 
   bool dominates(Instruction *I, Instruction *J) const;
 
-  /// Bug 6 fix: returns false (instead of asserting) when either block is
+  /// returns false (instead of asserting) when either block is
   /// absent from the forest. This is the correct behaviour for subset forests
   /// where blocks outside the subset are simply not present.
   bool dominates(BasicBlock *B1, BasicBlock *B2) const;
@@ -66,7 +66,7 @@ public:
 
   std::set<DominatorNode *> dominates(DominatorNode *node) const;
 
-  /// Bug 7 fix: returns nullptr (instead of asserting) when no common
+  /// returns nullptr (instead of asserting) when no common
   /// dominator exists in the forest (e.g., for subset forests where the true
   /// common dominator was pruned out). Callers must check the return value.
   BasicBlock *findNearestCommonDominator(BasicBlock *B1, BasicBlock *B2) const;

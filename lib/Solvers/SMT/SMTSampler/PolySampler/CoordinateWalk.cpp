@@ -26,8 +26,6 @@ bool coordinate_walk_step(const std::vector<LinearConstraint> &constraints,
   const size_t n = point.size();
   std::uniform_int_distribution<size_t> axis_dist(0, n - 1);
 
-  // Fix B31: try up to min(n, 16) different axes instead of only 2 sign
-  // attempts on a single axis.
   const int max_axis_attempts = static_cast<int>(std::min(n, size_t(16)));
 
   for (int axis_attempt = 0; axis_attempt < max_axis_attempts; ++axis_attempt) {
@@ -65,7 +63,6 @@ bool coordinate_walk_step(const std::vector<LinearConstraint> &constraints,
       if (t_low_ld > t_high_ld)
         continue;
 
-      // Fix B25/B26: safe cast.
       int64_t t_low = 0, t_high = 0;
       if (!WalkUtils::safe_cast_t(t_low_ld, t_low) ||
           !WalkUtils::safe_cast_t(t_high_ld, t_high))

@@ -221,16 +221,6 @@ void SVFGOPT::retargetEdgesOfAInFOut(SVFGNode *node) {
   if (!node || node->getInEdges().empty())
     return;
 
-  // BUG FIX: the old "size() != 1 → return" was too strict for
-  // FormalOutSVFGNode, which can legitimately have one incoming edge per return
-  // statement (multiple returns in a function body).  We now handle the general
-  // case by performing the cross-product retargeting for all (inEdge, outEdge)
-  // pairs, which is the same algorithm used by retargetEdgesOfAOutFIn.
-  //
-  // For the single-incoming-edge shortcut (the common case for
-  // ActualInSVFGNode), we still take the fast path to record the def-node
-  // mapping.
-
   if (node->getInEdges().size() == 1) {
     // Fast path: single in-edge (typical for ActualIn nodes).
     auto *inEdge = node->getInEdges().front();

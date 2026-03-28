@@ -44,7 +44,7 @@ DominatorForest::DominatorForest(std::set<DTAliases::Node *> nodeSubset)
 DominatorForest::DominatorForest(DominatorForest &DTS,
                                  std::set<BasicBlock *> &bbSubset)
     : DominatorForest{filterNodes(DTS.nodes, bbSubset)} {
-  // Fix #6: propagate the post flag from the source forest so that
+  // propagate the post flag from the source forest so that
   // dominates(Instruction*, Instruction*) uses the correct direction
   // for subset forests built from a PostDominatorTree.
   this->post = DTS.post;
@@ -59,7 +59,7 @@ DominatorForest::DominatorForest(std::set<DominatorNode *> nodeSubset)
 
 DominatorForest::~DominatorForest() { destroyNodes(); }
 
-// Bug 10 fix: destroyNodes() centralises the cleanup logic used by both the
+// destroyNodes() centralises the cleanup logic used by both the
 // destructor and the copy-assignment operator.
 void DominatorForest::destroyNodes() {
   for (auto *node : nodes)
@@ -68,7 +68,7 @@ void DominatorForest::destroyNodes() {
   bbNodeMap.clear();
 }
 
-// Bug 10 fix: deep-copy helper.  Clones every DominatorNode, rebuilds the
+// Dep-copy helper.  Clones every DominatorNode, rebuilds the
 // bbNodeMap, and re-wires parent/child pointers so the copy is fully
 // independent of the source.
 void DominatorForest::copyFrom(const DominatorForest &other) {
@@ -101,13 +101,13 @@ void DominatorForest::copyFrom(const DominatorForest &other) {
   }
 }
 
-// Bug 10 fix: copy constructor — performs a deep copy via copyFrom().
+// performs a deep copy via copyFrom().
 DominatorForest::DominatorForest(const DominatorForest &other)
     : nodes{}, bbNodeMap{}, post{false} {
   copyFrom(other);
 }
 
-// Bug 10 fix: copy-assignment operator — destroy existing nodes, then deep
+// copy-assignment operator — destroy existing nodes, then deep
 // copy.
 DominatorForest &DominatorForest::operator=(const DominatorForest &other) {
   if (this != &other) {
@@ -259,7 +259,7 @@ bool DominatorForest::dominates(Instruction *I, Instruction *J) const {
    */
   if (B1 == B2) {
 
-    // Fix #5: dominates(I, I) must return true (reflexivity).
+    // dominates(I, I) must return true (reflexivity).
     // The old code advanced firstOne before checking, so it never matched
     // when I == J, returning false — violating the standard dominance
     // convention.  Start the scan at I itself (not I->getNextNode()).
@@ -291,7 +291,7 @@ bool DominatorForest::dominates(Instruction *I, Instruction *J) const {
 bool DominatorForest::dominates(BasicBlock *B1, BasicBlock *B2) const {
   auto *nodeB1 = this->getNode(B1);
   auto *nodeB2 = this->getNode(B2);
-  // Bug 6 fix: when either block is absent from the forest (e.g., because this
+  // when either block is absent from the forest (e.g., because this
   // is a subset forest and the block was pruned out), return false instead of
   // asserting. A missing block cannot dominate or be dominated within this
   // forest, so false is the correct conservative answer.
@@ -440,7 +440,7 @@ BasicBlock *DominatorForest::findNearestCommonDominator(BasicBlock *B1,
   assert(B1 != nullptr);
   assert(B2 != nullptr);
 
-  // Bug 7 fix: getNode() returns nullptr for blocks absent from the forest
+  // getNode() returns nullptr for blocks absent from the forest
   // (e.g., subset forests where the true common dominator was pruned out).
   // Return nullptr instead of asserting / dereferencing a null pointer so
   // callers can handle the "no common dominator in this forest" case.

@@ -140,7 +140,7 @@ public:
 };
 
 void PtrLayoutMapPropagator::propagatePtrLayoutMap() {
-  // Fix #5: The cast map records edges srcType -> {dstType, ...}, meaning
+  // The cast map records edges srcType -> {dstType, ...}, meaning
   // "a pointer to srcType is cast to a pointer to dstType". When such a cast
   // exists, code that accesses memory through dstType may actually be reading
   // srcType memory (and vice versa). To be sound we must propagate pointer

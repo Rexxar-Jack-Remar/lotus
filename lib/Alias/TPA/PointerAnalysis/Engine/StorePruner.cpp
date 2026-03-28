@@ -92,15 +92,7 @@ void StorePruner::findAllReachableObjects(const Store &store,
       // transitive)
       reachableSet.insert(obj);
 
-      // 1. Trace structural reachability:
-      //    Objects that are physically part of 'obj' (e.g., fields of a struct)
-      // Bug fix: the original code used 'break' when an already-explored object
-      // was encountered, which incorrectly stopped processing the remaining
-      // fields of the struct. For example, if field[1] was already explored but
-      // field[2] was not, field[2] would be silently skipped, causing the
-      // pruned store to miss reachable objects and producing unsound results.
-      // Fix: use 'continue' to skip already-explored objects but keep
-      // processing.
+      // 1. Trace structural reachability
       auto offsetObjs = memManager.getReachablePointerObjects(obj, false);
       for (const auto *oObj : offsetObjs)
         if (!exploredSet.count(oObj))

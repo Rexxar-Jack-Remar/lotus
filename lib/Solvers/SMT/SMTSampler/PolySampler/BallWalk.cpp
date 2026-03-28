@@ -25,12 +25,6 @@ bool ball_walk_step(const std::vector<LinearConstraint> &constraints,
     return false;
 
   const size_t n = point.size();
-
-  // Fix B28: compute an adaptive step size per dimension.
-  // Estimate the range of each coordinate from the constraint bounds.
-  // For each axis j, find the tightest upper and lower bounds implied by
-  // constraints whose coefficient vector is a unit vector along j.
-  // Fall back to a default of 1 if no axis-aligned constraints exist.
   std::vector<int64_t> step_size(n, 1);
   {
     std::vector<long double> lo(n, -1e18L), hi(n, 1e18L);
@@ -59,8 +53,6 @@ bool ball_walk_step(const std::vector<LinearConstraint> &constraints,
       if (std::isfinite(lo[j]) && std::isfinite(hi[j]) && hi[j] > lo[j]) {
         long double range = hi[j] - lo[j];
         // Use ~0.1% of the range as the step size, minimum 1.
-        // Fix PS-5: range / 1000 can exceed INT64_MAX for very large ranges
-        // (e.g., 64-bit variables).  Clamp to INT64_MAX before casting.
         long double raw_step = std::max(1.0L, range / 1000.0L);
         constexpr long double kInt64Max =
             static_cast<long double>(std::numeric_limits<int64_t>::max());

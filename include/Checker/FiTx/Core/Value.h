@@ -273,8 +273,6 @@ private:
 /// Singleton registry of all framework values (for stable IDs / serialization).
 class ManagedValues {
 public:
-  // Bug fix: return by reference so addValue() mutations are not silently
-  // discarded on a temporary copy. Previously returned by value.
   static ManagedValues &GetInstance();
   constexpr static size_t kReserveSize = 10000;
 

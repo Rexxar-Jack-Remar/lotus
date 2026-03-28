@@ -253,10 +253,6 @@ private:
     OUT = Problem.allTop();
   }
 
-  // Bug B fix: computeGEN/computeKILL are not used by computeOUT (which calls
-  // normalFlow directly).  Setting them to allTop() was misleading and
-  // wasteful. They are left as no-ops; the engine still calls them but the
-  // results are never read by our computeOUT.
   void computeGEN(llvm::Instruction * /*Inst*/, ResultTy * /*DF*/) {}
   void computeKILL(llvm::Instruction * /*Inst*/, ResultTy * /*DF*/) {}
 
@@ -265,10 +261,6 @@ private:
                  mono_container_t &IN, ResultTy *DF) {
     mono_container_t Incoming;
 
-    // Bug A fix: use DF->OUT(PredInst, PredCtx) — the already-computed OUT of
-    // the predecessor — rather than re-applying normalFlow to PredIn.
-    // computeOUT applies normalFlow to produce OUT[Inst]; applying it again
-    // here to produce OUT[PredInst] would double-apply the transfer function.
     const auto &PredOut = DF->OUT(PredInst, PredCtx);
 
     if (Problem.direction() ==
@@ -380,22 +372,9 @@ private:
       const auto Callees = getCalleesForCall(PredInst);
       Incoming = Problem.callToRetFlow(PredInst, Inst, Callees, PredOut);
     } else {
-      // Normal intra-procedural edge: facts flow directly from OUT[Pred].
-      // Bug A fix: do NOT call normalFlow here — that is computeOUT's job.
       Incoming = PredOut;
     }
 
-    // Bug C fix: merge unconditionally rather than using empty() as a
-    // "first predecessor" sentinel.  An empty container is a valid lattice
-    // value (bottom for may-analyses) and must not be treated as uninitialised.
-    //
-    // The engine calls initializeIN before the predecessor loop, so IN already
-    // holds the correct identity element for the merge:
-    //   - May-analysis (union):         initializeIN → empty set (bottom)
-    //                                   merge(∅, Incoming) = Incoming  ✓
-    //   - Must-analysis (intersection): initializeIN → universal set (top)
-    //                                   merge(⊤, Incoming) = Incoming  ✓
-    // Subsequent predecessors are merged in correctly by the same equation.
     IN = Problem.merge(IN, Incoming);
   }
 

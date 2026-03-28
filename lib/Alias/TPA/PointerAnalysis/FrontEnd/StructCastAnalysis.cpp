@@ -86,16 +86,7 @@ CastMap CastMapBuilder::collectAllCasts() {
 // Computes transitive closure: if T1 casts to T2, and T2 casts to T3, then T1
 // casts to T3.
 //
-// Bug fix: the previous implementation used a naive fixed-point loop that
-// iterated over all mappings on every pass, giving O(n³) complexity in the
-// number of types. For large programs with many struct types and casts (e.g.,
-// the Linux kernel), this was extremely slow.
-//
-// Replacement: a worklist-based BFS that processes each newly-added edge
-// exactly once. For each source type S, we maintain a worklist of types
-// whose outgoing edges have not yet been propagated into S's reachable set.
-// Each edge (S -> T) is processed at most once per source, giving O(n²) in
-// the worst case (bounded by the number of distinct cast pairs).
+
 void CastMapBuilder::computeTransitiveClosure(CastMap &castMap) {
   // For each source type, run a BFS over the cast graph to find all
   // transitively reachable types.

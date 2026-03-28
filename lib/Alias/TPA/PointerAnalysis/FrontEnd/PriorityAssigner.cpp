@@ -10,7 +10,7 @@
 // information flows forward in a single pass rather than requiring many
 // iterations.
 //
-// Fix #6: The previous implementation assigned post-order labels (leaf nodes
+// The previous implementation assigned post-order labels (leaf nodes
 // get low numbers, entry gets a high number). If the worklist is a min-heap
 // (processes lowest priority first), this is backwards for a forward analysis:
 // the entry node would be processed last, requiring O(n) extra iterations to

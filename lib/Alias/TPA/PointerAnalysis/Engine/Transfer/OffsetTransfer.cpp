@@ -71,11 +71,6 @@ bool TransferFunction::copyWithOffset(const Pointer *dst, const Pointer *src,
 
   PtsSet resSet = PtsSet::mergeAll(srcPtsSets);
 
-  // Bug fix: do NOT promote an empty result to Universal. An empty result means
-  // the source set contained only null objects (GEP on null is UB) or the
-  // offset was out of bounds. Returning Universal here caused spurious aliasing
-  // throughout the analysis. Instead, return false (no environment change) so
-  // the worklist does not propagate stale information.
   if (resSet.empty())
     return false;
 

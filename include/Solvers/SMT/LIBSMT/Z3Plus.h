@@ -45,8 +45,6 @@
 #include <set>
 #include <vector>
 
-// Fix CC-1: do NOT place "using namespace std" or "using namespace z3" here.
-// Each .cpp file that needs these namespaces should declare them locally.
 
 inline bool get_expr_vars(z3::expr &exp, z3::expr_vector &vars) {
   /*
@@ -118,10 +116,6 @@ inline void get_k_models(z3::expr &exp, int k) {
   /*
    * Compute k models of exp.
    *
-   * Fix CC-3: use the string representation of the numeral to build the
-   * blocking clause so that bit-vectors of any width are handled correctly.
-   * The old code used get_numeral_int() which throws / truncates for BVs
-   * wider than 31 bits.
    */
   z3::context &ctx = exp.ctx();
   z3::solver solver(ctx);
@@ -136,7 +130,6 @@ inline void get_k_models(z3::expr &exp, int k) {
       z3::expr val = m.get_const_interp(z3Variable);
       if (val.get_sort().is_bv()) {
         unsigned bvSize = val.get_sort().bv_size();
-        // Fix CC-3: use the string numeral to avoid int truncation.
         std::string svalue =
             Z3_get_numeral_string(ctx, static_cast<Z3_ast>(val));
         args.push_back(ctx.bv_const(varName.c_str(), bvSize) !=
@@ -155,9 +148,9 @@ inline std::pair<int, int> get_abstract_interval(z3::expr &pre_cond,
   /*
    * Compute the interval abstraction of pre_cond for query.
    *
-   * Fix CC-2: after maximize(query), the optimal value is read with upper();
-   *           after minimize(query), the optimal value is read with lower().
-   *           The original code had these swapped.
+   *  after maximize(query), the optimal value is read with upper();
+   *   after minimize(query), the optimal value is read with lower().
+   *  The original code had these swapped.
    */
   z3::context &c = pre_cond.ctx();
   std::pair<int, int> ret(INT_MIN, INT_MAX);
@@ -177,7 +170,7 @@ inline std::pair<int, int> get_abstract_interval(z3::expr &pre_cond,
 
   try {
     if (opt_max.check() == z3::sat) {
-      // Fix CC-2: upper() gives the optimal maximum value.
+      // upper() gives the optimal maximum value.
       ret.second = opt_max.upper(h_max).get_numeral_int();
     }
   } catch (z3::exception &ex) {
@@ -185,7 +178,7 @@ inline std::pair<int, int> get_abstract_interval(z3::expr &pre_cond,
   }
   try {
     if (opt_min.check() == z3::sat) {
-      // Fix CC-2: lower() gives the optimal minimum value.
+      // lower() gives the optimal minimum value.
       ret.first = opt_min.lower(h_min).get_numeral_int();
     }
   } catch (z3::exception &ex) {
@@ -200,7 +193,7 @@ inline void get_abstract_interval_as_expr(z3::expr &pre_cond, z3::expr &query,
    * Compute the interval abstraction of pre_cond for query, returning
    * Z3 expressions for the lower and upper bounds.
    *
-   * Fix CC-2: lower() for the minimum result, upper() for the maximum result.
+   * lower() for the minimum result, upper() for the maximum result.
    */
   z3::context &Ctx = pre_cond.ctx();
   z3::params Param(Ctx);
@@ -220,7 +213,7 @@ inline void get_abstract_interval_as_expr(z3::expr &pre_cond, z3::expr &query,
 
   try {
     if (LowerFinder.check() == z3::sat) {
-      // Fix CC-2: lower() gives the optimal minimum value.
+      //  lower() gives the optimal minimum value.
       res.push_back(LowerFinder.lower(LowerGoal));
     }
   } catch (z3::exception &) {
@@ -228,7 +221,6 @@ inline void get_abstract_interval_as_expr(z3::expr &pre_cond, z3::expr &query,
   }
   try {
     if (UpperFinder.check() == z3::sat) {
-      // Fix CC-2: upper() gives the optimal maximum value.
       res.push_back(UpperFinder.upper(UpperGoal));
     }
   } catch (z3::exception &) {

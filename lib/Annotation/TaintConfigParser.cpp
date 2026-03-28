@@ -69,11 +69,6 @@ void TaintConfigParser::parse_line(const std::string &line,
   if (directive == "SOURCE") {
     config.sources.insert(func_name);
 
-    // Parse taint specifications: SOURCE func_name Arg0 D T
-    // Format: <location> <access_mode> <taint_type>
-    // Fix: the loop guard was "i + 2 < tokens.size()" which skips the last
-    // complete triplet when exactly 3 tokens remain (i+2 == size-1).
-    // Correct condition: i + 3 <= tokens.size()  (i.e. at least 3 tokens left).
     for (size_t i = 2; i + 3 <= tokens.size(); i += 3) {
       TaintSpec spec;
       if (parse_taint_spec(tokens, i, spec)) {

@@ -243,18 +243,6 @@ protected:
     NodeIndex nodeIdx = node->getNodeIndex();
     NodeIndex repIdx = repNode->getNodeIndex();
     mergeTarget[nodeIdx] = getMergeTargetRep(repIdx);
-
-    // B4 Fix: propagate the indirect-node property from the cycle member to
-    // the representative.  The previous code guarded the insert with
-    // `repIdx < getNumNodes()`, which silently skipped the case where repIdx
-    // itself is a REF/ADR node (index >= getNumNodes()).  A REF/ADR node that
-    // is the representative of a cycle must also be marked indirect so that
-    // HVN/HU assign it a unique label rather than merging it with unrelated
-    // nodes.
-    //
-    // Condition: mark repIdx indirect if the cycle member (nodeIdx) is
-    // indirect (either explicitly in indirectNodes, or because it is a
-    // REF/ADR node).  We no longer restrict this to VAR-node representatives.
     if (indirectNodes.count(nodeIdx) || nodeIdx >= nodeFactory.getNumNodes())
       indirectNodes.insert(repIdx);
 

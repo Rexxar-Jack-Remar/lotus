@@ -224,11 +224,6 @@ bool Analyzer::collectPossibleReturnValues(
      */
     /* } */
   } else if (auto *PHI = llvm::dyn_cast<llvm::PHINode>(V)) {
-    // Bug fix: PHI nodes were completely ignored, causing functions that return
-    // via a PHI (the common case after if/else with different return codes) to
-    // have no return codes recorded in their summary, breaking
-    // return-code-aware propagation. Recurse into each incoming value of the
-    // PHI.
     for (unsigned i = 0; i < PHI->getNumIncomingValues(); i++) {
       llvm::Value *incoming = PHI->getIncomingValue(i);
       if (incoming != V)

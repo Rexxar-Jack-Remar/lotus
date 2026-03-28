@@ -39,7 +39,7 @@
  * @tparam GraphType  The concrete graph type; must have an
  *                    `AndersGraphTraits<GraphType>` specialisation.
  *
- * ## B1 Fix: Iterative DFS to Avoid Stack Overflow
+ * ## Iterative DFS to Avoid Stack Overflow
  *
  * The original recursive `visit()` could overflow the native call stack on
  * large constraint graphs (deep chains of copy edges).  The implementation
@@ -98,12 +98,6 @@ private:
   /// Monotonically increasing DFS timestamp counter.
   unsigned timestamp;
 
-  // -----------------------------------------------------------------------
-  // B1 Fix: iterative DFS using an explicit worklist.
-  //
-  // Each WorkItem stores the node being visited and the iterator pointing to
-  // the next child to process.  When childIt == childEnd all children have
-  // been processed and we perform the post-order SCC-root check.
   // -----------------------------------------------------------------------
   struct WorkItem {
     NodeType *node;
@@ -213,12 +207,6 @@ protected:
   // Running the cycle detection algorithm starting from a single node.
   // Used when walking the entire graph is not desirable.
   //
-  // B7 Fix: the original implementation did not reset dfsNum, entryTime, or
-  // inComponent between successive runOnNode calls.  On the second and later
-  // calls, nodes visited in a prior call were already present in dfsNum and
-  // were therefore skipped, causing cycles that span multiple candidate pairs
-  // to be missed.  Fix: clear all per-run bookkeeping before each call so
-  // that every runOnNode invocation starts with a clean slate.
   void runOnNode(NodeIndex node) {
     assert(sccStack.empty() && "sccStack is not empty before cycle detection!");
 

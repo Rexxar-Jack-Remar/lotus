@@ -311,8 +311,6 @@ void FuncAnalysis::runForwardQualifierAnalysis() {
           init = true;
         } else {
           for (unsigned i = 0; i < sumObjSize; i++) {
-            // Tobe Fix: there should be a way to avoid this: function
-            // get_ringbuf
             if (obj - sumObjOffset + i >= nodeFactory.getNumNodes())
               break;
             // OP<<"obj - sumObjOffset + i = "<<obj - sumObjOffset + i<<"\n";

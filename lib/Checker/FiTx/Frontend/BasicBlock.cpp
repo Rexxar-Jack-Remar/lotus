@@ -184,7 +184,6 @@ BasicBlockInformation::ValueStatesForSuccessor(
     auto operand = std::find_if(
         compare_inst->Operands().begin(), compare_inst->Operands().end(),
         [](auto operand) { return fitx::shared_isa<CallInst>(operand); });
-    // Bug fix: guard against end() before dereferencing.
     if (operand == compare_inst->Operands().end())
       return states;
     call_inst = fitx::shared_dyn_cast<CallInst>(*operand);
@@ -229,7 +228,6 @@ BasicBlockInformation::ReturnCodeForSuccessor(
         compare_inst->Operands().begin(), compare_inst->Operands().end(),
         [](auto operand) { return fitx::shared_isa<CallInst>(operand); });
 
-    // Bug fix: guard against end() before dereferencing.
     if (operand != compare_inst->Operands().end())
       return_values.erase(*operand);
   }
@@ -651,7 +649,6 @@ void BasicBlockInformation::removeReturnvalue(int value) {
           return value == const_ret->getConstValue();
         return false;
       });
-  // Bug fix: guard against end() before dereferencing.
   if (found_value != return_values_.end())
     return_values_.erase(found_value);
 }

@@ -79,18 +79,6 @@ bool Andersen::addConstraintForExternalLibrary(
         handled = true;
       }
     } else if (allocInfo->ptrOutArgIndex >= 0) {
-      // B5 Fix: posix_memalign-style allocators write the address of the new
-      // object through a pointer-to-pointer out-argument.  The correct
-      // modelling is:
-      //   *outArg = &newObj   (i.e. STORE outArg, &newObj)
-      // which requires a temporary value node to hold &newObj, then a STORE
-      // of that temporary through outArg.  The previous code emitted
-      //   STORE outIndex, objIndex
-      // which is wrong: objIndex is an *object* node, not a value node, so
-      // the STORE would propagate the object's identity rather than its
-      // address.  The correct sequence is:
-      //   tmpPtr = &newObj   (ADDR_OF tmpPtr, objIndex)
-      //   *outArg = tmpPtr   (STORE outIndex, tmpPtr)
       NodeIndex outIndex = nodeFactory.getValueNodeFor(
           cs->getArgOperand(allocInfo->ptrOutArgIndex), callerCtx);
       assert(outIndex != AndersNodeFactory::InvalidIndex &&

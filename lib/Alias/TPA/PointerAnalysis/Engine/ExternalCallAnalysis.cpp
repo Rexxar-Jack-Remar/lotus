@@ -59,7 +59,7 @@ static const Value *getArgument(const CallCFGNode &callNode,
 // Looks at the uses of the call instruction (specifically BitCasts) to infer
 // the intended type.
 //
-// Bug fix (2i): the previous implementation only examined *direct* users of
+// Bug fix: the previous implementation only examined *direct* users of
 // the call instruction. A common pattern after optimization passes is:
 //
 //   %p = call i8* @malloc(...)
@@ -142,12 +142,6 @@ static bool isSingleAlloc(const TypeLayout *typeLayout,
   if (const auto *cInt = dyn_cast<ConstantInt>(sizeVal)) {
     auto size = cInt->getZExtValue();
     auto typeSize = typeLayout->getSize();
-    // Bug fix: replaced assert with a graceful check. If the allocation size is
-    // not a multiple of the type size (e.g., due to alignment padding or
-    // programmer computing sizeof(T)+extra), the assert would crash the
-    // analysis. Instead, treat such cases as array/unknown allocations by
-    // returning false, which causes the caller to fall back to byte-array
-    // layout.
     if (typeSize == 0 || size % typeSize != 0)
       return false;
     return size == typeSize;
@@ -333,12 +327,6 @@ void TransferFunction::evalExternalCopyDest(const context::Context *ctx,
         ctx, getArgument(callNode, dest.getPosition()));
     switch (dest.getType()) {
     case CopyDest::DestType::Value: {
-      // Destination is a pointer variable (e.g., p = ...).
-      // Bug fix: always propagate mem-level successors regardless of whether
-      // the env changed. Previously, if envChanged was false (no new pts-to
-      // info for the destination), neither top-level nor mem-level successors
-      // were added for this branch, silently dropping the call node's
-      // successors. The store is unchanged here, so we pass *localState.
       envChanged = globalState.getEnv().weakUpdate(dstPtr, srcSet);
       addMemLevelSuccessors(ProgramPoint(ctx, &callNode), *localState,
                             evalResult);
@@ -391,12 +379,6 @@ void TransferFunction::evalExternalCopy(const context::Context *ctx,
     auto storeChanged =
         evalMemcpy(ctx, callNode, store, dest.getPosition(), src.getPosition());
 
-    // Fix #4: Always propagate mem-level successors regardless of whether
-    // evalMemcpy reported a store change. If storeChanged is false (e.g.,
-    // because the source/dest sets are not yet resolved), we still need to
-    // propagate the current store so that the call node's successors are not
-    // silently dropped. When the src/dst sets are resolved later, the call
-    // node will be re-evaluated and the store will be updated then.
     addMemLevelSuccessors(ProgramPoint(ctx, &callNode),
                           storeChanged ? store : *localState, evalResult);
   } else {
@@ -457,14 +439,6 @@ void TransferFunction::evalExternalCall(const context::Context *ctx,
   const auto *summary =
       globalState.getExternalPointerTable().lookup(fc.getFunction()->getName());
   if (summary == nullptr) {
-    // Bug fix: unannotated external functions must be treated conservatively.
-    // Previously they were treated as no-ops, which is unsound: real library
-    // functions (e.g. qsort, pthread_create, custom allocators) can modify
-    // memory and cause pointer arguments to escape.
-    //
-    // Conservative model: for each pointer argument, assume the function may
-    // store Universal into any memory reachable from that argument, and if the
-    // call has a pointer-typed return value, assume it may return Universal.
     auto &ptrManager = globalState.getPointerManager();
     auto &env = globalState.getEnv();
     const auto *uObj = MemoryManager::getUniversalObject();

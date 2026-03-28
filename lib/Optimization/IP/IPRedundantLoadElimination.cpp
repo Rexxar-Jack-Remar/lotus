@@ -49,12 +49,7 @@ static cl::opt<bool>
 //         else: seen[key] = L
 //       elif I mayWriteToMemory (but is NOT a shadow.mem.load): seen.clear()
 //
-// Fix Bug 10: the original code called resetSeen() on every
-// mayReadOrWriteMemory() instruction, which includes shadow.mem.load calls
-// themselves — clearing the cache just before checking for a redundant load.
-// The fix is to only invalidate the cache on instructions that *write* to
-// memory (and are not shadow.mem markers), since reads cannot change the
-// memory state that the TLVar encodes.
+
 
 /// @brief Inter-procedural Redundant Load Elimination pass
 ///
@@ -92,12 +87,6 @@ public:
         for (auto It = BB.begin(), Et = BB.end(); It != Et;) {
           Instruction *I = &*It;
 
-          // Fix Bug 10: only invalidate the cache on instructions that write
-          // to memory. Pure reads (including shadow.mem.load) do not change
-          // the memory state encoded by TLVars, so they should not clear the
-          // cache. Shadow.mem calls are intrinsics that report mayReadOrWrite,
-          // but they are markers — not real memory operations — so we skip
-          // them for invalidation purposes.
           if (I->mayWriteToMemory()) {
             // If this is a shadow.mem marker, do not invalidate — it is a
             // bookkeeping call, not a real write.
@@ -146,11 +135,6 @@ public:
           LoadInst *DomLoad = Found->second;
           LI->replaceAllUsesWith(DomLoad);
 
-          // Fix Bug 11: save a stable iterator before erasing instructions.
-          // After erasing LI (NextIt), NextIt is dangling — do not use
-          // std::prev(NextIt). Instead, advance It past CB before any erasure,
-          // then erase LI and optionally CB.
-          //
           // Current state: It -> CB, NextIt -> LI
           // We want to continue from the instruction after LI.
           auto AfterLI = std::next(NextIt);
@@ -180,10 +164,6 @@ public:
   /// @brief Specify analysis dependencies and preserves
   /// @param AU Analysis usage information to populate
   void getAnalysisUsage(AnalysisUsage &AU) const override {
-    // Fix Bug 12: do NOT call setPreservesCFG() — this pass erases load
-    // instructions, which invalidates analyses that track instruction pointers
-    // (e.g., MemorySSA, DominatorTree). Declare no preserved analyses so the
-    // pass manager invalidates them correctly.
     (void)AU;
   }
 

@@ -17,8 +17,6 @@ const std::string SSIfy::copname = "SSIfy_copy";
 
 cl::opt<bool> Verbose("v", cl::desc("Print details"));
 
-// Fix for bug #10: make -set optional with a sensible default so the pass can
-// be used programmatically without requiring a command-line flag.
 static cl::opt<std::string>
     ProgramPointOptions("set",
                         cl::desc("Starting program points (4-char string, "
@@ -35,13 +33,11 @@ bool SSIfy::runOnFunction(Function &F) {
       &getAnalysis<DominanceFrontierWrapperPass>().getDominanceFrontier();
   this->PDFmap = new PostDominanceFrontier(this->PDTmap);
 
-  // Fix for bug #11: validate the length of the -set string before indexing.
   const std::string flags_str = std::string(ProgramPointOptions.c_str());
   for (int i = 0; i < 4; ++i) {
     this->flags[i] = (i < (int)flags_str.size()) && (flags_str[i] == '1');
   }
 
-  // Clear per-function side-table sets (fix for bug #2).
   this->ssiPhiSet.clear();
   this->ssiSigmaSet.clear();
   this->ssiCopySet.clear();

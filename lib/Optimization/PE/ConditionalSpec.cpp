@@ -2599,9 +2599,6 @@ bool IntegrationAttempt::subblockEndsWithSpecialTest(
   return instSpecialTest(idx, instIdx);
 }
 
-// Fix the cloned, unspecialised version of block 'idx'. On entry the
-// instructions are straightforward clones of the original program block; we
-// need to introduce PHI nodes to account for spec-to-unspec edges.
 void IntegrationAttempt::populateFailedBlock(uint32_t idx) {}
 
 void InlineAttempt::populateFailedBlock(uint32_t idx) {

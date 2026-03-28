@@ -192,13 +192,6 @@ public:
       Stats.flow_function_calls++;
       auto NewOut = Problem.normalFlow(Node, AnalysisIn[Node]);
 
-      // L1 fix: widening.  If this node has been re-processed more than
-      // WideningThreshold times, apply the problem's widen() operator instead
-      // of using NewOut directly.  This guarantees termination for analyses
-      // over infinite-height lattices (e.g., interval analysis) as long as
-      // the widen() implementation satisfies the ascending-chain condition.
-      // For analyses over finite-height lattices widen() defaults to returning
-      // NewOut unchanged, so there is no behavioural difference.
       if (WideningThreshold > 0u) {
         unsigned &Count = NodeIterCount[Node];
         ++Count;
@@ -392,13 +385,7 @@ private:
   mono_container_t MissingResultFallback{};
   DebugConfig DebugCfg;
   SolverStatistics Stats;
-  /// L1 fix: per-node re-processing counter used by the widening logic.
-  /// Counts how many times each node has been dequeued and processed.
-  /// Reset to zero at the start of each solve() call (implicitly, since
-  /// NodeIterCount is default-constructed empty and populated on first use).
   std::unordered_map<n_t, unsigned> NodeIterCount;
-  /// L1 fix: widening threshold.  0 = disabled (default).
-  /// When a node's NodeIterCount exceeds this value, widen() is called.
   unsigned WideningThreshold = 0u;
 };
 

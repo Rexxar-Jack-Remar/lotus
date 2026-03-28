@@ -69,7 +69,6 @@ bool constraint_walk_step(const std::vector<LinearConstraint> &constraints,
     if (t_low_ld > t_high_ld)
       continue;
 
-    // Fix B25/B26: safe cast.
     int64_t t_low = 0, t_high = 0;
     if (!WalkUtils::safe_cast_t(t_low_ld, t_low) ||
         !WalkUtils::safe_cast_t(t_high_ld, t_high))

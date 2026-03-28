@@ -58,8 +58,6 @@ bool ProgramPoint::operator>(const ProgramPoint &o) const {
   return !(*this == o) && !(*this < o);
 }
 
-// Fix for bug #2: accept a const SSIfy& so we can use the side-table sets
-// (ssiPhiSet / ssiSigmaSet / ssiCopySet) instead of name-prefix matching.
 bool ProgramPoint::not_definition_of(const Value *V, const SSIfy &pass) const {
   const Instruction *I = this->I;
   const BasicBlock *BB = I->getParent();
@@ -78,7 +76,6 @@ bool ProgramPoint::not_definition_of(const Value *V, const SSIfy &pass) const {
            BBit != BBend; ++BBit) {
         const PHINode *op = cast<PHINode>(&*BBit);
 
-        // Fix for bug #2: use side-table instead of name prefix.
         if (pass.is_SSIphi(op)) {
           for (unsigned i = 0, n = op->getNumIncomingValues(); i < n; ++i) {
             if (op->getIncomingValue(i) == V)
@@ -104,7 +101,6 @@ bool ProgramPoint::not_definition_of(const Value *V, const SSIfy &pass) const {
            BBit != BBend; ++BBit) {
         const PHINode *op = cast<PHINode>(&*BBit);
 
-        // Fix for bug #2: use side-table instead of name prefix.
         if (pass.is_SSIsigma(op)) {
           for (unsigned i = 0, n = op->getNumIncomingValues(); i < n; ++i) {
             if (op->getIncomingValue(i) == V)
@@ -121,7 +117,6 @@ bool ProgramPoint::not_definition_of(const Value *V, const SSIfy &pass) const {
          ++bit) {
       const Instruction *next = &*bit;
 
-      // Fix for bug #2: use side-table instead of name prefix.
       if (pass.is_SSIcopy(next)) {
         if (next->getOperand(0) == V)
           return false;
@@ -167,8 +162,6 @@ unsigned RenamingStack::size() const {
   return static_cast<unsigned>(this->stack.size());
 }
 
-// Fix for bug #6: allow the rename() function to restore the stack to a
-// previously saved depth after returning from a dominator-tree subtree.
 void RenamingStack::resize(unsigned n) { this->stack.resize(n); }
 
 // ---------------------------------------------------------------------------
@@ -197,25 +190,6 @@ bool Graph::hasEdge(Value *from, Value *to) {
 // ---------------------------------------------------------------------------
 // PostDominanceFrontier::calculate
 // ---------------------------------------------------------------------------
-
-// Fix for bug #4: the original implementation guarded on getRoots().empty()
-// and returned immediately because Roots was never populated.  The fix is:
-//   1. calculate_frontiers() (in SSI.h) now correctly populates Roots before
-//      calling calculate().
-//   2. calculate() no longer uses getRoots() as a guard; instead it handles
-//      the virtual root node (block == nullptr) gracefully.
-
-// Fix for bug G: the original code returned a reference to a `static
-// DomSetType empty` for the virtual root case.  That static object is shared
-// across all calls and translation units, so any caller that accidentally
-// mutates it (or that relies on it being empty) would see stale data.
-//
-// The fix splits the function into two parts:
-//   - calculateNode(): computes and stores the frontier for a real block and
-//     returns a const reference to the stored set.
-//   - calculateVirtualRoot(): handles the virtual root (null block) by
-//     recursing into its children without needing to return a set at all.
-// The public calculate() entry point dispatches between the two.
 
 void PostDominanceFrontier::calculateVirtualRoot(const PostDominatorTree &DT,
                                                  const DomTreeNode *Node) {

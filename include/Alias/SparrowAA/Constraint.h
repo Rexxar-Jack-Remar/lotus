@@ -40,7 +40,7 @@ public:
 
   bool operator!=(const AndersConstraint &RHS) const { return !(*this == RHS); }
 
-  // B6 Fix: the original comparisons were all `RHS.field < this->field`,
+  // the original comparisons were all `RHS.field < this->field`,
   // producing a descending order instead of the ascending order required by
   // std::set and other sorted containers.  Corrected to `this->field <
   // RHS.field`.

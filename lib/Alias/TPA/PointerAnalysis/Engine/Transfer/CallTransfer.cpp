@@ -121,12 +121,6 @@ TransferFunction::collectArgumentPtsSets(const context::Context *ctx,
     }
 
     auto const &pSet = env.lookup(argPtr);
-    // Bug fix: previously an empty points-to set caused early termination of
-    // the loop, which made evalCallArguments return (false, false) and skip
-    // the entire call. This could cause premature fixpoints if the argument's
-    // set is computed later. Now we include the empty set as a placeholder;
-    // updateParameterPtsSets will simply perform a no-op weak update for it,
-    // and the call will be re-evaluated when the argument's set changes.
     result.emplace_back(pSet);
     ++argItr;
   }
@@ -235,12 +229,6 @@ void TransferFunction::evalCallNode(const ProgramPoint &pp,
 
   const auto callees = resolveCallTarget(ctx, callNode);
   if (callees.empty()) {
-    // Fix #9: if the callee set is empty the function pointer's points-to set
-    // has not been resolved yet (it will be populated later in the fixpoint
-    // iteration). Call nodes are mem-level nodes and are only re-enqueued when
-    // the store changes. But the function pointer's points-to set lives in the
-    // Env (top-level), so a store-only re-enqueue may never happen.
-    //
     // To avoid a premature fixpoint we need two things:
     // 1. Propagate the current store to mem-level successors so that when the
     //    function pointer is resolved (triggering a top-level re-evaluation of

@@ -583,10 +583,7 @@ void FlowDDA::buildRecursionInfo() {
         }
       }
   }
-  // Bug 8 fix: the old implementation used a recursive std::function for
-  // Tarjan's SCC algorithm, which overflows the system stack on programs with
-  // deep call chains (e.g. SPEC2006 benchmarks). Replace with an explicit
-  // worklist-based iterative Tarjan's algorithm.
+
   std::unordered_map<const llvm::Function *, uint32_t> index, lowlink;
   std::stack<const llvm::Function *> stk;
   std::unordered_set<const llvm::Function *> onStack;

@@ -283,8 +283,7 @@ void ContextDDA::buildRecursionInfo() {
         }
       }
   }
-  // Bug 8 fix: replace recursive std::function Tarjan with iterative version
-  // to avoid stack overflow on programs with deep call chains.
+
   std::unordered_map<const llvm::Function *, uint32_t> index, lowlink;
   std::stack<const llvm::Function *> stk;
   std::unordered_set<const llvm::Function *> onStack;
@@ -649,17 +648,6 @@ void ContextDDA::initInsensitiveEdges() {
   if (!svfg || (!insensitiveRecursion_ && !insensitiveCycle_))
     return;
 
-  // Bug 6 fix: performSCCAnalysis takes the set of already-known insensitive
-  // call/ret edges so it can exclude them from the SCC condensation (treating
-  // them as cut edges). The old code passed an empty set, which caused the SCC
-  // analysis to include recursion-marked edges in the condensation graph,
-  // potentially producing an incorrect SCC decomposition that either missed
-  // cycle edges or incorrectly merged SCCs.
-  //
-  // Correct approach (matching SVF ContextDDA::initInsensitiveEdges):
-  //   1. First pass: collect all call/ret edges that are in recursion.
-  //   2. Pass that set to performSCCAnalysis as the seed insensitive edges.
-  //   3. Second pass: add any remaining call/ret edges that are in an SVFG SCC.
   CxtLocDPItem dummy(CxtVar(ContextCond(), 0), nullptr);
 
   SVFGStats::SVFGEdgeSet recursionInsensitive;
@@ -825,12 +813,6 @@ CxtLocDPItem ContextDDA::getDPImWithOldCond(const CxtLocDPItem &oldDpm,
                                             const SVFGNode *loc) const {
   CxtLocDPItem dpm(oldDpm);
   dpm.setLocVar(loc, var.get_id());
-  // Match SVF DDAVFSolver::getDPImWithOldCond: add load info for Store/Load
-  // nodes. Bug 5 fix: guard with hasLoadDpm(oldDpm) before calling
-  // getLoadDpm(oldDpm). The old code called getLoadDpm unconditionally for
-  // Store nodes, triggering assert(false) + unsound fallback when oldDpm had no
-  // associated load DPM (e.g. when the solver reaches a Store via a path from
-  // EntryChi/FormalIn).
   ContextDDA *nonConstThis = const_cast<ContextDDA *>(this);
   if (llvm::isa<StoreSVFGNode>(loc) || llvm::isa<StoreChiSVFGNode>(loc)) {
     if (hasLoadDpm(oldDpm))

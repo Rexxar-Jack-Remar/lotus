@@ -95,9 +95,6 @@ sample_points(const std::vector<LinearConstraint> &constraints,
   if (constraints.empty() || point.empty())
     return samples;
 
-  // Fix B29: burn-in counts only *successful* steps so the chain actually
-  // mixes.  We allow up to 10× the requested burn-in steps to account for
-  // failed walk attempts.
   {
     int successful = 0;
     const int max_burn_attempts = config.burn_in_steps * 10;
@@ -111,7 +108,7 @@ sample_points(const std::vector<LinearConstraint> &constraints,
   std::unordered_set<std::string> seen;
   auto start = std::chrono::high_resolution_clock::now();
 
-  // Fix B30: track rejected attempts separately from total iterations so that
+  // track rejected attempts separately from total iterations so that
   // successful samples do not consume the rejection budget.
   int rejected_attempts = 0;
   const int max_rejected = config.max_samples * config.max_attempts_factor;
@@ -127,9 +124,6 @@ sample_points(const std::vector<LinearConstraint> &constraints,
       break;
 
     // Thinning: take multiple steps to reduce correlation between samples.
-    // Fix PS-1: count only *successful* steps so that a failed intermediate
-    // step does not silently shorten the thinning chain and increase
-    // correlation between consecutive samples.
     {
       int thinned = 0;
       int thin_attempts = 0;

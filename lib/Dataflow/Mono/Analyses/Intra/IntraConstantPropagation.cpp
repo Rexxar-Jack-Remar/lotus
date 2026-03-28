@@ -102,7 +102,7 @@ ConstantPropagationMap buildTopUniverse(const llvm::Module &M) {
 ConstantPropagationValue evalBinaryOp(unsigned Opcode,
                                       const ConstantPropagationValue &Lhs,
                                       const ConstantPropagationValue &Rhs) {
-  // Fix #5: distinguish Top (unknown) from Bottom (unreachable/error).
+  // Distinguish Top (unknown) from Bottom (unreachable/error).
   //   - Bottom propagates as Bottom (unreachable code stays unreachable).
   //   - Top means the value is unknown; the result is also unknown (Top),
   //     NOT Bottom.  Returning Bottom for Top inputs was unsound: it caused

@@ -1,7 +1,3 @@
-// Bug 17 fix: definitions moved here from CodeMetrics.h so that the header
-// can be included by multiple translation units without ODR violations or
-// duplicate RegisterPass<> registrations.
-
 #include "Analysis/CFG/CodeMetrics.h"
 
 #include "llvm/ADT/DenseMap.h"
@@ -148,9 +144,6 @@ void ComplexityLegacy::getAnalysisUsage(AnalysisUsage &AU) const {
   AU.addPreserved<LoopInfoWrapperPass>();
 }
 
-// Bug 17 fix: char ID and RegisterPass<> are defined exactly once here in the
-// .cpp file. Previously they were in the header, causing one definition per
-// including TU — an ODR violation and a duplicate-registration crash.
 char ComplexityLegacy::ID = 0;
 
 static RegisterPass<ComplexityLegacy> X("complexity-legacy",

@@ -815,12 +815,6 @@ std::vector<const void *> SVFGBuilder::getPointsToSet(const Value *ptr) {
     result.push_back(static_cast<const void *>(obj));
   }
 
-  // Bug #5 fix: when PTA is enabled but returns an empty set for a pointer
-  // that is clearly address-taken (alloca, global, heap), return a sentinel
-  // so callers create a conservative wildcard Mu/Chi node instead of silently
-  // dropping the memory operation from the SVFG.
-  // We do NOT do this for arbitrary values (e.g., integer-typed operands)
-  // because an empty PTA result there is correct (not a pointer).
   if (result.empty() && ptr->getType()->isPointerTy()) {
     const Value *base = ptr->stripPointerCasts();
     const bool isKnownAddressTaken =

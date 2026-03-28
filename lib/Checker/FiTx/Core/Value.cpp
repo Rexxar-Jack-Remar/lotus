@@ -394,8 +394,6 @@ AliasValues::getAliasInfo(std::shared_ptr<fitx::Value> value) {
   return nullptr;
 }
 
-// Bug fix: return by reference (was returning by value, so addValue() calls
-// on the returned copy were silently discarded).
 ManagedValues &ManagedValues::GetInstance() {
   static ManagedValues *managed_values = new ManagedValues();
   return *managed_values;

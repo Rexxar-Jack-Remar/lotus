@@ -9,7 +9,7 @@ namespace tpa {
 class CFG;
 class CFGNode;
 
-// Fix #6: PriorityAssigner now assigns Reverse Post-Order (RPO) labels instead
+// PriorityAssigner now assigns Reverse Post-Order (RPO) labels instead
 // of post-order labels. RPO ensures that for a forward data-flow analysis the
 // worklist processes nodes in the correct order (predecessors before successors
 // in the acyclic case), minimising the number of fixpoint iterations needed.

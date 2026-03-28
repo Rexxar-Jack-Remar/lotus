@@ -65,7 +65,7 @@ void FunctionTranslator::translateBasicBlock(const Function &llvmFunc) {
   }
 }
 
-// Fix #7: Rewritten processEmptyBlock to eliminate the quadratic worst-case
+// Rewritten processEmptyBlock to eliminate the quadratic worst-case
 // complexity and the potential infinite loop on irreducible CFGs.
 //
 // The original implementation used a per-empty-block BFS with a local visited

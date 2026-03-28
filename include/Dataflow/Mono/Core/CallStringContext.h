@@ -30,7 +30,7 @@ public:
   }
 
   void push_back(N Stmt) { // NOLINT
-    // Fix #3: when K == 0 the expression (KLimit - 1) underflows to SIZE_MAX
+    // when K == 0 the expression (KLimit - 1) underflows to SIZE_MAX
     // (unsigned arithmetic), making the condition always false and allowing
     // the deque to grow without bound.  Guard explicitly for K == 0 (which
     // means context-insensitive: never store any call-site) and for the
@@ -46,14 +46,6 @@ public:
   }
 
   /// Remove and return the last element of the call string.
-  ///
-  /// Bug fix: the old implementation silently returned a default-constructed
-  /// N{} (typically nullptr for pointer types) when the deque was empty.
-  /// Callers that forgot to check empty() would receive a null call-site and
-  /// silently produce wrong results (e.g., wrong context transitions in the
-  /// interprocedural solver).  We now assert non-empty so the bug surfaces
-  /// immediately in debug builds.  In release builds the assert is a no-op
-  /// and the old behaviour (return N{}) is preserved for ABI compatibility.
   N pop_back() { // NOLINT
     assert(!CallString.empty() &&
            "CallStringCTX::pop_back() called on empty call string");

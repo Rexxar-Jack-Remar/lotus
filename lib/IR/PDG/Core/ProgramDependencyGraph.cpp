@@ -158,15 +158,6 @@ void pdg::ProgramDependencyGraph::connectInTrees(Tree *src_tree, Tree *dst_tree,
 void pdg::ProgramDependencyGraph::connectOutTrees(Tree *src_tree,
                                                   Tree *dst_tree,
                                                   EdgeType edge_type) {
-  // Fix: the original code guarded each edge on src->hasWriteAccess(), but
-  // DATA_WRITE access tags are set by connectFormalOutTreeWithAddrVars() which
-  // runs AFTER connectOutTrees() is called for actual-out trees.  At call time
-  // the tags are always unset, so no PARAMETER_OUT edges were ever emitted.
-  //
-  // The correct approach is to check whether any addr_var of the source node
-  // has a write access (i.e., is the pointer operand of a StoreInst) directly
-  // here, rather than relying on a pre-populated tag.  We also set the tag so
-  // that subsequent queries via hasWriteAccess() return the right answer.
   if (!src_tree->isShapeCompatible(*dst_tree)) {
     // Fallback: connect roots to avoid dropping all PARAMETER_OUT edges.
     if (auto *src_root = src_tree->getRootNode())

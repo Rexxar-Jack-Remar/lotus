@@ -998,13 +998,6 @@ void Analyzer::analyzeReturnValue(
   std::set<std::weak_ptr<fitx::BasicBlock>> pred_block(
       return_block->Predecessors());
 
-  // Bug fix: the original logic cleared pred_block when the return block had
-  // instructions, then unconditionally re-inserted return_block whenever
-  // pred_block was empty — making the two branches non-exclusive and silently
-  // discarding the predecessor set for functions whose return block has no
-  // predecessors. Correct intent: if the return block itself has instructions
-  // (i.e. it is not a pure merge block), analyze it directly; otherwise use
-  // its predecessors.
   if (!return_block->Instructions().empty() || pred_block.empty()) {
     pred_block.clear();
     pred_block.insert(return_block);

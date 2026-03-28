@@ -184,15 +184,6 @@ SVFGEdge *SVFG::addEdge(SVFGNode *src, SVFGNode *dst, SVFGEdgeK kind,
     }
   }
 
-  // Bug #3 fix: the old duplicate check was O(out-degree) and used a debug
-  // string as part of the identity key, which is both slow and fragile.
-  // The canonical identity of an edge is (src, dst, kind, callSite pointer).
-  // We use the same O(out-degree) scan but drop the string comparison so that
-  // two semantically identical edges with different debug strings are correctly
-  // deduplicated. For graphs with very high fan-out this is still O(n); a
-  // proper fix would require a hash-set of (dst, kind, callSite) tuples on
-  // each node, but that is a larger refactor. The string comparison is the
-  // most harmful part and is removed here.
   for (auto *existing : src->getOutEdges()) {
     if (existing->getDstNode() == dst && existing->getEdgeKind() == kind &&
         existing->getCallSite() == callSite) {
@@ -217,7 +208,6 @@ void SVFG::removeEdge(SVFGEdge *edge) {
   if (!edge)
     return;
 
-  // Bug #1 fix: decrement stats before deletion.
   adjustEdgeStat(stat, edge, -1);
 
   SVFGNode *src = edge->getSrcNode();
@@ -435,7 +425,6 @@ void SVFG::removeNode(SVFGNode *node) {
     removeEdge(edge);
   }
 
-  // Bug #1 fix: decrement stats before deletion.
   adjustNodeStat(stat, node, -1);
 
   nodeMap.erase(nodeId);
@@ -443,8 +432,6 @@ void SVFG::removeNode(SVFGNode *node) {
   delete node;
 }
 
-// Bug #1 fix: updateStat / decrementStat are symmetric so that removeNode and
-// removeEdge keep the counters accurate.
 
 static void adjustNodeStat(SVFGStat &stat, SVFGNode *node, int delta) {
   if (!node)
@@ -513,10 +500,6 @@ void SVFG::updateStat(SVFGNode *node) { adjustNodeStat(stat, node, +1); }
 void SVFG::updateStat(SVFGEdge *edge) { adjustEdgeStat(stat, edge, +1); }
 
 SVFGNodeSet SVFG::getPreds(SVFGNode *node) const {
-  // Bug #2 fix: do NOT insert the start node into the visited set before BFS.
-  // The old code inserted `node` first then erased it at the end, which
-  // silently dropped `node` from the result when it was reachable from itself
-  // (cycle). The correct approach: only insert nodes discovered via edges.
   SVFGNodeSet result;
   if (!node)
     return result;
@@ -545,7 +528,6 @@ SVFGNodeSet SVFG::getPreds(SVFGNode *node) const {
 }
 
 SVFGNodeSet SVFG::getSuccs(SVFGNode *node) const {
-  // Bug #2 fix: same as getPreds — don't insert start node into result.
   SVFGNodeSet result;
   if (!node)
     return result;

@@ -57,17 +57,6 @@ void pdg::ControlDependencyGraph::addControlDepFromEntryNodeToInsts(
 
 void pdg::ControlDependencyGraph::addControlDepFromDominatedBlockToDominator(
     Function &F) {
-  // Implements the standard Ferrante/Ottenstein/Warren CDG algorithm:
-  // For each CFG edge (A -> B) where B does not post-dominate A, walk up the
-  // post-dominator tree from B to the parent of A in the post-dominator tree,
-  // adding CONTROLDEP_BR edges from A's terminator to every block on that path.
-  //
-  // Fix: the original code added a direct edge to succ_bb AND then walked the
-  // post-dominator tree from succ_bb upward, which double-counted succ_bb when
-  // nearestCommonDominator == &BB.  The corrected version only uses the tree
-  // walk (which already includes succ_bb as the starting point).
-  //
-  // IndirectBr is handled separately in addControlDepFromIndirectBranches().
   ProgramGraph &g = ProgramGraph::getInstance();
   for (auto &BB : F) {
     Instruction *terminator = BB.getTerminator();

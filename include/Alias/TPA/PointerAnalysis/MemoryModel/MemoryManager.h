@@ -44,7 +44,7 @@ private:
   // Ordered for deterministic iteration and comparison
   mutable std::set<MemoryObject> objSet;
 
-  // Fix #8: Index from MemoryBlock* to the list of MemoryObjects that belong
+  // Index from MemoryBlock* to the list of MemoryObjects that belong
   // to it. This allows getReachableMemoryObjects() to run in O(k) time (where
   // k is the number of fields/elements in the block) instead of O(n) over all
   // objects in the analysis. The index is populated lazily in getMemoryObject()

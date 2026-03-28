@@ -217,7 +217,7 @@ std::unique_ptr<DataFlowResult> runAvailableExpressionsAnalysis(Function *F) {
   IntraMonoSolver<AvailableExprDomain> Solver(Problem);
   Solver.solve();
 
-  // Fix #7: build a correct result by mapping each Expression back to the
+  // build a correct result by mapping each Expression back to the
   // Instruction* that computes it.  DataFlowResult stores std::set<Value*>;
   // we represent each available expression by the instruction that defines it.
   //

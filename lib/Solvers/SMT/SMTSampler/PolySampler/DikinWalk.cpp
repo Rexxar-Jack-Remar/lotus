@@ -29,12 +29,6 @@ bool dikin_walk_step(const std::vector<LinearConstraint> &constraints,
 
   const size_t n = point.size();
 
-  // Compute diagonal of the log-barrier Hessian: sum_i (a_ij^2 / slack_i^2).
-  // Fix B27: use a small epsilon instead of returning false when slack == 0,
-  // so that boundary points can still move.
-  // Fix PS-3: if slack is genuinely negative (the integer point is outside the
-  // polytope due to floating-point rounding in dot_ld), return false rather
-  // than silently clamping to kEps and producing an invalid sample.
   constexpr long double kEps = 1.0e-6L;
   std::vector<long double> diag(n, 0.0L);
   for (const auto &c : constraints) {
@@ -55,10 +49,6 @@ bool dikin_walk_step(const std::vector<LinearConstraint> &constraints,
       diag[j] = 1.0L;
   }
 
-  // Generate direction: N(0, 1/diag[j]) per coordinate, then round.
-  // Fix B24: clamp the raw Gaussian to [-3, 3] before rounding to reduce the
-  // probability of rounding to zero (which was ~39% per coordinate with
-  // N(0,1)).
   std::normal_distribution<double> normal(0.0, 1.0);
   std::vector<int64_t> direction(n, 0);
   bool non_zero = false;
@@ -116,7 +106,6 @@ bool dikin_walk_step(const std::vector<LinearConstraint> &constraints,
   if (t_low_ld > t_high_ld)
     return false;
 
-  // Fix B25/B26: safe cast.
   int64_t t_low = 0, t_high = 0;
   if (!WalkUtils::safe_cast_t(t_low_ld, t_low) ||
       !WalkUtils::safe_cast_t(t_high_ld, t_high))

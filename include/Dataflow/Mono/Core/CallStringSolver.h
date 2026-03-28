@@ -593,10 +593,7 @@ public:
           computeOUT,
       std::function<bool(const ContainerT &, const ContainerT &)> equal);
 
-  /**
-   * Convenience overload with empty KILL sets.
-   * Fix: returns unique_ptr<ResultTy> to match the primary overload.
-   */
+
   std::unique_ptr<ResultTy> applyForward(
       llvm::Function *Entry, const ICFG *ICF,
       std::function<void(llvm::Instruction *, ResultTy *)> computeGEN,

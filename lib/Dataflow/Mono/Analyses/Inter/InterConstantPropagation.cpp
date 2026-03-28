@@ -119,7 +119,7 @@ resolveIndirectCalleesWithAA(Instruction *CallSite,
 ConstantPropagationValue evalBinaryOp(unsigned Opcode,
                                       const ConstantPropagationValue &Lhs,
                                       const ConstantPropagationValue &Rhs) {
-  // Fix #5: Bottom (unreachable) propagates as Bottom; Top (unknown) yields
+  // Bottom (unreachable) propagates as Bottom; Top (unknown) yields
   // Top, not Bottom.  The old code returned Bottom for any non-Const input,
   // which incorrectly treated unknown values as unreachable.
   if (isBottom(Lhs) || isBottom(Rhs)) {

@@ -134,10 +134,6 @@ tpa::CFGNode *InstructionTranslator::visitPHINode(PHINode &phiInst) {
       continue;
     srcs.insert(value);
   }
-
-  // Bug fix: if all incoming values are UndefValue (or the PHI has no
-  // incoming values), srcs will be empty and createCopyNode would assert.
-  // Model an all-undef PHI as a copy from UndefValue (unknown pointer).
   if (srcs.empty()) {
     srcs.insert(UndefValue::get(phiInst.getType()));
   }
@@ -259,29 +255,10 @@ InstructionTranslator::visitExtractValueInst(ExtractValueInst &inst) {
 }
 tpa::CFGNode *
 InstructionTranslator::visitInsertValueInst(InsertValueInst &inst) {
-  // InsertValueInst produces an aggregate type, not a pointer type directly.
-  // The pointer analysis only models pointer-typed SSA values, so we can
-  // safely ignore insertvalue instructions here. Any pointer-typed fields
-  // inside the aggregate are recovered at their use sites via
-  // visitExtractValueInst().
-  //
-  // Bug fix: previously this called handleUnsupportedInst() (which calls
-  // llvm_unreachable) whenever the aggregate type happened to be a pointer
-  // type (which is unusual but valid, e.g. a pointer-to-struct aggregate).
-  // This caused an analysis crash on valid IR. Since we handle the extraction
-  // side conservatively, we can safely return nullptr here.
   (void)inst;
   return nullptr;
 }
 tpa::CFGNode *InstructionTranslator::visitVAArgInst(VAArgInst &inst) {
-  // Bug fix: previously this called handleUnsupportedInst() which calls
-  // llvm_unreachable, crashing the analysis on any program that uses variadic
-  // functions (va_arg). The va_arg instruction reads the next argument from a
-  // va_list. For pointer analysis purposes:
-  //   - If the result is not a pointer type, it is irrelevant — return nullptr.
-  //   - If the result is a pointer type, we conservatively model it as an
-  //     unknown pointer (UndefValue), since we cannot statically determine
-  //     which variadic argument is being read.
   if (!inst.getType()->isPointerTy())
     return nullptr;
 

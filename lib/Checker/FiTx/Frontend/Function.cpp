@@ -129,9 +129,6 @@ FunctionInformation::createBasicBlockInfo(
           status = BasicBlockInformation::ERROR;
           if (auto condition =
                   shared_dyn_cast<CompareInst>(branch_inst->Condition())) {
-            // Bug fix: add missing break statements to prevent fall-through.
-            // Previously ICMP_EQ and ICMP_SGT fell through to set ERROR,
-            // making the SUCCESS assignment unreachable.
             switch (condition->GetPredicate()) {
             case llvm::CmpInst::Predicate::ICMP_EQ:
             case llvm::CmpInst::Predicate::ICMP_SGT:

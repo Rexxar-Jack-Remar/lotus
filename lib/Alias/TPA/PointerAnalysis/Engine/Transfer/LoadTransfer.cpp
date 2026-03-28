@@ -27,10 +27,6 @@ PtsSet TransferFunction::loadFromPointer(const Pointer *ptr,
   const auto *uObj = MemoryManager::getUniversalObject();
   auto const &srcSet = globalState.getEnv().lookup(ptr);
 
-  // Bug fix: if the source pointer's points-to set is empty, the pointer is
-  // not yet resolved (fixpoint iteration artifact). Return the empty set so
-  // the caller can defer evaluation rather than conservatively returning
-  // Universal, which would cause cascading imprecision.
   if (srcSet.empty())
     return PtsSet::getEmptySet();
 

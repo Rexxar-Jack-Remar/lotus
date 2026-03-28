@@ -72,9 +72,6 @@ StoreValueTransitionRule::StoreValueTransitionRule(
     StoreValueType type, std::vector<std::string> funcs)
     : TransitionRule(TransitionTrigger::STORE_VALUE), type_(type),
       function_names_(funcs),
-      // Bug fix: default to false so detectors must explicitly opt-in to
-      // branch-variant transitions. Previously always true, causing every
-      // store rule to silently register NULL_BRANCH_CONSIDERED_* variants.
       consider_null_branch_(false) {}
 
 UseValueTransitionRule::UseValueTransitionRule()

@@ -104,8 +104,6 @@ void SSIfy::split(Instruction *V, const std::set<ProgramPoint> &Iup,
       Instruction *insertion_point = point.I;
       ProgramPoint::Position relative_position = point.P;
 
-      // Check if new variable is actually not necessary.
-      // Fix for bug #18: isNotNecessary now also checks existing versions.
       if (isNotNecessary(insertion_point, V)) {
         continue;
       }
@@ -139,7 +137,6 @@ void SSIfy::split(Instruction *V, const std::set<ProgramPoint> &Iup,
           errs() << "Created " << new_phi->getName() << "\n";
         }
 
-        // Fix for bug #2: register in side-table, not just by name.
         this->ssiPhiSet.insert(new_phi);
         this->versions[V].insert(new_phi);
         ++NumPHIsCreated;
@@ -161,7 +158,6 @@ void SSIfy::split(Instruction *V, const std::set<ProgramPoint> &Iup,
             errs() << "Created " << new_sigma->getName() << "\n";
           }
 
-          // Fix for bug #2: register in side-table.
           this->ssiSigmaSet.insert(new_sigma);
           this->versions[V].insert(new_sigma);
           ++NumSigmasCreated;
@@ -188,7 +184,6 @@ void SSIfy::split(Instruction *V, const std::set<ProgramPoint> &Iup,
           errs() << "Created " << new_copy->getName() << "\n";
         }
 
-        // Fix for bug #2: register in side-table.
         this->ssiCopySet.insert(new_copy);
         this->versions[V].insert(new_copy);
         ++NumCopiesCreated;
@@ -203,12 +198,6 @@ void SSIfy::split(Instruction *V, const std::set<ProgramPoint> &Iup,
 
 void SSIfy::rename_initial(Instruction *V) {
   RenamingStack stack(V);
-
-  // Fix for bug #5: start renaming from the function entry block, not from
-  // V's defining block.  The standard SSA renaming algorithm walks the full
-  // dominator tree from the root so that every reachable use is visited.
-  // Starting from V's block misses uses in blocks that dominate V's block
-  // (which can arise for SSI-inserted nodes) and is incorrect in general.
   BasicBlock *entry = &V->getParent()->getParent()->getEntryBlock();
   rename(entry, stack);
 }
@@ -220,8 +209,6 @@ void SSIfy::rename(BasicBlock *BB, RenamingStack &stack) {
     errs() << "Renaming " << V->getName() << " in " << BB->getName() << "\n";
   }
 
-  // Fix for bug #6: record the stack depth on entry so we can restore it
-  // after processing this block's dominator-tree children.
   unsigned stackDepthOnEntry = stack.size();
 
   // Iterate over all instructions in BB.
@@ -286,10 +273,6 @@ void SSIfy::rename(BasicBlock *BB, RenamingStack &stack) {
     }
   }
 
-  // Fix for bug #6: restore the stack to the depth it had when we entered
-  // this block.  Definitions pushed while processing this block are only
-  // valid within its dominator-tree subtree and must not be visible to
-  // sibling subtrees.
   stack.resize(stackDepthOnEntry);
 }
 
@@ -306,10 +289,6 @@ void SSIfy::set_use(RenamingStack &stack, Instruction *inst, BasicBlock *from) {
     return;
   }
 
-  // Fix for bug #7: find the correct dominating definition by scanning the
-  // stack from top to bottom WITHOUT popping entries.  The original code
-  // destructively popped entries, which corrupted the stack for subsequent
-  // uses in the same dominator-tree subtree.
   Instruction *new_name = nullptr;
 
   if (!from) {
@@ -443,17 +422,8 @@ void SSIfy::clean() {
         } else if (!this->DTmap->dominates(V, newvar)) {
           if (Verbose)
             errs() << "Erasing " << newvar->getName() << "\n";
-
-          // Fix for bug #9: only replace uses with V when V actually
-          // dominates every use site of newvar.  If it does not, replacing
-          // with V would produce IR that violates SSA dominance.
-          // Fix for new bug E: only add to to_be_erased when we can safely
-          // remap all uses (or there are no uses), to avoid erasing an
-          // instruction that still has live uses with no replacement.
           bool v_dominates_all_uses = true;
           for (User *U : newvar->users()) {
-            // Fix for bug F: a user might not be an Instruction (e.g. a
-            // ConstantExpr); use dyn_cast and skip non-instruction users.
             Instruction *use_inst = dyn_cast<Instruction>(U);
             if (!use_inst || !this->DTmap->dominates(V, use_inst)) {
               v_dominates_all_uses = false;
@@ -503,16 +473,9 @@ void SSIfy::clean() {
 }
 
 // ---------------------------------------------------------------------------
-// SSI node classification — fix for bug #2
+// SSI node classification
 // ---------------------------------------------------------------------------
 
-// Fix for bug #2: use side-table sets for classification.
-// The name-based approach (startswith) is fragile: any user variable whose
-// LLVM IR name happens to start with "SSIfy_phi" etc. would be misclassified.
-// We keep the name-based fallback only for the static (const) overloads that
-// are called from ProgramPoint::not_definition_of before the pass object is
-// available; those are only used during the split phase before any renaming
-// has occurred, so false positives are unlikely in practice.
 
 bool SSIfy::is_SSIphi(const Instruction *I) const {
   return ssiPhiSet.count(I) > 0;
@@ -541,9 +504,6 @@ SmallPtrSet<BasicBlock *, 8> SSIfy::get_iterated_df(BasicBlock *BB) const {
 
   while (!worklist.empty()) {
     BasicBlock *current = worklist.pop_back_val();
-
-    // Fix for bug #3: guard against blocks not present in the frontier map
-    // (e.g. unreachable blocks or blocks added during the transformation).
     auto it = this->DFmap->find(current);
     if (it == this->DFmap->end())
       continue;
@@ -568,7 +528,6 @@ SmallPtrSet<BasicBlock *, 8> SSIfy::get_iterated_pdf(BasicBlock *BB) const {
   while (!worklist.empty()) {
     BasicBlock *current = worklist.pop_back_val();
 
-    // Fix for bug #3: guard against blocks not present in the PDF map.
     auto it = this->PDFmap->find(current);
     if (it == this->PDFmap->end())
       continue;
@@ -585,17 +544,11 @@ SmallPtrSet<BasicBlock *, 8> SSIfy::get_iterated_pdf(BasicBlock *BB) const {
   return iterated_pdf;
 }
 
-// ---------------------------------------------------------------------------
-// isNotNecessary — fix for bug #18
-// ---------------------------------------------------------------------------
 
 bool SSIfy::isNotNecessary(const Instruction *insert_point,
                            const Value *V) const {
   // Check uses of V itself.
   for (const User *U : V->users()) {
-    // Fix for bug F: users of a Value are not always Instructions (e.g. a
-    // ConstantExpr can use a Value).  Skip non-instruction users to avoid
-    // a crash in cast<Instruction>.
     const Instruction *use = dyn_cast<Instruction>(U);
     if (!use)
       continue;
@@ -604,10 +557,6 @@ bool SSIfy::isNotNecessary(const Instruction *insert_point,
     }
   }
 
-  // Fix for bug #18: also check uses of existing SSI versions of V.
-  // The original code only checked uses of V, so it could incorrectly skip
-  // an insertion point that is needed to rename a use of an already-created
-  // sigma or phi.
   auto mit = this->versions.find(const_cast<Value *>(V));
   if (mit != this->versions.end()) {
     for (const Instruction *ver : mit->second) {
@@ -627,7 +576,7 @@ bool SSIfy::isNotNecessary(const Instruction *insert_point,
 }
 
 // ---------------------------------------------------------------------------
-// Topological sort — fix for bug #8
+// Topological sort 
 // ---------------------------------------------------------------------------
 
 SmallVector<Instruction *, 8> SSIfy::get_topsort_versions(
@@ -653,9 +602,6 @@ SmallVector<Instruction *, 8> SSIfy::get_topsort_versions(
     }
   }
 
-  // Fix for bug #8: use a proper three-colour DFS (white/grey/black) so that
-  // back-edges (cycles) are detected and skipped rather than causing infinite
-  // recursion.  colour: 0 = white, 1 = grey (on stack), 2 = black (done).
   DenseMap<Value *, int> colour;
   for (Instruction *I : to_be_erased) {
     colour[I] = 0; // white
@@ -672,8 +618,6 @@ SmallVector<Instruction *, 8> SSIfy::get_topsort_versions(
 
 void SSIfy::visit(Graph &g, DenseMap<Value *, int> &colour,
                   SmallVectorImpl<Instruction *> &list, Value *V) const {
-  // Fix for bug #8: skip nodes that are already being processed (grey) to
-  // break cycles, and skip nodes that are already finished (black).
   int &c = colour[V];
   if (c != 0) // grey (cycle) or black (already emitted)
     return;

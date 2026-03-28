@@ -26,12 +26,6 @@ void TransferFunction::evalCopyNode(const ProgramPoint &pp,
       continue;
 
     auto pSet = env.lookup(srcPtr);
-    // Bug fix (same class as CallTransfer Bug 7): previously an empty
-    // points-to set caused an early return, which could cause a premature
-    // fixpoint if the operand's set is computed later in the iteration.
-    // Now we include the empty set as a placeholder and continue; the
-    // merge will simply contribute nothing for this operand, and the node
-    // will be re-evaluated when the operand's set changes.
     srcPtsSets.emplace_back(pSet);
   }
 

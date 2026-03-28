@@ -38,15 +38,6 @@ static bool isScalarNonPointerType(const Type *type) {
 
 // Calculates the byte offset for a sequence of GEP indices.
 //
-// Fix #1: Removed use of the deprecated getPointerElementType() API (removed
-// in LLVM 17 with opaque pointers). The pointer-arithmetic branch now requires
-// the caller to pass the pointee type explicitly via `baseType`.
-//
-// Fix #2: The caller (processConstantGEP) previously passed
-// `baseVal->getType()` (a pointer type, e.g. `i32*`) instead of the pointee
-// type (`i32`). The function now takes the *pointee* type directly, so the
-// first index correctly indexes into the pointed-to aggregate rather than
-// hitting the pointer-arithmetic fallback.
 //
 // Parameters:
 //   dataLayout  - module data layout
@@ -85,14 +76,6 @@ static unsigned calculateIndexedOffset(const DataLayout &dataLayout,
       } else {
         // Pointer arithmetic: the current type is a pointer; the index steps
         // over elements of the pointee type.
-        // Fix #1: We no longer call getPointerElementType() here. Instead we
-        // rely on the fact that for a well-formed constant GEP the first index
-        // always steps over the base pointee type, which is passed in as
-        // `pointeeType` and is already set as `currentType` on the first
-        // iteration. Subsequent iterations should never reach this branch for
-        // a valid GEP (they will always be struct/array/vector). If we do
-        // reach here for a later index it means the IR is unusual; treat the
-        // offset as unknown (0) and stop.
         LOG_WARN("calculateIndexedOffset: unexpected pointer type at index {}; "
                  "treating remaining offset as 0",
                  static_cast<unsigned>(idxIt - indexes.begin()));
@@ -197,15 +180,6 @@ GlobalPointerAnalysis::processConstantGEP(const llvm::ConstantExpr *cexpr,
   auto indexes = llvm::SmallVector<llvm::Value *, 4>(cexpr->op_begin() + 1,
                                                      cexpr->op_end());
 
-  // Fix #2: Pass the *pointee* type (source element type of the GEP), not the
-  // pointer type of the base operand. Previously `baseVal->getType()` was
-  // passed, which is a pointer type (e.g. `i32*`). calculateIndexedOffset
-  // expects the type being indexed into (e.g. `i32` or a struct type).
-  //
-  // getSourceElementType() is defined on GEPOperator (llvm/IR/Operator.h),
-  // which ConstantExpr with a GEP opcode inherits from.  We must cast to
-  // GEPOperator to access it — ConstantExpr itself does not expose the method
-  // directly in LLVM 14.
   const auto *gepOp = cast<GEPOperator>(cexpr);
   Type *sourceElemType = gepOp->getSourceElementType();
   unsigned offset = calculateIndexedOffset(dataLayout, sourceElemType, indexes);

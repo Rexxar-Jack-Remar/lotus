@@ -119,18 +119,6 @@ void pdg::FunctionWrapper::buildFormalTreeForArgs() {
   }
 }
 
-/**
- * @brief Builds formal trees for the function's return value.
- *
- * Constructs "FormalIn" and "FormalOut" trees for the return value, enabling
- * field-sensitive analysis of returned data structures.
- *
- * Fix: the original code always allocated a tree even for void-returning
- * functions, making hasNullRetVal() always return false.  It also called
- * addAddrVar(*ret_val) without checking whether ret_val is nullptr (which it
- * is for "ret void").  We now leave both tree pointers null for void functions
- * so that hasNullRetVal() correctly returns true.
- */
 void pdg::FunctionWrapper::buildFormalTreesForRetVal() {
   // Void-returning functions have no return value to model.
   if (_func->getReturnType()->isVoidTy()) {

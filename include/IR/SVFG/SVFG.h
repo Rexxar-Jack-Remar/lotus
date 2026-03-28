@@ -298,14 +298,6 @@ public:
     
     /// @brief Destructor
     ///
-    /// Bug #4 fix: the old destructor collected edges from getOutEdges() into a
-    /// set and deleted them, then deleted nodes. This caused a double-free when
-    /// removeEdge() had already deleted some edges (removeEdge calls `delete
-    /// edge` directly). The fix: let each node own and delete its out-edges.
-    /// Since every edge appears in exactly one node's out-edge list, iterating
-    /// all nodes and deleting their out-edges covers every edge exactly once.
-    /// We must delete edges before nodes because edge destructors may reference
-    /// node pointers.
     virtual ~SVFG() {
         // First pass: delete all edges (each edge is in exactly one out-edge list).
         for (auto& pair : nodeMap) {

@@ -78,11 +78,6 @@ struct ForwardSearchState {
   bool merge(const Value *Candidate, const Value *StorePtr) {
     if (Conflict)
       return false;
-    // Fix Bug 19: use pointer equality after stripPointerCasts (already done
-    // by callers). This is conservative — two GEPs with the same base and
-    // offset but different Value* will not match. A proper alias check would
-    // require AAResults; for now, pointer equality after stripping casts is
-    // the safest correct approximation without alias analysis.
     if (StorePtr != TargetPtr)
       return false;
     if (!Candidate || Candidate->getType() != TargetTy) {
@@ -122,11 +117,6 @@ static const Instruction *nextNonDebugInst(const Instruction *I) {
 
 /// @brief Explore callers when a shadow.mem.in node is encountered.
 ///
-/// Fix Bug 16: the original exploreFunIn iterated F->uses() and silently
-/// skipped non-CallInst uses (e.g., function pointer stores, bitcasts). This
-/// is safe but incomplete. We now also handle InvokeInst callers, and we
-/// explicitly note that indirect callers (via function pointers) cannot be
-/// resolved and are conservatively ignored.
 static void exploreFunIn(const CallBase *CB, const Function *F, unsigned Idx,
                          ForwardSearchState &State,
                          std::queue<const Value *> &Q) {
@@ -152,17 +142,9 @@ static void exploreFunIn(const CallBase *CB, const Function *F, unsigned Idx,
 
 /// @brief Find the reaching store value for a load instruction via BFS.
 ///
-/// Fix Bug 20: the original code silently ignored shadow.mem.out nodes,
-/// missing forwarding opportunities across return edges. We now enqueue
-/// the users of shadow.mem.out so that the BFS continues into the callee's
-/// return path.
-///
-/// Fix Bug 17: use std::unordered_set<const Value*> instead of
-/// std::set<const Value*> for O(1) average lookup instead of O(log N).
 static bool findReachingStore(const Value *StartVal, const Function *CurF,
                               ForwardSearchState &State) {
   std::queue<const Value *> Q;
-  // Fix Bug 17: use unordered_set for O(1) average visited lookup.
   std::unordered_set<const Value *> Visited;
   enqueueIfInstruction(Q, StartVal);
 
@@ -200,10 +182,6 @@ static bool findReachingStore(const Value *StartVal, const Function *CurF,
         continue;
       }
 
-      // Fix Bug 20: shadow.mem.out represents the value flowing back to
-      // callers. Enqueue its users so the BFS continues into the callee's
-      // return path (the users of shadow.mem.out are the instructions inside
-      // the callee that consume the outgoing memory value).
       if (isMemSSAFunOut(CB, OnlySingletonForward)) {
         for (const Use &U : CB->uses()) {
           enqueueIfInstruction(Q, dyn_cast<const Instruction>(U.getUser()));
@@ -279,10 +257,6 @@ public:
 
           LI->replaceAllUsesWith(const_cast<Value *>(State.ReachingStoreVal));
 
-          // Fix Bug 18: after the top-of-loop `&*It++`, It already points to
-          // LI. We need to advance It past LI before erasing it, then
-          // optionally erase CB.
-          //
           // State: It -> LI (the load we just matched).
           // Advance It past LI before erasing.
           ++It;                  // It now points to the instruction after LI.

@@ -102,15 +102,6 @@ public:
                                  ArrayRef<Function *> Callees,
                                  const mono_container_t &In) override {
     (void)RetSite;
-    // Bug fix: callToRetFlow must NOT call normalFlow here.
-    // normalFlow is applied by computeOUT in InterSolver for every instruction
-    // including call sites.  Calling it again inside callToRetFlow would
-    // double-apply the transfer function, producing over-approximate results.
-    //
-    // For known callees the call-to-return edge just passes facts through
-    // unchanged; the callee body is handled via callFlow/returnFlow.
-    // For unknown/indirect callees we conservatively pass facts through too,
-    // since we have no callee body to analyse.
     (void)Callees;
     return In;
   }

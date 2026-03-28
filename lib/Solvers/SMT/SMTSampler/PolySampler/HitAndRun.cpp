@@ -31,17 +31,6 @@ bool hit_and_run_step(const std::vector<LinearConstraint> &constraints,
 
   // 1. Generate a random direction vector.
   //
-  //    Fix B24: sample each coordinate uniformly from {-1, 0, +1} rather than
-  //    rounding a N(0,1) variate.  Rounding a standard normal gives P(0) ≈ 39%
-  //    per coordinate, making all-zero directions very likely in high
-  //    dimensions. A uniform draw from {-1,0,+1} gives P(0) = 1/3, which is
-  //    much better, and the direction is still unbiased (symmetric around
-  //    zero).
-  // Fix PS-2: non_zero must NOT be reset inside the loop body — doing so
-  // makes the outer condition (!non_zero) always true at loop entry, causing
-  // all 32 attempts to run even when the first attempt succeeded.
-  // The reset is now removed; non_zero is only set to true when a non-zero
-  // coordinate is found, and the loop exits as soon as that happens.
   std::uniform_int_distribution<int> dir_dist(-1, 1);
   std::vector<int64_t> direction(n, 0);
   bool non_zero = false;
@@ -80,7 +69,7 @@ bool hit_and_run_step(const std::vector<LinearConstraint> &constraints,
   if (!std::isfinite(t_min) || !std::isfinite(t_max) || t_min > t_max)
     return false;
 
-  // Fix B25: use safe_cast_t to avoid UB when t_low_ld / t_high_ld are outside
+  // use safe_cast_t to avoid UB when t_low_ld / t_high_ld are outside
   // the representable range of int64_t.
   long double t_low_ld = std::ceil(t_min);
   long double t_high_ld = std::floor(t_max);

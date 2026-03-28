@@ -42,7 +42,7 @@
 #include <sys/types.h>
 #include <z3++.h>
 
-// Fix L8: do NOT place "using namespace std" or "using namespace z3" here.
+// do NOT place "using namespace std" or "using namespace z3" here.
 // Each .cpp implementation file declares them locally as needed.
 
 // Forward declarations for sampler implementations

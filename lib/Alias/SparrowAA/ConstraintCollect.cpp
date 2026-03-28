@@ -169,19 +169,7 @@ void Andersen::collectConstraintsForGlobals(const Module &M,
   }
 
   // Functions and function pointers are also considered global.
-  // B7 Fix: collectConstraintsForGlobals previously pre-created return nodes,
-  // vararg nodes, and argument nodes for all non-declaration functions using
-  // initialCtx.  collectConstraintsForFunction() does the same for each
-  // function in its own context.  For context-insensitive analysis (k=0) the
-  // contexts are identical so createReturnNode/createValueNode are idempotent
-  // and the duplication is harmless.  For k>0, however, the pre-created nodes
-  // in initialCtx are never used for functions called in a different context,
-  // wasting memory and polluting valueNodeBuckets.
-  //
-  // Fix: only create the address-taken function pointer/object nodes here
-  // (which are genuinely global and context-independent).  The per-function
-  // return/vararg/argument nodes are created on demand by
-  // collectConstraintsForFunction() in the correct context.
+
   for (auto const &f : M) {
     // If f is an addr-taken function, create a pointer and an object for it.
     // These are global (context-independent) because the function's address
@@ -225,13 +213,6 @@ void Andersen::addGlobalInitializerConstraints(NodeIndex objNode,
   } else if (isa<UndefValue>(c)) {
     // Undefined values carry no pointer information; skip.
   } else if (isa<ConstantAggregateZero>(c)) {
-    // B8 Fix: ConstantAggregateZero represents a zero-initialized aggregate
-    // (struct, array, or vector).  The previous code fell through to the
-    // isNullValue() branch only for scalar null pointers; for aggregates,
-    // isNullValue() is also true but the correct treatment is to recurse
-    // into each element so that pointer-typed fields are connected to the
-    // null object node individually.  For non-pointer element types the
-    // recursive call is a no-op (isSingleValueType() && !isPointerTy()).
     for (unsigned i = 0, e = c->getNumOperands(); i != e; ++i)
       addGlobalInitializerConstraints(objNode, cast<Constant>(c->getOperand(i)),
                                       ctx);
@@ -549,18 +530,6 @@ void Andersen::collectConstraintsForInstruction(const Instruction *inst,
       }
     }
 
-    // B2 Fix: model the load-side of cmpxchg.
-    // The result is a struct {T, i1}.  When T is a pointer type, the first
-    // element (the old value read from memory) carries pointer information
-    // that must be tracked.  We model this with a LOAD constraint from the
-    // pointer operand into a synthetic value node for the instruction result.
-    // Subsequent ExtractValue instructions that pull out the old pointer will
-    // then copy from this synthetic node via the InsertValue/ExtractValue
-    // handling above.
-    //
-    // Note: the instruction result type is always a struct (never a raw
-    // pointer), so we check the *compared* value's type to determine whether
-    // the loaded element is a pointer.
     const Value *cmpVal = cx->getCompareOperand();
     if (cmpVal->getType()->isPointerTy()) {
       NodeIndex ptrIndex =
@@ -656,14 +625,6 @@ void Andersen::addConstraintForCall(const llvm::CallBase *cs,
     // than checking whether a value node exists for f in the current context,
     // which was previously wrong and could miss or spuriously include callees.
     const Module *M = cs->getFunction()->getParent();
-    // B6 Fix: helper to check whether a candidate function's type is
-    // compatible with the call-site's function-pointer type.  We require
-    // that the return types and all argument types are pointer-compatible
-    // (both pointer or both non-pointer) to avoid spurious constraints from
-    // completely unrelated functions that happen to have the same arity.
-    // This is a conservative approximation: it may still admit some
-    // incompatible functions, but it eliminates the most egregious mismatches
-    // (e.g., a void*(int*) call site matching a void(int,int) callee).
     auto isTypeCompatible = [&](const Function &f) -> bool {
       // Derive the function type from the call-site's called operand.
       // In LLVM 14 opaque-pointer mode, CallBase::getFunctionType() gives the
@@ -703,7 +664,6 @@ void Andersen::addConstraintForCall(const llvm::CallBase *cs,
         // #arg mismatch
         continue;
 
-      // B6 Fix: skip functions whose type is incompatible with the call site.
       if (!isTypeCompatible(f))
         continue;
 

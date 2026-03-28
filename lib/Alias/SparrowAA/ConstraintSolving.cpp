@@ -232,11 +232,6 @@ public:
 
 namespace {
 
-// B4 Fix: Consolidate collapseNodes into a single static template function.
-// The previous code had multiple overloads with external linkage (ODR
-// violation) and dead __attribute__((unused)) wrappers.  All call sites use
-// DefaultPtsSet, so we keep only the template + one explicit instantiation,
-// both with internal linkage (static).
 template <typename PtsSetType>
 static void collapseNodes(NodeIndex dst, NodeIndex src,
                           AndersNodeFactory &nodeFactory,
@@ -354,10 +349,6 @@ private:
 
     scc.set(node->getNodeIndex());
 
-    // B2 Fix: find the first VAR node (index < getNumNodes()) as the
-    // representative.  scc.find_first() returns the numerically smallest
-    // index, which may be a REF node (index >= getNumNodes()).  Iterating
-    // to find the first VAR node is correct and safe.
     NodeIndex repNode = AndersNodeFactory::InvalidIndex;
     for (auto idx : scc) {
       if (idx < nodeFactory.getNumNodes()) {
@@ -456,8 +447,6 @@ void buildConstraintGraph(ConstraintGraph &cGraph,
   }
 }
 
-// Explicit instantiation for the DefaultPtsSet used by solveConstraints.
-// (B4 Fix: keep internal linkage; no duplicate non-static overloads.)
 static void
 buildConstraintGraph(ConstraintGraph &cGraph,
                      const std::vector<AndersConstraint> &constraints,
@@ -601,11 +590,6 @@ void Andersen::solveConstraints() {
       while (!cycleCandidates.empty())
         cycleCandidates.pop();
 
-      // B9 Fix: After collapsing cycles, node indices in checkedEdges may
-      // refer to nodes that have been merged into their representatives.
-      // Stale entries would prevent re-checking edges that now involve the
-      // merged representative, causing missed cycle detections.  Clear the
-      // entire set so that all edges are eligible for re-checking.
       checkedEdges.clear();
     }
 

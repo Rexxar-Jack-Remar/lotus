@@ -22,8 +22,6 @@ bool CFGReachability::reachable(BasicBlock *From, BasicBlock *To) {
   if (From == To)
     return true;
 
-  // Bug 1 fix: validate that both blocks still belong to this function.
-  // If the IR has been modified since construction, the caller must rebuild.
   assert(isValid(From) &&
          "CFGReachability: 'From' block not found — object may be stale");
   assert(isValid(To) &&
@@ -31,8 +29,6 @@ bool CFGReachability::reachable(BasicBlock *From, BasicBlock *To) {
 
   const unsigned DstBlockID = BB2ID.at(To);
 
-  // Bug 3 fix: lock the cache before reading or writing AnalyzedVec /
-  // ReachableMatrix so that concurrent reachable() calls are safe.
   std::unique_lock<std::mutex> lock(CacheMutex);
 
   // Demand-driven: run the backward BFS only the first time To is queried.
@@ -46,7 +42,7 @@ bool CFGReachability::reachable(BasicBlock *From, BasicBlock *To) {
 
 // Returns true if there is a path from instruction From to instruction To.
 //
-// Fix #3: The old implementation only walked forward from From within the same
+// The old implementation only walked forward from From within the same
 // block, returning false when To appeared earlier.  That is wrong for loops:
 // if To precedes From in the block, From can still reach To via a back-edge
 // that loops back to the block's header.
@@ -79,10 +75,6 @@ bool CFGReachability::reachable(Instruction *From, Instruction *To) {
   return reachable(FromB, ToB);
 }
 
-// Fix #1: Backward BFS from ToBB.  Marks every block B (B != ToBB) such that
-// there exists a path B → … → ToBB.  The old code used a fragile `FirstRun`
-// boolean to skip marking ToBB itself; replaced with an explicit `BB != ToBB`
-// guard that makes the intent immediately clear.
 void CFGReachability::analyze(BasicBlock *ToBB) {
   const unsigned ToBBID = BB2ID[ToBB];
   BitVector VisitedVec(static_cast<unsigned>(ID2BB.size()));

@@ -47,15 +47,6 @@ static cl::opt<bool> OnlySingletonSink(
 //       - writes to the same memory location as S (alias check)
 //     if safe: move S before U, move shadow.mem.store just before S
 //
-// Fix Bug 13: after sinking, the outer iterator still points to CB (now
-//   moved). We restart the inner scan from the beginning of the block after
-//   any sink to avoid skipping instructions.
-// Fix Bug 14: the FirstUser search only looks at users of CB (shadow.mem.store)
-//   but not users of SI (the stored value). We now also check that the stored
-//   value is not used between SI and FirstUser.
-// Fix Bug 15: the safety check now also verifies that no instruction between
-//   SI and FirstUser writes to the same memory location as SI (using a simple
-//   mayWriteToMemory + alias check).
 
 /// @brief Inter-procedural Store Sinking pass
 ///
@@ -84,9 +75,6 @@ public:
         continue;
 
       for (BasicBlock &BB : F) {
-        // Fix Bug 13: use a restart loop so that after a sink we re-scan from
-        // the beginning of the block. This avoids the iterator pointing to a
-        // moved instruction and skipping subsequent candidates.
         bool Changed = true;
         while (Changed) {
           Changed = false;
@@ -122,20 +110,6 @@ public:
             if (!FirstUser)
               continue;
 
-            // Fix Bug 14: also check that the stored *value*
-            // (SI->getValueOperand()) is not used between SI and FirstUser. If
-            // it is, sinking SI past those uses would not change correctness
-            // (the value is already computed), but we must ensure the value is
-            // available at the new position. Since we only sink within the same
-            // block and the value is defined before SI, this is always safe —
-            // skip this check. However, we must ensure that no instruction
-            // between SI and FirstUser *reads* the pointer that SI writes to,
-            // because sinking SI past such a read would expose a stale value.
-            //
-            // Fix Bug 15: check that no instruction between SI and FirstUser
-            // writes to the same memory location as SI (which would make the
-            // sink incorrect — the intermediate write would be hidden by SI).
-            // We use mayWriteToMemory as a conservative approximation.
             bool Safe = true;
             const Value *StorePtr =
                 SI->getPointerOperand()->stripPointerCasts();
@@ -146,12 +120,7 @@ public:
                 Safe = false;
                 break;
               }
-              // Fix Bug 15: reject if any instruction between SI and FirstUser
-              // may read or write memory. This is conservative but correct:
-              // - A write to the same location would be hidden by the sunk SI.
-              // - A read from the same location would see a stale value.
-              // We cannot easily do alias analysis here without AAResults, so
-              // we conservatively reject any memory-touching instruction.
+
               if (Between->mayReadOrWriteMemory()) {
                 // Allow shadow.mem marker calls through — they are bookkeeping,
                 // not real memory operations.
@@ -169,9 +138,6 @@ public:
                 }
               }
 
-              // Fix Bug 14: if any instruction between SI and FirstUser uses
-              // the store pointer as an operand (e.g., a load from StorePtr),
-              // sinking SI past it would expose a stale value. Reject.
               for (const Use &Op : Between->operands()) {
                 const Value *OpV = Op.get()->stripPointerCasts();
                 if (OpV == StorePtr) {
@@ -190,8 +156,6 @@ public:
             SI->moveBefore(FirstUser);
             CB->moveBefore(SI);
             NumSunk++;
-            // Fix Bug 13: restart the scan from the top of the block since
-            // the iterator (It) now points to a moved instruction.
             Changed = true;
             break;
           }

@@ -53,11 +53,6 @@ ForwardWorkList Initializer::runOnInitState(Store &&initStore) {
   //   argvPtr  -> { argvObj }          (env: argv variable points to the array)
   //   argvObj  -> { Universal }        (store: each argv[i] may point anywhere,
   //                                     i.e. to any string in memory)
-  // Bug fix: previously argvObj was stored as pointing to itself
-  // (initStore.insert(argvObj, argvObj)), which meant dereferencing argv[i]
-  // would yield the argv array object rather than a string buffer. The correct
-  // model is that argv[i] is a char* that can point to any string — represented
-  // conservatively as Universal.
   if (entryFunc.arg_size() > 1) {
     const auto *argvValue = std::next(entryFunc.arg_begin());
     const auto *argvPtr =
