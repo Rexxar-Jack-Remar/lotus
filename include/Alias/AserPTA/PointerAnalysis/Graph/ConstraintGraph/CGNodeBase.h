@@ -128,27 +128,27 @@ public:
   CGNodeBase<ctx> &operator=(const CGNodeBase<ctx> &) = delete;
   CGNodeBase<ctx> &operator=(CGNodeBase<ctx> &&) = delete;
 
-  [[nodiscard]]
+  __attribute__((warn_unused_result))
   inline bool isSpecialNode() const {
     return this->getNodeID() < NORMAL_NODE_START_ID;
   }
 
-  [[nodiscard]]
+  __attribute__((warn_unused_result))
   inline bool isNullObj() const {
     return this->getNodeID() == NULL_OBJ;
   }
 
-  [[nodiscard]]
+  __attribute__((warn_unused_result))
   inline bool isUniObj() const {
     return this->getNodeID() == UNI_OBJ;
   }
 
-  [[nodiscard]]
+  __attribute__((warn_unused_result))
   inline bool isNullPtr() const {
     return this->getNodeID() == NULL_PTR;
   }
 
-  [[nodiscard]]
+  __attribute__((warn_unused_result))
   inline bool isUniPtr() const {
     return this->getNodeID() == UNI_PTR;
   }
@@ -205,9 +205,9 @@ public:
 #undef CLEAR_CONSTRAINT
   }
 
-  [[nodiscard]] inline CGNodeKind getType() const { return type; }
+  __attribute__((warn_unused_result)) inline CGNodeKind getType() const { return type; }
 
-  [[nodiscard]]
+  __attribute__((warn_unused_result))
   inline bool hasSuperNode() const {
     return superNode != nullptr;
   }
@@ -230,29 +230,29 @@ public:
     return this->indirectNodes.end();
   }
 
-  [[nodiscard]]
+  __attribute__((warn_unused_result))
   inline bool isFunctionPtr() {
     return !this->indirectNodes.empty();
   }
 
-  [[nodiscard]]
+  __attribute__((warn_unused_result))
   inline const GraphTy *getGraph() {
     return this->graph;
   }
 
-  [[nodiscard]]
+  __attribute__((warn_unused_result))
   inline NodeID getNodeID() const {
     return id;
   }
 
-  [[nodiscard]]
+  __attribute__((warn_unused_result))
   virtual std::string toString() const = 0;
   virtual ~CGNodeBase() = default;
 
   using cg_iterator = typename SetTy::iterator;
 
 #define __CONS_ITER__(DIRECTION, KIND, TYPE)                                   \
-  [[nodiscard]] inline cg_iterator DIRECTION##_##KIND##_##TYPE() {             \
+  __attribute__((warn_unused_result)) inline cg_iterator DIRECTION##_##KIND##_##TYPE() {             \
     constexpr auto index =                                                     \
         static_cast<std::underlying_type<Constraints>::type>(                  \
             Constraints::KIND);                                                \

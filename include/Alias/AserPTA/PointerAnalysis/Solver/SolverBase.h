@@ -308,7 +308,7 @@ protected:
     // llvm::outs() << this->getConsGraph()->getNodeNum();
   }
 
-  [[nodiscard]]
+  __attribute__((warn_unused_result))
   inline LangModel *getLangModel() const {
     return this->langModel.get();
   }
@@ -373,7 +373,7 @@ public:
 
   /// Expose language model for clients outside the solver (e.g., SVFGBuilder).
   /// This is read-only access; mutating the model from outside is unsupported.
-  [[nodiscard]] inline LangModel *getLangModelForClients() const {
+  __attribute__((warn_unused_result)) inline LangModel *getLangModelForClients() const {
     return langModel.get();
   }
 
@@ -476,7 +476,7 @@ public:
     return nullptr;
   }
 
-  [[nodiscard]] bool alias(const ctx *c1, const llvm::Value *v1, const ctx *c2,
+  __attribute__((warn_unused_result)) bool alias(const ctx *c1, const llvm::Value *v1, const ctx *c2,
                            const llvm::Value *v2) const {
     assert(v1->getType()->isPointerTy() && v2->getType()->isPointerTy());
 
@@ -488,7 +488,7 @@ public:
     return PT::intersectWithNoSpecialNode(n1, n2);
   }
 
-  [[nodiscard]] bool aliasIfExsit(const ctx *c1, const llvm::Value *v1,
+  __attribute__((warn_unused_result)) bool aliasIfExsit(const ctx *c1, const llvm::Value *v1,
                                   const ctx *c2, const llvm::Value *v2) const {
     assert(v1->getType()->isPointerTy() && v2->getType()->isPointerTy());
 
@@ -501,7 +501,7 @@ public:
     return PT::intersectWithNoSpecialNode(n1, n2);
   }
 
-  [[nodiscard]] bool hasIdenticalPTS(const ctx *c1, const llvm::Value *v1,
+  __attribute__((warn_unused_result)) bool hasIdenticalPTS(const ctx *c1, const llvm::Value *v1,
                                      const ctx *c2,
                                      const llvm::Value *v2) const {
     assert(v1->getType()->isPointerTy() && v2->getType()->isPointerTy());
@@ -514,7 +514,7 @@ public:
     return PT::equal(n1, n2);
   }
 
-  [[nodiscard]] bool containsPTS(const ctx *c1, const llvm::Value *v1,
+  __attribute__((warn_unused_result)) bool containsPTS(const ctx *c1, const llvm::Value *v1,
                                  const ctx *c2, const llvm::Value *v2) const {
     assert(v1->getType()->isPointerTy() && v2->getType()->isPointerTy());
 
@@ -527,40 +527,40 @@ public:
   }
 
   // Delegator of the language model
-  [[nodiscard]]
+  __attribute__((warn_unused_result))
   inline ConsGraphTy *getConsGraph() const {
     return LMT::getConsGraph(langModel.get());
   }
 
-  [[nodiscard]]
+  __attribute__((warn_unused_result))
   inline const CallGraphTy *getCallGraph() const {
     return LMT::getCallGraph(langModel.get());
   }
 
-  [[nodiscard]]
+  __attribute__((warn_unused_result))
   inline llvm::StringRef getEntryName() const {
     return LMT::getEntryName(this->getLangModel());
   }
 
-  [[nodiscard]]
+  __attribute__((warn_unused_result))
   inline const llvm::Module *getLLVMModule() const {
     return LMT::getLLVMModule(this->getLangModel());
   }
 
-  [[nodiscard]]
+  __attribute__((warn_unused_result))
   inline const CallGraphNode<ctx> *getDirectNode(const ctx *C,
                                                  const llvm::Function *F) {
     return LMT::getDirectNode(this->getLangModel(), C,
                               F); //->getDirectNode(C, F);
   }
 
-  [[nodiscard]]
+  __attribute__((warn_unused_result))
   inline const CallGraphNode<ctx> *
   getDirectNodeOrNull(const ctx *C, const llvm::Function *F) {
     return LMT::getDirectNodeOrNull(this->getLangModel(), C, F);
   }
 
-  [[nodiscard]]
+  __attribute__((warn_unused_result))
   inline const InDirectCallSite<ctx> *
   getInDirectCallSite(const ctx *C, const llvm::Instruction *I) {
     return LMT::getInDirectCallSite(this->getLangModel(), C, I);

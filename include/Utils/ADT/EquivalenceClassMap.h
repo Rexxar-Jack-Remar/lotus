@@ -62,11 +62,11 @@ public:
     this->insert(Vals.begin(), Vals.end());
   }
 
-  [[nodiscard]] inline const_iterator begin() const {
+  __attribute__((warn_unused_result)) inline const_iterator begin() const {
     return StoredData.begin();
   }
-  [[nodiscard]] inline const_iterator end() const { return StoredData.end(); }
-  [[nodiscard]] inline llvm::iterator_range<const_iterator>
+  __attribute__((warn_unused_result)) inline const_iterator end() const { return StoredData.end(); }
+  __attribute__((warn_unused_result)) inline llvm::iterator_range<const_iterator>
   equivalenceClasses() const {
     return llvm::make_range(begin(), end());
   }
@@ -137,7 +137,7 @@ public:
   }
 
   /// Return 1 if the specified key is in the map, 0 otherwise.
-  [[nodiscard]] inline size_type count(const KeyT &Key) const {
+  __attribute__((warn_unused_result)) inline size_type count(const KeyT &Key) const {
     for (auto &KVPair : StoredData) {
       if (KVPair.first.count(Key) >= 1) {
         return 1;
@@ -146,23 +146,23 @@ public:
     return 0;
   }
 
-  [[nodiscard]] inline size_type numEquivalenceClasses() const {
+  __attribute__((warn_unused_result)) inline size_type numEquivalenceClasses() const {
     return StoredData.size();
   }
 
   /// Returns the size of the map, i.e., the number of equivalence classes.
-  [[nodiscard]] inline size_type size() const {
+  __attribute__((warn_unused_result)) inline size_type size() const {
     return numEquivalenceClasses();
   }
 
-  [[nodiscard]] const_iterator find(key_type Key) const {
+  __attribute__((warn_unused_result)) const_iterator find(key_type Key) const {
     return llvm::find_if(StoredData,
                          [&Key](const EquivalenceClassBucketT &Val) -> bool {
                            return Val.first.count(Key) >= 1;
                          });
   }
 
-  [[nodiscard]] util::Optional<ValueT> findValue(key_type Key) const {
+  __attribute__((warn_unused_result)) util::Optional<ValueT> findValue(key_type Key) const {
     auto Search = find(Key);
     if (Search != StoredData.end()) {
       return Search->second;
@@ -271,16 +271,16 @@ public:
     return end();
   }
 
-  [[nodiscard]] inline size_t numEquivalenceClasses() const noexcept {
+  __attribute__((warn_unused_result)) inline size_t numEquivalenceClasses() const noexcept {
     return Values.size();
   }
 
   /// Returns the size of the map, i.e., the number of equivalence classes.
-  [[nodiscard]] inline size_t size() const noexcept {
+  __attribute__((warn_unused_result)) inline size_t size() const noexcept {
     return numEquivalenceClasses();
   }
 
-  [[nodiscard]] bool empty() const noexcept { return Values.empty(); }
+  __attribute__((warn_unused_result)) bool empty() const noexcept { return Values.empty(); }
 
   void clear() noexcept {
     Values.clear();

@@ -150,7 +150,7 @@ public:
   };
 
   // Return true if *this contains idx.
-  [[nodiscard]] bool contains(Index idx) const {
+  __attribute__((warn_unused_result)) bool contains(Index idx) const {
     const std::uint64_t chunk_id = chunkId(idx);
     const std::uint64_t offset = chunkOffset(idx);
     const std::size_t word = static_cast<std::size_t>(offset >> 6);
@@ -206,7 +206,7 @@ public:
     return true;
   }
 
-  [[nodiscard]] bool contains(const ChunkedSparseBitsetPtsSet &other) const {
+  __attribute__((warn_unused_result)) bool contains(const ChunkedSparseBitsetPtsSet &other) const {
     std::size_t i = 0;
     std::size_t j = 0;
     while (i < ids_.size() && j < other.ids_.size()) {
@@ -230,7 +230,7 @@ public:
 
   // Return true if this set and other have at least one element in common
   // (read-only).
-  [[nodiscard]] bool intersects(const ChunkedSparseBitsetPtsSet &other) const {
+  __attribute__((warn_unused_result)) bool intersects(const ChunkedSparseBitsetPtsSet &other) const {
     std::size_t i = 0;
     std::size_t j = 0;
     while (i < ids_.size() && j < other.ids_.size()) {
@@ -358,9 +358,9 @@ public:
     chunks_.reserve(n);
   }
 
-  [[nodiscard]] std::size_t getSize() const { return size_; }
+  __attribute__((warn_unused_result)) std::size_t getSize() const { return size_; }
 
-  [[nodiscard]] bool isEmpty() const noexcept { return chunks_.empty(); }
+  __attribute__((warn_unused_result)) bool isEmpty() const noexcept { return chunks_.empty(); }
 
   bool operator==(const ChunkedSparseBitsetPtsSet &other) const {
     return ids_ == other.ids_ && chunks_ == other.chunks_;

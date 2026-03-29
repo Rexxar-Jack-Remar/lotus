@@ -37,43 +37,43 @@ public:
   CtxFunction(const CtxFunction<ctx> &) = delete;
   CtxFunction<ctx> &operator=(const CtxFunction<ctx> &) = delete;
 
-  [[nodiscard]] inline const ctx *getContext() const { return this->context; }
+  __attribute__((warn_unused_result)) inline const ctx *getContext() const { return this->context; }
 
   inline void markAsExtFunction() { this->isExt = true; }
 
-  [[nodiscard]] inline const llvm::Function *getFunction() const {
+  __attribute__((warn_unused_result)) inline const llvm::Function *getFunction() const {
     return this->function;
   }
 
-  [[deprecated(
-      "The Callsite returned could be wrong")]] inline const llvm::Instruction *
+  __attribute__((deprecated(
+      "The Callsite returned could be wrong"))) inline const llvm::Instruction *
   getCallSite() const {
     return this->callSite;
   }
 
-  [[nodiscard]] inline CallGraphNode<ctx> *getCallNode() const {
+  __attribute__((warn_unused_result)) inline CallGraphNode<ctx> *getCallNode() const {
     return this->callNode;
   }
-  [[nodiscard]] inline bool isExtFunction() const { return this->isExt; }
+  __attribute__((warn_unused_result)) inline bool isExtFunction() const { return this->isExt; }
 
-  [[nodiscard]] inline auto begin() const -> decltype(function->begin()) {
+  __attribute__((warn_unused_result)) inline auto begin() const -> decltype(function->begin()) {
     return function->begin();
   }
 
-  [[nodiscard]] inline auto end() const -> decltype(function->end()) {
+  __attribute__((warn_unused_result)) inline auto end() const -> decltype(function->end()) {
     return function->end();
   }
 
-  [[nodiscard]] inline auto arg_begin() const
+  __attribute__((warn_unused_result)) inline auto arg_begin() const
       -> decltype(function->arg_begin()) {
     return function->arg_begin();
   }
 
-  [[nodiscard]] inline auto arg_end() const -> decltype(function->arg_end()) {
+  __attribute__((warn_unused_result)) inline auto arg_end() const -> decltype(function->arg_end()) {
     return function->arg_end();
   }
 
-  [[nodiscard]] inline llvm::StringRef getName() const {
+  __attribute__((warn_unused_result)) inline llvm::StringRef getName() const {
     return function->getName();
   }
 
@@ -113,16 +113,16 @@ public:
   InDirectCallSite(const InDirectCallSite<ctx> &) = delete;
   InDirectCallSite<ctx> &operator=(const InDirectCallSite<ctx> &) = delete;
 
-  [[nodiscard]] inline CallGraphNode<ctx> *getCallNode() const {
+  __attribute__((warn_unused_result)) inline CallGraphNode<ctx> *getCallNode() const {
     return this->callNode;
   }
-  [[nodiscard]] inline bool isInterceptedCallSite() const {
+  __attribute__((warn_unused_result)) inline bool isInterceptedCallSite() const {
     return this->funPtr != nullptr; // the callsite is changed by language model
   }
 
-  [[nodiscard]] inline const ctx *getContext() const { return this->context; }
+  __attribute__((warn_unused_result)) inline const ctx *getContext() const { return this->context; }
 
-  [[nodiscard]] inline const llvm::Value *getValue() const {
+  __attribute__((warn_unused_result)) inline const llvm::Value *getValue() const {
     if (funPtr != nullptr) {
       // overriden by language model.
       return funPtr;
@@ -130,15 +130,15 @@ public:
     return callSite.getCalledValue();
   }
 
-  [[nodiscard]] inline const llvm::Type *getCalledType() const {
+  __attribute__((warn_unused_result)) inline const llvm::Type *getCalledType() const {
     return this->getValue()->getType();
   }
 
-  [[nodiscard]] inline const llvm::Instruction *getCallSite() const {
+  __attribute__((warn_unused_result)) inline const llvm::Instruction *getCallSite() const {
     return this->callSite.getInstruction();
   }
 
-  [[nodiscard]] inline bool resolvedTo(const llvm::Function *fun) {
+  __attribute__((warn_unused_result)) inline bool resolvedTo(const llvm::Function *fun) {
     if (this->targets.size() >= MaxIndirectTarget) {
       return false;
     }
@@ -150,12 +150,12 @@ public:
     assert(result);
   }
 
-  [[nodiscard]]
+  __attribute__((warn_unused_result))
   inline const std::set<const CallGraphNode<ctx> *> &getResolvedNode() const {
     return this->resolvedNode;
   }
 
-  [[nodiscard]] inline const std::set<const llvm::Function *> &
+  __attribute__((warn_unused_result)) inline const std::set<const llvm::Function *> &
   getResolvedTarget() const {
     return this->targets;
   }

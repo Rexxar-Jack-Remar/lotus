@@ -59,25 +59,25 @@ public:
                                 const DIBasedTypeHierarchyData &SerializedData);
   ~DIBasedTypeHierarchy() override = default;
 
-  [[nodiscard]] bool hasType(ClassType Type) const override {
+  __attribute__((warn_unused_result)) bool hasType(ClassType Type) const override {
     return TypeToVertex.count(Type);
   }
 
-  [[nodiscard]] bool isSubType(ClassType Type,
+  __attribute__((warn_unused_result)) bool isSubType(ClassType Type,
                                ClassType SubType) const override {
     return llvm::is_contained(subTypesOf(Type), SubType);
   }
 
-  [[nodiscard]] std::set<ClassType> getSubTypes(ClassType Type) const override {
+  __attribute__((warn_unused_result)) std::set<ClassType> getSubTypes(ClassType Type) const override {
     const auto &Range = subTypesOf(Type);
     return {Range.begin(), Range.end()};
   }
 
   /// A more efficient version of getSubTypes()
-  [[nodiscard]] llvm::iterator_range<const ClassType *>
+  __attribute__((warn_unused_result)) llvm::iterator_range<const ClassType *>
   subTypesOf(ClassType Ty) const noexcept;
 
-  [[nodiscard]] llvm::Optional<ClassType>
+  __attribute__((warn_unused_result)) llvm::Optional<ClassType>
   getType(llvm::StringRef TypeName) const noexcept override {
     auto It = NameToType.find(TypeName);
     if (It != NameToType.end()) {
@@ -86,13 +86,13 @@ public:
     return llvm::None;
   }
 
-  [[nodiscard]] std::vector<ClassType> getAllTypes() const override {
+  __attribute__((warn_unused_result)) std::vector<ClassType> getAllTypes() const override {
     return {VertexTypes.begin(), VertexTypes.end()};
   }
 
-  [[nodiscard]] const auto &getAllVTables() const noexcept { return VTables; }
+  __attribute__((warn_unused_result)) const auto &getAllVTables() const noexcept { return VTables; }
 
-  [[nodiscard]] static llvm::StringRef typeName(ClassType Type) {
+  __attribute__((warn_unused_result)) static llvm::StringRef typeName(ClassType Type) {
     if (const auto *CompTy = llvm::dyn_cast<llvm::DICompositeType>(Type)) {
       auto Ident = CompTy->getIdentifier();
       return Ident.empty() ? CompTy->getName() : Ident;
@@ -100,14 +100,14 @@ public:
     return Type->getName();
   }
 
-  [[nodiscard]] llvm::StringRef getTypeName(ClassType Type) const override {
+  __attribute__((warn_unused_result)) llvm::StringRef getTypeName(ClassType Type) const override {
     return typeName(Type);
   }
 
-  [[nodiscard]] size_t size() const noexcept override {
+  __attribute__((warn_unused_result)) size_t size() const noexcept override {
     return VertexTypes.size();
   }
-  [[nodiscard]] bool empty() const noexcept override {
+  __attribute__((warn_unused_result)) bool empty() const noexcept override {
     return VertexTypes.empty();
   }
 
@@ -122,8 +122,8 @@ public:
   void printAsJson(llvm::raw_ostream &OS = llvm::outs()) const override;
 
 private:
-  [[nodiscard]] DIBasedTypeHierarchyData getTypeHierarchyData() const;
-  [[nodiscard]] llvm::iterator_range<const ClassType *>
+  __attribute__((warn_unused_result)) DIBasedTypeHierarchyData getTypeHierarchyData() const;
+  __attribute__((warn_unused_result)) llvm::iterator_range<const ClassType *>
   subTypesOf(size_t TypeIdx) const noexcept;
 
   // ---

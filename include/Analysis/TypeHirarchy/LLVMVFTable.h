@@ -48,9 +48,9 @@ public:
    * 	@param i Index of the entry.
    * 	@return Function identifier.
    */
-  [[nodiscard]] const llvm::Function *getFunction(unsigned Idx) const override;
+  __attribute__((warn_unused_result)) const llvm::Function *getFunction(unsigned Idx) const override;
 
-  [[nodiscard]] std::vector<const llvm::Function *>
+  __attribute__((warn_unused_result)) std::vector<const llvm::Function *>
   getAllFunctions() const override {
     return VFT;
   }
@@ -63,35 +63,35 @@ public:
    */
   int getIndex(const llvm::Function *F) const override;
 
-  [[nodiscard]] bool empty() const override { return VFT.empty(); };
+  __attribute__((warn_unused_result)) bool empty() const override { return VFT.empty(); };
 
-  [[nodiscard]] size_t size() const override { return VFT.size(); };
+  __attribute__((warn_unused_result)) size_t size() const override { return VFT.size(); };
 
   void print(llvm::raw_ostream &OS) const override;
 
-  [[nodiscard]] LLVMVFTableData getVFTableData() const;
+  __attribute__((warn_unused_result)) LLVMVFTableData getVFTableData() const;
 
   void printAsJson(llvm::raw_ostream &OS) const override;
 
-  [[nodiscard]] std::vector<const llvm::Function *>::iterator begin() noexcept {
+  __attribute__((warn_unused_result)) std::vector<const llvm::Function *>::iterator begin() noexcept {
     return VFT.begin();
   }
 
-  [[nodiscard]] std::vector<const llvm::Function *>::const_iterator
+  __attribute__((warn_unused_result)) std::vector<const llvm::Function *>::const_iterator
   begin() const noexcept {
     return VFT.begin();
   };
 
-  [[nodiscard]] std::vector<const llvm::Function *>::iterator end() noexcept {
+  __attribute__((warn_unused_result)) std::vector<const llvm::Function *>::iterator end() noexcept {
     return VFT.end();
   };
 
-  [[nodiscard]] std::vector<const llvm::Function *>::const_iterator
+  __attribute__((warn_unused_result)) std::vector<const llvm::Function *>::const_iterator
   end() const noexcept {
     return VFT.end();
   };
 
-  [[nodiscard]] static std::vector<const llvm::Function *>
+  __attribute__((warn_unused_result)) static std::vector<const llvm::Function *>
   getVFVectorFromIRVTable(const llvm::ConstantStruct &VT, uint32_t Index = 0);
 };
 

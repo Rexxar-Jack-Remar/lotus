@@ -44,7 +44,7 @@ public:
 
   friend class ConstraintGraph<ctx>;
 
-  [[nodiscard]] std::string toString() const {
+  __attribute__((warn_unused_result)) std::string toString() const {
     std::string str;
     llvm::raw_string_ostream os(str);
     if (this->isSuperNode()) {

@@ -12,6 +12,7 @@
 #include "Checker/AE/IntervalValue.h"
 #include "Checker/Report/BugReportMgr.h"
 #include "TestUtils/LLVMHelpers.h"
+#include "Utils/Types/Optional.h"
 
 #ifndef GTEST_INTERNAL_CPLUSPLUS_LANG
 #define GTEST_INTERNAL_CPLUSPLUS_LANG 201703L
@@ -22,7 +23,6 @@
 #include <gtest/gtest.h>
 
 #include <cstdlib>
-#include <optional>
 
 using namespace llvm;
 using namespace lotus::analysis;
@@ -52,7 +52,7 @@ protected:
       bool enableMemLeak = false,
       AbstractInterpretation::HandleRecur recursionMode =
           AbstractInterpretation::WIDEN_NARROW,
-      std::optional<unsigned> widenDelay = 3u, bool enableDivZero = false,
+      util::Optional<unsigned> widenDelay = 3u, bool enableDivZero = false,
       bool enableIntOverflow = false) {
     if (!module->getFunction("main")) {
       FunctionType *MainTy =
@@ -1235,7 +1235,7 @@ TEST_F(AECheckerTest, DefaultWidenDelayMatchesExplicitThree) {
   ASSERT_NE(defaultModule, nullptr);
   AEResult defaultResult = runAE(defaultModule.get(), true, false,
                                  AbstractInterpretation::WIDEN_NARROW,
-                                 std::nullopt);
+                                 util::nullopt);
   IntervalValue defaultRet =
       getFunctionReturnInterval(defaultModule.get(), "main");
 
@@ -1257,13 +1257,13 @@ TEST_F(AECheckerTest, ParitySensitiveRegressionHarness) {
     const char *source;
     size_t expectedOverflow;
     size_t expectedNull;
-    std::optional<IntervalValue> expectedMainReturn;
+    util::Optional<IntervalValue> expectedMainReturn;
     AbstractInterpretation::HandleRecur recursionMode;
-    std::optional<unsigned> widenDelay;
+    util::Optional<unsigned> widenDelay;
   };
 
   const std::vector<ParityCase> cases = {
-      {"recursive_top_summary",
+      ParityCase{"recursive_top_summary",
        R"(
          define i32 @demo(i32 %a) {
          entry:
@@ -1290,7 +1290,7 @@ TEST_F(AECheckerTest, ParitySensitiveRegressionHarness) {
        IntervalValue::top(),
        AbstractInterpretation::TOP,
        3u},
-      {"indirect_external_memcpy_no_null_false_positive",
+      ParityCase{"indirect_external_memcpy_no_null_false_positive",
        R"(
          declare void @llvm.memcpy.p0i8.p0i8.i64(i8*, i8*, i64, i1)
 
@@ -1309,7 +1309,7 @@ TEST_F(AECheckerTest, ParitySensitiveRegressionHarness) {
        )",
        1u,
        0u,
-       std::nullopt,
+       util::nullopt,
        AbstractInterpretation::WIDEN_NARROW,
        3u},
   };

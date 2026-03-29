@@ -32,7 +32,7 @@ private:
   static inline void clearAll() { ptsVec.clear(); }
 
   // get the pts of the corresponding node
-  [[nodiscard]] static inline const PtsTy &getPointsTo(NodeID id) {
+  __attribute__((warn_unused_result)) static inline const PtsTy &getPointsTo(NodeID id) {
     assert(id < ptsVec.size());
     return ptsVec[id];
   }
@@ -48,12 +48,12 @@ private:
   }
 
   // whether the two pts intersect
-  [[nodiscard]] static inline bool intersectWith(NodeID src, NodeID dst) {
+  __attribute__((warn_unused_result)) static inline bool intersectWith(NodeID src, NodeID dst) {
     assert(src < ptsVec.size() && dst < ptsVec.size());
     return ptsVec[src].intersects(ptsVec[dst]);
   }
 
-  [[nodiscard]] static inline bool intersectWithNoSpecialNode(NodeID src,
+  __attribute__((warn_unused_result)) static inline bool intersectWithNoSpecialNode(NodeID src,
                                                               NodeID dst) {
     assert(src < ptsVec.size() && dst < ptsVec.size());
     auto result = ptsVec[src] & ptsVec[dst];
@@ -73,34 +73,34 @@ private:
   }
 
   // Return true if this has idx as an element
-  [[nodiscard]] static inline bool has(NodeID src, TargetID idx) {
+  __attribute__((warn_unused_result)) static inline bool has(NodeID src, TargetID idx) {
     assert(src < ptsVec.size() && idx < ptsVec.size());
     return ptsVec[src].test(idx);
   }
 
-  [[nodiscard]] static inline bool equal(NodeID src, NodeID dst) {
+  __attribute__((warn_unused_result)) static inline bool equal(NodeID src, NodeID dst) {
     assert(src < ptsVec.size() && dst < ptsVec.size());
     return ptsVec[src] == ptsVec[dst];
   }
 
   // Return true if *this is a superset of other
-  [[nodiscard]] static inline bool contains(NodeID src, NodeID dst) {
+  __attribute__((warn_unused_result)) static inline bool contains(NodeID src, NodeID dst) {
     assert(src < ptsVec.size() && dst < ptsVec.size());
     return ptsVec[src].contains(ptsVec[dst]);
   }
 
-  [[nodiscard]] static inline bool isEmpty(NodeID id) {
+  __attribute__((warn_unused_result)) static inline bool isEmpty(NodeID id) {
     assert(id < ptsVec.size());
     return ptsVec[id].empty();
   }
 
-  [[nodiscard]] static inline iterator begin(NodeID id) {
+  __attribute__((warn_unused_result)) static inline iterator begin(NodeID id) {
     assert(id < ptsVec.size());
     assert(*ptsVec[id].begin() < ptsVec.size());
     return ptsVec[id].begin();
   }
 
-  [[nodiscard]] static inline iterator end(NodeID id) {
+  __attribute__((warn_unused_result)) static inline iterator end(NodeID id) {
     assert(id < ptsVec.size());
     return ptsVec[id].end();
   }

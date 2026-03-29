@@ -31,7 +31,7 @@ public:
            llvm::isa<llvm::InvokeInst>(callerSite));
   }
 
-  [[nodiscard]] inline const llvm::Instruction *getCallInstruction() const {
+  __attribute__((warn_unused_result)) inline const llvm::Instruction *getCallInstruction() const {
     return callerSite;
   }
 
@@ -88,26 +88,26 @@ public:
     }
   }
 
-  [[nodiscard]] inline bool isIndirectCall() const {
+  __attribute__((warn_unused_result)) inline bool isIndirectCall() const {
     return this->kind == CallKind::Indirect;
   }
 
-  [[nodiscard]] inline const CtxFunction<ctx> *getTargetFun() const {
+  __attribute__((warn_unused_result)) inline const CtxFunction<ctx> *getTargetFun() const {
     assert(kind == CallKind::Direct);
     return &this->target.fun;
   }
 
-  [[nodiscard]] inline const InDirectCallSite<ctx> *getTargetFunPtr() const {
+  __attribute__((warn_unused_result)) inline const InDirectCallSite<ctx> *getTargetFunPtr() const {
     assert(kind == CallKind::Indirect);
     return &this->target.funPtr;
   }
 
-  [[nodiscard]] inline InDirectCallSite<ctx> *getTargetFunPtr() {
+  __attribute__((warn_unused_result)) inline InDirectCallSite<ctx> *getTargetFunPtr() {
     assert(kind == CallKind::Indirect);
     return &this->target.funPtr;
   }
 
-  [[nodiscard]] inline const ctx *getContext() const {
+  __attribute__((warn_unused_result)) inline const ctx *getContext() const {
     if (kind == CallKind::Direct) {
       return target.fun.getContext();
     } else {

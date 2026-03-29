@@ -48,13 +48,13 @@ public:
   AllocSite<ctx> &operator=(AllocSite<ctx> &&) = delete;
 
   // getters
-  [[nodiscard]] inline const ctx *getContext() const { return this->context; }
+  __attribute__((warn_unused_result)) inline const ctx *getContext() const { return this->context; }
 
-  [[nodiscard]] inline const llvm::Value *getValue() const {
+  __attribute__((warn_unused_result)) inline const llvm::Value *getValue() const {
     return this->value;
   }
 
-  [[nodiscard]] inline AllocType getAllocType() const { return this->type; }
+  __attribute__((warn_unused_result)) inline AllocType getAllocType() const { return this->type; }
 
   friend FIObject<ctx>;
   friend MemBlock<ctx>;

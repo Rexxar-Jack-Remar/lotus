@@ -52,12 +52,12 @@ class PointedByPts {
   }
 
   // whether the two pts intersect
-  [[nodiscard]] static inline bool intersectWith(NodeID src, NodeID dst) {
+  __attribute__((warn_unused_result)) static inline bool intersectWith(NodeID src, NodeID dst) {
     assert(src < pointsTo.size() && dst < pointsTo.size());
     return pointsTo[src].intersects(pointsTo[dst]);
   }
 
-  [[nodiscard]] static inline bool intersectWithNoSpecialNode(NodeID src,
+  __attribute__((warn_unused_result)) static inline bool intersectWithNoSpecialNode(NodeID src,
                                                               NodeID dst) {
     assert(src < pointsTo.size() && dst < pointsTo.size());
     auto result = pointsTo[src] & pointsTo[dst];
@@ -78,34 +78,34 @@ class PointedByPts {
     return pointsTo[src].test_and_set(idx);
   }
 
-  [[nodiscard]] static inline bool equal(NodeID src, NodeID dst) {
+  __attribute__((warn_unused_result)) static inline bool equal(NodeID src, NodeID dst) {
     assert(src < pointsTo.size() && dst < pointsTo.size());
     return pointsTo[src] == pointsTo[dst];
   }
 
   // Return true if this has idx as an element
-  [[nodiscard]] static inline bool has(NodeID src, TargetID idx) {
+  __attribute__((warn_unused_result)) static inline bool has(NodeID src, TargetID idx) {
     assert(src < pointsTo.size() && idx < pointsTo.size());
     return pointsTo[src].test(idx);
   }
 
   // Return true if *this is a superset of other
-  [[nodiscard]] static inline bool contains(NodeID src, NodeID dst) {
+  __attribute__((warn_unused_result)) static inline bool contains(NodeID src, NodeID dst) {
     assert(src < pointsTo.size() && dst < pointsTo.size());
     return pointsTo[src].contains(pointsTo[dst]);
   }
 
-  [[nodiscard]] static inline bool isEmpty(NodeID id) {
+  __attribute__((warn_unused_result)) static inline bool isEmpty(NodeID id) {
     assert(id < pointsTo.size());
     return pointsTo[id].empty();
   }
 
-  [[nodiscard]] static inline iterator begin(NodeID id) {
+  __attribute__((warn_unused_result)) static inline iterator begin(NodeID id) {
     assert(id < pointsTo.size());
     return pointsTo[id].begin();
   }
 
-  [[nodiscard]] static inline iterator end(NodeID id) {
+  __attribute__((warn_unused_result)) static inline iterator end(NodeID id) {
     assert(id < pointsTo.size());
     return pointsTo[id].end();
   }
@@ -115,17 +115,17 @@ class PointedByPts {
     pointsTo[id].clear();
   }
 
-  [[nodiscard]] static inline const PtsTy &getPointedBy(NodeID id) {
+  __attribute__((warn_unused_result)) static inline const PtsTy &getPointedBy(NodeID id) {
     assert(id < pointsTo.size());
     return pointedBy[id];
   }
 
-  [[nodiscard]] static inline const PtsTy &getPointsTo(NodeID id) {
+  __attribute__((warn_unused_result)) static inline const PtsTy &getPointsTo(NodeID id) {
     assert(id < pointsTo.size());
     return pointsTo[id];
   }
 
-  [[nodiscard]] static inline size_t count(NodeID id) {
+  __attribute__((warn_unused_result)) static inline size_t count(NodeID id) {
     assert(id < pointsTo.size());
     return pointsTo[id].count();
   }

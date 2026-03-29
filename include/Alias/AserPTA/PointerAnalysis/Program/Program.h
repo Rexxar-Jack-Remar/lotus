@@ -20,13 +20,13 @@ public:
   ProgramPoint(const llvm::Instruction *inst, const ctx *context)
       : inst(inst), context(context) {}
 
-  [[nodiscard]] inline const llvm::Instruction *getInstruction() const {
+  __attribute__((warn_unused_result)) inline const llvm::Instruction *getInstruction() const {
     return this->inst;
   }
 
-  [[nodiscard]] inline const ctx *getContext() const { return this->context; }
+  __attribute__((warn_unused_result)) inline const ctx *getContext() const { return this->context; }
 
-  [[nodiscard]] inline bool isCallSite() const {
+  __attribute__((warn_unused_result)) inline bool isCallSite() const {
     if (inst == nullptr) {
       return false;
     }
