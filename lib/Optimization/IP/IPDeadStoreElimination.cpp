@@ -189,8 +189,6 @@ class IPDeadStoreElimination : public ModulePass {
   }
 
   inline void markToRemove(Value *V) {
-    // Fix Bug 1: if already marked Keep (e.g., via a different path), do not
-    // downgrade to Removable — just leave it as Keep.
     if (isMarkedKeep(V)) {
       return;
     }
@@ -200,9 +198,6 @@ class IPDeadStoreElimination : public ModulePass {
   // Given a call to shadow.mem.arg.XXX it finds the nearest actual
   // callsite from the original program and returns the called function.
   //
-  // Fix Bug 3: guard against the callsite being in a different block by
-  // limiting the scan to the current block and returning nullptr gracefully
-  // instead of crashing.
   const Function *findCalledFunction(const CallBase *MemSsaCB) {
     const Instruction *I = MemSsaCB;
     for (auto it = I->getIterator(), et = I->getParent()->end(); it != et;
@@ -336,8 +331,6 @@ public:
           continue;
         }
 
-        // Fix Bug 2: use isMarkedKeep() instead of m_valueMap[V] which
-        // default-constructs to false for unregistered values.
         if (isMarkedKeep(w.storeInstOrGvInit)) {
           continue;
         }
@@ -358,7 +351,6 @@ public:
         // indirect uses say it is not useless.
         for (auto &U : w.shadowMemInst->uses()) {
 
-          // Fix Bug 2: use isMarkedKeep() for the early-exit check.
           if (isMarkedKeep(w.storeInstOrGvInit)) {
             break;
           }
@@ -396,8 +388,6 @@ public:
               // shadow.mem.arg.ref_mod(...)
               const Function *calleeF = findCalledFunction(CB);
               if (!calleeF) {
-                // Fix Bug 3: gracefully handle missing callee instead of
-                // crashing — conservatively keep the store.
                 errs() << "Warning: [IPDSE] cannot find callee for "
                           "shadow.mem.XXX; keeping store conservatively.\n";
                 markToKeep(w.storeInstOrGvInit);
@@ -434,9 +424,6 @@ public:
               }
 
             } else if (isMemSSAFunIn(CB, OnlySingleton)) {
-              // Fix Bug 8: shadow.mem.in represents the entry of a value into
-              // a function. Enqueue its users so that stores inside callees
-              // reachable via shadow.mem.in are also explored.
               DSE_LOG(errs() << "\tin: enqueue users\n");
               for (auto &InU : CB->uses()) {
                 if (Instruction *InUI = dyn_cast<Instruction>(InU.getUser())) {
@@ -468,13 +455,10 @@ public:
                   // make things easier ...
                   if (!CI->getCalledFunction()) {
                     markToKeep(w.storeInstOrGvInit);
-                    // Fix Bug 9: use continue instead of break so remaining
-                    // callers are still checked.
                     continue;
                   }
                   if (hasFunctionPtrParam(CI->getCalledFunction())) {
                     markToKeep(w.storeInstOrGvInit);
-                    // Fix Bug 9: continue, not break.
                     continue;
                   }
 
@@ -486,7 +470,6 @@ public:
                     errs() << "TODO: unexpected case of callsite with no "
                               "actual parameters.\n";
                     markToKeep(w.storeInstOrGvInit);
-                    // Fix Bug 9: continue, not break — check remaining callers.
                     continue;
                   }
 
@@ -504,7 +487,6 @@ public:
                       // now, we play conservative and give up by
                       // keeping the store.
                       markToKeep(w.storeInstOrGvInit);
-                      // Fix Bug 9: continue, not break.
                       continue;
                     }
                   }
@@ -567,9 +549,6 @@ public:
   /// @brief Specify analysis dependencies and preserves
   /// @param AU Analysis usage information to populate
   virtual void getAnalysisUsage(AnalysisUsage &AU) const override {
-    // Fix Bug 4: do NOT call AU.setPreservesAll() — this pass erases
-    // instructions (StoreInst) and runs StripShadowMemPass, which invalidates
-    // most analyses. Declare only what is actually required.
 
     // Required to place shadow.mem.in and shadow.mem.out
     AU.addRequired<llvm::UnifyFunctionExitNodesLegacyPass>();

@@ -374,11 +374,6 @@ LocDPItem FlowDDA::getDPImWithOldCond(const LocDPItem &oldDpm, uint32_t objId,
                                       const SVFGNode *loc) const {
   LocDPItem dpm(oldDpm);
   dpm.setLocVar(loc, objId);
-  // Match SVF DDAVFSolver::getDPImWithOldCond: add load info for Store/Load
-  // nodes. Bug 5 fix (FlowDDA side): guard with hasLoadDpm(oldDpm) before
-  // calling getLoadDpm(oldDpm) for Store nodes. The old code called getLoadDpm
-  // unconditionally, triggering assert(false) + unsound fallback when oldDpm
-  // had no associated load DPM (e.g. path from EntryChi/FormalIn to a Store).
   FlowDDA *nonConstThis = const_cast<FlowDDA *>(this);
   if (isa<StoreSVFGNode>(loc) || isa<StoreChiSVFGNode>(loc)) {
     if (hasLoadDpm(oldDpm))

@@ -722,6 +722,52 @@ TEST(SaberConditionAllocatorTest,
   EXPECT_FALSE(builder.isStrongUpdatePublic(storeNode, singleton));
 }
 
+TEST(SaberConditionAllocatorTest,
+     StrongUpdateIsDisabledForUnknownObjectStores) {
+  LLVMContext context;
+  auto module = parseModule(context, R"(
+    declare i8** @unknown_pp()
+
+    define void @test(i8* %value) {
+    entry:
+      %pp = call i8** @unknown_pp()
+      store i8* %value, i8** %pp
+      ret void
+    }
+  )");
+  ASSERT_NE(module, nullptr);
+
+  auto icfg = std::make_unique<ICFG>();
+  ICFGBuilder icfgBuilder(icfg.get());
+  icfgBuilder.build(module.get());
+
+  TestSaberSVFGBuilder builder;
+  builder.setModule(module.get());
+
+  SVFGBuilderConfig cfg;
+  cfg.usePointerAnalysis = false;
+  cfg.buildMSSA = true;
+  SVFG *svfg = builder.build(icfg.get(), cfg);
+  ASSERT_NE(svfg, nullptr);
+  builder.setCurrentSVFG(svfg);
+
+  const StoreInst *store = getOnlyStore(*module, "test");
+  ASSERT_NE(store, nullptr);
+  SVFGNode *storeNode = svfg->getDef(store);
+  ASSERT_NE(storeNode, nullptr);
+
+  const Value *storePtr = store->getPointerOperand();
+  ASSERT_NE(storePtr, nullptr);
+  const uint32_t unknownObjId = builder.getUnknownObjId();
+  ASSERT_NE(unknownObjId, 0u);
+  svfg->setObjectValue(unknownObjId, storePtr);
+  ASSERT_EQ(svfg->getObjectId(storePtr), unknownObjId);
+  ASSERT_TRUE(svfg->isUnknownObject(unknownObjId));
+
+  uint32_t singleton = 0;
+  EXPECT_FALSE(builder.isStrongUpdatePublic(storeNode, singleton));
+}
+
 TEST(SaberConditionAllocatorTest, LeakCheckerSkipsUncalledFunctionsLikeSVF) {
   LLVMContext context;
   auto module = parseModule(context, R"(

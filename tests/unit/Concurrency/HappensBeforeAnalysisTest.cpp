@@ -246,7 +246,7 @@ TEST_F(HappensBeforeAnalysisTest,
 }
 
 TEST_F(HappensBeforeAnalysisTest,
-       UniqueConditionSignalCreatesHBForSingleWaiter) {
+       UniqueConditionSignalDoesNotCreateDefiniteHB) {
   const char *source = R"(
     @cond = global i8 0
     @mutex = global i8 0
@@ -296,9 +296,9 @@ TEST_F(HappensBeforeAnalysisTest,
   ASSERT_NE(store_shared, nullptr);
   ASSERT_NE(load_shared, nullptr);
 
-  EXPECT_TRUE(hb.happensBefore(store_shared, load_shared));
+  EXPECT_FALSE(hb.happensBefore(store_shared, load_shared));
   const auto &deferred = hb.getDeferredSyncCounts();
-  auto it = deferred.find("condvar_sync_edges");
+  auto it = deferred.find("condvar_relations_deferred");
   ASSERT_NE(it, deferred.end());
   EXPECT_GT(it->second, 0u);
 }

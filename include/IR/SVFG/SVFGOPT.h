@@ -26,7 +26,7 @@ public:
   };
 
   SVFGOPT()
-      : SVFG(), keepActualOutFormalIn(false), keepAllSelfCycle(false),
+      : SVFG(), keepActualOutFormalIn(false), keepAllSelfCycle(true),
         keepContextSelfCycle(false) {}
 
   ~SVFGOPT() override = default;
@@ -35,10 +35,16 @@ public:
     keepActualOutFormalIn = keep;
   }
 
-  inline void setKeepAllSelfCycle(bool keep = true) { keepAllSelfCycle = keep; }
+  inline void setKeepAllSelfCycle(bool keep = true) {
+    keepAllSelfCycle = keep;
+    if (keep)
+      keepContextSelfCycle = false;
+  }
 
   inline void setKeepContextSelfCycle(bool keep = true) {
     keepContextSelfCycle = keep;
+    if (keep)
+      keepAllSelfCycle = false;
   }
 
   SVFG *buildAndOptimize(const ICFG *icfg, const SVFGBuilderConfig &config);

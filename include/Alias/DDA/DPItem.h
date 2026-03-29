@@ -71,18 +71,6 @@ struct SVFGNode; // forward decl for StmtDPItem<SVFGNode>
 
 /// Base DP item (current variable only, no location).
 ///
-/// Bug 7 note: DPItem::operator< and operator== compare only `cur` (the node
-/// ID). This is intentional for the base class because DPItem has no location
-/// field. The concrete subclass StmtDPItem overrides both operators to also
-/// compare `curloc`, so std::set<StmtDPItem> / std::map<StmtDPItem,...>
-/// correctly distinguish items with the same cur but different locations.
-///
-/// The risk is that code instantiated with the static type DPItem (rather than
-/// StmtDPItem) would silently treat two items with the same cur but different
-/// locations as equal. To prevent this, DPItem should never be used directly
-/// as a map/set key; always use the concrete StmtDPItem (i.e. LocDPItem or
-/// CxtLocDPItem). The static_assert below enforces this at the call sites that
-/// matter most.
 class DPItem {
 protected:
   uint32_t cur;

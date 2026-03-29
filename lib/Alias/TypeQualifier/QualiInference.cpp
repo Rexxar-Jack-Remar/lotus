@@ -42,8 +42,6 @@ using namespace llvm;
 bool isEqual(const QualifierArray &a1, const QualifierArray &a2, unsigned);
 QualifierState getQualiForConstant(const ConstantExpr *, AndersNodeFactory &,
                                    const QualifierArray &);
-// bug 1: the length of the argument could be 0, so, we need to check the
-// FSummary.len each time we use relavent information
 void FuncAnalysis::qualiInference() { runForwardQualifierAnalysis(); }
 
 void FuncAnalysis::runForwardQualifierAnalysis() {

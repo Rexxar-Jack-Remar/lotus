@@ -253,8 +253,7 @@ NodeIndex AndersNodeFactory::getObjectNodeFor(const Value *val,
   }
 
   // For context-sensitive analysis, do NOT fall back across contexts to avoid
-  // returning an object node from an unrelated calling context (Bug 1.4).
-  //
+  // returning an object node from an unrelated calling context.
   // Exception: global variables are context-independent — their object nodes
   // are created once under initialCtx in collectConstraintsForGlobals() and
   // must be accessible from any calling context.
@@ -318,7 +317,7 @@ NodeIndex AndersNodeFactory::getReturnNodeFor(const llvm::Function *f,
       return itr->second;
   }
 
-  // For context-sensitive analysis, do NOT fall back across contexts (Bug 1.4).
+  // For context-sensitive analysis, do NOT fall back across contexts
   if (ctx != nullptr)
     return InvalidIndex;
 
@@ -340,7 +339,7 @@ NodeIndex AndersNodeFactory::getVarargNodeFor(const llvm::Function *f,
       return itr->second;
   }
 
-  // For context-sensitive analysis, do NOT fall back across contexts (Bug 1.4).
+  // For context-sensitive analysis, do NOT fall back across contexts
   if (ctx != nullptr)
     return InvalidIndex;
 

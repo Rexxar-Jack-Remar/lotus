@@ -360,7 +360,223 @@ findOrCreateConditionNode(GuardedValueFlowGraph &graph, Value *value) {
 }
 
 static GuardedValueFlowRegionNode *
-translateLocalPathCondToRegion(GuardedValueFlowGraph &graph, path_cond_t cond,
+translateImportedPathCondToRegion(GuardedValueFlowGraphBuilderPass &builder,
+                                  GuardedValueFlowGraph &graph,
+                                  path_cond_t cond,
+                                  BasicBlock *fallback_block);
+
+static GuardedValueFlowNode *
+findOrCreateCallTargetPredicateNode(GuardedValueFlowGraph &graph,
+                                    path_cond_t cond) {
+  if (!cond || cond->getKind() != PathCond::Kind::CallTargetAtom ||
+      !cond->getValue() || !cond->getCallee()) {
+    return nullptr;
+  }
+
+  if (auto *existing = graph.findSemanticConditionNode(cond))
+    return existing;
+
+  auto *called_value_node = findOrCreateConditionNode(graph, cond->getValue());
+  auto *callee_node =
+      ensureValueNode(graph, cond->getCallee(), cond->getCallee()->getType(),
+                      getEntryBlockOrNull(graph),
+                      GuardedValueFlowNode::Kind::SimpleOperand,
+                      "call.target.callee");
+  if (!called_value_node || !callee_node)
+    return nullptr;
+
+  BasicBlock *block = called_value_node->getParentBasicBlock()
+                          ? called_value_node->getParentBasicBlock()
+                          : getValueBlockOrEntry(graph, cond->getValue());
+  auto *cmp_opcode = graph.createNode<GuardedValueFlowOpcodeNode>(
+      GuardedValueFlowNode::Kind::SimpleOpcode,
+      Type::getInt1Ty(graph.getBaseFunction()->getContext()), &graph, block,
+      GuardedValueFlowOpcodeNode::OpcodeKind::ICmp);
+  cmp_opcode->setDescription("call.target.eq");
+  cmp_opcode->setCmpPredicate(CmpInst::ICMP_EQ);
+  cmp_opcode->addChild(callee_node);
+  cmp_opcode->addChild(called_value_node);
+
+  auto *cmp_value = graph.createNode<GuardedValueFlowNode>(
+      GuardedValueFlowNode::Kind::SimpleOperand,
+      Type::getInt1Ty(graph.getBaseFunction()->getContext()), &graph, block,
+      nullptr, dyn_cast<Instruction>(cond->getValue()));
+  cmp_value->setDescription("call.target.guard");
+  cmp_value->addChild(cmp_opcode);
+  graph.mapSemanticConditionNode(cond, cmp_value);
+  return cmp_value;
+}
+
+static GuardedValueFlowNode *
+createSwitchCaseCompare(GuardedValueFlowGraph &graph, SwitchInst *switch_inst,
+                        ConstantInt *case_value) {
+  if (!switch_inst || !case_value)
+    return nullptr;
+
+  auto *switch_value =
+      findOrCreateConditionNode(graph, switch_inst->getCondition());
+  auto *case_node = findOrCreateConditionNode(graph, case_value);
+  if (!switch_value || !case_node)
+    return nullptr;
+
+  auto *cmp_opcode = graph.createNode<GuardedValueFlowOpcodeNode>(
+      GuardedValueFlowNode::Kind::SimpleOpcode,
+      Type::getInt1Ty(graph.getBaseFunction()->getContext()), &graph,
+      switch_inst->getParent(), GuardedValueFlowOpcodeNode::OpcodeKind::ICmp);
+  cmp_opcode->setDescription("switch.case.eq");
+  cmp_opcode->setCmpPredicate(CmpInst::ICMP_EQ);
+  cmp_opcode->addChild(switch_value);
+  cmp_opcode->addChild(case_node);
+
+  auto *cmp_value = graph.createNode<GuardedValueFlowNode>(
+      GuardedValueFlowNode::Kind::SimpleOperand,
+      Type::getInt1Ty(graph.getBaseFunction()->getContext()), &graph,
+      switch_inst->getParent(), nullptr, switch_inst);
+  cmp_value->setDescription("switch.case.guard");
+  cmp_value->addChild(cmp_opcode);
+  return cmp_value;
+}
+
+static GuardedValueFlowNode *
+findOrCreateSwitchPredicateNode(GuardedValueFlowGraph &graph, path_cond_t cond) {
+  if (!cond || (cond->getKind() != PathCond::Kind::SwitchCaseAtom &&
+                cond->getKind() != PathCond::Kind::SwitchDefaultAtom)) {
+    return nullptr;
+  }
+
+  auto *switch_inst = cond->getBlock()
+                          ? dyn_cast_or_null<SwitchInst>(
+                                cond->getBlock()->getTerminator())
+                          : nullptr;
+  BasicBlock *successor = cond->getSuccessor();
+  if (!switch_inst || !successor)
+    return nullptr;
+
+  if (auto *existing = graph.findSyntheticGuardNode(switch_inst, successor))
+    return existing;
+
+  GuardedValueFlowNode *predicate = nullptr;
+  SmallVector<ConstantInt *, 4> matching_cases;
+  for (const auto &case_it : switch_inst->cases()) {
+    if (case_it.getCaseSuccessor() == successor)
+      matching_cases.push_back(case_it.getCaseValue());
+  }
+
+  if (!matching_cases.empty()) {
+    for (ConstantInt *case_value : matching_cases) {
+      auto *case_guard =
+          createSwitchCaseCompare(graph, switch_inst, case_value);
+      if (!case_guard)
+        return nullptr;
+      if (!predicate) {
+        predicate = case_guard;
+        continue;
+      }
+
+      auto *or_opcode = graph.createNode<GuardedValueFlowOpcodeNode>(
+          GuardedValueFlowNode::Kind::SimpleOpcode,
+          Type::getInt1Ty(graph.getBaseFunction()->getContext()), &graph,
+          switch_inst->getParent(), GuardedValueFlowOpcodeNode::OpcodeKind::Or);
+      or_opcode->setDescription("switch.case.or");
+      or_opcode->addChild(predicate);
+      or_opcode->addChild(case_guard);
+
+      auto *or_value = graph.createNode<GuardedValueFlowNode>(
+          GuardedValueFlowNode::Kind::SimpleOperand,
+          Type::getInt1Ty(graph.getBaseFunction()->getContext()), &graph,
+          switch_inst->getParent(), nullptr, switch_inst);
+      or_value->setDescription("switch.case.guard");
+      or_value->addChild(or_opcode);
+      predicate = or_value;
+    }
+  } else if (switch_inst->getDefaultDest() == successor) {
+    SmallVector<GuardedValueFlowNode *, 4> case_guards;
+    for (const auto &case_it : switch_inst->cases()) {
+      if (auto *case_guard =
+              createSwitchCaseCompare(graph, switch_inst, case_it.getCaseValue()))
+        case_guards.push_back(case_guard);
+    }
+
+    if (case_guards.empty()) {
+      predicate = findOrCreateConditionNode(
+          graph, ConstantInt::getTrue(graph.getBaseFunction()->getContext()));
+    } else {
+      GuardedValueFlowNode *covered = case_guards.front();
+      for (size_t idx = 1; idx < case_guards.size(); ++idx) {
+        auto *or_opcode = graph.createNode<GuardedValueFlowOpcodeNode>(
+            GuardedValueFlowNode::Kind::SimpleOpcode,
+            Type::getInt1Ty(graph.getBaseFunction()->getContext()), &graph,
+            switch_inst->getParent(),
+            GuardedValueFlowOpcodeNode::OpcodeKind::Or);
+        or_opcode->setDescription("switch.default.covered");
+        or_opcode->addChild(covered);
+        or_opcode->addChild(case_guards[idx]);
+
+        auto *or_value = graph.createNode<GuardedValueFlowNode>(
+            GuardedValueFlowNode::Kind::SimpleOperand,
+            Type::getInt1Ty(graph.getBaseFunction()->getContext()), &graph,
+            switch_inst->getParent(), nullptr, switch_inst);
+        or_value->setDescription("switch.default.covered");
+        or_value->addChild(or_opcode);
+        covered = or_value;
+      }
+
+      auto *not_opcode = graph.createNode<GuardedValueFlowOpcodeNode>(
+          GuardedValueFlowNode::Kind::SimpleOpcode,
+          Type::getInt1Ty(graph.getBaseFunction()->getContext()), &graph,
+          switch_inst->getParent(),
+          GuardedValueFlowOpcodeNode::OpcodeKind::Xor);
+      not_opcode->setDescription("switch.default.not");
+      not_opcode->setIntConstant(-1);
+      not_opcode->addChild(covered);
+
+      auto *not_value = graph.createNode<GuardedValueFlowNode>(
+          GuardedValueFlowNode::Kind::SimpleOperand,
+          Type::getInt1Ty(graph.getBaseFunction()->getContext()), &graph,
+          switch_inst->getParent(), nullptr, switch_inst);
+      not_value->setDescription("switch.default.guard");
+      not_value->addChild(not_opcode);
+      predicate = not_value;
+    }
+  }
+
+  if (predicate)
+    graph.mapSyntheticGuardNode(switch_inst, successor, predicate);
+  return predicate;
+}
+
+static GuardedValueFlowNode *
+findOrCreateInvokePredicateNode(GuardedValueFlowGraph &graph, path_cond_t cond) {
+  if (!cond || (cond->getKind() != PathCond::Kind::InvokeNormalAtom &&
+                cond->getKind() != PathCond::Kind::InvokeUnwindAtom)) {
+    return nullptr;
+  }
+
+  auto *invoke_inst = cond->getBlock()
+                          ? dyn_cast_or_null<InvokeInst>(
+                                cond->getBlock()->getTerminator())
+                          : nullptr;
+  BasicBlock *successor = cond->getSuccessor();
+  if (!invoke_inst || !successor)
+    return nullptr;
+
+  if (auto *existing = graph.findSyntheticGuardNode(invoke_inst, successor))
+    return existing;
+
+  auto *node = graph.createNode<GuardedValueFlowNode>(
+      GuardedValueFlowNode::Kind::SimpleOperand,
+      Type::getInt1Ty(graph.getBaseFunction()->getContext()), &graph,
+      invoke_inst->getParent(), nullptr, invoke_inst);
+  node->setDescription(cond->getKind() == PathCond::Kind::InvokeNormalAtom
+                           ? "invoke.normal.guard"
+                           : "invoke.unwind.guard");
+  graph.mapSyntheticGuardNode(invoke_inst, successor, node);
+  return node;
+}
+
+static GuardedValueFlowRegionNode *
+translateLocalPathCondToRegion(GuardedValueFlowGraphBuilderPass &builder,
+                               GuardedValueFlowGraph &graph, path_cond_t cond,
                                BasicBlock *fallback_block) {
   if (!cond)
     return graph.getAlwaysTrueRegion();
@@ -409,36 +625,87 @@ translateLocalPathCondToRegion(GuardedValueFlowGraph &graph, path_cond_t cond,
     return nullptr;
   case PathCond::Kind::Not: {
     auto *input =
-        translateLocalPathCondToRegion(graph, cond->getLhs(), fallback_block);
+        translatePathCondToRegion(builder, graph, cond->getLhs(), fallback_block);
     return input ? graph.findOrCreateNotRegion(input, fallback_block) : nullptr;
   }
   case PathCond::Kind::And: {
     auto *lhs =
-        translateLocalPathCondToRegion(graph, cond->getLhs(), fallback_block);
+        translatePathCondToRegion(builder, graph, cond->getLhs(), fallback_block);
     auto *rhs =
-        translateLocalPathCondToRegion(graph, cond->getRhs(), fallback_block);
+        translatePathCondToRegion(builder, graph, cond->getRhs(), fallback_block);
     if (!lhs || !rhs)
       return nullptr;
     return graph.findOrCreateAndRegion(lhs, rhs, fallback_block);
   }
   case PathCond::Kind::Or: {
     auto *lhs =
-        translateLocalPathCondToRegion(graph, cond->getLhs(), fallback_block);
+        translatePathCondToRegion(builder, graph, cond->getLhs(), fallback_block);
     auto *rhs =
-        translateLocalPathCondToRegion(graph, cond->getRhs(), fallback_block);
+        translatePathCondToRegion(builder, graph, cond->getRhs(), fallback_block);
     if (!lhs || !rhs)
       return nullptr;
     return graph.findOrCreateOrRegion(lhs, rhs, fallback_block);
   }
   case PathCond::Kind::ImportedAtom:
-  case PathCond::Kind::CallTargetAtom:
+    return translateImportedPathCondToRegion(builder, graph, cond,
+                                             fallback_block);
+  case PathCond::Kind::CallTargetAtom: {
+    auto *predicate = findOrCreateCallTargetPredicateNode(graph, cond);
+    BasicBlock *block =
+        fallback_block ? fallback_block : getValueBlockOrEntry(graph, cond->getValue());
+    return predicate ? graph.findOrCreateUnitRegion(
+                           predicate, true, block, ConditionRef::fromPathCond(cond))
+                     : nullptr;
+  }
   case PathCond::Kind::SwitchCaseAtom:
-  case PathCond::Kind::SwitchDefaultAtom:
+  case PathCond::Kind::SwitchDefaultAtom: {
+    auto *predicate = findOrCreateSwitchPredicateNode(graph, cond);
+    BasicBlock *block = cond->getSuccessor();
+    if (!block)
+      block = cond->getBlock() ? cond->getBlock() : fallback_block;
+    return predicate ? graph.findOrCreateUnitRegion(
+                           predicate, true, block, ConditionRef::fromPathCond(cond))
+                     : nullptr;
+  }
   case PathCond::Kind::InvokeNormalAtom:
-  case PathCond::Kind::InvokeUnwindAtom:
-    return nullptr;
+  case PathCond::Kind::InvokeUnwindAtom: {
+    auto *predicate = findOrCreateInvokePredicateNode(graph, cond);
+    BasicBlock *block = cond->getSuccessor();
+    if (!block)
+      block = cond->getBlock() ? cond->getBlock() : fallback_block;
+    return predicate ? graph.findOrCreateUnitRegion(
+                           predicate, true, block, ConditionRef::fromPathCond(cond))
+                     : nullptr;
+  }
   }
   return nullptr;
+}
+
+static GuardedValueFlowRegionNode *
+translateImportedPathCondToRegion(GuardedValueFlowGraphBuilderPass &builder,
+                                  GuardedValueFlowGraph &graph, path_cond_t cond,
+                                  BasicBlock *fallback_block) {
+  path_cond_t imported_source =
+      cond && cond->getKind() == PathCond::Kind::ImportedAtom
+          ? cond->getImportedSource()
+          : nullptr;
+  if (!imported_source)
+    return nullptr;
+
+  Function *origin_func = imported_source->getOwnerFunc();
+  if (!origin_func || !builder.hasGraphFor(*origin_func))
+    return nullptr;
+
+  auto &origin_graph = builder.getGraph(*origin_func);
+  auto *origin_region = translatePathCondToRegion(
+      builder, origin_graph, imported_source,
+      getFunctionEntryBlockOrNull(origin_func));
+  if (!origin_region)
+    return nullptr;
+
+  BasicBlock *block = fallback_block ? fallback_block : getEntryBlockOrNull(graph);
+  return graph.findOrCreateUnitRegion(origin_region, true, block,
+                                      ConditionRef::fromPathCond(cond));
 }
 
 static GuardedValueFlowRegionNode *
@@ -448,7 +715,7 @@ translatePathCondToRegion(GuardedValueFlowGraphBuilderPass &builder,
   if (!cond)
     return graph.getAlwaysTrueRegion();
   if (auto *structural =
-          translateLocalPathCondToRegion(graph, cond, fallback_block)) {
+          translateLocalPathCondToRegion(builder, graph, cond, fallback_block)) {
     return structural;
   }
   // Fall back to a semantic/interface region when the path condition cannot be

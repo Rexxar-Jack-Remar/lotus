@@ -145,6 +145,28 @@ bool areDisjointConstantOffsetPointers(const Value *lhs, const Value *rhs,
   return lhs_end <= rhs_offset || rhs_end <= lhs_offset;
 }
 
+bool instructionPrecedesOrEquals(const Instruction *lhs,
+                                 const Instruction *rhs,
+                                 const Function *func) {
+  if (!lhs || !rhs || !func) {
+    return false;
+  }
+  if (lhs == rhs) {
+    return true;
+  }
+
+  for (const Instruction &inst : instructions(func)) {
+    if (&inst == lhs) {
+      return true;
+    }
+    if (&inst == rhs) {
+      return false;
+    }
+  }
+
+  return false;
+}
+
 } // namespace
 
 // ============================================================================
@@ -1001,6 +1023,19 @@ void LockSetAnalysis::computeIntraproceduralLockSets(Function *func) {
     LockSet may_out = transfer(inst, may_in, false);
     LockSet must_out = transfer(inst, must_in, true);
 
+    // Function summaries and transfer functions are modeled against normal
+    // return behavior. For a potentially-throwing invoke, those facts are too
+    // strong for the exceptional successor, and we store one exit fact for all
+    // successors. Drop must-lock certainty at the invoke exit rather than
+    // propagating unsound protection through the unwind edge.
+    if (const auto *invoke = dyn_cast<InvokeInst>(inst)) {
+      if (!invoke->doesNotThrow()) {
+        must_read_out.clear();
+        must_write_out.clear();
+        must_out.clear();
+      }
+    }
+
     // First time we see this instruction we must propagate (otherwise we never
     // add successors when the computed value equals the default empty set).
     bool had_entry = m_may_locksets_entry.count(inst);
@@ -1297,10 +1332,9 @@ LockSet LockSetAnalysis::transfer(const Instruction *inst,
         const Function *parent_func = inst->getFunction();
         auto raii_it = m_raii_locks.find(parent_func);
         if (raii_it != m_raii_locks.end()) {
-          // Find the RAII lock object for this destructor
+          // Find the RAII lifetime instance for this destructor.
           for (const auto &raii_entry : raii_it->second) {
             const RAIILock::LockLifetime &lifetime = raii_entry.second;
-            // Check if this destructor call corresponds to this lock lifetime
             for (const Instruction *dtor : lifetime.destructors) {
               if (dtor == inst && !lifetime.underlyingLocks.empty()) {
                 for (const Value *underlying : lifetime.underlyingLocks) {
@@ -1757,6 +1791,36 @@ void LockSetAnalysis::transferReadWrite(const Instruction *inst,
         return false;
       }
 
+      auto eraseMustReleasedLock = [&](LockID released_lock) {
+        if (!released_lock) {
+          return;
+        }
+        candidate_read.erase(released_lock);
+        candidate_write.erase(released_lock);
+        if (!m_alias_analysis) {
+          return;
+        }
+
+        LockSet aliased_read;
+        LockSet aliased_write;
+        for (const auto *held : candidate_read) {
+          if (mayAlias(held, released_lock)) {
+            aliased_read.insert(held);
+          }
+        }
+        for (const auto *held : candidate_write) {
+          if (mayAlias(held, released_lock)) {
+            aliased_write.insert(held);
+          }
+        }
+        for (const auto *held : aliased_read) {
+          candidate_read.erase(held);
+        }
+        for (const auto *held : aliased_write) {
+          candidate_write.erase(held);
+        }
+      };
+
       const FunctionSummary &summary = it->second;
       if (!is_must) {
         candidate_read.insert(summary.may_read_acquire_delta.begin(),
@@ -1769,14 +1833,12 @@ void LockSetAnalysis::transferReadWrite(const Instruction *inst,
         candidate_write.insert(summary.must_write_acquire_delta.begin(),
                                summary.must_write_acquire_delta.end());
         for (LockID lock : summary.may_release_delta) {
-          candidate_read.erase(lock);
-          candidate_write.erase(lock);
+          eraseMustReleasedLock(lock);
         }
       }
 
       for (LockID lock : summary.must_release_delta) {
-        candidate_read.erase(lock);
-        candidate_write.erase(lock);
+        eraseMustReleasedLock(lock);
       }
       return true;
     };
@@ -2064,19 +2126,46 @@ LockSetAnalysis::getUnderlyingRAIILocks(const Instruction *inst,
     base = underlying->stripPointerCasts();
   }
 
-  const auto *alloca = dyn_cast<AllocaInst>(base);
-  if (!alloca) {
+  auto lifetime_range = raii_it->second.equal_range(base);
+  if (lifetime_range.first == lifetime_range.second) {
     return locks;
   }
 
-  auto lifetime_it = raii_it->second.find(alloca);
-  if (lifetime_it == raii_it->second.end()) {
+  const RAIILock::LockLifetime *selected_lifetime = nullptr;
+  for (auto lifetime_it = lifetime_range.first; lifetime_it != lifetime_range.second;
+       ++lifetime_it) {
+    const RAIILock::LockLifetime &lifetime = lifetime_it->second;
+    if (std::find(lifetime.destructors.begin(), lifetime.destructors.end(),
+                  inst) != lifetime.destructors.end()) {
+      selected_lifetime = &lifetime;
+      break;
+    }
+
+    if (!lifetime.constructor || lifetime.constructor->getFunction() !=
+                                     inst->getFunction()) {
+      continue;
+    }
+    if (!instructionPrecedesOrEquals(lifetime.constructor, inst,
+                                     inst->getFunction())) {
+      continue;
+    }
+    if (!selected_lifetime ||
+        instructionPrecedesOrEquals(selected_lifetime->constructor,
+                                    lifetime.constructor,
+                                    inst->getFunction())) {
+      selected_lifetime = &lifetime;
+    }
+  }
+
+  if (!selected_lifetime) {
     return locks;
   }
 
-  for (const Value *lock : lifetime_it->second.underlyingLocks) {
+  for (const Value *lock : selected_lifetime->underlyingLocks) {
     if (LockID canonical = getCanonicalLock(lock)) {
-      locks.push_back(canonical);
+      if (std::find(locks.begin(), locks.end(), canonical) == locks.end()) {
+        locks.push_back(canonical);
+      }
     }
   }
   return locks;
@@ -2162,7 +2251,7 @@ LockSetAnalysis::getImpreciseRAIILocksInFunction(const Function *func) const {
 
   for (const auto &entry : raii_it->second) {
     const RAIILock::LockLifetime &lifetime = entry.second;
-    if (lifetime.hasPreciseLifetimeEnd || !lifetime.impreciseLifetimeBoundary) {
+    if (lifetime.hasPreciseLifetimeEnd) {
       continue;
     }
     for (const Value *lock : lifetime.underlyingLocks) {

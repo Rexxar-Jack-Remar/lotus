@@ -1224,10 +1224,33 @@ void MHPAnalysis::handleBarrier(const Instruction *barrier_inst,
 }
 
 void MHPAnalysis::finalizeBarrierPhases() {
+  auto phaseMayContainRepeatedParticipant =
+      [this](const std::vector<BarrierParticipant> &participants) {
+        for (const BarrierParticipant &participant : participants) {
+          const SyncNode *arrival = participant.arrival;
+          const Instruction *inst = arrival ? arrival->getInstruction() : nullptr;
+          if (!inst || !m_thread_multiplicity) {
+            continue;
+          }
+          if (m_thread_multiplicity->instructionMayExecuteMultipleTimes(inst)) {
+            return true;
+          }
+        }
+        return false;
+      };
+
   for (const auto &barrier_entry : m_barrier_waits) {
     const Value *barrier_key = barrier_entry.first
                                    ? barrier_entry.first->stripPointerCasts()
                                    : nullptr;
+    std::unordered_set<ThreadID> all_threads_for_barrier;
+    for (const auto &phase_entry : barrier_entry.second) {
+      for (const BarrierParticipant &participant : phase_entry.second) {
+        if (participant.arrival) {
+          all_threads_for_barrier.insert(participant.arrival->getThreadID());
+        }
+      }
+    }
     const size_t expected_count =
         barrier_key && m_barrier_expected_counts.count(barrier_key)
             ? m_barrier_expected_counts.at(barrier_key)
@@ -1240,7 +1263,26 @@ void MHPAnalysis::finalizeBarrierPhases() {
           distinct_threads.insert(participant.arrival->getThreadID());
         }
       }
-      if (expected_count != 0 && distinct_threads.size() < expected_count) {
+
+      bool phase_has_multi_instance_thread = false;
+      for (ThreadID tid : distinct_threads) {
+        if (isMultiInstanceThread(tid)) {
+          phase_has_multi_instance_thread = true;
+          break;
+        }
+      }
+      if (!phase_has_multi_instance_thread &&
+          phaseMayContainRepeatedParticipant(participants)) {
+        phase_has_multi_instance_thread = true;
+      }
+
+      const bool phase_complete =
+          !phase_has_multi_instance_thread && !distinct_threads.empty() &&
+          (expected_count != 0
+               ? distinct_threads.size() == expected_count
+               : !m_has_unresolved_fork &&
+                     distinct_threads.size() == all_threads_for_barrier.size());
+      if (!phase_complete) {
         continue;
       }
       for (size_t i = 0; i < participants.size(); ++i) {

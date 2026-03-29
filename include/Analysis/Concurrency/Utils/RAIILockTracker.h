@@ -61,8 +61,10 @@ struct LockLifetime {
  */
 class RAIILockTracker {
 private:
-  /// Map from lock object allocation to its lifetime info
-  std::map<const llvm::Value *, LockLifetime> lockLifetimes;
+  /// Lifetime records keyed by lock object allocation.
+  /// Multiple entries are allowed when the same wrapper storage is reused for
+  /// distinct constructor/destructor pairs.
+  std::multimap<const llvm::Value *, LockLifetime> lockLifetimes;
   
   /// Set of destructor calls we've already processed
   std::set<const llvm::Instruction *> processedDestructors;
@@ -79,7 +81,7 @@ public:
   /**
    * @brief Get the lifetime information for a lock object
    * @param alloca The allocation site of the lock object
-   * @return Pointer to LockLifetime if found, nullptr otherwise
+   * @return Pointer to the first LockLifetime if found, nullptr otherwise
    */
   const LockLifetime *getLockLifetime(const llvm::Value *lockObject) const;
 
@@ -99,9 +101,10 @@ public:
 
   /**
    * @brief Get all lock lifetimes tracked in this function
-   * @return Map of lock-object identity -> LockLifetime
+   * @return Multi-map of lock-object identity -> LockLifetime
    */
-  const std::map<const llvm::Value *, LockLifetime> &getAllLockLifetimes() const {
+  const std::multimap<const llvm::Value *, LockLifetime> &
+  getAllLockLifetimes() const {
     return lockLifetimes;
   }
 

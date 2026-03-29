@@ -77,22 +77,46 @@ void EscapeAnalysis::runEscapeAnalysis() {
       }
     }
   };
+  auto seedPotentialSinkArguments = [&](const CallBase *call) {
+    if (!call) {
+      return;
+    }
+
+    auto *threadAPI = ThreadAPI::getThreadAPI();
+    if (threadAPI && threadAPI->isTDFork(call)) {
+      for (const Value *arg : threadAPI->getForkPayloadArgs(call)) {
+        if (arg && arg->getType()->isPointerTy()) {
+          enqueueEscaped(arg);
+        }
+      }
+      return;
+    }
+
+    const Function *callee = resolveInternalCallee(call);
+    if (callee && callee->isIntrinsic()) {
+      return;
+    }
+    if (callee && !callee->isDeclaration()) {
+      return;
+    }
+
+    for (unsigned i = 0; i < call->arg_size(); ++i) {
+      const Value *arg = call->getArgOperand(i);
+      if (arg && arg->getType()->isPointerTy()) {
+        enqueueEscaped(arg);
+      }
+    }
+  };
 
   // 1. Initial seeds
   for (const GlobalValue &gv : m_module.globals()) {
     enqueueEscaped(&gv);
   }
 
-  auto *threadAPI = ThreadAPI::getThreadAPI();
   for (Function &F : m_module) {
     for (inst_iterator I = inst_begin(F), E = inst_end(F); I != E; ++I) {
-      Instruction *inst = &*I;
-      if (threadAPI->isTDFork(inst)) {
-        for (const Value *arg : threadAPI->getForkPayloadArgs(inst)) {
-          if (arg && arg->getType()->isPointerTy()) {
-            enqueueEscaped(arg);
-          }
-        }
+      if (const auto *call = dyn_cast<CallBase>(&*I)) {
+        seedPotentialSinkArguments(call);
       }
     }
   }
@@ -101,6 +125,39 @@ void EscapeAnalysis::runEscapeAnalysis() {
   while (!worklist.empty()) {
     const Value *curr = worklist.front();
     worklist.pop_front();
+    curr = curr->stripPointerCasts();
+
+    if (const auto *cast = dyn_cast<CastInst>(curr)) {
+      enqueueEscaped(cast->getOperand(0));
+    } else if (const auto *gep = dyn_cast<GetElementPtrInst>(curr)) {
+      enqueueEscaped(gep->getPointerOperand());
+    } else if (const auto *phi = dyn_cast<PHINode>(curr)) {
+      for (const Value *incoming : phi->incoming_values()) {
+        enqueueEscaped(incoming);
+      }
+    } else if (const auto *select = dyn_cast<SelectInst>(curr)) {
+      enqueueEscaped(select->getTrueValue());
+      enqueueEscaped(select->getFalseValue());
+    } else if (const auto *load = dyn_cast<LoadInst>(curr)) {
+      enqueueEscaped(load->getPointerOperand());
+      const Value *pointer = load->getPointerOperand();
+      for (const User *user : pointer->users()) {
+        if (const auto *store = dyn_cast<StoreInst>(user)) {
+          if (store->getPointerOperand() == pointer) {
+            enqueueEscaped(store->getValueOperand());
+          }
+        }
+      }
+    } else if (const auto *call = dyn_cast<CallBase>(curr)) {
+      const Function *callee = resolveInternalCallee(call);
+      if (callee && !callee->isDeclaration()) {
+        for (const BasicBlock &BB : *callee) {
+          if (const auto *ret = dyn_cast<ReturnInst>(BB.getTerminator())) {
+            enqueueEscaped(ret->getReturnValue());
+          }
+        }
+      }
+    }
 
     for (const User *U : curr->users()) {
       if (const auto *inst = dyn_cast<Instruction>(U)) {
@@ -127,15 +184,13 @@ void EscapeAnalysis::runEscapeAnalysis() {
                 enqueueEscaped(callee->getArg(i));
               }
             }
-          }
-          // If the call site itself is escaped (e.g. return value escapes), 
-          // then the return values from all returns in callee escape.
-          if (cb == curr && callee && !callee->isDeclaration()) {
-             for (const BasicBlock &BB : *callee) {
-               if (const auto *ret = dyn_cast<ReturnInst>(BB.getTerminator())) {
-                 if (ret->getReturnValue()) enqueueEscaped(ret->getReturnValue());
-               }
-             }
+          } else {
+            for (unsigned i = 0; i < cb->arg_size(); ++i) {
+              if (cb->getArgOperand(i) == curr &&
+                  cb->getArgOperand(i)->getType()->isPointerTy()) {
+                enqueueEscaped(cb->getArgOperand(i));
+              }
+            }
           }
         } else if (const auto *ret = dyn_cast<ReturnInst>(inst)) {
           // Return value escapes to all call sites
@@ -155,6 +210,18 @@ void EscapeAnalysis::runEscapeAnalysis() {
       for (const User *U : F->users()) {
         if (const auto *cb = dyn_cast<CallBase>(U)) {
           if (resolveInternalCallee(cb) == F && arg->getArgNo() < cb->arg_size()) {
+            enqueueEscaped(cb->getArgOperand(arg->getArgNo()));
+          }
+        }
+      }
+      for (const Function &moduleFunc : m_module) {
+        for (const BasicBlock &BB : moduleFunc) {
+          for (const Instruction &I : BB) {
+            const auto *cb = dyn_cast<CallBase>(&I);
+            if (!cb || resolveInternalCallee(cb) != F ||
+                arg->getArgNo() >= cb->arg_size()) {
+              continue;
+            }
             enqueueEscaped(cb->getArgOperand(arg->getArgNo()));
           }
         }

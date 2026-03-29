@@ -1630,6 +1630,46 @@ void HappensBeforeAnalysis::buildSynchronizesWith() {
 
   size_t barrier_edges = 0;
   size_t deferred_barrier_relations = 0;
+  std::unordered_map<const Value *, std::unordered_set<mhp::ThreadID>>
+      barrier_threads_by_identity;
+  for (const Instruction *candidate : barrier_arrives) {
+    const Value *barrier =
+        threadAPI->getBarrierVal(candidate)
+            ? threadAPI->getBarrierVal(candidate)->stripPointerCasts()
+            : nullptr;
+    barrier_threads_by_identity[barrier].insert(m_mhp.getThreadID(candidate));
+  }
+  for (const Instruction *candidate : barrier_waits) {
+    const Value *barrier =
+        threadAPI->getBarrierVal(candidate)
+            ? threadAPI->getBarrierVal(candidate)->stripPointerCasts()
+            : nullptr;
+    barrier_threads_by_identity[barrier].insert(m_mhp.getThreadID(candidate));
+  }
+  auto threadMayRepresentMultipleBarrierParticipants = [&](mhp::ThreadID tid,
+                                                           const Value *barrier) {
+    for (const Instruction *candidate : barrier_arrives) {
+      const Value *candidate_barrier =
+          threadAPI->getBarrierVal(candidate)
+              ? threadAPI->getBarrierVal(candidate)->stripPointerCasts()
+              : nullptr;
+      if (m_mhp.getThreadID(candidate) == tid && candidate_barrier == barrier &&
+          site_multiplicity.instructionMayExecuteMultipleTimes(candidate)) {
+        return true;
+      }
+    }
+    for (const Instruction *candidate : barrier_waits) {
+      const Value *candidate_barrier =
+          threadAPI->getBarrierVal(candidate)
+              ? threadAPI->getBarrierVal(candidate)->stripPointerCasts()
+              : nullptr;
+      if (m_mhp.getThreadID(candidate) == tid && candidate_barrier == barrier &&
+          site_multiplicity.instructionMayExecuteMultipleTimes(candidate)) {
+        return true;
+      }
+    }
+    return false;
+  };
   auto hasAmbiguousSplitPhaseBarrier = [&](const Instruction *inst) {
     std::unordered_map<mhp::ThreadID, size_t> arrive_counts;
     std::unordered_map<mhp::ThreadID, size_t> wait_counts;
@@ -1664,8 +1704,21 @@ void HappensBeforeAnalysis::buildSynchronizesWith() {
             ? threadAPI->getBarrierVal(inst)->stripPointerCasts()
             : nullptr;
     auto expected_it = barrier_expected_counts.find(barrier);
-    if (expected_it != barrier_expected_counts.end() &&
-        distinct_threads.size() < expected_it->second) {
+    for (mhp::ThreadID tid : distinct_threads) {
+      if (threadMayRepresentMultipleBarrierParticipants(tid, barrier)) {
+        return true;
+      }
+    }
+    if (expected_it != barrier_expected_counts.end()) {
+      return distinct_threads.size() != expected_it->second;
+    }
+
+    auto barrier_threads_it = barrier_threads_by_identity.find(barrier);
+    if (barrier_threads_it == barrier_threads_by_identity.end() ||
+        barrier_threads_it->second.empty()) {
+      return true;
+    }
+    if (distinct_threads.size() != barrier_threads_it->second.size()) {
       return true;
     }
     for (const auto &entry : arrive_counts) {
@@ -1806,6 +1859,24 @@ void HappensBeforeAnalysis::buildSynchronizesWith() {
       continue;
     }
 
+    bool competing_post_fork_acquire = false;
+    for (const Instruction *candidate : lock_acquires) {
+      if (candidate == child_acquires.front() ||
+          candidate == parent_acquires.front() ||
+          !sameLockIdentity(candidate, acquire) ||
+          !isSingleExecutionSite(candidate)) {
+        continue;
+      }
+      if (!hasProgramOrder(candidate, fork_inst)) {
+        competing_post_fork_acquire = true;
+        break;
+      }
+    }
+    if (competing_post_fork_acquire) {
+      ++deferred_mutex_relations;
+      continue;
+    }
+
     size_t before = m_sync_with.size();
     addSyncEdge(parent_releases.front(), acquire, acquire);
     if (m_sync_with.size() != before) {
@@ -1816,41 +1887,13 @@ void HappensBeforeAnalysis::buildSynchronizesWith() {
   size_t condvar_edges = 0;
   size_t deferred_condvar_relations = 0;
   for (const Instruction *wait : cond_waits) {
-    if (!wait || !isSingleExecutionSite(wait)) {
+    if (!wait) {
       continue;
     }
-
-    size_t competing_waits = 0;
-    for (const Instruction *other_wait : cond_waits) {
-      if (other_wait && isSingleExecutionSite(other_wait) &&
-          sameCondIdentity(wait, other_wait) &&
-          m_mhp.getThreadID(other_wait) != m_mhp.getThreadID(wait)) {
-        ++competing_waits;
-      }
-    }
-
-    std::vector<const Instruction *> matching_signals;
     for (const Instruction *signal : cond_signals) {
-      if (!sameCondIdentity(wait, signal)) {
+      if (!signal || !sameCondIdentity(wait, signal)) {
         continue;
       }
-      if (!signal || !isSingleExecutionSite(signal) ||
-          m_mhp.getThreadID(signal) == m_mhp.getThreadID(wait)) {
-        continue;
-      }
-      matching_signals.push_back(signal);
-    }
-
-    if (competing_waits == 0 && matching_signals.size() == 1) {
-      size_t before = m_sync_with.size();
-      addSyncEdge(matching_signals.front(), wait, wait);
-      if (m_sync_with.size() != before) {
-        ++condvar_edges;
-        continue;
-      }
-    }
-
-    if (!matching_signals.empty()) {
       ++deferred_condvar_relations;
     }
   }

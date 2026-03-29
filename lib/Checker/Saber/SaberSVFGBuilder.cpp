@@ -627,6 +627,8 @@ bool SaberSVFGBuilder::isStrongUpdate(const SVFGNode *node,
     return false;
 
   uint32_t objId = *objIds.begin();
+  if (currentSVFG_->isUnknownObject(objId))
+    return false;
   if (!currentSVFG_->isHeapObject(objId) &&
       !currentSVFG_->isArrayObject(objId)) {
     if (const auto *info = currentSVFG_->getObjectInfo(objId)) {

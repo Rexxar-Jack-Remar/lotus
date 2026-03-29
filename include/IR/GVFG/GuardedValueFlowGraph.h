@@ -125,6 +125,8 @@ public:
       path_cond_t path_cond, BasicBlock *block,
       GuardedValueFlowNode *origin_condition_node = nullptr);
   GuardedValueFlowNode *findSemanticConditionNode(path_cond_t path_cond) const;
+  void mapSemanticConditionNode(path_cond_t path_cond,
+                                GuardedValueFlowNode *node);
 
   void addBlockCondition(BasicBlock *block, BlockCondition condition);
   ArrayRef<BlockCondition> getBlockConditions(BasicBlock *block) const;

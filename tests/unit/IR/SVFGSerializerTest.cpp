@@ -266,6 +266,32 @@ TEST_F(SVFGSerializerTest, RoundTripsInterPhiOperands) {
   EXPECT_EQ(reloadedInterPhiOperandCounts, originalInterPhiOperandCounts);
 }
 
+TEST_F(SVFGSerializerTest, SVFGOPTKeepsSelfCyclesByDefault) {
+  auto graph = std::make_unique<SVFG>();
+  auto *phi = new IntraMSSAPhiSVFGNode(1, nullptr, 1, 1, SVFGNodeBS{1});
+  graph->addNode(phi);
+  ASSERT_NE(graph->addEdge(phi, phi, SVFGEdgeK::IntraIndirect, nullptr,
+                           SVFGNodeBS{1}),
+            nullptr);
+
+  SVFGOPT optimized;
+  ASSERT_TRUE(optimized.adoptAndOptimize(std::move(graph)));
+
+  auto *optimizedPhi =
+      dyn_cast<IntraMSSAPhiSVFGNode>(optimized.getNode(phi->getId()));
+  ASSERT_NE(optimizedPhi, nullptr);
+
+  bool foundSelfCycle = false;
+  for (SVFGEdge *edge : optimizedPhi->getOutEdges()) {
+    if (edge && edge->getSrcNode() == optimizedPhi &&
+        edge->getDstNode() == optimizedPhi) {
+      foundSelfCycle = true;
+      break;
+    }
+  }
+  EXPECT_TRUE(foundSelfCycle);
+}
+
 TEST_F(SVFGSerializerTest, PreservesExplicitNullInterPhiOperand) {
   const char *source = R"(
     define i32 @main() {

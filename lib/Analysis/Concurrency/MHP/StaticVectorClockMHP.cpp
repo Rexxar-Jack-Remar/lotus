@@ -1409,41 +1409,7 @@ void StaticVectorClockMHP::handleBarrier(const Instruction *barrier_inst,
     pending_phase_by_thread.erase(node->getThreadID());
     phase = next_phase++;
   }
-  auto &participants = m_barrier_waits[barrier][phase];
-  std::unordered_set<ThreadID> distinct_threads;
-  for (const BarrierParticipant &previous : participants) {
-    if (previous.arrival) {
-      distinct_threads.insert(previous.arrival->getThreadID());
-    }
-  }
-  distinct_threads.insert(node->getThreadID());
-  const Value *barrier_key = barrier ? barrier->stripPointerCasts() : nullptr;
-  const size_t expected_count =
-      barrier_key && m_barrier_expected_counts.count(barrier_key)
-          ? m_barrier_expected_counts.at(barrier_key)
-          : 0;
-  const bool phase_complete =
-      expected_count == 0 || distinct_threads.size() >= expected_count;
-  for (const BarrierParticipant &previous : participants) {
-    if (!previous.arrival ||
-        previous.arrival->getThreadID() == node->getThreadID()) {
-      continue;
-    }
-
-    if (phase_complete) {
-      for (SyncNode *cont : current.continuations) {
-        if (cont) {
-          m_tfg->addInterThreadEdge(previous.arrival, cont, EdgeKind::Barrier);
-        }
-      }
-      for (SyncNode *cont : previous.continuations) {
-        if (cont) {
-          m_tfg->addInterThreadEdge(node, cont, EdgeKind::Barrier);
-        }
-      }
-    }
-  }
-  participants.push_back(std::move(current));
+  m_barrier_waits[barrier][phase].push_back(std::move(current));
 }
 
 void StaticVectorClockMHP::wireSynchronizationEdges() {
@@ -1451,12 +1417,98 @@ void StaticVectorClockMHP::wireSynchronizationEdges() {
     return;
 
   errs() << "Wiring synchronization edges for SVC-MHP...\n";
-  // Barrier edges are added in handleBarrier only when the phase is complete.
-  // Rewiring all recorded participants here would over-order incomplete phases.
-  //
-  // Condition variable and atomic synchronization stay in HappensBeforeAnalysis.
-  // Adding unconditional TFG edges here would be stronger than the witness-
-  // based HB model and can suppress real MHP/race candidates.
+  auto phaseMayContainRepeatedParticipant =
+      [this](const std::vector<BarrierParticipant> &participants) {
+        for (const BarrierParticipant &participant : participants) {
+          const SyncNode *arrival = participant.arrival;
+          const Instruction *inst = arrival ? arrival->getInstruction() : nullptr;
+          if (!inst || !m_thread_multiplicity) {
+            continue;
+          }
+          if (m_thread_multiplicity->instructionMayExecuteMultipleTimes(inst)) {
+            return true;
+          }
+        }
+        return false;
+      };
+
+  for (const auto &barrier_entry : m_barrier_waits) {
+    const Value *barrier_key = barrier_entry.first
+                                   ? barrier_entry.first->stripPointerCasts()
+                                   : nullptr;
+    std::unordered_set<ThreadID> all_threads_for_barrier;
+    for (const auto &phase_entry : barrier_entry.second) {
+      for (const BarrierParticipant &participant : phase_entry.second) {
+        if (participant.arrival) {
+          all_threads_for_barrier.insert(participant.arrival->getThreadID());
+        }
+      }
+    }
+
+    const size_t expected_count =
+        barrier_key && m_barrier_expected_counts.count(barrier_key)
+            ? m_barrier_expected_counts.at(barrier_key)
+            : 0;
+
+    for (const auto &phase_entry : barrier_entry.second) {
+      const std::vector<BarrierParticipant> &participants = phase_entry.second;
+      std::unordered_set<ThreadID> distinct_threads;
+      for (const BarrierParticipant &participant : participants) {
+        if (participant.arrival) {
+          distinct_threads.insert(participant.arrival->getThreadID());
+        }
+      }
+
+      bool phase_has_multi_instance_thread = false;
+      for (ThreadID tid : distinct_threads) {
+        if (isMultiInstanceThread(tid)) {
+          phase_has_multi_instance_thread = true;
+          break;
+        }
+      }
+      if (!phase_has_multi_instance_thread &&
+          phaseMayContainRepeatedParticipant(participants)) {
+        phase_has_multi_instance_thread = true;
+      }
+
+      const bool phase_complete =
+          !phase_has_multi_instance_thread && !distinct_threads.empty() &&
+          (expected_count != 0
+               ? distinct_threads.size() == expected_count
+               : !m_has_unresolved_fork &&
+                     distinct_threads.size() == all_threads_for_barrier.size());
+      if (!phase_complete) {
+        continue;
+      }
+
+      for (size_t i = 0; i < participants.size(); ++i) {
+        const BarrierParticipant &lhs = participants[i];
+        if (!lhs.arrival) {
+          continue;
+        }
+        for (size_t j = 0; j < participants.size(); ++j) {
+          if (i == j) {
+            continue;
+          }
+          const BarrierParticipant &rhs = participants[j];
+          if (!rhs.arrival ||
+              lhs.arrival->getThreadID() == rhs.arrival->getThreadID()) {
+            continue;
+          }
+          for (SyncNode *cont : rhs.continuations) {
+            if (cont) {
+              m_tfg->addInterThreadEdge(lhs.arrival, cont, EdgeKind::Barrier);
+            }
+          }
+        }
+      }
+    }
+  }
+
+  // Condition variable and atomic synchronization stay in
+  // HappensBeforeAnalysis. Adding unconditional TFG edges here would be
+  // stronger than the witness-based HB model and can suppress real MHP/race
+  // candidates.
 }
 
 std::vector<SyncNode *> StaticVectorClockMHP::getBarrierContinuations(

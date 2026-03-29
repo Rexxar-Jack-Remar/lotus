@@ -285,10 +285,29 @@ GuardedValueFlowGraph::findOrCreateUnitRegion(GuardedValueFlowNode *condition,
   if (auto *existing = findUnitRegion(condition, sense))
     return existing;
 
+  const bool is_foreign_condition =
+      condition && condition->getGraph() && condition->getGraph() != this;
   auto *region = createNode<GuardedValueFlowRegionNode>(
       Type::getInt1Ty(base_function_->getContext()), this, block,
-      GuardedValueFlowRegionNode::Form::Unit, condition, sense, condition_ref);
-  if (condition) {
+      is_foreign_condition ? GuardedValueFlowRegionNode::Form::ImportedInterface
+                           : GuardedValueFlowRegionNode::Form::Unit,
+      condition, sense, condition_ref);
+
+  if (is_foreign_condition) {
+    GuardedValueFlowRegionNode::ConstraintState state;
+    state.assignments[region] = true;
+    state.assignments[condition] = sense;
+    region->setConstraintState(std::move(state));
+
+    path_cond_t path_cond = condition_ref.getPathCond();
+    region->setInterfaceMetadata(
+        path_cond ? path_cond->getOwnerFunc() : nullptr,
+        condition->getGraph() ? condition->getGraph()->getBaseFunction()
+                              : nullptr,
+        path_cond, getImportedSource(path_cond));
+  }
+
+  if (!is_foreign_condition && condition) {
     if (sense) {
       region->addChild(condition, 1.0f, condition_ref);
     } else {
@@ -438,6 +457,12 @@ GuardedValueFlowNode *
 GuardedValueFlowGraph::findSemanticConditionNode(path_cond_t path_cond) const {
   auto it = semantic_condition_nodes_.find(path_cond);
   return it == semantic_condition_nodes_.end() ? nullptr : it->second;
+}
+
+void GuardedValueFlowGraph::mapSemanticConditionNode(path_cond_t path_cond,
+                                                     GuardedValueFlowNode *node) {
+  if (path_cond && node)
+    semantic_condition_nodes_[path_cond] = node;
 }
 
 GuardedValueFlowRegionNode *GuardedValueFlowGraph::findOrCreateSemanticRegion(

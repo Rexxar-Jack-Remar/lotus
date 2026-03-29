@@ -240,7 +240,7 @@ bool DataRaceChecker::wouldReportDataRace(const Instruction *inst1,
       isDefinitelyThreadLocalAccess(inst2)) {
     return false;
   }
-  if (isAtomicOperation(inst1) || isAtomicOperation(inst2))
+  if (isAtomicOperation(inst1) && isAtomicOperation(inst2))
     return false;
   if (!isWriteAccess(inst1) && !isWriteAccess(inst2))
     return false;
@@ -262,93 +262,6 @@ bool DataRaceChecker::wouldReportDataRace(const Instruction *inst1,
                                                access_kind(inst2))) {
       return false;
     }
-
-    // Fallback for DCL/singleton: both in same function - use dominance to
-    // detect critical sections when lock-set lookup is imprecise.
-    const Function *F1 = inst1->getFunction();
-    const Function *F2 = inst2->getFunction();
-    if (F1 && F2 && F1 == F2) {
-      DominatorTree DT(const_cast<Function &>(*F1));
-      PostDominatorTree PDT(const_cast<Function &>(*F1));
-      const BasicBlock *BB1 = inst1->getParent();
-      const BasicBlock *BB2 = inst2->getParent();
-      LockSet funcLocks = m_locksetAnalysis->getAllLocksInFunction(F1);
-      for (LockID lock : funcLocks) {
-        for (const Instruction *Acq :
-             m_locksetAnalysis->getLockAcquires(lock)) {
-          if (Acq->getFunction() != F1)
-            continue;
-          const BasicBlock *AcqBB = Acq->getParent();
-          if (!DT.dominates(AcqBB, BB1) || !DT.dominates(AcqBB, BB2))
-            continue;
-          for (const Instruction *Rel :
-               m_locksetAnalysis->getLockReleases(lock)) {
-            if (Rel->getFunction() != F1)
-              continue;
-            const BasicBlock *RelBB = Rel->getParent();
-            if (PDT.dominates(RelBB, BB1) && PDT.dominates(RelBB, BB2))
-              return false;
-          }
-        }
-      }
-    }
-  }
-
-  // Fallback for helper-based locking patterns where lockset propagation is
-  // imprecise (e.g., acquire/release split across helper calls).
-  if (inst1->getFunction() == inst2->getFunction()) {
-    auto getAcquireReleaseLock = [this](const CallBase *CB,
-                                        bool wantAcquire) -> const Value * {
-      if (!CB)
-        return nullptr;
-      const Instruction *I = cast<Instruction>(CB);
-      if (wantAcquire && m_threadAPI->isTDAcquire(I))
-        return m_threadAPI->getAnalysisLockIdentity(I);
-      if (!wantAcquire && m_threadAPI->isTDRelease(I))
-        return m_threadAPI->getAnalysisLockIdentity(I);
-      Function *callee = CB->getCalledFunction();
-      if (!callee || callee->isDeclaration())
-        return nullptr;
-      for (const Instruction &CI : instructions(callee)) {
-        if (wantAcquire && m_threadAPI->isTDAcquire(&CI))
-          return m_threadAPI->getAnalysisLockIdentity(&CI);
-        if (!wantAcquire && m_threadAPI->isTDRelease(&CI))
-          return m_threadAPI->getAnalysisLockIdentity(&CI);
-      }
-      return nullptr;
-    };
-
-    auto isSyntacticallyProtected = [&](const Instruction *I) {
-      const BasicBlock *BB = I->getParent();
-      if (!BB)
-        return false;
-      const Value *preLock = nullptr;
-      for (const Instruction *P = I->getPrevNode(); P; P = P->getPrevNode()) {
-        const auto *CB = dyn_cast<CallBase>(P);
-        if (!CB)
-          continue;
-        if (const Value *L = getAcquireReleaseLock(CB, /*wantAcquire=*/true)) {
-          preLock = L->stripPointerCasts();
-          break;
-        }
-      }
-      if (!preLock)
-        return false;
-      for (const Instruction *N = I->getNextNode(); N; N = N->getNextNode()) {
-        const auto *CB = dyn_cast<CallBase>(N);
-        if (!CB)
-          continue;
-        if (const Value *L = getAcquireReleaseLock(CB, /*wantAcquire=*/false)) {
-          const Value *postLock = L ? L->stripPointerCasts() : nullptr;
-          if (postLock && mayAlias(preLock, postLock))
-            return true;
-        }
-      }
-      return false;
-    };
-
-    if (isSyntacticallyProtected(inst1) && isSyntacticallyProtected(inst2))
-      return false;
   }
   return true;
 }
@@ -358,7 +271,8 @@ bool DataRaceChecker::wouldReportDataRace(const Instruction *inst1,
 //   1. Two instructions may happen in parallel (MHP analysis)
 //   2. At least one is a write operation
 //   3. They may access the same memory location (alias analysis)
-//   4. Neither operation is atomic
+//   4. The pair is not atomic-vs-atomic. Atomic-vs-non-atomic conflicts are
+//      still races and must be checked here.
 //   5. They are not protected by a common lock (LockSet analysis)
 //   6. The memory location is shared/escaped (Escape analysis)
 // Reports one bug per "racy component" (connected set of conflicting accesses),
@@ -794,7 +708,7 @@ bool DataRaceChecker::isSyncObjectAccess(const Value *loc) const {
   if (!m_aliasAnalysis)
     return false;
   for (const Value *sync : m_syncObjects)
-    if (m_aliasAnalysis->mayAlias(stripped, sync))
+    if (m_aliasAnalysis->mustAlias(stripped, sync))
       return true;
   return false;
 }

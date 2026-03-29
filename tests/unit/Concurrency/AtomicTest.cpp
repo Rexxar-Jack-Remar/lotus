@@ -1196,7 +1196,7 @@ TEST_F(AtomicHappensBeforeTest, ReleaseSequenceThroughRmwSynchronizes) {
 }
 
 TEST_F(AtomicHappensBeforeTest,
-       ReleaseSequenceWithMultipleRmwTailsDoesNotSynchronize) {
+       ReleaseSequenceWithMultipleRmwTailsSynchronizes) {
   const char *source = R"(
     @data = global i32 0, align 4
     @flag = global i32 0, align 4
@@ -1268,7 +1268,7 @@ TEST_F(AtomicHappensBeforeTest,
   HappensBeforeAnalysis hb(*module, mhp);
   hb.analyze();
 
-  EXPECT_FALSE(hb.mustPrecede(store_data, load_data));
+  EXPECT_TRUE(hb.mustPrecede(store_data, load_data));
   EXPECT_TRUE(mhp.mayHappenInParallel(store_data, load_data));
 }
 
