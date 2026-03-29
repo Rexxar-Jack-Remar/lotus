@@ -674,7 +674,8 @@ void SVFG::getInterVFEdgesForIndirectCallSite(
   }
 }
 
-void SVFG::dump(const std::string &filename) const {
+void SVFG::dump(const std::string &filename, bool simple) const {
+  (void)simple;
   (void)SVFGSerializer::writeDot(*this, filename);
 }
 

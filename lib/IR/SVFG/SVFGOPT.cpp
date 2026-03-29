@@ -17,16 +17,20 @@ using namespace llvm;
 namespace {
 
 static bool isInterIndirectKind(SVFGEdgeK kind) {
-  return kind == SVFGEdgeK::CallInd || kind == SVFGEdgeK::RetInd;
+  return kind == SVFGEdgeK::CallInd || kind == SVFGEdgeK::RetInd ||
+         kind == SVFGEdgeK::CallAIn || kind == SVFGEdgeK::CallFIn ||
+         kind == SVFGEdgeK::RetAOut || kind == SVFGEdgeK::RetFOut;
 }
 
 static bool isCallLikeKind(SVFGEdgeK kind) {
   return kind == SVFGEdgeK::CallDir || kind == SVFGEdgeK::CallInd ||
+         kind == SVFGEdgeK::CallAIn || kind == SVFGEdgeK::CallFIn ||
          kind == SVFGEdgeK::ParamCall;
 }
 
 static bool isRetLikeKind(SVFGEdgeK kind) {
   return kind == SVFGEdgeK::RetDir || kind == SVFGEdgeK::RetInd ||
+         kind == SVFGEdgeK::RetAOut || kind == SVFGEdgeK::RetFOut ||
          kind == SVFGEdgeK::ParamRet;
 }
 
@@ -311,7 +315,7 @@ void SVFGOPT::retargetEdgesOfAOutFIn(SVFGNode *node) {
       SVFGEdgeK kind = inEdge->getEdgeKind();
       if (!isInterIndirectKind(kind))
         kind = outEdge->getEdgeKind();
-      if (!isIndirectVFGEdge(kind))
+      if (!isInterIndirectKind(kind) && !isIndirectVFGEdge(kind))
         kind = SVFGEdgeK::IntraIndirect;
 
       addEdge(inEdge->getSrcNode(), outEdge->getDstNode(), kind,
@@ -403,7 +407,9 @@ bool SVFGOPT::handleSelfCycleEdges(const MSSAPhiSVFGNode *node) {
   for (SVFGEdge *edge : node->getInEdges()) {
     if (edge && edge->getSrcNode() == node && edge->getDstNode() == node) {
       hasSelfCycle = true;
-      if (edge->getEdgeKind() == SVFGEdgeK::CallInd)
+      if (edge->getEdgeKind() == SVFGEdgeK::CallInd ||
+          edge->getEdgeKind() == SVFGEdgeK::CallAIn ||
+          edge->getEdgeKind() == SVFGEdgeK::CallFIn)
         callEdge = edge;
     }
   }
@@ -411,7 +417,9 @@ bool SVFGOPT::handleSelfCycleEdges(const MSSAPhiSVFGNode *node) {
   for (SVFGEdge *edge : node->getOutEdges()) {
     if (edge && edge->getSrcNode() == node && edge->getDstNode() == node) {
       hasSelfCycle = true;
-      if (edge->getEdgeKind() == SVFGEdgeK::RetInd)
+      if (edge->getEdgeKind() == SVFGEdgeK::RetInd ||
+          edge->getEdgeKind() == SVFGEdgeK::RetAOut ||
+          edge->getEdgeKind() == SVFGEdgeK::RetFOut)
         retEdge = edge;
     }
   }
@@ -552,8 +560,22 @@ bool SVFGOPT::addNewEdge(uint32_t srcId, uint32_t dstId,
 
   SVFGEdgeK kind = SVFGEdgeK::IntraIndirect;
   const llvm::CallBase *cs = nullptr;
-  if (predEdge->getEdgeKind() == SVFGEdgeK::CallInd ||
-      succEdge->getEdgeKind() == SVFGEdgeK::CallInd) {
+  if (predEdge->getEdgeKind() == SVFGEdgeK::CallAIn ||
+      predEdge->getEdgeKind() == SVFGEdgeK::CallFIn ||
+      succEdge->getEdgeKind() == SVFGEdgeK::CallAIn ||
+      succEdge->getEdgeKind() == SVFGEdgeK::CallFIn) {
+    kind = SVFGEdgeK::CallAIn;
+    cs = predEdge->getCallSite() ? predEdge->getCallSite()
+                                 : succEdge->getCallSite();
+  } else if (predEdge->getEdgeKind() == SVFGEdgeK::RetAOut ||
+             predEdge->getEdgeKind() == SVFGEdgeK::RetFOut ||
+             succEdge->getEdgeKind() == SVFGEdgeK::RetAOut ||
+             succEdge->getEdgeKind() == SVFGEdgeK::RetFOut) {
+    kind = SVFGEdgeK::RetAOut;
+    cs = predEdge->getCallSite() ? predEdge->getCallSite()
+                                 : succEdge->getCallSite();
+  } else if (predEdge->getEdgeKind() == SVFGEdgeK::CallInd ||
+             succEdge->getEdgeKind() == SVFGEdgeK::CallInd) {
     kind = SVFGEdgeK::CallInd;
     cs = predEdge->getCallSite() ? predEdge->getCallSite()
                                  : succEdge->getCallSite();
@@ -571,10 +593,8 @@ bool SVFGOPT::bothInterEdges(const SVFGEdge *edge1,
                              const SVFGEdge *edge2) const {
   if (!edge1 || !edge2)
     return false;
-  const bool e1Inter = edge1->getEdgeKind() == SVFGEdgeK::CallInd ||
-                       edge1->getEdgeKind() == SVFGEdgeK::RetInd;
-  const bool e2Inter = edge2->getEdgeKind() == SVFGEdgeK::CallInd ||
-                       edge2->getEdgeKind() == SVFGEdgeK::RetInd;
+  const bool e1Inter = isInterIndirectKind(edge1->getEdgeKind());
+  const bool e2Inter = isInterIndirectKind(edge2->getEdgeKind());
   return e1Inter && e2Inter;
 }
 
@@ -642,7 +662,9 @@ bool SVFGOPT::actualInOfIndCS(const ActualInSVFGNode *ai) const {
   for (const SVFGEdge *edge : ai->getOutEdges()) {
     if (!edge)
       continue;
-    if (edge->getEdgeKind() == SVFGEdgeK::CallInd)
+    if (edge->getEdgeKind() == SVFGEdgeK::CallInd ||
+        edge->getEdgeKind() == SVFGEdgeK::CallAIn ||
+        edge->getEdgeKind() == SVFGEdgeK::CallFIn)
       return true;
     if (!edge->getPointsTo().empty())
       return true;
@@ -656,7 +678,9 @@ bool SVFGOPT::actualOutOfIndCS(const ActualOutSVFGNode *ao) const {
   for (const SVFGEdge *edge : ao->getInEdges()) {
     if (!edge)
       continue;
-    if (edge->getEdgeKind() == SVFGEdgeK::RetInd)
+    if (edge->getEdgeKind() == SVFGEdgeK::RetInd ||
+        edge->getEdgeKind() == SVFGEdgeK::RetAOut ||
+        edge->getEdgeKind() == SVFGEdgeK::RetFOut)
       return true;
     if (!edge->getPointsTo().empty())
       return true;
@@ -685,8 +709,7 @@ bool SVFGOPT::isConnectingTwoCallSites(const SVFGNode *node) const {
   for (const SVFGEdge *edge : node->getInEdges()) {
     if (!edge)
       continue;
-    if (edge->getEdgeKind() == SVFGEdgeK::CallInd ||
-        edge->getEdgeKind() == SVFGEdgeK::RetInd) {
+    if (isInterIndirectKind(edge->getEdgeKind())) {
       hasInCallRet = true;
       break;
     }
@@ -694,8 +717,7 @@ bool SVFGOPT::isConnectingTwoCallSites(const SVFGNode *node) const {
   for (const SVFGEdge *edge : node->getOutEdges()) {
     if (!edge)
       continue;
-    if (edge->getEdgeKind() == SVFGEdgeK::CallInd ||
-        edge->getEdgeKind() == SVFGEdgeK::RetInd) {
+    if (isInterIndirectKind(edge->getEdgeKind())) {
       hasOutCallRet = true;
       break;
     }

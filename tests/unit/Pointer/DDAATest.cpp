@@ -360,6 +360,62 @@ TEST_F(DDAATest, ContextDDAKeepsGenericHeapStoresWeak) {
   EXPECT_FALSE(ctx.isStrongUpdate(pts, nullptr));
 }
 
+TEST_F(DDAATest, ContextDDAAllowsConcreteHeapStrongUpdatesWhenSafe) {
+  const char *source = R"(
+    declare noalias i8* @malloc(i64)
+
+    define i32 @main() {
+      %h = call noalias i8* @malloc(i64 4)
+      ret i32 0
+    }
+  )";
+
+  auto module = parseModule(source);
+  ASSERT_NE(module, nullptr);
+
+  FlowDDA flow;
+  ASSERT_TRUE(flow.run(*module));
+  ContextDDATestHelper ctx(&flow, nullptr);
+  ASSERT_TRUE(ctx.run(*module));
+  ASSERT_NE(flow.getSVFG(), nullptr);
+
+  const Function *mainFn = module->getFunction("main");
+  ASSERT_NE(mainFn, nullptr);
+  const CallInst *heapCall = nullptr;
+  for (const BasicBlock &BB : *mainFn) {
+    for (const Instruction &I : BB) {
+      if (const auto *CI = dyn_cast<CallInst>(&I)) {
+        if (CI->getCalledFunction() &&
+            CI->getCalledFunction()->getName() == "malloc") {
+          heapCall = CI;
+          break;
+        }
+      }
+    }
+  }
+  ASSERT_NE(heapCall, nullptr);
+
+  constexpr uint32_t heapObjId = 424243;
+  SVFG::ObjectInfo info;
+  info.isHeap = true;
+  info.isConcreteHeap = true;
+  info.baseObjId = heapObjId;
+  flow.getSVFG()->setObjectInfo(heapObjId, info);
+  flow.getSVFG()->setObjectValue(heapObjId, heapCall);
+  EXPECT_TRUE(flow.getSVFG()->isHeapObject(heapObjId));
+  EXPECT_TRUE(flow.getSVFG()->isConcreteHeapObject(heapObjId));
+
+  CxtPtSet concretePts;
+  concretePts.insert(CxtVar(ContextCond(), heapObjId));
+  EXPECT_TRUE(ctx.isStrongUpdate(concretePts, nullptr));
+
+  ContextCond nonConcrete;
+  nonConcrete.setNonConcreteCxt();
+  CxtPtSet nonConcretePts;
+  nonConcretePts.insert(CxtVar(nonConcrete, heapObjId));
+  EXPECT_FALSE(ctx.isStrongUpdate(nonConcretePts, nullptr));
+}
+
 TEST_F(DDAATest, FlowDDARecursionInfoSurvivesPartialIndirectRefinement) {
   const char *source = R"(
     define void @B(i8* %ptr) {
@@ -582,9 +638,13 @@ TEST_F(DDAATest, ContextSensitiveBKConditionOnCallAInRetAOut) {
     for (SVFGEdge *edge : node->getOutEdges()) {
       if (!edge || edge->getCallSite() != indCall)
         continue;
-      if (!callAInEdge && edge->getEdgeKind() == SVFGEdgeK::CallAIn)
+      if (!callAInEdge && edge->getEdgeKind() == SVFGEdgeK::CallAIn &&
+          isa<ActualInSVFGNode>(edge->getSrcNode()) &&
+          isa<FormalInSVFGNode>(edge->getDstNode()))
         callAInEdge = edge;
-      if (!retAOutEdge && edge->getEdgeKind() == SVFGEdgeK::RetAOut)
+      if (!retAOutEdge && edge->getEdgeKind() == SVFGEdgeK::RetAOut &&
+          isa<FormalOutSVFGNode>(edge->getSrcNode()) &&
+          isa<ActualOutSVFGNode>(edge->getDstNode()))
         retAOutEdge = edge;
     }
   }
@@ -677,6 +737,73 @@ TEST_F(DDAATest, IndirectCallRefinementPreservesIndirectEdgeKinds) {
   }
   EXPECT_TRUE(sawCallInd);
   EXPECT_TRUE(sawRetInd);
+}
+
+TEST_F(DDAATest, IndirectCallRefinementMarksResolvedEdgesValid) {
+  const char *source = R"(
+    define i8* @foo(i8* %p) {
+      ret i8* %p
+    }
+
+    define i8* @bar(i8* %p) {
+      %fp = alloca i8* (i8*)*
+      store i8* (i8*)* @foo, i8* (i8*)** %fp
+      %x = load i8* (i8*)*, i8* (i8*)** %fp
+      %r = call i8* %x(i8* %p)
+      ret i8* %r
+    }
+
+    define i32 @main() {
+      %x = alloca i8
+      %r = call i8* @bar(i8* %x)
+      ret i32 0
+    }
+  )";
+
+  auto module = parseModule(source);
+  ASSERT_NE(module, nullptr);
+
+  FlowDDA flow;
+  ASSERT_TRUE(flow.run(*module));
+  ASSERT_NE(flow.getSVFG(), nullptr);
+  ASSERT_NE(flow.getSVFGBuilder(), nullptr);
+
+  const Function *foo = module->getFunction("foo");
+  const Function *bar = module->getFunction("bar");
+  ASSERT_NE(foo, nullptr);
+  ASSERT_NE(bar, nullptr);
+
+  const LoadInst *x = nullptr;
+  const CallBase *callResult = nullptr;
+  const CallInst *indCall = nullptr;
+  for (const BasicBlock &BB : *bar) {
+    for (const Instruction &I : BB) {
+      if (!x) {
+        if (const auto *LI = dyn_cast<LoadInst>(&I))
+          x = LI;
+      }
+      if (const auto *CI = dyn_cast<CallInst>(&I)) {
+        if (!CI->getCalledFunction()) {
+          indCall = CI;
+          callResult = CI;
+        }
+      }
+    }
+  }
+  ASSERT_NE(x, nullptr);
+  ASSERT_NE(indCall, nullptr);
+  ASSERT_NE(callResult, nullptr);
+
+  (void)flow.getPointsTo(callResult);
+
+  std::vector<SVFGEdge *> resolvedEdges;
+  flow.getSVFG()->getInterVFEdgesForIndirectCallSite(indCall, foo,
+                                                     resolvedEdges);
+  ASSERT_FALSE(resolvedEdges.empty());
+  for (SVFGEdge *edge : resolvedEdges) {
+    ASSERT_NE(edge, nullptr);
+    EXPECT_FALSE(flow.getSVFGBuilder()->isSpuriousVFEdgeAtIndCallSite(edge));
+  }
 }
 
 TEST_F(DDAATest, HandlesVarArgValueFlowNodes) {

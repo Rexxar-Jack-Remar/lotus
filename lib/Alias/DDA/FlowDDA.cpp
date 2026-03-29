@@ -184,7 +184,10 @@ void FlowDDA::setDpmLocVar(LocDPItem &dpm, SVFGNode *src, uint32_t ptrNodeId) {
 
 void FlowDDA::connectIndirectCallees(const LocDPItem &dpm, const PtsSet &funPts,
                                      std::vector<SVFGEdge *> &newEdges) {
+  if (!svfg_ || !svfgBuilder_)
+    return;
   const auto &indCallSites = svfg_->getIndCallSites(dpm.getCurNodeID());
+  std::unordered_set<SVFGEdge *> newlyValidated;
   for (const CallBase *cs : indCallSites) {
     if (!cs)
       continue;
@@ -195,10 +198,19 @@ void FlowDDA::connectIndirectCallees(const LocDPItem &dpm, const PtsSet &funPts,
       const Function *callee = dyn_cast_or_null<Function>(v);
       if (!callee || callee->isDeclaration())
         continue;
+      std::vector<SVFGEdge *> resolvedEdges;
       (void)svfgBuilder_->connectCallSiteToCalleeOnTheFly(svfg_.get(), cs,
-                                                          callee, newEdges);
+                                                          callee, resolvedEdges);
+      svfg_->getInterVFEdgesForIndirectCallSite(cs, callee, resolvedEdges);
+      for (SVFGEdge *edge : resolvedEdges) {
+        if (!edge || newlyValidated.insert(edge).second == false)
+          continue;
+        newEdges.push_back(edge);
+      }
     }
   }
+  if (!newEdges.empty())
+    svfgBuilder_->markValidVFEdges(newEdges);
 }
 
 void FlowDDA::forEachObjId(const PtsSet &pts,

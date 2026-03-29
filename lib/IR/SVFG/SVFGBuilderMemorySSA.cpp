@@ -1507,9 +1507,14 @@ void SVFGBuilder::buildCallEdges() {
             SVFGNodeBS edgePts =
                 intersectPointsToSets(actualIn->getDefSVFVars(),
                                       formalIn->getDefSVFVars(), unknownObjId);
-            if (!edgePts.empty())
-              svfg->addEdge(actualIn, formalIn, SVFGEdgeK::CallAIn, call,
-                            edgePts);
+            if (edgePts.empty())
+              continue;
+            if (SVFGEdge *e =
+                    svfg->addEdge(actualIn, formalIn, SVFGEdgeK::CallAIn,
+                                  call, edgePts)) {
+              if (!directCallee)
+                vfEdgesAtIndCallSite.insert(e);
+            }
           }
         }
       }
@@ -1585,9 +1590,14 @@ void SVFGBuilder::buildReturnEdges() {
             SVFGNodeBS edgePts =
                 intersectPointsToSets(formalOut->getDefSVFVars(),
                                       actualOut->getDefSVFVars(), unknownObjId);
-            if (!edgePts.empty())
-              svfg->addEdge(formalOut, actualOut, SVFGEdgeK::RetAOut, call,
-                            edgePts);
+            if (edgePts.empty())
+              continue;
+            if (SVFGEdge *e =
+                    svfg->addEdge(formalOut, actualOut, SVFGEdgeK::RetAOut,
+                                  call, edgePts)) {
+              if (!directCallee)
+                vfEdgesAtIndCallSite.insert(e);
+            }
           }
         }
       }
@@ -1686,6 +1696,8 @@ bool SVFGBuilder::connectCallSiteToCalleeOnTheFly(
               g->addEdge(actualIn, formalIn, SVFGEdgeK::CallAIn, cs, edgePts)) {
         newEdges.push_back(e);
         created = true;
+        if (!isDirectEdge)
+          vfEdgesAtIndCallSite.insert(e);
       }
     }
   }
@@ -1729,10 +1741,13 @@ bool SVFGBuilder::connectCallSiteToCalleeOnTheFly(
           formalOut->getDefSVFVars(), actualOut->getDefSVFVars(), unknownObjId);
       if (edgePts.empty())
         continue;
-      if (SVFGEdge *e = g->addEdge(formalOut, actualOut, SVFGEdgeK::RetAOut, cs,
-                                   edgePts)) {
+      if (SVFGEdge *e =
+              g->addEdge(formalOut, actualOut, SVFGEdgeK::RetAOut, cs,
+                         edgePts)) {
         newEdges.push_back(e);
         created = true;
+        if (!isDirectEdge)
+          vfEdgesAtIndCallSite.insert(e);
       }
     }
   }

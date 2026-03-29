@@ -212,6 +212,8 @@ protected:
     if (!node || !svfg)
       return;
     for (SVFGEdge *edge : node->getInEdges()) {
+      if (shouldSkipSpuriousEdge(edge))
+        continue;
       if (!derived().isDirectEdge(edge))
         continue;
       SVFGNode *src = edge->getSrcNode();
@@ -248,6 +250,8 @@ protected:
       }
     }
     for (SVFGEdge *edge : node->getInEdges()) {
+      if (shouldSkipSpuriousEdge(edge))
+        continue;
       if (!derived().isIndirectEdge(edge))
         continue;
       const std::set<uint32_t> &guard = edge->getPointsTo();
@@ -381,6 +385,8 @@ protected:
                          const std::vector<SVFGEdge *> &edgeSet,
                          bool indirectCall) {
     for (SVFGEdge *edge : edgeSet) {
+      if (shouldSkipSpuriousEdge(edge))
+        continue;
       SVFGNode *dst = edge->getDstNode();
       if (!dst)
         continue;
@@ -478,6 +484,11 @@ protected:
           clearbkVisited(dpm);
       }
     }
+  }
+
+  bool shouldSkipSpuriousEdge(SVFGEdge *edge) const {
+    auto *builder = derived().getSVFGBuilder();
+    return builder && builder->isSpuriousVFEdgeAtIndCallSite(edge);
   }
 
   /// Per-query DFS visited set (for termination on value-flow cycles).

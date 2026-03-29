@@ -35,6 +35,7 @@
 #include <set>
 
 #include <llvm/ADT/Statistic.h>
+#include <llvm/Analysis/CaptureTracking.h>
 #include <llvm/Analysis/MemoryBuiltins.h>
 #include <llvm/IR/CFG.h>
 #include <llvm/IR/Constants.h>
@@ -73,6 +74,49 @@ using FSObjectTy = FSObject<NoCtx>;
 using ObjNodeTy = CGObjNode<FSMemModel<NoCtx>>;
 using LangModelTy = FSModel<NoCtx>;
 using LMT = LangModelTrait<LangModelTy>;
+
+namespace {
+
+static bool isConcreteHeapAllocationSite(const Value *val) {
+  const auto *inst = dyn_cast_or_null<Instruction>(val);
+  if (!inst)
+    return false;
+  return !PointerMayBeCaptured(inst, /*ReturnCaptures=*/true,
+                               /*StoreCaptures=*/true);
+}
+
+static SVFG::ObjectInfo inferObjectInfoFromValue(const Value *val) {
+  SVFG::ObjectInfo info;
+  if (!val)
+    return info;
+  if (const auto *F = dyn_cast<Function>(val)) {
+    info.isFunction = true;
+    return info;
+  }
+  if (const auto *GV = dyn_cast<GlobalVariable>(val)) {
+    info.isGlobal = true;
+    info.isConstant = GV->isConstant();
+  } else if (isa<GlobalValue>(val)) {
+    info.isGlobal = true;
+  }
+  if (const auto *inst = dyn_cast<Instruction>(val)) {
+    if (isa<AllocaInst>(inst))
+      info.isStack = true;
+    if (isAllocationFn(inst, nullptr)) {
+      info.isHeap = true;
+      info.isConcreteHeap = isConcreteHeapAllocationSite(inst);
+    }
+  }
+  if (isa<Constant>(val) && !isa<Function>(val))
+    info.isConstant = true;
+  if (val->getType()->isPointerTy()) {
+    if (const Type *elemTy = val->getType()->getPointerElementType())
+      info.isArray = elemTy->isArrayTy();
+  }
+  return info;
+}
+
+} // namespace
 
 static SVFGNodeBS intersectPointsToSets(const SVFGNodeBS &lhs,
                                         const SVFGNodeBS &rhs,
@@ -258,6 +302,7 @@ void SVFGBuilder::initialize(const ICFG *cfg) {
   previousPTSets.clear();
   funcEntryChiMemRegs.clear();
   globalEntryRegions.clear();
+  vfEdgesAtIndCallSite.clear();
 }
 
 void SVFGBuilder::recordRefinedCallEdge(const CallBase *call,
@@ -477,6 +522,8 @@ SVFGNodeBS SVFGBuilder::convertPTAObjectsToObjIDs(
       return info;
     info.isFunction = obj->isFunction();
     info.isHeap = obj->isHeapObj();
+    if (info.isHeap)
+      info.isConcreteHeap = isConcreteHeapAllocationSite(obj->getValue());
     info.isStack = obj->isStackObj();
     info.isGlobal = obj->isGlobalObj();
     info.isFieldInsensitive = obj->isFIObject();
@@ -606,8 +653,11 @@ SVFGNodeBS SVFGBuilder::getObjectIdsForValue(const Value *ptr) {
         return isHeapAllocation(inst);
       return false;
     };
-    if (result.size() == 1 && graph && isCanonicalObjectValue(ptr))
-      graph->setObjectValue(*result.begin(), ptr);
+    if (result.size() == 1 && graph && isCanonicalObjectValue(ptr)) {
+      const uint32_t objId = *result.begin();
+      graph->setObjectValue(objId, ptr);
+      graph->updateObjectInfo(objId, inferObjectInfoFromValue(ptr));
+    }
   }
   if (result.empty() && graph) {
     const uint32_t objId = graph->getObjectId(ptr);
@@ -1119,6 +1169,7 @@ bool SVFGBuilder::updateSVFG(SVFG *existingSVFG) {
     return false;
   }
   existingSVFG->swapWith(*rebuilt);
+  lastBuiltSVFG = existingSVFG;
   return true;
 }
 

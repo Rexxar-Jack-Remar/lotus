@@ -157,7 +157,8 @@ The SVFG builder follows a phased construction approach:
    * Memory region identification from points-to sets.
    * SSA versioning for memory locations.
    * Memory PHI nodes at control-flow merges.
-   * Interprocedural memory flow through call/return edges (``CallAIn``/``RetAOut``).
+   * Interprocedural memory flow through call/return edges
+     (``CallAIn``/``RetAOut``).
 
 Usage
 =====

@@ -23,12 +23,21 @@
 #include "IR/ICFG/ICFG.h"
 #include "IR/SVFG/SVFGBuilder.h"
 
+#include <llvm/Analysis/CaptureTracking.h>
 #include <llvm/IR/CFG.h>
 #include <llvm/IR/Function.h>
 #include <llvm/IR/Module.h>
 
 using namespace lotus::analysis;
 using namespace llvm;
+
+static bool isConcreteHeapAllocationSite(const Value *val) {
+  const auto *inst = dyn_cast_or_null<Instruction>(val);
+  if (!inst)
+    return false;
+  return !PointerMayBeCaptured(inst, /*ReturnCaptures=*/true,
+                               /*StoreCaptures=*/true);
+}
 
 // Helper function to get Module from ICFG
 static const Module *getModuleFromICFG(const ICFG *icfg) {
@@ -70,8 +79,8 @@ void SVFGBuilder::buildNodes() {
   if (const Module *M = getModuleFromICFG(icfg)) {
     for (const Function &F : *M) {
       (void)getOrCreateCanonicalObjectIdForValue(
-          &F, SVFG::ObjectInfo{false, false, false, true, false, false, false,
-                               false, 0});
+          &F, SVFG::ObjectInfo{false, false, false, false, true, false, false,
+                               false, false, 0});
     }
     for (const GlobalVariable &GV : M->globals()) {
       SVFG::ObjectInfo info;
@@ -211,6 +220,7 @@ void SVFGBuilder::buildTopLevelNodes() {
         (void)getOrCreateMemReg(&inst);
         SVFG::ObjectInfo info;
         info.isHeap = true;
+        info.isConcreteHeap = isConcreteHeapAllocationSite(&inst);
         uint32_t baseObjId = ensureBaseObjIdForValue(&inst, info);
         // Set object ID on AddrSVFGNode (mirrors SVF's getPAGSrcNodeID).
         if (baseObjId != 0)

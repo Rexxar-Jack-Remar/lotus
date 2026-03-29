@@ -69,9 +69,12 @@
 #include "Solvers/CUDD/network.h"
 #endif
 
-#include <math.h>
 #include "Solvers/CUDD/cudd.h"
+
 #include "Solvers/CUDD/st.h"
+
+#include <math.h>
+
 
 #ifdef __cplusplus
 extern "C" {

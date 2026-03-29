@@ -93,8 +93,10 @@ typedef int util_ptrint;
 
 
 /* No machines seem to have much of a problem with these */
-#include <stdio.h>
 #include <ctype.h>
+
+#include <stdio.h>
+
 
 
 /* Some machines fail to define some functions in stdio.h */

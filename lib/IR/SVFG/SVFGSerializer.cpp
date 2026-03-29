@@ -280,13 +280,14 @@ static const ICFGNode *resolveICFGNode(const SVFG &graph, const Anchor &anchor,
 static uint32_t packObjectInfoFlags(const SVFG::ObjectInfo &info) {
   uint32_t flags = 0;
   flags |= info.isHeap ? (1u << 0) : 0;
-  flags |= info.isStack ? (1u << 1) : 0;
-  flags |= info.isGlobal ? (1u << 2) : 0;
-  flags |= info.isFunction ? (1u << 3) : 0;
-  flags |= info.isConstant ? (1u << 4) : 0;
-  flags |= info.isFieldInsensitive ? (1u << 5) : 0;
-  flags |= info.isArray ? (1u << 6) : 0;
-  flags |= info.isUnknown ? (1u << 7) : 0;
+  flags |= info.isConcreteHeap ? (1u << 1) : 0;
+  flags |= info.isStack ? (1u << 2) : 0;
+  flags |= info.isGlobal ? (1u << 3) : 0;
+  flags |= info.isFunction ? (1u << 4) : 0;
+  flags |= info.isConstant ? (1u << 5) : 0;
+  flags |= info.isFieldInsensitive ? (1u << 6) : 0;
+  flags |= info.isArray ? (1u << 7) : 0;
+  flags |= info.isUnknown ? (1u << 8) : 0;
   return flags;
 }
 
@@ -294,13 +295,14 @@ static SVFG::ObjectInfo unpackObjectInfoFlags(uint32_t flags,
                                               uint32_t baseObjId) {
   SVFG::ObjectInfo info;
   info.isHeap = (flags & (1u << 0)) != 0;
-  info.isStack = (flags & (1u << 1)) != 0;
-  info.isGlobal = (flags & (1u << 2)) != 0;
-  info.isFunction = (flags & (1u << 3)) != 0;
-  info.isConstant = (flags & (1u << 4)) != 0;
-  info.isFieldInsensitive = (flags & (1u << 5)) != 0;
-  info.isArray = (flags & (1u << 6)) != 0;
-  info.isUnknown = (flags & (1u << 7)) != 0;
+  info.isConcreteHeap = (flags & (1u << 1)) != 0;
+  info.isStack = (flags & (1u << 2)) != 0;
+  info.isGlobal = (flags & (1u << 3)) != 0;
+  info.isFunction = (flags & (1u << 4)) != 0;
+  info.isConstant = (flags & (1u << 5)) != 0;
+  info.isFieldInsensitive = (flags & (1u << 6)) != 0;
+  info.isArray = (flags & (1u << 7)) != 0;
+  info.isUnknown = (flags & (1u << 8)) != 0;
   info.baseObjId = baseObjId;
   return info;
 }

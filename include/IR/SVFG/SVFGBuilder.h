@@ -364,6 +364,26 @@ public:
   /// Convenience overload that applies \p cfg then performs build().
   SVFG *build(const ICFG *icfg, const SVFGBuilderConfig &cfg);
 
+  /// @brief Mark newly materialized indirect-call edges as feasible.
+  ///
+  /// Mirrors upstream SVF's builder bookkeeping for speculative edges added at
+  /// indirect call sites. Demand-driven clients can remove edges they proved
+  /// feasible from the spurious-edge set after refinement.
+  inline void markValidVFEdges(const std::vector<SVFGEdge *> &edges) {
+    for (SVFGEdge *edge : edges) {
+      if (edge)
+        vfEdgesAtIndCallSite.erase(edge);
+    }
+  }
+
+  /// @brief Return true if \p edge was pre-connected speculatively at an
+  /// indirect call site and has not yet been marked feasible.
+  inline bool isSpuriousVFEdgeAtIndCallSite(const SVFGEdge *edge) const {
+    return edge &&
+           vfEdgesAtIndCallSite.find(const_cast<SVFGEdge *>(edge)) !=
+               vfEdgesAtIndCallSite.end();
+  }
+
   //===------------------------------------------------------------------===
   // Incremental update API
   //===------------------------------------------------------------------===

@@ -499,6 +499,7 @@ void ContextDDA::connectIndirectCallees(const CxtLocDPItem &dpm,
   if (!flowDDA_ || !flowDDA_->getSVFGBuilder() || !svfg)
     return;
   const auto &indCallSites = svfg->getIndCallSites(dpm.getCurNodeID());
+  std::unordered_set<SVFGEdge *> newlyValidated;
   for (const llvm::CallBase *cs : indCallSites) {
     if (!cs)
       continue;
@@ -510,10 +511,19 @@ void ContextDDA::connectIndirectCallees(const CxtLocDPItem &dpm,
       const llvm::Function *callee = llvm::dyn_cast_or_null<llvm::Function>(v);
       if (!callee || callee->isDeclaration())
         continue;
+      std::vector<SVFGEdge *> resolvedEdges;
       (void)flowDDA_->getSVFGBuilder()->connectCallSiteToCalleeOnTheFly(
-          svfg, cs, callee, newEdges);
+          svfg, cs, callee, resolvedEdges);
+      svfg->getInterVFEdgesForIndirectCallSite(cs, callee, resolvedEdges);
+      for (SVFGEdge *edge : resolvedEdges) {
+        if (!edge || newlyValidated.insert(edge).second == false)
+          continue;
+        newEdges.push_back(edge);
+      }
     }
   }
+  if (!newEdges.empty())
+    flowDDA_->getSVFGBuilder()->markValidVFEdges(newEdges);
 }
 
 void ContextDDA::insertOutOfBudgetDpm(const CxtLocDPItem &dpm) {
@@ -894,12 +904,28 @@ bool ContextDDA::isStrongUpdate(const CxtPtSet &dstPts,
   if (svfg->isUnknownObject(objId))
     return false;
   if (svfg->isHeapObject(objId)) {
-    // Lotus's SVFG object model does not currently distinguish SVF's
-    // DummyObjVar-style concrete heap cells from ordinary heap allocations.
-    // Upstream only allows the former to strong-update under additional
-    // context/loop checks; treating all heap objects as eligible would be
-    // unsound. Stay conservative until the SVFG carries that distinction.
-    return false;
+    // Mirror SVF ContextDDA::isHeapCondMemObj:
+    // ordinary heap objects stay weak; only concrete heap cells may strong
+    // update, and only under a concrete context outside recursion/loops.
+    if (!svfg->isConcreteHeapObject(objId))
+      return false;
+    if (!var.get_cond().isConcreteCxt())
+      return false;
+
+    uint32_t baseObjId = objId;
+    if (const auto *info = svfg->getObjectInfo(objId)) {
+      if (info->baseObjId != 0)
+        baseObjId = info->baseObjId;
+    }
+    const Value *allocValue = svfg->getObjectValue(baseObjId);
+    const Instruction *allocInst = dyn_cast_or_null<Instruction>(allocValue);
+    if (!allocInst)
+      return false;
+    const Function *allocFun = allocInst->getFunction();
+    if (flowDDA_ && flowDDA_->isRecursiveFunction(allocFun))
+      return false;
+    if (flowDDA_ && flowDDA_->isInLoop(allocInst))
+      return false;
   }
   if (svfg->isArrayObject(objId))
     return false;

@@ -194,6 +194,7 @@ public:
     /// constant, field-insensitive, etc., the bit remains set.
     struct ObjectInfo {
         bool isHeap = false;
+        bool isConcreteHeap = false;
         bool isStack = false;
         bool isGlobal = false;
         bool isFunction = false;
@@ -645,6 +646,7 @@ public:
         if (objId == 0) return;
         auto &dst = objIdToInfo[objId];
         dst.isHeap = dst.isHeap || info.isHeap;
+        dst.isConcreteHeap = dst.isConcreteHeap || info.isConcreteHeap;
         dst.isStack = dst.isStack || info.isStack;
         dst.isGlobal = dst.isGlobal || info.isGlobal;
         dst.isFunction = dst.isFunction || info.isFunction;
@@ -668,6 +670,11 @@ public:
     }
     inline bool isStackObject(uint32_t objId) const {
         if (const ObjectInfo *info = getObjectInfo(objId)) return info->isStack;
+        return false;
+    }
+    inline bool isConcreteHeapObject(uint32_t objId) const {
+        if (const ObjectInfo *info = getObjectInfo(objId))
+            return info->isConcreteHeap;
         return false;
     }
     inline bool isGlobalObject(uint32_t objId) const {
@@ -790,7 +797,11 @@ public:
                                             std::vector<SVFGEdge*>& edges) const;
 
     /// @brief Dump to DOT format
-    void dump(const std::string& filename) const;
+    ///
+    /// The optional \p simple flag is kept for source compatibility with
+    /// upstream SVF's dumping API. The current serializer-backed DOT writer
+    /// does not implement alternate simple formatting and ignores the flag.
+    void dump(const std::string& filename, bool simple = false) const;
 
     /// @brief Serialize graph to text
     bool writeToFile(const std::string& filename) const;

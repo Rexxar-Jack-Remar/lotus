@@ -48,12 +48,18 @@
 
 ******************************************************************************/
 
-#include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
-#include <math.h>
 #include "Solvers/CUDD/util.h"
+
 #include "Solvers/CUDD/epd.h"
+
+#include <math.h>
+
+#include <stdio.h>
+
+#include <stdlib.h>
+
+#include <string.h>
+
 
 
 /**Function********************************************************************

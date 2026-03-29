@@ -630,11 +630,64 @@ TEST_F(SVFGMemorySSATest, OnTheFlyIndirectCallUpdatesRefinedCallGraph) {
   std::vector<SVFGEdge *> newEdges;
   EXPECT_TRUE(builder.connectCallSiteToCalleeOnTheFly(svfg.get(), indCall,
                                                       targetFn, newEdges));
+  bool sawSpeculativeEdge = false;
+  for (SVFGEdge *edge : newEdges) {
+    if (builder.isSpuriousVFEdgeAtIndCallSite(edge))
+      sawSpeculativeEdge = true;
+  }
+  EXPECT_TRUE(sawSpeculativeEdge);
+  builder.markValidVFEdges(newEdges);
+  for (SVFGEdge *edge : newEdges)
+    EXPECT_FALSE(builder.isSpuriousVFEdgeAtIndCallSite(edge));
 
   const LTCallGraph *cg = builder.getRefinedCallGraph();
   ASSERT_NE(cg, nullptr);
   EXPECT_TRUE(callGraphHasEdge(*cg, applyFn, indCall, targetFn));
   ASSERT_EQ(cg, svfg->getRefinedCallGraph());
+}
+
+TEST_F(SVFGMemorySSATest, UpdateSVFGKeepsBuilderGraphAccessorsValid) {
+  const char *source = R"(
+    define void @target(i8* %p) {
+    entry:
+      ret void
+    }
+
+    define void @apply(i8* %arg) {
+    entry:
+      call void @target(i8* %arg)
+      ret void
+    }
+  )";
+
+  auto module = parseModule(source);
+  ASSERT_NE(module, nullptr);
+
+  ICFG icfg;
+  ICFGBuilder icfgBuilder(&icfg);
+  icfgBuilder.build(module.get());
+
+  SVFGBuilderConfig cfg;
+  cfg.usePointerAnalysis = false;
+  cfg.buildMSSA = false;
+
+  SVFGBuilder builder(cfg);
+  std::unique_ptr<SVFG> svfg(builder.build(&icfg));
+  ASSERT_NE(svfg, nullptr);
+
+  const Function *applyFn = module->getFunction("apply");
+  const Function *targetFn = module->getFunction("target");
+  ASSERT_NE(applyFn, nullptr);
+  ASSERT_NE(targetFn, nullptr);
+  const CallBase *call = findDirectCall(applyFn, "target");
+  ASSERT_NE(call, nullptr);
+
+  ASSERT_TRUE(builder.updateSVFG(svfg.get()));
+
+  const LTCallGraph *cg = builder.getRefinedCallGraph();
+  ASSERT_NE(cg, nullptr);
+  ASSERT_EQ(cg, svfg->getRefinedCallGraph());
+  EXPECT_TRUE(callGraphHasEdge(*cg, applyFn, call, targetFn));
 }
 
 TEST_F(SVFGMemorySSATest, SelectProducesPhiNodeAndPhiEdges) {
