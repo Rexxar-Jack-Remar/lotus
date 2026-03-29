@@ -26,10 +26,13 @@ All optimizations are **disabled by default**. HVN and HU run during the constra
 
 ## Context sensitivity
 
-- `--andersen-k-cs=<0|1|2>` selects the call-site sensitivity:
+- `--andersen-k-cs=<k>` selects the call-site sensitivity (`0 <= k <= 32`):
   - `0` (default): context-insensitive
   - `1`: 1-CFA (last call site)
   - `2`: 2-CFA (last two call sites)
+  - `k > 2`: k-CFA (last `k` call sites)
+- If `k` is greater than 32, SparrowAA emits a warning and falls back to
+  context-insensitive analysis (`k=0`).
 - Andersen now uses an internal call-string context manager to keep each call-site
   history distinct while still sharing universal/null nodes. This avoids the
   equality bug in the external `KCallSite` helper and ensures points-to facts are

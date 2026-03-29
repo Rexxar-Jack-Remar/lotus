@@ -61,7 +61,8 @@ cl::opt<bool> DumpConstraintInfo("dump-cons",
                                  cl::cat(AndersenCategory));
 cl::opt<unsigned>
     AndersenKContext("andersen-k-cs",
-                     cl::desc("Context-sensitive Andersen k-callsite (0/1/2)"),
+                     cl::desc("Context-sensitive Andersen k-callsite depth "
+                              "(k>=0, currently supports 0-32)"),
                      cl::init(0), cl::cat(AndersenCategory));
 cl::opt<bool> AndersenUseBDDPointsTo(
     "andersen-use-bdd-pts",
@@ -232,20 +233,93 @@ ContextPolicy buildCtxPolicy(unsigned k, const char *name) {
 
 } // namespace
 
-ContextPolicy makeContextPolicy(unsigned kCallSite) {
+static constexpr unsigned MAX_SUPPORTED_K_CALLSITE = 32;
+
+static ContextPolicy buildSupportedKCallStringPolicy(unsigned kCallSite) {
   switch (kCallSite) {
-  case 1:
-    return buildKCallStringPolicy<1>("1-CFA");
-  case 2:
-    return buildKCallStringPolicy<2>("2-CFA");
-  case 0:
-    return buildCtxPolicy<aser::NoCtx>(0, "NoCtx");
-  default:
-    // k > 2 is not supported; warn and fall back to context-insensitive.
+    case 1:
+      return buildKCallStringPolicy<1>("1-CFA");
+    case 2:
+      return buildKCallStringPolicy<2>("2-CFA");
+    case 3:
+      return buildKCallStringPolicy<3>("3-CFA");
+    case 4:
+      return buildKCallStringPolicy<4>("4-CFA");
+    case 5:
+      return buildKCallStringPolicy<5>("5-CFA");
+    case 6:
+      return buildKCallStringPolicy<6>("6-CFA");
+    case 7:
+      return buildKCallStringPolicy<7>("7-CFA");
+    case 8:
+      return buildKCallStringPolicy<8>("8-CFA");
+    case 9:
+      return buildKCallStringPolicy<9>("9-CFA");
+    case 10:
+      return buildKCallStringPolicy<10>("10-CFA");
+    case 11:
+      return buildKCallStringPolicy<11>("11-CFA");
+    case 12:
+      return buildKCallStringPolicy<12>("12-CFA");
+    case 13:
+      return buildKCallStringPolicy<13>("13-CFA");
+    case 14:
+      return buildKCallStringPolicy<14>("14-CFA");
+    case 15:
+      return buildKCallStringPolicy<15>("15-CFA");
+    case 16:
+      return buildKCallStringPolicy<16>("16-CFA");
+    case 17:
+      return buildKCallStringPolicy<17>("17-CFA");
+    case 18:
+      return buildKCallStringPolicy<18>("18-CFA");
+    case 19:
+      return buildKCallStringPolicy<19>("19-CFA");
+    case 20:
+      return buildKCallStringPolicy<20>("20-CFA");
+    case 21:
+      return buildKCallStringPolicy<21>("21-CFA");
+    case 22:
+      return buildKCallStringPolicy<22>("22-CFA");
+    case 23:
+      return buildKCallStringPolicy<23>("23-CFA");
+    case 24:
+      return buildKCallStringPolicy<24>("24-CFA");
+    case 25:
+      return buildKCallStringPolicy<25>("25-CFA");
+    case 26:
+      return buildKCallStringPolicy<26>("26-CFA");
+    case 27:
+      return buildKCallStringPolicy<27>("27-CFA");
+    case 28:
+      return buildKCallStringPolicy<28>("28-CFA");
+    case 29:
+      return buildKCallStringPolicy<29>("29-CFA");
+    case 30:
+      return buildKCallStringPolicy<30>("30-CFA");
+    case 31:
+      return buildKCallStringPolicy<31>("31-CFA");
+    case 32:
+      return buildKCallStringPolicy<32>("32-CFA");
+    default:
+      llvm_unreachable("Unsupported k-callsite value in dispatcher");
+  }
+}
+
+ContextPolicy makeContextPolicy(unsigned kCallSite) {
+  if (kCallSite > MAX_SUPPORTED_K_CALLSITE) {
     llvm::errs() << "WARNING: Andersen: k-callsite depth " << kCallSite
-                 << " is not supported (max is 2); falling back to "
-                    "context-insensitive analysis (k=0).\n";
+                 << " is not supported (max is "
+                 << MAX_SUPPORTED_K_CALLSITE
+                 << "); falling back to context-insensitive analysis (k=0).\n";
     return buildCtxPolicy<aser::NoCtx>(0, "NoCtx");
+  }
+
+  switch (kCallSite) {
+    case 0:
+      return buildCtxPolicy<aser::NoCtx>(0, "NoCtx");
+    default:
+      return buildSupportedKCallStringPolicy(kCallSite);
   }
 }
 
