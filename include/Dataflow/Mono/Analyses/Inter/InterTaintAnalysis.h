@@ -21,6 +21,8 @@ namespace mono {
 struct InterMonoTaintConfig {
   std::unordered_set<std::string> SourceFunctions;
   std::unordered_set<std::string> SinkFunctions;
+  std::unordered_set<std::string> SanitizerFunctions;
+  bool SeedEntryArguments = false;
   bool TaintPointerArgsFromSources = true;
 };
 

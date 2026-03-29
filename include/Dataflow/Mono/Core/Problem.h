@@ -12,6 +12,7 @@
 #include "Dataflow/ControlFlow/IntraCFG.h"
 #include "Dataflow/Mono/Support/Soundness.h"
 
+#include <algorithm>
 #include <cstddef>
 #include <string>
 #include <unordered_map>
@@ -324,10 +325,14 @@ public:
    * Override to provide more precise call graph resolution (e.g., for
    * indirect calls using points-to analysis).
    *
-   * Default: returns direct callee only.  For indirect calls (function
-   * pointers, virtual dispatch) the default returns an empty vector and
-   * emits a diagnostic warning.  Subclasses should override this
-   * method and use points-to information to resolve indirect calls soundly.
+   * Default behaviour:
+   * - direct calls: return the direct callee
+   * - indirect calls in `Soundness::Soundy` mode: conservatively return every
+   *   compatible function in the module
+   * - indirect calls in `Soundness::Unsoundy` mode: return an empty set
+   *
+   * Subclasses should still override this method when they can provide a more
+   * precise resolution using points-to information or a custom call graph.
    *
    * @param CallSite The call instruction
    * @return Vector of possible callees
@@ -354,7 +359,26 @@ public:
     return Callees;
   }
 
-  virtual std::vector<f_t> resolve_indirect_callees(n_t) const { return {}; }
+  virtual std::vector<f_t> resolve_indirect_callees(n_t CallSite) const {
+    std::vector<f_t> Callees;
+    if (this->getSoundness() == Soundness::Unsoundy) {
+      return Callees;
+    }
+
+    auto *Call = llvm::dyn_cast_or_null<llvm::CallBase>(CallSite);
+    auto *M = Call != nullptr ? Call->getModule() : nullptr;
+    if (Call == nullptr || M == nullptr) {
+      return Callees;
+    }
+
+    for (auto &F : *M) {
+      if (F.isIntrinsic() || !has_compatible_signature(*Call, F)) {
+        continue;
+      }
+      Callees.push_back(&F);
+    }
+    return Callees;
+  }
 
   virtual UnresolvedCallPolicy unresolved_call_policy() const {
     return UnresolvedCallPolicy::WarnAndIgnore;
@@ -363,6 +387,38 @@ public:
   const i_t *getICFG() const { return ICF; }
 
 protected:
+  static bool has_compatible_signature(const llvm::CallBase &Call,
+                                       const llvm::Function &Callee) {
+    auto *CallTy = Call.getFunctionType();
+    auto *CalleeTy = Callee.getFunctionType();
+
+    if (CallTy == CalleeTy) {
+      return true;
+    }
+
+    if (CallTy->getReturnType() != CalleeTy->getReturnType()) {
+      return false;
+    }
+
+    const unsigned SharedParams =
+        std::min(CallTy->getNumParams(), CalleeTy->getNumParams());
+    for (unsigned I = 0; I < SharedParams; ++I) {
+      if (CallTy->getParamType(I) != CalleeTy->getParamType(I)) {
+        return false;
+      }
+    }
+
+    if (CalleeTy->isVarArg()) {
+      return CallTy->getNumParams() >= CalleeTy->getNumParams();
+    }
+
+    if (CallTy->isVarArg()) {
+      return false;
+    }
+
+    return CallTy->getNumParams() == CalleeTy->getNumParams();
+  }
+
   const i_t *ICF = nullptr;
 };
 

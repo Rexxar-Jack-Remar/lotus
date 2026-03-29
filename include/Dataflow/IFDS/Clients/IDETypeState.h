@@ -4,11 +4,13 @@
 
 #include <functional>
 #include <memory>
+#include <set>
 #include <string>
 #include <unordered_map>
 #include <unordered_set>
 #include <vector>
 
+#include <llvm/ADT/StringRef.h>
 #include <llvm/IR/Function.h>
 #include <llvm/IR/Instruction.h>
 #include <llvm/IR/Value.h>
@@ -227,6 +229,40 @@ private:
 };
 
 /**
+ * TypeStateDescriptionBase - Description-driven typestate API
+ *
+ * This is a lighter-weight Lotus counterpart to Phasar's typestate
+ * descriptions. It models API categories and transitions while reusing the
+ * existing `IDETypeState` client for LLVM value tracking.
+ */
+class TypeStateDescriptionBase {
+public:
+  using StateId = int;
+
+  virtual ~TypeStateDescriptionBase() = default;
+
+  virtual bool is_factory_function(llvm::StringRef func_name) const = 0;
+  virtual bool is_consuming_function(llvm::StringRef func_name) const = 0;
+  virtual bool is_api_function(llvm::StringRef func_name) const {
+    return is_factory_function(func_name) || is_consuming_function(func_name);
+  }
+
+  virtual std::string get_type_name_of_interest() const = 0;
+  virtual std::set<int>
+  get_consumer_param_indices(llvm::StringRef func_name) const = 0;
+  virtual std::set<int>
+  get_factory_param_indices(llvm::StringRef func_name) const {
+    (void)func_name;
+    return {};
+  }
+
+  virtual StateId uninitialized_state() const = 0;
+  virtual StateId error_state() const = 0;
+  virtual StateId get_next_state(llvm::StringRef token, StateId current_state,
+                                 const llvm::CallBase *call_site) const = 0;
+};
+
+/**
  * IDETypeState - Parametric typestate analysis
  *
  * Usage example:
@@ -253,6 +289,7 @@ public:
 
   // Constructor with typestate property
   explicit IDETypeState(std::shared_ptr<TypeStateProperty> property);
+  explicit IDETypeState(std::shared_ptr<TypeStateDescriptionBase> description);
 
   // IFDS interface
   Fact zero_fact() const override { return nullptr; }
@@ -298,9 +335,19 @@ public:
       const llvm::CallBase *call, const llvm::Instruction *return_site,
       llvm::ArrayRef<const llvm::Function *> callees, const Fact &src_fact,
       const Fact &tgt_fact) override;
+  FactSet summary_flow(const llvm::CallBase *call, const llvm::Function *callee,
+                       const Fact &fact) override;
+  EdgeFunction summary_edge_function(const llvm::CallBase *call,
+                                     const llvm::Function *callee,
+                                     const llvm::Instruction *return_site,
+                                     const Fact &src_fact,
+                                     const Fact &tgt_fact) override;
 
   // Configuration
   std::shared_ptr<TypeStateProperty> get_property() const { return m_property; }
+  std::shared_ptr<TypeStateDescriptionBase> get_description() const {
+    return m_description;
+  }
 
   // Tracked values configuration
   void track_globals(bool enable) { m_track_globals = enable; }
@@ -311,11 +358,18 @@ public:
 
   // Query interface
   bool is_error_state(const Value &v) const {
-    return !v.is_special() && m_property->is_error_state(v.user_state());
+    if (v.is_special()) {
+      return false;
+    }
+    if (m_property) {
+      return m_property->is_error_state(v.user_state());
+    }
+    return m_description && v.user_state() == m_description->error_state();
   }
 
 private:
   std::shared_ptr<TypeStateProperty> m_property;
+  std::shared_ptr<TypeStateDescriptionBase> m_description;
   bool m_track_globals;
   bool m_track_heap;
   std::unordered_set<std::string> m_tracked_types;

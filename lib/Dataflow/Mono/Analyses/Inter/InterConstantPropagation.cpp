@@ -397,7 +397,12 @@ public:
 
   std::vector<Function *>
   resolve_indirect_callees(Instruction *CallSite) const override {
-    return resolveIndirectCalleesWithAA(CallSite, AA);
+    auto Callees = resolveIndirectCalleesWithAA(CallSite, AA);
+    if (!Callees.empty()) {
+      return Callees;
+    }
+    return InterMonoProblem<ConstantPropagationDomain>::resolve_indirect_callees(
+        CallSite);
   }
 
 private:

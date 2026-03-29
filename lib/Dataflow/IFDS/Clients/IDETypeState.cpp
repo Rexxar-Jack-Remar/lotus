@@ -79,6 +79,19 @@ IDETypeState::IDETypeState(std::shared_ptr<TypeStateProperty> property)
   }
 }
 
+IDETypeState::IDETypeState(
+    std::shared_ptr<TypeStateDescriptionBase> description)
+    : m_description(std::move(description)), m_track_globals(true),
+      m_track_heap(true) {
+  if (!m_description) {
+    throw std::runtime_error("IDETypeState: description cannot be null");
+  }
+  const std::string type_name = m_description->get_type_name_of_interest();
+  if (!type_name.empty()) {
+    m_tracked_types.insert(type_name);
+  }
+}
+
 IDETypeState::FactSet IDETypeState::initial_facts(const llvm::Function *main) {
   FactSet seeds;
 
@@ -265,13 +278,54 @@ IDETypeState::call_to_return_flow(const llvm::CallBase *call,
                                   llvm::ArrayRef<const llvm::Function *> callees, const Fact &fact) {
   FactSet out;
 
+  bool preserve_fact = fact && should_track(fact);
+  bool preserve_call_result = call && !call->getType()->isVoidTy() &&
+                              should_track(call);
+
+  if (m_description && call) {
+    for (const llvm::Function *callee : callees) {
+      if (!callee) {
+        continue;
+      }
+      const llvm::StringRef callee_name = callee->getName();
+      if (!m_description->is_api_function(callee_name)) {
+        continue;
+      }
+
+      if (preserve_call_result &&
+          m_description->is_factory_function(callee_name) &&
+          fact == zero_fact()) {
+        preserve_call_result = false;
+      }
+
+      if (preserve_fact) {
+        for (int idx : m_description->get_consumer_param_indices(callee_name)) {
+          if (idx < 0 || static_cast<unsigned>(idx) >= call->arg_size()) {
+            continue;
+          }
+          const llvm::Value *actual =
+              call->getArgOperand(static_cast<unsigned>(idx));
+          if (!actual) {
+            continue;
+          }
+          if (actual == fact ||
+              (actual->getType()->isPointerTy() && fact->getType()->isPointerTy() &&
+               may_alias_or_equal(actual, fact))) {
+            preserve_fact = false;
+            break;
+          }
+        }
+      }
+    }
+  }
+
   // Keep the fact (it's not killed by the call)
-  if (fact && should_track(fact)) {
+  if (preserve_fact) {
     out.insert(fact);
   }
 
   // Call result is a new fact
-  if (!call->getType()->isVoidTy() && should_track(call)) {
+  if (preserve_call_result) {
     out.insert(call);
   }
 
@@ -284,6 +338,10 @@ IDETypeState::normal_edge_function(const llvm::Instruction *stmt,
                                    const Fact &src_fact, const Fact &tgt_fact) {
   (void)src_fact;
   (void)tgt_fact;
+
+  if (!m_property) {
+    return [](const Value &v) { return v; };
+  }
 
   // Get transitions for this instruction
   auto transitions = m_property->get_transitions(stmt);
@@ -303,6 +361,10 @@ IDETypeState::call_edge_function(const llvm::CallBase *call,
   (void)callee;
   (void)src_fact;
   (void)tgt_fact;
+
+  if (!m_property) {
+    return [](const Value &v) { return v; };
+  }
 
   // Get transitions for this call
   auto transitions = m_property->get_transitions(call);
@@ -345,6 +407,120 @@ IDETypeState::EdgeFunction IDETypeState::call_to_return_edge_function(
   return [](const Value &v) { return v; };
 }
 
+IDETypeState::FactSet IDETypeState::summary_flow(const llvm::CallBase *call,
+                                                 const llvm::Function *callee,
+                                                 const Fact &fact) {
+  FactSet out;
+  if (!m_description || !call || !callee) {
+    return out;
+  }
+
+  const llvm::StringRef callee_name = callee->getName();
+
+  if (fact == zero_fact() && m_description->is_factory_function(callee_name)) {
+    if (!call->getType()->isVoidTy() && should_track(call)) {
+      out.insert(call);
+    }
+    for (int idx : m_description->get_factory_param_indices(callee_name)) {
+      if (idx < 0 || static_cast<unsigned>(idx) >= call->arg_size()) {
+        continue;
+      }
+      const llvm::Value *actual = call->getArgOperand(static_cast<unsigned>(idx));
+      if (should_track(actual)) {
+        out.insert(actual);
+      }
+    }
+  }
+
+  if (fact && m_description->is_api_function(callee_name)) {
+    for (int idx : m_description->get_consumer_param_indices(callee_name)) {
+      if (idx < 0 || static_cast<unsigned>(idx) >= call->arg_size()) {
+        continue;
+      }
+      const llvm::Value *actual = call->getArgOperand(static_cast<unsigned>(idx));
+      if (!actual) {
+        continue;
+      }
+      if (actual == fact) {
+        out.insert(fact);
+        break;
+      }
+      if (actual->getType()->isPointerTy() && fact->getType()->isPointerTy() &&
+          may_alias_or_equal(actual, fact)) {
+        out.insert(fact);
+        break;
+      }
+    }
+  }
+
+  return out;
+}
+
+IDETypeState::EdgeFunction
+IDETypeState::summary_edge_function(const llvm::CallBase *call,
+                                    const llvm::Function *callee,
+                                    const llvm::Instruction *return_site,
+                                    const Fact &src_fact,
+                                    const Fact &tgt_fact) {
+  (void)return_site;
+  if (!m_description || !call || !callee) {
+    return [](const Value &v) { return v; };
+  }
+
+  const llvm::StringRef callee_name = callee->getName();
+  const std::string token = callee_name.str();
+
+  auto apply_api_transition = [description = m_description, token,
+                               call](const Value &v) -> Value {
+    if (v.is_top()) {
+      return v;
+    }
+    const int current_state =
+        v.is_bottom() ? description->uninitialized_state() : v.user_state();
+    return Value(
+        description->get_next_state(token, current_state, call));
+  };
+
+  if (src_fact == zero_fact() && m_description->is_factory_function(callee_name)) {
+    bool applies = tgt_fact == call;
+    if (!applies) {
+      for (int idx : m_description->get_factory_param_indices(callee_name)) {
+        if (idx < 0 || static_cast<unsigned>(idx) >= call->arg_size()) {
+          continue;
+        }
+        applies |= call->getArgOperand(static_cast<unsigned>(idx)) == tgt_fact;
+      }
+    }
+    if (applies) {
+      return [description = m_description, token,
+              call](const Value &) -> Value {
+        return Value(description->get_next_state(
+            token, description->uninitialized_state(), call));
+      };
+    }
+  }
+
+  if (src_fact == tgt_fact && tgt_fact &&
+      m_description->is_api_function(callee_name)) {
+    for (int idx : m_description->get_consumer_param_indices(callee_name)) {
+      if (idx < 0 || static_cast<unsigned>(idx) >= call->arg_size()) {
+        continue;
+      }
+      const llvm::Value *actual = call->getArgOperand(static_cast<unsigned>(idx));
+      if (!actual) {
+        continue;
+      }
+      if (actual == tgt_fact ||
+          (actual->getType()->isPointerTy() && tgt_fact->getType()->isPointerTy() &&
+           may_alias_or_equal(actual, tgt_fact))) {
+        return apply_api_transition;
+      }
+    }
+  }
+
+  return [](const Value &v) { return v; };
+}
+
 bool IDETypeState::should_track(const llvm::Value *val) const {
   if (!val)
     return false;
@@ -374,7 +550,16 @@ bool IDETypeState::should_track(const llvm::Value *val) const {
   // getNonOpaquePointerElementType() which is still available in LLVM 14.x (the
   // project's target version) but guarded so the code compiles cleanly when the
   // API is absent.
-  if (!m_tracked_types.empty() && val->getType()) {
+  std::unordered_set<std::string> tracked_types = m_tracked_types;
+  if (tracked_types.empty() && m_description) {
+    const std::string description_type =
+        m_description->get_type_name_of_interest();
+    if (!description_type.empty()) {
+      tracked_types.insert(description_type);
+    }
+  }
+
+  if (!tracked_types.empty() && val->getType()) {
     llvm::Type *ty = val->getType();
     if (auto *ptr_ty = llvm::dyn_cast<llvm::PointerType>(ty)) {
 #if LLVM_VERSION_MAJOR < 17
@@ -383,7 +568,7 @@ bool IDETypeState::should_track(const llvm::Value *val) const {
       if (auto *struct_ty = llvm::dyn_cast<llvm::StructType>(elem_ty)) {
         if (struct_ty->hasName()) {
           std::string type_name = struct_ty->getName().str();
-          if (m_tracked_types.count(type_name) > 0) {
+          if (tracked_types.count(type_name) > 0) {
             return true;
           }
         }

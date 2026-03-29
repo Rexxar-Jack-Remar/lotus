@@ -135,6 +135,10 @@ public:
           M, RootKeys, ICF, SeedIns, ComputeGEN, ComputeKILL, InitializeIN,
           InitializeOUT, ComputeIN, ComputeOUT, Equal);
     }
+
+    if (Result) {
+      Result->setMissingFactFallback(Problem.allTop());
+    }
   }
 
   const ResultTy *getResults() const { return Result.get(); }
@@ -142,8 +146,8 @@ public:
   /// Returns the IN facts at \p Stmt merged across all call-string contexts.
   /// This is a convenience query; use the raw IN/OUT maps below when checking
   /// context-sensitive behaviour because they preserve the per-context split.
-  /// Uses the problem's merge to combine per-context facts. Returns an empty
-  /// container if no results or \p Stmt has no entries.
+  /// Uses the problem's merge to combine per-context facts. Returns
+  /// `Problem.allTop()` if no results or \p Stmt has no entries.
   mono_container_t getResultsAt(llvm::Instruction *Stmt) const {
     if (!Result) {
       return Problem.allTop();

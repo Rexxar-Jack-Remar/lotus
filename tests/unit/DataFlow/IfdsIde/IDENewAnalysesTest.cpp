@@ -1,17 +1,118 @@
 #include <gtest/gtest.h>
+#include <Dataflow/IFDS/Clients/DefaultReachableAllocationSitesIDEProblem.h>
 #include <Dataflow/IFDS/Clients/IDEExtendedTaintAnalysis.h>
 #include <Dataflow/IFDS/Clients/IDEFeatureTaintAnalysis.h>
 #include <Dataflow/IFDS/Clients/IDEGeneralizedLCA.h>
 #include <Dataflow/IFDS/Clients/IDEInstInteractionAnalysis.h>
 #include <Dataflow/IFDS/Clients/IDESecureHeapPropagation.h>
+#include <Dataflow/IFDS/Clients/IDETypeState.h>
 #include <Dataflow/IFDS/Solvers/IDESolver.h>
 #include <TestUtils/LLVMHelpers.h>
 
 #include <llvm/IR/LLVMContext.h>
 #include <llvm/IR/Module.h>
 
+#include <set>
+
 namespace ifds {
 namespace {
+
+struct ReachableFactValue {
+  bool reachable = false;
+
+  static ReachableFactValue top() { return ReachableFactValue{true}; }
+  static ReachableFactValue bottom() { return ReachableFactValue{false}; }
+
+  bool operator==(const ReachableFactValue &other) const {
+    return reachable == other.reachable;
+  }
+};
+
+class ReachableAllocationProblem
+    : public DefaultReachableAllocationSitesIDEProblem<ReachableFactValue> {
+public:
+  Fact zero_fact() const override { return nullptr; }
+  FactSet initial_facts(const llvm::Function *) override { return {zero_fact()}; }
+  IDEInitialSeeds initial_ide_seeds(const llvm::Module &module) override {
+    IDEInitialSeeds seeds;
+    const llvm::Function *main = module.getFunction("main");
+    if (!main) {
+      return seeds;
+    }
+    const llvm::Instruction *seed_inst =
+        lotus::unittest::findInstructionByName(*main, "p");
+    if (seed_inst) {
+      seeds.add_seed(seed_inst, seed_inst, ReachableFactValue::top());
+    }
+    return seeds;
+  }
+
+  ReachableFactValue top_value() const override {
+    return ReachableFactValue::top();
+  }
+  ReachableFactValue bottom_value() const override {
+    return ReachableFactValue::bottom();
+  }
+  ReachableFactValue join(const ReachableFactValue &lhs,
+                          const ReachableFactValue &rhs) const override {
+    return ReachableFactValue{lhs.reachable || rhs.reachable};
+  }
+
+  EdgeFunction normal_edge_function(const llvm::Instruction *,
+                                    const llvm::Instruction *, const Fact &,
+                                    const Fact &) override {
+    return identity();
+  }
+  EdgeFunction call_edge_function(const llvm::CallBase *, const llvm::Function *,
+                                  const Fact &, const Fact &) override {
+    return identity();
+  }
+  EdgeFunction return_edge_function(const llvm::CallBase *,
+                                    const llvm::Function *,
+                                    const llvm::Instruction *,
+                                    const llvm::Instruction *, const Fact &,
+                                    const Fact &) override {
+    return identity();
+  }
+  EdgeFunction call_to_return_edge_function(
+      const llvm::CallBase *, const llvm::Instruction *,
+      llvm::ArrayRef<const llvm::Function *>, const Fact &, const Fact &)
+      override {
+    return identity();
+  }
+};
+
+class FileHandleDescription : public TypeStateDescriptionBase {
+public:
+  bool is_factory_function(llvm::StringRef func_name) const override {
+    return func_name == "file_open";
+  }
+  bool is_consuming_function(llvm::StringRef func_name) const override {
+    return func_name == "file_use" || func_name == "file_close";
+  }
+  std::string get_type_name_of_interest() const override {
+    return "FileHandle";
+  }
+  std::set<int>
+  get_consumer_param_indices(llvm::StringRef /*func_name*/) const override {
+    return {0};
+  }
+  StateId uninitialized_state() const override { return 0; }
+  StateId error_state() const override { return 3; }
+  StateId get_next_state(llvm::StringRef token, StateId current_state,
+                         const llvm::CallBase * /*call_site*/) const override {
+    if (token == "file_open") {
+      return 1;
+    }
+    if (token == "file_use") {
+      return current_state == 2 ? 3 : current_state;
+    }
+    if (token == "file_close") {
+      return current_state == 1 ? 2 : 3;
+    }
+    return current_state;
+  }
+};
 
 class IDENewAnalysesTest : public ::testing::Test {
 protected:
@@ -135,6 +236,70 @@ TEST_F(IDENewAnalysesTest, GeneralizedLCAComputesConstantSet) {
   EXPECT_EQ(V.kind, GLCAValue::ConstantSet);
   EXPECT_EQ(V.constants.size(), 1u);
   EXPECT_TRUE(V.constants.count(7) > 0);
+}
+
+TEST_F(IDENewAnalysesTest,
+       ReachableAllocationSitesPropagateThroughStoreLoadAndCalls) {
+  auto M = lotus::unittest::parseModuleChecked(*Ctx, R"(
+    declare i8* @malloc(i64)
+
+    define i8* @id(i8* %arg) {
+    entry:
+      ret i8* %arg
+    }
+
+    define i32 @main() {
+    entry:
+      %p = call i8* @malloc(i64 4)
+      %slot = alloca i8*
+      store i8* %p, i8** %slot
+      %tmp = load i8*, i8** %slot
+      %q = call i8* @id(i8* %tmp)
+      ret i32 0
+    }
+  )", "ide_reachable_alloc_sites");
+  auto *Main = M->getFunction("main");
+  auto *Q = lotus::unittest::findInstructionByName(*Main, "q");
+  auto *Ret = Main->back().getTerminator();
+
+  ReachableAllocationProblem Problem;
+  IDESolver<ReachableAllocationProblem> Solver(Problem);
+  auto Config = Solver.get_solver_config();
+  Config.set_auto_inject_alias_analysis(true);
+  Solver.set_solver_config(Config);
+  Solver.solve(*M);
+
+  auto V = Solver.get_value_at(Ret, Q);
+  EXPECT_TRUE(V.reachable);
+}
+
+TEST_F(IDENewAnalysesTest, DescriptionDrivenTypeStateUsesSummaryTransitions) {
+  auto M = lotus::unittest::parseModuleChecked(*Ctx, R"(
+    %FileHandle = type { i32 }
+
+    declare %FileHandle* @file_open()
+    declare void @file_use(%FileHandle*)
+    declare void @file_close(%FileHandle*)
+
+    define i32 @main() {
+    entry:
+      %fh = call %FileHandle* @file_open()
+      call void @file_use(%FileHandle* %fh)
+      call void @file_close(%FileHandle* %fh)
+      ret i32 0
+    }
+  )", "ide_typestate_description");
+  auto *Main = M->getFunction("main");
+  auto *Handle = lotus::unittest::findInstructionByName(*Main, "fh");
+  auto *Ret = Main->back().getTerminator();
+
+  IDETypeState Problem(std::make_shared<FileHandleDescription>());
+  IDESolver<IDETypeState> Solver(Problem);
+  Solver.solve(*M);
+
+  auto V = Solver.get_value_at(Ret, Handle);
+  ASSERT_FALSE(V.is_special());
+  EXPECT_EQ(V.user_state(), 2);
 }
 
 } // namespace

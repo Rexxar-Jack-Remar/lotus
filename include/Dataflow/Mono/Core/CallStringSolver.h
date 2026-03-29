@@ -295,6 +295,7 @@
 #include <queue>
 #include <set>
 #include <unordered_set>
+#include <utility>
 #include <vector>
 
 namespace dataflow {
@@ -383,15 +384,21 @@ public:
     return OUT(ContextKey{Inst, Ctx});
   }
 
-  // Replace shared static empty containers with per-instance members.
-  // The old code used "static ContainerT EmptySet" which is shared across all
-  // instances and all calls.  For BitVectorSet this means the returned empty
-  // set has no universe, causing incorrect results when callers iterate or
-  // union with it.  Using per-instance members avoids the sharing problem.
+  void setMissingFactFallback(const ContainerT &Fallback) {
+    MissingFactFallback = Fallback;
+  }
+
+  void setMissingFactFallback(ContainerT &&Fallback) {
+    MissingFactFallback = std::move(Fallback);
+  }
+
+  // Replace shared static empty containers with a per-instance fallback.
+  // Solvers can configure it to `allTop()` so raw result queries remain
+  // lattice-aware for must-analyses and other non-empty top elements.
   const ContainerT &IN(const ContextKey &Key) const {
     auto It = Ins.find(Key);
     if (It == Ins.end()) {
-      return EmptyContainer;
+      return MissingFactFallback;
     }
     return It->second;
   }
@@ -399,7 +406,7 @@ public:
   const ContainerT &OUT(const ContextKey &Key) const {
     auto It = Outs.find(Key);
     if (It == Outs.end()) {
-      return EmptyContainer;
+      return MissingFactFallback;
     }
     return It->second;
   }
@@ -431,11 +438,10 @@ private:
   std::map<llvm::Instruction *, ContainerT> Kills;
   std::map<ContextKey, ContainerT> Ins;
   std::map<ContextKey, ContainerT> Outs;
-  /// Per-instance empty container returned for missing keys.
-  /// This avoids the shared-static problem where all callers would share
-  /// one empty container (especially problematic for BitVectorSet which
-  /// needs a universe to be useful).
-  ContainerT EmptyContainer{};
+  /// Per-instance fallback returned for missing keys.
+  /// Defaults to a value-initialized container and can be overridden by the
+  /// solver with the lattice's `allTop()` element.
+  ContainerT MissingFactFallback{};
 };
 
 /**

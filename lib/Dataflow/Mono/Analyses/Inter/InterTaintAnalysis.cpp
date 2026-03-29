@@ -52,7 +52,7 @@ public:
   mono_container_t normalFlow(Instruction *Inst,
                               const mono_container_t &In) override {
     if (auto *Call = dyn_cast<CallBase>(Inst)) {
-      return applyCallSite(Call, In);
+      return applyCallSite(Call, resolveCallTargets(Call), In);
     }
     return applyInstructionFlow(Inst, In);
   }
@@ -142,24 +142,12 @@ public:
   mono_container_t callToRetFlow(Instruction *CallSite, Instruction *RetSite,
                                  ArrayRef<Function *> Callees,
                                  const mono_container_t &In) override {
+    (void)CallSite;
     (void)RetSite;
+    (void)Callees;
 
-    // callToRetFlow models the call-to-return edge: facts that flow from the
-    // call site to the return site WITHOUT going through the callee body.
-    //
-    // For UNKNOWN/indirect callees (Callees.empty()), we conservatively apply
-    // the full call semantics here (source tainting, sink recording) since we
-    // have no callee body to analyse.
-    //
-    // For KNOWN callees, the callee body is analysed via callFlow/returnFlow.
-    // We must NOT re-apply applyCallSite here — that would double-count source
-    // tainting and sink recording.  Instead, just pass IN through unchanged;
-    // the return value and pointer-arg tainting are handled by returnFlow.
-    if (Callees.empty()) {
-      if (auto *Call = dyn_cast<CallBase>(CallSite)) {
-        return applyCallSite(Call, In);
-      }
-    }
+    // Call-specific gen/kill effects are modeled in normalFlow() so the
+    // call-to-return edge only needs to forward the already computed OUT set.
     return In;
   }
 
@@ -169,13 +157,22 @@ public:
     if (F == nullptr || F->empty()) {
       return Seeds;
     }
-    Seeds[&F->getEntryBlock().front()] = {};
+    auto &EntryFacts = Seeds[&F->getEntryBlock().front()];
+    if (Config.SeedEntryArguments) {
+      for (auto &Arg : F->args()) {
+        EntryFacts.insert(&Arg);
+      }
+    }
     return Seeds;
   }
 
   std::vector<Function *>
   resolve_indirect_callees(Instruction *CallSite) const override {
-    return resolveIndirectCalleesWithAA(CallSite, AA);
+    auto Callees = resolveIndirectCalleesWithAA(CallSite, AA);
+    if (!Callees.empty()) {
+      return Callees;
+    }
+    return InterMonoProblem<TaintDomain>::resolve_indirect_callees(CallSite);
   }
 
   const InterMonoTaintReport &getReport() const { return Report; }
@@ -297,9 +294,30 @@ private:
     return Config.SinkFunctions.count(F->getName().str()) > 0;
   }
 
-  void recordSinkLeak(CallBase *Call, const mono_container_t &In) {
-    auto *Callee = Call->getCalledFunction();
-    if (!isSinkFunction(Callee)) {
+  bool isSanitizerFunction(const Function *F) const {
+    if (F == nullptr) {
+      return false;
+    }
+    return Config.SanitizerFunctions.count(F->getName().str()) > 0;
+  }
+
+  std::vector<Function *> resolveCallTargets(CallBase *Call) const {
+    if (Call == nullptr) {
+      return {};
+    }
+    if (auto *Direct = Call->getCalledFunction()) {
+      return {Direct};
+    }
+    return resolve_indirect_callees(Call);
+  }
+
+  void recordSinkLeak(CallBase *Call, ArrayRef<Function *> Callees,
+                      const mono_container_t &In) {
+    if (Call == nullptr ||
+        !std::any_of(Callees.begin(), Callees.end(),
+                     [this](const Function *Callee) {
+                       return isSinkFunction(Callee);
+                     })) {
       return;
     }
     for (auto &Arg : Call->args()) {
@@ -342,13 +360,23 @@ private:
     return Out;
   }
 
-  mono_container_t applyCallSite(CallBase *Call, const mono_container_t &In) {
+  void sanitizeCallResult(CallBase *Call, mono_container_t &Out) const {
+    if (Call == nullptr || Call->getType()->isVoidTy()) {
+      return;
+    }
+    Out.erase(Call);
+  }
+
+  mono_container_t applyCallSite(CallBase *Call, ArrayRef<Function *> Callees,
+                                 const mono_container_t &In) {
     mono_container_t Out = applyInstructionFlow(Call, In);
-    auto *Callee = Call->getCalledFunction();
 
-    recordSinkLeak(Call, In);
+    recordSinkLeak(Call, Callees, In);
 
-    if (isSourceFunction(Callee)) {
+    if (std::any_of(Callees.begin(), Callees.end(),
+                    [this](const Function *Callee) {
+                      return isSourceFunction(Callee);
+                    })) {
       if (!Call->getType()->isVoidTy()) {
         Out.insert(Call);
       }
@@ -359,6 +387,14 @@ private:
           }
         }
       }
+    }
+
+    if (!Callees.empty() &&
+        std::all_of(Callees.begin(), Callees.end(),
+                    [this](const Function *Callee) {
+                      return isSanitizerFunction(Callee);
+                    })) {
+      sanitizeCallResult(Call, Out);
     }
 
     return Out;
