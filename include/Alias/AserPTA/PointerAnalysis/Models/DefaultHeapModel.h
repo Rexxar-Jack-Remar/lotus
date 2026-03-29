@@ -21,7 +21,7 @@ private:
 protected:
   // infer the type for calloc-like memory allocation.
   // NOTE: this can be used for sub class as well as general routine
-  [[nodiscard]]
+  __attribute__((warn_unused_result))
   static llvm::Type *inferCallocType(const llvm::Function *fun,
                                      const llvm::Instruction *allocSite,
                                      int numArgNo = 0, int sizeArgNo = 1);
@@ -31,7 +31,7 @@ protected:
   // NOTE:
   // if sizeArgNo < 0:
   //    the type should be modelled as unlimited bound array.
-  [[nodiscard]]
+  __attribute__((warn_unused_result))
   static llvm::Type *inferMallocType(const llvm::Function *fun,
                                      const llvm::Instruction *allocSite,
                                      int sizeArgNo = 0);

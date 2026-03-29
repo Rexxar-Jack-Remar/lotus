@@ -23,12 +23,12 @@ public:
   explicit CallSite(const llvm::Instruction *I)
       : CB(llvm::dyn_cast<llvm::CallBase>(I)) {}
 
-  [[nodiscard]] inline bool isCallOrInvoke() const {
+  __attribute__((warn_unused_result)) inline bool isCallOrInvoke() const {
     return CB &&
            (llvm::isa<llvm::CallInst>(CB) || llvm::isa<llvm::InvokeInst>(CB));
   }
 
-  [[nodiscard]] inline bool isIndirectCall() const {
+  __attribute__((warn_unused_result)) inline bool isIndirectCall() const {
     if (!CB)
       return false;
     if (CB->isIndirectCall()) {
@@ -53,15 +53,15 @@ public:
     return true;
   }
 
-  [[nodiscard]] inline const llvm::Value *getCalledValue() const {
+  __attribute__((warn_unused_result)) inline const llvm::Value *getCalledValue() const {
     return CB ? CB->getCalledOperand() : nullptr;
   }
 
-  [[nodiscard]] inline const llvm::Function *getCalledFunction() const {
+  __attribute__((warn_unused_result)) inline const llvm::Function *getCalledFunction() const {
     return this->getTargetFunction();
   }
 
-  [[nodiscard]] inline const llvm::Function *getTargetFunction() const {
+  __attribute__((warn_unused_result)) inline const llvm::Function *getTargetFunction() const {
     if (!CB || this->isIndirectCall()) {
       return nullptr;
     }
@@ -73,17 +73,17 @@ public:
     return resolveTargetFunction(CB->getCalledOperand());
   }
 
-  [[nodiscard]]
+  __attribute__((warn_unused_result))
   inline const llvm::Value *getReturnedArgOperand() const {
     return CB ? CB->getReturnedArgOperand() : nullptr;
   }
 
-  [[nodiscard]]
+  __attribute__((warn_unused_result))
   inline const llvm::Instruction *getInstruction() const {
     return CB;
   }
 
-  [[nodiscard]]
+  __attribute__((warn_unused_result))
   unsigned int getNumArgOperands() const {
     return CB ? CB->arg_size() : 0;
   }
@@ -94,12 +94,12 @@ public:
 
   inline auto args() const { return CB->args(); }
 
-  [[nodiscard]]
+  __attribute__((warn_unused_result))
   inline auto arg_begin() const {
     return CB->arg_begin();
   }
 
-  [[nodiscard]]
+  __attribute__((warn_unused_result))
   inline auto arg_end() const {
     return CB->arg_end();
   }

@@ -30,7 +30,7 @@ private:
     objNode = node;
   }
 
-  [[nodiscard]] inline ObjNode *getObjNodeOrNull() const { return objNode; }
+  __attribute__((warn_unused_result)) inline ObjNode *getObjNodeOrNull() const { return objNode; }
 
   inline const FSObject<ctx> *getObjIndexedByVar(size_t stepSize) const {
     // when we encounter an object that indexed by variable, we need to ensure
@@ -72,52 +72,52 @@ public:
   FSObject<ctx> &operator=(const FSObject<ctx> &) = delete;
   FSObject<ctx> &operator=(FSObject<ctx> &&) = delete;
 
-  [[nodiscard]] inline const AllocSite<ctx> &getAllocSite() const {
+  __attribute__((warn_unused_result)) inline const AllocSite<ctx> &getAllocSite() const {
     return this->memBlock->getAllocSite();
   }
 
-  [[nodiscard]] inline const ctx *getContext() const {
+  __attribute__((warn_unused_result)) inline const ctx *getContext() const {
     return this->getAllocSite().getContext();
   }
 
-  [[nodiscard]] inline const llvm::Value *getValue() const {
+  __attribute__((warn_unused_result)) inline const llvm::Value *getValue() const {
     return this->getAllocSite().getValue();
   }
 
-  [[nodiscard]] inline ObjNode *getObjNode() const {
+  __attribute__((warn_unused_result)) inline ObjNode *getObjNode() const {
     assert(objNode != nullptr);
     return objNode;
   }
 
-  [[nodiscard]] inline AllocType getAllocType() const {
+  __attribute__((warn_unused_result)) inline AllocType getAllocType() const {
     return this->getAllocSite().getAllocType();
   }
 
-  [[nodiscard]] inline bool isFunction() const {
+  __attribute__((warn_unused_result)) inline bool isFunction() const {
     return this->getAllocType() == AllocType::Functions;
   }
 
-  [[nodiscard]] inline const llvm::Type *getType() const {
+  __attribute__((warn_unused_result)) inline const llvm::Type *getType() const {
     return this->getAllocSite().getValue()->getType();
   }
 
-  [[nodiscard]] inline bool isGlobalObj() const {
+  __attribute__((warn_unused_result)) inline bool isGlobalObj() const {
     return this->getAllocType() == AllocType::Globals;
   }
 
-  [[nodiscard]] inline bool isStackObj() const {
+  __attribute__((warn_unused_result)) inline bool isStackObj() const {
     return this->getAllocType() == AllocType::Stack;
   }
 
-  [[nodiscard]] inline bool isHeapObj() const {
+  __attribute__((warn_unused_result)) inline bool isHeapObj() const {
     return this->getAllocType() == AllocType::Heap;
   }
 
-  [[nodiscard]] inline bool isFIObject() const {
+  __attribute__((warn_unused_result)) inline bool isFIObject() const {
     return this->memBlock->isFIBlock();
   }
 
-  [[nodiscard]] inline std::string toString(bool detailed = true) const {
+  __attribute__((warn_unused_result)) inline std::string toString(bool detailed = true) const {
     if (detailed) {
       std::string ctxStr = CT::toString(getContext(), detailed);
       llvm::raw_string_ostream os(ctxStr);

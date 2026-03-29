@@ -41,23 +41,23 @@ class ArrayLayout {
   }
 
 public:
-  [[nodiscard]] inline size_t getArraySize() const {
+  __attribute__((warn_unused_result)) inline size_t getArraySize() const {
     if (elementNum == std::numeric_limits<size_t>::max()) {
       return std::numeric_limits<size_t>::max();
     }
     return elementNum * elementSize;
   }
 
-  [[nodiscard]] inline size_t getElementSize() const { return elementSize; }
+  __attribute__((warn_unused_result)) inline size_t getElementSize() const { return elementSize; }
 
-  [[nodiscard]] inline size_t getElementNum() const { return elementNum; }
+  __attribute__((warn_unused_result)) inline size_t getElementNum() const { return elementNum; }
 
-  [[nodiscard]] inline size_t getLayoutSize() const {
+  __attribute__((warn_unused_result)) inline size_t getLayoutSize() const {
     assert(layoutSize != 0);
     return layoutSize;
   }
 
-  [[nodiscard]] inline bool hasSubArrays() const { return !subArrays.empty(); }
+  __attribute__((warn_unused_result)) inline bool hasSubArrays() const { return !subArrays.empty(); }
 
   inline const std::map<size_t, ArrayLayout *> &getSubArrayMap() const {
     return this->subArrays;

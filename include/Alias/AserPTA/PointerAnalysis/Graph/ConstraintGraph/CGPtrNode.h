@@ -47,7 +47,7 @@ public:
 
   llvm::SparseBitVector<5120> *getCachedPts() const { return cachedPts.get(); }
 
-  [[nodiscard]] std::string toString() const override {
+  __attribute__((warn_unused_result)) std::string toString() const override {
     std::string str;
     llvm::raw_string_ostream os(str);
     if (this->isSuperNode()) {

@@ -5,7 +5,6 @@
 #include "Checker/Pulse/Core/PulseValueHistory.h"
 #include "Checker/Pulse/Domain/PulseInvalidation.h"
 
-#include <optional>
 #include <string>
 #include <vector>
 

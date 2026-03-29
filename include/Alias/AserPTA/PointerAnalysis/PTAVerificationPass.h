@@ -44,11 +44,11 @@ private:
 public:
   explicit AserMarkerCallSite(llvm::Instruction *II) : CallSite(II) {}
 
-  [[nodiscard]] inline bool isNoAliasCheck() const {
+  __attribute__((warn_unused_result)) inline bool isNoAliasCheck() const {
     return isFunNameEqualsTo(CHECK_NO_ALIAS_FUN);
   }
 
-  [[nodiscard]] inline bool isAliasCheck() const {
+  __attribute__((warn_unused_result)) inline bool isAliasCheck() const {
     return isFunNameEqualsTo(CHECK_ALIAS_FUN);
   }
 };

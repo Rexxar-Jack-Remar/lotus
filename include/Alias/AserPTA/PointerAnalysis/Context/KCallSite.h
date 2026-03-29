@@ -38,7 +38,7 @@ public:
 
   iterator end() const { return ctxBuffer.end(); }
 
-  [[nodiscard]] std::string toString(bool detailed = false) const {
+  __attribute__((warn_unused_result)) std::string toString(bool detailed = false) const {
     std::string str;
     llvm::raw_string_ostream os(str);
     if (detailed) {

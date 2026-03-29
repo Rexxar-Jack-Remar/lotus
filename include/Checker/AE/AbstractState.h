@@ -38,7 +38,7 @@ class SVFIRWrapper;
 
 /// Maximum field limit for GEP offset calculations to prevent explosion
 /// in field-sensitive analysis. Fields beyond this limit are merged.
-[[maybe_unused]] static constexpr uint32_t MaxFieldLimit = 10000;
+__attribute__((unused)) static constexpr uint32_t MaxFieldLimit = 10000;
 
 /// AbstractState represents the abstract execution state at a program point.
 ///

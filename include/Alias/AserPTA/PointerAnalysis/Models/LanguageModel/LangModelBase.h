@@ -233,38 +233,38 @@ private:
                                   const llvm::Value *v,
                                   std::set<Pointer<ctx>> &result) {}
 
-  [[nodiscard]]
+  __attribute__((warn_unused_result))
   static inline llvm::StringRef getEntryName(const LangModelTy *model) {
     return model->getEntryName();
   }
 
-  [[nodiscard]]
+  __attribute__((warn_unused_result))
   static inline const llvm::Module *getLLVMModule(const LangModelTy *model) {
     return model->getLLVMModule();
   }
 
-  [[nodiscard]]
+  __attribute__((warn_unused_result))
   static inline const CallGraphNode<ctx> *
   getDirectNode(LangModelTy *model, const ctx *C, const llvm::Function *F) {
     return model->getDirectNode(C, F);
   }
 
-  [[nodiscard]]
+  __attribute__((warn_unused_result))
   static inline const CallGraphNode<ctx> *
   getDirectNodeOrNull(LangModelTy *model, const ctx *C,
                       const llvm::Function *F) {
     return model->getDirectNodeOrNull(C, F);
   }
 
-  [[nodiscard]] [[deprecated(
-      "use getInDirectCallSite(ctx, instruction) instead")]]
+  __attribute__((warn_unused_result)) __attribute__((deprecated(
+      "use getInDirectCallSite(ctx, instruction) instead")))
   static inline const CallGraphNode<ctx> *
   getInDirectNode(LangModelTy *model, const ctx *C,
                   const llvm::Instruction *I) {
     return model->getInDirectNode(C, I);
   }
 
-  [[nodiscard]]
+  __attribute__((warn_unused_result))
   static inline const InDirectCallSite<ctx> *
   getInDirectCallSite(LangModelTy *model, const ctx *C,
                       const llvm::Instruction *I) {

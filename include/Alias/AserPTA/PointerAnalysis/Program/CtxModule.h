@@ -371,27 +371,27 @@ public:
     }
   }
 
-  [[nodiscard]]
+  __attribute__((warn_unused_result))
   inline llvm::StringRef getEntryName() const {
     return this->entryName;
   }
 
-  [[nodiscard]]
+  __attribute__((warn_unused_result))
   inline const llvm::Module *getLLVMModule() {
     return this->llvmModule;
   }
 
-  [[nodiscard]]
+  __attribute__((warn_unused_result))
   inline const llvm::DataLayout &getDataLayout() {
     return this->llvmModule->getDataLayout();
   }
 
-  [[nodiscard]]
+  __attribute__((warn_unused_result))
   inline const CallGraphTy *getCallGraph() {
     return callGraph.get();
   }
 
-  [[nodiscard]] inline const CallGraphNode<ctx> *
+  __attribute__((warn_unused_result)) inline const CallGraphNode<ctx> *
   getDirectNode(const ctx *C, const llvm::Function *F) {
     auto it = ctxFunMap.find(std::make_pair(C, F));
     assert(it != ctxFunMap.end());
@@ -399,7 +399,7 @@ public:
     return it->second->getCallNode();
   }
 
-  [[nodiscard]] inline const CallGraphNode<ctx> *
+  __attribute__((warn_unused_result)) inline const CallGraphNode<ctx> *
   getDirectNodeOrNull(const ctx *C, const llvm::Function *F) {
     auto it = ctxFunMap.find(std::make_pair(C, F));
     if (it == ctxFunMap.end()) {
@@ -409,7 +409,7 @@ public:
     return it->second->getCallNode();
   }
 
-  [[nodiscard]] inline const CallGraphNode<ctx> *
+  __attribute__((warn_unused_result)) inline const CallGraphNode<ctx> *
   getInDirectNode(const ctx *C, const llvm::Instruction *I) {
     auto it = ctxFunPtrMap.find(std::make_pair(C, I));
     assert(it != ctxFunPtrMap.end());

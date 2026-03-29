@@ -46,7 +46,7 @@ void LLVMVFTable::print(llvm::raw_ostream &OS) const {
   }
 }
 
-[[nodiscard]] LLVMVFTableData LLVMVFTable::getVFTableData() const {
+__attribute__((warn_unused_result)) LLVMVFTableData LLVMVFTable::getVFTableData() const {
   LLVMVFTableData Data;
 
   for (const auto *Curr : VFT) {

@@ -16,7 +16,6 @@
 
 #include <cstddef>
 #include <functional>
-#include <optional>
 
 namespace lotus {
 namespace sifa {

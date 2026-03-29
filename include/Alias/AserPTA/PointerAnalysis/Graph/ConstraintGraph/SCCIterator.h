@@ -188,7 +188,7 @@ public:
     return SCCIterator<ctx, cons, reverse>();
   }
 
-  [[nodiscard]] size_t visitedNodeNum() const {
+  __attribute__((warn_unused_result)) size_t visitedNodeNum() const {
     return this->visitedNode.size();
   }
 
@@ -242,7 +242,7 @@ public:
   ///
   /// If the SCC has more than one node, this is trivially true.  If not, it
   /// may still contain a loop if the node has an edge back to itself.
-  [[nodiscard]]
+  __attribute__((warn_unused_result))
   bool hasLoop() const;
 };
 

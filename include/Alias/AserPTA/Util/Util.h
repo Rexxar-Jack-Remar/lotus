@@ -122,9 +122,9 @@ public:
     assert(vec.size() <= capacity);
   }
 
-  [[nodiscard]] inline unsigned int getCapacity() const { return capacity; }
+  __attribute__((warn_unused_result)) inline unsigned int getCapacity() const { return capacity; }
 
-  [[nodiscard]] inline unsigned int size() const { return vec.size(); }
+  __attribute__((warn_unused_result)) inline unsigned int size() const { return vec.size(); }
 
   inline iterator begin() { return vec.begin(); }
   inline iterator end() { return vec.end(); }

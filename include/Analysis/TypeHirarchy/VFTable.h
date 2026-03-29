@@ -25,15 +25,15 @@ template <typename F> class VFTable {
 public:
   virtual ~VFTable() = default;
 
-  [[nodiscard]] virtual F getFunction(unsigned Idx) const = 0;
+  __attribute__((warn_unused_result)) virtual F getFunction(unsigned Idx) const = 0;
 
-  [[nodiscard]] virtual std::vector<F> getAllFunctions() const = 0;
+  __attribute__((warn_unused_result)) virtual std::vector<F> getAllFunctions() const = 0;
 
-  [[nodiscard]] virtual int getIndex(F Func) const = 0;
+  __attribute__((warn_unused_result)) virtual int getIndex(F Func) const = 0;
 
-  [[nodiscard]] virtual bool empty() const = 0;
+  __attribute__((warn_unused_result)) virtual bool empty() const = 0;
 
-  [[nodiscard]] virtual size_t size() const = 0;
+  __attribute__((warn_unused_result)) virtual size_t size() const = 0;
 
   virtual void print(llvm::raw_ostream &OS) const = 0;
 

@@ -476,17 +476,17 @@ protected:
                                onNewEdge);
   }
 
-  // [[nodiscard]] inline const CallGraphNode<ctx> *getDirectNode(const ctx *C,
+  // __attribute__((warn_unused_result)) inline const CallGraphNode<ctx> *getDirectNode(const ctx *C,
   // const llvm::Function *F) {
   //     return module->getDirectNode(C, F);
   // }
 
-  // [[nodiscard]] inline const CallGraphNode<ctx> *getDirectNodeOrNull(const
+  // __attribute__((warn_unused_result)) inline const CallGraphNode<ctx> *getDirectNodeOrNull(const
   // ctx *C, const llvm::Function *F) {
   //     return module->getDirectNodeOrNull(C, F);
   // }
 
-  // [[nodiscard]] inline const CallGraphNode<ctx> *getInDirectNode(const ctx
+  // __attribute__((warn_unused_result)) inline const CallGraphNode<ctx> *getInDirectNode(const ctx
   // *C, const llvm::Instruction *I) {
   //     return module->getInDirectNode(C, I);
   // }
@@ -534,17 +534,17 @@ public:
     */
   }
 
-  [[nodiscard]] inline const CallGraphNode<ctx> *
+  __attribute__((warn_unused_result)) inline const CallGraphNode<ctx> *
   getDirectNode(const ctx *C, const llvm::Function *F) const {
     return module->getDirectNode(C, F);
   }
 
-  [[nodiscard]] inline const CallGraphNode<ctx> *
+  __attribute__((warn_unused_result)) inline const CallGraphNode<ctx> *
   getDirectNodeOrNull(const ctx *C, const llvm::Function *F) const {
     return module->getDirectNodeOrNull(C, F);
   }
 
-  [[nodiscard]] inline const CallGraphNode<ctx> *
+  __attribute__((warn_unused_result)) inline const CallGraphNode<ctx> *
   getInDirectNode(const ctx *C, const llvm::Instruction *I) const {
     return module->getInDirectNode(C, I);
   }

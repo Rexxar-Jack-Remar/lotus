@@ -56,7 +56,7 @@ public:
   const_iterator cbegin() const { return const_iterator(nodes.begin()); }
   const_iterator cend() const { return const_iterator(nodes.end()); }
 
-  [[nodiscard]] inline size_t getNodeNum() const { return nodes.size(); }
+  __attribute__((warn_unused_result)) inline size_t getNodeNum() const { return nodes.size(); }
 };
 
 /// CRTP
@@ -107,10 +107,10 @@ public:
 
   inline const GraphTy *getGraph() { return this->graph; }
 
-  [[nodiscard]] inline NodeID getNodeID() const { return id; }
+  __attribute__((warn_unused_result)) inline NodeID getNodeID() const { return id; }
 
-  [[nodiscard]] inline size_t predEdgeCount() const { return pred.size(); }
-  [[nodiscard]] inline size_t succEdgeCount() const { return succ.size(); }
+  __attribute__((warn_unused_result)) inline size_t predEdgeCount() const { return pred.size(); }
+  __attribute__((warn_unused_result)) inline size_t succEdgeCount() const { return succ.size(); }
 
   inline iterator succ_begin() { return iterator(succ.begin()); }
   inline iterator succ_end() { return iterator(succ.end()); }

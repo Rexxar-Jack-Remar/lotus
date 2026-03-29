@@ -27,16 +27,16 @@ public:
   Pointer<ctx> &operator=(const Pointer<ctx> &) = delete;
   Pointer<ctx> &operator=(Pointer<ctx> &&) = delete;
 
-  [[nodiscard]] inline const ctx *getContext() const { return context; }
+  __attribute__((warn_unused_result)) inline const ctx *getContext() const { return context; }
 
-  [[nodiscard]] inline const llvm::Value *getValue() const { return value; }
+  __attribute__((warn_unused_result)) inline const llvm::Value *getValue() const { return value; }
 
   inline void setPtrNode(CGPtrNode<ctx> *node) {
     assert(ptrNode == nullptr); // can only be set once
     this->ptrNode = node;
   }
 
-  [[nodiscard]] inline CGPtrNode<ctx> *getPtrNode() const { return ptrNode; }
+  __attribute__((warn_unused_result)) inline CGPtrNode<ctx> *getPtrNode() const { return ptrNode; }
 };
 
 // for container operation

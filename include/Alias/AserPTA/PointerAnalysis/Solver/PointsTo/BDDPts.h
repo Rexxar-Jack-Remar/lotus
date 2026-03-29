@@ -72,7 +72,7 @@ public:
 
   static inline void clearAll() { ptsVec.clear(); }
 
-  [[nodiscard]] static inline const PtsTy &getPointsTo(NodeID id) {
+  __attribute__((warn_unused_result)) static inline const PtsTy &getPointsTo(NodeID id) {
     validateId(id);
     return ptsVec[id];
   }
@@ -83,13 +83,13 @@ public:
     return ptsVec[src].unionWith(ptsVec[dst]);
   }
 
-  [[nodiscard]] static inline bool intersectWith(NodeID src, NodeID dst) {
+  __attribute__((warn_unused_result)) static inline bool intersectWith(NodeID src, NodeID dst) {
     validateId(src);
     validateId(dst);
     return ptsVec[src].intersectWith(ptsVec[dst]);
   }
 
-  [[nodiscard]] static inline bool intersectWithNoSpecialNode(NodeID src,
+  __attribute__((warn_unused_result)) static inline bool intersectWithNoSpecialNode(NodeID src,
                                                               NodeID dst) {
     validateId(src);
     validateId(dst);
@@ -111,34 +111,34 @@ public:
     return ptsVec[src].insert(idx);
   }
 
-  [[nodiscard]] static inline bool has(NodeID src, TargetID idx) {
+  __attribute__((warn_unused_result)) static inline bool has(NodeID src, TargetID idx) {
     validateId(src);
     return ptsVec[src].has(idx);
   }
 
-  [[nodiscard]] static inline bool equal(NodeID src, NodeID dst) {
+  __attribute__((warn_unused_result)) static inline bool equal(NodeID src, NodeID dst) {
     validateId(src);
     validateId(dst);
     return ptsVec[src].equals(ptsVec[dst]);
   }
 
-  [[nodiscard]] static inline bool contains(NodeID src, NodeID dst) {
+  __attribute__((warn_unused_result)) static inline bool contains(NodeID src, NodeID dst) {
     validateId(src);
     validateId(dst);
     return ptsVec[src].contains(ptsVec[dst]);
   }
 
-  [[nodiscard]] static inline bool isEmpty(NodeID id) {
+  __attribute__((warn_unused_result)) static inline bool isEmpty(NodeID id) {
     validateId(id);
     return ptsVec[id].isEmpty();
   }
 
-  [[nodiscard]] static inline iterator begin(NodeID id) {
+  __attribute__((warn_unused_result)) static inline iterator begin(NodeID id) {
     validateId(id);
     return ptsVec[id].begin();
   }
 
-  [[nodiscard]] static inline iterator end(NodeID id) {
+  __attribute__((warn_unused_result)) static inline iterator end(NodeID id) {
     validateId(id);
     return ptsVec[id].end();
   }

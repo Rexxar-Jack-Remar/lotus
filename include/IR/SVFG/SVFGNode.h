@@ -113,7 +113,7 @@ namespace analysis {
 
 #if defined(__has_cpp_attribute)
 #if __has_cpp_attribute(deprecated)
-#define LOTUS_SVFG_LEGACY_NODE(MSG) [[deprecated(MSG)]]
+#define LOTUS_SVFG_LEGACY_NODE(MSG) __attribute__((deprecated(MSG)))
 #else
 #define LOTUS_SVFG_LEGACY_NODE(MSG)
 #endif

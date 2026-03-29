@@ -46,19 +46,19 @@ protected:
       : allocSite(c, v, t), kind(kind) {};
 
 public:
-  [[nodiscard]] inline const ctx *getContext() const {
+  __attribute__((warn_unused_result)) inline const ctx *getContext() const {
     return allocSite.getContext();
   }
 
-  [[nodiscard]] inline const llvm::Value *getValue() const {
+  __attribute__((warn_unused_result)) inline const llvm::Value *getValue() const {
     return allocSite.getValue();
   }
 
-  [[nodiscard]] inline const AllocSite<ctx> &getAllocSite() const {
+  __attribute__((warn_unused_result)) inline const AllocSite<ctx> &getAllocSite() const {
     return allocSite;
   }
 
-  [[nodiscard]] inline bool validateStepSize(size_t pOffset, size_t stepSize) {
+  __attribute__((warn_unused_result)) inline bool validateStepSize(size_t pOffset, size_t stepSize) {
     switch (kind) {
     case MemBlockKind::Aggregate:
       return static_cast<AggregateMemBlock<ctx> *>(this)->validateStepSize(
@@ -74,13 +74,13 @@ public:
     }
   }
 
-  [[nodiscard]] inline bool isFIBlock() {
+  __attribute__((warn_unused_result)) inline bool isFIBlock() {
     return kind == MemBlockKind::FIBlock;
   }
 
   // nullptr if the memory block can not be indexed (scalar memory object) and
   // the offset is non-zero else the corresponding object
-  [[nodiscard]] inline const FSObject<ctx> *getObjectAt(size_t offset) {
+  __attribute__((warn_unused_result)) inline const FSObject<ctx> *getObjectAt(size_t offset) {
     switch (kind) {
     case MemBlockKind::Aggregate:
       return static_cast<AggregateMemBlock<ctx> *>(this)->indexMemoryBlock(
@@ -98,7 +98,7 @@ public:
     }
   }
 
-  [[nodiscard]] inline const FSObject<ctx> *getPtrObjectAt(size_t offset) {
+  __attribute__((warn_unused_result)) inline const FSObject<ctx> *getPtrObjectAt(size_t offset) {
     switch (kind) {
     case MemBlockKind::Aggregate:
       return static_cast<AggregateMemBlock<ctx> *>(this)->indexPtrInMemoryBlock(
@@ -218,7 +218,7 @@ private:
     return nullptr;
   }
 
-  [[nodiscard]] inline bool validateStepSize(size_t pOffset,
+  __attribute__((warn_unused_result)) inline bool validateStepSize(size_t pOffset,
                                              size_t stepSize) const {
     return isArrayExistAtOffset(layout->getSubArrayMap(), pOffset, stepSize);
   }

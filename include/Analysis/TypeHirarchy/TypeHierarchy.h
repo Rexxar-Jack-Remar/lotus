@@ -61,7 +61,7 @@ public:
    * @param Type The type to check
    * @return true if the type is in the hierarchy
    */
-  [[nodiscard]] virtual bool hasType(T Type) const = 0;
+  __attribute__((warn_unused_result)) virtual bool hasType(T Type) const = 0;
 
   /**
    * @brief Check if Type is a subtype of SubType
@@ -69,47 +69,47 @@ public:
    * @param SubType The potential supertype
    * @return true if Type <= SubType in the type hierarchy
    */
-  [[nodiscard]] virtual bool isSubType(T Type, T SubType) const = 0;
+  __attribute__((warn_unused_result)) virtual bool isSubType(T Type, T SubType) const = 0;
 
   /**
    * @brief Get all direct and indirect subtypes of a type
    * @param Type The type to find subtypes for
    * @return Set of all types that are subtypes of Type
    */
-  [[nodiscard]] virtual std::set<T> getSubTypes(T Type) const = 0;
+  __attribute__((warn_unused_result)) virtual std::set<T> getSubTypes(T Type) const = 0;
 
   /**
    * @brief Look up a type by its name
    * @param TypeName The name of the type to find
    * @return Optional containing the type if found, empty otherwise
    */
-  [[nodiscard]] virtual llvm::Optional<T>
+  __attribute__((warn_unused_result)) virtual llvm::Optional<T>
   getType(llvm::StringRef TypeName) const = 0;
 
   /**
    * @brief Get all types in the hierarchy
    * @return Vector of all types
    */
-  [[nodiscard]] virtual std::vector<T> getAllTypes() const = 0;
+  __attribute__((warn_unused_result)) virtual std::vector<T> getAllTypes() const = 0;
 
   /**
    * @brief Get the name of a type
    * @param Type The type to get the name for
    * @return StringRef containing the type name
    */
-  [[nodiscard]] virtual llvm::StringRef getTypeName(T Type) const = 0;
+  __attribute__((warn_unused_result)) virtual llvm::StringRef getTypeName(T Type) const = 0;
 
   /**
    * @brief Get the number of types in the hierarchy
    * @return Number of types
    */
-  [[nodiscard]] virtual size_t size() const noexcept = 0;
+  __attribute__((warn_unused_result)) virtual size_t size() const noexcept = 0;
 
   /**
    * @brief Check if the hierarchy is empty
    * @return true if no types are in the hierarchy
    */
-  [[nodiscard]] virtual bool empty() const noexcept = 0;
+  __attribute__((warn_unused_result)) virtual bool empty() const noexcept = 0;
 
   /**
    * @brief Print the type hierarchy to a stream
