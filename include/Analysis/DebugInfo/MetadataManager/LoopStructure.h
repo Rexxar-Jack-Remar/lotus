@@ -104,11 +104,14 @@
    std::vector<BasicBlock *> exitBlocks;
    std::vector<std::pair<BasicBlock *, BasicBlock *>> exitEdges;
  
-   static const std::string metadataKeyID;
+  static const std::string metadataKeyID;
  
-   void instantiateIDsAndBasicBlocks(Loop *llvmLoop);
+  void instantiateIDsAndBasicBlocks(Loop *llvmLoop);
  
-   bool isContainedInstructionLoopInvariant(Instruction *inst) const;
+  bool isContainedInstructionLoopInvariant(Instruction *inst) const;
+  bool isContainedInstructionLoopInvariant(
+      Instruction *inst,
+      std::unordered_set<Instruction *> &visiting) const;
  };
  
  } // namespace noelle

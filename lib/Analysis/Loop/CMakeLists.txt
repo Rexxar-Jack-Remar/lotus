@@ -1,0 +1,26 @@
+set(CanaryLoopAnalysis_SOURCES
+  LoopForest.cpp
+  FunctionLoopAnalyses.cpp
+  LoopDependenceGraph.cpp
+  LoopSCCDAG.cpp
+  Invariants.cpp
+  InductionVariable.cpp
+  InductionVariables.cpp
+  LoopGoverningInductionVariable.cpp
+  LoopEnvironment.cpp
+  LoopCarriedDependencies.cpp
+  LoopNestingGraph.cpp
+  LoopIterationSpaceAnalysis.cpp
+  Variable.cpp
+  MemoryCloningAnalysis.cpp
+  SCCDAGAttrs.cpp
+)
+
+add_library(CanaryLoopAnalysis STATIC ${CanaryLoopAnalysis_SOURCES})
+target_link_libraries(CanaryLoopAnalysis
+  CanaryCFG
+  CanaryDebugInfo
+  CanaryPDG
+  CanaryAliasAnalysisWrapper
+  LLVMAnalysis
+)
