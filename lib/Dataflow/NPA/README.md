@@ -43,6 +43,39 @@ Use `NewtonSolver<D>::solve(eqns, verbose, -1, LinearStrategy::SCC)`, `LinearStr
 
 When using `AdaptiveScc`, the solver reports aggregate counts for SCC-local direct/worklist/tensor choices and tensor fallbacks in `Stat`.
 
+## Public header structure
+
+The public API lives under `include/Dataflow/NPA/`:
+
+```text
+include/Dataflow/NPA/
+├── NPA.h                      # Umbrella header; Kleene/Newton entry points
+├── Core/                      # Expressions, differentiation, solvers, tensor support
+├── Domains/                   # Semiring/domain implementations
+└── Analyses/                  # Intraprocedural and interprocedural clients
+```
+
+Notable entry points:
+
+- `Core/Solver.h` contains the core Kleene/Newton iteration logic.
+- `Core/Diff.h` and `Core/TensorDiff.h` implement ordinary and tensor-side
+  differentials.
+- `Core/LinearSolvers.h` and `Core/TensorLinearSolve.h` implement the
+  linearized-system solvers.
+- `Analyses/Interprocedural/` contains the public analysis wrappers used by
+  the in-tree constant-propagation, interval, taint, nullability, and related
+  clients.
+
+## Usage notes
+
+- Intraprocedural clients can use `BitVectorSolver` and related local engines.
+- Interprocedural forward clients use `InterproceduralEngine<Domain, Analysis>`.
+- Interprocedural backward clients use
+  `BackwardInterproceduralEngine<Domain, Analysis>`.
+- `SummaryTransformerDomain` is the current bounded abstract-summary path used
+  by in-tree subdistributive clients such as interprocedural constant
+  propagation and interval analysis.
+
 ## Current parallel algorithm
 
 The current implementation uses **coarse-grained parallelism inside one

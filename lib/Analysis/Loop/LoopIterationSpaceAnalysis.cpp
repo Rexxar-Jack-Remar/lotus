@@ -10,8 +10,7 @@ namespace analysis {
 namespace loop {
 
 LoopIterationSpaceAnalysis::LoopIterationSpaceAnalysis(
-    LoopTree *loops,
-    InductionVariableManager &ivManager,
+    LoopTree *loops, InductionVariableManager &ivManager,
     llvm::ScalarEvolution &SE)
     : loops{loops}, ivManager{ivManager} {
   indexIVInstructionSCEVs(SE);
@@ -26,8 +25,7 @@ LoopIterationSpaceAnalysis::LoopIterationSpaceAnalysis(
 
 bool LoopIterationSpaceAnalysis::
     areInstructionsAccessingDisjointMemoryLocationsBetweenIterations(
-        Instruction *I,
-        Instruction *J) const {
+        Instruction *I, Instruction *J) const {
   if ((!I) || (!J) ||
       (this->accessSpaceByInstruction.find(I) ==
        this->accessSpaceByInstruction.end()) ||
@@ -38,13 +36,6 @@ bool LoopIterationSpaceAnalysis::
 
   auto *accessSpaceI = this->accessSpaceByInstruction.at(I);
   auto *accessSpaceJ = this->accessSpaceByInstruction.at(J);
-  if (this->nonOverlappingAccessesBetweenIterations.count(accessSpaceI) != 0 &&
-      this->nonOverlappingAccessesBetweenIterations.count(accessSpaceJ) != 0 &&
-      accessSpaceI->memoryAccessorBasePointerSCEV ==
-          accessSpaceJ->memoryAccessorBasePointerSCEV &&
-      accessSpaceI == accessSpaceJ) {
-    return true;
-  }
   return this->areMemoryAccessSpaceNotOverlappingOrExactlyTheSame(accessSpaceI,
                                                                   accessSpaceJ);
 }
@@ -56,28 +47,36 @@ bool LoopIterationSpaceAnalysis::
   if (!accessSpaceI->isAnalyzed || !accessSpaceJ->isAnalyzed) {
     return false;
   }
-  if (this->spacesThatCannotOverlap.find(accessSpaceI) == this->spacesThatCannotOverlap.end()
-      || this->spacesThatCannotOverlap.find(accessSpaceJ)
-             == this->spacesThatCannotOverlap.end()) {
+  if (this->nonOverlappingAccessesBetweenIterations.count(accessSpaceI) == 0 ||
+      this->nonOverlappingAccessesBetweenIterations.count(accessSpaceJ) == 0) {
+    return false;
+  }
+  if (accessSpaceI == accessSpaceJ) {
+    return true;
+  }
+  if (this->spacesThatCannotOverlap.find(accessSpaceI) ==
+          this->spacesThatCannotOverlap.end() ||
+      this->spacesThatCannotOverlap.find(accessSpaceJ) ==
+          this->spacesThatCannotOverlap.end()) {
     return false;
   }
   auto &notOverlapSetForI = this->spacesThatCannotOverlap.at(accessSpaceI);
   auto &notOverlapSetForJ = this->spacesThatCannotOverlap.at(accessSpaceJ);
-  return notOverlapSetForI.count(accessSpaceJ) != 0
-         || notOverlapSetForJ.count(accessSpaceI) != 0;
+  return notOverlapSetForI.count(accessSpaceJ) != 0 ||
+         notOverlapSetForJ.count(accessSpaceI) != 0;
 }
 
 bool LoopIterationSpaceAnalysis::
     analyzeToCheckIfMemoryAccessSpaceNotOverlappingOrExactlyTheSame(
         MemoryAccessSpace *accessSpaceI,
         MemoryAccessSpace *accessSpaceJ) const {
-  if (this->nonOverlappingAccessesBetweenIterations.count(accessSpaceI) == 0
-      || this->nonOverlappingAccessesBetweenIterations.count(accessSpaceJ) == 0) {
+  if (this->nonOverlappingAccessesBetweenIterations.count(accessSpaceI) == 0 ||
+      this->nonOverlappingAccessesBetweenIterations.count(accessSpaceJ) == 0) {
     return false;
   }
 
-  if (accessSpaceI->memoryAccessorBasePointerSCEV
-      != accessSpaceJ->memoryAccessorBasePointerSCEV) {
+  if (accessSpaceI->memoryAccessorBasePointerSCEV !=
+      accessSpaceJ->memoryAccessorBasePointerSCEV) {
     return false;
   }
   if (accessSpaceI == accessSpaceJ) {
@@ -88,14 +87,15 @@ bool LoopIterationSpaceAnalysis::
                                                                   accessSpaceJ);
 }
 
-bool LoopIterationSpaceAnalysis::isMemoryAccessSpaceEquivalentForTopLoopIVSubscript(
-    MemoryAccessSpace *space1,
-    MemoryAccessSpace *space2) const {
+bool LoopIterationSpaceAnalysis::
+    isMemoryAccessSpaceEquivalentForTopLoopIVSubscript(
+        MemoryAccessSpace *space1, MemoryAccessSpace *space2) const {
   assert(space1 != nullptr);
   assert(space2 != nullptr);
 
-  if (space1->subscriptIVs.empty() || space1->subscriptIVs.size() != space2->subscriptIVs.size()
-      || space1->memoryMinusSCEV != space2->memoryMinusSCEV) {
+  if (space1->subscriptIVs.empty() ||
+      space1->subscriptIVs.size() != space2->subscriptIVs.size() ||
+      space1->memoryMinusSCEV != space2->memoryMinusSCEV) {
     return false;
   }
 
@@ -142,7 +142,8 @@ bool LoopIterationSpaceAnalysis::isMemoryAccessSpaceEquivalentForTopLoopIVSubscr
   return true;
 }
 
-void LoopIterationSpaceAnalysis::indexIVInstructionSCEVs(llvm::ScalarEvolution &SE) {
+void LoopIterationSpaceAnalysis::indexIVInstructionSCEVs(
+    llvm::ScalarEvolution &SE) {
   for (auto *loop : this->loops->getLoops()) {
     for (auto *iv : this->ivManager.getInductionVariables(*loop)) {
       for (auto *inst : iv->getAllInstructions()) {
@@ -166,7 +167,8 @@ void LoopIterationSpaceAnalysis::indexIVInstructionSCEVs(llvm::ScalarEvolution &
   }
 }
 
-void LoopIterationSpaceAnalysis::computeMemoryAccessSpace(llvm::ScalarEvolution &SE) {
+void LoopIterationSpaceAnalysis::computeMemoryAccessSpace(
+    llvm::ScalarEvolution &SE) {
   std::unordered_set<Instruction *> memoryAccessors{};
   auto *targetLoop = this->loops->getLoop();
 
@@ -194,14 +196,17 @@ void LoopIterationSpaceAnalysis::computeMemoryAccessSpace(llvm::ScalarEvolution 
       continue;
     }
 
-    this->accessSpaces.push_back(std::make_unique<MemoryAccessSpace>(memoryAccessor));
+    this->accessSpaces.push_back(
+        std::make_unique<MemoryAccessSpace>(memoryAccessor));
     auto *memAccessSpace = this->accessSpaces.back().get();
     this->accessSpaceByInstruction[memoryAccessor] = memAccessSpace;
 
-    memAccessSpace->memoryAccessorSCEV = SE.getSCEV(memAccessSpace->memoryAccessor);
+    memAccessSpace->memoryAccessorSCEV =
+        SE.getSCEV(memAccessSpace->memoryAccessor);
 
     for (auto *user : memoryAccessor->users()) {
-      if (isa<StoreInst>(user) || isa<LoadInst>(user) || isa<GetElementPtrInst>(user)) {
+      if (isa<StoreInst>(user) || isa<LoadInst>(user) ||
+          isa<GetElementPtrInst>(user)) {
         auto *accessor = cast<Instruction>(user);
         this->accessSpaceByInstruction[accessor] = memAccessSpace;
         memAccessSpace->accessInstructions.insert(accessor);
@@ -232,8 +237,8 @@ void LoopIterationSpaceAnalysis::computeMemoryAccessSpace(llvm::ScalarEvolution 
       continue;
     }
 
-    memAccessSpace->memoryAccessorBasePointerSCEV =
-        dyn_cast<llvm::SCEVUnknown>(SE.getPointerBase(memAccessSpace->memoryAccessorSCEV));
+    memAccessSpace->memoryAccessorBasePointerSCEV = dyn_cast<llvm::SCEVUnknown>(
+        SE.getPointerBase(memAccessSpace->memoryAccessorSCEV));
     if (memAccessSpace->memoryAccessorBasePointerSCEV == nullptr) {
       continue;
     }
@@ -244,23 +249,24 @@ void LoopIterationSpaceAnalysis::computeMemoryAccessSpace(llvm::ScalarEvolution 
     memAccessSpace->memoryMinusSCEV = accessFunction;
     SmallVector<const llvm::SCEV *, 4> delinearizedSubscripts;
     SmallVector<const llvm::SCEV *, 4> delinearizedSizes;
-    llvm::delinearize(SE,
-                      accessFunction,
-                      delinearizedSubscripts,
-                      delinearizedSizes,
-                      memAccessSpace->elementSize);
+    llvm::delinearize(SE, accessFunction, delinearizedSubscripts,
+                      delinearizedSizes, memAccessSpace->elementSize);
     memAccessSpace->subscripts.assign(delinearizedSubscripts.begin(),
                                       delinearizedSubscripts.end());
-    memAccessSpace->sizes.assign(delinearizedSizes.begin(), delinearizedSizes.end());
+    memAccessSpace->sizes.assign(delinearizedSizes.begin(),
+                                 delinearizedSizes.end());
 
     if (memAccessSpace->subscripts.empty()) {
-      if (auto *gep = dyn_cast<GetElementPtrInst>(memAccessSpace->memoryAccessor)) {
+      if (auto *gep =
+              dyn_cast<GetElementPtrInst>(memAccessSpace->memoryAccessor)) {
         SmallVector<int, 4> sizes;
         SmallVector<const llvm::SCEV *, 4> gepSubscripts;
         llvm::getIndexExpressionsFromGEP(SE, gep, gepSubscripts, sizes);
-        memAccessSpace->subscripts.assign(gepSubscripts.begin(), gepSubscripts.end());
+        memAccessSpace->subscripts.assign(gepSubscripts.begin(),
+                                          gepSubscripts.end());
         for (auto size : sizes) {
-          memAccessSpace->sizes.push_back(SE.getConstant(accessFunction->getType(), size));
+          memAccessSpace->sizes.push_back(
+              SE.getConstant(accessFunction->getType(), size));
         }
         if (sizes.empty()) {
           memAccessSpace->sizes.push_back(memAccessSpace->elementSize);
@@ -271,8 +277,8 @@ void LoopIterationSpaceAnalysis::computeMemoryAccessSpace(llvm::ScalarEvolution 
     bool isFullyDelinearized = true;
     for (auto *subscript : memAccessSpace->subscripts) {
       if (auto *addRecSubscript = dyn_cast<llvm::SCEVAddRecExpr>(subscript)) {
-        if (isa<llvm::SCEVAddRecExpr>(addRecSubscript->getStart())
-            || isa<llvm::SCEVAddRecExpr>(addRecSubscript->getStepRecurrence(SE))) {
+        if (isa<llvm::SCEVAddRecExpr>(addRecSubscript->getStart()) ||
+            isa<llvm::SCEVAddRecExpr>(addRecSubscript->getStepRecurrence(SE))) {
           isFullyDelinearized = false;
           break;
         }
@@ -287,21 +293,24 @@ void LoopIterationSpaceAnalysis::computeMemoryAccessSpace(llvm::ScalarEvolution 
   }
 }
 
-void LoopIterationSpaceAnalysis::identifyNonOverlappingAccessesBetweenIterationsAcrossOneLoopInvocation(
-    llvm::ScalarEvolution &SE) {
+void LoopIterationSpaceAnalysis::
+    identifyNonOverlappingAccessesBetweenIterationsAcrossOneLoopInvocation(
+        llvm::ScalarEvolution &SE) {
   for (auto &memAccessSpaceOwner : this->accessSpaces) {
     auto *memAccessSpace = memAccessSpaceOwner.get();
-    if (memAccessSpace->subscriptIVs.empty()
-        || memAccessSpace->subscriptIVs.size() != memAccessSpace->sizes.size()) {
+    if (memAccessSpace->subscriptIVs.empty() ||
+        memAccessSpace->subscriptIVs.size() != memAccessSpace->sizes.size()) {
       continue;
     }
 
     bool isOverflowPossible = true;
-    auto *scevExpression = dyn_cast<llvm::SCEVNAryExpr>(memAccessSpace->memoryAccessorSCEV);
+    auto *scevExpression =
+        dyn_cast<llvm::SCEVNAryExpr>(memAccessSpace->memoryAccessorSCEV);
     if (scevExpression != nullptr) {
       bool isBound = true;
       bool foundOffsetExpression = false;
-      for (auto operandID = 0u; operandID < scevExpression->getNumOperands(); operandID++) {
+      for (auto operandID = 0u; operandID < scevExpression->getNumOperands();
+           operandID++) {
         auto *operand = scevExpression->getOperand(operandID);
         if (isa<llvm::SCEVConstant>(operand)) {
           continue;
@@ -323,9 +332,9 @@ void LoopIterationSpaceAnalysis::identifyNonOverlappingAccessesBetweenIterations
           break;
         }
         foundOffsetExpression = true;
-        if (offsetExpression->hasNoSelfWrap()
-            || (offsetExpression->hasNoSignedWrap()
-                && offsetExpression->hasNoUnsignedWrap())) {
+        if (offsetExpression->hasNoSelfWrap() ||
+            (offsetExpression->hasNoSignedWrap() &&
+             offsetExpression->hasNoUnsignedWrap())) {
           continue;
         }
         isBound = false;
@@ -352,7 +361,8 @@ void LoopIterationSpaceAnalysis::identifyNonOverlappingAccessesBetweenIterations
         }
 
         auto *loopEntryPHI = iv->getLoopEntryPHI();
-        auto *loopStructure = this->loops->getInnermostLoopThatContains(loopEntryPHI);
+        auto *loopStructure =
+            this->loops->getInnermostLoopThatContains(loopEntryPHI);
         bool isRootLoopIV = (rootLoopStructure == loopStructure);
         if (!isRootLoopIV) {
           continue;
@@ -360,8 +370,8 @@ void LoopIterationSpaceAnalysis::identifyNonOverlappingAccessesBetweenIterations
 
         bool isIV = iv->isIVInstruction(inst);
         bool isDerivedFromIV = iv->isDerivedFromIVInstructions(inst);
-        assert((isIV || isDerivedFromIV)
-               && "Subscript associated to IV has invalid associated instruction");
+        assert((isIV || isDerivedFromIV) &&
+               "Subscript associated to IV has invalid associated instruction");
 
         bool isOneToOne = false;
         if (isIV) {
@@ -392,8 +402,7 @@ void LoopIterationSpaceAnalysis::identifyNonOverlappingAccessesBetweenIterations
         continue;
       }
       if (this->analyzeToCheckIfMemoryAccessSpaceNotOverlappingOrExactlyTheSame(
-              accessSpace0,
-              accessSpace1)) {
+              accessSpace0, accessSpace1)) {
         this->spacesThatCannotOverlap[accessSpace0].insert(accessSpace1);
       }
     }
@@ -402,44 +411,49 @@ void LoopIterationSpaceAnalysis::identifyNonOverlappingAccessesBetweenIterations
 
 void LoopIterationSpaceAnalysis::identifyIVForMemoryAccessSubscripts(
     llvm::ScalarEvolution &SE) {
-  auto findCorrespondingIVForSubscript =
-      [&](const llvm::SCEV *subscriptSCEV) -> std::pair<Instruction *, InductionVariable *> {
+  auto findCorrespondingIVForSubscript = [&](const llvm::SCEV *subscriptSCEV)
+      -> std::pair<Instruction *, InductionVariable *> {
     auto emptyPair = std::make_pair(nullptr, nullptr);
     if (isa<llvm::SCEVConstant>(subscriptSCEV)) {
       return emptyPair;
     }
 
-    auto scevsMatch = [](const llvm::SCEV *scev1, const llvm::SCEV *scev2) -> bool {
+    auto scevsMatch = [](const llvm::SCEV *scev1,
+                         const llvm::SCEV *scev2) -> bool {
       if (scev1 == scev2) {
         return true;
       }
       auto *scevConstant1 = dyn_cast<llvm::SCEVConstant>(scev1);
       auto *scevConstant2 = dyn_cast<llvm::SCEVConstant>(scev2);
-      return scevConstant1 != nullptr && scevConstant2 != nullptr
-             && scevConstant1->getValue()->getSExtValue()
-                    == scevConstant2->getValue()->getSExtValue();
+      return scevConstant1 != nullptr && scevConstant2 != nullptr &&
+             scevConstant1->getValue()->getSExtValue() ==
+                 scevConstant2->getValue()->getSExtValue();
     };
 
     auto findInstructionInLoopForSCEV =
-        [&SE, &scevsMatch](
-            std::unordered_map<const llvm::SCEV *, std::unordered_set<Instruction *>> &scevToInstMap,
-            const llvm::SCEV *subscriptSCEV) -> Instruction * {
+        [&SE, &scevsMatch](std::unordered_map<const llvm::SCEV *,
+                                              std::unordered_set<Instruction *>>
+                               &scevToInstMap,
+                           const llvm::SCEV *subscriptSCEV) -> Instruction * {
       auto found = scevToInstMap.find(subscriptSCEV);
       if (found != scevToInstMap.end()) {
         return *found->second.begin();
       }
 
-      if (auto *addRecSubscriptSCEV = dyn_cast<llvm::SCEVAddRecExpr>(subscriptSCEV)) {
+      if (auto *addRecSubscriptSCEV =
+              dyn_cast<llvm::SCEVAddRecExpr>(subscriptSCEV)) {
         auto *loopHeader = addRecSubscriptSCEV->getLoop()->getHeader();
         for (auto &scevInstPair : scevToInstMap) {
           auto *otherSCEV = scevInstPair.first;
-          if (auto *otherAddRecSCEV = dyn_cast<llvm::SCEVAddRecExpr>(otherSCEV)) {
+          if (auto *otherAddRecSCEV =
+                  dyn_cast<llvm::SCEVAddRecExpr>(otherSCEV)) {
             if (otherAddRecSCEV->getLoop()->getHeader() != loopHeader) {
               continue;
             }
-            if (!scevsMatch(addRecSubscriptSCEV->getStart(), otherAddRecSCEV->getStart())
-                || !scevsMatch(addRecSubscriptSCEV->getStepRecurrence(SE),
-                               otherAddRecSCEV->getStepRecurrence(SE))) {
+            if (!scevsMatch(addRecSubscriptSCEV->getStart(),
+                            otherAddRecSCEV->getStart()) ||
+                !scevsMatch(addRecSubscriptSCEV->getStepRecurrence(SE),
+                            otherAddRecSCEV->getStepRecurrence(SE))) {
               continue;
             }
           }
@@ -451,15 +465,17 @@ void LoopIterationSpaceAnalysis::identifyIVForMemoryAccessSubscripts(
       return nullptr;
     };
 
-    auto *ivInst = findInstructionInLoopForSCEV(this->ivInstructionsBySCEV, subscriptSCEV);
+    auto *ivInst =
+        findInstructionInLoopForSCEV(this->ivInstructionsBySCEV, subscriptSCEV);
     if (ivInst != nullptr) {
       return std::make_pair(ivInst, this->ivsByInstruction.at(ivInst));
     }
 
-    auto *derivedInst = findInstructionInLoopForSCEV(this->derivedInstructionsFromIVsBySCEV,
-                                                     subscriptSCEV);
+    auto *derivedInst = findInstructionInLoopForSCEV(
+        this->derivedInstructionsFromIVsBySCEV, subscriptSCEV);
     if (derivedInst != nullptr) {
-      return std::make_pair(derivedInst, this->ivsByInstruction.at(derivedInst));
+      return std::make_pair(derivedInst,
+                            this->ivsByInstruction.at(derivedInst));
     }
 
     return emptyPair;
@@ -473,14 +489,16 @@ void LoopIterationSpaceAnalysis::identifyIVForMemoryAccessSubscripts(
         memAccessSpace->subscripts[idx] = memAccessSpace->memoryAccessorSCEV;
         subscriptSCEV = memAccessSpace->memoryAccessorSCEV;
       }
-      memAccessSpace->subscriptIVs.push_back(findCorrespondingIVForSubscript(subscriptSCEV));
+      memAccessSpace->subscriptIVs.push_back(
+          findCorrespondingIVForSubscript(subscriptSCEV));
       idx++;
     }
     if (auto *phi = dyn_cast<PHINode>(memAccessSpace->memoryAccessor)) {
       if (idx == 0 && phi->getNumIncomingValues() == 1) {
-        memAccessSpace->subscriptIVs.push_back(
-            findCorrespondingIVForSubscript(memAccessSpace->memoryAccessorSCEV));
-        assert(memAccessSpace->elementSize != nullptr && "elementSize is nullptr");
+        memAccessSpace->subscriptIVs.push_back(findCorrespondingIVForSubscript(
+            memAccessSpace->memoryAccessorSCEV));
+        assert(memAccessSpace->elementSize != nullptr &&
+               "elementSize is nullptr");
         memAccessSpace->sizes.push_back(memAccessSpace->elementSize);
         auto *Expr = SE.getSCEV(phi->getIncomingValue(0));
         assert(Expr != nullptr && "Expr is nullptr");
@@ -492,22 +510,14 @@ void LoopIterationSpaceAnalysis::identifyIVForMemoryAccessSubscripts(
 
 LoopIterationSpaceAnalysis::MemoryAccessSpace::MemoryAccessSpace(
     Instruction *memoryAccessor)
-    : memoryAccessor{memoryAccessor},
-      memoryAccessorSCEV{nullptr},
-      memoryAccessorBasePointerSCEV{nullptr},
-      memoryMinusSCEV{nullptr},
-      recurrence{nullptr},
-      elementSize{nullptr},
-      subscripts{},
-      sizes{},
-      subscriptIVs{},
-      accessInstructions{},
-      constantStep{0},
-      isAnalyzed{false} {}
+    : memoryAccessor{memoryAccessor}, memoryAccessorSCEV{nullptr},
+      memoryAccessorBasePointerSCEV{nullptr}, memoryMinusSCEV{nullptr},
+      recurrence{nullptr}, elementSize{nullptr}, subscripts{}, sizes{},
+      subscriptIVs{}, accessInstructions{}, constantStep{0}, isAnalyzed{false} {
+}
 
 bool LoopIterationSpaceAnalysis::isOneToOneFunctionOnIV(
-    LoopStructure *loopStructure,
-    InductionVariable *IV,
+    LoopStructure *loopStructure, InductionVariable *IV,
     Instruction *derivedInstruction) const {
   std::queue<Instruction *> derivingInsts;
   std::unordered_set<Instruction *> visited;
@@ -521,8 +531,8 @@ bool LoopIterationSpaceAnalysis::isOneToOneFunctionOnIV(
     }
 
     auto op = inst->getOpcode();
-    bool isOneToOne = (op == Instruction::Add || op == Instruction::Sub
-                       || op == Instruction::Mul || inst->isCast());
+    bool isOneToOne = (op == Instruction::Add || op == Instruction::Sub ||
+                       op == Instruction::Mul || inst->isCast());
     if (!isOneToOne) {
       return false;
     }
@@ -551,8 +561,7 @@ bool LoopIterationSpaceAnalysis::isOneToOneFunctionOnIV(
 }
 
 bool LoopIterationSpaceAnalysis::isInnerDimensionSubscriptsBounded(
-    llvm::ScalarEvolution &SE,
-    MemoryAccessSpace *space) {
+    llvm::ScalarEvolution &SE, MemoryAccessSpace *space) {
   if (space->subscriptIVs.empty() ||
       space->subscriptIVs.size() != space->sizes.size()) {
     return false;
@@ -610,7 +619,8 @@ bool LoopIterationSpaceAnalysis::isInnerDimensionSubscriptsBounded(
         return false;
       }
 
-      if (scevsMatch(subscriptRecSCEV->getStart(), loopEntryPHISCEV->getStart()) &&
+      if (scevsMatch(subscriptRecSCEV->getStart(),
+                     loopEntryPHISCEV->getStart()) &&
           scevsMatch(subscriptRecSCEV->getStepRecurrence(SE),
                      loopEntryPHISCEV->getStepRecurrence(SE))) {
         auto *loopHeader = loopEntryPHI->getParent();
@@ -647,10 +657,8 @@ bool LoopIterationSpaceAnalysis::isInnerDimensionSubscriptsBounded(
             }
 
             bool isUpperBoundedByEq =
-                (!exitOnFalse &&
-                 predicate == ICmpInst::Predicate::ICMP_EQ) ||
-                (exitOnFalse &&
-                 predicate == ICmpInst::Predicate::ICMP_NE);
+                (!exitOnFalse && predicate == ICmpInst::Predicate::ICMP_EQ) ||
+                (exitOnFalse && predicate == ICmpInst::Predicate::ICMP_NE);
             bool isUpperBoundedByLT =
                 exitOnFalse && !isConditionLHS &&
                 (predicate == ICmpInst::Predicate::ICMP_ULT ||
@@ -659,9 +667,8 @@ bool LoopIterationSpaceAnalysis::isInnerDimensionSubscriptsBounded(
                 exitOnFalse && isConditionLHS &&
                 (predicate == ICmpInst::Predicate::ICMP_UGT ||
                  predicate == ICmpInst::Predicate::ICMP_SGT);
-            bool isUpperBounded =
-                isUpperBoundedByEq || isUpperBoundedByLT ||
-                isUpperBoundedByFlippedGT;
+            bool isUpperBounded = isUpperBoundedByEq || isUpperBoundedByLT ||
+                                  isUpperBoundedByFlippedGT;
 
             if (isUpperBounded) {
               auto *conditionSCEVBase = SE.getSCEV(conditionValue);

@@ -17,6 +17,34 @@ Analysis" machinery. In Lotus today, this component should be read as:
 For broader interprocedural formulations, see other frameworks in this repository
 (e.g., IFDS/IDE, WPDS, and NPA modules).
 
+## Public header layout
+
+The public API lives under `include/Dataflow/APA/`:
+
+```text
+include/Dataflow/APA/
+├── APA.h                          # Canonical umbrella for the framework
+├── Core/                          # Generic problem, path-expression, options, results
+├── Engines/                       # Solver facade and concrete elimination engines
+├── Adapters/LLVM/                 # LLVM CFG adapters
+├── Clients/LLVM/Intra/            # Concrete LLVM analyses
+└── Passes/                        # Legacy-pass wrappers
+```
+
+The current layout is the supported public header structure; there are no
+compatibility aliases for an older pre-reorg layout.
+
+### Quick include guide
+
+- Framework umbrella: `#include "Dataflow/APA/APA.h"`
+- Minimal framework surface: `Core/Problem.h`, `Core/Result.h`,
+  `Engines/Solver.h`, `Adapters/LLVM/ForwardProblem.h`
+- LLVM clients: `Clients/LLVM/Intra/*.h`
+- Passes: `#include "Dataflow/APA/Passes/EliminationPasses.h"`
+- Internal engine headers: `Engines/SolverContext.h` and the concrete
+  `*Solver.h` files are solver internals; downstream clients should normally
+  include only `Engines/Solver.h`.
+
 ## References
 
 ### Classical Elimination-Based Dataflow Analysis
@@ -54,6 +82,18 @@ The APA solver is different:
   `applyTransfer`, `meet`, and `maxStarIterations`.
 - The utility path-expression library is for **regex/path summarization** and is
   not a drop-in implementation of the APA solver.
+
+## Layering
+
+- `Core/` is generic and does not depend on LLVM.
+- `Engines/` is generic and builds/evaluates path expressions.
+- `Adapters/LLVM/` maps LLVM CFGs into the generic problem interface.
+- `Clients/LLVM/` supplies lattice semantics and transfer behavior for concrete
+  analyses.
+
+APA is therefore a generic elimination framework, not a complete
+"analysis generator." Each client analysis still provides its own lattice and
+LLVM-specific modeling.
 
 ## Current gaps / non-goals
 

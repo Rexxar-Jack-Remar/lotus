@@ -46,6 +46,27 @@ bool isPureLibraryCall(CallBase *call) {
   }
 
   static const std::set<std::string> noellePureFallback{
+      // ctype.h
+      "isalnum", "isalpha", "isblank", "iscntrl", "isdigit", "isgraph",
+      "islower", "isprint", "ispunct", "isspace", "isupper", "isxdigit",
+      "tolower", "toupper",
+      // math.h
+      "cos", "sin", "tan", "acos", "asin", "atan", "atan2", "cosh", "sinh",
+      "tanh", "acosh", "asinh", "atanh", "exp", "expf", "ldexp", "log", "logf",
+      "log10", "exp2", "expm1", "ilogb", "log1p", "log2", "logb", "scalbn",
+      "scalbln", "pow", "sqrt", "cbrt", "hypot", "erf", "erfc", "tgamma",
+      "lgamma", "ceil", "floor", "fmod", "trunc", "round", "lround", "llround",
+      "nearbyint", "remainder", "copysign", "nextafter", "nexttoward", "fdim",
+      "fmax", "fmin", "fabs", "abs", "fma", "fpclassify", "isfinite", "isinf",
+      "isnan", "isnormal", "signbit", "isgreater", "isgreaterequal", "isless",
+      "islessequal", "islessgreater", "isunordered",
+      // time.h
+      "clock", "difftime",
+      // wctype.h
+      "iswalnum", "iswalpha", "iswblank", "iswcntrl", "iswdigit", "iswgraph",
+      "iswlower", "iswprint", "iswpunct", "iswspace", "iswupper", "iswxdigit",
+      "towlower", "towupper", "iswctype", "towctrans",
+      // stdlib.h / string.h
       "atoi", "atoll", "exit", "strcmp", "strncmp", "rand_r", "strlen"};
   return noellePureFallback.count(callee->getName().str()) != 0;
 }
@@ -54,8 +75,7 @@ bool isPureLibraryCall(CallBase *call) {
 
 class InvariantManager::InvarianceChecker {
 public:
-  InvarianceChecker(LoopStructure *loop,
-                    LoopDependenceGraph *loopDG,
+  InvarianceChecker(LoopStructure *loop, LoopDependenceGraph *loopDG,
                     std::unordered_set<Instruction *> &invariants)
       : loop{loop}, loopDG{loopDG}, invariants{invariants} {
     for (auto *inst : loop->getInstructions()) {
@@ -78,7 +98,8 @@ public:
         }
       }
 
-      if (this->invariants.count(inst) != 0 || this->notInvariants.count(inst) != 0) {
+      if (this->invariants.count(inst) != 0 ||
+          this->notInvariants.count(inst) != 0) {
         continue;
       }
 
@@ -89,17 +110,14 @@ public:
       }
 
       auto canEvolve = this->loopDG->iterateOverDependencesTo(
-          inst,
-          false,
-          true,
-          true,
+          inst, false, true, true,
           [this](Value *toValue, LoopDependenceEdge *dep) {
             return this->isEvolvingValue(toValue, dep);
           });
 
       if (auto *call = dyn_cast<CallInst>(inst)) {
         auto *callee = call->getCalledFunction();
-        if (callee != nullptr && callee->empty()) {
+        if (callee != nullptr && callee->empty() && !isPureLibraryCall(call)) {
           canEvolve = true;
         }
       }
@@ -165,10 +183,7 @@ private:
     this->dependencyValuesBeingChecked.insert(toInst);
 
     auto canEvolve = this->loopDG->iterateOverDependencesTo(
-        toInst,
-        false,
-        true,
-        true,
+        toInst, false, true, true,
         [this](Value *nextValue, LoopDependenceEdge *nextDep) {
           return this->isEvolvingValue(nextValue, nextDep);
         });
@@ -259,9 +274,8 @@ bool InvariantManager::isLoopInvariant(Value *value) const {
 }
 
 bool InvariantManager::isLoopInvariant(LoopSCC *scc) const {
-  auto interrupted = scc->iterateOverInstructions([this](Instruction *inst) {
-    return !this->isLoopInvariant(inst);
-  });
+  auto interrupted = scc->iterateOverInstructions(
+      [this](Instruction *inst) { return !this->isLoopInvariant(inst); });
   return !interrupted;
 }
 

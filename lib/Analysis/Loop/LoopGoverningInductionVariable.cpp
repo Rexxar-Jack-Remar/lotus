@@ -15,11 +15,6 @@ LoopGoverningInductionVariable::LoopGoverningInductionVariable(
 LoopGoverningInductionVariable::LoopGoverningInductionVariable(
     LoopStructure *loop, InductionVariable &iv, LoopSCC &,
     const std::vector<BasicBlock *> &exitBlocks)
-    : LoopGoverningInductionVariable(loop, iv, exitBlocks) {}
-
-LoopGoverningInductionVariable::LoopGoverningInductionVariable(
-    LoopStructure *loop, InductionVariable &iv,
-    const std::vector<BasicBlock *> &exitBlocks)
     : loop{loop}, iv{&iv}, conditionValueDerivation{}, headerCmp{nullptr},
       headerBr{nullptr}, conditionValue{nullptr}, comparedValue{nullptr},
       exitBlock{nullptr}, isWellFormed{false} {
@@ -53,19 +48,14 @@ LoopGoverningInductionVariable::LoopGoverningInductionVariable(
     if (br == nullptr || !br->isConditional()) {
       continue;
     }
-    if (br->getParent() != headerPHI->getParent()) {
-      continue;
-    }
     if (loopGoverningTerminator != nullptr) {
       return;
     }
     loopGoverningTerminator = br;
   }
 
-  if (loopGoverningTerminator == nullptr) {
-    return;
-  }
-  if (loopGoverningTerminator->getParent() != headerPHI->getParent()) {
+  if (loopGoverningTerminator == nullptr ||
+      loopGoverningTerminator->getParent() != headerPHI->getParent()) {
     return;
   }
 
@@ -93,11 +83,7 @@ LoopGoverningInductionVariable::LoopGoverningInductionVariable(
     if (this->comparedValue == nullptr) {
       return;
     }
-    if (this->comparedValue == opR) {
-      this->conditionValue = opL;
-    } else {
-      this->conditionValue = opR;
-    }
+    this->conditionValue = (this->comparedValue == opR) ? opL : opR;
   } else {
     this->conditionValue = isOpLHSLoopEntryPHI ? opR : opL;
     this->comparedValue = cast<Instruction>(isOpLHSLoopEntryPHI ? opL : opR);
@@ -148,6 +134,27 @@ LoopGoverningInductionVariable::LoopGoverningInductionVariable(
   }
 
   this->isWellFormed = true;
+}
+
+LoopGoverningInductionVariable::LoopGoverningInductionVariable(
+    LoopStructure *loop, InductionVariable &iv,
+    const std::vector<BasicBlock *> &exitBlocks)
+    : loop{loop}, iv{&iv}, conditionValueDerivation{}, headerCmp{nullptr},
+      headerBr{nullptr}, conditionValue{nullptr}, comparedValue{nullptr},
+      exitBlock{nullptr}, isWellFormed{false} {
+  auto *scc = iv.getSCC();
+  if (scc == nullptr) {
+    return;
+  }
+
+  LoopGoverningInductionVariable scoped(loop, iv, *scc, exitBlocks);
+  this->conditionValueDerivation = scoped.getConditionValueDerivation();
+  this->headerCmp = scoped.getHeaderCompareInstructionToComputeExitCondition();
+  this->headerBr = scoped.getHeaderBrInst();
+  this->conditionValue = scoped.getExitConditionValue();
+  this->comparedValue = scoped.getValueToCompareAgainstExitConditionValue();
+  this->exitBlock = scoped.getExitBlockFromHeader();
+  this->isWellFormed = scoped.isSCCContainingIVWellFormed();
 }
 
 InductionVariable *

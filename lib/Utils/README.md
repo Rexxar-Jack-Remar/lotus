@@ -57,6 +57,24 @@ Algorithm utilities:
 - `PathExpressionComputer.h` – Path expression computation
 - `RegexToTgf.h` / `RegexToCompactTgf.h` – Regex to TGF format
 
+This utility computes regular expressions over labeled graphs using Tarjan's
+path-expression construction. It is a generic graph algorithm utility, not the
+APA transfer-expression engine in `Dataflow/APA/`.
+
+Main components:
+
+- `ILabeledGraph<N, L>` / `ILabeledEdge<N, L>` – graph and edge interfaces
+  with set semantics
+- `GenericLabeledGraph<N, L>` – mutable graph builder with duplicate-edge
+  suppression
+- `IRegex<L>` / `Regex<L>` – regex AST plus simplification/factory helpers
+- `PathExpressionComputer<N, L>` – computes `exprBetween(source, target)`
+
+Requirements:
+
+- node type `N` must be hashable and equality comparable
+- label type `L` must be hashable, equality comparable, and streamable
+
 ## Benchmark
 
 - `Microbench.h` – Microbenchmarking utilities

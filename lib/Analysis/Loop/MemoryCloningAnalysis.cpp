@@ -356,8 +356,8 @@ bool ClonableMemoryObject::isOverrideSetFullyCoveringTheAllocationSpace(
           gep->getSourceElementType() != this->allocatedType) {
         continue;
       }
-      auto baseIdxIter = gep->idx_begin();
-      auto elementIdxIter = baseIdxIter + 1;
+      auto *baseIdxIter = gep->idx_begin();
+      auto *elementIdxIter = baseIdxIter + 1;
       auto *baseIdxValue = dyn_cast<ConstantInt>(baseIdxIter->get());
       auto *elementIdxValue = dyn_cast<ConstantInt>(elementIdxIter->get());
       if (baseIdxValue == nullptr || elementIdxValue == nullptr ||

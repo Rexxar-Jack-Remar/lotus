@@ -166,4 +166,65 @@ TEST_F(LoopIterationSpaceTest, StaysConservativeWhenAccessSpaceCannotBeLinearize
           ld, store));
 }
 
+TEST_F(LoopIterationSpaceTest, StaysConservativeForDescendingAffineTraversal) {
+  llvm::LLVMContext context;
+  auto module = parseModuleChecked(context, R"(
+    define void @reverse_array_loop(i32* %base, i32 %n) {
+    entry:
+      %start = add i32 %n, -1
+      br label %header
+
+    header:
+      %i = phi i32 [ %start, %entry ], [ %i.next, %latch ]
+      %cmp = icmp sge i32 %i, 0
+      br i1 %cmp, label %body, label %exit
+
+    body:
+      %idx = sext i32 %i to i64
+      %ptr = getelementptr inbounds i32, i32* %base, i64 %idx
+      %ld = load i32, i32* %ptr, align 4
+      store i32 %ld, i32* %ptr, align 4
+      br label %latch
+
+    latch:
+      %i.next = add i32 %i, -1
+      br label %header
+
+    exit:
+      ret void
+    }
+  )");
+  auto *function = module->getFunction("reverse_array_loop");
+  ASSERT_NE(function, nullptr);
+
+  buildPDG(*module);
+
+  llvm::PassBuilder PB;
+  llvm::FunctionAnalysisManager FAM;
+  PB.registerFunctionAnalyses(FAM);
+  auto &DT = FAM.getResult<llvm::DominatorTreeAnalysis>(*function);
+  auto &PDT = FAM.getResult<llvm::PostDominatorTreeAnalysis>(*function);
+  auto &LI = FAM.getResult<llvm::LoopAnalysis>(*function);
+  auto &SE = FAM.getResult<llvm::ScalarEvolutionAnalysis>(*function);
+
+  FunctionLoopAnalyses analyses(*function, LI, DT, PDT);
+  analyses.materializeDependenceGraphs(graph);
+  analyses.materializeScalarAnalyses(SE, LI);
+  analyses.materializeLoopCarriedDependencies(DT, PDT);
+  analyses.materializeIterationSpaceAnalyses(SE);
+
+  auto *content = analyses.getLoopContent(**LI.begin());
+  ASSERT_NE(content, nullptr);
+  auto *iterationSpace = content->getLoopIterationSpaceAnalysis();
+  ASSERT_NE(iterationSpace, nullptr);
+  auto *ld = findInstructionByName(function, "ld");
+  auto *store = lotus::unittest::findInstruction<llvm::StoreInst>(*function);
+  ASSERT_NE(ld, nullptr);
+  ASSERT_NE(store, nullptr);
+
+  EXPECT_TRUE(
+      iterationSpace->areInstructionsAccessingDisjointMemoryLocationsBetweenIterations(
+          ld, store));
+}
+
 } // namespace

@@ -20,6 +20,22 @@
   - **LLVMFlowHelpers.h** – LLVM-specific flow function helpers.
 - **Clients/** – Analysis problem definitions (IFDSTaintAnalysis, IDEConstantPropagation, etc.).
 
+### API notes
+
+- `IDESolver` exposes path/summary edge query APIs:
+  - `get_path_edges(std::vector<PathEdgeType>&)`
+  - `get_summary_edges(std::vector<SummaryEdge<Fact>>& )`
+  where each summary edge records both the `call_site` and the concrete
+  `return_site`.
+- `IDESolver` also exposes unified solver statistics via `get_statistics()`.
+
+### Include paths
+
+- Core: `#include "Dataflow/IFDS/Core/IFDSFramework.h"`
+- Solvers: `#include "Dataflow/IFDS/Solvers/IFDSSolver.h"`
+- Utils: `#include "Dataflow/IFDS/Utils/LLVMFlowHelpers.h"`
+- Clients: `#include "Dataflow/IFDS/Clients/IFDSTaintAnalysis.h"`
+
 ### Solver features (aligned with Phasar where applicable)
 
 - **Multiple return sites**: Each call can have several return sites (e.g. normal and unwind for `invoke`). The solver uses all CFG successors of the call.

@@ -419,14 +419,18 @@ InductionVariableManager::InductionVariableManager(
     }
 
     for (auto &iv : owned) {
+      auto *ivSCC = iv->getSCC();
+      if (ivSCC == nullptr) {
+        continue;
+      }
       auto candidate = std::unique_ptr<LoopGoverningInductionVariable>(
-          new LoopGoverningInductionVariable(loop, *iv));
+          new LoopGoverningInductionVariable(
+              loop, *iv, *ivSCC, loop->getLoopExitBasicBlocks()));
       if (!candidate->isSCCContainingIVWellFormed()) {
         continue;
       }
       this->governingIVs[loop] = candidate.get();
       this->ownedGoverningIVs.push_back(std::move(candidate));
-      break;
     }
   }
 }

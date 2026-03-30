@@ -17,6 +17,12 @@ the post* or pre* algorithm using the WALi library
 ## Directory Structure
 
 ```
+include/Dataflow/WPDS/
+├── Core/                          # Public fact/weight/builder abstractions
+├── Solver/                        # Public engine interface
+├── Clients/                       # Public client analysis wrappers
+└── InterProceduralDataFlow.h      # Umbrella header
+
 lib/Dataflow/WPDS/
 ├── Core/                          # Core abstractions
 │   ├── DataFlowFacts.cpp         # Fact domain implementation
@@ -40,6 +46,16 @@ To write a WPDS analysis, you essentially write an IDE analysis. The framework p
 2. **Use `MemoryObjectFact`** when facts should represent canonical memory objects
 3. **Run the analysis** using `InterProceduralDataFlowEngine`
 
+Modern include paths:
+
+- `#include "Dataflow/WPDS/Core/DataFlowFacts.h"`
+- `#include "Dataflow/WPDS/Core/GenKillTransformer.h"`
+- `#include "Dataflow/WPDS/Solver/InterProceduralDataFlowEngine.h"`
+
+Or use the umbrella header:
+
+- `#include "Dataflow/WPDS/InterProceduralDataFlow.h"`
+
 ## Current Limits
 
 - `GEN`/`KILL` in `mono::DataFlowResult` are local instruction effects only.
@@ -51,6 +67,15 @@ To write a WPDS analysis, you essentially write an IDE analysis. The framework p
 - Must analyses are not supported by the current `GenKillTransformer`.
 - Higher-level point-query helpers are available; raw regular-language queries
   remain an expert API and may be more expensive than direct point queries.
+
+## Supported semantics
+
+- The current framework targets distributive may analyses over a finite fact
+  domain.
+- `GEN` and `KILL` are local transfer effects of the current instruction, not
+  accumulated path summaries.
+- Memory objects are tracked via canonical base objects such as allocas,
+  globals, pointer arguments, and pointer-returning calls.
 
 ```cpp
 #include "Dataflow/WPDS/InterProceduralDataFlow.h"
