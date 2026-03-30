@@ -101,6 +101,14 @@ bool ClonableMemoryObject::doPrivateCopiesNeedToBeInitialized(void) const {
 }
 bool ClonableMemoryObject::mustAliasAMemoryLocationWithinObject(
     Value *pointer) const {
+  if (pointer == this->allocation) {
+    return true;
+  }
+  if (auto *inst = dyn_cast<Instruction>(pointer)) {
+    if (this->castsAndGEPs.count(inst) != 0) {
+      return true;
+    }
+  }
   return stripLocationCasts(pointer) == this->allocation;
 }
 bool ClonableMemoryObject::isInstructionCastOrGEPOfLocation(
@@ -146,6 +154,7 @@ MemoryCloningAnalysis::MemoryCloningAnalysis(LoopStructure *loop,
   auto *function = loop->getFunction();
   auto &entryBlock = function->getEntryBlock();
   auto &DL = function->getParent()->getDataLayout();
+  auto *header = loop->getHeader();
 
   for (auto &inst : entryBlock) {
     auto *alloca = dyn_cast<AllocaInst>(&inst);
@@ -192,6 +201,11 @@ MemoryCloningAnalysis::MemoryCloningAnalysis(LoopStructure *loop,
             isa<AddrSpaceCastInst>(userInst)) {
           object->addPointer(userInst);
           worklist.push(userInst);
+          if (!loop->isIncluded(userInst) &&
+              !DS.DT.dominates(userInst->getParent(), header)) {
+            hasIllegalOutsideUse = true;
+          }
+          continue;
         }
 
         if (auto *load = dyn_cast<LoadInst>(userInst)) {
@@ -223,13 +237,25 @@ MemoryCloningAnalysis::MemoryCloningAnalysis(LoopStructure *loop,
             continue;
           }
           if (isMemoryTransferIntrinsic(call)) {
+            bool isDestinationUse =
+                call->arg_size() >= 1 && call->getArgOperand(0) == value;
+            bool isSourceUse =
+                call->arg_size() >= 2 && call->getArgOperand(1) == value;
+            if (isDestinationUse) {
+              object->addStore(call);
+            } else if (isSourceUse) {
+              object->addLoad(call);
+            } else {
+              object->addNonStoringUse(call);
+            }
             hasLoopUse |= loop->isIncluded(call);
             if (loop->isIncluded(call) && call->arg_size() > 0 &&
                 object->mustAliasAMemoryLocationWithinObject(
                     call->getArgOperand(0))) {
               hasLoopFullOverwrite = true;
             }
-            if (!loop->isIncluded(call)) {
+            if (!loop->isIncluded(call) &&
+                !DS.DT.dominates(call->getParent(), header)) {
               hasIllegalOutsideUse = true;
             }
             continue;
@@ -246,9 +272,22 @@ MemoryCloningAnalysis::MemoryCloningAnalysis(LoopStructure *loop,
             object->addNonStoringUse(call);
           }
         }
+        if (!isa<LoadInst>(userInst) && !isa<StoreInst>(userInst) &&
+            !isa<CallInst>(userInst)) {
+          object->addNonStoringUse(userInst);
+        }
+        if (isa<InvokeInst>(userInst)) {
+          hasIllegalOutsideUse = true;
+          continue;
+        }
 
         if (loop->isIncluded(userInst)) {
           hasLoopUse = true;
+          continue;
+        }
+
+        if (!DS.DT.dominates(userInst->getParent(), header)) {
+          hasIllegalOutsideUse = true;
           continue;
         }
 

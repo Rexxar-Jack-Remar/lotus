@@ -137,6 +137,7 @@ private:
   void rebuildSCCDAG(void);
   void buildEnvironment(const std::set<Value *> &excludeValues);
   void removeMemoryCloningNegatedDependences(void);
+  void removeThreadSafeLibraryDependences(void);
   void removeLoopCarriedDependencesProvedDisjoint(
       LoopIterationSpaceAnalysis &analysis);
   bool canInstructionReachWithinSameIteration(Instruction *from,

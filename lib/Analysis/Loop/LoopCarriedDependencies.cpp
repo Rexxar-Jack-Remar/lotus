@@ -138,22 +138,29 @@ LoopCarriedDependencies::getLoopCarriedDependenciesForLoop(
   auto *graph = sccdag.getLoopDependenceGraph();
   assert(graph != nullptr);
   for (auto *scc : sccdag.getSCCs()) {
-    for (auto &pair : scc->internalNodePairs()) {
-      auto *node = pair.second;
-      for (auto *edge : node->getOutgoingEdges()) {
-        if (!edge->isLoopCarried()) {
-          continue;
-        }
-        auto *consumerI = dyn_cast_or_null<Instruction>(edge->getDst()->getValue());
-        if (consumerI == nullptr) {
-          continue;
-        }
-        auto *consumerLoop = loopNode->getInnermostLoopThatContains(consumerI);
-        if (consumerLoop != &loop) {
-          continue;
-        }
-        edges.insert(edge);
+    for (auto *edge : scc->getEdges()) {
+      if (!edge->isLoopCarried()) {
+        continue;
       }
+      auto *consumerI =
+          dyn_cast_or_null<Instruction>(edge->getDst()->getValue());
+      if (consumerI == nullptr) {
+        continue;
+      }
+      auto *consumerLoop = loopNode->getInnermostLoopThatContains(consumerI);
+      if (consumerLoop != &loop) {
+        continue;
+      }
+      auto *producerI =
+          dyn_cast_or_null<Instruction>(edge->getSrc()->getValue());
+      if (producerI == nullptr) {
+        continue;
+      }
+      auto *producerLoop = loopNode->getInnermostLoopThatContains(producerI);
+      if (producerLoop == nullptr) {
+        continue;
+      }
+      edges.insert(edge);
     }
   }
   return edges;

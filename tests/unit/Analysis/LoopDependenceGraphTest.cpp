@@ -134,11 +134,7 @@ TEST_F(LoopDependenceGraphTest, MaterializesGraphAndSCCsFromLegacyPDG) {
   EXPECT_FALSE(ldg->isInternal(limit));
 
   auto *limitSCC = sccdag->getSCC(limit);
-  ASSERT_NE(limitSCC, nullptr);
-  EXPECT_FALSE(limitSCC->isIncludedInLoop());
-  auto includedSCCs = sccdag->getSCCs();
-  EXPECT_EQ(std::find(includedSCCs.begin(), includedSCCs.end(), limitSCC),
-            includedSCCs.end());
+  EXPECT_EQ(limitSCC, nullptr);
 
   bool foundControlEdge = false;
   bool foundVariableEdge = false;

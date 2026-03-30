@@ -9,6 +9,12 @@ namespace loop {
 
 LoopGoverningInductionVariable::LoopGoverningInductionVariable(
     LoopStructure *loop, InductionVariable &iv)
+    : LoopGoverningInductionVariable(loop, iv, loop->getLoopExitBasicBlocks()) {
+}
+
+LoopGoverningInductionVariable::LoopGoverningInductionVariable(
+    LoopStructure *loop, InductionVariable &iv,
+    const std::vector<BasicBlock *> &exitBlocks)
     : loop{loop}, iv{&iv}, conditionValueDerivation{}, headerCmp{nullptr},
       headerBr{nullptr}, conditionValue{nullptr}, comparedValue{nullptr},
       exitBlock{nullptr}, isWellFormed{false} {
@@ -51,14 +57,11 @@ LoopGoverningInductionVariable::LoopGoverningInductionVariable(
     loopGoverningTerminator = br;
   }
 
-  if (loopGoverningTerminator == nullptr ||
-      loopGoverningTerminator->getParent() != headerPHI->getParent()) {
-    auto *headerTerminator =
-        dyn_cast<BranchInst>(headerPHI->getParent()->getTerminator());
-    if (headerTerminator == nullptr || !headerTerminator->isConditional()) {
-      return;
-    }
-    loopGoverningTerminator = headerTerminator;
+  if (loopGoverningTerminator == nullptr) {
+    return;
+  }
+  if (loopGoverningTerminator->getParent() != headerPHI->getParent()) {
+    return;
   }
 
   this->headerBr = loopGoverningTerminator;
@@ -76,39 +79,25 @@ LoopGoverningInductionVariable::LoopGoverningInductionVariable(
   auto isOpRHSLoopEntryPHI =
       isa<Instruction>(opR) && headerPHI == cast<Instruction>(opR);
   if (!(isOpLHSLoopEntryPHI ^ isOpRHSLoopEntryPHI)) {
-    auto *opLInst = dyn_cast<Instruction>(opL);
-    auto *opRInst = dyn_cast<Instruction>(opR);
-    bool opLIsIVLike =
-        opLInst != nullptr &&
-        (iv.isIVInstruction(opLInst) || iv.isDerivedFromIVInstructions(opLInst));
-    bool opRIsIVLike =
-        opRInst != nullptr &&
-        (iv.isIVInstruction(opRInst) || iv.isDerivedFromIVInstructions(opRInst));
-    if (opLIsIVLike ^ opRIsIVLike) {
-      this->comparedValue = cast<Instruction>(opLIsIVLike ? opL : opR);
-      this->conditionValue = opLIsIVLike ? opR : opL;
+    for (auto *intermediateValue : iv.getNonPHIIntermediateValues()) {
+      if (intermediateValue == opR || intermediateValue == opL) {
+        this->comparedValue = intermediateValue;
+        break;
+      }
+    }
+    if (this->comparedValue == nullptr) {
+      return;
+    }
+    if (this->comparedValue == opR) {
+      this->conditionValue = opL;
     } else {
-      for (auto *intermediateValue : iv.getNonPHIIntermediateValues()) {
-        if (intermediateValue == opR || intermediateValue == opL) {
-          this->comparedValue = intermediateValue;
-          break;
-        }
-      }
-      if (this->comparedValue == nullptr) {
-        return;
-      }
-      if (this->comparedValue == opR) {
-        this->conditionValue = opL;
-      } else {
-        this->conditionValue = opR;
-      }
+      this->conditionValue = opR;
     }
   } else {
     this->conditionValue = isOpLHSLoopEntryPHI ? opR : opL;
     this->comparedValue = cast<Instruction>(isOpLHSLoopEntryPHI ? opL : opR);
   }
 
-  auto exitBlocks = loop->getLoopExitBasicBlocks();
   std::set<BasicBlock *> exitBlockSet(exitBlocks.begin(), exitBlocks.end());
   if (exitBlockSet.count(this->headerBr->getSuccessor(0)) != 0) {
     this->exitBlock = this->headerBr->getSuccessor(0);

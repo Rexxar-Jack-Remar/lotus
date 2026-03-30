@@ -3,6 +3,8 @@
  */
 #include "Analysis/Loop/LoopNestingGraph.h"
 
+#include <queue>
+
 namespace lotus {
 namespace analysis {
 namespace loop {
@@ -135,10 +137,41 @@ std::unique_ptr<LoopNestingGraph> LoopNestingGraph::buildFromAnalyses(
     std::vector<FunctionLoopAnalyses *> const &analyses,
     llvm::Module &module,
     Function *entryFunction) {
+  auto &callGraph = pdg::PDGCallGraph::getInstance();
+  if (!callGraph.isBuiltForModule(module)) {
+    callGraph.reset();
+    callGraph.build(module);
+  }
+
+  std::unordered_set<const Function *> reachableFunctions;
+  if (entryFunction != nullptr) {
+    std::queue<const Function *> worklist;
+    worklist.push(entryFunction);
+    reachableFunctions.insert(entryFunction);
+    while (!worklist.empty()) {
+      auto *current = worklist.front();
+      worklist.pop();
+      auto *currentNode = callGraph.getNode(*const_cast<Function *>(current));
+      if (currentNode == nullptr) {
+        continue;
+      }
+      for (auto *succ : currentNode->getOutNeighbors()) {
+        auto *callee = dyn_cast_or_null<Function>(succ->getValue());
+        if (callee == nullptr ||
+            !reachableFunctions.insert(callee).second) {
+          continue;
+        }
+        worklist.push(callee);
+      }
+    }
+  }
+
   std::vector<LoopStructure *> allLoops;
-  std::unordered_map<const Function *, FunctionLoopAnalyses *> analysesByFunction;
   for (auto *analysis : analyses) {
-    analysesByFunction[analysis->getFunction()] = analysis;
+    if (entryFunction != nullptr &&
+        reachableFunctions.count(analysis->getFunction()) == 0) {
+      continue;
+    }
     auto loops = analysis->getLoopStructures();
     allLoops.insert(allLoops.end(), loops.begin(), loops.end());
   }
@@ -170,16 +203,14 @@ std::unique_ptr<LoopNestingGraph> LoopNestingGraph::buildFromAnalyses(
     }
   }
 
-  auto &callGraph = pdg::PDGCallGraph::getInstance();
-  if (!callGraph.isBuiltForModule(module)) {
-    callGraph.reset();
-    callGraph.build(module);
-  }
-
   for (auto *analysis : analyses) {
     auto *callerFunction = analysis->getFunction();
     auto *callerForest = analysis->getLoopForest();
     if (callerFunction == nullptr || callerForest == nullptr) {
+      continue;
+    }
+    if (entryFunction != nullptr &&
+        reachableFunctions.count(callerFunction) == 0) {
       continue;
     }
 

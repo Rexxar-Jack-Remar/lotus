@@ -31,6 +31,9 @@ namespace loop {
 class LoopGoverningInductionVariable {
 public:
   LoopGoverningInductionVariable(LoopStructure *loop, InductionVariable &iv);
+  LoopGoverningInductionVariable(
+      LoopStructure *loop, InductionVariable &iv,
+      const std::vector<BasicBlock *> &exitBlocks);
 
   InductionVariable *getInductionVariable(void) const;
   CmpInst *getHeaderCompareInstructionToComputeExitCondition(void) const;

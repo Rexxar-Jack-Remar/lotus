@@ -467,7 +467,12 @@ SCCDAGAttrs::checkIfSCCOnlyContainsInductionVariables(
     if (loopGoverningIVs.count(iv) == 0) {
       continue;
     }
-    LoopGoverningInductionVariable attribution(loopNode->getLoop(), *iv);
+    auto *ivLoop =
+        loopNode->getInnermostLoopThatContains(iv->getLoopEntryPHI());
+    assert(ivLoop != nullptr);
+    auto exitBlocks = ivLoop->getLoopExitBasicBlocks();
+    LoopGoverningInductionVariable attribution(loopNode->getLoop(), *iv,
+                                               exitBlocks);
     if (!attribution.isSCCContainingIVWellFormed()) {
       continue;
     }
@@ -535,85 +540,20 @@ SCCDAGAttrs::checkIfClonableByUsingLocalMemory(LoopSCC *scc, LoopTree *) const {
   }
 
   std::set<AllocaInst *> allocations;
-  bool sawRelevantMemoryTraffic = false;
-
-  auto inspectInstruction = [&](Instruction *inst) -> bool {
+  for (auto *dependency : it->second) {
+    auto *inst = dyn_cast_or_null<Instruction>(dependency->getSrc()->getValue());
     if (inst == nullptr) {
-      return true;
+      return {};
     }
 
     auto locs = this->memoryCloningAnalysis->getClonableMemoryObjectsFor(inst);
     if (locs.empty()) {
-      Value *pointerOperand = nullptr;
-      if (auto *loadInst = dyn_cast<LoadInst>(inst)) {
-        pointerOperand = loadInst->getPointerOperand();
-      } else if (auto *storeInst = dyn_cast<StoreInst>(inst)) {
-        pointerOperand = storeInst->getPointerOperand();
-      }
-      if (pointerOperand != nullptr) {
-        for (auto *loc : this->memoryCloningAnalysis->getClonableMemoryObjects()) {
-          if (loc->mustAliasAMemoryLocationWithinObject(pointerOperand)) {
-            locs.insert(loc);
-          }
-        }
-      }
-    }
-
-    bool usesClonableLocation = false;
-    for (auto *loc : locs) {
-      bool isMemoryTraffic = loc->isInstructionLoadingLocation(inst) ||
-                             loc->isInstructionStoringLocation(inst);
-      if (!isMemoryTraffic) {
-        if (auto *callInst = dyn_cast<CallInst>(inst)) {
-          if (!callInst->isLifetimeStartOrEnd()) {
-            for (auto &arg : callInst->args()) {
-              if (loc->mustAliasAMemoryLocationWithinObject(arg.get())) {
-                isMemoryTraffic = true;
-                break;
-              }
-            }
-          }
-        }
-      }
-      if (!isMemoryTraffic) {
-        continue;
-      }
-      sawRelevantMemoryTraffic = true;
-      usesClonableLocation = true;
-      allocations.insert(loc->getAllocation());
-    }
-
-    if (usesClonableLocation) {
-      return true;
-    }
-    if (isa<LoadInst>(inst) || isa<StoreInst>(inst)) {
-      sawRelevantMemoryTraffic = true;
-      return false;
-    }
-    if (auto *callInst = dyn_cast<CallInst>(inst)) {
-      if (!callInst->isLifetimeStartOrEnd()) {
-        sawRelevantMemoryTraffic = true;
-        return false;
-      }
-    }
-    return true;
-  };
-
-  for (auto *dependency : it->second) {
-    if (dependency->getKind() == LoopDependenceEdgeKind::Control) {
-      continue;
-    }
-    auto *srcInst =
-        dyn_cast_or_null<Instruction>(dependency->getSrc()->getValue());
-    auto *dstInst =
-        dyn_cast_or_null<Instruction>(dependency->getDst()->getValue());
-    if (!inspectInstruction(srcInst) || !inspectInstruction(dstInst)) {
       return {};
     }
-  }
 
-  if (!sawRelevantMemoryTraffic) {
-    return {};
+    for (auto *loc : locs) {
+      allocations.insert(loc->getAllocation());
+    }
   }
 
   return allocations;

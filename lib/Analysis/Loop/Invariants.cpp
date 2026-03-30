@@ -3,9 +3,54 @@
  */
 #include "Analysis/Loop/Invariants.h"
 
+#include "Alias/Spec/AliasSpecManager.h"
+
 namespace lotus {
 namespace analysis {
 namespace loop {
+
+namespace {
+
+lotus::alias::AliasSpecManager &getLoopAnalysisSpecManager(void) {
+  static lotus::alias::AliasSpecManager manager;
+  return manager;
+}
+
+bool isAllocatorLike(CallBase *call) {
+  if (call == nullptr) {
+    return false;
+  }
+  auto *callee = call->getCalledFunction();
+  if (callee == nullptr || !callee->empty()) {
+    return false;
+  }
+
+  auto &specManager = getLoopAnalysisSpecManager();
+  return specManager.isAllocator(callee) || specManager.isDeallocator(callee) ||
+         specManager.getCategory(callee) ==
+             lotus::alias::FunctionCategory::Reallocator;
+}
+
+bool isPureLibraryCall(CallBase *call) {
+  if (call == nullptr) {
+    return false;
+  }
+  auto *callee = call->getCalledFunction();
+  if (callee == nullptr || !callee->empty()) {
+    return false;
+  }
+
+  auto &specManager = getLoopAnalysisSpecManager();
+  if (specManager.isNoEffect(callee)) {
+    return true;
+  }
+
+  static const std::set<std::string> noellePureFallback{
+      "atoi", "atoll", "exit", "strcmp", "strncmp", "rand_r", "strlen"};
+  return noellePureFallback.count(callee->getName().str()) != 0;
+}
+
+} // namespace
 
 class InvariantManager::InvarianceChecker {
 public:
@@ -19,6 +64,10 @@ public:
       }
 
       if (auto *call = dyn_cast<CallInst>(inst)) {
+        if (isAllocatorLike(call)) {
+          this->notInvariants.insert(inst);
+          continue;
+        }
         if (call->mayHaveSideEffects() && !call->onlyReadsMemory()) {
           this->notInvariants.insert(inst);
           continue;
@@ -55,7 +104,7 @@ public:
       if (auto *call = dyn_cast<CallInst>(inst)) {
         auto *callee = call->getCalledFunction();
         if (callee != nullptr && callee->empty()) {
-          if (!call->onlyReadsMemory() || !call->doesNotThrow()) {
+          if (!isPureLibraryCall(call)) {
             canEvolve = true;
           }
         }
@@ -85,6 +134,9 @@ private:
     }
 
     if (auto *call = dyn_cast<CallInst>(toInst)) {
+      if (isAllocatorLike(call)) {
+        return true;
+      }
       if (call->mayHaveSideEffects() && !call->onlyReadsMemory()) {
         return true;
       }

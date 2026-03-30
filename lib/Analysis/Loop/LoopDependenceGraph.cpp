@@ -150,55 +150,6 @@ bool isAllowedBoundaryContextValue(Value *value) {
   return false;
 }
 
-Instruction *findMemoryAccessRepresentative(Value *value, LoopStructure *loop) {
-  auto *inst = dyn_cast_or_null<Instruction>(value);
-  if (inst == nullptr) {
-    return nullptr;
-  }
-  if (isa<LoadInst>(inst) || isa<StoreInst>(inst)) {
-    return inst;
-  }
-  if (auto *call = dyn_cast<CallInst>(inst)) {
-    if (!call->isLifetimeStartOrEnd()) {
-      return call;
-    }
-  }
-
-  std::queue<Value *> worklist;
-  std::unordered_set<Value *> visited;
-  worklist.push(value);
-  visited.insert(value);
-
-  while (!worklist.empty()) {
-    auto *current = worklist.front();
-    worklist.pop();
-    for (auto *user : current->users()) {
-      auto *userInst = dyn_cast<Instruction>(user);
-      if (userInst == nullptr) {
-        continue;
-      }
-      if (!loop->isIncluded(userInst)) {
-        continue;
-      }
-      if (isa<LoadInst>(userInst) || isa<StoreInst>(userInst)) {
-        return userInst;
-      }
-      if (auto *call = dyn_cast<CallInst>(userInst)) {
-        if (!call->isLifetimeStartOrEnd()) {
-          return call;
-        }
-      }
-      if ((isa<GetElementPtrInst>(userInst) || isa<BitCastInst>(userInst) ||
-           isa<AddrSpaceCastInst>(userInst)) &&
-          visited.insert(userInst).second) {
-        worklist.push(userInst);
-      }
-    }
-  }
-
-  return inst;
-}
-
 template <typename T> void eraseFirst(std::vector<T *> &values, T *needle) {
   auto it = std::find(values.begin(), values.end(), needle);
   if (it != values.end()) {
@@ -303,12 +254,6 @@ LoopDependenceGraph::LoopDependenceGraph(LoopTree *loopNode,
     this->fetchOrCreateNode(instruction, pdgNode, true);
   }
 
-  if (auto *function = loopStructure->getFunction()) {
-    for (auto &arg : function->args()) {
-      this->fetchOrCreateNode(&arg, nullptr, false);
-    }
-  }
-
   std::set<std::tuple<pdg::Node *, pdg::Node *, int>> seenEdges;
   for (auto *instruction : loopInstructions) {
     auto *pdgNode = this->pdg->getNode(*instruction);
@@ -332,48 +277,10 @@ LoopDependenceGraph::LoopDependenceGraph(LoopTree *loopNode,
     }
   }
 
-  std::queue<Instruction *> boundaryInstructions;
-  std::unordered_set<Instruction *> visitedBoundaryInstructions;
-  auto enqueueBoundaryInstruction = [&](Instruction *inst) -> void {
-    if (inst == nullptr || shouldIgnoreLoopInstruction(inst) ||
-        loopStructure->isIncluded(inst) ||
-        !visitedBoundaryInstructions.insert(inst).second) {
-      return;
-    }
-    boundaryInstructions.push(inst);
-  };
-
-  auto addControlDependence = [&](Value *srcValue, Value *dstValue) -> void {
-    if (!isAllowedBoundaryContextValue(srcValue) ||
-        !isAllowedBoundaryContextValue(dstValue)) {
-      return;
-    }
-
-    auto *srcPDGNode =
-        isa<Instruction>(srcValue) ? this->pdg->getNode(*srcValue) : nullptr;
-    auto *dstPDGNode =
-        isa<Instruction>(dstValue) ? this->pdg->getNode(*dstValue) : nullptr;
-    auto *srcNode = this->fetchOrCreateNode(
-        srcValue, srcPDGNode, isInternalToLoop(loopStructure, srcValue));
-    auto *dstNode = this->fetchOrCreateNode(
-        dstValue, dstPDGNode, isInternalToLoop(loopStructure, dstValue));
-
-    for (auto *edge : srcNode->getOutgoingEdges()) {
-      if (edge->getDst() == dstNode &&
-          edge->getKind() == LoopDependenceEdgeKind::Control) {
-        return;
-      }
-    }
-
-    auto ownedEdge = std::unique_ptr<LoopDependenceEdge>(new LoopDependenceEdge(
-        srcNode, dstNode, LoopDependenceEdgeKind::Control,
-        LoopDependenceMemoryKind::None, pdg::EdgeType::CONTROLDEP_BR, false));
-    auto *rawEdge = ownedEdge.get();
-    srcNode->outgoingEdges.push_back(rawEdge);
-    dstNode->incomingEdges.push_back(rawEdge);
-    this->ownedEdges.push_back(std::move(ownedEdge));
-  };
-
+  // Preserve direct operand-use relations at the loop layer. NOELLE's PDG
+  // already exposes these value-level dependences; Lotus's current PDG can
+  // miss some of them, especially for arguments and pointer-manipulation
+  // values that remain relevant to loop-local reasoning.
   for (auto *instruction : loopInstructions) {
     auto *dstNode = this->getNode(instruction);
     if (dstNode == nullptr) {
@@ -389,99 +296,7 @@ LoopDependenceGraph::LoopDependenceGraph(LoopTree *loopNode,
       if (!isAllowedBoundaryContextValue(value)) {
         continue;
       }
-
-      auto *pdgNode =
-          isa<Instruction>(value) ? this->pdg->getNode(*value) : nullptr;
-      auto *srcNode = this->fetchOrCreateNode(
-          value, pdgNode, isInternalToLoop(loopStructure, value));
-      if (auto *operandInst = dyn_cast<Instruction>(value)) {
-        enqueueBoundaryInstruction(operandInst);
-      }
-      bool alreadyImported = false;
-      for (auto *edge : srcNode->getOutgoingEdges()) {
-        if (edge->getDst() == dstNode &&
-            edge->getKind() == LoopDependenceEdgeKind::Variable) {
-          alreadyImported = true;
-          break;
-        }
-      }
-      if (alreadyImported) {
-        continue;
-      }
-
-      auto ownedEdge =
-          std::unique_ptr<LoopDependenceEdge>(new LoopDependenceEdge(
-              srcNode, dstNode, LoopDependenceEdgeKind::Variable,
-              LoopDependenceMemoryKind::None, pdg::EdgeType::DATA_DEF_USE,
-              false));
-      auto *rawEdge = ownedEdge.get();
-      srcNode->outgoingEdges.push_back(rawEdge);
-      dstNode->incomingEdges.push_back(rawEdge);
-      this->ownedEdges.push_back(std::move(ownedEdge));
-    }
-  }
-
-  if (auto *header = loopStructure->getHeader()) {
-    if (auto *headerBranch = dyn_cast<BranchInst>(header->getTerminator())) {
-      if (headerBranch->isConditional()) {
-        addControlDependence(headerBranch, headerBranch);
-        for (auto &inst : *header) {
-          if (&inst == headerBranch || shouldIgnoreLoopInstruction(&inst)) {
-            continue;
-          }
-          addControlDependence(headerBranch, &inst);
-        }
-      }
-    }
-  }
-
-  for (auto *instruction : loopInstructions) {
-    for (auto *user : instruction->users()) {
-      enqueueBoundaryInstruction(dyn_cast<Instruction>(user));
-    }
-  }
-
-  while (!boundaryInstructions.empty()) {
-    auto *instruction = boundaryInstructions.front();
-    boundaryInstructions.pop();
-    auto *pdgNode = this->pdg->getNode(*instruction);
-    this->fetchOrCreateNode(instruction, pdgNode, false);
-
-    for (auto *next = instruction->getNextNode(); next != nullptr;
-         next = next->getNextNode()) {
-      if (shouldIgnoreLoopInstruction(next)) {
-        continue;
-      }
-      if (!loopStructure->isIncluded(next)) {
-        enqueueBoundaryInstruction(next);
-      }
-      break;
-    }
-
-    for (auto &operandUse : instruction->operands()) {
-      auto *value = operandUse.get();
-      if (shouldIgnoreValue(value) ||
-          (isa<Constant>(value) && !isa<ConstantExpr>(value))) {
-        continue;
-      }
-      if (!isAllowedBoundaryContextValue(value)) {
-        continue;
-      }
       this->addVariableDependence(value, instruction);
-      if (auto *operandInst = dyn_cast<Instruction>(value)) {
-        enqueueBoundaryInstruction(operandInst);
-      }
-    }
-
-    for (auto *user : instruction->users()) {
-      auto *userInst = dyn_cast<Instruction>(user);
-      if (userInst == nullptr || shouldIgnoreLoopInstruction(userInst)) {
-        continue;
-      }
-      this->addVariableDependence(instruction, userInst);
-      if (!loopStructure->isIncluded(userInst)) {
-        enqueueBoundaryInstruction(userInst);
-      }
     }
   }
 }
@@ -784,25 +599,6 @@ void LoopDependenceGraph::importEdge(pdg::Edge *edge) {
   Value *srcValue = srcPDGNode ? srcPDGNode->getValue() : nullptr;
   Value *dstValue = dstPDGNode ? dstPDGNode->getValue() : nullptr;
   auto edgeKind = classifyEdgeKind(edge->getEdgeType());
-  if (edgeKind == LoopDependenceEdgeKind::Control) {
-    if (auto *dstBranch = dyn_cast_or_null<BranchInst>(dstValue)) {
-      if (!dstBranch->isConditional()) {
-        return;
-      }
-    }
-  }
-  if (edgeKind == LoopDependenceEdgeKind::Memory) {
-    if (auto *representative =
-            findMemoryAccessRepresentative(srcValue, loopStructure)) {
-      srcValue = representative;
-      srcPDGNode = this->pdg->getNode(*representative);
-    }
-    if (auto *representative =
-            findMemoryAccessRepresentative(dstValue, loopStructure)) {
-      dstValue = representative;
-      dstPDGNode = this->pdg->getNode(*representative);
-    }
-  }
   if (!isAllowedBoundaryContextValue(srcValue) ||
       !isAllowedBoundaryContextValue(dstValue)) {
     return;

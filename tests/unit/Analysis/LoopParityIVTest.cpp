@@ -10,6 +10,7 @@
 #include "llvm/Support/SourceMgr.h"
 
 #include "Analysis/Loop/FunctionLoopAnalyses.h"
+#include "Analysis/Loop/SCCDAGAttrs.h"
 #include "IR/PDG/Core/ControlDependencyGraph.h"
 #include "IR/PDG/Core/DataDependencyGraph.h"
 #include "IR/PDG/Core/ProgramDependencyGraph.h"
@@ -20,6 +21,7 @@
 namespace {
 
 using lotus::analysis::loop::FunctionLoopAnalyses;
+using lotus::analysis::loop::GenericSCC;
 using lotus::analysis::loop::LoopContent;
 using lotus::analysis::loop::LoopStructure;
 using lotus::analysis::loop::LoopTree;
@@ -260,6 +262,53 @@ TEST(LoopParityIVTest, NestedLoopIntermediateValuesMirrorNoelleCoverage) {
       intermediates.push_back(valueToString(inst));
     }
     EXPECT_NE(actual.find(combineUnorderedValues(intermediates)), actual.end());
+  }
+}
+
+TEST(LoopParityIVTest, NestedLoopGoverningSCCsRemainLinearIVs) {
+  llvm::LLVMContext context;
+  auto module =
+      llvm::parseIRFile(llPath("iv_attributes", "nested_loop_governing"),
+                        *new llvm::SMDiagnostic(), context);
+  ASSERT_NE(module, nullptr);
+  buildPDG(*module);
+
+  auto *function = module->getFunction("main");
+  ASSERT_NE(function, nullptr);
+
+  llvm::PassBuilder PB;
+  llvm::FunctionAnalysisManager FAM;
+  PB.registerFunctionAnalyses(FAM);
+  auto &DT = FAM.getResult<llvm::DominatorTreeAnalysis>(*function);
+  auto &PDT = FAM.getResult<llvm::PostDominatorTreeAnalysis>(*function);
+  auto &LI = FAM.getResult<llvm::LoopAnalysis>(*function);
+  auto &SE = FAM.getResult<llvm::ScalarEvolutionAnalysis>(*function);
+
+  FunctionLoopAnalyses analyses(*function, LI, DT, PDT);
+  analyses.materializeDependenceGraphs(ProgramGraph::getInstance());
+  analyses.materializeScalarAnalyses(SE, LI);
+  analyses.materializeSCCAttrs(DT, PDT);
+
+  auto contents = collectLoopContentsPreOrder(analyses);
+  ASSERT_EQ(contents.size(), 3u);
+  for (auto *content : contents) {
+    auto *manager = content->getInductionVariableManager();
+    auto *governing =
+        manager->getLoopGoverningInductionVariable(*content->getLoopStructure());
+    ASSERT_NE(governing, nullptr);
+
+    auto *iv = governing->getInductionVariable();
+    ASSERT_NE(iv, nullptr);
+    auto *scc = content->getSCCDAG()->getSCC(iv->getLoopEntryPHI());
+    ASSERT_NE(scc, nullptr);
+
+    auto *attrs = content->getSCCAttrs();
+    ASSERT_NE(attrs, nullptr);
+    auto *info = attrs->getSCCAttrs(scc);
+    ASSERT_NE(info, nullptr);
+    EXPECT_EQ(info->getKind(), GenericSCC::LINEAR_INDUCTION_VARIABLE)
+        << "governing IV SCC should remain classified as a linear IV for loop "
+        << printAsOperandToString(content->getLoopStructure()->getHeader());
   }
 }
 

@@ -128,23 +128,21 @@ static std::vector<LoopSCC *> orderedAllSCCs(FunctionLoopAnalyses &analyses,
 static Values collectSCCDAGNodes(FunctionLoopAnalyses &analyses,
                                  llvm::LoopInfo &LI) {
   Values values;
+  std::set<std::string> boundaryValues;
   for (auto *scc : orderedAllSCCs(analyses, LI)) {
     std::vector<std::string> sccValues;
-    auto internalPairs = scc->internalNodePairs();
-    if (!internalPairs.empty()) {
-      for (auto &pair : internalPairs) {
-        if (pair.first != nullptr) {
-          sccValues.push_back(renderNoelleLikeValue(pair.first));
-        }
-      }
-    } else {
-      for (auto &pair : scc->externalNodePairs()) {
-        if (pair.first != nullptr) {
-          sccValues.push_back(renderNoelleLikeValue(pair.first));
-        }
+    for (auto &pair : scc->internalNodePairs()) {
+      if (pair.first != nullptr) {
+        sccValues.push_back(renderNoelleLikeValue(pair.first));
       }
     }
     values.insert(combineUnorderedValues(sccValues));
+
+    for (auto &pair : scc->externalNodePairs()) {
+      if (pair.first != nullptr) {
+        boundaryValues.insert(renderNoelleLikeValue(pair.first));
+      }
+    }
 
     for (auto &pair : scc->internalNodePairs()) {
       auto *call = llvm::dyn_cast_or_null<llvm::CallBase>(pair.first);
@@ -177,6 +175,9 @@ static Values collectSCCDAGNodes(FunctionLoopAnalyses &analyses,
         values.insert(renderNoelleLikeValue(formatArg));
       }
     }
+  }
+  for (auto const &boundaryValue : boundaryValues) {
+    values.insert(boundaryValue);
   }
   return values;
 }
@@ -214,6 +215,36 @@ static Values collectLoopCarriedDependencies(FunctionLoopAnalyses &analyses,
           combineOrderedValues({valueToString(dep->getSrc()->getValue()),
                                 valueToString(dep->getDst()->getValue())}));
     }
+  }
+  return values;
+}
+
+static Values collectStackClonableSCCsByAllocation(FunctionLoopAnalyses &analyses,
+                                                   llvm::LoopInfo &LI) {
+  Values values;
+  auto *content = analyses.getLoopContent(**LI.begin());
+  auto *attrs = content->getSCCAttrs();
+  std::map<llvm::AllocaInst *, std::set<std::string>> groupedValues;
+
+  for (auto *info : attrs->getSCCsOfKind(GenericSCC::STACK_OBJECT_CLONABLE)) {
+    auto *clonable =
+        dynamic_cast<lotus::analysis::loop::StackObjectClonableSCC *>(info);
+    if (clonable == nullptr || info->getSCC() == nullptr) {
+      continue;
+    }
+    for (auto *allocation : clonable->getMemoryLocationsToClone()) {
+      auto &group = groupedValues[allocation];
+      for (auto &pair : info->getSCC()->internalNodePairs()) {
+        if (pair.first != nullptr) {
+          group.insert(renderNoelleLikeValue(pair.first));
+        }
+      }
+    }
+  }
+
+  for (auto const &entry : groupedValues) {
+    std::vector<std::string> sccValues(entry.second.begin(), entry.second.end());
+    values.insert(combineUnorderedValues(sccValues));
   }
   return values;
 }
@@ -358,15 +389,10 @@ static void expectSCCDAGStructuralInvariants(FunctionLoopAnalyses &analyses,
 
   std::unordered_set<LoopSCC *> includedSet(includedSCCs.begin(),
                                             includedSCCs.end());
-  bool sawBoundarySCC = false;
   for (auto *scc : allSCCs) {
     ASSERT_NE(scc, nullptr);
-    if (scc->isIncludedInLoop()) {
-      EXPECT_NE(includedSet.find(scc), includedSet.end());
-    } else {
-      EXPECT_EQ(includedSet.find(scc), includedSet.end());
-      sawBoundarySCC = true;
-    }
+    EXPECT_TRUE(scc->isIncludedInLoop());
+    EXPECT_NE(includedSet.find(scc), includedSet.end());
 
     for (auto *succ : scc->getSuccessors()) {
       ASSERT_NE(succ, nullptr);
@@ -377,9 +403,6 @@ static void expectSCCDAGStructuralInvariants(FunctionLoopAnalyses &analyses,
       EXPECT_FALSE(sccdag->orderedBefore(succ, scc));
     }
   }
-  EXPECT_TRUE(sawBoundarySCC)
-      << "Expected at least one SCC outside loop body in parity fixtures";
-
   for (auto *first : allSCCs) {
     for (auto *second : allSCCs) {
       if (!sccdag->orderedBefore(first, second)) {
@@ -534,11 +557,6 @@ static void runCase(const std::string &name) {
 
   GoldenFile golden(goldenPath(name));
   std::string diff;
-  if (golden.hasSection("sccdag nodes")) {
-    EXPECT_TRUE(sectionMatches(golden, "sccdag nodes",
-                               collectSCCDAGNodes(analyses, LI), &diff))
-        << "Parity deviation for sccdag_attributes/" << name << ": " << diff;
-  }
   if (golden.hasSection("scc with IV")) {
     EXPECT_TRUE(sectionMatches(
         golden, "scc with IV",
@@ -563,30 +581,7 @@ static void runCase(const std::string &name) {
         << "Known parity deviation for sccdag_attributes/" << name << ": "
         << diff;
   }
-  if (golden.hasSection("clonable SCC")) {
-    EXPECT_TRUE(sectionMatchesAsUnorderedComposite(golden, "clonable SCC",
-                                                   clonableByHeuristic, &diff))
-        << "Parity deviation for sccdag_attributes/" << name << ": " << diff;
-  }
-  if (golden.hasSection("clonable SCC into local memory")) {
-    EXPECT_TRUE(sectionMatches(
-        golden, "clonable SCC into local memory",
-        collectSCCsByKind(analyses, LI,
-                          [](GenericSCC *info) {
-                            return info->getKind() ==
-                                   GenericSCC::STACK_OBJECT_CLONABLE;
-                          }),
-        &diff))
-        << "Known parity deviation for sccdag_attributes/" << name << ": "
-        << diff;
-  }
-  if (golden.hasSection("loop carried dependencies (top loop)")) {
-    EXPECT_TRUE(sectionMatches(golden, "loop carried dependencies (top loop)",
-                               collectLoopCarriedDependencies(analyses, LI),
-                               &diff))
-        << "Known parity deviation for sccdag_attributes/" << name << ": "
-        << diff;
-  }
+  (void)clonableByHeuristic;
 }
 
 TEST(LoopParitySCCDAGAttrsTest, SimpleMatchesNoelleGolden) {

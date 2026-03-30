@@ -137,6 +137,15 @@ add_lotus_targeted_test(loop_classification_test
                    CanaryPDG
                    CanaryAliasAnalysisWrapper
                    LLVMAnalysis)
+add_lotus_targeted_test(loop_nesting_graph_test
+               LoopNestingGraphTest.cpp
+               LINK_LIBS
+                   CanaryLoopAnalysis
+                   CanaryCFG
+                   CanaryDebugInfo
+                   CanaryPDG
+                   CanaryAliasAnalysisWrapper
+                   LLVMAnalysis)
 add_lotus_targeted_test(loop_parity_iv_test
                LoopParityIVTest.cpp
                LINK_LIBS
