@@ -38,8 +38,7 @@ void LoopContent::buildEnvironment(const std::set<Value *> &excludeValues) {
   assert(this->dependenceGraph != nullptr);
   this->environment.reset(new LoopEnvironment(
       this->dependenceGraph.get(),
-      this->getLoopStructure()->getLoopExitBasicBlocks(),
-      excludeValues));
+      this->getLoopStructure()->getLoopExitBasicBlocks(), excludeValues));
 }
 
 void LoopContent::materializeEnvironment(void) {
@@ -52,12 +51,12 @@ void LoopContent::materializeEnvironment(void) {
 void LoopContent::materializeLoopCarriedDependencies(
     const noelle::DominatorSummary &DS) {
   assert(this->dependenceGraph != nullptr);
-  LoopCarriedDependencies::setLoopCarriedDependencies(
-      this->loop, DS, *this->dependenceGraph);
+  LoopCarriedDependencies::setLoopCarriedDependencies(this->loop, DS,
+                                                      *this->dependenceGraph);
 }
 
-bool LoopContent::canInstructionReachWithinSameIteration(Instruction *from,
-                                                         Instruction *to) const {
+bool LoopContent::canInstructionReachWithinSameIteration(
+    Instruction *from, Instruction *to) const {
   auto *loopStructure = this->getLoopStructure();
   if (loopStructure == nullptr || from == nullptr || to == nullptr) {
     return false;
@@ -109,7 +108,8 @@ void LoopContent::removeLoopCarriedDependencesProvedDisjoint(
 
   std::vector<LoopDependenceEdge *> edgesToRemove;
   for (auto *edge : this->dependenceGraph->getEdges()) {
-    if (!edge->isLoopCarried() || edge->getKind() != LoopDependenceEdgeKind::Memory) {
+    if (!edge->isLoopCarried() ||
+        edge->getKind() != LoopDependenceEdgeKind::Memory) {
       continue;
     }
 
@@ -121,8 +121,9 @@ void LoopContent::removeLoopCarriedDependencesProvedDisjoint(
     if (this->canInstructionReachWithinSameIteration(from, to)) {
       continue;
     }
-    if (!analysis.areInstructionsAccessingDisjointMemoryLocationsBetweenIterations(
-            from, to)) {
+    if (!analysis
+             .areInstructionsAccessingDisjointMemoryLocationsBetweenIterations(
+                 from, to)) {
       continue;
     }
 
@@ -136,13 +137,15 @@ void LoopContent::removeLoopCarriedDependencesProvedDisjoint(
 }
 
 void LoopContent::removeMemoryCloningNegatedDependences(void) {
-  if (this->dependenceGraph == nullptr || this->memoryCloningAnalysis == nullptr) {
+  if (this->dependenceGraph == nullptr ||
+      this->memoryCloningAnalysis == nullptr) {
     return;
   }
 
   std::vector<LoopDependenceEdge *> edgesToRemove;
   for (auto *edge : this->dependenceGraph->getEdges()) {
-    if (!edge->isLoopCarried() || edge->getKind() != LoopDependenceEdgeKind::Memory) {
+    if (!edge->isLoopCarried() ||
+        edge->getKind() != LoopDependenceEdgeKind::Memory) {
       continue;
     }
 
@@ -163,20 +166,23 @@ void LoopContent::removeMemoryCloningNegatedDependences(void) {
     bool removable = false;
     for (auto *locationProducer : locationsProducer) {
       for (auto *locationConsumer : locationsConsumer) {
-        if (locationProducer->getAllocation() != locationConsumer->getAllocation()) {
+        if (locationProducer->getAllocation() !=
+            locationConsumer->getAllocation()) {
           continue;
         }
-        bool producerTouchesMemory =
-            locationProducer->isInstructionStoringLocation(producer)
-            || locationProducer->isInstructionLoadingLocation(producer);
-        bool consumerTouchesMemory =
-            locationConsumer->isInstructionStoringLocation(consumer)
-            || locationConsumer->isInstructionLoadingLocation(consumer);
-        if (!producerTouchesMemory || !consumerTouchesMemory) {
-          continue;
-        }
-        if (locationProducer->isInstructionStoringLocation(producer)
-            || locationConsumer->isInstructionStoringLocation(consumer)) {
+        bool producerStores =
+            locationProducer->isInstructionStoringLocation(producer);
+        bool consumerStores =
+            locationConsumer->isInstructionStoringLocation(consumer);
+        bool producerLoads =
+            locationProducer->isInstructionLoadingLocation(producer);
+        bool consumerLoads =
+            locationConsumer->isInstructionLoadingLocation(consumer);
+
+        bool isRAW = producerStores && consumerLoads;
+        bool isWAR = producerLoads && consumerStores;
+        bool isWAW = producerStores && consumerStores;
+        if (isRAW || isWAR || isWAW) {
           removable = true;
           break;
         }
@@ -199,16 +205,16 @@ void LoopContent::removeMemoryCloningNegatedDependences(void) {
   }
 }
 
-void LoopContent::materializeScalarAnalyses(llvm::ScalarEvolution &SE,
-                                            llvm::LoopInfo &LI,
-                                            const noelle::DominatorSummary &DS) {
+void LoopContent::materializeScalarAnalyses(
+    llvm::ScalarEvolution &SE, llvm::LoopInfo &LI,
+    const noelle::DominatorSummary &DS) {
   assert(this->dependenceGraph != nullptr);
   assert(this->sccdag != nullptr);
 
   this->invalidateDerivedAnalyses();
 
-  LoopCarriedDependencies::setLoopCarriedDependencies(
-      this->loop, DS, *this->dependenceGraph);
+  LoopCarriedDependencies::setLoopCarriedDependencies(this->loop, DS,
+                                                      *this->dependenceGraph);
 
   InvariantManager temporaryInvariants(this->getLoopStructure(),
                                        this->dependenceGraph.get());
@@ -218,28 +224,26 @@ void LoopContent::materializeScalarAnalyses(llvm::ScalarEvolution &SE,
                                             /*includeMemory=*/false);
   auto temporaryIVSCCDAG =
       std::unique_ptr<LoopSCCDAG>(new LoopSCCDAG(*temporaryIVDependenceGraph));
-  LoopEnvironment temporaryEnvironment(this->dependenceGraph.get(),
-                                       this->getLoopStructure()->getLoopExitBasicBlocks());
+  LoopEnvironment temporaryEnvironment(
+      this->dependenceGraph.get(),
+      this->getLoopStructure()->getLoopExitBasicBlocks());
   auto temporaryIVs = std::unique_ptr<InductionVariableManager>(
-      new InductionVariableManager(this->loop,
-                                   temporaryInvariants,
-                                   SE,
-                                   LI,
-                                   *temporaryIVSCCDAG,
-                                   temporaryEnvironment));
-  LoopIterationSpaceAnalysis temporaryIterationSpace(
-      this->loop, *temporaryIVs, SE);
+      new InductionVariableManager(this->loop, temporaryInvariants, SE, LI,
+                                   *temporaryIVSCCDAG, temporaryEnvironment));
+  LoopIterationSpaceAnalysis temporaryIterationSpace(this->loop, *temporaryIVs,
+                                                     SE);
   this->removeLoopCarriedDependencesProvedDisjoint(temporaryIterationSpace);
 
-  LoopCarriedDependencies::setLoopCarriedDependencies(
-      this->loop, DS, *this->dependenceGraph);
+  LoopCarriedDependencies::setLoopCarriedDependencies(this->loop, DS,
+                                                      *this->dependenceGraph);
   this->memoryCloningAnalysis.reset(new MemoryCloningAnalysis(
       this->getLoopStructure(), const_cast<noelle::DominatorSummary &>(DS),
       this->dependenceGraph.get()));
 
   std::vector<Instruction *> clonableAccesses;
   for (auto *instruction : this->getLoopStructure()->getInstructions()) {
-    bool isMemoryTraffic = isa<LoadInst>(instruction) || isa<StoreInst>(instruction);
+    bool isMemoryTraffic =
+        isa<LoadInst>(instruction) || isa<StoreInst>(instruction);
     if (!isMemoryTraffic) {
       if (auto *callInst = dyn_cast<CallInst>(instruction)) {
         isMemoryTraffic = !callInst->isLifetimeStartOrEnd();
@@ -248,17 +252,20 @@ void LoopContent::materializeScalarAnalyses(llvm::ScalarEvolution &SE,
     if (!isMemoryTraffic) {
       continue;
     }
-    if (!this->memoryCloningAnalysis->getClonableMemoryObjectsFor(instruction).empty()) {
+    if (!this->memoryCloningAnalysis->getClonableMemoryObjectsFor(instruction)
+             .empty()) {
       clonableAccesses.push_back(instruction);
     }
   }
   for (auto *src : clonableAccesses) {
-    auto srcLocations = this->memoryCloningAnalysis->getClonableMemoryObjectsFor(src);
+    auto srcLocations =
+        this->memoryCloningAnalysis->getClonableMemoryObjectsFor(src);
     for (auto *dst : clonableAccesses) {
       if (src == dst) {
         continue;
       }
-      auto dstLocations = this->memoryCloningAnalysis->getClonableMemoryObjectsFor(dst);
+      auto dstLocations =
+          this->memoryCloningAnalysis->getClonableMemoryObjectsFor(dst);
       bool sharesLocation = false;
       for (auto *srcLocation : srcLocations) {
         for (auto *dstLocation : dstLocations) {
@@ -272,39 +279,42 @@ void LoopContent::materializeScalarAnalyses(llvm::ScalarEvolution &SE,
         }
       }
       if (sharesLocation) {
-        this->dependenceGraph->addVariableDependence(src, dst);
+        this->dependenceGraph->addVariableDependence(src, dst, true);
       }
     }
   }
+
   this->removeMemoryCloningNegatedDependences();
 
   this->rebuildSCCDAG();
-  LoopCarriedDependencies::setLoopCarriedDependencies(
-      this->loop, DS, *this->dependenceGraph);
+  LoopCarriedDependencies::setLoopCarriedDependencies(this->loop, DS,
+                                                      *this->dependenceGraph);
 
   std::set<Value *> excludeValues;
-  for (auto *memoryObject : this->memoryCloningAnalysis->getClonableMemoryObjects()) {
+  for (auto *memoryObject :
+       this->memoryCloningAnalysis->getClonableMemoryObjects()) {
     if (!memoryObject->doPrivateCopiesNeedToBeInitialized()) {
       excludeValues.insert(memoryObject->getAllocation());
     }
   }
   this->buildEnvironment(excludeValues);
 
-  this->invariantManager.reset(
-      new InvariantManager(this->getLoopStructure(), this->dependenceGraph.get()));
+  this->invariantManager.reset(new InvariantManager(
+      this->getLoopStructure(), this->dependenceGraph.get()));
   this->ivDependenceGraph =
       this->dependenceGraph->createSubgraph(/*includeControl=*/true,
                                             /*includeVariable=*/true,
                                             /*includeMemory=*/false);
   this->ivSCCDAG.reset(new LoopSCCDAG(*this->ivDependenceGraph));
-  this->inductionVariables.reset(new InductionVariableManager(
-      this->loop, *this->invariantManager, SE, LI, *this->ivSCCDAG, *this->environment));
+  this->inductionVariables.reset(
+      new InductionVariableManager(this->loop, *this->invariantManager, SE, LI,
+                                   *this->ivSCCDAG, *this->environment));
 }
 
 void LoopContent::materializeIterationSpaceAnalysis(llvm::ScalarEvolution &SE) {
   assert(this->inductionVariables != nullptr);
-  this->iterationSpaceAnalysis.reset(
-      new LoopIterationSpaceAnalysis(this->loop, *this->inductionVariables, SE));
+  this->iterationSpaceAnalysis.reset(new LoopIterationSpaceAnalysis(
+      this->loop, *this->inductionVariables, SE));
 }
 
 void LoopContent::materializeSCCAttrs(bool enableFloatAsReal,
@@ -316,12 +326,9 @@ void LoopContent::materializeSCCAttrs(bool enableFloatAsReal,
     this->memoryCloningAnalysis.reset(new MemoryCloningAnalysis(
         this->getLoopStructure(), DS, this->dependenceGraph.get()));
   }
-  this->sccAttrs.reset(new SCCDAGAttrs(enableFloatAsReal,
-                                       this->dependenceGraph.get(),
-                                       this->sccdag.get(),
-                                       this->loop,
-                                       *this->inductionVariables,
-                                       DS));
+  this->sccAttrs.reset(new SCCDAGAttrs(
+      enableFloatAsReal, this->dependenceGraph.get(), this->sccdag.get(),
+      this->loop, *this->inductionVariables, DS));
 }
 
 } // namespace loop

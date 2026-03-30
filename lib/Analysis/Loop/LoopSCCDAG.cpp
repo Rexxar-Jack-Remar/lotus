@@ -35,8 +35,7 @@ struct TarjanState {
   std::vector<LoopDependenceNode *> stack;
 };
 
-void strongConnect(LoopDependenceNode *node,
-                   TarjanState &state,
+void strongConnect(LoopDependenceNode *node, TarjanState &state,
                    std::vector<std::vector<LoopDependenceNode *>> &components) {
   state.index[node] = state.nextIndex;
   state.lowlink[node] = state.nextIndex;
@@ -73,8 +72,7 @@ void strongConnect(LoopDependenceNode *node,
     }
   }
 
-  std::sort(component.begin(),
-            component.end(),
+  std::sort(component.begin(), component.end(),
             [](LoopDependenceNode *lhs, LoopDependenceNode *rhs) {
               return lhs->getID() < rhs->getID();
             });
@@ -97,12 +95,9 @@ bool componentHasCycle(std::vector<LoopDependenceNode *> const &members) {
 
 } // namespace
 
-LoopSCC::LoopSCC(uint64_t id,
-                 std::vector<LoopDependenceNode *> members,
+LoopSCC::LoopSCC(uint64_t id, std::vector<LoopDependenceNode *> members,
                  bool hasCycle)
-    : id{id},
-      internalNodes{std::move(members)},
-      externalNodes{},
+    : id{id}, internalNodes{std::move(members)}, externalNodes{},
       cycle{hasCycle} {}
 
 uint64_t LoopSCC::getID(void) const { return this->id; }
@@ -112,8 +107,10 @@ bool LoopSCC::hasCycle(void) const { return this->cycle; }
 std::vector<LoopDependenceNode *> LoopSCC::getNodes(void) const {
   std::vector<LoopDependenceNode *> nodes;
   nodes.reserve(this->internalNodes.size() + this->externalNodes.size());
-  nodes.insert(nodes.end(), this->internalNodes.begin(), this->internalNodes.end());
-  nodes.insert(nodes.end(), this->externalNodes.begin(), this->externalNodes.end());
+  nodes.insert(nodes.end(), this->internalNodes.begin(),
+               this->internalNodes.end());
+  nodes.insert(nodes.end(), this->externalNodes.begin(),
+               this->externalNodes.end());
   return nodes;
 }
 
@@ -134,10 +131,12 @@ std::vector<LoopDependenceEdge *> LoopSCC::getEdges(void) const {
       if (dst == nullptr) {
         continue;
       }
-      bool srcInside = std::find(this->internalNodes.begin(), this->internalNodes.end(), node)
-                       != this->internalNodes.end();
-      bool dstInside = std::find(this->internalNodes.begin(), this->internalNodes.end(), dst)
-                       != this->internalNodes.end();
+      bool srcInside =
+          std::find(this->internalNodes.begin(), this->internalNodes.end(),
+                    node) != this->internalNodes.end();
+      bool dstInside =
+          std::find(this->internalNodes.begin(), this->internalNodes.end(),
+                    dst) != this->internalNodes.end();
       if (srcInside && dstInside && seen.insert(edge).second) {
         edges.push_back(edge);
       }
@@ -146,7 +145,8 @@ std::vector<LoopDependenceEdge *> LoopSCC::getEdges(void) const {
   return edges;
 }
 
-std::vector<std::pair<Value *, LoopDependenceNode *>> LoopSCC::internalNodePairs(void) const {
+std::vector<std::pair<Value *, LoopDependenceNode *>>
+LoopSCC::internalNodePairs(void) const {
   std::vector<std::pair<Value *, LoopDependenceNode *>> pairs;
   for (auto *node : this->internalNodes) {
     pairs.emplace_back(node->getValue(), node);
@@ -154,7 +154,8 @@ std::vector<std::pair<Value *, LoopDependenceNode *>> LoopSCC::internalNodePairs
   return pairs;
 }
 
-std::vector<std::pair<Value *, LoopDependenceNode *>> LoopSCC::externalNodePairs(void) const {
+std::vector<std::pair<Value *, LoopDependenceNode *>>
+LoopSCC::externalNodePairs(void) const {
   std::vector<std::pair<Value *, LoopDependenceNode *>> pairs;
   for (auto *node : this->externalNodes) {
     pairs.emplace_back(node->getValue(), node);
@@ -253,8 +254,7 @@ LoopSCCDAG::LoopSCCDAG(LoopDependenceGraph &graph) : graph{&graph} {
   std::vector<std::vector<LoopDependenceNode *>> components;
 
   this->nodes = graph.getInternalNodes();
-  std::sort(this->nodes.begin(),
-            this->nodes.end(),
+  std::sort(this->nodes.begin(), this->nodes.end(),
             [](LoopDependenceNode *lhs, LoopDependenceNode *rhs) {
               return lhs->getID() < rhs->getID();
             });
@@ -265,18 +265,15 @@ LoopSCCDAG::LoopSCCDAG(LoopDependenceGraph &graph) : graph{&graph} {
     }
   }
 
-  std::sort(components.begin(),
-            components.end(),
+  std::sort(components.begin(), components.end(),
             [](std::vector<LoopDependenceNode *> const &lhs,
                std::vector<LoopDependenceNode *> const &rhs) {
               return lhs.front()->getID() < rhs.front()->getID();
             });
 
   for (auto &component : components) {
-    auto owned =
-        std::unique_ptr<LoopSCC>(new LoopSCC(this->ownedSCCs.size(),
-                                             component,
-                                             componentHasCycle(component)));
+    auto owned = std::unique_ptr<LoopSCC>(new LoopSCC(
+        this->ownedSCCs.size(), component, componentHasCycle(component)));
     auto *raw = owned.get();
     this->ownedSCCs.push_back(std::move(owned));
     for (auto *node : raw->internalNodes) {
@@ -312,30 +309,27 @@ LoopSCCDAG::LoopSCCDAG(LoopDependenceGraph &graph) : graph{&graph} {
       }
     }
 
-    std::sort(scc->externalNodes.begin(),
-              scc->externalNodes.end(),
+    std::sort(scc->externalNodes.begin(), scc->externalNodes.end(),
               [](LoopDependenceNode *lhs, LoopDependenceNode *rhs) {
                 return lhs->getID() < rhs->getID();
               });
   }
 
   std::vector<LoopDependenceNode *> externalNodes = graph.getExternalNodes();
-  std::sort(externalNodes.begin(),
-            externalNodes.end(),
+  std::sort(externalNodes.begin(), externalNodes.end(),
             [](LoopDependenceNode *lhs, LoopDependenceNode *rhs) {
               return lhs->getID() < rhs->getID();
             });
   for (auto *node : externalNodes) {
-    auto owned = std::unique_ptr<LoopSCC>(
-        new LoopSCC(this->ownedSCCs.size() + this->ownedExternalSCCs.size(),
-                    {},
-                    false));
+    auto owned = std::unique_ptr<LoopSCC>(new LoopSCC(
+        this->ownedSCCs.size() + this->ownedExternalSCCs.size(), {}, false));
     auto *raw = owned.get();
     raw->externalNodes.push_back(node);
     this->ownedExternalSCCs.push_back(std::move(owned));
     this->sccByNode[node] = raw;
     auto *value = node->getValue();
-    if (value != nullptr && this->sccByValue.find(value) == this->sccByValue.end()) {
+    if (value != nullptr &&
+        this->sccByValue.find(value) == this->sccByValue.end()) {
       this->sccByValue[value] = raw;
     }
   }
@@ -370,12 +364,12 @@ LoopSCCDAG::LoopSCCDAG(LoopDependenceGraph &graph) : graph{&graph} {
   }
 
   for (auto &ownedSCC : this->ownedSCCs) {
-    std::sort(ownedSCC->predecessors.begin(),
-              ownedSCC->predecessors.end(),
-              [](LoopSCC *lhs, LoopSCC *rhs) { return lhs->getID() < rhs->getID(); });
-    std::sort(ownedSCC->successors.begin(),
-              ownedSCC->successors.end(),
-              [](LoopSCC *lhs, LoopSCC *rhs) { return lhs->getID() < rhs->getID(); });
+    std::sort(
+        ownedSCC->predecessors.begin(), ownedSCC->predecessors.end(),
+        [](LoopSCC *lhs, LoopSCC *rhs) { return lhs->getID() < rhs->getID(); });
+    std::sort(
+        ownedSCC->successors.begin(), ownedSCC->successors.end(),
+        [](LoopSCC *lhs, LoopSCC *rhs) { return lhs->getID() < rhs->getID(); });
   }
   this->computeReachabilityAmongSCCs();
 }
@@ -384,7 +378,7 @@ LoopDependenceGraph *LoopSCCDAG::getLoopDependenceGraph(void) const {
   return this->graph;
 }
 
-  std::vector<LoopSCC *> LoopSCCDAG::getSCCs(void) const {
+std::vector<LoopSCC *> LoopSCCDAG::getSCCs(void) const {
   std::vector<LoopSCC *> sccs;
   sccs.reserve(this->ownedSCCs.size());
   for (auto const &owned : this->ownedSCCs) {
@@ -416,7 +410,8 @@ LoopSCC *LoopSCCDAG::getSCC(Value *value) const {
   return it->second;
 }
 
-bool LoopSCCDAG::orderedBefore(const LoopSCC *early, const LoopSCC *late) const {
+bool LoopSCCDAG::orderedBefore(const LoopSCC *early,
+                               const LoopSCC *late) const {
   auto it = this->reachableSCCs.find(early);
   if (it == this->reachableSCCs.end()) {
     return false;

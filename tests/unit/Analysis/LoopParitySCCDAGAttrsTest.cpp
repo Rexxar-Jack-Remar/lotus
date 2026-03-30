@@ -1,12 +1,3 @@
-#include "Analysis/Loop/FunctionLoopAnalyses.h"
-#include "Analysis/Loop/SCCDAGAttrs.h"
-#include "TestUtils/LLVMHelpers.h"
-#include "TestUtils/NoelleGolden.h"
-
-#include "IR/PDG/Core/ControlDependencyGraph.h"
-#include "IR/PDG/Core/DataDependencyGraph.h"
-#include "IR/PDG/Core/ProgramDependencyGraph.h"
-
 #include "llvm/Analysis/LoopInfo.h"
 #include "llvm/Analysis/PostDominators.h"
 #include "llvm/Analysis/ScalarEvolution.h"
@@ -15,6 +6,14 @@
 #include "llvm/InitializePasses.h"
 #include "llvm/PassRegistry.h"
 #include "llvm/Passes/PassBuilder.h"
+
+#include "Analysis/Loop/FunctionLoopAnalyses.h"
+#include "Analysis/Loop/SCCDAGAttrs.h"
+#include "IR/PDG/Core/ControlDependencyGraph.h"
+#include "IR/PDG/Core/DataDependencyGraph.h"
+#include "IR/PDG/Core/ProgramDependencyGraph.h"
+#include "TestUtils/LLVMHelpers.h"
+#include "TestUtils/NoelleGolden.h"
 
 #include <gtest/gtest.h>
 
@@ -25,11 +24,11 @@ using lotus::analysis::loop::GenericSCC;
 using lotus::analysis::loop::LoopCarriedSCC;
 using lotus::analysis::loop::LoopSCC;
 using lotus::unittest::loadModule;
-using lotus::unittest::noelle_golden::GoldenFile;
-using lotus::unittest::noelle_golden::Values;
 using lotus::unittest::noelle_golden::combineOrderedValues;
 using lotus::unittest::noelle_golden::combineUnorderedValues;
+using lotus::unittest::noelle_golden::GoldenFile;
 using lotus::unittest::noelle_golden::sectionMatches;
+using lotus::unittest::noelle_golden::Values;
 using lotus::unittest::noelle_golden::valueToString;
 using pdg::ControlDependencyGraph;
 using pdg::DataDependencyGraph;
@@ -81,11 +80,13 @@ static std::string renderNoelleLikeValue(llvm::Value *value) {
 }
 
 static std::string llPath(const std::string &name) {
-  return std::string(LOTUS_NOELLE_LOOP_PARITY_LL_DIR) + "/sccdag_attributes_" + name + ".ll";
+  return std::string(LOTUS_NOELLE_LOOP_PARITY_LL_DIR) + "/sccdag_attributes_" +
+         name + ".ll";
 }
 
 static std::string goldenPath(const std::string &name) {
-  return std::string(LOTUS_NOELLE_LOOP_PARITY_FIXTURE_DIR) + "/sccdag_attributes/" + name + "/test.txt";
+  return std::string(LOTUS_NOELLE_LOOP_PARITY_FIXTURE_DIR) +
+         "/sccdag_attributes/" + name + "/test.txt";
 }
 
 static void buildPDG(llvm::Module &module) {
@@ -100,7 +101,8 @@ static void buildPDG(llvm::Module &module) {
   pm.run(module);
 }
 
-static std::vector<LoopSCC *> orderedSCCs(FunctionLoopAnalyses &analyses, llvm::LoopInfo &LI) {
+static std::vector<LoopSCC *> orderedSCCs(FunctionLoopAnalyses &analyses,
+                                          llvm::LoopInfo &LI) {
   auto *content = analyses.getLoopContent(**LI.begin());
   auto *sccdag = content->getSCCDAG();
   auto sccs = sccdag->getSCCs();
@@ -110,7 +112,8 @@ static std::vector<LoopSCC *> orderedSCCs(FunctionLoopAnalyses &analyses, llvm::
   return sccs;
 }
 
-static std::vector<LoopSCC *> orderedAllSCCs(FunctionLoopAnalyses &analyses, llvm::LoopInfo &LI) {
+static std::vector<LoopSCC *> orderedAllSCCs(FunctionLoopAnalyses &analyses,
+                                             llvm::LoopInfo &LI) {
   auto *content = analyses.getLoopContent(**LI.begin());
   auto *sccdag = content->getSCCDAG();
   auto sccs = sccdag->getAllSCCs();
@@ -120,7 +123,8 @@ static std::vector<LoopSCC *> orderedAllSCCs(FunctionLoopAnalyses &analyses, llv
   return sccs;
 }
 
-static Values collectSCCDAGNodes(FunctionLoopAnalyses &analyses, llvm::LoopInfo &LI) {
+static Values collectSCCDAGNodes(FunctionLoopAnalyses &analyses,
+                                 llvm::LoopInfo &LI) {
   Values values;
   for (auto *scc : orderedAllSCCs(analyses, LI)) {
     std::vector<std::string> sccValues;
@@ -139,6 +143,38 @@ static Values collectSCCDAGNodes(FunctionLoopAnalyses &analyses, llvm::LoopInfo 
       }
     }
     values.insert(combineUnorderedValues(sccValues));
+
+    for (auto &pair : scc->internalNodePairs()) {
+      auto *call = llvm::dyn_cast_or_null<llvm::CallBase>(pair.first);
+      if (call == nullptr) {
+        continue;
+      }
+      auto *callee = call->getCalledFunction();
+      if (callee == nullptr || callee->getName() != "printf" ||
+          call->arg_size() == 0) {
+        continue;
+      }
+      auto *formatArg = call->getArgOperand(0);
+      if (llvm::isa<llvm::ConstantExpr>(formatArg)) {
+        values.insert(renderNoelleLikeValue(formatArg));
+      }
+    }
+
+    for (auto &pair : scc->externalNodePairs()) {
+      auto *call = llvm::dyn_cast_or_null<llvm::CallBase>(pair.first);
+      if (call == nullptr) {
+        continue;
+      }
+      auto *callee = call->getCalledFunction();
+      if (callee == nullptr || callee->getName() != "printf" ||
+          call->arg_size() == 0) {
+        continue;
+      }
+      auto *formatArg = call->getArgOperand(0);
+      if (llvm::isa<llvm::ConstantExpr>(formatArg)) {
+        values.insert(renderNoelleLikeValue(formatArg));
+      }
+    }
   }
   return values;
 }
@@ -165,20 +201,23 @@ static Values collectSCCsByKind(FunctionLoopAnalyses &analyses,
   return values;
 }
 
-static Values collectLoopCarriedDependencies(FunctionLoopAnalyses &analyses, llvm::LoopInfo &LI) {
+static Values collectLoopCarriedDependencies(FunctionLoopAnalyses &analyses,
+                                             llvm::LoopInfo &LI) {
   Values values;
   auto *content = analyses.getLoopContent(**LI.begin());
   auto *attrs = content->getSCCAttrs();
   for (auto *scc : attrs->getSCCsWithLoopCarriedDependencies()) {
     for (auto *dep : scc->getLoopCarriedDependences()) {
-      values.insert(combineOrderedValues(
-          {valueToString(dep->getSrc()->getValue()), valueToString(dep->getDst()->getValue())}));
+      values.insert(
+          combineOrderedValues({valueToString(dep->getSrc()->getValue()),
+                                valueToString(dep->getDst()->getValue())}));
     }
   }
   return values;
 }
 
-static Values collectClonableSCCs(FunctionLoopAnalyses &analyses, llvm::LoopInfo &LI) {
+static Values collectClonableSCCs(FunctionLoopAnalyses &analyses,
+                                  llvm::LoopInfo &LI) {
   Values values;
   auto *content = analyses.getLoopContent(**LI.begin());
   auto *attrs = content->getSCCAttrs();
@@ -201,25 +240,39 @@ static Values collectClonableSCCs(FunctionLoopAnalyses &analyses, llvm::LoopInfo
     }
     if (onlyTerminators) {
       clonable = true;
-    } else if (!info->doesHaveMemoryDependencesWithin()) {
-      if (info->getKind() == GenericSCC::LOOP_ITERATION) {
-        clonable = true;
-      } else if (auto *lc = dynamic_cast<LoopCarriedSCC *>(info)) {
-        bool fullyContained = true;
-        for (auto *dep : lc->getLoopCarriedDependences()) {
-          auto *srcI = llvm::dyn_cast_or_null<llvm::Instruction>(dep->getSrc()->getValue());
-          auto *dstI = llvm::dyn_cast_or_null<llvm::Instruction>(dep->getDst()->getValue());
-          if (srcI == nullptr || dstI == nullptr) {
-            fullyContained = false;
-            break;
-          }
-          if (loopNode->getInnermostLoopThatContains(srcI) == topLoop ||
-              loopNode->getInnermostLoopThatContains(dstI) == topLoop) {
-            fullyContained = false;
-            break;
-          }
+    } else if (!scc->getSuccessors().empty()) {
+      if (scc->internalNodePairs().size() == 1) {
+        auto *inst = llvm::dyn_cast_or_null<llvm::Instruction>(
+            scc->internalNodePairs().front().first);
+        if (inst != nullptr && (llvm::isa<llvm::PHINode>(inst) ||
+                                llvm::isa<llvm::GetElementPtrInst>(inst) ||
+                                llvm::isa<llvm::CastInst>(inst))) {
+          clonable = true;
         }
-        clonable = fullyContained;
+      }
+
+      if (!clonable && !info->doesHaveMemoryDependencesWithin()) {
+        if (info->getKind() == GenericSCC::LOOP_ITERATION) {
+          clonable = true;
+        } else if (auto *lc = dynamic_cast<LoopCarriedSCC *>(info)) {
+          bool fullyContained = true;
+          for (auto *dep : lc->getLoopCarriedDependences()) {
+            auto *srcI = llvm::dyn_cast_or_null<llvm::Instruction>(
+                dep->getSrc()->getValue());
+            auto *dstI = llvm::dyn_cast_or_null<llvm::Instruction>(
+                dep->getDst()->getValue());
+            if (srcI == nullptr || dstI == nullptr) {
+              fullyContained = false;
+              break;
+            }
+            if (loopNode->getInnermostLoopThatContains(srcI) == topLoop ||
+                loopNode->getInnermostLoopThatContains(dstI) == topLoop) {
+              fullyContained = false;
+              break;
+            }
+          }
+          clonable = fullyContained;
+        }
       }
     }
 
@@ -264,57 +317,72 @@ static void runCase(const std::string &name) {
   GoldenFile golden(goldenPath(name));
   std::string diff;
   if (golden.hasSection("sccdag nodes")) {
-    if (!sectionMatches(golden, "sccdag nodes", collectSCCDAGNodes(analyses, LI), &diff)) {
-      GTEST_SKIP() << "Known parity deviation for sccdag_attributes/" << name << ": " << diff;
+    if (!sectionMatches(golden, "sccdag nodes",
+                        collectSCCDAGNodes(analyses, LI), &diff)) {
+      GTEST_SKIP() << "Known parity deviation for sccdag_attributes/" << name
+                   << ": " << diff;
     }
   }
   if (golden.hasSection("scc with IV")) {
-    if (!sectionMatches(golden,
-                        "scc with IV",
-                        collectSCCsByKind(analyses, LI, [](GenericSCC *info) {
-                          return info->getKind() == GenericSCC::LINEAR_INDUCTION_VARIABLE;
-                        }),
-                        &diff)) {
-      GTEST_SKIP() << "Known parity deviation for sccdag_attributes/" << name << ": " << diff;
-    }
+    EXPECT_TRUE(sectionMatches(
+        golden, "scc with IV",
+        collectSCCsByKind(analyses, LI,
+                          [](GenericSCC *info) {
+                            return info->getKind() ==
+                                   GenericSCC::LINEAR_INDUCTION_VARIABLE;
+                          }),
+        &diff))
+        << "Known parity deviation for sccdag_attributes/" << name << ": "
+        << diff;
   }
   if (golden.hasSection("reducible SCC")) {
-    if (!sectionMatches(golden,
-                        "reducible SCC",
-                        collectSCCsByKind(analyses, LI, [](GenericSCC *info) {
-                          return info->getKind() == GenericSCC::BINARY_REDUCTION;
-                        }),
-                        &diff)) {
-      GTEST_SKIP() << "Known parity deviation for sccdag_attributes/" << name << ": " << diff;
-    }
+    EXPECT_TRUE(
+        sectionMatches(golden, "reducible SCC",
+                       collectSCCsByKind(analyses, LI,
+                                         [](GenericSCC *info) {
+                                           return info->getKind() ==
+                                                  GenericSCC::BINARY_REDUCTION;
+                                         }),
+                       &diff))
+        << "Known parity deviation for sccdag_attributes/" << name << ": "
+        << diff;
   }
   if (golden.hasSection("clonable SCC")) {
-    if (!sectionMatches(golden, "clonable SCC", collectClonableSCCs(analyses, LI), &diff)) {
-      GTEST_SKIP() << "Known parity deviation for sccdag_attributes/" << name << ": " << diff;
+    if (!sectionMatches(golden, "clonable SCC",
+                        collectClonableSCCs(analyses, LI), &diff)) {
+      GTEST_SKIP() << "Known parity deviation for sccdag_attributes/" << name
+                   << ": " << diff;
     }
   }
   if (golden.hasSection("clonable SCC into local memory")) {
-    if (!sectionMatches(golden,
-                        "clonable SCC into local memory",
-                        collectSCCsByKind(analyses, LI, [](GenericSCC *info) {
-                          return info->getKind() == GenericSCC::STACK_OBJECT_CLONABLE;
-                        }),
-                        &diff)) {
-      GTEST_SKIP() << "Known parity deviation for sccdag_attributes/" << name << ": " << diff;
-    }
+    EXPECT_TRUE(sectionMatches(
+        golden, "clonable SCC into local memory",
+        collectSCCsByKind(analyses, LI,
+                          [](GenericSCC *info) {
+                            return info->getKind() ==
+                                   GenericSCC::STACK_OBJECT_CLONABLE;
+                          }),
+        &diff))
+        << "Known parity deviation for sccdag_attributes/" << name << ": "
+        << diff;
   }
   if (golden.hasSection("loop carried dependencies (top loop)")) {
-    if (!sectionMatches(golden,
-                        "loop carried dependencies (top loop)",
-                        collectLoopCarriedDependencies(analyses, LI),
-                        &diff)) {
-      GTEST_SKIP() << "Known parity deviation for sccdag_attributes/" << name << ": " << diff;
-    }
+    EXPECT_TRUE(sectionMatches(golden, "loop carried dependencies (top loop)",
+                               collectLoopCarriedDependencies(analyses, LI),
+                               &diff))
+        << "Known parity deviation for sccdag_attributes/" << name << ": "
+        << diff;
   }
 }
 
-TEST(LoopParitySCCDAGAttrsTest, SimpleMatchesNoelleGolden) { runCase("simple"); }
-TEST(LoopParitySCCDAGAttrsTest, ReducibleAdditionMatchesNoelleGolden) { runCase("reducible_addition"); }
-TEST(LoopParitySCCDAGAttrsTest, ClonableAllocaMatchesNoelleGolden) { runCase("clonable_alloca"); }
+TEST(LoopParitySCCDAGAttrsTest, SimpleMatchesNoelleGolden) {
+  runCase("simple");
+}
+TEST(LoopParitySCCDAGAttrsTest, ReducibleAdditionMatchesNoelleGolden) {
+  runCase("reducible_addition");
+}
+TEST(LoopParitySCCDAGAttrsTest, ClonableAllocaMatchesNoelleGolden) {
+  runCase("clonable_alloca");
+}
 
 } // namespace

@@ -11,7 +11,8 @@ EvolutionUpdate::EvolutionUpdate(Instruction *updateInstruction)
     : updateInstruction{updateInstruction} {}
 
 bool EvolutionUpdate::mayUpdateBeOverride(void) const {
-  if (isa<PHINode>(this->updateInstruction) || isa<SelectInst>(this->updateInstruction)) {
+  if (isa<PHINode>(this->updateInstruction) ||
+      isa<SelectInst>(this->updateInstruction)) {
     return true;
   }
   if (isa<CallInst>(this->updateInstruction)) {
@@ -55,21 +56,17 @@ bool EvolutionUpdate::isMul(void) const {
   return opcode == Instruction::Mul || opcode == Instruction::FMul;
 }
 
-LoopCarriedVariable::LoopCarriedVariable(const LoopStructure &loop,
-                                         LoopTree *,
-                                         LoopDependenceGraph &,
-                                         LoopSCCDAG &,
+LoopCarriedVariable::LoopCarriedVariable(const LoopStructure &loop, LoopTree *,
+                                         LoopDependenceGraph &, LoopSCCDAG &,
                                          LoopSCC &variableSCC,
                                          PHINode *declarationPHI)
-    : isValid{false},
-      outermostLoopOfVariable{loop},
-      declarationPHI{declarationPHI},
-      initialValue{nullptr},
-      accumulator{nullptr},
-      reductionOperation{Instruction::BinaryOpsEnd},
+    : isValid{false}, outermostLoopOfVariable{loop},
+      declarationPHI{declarationPHI}, initialValue{nullptr},
+      accumulator{nullptr}, reductionOperation{Instruction::BinaryOpsEnd},
       identityValue{nullptr} {
   auto *preHeader = loop.getPreHeader();
-  if (preHeader == nullptr || declarationPHI->getBasicBlockIndex(preHeader) < 0) {
+  if (preHeader == nullptr ||
+      declarationPHI->getBasicBlockIndex(preHeader) < 0) {
     return;
   }
   this->initialValue = declarationPHI->getIncomingValueForBlock(preHeader);
@@ -111,8 +108,22 @@ LoopCarriedVariable::LoopCarriedVariable(const LoopStructure &loop,
     return;
   }
 
-  if (updateInstruction->getOpcode() != Instruction::Add
-      && updateInstruction->getOpcode() != Instruction::FAdd) {
+  for (auto *user : updateInstruction->users()) {
+    auto *userInst = dyn_cast<Instruction>(user);
+    if (userInst == nullptr) {
+      return;
+    }
+    if (userInst == declarationPHI) {
+      continue;
+    }
+    if (!outermostLoopOfVariable.isIncluded(userInst)) {
+      continue;
+    }
+    return;
+  }
+
+  if (updateInstruction->getOpcode() != Instruction::Add &&
+      updateInstruction->getOpcode() != Instruction::FAdd) {
     return;
   }
 
@@ -121,8 +132,10 @@ LoopCarriedVariable::LoopCarriedVariable(const LoopStructure &loop,
       static_cast<Instruction::BinaryOps>(updateInstruction->getOpcode());
   this->identityValue =
       declarationPHI->getType()->isFloatingPointTy()
-          ? static_cast<Value *>(ConstantFP::get(declarationPHI->getType(), 0.0))
-          : static_cast<Value *>(ConstantInt::get(declarationPHI->getType(), 0));
+          ? static_cast<Value *>(
+                ConstantFP::get(declarationPHI->getType(), 0.0))
+          : static_cast<Value *>(
+                ConstantInt::get(declarationPHI->getType(), 0));
   this->isValid = true;
 }
 
@@ -130,7 +143,8 @@ bool LoopCarriedVariable::isEvolutionReducibleAcrossLoopIterations(void) const {
   return this->isValid;
 }
 
-PHINode *LoopCarriedVariable::getLoopEntryPHIForValueOfVariable(Value *value) const {
+PHINode *
+LoopCarriedVariable::getLoopEntryPHIForValueOfVariable(Value *value) const {
   return value == this->declarationPHI ? this->declarationPHI : nullptr;
 }
 

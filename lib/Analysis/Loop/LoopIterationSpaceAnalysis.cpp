@@ -81,7 +81,6 @@ bool LoopIterationSpaceAnalysis::
       return true;
     }
   }
-
   return false;
 }
 

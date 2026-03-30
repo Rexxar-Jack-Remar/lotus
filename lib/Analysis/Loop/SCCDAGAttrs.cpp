@@ -35,165 +35,141 @@ GenericSCC::GenericSCC(SCCKind K, LoopSCC *s, LoopStructure *loop)
 
 LoopSCC *GenericSCC::getSCC(void) const { return this->scc; }
 GenericSCC::SCCKind GenericSCC::getKind(void) const { return this->kind; }
-bool GenericSCC::doesHaveMemoryDependencesWithin(void) const { return this->hasMemoryDependences; }
+bool GenericSCC::doesHaveMemoryDependencesWithin(void) const {
+  return this->hasMemoryDependences;
+}
 std::set<PHINode *> GenericSCC::getPHIs(void) const { return this->PHINodes; }
 
 LoopIterationSCC::LoopIterationSCC(LoopSCC *s, LoopStructure *loop)
     : GenericSCC(LOOP_ITERATION, s, loop) {}
 
-LoopCarriedSCC::LoopCarriedSCC(SCCKind K,
-                               LoopSCC *s,
-                               LoopStructure *loop,
-                               const std::set<LoopDependenceEdge *> &loopCarriedDependences,
-                               bool commutative)
-    : GenericSCC(K, s, loop), lcDeps{loopCarriedDependences}, commutative{commutative} {}
+LoopCarriedSCC::LoopCarriedSCC(
+    SCCKind K, LoopSCC *s, LoopStructure *loop,
+    const std::set<LoopDependenceEdge *> &loopCarriedDependences,
+    bool commutative)
+    : GenericSCC(K, s, loop), lcDeps{loopCarriedDependences},
+      commutative{commutative} {}
 
-std::set<LoopDependenceEdge *> LoopCarriedSCC::getLoopCarriedDependences(void) const {
+std::set<LoopDependenceEdge *>
+LoopCarriedSCC::getLoopCarriedDependences(void) const {
   return this->lcDeps;
 }
 bool LoopCarriedSCC::isCommutative(void) const { return this->commutative; }
 
-ReductionSCC::ReductionSCC(SCCKind K,
-                           LoopSCC *s,
-                           LoopStructure *loop,
-                           const std::set<LoopDependenceEdge *> &loopCarriedDependences,
-                           Value *initialValue,
-                           PHINode *accumulator,
-                           Value *identity)
+ReductionSCC::ReductionSCC(
+    SCCKind K, LoopSCC *s, LoopStructure *loop,
+    const std::set<LoopDependenceEdge *> &loopCarriedDependences,
+    Value *initialValue, PHINode *accumulator, Value *identity)
     : LoopCarriedSCC(K, s, loop, loopCarriedDependences, true),
-      initialValue{initialValue},
-      accumulator{accumulator},
-      identity{identity} {}
+      initialValue{initialValue}, accumulator{accumulator}, identity{identity} {
+}
 Value *ReductionSCC::getInitialValue(void) const { return this->initialValue; }
 Value *ReductionSCC::getIdentityValue(void) const { return this->identity; }
-PHINode *ReductionSCC::getPhiThatAccumulatesValuesBetweenLoopIterations(void) const {
+PHINode *
+ReductionSCC::getPhiThatAccumulatesValuesBetweenLoopIterations(void) const {
   return this->accumulator;
 }
 
-BinaryReductionSCC::BinaryReductionSCC(LoopSCC *s,
-                                       LoopStructure *loop,
-                                       const std::set<LoopDependenceEdge *> &loopCarriedDependences,
-                                       LoopCarriedVariable *variable)
-    : ReductionSCC(BINARY_REDUCTION,
-                   s,
-                   loop,
-                   loopCarriedDependences,
-                   variable->getInitialValue(),
-                   variable->getAccumulator(),
+BinaryReductionSCC::BinaryReductionSCC(
+    LoopSCC *s, LoopStructure *loop,
+    const std::set<LoopDependenceEdge *> &loopCarriedDependences,
+    LoopCarriedVariable *variable)
+    : ReductionSCC(BINARY_REDUCTION, s, loop, loopCarriedDependences,
+                   variable->getInitialValue(), variable->getAccumulator(),
                    variable->getIdentityValue()),
       reductionOperation{variable->getReductionOperation()} {}
 Instruction::BinaryOps BinaryReductionSCC::getReductionOperation(void) const {
   return this->reductionOperation;
 }
 
-RecomputableSCC::RecomputableSCC(SCCKind K,
-                                 LoopSCC *s,
-                                 LoopStructure *loop,
-                                 const std::set<LoopDependenceEdge *> &loopCarriedDependences,
-                                 const std::set<Instruction *> &values,
-                                 bool commutative)
+RecomputableSCC::RecomputableSCC(
+    SCCKind K, LoopSCC *s, LoopStructure *loop,
+    const std::set<LoopDependenceEdge *> &loopCarriedDependences,
+    const std::set<Instruction *> &values, bool commutative)
     : LoopCarriedSCC(K, s, loop, loopCarriedDependences, commutative),
       values{values} {}
-std::set<Instruction *> RecomputableSCC::getValuesToPropagateAcrossLoopIterations(void) const {
+std::set<Instruction *>
+RecomputableSCC::getValuesToPropagateAcrossLoopIterations(void) const {
   return this->values;
 }
 
 SingleAccumulatorRecomputableSCC::SingleAccumulatorRecomputableSCC(
-    SCCKind K,
-    LoopSCC *s,
-    LoopStructure *loop,
+    SCCKind K, LoopSCC *s, LoopStructure *loop,
     const std::set<LoopDependenceEdge *> &loopCarriedDependences,
     PHINode *accumulator)
     : RecomputableSCC(K, s, loop, loopCarriedDependences, {}, true),
       accumulator{accumulator} {}
-PHINode *SingleAccumulatorRecomputableSCC::getPhiThatAccumulatesValuesBetweenLoopIterations(
-    void) const {
+PHINode *SingleAccumulatorRecomputableSCC::
+    getPhiThatAccumulatesValuesBetweenLoopIterations(void) const {
   return this->accumulator;
 }
 
 InductionVariableSCC::InductionVariableSCC(
-    SCCKind K,
-    LoopSCC *s,
-    LoopStructure *loop,
+    SCCKind K, LoopSCC *s, LoopStructure *loop,
     const std::set<LoopDependenceEdge *> &loopCarriedDependences,
     PHINode *accumulator)
-    : SingleAccumulatorRecomputableSCC(K, s, loop, loopCarriedDependences, accumulator) {}
+    : SingleAccumulatorRecomputableSCC(K, s, loop, loopCarriedDependences,
+                                       accumulator) {}
 
 LinearInductionVariableSCC::LinearInductionVariableSCC(
-    LoopSCC *s,
-    LoopStructure *loop,
+    LoopSCC *s, LoopStructure *loop,
     const std::set<LoopDependenceEdge *> &loopCarriedDependences,
     const std::set<InductionVariable *> &ivs)
-    : InductionVariableSCC(LINEAR_INDUCTION_VARIABLE,
-                           s,
-                           loop,
-                           loopCarriedDependences,
-                           ivs.empty() ? nullptr : (*ivs.begin())->getLoopEntryPHI()),
+    : InductionVariableSCC(
+          LINEAR_INDUCTION_VARIABLE, s, loop, loopCarriedDependences,
+          ivs.empty() ? nullptr : (*ivs.begin())->getLoopEntryPHI()),
       IVs{ivs} {}
 std::set<InductionVariable *> LinearInductionVariableSCC::getIVs(void) const {
   return this->IVs;
 }
 
 PeriodicVariableSCC::PeriodicVariableSCC(
-    LoopSCC *s,
-    LoopStructure *loop,
+    LoopSCC *s, LoopStructure *loop,
     const std::set<LoopDependenceEdge *> &loopCarriedDependences,
-    Value *initialValue,
-    Value *period,
-    Value *step,
-    PHINode *accumulator)
-    : SingleAccumulatorRecomputableSCC(PERIODIC_VARIABLE,
-                                       s,
-                                       loop,
-                                       loopCarriedDependences,
-                                       accumulator),
-      initialValue{initialValue},
-      period{period},
-      step{step} {}
-Value *PeriodicVariableSCC::getInitialValue(void) const { return this->initialValue; }
+    Value *initialValue, Value *period, Value *step, PHINode *accumulator)
+    : SingleAccumulatorRecomputableSCC(PERIODIC_VARIABLE, s, loop,
+                                       loopCarriedDependences, accumulator),
+      initialValue{initialValue}, period{period}, step{step} {}
+Value *PeriodicVariableSCC::getInitialValue(void) const {
+  return this->initialValue;
+}
 Value *PeriodicVariableSCC::getPeriod(void) const { return this->period; }
 Value *PeriodicVariableSCC::getStepValue(void) const { return this->step; }
 
 UnknownClosedFormSCC::UnknownClosedFormSCC(
-    LoopSCC *s,
-    LoopStructure *loop,
+    LoopSCC *s, LoopStructure *loop,
     const std::set<LoopDependenceEdge *> &loopCarriedDependences,
     const std::set<Instruction *> &values)
-    : RecomputableSCC(UNKNOWN_CLOSED_FORM, s, loop, loopCarriedDependences, values, false) {}
+    : RecomputableSCC(UNKNOWN_CLOSED_FORM, s, loop, loopCarriedDependences,
+                      values, false) {}
 
 MemoryClonableSCC::MemoryClonableSCC(
-    SCCKind K,
-    LoopSCC *s,
-    LoopStructure *loop,
+    SCCKind K, LoopSCC *s, LoopStructure *loop,
     const std::set<LoopDependenceEdge *> &loopCarriedDependences)
     : LoopCarriedSCC(K, s, loop, loopCarriedDependences, false) {}
 
 StackObjectClonableSCC::StackObjectClonableSCC(
-    LoopSCC *s,
-    LoopStructure *loop,
+    LoopSCC *s, LoopStructure *loop,
     const std::set<LoopDependenceEdge *> &loopCarriedDependences,
     const std::set<AllocaInst *> &locations)
     : MemoryClonableSCC(STACK_OBJECT_CLONABLE, s, loop, loopCarriedDependences),
       locations{locations} {}
-std::set<AllocaInst *> StackObjectClonableSCC::getMemoryLocationsToClone(void) const {
+std::set<AllocaInst *>
+StackObjectClonableSCC::getMemoryLocationsToClone(void) const {
   return this->locations;
 }
 
 LoopCarriedUnknownSCC::LoopCarriedUnknownSCC(
-    LoopSCC *s,
-    LoopStructure *loop,
+    LoopSCC *s, LoopStructure *loop,
     const std::set<LoopDependenceEdge *> &loopCarriedDependences)
-    : LoopCarriedSCC(LOOP_CARRIED_UNKNOWN, s, loop, loopCarriedDependences, false) {}
+    : LoopCarriedSCC(LOOP_CARRIED_UNKNOWN, s, loop, loopCarriedDependences,
+                     false) {}
 
-SCCDAGAttrs::SCCDAGAttrs(bool enableFloatAsReal,
-                         LoopDependenceGraph *loopDG,
-                         LoopSCCDAG *loopSCCDAG,
-                         LoopTree *loopNode,
+SCCDAGAttrs::SCCDAGAttrs(bool enableFloatAsReal, LoopDependenceGraph *loopDG,
+                         LoopSCCDAG *loopSCCDAG, LoopTree *loopNode,
                          InductionVariableManager &IV,
                          noelle::DominatorSummary &DS)
-    : enableFloatAsReal{enableFloatAsReal},
-      loopDG{loopDG},
-      sccdag{loopSCCDAG} {
+    : enableFloatAsReal{enableFloatAsReal}, loopDG{loopDG}, sccdag{loopSCCDAG} {
   this->collectLoopCarriedDependencies(loopNode);
   this->memoryCloningAnalysis.reset(
       new MemoryCloningAnalysis(loopNode->getLoop(), DS, loopDG));
@@ -212,42 +188,52 @@ SCCDAGAttrs::SCCDAGAttrs(bool enableFloatAsReal,
   for (auto *scc : loopSCCDAG->getSCCs()) {
     std::unique_ptr<GenericSCC> info;
     if (this->checkIfIndependent(scc)) {
-      info.reset(new LoopIterationSCC(scc, loopNode->getLoop()));
+      auto clonable = this->checkIfClonableByUsingLocalMemory(scc, loopNode);
+      if (!clonable.empty()) {
+        info.reset(new StackObjectClonableSCC(
+            scc, loopNode->getLoop(), this->sccToLoopCarriedDependencies[scc],
+            clonable));
+      } else {
+        info.reset(new LoopIterationSCC(scc, loopNode->getLoop()));
+      }
     } else {
       auto periodic = this->checkIfPeriodic(scc, loopNode);
       if (std::get<0>(periodic)) {
-        info.reset(new PeriodicVariableSCC(scc,
-                                           loopNode->getLoop(),
-                                           this->sccToLoopCarriedDependencies[scc],
-                                           std::get<1>(periodic),
-                                           std::get<2>(periodic),
-                                           std::get<3>(periodic),
-                                           std::get<4>(periodic)));
+        info.reset(new PeriodicVariableSCC(
+            scc, loopNode->getLoop(), this->sccToLoopCarriedDependencies[scc],
+            std::get<1>(periodic), std::get<2>(periodic), std::get<3>(periodic),
+            std::get<4>(periodic)));
       } else {
-        auto ivSet =
-            this->checkIfSCCOnlyContainsInductionVariables(scc, loopNode, ivs, loopGoverningIVs);
+        auto ivSet = this->checkIfSCCOnlyContainsInductionVariables(
+            scc, loopNode, ivs, loopGoverningIVs);
         if (!ivSet.empty()) {
           info.reset(new LinearInductionVariableSCC(
-              scc, loopNode->getLoop(), this->sccToLoopCarriedDependencies[scc], ivSet));
+              scc, loopNode->getLoop(), this->sccToLoopCarriedDependencies[scc],
+              ivSet));
         } else {
           auto *variable = this->checkIfReducible(scc, loopNode);
           if (variable != nullptr) {
             info.reset(new BinaryReductionSCC(
-                scc, loopNode->getLoop(), this->sccToLoopCarriedDependencies[scc], variable));
+                scc, loopNode->getLoop(),
+                this->sccToLoopCarriedDependencies[scc], variable));
             delete variable;
           } else {
             auto recomputable = this->checkIfRecomputable(scc, loopNode);
             if (!recomputable.empty()) {
               info.reset(new UnknownClosedFormSCC(
-                  scc, loopNode->getLoop(), this->sccToLoopCarriedDependencies[scc], recomputable));
+                  scc, loopNode->getLoop(),
+                  this->sccToLoopCarriedDependencies[scc], recomputable));
             } else {
-              auto clonable = this->checkIfClonableByUsingLocalMemory(scc, loopNode);
+              auto clonable =
+                  this->checkIfClonableByUsingLocalMemory(scc, loopNode);
               if (!clonable.empty()) {
                 info.reset(new StackObjectClonableSCC(
-                    scc, loopNode->getLoop(), this->sccToLoopCarriedDependencies[scc], clonable));
+                    scc, loopNode->getLoop(),
+                    this->sccToLoopCarriedDependencies[scc], clonable));
               } else {
                 info.reset(new LoopCarriedUnknownSCC(
-                    scc, loopNode->getLoop(), this->sccToLoopCarriedDependencies[scc]));
+                    scc, loopNode->getLoop(),
+                    this->sccToLoopCarriedDependencies[scc]));
               }
             }
           }
@@ -275,7 +261,8 @@ void SCCDAGAttrs::collectLoopCarriedDependencies(LoopTree *loopNode) {
   }
 }
 
-LoopCarriedVariable *SCCDAGAttrs::checkIfReducible(LoopSCC *scc, LoopTree *loopNode) {
+LoopCarriedVariable *SCCDAGAttrs::checkIfReducible(LoopSCC *scc,
+                                                   LoopTree *loopNode) {
   auto it = this->sccToLoopCarriedDependencies.find(scc);
   if (it == this->sccToLoopCarriedDependencies.end()) {
     return nullptr;
@@ -314,23 +301,22 @@ LoopCarriedVariable *SCCDAGAttrs::checkIfReducible(LoopSCC *scc, LoopTree *loopN
     return nullptr;
   }
   auto *phi = *carriedPhis.begin();
-  auto *variable =
-      new LoopCarriedVariable(*loopNode->getLoop(), loopNode, *this->loopDG, *this->sccdag, *scc, phi);
+  auto *variable = new LoopCarriedVariable(
+      *loopNode->getLoop(), loopNode, *this->loopDG, *this->sccdag, *scc, phi);
   if (!variable->isEvolutionReducibleAcrossLoopIterations()) {
     delete variable;
     return nullptr;
   }
-  if (!this->enableFloatAsReal
-      && (phi->getType()->isFloatTy() || phi->getType()->isDoubleTy())) {
+  if (!this->enableFloatAsReal &&
+      (phi->getType()->isFloatTy() || phi->getType()->isDoubleTy())) {
     delete variable;
     return nullptr;
   }
   return variable;
 }
 
-std::tuple<bool, Value *, Value *, Value *, PHINode *> SCCDAGAttrs::checkIfPeriodic(
-    LoopSCC *scc,
-    LoopTree *loopNode) {
+std::tuple<bool, Value *, Value *, Value *, PHINode *>
+SCCDAGAttrs::checkIfPeriodic(LoopSCC *scc, LoopTree *loopNode) {
   auto notPeriodic = std::make_tuple(false, nullptr, nullptr, nullptr, nullptr);
   auto it = this->sccToLoopCarriedDependencies.find(scc);
   if (it == this->sccToLoopCarriedDependencies.end()) {
@@ -340,7 +326,8 @@ std::tuple<bool, Value *, Value *, Value *, PHINode *> SCCDAGAttrs::checkIfPerio
     return notPeriodic;
   }
   for (auto *dep : it->second) {
-    if (!dep->isLoopCarried() || dep->getKind() == LoopDependenceEdgeKind::Control) {
+    if (!dep->isLoopCarried() ||
+        dep->getKind() == LoopDependenceEdgeKind::Control) {
       continue;
     }
 
@@ -378,8 +365,10 @@ std::tuple<bool, Value *, Value *, Value *, PHINode *> SCCDAGAttrs::checkIfPerio
 
       int fromInitialIdx = (fromPhi->getIncomingValue(0) == to) ? 1 : 0;
       int toInitialIdx = (to->getIncomingValue(0) == from) ? 1 : 0;
-      if (fromPhi->getIncomingBlock(fromInitialIdx) != loopNode->getLoop()->getPreHeader()
-          || to->getIncomingBlock(toInitialIdx) != loopNode->getLoop()->getPreHeader()) {
+      if (fromPhi->getIncomingBlock(fromInitialIdx) !=
+              loopNode->getLoop()->getPreHeader() ||
+          to->getIncomingBlock(toInitialIdx) !=
+              loopNode->getLoop()->getPreHeader()) {
         return notPeriodic;
       }
 
@@ -412,8 +401,9 @@ std::tuple<bool, Value *, Value *, Value *, PHINode *> SCCDAGAttrs::checkIfPerio
       return notPeriodic;
     }
 
-    Value *initial =
-        (to->getIncomingValue(0) == from) ? to->getIncomingValue(1) : to->getIncomingValue(0);
+    Value *initial = (to->getIncomingValue(0) == from)
+                         ? to->getIncomingValue(1)
+                         : to->getIncomingValue(0);
     Value *period = nullptr;
     Value *step = nullptr;
     bool found = false;
@@ -423,8 +413,8 @@ std::tuple<bool, Value *, Value *, Value *, PHINode *> SCCDAGAttrs::checkIfPerio
       auto *fromOperand = fromInst->getOperand(1);
       auto *fromCI = dyn_cast<ConstantInt>(fromOperand);
       auto *initialCI = dyn_cast<ConstantInt>(initial);
-      if (fromCI != nullptr && initialCI != nullptr && initialCI->isZero()
-          && fromCI->isOne()) {
+      if (fromCI != nullptr && initialCI != nullptr && initialCI->isZero() &&
+          fromCI->isOne()) {
         step = fromOperand;
         found = true;
       }
@@ -455,14 +445,13 @@ std::tuple<bool, Value *, Value *, Value *, PHINode *> SCCDAGAttrs::checkIfPerio
 }
 
 bool SCCDAGAttrs::checkIfIndependent(LoopSCC *scc) {
-  return this->sccToLoopCarriedDependencies.find(scc)
-         == this->sccToLoopCarriedDependencies.end();
+  return this->sccToLoopCarriedDependencies.find(scc) ==
+         this->sccToLoopCarriedDependencies.end();
 }
 
-std::set<InductionVariable *> SCCDAGAttrs::checkIfSCCOnlyContainsInductionVariables(
-    LoopSCC *scc,
-    LoopTree *loopNode,
-    std::set<InductionVariable *> &IVs,
+std::set<InductionVariable *>
+SCCDAGAttrs::checkIfSCCOnlyContainsInductionVariables(
+    LoopSCC *scc, LoopTree *loopNode, std::set<InductionVariable *> &IVs,
     std::set<InductionVariable *> &loopGoverningIVs) const {
   std::set<InductionVariable *> contained;
   std::set<Instruction *> containedInsts;
@@ -489,7 +478,8 @@ std::set<InductionVariable *> SCCDAGAttrs::checkIfSCCOnlyContainsInductionVariab
     if (!attribution.isSCCContainingIVWellFormed()) {
       continue;
     }
-    if (auto *cmp = attribution.getHeaderCompareInstructionToComputeExitCondition()) {
+    if (auto *cmp =
+            attribution.getHeaderCompareInstructionToComputeExitCondition()) {
       containedInsts.insert(cmp);
     }
     if (auto *br = attribution.getHeaderBrInst()) {
@@ -512,9 +502,8 @@ std::set<InductionVariable *> SCCDAGAttrs::checkIfSCCOnlyContainsInductionVariab
   return contained;
 }
 
-std::set<Instruction *> SCCDAGAttrs::checkIfRecomputable(
-    LoopSCC *scc,
-    LoopTree *loopNode) const {
+std::set<Instruction *>
+SCCDAGAttrs::checkIfRecomputable(LoopSCC *scc, LoopTree *loopNode) const {
   for (auto *edge : scc->getEdges()) {
     if (edge->getKind() == LoopDependenceEdgeKind::Memory) {
       return {};
@@ -536,8 +525,8 @@ std::set<Instruction *> SCCDAGAttrs::checkIfRecomputable(
     if (src == nullptr || dst == nullptr) {
       return {};
     }
-    if (loopNode->getInnermostLoopThatContains(src) == topLoop
-        || loopNode->getInnermostLoopThatContains(dst) == topLoop) {
+    if (loopNode->getInnermostLoopThatContains(src) == topLoop ||
+        loopNode->getInnermostLoopThatContains(dst) == topLoop) {
       return {};
     }
     values.insert(src);
@@ -545,51 +534,99 @@ std::set<Instruction *> SCCDAGAttrs::checkIfRecomputable(
   return values;
 }
 
-std::set<AllocaInst *> SCCDAGAttrs::checkIfClonableByUsingLocalMemory(
-    LoopSCC *scc,
-    LoopTree *) const {
-  auto it = this->sccToLoopCarriedDependencies.find(scc);
-  if (it == this->sccToLoopCarriedDependencies.end()) {
-    return {};
-  }
-
+std::set<AllocaInst *>
+SCCDAGAttrs::checkIfClonableByUsingLocalMemory(LoopSCC *scc, LoopTree *) const {
   std::set<AllocaInst *> allocations;
-  for (auto *dependency : it->second) {
-    auto *inst = dyn_cast_or_null<Instruction>(dependency->getSrc()->getValue());
+  bool sawRelevantMemoryTraffic = false;
+
+  auto inspectInstruction = [&](Instruction *inst) -> bool {
     if (inst == nullptr) {
       return {};
     }
 
     auto locs = this->memoryCloningAnalysis->getClonableMemoryObjectsFor(inst);
     if (locs.empty()) {
-      return {};
+      Value *pointerOperand = nullptr;
+      if (auto *loadInst = dyn_cast<LoadInst>(inst)) {
+        pointerOperand = loadInst->getPointerOperand();
+      } else if (auto *storeInst = dyn_cast<StoreInst>(inst)) {
+        pointerOperand = storeInst->getPointerOperand();
+      }
+      if (pointerOperand != nullptr) {
+        for (auto *loc :
+             this->memoryCloningAnalysis->getClonableMemoryObjects()) {
+          if (loc->mustAliasAMemoryLocationWithinObject(pointerOperand)) {
+            locs.insert(loc);
+          }
+        }
+      }
     }
-
     bool usesClonableLocation = false;
     for (auto *loc : locs) {
-      bool isMemoryTraffic = loc->isInstructionLoadingLocation(inst)
-                             || loc->isInstructionStoringLocation(inst);
+      bool isMemoryTraffic = loc->isInstructionLoadingLocation(inst) ||
+                             loc->isInstructionStoringLocation(inst);
       if (!isMemoryTraffic) {
         if (auto *callInst = dyn_cast<CallInst>(inst)) {
-          if (callInst->isLifetimeStartOrEnd()) {
-            continue;
-          }
-          for (auto &arg : callInst->args()) {
-            if (loc->mustAliasAMemoryLocationWithinObject(arg.get())) {
-              isMemoryTraffic = true;
-              break;
+          if (!callInst->isLifetimeStartOrEnd()) {
+            for (auto &arg : callInst->args()) {
+              if (loc->mustAliasAMemoryLocationWithinObject(arg.get())) {
+                isMemoryTraffic = true;
+                break;
+              }
             }
           }
         }
       }
-      if (isMemoryTraffic) {
-        usesClonableLocation = true;
-        allocations.insert(loc->getAllocation());
+      if (!isMemoryTraffic) {
+        continue;
+      }
+      sawRelevantMemoryTraffic = true;
+      usesClonableLocation = true;
+      allocations.insert(loc->getAllocation());
+    }
+    if (usesClonableLocation) {
+      return true;
+    }
+    if (isa<LoadInst>(inst) || isa<StoreInst>(inst)) {
+      sawRelevantMemoryTraffic = true;
+      return false;
+    }
+    if (auto *callInst = dyn_cast<CallInst>(inst)) {
+      if (!callInst->isLifetimeStartOrEnd()) {
+        sawRelevantMemoryTraffic = true;
+        return false;
       }
     }
-    if (!usesClonableLocation) {
-      return {};
+    return true;
+  };
+
+  auto it = this->sccToLoopCarriedDependencies.find(scc);
+  if (it != this->sccToLoopCarriedDependencies.end()) {
+    for (auto *dependency : it->second) {
+      if (dependency->getKind() == LoopDependenceEdgeKind::Control) {
+        continue;
+      }
+      auto *srcInst =
+          dyn_cast_or_null<Instruction>(dependency->getSrc()->getValue());
+      auto *dstInst =
+          dyn_cast_or_null<Instruction>(dependency->getDst()->getValue());
+      if (!inspectInstruction(srcInst) || !inspectInstruction(dstInst)) {
+        return {};
+      }
     }
+  }
+
+  if (!sawRelevantMemoryTraffic) {
+    for (auto &pair : scc->internalNodePairs()) {
+      auto *inst = dyn_cast_or_null<Instruction>(pair.first);
+      if (!inspectInstruction(inst)) {
+        return {};
+      }
+    }
+  }
+
+  if (!sawRelevantMemoryTraffic) {
+    return {};
   }
 
   return allocations;
@@ -603,7 +640,8 @@ GenericSCC *SCCDAGAttrs::getSCCAttrs(LoopSCC *scc) const {
   return it->second.get();
 }
 
-std::set<LoopCarriedSCC *> SCCDAGAttrs::getSCCsWithLoopCarriedDependencies(void) const {
+std::set<LoopCarriedSCC *>
+SCCDAGAttrs::getSCCsWithLoopCarriedDependencies(void) const {
   std::set<LoopCarriedSCC *> result;
   for (auto &pair : this->sccToLoopCarriedDependencies) {
     auto *attrs = dynamic_cast<LoopCarriedSCC *>(this->getSCCAttrs(pair.first));
@@ -614,8 +652,8 @@ std::set<LoopCarriedSCC *> SCCDAGAttrs::getSCCsWithLoopCarriedDependencies(void)
   return result;
 }
 
-std::set<LoopCarriedSCC *> SCCDAGAttrs::getSCCsWithLoopCarriedDataDependencies(
-    void) const {
+std::set<LoopCarriedSCC *>
+SCCDAGAttrs::getSCCsWithLoopCarriedDataDependencies(void) const {
   std::set<LoopCarriedSCC *> result;
   for (auto &pair : this->sccToLoopCarriedDependencies) {
     bool hasData = false;
@@ -658,8 +696,8 @@ SCCDAGAttrs::getSCCsWithLoopCarriedControlDependencies(void) const {
   return result;
 }
 
-std::unordered_set<GenericSCC *> SCCDAGAttrs::getSCCsOfKind(
-    GenericSCC::SCCKind kind) const {
+std::unordered_set<GenericSCC *>
+SCCDAGAttrs::getSCCsOfKind(GenericSCC::SCCKind kind) const {
   std::unordered_set<GenericSCC *> result;
   for (auto &pair : this->sccToInfo) {
     if (pair.second != nullptr && pair.second->getKind() == kind) {
@@ -701,8 +739,8 @@ bool SCCDAGAttrs::isLoopGovernedBySCC(LoopSCC *governingSCC) const {
     topLevelLoopCarriedSCCs.insert(scc);
   }
 
-  return topLevelLoopCarriedSCCs.size() == 1
-         && *topLevelLoopCarriedSCCs.begin() == governingSCC;
+  return topLevelLoopCarriedSCCs.size() == 1 &&
+         *topLevelLoopCarriedSCCs.begin() == governingSCC;
 }
 
 std::set<uint32_t> SCCDAGAttrs::getLiveOutVariablesThatAreNotReducable(
@@ -724,8 +762,8 @@ std::set<uint32_t> SCCDAGAttrs::getLiveOutVariablesThatAreNotReducable(
       result.insert(envID);
       continue;
     }
-    if (info->getKind() == GenericSCC::BINARY_REDUCTION
-        || info->getKind() == GenericSCC::LOOP_ITERATION) {
+    if (info->getKind() == GenericSCC::BINARY_REDUCTION ||
+        info->getKind() == GenericSCC::LOOP_ITERATION) {
       continue;
     }
     result.insert(envID);
@@ -734,7 +772,8 @@ std::set<uint32_t> SCCDAGAttrs::getLiveOutVariablesThatAreNotReducable(
   return result;
 }
 
-bool SCCDAGAttrs::isSCCContainedInSubloop(LoopTree *loopNode, LoopSCC *scc) const {
+bool SCCDAGAttrs::isSCCContainedInSubloop(LoopTree *loopNode,
+                                          LoopSCC *scc) const {
   if (loopNode == nullptr || scc == nullptr) {
     return false;
   }
@@ -757,8 +796,8 @@ SCCDAGAttrs::computeSCCDAGWhenSCCsAreIgnored(
   SCCParentMap parentsViaIgnored;
   SCCEdgeMap edgesViaIgnored;
 
-  auto addIncomingNodes =
-      [&](std::queue<LoopSCC *> &queue, LoopSCC *scc) -> void {
+  auto addIncomingNodes = [&](std::queue<LoopSCC *> &queue,
+                              LoopSCC *scc) -> void {
     for (auto *pred : scc->getPredecessors()) {
       queue.push(pred);
       edgesViaIgnored[scc].insert(std::make_pair(pred, scc));
@@ -791,7 +830,8 @@ SCCDAGAttrs::computeSCCDAGWhenSCCsAreIgnored(
     }
   }
 
-  return std::make_pair(std::move(parentsViaIgnored), std::move(edgesViaIgnored));
+  return std::make_pair(std::move(parentsViaIgnored),
+                        std::move(edgesViaIgnored));
 }
 
 LoopSCCDAG *SCCDAGAttrs::getSCCDAG(void) const { return this->sccdag; }

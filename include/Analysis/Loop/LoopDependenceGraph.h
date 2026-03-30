@@ -61,7 +61,8 @@ public:
 private:
   friend class LoopDependenceGraph;
 
-  LoopDependenceNode(uint64_t id, Value *value, pdg::Node *pdgNode, bool internal);
+  LoopDependenceNode(uint64_t id, Value *value, pdg::Node *pdgNode,
+                     bool internal);
 
   uint64_t id;
   Value *value;
@@ -84,12 +85,10 @@ public:
 private:
   friend class LoopDependenceGraph;
 
-  LoopDependenceEdge(LoopDependenceNode *src,
-                     LoopDependenceNode *dst,
+  LoopDependenceEdge(LoopDependenceNode *src, LoopDependenceNode *dst,
                      LoopDependenceEdgeKind kind,
                      LoopDependenceMemoryKind memoryKind,
-                     pdg::EdgeType originalEdgeType,
-                     bool loopCarried);
+                     pdg::EdgeType originalEdgeType, bool loopCarried);
 
   LoopDependenceNode *src;
   LoopDependenceNode *dst;
@@ -111,8 +110,10 @@ public:
   std::vector<LoopDependenceNode *> getNodes(void) const;
   std::vector<LoopDependenceEdge *> getEdges(void) const;
 
-  std::vector<std::pair<Value *, LoopDependenceNode *>> internalNodePairs(void) const;
-  std::vector<std::pair<Value *, LoopDependenceNode *>> externalNodePairs(void) const;
+  std::vector<std::pair<Value *, LoopDependenceNode *>>
+  internalNodePairs(void) const;
+  std::vector<std::pair<Value *, LoopDependenceNode *>>
+  externalNodePairs(void) const;
 
   LoopDependenceNode *getNode(Value *value) const;
   LoopDependenceNode *fetchNode(Value *value) const;
@@ -121,17 +122,16 @@ public:
   bool isExternal(Value *value) const;
 
   bool iterateOverDependencesTo(
-      Value *target,
-      bool includeControl,
-      bool includeVariable,
+      Value *target, bool includeControl, bool includeVariable,
       bool includeMemory,
-      const std::function<bool(Value *, LoopDependenceEdge *)> &funcToInvoke) const;
+      const std::function<bool(Value *, LoopDependenceEdge *)> &funcToInvoke)
+      const;
 
   std::unique_ptr<LoopDependenceGraph> createSubgraph(bool includeControl,
                                                       bool includeVariable,
                                                       bool includeMemory) const;
   void removeEdge(LoopDependenceEdge *edge);
-  void addVariableDependence(Value *src, Value *dst);
+  void addVariableDependence(Value *src, Value *dst, bool loopCarried = false);
 
 private:
   LoopDependenceGraph() = default;
@@ -145,8 +145,7 @@ private:
   std::unordered_map<Value *, LoopDependenceNode *> nodesByValue;
   std::unordered_map<pdg::Node *, LoopDependenceNode *> nodesByPDGNode;
 
-  LoopDependenceNode *fetchOrCreateNode(Value *value,
-                                        pdg::Node *pdgNode,
+  LoopDependenceNode *fetchOrCreateNode(Value *value, pdg::Node *pdgNode,
                                         bool internal);
   void importEdge(pdg::Edge *edge);
 };

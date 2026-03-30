@@ -21,9 +21,11 @@ public:
   bool isInstructionCastOrGEPOfLocation(Instruction *I) const;
   bool isInstructionStoringLocation(Instruction *I) const;
   bool isInstructionLoadingLocation(Instruction *I) const;
+  bool isInstructionUsingLocationWithoutStoring(Instruction *I) const;
   void addPointer(Instruction *I);
   void addStore(Instruction *I);
   void addLoad(Instruction *I);
+  void addNonStoringUse(Instruction *I);
   void setClonable(bool clonable);
   void setNeedsInitialization(bool needsInitialization);
 
@@ -35,17 +37,18 @@ private:
   std::unordered_set<Instruction *> castsAndGEPs;
   std::unordered_set<Instruction *> storingInstructions;
   std::unordered_set<Instruction *> loadInstructions;
+  std::unordered_set<Instruction *> nonStoringInstructions;
 };
 
 class MemoryCloningAnalysis {
 public:
-  MemoryCloningAnalysis(LoopStructure *loop,
-                        noelle::DominatorSummary &DS,
+  MemoryCloningAnalysis(LoopStructure *loop, noelle::DominatorSummary &DS,
                         LoopDependenceGraph *ldg);
 
-  std::unordered_set<ClonableMemoryObject *> getClonableMemoryObjects(void) const;
-  std::unordered_set<ClonableMemoryObject *> getClonableMemoryObjectsFor(
-      Instruction *I) const;
+  std::unordered_set<ClonableMemoryObject *>
+  getClonableMemoryObjects(void) const;
+  std::unordered_set<ClonableMemoryObject *>
+  getClonableMemoryObjectsFor(Instruction *I) const;
 
 private:
   std::vector<std::unique_ptr<ClonableMemoryObject>> clonableMemoryLocations;

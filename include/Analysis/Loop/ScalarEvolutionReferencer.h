@@ -8,6 +8,8 @@
 #include "llvm/Analysis/ScalarEvolutionExpressions.h"
 #include "llvm/IR/IRBuilder.h"
 
+#include <unordered_map>
+
 namespace llvm {
 
 class SCEVReference;

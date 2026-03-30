@@ -8,28 +8,22 @@ namespace analysis {
 namespace loop {
 
 LoopGoverningInductionVariable::LoopGoverningInductionVariable(
-    LoopStructure *loop,
-    InductionVariable &iv)
-    : loop{loop},
-      iv{&iv},
-      conditionValueDerivation{},
-      headerCmp{nullptr},
-      headerBr{nullptr},
-      conditionValue{nullptr},
-      comparedValue{nullptr},
-      exitBlock{nullptr},
-      isWellFormed{false} {
+    LoopStructure *loop, InductionVariable &iv)
+    : loop{loop}, iv{&iv}, conditionValueDerivation{}, headerCmp{nullptr},
+      headerBr{nullptr}, conditionValue{nullptr}, comparedValue{nullptr},
+      exitBlock{nullptr}, isWellFormed{false} {
   assert(loop != nullptr);
 
-  if (iv.getSingleComputedStepValue() == nullptr
-      || (!isa<ConstantInt>(iv.getSingleComputedStepValue())
-          && !isa<ConstantFP>(iv.getSingleComputedStepValue()))) {
+  if (iv.getSingleComputedStepValue() == nullptr ||
+      (!isa<ConstantInt>(iv.getSingleComputedStepValue()) &&
+       !isa<ConstantFP>(iv.getSingleComputedStepValue()))) {
     return;
   }
 
   auto *headerPHI = iv.getLoopEntryPHI();
   auto ivInstructions = iv.getAllInstructions();
-  if (!headerPHI->getType()->isIntegerTy() && !headerPHI->getType()->isFloatingPointTy()) {
+  if (!headerPHI->getType()->isIntegerTy() &&
+      !headerPHI->getType()->isFloatingPointTy()) {
     return;
   }
 
@@ -48,15 +42,19 @@ LoopGoverningInductionVariable::LoopGoverningInductionVariable(
     if (br == nullptr || !br->isConditional()) {
       continue;
     }
+    if (br->getParent() != headerPHI->getParent()) {
+      continue;
+    }
     if (loopGoverningTerminator != nullptr) {
       return;
     }
     loopGoverningTerminator = br;
   }
 
-  if (loopGoverningTerminator == nullptr
-      || loopGoverningTerminator->getParent() != headerPHI->getParent()) {
-    auto *headerTerminator = dyn_cast<BranchInst>(headerPHI->getParent()->getTerminator());
+  if (loopGoverningTerminator == nullptr ||
+      loopGoverningTerminator->getParent() != headerPHI->getParent()) {
+    auto *headerTerminator =
+        dyn_cast<BranchInst>(headerPHI->getParent()->getTerminator());
     if (headerTerminator == nullptr || !headerTerminator->isConditional()) {
       return;
     }
@@ -73,8 +71,10 @@ LoopGoverningInductionVariable::LoopGoverningInductionVariable(
   this->headerCmp = cmp;
   auto *opL = cmp->getOperand(0);
   auto *opR = cmp->getOperand(1);
-  auto isOpLHSLoopEntryPHI = isa<Instruction>(opL) && headerPHI == cast<Instruction>(opL);
-  auto isOpRHSLoopEntryPHI = isa<Instruction>(opR) && headerPHI == cast<Instruction>(opR);
+  auto isOpLHSLoopEntryPHI =
+      isa<Instruction>(opL) && headerPHI == cast<Instruction>(opL);
+  auto isOpRHSLoopEntryPHI =
+      isa<Instruction>(opR) && headerPHI == cast<Instruction>(opR);
   if (!(isOpLHSLoopEntryPHI ^ isOpRHSLoopEntryPHI)) {
     for (auto *intermediateValue : iv.getNonPHIIntermediateValues()) {
       if (intermediateValue == opR || intermediateValue == opL) {
@@ -120,7 +120,8 @@ LoopGoverningInductionVariable::LoopGoverningInductionVariable(
         if (edge->getKind() != LoopDependenceEdgeKind::Variable) {
           continue;
         }
-        auto *outgoingInst = dyn_cast_or_null<Instruction>(edge->getSrc()->getValue());
+        auto *outgoingInst =
+            dyn_cast_or_null<Instruction>(edge->getSrc()->getValue());
         if (outgoingInst == nullptr || !sccOfIV->isInternal(outgoingInst)) {
           continue;
         }
@@ -138,12 +139,13 @@ LoopGoverningInductionVariable::LoopGoverningInductionVariable(
   this->isWellFormed = true;
 }
 
-InductionVariable *LoopGoverningInductionVariable::getInductionVariable(void) const {
+InductionVariable *
+LoopGoverningInductionVariable::getInductionVariable(void) const {
   return this->iv;
 }
 
-CmpInst *LoopGoverningInductionVariable::getHeaderCompareInstructionToComputeExitCondition(
-    void) const {
+CmpInst *LoopGoverningInductionVariable::
+    getHeaderCompareInstructionToComputeExitCondition(void) const {
   return this->headerCmp;
 }
 
@@ -159,7 +161,8 @@ BasicBlock *LoopGoverningInductionVariable::getExitBlockFromHeader(void) const {
   return this->exitBlock;
 }
 
-bool LoopGoverningInductionVariable::valueOfExitConditionToJumpToTheLoopBody(void) const {
+bool LoopGoverningInductionVariable::valueOfExitConditionToJumpToTheLoopBody(
+    void) const {
   assert(this->headerBr != nullptr);
   auto *succTrue = this->headerBr->getSuccessor(0);
   return this->loop->isIncluded(succTrue);
@@ -169,12 +172,13 @@ bool LoopGoverningInductionVariable::isSCCContainingIVWellFormed(void) const {
   return this->isWellFormed;
 }
 
-std::set<Instruction *> LoopGoverningInductionVariable::getConditionValueDerivation(
-    void) const {
+std::set<Instruction *>
+LoopGoverningInductionVariable::getConditionValueDerivation(void) const {
   return this->conditionValueDerivation;
 }
 
-Instruction *LoopGoverningInductionVariable::getValueToCompareAgainstExitConditionValue(
+Instruction *
+LoopGoverningInductionVariable::getValueToCompareAgainstExitConditionValue(
     void) const {
   return this->comparedValue;
 }

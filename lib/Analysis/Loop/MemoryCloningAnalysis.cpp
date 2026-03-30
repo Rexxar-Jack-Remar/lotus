@@ -37,8 +37,7 @@ bool isMemoryTransferIntrinsic(CallInst *call) {
   return intrinsic == Intrinsic::memcpy || intrinsic == Intrinsic::memmove;
 }
 
-bool collectAccessKey(Value *value,
-                      AllocaInst *allocation,
+bool collectAccessKey(Value *value, AllocaInst *allocation,
                       std::vector<int64_t> &indices) {
   if (value == allocation) {
     return true;
@@ -86,33 +85,54 @@ std::string accessKeyFor(Value *pointer, AllocaInst *allocation) {
 
 } // namespace
 
-ClonableMemoryObject::ClonableMemoryObject(AllocaInst *allocation, uint64_t sizeInBits)
-    : allocation{allocation},
-      sizeInBits{sizeInBits},
-      clonable{false},
+ClonableMemoryObject::ClonableMemoryObject(AllocaInst *allocation,
+                                           uint64_t sizeInBits)
+    : allocation{allocation}, sizeInBits{sizeInBits}, clonable{false},
       needsInitialization{false} {}
 
-AllocaInst *ClonableMemoryObject::getAllocation(void) const { return this->allocation; }
-bool ClonableMemoryObject::isClonableLocation(void) const { return this->clonable; }
+AllocaInst *ClonableMemoryObject::getAllocation(void) const {
+  return this->allocation;
+}
+bool ClonableMemoryObject::isClonableLocation(void) const {
+  return this->clonable;
+}
 bool ClonableMemoryObject::doPrivateCopiesNeedToBeInitialized(void) const {
   return this->needsInitialization;
 }
-bool ClonableMemoryObject::mustAliasAMemoryLocationWithinObject(Value *pointer) const {
+bool ClonableMemoryObject::mustAliasAMemoryLocationWithinObject(
+    Value *pointer) const {
   return stripLocationCasts(pointer) == this->allocation;
 }
-bool ClonableMemoryObject::isInstructionCastOrGEPOfLocation(Instruction *I) const {
+bool ClonableMemoryObject::isInstructionCastOrGEPOfLocation(
+    Instruction *I) const {
   return this->castsAndGEPs.count(I) != 0;
 }
 bool ClonableMemoryObject::isInstructionStoringLocation(Instruction *I) const {
   return this->storingInstructions.count(I) != 0;
 }
 bool ClonableMemoryObject::isInstructionLoadingLocation(Instruction *I) const {
-  return this->loadInstructions.count(I) != 0;
+  return this->loadInstructions.count(I) != 0 ||
+         this->nonStoringInstructions.count(I) != 0;
 }
-void ClonableMemoryObject::addPointer(Instruction *I) { this->castsAndGEPs.insert(I); }
-void ClonableMemoryObject::addStore(Instruction *I) { this->storingInstructions.insert(I); }
-void ClonableMemoryObject::addLoad(Instruction *I) { this->loadInstructions.insert(I); }
-void ClonableMemoryObject::setClonable(bool clonable) { this->clonable = clonable; }
+bool ClonableMemoryObject::isInstructionUsingLocationWithoutStoring(
+    Instruction *I) const {
+  return this->nonStoringInstructions.count(I) != 0;
+}
+void ClonableMemoryObject::addPointer(Instruction *I) {
+  this->castsAndGEPs.insert(I);
+}
+void ClonableMemoryObject::addStore(Instruction *I) {
+  this->storingInstructions.insert(I);
+}
+void ClonableMemoryObject::addLoad(Instruction *I) {
+  this->loadInstructions.insert(I);
+}
+void ClonableMemoryObject::addNonStoringUse(Instruction *I) {
+  this->nonStoringInstructions.insert(I);
+}
+void ClonableMemoryObject::setClonable(bool clonable) {
+  this->clonable = clonable;
+}
 void ClonableMemoryObject::setNeedsInitialization(bool needsInitialization) {
   this->needsInitialization = needsInitialization;
 }
@@ -168,8 +188,8 @@ MemoryCloningAnalysis::MemoryCloningAnalysis(LoopStructure *loop,
           continue;
         }
 
-        if (isa<GetElementPtrInst>(userInst) || isa<BitCastInst>(userInst)
-            || isa<AddrSpaceCastInst>(userInst)) {
+        if (isa<GetElementPtrInst>(userInst) || isa<BitCastInst>(userInst) ||
+            isa<AddrSpaceCastInst>(userInst)) {
           object->addPointer(userInst);
           worklist.push(userInst);
         }
@@ -178,39 +198,52 @@ MemoryCloningAnalysis::MemoryCloningAnalysis(LoopStructure *loop,
           object->addLoad(load);
           if (loop->isIncluded(load)) {
             hasLoopLoad = true;
-            loopLoads.emplace_back(load,
-                                   accessKeyFor(load->getPointerOperand(), alloca));
+            loopLoads.emplace_back(
+                load, accessKeyFor(load->getPointerOperand(), alloca));
           }
         }
         if (auto *store = dyn_cast<StoreInst>(userInst)) {
-          if (object->mustAliasAMemoryLocationWithinObject(store->getPointerOperand())) {
+          if (object->mustAliasAMemoryLocationWithinObject(
+                  store->getPointerOperand())) {
             object->addStore(store);
             if (loop->isIncluded(store)) {
-              loopStores.emplace_back(store,
-                                      accessKeyFor(store->getPointerOperand(), alloca));
+              loopStores.emplace_back(
+                  store, accessKeyFor(store->getPointerOperand(), alloca));
             }
           }
         }
         if (auto *call = dyn_cast<CallInst>(userInst)) {
           if (call->isLifetimeStartOrEnd()) {
-            if (call->arg_size() > 1
-                && object->mustAliasAMemoryLocationWithinObject(call->getArgOperand(1))
-                && loop->isIncluded(call)) {
+            if (call->arg_size() > 1 &&
+                object->mustAliasAMemoryLocationWithinObject(
+                    call->getArgOperand(1)) &&
+                loop->isIncluded(call)) {
               scopeWithinLoop = true;
             }
             continue;
           }
           if (isMemoryTransferIntrinsic(call)) {
             hasLoopUse |= loop->isIncluded(call);
-            if (loop->isIncluded(call)
-                && call->arg_size() > 0
-                && object->mustAliasAMemoryLocationWithinObject(call->getArgOperand(0))) {
+            if (loop->isIncluded(call) && call->arg_size() > 0 &&
+                object->mustAliasAMemoryLocationWithinObject(
+                    call->getArgOperand(0))) {
               hasLoopFullOverwrite = true;
             }
             if (!loop->isIncluded(call)) {
               hasIllegalOutsideUse = true;
             }
             continue;
+          }
+
+          bool aliasesObject = false;
+          for (auto &arg : call->args()) {
+            if (object->mustAliasAMemoryLocationWithinObject(arg.get())) {
+              aliasesObject = true;
+              break;
+            }
+          }
+          if (aliasesObject) {
+            object->addNonStoringUse(call);
           }
         }
 
@@ -220,14 +253,15 @@ MemoryCloningAnalysis::MemoryCloningAnalysis(LoopStructure *loop,
         }
 
         if (auto *store = dyn_cast<StoreInst>(userInst)) {
-          if (object->mustAliasAMemoryLocationWithinObject(store->getPointerOperand())) {
+          if (object->mustAliasAMemoryLocationWithinObject(
+                  store->getPointerOperand())) {
             hasOutsideInitializationStore = true;
             continue;
           }
         }
 
-        if (isa<GetElementPtrInst>(userInst) || isa<BitCastInst>(userInst)
-            || userInst->isLifetimeStartOrEnd()) {
+        if (isa<GetElementPtrInst>(userInst) || isa<BitCastInst>(userInst) ||
+            userInst->isLifetimeStartOrEnd()) {
           continue;
         }
 
@@ -235,8 +269,8 @@ MemoryCloningAnalysis::MemoryCloningAnalysis(LoopStructure *loop,
       }
     }
 
-    if (!scopeWithinLoop && hasOutsideInitializationStore && hasLoopLoad
-        && alloca->getAllocatedType()->isAggregateType()) {
+    if (!scopeWithinLoop && hasOutsideInitializationStore && hasLoopLoad &&
+        alloca->getAllocatedType()->isAggregateType()) {
       for (auto const &loadInfo : loopLoads) {
         bool covered = hasLoopFullOverwrite;
         if (!covered) {
@@ -244,7 +278,8 @@ MemoryCloningAnalysis::MemoryCloningAnalysis(LoopStructure *loop,
             if (!DS.DT.dominates(storeInfo.first, loadInfo.first)) {
               continue;
             }
-            if (storeInfo.second.empty() || storeInfo.second == loadInfo.second) {
+            if (storeInfo.second.empty() ||
+                storeInfo.second == loadInfo.second) {
               covered = true;
               break;
             }
@@ -257,7 +292,8 @@ MemoryCloningAnalysis::MemoryCloningAnalysis(LoopStructure *loop,
       }
     }
 
-    object->setNeedsInitialization(!scopeWithinLoop && hasOutsideInitializationStore && hasLoopLoad);
+    object->setNeedsInitialization(
+        !scopeWithinLoop && hasOutsideInitializationStore && hasLoopLoad);
     object->setClonable(hasLoopUse && !hasIllegalOutsideUse);
     if (object->isClonableLocation()) {
       this->clonableMemoryLocations.push_back(std::move(object));
@@ -279,24 +315,26 @@ MemoryCloningAnalysis::getClonableMemoryObjectsFor(Instruction *I) const {
   std::unordered_set<ClonableMemoryObject *> result;
   for (auto const &location : this->clonableMemoryLocations) {
     auto *loc = location.get();
-    if (loc->getAllocation() == I || loc->isInstructionCastOrGEPOfLocation(I)
-        || loc->isInstructionLoadingLocation(I)
-        || loc->isInstructionStoringLocation(I)) {
+    if (loc->getAllocation() == I || loc->isInstructionCastOrGEPOfLocation(I) ||
+        loc->isInstructionLoadingLocation(I) ||
+        loc->isInstructionStoringLocation(I)) {
       result.insert(loc);
       continue;
     }
     if (auto *callInst = dyn_cast<CallInst>(I)) {
-      if (callInst->isLifetimeStartOrEnd()
-          && callInst->arg_size() > 1
-          && loc->mustAliasAMemoryLocationWithinObject(callInst->getArgOperand(1))) {
+      if (callInst->isLifetimeStartOrEnd() && callInst->arg_size() > 1 &&
+          loc->mustAliasAMemoryLocationWithinObject(
+              callInst->getArgOperand(1))) {
         result.insert(loc);
         continue;
       }
       auto intrinsic = callInst->getIntrinsicID();
-      if ((intrinsic == Intrinsic::memcpy || intrinsic == Intrinsic::memmove)
-          && callInst->arg_size() > 1
-          && (loc->mustAliasAMemoryLocationWithinObject(callInst->getArgOperand(0))
-              || loc->mustAliasAMemoryLocationWithinObject(callInst->getArgOperand(1)))) {
+      if ((intrinsic == Intrinsic::memcpy || intrinsic == Intrinsic::memmove) &&
+          callInst->arg_size() > 1 &&
+          (loc->mustAliasAMemoryLocationWithinObject(
+               callInst->getArgOperand(0)) ||
+           loc->mustAliasAMemoryLocationWithinObject(
+               callInst->getArgOperand(1)))) {
         result.insert(loc);
         continue;
       }
