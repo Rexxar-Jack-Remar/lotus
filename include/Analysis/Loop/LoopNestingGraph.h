@@ -23,8 +23,7 @@
 #define LOTUS_ANALYSIS_LOOP_LOOPNESTINGGRAPH_H
 
 #include "Analysis/Loop/FunctionLoopAnalyses.h"
-
-#include "llvm/Analysis/CallGraph.h"
+#include "IR/PDG/Core/PDGCallGraph.h"
 
 namespace lotus {
 namespace analysis {
@@ -130,7 +129,7 @@ public:
 
   static std::unique_ptr<LoopNestingGraph>
   buildFromAnalyses(std::vector<FunctionLoopAnalyses *> const &analyses,
-                    llvm::CallGraph &callGraph,
+                    llvm::Module &module,
                     Function *entryFunction);
 
 private:

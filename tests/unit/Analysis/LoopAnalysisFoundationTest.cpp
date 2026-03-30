@@ -1,4 +1,5 @@
 #include "Analysis/Loop/FunctionLoopAnalyses.h"
+#include "Analysis/Loop/LoopNestingGraph.h"
 #include "TestUtils/LLVMHelpers.h"
 
 #include "llvm/Analysis/CGSCCPassManager.h"
@@ -13,6 +14,7 @@ namespace {
 
 using lotus::analysis::loop::FunctionLoopAnalyses;
 using lotus::analysis::loop::FunctionLoopAnalysesPass;
+using lotus::analysis::loop::LoopNestingGraph;
 using lotus::analysis::loop::LoopStructure;
 using lotus::unittest::findInstructionByName;
 using lotus::unittest::parseModuleChecked;
@@ -163,6 +165,118 @@ TEST(FunctionLoopAnalysesTest, RegistersAsNewPmFunctionAnalysis) {
   auto structures = result.getLoopStructures();
   ASSERT_EQ(structures.size(), 2u);
   EXPECT_EQ(result.getLoopForest()->getTrees().size(), 1u);
+}
+
+TEST(FunctionLoopAnalysesTest, BuildsInterproceduralLoopNestingGraphWithMustAndMayEdges) {
+  llvm::LLVMContext context;
+  auto module = parseModuleChecked(context, R"(
+    define void @must_callee(i32 %n) {
+    entry:
+      br label %header
+    header:
+      %i = phi i32 [ 0, %entry ], [ %i.next, %latch ]
+      %cmp = icmp slt i32 %i, %n
+      br i1 %cmp, label %body, label %exit
+    body:
+      br label %latch
+    latch:
+      %i.next = add i32 %i, 1
+      br label %header
+    exit:
+      ret void
+    }
+
+    define void @may_callee(i32 %n) {
+    entry:
+      br label %header
+    header:
+      %i = phi i32 [ 0, %entry ], [ %i.next, %latch ]
+      %cmp = icmp slt i32 %i, %n
+      br i1 %cmp, label %body, label %exit
+    body:
+      br label %latch
+    latch:
+      %i.next = add i32 %i, 1
+      br label %header
+    exit:
+      ret void
+    }
+
+    define void @driver(i32 %n) {
+    entry:
+      br label %header
+    header:
+      %i = phi i32 [ 0, %entry ], [ %i.next, %latch ]
+      %cmp = icmp slt i32 %i, %n
+      br i1 %cmp, label %body, label %exit
+    body:
+      call void @must_callee(i32 %n)
+      %fp = select i1 true, void (i32)* @may_callee, void (i32)* @must_callee
+      call void %fp(i32 %n)
+      br label %latch
+    latch:
+      %i.next = add i32 %i, 1
+      br label %header
+    exit:
+      ret void
+    }
+  )");
+
+  std::vector<std::unique_ptr<FunctionLoopAnalyses>> ownedAnalyses;
+  std::vector<FunctionLoopAnalyses *> analyses;
+  for (auto &function : *module) {
+    if (function.isDeclaration()) {
+      continue;
+    }
+    llvm::DominatorTree DT(function);
+    llvm::PostDominatorTree PDT;
+    PDT.recalculate(function);
+    llvm::LoopInfo LI(DT);
+    if (LI.empty()) {
+      continue;
+    }
+    ownedAnalyses.emplace_back(new FunctionLoopAnalyses(function, LI, DT, PDT));
+    analyses.push_back(ownedAnalyses.back().get());
+  }
+
+  auto *entryFunction = module->getFunction("driver");
+  ASSERT_NE(entryFunction, nullptr);
+  auto graph = LoopNestingGraph::buildFromAnalyses(analyses, *module, entryFunction);
+  ASSERT_NE(graph, nullptr);
+
+  LoopStructure *driverLoop = nullptr;
+  LoopStructure *mustLoop = nullptr;
+  LoopStructure *mayLoop = nullptr;
+  for (auto *analysis : analyses) {
+    auto *function = analysis->getFunction();
+    auto loops = analysis->getLoopStructures();
+    ASSERT_EQ(loops.size(), 1u);
+    if (function->getName() == "driver") {
+      driverLoop = loops.front();
+    } else if (function->getName() == "must_callee") {
+      mustLoop = loops.front();
+    } else if (function->getName() == "may_callee") {
+      mayLoop = loops.front();
+    }
+  }
+
+  ASSERT_NE(driverLoop, nullptr);
+  ASSERT_NE(mustLoop, nullptr);
+  ASSERT_NE(mayLoop, nullptr);
+
+  auto *driverNode = graph->getLoopNode(driverLoop);
+  auto *mustNode = graph->getLoopNode(mustLoop);
+  auto *mayNode = graph->getLoopNode(mayLoop);
+  ASSERT_NE(driverNode, nullptr);
+  ASSERT_NE(mustNode, nullptr);
+  ASSERT_NE(mayNode, nullptr);
+
+  auto *mustEdge = driverNode->getNestingEdgeTo(mustNode);
+  auto *mayEdge = driverNode->getNestingEdgeTo(mayNode);
+  ASSERT_NE(mustEdge, nullptr);
+  ASSERT_NE(mayEdge, nullptr);
+  EXPECT_TRUE(mustEdge->isMust());
+  EXPECT_FALSE(mayEdge->isMust());
 }
 
 } // namespace

@@ -41,6 +41,33 @@ endif()
 
 message(STATUS "Found LLVM ${LLVM_PACKAGE_VERSION}")
 
+# Derive a stable LLVM tools directory for tests and helper commands. Prefer
+# the path exported by LLVMConfig.cmake; fall back to common layouts relative
+# to llvm-config or LLVM_DIR when needed.
+set(LOTUS_LLVM_TOOLS_BINARY_DIR "")
+if(DEFINED LLVM_TOOLS_BINARY_DIR AND EXISTS "${LLVM_TOOLS_BINARY_DIR}")
+  set(LOTUS_LLVM_TOOLS_BINARY_DIR "${LLVM_TOOLS_BINARY_DIR}")
+elseif(DEFINED LLVM_TOOLS_BINARY_DIR AND EXISTS "${LLVM_TOOLS_BINARY_DIR}/opt")
+  set(LOTUS_LLVM_TOOLS_BINARY_DIR "${LLVM_TOOLS_BINARY_DIR}")
+elseif(DEFINED LLVM_TOOLS_BINARY_DIR AND EXISTS "${LLVM_TOOLS_BINARY_DIR}/clang++")
+  set(LOTUS_LLVM_TOOLS_BINARY_DIR "${LLVM_TOOLS_BINARY_DIR}")
+elseif(DEFINED LLVM_TOOLS_BINARY_DIR AND EXISTS "${LLVM_TOOLS_BINARY_DIR}/clang++-14")
+  set(LOTUS_LLVM_TOOLS_BINARY_DIR "${LLVM_TOOLS_BINARY_DIR}")
+elseif(DEFINED LLVM_TOOLS_BINARY_DIR AND EXISTS "${LLVM_TOOLS_BINARY_DIR}/opt-14")
+  set(LOTUS_LLVM_TOOLS_BINARY_DIR "${LLVM_TOOLS_BINARY_DIR}")
+elseif(DEFINED LLVM_TOOLS_BINARY_DIR AND LLVM_TOOLS_BINARY_DIR)
+  set(LOTUS_LLVM_TOOLS_BINARY_DIR "${LLVM_TOOLS_BINARY_DIR}")
+elseif(DEFINED LLVM_DIR AND LLVM_DIR)
+  get_filename_component(_lotus_llvm_prefix "${LLVM_DIR}/../../.." ABSOLUTE)
+  if(EXISTS "${_lotus_llvm_prefix}/bin")
+    set(LOTUS_LLVM_TOOLS_BINARY_DIR "${_lotus_llvm_prefix}/bin")
+  endif()
+endif()
+
+if(LOTUS_LLVM_TOOLS_BINARY_DIR)
+  message(STATUS "Using LLVM tools from ${LOTUS_LLVM_TOOLS_BINARY_DIR}")
+endif()
+
 # Include LLVM CMake modules to make functions # like add_llvm_library available (if you want to use it)
 # include(AddLLVM)
 
@@ -57,5 +84,4 @@ include_directories(${LLVM_INCLUDE_DIRS}
   )
 add_definitions(${LLVM_DEFINITIONS})
 link_directories(${LLVM_LIBRARY_DIRS})
-
 

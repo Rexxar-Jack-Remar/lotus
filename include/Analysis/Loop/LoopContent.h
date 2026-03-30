@@ -30,6 +30,7 @@
 #include "Analysis/Loop/LoopForest.h"
 #include "Analysis/Loop/LoopIterationSpaceAnalysis.h"
 #include "Analysis/Loop/LoopSCCDAG.h"
+#include "Analysis/Loop/MemoryCloningAnalysis.h"
 #include "Analysis/Loop/SCCDAGAttrs.h"
 
 namespace lotus {
@@ -38,7 +39,7 @@ namespace loop {
 
 class LoopContent {
 public:
-  explicit LoopContent(LoopTree *loopNode) : loop{loopNode} {}
+  explicit LoopContent(LoopTree *loopNode);
 
   LoopTree *getLoopHierarchyStructures(void) const { return this->loop; }
 
@@ -64,10 +65,7 @@ public:
     return this->sccdag.get();
   }
 
-  void materializeDependenceGraph(pdg::ProgramGraph &pdg) {
-    this->dependenceGraph.reset(new LoopDependenceGraph(this->loop, pdg));
-    this->sccdag.reset(new LoopSCCDAG(*this->dependenceGraph));
-  }
+  void materializeDependenceGraph(pdg::ProgramGraph &pdg);
 
   bool hasInvariantManager(void) const {
     return this->invariantManager != nullptr;
@@ -88,14 +86,8 @@ public:
   }
 
   void materializeScalarAnalyses(llvm::ScalarEvolution &SE,
-                                 llvm::LoopInfo &LI) {
-    assert(this->dependenceGraph != nullptr);
-    assert(this->sccdag != nullptr);
-    this->invariantManager.reset(
-        new InvariantManager(this->getLoopStructure(), this->dependenceGraph.get()));
-    this->inductionVariables.reset(new InductionVariableManager(
-        this->loop, *this->invariantManager, SE, LI, *this->sccdag));
-  }
+                                 llvm::LoopInfo &LI,
+                                 const noelle::DominatorSummary &DS);
 
   bool hasEnvironment(void) const { return this->environment != nullptr; }
 
@@ -104,17 +96,9 @@ public:
     return this->environment.get();
   }
 
-  void materializeEnvironment(void) {
-    assert(this->dependenceGraph != nullptr);
-    this->environment.reset(new LoopEnvironment(
-        this->dependenceGraph.get(), this->getLoopStructure()->getLoopExitBasicBlocks()));
-  }
+  void materializeEnvironment(void);
 
-  void materializeLoopCarriedDependencies(const noelle::DominatorSummary &DS) {
-    assert(this->dependenceGraph != nullptr);
-    LoopCarriedDependencies::setLoopCarriedDependencies(
-        this->loop, DS, *this->dependenceGraph);
-  }
+  void materializeLoopCarriedDependencies(const noelle::DominatorSummary &DS);
 
   bool hasLoopIterationSpaceAnalysis(void) const {
     return this->iterationSpaceAnalysis != nullptr;
@@ -125,30 +109,7 @@ public:
     return this->iterationSpaceAnalysis.get();
   }
 
-  void materializeIterationSpaceAnalysis(llvm::ScalarEvolution &SE) {
-    assert(this->inductionVariables != nullptr);
-    this->iterationSpaceAnalysis.reset(
-        new LoopIterationSpaceAnalysis(this->loop, *this->inductionVariables, SE));
-
-    if (this->dependenceGraph == nullptr) {
-      return;
-    }
-    for (auto *edge : this->dependenceGraph->getEdges()) {
-      if (!edge->isLoopCarried() || edge->getKind() != LoopDependenceEdgeKind::Memory) {
-        continue;
-      }
-      auto *src = dyn_cast_or_null<Instruction>(edge->getSrc()->getValue());
-      auto *dst = dyn_cast_or_null<Instruction>(edge->getDst()->getValue());
-      if (src == nullptr || dst == nullptr) {
-        continue;
-      }
-      if (this->iterationSpaceAnalysis
-              ->areInstructionsAccessingDisjointMemoryLocationsBetweenIterations(
-                  src, dst)) {
-        edge->setLoopCarried(false);
-      }
-    }
-  }
+  void materializeIterationSpaceAnalysis(llvm::ScalarEvolution &SE);
 
   bool hasSCCAttrs(void) const { return this->sccAttrs != nullptr; }
 
@@ -158,17 +119,7 @@ public:
   }
 
   void materializeSCCAttrs(bool enableFloatAsReal,
-                           noelle::DominatorSummary &DS) {
-    assert(this->dependenceGraph != nullptr);
-    assert(this->sccdag != nullptr);
-    assert(this->inductionVariables != nullptr);
-    this->sccAttrs.reset(new SCCDAGAttrs(enableFloatAsReal,
-                                         this->dependenceGraph.get(),
-                                         this->sccdag.get(),
-                                         this->loop,
-                                         *this->inductionVariables,
-                                         DS));
-  }
+                           noelle::DominatorSummary &DS);
 
   bool doesHaveCompileTimeKnownTripCount(void) const {
     return this->compileTimeKnownTripCount;
@@ -182,13 +133,25 @@ public:
   }
 
 private:
+  void invalidateDerivedAnalyses(void);
+  void rebuildSCCDAG(void);
+  void buildEnvironment(const std::set<Value *> &excludeValues);
+  void removeMemoryCloningNegatedDependences(void);
+  void removeLoopCarriedDependencesProvedDisjoint(
+      LoopIterationSpaceAnalysis &analysis);
+  bool canInstructionReachWithinSameIteration(Instruction *from,
+                                              Instruction *to) const;
+
   LoopTree *loop;
   std::unique_ptr<LoopDependenceGraph> dependenceGraph;
   std::unique_ptr<LoopSCCDAG> sccdag;
+  std::unique_ptr<LoopDependenceGraph> ivDependenceGraph;
+  std::unique_ptr<LoopSCCDAG> ivSCCDAG;
   std::unique_ptr<LoopEnvironment> environment;
   std::unique_ptr<InvariantManager> invariantManager;
   std::unique_ptr<InductionVariableManager> inductionVariables;
   std::unique_ptr<LoopIterationSpaceAnalysis> iterationSpaceAnalysis;
+  std::unique_ptr<MemoryCloningAnalysis> memoryCloningAnalysis;
   std::unique_ptr<SCCDAGAttrs> sccAttrs;
   bool compileTimeKnownTripCount{false};
   uint64_t tripCount{0};

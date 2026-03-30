@@ -109,9 +109,6 @@
   void instantiateIDsAndBasicBlocks(Loop *llvmLoop);
  
   bool isContainedInstructionLoopInvariant(Instruction *inst) const;
-  bool isContainedInstructionLoopInvariant(
-      Instruction *inst,
-      std::unordered_set<Instruction *> &visiting) const;
  };
  
  } // namespace noelle

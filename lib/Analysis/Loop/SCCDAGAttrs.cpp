@@ -9,19 +9,23 @@ namespace loop {
 
 GenericSCC::GenericSCC(SCCKind K, LoopSCC *s, LoopStructure *loop)
     : loop{loop}, scc{s}, kind{K}, hasMemoryDependences{false} {
+  std::unordered_set<LoopDependenceNode *> internalNodeSet;
   for (auto &pair : s->internalNodePairs()) {
     auto *node = pair.second;
+    internalNodeSet.insert(node);
     auto *phi = dyn_cast_or_null<PHINode>(node->getValue());
     if (phi != nullptr) {
       this->PHINodes.insert(phi);
     }
+  }
+
+  for (auto &pair : s->internalNodePairs()) {
+    auto *node = pair.second;
     for (auto *edge : node->getOutgoingEdges()) {
       auto *dst = edge->getDst();
-      if (dst == nullptr || !dst->isInternal()) {
+      if (dst == nullptr || internalNodeSet.count(dst) == 0) {
         continue;
       }
-      auto *dstScc = s;
-      (void)dstScc;
       if (edge->getKind() == LoopDependenceEdgeKind::Memory) {
         this->hasMemoryDependences = true;
       }
@@ -282,6 +286,15 @@ LoopCarriedVariable *SCCDAGAttrs::checkIfReducible(LoopSCC *scc, LoopTree *loopN
     if (dep->getKind() == LoopDependenceEdgeKind::Memory) {
       return nullptr;
     }
+
+    auto *producer = dep->getSrc()->getValue();
+    if (dep->getKind() == LoopDependenceEdgeKind::Control) {
+      if (scc->isInternal(producer)) {
+        return nullptr;
+      }
+      continue;
+    }
+
     auto *consumer = dyn_cast_or_null<PHINode>(dep->getDst()->getValue());
     if (consumer == nullptr) {
       return nullptr;
@@ -327,18 +340,115 @@ std::tuple<bool, Value *, Value *, Value *, PHINode *> SCCDAGAttrs::checkIfPerio
     return notPeriodic;
   }
   for (auto *dep : it->second) {
-    auto *to = dyn_cast_or_null<PHINode>(dep->getDst()->getValue());
-    auto *fromInst = dyn_cast_or_null<Instruction>(dep->getSrc()->getValue());
-    if (to == nullptr || fromInst == nullptr) {
+    if (!dep->isLoopCarried() || dep->getKind() == LoopDependenceEdgeKind::Control) {
       continue;
     }
-    if (fromInst->getOpcode() == Instruction::Xor
-        && isa<ConstantInt>(fromInst->getOperand(1))
-        && cast<ConstantInt>(fromInst->getOperand(1))->isOne()) {
+
+    auto *to = dyn_cast_or_null<PHINode>(dep->getDst()->getValue());
+    auto *from = dep->getSrc()->getValue();
+    if (to == nullptr || from == nullptr) {
+      return notPeriodic;
+    }
+    if (to->getNumIncomingValues() != 2) {
+      return notPeriodic;
+    }
+
+    if (auto *fromPhi = dyn_cast<PHINode>(from)) {
+      bool fromHasExternalUsers = false;
+      bool toHasExternalUsers = false;
+      for (auto *user : from->users()) {
+        if (user == to) {
+          continue;
+        }
+        if (isa<Instruction>(user)) {
+          fromHasExternalUsers = true;
+        }
+      }
+      for (auto *user : to->users()) {
+        if (user == from) {
+          continue;
+        }
+        if (isa<Instruction>(user)) {
+          toHasExternalUsers = true;
+        }
+      }
+      if (fromHasExternalUsers && toHasExternalUsers) {
+        return notPeriodic;
+      }
+
+      int fromInitialIdx = (fromPhi->getIncomingValue(0) == to) ? 1 : 0;
+      int toInitialIdx = (to->getIncomingValue(0) == from) ? 1 : 0;
+      if (fromPhi->getIncomingBlock(fromInitialIdx) != loopNode->getLoop()->getPreHeader()
+          || to->getIncomingBlock(toInitialIdx) != loopNode->getLoop()->getPreHeader()) {
+        return notPeriodic;
+      }
+
+      Value *initial = nullptr;
+      Value *secondaryInitial = nullptr;
+      PHINode *accumulator = nullptr;
+      if (fromHasExternalUsers) {
+        initial = fromPhi->getIncomingValue(fromInitialIdx);
+        secondaryInitial = to->getIncomingValue(toInitialIdx);
+        accumulator = fromPhi;
+      } else {
+        initial = to->getIncomingValue(toInitialIdx);
+        secondaryInitial = fromPhi->getIncomingValue(fromInitialIdx);
+        accumulator = to;
+      }
+
+      auto *initialCI = dyn_cast<ConstantInt>(initial);
+      auto *secondaryCI = dyn_cast<ConstantInt>(secondaryInitial);
+      if (initialCI == nullptr || secondaryCI == nullptr) {
+        return notPeriodic;
+      }
+
       auto *period = ConstantInt::get(Type::getInt64Ty(to->getContext()), 2);
-      auto *step = fromInst->getOperand(1);
-      auto *initial = to->getIncomingValueForBlock(loopNode->getLoop()->getPreHeader());
-      return std::make_tuple(true, initial, period, step, to);
+      auto *step = ConstantExpr::getSub(secondaryCI, initialCI);
+      return std::make_tuple(true, initial, period, step, accumulator);
+    }
+
+    auto *fromInst = dyn_cast<Instruction>(from);
+    if (fromInst == nullptr) {
+      return notPeriodic;
+    }
+
+    Value *initial =
+        (to->getIncomingValue(0) == from) ? to->getIncomingValue(1) : to->getIncomingValue(0);
+    Value *period = nullptr;
+    Value *step = nullptr;
+    bool found = false;
+    switch (fromInst->getOpcode()) {
+    case Instruction::Xor: {
+      period = ConstantInt::get(Type::getInt64Ty(fromInst->getContext()), 2);
+      auto *fromOperand = fromInst->getOperand(1);
+      auto *fromCI = dyn_cast<ConstantInt>(fromOperand);
+      auto *initialCI = dyn_cast<ConstantInt>(initial);
+      if (fromCI != nullptr && initialCI != nullptr && initialCI->isZero()
+          && fromCI->isOne()) {
+        step = fromOperand;
+        found = true;
+      }
+      break;
+    }
+    case Instruction::Sub: {
+      period = ConstantInt::get(Type::getInt64Ty(fromInst->getContext()), 2);
+      auto *fromOperand = fromInst->getOperand(0);
+      auto *fromCI = dyn_cast<ConstantInt>(fromOperand);
+      auto *initialCI = dyn_cast<ConstantInt>(initial);
+      if (fromCI != nullptr && fromCI->isZero() && initialCI != nullptr) {
+        auto sign = initialCI->isNegative() ? 1 : -1;
+        step = ConstantInt::get(Type::getInt64Ty(fromInst->getContext()),
+                                2 * sign * initialCI->getSExtValue());
+        found = true;
+      }
+      break;
+    }
+    default:
+      return notPeriodic;
+    }
+
+    if (found) {
+      return std::make_tuple(true, initial, period, step, nullptr);
     }
   }
   return notPeriodic;
@@ -389,6 +499,8 @@ std::set<InductionVariable *> SCCDAGAttrs::checkIfSCCOnlyContainsInductionVariab
             dyn_cast<Instruction>(attribution.getExitConditionValue())) {
       containedInsts.insert(condInst);
     }
+    auto derivation = attribution.getConditionValueDerivation();
+    containedInsts.insert(derivation.begin(), derivation.end());
   }
 
   for (auto &pair : scc->internalNodePairs()) {
@@ -403,6 +515,12 @@ std::set<InductionVariable *> SCCDAGAttrs::checkIfSCCOnlyContainsInductionVariab
 std::set<Instruction *> SCCDAGAttrs::checkIfRecomputable(
     LoopSCC *scc,
     LoopTree *loopNode) const {
+  for (auto *edge : scc->getEdges()) {
+    if (edge->getKind() == LoopDependenceEdgeKind::Memory) {
+      return {};
+    }
+  }
+
   auto it = this->sccToLoopCarriedDependencies.find(scc);
   if (it == this->sccToLoopCarriedDependencies.end()) {
     return {};
@@ -430,24 +548,16 @@ std::set<Instruction *> SCCDAGAttrs::checkIfRecomputable(
 std::set<AllocaInst *> SCCDAGAttrs::checkIfClonableByUsingLocalMemory(
     LoopSCC *scc,
     LoopTree *) const {
-  std::set<AllocaInst *> allocations;
-  bool sawMemoryUsingInstruction = false;
-  bool sawMutation = false;
-  for (auto &pair : scc->internalNodePairs()) {
-    auto *inst = dyn_cast_or_null<Instruction>(pair.first);
-    if (inst == nullptr) {
-      continue;
-    }
+  auto it = this->sccToLoopCarriedDependencies.find(scc);
+  if (it == this->sccToLoopCarriedDependencies.end()) {
+    return {};
+  }
 
-    bool memoryUsingInstruction = isa<LoadInst>(inst) || isa<StoreInst>(inst);
-    if (auto *call = dyn_cast<CallInst>(inst)) {
-      auto intrinsic = call->getIntrinsicID();
-      memoryUsingInstruction = memoryUsingInstruction
-                               || intrinsic == Intrinsic::memcpy
-                               || intrinsic == Intrinsic::memmove;
-    }
-    if (!memoryUsingInstruction) {
-      continue;
+  std::set<AllocaInst *> allocations;
+  for (auto *dependency : it->second) {
+    auto *inst = dyn_cast_or_null<Instruction>(dependency->getSrc()->getValue());
+    if (inst == nullptr) {
+      return {};
     }
 
     auto locs = this->memoryCloningAnalysis->getClonableMemoryObjectsFor(inst);
@@ -457,22 +567,32 @@ std::set<AllocaInst *> SCCDAGAttrs::checkIfClonableByUsingLocalMemory(
 
     bool usesClonableLocation = false;
     for (auto *loc : locs) {
-      if (!loc->isInstructionLoadingLocation(inst)
-          && !loc->isInstructionStoringLocation(inst)) {
-        continue;
+      bool isMemoryTraffic = loc->isInstructionLoadingLocation(inst)
+                             || loc->isInstructionStoringLocation(inst);
+      if (!isMemoryTraffic) {
+        if (auto *callInst = dyn_cast<CallInst>(inst)) {
+          if (callInst->isLifetimeStartOrEnd()) {
+            continue;
+          }
+          for (auto &arg : callInst->args()) {
+            if (loc->mustAliasAMemoryLocationWithinObject(arg.get())) {
+              isMemoryTraffic = true;
+              break;
+            }
+          }
+        }
       }
-      usesClonableLocation = true;
-      allocations.insert(loc->getAllocation());
+      if (isMemoryTraffic) {
+        usesClonableLocation = true;
+        allocations.insert(loc->getAllocation());
+      }
     }
     if (!usesClonableLocation) {
       return {};
     }
-    sawMemoryUsingInstruction = true;
-    sawMutation = sawMutation || isa<StoreInst>(inst) || isa<CallInst>(inst);
   }
-  return (!sawMemoryUsingInstruction || !sawMutation || allocations.empty())
-             ? std::set<AllocaInst *>{}
-                                                             : allocations;
+
+  return allocations;
 }
 
 GenericSCC *SCCDAGAttrs::getSCCAttrs(LoopSCC *scc) const {
@@ -492,6 +612,186 @@ std::set<LoopCarriedSCC *> SCCDAGAttrs::getSCCsWithLoopCarriedDependencies(void)
     }
   }
   return result;
+}
+
+std::set<LoopCarriedSCC *> SCCDAGAttrs::getSCCsWithLoopCarriedDataDependencies(
+    void) const {
+  std::set<LoopCarriedSCC *> result;
+  for (auto &pair : this->sccToLoopCarriedDependencies) {
+    bool hasData = false;
+    for (auto *dep : pair.second) {
+      if (dep->getKind() != LoopDependenceEdgeKind::Control) {
+        hasData = true;
+        break;
+      }
+    }
+    if (!hasData) {
+      continue;
+    }
+    auto *attrs = dynamic_cast<LoopCarriedSCC *>(this->getSCCAttrs(pair.first));
+    if (attrs != nullptr) {
+      result.insert(attrs);
+    }
+  }
+  return result;
+}
+
+std::set<LoopCarriedSCC *>
+SCCDAGAttrs::getSCCsWithLoopCarriedControlDependencies(void) const {
+  std::set<LoopCarriedSCC *> result;
+  for (auto &pair : this->sccToLoopCarriedDependencies) {
+    bool hasControl = false;
+    for (auto *dep : pair.second) {
+      if (dep->getKind() == LoopDependenceEdgeKind::Control) {
+        hasControl = true;
+        break;
+      }
+    }
+    if (!hasControl) {
+      continue;
+    }
+    auto *attrs = dynamic_cast<LoopCarriedSCC *>(this->getSCCAttrs(pair.first));
+    if (attrs != nullptr) {
+      result.insert(attrs);
+    }
+  }
+  return result;
+}
+
+std::unordered_set<GenericSCC *> SCCDAGAttrs::getSCCsOfKind(
+    GenericSCC::SCCKind kind) const {
+  std::unordered_set<GenericSCC *> result;
+  for (auto &pair : this->sccToInfo) {
+    if (pair.second != nullptr && pair.second->getKind() == kind) {
+      result.insert(pair.second.get());
+    }
+  }
+  return result;
+}
+
+bool SCCDAGAttrs::isLoopGovernedBySCC(LoopSCC *governingSCC) const {
+  std::queue<LoopSCC *> toTraverse;
+  std::unordered_set<LoopSCC *> visited;
+  std::set<LoopSCC *> topLevelLoopCarriedSCCs;
+
+  for (auto *scc : this->sccdag->getSCCs()) {
+    if (scc->getPredecessors().empty()) {
+      toTraverse.push(scc);
+    }
+  }
+
+  while (!toTraverse.empty()) {
+    auto *scc = toTraverse.front();
+    toTraverse.pop();
+    if (!visited.insert(scc).second) {
+      continue;
+    }
+
+    auto *info = this->getSCCAttrs(scc);
+    if (info == nullptr) {
+      continue;
+    }
+    if (info->getKind() == GenericSCC::LOOP_ITERATION) {
+      for (auto *succ : scc->getSuccessors()) {
+        toTraverse.push(succ);
+      }
+      continue;
+    }
+
+    topLevelLoopCarriedSCCs.insert(scc);
+  }
+
+  return topLevelLoopCarriedSCCs.size() == 1
+         && *topLevelLoopCarriedSCCs.begin() == governingSCC;
+}
+
+std::set<uint32_t> SCCDAGAttrs::getLiveOutVariablesThatAreNotReducable(
+    LoopEnvironment *env) const {
+  std::set<uint32_t> result;
+  if (env == nullptr) {
+    return result;
+  }
+
+  for (auto envID : env->getEnvIDsOfLiveOutVars()) {
+    auto *producer = env->getProducer(envID);
+    auto *scc = this->sccdag->getSCC(producer);
+    if (scc == nullptr) {
+      result.insert(envID);
+      continue;
+    }
+    auto *info = this->getSCCAttrs(scc);
+    if (info == nullptr) {
+      result.insert(envID);
+      continue;
+    }
+    if (info->getKind() == GenericSCC::BINARY_REDUCTION
+        || info->getKind() == GenericSCC::LOOP_ITERATION) {
+      continue;
+    }
+    result.insert(envID);
+  }
+
+  return result;
+}
+
+bool SCCDAGAttrs::isSCCContainedInSubloop(LoopTree *loopNode, LoopSCC *scc) const {
+  if (loopNode == nullptr || scc == nullptr) {
+    return false;
+  }
+  auto *topLoop = loopNode->getLoop();
+  for (auto &pair : scc->internalNodePairs()) {
+    auto *inst = dyn_cast<Instruction>(pair.first);
+    if (inst == nullptr) {
+      return false;
+    }
+    if (loopNode->getInnermostLoopThatContains(inst) == topLoop) {
+      return false;
+    }
+  }
+  return true;
+}
+
+std::pair<SCCDAGAttrs::SCCParentMap, SCCDAGAttrs::SCCEdgeMap>
+SCCDAGAttrs::computeSCCDAGWhenSCCsAreIgnored(
+    std::function<bool(GenericSCC *)> ignoreSCC) const {
+  SCCParentMap parentsViaIgnored;
+  SCCEdgeMap edgesViaIgnored;
+
+  auto addIncomingNodes =
+      [&](std::queue<LoopSCC *> &queue, LoopSCC *scc) -> void {
+    for (auto *pred : scc->getPredecessors()) {
+      queue.push(pred);
+      edgesViaIgnored[scc].insert(std::make_pair(pred, scc));
+    }
+  };
+
+  for (auto *childSCC : this->sccdag->getSCCs()) {
+    std::queue<LoopSCC *> nodesToCheck;
+    std::unordered_set<LoopSCC *> analyzed;
+
+    analyzed.insert(childSCC);
+    addIncomingNodes(nodesToCheck, childSCC);
+
+    while (!nodesToCheck.empty()) {
+      auto *scc = nodesToCheck.front();
+      nodesToCheck.pop();
+      if (scc == nullptr) {
+        continue;
+      }
+
+      auto *sccInfo = this->getSCCAttrs(scc);
+      parentsViaIgnored[childSCC].insert(scc);
+      if (sccInfo == nullptr || !ignoreSCC(sccInfo)) {
+        continue;
+      }
+      if (!analyzed.insert(scc).second) {
+        continue;
+      }
+      addIncomingNodes(nodesToCheck, scc);
+    }
+  }
+
+  return std::make_pair(std::move(parentsViaIgnored), std::move(edgesViaIgnored));
 }
 
 LoopSCCDAG *SCCDAGAttrs::getSCCDAG(void) const { return this->sccdag; }

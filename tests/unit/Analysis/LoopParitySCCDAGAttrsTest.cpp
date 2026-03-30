@@ -36,6 +36,50 @@ using pdg::DataDependencyGraph;
 using pdg::ProgramDependencyGraph;
 using pdg::ProgramGraph;
 
+static std::string renderNoelleLikeValue(llvm::Value *value) {
+  if (value == nullptr) {
+    return "";
+  }
+
+  if (auto *ce = llvm::dyn_cast<llvm::ConstantExpr>(value)) {
+    if (ce->getOpcode() == llvm::Instruction::GetElementPtr) {
+      std::string text = valueToString(ce);
+      auto firstSpace = text.find(' ');
+      if (firstSpace != std::string::npos) {
+        text.erase(0, firstSpace + 1);
+      }
+      const std::string inbounds = "inbounds ";
+      auto inboundsPos = text.find(inbounds);
+      if (inboundsPos != std::string::npos) {
+        text.erase(inboundsPos, inbounds.size());
+      }
+      auto gepPos = text.find("getelementptr (");
+      if (gepPos != std::string::npos) {
+        text.erase(gepPos + std::strlen("getelementptr "), 1);
+        if (!text.empty() && text.back() == ')') {
+          text.pop_back();
+        }
+      }
+      return std::string("%ce = ") + text;
+    }
+  }
+
+  if (auto *call = llvm::dyn_cast<llvm::CallBase>(value)) {
+    std::string text = valueToString(call);
+    auto gepPos = text.find("getelementptr");
+    if (gepPos != std::string::npos) {
+      auto argStart = text.rfind("i8* ", gepPos);
+      auto argEnd = text.find(", i32", gepPos);
+      if (argStart != std::string::npos && argEnd != std::string::npos) {
+        text.replace(argStart, argEnd - argStart, "i8* %ce0");
+      }
+    }
+    return text;
+  }
+
+  return valueToString(value);
+}
+
 static std::string llPath(const std::string &name) {
   return std::string(LOTUS_NOELLE_LOOP_PARITY_LL_DIR) + "/sccdag_attributes_" + name + ".ll";
 }
@@ -70,9 +114,9 @@ static Values collectSCCDAGNodes(FunctionLoopAnalyses &analyses, llvm::LoopInfo 
   Values values;
   for (auto *scc : orderedSCCs(analyses, LI)) {
     std::vector<std::string> sccValues;
-    for (auto *node : scc->getNodes()) {
-      if (node->getValue() != nullptr) {
-        sccValues.push_back(valueToString(node->getValue()));
+    for (auto &pair : scc->internalNodePairs()) {
+      if (pair.first != nullptr) {
+        sccValues.push_back(renderNoelleLikeValue(pair.first));
       }
     }
     values.insert(combineUnorderedValues(sccValues));
@@ -92,9 +136,9 @@ static Values collectSCCsByKind(FunctionLoopAnalyses &analyses,
       continue;
     }
     std::vector<std::string> sccValues;
-    for (auto *node : scc->getNodes()) {
-      if (node->getValue() != nullptr) {
-        sccValues.push_back(valueToString(node->getValue()));
+    for (auto &pair : scc->internalNodePairs()) {
+      if (pair.first != nullptr) {
+        sccValues.push_back(renderNoelleLikeValue(pair.first));
       }
     }
     values.insert(combineUnorderedValues(sccValues));
@@ -126,8 +170,8 @@ static Values collectClonableSCCs(FunctionLoopAnalyses &analyses, llvm::LoopInfo
     bool clonable = false;
 
     bool onlyTerminators = true;
-    for (auto *node : scc->getNodes()) {
-      auto *inst = llvm::dyn_cast_or_null<llvm::Instruction>(node->getValue());
+    for (auto &pair : scc->internalNodePairs()) {
+      auto *inst = llvm::dyn_cast_or_null<llvm::Instruction>(pair.first);
       if (inst == nullptr) {
         continue;
       }
@@ -164,9 +208,9 @@ static Values collectClonableSCCs(FunctionLoopAnalyses &analyses, llvm::LoopInfo
       continue;
     }
     std::vector<std::string> sccValues;
-    for (auto *node : scc->getNodes()) {
-      if (node->getValue() != nullptr) {
-        sccValues.push_back(valueToString(node->getValue()));
+    for (auto &pair : scc->internalNodePairs()) {
+      if (pair.first != nullptr) {
+        sccValues.push_back(renderNoelleLikeValue(pair.first));
       }
     }
     values.insert(combineUnorderedValues(sccValues));

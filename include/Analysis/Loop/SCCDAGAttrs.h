@@ -5,6 +5,7 @@
 #define LOTUS_ANALYSIS_LOOP_SCCDAGATTRS_H
 
 #include "Analysis/Loop/LoopIterationSpaceAnalysis.h"
+#include "Analysis/Loop/LoopEnvironment.h"
 #include "Analysis/Loop/MemoryCloningAnalysis.h"
 #include "Analysis/Loop/Variable.h"
 
@@ -211,6 +212,11 @@ public:
 
 class SCCDAGAttrs {
 public:
+  using SCCParentMap = std::unordered_map<LoopSCC *, std::unordered_set<LoopSCC *>>;
+  using SCCEdgeSet =
+      std::set<std::pair<LoopSCC *, LoopSCC *>>;
+  using SCCEdgeMap = std::unordered_map<LoopSCC *, SCCEdgeSet>;
+
   SCCDAGAttrs(bool enableFloatAsReal,
               LoopDependenceGraph *loopDG,
               LoopSCCDAG *loopSCCDAG,
@@ -220,6 +226,15 @@ public:
 
   GenericSCC *getSCCAttrs(LoopSCC *scc) const;
   std::set<LoopCarriedSCC *> getSCCsWithLoopCarriedDependencies(void) const;
+  std::set<LoopCarriedSCC *> getSCCsWithLoopCarriedDataDependencies(void) const;
+  std::set<LoopCarriedSCC *> getSCCsWithLoopCarriedControlDependencies(void) const;
+  std::unordered_set<GenericSCC *> getSCCsOfKind(GenericSCC::SCCKind kind) const;
+  bool isLoopGovernedBySCC(LoopSCC *scc) const;
+  std::set<uint32_t> getLiveOutVariablesThatAreNotReducable(
+      LoopEnvironment *env) const;
+  bool isSCCContainedInSubloop(LoopTree *loopNode, LoopSCC *scc) const;
+  std::pair<SCCParentMap, SCCEdgeMap> computeSCCDAGWhenSCCsAreIgnored(
+      std::function<bool(GenericSCC *)> ignoreSCC) const;
   LoopSCCDAG *getSCCDAG(void) const;
 
 private:

@@ -119,6 +119,19 @@ TEST_F(LoopClassificationTest, ClassifiesIVAndReductionSCCsAndTripCount) {
   ASSERT_NE(iInfo, nullptr);
   EXPECT_EQ(sumInfo->getKind(), GenericSCC::BINARY_REDUCTION);
   EXPECT_EQ(iInfo->getKind(), GenericSCC::LINEAR_INDUCTION_VARIABLE);
+
+  auto reductionSCCs = attrs->getSCCsOfKind(GenericSCC::BINARY_REDUCTION);
+  EXPECT_EQ(reductionSCCs.size(), 1u);
+  EXPECT_EQ((*reductionSCCs.begin())->getSCC(), sumSCC);
+
+  auto carriedSCCs = attrs->getSCCsWithLoopCarriedDependencies();
+  EXPECT_FALSE(carriedSCCs.empty());
+  auto carriedDataSCCs = attrs->getSCCsWithLoopCarriedDataDependencies();
+  EXPECT_FALSE(carriedDataSCCs.empty());
+
+  auto liveOutsNotReducible =
+      attrs->getLiveOutVariablesThatAreNotReducable(content->getEnvironment());
+  EXPECT_TRUE(liveOutsNotReducible.empty());
 }
 
 TEST_F(LoopClassificationTest, ClassifiesClonableStackObjectAndRefinesCarriedMemory) {
@@ -182,6 +195,10 @@ TEST_F(LoopClassificationTest, ClassifiesClonableStackObjectAndRefinesCarriedMem
   auto *info = attrs->getSCCAttrs(scc);
   ASSERT_NE(info, nullptr);
   EXPECT_EQ(info->getKind(), GenericSCC::STACK_OBJECT_CLONABLE);
+
+  auto clonableSCCs = attrs->getSCCsOfKind(GenericSCC::STACK_OBJECT_CLONABLE);
+  EXPECT_EQ(clonableSCCs.size(), 1u);
+  EXPECT_EQ((*clonableSCCs.begin())->getSCC(), scc);
 }
 
 } // namespace

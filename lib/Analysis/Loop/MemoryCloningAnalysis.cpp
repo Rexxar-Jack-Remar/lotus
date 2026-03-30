@@ -29,6 +29,61 @@ Value *stripLocationCasts(Value *value) {
   return current;
 }
 
+bool isMemoryTransferIntrinsic(CallInst *call) {
+  if (call == nullptr) {
+    return false;
+  }
+  Intrinsic::ID intrinsic = call->getIntrinsicID();
+  return intrinsic == Intrinsic::memcpy || intrinsic == Intrinsic::memmove;
+}
+
+bool collectAccessKey(Value *value,
+                      AllocaInst *allocation,
+                      std::vector<int64_t> &indices) {
+  if (value == allocation) {
+    return true;
+  }
+  if (auto *bitcast = dyn_cast<BitCastInst>(value)) {
+    return collectAccessKey(bitcast->getOperand(0), allocation, indices);
+  }
+  if (auto *addrspace = dyn_cast<AddrSpaceCastInst>(value)) {
+    return collectAccessKey(addrspace->getOperand(0), allocation, indices);
+  }
+  if (auto *gep = dyn_cast<GetElementPtrInst>(value)) {
+    if (!collectAccessKey(gep->getPointerOperand(), allocation, indices)) {
+      return false;
+    }
+    for (auto idx = gep->idx_begin(); idx != gep->idx_end(); ++idx) {
+      auto *constantIndex = dyn_cast<ConstantInt>(idx->get());
+      if (constantIndex == nullptr) {
+        return false;
+      }
+      indices.push_back(constantIndex->getSExtValue());
+    }
+    return true;
+  }
+  return false;
+}
+
+std::string accessKeyFor(Value *pointer, AllocaInst *allocation) {
+  std::vector<int64_t> indices;
+  if (!collectAccessKey(pointer, allocation, indices)) {
+    return "";
+  }
+  if (indices.empty()) {
+    return "";
+  }
+  size_t start = (indices.size() > 1 && indices[0] == 0) ? 1 : 0;
+  std::string key;
+  for (size_t i = start; i < indices.size(); ++i) {
+    if (!key.empty()) {
+      key += ".";
+    }
+    key += std::to_string(indices[i]);
+  }
+  return key;
+}
+
 } // namespace
 
 ClonableMemoryObject::ClonableMemoryObject(AllocaInst *allocation, uint64_t sizeInBits)
@@ -63,7 +118,7 @@ void ClonableMemoryObject::setNeedsInitialization(bool needsInitialization) {
 }
 
 MemoryCloningAnalysis::MemoryCloningAnalysis(LoopStructure *loop,
-                                             noelle::DominatorSummary &,
+                                             noelle::DominatorSummary &DS,
                                              LoopDependenceGraph *ldg) {
   assert(loop != nullptr);
   assert(ldg != nullptr);
@@ -89,6 +144,10 @@ MemoryCloningAnalysis::MemoryCloningAnalysis(LoopStructure *loop,
     bool hasIllegalOutsideUse = false;
     bool hasOutsideInitializationStore = false;
     bool hasLoopLoad = false;
+    bool scopeWithinLoop = false;
+    bool hasLoopFullOverwrite = false;
+    std::vector<std::pair<Instruction *, std::string>> loopStores;
+    std::vector<std::pair<Instruction *, std::string>> loopLoads;
 
     std::queue<Value *> worklist;
     std::unordered_set<Value *> visited;
@@ -119,20 +178,35 @@ MemoryCloningAnalysis::MemoryCloningAnalysis(LoopStructure *loop,
           object->addLoad(load);
           if (loop->isIncluded(load)) {
             hasLoopLoad = true;
+            loopLoads.emplace_back(load,
+                                   accessKeyFor(load->getPointerOperand(), alloca));
           }
         }
         if (auto *store = dyn_cast<StoreInst>(userInst)) {
           if (object->mustAliasAMemoryLocationWithinObject(store->getPointerOperand())) {
             object->addStore(store);
+            if (loop->isIncluded(store)) {
+              loopStores.emplace_back(store,
+                                      accessKeyFor(store->getPointerOperand(), alloca));
+            }
           }
         }
         if (auto *call = dyn_cast<CallInst>(userInst)) {
           if (call->isLifetimeStartOrEnd()) {
+            if (call->arg_size() > 1
+                && object->mustAliasAMemoryLocationWithinObject(call->getArgOperand(1))
+                && loop->isIncluded(call)) {
+              scopeWithinLoop = true;
+            }
             continue;
           }
-          if (auto intrinsic = call->getIntrinsicID();
-              intrinsic == Intrinsic::memcpy || intrinsic == Intrinsic::memmove) {
+          if (isMemoryTransferIntrinsic(call)) {
             hasLoopUse |= loop->isIncluded(call);
+            if (loop->isIncluded(call)
+                && call->arg_size() > 0
+                && object->mustAliasAMemoryLocationWithinObject(call->getArgOperand(0))) {
+              hasLoopFullOverwrite = true;
+            }
             if (!loop->isIncluded(call)) {
               hasIllegalOutsideUse = true;
             }
@@ -161,7 +235,29 @@ MemoryCloningAnalysis::MemoryCloningAnalysis(LoopStructure *loop,
       }
     }
 
-    object->setNeedsInitialization(hasOutsideInitializationStore && hasLoopLoad);
+    if (!scopeWithinLoop && hasOutsideInitializationStore && hasLoopLoad
+        && alloca->getAllocatedType()->isAggregateType()) {
+      for (auto const &loadInfo : loopLoads) {
+        bool covered = hasLoopFullOverwrite;
+        if (!covered) {
+          for (auto const &storeInfo : loopStores) {
+            if (!DS.DT.dominates(storeInfo.first, loadInfo.first)) {
+              continue;
+            }
+            if (storeInfo.second.empty() || storeInfo.second == loadInfo.second) {
+              covered = true;
+              break;
+            }
+          }
+        }
+        if (!covered) {
+          hasIllegalOutsideUse = true;
+          break;
+        }
+      }
+    }
+
+    object->setNeedsInitialization(!scopeWithinLoop && hasOutsideInitializationStore && hasLoopLoad);
     object->setClonable(hasLoopUse && !hasIllegalOutsideUse);
     if (object->isClonableLocation()) {
       this->clonableMemoryLocations.push_back(std::move(object));

@@ -33,7 +33,7 @@ FunctionLoopAnalyses::FunctionLoopAnalyses(Function &F,
                                            LoopInfo &LI,
                                            DominatorTree &DT,
                                            PostDominatorTree &PDT)
-    : function{&F} {
+    : function{&F}, dominatorTree{&DT}, postDominatorTree{&PDT} {
   std::vector<LoopStructure *> loopPtrs;
   loopPtrs.reserve(LI.getLoopsInPreorder().size());
 
@@ -98,8 +98,11 @@ void FunctionLoopAnalyses::materializeDependenceGraphs(pdg::ProgramGraph &pdg) {
 
 void FunctionLoopAnalyses::materializeScalarAnalyses(llvm::ScalarEvolution &SE,
                                                      llvm::LoopInfo &LI) {
+  assert(this->dominatorTree != nullptr);
+  assert(this->postDominatorTree != nullptr);
+  noelle::DominatorSummary summary(*this->dominatorTree, *this->postDominatorTree);
   for (auto const &ownedContent : this->loopContents) {
-    ownedContent->materializeScalarAnalyses(SE, LI);
+    ownedContent->materializeScalarAnalyses(SE, LI, summary);
     auto *llvmLoop = LI.getLoopFor(ownedContent->getLoopStructure()->getHeader());
     if (llvmLoop != nullptr) {
       ownedContent->setCompileTimeTripCount(SE.getSmallConstantTripCount(llvmLoop));

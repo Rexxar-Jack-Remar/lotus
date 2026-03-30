@@ -204,59 +204,7 @@ bool LoopStructure::isLoopInvariant(Value *value) const {
 
 bool LoopStructure::isContainedInstructionLoopInvariant(
     Instruction *inst) const {
-  std::unordered_set<Instruction *> visiting;
-  return this->isContainedInstructionLoopInvariant(inst, visiting);
-}
-
-bool LoopStructure::isContainedInstructionLoopInvariant(
-    Instruction *inst,
-    std::unordered_set<Instruction *> &visiting) const {
-
-  // Fast path: LLVM already determined this instruction is loop-invariant.
-  if (this->invariants.find(inst) != this->invariants.end()) {
-    return true;
-  }
-
-  // If we re-enter the same instruction while proving invariance, we hit a
-  // loop-carried cycle and must conservatively treat it as variant.
-  if (!visiting.insert(inst).second) {
-    return false;
-  }
-
-  // Extended check: an instruction is loop-invariant if all of its operands
-  // are loop-invariant.  This catches one level of derived invariants that
-  // LLVM's naive isLoopInvariant misses (e.g., "add invariant_a, invariant_b").
-  //
-  // We only apply this to side-effect-free instructions to stay conservative.
-  if (inst->mayHaveSideEffects() || inst->mayReadFromMemory()) {
-    return false;
-  }
-
-  for (auto &operand : inst->operands()) {
-    Value *V = operand.get();
-    // Constants and arguments are always invariant.
-    if (isa<Constant>(V) || isa<Argument>(V)) {
-      continue;
-    }
-    // Instructions outside the loop are invariant.
-    if (auto *opInst = dyn_cast<Instruction>(V)) {
-      if (!this->isIncluded(opInst->getParent())) {
-        continue;
-      }
-      // Recursively check if the operand instruction is invariant.
-      if (!this->isContainedInstructionLoopInvariant(opInst, visiting)) {
-        visiting.erase(inst);
-        return false;
-      }
-    } else {
-      // Unknown value kind — be conservative.
-      visiting.erase(inst);
-      return false;
-    }
-  }
-
-  visiting.erase(inst);
-  return true;
+  return this->invariants.find(inst) != this->invariants.end();
 }
 
 bool LoopStructure::isIncluded(BasicBlock *bb) const {

@@ -70,6 +70,8 @@ public:
 
 private:
   Function *function{nullptr};
+  DominatorTree *dominatorTree{nullptr};
+  PostDominatorTree *postDominatorTree{nullptr};
   std::vector<std::unique_ptr<LoopStructure>> ownedLoopStructures;
   std::unordered_map<BasicBlock *, LoopStructure *> loopByHeader;
   std::unique_ptr<LoopForest> forest;

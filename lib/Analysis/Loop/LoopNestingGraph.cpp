@@ -133,7 +133,7 @@ LoopNestingGraphLoopLoopEdge *LoopNestingGraph::fetchOrCreateEdge(
 
 std::unique_ptr<LoopNestingGraph> LoopNestingGraph::buildFromAnalyses(
     std::vector<FunctionLoopAnalyses *> const &analyses,
-    llvm::CallGraph &callGraph,
+    llvm::Module &module,
     Function *entryFunction) {
   std::vector<LoopStructure *> allLoops;
   std::unordered_map<const Function *, FunctionLoopAnalyses *> analysesByFunction;
@@ -170,42 +170,53 @@ std::unique_ptr<LoopNestingGraph> LoopNestingGraph::buildFromAnalyses(
     }
   }
 
-  for (auto &calleePair : callGraph) {
-    auto *callee = calleePair.first;
-    if (callee == nullptr || callee->empty()) {
-      continue;
-    }
-    if (outermostLoops.find(callee) == outermostLoops.end()) {
+  auto &callGraph = pdg::PDGCallGraph::getInstance();
+  if (!callGraph.isBuiltForModule(module)) {
+    callGraph.reset();
+    callGraph.build(module);
+  }
+
+  for (auto *analysis : analyses) {
+    auto *callerFunction = analysis->getFunction();
+    auto *callerForest = analysis->getLoopForest();
+    if (callerFunction == nullptr || callerForest == nullptr) {
       continue;
     }
 
-    auto *calleeNode = calleePair.second.get();
-    for (auto &useRecord : *calleeNode) {
-      auto &call = useRecord.first;
-      if (!call) {
-        continue;
-      }
-      auto *callBase = dyn_cast<CallBase>(*call);
-      if (callBase == nullptr) {
-        continue;
-      }
-      bool isMustCall = callBase->getCalledFunction() != nullptr;
-      auto *callerFunction = callBase->getFunction();
-      auto analysisIt = analysesByFunction.find(callerFunction);
-      if (analysisIt == analysesByFunction.end()) {
-        continue;
-      }
-      auto *callerForest = analysisIt->second->getLoopForest();
-      if (callerForest == nullptr) {
-        continue;
-      }
-      auto *loopNode = callerForest->getInnermostLoopThatContains(callBase);
-      if (loopNode == nullptr) {
-        continue;
-      }
-      auto *parentLoop = loopNode->getLoop();
-      for (auto *outermostLoop : outermostLoops[callee]) {
-        graph->createEdge(parentLoop, callBase, outermostLoop, isMustCall);
+    for (auto &bb : *callerFunction) {
+      for (auto &inst : bb) {
+        auto *callBase = dyn_cast<CallBase>(&inst);
+        if (callBase == nullptr) {
+          continue;
+        }
+
+        auto *loopNode = callerForest->getInnermostLoopThatContains(callBase);
+        if (loopNode == nullptr) {
+          continue;
+        }
+        auto *parentLoop = loopNode->getLoop();
+
+        if (auto *callee = callBase->getCalledFunction()) {
+          auto it = outermostLoops.find(callee);
+          if (it == outermostLoops.end()) {
+            continue;
+          }
+          for (auto *outermostLoop : it->second) {
+            graph->createEdge(parentLoop, callBase, outermostLoop, true);
+          }
+          continue;
+        }
+
+        auto candidates = callGraph.getIndirectCallCandidates(*callBase, module);
+        for (auto *callee : candidates) {
+          auto it = outermostLoops.find(callee);
+          if (it == outermostLoops.end()) {
+            continue;
+          }
+          for (auto *outermostLoop : it->second) {
+            graph->createEdge(parentLoop, callBase, outermostLoop, false);
+          }
+        }
       }
     }
   }

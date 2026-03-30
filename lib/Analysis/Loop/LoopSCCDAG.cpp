@@ -253,8 +253,6 @@ LoopSCCDAG::LoopSCCDAG(LoopDependenceGraph &graph) : graph{&graph} {
   std::vector<std::vector<LoopDependenceNode *>> components;
 
   this->nodes = graph.getInternalNodes();
-  auto externalNodes = graph.getExternalNodes();
-  this->nodes.insert(this->nodes.end(), externalNodes.begin(), externalNodes.end());
   std::sort(this->nodes.begin(),
             this->nodes.end(),
             [](LoopDependenceNode *lhs, LoopDependenceNode *rhs) {
@@ -292,34 +290,33 @@ LoopSCCDAG::LoopSCCDAG(LoopDependenceGraph &graph) : graph{&graph} {
 
   for (auto &ownedSCC : this->ownedSCCs) {
     auto *scc = ownedSCC.get();
-    std::queue<LoopDependenceNode *> queue;
     std::unordered_set<LoopDependenceNode *> seenExternal;
     for (auto *node : scc->internalNodes) {
+      seenExternal.insert(node);
+    }
+
+    for (auto *node : scc->internalNodes) {
+      for (auto *edge : node->getOutgoingEdges()) {
+        auto *dst = edge->getDst();
+        if (dst == nullptr || !seenExternal.insert(dst).second) {
+          continue;
+        }
+        scc->externalNodes.push_back(dst);
+      }
       for (auto *edge : node->getIncomingEdges()) {
         auto *src = edge->getSrc();
-        if (src != nullptr && src->isExternal()
-            && isa<Instruction>(src->getValue())) {
-          queue.push(src);
+        if (src == nullptr || !seenExternal.insert(src).second) {
+          continue;
         }
+        scc->externalNodes.push_back(src);
       }
     }
 
-    while (!queue.empty()) {
-      auto *external = queue.front();
-      queue.pop();
-      if (external == nullptr || !external->isExternal()
-          || !seenExternal.insert(external).second) {
-        continue;
-      }
-      scc->externalNodes.push_back(external);
-      for (auto *edge : external->getIncomingEdges()) {
-        auto *src = edge->getSrc();
-        if (src != nullptr && src->isExternal()
-            && isa<Instruction>(src->getValue())) {
-          queue.push(src);
-        }
-      }
-    }
+    std::sort(scc->externalNodes.begin(),
+              scc->externalNodes.end(),
+              [](LoopDependenceNode *lhs, LoopDependenceNode *rhs) {
+                return lhs->getID() < rhs->getID();
+              });
   }
 
   std::set<std::pair<LoopSCC *, LoopSCC *>> seenPairs;
@@ -330,7 +327,11 @@ LoopSCCDAG::LoopSCCDAG(LoopDependenceGraph &graph) : graph{&graph} {
       if (dst == nullptr) {
         continue;
       }
-      auto *dstSCC = this->sccByNode.at(dst);
+      auto dstIt = this->sccByNode.find(dst);
+      if (dstIt == this->sccByNode.end()) {
+        continue;
+      }
+      auto *dstSCC = dstIt->second;
       if (srcSCC == dstSCC) {
         continue;
       }

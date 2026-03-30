@@ -127,7 +127,15 @@ public:
       bool includeMemory,
       const std::function<bool(Value *, LoopDependenceEdge *)> &funcToInvoke) const;
 
+  std::unique_ptr<LoopDependenceGraph> createSubgraph(bool includeControl,
+                                                      bool includeVariable,
+                                                      bool includeMemory) const;
+  void removeEdge(LoopDependenceEdge *edge);
+  void addVariableDependence(Value *src, Value *dst);
+
 private:
+  LoopDependenceGraph() = default;
+
   LoopTree *loop;
   pdg::ProgramGraph *pdg;
   std::vector<std::unique_ptr<LoopDependenceNode>> ownedNodes;
