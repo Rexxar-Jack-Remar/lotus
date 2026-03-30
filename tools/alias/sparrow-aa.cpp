@@ -7,7 +7,7 @@
  *
  * Andersen's analysis is a subset-based, flow-insensitive, field-sensitive
  * pointer analysis algorithm. It supports both context-insensitive and
- * context-sensitive variants (1-CFA and 2-CFA).
+ * context-sensitive variants (k-CFA, where 0 <= k <= 32).
  */
 
 #include "Alias/AliasAnalysisWrapper/CLIUtils.h"
@@ -114,10 +114,13 @@ int main(int argc, char **argv) {
       "Andersen's Pointer Analysis Tool\n\n"
       "Subset-based, flow-insensitive, field-sensitive pointer analysis.\n\n"
       "Context Sensitivity:\n"
-      "  --andersen-k-cs=<0|1|2>  Select call-site sensitivity:\n"
+      "  --andersen-k-cs=<k>      Select call-site sensitivity (0 <= k <= 32):\n"
       "                            0 = context-insensitive (default)\n"
       "                            1 = 1-CFA\n"
-      "                            2 = 2-CFA\n");
+      "                            2 = 2-CFA\n"
+      "                            ...\n"
+      "                           32 = 32-CFA\n"
+      "                            k > 32 falls back to k=0 (NoCtx)\n");
 
   selectGlobalPtsSetImpl(AndersenUseBDDPointsTo ? PtsSetImpl::BDD
                                                 : PtsSetImpl::SPARSE_BITVECTOR);
