@@ -28,60 +28,25 @@ bool LoopIterationSpaceAnalysis::
     areInstructionsAccessingDisjointMemoryLocationsBetweenIterations(
         Instruction *I,
         Instruction *J) const {
-  if (!I || !J || this->accessSpaceByInstruction.find(I) == this->accessSpaceByInstruction.end()
-      || this->accessSpaceByInstruction.find(J) == this->accessSpaceByInstruction.end()) {
+  if ((!I) || (!J) ||
+      (this->accessSpaceByInstruction.find(I) ==
+       this->accessSpaceByInstruction.end()) ||
+      (this->accessSpaceByInstruction.find(J) ==
+       this->accessSpaceByInstruction.end())) {
     return false;
   }
+
   auto *accessSpaceI = this->accessSpaceByInstruction.at(I);
   auto *accessSpaceJ = this->accessSpaceByInstruction.at(J);
-  if (this->areMemoryAccessSpaceNotOverlappingOrExactlyTheSame(accessSpaceI,
-                                                               accessSpaceJ)) {
+  if (this->nonOverlappingAccessesBetweenIterations.count(accessSpaceI) != 0 &&
+      this->nonOverlappingAccessesBetweenIterations.count(accessSpaceJ) != 0 &&
+      accessSpaceI->memoryAccessorBasePointerSCEV ==
+          accessSpaceJ->memoryAccessorBasePointerSCEV &&
+      accessSpaceI == accessSpaceJ) {
     return true;
   }
-
-  if (!accessSpaceI->isAnalyzed || !accessSpaceJ->isAnalyzed) {
-    return false;
-  }
-  if (accessSpaceI->memoryAccessorSCEV == accessSpaceJ->memoryAccessorSCEV
-      || accessSpaceI->memoryMinusSCEV == accessSpaceJ->memoryMinusSCEV) {
-    return true;
-  }
-  if (accessSpaceI->memoryAccessorBasePointerSCEV
-      != accessSpaceJ->memoryAccessorBasePointerSCEV) {
-    return false;
-  }
-  if (accessSpaceI == accessSpaceJ) {
-    return true;
-  }
-  if (accessSpaceI->recurrence != nullptr && accessSpaceJ->recurrence != nullptr) {
-    if (accessSpaceI->recurrence == accessSpaceJ->recurrence
-        && accessSpaceI->constantStep == accessSpaceJ->constantStep) {
-      return true;
-    }
-  }
-  if (isMemoryAccessSpaceEquivalentForTopLoopIVSubscript(accessSpaceI, accessSpaceJ)) {
-    return true;
-  }
-
-  for (auto const &subscriptPair : accessSpaceI->subscriptIVs) {
-    auto *inst = subscriptPair.first;
-    auto *iv = subscriptPair.second;
-    if (inst == nullptr || iv == nullptr) {
-      continue;
-    }
-    auto *ivLoop = this->loops->getInnermostLoopThatContains(iv->getLoopEntryPHI());
-    if (ivLoop != this->loops->getLoop()) {
-      continue;
-    }
-    if (inst == I || inst == J) {
-      return true;
-    }
-    if (iv->isDerivedFromIVInstructions(inst)
-        && isOneToOneFunctionOnIV(this->loops->getLoop(), iv, inst)) {
-      return true;
-    }
-  }
-  return false;
+  return this->areMemoryAccessSpaceNotOverlappingOrExactlyTheSame(accessSpaceI,
+                                                                  accessSpaceJ);
 }
 
 bool LoopIterationSpaceAnalysis::
@@ -574,9 +539,11 @@ bool LoopIterationSpaceAnalysis::isOneToOneFunctionOnIV(
       if (!loopStructure->isIncluded(usedInst)) {
         continue;
       }
-      if (visited.insert(usedInst).second) {
-        derivingInsts.push(usedInst);
+      if (visited.find(usedInst) != visited.end()) {
+        continue;
       }
+      visited.insert(usedInst);
+      derivingInsts.push(usedInst);
     }
   }
 
@@ -586,42 +553,161 @@ bool LoopIterationSpaceAnalysis::isOneToOneFunctionOnIV(
 bool LoopIterationSpaceAnalysis::isInnerDimensionSubscriptsBounded(
     llvm::ScalarEvolution &SE,
     MemoryAccessSpace *space) {
-  if (space->subscriptIVs.empty() || space->subscriptIVs.size() != space->sizes.size()) {
+  if (space->subscriptIVs.empty() ||
+      space->subscriptIVs.size() != space->sizes.size()) {
     return false;
   }
+
+  auto scevsMatch = [](const llvm::SCEV *scev1,
+                       const llvm::SCEV *scev2) -> bool {
+    if (scev1 == scev2) {
+      return true;
+    }
+    auto *constant1 = dyn_cast<llvm::SCEVConstant>(scev1);
+    auto *constant2 = dyn_cast<llvm::SCEVConstant>(scev2);
+    if (!constant1 || !constant2) {
+      return false;
+    }
+    return constant1->getValue()->getSExtValue() ==
+           constant2->getValue()->getSExtValue();
+  };
 
   for (auto i = 1u; i < space->sizes.size(); ++i) {
     auto *sizeSCEV = space->sizes[i - 1];
     auto instIVPair = space->subscriptIVs[i];
     auto *inst = instIVPair.first;
     auto *iv = instIVPair.second;
-    if (inst == nullptr || iv == nullptr) {
-      continue;
+    if (inst == nullptr) {
+      return false;
     }
 
     auto *subscriptSCEV = SE.getSCEV(inst);
-    if (subscriptSCEV == sizeSCEV) {
-      continue;
+    if (subscriptSCEV == nullptr) {
+      return false;
     }
-
-    auto *loopEntryPHI = iv->getLoopEntryPHI();
-    auto *ivLoop = this->loops->getInnermostLoopThatContains(loopEntryPHI);
-    if (ivLoop == nullptr) {
+    if (isa<llvm::SCEVSignExtendExpr>(subscriptSCEV) ||
+        isa<llvm::SCEVTruncateExpr>(subscriptSCEV) ||
+        isa<llvm::SCEVZeroExtendExpr>(subscriptSCEV)) {
+      subscriptSCEV = cast<llvm::SCEVCastExpr>(subscriptSCEV)->getOperand();
+    }
+    if (!isa<IntegerType>(subscriptSCEV->getType())) {
       return false;
     }
 
-    auto *governingIV = this->ivManager.getLoopGoverningInductionVariable(*ivLoop);
-    if (governingIV == nullptr) {
-      return false;
-    }
-    if (governingIV->getInductionVariable() != iv) {
-      return false;
+    if (iv && iv->isIVInstruction(inst) &&
+        isa<llvm::SCEVAddRecExpr>(subscriptSCEV)) {
+      auto *subscriptRecSCEV = cast<llvm::SCEVAddRecExpr>(subscriptSCEV);
+      auto *loopEntryPHI = iv->getLoopEntryPHI();
+      auto *loopEntryPHISCEV =
+          dyn_cast<llvm::SCEVAddRecExpr>(SE.getSCEV(loopEntryPHI));
+      if (loopEntryPHISCEV == nullptr) {
+        return false;
+      }
+
+      auto *stepSCEV = subscriptRecSCEV->getStepRecurrence(SE);
+      auto *constantStepSCEV = dyn_cast<llvm::SCEVConstant>(stepSCEV);
+      if (constantStepSCEV && constantStepSCEV->getValue()->isNegative()) {
+        return false;
+      }
+
+      if (scevsMatch(subscriptRecSCEV->getStart(), loopEntryPHISCEV->getStart()) &&
+          scevsMatch(subscriptRecSCEV->getStepRecurrence(SE),
+                     loopEntryPHISCEV->getStepRecurrence(SE))) {
+        auto *loopHeader = loopEntryPHI->getParent();
+        auto *loopStructure =
+            this->loops->getInnermostLoopThatContains(loopHeader);
+        if (loopStructure == nullptr) {
+          return false;
+        }
+        auto *attr =
+            ivManager.getLoopGoverningInductionVariable(*loopStructure);
+        if (attr != nullptr && iv == attr->getInductionVariable()) {
+          if (constantStepSCEV && !constantStepSCEV->getValue()->isNegative()) {
+            auto *conditionValue = attr->getExitConditionValue();
+            auto *cmpInst =
+                attr->getHeaderCompareInstructionToComputeExitCondition();
+            if (conditionValue == nullptr || cmpInst == nullptr) {
+              return false;
+            }
+
+            auto predicate = cmpInst->getPredicate();
+            auto *exitBlock = attr->getExitBlockFromHeader();
+            auto *falseSuccessor = *(++succ_begin(loopHeader));
+            bool exitOnFalse = exitBlock == falseSuccessor;
+            bool isConditionLHS = cmpInst->getOperand(0) == conditionValue;
+
+            if (predicate == ICmpInst::Predicate::ICMP_ULE ||
+                predicate == ICmpInst::Predicate::ICMP_SLE) {
+              predicate = ICmpInst::Predicate::ICMP_UGT;
+              isConditionLHS = !isConditionLHS;
+            } else if (predicate == ICmpInst::Predicate::ICMP_UGE ||
+                       predicate == ICmpInst::Predicate::ICMP_SGE) {
+              predicate = ICmpInst::Predicate::ICMP_ULT;
+              isConditionLHS = !isConditionLHS;
+            }
+
+            bool isUpperBoundedByEq =
+                (!exitOnFalse &&
+                 predicate == ICmpInst::Predicate::ICMP_EQ) ||
+                (exitOnFalse &&
+                 predicate == ICmpInst::Predicate::ICMP_NE);
+            bool isUpperBoundedByLT =
+                exitOnFalse && !isConditionLHS &&
+                (predicate == ICmpInst::Predicate::ICMP_ULT ||
+                 predicate == ICmpInst::Predicate::ICMP_SLT);
+            bool isUpperBoundedByFlippedGT =
+                exitOnFalse && isConditionLHS &&
+                (predicate == ICmpInst::Predicate::ICMP_UGT ||
+                 predicate == ICmpInst::Predicate::ICMP_SGT);
+            bool isUpperBounded =
+                isUpperBoundedByEq || isUpperBoundedByLT ||
+                isUpperBoundedByFlippedGT;
+
+            if (isUpperBounded) {
+              auto *conditionSCEVBase = SE.getSCEV(conditionValue);
+              auto *sizeSCEVBase = sizeSCEV;
+              auto *operand = conditionSCEVBase;
+              if (isa<llvm::SCEVSignExtendExpr>(operand) ||
+                  isa<llvm::SCEVTruncateExpr>(operand) ||
+                  isa<llvm::SCEVZeroExtendExpr>(operand)) {
+                conditionSCEVBase =
+                    cast<llvm::SCEVCastExpr>(operand)->getOperand();
+              }
+              operand = sizeSCEVBase;
+              if (isa<llvm::SCEVSignExtendExpr>(operand) ||
+                  isa<llvm::SCEVTruncateExpr>(operand) ||
+                  isa<llvm::SCEVZeroExtendExpr>(operand)) {
+                sizeSCEVBase = cast<llvm::SCEVCastExpr>(operand)->getOperand();
+              }
+
+              if (conditionSCEVBase == sizeSCEVBase) {
+                continue;
+              }
+
+              if (auto *conditionOffsetSCEV =
+                      dyn_cast<llvm::SCEVAddExpr>(conditionSCEVBase)) {
+                if (conditionOffsetSCEV->getNumOperands() == 2) {
+                  auto *lhsSCEV = conditionOffsetSCEV->getOperand(0);
+                  auto *rhsSCEV = conditionOffsetSCEV->getOperand(1);
+                  if ((lhsSCEV == sizeSCEVBase) ^ (rhsSCEV == sizeSCEVBase)) {
+                    auto *otherSCEV =
+                        lhsSCEV == sizeSCEVBase ? rhsSCEV : lhsSCEV;
+                    if (auto *constOffsetSCEV =
+                            dyn_cast<llvm::SCEVConstant>(otherSCEV)) {
+                      if (constOffsetSCEV->getValue()->isNegative()) {
+                        continue;
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
     }
 
-    auto *exitValue = governingIV->getExitConditionValue();
-    if (exitValue == nullptr || !isa<ConstantInt>(exitValue)) {
-      return false;
-    }
+    return false;
   }
 
   return true;

@@ -32,6 +32,7 @@ class LoopSCC {
 public:
   uint64_t getID(void) const;
   bool hasCycle(void) const;
+  bool isIncludedInLoop(void) const;
 
   std::vector<LoopDependenceNode *> getNodes(void) const;
   std::vector<LoopSCC *> getPredecessors(void) const;
@@ -57,7 +58,10 @@ public:
 private:
   friend class LoopSCCDAG;
 
-  LoopSCC(uint64_t id, std::vector<LoopDependenceNode *> members, bool hasCycle);
+  LoopSCC(uint64_t id,
+          std::vector<LoopDependenceNode *> members,
+          bool hasCycle,
+          bool includedInLoop);
 
   uint64_t id;
   std::vector<LoopDependenceNode *> internalNodes;
@@ -65,6 +69,7 @@ private:
   std::vector<LoopSCC *> predecessors;
   std::vector<LoopSCC *> successors;
   bool cycle;
+  bool includedInLoop;
 };
 
 class LoopSCCDAG {
@@ -82,7 +87,7 @@ private:
   LoopDependenceGraph *graph;
   std::vector<LoopDependenceNode *> nodes;
   std::vector<std::unique_ptr<LoopSCC>> ownedSCCs;
-  std::vector<std::unique_ptr<LoopSCC>> ownedExternalSCCs;
+  std::vector<LoopSCC *> includedSCCs;
   std::unordered_map<LoopDependenceNode *, LoopSCC *> sccByNode;
   std::unordered_map<Value *, LoopSCC *> sccByValue;
   std::unordered_map<const LoopSCC *, uint32_t> sccIndexes;

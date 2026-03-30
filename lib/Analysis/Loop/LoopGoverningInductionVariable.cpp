@@ -76,16 +76,33 @@ LoopGoverningInductionVariable::LoopGoverningInductionVariable(
   auto isOpRHSLoopEntryPHI =
       isa<Instruction>(opR) && headerPHI == cast<Instruction>(opR);
   if (!(isOpLHSLoopEntryPHI ^ isOpRHSLoopEntryPHI)) {
-    for (auto *intermediateValue : iv.getNonPHIIntermediateValues()) {
-      if (intermediateValue == opR || intermediateValue == opL) {
-        this->comparedValue = intermediateValue;
-        break;
+    auto *opLInst = dyn_cast<Instruction>(opL);
+    auto *opRInst = dyn_cast<Instruction>(opR);
+    bool opLIsIVLike =
+        opLInst != nullptr &&
+        (iv.isIVInstruction(opLInst) || iv.isDerivedFromIVInstructions(opLInst));
+    bool opRIsIVLike =
+        opRInst != nullptr &&
+        (iv.isIVInstruction(opRInst) || iv.isDerivedFromIVInstructions(opRInst));
+    if (opLIsIVLike ^ opRIsIVLike) {
+      this->comparedValue = cast<Instruction>(opLIsIVLike ? opL : opR);
+      this->conditionValue = opLIsIVLike ? opR : opL;
+    } else {
+      for (auto *intermediateValue : iv.getNonPHIIntermediateValues()) {
+        if (intermediateValue == opR || intermediateValue == opL) {
+          this->comparedValue = intermediateValue;
+          break;
+        }
+      }
+      if (this->comparedValue == nullptr) {
+        return;
+      }
+      if (this->comparedValue == opR) {
+        this->conditionValue = opL;
+      } else {
+        this->conditionValue = opR;
       }
     }
-    if (this->comparedValue == nullptr) {
-      return;
-    }
-    this->conditionValue = (this->comparedValue == opR) ? opL : opR;
   } else {
     this->conditionValue = isOpLHSLoopEntryPHI ? opR : opL;
     this->comparedValue = cast<Instruction>(isOpLHSLoopEntryPHI ? opL : opR);

@@ -24,33 +24,48 @@
 
 #include "Analysis/Loop/LoopCarriedDependencies.h"
 
+#include <set>
+#include <unordered_set>
+
 namespace lotus {
 namespace analysis {
 namespace loop {
 
 class EvolutionUpdate {
 public:
-  explicit EvolutionUpdate(Instruction *updateInstruction);
+  EvolutionUpdate(Instruction *updateInstruction,
+                  const std::unordered_set<Value *> &internalVariableValues);
 
   bool mayUpdateBeOverride(void) const;
+  bool isCommutativeWithSelf(void) const;
+  bool isAssociativeWithSelf(void) const;
+  bool isTransformablyCommutativeWithSelf(void) const;
   bool isTransformablyCommutativeWith(const EvolutionUpdate &other) const;
   bool isAssociativeWith(const EvolutionUpdate &other) const;
   Instruction *getUpdateInstruction(void) const;
   bool isAdd(void) const;
   bool isMul(void) const;
+  bool isSub(void) const;
+  bool isSubTransformableToAdd(void) const;
 
 private:
+  bool isBothUpdatesAddOrSub(const EvolutionUpdate &other) const;
+  bool isBothUpdatesMul(const EvolutionUpdate &other) const;
+  bool isBothUpdatesSameBitwiseLogicalOp(const EvolutionUpdate &other) const;
+
   Instruction *updateInstruction;
+  Value *newValue;
+  std::unordered_set<Use *> internalValuesUsed;
+  std::unordered_set<Use *> externalValuesUsed;
 };
 
 class LoopCarriedVariable {
 public:
-  LoopCarriedVariable(const LoopStructure &loop,
-                      LoopTree *loopNode,
-                      LoopDependenceGraph &loopDG,
-                      LoopSCCDAG &sccdag,
-                      LoopSCC &variableSCC,
-                      PHINode *declarationPHI);
+  LoopCarriedVariable(const LoopStructure &loop, LoopTree *loopNode,
+                      LoopDependenceGraph &loopDG, LoopSCCDAG &sccdag,
+                      LoopSCC &variableSCC, PHINode *declarationPHI);
+
+  ~LoopCarriedVariable();
 
   bool isEvolutionReducibleAcrossLoopIterations(void) const;
   PHINode *getLoopEntryPHIForValueOfVariable(Value *value) const;
@@ -60,13 +75,35 @@ public:
   Value *getIdentityValue(void) const;
 
 private:
+  std::unordered_set<Value *>
+  produceDataAndMemoryOnlySCC(LoopDependenceGraph &loopDG,
+                              const std::unordered_set<LoopDependenceEdge *>
+                                  &loopCarriedDependenciesNotOfVariable) const;
+  void collectControlValuesGoverningEvolution(
+      LoopDependenceGraph &loopDG,
+      const std::unordered_set<LoopDependenceEdge *>
+          &loopCarriedDependenciesNotOfVariable);
+  bool
+  collectVariableUpdates(const std::unordered_set<Value *> &loopCarriedValues);
+  std::unordered_set<Value *> getConsumersOfVariable(void) const;
+  bool areValuesPropagatingVariableIntermediatesOutsideLoop(
+      const std::unordered_set<Value *> &values) const;
+  bool hasRoundingError(
+      std::unordered_set<EvolutionUpdate *> &arithmeticUpdates) const;
+
   bool isValid;
   const LoopStructure &outermostLoopOfVariable;
   PHINode *declarationPHI;
+  std::unordered_set<Value *> sccOfVariableOnlyValues;
+  std::unordered_set<Value *> sccOfDataAndMemoryVariableValuesOnly;
+  std::set<Value *> controlValuesGoverningEvolution;
+  std::unordered_set<EvolutionUpdate *> variableUpdates;
+  std::unordered_set<EvolutionUpdate *> loopCarriedVariableUpdates;
+  std::unordered_set<CastInst *> castsInternalToVariableComputation;
   Value *initialValue;
-  PHINode *accumulator;
-  Instruction::BinaryOps reductionOperation;
-  Value *identityValue;
+  mutable PHINode *accumulator;
+  mutable Instruction::BinaryOps reductionOperation;
+  mutable Value *identityValue;
 };
 
 } // namespace loop

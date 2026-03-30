@@ -3,15 +3,16 @@
 #include "llvm/Analysis/ScalarEvolution.h"
 #include "llvm/IR/Dominators.h"
 #include "llvm/IR/LegacyPassManager.h"
+#include "llvm/IRReader/IRReader.h"
 #include "llvm/InitializePasses.h"
 #include "llvm/PassRegistry.h"
 #include "llvm/Passes/PassBuilder.h"
+#include "llvm/Support/SourceMgr.h"
 
 #include "Analysis/Loop/FunctionLoopAnalyses.h"
 #include "IR/PDG/Core/ControlDependencyGraph.h"
 #include "IR/PDG/Core/DataDependencyGraph.h"
 #include "IR/PDG/Core/ProgramDependencyGraph.h"
-#include "TestUtils/LLVMHelpers.h"
 #include "TestUtils/NoelleGolden.h"
 
 #include <gtest/gtest.h>
@@ -23,6 +24,7 @@ using lotus::analysis::loop::LoopContent;
 using lotus::analysis::loop::LoopStructure;
 using lotus::analysis::loop::LoopTree;
 using lotus::unittest::noelle_golden::combineOrderedValues;
+using lotus::unittest::noelle_golden::combineUnorderedValues;
 using lotus::unittest::noelle_golden::GoldenFile;
 using lotus::unittest::noelle_golden::printAsOperandToString;
 using lotus::unittest::noelle_golden::sectionMatches;
@@ -132,6 +134,39 @@ static Values collectLoopGoverning(FunctionLoopAnalyses &analyses) {
   return values;
 }
 
+static Values collectIntermediateValues(FunctionLoopAnalyses &analyses) {
+  Values values;
+  for (auto *content : collectLoopContentsPreOrder(analyses)) {
+    auto *loop = content->getLoopStructure();
+    values.insert(printAsOperandToString(loop->getHeader()));
+
+    auto *manager = content->getInductionVariableManager();
+    auto ivs = manager->getInductionVariables(*loop);
+    std::vector<lotus::analysis::loop::InductionVariable *> orderedIVs(
+        ivs.begin(), ivs.end());
+    std::sort(orderedIVs.begin(), orderedIVs.end(), [](auto *lhs, auto *rhs) {
+      return valueToString(lhs->getLoopEntryPHI()) <
+             valueToString(rhs->getLoopEntryPHI());
+    });
+
+    for (auto *iv : orderedIVs) {
+      std::vector<std::string> intermediates;
+      auto instructions = iv->getAllInstructions();
+      std::vector<llvm::Instruction *> orderedInstructions(instructions.begin(),
+                                                           instructions.end());
+      std::sort(orderedInstructions.begin(), orderedInstructions.end(),
+                [](auto *lhs, auto *rhs) {
+                  return valueToString(lhs) < valueToString(rhs);
+                });
+      for (auto *inst : orderedInstructions) {
+        intermediates.push_back(valueToString(inst));
+      }
+      values.insert(combineUnorderedValues(intermediates));
+    }
+  }
+  return values;
+}
+
 TEST(LoopParityIVTest, NestedLoopGoverningMatchesNoelleGolden) {
   llvm::LLVMContext context;
   auto module =
@@ -160,11 +195,71 @@ TEST(LoopParityIVTest, NestedLoopGoverningMatchesNoelleGolden) {
   auto startAndStep = collectStartAndStepByLoop(analyses);
   EXPECT_TRUE(
       sectionMatches(golden, "verifyStartAndStepByLoop", startAndStep, &diff))
-      << "Known parity deviation for nested_loop_governing: " << diff;
+      << "Parity deviation for nested_loop_governing: " << diff;
   auto governing = collectLoopGoverning(analyses);
-  if (!sectionMatches(golden, "verifyLoopGoverning", governing, &diff)) {
-    GTEST_SKIP() << "Known parity deviation for nested_loop_governing: "
-                 << diff;
+  EXPECT_TRUE(sectionMatches(golden, "verifyLoopGoverning", governing, &diff))
+      << "Parity deviation for nested_loop_governing: " << diff;
+}
+
+TEST(LoopParityIVTest, NestedLoopIntermediateValuesMirrorNoelleCoverage) {
+  llvm::LLVMContext context;
+  auto module =
+      llvm::parseIRFile(llPath("iv_attributes", "nested_loop_governing"),
+                        *new llvm::SMDiagnostic(), context);
+  ASSERT_NE(module, nullptr);
+  buildPDG(*module);
+
+  auto *function = module->getFunction("main");
+  ASSERT_NE(function, nullptr);
+
+  llvm::PassBuilder PB;
+  llvm::FunctionAnalysisManager FAM;
+  PB.registerFunctionAnalyses(FAM);
+  auto &DT = FAM.getResult<llvm::DominatorTreeAnalysis>(*function);
+  auto &PDT = FAM.getResult<llvm::PostDominatorTreeAnalysis>(*function);
+  auto &LI = FAM.getResult<llvm::LoopAnalysis>(*function);
+  auto &SE = FAM.getResult<llvm::ScalarEvolutionAnalysis>(*function);
+
+  FunctionLoopAnalyses analyses(*function, LI, DT, PDT);
+  analyses.materializeDependenceGraphs(ProgramGraph::getInstance());
+  analyses.materializeScalarAnalyses(SE, LI);
+
+  auto contents = collectLoopContentsPreOrder(analyses);
+  ASSERT_EQ(contents.size(), 3u);
+
+  auto actual = collectIntermediateValues(analyses);
+  ASSERT_EQ(actual.size(), 6u);
+
+  for (auto *content : contents) {
+    auto *loop = content->getLoopStructure();
+    auto *manager = content->getInductionVariableManager();
+    auto ivs = manager->getInductionVariables(*loop);
+    ASSERT_EQ(ivs.size(), 1u)
+        << "nested_loop_governing should expose one canonical IV per loop";
+
+    auto *iv = *ivs.begin();
+    auto instructions = iv->getAllInstructions();
+    EXPECT_NE(actual.find(printAsOperandToString(loop->getHeader())),
+              actual.end());
+    EXPECT_NE(instructions.find(iv->getLoopEntryPHI()), instructions.end());
+
+    auto *stepInstruction = llvm::dyn_cast_or_null<llvm::Instruction>(
+        iv->getSingleComputedStepValue());
+    if (stepInstruction != nullptr && loop->isIncluded(stepInstruction)) {
+      EXPECT_NE(instructions.find(stepInstruction), instructions.end());
+    } else if (iv->getSingleComputedStepValue() == nullptr) {
+      auto stepComputation = iv->getComputationOfStepValue();
+      EXPECT_FALSE(stepComputation.empty());
+      for (auto *inst : stepComputation) {
+        EXPECT_NE(instructions.find(inst), instructions.end());
+      }
+    }
+
+    std::vector<std::string> intermediates;
+    for (auto *inst : instructions) {
+      intermediates.push_back(valueToString(inst));
+    }
+    EXPECT_NE(actual.find(combineUnorderedValues(intermediates)), actual.end());
   }
 }
 

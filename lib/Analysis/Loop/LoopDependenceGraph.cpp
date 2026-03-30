@@ -447,6 +447,17 @@ LoopDependenceGraph::LoopDependenceGraph(LoopTree *loopNode,
     auto *pdgNode = this->pdg->getNode(*instruction);
     this->fetchOrCreateNode(instruction, pdgNode, false);
 
+    for (auto *next = instruction->getNextNode(); next != nullptr;
+         next = next->getNextNode()) {
+      if (shouldIgnoreLoopInstruction(next)) {
+        continue;
+      }
+      if (!loopStructure->isIncluded(next)) {
+        enqueueBoundaryInstruction(next);
+      }
+      break;
+    }
+
     for (auto &operandUse : instruction->operands()) {
       auto *value = operandUse.get();
       if (shouldIgnoreValue(value) ||

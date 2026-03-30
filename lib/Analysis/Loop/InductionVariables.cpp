@@ -7,167 +7,12 @@ namespace lotus {
 namespace analysis {
 namespace loop {
 
-namespace {
+namespace {} // namespace
 
-Value *extractSingleStepValue(const llvm::SCEV *stepSCEV, LoopStructure *loop) {
-  if (stepSCEV == nullptr) {
-    return nullptr;
-  }
-  if (auto *constant = dyn_cast<llvm::SCEVConstant>(stepSCEV)) {
-    return constant->getValue();
-  }
-  if (auto *unknown = dyn_cast<llvm::SCEVUnknown>(stepSCEV)) {
-    auto *value = unknown->getValue();
-    if (loop != nullptr && loop->isLoopInvariant(value)) {
-      return value;
-    }
-  }
-  return nullptr;
-}
-
-void collectIVInstructions(LoopStructure *loop,
-                           LoopSCC *scc,
-                           PHINode *phi,
-                           std::unordered_set<PHINode *> &phis,
-                           std::unordered_set<Instruction *> &nonPHIInstructions,
-                           std::unordered_set<Instruction *> &instructions) {
-  if (scc != nullptr) {
-    for (auto &pair : scc->internalNodePairs()) {
-      auto *inst = dyn_cast_or_null<Instruction>(pair.first);
-      if (inst == nullptr || !loop->isIncluded(inst)) {
-        continue;
-      }
-      instructions.insert(inst);
-      if (auto *innerPhi = dyn_cast<PHINode>(inst)) {
-        phis.insert(innerPhi);
-      } else {
-        nonPHIInstructions.insert(inst);
-      }
-    }
-  }
-
-  if (instructions.empty()) {
-    instructions.insert(phi);
-    phis.insert(phi);
-    for (unsigned i = 0; i < phi->getNumIncomingValues(); ++i) {
-      auto *incomingBlock = phi->getIncomingBlock(i);
-      if (!loop->isIncluded(incomingBlock)) {
-        continue;
-      }
-      if (auto *inst = dyn_cast<Instruction>(phi->getIncomingValue(i))) {
-        instructions.insert(inst);
-        if (auto *innerPhi = dyn_cast<PHINode>(inst)) {
-          phis.insert(innerPhi);
-        } else {
-          nonPHIInstructions.insert(inst);
-        }
-      }
-    }
-  }
-
-  std::vector<Instruction *> worklist(instructions.begin(), instructions.end());
-  while (!worklist.empty()) {
-    auto *current = worklist.back();
-    worklist.pop_back();
-    for (auto *user : current->users()) {
-      auto *userInst = dyn_cast<Instruction>(user);
-      if (userInst == nullptr || !loop->isIncluded(userInst) || !isa<CastInst>(userInst)) {
-        continue;
-      }
-      if (instructions.insert(userInst).second) {
-        nonPHIInstructions.insert(userInst);
-        worklist.push_back(userInst);
-      }
-    }
-  }
-}
-
-bool isSCEVDerivedInstruction(LoopStructure *loop,
-                              InvariantManager &IVM,
-                              llvm::ScalarEvolution &SE,
-                              const std::unordered_set<Instruction *> &ivInstructions,
-                              const std::unordered_set<Instruction *> &alreadyDerived,
-                              Instruction *inst) {
-  if (inst == nullptr || !loop->isIncluded(inst) || !SE.isSCEVable(inst->getType())) {
-    return false;
-  }
-
-  auto *scev = SE.getSCEV(inst);
-  bool supportedSCEV = isa<llvm::SCEVCastExpr>(scev)
-                       || isa<llvm::SCEVNAryExpr>(scev)
-                       || isa<llvm::SCEVUDivExpr>(scev);
-  if (!supportedSCEV && !inst->isBinaryOp()) {
-    return false;
-  }
-
-  bool usesAtLeastOneIVInstruction = false;
-  for (auto &operandUse : inst->operands()) {
-    auto *operand = operandUse.get();
-    if (isa<ConstantInt>(operand) || IVM.isLoopInvariant(operand)) {
-      continue;
-    }
-    auto *operandInst = dyn_cast<Instruction>(operand);
-    if (operandInst == nullptr) {
-      return false;
-    }
-    if (!loop->isIncluded(operandInst)) {
-      continue;
-    }
-    if (ivInstructions.count(operandInst) != 0 || alreadyDerived.count(operandInst) != 0) {
-      usesAtLeastOneIVInstruction = true;
-      continue;
-    }
-    return false;
-  }
-
-  return usesAtLeastOneIVInstruction;
-}
-
-std::unordered_set<Instruction *> collectDerivedSCEVInstructions(
-    LoopStructure *loop,
-    InvariantManager &IVM,
-    llvm::ScalarEvolution &SE,
-    const std::unordered_set<Instruction *> &ivInstructions) {
-  std::unordered_set<Instruction *> derivedInstructions;
-  std::queue<Instruction *> worklist;
-  std::unordered_set<Instruction *> visited;
-  for (auto *inst : ivInstructions) {
-    worklist.push(inst);
-    visited.insert(inst);
-  }
-
-  while (!worklist.empty()) {
-    auto *inst = worklist.front();
-    worklist.pop();
-    for (auto *user : inst->users()) {
-      auto *userInst = dyn_cast<Instruction>(user);
-      if (userInst == nullptr || visited.count(userInst) != 0) {
-        continue;
-      }
-      visited.insert(userInst);
-      if (!isSCEVDerivedInstruction(
-              loop, IVM, SE, ivInstructions, derivedInstructions, userInst)) {
-        continue;
-      }
-      derivedInstructions.insert(userInst);
-      worklist.push(userInst);
-    }
-  }
-  return derivedInstructions;
-}
-
-} // namespace
-
-InductionVariableManager::InductionVariableManager(LoopTree *loopNode,
-                                                   InvariantManager &IVM,
-                                                   llvm::ScalarEvolution &SE,
-                                                   llvm::LoopInfo &LI,
-                                                   LoopSCCDAG &sccdag,
-                                                   LoopEnvironment &loopEnvironment)
-    : loop{loopNode},
-      ownedIVs{},
-      governingIVs{},
-      ownedGoverningIVs{} {
+InductionVariableManager::InductionVariableManager(
+    LoopTree *loopNode, InvariantManager &IVM, llvm::ScalarEvolution &SE,
+    llvm::LoopInfo &LI, LoopSCCDAG &sccdag, LoopEnvironment &loopEnvironment)
+    : loop{loopNode}, ownedIVs{}, governingIVs{}, ownedGoverningIVs{} {
   assert(this->loop != nullptr);
 
   auto *loopToAnalyze = this->loop->getLoop();
@@ -187,16 +32,15 @@ InductionVariableManager::InductionVariableManager(LoopTree *loopNode,
     for (auto &phi : header->phis()) {
       llvm::InductionDescriptor ID{};
       bool llvmDeterminedValidIV = false;
-      bool llvmLoopValidForInductionAnalysis = (phi.getBasicBlockIndex(preHeader) >= 0)
-                                               && (llvmLoop != nullptr);
-      if (llvmLoopValidForInductionAnalysis
-          && llvm::InductionDescriptor::isInductionPHI(&phi, llvmLoop, &SE, ID)) {
+      bool llvmLoopValidForInductionAnalysis =
+          (phi.getBasicBlockIndex(preHeader) >= 0) && (llvmLoop != nullptr);
+      if (llvmLoopValidForInductionAnalysis &&
+          llvm::InductionDescriptor::isInductionPHI(&phi, llvmLoop, &SE, ID)) {
         llvmDeterminedValidIV = true;
-      } else if (phi.getType()->isFloatingPointTy() && llvmLoopValidForInductionAnalysis
-                 && llvm::InductionDescriptor::isFPInductionPHI(&phi,
-                                                                llvmLoop,
-                                                                &SE,
-                                                                ID)) {
+      } else if (phi.getType()->isFloatingPointTy() &&
+                 llvmLoopValidForInductionAnalysis &&
+                 llvm::InductionDescriptor::isFPInductionPHI(&phi, llvmLoop,
+                                                             &SE, ID)) {
         llvmDeterminedValidIV = true;
       }
 
@@ -216,20 +60,22 @@ InductionVariableManager::InductionVariableManager(LoopTree *loopNode,
           bool foundOnePHI = false;
           PHINode *internalPHI = nullptr;
           if (sccContainingIV != nullptr) {
-            sccContainingIV->iterateOverInstructions([&](Instruction *I) -> bool {
-              if (isa<PHINode>(I) && I != &phi
-                  && SE.getSCEV(I)->getSCEVType() == llvm::SCEVTypes::scAddRecExpr
-                  && this->loop->isIncludedInItsSubLoops(I)) {
-                if (!foundOnePHI) {
-                  foundOnePHI = true;
-                  internalPHI = cast<PHINode>(I);
-                } else {
-                  foundOnePHI = false;
-                  return true;
-                }
-              }
-              return false;
-            });
+            sccContainingIV->iterateOverInstructions(
+                [&](Instruction *I) -> bool {
+                  if (isa<PHINode>(I) && I != &phi &&
+                      SE.getSCEV(I)->getSCEVType() ==
+                          llvm::SCEVTypes::scAddRecExpr &&
+                      this->loop->isIncludedInItsSubLoops(I)) {
+                    if (!foundOnePHI) {
+                      foundOnePHI = true;
+                      internalPHI = cast<PHINode>(I);
+                    } else {
+                      foundOnePHI = false;
+                      return true;
+                    }
+                  }
+                  return false;
+                });
           }
 
           if (!foundOnePHI) {
@@ -237,7 +83,8 @@ InductionVariableManager::InductionVariableManager(LoopTree *loopNode,
           }
 
           auto *subloop = this->loop->getInnermostLoopThatContains(internalPHI);
-          if (subloop == nullptr || subloop->getLoopExitBasicBlocks().size() != 1) {
+          if (subloop == nullptr ||
+              subloop->getLoopExitBasicBlocks().size() != 1) {
             goto allocate_iv;
           }
 
@@ -246,7 +93,8 @@ InductionVariableManager::InductionVariableManager(LoopTree *loopNode,
             goto allocate_iv;
           }
 
-          if (auto *subloopExitBr = dyn_cast<BranchInst>(subloopHeader->getTerminator())) {
+          if (auto *subloopExitBr =
+                  dyn_cast<BranchInst>(subloopHeader->getTerminator())) {
             auto *subloopExitBrCondition = subloopExitBr->getCondition();
             if (!isa<CmpInst>(subloopExitBrCondition)) {
               goto allocate_iv;
@@ -257,15 +105,16 @@ InductionVariableManager::InductionVariableManager(LoopTree *loopNode,
 
             const llvm::SCEV *subloopIV = nullptr;
             const llvm::SCEV *subloopExitSCEV = nullptr;
-            if (SE.getSCEV(subloopExitCondL)->getSCEVType() == llvm::SCEVTypes::scAddRecExpr
-                && SE.getSCEV(subloopExitCondR)->getSCEVType()
-                       == llvm::SCEVTypes::scConstant) {
+            if (SE.getSCEV(subloopExitCondL)->getSCEVType() ==
+                    llvm::SCEVTypes::scAddRecExpr &&
+                SE.getSCEV(subloopExitCondR)->getSCEVType() ==
+                    llvm::SCEVTypes::scConstant) {
               subloopIV = SE.getSCEV(subloopExitCondL);
               subloopExitSCEV = SE.getSCEV(subloopExitCondR);
-            } else if (SE.getSCEV(subloopExitCondR)->getSCEVType()
-                           == llvm::SCEVTypes::scAddRecExpr
-                       && SE.getSCEV(subloopExitCondL)->getSCEVType()
-                              == llvm::SCEVTypes::scConstant) {
+            } else if (SE.getSCEV(subloopExitCondR)->getSCEVType() ==
+                           llvm::SCEVTypes::scAddRecExpr &&
+                       SE.getSCEV(subloopExitCondL)->getSCEVType() ==
+                           llvm::SCEVTypes::scConstant) {
               subloopIV = SE.getSCEV(subloopExitCondR);
               subloopExitSCEV = SE.getSCEV(subloopExitCondL);
             }
@@ -274,23 +123,25 @@ InductionVariableManager::InductionVariableManager(LoopTree *loopNode,
               goto allocate_iv;
             }
 
-            auto subloopExitConstant =
-                cast<llvm::SCEVConstant>(subloopExitSCEV)->getValue()->getSExtValue();
+            auto subloopExitConstant = cast<llvm::SCEVConstant>(subloopExitSCEV)
+                                           ->getValue()
+                                           ->getSExtValue();
             auto *subloopIVSCEV = cast<llvm::SCEVAddRecExpr>(subloopIV);
 
             auto subloopExitBBs = subloop->getLoopExitBasicBlocks();
             bool exitsOnTrue =
-                std::find(subloopExitBBs.begin(),
-                          subloopExitBBs.end(),
-                          subloopExitBr->getSuccessor(0))
-                != subloopExitBBs.end();
+                std::find(subloopExitBBs.begin(), subloopExitBBs.end(),
+                          subloopExitBr->getSuccessor(0)) !=
+                subloopExitBBs.end();
 
             if (auto *startSCEVConstant =
                     dyn_cast<llvm::SCEVConstant>(subloopIVSCEV->getStart())) {
-              auto subloopStartValue = startSCEVConstant->getValue()->getSExtValue();
-              if (auto *stepSCEVConstant =
-                      dyn_cast<llvm::SCEVConstant>(subloopIVSCEV->getStepRecurrence(SE))) {
-                auto subloopStepSize = stepSCEVConstant->getValue()->getSExtValue();
+              auto subloopStartValue =
+                  startSCEVConstant->getValue()->getSExtValue();
+              if (auto *stepSCEVConstant = dyn_cast<llvm::SCEVConstant>(
+                      subloopIVSCEV->getStepRecurrence(SE))) {
+                auto subloopStepSize =
+                    stepSCEVConstant->getValue()->getSExtValue();
                 auto negativeStep = stepSCEVConstant->getValue()->isNegative();
                 bool unhandledCmp = false;
                 switch (subloopExitCond->getPredicate()) {
@@ -349,15 +200,10 @@ InductionVariableManager::InductionVariableManager(LoopTree *loopNode,
                   auto d = std::div(subloopExitConstant - subloopStartValue,
                                     subloopStepSize);
                   stepMultiplier = d.quot + (d.rem ? 1 : 0);
-                  IV.reset(new InductionVariable(loop,
-                                                 IVM,
-                                                 SE,
-                                                 stepMultiplier,
-                                                 &phi,
-                                                 std::unordered_set<PHINode *>({internalPHI}),
-                                                 sccContainingIV,
-                                                 loopEnvironment,
-                                                 referentialExpander));
+                  IV.reset(new InductionVariable(
+                      loop, IVM, SE, stepMultiplier, &phi,
+                      std::unordered_set<PHINode *>({internalPHI}),
+                      sccContainingIV, loopEnvironment, referentialExpander));
                 }
               }
             }
@@ -365,9 +211,10 @@ InductionVariableManager::InductionVariableManager(LoopTree *loopNode,
         }
       }
 
-allocate_iv:
+    allocate_iv:
       if (!IV && (noelleDeterminedValidIV || llvmDeterminedValidIV)) {
-        Value *startValue = llvmDeterminedValidIV ? ID.getStartValue() : nullptr;
+        Value *startValue =
+            llvmDeterminedValidIV ? ID.getStartValue() : nullptr;
         if (!llvmDeterminedValidIV) {
           auto bbs = loop->getBasicBlocks();
           for (auto i = 0u; i < phi.getNumIncomingValues(); ++i) {
@@ -381,43 +228,186 @@ allocate_iv:
         auto *stepSCEV = llvmDeterminedValidIV ? ID.getStep() : nullptr;
         Value *singleStepValue =
             llvmDeterminedValidIV ? ID.getConstIntStepValue() : nullptr;
-        if (singleStepValue == nullptr) {
-          singleStepValue = extractSingleStepValue(stepSCEV, loop);
+        if (singleStepValue == nullptr && stepSCEV != nullptr) {
+          if (auto *constant = dyn_cast<llvm::SCEVConstant>(stepSCEV)) {
+            singleStepValue = constant->getValue();
+          } else if (auto *unknown = dyn_cast<llvm::SCEVUnknown>(stepSCEV)) {
+            auto *value = unknown->getValue();
+            if (loop->isLoopInvariant(value)) {
+              singleStepValue = value;
+            }
+          }
         }
         std::unordered_set<PHINode *> stepPHIs{&phi};
         std::unordered_set<PHINode *> phis;
         std::unordered_set<Instruction *> nonPHIInstructions;
         std::unordered_set<Instruction *> instructions;
-        collectIVInstructions(loop,
-                              sccContainingIV,
-                              &phi,
-                              phis,
-                              nonPHIInstructions,
-                              instructions);
-        auto derivedInstructions =
-            collectDerivedSCEVInstructions(loop, IVM, SE, instructions);
-        if (stepSCEV == nullptr && !stepPHIs.empty()) {
-          auto *stepSCEVPHI = *stepPHIs.begin();
-          if (SE.getSCEV(stepSCEVPHI)->getSCEVType() == llvm::SCEVTypes::scAddRecExpr) {
-            stepSCEV =
-                cast<llvm::SCEVAddRecExpr>(SE.getSCEV(stepSCEVPHI))->getStepRecurrence(SE);
-            if (singleStepValue == nullptr) {
-              singleStepValue = extractSingleStepValue(stepSCEV, loop);
+        if (sccContainingIV != nullptr) {
+          std::queue<LoopDependenceNode *> ivIntermediateValues;
+          std::set<Value *> valuesVisited;
+          auto *rootNode = sccContainingIV->fetchNode(&phi);
+          if (rootNode != nullptr) {
+            ivIntermediateValues.push(rootNode);
+          }
+
+          while (!ivIntermediateValues.empty()) {
+            auto *node = ivIntermediateValues.front();
+            ivIntermediateValues.pop();
+
+            auto *value = node->getValue();
+            if (valuesVisited.count(value) != 0) {
+              continue;
+            }
+            valuesVisited.insert(value);
+
+            auto *inst = dyn_cast_or_null<Instruction>(value);
+            if (inst == nullptr || !loop->isIncluded(inst)) {
+              continue;
+            }
+            instructions.insert(inst);
+            if (auto *innerPhi = dyn_cast<PHINode>(inst)) {
+              phis.insert(innerPhi);
+            } else {
+              nonPHIInstructions.insert(inst);
+            }
+
+            for (auto *edge : node->getIncomingEdges()) {
+              if (edge->getKind() != LoopDependenceEdgeKind::Variable) {
+                continue;
+              }
+              auto *otherNode = edge->getSrc();
+              if (otherNode == nullptr) {
+                continue;
+              }
+              auto *otherValue = otherNode->getValue();
+              if (!sccContainingIV->isInternal(otherValue)) {
+                continue;
+              }
+              ivIntermediateValues.push(otherNode);
             }
           }
         }
-        if (startValue != nullptr && singleStepValue != nullptr && stepSCEV != nullptr) {
-          IV.reset(new InductionVariable(loop,
-                                         sccContainingIV,
-                                         &phi,
-                                         startValue,
-                                         stepSCEV,
-                                         singleStepValue,
-                                         stepPHIs,
-                                         phis,
-                                         nonPHIInstructions,
-                                         instructions,
-                                         derivedInstructions));
+        if (instructions.empty()) {
+          instructions.insert(&phi);
+          phis.insert(&phi);
+          for (unsigned i = 0; i < phi.getNumIncomingValues(); ++i) {
+            auto *incomingBB = phi.getIncomingBlock(i);
+            if (!loop->isIncluded(incomingBB)) {
+              continue;
+            }
+            if (auto *inst = dyn_cast<Instruction>(phi.getIncomingValue(i))) {
+              instructions.insert(inst);
+              if (auto *innerPhi = dyn_cast<PHINode>(inst)) {
+                phis.insert(innerPhi);
+              } else {
+                nonPHIInstructions.insert(inst);
+              }
+            }
+          }
+        }
+        std::vector<Instruction *> worklist(instructions.begin(),
+                                            instructions.end());
+        while (!worklist.empty()) {
+          auto *current = worklist.back();
+          worklist.pop_back();
+          for (auto *user : current->users()) {
+            auto *userInst = dyn_cast<Instruction>(user);
+            if (userInst == nullptr || !loop->isIncluded(userInst) ||
+                !isa<CastInst>(userInst)) {
+              continue;
+            }
+            if (instructions.insert(userInst).second) {
+              nonPHIInstructions.insert(userInst);
+              worklist.push_back(userInst);
+            }
+          }
+        }
+
+        std::unordered_set<Instruction *> derivedInstructions;
+        std::queue<Instruction *> derivedWorklist;
+        std::unordered_set<Instruction *> visited;
+        for (auto *inst : instructions) {
+          derivedWorklist.push(inst);
+          visited.insert(inst);
+        }
+        while (!derivedWorklist.empty()) {
+          auto *inst = derivedWorklist.front();
+          derivedWorklist.pop();
+          for (auto *user : inst->users()) {
+            auto *userInst = dyn_cast<Instruction>(user);
+            if (userInst == nullptr || visited.count(userInst) != 0) {
+              continue;
+            }
+            visited.insert(userInst);
+            if (!loop->isIncluded(userInst) ||
+                !SE.isSCEVable(userInst->getType())) {
+              continue;
+            }
+            auto *scev = SE.getSCEV(userInst);
+            bool supportedSCEV = isa<llvm::SCEVCastExpr>(scev) ||
+                                 isa<llvm::SCEVNAryExpr>(scev) ||
+                                 isa<llvm::SCEVUDivExpr>(scev);
+            if (!supportedSCEV && !userInst->isBinaryOp()) {
+              continue;
+            }
+
+            bool usesAtLeastOneIVInstruction = false;
+            bool valid = true;
+            for (auto &operandUse : userInst->operands()) {
+              auto *operand = operandUse.get();
+              if (isa<ConstantInt>(operand) || IVM.isLoopInvariant(operand)) {
+                continue;
+              }
+              auto *operandInst = dyn_cast<Instruction>(operand);
+              if (operandInst == nullptr) {
+                valid = false;
+                break;
+              }
+              if (!loop->isIncluded(operandInst)) {
+                continue;
+              }
+              if (instructions.count(operandInst) != 0 ||
+                  derivedInstructions.count(operandInst) != 0) {
+                usesAtLeastOneIVInstruction = true;
+                continue;
+              }
+              valid = false;
+              break;
+            }
+
+            if (!valid || !usesAtLeastOneIVInstruction) {
+              continue;
+            }
+            derivedInstructions.insert(userInst);
+            derivedWorklist.push(userInst);
+          }
+        }
+
+        if (stepSCEV == nullptr && !stepPHIs.empty()) {
+          auto *stepSCEVPHI = *stepPHIs.begin();
+          if (SE.getSCEV(stepSCEVPHI)->getSCEVType() ==
+              llvm::SCEVTypes::scAddRecExpr) {
+            stepSCEV = cast<llvm::SCEVAddRecExpr>(SE.getSCEV(stepSCEVPHI))
+                           ->getStepRecurrence(SE);
+            if (singleStepValue == nullptr) {
+              if (auto *constant = dyn_cast<llvm::SCEVConstant>(stepSCEV)) {
+                singleStepValue = constant->getValue();
+              } else if (auto *unknown =
+                             dyn_cast<llvm::SCEVUnknown>(stepSCEV)) {
+                auto *value = unknown->getValue();
+                if (loop->isLoopInvariant(value)) {
+                  singleStepValue = value;
+                }
+              }
+            }
+          }
+        }
+        if (startValue != nullptr && singleStepValue != nullptr &&
+            stepSCEV != nullptr) {
+          IV.reset(new InductionVariable(loop, sccContainingIV, &phi,
+                                         startValue, stepSCEV, singleStepValue,
+                                         stepPHIs, phis, nonPHIInstructions,
+                                         instructions, derivedInstructions));
         }
       }
 

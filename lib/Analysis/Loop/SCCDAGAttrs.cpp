@@ -185,17 +185,10 @@ SCCDAGAttrs::SCCDAGAttrs(bool enableFloatAsReal, LoopDependenceGraph *loopDG,
     }
   }
 
-  for (auto *scc : loopSCCDAG->getSCCs()) {
+  for (auto *scc : loopSCCDAG->getAllSCCs()) {
     std::unique_ptr<GenericSCC> info;
     if (this->checkIfIndependent(scc)) {
-      auto clonable = this->checkIfClonableByUsingLocalMemory(scc, loopNode);
-      if (!clonable.empty()) {
-        info.reset(new StackObjectClonableSCC(
-            scc, loopNode->getLoop(), this->sccToLoopCarriedDependencies[scc],
-            clonable));
-      } else {
-        info.reset(new LoopIterationSCC(scc, loopNode->getLoop()));
-      }
+      info.reset(new LoopIterationSCC(scc, loopNode->getLoop()));
     } else {
       auto periodic = this->checkIfPeriodic(scc, loopNode);
       if (std::get<0>(periodic)) {
@@ -536,12 +529,17 @@ SCCDAGAttrs::checkIfRecomputable(LoopSCC *scc, LoopTree *loopNode) const {
 
 std::set<AllocaInst *>
 SCCDAGAttrs::checkIfClonableByUsingLocalMemory(LoopSCC *scc, LoopTree *) const {
+  auto it = this->sccToLoopCarriedDependencies.find(scc);
+  if (it == this->sccToLoopCarriedDependencies.end()) {
+    return {};
+  }
+
   std::set<AllocaInst *> allocations;
   bool sawRelevantMemoryTraffic = false;
 
   auto inspectInstruction = [&](Instruction *inst) -> bool {
     if (inst == nullptr) {
-      return {};
+      return true;
     }
 
     auto locs = this->memoryCloningAnalysis->getClonableMemoryObjectsFor(inst);
@@ -553,14 +551,14 @@ SCCDAGAttrs::checkIfClonableByUsingLocalMemory(LoopSCC *scc, LoopTree *) const {
         pointerOperand = storeInst->getPointerOperand();
       }
       if (pointerOperand != nullptr) {
-        for (auto *loc :
-             this->memoryCloningAnalysis->getClonableMemoryObjects()) {
+        for (auto *loc : this->memoryCloningAnalysis->getClonableMemoryObjects()) {
           if (loc->mustAliasAMemoryLocationWithinObject(pointerOperand)) {
             locs.insert(loc);
           }
         }
       }
     }
+
     bool usesClonableLocation = false;
     for (auto *loc : locs) {
       bool isMemoryTraffic = loc->isInstructionLoadingLocation(inst) ||
@@ -584,6 +582,7 @@ SCCDAGAttrs::checkIfClonableByUsingLocalMemory(LoopSCC *scc, LoopTree *) const {
       usesClonableLocation = true;
       allocations.insert(loc->getAllocation());
     }
+
     if (usesClonableLocation) {
       return true;
     }
@@ -600,28 +599,16 @@ SCCDAGAttrs::checkIfClonableByUsingLocalMemory(LoopSCC *scc, LoopTree *) const {
     return true;
   };
 
-  auto it = this->sccToLoopCarriedDependencies.find(scc);
-  if (it != this->sccToLoopCarriedDependencies.end()) {
-    for (auto *dependency : it->second) {
-      if (dependency->getKind() == LoopDependenceEdgeKind::Control) {
-        continue;
-      }
-      auto *srcInst =
-          dyn_cast_or_null<Instruction>(dependency->getSrc()->getValue());
-      auto *dstInst =
-          dyn_cast_or_null<Instruction>(dependency->getDst()->getValue());
-      if (!inspectInstruction(srcInst) || !inspectInstruction(dstInst)) {
-        return {};
-      }
+  for (auto *dependency : it->second) {
+    if (dependency->getKind() == LoopDependenceEdgeKind::Control) {
+      continue;
     }
-  }
-
-  if (!sawRelevantMemoryTraffic) {
-    for (auto &pair : scc->internalNodePairs()) {
-      auto *inst = dyn_cast_or_null<Instruction>(pair.first);
-      if (!inspectInstruction(inst)) {
-        return {};
-      }
+    auto *srcInst =
+        dyn_cast_or_null<Instruction>(dependency->getSrc()->getValue());
+    auto *dstInst =
+        dyn_cast_or_null<Instruction>(dependency->getDst()->getValue());
+    if (!inspectInstruction(srcInst) || !inspectInstruction(dstInst)) {
+      return {};
     }
   }
 
