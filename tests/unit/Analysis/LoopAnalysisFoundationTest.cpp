@@ -299,4 +299,101 @@ TEST(FunctionLoopAnalysesTest,
   EXPECT_FALSE(mayEdge->isMust());
 }
 
+TEST(FunctionLoopAnalysesTest,
+     ConnectsCallerLoopToMultipleOutermostLoopsOfDirectCallee) {
+  llvm::LLVMContext context;
+  auto module = parseModuleChecked(context, R"(
+    define void @multi_outer(i32 %n) {
+    entry:
+      br label %first.header
+    first.header:
+      %a = phi i32 [ 0, %entry ], [ %a.next, %first.latch ]
+      %first.cmp = icmp slt i32 %a, %n
+      br i1 %first.cmp, label %first.body, label %between
+    first.body:
+      br label %first.latch
+    first.latch:
+      %a.next = add i32 %a, 1
+      br label %first.header
+    between:
+      br label %second.header
+    second.header:
+      %b = phi i32 [ 0, %between ], [ %b.next, %second.latch ]
+      %second.cmp = icmp slt i32 %b, %n
+      br i1 %second.cmp, label %second.body, label %exit
+    second.body:
+      br label %second.latch
+    second.latch:
+      %b.next = add i32 %b, 1
+      br label %second.header
+    exit:
+      ret void
+    }
+
+    define void @caller(i32 %n) {
+    entry:
+      br label %header
+    header:
+      %i = phi i32 [ 0, %entry ], [ %i.next, %latch ]
+      %cmp = icmp slt i32 %i, %n
+      br i1 %cmp, label %body, label %exit
+    body:
+      call void @multi_outer(i32 %n)
+      br label %latch
+    latch:
+      %i.next = add i32 %i, 1
+      br label %header
+    exit:
+      ret void
+    }
+  )");
+
+  std::vector<std::unique_ptr<FunctionLoopAnalyses>> ownedAnalyses;
+  std::vector<FunctionLoopAnalyses *> analyses;
+  for (auto &function : *module) {
+    if (function.isDeclaration()) {
+      continue;
+    }
+    llvm::DominatorTree DT(function);
+    llvm::PostDominatorTree PDT;
+    PDT.recalculate(function);
+    llvm::LoopInfo LI(DT);
+    if (LI.empty()) {
+      continue;
+    }
+    ownedAnalyses.emplace_back(new FunctionLoopAnalyses(function, LI, DT, PDT));
+    analyses.push_back(ownedAnalyses.back().get());
+  }
+
+  auto *entryFunction = module->getFunction("caller");
+  auto *calleeFunction = module->getFunction("multi_outer");
+  ASSERT_NE(entryFunction, nullptr);
+  ASSERT_NE(calleeFunction, nullptr);
+  auto graph =
+      LoopNestingGraph::buildFromAnalyses(analyses, *module, entryFunction);
+  ASSERT_NE(graph, nullptr);
+
+  LoopStructure *callerLoop = nullptr;
+  std::vector<LoopStructure *> calleeLoops;
+  for (auto *analysis : analyses) {
+    if (analysis->getFunction()->getName() == "caller") {
+      callerLoop = analysis->getLoopStructures().front();
+    } else if (analysis->getFunction()->getName() == "multi_outer") {
+      calleeLoops = analysis->getLoopStructures();
+    }
+  }
+  ASSERT_NE(callerLoop, nullptr);
+  ASSERT_EQ(calleeLoops.size(), 2u);
+
+  auto *callerNode = graph->getLoopNode(callerLoop);
+  ASSERT_NE(callerNode, nullptr);
+  for (auto *calleeLoop : calleeLoops) {
+    auto *calleeNode = graph->getLoopNode(calleeLoop);
+    ASSERT_NE(calleeNode, nullptr);
+    auto *edge = callerNode->getNestingEdgeTo(calleeNode);
+    ASSERT_NE(edge, nullptr);
+    EXPECT_TRUE(edge->isMust());
+  }
+}
+
 } // namespace

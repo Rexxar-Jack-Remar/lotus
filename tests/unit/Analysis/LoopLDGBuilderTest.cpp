@@ -20,6 +20,7 @@ namespace {
 
 using lotus::analysis::loop::FunctionLoopAnalyses;
 using lotus::analysis::loop::LoopDependenceEdgeOrigin;
+using lotus::unittest::findInstructionByName;
 using lotus::unittest::parseModuleChecked;
 using pdg::ControlDependencyGraph;
 using pdg::DataDependencyGraph;
@@ -108,7 +109,7 @@ TEST_F(LoopLDGBuilderTest, RecordsDeterministicPhaseSnapshots) {
   }
 }
 
-TEST_F(LoopLDGBuilderTest, TagsBoundaryEdgesAndAvoidsRefinementSyntheticEdges) {
+TEST_F(LoopLDGBuilderTest, PreservesExternalContextWithoutSyntheticBoundaryEdges) {
   llvm::LLVMContext context;
   auto module = parseModuleChecked(context, R"(
     define i32 @loop_boundary(i32* %p, i32 %n) {
@@ -166,7 +167,12 @@ TEST_F(LoopLDGBuilderTest, TagsBoundaryEdgesAndAvoidsRefinementSyntheticEdges) {
     }
   }
 
-  EXPECT_TRUE(sawBoundaryEdge);
+  auto *limit = findInstructionByName(function, "limit");
+  ASSERT_NE(limit, nullptr);
+  EXPECT_TRUE(ldg->isExternal(limit));
+  EXPECT_FALSE(ldg->isInternal(limit));
+  EXPECT_FALSE(ldg->getExternalNodes().empty());
+  EXPECT_FALSE(sawBoundaryEdge);
   EXPECT_FALSE(sawRefinementEdge);
 }
 

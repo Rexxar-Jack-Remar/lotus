@@ -312,4 +312,43 @@ TEST(LoopParityIVTest, NestedLoopGoverningSCCsRemainLinearIVs) {
   }
 }
 
+TEST(LoopParityIVTest, IVSCCDAGDoesNotRetainExternalContextNodes) {
+  llvm::LLVMContext context;
+  auto module =
+      llvm::parseIRFile(llPath("iv_attributes", "nested_loop_governing"),
+                        *new llvm::SMDiagnostic(), context);
+  ASSERT_NE(module, nullptr);
+  buildPDG(*module);
+
+  auto *function = module->getFunction("main");
+  ASSERT_NE(function, nullptr);
+
+  llvm::PassBuilder PB;
+  llvm::FunctionAnalysisManager FAM;
+  PB.registerFunctionAnalyses(FAM);
+  auto &DT = FAM.getResult<llvm::DominatorTreeAnalysis>(*function);
+  auto &PDT = FAM.getResult<llvm::PostDominatorTreeAnalysis>(*function);
+  auto &LI = FAM.getResult<llvm::LoopAnalysis>(*function);
+  auto &SE = FAM.getResult<llvm::ScalarEvolutionAnalysis>(*function);
+
+  FunctionLoopAnalyses analyses(*function, LI, DT, PDT);
+  analyses.materializeDependenceGraphs(ProgramGraph::getInstance());
+  analyses.materializeScalarAnalyses(SE, LI);
+
+  auto contents = collectLoopContentsPreOrder(analyses);
+  ASSERT_EQ(contents.size(), 3u);
+  for (auto *content : contents) {
+    auto *manager = content->getInductionVariableManager();
+    auto ivs = manager->getInductionVariables(*content->getLoopStructure());
+    ASSERT_FALSE(ivs.empty());
+    for (auto *iv : ivs) {
+      auto *scc = iv->getSCC();
+      ASSERT_NE(scc, nullptr);
+      EXPECT_TRUE(scc->externalNodePairs().empty())
+          << "IV SCC should be built from loop-internal values only for loop "
+          << printAsOperandToString(content->getLoopStructure()->getHeader());
+    }
+  }
+}
+
 } // namespace

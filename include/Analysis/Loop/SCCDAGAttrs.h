@@ -195,12 +195,13 @@ public:
   StackObjectClonableSCC(LoopSCC *s,
                          LoopStructure *loop,
                          const std::set<LoopDependenceEdge *> &loopCarriedDependences,
-                         const std::set<AllocaInst *> &locations);
+                         const std::set<ClonableMemoryObject *> &locations);
 
   std::set<AllocaInst *> getMemoryLocationsToClone(void) const;
+  std::set<ClonableMemoryObject *> getClonableMemoryObjects(void) const;
 
 private:
-  std::set<AllocaInst *> locations;
+  std::set<ClonableMemoryObject *> locations;
 };
 
 class LoopCarriedUnknownSCC : public LoopCarriedSCC {
@@ -259,7 +260,7 @@ private:
       std::set<InductionVariable *> &loopGoverningIVs) const;
   std::set<Instruction *> checkIfRecomputable(LoopSCC *scc,
                                               LoopTree *loopNode) const;
-  std::set<AllocaInst *> checkIfClonableByUsingLocalMemory(
+  std::set<ClonableMemoryObject *> checkIfClonableByUsingLocalMemory(
       LoopSCC *scc,
       LoopTree *loopNode) const;
 };

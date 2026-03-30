@@ -16,6 +16,7 @@ namespace loop {
 
 struct LoopLDGBuilderOptions {
   bool enableLoopAwareDependenceAnalyses{true};
+  bool hasLoopAwareDependenceBackend{true};
   bool enableAffineIterationSpaceRefinement{true};
   bool enableMemoryCloningRefinement{true};
   bool enableThreadSafeLibraryRefinement{true};

@@ -31,6 +31,10 @@ namespace loop {
 class LoopGoverningInductionVariable {
 public:
   LoopGoverningInductionVariable(LoopStructure *loop, InductionVariable &iv);
+  LoopGoverningInductionVariable(LoopStructure *loop,
+                                 InductionVariable &iv,
+                                 LoopSCC &scc,
+                                 const std::vector<BasicBlock *> &exitBlocks);
   LoopGoverningInductionVariable(
       LoopStructure *loop, InductionVariable &iv,
       const std::vector<BasicBlock *> &exitBlocks);

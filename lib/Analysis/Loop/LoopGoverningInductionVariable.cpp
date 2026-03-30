@@ -13,6 +13,11 @@ LoopGoverningInductionVariable::LoopGoverningInductionVariable(
 }
 
 LoopGoverningInductionVariable::LoopGoverningInductionVariable(
+    LoopStructure *loop, InductionVariable &iv, LoopSCC &,
+    const std::vector<BasicBlock *> &exitBlocks)
+    : LoopGoverningInductionVariable(loop, iv, exitBlocks) {}
+
+LoopGoverningInductionVariable::LoopGoverningInductionVariable(
     LoopStructure *loop, InductionVariable &iv,
     const std::vector<BasicBlock *> &exitBlocks)
     : loop{loop}, iv{&iv}, conditionValueDerivation{}, headerCmp{nullptr},

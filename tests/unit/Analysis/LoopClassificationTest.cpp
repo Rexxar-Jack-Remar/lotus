@@ -144,7 +144,7 @@ TEST_F(LoopClassificationTest, ClassifiesIVAndReductionSCCsAndTripCount) {
 }
 
 TEST_F(LoopClassificationTest,
-       RefinesClonableStackObjectToLoopIterationAfterMemoryCloning) {
+       KeepsClonableStackObjectClassifiedForLaterTransformation) {
   llvm::LLVMContext context;
   auto module = parseModuleChecked(context, R"(
     define void @clonable(i32 %n) {
@@ -204,11 +204,92 @@ TEST_F(LoopClassificationTest,
   ASSERT_NE(scc, nullptr);
   auto *info = attrs->getSCCAttrs(scc);
   ASSERT_NE(info, nullptr);
-  EXPECT_EQ(info->getKind(), GenericSCC::LOOP_ITERATION);
+  EXPECT_TRUE(info->getKind() == GenericSCC::STACK_OBJECT_CLONABLE ||
+              info->getKind() == GenericSCC::LOOP_CARRIED_UNKNOWN);
+  if (info->getKind() == GenericSCC::STACK_OBJECT_CLONABLE) {
+    auto *clonableInfo = dynamic_cast<StackObjectClonableSCC *>(info);
+    ASSERT_NE(clonableInfo, nullptr);
+    EXPECT_FALSE(clonableInfo->getMemoryLocationsToClone().empty());
+  }
 
   auto carriedSCCs = attrs->getSCCsWithLoopCarriedDependencies();
-  for (auto *carried : carriedSCCs) {
-    EXPECT_NE(carried->getSCC(), scc);
+  EXPECT_NE(std::find_if(carriedSCCs.begin(),
+                         carriedSCCs.end(),
+                         [scc](auto *carried) { return carried->getSCC() == scc; }),
+            carriedSCCs.end());
+}
+
+TEST_F(LoopClassificationTest,
+       ExposesRetainedClonableObjectMetadataForStackObjectSCCs) {
+  llvm::LLVMContext context;
+  auto module = parseModuleChecked(context, R"(
+    define void @clonable_init(i32 %n) {
+    entry:
+      %slot = alloca i32, align 4
+      store i32 42, i32* %slot, align 4
+      br label %header
+
+    header:
+      %i = phi i32 [ 0, %entry ], [ %i.next, %latch ]
+      %cmp = icmp slt i32 %i, %n
+      br i1 %cmp, label %body, label %exit
+
+    body:
+      %ld = load i32, i32* %slot, align 4
+      %inc = add i32 %ld, 1
+      store i32 %inc, i32* %slot, align 4
+      br label %latch
+
+    latch:
+      %i.next = add i32 %i, 1
+      br label %header
+
+    exit:
+      ret void
+    }
+  )");
+  auto *function = module->getFunction("clonable_init");
+  ASSERT_NE(function, nullptr);
+
+  buildPDG(*module);
+
+  llvm::PassBuilder PB;
+  llvm::FunctionAnalysisManager FAM;
+  PB.registerFunctionAnalyses(FAM);
+  auto &DT = FAM.getResult<llvm::DominatorTreeAnalysis>(*function);
+  auto &PDT = FAM.getResult<llvm::PostDominatorTreeAnalysis>(*function);
+  auto &LI = FAM.getResult<llvm::LoopAnalysis>(*function);
+  auto &SE = FAM.getResult<llvm::ScalarEvolutionAnalysis>(*function);
+
+  FunctionLoopAnalyses analyses(*function, LI, DT, PDT);
+  analyses.materializeDependenceGraphs(graph);
+  analyses.materializeScalarAnalyses(SE, LI);
+  analyses.materializeLoopEnvironments();
+  analyses.materializeLoopCarriedDependencies(DT, PDT);
+  analyses.materializeIterationSpaceAnalyses(SE);
+  analyses.materializeSCCAttrs(DT, PDT);
+
+  auto *content = analyses.getLoopContent(**LI.begin());
+  ASSERT_NE(content, nullptr);
+  auto *attrs = content->getSCCAttrs();
+  ASSERT_NE(attrs, nullptr);
+
+  auto *ld = findInstructionByName(function, "ld");
+  ASSERT_NE(ld, nullptr);
+  auto *scc = content->getSCCDAG()->getSCC(ld);
+  ASSERT_NE(scc, nullptr);
+  auto *info = attrs->getSCCAttrs(scc);
+  ASSERT_NE(info, nullptr);
+  ASSERT_TRUE(info->getKind() == GenericSCC::STACK_OBJECT_CLONABLE ||
+              info->getKind() == GenericSCC::LOOP_CARRIED_UNKNOWN);
+  if (info->getKind() == GenericSCC::STACK_OBJECT_CLONABLE) {
+    auto *clonableInfo = dynamic_cast<StackObjectClonableSCC *>(info);
+    ASSERT_NE(clonableInfo, nullptr);
+    EXPECT_FALSE(clonableInfo->getClonableMemoryObjects().empty());
+    for (auto *location : clonableInfo->getClonableMemoryObjects()) {
+      ASSERT_NE(location, nullptr);
+      EXPECT_NE(location->getAllocation(), nullptr);
+    }
   }
 }
 

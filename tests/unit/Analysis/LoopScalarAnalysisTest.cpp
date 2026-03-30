@@ -136,4 +136,134 @@ TEST_F(LoopScalarAnalysisTest, MaterializesInvariantsAndInductionVariables) {
   EXPECT_EQ(governing->getExitConditionValue(), limit);
 }
 
+TEST_F(LoopScalarAnalysisTest, KeepsEquivalentPhiInvariantWhileStayingConservativeOnPureCalls) {
+  llvm::LLVMContext context;
+  auto module = parseModuleChecked(context, R"(
+    declare i64 @strlen(i8*)
+
+    define i64 @loop_scalar_pure(i8* %s, i32 %n) {
+    entry:
+      %seed = add i64 0, 7
+      br label %header
+
+    header:
+      %i = phi i32 [ 0, %entry ], [ %i.next, %latch ]
+      %stable = phi i64 [ %seed, %entry ], [ %seed, %latch ]
+      %cmp = icmp slt i32 %i, %n
+      br i1 %cmp, label %body, label %exit
+
+    body:
+      %len = call i64 @strlen(i8* %s)
+      %mix = add i64 %stable, %len
+      br label %latch
+
+    latch:
+      %i.next = add i32 %i, 1
+      br label %header
+
+    exit:
+      ret i64 %stable
+    }
+  )");
+  auto *function = module->getFunction("loop_scalar_pure");
+  ASSERT_NE(function, nullptr);
+
+  buildPDG(*module);
+
+  llvm::PassBuilder PB;
+  llvm::FunctionAnalysisManager FAM;
+  PB.registerFunctionAnalyses(FAM);
+  auto &DT = FAM.getResult<llvm::DominatorTreeAnalysis>(*function);
+  auto &PDT = FAM.getResult<llvm::PostDominatorTreeAnalysis>(*function);
+  auto &LI = FAM.getResult<llvm::LoopAnalysis>(*function);
+  auto &SE = FAM.getResult<llvm::ScalarEvolutionAnalysis>(*function);
+
+  FunctionLoopAnalyses analyses(*function, LI, DT, PDT);
+  analyses.materializeDependenceGraphs(graph);
+  analyses.materializeScalarAnalyses(SE, LI);
+
+  auto *content = analyses.getLoopContent(**LI.begin());
+  ASSERT_NE(content, nullptr);
+  auto *invariants = content->getInvariantManager();
+  ASSERT_NE(invariants, nullptr);
+
+  auto *seed = findInstructionByName(function, "seed");
+  auto *stablePhi = findPhi(function, "stable");
+  auto *len = findInstructionByName(function, "len");
+  auto *mix = findInstructionByName(function, "mix");
+  ASSERT_NE(seed, nullptr);
+  ASSERT_NE(stablePhi, nullptr);
+  ASSERT_NE(len, nullptr);
+  ASSERT_NE(mix, nullptr);
+
+  EXPECT_TRUE(invariants->isLoopInvariant(seed));
+  EXPECT_TRUE(invariants->isLoopInvariant(stablePhi));
+  EXPECT_FALSE(invariants->isLoopInvariant(len));
+  EXPECT_TRUE(invariants->isLoopInvariant(mix));
+}
+
+TEST_F(LoopScalarAnalysisTest, AttributesDerivedExitConditionValueForGoverningIV) {
+  llvm::LLVMContext context;
+  auto module = parseModuleChecked(context, R"(
+    define i32 @loop_scalar_derived_condition_giv(i32 %n) {
+    entry:
+      %limit = add i32 %n, 5
+      br label %header
+
+    header:
+      %i = phi i32 [ 0, %entry ], [ %i.next, %latch ]
+      %cmp.limit = add i32 %limit, 0
+      %cmp = icmp slt i32 %i, %cmp.limit
+      br i1 %cmp, label %body, label %exit
+
+    body:
+      br label %latch
+
+    latch:
+      %i.next = add i32 %i, 1
+      br label %header
+
+    exit:
+      ret i32 %i
+    }
+  )");
+  auto *function = module->getFunction("loop_scalar_derived_condition_giv");
+  ASSERT_NE(function, nullptr);
+
+  buildPDG(*module);
+
+  llvm::PassBuilder PB;
+  llvm::FunctionAnalysisManager FAM;
+  PB.registerFunctionAnalyses(FAM);
+  auto &DT = FAM.getResult<llvm::DominatorTreeAnalysis>(*function);
+  auto &PDT = FAM.getResult<llvm::PostDominatorTreeAnalysis>(*function);
+  auto &LI = FAM.getResult<llvm::LoopAnalysis>(*function);
+  auto &SE = FAM.getResult<llvm::ScalarEvolutionAnalysis>(*function);
+
+  FunctionLoopAnalyses analyses(*function, LI, DT, PDT);
+  analyses.materializeDependenceGraphs(graph);
+  analyses.materializeScalarAnalyses(SE, LI);
+
+  auto *content = analyses.getLoopContent(**LI.begin());
+  ASSERT_NE(content, nullptr);
+  auto *ivs = content->getInductionVariableManager();
+  ASSERT_NE(ivs, nullptr);
+  auto *governing =
+      ivs->getLoopGoverningInductionVariable(*content->getLoopStructure());
+  ASSERT_NE(governing, nullptr);
+  EXPECT_TRUE(governing->isSCCContainingIVWellFormed());
+
+  auto *cmpLimit = findInstructionByName(function, "cmp.limit");
+  auto *cmp = findInstructionByName(function, "cmp");
+  ASSERT_NE(cmpLimit, nullptr);
+  ASSERT_NE(cmp, nullptr);
+  auto *iPhi = findPhi(function, "i");
+  ASSERT_NE(iPhi, nullptr);
+
+  EXPECT_EQ(governing->getHeaderCompareInstructionToComputeExitCondition(), cmp);
+  EXPECT_EQ(governing->getValueToCompareAgainstExitConditionValue(), iPhi);
+  EXPECT_EQ(governing->getExitConditionValue(), cmpLimit);
+  EXPECT_TRUE(governing->getConditionValueDerivation().empty());
+}
+
 } // namespace

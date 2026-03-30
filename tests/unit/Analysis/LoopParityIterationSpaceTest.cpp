@@ -127,7 +127,7 @@ static void runCase(
   std::string diff;
   auto actual = collectDisjointAccesses(analyses, LI);
   EXPECT_TRUE(sectionMatches(golden, section, actual, &diff))
-      << "Known parity deviation for loop_domain_space/" << name << ": "
+      << "Parity deviation for loop_domain_space/" << name << ": "
       << diff;
 }
 

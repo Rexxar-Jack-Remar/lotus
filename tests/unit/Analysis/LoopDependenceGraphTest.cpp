@@ -134,7 +134,8 @@ TEST_F(LoopDependenceGraphTest, MaterializesGraphAndSCCsFromLegacyPDG) {
   EXPECT_FALSE(ldg->isInternal(limit));
 
   auto *limitSCC = sccdag->getSCC(limit);
-  EXPECT_EQ(limitSCC, nullptr);
+  ASSERT_NE(limitSCC, nullptr);
+  EXPECT_FALSE(limitSCC->isIncludedInLoop());
 
   bool foundControlEdge = false;
   bool foundVariableEdge = false;
@@ -255,6 +256,71 @@ TEST_F(LoopDependenceGraphTest, CondensesAcyclicAndCyclicInternalRegions) {
     EXPECT_NE(std::find(predSuccs.begin(), predSuccs.end(), iSCC),
               predSuccs.end());
   }
+}
+
+TEST_F(LoopDependenceGraphTest, PreservesExternalOnlySCCsInAllSCCsView) {
+  llvm::LLVMContext context;
+  auto module = parseModuleChecked(context, R"(
+    define i32 @external_context_scc(i32 %n) {
+    entry:
+      %limit = add i32 %n, 4
+      %stable = add i32 %n, 1
+      br label %header
+
+    header:
+      %i = phi i32 [ 0, %entry ], [ %i.next, %latch ]
+      %cmp.lhs = add i32 %stable, 0
+      %cmp.rhs = add i32 %limit, 0
+      %cmp = icmp slt i32 %i, %cmp.rhs
+      br i1 %cmp, label %body, label %exit
+
+    body:
+      %use = add i32 %cmp.lhs, %i
+      br label %latch
+
+    latch:
+      %i.next = add i32 %i, 1
+      br label %header
+
+    exit:
+      ret i32 %use
+    }
+  )");
+  auto *function = module->getFunction("external_context_scc");
+  ASSERT_NE(function, nullptr);
+
+  buildPDG(*module);
+
+  llvm::DominatorTree DT(*function);
+  llvm::PostDominatorTree PDT;
+  PDT.recalculate(*function);
+  llvm::LoopInfo LI(DT);
+
+  FunctionLoopAnalyses analyses(*function, LI, DT, PDT);
+  analyses.materializeDependenceGraphs(graph);
+
+  auto *content = analyses.getLoopContent(**LI.begin());
+  ASSERT_NE(content, nullptr);
+  auto *sccdag = content->getSCCDAG();
+  ASSERT_NE(sccdag, nullptr);
+
+  auto *limit = findInstructionByName(function, "limit");
+  auto *stable = findInstructionByName(function, "stable");
+  ASSERT_NE(limit, nullptr);
+  ASSERT_NE(stable, nullptr);
+  auto *limitSCC = sccdag->getSCC(limit);
+  auto *stableSCC = sccdag->getSCC(stable);
+  ASSERT_NE(limitSCC, nullptr);
+  ASSERT_NE(stableSCC, nullptr);
+  EXPECT_FALSE(limitSCC->isIncludedInLoop());
+  EXPECT_FALSE(stableSCC->isIncludedInLoop());
+
+  auto includedSCCs = sccdag->getSCCs();
+  auto allSCCs = sccdag->getAllSCCs();
+  EXPECT_GT(allSCCs.size(), includedSCCs.size());
+  EXPECT_EQ(std::find(includedSCCs.begin(), includedSCCs.end(), limitSCC),
+            includedSCCs.end());
+  EXPECT_NE(std::find(allSCCs.begin(), allSCCs.end(), limitSCC), allSCCs.end());
 }
 
 } // namespace

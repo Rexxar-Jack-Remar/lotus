@@ -103,10 +103,16 @@ TEST_F(LoopEnvironmentAndCarriedDepsTest, BuildsEnvironmentAndMarksCarriedEdges)
   auto *limit = findInstructionByName(function, "limit");
   ASSERT_NE(limit, nullptr);
   EXPECT_TRUE(env->isLiveIn(limit));
+  auto liveInConsumers = env->consumersOf(limit);
+  auto *cmp = findInstructionByName(function, "cmp");
+  ASSERT_NE(cmp, nullptr);
+  EXPECT_NE(liveInConsumers.find(cmp), liveInConsumers.end());
 
   auto *sumPhi = findPhi(function, "sum");
   ASSERT_NE(sumPhi, nullptr);
   EXPECT_TRUE(env->isProducer(sumPhi));
+  auto liveOutConsumers = env->consumersOf(sumPhi);
+  EXPECT_FALSE(liveOutConsumers.empty());
 
   auto *graphView = content->getLoopDependenceGraph();
   ASSERT_NE(graphView, nullptr);
@@ -134,6 +140,128 @@ TEST_F(LoopEnvironmentAndCarriedDepsTest, BuildsEnvironmentAndMarksCarriedEdges)
       content->getLoopHierarchyStructures(),
       *graphView);
   EXPECT_FALSE(carriedForLoop.empty());
+}
+
+TEST_F(LoopEnvironmentAndCarriedDepsTest, TracksDistinctExitEnvironmentSlotForMultiExitLoop) {
+  llvm::LLVMContext context;
+  auto module = parseModuleChecked(context, R"(
+    define i32 @loop_env_multi_exit(i32 %n, i1 %flag) {
+    entry:
+      br label %header
+
+    header:
+      %i = phi i32 [ 0, %entry ], [ %i.next, %latch ]
+      %cmp = icmp slt i32 %i, %n
+      br i1 %cmp, label %body, label %exit.one
+
+    body:
+      br i1 %flag, label %exit.two, label %latch
+
+    latch:
+      %i.next = add i32 %i, 1
+      br label %header
+
+    exit.one:
+      ret i32 %i
+
+    exit.two:
+      ret i32 %i
+    }
+  )");
+  auto *function = module->getFunction("loop_env_multi_exit");
+  ASSERT_NE(function, nullptr);
+
+  buildPDG(*module);
+
+  llvm::DominatorTree DT(*function);
+  llvm::PostDominatorTree PDT;
+  PDT.recalculate(*function);
+  llvm::LoopInfo LI(DT);
+
+  FunctionLoopAnalyses analyses(*function, LI, DT, PDT);
+  analyses.materializeDependenceGraphs(graph);
+  analyses.materializeLoopEnvironments();
+
+  auto *content = analyses.getLoopContent(**LI.begin());
+  ASSERT_NE(content, nullptr);
+  auto *env = content->getEnvironment();
+  ASSERT_NE(env, nullptr);
+  EXPECT_EQ(env->getExitBlockID(), static_cast<int64_t>(env->size() - 1));
+  EXPECT_GE(env->size(), env->getNumberOfLiveIns() + 1);
+}
+
+TEST_F(LoopEnvironmentAndCarriedDepsTest, DistinguishesComputedPointersFromSharedPointerCarriedMemory) {
+  llvm::LLVMContext context;
+  auto module = parseModuleChecked(context, R"(
+    define void @loop_env_pointer_modes(i32* %base, i32* %shared, i32 %n) {
+    entry:
+      br label %header
+
+    header:
+      %i = phi i32 [ 0, %entry ], [ %i.next, %latch ]
+      %cmp = icmp slt i32 %i, %n
+      br i1 %cmp, label %body, label %exit
+
+    body:
+      %idx = sext i32 %i to i64
+      %ptr = getelementptr inbounds i32, i32* %base, i64 %idx
+      %ld.indexed = load i32, i32* %ptr, align 4
+      store i32 %ld.indexed, i32* %ptr, align 4
+      %ld.shared = load i32, i32* %shared, align 4
+      store i32 %ld.shared, i32* %shared, align 4
+      br label %latch
+
+    latch:
+      %i.next = add i32 %i, 1
+      br label %header
+
+    exit:
+      ret void
+    }
+  )");
+  auto *function = module->getFunction("loop_env_pointer_modes");
+  ASSERT_NE(function, nullptr);
+
+  buildPDG(*module);
+
+  llvm::DominatorTree DT(*function);
+  llvm::PostDominatorTree PDT;
+  PDT.recalculate(*function);
+  llvm::LoopInfo LI(DT);
+
+  FunctionLoopAnalyses analyses(*function, LI, DT, PDT);
+  analyses.materializeDependenceGraphs(graph);
+  analyses.materializeLoopCarriedDependencies(DT, PDT);
+
+  auto *content = analyses.getLoopContent(**LI.begin());
+  ASSERT_NE(content, nullptr);
+  auto *graphView = content->getLoopDependenceGraph();
+  ASSERT_NE(graphView, nullptr);
+
+  auto *indexedLoad = findInstructionByName(function, "ld.indexed");
+  auto *sharedLoad = findInstructionByName(function, "ld.shared");
+  ASSERT_NE(indexedLoad, nullptr);
+  ASSERT_NE(sharedLoad, nullptr);
+
+  bool indexedHasCarriedMemory = false;
+  bool sharedHasCarriedMemory = false;
+  for (auto *edge : graphView->getEdges()) {
+    if (!edge->isLoopCarried() ||
+        edge->getKind() != LoopDependenceEdgeKind::Memory) {
+      continue;
+    }
+    if (edge->getSrc()->getValue() == indexedLoad ||
+        edge->getDst()->getValue() == indexedLoad) {
+      indexedHasCarriedMemory = true;
+    }
+    if (edge->getSrc()->getValue() == sharedLoad ||
+        edge->getDst()->getValue() == sharedLoad) {
+      sharedHasCarriedMemory = true;
+    }
+  }
+
+  EXPECT_FALSE(indexedHasCarriedMemory);
+  EXPECT_TRUE(sharedHasCarriedMemory);
 }
 
 } // namespace

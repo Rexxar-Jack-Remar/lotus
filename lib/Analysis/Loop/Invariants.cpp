@@ -68,10 +68,6 @@ public:
           this->notInvariants.insert(inst);
           continue;
         }
-        if (call->mayHaveSideEffects() && !call->onlyReadsMemory()) {
-          this->notInvariants.insert(inst);
-          continue;
-        }
       }
 
       bool isPHI = false;
@@ -104,9 +100,7 @@ public:
       if (auto *call = dyn_cast<CallInst>(inst)) {
         auto *callee = call->getCalledFunction();
         if (callee != nullptr && callee->empty()) {
-          if (!isPureLibraryCall(call)) {
-            canEvolve = true;
-          }
+          canEvolve = true;
         }
       }
 
@@ -137,8 +131,8 @@ private:
       if (isAllocatorLike(call)) {
         return true;
       }
-      if (call->mayHaveSideEffects() && !call->onlyReadsMemory()) {
-        return true;
+      if (isPureLibraryCall(call)) {
+        return false;
       }
     }
 

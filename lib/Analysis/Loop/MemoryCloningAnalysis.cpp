@@ -7,142 +7,453 @@ namespace lotus {
 namespace analysis {
 namespace loop {
 
-namespace {
-
-Value *stripLocationCasts(Value *value) {
-  Value *current = value;
-  while (true) {
-    if (auto *gep = dyn_cast<GetElementPtrInst>(current)) {
-      current = gep->getPointerOperand();
-      continue;
-    }
-    if (auto *bitcast = dyn_cast<BitCastInst>(current)) {
-      current = bitcast->getOperand(0);
-      continue;
-    }
-    if (auto *addrspace = dyn_cast<AddrSpaceCastInst>(current)) {
-      current = addrspace->getOperand(0);
-      continue;
-    }
-    break;
-  }
-  return current;
-}
-
-bool isMemoryTransferIntrinsic(CallInst *call) {
-  if (call == nullptr) {
-    return false;
-  }
-  Intrinsic::ID intrinsic = call->getIntrinsicID();
-  return intrinsic == Intrinsic::memcpy || intrinsic == Intrinsic::memmove;
-}
-
-bool collectAccessKey(Value *value, AllocaInst *allocation,
-                      std::vector<int64_t> &indices) {
-  if (value == allocation) {
-    return true;
-  }
-  if (auto *bitcast = dyn_cast<BitCastInst>(value)) {
-    return collectAccessKey(bitcast->getOperand(0), allocation, indices);
-  }
-  if (auto *addrspace = dyn_cast<AddrSpaceCastInst>(value)) {
-    return collectAccessKey(addrspace->getOperand(0), allocation, indices);
-  }
-  if (auto *gep = dyn_cast<GetElementPtrInst>(value)) {
-    if (!collectAccessKey(gep->getPointerOperand(), allocation, indices)) {
-      return false;
-    }
-    for (auto *idx = gep->idx_begin(); idx != gep->idx_end(); ++idx) {
-      auto *constantIndex = dyn_cast<ConstantInt>(idx->get());
-      if (constantIndex == nullptr) {
-        return false;
-      }
-      indices.push_back(constantIndex->getSExtValue());
-    }
-    return true;
-  }
-  return false;
-}
-
-std::string accessKeyFor(Value *pointer, AllocaInst *allocation) {
-  std::vector<int64_t> indices;
-  if (!collectAccessKey(pointer, allocation, indices)) {
-    return "";
-  }
-  if (indices.empty()) {
-    return "";
-  }
-  size_t start = (indices.size() > 1 && indices[0] == 0) ? 1 : 0;
-  std::string key;
-  for (size_t i = start; i < indices.size(); ++i) {
-    if (!key.empty()) {
-      key += ".";
-    }
-    key += std::to_string(indices[i]);
-  }
-  return key;
-}
-
-} // namespace
-
-ClonableMemoryObject::ClonableMemoryObject(AllocaInst *allocation,
-                                           uint64_t sizeInBits)
-    : allocation{allocation}, sizeInBits{sizeInBits}, clonable{false},
-      needsInitialization{false} {}
-
 AllocaInst *ClonableMemoryObject::getAllocation(void) const {
   return this->allocation;
 }
-bool ClonableMemoryObject::isClonableLocation(void) const {
-  return this->clonable;
+
+uint64_t ClonableMemoryObject::getAllocationSizeInBits(void) const {
+  return this->sizeInBits;
 }
-bool ClonableMemoryObject::doPrivateCopiesNeedToBeInitialized(void) const {
-  return this->needsInitialization;
-}
+
 bool ClonableMemoryObject::mustAliasAMemoryLocationWithinObject(
     Value *pointer) const {
   if (pointer == this->allocation) {
     return true;
   }
-  if (auto *inst = dyn_cast<Instruction>(pointer)) {
-    if (this->castsAndGEPs.count(inst) != 0) {
-      return true;
-    }
-  }
-  return stripLocationCasts(pointer) == this->allocation;
+  return this->castsAndGEPs.count(dyn_cast_or_null<Instruction>(pointer)) != 0;
 }
-bool ClonableMemoryObject::isInstructionCastOrGEPOfLocation(
-    Instruction *I) const {
+
+bool ClonableMemoryObject::isInstructionCastOrGEPOfLocation(Instruction *I) const {
   return this->castsAndGEPs.count(I) != 0;
 }
+
 bool ClonableMemoryObject::isInstructionStoringLocation(Instruction *I) const {
   return this->storingInstructions.count(I) != 0;
 }
+
 bool ClonableMemoryObject::isInstructionLoadingLocation(Instruction *I) const {
-  return this->loadInstructions.count(I) != 0 ||
-         this->nonStoringInstructions.count(I) != 0;
+  return this->nonStoringInstructions.count(I) != 0 ||
+         this->loadInstructions.count(I) != 0;
 }
+
 bool ClonableMemoryObject::isInstructionUsingLocationWithoutStoring(
     Instruction *I) const {
   return this->nonStoringInstructions.count(I) != 0;
 }
+
 void ClonableMemoryObject::addPointer(Instruction *I) {
   this->castsAndGEPs.insert(I);
 }
+
 void ClonableMemoryObject::addStore(Instruction *I) {
   this->storingInstructions.insert(I);
 }
+
 void ClonableMemoryObject::addLoad(Instruction *I) {
   this->loadInstructions.insert(I);
 }
+
 void ClonableMemoryObject::addNonStoringUse(Instruction *I) {
   this->nonStoringInstructions.insert(I);
 }
+
+std::unordered_set<Instruction *>
+ClonableMemoryObject::getLocationPointerInstructions(void) const {
+  return this->castsAndGEPs;
+}
+
 void ClonableMemoryObject::setClonable(bool clonable) {
   this->clonable = clonable;
 }
+
 void ClonableMemoryObject::setNeedsInitialization(bool needsInitialization) {
   this->needsInitialization = needsInitialization;
+}
+
+void ClonableMemoryObject::setObjectScope(AllocaInst *allocation,
+                                          LoopStructure *loop,
+                                          noelle::DominatorSummary &) {
+  for (auto *inst : loop->getInstructions()) {
+    auto *call = dyn_cast<CallInst>(inst);
+    if (call == nullptr || !call->isLifetimeStartOrEnd()) {
+      continue;
+    }
+    Value *objectUsed = call->getArgOperand(1);
+    if (auto *castInst = dyn_cast<CastInst>(objectUsed)) {
+      objectUsed = castInst->getOperand(0);
+    }
+    if (objectUsed == allocation) {
+      this->scopeWithinLoop = true;
+      return;
+    }
+  }
+}
+
+bool ClonableMemoryObject::isMemCpyInstrinsicCall(CallInst *call) {
+  if (call == nullptr) {
+    return false;
+  }
+  auto *calledFn = call->getCalledFunction();
+  if (calledFn == nullptr || !calledFn->hasName()) {
+    return false;
+  }
+  return calledFn->getName().contains("llvm.memcpy");
+}
+
+bool ClonableMemoryObject::identifyStoresAndOtherUsers(
+    LoopStructure *loop, noelle::DominatorSummary &DS) {
+  std::queue<Instruction *> allocationUses;
+  allocationUses.push(this->allocation);
+  while (!allocationUses.empty()) {
+    auto *I = allocationUses.front();
+    allocationUses.pop();
+
+    for (auto *user : I->users()) {
+      if (auto *cast = dyn_cast<CastInst>(user)) {
+        allocationUses.push(cast);
+        this->castsAndGEPs.insert(cast);
+        continue;
+      }
+      if (auto *gep = dyn_cast<GetElementPtrInst>(user)) {
+        allocationUses.push(gep);
+        this->castsAndGEPs.insert(gep);
+        continue;
+      }
+
+      auto *inst = dyn_cast<Instruction>(user);
+      if (inst == nullptr) {
+        return false;
+      }
+
+      if (auto *store = dyn_cast<StoreInst>(inst)) {
+        this->storingInstructions.insert(store);
+      } else if (auto *load = dyn_cast<LoadInst>(inst)) {
+        this->loadInstructions.insert(load);
+      } else if (auto *call = dyn_cast<CallInst>(inst)) {
+        if (call->isLifetimeStartOrEnd()) {
+          continue;
+        }
+        bool isMemCpy = ClonableMemoryObject::isMemCpyInstrinsicCall(call);
+        bool isDestinationUse =
+            call->arg_size() == 4 && call->getArgOperand(0) == I;
+        bool isSourceUse = call->arg_size() == 4 && call->getArgOperand(1) == I;
+        if (isMemCpy && isDestinationUse) {
+          this->storingInstructions.insert(call);
+        } else if (isMemCpy && isSourceUse) {
+          this->loadInstructions.insert(call);
+        } else {
+          this->nonStoringInstructions.insert(call);
+        }
+      } else {
+        this->nonStoringInstructions.insert(inst);
+      }
+
+      if (!loop->isIncluded(inst)) {
+        auto *block = inst->getParent();
+        auto *header = loop->getHeader();
+        if (!DS.DT.dominates(block, header)) {
+          return false;
+        }
+      }
+
+      if (isa<InvokeInst>(inst)) {
+        return false;
+      }
+    }
+  }
+
+  return true;
+}
+
+bool ClonableMemoryObject::isThereAMemoryDependenceBetweenLoopIterations(
+    LoopStructure *loop, AllocaInst *, LoopDependenceGraph *ldg,
+    const std::unordered_set<Instruction *> &insts) const {
+  for (auto *inst : insts) {
+    if (!loop->isIncluded(inst)) {
+      continue;
+    }
+    auto functor = [loop](Value *fromValue, LoopDependenceEdge *d) -> bool {
+      auto *otherInst = dyn_cast<Instruction>(fromValue);
+      if (otherInst == nullptr || !loop->isIncluded(otherInst)) {
+        return false;
+      }
+      return d->isLoopCarried();
+    };
+
+    if (ldg->iterateOverDependencesTo(inst, false, false, true, functor) ||
+        ldg->iterateOverDependencesFrom(inst, false, false, true, functor)) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
+bool ClonableMemoryObject::isThereRAWThroughMemoryBetweenLoopIterations(
+    LoopStructure *loop,
+    AllocaInst *allocation,
+    LoopDependenceGraph *ldg) const {
+  return this->isThereRAWThroughMemoryBetweenLoopIterations(
+      loop, allocation, ldg, this->loadInstructions);
+}
+
+bool ClonableMemoryObject::isThereRAWThroughMemoryBetweenLoopIterations(
+    LoopStructure *loop, AllocaInst *, LoopDependenceGraph *ldg,
+    const std::unordered_set<Instruction *> &insts) const {
+  for (auto *inst : insts) {
+    if (!loop->isIncluded(inst)) {
+      continue;
+    }
+    auto functor = [loop](Value *fromValue, LoopDependenceEdge *d) -> bool {
+      auto *otherInst = dyn_cast<Instruction>(fromValue);
+      if (otherInst == nullptr || !loop->isIncluded(otherInst)) {
+        return false;
+      }
+      return d->getKind() == LoopDependenceEdgeKind::Memory &&
+             d->getMemoryKind() == LoopDependenceMemoryKind::Raw &&
+             d->isLoopCarried();
+    };
+    if (ldg->iterateOverDependencesTo(inst, false, false, true, functor)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+bool ClonableMemoryObject::isThereRAWThroughMemoryFromOutsideToLoop(
+    LoopStructure *loop, AllocaInst *allocation, LoopDependenceGraph *ldg) const {
+  return this->isThereRAWThroughMemoryFromOutsideToLoop(
+      loop, allocation, ldg, this->loadInstructions) ||
+         this->isThereRAWThroughMemoryFromOutsideToLoop(
+             loop, allocation, ldg, this->nonStoringInstructions);
+}
+
+bool ClonableMemoryObject::isThereRAWThroughMemoryFromOutsideToLoop(
+    LoopStructure *loop, AllocaInst *, LoopDependenceGraph *ldg,
+    std::unordered_set<Instruction *> insts) const {
+  for (auto *inst : insts) {
+    if (!loop->isIncluded(inst)) {
+      continue;
+    }
+    auto functor = [loop](Value *fromValue, LoopDependenceEdge *d) -> bool {
+      auto *otherInst = dyn_cast<Instruction>(fromValue);
+      if (otherInst == nullptr || loop->isIncluded(otherInst)) {
+        return false;
+      }
+      return d->getKind() == LoopDependenceEdgeKind::Memory &&
+             d->getMemoryKind() == LoopDependenceMemoryKind::Raw;
+    };
+    if (ldg->iterateOverDependencesTo(inst, false, false, true, functor)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+bool ClonableMemoryObject::isThereRAWThroughMemoryFromLoopToOutside(
+    LoopStructure *loop, AllocaInst *allocation, LoopDependenceGraph *ldg) const {
+  return this->isThereRAWThroughMemoryFromLoopToOutside(
+      loop, allocation, ldg, this->storingInstructions) ||
+         this->isThereRAWThroughMemoryFromLoopToOutside(
+             loop, allocation, ldg, this->nonStoringInstructions);
+}
+
+bool ClonableMemoryObject::isThereRAWThroughMemoryFromLoopToOutside(
+    LoopStructure *loop, AllocaInst *, LoopDependenceGraph *ldg,
+    std::unordered_set<Instruction *> insts) const {
+  for (auto *inst : insts) {
+    if (!loop->isIncluded(inst)) {
+      continue;
+    }
+    auto functor = [loop](Value *toValue, LoopDependenceEdge *d) -> bool {
+      auto *otherInst = dyn_cast<Instruction>(toValue);
+      if (otherInst == nullptr || loop->isIncluded(otherInst)) {
+        return false;
+      }
+      return d->getKind() == LoopDependenceEdgeKind::Memory &&
+             d->getMemoryKind() == LoopDependenceMemoryKind::Raw;
+    };
+    if (ldg->iterateOverDependencesFrom(inst, false, false, true, functor)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+bool ClonableMemoryObject::identifyInitialStoringInstructions(
+    LoopStructure *loop, noelle::DominatorSummary &DS) {
+  std::unordered_set<Instruction *> instructionsNeedingCoverage;
+  instructionsNeedingCoverage.insert(this->nonStoringInstructions.begin(),
+                                     this->nonStoringInstructions.end());
+  instructionsNeedingCoverage.insert(this->loadInstructions.begin(),
+                                     this->loadInstructions.end());
+
+  for (auto *instToCover : instructionsNeedingCoverage) {
+    auto *instBlock = instToCover->getParent();
+    bool belongsToExistingSet = false;
+    for (auto &overrideSet : this->overrideSets) {
+      auto *dominatingBlock = overrideSet->dominatingBlockOfNonStoringInsts;
+      if (DS.DT.dominates(dominatingBlock, instBlock)) {
+        overrideSet->subsequentNonStoringInstructions.insert(instToCover);
+        belongsToExistingSet = true;
+        break;
+      }
+    }
+    if (belongsToExistingSet) {
+      continue;
+    }
+    auto overrideSet = std::unique_ptr<OverrideSet>(new OverrideSet());
+    overrideSet->dominatingBlockOfNonStoringInsts = instBlock;
+    overrideSet->subsequentNonStoringInstructions.insert(instToCover);
+    this->overrideSets.push_back(std::move(overrideSet));
+  }
+
+  for (auto *storingInstruction : this->storingInstructions) {
+    if (!loop->isIncluded(storingInstruction)) {
+      continue;
+    }
+    auto *storingBlock = storingInstruction->getParent();
+    for (auto &overrideSet : this->overrideSets) {
+      auto *dominatingBlock = overrideSet->dominatingBlockOfNonStoringInsts;
+      if (DS.DT.dominates(storingBlock, dominatingBlock)) {
+        overrideSet->initialStoringInstructions.insert(storingInstruction);
+      }
+    }
+  }
+
+  for (auto &overrideSet : this->overrideSets) {
+    if (overrideSet->initialStoringInstructions.empty()) {
+      return false;
+    }
+  }
+
+  return true;
+}
+
+bool ClonableMemoryObject::areOverrideSetsFullyCoveringTheAllocationSpace(void) const {
+  if (this->overrideSets.empty()) {
+    return false;
+  }
+  for (auto const &overrideSet : this->overrideSets) {
+    if (!this->isOverrideSetFullyCoveringTheAllocationSpace(overrideSet.get())) {
+      return false;
+    }
+  }
+  return true;
+}
+
+bool ClonableMemoryObject::isOverrideSetFullyCoveringTheAllocationSpace(
+    OverrideSet *overrideSet) const {
+  std::unordered_set<int64_t> structElementsStoredTo;
+  for (auto *storingInstruction : overrideSet->initialStoringInstructions) {
+    if (auto *store = dyn_cast<StoreInst>(storingInstruction)) {
+      auto *pointerOperand = store->getPointerOperand();
+      if (dyn_cast<AllocaInst>(pointerOperand) != nullptr) {
+        return true;
+      }
+      auto *gep = dyn_cast<GetElementPtrInst>(pointerOperand);
+      if (gep == nullptr || !gep->getSourceElementType()->isStructTy() ||
+          gep->getSourceElementType() != this->allocatedType) {
+        continue;
+      }
+      auto baseIdxIter = gep->idx_begin();
+      auto elementIdxIter = baseIdxIter + 1;
+      auto *baseIdxValue = dyn_cast<ConstantInt>(baseIdxIter->get());
+      auto *elementIdxValue = dyn_cast<ConstantInt>(elementIdxIter->get());
+      if (baseIdxValue == nullptr || elementIdxValue == nullptr ||
+          baseIdxValue->getSExtValue() != 0) {
+        continue;
+      }
+      structElementsStoredTo.insert(elementIdxValue->getSExtValue());
+    } else if (auto *call = dyn_cast<CallInst>(storingInstruction)) {
+      if (!ClonableMemoryObject::isMemCpyInstrinsicCall(call)) {
+        continue;
+      }
+      auto *bytesStoredConst = dyn_cast<ConstantInt>(call->getOperand(2));
+      if (bytesStoredConst == nullptr) {
+        continue;
+      }
+      if (this->sizeInBits == bytesStoredConst->getZExtValue() * 8) {
+        return true;
+      }
+    }
+  }
+
+  if (this->allocatedType != nullptr && this->allocatedType->isStructTy() &&
+      structElementsStoredTo.size() == this->allocatedType->getStructNumElements()) {
+    return true;
+  }
+  return false;
+}
+
+ClonableMemoryObject::ClonableMemoryObject(AllocaInst *allocation,
+                                           uint64_t sizeInBits,
+                                           LoopStructure *loop,
+                                           noelle::DominatorSummary &DS,
+                                           LoopDependenceGraph *ldg)
+    : allocation{allocation},
+      sizeInBits{sizeInBits},
+      loop{loop},
+      clonable{false},
+      scopeWithinLoop{false},
+      needsInitialization{false} {
+  this->setObjectScope(allocation, loop, DS);
+  this->allocatedType = allocation->getAllocatedType();
+  if (!this->identifyStoresAndOtherUsers(loop, DS)) {
+    return;
+  }
+
+  if (!this->isThereAMemoryDependenceBetweenLoopIterations(
+          loop, allocation, ldg, this->storingInstructions) &&
+      !this->isThereAMemoryDependenceBetweenLoopIterations(
+          loop, allocation, ldg, this->loadInstructions) &&
+      !this->isThereAMemoryDependenceBetweenLoopIterations(
+          loop, allocation, ldg, this->nonStoringInstructions) &&
+      !this->scopeWithinLoop) {
+    return;
+  }
+
+  if (this->isThereRAWThroughMemoryBetweenLoopIterations(loop, allocation, ldg)) {
+    return;
+  }
+
+  if (this->scopeWithinLoop) {
+    this->clonable = true;
+    return;
+  }
+
+  if (!this->isThereRAWThroughMemoryFromLoopToOutside(loop, allocation, ldg)) {
+    if (!this->isThereRAWThroughMemoryFromOutsideToLoop(loop, allocation, ldg)) {
+      this->clonable = true;
+      return;
+    }
+
+    this->needsInitialization = true;
+    this->clonable = true;
+    return;
+  }
+
+  if (!this->allocatedType->isStructTy() && !this->allocatedType->isIntegerTy()) {
+    return;
+  }
+
+  this->identifyInitialStoringInstructions(loop, DS);
+  if (!this->scopeWithinLoop) {
+    if (!this->areOverrideSetsFullyCoveringTheAllocationSpace() ||
+        this->isThereRAWThroughMemoryFromLoopToOutside(loop, allocation, ldg)) {
+      return;
+    }
+  }
+
+  this->clonable = true;
+}
+
+bool ClonableMemoryObject::isClonableLocation(void) const {
+  return this->clonable;
+}
+
+bool ClonableMemoryObject::doPrivateCopiesNeedToBeInitialized(void) const {
+  return this->needsInitialization;
 }
 
 MemoryCloningAnalysis::MemoryCloningAnalysis(LoopStructure *loop,
@@ -154,10 +465,9 @@ MemoryCloningAnalysis::MemoryCloningAnalysis(LoopStructure *loop,
   auto *function = loop->getFunction();
   auto &entryBlock = function->getEntryBlock();
   auto &DL = function->getParent()->getDataLayout();
-  auto *header = loop->getHeader();
 
-  for (auto &inst : entryBlock) {
-    auto *alloca = dyn_cast<AllocaInst>(&inst);
+  for (auto &I : entryBlock) {
+    auto *alloca = dyn_cast<AllocaInst>(&I);
     if (alloca == nullptr) {
       continue;
     }
@@ -166,226 +476,45 @@ MemoryCloningAnalysis::MemoryCloningAnalysis(LoopStructure *loop,
       continue;
     }
 
-    auto object = std::make_unique<ClonableMemoryObject>(
-        alloca, sizeInBitsOptional.getValue());
-
-    bool hasLoopUse = false;
-    bool hasIllegalOutsideUse = false;
-    bool hasOutsideInitializationStore = false;
-    bool hasLoopLoad = false;
-    bool scopeWithinLoop = false;
-    bool hasLoopFullOverwrite = false;
-    std::vector<std::pair<Instruction *, std::string>> loopStores;
-    std::vector<std::pair<Instruction *, std::string>> loopLoads;
-
-    std::queue<Value *> worklist;
-    std::unordered_set<Value *> visited;
-    worklist.push(alloca);
-    visited.insert(alloca);
-
-    while (!worklist.empty()) {
-      auto *value = worklist.front();
-      worklist.pop();
-      for (auto *user : value->users()) {
-        if (!visited.insert(user).second) {
-          continue;
-        }
-
-        auto *userInst = dyn_cast<Instruction>(user);
-        if (userInst == nullptr) {
-          hasIllegalOutsideUse = true;
-          continue;
-        }
-
-        if (isa<GetElementPtrInst>(userInst) || isa<BitCastInst>(userInst) ||
-            isa<AddrSpaceCastInst>(userInst)) {
-          object->addPointer(userInst);
-          worklist.push(userInst);
-          if (!loop->isIncluded(userInst) &&
-              !DS.DT.dominates(userInst->getParent(), header)) {
-            hasIllegalOutsideUse = true;
-          }
-          continue;
-        }
-
-        if (auto *load = dyn_cast<LoadInst>(userInst)) {
-          object->addLoad(load);
-          if (loop->isIncluded(load)) {
-            hasLoopLoad = true;
-            loopLoads.emplace_back(
-                load, accessKeyFor(load->getPointerOperand(), alloca));
-          }
-        }
-        if (auto *store = dyn_cast<StoreInst>(userInst)) {
-          if (object->mustAliasAMemoryLocationWithinObject(
-                  store->getPointerOperand())) {
-            object->addStore(store);
-            if (loop->isIncluded(store)) {
-              loopStores.emplace_back(
-                  store, accessKeyFor(store->getPointerOperand(), alloca));
-            }
-          }
-        }
-        if (auto *call = dyn_cast<CallInst>(userInst)) {
-          if (call->isLifetimeStartOrEnd()) {
-            if (call->arg_size() > 1 &&
-                object->mustAliasAMemoryLocationWithinObject(
-                    call->getArgOperand(1)) &&
-                loop->isIncluded(call)) {
-              scopeWithinLoop = true;
-            }
-            continue;
-          }
-          if (isMemoryTransferIntrinsic(call)) {
-            bool isDestinationUse =
-                call->arg_size() >= 1 && call->getArgOperand(0) == value;
-            bool isSourceUse =
-                call->arg_size() >= 2 && call->getArgOperand(1) == value;
-            if (isDestinationUse) {
-              object->addStore(call);
-            } else if (isSourceUse) {
-              object->addLoad(call);
-            } else {
-              object->addNonStoringUse(call);
-            }
-            hasLoopUse |= loop->isIncluded(call);
-            if (loop->isIncluded(call) && call->arg_size() > 0 &&
-                object->mustAliasAMemoryLocationWithinObject(
-                    call->getArgOperand(0))) {
-              hasLoopFullOverwrite = true;
-            }
-            if (!loop->isIncluded(call) &&
-                !DS.DT.dominates(call->getParent(), header)) {
-              hasIllegalOutsideUse = true;
-            }
-            continue;
-          }
-
-          bool aliasesObject = false;
-          for (auto &arg : call->args()) {
-            if (object->mustAliasAMemoryLocationWithinObject(arg.get())) {
-              aliasesObject = true;
-              break;
-            }
-          }
-          if (aliasesObject) {
-            object->addNonStoringUse(call);
-          }
-        }
-        if (!isa<LoadInst>(userInst) && !isa<StoreInst>(userInst) &&
-            !isa<CallInst>(userInst)) {
-          object->addNonStoringUse(userInst);
-        }
-        if (isa<InvokeInst>(userInst)) {
-          hasIllegalOutsideUse = true;
-          continue;
-        }
-
-        if (loop->isIncluded(userInst)) {
-          hasLoopUse = true;
-          continue;
-        }
-
-        if (!DS.DT.dominates(userInst->getParent(), header)) {
-          hasIllegalOutsideUse = true;
-          continue;
-        }
-
-        if (auto *store = dyn_cast<StoreInst>(userInst)) {
-          if (object->mustAliasAMemoryLocationWithinObject(
-                  store->getPointerOperand())) {
-            hasOutsideInitializationStore = true;
-            continue;
-          }
-        }
-
-        if (isa<GetElementPtrInst>(userInst) || isa<BitCastInst>(userInst) ||
-            userInst->isLifetimeStartOrEnd()) {
-          continue;
-        }
-
-        hasIllegalOutsideUse = true;
-      }
+    auto location = std::make_unique<ClonableMemoryObject>(
+        alloca, sizeInBitsOptional.getValue(), loop, DS, ldg);
+    if (!location->isClonableLocation()) {
+      continue;
     }
-
-    if (!scopeWithinLoop && hasOutsideInitializationStore && hasLoopLoad &&
-        alloca->getAllocatedType()->isAggregateType()) {
-      for (auto const &loadInfo : loopLoads) {
-        bool covered = hasLoopFullOverwrite;
-        if (!covered) {
-          for (auto const &storeInfo : loopStores) {
-            if (!DS.DT.dominates(storeInfo.first, loadInfo.first)) {
-              continue;
-            }
-            if (loadInfo.second.empty() || storeInfo.second.empty() ||
-                storeInfo.second == loadInfo.second) {
-              covered = true;
-              break;
-            }
-          }
-        }
-        if (!covered) {
-          hasIllegalOutsideUse = true;
-          break;
-        }
-      }
-    }
-
-    object->setNeedsInitialization(
-        !scopeWithinLoop && hasOutsideInitializationStore && hasLoopLoad);
-    object->setClonable(hasLoopUse && !hasIllegalOutsideUse);
-    if (object->isClonableLocation()) {
-      this->clonableMemoryLocations.push_back(std::move(object));
-    }
+    this->clonableMemoryLocations.insert(this->clonableMemoryLocations.end(),
+                                         std::move(location));
   }
 }
 
 std::unordered_set<ClonableMemoryObject *>
 MemoryCloningAnalysis::getClonableMemoryObjects(void) const {
-  std::unordered_set<ClonableMemoryObject *> result;
+  std::unordered_set<ClonableMemoryObject *> locations;
   for (auto const &location : this->clonableMemoryLocations) {
-    result.insert(location.get());
+    locations.insert(location.get());
   }
-  return result;
+  return locations;
 }
 
 std::unordered_set<ClonableMemoryObject *>
 MemoryCloningAnalysis::getClonableMemoryObjectsFor(Instruction *I) const {
-  std::unordered_set<ClonableMemoryObject *> result;
+  std::unordered_set<ClonableMemoryObject *> locations;
   for (auto const &location : this->clonableMemoryLocations) {
     auto *loc = location.get();
     if (loc->getAllocation() == I || loc->isInstructionCastOrGEPOfLocation(I) ||
         loc->isInstructionLoadingLocation(I) ||
         loc->isInstructionStoringLocation(I)) {
-      result.insert(loc);
+      locations.insert(loc);
       continue;
     }
     if (auto *callInst = dyn_cast<CallInst>(I)) {
-      if (callInst->isLifetimeStartOrEnd() && callInst->arg_size() > 1 &&
-          loc->mustAliasAMemoryLocationWithinObject(
-              callInst->getArgOperand(1))) {
-        result.insert(loc);
-        continue;
-      }
-      auto intrinsic = callInst->getIntrinsicID();
-      if ((intrinsic == Intrinsic::memcpy || intrinsic == Intrinsic::memmove) &&
+      if (callInst->isLifetimeStartOrEnd() &&
           callInst->arg_size() > 1 &&
-          (loc->mustAliasAMemoryLocationWithinObject(
-               callInst->getArgOperand(0)) ||
-           loc->mustAliasAMemoryLocationWithinObject(
-               callInst->getArgOperand(1)))) {
-        result.insert(loc);
-        continue;
-      }
-      for (auto &arg : callInst->args()) {
-        if (loc->mustAliasAMemoryLocationWithinObject(arg.get())) {
-          result.insert(loc);
-          break;
-        }
+          loc->mustAliasAMemoryLocationWithinObject(callInst->getArgOperand(1))) {
+        locations.insert(loc);
       }
     }
   }
-  return result;
+  return locations;
 }
 
 } // namespace loop

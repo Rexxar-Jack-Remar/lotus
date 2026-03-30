@@ -85,9 +85,11 @@ public:
 
 private:
   LoopDependenceGraph *graph;
-  std::vector<LoopDependenceNode *> nodes;
+  std::vector<LoopDependenceNode *> internalNodes;
+  std::vector<LoopDependenceNode *> allNodes;
   std::vector<std::unique_ptr<LoopSCC>> ownedSCCs;
   std::vector<LoopSCC *> includedSCCs;
+  std::vector<LoopSCC *> allSCCs;
   std::unordered_map<LoopDependenceNode *, LoopSCC *> sccByNode;
   std::unordered_map<Value *, LoopSCC *> sccByValue;
   std::unordered_map<const LoopSCC *, uint32_t> sccIndexes;

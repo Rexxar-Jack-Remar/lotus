@@ -154,11 +154,21 @@ MemoryClonableSCC::MemoryClonableSCC(
 StackObjectClonableSCC::StackObjectClonableSCC(
     LoopSCC *s, LoopStructure *loop,
     const std::set<LoopDependenceEdge *> &loopCarriedDependences,
-    const std::set<AllocaInst *> &locations)
+    const std::set<ClonableMemoryObject *> &locations)
     : MemoryClonableSCC(STACK_OBJECT_CLONABLE, s, loop, loopCarriedDependences),
       locations{locations} {}
 std::set<AllocaInst *>
 StackObjectClonableSCC::getMemoryLocationsToClone(void) const {
+  std::set<AllocaInst *> allocations;
+  for (auto *location : this->locations) {
+    if (location != nullptr) {
+      allocations.insert(location->getAllocation());
+    }
+  }
+  return allocations;
+}
+std::set<ClonableMemoryObject *>
+StackObjectClonableSCC::getClonableMemoryObjects(void) const {
   return this->locations;
 }
 
@@ -535,14 +545,14 @@ SCCDAGAttrs::checkIfRecomputable(LoopSCC *scc, LoopTree *loopNode) const {
   return values;
 }
 
-std::set<AllocaInst *>
+std::set<ClonableMemoryObject *>
 SCCDAGAttrs::checkIfClonableByUsingLocalMemory(LoopSCC *scc, LoopTree *) const {
   auto it = this->sccToLoopCarriedDependencies.find(scc);
   if (it == this->sccToLoopCarriedDependencies.end()) {
     return {};
   }
 
-  std::set<AllocaInst *> allocations;
+  std::set<ClonableMemoryObject *> locations;
   for (auto *dependency : it->second) {
     auto *inst = dyn_cast_or_null<Instruction>(dependency->getSrc()->getValue());
     if (inst == nullptr) {
@@ -555,11 +565,11 @@ SCCDAGAttrs::checkIfClonableByUsingLocalMemory(LoopSCC *scc, LoopTree *) const {
     }
 
     for (auto *loc : locs) {
-      allocations.insert(loc->getAllocation());
+      locations.insert(loc);
     }
   }
 
-  return allocations;
+  return locations;
 }
 
 GenericSCC *SCCDAGAttrs::getSCCAttrs(LoopSCC *scc) const {

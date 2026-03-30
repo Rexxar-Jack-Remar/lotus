@@ -386,12 +386,18 @@ static void expectSCCDAGStructuralInvariants(FunctionLoopAnalyses &analyses,
   auto includedSCCs = sccdag->getSCCs();
   auto allSCCs = sccdag->getAllSCCs();
   ASSERT_FALSE(allSCCs.empty());
+  EXPECT_GE(allSCCs.size(), includedSCCs.size());
 
   std::unordered_set<LoopSCC *> includedSet(includedSCCs.begin(),
                                             includedSCCs.end());
+  bool sawExternalSCC = false;
   for (auto *scc : allSCCs) {
     ASSERT_NE(scc, nullptr);
-    EXPECT_TRUE(scc->isIncludedInLoop());
+    if (!scc->isIncludedInLoop()) {
+      sawExternalSCC = true;
+      EXPECT_EQ(includedSet.find(scc), includedSet.end());
+      continue;
+    }
     EXPECT_NE(includedSet.find(scc), includedSet.end());
 
     for (auto *succ : scc->getSuccessors()) {
@@ -415,6 +421,8 @@ static void expectSCCDAGStructuralInvariants(FunctionLoopAnalyses &analyses,
       }
     }
   }
+  EXPECT_TRUE(sawExternalSCC)
+      << "Parity fixtures should expose SCCDAG boundary nodes";
 }
 
 static std::string sortCompositeTokens(std::string value) {
@@ -547,6 +555,9 @@ static void runCase(const std::string &name) {
     auto *clonable =
         dynamic_cast<lotus::analysis::loop::StackObjectClonableSCC *>(info);
     ASSERT_NE(clonable, nullptr);
+    EXPECT_FALSE(clonable->getClonableMemoryObjects().empty())
+        << "STACK_OBJECT_CLONABLE SCC must retain clonable-memory metadata, "
+           "not just projected allocations";
     EXPECT_FALSE(clonable->getMemoryLocationsToClone().empty())
         << "STACK_OBJECT_CLONABLE SCC must identify at least one stack "
            "allocation to clone";
@@ -566,7 +577,7 @@ static void runCase(const std::string &name) {
                                    GenericSCC::LINEAR_INDUCTION_VARIABLE;
                           }),
         &diff))
-        << "Known parity deviation for sccdag_attributes/" << name << ": "
+        << "Parity deviation for sccdag_attributes/" << name << ": "
         << diff;
   }
   if (golden.hasSection("reducible SCC")) {
@@ -578,7 +589,7 @@ static void runCase(const std::string &name) {
                                                   GenericSCC::BINARY_REDUCTION;
                                          }),
                        &diff))
-        << "Known parity deviation for sccdag_attributes/" << name << ": "
+        << "Parity deviation for sccdag_attributes/" << name << ": "
         << diff;
   }
   (void)clonableByHeuristic;

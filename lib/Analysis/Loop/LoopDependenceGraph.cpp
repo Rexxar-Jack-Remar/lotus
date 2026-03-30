@@ -182,13 +182,7 @@ bool isAllowedBoundaryContextValue(Value *value) {
   if (value == nullptr || shouldIgnoreValue(value)) {
     return false;
   }
-  if (isa<Instruction>(value) || isa<Argument>(value)) {
-    return true;
-  }
-  if (auto *ce = dyn_cast<ConstantExpr>(value)) {
-    return ce->getOpcode() == Instruction::GetElementPtr;
-  }
-  return false;
+  return true;
 }
 
 template <typename T> void eraseFirst(std::vector<T *> &values, T *needle) {
@@ -397,6 +391,45 @@ bool LoopDependenceGraph::iterateOverDependencesTo(
   return false;
 }
 
+bool LoopDependenceGraph::iterateOverDependencesFrom(
+    Value *source, bool includeControl, bool includeVariable,
+    bool includeMemory,
+    const std::function<bool(Value *, LoopDependenceEdge *)> &funcToInvoke)
+    const {
+  auto *sourceNode = this->getNode(source);
+  if (sourceNode == nullptr) {
+    return false;
+  }
+
+  for (auto *edge : sourceNode->getOutgoingEdges()) {
+    bool include = false;
+    switch (edge->getKind()) {
+    case LoopDependenceEdgeKind::Control:
+      include = includeControl;
+      break;
+    case LoopDependenceEdgeKind::Variable:
+      include = includeVariable;
+      break;
+    case LoopDependenceEdgeKind::Memory:
+      include = includeMemory;
+      break;
+    }
+    if (!include) {
+      continue;
+    }
+
+    auto *dst = edge->getDst();
+    if (dst == nullptr) {
+      continue;
+    }
+    if (funcToInvoke(dst->getValue(), edge)) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
 std::unique_ptr<LoopDependenceGraph>
 LoopDependenceGraph::createSubgraph(bool includeControl, bool includeVariable,
                                     bool includeMemory) const {
@@ -456,6 +489,89 @@ LoopDependenceGraph::createSubgraph(bool includeControl, bool includeVariable,
     src->outgoingEdges.push_back(rawClonedEdge);
     dst->incomingEdges.push_back(rawClonedEdge);
     subgraph->ownedEdges.push_back(std::move(clonedEdge));
+  }
+
+  return subgraph;
+}
+
+std::unique_ptr<LoopDependenceGraph> LoopDependenceGraph::createSubgraphFromValues(
+    const std::vector<Value *> &values, bool linkToExternal, bool includeControl,
+    bool includeVariable, bool includeMemory,
+    const std::unordered_set<LoopDependenceEdge *> &edgesToIgnore) const {
+  if (values.empty()) {
+    return nullptr;
+  }
+
+  auto subgraph =
+      std::unique_ptr<LoopDependenceGraph>(new LoopDependenceGraph());
+  subgraph->loop = this->loop;
+  subgraph->pdg = this->pdg;
+
+  std::unordered_set<Value *> internalValues;
+  for (auto *value : values) {
+    if (value == nullptr || shouldIgnoreValue(value)) {
+      continue;
+    }
+    internalValues.insert(value);
+    auto *sourceNode = this->getNode(value);
+    auto *sourcePDGNode = sourceNode ? sourceNode->getPDGNode()
+                                     : (this->pdg && isa<Instruction>(value)
+                                            ? this->pdg->getNode(*value)
+                                            : nullptr);
+    subgraph->fetchOrCreateNode(value, sourcePDGNode, true);
+  }
+
+  std::set<std::tuple<pdg::Node *, pdg::Node *, int>> seenEdges;
+  for (auto const &owned : this->ownedEdges) {
+    auto *edge = owned.get();
+    if (edgesToIgnore.count(edge) != 0) {
+      continue;
+    }
+
+    bool keep = false;
+    switch (edge->getKind()) {
+    case LoopDependenceEdgeKind::Control:
+      keep = includeControl;
+      break;
+    case LoopDependenceEdgeKind::Variable:
+      keep = includeVariable;
+      break;
+    case LoopDependenceEdgeKind::Memory:
+      keep = includeMemory;
+      break;
+    }
+    if (!keep) {
+      continue;
+    }
+
+    auto *srcValue = edge->getSrc() ? edge->getSrc()->getValue() : nullptr;
+    auto *dstValue = edge->getDst() ? edge->getDst()->getValue() : nullptr;
+    bool srcInternal = srcValue != nullptr && internalValues.count(srcValue) != 0;
+    bool dstInternal = dstValue != nullptr && internalValues.count(dstValue) != 0;
+    if (!srcInternal && !dstInternal) {
+      continue;
+    }
+    if (!linkToExternal && (!srcInternal || !dstInternal)) {
+      continue;
+    }
+
+    auto *srcNode = subgraph->fetchOrCreateNode(
+        srcValue, edge->getSrc() ? edge->getSrc()->getPDGNode() : nullptr,
+        srcInternal);
+    auto *dstNode = subgraph->fetchOrCreateNode(
+        dstValue, edge->getDst() ? edge->getDst()->getPDGNode() : nullptr,
+        dstInternal);
+
+    auto key = std::make_tuple(srcNode ? srcNode->getPDGNode() : nullptr,
+                               dstNode ? dstNode->getPDGNode() : nullptr,
+                               static_cast<int>(edge->getOriginalEdgeType()));
+    if (!seenEdges.insert(key).second) {
+      continue;
+    }
+
+    subgraph->addEdge(srcNode, dstNode, edge->getKind(), edge->getMemoryKind(),
+                      edge->getOrigin(), edge->getOriginalEdgeType(),
+                      edge->isLoopCarried());
   }
 
   return subgraph;
@@ -598,6 +714,46 @@ void LoopDependenceGraph::importEdge(pdg::Edge *edge) {
   srcNode->outgoingEdges.push_back(rawEdge);
   dstNode->incomingEdges.push_back(rawEdge);
   this->ownedEdges.push_back(std::move(ownedEdge));
+}
+
+void LoopDependenceGraph::importEdgeIfIncluded(
+    pdg::Edge *edge, bool linkToExternal,
+    const std::unordered_set<Value *> &internalValues,
+    std::set<std::tuple<pdg::Node *, pdg::Node *, int>> &seenEdges) {
+  if (edge == nullptr) {
+    return;
+  }
+
+  auto *srcPDGNode = edge->getSrcNode();
+  auto *dstPDGNode = edge->getDstNode();
+  auto *srcValue = srcPDGNode ? srcPDGNode->getValue() : nullptr;
+  auto *dstValue = dstPDGNode ? dstPDGNode->getValue() : nullptr;
+  if (!isAllowedBoundaryContextValue(srcValue) ||
+      !isAllowedBoundaryContextValue(dstValue)) {
+    return;
+  }
+
+  bool srcInternal = srcValue != nullptr && internalValues.count(srcValue) != 0;
+  bool dstInternal = dstValue != nullptr && internalValues.count(dstValue) != 0;
+  if (!srcInternal && !dstInternal) {
+    return;
+  }
+  if (!linkToExternal && (!srcInternal || !dstInternal)) {
+    return;
+  }
+
+  auto key = std::make_tuple(srcPDGNode, dstPDGNode,
+                             static_cast<int>(edge->getEdgeType()));
+  if (!seenEdges.insert(key).second) {
+    return;
+  }
+
+  auto *srcNode = this->fetchOrCreateNode(srcValue, srcPDGNode, srcInternal);
+  auto *dstNode = this->fetchOrCreateNode(dstValue, dstPDGNode, dstInternal);
+  this->addEdge(srcNode, dstNode, classifyEdgeKind(edge->getEdgeType()),
+                classifyMemoryKind(edge->getEdgeType()),
+                LoopDependenceEdgeOrigin::ImportedPDG, edge->getEdgeType(),
+                false);
 }
 
 void LoopDependenceGraph::initialize(LoopTree *loopNode,

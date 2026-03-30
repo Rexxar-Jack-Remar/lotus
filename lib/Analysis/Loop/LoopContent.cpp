@@ -153,7 +153,6 @@ void LoopContent::removeMemoryCloningNegatedDependences(void) {
   }
 
   std::vector<LoopDependenceEdge *> edgesToRemove;
-  std::vector<std::pair<Value *, Value *>> replacementEdges;
   for (auto *edge : this->dependenceGraph->getEdges()) {
     if (!edge->isLoopCarried() ||
         edge->getKind() != LoopDependenceEdgeKind::Memory) {
@@ -207,14 +206,10 @@ void LoopContent::removeMemoryCloningNegatedDependences(void) {
       continue;
     }
 
-    replacementEdges.emplace_back(producer, consumer);
     edge->setLoopCarried(false);
     edgesToRemove.push_back(edge);
   }
 
-  for (auto &pair : replacementEdges) {
-    this->dependenceGraph->addVariableDependence(pair.first, pair.second, true);
-  }
   for (auto *edge : edgesToRemove) {
     this->dependenceGraph->removeEdge(edge);
   }
@@ -256,10 +251,26 @@ void LoopContent::materializeScalarAnalyses(
 
   this->invariantManager.reset(new InvariantManager(
       this->getLoopStructure(), this->dependenceGraph.get()));
+  std::vector<Value *> loopInternalValues;
+  for (auto *block : this->getLoopStructure()->getBasicBlocks()) {
+    for (auto &instruction : *block) {
+      if (isa<DbgInfoIntrinsic>(&instruction)) {
+        continue;
+      }
+      if (auto *call = dyn_cast<CallInst>(&instruction)) {
+        if (call->isLifetimeStartOrEnd()) {
+          continue;
+        }
+      }
+      loopInternalValues.push_back(&instruction);
+    }
+  }
+  auto loopInternalGraph = this->dependenceGraph->createSubgraphFromValues(
+      loopInternalValues, /*linkToExternal=*/false);
   this->ivDependenceGraph =
-      this->dependenceGraph->createSubgraph(/*includeControl=*/true,
-                                            /*includeVariable=*/true,
-                                            /*includeMemory=*/false);
+      loopInternalGraph->createSubgraph(/*includeControl=*/true,
+                                        /*includeVariable=*/true,
+                                        /*includeMemory=*/false);
   this->ivSCCDAG.reset(new LoopSCCDAG(*this->ivDependenceGraph));
   this->inductionVariables.reset(
       new InductionVariableManager(this->loop, *this->invariantManager, SE, LI,

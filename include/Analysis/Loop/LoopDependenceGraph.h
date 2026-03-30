@@ -136,10 +136,23 @@ public:
       bool includeMemory,
       const std::function<bool(Value *, LoopDependenceEdge *)> &funcToInvoke)
       const;
+  bool iterateOverDependencesFrom(
+      Value *source, bool includeControl, bool includeVariable,
+      bool includeMemory,
+      const std::function<bool(Value *, LoopDependenceEdge *)> &funcToInvoke)
+      const;
 
   std::unique_ptr<LoopDependenceGraph> createSubgraph(bool includeControl,
                                                       bool includeVariable,
                                                       bool includeMemory) const;
+  std::unique_ptr<LoopDependenceGraph>
+  createSubgraphFromValues(const std::vector<Value *> &values,
+                           bool linkToExternal,
+                           bool includeControl = true,
+                           bool includeVariable = true,
+                           bool includeMemory = true,
+                           const std::unordered_set<LoopDependenceEdge *> &edgesToIgnore =
+                               {}) const;
   void removeEdge(LoopDependenceEdge *edge);
   void addVariableDependence(Value *src, Value *dst, bool loopCarried = false);
   std::string renderStable(void) const;
@@ -160,6 +173,10 @@ private:
   LoopDependenceNode *fetchOrCreateNode(Value *value, pdg::Node *pdgNode,
                                         bool internal);
   void importEdge(pdg::Edge *edge);
+  void importEdgeIfIncluded(pdg::Edge *edge,
+                            bool linkToExternal,
+                            const std::unordered_set<Value *> &internalValues,
+                            std::set<std::tuple<pdg::Node *, pdg::Node *, int>> &seenEdges);
   void initialize(LoopTree *loopNode, pdg::ProgramGraph &programGraph);
   void addEdge(LoopDependenceNode *src,
                LoopDependenceNode *dst,

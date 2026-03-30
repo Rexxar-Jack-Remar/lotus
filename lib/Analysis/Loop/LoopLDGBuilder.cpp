@@ -66,13 +66,7 @@ bool isAllowedBoundaryContextValue(Value *value) {
   if (value == nullptr || shouldIgnoreValue(value)) {
     return false;
   }
-  if (isa<Instruction>(value) || isa<Argument>(value)) {
-    return true;
-  }
-  if (auto *ce = dyn_cast<ConstantExpr>(value)) {
-    return ce->getOpcode() == Instruction::GetElementPtr;
-  }
-  return false;
+  return true;
 }
 
 bool isInternalToLoop(LoopStructure *loop, Value *value) {
@@ -144,18 +138,81 @@ public:
                       const noelle::DominatorSummary &) = 0;
 };
 
-class UnsupportedLoopAwareDependenceRefinementPass
+bool isReadOnlyInstruction(const Instruction *instruction) {
+  if (instruction == nullptr) {
+    return false;
+  }
+
+  if (isa<LoadInst>(instruction)) {
+    return true;
+  }
+
+  auto *call = dyn_cast<CallBase>(instruction);
+  if (call == nullptr) {
+    return !instruction->mayWriteToMemory();
+  }
+
+  if (call->mayWriteToMemory()) {
+    return false;
+  }
+
+  return true;
+}
+
+class ImportedPDGLoopAwareDependenceRefinementPass
     : public LoopAwareDependenceRefinementPass {
 public:
-  void refine(LoopDependenceGraph &,
-              LoopTree *,
+  void refine(LoopDependenceGraph &graph,
+              LoopTree *loopNode,
               llvm::ScalarEvolution &,
               llvm::LoopInfo &,
-              const noelle::DominatorSummary &) override {
-    // NOELLE can host loop-aware disproval backends such as SCAF.
-    // Lotus preserves the pipeline stage even when no backend is available.
+              const noelle::DominatorSummary &DS) override {
+    std::vector<LoopDependenceEdge *> edgesToRemove;
+    for (auto *edge : graph.getEdges()) {
+      if (edge->getKind() != LoopDependenceEdgeKind::Memory ||
+          edge->getOrigin() != LoopDependenceEdgeOrigin::ImportedPDG) {
+        continue;
+      }
+
+      auto *producer = dyn_cast_or_null<Instruction>(edge->getSrc()->getValue());
+      auto *consumer = dyn_cast_or_null<Instruction>(edge->getDst()->getValue());
+      if (producer == nullptr || consumer == nullptr) {
+        continue;
+      }
+
+      // DATA_READ and load/load alias edges are not true data dependences.
+      if (edge->getMemoryKind() == LoopDependenceMemoryKind::ReadOnly ||
+          (isReadOnlyInstruction(producer) && isReadOnlyInstruction(consumer))) {
+        edgesToRemove.push_back(edge);
+      }
+    }
+
+    for (auto *edge : edgesToRemove) {
+      edge->setLoopCarried(false);
+      graph.removeEdge(edge);
+    }
+
+    LoopCarriedDependencies::setLoopCarriedDependencies(loopNode, DS, graph);
   }
 };
+
+std::vector<Value *> collectLoopInternalValues(LoopStructure *loopStructure) {
+  std::vector<Value *> values;
+  if (loopStructure == nullptr) {
+    return values;
+  }
+
+  for (auto *block : loopStructure->getBasicBlocks()) {
+    for (auto &instruction : *block) {
+      if (shouldIgnoreLoopInstruction(&instruction)) {
+        continue;
+      }
+      values.push_back(&instruction);
+    }
+  }
+
+  return values;
+}
 
 void removeLoopCarriedDependencesProvedDisjoint(
     LoopDependenceGraph &graph,
@@ -200,10 +257,13 @@ public:
               llvm::LoopInfo &LI,
               const noelle::DominatorSummary &DS) override {
     InvariantManager temporaryInvariants(loopNode->getLoop(), &graph);
+    auto loopInternalValues = collectLoopInternalValues(loopNode->getLoop());
+    auto temporaryLoopInternalGraph = graph.createSubgraphFromValues(
+        loopInternalValues, /*linkToExternal=*/false);
     auto temporaryIVDependenceGraph =
-        graph.createSubgraph(/*includeControl=*/true,
-                             /*includeVariable=*/true,
-                             /*includeMemory=*/false);
+        temporaryLoopInternalGraph->createSubgraph(/*includeControl=*/true,
+                                                   /*includeVariable=*/true,
+                                                   /*includeMemory=*/false);
     auto temporaryIVSCCDAG =
         std::unique_ptr<LoopSCCDAG>(new LoopSCCDAG(*temporaryIVDependenceGraph));
     LoopEnvironment temporaryEnvironment(
@@ -360,13 +420,14 @@ LoopLDGBuilder::GraphBundle LoopLDGBuilder::buildBaseLoopDependenceGraph(
   auto *loopStructure = graph.getLoopStructure();
   assert(loopStructure != nullptr);
 
+  std::vector<Value *> loopInternalValues = collectLoopInternalValues(loopStructure);
   std::vector<Instruction *> loopInstructions;
-  for (auto *block : loopStructure->getBasicBlocks()) {
-    for (auto &instruction : *block) {
-      if (shouldIgnoreLoopInstruction(&instruction)) {
-        continue;
-      }
-      loopInstructions.push_back(&instruction);
+  std::unordered_set<Value *> loopInternalValueSet;
+  loopInstructions.reserve(loopInternalValues.size());
+  for (auto *value : loopInternalValues) {
+    loopInternalValueSet.insert(value);
+    if (auto *instruction = dyn_cast<Instruction>(value)) {
+      loopInstructions.push_back(instruction);
     }
   }
 
@@ -391,67 +452,13 @@ LoopLDGBuilder::GraphBundle LoopLDGBuilder::buildBaseLoopDependenceGraph(
     }
 
     for (auto *edge : pdgNode->getOutEdgeSet()) {
-      auto key = std::make_tuple(edge->getSrcNode(), edge->getDstNode(),
-                                 static_cast<int>(edge->getEdgeType()));
-      if (seenEdges.insert(key).second) {
-        graph.importEdge(edge);
-      }
+      graph.importEdgeIfIncluded(edge, /*linkToExternal=*/true,
+                                 loopInternalValueSet, seenEdges);
     }
 
     for (auto *edge : pdgNode->getInEdgeSet()) {
-      auto key = std::make_tuple(edge->getSrcNode(), edge->getDstNode(),
-                                 static_cast<int>(edge->getEdgeType()));
-      if (seenEdges.insert(key).second) {
-        graph.importEdge(edge);
-      }
-    }
-  }
-
-  // Deliberately synthesize boundary/context variable edges only for values
-  // NOELLE exposes to loop-local consumers.
-  for (auto *instruction : loopInstructions) {
-    auto *dstNode = graph.getNode(instruction);
-    if (dstNode == nullptr) {
-      continue;
-    }
-
-    for (auto &operandUse : instruction->operands()) {
-      auto *value = operandUse.get();
-      if (shouldIgnoreValue(value) ||
-          (isa<Constant>(value) && !isa<ConstantExpr>(value))) {
-        continue;
-      }
-      if (!isAllowedBoundaryContextValue(value)) {
-        continue;
-      }
-
-      auto *srcPDGNode = isa<Instruction>(value) ? pdg.getNode(*value) : nullptr;
-      auto *dstPDGNode =
-          isa<Instruction>(instruction) ? pdg.getNode(*instruction) : nullptr;
-      auto *srcNode = graph.fetchOrCreateNode(
-          value, srcPDGNode, isInternalToLoop(loopStructure, value));
-      auto *resolvedDstNode = graph.fetchOrCreateNode(
-          instruction, dstPDGNode, isInternalToLoop(loopStructure, instruction));
-
-      bool duplicate = false;
-      for (auto *edge : srcNode->getOutgoingEdges()) {
-        if (edge->getDst() == resolvedDstNode &&
-            edge->getKind() == LoopDependenceEdgeKind::Variable) {
-          duplicate = true;
-          break;
-        }
-      }
-      if (duplicate) {
-        continue;
-      }
-
-      graph.addEdge(srcNode,
-                    resolvedDstNode,
-                    LoopDependenceEdgeKind::Variable,
-                    LoopDependenceMemoryKind::None,
-                    LoopDependenceEdgeOrigin::SynthesizedBoundaryValue,
-                    pdg::EdgeType::DATA_DEF_USE,
-                    false);
+      graph.importEdgeIfIncluded(edge, /*linkToExternal=*/true,
+                                 loopInternalValueSet, seenEdges);
     }
   }
 
@@ -474,9 +481,10 @@ LoopLDGBuilder::GraphBundle LoopLDGBuilder::refineLoopDependenceGraph(
 
   LoopCarriedDependencies::setLoopCarriedDependencies(loopNode, DS, resolvedGraph);
 
-  if (options.enableLoopAwareDependenceAnalyses) {
-    UnsupportedLoopAwareDependenceRefinementPass unsupportedPass;
-    unsupportedPass.refine(resolvedGraph, loopNode, SE, LI, DS);
+  if (options.enableLoopAwareDependenceAnalyses &&
+      options.hasLoopAwareDependenceBackend) {
+    ImportedPDGLoopAwareDependenceRefinementPass loopAwarePass;
+    loopAwarePass.refine(resolvedGraph, loopNode, SE, LI, DS);
   }
   captureSnapshot(bundle, "after_loop_aware", resolvedGraph);
 
