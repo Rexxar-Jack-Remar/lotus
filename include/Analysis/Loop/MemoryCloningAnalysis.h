@@ -15,6 +15,7 @@ public:
   ClonableMemoryObject(AllocaInst *allocation, uint64_t sizeInBits);
 
   AllocaInst *getAllocation(void) const;
+  uint64_t getAllocationSizeInBits(void) const;
   bool isClonableLocation(void) const;
   bool doPrivateCopiesNeedToBeInitialized(void) const;
   bool mustAliasAMemoryLocationWithinObject(Value *pointer) const;
@@ -26,6 +27,7 @@ public:
   void addStore(Instruction *I);
   void addLoad(Instruction *I);
   void addNonStoringUse(Instruction *I);
+  std::unordered_set<Instruction *> getLocationPointerInstructions(void) const;
   void setClonable(bool clonable);
   void setNeedsInitialization(bool needsInitialization);
 

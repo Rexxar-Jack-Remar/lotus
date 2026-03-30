@@ -1,10 +1,3 @@
-#include "Analysis/Loop/FunctionLoopAnalyses.h"
-#include "Analysis/Loop/SCCDAGAttrs.h"
-#include "IR/PDG/Core/ControlDependencyGraph.h"
-#include "IR/PDG/Core/DataDependencyGraph.h"
-#include "IR/PDG/Core/ProgramDependencyGraph.h"
-#include "TestUtils/LLVMHelpers.h"
-
 #include "llvm/Analysis/LoopInfo.h"
 #include "llvm/Analysis/PostDominators.h"
 #include "llvm/Analysis/ScalarEvolution.h"
@@ -14,14 +7,23 @@
 #include "llvm/PassRegistry.h"
 #include "llvm/Passes/PassBuilder.h"
 
+#include "Analysis/Loop/FunctionLoopAnalyses.h"
+#include "Analysis/Loop/SCCDAGAttrs.h"
+#include "IR/PDG/Core/ControlDependencyGraph.h"
+#include "IR/PDG/Core/DataDependencyGraph.h"
+#include "IR/PDG/Core/ProgramDependencyGraph.h"
+#include "TestUtils/LLVMHelpers.h"
+
 #include <gtest/gtest.h>
 
 namespace {
 
 using lotus::analysis::loop::FunctionLoopAnalyses;
 using lotus::analysis::loop::GenericSCC;
-using lotus::unittest::findPhi;
+using lotus::analysis::loop::LoopDependenceEdgeKind;
+using lotus::analysis::loop::StackObjectClonableSCC;
 using lotus::unittest::findInstructionByName;
+using lotus::unittest::findPhi;
 using lotus::unittest::parseModuleChecked;
 using pdg::ControlDependencyGraph;
 using pdg::DataDependencyGraph;
@@ -128,13 +130,21 @@ TEST_F(LoopClassificationTest, ClassifiesIVAndReductionSCCsAndTripCount) {
   EXPECT_FALSE(carriedSCCs.empty());
   auto carriedDataSCCs = attrs->getSCCsWithLoopCarriedDataDependencies();
   EXPECT_FALSE(carriedDataSCCs.empty());
+  auto carriedControlSCCs = attrs->getSCCsWithLoopCarriedControlDependencies();
+  for (auto *controlSCC : carriedControlSCCs) {
+    EXPECT_NE(carriedSCCs.find(controlSCC), carriedSCCs.end());
+  }
+
+  EXPECT_TRUE(attrs->isLoopGovernedBySCC(iSCC));
+  EXPECT_FALSE(attrs->isLoopGovernedBySCC(sumSCC));
 
   auto liveOutsNotReducible =
       attrs->getLiveOutVariablesThatAreNotReducable(content->getEnvironment());
   EXPECT_TRUE(liveOutsNotReducible.empty());
 }
 
-TEST_F(LoopClassificationTest, ClassifiesClonableStackObjectAndRefinesCarriedMemory) {
+TEST_F(LoopClassificationTest,
+       ClassifiesClonableStackObjectAndRefinesCarriedMemory) {
   llvm::LLVMContext context;
   auto module = parseModuleChecked(context, R"(
     define void @clonable(i32 %n) {
@@ -195,6 +205,15 @@ TEST_F(LoopClassificationTest, ClassifiesClonableStackObjectAndRefinesCarriedMem
   auto *info = attrs->getSCCAttrs(scc);
   ASSERT_NE(info, nullptr);
   EXPECT_EQ(info->getKind(), GenericSCC::STACK_OBJECT_CLONABLE);
+
+  auto *stackClonable = dynamic_cast<StackObjectClonableSCC *>(info);
+  ASSERT_NE(stackClonable, nullptr);
+  auto locationsToClone = stackClonable->getMemoryLocationsToClone();
+  auto *slot = findInstructionByName(function, "slot");
+  auto *slotAlloca = llvm::dyn_cast_or_null<llvm::AllocaInst>(slot);
+  ASSERT_NE(slotAlloca, nullptr);
+  EXPECT_EQ(locationsToClone.size(), 1u);
+  EXPECT_NE(locationsToClone.find(slotAlloca), locationsToClone.end());
 
   auto clonableSCCs = attrs->getSCCsOfKind(GenericSCC::STACK_OBJECT_CLONABLE);
   EXPECT_EQ(clonableSCCs.size(), 1u);

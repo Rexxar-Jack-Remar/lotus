@@ -1,15 +1,15 @@
-#include "Analysis/Loop/FunctionLoopAnalyses.h"
-#include "IR/PDG/Core/ControlDependencyGraph.h"
-#include "IR/PDG/Core/DataDependencyGraph.h"
-#include "IR/PDG/Core/ProgramDependencyGraph.h"
-#include "TestUtils/LLVMHelpers.h"
-
 #include "llvm/Analysis/LoopInfo.h"
 #include "llvm/Analysis/PostDominators.h"
 #include "llvm/IR/Dominators.h"
 #include "llvm/IR/LegacyPassManager.h"
 #include "llvm/InitializePasses.h"
 #include "llvm/PassRegistry.h"
+
+#include "Analysis/Loop/FunctionLoopAnalyses.h"
+#include "IR/PDG/Core/ControlDependencyGraph.h"
+#include "IR/PDG/Core/DataDependencyGraph.h"
+#include "IR/PDG/Core/ProgramDependencyGraph.h"
+#include "TestUtils/LLVMHelpers.h"
 
 #include <gtest/gtest.h>
 
@@ -20,8 +20,8 @@ using lotus::analysis::loop::LoopDependenceEdgeKind;
 using lotus::analysis::loop::LoopDependenceMemoryKind;
 using lotus::analysis::loop::LoopDependenceNode;
 using lotus::analysis::loop::LoopSCC;
-using lotus::unittest::findPhi;
 using lotus::unittest::findInstructionByName;
+using lotus::unittest::findPhi;
 using lotus::unittest::parseModuleChecked;
 using pdg::ControlDependencyGraph;
 using pdg::DataDependencyGraph;
@@ -92,8 +92,8 @@ TEST_F(LoopDependenceGraphTest, MaterializesGraphAndSCCsFromLegacyPDG) {
   FunctionLoopAnalyses analyses(*function, LI, DT, PDT);
   analyses.materializeDependenceGraphs(graph);
 
-  auto *content = analyses.getLoopContent(*LI.getLoopFor(
-      findInstructionByName(function, "cmp")->getParent()));
+  auto *content = analyses.getLoopContent(
+      *LI.getLoopFor(findInstructionByName(function, "cmp")->getParent()));
   ASSERT_NE(content, nullptr);
   ASSERT_TRUE(content->hasDependenceGraph());
   ASSERT_TRUE(content->hasSCCDAG());
@@ -130,6 +130,15 @@ TEST_F(LoopDependenceGraphTest, MaterializesGraphAndSCCsFromLegacyPDG) {
     }
   }
   EXPECT_TRUE(foundExternalValueNode);
+  EXPECT_TRUE(ldg->isExternal(limit));
+  EXPECT_FALSE(ldg->isInternal(limit));
+
+  auto *limitSCC = sccdag->getSCC(limit);
+  ASSERT_NE(limitSCC, nullptr);
+  EXPECT_FALSE(limitSCC->isIncludedInLoop());
+  auto includedSCCs = sccdag->getSCCs();
+  EXPECT_EQ(std::find(includedSCCs.begin(), includedSCCs.end(), limitSCC),
+            includedSCCs.end());
 
   bool foundControlEdge = false;
   bool foundVariableEdge = false;
@@ -218,6 +227,38 @@ TEST_F(LoopDependenceGraphTest, CondensesAcyclicAndCyclicInternalRegions) {
   ASSERT_NE(iSCC, nullptr);
   EXPECT_TRUE(accSCC->hasCycle());
   EXPECT_TRUE(iSCC->hasCycle());
+
+  auto accSuccs = accSCC->getSuccessors();
+  auto iSuccs = iSCC->getSuccessors();
+  auto accPreds = accSCC->getPredecessors();
+  auto iPreds = iSCC->getPredecessors();
+  EXPECT_NE(std::find(iSuccs.begin(), iSuccs.end(), accSCC), iSuccs.end());
+  EXPECT_NE(std::find(accPreds.begin(), accPreds.end(), iSCC), accPreds.end());
+
+  EXPECT_TRUE(sccdag->orderedBefore(iSCC, accSCC));
+  EXPECT_FALSE(sccdag->orderedBefore(accSCC, iSCC));
+
+  for (auto *succ : accSuccs) {
+    auto succPreds = succ->getPredecessors();
+    EXPECT_NE(std::find(succPreds.begin(), succPreds.end(), accSCC),
+              succPreds.end());
+  }
+  for (auto *succ : iSuccs) {
+    auto succPreds = succ->getPredecessors();
+    EXPECT_NE(std::find(succPreds.begin(), succPreds.end(), iSCC),
+              succPreds.end());
+  }
+
+  for (auto *pred : accPreds) {
+    auto predSuccs = pred->getSuccessors();
+    EXPECT_NE(std::find(predSuccs.begin(), predSuccs.end(), accSCC),
+              predSuccs.end());
+  }
+  for (auto *pred : iPreds) {
+    auto predSuccs = pred->getSuccessors();
+    EXPECT_NE(std::find(predSuccs.begin(), predSuccs.end(), iSCC),
+              predSuccs.end());
+  }
 }
 
 } // namespace

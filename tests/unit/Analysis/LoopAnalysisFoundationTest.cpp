@@ -1,12 +1,12 @@
-#include "Analysis/Loop/FunctionLoopAnalyses.h"
-#include "Analysis/Loop/LoopNestingGraph.h"
-#include "TestUtils/LLVMHelpers.h"
-
 #include "llvm/Analysis/CGSCCPassManager.h"
 #include "llvm/Analysis/LoopInfo.h"
 #include "llvm/Analysis/PostDominators.h"
 #include "llvm/IR/Dominators.h"
 #include "llvm/Passes/PassBuilder.h"
+
+#include "Analysis/Loop/FunctionLoopAnalyses.h"
+#include "Analysis/Loop/LoopNestingGraph.h"
+#include "TestUtils/LLVMHelpers.h"
 
 #include <gtest/gtest.h>
 
@@ -120,16 +120,34 @@ TEST(FunctionLoopAnalysesTest, BuildsNestedForestAndContentLookup) {
 
   auto *innerWork = findInstructionByName(function, "inner.work");
   ASSERT_NE(innerWork, nullptr);
-  LoopStructure *innermost =
-      analyses.getLoopForest()->getInnermostLoopThatContains(innerWork)->getLoop();
+  LoopStructure *innermost = analyses.getLoopForest()
+                                 ->getInnermostLoopThatContains(innerWork)
+                                 ->getLoop();
   ASSERT_NE(innermost, nullptr);
   EXPECT_EQ(innermost->getHeader()->getName(), "inner.header");
 
-  auto *content = analyses.getLoopContent(*LI.getLoopFor(structures[0]->getHeader()));
+  llvm::BasicBlock *exitBlock = nullptr;
+  for (auto &bb : *function) {
+    if (bb.getName() == "exit") {
+      exitBlock = &bb;
+      break;
+    }
+  }
+  ASSERT_NE(exitBlock, nullptr);
+  auto *exitTerminator = exitBlock->getTerminator();
+  ASSERT_NE(exitTerminator, nullptr);
+  EXPECT_EQ(
+      analyses.getLoopForest()->getInnermostLoopThatContains(exitTerminator),
+      nullptr);
+
+  auto *content =
+      analyses.getLoopContent(*LI.getLoopFor(structures[0]->getHeader()));
   ASSERT_NE(content, nullptr);
-  EXPECT_EQ(content->getLoopStructure()->getHeader()->getName(), "outer.header");
-  EXPECT_EQ(content->getNestedMostLoopStructure(innerWork)->getHeader()->getName(),
-            "inner.header");
+  EXPECT_EQ(content->getLoopStructure()->getHeader()->getName(),
+            "outer.header");
+  EXPECT_EQ(
+      content->getNestedMostLoopStructure(innerWork)->getHeader()->getName(),
+      "inner.header");
 }
 
 TEST(FunctionLoopAnalysesTest, PreservesSiblingTopLevelLoopsAsSeparateTrees) {
@@ -167,7 +185,8 @@ TEST(FunctionLoopAnalysesTest, RegistersAsNewPmFunctionAnalysis) {
   EXPECT_EQ(result.getLoopForest()->getTrees().size(), 1u);
 }
 
-TEST(FunctionLoopAnalysesTest, BuildsInterproceduralLoopNestingGraphWithMustAndMayEdges) {
+TEST(FunctionLoopAnalysesTest,
+     BuildsInterproceduralLoopNestingGraphWithMustAndMayEdges) {
   llvm::LLVMContext context;
   auto module = parseModuleChecked(context, R"(
     define void @must_callee(i32 %n) {
@@ -241,7 +260,8 @@ TEST(FunctionLoopAnalysesTest, BuildsInterproceduralLoopNestingGraphWithMustAndM
 
   auto *entryFunction = module->getFunction("driver");
   ASSERT_NE(entryFunction, nullptr);
-  auto graph = LoopNestingGraph::buildFromAnalyses(analyses, *module, entryFunction);
+  auto graph =
+      LoopNestingGraph::buildFromAnalyses(analyses, *module, entryFunction);
   ASSERT_NE(graph, nullptr);
 
   LoopStructure *driverLoop = nullptr;

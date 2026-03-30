@@ -1,9 +1,3 @@
-#include "Analysis/Loop/FunctionLoopAnalyses.h"
-#include "IR/PDG/Core/ControlDependencyGraph.h"
-#include "IR/PDG/Core/DataDependencyGraph.h"
-#include "IR/PDG/Core/ProgramDependencyGraph.h"
-#include "TestUtils/LLVMHelpers.h"
-
 #include "llvm/Analysis/LoopInfo.h"
 #include "llvm/Analysis/PostDominators.h"
 #include "llvm/Analysis/ScalarEvolution.h"
@@ -13,11 +7,18 @@
 #include "llvm/PassRegistry.h"
 #include "llvm/Passes/PassBuilder.h"
 
+#include "Analysis/Loop/FunctionLoopAnalyses.h"
+#include "IR/PDG/Core/ControlDependencyGraph.h"
+#include "IR/PDG/Core/DataDependencyGraph.h"
+#include "IR/PDG/Core/ProgramDependencyGraph.h"
+#include "TestUtils/LLVMHelpers.h"
+
 #include <gtest/gtest.h>
 
 namespace {
 
 using lotus::analysis::loop::FunctionLoopAnalyses;
+using lotus::analysis::loop::LoopDependenceEdgeKind;
 using lotus::unittest::findInstructionByName;
 using lotus::unittest::findPhi;
 using lotus::unittest::parseModuleChecked;
@@ -125,12 +126,13 @@ TEST_F(LoopScalarAnalysisTest, MaterializesInvariantsAndInductionVariables) {
   EXPECT_TRUE(iv->isIVInstruction(iPhi));
   EXPECT_FALSE(iv->isIVInstruction(sumPhi));
 
-  auto *governing = ivs->getLoopGoverningInductionVariable(
-      *content->getLoopStructure());
+  auto *governing =
+      ivs->getLoopGoverningInductionVariable(*content->getLoopStructure());
   ASSERT_NE(governing, nullptr);
   EXPECT_TRUE(governing->isSCCContainingIVWellFormed());
   EXPECT_EQ(governing->getInductionVariable(), iv);
-  EXPECT_EQ(governing->getHeaderCompareInstructionToComputeExitCondition(), cmp);
+  EXPECT_EQ(governing->getHeaderCompareInstructionToComputeExitCondition(),
+            cmp);
   EXPECT_EQ(governing->getExitConditionValue(), limit);
 }
 

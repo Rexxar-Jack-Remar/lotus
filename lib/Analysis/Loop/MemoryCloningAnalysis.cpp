@@ -278,7 +278,7 @@ MemoryCloningAnalysis::MemoryCloningAnalysis(LoopStructure *loop,
             if (!DS.DT.dominates(storeInfo.first, loadInfo.first)) {
               continue;
             }
-            if (storeInfo.second.empty() ||
+            if (loadInfo.second.empty() || storeInfo.second.empty() ||
                 storeInfo.second == loadInfo.second) {
               covered = true;
               break;

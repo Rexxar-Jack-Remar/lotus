@@ -257,7 +257,8 @@ static Values collectClonableSCCs(FunctionLoopAnalyses &analyses,
       hasCalls |= llvm::isa<llvm::CallBase>(inst);
     }
     if (valuePairs.size() == 1) {
-      auto *inst = llvm::dyn_cast_or_null<llvm::Instruction>(valuePairs.front().first);
+      auto *inst =
+          llvm::dyn_cast_or_null<llvm::Instruction>(valuePairs.front().first);
       singleAdministrative =
           inst != nullptr && (llvm::isa<llvm::PHINode>(inst) ||
                               llvm::isa<llvm::GetElementPtrInst>(inst) ||
@@ -323,6 +324,74 @@ static Values collectClonableSCCs(FunctionLoopAnalyses &analyses,
     }
   }
   return values;
+}
+
+static std::string sccSignature(LoopSCC *scc) {
+  std::vector<std::string> sccValues;
+  for (auto &pair : scc->internalNodePairs()) {
+    if (pair.first != nullptr) {
+      sccValues.push_back(renderNoelleLikeValue(pair.first));
+    }
+  }
+  return combineUnorderedValues(sccValues);
+}
+
+static void expectSCCDAGStructuralInvariants(FunctionLoopAnalyses &analyses,
+                                             llvm::LoopInfo &LI) {
+  auto *content = analyses.getLoopContent(**LI.begin());
+  ASSERT_NE(content, nullptr);
+  ASSERT_TRUE(content->hasDependenceGraph());
+  ASSERT_TRUE(content->hasSCCDAG());
+
+  auto *ldg = content->getLoopDependenceGraph();
+  auto *sccdag = content->getSCCDAG();
+  ASSERT_NE(ldg, nullptr);
+  ASSERT_NE(sccdag, nullptr);
+
+  auto externalNodes = ldg->getExternalNodes();
+  EXPECT_FALSE(externalNodes.empty())
+      << "Parity fixtures should exercise boundary-node modeling";
+
+  auto includedSCCs = sccdag->getSCCs();
+  auto allSCCs = sccdag->getAllSCCs();
+  ASSERT_FALSE(allSCCs.empty());
+
+  std::unordered_set<LoopSCC *> includedSet(includedSCCs.begin(),
+                                            includedSCCs.end());
+  bool sawBoundarySCC = false;
+  for (auto *scc : allSCCs) {
+    ASSERT_NE(scc, nullptr);
+    if (scc->isIncludedInLoop()) {
+      EXPECT_NE(includedSet.find(scc), includedSet.end());
+    } else {
+      EXPECT_EQ(includedSet.find(scc), includedSet.end());
+      sawBoundarySCC = true;
+    }
+
+    for (auto *succ : scc->getSuccessors()) {
+      ASSERT_NE(succ, nullptr);
+      auto succPreds = succ->getPredecessors();
+      EXPECT_NE(std::find(succPreds.begin(), succPreds.end(), scc),
+                succPreds.end());
+      EXPECT_TRUE(sccdag->orderedBefore(scc, succ));
+      EXPECT_FALSE(sccdag->orderedBefore(succ, scc));
+    }
+  }
+  EXPECT_TRUE(sawBoundarySCC)
+      << "Expected at least one SCC outside loop body in parity fixtures";
+
+  for (auto *first : allSCCs) {
+    for (auto *second : allSCCs) {
+      if (!sccdag->orderedBefore(first, second)) {
+        continue;
+      }
+      for (auto *third : allSCCs) {
+        if (sccdag->orderedBefore(second, third)) {
+          EXPECT_TRUE(sccdag->orderedBefore(first, third));
+        }
+      }
+    }
+  }
 }
 
 static std::string sortCompositeTokens(std::string value) {
@@ -442,6 +511,27 @@ static void runCase(const std::string &name) {
   analyses.materializeIterationSpaceAnalyses(SE);
   analyses.materializeSCCAttrs(DT, PDT);
 
+  expectSCCDAGStructuralInvariants(analyses, LI);
+
+  auto *content = analyses.getLoopContent(**LI.begin());
+  ASSERT_NE(content, nullptr);
+  auto *attrs = content->getSCCAttrs();
+  ASSERT_NE(attrs, nullptr);
+  auto clonableByHeuristic = collectClonableSCCs(analyses, LI);
+  for (auto *info : attrs->getSCCsOfKind(GenericSCC::STACK_OBJECT_CLONABLE)) {
+    ASSERT_NE(info, nullptr);
+    ASSERT_NE(info->getSCC(), nullptr);
+    auto *clonable =
+        dynamic_cast<lotus::analysis::loop::StackObjectClonableSCC *>(info);
+    ASSERT_NE(clonable, nullptr);
+    EXPECT_FALSE(clonable->getMemoryLocationsToClone().empty())
+        << "STACK_OBJECT_CLONABLE SCC must identify at least one stack "
+           "allocation to clone";
+    EXPECT_FALSE(clonable->getLoopCarriedDependences().empty())
+        << "STACK_OBJECT_CLONABLE SCC must still be justified by loop-carried "
+           "dependences after refinement";
+  }
+
   GoldenFile golden(goldenPath(name));
   std::string diff;
   if (golden.hasSection("sccdag nodes")) {
@@ -474,8 +564,8 @@ static void runCase(const std::string &name) {
         << diff;
   }
   if (golden.hasSection("clonable SCC")) {
-    EXPECT_TRUE(sectionMatchesAsUnorderedComposite(
-        golden, "clonable SCC", collectClonableSCCs(analyses, LI), &diff))
+    EXPECT_TRUE(sectionMatchesAsUnorderedComposite(golden, "clonable SCC",
+                                                   clonableByHeuristic, &diff))
         << "Parity deviation for sccdag_attributes/" << name << ": " << diff;
   }
   if (golden.hasSection("clonable SCC into local memory")) {
