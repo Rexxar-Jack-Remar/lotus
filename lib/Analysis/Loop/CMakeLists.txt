@@ -8,6 +8,7 @@ set(CanaryLoopAnalysis_SOURCES
   InductionVariable.cpp
   InductionVariables.cpp
   LoopGoverningInductionVariable.cpp
+  ScalarEvolutionReferencer.cpp
   LoopEnvironment.cpp
   LoopCarriedDependencies.cpp
   LoopNestingGraph.cpp

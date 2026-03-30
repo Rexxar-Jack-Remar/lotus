@@ -676,6 +676,13 @@ void LoopDependenceGraph::importEdge(pdg::Edge *edge) {
   Value *srcValue = srcPDGNode ? srcPDGNode->getValue() : nullptr;
   Value *dstValue = dstPDGNode ? dstPDGNode->getValue() : nullptr;
   auto edgeKind = classifyEdgeKind(edge->getEdgeType());
+  if (edgeKind == LoopDependenceEdgeKind::Control) {
+    if (auto *dstBranch = dyn_cast_or_null<BranchInst>(dstValue)) {
+      if (!dstBranch->isConditional()) {
+        return;
+      }
+    }
+  }
   if (edgeKind == LoopDependenceEdgeKind::Memory) {
     if (auto *representative = findMemoryAccessRepresentative(srcValue, loopStructure)) {
       srcValue = representative;

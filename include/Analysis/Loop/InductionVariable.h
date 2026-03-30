@@ -23,7 +23,10 @@
 #define LOTUS_ANALYSIS_LOOP_INDUCTIONVARIABLE_H
 
 #include "Analysis/Loop/LoopStructure.h"
+#include "Analysis/Loop/Invariants.h"
+#include "Analysis/Loop/LoopEnvironment.h"
 #include "Analysis/Loop/LoopSCCDAG.h"
+#include "Analysis/Loop/ScalarEvolutionReferencer.h"
 
 #include "llvm/Analysis/ScalarEvolution.h"
 
@@ -45,6 +48,25 @@ public:
                     std::unordered_set<Instruction *> instructions,
                     std::unordered_set<Instruction *> derivedInstructions);
 
+  InductionVariable(LoopStructure *loop,
+                    InvariantManager &IVM,
+                    llvm::ScalarEvolution &SE,
+                    int64_t stepMultiplier,
+                    PHINode *loopEntryPHI,
+                    std::unordered_set<PHINode *> stepPHIs,
+                    LoopSCC *scc,
+                    LoopEnvironment &loopEnvironment,
+                    llvm::ScalarEvolutionReferentialExpander &referentialExpander);
+
+  InductionVariable(LoopStructure *loop,
+                    InvariantManager &IVM,
+                    llvm::ScalarEvolution &SE,
+                    PHINode *loopEntryPHI,
+                    LoopSCC *scc,
+                    LoopEnvironment &loopEnvironment,
+                    llvm::ScalarEvolutionReferentialExpander &referentialExpander,
+                    llvm::InductionDescriptor &descriptor);
+
   LoopSCC *getSCC(void) const;
   PHINode *getLoopEntryPHI(void) const;
   std::unordered_set<PHINode *> getPHIsInvolvedInComputingIVStep(void) const;
@@ -54,12 +76,31 @@ public:
   std::unordered_set<Instruction *> getDerivedSCEVInstructions(void) const;
   Value *getStartValue(void) const;
   Value *getSingleComputedStepValue(void) const;
+  std::vector<Instruction *> getComputationOfStepValue(void) const;
+  bool isStepValueLoopInvariant(void) const;
+  bool isStepValuePositive(void) const;
   const llvm::SCEV *getStepSCEV(void) const;
   Type *getType(void) const;
   bool isIVInstruction(Instruction *I) const;
   bool isDerivedFromIVInstructions(Instruction *I) const;
 
 private:
+  void collectValuesInternalAndExternalToLoopAndSCC(
+      LoopEnvironment &loopEnvironment);
+  void deriveStepValue(llvm::ScalarEvolution &SE,
+                       llvm::ScalarEvolutionReferentialExpander &referentialExpander,
+                       int64_t multiplier);
+  void deriveStepValueFromSCEVConstant(const llvm::SCEVConstant *scev,
+                                       int64_t multiplier);
+  void deriveStepValueFromSCEVUnknown(const llvm::SCEVUnknown *scev);
+  bool deriveStepValueFromCompositeSCEV(
+      const llvm::SCEV *scev,
+      llvm::ScalarEvolutionReferentialExpander &referentialExpander);
+  void traverseCycleThroughLoopEntryPHIToGetAllIVInstructions(void);
+  void traverseConsumersOfIVInstructionsToGetAllDerivedSCEVInstructions(
+      InvariantManager &IVM,
+      llvm::ScalarEvolution &SE);
+
   LoopStructure *loop;
   LoopSCC *scc;
   PHINode *loopEntryPHI;
@@ -69,6 +110,12 @@ private:
   Value *startValue;
   const llvm::SCEV *stepSCEV;
   Value *singleStepValue;
+  int64_t stepMultiplier;
+  std::vector<Instruction *> computationOfStepValue;
+  bool isComputedStepValueLoopInvariant;
+  Type *loopEntryPHIType;
+  std::set<Value *> valuesToReferenceInComputingStepValue;
+  std::set<Value *> valuesInScopeOfInductionVariable;
   std::unordered_set<Instruction *> instructions;
   std::unordered_set<Instruction *> derivedInstructions;
 };

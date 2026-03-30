@@ -56,7 +56,11 @@ LoopGoverningInductionVariable::LoopGoverningInductionVariable(
 
   if (loopGoverningTerminator == nullptr
       || loopGoverningTerminator->getParent() != headerPHI->getParent()) {
-    return;
+    auto *headerTerminator = dyn_cast<BranchInst>(headerPHI->getParent()->getTerminator());
+    if (headerTerminator == nullptr || !headerTerminator->isConditional()) {
+      return;
+    }
+    loopGoverningTerminator = headerTerminator;
   }
 
   this->headerBr = loopGoverningTerminator;

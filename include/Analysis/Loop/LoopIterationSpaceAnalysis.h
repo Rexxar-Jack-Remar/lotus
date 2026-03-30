@@ -64,18 +64,31 @@ private:
   std::unordered_map<const llvm::SCEV *, std::unordered_set<Instruction *>>
       derivedInstructionsFromIVsBySCEV;
   std::unordered_map<Instruction *, InductionVariable *> ivsByInstruction;
-  std::unordered_map<Instruction *, std::unique_ptr<MemoryAccessSpace>>
-      accessSpaceByInstruction;
+  std::set<MemoryAccessSpace *> nonOverlappingAccessesBetweenIterations;
+  std::unordered_map<MemoryAccessSpace *, std::set<MemoryAccessSpace *>>
+      spacesThatCannotOverlap;
+  std::vector<std::unique_ptr<MemoryAccessSpace>> accessSpaces;
+  std::unordered_map<Instruction *, MemoryAccessSpace *> accessSpaceByInstruction;
 
   void indexIVInstructionSCEVs(llvm::ScalarEvolution &SE);
   void computeMemoryAccessSpace(llvm::ScalarEvolution &SE);
   void identifyIVForMemoryAccessSubscripts(llvm::ScalarEvolution &SE);
+  void identifyNonOverlappingAccessesBetweenIterationsAcrossOneLoopInvocation(
+      llvm::ScalarEvolution &SE);
+  bool areMemoryAccessSpaceNotOverlappingOrExactlyTheSame(
+      MemoryAccessSpace *space1,
+      MemoryAccessSpace *space2) const;
+  bool analyzeToCheckIfMemoryAccessSpaceNotOverlappingOrExactlyTheSame(
+      MemoryAccessSpace *space1,
+      MemoryAccessSpace *space2) const;
   bool isMemoryAccessSpaceEquivalentForTopLoopIVSubscript(
       MemoryAccessSpace *space1,
       MemoryAccessSpace *space2) const;
   bool isOneToOneFunctionOnIV(LoopStructure *loopStructure,
                               InductionVariable *IV,
                               Instruction *derivedInstruction) const;
+  bool isInnerDimensionSubscriptsBounded(llvm::ScalarEvolution &SE,
+                                         MemoryAccessSpace *space);
 };
 
 } // namespace loop

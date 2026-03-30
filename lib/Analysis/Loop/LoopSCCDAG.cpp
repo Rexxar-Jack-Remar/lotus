@@ -319,9 +319,35 @@ LoopSCCDAG::LoopSCCDAG(LoopDependenceGraph &graph) : graph{&graph} {
               });
   }
 
+  std::vector<LoopDependenceNode *> externalNodes = graph.getExternalNodes();
+  std::sort(externalNodes.begin(),
+            externalNodes.end(),
+            [](LoopDependenceNode *lhs, LoopDependenceNode *rhs) {
+              return lhs->getID() < rhs->getID();
+            });
+  for (auto *node : externalNodes) {
+    auto owned = std::unique_ptr<LoopSCC>(
+        new LoopSCC(this->ownedSCCs.size() + this->ownedExternalSCCs.size(),
+                    {},
+                    false));
+    auto *raw = owned.get();
+    raw->externalNodes.push_back(node);
+    this->ownedExternalSCCs.push_back(std::move(owned));
+    this->sccByNode[node] = raw;
+    auto *value = node->getValue();
+    if (value != nullptr && this->sccByValue.find(value) == this->sccByValue.end()) {
+      this->sccByValue[value] = raw;
+    }
+  }
+
   std::set<std::pair<LoopSCC *, LoopSCC *>> seenPairs;
-  for (auto *node : this->nodes) {
-    auto *srcSCC = this->sccByNode.at(node);
+  auto allNodes = graph.getNodes();
+  for (auto *node : allNodes) {
+    auto srcIt = this->sccByNode.find(node);
+    if (srcIt == this->sccByNode.end()) {
+      continue;
+    }
+    auto *srcSCC = srcIt->second;
     for (auto *edge : node->getOutgoingEdges()) {
       auto *dst = edge->getDst();
       if (dst == nullptr) {
@@ -358,12 +384,27 @@ LoopDependenceGraph *LoopSCCDAG::getLoopDependenceGraph(void) const {
   return this->graph;
 }
 
-std::vector<LoopSCC *> LoopSCCDAG::getSCCs(void) const {
+  std::vector<LoopSCC *> LoopSCCDAG::getSCCs(void) const {
   std::vector<LoopSCC *> sccs;
   sccs.reserve(this->ownedSCCs.size());
   for (auto const &owned : this->ownedSCCs) {
     sccs.push_back(owned.get());
   }
+  return sccs;
+}
+
+std::vector<LoopSCC *> LoopSCCDAG::getAllSCCs(void) const {
+  std::vector<LoopSCC *> sccs;
+  sccs.reserve(this->ownedSCCs.size() + this->ownedExternalSCCs.size());
+  for (auto const &owned : this->ownedSCCs) {
+    sccs.push_back(owned.get());
+  }
+  for (auto const &owned : this->ownedExternalSCCs) {
+    sccs.push_back(owned.get());
+  }
+  std::sort(sccs.begin(), sccs.end(), [](LoopSCC *lhs, LoopSCC *rhs) {
+    return lhs->getID() < rhs->getID();
+  });
   return sccs;
 }
 

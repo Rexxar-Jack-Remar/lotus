@@ -53,7 +53,7 @@ bool collectAccessKey(Value *value,
     if (!collectAccessKey(gep->getPointerOperand(), allocation, indices)) {
       return false;
     }
-    for (auto idx = gep->idx_begin(); idx != gep->idx_end(); ++idx) {
+    for (auto *idx = gep->idx_begin(); idx != gep->idx_end(); ++idx) {
       auto *constantIndex = dyn_cast<ConstantInt>(idx->get());
       if (constantIndex == nullptr) {
         return false;

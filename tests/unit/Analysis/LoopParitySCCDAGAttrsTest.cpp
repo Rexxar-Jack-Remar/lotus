@@ -110,13 +110,32 @@ static std::vector<LoopSCC *> orderedSCCs(FunctionLoopAnalyses &analyses, llvm::
   return sccs;
 }
 
+static std::vector<LoopSCC *> orderedAllSCCs(FunctionLoopAnalyses &analyses, llvm::LoopInfo &LI) {
+  auto *content = analyses.getLoopContent(**LI.begin());
+  auto *sccdag = content->getSCCDAG();
+  auto sccs = sccdag->getAllSCCs();
+  std::sort(sccs.begin(), sccs.end(), [](LoopSCC *lhs, LoopSCC *rhs) {
+    return lhs->getID() < rhs->getID();
+  });
+  return sccs;
+}
+
 static Values collectSCCDAGNodes(FunctionLoopAnalyses &analyses, llvm::LoopInfo &LI) {
   Values values;
-  for (auto *scc : orderedSCCs(analyses, LI)) {
+  for (auto *scc : orderedAllSCCs(analyses, LI)) {
     std::vector<std::string> sccValues;
-    for (auto &pair : scc->internalNodePairs()) {
-      if (pair.first != nullptr) {
-        sccValues.push_back(renderNoelleLikeValue(pair.first));
+    auto internalPairs = scc->internalNodePairs();
+    if (!internalPairs.empty()) {
+      for (auto &pair : internalPairs) {
+        if (pair.first != nullptr) {
+          sccValues.push_back(renderNoelleLikeValue(pair.first));
+        }
+      }
+    } else {
+      for (auto &pair : scc->externalNodePairs()) {
+        if (pair.first != nullptr) {
+          sccValues.push_back(renderNoelleLikeValue(pair.first));
+        }
       }
     }
     values.insert(combineUnorderedValues(sccValues));

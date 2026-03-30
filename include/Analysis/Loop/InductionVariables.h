@@ -24,6 +24,7 @@
 
 #include "Analysis/Loop/Invariants.h"
 #include "Analysis/Loop/InductionVariable.h"
+#include "Analysis/Loop/LoopEnvironment.h"
 #include "Analysis/Loop/LoopGoverningInductionVariable.h"
 #include "Analysis/Loop/LoopSCCDAG.h"
 
@@ -40,7 +41,8 @@ public:
                            InvariantManager &invariants,
                            llvm::ScalarEvolution &SE,
                            llvm::LoopInfo &LI,
-                           LoopSCCDAG &sccdag);
+                           LoopSCCDAG &sccdag,
+                           LoopEnvironment &loopEnvironment);
 
   std::unordered_set<InductionVariable *> getInductionVariables(void) const;
   std::unordered_set<InductionVariable *> getInductionVariables(

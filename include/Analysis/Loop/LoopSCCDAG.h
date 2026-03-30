@@ -74,6 +74,7 @@ public:
   LoopDependenceGraph *getLoopDependenceGraph(void) const;
 
   std::vector<LoopSCC *> getSCCs(void) const;
+  std::vector<LoopSCC *> getAllSCCs(void) const;
   LoopSCC *getSCC(Value *value) const;
   bool orderedBefore(const LoopSCC *early, const LoopSCC *late) const;
 
@@ -81,6 +82,7 @@ private:
   LoopDependenceGraph *graph;
   std::vector<LoopDependenceNode *> nodes;
   std::vector<std::unique_ptr<LoopSCC>> ownedSCCs;
+  std::vector<std::unique_ptr<LoopSCC>> ownedExternalSCCs;
   std::unordered_map<LoopDependenceNode *, LoopSCC *> sccByNode;
   std::unordered_map<Value *, LoopSCC *> sccByValue;
   std::unordered_map<const LoopSCC *, uint32_t> sccIndexes;

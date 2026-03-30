@@ -218,12 +218,15 @@ void LoopContent::materializeScalarAnalyses(llvm::ScalarEvolution &SE,
                                             /*includeMemory=*/false);
   auto temporaryIVSCCDAG =
       std::unique_ptr<LoopSCCDAG>(new LoopSCCDAG(*temporaryIVDependenceGraph));
+  LoopEnvironment temporaryEnvironment(this->dependenceGraph.get(),
+                                       this->getLoopStructure()->getLoopExitBasicBlocks());
   auto temporaryIVs = std::unique_ptr<InductionVariableManager>(
       new InductionVariableManager(this->loop,
                                    temporaryInvariants,
                                    SE,
                                    LI,
-                                   *temporaryIVSCCDAG));
+                                   *temporaryIVSCCDAG,
+                                   temporaryEnvironment));
   LoopIterationSpaceAnalysis temporaryIterationSpace(
       this->loop, *temporaryIVs, SE);
   this->removeLoopCarriedDependencesProvedDisjoint(temporaryIterationSpace);
@@ -295,7 +298,7 @@ void LoopContent::materializeScalarAnalyses(llvm::ScalarEvolution &SE,
                                             /*includeMemory=*/false);
   this->ivSCCDAG.reset(new LoopSCCDAG(*this->ivDependenceGraph));
   this->inductionVariables.reset(new InductionVariableManager(
-      this->loop, *this->invariantManager, SE, LI, *this->ivSCCDAG));
+      this->loop, *this->invariantManager, SE, LI, *this->ivSCCDAG, *this->environment));
 }
 
 void LoopContent::materializeIterationSpaceAnalysis(llvm::ScalarEvolution &SE) {
