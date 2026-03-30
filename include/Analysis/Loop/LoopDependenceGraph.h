@@ -41,8 +41,15 @@ enum class LoopDependenceMemoryKind {
   Unknown
 };
 
+enum class LoopDependenceEdgeOrigin {
+  ImportedPDG,
+  SynthesizedBoundaryValue,
+  SynthesizedRefinement
+};
+
 class LoopDependenceNode;
 class LoopDependenceEdge;
+class LoopLDGBuilder;
 
 class LoopDependenceNode {
 public:
@@ -78,6 +85,7 @@ public:
   LoopDependenceNode *getDst(void) const;
   LoopDependenceEdgeKind getKind(void) const;
   LoopDependenceMemoryKind getMemoryKind(void) const;
+  LoopDependenceEdgeOrigin getOrigin(void) const;
   pdg::EdgeType getOriginalEdgeType(void) const;
   bool isLoopCarried(void) const;
   void setLoopCarried(bool isLoopCarried);
@@ -88,12 +96,14 @@ private:
   LoopDependenceEdge(LoopDependenceNode *src, LoopDependenceNode *dst,
                      LoopDependenceEdgeKind kind,
                      LoopDependenceMemoryKind memoryKind,
+                     LoopDependenceEdgeOrigin origin,
                      pdg::EdgeType originalEdgeType, bool loopCarried);
 
   LoopDependenceNode *src;
   LoopDependenceNode *dst;
   LoopDependenceEdgeKind kind;
   LoopDependenceMemoryKind memoryKind;
+  LoopDependenceEdgeOrigin origin;
   pdg::EdgeType originalEdgeType;
   bool loopCarried;
 };
@@ -132,8 +142,10 @@ public:
                                                       bool includeMemory) const;
   void removeEdge(LoopDependenceEdge *edge);
   void addVariableDependence(Value *src, Value *dst, bool loopCarried = false);
+  std::string renderStable(void) const;
 
 private:
+  friend class LoopLDGBuilder;
   LoopDependenceGraph() = default;
 
   LoopTree *loop;
@@ -148,6 +160,14 @@ private:
   LoopDependenceNode *fetchOrCreateNode(Value *value, pdg::Node *pdgNode,
                                         bool internal);
   void importEdge(pdg::Edge *edge);
+  void initialize(LoopTree *loopNode, pdg::ProgramGraph &programGraph);
+  void addEdge(LoopDependenceNode *src,
+               LoopDependenceNode *dst,
+               LoopDependenceEdgeKind kind,
+               LoopDependenceMemoryKind memoryKind,
+               LoopDependenceEdgeOrigin origin,
+               pdg::EdgeType originalEdgeType,
+               bool loopCarried);
 };
 
 } // namespace loop

@@ -5,147 +5,11 @@
 
 #include "Alias/Spec/AliasSpecManager.h"
 
-#include <queue>
-#include <unordered_set>
-
 namespace lotus {
 namespace analysis {
 namespace loop {
 
 namespace {
-
-bool canInstructionReachWithinSameIteration(const LoopStructure *loopStructure,
-                                            Instruction *from,
-                                            Instruction *to) {
-  if (loopStructure == nullptr || from == nullptr || to == nullptr) {
-    return false;
-  }
-  if (!loopStructure->isIncluded(from) || !loopStructure->isIncluded(to)) {
-    return false;
-  }
-
-  if (from->getParent() == to->getParent()) {
-    bool seenFrom = false;
-    for (auto &inst : *from->getParent()) {
-      if (&inst == from) {
-        seenFrom = true;
-      }
-      if (seenFrom && &inst == to) {
-        return true;
-      }
-    }
-    return false;
-  }
-
-  std::queue<BasicBlock *> worklist;
-  std::unordered_set<BasicBlock *> visited;
-  worklist.push(from->getParent());
-  visited.insert(from->getParent());
-  auto *header = loopStructure->getHeader();
-
-  while (!worklist.empty()) {
-    auto *current = worklist.front();
-    worklist.pop();
-    for (auto *succ : successors(current)) {
-      if (!loopStructure->isIncluded(succ) || succ == header) {
-        continue;
-      }
-      if (succ == to->getParent()) {
-        return true;
-      }
-      if (visited.insert(succ).second) {
-        worklist.push(succ);
-      }
-    }
-  }
-
-  return false;
-}
-
-void removeLoopCarriedDependencesProvedDisjoint(
-    LoopDependenceGraph &graph, LoopStructure *loopStructure,
-    LoopIterationSpaceAnalysis &analysis) {
-  std::vector<LoopDependenceEdge *> edgesToRemove;
-  for (auto *edge : graph.getEdges()) {
-    if (!edge->isLoopCarried() ||
-        edge->getKind() != LoopDependenceEdgeKind::Memory) {
-      continue;
-    }
-
-    auto *from = dyn_cast_or_null<Instruction>(edge->getSrc()->getValue());
-    auto *to = dyn_cast_or_null<Instruction>(edge->getDst()->getValue());
-    if (from == nullptr || to == nullptr) {
-      continue;
-    }
-    if (canInstructionReachWithinSameIteration(loopStructure, from, to)) {
-      continue;
-    }
-    if (!analysis
-             .areInstructionsAccessingDisjointMemoryLocationsBetweenIterations(
-                 from, to)) {
-      continue;
-    }
-
-    edge->setLoopCarried(false);
-    edgesToRemove.push_back(edge);
-  }
-
-  for (auto *edge : edgesToRemove) {
-    graph.removeEdge(edge);
-  }
-}
-
-class LoopDependenceRefinementPass {
-public:
-  virtual ~LoopDependenceRefinementPass() = default;
-
-  virtual void refine(LoopContent &content, llvm::ScalarEvolution &SE,
-                      llvm::LoopInfo &LI,
-                      const noelle::DominatorSummary &DS) = 0;
-};
-
-class UnsupportedLoopAwareDependenceRefinementPass
-    : public LoopDependenceRefinementPass {
-public:
-  void refine(LoopContent &, llvm::ScalarEvolution &, llvm::LoopInfo &,
-              const noelle::DominatorSummary &) override {
-    // NOELLE can host additional loop-aware disproval engines such as SCAF.
-    // Lotus preserves the stage boundary here even when no extra engine is
-    // available yet.
-  }
-};
-
-class AffineLoopDependenceRefinementPass : public LoopDependenceRefinementPass {
-public:
-  void refine(LoopContent &content, llvm::ScalarEvolution &SE, llvm::LoopInfo &LI,
-              const noelle::DominatorSummary &DS) override {
-    InvariantManager temporaryInvariants(content.getLoopStructure(),
-                                         content.getLoopDependenceGraph());
-    auto temporaryIVDependenceGraph =
-        content.getLoopDependenceGraph()->createSubgraph(
-            /*includeControl=*/true,
-            /*includeVariable=*/true,
-            /*includeMemory=*/false);
-    auto temporaryIVSCCDAG =
-        std::unique_ptr<LoopSCCDAG>(new LoopSCCDAG(*temporaryIVDependenceGraph));
-    LoopEnvironment temporaryEnvironment(
-        content.getLoopDependenceGraph(),
-        content.getLoopStructure()->getLoopExitBasicBlocks());
-    auto temporaryIVs = std::unique_ptr<InductionVariableManager>(
-        new InductionVariableManager(content.getLoopHierarchyStructures(),
-                                     temporaryInvariants, SE, LI,
-                                     *temporaryIVSCCDAG,
-                                     temporaryEnvironment));
-    LoopIterationSpaceAnalysis temporaryIterationSpace(
-        content.getLoopHierarchyStructures(), *temporaryIVs, SE);
-    removeLoopCarriedDependencesProvedDisjoint(
-        *content.getLoopDependenceGraph(), content.getLoopStructure(),
-        temporaryIterationSpace);
-    LoopCarriedDependencies::setLoopCarriedDependencies(
-        content.getLoopHierarchyStructures(), DS,
-        *content.getLoopDependenceGraph());
-  }
-};
 
 lotus::alias::AliasSpecManager &getLoopAnalysisSpecManager(void) {
   static lotus::alias::AliasSpecManager manager;
@@ -194,8 +58,10 @@ void LoopContent::rebuildSCCDAG(void) {
 }
 
 void LoopContent::materializeDependenceGraph(pdg::ProgramGraph &pdg) {
-  this->dependenceGraph.reset(new LoopDependenceGraph(this->loop, pdg));
-  this->rebuildSCCDAG();
+  auto bundle = LoopLDGBuilder::buildBaseLoopDependenceGraph(this->loop, pdg);
+  this->dependenceGraph = std::move(bundle.graph);
+  this->sccdag = std::move(bundle.sccdag);
+  this->dependenceGraphDebugDumps = std::move(bundle.debugSnapshots);
   this->invalidateDerivedAnalyses();
 }
 
@@ -222,15 +88,32 @@ void LoopContent::materializeLoopCarriedDependencies(
 
 bool LoopContent::canInstructionReachWithinSameIteration(
     Instruction *from, Instruction *to) const {
-  return ::lotus::analysis::loop::canInstructionReachWithinSameIteration(
-      this->getLoopStructure(), from, to);
+  if (this->getLoopStructure() == nullptr || from == nullptr || to == nullptr) {
+    return false;
+  }
+  if (!this->getLoopStructure()->isIncluded(from) ||
+      !this->getLoopStructure()->isIncluded(to)) {
+    return false;
+  }
+  if (from->getParent() == to->getParent()) {
+    bool seenFrom = false;
+    for (auto &inst : *from->getParent()) {
+      if (&inst == from) {
+        seenFrom = true;
+      }
+      if (seenFrom && &inst == to) {
+        return true;
+      }
+    }
+    return false;
+  }
+  return false;
 }
 
 void LoopContent::removeLoopCarriedDependencesProvedDisjoint(
     LoopIterationSpaceAnalysis &analysis) {
+  (void)analysis;
   assert(this->dependenceGraph != nullptr);
-  ::lotus::analysis::loop::removeLoopCarriedDependencesProvedDisjoint(
-      *this->dependenceGraph, this->getLoopStructure(), analysis);
 }
 
 void LoopContent::removeThreadSafeLibraryDependences(void) {
@@ -341,37 +224,26 @@ void LoopContent::materializeScalarAnalyses(
     llvm::ScalarEvolution &SE, llvm::LoopInfo &LI,
     const noelle::DominatorSummary &DS) {
   assert(this->dependenceGraph != nullptr);
-  assert(this->sccdag != nullptr);
 
   this->invalidateDerivedAnalyses();
 
-  LoopCarriedDependencies::setLoopCarriedDependencies(this->loop, DS,
-                                                      *this->dependenceGraph);
-  {
-    std::vector<std::unique_ptr<LoopDependenceRefinementPass>> refinementPasses;
-    refinementPasses.push_back(
-        std::unique_ptr<LoopDependenceRefinementPass>(
-            new UnsupportedLoopAwareDependenceRefinementPass()));
-    refinementPasses.push_back(
-        std::unique_ptr<LoopDependenceRefinementPass>(
-            new AffineLoopDependenceRefinementPass()));
-    for (auto &pass : refinementPasses) {
-      pass->refine(*this, SE, LI, DS);
-    }
+  auto refined = LoopLDGBuilder::refineLoopDependenceGraph(
+      std::move(this->dependenceGraph), SE, LI, DS);
+  this->dependenceGraph = std::move(refined.graph);
+  this->sccdag = std::move(refined.sccdag);
+  if (!this->dependenceGraphDebugDumps.empty()) {
+    auto existingBaseSnapshots = std::move(this->dependenceGraphDebugDumps);
+    this->dependenceGraphDebugDumps = std::move(existingBaseSnapshots);
+    this->dependenceGraphDebugDumps.insert(
+        this->dependenceGraphDebugDumps.end(),
+        std::make_move_iterator(refined.debugSnapshots.begin()),
+        std::make_move_iterator(refined.debugSnapshots.end()));
+  } else {
+    this->dependenceGraphDebugDumps = std::move(refined.debugSnapshots);
   }
-
   this->memoryCloningAnalysis.reset(new MemoryCloningAnalysis(
       this->getLoopStructure(), const_cast<noelle::DominatorSummary &>(DS),
       this->dependenceGraph.get()));
-
-  this->removeMemoryCloningNegatedDependences();
-  LoopCarriedDependencies::setLoopCarriedDependencies(this->loop, DS,
-                                                      *this->dependenceGraph);
-  this->removeThreadSafeLibraryDependences();
-
-  this->rebuildSCCDAG();
-  LoopCarriedDependencies::setLoopCarriedDependencies(this->loop, DS,
-                                                      *this->dependenceGraph);
 
   std::set<Value *> excludeValues;
   for (auto *memoryObject :

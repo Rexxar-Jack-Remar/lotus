@@ -29,6 +29,7 @@
 #include "Analysis/Loop/LoopEnvironment.h"
 #include "Analysis/Loop/LoopForest.h"
 #include "Analysis/Loop/LoopIterationSpaceAnalysis.h"
+#include "Analysis/Loop/LoopLDGBuilder.h"
 #include "Analysis/Loop/LoopSCCDAG.h"
 #include "Analysis/Loop/MemoryCloningAnalysis.h"
 #include "Analysis/Loop/SCCDAGAttrs.h"
@@ -66,6 +67,10 @@ public:
   }
 
   void materializeDependenceGraph(pdg::ProgramGraph &pdg);
+  const std::vector<std::pair<std::string, std::string>> &
+  getDependenceGraphDebugDumps(void) const {
+    return this->dependenceGraphDebugDumps;
+  }
 
   bool hasInvariantManager(void) const {
     return this->invariantManager != nullptr;
@@ -146,6 +151,7 @@ private:
   LoopTree *loop;
   std::unique_ptr<LoopDependenceGraph> dependenceGraph;
   std::unique_ptr<LoopSCCDAG> sccdag;
+  std::vector<std::pair<std::string, std::string>> dependenceGraphDebugDumps;
   std::unique_ptr<LoopDependenceGraph> ivDependenceGraph;
   std::unique_ptr<LoopSCCDAG> ivSCCDAG;
   std::unique_ptr<LoopEnvironment> environment;

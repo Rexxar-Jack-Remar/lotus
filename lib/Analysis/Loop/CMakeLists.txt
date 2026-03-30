@@ -2,6 +2,7 @@ set(CanaryLoopAnalysis_SOURCES
   LoopForest.cpp
   FunctionLoopAnalyses.cpp
   LoopContent.cpp
+  LoopLDGBuilder.cpp
   LoopDependenceGraph.cpp
   LoopSCCDAG.cpp
   Invariants.cpp

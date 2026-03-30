@@ -3,6 +3,9 @@
  */
 #include "Analysis/Loop/SCCDAGAttrs.h"
 
+#include "llvm/Support/FileSystem.h"
+#include "llvm/Support/raw_ostream.h"
+
 namespace lotus {
 namespace analysis {
 namespace loop {
@@ -762,6 +765,35 @@ SCCDAGAttrs::computeSCCDAGWhenSCCsAreIgnored(
 }
 
 LoopSCCDAG *SCCDAGAttrs::getSCCDAG(void) const { return this->sccdag; }
+
+void SCCDAGAttrs::dumpToFile(uint64_t id) const {
+  std::error_code error;
+  std::string filename = "sccdag-attrs-loop-" + std::to_string(id) + ".txt";
+  llvm::raw_fd_ostream stream(filename, error, llvm::sys::fs::OF_Text);
+  if (error) {
+    llvm::errs() << "ERROR: Could not dump SCC attributes to file: "
+                 << error.message() << "\n";
+    return;
+  }
+
+  for (auto *scc : this->sccdag->getSCCs()) {
+    auto *info = this->getSCCAttrs(scc);
+    stream << "SCC " << scc->getID() << ": ";
+    if (info == nullptr) {
+      stream << "unknown-info\n";
+      continue;
+    }
+    stream << static_cast<int>(info->getKind()) << "\n";
+    for (auto &pair : scc->internalNodePairs()) {
+      if (pair.first == nullptr) {
+        continue;
+      }
+      stream << "  ";
+      pair.first->print(stream);
+      stream << "\n";
+    }
+  }
+}
 
 } // namespace loop
 } // namespace analysis

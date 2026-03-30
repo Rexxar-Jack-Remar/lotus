@@ -20,6 +20,7 @@
  * OR OTHER DEALINGS IN THE SOFTWARE.
  */
 #include "Analysis/Loop/LoopDependenceGraph.h"
+#include "Analysis/Loop/LoopLDGBuilder.h"
 
 #include <queue>
 #include <unordered_set>
@@ -47,6 +48,46 @@ std::string describeValue(Value *value) {
   raw_string_ostream stream(text);
   value->printAsOperand(stream, false);
   return stream.str();
+}
+
+const char *describeEdgeKind(LoopDependenceEdgeKind kind) {
+  switch (kind) {
+  case LoopDependenceEdgeKind::Variable:
+    return "var";
+  case LoopDependenceEdgeKind::Control:
+    return "ctrl";
+  case LoopDependenceEdgeKind::Memory:
+    return "mem";
+  }
+  return "unknown";
+}
+
+const char *describeMemoryKind(LoopDependenceMemoryKind kind) {
+  switch (kind) {
+  case LoopDependenceMemoryKind::None:
+    return "none";
+  case LoopDependenceMemoryKind::Raw:
+    return "raw";
+  case LoopDependenceMemoryKind::ReadOnly:
+    return "read";
+  case LoopDependenceMemoryKind::AliasUnknown:
+    return "alias";
+  case LoopDependenceMemoryKind::Unknown:
+    return "unknown";
+  }
+  return "unknown";
+}
+
+const char *describeOrigin(LoopDependenceEdgeOrigin origin) {
+  switch (origin) {
+  case LoopDependenceEdgeOrigin::ImportedPDG:
+    return "pdg";
+  case LoopDependenceEdgeOrigin::SynthesizedBoundaryValue:
+    return "boundary";
+  case LoopDependenceEdgeOrigin::SynthesizedRefinement:
+    return "refinement";
+  }
+  return "unknown";
 }
 
 LoopDependenceEdgeKind classifyEdgeKind(pdg::EdgeType type) {
@@ -195,10 +236,12 @@ LoopDependenceEdge::LoopDependenceEdge(LoopDependenceNode *src,
                                        LoopDependenceNode *dst,
                                        LoopDependenceEdgeKind kind,
                                        LoopDependenceMemoryKind memoryKind,
+                                       LoopDependenceEdgeOrigin origin,
                                        pdg::EdgeType originalEdgeType,
                                        bool loopCarried)
     : src{src}, dst{dst}, kind{kind}, memoryKind{memoryKind},
-      originalEdgeType{originalEdgeType}, loopCarried{loopCarried} {}
+      origin{origin}, originalEdgeType{originalEdgeType},
+      loopCarried{loopCarried} {}
 
 LoopDependenceNode *LoopDependenceEdge::getSrc(void) const { return this->src; }
 
@@ -210,6 +253,10 @@ LoopDependenceEdgeKind LoopDependenceEdge::getKind(void) const {
 
 LoopDependenceMemoryKind LoopDependenceEdge::getMemoryKind(void) const {
   return this->memoryKind;
+}
+
+LoopDependenceEdgeOrigin LoopDependenceEdge::getOrigin(void) const {
+  return this->origin;
 }
 
 pdg::EdgeType LoopDependenceEdge::getOriginalEdgeType(void) const {
@@ -224,81 +271,9 @@ void LoopDependenceEdge::setLoopCarried(bool isLoopCarried) {
 
 LoopDependenceGraph::LoopDependenceGraph(LoopTree *loopNode,
                                          pdg::ProgramGraph &pdg)
-    : loop{loopNode}, pdg{&pdg} {
-  assert(loopNode != nullptr);
-
-  auto *loopStructure = this->getLoopStructure();
-  assert(loopStructure != nullptr);
-  std::vector<Instruction *> loopInstructions;
-  for (auto *block : loopStructure->getBasicBlocks()) {
-    for (auto &instruction : *block) {
-      if (shouldIgnoreLoopInstruction(&instruction)) {
-        continue;
-      }
-      loopInstructions.push_back(&instruction);
-    }
-  }
-
-  std::sort(loopInstructions.begin(), loopInstructions.end(),
-            [](Instruction *lhs, Instruction *rhs) {
-              auto lhsBlock = lhs->getParent()->getName();
-              auto rhsBlock = rhs->getParent()->getName();
-              if (lhsBlock != rhsBlock) {
-                return lhsBlock < rhsBlock;
-              }
-              return describeValue(lhs) < describeValue(rhs);
-            });
-
-  for (auto *instruction : loopInstructions) {
-    auto *pdgNode = this->pdg->getNode(*instruction);
-    this->fetchOrCreateNode(instruction, pdgNode, true);
-  }
-
-  std::set<std::tuple<pdg::Node *, pdg::Node *, int>> seenEdges;
-  for (auto *instruction : loopInstructions) {
-    auto *pdgNode = this->pdg->getNode(*instruction);
-    if (pdgNode == nullptr) {
-      continue;
-    }
-    for (auto *edge : pdgNode->getOutEdgeSet()) {
-      auto key = std::make_tuple(edge->getSrcNode(), edge->getDstNode(),
-                                 static_cast<int>(edge->getEdgeType()));
-      if (seenEdges.insert(key).second) {
-        this->importEdge(edge);
-      }
-    }
-
-    for (auto *edge : pdgNode->getInEdgeSet()) {
-      auto key = std::make_tuple(edge->getSrcNode(), edge->getDstNode(),
-                                 static_cast<int>(edge->getEdgeType()));
-      if (seenEdges.insert(key).second) {
-        this->importEdge(edge);
-      }
-    }
-  }
-
-  // Preserve direct operand-use relations at the loop layer. NOELLE's PDG
-  // already exposes these value-level dependences; Lotus's current PDG can
-  // miss some of them, especially for arguments and pointer-manipulation
-  // values that remain relevant to loop-local reasoning.
-  for (auto *instruction : loopInstructions) {
-    auto *dstNode = this->getNode(instruction);
-    if (dstNode == nullptr) {
-      continue;
-    }
-
-    for (auto &operandUse : instruction->operands()) {
-      auto *value = operandUse.get();
-      if (shouldIgnoreValue(value) ||
-          (isa<Constant>(value) && !isa<ConstantExpr>(value))) {
-        continue;
-      }
-      if (!isAllowedBoundaryContextValue(value)) {
-        continue;
-      }
-      this->addVariableDependence(value, instruction);
-    }
-  }
+    : loop{nullptr}, pdg{nullptr} {
+  auto bundle = LoopLDGBuilder::buildBaseLoopDependenceGraph(loopNode, pdg);
+  *this = std::move(*bundle.graph);
 }
 
 LoopTree *LoopDependenceGraph::getLoopHierarchyStructures(void) const {
@@ -475,6 +450,7 @@ LoopDependenceGraph::createSubgraph(bool includeControl, bool includeVariable,
     auto clonedEdge =
         std::unique_ptr<LoopDependenceEdge>(new LoopDependenceEdge(
             src, dst, edge->getKind(), edge->getMemoryKind(),
+            edge->getOrigin(),
             edge->getOriginalEdgeType(), edge->isLoopCarried()));
     auto *rawClonedEdge = clonedEdge.get();
     src->outgoingEdges.push_back(rawClonedEdge);
@@ -538,6 +514,7 @@ void LoopDependenceGraph::addVariableDependence(Value *srcValue,
   auto ownedEdge = std::unique_ptr<LoopDependenceEdge>(
       new LoopDependenceEdge(srcNode, dstNode, LoopDependenceEdgeKind::Variable,
                              LoopDependenceMemoryKind::None,
+                             LoopDependenceEdgeOrigin::SynthesizedBoundaryValue,
                              pdg::EdgeType::DATA_DEF_USE, loopCarried));
   auto *rawEdge = ownedEdge.get();
   srcNode->outgoingEdges.push_back(rawEdge);
@@ -615,11 +592,80 @@ void LoopDependenceGraph::importEdge(pdg::Edge *edge) {
   auto memoryKind = classifyMemoryKind(edge->getEdgeType());
 
   auto ownedEdge = std::unique_ptr<LoopDependenceEdge>(new LoopDependenceEdge(
-      srcNode, dstNode, edgeKind, memoryKind, edge->getEdgeType(), false));
+      srcNode, dstNode, edgeKind, memoryKind,
+      LoopDependenceEdgeOrigin::ImportedPDG, edge->getEdgeType(), false));
   auto *rawEdge = ownedEdge.get();
   srcNode->outgoingEdges.push_back(rawEdge);
   dstNode->incomingEdges.push_back(rawEdge);
   this->ownedEdges.push_back(std::move(ownedEdge));
+}
+
+void LoopDependenceGraph::initialize(LoopTree *loopNode,
+                                     pdg::ProgramGraph &programGraph) {
+  this->loop = loopNode;
+  this->pdg = &programGraph;
+}
+
+void LoopDependenceGraph::addEdge(LoopDependenceNode *src,
+                                  LoopDependenceNode *dst,
+                                  LoopDependenceEdgeKind kind,
+                                  LoopDependenceMemoryKind memoryKind,
+                                  LoopDependenceEdgeOrigin origin,
+                                  pdg::EdgeType originalEdgeType,
+                                  bool loopCarried) {
+  auto ownedEdge = std::unique_ptr<LoopDependenceEdge>(new LoopDependenceEdge(
+      src, dst, kind, memoryKind, origin, originalEdgeType, loopCarried));
+  auto *rawEdge = ownedEdge.get();
+  src->outgoingEdges.push_back(rawEdge);
+  dst->incomingEdges.push_back(rawEdge);
+  this->ownedEdges.push_back(std::move(ownedEdge));
+}
+
+std::string LoopDependenceGraph::renderStable(void) const {
+  std::vector<LoopDependenceNode *> orderedNodes = this->getNodes();
+  std::sort(orderedNodes.begin(), orderedNodes.end(),
+            [](LoopDependenceNode *lhs, LoopDependenceNode *rhs) {
+              return lhs->getID() < rhs->getID();
+            });
+  std::vector<LoopDependenceEdge *> orderedEdges = this->getEdges();
+  std::sort(orderedEdges.begin(), orderedEdges.end(),
+            [](LoopDependenceEdge *lhs, LoopDependenceEdge *rhs) {
+              if (lhs->getSrc()->getID() != rhs->getSrc()->getID()) {
+                return lhs->getSrc()->getID() < rhs->getSrc()->getID();
+              }
+              if (lhs->getDst()->getID() != rhs->getDst()->getID()) {
+                return lhs->getDst()->getID() < rhs->getDst()->getID();
+              }
+              if (lhs->getKind() != rhs->getKind()) {
+                return static_cast<int>(lhs->getKind()) <
+                       static_cast<int>(rhs->getKind());
+              }
+              if (lhs->getOrigin() != rhs->getOrigin()) {
+                return static_cast<int>(lhs->getOrigin()) <
+                       static_cast<int>(rhs->getOrigin());
+              }
+              return static_cast<int>(lhs->getMemoryKind()) <
+                     static_cast<int>(rhs->getMemoryKind());
+            });
+
+  std::string text;
+  raw_string_ostream stream(text);
+  stream << "nodes\n";
+  for (auto *node : orderedNodes) {
+    stream << "  [" << node->getID() << "] "
+           << (node->isInternal() ? "internal " : "external ")
+           << describeValue(node->getValue()) << "\n";
+  }
+  stream << "edges\n";
+  for (auto *edge : orderedEdges) {
+    stream << "  [" << edge->getSrc()->getID() << " -> "
+           << edge->getDst()->getID() << "] kind="
+           << describeEdgeKind(edge->getKind()) << " mem="
+           << describeMemoryKind(edge->getMemoryKind()) << " origin="
+           << describeOrigin(edge->getOrigin()) << " carried="
+           << (edge->isLoopCarried() ? "true" : "false") << "\n";
+  }
+  return stream.str();
 }
 
 } // namespace loop

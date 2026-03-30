@@ -236,6 +236,7 @@ public:
   std::pair<SCCParentMap, SCCEdgeMap> computeSCCDAGWhenSCCsAreIgnored(
       std::function<bool(GenericSCC *)> ignoreSCC) const;
   LoopSCCDAG *getSCCDAG(void) const;
+  void dumpToFile(uint64_t id) const;
 
 private:
   std::map<LoopSCC *, std::set<LoopDependenceEdge *>> sccToLoopCarriedDependencies;

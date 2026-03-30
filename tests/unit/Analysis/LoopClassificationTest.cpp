@@ -144,7 +144,7 @@ TEST_F(LoopClassificationTest, ClassifiesIVAndReductionSCCsAndTripCount) {
 }
 
 TEST_F(LoopClassificationTest,
-       ClassifiesClonableStackObjectAndRefinesCarriedMemory) {
+       RefinesClonableStackObjectToLoopIterationAfterMemoryCloning) {
   llvm::LLVMContext context;
   auto module = parseModuleChecked(context, R"(
     define void @clonable(i32 %n) {
@@ -204,20 +204,151 @@ TEST_F(LoopClassificationTest,
   ASSERT_NE(scc, nullptr);
   auto *info = attrs->getSCCAttrs(scc);
   ASSERT_NE(info, nullptr);
-  EXPECT_EQ(info->getKind(), GenericSCC::STACK_OBJECT_CLONABLE);
+  EXPECT_EQ(info->getKind(), GenericSCC::LOOP_ITERATION);
 
-  auto *stackClonable = dynamic_cast<StackObjectClonableSCC *>(info);
-  ASSERT_NE(stackClonable, nullptr);
-  auto locationsToClone = stackClonable->getMemoryLocationsToClone();
-  auto *slot = findInstructionByName(function, "slot");
-  auto *slotAlloca = llvm::dyn_cast_or_null<llvm::AllocaInst>(slot);
-  ASSERT_NE(slotAlloca, nullptr);
-  EXPECT_EQ(locationsToClone.size(), 1u);
-  EXPECT_NE(locationsToClone.find(slotAlloca), locationsToClone.end());
+  auto carriedSCCs = attrs->getSCCsWithLoopCarriedDependencies();
+  for (auto *carried : carriedSCCs) {
+    EXPECT_NE(carried->getSCC(), scc);
+  }
+}
 
-  auto clonableSCCs = attrs->getSCCsOfKind(GenericSCC::STACK_OBJECT_CLONABLE);
-  EXPECT_EQ(clonableSCCs.size(), 1u);
-  EXPECT_EQ((*clonableSCCs.begin())->getSCC(), scc);
+TEST_F(LoopClassificationTest,
+       ClassifiesPeriodicSCCAndMarksItNonReducibleForLiveOuts) {
+  llvm::LLVMContext context;
+  auto module = parseModuleChecked(context, R"(
+    define i32 @periodic_toggle(i32 %n) {
+    entry:
+      br label %header
+
+    header:
+      %flip = phi i32 [ 0, %entry ], [ %next, %latch ]
+      %i = phi i32 [ 0, %entry ], [ %i.next, %latch ]
+      %cmp = icmp slt i32 %i, %n
+      br i1 %cmp, label %body, label %exit
+
+    body:
+      %next = xor i32 %flip, 1
+      br label %latch
+
+    latch:
+      %i.next = add i32 %i, 1
+      br label %header
+
+    exit:
+      ret i32 %flip
+    }
+  )");
+  auto *function = module->getFunction("periodic_toggle");
+  ASSERT_NE(function, nullptr);
+
+  buildPDG(*module);
+
+  llvm::PassBuilder PB;
+  llvm::FunctionAnalysisManager FAM;
+  PB.registerFunctionAnalyses(FAM);
+  auto &DT = FAM.getResult<llvm::DominatorTreeAnalysis>(*function);
+  auto &PDT = FAM.getResult<llvm::PostDominatorTreeAnalysis>(*function);
+  auto &LI = FAM.getResult<llvm::LoopAnalysis>(*function);
+  auto &SE = FAM.getResult<llvm::ScalarEvolutionAnalysis>(*function);
+
+  FunctionLoopAnalyses analyses(*function, LI, DT, PDT);
+  analyses.materializeDependenceGraphs(graph);
+  analyses.materializeScalarAnalyses(SE, LI);
+  analyses.materializeLoopEnvironments();
+  analyses.materializeLoopCarriedDependencies(DT, PDT);
+  analyses.materializeIterationSpaceAnalyses(SE);
+  analyses.materializeSCCAttrs(DT, PDT);
+
+  auto *loop = *LI.begin();
+  auto *content = analyses.getLoopContent(*loop);
+  ASSERT_NE(content, nullptr);
+  auto *attrs = content->getSCCAttrs();
+  ASSERT_NE(attrs, nullptr);
+
+  auto *flipPhi = findPhi(function, "flip");
+  ASSERT_NE(flipPhi, nullptr);
+  auto *flipSCC = content->getSCCDAG()->getSCC(flipPhi);
+  ASSERT_NE(flipSCC, nullptr);
+
+  auto *info = attrs->getSCCAttrs(flipSCC);
+  ASSERT_NE(info, nullptr);
+  EXPECT_EQ(info->getKind(), GenericSCC::PERIODIC_VARIABLE);
+
+  auto liveOutsNotReducible =
+      attrs->getLiveOutVariablesThatAreNotReducable(content->getEnvironment());
+  EXPECT_FALSE(liveOutsNotReducible.empty());
+}
+
+TEST_F(LoopClassificationTest, ComputesIgnoredSCCDAGParentsThroughLoopIteration) {
+  llvm::LLVMContext context;
+  auto module = parseModuleChecked(context, R"(
+    define i32 @ignored_sccdag(i32 %n) {
+    entry:
+      br label %header
+
+    header:
+      %i = phi i32 [ 0, %entry ], [ %i.next, %latch ]
+      %sum = phi i32 [ 0, %entry ], [ %sum.next, %latch ]
+      %cmp = icmp slt i32 %i, %n
+      br i1 %cmp, label %body, label %exit
+
+    body:
+      %inc = add i32 %i, 1
+      %sum.next = add i32 %sum, %inc
+      br label %latch
+
+    latch:
+      %i.next = add i32 %i, 1
+      br label %header
+
+    exit:
+      ret i32 %sum
+    }
+  )");
+  auto *function = module->getFunction("ignored_sccdag");
+  ASSERT_NE(function, nullptr);
+
+  buildPDG(*module);
+
+  llvm::PassBuilder PB;
+  llvm::FunctionAnalysisManager FAM;
+  PB.registerFunctionAnalyses(FAM);
+  auto &DT = FAM.getResult<llvm::DominatorTreeAnalysis>(*function);
+  auto &PDT = FAM.getResult<llvm::PostDominatorTreeAnalysis>(*function);
+  auto &LI = FAM.getResult<llvm::LoopAnalysis>(*function);
+  auto &SE = FAM.getResult<llvm::ScalarEvolutionAnalysis>(*function);
+
+  FunctionLoopAnalyses analyses(*function, LI, DT, PDT);
+  analyses.materializeDependenceGraphs(graph);
+  analyses.materializeScalarAnalyses(SE, LI);
+  analyses.materializeLoopEnvironments();
+  analyses.materializeLoopCarriedDependencies(DT, PDT);
+  analyses.materializeIterationSpaceAnalyses(SE);
+  analyses.materializeSCCAttrs(DT, PDT);
+
+  auto *loop = *LI.begin();
+  auto *content = analyses.getLoopContent(*loop);
+  ASSERT_NE(content, nullptr);
+  auto *attrs = content->getSCCAttrs();
+  ASSERT_NE(attrs, nullptr);
+
+  auto *sumPhi = findPhi(function, "sum");
+  auto *iPhi = findPhi(function, "i");
+  ASSERT_NE(sumPhi, nullptr);
+  ASSERT_NE(iPhi, nullptr);
+
+  auto *sumSCC = content->getSCCDAG()->getSCC(sumPhi);
+  auto *iSCC = content->getSCCDAG()->getSCC(iPhi);
+  ASSERT_NE(sumSCC, nullptr);
+  ASSERT_NE(iSCC, nullptr);
+
+  auto ignored = attrs->computeSCCDAGWhenSCCsAreIgnored(
+      [](GenericSCC *info) {
+        return info != nullptr && info->getKind() == GenericSCC::LOOP_ITERATION;
+      });
+  auto &parents = ignored.first;
+  ASSERT_NE(parents.find(sumSCC), parents.end());
+  EXPECT_NE(parents.at(sumSCC).find(iSCC), parents.at(sumSCC).end());
 }
 
 } // namespace
