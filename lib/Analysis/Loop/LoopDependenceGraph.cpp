@@ -107,6 +107,37 @@ bool isInternalToLoop(LoopStructure *loop, Value *value) {
   return false;
 }
 
+bool shouldIgnoreLoopInstruction(Instruction *instruction) {
+  if (instruction == nullptr) {
+    return true;
+  }
+  if (isa<DbgInfoIntrinsic>(instruction)) {
+    return true;
+  }
+  if (auto *call = dyn_cast<CallInst>(instruction)) {
+    if (call->isLifetimeStartOrEnd()) {
+      return true;
+    }
+  }
+  return false;
+}
+
+bool shouldIgnoreValue(Value *value) {
+  if (value == nullptr) {
+    return true;
+  }
+  if (isa<BasicBlock>(value)) {
+    return true;
+  }
+  if (isa<MetadataAsValue>(value)) {
+    return true;
+  }
+  if (auto *inst = dyn_cast<Instruction>(value)) {
+    return shouldIgnoreLoopInstruction(inst);
+  }
+  return false;
+}
+
 } // namespace
 
 LoopDependenceNode::LoopDependenceNode(uint64_t id,
@@ -133,6 +164,14 @@ LoopDependenceNode::getIncomingEdges(void) const {
 const std::vector<LoopDependenceEdge *> &
 LoopDependenceNode::getOutgoingEdges(void) const {
   return this->outgoingEdges;
+}
+
+bool LoopDependenceNode::hasIncomingEdges(void) const {
+  return !this->incomingEdges.empty();
+}
+
+bool LoopDependenceNode::hasOutgoingEdges(void) const {
+  return !this->outgoingEdges.empty();
 }
 
 LoopDependenceEdge::LoopDependenceEdge(LoopDependenceNode *src,
@@ -183,6 +222,9 @@ LoopDependenceGraph::LoopDependenceGraph(LoopTree *loopNode,
   std::vector<Instruction *> loopInstructions;
   for (auto *block : loopStructure->getBasicBlocks()) {
     for (auto &instruction : *block) {
+      if (shouldIgnoreLoopInstruction(&instruction)) {
+        continue;
+      }
       loopInstructions.push_back(&instruction);
     }
   }
@@ -205,12 +247,31 @@ LoopDependenceGraph::LoopDependenceGraph(LoopTree *loopNode,
 
   std::vector<pdg::Edge *> pdgEdges;
   std::set<std::tuple<pdg::Node *, pdg::Node *, int>> seenEdges;
-
+  std::queue<pdg::Node *> worklist;
+  std::unordered_set<pdg::Node *> enqueued;
   for (auto *instruction : loopInstructions) {
     auto *pdgNode = this->pdg->getNode(*instruction);
-    if (pdgNode == nullptr) {
-      continue;
+    if (pdgNode != nullptr && enqueued.insert(pdgNode).second) {
+      worklist.push(pdgNode);
     }
+  }
+
+  auto enqueueNode = [&](pdg::Node *node) {
+    if (node == nullptr) {
+      return;
+    }
+    auto *value = node->getValue();
+    if (shouldIgnoreValue(value)) {
+      return;
+    }
+    if (enqueued.insert(node).second) {
+      worklist.push(node);
+    }
+  };
+
+  while (!worklist.empty()) {
+    auto *pdgNode = worklist.front();
+    worklist.pop();
 
     for (auto *edge : pdgNode->getOutEdgeSet()) {
       auto key = std::make_tuple(edge->getSrcNode(),
@@ -219,6 +280,8 @@ LoopDependenceGraph::LoopDependenceGraph(LoopTree *loopNode,
       if (seenEdges.insert(key).second) {
         pdgEdges.push_back(edge);
       }
+      enqueueNode(edge->getDstNode());
+      enqueueNode(edge->getSrcNode());
     }
 
     for (auto *edge : pdgNode->getInEdgeSet()) {
@@ -228,6 +291,8 @@ LoopDependenceGraph::LoopDependenceGraph(LoopTree *loopNode,
       if (seenEdges.insert(key).second) {
         pdgEdges.push_back(edge);
       }
+      enqueueNode(edge->getSrcNode());
+      enqueueNode(edge->getDstNode());
     }
   }
 
@@ -251,6 +316,67 @@ LoopDependenceGraph::LoopDependenceGraph(LoopTree *loopNode,
   for (auto *edge : pdgEdges) {
     this->importEdge(edge);
   }
+
+  std::set<std::tuple<Value *, Value *, int>> seenSynthetic;
+  std::queue<Instruction *> syntheticWorklist;
+  std::unordered_set<Instruction *> queuedSynthetic;
+  for (auto *instruction : loopInstructions) {
+    syntheticWorklist.push(instruction);
+    queuedSynthetic.insert(instruction);
+  }
+  for (auto *node : this->getNodes()) {
+    auto *instruction = dyn_cast_or_null<Instruction>(node->getValue());
+    if (instruction != nullptr && queuedSynthetic.insert(instruction).second) {
+      syntheticWorklist.push(instruction);
+    }
+  }
+
+  while (!syntheticWorklist.empty()) {
+    auto *instruction = syntheticWorklist.front();
+    syntheticWorklist.pop();
+    auto *dstNode = this->getNode(instruction);
+    if (dstNode == nullptr) {
+      auto *pdgNode = this->pdg->getNode(*instruction);
+      dstNode = this->fetchOrCreateNode(
+          instruction, pdgNode, isInternalToLoop(loopStructure, instruction));
+    }
+    for (auto &operand : instruction->operands()) {
+      auto *value = operand.get();
+      if (shouldIgnoreValue(value) || isa<Constant>(value)) {
+        continue;
+      }
+      auto *srcNode = this->getNode(value);
+      if (srcNode == nullptr) {
+        auto *pdgNode = this->pdg->getNode(*value);
+        srcNode = this->fetchOrCreateNode(
+            value, pdgNode, isInternalToLoop(loopStructure, value));
+      }
+      auto key = std::make_tuple(value,
+                                 static_cast<Value *>(instruction),
+                                 static_cast<int>(pdg::EdgeType::DATA_DEF_USE));
+      if (!seenSynthetic.insert(key).second) {
+        continue;
+      }
+      auto ownedEdge = std::unique_ptr<LoopDependenceEdge>(new LoopDependenceEdge(
+          srcNode,
+          dstNode,
+          LoopDependenceEdgeKind::Variable,
+          LoopDependenceMemoryKind::None,
+          pdg::EdgeType::DATA_DEF_USE,
+          false));
+      auto *rawEdge = ownedEdge.get();
+      srcNode->outgoingEdges.push_back(rawEdge);
+      dstNode->incomingEdges.push_back(rawEdge);
+      this->ownedEdges.push_back(std::move(ownedEdge));
+
+      if (auto *srcInst = dyn_cast<Instruction>(value)) {
+        if (!shouldIgnoreLoopInstruction(srcInst)
+            && queuedSynthetic.insert(srcInst).second) {
+          syntheticWorklist.push(srcInst);
+        }
+      }
+    }
+  }
 }
 
 LoopTree *LoopDependenceGraph::getLoopHierarchyStructures(void) const {
@@ -269,6 +395,15 @@ std::vector<LoopDependenceNode *> LoopDependenceGraph::getExternalNodes(void) co
   return this->externalNodes;
 }
 
+std::vector<LoopDependenceNode *> LoopDependenceGraph::getNodes(void) const {
+  std::vector<LoopDependenceNode *> nodes;
+  nodes.reserve(this->ownedNodes.size());
+  for (auto const &owned : this->ownedNodes) {
+    nodes.push_back(owned.get());
+  }
+  return nodes;
+}
+
 std::vector<LoopDependenceEdge *> LoopDependenceGraph::getEdges(void) const {
   std::vector<LoopDependenceEdge *> edges;
   edges.reserve(this->ownedEdges.size());
@@ -276,6 +411,26 @@ std::vector<LoopDependenceEdge *> LoopDependenceGraph::getEdges(void) const {
     edges.push_back(edge.get());
   }
   return edges;
+}
+
+std::vector<std::pair<Value *, LoopDependenceNode *>>
+LoopDependenceGraph::internalNodePairs(void) const {
+  std::vector<std::pair<Value *, LoopDependenceNode *>> pairs;
+  pairs.reserve(this->internalNodes.size());
+  for (auto *node : this->internalNodes) {
+    pairs.emplace_back(node->getValue(), node);
+  }
+  return pairs;
+}
+
+std::vector<std::pair<Value *, LoopDependenceNode *>>
+LoopDependenceGraph::externalNodePairs(void) const {
+  std::vector<std::pair<Value *, LoopDependenceNode *>> pairs;
+  pairs.reserve(this->externalNodes.size());
+  for (auto *node : this->externalNodes) {
+    pairs.emplace_back(node->getValue(), node);
+  }
+  return pairs;
 }
 
 LoopDependenceNode *LoopDependenceGraph::getNode(Value *value) const {
@@ -286,8 +441,62 @@ LoopDependenceNode *LoopDependenceGraph::getNode(Value *value) const {
   return it->second;
 }
 
+LoopDependenceNode *LoopDependenceGraph::fetchNode(Value *value) const {
+  return this->getNode(value);
+}
+
 bool LoopDependenceGraph::doesItContain(Value *value) const {
   return this->getNode(value) != nullptr;
+}
+
+bool LoopDependenceGraph::isInternal(Value *value) const {
+  auto *node = this->getNode(value);
+  return node != nullptr && node->isInternal();
+}
+
+bool LoopDependenceGraph::isExternal(Value *value) const {
+  auto *node = this->getNode(value);
+  return node != nullptr && node->isExternal();
+}
+
+bool LoopDependenceGraph::iterateOverDependencesTo(
+    Value *target,
+    bool includeControl,
+    bool includeVariable,
+    bool includeMemory,
+    const std::function<bool(Value *, LoopDependenceEdge *)> &funcToInvoke) const {
+  auto *targetNode = this->getNode(target);
+  if (targetNode == nullptr) {
+    return false;
+  }
+
+  for (auto *edge : targetNode->getIncomingEdges()) {
+    bool include = false;
+    switch (edge->getKind()) {
+    case LoopDependenceEdgeKind::Control:
+      include = includeControl;
+      break;
+    case LoopDependenceEdgeKind::Variable:
+      include = includeVariable;
+      break;
+    case LoopDependenceEdgeKind::Memory:
+      include = includeMemory;
+      break;
+    }
+    if (!include) {
+      continue;
+    }
+
+    auto *src = edge->getSrc();
+    if (src == nullptr) {
+      continue;
+    }
+    if (funcToInvoke(src->getValue(), edge)) {
+      return true;
+    }
+  }
+
+  return false;
 }
 
 LoopDependenceNode *LoopDependenceGraph::fetchOrCreateNode(Value *value,
@@ -333,6 +542,9 @@ void LoopDependenceGraph::importEdge(pdg::Edge *edge) {
   auto *dstPDGNode = edge->getDstNode();
   Value *srcValue = srcPDGNode ? srcPDGNode->getValue() : nullptr;
   Value *dstValue = dstPDGNode ? dstPDGNode->getValue() : nullptr;
+  if (shouldIgnoreValue(srcValue) || shouldIgnoreValue(dstValue)) {
+    return;
+  }
 
   auto srcInternal = isInternalToLoop(loopStructure, srcValue);
   auto dstInternal = isInternalToLoop(loopStructure, dstValue);

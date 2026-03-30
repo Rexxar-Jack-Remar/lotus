@@ -9,12 +9,17 @@ namespace loop {
 
 LoopEnvironment::LoopEnvironment(LoopDependenceGraph *loopDG,
                                  std::vector<BasicBlock *> const &exitBlocks)
+    : LoopEnvironment(loopDG, exitBlocks, std::set<Value *>{}) {}
+
+LoopEnvironment::LoopEnvironment(LoopDependenceGraph *loopDG,
+                                 std::vector<BasicBlock *> const &exitBlocks,
+                                 const std::set<Value *> &excludeValues)
     : hasExitBlockEnv{exitBlocks.size() > 1}, exitBlockType{nullptr} {
   assert(loopDG != nullptr);
 
   for (auto *externalNode : loopDG->getExternalNodes()) {
     auto *externalValue = externalNode->getValue();
-    if (externalValue == nullptr) {
+    if (externalValue == nullptr || excludeValues.count(externalValue) != 0) {
       continue;
     }
 

@@ -7,119 +7,216 @@ namespace lotus {
 namespace analysis {
 namespace loop {
 
-namespace {
+class InvariantManager::InvarianceChecker {
+public:
+  InvarianceChecker(LoopStructure *loop,
+                    LoopDependenceGraph *loopDG,
+                    std::unordered_set<Instruction *> &invariants)
+      : loop{loop}, loopDG{loopDG}, invariants{invariants} {
+    for (auto *inst : loop->getInstructions()) {
+      if (inst->isTerminator()) {
+        continue;
+      }
 
-bool phiIncomingValuesEquivalent(PHINode *phi) {
-  if (phi->getNumIncomingValues() == 0) {
-    return false;
-  }
+      if (auto *call = dyn_cast<CallInst>(inst)) {
+        if (call->mayHaveSideEffects() && !call->onlyReadsMemory()) {
+          this->notInvariants.insert(inst);
+          continue;
+        }
+      }
 
-  Value *first = phi->getIncomingValue(0);
-  for (unsigned i = 1; i < phi->getNumIncomingValues(); ++i) {
-    if (phi->getIncomingValue(i) != first) {
-      return false;
+      bool isPHI = false;
+      if (auto *phi = dyn_cast<PHINode>(inst)) {
+        isPHI = true;
+        if (!arePHIIncomingValuesEquivalent(phi)) {
+          continue;
+        }
+      }
+
+      if (this->invariants.count(inst) != 0 || this->notInvariants.count(inst) != 0) {
+        continue;
+      }
+
+      this->dependencyValuesBeingChecked.clear();
+      this->dependencyValuesBeingChecked.insert(inst);
+      if (isPHI) {
+        this->invariants.insert(inst);
+      }
+
+      auto canEvolve = this->loopDG->iterateOverDependencesTo(
+          inst,
+          false,
+          true,
+          true,
+          [this](Value *toValue, LoopDependenceEdge *dep) {
+            return this->isEvolvingValue(toValue, dep);
+          });
+
+      if (auto *call = dyn_cast<CallInst>(inst)) {
+        auto *callee = call->getCalledFunction();
+        if (callee != nullptr && callee->empty()) {
+          if (!call->onlyReadsMemory() || !call->doesNotThrow()) {
+            canEvolve = true;
+          }
+        }
+      }
+
+      if (canEvolve) {
+        this->invariants.erase(inst);
+        this->notInvariants.insert(inst);
+      } else {
+        this->invariants.insert(inst);
+      }
     }
   }
 
-  return true;
-}
-
-bool isInstructionPureEnough(Instruction *instruction) {
-  if (isa<StoreInst>(instruction) || instruction->isTerminator()) {
-    return false;
-  }
-  if (auto *call = dyn_cast<CallBase>(instruction)) {
-    if (!call->onlyReadsMemory() || !call->doesNotThrow()) {
+private:
+  bool isEvolvingValue(Value *toValue, LoopDependenceEdge *dep) {
+    auto *toInst = dyn_cast<Instruction>(toValue);
+    if (toInst == nullptr) {
       return false;
     }
-  }
-  if (instruction->mayHaveSideEffects()) {
-    return false;
-  }
-  return true;
-}
+    if (!this->loop->isIncluded(toInst)) {
+      return false;
+    }
 
-} // namespace
+    if (isa<StoreInst>(toInst)) {
+      return true;
+    }
+
+    if (auto *call = dyn_cast<CallInst>(toInst)) {
+      if (call->mayHaveSideEffects() && !call->onlyReadsMemory()) {
+        return true;
+      }
+    }
+
+    if (dep->getKind() == LoopDependenceEdgeKind::Memory) {
+      return true;
+    }
+
+    bool isPHI = false;
+    if (auto *phi = dyn_cast<PHINode>(toInst)) {
+      isPHI = true;
+      if (!arePHIIncomingValuesEquivalent(phi)) {
+        return true;
+      }
+    }
+
+    if (this->invariants.count(toInst) != 0) {
+      return false;
+    }
+    if (this->notInvariants.count(toInst) != 0) {
+      return true;
+    }
+
+    if (isPHI) {
+      this->invariants.insert(toInst);
+    }
+
+    if (this->dependencyValuesBeingChecked.count(toInst) != 0) {
+      return true;
+    }
+    this->dependencyValuesBeingChecked.insert(toInst);
+
+    auto canEvolve = this->loopDG->iterateOverDependencesTo(
+        toInst,
+        false,
+        true,
+        true,
+        [this](Value *nextValue, LoopDependenceEdge *nextDep) {
+          return this->isEvolvingValue(nextValue, nextDep);
+        });
+    if (canEvolve) {
+      this->invariants.erase(toInst);
+      this->notInvariants.insert(toInst);
+    } else {
+      this->invariants.insert(toInst);
+    }
+    return canEvolve;
+  }
+
+  bool arePHIIncomingValuesEquivalent(PHINode *phi) const {
+    std::unordered_set<Value *> incomingValues;
+    for (auto &incomingUse : phi->incoming_values()) {
+      incomingValues.insert(incomingUse.get());
+    }
+    if (incomingValues.empty()) {
+      return false;
+    }
+    if (incomingValues.size() == 1) {
+      return true;
+    }
+
+    Value *singleUniqueValue = *incomingValues.begin();
+    for (auto *incomingValue : incomingValues) {
+      if (incomingValue != singleUniqueValue) {
+        singleUniqueValue = nullptr;
+        break;
+      }
+    }
+    if (singleUniqueValue != nullptr) {
+      return true;
+    }
+
+    GlobalValue *singleGlobalLoaded = nullptr;
+    for (auto *incomingValue : incomingValues) {
+      auto *load = dyn_cast<LoadInst>(incomingValue);
+      if (load == nullptr) {
+        singleGlobalLoaded = nullptr;
+        break;
+      }
+      auto *global = dyn_cast<GlobalValue>(load->getPointerOperand());
+      if (global == nullptr) {
+        singleGlobalLoaded = nullptr;
+        break;
+      }
+      if (singleGlobalLoaded == nullptr || singleGlobalLoaded == global) {
+        singleGlobalLoaded = global;
+        continue;
+      }
+      singleGlobalLoaded = nullptr;
+      break;
+    }
+
+    return singleGlobalLoaded != nullptr;
+  }
+
+  LoopStructure *loop;
+  LoopDependenceGraph *loopDG;
+  std::unordered_set<Instruction *> &invariants;
+  std::unordered_set<Instruction *> notInvariants;
+  std::unordered_set<Instruction *> dependencyValuesBeingChecked;
+};
 
 InvariantManager::InvariantManager(LoopStructure *loop,
                                    LoopDependenceGraph *loopDG)
     : loop{loop}, loopDG{loopDG} {
-  assert(loop != nullptr);
-  assert(loopDG != nullptr);
-
-  for (auto *instruction : loop->getInstructions()) {
-    if (loop->isLoopInvariant(instruction)) {
-      this->invariants.insert(instruction);
+  for (auto *inst : loop->getInstructions()) {
+    if (loop->isLoopInvariant(inst)) {
+      this->invariants.insert(inst);
     }
   }
 
-  bool changed = true;
-  while (changed) {
-    changed = false;
-    for (auto *node : loopDG->getInternalNodes()) {
-      auto *value = node->getValue();
-      auto *instruction = dyn_cast_or_null<Instruction>(value);
-      if (instruction == nullptr) {
-        continue;
-      }
-      if (this->invariants.count(instruction) != 0) {
-        continue;
-      }
-      if (!isInstructionPureEnough(instruction)) {
-        continue;
-      }
-      if (auto *phi = dyn_cast<PHINode>(instruction)) {
-        if (!phiIncomingValuesEquivalent(phi)) {
-          continue;
-        }
-      }
-
-      bool allInputsInvariant = true;
-      for (auto *edge : node->getIncomingEdges()) {
-        auto *src = edge->getSrc();
-        if (src == nullptr) {
-          continue;
-        }
-        if (edge->getKind() == LoopDependenceEdgeKind::Memory) {
-          allInputsInvariant = false;
-          break;
-        }
-
-        auto *srcValue = src->getValue();
-        if (srcValue == nullptr) {
-          allInputsInvariant = false;
-          break;
-        }
-        if (!this->isLoopInvariant(srcValue)) {
-          allInputsInvariant = false;
-          break;
-        }
-      }
-
-      if (!allInputsInvariant) {
-        continue;
-      }
-
-      this->invariants.insert(instruction);
-      changed = true;
-    }
-  }
+  InvarianceChecker checker{loop, loopDG, this->invariants};
+  (void)checker;
 }
 
 bool InvariantManager::isLoopInvariant(Value *value) const {
-  if (value == nullptr) {
-    return false;
-  }
   if (!isa<Instruction>(value)) {
     return true;
   }
-
-  auto *instruction = cast<Instruction>(value);
-  if (!this->loop->isIncluded(instruction)) {
+  auto *inst = cast<Instruction>(value);
+  if (!this->loop->isIncluded(inst)) {
     return true;
   }
+  return this->invariants.count(inst) != 0;
+}
 
-  return this->invariants.count(instruction) != 0;
+bool InvariantManager::isLoopInvariant(LoopSCC *scc) const {
+  auto interrupted = scc->iterateOverInstructions([this](Instruction *inst) {
+    return !this->isLoopInvariant(inst);
+  });
+  return !interrupted;
 }
 
 std::unordered_set<Instruction *>

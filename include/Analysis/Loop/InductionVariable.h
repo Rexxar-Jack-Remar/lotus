@@ -23,6 +23,7 @@
 #define LOTUS_ANALYSIS_LOOP_INDUCTIONVARIABLE_H
 
 #include "Analysis/Loop/LoopStructure.h"
+#include "Analysis/Loop/LoopSCCDAG.h"
 
 #include "llvm/Analysis/ScalarEvolution.h"
 
@@ -33,27 +34,43 @@ namespace loop {
 class InductionVariable {
 public:
   InductionVariable(LoopStructure *loop,
+                    LoopSCC *scc,
                     PHINode *loopEntryPHI,
                     Value *startValue,
                     const llvm::SCEV *stepSCEV,
                     Value *singleStepValue,
-                    std::unordered_set<Instruction *> instructions);
+                    std::unordered_set<PHINode *> stepPHIs,
+                    std::unordered_set<PHINode *> phis,
+                    std::unordered_set<Instruction *> nonPHIInstructions,
+                    std::unordered_set<Instruction *> instructions,
+                    std::unordered_set<Instruction *> derivedInstructions);
 
+  LoopSCC *getSCC(void) const;
   PHINode *getLoopEntryPHI(void) const;
+  std::unordered_set<PHINode *> getPHIsInvolvedInComputingIVStep(void) const;
+  std::unordered_set<PHINode *> getPHIs(void) const;
+  std::unordered_set<Instruction *> getNonPHIIntermediateValues(void) const;
   std::unordered_set<Instruction *> getAllInstructions(void) const;
+  std::unordered_set<Instruction *> getDerivedSCEVInstructions(void) const;
   Value *getStartValue(void) const;
   Value *getSingleComputedStepValue(void) const;
   const llvm::SCEV *getStepSCEV(void) const;
   Type *getType(void) const;
   bool isIVInstruction(Instruction *I) const;
+  bool isDerivedFromIVInstructions(Instruction *I) const;
 
 private:
   LoopStructure *loop;
+  LoopSCC *scc;
   PHINode *loopEntryPHI;
+  std::unordered_set<PHINode *> stepPHIs;
+  std::unordered_set<PHINode *> phis;
+  std::unordered_set<Instruction *> nonPHIInstructions;
   Value *startValue;
   const llvm::SCEV *stepSCEV;
   Value *singleStepValue;
   std::unordered_set<Instruction *> instructions;
+  std::unordered_set<Instruction *> derivedInstructions;
 };
 
 } // namespace loop

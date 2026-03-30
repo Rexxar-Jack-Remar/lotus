@@ -46,17 +46,36 @@ private:
     Instruction *memoryAccessor;
     const llvm::SCEV *memoryAccessorSCEV;
     const llvm::SCEV *memoryAccessorBasePointerSCEV;
+    const llvm::SCEV *memoryMinusSCEV;
     const llvm::SCEVAddRecExpr *recurrence;
+    const llvm::SCEV *elementSize;
+    std::vector<const llvm::SCEV *> subscripts;
+    std::vector<const llvm::SCEV *> sizes;
+    std::vector<std::pair<Instruction *, InductionVariable *>> subscriptIVs;
+    std::set<Instruction *> accessInstructions;
     int64_t constantStep;
     bool isAnalyzed;
   };
 
   LoopTree *loops;
   InductionVariableManager &ivManager;
+  std::unordered_map<const llvm::SCEV *, std::unordered_set<Instruction *>>
+      ivInstructionsBySCEV;
+  std::unordered_map<const llvm::SCEV *, std::unordered_set<Instruction *>>
+      derivedInstructionsFromIVsBySCEV;
+  std::unordered_map<Instruction *, InductionVariable *> ivsByInstruction;
   std::unordered_map<Instruction *, std::unique_ptr<MemoryAccessSpace>>
       accessSpaceByInstruction;
 
+  void indexIVInstructionSCEVs(llvm::ScalarEvolution &SE);
   void computeMemoryAccessSpace(llvm::ScalarEvolution &SE);
+  void identifyIVForMemoryAccessSubscripts(llvm::ScalarEvolution &SE);
+  bool isMemoryAccessSpaceEquivalentForTopLoopIVSubscript(
+      MemoryAccessSpace *space1,
+      MemoryAccessSpace *space2) const;
+  bool isOneToOneFunctionOnIV(LoopStructure *loopStructure,
+                              InductionVariable *IV,
+                              Instruction *derivedInstruction) const;
 };
 
 } // namespace loop

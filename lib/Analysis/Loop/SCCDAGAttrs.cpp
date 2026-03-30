@@ -9,7 +9,8 @@ namespace loop {
 
 GenericSCC::GenericSCC(SCCKind K, LoopSCC *s, LoopStructure *loop)
     : loop{loop}, scc{s}, kind{K}, hasMemoryDependences{false} {
-  for (auto *node : s->getNodes()) {
+  for (auto &pair : s->internalNodePairs()) {
+    auto *node = pair.second;
     auto *phi = dyn_cast_or_null<PHINode>(node->getValue());
     if (phi != nullptr) {
       this->PHINodes.insert(phi);
@@ -190,7 +191,8 @@ SCCDAGAttrs::SCCDAGAttrs(bool enableFloatAsReal,
       loopDG{loopDG},
       sccdag{loopSCCDAG} {
   this->collectLoopCarriedDependencies(loopNode);
-  this->memoryCloningAnalysis.reset(new MemoryCloningAnalysis(loopNode->getLoop(), loopDG));
+  this->memoryCloningAnalysis.reset(
+      new MemoryCloningAnalysis(loopNode->getLoop(), DS, loopDG));
 
   std::set<InductionVariable *> ivs;
   std::set<InductionVariable *> loopGoverningIVs;
@@ -321,7 +323,7 @@ std::tuple<bool, Value *, Value *, Value *, PHINode *> SCCDAGAttrs::checkIfPerio
   if (it == this->sccToLoopCarriedDependencies.end()) {
     return notPeriodic;
   }
-  if (scc->getNodes().size() != 2) {
+  if (scc->numberOfInstructions() != 2) {
     return notPeriodic;
   }
   for (auto *dep : it->second) {
@@ -356,8 +358,8 @@ std::set<InductionVariable *> SCCDAGAttrs::checkIfSCCOnlyContainsInductionVariab
   std::set<Instruction *> containedInsts;
   for (auto *iv : IVs) {
     for (auto *inst : iv->getAllInstructions()) {
-      for (auto *node : scc->getNodes()) {
-        if (node->getValue() == inst) {
+      for (auto &pair : scc->internalNodePairs()) {
+        if (pair.first == inst) {
           contained.insert(iv);
           auto all = iv->getAllInstructions();
           containedInsts.insert(all.begin(), all.end());
@@ -389,8 +391,8 @@ std::set<InductionVariable *> SCCDAGAttrs::checkIfSCCOnlyContainsInductionVariab
     }
   }
 
-  for (auto *node : scc->getNodes()) {
-    auto *inst = dyn_cast_or_null<Instruction>(node->getValue());
+  for (auto &pair : scc->internalNodePairs()) {
+    auto *inst = dyn_cast_or_null<Instruction>(pair.first);
     if (inst != nullptr && containedInsts.count(inst) == 0) {
       return {};
     }
@@ -428,28 +430,49 @@ std::set<Instruction *> SCCDAGAttrs::checkIfRecomputable(
 std::set<AllocaInst *> SCCDAGAttrs::checkIfClonableByUsingLocalMemory(
     LoopSCC *scc,
     LoopTree *) const {
-  auto it = this->sccToLoopCarriedDependencies.find(scc);
-  if (it == this->sccToLoopCarriedDependencies.end()) {
-    return {};
-  }
   std::set<AllocaInst *> allocations;
-  for (auto *dep : it->second) {
-    if (dep->getKind() != LoopDependenceEdgeKind::Memory) {
+  bool sawMemoryUsingInstruction = false;
+  bool sawMutation = false;
+  for (auto &pair : scc->internalNodePairs()) {
+    auto *inst = dyn_cast_or_null<Instruction>(pair.first);
+    if (inst == nullptr) {
       continue;
     }
-    auto *srcInst = dyn_cast_or_null<Instruction>(dep->getSrc()->getValue());
-    if (srcInst == nullptr) {
-      return {};
+
+    bool memoryUsingInstruction = isa<LoadInst>(inst) || isa<StoreInst>(inst);
+    if (auto *call = dyn_cast<CallInst>(inst)) {
+      auto intrinsic = call->getIntrinsicID();
+      memoryUsingInstruction = memoryUsingInstruction
+                               || intrinsic == Intrinsic::memcpy
+                               || intrinsic == Intrinsic::memmove;
     }
-    auto locs = this->memoryCloningAnalysis->getClonableMemoryObjectsFor(srcInst);
+    if (!memoryUsingInstruction) {
+      continue;
+    }
+
+    auto locs = this->memoryCloningAnalysis->getClonableMemoryObjectsFor(inst);
     if (locs.empty()) {
       return {};
     }
+
+    bool usesClonableLocation = false;
     for (auto *loc : locs) {
+      if (!loc->isInstructionLoadingLocation(inst)
+          && !loc->isInstructionStoringLocation(inst)) {
+        continue;
+      }
+      usesClonableLocation = true;
       allocations.insert(loc->getAllocation());
     }
+    if (!usesClonableLocation) {
+      return {};
+    }
+    sawMemoryUsingInstruction = true;
+    sawMutation = sawMutation || isa<StoreInst>(inst) || isa<CallInst>(inst);
   }
-  return allocations.empty() ? std::set<AllocaInst *>{} : allocations;
+  return (!sawMemoryUsingInstruction || !sawMutation || allocations.empty())
+             ? std::set<AllocaInst *>{}
+                                                             : allocations;
 }
 
 GenericSCC *SCCDAGAttrs::getSCCAttrs(LoopSCC *scc) const {

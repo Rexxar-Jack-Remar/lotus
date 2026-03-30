@@ -45,6 +45,7 @@ public:
 private:
   LoopStructure *loop;
   InductionVariable *iv;
+  std::set<Instruction *> conditionValueDerivation;
   CmpInst *headerCmp;
   BranchInst *headerBr;
   Value *conditionValue;

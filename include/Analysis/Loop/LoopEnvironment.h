@@ -32,6 +32,9 @@ class LoopEnvironment {
 public:
   LoopEnvironment(LoopDependenceGraph *loopDG,
                   std::vector<BasicBlock *> const &exitBlocks);
+  LoopEnvironment(LoopDependenceGraph *loopDG,
+                  std::vector<BasicBlock *> const &exitBlocks,
+                  const std::set<Value *> &excludeValues);
 
   iterator_range<std::vector<Value *>::iterator> getProducers(void);
   iterator_range<std::set<int>::iterator> getEnvIDsOfLiveInVars(void) const;

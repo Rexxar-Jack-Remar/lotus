@@ -12,10 +12,12 @@ namespace loop {
 
 class ClonableMemoryObject {
 public:
-  explicit ClonableMemoryObject(AllocaInst *allocation);
+  ClonableMemoryObject(AllocaInst *allocation, uint64_t sizeInBits);
 
   AllocaInst *getAllocation(void) const;
   bool isClonableLocation(void) const;
+  bool doPrivateCopiesNeedToBeInitialized(void) const;
+  bool mustAliasAMemoryLocationWithinObject(Value *pointer) const;
   bool isInstructionCastOrGEPOfLocation(Instruction *I) const;
   bool isInstructionStoringLocation(Instruction *I) const;
   bool isInstructionLoadingLocation(Instruction *I) const;
@@ -23,10 +25,13 @@ public:
   void addStore(Instruction *I);
   void addLoad(Instruction *I);
   void setClonable(bool clonable);
+  void setNeedsInitialization(bool needsInitialization);
 
 private:
   AllocaInst *allocation;
+  uint64_t sizeInBits;
   bool clonable;
+  bool needsInitialization;
   std::unordered_set<Instruction *> castsAndGEPs;
   std::unordered_set<Instruction *> storingInstructions;
   std::unordered_set<Instruction *> loadInstructions;
@@ -34,7 +39,9 @@ private:
 
 class MemoryCloningAnalysis {
 public:
-  MemoryCloningAnalysis(LoopStructure *loop, LoopDependenceGraph *ldg);
+  MemoryCloningAnalysis(LoopStructure *loop,
+                        noelle::DominatorSummary &DS,
+                        LoopDependenceGraph *ldg);
 
   std::unordered_set<ClonableMemoryObject *> getClonableMemoryObjects(void) const;
   std::unordered_set<ClonableMemoryObject *> getClonableMemoryObjectsFor(

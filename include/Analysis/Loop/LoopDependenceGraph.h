@@ -55,6 +55,9 @@ public:
   const std::vector<LoopDependenceEdge *> &getIncomingEdges(void) const;
   const std::vector<LoopDependenceEdge *> &getOutgoingEdges(void) const;
 
+  bool hasIncomingEdges(void) const;
+  bool hasOutgoingEdges(void) const;
+
 private:
   friend class LoopDependenceGraph;
 
@@ -105,10 +108,24 @@ public:
 
   std::vector<LoopDependenceNode *> getInternalNodes(void) const;
   std::vector<LoopDependenceNode *> getExternalNodes(void) const;
+  std::vector<LoopDependenceNode *> getNodes(void) const;
   std::vector<LoopDependenceEdge *> getEdges(void) const;
 
+  std::vector<std::pair<Value *, LoopDependenceNode *>> internalNodePairs(void) const;
+  std::vector<std::pair<Value *, LoopDependenceNode *>> externalNodePairs(void) const;
+
   LoopDependenceNode *getNode(Value *value) const;
+  LoopDependenceNode *fetchNode(Value *value) const;
   bool doesItContain(Value *value) const;
+  bool isInternal(Value *value) const;
+  bool isExternal(Value *value) const;
+
+  bool iterateOverDependencesTo(
+      Value *target,
+      bool includeControl,
+      bool includeVariable,
+      bool includeMemory,
+      const std::function<bool(Value *, LoopDependenceEdge *)> &funcToInvoke) const;
 
 private:
   LoopTree *loop;

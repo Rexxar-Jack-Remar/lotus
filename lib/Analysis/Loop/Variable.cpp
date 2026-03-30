@@ -75,13 +75,13 @@ LoopCarriedVariable::LoopCarriedVariable(const LoopStructure &loop,
   this->initialValue = declarationPHI->getIncomingValueForBlock(preHeader);
 
   std::unordered_set<Value *> sccValues;
-  for (auto *node : variableSCC.getNodes()) {
-    sccValues.insert(node->getValue());
+  for (auto &pair : variableSCC.internalNodePairs()) {
+    sccValues.insert(pair.first);
   }
 
   Instruction *updateInstruction = nullptr;
-  for (auto *node : variableSCC.getNodes()) {
-    auto *inst = dyn_cast_or_null<Instruction>(node->getValue());
+  for (auto &pair : variableSCC.internalNodePairs()) {
+    auto *inst = dyn_cast_or_null<Instruction>(pair.first);
     if (inst == nullptr || inst == declarationPHI) {
       continue;
     }

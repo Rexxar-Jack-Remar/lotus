@@ -12,50 +12,123 @@ LoopGoverningInductionVariable::LoopGoverningInductionVariable(
     InductionVariable &iv)
     : loop{loop},
       iv{&iv},
+      conditionValueDerivation{},
       headerCmp{nullptr},
       headerBr{nullptr},
       conditionValue{nullptr},
       comparedValue{nullptr},
       exitBlock{nullptr},
       isWellFormed{false} {
-  if (loop == nullptr) {
+  assert(loop != nullptr);
+
+  if (iv.getSingleComputedStepValue() == nullptr
+      || (!isa<ConstantInt>(iv.getSingleComputedStepValue())
+          && !isa<ConstantFP>(iv.getSingleComputedStepValue()))) {
     return;
   }
-  auto *header = loop->getHeader();
-  auto *branch = dyn_cast<BranchInst>(header->getTerminator());
-  if (branch == nullptr || !branch->isConditional()) {
+
+  auto *headerPHI = iv.getLoopEntryPHI();
+  auto ivInstructions = iv.getAllInstructions();
+  if (!headerPHI->getType()->isIntegerTy() && !headerPHI->getType()->isFloatingPointTy()) {
     return;
   }
-  auto *cmp = dyn_cast<CmpInst>(branch->getCondition());
+
+  auto *sccOfIV = iv.getSCC();
+  if (sccOfIV == nullptr) {
+    return;
+  }
+
+  BranchInst *loopGoverningTerminator = nullptr;
+  for (auto &pair : sccOfIV->internalNodePairs()) {
+    auto *value = pair.first;
+    if (isa<InvokeInst>(value)) {
+      return;
+    }
+    auto *br = dyn_cast<BranchInst>(value);
+    if (br == nullptr || !br->isConditional()) {
+      continue;
+    }
+    if (loopGoverningTerminator != nullptr) {
+      return;
+    }
+    loopGoverningTerminator = br;
+  }
+
+  if (loopGoverningTerminator == nullptr
+      || loopGoverningTerminator->getParent() != headerPHI->getParent()) {
+    return;
+  }
+
+  this->headerBr = loopGoverningTerminator;
+  auto *headerCondition = this->headerBr->getCondition();
+  auto *cmp = dyn_cast<CmpInst>(headerCondition);
   if (cmp == nullptr) {
     return;
   }
 
-  auto *lhs = cmp->getOperand(0);
-  auto *rhs = cmp->getOperand(1);
-  bool lhsIsIV = lhs == iv.getLoopEntryPHI()
-                 || (isa<Instruction>(lhs)
-                     && iv.isIVInstruction(cast<Instruction>(lhs)));
-  bool rhsIsIV = rhs == iv.getLoopEntryPHI()
-                 || (isa<Instruction>(rhs)
-                     && iv.isIVInstruction(cast<Instruction>(rhs)));
-  if (lhsIsIV == rhsIsIV) {
-    return;
-  }
-
   this->headerCmp = cmp;
-  this->headerBr = branch;
-  this->comparedValue = dyn_cast<Instruction>(lhsIsIV ? lhs : rhs);
-  this->conditionValue = lhsIsIV ? rhs : lhs;
-
-  for (auto &edge : loop->getLoopExitEdges()) {
-    if (edge.first == header) {
-      this->exitBlock = edge.second;
-      break;
+  auto *opL = cmp->getOperand(0);
+  auto *opR = cmp->getOperand(1);
+  auto isOpLHSLoopEntryPHI = isa<Instruction>(opL) && headerPHI == cast<Instruction>(opL);
+  auto isOpRHSLoopEntryPHI = isa<Instruction>(opR) && headerPHI == cast<Instruction>(opR);
+  if (!(isOpLHSLoopEntryPHI ^ isOpRHSLoopEntryPHI)) {
+    for (auto *intermediateValue : iv.getNonPHIIntermediateValues()) {
+      if (intermediateValue == opR || intermediateValue == opL) {
+        this->comparedValue = intermediateValue;
+        break;
+      }
     }
+    if (this->comparedValue == nullptr) {
+      return;
+    }
+    this->conditionValue = (this->comparedValue == opR) ? opL : opR;
+  } else {
+    this->conditionValue = isOpLHSLoopEntryPHI ? opR : opL;
+    this->comparedValue = cast<Instruction>(isOpLHSLoopEntryPHI ? opL : opR);
   }
-  if (this->exitBlock == nullptr) {
+
+  auto exitBlocks = loop->getLoopExitBasicBlocks();
+  std::set<BasicBlock *> exitBlockSet(exitBlocks.begin(), exitBlocks.end());
+  if (exitBlockSet.count(this->headerBr->getSuccessor(0)) != 0) {
+    this->exitBlock = this->headerBr->getSuccessor(0);
+  } else if (exitBlockSet.count(this->headerBr->getSuccessor(1)) != 0) {
+    this->exitBlock = this->headerBr->getSuccessor(1);
+  } else {
     return;
+  }
+
+  if (sccOfIV->isInternal(this->conditionValue)) {
+    auto *conditionInst = dyn_cast<Instruction>(this->conditionValue);
+    if (conditionInst == nullptr) {
+      return;
+    }
+    std::queue<Instruction *> conditionDerivation;
+    conditionDerivation.push(conditionInst);
+    while (!conditionDerivation.empty()) {
+      auto *value = conditionDerivation.front();
+      conditionDerivation.pop();
+
+      auto *valueNode = sccOfIV->fetchNode(value);
+      if (valueNode == nullptr) {
+        continue;
+      }
+      for (auto *edge : valueNode->getIncomingEdges()) {
+        if (edge->getKind() != LoopDependenceEdgeKind::Variable) {
+          continue;
+        }
+        auto *outgoingInst = dyn_cast_or_null<Instruction>(edge->getSrc()->getValue());
+        if (outgoingInst == nullptr || !sccOfIV->isInternal(outgoingInst)) {
+          continue;
+        }
+        if (ivInstructions.count(outgoingInst) != 0) {
+          return;
+        }
+        if (!this->conditionValueDerivation.insert(outgoingInst).second) {
+          continue;
+        }
+        conditionDerivation.push(outgoingInst);
+      }
+    }
   }
 
   this->isWellFormed = true;
@@ -82,12 +155,10 @@ BasicBlock *LoopGoverningInductionVariable::getExitBlockFromHeader(void) const {
   return this->exitBlock;
 }
 
-bool LoopGoverningInductionVariable::valueOfExitConditionToJumpToTheLoopBody(
-    void) const {
-  if (this->headerBr == nullptr) {
-    return false;
-  }
-  return this->loop->isIncluded(this->headerBr->getSuccessor(0));
+bool LoopGoverningInductionVariable::valueOfExitConditionToJumpToTheLoopBody(void) const {
+  assert(this->headerBr != nullptr);
+  auto *succTrue = this->headerBr->getSuccessor(0);
+  return this->loop->isIncluded(succTrue);
 }
 
 bool LoopGoverningInductionVariable::isSCCContainingIVWellFormed(void) const {
@@ -96,7 +167,7 @@ bool LoopGoverningInductionVariable::isSCCContainingIVWellFormed(void) const {
 
 std::set<Instruction *> LoopGoverningInductionVariable::getConditionValueDerivation(
     void) const {
-  return {};
+  return this->conditionValueDerivation;
 }
 
 Instruction *LoopGoverningInductionVariable::getValueToCompareAgainstExitConditionValue(

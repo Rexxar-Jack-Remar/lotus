@@ -138,7 +138,8 @@ LoopCarriedDependencies::getLoopCarriedDependenciesForLoop(
   auto *graph = sccdag.getLoopDependenceGraph();
   assert(graph != nullptr);
   for (auto *scc : sccdag.getSCCs()) {
-    for (auto *node : scc->getNodes()) {
+    for (auto &pair : scc->internalNodePairs()) {
+      auto *node = pair.second;
       for (auto *edge : node->getOutgoingEdges()) {
         if (!edge->isLoopCarried()) {
           continue;

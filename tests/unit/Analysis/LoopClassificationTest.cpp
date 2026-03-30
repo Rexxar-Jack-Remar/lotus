@@ -11,8 +11,8 @@
 #include "llvm/IR/Dominators.h"
 #include "llvm/IR/LegacyPassManager.h"
 #include "llvm/InitializePasses.h"
-#include "llvm/Passes/PassBuilder.h"
 #include "llvm/PassRegistry.h"
+#include "llvm/Passes/PassBuilder.h"
 
 #include <gtest/gtest.h>
 

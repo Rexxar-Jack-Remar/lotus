@@ -189,6 +189,7 @@ std::unique_ptr<LoopNestingGraph> LoopNestingGraph::buildFromAnalyses(
       if (callBase == nullptr) {
         continue;
       }
+      bool isMustCall = callBase->getCalledFunction() != nullptr;
       auto *callerFunction = callBase->getFunction();
       auto analysisIt = analysesByFunction.find(callerFunction);
       if (analysisIt == analysesByFunction.end()) {
@@ -204,12 +205,12 @@ std::unique_ptr<LoopNestingGraph> LoopNestingGraph::buildFromAnalyses(
       }
       auto *parentLoop = loopNode->getLoop();
       for (auto *outermostLoop : outermostLoops[callee]) {
-        graph->createEdge(parentLoop, callBase, outermostLoop, true);
+        graph->createEdge(parentLoop, callBase, outermostLoop, isMustCall);
       }
     }
   }
 
-  (void)entryFunction;
+  (void)graph->getEntryNode(entryFunction);
   return graph;
 }
 

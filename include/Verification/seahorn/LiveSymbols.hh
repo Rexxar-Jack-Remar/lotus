@@ -4,9 +4,9 @@
 #include "llvm/ADT/DenseMap.h"
 #include "llvm/IR/Function.h"
 
+#include "seahorn/Expr/Expr.hh"
 #include "seahorn/OperationalSemantics.hh"
 #include "seahorn/SymStore.hh"
-#include "seahorn/Expr/Expr.hh"
 
 namespace seahorn {
 using namespace llvm;

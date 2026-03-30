@@ -36,6 +36,23 @@ public:
   std::vector<LoopDependenceNode *> getNodes(void) const;
   std::vector<LoopSCC *> getPredecessors(void) const;
   std::vector<LoopSCC *> getSuccessors(void) const;
+  std::vector<LoopDependenceEdge *> getEdges(void) const;
+
+  std::vector<std::pair<Value *, LoopDependenceNode *>> internalNodePairs(void) const;
+  std::vector<std::pair<Value *, LoopDependenceNode *>> externalNodePairs(void) const;
+  bool isInternal(Value *value) const;
+  bool isExternal(Value *value) const;
+  LoopDependenceNode *fetchNode(Value *value) const;
+
+  int64_t numberOfInstructions(void) const;
+  bool iterateOverInstructions(
+      const std::function<bool(Instruction *)> &funcToInvoke) const;
+  bool iterateOverAllInstructions(
+      const std::function<bool(Instruction *)> &funcToInvoke) const;
+  bool iterateOverValues(
+      const std::function<bool(Value *)> &funcToInvoke) const;
+  bool iterateOverAllValues(
+      const std::function<bool(Value *)> &funcToInvoke) const;
 
 private:
   friend class LoopSCCDAG;
@@ -43,7 +60,8 @@ private:
   LoopSCC(uint64_t id, std::vector<LoopDependenceNode *> members, bool hasCycle);
 
   uint64_t id;
-  std::vector<LoopDependenceNode *> nodes;
+  std::vector<LoopDependenceNode *> internalNodes;
+  std::vector<LoopDependenceNode *> externalNodes;
   std::vector<LoopSCC *> predecessors;
   std::vector<LoopSCC *> successors;
   bool cycle;
@@ -57,12 +75,19 @@ public:
 
   std::vector<LoopSCC *> getSCCs(void) const;
   LoopSCC *getSCC(Value *value) const;
+  bool orderedBefore(const LoopSCC *early, const LoopSCC *late) const;
 
 private:
   LoopDependenceGraph *graph;
+  std::vector<LoopDependenceNode *> nodes;
   std::vector<std::unique_ptr<LoopSCC>> ownedSCCs;
   std::unordered_map<LoopDependenceNode *, LoopSCC *> sccByNode;
   std::unordered_map<Value *, LoopSCC *> sccByValue;
+  std::unordered_map<const LoopSCC *, uint32_t> sccIndexes;
+  std::unordered_map<const LoopSCC *, std::unordered_set<const LoopSCC *>>
+      reachableSCCs;
+
+  void computeReachabilityAmongSCCs(void);
 };
 
 } // namespace loop

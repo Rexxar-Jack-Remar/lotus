@@ -195,8 +195,8 @@ Expr visitNoRec(ExprVisitor &v, Expr _expr, DagVisitCache &cache) {
         popActionStack = true;
 
         unsigned kids_begin_idx = resStack.size() - arity;
-        auto kids_it = resStack.begin() + kids_begin_idx;
-        auto kids_it_end = resStack.end();
+        auto *kids_it = resStack.begin() + kids_begin_idx;
+        auto *kids_it_end = resStack.end();
         bool changed = false;
         for (unsigned i = 0; !changed && i < arity; ++i) {
           changed |= (res->arg(i) != *(kids_it++));

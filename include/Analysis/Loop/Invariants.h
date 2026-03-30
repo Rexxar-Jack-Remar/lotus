@@ -23,6 +23,7 @@
 #define LOTUS_ANALYSIS_LOOP_INVARIANTS_H
 
 #include "Analysis/Loop/LoopDependenceGraph.h"
+#include "Analysis/Loop/LoopSCCDAG.h"
 
 namespace lotus {
 namespace analysis {
@@ -33,10 +34,13 @@ public:
   InvariantManager(LoopStructure *loop, LoopDependenceGraph *loopDG);
 
   bool isLoopInvariant(Value *value) const;
+  bool isLoopInvariant(LoopSCC *scc) const;
   std::unordered_set<Instruction *> getLoopInstructionsThatAreLoopInvariants(
       void) const;
 
 private:
+  class InvarianceChecker;
+
   LoopStructure *loop;
   LoopDependenceGraph *loopDG;
   std::unordered_set<Instruction *> invariants;

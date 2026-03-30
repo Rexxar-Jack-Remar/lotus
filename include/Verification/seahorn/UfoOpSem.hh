@@ -12,7 +12,7 @@
 
 namespace llvm {
 class GetElementPtrInst;
-}
+} // namespace llvm
 
 namespace seahorn {
 

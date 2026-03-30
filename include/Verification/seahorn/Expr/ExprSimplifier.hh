@@ -151,7 +151,7 @@ struct TrivialSimplifier {
     return exp;
   }
 };
-}
+} // namespace boolop
 } // namespace op
 
 namespace {
