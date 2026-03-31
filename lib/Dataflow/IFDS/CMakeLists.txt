@@ -33,4 +33,4 @@ set(IFDS_SOURCES ${IFDS_FRAMEWORK_SOURCES} ${IFDS_CLIENT_SOURCES})
 
 add_library(IFDS STATIC ${IFDS_SOURCES})
 
-target_link_libraries(IFDS Annotation)
+target_link_libraries(IFDS PUBLIC Annotation CanaryPlatform)

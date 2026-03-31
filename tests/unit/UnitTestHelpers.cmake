@@ -334,8 +334,7 @@ function(add_lotus_utils_test test_name source_file)
             CanaryADT
             CanaryLLVMUtils
             CanaryFormats
-            CanaryParallel
-            CanarySupport)
+            CanaryParallel)
 endfunction()
 
 function(add_lotus_verification_test test_name source_file)

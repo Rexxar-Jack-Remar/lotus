@@ -15,7 +15,6 @@ target_link_libraries(lotus-kint PRIVATE
         CanaryKint
         CanaryReport
         CanaryFuzzing
-        CanarySupport
         ${LLVM_LINK_COMPONENTS_KINT}
         ${Z3_LIBRARIES} 
 )

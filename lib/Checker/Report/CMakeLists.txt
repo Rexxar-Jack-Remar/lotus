@@ -6,4 +6,4 @@ add_library(CanaryReport STATIC
     ReportOptions.cpp
     SuppressionManager.cpp
 )
-target_link_libraries(CanaryReport CanaryDebugInfo CanarySupport)
+target_link_libraries(CanaryReport CanaryDebugInfo CanaryFormats)

@@ -21,9 +21,9 @@ foreach(target lotus-dfa lotus-dfa-elim lotus-dfa-mono lotus-dfa-ifds)
   )
 endforeach()
 
-# IFDS-dependent targets need additional linking (IFDS solver uses ProgressBar from CanarySupport)
-target_link_libraries(lotus-dfa PRIVATE IFDS CanarySupport CanaryAliasAnalysisWrapper)
-target_link_libraries(lotus-dfa-ifds PRIVATE IFDS CanarySupport CanaryAliasAnalysisWrapper)
+# IFDS-dependent targets need additional linking
+target_link_libraries(lotus-dfa PRIVATE IFDS CanaryAliasAnalysisWrapper)
+target_link_libraries(lotus-dfa-ifds PRIVATE IFDS CanaryAliasAnalysisWrapper)
 
 # Mono uses AliasAnalysisWrapper (IntraMonoConstantPropagation, IntraMonoUninitVariables)
 target_link_libraries(lotus-dfa-mono PRIVATE CanaryAliasAnalysisWrapper)

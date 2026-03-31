@@ -5,4 +5,4 @@ add_library(CanaryParallel STATIC
     Scheduler/ParallelSchedulerPass.cpp
 )
 
-target_link_libraries(CanaryParallel PUBLIC LLVMAnalysis CanarySupport)
+target_link_libraries(CanaryParallel PUBLIC LLVMAnalysis CanaryPlatform)

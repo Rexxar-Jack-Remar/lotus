@@ -11,4 +11,4 @@ add_library(CanaryLLVMUtils STATIC
 )
 
 # Link against LLVMDemangle since Demangle.cpp uses llvm::demangle()
-target_link_libraries(CanaryLLVMUtils PUBLIC LLVMDemangle LLVMAnalysis CanarySupport)
+target_link_libraries(CanaryLLVMUtils PUBLIC LLVMDemangle LLVMAnalysis)

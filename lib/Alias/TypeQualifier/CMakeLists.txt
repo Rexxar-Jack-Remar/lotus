@@ -20,7 +20,6 @@ add_library(TypeQualifier STATIC
 
 target_link_libraries(TypeQualifier PRIVATE
   ${typequalifier_llvm_libs}
-  CanarySupport
+  CanaryFormats
   AliasSpecManager
 )
-
