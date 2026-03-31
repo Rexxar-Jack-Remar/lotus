@@ -444,18 +444,19 @@ void LoopIterationSpaceAnalysis::identifyIVForMemoryAccessSubscripts(
               dyn_cast<llvm::SCEVAddRecExpr>(subscriptSCEV)) {
         auto *loopHeader = addRecSubscriptSCEV->getLoop()->getHeader();
         for (auto &scevInstPair : scevToInstMap) {
-          auto *otherSCEV = scevInstPair.first;
-          if (auto *otherAddRecSCEV =
-                  dyn_cast<llvm::SCEVAddRecExpr>(otherSCEV)) {
-            if (otherAddRecSCEV->getLoop()->getHeader() != loopHeader) {
-              continue;
-            }
-            if (!scevsMatch(addRecSubscriptSCEV->getStart(),
-                            otherAddRecSCEV->getStart()) ||
-                !scevsMatch(addRecSubscriptSCEV->getStepRecurrence(SE),
-                            otherAddRecSCEV->getStepRecurrence(SE))) {
-              continue;
-            }
+          auto *otherAddRecSCEV =
+              dyn_cast<llvm::SCEVAddRecExpr>(scevInstPair.first);
+          if (otherAddRecSCEV == nullptr) {
+            continue;
+          }
+          if (otherAddRecSCEV->getLoop()->getHeader() != loopHeader) {
+            continue;
+          }
+          if (!scevsMatch(addRecSubscriptSCEV->getStart(),
+                          otherAddRecSCEV->getStart()) ||
+              !scevsMatch(addRecSubscriptSCEV->getStepRecurrence(SE),
+                          otherAddRecSCEV->getStepRecurrence(SE))) {
+            continue;
           }
 
           return *scevInstPair.second.begin();
@@ -519,6 +520,30 @@ LoopIterationSpaceAnalysis::MemoryAccessSpace::MemoryAccessSpace(
 bool LoopIterationSpaceAnalysis::isOneToOneFunctionOnIV(
     LoopStructure *loopStructure, InductionVariable *IV,
     Instruction *derivedInstruction) const {
+  auto isInjectiveCast = [](Instruction *inst) -> bool {
+    auto *castInst = dyn_cast<CastInst>(inst);
+    if (castInst == nullptr) {
+      return false;
+    }
+
+    auto *srcTy = castInst->getSrcTy();
+    auto *dstTy = castInst->getDestTy();
+    if (!srcTy->isIntegerTy() || !dstTy->isIntegerTy()) {
+      return false;
+    }
+
+    auto srcWidth = cast<IntegerType>(srcTy)->getBitWidth();
+    auto dstWidth = cast<IntegerType>(dstTy)->getBitWidth();
+    if (isa<SExtInst>(castInst) || isa<ZExtInst>(castInst)) {
+      return dstWidth >= srcWidth;
+    }
+    if (isa<BitCastInst>(castInst)) {
+      return dstWidth == srcWidth;
+    }
+
+    return false;
+  };
+
   std::queue<Instruction *> derivingInsts;
   std::unordered_set<Instruction *> visited;
   derivingInsts.push(derivedInstruction);
@@ -531,8 +556,8 @@ bool LoopIterationSpaceAnalysis::isOneToOneFunctionOnIV(
     }
 
     auto op = inst->getOpcode();
-    bool isOneToOne = (op == Instruction::Add || op == Instruction::Sub ||
-                       op == Instruction::Mul || inst->isCast());
+    bool isOneToOne =
+        (op == Instruction::Add || op == Instruction::Sub || isInjectiveCast(inst));
     if (!isOneToOne) {
       return false;
     }

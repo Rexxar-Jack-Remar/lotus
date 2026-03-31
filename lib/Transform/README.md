@@ -11,6 +11,12 @@ These passes are used to prepare IR that is easier for analyses and tools to con
 - **Control-flow cleanup**: Remove dead blocks, normalize loop latches, and give blocks stable names
 - **Optimization helpers**: Light-weight inlining and loop/vector transforms used by optimization pipelines
 
+## Subdirectories
+
+| Subdir | Purpose |
+|--------|---------|
+| **Nisse** | Nisse analysis and transformation passes, including `NisseAnalysis`, `NissePass`, `KSPass`, and the LLVM plugin registration used to expose them through the new pass manager. |
+
 ## Core Normalization Passes
 
 Normalization passes that rewrite IR into a simpler, analysis-friendly form.

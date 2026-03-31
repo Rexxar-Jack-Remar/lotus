@@ -1,6 +1,6 @@
 # Sparse Value-Flow Graph (SVFG)
 
-Production-ready implementation of the Sparse Value-Flow Graph (SVFG) for whole-program value-flow analysis. The SVFG provides a sparse representation of value flows, enabling efficient interprocedural analysis with Memory SSA integration.
+This is a re-implementation of the Sparse Value-Flow Graph (SVFG) in SVF. The SVFG provides a sparse representation of value flows, enabling efficient interprocedural analysis with Memory SSA integration.
 
 **This implementation uses [AserPTA](lib/Alias/AserPTA) as its points-to analysis engine** to compute points-to sets for building value-flow edges and Memory SSA.
 

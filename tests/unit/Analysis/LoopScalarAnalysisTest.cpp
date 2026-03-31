@@ -263,6 +263,64 @@ TEST_F(LoopScalarAnalysisTest, KeepsObservedImpureLibraryCallsVariant) {
   EXPECT_FALSE(invariants->isLoopInvariant(mix));
 }
 
+TEST_F(LoopScalarAnalysisTest, KeepsTimeVaryingLibraryCallsVariant) {
+  llvm::LLVMContext context;
+  auto module = parseModuleChecked(context, R"(
+    declare i64 @clock()
+
+    define i64 @loop_scalar_clock(i32 %n) {
+    entry:
+      br label %header
+
+    header:
+      %i = phi i32 [ 0, %entry ], [ %i.next, %latch ]
+      %cmp = icmp slt i32 %i, %n
+      br i1 %cmp, label %body, label %exit
+
+    body:
+      %ticks = call i64 @clock()
+      %mix = add i64 %ticks, 1
+      br label %latch
+
+    latch:
+      %i.next = add i32 %i, 1
+      br label %header
+
+    exit:
+      ret i64 0
+    }
+  )");
+  auto *function = module->getFunction("loop_scalar_clock");
+  ASSERT_NE(function, nullptr);
+
+  buildPDG(*module);
+
+  llvm::PassBuilder PB;
+  llvm::FunctionAnalysisManager FAM;
+  PB.registerFunctionAnalyses(FAM);
+  auto &DT = FAM.getResult<llvm::DominatorTreeAnalysis>(*function);
+  auto &PDT = FAM.getResult<llvm::PostDominatorTreeAnalysis>(*function);
+  auto &LI = FAM.getResult<llvm::LoopAnalysis>(*function);
+  auto &SE = FAM.getResult<llvm::ScalarEvolutionAnalysis>(*function);
+
+  FunctionLoopAnalyses analyses(*function, LI, DT, PDT);
+  analyses.materializeDependenceGraphs(graph);
+  analyses.materializeScalarAnalyses(SE, LI);
+
+  auto *content = analyses.getLoopContent(**LI.begin());
+  ASSERT_NE(content, nullptr);
+  auto *invariants = content->getInvariantManager();
+  ASSERT_NE(invariants, nullptr);
+
+  auto *ticks = findInstructionByName(function, "ticks");
+  auto *mix = findInstructionByName(function, "mix");
+  ASSERT_NE(ticks, nullptr);
+  ASSERT_NE(mix, nullptr);
+
+  EXPECT_FALSE(invariants->isLoopInvariant(ticks));
+  EXPECT_FALSE(invariants->isLoopInvariant(mix));
+}
+
 TEST_F(LoopScalarAnalysisTest, AttributesDerivedExitConditionValueForGoverningIV) {
   llvm::LLVMContext context;
   auto module = parseModuleChecked(context, R"(

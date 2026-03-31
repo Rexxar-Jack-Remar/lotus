@@ -1,10 +1,5 @@
 # Sparrow Andersen Analysis
 
-Extend https://github.com/grievejia/andersen
-- upgrae to LLVM 14.x
-- add context-sensitive variants.
-
-
 ## Optimizations
 
 The implementation includes four optional optimizations that can be enabled via command-line flags:

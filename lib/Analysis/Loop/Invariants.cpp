@@ -41,7 +41,7 @@ bool isPureLibraryCall(CallBase *call) {
   }
 
   auto &specManager = getLoopAnalysisSpecManager();
-  if (specManager.isNoEffect(callee)) {
+  if (specManager.isNoEffect(callee) && !call->mayHaveSideEffects()) {
     return true;
   }
 
@@ -61,13 +61,13 @@ bool isPureLibraryCall(CallBase *call) {
       "isnan", "isnormal", "signbit", "isgreater", "isgreaterequal", "isless",
       "islessequal", "islessgreater", "isunordered",
       // time.h
-      "clock", "difftime",
+      "difftime",
       // wctype.h
       "iswalnum", "iswalpha", "iswblank", "iswcntrl", "iswdigit", "iswgraph",
       "iswlower", "iswprint", "iswpunct", "iswspace", "iswupper", "iswxdigit",
       "towlower", "towupper", "iswctype", "towctrans",
       // stdlib.h / string.h
-      "atoi", "atoll", "exit", "strcmp", "strncmp", "rand_r", "strlen"};
+      "atoi", "atoll", "strcmp", "strncmp", "strlen"};
   return noellePureFallback.count(callee->getName().str()) != 0;
 }
 
@@ -98,8 +98,7 @@ public:
         }
       }
 
-      if (this->invariants.count(inst) != 0 ||
-          this->notInvariants.count(inst) != 0) {
+      if (this->notInvariants.count(inst) != 0) {
         continue;
       }
 
@@ -151,6 +150,10 @@ private:
       }
       if (isPureLibraryCall(call)) {
         return false;
+      }
+      auto *callee = call->getCalledFunction();
+      if (callee != nullptr && callee->empty()) {
+        return true;
       }
     }
 

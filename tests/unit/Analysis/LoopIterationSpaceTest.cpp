@@ -227,4 +227,65 @@ TEST_F(LoopIterationSpaceTest, StaysConservativeForDescendingAffineTraversal) {
           ld, store));
 }
 
+TEST_F(LoopIterationSpaceTest, StaysConservativeForNonInjectiveStride) {
+  llvm::LLVMContext context;
+  auto module = parseModuleChecked(context, R"(
+    define void @wrapped_stride_loop(i8* %base) {
+    entry:
+      br label %header
+
+    header:
+      %i = phi i16 [ 0, %entry ], [ %i.next, %latch ]
+      %cmp = icmp ult i16 %i, 40000
+      br i1 %cmp, label %body, label %exit
+
+    body:
+      %scaled = mul i16 %i, 2
+      %idx = zext i16 %scaled to i64
+      %ptr = getelementptr i8, i8* %base, i64 %idx
+      %ld = load i8, i8* %ptr, align 1
+      store i8 %ld, i8* %ptr, align 1
+      br label %latch
+
+    latch:
+      %i.next = add i16 %i, 1
+      br label %header
+
+    exit:
+      ret void
+    }
+  )");
+  auto *function = module->getFunction("wrapped_stride_loop");
+  ASSERT_NE(function, nullptr);
+
+  buildPDG(*module);
+
+  llvm::PassBuilder PB;
+  llvm::FunctionAnalysisManager FAM;
+  PB.registerFunctionAnalyses(FAM);
+  auto &DT = FAM.getResult<llvm::DominatorTreeAnalysis>(*function);
+  auto &PDT = FAM.getResult<llvm::PostDominatorTreeAnalysis>(*function);
+  auto &LI = FAM.getResult<llvm::LoopAnalysis>(*function);
+  auto &SE = FAM.getResult<llvm::ScalarEvolutionAnalysis>(*function);
+
+  FunctionLoopAnalyses analyses(*function, LI, DT, PDT);
+  analyses.materializeDependenceGraphs(graph);
+  analyses.materializeScalarAnalyses(SE, LI);
+  analyses.materializeLoopCarriedDependencies(DT, PDT);
+  analyses.materializeIterationSpaceAnalyses(SE);
+
+  auto *content = analyses.getLoopContent(**LI.begin());
+  ASSERT_NE(content, nullptr);
+  auto *iterationSpace = content->getLoopIterationSpaceAnalysis();
+  ASSERT_NE(iterationSpace, nullptr);
+  auto *ld = findInstructionByName(function, "ld");
+  auto *store = lotus::unittest::findInstruction<llvm::StoreInst>(*function);
+  ASSERT_NE(ld, nullptr);
+  ASSERT_NE(store, nullptr);
+
+  EXPECT_FALSE(
+      iterationSpace->areInstructionsAccessingDisjointMemoryLocationsBetweenIterations(
+          ld, store));
+}
+
 } // namespace
