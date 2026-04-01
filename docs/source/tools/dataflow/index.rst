@@ -36,14 +36,14 @@ Important options:
 - ``--elim-method=state|adt-simple|adt-delayed``
 - ``--out-dir=<dir>``
 
-lotus-dfa-elim
---------------
+lotus-dfa-apa
+-------------
 
 Standalone front-end for the elimination-based APA engine.
 
-**Binary**: ``lotus-dfa-elim``
+**Binary**: ``lotus-dfa-apa``
 
-**Source**: ``tools/dataflow/lotus-dfa-elim.cpp``
+**Source**: ``tools/dataflow/lotus-dfa-apa.cpp``
 
 Supports the same ``--analysis`` space as ``lotus-dfa`` plus
 ``--elim-method`` for choosing the elimination solver variant.

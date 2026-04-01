@@ -45,16 +45,16 @@ while true; do
     fi
     echo "Output: Compilation successful"
     
-    # Run lotus-dfa-elim with different analysis options
-    echo "=== Running lotus-dfa-elim ==="
+    # Run lotus-dfa-apa with different analysis options
+    echo "=== Running lotus-dfa-apa ==="
     for analysis in liveness reaching_defs uninitialized constant_prop available_exprs reachable; do
-        echo "--- lotus-dfa-elim with --analysis=$analysis ---"
-        if ! "$BUILD_DIR/bin/lotus-dfa-elim" --analysis="$analysis" "$BC_FILE" 2>&1; then
-            echo "CRASH: lotus-dfa-elim (--analysis=$analysis) crashed on $C_FILE"
+        echo "--- lotus-dfa-apa with --analysis=$analysis ---"
+        if ! "$BUILD_DIR/bin/lotus-dfa-apa" --analysis="$analysis" "$BC_FILE" 2>&1; then
+            echo "CRASH: lotus-dfa-apa (--analysis=$analysis) crashed on $C_FILE"
             echo "Test files preserved: $C_FILE, $BC_FILE"
             exit 1
         fi
-        echo "✓ lotus-dfa-elim (--analysis=$analysis) completed successfully"
+        echo "✓ lotus-dfa-apa (--analysis=$analysis) completed successfully"
     done
     
     # Run lotus-dfa-mono with different analysis options

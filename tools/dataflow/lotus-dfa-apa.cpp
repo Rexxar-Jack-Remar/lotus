@@ -1,7 +1,7 @@
 /*
- * lotus-dfa-elim
+ * lotus-dfa-apa
  *
- * Dataflow testing tool: Elimination engine.
+ * Dataflow testing tool: APA (Algebraic Path Analysis) engine.
  */
 
 #include "llvm/IR/Function.h"

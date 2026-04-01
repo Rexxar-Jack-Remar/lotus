@@ -21,7 +21,7 @@ Currently only **liveness** is wired for diff (Elimination vs Mono, both intrapr
 lotus-dfa-diff --analysis=liveness --engine=both --out-dir=/tmp/dfa /path/to/file.bc
 
 # Run APA with a specific elimination backend
-lotus-dfa-elim --analysis=liveness --elim-method=adt-simple /path/to/file.bc
+lotus-dfa-apa --analysis=liveness --elim-method=adt-simple /path/to/file.bc
 
 # Run only one engine (for debugging)
 lotus-dfa-diff --analysis=liveness --engine=elim --out-dir=/tmp/dfa /path/to/file.bc

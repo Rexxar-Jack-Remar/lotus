@@ -9,11 +9,11 @@ llvm_map_components_to_libnames(LLVM_LINK_COMPONENTS
 add_executable(lotus-dfa lotus-dfa-diff.cpp)
 
 # Engine-specific tools
-add_executable(lotus-dfa-elim lotus-dfa-elim.cpp)
+add_executable(lotus-dfa-apa lotus-dfa-apa.cpp)
 add_executable(lotus-dfa-mono lotus-dfa-mono.cpp)
 add_executable(lotus-dfa-ifds lotus-dfa-ifds.cpp)
 
-foreach(target lotus-dfa lotus-dfa-elim lotus-dfa-mono lotus-dfa-ifds)
+foreach(target lotus-dfa lotus-dfa-apa lotus-dfa-mono lotus-dfa-ifds)
   target_link_libraries(${target} PRIVATE
     APADataFlow
     MONODataFlow
