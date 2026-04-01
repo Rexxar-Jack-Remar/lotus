@@ -3,9 +3,9 @@
  * @brief Simplified unit tests for MHP Analysis
  */
 
-#include "Analysis/Concurrency/MHP/HappensBeforeAnalysis.h"
 #include "Analysis/Concurrency/MHP/MHPAnalysis.h"
 
+#include "Analysis/Concurrency/MHP/HappensBeforeAnalysis.h"
 #include "TestUtils/LLVMHelpers.h"
 
 using namespace llvm;
@@ -145,6 +145,66 @@ TEST_F(MHPAnalysisTest, WrapperAndCriticalLocksReachMHPNodes) {
             module->getNamedGlobal("crit"));
   EXPECT_EQ(end_critical_nodes.front()->getLockValue(),
             module->getNamedGlobal("crit"));
+}
+
+TEST_F(MHPAnalysisTest, WrapperAcquireUsesUnderlyingMutexForHBHandoff) {
+  const char *source = R"(
+    declare i32 @pthread_create(i8*, i8*, i8* (i8*)*, i8*)
+    declare i32 @pthread_mutex_lock(i8*)
+    declare i32 @pthread_mutex_unlock(i8*)
+    declare void @fake_unique_lockC1E(i8*, i8*)
+    declare void @fake_unique_lockD1Ev(i8*)
+
+    @lock = global i8 0
+    @shared = global i32 0
+
+    define i8* @worker(i8* %arg) {
+    entry:
+      %wrapper = alloca i8
+      call void @fake_unique_lockC1E(i8* %wrapper, i8* @lock)
+      store i32 1, i32* @shared, align 4
+      call void @fake_unique_lockD1Ev(i8* %wrapper)
+      ret i8* null
+    }
+
+    define i32 @main() {
+    entry:
+      %tid = alloca i8
+      call i32 @pthread_mutex_lock(i8* @lock)
+      call i32 @pthread_create(i8* %tid, i8* null, i8* (i8*)* @worker, i8* null)
+      call i32 @pthread_mutex_unlock(i8* @lock)
+      ret i32 0
+    }
+  )";
+
+  auto module = parseModule(source);
+  ASSERT_NE(module, nullptr);
+
+  MHPAnalysis mhp(*module);
+  mhp.analyze();
+  HappensBeforeAnalysis hb(*module, mhp);
+  hb.analyze();
+
+  const Function *main_func = module->getFunction("main");
+  const Function *worker_func = module->getFunction("worker");
+  ASSERT_NE(main_func, nullptr);
+  ASSERT_NE(worker_func, nullptr);
+
+  auto it = main_func->getEntryBlock().begin();
+  ++it;
+  ++it;
+  ++it;
+  const Instruction *unlock = &*it;
+  const Instruction *worker_store = nullptr;
+  for (const Instruction &inst : worker_func->getEntryBlock()) {
+    if (isa<StoreInst>(&inst)) {
+      worker_store = &inst;
+      break;
+    }
+  }
+  ASSERT_NE(worker_store, nullptr);
+
+  EXPECT_TRUE(hb.mustPrecede(unlock, worker_store));
 }
 
 TEST_F(MHPAnalysisTest, LatchArriveAndWaitCreatesBarrierWaitNode) {
@@ -423,9 +483,12 @@ TEST_F(MHPAnalysisTest, ReusedThreadHandleStorageKeepsJoinAmbiguous) {
   MHPAnalysis mhp(*module);
   mhp.analyze();
 
-  const Instruction *w1 = findInstructionByName(*module->getFunction("worker1"), "w1");
-  const Instruction *w2 = findInstructionByName(*module->getFunction("worker2"), "w2");
-  const Instruction *post = findInstructionByName(*module->getFunction("main"), "post");
+  const Instruction *w1 =
+      findInstructionByName(*module->getFunction("worker1"), "w1");
+  const Instruction *w2 =
+      findInstructionByName(*module->getFunction("worker2"), "w2");
+  const Instruction *post =
+      findInstructionByName(*module->getFunction("main"), "post");
   ASSERT_NE(w1, nullptr);
   ASSERT_NE(w2, nullptr);
   ASSERT_NE(post, nullptr);
@@ -988,7 +1051,8 @@ TEST_F(MHPAnalysisTest, MultiExitWorkerStillOrdersPostJoinContinuation) {
   ASSERT_NE(worker_func, nullptr);
   ASSERT_NE(main_func, nullptr);
 
-  const Instruction *left_work = findInstructionByName(*worker_func, "left_work");
+  const Instruction *left_work =
+      findInstructionByName(*worker_func, "left_work");
   const Instruction *right_work =
       findInstructionByName(*worker_func, "right_work");
   const Instruction *post = findInstructionByName(*main_func, "post");
@@ -1139,9 +1203,12 @@ TEST_F(MHPAnalysisTest, ReusedHandleJoinDoesNotOrderLaterCreatePhase) {
   HappensBeforeAnalysis hb(*module, mhp);
   hb.analyze();
 
-  const Instruction *w1 = findInstructionByName(*module->getFunction("worker1"), "w1");
-  const Instruction *w2 = findInstructionByName(*module->getFunction("worker2"), "w2");
-  const Instruction *post = findInstructionByName(*module->getFunction("main"), "post");
+  const Instruction *w1 =
+      findInstructionByName(*module->getFunction("worker1"), "w1");
+  const Instruction *w2 =
+      findInstructionByName(*module->getFunction("worker2"), "w2");
+  const Instruction *post =
+      findInstructionByName(*module->getFunction("main"), "post");
   ASSERT_NE(w1, nullptr);
   ASSERT_NE(w2, nullptr);
   ASSERT_NE(post, nullptr);
@@ -1250,7 +1317,8 @@ TEST_F(MHPAnalysisTest, HelperCalledBeforeAndAfterForkIsNotGloballyPrefork) {
   EXPECT_TRUE(mhp.mayHappenInParallel(helper_inst, worker_inst));
 }
 
-TEST_F(MHPAnalysisTest, HelperHiddenFirstForkDoesNotMakeCallerContinuationPrefork) {
+TEST_F(MHPAnalysisTest,
+       HelperHiddenFirstForkDoesNotMakeCallerContinuationPrefork) {
   const char *source = R"(
     @shared = global i32 0, align 4
 

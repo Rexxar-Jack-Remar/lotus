@@ -16,12 +16,7 @@
 
 namespace OpenMP {
 
-enum class DependType {
-  IN,
-  OUT,
-  INOUT,
-  MUTEXINOUTSET
-};
+enum class DependType { IN, OUT, INOUT, MUTEXINOUTSET };
 
 enum class DependencySourceKind {
   DirectAddress,
@@ -292,7 +287,8 @@ public:
   getRelations() const {
     return m_relations;
   }
-  const std::unordered_map<std::string, size_t> &getDeferredReasonCounts() const {
+  const std::unordered_map<std::string, size_t> &
+  getDeferredReasonCounts() const {
     return m_deferred_reason_counts;
   }
   DependencyConflict
@@ -309,6 +305,7 @@ public:
   size_t getRegionNestingDepth(size_t region_id) const;
   const std::vector<DataSharingEntry> &
   getDataSharingEntriesForEntity(size_t entity_id) const;
+  bool hasLinearControlFlow(const llvm::Function *func) const;
 
 private:
   friend class OpenMPTaskGraph;
@@ -362,18 +359,19 @@ private:
                                                      unsigned ndeps_arg_idx,
                                                      unsigned dep_arg_idx);
   const llvm::CallBase *findTaskAllocCall(const llvm::Value *task_value) const;
-  const llvm::Value *canonicalizeTaskHandle(const llvm::Value *task_value) const;
+  const llvm::Value *
+  canonicalizeTaskHandle(const llvm::Value *task_value) const;
   const llvm::Function *extractTaskFunction(const llvm::CallBase *task_call);
   void applyTaskExecutionHints(Task &task, const llvm::CallBase *task_call);
-  size_t addEntity(SemanticEntityKind kind, const llvm::Instruction *anchor_inst,
+  size_t addEntity(SemanticEntityKind kind,
+                   const llvm::Instruction *anchor_inst,
                    const llvm::Function *func, size_t scheduling_context_id,
                    size_t parent_id, size_t region_id, size_t phase_id,
                    size_t taskgroup_id);
   void addEvent(SemanticEventKind kind, const llvm::Instruction *inst,
                 size_t entity_id, size_t scheduling_context_id,
                 size_t sequence_index, size_t event_order, size_t region_id,
-                size_t phase_id,
-                bool is_partial = false);
+                size_t phase_id, bool is_partial = false);
   void addEvent(SemanticEventKind kind, const llvm::Instruction *inst,
                 size_t entity_id, size_t scheduling_context_id,
                 size_t sequence_index, size_t region_id, size_t phase_id,
@@ -381,32 +379,29 @@ private:
     addEvent(kind, inst, entity_id, scheduling_context_id, sequence_index,
              sequence_index, region_id, phase_id, is_partial);
   }
-  void addTaskEvent(OpenMPTaskEvent::Kind kind, const llvm::Instruction *inst,
-                    size_t scheduling_context_id, size_t sequence_index,
-                    size_t event_order,
-                    size_t phase_id, size_t taskgroup_id, size_t region_id,
-                    size_t semantic_entity_id, const Task *task = nullptr,
-                    WaitBoundaryInfo::Kind boundary_kind =
-                        WaitBoundaryInfo::Kind::Unknown,
-                    bool is_partial_wait = false,
-                    bool is_taskgroup_end = false,
-                    std::vector<Dependency> dependencies = {});
-  void addTaskEvent(OpenMPTaskEvent::Kind kind, const llvm::Instruction *inst,
-                    size_t scheduling_context_id, size_t sequence_index,
-                    size_t phase_id, size_t taskgroup_id, size_t region_id,
-                    size_t semantic_entity_id, const Task *task = nullptr,
-                    WaitBoundaryInfo::Kind boundary_kind =
-                        WaitBoundaryInfo::Kind::Unknown,
-                    bool is_partial_wait = false,
-                    bool is_taskgroup_end = false,
-                    std::vector<Dependency> dependencies = {}) {
+  void addTaskEvent(
+      OpenMPTaskEvent::Kind kind, const llvm::Instruction *inst,
+      size_t scheduling_context_id, size_t sequence_index, size_t event_order,
+      size_t phase_id, size_t taskgroup_id, size_t region_id,
+      size_t semantic_entity_id, const Task *task = nullptr,
+      WaitBoundaryInfo::Kind boundary_kind = WaitBoundaryInfo::Kind::Unknown,
+      bool is_partial_wait = false, bool is_taskgroup_end = false,
+      std::vector<Dependency> dependencies = {});
+  void addTaskEvent(
+      OpenMPTaskEvent::Kind kind, const llvm::Instruction *inst,
+      size_t scheduling_context_id, size_t sequence_index, size_t phase_id,
+      size_t taskgroup_id, size_t region_id, size_t semantic_entity_id,
+      const Task *task = nullptr,
+      WaitBoundaryInfo::Kind boundary_kind = WaitBoundaryInfo::Kind::Unknown,
+      bool is_partial_wait = false, bool is_taskgroup_end = false,
+      std::vector<Dependency> dependencies = {}) {
     addTaskEvent(kind, inst, scheduling_context_id, sequence_index,
                  sequence_index, phase_id, taskgroup_id, region_id,
                  semantic_entity_id, task, boundary_kind, is_partial_wait,
                  is_taskgroup_end, std::move(dependencies));
   }
   DependencyConflict classifyDependencyConflict(const Dependency &d1,
-                                               const Dependency &d2) const;
+                                                const Dependency &d2) const;
   bool dependenciesConflict(const Dependency &d1, const Dependency &d2) const;
   bool isMutexLikeExclusion(const Dependency &d1, const Dependency &d2) const;
 };

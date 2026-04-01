@@ -479,6 +479,7 @@ TEST_F(ThreadAPITest, RecognizesJthreadAndTreatsItAsForkLike) {
   const char *source = R"(
     declare void @_ZNSt7jthreadC1EPFvPvES0_(i8*, i8* (i8*)*, i8*)
     declare void @_ZNSt7jthread4joinEv(i8*)
+    declare void @_ZNSt7jthread6detachEv(i8*)
 
     define i8* @worker(i8* %arg) {
     entry:
@@ -490,6 +491,7 @@ TEST_F(ThreadAPITest, RecognizesJthreadAndTreatsItAsForkLike) {
       %thr = alloca i8
       call void @_ZNSt7jthreadC1EPFvPvES0_(i8* %thr, i8* (i8*)* @worker, i8* null)
       call void @_ZNSt7jthread4joinEv(i8* %thr)
+      call void @_ZNSt7jthread6detachEv(i8* %thr)
       ret void
     }
   )";
@@ -521,6 +523,8 @@ TEST_F(ThreadAPITest, RecognizesJthreadAndTreatsItAsForkLike) {
             ThreadAPI::TD_JTHREAD_FORK);
   EXPECT_EQ(api->getType(module->getFunction("_ZNSt7jthread4joinEv")),
             ThreadAPI::TD_JTHREAD_JOIN);
+  EXPECT_EQ(api->getType(module->getFunction("_ZNSt7jthread6detachEv")),
+            ThreadAPI::TD_DETACH);
   EXPECT_TRUE(api->isTDFork(fork));
   EXPECT_TRUE(api->isTDJoin(join));
 }
@@ -1210,6 +1214,7 @@ TEST_F(ThreadAPITest, SpecialSemanticLoweringStatesStayExplicitlyEnumerated) {
       ThreadAPI::TD_ATOMIC_WAIT,
       ThreadAPI::TD_ATOMIC_NOTIFY_ONE,
       ThreadAPI::TD_ATOMIC_NOTIFY_ALL,
+      ThreadAPI::TD_JTHREAD_DTOR,
       ThreadAPI::TD_MPI_SESSION_GET_INFO,
       ThreadAPI::TD_MPI_SESSION_GET_NUM_ERRCODES,
       ThreadAPI::TD_MPI_SESSION_GET_ERRHANDLER,
@@ -1393,6 +1398,13 @@ TEST_F(ThreadAPITest, RecognizesCppAtomicWaitNotifyAndJthreadDestructor) {
     declare void @_ZNSt6atomicIiE10notify_oneEv(i8*)
     declare void @_ZNSt6atomicIiE10notify_allEv(i8*)
     declare void @_ZNSt7jthreadD1Ev(i8*)
+
+    define void @main() {
+    entry:
+      %thr = alloca i8
+      call void @_ZNSt7jthreadD1Ev(i8* %thr)
+      ret void
+    }
   )";
 
   auto module = parseModule(source);
@@ -1417,8 +1429,50 @@ TEST_F(ThreadAPITest, RecognizesCppAtomicWaitNotifyAndJthreadDestructor) {
   EXPECT_EQ(api->getType(jthread_dtor), ThreadAPI::TD_JTHREAD_DTOR);
   EXPECT_EQ(api->getSemanticLoweringInfo(atomic_wait).kind,
             ThreadAPI::SemanticLoweringKind::RecognizedButUnmodeled);
-  EXPECT_TRUE(api->hasSemanticLoweringOwner(
-      jthread_dtor, ThreadAPI::SemanticLoweringOwner::MHP));
+  EXPECT_EQ(api->getSemanticLoweringInfo(jthread_dtor).kind,
+            ThreadAPI::SemanticLoweringKind::RecognizedButUnmodeled);
+  EXPECT_STREQ(api->getSemanticLoweringInfo(jthread_dtor).reason,
+               "jthread-autojoin-lifetime-unmodeled");
+
+  const Function *main_func = module->getFunction("main");
+  ASSERT_NE(main_func, nullptr);
+  const Instruction *call = &*main_func->getEntryBlock().begin();
+  EXPECT_FALSE(api->isTDJoin(call));
+}
+
+TEST_F(ThreadAPITest, CppWrapperLockIdentityResolvesUnderlyingMutex) {
+  const char *source = R"(
+    declare void @fake_unique_lockC1E(i8*, i8*)
+    declare void @fake_unique_lockD1Ev(i8*)
+
+    @lock = global i8 0
+
+    define void @main() {
+    entry:
+      %wrapper = alloca i8
+      call void @fake_unique_lockC1E(i8* %wrapper, i8* @lock)
+      call void @fake_unique_lockD1Ev(i8* %wrapper)
+      ret void
+    }
+  )";
+
+  auto module = parseModule(source);
+  ASSERT_NE(module, nullptr);
+
+  ThreadAPI::resetThreadAPI();
+  ThreadAPI *api = ThreadAPI::getThreadAPI();
+  const Function *main_func = module->getFunction("main");
+  ASSERT_NE(main_func, nullptr);
+
+  auto it = main_func->getEntryBlock().begin();
+  ++it;
+  const Instruction *ctor = &*it++;
+  const Instruction *dtor = &*it++;
+  const Value *lock = module->getNamedGlobal("lock");
+  ASSERT_NE(lock, nullptr);
+
+  EXPECT_EQ(api->getAnalysisLockIdentity(ctor), lock);
+  EXPECT_EQ(api->getAnalysisLockIdentity(dtor), lock);
 }
 
 TEST_F(ThreadAPITest, MPIConfiguredAPIsHaveConsistentLoweringLibraries) {

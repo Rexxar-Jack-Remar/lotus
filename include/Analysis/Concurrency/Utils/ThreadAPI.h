@@ -567,6 +567,10 @@ private:
   const llvm::Value *
   getConditionVariableWaitMutex(const llvm::Instruction *inst) const;
 
+  /// Return the underlying mutex identity for C++ RAII lock wrappers.
+  const llvm::Value *
+  getCppWrapperUnderlyingLock(const llvm::Instruction *inst) const;
+
   /// API map, from a string to threadAPI type
   TDAPIMap tdAPIMap;
   std::unordered_map<std::string, ForkArgIndices> m_fork_args;
@@ -892,7 +896,7 @@ public:
   //@{
   inline bool isJoinLike(const llvm::Instruction *inst) const {
     TD_TYPE t = getType(getCallee(inst));
-    return t == TD_JOIN || t == TD_JTHREAD_JOIN || t == TD_JTHREAD_DTOR;
+    return t == TD_JOIN || t == TD_JTHREAD_JOIN;
   }
   inline bool isJoinLike(const llvm::CallBase *cb) const {
     return isJoinLike(llvm::dyn_cast<llvm::Instruction>(cb));
@@ -1112,6 +1116,9 @@ public:
     case TD_SCOPED_LOCK_DTOR:
     case TD_SHARED_LOCK_CTOR:
     case TD_SHARED_LOCK_DTOR:
+      if (const llvm::Value *underlying = getCppWrapperUnderlyingLock(inst)) {
+        return underlying;
+      }
       return cb->getArgOperand(0)->stripPointerCasts();
     case TD_ACQUIRE:
     case TD_RELEASE:

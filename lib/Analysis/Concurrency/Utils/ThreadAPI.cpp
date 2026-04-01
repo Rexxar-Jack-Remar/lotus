@@ -19,6 +19,7 @@
 #include "Analysis/Concurrency/MPI/MPISymbol.h"
 #include "Analysis/Concurrency/Utils/CppThreading.h"
 #include "Analysis/Concurrency/Utils/LinuxKernel.h"
+#include "Analysis/Concurrency/Utils/RAIILockTracker.h"
 
 #include <cctype>
 #include <fstream>
@@ -26,7 +27,6 @@
 #include <iostream>
 #include <set>
 #include <sstream>
-#include <stdio.h>
 
 #include <llvm/ADT/STLExtras.h>
 #include <llvm/ADT/SmallVector.h>
@@ -35,6 +35,7 @@
 #include <llvm/IR/InstIterator.h>
 #include <llvm/IR/Instructions.h>
 #include <llvm/IR/Module.h>
+#include <stdio.h>
 
 using namespace std;
 using namespace llvm;
@@ -109,7 +110,8 @@ static SmallVector<std::string, 4> getConfiguredLookupNames(StringRef name) {
   appendLookupName(names, legacy_alias);
 
   if (looksLikeMPISymbol(name)) {
-    appendLookupName(names, mpi::normalizeMPISymbolName(stripAPIGlobalPrefix(name)));
+    appendLookupName(names,
+                     mpi::normalizeMPISymbolName(stripAPIGlobalPrefix(name)));
   }
   return names;
 }
@@ -432,6 +434,86 @@ ThreadAPI::getConditionVariableWaitMutex(const Instruction *inst) const {
   }
 
   return resolved_mutex ? resolved_mutex : lock_or_mutex;
+}
+
+const llvm::Value *
+ThreadAPI::getCppWrapperUnderlyingLock(const Instruction *inst) const {
+  const auto *cb = getLLVMCallSite(inst);
+  if (!cb || cb->arg_size() == 0) {
+    return nullptr;
+  }
+
+  const TD_TYPE type = getType(getCallee(inst));
+  switch (type) {
+  case TD_LOCK_GUARD_CTOR:
+  case TD_UNIQUE_LOCK_CTOR:
+  case TD_SCOPED_LOCK_CTOR:
+  case TD_SHARED_LOCK_CTOR: {
+    std::vector<const Value *> locks =
+        RAIILock::RAIILockTracker::extractUnderlyingLocks(cb);
+    if (locks.size() == 1 && locks.front()) {
+      return locks.front()->stripPointerCasts();
+    }
+    return nullptr;
+  }
+  case TD_LOCK_GUARD_DTOR:
+  case TD_UNIQUE_LOCK_DTOR:
+  case TD_UNIQUE_LOCK_LOCK:
+  case TD_UNIQUE_LOCK_UNLOCK:
+  case TD_SCOPED_LOCK_DTOR:
+  case TD_SHARED_LOCK_DTOR:
+    break;
+  default:
+    return nullptr;
+  }
+
+  const Value *wrapper = cb->getArgOperand(0)->stripPointerCasts();
+  const Function *parent = inst ? inst->getFunction() : nullptr;
+  if (!wrapper || !parent || parent->isDeclaration()) {
+    return nullptr;
+  }
+
+  const Value *resolved_lock = nullptr;
+  auto recordCandidate = [&](const Value *candidate) -> bool {
+    candidate = candidate ? candidate->stripPointerCasts() : nullptr;
+    if (!candidate) {
+      return false;
+    }
+    if (!resolved_lock) {
+      resolved_lock = candidate;
+      return true;
+    }
+    return resolved_lock == candidate;
+  };
+
+  for (const Instruction &cursor : instructions(*parent)) {
+    const auto *candidate_call = dyn_cast<CallBase>(&cursor);
+    if (!candidate_call) {
+      continue;
+    }
+
+    const TD_TYPE candidate_type = getType(getCallee(candidate_call));
+    if (candidate_type != TD_LOCK_GUARD_CTOR &&
+        candidate_type != TD_UNIQUE_LOCK_CTOR &&
+        candidate_type != TD_SCOPED_LOCK_CTOR &&
+        candidate_type != TD_SHARED_LOCK_CTOR) {
+      continue;
+    }
+
+    const Value *candidate_wrapper =
+        RAIILock::RAIILockTracker::findLockObjectForConstructor(candidate_call);
+    if (candidate_wrapper != wrapper) {
+      continue;
+    }
+
+    std::vector<const Value *> locks =
+        RAIILock::RAIILockTracker::extractUnderlyingLocks(candidate_call);
+    if (locks.size() != 1 || !recordCandidate(locks.front())) {
+      return nullptr;
+    }
+  }
+
+  return resolved_lock;
 }
 
 ThreadAPI::TD_TYPE ThreadAPI::stringToType(StringRef s) {
@@ -829,10 +911,6 @@ constexpr uint32_t ownerMask(Owner owner_a, Owner owner_b) {
   return ownerMask(owner_a) | ownerMask(owner_b);
 }
 
-constexpr uint32_t ownerMask(Owner owner_a, Owner owner_b, Owner owner_c) {
-  return ownerMask(owner_a, owner_b) | ownerMask(owner_c);
-}
-
 bool isExplicitFallbackType(TD type) {
   switch (type) {
   case TD::TD_DUMMY:
@@ -942,8 +1020,7 @@ bool isLockLikeType(TD type) {
 }
 
 bool isSemaphoreTypeForLowering(TD type) {
-  return type == TD::TD_SEMAPHORE_ACQUIRE ||
-         type == TD::TD_SEMAPHORE_RELEASE ||
+  return type == TD::TD_SEMAPHORE_ACQUIRE || type == TD::TD_SEMAPHORE_RELEASE ||
          type == TD::TD_SEMAPHORE_TRY_ACQUIRE;
 }
 
@@ -992,7 +1069,6 @@ bool isMHPThreadType(TD type) {
   case TD::TD_BAR_WAIT:
   case TD::TD_JTHREAD_FORK:
   case TD::TD_JTHREAD_JOIN:
-  case TD::TD_JTHREAD_DTOR:
   case TD::TD_ASYNC:
   case TD::HARE_PAR_FOR:
     return true;
@@ -1048,6 +1124,11 @@ LoweringInfo makeLoweringInfo(TD type, ThreadAPI::RuntimeLibrary library,
   if (type == TD::TD_ASYNC) {
     return {LoweringKind::Deferred, "async-launch-policy-witness",
             ownerMask(Owner::HB, Owner::MHP)};
+  }
+  if (type == TD::TD_JTHREAD_DTOR) {
+    return {LoweringKind::RecognizedButUnmodeled,
+            "jthread-autojoin-lifetime-unmodeled",
+            ownerMask(Owner::ExplicitFallback)};
   }
   if (type == TD::TD_ATOMIC_WAIT) {
     return {LoweringKind::RecognizedButUnmodeled,
@@ -1111,12 +1192,12 @@ LoweringInfo makeLoweringInfo(TD type, ThreadAPI::RuntimeLibrary library,
     owners |= ownerMask(Owner::MHP);
   }
   if (isOpenMPTaskType(type) || semantic_tag.startswith("task") ||
-      semantic_tag.startswith("taskgroup") || semantic_tag.startswith("doacross")) {
+      semantic_tag.startswith("taskgroup") ||
+      semantic_tag.startswith("doacross")) {
     owners |= ownerMask(Owner::HB, Owner::MHP);
   }
   if (library == ThreadAPI::RuntimeLibrary::MPI &&
-      type == TD::TD_MPI_COMM_DUP &&
-      semantic_tag.equals("comm-idup")) {
+      type == TD::TD_MPI_COMM_DUP && semantic_tag.equals("comm-idup")) {
     owners |= ownerMask(Owner::MPI);
   }
   if (owners == 0) {
@@ -1182,7 +1263,8 @@ ThreadAPI::lookupMatchRule(StringRef normalized_name) const {
 
 ThreadAPI::TD_TYPE
 ThreadAPI::getConfiguredType(StringRef normalized_name) const {
-  for (const std::string &lookup_name : getConfiguredLookupNames(normalized_name)) {
+  for (const std::string &lookup_name :
+       getConfiguredLookupNames(normalized_name)) {
     TDAPIMap::const_iterator it = tdAPIMap.find(lookup_name);
     if (it != tdAPIMap.end()) {
       auto desc_it = m_api_descriptions.find(lookup_name);
@@ -1230,7 +1312,8 @@ ThreadAPI::APIDescription ThreadAPI::describe(const Function *F) const {
   if (const APIDescription *configured = lookupDescription(F)) {
     return *configured;
   }
-  for (const std::string &lookup_name : getConfiguredLookupNames(F->getName())) {
+  for (const std::string &lookup_name :
+       getConfiguredLookupNames(F->getName())) {
     if (const MatchRule *rule = lookupMatchRule(lookup_name)) {
       return rule->description;
     }
@@ -1251,15 +1334,14 @@ ThreadAPI::getSemanticLoweringInfo(const Function *F) const {
     return getSemanticLoweringInfo(TD_DUMMY);
   }
   const APIDescription description = describe(F);
-  SemanticLoweringInfo info =
-      makeLoweringInfo(description.type, description.library,
-                       description.semantic_tag);
+  SemanticLoweringInfo info = makeLoweringInfo(
+      description.type, description.library, description.semantic_tag);
   const bool has_semaphore_trait =
       llvm::is_contained(description.traits, std::string("semaphore"));
   const bool is_binary_semaphore =
       llvm::is_contained(description.traits, std::string("binary-semaphore")) ||
       F->getName().contains("binary_semaphore");
-    if (isSemaphoreTypeForLowering(description.type) || has_semaphore_trait) {
+  if (isSemaphoreTypeForLowering(description.type) || has_semaphore_trait) {
     if (is_binary_semaphore) {
       info.kind = SemanticLoweringKind::Modeled;
       info.reason = "modeled";
@@ -1269,8 +1351,7 @@ ThreadAPI::getSemanticLoweringInfo(const Function *F) const {
       info.kind = SemanticLoweringKind::RecognizedButUnmodeled;
       info.reason = "counting-semaphore-runtime-unmodeled";
       info.owners = semanticLoweringOwnerMask(
-          SemanticLoweringOwner::ExplicitFallback,
-          SemanticLoweringOwner::HB);
+          SemanticLoweringOwner::ExplicitFallback, SemanticLoweringOwner::HB);
     }
   }
   return info;
@@ -1370,6 +1451,8 @@ ThreadAPI::TD_TYPE ThreadAPI::getType(const Function *F) const {
       return TD_JTHREAD_FORK;
     if (CppThreadingModel::isJthreadJoin(name))
       return TD_JTHREAD_JOIN;
+    if (CppThreadingModel::isJthreadDetach(name))
+      return TD_DETACH;
     if (CppThreadingModel::isJthreadDestructor(name))
       return TD_JTHREAD_DTOR;
 

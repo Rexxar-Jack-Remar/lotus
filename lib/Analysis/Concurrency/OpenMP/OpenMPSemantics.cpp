@@ -287,8 +287,7 @@ void OpenMPSemantics::analyze() {
   m_summary.semantic_event_count = m_events.size();
 }
 
-const Task *
-OpenMPSemantics::getTaskForCreate(const Instruction *inst) const {
+const Task *OpenMPSemantics::getTaskForCreate(const Instruction *inst) const {
   auto it = m_inst_to_task.find(inst);
   return it != m_inst_to_task.end() ? it->second : nullptr;
 }
@@ -323,6 +322,39 @@ size_t OpenMPSemantics::getRegionNestingDepth(size_t region_id) const {
   return it->second;
 }
 
+bool OpenMPSemantics::hasLinearControlFlow(const llvm::Function *func) const {
+  if (!func || func->isDeclaration()) {
+    return true;
+  }
+
+  for (const BasicBlock &bb : *func) {
+    if (&bb != &func->getEntryBlock() && !bb.hasNPredecessors(1)) {
+      return false;
+    }
+
+    const Instruction *term = bb.getTerminator();
+    if (!term) {
+      continue;
+    }
+    if (isa<ReturnInst>(term) || isa<ResumeInst>(term) ||
+        isa<UnreachableInst>(term)) {
+      continue;
+    }
+    if (term->getNumSuccessors() != 1) {
+      return false;
+    }
+    if (const auto *branch = dyn_cast<BranchInst>(term)) {
+      if (!branch->isUnconditional()) {
+        return false;
+      }
+      continue;
+    }
+    return false;
+  }
+
+  return true;
+}
+
 const std::vector<DataSharingEntry> &
 OpenMPSemantics::getDataSharingEntriesForEntity(size_t entity_id) const {
   static const std::vector<DataSharingEntry> kEmpty;
@@ -355,8 +387,7 @@ size_t OpenMPSemantics::addEntity(SemanticEntityKind kind,
 }
 
 void OpenMPSemantics::addEvent(SemanticEventKind kind, const Instruction *inst,
-                               size_t entity_id,
-                               size_t scheduling_context_id,
+                               size_t entity_id, size_t scheduling_context_id,
                                size_t sequence_index, size_t event_order,
                                size_t region_id, size_t phase_id,
                                bool is_partial) {
@@ -373,17 +404,13 @@ void OpenMPSemantics::addEvent(SemanticEventKind kind, const Instruction *inst,
   m_events.push_back(event);
 }
 
-void OpenMPSemantics::addTaskEvent(OpenMPTaskEvent::Kind kind,
-                                   const Instruction *inst,
-                                   size_t scheduling_context_id,
-                                   size_t sequence_index, size_t event_order,
-                                   size_t phase_id,
-                                   size_t taskgroup_id, size_t region_id,
-                                   size_t semantic_entity_id,
-                                   const Task *task,
-                                   WaitBoundaryInfo::Kind boundary_kind,
-                                   bool is_partial_wait, bool is_taskgroup_end,
-                                   std::vector<Dependency> dependencies) {
+void OpenMPSemantics::addTaskEvent(
+    OpenMPTaskEvent::Kind kind, const Instruction *inst,
+    size_t scheduling_context_id, size_t sequence_index, size_t event_order,
+    size_t phase_id, size_t taskgroup_id, size_t region_id,
+    size_t semantic_entity_id, const Task *task,
+    WaitBoundaryInfo::Kind boundary_kind, bool is_partial_wait,
+    bool is_taskgroup_end, std::vector<Dependency> dependencies) {
   OpenMPTaskEvent event;
   event.kind = kind;
   event.inst = inst;
@@ -484,7 +511,8 @@ void OpenMPSemantics::identifySemanticStructure() {
         }
         ThreadAPI::TD_TYPE type = api->getType(call);
         if (type == ThreadAPI::TD_OMP_TASK_WITH_DEPS ||
-            type == ThreadAPI::TD_OMP_TASK || type == ThreadAPI::TD_OMP_TASKLOOP) {
+            type == ThreadAPI::TD_OMP_TASK ||
+            type == ThreadAPI::TD_OMP_TASKLOOP) {
           if (const Function *task_function = extractTaskFunction(call)) {
             if (!task_function->isDeclaration()) {
               directly_called.insert(task_function);
@@ -663,9 +691,9 @@ void OpenMPSemantics::buildTaskRelations() {
       StringRef deferred_reason = deferredPartialWaitReason(task_i, task_j);
       if (!deferred_reason.empty()) {
         ++m_deferred_reason_counts[deferred_reason.str()];
-        recordRelation(
-            task_i, task_j, concurrency::RelationKind::UnknownDueToModelGap,
-            concurrency::ProofStrength::Unknown, deferred_reason);
+        recordRelation(task_i, task_j,
+                       concurrency::RelationKind::UnknownDueToModelGap,
+                       concurrency::ProofStrength::Unknown, deferred_reason);
         continue;
       }
 
@@ -705,7 +733,8 @@ void OpenMPSemantics::buildTaskRelations() {
         continue;
       }
 
-      if (mustHappenBefore(taskOrderingSite(task_i), taskOrderingSite(task_j))) {
+      if (mustHappenBefore(taskOrderingSite(task_i),
+                           taskOrderingSite(task_j))) {
         task_i->successors.insert(task_j);
         task_j->predecessors.insert(task_i);
         recordRelation(task_i, task_j,
@@ -764,99 +793,95 @@ void OpenMPSemantics::buildTaskRelations() {
       continue;
     }
 
-      for (const auto &lhs : m_tasks) {
-        if (lhs->scheduling_context_id != boundary.scheduling_context_id ||
-            lhs->event_order >= boundary.event_order) {
-          continue;
-        }
-        if (boundary.is_taskgroup_end &&
-            (boundary.taskgroup_id == 0 ||
-             lhs->taskgroup_id != boundary.taskgroup_id)) {
+    for (const auto &lhs : m_tasks) {
+      if (lhs->scheduling_context_id != boundary.scheduling_context_id ||
+          lhs->event_order >= boundary.event_order) {
+        continue;
+      }
+      if (boundary.is_taskgroup_end &&
+          (boundary.taskgroup_id == 0 ||
+           lhs->taskgroup_id != boundary.taskgroup_id)) {
+        continue;
+      }
+      if (!boundary.is_taskgroup_end && !boundary.is_partial_wait &&
+          lhs->phase_id != boundary.phase_id) {
+        continue;
+      }
+      for (const auto &rhs : m_tasks) {
+        if (rhs->scheduling_context_id != boundary.scheduling_context_id ||
+            rhs.get() == lhs.get() || rhs->event_order < boundary.event_order) {
           continue;
         }
         if (!boundary.is_taskgroup_end && !boundary.is_partial_wait &&
-            lhs->phase_id != boundary.phase_id) {
+            rhs->phase_id <= boundary.phase_id) {
           continue;
         }
-        for (const auto &rhs : m_tasks) {
-          if (rhs->scheduling_context_id != boundary.scheduling_context_id ||
-              rhs.get() == lhs.get() ||
-              rhs->event_order < boundary.event_order) {
+        if (boundary.is_partial_wait) {
+          if (boundary.boundary_kind == WaitBoundaryInfo::Kind::DoacrossWait &&
+              !hasUniqueMatchingDoacrossSubmit(boundary)) {
+            recordRelation(lhs.get(), rhs.get(),
+                           concurrency::RelationKind::UnknownDueToModelGap,
+                           concurrency::ProofStrength::Unknown,
+                           "omp_doacross_submit_missing");
             continue;
           }
-          if (!boundary.is_taskgroup_end && !boundary.is_partial_wait &&
-              rhs->phase_id <= boundary.phase_id) {
-            continue;
-          }
-      if (boundary.is_partial_wait) {
-            if (boundary.boundary_kind == WaitBoundaryInfo::Kind::DoacrossWait &&
-                !hasUniqueMatchingDoacrossSubmit(boundary)) {
-              recordRelation(lhs.get(), rhs.get(),
-                             concurrency::RelationKind::UnknownDueToModelGap,
-                             concurrency::ProofStrength::Unknown,
-                             "omp_doacross_submit_missing");
-              continue;
-            }
-            bool lhs_selected = false;
-            bool rhs_selected = false;
-            for (const Dependency &wait_dep : boundary.dependencies) {
-              for (const Dependency &lhs_dep : lhs->dependencies) {
-                if (classifyDependencyConflict(lhs_dep, wait_dep) ==
-                    DependencyConflict::MustConflict) {
-                  lhs_selected = true;
-                  break;
-                }
-              }
-              for (const Dependency &rhs_dep : rhs->dependencies) {
-                if (classifyDependencyConflict(rhs_dep, wait_dep) ==
-                    DependencyConflict::MustConflict) {
-                  rhs_selected = true;
-                  break;
-                }
-              }
-              if (lhs_selected && rhs_selected) {
+          bool lhs_selected = false;
+          bool rhs_selected = false;
+          for (const Dependency &wait_dep : boundary.dependencies) {
+            for (const Dependency &lhs_dep : lhs->dependencies) {
+              if (classifyDependencyConflict(lhs_dep, wait_dep) ==
+                  DependencyConflict::MustConflict) {
+                lhs_selected = true;
                 break;
               }
             }
-            StringRef selective_reason = "omp_taskwait_deps_selective";
-            StringRef deferred_reason = "omp_taskwait_deps_partial";
-            std::tie(selective_reason, deferred_reason) =
-                selectiveReasonForBoundary(boundary.boundary_kind);
-            if (!boundary.dependencies.empty() && lhs_selected &&
-                rhs_selected &&
-                mustHappenBefore(taskOrderingSite(lhs.get()), boundary.inst) &&
-                mustHappenBefore(boundary.inst, taskOrderingSite(rhs.get()))) {
-              lhs->successors.insert(rhs.get());
-              rhs->predecessors.insert(lhs.get());
-              recordRelation(lhs.get(), rhs.get(),
-                             concurrency::RelationKind::SelectiveHappenBefore,
-                             concurrency::ProofStrength::Must,
-                             selective_reason);
-            } else {
-              ++m_deferred_reason_counts[deferred_reason.str()];
-              recordRelation(lhs.get(), rhs.get(),
-                             concurrency::RelationKind::UnknownDueToModelGap,
-                             concurrency::ProofStrength::Unknown,
-                             deferred_reason);
+            for (const Dependency &rhs_dep : rhs->dependencies) {
+              if (classifyDependencyConflict(rhs_dep, wait_dep) ==
+                  DependencyConflict::MustConflict) {
+                rhs_selected = true;
+                break;
+              }
             }
-            continue;
+            if (lhs_selected && rhs_selected) {
+              break;
+            }
           }
-          if (mustHappenBefore(taskOrderingSite(lhs.get()), boundary.inst) &&
+          StringRef selective_reason = "omp_taskwait_deps_selective";
+          StringRef deferred_reason = "omp_taskwait_deps_partial";
+          std::tie(selective_reason, deferred_reason) =
+              selectiveReasonForBoundary(boundary.boundary_kind);
+          if (!boundary.dependencies.empty() && lhs_selected && rhs_selected &&
+              mustHappenBefore(taskOrderingSite(lhs.get()), boundary.inst) &&
               mustHappenBefore(boundary.inst, taskOrderingSite(rhs.get()))) {
             lhs->successors.insert(rhs.get());
             rhs->predecessors.insert(lhs.get());
             recordRelation(lhs.get(), rhs.get(),
-                           concurrency::RelationKind::MustHappenBefore,
-                           concurrency::ProofStrength::Must,
-                           "omp_wait_boundary");
+                           concurrency::RelationKind::SelectiveHappenBefore,
+                           concurrency::ProofStrength::Must, selective_reason);
           } else {
+            ++m_deferred_reason_counts[deferred_reason.str()];
             recordRelation(lhs.get(), rhs.get(),
                            concurrency::RelationKind::UnknownDueToModelGap,
                            concurrency::ProofStrength::Unknown,
-                           "omp_conditional_wait_boundary");
+                           deferred_reason);
           }
+          continue;
+        }
+        if (mustHappenBefore(taskOrderingSite(lhs.get()), boundary.inst) &&
+            mustHappenBefore(boundary.inst, taskOrderingSite(rhs.get()))) {
+          lhs->successors.insert(rhs.get());
+          rhs->predecessors.insert(lhs.get());
+          recordRelation(lhs.get(), rhs.get(),
+                         concurrency::RelationKind::MustHappenBefore,
+                         concurrency::ProofStrength::Must, "omp_wait_boundary");
+        } else {
+          recordRelation(lhs.get(), rhs.get(),
+                         concurrency::RelationKind::UnknownDueToModelGap,
+                         concurrency::ProofStrength::Unknown,
+                         "omp_conditional_wait_boundary");
         }
       }
+    }
   }
 
   for (const OpenMPTaskEvent &event : m_task_events) {
@@ -887,14 +912,18 @@ void OpenMPSemantics::buildTaskRelations() {
   }
 }
 
-void OpenMPSemantics::scanSchedulingContext(const Function *func,
-                                            TraversalState &state,
-                                            std::set<const Function *> &call_stack) {
+void OpenMPSemantics::scanSchedulingContext(
+    const Function *func, TraversalState &state,
+    std::set<const Function *> &call_stack) {
   if (!func || func->isDeclaration() || !call_stack.insert(func).second) {
     return;
   }
 
   ThreadAPI *api = ThreadAPI::getThreadAPI();
+  const bool precise_phase_tracking = hasLinearControlFlow(func);
+  if (!precise_phase_tracking) {
+    ++m_deferred_reason_counts["omp_cfg_path_sensitive_semantics_deferred"];
+  }
   auto currentPhaseToken = [&state]() -> size_t {
     return state.phase_stack.empty() ? 0 : state.phase_stack.back();
   };
@@ -905,32 +934,43 @@ void OpenMPSemantics::scanSchedulingContext(const Function *func,
     return state.region_stack.empty() ? state.scheduling_context_entity_id
                                       : state.region_stack.back().entity_id;
   };
-  auto nextEventOrder = [&state]() -> size_t { return state.next_event_order++; };
-  auto advanceCurrentPhase = [&state]() {
+  auto nextEventOrder = [&state]() -> size_t {
+    return state.next_event_order++;
+  };
+  auto advanceCurrentPhase = [&state, precise_phase_tracking]() {
+    if (!precise_phase_tracking) {
+      return;
+    }
     if (state.phase_stack.empty()) {
       state.phase_stack.push_back(state.next_phase_token++);
     } else {
       state.phase_stack.back() = state.next_phase_token++;
     }
   };
-  auto pushRegion = [&](WaitBoundaryInfo::Kind kind, SemanticEntityKind entity_kind,
+  auto pushRegion = [&](WaitBoundaryInfo::Kind kind,
+                        SemanticEntityKind entity_kind,
                         const Instruction *anchor = nullptr) {
     TraversalState::RegionFrame frame;
     frame.id = state.next_region_id++;
     frame.kind = kind;
-    frame.entity_id =
-        addEntity(entity_kind, anchor, func, state.scheduling_context_id,
-                  currentRegionEntityId(), frame.id, currentPhaseToken(),
-                  state.taskgroup_stack.empty() ? 0 : state.taskgroup_stack.back());
-    state.region_stack.push_back(frame);
+    frame.entity_id = addEntity(
+        entity_kind, anchor, func, state.scheduling_context_id,
+        currentRegionEntityId(), frame.id, currentPhaseToken(),
+        state.taskgroup_stack.empty() ? 0 : state.taskgroup_stack.back());
+    if (precise_phase_tracking) {
+      state.region_stack.push_back(frame);
+    }
     const size_t event_order = nextEventOrder();
     addEvent(SemanticEventKind::RegionBegin, anchor, frame.entity_id,
              state.scheduling_context_id, state.sequence_index, event_order,
-             frame.id,
-             currentPhaseToken());
+             frame.id, currentPhaseToken());
     return frame;
   };
   auto popRegion = [&](WaitBoundaryInfo::Kind kind, const Instruction *anchor) {
+    if (!precise_phase_tracking) {
+      ++m_deferred_reason_counts["omp_region_end_cfg_deferred"];
+      return TraversalState::RegionFrame{};
+    }
     if (state.region_stack.empty()) {
       ++m_deferred_reason_counts["omp_region_end_unmatched"];
       return TraversalState::RegionFrame{};
@@ -941,8 +981,7 @@ void OpenMPSemantics::scanSchedulingContext(const Function *func,
       const size_t event_order = nextEventOrder();
       addEvent(SemanticEventKind::RegionEnd, anchor, frame.entity_id,
                state.scheduling_context_id, state.sequence_index, event_order,
-               frame.id,
-               currentPhaseToken());
+               frame.id, currentPhaseToken());
       return frame;
     }
     for (size_t idx = state.region_stack.size(); idx > 0; --idx) {
@@ -957,12 +996,12 @@ void OpenMPSemantics::scanSchedulingContext(const Function *func,
       }
       for (size_t stale_idx = state.region_stack.size(); stale_idx > idx - 1;
            --stale_idx) {
-        const TraversalState::RegionFrame &frame = state.region_stack[stale_idx - 1];
+        const TraversalState::RegionFrame &frame =
+            state.region_stack[stale_idx - 1];
         const size_t event_order = nextEventOrder();
         addEvent(SemanticEventKind::RegionEnd, anchor, frame.entity_id,
                  state.scheduling_context_id, state.sequence_index, event_order,
-                 frame.id,
-                 currentPhaseToken());
+                 frame.id, currentPhaseToken());
       }
       TraversalState::RegionFrame frame = state.region_stack[idx - 1];
       state.region_stack.erase(state.region_stack.begin() + (idx - 1),
@@ -975,11 +1014,12 @@ void OpenMPSemantics::scanSchedulingContext(const Function *func,
   auto recordBoundary = [&](const CallBase *call, WaitBoundaryInfo::Kind kind,
                             bool partial_wait = false,
                             bool taskgroup_end = false) {
-    const size_t entity_id =
-        addEntity(SemanticEntityKind::WaitBoundary, call, func,
-                  state.scheduling_context_id, currentRegionEntityId(),
-                  currentRegionId(), currentPhaseToken(),
-                  state.taskgroup_stack.empty() ? 0 : state.taskgroup_stack.back());
+    partial_wait = partial_wait || !precise_phase_tracking;
+    const size_t entity_id = addEntity(
+        SemanticEntityKind::WaitBoundary, call, func,
+        state.scheduling_context_id, currentRegionEntityId(), currentRegionId(),
+        currentPhaseToken(),
+        state.taskgroup_stack.empty() ? 0 : state.taskgroup_stack.back());
     WaitBoundaryInfo info;
     info.inst = call;
     info.scheduling_context_id = state.scheduling_context_id;
@@ -992,18 +1032,17 @@ void OpenMPSemantics::scanSchedulingContext(const Function *func,
     info.is_partial_wait = partial_wait;
     info.is_taskgroup_end = taskgroup_end;
     m_wait_boundary_infos.push_back(info);
-    addEvent(kind == WaitBoundaryInfo::Kind::Barrier ? SemanticEventKind::Barrier
-                                                     : kind == WaitBoundaryInfo::Kind::Flush
-                                                           ? SemanticEventKind::Flush
-                                                           : kind == WaitBoundaryInfo::Kind::Target ||
-                                                                     kind == WaitBoundaryInfo::Kind::TargetNowait ||
-                                                                     kind == WaitBoundaryInfo::Kind::TargetData ||
-                                                                     kind == WaitBoundaryInfo::Kind::TargetDataNowait
-                                                                 ? SemanticEventKind::TargetLaunch
-                                                                 : SemanticEventKind::Boundary,
-             call, entity_id, state.scheduling_context_id, state.sequence_index,
-             info.event_order, currentRegionId(), currentPhaseToken(),
-             partial_wait);
+    addEvent(
+        kind == WaitBoundaryInfo::Kind::Barrier ? SemanticEventKind::Barrier
+        : kind == WaitBoundaryInfo::Kind::Flush ? SemanticEventKind::Flush
+        : kind == WaitBoundaryInfo::Kind::Target ||
+                kind == WaitBoundaryInfo::Kind::TargetNowait ||
+                kind == WaitBoundaryInfo::Kind::TargetData ||
+                kind == WaitBoundaryInfo::Kind::TargetDataNowait
+            ? SemanticEventKind::TargetLaunch
+            : SemanticEventKind::Boundary,
+        call, entity_id, state.scheduling_context_id, state.sequence_index,
+        info.event_order, currentRegionId(), currentPhaseToken(), partial_wait);
     return info;
   };
 
@@ -1060,14 +1099,12 @@ void OpenMPSemantics::scanSchedulingContext(const Function *func,
           ++m_summary.barrier_count;
           WaitBoundaryInfo boundary =
               recordBoundary(call, WaitBoundaryInfo::Kind::Barrier);
-          addTaskEvent(OpenMPTaskEvent::Kind::Barrier, call,
-                       state.scheduling_context_id, state.sequence_index,
-                       boundary.event_order,
-                       currentPhaseToken(),
-                       state.taskgroup_stack.empty() ? 0
-                                                     : state.taskgroup_stack.back(),
-                       currentRegionId(), boundary.semantic_entity_id, nullptr,
-                       WaitBoundaryInfo::Kind::Barrier);
+          addTaskEvent(
+              OpenMPTaskEvent::Kind::Barrier, call, state.scheduling_context_id,
+              state.sequence_index, boundary.event_order, currentPhaseToken(),
+              state.taskgroup_stack.empty() ? 0 : state.taskgroup_stack.back(),
+              currentRegionId(), boundary.semantic_entity_id, nullptr,
+              WaitBoundaryInfo::Kind::Barrier, boundary.is_partial_wait);
           if (callee && api->hasTrait(callee, "parallel-end")) {
             popRegion(WaitBoundaryInfo::Kind::Unknown, call);
           }
@@ -1097,7 +1134,8 @@ void OpenMPSemantics::scanSchedulingContext(const Function *func,
         if (type == ThreadAPI::TD_OMP_CANCEL) {
           if (api->hasSemanticTag(callee, "cancellation-point")) {
             ++m_summary.cancellation_point_count;
-            ++m_deferred_reason_counts["omp_cancellation_point_runtime_unmodeled"];
+            ++m_deferred_reason_counts
+                ["omp_cancellation_point_runtime_unmodeled"];
           } else {
             ++m_summary.cancel_count;
             ++m_deferred_reason_counts["omp_cancel_runtime_unmodeled"];
@@ -1109,48 +1147,46 @@ void OpenMPSemantics::scanSchedulingContext(const Function *func,
       if (type == ThreadAPI::TD_OMP_TASKWAIT_DEPS) {
         std::vector<Dependency> dependencies =
             extractRuntimeDependencies(call, 2, 3);
-        WaitBoundaryInfo boundary =
-            recordBoundary(call, WaitBoundaryInfo::Kind::TaskwaitDeps,
-                           dependencies.empty());
-        addTaskEvent(OpenMPTaskEvent::Kind::TaskwaitDeps, call,
-                     state.scheduling_context_id, state.sequence_index,
-                     boundary.event_order,
-                     currentPhaseToken(),
-                     state.taskgroup_stack.empty() ? 0
-                                                   : state.taskgroup_stack.back(),
-                     currentRegionId(), boundary.semantic_entity_id, nullptr,
-                     WaitBoundaryInfo::Kind::TaskwaitDeps,
-                     dependencies.empty(), false, std::move(dependencies));
+        WaitBoundaryInfo boundary = recordBoundary(
+            call, WaitBoundaryInfo::Kind::TaskwaitDeps, dependencies.empty());
+        addTaskEvent(
+            OpenMPTaskEvent::Kind::TaskwaitDeps, call,
+            state.scheduling_context_id, state.sequence_index,
+            boundary.event_order, currentPhaseToken(),
+            state.taskgroup_stack.empty() ? 0 : state.taskgroup_stack.back(),
+            currentRegionId(), boundary.semantic_entity_id, nullptr,
+            WaitBoundaryInfo::Kind::TaskwaitDeps, dependencies.empty(), false,
+            std::move(dependencies));
         continue;
       }
 
       if (type == ThreadAPI::TD_OMP_TASKWAIT) {
         WaitBoundaryInfo boundary =
             recordBoundary(call, WaitBoundaryInfo::Kind::Taskwait);
-        addTaskEvent(OpenMPTaskEvent::Kind::Taskwait, call,
-                     state.scheduling_context_id, state.sequence_index,
-                     boundary.event_order,
-                     currentPhaseToken(),
-                     state.taskgroup_stack.empty() ? 0
-                                                   : state.taskgroup_stack.back(),
-                     currentRegionId(), boundary.semantic_entity_id, nullptr,
-                     WaitBoundaryInfo::Kind::Taskwait);
+        addTaskEvent(
+            OpenMPTaskEvent::Kind::Taskwait, call, state.scheduling_context_id,
+            state.sequence_index, boundary.event_order, currentPhaseToken(),
+            state.taskgroup_stack.empty() ? 0 : state.taskgroup_stack.back(),
+            currentRegionId(), boundary.semantic_entity_id, nullptr,
+            WaitBoundaryInfo::Kind::Taskwait, boundary.is_partial_wait);
         advanceCurrentPhase();
         continue;
       }
 
       if (type == ThreadAPI::TD_OMP_TASKGROUP_START) {
-        size_t taskgroup_id = state.next_taskgroup_id++;
-        state.taskgroup_stack.push_back(taskgroup_id);
-        state.phase_stack.push_back(state.next_phase_token++);
+        size_t taskgroup_id = 0;
+        if (precise_phase_tracking) {
+          taskgroup_id = state.next_taskgroup_id++;
+          state.taskgroup_stack.push_back(taskgroup_id);
+          state.phase_stack.push_back(state.next_phase_token++);
+        }
         TraversalState::RegionFrame frame =
             pushRegion(WaitBoundaryInfo::Kind::TaskgroupEnd,
                        SemanticEntityKind::Taskgroup, call);
         const size_t event_order = nextEventOrder();
         addTaskEvent(OpenMPTaskEvent::Kind::TaskgroupBegin, call,
                      state.scheduling_context_id, state.sequence_index,
-                     event_order,
-                     currentPhaseToken(), taskgroup_id, frame.id,
+                     event_order, currentPhaseToken(), taskgroup_id, frame.id,
                      frame.entity_id);
         ++m_summary.taskgroup_region_count;
         continue;
@@ -1158,9 +1194,10 @@ void OpenMPSemantics::scanSchedulingContext(const Function *func,
 
       if (type == ThreadAPI::TD_OMP_TASKGROUP_END) {
         WaitBoundaryInfo info =
-            recordBoundary(call, WaitBoundaryInfo::Kind::TaskgroupEnd, false, true);
+            recordBoundary(call, WaitBoundaryInfo::Kind::TaskgroupEnd,
+                           !precise_phase_tracking, true);
         size_t taskgroup_id = 0;
-        if (!state.taskgroup_stack.empty()) {
+        if (precise_phase_tracking && !state.taskgroup_stack.empty()) {
           taskgroup_id = state.taskgroup_stack.back();
           info.taskgroup_id = taskgroup_id;
           state.taskgroup_stack.pop_back();
@@ -1170,11 +1207,11 @@ void OpenMPSemantics::scanSchedulingContext(const Function *func,
         info.region_id = frame.id;
         addTaskEvent(OpenMPTaskEvent::Kind::TaskgroupEnd, call,
                      state.scheduling_context_id, state.sequence_index,
-                     info.event_order,
-                     currentPhaseToken(), taskgroup_id, frame.id,
-                     info.semantic_entity_id, nullptr,
-                     WaitBoundaryInfo::Kind::TaskgroupEnd, false, true);
-        if (!state.phase_stack.empty()) {
+                     info.event_order, currentPhaseToken(), taskgroup_id,
+                     frame.id, info.semantic_entity_id, nullptr,
+                     WaitBoundaryInfo::Kind::TaskgroupEnd, info.is_partial_wait,
+                     true);
+        if (precise_phase_tracking && !state.phase_stack.empty()) {
           state.phase_stack.pop_back();
         }
         advanceCurrentPhase();
@@ -1230,14 +1267,13 @@ void OpenMPSemantics::scanSchedulingContext(const Function *func,
                                           : WaitBoundaryInfo::Kind::Target;
         WaitBoundaryInfo boundary =
             recordBoundary(call, kind, is_nowait_variant);
-        addTaskEvent(OpenMPTaskEvent::Kind::TargetBoundary, call,
-                     state.scheduling_context_id, state.sequence_index,
-                     boundary.event_order,
-                     currentPhaseToken(),
-                     state.taskgroup_stack.empty() ? 0
-                                                   : state.taskgroup_stack.back(),
-                     currentRegionId(), boundary.semantic_entity_id, nullptr,
-                     kind, is_nowait_variant);
+        addTaskEvent(
+            OpenMPTaskEvent::Kind::TargetBoundary, call,
+            state.scheduling_context_id, state.sequence_index,
+            boundary.event_order, currentPhaseToken(),
+            state.taskgroup_stack.empty() ? 0 : state.taskgroup_stack.back(),
+            currentRegionId(), boundary.semantic_entity_id, nullptr, kind,
+            boundary.is_partial_wait);
         if (is_nowait_variant) {
           ++m_summary.target_nowait_boundary_count;
         }
@@ -1251,19 +1287,18 @@ void OpenMPSemantics::scanSchedulingContext(const Function *func,
           type == ThreadAPI::TD_OMP_TARGET_DATA_UPDATE) {
         ++m_summary.target_data_region_count;
         if (type == ThreadAPI::TD_OMP_TARGET_DATA_END) {
-          WaitBoundaryInfo::Kind kind = is_nowait_variant
-                                            ? WaitBoundaryInfo::Kind::TargetDataNowait
-                                            : WaitBoundaryInfo::Kind::TargetData;
+          WaitBoundaryInfo::Kind kind =
+              is_nowait_variant ? WaitBoundaryInfo::Kind::TargetDataNowait
+                                : WaitBoundaryInfo::Kind::TargetData;
           WaitBoundaryInfo boundary =
               recordBoundary(call, kind, is_nowait_variant);
-          addTaskEvent(OpenMPTaskEvent::Kind::TargetBoundary, call,
-                       state.scheduling_context_id, state.sequence_index,
-                       boundary.event_order,
-                       currentPhaseToken(),
-                       state.taskgroup_stack.empty() ? 0
-                                                     : state.taskgroup_stack.back(),
-                       currentRegionId(), boundary.semantic_entity_id, nullptr,
-                       kind, is_nowait_variant);
+          addTaskEvent(
+              OpenMPTaskEvent::Kind::TargetBoundary, call,
+              state.scheduling_context_id, state.sequence_index,
+              boundary.event_order, currentPhaseToken(),
+              state.taskgroup_stack.empty() ? 0 : state.taskgroup_stack.back(),
+              currentRegionId(), boundary.semantic_entity_id, nullptr, kind,
+              boundary.is_partial_wait);
           if (is_nowait_variant) {
             ++m_summary.target_nowait_boundary_count;
           }
@@ -1300,15 +1335,14 @@ void OpenMPSemantics::scanSchedulingContext(const Function *func,
         }
         WaitBoundaryInfo boundary =
             recordBoundary(call, WaitBoundaryInfo::Kind::DoacrossWait, true);
-        addTaskEvent(OpenMPTaskEvent::Kind::DoacrossWait, call,
-                     state.scheduling_context_id, state.sequence_index,
-                     boundary.event_order,
-                     currentPhaseToken(),
-                     state.taskgroup_stack.empty() ? 0
-                                                   : state.taskgroup_stack.back(),
-                     currentRegionId(), boundary.semantic_entity_id, nullptr,
-                     WaitBoundaryInfo::Kind::DoacrossWait, true, false,
-                     std::move(dependencies));
+        addTaskEvent(
+            OpenMPTaskEvent::Kind::DoacrossWait, call,
+            state.scheduling_context_id, state.sequence_index,
+            boundary.event_order, currentPhaseToken(),
+            state.taskgroup_stack.empty() ? 0 : state.taskgroup_stack.back(),
+            currentRegionId(), boundary.semantic_entity_id, nullptr,
+            WaitBoundaryInfo::Kind::DoacrossWait, true, false,
+            std::move(dependencies));
         continue;
       }
       if (type == ThreadAPI::TD_OMP_DOACROSS_SUBMIT) {
@@ -1333,32 +1367,31 @@ void OpenMPSemantics::scanSchedulingContext(const Function *func,
           }
         }
         const size_t event_order = nextEventOrder();
-        addTaskEvent(OpenMPTaskEvent::Kind::DoacrossSubmit, call,
-                     state.scheduling_context_id, state.sequence_index,
-                     event_order,
-                     currentPhaseToken(),
-                     state.taskgroup_stack.empty() ? 0
-                                                   : state.taskgroup_stack.back(),
-                     currentRegionId(), currentRegionEntityId(), nullptr,
-                     WaitBoundaryInfo::Kind::Unknown, false, false,
-                     std::move(dependencies));
+        addTaskEvent(
+            OpenMPTaskEvent::Kind::DoacrossSubmit, call,
+            state.scheduling_context_id, state.sequence_index, event_order,
+            currentPhaseToken(),
+            state.taskgroup_stack.empty() ? 0 : state.taskgroup_stack.back(),
+            currentRegionId(), currentRegionEntityId(), nullptr,
+            WaitBoundaryInfo::Kind::Unknown, false, false,
+            std::move(dependencies));
         continue;
       }
       if (type == ThreadAPI::TD_OMP_TASK_COMPLETE) {
         ++m_summary.detach_completion_count;
         const Task *completed_task =
-            call->arg_size() >= 3 ? getTaskForHandle(call->getArgOperand(2)) : nullptr;
+            call->arg_size() >= 3 ? getTaskForHandle(call->getArgOperand(2))
+                                  : nullptr;
         if (!completed_task) {
           ++m_deferred_reason_counts["omp_detached_task_completion_unresolved"];
         }
         const size_t event_order = nextEventOrder();
-        addTaskEvent(OpenMPTaskEvent::Kind::TaskComplete, call,
-                     state.scheduling_context_id, state.sequence_index,
-                     event_order,
-                     currentPhaseToken(),
-                     state.taskgroup_stack.empty() ? 0
-                                                   : state.taskgroup_stack.back(),
-                     currentRegionId(), currentRegionEntityId(), completed_task);
+        addTaskEvent(
+            OpenMPTaskEvent::Kind::TaskComplete, call,
+            state.scheduling_context_id, state.sequence_index, event_order,
+            currentPhaseToken(),
+            state.taskgroup_stack.empty() ? 0 : state.taskgroup_stack.back(),
+            currentRegionId(), currentRegionEntityId(), completed_task);
         continue;
       }
       if (type == ThreadAPI::TD_OMP_TEAMS ||
@@ -1428,15 +1461,14 @@ void OpenMPSemantics::scanSchedulingContext(const Function *func,
           frame.id = currentRegionId();
           frame.entity_id = currentRegionEntityId();
         }
-        addTaskEvent(kind == WaitBoundaryInfo::Kind::Barrier
-                         ? OpenMPTaskEvent::Kind::Barrier
-                         : OpenMPTaskEvent::Kind::Taskwait,
-                     call, state.scheduling_context_id, state.sequence_index,
-                     info.event_order,
-                     currentPhaseToken(),
-                     state.taskgroup_stack.empty() ? 0
-                                                   : state.taskgroup_stack.back(),
-                     frame.id, info.semantic_entity_id, nullptr, kind);
+        addTaskEvent(
+            kind == WaitBoundaryInfo::Kind::Barrier
+                ? OpenMPTaskEvent::Kind::Barrier
+                : OpenMPTaskEvent::Kind::Taskwait,
+            call, state.scheduling_context_id, state.sequence_index,
+            info.event_order, currentPhaseToken(),
+            state.taskgroup_stack.empty() ? 0 : state.taskgroup_stack.back(),
+            frame.id, info.semantic_entity_id, nullptr, kind);
         advanceCurrentPhase();
         continue;
       }
@@ -1467,34 +1499,32 @@ void OpenMPSemantics::scanSchedulingContext(const Function *func,
           }
           WaitBoundaryInfo boundary =
               recordBoundary(call, WaitBoundaryInfo::Kind::Flush, true);
-          addTaskEvent(OpenMPTaskEvent::Kind::Flush, call,
-                       state.scheduling_context_id, state.sequence_index,
-                       boundary.event_order,
-                       currentPhaseToken(),
-                       state.taskgroup_stack.empty() ? 0
-                                                     : state.taskgroup_stack.back(),
-                       currentRegionId(), boundary.semantic_entity_id, nullptr,
-                       WaitBoundaryInfo::Kind::Flush, true, false,
-                       std::move(dependencies));
+          addTaskEvent(
+              OpenMPTaskEvent::Kind::Flush, call, state.scheduling_context_id,
+              state.sequence_index, boundary.event_order, currentPhaseToken(),
+              state.taskgroup_stack.empty() ? 0 : state.taskgroup_stack.back(),
+              currentRegionId(), boundary.semantic_entity_id, nullptr,
+              WaitBoundaryInfo::Kind::Flush, true, false,
+              std::move(dependencies));
         } else if (type == ThreadAPI::TD_OMP_REDUCE_NOWAIT_END) {
           popRegion(WaitBoundaryInfo::Kind::Unknown, call);
           WaitBoundaryInfo boundary =
               recordBoundary(call, WaitBoundaryInfo::Kind::ReduceNowait, true);
-          addTaskEvent(OpenMPTaskEvent::Kind::ReductionNowaitBoundary, call,
-                       state.scheduling_context_id, state.sequence_index,
-                       boundary.event_order,
-                       currentPhaseToken(),
-                       state.taskgroup_stack.empty() ? 0
-                                                     : state.taskgroup_stack.back(),
-                       currentRegionId(), boundary.semantic_entity_id, nullptr,
-                       WaitBoundaryInfo::Kind::ReduceNowait, true);
+          addTaskEvent(
+              OpenMPTaskEvent::Kind::ReductionNowaitBoundary, call,
+              state.scheduling_context_id, state.sequence_index,
+              boundary.event_order, currentPhaseToken(),
+              state.taskgroup_stack.empty() ? 0 : state.taskgroup_stack.back(),
+              currentRegionId(), boundary.semantic_entity_id, nullptr,
+              WaitBoundaryInfo::Kind::ReduceNowait, true);
           ++m_summary.reduction_nowait_boundary_count;
         }
         continue;
       }
 
       if (type == ThreadAPI::TD_OMP_TASK_WITH_DEPS ||
-          type == ThreadAPI::TD_OMP_TASK || type == ThreadAPI::TD_OMP_TASKLOOP) {
+          type == ThreadAPI::TD_OMP_TASK ||
+          type == ThreadAPI::TD_OMP_TASKLOOP) {
         auto task = std::make_unique<Task>();
         task->task_create = call;
         task->task_function = extractTaskFunction(call);
@@ -1510,20 +1540,17 @@ void OpenMPSemantics::scanSchedulingContext(const Function *func,
         task->sequence_index = state.sequence_index++;
         task->event_order = nextEventOrder();
         task->region_id = currentRegionId();
-        task->semantic_entity_id =
-            addEntity(SemanticEntityKind::ExplicitTask, call,
-                      task->task_function ? task->task_function : func,
-                      state.scheduling_context_id, currentRegionEntityId(),
-                      currentRegionId(), currentPhaseToken(),
-                      task->taskgroup_id);
+        task->semantic_entity_id = addEntity(
+            SemanticEntityKind::ExplicitTask, call,
+            task->task_function ? task->task_function : func,
+            state.scheduling_context_id, currentRegionEntityId(),
+            currentRegionId(), currentPhaseToken(), task->taskgroup_id);
         addEvent(SemanticEventKind::TaskCreate, call, task->semantic_entity_id,
                  state.scheduling_context_id, task->sequence_index,
-                 task->event_order,
-                 currentRegionId(), currentPhaseToken());
+                 task->event_order, currentRegionId(), currentPhaseToken());
         addTaskEvent(OpenMPTaskEvent::Kind::TaskCreate, call,
                      state.scheduling_context_id, task->sequence_index,
-                     task->event_order,
-                     currentPhaseToken(), task->taskgroup_id,
+                     task->event_order, currentPhaseToken(), task->taskgroup_id,
                      currentRegionId(), task->semantic_entity_id, task.get());
 
         if (type == ThreadAPI::TD_OMP_TASK_WITH_DEPS) {
@@ -1555,11 +1582,10 @@ void OpenMPSemantics::scanSchedulingContext(const Function *func,
         if (task->task_function && !task->task_function->isDeclaration()) {
           TraversalState task_state;
           task_state.scheduling_context_id = m_next_scheduling_context_id++;
-          task_state.scheduling_context_entity_id =
-              addEntity(SemanticEntityKind::SchedulingContext, call,
-                        task->task_function, task_state.scheduling_context_id,
-                        task->semantic_entity_id, currentRegionId(),
-                        currentPhaseToken(), task->taskgroup_id);
+          task_state.scheduling_context_entity_id = addEntity(
+              SemanticEntityKind::SchedulingContext, call, task->task_function,
+              task_state.scheduling_context_id, task->semantic_entity_id,
+              currentRegionId(), currentPhaseToken(), task->taskgroup_id);
           task_state.phase_stack.push_back(0);
           task_state.anchor_inst = call;
           std::set<const Function *> nested_call_stack = call_stack;
@@ -1726,7 +1752,8 @@ std::vector<Dependency> OpenMPSemantics::extractRuntimeDependencies(
   return deps;
 }
 
-const CallBase *OpenMPSemantics::findTaskAllocCall(const Value *task_value) const {
+const CallBase *
+OpenMPSemantics::findTaskAllocCall(const Value *task_value) const {
   if (!task_value) {
     return nullptr;
   }
@@ -1787,7 +1814,8 @@ const CallBase *OpenMPSemantics::findTaskAllocCall(const Value *task_value) cons
   return nullptr;
 }
 
-const Value *OpenMPSemantics::canonicalizeTaskHandle(const Value *task_value) const {
+const Value *
+OpenMPSemantics::canonicalizeTaskHandle(const Value *task_value) const {
   if (!task_value) {
     return nullptr;
   }
@@ -1812,8 +1840,8 @@ OpenMPSemantics::extractTaskFunction(const CallBase *task_call) {
   if (const Function *callee = task_call->getCalledFunction()) {
     if (callee->hasName() && callee->getName().equals("GOMP_task") &&
         task_call->arg_size() >= 1) {
-      if (const auto *direct =
-              dyn_cast<Function>(task_call->getArgOperand(0)->stripPointerCasts())) {
+      if (const auto *direct = dyn_cast<Function>(
+              task_call->getArgOperand(0)->stripPointerCasts())) {
         return direct;
       }
     }

@@ -140,12 +140,14 @@ TEST_F(OpenMPSemanticsTest, ExtractsNormalizedTaskAndBoundaryEvents) {
   EXPECT_EQ(task_events[1].kind, OpenMPTaskEvent::Kind::TaskCreate);
   EXPECT_EQ(task_events[2].kind, OpenMPTaskEvent::Kind::Taskwait);
   EXPECT_EQ(task_events[3].kind, OpenMPTaskEvent::Kind::TaskgroupEnd);
-  EXPECT_EQ(task_events[1].scheduling_context_id, task_events[2].scheduling_context_id);
+  EXPECT_EQ(task_events[1].scheduling_context_id,
+            task_events[2].scheduling_context_id);
   EXPECT_LT(task_events[1].event_order, task_events[2].event_order);
   EXPECT_EQ(task_events[3].taskgroup_id, task_events[0].taskgroup_id);
 }
 
-TEST_F(OpenMPSemanticsTest, EventOrderStaysMonotonicAcrossConsecutiveBoundaries) {
+TEST_F(OpenMPSemanticsTest,
+       EventOrderStaysMonotonicAcrossConsecutiveBoundaries) {
   const char *source = R"(
     declare i32 @__kmpc_omp_task(i8*, i32, i8*)
     declare i32 @__kmpc_omp_taskwait(i8*, i32)
@@ -170,6 +172,51 @@ TEST_F(OpenMPSemanticsTest, EventOrderStaysMonotonicAcrossConsecutiveBoundaries)
   ASSERT_EQ(task_events.size(), 3u);
   EXPECT_LT(task_events[0].event_order, task_events[1].event_order);
   EXPECT_LT(task_events[1].event_order, task_events[2].event_order);
+}
+
+TEST_F(OpenMPSemanticsTest,
+       BranchLocalTaskwaitIsDeferredInsteadOfCreatingGlobalOrdering) {
+  const char *source = R"(
+    declare i32 @__kmpc_omp_task(i8*, i32, i8*)
+    declare i32 @__kmpc_omp_taskwait(i8*, i32)
+
+    define i32 @main(i1 %cond) {
+    entry:
+      call i32 @__kmpc_omp_task(i8* null, i32 0, i8* null)
+      br i1 %cond, label %then, label %else
+
+    then:
+      call i32 @__kmpc_omp_taskwait(i8* null, i32 0)
+      br label %join
+
+    else:
+      br label %join
+
+    join:
+      call i32 @__kmpc_omp_task(i8* null, i32 0, i8* null)
+      ret i32 0
+    }
+  )";
+
+  auto module = parseModule(source);
+  ASSERT_NE(module, nullptr);
+
+  OpenMPSemantics semantics(*module);
+  semantics.analyze();
+
+  ASSERT_EQ(semantics.getTasks().size(), 2u);
+  ASSERT_EQ(semantics.getWaitBoundaryInfos().size(), 1u);
+  EXPECT_TRUE(semantics.getWaitBoundaryInfos().front().is_partial_wait);
+  ASSERT_FALSE(semantics.getRelations().empty());
+  for (const auto &entry : semantics.getRelations()) {
+    EXPECT_EQ(entry.second.kind,
+              concurrency::RelationKind::UnknownDueToModelGap);
+  }
+
+  const auto &reasons = semantics.getDeferredReasonCounts();
+  auto it = reasons.find("omp_cfg_path_sensitive_semantics_deferred");
+  ASSERT_NE(it, reasons.end());
+  EXPECT_GT(it->second, 0u);
 }
 
 TEST_F(OpenMPSemanticsTest, NormalizesPartialBoundaryEventsAcrossKinds) {
@@ -213,14 +260,15 @@ TEST_F(OpenMPSemanticsTest, NormalizesPartialBoundaryEventsAcrossKinds) {
       continue;
     }
     ++partial_count;
-    saw_wait_deps = saw_wait_deps ||
-                    event.kind == OpenMPTaskEvent::Kind::TaskwaitDeps;
+    saw_wait_deps =
+        saw_wait_deps || event.kind == OpenMPTaskEvent::Kind::TaskwaitDeps;
     saw_flush = saw_flush || event.kind == OpenMPTaskEvent::Kind::Flush;
     saw_doacross =
         saw_doacross || event.kind == OpenMPTaskEvent::Kind::DoacrossWait;
     saw_target =
-        saw_target || (event.kind == OpenMPTaskEvent::Kind::TargetBoundary &&
-                       event.boundary_kind == WaitBoundaryInfo::Kind::TargetDataNowait);
+        saw_target ||
+        (event.kind == OpenMPTaskEvent::Kind::TargetBoundary &&
+         event.boundary_kind == WaitBoundaryInfo::Kind::TargetDataNowait);
     saw_reduce = saw_reduce ||
                  event.kind == OpenMPTaskEvent::Kind::ReductionNowaitBoundary;
   }
@@ -343,7 +391,8 @@ TEST_F(OpenMPSemanticsTest,
   EXPECT_NE(taskgroup_id, parallel_region_id);
 }
 
-TEST_F(OpenMPSemanticsTest, ExplicitGNUParallelEndKeepsRegionOpenUntilBoundary) {
+TEST_F(OpenMPSemanticsTest,
+       ExplicitGNUParallelEndKeepsRegionOpenUntilBoundary) {
   const char *source = R"(
     declare void @GOMP_parallel(void ()*, i8*, i32, i32)
     declare void @GOMP_parallel_end()
@@ -396,7 +445,8 @@ TEST_F(OpenMPSemanticsTest, ExplicitGNUParallelEndKeepsRegionOpenUntilBoundary) 
   EXPECT_EQ(taskgroup_parent_ids[1], root_context_id);
 }
 
-TEST_F(OpenMPSemanticsTest, ValidSectionsAndReduceDoNotTriggerMalformedRegionCounters) {
+TEST_F(OpenMPSemanticsTest,
+       ValidSectionsAndReduceDoNotTriggerMalformedRegionCounters) {
   const char *source = R"(
     declare i32 @__kmpc_sections_init(i8*, i32)
     declare void @__kmpc_end_sections(i8*, i32)
@@ -675,8 +725,7 @@ TEST_F(OpenMPSemanticsTest,
   EXPECT_TRUE(saw_unknown_gap);
 }
 
-TEST_F(OpenMPSemanticsTest,
-       TargetDataUpdateDoesNotCreateTaskOrderingBoundary) {
+TEST_F(OpenMPSemanticsTest, TargetDataUpdateDoesNotCreateTaskOrderingBoundary) {
   const char *source = R"(
     declare i32 @__kmpc_omp_task(i8*, i32, i8*)
     declare i32 @__tgt_target_data_update(i8*, i32)
@@ -759,7 +808,8 @@ TEST_F(OpenMPSemanticsTest, ReusedTaskFunctionGetsDistinctSchedulingContexts) {
             grandchild_tasks[1]->scheduling_context_id);
   for (const Task *child : child_tasks) {
     for (const Task *grandchild : grandchild_tasks) {
-      EXPECT_NE(child->scheduling_context_id, grandchild->scheduling_context_id);
+      EXPECT_NE(child->scheduling_context_id,
+                grandchild->scheduling_context_id);
     }
   }
 

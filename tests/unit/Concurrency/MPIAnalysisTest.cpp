@@ -411,11 +411,11 @@ TEST_F(MPIAnalysisTest, NonblockingCollectiveUsesSingleRequestArity) {
   analysis.runAnalysis();
 
   const auto &request_sets = analysis.getRequestSetFacts();
-  auto issued = std::find_if(
-      request_sets.begin(), request_sets.end(),
-      [](const MPIRequestSetFact &fact) {
-        return fact.provenance == "mpi_request_set_issue";
-      });
+  auto issued =
+      std::find_if(request_sets.begin(), request_sets.end(),
+                   [](const MPIRequestSetFact &fact) {
+                     return fact.provenance == "mpi_request_set_issue";
+                   });
   ASSERT_NE(issued, request_sets.end());
   EXPECT_EQ(issued->arity, MPIRequestArity::Single);
   EXPECT_EQ(issued->kind, MPIRequestSetKind::Collective);
@@ -502,6 +502,59 @@ TEST_F(MPIAnalysisTest, SemanticEventsCapturePointToPointObligations) {
   EXPECT_EQ(obligations.front().proof, MPIMatchProofKind::MustMatch);
   EXPECT_EQ(obligations.front().relation.proof,
             concurrency::ProofStrength::Must);
+}
+
+TEST_F(MPIAnalysisTest,
+       CollectiveSemanticEventsPreserveVariantSpecificOperands) {
+  const char *source = R"(
+    declare i32 @MPI_Gatherv(i8*, i32, i32, i8*, i32*, i32*, i32, i32, i8*)
+    declare i32 @MPI_Scatterv(i8*, i32*, i32*, i32, i8*, i32, i32, i32, i8*)
+
+    @recvcounts = global [2 x i32] [i32 1, i32 1]
+    @displs = global [2 x i32] [i32 0, i32 1]
+
+    define i32 @main(i8* %comm) {
+    entry:
+      %rc = getelementptr inbounds [2 x i32], [2 x i32]* @recvcounts, i64 0, i64 0
+      %dp = getelementptr inbounds [2 x i32], [2 x i32]* @displs, i64 0, i64 0
+      call i32 @MPI_Gatherv(i8* null, i32 4, i32 11, i8* null, i32* %rc, i32* %dp,
+                            i32 13, i32 7, i8* %comm)
+      call i32 @MPI_Scatterv(i8* null, i32* %rc, i32* %dp, i32 17, i8* null, i32 5,
+                             i32 19, i32 3, i8* %comm)
+      ret i32 0
+    }
+  )";
+
+  auto module = parseModule(source);
+  ASSERT_NE(module, nullptr);
+
+  MPIAnalysis analysis(*module);
+  analysis.runAnalysis();
+
+  bool saw_gatherv = false;
+  bool saw_scatterv = false;
+  for (const auto &event : analysis.getProcessModel().getSemanticEvents()) {
+    if (!event.has_collective_semantics) {
+      continue;
+    }
+    if (event.collective.variant == MPICollectiveVariant::Gatherv) {
+      saw_gatherv = true;
+      EXPECT_EQ(event.collective.count, 4);
+      EXPECT_EQ(event.collective.datatype, 11);
+      EXPECT_EQ(event.collective.recv_datatype, 13);
+      EXPECT_EQ(event.collective.root_rank, 7);
+    }
+    if (event.collective.variant == MPICollectiveVariant::Scatterv) {
+      saw_scatterv = true;
+      EXPECT_EQ(event.collective.datatype, 17);
+      EXPECT_EQ(event.collective.recv_count, 5);
+      EXPECT_EQ(event.collective.recv_datatype, 19);
+      EXPECT_EQ(event.collective.root_rank, 3);
+    }
+  }
+
+  EXPECT_TRUE(saw_gatherv);
+  EXPECT_TRUE(saw_scatterv);
 }
 
 TEST_F(MPIAnalysisTest, SemanticEventsCaptureRMAEpochFacts) {
@@ -663,11 +716,11 @@ TEST_F(MPIAnalysisTest, StartallActivatesPersistentRequestArrays) {
 
   EXPECT_EQ(analysis.getResults().orphaned_requests.size(), 2u);
   const auto &request_sets = analysis.getRequestSetFacts();
-  auto activation = std::find_if(
-      request_sets.begin(), request_sets.end(),
-      [](const MPIRequestSetFact &fact) {
-        return fact.provenance == "mpi_request_set_activate";
-      });
+  auto activation =
+      std::find_if(request_sets.begin(), request_sets.end(),
+                   [](const MPIRequestSetFact &fact) {
+                     return fact.provenance == "mpi_request_set_activate";
+                   });
   ASSERT_NE(activation, request_sets.end());
   EXPECT_EQ(activation->arity, MPIRequestArity::Array);
   EXPECT_EQ(activation->completion_scope,
@@ -867,4 +920,3 @@ TEST_F(MPIAnalysisTest, PrintResultsIncludesDetailedCounters) {
   EXPECT_NE(output.find("Deferred MPI semantic lowering total: 1"),
             std::string::npos);
 }
-
