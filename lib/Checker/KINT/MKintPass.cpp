@@ -9,6 +9,7 @@
 #include <fstream>
 #include <functional>
 
+#include <llvm/ADT/SmallString.h>
 #include <llvm/Analysis/AliasAnalysis.h>
 #include <llvm/Analysis/MemoryLocation.h>
 #include <llvm/Analysis/MemorySSA.h>
@@ -22,7 +23,6 @@
 #include <llvm/IR/Instructions.h>
 #include <llvm/IR/IntrinsicInst.h>
 #include <llvm/IR/Module.h>
-#include <llvm/ADT/SmallString.h>
 #include <llvm/Support/raw_ostream.h>
 #include <z3++.h>
 

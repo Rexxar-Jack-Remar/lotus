@@ -294,6 +294,76 @@ TEST_F(LoopClassificationTest,
 }
 
 TEST_F(LoopClassificationTest,
+       RejectsMalformedLoopGoverningIVSCCFromLinearIVClassification) {
+  llvm::LLVMContext context;
+  auto module = parseModuleChecked(context, R"(
+    define i32 @malformed_governing_iv_scc(i32 %n) {
+    entry:
+      br label %header
+
+    header:
+      %i = phi i32 [ 0, %entry ], [ %i.next, %latch ]
+      %limit = sub i32 %n, %i
+      %cmp = icmp slt i32 %i, %limit
+      br i1 %cmp, label %body, label %exit
+
+    body:
+      br label %latch
+
+    latch:
+      %i.next = add i32 %i, 1
+      br label %header
+
+    exit:
+      ret i32 %i
+    }
+  )");
+  auto *function = module->getFunction("malformed_governing_iv_scc");
+  ASSERT_NE(function, nullptr);
+
+  buildPDG(*module);
+
+  llvm::PassBuilder PB;
+  llvm::FunctionAnalysisManager FAM;
+  PB.registerFunctionAnalyses(FAM);
+  auto &DT = FAM.getResult<llvm::DominatorTreeAnalysis>(*function);
+  auto &PDT = FAM.getResult<llvm::PostDominatorTreeAnalysis>(*function);
+  auto &LI = FAM.getResult<llvm::LoopAnalysis>(*function);
+  auto &SE = FAM.getResult<llvm::ScalarEvolutionAnalysis>(*function);
+
+  FunctionLoopAnalyses analyses(*function, LI, DT, PDT);
+  analyses.materializeDependenceGraphs(graph);
+  analyses.materializeScalarAnalyses(SE, LI);
+  analyses.materializeLoopEnvironments();
+  analyses.materializeLoopCarriedDependencies(DT, PDT);
+  analyses.materializeIterationSpaceAnalyses(SE);
+  analyses.materializeSCCAttrs(DT, PDT);
+
+  auto *content = analyses.getLoopContent(**LI.begin());
+  ASSERT_NE(content, nullptr);
+  auto *ivs = content->getInductionVariableManager();
+  auto *attrs = content->getSCCAttrs();
+  ASSERT_NE(ivs, nullptr);
+  ASSERT_NE(attrs, nullptr);
+
+  auto *loop = content->getLoopStructure();
+  auto ivSet = ivs->getInductionVariables(*loop);
+  ASSERT_EQ(ivSet.size(), 1u);
+  auto *iv = *ivSet.begin();
+  ASSERT_NE(iv, nullptr);
+
+  auto *ivSCC = content->getSCCDAG()->getSCC(iv->getLoopEntryPHI());
+  ASSERT_NE(ivSCC, nullptr);
+  lotus::analysis::loop::LoopGoverningInductionVariable malformedAttribution(
+      loop, *iv, *ivSCC, loop->getLoopExitBasicBlocks());
+  EXPECT_FALSE(malformedAttribution.isSCCContainingIVWellFormed());
+
+  auto *info = attrs->getSCCAttrs(ivSCC);
+  ASSERT_NE(info, nullptr);
+  EXPECT_NE(info->getKind(), GenericSCC::LINEAR_INDUCTION_VARIABLE);
+}
+
+TEST_F(LoopClassificationTest,
        ClassifiesPeriodicSCCAndMarksItNonReducibleForLiveOuts) {
   llvm::LLVMContext context;
   auto module = parseModuleChecked(context, R"(

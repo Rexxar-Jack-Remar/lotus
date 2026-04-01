@@ -41,7 +41,7 @@ namespace seadsa {
  */
 
 static bool
-visitIntStoreInst(StoreInst *SI, Function &F, const DataLayout &DL,
+visitIntStoreInst(StoreInst *SI, const DataLayout &DL,
                   SmallPtrSetImpl<StoreInst *> &StoresToErase,
                   SmallPtrSetImpl<Instruction *> &MaybeUnusedInsts) {
 
@@ -63,7 +63,7 @@ visitIntStoreInst(StoreInst *SI, Function &F, const DataLayout &DL,
   IRBuilder<> IRB(LI);
 
   auto *Int8PtrPtrTy = Type::getInt8PtrTy(SI->getContext())->getPointerTo();
-  auto newLI = IRB.CreateLoad(Type::getInt8PtrTy(SI->getContext()),
+  auto *newLI = IRB.CreateLoad(Type::getInt8PtrTy(SI->getContext()),
                               IRB.CreateBitCast(loadAddr, Int8PtrPtrTy));
   if (LI->hasName()) newLI->setName(LI->getName());
   newLI->setAlignment(LI->getAlign());
@@ -71,7 +71,7 @@ visitIntStoreInst(StoreInst *SI, Function &F, const DataLayout &DL,
   newLI->setSyncScopeID(LI->getSyncScopeID());
 
   IRB.SetInsertPoint(SI);
-  auto newSI =
+  auto *newSI =
       IRB.CreateStore(newLI, IRB.CreateBitCast(storeAddr, Int8PtrPtrTy));
   newSI->setAlignment(SI->getAlign());
   newSI->setOrdering(SI->getOrdering());
@@ -330,7 +330,7 @@ public:
         IRB.SetInsertPoint(SI);
         auto *ptr = SI->getPointerOperand();
         ptr = IRB.CreateBitCast(ptr, m_ty->getPointerTo());
-        auto newStore = IRB.CreateStore(res, ptr);
+        auto *newStore = IRB.CreateStore(res, ptr);
         newStore->setVolatile(SI->isVolatile());
         newStore->setAlignment(SI->getAlign());
         newStore->setOrdering(SI->getOrdering());
@@ -491,7 +491,7 @@ bool RemovePtrToInt::runOnFunction(Function &F) {
         bool flag = false;
         flag |= visitIntStoreInst2(SI, F, DL, StoresToErase, MaybeUnusedInsts);
         flag |= visitStoreInst(SI, F, DL, StoresToErase, MaybeUnusedInsts);
-        flag |= visitIntStoreInst(SI, F, DL, StoresToErase, MaybeUnusedInsts);
+        flag |= visitIntStoreInst(SI, DL, StoresToErase, MaybeUnusedInsts);
         Changed |= flag;
         continue;
       }
@@ -522,7 +522,7 @@ bool RemovePtrToInt::runOnFunction(Function &F) {
   // removed before this call. So it should be safe to keep its original type
   // and map it to WeakTrackingVH as the following code does.
   SmallVector<WeakTrackingVH, 16> TriviallyDeadHandles;
-  for (auto i : TriviallyDeadInstructions)  
+  for (auto *i : TriviallyDeadInstructions)  
       TriviallyDeadHandles.emplace_back(WeakTrackingVH(i));
   
   RecursivelyDeleteTriviallyDeadInstructions(TriviallyDeadHandles);

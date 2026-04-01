@@ -9,6 +9,52 @@ namespace lotus {
 namespace analysis {
 namespace loop {
 
+namespace {
+
+std::unordered_set<const Function *>
+collectReachableFunctions(pdg::PDGCallGraph &callGraph, Function *entryFunction) {
+  std::unordered_set<const Function *> reachableFunctions;
+  if (entryFunction == nullptr) {
+    return reachableFunctions;
+  }
+
+  std::queue<const Function *> worklist;
+  worklist.push(entryFunction);
+  reachableFunctions.insert(entryFunction);
+  while (!worklist.empty()) {
+    auto *current = worklist.front();
+    worklist.pop();
+    auto *currentNode = callGraph.getNode(*const_cast<Function *>(current));
+    if (currentNode == nullptr) {
+      continue;
+    }
+
+    for (auto *succ : currentNode->getOutNeighbors()) {
+      auto *callee = dyn_cast_or_null<Function>(succ->getValue());
+      if (callee == nullptr ||
+          !reachableFunctions.insert(callee).second) {
+        continue;
+      }
+      worklist.push(callee);
+    }
+  }
+
+  return reachableFunctions;
+}
+
+std::map<const Function *, std::unordered_set<LoopStructure *>>
+collectOutermostLoops(std::vector<LoopStructure *> const &allLoops) {
+  std::map<const Function *, std::unordered_set<LoopStructure *>> outermostLoops;
+  for (auto *loop : allLoops) {
+    if (loop->getNestingLevel() == 1) {
+      outermostLoops[loop->getFunction()].insert(loop);
+    }
+  }
+  return outermostLoops;
+}
+
+} // namespace
+
 std::set<LoopNestingGraphEdge *> LoopNestingGraphLoopNode::getIncomingEdges(void) const {
   return this->incomingEdges;
 }
@@ -143,28 +189,7 @@ std::unique_ptr<LoopNestingGraph> LoopNestingGraph::buildFromAnalyses(
     callGraph.build(module);
   }
 
-  std::unordered_set<const Function *> reachableFunctions;
-  if (entryFunction != nullptr) {
-    std::queue<const Function *> worklist;
-    worklist.push(entryFunction);
-    reachableFunctions.insert(entryFunction);
-    while (!worklist.empty()) {
-      auto *current = worklist.front();
-      worklist.pop();
-      auto *currentNode = callGraph.getNode(*const_cast<Function *>(current));
-      if (currentNode == nullptr) {
-        continue;
-      }
-      for (auto *succ : currentNode->getOutNeighbors()) {
-        auto *callee = dyn_cast_or_null<Function>(succ->getValue());
-        if (callee == nullptr ||
-            !reachableFunctions.insert(callee).second) {
-          continue;
-        }
-        worklist.push(callee);
-      }
-    }
-  }
+  auto reachableFunctions = collectReachableFunctions(callGraph, entryFunction);
 
   std::vector<LoopStructure *> allLoops;
   for (auto *analysis : analyses) {
@@ -196,12 +221,7 @@ std::unique_ptr<LoopNestingGraph> LoopNestingGraph::buildFromAnalyses(
     }
   }
 
-  std::map<const Function *, std::unordered_set<LoopStructure *>> outermostLoops;
-  for (auto *loop : allLoops) {
-    if (loop->getNestingLevel() == 1) {
-      outermostLoops[loop->getFunction()].insert(loop);
-    }
-  }
+  auto outermostLoops = collectOutermostLoops(allLoops);
 
   for (auto *analysis : analyses) {
     auto *callerFunction = analysis->getFunction();
@@ -228,6 +248,10 @@ std::unique_ptr<LoopNestingGraph> LoopNestingGraph::buildFromAnalyses(
         auto *parentLoop = loopNode->getLoop();
 
         if (auto *callee = callBase->getCalledFunction()) {
+          if (entryFunction != nullptr &&
+              reachableFunctions.count(callee) == 0) {
+            continue;
+          }
           auto it = outermostLoops.find(callee);
           if (it == outermostLoops.end()) {
             continue;
@@ -240,6 +264,10 @@ std::unique_ptr<LoopNestingGraph> LoopNestingGraph::buildFromAnalyses(
 
         auto candidates = callGraph.getIndirectCallCandidates(*callBase, module);
         for (auto *callee : candidates) {
+          if (entryFunction != nullptr &&
+              reachableFunctions.count(callee) == 0) {
+            continue;
+          }
           auto it = outermostLoops.find(callee);
           if (it == outermostLoops.end()) {
             continue;

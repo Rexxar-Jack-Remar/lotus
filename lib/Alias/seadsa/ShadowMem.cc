@@ -1009,7 +1009,7 @@ void ShadowMemImpl::visitMainFunction(Function &fn) {
   }
 
   // iterate over all globals
-  for (auto gv : globals) {
+  for (auto *gv : globals) {
     // skip globals that are used internally by llvm
     if (gv->getSection().equals("llvm.metadata")) continue;
     if (gv->getName().equals("llvm.global_ctors") ||
@@ -1919,7 +1919,7 @@ bool ShadowMemPass::runOnModule(llvm::Module &M) {
   AllocSiteInfo &asi = getAnalysis<AllocSiteInfo>();
   auto &tliWrapper = getAnalysis<TargetLibraryInfoWrapperPass>();
   CallGraph *cg = nullptr;
-  auto cgPass = getAnalysisIfAvailable<CallGraphWrapperPass>();
+  auto *cgPass = getAnalysisIfAvailable<CallGraphWrapperPass>();
   if (cgPass) cg = &cgPass->getCallGraph();
 
   LOG("shadow_verbose", errs() << "Module before shadow insertion:\n"

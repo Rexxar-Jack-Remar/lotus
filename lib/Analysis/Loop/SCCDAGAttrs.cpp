@@ -484,10 +484,10 @@ SCCDAGAttrs::checkIfSCCOnlyContainsInductionVariables(
         loopNode->getInnermostLoopThatContains(iv->getLoopEntryPHI());
     assert(ivLoop != nullptr);
     auto exitBlocks = ivLoop->getLoopExitBasicBlocks();
-    LoopGoverningInductionVariable attribution(loopNode->getLoop(), *iv,
+    LoopGoverningInductionVariable attribution(loopNode->getLoop(), *iv, *scc,
                                                exitBlocks);
     if (!attribution.isSCCContainingIVWellFormed()) {
-      continue;
+      return {};
     }
     if (auto *cmp =
             attribution.getHeaderCompareInstructionToComputeExitCondition()) {

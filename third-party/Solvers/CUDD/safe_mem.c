@@ -1,7 +1,9 @@
 /* LINTLIBRARY */
 
-#include <stdio.h>
 #include "Solvers/CUDD/util.h"
+
+#include <stdio.h>
+
 
 /*
  *  These are interface routines to be placed between a program and the
