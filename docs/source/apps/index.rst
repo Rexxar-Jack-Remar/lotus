@@ -13,3 +13,6 @@ Components
    :maxdepth: 2
 
    fuzzing_support
+   fuzzing_analysis
+   aflgo_compiler
+   aflgo_linker

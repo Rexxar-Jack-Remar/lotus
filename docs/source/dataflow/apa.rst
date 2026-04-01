@@ -1,7 +1,7 @@
-Algebraic Path Analysis (APA)
+Algebraic Program Analysis (APA)
 =============================
 
-``APA`` is Lotus's elimination-based dataflow framework.
+``APA`` is Lotus's elimination-based dataflow analysis (or, "algebraic program analysis") framework.
 
 **Headers**: ``include/Dataflow/APA/``
 
@@ -10,7 +10,7 @@ Algebraic Path Analysis (APA)
 Overview
 --------
 
-APA expresses classical dataflow problems as algebraic path problems and solves
+APA expresses classical dataflow problems as algebraic program analysis and solves
 them with elimination-style algorithms. The framework currently provides LLVM
 clients for standard intraprocedural analyses and reusable solver backends.
 

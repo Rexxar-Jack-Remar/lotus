@@ -4,7 +4,7 @@ This library provides multiple interprocedural and intraprocedural dataflow solv
 
 | Subdir | Purpose |
 |--------|---------|
-| **APA** | Algebraic path analysis and path-expression infrastructure for dataflow problems. |
+| **APA** | Algebraic progrram analysis infrastructure for dataflow problems. |
 | **IFDS/IDE** | Interprocedural tabulation. IFDS: reachability / may-analyses (taint, uninit). IDE: value-carrying facts (constant prop, typestate). |
 | **Mono** | Monotone frameworks. Intra- and interprocedural; call-string context. Constant prop, liveness, taint. |
 | **NPA** | Newtonian program analysis over ω-continuous semirings. Generalizes lattices. TOPLAS 2016 / LCFL support. |

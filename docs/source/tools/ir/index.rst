@@ -27,5 +27,10 @@ Key features:
 - Security policy checks
 - Subgraph export (DOT)
 
-See :doc:`../../user_guide/pdg_query_language` and ``examples/pdg-queries/`` for a complete
-language reference and examples.
+See :doc:`../../user_guide/pdg_query_language` for the language reference and
+:doc:`examples` for the in-repo query cookbook.
+
+.. toctree::
+   :maxdepth: 1
+
+   examples

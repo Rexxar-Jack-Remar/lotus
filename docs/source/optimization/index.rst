@@ -118,6 +118,8 @@ Interprocedural optimizations that use MemorySSA instrumentation (ShadowMem):
 All implemented under ``lib/Optimization`` and default to singleton regions
 unless configured otherwise.
 
+See :doc:`ip` for the dedicated page for the ``lib/Optimization/IP/`` subtree.
+
 Integration with Analysis
 -------------------------
 
@@ -145,5 +147,6 @@ These optimization passes can be used to prepare code for analysis:
 .. toctree::
    :maxdepth: 2
 
+   ip
    pe
    swprefetching

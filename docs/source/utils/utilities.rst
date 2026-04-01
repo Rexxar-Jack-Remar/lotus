@@ -3,6 +3,18 @@ Utility Libraries
 
 Lotus provides comprehensive utility libraries organized into categories: Platform, Random, Types, Benchmark, ADT, Formats, Algorithms, Vendor, LLVM, and Parallel.
 
+Dedicated module pages:
+
+- :doc:`adt`
+- :doc:`algorithms`
+- :doc:`benchmark`
+- :doc:`formats`
+- :doc:`llvm`
+- :doc:`parallel`
+- :doc:`platform`
+- :doc:`random`
+- :doc:`types`
+
 Platform Utilities
 ------------------
 

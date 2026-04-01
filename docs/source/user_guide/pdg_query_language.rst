@@ -723,4 +723,5 @@ See Also
 - :doc:`ir/pdg` - PDG construction details
 - :doc:`tutorials` - PDG usage examples
 - :doc:`../developer/api_reference` - Programmatic PDG access
-- ``examples/how-to/build-pdg/pdg-queries/`` - More example queries
+- ``tools/ir/examples/`` - In-repo example query cookbook
+- :doc:`../tools/ir/examples` - Rendered documentation for the example queries

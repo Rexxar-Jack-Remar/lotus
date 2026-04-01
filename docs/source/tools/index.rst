@@ -23,7 +23,6 @@ The documentation is organized to match the ``tools/`` directory structure:
    checker/index
    dataflow/index
    ir/index
-   mcp/index
    optimization/index
    solver/index
    verifier/index

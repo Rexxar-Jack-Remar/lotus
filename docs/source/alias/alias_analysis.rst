@@ -3,6 +3,12 @@ Alias Analysis Components
 
 Lotus provides several alias analysis algorithms with different precision/performance trade-offs. Each analysis makes different trade-offs between precision, scalability, and analysis cost.
 
+Reusable support modules are documented separately:
+
+- :doc:`metrics` for evaluation helpers
+- :doc:`ptsset` for points-to set backends
+- :doc:`spec` for external-library specification support
+
 Analysis Selection Guide
 -------------------------
 

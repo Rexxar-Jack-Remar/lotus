@@ -3,6 +3,12 @@ Annotation Framework
 
 Lotus provides annotation frameworks for specifying and analyzing program behavior. The annotation system is organized into several components for tracking argument positions, modification/reference effects, pointer effects, and taint analysis.
 
+Dedicated module pages:
+
+- :doc:`modref` for external mod/ref summaries
+- :doc:`pointer_effects` for pointer-side-effect specifications
+- :doc:`taint_config` for taint source, sink, and propagation specs
+
 Position Tracking
 -----------------
 

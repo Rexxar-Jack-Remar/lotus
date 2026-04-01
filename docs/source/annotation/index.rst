@@ -7,3 +7,6 @@ This section covers the annotation system for specifying analysis properties.
    :maxdepth: 2
 
    annotation
+   modref
+   pointer_effects
+   taint_config

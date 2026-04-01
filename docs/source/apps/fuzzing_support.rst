@@ -12,6 +12,12 @@ Integrates AFLGo, Hawkeye, and DAFL algorithms for directed greybox fuzzing. The
 
 **Components**: Directed fuzzing algorithms, distance analysis, target detection, compiler/linker plugins, IR mutation utilities.
 
+Detailed module pages:
+
+- :doc:`fuzzing_analysis`
+- :doc:`aflgo_compiler`
+- :doc:`aflgo_linker`
+
 **Algorithms Supported**:
 * **AFLGo (CCS 17)**: Distance-based power scheduling, call graph distances
 * **Hawkeye (CCS 18)**: Function-level analysis, rare branch prioritization

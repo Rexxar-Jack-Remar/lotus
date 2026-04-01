@@ -21,6 +21,8 @@ At a glance:
   cryptographic code. See :doc:`crypto`.
 - **DebugInfo** (``lib/Analysis/DebugInfo``): Source-location and metadata
   extraction support. See :doc:`debug_info`.
+- **Loop** (``lib/Analysis/Loop``): Loop-dependence, iteration-space, and
+  transformation-oriented loop analyses. See :doc:`loop`.
 - **NullPointer** (``lib/Analysis/NullPointer``): A family of nullness and
   null-flow analyses. See :doc:`null_pointer`.
 - **Spectre** (``lib/Analysis/Spectre``): Cache speculation analysis for
@@ -40,6 +42,7 @@ details.
    concurrency
    crypto
    debug_info
+   loop
    null_pointer
    spectre
    type_hierarchy

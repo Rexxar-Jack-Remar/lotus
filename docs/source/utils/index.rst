@@ -7,3 +7,12 @@ This section covers utility functions and helpers available in Lotus.
    :maxdepth: 2
 
    utilities
+   adt
+   algorithms
+   benchmark
+   formats
+   llvm
+   parallel
+   platform
+   random
+   types
