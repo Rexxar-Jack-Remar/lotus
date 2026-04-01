@@ -10,4 +10,6 @@ public:
   unsigned mk();
   unsigned find(unsigned i);
   unsigned merge(unsigned p, unsigned q);
+  void join(unsigned p, unsigned q) { merge(p, q); }
+  bool connected(unsigned p, unsigned q) { return find(p) == find(q); }
 };

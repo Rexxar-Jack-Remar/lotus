@@ -1,5 +1,6 @@
 #include "CFL/InterDyckGraphReduce/SummaryEdge.h"
-#include "CFL/InterDyckGraphReduce/DisjointSet.h"
+#include "Utils/ADT/UnionFind.h"
+
 #include <iostream>
 #include <list>
 #include <string>
@@ -189,7 +190,7 @@ int main() {
       }
     }
 
-    DisjointSet m_sets(sGraph.nodes.size());
+    UnionFind m_sets(sGraph.nodes.size());
 
     while (!worklist.empty()) {
       unsigned first = worklist.front().first;

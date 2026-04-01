@@ -1,6 +1,5 @@
 add_library(CanaryNisse STATIC
         Edge.cpp
-        UnionFind.cpp
         NisseAnalysis.cpp
         NissePass.cpp
         NissePlugin.cpp
@@ -8,6 +7,7 @@ add_library(CanaryNisse STATIC
 )
 
 target_link_libraries(CanaryNisse
+        CanaryADT
         LLVMAnalysis
         LLVMCore
         LLVMSupport

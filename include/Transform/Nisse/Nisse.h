@@ -173,39 +173,6 @@ public:
   friend std::ostream &operator<<(std::ostream &os, const Edge &e);
 };
 
-/// \struct UnionFind
-///
-/// \brief Implements union-find structure for Kruskal's Maximal Spanning Tree
-/// algorithm
-/// \see NisseAnalysis
-struct UnionFind {
-private:
-  int cnt;                     ///< Number of elements in the structure.
-  std::map<void *, void *> id; ///< Maps elements to their root.
-  std::map<void *, int> sz;    ///< Maps roots to the size of their group.
-
-public:
-  /// \brief Initialises a new element in the structure.
-  /// \param x Element to initialise.
-  void init(void *x);
-
-  /// \brief Finds the root of x, and collapses the path from x to its root.
-  /// \param x Element to find the root of.
-  /// \return The root of x.
-  void *find(void *x);
-
-  /// \brief Merges the sets of x and y, updates the weights, and makes the
-  /// smaller root point to larger one. \param x First element to merge. \param
-  /// y Second element to merge.
-  void merge(void *x, void *y);
-
-  /// \brief Checks if x and y belong to the same set.
-  /// \param x First element to check.
-  /// \param y Second element to check.
-  /// \return true is x and y belong to the same set.
-  bool connected(void *x, void *y);
-};
-
 struct AnalysisUtil {
 public:
   /// \brief Find the return block of a function.
@@ -246,7 +213,7 @@ public:
 /// \struct NisseAnalysis
 ///
 /// \brief Computes the maximum spanning tree of a function's CFG
-/// \see Edge, UnionFind
+/// \see Edge
 struct NisseAnalysis : public llvm::AnalysisInfoMixin<NisseAnalysis> {
 
 private:

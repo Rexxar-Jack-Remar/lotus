@@ -14,7 +14,7 @@
 
 #include <iostream>
 
-#include "Utils/ADT/egraphs.h"
+#include "Utils/ADT/EGraphs.h"
 
 enum class NodeKind {
   Constant, Variable,
@@ -90,7 +90,7 @@ std::ostream& operator<<(std::ostream& stream, const NodeData& data) {
 }
 
 int main() {
-  using EGraph = egraphs::EGraph<NodeKind, NodeData>;
+  using EGraph = graphs::EGraph<NodeKind, NodeData>;
   using Node = EGraph::Node;
   using EClass = EGraph::EClass;
   
@@ -185,7 +185,7 @@ int main() {
         }
       }
     }
-    std::cout << queue.size() << std::endl;
+    std::cout << queue.size() << '\n';
   } while(e_graph.merge(queue));
   
   e_graph.save_dot("graph.gv");

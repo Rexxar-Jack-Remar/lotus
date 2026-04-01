@@ -36,6 +36,7 @@
 #include "llvm/Transforms/Scalar/LoopPassManager.h"
 
 #include "Transform/Nisse/Nisse.h"
+#include "Utils/ADT/UnionFind.h"
 
 #include <fstream>
 #include <queue>
@@ -113,17 +114,22 @@ std::pair<std::multiset<Edge>, std::multiset<Edge>>
 AnalysisUtil::generateSTrev(Function &F, std::multiset<Edge> &edges) {
   multiset<Edge> ST;
   multiset<Edge> rev;
-  UnionFind uf;
+
+  // Map each BasicBlock to a unique index for the union-find structure.
+  std::map<BlockPtr, unsigned> bb_index;
+  unsigned idx = 0;
   for (auto &BB : F) {
-    uf.init(&BB);
+    bb_index[&BB] = idx++;
   }
+  UnionFind uf(idx);
+
   multiset<Edge, greater<Edge>> revEdges(edges.begin(), edges.end());
   for (auto e : revEdges) {
     auto *BB1 = e.getOrigin();
     auto *BB2 = e.getDest();
-    if (!uf.connected(BB1, BB2)) {
+    if (!uf.connected(bb_index[BB1], bb_index[BB2])) {
       ST.insert(e);
-      uf.merge(BB1, BB2);
+      uf.merge(bb_index[BB1], bb_index[BB2]);
     } else {
       NumCounters++;
       if (e.isSESE()) {
