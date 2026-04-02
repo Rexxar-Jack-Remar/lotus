@@ -592,7 +592,7 @@ public:
   };
 
   // Map to store accumulated times
-  typedef StringMap<TimeValue> AccTimesMap;
+  using AccTimesMap = StringMap<TimeValue>;
 
 private:
   AccTimesMap accumulatedtimes;
@@ -631,24 +631,24 @@ public:
 };
 
 // The VarNodes type.
-typedef DenseMap<const Value *, VarNode *> VarNodes;
+using VarNodes = DenseMap<const Value *, VarNode *>;
 
 // The Operations type.
-typedef SmallPtrSet<BasicOp *, 32> GenOprs;
+using GenOprs = SmallPtrSet<BasicOp *, 32>;
 
 // A map from variables to the operations where these variables are used.
-typedef DenseMap<const Value *, SmallPtrSet<BasicOp *, 8>> UseMap;
+using UseMap = DenseMap<const Value *, SmallPtrSet<BasicOp *, 8>>;
 
 // A map from variables to the operations where these
 // variables are present as bounds
-typedef DenseMap<const Value *, SmallPtrSet<BasicOp *, 8>> SymbMap;
+using SymbMap = DenseMap<const Value *, SmallPtrSet<BasicOp *, 8>>;
 
 // A map from varnodes to the operation in which this variable is defined
-typedef DenseMap<const Value *, BasicOp *> DefMap;
+using DefMap = DenseMap<const Value *, BasicOp *>;
 
-typedef DenseMap<const Value *, ValueBranchMap> ValuesBranchMap;
+using ValuesBranchMap = DenseMap<const Value *, ValueBranchMap>;
 
-typedef DenseMap<const Value *, ValueSwitchMap> ValuesSwitchMap;
+using ValuesSwitchMap = DenseMap<const Value *, ValueSwitchMap>;
 
 /// This class represents our constraint graph. This graph is used to
 /// perform all computations in our analysis.
@@ -814,7 +814,7 @@ public:
                                  VarNodes *vars);
   void delControlDependenceEdges(UseMap *useMap);
   void visit(Value *V, std::stack<Value *> &stack, UseMap *useMap);
-  typedef std::deque<Value *>::reverse_iterator iterator;
+  using iterator = std::deque<Value *>::reverse_iterator;
   iterator begin() { return worklist.rbegin(); }
   iterator end() { return worklist.rend(); }
 };

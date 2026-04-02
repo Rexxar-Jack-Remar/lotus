@@ -124,8 +124,8 @@ public:
 
 class DyckCallGraphNode;
 
-typedef std::pair<Call *, DyckCallGraphNode *> CallRecordTy;
-typedef std::vector<CallRecordTy> CallRecordVecTy;
+using CallRecordTy = std::pair<Call *, DyckCallGraphNode *>;
+using CallRecordVecTy = std::vector<CallRecordTy>;
 
 class DyckCallGraphNode {
 private:

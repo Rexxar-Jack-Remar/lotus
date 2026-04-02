@@ -5,12 +5,12 @@
 
 namespace seahorn {
 template <typename Set> struct SetPropertyMap {
-  typedef bool value_type;
-  typedef bool reference;
-  typedef typename Set::key_type key_type;
-  typedef read_write_property_map_tag category;
+  using value_type = bool;
+  using reference = bool;
+  using key_type = typename Set::key_type;
+  using category = read_write_property_map_tag;
 
-  typedef SetPropertyMap<Set> this_type;
+  using this_type = SetPropertyMap<Set>;
 
   Set *set;
   SetPropertyMap() : set(NULL) {}

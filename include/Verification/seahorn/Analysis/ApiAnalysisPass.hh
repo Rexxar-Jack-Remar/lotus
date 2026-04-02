@@ -41,7 +41,7 @@ namespace seahorn
   };
 
   // Each Basic block in a function will have an ApiCallList
-  typedef std::vector<ApiEntry> BBApiList;
+  using BBApiList = std::vector<ApiEntry>;
 
   struct ApiCallInfo
   {

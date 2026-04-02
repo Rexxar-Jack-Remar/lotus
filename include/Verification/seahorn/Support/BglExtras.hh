@@ -31,7 +31,7 @@ void slice(const Graph &g, typename graph_traits<Graph>::vertex_descriptor en,
 template <typename Graph, typename BoolVertexMap>
 void reaches(const Graph &g, typename graph_traits<Graph>::vertex_descriptor n,
              BoolVertexMap out) {
-  typedef typename graph_traits<Graph>::edge_descriptor Edge;
+  using Edge = typename graph_traits<Graph>::edge_descriptor;
 
   if (get(out, n))
     return;
@@ -43,7 +43,7 @@ template <typename Graph, typename BoolVertexMap>
 void reachable(const Graph &g,
                typename graph_traits<Graph>::vertex_descriptor n,
                BoolVertexMap out) {
-  typedef typename graph_traits<Graph>::edge_descriptor Edge;
+  using Edge = typename graph_traits<Graph>::edge_descriptor;
   if (get(out, n))
     return;
 

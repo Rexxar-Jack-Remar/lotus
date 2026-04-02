@@ -66,15 +66,15 @@ public:
 
 class DsaInfo {
 
-  typedef std::unordered_map<const Node *, NodeInfo> NodeInfoMap;
+  using NodeInfoMap = std::unordered_map<const Node *, NodeInfo>;
   // Replacement for boost::bimap - use two maps
-  typedef std::map<const llvm::Value *, unsigned int> AllocSiteToIdMap;
-  typedef std::map<unsigned int, const llvm::Value *> IdToAllocSiteMap;
-  typedef std::set<const llvm::Value *> ValueSet;
-  typedef std::set<unsigned int> IdSet;
-  typedef std::set<NodeInfo> NodeInfoSet;
-  typedef std::set<Graph *> GraphSet;
-  typedef std::unordered_map<const llvm::Value *, std::string> NamingMap;
+  using AllocSiteToIdMap = std::map<const llvm::Value *, unsigned int>;
+  using IdToAllocSiteMap = std::map<unsigned int, const llvm::Value *>;
+  using ValueSet = std::set<const llvm::Value *>;
+  using IdSet = std::set<unsigned int>;
+  using NodeInfoSet = std::set<NodeInfo>;
+  using GraphSet = std::set<Graph *>;
+  using NamingMap = std::unordered_map<const llvm::Value *, std::string>;
 
   const llvm::DataLayout &m_dl;
   llvm::TargetLibraryInfoWrapperPass &m_tliWrapper;
@@ -110,8 +110,8 @@ class DsaInfo {
     bool operator!=(const transform_second_iterator& other) const { return m_iter != other.m_iter; }
   };
 
-  typedef transform_second_iterator<typename NodeInfoMap::const_iterator> nodes_const_iterator;
-  typedef llvm::iterator_range<nodes_const_iterator> nodes_const_range;
+  using nodes_const_iterator = transform_second_iterator<typename NodeInfoMap::const_iterator>;
+  using nodes_const_range = llvm::iterator_range<nodes_const_iterator>;
 
   nodes_const_iterator nodes_begin() const {
     return nodes_const_iterator(m_nodes_map.begin());
@@ -163,11 +163,11 @@ class DsaInfo {
     bool operator!=(const filter_alive_iterator& other) const { return m_iter != other.m_iter; }
   };
   
-  typedef filter_alive_iterator<nodes_const_iterator> live_nodes_const_iterator;
+  using live_nodes_const_iterator = filter_alive_iterator<nodes_const_iterator>;
 
 public:
-  typedef llvm::iterator_range<live_nodes_const_iterator> live_nodes_const_range;
-  typedef IdSet alloc_sites_set;
+  using live_nodes_const_range = llvm::iterator_range<live_nodes_const_iterator>;
+  using alloc_sites_set = IdSet;
 
 private:
   live_nodes_const_iterator live_nodes_begin() const {

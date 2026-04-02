@@ -9,10 +9,9 @@
 #include <system_error>
 #include <vector>
 
-typedef std::function<int(
+using SolverProgram = std::function<int(
     const std::vector<std::string> &Args, llvm::StringRef RedirectIn,
-    llvm::StringRef RedirectOut, llvm::StringRef RedirectErr, unsigned Timeout)>
-    SolverProgram;
+    llvm::StringRef RedirectOut, llvm::StringRef RedirectErr, unsigned Timeout)>;
 
 class SMTLIBSolver {
 public:

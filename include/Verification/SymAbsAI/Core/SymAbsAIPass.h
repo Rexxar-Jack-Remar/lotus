@@ -64,7 +64,7 @@ public:
    * Representation of a partition of a set of llvm Values. Values in the
    * same set behave identical at the considered program point.
    */
-  typedef std::vector<std::set<llvm::Value *>> equals_t;
+  using equals_t = std::vector<std::set<llvm::Value *>>;
 
   /**
    *  Insert a new equality (namely of a and b) into the partition eqs.

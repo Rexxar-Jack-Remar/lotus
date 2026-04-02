@@ -10,7 +10,7 @@
 #include <boost/property_map/property_map.hpp>
 
 namespace llvm {
-typedef std::pair<BasicBlock *, BasicBlock *> BBPair;
+using BBPair = std::pair<BasicBlock *, BasicBlock *>;
 namespace bgl {
 struct MkOutEdgePair {
   using argument_type = BasicBlock *;
@@ -46,31 +46,29 @@ struct MkInEdgePair {
 
 namespace boost {
 template <> struct graph_traits<llvm::Function> {
-  typedef llvm::BasicBlock *vertex_descriptor;
-  typedef llvm::BBPair edge_descriptor;
+  using vertex_descriptor = llvm::BasicBlock *;
+  using edge_descriptor = llvm::BBPair;
 
-  typedef disallow_parallel_edge_tag edge_parallel_category;
-  typedef bidirectional_tag directed_category;
+  using edge_parallel_category = disallow_parallel_edge_tag;
+  using directed_category = bidirectional_tag;
   struct this_graph_tag : virtual bidirectional_graph_tag,
                           virtual vertex_list_graph_tag {};
-  typedef this_graph_tag traversal_category;
+  using traversal_category = this_graph_tag;
 
-  typedef size_t vertices_size_type;
-  typedef size_t edges_size_type;
-  typedef size_t degree_size_type;
+  using vertices_size_type = size_t;
+  using edges_size_type = size_t;
+  using degree_size_type = size_t;
 
-  typedef boost::transform_iterator<llvm::bgl::MkOutEdgePair,
-                                    llvm::succ_iterator>
-      out_edge_iterator;
+  using out_edge_iterator = boost::transform_iterator<llvm::bgl::MkOutEdgePair,
+                                    llvm::succ_iterator>;
 
-  typedef boost::transform_iterator<llvm::bgl::MkInEdgePair,
-                                    llvm::pred_iterator>
-      in_edge_iterator;
+  using in_edge_iterator = boost::transform_iterator<llvm::bgl::MkInEdgePair,
+                                    llvm::pred_iterator>;
 
-  typedef llvm::Function::const_iterator vertex_iterator;
+  using vertex_iterator = llvm::Function::const_iterator;
 
   /** unimplemented iterator over edges to make filtered_graph happy */
-  typedef in_edge_iterator edge_iterator;
+  using edge_iterator = in_edge_iterator;
 
   static vertex_descriptor null_vertex() { return NULL; }
 };
@@ -86,10 +84,9 @@ inline llvm::BasicBlock *target(const llvm::BBPair e, const llvm::Function &f) {
 
 namespace llvm {
 namespace bgl {
-typedef
-    typename boost::graph_traits<::llvm::Function>::out_edge_iterator out_eit;
-typedef typename boost::graph_traits<::llvm::Function>::in_edge_iterator in_eit;
-typedef llvm::Function::const_iterator vit;
+using out_eit = typename boost::graph_traits<::llvm::Function>::out_edge_iterator;
+using in_eit = typename boost::graph_traits<::llvm::Function>::in_edge_iterator;
+using vit = llvm::Function::const_iterator;
 } // namespace bgl
 } // namespace llvm
 

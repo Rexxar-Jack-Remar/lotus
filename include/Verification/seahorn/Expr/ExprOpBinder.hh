@@ -364,14 +364,14 @@ namespace details {
 template <typename Abs> struct ABSCST;
 
 template <typename Range> struct AbsCst {
-  typedef AbsCst<Range> this_type;
+  using this_type = AbsCst<Range>;
 
   const Range &m_r;
   std::unordered_map<Expr, unsigned> m_evmap;
 
   std::deque<ABSCST<this_type>> m_pinned;
 
-  typedef std::map<unsigned, DagVisit<ABSCST<this_type>>> cache_type;
+  using cache_type = std::map<unsigned int, DagVisit<ABSCST<this_type>>>;
   cache_type m_cache;
 
   AbsCst(const Range &r);
@@ -398,7 +398,7 @@ template <typename Range> AbsCst<Range>::AbsCst(const Range &r) : m_r(r) {
 
 template <typename Range>
 DagVisit<ABSCST<AbsCst<Range>>> &AbsCst<Range>::cachedVisitor(unsigned offset) {
-  typedef AbsCst<Range> this_type;
+  using this_type = AbsCst<Range>;
 
   auto it = m_cache.find(offset);
   if (it != m_cache.end())
@@ -445,12 +445,12 @@ template <typename Range> Expr absConstants(const Range &r, Expr e) {
 template <typename Sub> struct SUBBND;
 
 template <typename Range> struct SubBnd {
-  typedef SubBnd<Range> this_type;
+  using this_type = SubBnd<Range>;
 
   const Range &m_r;
   unsigned m_sz;
   std::vector<SUBBND<this_type>> m_pinned;
-  typedef std::map<unsigned, DagVisit<SUBBND<this_type>>> cache_type;
+  using cache_type = std::map<unsigned int, DagVisit<SUBBND<this_type>>>;
   cache_type m_cache;
 
   SubBnd(const Range &r) : m_r(r) {
@@ -500,7 +500,7 @@ struct SUBBND {
 
 template <typename Range>
 DagVisit<SUBBND<SubBnd<Range>>> &SubBnd<Range>::cachedVisitor(unsigned offset) {
-  typedef SubBnd<Range> this_type;
+  using this_type = SubBnd<Range>;
   auto it = m_cache.find(offset);
   if (it != m_cache.end())
     return it->second;

@@ -44,8 +44,8 @@ public:
   using argument_type = Expr;
   using result_type = Expr;
 
-  typedef std::shared_ptr<SymStore> SymStorePtr;
-  typedef std::unordered_map<Expr, Expr> ExprExprMap;
+  using SymStorePtr = std::shared_ptr<SymStore>;
+  using ExprExprMap = std::unordered_map<Expr, Expr>;
 
 protected:
   /// Parent store, if any
@@ -118,8 +118,8 @@ public:
   Expr eval(Expr exp) { return expr::dagVisit(m_evalVisitor, exp); }
   Expr operator()(Expr exp) { return eval(exp); }
 
-  typedef ExprExprMap::iterator iterator;
-  typedef ExprExprMap::const_iterator const_iterator;
+  using iterator = ExprExprMap::iterator;
+  using const_iterator = ExprExprMap::const_iterator;
   iterator begin() { return m_Store.begin(); }
   iterator end() { return m_Store.end(); }
   const_iterator begin() const { return m_Store.begin(); }

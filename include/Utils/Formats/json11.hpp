@@ -84,8 +84,8 @@ public:
     };
 
     // Array and object typedefs
-    typedef std::vector<Json> array;
-    typedef std::map<std::string, Json> object;
+    using array = std::vector<Json>;
+    using object = std::map<std::string, Json>;
 
     // Constructors for the various types of JSON value.
     Json() noexcept;                // NUL
@@ -201,7 +201,7 @@ public:
      * Return true if this is a JSON object and, for each item in types, has a field of
      * the given type. If not, return false and set err to a descriptive message.
      */
-    typedef std::initializer_list<std::pair<std::string, Type>> shape;
+    using shape = std::initializer_list<std::pair<std::string, Type>>;
     bool has_shape(const shape & types, std::string & err) const;
 
 private:

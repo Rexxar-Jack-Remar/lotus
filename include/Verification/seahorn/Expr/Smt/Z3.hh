@@ -214,7 +214,7 @@ public:
   using z_cache_type = typename cache_type::right_map;
 
 private:
-  typedef ZContext<M, U> this_type;
+  using this_type = ZContext<M, U>;
   ExprFactory &efac;
   z3::config m_c; // default config
   z3::context ctx;
@@ -248,8 +248,8 @@ protected:
 
   ExprFactory &get_efac() { return efac; }
 
-  typedef std::unordered_set<Z3_func_decl> Z3_func_decl_set;
-  typedef std::unordered_set<Z3_ast> Z3_ast_set;
+  using Z3_func_decl_set = std::unordered_set<Z3_func_decl>;
+  using Z3_ast_set = std::unordered_set<Z3_ast>;
 
   void allDecls(Z3_ast a, Z3_func_decl_set &seen, Z3_ast_set &visited) {
     if (Z3_get_ast_kind(ctx, a) != Z3_APP_AST &&
@@ -327,7 +327,7 @@ public:
 
 template <typename Z> class ZModel {
 private:
-  typedef ZModel<Z> this_type;
+  using this_type = ZModel<Z>;
 
 public:
   using argument_type = Expr;
@@ -445,7 +445,7 @@ public:
 
 template <typename Z> class ZParams {
 private:
-  typedef ZParams<Z> this_type;
+  using this_type = ZParams<Z>;
 
   Z &z3;
   z3::context &ctx;
@@ -533,8 +533,8 @@ private:
   ExprFactory &efac;
 
 public:
-  typedef ZSolver<Z> this_type;
-  typedef ZModel<Z> Model;
+  using this_type = ZSolver<Z>;
+  using Model = ZModel<Z>;
 
   ZSolver(Z &z)
       : z3(z), ctx(z.get_ctx()), solver(z.get_ctx()), efac(z.get_efac()) {}
@@ -678,7 +678,7 @@ public:
 
 template <typename Z> class ZFixedPoint {
 private:
-  typedef ZFixedPoint<Z> this_type;
+  using this_type = ZFixedPoint<Z>;
 
   Z &z3;
   z3::context &ctx;

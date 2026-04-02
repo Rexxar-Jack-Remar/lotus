@@ -67,7 +67,7 @@ private:
 namespace detail {
 // C++14 compatible void_t implementation
 template <typename...> struct make_void {
-  typedef void type;
+  using type = void;
 };
 template <typename... Ts> using void_t = typename make_void<Ts...>::type;
 

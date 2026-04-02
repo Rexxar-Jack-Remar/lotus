@@ -19,8 +19,8 @@
 
 // llvm::ConstantRange fixup.
 class CRange : public llvm::ConstantRange {
-  typedef llvm::APInt APInt;
-  typedef llvm::ConstantRange super;
+  using APInt = llvm::APInt;
+  using super = llvm::ConstantRange;
 
 public:
   CRange(uint32_t BitWidth, bool isFullSet) : super(BitWidth, isFullSet) {}

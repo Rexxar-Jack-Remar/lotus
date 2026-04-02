@@ -24,11 +24,11 @@ class DsaLibFuncInfo;
 class BottomUpAnalysis {
 
 public:
-  typedef std::shared_ptr<Graph> GraphRef;
-  typedef llvm::DenseMap<const llvm::Function *, GraphRef> GraphMap;
+  using GraphRef = std::shared_ptr<Graph>;
+  using GraphMap = llvm::DenseMap<const llvm::Function *, GraphRef>;
 
 private:
-  typedef std::shared_ptr<SimulationMapper> SimulationMapperRef;
+  using SimulationMapperRef = std::shared_ptr<SimulationMapper>;
 
   const llvm::DataLayout &m_dl;
   llvm::TargetLibraryInfoWrapperPass &m_tliWrapper;

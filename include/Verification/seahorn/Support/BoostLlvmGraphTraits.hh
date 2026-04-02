@@ -18,8 +18,8 @@ template <typename T> struct llvm_null_trait<T *> {
 
 template <typename G>
 struct MkOutEdge {
-  typedef typename boost::graph_traits<G>::vertex_descriptor Node;
-  typedef typename boost::graph_traits<G>::edge_descriptor Edge;
+  using Node = typename boost::graph_traits<G>::vertex_descriptor;
+  using Edge = typename boost::graph_traits<G>::edge_descriptor;
   using argument_type = Node;
   using result_type = Edge;
 
@@ -33,8 +33,8 @@ struct MkOutEdge {
 
 template <typename G>
 struct MkInEdge {
-  typedef typename boost::graph_traits<G>::vertex_descriptor Node;
-  typedef typename boost::graph_traits<G>::edge_descriptor Edge;
+  using Node = typename boost::graph_traits<G>::vertex_descriptor;
+  using Edge = typename boost::graph_traits<G>::edge_descriptor;
   using argument_type = Node;
   using result_type = Edge;
 
@@ -51,42 +51,38 @@ struct MkInEdge {
 
 namespace boost {
 template <typename Graph> struct graph_traits<Graph *> {
-  typedef Graph *GraphPtr;
-  typedef llvm::GraphTraits<GraphPtr> llvm_graph;
-  typedef typename llvm_graph::ChildIteratorType llvm_succ_iterator;
+  using GraphPtr = Graph *;
+  using llvm_graph = llvm::GraphTraits<GraphPtr>;
+  using llvm_succ_iterator = typename llvm_graph::ChildIteratorType;
 
-  typedef llvm::GraphTraits<llvm::Inverse<GraphPtr>> llvm_inverse_graph;
-  typedef typename llvm_inverse_graph::ChildIteratorType llvm_pred_iterator;
+  using llvm_inverse_graph = llvm::GraphTraits<llvm::Inverse<GraphPtr>>;
+  using llvm_pred_iterator = typename llvm_inverse_graph::ChildIteratorType;
 
-  typedef typename llvm_graph::NodeType *vertex_descriptor;
-  typedef typename std::pair<vertex_descriptor, vertex_descriptor>
-      edge_descriptor;
+  using vertex_descriptor = typename llvm_graph::NodeType *;
+  using edge_descriptor = typename std::pair<vertex_descriptor, vertex_descriptor>;
 
-  typedef std::pair<const vertex_descriptor, const vertex_descriptor>
-      const_edge_descriptor;
+  using const_edge_descriptor = std::pair<const vertex_descriptor, const vertex_descriptor>;
 
-  typedef disallow_parallel_edge_tag edge_parallel_category;
-  typedef bidirectional_tag directed_category;
+  using edge_parallel_category = disallow_parallel_edge_tag;
+  using directed_category = bidirectional_tag;
   struct this_graph_tag : virtual bidirectional_graph_tag,
                           virtual vertex_list_graph_tag {};
-  typedef this_graph_tag traversal_category;
+  using traversal_category = this_graph_tag;
 
-  typedef size_t vertices_size_type;
-  typedef size_t edges_size_type;
-  typedef size_t degree_size_type;
+  using vertices_size_type = size_t;
+  using edges_size_type = size_t;
+  using degree_size_type = size_t;
 
-  typedef boost::transform_iterator<seahorn::graph::MkOutEdge<GraphPtr>,
-                                    llvm_succ_iterator>
-      out_edge_iterator;
+  using out_edge_iterator = boost::transform_iterator<seahorn::graph::MkOutEdge<GraphPtr>,
+                                    llvm_succ_iterator>;
 
-  typedef boost::transform_iterator<seahorn::graph::MkInEdge<GraphPtr>,
-                                    llvm_pred_iterator>
-      in_edge_iterator;
+  using in_edge_iterator = boost::transform_iterator<seahorn::graph::MkInEdge<GraphPtr>,
+                                    llvm_pred_iterator>;
 
-  typedef typename llvm_graph::nodes_iterator vertex_iterator;
+  using vertex_iterator = typename llvm_graph::nodes_iterator;
 
   /** unimplemented iterator over edges to make filtered_graph happy */
-  typedef in_edge_iterator edge_iterator;
+  using edge_iterator = in_edge_iterator;
 
   static vertex_descriptor null_vertex() {
     return seahorn::graph::llvm_null_trait<vertex_descriptor>::null_value();

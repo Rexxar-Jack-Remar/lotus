@@ -18,7 +18,7 @@ using namespace llvm;
 
 struct EliminatePHIPass : public FunctionPass {
 
-  typedef std::unordered_map<PHINode *, Value *> AssignMap;
+  using AssignMap = std::unordered_map<PHINode *, Value *>;
 
 public:
   static char ID;

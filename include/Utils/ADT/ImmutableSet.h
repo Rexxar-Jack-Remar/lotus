@@ -17,11 +17,11 @@ template <class T> struct _Identity {
 
 template <class T, class CMP = std::less<T>> class ImmutableSet {
 public:
-  typedef T key_type;
-  typedef T value_type;
+  using key_type = T;
+  using value_type = T;
 
-  typedef ImmutableTree<T, T, _Identity<T>, CMP> Tree;
-  typedef typename Tree::iterator iterator;
+  using Tree = ImmutableTree<T, T, _Identity<T>, CMP>;
+  using iterator = typename Tree::iterator;
 
 private:
   Tree elts;

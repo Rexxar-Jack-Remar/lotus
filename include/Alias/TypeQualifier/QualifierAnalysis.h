@@ -32,18 +32,17 @@
 
 #define _CH 1
 
-typedef std::map<NodeIndex, AndersPtsSet> PtsGraph;
-typedef std::map<const llvm::Instruction *, PtsGraph> NodeToPtsGraph;
-typedef std::map<const llvm::Instruction *, QualifierArray> NodeToQualifier;
-typedef std::map<const llvm::BasicBlock *, QualifierArray> BBToQualifier;
-typedef std::map<const llvm::Instruction *, RequirednessArray>
-    NodeToRequiredness;
-typedef std::map<const llvm::BasicBlock *, RequirednessArray> BBToRequiredness;
+using PtsGraph = std::map<NodeIndex, AndersPtsSet>;
+using NodeToPtsGraph = std::map<const llvm::Instruction *, PtsGraph>;
+using NodeToQualifier = std::map<const llvm::Instruction *, QualifierArray>;
+using BBToQualifier = std::map<const llvm::BasicBlock *, QualifierArray>;
+using NodeToRequiredness = std::map<const llvm::Instruction *, RequirednessArray>;
+using BBToRequiredness = std::map<const llvm::BasicBlock *, RequirednessArray>;
 
 // alias set
-typedef std::set<NodeIndex> NodeSet;
-typedef std::unordered_map<NodeIndex, NodeSet> AAMap;
-typedef std::unordered_map<const llvm::Instruction *, AAMap> NodeToAAMap;
+using NodeSet = std::set<NodeIndex>;
+using AAMap = std::unordered_map<NodeIndex, NodeSet>;
+using NodeToAAMap = std::unordered_map<const llvm::Instruction *, AAMap>;
 enum WarnType { FUNCTION_PTR, NORMAL_PTR, DATA, OTHER };
 
 /// @brief Main qualifier analysis pass

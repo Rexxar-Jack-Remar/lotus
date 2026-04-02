@@ -21,7 +21,7 @@
 #include <unordered_map>
 
 using namespace llvm;
-typedef unsigned NodeIndex;
+using NodeIndex = unsigned int;
 
 using BBList = std::set<std::string>;
 
@@ -227,8 +227,8 @@ public:
 };
 
 class Summary {
-  typedef std::map<unsigned, std::set<NodeIndex>> PtsGraph;
-  typedef std::unordered_map<std::string, llvm::GlobalVariable *> GObjMap;
+  using PtsGraph = std::map<unsigned int, std::set<NodeIndex>>;
+  using GObjMap = std::unordered_map<std::string, llvm::GlobalVariable *>;
 
 private:
   int retSize;

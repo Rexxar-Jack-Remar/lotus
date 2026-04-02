@@ -37,7 +37,7 @@
 // Do NOT use `using namespace llvm` in headers — it pollutes every TU that
 // includes this file.  All LLVM types are qualified explicitly below.
 
-typedef unsigned u32_t;
+using u32_t = unsigned;
 
 /**
  * @class ThreadAPI

@@ -68,7 +68,7 @@ using std::unique_ptr;
  */
 class Predicates : public AbstractValue {
 public:
-  typedef std::function<Expression(Expression, Expression)> pred_t;
+  using pred_t = std::function<Expression(Expression, Expression)>;
   enum Value { BOTTOM, TRUE, FALSE, TOP };
 
 private:

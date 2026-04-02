@@ -161,13 +161,13 @@ struct RVSIMP {
   using argument_type = Expr;
   using result_type = VisitAction;
 
-  typedef typename M::const_iterator const_iterator;
+  using const_iterator = typename M::const_iterator;
 
   const M &map;
 
   std::shared_ptr<boolop::TrivialSimplifier> r;
 
-  typedef RVSIMP<M> this_type;
+  using this_type = RVSIMP<M>;
 
   RVSIMP(const this_type &o) : map(o.map), r(o.r) {}
   RVSIMP(ExprFactory &fac, const M &m)

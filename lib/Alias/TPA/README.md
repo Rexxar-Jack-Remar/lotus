@@ -6,7 +6,7 @@ TPA is an **inclusion-based**, **flow- and context-sensitive** pointer analysis 
 
 - **Flow-sensitivity**: Respects program order and control flow
 - **Context-sensitivity**: Distinguishes different calling contexts (with k-limiting support)
-- **Semi-sparse representation**: Only analyzes relevant program points (def-use chains)
+- **Semi-sparse representation**: Only analyzes relevant program points (def-use chains). 
 - **Type/offset-aware memory model**: Tracks objects with field/offset precision,
   with conservative summarization in cases such as arrays
 

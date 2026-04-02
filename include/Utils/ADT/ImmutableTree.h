@@ -15,10 +15,10 @@ public:
   static size_t allocated;
   class iterator;
 
-  typedef K key_type;
-  typedef V value_type;
-  typedef KOV key_of_value;
-  typedef CMP key_compare;
+  using key_type = K;
+  using value_type = V;
+  using key_of_value = KOV;
+  using key_compare = CMP;
 
 public:
   ImmutableTree();

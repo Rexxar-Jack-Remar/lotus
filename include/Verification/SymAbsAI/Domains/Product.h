@@ -16,7 +16,7 @@ namespace symabs_ai {
 namespace domains {
 class Product : public AbstractValue {
 protected:
-  typedef std::vector<unique_ptr<AbstractValue>> values_t;
+  using values_t = std::vector<unique_ptr<AbstractValue>>;
   values_t Values_;
   const FunctionContext &FunctionContext_;
   bool Finalized_;

@@ -25,7 +25,7 @@ namespace analysis {
 /// AddressValue - represents a set of memory addresses
 class AddressValue {
 public:
-  typedef std::unordered_set<uint32_t> AddrSet;
+  using AddrSet = std::unordered_set<uint32_t>;
 
 private:
   AddrSet _addrs;

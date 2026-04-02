@@ -33,7 +33,7 @@ namespace symabs_ai {
  */
 class ParamStrategy {
 public:
-  typedef std::vector<llvm::SmallVector<Expression, 2>> params_t;
+  using params_t = std::vector<llvm::SmallVector<Expression, 2>>;
 
 private:
   int Arity_;

@@ -31,8 +31,8 @@ namespace seadsa
   class SimulationMapper 
   {
     /// the simulation relation: a node is simulated by a cell
-    typedef std::unordered_map<const Node*,
-			       std::map<Node*, Field> > rel_type;
+    using rel_type = std::unordered_map<const Node*,
+			       std::map<Node*, Field> >;
     rel_type m_sim;
     
   public:

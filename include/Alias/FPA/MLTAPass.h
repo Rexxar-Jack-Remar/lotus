@@ -9,10 +9,10 @@
 
 #include "Alias/FPA/FLTAPass.h"
 
-typedef pair<Type *, int> typeidx_t;
+using typeidx_t = pair<Type *, int>;
 pair<Type *, int> typeidx_c(Type *Ty, int Idx);
 
-typedef pair<size_t, int> hashidx_t;
+using hashidx_t = pair<size_t, int>;
 pair<size_t, int> hashidx_c(size_t Hash, int Idx);
 
 class MLTAPass : public FLTAPass {

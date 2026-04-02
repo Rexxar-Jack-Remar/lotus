@@ -28,7 +28,7 @@ using namespace llvm;
 // Notes: this encoding is not intended to be used with
 //        interprocedural encodings.
 class IncHornifyFunction : public HornifyFunction {
-  typedef llvm::DenseMap<const BasicBlock *, Expr> PredDeclMap;
+  using PredDeclMap = llvm::DenseMap<const BasicBlock *, Expr>;
 
   /// -- Cannot use the map from the parent (module)
   PredDeclMap m_bbPreds;

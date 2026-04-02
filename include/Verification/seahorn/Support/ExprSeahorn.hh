@@ -41,7 +41,7 @@ namespace expr
 
 namespace seahorn
 {
-  typedef expr::Terminal<const seahorn::CutPoint*> CP;
+  using CP = expr::Terminal<const seahorn::CutPoint*>;
 } // namespace seahorn
 
 

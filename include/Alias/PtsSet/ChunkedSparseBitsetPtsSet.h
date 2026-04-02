@@ -149,8 +149,12 @@ public:
     bool end_ = true;
   };
 
+  bool has(Index idx) {
+    return static_cast<const ChunkedSparseBitsetPtsSet &>(*this).has(idx);
+  }
+
   // Return true if *this contains idx.
-  __attribute__((warn_unused_result)) bool contains(Index idx) const {
+  __attribute__((warn_unused_result)) bool has(Index idx) const {
     const std::uint64_t chunk_id = chunkId(idx);
     const std::uint64_t offset = chunkOffset(idx);
     const std::size_t word = static_cast<std::size_t>(offset >> 6);
@@ -206,7 +210,8 @@ public:
     return true;
   }
 
-  __attribute__((warn_unused_result)) bool contains(const ChunkedSparseBitsetPtsSet &other) const {
+  __attribute__((warn_unused_result)) bool
+  contains(const ChunkedSparseBitsetPtsSet &other) const {
     std::size_t i = 0;
     std::size_t j = 0;
     while (i < ids_.size() && j < other.ids_.size()) {
@@ -230,7 +235,8 @@ public:
 
   // Return true if this set and other have at least one element in common
   // (read-only).
-  __attribute__((warn_unused_result)) bool intersects(const ChunkedSparseBitsetPtsSet &other) const {
+  __attribute__((warn_unused_result)) bool
+  intersectWith(const ChunkedSparseBitsetPtsSet &other) const {
     std::size_t i = 0;
     std::size_t j = 0;
     while (i < ids_.size() && j < other.ids_.size()) {
@@ -358,9 +364,13 @@ public:
     chunks_.reserve(n);
   }
 
-  __attribute__((warn_unused_result)) std::size_t getSize() const { return size_; }
+  __attribute__((warn_unused_result)) std::size_t getSize() const {
+    return size_;
+  }
 
-  __attribute__((warn_unused_result)) bool isEmpty() const noexcept { return chunks_.empty(); }
+  __attribute__((warn_unused_result)) bool isEmpty() const noexcept {
+    return chunks_.empty();
+  }
 
   bool operator==(const ChunkedSparseBitsetPtsSet &other) const {
     return ids_ == other.ids_ && chunks_ == other.chunks_;
@@ -368,6 +378,15 @@ public:
 
   iterator begin() const { return iterator(&ids_, &chunks_, false); }
   iterator end() const { return iterator(&ids_, &chunks_, true); }
+
+  __attribute__((warn_unused_result)) bool contains(Index idx) const {
+    return has(idx);
+  }
+
+  __attribute__((warn_unused_result)) bool
+  intersects(const ChunkedSparseBitsetPtsSet &other) const {
+    return intersectWith(other);
+  }
 
 private:
   static constexpr std::uint64_t chunkId(Index idx) noexcept {

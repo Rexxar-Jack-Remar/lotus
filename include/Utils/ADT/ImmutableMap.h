@@ -17,12 +17,11 @@ template <class V, class D> struct _Select1st {
 
 template <class K, class D, class CMP = std::less<K>> class ImmutableMap {
 public:
-  typedef K key_type;
-  typedef std::pair<K, D> value_type;
+  using key_type = K;
+  using value_type = std::pair<K, D>;
 
-  typedef ImmutableTree<K, value_type, _Select1st<value_type, key_type>, CMP>
-      Tree;
-  typedef typename Tree::iterator iterator;
+  using Tree = ImmutableTree<K, value_type, _Select1st<value_type, key_type>, CMP>;
+  using iterator = typename Tree::iterator;
 
 private:
   Tree elts;

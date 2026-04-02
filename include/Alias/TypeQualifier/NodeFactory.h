@@ -35,9 +35,9 @@
 // location equivalent Node. Ordinary clients are not allowed to create
 // AndersNode objects. To guarantee index consistency, AndersNodes (and its
 // subclasses) instances should only be created through AndersNodeFactory.
-typedef unsigned NodeIndex;
-typedef std::unordered_map<std::string, llvm::Function *> FuncMap;
-typedef std::unordered_map<std::string, llvm::GlobalVariable *> GObjMap;
+using NodeIndex = unsigned;
+using FuncMap = std::unordered_map<std::string, llvm::Function *>;
+using GObjMap = std::unordered_map<std::string, llvm::GlobalVariable *>;
 
 class AndersNode {
 public:
@@ -105,7 +105,7 @@ public:
 // functions like createXXX and getXXX. This is ugly, but it is efficient.
 class AndersNodeFactory {
 public:
-  typedef llvm::DenseMap<std::pair<NodeIndex, unsigned>, NodeIndex> GepMap;
+  using GepMap = llvm::DenseMap<std::pair<NodeIndex, unsigned>, NodeIndex>;
 
   // The largest unsigned int is reserved for invalid index
   static const unsigned InvalidIndex;

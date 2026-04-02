@@ -19,7 +19,7 @@ class ICFGNode;
 ///
 /// Represents control flow connections between ICFG nodes, including
 /// intraprocedural (within functions), call, and return edges.
-typedef GenericEdge<ICFGNode> GenericICFGEdgeTy;
+using GenericICFGEdgeTy = GenericEdge<ICFGNode>;
 class ICFGEdge : public GenericICFGEdgeTy {
 
 public:

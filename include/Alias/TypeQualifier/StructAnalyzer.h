@@ -139,7 +139,7 @@ public:
   // size => # of fields????
   // getExpandedSize => # of unrolled fields???
 
-  typedef std::vector<unsigned>::const_iterator const_iterator;
+  using const_iterator = std::vector<unsigned>::const_iterator;
   unsigned getSize() const { return offsetMap.size(); }
   unsigned getExpandedSize() const { return arrayFlags.size(); }
 
@@ -194,11 +194,11 @@ public:
 class StructAnalyzer {
 private:
   // Map llvm type to corresponding StructInfo
-  typedef std::map<const llvm::StructType *, StructInfo> StructInfoMap;
+  using StructInfoMap = std::map<const llvm::StructType *, StructInfo>;
   StructInfoMap structInfoMap;
 
   // Map struct name to llvm type
-  typedef std::map<const std::string, const llvm::StructType *> StructMap;
+  using StructMap = std::map<const std::string, const llvm::StructType *>;
   StructMap structMap;
 
   // Expand (or flatten) the specified StructType and produce StructInfo

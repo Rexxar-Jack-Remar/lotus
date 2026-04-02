@@ -44,7 +44,7 @@
 
 using namespace llvm;
 
-typedef std::map<Function *, DyckCallGraphNode *> FunctionMapTy;
+using FunctionMapTy = std::map<Function *, DyckCallGraphNode *>;
 
 class DyckCallGraph {
 private:

@@ -25,8 +25,8 @@ using namespace llvm;
 using namespace seahorn;
 
 class HornifyModule : public llvm::ModulePass {
-  typedef llvm::DenseMap<const Function *, LiveSymbols> LiveSymbolsMap;
-  typedef llvm::DenseMap<const BasicBlock *, Expr> PredDeclMap;
+  using LiveSymbolsMap = llvm::DenseMap<const Function *, LiveSymbols>;
+  using PredDeclMap = llvm::DenseMap<const BasicBlock *, Expr>;
 
 protected:
   ExprFactory m_efac;

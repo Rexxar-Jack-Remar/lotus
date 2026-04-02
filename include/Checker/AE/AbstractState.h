@@ -61,10 +61,10 @@ __attribute__((unused)) static constexpr uint32_t MaxFieldLimit = 10000;
 class AbstractState {
 public:
   /// Map from variable ID to abstract value
-  typedef std::unordered_map<uint32_t, AbstractValue> VarToAbsValMap;
+  using VarToAbsValMap = std::unordered_map<uint32_t, AbstractValue>;
 
   /// Map from memory address/object ID to abstract value
-  typedef VarToAbsValMap AddrToAbsValMap;
+  using AddrToAbsValMap = VarToAbsValMap;
 
   /// Special sentinel IDs for null and black-hole pointers
   static constexpr uint32_t NullPtr = 0; ///< Null pointer constant (ID 0)

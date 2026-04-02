@@ -10,7 +10,7 @@ namespace expr {
 
 namespace {
 extern "C" {
-typedef void (*__gmp_freefunc_t)(void *, size_t);
+using __gmp_freefunc_t = void (*)(void *, size_t);
 }
 struct scoped_cstring {
   char *m_str;

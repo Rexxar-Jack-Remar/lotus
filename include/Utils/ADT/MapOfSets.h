@@ -72,7 +72,7 @@ template <class K, class V> class MapOfSets<K, V>::Node {
   friend class MapOfSets<K, V>::iterator;
 
 public:
-  typedef std::map<K, Node> children_ty;
+  using children_ty = std::map<K, Node>;
 
   V value;
 
@@ -85,7 +85,7 @@ public:
 };
 
 template <class K, class V> class MapOfSets<K, V>::iterator {
-  typedef std::vector<typename std::map<K, Node>::iterator> stack_ty;
+  using stack_ty = std::vector<typename std::map<K, Node>::iterator>;
   friend class MapOfSets<K, V>;
 
 private:

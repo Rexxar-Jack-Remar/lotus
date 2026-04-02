@@ -50,11 +50,10 @@ struct DWVertexProp {
   int edgeid; ///< Edge identifier
 };
 
-typedef list<int> DWEdgeList; ///< Edge list represented by edge ID list
-typedef unordered_map<int, DWVertex>
-    DWVertexList; ///< Vertices list storing real vertex properties
-typedef unordered_map<int, DWEdgeProp> DWEdgeOpMap; ///< Edge properties map
-typedef pair<int, DWVertexProp> Edge;               ///< Edge representation
+using DWEdgeList = list<int>; ///< Edge list represented by edge ID list
+using DWVertexList = unordered_map<int, DWVertex>; ///< Vertices list storing real vertex properties
+using DWEdgeOpMap = unordered_map<int, DWEdgeProp>; ///< Edge properties map
+using Edge = pair<int, DWVertexProp>;               ///< Edge representation
 
 /**
  * @brief Less-than comparator for edges.
@@ -81,7 +80,7 @@ struct ltEdge {
     return false;
   }
 };
-typedef map<Edge, Edge, ltEdge> EdgeMap; ///< Edge map with custom ordering
+using EdgeMap = map<Edge, Edge, ltEdge>; ///< Edge map with custom ordering
 
 /**
  * @brief Structure containing incoming and outgoing edge lists for a vertex.
@@ -90,8 +89,7 @@ struct DWIn_OutList {
   DWEdgeList inList;  ///< List of incoming edge IDs
   DWEdgeList outList; ///< List of outgoing edge IDs
 };
-typedef map<int, DWIn_OutList>
-    DWGRA; ///< Directed weighted graph representation
+using DWGRA = map<int, DWIn_OutList>; ///< Directed weighted graph representation
 
 /**
  * @brief Directed weighted graph class with edge and vertex management.

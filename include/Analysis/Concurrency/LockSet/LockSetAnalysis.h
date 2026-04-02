@@ -359,8 +359,7 @@ private:
   std::unordered_set<LockID> m_reentrant_locks;
 
   // RAII lock tracking per function (type alias avoids C++11 >> parse issue)
-  typedef std::multimap<const llvm::Value *, RAIILock::LockLifetime>
-      RAIILockMap;
+  using RAIILockMap = std::multimap<const llvm::Value *, RAIILock::LockLifetime>;
   std::unordered_map<const llvm::Function *, RAIILockMap> m_raii_locks;
 
   // Interprocedural analysis data structures

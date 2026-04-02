@@ -15,8 +15,8 @@ private:
   vector<T> vectors;
 
 public:
-  typedef typename vector<T>::iterator iterator;
-  typedef typename vector<T>::const_iterator const_iterator;
+  using iterator = typename vector<T>::iterator;
+  using const_iterator = typename vector<T>::const_iterator;
 
   OrderedSet() {}
 

@@ -123,6 +123,10 @@ public:
     bool end_ = true;
   };
 
+  bool has(Index idx) {
+    return static_cast<const BloomBitsetPtsSet &>(*this).has(idx);
+  }
+
   bool has(Index idx) const {
     if (!bloomMaybe(idx))
       return false;
@@ -222,6 +226,10 @@ public:
 
   iterator begin() const { return iterator(&words_, false); }
   iterator end() const { return iterator(&words_, true); }
+
+  bool intersects(const BloomBitsetPtsSet &other) const {
+    return intersectWith(other);
+  }
 
 private:
   static std::uint64_t mix(std::uint64_t value) {

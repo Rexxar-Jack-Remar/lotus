@@ -35,7 +35,7 @@ public:
 
 class Local : public llvm::ModulePass {
   Graph::SetFactory m_setFactory;
-  typedef std::shared_ptr<Graph> GraphRef;
+  using GraphRef = std::shared_ptr<Graph>;
   llvm::DenseMap<const llvm::Function *, GraphRef> m_graphs;
 
   const llvm::DataLayout *m_dl;

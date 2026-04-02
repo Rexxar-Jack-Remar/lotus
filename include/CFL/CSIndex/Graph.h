@@ -82,9 +82,8 @@ struct Vertex {
   };
 };
 
-typedef vector<int> EdgeList; ///< Edge list represented by vertex ID list
-typedef vector<Vertex>
-    VertexList; ///< Vertices list storing real vertex properties
+using EdgeList = vector<int>; ///< Edge list represented by vertex ID list
+using VertexList = vector<Vertex>; ///< Vertices list storing real vertex properties
 
 /**
  * @brief Structure containing incoming and outgoing edge lists for a vertex.
@@ -93,7 +92,7 @@ struct In_OutList {
   EdgeList inList;  ///< List of incoming edge vertex IDs
   EdgeList outList; ///< List of outgoing edge vertex IDs
 };
-typedef vector<In_OutList> GRA; ///< Graph representation as adjacency list
+using GRA = vector<In_OutList>; ///< Graph representation as adjacency list
 
 /**
  * @brief Hash function for std::pair<int, int> used in unordered_map.

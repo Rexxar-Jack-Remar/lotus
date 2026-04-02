@@ -67,22 +67,22 @@ private:
 };
 #endif
 
-typedef std::vector<std::pair<llvm::Module *, llvm::StringRef>> ModuleList;
-typedef std::unordered_map<std::string, llvm::Function *> FuncMap;
-typedef FuncMap NameFuncMap; // Alias for FuncMap
-typedef std::unordered_map<std::string, llvm::GlobalVariable *> GObjMap;
-typedef std::unordered_map<std::string, FuncSet> FuncPtrMap;
-typedef llvm::DenseMap<llvm::CallInst *, FuncSet> CalleeMap;
+using ModuleList = std::vector<std::pair<llvm::Module *, llvm::StringRef>>;
+using FuncMap = std::unordered_map<std::string, llvm::Function *>;
+using NameFuncMap = FuncMap; // Alias for FuncMap
+using GObjMap = std::unordered_map<std::string, llvm::GlobalVariable *>;
+using FuncPtrMap = std::unordered_map<std::string, FuncSet>;
+using CalleeMap = llvm::DenseMap<llvm::CallInst *, FuncSet>;
 
 // Forward declarations
-typedef std::set<std::string> DescSet;
+using DescSet = std::set<std::string>;
 class TaintInstLogger;
 
 class TaintMap {
 
 public:
-  typedef std::map<std::string, std::pair<DescSet, bool>> GlobalMap;
-  typedef std::map<llvm::Value *, DescSet> ValueMap;
+  using GlobalMap = std::map<std::string, std::pair<DescSet, bool>>;
+  using ValueMap = std::map<llvm::Value *, DescSet>;
 
   GlobalMap GTS;
   ValueMap VTS;
@@ -142,8 +142,8 @@ public:
   }
 };
 
-typedef std::unordered_map<std::string, int> SimpleTaintMap;
-typedef std::set<std::string> SimpleSet;
+using SimpleTaintMap = std::unordered_map<std::string, int>;
+using SimpleSet = std::set<std::string>;
 
 struct GlobalContext {
   // Map global object name to object definition
@@ -185,11 +185,10 @@ struct GlobalContext {
   StructAnalyzer structAnalyzer;
 
   // Additional members for TypeQualifier analysis
-  typedef std::map<llvm::Function *, Summary> FuncSummaryMap;
+  using FuncSummaryMap = std::map<llvm::Function *, Summary>;
   FuncSummaryMap FSummaries;
 
-  typedef std::unordered_map<llvm::Function *, std::set<llvm::Function *>>
-      CallMapType;
+  using CallMapType = std::unordered_map<llvm::Function *, std::set<llvm::Function *>>;
   CallMapType CallMaps;
   CallMapType CalledMaps;
 
@@ -197,7 +196,7 @@ struct GlobalContext {
   std::map<llvm::Function *, bool> Visit;
   std::map<llvm::Function *, int> RemainedFunction;
 
-  typedef std::vector<std::vector<llvm::Function *>> SCCType;
+  using SCCType = std::vector<std::vector<llvm::Function *>>;
   SCCType SCC;
   std::set<llvm::Function *> indFuncs;
 

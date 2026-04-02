@@ -122,12 +122,12 @@ public:
   SMTExpr parseSMTLib2File(const std::string &);
 
 private:
-  typedef struct RenamingUtility {
+  struct RenamingUtility {
     bool WillBePruned;
     SMTExpr AfterBeingPruned;
     SMTExprVec ToPrune;
     std::unordered_map<std::string, SMTExpr> SymbolMapping;
-  } RenamingUtility;
+  };
 
   std::map<SMTExpr, RenamingUtility, SMTExprComparator> ExprRenamingCache;
 

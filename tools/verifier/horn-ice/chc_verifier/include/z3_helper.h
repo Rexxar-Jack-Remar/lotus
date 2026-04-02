@@ -43,8 +43,8 @@ namespace chc_teacher
 	};
 
 
-	typedef std::unordered_set<z3::expr, ASTHasher, ASTComparer> expr_set;
-	typedef std::unordered_set<z3::func_decl, ASTHasher, ASTComparer> decl_set;
+	using expr_set = std::unordered_set<z3::expr, ASTHasher, ASTComparer>;
+	using decl_set = std::unordered_set<z3::func_decl, ASTHasher, ASTComparer>;
 
 
 	class z3_helper
@@ -63,7 +63,7 @@ namespace chc_teacher
 			z3::expr result = e;
 
 			// Create cache to store (substituted) expressions
-			typedef std::unordered_map<z3::expr, z3::expr, ASTHasher, ASTComparer> ExprMap;
+			using ExprMap = std::unordered_map<z3::expr, z3::expr, ASTHasher, ASTComparer>;
 			ExprMap cache;
 
 			// Initialize worklist with root node of the AST

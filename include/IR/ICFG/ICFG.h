@@ -25,7 +25,7 @@
 ///
 /// Extends basic CFG with interprocedural edges (call/return) to enable
 /// whole-program control flow analysis.
-typedef GenericGraph<ICFGNode, ICFGEdge> GenericICFGTy;
+using GenericICFGTy = GenericGraph<ICFGNode, ICFGEdge>;
 class ICFG : public GenericICFGTy {
 
 public:

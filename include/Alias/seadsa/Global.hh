@@ -78,10 +78,10 @@ public:
 // Context-insensitive dsa analysis
 class ContextInsensitiveGlobalAnalysis : public GlobalAnalysis {
 public:
-  typedef typename Graph::SetFactory SetFactory;
+  using SetFactory = typename Graph::SetFactory;
 
 private:
-  typedef std::unique_ptr<Graph> GraphRef;
+  using GraphRef = std::unique_ptr<Graph>;
 
   const llvm::DataLayout &m_dl;
   llvm::TargetLibraryInfoWrapperPass &m_tliWrapper;
@@ -148,16 +148,15 @@ private:
 // be aliased at any particular call site.
 class ContextSensitiveGlobalAnalysis : public GlobalAnalysis {
 public:
-  typedef typename Graph::SetFactory SetFactory;
+  using SetFactory = typename Graph::SetFactory;
 
 private:
-  typedef std::shared_ptr<Graph> GraphRef;
-  typedef BottomUpAnalysis::GraphMap GraphMap;
+  using GraphRef = std::shared_ptr<Graph>;
+  using GraphMap = BottomUpAnalysis::GraphMap;
   enum PropagationKind { DOWN, UP, NONE };
 
-  typedef std::shared_ptr<SimulationMapper> SimulationMapperRef;
-  typedef std::map<DsaCallSite, SimulationMapperRef>
-      CalleeCallerMapping;
+  using SimulationMapperRef = std::shared_ptr<SimulationMapper>;
+  using CalleeCallerMapping = std::map<DsaCallSite, SimulationMapperRef>;
 
   const llvm::DataLayout &m_dl;
   llvm::TargetLibraryInfoWrapperPass &m_tliWrapper;
@@ -215,11 +214,11 @@ public:
  */
 class BottomUpTopDownGlobalAnalysis : public GlobalAnalysis {
 public:
-  typedef typename Graph::SetFactory SetFactory;
+  using SetFactory = typename Graph::SetFactory;
 
 private:
-  typedef std::shared_ptr<Graph> GraphRef;
-  typedef BottomUpAnalysis::GraphMap GraphMap;
+  using GraphRef = std::shared_ptr<Graph>;
+  using GraphMap = BottomUpAnalysis::GraphMap;
 
   const llvm::DataLayout &m_dl;
   llvm::TargetLibraryInfoWrapperPass &m_tliWrapper;
@@ -262,11 +261,11 @@ public:
  */
 class BottomUpGlobalAnalysis : public GlobalAnalysis {
 public:
-  typedef typename Graph::SetFactory SetFactory;
+  using SetFactory = typename Graph::SetFactory;
 
 private:
-  typedef std::shared_ptr<Graph> GraphRef;
-  typedef BottomUpAnalysis::GraphMap GraphMap;
+  using GraphRef = std::shared_ptr<Graph>;
+  using GraphMap = BottomUpAnalysis::GraphMap;
 
   const llvm::DataLayout &m_dl;
   llvm::TargetLibraryInfoWrapperPass &m_tliWrapper;

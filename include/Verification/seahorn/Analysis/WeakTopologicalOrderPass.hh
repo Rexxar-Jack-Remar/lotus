@@ -9,12 +9,12 @@ namespace seahorn {
 
 /// Construct weak topological order of a CFG of a function
 class WeakTopologicalOrderPass : public llvm::FunctionPass {
-  typedef WeakTopoOrder<llvm::Function> wto_t;
+  using wto_t = WeakTopoOrder<llvm::Function>;
 
   wto_t m_wto;
 
 public:
-  typedef typename wto_t::const_iterator const_iterator;
+  using const_iterator = typename wto_t::const_iterator;
 
   static char ID;
 

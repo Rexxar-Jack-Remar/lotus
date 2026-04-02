@@ -7,9 +7,9 @@
  * This class is the VarSet interface;
  */
 
-#include <string>
-#include <iostream>
 #include "dictionary_t.h"
+#include <iostream>
+#include <string>
 
 class VarSet {
     public:

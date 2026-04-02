@@ -13,7 +13,7 @@
 namespace aser {
 
 template <typename _Tp> struct const_pointer {
-  typedef const typename std::remove_pointer<_Tp>::type *type;
+  using type = const typename std::remove_pointer<_Tp>::type *;
 };
 
 template <typename WrapperIteratorT,

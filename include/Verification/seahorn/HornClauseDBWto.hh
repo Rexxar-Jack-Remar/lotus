@@ -25,18 +25,18 @@ namespace seahorn
 
   // Build a weak topological ordering from the Horn clause database.
   class HornClauseDBWto {
-    typedef WeakTopoOrder<HornClauseDBCallGraph> wto_t;
+    using wto_t = WeakTopoOrder<HornClauseDBCallGraph>;
 
     HornClauseDBCallGraph &m_callgraph;
     wto_t m_wto;
 
    public:
 
-    typedef typename wto_t::iterator iterator;
-    typedef typename wto_t::const_iterator const_iterator;
+    using iterator = typename wto_t::iterator;
+    using const_iterator = typename wto_t::const_iterator;
 
-    typedef typename wto_t::nested_components_iterator head_iterator;
-    typedef typename wto_t::nested_components_const_iterator head_const_iterator;
+    using head_iterator = typename wto_t::nested_components_iterator;
+    using head_const_iterator = typename wto_t::nested_components_const_iterator;
 
     HornClauseDBWto(HornClauseDBCallGraph &callgraph): m_callgraph(callgraph) { }
 

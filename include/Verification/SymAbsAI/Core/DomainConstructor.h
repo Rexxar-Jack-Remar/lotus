@@ -56,18 +56,15 @@ public:
 
 private:
   // basic form of a "factory function" that this class wraps
-  typedef std::function<unique_ptr<AbstractValue>(const args &)> factory_func_t;
+  using factory_func_t = std::function<unique_ptr<AbstractValue>(const args &)>;
 
   // alternative factory functions that the domain implementers can supply
   // instead of factory_func_t if it's more convenient
-  typedef std::function<unique_ptr<AbstractValue>(const FunctionContext &,
-                                                  llvm::BasicBlock *, bool)>
-      alt_ffunc_0;
-  typedef std::function<unique_ptr<AbstractValue>(Expression, const args &)>
-      alt_ffunc_1;
-  typedef std::function<unique_ptr<AbstractValue>(Expression, Expression,
-                                                  const args &)>
-      alt_ffunc_2;
+  using alt_ffunc_0 = std::function<unique_ptr<AbstractValue>(const FunctionContext &,
+                                                  llvm::BasicBlock *, bool)>;
+  using alt_ffunc_1 = std::function<unique_ptr<AbstractValue>(Expression, const args &)>;
+  using alt_ffunc_2 = std::function<unique_ptr<AbstractValue>(Expression, Expression,
+                                                  const args &)>;
 
   std::string Name_;
   std::string Description_;

@@ -70,15 +70,15 @@ private:
 
 public:
   // parameters for partitioned search
-  typedef enum { disjoint, shared } partition_strategy;
+  enum partition_strategy { disjoint, shared };
 
-  typedef enum { t_false, t_true, t_undef } tri_bool;
+  enum tri_bool { t_false, t_true, t_undef };
 
-  typedef enum {
+  enum opt_mode {
     g_min,    // get min
     g_max,    // get max
     g_min_max // get min and max
-  } opt_mode;
+  };
 
   opt_solver() {}
 

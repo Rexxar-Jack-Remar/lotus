@@ -8,7 +8,7 @@
  
  class FBVClock{
  public:
-   typedef int ClockSystemID;
+   using ClockSystemID = int;
    static ClockSystemID new_clock_system();
    static void delete_clock_system(ClockSystemID cid);
    FBVClock(ClockSystemID cid, int idx);

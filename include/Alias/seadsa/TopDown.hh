@@ -17,8 +17,8 @@ namespace seadsa {
 class TopDownAnalysis {
 
 public:
-  typedef std::shared_ptr<Graph> GraphRef;
-  typedef llvm::DenseMap<const llvm::Function *, GraphRef> GraphMap;
+  using GraphRef = std::shared_ptr<Graph>;
+  using GraphMap = llvm::DenseMap<const llvm::Function *, GraphRef>;
 
 private:
   llvm::CallGraph &m_cg;

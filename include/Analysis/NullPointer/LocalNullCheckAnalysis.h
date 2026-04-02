@@ -33,7 +33,7 @@
 
 using namespace llvm;
 
-typedef std::pair<Instruction *, unsigned> Edge;
+using Edge = std::pair<Instruction *, unsigned>;
 
 class LocalNullCheckAnalysis {
 private:

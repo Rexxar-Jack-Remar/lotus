@@ -65,7 +65,7 @@ haimcohen Exp $ FILE:  bdd.h DESCR: C,C++ User interface for the BDD package
 
 /*=== User BDD types ===================================================*/
 
-typedef int BDD;
+using BDD = int;
 
 #ifndef CPLUSPLUS
 typedef BDD bdd;

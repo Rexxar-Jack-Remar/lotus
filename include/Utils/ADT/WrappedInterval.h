@@ -13,20 +13,20 @@
 #define OP_SGE 7
 #define OP_EQ 8
 
-typedef int optype;
+using optype = int;
 
-typedef struct wrapped_interval_t {
+struct wrapped_interval_t {
   uint64_t min;
   uint64_t max;
   uint32_t size;
-} wrapped_interval_t;
+};
 
-typedef struct wrapped_interval_iter_t {
+struct wrapped_interval_iter_t {
   uint64_t curr_i;
   uint64_t max_i;
   uint64_t min_v;
   uint64_t mask;
-} wrapped_interval_iter_t;
+};
 
 wrapped_interval_t wi_init(unsigned size);
 int wi_update_cmp(wrapped_interval_t *src, uint64_t c, optype op);

@@ -25,7 +25,7 @@ class CpEdge {
   CutPoint &m_src;
   CutPoint &m_dst;
 
-  typedef std::vector<const BasicBlock *> BlockVector;
+  using BlockVector = std::vector<const BasicBlock *>;
   BlockVector m_bbs;
 
   CutPoint &source() { return m_src; }
@@ -40,12 +40,10 @@ public:
 
   void push_back(const BasicBlock *b) { m_bbs.push_back(b); }
 
-  typedef boost::indirect_iterator<BlockVector::iterator> iterator;
-  typedef boost::indirect_iterator<BlockVector::const_iterator> const_iterator;
-  typedef boost::indirect_iterator<BlockVector::reverse_iterator>
-      reverse_iterator;
-  typedef boost::indirect_iterator<BlockVector::const_reverse_iterator>
-      const_reverse_iterator;
+  using iterator = boost::indirect_iterator<BlockVector::iterator>;
+  using const_iterator = boost::indirect_iterator<BlockVector::const_iterator>;
+  using reverse_iterator = boost::indirect_iterator<BlockVector::reverse_iterator>;
+  using const_reverse_iterator = boost::indirect_iterator<BlockVector::const_reverse_iterator>;
 
   iterator begin() { return boost::make_indirect_iterator(m_bbs.begin()); }
   iterator end() { return boost::make_indirect_iterator(m_bbs.end()); }
@@ -76,7 +74,7 @@ class CutPoint {
   unsigned m_id;
   const BasicBlock &m_bb;
 
-  typedef SmallVector<CpEdge *, 4> EdgeVector;
+  using EdgeVector = SmallVector<CpEdge *, 4>;
   EdgeVector m_pred;
   EdgeVector m_succ;
 
@@ -93,10 +91,10 @@ public:
   void addSucc(CpEdge &edg) { m_succ.push_back(&edg); }
   void addPred(CpEdge &edg) { m_pred.push_back(&edg); }
 
-  typedef EdgeVector::iterator iterator;
-  typedef EdgeVector::const_iterator const_iterator;
-  typedef EdgeVector::reverse_iterator reverse_iterator;
-  typedef EdgeVector::const_reverse_iterator const_reverse_iterator;
+  using iterator = EdgeVector::iterator;
+  using const_iterator = EdgeVector::const_iterator;
+  using reverse_iterator = EdgeVector::reverse_iterator;
+  using const_reverse_iterator = EdgeVector::const_reverse_iterator;
 
   iterator succ_begin() { return m_succ.begin(); }
   iterator succ_end() { return m_succ.end(); }
@@ -119,15 +117,15 @@ inline CutPoint::const_iterator succ_end(const CutPoint &cp) {
 inline const CutPointGraph &CpEdge::parent() const { return m_src.parent(); }
 
 class CutPointGraph : public FunctionPass {
-  typedef boost::shared_ptr<CutPoint> CutPointPtr;
+  using CutPointPtr = boost::shared_ptr<CutPoint>;
 
-  typedef std::vector<CutPointPtr> CpVector;
-  typedef std::vector<boost::shared_ptr<CpEdge>> CpEdgeVector;
+  using CpVector = std::vector<CutPointPtr>;
+  using CpEdgeVector = std::vector<boost::shared_ptr<CpEdge>>;
 
   CpVector m_cps;
   CpEdgeVector m_edges;
 
-  typedef DenseMap<const BasicBlock *, BitVector> BlockBitMap;
+  using BlockBitMap = DenseMap<const BasicBlock *, BitVector>;
   /// maps a basic block to ids of cut-points it can forward reach
   BlockBitMap m_fwd;
   /// maps a basic block to ids of cut-points that can reach it
@@ -195,11 +193,10 @@ public:
   /// (without going through other cutpoints
   bool isFwdReach(const CutPoint &cp, const BasicBlock &bb) const;
 
-  typedef boost::indirect_iterator<CpVector::iterator> iterator;
-  typedef boost::indirect_iterator<CpVector::const_iterator> const_iterator;
-  typedef boost::indirect_iterator<CpVector::reverse_iterator> reverse_iterator;
-  typedef boost::indirect_iterator<CpVector::const_reverse_iterator>
-      const_reverse_iterator;
+  using iterator = boost::indirect_iterator<CpVector::iterator>;
+  using const_iterator = boost::indirect_iterator<CpVector::const_iterator>;
+  using reverse_iterator = boost::indirect_iterator<CpVector::reverse_iterator>;
+  using const_reverse_iterator = boost::indirect_iterator<CpVector::const_reverse_iterator>;
 
   iterator begin() { return make_indirect_iterator(m_cps.begin()); }
   iterator end() { return make_indirect_iterator(m_cps.end()); }

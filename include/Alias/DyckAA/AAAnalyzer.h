@@ -39,11 +39,11 @@
 
 using namespace llvm;
 
-typedef struct FunctionTypeNode {
+struct FunctionTypeNode {
   FunctionType *FuncTy;
   FunctionTypeNode *Root;
   std::set<Function *> CompatibleFuncs;
-} FunctionTypeNode;
+};
 
 class AAAnalyzer {
 private:

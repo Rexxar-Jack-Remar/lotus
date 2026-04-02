@@ -87,7 +87,7 @@ class DsaWrapper;
 class ShadowFunctionPass;
 
 class Local : public llvm::ModulePass {
-  typedef boost::unordered_set<const Value *> ValueSet;
+  using ValueSet = boost::unordered_set<const Value *>;
 
   const DataLayout *m_dl;
   TargetLibraryInfo *m_tli;

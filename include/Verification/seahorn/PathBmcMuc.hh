@@ -44,7 +44,7 @@ class MucDeletion : public minimalUnsatCore {
 
   friend class MucBinarySearch;
 
-  typedef expr::ExprVector::const_iterator const_iterator;
+  using const_iterator = expr::ExprVector::const_iterator;
 
   solver::SolverResult check(const_iterator it, const_iterator et,
                              const expr::ExprVector &assumptions);

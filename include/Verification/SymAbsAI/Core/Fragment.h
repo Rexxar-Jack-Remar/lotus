@@ -72,7 +72,7 @@ namespace symabs_ai {
 
 class Fragment {
 public:
-  typedef std::pair<llvm::BasicBlock *, llvm::BasicBlock *> edge;
+  using edge = std::pair<llvm::BasicBlock *, llvm::BasicBlock *>;
 
   // noncopyable but moveable
   Fragment(const Fragment &) = delete;

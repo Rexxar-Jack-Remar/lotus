@@ -4,7 +4,7 @@
 #include <string>
 #include <vector>
 
-typedef unsigned TreeStreamID;
+using TreeStreamID = unsigned;
 class TreeOStream;
 
 class TreeStreamWriter {

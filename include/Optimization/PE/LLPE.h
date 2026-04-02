@@ -883,7 +883,7 @@ enum MultiCmpResult {
 class IAWalker {
 
 public:
-  typedef std::pair<uint32_t, ShadowBB *> WLItem;
+  using WLItem = std::pair<uint32_t, ShadowBB *>;
 
 protected:
   WLItem makeWL(uint32_t x, ShadowBB *y) { return std::make_pair(x, y); }

@@ -16,17 +16,17 @@ namespace seadsa {
     
     typename Node::links_type::const_iterator _links_it;
     
-    typedef NodeIterator<NodeTy> this_type;
+    using this_type = NodeIterator<NodeTy>;
     
     NodeIterator(NodeTy *N) : _links_it(N->links().begin()) {}   // begin iterator
     NodeIterator(NodeTy *N, bool) : _links_it(N->links().end()) {}  // Create end iterator
     
   public:
-    typedef std::forward_iterator_tag iterator_category;
-    typedef Node value_type;
-    typedef Node* pointer;
-    typedef Node& reference;
-    typedef std::ptrdiff_t difference_type;
+    using iterator_category = std::forward_iterator_tag;
+    using value_type = Node;
+    using pointer = Node *;
+    using reference = Node &;
+    using difference_type = std::ptrdiff_t;
     
     bool operator==(const this_type& x) const {
       return _links_it == x._links_it;
@@ -78,8 +78,8 @@ inline Node::const_iterator Node::end() const { return Node::const_iterator(this
 namespace llvm {
   
   template <> struct GraphTraits<seadsa::Node*> {
-    typedef seadsa::Node NodeType;
-    typedef seadsa::Node::iterator ChildIteratorType;
+    using NodeType = seadsa::Node;
+    using ChildIteratorType = seadsa::Node::iterator;
     
     static NodeType *getEntryNode(NodeType *N) { return N; }
     static ChildIteratorType child_begin(NodeType *N) { return N->begin(); }
@@ -87,8 +87,8 @@ namespace llvm {
   };
 
   template <> struct GraphTraits<const seadsa::Node*> {
-    typedef const seadsa::Node NodeType;
-    typedef seadsa::Node::const_iterator ChildIteratorType;
+    using NodeType = const seadsa::Node;
+    using ChildIteratorType = seadsa::Node::const_iterator;
     
     static NodeType *getEntryNode(NodeType *N) { return N; }
     static ChildIteratorType child_begin(NodeType *N) { return N->begin(); }
@@ -96,11 +96,11 @@ namespace llvm {
   };
 
   template <> struct GraphTraits<seadsa::Graph*> {
-    typedef seadsa::Node NodeType;
-    typedef seadsa::Node::iterator ChildIteratorType;
+    using NodeType = seadsa::Node;
+    using ChildIteratorType = seadsa::Node::iterator;
     
     // nodes_iterator/begin/end - Allow iteration over all nodes in the graph
-    typedef seadsa::Graph::iterator nodes_iterator;
+    using nodes_iterator = seadsa::Graph::iterator;
     
     static nodes_iterator nodes_begin(seadsa::Graph *G) { return G->begin(); }
     static nodes_iterator nodes_end(seadsa::Graph *G) { return G->end(); }
@@ -110,11 +110,11 @@ namespace llvm {
   };
 
   template <> struct GraphTraits<const seadsa::Graph*> {
-    typedef const seadsa::Node NodeType;
-    typedef seadsa::Node::const_iterator ChildIteratorType;
+    using NodeType = const seadsa::Node;
+    using ChildIteratorType = seadsa::Node::const_iterator;
     
     // nodes_iterator/begin/end - Allow iteration over all nodes in the graph
-    typedef seadsa::Graph::const_iterator nodes_iterator;
+    using nodes_iterator = seadsa::Graph::const_iterator;
     
     static nodes_iterator nodes_begin(const seadsa::Graph *G) { return G->begin(); }
     static nodes_iterator nodes_end(const seadsa::Graph *G) { return G->end(); }
@@ -126,17 +126,17 @@ namespace llvm {
   /// Iterator to traverse all the nodes of a given graph.
   template <typename Set>
   class nodes_iterator_tpl {
-    typedef typename Set::iterator iterator;
-    typedef typename Set::value_type value_type;
+    using iterator = typename Set::iterator;
+    using value_type = typename Set::value_type;
 
     iterator m_it;
     iterator m_end;
 
   public:
-    typedef value_type *pointer;
-    typedef value_type &reference;
-    typedef std::forward_iterator_tag iterator_category;
-    typedef std::ptrdiff_t difference_type;
+    using pointer = value_type *;
+    using reference = value_type &;
+    using iterator_category = std::forward_iterator_tag;
+    using difference_type = std::ptrdiff_t;
 
     nodes_iterator_tpl() {}
     nodes_iterator_tpl(iterator it, iterator end) : m_it(it), m_end(end) {}
@@ -153,7 +153,7 @@ namespace llvm {
   };
   
   // Just use Graph's built-in iterators for nodes
-  typedef seadsa::Graph::iterator nodes_iterator;
-} // End llvm namespace
+  using nodes_iterator = seadsa::Graph::iterator;
+} // namespace llvm
 
 #endif

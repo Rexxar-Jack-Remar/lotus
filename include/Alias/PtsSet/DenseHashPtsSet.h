@@ -14,6 +14,10 @@ public:
   using Index = std::uint64_t;
   using iterator = llvm::DenseSet<Index>::const_iterator;
 
+  bool has(Index idx) {
+    return static_cast<const DenseHashPtsSet &>(*this).has(idx);
+  }
+
   bool has(Index idx) const { return set_.contains(idx); }
 
   bool insert(Index idx) { return set_.insert(idx).second; }
@@ -69,6 +73,10 @@ public:
 
   iterator begin() const { return set_.begin(); }
   iterator end() const { return set_.end(); }
+
+  bool intersects(const DenseHashPtsSet &other) const {
+    return intersectWith(other);
+  }
 
 private:
   llvm::DenseSet<Index> set_;

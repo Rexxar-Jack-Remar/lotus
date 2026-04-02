@@ -24,20 +24,19 @@
 #include <utility>
 
 template <bool Condition, class T> struct add_const_if {
-  typedef T type;
+  using type = T;
 };
 
 template <class T> struct add_const_if<true, T> {
-  typedef typename std::add_const<T>::type type;
+  using type = typename std::add_const<T>::type;
 };
 
 template <class IteratorTy> class key_iterator : public IteratorTy {
 public:
-  typedef typename add_const_if<
+  using value_type = typename add_const_if<
       std::is_const<typename std::remove_reference<
           typename std::iterator_traits<IteratorTy>::reference>::type>::value,
-      typename std::iterator_traits<IteratorTy>::value_type::first_type>::type
-      value_type;
+      typename std::iterator_traits<IteratorTy>::value_type::first_type>::type;
 
   key_iterator() : IteratorTy() {}
 
@@ -56,11 +55,10 @@ public:
 
 template <class IteratorTy> class value_iterator : public IteratorTy {
 public:
-  typedef typename add_const_if<
+  using value_type = typename add_const_if<
       std::is_const<typename std::remove_reference<
           typename std::iterator_traits<IteratorTy>::reference>::type>::value,
-      typename std::iterator_traits<IteratorTy>::value_type::second_type>::type
-      value_type;
+      typename std::iterator_traits<IteratorTy>::value_type::second_type>::type;
 
   value_iterator() : IteratorTy() {}
 
@@ -79,7 +77,7 @@ public:
 
 template <class IteratorTy> class KeyRange {
 public:
-  typedef key_iterator<IteratorTy> iterator;
+  using iterator = key_iterator<IteratorTy>;
 
 private:
   iterator Begin;
@@ -95,7 +93,7 @@ public:
 
 template <class IteratorTy> class ValueRange {
 public:
-  typedef value_iterator<IteratorTy> iterator;
+  using iterator = value_iterator<IteratorTy>;
 
 private:
   iterator Begin;

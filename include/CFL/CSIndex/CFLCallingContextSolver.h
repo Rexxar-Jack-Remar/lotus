@@ -18,7 +18,7 @@
 /// backtrace point and the pop() method is to jump back the backtrace point.
 class CFLCallingContextSolver {
 protected:
-  typedef struct Item {
+  struct Item {
     int PrevIndex;
     int NextIndex;
     int SelfIndex;
@@ -28,7 +28,7 @@ protected:
         : PrevIndex(p), NextIndex(n), SelfIndex(s), Label(l) {}
 
     ~Item() {}
-  } Item;
+  };
 
   std::vector<size_t> SizeStack;
   std::vector<Item> LabelVector;

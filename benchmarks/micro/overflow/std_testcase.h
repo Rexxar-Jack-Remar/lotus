@@ -35,21 +35,21 @@
 #define ALLOCA alloca
 #endif
 
+#include <limits.h>
+#include <stddef.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
-#include <stddef.h>
-#include <time.h>
-#include <limits.h>
 #include <string.h>
-#include <stdint.h>
+#include <time.h>
 #ifndef _WIN32
 /* SIZE_MAX, int64_t, etc. are in this file on Linux */
 # include <stdint.h>
 #endif
 #include <ctype.h>
 #include <fcntl.h>
-#include <sys/types.h>
 #include <sys/stat.h>
+#include <sys/types.h>
 #ifdef _WIN32
 #include <io.h> /* for open/close etc */
 #endif

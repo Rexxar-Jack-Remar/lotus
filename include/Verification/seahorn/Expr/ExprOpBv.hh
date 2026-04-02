@@ -39,7 +39,7 @@ inline std::ostream &operator<<(std::ostream &OS, const BvSort &b) {
 } // namespace bv
 } // namespace op
 template <> struct TerminalTrait<const op::bv::BvSort> {
-  typedef const op::bv::BvSort value_type;
+  using value_type = const op::bv::BvSort;
 
   static inline void print(std::ostream &OS, const op::bv::BvSort &b, int depth,
                            bool brkt) {
@@ -64,7 +64,7 @@ template <> struct TerminalTrait<const op::bv::BvSort> {
 };
 
 namespace op {
-typedef Terminal<const bv::BvSort> BVSORT;
+using BVSORT = Terminal<const bv::BvSort>;
 
 namespace bv {
 inline Expr bvsort(unsigned width, ExprFactory &efac) {

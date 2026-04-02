@@ -48,6 +48,11 @@ Standalone front-end for the elimination-based APA engine.
 Supports the same ``--analysis`` space as ``lotus-dfa`` plus
 ``--elim-method`` for choosing the elimination solver variant.
 
+Profiling-oriented dumps are available with:
+
+- ``--dump-profile`` to emit CFG, solver, and path-expression summary metrics
+- ``--dump-exprs`` to additionally emit per-instruction path-expression stats and serialized expressions
+
 lotus-dfa-mono
 --------------
 

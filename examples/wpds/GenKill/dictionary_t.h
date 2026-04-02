@@ -43,8 +43,8 @@
 #define DICTIONARY_GUARD
 
 #include <assert.h>
-#include <limits.h>
 #include <iostream>
+#include <limits.h>
 
 typedef unsigned short height_t;
 typedef unsigned short refcount_t;

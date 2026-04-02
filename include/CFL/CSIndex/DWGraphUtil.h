@@ -5,8 +5,8 @@
 
 // #define DEBUG
 
-typedef pair<DWEdgeList::iterator, DWEdgeList::iterator> EdgePtr;
-typedef vector<EdgePtr> EdgePtrMap;
+using EdgePtr = pair<DWEdgeList::iterator, DWEdgeList::iterator>;
+using EdgePtrMap = vector<EdgePtr>;
 
 class DWGraphUtil {
 public:

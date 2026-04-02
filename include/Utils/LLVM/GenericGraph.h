@@ -5,7 +5,7 @@
 #include <set>
 #include <unordered_map>
 
-typedef int32_t NodeID;
+using NodeID = int32_t;
 
 /*!
  * Generic edge on the graph as base class
@@ -14,7 +14,7 @@ template <class NodeTy> class GenericEdge {
 
 public:
   /// Edge type
-  typedef int32_t GEdgeKind;
+  using GEdgeKind = int32_t;
 
 private:
   NodeTy *src;        ///< source node
@@ -43,7 +43,7 @@ public:
   //  and duplicated elements in the set are not inserted (binary tree
   //  comparison)
   //@{
-  typedef struct equalGEdge {
+  struct equalGEdge {
     bool operator()(const GenericEdge<NodeTy> *lhs,
                     const GenericEdge<NodeTy> *rhs) const {
       if (lhs->edgeKind != rhs->edgeKind)
@@ -53,7 +53,7 @@ public:
       else
         return lhs->getDstNode() < rhs->getDstNode();
     }
-  } equalGEdge;
+  };
 
   inline bool operator==(const GenericEdge<NodeTy> *rhs) const {
     return (rhs->edgeKind == this->edgeKind &&
@@ -70,12 +70,12 @@ template <class NodeTy, class EdgeTy> class GenericNode {
 
 public:
   /// Edge kind
-  typedef int32_t GNodeK;
-  typedef std::set<EdgeTy *, typename EdgeTy::equalGEdge> GEdgeSetTy;
+  using GNodeK = int32_t;
+  using GEdgeSetTy = std::set<EdgeTy *, typename EdgeTy::equalGEdge>;
   /// Edge iterator
   ///@{
-  typedef typename GEdgeSetTy::iterator iterator;
-  typedef typename GEdgeSetTy::const_iterator const_iterator;
+  using iterator = typename GEdgeSetTy::iterator;
+  using const_iterator = typename GEdgeSetTy::const_iterator;
   ///@}
 
 private:
@@ -173,12 +173,12 @@ template <class NodeTy, class EdgeTy> class GenericGraph {
 
 public:
   /// NodeID to GenericNode map
-  typedef std::unordered_map<NodeID, NodeTy *> IDToNodeMapTy;
+  using IDToNodeMapTy = std::unordered_map<NodeID, NodeTy *>;
 
   /// Node Iterators
   //@{
-  typedef typename IDToNodeMapTy::iterator iterator;
-  typedef typename IDToNodeMapTy::const_iterator const_iterator;
+  using iterator = typename IDToNodeMapTy::iterator;
+  using const_iterator = typename IDToNodeMapTy::const_iterator;
   //@}
 
   /// Constructor

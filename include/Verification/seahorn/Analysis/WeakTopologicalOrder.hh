@@ -57,7 +57,7 @@ template <typename E> class WtoElementVisitor;
 // WtoElement = [ WtoSingleton | WtoComponent]
 template <typename E> class WtoElement {
 public:
-  typedef WtoElementVisitor<E> wto_element_visitor_t;
+  using wto_element_visitor_t = WtoElementVisitor<E>;
 
   virtual void accept(wto_element_visitor_t *) = 0;
 
@@ -69,8 +69,8 @@ public:
 template <typename E> class WtoSingleton : public WtoElement<E> {
 
 public:
-  typedef WtoElement<E> wto_element_t;
-  typedef WtoElementVisitor<E> wto_element_visitor_t;
+  using wto_element_t = WtoElement<E>;
+  using wto_element_visitor_t = WtoElementVisitor<E>;
 
 private:
   E m_singleton;
@@ -90,20 +90,18 @@ public:
 template <typename E> class WtoComponent : public WtoElement<E> {
 
 public:
-  typedef WtoElementVisitor<E> wto_element_visitor_t;
-  typedef WtoElement<E> wto_element_t;
-  typedef boost::shared_ptr<wto_element_t> wto_element_ptr;
-  typedef std::deque<wto_element_ptr> wto_components_t;
+  using wto_element_visitor_t = WtoElementVisitor<E>;
+  using wto_element_t = WtoElement<E>;
+  using wto_element_ptr = boost::shared_ptr<wto_element_t>;
+  using wto_components_t = std::deque<wto_element_ptr>;
 
 private:
   E m_head;
   wto_components_t m_components;
 
 public:
-  typedef boost::indirect_iterator<typename wto_components_t::iterator>
-      iterator;
-  typedef boost::indirect_iterator<typename wto_components_t::const_iterator>
-      const_iterator;
+  using iterator = boost::indirect_iterator<typename wto_components_t::iterator>;
+  using const_iterator = boost::indirect_iterator<typename wto_components_t::const_iterator>;
 
   WtoComponent(E head, wto_components_t components)
       : m_head(head), m_components(components) {}
@@ -146,8 +144,8 @@ public:
 template <typename E> class WtoElementVisitor {
 
 public:
-  typedef WtoSingleton<E> wto_singleton_t;
-  typedef WtoComponent<E> wto_component_t;
+  using wto_singleton_t = WtoSingleton<E>;
+  using wto_component_t = WtoComponent<E>;
 
   virtual void visit(const wto_singleton_t &) = 0;
 
@@ -160,7 +158,7 @@ public:
 template <typename G> class WeakTopoOrder {
 
 public:
-  typedef typename boost::graph_traits<G>::vertex_descriptor vertex_t;
+  using vertex_t = typename boost::graph_traits<G>::vertex_descriptor;
 
 private:
   // A helper class to extend an unsigned number with +oo;
@@ -223,16 +221,15 @@ private:
     }
   };
 
-  typedef WtoElement<vertex_t> wto_element_t;
-  typedef WtoSingleton<vertex_t> wto_singleton_t;
-  typedef WtoComponent<vertex_t> wto_component_t;
+  using wto_element_t = WtoElement<vertex_t>;
+  using wto_singleton_t = WtoSingleton<vertex_t>;
+  using wto_component_t = WtoComponent<vertex_t>;
 
-  typedef boost::shared_ptr<wto_element_t> wto_element_ptr;
-  typedef std::deque<wto_element_ptr> partition_t;
-  typedef boost::unordered_map<vertex_t, Number> dfn_map_t;
-  typedef std::vector<vertex_t> stack_t;
-  typedef boost::unordered_map<vertex_t, std::vector<wto_component_t>>
-      nested_components_t;
+  using wto_element_ptr = boost::shared_ptr<wto_element_t>;
+  using partition_t = std::deque<wto_element_ptr>;
+  using dfn_map_t = boost::unordered_map<vertex_t, Number>;
+  using stack_t = std::vector<vertex_t>;
+  using nested_components_t = boost::unordered_map<vertex_t, std::vector<wto_component_t>>;
 
   //! the graph
   G *m_g;
@@ -312,9 +309,9 @@ private:
   // \omega(c) is the set of heads of the (nested) components containing c
   template <typename E, typename NestedComponentsTable>
   class NestedComponentsVisitor : public WtoElementVisitor<E> {
-    typedef WtoElementVisitor<E> wto_element_visitor_t;
-    typedef typename wto_element_visitor_t::wto_singleton_t wto_singleton_t;
-    typedef typename wto_element_visitor_t::wto_component_t wto_component_t;
+    using wto_element_visitor_t = WtoElementVisitor<E>;
+    using wto_singleton_t = typename wto_element_visitor_t::wto_singleton_t;
+    using wto_component_t = typename wto_element_visitor_t::wto_component_t;
 
     std::vector<wto_component_t> m_nested_components;
     NestedComponentsTable &m_nested_components_table;
@@ -355,15 +352,12 @@ private:
   };
 
 public:
-  typedef boost::indirect_iterator<typename partition_t::iterator> iterator;
-  typedef boost::indirect_iterator<typename partition_t::const_iterator>
-      const_iterator;
-  typedef boost::transform_iterator<
-      getHead, typename std::vector<wto_component_t>::iterator>
-      nested_components_iterator;
-  typedef boost::transform_iterator<
-      getHead, typename std::vector<wto_component_t>::const_iterator>
-      nested_components_const_iterator;
+  using iterator = boost::indirect_iterator<typename partition_t::iterator>;
+  using const_iterator = boost::indirect_iterator<typename partition_t::const_iterator>;
+  using nested_components_iterator = boost::transform_iterator<
+      getHead, typename std::vector<wto_component_t>::iterator>;
+  using nested_components_const_iterator = boost::transform_iterator<
+      getHead, typename std::vector<wto_component_t>::const_iterator>;
 
   WeakTopoOrder() : m_g(nullptr), m_cur_dfn_num(0) {}
 

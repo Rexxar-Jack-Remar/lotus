@@ -30,10 +30,10 @@
 
 using namespace llvm;
 
-typedef struct ModRef {
+struct ModRef {
   std::set<DyckGraphNode *> Mods;
   std::set<DyckGraphNode *> Refs;
-} ModRef;
+};
 
 class DyckModRefAnalysis : public ModulePass {
 private:

@@ -682,9 +682,9 @@ void SharedStoreMap<ChildType, ExtraState>::print(raw_ostream &RSO,
 
 template <class ChildType, class ExtraState> struct LocalStoreMap {
 
-  typedef SharedStoreMap<ChildType, ExtraState> FrameType;
-  typedef SharedTreeRoot<ChildType, ExtraState> RootType;
-  typedef SharedTreeNode<ChildType, ExtraState> NodeType;
+  using FrameType = SharedStoreMap<ChildType, ExtraState>;
+  using RootType = SharedTreeRoot<ChildType, ExtraState>;
+  using NodeType = SharedTreeNode<ChildType, ExtraState>;
 
   SmallVector<FrameType *, 4> frames;
   RootType heap;
@@ -921,10 +921,10 @@ void LocalStoreMap<ChildType, ExtraState>::print(raw_ostream &RSO, bool brief) {
 template <class ChildType, class ExtraState>
 struct MergeBlockVisitor : public ShadowBBVisitor {
 
-  typedef LocalStoreMap<ChildType, ExtraState> MapType;
-  typedef SharedStoreMap<ChildType, ExtraState> FrameType;
-  typedef SharedTreeRoot<ChildType, ExtraState> RootType;
-  typedef SharedTreeNode<ChildType, ExtraState> NodeType;
+  using MapType = LocalStoreMap<ChildType, ExtraState>;
+  using FrameType = SharedStoreMap<ChildType, ExtraState>;
+  using RootType = SharedTreeRoot<ChildType, ExtraState>;
+  using NodeType = SharedTreeNode<ChildType, ExtraState>;
 
   IntegrationAttempt *originContext;
   MapType *newMap;

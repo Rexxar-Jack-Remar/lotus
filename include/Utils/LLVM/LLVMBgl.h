@@ -18,7 +18,7 @@
 #include <utility>
 
 namespace llvm {
-typedef std::pair<BasicBlock *, BasicBlock *> BBPair;
+using BBPair = std::pair<BasicBlock *, BasicBlock *>;
 namespace bgl {
 struct MkOutEdgePair {
   BasicBlock *src = nullptr;

@@ -20,11 +20,11 @@ namespace seadsa {
 class CallGraphWrapper {
 public:
   // XXX: use a vector to have more control about the ordering
-  typedef std::vector<DsaCallSite> CallSiteSet;
+  using CallSiteSet = std::vector<DsaCallSite>;
   
 private:
-  typedef std::shared_ptr<CallSiteSet> CallSiteSetRef;
-  typedef std::unordered_map<const llvm::Function *, CallSiteSetRef> IndexMap;
+  using CallSiteSetRef = std::shared_ptr<CallSiteSet>;
+  using IndexMap = std::unordered_map<const llvm::Function *, CallSiteSetRef>;
 
   llvm::CallGraph &m_cg;
   IndexMap m_uses;

@@ -31,10 +31,10 @@ public:
 
   bool isBackEdge(const BasicBlock &src, const BasicBlock &dst) const;
 
-  typedef BlockVector::iterator iterator;
-  typedef BlockVector::const_iterator const_iterator;
-  typedef BlockVector::reverse_iterator reverse_iterator;
-  typedef BlockVector::const_reverse_iterator const_reverse_iterator;
+  using iterator = BlockVector::iterator;
+  using const_iterator = BlockVector::const_iterator;
+  using reverse_iterator = BlockVector::reverse_iterator;
+  using const_reverse_iterator = BlockVector::const_reverse_iterator;
 
   iterator begin() { return m_order.begin(); }
   iterator end() { return m_order.end(); }

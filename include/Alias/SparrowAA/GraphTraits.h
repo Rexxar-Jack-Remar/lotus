@@ -40,7 +40,7 @@
 template <class MapIterator> class MapValueIterator {
 private:
   MapIterator itr;
-  typedef typename MapIterator::value_type::second_type MapValueType;
+  using MapValueType = typename MapIterator::value_type::second_type;
 
 public:
   explicit MapValueIterator(const MapIterator &i) : itr(i) {}

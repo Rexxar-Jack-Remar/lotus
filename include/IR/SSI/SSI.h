@@ -188,7 +188,7 @@ struct SSIfy : public FunctionPass {
  */
 class ProgramPoint {
 public:
-  typedef enum { In, Self, Out } Position;
+  enum Position { In, Self, Out };
 
 public:
   explicit ProgramPoint(Instruction *I, Position P);
@@ -269,8 +269,8 @@ struct PostDominanceFrontier {
   static char ID;
 
 public:
-  typedef std::set<BasicBlock *> DomSetType;    // Dom set for a bb
-  typedef std::map<BasicBlock *, DomSetType> DomSetMapType; // Dom set map
+  using DomSetType = std::set<BasicBlock *>;    // Dom set for a bb
+  using DomSetMapType = std::map<BasicBlock *, DomSetType>; // Dom set map
 
   DomSetMapType Frontiers;
   std::vector<BasicBlock *> Roots;
@@ -291,8 +291,8 @@ public:
   virtual void releaseMemory() { Frontiers.clear(); }
 
   // Accessor interface:
-  typedef DomSetMapType::iterator iterator;
-  typedef DomSetMapType::const_iterator const_iterator;
+  using iterator = DomSetMapType::iterator;
+  using const_iterator = DomSetMapType::const_iterator;
   iterator begin() { return Frontiers.begin(); }
   const_iterator begin() const { return Frontiers.begin(); }
   iterator end() { return Frontiers.end(); }

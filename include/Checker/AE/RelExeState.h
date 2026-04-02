@@ -18,8 +18,8 @@ namespace analysis {
 
 class RelExeState {
 public:
-  typedef std::unordered_map<uint32_t, Z3Expr> VarToValMap;
-  typedef VarToValMap AddrToValMap;
+  using VarToValMap = std::unordered_map<uint32_t, Z3Expr>;
+  using AddrToValMap = VarToValMap;
 
 protected:
   VarToValMap _varToVal;

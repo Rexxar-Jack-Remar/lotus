@@ -87,8 +87,8 @@ class HornClauseDB {
   friend class HornRule;
 
 public:
-  typedef std::vector<HornRule> RuleVector;
-  typedef boost::container::flat_set<Expr> expr_set_type;
+  using RuleVector = std::vector<HornRule>;
+  using expr_set_type = boost::container::flat_set<Expr>;
   struct IsRelation {
     using argument_type = Expr;
     using result_type = bool;
@@ -112,8 +112,8 @@ private:
 
   /// indexes
 
-  typedef boost::container::flat_set<HornRule *> horn_set_type;
-  typedef std::map<Expr, horn_set_type> index_type;
+  using horn_set_type = boost::container::flat_set<HornRule *>;
+  using index_type = std::map<Expr, horn_set_type>;
   /// maps a relation to rules it appears in the body
   index_type m_body_idx;
   /// maps a relation to rules it appears in the head
@@ -265,7 +265,7 @@ inline raw_ostream &operator<<(raw_ostream &o, const HornClauseDB &db) {
 class HornClauseDBCallGraph {
   HornClauseDB &m_db;
   /// callgraph
-  typedef std::map<Expr, HornClauseDB::expr_set_type> callgraph_type;
+  using callgraph_type = std::map<Expr, HornClauseDB::expr_set_type>;
   callgraph_type m_callers;
   callgraph_type m_callees;
   Expr m_cg_entry;

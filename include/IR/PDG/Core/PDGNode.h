@@ -188,7 +188,7 @@ protected:
 template <typename NodeTy>
 class EdgeIterator : public std::iterator<std::input_iterator_tag, NodeTy> {
   typename Node::EdgeSet::iterator _edge_iter;
-  typedef EdgeIterator<NodeTy> this_type;
+  using this_type = EdgeIterator<NodeTy>;
 
 public:
   /// @brief Constructs an iterator pointing to the beginning of the edge set

@@ -79,13 +79,13 @@ struct OrdinaryStoreExtraState;
 struct DSEStoreExtraState;
 struct TLStoreExtraState;
 
-typedef LocalStoreMap<LocStore, OrdinaryStoreExtraState> OrdinaryLocalStore;
-typedef LocalStoreMap<DSEMapPointer, DSEStoreExtraState> DSELocalStore;
-typedef LocalStoreMap<TLMapPointer, TLStoreExtraState> TLLocalStore;
+using OrdinaryLocalStore = LocalStoreMap<LocStore, OrdinaryStoreExtraState>;
+using DSELocalStore = LocalStoreMap<DSEMapPointer, DSEStoreExtraState>;
+using TLLocalStore = LocalStoreMap<TLMapPointer, TLStoreExtraState>;
 
-typedef MergeBlockVisitor<LocStore, OrdinaryStoreExtraState> OrdinaryMerger;
-typedef MergeBlockVisitor<DSEMapPointer, DSEStoreExtraState> DSEMerger;
-typedef MergeBlockVisitor<TLMapPointer, TLStoreExtraState> TLMerger;
+using OrdinaryMerger = MergeBlockVisitor<LocStore, OrdinaryStoreExtraState>;
+using DSEMerger = MergeBlockVisitor<DSEMapPointer, DSEStoreExtraState>;
+using TLMerger = MergeBlockVisitor<TLMapPointer, TLStoreExtraState>;
 
 enum ValSetType {
 
@@ -312,9 +312,9 @@ inline bool operator>=(ShadowValue V1, ShadowValue V2) { return !(V1 < V2); }
 // DenseMaps)
 template <> struct DenseMapInfo<ShadowValue> {
 
-  typedef DenseMapInfo<int> TypeInfo;
-  typedef DenseMapInfo<void *> VoidInfo;
-  typedef DenseMapInfo<std::pair<int, void *>> PairInfo;
+  using TypeInfo = DenseMapInfo<int>;
+  using VoidInfo = DenseMapInfo<void *>;
+  using PairInfo = DenseMapInfo<std::pair<int, void *>>;
 
   static inline ShadowValue getEmptyKey() {
     return ShadowValue((Value *)VoidInfo::getEmptyKey());
@@ -457,7 +457,7 @@ inline bool operator>=(ImprovedVal V1, ImprovedVal V2) { return !(V1 < V2); }
 
 struct ImprovedValSetSingle;
 
-typedef std::pair<std::pair<uint64_t, uint64_t>, ImprovedValSetSingle> IVSRange;
+using IVSRange = std::pair<std::pair<uint64_t, uint64_t>, ImprovedValSetSingle>;
 
 #define SAFE_DROP_REF(x)                                                       \
   do {                                                                         \
@@ -742,13 +742,12 @@ struct HalfOpenWithMerge {
 
 struct ImprovedValSetMulti : public ImprovedValSet {
 
-  typedef IntervalMap<
+  using MapTy = IntervalMap<
       uint64_t, ImprovedValSetSingle,
       IntervalMapImpl::NodeSizer<uint64_t, ImprovedValSetSingle>::LeafSize,
-      HalfOpenNoMerge>
-      MapTy;
-  typedef MapTy::iterator MapIt;
-  typedef MapTy::const_iterator ConstMapIt;
+      HalfOpenNoMerge>;
+  using MapIt = MapTy::iterator;
+  using ConstMapIt = MapTy::const_iterator;
   MapTy Map;
   uint32_t MapRefCount;
   ImprovedValSet *Underlying;
@@ -1067,12 +1066,11 @@ struct TrackedStore {
   void derefBytes(uint64_t nBytes);
 };
 
-typedef SmallVector<TrackedStore *, 1> DSEMapEntry;
+using DSEMapEntry = SmallVector<TrackedStore *, 1>;
 
-typedef IntervalMap<uint64_t, DSEMapEntry,
+using DSEMapTy = IntervalMap<uint64_t, DSEMapEntry,
                     IntervalMapImpl::NodeSizer<uint64_t, DSEMapEntry>::LeafSize,
-                    HalfOpenNoMerge>
-    DSEMapTy;
+                    HalfOpenNoMerge>;
 
 struct TrackedAlloc {
 
@@ -1142,10 +1140,9 @@ struct DSEStoreExtraState {
 
 // Define types for the TL store:
 
-typedef IntervalMap<uint64_t, bool,
+using TLMapTy = IntervalMap<uint64_t, bool,
                     IntervalMapImpl::NodeSizer<uint64_t, bool>::LeafSize,
-                    HalfOpenWithMerge>
-    TLMapTy;
+                    HalfOpenWithMerge>;
 
 extern TLMapPointer TLEmptyMapPtr;
 

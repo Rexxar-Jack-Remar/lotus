@@ -314,7 +314,7 @@ struct RW {
 
   std::shared_ptr<T> _r;
 
-  typedef RW<T> this_type;
+  using this_type = RW<T>;
 
   RW(const this_type &o) : _r(o._r) {}
   RW(std::shared_ptr<T> r) : _r(r) {}
@@ -343,7 +343,7 @@ struct FV {
   OutputIterator out;
   ExprSet seen;
 
-  typedef FV<F, OutputIterator> this_type;
+  using this_type = FV<F, OutputIterator>;
   FV(const this_type &o) : filter(o.filter), out(o.out), seen(o.seen) {
     llvm_unreachable(nullptr);
   }
@@ -408,7 +408,7 @@ struct RV {
   using argument_type = Expr;
   using result_type = VisitAction;
 
-  typedef typename M::const_iterator const_iterator;
+  using const_iterator = typename M::const_iterator;
 
   const M &map;
   RV(const M &m) : map(m) {}

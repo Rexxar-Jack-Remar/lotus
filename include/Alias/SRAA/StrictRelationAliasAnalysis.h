@@ -19,7 +19,7 @@
 #include <unordered_set>
 #include <utility>
 
-typedef InterProceduralRA<Cousot> InterProceduralRACousot;
+using InterProceduralRACousot = InterProceduralRA<Cousot>;
 
 namespace {
 
@@ -151,7 +151,7 @@ public:
     };
 
   public:
-    typedef VariableSetIterator iterator;
+    using iterator = VariableSetIterator;
 
     void insert(Variable *v) {
       trans->addValue(v);
