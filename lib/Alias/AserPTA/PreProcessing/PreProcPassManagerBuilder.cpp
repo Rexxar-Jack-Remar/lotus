@@ -139,6 +139,7 @@ void PreProcPassManagerBuilder::addFunctionSimplificationPasses(
   MPM.add(createTailCallEliminationPass()); // Eliminate tail calls
   MPM.add(createCFGSimplificationPass());   // Merge & remove BBs
   MPM.add(createReassociatePass());         // Reassociate expressions
+  MPM.add(createGVNPass());                 // Eliminate redundant values/loads
 
   // Begin the loop pass pipeline.
   // TODO: probably does not matter for now

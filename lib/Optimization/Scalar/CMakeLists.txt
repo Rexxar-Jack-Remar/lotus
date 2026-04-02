@@ -1,5 +1,7 @@
 add_library(CanaryOptimizationScalar STATIC
   AggressiveInliner.cpp
+  DeadStoreElimination.cpp
+  GVN.cpp
   LICM.cpp
 )
 
