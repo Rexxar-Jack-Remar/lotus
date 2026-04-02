@@ -6,6 +6,9 @@ jobs:
   build:
     runs-on: macos-latest
     timeout-minutes: 60
+    strategy:
+      matrix:
+        build-type: [Release, Debug]
 
     steps:
       - name: Checkout
@@ -21,13 +24,20 @@ jobs:
           export CPPFLAGS="-I/opt/homebrew/opt/llvm@14/include"
           echo "LDFLAGS=$LDFLAGS" >> $GITHUB_ENV
           echo "CPPFLAGS=$CPPFLAGS" >> $GITHUB_ENV
+      - name: Cache CMake build
+        uses: actions/cache@v4
+        with:
+          path: build
+          key: ${{ runner.os }}-${{ matrix.build-type }}-cmake-${{ hashFiles('**/CMakeLists.txt', '**/*.cmake') }}
+          restore-keys: |
+            ${{ runner.os }}-${{ matrix.build-type }}-cmake-
       - name: Compile Lotus
         run: |
-          mkdir build
+          mkdir -p build
           cd build
           cmake \
             -DCMAKE_INSTALL_PREFIX="$HOME/lotus" \
-            -DCMAKE_BUILD_TYPE="Release" \
+            -DCMAKE_BUILD_TYPE="${{ matrix.build-type }}" \
             -DLLVM_BUILD_PATH="/opt/homebrew/opt/llvm@14/lib/cmake/llvm" \
             -DZ3_DIR="/usr/local" \
             -DENABLE_SEAHORN=OFF \

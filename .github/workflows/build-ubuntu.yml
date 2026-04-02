@@ -10,6 +10,7 @@ jobs:
       matrix:
         ubuntu-version: [ubuntu-22.04, ubuntu-24.04, ubuntu-latest]
         compiler: [clang, gcc]
+        build-type: [Release, Debug]
 
     steps:
       - name: Checkout
@@ -41,15 +42,15 @@ jobs:
         uses: actions/cache@v4
         with:
           path: build
-          key: ${{ runner.os }}-${{ matrix.ubuntu-version }}-${{ matrix.compiler }}-cmake-${{ hashFiles('**/CMakeLists.txt', '**/*.cmake') }}
+          key: ${{ runner.os }}-${{ matrix.ubuntu-version }}-${{ matrix.compiler }}-${{ matrix.build-type }}-cmake-${{ hashFiles('**/CMakeLists.txt', '**/*.cmake') }}
           restore-keys: |
-            ${{ runner.os }}-${{ matrix.ubuntu-version }}-${{ matrix.compiler }}-cmake-
+            ${{ runner.os }}-${{ matrix.ubuntu-version }}-${{ matrix.compiler }}-${{ matrix.build-type }}-cmake-
 
       - name: Build and install
         run: |
           mkdir -p build && cd build
           cmake -DCMAKE_INSTALL_PREFIX="$HOME/lotus" \
-                -DCMAKE_BUILD_TYPE="Release" \
+                -DCMAKE_BUILD_TYPE="${{ matrix.build-type }}" \
                 -DLLVM_BUILD_PATH="/usr/lib/llvm-14/lib/cmake/llvm" \
                 -DLLVM_CONFIG_PATH="/usr/bin/llvm-config-14" \
                 -DLLVM_DIR="/usr/lib/llvm-14/lib/cmake/llvm" \
