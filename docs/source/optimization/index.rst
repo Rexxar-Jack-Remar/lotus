@@ -13,7 +13,7 @@ performance. They complement the code transformations available in
 ModuleOptimizer
 ---------------
 
-**File**: ``ModuleOptimizer.cpp``, ``ModuleOptimizer.h``
+**File**: ``lib/Optimization/Pipeline/ModuleOptimizer.cpp``, ``include/Optimization/Pipeline/ModuleOptimizer.h``
 
 Provides a simple interface for applying standard LLVM optimization pipelines
 (O0, O1, O2, or O3) to an entire module.
@@ -22,7 +22,7 @@ Provides a simple interface for applying standard LLVM optimization pipelines
 
 .. code-block:: cpp
 
-   #include <Optimization/ModuleOptimizer.h>
+   #include <Optimization/Pipeline/ModuleOptimizer.h>
 
    llvm::Module *M = ...;
    
@@ -38,7 +38,7 @@ Provides a simple interface for applying standard LLVM optimization pipelines
 AInliner (Aggressive Inliner)
 ------------------------------
 
-**File**: ``AInliner.cpp``
+**File**: ``lib/Optimization/Scalar/AggressiveInliner.cpp``
 
 An aggressive inliner that attempts to inline as many function calls as
 possible. This pass is tuned for analysis-friendly IR where maximum inlining
@@ -70,7 +70,7 @@ may be beneficial.
 LICM (Loop Invariant Code Motion)
 ----------------------------------
 
-**File**: ``LICM.cpp``, ``LICM.h``
+**File**: ``lib/Optimization/Scalar/LICM.cpp``, ``include/Optimization/Scalar/LICM.h``
 
 Loop Invariant Code Motion pass taken from LLVM 14. This pass moves loop-invariant
 code out of loops to improve performance.
@@ -115,10 +115,10 @@ Interprocedural optimizations that use MemorySSA instrumentation (ShadowMem):
   block to just before the first observed use when instructions in between are
   side-effect free.
 
-All implemented under ``lib/Optimization`` and default to singleton regions
+All implemented under ``lib/Optimization/IPO`` and default to singleton regions
 unless configured otherwise.
 
-See :doc:`ip` for the dedicated page for the ``lib/Optimization/IP/`` subtree.
+See :doc:`ip` for the dedicated page for the ``lib/Optimization/IPO/`` subtree.
 
 Integration with Analysis
 -------------------------
@@ -127,8 +127,8 @@ These optimization passes can be used to prepare code for analysis:
 
 .. code-block:: cpp
 
-   #include <Optimization/ModuleOptimizer.h>
-   #include <Optimization/SWPrefetching.h>
+   #include <Optimization/Pipeline/ModuleOptimizer.h>
+   #include <Optimization/Prefetch/Prefetch.h>
    
    llvm::Module &M = ...;
    

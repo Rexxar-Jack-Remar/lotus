@@ -5,13 +5,15 @@ memory modeling.
 
 | Subdir | Purpose |
 |--------|---------|
-| **IP** | Interprocedural memory optimizations built on ShadowMem/MemorySSA, including dead store elimination, redundant load elimination, store sinking, and store-to-load forwarding. |
-| **PE** | LLPE-based partial evaluation and specialization for LLVM IR, including inlining, loop peeling, load forwarding, and dead code elimination. |
-| **SWPrefetching** | Software prefetching passes for indirect memory accesses and loop-based prefetch insertion experiments. |
+| **IPO** | Interprocedural memory optimizations built on ShadowMem/MemorySSA, including dead store elimination, redundant load elimination, store sinking, and store-to-load forwarding. |
+| **PartialEvaluation** | LLPE-based partial evaluation and specialization for LLVM IR, including inlining, loop peeling, load forwarding, and dead code elimination. |
+| **Prefetch** | Software prefetching passes for indirect memory accesses and loop-based prefetch insertion experiments. |
+| **Scalar** | Scalar optimization passes such as LICM and the aggressive inliner. |
+| **Pipeline** | Wrappers around LLVM's standard optimization pipelines. |
 
-## SWPrefetching
+## Prefetch
 
-The `SWPrefetching/` subdirectory contains the software prefetching
+The `Prefetch/` subdirectory contains the software prefetching
 implementation used for indirect-memory-access workloads.
 
 **Benchmarks**

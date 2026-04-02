@@ -1,13 +1,5 @@
-add_subdirectory(PE)
-
-add_library(CanaryOptimization STATIC
-  AInliner.cpp
-  ModuleOptimizer.cpp
-  LICM.cpp
-  IP/IPDeadStoreElimination.cpp
-  IP/IPRedundantLoadElimination.cpp
-  IP/IPStoreSinking.cpp
-  IP/IPStoreToLoadForwarding.cpp
-)
-add_subdirectory(SWPrefetching)
-target_link_libraries(CanaryOptimization CanaryLLVMUtils)
+add_subdirectory(Scalar)
+add_subdirectory(IPO)
+add_subdirectory(Pipeline)
+add_subdirectory(PartialEvaluation)
+add_subdirectory(Prefetch)

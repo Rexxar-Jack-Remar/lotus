@@ -1,7 +1,7 @@
 SWPrefetching (Software Prefetching)
 ====================================
 
-**File**: ``lib/Optimization/SWPrefetching.cpp``, ``include/Optimization/SWPrefetching.h``
+**File**: ``lib/Optimization/Prefetch/``, ``include/Optimization/Prefetch/Prefetch.h``
 
 Implements profile-guided software prefetching for indirect memory accesses.
 This pass injects ``llvm.prefetch`` intrinsics to reduce cache misses.

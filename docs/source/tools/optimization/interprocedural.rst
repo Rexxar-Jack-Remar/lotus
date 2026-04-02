@@ -2,10 +2,10 @@ Inter-Procedural Optimizations
 ==============================
 
 This page summarizes inter-procedural optimizations implemented in
-``lib/Optimization/IP/`` plus ``lib/Optimization/AInliner.cpp`` and exposed via
+``lib/Optimization/IPO/`` plus ``lib/Optimization/Scalar/AggressiveInliner.cpp`` and exposed via
 the ``lotus-opt`` tool.
 
-**Implementation Location**: ``lib/Optimization/IP/``
+**Implementation Location**: ``lib/Optimization/IPO/``
 
 Tool
 ----
@@ -24,18 +24,18 @@ Example:
 Passes
 ------
 
-- **AInliner** (``lib/Optimization/AInliner.cpp``)
+- **AInliner** (``lib/Optimization/Scalar/AggressiveInliner.cpp``)
   Aggressive inliner to simplify call boundaries and enable downstream IP
   optimizations.
-- **IPDeadStoreElimination** (``lib/Optimization/IP/IPDeadStoreElimination.cpp``)
+- **IPDeadStoreElimination** (``lib/Optimization/IPO/IPDeadStoreElimination.cpp``)
   Removes inter-procedurally provable dead stores.
-- **IPRedundantLoadElimination** (``lib/Optimization/IP/IPRedundantLoadElimination.cpp``)
+- **IPRedundantLoadElimination** (``lib/Optimization/IPO/IPRedundantLoadElimination.cpp``)
   Eliminates redundant loads across function boundaries when safe.
-- **IPStoreSinking** (``lib/Optimization/IP/IPStoreSinking.cpp``)
+- **IPStoreSinking** (``lib/Optimization/IPO/IPStoreSinking.cpp``)
   Sinks stores inter-procedurally to reduce redundant writes.
-- **IPStoreToLoadForwarding** (``lib/Optimization/IP/IPStoreToLoadForwarding.cpp``)
+- **IPStoreToLoadForwarding** (``lib/Optimization/IPO/IPStoreToLoadForwarding.cpp``)
   Forwards values from stores to later loads across calls when possible.
-- **ModuleOptimizer** (``lib/Optimization/ModuleOptimizer.cpp``)
+- **ModuleOptimizer** (``lib/Optimization/Pipeline/ModuleOptimizer.cpp``)
   Driver that wires the above passes into a module-level pipeline.
 
 Notes
@@ -43,5 +43,5 @@ Notes
 
 - ``lib/Optimization/README.md`` tracks optimization-specific references and
   evaluation notes for select passes (e.g., prefetching, LICM).
-- :doc:`../../optimization/ip` documents the dedicated ``lib/Optimization/IP/``
+- :doc:`../../optimization/ip` documents the dedicated ``lib/Optimization/IPO/``
   subtree.

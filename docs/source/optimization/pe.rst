@@ -1,11 +1,11 @@
 PE
 ==
 
-``Optimization/PE`` contains the LLPE partial-evaluation infrastructure.
+``Optimization/PartialEvaluation`` contains the LLPE partial-evaluation infrastructure.
 
-**Headers**: ``include/Optimization/PE/``
+**Headers**: ``include/Optimization/PartialEvaluation/``
 
-**Implementation**: ``lib/Optimization/PE/``
+**Implementation**: ``lib/Optimization/PartialEvaluation/``
 
 Overview
 --------

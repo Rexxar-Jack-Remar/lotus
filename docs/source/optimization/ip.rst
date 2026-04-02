@@ -1,10 +1,10 @@
 Interprocedural MemorySSA Optimizations
 =======================================
 
-``lib/Optimization/IP/`` contains the interprocedural ShadowMem and MemorySSA
+``lib/Optimization/IPO/`` contains the interprocedural ShadowMem and MemorySSA
 optimizations used by the optimization tooling.
 
-**Location**: ``lib/Optimization/IP/``
+**Location**: ``lib/Optimization/IPO/``
 
 **Main passes**:
 
