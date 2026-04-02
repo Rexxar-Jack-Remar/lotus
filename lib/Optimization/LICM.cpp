@@ -93,6 +93,14 @@ using namespace llvm;
 
 #define DEBUG_TYPE "licm"
 
+static raw_ostream &printNameOrAsOperand(raw_ostream &OS, const Value *V) {
+  if (V->hasName())
+    OS << V->getName();
+  else
+    V->printAsOperand(OS, false);
+  return OS;
+}
+
 STATISTIC(NumCreatedBlocks, "Number of blocks created");
 STATISTIC(NumClonedBranches, "Number of branches cloned");
 STATISTIC(NumSunk, "Number of instructions sunk out of loop");
@@ -216,8 +224,8 @@ struct LegacyLICMPass : public LoopPass {
     if (skipLoop(L))
       return false;
 
-    LLVM_DEBUG(dbgs() << "Perform LICM on Loop with header at block "
-                      << L->getHeader()->getNameOrAsOperand() << "\n");
+    LLVM_DEBUG(dbgs() << "Perform LICM on Loop with header at block ";
+               printNameOrAsOperand(dbgs(), L->getHeader()) << "\n");
 
     auto *SE = getAnalysisIfAvailable<ScalarEvolutionWrapperPass>();
     MemorySSA *MSSA = &getAnalysis<MemorySSAWrapperPass>().getMSSA();
@@ -738,10 +746,10 @@ public:
     // If not involved in a pending branch, hoist to preheader
     BasicBlock *InitialPreheader = CurLoop->getLoopPreheader();
     if (It == HoistableBranches.end()) {
-      LLVM_DEBUG(dbgs() << "LICM using "
-                        << InitialPreheader->getNameOrAsOperand()
-                        << " as hoist destination for "
-                        << BB->getNameOrAsOperand() << "\n");
+      LLVM_DEBUG(dbgs() << "LICM using ";
+                 printNameOrAsOperand(dbgs(), InitialPreheader)
+                 << " as hoist destination for ";
+                 printNameOrAsOperand(dbgs(), BB) << "\n");
       HoistDestinationMap[BB] = InitialPreheader;
       return InitialPreheader;
     }
@@ -984,9 +992,9 @@ bool llvm::hoistRegion(DomTreeNode *N, AAResults *AA, LoopInfo *LI,
                    "New hoist point expected to dominate old hoist point");
           HoistPoint = Dominator->getTerminator();
         }
-        LLVM_DEBUG(dbgs() << "LICM rehoisting to "
-                          << HoistPoint->getParent()->getNameOrAsOperand()
-                          << ": " << *I << "\n");
+        LLVM_DEBUG(dbgs() << "LICM rehoisting to ";
+                   printNameOrAsOperand(dbgs(), HoistPoint->getParent())
+                   << ": " << *I << "\n");
         moveInstructionBefore(*I, *HoistPoint, *SafetyInfo, MSSAU, SE);
         HoistPoint = I;
         Changed = true;
@@ -1745,8 +1753,8 @@ static void hoist(Instruction &I, const DominatorTree *DT, const Loop *CurLoop,
                   BasicBlock *Dest, ICFLoopSafetyInfo *SafetyInfo,
                   MemorySSAUpdater *MSSAU, ScalarEvolution *SE,
                   OptimizationRemarkEmitter *ORE) {
-  LLVM_DEBUG(dbgs() << "LICM hoisting to " << Dest->getNameOrAsOperand() << ": "
-                    << I << "\n");
+  LLVM_DEBUG(dbgs() << "LICM hoisting to ";
+             printNameOrAsOperand(dbgs(), Dest) << ": " << I << "\n");
   ORE->emit([&]() {
     return OptimizationRemark(DEBUG_TYPE, "Hoisted", &I)
            << "hoisting " << ore::NV("Inst", &I);
