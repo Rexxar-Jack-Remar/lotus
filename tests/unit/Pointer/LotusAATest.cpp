@@ -1899,6 +1899,39 @@ TEST(LotusAA, CallerCgInliningResolvesTransitiveIndirectSetterTargets) {
   EXPECT_TRUE(MainIt->second.empty());
 }
 
+TEST(LotusAA, UnmodeledSelectGuardKeepsIndirectCallOpaque) {
+  const char *IR = R"(
+    declare void @foo()
+    declare void @bar()
+
+    define void @main() {
+    entry:
+      %fp = select i1 undef, void ()* @foo, void ()* @bar
+      call void %fp()
+      ret void
+    }
+  )";
+
+  LLVMContext Ctx;
+  auto M = parseAssembly(Ctx, IR);
+  ASSERT_NE(M, nullptr);
+
+  LotusAA *Pass = runLotusAA(*M);
+  Function *Main = M->getFunction("main");
+  ASSERT_NE(Main, nullptr);
+
+  auto Calls = getIndirectCalls(*Main);
+  ASSERT_EQ(Calls.size(), 1u);
+
+  auto *PTG = Pass->getPtGraph(Main);
+  ASSERT_NE(PTG, nullptr);
+  PTG->computeCG();
+
+  auto It = PTG->cg_resolve_result.find(Calls.front());
+  ASSERT_NE(It, PTG->cg_resolve_result.end());
+  EXPECT_TRUE(It->second.empty());
+}
+
 TEST(LotusAA, PthreadCreateThreadArgCgInliningResolvesWorkerIndirectCall) {
   LotusConfigScope ConfigScope;
   IntraLotusAAConfig::lotus_restrict_inline_depth = 2;

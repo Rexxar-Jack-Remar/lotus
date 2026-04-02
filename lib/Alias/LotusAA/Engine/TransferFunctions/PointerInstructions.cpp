@@ -40,6 +40,10 @@ using namespace llvm;
 
 namespace {
 
+static bool canSplitSelectCondition(Value *cond) {
+  return cond && !isa<UndefValue>(cond) && !isa<PoisonValue>(cond);
+}
+
 static Value *tracebackPointerCastChain(Value *ptr) {
   while (ptr) {
     if (auto *cast = dyn_cast<CastInst>(ptr)) {
@@ -556,6 +560,7 @@ PTResult *IntraLotusAA::processSelect(SelectInst *select) {
   if (!select->getType()->isPointerTy())
     return nullptr;
 
+  Value *cond_val = select->getCondition();
   Value *true_val = select->getTrueValue();
   Value *false_val = select->getFalseValue();
 
@@ -563,10 +568,15 @@ PTResult *IntraLotusAA::processSelect(SelectInst *select) {
   PTResult *pts_false = processBasePointer(false_val);
 
   PTResult *select_pts = findPTResult(select, true);
-  select_pts->add_derived_target(getValueCond(select->getCondition(), true),
-                                 pts_true, 0);
-  select_pts->add_derived_target(getValueCond(select->getCondition(), false),
-                                 pts_false, 0);
+  if (!canSplitSelectCondition(cond_val)) {
+    // Match Falcon's conservative fallback when the select guard is not
+    // materialized by the underlying path-condition machinery.
+    select_pts->add_derived_target(getEmptyCond(), pts_true, 0);
+    select_pts->add_derived_target(getEmptyCond(), pts_false, 0);
+  } else {
+    select_pts->add_derived_target(getValueCond(cond_val, true), pts_true, 0);
+    select_pts->add_derived_target(getValueCond(cond_val, false), pts_false, 0);
+  }
 
   PTResultIterator iter(select_pts, this);
   return select_pts;

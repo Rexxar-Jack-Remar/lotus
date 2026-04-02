@@ -97,6 +97,10 @@ template <typename T> static pair<T, T> canonicalCondPair(T lhs, T rhs) {
   return (lhs < rhs) ? make_pair(lhs, rhs) : make_pair(rhs, lhs);
 }
 
+static bool canSplitSelectCondition(Value *cond) {
+  return cond && !isa<UndefValue>(cond) && !isa<PoisonValue>(cond);
+}
+
 static bool isCompositeCond(path_cond_t cond) {
   if (!cond)
     return false;
@@ -403,14 +407,22 @@ void PTGraph::trackPtrRightValueUnderCondition(Value *ptr, mem_value_t &res,
           base_confidence);
     }
   } else if (SelectInst *sel = dyn_cast<SelectInst>(ptr)) {
-    path_cond_t true_cond = getValueCond(sel->getCondition(), true);
-    path_cond_t false_cond = getValueCond(sel->getCondition(), false);
-    trackPtrRightValueUnderCondition(
-        sel->getTrueValue(), res, findOrCreateAndRegion(base_cond, true_cond),
-        base_confidence);
-    trackPtrRightValueUnderCondition(
-        sel->getFalseValue(), res, findOrCreateAndRegion(base_cond, false_cond),
-        base_confidence);
+    if (!canSplitSelectCondition(sel->getCondition())) {
+      // Falcon keeps an unmodeled select opaque in right-value propagation
+      // instead of inventing a fresh path split.
+      res.push_back(mem_value_item_t(base_cond, sel, ptr, base_confidence));
+    } else {
+      path_cond_t true_cond = getValueCond(sel->getCondition(), true);
+      path_cond_t false_cond = getValueCond(sel->getCondition(), false);
+      trackPtrRightValueUnderCondition(sel->getTrueValue(), res,
+                                       findOrCreateAndRegion(base_cond,
+                                                             true_cond),
+                                       base_confidence);
+      trackPtrRightValueUnderCondition(sel->getFalseValue(), res,
+                                       findOrCreateAndRegion(base_cond,
+                                                             false_cond),
+                                       base_confidence);
+    }
   } else if (CastInst *cast = dyn_cast<CastInst>(ptr)) {
     trackPtrRightValueUnderCondition(cast->getOperand(0), res, base_cond,
                                      base_confidence);

@@ -289,7 +289,7 @@ TEST(GVFGAdapter, ConditionalLoadPreservesTwoMatchingConditions) {
   }
 }
 
-TEST(GVFGAdapter, EquivalentLoadsShareLoadMemoryNodes) {
+TEST(GVFGAdapter, EquivalentLoadsKeepDistinctLoadMemoryNodes) {
   const char *IR = R"(
     define i32* @test(i32** %p) {
     entry:
@@ -333,7 +333,7 @@ TEST(GVFGAdapter, EquivalentLoadsShareLoadMemoryNodes) {
   ASSERT_EQ(second_value->children().size(), 1u);
   EXPECT_EQ(first_value->children().front().target, first_mem);
   EXPECT_EQ(second_value->children().front().target, second_mem);
-  EXPECT_EQ(first_mem, second_mem);
+  EXPECT_NE(first_mem, second_mem);
   EXPECT_EQ(first_mem->getMatchingRegions().size(), second_mem->getMatchingRegions().size());
 }
 
@@ -567,7 +567,15 @@ TEST(GVFGAdapter, MaterializesSummaryNodesAndPseudoOutputIndices) {
     if (!summary_outputs || summary_outputs->empty())
       continue;
     auto *node = site->getOutputSummaryNode(Callee, bucket);
-    EXPECT_EQ(node, nullptr);
+    ASSERT_NE(node, nullptr);
+    EXPECT_EQ(node->getKind(), GuardedValueFlowNode::Kind::CallSiteReturnSummary);
+    auto *summary = dyn_cast<GuardedValueFlowCallSummaryNode>(node);
+    ASSERT_NE(summary, nullptr);
+    EXPECT_EQ(summary->getSummaryIndex(), bucket);
+    EXPECT_EQ(summary->children().size(), 1u);
+    ASSERT_NE(summary->children().front().target, nullptr);
+    EXPECT_EQ(summary->children().front().target->getKind(),
+              GuardedValueFlowNode::Kind::LoadMemory);
   }
 
   EXPECT_EQ(saw_input_summary, has_any_summary_input);
@@ -747,7 +755,12 @@ TEST(GVFGAdapter, KeepsCallsiteSummaryNodesOutOfCanonicalSummaryRegistries) {
   }
   for (unsigned bucket = 0; bucket < callee_ptg->getSummaryOutputs().size(); ++bucket) {
     auto *summary_node = site->getOutputSummaryNode(callee, bucket);
-    EXPECT_EQ(summary_node, nullptr);
+    if (!summary_node)
+      continue;
+    auto nodes = graph.getSummaryReturnNodes(bucket);
+    EXPECT_EQ(std::find(nodes.begin(), nodes.end(), summary_node), nodes.end());
+    for (GuardedValueFlowNode *registered : nodes)
+      EXPECT_NE(registered, summary_node);
   }
 
   if (!saw_summary_node)

@@ -4,19 +4,11 @@
  * Dataflow testing tool: APA (Algebraic Program Analysis) engine.
  */
 
+#include "llvm/ADT/StringRef.h"
 #include "llvm/IR/CFG.h"
-#include "llvm/IR/Function.h"
-#include "llvm/IR/Instruction.h"
-#include "llvm/IR/LLVMContext.h"
-#include "llvm/IR/LegacyPassManager.h"
-#include "llvm/IR/Module.h"
-#include "llvm/IRReader/IRReader.h"
 #include "llvm/Support/CommandLine.h"
 #include "llvm/Support/InitLLVM.h"
-#include "llvm/Support/SourceMgr.h"
 #include "llvm/Support/raw_ostream.h"
-#include "llvm/Transforms/Scalar.h"
-#include "llvm/Transforms/Utils.h"
 
 #include "Dataflow/APA/Clients/LLVM/Intra/AvailableExpressions.h"
 #include "Dataflow/APA/Clients/LLVM/Intra/ConstantPropagation.h"
@@ -24,6 +16,7 @@
 #include "Dataflow/APA/Clients/LLVM/Intra/Reachability.h"
 #include "Dataflow/APA/Clients/LLVM/Intra/ReachingDefinitions.h"
 #include "Dataflow/APA/Clients/LLVM/Intra/UninitializedVariables.h"
+#include "ToolSupport.h"
 
 #include <algorithm>
 #include <chrono>
@@ -61,6 +54,8 @@ static cl::opt<bool>
 
 namespace {
 
+using lotus::dataflow_tool::FunctionView;
+using lotus::dataflow_tool::ValueIdMap;
 using InstructionExprFactory = elimination::PathExprFactory<Instruction *>;
 using InstructionExprRef = InstructionExprFactory::Ref;
 
@@ -113,24 +108,9 @@ elimination::EliminationOptions getElimOptions() {
   return Opts;
 }
 
-void buildValueIds(Function *F,
-                   std::unordered_map<const Value *, std::string> &ValueToId,
-                   std::vector<Instruction *> &OrderedInsts) {
-  unsigned ArgIdx = 0;
-  for (auto &Arg : F->args())
-    ValueToId[&Arg] = "arg" + std::to_string(ArgIdx++);
-  unsigned InstIdx = 0;
-  for (auto &BB : *F)
-    for (auto &I : BB) {
-      OrderedInsts.push_back(&I);
-      ValueToId[&I] = "i" + std::to_string(InstIdx++);
-    }
-}
-
 template <typename T>
-void formatValueSet(
-    raw_ostream &OS, const std::set<T> &S,
-    const std::unordered_map<const Value *, std::string> &ValueToId) {
+void formatValueSet(raw_ostream &OS, const std::set<T> &S,
+                    const ValueIdMap &ValueToId) {
   std::vector<std::string> ids;
   for (const Value *V : S) {
     auto It = ValueToId.find(V);
@@ -274,20 +254,15 @@ ExprProfile collectExprProfile(const InstructionExprRef &Expr) {
   return Profile;
 }
 
-std::string formatTransfer(
-    const Instruction *I,
-    const std::unordered_map<const Value *, std::string> &ValueToId) {
+std::string formatTransfer(const Instruction *I, const ValueIdMap &ValueToId) {
   if (!I)
     return "null";
   auto It = ValueToId.find(I);
-  if (It != ValueToId.end())
-    return It->second;
-  return "inst";
+  return It != ValueToId.end() ? It->second : "inst";
 }
 
-void formatPathExpr(
-    raw_ostream &OS, const InstructionExprRef &Expr,
-    const std::unordered_map<const Value *, std::string> &ValueToId) {
+void formatPathExpr(raw_ostream &OS, const InstructionExprRef &Expr,
+                    const ValueIdMap &ValueToId) {
   if (!Expr) {
     OS << "null";
     return;
@@ -342,12 +317,9 @@ void printSolveMetadata(raw_ostream &OS, const ResultT &Result) {
 }
 
 template <typename ResultT>
-void dumpProfile(
-    raw_ostream &OS, const Function &F, const ResultT &Result,
-    const std::unordered_map<const Value *, std::string> &ValueToId,
-    const std::vector<Instruction *> &OrderedInsts,
-    std::chrono::microseconds Elapsed) {
-  const auto CFG = collectCFGStats(F);
+void dumpProfile(raw_ostream &OS, const FunctionView &View,
+                 const ResultT &Result, std::chrono::microseconds Elapsed) {
+  const auto CFG = collectCFGStats(View.Function);
   OS << "  [cfg] args=" << CFG.Arguments << ", blocks=" << CFG.Blocks
      << ", insts=" << CFG.Instructions << ", edges=" << CFG.Edges
      << ", branching_blocks=" << CFG.BranchingBlocks
@@ -369,13 +341,12 @@ void dumpProfile(
   std::string MaxExprInst = "none";
   std::string DeepestExprInst = "none";
 
-  for (auto *I : OrderedInsts) {
+  for (auto *I : View.OrderedInsts) {
     const auto Expr = Result.ExprTo(I);
     if (!Expr) {
       ++MissingExpr;
       continue;
     }
-
     ++NodesWithExpr;
     const auto Profile = collectExprProfile(Expr);
     TotalUniqueNodes += Profile.UniqueNodes;
@@ -385,11 +356,11 @@ void dumpProfile(
     TotalConcats += Profile.ConcatNodes;
     if (Profile.UniqueNodes > MaxExprNodes) {
       MaxExprNodes = Profile.UniqueNodes;
-      MaxExprInst = ValueToId.at(I);
+      MaxExprInst = View.ValueToId.at(I);
     }
     if (Profile.MaxDepth > MaxExprDepth) {
       MaxExprDepth = Profile.MaxDepth;
-      DeepestExprInst = ValueToId.at(I);
+      DeepestExprInst = View.ValueToId.at(I);
     }
   }
 
@@ -405,9 +376,9 @@ void dumpProfile(
   if (!DumpExprsOpt)
     return;
 
-  for (auto *I : OrderedInsts) {
+  for (auto *I : View.OrderedInsts) {
     const auto Expr = Result.ExprTo(I);
-    OS << "  [expr] " << ValueToId.at(I);
+    OS << "  [expr] " << View.ValueToId.at(I);
     if (!Expr) {
       OS << " missing\n";
       continue;
@@ -417,21 +388,21 @@ void dumpProfile(
        << ", atoms=" << Profile.AtomNodes << ", unions=" << Profile.UnionNodes
        << ", concats=" << Profile.ConcatNodes << ", stars=" << Profile.StarNodes
        << ", shared_refs=" << Profile.SharedRefs << ", expr=";
-    formatPathExpr(OS, Expr, ValueToId);
+    formatPathExpr(OS, Expr, View.ValueToId);
     OS << "\n";
   }
 }
 
 template <typename ValueType>
-void formatConstPropMap(
-    raw_ostream &OS, const std::unordered_map<const Value *, ValueType> &M,
-    const std::unordered_map<const Value *, std::string> &ValueToId) {
+void formatConstPropMap(raw_ostream &OS,
+                        const std::unordered_map<const Value *, ValueType> &M,
+                        const ValueIdMap &ValueToId) {
   std::vector<std::string> entries;
-  for (const auto &p : M) {
+  for (const auto &Entry : M) {
     std::ostringstream ss;
-    auto It = ValueToId.find(p.first);
-    ss << (It != ValueToId.end() ? It->second : "v") << "=";
-    ss << formatValueLatticeElement(p.second);
+    auto It = ValueToId.find(Entry.first);
+    ss << (It != ValueToId.end() ? It->second : "v") << "="
+       << formatValueLatticeElement(Entry.second);
     entries.push_back(ss.str());
   }
   std::sort(entries.begin(), entries.end());
@@ -442,99 +413,128 @@ void formatConstPropMap(
   }
 }
 
-void dumpFunctionAnalysis(raw_ostream &OS, Function &F,
-                          const std::string &Analysis,
-                          const elimination::EliminationOptions &ElimOpts) {
-  std::unordered_map<const Value *, std::string> ValueToId;
-  std::vector<Instruction *> OrderedInsts;
-  buildValueIds(&F, ValueToId, OrderedInsts);
-  OS << "FUNC " << F.getName().str() << "\n";
-
-  if (Analysis == "liveness") {
-    const auto Start = std::chrono::steady_clock::now();
-    auto Result = elimination::runIntraElimLiveVariables(&F, ElimOpts);
-    const auto Elapsed = std::chrono::duration_cast<std::chrono::microseconds>(
-        std::chrono::steady_clock::now() - Start);
-    if (DumpProfileOpt || DumpExprsOpt)
-      dumpProfile(OS, F, Result, ValueToId, OrderedInsts, Elapsed);
-    for (auto *I : OrderedInsts) {
-      OS << "  " << ValueToId.at(I) << " IN: ";
-      formatValueSet(OS, Result.IN(I), ValueToId);
-      OS << "\n";
-    }
-  } else if (Analysis == "reaching_defs") {
-    const auto Start = std::chrono::steady_clock::now();
-    auto Result =
-        elimination::runIntraElimReachingDefinitions(&F, nullptr, ElimOpts);
-    const auto Elapsed = std::chrono::duration_cast<std::chrono::microseconds>(
-        std::chrono::steady_clock::now() - Start);
-    if (DumpProfileOpt || DumpExprsOpt)
-      dumpProfile(OS, F, Result, ValueToId, OrderedInsts, Elapsed);
-    for (auto *I : OrderedInsts) {
-      OS << "  " << ValueToId.at(I) << " IN: ";
-      formatValueSet(OS, Result.IN(I), ValueToId);
-      OS << "\n";
-    }
-  } else if (Analysis == "uninitialized") {
-    const auto Start = std::chrono::steady_clock::now();
-    auto Result =
-        elimination::runIntraElimUninitVariables(&F, nullptr, ElimOpts);
-    const auto Elapsed = std::chrono::duration_cast<std::chrono::microseconds>(
-        std::chrono::steady_clock::now() - Start);
-    if (DumpProfileOpt || DumpExprsOpt)
-      dumpProfile(OS, F, Result, ValueToId, OrderedInsts, Elapsed);
-    for (auto *I : OrderedInsts) {
-      OS << "  " << ValueToId.at(I) << " IN: ";
-      formatValueSet(OS, Result.IN(I), ValueToId);
-      OS << "\n";
-    }
-  } else if (Analysis == "constant_prop") {
-    const auto Start = std::chrono::steady_clock::now();
-    auto Result =
-        elimination::runIntraElimConstantPropagation(&F, nullptr, ElimOpts);
-    const auto Elapsed = std::chrono::duration_cast<std::chrono::microseconds>(
-        std::chrono::steady_clock::now() - Start);
-    if (DumpProfileOpt || DumpExprsOpt)
-      dumpProfile(OS, F, Result, ValueToId, OrderedInsts, Elapsed);
-    for (auto *I : OrderedInsts) {
-      OS << "  " << ValueToId.at(I) << " IN: ";
-      formatConstPropMap(OS, Result.IN(I), ValueToId);
-      OS << "\n";
-    }
-  } else if (Analysis == "available_exprs") {
-    const auto Start = std::chrono::steady_clock::now();
-    auto Result =
-        elimination::runIntraElimAvailableExpressions(&F, nullptr, ElimOpts);
-    const auto Elapsed = std::chrono::duration_cast<std::chrono::microseconds>(
-        std::chrono::steady_clock::now() - Start);
-    if (DumpProfileOpt || DumpExprsOpt)
-      dumpProfile(OS, F, Result, ValueToId, OrderedInsts, Elapsed);
-    for (auto *I : OrderedInsts) {
-      OS << "  " << ValueToId.at(I) << " IN: ";
-      std::vector<std::string> exprs;
-      for (const auto &expr : Result.IN(I))
-        exprs.push_back(formatExpressionKey(expr));
-      std::sort(exprs.begin(), exprs.end());
-      for (size_t i = 0; i < exprs.size(); ++i) {
-        if (i)
-          OS << ",";
-        OS << exprs[i];
-      }
-      OS << "\n";
-    }
-  } else if (Analysis == "reachable") {
-    const auto Start = std::chrono::steady_clock::now();
-    auto Result = elimination::runIntraElimReachable(&F, ElimOpts);
-    const auto Elapsed = std::chrono::duration_cast<std::chrono::microseconds>(
-        std::chrono::steady_clock::now() - Start);
-    if (DumpProfileOpt || DumpExprsOpt)
-      dumpProfile(OS, F, Result, ValueToId, OrderedInsts, Elapsed);
-    for (auto *I : OrderedInsts) {
-      OS << "  " << ValueToId.at(I) << " IN: ";
-      OS << (Result.IN(I) ? "true" : "false");
-      OS << "\n";
-    }
+template <typename ResultT, typename Printer>
+void dumpTimedResult(raw_ostream &OS, const FunctionView &View, ResultT &Result,
+                     std::chrono::microseconds Elapsed, Printer &&PrintState) {
+  if (DumpProfileOpt || DumpExprsOpt)
+    dumpProfile(OS, View, Result, Elapsed);
+  for (auto *I : View.OrderedInsts) {
+    OS << "  " << View.ValueToId.at(I) << " IN: ";
+    PrintState(I, Result);
+    OS << "\n";
   }
+}
+
+template <typename Runner, typename Printer>
+void runTimedAnalysis(raw_ostream &OS, const FunctionView &View,
+                      const elimination::EliminationOptions &ElimOpts,
+                      Runner &&Run, Printer &&PrintState) {
+  const auto Start = std::chrono::steady_clock::now();
+  auto Result = Run(View.Function, ElimOpts);
+  const auto Elapsed = std::chrono::duration_cast<std::chrono::microseconds>(
+      std::chrono::steady_clock::now() - Start);
+  dumpTimedResult(OS, View, Result, Elapsed, std::forward<Printer>(PrintState));
+}
+
+void runLiveness(raw_ostream &OS, const FunctionView &View,
+                 const elimination::EliminationOptions &ElimOpts) {
+  runTimedAnalysis(
+      OS, View, ElimOpts,
+      [](Function &F, const elimination::EliminationOptions &Opts) {
+        return elimination::runIntraElimLiveVariables(&F, Opts);
+      },
+      [&](Instruction *I, auto &Result) {
+        formatValueSet(OS, Result.IN(I), View.ValueToId);
+      });
+}
+
+void runReachingDefinitions(raw_ostream &OS, const FunctionView &View,
+                            const elimination::EliminationOptions &ElimOpts) {
+  runTimedAnalysis(
+      OS, View, ElimOpts,
+      [](Function &F, const elimination::EliminationOptions &Opts) {
+        return elimination::runIntraElimReachingDefinitions(&F, nullptr, Opts);
+      },
+      [&](Instruction *I, auto &Result) {
+        formatValueSet(OS, Result.IN(I), View.ValueToId);
+      });
+}
+
+void runUninitialized(raw_ostream &OS, const FunctionView &View,
+                      const elimination::EliminationOptions &ElimOpts) {
+  runTimedAnalysis(
+      OS, View, ElimOpts,
+      [](Function &F, const elimination::EliminationOptions &Opts) {
+        return elimination::runIntraElimUninitVariables(&F, nullptr, Opts);
+      },
+      [&](Instruction *I, auto &Result) {
+        formatValueSet(OS, Result.IN(I), View.ValueToId);
+      });
+}
+
+void runConstantPropagation(raw_ostream &OS, const FunctionView &View,
+                            const elimination::EliminationOptions &ElimOpts) {
+  runTimedAnalysis(
+      OS, View, ElimOpts,
+      [](Function &F, const elimination::EliminationOptions &Opts) {
+        return elimination::runIntraElimConstantPropagation(&F, nullptr, Opts);
+      },
+      [&](Instruction *I, auto &Result) {
+        formatConstPropMap(OS, Result.IN(I), View.ValueToId);
+      });
+}
+
+void runAvailableExpressions(raw_ostream &OS, const FunctionView &View,
+                             const elimination::EliminationOptions &ElimOpts) {
+  runTimedAnalysis(
+      OS, View, ElimOpts,
+      [](Function &F, const elimination::EliminationOptions &Opts) {
+        return elimination::runIntraElimAvailableExpressions(&F, nullptr, Opts);
+      },
+      [&](Instruction *I, auto &Result) {
+        std::vector<std::string> Exprs;
+        for (const auto &Expr : Result.IN(I))
+          Exprs.push_back(formatExpressionKey(Expr));
+        std::sort(Exprs.begin(), Exprs.end());
+        for (size_t Index = 0; Index < Exprs.size(); ++Index) {
+          if (Index)
+            OS << ",";
+          OS << Exprs[Index];
+        }
+      });
+}
+
+void runReachable(raw_ostream &OS, const FunctionView &View,
+                  const elimination::EliminationOptions &ElimOpts) {
+  runTimedAnalysis(
+      OS, View, ElimOpts,
+      [](Function &F, const elimination::EliminationOptions &Opts) {
+        return elimination::runIntraElimReachable(&F, Opts);
+      },
+      [&](Instruction *I, auto &Result) {
+        OS << (Result.IN(I) ? "true" : "false");
+      });
+}
+
+struct AnalysisHandler final {
+  StringRef Name;
+  void (*Run)(raw_ostream &, const FunctionView &,
+              const elimination::EliminationOptions &);
+};
+
+const AnalysisHandler *findHandler(StringRef Name) {
+  static const AnalysisHandler Handlers[] = {
+      {"liveness", &runLiveness},
+      {"reaching_defs", &runReachingDefinitions},
+      {"uninitialized", &runUninitialized},
+      {"constant_prop", &runConstantPropagation},
+      {"available_exprs", &runAvailableExpressions},
+      {"reachable", &runReachable},
+  };
+  for (const auto &Handler : Handlers)
+    if (Handler.Name == Name)
+      return &Handler;
+  return nullptr;
 }
 
 } // namespace
@@ -545,22 +545,19 @@ int main(int argc, char **argv) {
 
   LLVMContext Context;
   SMDiagnostic Err;
-  std::unique_ptr<Module> M = parseIRFile(InputFilename, Err, Context);
-  if (!M) {
-    Err.print(argv[0], errs());
+  auto M = lotus::dataflow_tool::loadModuleOrReport(InputFilename, Context, Err,
+                                                    argv[0]);
+  if (!M)
     return 1;
-  }
 
-  legacy::PassManager PM;
-  PM.add(createPromoteMemoryToRegisterPass());
-  PM.add(createInstructionNamerPass());
-  PM.run(*M);
+  lotus::dataflow_tool::prepareModule(*M);
 
   raw_ostream *OutOS = &outs();
   std::unique_ptr<raw_fd_ostream> FileOS;
   if (!OutDir.empty()) {
     std::error_code EC;
-    FileOS = std::make_unique<raw_fd_ostream>(OutDir + "/elim.txt", EC);
+    FileOS =
+        lotus::dataflow_tool::openOutputFileOrReport(OutDir, "elim.txt", EC);
     if (EC) {
       errs() << "error: cannot create " << OutDir
              << "/elim.txt: " << EC.message() << "\n";
@@ -569,13 +566,22 @@ int main(int argc, char **argv) {
     OutOS = FileOS.get();
   }
   raw_ostream &OS = *OutOS;
+
+  const auto *Handler = findHandler(AnalysisOpt);
+  if (!Handler) {
+    errs() << "error: unknown elimination analysis '" << AnalysisOpt << "'\n";
+    return 1;
+  }
+
   const auto ElimOpts = getElimOptions();
-
   OS << "[elim:" << AnalysisOpt << "]\n";
-
-  for (auto &F : *M)
-    if (!F.isDeclaration())
-      dumpFunctionAnalysis(OS, F, AnalysisOpt, ElimOpts);
+  for (auto &F : *M) {
+    if (F.isDeclaration())
+      continue;
+    auto View = lotus::dataflow_tool::buildFunctionView(F);
+    OS << "FUNC " << F.getName() << "\n";
+    Handler->Run(OS, View, ElimOpts);
+  }
 
   return 0;
 }

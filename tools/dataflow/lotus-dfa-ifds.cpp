@@ -4,29 +4,22 @@
  * Dataflow testing tool: IFDS engine.
  */
 
-#include "llvm/IR/Function.h"
-#include "llvm/IR/Instruction.h"
-#include "llvm/IR/LLVMContext.h"
-#include "llvm/IR/LegacyPassManager.h"
-#include "llvm/IR/Module.h"
-#include "llvm/IRReader/IRReader.h"
+#include "llvm/ADT/StringRef.h"
+#include "llvm/IR/CFG.h"
 #include "llvm/Support/CommandLine.h"
 #include "llvm/Support/InitLLVM.h"
-#include "llvm/Support/SourceMgr.h"
 #include "llvm/Support/raw_ostream.h"
-#include "llvm/Transforms/Scalar.h"
-#include "llvm/Transforms/Utils.h"
 
 #include "Dataflow/IFDS/Clients/IFDSReachingDefinitions.h"
 #include "Dataflow/IFDS/Clients/IFDSUninitializedVariables.h"
 #include "Dataflow/IFDS/Solvers/IFDSSolver.h"
+#include "ToolSupport.h"
 
 #include <algorithm>
 #include <memory>
 #include <set>
 #include <sstream>
 #include <string>
-#include <unordered_map>
 #include <vector>
 
 using namespace llvm;
@@ -42,52 +35,38 @@ static cl::opt<std::string>
 
 namespace {
 
-void buildValueIds(Function *F,
-                   std::unordered_map<const Value *, std::string> &ValueToId,
-                   std::vector<Instruction *> &OrderedInsts) {
-  unsigned ArgIdx = 0;
-  for (auto &Arg : F->args())
-    ValueToId[&Arg] = "arg" + std::to_string(ArgIdx++);
-  unsigned InstIdx = 0;
-  for (auto &BB : *F)
-    for (auto &I : BB) {
-      OrderedInsts.push_back(&I);
-      ValueToId[&I] = "i" + std::to_string(InstIdx++);
-    }
-}
+using lotus::dataflow_tool::FunctionView;
+using lotus::dataflow_tool::ValueIdMap;
 
-std::string formatIFDSFact(
-    const ifds::DefinitionFact &fact,
-    const std::unordered_map<const Value *, std::string> &ValueToId) {
-  if (fact.is_zero())
+std::string formatIFDSFact(const ifds::DefinitionFact &Fact,
+                           const ValueIdMap &ValueToId) {
+  if (Fact.is_zero())
     return "zero";
   std::ostringstream ss;
-  auto varIt = ValueToId.find(fact.get_variable());
-  auto defIt = ValueToId.find(fact.get_definition_site());
-  ss << "def(" << (varIt != ValueToId.end() ? varIt->second : "v") << ","
-     << (defIt != ValueToId.end() ? defIt->second : "i") << ")";
+  auto VarIt = ValueToId.find(Fact.get_variable());
+  auto DefIt = ValueToId.find(Fact.get_definition_site());
+  ss << "def(" << (VarIt != ValueToId.end() ? VarIt->second : "v") << ","
+     << (DefIt != ValueToId.end() ? DefIt->second : "i") << ")";
   return ss.str();
 }
 
-std::string formatIFDSFact(
-    const ifds::UninitVarFact &fact,
-    const std::unordered_map<const Value *, std::string> &ValueToId) {
-  if (fact.is_zero())
+std::string formatIFDSFact(const ifds::UninitVarFact &Fact,
+                           const ValueIdMap &ValueToId) {
+  if (Fact.is_zero())
     return "zero";
   std::ostringstream ss;
-  auto It = ValueToId.find(fact.value);
-  ss << (fact.is_uninitialized() ? "uninit(" : "init(")
+  auto It = ValueToId.find(Fact.value);
+  ss << (Fact.is_uninitialized() ? "uninit(" : "init(")
      << (It != ValueToId.end() ? It->second : "v") << ")";
   return ss.str();
 }
 
-template <typename Fact>
-void formatIFDSFactSet(
-    raw_ostream &OS, const std::set<Fact> &facts,
-    const std::unordered_map<const Value *, std::string> &ValueToId) {
+template <typename FactT>
+void formatIFDSFactSet(raw_ostream &OS, const std::set<FactT> &Facts,
+                       const ValueIdMap &ValueToId) {
   std::vector<std::string> formatted;
-  for (const auto &fact : facts)
-    formatted.push_back(formatIFDSFact(fact, ValueToId));
+  for (const auto &Fact : Facts)
+    formatted.push_back(formatIFDSFact(Fact, ValueToId));
   std::sort(formatted.begin(), formatted.end());
   for (size_t i = 0; i < formatted.size(); ++i) {
     if (i)
@@ -107,6 +86,66 @@ const Instruction *getNextInstruction(const Instruction *I) {
   return nullptr;
 }
 
+template <typename Fact, typename ResultsT>
+void printIFDSResults(raw_ostream &OS, const FunctionView &View,
+                      const ResultsT &AllResults) {
+  for (auto *I : View.OrderedInsts) {
+    OS << "  " << View.ValueToId.at(I) << " IN: ";
+    if (const Instruction *NextInst = getNextInstruction(I)) {
+      auto Node =
+          typename ifds::ExplodedSupergraph<Fact>::Node(NextInst, Fact::zero());
+      auto It = AllResults.find(Node);
+      if (It != AllResults.end())
+        formatIFDSFactSet(OS, It->second, View.ValueToId);
+    }
+    OS << "\n";
+  }
+}
+
+void runReachingDefinitions(raw_ostream &OS, Module &M) {
+  ifds::ReachingDefinitionsAnalysis Problem;
+  ifds::IFDSSolver<ifds::ReachingDefinitionsAnalysis> Solver(Problem);
+  Solver.solve(M);
+  const auto AllResults = Solver.get_all_results();
+  for (auto &F : M) {
+    if (F.isDeclaration())
+      continue;
+    auto View = lotus::dataflow_tool::buildFunctionView(F);
+    OS << "FUNC " << F.getName() << "\n";
+    printIFDSResults<ifds::DefinitionFact>(OS, View, AllResults);
+  }
+}
+
+void runUninitialized(raw_ostream &OS, Module &M) {
+  ifds::UninitializedVariablesAnalysis Problem;
+  ifds::IFDSSolver<ifds::UninitializedVariablesAnalysis> Solver(Problem);
+  Solver.solve(M);
+  const auto AllResults = Solver.get_all_results();
+  for (auto &F : M) {
+    if (F.isDeclaration())
+      continue;
+    auto View = lotus::dataflow_tool::buildFunctionView(F);
+    OS << "FUNC " << F.getName() << "\n";
+    printIFDSResults<ifds::UninitVarFact>(OS, View, AllResults);
+  }
+}
+
+struct AnalysisHandler final {
+  StringRef Name;
+  void (*Run)(raw_ostream &, Module &);
+};
+
+const AnalysisHandler *findHandler(StringRef Name) {
+  static const AnalysisHandler Handlers[] = {
+      {"reaching_defs", &runReachingDefinitions},
+      {"uninitialized", &runUninitialized},
+  };
+  for (const auto &Handler : Handlers)
+    if (Handler.Name == Name)
+      return &Handler;
+  return nullptr;
+}
+
 } // namespace
 
 int main(int argc, char **argv) {
@@ -115,22 +154,19 @@ int main(int argc, char **argv) {
 
   LLVMContext Context;
   SMDiagnostic Err;
-  std::unique_ptr<Module> M = parseIRFile(InputFilename, Err, Context);
-  if (!M) {
-    Err.print(argv[0], errs());
+  auto M = lotus::dataflow_tool::loadModuleOrReport(InputFilename, Context, Err,
+                                                    argv[0]);
+  if (!M)
     return 1;
-  }
 
-  legacy::PassManager PM;
-  PM.add(createPromoteMemoryToRegisterPass());
-  PM.add(createInstructionNamerPass());
-  PM.run(*M);
+  lotus::dataflow_tool::prepareModule(*M);
 
   raw_ostream *OutOS = &outs();
   std::unique_ptr<raw_fd_ostream> FileOS;
   if (!OutDir.empty()) {
     std::error_code EC;
-    FileOS = std::make_unique<raw_fd_ostream>(OutDir + "/ifds.txt", EC);
+    FileOS =
+        lotus::dataflow_tool::openOutputFileOrReport(OutDir, "ifds.txt", EC);
     if (EC) {
       errs() << "error: cannot create " << OutDir
              << "/ifds.txt: " << EC.message() << "\n";
@@ -140,53 +176,13 @@ int main(int argc, char **argv) {
   }
   raw_ostream &OS = *OutOS;
 
-  OS << "[ifds:" << AnalysisOpt << "]\n";
-
-  for (auto &F : *M) {
-    if (F.isDeclaration())
-      continue;
-
-    std::unordered_map<const Value *, std::string> ValueToId;
-    std::vector<Instruction *> OrderedInsts;
-    buildValueIds(&F, ValueToId, OrderedInsts);
-    OS << "FUNC " << F.getName().str() << "\n";
-
-    if (AnalysisOpt == "reaching_defs") {
-      ifds::ReachingDefinitionsAnalysis problem;
-      ifds::IFDSSolver<ifds::ReachingDefinitionsAnalysis> solver(problem);
-      solver.solve(*M);
-      auto allResults = solver.get_all_results();
-      for (auto *I : OrderedInsts) {
-        const Instruction *nextInst = getNextInstruction(I);
-        OS << "  " << ValueToId.at(I) << " IN: ";
-        if (nextInst) {
-          auto node = ifds::ExplodedSupergraph<ifds::DefinitionFact>::Node(
-              nextInst, ifds::DefinitionFact::zero());
-          auto It = allResults.find(node);
-          if (It != allResults.end())
-            formatIFDSFactSet(OS, It->second, ValueToId);
-        }
-        OS << "\n";
-      }
-    } else if (AnalysisOpt == "uninitialized") {
-      ifds::UninitializedVariablesAnalysis problem;
-      ifds::IFDSSolver<ifds::UninitializedVariablesAnalysis> solver(problem);
-      solver.solve(*M);
-      auto allResults = solver.get_all_results();
-      for (auto *I : OrderedInsts) {
-        const Instruction *nextInst = getNextInstruction(I);
-        OS << "  " << ValueToId.at(I) << " IN: ";
-        if (nextInst) {
-          auto node = ifds::ExplodedSupergraph<ifds::UninitVarFact>::Node(
-              nextInst, ifds::UninitVarFact::zero());
-          auto It = allResults.find(node);
-          if (It != allResults.end())
-            formatIFDSFactSet(OS, It->second, ValueToId);
-        }
-        OS << "\n";
-      }
-    }
+  const auto *Handler = findHandler(AnalysisOpt);
+  if (!Handler) {
+    errs() << "error: unknown IFDS analysis '" << AnalysisOpt << "'\n";
+    return 1;
   }
 
+  OS << "[ifds:" << AnalysisOpt << "]\n";
+  Handler->Run(OS, *M);
   return 0;
 }

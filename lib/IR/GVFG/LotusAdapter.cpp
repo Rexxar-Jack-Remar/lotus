@@ -946,49 +946,26 @@ collectCallees(const GuardedValueFlowCallSite &site, CallBase &call,
 static void materializeLoadParity(GuardedValueFlowGraph &graph,
                                   IntraLotusAA &pta,
                                   GuardedValueFlowGraphBuilderPass &builder) {
-  SmallPtrSet<LoadInst *, 16> populated_representatives;
   for (Instruction &inst : instructions(*pta.getFunc())) {
     auto *load = dyn_cast<LoadInst>(&inst);
     if (!load)
       continue;
 
     auto *load_value_node = graph.findNode(load);
-    const auto &equivalent_loads = pta.getAllLoadWithSameValue(load);
-    LoadInst *representative =
-        equivalent_loads.empty() ? load : *equivalent_loads.begin();
-    auto *load_mem_node = graph.findLoadMemoryNode(representative);
-    if (!load_mem_node)
-      load_mem_node = graph.findLoadMemoryNode(load);
+    auto *load_mem_node = graph.findLoadMemoryNode(load);
     if (!load_value_node || !load_mem_node)
       continue;
 
-    if (equivalent_loads.empty()) {
-      load_value_node->clearChildren();
-      load_value_node->addChild(load_mem_node);
-      graph.mapLoadMemoryNode(load, load_mem_node);
-    } else {
-      // LotusAA may classify several loads as reading the same abstract value.
-      // Reuse one representative memory node so the adapted graph exposes one
-      // shared producer set for that equivalence class.
-      for (LoadInst *equivalent_load : equivalent_loads) {
-        if (auto *equivalent_value_node = graph.findNode(equivalent_load)) {
-          equivalent_value_node->clearChildren();
-          equivalent_value_node->addChild(load_mem_node);
-        }
-        graph.mapLoadMemoryNode(equivalent_load, load_mem_node);
-      }
-    }
-
-    if (!populated_representatives.insert(representative).second)
-      continue;
+    load_value_node->clearChildren();
+    load_value_node->addChild(load_mem_node);
+    graph.mapLoadMemoryNode(load, load_mem_node);
 
     mem_value_t load_values;
-    pta.collectGuardedValueFlowLoadValues(representative, load_values);
+    pta.collectGuardedValueFlowLoadValues(load, load_values);
     if (load_values.empty())
-      collectExactPointerStoreFallbacks(*pta.getFunc(), representative,
-                                        load_values);
-    populateLoadMemoryNode(graph, load_mem_node, load_values,
-                           representative->getParent(), builder);
+      collectExactPointerStoreFallbacks(*pta.getFunc(), load, load_values);
+    populateLoadMemoryNode(graph, load_mem_node, load_values, load->getParent(),
+                           builder);
   }
 }
 
@@ -1159,11 +1136,11 @@ static bool materializeCallsiteSummaryNodes(
       }
     }
 
-    for (unsigned bucket = 1; bucket < summary_values.size(); ++bucket) {
-      Type *summary_type = getStableSummaryNodeType(call->getContext());
-      auto *summary_node = graph.createNode<GuardedValueFlowCallSummaryNode>(
-          GuardedValueFlowNode::Kind::CallSiteArgumentSummary, summary_type,
-          &graph, call->getParent(), call, nullptr, bucket);
+      for (unsigned bucket = 1; bucket < summary_values.size(); ++bucket) {
+        Type *summary_type = getStableSummaryNodeType(call->getContext());
+        auto *summary_node = graph.createNode<GuardedValueFlowCallSummaryNode>(
+            GuardedValueFlowNode::Kind::CallSiteArgumentSummary, summary_type,
+            &graph, call->getParent(), call, nullptr, bucket);
       summary_node->setDescription(
           (Twine("call.input.summary.") + Twine(bucket)).str());
 
@@ -1187,6 +1164,54 @@ static bool materializeCallsiteSummaryNodes(
         if (caller && lotus.isBackEdge(caller, callee))
           continue;
         site->setInputSummaryNode(callee, bucket, summary_node);
+      }
+
+    }
+
+    for (Function *callee : callees) {
+      if (caller && lotus.isBackEdge(caller, callee))
+        continue;
+
+      auto *callee_graph = dyn_cast_or_null<IntraLotusAA>(pta.getPtGraph(callee));
+      if (!callee_graph)
+        continue;
+
+      const auto &summary_outputs = callee_graph->getSummaryOutputs();
+      for (unsigned bucket = 0; bucket < summary_outputs.size(); ++bucket) {
+        const mem_value_t *summary_bucket = summary_outputs[bucket];
+        if (!summary_bucket || summary_bucket->empty())
+          continue;
+
+        Type *summary_type = getStableSummaryNodeType(call->getContext());
+        auto *summary_node = dyn_cast_or_null<GuardedValueFlowCallSummaryNode>(
+            site->getOutputSummaryNode(callee, bucket));
+        if (!summary_node) {
+          summary_node = graph.createNode<GuardedValueFlowCallSummaryNode>(
+              GuardedValueFlowNode::Kind::CallSiteReturnSummary, summary_type,
+              &graph, call->getParent(), call, callee, bucket);
+          summary_node->setDescription(
+              (Twine("call.output.summary.") + Twine(bucket)).str());
+          site->setOutputSummaryNode(callee, bucket, summary_node);
+        } else {
+          summary_node->clearChildren();
+        }
+
+        auto *load_mem = graph.createNode<GuardedValueFlowNode>(
+            GuardedValueFlowNode::Kind::LoadMemory, summary_type, &graph,
+            call->getParent(), nullptr, call);
+        load_mem->setDescription(
+            (Twine("call.output.summary.mem.") + Twine(bucket)).str());
+        (void)LotusGuardedValueFlowAdapterPass::safeLink(graph, summary_node,
+                                                         load_mem);
+
+        SummarySentinelProvenance summary_provenance{call, callee, bucket,
+                                                     SummaryDirection::Output};
+        mem_value_t imported_values =
+            importSummaryValues(pta, call, callee, *summary_bucket);
+        populateLoadMemoryNode(graph, load_mem, imported_values,
+                               call->getParent(), builder,
+                               SummaryValueMode::CallsiteProducer,
+                               &summary_provenance);
       }
     }
   }

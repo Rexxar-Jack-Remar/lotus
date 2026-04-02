@@ -191,7 +191,7 @@ TEST(GuardedValueFlowAdapterShape, BuildsMemoryAndPseudoInterfaceShape) {
 }
 
 TEST(GuardedValueFlowAdapterShape,
-     SharesRepresentativeLoadMemoryNodesForEquivalentLoads) {
+     KeepsDistinctLoadMemoryNodesForEquivalentLoads) {
   const char *IR = R"(
     define i32 @test(i32* %p, i32 %v) {
     entry:
@@ -225,7 +225,7 @@ TEST(GuardedValueFlowAdapterShape,
   auto *second_load_mem = graph.findLoadMemoryNode(loads[1]);
   ASSERT_NE(first_load_mem, nullptr);
   ASSERT_NE(second_load_mem, nullptr);
-  EXPECT_EQ(first_load_mem, second_load_mem);
+  EXPECT_NE(first_load_mem, second_load_mem);
 
   auto *first_value_node = graph.findNode(loads[0]);
   auto *second_value_node = graph.findNode(loads[1]);
@@ -784,7 +784,7 @@ TEST(GuardedValueFlowAdapterShape,
 }
 
 TEST(GuardedValueFlowAdapterShape,
-     DoesNotMaterializeCallsiteOutputSummaryWrappers) {
+     MaterializesCallsiteOutputSummaryWrappers) {
   int old_ap_level = IntraLotusAAConfig::lotus_restrict_ap_level;
   int old_inline_size = IntraLotusAAConfig::lotus_restrict_inline_size;
   IntraLotusAAConfig::lotus_restrict_ap_level = 0;
@@ -844,7 +844,17 @@ TEST(GuardedValueFlowAdapterShape,
     saw_summary_bucket = true;
 
     auto *node = site->getOutputSummaryNode(callee, bucket);
-    EXPECT_EQ(node, nullptr);
+    ASSERT_NE(node, nullptr);
+    EXPECT_EQ(node->getKind(),
+              GuardedValueFlowNode::Kind::CallSiteReturnSummary);
+    auto *summary = dyn_cast<GuardedValueFlowCallSummaryNode>(node);
+    ASSERT_NE(summary, nullptr);
+    EXPECT_EQ(summary->getSummaryIndex(), bucket);
+    EXPECT_EQ(summary->getType(), PTGraph::DEFAULT_NON_POINTER_TYPE);
+    EXPECT_EQ(summary->children().size(), 1u);
+    ASSERT_NE(summary->children().front().target, nullptr);
+    EXPECT_EQ(summary->children().front().target->getKind(),
+              GuardedValueFlowNode::Kind::LoadMemory);
   }
 
   if (!saw_summary_bucket)

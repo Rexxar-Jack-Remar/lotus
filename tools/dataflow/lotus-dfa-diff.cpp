@@ -4,18 +4,11 @@
  * Differential testing for lib/Dataflow engines.
  */
 
-#include "llvm/IR/Function.h"
-#include "llvm/IR/Instruction.h"
-#include "llvm/IR/LLVMContext.h"
-#include "llvm/IR/LegacyPassManager.h"
-#include "llvm/IR/Module.h"
-#include "llvm/IRReader/IRReader.h"
+#include "llvm/ADT/StringRef.h"
+#include "llvm/IR/CFG.h"
 #include "llvm/Support/CommandLine.h"
 #include "llvm/Support/InitLLVM.h"
-#include "llvm/Support/SourceMgr.h"
 #include "llvm/Support/raw_ostream.h"
-#include "llvm/Transforms/Scalar.h"
-#include "llvm/Transforms/Utils.h"
 
 #include "Dataflow/APA/Clients/LLVM/Intra/AvailableExpressions.h"
 #include "Dataflow/APA/Clients/LLVM/Intra/ConstantPropagation.h"
@@ -30,6 +23,7 @@
 #include "Dataflow/Mono/Analyses/Intra/IntraLiveVariables.h"
 #include "Dataflow/Mono/Analyses/Intra/IntraReachable.h"
 #include "Dataflow/Mono/Analyses/Intra/IntraUninitVariables.h"
+#include "ToolSupport.h"
 
 #include <algorithm>
 #include <memory>
@@ -61,6 +55,9 @@ static cl::opt<std::string>
 
 namespace {
 
+using lotus::dataflow_tool::FunctionView;
+using lotus::dataflow_tool::ValueIdMap;
+
 elimination::EliminationOptions getElimOptions() {
   elimination::EliminationOptions Opts;
   if (ElimMethodOpt == "adt-simple")
@@ -72,24 +69,9 @@ elimination::EliminationOptions getElimOptions() {
   return Opts;
 }
 
-void buildValueIds(Function *F,
-                   std::unordered_map<const Value *, std::string> &ValueToId,
-                   std::vector<Instruction *> &OrderedInsts) {
-  unsigned ArgIdx = 0;
-  for (auto &Arg : F->args())
-    ValueToId[&Arg] = "arg" + std::to_string(ArgIdx++);
-  unsigned InstIdx = 0;
-  for (auto &BB : *F)
-    for (auto &I : BB) {
-      OrderedInsts.push_back(&I);
-      ValueToId[&I] = "i" + std::to_string(InstIdx++);
-    }
-}
-
 template <typename T>
-void formatValueSet(
-    raw_ostream &OS, const std::set<T> &S,
-    const std::unordered_map<const Value *, std::string> &ValueToId) {
+void formatValueSet(raw_ostream &OS, const std::set<T> &S,
+                    const ValueIdMap &ValueToId) {
   std::vector<std::string> ids;
   for (const Value *V : S) {
     auto It = ValueToId.find(V);
@@ -152,16 +134,16 @@ std::string formatMonoConstantValue(const mono::ConstantPropagationValue &Val) {
   return ss.str();
 }
 
-void formatElimConstPropMap(
-    raw_ostream &OS,
-    const std::unordered_map<const Value *, ValueLatticeElement> &M,
-    const std::unordered_map<const Value *, std::string> &ValueToId) {
+template <typename ValueType, typename Formatter>
+void formatMap(raw_ostream &OS,
+               const std::unordered_map<const Value *, ValueType> &Map,
+               const ValueIdMap &ValueToId, Formatter &&FormatValue) {
   std::vector<std::string> entries;
-  for (const auto &p : M) {
+  for (const auto &Entry : Map) {
     std::ostringstream ss;
-    auto It = ValueToId.find(p.first);
+    auto It = ValueToId.find(Entry.first);
     ss << (It != ValueToId.end() ? It->second : "v") << "="
-       << formatValueLatticeElement(p.second);
+       << FormatValue(Entry.second);
     entries.push_back(ss.str());
   }
   std::sort(entries.begin(), entries.end());
@@ -172,58 +154,35 @@ void formatElimConstPropMap(
   }
 }
 
-void formatMonoConstPropMap(
-    raw_ostream &OS,
-    const std::unordered_map<const Value *, mono::ConstantPropagationValue> &M,
-    const std::unordered_map<const Value *, std::string> &ValueToId) {
-  std::vector<std::string> entries;
-  for (const auto &p : M) {
-    std::ostringstream ss;
-    auto It = ValueToId.find(p.first);
-    ss << (It != ValueToId.end() ? It->second : "v") << "="
-       << formatMonoConstantValue(p.second);
-    entries.push_back(ss.str());
-  }
-  std::sort(entries.begin(), entries.end());
-  for (size_t i = 0; i < entries.size(); ++i) {
-    if (i)
-      OS << ",";
-    OS << entries[i];
-  }
-}
-
-std::string formatIFDSFact(
-    const ifds::DefinitionFact &fact,
-    const std::unordered_map<const Value *, std::string> &ValueToId) {
-  if (fact.is_zero())
+std::string formatIFDSFact(const ifds::DefinitionFact &Fact,
+                           const ValueIdMap &ValueToId) {
+  if (Fact.is_zero())
     return "zero";
   std::ostringstream ss;
-  auto varIt = ValueToId.find(fact.get_variable());
-  auto defIt = ValueToId.find(fact.get_definition_site());
-  ss << "def(" << (varIt != ValueToId.end() ? varIt->second : "v") << ","
-     << (defIt != ValueToId.end() ? defIt->second : "i") << ")";
+  auto VarIt = ValueToId.find(Fact.get_variable());
+  auto DefIt = ValueToId.find(Fact.get_definition_site());
+  ss << "def(" << (VarIt != ValueToId.end() ? VarIt->second : "v") << ","
+     << (DefIt != ValueToId.end() ? DefIt->second : "i") << ")";
   return ss.str();
 }
 
-std::string formatIFDSFact(
-    const ifds::UninitVarFact &fact,
-    const std::unordered_map<const Value *, std::string> &ValueToId) {
-  if (fact.is_zero())
+std::string formatIFDSFact(const ifds::UninitVarFact &Fact,
+                           const ValueIdMap &ValueToId) {
+  if (Fact.is_zero())
     return "zero";
   std::ostringstream ss;
-  auto It = ValueToId.find(fact.value);
-  ss << (fact.is_uninitialized() ? "uninit(" : "init(")
+  auto It = ValueToId.find(Fact.value);
+  ss << (Fact.is_uninitialized() ? "uninit(" : "init(")
      << (It != ValueToId.end() ? It->second : "v") << ")";
   return ss.str();
 }
 
-template <typename Fact>
-void formatIFDSFactSet(
-    raw_ostream &OS, const std::set<Fact> &facts,
-    const std::unordered_map<const Value *, std::string> &ValueToId) {
+template <typename FactT>
+void formatIFDSFactSet(raw_ostream &OS, const std::set<FactT> &Facts,
+                       const ValueIdMap &ValueToId) {
   std::vector<std::string> formatted;
-  for (const auto &fact : facts)
-    formatted.push_back(formatIFDSFact(fact, ValueToId));
+  for (const auto &Fact : Facts)
+    formatted.push_back(formatIFDSFact(Fact, ValueToId));
   std::sort(formatted.begin(), formatted.end());
   for (size_t i = 0; i < formatted.size(); ++i) {
     if (i)
@@ -243,236 +202,289 @@ const Instruction *getNextInstruction(const Instruction *I) {
   return nullptr;
 }
 
+template <typename Printer>
+void printInstructionStates(raw_ostream &OS, const FunctionView &View,
+                            Printer &&PrintState) {
+  for (auto *I : View.OrderedInsts) {
+    OS << "  " << View.ValueToId.at(I) << " IN: ";
+    PrintState(I);
+    OS << "\n";
+  }
+}
+
 class OutputManager {
-  std::unique_ptr<raw_fd_ostream> elim_out, mono_out, ifds_out;
+  std::unique_ptr<raw_fd_ostream> ElimOut;
+  std::unique_ptr<raw_fd_ostream> MonoOut;
+  std::unique_ptr<raw_fd_ostream> IFDSOut;
 
 public:
-  raw_ostream &getStream(const std::string &Engine) {
-    auto open = [&](auto &out, const char *name) -> raw_ostream & {
-      if (!out) {
+  raw_ostream &getStream(StringRef Engine) {
+    if (OutDir.empty())
+      return outs();
+
+    auto open = [&](std::unique_ptr<raw_fd_ostream> &Out,
+                    const char *Name) -> raw_ostream & {
+      if (!Out) {
         std::error_code EC;
-        out = std::make_unique<raw_fd_ostream>(
-            OutDir.empty() ? "" : OutDir + "/" + name, EC);
+        Out = lotus::dataflow_tool::openOutputFileOrReport(OutDir, Name, EC);
         if (EC)
-          errs() << "warning: cannot create " << name << ": " << EC.message()
+          errs() << "warning: cannot create " << Name << ": " << EC.message()
                  << "\n";
       }
-      return *out;
+      return Out ? *Out : outs();
     };
+
     if (Engine == "elim")
-      return open(elim_out, "elim.txt");
+      return open(ElimOut, "elim.txt");
     if (Engine == "mono")
-      return open(mono_out, "mono.txt");
+      return open(MonoOut, "mono.txt");
     if (Engine == "ifds")
-      return open(ifds_out, "ifds.txt");
+      return open(IFDSOut, "ifds.txt");
     return outs();
-  }
-  void close() {
-    if (elim_out)
-      elim_out->close();
-    if (mono_out)
-      mono_out->close();
-    if (ifds_out)
-      ifds_out->close();
   }
 };
 
-void runEliminationAnalysis(Module &M, const std::string &AnalysisName,
-                            OutputManager &OutMgr,
+template <typename HandlerT>
+const HandlerT *findHandler(StringRef Name, const HandlerT *Handlers,
+                            size_t Count) {
+  for (size_t Index = 0; Index < Count; ++Index)
+    if (Handlers[Index].Name == Name)
+      return &Handlers[Index];
+  return nullptr;
+}
+
+template <typename T, size_t N> constexpr size_t arraySize(const T (&)[N]) {
+  return N;
+}
+
+struct ElimHandler final {
+  StringRef Name;
+  void (*Run)(raw_ostream &, const FunctionView &,
+              const elimination::EliminationOptions &);
+};
+
+void runElimLiveness(raw_ostream &OS, const FunctionView &View,
+                     const elimination::EliminationOptions &Opts) {
+  auto Res = elimination::runIntraElimLiveVariables(&View.Function, Opts);
+  printInstructionStates(OS, View, [&](Instruction *I) {
+    formatValueSet(OS, Res.IN(I), View.ValueToId);
+  });
+}
+
+void runElimReachingDefinitions(raw_ostream &OS, const FunctionView &View,
+                                const elimination::EliminationOptions &Opts) {
+  auto Res = elimination::runIntraElimReachingDefinitions(&View.Function,
+                                                          nullptr, Opts);
+  printInstructionStates(OS, View, [&](Instruction *I) {
+    formatValueSet(OS, Res.IN(I), View.ValueToId);
+  });
+}
+
+void runElimUninitialized(raw_ostream &OS, const FunctionView &View,
+                          const elimination::EliminationOptions &Opts) {
+  auto Res =
+      elimination::runIntraElimUninitVariables(&View.Function, nullptr, Opts);
+  printInstructionStates(OS, View, [&](Instruction *I) {
+    formatValueSet(OS, Res.IN(I), View.ValueToId);
+  });
+}
+
+void runElimConstantPropagation(raw_ostream &OS, const FunctionView &View,
+                                const elimination::EliminationOptions &Opts) {
+  auto Res = elimination::runIntraElimConstantPropagation(&View.Function,
+                                                          nullptr, Opts);
+  printInstructionStates(OS, View, [&](Instruction *I) {
+    formatMap(OS, Res.IN(I), View.ValueToId,
+              [&](const ValueLatticeElement &Val) {
+                return formatValueLatticeElement(Val);
+              });
+  });
+}
+
+void runElimAvailableExpressions(raw_ostream &OS, const FunctionView &View,
+                                 const elimination::EliminationOptions &Opts) {
+  auto Res = elimination::runIntraElimAvailableExpressions(&View.Function,
+                                                           nullptr, Opts);
+  printInstructionStates(OS, View, [&](Instruction *I) {
+    std::vector<std::string> Exprs;
+    for (const auto &Expr : Res.IN(I))
+      Exprs.push_back(formatExpressionKey(Expr));
+    std::sort(Exprs.begin(), Exprs.end());
+    for (size_t Index = 0; Index < Exprs.size(); ++Index) {
+      if (Index)
+        OS << ",";
+      OS << Exprs[Index];
+    }
+  });
+}
+
+void runElimReachable(raw_ostream &OS, const FunctionView &View,
+                      const elimination::EliminationOptions &Opts) {
+  auto Res = elimination::runIntraElimReachable(&View.Function, Opts);
+  printInstructionStates(
+      OS, View, [&](Instruction *I) { OS << (Res.IN(I) ? "true" : "false"); });
+}
+
+struct MonoHandler final {
+  StringRef Name;
+  void (*Run)(raw_ostream &, const FunctionView &);
+};
+
+void runMonoLiveness(raw_ostream &OS, const FunctionView &View) {
+  if (auto Res = mono::runLiveVariablesAnalysis(&View.Function))
+    printInstructionStates(OS, View, [&](Instruction *I) {
+      formatValueSet(OS, Res->IN(I), View.ValueToId);
+    });
+}
+
+void runMonoReachable(raw_ostream &OS, const FunctionView &View) {
+  if (auto Res = mono::runReachableAnalysis(&View.Function))
+    printInstructionStates(OS, View, [&](Instruction *I) {
+      formatValueSet(OS, Res->IN(I), View.ValueToId);
+    });
+}
+
+void runMonoConstantPropagation(raw_ostream &OS, const FunctionView &View) {
+  auto Res = mono::runIntraMonoConstantPropagation(&View.Function);
+  printInstructionStates(OS, View, [&](Instruction *I) {
+    auto It = Res.find(I);
+    if (It != Res.end())
+      formatMap(OS, It->second, View.ValueToId,
+                [&](const mono::ConstantPropagationValue &Val) {
+                  return formatMonoConstantValue(Val);
+                });
+  });
+}
+
+void runMonoUninitialized(raw_ostream &OS, const FunctionView &View) {
+  if (auto Res = mono::runIntraMonoUninitVariables(&View.Function))
+    printInstructionStates(OS, View, [&](Instruction *I) {
+      formatValueSet(OS, Res->IN(I), View.ValueToId);
+    });
+}
+
+struct IFDSHandler final {
+  StringRef Name;
+  void (*Run)(raw_ostream &, Module &);
+};
+
+template <typename Fact, typename ResultsT>
+void printIFDSResults(raw_ostream &OS, const FunctionView &View,
+                      const ResultsT &AllResults) {
+  printInstructionStates(OS, View, [&](Instruction *I) {
+    if (const Instruction *NextInst = getNextInstruction(I)) {
+      auto Node =
+          typename ifds::ExplodedSupergraph<Fact>::Node(NextInst, Fact::zero());
+      auto It = AllResults.find(Node);
+      if (It != AllResults.end())
+        formatIFDSFactSet(OS, It->second, View.ValueToId);
+    }
+  });
+}
+
+void runIFDSReachingDefinitions(raw_ostream &OS, Module &M) {
+  ifds::ReachingDefinitionsAnalysis Problem;
+  ifds::IFDSSolver<ifds::ReachingDefinitionsAnalysis> Solver(Problem);
+  Solver.solve(M);
+  const auto AllResults = Solver.get_all_results();
+  for (auto &F : M) {
+    if (F.isDeclaration())
+      continue;
+    auto View = lotus::dataflow_tool::buildFunctionView(F);
+    OS << "FUNC " << F.getName() << "\n";
+    printIFDSResults<ifds::DefinitionFact>(OS, View, AllResults);
+  }
+}
+
+void runIFDSUninitialized(raw_ostream &OS, Module &M) {
+  ifds::UninitializedVariablesAnalysis Problem;
+  ifds::IFDSSolver<ifds::UninitializedVariablesAnalysis> Solver(Problem);
+  Solver.solve(M);
+  const auto AllResults = Solver.get_all_results();
+  for (auto &F : M) {
+    if (F.isDeclaration())
+      continue;
+    auto View = lotus::dataflow_tool::buildFunctionView(F);
+    OS << "FUNC " << F.getName() << "\n";
+    printIFDSResults<ifds::UninitVarFact>(OS, View, AllResults);
+  }
+}
+
+const ElimHandler ElimHandlers[] = {
+    {"liveness", &runElimLiveness},
+    {"reaching_defs", &runElimReachingDefinitions},
+    {"uninitialized", &runElimUninitialized},
+    {"constant_prop", &runElimConstantPropagation},
+    {"available_exprs", &runElimAvailableExpressions},
+    {"reachable", &runElimReachable},
+};
+
+const MonoHandler MonoHandlers[] = {
+    {"liveness", &runMonoLiveness},
+    {"reachable", &runMonoReachable},
+    {"constant_prop", &runMonoConstantPropagation},
+    {"uninitialized", &runMonoUninitialized},
+};
+
+const IFDSHandler IFDSHandlers[] = {
+    {"reaching_defs", &runIFDSReachingDefinitions},
+    {"uninitialized", &runIFDSUninitialized},
+};
+
+template <typename HandlerT>
+bool emitHeader(raw_ostream &OS, StringRef Engine, const HandlerT *Handler) {
+  if (!OutDir.empty())
+    return Handler != nullptr;
+  OS << "[" << Engine << ":" << AnalysisOpt << "]\n";
+  return Handler != nullptr;
+}
+
+void runEliminationAnalysis(Module &M, OutputManager &OutMgr,
                             const elimination::EliminationOptions &ElimOpts) {
   raw_ostream &OS = OutMgr.getStream("elim");
-  bool firstFunc = true;
+  const auto *Handler = findHandler(StringRef(AnalysisOpt), ElimHandlers,
+                                    arraySize(ElimHandlers));
+  if (!emitHeader(OS, "elim", Handler))
+    return;
+
   for (auto &F : M) {
     if (F.isDeclaration())
       continue;
-    std::unordered_map<const Value *, std::string> ValueToId;
-    std::vector<Instruction *> OrderedInsts;
-    buildValueIds(&F, ValueToId, OrderedInsts);
-    if (OutDir.empty() && firstFunc) {
-      OS << "[elim:" << AnalysisName << "]\n";
-      firstFunc = false;
-    }
-    OS << "FUNC " << F.getName().str() << "\n";
-
-    if (AnalysisName == "liveness") {
-      auto Res = elimination::runIntraElimLiveVariables(&F, ElimOpts);
-      for (auto *I : OrderedInsts) {
-        OS << "  " << ValueToId.at(I) << " IN: ";
-        formatValueSet(OS, Res.IN(I), ValueToId);
-        OS << "\n";
-      }
-    } else if (AnalysisName == "reaching_defs") {
-      auto Res =
-          elimination::runIntraElimReachingDefinitions(&F, nullptr, ElimOpts);
-      for (auto *I : OrderedInsts) {
-        OS << "  " << ValueToId.at(I) << " IN: ";
-        formatValueSet(OS, Res.IN(I), ValueToId);
-        OS << "\n";
-      }
-    } else if (AnalysisName == "uninitialized") {
-      auto Res =
-          elimination::runIntraElimUninitVariables(&F, nullptr, ElimOpts);
-      for (auto *I : OrderedInsts) {
-        OS << "  " << ValueToId.at(I) << " IN: ";
-        formatValueSet(OS, Res.IN(I), ValueToId);
-        OS << "\n";
-      }
-    } else if (AnalysisName == "constant_prop") {
-      auto Res =
-          elimination::runIntraElimConstantPropagation(&F, nullptr, ElimOpts);
-      for (auto *I : OrderedInsts) {
-        OS << "  " << ValueToId.at(I) << " IN: ";
-        formatElimConstPropMap(OS, Res.IN(I), ValueToId);
-        OS << "\n";
-      }
-    } else if (AnalysisName == "available_exprs") {
-      auto Res =
-          elimination::runIntraElimAvailableExpressions(&F, nullptr, ElimOpts);
-      for (auto *I : OrderedInsts) {
-        OS << "  " << ValueToId.at(I) << " IN: ";
-        std::vector<std::string> exprs;
-        for (const auto &expr : Res.IN(I))
-          exprs.push_back(formatExpressionKey(expr));
-        std::sort(exprs.begin(), exprs.end());
-        for (size_t i = 0; i < exprs.size(); ++i) {
-          if (i)
-            OS << ",";
-          OS << exprs[i];
-        }
-        OS << "\n";
-      }
-    } else if (AnalysisName == "reachable") {
-      auto Res = elimination::runIntraElimReachable(&F, ElimOpts);
-      for (auto *I : OrderedInsts) {
-        OS << "  " << ValueToId.at(I)
-           << " IN: " << (Res.IN(I) ? "true" : "false") << "\n";
-      }
-    }
+    auto View = lotus::dataflow_tool::buildFunctionView(F);
+    OS << "FUNC " << F.getName() << "\n";
+    Handler->Run(OS, View, ElimOpts);
   }
 }
 
-void runMonoAnalysis(Module &M, const std::string &AnalysisName,
-                     OutputManager &OutMgr) {
+void runMonoAnalysis(Module &M, OutputManager &OutMgr) {
   raw_ostream &OS = OutMgr.getStream("mono");
-  bool firstFunc = true;
+  const auto *Handler = findHandler(StringRef(AnalysisOpt), MonoHandlers,
+                                    arraySize(MonoHandlers));
+  if (!emitHeader(OS, "mono", Handler))
+    return;
+
   for (auto &F : M) {
     if (F.isDeclaration())
       continue;
-    std::unordered_map<const Value *, std::string> ValueToId;
-    std::vector<Instruction *> OrderedInsts;
-    buildValueIds(&F, ValueToId, OrderedInsts);
-    if (OutDir.empty() && firstFunc) {
-      OS << "[mono:" << AnalysisName << "]\n";
-      firstFunc = false;
-    }
-    OS << "FUNC " << F.getName().str() << "\n";
-
-    if (AnalysisName == "liveness") {
-      auto Res = mono::runLiveVariablesAnalysis(&F);
-      if (Res)
-        for (auto *I : OrderedInsts) {
-          OS << "  " << ValueToId.at(I) << " IN: ";
-          formatValueSet(OS, Res->IN(I), ValueToId);
-          OS << "\n";
-        }
-    } else if (AnalysisName == "reachable") {
-      auto Res = mono::runReachableAnalysis(&F);
-      if (Res)
-        for (auto *I : OrderedInsts) {
-          OS << "  " << ValueToId.at(I) << " IN: ";
-          formatValueSet(OS, Res->IN(I), ValueToId);
-          OS << "\n";
-        }
-    } else if (AnalysisName == "constant_prop") {
-      auto Res = mono::runIntraMonoConstantPropagation(&F);
-      for (auto *I : OrderedInsts) {
-        OS << "  " << ValueToId.at(I) << " IN: ";
-        auto It = Res.find(I);
-        if (It != Res.end())
-          formatMonoConstPropMap(OS, It->second, ValueToId);
-        OS << "\n";
-      }
-    } else if (AnalysisName == "uninitialized") {
-      auto Res = mono::runIntraMonoUninitVariables(&F);
-      if (Res)
-        for (auto *I : OrderedInsts) {
-          OS << "  " << ValueToId.at(I) << " IN: ";
-          formatValueSet(OS, Res->IN(I), ValueToId);
-          OS << "\n";
-        }
-    }
+    auto View = lotus::dataflow_tool::buildFunctionView(F);
+    OS << "FUNC " << F.getName() << "\n";
+    Handler->Run(OS, View);
   }
 }
 
-void runIFDSAnalysis(Module &M, const std::string &AnalysisName,
-                     OutputManager &OutMgr) {
+void runIFDSAnalysis(Module &M, OutputManager &OutMgr) {
   raw_ostream &OS = OutMgr.getStream("ifds");
-  bool firstFunc = true;
+  const auto *Handler = findHandler(StringRef(AnalysisOpt), IFDSHandlers,
+                                    arraySize(IFDSHandlers));
+  if (!OutDir.empty() && !Handler)
+    return;
 
-  if (AnalysisName == "reaching_defs") {
-    for (auto &F : M) {
-      if (F.isDeclaration())
-        continue;
-      std::unordered_map<const Value *, std::string> ValueToId;
-      std::vector<Instruction *> OrderedInsts;
-      buildValueIds(&F, ValueToId, OrderedInsts);
-      if (OutDir.empty() && firstFunc) {
-        OS << "[ifds:" << AnalysisName << "]\n";
-        firstFunc = false;
-      }
-      OS << "FUNC " << F.getName().str() << "\n";
-
-      ifds::ReachingDefinitionsAnalysis problem;
-      ifds::IFDSSolver<ifds::ReachingDefinitionsAnalysis> solver(problem);
-      solver.solve(M);
-      auto allResults = solver.get_all_results();
-      for (auto *I : OrderedInsts) {
-        const Instruction *nextInst = getNextInstruction(I);
-        OS << "  " << ValueToId.at(I) << " IN: ";
-        if (nextInst) {
-          auto node = ifds::ExplodedSupergraph<ifds::DefinitionFact>::Node(
-              nextInst, ifds::DefinitionFact::zero());
-          auto It = allResults.find(node);
-          if (It != allResults.end())
-            formatIFDSFactSet(OS, It->second, ValueToId);
-        }
-        OS << "\n";
-      }
-    }
-  } else if (AnalysisName == "uninitialized") {
-    for (auto &F : M) {
-      if (F.isDeclaration())
-        continue;
-      std::unordered_map<const Value *, std::string> ValueToId;
-      std::vector<Instruction *> OrderedInsts;
-      buildValueIds(&F, ValueToId, OrderedInsts);
-      if (OutDir.empty() && firstFunc) {
-        OS << "[ifds:" << AnalysisName << "]\n";
-        firstFunc = false;
-      }
-      OS << "FUNC " << F.getName().str() << "\n";
-
-      ifds::UninitializedVariablesAnalysis problem;
-      ifds::IFDSSolver<ifds::UninitializedVariablesAnalysis> solver(problem);
-      solver.solve(M);
-      auto allResults = solver.get_all_results();
-      for (auto *I : OrderedInsts) {
-        const Instruction *nextInst = getNextInstruction(I);
-        OS << "  " << ValueToId.at(I) << " IN: ";
-        if (nextInst) {
-          auto node = ifds::ExplodedSupergraph<ifds::UninitVarFact>::Node(
-              nextInst, ifds::UninitVarFact::zero());
-          auto It = allResults.find(node);
-          if (It != allResults.end())
-            formatIFDSFactSet(OS, It->second, ValueToId);
-        }
-        OS << "\n";
-      }
-    }
-  } else {
-    if (OutDir.empty() && firstFunc)
-      OS << "[ifds:" << AnalysisName << "]\n  (not implemented for IFDS)\n";
+  OS << "[ifds:" << AnalysisOpt << "]\n";
+  if (!Handler) {
+    OS << "  (not implemented for IFDS)\n";
+    return;
   }
+  Handler->Run(OS, M);
 }
 
 } // namespace
@@ -483,30 +495,25 @@ int main(int argc, char **argv) {
 
   LLVMContext Context;
   SMDiagnostic Err;
-  std::unique_ptr<Module> M = parseIRFile(InputFilename, Err, Context);
-  if (!M) {
-    Err.print(argv[0], errs());
+  auto M = lotus::dataflow_tool::loadModuleOrReport(InputFilename, Context, Err,
+                                                    argv[0]);
+  if (!M)
     return 1;
-  }
 
-  legacy::PassManager PM;
-  PM.add(createPromoteMemoryToRegisterPass());
-  PM.add(createInstructionNamerPass());
-  PM.run(*M);
+  lotus::dataflow_tool::prepareModule(*M);
 
   OutputManager OutMgr;
   const auto ElimOpts = getElimOptions();
-  bool runElim = (EngineOpt == "elim" || EngineOpt == "all");
-  bool runMono = (EngineOpt == "mono" || EngineOpt == "all");
-  bool runIFDS = (EngineOpt == "ifds" || EngineOpt == "all");
+  const bool RunElim = EngineOpt == "elim" || EngineOpt == "all";
+  const bool RunMono = EngineOpt == "mono" || EngineOpt == "all";
+  const bool RunIFDS = EngineOpt == "ifds" || EngineOpt == "all";
 
-  if (runElim)
-    runEliminationAnalysis(*M, AnalysisOpt, OutMgr, ElimOpts);
-  if (runMono)
-    runMonoAnalysis(*M, AnalysisOpt, OutMgr);
-  if (runIFDS)
-    runIFDSAnalysis(*M, AnalysisOpt, OutMgr);
+  if (RunElim)
+    runEliminationAnalysis(*M, OutMgr, ElimOpts);
+  if (RunMono)
+    runMonoAnalysis(*M, OutMgr);
+  if (RunIFDS)
+    runIFDSAnalysis(*M, OutMgr);
 
-  OutMgr.close();
   return 0;
 }

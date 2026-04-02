@@ -259,7 +259,7 @@ TEST_F(GuardedValueFlowParityTest, ModelsReturnPhiSelectAndOperationalSites) {
 }
 
 TEST_F(GuardedValueFlowParityTest,
-       SharesRepresentativeLoadMemoryNodesForEquivalentLoads) {
+       KeepsDistinctLoadMemoryNodesForEquivalentLoads) {
   const char *source = R"(
     define i32 @test(i32* %p, i32 %v) {
     entry:
@@ -292,7 +292,7 @@ TEST_F(GuardedValueFlowParityTest,
   auto *second_mem = graph.findLoadMemoryNode(loads[1]);
   ASSERT_NE(first_mem, nullptr);
   ASSERT_NE(second_mem, nullptr);
-  EXPECT_EQ(first_mem, second_mem);
+  EXPECT_NE(first_mem, second_mem);
 
   auto *first_load_node = graph.findNode(loads[0]);
   auto *second_load_node = graph.findNode(loads[1]);

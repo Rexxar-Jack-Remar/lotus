@@ -710,7 +710,8 @@ LLVM_DUMP_METHOD void GVNPass::dump(DenseMap<uint32_t, Value *> &d) const {
   errs() << "{\n";
   for (auto &I : d) {
     errs() << I.first << "\n";
-    I.second->dump();
+    I.second->print(errs());
+    errs() << "\n";
   }
   errs() << "}\n";
 }
