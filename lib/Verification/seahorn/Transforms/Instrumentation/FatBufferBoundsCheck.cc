@@ -85,7 +85,7 @@ STATISTIC(ChecksUnable, "Bounds checks unable to add");
 STATISTIC(ChecksFat, "Bounds checks that use fat pointers");
 STATISTIC(ChecksKnownSize, "Bounds checks that have known size but not offset");
 
-typedef IRBuilder<TargetFolder> BuilderTy;
+using BuilderTy = IRBuilder<TargetFolder>;
 
 namespace {
 struct FatBufferBoundsCheck : public FunctionPass {

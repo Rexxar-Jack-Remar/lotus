@@ -22,7 +22,7 @@ namespace pdg {
 
 namespace {
 
-typedef PDGQueryResult::NodeSet NodeSet;
+using NodeSet = PDGQueryResult::NodeSet;
 
 static bool isCallNode(Node *node) {
   return node != nullptr && node->getNodeType() == GraphNodeType::INST_FUNCALL;

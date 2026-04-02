@@ -231,7 +231,7 @@ calculateDistanceMapIntra(llvm::BasicBlock *sourceBB) {
 std::map<llvm::BasicBlock *, uint64_t>
 calculateDistanceMapIntra(llvm::BasicBlock *sourceBB,
                           const std::set<BBEdgePair> &backEdges) {
-  typedef std::pair<uint64_t, llvm::BasicBlock *> DisBBPair;
+  using DisBBPair = std::pair<uint64_t, llvm::BasicBlock *>;
 
   Function *func = sourceBB->getParent();
 
@@ -291,8 +291,8 @@ calculateDistanceMapIntra(llvm::BasicBlock *sourceBB,
 void calculateDistanceMapInterICFGWithDistanceMap(
     ICFG *icfg, ICFGNode *sourceBB,
     std::map<ICFGNode *, uint64_t> &distanceMap) {
-  typedef std::pair<uint64_t, ICFGNode *> DisBBPair;
-  typedef ICFGEdge Edge;
+  using DisBBPair = std::pair<uint64_t, ICFGNode *>;
+  using Edge = ICFGEdge;
 
   // initialize INF distance from source to other blocks
   std::for_each(std::begin(distanceMap), std::end(distanceMap),
@@ -342,7 +342,7 @@ void calculateDistanceMapInterICFGWithDistanceMap(
 
 std::map<ICFGNode *, uint64_t>
 calculateDistanceMapInterICFG(ICFG *icfg, ICFGNode *sourceBB) {
-  typedef std::pair<uint64_t, ICFGNode *> DisBBPair;
+  using DisBBPair = std::pair<uint64_t, ICFGNode *>;
 
   // Initialize INF distance for every node reachable via the function map.
   std::map<ICFGNode *, uint64_t> distanceMap;

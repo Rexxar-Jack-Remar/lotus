@@ -49,7 +49,7 @@ void unproven_assumption_annotation::print_begin(const statement_t &s,
   using assumption_ptr = typename unproven_assumption_analysis_t::assumption_ptr;
   std::vector<assumption_ptr> assumes;
   if (s.is_assert()) {
-    typedef typename cfg_ref_t::basic_block_t::assert_t assert_t;
+    using assert_t = typename cfg_ref_t::basic_block_t::assert_t;
     m_analyzer.get_assumptions(static_cast<const assert_t *>(&s), assumes);
     if (!assumes.empty()) {
       o << "/** assert verified as ";

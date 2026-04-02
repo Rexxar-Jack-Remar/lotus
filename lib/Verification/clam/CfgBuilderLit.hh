@@ -2,15 +2,15 @@
 
 /* A wrapper object for a LLVM variable or constant */
 
-#include <llvm/ADT/Optional.h>
-#include <llvm/IR/Instructions.h>
-#include <llvm/Support/raw_ostream.h>
-
 #include "clam/CfgBuilderParams.hh"
 #include "clam/HeapAbstraction.hh"
 #include "clam/crab/crab_lang.hh"
 
 #include <unordered_map>
+
+#include <llvm/ADT/Optional.h>
+#include <llvm/IR/Instructions.h>
+#include <llvm/Support/raw_ostream.h>
 
 namespace clam {
 
@@ -57,7 +57,8 @@ class crabBoolLit : public crabLit {
 
   crabBoolLit(bool cst) : crabLit(CRAB_LITERAL_BOOL), m_cst(cst) {}
 
-  crabBoolLit(var_t var) : crabLit(CRAB_LITERAL_BOOL), m_cst(false), m_var(var) {}
+  crabBoolLit(var_t var)
+      : crabLit(CRAB_LITERAL_BOOL), m_cst(false), m_var(var) {}
 
 public:
   bool isVar() const override { return (m_var.hasValue()); }
@@ -194,7 +195,7 @@ public:
   }
 };
 
-typedef std::shared_ptr<crabLit> crab_lit_ref_t;
+using crab_lit_ref_t = std::shared_ptr<crabLit>;
 
 class crabLitFactoryImpl;
 
@@ -229,10 +230,10 @@ public:
   var_t mkRegionVar(RegionInfo rgnInfo);
 
   /** This is the inverse of mkVar.
-   **  Return null if no Value associated with v 
+   **  Return null if no Value associated with v
    ***/
-  const llvm::Value* getLLVMVar(const var_t &v) const;
-  
+  const llvm::Value *getLLVMVar(const var_t &v) const;
+
   /** make typed variables associated with regions.
    ** Multiple calls with same parameters return the same variable.
    **/

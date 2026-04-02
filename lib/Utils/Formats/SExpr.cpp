@@ -6,7 +6,7 @@
 #include <utility>
 #include <vector>
 
-typedef std::logic_error parse_error;
+using parse_error = std::logic_error;
 
 static bool endoftok(int c) {
   return c == EOF || std::isspace(c) || c == ')' || c == '(';

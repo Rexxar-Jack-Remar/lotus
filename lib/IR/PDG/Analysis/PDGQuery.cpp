@@ -23,8 +23,8 @@ namespace pdg {
 
 namespace {
 
-typedef PDGQueryResult::NodeSet NodeSet;
-typedef PDGQueryResult::EdgeSet EdgeSet;
+using NodeSet = PDGQueryResult::NodeSet;
+using EdgeSet = PDGQueryResult::EdgeSet;
 
 struct TraversalOutcome {
   NodeSet nodes;

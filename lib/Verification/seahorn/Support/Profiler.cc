@@ -394,7 +394,7 @@ namespace seahorn {
 
       if (ShowCallGraphInfo) {
         CallGraph &CG = getAnalysis<CallGraphWrapperPass> ().getCallGraph ();
-        typedef std::pair <Function*, std::pair <unsigned, unsigned> > func_ty;
+        using func_ty = std::pair<Function *, std::pair<unsigned, unsigned>>;
         std::vector<func_ty> funcs;
         errs () << " ===================================== \n";
         errs () << "  Call graph information\n";

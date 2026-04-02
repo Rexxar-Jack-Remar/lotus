@@ -34,7 +34,7 @@ bool NameValues::runOnFunction(Function &F) {
     out << F;
     out.flush();
 
-    typedef boost::tokenizer<boost::char_separator<char>> tokenizer;
+    using tokenizer = boost::tokenizer<boost::char_separator<char>>;
     boost::char_separator<char> nl_sep("\n");
     boost::char_separator<char> sp_sep(" :\t%@");
 

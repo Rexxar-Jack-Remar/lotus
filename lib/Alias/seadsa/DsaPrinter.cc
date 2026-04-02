@@ -69,11 +69,11 @@ template <typename GraphType> class GraphWriter {
   const GraphType &G;
   ColorMap *m_cm = nullptr;
 
-  typedef DOTGraphTraits<GraphType> DOTTraits;
-  typedef GraphTraits<GraphType> GTraits;
-  typedef typename GTraits::NodeType NodeType;
-  typedef typename GTraits::nodes_iterator node_iterator;
-  typedef typename GTraits::ChildIteratorType child_iterator;
+  using DOTTraits = DOTGraphTraits<GraphType>;
+  using GTraits = GraphTraits<GraphType>;
+  using NodeType = typename GTraits::NodeType;
+  using node_iterator = typename GTraits::nodes_iterator;
+  using child_iterator = typename GTraits::ChildIteratorType;
   DOTTraits DTraits;
 
   // Writes the edge labels of the node to O and returns true if there are any
@@ -492,8 +492,8 @@ struct DOTGraphTraits<seadsa::Graph *> : public DefaultDOTGraphTraits {
   addCustomGraphFeatures(seadsa::Graph *g,
                          seadsa::internals::GraphWriter<seadsa::Graph *> &GW) {
 
-    typedef seadsa::Node Node;
-    typedef seadsa::Field Field;
+    using Node = seadsa::Node;
+    using Field = seadsa::Field;
 
     auto EmitLinkTypeSuffix = [](const seadsa::Cell &C,
                                  seadsa::FieldType Ty =

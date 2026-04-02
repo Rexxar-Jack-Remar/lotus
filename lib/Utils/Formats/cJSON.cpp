@@ -86,10 +86,10 @@
 #endif
 #endif
 
-typedef struct {
+struct error {
   const unsigned char *json;
   size_t position;
-} error;
+};
 static error global_error = {NULL, 0};
 
 CJSON_PUBLIC(const char *) cJSON_GetErrorPtr(void) {
@@ -148,11 +148,11 @@ static int case_insensitive_strcmp(const unsigned char *string1,
   return tolower(*string1) - tolower(*string2);
 }
 
-typedef struct internal_hooks {
+struct internal_hooks {
   void *(CJSON_CDECL *allocate)(size_t size);
   void(CJSON_CDECL *deallocate)(void *pointer);
   void *(CJSON_CDECL *reallocate)(void *pointer, size_t size);
-} internal_hooks;
+};
 
 #if defined(_MSC_VER)
 /* work around MSVC error C2322: '...' address of dllimport '...' is not static
@@ -258,14 +258,14 @@ static unsigned char get_decimal_point(void) {
 #endif
 }
 
-typedef struct {
+struct parse_buffer {
   const unsigned char *content;
   size_t length;
   size_t offset;
   size_t depth; /* How deeply nested (in arrays/objects) is the input at the
                    current offset. */
   internal_hooks hooks;
-} parse_buffer;
+};
 
 /* check if the given size is left to read in a given parse buffer (starting
  * with 1) */
@@ -389,7 +389,7 @@ cJSON_SetValuestring(cJSON *object, const char *valuestring) {
   return copy;
 }
 
-typedef struct {
+struct printbuffer {
   unsigned char *buffer;
   size_t length;
   size_t offset;
@@ -397,7 +397,7 @@ typedef struct {
   cJSON_bool noalloc;
   cJSON_bool format; /* is this print a formatted print */
   internal_hooks hooks;
-} printbuffer;
+};
 
 /* realloc printbuffer if necessary to have at least "needed" bytes more */
 static unsigned char *ensure(printbuffer *const p, size_t needed) {

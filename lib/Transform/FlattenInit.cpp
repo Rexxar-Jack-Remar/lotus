@@ -321,7 +321,7 @@ struct LinearPtr {
   }
 };
 
-typedef uint8_t Label;
+using Label = uint8_t;
 
 const Label BOTTOM = 3;
 const Label MAYBE_TAINTED = 2;

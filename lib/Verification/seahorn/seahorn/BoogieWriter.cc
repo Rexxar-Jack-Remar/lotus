@@ -116,19 +116,19 @@ using namespace llvm;
 
 namespace seahorn {
 
-typedef std::string instruction_t;
-typedef std::string term_t;
-typedef std::string type_t;
+using instruction_t = std::string;
+using term_t = std::string;
+using type_t = std::string;
 
 /** Factory to create boogie instructions **/
 class instruction_factory {
 public:
-  typedef boost::optional<term_t> opt_term_t;
-  typedef boost::optional<type_t> opt_type_t;
+  using opt_term_t = boost::optional<term_t>;
+  using opt_type_t = boost::optional<type_t>;
 
 private:
   // map Value to term
-  typedef DenseMap<const Value *, term_t> term_cache_t;
+  using term_cache_t = DenseMap<const Value *, term_t>;
   term_cache_t m_term_cache;
   // create unique term names
   unsigned m_id;
@@ -136,8 +136,8 @@ private:
   boost::unordered_set<std::string> m_reserved_names;
 
 public:
-  typedef term_cache_t::iterator term_iterator_t;
-  typedef term_cache_t::const_iterator term_const_iterator_t;
+  using term_iterator_t = term_cache_t::iterator;
+  using term_const_iterator_t = term_cache_t::const_iterator;
 
   instruction_factory();
 
@@ -463,7 +463,7 @@ instruction_t instruction_factory::mk_call(CallBase &CB) {
 /** internal basic block of boogie instructions **/
 class block {
 public:
-  typedef std::string label_t;
+  using label_t = std::string;
 
 private:
   /** llvm basic block associated (it can be null) **/
@@ -525,7 +525,7 @@ public:
 
 /** A factory to create boogie basic blocks **/
 class block_factory {
-  typedef boost::unordered_map<block::label_t, block> block_map_t;
+  using block_map_t = boost::unordered_map<block::label_t, block>;
 
   block_map_t m_bm;
   unsigned m_id;
@@ -540,8 +540,8 @@ class block_factory {
   }
 
 public:
-  typedef typename block_map_t::iterator iterator;
-  typedef typename block_map_t::const_iterator const_iterator;
+  using iterator = typename block_map_t::iterator;
+  using const_iterator = typename block_map_t::const_iterator;
 
   block_factory() : m_id(0) {}
 
@@ -838,7 +838,7 @@ template <typename Out> Out &BoogieWriter::write(Out &out) {
   }
 
   // Collect tracked formal parameters
-  typedef std::vector<std::pair<term_t, type_t>> formal_params_t;
+  using formal_params_t = std::vector<std::pair<term_t, type_t>>;
   formal_params_t targs;
   for (Value &a : m_func.args()) {
     // XXX: untracked formal parameters are ignored

@@ -50,7 +50,7 @@ class LinConsToExprImpl {
 public:  
   // A normalizer for Boolean constraints
   class BoolCst {
-    typedef enum { T_TRUE, T_FALSE, T_TOP } tribool_t;
+    enum tribool_t { T_TRUE, T_FALSE, T_TOP };
 
     tribool_t m_val;
 

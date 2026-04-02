@@ -4840,7 +4840,7 @@ void CfgBuilderImpl::addFunctionDeclaration() {
     CLAM_ERROR("function inputs and outputs should not intersect");
   }
 
-  typedef function_decl<number_t, varname_t> function_decl_t;
+  using function_decl_t = function_decl<number_t, varname_t>;
   m_cfg->set_func_decl(
       function_decl_t(m_func.getName().str(), inputs, outputs));
 }

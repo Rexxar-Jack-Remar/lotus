@@ -45,7 +45,7 @@ private:
         : m_start(start), m_step(step), m_stride(stride) {}
   };
 
-  typedef DenseMap<PHINode *, InductionInfo> InductionMapTy;
+  using InductionMapTy = DenseMap<PHINode *, InductionInfo>;
   /*
     Integer loops often have one integer induction
     variables. However, c++ iterators have often multiple pointer

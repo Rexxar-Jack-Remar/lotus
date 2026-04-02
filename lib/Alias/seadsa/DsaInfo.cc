@@ -341,8 +341,8 @@ void DsaInfo::assignNodeId(const Function &fn, Graph *g) {
   /// XXX: Try to build a global id from the name of a node's
   /// representative. The representative is chosen deterministically.
 
-  typedef std::unordered_map<const Node *, ValueSet> ReferrerMap;
-  typedef std::vector<std::pair<const Node *, std::string>> ReferrerRepVector;
+  using ReferrerMap = std::unordered_map<const Node *, ValueSet>;
+  using ReferrerRepVector = std::vector<std::pair<const Node *, std::string>>;
 
   ReferrerMap ref_map;
   ReferrerRepVector sorted_ref_vector;

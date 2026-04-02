@@ -106,7 +106,7 @@ namespace seahorn
     {
       if (std::distance (args.begin (), args.end ()) == 0) 
         return ExprStr ();
-      typedef typename std::vector<ExprStr>::iterator iterator;
+      using iterator = typename std::vector<ExprStr>::iterator;
       string s = (*args.begin ()).str ();
       for(iterator it = ++ (args.begin ()), end = args.end (); it!=end ; ++it )
       {
@@ -118,7 +118,7 @@ namespace seahorn
 
   };
  
-  typedef std::unordered_map<Expr,ExprStr> expr_str_map;
+  using expr_str_map = std::unordered_map<Expr, ExprStr>;
   struct FailPrettyPrinter
   {
     template <typename C, typename Range>

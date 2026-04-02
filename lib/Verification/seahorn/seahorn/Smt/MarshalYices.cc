@@ -570,7 +570,7 @@ Expr marshal_yices::decode_yval(yval_t &yval, ExprFactory &efac, model_t *model,
         decode_yval(def_val, efac, model, false, nullptr, nullptr);
 
     // typedef for a mapping
-    typedef std::pair<ExprVector, Expr> mapping_t;
+    using mapping_t = std::pair<ExprVector, Expr>;
     uint32_t num_mappings = yvec.size;
     // our sequence of mappings
     std::vector<mapping_t> entries(num_mappings);

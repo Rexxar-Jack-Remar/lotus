@@ -63,7 +63,7 @@ namespace seahorn
       while (getline (in, line))
       {
         boost::char_separator<char> sep(",");
-        typedef boost::tokenizer< boost::char_separator<char>> t_tokenizer;
+        using t_tokenizer = boost::tokenizer<boost::char_separator<char>>;
         t_tokenizer tok(line, sep);
         std::string op = *(tok.begin());
         std::string number = *(++tok.begin());
