@@ -52,8 +52,8 @@
 
 #include "IR/ICFG/CallGraph.h"
 #include "IR/ICFG/ICFG.h"
-#include "IR/SVFG/SVFG.h"
 #include "IR/SVFG/PointsToSetHash.h"
+#include "IR/SVFG/SVFG.h"
 
 #include <limits>
 #include <memory>

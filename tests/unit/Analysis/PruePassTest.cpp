@@ -47,6 +47,17 @@ static GlobalVariable *getCounterArray(Module &module, StringRef name) {
   return module.getNamedGlobal(name);
 }
 
+static unsigned countDeltaAllocas(Function &function) {
+  unsigned count = 0;
+  for (Instruction &inst : instructions(function)) {
+    auto *alloca = dyn_cast<AllocaInst>(&inst);
+    if (alloca && alloca->getName().startswith("prue.delta.")) {
+      ++count;
+    }
+  }
+  return count;
+}
+
 static unsigned countTaggedStores(Function &function) {
   unsigned count = 0;
   for (Instruction &inst : instructions(function)) {
@@ -104,6 +115,24 @@ static bool hasStoreInBlock(Function &function, StringRef block_name,
   return false;
 }
 
+static BasicBlock *getBlockByName(Function &function, StringRef block_name) {
+  for (BasicBlock &bb : function) {
+    if (bb.getName() == block_name) {
+      return &bb;
+    }
+  }
+  return nullptr;
+}
+
+static Instruction *getInstructionByName(Function &function, StringRef name) {
+  for (Instruction &inst : instructions(function)) {
+    if (inst.getName() == name) {
+      return &inst;
+    }
+  }
+  return nullptr;
+}
+
 TEST(PruePassTest, DeltaInstrumentationCreatesLocalCountersAndTaggedUpdates) {
   LLVMContext context;
   auto module = parseModuleChecked(context, R"(
@@ -129,16 +158,46 @@ TEST(PruePassTest, DeltaInstrumentationCreatesLocalCountersAndTaggedUpdates) {
   ASSERT_NE(function, nullptr);
   EXPECT_NE(getCounterArray(*module, "prue-counter-array"), nullptr);
 
-  unsigned alloca_count = 0;
-  for (Instruction &inst : instructions(*function)) {
-    auto *alloca = dyn_cast<AllocaInst>(&inst);
-    if (alloca && alloca->getName().startswith("prue.delta.")) {
-      ++alloca_count;
-    }
-  }
-
-  EXPECT_GT(alloca_count, 0u);
+  EXPECT_GT(countDeltaAllocas(*function), 0u);
   EXPECT_GT(countTaggedStores(*function), 0u);
+}
+
+TEST(PruePassTest, DeltaInstrumentationSkipsMustTailFunctions) {
+  LLVMContext context;
+  auto module = parseModuleChecked(context, R"(
+    declare i64 @callee(i64)
+
+    define i64 @musttail_func(i64 %x) {
+    entry:
+      %call = musttail call i64 @callee(i64 %x)
+      ret i64 %call
+    }
+
+    define void @regular_func(i1 %cond) {
+    entry:
+      br i1 %cond, label %then, label %exit
+
+    then:
+      br label %exit
+
+    exit:
+      ret void
+    }
+  )");
+  ASSERT_NE(module, nullptr);
+
+  runDeltaPass(*module);
+
+  Function *musttail_function = module->getFunction("musttail_func");
+  ASSERT_NE(musttail_function, nullptr);
+  EXPECT_EQ(countDeltaAllocas(*musttail_function), 0u);
+  EXPECT_EQ(countTaggedStores(*musttail_function), 0u);
+  EXPECT_EQ(countStoresToGlobal(*musttail_function, "prue-counter-array"), 0u);
+
+  Function *regular_function = module->getFunction("regular_func");
+  ASSERT_NE(regular_function, nullptr);
+  EXPECT_GT(countDeltaAllocas(*regular_function), 0u);
+  EXPECT_GT(countTaggedStores(*regular_function), 0u);
 }
 
 TEST(PruePassTest, EliminatesZeroUpdate) {
@@ -233,6 +292,177 @@ TEST(PruePassTest, RelocatesUpdateToDefinitionBlock) {
   ASSERT_NE(function, nullptr);
   EXPECT_TRUE(hasStoreInBlock(*function, "then", "prue-counter-array"));
   EXPECT_FALSE(hasStoreInBlock(*function, "exit", "prue-counter-array"));
+}
+
+TEST(PruePassTest, OffloadsWrappedLoopClosure) {
+  LLVMContext context;
+  auto module = parseModuleChecked(context, R"(
+    @prue-counter-array = global [1 x i64] zeroinitializer
+
+    define void @offload_wrapped_loop_closure(i1 %enter_inner, i1 %continue_inner,
+                                              i1 %continue_outer) {
+    entry:
+      br label %outer.header
+
+    outer.header:
+      %d1 = phi i64 [ 0, %entry ], [ %d4.f, %outer.latch ]
+      br label %outer.body
+
+    outer.body:
+      %d1.tr = trunc i64 %d1 to i32
+      %d1.z = zext i32 %d1.tr to i64
+      br i1 %enter_inner, label %inner.header, label %outer.latch
+
+    inner.header:
+      %d2 = phi i64 [ %d1.z, %outer.body ], [ %d3, %inner.body ]
+      br label %inner.body
+
+    inner.body:
+      %d2.f = freeze i64 %d2
+      %d3 = add i64 %d2.f, 1
+      br i1 %continue_inner, label %inner.header, label %outer.latch
+
+    outer.latch:
+      %d4 = phi i64 [ %d1, %outer.body ], [ %d3, %inner.body ]
+      %d4.f = freeze i64 %d4
+      %ptr = getelementptr inbounds [1 x i64], [1 x i64]* @prue-counter-array,
+                                     i64 0, i64 0
+      %old = load i64, i64* %ptr
+      %new = add i64 %old, %d4.f
+      store i64 %new, i64* %ptr, !nisse.prue.update !0
+      br i1 %continue_outer, label %outer.header, label %exit
+
+    exit:
+      ret void
+    }
+
+    !0 = !{i64 0}
+  )");
+  ASSERT_NE(module, nullptr);
+
+  runPruePass(*module);
+
+  Function *function = module->getFunction("offload_wrapped_loop_closure");
+  ASSERT_NE(function, nullptr);
+  EXPECT_EQ(countStoresToGlobal(*function, "prue-counter-array"), 1u);
+  EXPECT_FALSE(hasStoreInBlock(*function, "outer.latch", "prue-counter-array"));
+
+  auto *d2 = dyn_cast<PHINode>(getInstructionByName(*function, "d2"));
+  ASSERT_NE(d2, nullptr);
+  BasicBlock *outer_body = getBlockByName(*function, "outer.body");
+  ASSERT_NE(outer_body, nullptr);
+  auto *incoming = dyn_cast<ConstantInt>(d2->getIncomingValueForBlock(outer_body));
+  ASSERT_NE(incoming, nullptr);
+  EXPECT_TRUE(incoming->isZero());
+}
+
+TEST(PruePassTest, OffloadsSelectBasedLoopClosure) {
+  LLVMContext context;
+  auto module = parseModuleChecked(context, R"(
+    @prue-counter-array = global [1 x i64] zeroinitializer
+
+    define void @offload_select_loop_closure(i1 %enter_inner, i1 %continue_inner,
+                                             i1 %continue_outer, i1 %mask) {
+    entry:
+      br label %outer.header
+
+    outer.header:
+      %d1 = phi i64 [ 0, %entry ], [ %d4.f, %outer.latch ]
+      br label %outer.body
+
+    outer.body:
+      br i1 %enter_inner, label %inner.header, label %outer.latch
+
+    inner.header:
+      %d2 = phi i64 [ %d1, %outer.body ], [ %d3, %inner.body ]
+      br label %inner.body
+
+    inner.body:
+      %picked = select i1 %mask, i64 %d1, i64 %d2
+      %d3 = add i64 %picked, 1
+      br i1 %continue_inner, label %inner.header, label %outer.latch
+
+    outer.latch:
+      %d4 = phi i64 [ %d1, %outer.body ], [ %d3, %inner.body ]
+      %d4.f = freeze i64 %d4
+      %ptr = getelementptr inbounds [1 x i64], [1 x i64]* @prue-counter-array,
+                                     i64 0, i64 0
+      %old = load i64, i64* %ptr
+      %new = add i64 %old, %d4.f
+      store i64 %new, i64* %ptr, !nisse.prue.update !0
+      br i1 %continue_outer, label %outer.header, label %exit
+
+    exit:
+      ret void
+    }
+
+    !0 = !{i64 0}
+  )");
+  ASSERT_NE(module, nullptr);
+
+  runPruePass(*module);
+
+  Function *function = module->getFunction("offload_select_loop_closure");
+  ASSERT_NE(function, nullptr);
+  EXPECT_EQ(countStoresToGlobal(*function, "prue-counter-array"), 1u);
+  EXPECT_FALSE(hasStoreInBlock(*function, "outer.latch", "prue-counter-array"));
+
+  auto *picked = dyn_cast<SelectInst>(getInstructionByName(*function, "picked"));
+  ASSERT_NE(picked, nullptr);
+  auto *true_value = dyn_cast<ConstantInt>(picked->getTrueValue());
+  ASSERT_NE(true_value, nullptr);
+  EXPECT_TRUE(true_value->isZero());
+}
+
+TEST(PruePassTest, LeavesNonAddLoopClosureUnchanged) {
+  LLVMContext context;
+  auto module = parseModuleChecked(context, R"(
+    @prue-counter-array = global [1 x i64] zeroinitializer
+
+    define void @non_add_loop_closure(i1 %enter_inner, i1 %continue_inner,
+                                      i1 %continue_outer) {
+    entry:
+      br label %outer.header
+
+    outer.header:
+      %d1 = phi i64 [ 1, %entry ], [ %d4.f, %outer.latch ]
+      br label %outer.body
+
+    outer.body:
+      br i1 %enter_inner, label %inner.header, label %outer.latch
+
+    inner.header:
+      %d2 = phi i64 [ %d1, %outer.body ], [ %scaled, %inner.body ]
+      br label %inner.body
+
+    inner.body:
+      %scaled = mul i64 %d2, 2
+      br i1 %continue_inner, label %inner.header, label %outer.latch
+
+    outer.latch:
+      %d4 = phi i64 [ %d1, %outer.body ], [ %scaled, %inner.body ]
+      %d4.f = freeze i64 %d4
+      %ptr = getelementptr inbounds [1 x i64], [1 x i64]* @prue-counter-array,
+                                     i64 0, i64 0
+      %old = load i64, i64* %ptr
+      %new = add i64 %old, %d4.f
+      store i64 %new, i64* %ptr, !nisse.prue.update !0
+      br i1 %continue_outer, label %outer.header, label %exit
+
+    exit:
+      ret void
+    }
+
+    !0 = !{i64 0}
+  )");
+  ASSERT_NE(module, nullptr);
+
+  runPruePass(*module);
+
+  Function *function = module->getFunction("non_add_loop_closure");
+  ASSERT_NE(function, nullptr);
+  EXPECT_EQ(countStoresToGlobal(*function, "prue-counter-array"), 1u);
+  EXPECT_TRUE(hasStoreInBlock(*function, "outer.latch", "prue-counter-array"));
 }
 
 } // namespace

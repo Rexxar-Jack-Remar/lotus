@@ -9,13 +9,14 @@
 #include "Transform/Nisse/Nisse.h"
 
 #include "llvm/ADT/SmallPtrSet.h"
-#include "llvm/Analysis/CFG.h"
 #include "llvm/ADT/SmallVector.h"
+#include "llvm/Analysis/CFG.h"
 #include "llvm/Analysis/LoopInfo.h"
 #include "llvm/Analysis/PostDominators.h"
 #include "llvm/IR/Dominators.h"
 #include "llvm/IR/InstIterator.h"
 #include "llvm/IR/Instructions.h"
+#include "llvm/IR/Operator.h"
 #include "llvm/Transforms/Utils/BasicBlockUtils.h"
 
 #include <algorithm>
@@ -70,8 +71,29 @@ struct FunctionPRUEContext {
 struct LoopClosure {
   SmallPtrSet<Value *, 16> members;
   SmallVector<PHINode *, 8> phis;
+  SmallVector<SelectInst *, 8> selects;
+  SmallVector<Instruction *, 8> wrappers;
   SmallVector<BinaryOperator *, 8> adds;
 };
+
+static bool hasMustTailReturn(const Function &F) {
+  for (const BasicBlock &BB : F) {
+    auto *ret = dyn_cast<ReturnInst>(BB.getTerminator());
+    if (!ret) {
+      continue;
+    }
+
+    if (const Instruction *prev = BB.getTerminator()->getPrevNonDebugInstruction()) {
+      if (const auto *call = dyn_cast<CallInst>(prev)) {
+        if (call->isMustTailCall()) {
+          return true;
+        }
+      }
+    }
+  }
+
+  return false;
+}
 
 static bool unifyReturnBlocks(Function &F) {
   std::vector<BasicBlock *> returning_blocks;
@@ -79,16 +101,6 @@ static bool unifyReturnBlocks(Function &F) {
   for (BasicBlock &BB : F) {
     if (isa<ReturnInst>(BB.getTerminator())) {
       returning_blocks.push_back(&BB);
-    }
-    if (auto *ret = dyn_cast<ReturnInst>(BB.getTerminator())) {
-      (void)ret;
-      if (Instruction *prev = BB.getTerminator()->getPrevNonDebugInstruction()) {
-        if (auto *call = dyn_cast<CallInst>(prev)) {
-          if (call->isMustTailCall()) {
-            return false;
-          }
-        }
-      }
     }
   }
 
@@ -168,12 +180,48 @@ static Value *castToInt64(Value *value, IRBuilder<> &builder) {
   return value;
 }
 
+static bool isTransparentPrueWrapperOpcode(unsigned opcode) {
+  switch (opcode) {
+  case Instruction::Trunc:
+  case Instruction::ZExt:
+  case Instruction::SExt:
+  case Instruction::BitCast:
+  case Instruction::PtrToInt:
+  case Instruction::IntToPtr:
+  case Instruction::Freeze:
+    return true;
+  default:
+    return false;
+  }
+}
+
+static bool isTransparentPrueWrapper(const Value *value) {
+  auto *op = dyn_cast<Operator>(value);
+  return op && op->getNumOperands() == 1 &&
+         isTransparentPrueWrapperOpcode(op->getOpcode());
+}
+
+static Value *getTransparentPrueOperand(Value *value) {
+  if (!isTransparentPrueWrapper(value)) {
+    return nullptr;
+  }
+  return cast<Operator>(value)->getOperand(0);
+}
+
+static Value *stripTransparentPrueWrappers(Value *value) {
+  while (Value *wrapped = getTransparentPrueOperand(value)) {
+    value = wrapped;
+  }
+  return value;
+}
+
 static Instruction *getPointerInstruction(Value *value) {
   value = value->stripPointerCasts();
   return dyn_cast<Instruction>(value);
 }
 
 static BasicBlock *getDefBlock(Function &function, Value *value) {
+  value = stripTransparentPrueWrappers(value);
   if (auto *inst = dyn_cast<Instruction>(value)) {
     return inst->getParent();
   }
@@ -341,6 +389,7 @@ static StoreInst *createUpdate(BasicBlock *block, GlobalVariable *counter_array,
 }
 
 static bool isZeroValue(Value *value) {
+  value = stripTransparentPrueWrappers(value);
   auto *constant = dyn_cast<ConstantInt>(value);
   return constant && constant->isZero();
 }
@@ -464,25 +513,79 @@ static std::vector<Loop *> getExitLoops(BasicBlock *block, LoopInfo &li) {
   return loops;
 }
 
-static bool collectLoopClosure(Value *root, BasicBlock *update_block,
+static void enqueueLoopClosureValue(Value *value, LoopClosure &closure,
+                                    std::deque<Value *> &worklist) {
+  if (!closure.members.insert(value).second) {
+    return;
+  }
+
+  if (auto *phi = dyn_cast<PHINode>(value)) {
+    closure.phis.push_back(phi);
+  } else if (auto *select = dyn_cast<SelectInst>(value)) {
+    closure.selects.push_back(select);
+  } else if (auto *add = dyn_cast<BinaryOperator>(value)) {
+    if (add->getOpcode() == Instruction::Add) {
+      closure.adds.push_back(add);
+    }
+  } else if (auto *inst = dyn_cast<Instruction>(value)) {
+    if (isTransparentPrueWrapper(inst)) {
+      closure.wrappers.push_back(inst);
+    }
+  }
+
+  worklist.push_back(value);
+}
+
+static bool isClosureValueOrZero(Value *value, const LoopClosure &closure) {
+  return closure.members.count(value) || isZeroValue(value);
+}
+
+static bool collectLoopClosure(const ParsedUpdate &update,
                                FunctionPRUEContext &ctx, LoopClosure &closure) {
   std::deque<Value *> worklist;
-  closure.members.insert(root);
-  worklist.push_back(root);
+  enqueueLoopClosureValue(update.operand, closure, worklist);
 
   while (!worklist.empty()) {
     Value *current = worklist.front();
     worklist.pop_front();
 
     for (User *user : current->users()) {
+      if (user == update.add) {
+        continue;
+      }
+
+      auto *inst = dyn_cast<Instruction>(user);
+      if (!inst) {
+        continue;
+      }
+
       if (auto *phi = dyn_cast<PHINode>(user)) {
-        if (!ctx.pdt.dominates(update_block, phi->getParent())) {
+        if (!ctx.pdt.dominates(update.store->getParent(), phi->getParent())) {
           return false;
         }
-        if (closure.members.insert(phi).second) {
-          closure.phis.push_back(phi);
-          worklist.push_back(phi);
+        enqueueLoopClosureValue(phi, closure, worklist);
+        continue;
+      }
+
+      if (auto *select = dyn_cast<SelectInst>(user)) {
+        if (select->getTrueValue() != current && select->getFalseValue() != current) {
+          continue;
         }
+        if (!ctx.pdt.dominates(update.store->getParent(), select->getParent())) {
+          return false;
+        }
+        enqueueLoopClosureValue(select, closure, worklist);
+        continue;
+      }
+
+      if (isTransparentPrueWrapper(inst)) {
+        if (inst->getOperand(0) != current) {
+          continue;
+        }
+        if (!ctx.pdt.dominates(update.store->getParent(), inst->getParent())) {
+          return false;
+        }
+        enqueueLoopClosureValue(inst, closure, worklist);
         continue;
       }
 
@@ -490,25 +593,26 @@ static bool collectLoopClosure(Value *root, BasicBlock *update_block,
       if (!bin || bin->getOpcode() != Instruction::Add) {
         continue;
       }
-      if (!ctx.pdt.dominates(update_block, bin->getParent())) {
+      if (!ctx.pdt.dominates(update.store->getParent(), bin->getParent())) {
         return false;
       }
-      if (closure.members.insert(bin).second) {
-        closure.adds.push_back(bin);
-        worklist.push_back(bin);
-      }
+      enqueueLoopClosureValue(bin, closure, worklist);
     }
   }
 
   for (PHINode *phi : closure.phis) {
     for (unsigned i = 0; i < phi->getNumIncomingValues(); ++i) {
       Value *incoming = phi->getIncomingValue(i);
-      if (closure.members.count(incoming)) {
+      if (isClosureValueOrZero(incoming, closure)) {
         continue;
       }
-      if (isZeroValue(incoming)) {
-        continue;
-      }
+      return false;
+    }
+  }
+
+  for (SelectInst *select : closure.selects) {
+    if (!isClosureValueOrZero(select->getTrueValue(), closure) ||
+        !isClosureValueOrZero(select->getFalseValue(), closure)) {
       return false;
     }
   }
@@ -548,6 +652,15 @@ static bool getSingleExitingBlock(Loop *loop, BasicBlock *&exiting_block,
   return exiting_block && !outside_succs.empty();
 }
 
+static bool isDefinedOutsideLoop(Value *value, Loop *loop, Function &function) {
+  if (isZeroValue(value)) {
+    return false;
+  }
+
+  BasicBlock *def_block = getDefBlock(function, value);
+  return !def_block || !loop->contains(def_block);
+}
+
 static Value *getExternalOperand(BinaryOperator *add, const LoopClosure &closure) {
   if (closure.members.count(add->getOperand(0))) {
     return add->getOperand(1);
@@ -581,7 +694,7 @@ static bool applyOffload(const ParsedUpdate &update,
   }
 
   LoopClosure closure;
-  if (!collectLoopClosure(update.operand, update.store->getParent(), ctx, closure)) {
+  if (!collectLoopClosure(update, ctx, closure)) {
     return false;
   }
   if (closure.adds.size() != 1) {
@@ -623,13 +736,19 @@ static bool applyOffload(const ParsedUpdate &update,
   for (PHINode *phi : closure.phis) {
     for (unsigned i = 0; i < phi->getNumIncomingValues(); ++i) {
       Value *incoming = phi->getIncomingValue(i);
-      if (closure.members.count(incoming) || isZeroValue(incoming)) {
+      if (!isDefinedOutsideLoop(incoming, selected_loop, ctx.function)) {
         continue;
       }
-      BasicBlock *incoming_def = getDefBlock(ctx.function, incoming);
-      if (!incoming_def || !selected_loop->contains(incoming_def)) {
-        phi->setIncomingValue(i, ConstantInt::get(phi->getType(), 0));
-      }
+      phi->setIncomingValue(i, ConstantInt::get(phi->getType(), 0));
+    }
+  }
+
+  for (SelectInst *select : closure.selects) {
+    if (isDefinedOutsideLoop(select->getTrueValue(), selected_loop, ctx.function)) {
+      select->setTrueValue(ConstantInt::get(select->getType(), 0));
+    }
+    if (isDefinedOutsideLoop(select->getFalseValue(), selected_loop, ctx.function)) {
+      select->setFalseValue(ConstantInt::get(select->getType(), 0));
     }
   }
 
@@ -659,7 +778,7 @@ static bool applyUnpack(const ParsedUpdate &update,
   }
 
   LoopClosure closure;
-  if (!collectLoopClosure(update.operand, update.store->getParent(), ctx, closure)) {
+  if (!collectLoopClosure(update, ctx, closure)) {
     return false;
   }
   if (closure.adds.empty()) {
@@ -687,10 +806,15 @@ static bool applyUnpack(const ParsedUpdate &update,
 
 PreservedAnalyses DeltaCounterPass::run(Module &M, ModuleAnalysisManager &MAM) {
   LLVMContext &ctx = M.getContext();
+  SmallPtrSet<Function *, 8> musttail_functions;
 
   bool prepared_cfg = false;
   for (Function &F : M) {
     if (F.isDeclaration()) {
+      continue;
+    }
+    if (hasMustTailReturn(F)) {
+      musttail_functions.insert(&F);
       continue;
     }
     prepared_cfg |= unifyReturnBlocks(F);
@@ -701,6 +825,9 @@ PreservedAnalyses DeltaCounterPass::run(Module &M, ModuleAnalysisManager &MAM) {
   outfile.open("info.prof");
   for (Function &F : M) {
     if (F.isDeclaration()) {
+      continue;
+    }
+    if (musttail_functions.count(&F)) {
       continue;
     }
     std::vector<Edge> edges = collectAllEdges(F);
@@ -727,6 +854,11 @@ PreservedAnalyses DeltaCounterPass::run(Module &M, ModuleAnalysisManager &MAM) {
 
   for (Function &F : M) {
     if (F.isDeclaration()) {
+      continue;
+    }
+    if (musttail_functions.count(&F)) {
+      // Preserve the paper's single-root PRUE model by skipping functions
+      // whose musttail returns cannot be merged into a unified exit block.
       continue;
     }
     std::vector<Edge> edges = collectAllEdges(F);
