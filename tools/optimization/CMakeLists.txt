@@ -4,46 +4,35 @@ llvm_map_components_to_libnames(LLVM_LINK_COMPONENTS
   Passes
 )
 
-add_executable(lotus-opt lotus-opt.cpp)
-
 set(LOTUS_OPT_COMMON_LIBS
   CanaryMemorySSA
   CanaryLLVMUtils
   SeaDsaAnalysis
-  VerificationTransform
-  VerificationAnalysis
   ${LLVM_LINK_COMPONENTS}
 )
 
-target_link_libraries(lotus-opt PRIVATE ${LOTUS_OPT_COMMON_LIBS})
+set(LOTUS_PREFETCH_COMMON_LIBS
+  CanaryLLVMUtils
+  ${LLVM_LINK_COMPONENTS}
+)
 
-if(APPLE)
-  # On macOS, use -force_load to ensure all symbols are included
-  # Explicitly add dependencies to ensure pass libraries are built first
-  target_link_libraries(lotus-opt PRIVATE
-    CanaryOptimizationScalar
-    CanaryOptimizationIPO
-    CanaryOptimizationPipeline
-    CanarySWPrefetching
-  )
-  target_link_options(lotus-opt PRIVATE
-    -Wl,-force_load,$<TARGET_FILE:CanaryOptimizationScalar>
-    -Wl,-force_load,$<TARGET_FILE:CanaryOptimizationIPO>
-    -Wl,-force_load,$<TARGET_FILE:CanaryOptimizationPipeline>
-    -Wl,-force_load,$<TARGET_FILE:CanarySWPrefetching>
-  )
-else()
-  # On Linux, use --whole-archive
-  target_link_options(lotus-opt PRIVATE
-    -Wl,--whole-archive
-  )
-  target_link_libraries(lotus-opt PRIVATE
-    CanaryOptimizationScalar
-    CanaryOptimizationIPO
-    CanaryOptimizationPipeline
-    CanarySWPrefetching
-  )
-  target_link_options(lotus-opt PRIVATE
-    -Wl,--no-whole-archive
-  )
-endif()
+function(configure_force_load target library)
+  if(APPLE)
+    target_link_libraries(${target} PRIVATE ${library})
+    target_link_options(${target} PRIVATE
+      -Wl,-force_load,$<TARGET_FILE:${library}>
+    )
+  else()
+    target_link_options(${target} PRIVATE -Wl,--whole-archive)
+    target_link_libraries(${target} PRIVATE ${library})
+    target_link_options(${target} PRIVATE -Wl,--no-whole-archive)
+  endif()
+endfunction()
+
+add_executable(lotus-ipo lotus-ipo.cpp)
+target_link_libraries(lotus-ipo PRIVATE ${LOTUS_OPT_COMMON_LIBS})
+configure_force_load(lotus-ipo CanaryOptimizationIPO)
+
+add_executable(lotus-prefetch lotus-prefetch.cpp)
+target_link_libraries(lotus-prefetch PRIVATE ${LOTUS_PREFETCH_COMMON_LIBS})
+configure_force_load(lotus-prefetch CanarySWPrefetching)

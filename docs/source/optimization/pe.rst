@@ -13,7 +13,7 @@ Overview
 This subsystem contains the historical LLPE code used for aggressive
 specialization, symbolic execution style reasoning, and partial evaluation over
 LLVM IR. It is a large internal subsystem and is not currently surfaced through
-the main ``lotus-opt`` front-end.
+the ``lotus-ipo`` or ``lotus-prefetch`` frontends.
 
 Main components
 ---------------
@@ -30,4 +30,4 @@ Notes
 
 The PE subsystem is primarily infrastructure code. If you are looking for
 front-end optimization passes exposed as stable tools, start with
-:doc:`index` and :doc:`swprefetching`.
+:doc:`index` and :doc:`../tools/optimization/index`.

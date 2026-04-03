@@ -1,7 +1,6 @@
 # Optimization tools
 
-This directory contains command-line frontends for optimization and
-verification-oriented transformation passes.
+This directory contains command-line frontends for Lotus optimization passes.
 
 ## Build
 
@@ -10,58 +9,72 @@ cmake -S . -B build -DCMAKE_BUILD_TYPE=Debug
 cmake --build build -j
 ```
 
-The binary is written to `build/bin/lotus-opt`.
+The binaries are written to `build/bin/`.
 
 ## Tool
 
 | Tool | Purpose | Notes |
 | --- | --- | --- |
-| `lotus-opt` | Driver for Lotus optimization and transformation passes | Combines interprocedural optimizations, canonicalization, instrumentation, and verifier-oriented preprocessing passes. |
+| `lotus-ipo` | Driver for Lotus interprocedural IPO passes | Runs the MemorySSA/ShadowMem-backed passes in `lib/Optimization/IPO`. |
+| `lotus-prefetch` | Driver for Lotus software prefetch passes | Runs the software prefetching pass in `lib/Optimization/Prefetch`. |
 
 ## Input and output
 
-`lotus-opt` consumes LLVM bitcode or textual IR and writes either bitcode or
-LLVM assembly.
+The optimization tools consume LLVM bitcode or textual IR and write either
+bitcode or LLVM assembly.
 
 ```bash
 clang -emit-llvm -c test.c -o test.bc
-build/bin/lotus-opt test.bc -o out.bc
-build/bin/lotus-opt test.bc -S -o out.ll
+build/bin/lotus-ipo test.bc -o out.bc
+build/bin/lotus-ipo test.bc -S -o out.ll
+build/bin/lotus-prefetch test.bc -S -o prefetch.ll
 ```
 
-## Major pass groups
+## IPO passes
 
-- Interprocedural optimization: `--ip-all`, `--ainline`, `--ipdse`,
-  `--ip-rle`, `--ip-sink`, `--ip-forward`.
-- Verifier preparation: `--prep-overflows`, `--delete-undefined`,
-  `--remove-error-calls`, `--rename-verifier-funs`,
-  `--replace-verifier-atomic`.
-- Memory and allocation instrumentation: `--instrument-alloc`,
-  `--instrument-alloc-nf`, `--replace-lifetime-markers`, `--init-uninit`.
-- Loop and CFG normalization: `--break-crit-loops`, `--flatten-loops`,
-  `--remove-infinite-loops`, `--break-infinite-loops`, `--lotus-loop-unroll`.
-- Inspection utilities: `--classify-instructions`, `--classify-loops`,
-  `--count-instr`, `--check-module`, `--get-test-targets`.
+- `--ip-all` enables every IPO pass.
+- `--ipdse` runs interprocedural dead store elimination.
+- `--ip-rle` runs interprocedural redundant load elimination.
+- `--ip-sink` runs interprocedural store sinking.
+- `--ip-forward` runs interprocedural store-to-load forwarding.
+
+## Prefetch pass
+
+- `lotus-prefetch` always runs `SWPrefetchingLLVMPass`.
+- Prefetch-distance selection is controlled by the pass-level flags already
+  declared in `lib/Optimization/Prefetch`, such as `--prefetch-distance-provider`,
+  `--profile`, `--dist`, and `--llm-dist`.
+- When `--prefetch-distance-provider=profile` is used, pass a sample-profile
+  file with `--profile=<file>`.
 
 ## Examples
 
 ```bash
 # Run the full interprocedural optimization bundle
-build/bin/lotus-opt test.bc --ip-all -o opt.bc
+build/bin/lotus-ipo test.bc --ip-all -o opt.bc
 
-# Prepare code for downstream verification
-build/bin/lotus-opt test.bc \
-  --prep-overflows \
-  --delete-undefined \
-  --remove-error-calls \
-  -o prep.bc
+# Run a selected subset of IPO passes
+build/bin/lotus-ipo test.bc \
+  --ipdse \
+  --ip-forward \
+  -o opt-subset.bc
 
-# Collect module statistics without rewriting the program
-build/bin/lotus-opt test.bc --count-instr --classify-loops
+# Run software prefetching with explicit LBR distances
+build/bin/lotus-prefetch test.bc \
+  --prefetch-distance-provider=lbr \
+  --dist=32 \
+  -o prefetch.bc
+
+# Run profile-guided software prefetching
+build/bin/lotus-prefetch test.bc \
+  --prefetch-distance-provider=profile \
+  --profile=perf.prof \
+  -o prefetch-profile.bc
 ```
 
 ## Related documentation
 
 - `lib/Optimization/README.md` documents the optimization libraries.
-- `lib/Transform/README.md` documents transformation infrastructure used by
-  several `lotus-opt` passes.
+- `lib/Optimization/IPO/README.md` documents the passes exposed by `lotus-ipo`.
+- `lib/Optimization/Prefetch/` contains the software prefetching implementation
+  used by `lotus-prefetch`.

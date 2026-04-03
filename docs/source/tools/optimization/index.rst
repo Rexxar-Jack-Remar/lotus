@@ -11,6 +11,4 @@ This section documents optimization-related command-line tools under
    :maxdepth: 1
 
    interprocedural
-
-No optimization tools are registered yet. New frontends should live in this
-subdirectory and be added to ``tools/optimization/CMakeLists.txt``.
+   prefetch
