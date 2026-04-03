@@ -65,6 +65,16 @@ bool registerPipeline(StringRef Name, ModulePassManager &MPM,
     return true;
   }
 
+  if (Name == "prue-delta") {
+    MPM.addPass(nisse::DeltaCounterPass());
+    return true;
+  }
+
+  if (Name == "prue") {
+    MPM.addPass(nisse::PruePass());
+    return true;
+  }
+
   return false;
 }
 /// \brief Registers the plugins for the pipelines
@@ -83,6 +93,16 @@ PassPluginLibraryInfo getNissePluginInfo() {
             // that it can be used when specifying pass pipelines with
             // "-passes=". Also register NissePass as "add-const".
             PB.registerPipelineParsingCallback(registerPipeline);
+
+            PB.registerPipelineStartEPCallback(
+                [](ModulePassManager &MPM, OptimizationLevel Level) {
+                  MPM.addPass(nisse::DeltaCounterPass());
+                });
+
+            PB.registerOptimizerLastEPCallback(
+                [](ModulePassManager &MPM, OptimizationLevel Level) {
+                  MPM.addPass(nisse::PruePass());
+                });
           }};
 }
 

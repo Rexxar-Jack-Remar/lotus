@@ -83,6 +83,12 @@ add_lotus_analysis_test(context_sensitive_nullcheck_analysis_test
                ContextSensitiveNullCheckAnalysisTest.cpp)
 add_lotus_spectre_test(spectre_analysis_test SpectreAnalysisTest.cpp)
 add_lotus_crypto_test(crypto_analysis_test CryptoAnalysisTest.cpp)
+add_lotus_targeted_test(prue_pass_test
+               PruePassTest.cpp
+               LINK_LIBS
+                   CanaryNisse
+                   LLVMAnalysis
+                   LLVMTransformUtils)
 add_lotus_targeted_test(loop_analysis_foundation_test
                LoopAnalysisFoundationTest.cpp
                LINK_LIBS

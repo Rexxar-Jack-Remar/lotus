@@ -77,7 +77,7 @@ void Edge::insertSimpleIncrFn(int i, Value *inst) {
   builder.CreateStore(inst3, inst1);
 }
 
-Value *Edge::createInt32Cast(llvm::Value *inst, IRBuilder<> &builder) {
+Value *Edge::createInt32Cast(llvm::Value *inst, IRBuilder<> &builder) const {
   Type *int32Ty = builder.getInt32Ty();
   auto *ty = inst->getType();
   if (ty == int32Ty)
@@ -91,7 +91,7 @@ Value *Edge::createInt32Cast(llvm::Value *inst, IRBuilder<> &builder) {
   return inst;
 }
 
-Value *Edge::createInt64Cast(llvm::Value *inst, IRBuilder<> &builder) {
+Value *Edge::createInt64Cast(llvm::Value *inst, IRBuilder<> &builder) const {
   Type *int64Ty = builder.getInt64Ty();
   auto *ty = inst->getType();
   if (ty == int64Ty)
@@ -146,6 +146,38 @@ void Edge::insertIncrFn(int i, Value *inst) {
   } else {
     this->insertSimpleIncrFn(i, inst);
   }
+}
+
+void Edge::insertDeltaIncrFn(Value *inst) const {
+  auto *instruction = this->getInstrumentationPoint();
+  IRBuilder<> builder(instruction);
+  Type *int64Ty = builder.getInt64Ty();
+
+  auto *slot = builder.CreatePointerCast(inst, int64Ty->getPointerTo());
+  auto *current = builder.CreateLoad(int64Ty, slot);
+
+  Value *increment = builder.getInt64(1);
+  if (this->flagSESE) {
+    auto *indVarCast = this->createInt64Cast(indVar, builder);
+    auto *initValueCast = this->createInt64Cast(initValue, builder);
+    switch (static_cast<int>(incrValue)) {
+    case 1:
+      increment = builder.CreateSub(indVarCast, initValueCast);
+      break;
+    case -1:
+      increment = builder.CreateSub(initValueCast, indVarCast);
+      break;
+    default: {
+      auto *step = builder.getInt64(static_cast<int64_t>(incrValue));
+      auto *distance = builder.CreateSub(indVarCast, initValueCast);
+      increment = builder.CreateSDiv(distance, step);
+      break;
+    }
+    }
+  }
+
+  auto *updated = builder.CreateAdd(current, increment);
+  builder.CreateStore(updated, slot);
 }
 
 int Edge::getIndex() const { return this->index; }

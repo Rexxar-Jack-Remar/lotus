@@ -74,13 +74,15 @@ private:
   /// \param inst The value to cast.
   /// \param builder The builder where to insert the cast.
   /// \return The casted value.
-  llvm::Value *createInt32Cast(llvm::Value *inst, llvm::IRBuilder<> &builder);
+  llvm::Value *createInt32Cast(llvm::Value *inst,
+                               llvm::IRBuilder<> &builder) const;
 
   /// \brief Casts a value to i64.
   /// \param inst The value to cast.
   /// \param builder The builder where to insert the cast.
   /// \return The casted value.
-  llvm::Value *createInt64Cast(llvm::Value *inst, llvm::IRBuilder<> &builder);
+  llvm::Value *createInt64Cast(llvm::Value *inst,
+                               llvm::IRBuilder<> &builder) const;
 
   /// \brief Computes the hook to insert the KS counter.
   /// If the source block terminates with an absolute jump, the counter is
@@ -126,6 +128,10 @@ public:
   /// \param i The index of the array to increment.
   /// \param inst The instruction to the counter-array.
   void insertIncrFn(int i, llvm::Value *inst);
+
+  /// \brief Instruments the edge into a scalar local delta counter.
+  /// \param inst Pointer to the local counter slot.
+  void insertDeltaIncrFn(llvm::Value *inst) const;
 
   /// \brief Getter for the edge's index.
   /// \return the edge's index.
@@ -357,6 +363,28 @@ public:
   /// given as argument for KS edge instrumentation.
   /// \param F The function to transform.
   /// \param FAM The current FunctionAnalysisManager.
+  llvm::PreservedAnalyses run(llvm::Module &M,
+                              llvm::ModuleAnalysisManager &MAM);
+};
+
+/// \brief Instruments a function with local delta counters and delayed
+/// updates, enabling a later PRUE rewrite.
+struct DeltaCounterPass : public NissePass {
+private:
+  llvm::GlobalVariable *CounterArray = nullptr;
+  llvm::GlobalVariable *IndexArray = nullptr;
+  int NumEdges = 0;
+  int Offset = 0;
+  std::ofstream outfile;
+
+public:
+  llvm::PreservedAnalyses run(llvm::Module &M,
+                              llvm::ModuleAnalysisManager &MAM);
+};
+
+/// \brief Rewrites delayed counter updates to eliminate partially redundant
+/// zero-valued updates after optimization.
+struct PruePass : public llvm::PassInfoMixin<PruePass> {
   llvm::PreservedAnalyses run(llvm::Module &M,
                               llvm::ModuleAnalysisManager &MAM);
 };
