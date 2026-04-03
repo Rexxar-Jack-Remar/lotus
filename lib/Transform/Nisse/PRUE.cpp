@@ -16,6 +16,7 @@
 #include "llvm/IR/Dominators.h"
 #include "llvm/IR/InstIterator.h"
 #include "llvm/IR/Instructions.h"
+#include "llvm/IR/IntrinsicInst.h"
 #include "llvm/IR/Operator.h"
 #include "llvm/Transforms/Utils/BasicBlockUtils.h"
 
@@ -422,7 +423,7 @@ static BasicBlock *findRelocationTarget(const ParsedUpdate &update,
   return candidate;
 }
 
-static bool canSplitPhi(const ParsedUpdate &update, Function &function) {
+static bool canSplitPhi(const ParsedUpdate &update) {
   auto *phi = dyn_cast<PHINode>(update.operand);
   if (!phi || phi->getParent() != update.store->getParent()) {
     return false;
@@ -432,15 +433,6 @@ static bool canSplitPhi(const ParsedUpdate &update, Function &function) {
     Value *incoming = phi->getIncomingValue(i);
     if (incoming == phi) {
       return false;
-    }
-    if (auto *inst = dyn_cast<Instruction>(incoming)) {
-      if (inst->getParent() == &function.getEntryBlock() &&
-          isa<PHINode>(inst)) {
-        return false;
-      }
-      if (inst->getParent() == phi->getParent()) {
-        return false;
-      }
     }
   }
   return true;
@@ -452,7 +444,7 @@ static bool applySplit(const ParsedUpdate &update, std::deque<UpdateTask> &workl
   if (!phi || phi->getParent() != update.store->getParent()) {
     return false;
   }
-  if (!canSplitPhi(update, ctx.function)) {
+  if (!canSplitPhi(update)) {
     return false;
   }
 
@@ -538,6 +530,26 @@ static void enqueueLoopClosureValue(Value *value, LoopClosure &closure,
 
 static bool isClosureValueOrZero(Value *value, const LoopClosure &closure) {
   return closure.members.count(value) || isZeroValue(value);
+}
+
+static bool isIgnorableClosureUser(const User *user) {
+  auto *inst = dyn_cast<Instruction>(user);
+  return isa_and_nonnull<DbgInfoIntrinsic>(inst);
+}
+
+static bool hasOnlyPrueClosureUsers(const ParsedUpdate &update,
+                                    const LoopClosure &closure) {
+  for (Value *member : closure.members) {
+    for (User *user : member->users()) {
+      if (user == update.add || closure.members.count(user) ||
+          isIgnorableClosureUser(user)) {
+        continue;
+      }
+      return false;
+    }
+  }
+
+  return true;
 }
 
 static bool collectLoopClosure(const ParsedUpdate &update,
@@ -668,24 +680,6 @@ static Value *getExternalOperand(BinaryOperator *add, const LoopClosure &closure
   return add->getOperand(0);
 }
 
-static bool arePairwiseUnreachable(ArrayRef<BinaryOperator *> adds,
-                                   FunctionPRUEContext &ctx) {
-  for (size_t i = 0; i < adds.size(); ++i) {
-    for (size_t j = i + 1; j < adds.size(); ++j) {
-      BasicBlock *lhs = adds[i]->getParent();
-      BasicBlock *rhs = adds[j]->getParent();
-      if (lhs == rhs) {
-        return false;
-      }
-      if (isPotentiallyReachable(lhs, rhs, nullptr, &ctx.dt, &ctx.li) ||
-          isPotentiallyReachable(rhs, lhs, nullptr, &ctx.dt, &ctx.li)) {
-        return false;
-      }
-    }
-  }
-  return true;
-}
-
 static bool applyOffload(const ParsedUpdate &update,
                          std::deque<UpdateTask> &worklist,
                          FunctionPRUEContext &ctx) {
@@ -695,6 +689,9 @@ static bool applyOffload(const ParsedUpdate &update,
 
   LoopClosure closure;
   if (!collectLoopClosure(update, ctx, closure)) {
+    return false;
+  }
+  if (!hasOnlyPrueClosureUsers(update, closure)) {
     return false;
   }
   if (closure.adds.size() != 1) {
@@ -752,18 +749,19 @@ static bool applyOffload(const ParsedUpdate &update,
     }
   }
 
-  eraseUpdate(update);
-
+  SmallVector<UpdateTask, 4> new_tasks;
   for (BasicBlock *outside_succ : selected_outside_succs) {
     BasicBlock *dedicated_exit =
         SplitEdge(selected_exiting_block, outside_succ, &ctx.dt, &ctx.li);
     StoreInst *store =
         createUpdate(dedicated_exit, update.counter_array, update.counter_index,
                      x_plus, false);
-    UpdateTask subtask;
-    subtask.store = store;
-    subtask.counter_array = update.counter_array;
-    subtask.counter_index = update.counter_index;
+    new_tasks.push_back(
+        UpdateTask{store, update.counter_array, update.counter_index});
+  }
+
+  eraseUpdate(update);
+  for (const UpdateTask &subtask : new_tasks) {
     worklist.push_back(subtask);
   }
   ctx.recalculate();
@@ -784,19 +782,18 @@ static bool applyUnpack(const ParsedUpdate &update,
   if (closure.adds.empty()) {
     return false;
   }
-  if (!arePairwiseUnreachable(closure.adds, ctx)) {
-    return false;
-  }
 
-  eraseUpdate(update);
+  SmallVector<UpdateTask, 4> new_tasks;
   for (BinaryOperator *add : closure.adds) {
     StoreInst *store =
         createUpdate(add->getParent(), update.counter_array, update.counter_index,
                      getExternalOperand(add, closure), false);
-    UpdateTask subtask;
-    subtask.store = store;
-    subtask.counter_array = update.counter_array;
-    subtask.counter_index = update.counter_index;
+    new_tasks.push_back(
+        UpdateTask{store, update.counter_array, update.counter_index});
+  }
+
+  eraseUpdate(update);
+  for (const UpdateTask &subtask : new_tasks) {
     worklist.push_back(subtask);
   }
   return true;

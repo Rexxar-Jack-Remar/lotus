@@ -7,4 +7,4 @@ using EZ3 = ZContext<ExprToZ, ZToExpr>;
 #else
 using EZ3 = ZContext<ExprToZ, ZToExprNoRec>;
 #endif
-}
+} // namespace seahorn

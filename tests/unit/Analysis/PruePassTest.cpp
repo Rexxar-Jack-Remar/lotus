@@ -260,6 +260,41 @@ TEST(PruePassTest, SplitsPhiUpdateAndEliminatesZeroArm) {
   EXPECT_FALSE(hasStoreInBlock(*function, "exit", "prue-counter-array"));
 }
 
+TEST(PruePassTest, SplitsLoopPhiWithSameBlockBackedgeValue) {
+  LLVMContext context;
+  auto module = parseModuleChecked(context, R"(
+    @prue-counter-array = global [1 x i64] zeroinitializer
+
+    define void @split_loop_phi(i1 %again) {
+    entry:
+      br label %loop
+
+    loop:
+      %d = phi i64 [ 0, %entry ], [ %next, %loop ]
+      %ptr = getelementptr inbounds [1 x i64], [1 x i64]* @prue-counter-array,
+                                     i64 0, i64 0
+      %old = load i64, i64* %ptr
+      %new = add i64 %old, %d
+      store i64 %new, i64* %ptr, !nisse.prue.update !0
+      %next = add i64 %d, 1
+      br i1 %again, label %loop, label %exit
+
+    exit:
+      ret void
+    }
+
+    !0 = !{i64 0}
+  )");
+  ASSERT_NE(module, nullptr);
+
+  runPruePass(*module);
+
+  Function *function = module->getFunction("split_loop_phi");
+  ASSERT_NE(function, nullptr);
+  EXPECT_EQ(countStoresToGlobal(*function, "prue-counter-array"), 1u);
+  EXPECT_FALSE(hasStoreInBlock(*function, "loop", "prue-counter-array"));
+}
+
 TEST(PruePassTest, RelocatesUpdateToDefinitionBlock) {
   LLVMContext context;
   auto module = parseModuleChecked(context, R"(
@@ -412,6 +447,176 @@ TEST(PruePassTest, OffloadsSelectBasedLoopClosure) {
   auto *true_value = dyn_cast<ConstantInt>(picked->getTrueValue());
   ASSERT_NE(true_value, nullptr);
   EXPECT_TRUE(true_value->isZero());
+}
+
+TEST(PruePassTest, OffloadRefusesSharedLoopClosureValues) {
+  LLVMContext context;
+  auto module = parseModuleChecked(context, R"(
+    declare void @observe(i64)
+    @prue-counter-array = global [1 x i64] zeroinitializer
+
+    define void @offload_shared_loop_value(i1 %enter_inner, i1 %continue_inner,
+                                           i1 %continue_outer) {
+    entry:
+      br label %outer.header
+
+    outer.header:
+      %d1 = phi i64 [ 0, %entry ], [ %d4.f, %outer.latch ]
+      br label %outer.body
+
+    outer.body:
+      %d1.tr = trunc i64 %d1 to i32
+      %d1.z = zext i32 %d1.tr to i64
+      br i1 %enter_inner, label %inner.header, label %outer.latch
+
+    inner.header:
+      %d2 = phi i64 [ %d1.z, %outer.body ], [ %d3, %inner.body ]
+      br label %inner.body
+
+    inner.body:
+      call void @observe(i64 %d2)
+      %d2.f = freeze i64 %d2
+      %d3 = add i64 %d2.f, 1
+      br i1 %continue_inner, label %inner.header, label %outer.latch
+
+    outer.latch:
+      %d4 = phi i64 [ %d1, %outer.body ], [ %d3, %inner.body ]
+      %d4.f = freeze i64 %d4
+      %ptr = getelementptr inbounds [1 x i64], [1 x i64]* @prue-counter-array,
+                                     i64 0, i64 0
+      %old = load i64, i64* %ptr
+      %new = add i64 %old, %d4.f
+      store i64 %new, i64* %ptr, !nisse.prue.update !0
+      br i1 %continue_outer, label %outer.header, label %exit
+
+    exit:
+      ret void
+    }
+
+    !0 = !{i64 0}
+  )");
+  ASSERT_NE(module, nullptr);
+
+  runPruePass(*module);
+
+  Function *function = module->getFunction("offload_shared_loop_value");
+  ASSERT_NE(function, nullptr);
+  EXPECT_EQ(countStoresToGlobal(*function, "prue-counter-array"), 1u);
+  EXPECT_TRUE(hasStoreInBlock(*function, "inner.body", "prue-counter-array"));
+
+  auto *d2 = dyn_cast<PHINode>(getInstructionByName(*function, "d2"));
+  ASSERT_NE(d2, nullptr);
+  BasicBlock *outer_body = getBlockByName(*function, "outer.body");
+  ASSERT_NE(outer_body, nullptr);
+  EXPECT_FALSE(isa<ConstantInt>(d2->getIncomingValueForBlock(outer_body)));
+}
+
+TEST(PruePassTest, UnpacksReachableAddChainInsideLoopClosure) {
+  LLVMContext context;
+  auto module = parseModuleChecked(context, R"(
+    @prue-counter-array = global [1 x i64] zeroinitializer
+
+    define void @unpack_reachable_adds(i1 %enter_inner, i1 %continue_inner,
+                                       i1 %continue_outer) {
+    entry:
+      br label %outer.header
+
+    outer.header:
+      %d1 = phi i64 [ 0, %entry ], [ %d4.f, %outer.latch ]
+      br label %outer.body
+
+    outer.body:
+      br i1 %enter_inner, label %inner.header, label %outer.latch
+
+    inner.header:
+      %d2 = phi i64 [ %d1, %outer.body ], [ %d3, %inner.body ]
+      br label %inner.body
+
+    inner.body:
+      %step1 = add i64 %d2, 1
+      %d3 = add i64 %step1, 2
+      br i1 %continue_inner, label %inner.header, label %outer.latch
+
+    outer.latch:
+      %d4 = phi i64 [ %d1, %outer.body ], [ %d3, %inner.body ]
+      %d4.f = freeze i64 %d4
+      %ptr = getelementptr inbounds [1 x i64], [1 x i64]* @prue-counter-array,
+                                     i64 0, i64 0
+      %old = load i64, i64* %ptr
+      %new = add i64 %old, %d4.f
+      store i64 %new, i64* %ptr, !nisse.prue.update !0
+      br i1 %continue_outer, label %outer.header, label %exit
+
+    exit:
+      ret void
+    }
+
+    !0 = !{i64 0}
+  )");
+  ASSERT_NE(module, nullptr);
+
+  runPruePass(*module);
+
+  Function *function = module->getFunction("unpack_reachable_adds");
+  ASSERT_NE(function, nullptr);
+  EXPECT_EQ(countStoresToGlobal(*function, "prue-counter-array"), 2u);
+  EXPECT_FALSE(hasStoreInBlock(*function, "outer.latch", "prue-counter-array"));
+  EXPECT_TRUE(hasStoreInBlock(*function, "inner.body", "prue-counter-array"));
+}
+
+TEST(PruePassTest, UnpackAllowsSharedLoopClosureValues) {
+  LLVMContext context;
+  auto module = parseModuleChecked(context, R"(
+    declare void @observe(i64)
+    @prue-counter-array = global [1 x i64] zeroinitializer
+
+    define void @unpack_shared_loop_value(i1 %enter_inner, i1 %continue_inner,
+                                          i1 %continue_outer) {
+    entry:
+      br label %outer.header
+
+    outer.header:
+      %d1 = phi i64 [ 0, %entry ], [ %d4.f, %outer.latch ]
+      br label %outer.body
+
+    outer.body:
+      br i1 %enter_inner, label %inner.header, label %outer.latch
+
+    inner.header:
+      %d2 = phi i64 [ %d1, %outer.body ], [ %d3, %inner.body ]
+      br label %inner.body
+
+    inner.body:
+      call void @observe(i64 %d2)
+      %step1 = add i64 %d2, 1
+      %d3 = add i64 %step1, 2
+      br i1 %continue_inner, label %inner.header, label %outer.latch
+
+    outer.latch:
+      %d4 = phi i64 [ %d1, %outer.body ], [ %d3, %inner.body ]
+      %d4.f = freeze i64 %d4
+      %ptr = getelementptr inbounds [1 x i64], [1 x i64]* @prue-counter-array,
+                                     i64 0, i64 0
+      %old = load i64, i64* %ptr
+      %new = add i64 %old, %d4.f
+      store i64 %new, i64* %ptr, !nisse.prue.update !0
+      br i1 %continue_outer, label %outer.header, label %exit
+
+    exit:
+      ret void
+    }
+
+    !0 = !{i64 0}
+  )");
+  ASSERT_NE(module, nullptr);
+
+  runPruePass(*module);
+
+  Function *function = module->getFunction("unpack_shared_loop_value");
+  ASSERT_NE(function, nullptr);
+  EXPECT_EQ(countStoresToGlobal(*function, "prue-counter-array"), 2u);
+  EXPECT_FALSE(hasStoreInBlock(*function, "outer.latch", "prue-counter-array"));
+  EXPECT_TRUE(hasStoreInBlock(*function, "inner.body", "prue-counter-array"));
 }
 
 TEST(PruePassTest, LeavesNonAddLoopClosureUnchanged) {

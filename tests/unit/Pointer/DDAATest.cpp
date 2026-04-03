@@ -487,6 +487,74 @@ TEST_F(DDAATest, FlowDDARecursionInfoSurvivesPartialIndirectRefinement) {
   EXPECT_TRUE(flow.isRecursiveFunction(D));
 }
 
+TEST_F(DDAATest, CalleeEntryQueryRefinesMemoryNeutralIndirectCaller) {
+  const char *source = R"(
+    define void @target(i8* %p) {
+    entry:
+      ret void
+    }
+
+    define void @apply(void (i8*)* %fp, i8* %arg) {
+    entry:
+      call void %fp(i8* %arg)
+      ret void
+    }
+
+    define i32 @main() {
+    entry:
+      %x = alloca i8
+      call void @apply(void (i8*)* @target, i8* %x)
+      ret i32 0
+    }
+  )";
+
+  auto module = parseModule(source);
+  ASSERT_NE(module, nullptr);
+
+  FlowDDA flow;
+  ASSERT_TRUE(flow.run(*module));
+  ASSERT_NE(flow.getSVFG(), nullptr);
+
+  const Function *target = module->getFunction("target");
+  const Function *apply = module->getFunction("apply");
+  const Function *mainFn = module->getFunction("main");
+  ASSERT_NE(target, nullptr);
+  ASSERT_NE(apply, nullptr);
+  ASSERT_NE(mainFn, nullptr);
+
+  const CallBase *indirectCall = nullptr;
+  const AllocaInst *x = nullptr;
+  for (const BasicBlock &BB : *apply) {
+    for (const Instruction &I : BB) {
+      if (const auto *CB = dyn_cast<CallBase>(&I)) {
+        if (!CB->getCalledFunction())
+          indirectCall = CB;
+      }
+    }
+  }
+  for (const BasicBlock &BB : *mainFn) {
+    for (const Instruction &I : BB) {
+      if (const auto *AI = dyn_cast<AllocaInst>(&I))
+        x = AI;
+    }
+  }
+  ASSERT_NE(indirectCall, nullptr);
+  ASSERT_NE(x, nullptr);
+
+  const Argument *formalArg =
+      target->arg_empty() ? nullptr : &*target->arg_begin();
+  ASSERT_NE(formalArg, nullptr);
+
+  const auto &indCallers = flow.getSVFG()->getIndCallSitesInvokingCallee(target);
+  EXPECT_TRUE(indCallers.count(indirectCall) != 0);
+
+  std::vector<const Value *> ptsSet;
+  FlowDDA::PtsSet rawPts = flow.getPointsTo(formalArg);
+  ASSERT_FALSE(rawPts.empty());
+  ASSERT_TRUE(flow.getPointsToSet(formalArg, ptsSet));
+  EXPECT_TRUE(pointsToSetContains(ptsSet, x));
+}
+
 TEST_F(DDAATest, SVFGSCCSkipsInsensitiveCallRetEdges) {
   auto graph = std::make_unique<SVFG>();
   auto *n1 = new CopySVFGNode(1, nullptr, nullptr);

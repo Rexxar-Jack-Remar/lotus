@@ -266,6 +266,81 @@ TEST_F(SVFGSerializerTest, RoundTripsInterPhiOperands) {
   EXPECT_EQ(reloadedInterPhiOperandCounts, originalInterPhiOperandCounts);
 }
 
+TEST_F(SVFGSerializerTest, SVFGOPTBuildAndWriteSerializesFullGraph) {
+  const char *source = R"(
+    define i8* @id(i8* %p) {
+    entry:
+      ret i8* %p
+    }
+
+    define i32 @main() {
+    entry:
+      %x = alloca i8
+      %r = call i8* @id(i8* %x)
+      ret i32 0
+    }
+  )";
+
+  auto module = parseModule(source);
+  ASSERT_NE(module, nullptr);
+
+  ICFG icfg;
+  ICFGBuilder icfgBuilder(&icfg);
+  icfgBuilder.build(module.get());
+
+  SVFGBuilderConfig cfg;
+  cfg.usePointerAnalysis = false;
+  cfg.buildMSSA = true;
+
+  SVFGBuilder builder(cfg);
+  std::unique_ptr<SVFG> graph(builder.build(&icfg));
+  ASSERT_NE(graph, nullptr);
+
+  bool sawFormalParmBefore = false;
+  bool sawActualRetBefore = false;
+  for (const auto &pair : *graph) {
+    sawFormalParmBefore = sawFormalParmBefore || isa<FormalParmSVFGNode>(pair.second);
+    sawActualRetBefore = sawActualRetBefore || isa<ActualRetSVFGNode>(pair.second);
+    ASSERT_FALSE(isa<InterPhiSVFGNode>(pair.second));
+  }
+  ASSERT_TRUE(sawFormalParmBefore);
+  ASSERT_TRUE(sawActualRetBefore);
+
+  SVFGOPT optimized;
+  optimized.swapWith(*graph);
+
+  SmallString<256> path;
+  int fd = -1;
+  ASSERT_FALSE(
+      sys::fs::createTemporaryFile("svfgopt-full-write", "txt", fd, path));
+  ::close(fd);
+
+  optimized.buildAndWrite(path.str().str());
+
+  bool optimizedHasInterPhi = false;
+  for (const auto &pair : optimized)
+    optimizedHasInterPhi = optimizedHasInterPhi || isa<InterPhiSVFGNode>(pair.second);
+  EXPECT_TRUE(optimizedHasInterPhi);
+
+  SVFG reloaded;
+  reloaded.setICFG(&icfg);
+  ASSERT_TRUE(reloaded.readFromFile(path.str().str()));
+  sys::fs::remove(path);
+
+  bool reloadedHasFormalParm = false;
+  bool reloadedHasActualRet = false;
+  bool reloadedHasInterPhi = false;
+  for (const auto &pair : reloaded) {
+    reloadedHasFormalParm = reloadedHasFormalParm || isa<FormalParmSVFGNode>(pair.second);
+    reloadedHasActualRet = reloadedHasActualRet || isa<ActualRetSVFGNode>(pair.second);
+    reloadedHasInterPhi = reloadedHasInterPhi || isa<InterPhiSVFGNode>(pair.second);
+  }
+
+  EXPECT_TRUE(reloadedHasFormalParm);
+  EXPECT_TRUE(reloadedHasActualRet);
+  EXPECT_FALSE(reloadedHasInterPhi);
+}
+
 TEST_F(SVFGSerializerTest, SVFGOPTKeepsSelfCyclesByDefault) {
   auto graph = std::make_unique<SVFG>();
   auto *phi = new IntraMSSAPhiSVFGNode(1, nullptr, 1, 1, SVFGNodeBS{1});

@@ -431,6 +431,7 @@ private:
   void runPointerAnalysis();
   void buildNodes();
   void buildEdges();
+  void initializeIndirectCallReverseIndex();
   void buildMemorySSA();
   void buildMemoryPHINodes();
   void buildInterproceduralMemoryPHINodes();

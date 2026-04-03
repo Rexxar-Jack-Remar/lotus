@@ -228,6 +228,36 @@ filterCalleesByICFG(const ICFG *icfg, const CallBase *call,
   return filtered.empty() ? ptaCallees : filtered;
 }
 
+void SVFGBuilder::initializeIndirectCallReverseIndex() {
+  if (!svfg || !config.usePointerAnalysis || !ptaSolverWrapper ||
+      !ptaSolverWrapper->solver || !icfg)
+    return;
+
+  const Module *M = getModuleFromICFG(icfg);
+  if (!M)
+    return;
+
+  for (const Function &F : *M) {
+    if (F.isDeclaration() || F.isIntrinsic())
+      continue;
+    for (const BasicBlock &BB : F) {
+      for (const Instruction &I : BB) {
+        const auto *call = dyn_cast<CallBase>(&I);
+        if (!call || call->getCalledFunction())
+          continue;
+
+        std::vector<const Function *> callees =
+            filterCalleesByICFG(icfg, call, getIndirectCallTargets(call));
+        for (const Function *callee : callees) {
+          if (!callee || callee->isDeclaration())
+            continue;
+          svfg->addCalleeToIndCallSite(callee, call);
+        }
+      }
+    }
+  }
+}
+
 SVFG *SVFGBuilder::build(const ICFG *icfg) { return build(icfg, config); }
 
 SVFG *SVFGBuilder::build(const ICFG *icfg, const SVFGBuilderConfig &cfg) {
@@ -238,6 +268,7 @@ SVFG *SVFGBuilder::build(const ICFG *icfg, const SVFGBuilderConfig &cfg) {
     runPointerAnalysis();
   }
 
+  initializeIndirectCallReverseIndex();
   buildNodes();
   buildEdges();
 

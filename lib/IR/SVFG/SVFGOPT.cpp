@@ -75,8 +75,8 @@ void SVFGOPT::readAndOptimize(const std::string &filename) {
 }
 
 void SVFGOPT::buildAndWrite(const std::string &filename) {
-  optimize();
   SVFGSerializer::writeText(*this, filename);
+  optimize();
 }
 
 void SVFGOPT::optimize() {
