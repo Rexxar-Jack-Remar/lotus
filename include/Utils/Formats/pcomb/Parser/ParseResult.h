@@ -2,9 +2,9 @@
 #define PCOMB_PARSE_RESULT_H
 
 #include "Utils/Formats/pcomb/InputStream/InputStream.h"
-#include "Utils/Types/Optional.h"
 
 #include <cassert>
+#include <optional>
 
 namespace pcomb {
 
@@ -14,7 +14,7 @@ public:
 
 private:
   InputStream input;
-  util::Optional<OutputType> attr;
+  std::optional<OutputType> attr;
 
 public:
   template <typename I> ParseResult(I &&i) : input(std::forward<I>(i)) {}

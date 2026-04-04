@@ -1,14 +1,21 @@
 # CLAM and CRAB configuration
 
 if(ENABLE_CLAM)
+    set(LOTUS_VENDORED_CRAB_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/third-party/crab")
+
     # Determine CRAB root directory
     if(CUSTOM_CRAB_ROOT)
         set(CRAB_ROOT ${CUSTOM_CRAB_ROOT})
         message(STATUS "Using custom CRAB at: ${CRAB_ROOT}")
+    elseif(EXISTS "${LOTUS_VENDORED_CRAB_ROOT}/CMakeLists.txt")
+        set(CRAB_ROOT "${LOTUS_VENDORED_CRAB_ROOT}")
+        message(STATUS "Using vendored CRAB from third-party: ${CRAB_ROOT}")
     elseif(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/crab/CMakeLists.txt")
-        # Use manually cloned CRAB in source tree
+        # Backward-compatible fallback for older checkouts.
         set(CRAB_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/crab")
-        message(STATUS "Using CRAB from source tree: ${CRAB_ROOT}")
+        message(WARNING
+            "Using legacy CRAB source tree at ${CRAB_ROOT}. "
+            "Please move it to third-party/crab.")
     elseif(DOWNLOAD_CRAB)
         # Download CRAB to build/deps at configure time
         set(CRAB_ROOT "${CMAKE_BINARY_DIR}/deps/crab")
@@ -49,7 +56,7 @@ if(ENABLE_CLAM)
         message(WARNING 
             "CRAB not found. Either:\n"
             "  1. Set -DCUSTOM_CRAB_ROOT=/path/to/crab, or\n"
-            "  2. Clone manually: git clone https://github.com/seahorn/crab.git\n"
+            "  2. Vendor CRAB into third-party/crab, or\n"
             "  3. Enable auto-download with -DDOWNLOAD_CRAB=ON\n"
             "CLAM will be disabled.")
         set(ENABLE_CLAM OFF)
@@ -94,4 +101,3 @@ if(ENABLE_CLAM)
         message(STATUS "CLAM integration enabled with CRAB")
     endif()
 endif()
-

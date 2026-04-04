@@ -12,7 +12,7 @@ Prerequisites
 - LLVM 14.0.0 development libraries
 - Z3 4.11 with headers
 - CMake 3.10+
-- C++14 compatible compiler (GCC 7+, Clang 5+)
+- C++17 compatible compiler (GCC 7+, Clang 5+)
 - Git for version control
 
 Building from Source

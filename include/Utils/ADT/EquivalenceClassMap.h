@@ -15,11 +15,10 @@
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/ADT/iterator_range.h"
 
-#include "Utils/Types/Optional.h"
-
 #include <functional>
 #include <initializer_list>
 #include <iterator>
+#include <optional>
 #include <set>
 
 namespace psr {
@@ -65,8 +64,11 @@ public:
   __attribute__((warn_unused_result)) inline const_iterator begin() const {
     return StoredData.begin();
   }
-  __attribute__((warn_unused_result)) inline const_iterator end() const { return StoredData.end(); }
-  __attribute__((warn_unused_result)) inline llvm::iterator_range<const_iterator>
+  __attribute__((warn_unused_result)) inline const_iterator end() const {
+    return StoredData.end();
+  }
+  __attribute__((
+      warn_unused_result)) inline llvm::iterator_range<const_iterator>
   equivalenceClasses() const {
     return llvm::make_range(begin(), end());
   }
@@ -137,7 +139,8 @@ public:
   }
 
   /// Return 1 if the specified key is in the map, 0 otherwise.
-  __attribute__((warn_unused_result)) inline size_type count(const KeyT &Key) const {
+  __attribute__((warn_unused_result)) inline size_type
+  count(const KeyT &Key) const {
     for (auto &KVPair : StoredData) {
       if (KVPair.first.count(Key) >= 1) {
         return 1;
@@ -146,7 +149,8 @@ public:
     return 0;
   }
 
-  __attribute__((warn_unused_result)) inline size_type numEquivalenceClasses() const {
+  __attribute__((warn_unused_result)) inline size_type
+  numEquivalenceClasses() const {
     return StoredData.size();
   }
 
@@ -162,12 +166,13 @@ public:
                          });
   }
 
-  __attribute__((warn_unused_result)) util::Optional<ValueT> findValue(key_type Key) const {
+  __attribute__((warn_unused_result)) std::optional<ValueT>
+  findValue(key_type Key) const {
     auto Search = find(Key);
     if (Search != StoredData.end()) {
       return Search->second;
     }
-    return util::nullopt;
+    return std::nullopt;
   }
 
   inline void clear() { StoredData.clear(); }
@@ -188,7 +193,7 @@ public:
   public:
     using value_type = std::pair<SetTy, TValue>;
     using reference = std::pair<const SetTy &, const TValue &>;
-    using pointer = reference *;
+    using pointer = const value_type *;
     using difference_type = ptrdiff_t;
     using iterator_category = std::forward_iterator_tag;
 
@@ -222,7 +227,7 @@ public:
     const TValue *Val;
     const SetTy *Ky;
 
-    util::Optional<reference> TempStorage;
+    mutable std::optional<value_type> TempStorage;
   };
 
   EquivalenceClassMapNG() noexcept = default;
@@ -271,7 +276,8 @@ public:
     return end();
   }
 
-  __attribute__((warn_unused_result)) inline size_t numEquivalenceClasses() const noexcept {
+  __attribute__((warn_unused_result)) inline size_t
+  numEquivalenceClasses() const noexcept {
     return Values.size();
   }
 
@@ -280,7 +286,9 @@ public:
     return numEquivalenceClasses();
   }
 
-  __attribute__((warn_unused_result)) bool empty() const noexcept { return Values.empty(); }
+  __attribute__((warn_unused_result)) bool empty() const noexcept {
+    return Values.empty();
+  }
 
   void clear() noexcept {
     Values.clear();

@@ -15,8 +15,8 @@
 /// `Nullable` type alias and `unwrapNullable` functions.
 ///
 /// The `Nullable<T>` type alias behaves as follows:
-/// - If T is convertible to bool (like util::Optional<T>), it uses T directly
-/// - Otherwise, it wraps T in util::Optional<T>
+/// - If T is convertible to bool (like `std::optional<T>`), it uses T directly
+/// - Otherwise, it wraps T in `std::optional<T>`
 ///
 /// This allows seamless interoperability between Optional types and other
 /// nullable-like types.
@@ -26,8 +26,7 @@
 #ifndef PHASAR_UTILS_NULLABLE_H
 #define PHASAR_UTILS_NULLABLE_H
 
-#include "Utils/Types/Optional.h"
-
+#include <optional>
 #include <type_traits>
 #include <utility>
 
@@ -36,18 +35,18 @@ namespace psr {
 /// @brief Type alias for nullable values
 ///
 /// If T is convertible to bool, Nullable<T> is just T. Otherwise, it's
-/// util::Optional<T>. This allows writing generic code that accepts both
+/// `std::optional<T>`. This allows writing generic code that accepts both
 /// optional types and regular types.
 ///
 /// @tparam T The type to make nullable
 template <typename T>
 using Nullable = std::conditional_t<std::is_convertible<T, bool>::value, T,
-                                    util::Optional<T>>;
+                                    std::optional<T>>;
 
 /// @brief Unwrap a nullable value
 ///
 /// If the value is already a bool-convertible type, returns it unchanged.
-/// Otherwise, extracts the value from an Optional.
+/// Otherwise, extracts the value from an optional.
 ///
 /// @tparam T The underlying type
 /// @param Val The nullable value to unwrap
@@ -57,31 +56,31 @@ std::enable_if_t<std::is_convertible<T, bool>::value, T &&>
 unwrapNullable(T &&Val) noexcept {
   return std::forward<T>(Val);
 }
-/// @brief Unwrap an Optional rvalue
+/// @brief Unwrap an optional rvalue
 /// @tparam T The underlying type
-/// @param Val The Optional to unwrap
+/// @param Val The optional to unwrap
 /// @return The contained value
 template <typename T>
 std::enable_if_t<!std::is_convertible<T, bool>::value, T>
-unwrapNullable(util::Optional<T> &&Val) noexcept {
+unwrapNullable(std::optional<T> &&Val) noexcept {
   return *std::move(Val);
 }
-/// @brief Unwrap an Optional const lvalue
+/// @brief Unwrap an optional const lvalue
 /// @tparam T The underlying type
-/// @param Val The Optional to unwrap
+/// @param Val The optional to unwrap
 /// @return A const reference to the contained value
 template <typename T>
 std::enable_if_t<!std::is_convertible<T, bool>::value, const T &>
-unwrapNullable(const util::Optional<T> &Val) noexcept {
+unwrapNullable(const std::optional<T> &Val) noexcept {
   return *Val;
 }
-/// @brief Unwrap an Optional lvalue
+/// @brief Unwrap an optional lvalue
 /// @tparam T The underlying type
-/// @param Val The Optional to unwrap
+/// @param Val The optional to unwrap
 /// @return A reference to the contained value
 template <typename T>
 std::enable_if_t<!std::is_convertible<T, bool>::value, T &>
-unwrapNullable(util::Optional<T> &Val) noexcept {
+unwrapNullable(std::optional<T> &Val) noexcept {
   return *Val;
 }
 } // namespace psr

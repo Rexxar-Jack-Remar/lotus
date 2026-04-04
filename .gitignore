@@ -98,3 +98,12 @@ dist/*
 docs/build
 /.vs
 .worktrees/
+/build/
+/build-*/
+/debug/
+/debug-*/
+/install/
+/install-*/
+/GPATH
+/GRTAGS
+/GTAGS

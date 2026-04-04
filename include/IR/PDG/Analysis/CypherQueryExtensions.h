@@ -25,10 +25,10 @@
 #pragma once
 
 #include "IR/PDG/Analysis/CypherQuery.h"
-#include "Utils/Types/Optional.h"
 
 #include <functional>
 #include <numeric>
+#include <optional>
 #include <regex>
 
 namespace pdg {
@@ -155,13 +155,13 @@ public:
   struct PatternNode {
     std::string id;
     std::unordered_map<std::string, std::string> properties;
-    util::Optional<GraphNodeType> nodeType;
+    std::optional<GraphNodeType> nodeType;
   };
 
   struct PatternEdge {
     std::string srcId;
     std::string dstId;
-    util::Optional<EdgeType> edgeType;
+    std::optional<EdgeType> edgeType;
     std::unordered_map<std::string, std::string> properties;
   };
 

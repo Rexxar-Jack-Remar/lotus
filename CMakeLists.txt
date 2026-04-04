@@ -3,9 +3,8 @@ project(lotus C CXX)
 
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
-# Set C++14 standard and compiler flags
-set(CMAKE_CXX_STANDARD 14)
-# set(CMAKE_CXX_STANDARD 17)
+#set(CMAKE_CXX_STANDARD 14)
+set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 set(CMAKE_POSITION_INDEPENDENT_CODE ON)
@@ -53,7 +52,7 @@ if(ENABLE_CLAM OR ENABLE_SEAHORN OR LOTUS_USE_CCLYZER)
     include(cmake/ConfigureBoost.cmake)
 endif()
 
-option(DOWNLOAD_CRAB "Download and build CRAB if not found" ON)
+option(DOWNLOAD_CRAB "Download and build CRAB if not found" OFF)
 set(CUSTOM_CRAB_ROOT "" CACHE PATH "Path to custom CRAB installation (optional)")
 if (ENABLE_CLAM)
     include(cmake/ConfigureClamCrab.cmake)

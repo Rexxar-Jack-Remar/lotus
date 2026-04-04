@@ -12,17 +12,17 @@
 #include "Checker/AE/IntervalValue.h"
 #include "Checker/Report/BugReportMgr.h"
 #include "TestUtils/LLVMHelpers.h"
-#include "Utils/Types/Optional.h"
 
 #ifndef GTEST_INTERNAL_CPLUSPLUS_LANG
 #define GTEST_INTERNAL_CPLUSPLUS_LANG 201703L
 #endif
+#include <cstdlib>
+#include <optional>
+
+#include <gtest/gtest.h>
 #include <llvm/IR/Instructions.h>
 #include <llvm/IR/LLVMContext.h>
 #include <llvm/IR/Module.h>
-#include <gtest/gtest.h>
-
-#include <cstdlib>
 
 using namespace llvm;
 using namespace lotus::analysis;
@@ -47,21 +47,20 @@ protected:
     return lotus::unittest::parseModule(context, source, "AECheckerTest");
   }
 
-  AEResult runAE(
-      Module *module, bool analyzeAllFunctions = true,
-      bool enableMemLeak = false,
-      AbstractInterpretation::HandleRecur recursionMode =
-          AbstractInterpretation::WIDEN_NARROW,
-      util::Optional<unsigned> widenDelay = 3u, bool enableDivZero = false,
-      bool enableIntOverflow = false) {
+  AEResult runAE(Module *module, bool analyzeAllFunctions = true,
+                 bool enableMemLeak = false,
+                 AbstractInterpretation::HandleRecur recursionMode =
+                     AbstractInterpretation::WIDEN_NARROW,
+                 std::optional<unsigned> widenDelay = 3u,
+                 bool enableDivZero = false, bool enableIntOverflow = false) {
     if (!module->getFunction("main")) {
       FunctionType *MainTy =
           FunctionType::get(Type::getInt32Ty(context), false);
       Function *Main =
           Function::Create(MainTy, Function::ExternalLinkage, "main", module);
       BasicBlock *Entry = BasicBlock::Create(context, "entry", Main);
-      ReturnInst::Create(context, ConstantInt::get(Type::getInt32Ty(context), 0),
-                         Entry);
+      ReturnInst::Create(context,
+                         ConstantInt::get(Type::getInt32Ty(context), 0), Entry);
     }
 
     AbstractInterpretation &ae = AbstractInterpretation::getAEInstance();
@@ -112,7 +111,8 @@ protected:
 
     ae.runOnModule(module);
 
-    return {overflowDetectorPtr->getBugCount(), nullDetectorPtr->getBugCount(),
+    return {overflowDetectorPtr->getBugCount(),
+            nullDetectorPtr->getBugCount(),
             divZeroDetectorPtr ? divZeroDetectorPtr->getBugCount() : 0u,
             intOverflowDetectorPtr ? intOverflowDetectorPtr->getBugCount() : 0u,
             uafDetectorPtr->getBugCount(),
@@ -1056,8 +1056,8 @@ TEST_F(AECheckerTest, RecursiveSelfCallWidenOnlyKeepsLowerBound) {
   auto module = parseModule(source);
   ASSERT_NE(module, nullptr);
 
-  AEResult result = runAE(module.get(), true, false,
-                          AbstractInterpretation::WIDEN_ONLY, 3u);
+  AEResult result =
+      runAE(module.get(), true, false, AbstractInterpretation::WIDEN_ONLY, 3u);
   EXPECT_EQ(result.overflow_bugs, 0u);
   EXPECT_EQ(result.null_bugs, 0u);
 
@@ -1233,9 +1233,9 @@ TEST_F(AECheckerTest, DefaultWidenDelayMatchesExplicitThree) {
 
   auto defaultModule = parseModule(source);
   ASSERT_NE(defaultModule, nullptr);
-  AEResult defaultResult = runAE(defaultModule.get(), true, false,
-                                 AbstractInterpretation::WIDEN_NARROW,
-                                 util::nullopt);
+  AEResult defaultResult =
+      runAE(defaultModule.get(), true, false,
+            AbstractInterpretation::WIDEN_NARROW, std::nullopt);
   IntervalValue defaultRet =
       getFunctionReturnInterval(defaultModule.get(), "main");
 
@@ -1257,14 +1257,14 @@ TEST_F(AECheckerTest, ParitySensitiveRegressionHarness) {
     const char *source;
     size_t expectedOverflow;
     size_t expectedNull;
-    util::Optional<IntervalValue> expectedMainReturn;
+    std::optional<IntervalValue> expectedMainReturn;
     AbstractInterpretation::HandleRecur recursionMode;
-    util::Optional<unsigned> widenDelay;
+    std::optional<unsigned> widenDelay;
   };
 
   const std::vector<ParityCase> cases = {
       ParityCase{"recursive_top_summary",
-       R"(
+                 R"(
          define i32 @demo(i32 %a) {
          entry:
            %cmp = icmp sge i32 %a, 6
@@ -1285,13 +1285,9 @@ TEST_F(AECheckerTest, ParitySensitiveRegressionHarness) {
            ret i32 %res
          }
        )",
-       0u,
-       0u,
-       IntervalValue::top(),
-       AbstractInterpretation::TOP,
-       3u},
+                 0u, 0u, IntervalValue::top(), AbstractInterpretation::TOP, 3u},
       ParityCase{"indirect_external_memcpy_no_null_false_positive",
-       R"(
+                 R"(
          declare void @llvm.memcpy.p0i8.p0i8.i64(i8*, i8*, i64, i1)
 
          define void @test_copy() {
@@ -1307,11 +1303,8 @@ TEST_F(AECheckerTest, ParitySensitiveRegressionHarness) {
            ret void
          }
        )",
-       1u,
-       0u,
-       util::nullopt,
-       AbstractInterpretation::WIDEN_NARROW,
-       3u},
+                 1u, 0u, std::nullopt, AbstractInterpretation::WIDEN_NARROW,
+                 3u},
   };
 
   for (const ParityCase &testCase : cases) {
@@ -1319,9 +1312,8 @@ TEST_F(AECheckerTest, ParitySensitiveRegressionHarness) {
     auto module = parseModule(testCase.source);
     ASSERT_NE(module, nullptr);
 
-    AEResult result =
-        runAE(module.get(), true, false, testCase.recursionMode,
-              testCase.widenDelay);
+    AEResult result = runAE(module.get(), true, false, testCase.recursionMode,
+                            testCase.widenDelay);
     EXPECT_EQ(result.overflow_bugs, testCase.expectedOverflow);
     EXPECT_EQ(result.null_bugs, testCase.expectedNull);
     if (testCase.expectedMainReturn.has_value()) {
@@ -1407,9 +1399,9 @@ TEST_F(AECheckerTest, DivZeroDetection) {
   auto module = parseModule(source);
   ASSERT_NE(module, nullptr);
 
-  AEResult result = runAE(module.get(), true, false,
-                          AbstractInterpretation::WIDEN_NARROW, 3u, true,
-                          false);
+  AEResult result =
+      runAE(module.get(), true, false, AbstractInterpretation::WIDEN_NARROW, 3u,
+            true, false);
   EXPECT_GT(result.divzero_bugs, 0u);
 }
 
@@ -1425,9 +1417,9 @@ TEST_F(AECheckerTest, IntegerOverflowDetection) {
   auto module = parseModule(source);
   ASSERT_NE(module, nullptr);
 
-  AEResult result = runAE(module.get(), true, false,
-                          AbstractInterpretation::WIDEN_NARROW, 3u, false,
-                          true);
+  AEResult result =
+      runAE(module.get(), true, false, AbstractInterpretation::WIDEN_NARROW, 3u,
+            false, true);
   EXPECT_GT(result.int_overflow_bugs, 0u);
 }
 
@@ -1491,8 +1483,8 @@ TEST_F(AECheckerTest, AEBugReportsAreClearedBetweenRuns) {
   ASSERT_NE(divModule, nullptr);
 
   AEResult divResult =
-      runAE(divModule.get(), true, false,
-            AbstractInterpretation::WIDEN_NARROW, 3u, true, false);
+      runAE(divModule.get(), true, false, AbstractInterpretation::WIDEN_NARROW,
+            3u, true, false);
   EXPECT_GT(divResult.divzero_bugs, 0u);
 
   leakReports = mgr.get_reports_for_type(leakType);
@@ -1565,9 +1557,8 @@ TEST_F(AECheckerTest, PosixMemalignStoresAllocatedPointerThroughOutParam) {
 
   runAE(module.get());
 
-  const auto *load =
-      dyn_cast<LoadInst>(findNamedInstruction(module.get(),
-                                             "test_posix_memalign", "p"));
+  const auto *load = dyn_cast<LoadInst>(
+      findNamedInstruction(module.get(), "test_posix_memalign", "p"));
   ASSERT_NE(load, nullptr);
   AbstractValue value = getInstructionValue(load);
   EXPECT_TRUE(value.isAddr());
@@ -1596,8 +1587,8 @@ TEST_F(AECheckerTest, AsprintfStoresAllocatedPointerThroughOutParam) {
 
   runAE(module.get());
 
-  const auto *load =
-      dyn_cast<LoadInst>(findNamedInstruction(module.get(), "test_asprintf", "p"));
+  const auto *load = dyn_cast<LoadInst>(
+      findNamedInstruction(module.get(), "test_asprintf", "p"));
   ASSERT_NE(load, nullptr);
   AbstractValue value = getInstructionValue(load);
   EXPECT_TRUE(value.isAddr());

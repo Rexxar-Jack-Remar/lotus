@@ -9,7 +9,7 @@ Prerequisites
 * LLVM 14.0.0
 * Z3 4.11
 * CMake 3.10+
-* C++14 compatible compiler
+* C++17 compatible compiler
 * Boost 1.65+ (auto-downloaded if not found)
 
 Building Lotus

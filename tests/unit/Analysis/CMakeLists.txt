@@ -63,7 +63,7 @@ foreach(case_name ${NOELLE_LOOP_PARITY_CASES})
       OUTPUT ${ll_file}
       COMMAND ${NOELLE_LOOP_PARITY_CLANGXX}
               ${NOELLE_LOOP_PARITY_EXTRA_ARGS}
-              -std=c++14 -emit-llvm -c -g -O0 -Xclang -disable-O0-optnone
+              -std=c++17 -emit-llvm -c -g -O0 -Xclang -disable-O0-optnone
               ${src_file} -o ${pre_bc}
       COMMAND ${NOELLE_LOOP_PARITY_OPT}
               -basic-aa -mem2reg -scalar-evolution -loops

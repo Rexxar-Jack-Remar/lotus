@@ -53,7 +53,7 @@ For detailed documentation on using the binary tools, see [tools](https://zju-pl
 - LLVM 14.x
 - Z3 4.11
 - CMake 3.10+
-- C++14 compatible compiler
+- C++17 compatible compiler
 
 ### Build Lotus
 
