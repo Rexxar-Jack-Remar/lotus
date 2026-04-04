@@ -3,6 +3,7 @@
 #include <functional>
 #include <iterator>
 #include <map>
+#include <optional>
 #include <set>
 
 // llvm 3.8: forward declarations not enough

@@ -1,5 +1,7 @@
 #pragma once
 
+#include <optional>
+
 #include "Alias/seadsa/Graph.hh"
 
 namespace seadsa {
