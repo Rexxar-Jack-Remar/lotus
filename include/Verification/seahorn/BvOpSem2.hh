@@ -8,6 +8,7 @@
 #include "llvm/IR/GetElementPtrTypeIterator.h"
 #include "llvm/Pass.h"
 
+#include <optional>
 #include <seahorn/boost_flat_set.hh>
 
 // forward declarations

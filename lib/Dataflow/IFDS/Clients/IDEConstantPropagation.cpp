@@ -5,6 +5,7 @@
 #include "Dataflow/IFDS/Clients/IDEConstantPropagation.h"
 
 #include <limits>
+#include <optional>
 
 #include <llvm/IR/Instructions.h>
 #include <llvm/IR/IntrinsicInst.h>

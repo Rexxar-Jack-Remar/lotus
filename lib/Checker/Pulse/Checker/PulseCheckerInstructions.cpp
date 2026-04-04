@@ -13,6 +13,7 @@
 #include <functional>
 #include <limits>
 #include <map>
+#include <optional>
 #include <set>
 #include <tuple>
 #include <unordered_set>

@@ -1,6 +1,7 @@
 #include "Dataflow/IFDS/Clients/IDEGeneralizedLCA.h"
 
 #include <limits>
+#include <optional>
 
 #include <llvm/IR/Constants.h>
 #include <llvm/IR/Instructions.h>

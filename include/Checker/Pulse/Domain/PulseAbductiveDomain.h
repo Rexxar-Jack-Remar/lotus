@@ -10,6 +10,7 @@
 #include <cstdint>
 #include <map>
 #include <memory>
+#include <optional>
 #include <set>
 
 #include <llvm/IR/BasicBlock.h>

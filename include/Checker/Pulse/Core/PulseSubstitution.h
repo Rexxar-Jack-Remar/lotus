@@ -4,6 +4,7 @@
 #include "Checker/Pulse/Domain/PulseDomain.h"
 
 #include <map>
+#include <optional>
 
 namespace pulse {
 

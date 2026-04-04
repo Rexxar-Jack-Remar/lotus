@@ -15,6 +15,8 @@
 #include "seahorn/Expr/ExprOpFiniteMap.hh"
 #include "seahorn/Expr/ExprOpVariant.hh"
 
+#include <optional>
+
 static llvm::cl::opt<bool> FMapNotReadOnly(
     "horn-fmap-not-read-only",
     llvm::cl::desc("Do not encode with finite maps read-only dsa nodes"),

@@ -12,6 +12,8 @@
 #include "llvm/IR/PassManager.h"
 #include "llvm/IR/Type.h"
 
+#include <optional>
+
 #define DEBUG_TYPE "sea-aa"
 using namespace llvm;
 using namespace seadsa;

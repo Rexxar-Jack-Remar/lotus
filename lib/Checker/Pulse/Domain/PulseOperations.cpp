@@ -5,6 +5,7 @@
 
 #include <cassert>
 #include <limits>
+#include <optional>
 #include <set>
 
 #include <llvm/ADT/SmallVector.h>

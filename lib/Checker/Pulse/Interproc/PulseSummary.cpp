@@ -2,6 +2,8 @@
 
 #include "Checker/Pulse/Domain/PulseNonDisjunctiveDomain.h"
 
+#include <optional>
+
 namespace pulse {
 
 //===----------------------------------------------------------------------===//

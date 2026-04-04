@@ -8,6 +8,7 @@
 #include <cstdint>
 #include <fstream>
 #include <functional>
+#include <optional>
 
 #include <llvm/ADT/SmallString.h>
 #include <llvm/Analysis/AliasAnalysis.h>

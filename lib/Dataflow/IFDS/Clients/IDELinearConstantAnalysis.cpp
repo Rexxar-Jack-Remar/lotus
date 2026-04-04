@@ -1,5 +1,7 @@
 #include "Dataflow/IFDS/Clients/IDELinearConstantAnalysis.h"
 
+#include <optional>
+
 #include <llvm/IR/Constants.h>
 #include <llvm/IR/Function.h>
 #include <llvm/IR/Instructions.h>

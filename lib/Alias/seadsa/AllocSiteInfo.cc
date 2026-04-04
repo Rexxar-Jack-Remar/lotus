@@ -12,6 +12,8 @@
 #include <llvm/Support/Debug.h>
 #include <llvm/Support/raw_ostream.h>
 
+#include <optional>
+
 #include "Alias/seadsa/AllocSiteInfo.hh"
 #include "Alias/seadsa/AllocWrapInfo.hh"
 #include "Alias/seadsa/InitializePasses.hh"

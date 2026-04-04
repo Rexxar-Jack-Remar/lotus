@@ -3,6 +3,7 @@
 #include "Checker/Pulse/Core/PulseFormula.h"
 
 #include <limits>
+#include <optional>
 
 #include <llvm/IR/Constants.h>
 #include <llvm/IR/Instructions.h>

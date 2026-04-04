@@ -7,6 +7,7 @@
 
 #include <map>
 #include <memory>
+#include <optional>
 #include <vector>
 
 #include <llvm/IR/Function.h>

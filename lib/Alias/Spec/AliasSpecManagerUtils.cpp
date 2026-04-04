@@ -18,6 +18,7 @@
 #include <algorithm>
 #include <cctype>
 #include <cstdlib>
+#include <optional>
 #include <unordered_set>
 
 #include <llvm/Support/FileSystem.h>

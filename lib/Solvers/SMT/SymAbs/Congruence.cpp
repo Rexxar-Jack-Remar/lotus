@@ -46,6 +46,7 @@
 #include <cassert>
 #include <cmath>
 #include <numeric>
+#include <optional>
 
 #include <z3++.h>
 #include <z3.h>

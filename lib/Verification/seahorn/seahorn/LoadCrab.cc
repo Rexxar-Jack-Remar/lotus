@@ -32,6 +32,7 @@ bool LoadCrabPass::runOnModule(llvm::Module &M) {
 #include "seahorn/clam_CfgBuilder.hh"
 #include "seahorn/clam_Clam.hh"
 
+#include <optional>
 #include <unordered_map>
 
 namespace clam {

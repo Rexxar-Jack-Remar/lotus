@@ -6,6 +6,8 @@
 
 #include "llvm/IR/Constants.h"
 
+#include <optional>
+
 namespace clam {
 
 using namespace llvm;

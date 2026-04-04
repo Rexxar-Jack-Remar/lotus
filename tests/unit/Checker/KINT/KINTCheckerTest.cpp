@@ -12,6 +12,7 @@
 #include <llvm/IR/LLVMContext.h>
 #include <llvm/IR/Module.h>
 #include <gtest/gtest.h>
+#include <optional>
 #include <z3++.h>
 
 using namespace llvm;

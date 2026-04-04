@@ -21,6 +21,7 @@
 #include "Analysis/TypeHirarchy/TypeHierarchy.h"
 
 #include <deque>
+#include <optional>
 
 namespace llvm {
 class Module;

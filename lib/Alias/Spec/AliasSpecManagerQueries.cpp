@@ -23,6 +23,7 @@
 #include "Alias/Spec/AliasSpecManager.h"
 
 #include <algorithm>
+#include <optional>
 
 #include <llvm/IR/Intrinsics.h>
 #include <llvm/Support/raw_ostream.h>

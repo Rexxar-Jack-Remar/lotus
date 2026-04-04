@@ -25,6 +25,8 @@
 #include "seahorn/Support/SeaDebug.h"
 #include "seahorn/Support/SeaLog.hh"
 
+#include <optional>
+
 #define SMC_LOG(...) LOG("smc", __VA_ARGS__)
 
 using namespace llvm;

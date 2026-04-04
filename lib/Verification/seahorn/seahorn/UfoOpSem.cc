@@ -10,6 +10,8 @@
 #include "llvm/Support/CommandLine.h"
 #include "llvm/Support/FileSystem.h"
 
+#include <optional>
+
 #include "seahorn/Expr/ExprLlvm.hh"
 #include "seahorn/Expr/Smt/EZ3.hh"
 #include "seahorn/Support/SeaDebug.h"

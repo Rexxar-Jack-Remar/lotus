@@ -16,6 +16,7 @@
 #include "Alias/seadsa/Printer.hh"
 #include "Alias/seadsa/support/Debug.h"
 
+#include <optional>
 #include <sstream>
 
 /*

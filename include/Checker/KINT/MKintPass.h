@@ -15,6 +15,7 @@ using bbrange_t = DenseMap<const BasicBlock *, DenseMap<const Value *, crange>>;
 
 #include <chrono>
 #include <map>
+#include <optional>
 #include <set>
 #include <unordered_set>
 #include <vector>

@@ -4,6 +4,7 @@
 #include "Checker/Pulse/Domain/PulseDomain.h"
 
 #include <map>
+#include <optional>
 #include <set>
 
 #include <llvm/Analysis/LoopInfo.h>

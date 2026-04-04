@@ -5,6 +5,7 @@
 #include "Checker/Pulse/Report/PulseLogger.h"
 
 #include <map>
+#include <optional>
 #include <set>
 #include <vector>
 

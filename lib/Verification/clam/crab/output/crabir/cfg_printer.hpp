@@ -3,6 +3,7 @@
 #include "crab/checkers/checker.hpp"
 
 #include <functional>
+#include <optional>
 #include <string>
 #include <vector>
 

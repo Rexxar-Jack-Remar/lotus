@@ -6,6 +6,7 @@
 #include "Checker/Pulse/Interproc/PulseSummary.h"
 
 #include <algorithm>
+#include <optional>
 #include <set>
 
 #include <llvm/IR/Instructions.h>

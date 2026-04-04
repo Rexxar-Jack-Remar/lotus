@@ -2,6 +2,8 @@
 
 #include "Checker/Pulse/Core/PulseFormula.h"
 
+#include <optional>
+
 #include <llvm/Analysis/LoopInfo.h>
 
 namespace pulse {

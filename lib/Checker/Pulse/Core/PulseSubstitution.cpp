@@ -1,5 +1,7 @@
 #include "Checker/Pulse/Core/PulseSubstitution.h"
 
+#include <optional>
+
 namespace pulse {
 
 void Substitution::add(AbstractValue formal, AbstractValue actual) {

@@ -27,6 +27,7 @@
 #include "crab/numbers/wrapint.hpp"
 #include "crab/support/debug.hpp"
 
+#include <optional>
 #include <type_traits>
 
 using namespace llvm;

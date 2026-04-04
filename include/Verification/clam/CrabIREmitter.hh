@@ -4,6 +4,8 @@
 
 #include "llvm/ADT/SmallVector.h"
 
+#include <optional>
+
 namespace llvm {
 class TargetLibraryInfo;
 class Function;

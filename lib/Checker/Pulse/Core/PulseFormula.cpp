@@ -5,6 +5,7 @@
 
 #include <algorithm>
 #include <limits>
+#include <optional>
 #include <set>
 #include <unordered_map>
 

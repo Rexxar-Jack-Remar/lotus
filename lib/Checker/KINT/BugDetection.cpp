@@ -6,6 +6,8 @@
 #include "Checker/Report/SARIF.h"
 #include "Utils/Types/range.h"
 
+#include <optional>
+
 #include <llvm/ADT/SmallString.h>
 #include <llvm/IR/Constants.h>
 #include <llvm/IR/Instructions.h>

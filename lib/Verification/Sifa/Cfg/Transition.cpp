@@ -10,6 +10,7 @@
 #include "llvm/IR/Function.h"
 
 #include <cstddef>
+#include <optional>
 #include <ostream>
 #include <string>
 #include <utility>

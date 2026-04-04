@@ -53,6 +53,7 @@
 #include <algorithm>
 #include <cassert>
 #include <numeric>
+#include <optional>
 #include <sstream>
 #include <unordered_set>
 #include <vector>

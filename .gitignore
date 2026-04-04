@@ -42,7 +42,6 @@ fuzz/*.bc
 .core
 lib/Verification/seahorn/Support/GitSHA1.cc
 .cache
-.clangd
 docs/build
 venv
 compile_commands.json

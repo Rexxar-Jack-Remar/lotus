@@ -6,6 +6,7 @@
 #include "Checker/Pulse/Report/PulseReport.h"
 
 #include <limits>
+#include <optional>
 
 #include <llvm/IR/Constants.h>
 #include <llvm/IR/Function.h>

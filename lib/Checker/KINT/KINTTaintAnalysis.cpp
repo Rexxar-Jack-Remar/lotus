@@ -5,12 +5,13 @@
 #include "Utils/LLVM/Demangle.h"
 
 #include <algorithm>
+#include <optional>
 
 #include <llvm/ADT/SmallPtrSet.h>
 #include <llvm/IR/Constants.h>
-#include <llvm/IR/InstrTypes.h>
 #include <llvm/IR/Function.h>
 #include <llvm/IR/InstIterator.h>
+#include <llvm/IR/InstrTypes.h>
 #include <llvm/IR/Instructions.h>
 #include <llvm/IR/Metadata.h>
 #include <llvm/IR/Module.h>
@@ -69,7 +70,7 @@ static std::optional<size_t> getSinkArgIndex(const Function *callee) {
   if (!callee)
     return std::nullopt;
   const auto dname = DemangleUtils::demangle(callee->getName().str());
-  auto it = std::find_if(MKINT_SINKS.begin(), MKINT_SINKS.end(),
+  const auto *it = std::find_if(MKINT_SINKS.begin(), MKINT_SINKS.end(),
                          [&dname](const auto &s) { return dname == s.first; });
   if (it == MKINT_SINKS.end())
     return std::nullopt;

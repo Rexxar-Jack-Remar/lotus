@@ -38,6 +38,7 @@
 #include "Alias/seadsa/ShadowMem.hh"
 
 #include <fstream>
+#include <optional>
 #include <memory>
 
 using namespace llvm;

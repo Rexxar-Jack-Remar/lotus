@@ -3,6 +3,7 @@
 #include "Dataflow/IFDS/Core/IFDSFramework.h"
 
 #include <map>
+#include <optional>
 #include <set>
 #include <string>
 #include <vector>

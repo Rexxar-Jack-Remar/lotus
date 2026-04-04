@@ -38,6 +38,8 @@ seahorn::PathBmcTrace seahorn::PathBmcEngine::getTrace() {
 #include "clam/CrabDomain.hh"
 #include "clam/CrabDomainParser.hh"
 #include "clam/HeapAbstraction.hh"
+
+#include <optional>
 #include "clam/SeaDsaHeapAbstraction.hh"
 
 #include "Alias/seadsa/Global.hh"

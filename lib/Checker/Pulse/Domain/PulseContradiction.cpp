@@ -4,6 +4,7 @@
 #include "Checker/Pulse/Core/PulseFormula.h"
 
 #include <algorithm>
+#include <optional>
 
 namespace pulse {
 

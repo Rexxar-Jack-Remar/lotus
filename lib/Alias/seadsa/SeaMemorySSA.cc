@@ -6,6 +6,8 @@
 #include "llvm/IR/Instructions.h"
 #include "llvm/Support/FormattedStream.h"
 
+#include <optional>
+
 using namespace seadsa;
 using namespace llvm;
 

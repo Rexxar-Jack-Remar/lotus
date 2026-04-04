@@ -5,6 +5,8 @@
 #include "llvm/ADT/iterator.h"
 #include "llvm/Analysis/MemorySSA.h"
 
+#include <optional>
+
 namespace SMSSAHelpers {
 struct AllAccessTag {};
 } // end namespace SMSSAHelpers
@@ -529,7 +531,7 @@ struct OperandTraits<seadsa::SeaMemoryPhi> : public HungoffOperandTraits<2> {};
 
 namespace seadsa {
 DEFINE_TRANSPARENT_OPERAND_ACCESSORS(SeaMemoryPhi, SeaMemoryAccess)
-}
+} // namespace seadsa
 
 namespace seadsa {
 

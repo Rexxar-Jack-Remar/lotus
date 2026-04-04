@@ -23,6 +23,8 @@
 #include "llvm/IR/DataLayout.h"
 #include "llvm/IR/Dominators.h"
 #include "llvm/IR/IRBuilder.h"
+
+#include <optional>
 #include "llvm/IR/InstIterator.h"
 #include "llvm/IR/IntrinsicInst.h"
 #include "llvm/IR/Verifier.h"

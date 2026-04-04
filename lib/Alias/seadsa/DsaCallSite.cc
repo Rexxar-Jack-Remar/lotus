@@ -2,6 +2,8 @@
 #include <llvm/IR/Instructions.h>
 #include <llvm/IR/Module.h>
 
+#include <optional>
+
 #include "Alias/seadsa/CallSite.hh"
 
 using namespace llvm;

@@ -1,0 +1,28 @@
+CompileFlags:
+  # Treat code as C++, use C++17 standard, enable more warnings
+  Add: [-xc++, -std=c++17, -Wall, -Wextra, -Werror]
+  # Remove platform-specific include paths that might cause issues
+  Remove: [-fno-exceptions]
+
+Diagnostics:
+  # Display diagnostics even when there are errors in included files
+  UnusedIncludes: Strict
+  # Treat compiler warnings as errors
+  ClangTidy:
+    Add: [modernize*, performance*] # readability*
+    Remove: [modernize-use-trailing-return-type, cppcoreguidelines-pro-bounds-pointer-arithmetic, cppcoreguidelines-avoid-goto, cppcoreguidelines-pro-bounds-constant-array-index]
+
+Index:
+  Background: Build
+  StandardLibrary: Yes
+
+InlayHints:
+  Enabled: Yes
+  ParameterNames: Yes
+  DeducedTypes: Yes
+
+Hover:
+  ShowAKA: Yes
+
+Completion:
+  AllScopes: Yes
