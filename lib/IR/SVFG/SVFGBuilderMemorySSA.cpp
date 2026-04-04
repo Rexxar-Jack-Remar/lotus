@@ -70,6 +70,31 @@ static const ICFGNode *findFunctionExitICFGNode(const ICFG *icfg,
   return const_cast<ICFG *>(icfg)->getFunExitICFGNode(F);
 }
 
+static const Function *getProgramEntryFunction(const ICFG *icfg) {
+  if (!icfg)
+    return nullptr;
+  const GlobalInitBlockNode *globalInit =
+      const_cast<ICFG *>(icfg)->getGlobalInitICFGNode();
+  if (!globalInit)
+    return nullptr;
+
+  const Function *soleRoot = nullptr;
+  for (const ICFGEdge *edge : globalInit->getOutEdges()) {
+    const ICFGNode *dst = edge ? edge->getDstNode() : nullptr;
+    const auto *entry = dyn_cast_or_null<FunEntryBlockNode>(dst);
+    const Function *F = entry ? entry->getFunction() : nullptr;
+    if (!F)
+      continue;
+    if (F->getName() == "main")
+      return F;
+    if (!soleRoot)
+      soleRoot = F;
+    else if (soleRoot != F)
+      soleRoot = nullptr;
+  }
+  return soleRoot;
+}
+
 static bool icfgHasCallEdgeTo(const ICFG *icfg, const CallBase *call,
                               const Function *callee) {
   if (!icfg || !call || !callee || callee->isDeclaration())
@@ -1768,6 +1793,32 @@ void SVFGBuilder::connectFromGlobalToProgEntry() {
     return;
   if (globalEntryRegions.empty())
     return;
+
+  if (const Function *progEntry = getProgramEntryFunction(icfg)) {
+    const auto &formalIns = svfg->getFormalIns(progEntry);
+    if (!formalIns.empty() && !svfg->getGlobalStoreNodes().empty()) {
+      for (SVFGNode *storeNode : svfg->getGlobalStoreNodes()) {
+        auto *store = dyn_cast<StoreSVFGNode>(storeNode);
+        if (!store)
+          continue;
+        SVFGNodeBS storePts = store->getMemoryPointsTo();
+        if (storePts.empty())
+          storePts.insert(getOrCreateUnknownObjId());
+        for (SVFGNode *formalInNode : formalIns) {
+          auto *formalIn = dyn_cast_or_null<FormalInSVFGNode>(formalInNode);
+          if (!formalIn)
+            continue;
+          SVFGNodeBS intersectPts = intersectPointsToSets(
+              storePts, formalIn->getDefSVFVars(), getOrCreateUnknownObjId());
+          if (!intersectPts.empty()) {
+            svfg->addEdge(storeNode, formalInNode, SVFGEdgeK::IntraIndirect,
+                          nullptr, intersectPts);
+          }
+        }
+      }
+      return;
+    }
+  }
 
   std::unordered_map<uint32_t, SVFGNode *> memRegToEntryChi;
   for (const auto &entry : globalEntryRegions) {

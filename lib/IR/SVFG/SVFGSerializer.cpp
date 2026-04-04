@@ -738,7 +738,8 @@ static void applyMSSAOperands(SVFGNode *node, const ParsedNodeMeta &meta) {
 
 } // namespace
 
-bool SVFGSerializer::writeDot(const SVFG &graph, const std::string &filename) {
+bool SVFGSerializer::writeDot(const SVFG &graph, const std::string &filename,
+                              bool simple) {
   std::ofstream file(filename);
   if (!file.is_open())
     return false;
@@ -750,9 +751,25 @@ bool SVFGSerializer::writeDot(const SVFG &graph, const std::string &filename) {
   for (const auto &pair : graph) {
     const SVFGNode *node = pair.second;
     file << "  N" << node->getId() << " [label=\"";
-    file << "ID: " << node->getId() << "\\n";
-    file << "Kind: " << static_cast<uint32_t>(node->getNodeKind());
-    if (const auto *val = node->getValue()) {
+    if (simple) {
+      file << node->getId() << ":" << static_cast<uint32_t>(node->getNodeKind());
+    } else {
+      file << "ID: " << node->getId() << "\\n";
+      file << "Kind: " << static_cast<uint32_t>(node->getNodeKind());
+    }
+    if (!simple) {
+      if (const auto *val = node->getValue()) {
+        file << "\\nVal: " << val->getName().str();
+      }
+      if (const auto fnDebug = graph.getNodeFunctionDebug(node->getId());
+          !fnDebug.empty()) {
+        file << "\\nFn: " << fnDebug;
+      }
+      if (const auto callDebug = graph.getNodeCallSiteDebug(node->getId());
+          !callDebug.empty()) {
+        file << "\\nCS: " << callDebug;
+      }
+    } else if (const auto *val = node->getValue()) {
       file << "\\nVal: " << val->getName().str();
     }
     file << "\"];\n";
@@ -763,19 +780,26 @@ bool SVFGSerializer::writeDot(const SVFG &graph, const std::string &filename) {
     for (const SVFGEdge *edge : node->getOutEdges()) {
       file << "  N" << edge->getSrcNode()->getId() << " -> N"
            << edge->getDstNode()->getId();
-      file << " [label=\"" << edge->toString();
-      if (edge->hasCallSiteDebug()) {
-        file << "\\n" << edge->getCallSiteDebug();
+      file << " [label=\"";
+      if (simple) {
+        file << static_cast<uint32_t>(edge->getEdgeKind());
+      } else {
+        file << edge->toString();
+        if (edge->hasCallSiteDebug()) {
+          file << "\\n" << edge->getCallSiteDebug();
+        }
       }
       file << "\"";
-      if (edge->hasCallSite() || edge->hasCallSiteDebug()) {
-        file << ", color=darkgreen";
-      }
-      if (!edge->getPointsTo().empty()) {
-        file << ", tooltip=\"pts=" << edge->getPointsTo().size() << "\"";
-      }
-      if (edge->getWeight() == SVFGEdge::EdgeWeight::Many) {
-        file << ", style=dashed";
+      if (!simple) {
+        if (edge->hasCallSite() || edge->hasCallSiteDebug()) {
+          file << ", color=darkgreen";
+        }
+        if (!edge->getPointsTo().empty()) {
+          file << ", tooltip=\"pts=" << edge->getPointsTo().size() << "\"";
+        }
+        if (edge->getWeight() == SVFGEdge::EdgeWeight::Many) {
+          file << ", style=dashed";
+        }
       }
       file << "];\n";
     }

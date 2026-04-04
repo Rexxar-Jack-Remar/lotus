@@ -266,6 +266,62 @@ TEST_F(SVFGSerializerTest, RoundTripsInterPhiOperands) {
   EXPECT_EQ(reloadedInterPhiOperandCounts, originalInterPhiOperandCounts);
 }
 
+TEST_F(SVFGSerializerTest, DumpHonorsSimpleMode) {
+  const char *source = R"(
+    define i32 @main() {
+    entry:
+      %p = alloca i8*
+      ret i32 0
+    }
+  )";
+
+  auto module = parseModule(source);
+  ASSERT_NE(module, nullptr);
+
+  ICFG icfg;
+  ICFGBuilder icfgBuilder(&icfg);
+  icfgBuilder.build(module.get());
+
+  SVFGBuilderConfig cfg;
+  cfg.usePointerAnalysis = false;
+  cfg.buildMSSA = false;
+
+  SVFGBuilder builder(cfg);
+  std::unique_ptr<SVFG> graph(builder.build(&icfg));
+  ASSERT_NE(graph, nullptr);
+
+  SmallString<256> simplePath;
+  SmallString<256> verbosePath;
+  int simpleFd = -1;
+  int verboseFd = -1;
+  ASSERT_FALSE(
+      sys::fs::createTemporaryFile("svfg-simple", "dot", simpleFd, simplePath));
+  ASSERT_FALSE(sys::fs::createTemporaryFile("svfg-verbose", "dot", verboseFd,
+                                            verbosePath));
+  ::close(simpleFd);
+  ::close(verboseFd);
+
+  graph->dump(simplePath.str().str(), true);
+  graph->dump(verbosePath.str().str(), false);
+
+  std::ifstream simpleFile(simplePath.c_str());
+  std::ifstream verboseFile(verbosePath.c_str());
+  ASSERT_TRUE(simpleFile.good());
+  ASSERT_TRUE(verboseFile.good());
+
+  std::stringstream simpleBuf;
+  std::stringstream verboseBuf;
+  simpleBuf << simpleFile.rdbuf();
+  verboseBuf << verboseFile.rdbuf();
+
+  sys::fs::remove(simplePath);
+  sys::fs::remove(verbosePath);
+
+  EXPECT_NE(simpleBuf.str(), verboseBuf.str());
+  EXPECT_EQ(simpleBuf.str().find("Kind: "), std::string::npos);
+  EXPECT_NE(verboseBuf.str().find("Kind: "), std::string::npos);
+}
+
 TEST_F(SVFGSerializerTest, SVFGOPTBuildAndWriteSerializesFullGraph) {
   const char *source = R"(
     define i8* @id(i8* %p) {

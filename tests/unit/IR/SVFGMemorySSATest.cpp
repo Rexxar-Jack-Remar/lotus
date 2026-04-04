@@ -320,6 +320,7 @@ TEST_F(SVFGMemorySSATest, GlobalOnlyCalleeCreatesInterproceduralMemoryNodes) {
   const ICFGNode *globalInitNode = icfg.getGlobalInitICFGNode();
   ASSERT_NE(globalInitNode, nullptr);
   bool sawGlobalEntryChi = false;
+  bool sawStoreSeedIntoMain = false;
   for (const auto &pair : *svfg) {
     EXPECT_NE(pair.second->getNodeKind(), SVFGK::CallMu);
     EXPECT_NE(pair.second->getNodeKind(), SVFGK::CallChi);
@@ -329,7 +330,18 @@ TEST_F(SVFGMemorySSATest, GlobalOnlyCalleeCreatesInterproceduralMemoryNodes) {
       sawGlobalEntryChi = true;
     }
   }
-  EXPECT_TRUE(sawGlobalEntryChi);
+  EXPECT_FALSE(sawGlobalEntryChi);
+
+  for (SVFGNode *formalInNode : svfg->getFormalIns(mainFn)) {
+    for (SVFGEdge *edge : formalInNode->getInEdges()) {
+      if (edge && edge->getEdgeKind() == SVFGEdgeK::IntraIndirect &&
+          isa<StoreSVFGNode>(edge->getSrcNode())) {
+        sawStoreSeedIntoMain = true;
+        break;
+      }
+    }
+  }
+  EXPECT_TRUE(sawStoreSeedIntoMain);
 }
 
 TEST_F(SVFGMemorySSATest, CallsiteMemoryNodesTrackOnlyTouchedArguments) {

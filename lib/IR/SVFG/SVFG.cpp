@@ -639,44 +639,82 @@ void SVFG::getInterVFEdgesForIndirectCallSite(
   if (!cs || !callee)
     return;
 
-  auto isInterKind = [](SVFGEdgeK k) {
-    return k == SVFGEdgeK::CallDir || k == SVFGEdgeK::CallInd ||
-           k == SVFGEdgeK::CallAIn || k == SVFGEdgeK::CallFIn ||
-           k == SVFGEdgeK::ParamCall || k == SVFGEdgeK::RetDir ||
-           k == SVFGEdgeK::RetInd || k == SVFGEdgeK::RetAOut ||
-           k == SVFGEdgeK::RetFOut || k == SVFGEdgeK::ParamRet;
-  };
-
-  auto isCallKind = [](SVFGEdgeK k) {
-    return k == SVFGEdgeK::CallDir || k == SVFGEdgeK::CallInd ||
-           k == SVFGEdgeK::CallAIn || k == SVFGEdgeK::CallFIn ||
-           k == SVFGEdgeK::ParamCall;
-  };
-
   std::unordered_set<SVFGEdge *> seen;
-  for (const auto &pair : nodeMap) {
-    SVFGNode *src = pair.second;
-    if (!src)
-      continue;
+  auto pushEdge = [&](SVFGEdge *edge) {
+    if (edge && seen.insert(edge).second)
+      edges.push_back(edge);
+  };
+
+  auto findInterEdge = [&](SVFGNode *src, SVFGNode *dst,
+                           std::initializer_list<SVFGEdgeK> kinds) {
+    if (!src || !dst)
+      return;
     for (SVFGEdge *edge : src->getOutEdges()) {
+      if (!edge || edge->getDstNode() != dst || edge->getCallSite() != cs)
+        continue;
+      if (std::find(kinds.begin(), kinds.end(), edge->getEdgeKind()) !=
+          kinds.end()) {
+        pushEdge(edge);
+      }
+    }
+  };
+
+  for (SVFGNode *actualParmNode : getActualParms(cs)) {
+    auto *actualParm = dyn_cast<ActualParmSVFGNode>(actualParmNode);
+    if (!actualParm)
+      continue;
+    const unsigned actualIdx = actualParm->getParamIndex();
+    const bool isVarArgExtra = callee->isVarArg() && actualIdx >= callee->arg_size();
+    for (SVFGNode *formalParmNode : getFormalParms(callee)) {
+      if (isVarArgExtra) {
+        if (!isa<VarArgSVFGNode>(formalParmNode))
+          continue;
+      } else {
+        auto *formalParm = dyn_cast<FormalParmSVFGNode>(formalParmNode);
+        if (!formalParm || formalParm->getParamIndex() != actualIdx)
+          continue;
+      }
+      findInterEdge(actualParmNode, formalParmNode,
+                    {SVFGEdgeK::CallDir, SVFGEdgeK::CallInd,
+                     SVFGEdgeK::ParamCall});
+    }
+  }
+
+  for (SVFGNode *formalRetNode : getFormalRets(callee)) {
+    for (SVFGNode *actualRetNode : getActualRets(cs)) {
+      findInterEdge(formalRetNode, actualRetNode,
+                    {SVFGEdgeK::RetDir, SVFGEdgeK::RetInd,
+                     SVFGEdgeK::ParamRet});
+    }
+  }
+
+  for (SVFGNode *actualInNode : getActualIns(cs)) {
+    for (SVFGEdge *edge : actualInNode->getOutEdges()) {
       if (!edge || edge->getCallSite() != cs)
         continue;
-      const SVFGEdgeK kind = edge->getEdgeKind();
-      if (!isInterKind(kind))
+      if (edge->getEdgeKind() != SVFGEdgeK::CallAIn &&
+          edge->getEdgeKind() != SVFGEdgeK::CallFIn)
         continue;
-      const SVFGNode *anchor =
-          isCallKind(kind) ? edge->getDstNode() : edge->getSrcNode();
-      if (!anchor || anchor->getFunction() != callee)
+      if (edge->getDstNode() && edge->getDstNode()->getFunction() == callee)
+        pushEdge(edge);
+    }
+  }
+
+  for (SVFGNode *actualOutNode : getActualOuts(cs)) {
+    for (SVFGEdge *edge : actualOutNode->getInEdges()) {
+      if (!edge || edge->getCallSite() != cs)
         continue;
-      if (seen.insert(edge).second)
-        edges.push_back(edge);
+      if (edge->getEdgeKind() != SVFGEdgeK::RetAOut &&
+          edge->getEdgeKind() != SVFGEdgeK::RetFOut)
+        continue;
+      if (edge->getSrcNode() && edge->getSrcNode()->getFunction() == callee)
+        pushEdge(edge);
     }
   }
 }
 
 void SVFG::dump(const std::string &filename, bool simple) const {
-  (void)simple;
-  (void)SVFGSerializer::writeDot(*this, filename);
+  (void)SVFGSerializer::writeDot(*this, filename, simple);
 }
 
 bool SVFG::writeToFile(const std::string &filename) const {
