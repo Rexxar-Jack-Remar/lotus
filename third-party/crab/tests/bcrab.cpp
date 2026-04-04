@@ -11,7 +11,7 @@ void backward_run_internal(CFG *cfg, crab::cfg_impl::basic_block_label_t entry,
                            unsigned narrowing, unsigned jump_set_size,
                            bool enable_stats) {
   using basic_block_t = typename CFG::basic_block_t;
-  
+
   // Run backward analysis
   crab::outs() << "Invariants using " << initial_states.domain_name() << "\n";
   IntraBwdAnalyzer a(*cfg, initial_states);
@@ -23,7 +23,7 @@ void backward_run_internal(CFG *cfg, crab::cfg_impl::basic_block_label_t entry,
 
   crab::analyzer::fwd_bwd_parameters params;
   params.enable_backward() = true;
-  
+
   a.run(entry, initial_states, assumptions, nullptr /*liveness*/,
         fixpo_params, params);
 

@@ -145,17 +145,17 @@ template <typename CFG> void cfg_to_dot(const CFG &cfg) {
 
 template <typename CFG, typename Dom>
 void cfg_to_dot(const CFG &cfg,
-                std::function<boost::optional<Dom>(
+                std::function<std::optional<Dom>(
                     const typename CFG::basic_block_label_t &)>
                     pre_fn,
-                std::function<boost::optional<Dom>(
+                std::function<std::optional<Dom>(
                     const typename CFG::basic_block_label_t &)>
                     post_fn,
                 const checker::checks_db &db) {
   using basic_block_t = typename CFG::basic_block_t;
   auto print_invariants = [](const basic_block_t *node,
-                             boost::optional<Dom> pre,
-                             boost::optional<Dom> post, crab_string_os &os) {
+                             std::optional<Dom> pre,
+                             std::optional<Dom> post, crab_string_os &os) {
     if (pre) {
       os << "\tNodePreInv" << node << " ";
       os << "[style=\"filled\",fillcolor=cornsilk,label=\"" << *pre << "\"];\n";

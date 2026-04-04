@@ -6,9 +6,9 @@ using namespace crab::cfg;
 using namespace crab::cfg_impl;
 using namespace crab::domain_impl;
 
-/* 
+/*
    Example of how to use the sign domain for checking for null
-   dereferences 
+   dereferences
 */
 
 
@@ -40,7 +40,7 @@ z_cfg_t *cfg1(variable_factory_t &vfac) {
     assert(x != NULL); // EXPECTED OK
     assert(y != NULL); // EXPECTED OK
     assert(*i >= 0);   // EXPECTED OK
-    assert(*x >= 1);   // EXPECTED OK 
+    assert(*x >= 1);   // EXPECTED OK
     assert(*y >= 0);   // EXPECTED OK
     assert(*x >= *y);  // EXPECTED FAIL: OK but sign domain cannot prove it
     assert(z == 100);  // EXPECTED OK
@@ -50,7 +50,7 @@ z_cfg_t *cfg1(variable_factory_t &vfac) {
   z_var i(vfac["i"], crab::REF_TYPE);
   z_var x(vfac["x"], crab::REF_TYPE);
   z_var y(vfac["y"], crab::REF_TYPE);
-  z_var z(vfac["z"], crab::INT_TYPE, 32);  
+  z_var z(vfac["z"], crab::INT_TYPE, 32);
   z_var deref_i(vfac["*i"], crab::INT_TYPE, 32);
   z_var deref_x(vfac["*x"], crab::INT_TYPE, 32);
   z_var deref_y(vfac["*y"], crab::INT_TYPE, 32);
@@ -59,7 +59,7 @@ z_cfg_t *cfg1(variable_factory_t &vfac) {
   z_var mem2(vfac["region_1"], crab::REG_INT_TYPE, 32);
   z_var mem3(vfac["region_2"], crab::REG_INT_TYPE, 32);
   // Create allocation sites
-  crab::tag_manager as_man;  
+  crab::tag_manager as_man;
   // Create empty CFG
   z_cfg_t *cfg = new z_cfg_t("entry", "ret");
   // Adding CFG blocks
@@ -68,7 +68,7 @@ z_cfg_t *cfg1(variable_factory_t &vfac) {
   z_basic_block_t &bb1_t = cfg->insert("bb1_t");
   z_basic_block_t &bb1_f = cfg->insert("bb1_f");
   z_basic_block_t &bb2 = cfg->insert("bb2");
-  z_basic_block_t &bb3 = cfg->insert("bb3");  
+  z_basic_block_t &bb3 = cfg->insert("bb3");
   z_basic_block_t &ret = cfg->insert("ret");
   // Adding CFG edges
   entry.add_succ(bb1);
@@ -82,9 +82,9 @@ z_cfg_t *cfg1(variable_factory_t &vfac) {
   // === adding statements
 
   z_var_or_cst_t zero32(z_number(0), crab::variable_type(crab::INT_TYPE, 32));
-  z_var_or_cst_t one32(z_number(1), crab::variable_type(crab::INT_TYPE, 32));  
+  z_var_or_cst_t one32(z_number(1), crab::variable_type(crab::INT_TYPE, 32));
   z_var_or_cst_t size4(z_number(4), crab::variable_type(crab::INT_TYPE, 32));
-  
+
   // Intialization of memory regions
   entry.region_init(mem1);
   entry.region_init(mem2);
@@ -124,7 +124,7 @@ z_cfg_t *cfg1(variable_factory_t &vfac) {
   bb2.add(deref_i, deref_i, 1);
   bb2.store_to_ref(i, mem1, deref_i);
   bb2.sub(z, z, 3);
-  bb3.load_from_ref(deref_i, i, mem1);  
+  bb3.load_from_ref(deref_i, i, mem1);
   bb3.load_from_ref(deref_x, x, mem2);
   bb3.load_from_ref(deref_y, y, mem3);
   ret.assert_ref(z_ref_cst_t::mk_not_null(x));
@@ -155,7 +155,7 @@ int main(int argc, char **argv) {
   z_cfg_t *p1 = cfg1(vfac);
   crab::outs() << *p1 << "\n";
   z_rgn_sign_constant_t init;
-  //run(p1, p1->entry(), init, false, 2, 2, 20, stats_enabled);  
+  //run(p1, p1->entry(), init, false, 2, 2, 20, stats_enabled);
   run_and_check(p1, p1->entry(), init, false, 2, 2, 20, stats_enabled);
   delete p1;
 

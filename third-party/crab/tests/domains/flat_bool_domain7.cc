@@ -27,7 +27,7 @@ exit
   assert(x <= 10);
 */
 
-  variable_factory_t vfac;  
+  variable_factory_t vfac;
   // entry and exit block
   z_cfg_t cfg("entry", "exit");
   // adding blocks
@@ -44,7 +44,7 @@ exit
   z_var x(vfac["x"], crab::INT_TYPE, 32);
   z_var y(vfac["y"], crab::INT_TYPE, 32);
 
-  
+
   // adding statements
   entry.assume(z_lin_exp_t(x) >= 0);
   entry.bool_assign(b1, z_lin_exp_t(y) == 1);
@@ -56,12 +56,12 @@ exit
   entry.bool_assume(b6);
 
   // All assertions are OK
-  exit.assertion(z_lin_exp_t(y) >= 1);  
+  exit.assertion(z_lin_exp_t(y) >= 1);
   exit.assertion(z_lin_exp_t(x) >= 0);
   exit.assertion(z_lin_exp_t(x) <= 10);
   z_bool_num_domain_t init;
   run_and_check(&cfg, cfg.entry(), init, false, 1, 2, 20, stats_enabled);
-  
+
   return 0;
-  
+
 }

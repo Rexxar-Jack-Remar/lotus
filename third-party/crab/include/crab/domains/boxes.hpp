@@ -42,7 +42,7 @@ public:
 
 #include <algorithm>
 #include <boost/bimap.hpp>
-#include <boost/optional.hpp>
+#include <optional>
 
 namespace crab {
 
@@ -82,7 +82,7 @@ public:
   using typename abstract_domain_t::variable_t;
   using typename abstract_domain_t::variable_vector_t;
   using typename abstract_domain_t::variable_or_constant_vector_t;
-  
+
 private:
   using kind_t = typename linear_constraint_t::kind_t;
 
@@ -159,7 +159,7 @@ private:
   LddNodePtr project(variable_t v) const {
     crab::CrabStats::count(domain_name() + ".count.project");
     crab::ScopedCrabStats __st__(domain_name() + ".project");
-    
+
     std::vector<int> qvars;
     // num_of_vars is shared by all ldd's
     qvars.reserve(num_of_vars() - 1);
@@ -193,7 +193,7 @@ private:
         ->create_linterm_sparse_si(&dim, &sgn, 1);
   }
 
-  void copy_term(variable_t v, boost::optional<variable_t> x) {
+  void copy_term(variable_t v, std::optional<variable_t> x) {
     if (is_top() || is_bottom()) {
       return;
     }
@@ -202,7 +202,7 @@ private:
 
     linterm_t lhs = term_from_var(v);
     linterm_t rhs = (x ? term_from_var(*x) : term_from_special_var());
-    
+
     m_ldd =
         lddPtr(get_ldd_man(), Ldd_TermCopy(get_ldd_man(), &(*m_ldd), lhs, rhs));
     Ldd_GetTheory(get_ldd_man())->destroy_term(lhs);
@@ -218,8 +218,8 @@ private:
                      Ldd_ExistsAbstract(get_ldd_man(), &*m_ldd, dim));
     }
   }
- 
-  
+
+
   /**
    **  All the expressiveness about numerical operations with boxes
    **  is limited to:
@@ -260,9 +260,9 @@ private:
     assert(!is_bottom());
 
     constant_t kmin = NULL, kmax = NULL;
-    if (boost::optional<number_t> l = ival.lb().number())
+    if (std::optional<number_t> l = ival.lb().number())
       kmin = mk_cst(*l);
-    if (boost::optional<number_t> u = ival.ub().number())
+    if (std::optional<number_t> u = ival.ub().number())
       kmax = mk_cst(*u);
 
     linterm_t t = term_from_var(v);
@@ -335,17 +335,17 @@ private:
   }
 
   LddNodePtr make_unit_constraint(number_t coef, variable_t var, kind_t kind, number_t k) {
-    assert(coef == 1 || coef == -1);    
+    assert(coef == 1 || coef == -1);
     linterm_t term = term_from_var(var, (coef == 1 ? false : true));
     return make_unit_constraint(term, kind, k);
   }
 
   LddNodePtr make_unit_constraint(number_t coef, kind_t kind, number_t k) {
-    assert(coef == 1 || coef == -1);    
+    assert(coef == 1 || coef == -1);
     linterm_t term = term_from_special_var((coef == 1 ? false : true));
     return make_unit_constraint(term, kind, k);
   }
-  
+
   // Create a new ldd representing the constraint e
   // where e can be one of
   //    term <= k | term < k | term == k | term != k
@@ -355,15 +355,15 @@ private:
     switch(kind) {
     case kind_t::EQUALITY: {
       constant_t c = mk_cst(k);
-      // x>=k            
+      // x>=k
       lincons_t cons1 = get_theory()->create_cons(term, 0 /*non-strict*/, c);
-      // x<=k      
+      // x<=k
       lincons_t cons2 = get_theory()->create_cons(get_theory()->negate_term(term), 0, get_theory()->negate_cst(c));
       LddNodePtr n1 = lddPtr(get_ldd_man(), get_theory()->to_ldd(get_ldd_man(), cons1));
       LddNodePtr n2 = lddPtr(get_ldd_man(), get_theory()->to_ldd(get_ldd_man(), cons2));
       LddNodePtr n = lddPtr(get_ldd_man(), Ldd_And(get_ldd_man(), &*n1, &*n2));
       get_theory()->destroy_lincons(cons1);
-      get_theory()->destroy_lincons(cons2);                  
+      get_theory()->destroy_lincons(cons2);
       return n;
     }
     case kind_t::INEQUALITY: {
@@ -408,8 +408,8 @@ private:
 
     number_t unbounded_lbcoeff;
     number_t unbounded_ubcoeff;
-    boost::optional<variable_t> unbounded_lbvar;
-    boost::optional<variable_t> unbounded_ubvar;
+    std::optional<variable_t> unbounded_lbvar;
+    std::optional<variable_t> unbounded_ubvar;
     number_t exp_ub = -(exp.constant());
     std::vector<std::pair<std::pair<number_t, variable_t>, number_t>> pos_terms;
     std::vector<std::pair<std::pair<number_t, variable_t>, number_t>> neg_terms;
@@ -527,7 +527,7 @@ private:
          it != e.end(); ++it) {
       variable_t v = it->second;
       interval_t res_i = compute_residual(e, v) / interval_t(it->first);
-      boost::optional<number_t> k = res_i.singleton();
+      std::optional<number_t> k = res_i.singleton();
       if (k) {
         linear_constraint_t cst(v != *k);
         operator+=(cst);
@@ -686,10 +686,10 @@ private:
     return;
   }
 
-  inline LddNodePtr mk_false(boost::optional<variable_t> x) {
+  inline LddNodePtr mk_false(std::optional<variable_t> x) {
     return (x ? make_unit_constraint(number_t(1), variable_t(*x),
 				     linear_constraint_t::EQUALITY, number_t(0)):
-	    make_unit_constraint(number_t(1), 
+	    make_unit_constraint(number_t(1),
 				 linear_constraint_t::EQUALITY, number_t(0)));
   }
 
@@ -700,7 +700,7 @@ private:
   // Important: Crab follows LLVM semantics where TRUE is 1. Note that
   // in C, TRUE is any value different from 0. Following LLVM
   // semantics avoids many disjunctions in the boolean operations.
-  inline LddNodePtr mk_true(boost::optional<variable_t> x) {
+  inline LddNodePtr mk_true(std::optional<variable_t> x) {
     return (x ? make_unit_constraint(number_t(1), variable_t(*x),
 				     linear_constraint_t::EQUALITY, number_t(1)):
 	        make_unit_constraint(number_t(1),
@@ -715,10 +715,10 @@ private:
     return linear_constraint_t(x == 1);
     //return linear_constraint_t(x != 0);
   }
-  
+
 
   // Return a node of the form ITE(y Op z, x=TRUE, x=FALSE)
-  LddNodePtr gen_binary_bool(bool_operation_t op, boost::optional<variable_t> x,
+  LddNodePtr gen_binary_bool(bool_operation_t op, std::optional<variable_t> x,
                              const variable_t &y, const variable_t &z) {
     switch (op) {
     case OP_BAND: {
@@ -742,7 +742,7 @@ private:
     }
     }
   }
-  
+
   variable_t getVarName(int v) const {
     auto it = s_var_map.right.find(v);
     if (it != s_var_map.right.end())
@@ -751,7 +751,7 @@ private:
       CRAB_ERROR("Index ", v, " cannot be mapped back to a variable name");
     }
   }
-  
+
 public:
   static void clear_global_state() { s_var_map.clear(); }
 
@@ -840,7 +840,7 @@ public:
   void operator&=(const boxes_domain_t &other) override {
     *this = *this & other;
   }
-  
+
   boxes_domain_t operator&(const boxes_domain_t &other) const override {
     crab::CrabStats::count(domain_name() + ".count.meet");
     crab::ScopedCrabStats __st__(domain_name() + ".meet");
@@ -1023,7 +1023,7 @@ public:
   }
 
   DEFAULT_ENTAILS(boxes_domain_t)
-  
+
   void normalize() override {}
 
   void minimize() override {}
@@ -1096,7 +1096,7 @@ public:
                                            << "Projection " << i << "\n";);
     return i;
   }
-  
+
   // x := e
   void assign(const variable_t &x, const linear_expression_t &e) override {
     crab::CrabStats::count(domain_name() + ".count.assign");
@@ -1402,7 +1402,7 @@ public:
     if (!m_bool_reasoning) {
       return;
     }
-    
+
     crab::CrabStats::count(domain_name() + ".count.assign_bool_cst");
     crab::ScopedCrabStats __st__(domain_name() + ".assign_bool_cst");
 
@@ -1410,14 +1410,14 @@ public:
     	   return (c.expression().size() == 1 &&
     		   (c.expression().begin()->first == number_t(1) ||
     		    c.expression().begin()->first == number_t(-1))); };
-    
+
     if (is_bottom()) {
       return;
-    } 
+    }
 
     // Important to forget first lhs
     this->operator-=(lhs);
-    
+
     if (cst.is_tautology()) {
       this->operator+=(mk_true_cst(lhs));
     } else if (cst.is_contradiction()) {
@@ -1458,7 +1458,7 @@ public:
         *this = (tt | ff);
       }
     }
-      
+
     CRAB_LOG("boxes", crab::outs() << lhs << ":= "
                                    << "(" << cst << ")\n"
                                    << *this << "\n");
@@ -1478,24 +1478,24 @@ public:
                        bool is_not_y) override {
     if (!m_bool_reasoning)
       return;
-    
+
     crab::CrabStats::count(domain_name() + ".count.assign_bool_var");
     crab::ScopedCrabStats __st__(domain_name() + ".assign_bool_var");
 
     if (is_bottom()) {
       return;
     }
-    
+
     if (is_not_y) {
       // forget left-hand side
       operator-=(x);
 
       if (x == y) {
 	// TODO
-	CRAB_WARN("boxes skipped ", x, " not(", y, ")");	
+	CRAB_WARN("boxes skipped ", x, " not(", y, ")");
 	return;
       }
-      
+
       // Note that we could project away irrelevant variables before
       // performing the join but this would lose precision.
       boxes_domain_t inv1(*this);
@@ -1506,7 +1506,7 @@ public:
       inv2 += mk_true_cst(x);
       *this = (inv1 | inv2);
     } else {
-      apply_ldd(x, y, number_t(1), number_t(0));      
+      apply_ldd(x, y, number_t(1), number_t(0));
     }
 
     CRAB_LOG("boxes", crab::outs() << x << ":=";
@@ -1527,13 +1527,13 @@ public:
     if (is_bottom()) {
       return;
     }
-    
+
     // XXX: if *lhs is null then it represents the SPECIAL
     // variable $0.
-    boost::optional<variable_t> lhs;
+    std::optional<variable_t> lhs;
 
     if (!(x == y) && !(x == z)) {
-      lhs = boost::optional<variable_t>(x);
+      lhs = std::optional<variable_t>(x);
       // XXX: x does not appear on the rhs so we can remove it
       // without losing precision.
       this->operator-=(x);
@@ -1560,7 +1560,7 @@ public:
     if ((x == y) || (x == z)) {
       // XXX: if we are here we added ite(y op z, $0 >= 1, $0 <= 0);
       // so we still need to assign $0 to x:
-      copy_term(x, boost::optional<variable_t>());
+      copy_term(x, std::optional<variable_t>());
     }
 
     CRAB_LOG("boxes", crab::outs()
@@ -1578,7 +1578,7 @@ public:
     if (is_bottom()) {
       return;
     }
-    
+
     m_ldd = lddPtr(get_ldd_man(),
                    Ldd_And(get_ldd_man(), &*m_ldd,
                            ((is_negated) ? &*mk_false(x) : &*mk_true(x))));
@@ -1651,7 +1651,7 @@ public:
   DEFAULT_SELECT_BOOL(boxes_domain_t)
   DEFAULT_WEAK_ASSIGN(boxes_domain_t)
   DEFAULT_WEAK_BOOL_ASSIGN(boxes_domain_t)
-  
+
   linear_constraint_system_t to_linear_constraint_system() const override {
     crab::CrabStats::count(domain_name() +
                            ".count.to_linear_constraint_system");
@@ -1719,7 +1719,7 @@ public:
     } else {
 #if 0
       auto r = to_linear_constraint_system();
-#else      
+#else
       auto r = to_disjunctive_linear_constraint_system();
 #endif
       o << r;
@@ -1806,7 +1806,7 @@ public:
 //     return (!(cst_inv & inv).is_bottom());
 //   }
 // };
-  
+
 } // namespace domains
 } // namespace crab
 #endif /* HAVE_LDD */

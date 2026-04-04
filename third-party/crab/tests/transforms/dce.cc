@@ -32,7 +32,7 @@ z_cfg_t *prog1(variable_factory_t &vfac, crab::tag_manager &as_man) {
   z_var q(vfac["q"], crab::REF_TYPE);
   z_var mem(vfac["region_0"], crab::REG_INT_TYPE, 32);
   z_var_or_cst_t size400(z_number(400), crab::variable_type(crab::INT_TYPE, 32));
-  
+
   // entry and exit block
   auto cfg = new z_cfg_t("x0", "ret");
   // adding blocks
@@ -100,9 +100,9 @@ z_cfg_t *prog2(variable_factory_t &vfac, crab::tag_manager &as_man) {
   z_var p(vfac["p"], crab::REF_TYPE);
   z_var q(vfac["q"], crab::REF_TYPE);
   z_var mem(vfac["region_0"], crab::REG_INT_TYPE, 32);
-  z_var_or_cst_t size400(z_number(400), crab::variable_type(crab::INT_TYPE, 32));  
+  z_var_or_cst_t size400(z_number(400), crab::variable_type(crab::INT_TYPE, 32));
   // entry and exit block
-  typename z_cfg_t::fdecl_t fdecl("main", {}, {k});  
+  typename z_cfg_t::fdecl_t fdecl("main", {}, {k});
   auto cfg = new z_cfg_t("x0", "ret", fdecl);
   // adding blocks
   z_basic_block_t &x0 = cfg->insert("x0");

@@ -79,7 +79,7 @@ public:
     }
 
   public:
-    
+
     ghost_variable_t get_offset() const { return m_offset; }
 
     ghost_variable_t get_size() const { return m_size; }
@@ -124,7 +124,7 @@ public:
       dom.weak_assign(m_offset, rhs.m_offset);
       dom.weak_assign(m_size, rhs.m_size);
     }
-    
+
     void assign(ghost_domain_t &dom, const ghost_offset_and_size &rhs,
                 const ghost_linear_expression_t &offset) const {
       if (m_offset.get_type() != rhs.m_offset.get_type()) {
@@ -206,7 +206,7 @@ public:
   // address and the base address of the memory object to which
   // address belongs to, and m_object_offset_size.second is the `size` of the
   // memory object.
-  boost::optional<ghost_offset_and_size> m_object_offset_size;
+  std::optional<ghost_offset_and_size> m_object_offset_size;
   // The CrabIR type of the variable which is being shadowed
   variable_type m_vty;
 
@@ -226,7 +226,7 @@ public:
   }
 
   ghost_variables(ghost_variable_t bv, variable_type vty)
-      : m_var(bv), m_object_offset_size(boost::none), m_vty(vty) {
+      : m_var(bv), m_object_offset_size(std::nullopt), m_vty(vty) {
     check_types();
   }
 
@@ -289,7 +289,7 @@ public:
   enum class ghost_variable_kind {
     ADDRESS = 0, OFFSET = 1, SIZE = 2
   };
-  
+
   static ghost_variables create(ghost_varname_allocator_t &alloc,
                                 var_allocator_fn_t alloc_fn,
                                 const varname_t &name, const variable_type &vty,

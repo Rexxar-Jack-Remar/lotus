@@ -45,7 +45,7 @@
 
 #include <crab/support/os.hpp>
 
-#include <boost/optional.hpp>
+#include <optional>
 
 namespace ikos {
 
@@ -100,7 +100,7 @@ public:
   bool is_bottom() const;
   bool is_top() const;
 
-  boost::optional<Number> singleton() const;
+  std::optional<Number> singleton() const;
 
   Number get_modulo() const;
   Number get_remainder() const;

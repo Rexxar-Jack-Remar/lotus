@@ -37,7 +37,7 @@
 #include <crab/domains/patricia_trees.hpp>
 #include <crab/support/debug.hpp>
 
-#include "boost/optional.hpp"
+#include <optional>
 #include "boost/range/iterator_range_core.hpp"
 
 namespace ikos {
@@ -656,26 +656,26 @@ private:
   discrete_pair_domain(bool b) : m_is_top(b) {}
 
   class join_op : public binary_op_t {
-    virtual std::pair<bool, boost::optional<Value>>
+    virtual std::pair<bool, std::optional<Value>>
     apply(const Key & /*key*/, const Value &x, const Value &y) override {
       Value z = x.operator|(y);
       if (z.is_top()) {
-        return {false, boost::optional<Value>()};
+        return {false, std::optional<Value>()};
       } else {
-        return {false, boost::optional<Value>(z)};
+        return {false, std::optional<Value>(z)};
       }
     }
     virtual bool default_is_absorbing() override { return false; }
   }; // class join_op
 
   class meet_op : public binary_op_t {
-    virtual std::pair<bool, boost::optional<Value>>
+    virtual std::pair<bool, std::optional<Value>>
     apply(const Key & /*key*/, const Value &x, const Value &y) override {
       Value z = x.operator&(y);
       if (z.is_bottom()) {
-        return {true, boost::optional<Value>()};
+        return {true, std::optional<Value>()};
       } else {
-        return {false, boost::optional<Value>(z)};
+        return {false, std::optional<Value>(z)};
       }
     };
     virtual bool default_is_absorbing() override { return true; }
@@ -772,7 +772,7 @@ public:
     if (is_top())
       return Value::top();
     else {
-      boost::optional<Value> v = m_tree.lookup(k);
+      std::optional<Value> v = m_tree.lookup(k);
       if (v) {
         return *v;
       } else {

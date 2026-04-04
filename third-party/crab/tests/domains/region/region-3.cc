@@ -38,7 +38,7 @@ int main() {
   // Define program variables
   z_var i0(vfac["i0"], crab::INT_TYPE, 32);
   z_var x1(vfac["x1"], crab::INT_TYPE, 32);
-  z_var x2(vfac["x2"], crab::INT_TYPE, 32);    
+  z_var x2(vfac["x2"], crab::INT_TYPE, 32);
   z_var ref0(vfac["ref0"], crab::REF_TYPE, 32);
   z_var ref1(vfac["ref1"], crab::REF_TYPE, 32);
   z_var ref2(vfac["ref2"], crab::REF_TYPE, 32);
@@ -49,15 +49,15 @@ int main() {
   z_var ref7(vfac["ref7"], crab::REF_TYPE, 32);
   z_var ref8(vfac["ref8"], crab::REF_TYPE, 32);
   z_var ref9(vfac["ref9"], crab::REF_TYPE, 32);
-  
+
   // Define memory regions
   z_var mem_field_f(vfac["region_field_f"], crab::REG_INT_TYPE, 32);
-  z_var mem_field_s(vfac["region_field_s"], crab::REG_INT_TYPE, 32);  
+  z_var mem_field_s(vfac["region_field_s"], crab::REG_INT_TYPE, 32);
   z_var mem_field_next(vfac["region_field_next"], crab::REG_REF_TYPE, 32);
 
   // Create allocation sites
   crab::tag_manager as_man;
-  
+
   // Create empty CFG
   z_cfg_t *cfg = new z_cfg_t("entry", "exit");
   // Adding CFG blocks
@@ -69,14 +69,14 @@ int main() {
   z_basic_block_t &bb6_loop = cfg->insert("bb6_loop");
   z_basic_block_t &bb7 = cfg->insert("bb7");
   z_basic_block_t &bb8 = cfg->insert("bb8");
-  z_basic_block_t &bb9 = cfg->insert("bb9");      
+  z_basic_block_t &bb9 = cfg->insert("bb9");
   z_basic_block_t &exit = cfg->insert("exit");
   // Adding CFG edges
   entry.add_succ(bb2_loop);
   bb2_loop.add_succ(bb3);
   bb2_loop.add_succ(bb4);
   bb3.add_succ(bb5);
-  bb5.add_succ(bb2_loop);  
+  bb5.add_succ(bb2_loop);
   bb4.add_succ(bb6_loop);
   bb6_loop.add_succ(bb7);
   bb6_loop.add_succ(bb8);
@@ -86,7 +86,7 @@ int main() {
 
   z_var_or_cst_t n30000_32(z_number(30000), crab::variable_type(crab::INT_TYPE, 32));
   z_var_or_cst_t size16(z_number(16), crab::variable_type(crab::INT_TYPE, 32));
- 
+
   entry.region_init(mem_field_next);
   entry.region_init(mem_field_s);
   entry.region_init(mem_field_f);
@@ -102,9 +102,9 @@ int main() {
   bb4.gep_ref(ref1, mem_field_f, ref0, mem_field_f);
   // tmp = malloc(...)
   bb5.make_ref(ref2, mem_field_f, size16, as_man.mk_tag());
-  
+
   bb5.assume_ref(z_ref_cst_t::mk_gt_null(ref2));
-  /// tmp->f = i  
+  /// tmp->f = i
   bb5.gep_ref(ref3, mem_field_f, ref2, mem_field_f);
   bb5.store_to_ref(ref3, mem_field_f, i0);
   // tmp->s = N*3
@@ -133,7 +133,7 @@ int main() {
   bb9.gep_ref(ref8, mem_field_next, ref1, mem_field_f, 8);
   bb9.load_from_ref(ref9, ref8, mem_field_next);
   bb9.gep_ref(ref1, mem_field_f, ref9, mem_field_f);
-  
+
   return cfg;
 }
 

@@ -23,7 +23,7 @@ ELINA_LIBS := \
 
 CXXFLAGS += \
      -I $(MPFR_DIR)/include \
-     -I $(CRAB_INSTALL)/elina/include 
+     -I $(CRAB_INSTALL)/elina/include
 
 LDFLAGS += $(ELINA_LIBS)
 LDFLAGS += -L$(MPFR_DIR)/lib -lmpfr
@@ -31,7 +31,7 @@ LDFLAGS += -L$(MPFR_DIR)/lib -lmpfr
 # Lookup paths for crab and elina shared libraries
 LDFLAGS += -Wl,-rpath,$(CRAB_INSTALL)/crab/lib/,-rpath,$(CRAB_INSTALL)/elina/lib/
 ifeq ($(UNAME),Linux)
-    LDFLAGS += -Wl,--disable-new-dtags 
+    LDFLAGS += -Wl,--disable-new-dtags
 endif
 
 all: domain analysis

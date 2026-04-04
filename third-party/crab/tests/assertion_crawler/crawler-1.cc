@@ -11,7 +11,7 @@ using namespace crab::domain_impl;
 using assertion_crawler_t = crab::analyzer::assertion_crawler<z_cfg_ref_t>;
 using assertion_crawler_domain_t = typename assertion_crawler_t::assertion_crawler_domain_t;
 using var_dom_t = typename assertion_crawler_domain_t::var_dom_t;
-using summary_map_t = typename assertion_crawler_t::summary_map_t;  
+using summary_map_t = typename assertion_crawler_t::summary_map_t;
 using assert_map_t = typename assertion_crawler_t::assert_map_t;
 
 std::unique_ptr<z_cfg_t> main_cfg(variable_factory_t &vfac) {
@@ -26,10 +26,10 @@ std::unique_ptr<z_cfg_t> main_cfg(variable_factory_t &vfac) {
   z_var y3(vfac["y3"], crab::INT_TYPE, 32);
   z_var y4(vfac["y4"], crab::INT_TYPE, 32);
   z_var x1(vfac["x1"], crab::INT_TYPE, 32);
-  z_var x2(vfac["x2"], crab::INT_TYPE, 32);  
-  
+  z_var x2(vfac["x2"], crab::INT_TYPE, 32);
+
   // entry and exit block
-  function_decl<z_number, varname_t> decl("main", {}, {});  
+  function_decl<z_number, varname_t> decl("main", {}, {});
   std::unique_ptr<z_cfg_t> cfg(new z_cfg_t("exit", "exit", decl));
   // adding blocks
   //z_basic_block_t &entry = cfg->insert("entry");
@@ -40,10 +40,10 @@ std::unique_ptr<z_cfg_t> main_cfg(variable_factory_t &vfac) {
   //entry.havoc(y1);
   //entry.havoc(y2);
   //entry.havoc(y3);
-  //entry.havoc(y4);  
+  //entry.havoc(y4);
   exit.callsite("foo",{x1,x2},{y1,y2,y3,y4});
   exit.assertion(x1 >= 100);
-  exit.assertion(x2 >= 200);    
+  exit.assertion(x2 >= 200);
   return cfg;
 }
 
@@ -54,8 +54,8 @@ z_cfg_t *foo_cfg(variable_factory_t &vfac, summary_map_t &summaries) {
   z_var i3(vfac["i3"], crab::INT_TYPE, 32);
   z_var i4(vfac["i4"], crab::INT_TYPE, 32);
   z_var o1(vfac["o1"], crab::INT_TYPE, 32);
-  z_var o2(vfac["o2"], crab::INT_TYPE, 32);  
-  
+  z_var o2(vfac["o2"], crab::INT_TYPE, 32);
+
   // entry and exit block
    z_cfg_t *cfg = new z_cfg_t("entry", "entry",
 			      function_decl<z_number, varname_t>("foo", {i1,i2,i3,i4}, {o1,o2}));
@@ -75,7 +75,7 @@ z_cfg_t *foo_cfg(variable_factory_t &vfac, summary_map_t &summaries) {
 
   typename summary_map_t::mapped_type summary_foo_info({i1,i2,i3,i4},{o1,o2},summary_foo);
   summaries.insert({&cfg->get_func_decl(), std::move(summary_foo_info)});
-  
+
   return cfg;
 }
 
@@ -85,7 +85,7 @@ int main(int argc, char **argv) {
     return 0;
   }
 
-  summary_map_t summaries;  
+  summary_map_t summaries;
   assert_map_t assert_map;
   variable_factory_t vfac;
 
@@ -101,7 +101,7 @@ int main(int argc, char **argv) {
     kv.second.write(crab::outs());
     crab::outs() << "\n";
   }
-  
+
   assertion_crawler_t assert_crawler(*p1, assert_map, summaries);
   assert_crawler.exec();
   crab::outs() << "\n";

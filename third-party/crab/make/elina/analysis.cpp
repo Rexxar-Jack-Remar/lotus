@@ -43,12 +43,12 @@ namespace crab {
 template<>
 class basic_block_traits<basic_block_t> {
 public:
-  using bb_label_t = typename basic_block_t::basic_block_label_t;  
+  using bb_label_t = typename basic_block_t::basic_block_label_t;
   static std::string to_string(const bb_label_t &bbl) {
     return bbl;
   }
 };
-} // end namespace crab  
+} // end namespace crab
 //// To define CFG over integers
 using cfg_t = cfg::cfg<basic_block_label_t, varname_t, z_number>;
 using cfg_ref_t = cfg::cfg_ref<cfg_t>;
@@ -74,7 +74,7 @@ int main(int argc, char**argv) {
 
   // Build a CFG
   cfg_t prog("entry", "exit");
-  
+
   basic_block_t& entry = prog.insert("entry");
   basic_block_t& header = prog.insert("header");
   basic_block_t& exit = prog.insert("exit");
@@ -85,7 +85,7 @@ int main(int argc, char**argv) {
 
   entry.add_succ(header);
   header.add_succ(body);
-  header.add_succ(exit);  
+  header.add_succ(exit);
   body.add_succ(body_if_tt);
   body.add_succ(body_if_ff);
   body_if_tt.add_succ(body_tail);
@@ -123,12 +123,12 @@ int main(int argc, char**argv) {
   outs () << "Invariants using Elina Octagons\n";
   print_invariants(analyzer);
   analyzer.clear();
-  
+
   pk_domain_t top_pk;
   analyzer.get_abs_transformer().set_abs_value(top_pk);
   analyzer.run();
   outs () << "Invariants using Elina Polyhedra\n";
   print_invariants(analyzer);
-  
+
   return 0;
 }

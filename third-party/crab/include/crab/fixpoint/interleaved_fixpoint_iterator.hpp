@@ -96,7 +96,7 @@ private:
   using thresholds_t = crab::thresholds<typename CFG::number_t>;
   using wto_thresholds_t = crab::wto_thresholds<CFG>;
   using thresholds_map_t = typename wto_thresholds_t::thresholds_map_t;
-  
+
 protected:
   using iterator = typename invariant_table_t::iterator;
   using const_iterator = typename invariant_table_t::const_iterator;
@@ -112,7 +112,7 @@ protected:
   thresholds_map_t m_thresholds_per_cycle;
   // enable post-processing of the invariants
   bool m_enable_processor;
-  
+
 private:
   // We don't want derived classes to access directly to m_pre and
   // m_post in case we make internal changes
@@ -250,7 +250,7 @@ private:
       m_post.emplace(label, std::move(m_absval_fac.make_bottom()));
     }
   }
-  
+
 public:
   interleaved_fwd_fixpoint_iterator(CFG cfg, AbstractValue absval_fac,
 				    const crab::fixpoint_parameters &params,
@@ -293,7 +293,7 @@ public:
     crab::ScopedCrabStats __st__("Fixpo");
 
     initialize_invariant_tables();
-    
+
     CRAB_VERBOSE_IF(1, crab::get_msg_stream() << "== Started analysis of "
                                               << func_name(m_cfg) << "\n");
     set_pre(m_cfg.entry(), init);
@@ -315,7 +315,7 @@ public:
     crab::ScopedCrabStats __st__("Fixpo");
 
     initialize_invariant_tables();
-    
+
     CRAB_VERBOSE_IF(
         1, crab::get_msg_stream()
                << "== Started fixpoint at block " << func_name(m_cfg) << "::"
@@ -500,7 +500,7 @@ public:
     basic_block_label_t head = cycle.head();
 
     auto get_nesting = [this](basic_block_label_t n) {
-      boost::optional<wto_nesting_t> nesting = m_iterator->m_wto.nesting(n);
+      std::optional<wto_nesting_t> nesting = m_iterator->m_wto.nesting(n);
       if (nesting) {
         return *nesting;
       } else {

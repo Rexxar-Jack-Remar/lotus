@@ -121,7 +121,7 @@ private:
       return r;
     };
     interval_t i_elem_size = to_interval(elem_size);
-    if (boost::optional<number_t> n_bytes = i_elem_size.singleton()) {
+    if (std::optional<number_t> n_bytes = i_elem_size.singleton()) {
       if (static_cast<int64_t>(*n_bytes) > 0) {
         return (uint64_t) static_cast<int64_t>(*n_bytes);
       }
@@ -261,7 +261,7 @@ public:
     m_last_access_env = m_last_access_env & other.m_last_access_env;
     m_base_dom &= other.m_base_dom;
   }
-  
+
   array_smashing_t operator&(const array_smashing_t &other) const override {
     return array_smashing_t(m_last_access_env & other.m_last_access_env,
                             m_base_dom & other.m_base_dom);
@@ -359,7 +359,7 @@ public:
   bool entails(const linear_constraint_t &cst) const override {
     return m_base_dom.entails(cst);
   }
-  
+
   void operator-=(const variable_t &var) override {
     if (var.get_type().is_array()) {
       bytes_t size = get_size(var);
@@ -387,7 +387,7 @@ public:
     CRAB_LOG("smashing", crab::outs()
 	     << "weak_assign(" << x << "," << e << ")" <<  *this << "\n";);
   }
-  
+
   void apply(arith_operation_t op, const variable_t &x, const variable_t &y,
              number_t z) override {
     m_base_dom.apply(op, x, y, z);
@@ -473,7 +473,7 @@ public:
 				    bool is_not_rhs) override {
     m_base_dom.weak_assign_bool_var(lhs, rhs, is_not_rhs);
   }
-  
+
   virtual void apply_binary_bool(bool_operation_t op, const variable_t &x,
                                  const variable_t &y,
                                  const variable_t &z) override {

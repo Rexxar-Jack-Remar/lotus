@@ -42,9 +42,9 @@ z_cfg_t *foo(z_var x, z_var z, variable_factory_t &vfac, crab::tag_manager &as_m
   z_basic_block_t &exit = cfg->insert("exit");
   entry >> exit;
   z_var ref(vfac["ref"], crab::REF_TYPE, 32);
-  z_var tmp(vfac["tmp"], crab::INT_TYPE, 32);    
+  z_var tmp(vfac["tmp"], crab::INT_TYPE, 32);
   entry.region_init(z);
-  z_var_or_cst_t size4(z_number(4), crab::variable_type(crab::INT_TYPE, 32));    
+  z_var_or_cst_t size4(z_number(4), crab::variable_type(crab::INT_TYPE, 32));
   entry.make_ref(ref, z, size4, as_man.mk_tag());
   entry.assume(tmp <= x);
   entry.assume(tmp > 0);
@@ -62,10 +62,10 @@ z_cfg_t *m(z_var x, z_var z, variable_factory_t &vfac, crab::tag_manager &as_man
   entry.assume(x > 0);
   exit.callsite("foo", {z}, {x});
   z_var ref(vfac["ref"], crab::REF_TYPE, 32);
-  z_var lhs(vfac["lhs"], crab::INT_TYPE, 32);    
+  z_var lhs(vfac["lhs"], crab::INT_TYPE, 32);
   exit.load_from_ref(lhs, ref, z);
   exit.assertion(z_lin_exp_t(x) >= z_lin_exp_t(lhs));
-  exit.assertion(lhs > 0);  
+  exit.assertion(lhs > 0);
   return cfg;
 }
 
@@ -76,7 +76,7 @@ int main(int argc, char **argv) {
 			 false/*is_dereferenceable*/,
 			 true/*skip_unknown_regions*/);
   crab_domain_params_man::get().update_params(p);
-  
+
   bool stats_enabled = false;
   if (!crab_tests::parse_user_options(argc, argv, stats_enabled)) {
     return 0;
@@ -85,11 +85,11 @@ int main(int argc, char **argv) {
   using inter_params_t = inter_analyzer_parameters<z_cg_t>;
   variable_factory_t vfac;
   crab::tag_manager as_man;
-  
+
   // Defining program variables
   z_var x(vfac["x"], crab::INT_TYPE, 32);
   z_var z(vfac["z"], crab::REG_INT_TYPE, 32);
-  
+
   z_cfg_t *t1 = foo(x, z, vfac, as_man);
   z_cfg_t *t2 = m(x, z, vfac, as_man);
 

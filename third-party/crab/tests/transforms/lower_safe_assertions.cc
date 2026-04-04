@@ -46,7 +46,7 @@ z_cfg_t *prog(variable_factory_t &vfac, crab::tag_manager &as_man) {
   // create an  memory region
   z_var mem(vfac["region_0"], crab::REG_INT_TYPE, 32);
   z_var_or_cst_t size8(z_number(8), crab::variable_type(crab::INT_TYPE, 32));
-  
+
   // entry and exit block
   z_cfg_t *cfg = new z_cfg_t("entry", "ret");
   // adding blocks
@@ -141,7 +141,7 @@ int main(int argc, char **argv) {
 
   // Run numerical analysis
   z_sdbm_domain_t absval_fac;
-  crab::fixpoint_parameters fixpo_params;  
+  crab::fixpoint_parameters fixpo_params;
   num_analyzer_t num_a(cfg_ref, absval_fac, nullptr, fixpo_params);
   num_a.run(absval_fac.make_top());
   crab::outs() << "Analysis using " << absval_fac.domain_name() << "\n";

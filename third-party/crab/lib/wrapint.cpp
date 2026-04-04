@@ -196,7 +196,7 @@ std::size_t wrapint::hash() const {
   size_t z = std::hash<uint64_t>{}(_mod);
   return combine(combine(x, y), z);
 }
-  
+
 wrapint wrapint::operator+(wrapint x) const {
   sanity_check_bitwidths(x);
 

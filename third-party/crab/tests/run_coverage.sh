@@ -1,4 +1,4 @@
-#!/bin/bash  
+#!/bin/bash
 
 if [ $# -ne 2 ]; then
     echo "Usage: $0 BUILD_DIR CRAB_ROOT"
@@ -31,7 +31,7 @@ echo 'done!'
 # Generate coverage information
 if [ ! -d $BUILD_DIR/lcov_files ]; then
     mkdir $BUILD_DIR/lcov_files
-fi    
+fi
 echo 'Generating coverage information ...'
 PATTERNS=
 for test in $BUILD_DIR/test-bin/*

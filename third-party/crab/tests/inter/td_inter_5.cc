@@ -37,15 +37,15 @@ using namespace crab::cg_impl;
 
 z_cfg_t *foo(variable_factory_t &vfac, crab::tag_manager &as_man) {
   z_var a(vfac["a"], crab::INT_TYPE, 32);
-  z_var b(vfac["b"], crab::REG_INT_TYPE, 32);  
+  z_var b(vfac["b"], crab::REG_INT_TYPE, 32);
   z_var ref(vfac["ref"], crab::REF_TYPE, 32);
-  z_var tmp(vfac["tmp"], crab::INT_TYPE, 32);    
-  
+  z_var tmp(vfac["tmp"], crab::INT_TYPE, 32);
+
   function_decl<z_number, varname_t> decl("foo", {a}, {b});
   z_cfg_t *cfg = new z_cfg_t("entry", "exit", decl);
   z_basic_block_t &entry = cfg->insert("entry");
   z_basic_block_t &exit = cfg->insert("exit");
-  z_var_or_cst_t size4(z_number(4), crab::variable_type(crab::INT_TYPE, 32));      
+  z_var_or_cst_t size4(z_number(4), crab::variable_type(crab::INT_TYPE, 32));
   entry >> exit;
   entry.region_init(b);
   entry.make_ref(ref, b, size4, as_man.mk_tag());
@@ -62,16 +62,16 @@ z_cfg_t *__main(variable_factory_t &vfac, crab::tag_manager &as_man) {
   z_basic_block_t &exit = cfg->insert("exit");
   z_var x(vfac["x"], crab::INT_TYPE, 32);
   z_var z(vfac["z"], crab::REG_INT_TYPE, 32);
-  
+
   entry >> exit;
   entry.havoc(x);
   entry.assume(x > 0);
   exit.callsite("foo", {z}, {x});
   z_var ref(vfac["ref"], crab::REF_TYPE, 32);
-  z_var lhs(vfac["lhs"], crab::INT_TYPE, 32);    
+  z_var lhs(vfac["lhs"], crab::INT_TYPE, 32);
   exit.load_from_ref(lhs, ref, z);
   exit.assertion(z_lin_exp_t(x) >= z_lin_exp_t(lhs));
-  exit.assertion(lhs > 0);  
+  exit.assertion(lhs > 0);
   return cfg;
 }
 
@@ -82,7 +82,7 @@ int main(int argc, char **argv) {
 			 false/*is_dereferenceable*/,
 			 true/*skip_unknown_regions*/);
   crab_domain_params_man::get().update_params(p);
-  
+
   bool stats_enabled = false;
   if (!crab_tests::parse_user_options(argc, argv, stats_enabled)) {
     return 0;
@@ -92,7 +92,7 @@ int main(int argc, char **argv) {
   variable_factory_t vfac;
   crab::tag_manager as_man;
   // Defining program variables
-  
+
   z_cfg_t *t1 = foo(vfac, as_man);
   z_cfg_t *t2 = __main(vfac, as_man);
 

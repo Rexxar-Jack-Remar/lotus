@@ -126,28 +126,28 @@ int main(int argc, char **argv) {
   crab::outs() << "=== Arrays ==== \n";
   {
     z_uf_domain_t dom;
-    z_var a(vfac["A"], crab::ARR_INT_TYPE, 32);    
+    z_var a(vfac["A"], crab::ARR_INT_TYPE, 32);
     z_var x(vfac["x"], crab::INT_TYPE, 32);
     z_var y(vfac["y"], crab::INT_TYPE, 32);
     z_var w(vfac["w"], crab::INT_TYPE, 32);
-    z_var z(vfac["z"], crab::INT_TYPE, 32);        
+    z_var z(vfac["z"], crab::INT_TYPE, 32);
 
     // Create the term w = f(a, y)
     dom.array_load(w, a, 4, y);
-    // Create the term z = f(a, y)    
+    // Create the term z = f(a, y)
     dom.array_load(z, a, 4, y);
     // At this point, we know w=z
     crab::outs() << dom << "\n";
-    
+
     z_lin_cst_t c1(z_lin_exp_t(w) == z_lin_exp_t(z));
     crab::outs() << "Added " << c1 << "\n";
     dom += c1;
     crab::outs() << "Result=" << dom << "\n";
-    
-    z_lin_cst_t c2(z_lin_exp_t(w) != z_lin_exp_t(z));    
+
+    z_lin_cst_t c2(z_lin_exp_t(w) != z_lin_exp_t(z));
     crab::outs() << "Added " << c2 << "\n";
     dom += c2;
-    crab::outs() << "Result=" << dom << "\n";    
+    crab::outs() << "Result=" << dom << "\n";
   }
 #endif
 

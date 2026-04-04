@@ -32,7 +32,7 @@ public:
   using typename abstract_domain_t::variable_or_constant_t;
   using typename abstract_domain_t::variable_t;
   using typename abstract_domain_t::variable_vector_t;
-  using typename abstract_domain_t::variable_or_constant_vector_t;  
+  using typename abstract_domain_t::variable_or_constant_vector_t;
   using number_t = typename NumAbsDom::number_t;
   using varname_t = typename NumAbsDom::varname_t;
 
@@ -135,7 +135,7 @@ public:
   void operator&=(const rnc_domain_t &other) override {
     m_product &= other.m_product;
   }
-  
+
   rnc_domain_t operator&(const rnc_domain_t &other) const override {
     return rnc_domain_t(m_product & other.m_product);
   }
@@ -166,7 +166,7 @@ public:
 
   interval_t at(const variable_t &v) const override {
     return m_product.first().at(v);
-  }  
+  }
 
   void operator+=(const linear_constraint_system_t &csts) override {
     m_product += csts;
@@ -186,7 +186,7 @@ public:
   bool entails(const linear_constraint_t &cst) const override {
     return m_product.entails(cst);
   }
-  
+
   void operator-=(const variable_t &v) override { m_product -= v; }
 
   void assign(const variable_t &x, const linear_expression_t &e) override {
@@ -198,7 +198,7 @@ public:
     m_product.weak_assign(x, e);
     reduce_variable(x);
   }
-  
+
   void apply(arith_operation_t op, const variable_t &x, const variable_t &y,
              const variable_t &z) override {
     m_product.apply(op, x, y, z);

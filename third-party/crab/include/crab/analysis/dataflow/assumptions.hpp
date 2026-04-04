@@ -313,7 +313,7 @@ class assumption_naive_analysis : public assumption_analysis<CFG> {
       if (&s == a) {
         break;
       }
-      
+
       if (assumption_analysis_t::can_overflow(s)) {
         assumption_ptr assume = this->new_assumption(&s);
         assumption_analysis_t::insert_assumption(a, assume);

@@ -9,7 +9,7 @@
 #include <crab/fixpoint/thresholds.hpp>
 #include <crab/support/os.hpp>
 
-#include <boost/optional.hpp>
+#include <optional>
 
 namespace crab {
 namespace domains {
@@ -106,7 +106,7 @@ public:
 
   dis_interval_t upper_half_line() const;
 
-  boost::optional<Number> singleton() const;
+  std::optional<Number> singleton() const;
 
   iterator begin();
 

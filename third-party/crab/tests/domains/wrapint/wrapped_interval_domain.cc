@@ -10,16 +10,16 @@ z_cfg_t *prog1(variable_factory_t &vfac) {
 
   /* APLAS'12 example
      x and y are int8
-     
+
      y = -10;
      assume(x >= 0 && x <= 100);
      while (x >= y) {
         x = x - y;
      }
-       
+
      The expected result at the end is x=[-128,-119]
   */
-  
+
   // Defining program variables
   z_var x(vfac["x"], crab::INT_TYPE, 8);
   z_var y(vfac["y"], crab::INT_TYPE, 8);
@@ -122,7 +122,7 @@ int main(int argc, char **argv) {
   }
   {
     variable_factory_t vfac;
-    z_cfg_t *cfg = prog2(vfac); 
+    z_cfg_t *cfg = prog2(vfac);
     crab::outs() << *cfg << "\n";
     z_wrapped_interval_domain_t init;
     run(cfg, cfg->entry(), init, false, 1, 2, 20, stats_enabled);

@@ -83,7 +83,7 @@ int main(int argc, char **argv) {
     backward_run<z_pk_apron_domain_t>(cfg, cfg->entry(), initial_states, 1, 2,
                                       20, stats_enabled);
   }
-  
+
   // free the CFG
   delete cfg;
 #endif

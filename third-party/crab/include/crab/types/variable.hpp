@@ -1,7 +1,8 @@
 #pragma once
 
 #include <boost/functional/hash_fwd.hpp> // for hash_combine
-#include <boost/optional.hpp>
+#include <cassert>
+#include <optional>
 #include <crab/support/debug.hpp>
 #include <crab/support/os.hpp>
 #include <crab/types/indexable.hpp>
@@ -77,20 +78,20 @@ public:
     } else if (ty.is_real()) {
       return variable_type(variable_type_kind::REG_REAL_TYPE);
     } else if (ty.is_reference()) {
-      return variable_type(variable_type_kind::REG_REF_TYPE);      
+      return variable_type(variable_type_kind::REG_REF_TYPE);
     } else if (ty.is_bool_array()) {
-      return variable_type(variable_type_kind::REG_ARR_BOOL_TYPE);      
+      return variable_type(variable_type_kind::REG_ARR_BOOL_TYPE);
     } else if (ty.is_real_array()) {
-      return variable_type(variable_type_kind::REG_ARR_REAL_TYPE);            
+      return variable_type(variable_type_kind::REG_ARR_REAL_TYPE);
     } else if (ty.is_integer_array()) {
-      return variable_type(variable_type_kind::REG_ARR_INT_TYPE);                  
+      return variable_type(variable_type_kind::REG_ARR_INT_TYPE);
     } else if (!ty.is_typed()) {
       return variable_type(variable_type_kind::REG_UNKNOWN_TYPE);
     } else {
       CRAB_ERROR("unexpected type for variable_type::mk_region");
     }
   }
-  
+
   variable_type(const variable_type &o) = default;
   variable_type(variable_type &&o) = default;
   variable_type &operator=(const variable_type &o) = default;
@@ -175,16 +176,16 @@ public:
     } else if (is_int_array_region()) {
       return variable_type(variable_type_kind::ARR_INT_TYPE);
     } else if (is_real_array_region()) {
-      return variable_type(variable_type_kind::ARR_REAL_TYPE);      
+      return variable_type(variable_type_kind::ARR_REAL_TYPE);
     } else if (is_bool_array_region()) {
-      return variable_type(variable_type_kind::ARR_BOOL_TYPE);            
+      return variable_type(variable_type_kind::ARR_BOOL_TYPE);
     } else if (is_unknown_region()) {
-      return variable_type(variable_type_kind::UNK_TYPE);            
+      return variable_type(variable_type_kind::UNK_TYPE);
     } else {
       CRAB_ERROR("unexpected region type in get_region_content_type");
     }
   }
-  
+
   void write(crab_os &o) const {
     switch (m_kind) {
     case BOOL_TYPE:
@@ -296,10 +297,10 @@ public:
   // Note: for hash(), operator==, and operator< we could delegate on
   // calling _n's methods if _n is an indexed_varname. This is always
   // the case, but we don't rely on that here.
-  
+
   std::size_t hash() const {
     std::hash<ikos::index_t> hasher;
-    return hasher(_n.index());    
+    return hasher(_n.index());
   }
 
   bool operator==(const variable_t &o) const { return index() == o.index(); }
@@ -340,7 +341,7 @@ public:
 private:
   using this_type = variable_or_constant<Number, VariableName>;
 
-  boost::optional<variable_t> m_var;
+  std::optional<variable_t> m_var;
   // A number can be a boolean, a real, an integer, or a reference.
   std::pair<number_t, variable_type> m_num;
 
@@ -369,7 +370,7 @@ public:
       : m_var(var), m_num(std::make_pair(0, UNK_TYPE)) {}
 
   variable_or_constant(number_t num, variable_type num_ty)
-      : m_var(boost::none), m_num(std::make_pair(num, num_ty)) {
+      : m_var(std::nullopt), m_num(std::make_pair(num, num_ty)) {
     check_number_type(num_ty, num);
   }
 

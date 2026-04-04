@@ -45,7 +45,7 @@ z_cfg_t *cfg1(variable_factory_t &vfac) {
   z_var mem2(vfac["region_1"], crab::REG_INT_TYPE, 32);
   z_var mem3(vfac["region_2"], crab::REG_INT_TYPE, 32);
   // === Create allocation sites
-  crab::tag_manager as_man;  
+  crab::tag_manager as_man;
   // Create empty CFG
   z_cfg_t *cfg = new z_cfg_t("entry", "ret");
   // Adding CFG blocks
@@ -66,9 +66,9 @@ z_cfg_t *cfg1(variable_factory_t &vfac) {
   // === adding statements
 
   z_var_or_cst_t zero32(z_number(0), crab::variable_type(crab::INT_TYPE, 32));
-  z_var_or_cst_t one32(z_number(1), crab::variable_type(crab::INT_TYPE, 32));  
+  z_var_or_cst_t one32(z_number(1), crab::variable_type(crab::INT_TYPE, 32));
   z_var_or_cst_t size4(z_number(4), crab::variable_type(crab::INT_TYPE, 32));
- 
+
   // Intialization of memory regions
   entry.region_init(mem1);
   entry.region_init(mem2);
@@ -89,13 +89,13 @@ z_cfg_t *cfg1(variable_factory_t &vfac) {
   entry.assume_ref(z_ref_cst_t::mk_not_null(x));
   #else
   entry.assume_ref(z_ref_cst_t::mk_gt_null(x));
-  #endif 
+  #endif
   #if 0
   // Disequalities too hard
   entry.assume_ref(z_ref_cst_t::mk_not_null(y));
   #else
   entry.assume_ref(z_ref_cst_t::mk_gt_null(y));
-  #endif 
+  #endif
   //// *i := 0;
   entry.store_to_ref(i, mem1, zero32);
   //// *x := 1;

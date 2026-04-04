@@ -276,7 +276,7 @@ dis_interval<Number> dis_interval<Number>::upper_half_line() const {
 }
 
 template <typename Number>
-boost::optional<Number> dis_interval<Number>::singleton() const {
+std::optional<Number> dis_interval<Number>::singleton() const {
   ikos::interval<Number> i = approx();
   return i.singleton();
 }

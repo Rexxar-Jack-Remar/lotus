@@ -103,7 +103,7 @@ int main(int argc, char **argv) {
 
   inter_params_t params;
   params.max_call_contexts = 5;
-  //params.analyze_recursive_functions = true;  
+  //params.analyze_recursive_functions = true;
   z_dbm_domain_t init;
   z_cg_t cg(cfgs);
 

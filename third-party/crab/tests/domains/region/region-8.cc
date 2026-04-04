@@ -76,9 +76,9 @@ z_cfg_t *cfg1(variable_factory_t &vfac) {
   z_var_or_cst_t zero32(z_number(0), crab::variable_type(crab::INT_TYPE, 32));
   z_var_or_cst_t one32(z_number(1), crab::variable_type(crab::INT_TYPE, 32));
   z_var_or_cst_t two32(z_number(2), crab::variable_type(crab::INT_TYPE, 32));
-  z_var_or_cst_t three32(z_number(3), crab::variable_type(crab::INT_TYPE, 32));    
+  z_var_or_cst_t three32(z_number(3), crab::variable_type(crab::INT_TYPE, 32));
   z_var_or_cst_t size4(z_number(4), crab::variable_type(crab::INT_TYPE, 32));
- 
+
   // Intialization of memory regions
   entry.region_init(mem1);
   entry.region_init(mem2);
@@ -90,7 +90,7 @@ z_cfg_t *cfg1(variable_factory_t &vfac) {
   entry.make_ref(y, mem3, size4, as_man.mk_tag());
   entry.intrinsic("add_tag",{},{mem1, i, one32});
   entry.intrinsic("add_tag",{},{mem2, x, two32});
-  entry.intrinsic("add_tag",{},{mem3, y, three32});    
+  entry.intrinsic("add_tag",{},{mem3, y, three32});
   //// *i := 0;
   entry.store_to_ref(i, mem1, zero32);
   //// *x := 1;
@@ -120,16 +120,16 @@ z_cfg_t *cfg1(variable_factory_t &vfac) {
   bb3.load_from_ref(deref_x, x, mem2);
   bb3.load_from_ref(deref_y, y, mem3);
   ret.intrinsic("does_not_have_tag",{b1},{mem1, i, two32});
-  // EXPECTED: OK  
+  // EXPECTED: OK
   ret.bool_assert(b1);
   ret.intrinsic("does_not_have_tag",{b1},{mem1, i, three32});
-  // EXPECTED: OK  
+  // EXPECTED: OK
   ret.bool_assert(b1);
   ret.intrinsic("does_not_have_tag",{b1},{mem2, x, one32});
-  // EXPECTED: OK  
+  // EXPECTED: OK
   ret.bool_assert(b1);
   ret.intrinsic("does_not_have_tag",{b1},{mem3, y, one32});
-  // EXPECTED: OK  
+  // EXPECTED: OK
   ret.bool_assert(b1);
   ret.intrinsic("does_not_have_tag",{b1},{mem2, x, three32});
   // EXPECTED: FAIL

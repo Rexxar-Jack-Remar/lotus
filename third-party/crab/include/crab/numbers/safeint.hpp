@@ -19,7 +19,7 @@ class safe_i64 {
   // Current implementation is based on
   // https://blog.regehr.org/archives/1139 using wider integers.
 
-#ifdef __GNUC__  
+#ifdef __GNUC__
   // TODO/FIXME: the current code compiles assuming the type __int128
   // exists. Both clang and gcc supports __int128 if the targeted
   // architecture is x86/64, but it wont' work with 32 bits.
@@ -67,7 +67,7 @@ public:
   safe_i64 &operator-=(safe_i64 x);
 
   std::size_t hash() const;
-  
+
   bool operator==(safe_i64 x) const;
 
   bool operator!=(safe_i64 x) const;

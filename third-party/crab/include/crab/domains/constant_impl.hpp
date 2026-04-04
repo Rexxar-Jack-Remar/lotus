@@ -7,7 +7,7 @@ namespace domains {
 
 template <typename Number>
 constant<Number>::constant(bool is_bottom)
-    : m_constant(boost::none), m_is_bottom(is_bottom) {}
+    : m_constant(std::nullopt), m_is_bottom(is_bottom) {}
 
 template <typename Number>
 constant<Number>::constant(Number c) : m_constant(c), m_is_bottom(false) {}
@@ -33,7 +33,7 @@ template <typename Number> bool constant<Number>::is_top() const {
 }
 
 template <typename Number> bool constant<Number>::is_constant() const {
-  return m_constant != boost::none;
+  return m_constant != std::nullopt;
 }
 
 template <typename Number> Number constant<Number>::get_constant() const {

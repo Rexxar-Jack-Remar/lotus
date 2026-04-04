@@ -2,7 +2,7 @@
 #include <crab/numbers/bignums.hpp>
 
 namespace crab {
-namespace domains {  
+namespace domains {
 // Default instantiations
 template class interval_congruence<ikos::z_number>;
 } // end namespace domains

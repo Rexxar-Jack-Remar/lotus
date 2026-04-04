@@ -14,8 +14,8 @@ int main(int argc, char **argv) {
 /*
 
 bb1:
-    havoc(b1) 
-    havoc(b2) 
+    havoc(b1)
+    havoc(b2)
     b3 = b1&_b2;
     assume(b3);
     b4 = b1&_b3;
@@ -28,11 +28,11 @@ bb4:
     assume(false);
     goto bb3;
 bb3:
-    assert(b2)   
-    assert(b4)  
+    assert(b2)
+    assert(b4)
 */
 
-  variable_factory_t vfac;  
+  variable_factory_t vfac;
   // entry and exit block
   z_cfg_t cfg("bb1", "bb3");
   // adding blocks
@@ -65,8 +65,8 @@ bb3:
   bb3.bool_assert(b4);
 
   z_bool_num_domain_t init;
-  run_and_check(&cfg, cfg.entry(), init, false, 1, 2, 20, stats_enabled);  
-  
+  run_and_check(&cfg, cfg.entry(), init, false, 1, 2, 20, stats_enabled);
+
   return 0;
-  
+
 }

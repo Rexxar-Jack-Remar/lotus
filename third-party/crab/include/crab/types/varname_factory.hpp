@@ -10,7 +10,7 @@
 #include <crab/support/os.hpp>
 #include <crab/types/indexable.hpp>
 
-#include <boost/optional.hpp>
+#include <optional>
 #include <boost/range/iterator_range.hpp>
 
 #include <functional>
@@ -34,15 +34,15 @@ template <typename T> class variable_factory;
 
 template <class T> class indexed_varname : public indexable {
   template <typename Any> friend class variable_factory;
-public:  
+public:
   using variable_factory_t = variable_factory<T>;
-  
+
 private:
   using this_type = indexed_varname<T>;
-  
-  boost::optional<T> m_s;
+
+  std::optional<T> m_s;
   ikos::index_t m_id;
-  // optional string name associated with m_id if m_s is boost::none
+  // optional string name associated with m_id if m_s is std::nullopt
   std::shared_ptr<std::string> m_name;
   variable_factory_t *m_vfac;
 
@@ -50,7 +50,7 @@ private:
   // first constructor
   indexed_varname(ikos::index_t id, variable_factory_t *vfac,
                   std::string name = "")
-      : m_s(boost::none), m_id(id),
+      : m_s(std::nullopt), m_id(id),
         m_name(name == "" ? nullptr : std::make_shared<std::string>(name)),
         m_vfac(vfac) {}
   // second constructor
@@ -86,7 +86,7 @@ public:
     }
   }
 
-  boost::optional<T> get() const { return m_s; }
+  std::optional<T> get() const { return m_s; }
 
   variable_factory_t &get_var_factory() { return *m_vfac; }
 
@@ -100,18 +100,18 @@ public:
     std::hash<ikos::index_t> hasher;
     return hasher(index());
   }
-  
+
   friend crab_os &operator<<(crab_os &o, const this_type &s) {
     s.write(o);
     return o;
   }
 
 };
-// used by boost::hash_combine (no std::hash_combine in C+11)  
+// used by boost::hash_combine (no std::hash_combine in C+11)
 //template <typename T>
 //inline std::size_t hash_value(const crab::var_factory_impl::indexed_varname<T>&v) {
 //  return v.hash();
-//}  
+//}
 } // end namespace var_factory_impl
 } // end namespace crab
 
@@ -236,7 +236,7 @@ public:
     return m_renaming_map;
   }
 
-  // return all the non-T variables created by the factory.  
+  // return all the non-T variables created by the factory.
   virtual std::vector<varname_t> get_shadow_vars() const {
     std::vector<varname_t> out(m_shadow_vars.begin(), m_shadow_vars.end());
     for (auto &kv_ : m_shadow_map) {

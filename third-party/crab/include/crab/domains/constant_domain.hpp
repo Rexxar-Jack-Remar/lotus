@@ -9,7 +9,7 @@
 #include <crab/domains/separate_domains.hpp>
 #include <crab/support/stats.hpp>
 
-#include <boost/optional.hpp>
+#include <optional>
 
 namespace crab {
 namespace domains {
@@ -217,7 +217,7 @@ public:
     m_env = m_env & o.m_env;
     CRAB_LOG("constant-domain", crab::outs() << "Res=" << m_env << "\n";);
   }
-  
+
   constant_domain_t operator&(const constant_domain_t &o) const override {
     crab::CrabStats::count(domain_name() + ".count.meet");
     crab::ScopedCrabStats __st__(domain_name() + ".meet");
@@ -277,12 +277,12 @@ public:
   }
 
   DEFAULT_ENTAILS(constant_domain_t)
-  
+
   void assign(const variable_t &x, const linear_expression_t &e) override {
     crab::CrabStats::count(domain_name() + ".count.assign");
     crab::ScopedCrabStats __st__(domain_name() + ".assign");
     if (!is_bottom()) {
-      if (boost::optional<variable_t> v = e.get_variable()) {
+      if (std::optional<variable_t> v = e.get_variable()) {
 	m_env.set(x, m_env.at(*v));
       } else {
 	m_env.set(x, eval(e));
@@ -293,15 +293,15 @@ public:
   void weak_assign(const variable_t &x, const linear_expression_t &e) override {
     crab::CrabStats::count(domain_name() + ".count.weak_assign");
     crab::ScopedCrabStats __st__(domain_name() + ".weak_assign");
-    if (!is_bottom()) {    
-      if (boost::optional<variable_t> v = e.get_variable()) {
+    if (!is_bottom()) {
+      if (std::optional<variable_t> v = e.get_variable()) {
 	m_env.join(x, m_env.at(*v));
       } else {
 	m_env.join(x, eval(e));
       }
     }
   }
-  
+
   void apply(crab::domains::arith_operation_t op, const variable_t &x,
              const variable_t &y, const variable_t &z) override {
     crab::CrabStats::count(domain_name() + ".count.apply");
@@ -443,7 +443,7 @@ public:
       case crab::domains::OP_LSHR:
         xc = yc.BitwiseLShr(zc);
         break;
-      case crab::domains::OP_ASHR: 
+      case crab::domains::OP_ASHR:
         xc = yc.BitwiseAShr(zc);
         break;
       }
@@ -476,7 +476,7 @@ public:
       case crab::domains::OP_LSHR:
         xc = yc.BitwiseLShr(zc);
         break;
-      case crab::domains::OP_ASHR: 
+      case crab::domains::OP_ASHR:
         xc = yc.BitwiseAShr(zc);
         break;
       }
@@ -514,7 +514,7 @@ public:
   ARRAY_OPERATIONS_NOT_IMPLEMENTED(constant_domain_t)
   REGION_AND_REFERENCE_OPERATIONS_NOT_IMPLEMENTED(constant_domain_t)
 
-    
+
   void forget(const variable_vector_t &variables) override {
     if (is_bottom() || is_top()) {
       return;

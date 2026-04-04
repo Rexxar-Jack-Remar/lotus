@@ -85,11 +85,11 @@ public:
     auto it = m_call_table.find(&d);
     if (it != m_call_table.end()) {
       return it->second;
-    } else { 
+    } else {
       return m_top;
     }
   }
-  
+
   void clear() {
     m_call_table.clear();
   }
@@ -243,7 +243,7 @@ public:
   using basic_block_t = typename CFG::basic_block_t;
   using callsite_t = typename basic_block_t::callsite_t;
   using fdecl_t = typename CFG::fdecl_t;
-  using callsite_or_fdecl_t = crab::cfg::callsite_or_fdecl<CFG>;  
+  using callsite_or_fdecl_t = crab::cfg::callsite_or_fdecl<CFG>;
   using abs_domain_t = AbsDomain;
   using variable_t = typename CFG::variable_t;
 
@@ -296,7 +296,7 @@ public:
   void clear() {
     m_sum_table.clear();
   }
-  
+
   void write(crab_os &o) const {
     o << "--- Begin summary table ---\n";
     for (auto const &p : m_sum_table) {
@@ -490,7 +490,7 @@ inline void convert_domains(crab::domains::abstract_domain_ref<Variable> from,
   // domain.
   convert_domains_impl(from, to);
 }
-  
+
 template <typename Domain>
 inline void convert_domains(Domain from, Domain &to) {
   // do nothing if they are the same domain but not
@@ -656,12 +656,12 @@ public:
   using liveness_t = live_and_dead_analysis<cfg_t>;
   using liveness_map_t = std::unordered_map<cfg_t, const liveness_t *>;
   using params_t = inter_analyzer_parameters<CallGraph>;
-  
+
 private:
   using summ_tbl_t = inter_analyzer_impl::summary_table<cfg_t, BU_Dom>;
   using call_tbl_t = inter_analyzer_impl::call_ctx_table<cfg_t, TD_Dom>;
   using cg_ref_t = crab::cg::call_graph_ref<cg_t>;
-  using callsite_or_fdecl_t = crab::cfg::callsite_or_fdecl<cfg_t>;  
+  using callsite_or_fdecl_t = crab::cfg::callsite_or_fdecl<cfg_t>;
 public:
   using bu_abs_tr = inter_analyzer_impl::bu_summ_abs_transformer<summ_tbl_t>;
   using td_abs_tr =
@@ -669,7 +669,7 @@ public:
   using bu_analyzer = analyzer_internal_impl::fwd_analyzer<cfg_t, bu_abs_tr>;
   using td_analyzer = analyzer_internal_impl::fwd_analyzer<cfg_t, td_abs_tr>;
   using summary_t = typename inter_analyzer_api<CallGraph,TD_Dom,BU_Dom>::summary_t;
-  
+
   // for checkers
   using abs_dom_t = TD_Dom;
   using abs_tr_t = td_abs_tr;
@@ -711,11 +711,11 @@ public:
       m_live(params.live_map),
       m_call_tbl(make_td_top()),
       m_abs_tr(new abs_tr_t(make_td_top(), &m_summ_tbl, &m_call_tbl)) {
-    
+
     m_fixpo_params.get_widening_delay() = params.widening_delay;
     m_fixpo_params.get_descending_iterations() = params.descending_iters;
     m_fixpo_params.get_max_thresholds() = params.thresholds_size;
-      
+
     CRAB_VERBOSE_IF(1, get_msg_stream() << "Type checking call graph ... ";);
     crab::CrabStats::resume("CallGraph type checking");
     cg.type_check();
@@ -781,7 +781,7 @@ public:
         CRAB_LOG("inter", crab::outs() << "++ Analyzing function "
                                        << fdecl.get_func_name() << "\n");
 
-        td_analyzer_ptr a(new td_analyzer(cfg, &*m_abs_tr, m_td_absval_fac, get_live(cfg), m_fixpo_params)); 
+        td_analyzer_ptr a(new td_analyzer(cfg, &*m_abs_tr, m_td_absval_fac, get_live(cfg), m_fixpo_params));
         a->run_forward(init);
         m_inv_map.insert(std::make_pair(callsite_or_fdecl_t(&fdecl), std::move(a)));
       }
@@ -890,10 +890,10 @@ public:
           crab::outs() << "Top-down analysis for " << fdecl.get_func_name()
                        << " started with bottom (i.e., dead function).\n";
         }
-        td_analyzer_ptr a(new td_analyzer(cfg, &*m_abs_tr, m_td_absval_fac, get_live(cfg), 
+        td_analyzer_ptr a(new td_analyzer(cfg, &*m_abs_tr, m_td_absval_fac, get_live(cfg),
                                           m_fixpo_params));
         a->run_forward(init_inv);
-        m_inv_map.insert(std::make_pair(callsite_or_fdecl_t(&fdecl), std::move(a))); 
+        m_inv_map.insert(std::make_pair(callsite_or_fdecl_t(&fdecl), std::move(a)));
       }
     }
     CRAB_VERBOSE_IF(1, get_msg_stream()
@@ -952,12 +952,12 @@ public:
     }
     return summary;
   }
-  
-  // /*DEPRECATED*/ Propagate inv through statements: 
+
+  // /*DEPRECATED*/ Propagate inv through statements:
   abs_tr_t &get_abs_transformer() {
     assert(m_abs_tr);
     return *m_abs_tr;
-  } 
+  }
 };
 
 } // namespace analyzer

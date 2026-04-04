@@ -44,7 +44,7 @@
 #include  <crab/domains/patricia_trees.hpp>
 #include <crab/support/debug.hpp>
 
-#include <boost/optional.hpp>
+#include <optional>
 
 #include <algorithm>
 #include <set>
@@ -52,7 +52,7 @@
 
 namespace ikos {
 
-/* Environment from Key to Value with all lattice operations */ 
+/* Environment from Key to Value with all lattice operations */
 template <typename Key, typename Value,
 	  typename ValueEqual = std::equal_to<Value>>
 class separate_domain {
@@ -63,7 +63,7 @@ private:
   using partial_order_t = typename patricia_tree_t::partial_order_t;
 
 public:
-  using unary_op_t = typename patricia_tree_t::unary_op_t;  
+  using unary_op_t = typename patricia_tree_t::unary_op_t;
   using separate_domain_t = separate_domain<Key, Value, ValueEqual>;
   using iterator = typename patricia_tree_t::iterator;
   using key_type = Key;
@@ -75,13 +75,13 @@ private:
   patricia_tree_t _tree;
 
   class join_op : public binary_op_t {
-    virtual std::pair<bool, boost::optional<Value>>
+    virtual std::pair<bool, std::optional<Value>>
     apply(const Key &/*key*/, const Value &x, const Value &y) override {
       Value z = x.operator|(y);
       if (z.is_top()) {
-        return {false, boost::optional<Value>()};
+        return {false, std::optional<Value>()};
       } else {
-        return {false, boost::optional<Value>(z)};
+        return {false, std::optional<Value>(z)};
       }
     };
 
@@ -91,13 +91,13 @@ private:
   }; // class join_op
 
   class widening_op : public binary_op_t {
-    virtual std::pair<bool, boost::optional<Value>>
+    virtual std::pair<bool, std::optional<Value>>
     apply(const Key &/*key*/, const Value &x, const Value &y) override {
       Value z = x.operator||(y);
       if (z.is_top()) {
-        return {false, boost::optional<Value>()};
+        return {false, std::optional<Value>()};
       } else {
-        return {false, boost::optional<Value>(z)};
+        return {false, std::optional<Value>(z)};
       }
     };
 
@@ -113,13 +113,13 @@ private:
   public:
     widening_thresholds_op(const Thresholds &ts) : m_ts(ts) {}
 
-    virtual std::pair<bool, boost::optional<Value>>
+    virtual std::pair<bool, std::optional<Value>>
     apply(const Key &/*key*/, const Value &x, const Value &y) override {
       Value z = x.widening_thresholds(y, m_ts);
       if (z.is_top()) {
-        return {false, boost::optional<Value>()};
+        return {false, std::optional<Value>()};
       } else {
-        return {false, boost::optional<Value>(z)};
+        return {false, std::optional<Value>(z)};
       }
     };
 
@@ -130,13 +130,13 @@ private:
   }; // class widening_thresholds_op
 
   class meet_op : public binary_op_t {
-    virtual std::pair<bool, boost::optional<Value>>
+    virtual std::pair<bool, std::optional<Value>>
     apply(const Key &/*key*/, const Value &x, const Value &y) override {
       Value z = x.operator&(y);
       if (z.is_bottom()) {
-        return {true, boost::optional<Value>()};
+        return {true, std::optional<Value>()};
       } else {
-        return {false, boost::optional<Value>(z)};
+        return {false, std::optional<Value>(z)};
       }
     };
 
@@ -147,13 +147,13 @@ private:
   }; // class meet_op
 
   class narrowing_op : public binary_op_t {
-    virtual std::pair<bool, boost::optional<Value>>
+    virtual std::pair<bool, std::optional<Value>>
     apply(const Key &/*key*/, const Value &x, const Value &y) override {
       Value z = x.operator&&(y);
       if (z.is_bottom()) {
-        return {true, boost::optional<Value>()};
+        return {true, std::optional<Value>()};
       } else {
-        return {false, boost::optional<Value>(z)};
+        return {false, std::optional<Value>(z)};
       }
     };
 
@@ -188,13 +188,13 @@ private:
 public:
   separate_domain() : _is_bottom(false) {}
   separate_domain(const separate_domain_t &o) = default;
-  separate_domain(separate_domain_t &&o) = default;    
+  separate_domain(separate_domain_t &&o) = default;
   separate_domain_t &operator=(const separate_domain_t &o) = default;
   separate_domain_t &operator=(separate_domain_t &&o) = default;
 
   static separate_domain_t top() { return separate_domain_t(); }
   static separate_domain_t bottom() { return separate_domain_t(false); }
-  
+
   iterator begin() const {
     if (is_bottom()) {
       CRAB_ERROR("Separate domain: trying to invoke iterator on bottom");
@@ -336,7 +336,7 @@ public:
       }
     }
   }
-  
+
   void set_to_bottom() {
     _is_bottom = true;
     _tree = patricia_tree_t();
@@ -359,7 +359,7 @@ public:
     if (is_bottom()) {
       return Value::bottom();
     } else {
-      boost::optional<Value> v = _tree.lookup(k);
+      std::optional<Value> v = _tree.lookup(k);
       if (v) {
         return *v;
       } else {
@@ -469,7 +469,7 @@ public:
                      " does not exist in ", *this);
         }
       }
-      if (boost::optional<Value> k_val_opt = _tree.lookup(k)) {
+      if (std::optional<Value> k_val_opt = _tree.lookup(k)) {
         if (!(*k_val_opt).is_top()) {
           _tree.insert(new_k, *k_val_opt);
         }
@@ -492,11 +492,11 @@ public:
 
 namespace crab {
 namespace domains {
-//===================================================================//  
-//        The NOSA license does not apply to this code  
-//===================================================================//  
+//===================================================================//
+//        The NOSA license does not apply to this code
+//===================================================================//
 
-/* 
+/*
  * Environment from Key to discrete_domain<Element>
  *
  * We cannot use separate_domain because if the value of a key-value
@@ -505,7 +505,7 @@ namespace domains {
  * "empty set" so we want to allow entries whose values are
  * bottom. But, similar to separate_domain, the whole environment can
  * still be bottom meaning failure/undefined/unreachable.
- */ 
+ */
 template <typename Key, typename Element> class separate_discrete_domain {
 private:
   using discrete_domain_t = ikos::discrete_domain<Element>;
@@ -516,7 +516,7 @@ private:
 
 public:
   using key_type = Key;
-  using mapped_type = discrete_domain_t;    
+  using mapped_type = discrete_domain_t;
   using separate_discrete_domain_t = separate_discrete_domain<Key, Element>;
   using iterator = typename patricia_tree_t::iterator;
 
@@ -533,27 +533,27 @@ private:
   }
   /* begin patricia_tree API */
   class join_op : public binary_op_t {
-    std::pair<bool, boost::optional<mapped_type>>
+    std::pair<bool, std::optional<mapped_type>>
     apply(const key_type &/*key*/, const mapped_type &x, const mapped_type &y) override {
       mapped_type z = x.operator|(y);
       if (z.is_top()) {
 	// special encoding for top: the patricia tree will not keep
 	// top values.
-        return {false, boost::optional<mapped_type>()};
+        return {false, std::optional<mapped_type>()};
       } else {
-        return {false, boost::optional<mapped_type>(z)};
+        return {false, std::optional<mapped_type>(z)};
       }
     }
-    bool default_is_absorbing() override { return true; }    
+    bool default_is_absorbing() override { return true; }
   }; // class join_op
 
   class meet_op : public binary_op_t {
-    std::pair<bool, boost::optional<mapped_type>>
+    std::pair<bool, std::optional<mapped_type>>
     apply(const key_type &/*key*/, const mapped_type &x, const mapped_type &y) override {
       mapped_type z = x.operator&(y);
       // Returning this pair means that if z is bottom do not treat it
       // special and just update the patricia tree with z.
-      return {false, boost::optional<mapped_type>(z)};
+      return {false, std::optional<mapped_type>(z)};
     };
     bool default_is_absorbing() override { return false; }
   }; // class meet_op
@@ -565,12 +565,12 @@ private:
   }; // class domain_po
   /* end patricia_tree API */
 
-  
+
   separate_discrete_domain(patricia_tree_t &&t)
     : m_is_bottom(false), m_tree(std::move(t)) {}
 
 public:
-  
+
   static separate_discrete_domain_t top() {
     return separate_discrete_domain_t();
   }
@@ -582,12 +582,12 @@ public:
   // Default constructor returns a top environment
   separate_discrete_domain(bool is_bottom = false)
     : m_is_bottom(is_bottom), m_tree(patricia_tree_t()) {}
-  
+
   separate_discrete_domain(const separate_discrete_domain_t &o) = default;
   separate_discrete_domain(separate_discrete_domain_t &&o) = default;
   separate_discrete_domain_t &operator=(const separate_discrete_domain_t &o)  = default;
   separate_discrete_domain_t &operator=(separate_discrete_domain_t &&o)  = default;
-  
+
   iterator begin() const {
     if (is_bottom()) {
       CRAB_ERROR("Separate discrete domain: trying to invoke iterator on bottom");
@@ -620,19 +620,19 @@ public:
       return m_tree.leq(other.m_tree, po);
     }
   }
-  
+
   separate_discrete_domain_t
   operator|(const separate_discrete_domain_t &o) const {
     CRAB_LOG("separate-domain",
-	     crab::outs() << "Join " << *this << " and " << o << "=";);      
-    
+	     crab::outs() << "Join " << *this << " and " << o << "=";);
+
     if (is_bottom() || o.is_top()) {
       CRAB_LOG("separate-domain",
 	       crab::outs() << "Res=" << o << "\n";);
       return o;
     } else if (o.is_bottom() || is_top()) {
       CRAB_LOG("separate-domain",
-	       crab::outs() << "Res=" << *this << "\n";);      
+	       crab::outs() << "Res=" << *this << "\n";);
       return *this;
     } else {
       join_op op;
@@ -647,17 +647,17 @@ public:
   separate_discrete_domain_t
   operator&(const separate_discrete_domain_t &o) const {
     CRAB_LOG("separate-domain",
-	     crab::outs() << "Meet " << *this << " and " << o << "=";);      
-    
+	     crab::outs() << "Meet " << *this << " and " << o << "=";);
+
     if (is_top() || o.is_bottom()) {
       CRAB_LOG("separate-domain",
 	       crab::outs() << "Res=" << o << "\n";);
-      
+
       return o;
     } else if (o.is_top() || is_bottom()) {
       CRAB_LOG("separate-domain",
 	       crab::outs() << "Res=" << *this << "\n";);
-      
+
       return *this;
     } else {
       meet_op op;
@@ -694,7 +694,7 @@ public:
     } else if (is_top()) {
       return mapped_type::top();
     } else {
-      if (boost::optional<mapped_type> v = m_tree.lookup(k)) {
+      if (std::optional<mapped_type> v = m_tree.lookup(k)) {
         return *v;
       } else {
         return mapped_type::top();
@@ -772,7 +772,7 @@ public:
 		     new_k, " does not exist in ", *this);
         }
       }
-      if (boost::optional<mapped_type> val_opt = m_tree.lookup(k)) {
+      if (std::optional<mapped_type> val_opt = m_tree.lookup(k)) {
         if (!(*val_opt).is_top()) {
           m_tree.insert(new_k, *val_opt);
         }
@@ -781,7 +781,7 @@ public:
     }
   }
 
-  
+
   void write(crab::crab_os &o) const {
     if (is_top()) {
       o << "{}";
@@ -813,5 +813,5 @@ inline crab_os &operator<<(crab_os &o,
   return o;
 }
 
-} //end namespace domains  
+} //end namespace domains
 } //end namespace crab

@@ -5,7 +5,7 @@
 $ docker build -t seahorn/buildpack-deps-crab:bionic -f docker/buildpack-deps-crab.Dockerfile .
 $ docker push seahorn/buildpack-deps-crab:bionic
 ```
-or 
+or
 
 ```shell
 $ docker build -t seahorn/buildpack-deps-crab:bionic -f docker/buildpack-deps-crab.jammy.Dockerfile .

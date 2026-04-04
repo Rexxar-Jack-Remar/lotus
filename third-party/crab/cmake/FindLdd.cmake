@@ -18,12 +18,12 @@ if (NOT LDD_FOUND)
   include (FindPackageHandleStandardArgs)
   find_package_handle_standard_args(Ldd
     REQUIRED_VARS LDD_INCLUDE_DIR LDD_LIBRARY CUDD_FOUND)
-  if (LDD_FOUND)  
+  if (LDD_FOUND)
      set (LDD_CXXFLAGS "${CUDD_CXXFLAGS}")
      set(LDD_LIBRARY ${LDD_LIBRARY} ${CUDD_LIBRARY})
      set (LDD_INCLUDE_DIR ${LDD_INCLUDE_DIR} ${CUDD_INCLUDE_DIR})
-     mark_as_advanced (LDD_INCLUDE_DIR LDD_TVPI_LIBRARY 
+     mark_as_advanced (LDD_INCLUDE_DIR LDD_TVPI_LIBRARY
                        LDD_LDD_LIBRARY LDD_LIBRARY LDD_CXXFLAGS)
-  endif () 
+  endif ()
 
 endif ()

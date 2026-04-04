@@ -56,7 +56,7 @@ bound_t constant_value::val() const {
   return m_val;
 }
 
-boost::optional<uint64_t> constant_value::get_uint64_val() const {
+std::optional<uint64_t> constant_value::get_uint64_val() const {
   if (is_bottom()) {
     CRAB_ERROR("constant_value::get_uint64_val cannot be called on bottom");
   }
@@ -69,7 +69,7 @@ boost::optional<uint64_t> constant_value::get_uint64_val() const {
       }
     }
   }
-  return boost::optional<uint64_t>();
+  return std::optional<uint64_t>();
 }
 
 constant_value constant_value::bottom() { return constant_value(true); }
@@ -266,7 +266,7 @@ void cell_t::write(crab::crab_os &o) const {
 
 // Delete completely the cell
 void offset_map_t::erase_cell(const cell_t &c) {
-  if (boost::optional<cell_set_t> cells = m_map.lookup(c.get_offset())) {
+  if (std::optional<cell_set_t> cells = m_map.lookup(c.get_offset())) {
     if ((*cells).erase(c) > 0) {
       m_map.remove(c.get_offset());
       if (!(*cells).empty()) {
@@ -279,7 +279,7 @@ void offset_map_t::erase_cell(const cell_t &c) {
 
 // Pretend the cell is removed by marking it as "removed"
 void offset_map_t::remove_cell(const cell_t &c) {
-  if (boost::optional<cell_set_t> cells = m_map.lookup(c.get_offset())) {
+  if (std::optional<cell_set_t> cells = m_map.lookup(c.get_offset())) {
     if ((*cells).count(c) > 0) {
       m_map.remove(c.get_offset());
       cell_set_t ncells = cell_set_impl::set_difference(*cells, c);
@@ -292,7 +292,7 @@ void offset_map_t::remove_cell(const cell_t &c) {
 }
 
 void offset_map_t::insert_cell(const cell_t &c) {
-  if (boost::optional<cell_set_t> cells = m_map.lookup(c.get_offset())) {
+  if (std::optional<cell_set_t> cells = m_map.lookup(c.get_offset())) {
     if ((*cells).insert(c).second) {
       m_map.remove(c.get_offset());
       m_map.insert(c.get_offset(), *cells);
@@ -305,7 +305,7 @@ void offset_map_t::insert_cell(const cell_t &c) {
 }
 
 cell_t offset_map_t::get_cell(const offset_t &o, uint64_t size) const {
-  if (boost::optional<cell_set_t> cells = m_map.lookup(o)) {
+  if (std::optional<cell_set_t> cells = m_map.lookup(o)) {
     cell_t tmp(o, size);
     auto it = (*cells).find(tmp);
     if (it != (*cells).end()) {

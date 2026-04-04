@@ -1,4 +1,4 @@
-#include <boost/optional.hpp>
+#include <optional>
 #include <crab/domains/interval_congruence.hpp>
 
 namespace crab {
@@ -129,7 +129,7 @@ template <typename Number> void interval_congruence<Number>::reduce() {
 
   // congruence is top and interval is a singleton
   if (c.is_top()) {
-    boost::optional<Number> n = i.singleton();
+    std::optional<Number> n = i.singleton();
     if (n) {
       c = ikos::congruence<Number>(*n);
     }

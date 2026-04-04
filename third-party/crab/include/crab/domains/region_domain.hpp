@@ -150,7 +150,7 @@ private:
   using tag_t = region_domain_impl::tag<number_t>;
   using tag_env_t = separate_discrete_domain<variable_t, tag_t>;
   using tag_set = typename tag_env_t::mapped_type;
-  
+
   static_assert(
       std::is_same<typename Params::number_t,
                    typename Params::base_abstract_domain_t::number_t>::value,
@@ -163,7 +163,7 @@ private:
       "Either region and base domain uses the same variable factory or base "
       "domain uses Params::varname_allocator_t");
 
-  
+
   bool m_is_bottom; // special symbol for bottom
   /** Begin base domain **/
   // Proxy to deal with m_base_dom.
@@ -186,7 +186,7 @@ private:
   tag_env_t m_tag_env;
   // Allocation analysis: map each reference to its set of possible
   // allocation sites.
-  // 
+  //
   // It also maps each region variable to the union of all possible
   // allocation sites from all possible references stored in that
   // region. Regions need to be tracked because references are stored
@@ -202,7 +202,7 @@ private:
   //                                       and rgn2.
   //
   // This partitioning is used to reason about deallocations.
-  // 
+  //
   // Deallocation analysis: keep track of whether some memory within a
   // region has been deallocated. For this, we need to know which
   // regions might belong to the same allocated memory object.  Each
@@ -246,7 +246,7 @@ private:
     return m_ghost_var_man.get_or_insert(v);
   }
 
-  boost::optional<ghost_variables_t> get_gvars(const variable_t &v) const {
+  std::optional<ghost_variables_t> get_gvars(const variable_t &v) const {
     return m_ghost_var_man.get(v);
   }
 
@@ -440,23 +440,23 @@ private:
         }
       } else {
         ghost_variables_t val_gvars = get_or_insert_gvars(val.get_variable());
-	if (!weak) {	
+	if (!weak) {
 	  base_dom.assign(rgn_gvars.get_var(), val_gvars.get_var());
 	} else {
 	  base_dom.weak_assign(rgn_gvars.get_var(), val_gvars.get_var());
-	} 
+	}
 
         if (val.get_type().is_reference()) {
           if (rgn_gvars.has_offset_and_size() &&
               val_gvars.has_offset_and_size()) {
 
-	    if (!weak) {	
+	    if (!weak) {
 	      rgn_gvars.get_offset_and_size().assign(
                   base_dom, val_gvars.get_offset_and_size());
 	    } else {
 	      rgn_gvars.get_offset_and_size().weak_assign(
                   base_dom, val_gvars.get_offset_and_size());
-	    } 
+	    }
           } else if (rgn_gvars.has_offset_and_size()) {
             rgn_gvars.get_offset_and_size().forget(base_dom);
           }
@@ -494,18 +494,18 @@ private:
     return m_ghost_var_man.ghosting_ref_cst_to_linear_cst(ref_cst, kind);
   }
 
-  boost::optional<variable_t> rev_rename_var(const base_variable_t &v,
+  std::optional<variable_t> rev_rename_var(const base_variable_t &v,
                                              bool ignore_references) const {
     return m_ghost_var_man.rev_rename_var(v, ignore_references);
   }
 
-  boost::optional<linear_expression_t>
+  std::optional<linear_expression_t>
   rev_rename_linear_expr(const base_linear_expression_t &e,
                          bool ignore_references) const {
     return m_ghost_var_man.rev_rename_linear_expr(e, ignore_references);
   }
 
-  boost::optional<linear_constraint_t>
+  std::optional<linear_constraint_t>
   rev_rename_linear_cst(const base_linear_constraint_t &cst,
                         bool ignore_references) const {
     return m_ghost_var_man.rev_rename_linear_cst(cst, ignore_references);
@@ -815,7 +815,7 @@ public:
                           const base_abstract_domain_t &v2) { return v1 | v2; };
     region_domain_t res(std::move(
        do_join_or_widening(*this, o, true /*is join*/, base_dom_op)));
-    
+
     CRAB_LOG("region", crab::outs() << "Result=" << res << "\n");
     return res;
   }
@@ -847,7 +847,7 @@ public:
     // TODO: improve this by avoiding the copy of the left operand.
     *this = *this & o;
   }
-  
+
   region_domain_t operator||(const region_domain_t &o) const override {
     crab::CrabStats::count(domain_name() + ".count.widening");
     crab::ScopedCrabStats __st__(domain_name() + ".widening");
@@ -1328,9 +1328,9 @@ public:
       if (num_refs.is_zero()) {
 	// We consider that if the region has a zero refcounter then
 	// we can perform strong read. This might be unsound so at
-	// least we print a warning.	
+	// least we print a warning.
 	CRAB_WARN(domain_name(), "::ref_load from a region with zero refcounter. "
-		  "Perhaps region objects are allocated outside the code under analysis."); 
+		  "Perhaps region objects are allocated outside the code under analysis.");
       }
       // strong read
       CRAB_LOG("region-load", crab::outs() << "Reading from singleton\n";);
@@ -1385,7 +1385,7 @@ public:
 
     // forget the ghost variables in the base domain
     auto forget_region_ghost_vars = [this](const variable_t &rgn) {
-      if (boost::optional<ghost_variables_t> gvars = get_gvars(rgn)) {
+      if (std::optional<ghost_variables_t> gvars = get_gvars(rgn)) {
         (*gvars).forget(m_base_dom);
       }
     };
@@ -1513,11 +1513,11 @@ public:
       if (num_refs.is_zero()) {
 	// We consider that if the region has a zero refcounter then
 	// we can perform strong update. This might be unsound so at
-	// least we print a warning.	
+	// least we print a warning.
 	CRAB_WARN(domain_name(), "::ref_store from a region with zero refcounter. "
-		  "Perhaps region objects are allocated outside the code under analysis."); 
+		  "Perhaps region objects are allocated outside the code under analysis.");
       }
-      
+
       /* strong update */
       CRAB_LOG("region-store", crab::outs() << "Performing strong update\n";);
 
@@ -1670,22 +1670,22 @@ public:
     if (is_bottom()) {
       return;
     }
-    
+
     if (ref_cst.is_tautology()) {
       return;
     }
-    
+
     if (ref_cst.is_contradiction()) {
       set_to_bottom();
       return;
     }
 
-    
+
     if (crab_domain_params_man::get().region_allocation_sites()) {
       if (ref_cst.is_equality() && ref_cst.is_binary()) {
 	auto lhs_as = m_alloc_env.at(ref_cst.lhs());
 	auto rhs_as = m_alloc_env.at(ref_cst.rhs());
-	/** 
+	/**
 	 * Important note about soundness: if the program
 	 * environment is not modeled precisely enough we can
 	 * conclude *incorrectly* that p == q is definitely not
@@ -1708,7 +1708,7 @@ public:
       }
     }
 
-    /** 
+    /**
      * Having any constraint on p and q implies that the same
      * constraint applies on address(p) and address(q).
      **/
@@ -1716,26 +1716,26 @@ public:
       convert_ref_cst_to_linear_cst(ref_cst, ghost_variable_kind::ADDRESS);
     m_base_dom += addr_lin_csts;
     m_is_bottom = m_base_dom.is_bottom();
-    
-    /** 
+
+    /**
      * Having p relop q (where relop is not equality) DOESN'T
      * imply that relop holds on offset(p) and offset(q) EXCEPT if
      * p and q are known to point to the same singleton memory
      * object.
-     **/      
+     **/
     if (!m_is_bottom && ref_cst.is_equality()) {
       auto offset_lin_csts =
 	convert_ref_cst_to_linear_cst(ref_cst, ghost_variable_kind::OFFSET);
       m_base_dom += offset_lin_csts;
       m_is_bottom = m_base_dom.is_bottom();
     }
-    
+
     if (!m_is_bottom && ref_cst.is_equality()) {
       auto size_lin_csts =
 	convert_ref_cst_to_linear_cst(ref_cst, ghost_variable_kind::SIZE);
       m_base_dom += size_lin_csts;
       m_is_bottom = m_base_dom.is_bottom();
-    } 
+    }
 
     CRAB_LOG("region", crab::outs() << "Result=" << *this << "\n";);
   }
@@ -1797,7 +1797,7 @@ public:
   // This default implementation is expensive because it will call the
   // join.
   DEFAULT_SELECT_REF(region_domain_t)
-  
+
   // arithmetic operations
   void apply(arith_operation_t op, const variable_t &x, const variable_t &y,
              const variable_t &z) override {
@@ -1846,7 +1846,7 @@ public:
   // region domain is often at the top of the hierarchy of domains,
   // weak assignments shouldn't happen in this domain.
   DEFAULT_WEAK_ASSIGN(region_domain_t)
-  
+
   void select(const variable_t &lhs, const linear_constraint_t &cond,
               const linear_expression_t &e1,
               const linear_expression_t &e2) override {
@@ -1935,9 +1935,9 @@ public:
     auto b_cst = rename_linear_cst(cst);
     return m_base_dom.entails(b_cst);
   }
-  
+
   #if 0
-  // not part of the numerical_domains api but it should be  
+  // not part of the numerical_domains api but it should be
   void set(const variable_t &x, interval_t intv) {
     crab::CrabStats::count(domain_name() + ".count.assign");
     crab::ScopedCrabStats __st__(domain_name() + ".assign");
@@ -1955,14 +1955,14 @@ public:
     }
   }
   #endif
-  
+
   interval_t operator[](const variable_t &x) override {
     if (is_bottom()) {
       return interval_t::bottom();
     } else if (is_top()) {
       return interval_t::top();
     } else {
-      if (boost::optional<ghost_variables_t> gvars = get_gvars(x)) {
+      if (std::optional<ghost_variables_t> gvars = get_gvars(x)) {
         return m_base_dom[(*gvars).get_var()];
       } else {
         return interval_t::top();
@@ -1976,7 +1976,7 @@ public:
     } else if (is_top()) {
       return interval_t::top();
     } else {
-      if (boost::optional<ghost_variables_t> gvars = get_gvars(x)) {
+      if (std::optional<ghost_variables_t> gvars = get_gvars(x)) {
         return m_base_dom.at((*gvars).get_var());
       } else {
         return interval_t::top();
@@ -2106,8 +2106,8 @@ public:
   // Weak assignments are performed by other domains and since the
   // region domain is often at the top of the hierarchy of domains,
   // weak assignments shouldn't happen in this domain.
-  DEFAULT_WEAK_BOOL_ASSIGN(region_domain_t)  
-  
+  DEFAULT_WEAK_BOOL_ASSIGN(region_domain_t)
+
   void apply_binary_bool(bool_operation_t op, const variable_t &x,
                          const variable_t &y, const variable_t &z) override {
     crab::CrabStats::count(domain_name() + ".count.apply_binary_bool");
@@ -2656,7 +2656,7 @@ public:
                  crab::outs() << bv << ":= is_dereferenceable(" << inputs[0]
                               << "," << inputs[1] << "," << inputs[2] << ")\n"
                               << *this << "\n";);
-        if (boost::optional<ghost_variables_t> ref_gvars = get_gvars(ref)) {
+        if (std::optional<ghost_variables_t> ref_gvars = get_gvars(ref)) {
 
           if ((*ref_gvars).has_offset_and_size()) {
             // CRAB_LOG("region-domain-is-deref",
@@ -2767,8 +2767,8 @@ public:
         return boolean_value::get_false();
       }
 
-      boost::optional<number_t> x = ival.lb().number();
-      boost::optional<number_t> y = ival.ub().number();
+      std::optional<number_t> x = ival.lb().number();
+      std::optional<number_t> y = ival.ub().number();
       if (x && y && *x == zero && *y == zero) {
         return boolean_value::get_true();
       }
@@ -2838,7 +2838,7 @@ public:
       const bool ignore_references = true;
       for (base_linear_constraint_t cst :
            m_base_dom.to_linear_constraint_system()) {
-        if (boost::optional<linear_constraint_t> out_cst =
+        if (std::optional<linear_constraint_t> out_cst =
                 rev_rename_linear_cst(cst, ignore_references)) {
           out_csts += *(out_cst);
         }
@@ -2878,13 +2878,13 @@ public:
 	  }
 	  o << "," << "BaseDom=" << m_base_dom  << ")\n";
 	  return;
-	       );	       
-	  
+	       );
+
       CRAB_LOG(
-	  "region-print-debug",	       
+	  "region-print-debug",
 	  /// This format is understood by Clam debugging scripts such
 	  /// as read_assertions.py.
-	  o << "(" 
+	  o << "("
 	  << "RgnCounter="
 	  << "{";
 	  for(auto it = m_rgn_env.begin(), et = m_rgn_env.end(); it!=et;) {
@@ -2892,16 +2892,16 @@ public:
 	    ++it;
 	    if (it != et) {
 	      o << ";";
-	    }	  
+	    }
 	  }
 	  o << "}," << "BaseDom=";
-	  
+
 	  // We ask the ghost manager to print the base domain so that it
 	  // can rename ghost variables to user-friendly names.
 	  m_ghost_var_man.write(o, m_base_dom);
 	  o << ")";
 	  return;
-	       );      
+	       );
 
       // We ask the ghost manager to print the base domain so that it
       // can rename ghost variables to user-friendly names.

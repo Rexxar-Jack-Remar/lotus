@@ -75,7 +75,7 @@ available documentation can be found in our
   </tr>
 </table>
 
-# Docker # 
+# Docker #
 
 A (nightly) pre-built version of Crab that runs all tests can be
 obtained using Docker:
@@ -91,17 +91,17 @@ docker run -v `pwd`:/host -it seahorn/crab:bionic
 Crab is written in C++ and relies on the Boost library. The main
 requirements are:
 
-- C++11 compiler 
+- C++11 compiler
 - Boost >= 1.65
-- GMP 
+- GMP
 - MPFR (if `-DCRAB_USE_APRON=ON` or `-DCRAB_USE_ELINA=ON`)
-- FLINT (only if `-DCRAB_USE_PPLITE=ON`) 
+- FLINT (only if `-DCRAB_USE_PPLITE=ON`)
 
 In linux, you can install requirements typing the commands:
 
 	sudo apt-get install libboost-all-dev libboost-program-options-dev
     sudo apt-get install libgmp-dev
-    sudo apt-get install libmpfr-dev	
+    sudo apt-get install libmpfr-dev
 	sudo apt-get install libflint-dev
 
 # Compilation and Installation #
@@ -110,7 +110,7 @@ To install Crab, type:
 
      1. mkdir build && cd build
      2. cmake -DCMAKE_INSTALL_PREFIX=$INSTALL_DIR ../
-     3. cmake --build . --target install 
+     3. cmake --build . --target install
 
 The `tests` directory contains many examples of how to build programs
 written in CrabIR and compute invariants using different analyses and
@@ -119,7 +119,7 @@ abstract domains. To compile these tests add option `-DCRAB_ENABLE_TESTS=ON` to 
 and then, for instance, to run `test1`:
 
     build/test-bin/test1
-    
+
 ## Include third-party abstract domain libraries ##
 
 The [Boxes](https://github.com/seahorn/ldd)/[Apron](https://github.com/antoinemine/apron)/[Elina](https://github.com/eth-sri/ELINA)/[PPLite](https://github.com/ezaffanella/PPLite) domains require third-party libraries. To avoid
@@ -139,15 +139,15 @@ installation of the libraries is optional.
 
 
 **Important:** Apron and Elina are currently not compatible so you
-cannot enable `-DCRAB_USE_APRON=ON` and `-DCRAB_USE_ELINA=ON` at the same time. 
-	
+cannot enable `-DCRAB_USE_APRON=ON` and `-DCRAB_USE_ELINA=ON` at the same time.
+
 For instance, to install Crab with Boxes and Apron, type:
 
      1. mkdir build && cd build
      2. cmake -DCMAKE_INSTALL_PREFIX=$INSTALL_DIR -DCRAB_USE_LDD=ON -DCRAB_USE_APRON=ON ../
      3. cmake --build . --target ldd && cmake ..
-     4. cmake --build . --target apron && cmake ..	
-     5. cmake --build . --target install 	
+     4. cmake --build . --target apron && cmake ..
+     5. cmake --build . --target install
 
 Lines 3 and 4 will download, compile and install the Boxes and Apron domains, respectively. Replace `apron` at line 4 with `elina` or `pplite` if you want to use Elina or PPLite instead. If you have already compiled and installed these libraries in your machine then skip commands at line 3 and 4 and add the following options at line 2.
 
@@ -162,7 +162,7 @@ To include Crab in your C++ application you need to:
 
 - Include the C++ header files located at the
 `$INSTALL_DIR/crab/include`, and
- 
+
 - Link your application with the Crab libraries installed in
 `$INSTALL_DIR/crab/lib`.
 
@@ -170,7 +170,7 @@ If you compile with Boxes/Apron/Elina/PPLite you need also to include
 `$INSTALL_DIR/EXT/include` and link with `$INSTALL_DIR/EXT/lib`
 where `EXT=apron|elina|ldd|pplite`.
 
-## CMake ## 
+## CMake ##
 
 If your project uses `cmake` then you just need to add in your project's `CMakeLists.txt`:
 
@@ -181,7 +181,7 @@ include_directories(${CRAB_INCLUDE_DIRS})
 
 And then link your executable with `${CRAB_LIBS}`
 
-## Make ## 
+## Make ##
 
 If your project uses `make`, read this
 sample [Makefile](https://github.com/seahorn/crab/blob/master/make/Makefile).

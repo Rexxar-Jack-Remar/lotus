@@ -35,7 +35,6 @@ Types
 Type utilities in ``include/Utils/Types/``:
 
 * **Offset.h** - Offset manipulation utilities
-* **Optional.h** - Optional value wrapper
 * **Nullable.h** - Nullable type utilities
 * **ScopeExit.h** - RAII-style scope exit handlers
 * **range.h** - Range utilities

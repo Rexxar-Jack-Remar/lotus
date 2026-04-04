@@ -87,9 +87,9 @@ public:
   using region_copy_t =
       crab::cfg::region_copy_stmt<bb_label_t, number_t, varname_t>;
   using region_cast_t =
-      crab::cfg::region_cast_stmt<bb_label_t, number_t, varname_t>;  
+      crab::cfg::region_cast_stmt<bb_label_t, number_t, varname_t>;
   using make_ref_t = crab::cfg::make_ref_stmt<bb_label_t, number_t, varname_t>;
-  using remove_ref_t = crab::cfg::remove_ref_stmt<bb_label_t, number_t, varname_t>;  
+  using remove_ref_t = crab::cfg::remove_ref_stmt<bb_label_t, number_t, varname_t>;
   using load_from_ref_t =
       crab::cfg::load_from_ref_stmt<bb_label_t, number_t, varname_t>;
   using store_to_ref_t =
@@ -135,9 +135,9 @@ protected:
   virtual void exec(arr_assign_t &) {}
   virtual void exec(region_init_t &) {}
   virtual void exec(region_copy_t &) {}
-  virtual void exec(region_cast_t &) {}  
+  virtual void exec(region_cast_t &) {}
   virtual void exec(make_ref_t &) {}
-  virtual void exec(remove_ref_t &) {}  
+  virtual void exec(remove_ref_t &) {}
   virtual void exec(load_from_ref_t &) {}
   virtual void exec(store_to_ref_t &) {}
   virtual void exec(gep_ref_t &) {}
@@ -170,9 +170,9 @@ public: /* visitor api */
   virtual void visit(arr_assign_t &s) override { exec(s); }
   virtual void visit(region_init_t &s) override { exec(s); }
   virtual void visit(region_copy_t &s) override { exec(s); }
-  virtual void visit(region_cast_t &s) override { exec(s); }  
+  virtual void visit(region_cast_t &s) override { exec(s); }
   virtual void visit(make_ref_t &s) override { exec(s); }
-  virtual void visit(remove_ref_t &s) override { exec(s); }  
+  virtual void visit(remove_ref_t &s) override { exec(s); }
   virtual void visit(load_from_ref_t &s) override { exec(s); }
   virtual void visit(store_to_ref_t &s) override { exec(s); }
   virtual void visit(gep_ref_t &s) override { exec(s); }
@@ -194,14 +194,14 @@ public: /* visitor api */
  **/
 
 template <typename T>
-inline boost::optional<T> conv_op(crab::cfg::binary_operation_t op);
+inline std::optional<T> conv_op(crab::cfg::binary_operation_t op);
 template <typename T>
-inline boost::optional<T> conv_op(crab::cfg::bool_binary_operation_t op);
+inline std::optional<T> conv_op(crab::cfg::bool_binary_operation_t op);
 template <typename T>
-inline boost::optional<T> conv_op(crab::cfg::cast_operation_t op);
+inline std::optional<T> conv_op(crab::cfg::cast_operation_t op);
 
 template <>
-inline boost::optional<domains::arith_operation_t>
+inline std::optional<domains::arith_operation_t>
 conv_op(crab::cfg::binary_operation_t op) {
   switch (op) {
   case crab::cfg::BINOP_ADD:
@@ -219,12 +219,12 @@ conv_op(crab::cfg::binary_operation_t op) {
   case crab::cfg::BINOP_UREM:
     return domains::OP_UREM;
   default:
-    return boost::optional<domains::arith_operation_t>();
+    return std::optional<domains::arith_operation_t>();
   }
 }
 
 template <>
-inline boost::optional<domains::bitwise_operation_t>
+inline std::optional<domains::bitwise_operation_t>
 conv_op(crab::cfg::binary_operation_t op) {
   switch (op) {
   case crab::cfg::BINOP_AND:
@@ -240,12 +240,12 @@ conv_op(crab::cfg::binary_operation_t op) {
   case crab::cfg::BINOP_ASHR:
     return domains::OP_ASHR;
   default:
-    return boost::optional<domains::bitwise_operation_t>();
+    return std::optional<domains::bitwise_operation_t>();
   }
 }
 
 template <>
-inline boost::optional<domains::int_conv_operation_t>
+inline std::optional<domains::int_conv_operation_t>
 conv_op(crab::cfg::cast_operation_t op) {
   switch (op) {
   case crab::cfg::CAST_TRUNC:
@@ -259,7 +259,7 @@ conv_op(crab::cfg::cast_operation_t op) {
 }
 
 template <>
-inline boost::optional<domains::bool_operation_t>
+inline std::optional<domains::bool_operation_t>
 conv_op(crab::cfg::bool_binary_operation_t op) {
   switch (op) {
   case crab::cfg::BINOP_BAND:
@@ -333,10 +333,10 @@ public:
   using typename abs_transform_api_t::intrinsic_t;
   using typename abs_transform_api_t::load_from_ref_t;
   using typename abs_transform_api_t::make_ref_t;
-  using typename abs_transform_api_t::remove_ref_t;  
+  using typename abs_transform_api_t::remove_ref_t;
   using typename abs_transform_api_t::ref_to_int_t;
   using typename abs_transform_api_t::region_copy_t;
-  using typename abs_transform_api_t::region_cast_t;  
+  using typename abs_transform_api_t::region_cast_t;
   using typename abs_transform_api_t::region_init_t;
   using typename abs_transform_api_t::select_ref_t;
   using typename abs_transform_api_t::select_t;
@@ -408,14 +408,14 @@ public:
     }
 
     m_inv.select(stmt.lhs(), stmt.cond(), stmt.left(), stmt.right());
-    
+
     if (::crab::CrabSanityCheckFlag) {
       bool post_bot = m_inv.is_bottom();
       if (!(pre_bot || !post_bot)) {
         CRAB_ERROR("Invariant became bottom after ", stmt);
       }
     }
-    CRAB_VERBOSE_IF(5, crab::outs() << "EXECUTED " << stmt << " :" << m_inv <<"\n";);    
+    CRAB_VERBOSE_IF(5, crab::outs() << "EXECUTED " << stmt << " :" << m_inv <<"\n";);
   }
 
   virtual void exec(assign_t &stmt) override {
@@ -432,12 +432,12 @@ public:
         CRAB_ERROR("Invariant became bottom after ", stmt);
       }
     }
-    CRAB_VERBOSE_IF(5, crab::outs() << "EXECUTED " << stmt << " :" << m_inv <<"\n";);    
+    CRAB_VERBOSE_IF(5, crab::outs() << "EXECUTED " << stmt << " :" << m_inv <<"\n";);
   }
 
   virtual void exec(assume_t &stmt) override {
     m_inv.operator+=(stmt.constraint());
-    CRAB_VERBOSE_IF(5, crab::outs() << "EXECUTED " << stmt << " :" << m_inv <<"\n";);    
+    CRAB_VERBOSE_IF(5, crab::outs() << "EXECUTED " << stmt << " :" << m_inv <<"\n";);
   }
 
   virtual void exec(assert_t &stmt) override {
@@ -461,7 +461,7 @@ public:
         }
       }
     }
-    CRAB_VERBOSE_IF(5, crab::outs() << "EXECUTED " << stmt << " :" << m_inv <<"\n";);    
+    CRAB_VERBOSE_IF(5, crab::outs() << "EXECUTED " << stmt << " :" << m_inv <<"\n";);
   }
 
   virtual void exec(int_cast_t &stmt) override {
@@ -481,7 +481,7 @@ public:
         CRAB_ERROR("Invariant became bottom after ", stmt);
       }
     }
-    CRAB_VERBOSE_IF(5, crab::outs() << "EXECUTED " << stmt << " :" << m_inv <<"\n";);    
+    CRAB_VERBOSE_IF(5, crab::outs() << "EXECUTED " << stmt << " :" << m_inv <<"\n";);
   }
 
   virtual void exec(bool_assign_cst_t &stmt) override {
@@ -502,7 +502,7 @@ public:
         CRAB_ERROR("Invariant became bottom after ", stmt);
       }
     }
-    CRAB_VERBOSE_IF(5, crab::outs() << "EXECUTED " << stmt << " :" << m_inv <<"\n";);    
+    CRAB_VERBOSE_IF(5, crab::outs() << "EXECUTED " << stmt << " :" << m_inv <<"\n";);
   }
 
   virtual void exec(bool_assign_var_t &stmt) override {
@@ -518,7 +518,7 @@ public:
         CRAB_ERROR("Invariant became bottom after ", stmt);
       }
     }
-    CRAB_VERBOSE_IF(5, crab::outs() << "EXECUTED " << stmt << " :" << m_inv <<"\n";);    
+    CRAB_VERBOSE_IF(5, crab::outs() << "EXECUTED " << stmt << " :" << m_inv <<"\n";);
   }
 
   virtual void exec(bool_bin_op_t &stmt) override {
@@ -539,12 +539,12 @@ public:
         CRAB_ERROR("Invariant became bottom after ", stmt);
       }
     }
-    CRAB_VERBOSE_IF(5, crab::outs() << "EXECUTED " << stmt << " :" << m_inv <<"\n";);    
+    CRAB_VERBOSE_IF(5, crab::outs() << "EXECUTED " << stmt << " :" << m_inv <<"\n";);
   }
 
   virtual void exec(bool_assume_t &stmt) override {
     m_inv.assume_bool(stmt.cond(), stmt.is_negated());
-    CRAB_VERBOSE_IF(5, crab::outs() << "EXECUTED " << stmt << " :" << m_inv <<"\n";);    
+    CRAB_VERBOSE_IF(5, crab::outs() << "EXECUTED " << stmt << " :" << m_inv <<"\n";);
   }
 
   virtual void exec(bool_select_t &stmt) override {
@@ -554,14 +554,14 @@ public:
     }
 
     m_inv.select_bool(stmt.lhs(), stmt.cond(), stmt.left(), stmt.right());
-    
+
     if (::crab::CrabSanityCheckFlag) {
       bool post_bot = m_inv.is_bottom();
       if (!(pre_bot || !post_bot)) {
         CRAB_ERROR("Invariant became bottom after ", stmt);
       }
     }
-    CRAB_VERBOSE_IF(5, crab::outs() << "EXECUTED " << stmt << " :" << m_inv <<"\n";);    
+    CRAB_VERBOSE_IF(5, crab::outs() << "EXECUTED " << stmt << " :" << m_inv <<"\n";);
   }
 
   virtual void exec(bool_assert_t &stmt) override {
@@ -570,7 +570,7 @@ public:
     }
 
     m_inv.assume_bool(stmt.cond(), false);
-    CRAB_VERBOSE_IF(5, crab::outs() << "EXECUTED " << stmt << " :" << m_inv <<"\n";);    
+    CRAB_VERBOSE_IF(5, crab::outs() << "EXECUTED " << stmt << " :" << m_inv <<"\n";);
   }
 
   virtual void exec(havoc_t &stmt) override {
@@ -587,12 +587,12 @@ public:
         CRAB_ERROR("Invariant became bottom after ", stmt);
       }
     }
-    CRAB_VERBOSE_IF(5, crab::outs() << "EXECUTED " << stmt << " :" << m_inv <<"\n";);    
+    CRAB_VERBOSE_IF(5, crab::outs() << "EXECUTED " << stmt << " :" << m_inv <<"\n";);
   }
 
   virtual void exec(unreach_t &stmt) override {
     m_inv.set_to_bottom();
-    CRAB_VERBOSE_IF(5, crab::outs() << "EXECUTED " << stmt << " :" << m_inv <<"\n";);    
+    CRAB_VERBOSE_IF(5, crab::outs() << "EXECUTED " << stmt << " :" << m_inv <<"\n";);
   }
 
   virtual void exec(arr_init_t &stmt) override {
@@ -610,9 +610,9 @@ public:
         CRAB_ERROR("Invariant became bottom after ", stmt);
       }
     }
-    CRAB_VERBOSE_IF(5, crab::outs() << "EXECUTED " << stmt << " :" << m_inv <<"\n";);    
+    CRAB_VERBOSE_IF(5, crab::outs() << "EXECUTED " << stmt << " :" << m_inv <<"\n";);
   }
-  
+
   virtual void exec(arr_store_t &stmt) override {
     bool pre_bot = false;
     if (::crab::CrabSanityCheckFlag) {
@@ -633,7 +633,7 @@ public:
         CRAB_ERROR("Invariant became bottom after ", stmt);
       }
     }
-    CRAB_VERBOSE_IF(5, crab::outs() << "EXECUTED " << stmt << " :" << m_inv <<"\n";);    
+    CRAB_VERBOSE_IF(5, crab::outs() << "EXECUTED " << stmt << " :" << m_inv <<"\n";);
   }
 
   virtual void exec(arr_load_t &stmt) override {
@@ -650,7 +650,7 @@ public:
         CRAB_ERROR("Invariant became bottom after ", stmt);
       }
     }
-    CRAB_VERBOSE_IF(5, crab::outs() << "EXECUTED " << stmt << " :" << m_inv <<"\n";);    
+    CRAB_VERBOSE_IF(5, crab::outs() << "EXECUTED " << stmt << " :" << m_inv <<"\n";);
   }
 
   virtual void exec(arr_assign_t &stmt) override {
@@ -667,7 +667,7 @@ public:
         CRAB_ERROR("Invariant became bottom after ", stmt);
       }
     }
-    CRAB_VERBOSE_IF(5, crab::outs() << "EXECUTED " << stmt << " :" << m_inv <<"\n";);    
+    CRAB_VERBOSE_IF(5, crab::outs() << "EXECUTED " << stmt << " :" << m_inv <<"\n";);
   }
 
   virtual void exec(make_ref_t &stmt) override {
@@ -684,7 +684,7 @@ public:
         CRAB_ERROR("Invariant became bottom after ", stmt);
       }
     }
-    CRAB_VERBOSE_IF(5, crab::outs() << "EXECUTED " << stmt << " :" << m_inv <<"\n";);    
+    CRAB_VERBOSE_IF(5, crab::outs() << "EXECUTED " << stmt << " :" << m_inv <<"\n";);
   }
 
   virtual void exec(remove_ref_t &stmt) override {
@@ -701,9 +701,9 @@ public:
         CRAB_ERROR("Invariant became bottom after ", stmt);
       }
     }
-    CRAB_VERBOSE_IF(5, crab::outs() << "EXECUTED " << stmt << " :" << m_inv <<"\n";);    
+    CRAB_VERBOSE_IF(5, crab::outs() << "EXECUTED " << stmt << " :" << m_inv <<"\n";);
   }
-  
+
   virtual void exec(region_init_t &stmt) override {
     bool pre_bot = false;
     if (::crab::CrabSanityCheckFlag) {
@@ -718,7 +718,7 @@ public:
         CRAB_ERROR("Invariant became bottom after ", stmt);
       }
     }
-    CRAB_VERBOSE_IF(5, crab::outs() << "EXECUTED " << stmt << " :" << m_inv <<"\n";);    
+    CRAB_VERBOSE_IF(5, crab::outs() << "EXECUTED " << stmt << " :" << m_inv <<"\n";);
   }
 
   virtual void exec(region_copy_t &stmt) override {
@@ -735,7 +735,7 @@ public:
         CRAB_ERROR("Invariant became bottom after ", stmt);
       }
     }
-    CRAB_VERBOSE_IF(5, crab::outs() << "EXECUTED " << stmt << " :" << m_inv <<"\n";);    
+    CRAB_VERBOSE_IF(5, crab::outs() << "EXECUTED " << stmt << " :" << m_inv <<"\n";);
   }
 
   virtual void exec(region_cast_t &stmt) override {
@@ -752,9 +752,9 @@ public:
         CRAB_ERROR("Invariant became bottom after ", stmt);
       }
     }
-    CRAB_VERBOSE_IF(5, crab::outs() << "EXECUTED " << stmt << " :" << m_inv <<"\n";);    
+    CRAB_VERBOSE_IF(5, crab::outs() << "EXECUTED " << stmt << " :" << m_inv <<"\n";);
   }
-  
+
   virtual void exec(load_from_ref_t &stmt) override {
     bool pre_bot = false;
     if (::crab::CrabSanityCheckFlag) {
@@ -769,7 +769,7 @@ public:
         CRAB_ERROR("Invariant became bottom after ", stmt);
       }
     }
-    CRAB_VERBOSE_IF(5, crab::outs() << "EXECUTED " << stmt << " :" << m_inv <<"\n";);    
+    CRAB_VERBOSE_IF(5, crab::outs() << "EXECUTED " << stmt << " :" << m_inv <<"\n";);
   }
 
   virtual void exec(store_to_ref_t &stmt) override {
@@ -786,7 +786,7 @@ public:
         CRAB_ERROR("Invariant became bottom after ", stmt);
       }
     }
-    CRAB_VERBOSE_IF(5, crab::outs() << "EXECUTED " << stmt << " :" << m_inv <<"\n";);    
+    CRAB_VERBOSE_IF(5, crab::outs() << "EXECUTED " << stmt << " :" << m_inv <<"\n";);
   }
 
   virtual void exec(gep_ref_t &stmt) override {
@@ -804,12 +804,12 @@ public:
         CRAB_ERROR("Invariant became bottom after ", stmt);
       }
     }
-    CRAB_VERBOSE_IF(5, crab::outs() << "EXECUTED " << stmt << " :" << m_inv <<"\n";);    
+    CRAB_VERBOSE_IF(5, crab::outs() << "EXECUTED " << stmt << " :" << m_inv <<"\n";);
   }
 
   virtual void exec(assume_ref_t &stmt) override {
     m_inv.ref_assume(stmt.constraint());
-    CRAB_VERBOSE_IF(5, crab::outs() << "EXECUTED " << stmt << " :" << m_inv <<"\n";);    
+    CRAB_VERBOSE_IF(5, crab::outs() << "EXECUTED " << stmt << " :" << m_inv <<"\n";);
   }
 
   virtual void exec(assert_ref_t &stmt) override {
@@ -817,7 +817,7 @@ public:
       return;
     }
     m_inv.ref_assume(stmt.constraint());
-    CRAB_VERBOSE_IF(5, crab::outs() << "EXECUTED " << stmt << " :" << m_inv <<"\n";);    
+    CRAB_VERBOSE_IF(5, crab::outs() << "EXECUTED " << stmt << " :" << m_inv <<"\n";);
   }
 
   virtual void exec(select_ref_t &stmt) override {
@@ -830,14 +830,14 @@ public:
 		     stmt.cond(),
 		     stmt.left_ref(), stmt.left_rgn(),
 		     stmt.right_ref(), stmt.right_rgn());
-    
+
     if (::crab::CrabSanityCheckFlag) {
       bool post_bot = m_inv.is_bottom();
       if (!(pre_bot || !post_bot)) {
         CRAB_ERROR("Invariant became bottom after ", stmt);
       }
     }
-    CRAB_VERBOSE_IF(5, crab::outs() << "EXECUTED " << stmt << " :" << m_inv <<"\n";);    
+    CRAB_VERBOSE_IF(5, crab::outs() << "EXECUTED " << stmt << " :" << m_inv <<"\n";);
   }
 
   virtual void exec(int_to_ref_t &stmt) override {
@@ -854,7 +854,7 @@ public:
         CRAB_ERROR("Invariant became bottom after ", stmt);
       }
     }
-    CRAB_VERBOSE_IF(5, crab::outs() << "EXECUTED " << stmt << " :" << m_inv <<"\n";);    
+    CRAB_VERBOSE_IF(5, crab::outs() << "EXECUTED " << stmt << " :" << m_inv <<"\n";);
   }
 
   virtual void exec(ref_to_int_t &stmt) override {
@@ -871,7 +871,7 @@ public:
         CRAB_ERROR("Invariant became bottom after ", stmt);
       }
     }
-    CRAB_VERBOSE_IF(5, crab::outs() << "EXECUTED " << stmt << " :" << m_inv <<"\n";);    
+    CRAB_VERBOSE_IF(5, crab::outs() << "EXECUTED " << stmt << " :" << m_inv <<"\n";);
   }
 
   virtual void exec(intrinsic_t &cs) override {
@@ -879,7 +879,7 @@ public:
       // Note that we don't call the abstract transformer "intrinsic".
       // Instead, we directly print the projected invariants here.
       typename abs_dom_t::variable_vector_t vars;
-      auto const&inputs = cs.get_args(); 
+      auto const&inputs = cs.get_args();
       for (auto in: inputs) {
 	if (in.is_variable()) {
 	  vars.push_back(in.get_variable());
@@ -890,7 +890,7 @@ public:
       crab::outs() << cs << "\n" << "\t" << copy << "\n";
     } else {
       m_inv.intrinsic(cs.get_intrinsic_name(), cs.get_args(), cs.get_lhs());
-      CRAB_VERBOSE_IF(5, crab::outs() << "EXECUTED " << cs << " :" << m_inv <<"\n";);    
+      CRAB_VERBOSE_IF(5, crab::outs() << "EXECUTED " << cs << " :" << m_inv <<"\n";);
     }
   }
 
@@ -898,7 +898,7 @@ public:
     for (const variable_t &vt : cs.get_lhs()) {
       m_inv.operator-=(vt); // havoc
     }
-    CRAB_VERBOSE_IF(5, crab::outs() << "EXECUTED " << cs << " :" << m_inv <<"\n";);    
+    CRAB_VERBOSE_IF(5, crab::outs() << "EXECUTED " << cs << " :" << m_inv <<"\n";);
   }
 
 };
@@ -983,10 +983,10 @@ public:
   using typename abs_transform_api_t::lin_exp_t;
   using typename abs_transform_api_t::load_from_ref_t;
   using typename abs_transform_api_t::make_ref_t;
-  using typename abs_transform_api_t::remove_ref_t;  
+  using typename abs_transform_api_t::remove_ref_t;
   using typename abs_transform_api_t::ref_to_int_t;
   using typename abs_transform_api_t::region_copy_t;
-  using typename abs_transform_api_t::region_cast_t;  
+  using typename abs_transform_api_t::region_cast_t;
   using typename abs_transform_api_t::region_init_t;
   using typename abs_transform_api_t::select_ref_t;
   using typename abs_transform_api_t::select_t;
@@ -1185,15 +1185,15 @@ public:
   virtual void exec(bool_assign_cst_t &stmt) override {
     m_pre -= stmt.lhs();
   }
-  
+
   virtual void exec(bool_assign_var_t &stmt) override {
     m_pre -= stmt.lhs();
   }
-  
+
   virtual void exec(bool_bin_op_t &stmt) override {
     m_pre -= stmt.lhs();
   }
-  
+
   virtual void exec(bool_select_t &stmt) override {
     m_pre -= stmt.lhs();
   }
@@ -1279,9 +1279,9 @@ public:
   // NOT IMPLEMENTED
   virtual void exec(region_init_t &stmt) override {}
   virtual void exec(region_copy_t &stmt) override {}
-  virtual void exec(region_cast_t &stmt) override {}  
+  virtual void exec(region_cast_t &stmt) override {}
   virtual void exec(make_ref_t &stmt) override {}
-  virtual void exec(remove_ref_t &stmt) override {}  
+  virtual void exec(remove_ref_t &stmt) override {}
   virtual void exec(load_from_ref_t &stmt) override {}
   virtual void exec(store_to_ref_t &stmt) override {}
   virtual void exec(gep_ref_t &stmt) override {}

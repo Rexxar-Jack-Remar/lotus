@@ -106,9 +106,9 @@
 
 #include <boost/iterator/indirect_iterator.hpp>
 #include <boost/iterator/transform_iterator.hpp>
-#include <boost/optional.hpp>
+#include <optional>
 #include <boost/range/iterator_range.hpp>
-#include <boost/variant.hpp>
+#include <variant>
 #include <unordered_map>
 #include <unordered_set>
 
@@ -1489,9 +1489,9 @@ public:
   /* opX_rgn can be none if opX_ref is a null constant */
   ref_select_stmt(variable_t lhs_ref, variable_t lhs_rgn, variable_t cond,
                   variable_or_constant_t op1_ref,
-                  boost::optional<variable_t> op1_rgn,
+                  std::optional<variable_t> op1_rgn,
                   variable_or_constant_t op2_ref,
-                  boost::optional<variable_t> op2_rgn, basic_block_t *parent)
+                  std::optional<variable_t> op2_rgn, basic_block_t *parent)
       : statement_t(REF_SELECT, parent), m_lhs_ref(lhs_ref), m_lhs_rgn(lhs_rgn),
         m_cond(cond), m_op1_ref(op1_ref), m_op1_rgn(op1_rgn),
         m_op2_ref(op2_ref), m_op2_rgn(op2_rgn) {
@@ -1518,12 +1518,12 @@ public:
   const variable_or_constant_t &left_ref() const { return m_op1_ref; }
 
   // if left_ref() is a null constant then left_rgn() returns none
-  boost::optional<variable_t> left_rgn() const { return m_op1_rgn; }
+  std::optional<variable_t> left_rgn() const { return m_op1_rgn; }
 
   const variable_or_constant_t &right_ref() const { return m_op2_ref; }
 
   // if right_ref() is a null constant then right_rgn() returns none
-  boost::optional<variable_t> right_rgn() const { return m_op2_rgn; }
+  std::optional<variable_t> right_rgn() const { return m_op2_rgn; }
 
   virtual void
   accept(statement_visitor<BasicBlockLabel, Number, VariableName> *v) override {
@@ -1558,9 +1558,9 @@ private:
   variable_t m_lhs_rgn;
   variable_t m_cond;                // pre: boolean type
   variable_or_constant_t m_op1_ref; // pre: reference type
-  boost::optional<variable_t> m_op1_rgn;
+  std::optional<variable_t> m_op1_rgn;
   variable_or_constant_t m_op2_ref; // pre: reference type
-  boost::optional<variable_t> m_op2_rgn;
+  std::optional<variable_t> m_op2_rgn;
 };
 
 template <class BasicBlockLabel, class Number, class VariableName>
@@ -1904,7 +1904,7 @@ public:
   using linear_constraint_t = ikos::linear_constraint<Number, VariableName>;
   using reference_constraint_t = reference_constraint<Number, VariableName>;
   using linear_or_reference_constraint_t =
-      boost::variant<linear_constraint_t, reference_constraint_t>;
+      std::variant<linear_constraint_t, reference_constraint_t>;
 
   bool_assign_cst(variable_t lhs, linear_constraint_t rhs,
                   basic_block_t *parent)
@@ -1928,7 +1928,7 @@ public:
 
   const linear_constraint_t &rhs_as_linear_constraint() const {
     if (m_is_rhs_linear_constraint) {
-      return boost::get<linear_constraint_t>(m_rhs);
+      return std::get<linear_constraint_t>(m_rhs);
     } else {
       CRAB_ERROR("rhs of bool_assign_cst is not a linear constraint");
     }
@@ -1936,7 +1936,7 @@ public:
 
   const reference_constraint_t &rhs_as_reference_constraint() const {
     if (!m_is_rhs_linear_constraint) {
-      return boost::get<reference_constraint_t>(m_rhs);
+      return std::get<reference_constraint_t>(m_rhs);
     } else {
       CRAB_ERROR("rhs of bool_assign_cst is not a reference constraint");
     }
@@ -2830,7 +2830,7 @@ public:
                                                 variable_t op_rgn) {
     return insert(new ref_select_t(
         lhs_ref, lhs_rgn, cond, variable_or_constant_t::make_reference_null(),
-        boost::none, op_ref, op_rgn, this));
+        std::nullopt, op_ref, op_rgn, this));
   }
 
   // (lhs_ref, lhs_rgn) := select_ref(cond, (op_ref, op_rgn), null)
@@ -2841,7 +2841,7 @@ public:
                                                  variable_t op_rgn) {
     return insert(new ref_select_t(
         lhs_ref, lhs_rgn, cond, op_ref, op_rgn,
-        variable_or_constant_t::make_reference_null(), boost::none, this));
+        variable_or_constant_t::make_reference_null(), std::nullopt, this));
   }
 
   const statement_t *int_to_ref(variable_t int_var, variable_t region,
@@ -3309,7 +3309,7 @@ public:
 
 private:
   BasicBlockLabel m_entry;
-  boost::optional<BasicBlockLabel> m_exit;
+  std::optional<BasicBlockLabel> m_exit;
   basic_block_map_t m_blocks;
   fdecl_t m_func_decl;
 
@@ -3345,7 +3345,7 @@ public:
 
   cfg_t &operator=(const cfg_t &o) = delete;
 
-  cfg(BasicBlockLabel entry) : m_entry(entry), m_exit(boost::none) {
+  cfg(BasicBlockLabel entry) : m_entry(entry), m_exit(std::nullopt) {
     m_blocks.insert(binding_t(m_entry, basic_block_t::create(m_entry)));
   }
 

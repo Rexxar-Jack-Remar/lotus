@@ -1,4 +1,4 @@
-#!/bin/bash  
+#!/bin/bash
 
 usage() {
     echo "Usage: $0 EXPECTED_OUTPUT BUILD_DIR"
@@ -35,13 +35,13 @@ lib="${lib%.out}"
 if [[ $lib != "apron" ]] && [[ $lib != "pplite" ]] && [[ $lib != "boxes" ]] && [[ $lib != "elina" ]] && [[ $lib != "out" ]]; then
     echo "First parameter should be expected_results.[apron|pplite|elina|boxes].out but it is $OLDLOG"
     exit 1
-fi    
+fi
 
 
 #DIFF=/Applications/DiffMerge.app/Contents/MacOS/DiffMerge
 DIFF=diff
 
-timestamp=$(date +"%m_%d_%y.%H_%M")  
+timestamp=$(date +"%m_%d_%y.%H_%M")
 NEWLOG=results_${timestamp}.out
 
 
@@ -49,7 +49,7 @@ NEWLOG=results_${timestamp}.out
 for test in $DIR/test-bin/*
 do
   if [[ $lib == "out" ]]; then
-      if [[ $test != *"apron"* ]] && [[ $test != *"pplite"* ]] && [[ $test != *"boxes"* ]] && [[ $test != *"elina"* ]]; then    
+      if [[ $test != *"apron"* ]] && [[ $test != *"pplite"* ]] && [[ $test != *"boxes"* ]] && [[ $test != *"elina"* ]]; then
 	  echo "Running $test"
 	  echo "=== Begin $test ===" >> $NEWLOG
 	  $test >> $NEWLOG 2>/dev/null
@@ -57,7 +57,7 @@ do
       fi
   else
       # lib should be apron, pplite, boxes, or elina
-      if [[ $test == *"$lib"* ]]; then    
+      if [[ $test == *"$lib"* ]]; then
 	  echo "Running $test"
 	  echo "=== Begin $test ===" >> $NEWLOG
 	  $test >> $NEWLOG 2>/dev/null
@@ -87,5 +87,5 @@ if [ $STATUS -eq 0 ]; then
 else
     echo "Some tests produced unexpected output:"
     cat $LOG
-    exit 1  
+    exit 1
 fi

@@ -20,12 +20,12 @@ public:
   elina_domain_params(bool use_tree_expressions)
     : m_use_tree_expressions(use_tree_expressions) {}
 
-  
+
   bool elina_use_tree_expressions() const {
     return m_use_tree_expressions;
   }
   void update_params(const elina_domain_params &params);
-  void write(crab::crab_os &o) const;  
+  void write(crab::crab_os &o) const;
 };
 
 class array_adaptive_domain_params {
@@ -39,8 +39,8 @@ class array_adaptive_domain_params {
   // -- maximum size of the array: beyond this number the domain will
   //    try to smash the array if the smashing options allow that.
   unsigned m_max_array_size;
-  
-  friend class crab_domain_params;  
+
+  friend class crab_domain_params;
 public:
   array_adaptive_domain_params()
     : m_is_smashable(true),
@@ -48,7 +48,7 @@ public:
       m_max_smashable_cells(64),
       m_max_array_size(64) {
     if (m_max_smashable_cells > m_max_array_size) {
-      CRAB_ERROR("array_adaptive_domain params: max_smashable_cells must be <= max_array_size");            
+      CRAB_ERROR("array_adaptive_domain params: max_smashable_cells must be <= max_array_size");
     }
   }
   array_adaptive_domain_params(bool is_smashable,
@@ -59,11 +59,11 @@ public:
       m_smash_at_nonzero_offset(smash_at_nonzero_offset),
       m_max_smashable_cells(max_smashable_cells),
       m_max_array_size(max_array_size) {
-    if (m_max_smashable_cells > m_max_array_size) {    
-      CRAB_ERROR("array_adaptive_domain params: max_smashable_cells must be <= max_array_size");      
+    if (m_max_smashable_cells > m_max_array_size) {
+      CRAB_ERROR("array_adaptive_domain params: max_smashable_cells must be <= max_array_size");
     }
   }
-  
+
   bool array_adaptive_is_smashable() const {
     return m_is_smashable;
   }
@@ -86,7 +86,7 @@ class boxes_domain_params {
   int m_convexify_threshold;
   bool m_dynamic_reordering;
 
-  friend class crab_domain_params;  
+  friend class crab_domain_params;
 public:
   boxes_domain_params()
     : m_ldd_size(3000),
@@ -100,7 +100,7 @@ public:
       m_convexify_threshold(convexify_threshold),
       m_dynamic_reordering(dynamic_reordering) {
   }
-  
+
   unsigned boxes_ldd_size() const {
     return m_ldd_size;
   }
@@ -111,7 +111,7 @@ public:
     return m_dynamic_reordering;
   }
   void update_params(const boxes_domain_params &p);
-  void write(crab::crab_os &o) const;  
+  void write(crab::crab_os &o) const;
 };
 
 class powerset_domain_params {
@@ -119,7 +119,7 @@ class powerset_domain_params {
   // Smash if the number of disjunctions exceeds this threshold.
   unsigned m_max_disjuncts;
 
-  friend class crab_domain_params;  
+  friend class crab_domain_params;
 public:
   powerset_domain_params()
     : m_exact_meet(false),
@@ -130,7 +130,7 @@ public:
     : m_exact_meet(exact_meet),
       m_max_disjuncts(max_disjuncts) {
   }
-  
+
   bool powerset_exact_meet() const {
     return m_exact_meet;
   }
@@ -138,7 +138,7 @@ public:
     return m_max_disjuncts;
   }
   void update_params(const powerset_domain_params &p);
-  void write(crab::crab_os &o) const;  
+  void write(crab::crab_os &o) const;
 };
 
 class region_domain_params {
@@ -153,7 +153,7 @@ class region_domain_params {
   // reason about unknown regions
   bool m_skip_unknown_regions;
 
-  friend class crab_domain_params;  
+  friend class crab_domain_params;
 public:
   region_domain_params()
     : m_allocation_sites(true),
@@ -199,7 +199,7 @@ class zones_domain_params {
   bool m_special_assign;
   bool m_close_bounds_inline;
 
-  friend class crab_domain_params;  
+  friend class crab_domain_params;
 public:
   zones_domain_params()
     : m_chrome_dijkstra(true),
@@ -216,7 +216,7 @@ public:
       m_special_assign(special_assign),
       m_close_bounds_inline(close_bounds_inline) {
   }
-  
+
   bool zones_chrome_dijkstra() const {
     return m_chrome_dijkstra;
   }
@@ -239,7 +239,7 @@ class oct_domain_params {
   bool m_special_assign;
   bool m_close_bounds_inline;
 
-  friend class crab_domain_params;  
+  friend class crab_domain_params;
 public:
   oct_domain_params()
     : m_chrome_dijkstra(true),
@@ -256,7 +256,7 @@ public:
       m_special_assign(special_assign),
       m_close_bounds_inline(close_bounds_inline) {
   }
-  
+
   bool oct_chrome_dijkstra() const {
     return m_chrome_dijkstra;
   }
@@ -276,15 +276,15 @@ public:
 class fixed_tvpi_domain_params {
   std::vector<unsigned> m_coefficients;
 
-  friend class crab_domain_params;  
+  friend class crab_domain_params;
 public:
   fixed_tvpi_domain_params() {}
-  
+
   fixed_tvpi_domain_params(const std::vector<unsigned> &coefficients)
     : m_coefficients(coefficients) {}
 
   const std::vector<unsigned>& coefficients() const;
-  std::vector<unsigned>& coefficients();  
+  std::vector<unsigned>& coefficients();
   void update_params(const fixed_tvpi_domain_params& p);
   void write(crab::crab_os &o) const;
 };
@@ -307,7 +307,7 @@ public:
   using zones_domain_params::update_params;
   using oct_domain_params::update_params;
   using fixed_tvpi_domain_params::update_params;
-  
+
   crab_domain_params()
     : elina_domain_params(),
       array_adaptive_domain_params(),

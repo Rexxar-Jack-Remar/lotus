@@ -12,7 +12,7 @@ void inter_run_impl(CG &cg, BUDom bu_top, TDDom td_top, bool /*run_liveness*/,
                     const params_t &params, bool enable_stats) {
 
   using basic_block_t = typename CG::cfg_t::basic_block_t;
-  
+
   crab::outs() << "Running "
                << "summary domain=" << bu_top.domain_name()
                << " and forward domain=" << td_top.domain_name() << "\n";
@@ -42,7 +42,7 @@ void inter_run_impl(CG &cg, BUDom bu_top, TDDom td_top, bool /*run_liveness*/,
     crab::outs() << sum << "\n";
   }
   #endif
-  
+
   if (enable_stats) {
     crab::CrabStats::Print(crab::outs());
     crab::CrabStats::reset();
@@ -96,7 +96,7 @@ void td_inter_run_impl(crab::cg_impl::z_cg_t &cg, Dom init,
       auto sum = analyzer.get_summary(cfg);
       crab::outs() << sum << "\n";
     }
-    #endif 
+    #endif
   }
 
   if (enable_stats) {

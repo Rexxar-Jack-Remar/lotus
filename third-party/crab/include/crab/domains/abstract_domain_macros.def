@@ -1,7 +1,7 @@
 /**
  * Do not include this file. This file is included by
  * abstract_domain.hpp.
- * 
+ *
  * These macros are intended to be used only by classes deriving from
  * abstract_domain.hpp.
  *
@@ -14,7 +14,7 @@
  * DEFAULT_SELECT_REF(DOM)
  * DEFAULT_SELECT_BOOL(DOM)
  * DEFAULT_WEAK_ASSIGN(DOM)
- * DEFAULT_WEAK_BOOL_ASSIGN(DOM) 
+ * DEFAULT_WEAK_BOOL_ASSIGN(DOM)
  * DEFAULT_ENTAILS(DOM)
  *
  * Note that these macros are not really necessary because they could
@@ -119,9 +119,9 @@
   virtual void select_ref(const variable_t &lhs_ref, const variable_t &lhs_rgn,\
 			  const variable_t &cond,			       \
 			  const variable_or_constant_t &ref1,		       \
-			  const boost::optional<variable_t> &rgn1,	       \
+			  const std::optional<variable_t> &rgn1,	       \
 			  const variable_or_constant_t &ref2,		       \
-			  const boost::optional<variable_t> &rgn2) override {} \
+			  const std::optional<variable_t> &rgn2) override {} \
   virtual crab::domains::boolean_value is_null_ref(const variable_t &ref) override  \
   { return crab::domains::boolean_value::top();}			       \
   virtual bool get_allocation_sites(const variable_t &ref,                     \
@@ -129,8 +129,8 @@
   { return false; }							       \
   virtual bool get_tags(const variable_t &rng, const variable_t &ref,	       \
     std::vector<uint64_t> &out) override		                       \
-  { return false; }							
-  
+  { return false; }
+
 #define ARRAY_OPERATIONS_NOT_IMPLEMENTED(DOM)                                  \
   virtual void array_init(                                                     \
       const variable_t &a, const linear_expression_t &elem_size,               \
@@ -198,9 +198,9 @@
 #define DEFAULT_SELECT_REF(DOM)                                         \
 virtual void select_ref(const variable_t &lhs_ref, const variable_t &lhs_rgn, const variable_t &cond, \
 			const variable_or_constant_t &ref1,		\
-			const boost::optional<variable_t> &rgn1,	\
+			const std::optional<variable_t> &rgn1,	\
 			const variable_or_constant_t &ref2,		\
-			const boost::optional<variable_t> &rgn2) override { \
+			const std::optional<variable_t> &rgn2) override { \
   crab::CrabStats::count(domain_name() + ".count.select_ref");		\
   crab::ScopedCrabStats __st__(domain_name() + ".select_ref");		\
   if (!is_bottom()) {							\
@@ -277,7 +277,7 @@ virtual void weak_assign(const variable_t &x, const linear_expression_t &e) over
      other.assign(x, e);                                                \
      *this |= other;                                                    \
    }                                                                    \
-}                                                                       
+}
 
 #define DEFAULT_WEAK_BOOL_ASSIGN(DOM)                                        \
 virtual void weak_assign_bool_cst(const variable_t &lhs,                     \

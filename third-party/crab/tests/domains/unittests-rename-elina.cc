@@ -8,7 +8,7 @@ using namespace ikos;
 
 int main(int argc, char **argv) {
 #ifdef HAVE_ELINA
-  
+
   bool stats_enabled = false;
   if (!crab_tests::parse_user_options(argc, argv, stats_enabled)) {
     return 0;
@@ -26,7 +26,7 @@ int main(int argc, char **argv) {
   inv += z_lin_cst_t(x <= 0);
   inv += z_lin_cst_t(y == 5);
   crab::outs() << "Before renaming " << inv << "\n";
-  
+
   {
     z_pk_elina_domain_t tmp(inv);
     tmp.rename({x, y}, {w, z});

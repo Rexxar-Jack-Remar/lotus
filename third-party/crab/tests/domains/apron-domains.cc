@@ -341,36 +341,36 @@ int main(int argc, char **argv) {
 #if 0
   {
     variable_factory_t vfac;
-    
+
     ap_manager_t* man = box_manager_alloc();;
     // x:0 y:1 z:2
     ap_state_ptr ap1 = apPtr(man, ap_abstract0_top(man, 3, 0));
     ap1 = apPtr(man,
-                 ap_abstract0_assign_texpr(man, false, 
-                                           &*ap1, 
-                                           0, ap_texpr0_cst_scalar_int((int) 5), 
+                 ap_abstract0_assign_texpr(man, false,
+                                           &*ap1,
+                                           0, ap_texpr0_cst_scalar_int((int) 5),
                                            NULL));
     ap1 = apPtr(man,
-                 ap_abstract0_assign_texpr(man, false, 
-                                           &*ap1, 
-                                           1, ap_texpr0_cst_scalar_int((int) 2), 
+                 ap_abstract0_assign_texpr(man, false,
+                                           &*ap1,
+                                           1, ap_texpr0_cst_scalar_int((int) 2),
                                            NULL));
-    
+
     ap_abstract0_fprint(stdout, man, &*ap1, NULL);
-    
+
     ap_dimperm_t*  p = ap_dimperm_alloc(3);
-    
+
     p->dim[0] = 2;
     p->dim[1] = 1;
     p->dim[2] = 0;
-    
+
     ap_dimperm_fprint(stdout, p);
     ap_state_ptr ap2 = apPtr(man, ap_abstract0_permute_dimensions(man, false, &*ap1, p));
     ap_abstract0_fprint(stdout, man, &*ap2, NULL);
     ap_dimperm_free(p);
   }
-  
-  { 
+
+  {
     variable_factory_t vfac;
     z_pk_apron_domain_t inv1;
     inv1.assign(vfac ["x"], 5);
@@ -386,8 +386,8 @@ int main(int argc, char **argv) {
     pk_apron_domain_t inv3 = inv1 | inv2;
     crab::outs() << "Join: " << inv3 << "\n";
   }
-  
-  { 
+
+  {
     variable_factory_t vfac;
     z_pk_apron_domain_t inv1;
     inv1.assign(vfac ["x"], 5);
@@ -432,7 +432,7 @@ int main(int argc, char **argv) {
     }
 
     bool res = inv1 <= inv2;
-    crab::outs() << "Checking " << inv1 << " <= " << inv2 << "\nRes=" << res << "\n"; 
+    crab::outs() << "Checking " << inv1 << " <= " << inv2 << "\nRes=" << res << "\n";
   }
 #endif
 #endif

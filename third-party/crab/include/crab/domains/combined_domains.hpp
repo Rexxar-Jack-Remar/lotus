@@ -22,7 +22,7 @@
 #include <crab/support/stats.hpp>
 
 #include <algorithm>
-#include <boost/optional.hpp>
+#include <optional>
 
 namespace crab {
 namespace domains {
@@ -670,9 +670,9 @@ public:
   }
   void select_ref(const variable_t &lhs_ref, const variable_t &lhs_rgn,
                   const variable_t &cond, const variable_or_constant_t &ref1,
-                  const boost::optional<variable_t> &rgn1,
+                  const std::optional<variable_t> &rgn1,
                   const variable_or_constant_t &ref2,
-                  const boost::optional<variable_t> &rgn2) override {
+                  const std::optional<variable_t> &rgn2) override {
     m_product.first().select_ref(lhs_ref, lhs_rgn, cond, ref1, rgn1, ref2,
                                  rgn2);
     m_product.second().select_ref(lhs_ref, lhs_rgn, cond, ref1, rgn1, ref2,

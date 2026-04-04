@@ -4,7 +4,7 @@
 #include <crab/support/debug.hpp>
 #include <crab/support/stats.hpp>
 
-#include <boost/optional.hpp>
+#include <optional>
 
 #define PRINT_WRAPINT_AS_SIGNED
 
@@ -679,21 +679,21 @@ wrapped_interval<Number>::operator||(const wrapped_interval<Number> &x) const {
       max = wrapint(1 << (w - 2), w);
       break;
     }
-    BOOST_FALLTHROUGH;     
+    [[fallthrough]];
   case 8:
     if (w > 3) {
       max = wrapint(1 << (w - 3), w);
       break;
     }
-    BOOST_FALLTHROUGH;     
+    [[fallthrough]];
   case 16:
     if (w > 4) {
       max = wrapint(1 << (w - 4), w);
       break;
     }
-    BOOST_FALLTHROUGH;     
+    [[fallthrough]];
   case 2:
-    BOOST_FALLTHROUGH;         
+    [[fallthrough]];
   default:
     assert(w > 1);
     max = wrapint(1 << (w - 1), w);
@@ -803,21 +803,21 @@ wrapped_interval<Number> wrapped_interval<Number>::widening_thresholds(
       max = wrapint(1 << (w - 2), w);
       break;
     }
-    BOOST_FALLTHROUGH; 
+    [[fallthrough]];
   case 8:
     if (w > 3) {
       max = wrapint(1 << (w - 3), w);
       break;
     }
-    BOOST_FALLTHROUGH; 
+    [[fallthrough]];
   case 16:
     if (w > 4) {
       max = wrapint(1 << (w - 4), w);
       break;
     }
-    BOOST_FALLTHROUGH; 
+    [[fallthrough]];
   case 2:
-    BOOST_FALLTHROUGH; 
+    [[fallthrough]];
   default:
     assert(w > 1);
     max = wrapint(1 << (w - 1), w);
@@ -850,7 +850,7 @@ wrapped_interval<Number> wrapped_interval<Number>::widening_thresholds(
     using bound_t = typename ikos::interval<Number>::bound_t;
     bound_t next_end_bound_guess =
         ts.get_next(bound_t(x.m_end.get_unsigned_bignum()));
-    if (boost::optional<Number> n = next_end_bound_guess.number()) {
+    if (std::optional<Number> n = next_end_bound_guess.number()) {
       if (wrapint::fits_wrapint(*n, w)) {
         wrapint new_end_guess(*n, w);
         if (new_end_guess <= new_end) {

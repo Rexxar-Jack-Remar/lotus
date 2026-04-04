@@ -28,7 +28,7 @@
 #include <crab/support/debug.hpp>
 #include <crab/support/stats.hpp>
 
-#include <boost/optional.hpp>
+#include <optional>
 #include <unordered_set>
 
 #define JOIN_CLOSE_AFTER_MEET
@@ -68,7 +68,7 @@ public:
   using typename abstract_domain_t::variable_or_constant_t;
   using typename abstract_domain_t::variable_t;
   using typename abstract_domain_t::variable_vector_t;
-  using typename abstract_domain_t::variable_or_constant_vector_t;    
+  using typename abstract_domain_t::variable_or_constant_vector_t;
   using number_t = Number;
   using varname_t = VariableName;
   using constraint_kind_t = typename linear_constraint_t::kind_t;
@@ -86,7 +86,7 @@ private:
   using vert_map_t = std::unordered_map<variable_t, vert_id>;
 #endif
   using vmap_elt_t = typename vert_map_t::value_type;
-  using rev_map_t = std::vector<boost::optional<variable_t>>;
+  using rev_map_t = std::vector<std::optional<variable_t>>;
   using GrOps = GraphOps<graph_t>;
   using GrPerm = GraphPerm<graph_t>;
   using edge_vector = typename GrOps::edge_vector;
@@ -119,7 +119,7 @@ protected:
     Wt apply(const Wt &x, const Wt &y) { return std::min(x, y); }
     bool default_is_absorbing() { return false; }
   };
-  
+
   vert_id get_vert(variable_t v) {
     auto it = vert_map.find(v);
     if (it != vert_map.end())
@@ -143,15 +143,15 @@ protected:
     return vert;
   }
 
-  boost::optional<vert_id> get_vert(const variable_t &v) const {
+  std::optional<vert_id> get_vert(const variable_t &v) const {
     auto it = vert_map.find(v);
     if (it != vert_map.end()) {
       return (*it).second;
     } else {
-      return boost::none;
-    } 
+      return std::nullopt;
+    }
   }
-  
+
   vert_id get_vert(graph_t &g, vert_map_t &vmap, rev_map_t &rmap,
                    std::vector<Wt> &pot, variable_t v) {
     auto it = vmap.find(v);
@@ -262,7 +262,7 @@ protected:
                              the difference constraint v - k <= k */
                           std::vector<std::pair<variable_t, Wt>> &diff_csts) {
 
-    boost::optional<variable_t> unbounded_var;
+    std::optional<variable_t> unbounded_var;
     std::vector<std::pair<variable_t, Wt>> terms;
     bool overflow;
 
@@ -344,8 +344,8 @@ protected:
 
     Wt unbounded_lbcoeff;
     Wt unbounded_ubcoeff;
-    boost::optional<variable_t> unbounded_lbvar;
-    boost::optional<variable_t> unbounded_ubvar;
+    std::optional<variable_t> unbounded_lbvar;
+    std::optional<variable_t> unbounded_ubvar;
     bool underflow, overflow;
 
     Wt exp_ub = -(ntow::convert(exp.constant(), overflow));
@@ -569,7 +569,7 @@ protected:
       return false;
     } else if (!new_i.is_top() && (new_i <= i)) {
       vert_id v = get_vert(x);
-      wt_ref_t w; 
+      wt_ref_t w;
       Wt_min min_op;
       if (new_i.lb().is_finite()) {
         // strenghten lb
@@ -883,7 +883,7 @@ protected:
       diffcsts_of_lin_leq(exp, diffcsts, lbs, ubs);
       diffcsts_of_lin_leq(-exp, diffcsts, lbs, ubs);
     } else if (cst.is_disequation()) {
-      CRAB_WARN("disequalities ", cst, " not implemented by ", domain_name(), "::is_unsat");      
+      CRAB_WARN("disequalities ", cst, " not implemented by ", domain_name(), "::is_unsat");
       return false;
     } else {
       return false;
@@ -918,14 +918,14 @@ protected:
 
     return false;
   }
-  
+
   // Join of gx and gy.
   graph_t join(GrPerm &gx, GrPerm &gy, unsigned sz, std::vector<Wt> &pot_rx,
                std::vector<Wt> &pot_ry) const {
 
     // Compute the deferred relations
     graph_t g_ix_ry;
-    wt_ref_t ws, wd;    
+    wt_ref_t ws, wd;
     g_ix_ry.growTo(sz);
     SubGraph<GrPerm> gy_excl(gy, 0);
     for (vert_id s : gy_excl.verts()) {
@@ -1290,7 +1290,7 @@ public:
   split_dbm_domain(bool is_bottom = false) : _is_bottom(is_bottom) {
     g.growTo(1); // Allocate the zero vector
     potential.push_back(Wt(0));
-    rev_map.push_back(boost::none);
+    rev_map.push_back(std::nullopt);
   }
 
   // FIXME: Rewrite to avoid copying if o is _|_
@@ -1303,7 +1303,7 @@ public:
     CRAB_LOG("zones-split-size",
 	     auto p = size();
 	     print_dbm_size(p.first, p.second));
-    
+
     if (o._is_bottom)
       set_to_bottom();
 
@@ -1340,7 +1340,7 @@ public:
     CRAB_LOG("zones-split-size",
 	     auto p = size();
 	     print_dbm_size(p.first, p.second));
-    
+
     return *this;
   }
 
@@ -1405,11 +1405,11 @@ public:
 	// left is normalized but right doesn't need to.
 
 	wt_ref_t wx, wy;
-	
+
 	if (left.vert_map.size() < right.vert_map.size()) {
 	  return false;
 	}
-	
+
 	// Set up a mapping from o to this.
 	std::vector<unsigned int> vert_renaming(right.g.size(), -1);
 	vert_renaming[0] = 0;
@@ -1417,7 +1417,7 @@ public:
 	  if (right.g.succs(p.second).size() == 0 &&
 	      right.g.preds(p.second).size() == 0)
 	    continue;
-	  
+
 	  auto it = left.vert_map.find(p.first);
 	  // We can't have this <= o if we're missing some
 	  // vertex.
@@ -1426,14 +1426,14 @@ public:
 	  vert_renaming[p.second] = (*it).second;
 	  // vert_renaming[(*it).second] = p.second;
 	}
-	
+
 	assert(left.g.size() > 0);
 	// GrPerm g_perm(vert_renaming, g);
-	
+
 	for (vert_id ox : right.g.verts()) {
 	  if (right.g.succs(ox).size() == 0)
 	    continue;
-	  
+
 	  assert(vert_renaming[ox] != -1);
 	  vert_id x = vert_renaming[ox];
 	  for (auto edge : right.g.e_succs(ox)) {
@@ -1451,7 +1451,7 @@ public:
 	}
 	return true;
       };
-      
+
       if (need_normalization()) {
 	DBM_t left(*this);
 	left.normalize();
@@ -1482,15 +1482,15 @@ public:
 
       auto join_op = [this](DBM_t &left, const DBM_t& right)  {
 	// Both left and right are normalized
-	
+
 	check_potential(left.g, left.potential, __LINE__);
 	check_potential(right.g, right.potential, __LINE__);
-	
+
 	// Figure out the common renaming, initializing the
 	// resulting potentials as we go.
 	std::vector<vert_id> perm_x, perm_y;
 	std::vector<variable_t> perm_inv;
-	
+
 	std::vector<Wt> pot_rx, pot_ry;
 	vert_map_t out_vmap;
 	rev_map_t out_revmap;
@@ -1500,8 +1500,8 @@ public:
 	pot_ry.push_back(0);
 	perm_x.push_back(0);
 	perm_y.push_back(0);
-	out_revmap.push_back(boost::none);
-	
+	out_revmap.push_back(std::nullopt);
+
 	for (auto p : left.vert_map) {
 	  auto it = right.vert_map.find(p.first);
 	  // Variable exists in both
@@ -1518,16 +1518,16 @@ public:
 	  }
 	}
 	unsigned int sz = perm_x.size();
-	
+
 	// Build the permuted view of x and y.
 	assert(left.g.size() > 0);
 	GrPerm gx(perm_x, left.g);
 	assert(right.g.size() > 0);
 	GrPerm gy(perm_y, right.g);
-	
+
 	graph_t join_g = join(gx, gy, sz, pot_rx, pot_ry);
 	// Conjecture: join_g remains closed.
-	
+
 	// Now garbage collect any unused vertices
 	for (vert_id v : join_g.verts()) {
 	  if (v == 0)
@@ -1536,11 +1536,11 @@ public:
 	    join_g.forget(v);
 	    if (out_revmap[v]) {
 	      out_vmap.erase(*(out_revmap[v]));
-	      out_revmap[v] = boost::none;
+	      out_revmap[v] = std::nullopt;
 	    }
 	  }
 	}
-	
+
 	left.vert_map = std::move(out_vmap);
 	left.rev_map = std::move(out_revmap);
 	left.g = std::move(join_g);
@@ -1558,7 +1558,7 @@ public:
 	join_op(left, right);
       } else {
 	join_op(left, o);
-      } 
+      }
     }
   }
 
@@ -1582,15 +1582,15 @@ public:
 
       auto join_op = [this](const DBM_t &left, const DBM_t& right) -> DBM_t {
 	// Both left and right are normalized
-	
+
 	check_potential(left.g, left.potential, __LINE__);
 	check_potential(right.g, right.potential, __LINE__);
-	
+
 	// Figure out the common renaming, initializing the
 	// resulting potentials as we go.
 	std::vector<vert_id> perm_x, perm_y;
 	std::vector<variable_t> perm_inv;
-	
+
 	std::vector<Wt> pot_rx, pot_ry;
 	vert_map_t out_vmap;
 	rev_map_t out_revmap;
@@ -1600,15 +1600,15 @@ public:
 	pot_ry.push_back(0);
 	perm_x.push_back(0);
 	perm_y.push_back(0);
-	out_revmap.push_back(boost::none);
-	
+	out_revmap.push_back(std::nullopt);
+
 	for (auto p : left.vert_map) {
 	  auto it = right.vert_map.find(p.first);
 	  // Variable exists in both
 	  if (it != right.vert_map.end()) {
 	    out_vmap.insert(vmap_elt_t(p.first, perm_x.size()));
 	    out_revmap.push_back(p.first);
-	    
+
 	    pot_rx.push_back(left.potential[p.second] - left.potential[0]);
 	    // XXX JNL: check this out
 	    // pot_ry.push_back(right.potential[p.second] - right.potential[0]);
@@ -1619,16 +1619,16 @@ public:
         }
 	}
 	unsigned int sz = perm_x.size();
-	
+
 	// Build the permuted view of x and y.
 	assert(left.g.size() > 0);
 	GrPerm gx(perm_x, left.g);
 	assert(right.g.size() > 0);
 	GrPerm gy(perm_y, right.g);
-	
+
 	graph_t join_g = join(gx, gy, sz, pot_rx, pot_ry);
 	// Conjecture: join_g remains closed.
-	
+
 	// Now garbage collect any unused vertices
 	for (vert_id v : join_g.verts()) {
 	  if (v == 0)
@@ -1637,11 +1637,11 @@ public:
 	    join_g.forget(v);
 	    if (out_revmap[v]) {
 	      out_vmap.erase(*(out_revmap[v]));
-	      out_revmap[v] = boost::none;
+	      out_revmap[v] = std::nullopt;
 	    }
 	  }
 	}
-	
+
 	// DBM_t res(join_range, out_vmap, out_revmap, join_g, join_pot);
 	DBM_t res(std::move(out_vmap), std::move(out_revmap), std::move(join_g),
 		  std::move(pot_rx), vert_set_t());
@@ -1691,47 +1691,47 @@ public:
 
       auto widen_op = [this](const DBM_t &left, const DBM_t &right) -> DBM_t {
 	// Only right is normalized
-	
+
 	// Figure out the common renaming
 	std::vector<vert_id> perm_x, perm_y;
 	vert_map_t out_vmap;
 	rev_map_t out_revmap;
 	std::vector<Wt> widen_pot;
 	vert_set_t widen_unstable(left.unstable);
-	
+
 	assert(left.potential.size() > 0);
 	widen_pot.push_back(Wt(0));
 	perm_x.push_back(0);
 	perm_y.push_back(0);
-	out_revmap.push_back(boost::none);
+	out_revmap.push_back(std::nullopt);
 	for (auto p : left.vert_map) {
 	  auto it = right.vert_map.find(p.first);
 	  // Variable exists in both
 	  if (it != right.vert_map.end()) {
 	    out_vmap.insert(vmap_elt_t(p.first, perm_x.size()));
 	    out_revmap.push_back(p.first);
-	    
+
 	    widen_pot.push_back(left.potential[p.second] - left.potential[0]);
 	    perm_x.push_back(p.second);
 	    perm_y.push_back((*it).second);
 	  }
 	}
-	
+
 	// Build the permuted view of x and y.
 	assert(left.g.size() > 0);
 	GrPerm gx(perm_x, left.g);
 	assert(right.g.size() > 0);
 	GrPerm gy(perm_y, right.g);
-	
+
 	// Now perform the widening
 	std::vector<vert_id> destabilized;
 	graph_t widen_g(split_widen(gx, gy, destabilized));
 	for (vert_id v : destabilized)
 	  widen_unstable.insert(v);
-	
+
 	DBM_t res(std::move(out_vmap), std::move(out_revmap), std::move(widen_g),
 		  std::move(widen_pot), std::move(widen_unstable));
-	
+
 	CRAB_LOG("zones-split",crab::outs() << "Result widening:\n" << res << "\n");
 	return res;
       };
@@ -1771,7 +1771,7 @@ public:
 
       auto meet_op = [this](DBM_t &left, const DBM_t & right) {
 	// Both left and right are normalized
-	
+
 	check_potential(left.g, left.potential, __LINE__);
 	check_potential(right.g, right.potential, __LINE__);
 
@@ -1779,31 +1779,31 @@ public:
 	// This will often be the identity map, but there might be gaps.
 	vert_map_t meet_verts;
 	rev_map_t meet_rev;
-	
+
 	std::vector<vert_id> perm_x, perm_y;
 	std::vector<Wt> meet_pi;
 	perm_x.push_back(0);
 	perm_y.push_back(0);
 	meet_pi.push_back(Wt(0));
-	meet_rev.push_back(boost::none);
+	meet_rev.push_back(std::nullopt);
 	for (auto p : left.vert_map) {
 	  vert_id vv = perm_x.size();
 	  meet_verts.insert(vmap_elt_t(p.first, vv));
 	  meet_rev.push_back(p.first);
-	  
+
 	  perm_x.push_back(p.second);
 	  perm_y.push_back(-1);
 	  meet_pi.push_back(left.potential[p.second] - left.potential[0]);
 	}
-	
+
 	// Add missing mappings from the right operand.
 	for (auto p : right.vert_map) {
 	  auto it = meet_verts.find(p.first);
-	  
+
 	  if (it == meet_verts.end()) {
 	    vert_id vv = perm_y.size();
 	    meet_rev.push_back(p.first);
-	    
+
 	    perm_y.push_back(p.second);
 	    perm_x.push_back(-1);
 	    meet_pi.push_back(right.potential[p.second] - right.potential[0]);
@@ -1812,17 +1812,17 @@ public:
 	    perm_y[(*it).second] = p.second;
 	  }
 	}
-	
+
 	// Build the permuted view of x and y.
 	assert(left.g.size() > 0);
 	GrPerm gx(perm_x, left.g);
 	assert(right.g.size() > 0);
 	GrPerm gy(perm_y, right.g);
-	
+
 	// Compute the syntactic meet of the permuted graphs.
 	bool is_closed;
 	graph_t meet_g(GrOps::meet(gx, gy, is_closed));
-	
+
 	// Compute updated potentials on the zero-enriched graph
 	// vector<Wt> meet_pi(meet_g.size());
 	// We've warm-started pi with the operand potentials
@@ -1831,19 +1831,19 @@ public:
 	  set_to_bottom();
 	  return;
 	}
-	
+
 	if (!is_closed) {
 	  edge_vector delta;
 	  SubGraph<graph_t> meet_g_excl(meet_g, 0);
 	  // GrOps::close_after_meet(meet_g_excl, meet_pi, gx, gy, delta);
-	  
+
 	  if (crab_domain_params_man::get().zones_chrome_dijkstra())
 	    GrOps::close_after_meet(meet_g_excl, meet_pi, gx, gy, delta);
 	  else
 	    GrOps::close_johnson(meet_g_excl, meet_pi, delta);
-	  
+
 	  GrOps::apply_delta(meet_g, delta);
-	  
+
 	  // Recover updated LBs and UBs.
 	  if (crab_domain_params_man::get().zones_close_bounds_inline()) {
 	    Wt_min min_op;
@@ -1863,10 +1863,10 @@ public:
 	    GrOps::apply_delta(meet_g, delta);
 	  }
 	}
-      
+
 	check_potential(meet_g, meet_pi, __LINE__);
 
-      
+
 	left.vert_map = std::move(meet_verts);
 	left.rev_map = std::move(meet_rev);
 	left.g = std::move(meet_g);
@@ -1890,7 +1890,7 @@ public:
     }
   }
 
-  
+
   DBM_t operator&(const DBM_t &o) const override {
     crab::CrabStats::count(domain_name() + ".count.meet");
     crab::ScopedCrabStats __st__(domain_name() + ".meet");
@@ -1907,39 +1907,39 @@ public:
                                            << o << "\n");
 
       auto meet_op = [this](const DBM_t &left, const DBM_t &right) -> DBM_t {
-	// Both left and right are normalized 
+	// Both left and right are normalized
 	check_potential(left.g, left.potential, __LINE__);
 	check_potential(right.g, right.potential, __LINE__);
-	
+
 	// We map vertices in the left operand onto a contiguous range.
 	// This will often be the identity map, but there might be gaps.
 	vert_map_t meet_verts;
 	rev_map_t meet_rev;
-	
+
 	std::vector<vert_id> perm_x, perm_y;
 	std::vector<Wt> meet_pi;
 	perm_x.push_back(0);
 	perm_y.push_back(0);
 	meet_pi.push_back(Wt(0));
-	meet_rev.push_back(boost::none);
+	meet_rev.push_back(std::nullopt);
 	for (auto p : left.vert_map) {
 	  vert_id vv = perm_x.size();
 	  meet_verts.insert(vmap_elt_t(p.first, vv));
 	  meet_rev.push_back(p.first);
-	  
+
 	  perm_x.push_back(p.second);
 	  perm_y.push_back(-1);
 	  meet_pi.push_back(left.potential[p.second] - left.potential[0]);
 	}
-	
+
 	// Add missing mappings from the right operand.
 	for (auto p : right.vert_map) {
 	  auto it = meet_verts.find(p.first);
-	  
+
 	  if (it == meet_verts.end()) {
 	    vert_id vv = perm_y.size();
 	    meet_rev.push_back(p.first);
-	    
+
 	    perm_y.push_back(p.second);
 	    perm_x.push_back(-1);
 	    meet_pi.push_back(right.potential[p.second] - right.potential[0]);
@@ -1948,17 +1948,17 @@ public:
 	    perm_y[(*it).second] = p.second;
 	  }
 	}
-	
+
 	// Build the permuted view of x and y.
 	assert(left.g.size() > 0);
 	GrPerm gx(perm_x, left.g);
 	assert(right.g.size() > 0);
 	GrPerm gy(perm_y, right.g);
-	
+
 	// Compute the syntactic meet of the permuted graphs.
 	bool is_closed;
 	graph_t meet_g(GrOps::meet(gx, gy, is_closed));
-	
+
 	// Compute updated potentials on the zero-enriched graph
 	// vector<Wt> meet_pi(meet_g.size());
 	// We've warm-started pi with the operand potentials
@@ -1968,19 +1968,19 @@ public:
 	  res.set_to_bottom();
 	  return res;
 	}
-	
+
 	if (!is_closed) {
 	  edge_vector delta;
 	  SubGraph<graph_t> meet_g_excl(meet_g, 0);
 	  // GrOps::close_after_meet(meet_g_excl, meet_pi, gx, gy, delta);
-	  
+
 	  if (crab_domain_params_man::get().zones_chrome_dijkstra())
 	    GrOps::close_after_meet(meet_g_excl, meet_pi, gx, gy, delta);
 	  else
 	    GrOps::close_johnson(meet_g_excl, meet_pi, delta);
-	  
+
 	  GrOps::apply_delta(meet_g, delta);
-	  
+
 	  // Recover updated LBs and UBs.
 	  if (crab_domain_params_man::get().zones_close_bounds_inline()) {
 	    Wt_min min_op;
@@ -2044,20 +2044,20 @@ public:
       // Make sure that there is always a maximum bound for narrowing iterations.
       return *this & o;
 #else
-      // Narrowing as a no-op: sound and it will terminate 
+      // Narrowing as a no-op: sound and it will terminate
       CRAB_LOG("zones-split", crab::outs() << "Before narrowing:\n"
 	       << "DBM 1\n" << *this << "\n" << "DBM 2\n" << o << "\n");
-      
+
       if (need_normalization()) {
 	DBM_t res(*this);
-	res.normalize();      
+	res.normalize();
 	CRAB_LOG("zones-split", crab::outs() << "Result narrowing:\n" << res << "\n");
 	return res;
       } else {
 	CRAB_LOG("zones-split", crab::outs() << "Result narrowing:\n" << *this << "\n");
 	return *this;
       }
-#endif 	       
+#endif
     }
   }
 
@@ -2103,7 +2103,7 @@ public:
                                            << ": " << g << "\n");
       g.forget(it->second);
       CRAB_LOG("zones-split", crab::outs() << "After: " << g << "\n");
-      rev_map[it->second] = boost::none;
+      rev_map[it->second] = std::nullopt;
       vert_map.erase(v);
     }
   }
@@ -2124,7 +2124,7 @@ public:
 
     interval_t x_int = eval_interval(e);
 
-    boost::optional<Wt> lb_w, ub_w;
+    std::optional<Wt> lb_w, ub_w;
     bool overflow;
     if (x_int.lb().is_finite()) {
       lb_w = ntow::convert(-(*(x_int.lb().number())), overflow);
@@ -2152,7 +2152,7 @@ public:
       // close_bounds_inline is disabled. Otherwise, the meet
       // operator misses some non-redundant edges. Need to
       // investigate more this.
-      if (boost::optional<number_t> x_n = x_int.singleton()) {
+      if (std::optional<number_t> x_n = x_int.singleton()) {
         set(x, *x_n);
         is_rhs_constant = true;
       }
@@ -2394,11 +2394,11 @@ public:
       set_to_bottom();
       return;
     }
-    
+
     if (is_bottom()) {
       return;
     }
-    
+
     normalize();
     // g.check_adjs();
     if (cst.is_inequality()) {
@@ -2435,7 +2435,7 @@ public:
 	  }
 	}
       }
-      
+
       if (!is_bottom()) {
 	// We handle here the case x != c
 	add_disequation(cst.expression());
@@ -2455,18 +2455,18 @@ public:
     }
   }
 
-  virtual bool entails(const linear_constraint_t &cst) const override {	
-    if (is_bottom()) {							
-      return true;							
-    } if (cst.is_tautology()) {						
-      return true;							
-    } if (cst.is_contradiction()) {					
-      return false;							
+  virtual bool entails(const linear_constraint_t &cst) const override {
+    if (is_bottom()) {
+      return true;
+    } if (cst.is_tautology()) {
+      return true;
+    } if (cst.is_contradiction()) {
+      return false;
     }
 
     bool res;
     if (cst.is_disequation()) {
-      // |= c1.x1 + ... + cn.xn != k is iff 
+      // |= c1.x1 + ... + cn.xn != k is iff
       // (1) |= c1.x1 + ... + cn.xn < k OR
       // (2) |= c1.x1 + ... + cn.xn > k
       linear_constraint_t pob1(cst.expression(), linear_constraint_t::kind_t::STRICT_INEQUALITY);
@@ -2476,7 +2476,7 @@ public:
 	res = is_unsat(pob2.negate());
       }
     } else if (cst.is_equality()) {
-      // |= c1.x1 + ... + cn.xn == k is iff 
+      // |= c1.x1 + ... + cn.xn == k is iff
       // (1) |= c1.x1 + ... + cn.xn <= k AND
       // (2) |= c1.x1 + ... + cn.xn >= k
       linear_constraint_t pob1(cst.expression(), linear_constraint_t::kind_t::INEQUALITY);
@@ -2489,16 +2489,16 @@ public:
       // cst is an inequality
       res = is_unsat(cst.negate());
     }
-    
+
     return res;
   }
-  
+
   interval_t operator[](const variable_t &x) override {
     crab::CrabStats::count(domain_name() + ".count.to_intervals");
     crab::ScopedCrabStats __st__(domain_name() + ".to_intervals");
     normalize();
     return (is_bottom() ? interval_t::bottom() :
-	    get_interval(vert_map, g, x));    
+	    get_interval(vert_map, g, x));
   }
 
   interval_t at(const variable_t &x) const override {
@@ -2549,7 +2549,7 @@ public:
   // int_cast_operators_api
   void apply(int_conv_operation_t op, const variable_t &dst,
              const variable_t &src) override {
-    int_cast_domain_traits<DBM_t>::apply(*this, op, dst, src);    
+    int_cast_domain_traits<DBM_t>::apply(*this, op, dst, src);
   }
 
   // bitwise_operators_api
@@ -2588,7 +2588,7 @@ public:
       break;
     }
     default:
-      //case OP_ASHR: 
+      //case OP_ASHR:
       xi = yi.AShr(zi);
       break;
     }
@@ -2631,7 +2631,7 @@ public:
       break;
     }
     default:
-      //case OP_ASHR: 
+      //case OP_ASHR:
       xi = yi.AShr(zi);
       break;
     }
@@ -2646,7 +2646,7 @@ public:
   REGION_AND_REFERENCE_OPERATIONS_NOT_IMPLEMENTED(DBM_t)
   DEFAULT_SELECT(DBM_t)
   DEFAULT_WEAK_ASSIGN(DBM_t)
-    
+
   void project(const variable_vector_t &variables) override {
     crab::CrabStats::count(domain_name() + ".count.project");
     crab::ScopedCrabStats __st__(domain_name() + ".project");

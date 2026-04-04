@@ -39,7 +39,7 @@ template <typename CFG> class dead_code_elimination : public transform<CFG> {
       return true;
     } else if (s.is_arr_init() || s.is_arr_write()) {
       return true;
-    } else if (s.is_ref_store() || 
+    } else if (s.is_ref_store() ||
 	       s.is_region_init() ||
 	       s.is_ref_remove()) {
       return true;
@@ -58,7 +58,7 @@ template <typename CFG> class dead_code_elimination : public transform<CFG> {
     }
     return true;
   }
-  
+
 public:
   dead_code_elimination(int max_iterations = 10)
       : transform<CFG>(), m_max_iterations(max_iterations) {}

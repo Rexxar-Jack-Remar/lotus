@@ -6,9 +6,9 @@ namespace domains {
 
 #define UNREACHABLE_BOTTOM \
   case Bottom: CRAB_ERROR("cannot be bottom");
-  
+
 small_range::small_range(kind_t k)
-  : m_kind(k), m_value(boost::none) {
+  : m_kind(k), m_value(std::nullopt) {
   if (k == kind_t::ExactlyOne || k == kind_t::ZeroOrOne) {
     CRAB_ERROR("cannot call small_range constructor without variable");
   }
@@ -19,10 +19,10 @@ small_range::small_range(kind_t k, ikos::index_t v)
   if (k != kind_t::ExactlyOne && k != kind_t::ZeroOrOne) {
     CRAB_ERROR("call small_range constructor only with either ZeroOrOne or ExactlyOne");
   }
-}  
+}
 
-small_range::small_range(): m_kind(ZeroOrMore), m_value(boost::none) {}
-  
+small_range::small_range(): m_kind(ZeroOrMore), m_value(std::nullopt) {}
+
 /*
    0 | 0       = 0
    0 | 1       = [0,1]
@@ -42,9 +42,9 @@ small_range small_range::join_zero_with(const small_range &other) const {
   case ZeroOrOne:
     return other;
   case ZeroOrMore:
-  case OneOrMore:  
+  case OneOrMore:
     return zeroOrMore();
-  UNREACHABLE_BOTTOM    
+  UNREACHABLE_BOTTOM
   }
 }
 
@@ -60,7 +60,7 @@ small_range small_range::join_zero_with(const small_range &other) const {
 small_range small_range::join_one_with(const small_range &other) const {
   assert(m_kind == ExactlyOne);
   assert(other.m_kind != Bottom);
-  
+
   switch(other.m_kind) {
   case ExactlyZero:
     return small_range(ZeroOrOne, m_value.value());
@@ -70,16 +70,16 @@ small_range small_range::join_one_with(const small_range &other) const {
     } else {
       return oneOrMore();
     }
-  case ZeroOrOne: 
+  case ZeroOrOne:
     if (m_value.value() == other.m_value.value()) {
       return other;
     } else {
       return zeroOrMore();
     }
   case ZeroOrMore:
-  case OneOrMore:  
+  case OneOrMore:
     return other;
-  UNREACHABLE_BOTTOM    
+  UNREACHABLE_BOTTOM
   }
 }
 
@@ -95,22 +95,22 @@ small_range small_range::join_one_with(const small_range &other) const {
 small_range small_range::join_zero_or_one_with(const small_range &other) const {
   assert(m_kind == ZeroOrOne);
   assert(other.m_kind != Bottom);
-  
+
   switch(other.m_kind) {
   case ExactlyZero:
     return *this;
   case ExactlyOne:
-    BOOST_FALLTHROUGH;     
+    [[fallthrough]];
   case ZeroOrOne:
     if (m_value.value() == other.m_value.value()) {
       return *this;
     }
-    BOOST_FALLTHROUGH;             
+    [[fallthrough]];
   case ZeroOrMore:
-    BOOST_FALLTHROUGH;         
-  case OneOrMore:  
+    [[fallthrough]];
+  case OneOrMore:
     return zeroOrMore();
-  UNREACHABLE_BOTTOM  
+  UNREACHABLE_BOTTOM
   }
 }
 
@@ -124,19 +124,19 @@ small_range small_range::join_zero_or_one_with(const small_range &other) const {
 small_range small_range::join_one_or_more_with(const small_range &other) const {
   assert(m_kind == OneOrMore);
   assert(other.m_kind != Bottom);
-  
+
   switch(other.m_kind) {
   case ExactlyOne:
-    BOOST_FALLTHROUGH;                 
+    [[fallthrough]];
   case OneOrMore:
     return oneOrMore();
   case ExactlyZero:
-    BOOST_FALLTHROUGH;                     
+    [[fallthrough]];
   case ZeroOrOne:
-    BOOST_FALLTHROUGH;                     
+    [[fallthrough]];
   case ZeroOrMore:
     return zeroOrMore();
-  UNREACHABLE_BOTTOM      
+  UNREACHABLE_BOTTOM
   }
 }
 
@@ -150,19 +150,19 @@ small_range small_range::join_one_or_more_with(const small_range &other) const {
 small_range small_range::meet_zero_with(const small_range &other) const {
   assert(m_kind == ExactlyZero);
   assert(other.m_kind != Bottom);
-  
+
   switch(other.m_kind) {
   case ExactlyOne:
-    BOOST_FALLTHROUGH;     
+    [[fallthrough]];
   case OneOrMore:
     return bottom();
   case ExactlyZero:
-    BOOST_FALLTHROUGH;         
+    [[fallthrough]];
   case ZeroOrOne:
-    BOOST_FALLTHROUGH;         
+    [[fallthrough]];
   case ZeroOrMore:
     return *this;
-  UNREACHABLE_BOTTOM      
+  UNREACHABLE_BOTTOM
   }
 }
 
@@ -178,23 +178,23 @@ small_range small_range::meet_zero_with(const small_range &other) const {
 small_range small_range::meet_one_with(const small_range &other) const {
   assert(m_kind == ExactlyOne);
   assert(other.m_kind != Bottom);
-  
+
   switch(other.m_kind) {
   case ExactlyZero:
     return bottom();
   case ExactlyOne:
-    BOOST_FALLTHROUGH;             
-  case ZeroOrOne: 
+    [[fallthrough]];
+  case ZeroOrOne:
     if (m_value.value() == other.m_value.value()) {
       return *this;
     } else {
       return bottom();
     }
   case ZeroOrMore:
-    BOOST_FALLTHROUGH;                 
+    [[fallthrough]];
   case OneOrMore:
     return *this;
-  UNREACHABLE_BOTTOM      
+  UNREACHABLE_BOTTOM
   }
 }
 
@@ -203,34 +203,34 @@ small_range small_range::meet_one_with(const small_range &other) const {
    [0,1](V1) & 1(V2)     = 1 if V1==V2
                          = _|_   otherwise
    [0,1](V1) & [0,1](V2) = [0,1] if V1==V2
-                         = 0 otherwise 
+                         = 0 otherwise
    [0,1]     & [0,+oo]   = [0,1]
-   [0,1]     & [1,+oo]   = 1 
+   [0,1]     & [1,+oo]   = 1
 */
 small_range small_range::meet_zero_or_one_with(const small_range &other) const {
   assert(m_kind == ZeroOrOne);
   assert(other.m_kind != Bottom);
-  
+
   switch(other.m_kind) {
   case ExactlyZero:
     return other;
-  case ExactlyOne: 
+  case ExactlyOne:
     if (m_value.value() == other.m_value.value()) {
       return other;
     } else {
       return bottom();
-    }         
-  case ZeroOrOne: 
+    }
+  case ZeroOrOne:
     if (m_value.value() == other.m_value.value()) {
       return other;
     } else {
       return zero();
-    }     
+    }
   case OneOrMore:
     return small_range(ExactlyOne, m_value.value());
   case ZeroOrMore:
     return *this;
-  UNREACHABLE_BOTTOM      
+  UNREACHABLE_BOTTOM
   }
 }
 
@@ -244,7 +244,7 @@ small_range small_range::meet_zero_or_one_with(const small_range &other) const {
 small_range small_range::meet_one_or_more_with(const small_range &other) const {
   assert(m_kind == OneOrMore);
   assert(other.m_kind != Bottom);
-  
+
   switch(other.m_kind) {
   case ExactlyZero:
     return bottom();
@@ -253,11 +253,11 @@ small_range small_range::meet_one_or_more_with(const small_range &other) const {
   case ZeroOrOne:
     return small_range(ExactlyOne, other.m_value.value());
   case ZeroOrMore:
-    BOOST_FALLTHROUGH;  
-  case OneOrMore:    
+    [[fallthrough]];
+  case OneOrMore:
     return *this;
-  UNREACHABLE_BOTTOM      
-  } 
+  UNREACHABLE_BOTTOM
+  }
 }
 
 
@@ -265,22 +265,22 @@ small_range small_range::bottom() { return small_range(Bottom); }
 small_range small_range::top() { return small_range(ZeroOrMore); }
 small_range small_range::zero() { return small_range(ExactlyZero); }
 small_range small_range::oneOrMore() { return small_range(OneOrMore); }
-small_range small_range::zeroOrMore() { return small_range(ZeroOrMore); }  
+small_range small_range::zeroOrMore() { return small_range(ZeroOrMore); }
 small_range small_range::make_bottom() const {
   small_range res(Bottom);
   return res;
 }
 small_range small_range::make_top() const { return zeroOrMore();}
-  
+
 void small_range::set_to_top()  {
   m_kind = ZeroOrMore;
-  m_value = boost::none;
+  m_value = std::nullopt;
 }
 void small_range::set_to_bottom()  {
   m_kind = Bottom;
-  m_value = boost::none;  
-}  
-    
+  m_value = std::nullopt;
+}
+
 bool small_range::is_bottom() const { return (m_kind == Bottom); }
 
 bool small_range::is_top() const { return (m_kind == ZeroOrMore); }
@@ -289,7 +289,7 @@ bool small_range::is_zero() const { return (m_kind == ExactlyZero); }
 
 bool small_range::is_one() const { return (m_kind == ExactlyOne); }
 
-  
+
 /*
       [0,+oo]
        /    \
@@ -326,19 +326,19 @@ bool small_range::operator<=(const small_range &other) const {
     case ZeroOrMore:
     case OneOrMore:
       return true;
-    UNREACHABLE_BOTTOM        
+    UNREACHABLE_BOTTOM
     }
   }
   case ZeroOrOne:
-    BOOST_FALLTHROUGH;    
+    [[fallthrough]];
   case OneOrMore:
     return other.m_kind == ZeroOrMore;
   case ZeroOrMore:
     assert(other.m_kind != ZeroOrMore);
     return false;
-  UNREACHABLE_BOTTOM      
+  UNREACHABLE_BOTTOM
   }
-  
+
 }
 
 bool small_range::operator==(const small_range &other) const {
@@ -346,9 +346,9 @@ bool small_range::operator==(const small_range &other) const {
 }
 
 void small_range::operator|=(const small_range &other) {
-  *this = *this | other;     
+  *this = *this | other;
 }
-  
+
 small_range small_range::operator|(const small_range &other) const {
   if (is_bottom() || other.is_top()) {
     return other;

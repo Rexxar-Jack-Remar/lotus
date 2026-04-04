@@ -38,13 +38,13 @@ public:
     m_thresholds.push_back(0);
 // useful thresholds for wrapped domains
 #if 0
-	 m_thresholds.push_back(bound_t("-2147483648"));	 
+	 m_thresholds.push_back(bound_t("-2147483648"));
 	 m_thresholds.push_back(bound_t("-32768"));
 	 m_thresholds.push_back(bound_t("-128"));
 	 m_thresholds.push_back(bound_t("127"));
 	 m_thresholds.push_back(bound_t("255"));
 	 m_thresholds.push_back(bound_t("32767"));
-	 m_thresholds.push_back(bound_t("65535"));	 
+	 m_thresholds.push_back(bound_t("65535"));
 	 m_thresholds.push_back(bound_t("2147483647"));
 #endif
     m_thresholds.push_back(bound_t::plus_infinity());

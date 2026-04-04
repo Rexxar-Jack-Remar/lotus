@@ -111,7 +111,7 @@ void json_report_impl::write_invariants(cfg_ref_t cfg,
       std::vector<var_t> out;
       for (auto const&cst: csts) {
 	for (auto v : cst.variables()) {
-	  if (v.name().get() == boost::none) {
+	  if (!v.name().get()) {
 	    out.push_back(v);
 	  }
 	}
@@ -237,4 +237,3 @@ void json_report::write(cfg_ref_t cfg, const AnalysisParams &params,
 std::string json_report::generate() { return m_pimpl->generate(); }
 } // end namespace json
 } // end namespace clam
-

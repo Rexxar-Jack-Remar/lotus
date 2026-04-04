@@ -14,9 +14,9 @@ int main(int argc, char **argv) {
   if (!crab_tests::parse_user_options(argc, argv, stats_enabled)) {
     return 0;
   }
-  
+
   variable_factory_t vfac;
-  
+
   z_var v1(vfac["v1"], crab::INT_TYPE, 32);
   z_var v2(vfac["v2"], crab::INT_TYPE, 32);
   z_var v3(vfac["v3"], crab::INT_TYPE, 32);
@@ -27,11 +27,11 @@ int main(int argc, char **argv) {
   z_var v8(vfac["v8"], crab::INT_TYPE, 32);
   z_var x(vfac["x"], crab::INT_TYPE, 32);
   z_var y(vfac["y"], crab::INT_TYPE, 32);
-  
+
   { // test all operations
 
     using union_find_domain_t =
-      crab::domains::union_find_domain<z_var, z_interval_domain_t>;    
+      crab::domains::union_find_domain<z_var, z_interval_domain_t>;
     z_interval_domain_t idom1,idom2; // some abstract domain
     union_find_domain_t dom1, dom2, dom3;
 
@@ -39,21 +39,21 @@ int main(int argc, char **argv) {
     idom1.assign(y, 10);
     idom2.assign(x,10);
     idom2.assign(y, 20);
-    
+
     dom1.set(v1, idom1);
     dom1.set(v2, idom1);
     dom1.set(v3, idom1);
     dom1.set(v4, idom1);
-    crab::outs() << "Dom1=" << dom1 << "\n";    
+    crab::outs() << "Dom1=" << dom1 << "\n";
     dom1.join(v1,v2);
     crab::outs() << "After join " << v1 << " and " << v2 << "=" << dom1 << "\n";
     dom2.set(v1, idom2);
     dom2.set(v2, idom2);
     dom2.set(v3, idom2);
     dom2.set(v4, idom2);
-    crab::outs() << "Dom2=" << dom2 << "\n";    
+    crab::outs() << "Dom2=" << dom2 << "\n";
     dom2.join(v3,v4);
-    crab::outs() << "After join " << v3 << " and " << v4 << "=" << dom2 << "\n";    
+    crab::outs() << "After join " << v3 << " and " << v4 << "=" << dom2 << "\n";
     bool r1 = dom1 <= dom2;
     bool r2 = dom2 <= dom1;
     crab::outs() << "Dom1 <= Dom2 = " << r1 << "\n";
@@ -66,7 +66,7 @@ int main(int argc, char **argv) {
     crab::outs() << "Dom2 <= Dom3 = " << r4 << "\n";
     union_find_domain_t dom4 = dom1 & dom2;
     crab::outs() << "Dom4 = Dom1 & Dom2 = " << dom4 << "\n";
-    
+
     union_find_domain_t dom5(dom3);
     dom5.forget(v2);
     crab::outs() << "After forgetting " << v2 << ":" << dom5 << "\n";
@@ -83,7 +83,7 @@ int main(int argc, char **argv) {
   // Test meet
   {
     using union_find_domain_t =
-      crab::domains::union_find_domain<z_var, boolean_value>;    
+      crab::domains::union_find_domain<z_var, boolean_value>;
     union_find_domain_t dom1, dom2, dom3;
     dom1.set(v1, boolean_value::get_false());
     dom1.set(v2, boolean_value::get_false());
@@ -98,14 +98,14 @@ int main(int argc, char **argv) {
     dom2.set(v3, boolean_value::get_false());
     dom2.set(v4, boolean_value::get_false());
     dom2.join(v2,v3);
-    crab::outs() << "Dom2=" << dom2 << "\n";        
+    crab::outs() << "Dom2=" << dom2 << "\n";
     dom3 = dom1 & dom2;
     crab::outs() << "Dom1 & Dom2 = " << dom3 << "\n";
   }
 
   {
     using union_find_domain_t =
-      crab::domains::union_find_domain<z_var, boolean_value>;        
+      crab::domains::union_find_domain<z_var, boolean_value>;
     union_find_domain_t dom1, dom2, dom3;
     dom1.set(v1, boolean_value::get_false());
     dom1.set(v2, boolean_value::get_false());
@@ -120,7 +120,7 @@ int main(int argc, char **argv) {
     dom2.set(v7, boolean_value::get_false());
     dom2.set(v8, boolean_value::get_false());
     dom2.join(v6,v7);
-    crab::outs() << "Dom2=" << dom2 << "\n";        
+    crab::outs() << "Dom2=" << dom2 << "\n";
     dom3 = dom1 & dom2;
     crab::outs() << "Dom1 & Dom2 = " << dom3 << "\n";
   }
@@ -128,7 +128,7 @@ int main(int argc, char **argv) {
 
   {
     using union_find_domain_t =
-      crab::domains::union_find_domain<z_var, boolean_value>;        
+      crab::domains::union_find_domain<z_var, boolean_value>;
     union_find_domain_t dom1, dom2, dom3;
     dom1.set(v1, boolean_value::get_false());
     dom1.set(v2, boolean_value::get_false());
@@ -143,13 +143,13 @@ int main(int argc, char **argv) {
     dom2.set(v7, boolean_value::get_false());
     dom2.set(v8, boolean_value::get_false());
     dom2.join(v7,v8);
-    crab::outs() << "Dom2=" << dom2 << "\n";        
+    crab::outs() << "Dom2=" << dom2 << "\n";
     dom3 = dom1 & dom2;
     crab::outs() << "Dom1 & Dom2 = " << dom3 << "\n";
   }
-  
-  
 
-  
+
+
+
   return 0;
 }

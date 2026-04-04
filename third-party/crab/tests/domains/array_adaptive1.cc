@@ -418,7 +418,7 @@ z_cfg_t *prog9(variable_factory_t &vfac) {
   bb2_b >> bb1;
   bb1_f >> ret;
 
-  uint64_t elem_size = 1 /*bytes*/; 
+  uint64_t elem_size = 1 /*bytes*/;
   entry.array_init(a, 0, n, 0, elem_size);
   entry.assume(n >= 1);
   entry.assign(i1, 0);
@@ -549,7 +549,7 @@ int main(int argc, char **argv) {
 				 64/*max_smashable_cells*/,
 				 512/*max_array_size*/);
   crab_domain_params_man::get().update_params(p);
-  
+
   bool stats_enabled = false;
   if (!crab_tests::parse_user_options(argc, argv, stats_enabled)) {
     return 0;

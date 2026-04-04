@@ -49,10 +49,10 @@ int main(int argc, char**argv) {
     interval_domain_t inv1, inv2;
     inv1.assign(x, 5);
     inv1.assign(y, 10);
-    outs() << "inv1=" << inv1 << "\n";  
+    outs() << "inv1=" << inv1 << "\n";
     inv2.assign(x, 10);
     inv2.assign(y, 20);
-    outs() << "inv2=" << inv1 << "\n";    
+    outs() << "inv2=" << inv1 << "\n";
     interval_domain_t inv3 = inv1 | inv2;
     inv3.apply(domains::OP_ADDITION, z, x, y);
     outs() << "inv1 | inv2 = " << inv3 << "\n";
@@ -63,14 +63,14 @@ int main(int argc, char**argv) {
     pk_domain_t inv1, inv2;
     inv1.assign(x, 5);
     inv1.assign(y, 10);
-    outs() << "inv1=" << inv1 << "\n";  
+    outs() << "inv1=" << inv1 << "\n";
     inv2.assign(x, 10);
     inv2.assign(y, 20);
-    outs() << "inv2=" << inv1 << "\n";    
+    outs() << "inv2=" << inv1 << "\n";
     pk_domain_t inv3 = inv1 | inv2;
     inv3.apply(domains::OP_ADDITION, z, x, y);
     outs() << "inv1 | inv2 = " << inv3 << "\n";
   }
-  
+
   return 0;
 }

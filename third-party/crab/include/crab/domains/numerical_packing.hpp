@@ -137,12 +137,12 @@ private:
       } else {
 	variable_vector_t vars{x, y};
 	absval = merge(vars);
-      } 
+      }
     }
     assert(absval);
     return absval;
   }
-  
+
   numerical_packing_domain(union_find_domain_t &&packs)
       : m_packs(std::move(packs)) {}
 
@@ -349,29 +349,29 @@ public:
   void assign(const variable_t &x, const linear_expression_t &e) override {
     if (!is_bottom()) {
       std::shared_ptr<base_domain_t> absval = nullptr;
-      variable_vector_t vars(e.variables().begin(), e.variables().end());      
+      variable_vector_t vars(e.variables().begin(), e.variables().end());
       if (std::find(vars.begin(), vars.end(), x) == vars.end()) {
 	m_packs.forget(x);
 	vars.push_back(x);
-      }       
+      }
       absval = merge(vars);
       if (absval) {
         absval->assign(x, e);
       } else {
 	CRAB_ERROR(domain_name(), "::assign produced bottom!");
       }
-      
+
     }
   }
 
   void weak_assign(const variable_t &x, const linear_expression_t &e) override {
     if (!is_bottom()) {
       std::shared_ptr<base_domain_t> absval = nullptr;
-      variable_vector_t vars(e.variables().begin(), e.variables().end());      
+      variable_vector_t vars(e.variables().begin(), e.variables().end());
       if (std::find(vars.begin(), vars.end(), x) == vars.end()) {
 	m_packs.forget(x);
 	vars.push_back(x);
-      }       
+      }
       absval = merge(vars);
       if (absval) {
         absval->weak_assign(x, e);
@@ -380,8 +380,8 @@ public:
       }
     }
   }
-  
-  
+
+
   void apply(arith_operation_t op, const variable_t &x, const variable_t &y,
              number_t z) override {
     if (!is_bottom()) {
@@ -438,7 +438,7 @@ public:
       }
     }
   }
-  
+
   void select(const variable_t &lhs, const linear_constraint_t &cond,
               const linear_expression_t &e1,
               const linear_expression_t &e2) override {
@@ -620,7 +620,7 @@ public:
 	if (it == packs_vars.end()) {
 	  continue;
 	}
-	
+
         if (!first_pack) {
           o << ",";
         } else {

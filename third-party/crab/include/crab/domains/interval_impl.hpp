@@ -227,11 +227,11 @@ template <typename Number> bound<Number> bound<Number>::abs() const {
 }
 
 template <typename Number>
-boost::optional<Number> bound<Number>::number() const {
+std::optional<Number> bound<Number>::number() const {
   if (is_infinite()) {
-    return boost::optional<Number>();
+    return std::optional<Number>();
   } else {
-    return boost::optional<Number>(_n);
+    return std::optional<Number>(_n);
   }
 }
 
@@ -449,11 +449,11 @@ interval<Number> &interval<Number>::operator/=(const interval<Number> &x) {
 }
 
 template <typename Number>
-boost::optional<Number> interval<Number>::singleton() const {
+std::optional<Number> interval<Number>::singleton() const {
   if (!is_bottom() && _lb == _ub) {
     return _lb.number();
   } else {
-    return boost::optional<Number>();
+    return std::optional<Number>();
   }
 }
 

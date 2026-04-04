@@ -202,7 +202,7 @@ public:
     o.edge_count = 0;
   }
 
-  // PtGraph is a persistent graph so the assignment is cheap  
+  // PtGraph is a persistent graph so the assignment is cheap
   PtGraph &operator=(const PtGraph<Wt> &o) {
     if (this != &o) {
       edge_count = o.edge_count;
@@ -343,7 +343,7 @@ public:
     } else {
       // Expensive with patricia trees because it requires
       // lookup+insert
-      // 
+      //
       // TODO: extend patricia tree API to insert a new pair key-value
       // if some user-given binary predicate holds on the old and new
       // value associated to the key

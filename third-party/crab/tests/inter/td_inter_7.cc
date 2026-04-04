@@ -26,10 +26,10 @@ using namespace crab::cg;
 z_cfg_t *foo(variable_factory_t &vfac) {
   // Defining program variables
   z_var n(vfac["n"], crab::INT_TYPE, 32);
-  z_var n1(vfac["n1"], crab::INT_TYPE, 32);  
+  z_var n1(vfac["n1"], crab::INT_TYPE, 32);
   z_var ret_val(vfac["res"], crab::INT_TYPE, 32);
   z_var foo_ret(vfac["foo_ret"], crab::INT_TYPE, 32);
-  
+
   function_decl<z_number, varname_t> decl("foo", {n}, {ret_val});
   // entry and exit block
   z_cfg_t *cfg = new z_cfg_t("entry", "exit", decl);
@@ -49,7 +49,7 @@ z_cfg_t *foo(variable_factory_t &vfac) {
   rec.assume(n >= 1);
   rec.sub(n1, n, 1);
   rec.callsite("foo", {foo_ret}, {n1});
-  rec.add(ret_val, foo_ret, 1); 
+  rec.add(ret_val, foo_ret, 1);
   return cfg;
 }
 
@@ -58,7 +58,7 @@ z_cfg_t *_main(variable_factory_t &vfac) {
   // Defining program variables
   z_var n(vfac["n"], crab::INT_TYPE, 32);
   z_var res(vfac["res"], crab::INT_TYPE, 32);
-  
+
   function_decl<z_number, varname_t> decl("main", {}, {});
   // entry and exit block
   z_cfg_t *cfg = new z_cfg_t("entry", "exit", decl);
@@ -82,13 +82,13 @@ int main(int argc, char **argv) {
   if (!crab_tests::parse_user_options(argc, argv, stats_enabled)) {
     return 0;
   }
-  
+
   variable_factory_t vfac;
-  z_cfg_t *t1 = foo(vfac);  
+  z_cfg_t *t1 = foo(vfac);
   crab::outs() << *t1 << "\n";
-  z_cfg_t *t2 = _main(vfac);  
+  z_cfg_t *t2 = _main(vfac);
   crab::outs() << *t2 << "\n";
-  
+
   vector<z_cfg_ref_t> cfgs({*t1, *t2});
   callgraph_t cg(cfgs);
   crab::outs() << "CallGraph=" << cg << "\n";
@@ -97,11 +97,11 @@ int main(int argc, char **argv) {
     crab::outs() << "Running top-down inter-procedural analysis with "
                  << init.domain_name() << "\n";
     inter_params_t params;
-    params.analyze_recursive_functions = true;    
+    params.analyze_recursive_functions = true;
     td_inter_run(cg, init, params, true, true, false);
   }
-  
-  
+
+
   delete t1;
 
   return 0;

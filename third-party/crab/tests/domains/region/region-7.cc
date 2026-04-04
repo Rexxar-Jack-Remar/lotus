@@ -34,14 +34,14 @@ z_cfg_t *cfg1(variable_factory_t &vfac) {
   z_var f3(vfac["fun3"], crab::REF_TYPE);
   z_var f_ptr(vfac["fun_ptr"], crab::REF_TYPE);
   z_var res(vfac["res"], crab::REF_TYPE);
-  z_var orphan_ptr(vfac["orphan_ptr"], crab::REF_TYPE);  
-  z_var x(vfac["x"], crab::INT_TYPE, 32);    
+  z_var orphan_ptr(vfac["orphan_ptr"], crab::REF_TYPE);
+  z_var x(vfac["x"], crab::INT_TYPE, 32);
   z_var m1(vfac["rgn_0"], crab::REG_REF_TYPE, 32);
   z_var m2(vfac["rgn_1"], crab::REG_REF_TYPE, 32);
   z_var m3(vfac["rgn_2"], crab::REG_REF_TYPE, 32);
-  z_var m4(vfac["rgn_3"], crab::REG_REF_TYPE, 32);  
+  z_var m4(vfac["rgn_3"], crab::REG_REF_TYPE, 32);
   // === Create allocation sites
-  crab::tag_manager as_man;  
+  crab::tag_manager as_man;
   // Create empty CFG
   z_cfg_t *cfg = new z_cfg_t("entry", "ret");
   // Adding CFG blocks
@@ -51,7 +51,7 @@ z_cfg_t *cfg1(variable_factory_t &vfac) {
   z_basic_block_t &bb3 = cfg->insert("bb3");
   z_basic_block_t &bb4 = cfg->insert("bb4");
   z_basic_block_t &bb5 = cfg->insert("bb5");
-  z_basic_block_t &bb6 = cfg->insert("bb6");    
+  z_basic_block_t &bb6 = cfg->insert("bb6");
   z_basic_block_t &ret = cfg->insert("ret");
   // Adding CFG edges
   entry.add_succ(bb1);
@@ -70,10 +70,10 @@ z_cfg_t *cfg1(variable_factory_t &vfac) {
   entry.region_init(m1);
   entry.region_init(m2);
   entry.region_init(m3);
-  entry.region_init(m4);  
+  entry.region_init(m4);
 
   z_var_or_cst_t size8(z_number(8), crab::variable_type(crab::INT_TYPE, 32));
-  
+
   // Create references
   entry.make_ref(f1, m1, size8, as_man.mk_tag());
   entry.make_ref(f2, m2, size8, as_man.mk_tag());
@@ -83,16 +83,16 @@ z_cfg_t *cfg1(variable_factory_t &vfac) {
   entry.havoc(x);
   bb1.assume(x >= 0);
   bb2.assume(x > 0);
-  bb2.store_to_ref(f_ptr, m4, f1); 
+  bb2.store_to_ref(f_ptr, m4, f1);
   bb3.assume(x <= 0);
-  bb3.store_to_ref(f_ptr, m4, f2);  
+  bb3.store_to_ref(f_ptr, m4, f2);
   bb5.assume(x < 0);
   bb5.store_to_ref(f_ptr, m4, f3);
   bb6.load_from_ref(res, f_ptr, m4);
   // true but cannot be proven by simply comparing addresses because
   // the region domain is not strong enough for that. However, the
   // region domain can tell that &f3 is not an allocation site of res.
-  bb6.assert_ref(z_ref_cst_t::mk_not_eq(res, f3)); 
+  bb6.assert_ref(z_ref_cst_t::mk_not_eq(res, f3));
   return cfg;
 }
 
@@ -118,28 +118,28 @@ int main(int argc, char **argv) {
   fixpo_params.get_widening_delay() = 2;
   fixpo_params.get_descending_iterations() = 2;
   fixpo_params.get_max_thresholds() = 20;
-  
+
   using intra_fwd_analyzer_t =
     crab::analyzer::intra_fwd_analyzer<crab::cfg_impl::z_cfg_ref_t, z_rgn_sdbm_t>;
   intra_fwd_analyzer_t a(*p1, absval_fac, nullptr, fixpo_params);
   a.run(p1->entry(), init, typename intra_fwd_analyzer_t::assumption_map_t());
-  
-  /* 
+
+  /*
    * Example of how to ask an abstract domain about the allocation
    * sites associated to a program reference
-   *  
+   *
    * We ask about the allocation sites of *fun_ptr at the exit of the
    * function
    */
-  
+
   z_var f_ptr(vfac["fun_ptr"], crab::REF_TYPE);
   z_var m(vfac["rgn_3"], crab::REG_REF_TYPE, 32);  // region of f_ptr
   z_var deref_f_ptr(vfac["*fun_ptr"], crab::REF_TYPE);
-  z_var orphan_ptr(vfac["orphan_ptr"], crab::REF_TYPE);    
+  z_var orphan_ptr(vfac["orphan_ptr"], crab::REF_TYPE);
   z_rgn_sdbm_t exit_inv = a["ret"];
 
   auto print_alloc_sites = [](const z_var &ref, z_rgn_sdbm_t &inv) {
-			     crab::outs() << "Allocation sites for " << ref << " at the exit: ";    
+			     crab::outs() << "Allocation sites for " << ref << " at the exit: ";
 			     std::vector<crab::allocation_site> alloc_sites;
 			     if (inv.get_allocation_sites(ref, alloc_sites)) {
 			       crab::outs() << "{";
@@ -156,7 +156,7 @@ int main(int argc, char **argv) {
 			     }
 			   };
 
-  exit_inv.ref_load(f_ptr, m, deref_f_ptr);  
+  exit_inv.ref_load(f_ptr, m, deref_f_ptr);
   print_alloc_sites(deref_f_ptr, exit_inv);
   print_alloc_sites(orphan_ptr, exit_inv);
   delete p1;

@@ -18,7 +18,7 @@ add_library(Crab ${CRAB_LIBS_TYPE}
   term_operators.cpp
   types.cpp
   wrapped_interval.cpp
-  ##numbers 
+  ##numbers
   bignums.cpp
   safeint.cpp
   wrapint.cpp
@@ -41,7 +41,7 @@ if (NOT TopLevel)
   install(TARGETS Crab
     LIBRARY DESTINATION lib
     ARCHIVE DESTINATION lib)
-endif()  
+endif()
 
 
 

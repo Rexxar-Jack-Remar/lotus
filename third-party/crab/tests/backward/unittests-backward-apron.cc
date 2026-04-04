@@ -7,7 +7,7 @@ using namespace crab::cfg_impl;
 using namespace crab::domain_impl;
 
 int main(int argc, char **argv) {
-#ifdef HAVE_APRON  
+#ifdef HAVE_APRON
   bool stats_enabled = false;
   if (!crab_tests::parse_user_options(argc, argv, stats_enabled)) {
     return 0;

@@ -62,9 +62,9 @@ z_cfg_t *cfg1(variable_factory_t &vfac) {
   // === Adding statements
 
   z_var_or_cst_t zero32(z_number(0), crab::variable_type(crab::INT_TYPE, 32));
-  z_var_or_cst_t one32(z_number(1), crab::variable_type(crab::INT_TYPE, 32));  
+  z_var_or_cst_t one32(z_number(1), crab::variable_type(crab::INT_TYPE, 32));
   z_var_or_cst_t size4(z_number(4), crab::variable_type(crab::INT_TYPE, 32));
-  
+
   // Intialization of memory regions
   entry.region_init(mem1);
   entry.region_init(mem2);
@@ -113,7 +113,7 @@ int main(int argc, char **argv) {
 			 false/*is_dereferenceable*/,
 			 true/*skip_unknown_regions*/);
   crab_domain_params_man::get().update_params(p);
-  
+
   bool stats_enabled = false;
   if (!crab_tests::parse_user_options(argc, argv, stats_enabled)) {
     return 0;

@@ -34,8 +34,7 @@
 #include <boost/container/flat_map.hpp>
 #include <boost/container/flat_set.hpp>
 #include <boost/iterator/transform_iterator.hpp>
-#include <boost/optional.hpp>
-#include <boost/utility/string_ref.hpp>
+#include <optional>
 
 namespace crab {
 namespace domains {
@@ -172,7 +171,7 @@ private:
   }
 
   term_id_t term_of_const(const number_t &n) {
-    boost::optional<term_id_t> opt_tn(m_ttbl.find_const(n));
+    std::optional<term_id_t> opt_tn(m_ttbl.find_const(n));
     if (opt_tn) {
       return *opt_tn;
     } else {
@@ -222,7 +221,7 @@ private:
 
   term_id_t build_term(term::term_operator_t op,
                        const std::vector<term_id_t> &ids) {
-    boost::optional<term_id_t> eopt(m_ttbl.find_ftor(op, ids));
+    std::optional<term_id_t> eopt(m_ttbl.find_ftor(op, ids));
     if (eopt) {
       return *eopt;
     } else {
@@ -252,7 +251,7 @@ private:
     return t;
   }
 
-  boost::optional<std::pair<variable_t, variable_t>>
+  std::optional<std::pair<variable_t, variable_t>>
   get_eq_or_diseq(linear_constraint_t cst) {
     if (cst.is_equality() || cst.is_disequation()) {
       if (cst.size() == 2 && cst.constant() == 0) {
@@ -268,13 +267,13 @@ private:
         }
       }
     }
-    return boost::optional<std::pair<variable_t, variable_t>>();
+    return std::optional<std::pair<variable_t, variable_t>>();
   }
 
   // helper for pseudo-meet: choose one non-var term from the
   // equivalence class associated with t.
   template <typename Range>
-  boost::optional<term_id_t> choose_non_var(ttbl_t &ttbl,
+  std::optional<term_id_t> choose_non_var(ttbl_t &ttbl,
                                             const Range &terms) const {
     std::vector<term_id_t> non_var_terms(terms.size());
     auto it =
@@ -285,7 +284,7 @@ private:
                      });
     non_var_terms.resize(std::distance(non_var_terms.begin(), it));
     if (non_var_terms.empty()) {
-      return boost::optional<term_id_t>();
+      return std::optional<term_id_t>();
     } else {
       // TODO: the heuristics as described in the VMCAI'16 paper that
       // chooses the one that has more references each class.  For
@@ -330,7 +329,7 @@ private:
 
     stack.push_back(t);
     auto membs = solver.get_members(t);
-    boost::optional<term_id_t> f = choose_non_var(ttbl, membs);
+    std::optional<term_id_t> f = choose_non_var(ttbl, membs);
 
     if (!f) {
       // no concrete definition exists return a fresh variable
@@ -777,7 +776,7 @@ public:
     // it's fine to remove constness here because find_term won't
     // modify it.
     typename ttbl_t::term_ref_t t_ref(const_cast<term_t *>(t));
-    if (boost::optional<term_id_t> t_id = m_ttbl.find_term(t_ref)) {
+    if (std::optional<term_id_t> t_id = m_ttbl.find_term(t_ref)) {
       auto it = m_rev_var_map.find(*t_id);
       if (it != m_rev_var_map.end()) {
         return (it->second.empty() ? nullptr : &(it->second));
@@ -864,7 +863,7 @@ public:
 
     using pair_var_t = std::pair<variable_t, variable_t>;
 
-    if (boost::optional<pair_var_t> eq = get_eq_or_diseq(cst)) {
+    if (std::optional<pair_var_t> eq = get_eq_or_diseq(cst)) {
       term_id_t tx(term_of_var((*eq).first));
       term_id_t ty(term_of_var((*eq).second));
       if (cst.is_disequation()) {
@@ -1212,9 +1211,9 @@ public:
 
   void select_ref(const variable_t &lhs_ref, const variable_t &lhs_rgn,
                   const variable_t &cond, const variable_or_constant_t &ref1,
-                  const boost::optional<variable_t> &rgn1,
+                  const std::optional<variable_t> &rgn1,
                   const variable_or_constant_t &ref2,
-                  const boost::optional<variable_t> &rgn2) override {
+                  const std::optional<variable_t> &rgn2) override {
     // do nothing
   }
 

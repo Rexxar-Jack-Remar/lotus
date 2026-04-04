@@ -125,7 +125,7 @@ safe_i64 &safe_i64::operator-=(safe_i64 x) {
 std::size_t safe_i64::hash() const {
   return std::hash<int64_t>{}(m_num);
 }
-  
+
 bool safe_i64::operator==(safe_i64 x) const { return m_num == x.m_num; }
 
 bool safe_i64::operator!=(safe_i64 x) const { return m_num != x.m_num; }

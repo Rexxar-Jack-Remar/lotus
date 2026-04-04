@@ -36,7 +36,7 @@ private:
       killgen_operations_api<CFG, varset_domain_t>;
   using binding_t = std::pair<varset_domain_t, varset_domain_t>;
   using liveness_map_t = std::unordered_map<basic_block_label_t, binding_t>;
-  
+
   liveness_map_t m_liveness_map;
 public:
   liveness_analysis_operations(CFG cfg) : parent_type(cfg) {}
@@ -67,7 +67,7 @@ public:
 	if (s.is_unreachable()) {
 	  is_unreachable_block = true;
 	  break;
-	} 
+	}
         auto const &live = s.get_live();
         for (auto d :
              boost::make_iterator_range(live.defs_begin(), live.defs_end())) {
@@ -94,7 +94,7 @@ public:
     } else {
       // bb_id is unreachable
       in = varset_domain_t::bottom(); // empty set (i.e., no live variables)
-    } 
+    }
     return in;
   }
 
@@ -125,9 +125,9 @@ public:
       typename liveness_analysis_operations_t::varset_domain_t varset_domain_t;
 
 private:
-  liveness_analysis_operations_t m_liveness_op;  
+  liveness_analysis_operations_t m_liveness_op;
   bool m_release_in;
-  
+
 public:
   liveness_analysis(CFG cfg, bool release_in = true)
     : killgen_fixpoint_iterator_t(cfg, m_liveness_op),

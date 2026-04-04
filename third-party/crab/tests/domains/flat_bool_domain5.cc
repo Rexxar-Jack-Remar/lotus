@@ -11,7 +11,7 @@ using namespace crab::domain_impl;
 z_cfg_t *prog1(variable_factory_t &vfac) {
 
   /*
-    havoc(x) 
+    havoc(x)
     b1 = (-x <= -1)
     assume(b1)
     b2 = (-x <= 0)
@@ -25,13 +25,13 @@ z_cfg_t *prog1(variable_factory_t &vfac) {
 
     EXPECTED RESULT: SAFE
    */
-  
+
   // Defining program variables
   z_var b1(vfac["b1"], crab::BOOL_TYPE, 1);
   z_var b2(vfac["b2"], crab::BOOL_TYPE, 1);
   z_var b3(vfac["b3"], crab::BOOL_TYPE, 1);
   z_var b4(vfac["b4"], crab::BOOL_TYPE, 1);
-  z_var b5(vfac["b5"], crab::BOOL_TYPE, 1);  
+  z_var b5(vfac["b5"], crab::BOOL_TYPE, 1);
   z_var x(vfac["x"], crab::INT_TYPE, 64);
 
   // entry and exit block
@@ -58,7 +58,7 @@ z_cfg_t *prog1(variable_factory_t &vfac) {
 z_cfg_t *prog2(variable_factory_t &vfac) {
 
   /*
-    havoc(x) 
+    havoc(x)
     b2 = (-x <= 0)
     b3 = (x <= 10)
     b4 = false
@@ -74,13 +74,13 @@ z_cfg_t *prog2(variable_factory_t &vfac) {
     be true. However, our propagation is not that strong. Note that
     the boxes domain can prove this program.
    */
-  
+
   // Defining program variables
   z_var b1(vfac["b1"], crab::BOOL_TYPE, 1);
   z_var b2(vfac["b2"], crab::BOOL_TYPE, 1);
   z_var b3(vfac["b3"], crab::BOOL_TYPE, 1);
   z_var b4(vfac["b4"], crab::BOOL_TYPE, 1);
-  z_var b5(vfac["b5"], crab::BOOL_TYPE, 1);  
+  z_var b5(vfac["b5"], crab::BOOL_TYPE, 1);
   z_var x(vfac["x"], crab::INT_TYPE, 64);
 
   // entry and exit block
@@ -96,7 +96,7 @@ z_cfg_t *prog2(variable_factory_t &vfac) {
   entry.bool_assign(b4, z_lin_cst_t::get_false());
   entry.bool_select(b5,b2,b3,b4);
   entry.bool_assume(b5);
-  exit.assertion(x >= z_number(0));  
+  exit.assertion(x >= z_number(0));
   exit.assertion(x <= z_number(10));
   return cfg;
 }
@@ -105,7 +105,7 @@ z_cfg_t *prog2(variable_factory_t &vfac) {
 z_cfg_t *prog3(variable_factory_t &vfac) {
 
   /*
-    havoc(x) 
+    havoc(x)
     b2 = (-x <= 0)
     b3 = (x <= 10)
     b4 = false
@@ -120,13 +120,13 @@ z_cfg_t *prog3(variable_factory_t &vfac) {
     1) if b2 is false (x < 0) then b4=false
     2) if b2 is true then b3=false that implies x > 10
    */
-  
+
   // Defining program variables
   z_var b1(vfac["b1"], crab::BOOL_TYPE, 1);
   z_var b2(vfac["b2"], crab::BOOL_TYPE, 1);
   z_var b3(vfac["b3"], crab::BOOL_TYPE, 1);
   z_var b4(vfac["b4"], crab::BOOL_TYPE, 1);
-  z_var b5(vfac["b5"], crab::BOOL_TYPE, 1);  
+  z_var b5(vfac["b5"], crab::BOOL_TYPE, 1);
   z_var x(vfac["x"], crab::INT_TYPE, 64);
 
   // entry and exit block
@@ -160,7 +160,7 @@ int main(int argc, char **argv) {
     crab::outs() << *cfg << "\n";
     run_and_check(cfg, cfg->entry(), init, false, 1, 2, 20, stats_enabled);
     delete cfg;
-    
+
   }
   {
     z_cfg_t *cfg = prog2(vfac);

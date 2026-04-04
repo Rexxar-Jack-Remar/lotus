@@ -27,7 +27,7 @@ int main(int argc, char **argv) {
 
   {
     domain_t dom0;
-    crab::outs() << "===== Initially ======\n" << dom0 << "\n";    
+    crab::outs() << "===== Initially ======\n" << dom0 << "\n";
     dom0.intrinsic(START_PARTITION, {x}, {});
     crab::outs() << "Start partitioning on " << x << "\n";
     domain_t dom1(dom0);
@@ -116,13 +116,13 @@ int main(int argc, char **argv) {
   z_var w2(vfac["w2"], crab::INT_TYPE, 32);
   z_var w3(vfac["w3"], crab::INT_TYPE, 32);
   z_var w4(vfac["w4"], crab::INT_TYPE, 32);
-  
+
   {
-    
+
     domain_t dom0;
     crab::outs() << "===== Join (EXPECTED Top) ======\n" ;
     dom0.intrinsic(START_PARTITION, {v1}, {});
-    dom0.intrinsic(START_PARTITION, {v3}, {});    
+    dom0.intrinsic(START_PARTITION, {v3}, {});
     domain_t dom1(dom0);
     domain_t dom2(dom0);
     dom1.assign(v1, z_number(5));
@@ -133,7 +133,7 @@ int main(int argc, char **argv) {
 
     domain_t dom4(dom0);
     domain_t dom5(dom0);
-    dom0.intrinsic(START_PARTITION, {v3}, {});    
+    dom0.intrinsic(START_PARTITION, {v3}, {});
     dom4.assign(v3, z_number(50));
     dom4.assign(v4, z_number(60));
     dom5.assign(v3, z_number(52));
@@ -146,11 +146,11 @@ int main(int argc, char **argv) {
   }
 
   {
-    
+
     domain_t dom0;
     crab::outs() << "===== Meet (EXPECTED non-bot/non-top ======\n" ;
     dom0.intrinsic(START_PARTITION, {v1}, {});
-    dom0.intrinsic(START_PARTITION, {v3}, {});    
+    dom0.intrinsic(START_PARTITION, {v3}, {});
     domain_t dom1(dom0);
     domain_t dom2(dom0);
     dom1.assign(v1, z_number(5));
@@ -161,7 +161,7 @@ int main(int argc, char **argv) {
 
     domain_t dom4(dom0);
     domain_t dom5(dom0);
-    dom0.intrinsic(START_PARTITION, {v3}, {});    
+    dom0.intrinsic(START_PARTITION, {v3}, {});
     dom4.assign(v3, z_number(50));
     dom4.assign(v4, z_number(60));
     dom5.assign(v3, z_number(52));
@@ -174,7 +174,7 @@ int main(int argc, char **argv) {
   }
 
   {
-    
+
     domain_t dom0;
     crab::outs() << "===== Join EXPECTED non-top ======\n" ;
     dom0.intrinsic(START_PARTITION, {v1}, {});
@@ -188,7 +188,7 @@ int main(int argc, char **argv) {
 
     domain_t dom4(dom0);
     domain_t dom5(dom0);
-    dom0.intrinsic(START_PARTITION, {v3}, {});    
+    dom0.intrinsic(START_PARTITION, {v3}, {});
     dom4.assign(v1, z_number(50));
     dom4.assign(v2, z_number(60));
     dom5.assign(v1, z_number(52));
@@ -201,7 +201,7 @@ int main(int argc, char **argv) {
   }
 
   {
-    
+
     domain_t dom0;
     crab::outs() << "===== Meet EXPECTED bot ======\n" ;
     dom0.intrinsic(START_PARTITION, {v1}, {});
@@ -215,7 +215,7 @@ int main(int argc, char **argv) {
 
     domain_t dom4(dom0);
     domain_t dom5(dom0);
-    dom0.intrinsic(START_PARTITION, {v3}, {});    
+    dom0.intrinsic(START_PARTITION, {v3}, {});
     dom4.assign(v1, z_number(50));
     dom4.assign(v2, z_number(60));
     dom5.assign(v1, z_number(52));
@@ -226,6 +226,6 @@ int main(int argc, char **argv) {
 
     crab::outs() << "RES:"<<dom7 << "\n";
   }
-  
+
   return 0;
 }

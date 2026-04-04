@@ -18,7 +18,7 @@ struct inter_analyzer_parameters {
   inter_analyzer_parameters()
       : only_main_as_entry(false), widening_delay(2),
         descending_iters(2 /*UINT_MAX*/), thresholds_size(20 /*0*/),
-        live_map(nullptr), 
+        live_map(nullptr),
 	run_checker(true), checker_verbosity(0), keep_cc_invariants(false),
         keep_invariants(true), max_call_contexts(UINT_MAX),
         analyze_recursive_functions(false), exact_summary_reuse(true) {}
@@ -31,7 +31,7 @@ struct inter_analyzer_parameters {
   unsigned int thresholds_size;
   // Use liveness symbols if already available
   const liveness_map_t *live_map;
-  
+
   // -- Begin parameters for top-down analysis -- //
   // whether interleave analysis with checking
   bool run_checker;
@@ -47,7 +47,7 @@ struct inter_analyzer_parameters {
   // reuse summaries without losing precision
   bool exact_summary_reuse;
   // -- End parameters for top-down analysis -- //
-  
+
 };
 
 } // namespace analyzer

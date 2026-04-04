@@ -34,9 +34,9 @@ protected:
 public:
   checker(prop_checker_vector checkers) : m_checkers(checkers) {}
 
-  checker(const checker<Analyzer> &other) = delete; 
+  checker(const checker<Analyzer> &other) = delete;
   checker<Analyzer> &operator=(const checker<Analyzer> &other) = delete;
-  
+
   virtual ~checker() {}
 
   virtual void run() = 0;

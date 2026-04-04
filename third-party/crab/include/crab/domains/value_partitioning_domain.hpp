@@ -9,7 +9,7 @@
 #include <string>
 #include <vector>
 
-#include <boost/optional.hpp>
+#include <optional>
 
 namespace crab {
 namespace domains {
@@ -63,12 +63,12 @@ public:
 
 private:
   // the partitioning variable
-  boost::optional<variable_t> m_variable;
+  std::optional<variable_t> m_variable;
   // partitions over m_variable's values: are sorted and they don't
   // overlap
   partition_vector m_partitions;
 
-  value_partitioning_domain(boost::optional<variable_t> variable,
+  value_partitioning_domain(std::optional<variable_t> variable,
                             partition_vector &&partitions)
       : m_variable(variable), m_partitions(std::move(partitions)) {}
 
@@ -204,7 +204,7 @@ private:
 				  sorted_variables.end(), v);
     return (!(lower == sorted_variables.end() || v < *lower));
   }
-  
+
   bool contains(const linear_constraint_system_t &csts, const variable_t &v) const {
     return std::any_of(csts.begin(), csts.end(),
 		       [this,&v](const linear_constraint_t &cst) {
@@ -216,7 +216,7 @@ private:
     assert(!is_bottom());
     assert(!csts.is_true());
     assert(!csts.is_false());
-    
+
     CRAB_LOG("partition", crab::outs() << "Adding " << csts << "\n";);
     partition_vector vec;
     vec.reserve(m_partitions.size());
@@ -232,7 +232,7 @@ private:
 
     // update partitions
     if (m_variable) {
-      
+
       if (contains(csts, *m_variable)) {
         update_partitions();
       }
@@ -257,9 +257,9 @@ private:
       }
     }
   }
-  
+
 public:
-  value_partitioning_domain() : m_variable(boost::none) {
+  value_partitioning_domain() : m_variable(std::nullopt) {
     m_partitions.reserve(1);
     m_partitions.emplace_back(partition_t::top());
   }
@@ -311,10 +311,10 @@ public:
 
   /* Begin specialized API of the value_partitioning_domain */
 
-  boost::optional<variable_t> get_variable() const { return m_variable; }
+  std::optional<variable_t> get_variable() const { return m_variable; }
 
   // passed by reference so that we can set m_variable if none
-  boost::optional<variable_t> &get_variable() { return m_variable; }
+  std::optional<variable_t> &get_variable() { return m_variable; }
 
   bool has_same_partitions(const value_partitioning_domain_t &other) const {
     if (m_variable != other.m_variable ||
@@ -341,7 +341,7 @@ public:
     m_partitions.clear();
     m_partitions.emplace_back(std::move(partition));
     m_partitions[0].get_interval() = interval_t::top();
-    m_variable = boost::none;
+    m_variable = std::nullopt;
   }
 
   partition_t merge_partitions() const {
@@ -627,7 +627,7 @@ public:
       }
       if (m_variable && *m_variable == x) {
 	update_partitions();
-      } 
+      }
     }
   }
 
@@ -638,10 +638,10 @@ public:
       }
       if (m_variable && *m_variable == x) {
 	update_partitions();
-      } 
+      }
     }
   }
-  
+
   void apply(arith_operation_t op, const variable_t &x, const variable_t &y,
              const variable_t &z) override {
     if (!is_bottom()) {
@@ -702,7 +702,7 @@ public:
     }
   }
 
-  
+
   void operator+=(const linear_constraint_system_t &csts) override {
     if (is_bottom() || csts.is_true()) {
       return;
@@ -745,7 +745,7 @@ public:
     }
     return true;
   }
-  
+
   void backward_apply(arith_operation_t op, const variable_t &x,
                       const variable_t &y, const variable_t &z,
                       const value_partitioning_domain_t &invariant) override {
@@ -960,11 +960,11 @@ public:
       : m_interval(std::move(i)), m_dom(std::move(d)) {}
 
   partition(const partition &other) = default;
-  partition(partition &&other) = default;  
+  partition(partition &&other) = default;
   partition &operator=(const partition &other) = default;
-  partition &operator=(partition &&other) = default;  
-    
-  static partition top() {    
+  partition &operator=(partition &&other) = default;
+
+  static partition top() {
     NumDomain top_base;
     partition res(interval_t::top(), std::move(top_base));
     return res;
@@ -996,7 +996,7 @@ public:
   void join_interval(const partition &other) {
     m_interval = m_interval | other.get_interval();
   }
-  
+
   NumDomain &get_dom() { return m_dom; }
 
   const NumDomain &get_dom() const { return m_dom; }
@@ -1105,8 +1105,8 @@ private:
 	CRAB_ERROR(domain_name(), " normalization did not normalize");
       }
     }
-    #endif 
-    
+    #endif
+
   }
 
   // Sanity check
@@ -1159,7 +1159,7 @@ private:
     }
 
     for (auto const &elem : m_product) {
-      boost::optional<variable_t> var_opt = elem.get_variable();
+      std::optional<variable_t> var_opt = elem.get_variable();
       if (var_opt && (*var_opt) == var) {
         return true;
       }
@@ -1178,14 +1178,14 @@ private:
     }
 
     for (auto &elem : m_product) {
-      boost::optional<variable_t> var_opt = elem.get_variable();
+      std::optional<variable_t> var_opt = elem.get_variable();
       if (var_opt && (*var_opt) == var) {
         return &elem;
       }
     }
     return nullptr;
   }
-  
+
   void add_partition(value_partitioning_domain_t &&elem) {
     if (is_bottom()) {
       return;
@@ -1478,12 +1478,12 @@ private:
 	  m_absval.assign(x, e);
 	} else {
 	  m_absval.weak_assign(x, e);
-	} 
+	}
       } else {
-	
-	if (boost::optional<variable_t> y = e.get_variable()) {
+
+	if (std::optional<variable_t> y = e.get_variable()) {
 	  // x := y
-	  // 
+	  //
 	  if (value_partitioning_domain_t *partition_y = get_partition(*y)) {
 	    // We create a new partition for x if we have one for y
 	    if (!contains(x)) {
@@ -1496,10 +1496,10 @@ private:
 	      CRAB_WARN(domain_name(),
 			" assigning a partitioning variable ", *y,
 			" to a non-partitioning one ", x);
-	    }  
+	    }
 	    value_partitioning_domain_t partition_x(*partition_y);
 	    partition_x.m_variable = x;
-	    remove_partition(x); 
+	    remove_partition(x);
 	    add_partition(std::move(partition_x));
 	    // TODO(IMPORTANT): if x is not partitioning variable
 	    // chosen by the user then we should remove the partition
@@ -1507,18 +1507,18 @@ private:
 	    // done at the moment.
 	  }
 	}
-	
+
         for (auto &elem : m_product) {
 	  if (!weak) {
 	    elem.assign(x, e);
 	  } else {
 	    elem.weak_assign(x, e);
-	  } 
+	  }
         }
       }
     }
   }
-  
+
 public:
   product_value_partitioning_domain() {
     NumDomain top;
@@ -1771,7 +1771,7 @@ public:
   void weak_assign(const variable_t &x, const linear_expression_t &e) override {
     assign(x, e, true /*weak*/);
   }
-  
+
   void apply(arith_operation_t op, const variable_t &x, const variable_t &y,
              const variable_t &z) override {
     if (!is_bottom()) {
@@ -1874,7 +1874,7 @@ public:
     }
     return true;
   }
-  
+
   void backward_apply(arith_operation_t op, const variable_t &x,
                       const variable_t &y, const variable_t &z,
                       const this_type &invariant) override {
@@ -1999,7 +1999,7 @@ public:
         for (auto &elem : m_product) {
           elem.rename(from, to);
         }
-	normalize();	
+	normalize();
       }
     }
   }

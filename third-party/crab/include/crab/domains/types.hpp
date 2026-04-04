@@ -6,7 +6,7 @@
 #include <crab/support/os.hpp>
 #include <crab/types/variable.hpp>
 
-#include <boost/optional.hpp>
+#include <optional>
 #include <string>
 
 namespace crab {
@@ -18,10 +18,10 @@ namespace domains {
  *
  *  Num    = bool | int | real
  *  Scalar = Num | reference
- * 
+ *
  *                 -------- top
  *                /         /   \
- *               /         /    region(unknown)-------- 
+ *               /         /    region(unknown)--------
  *              /         /           |                |
  *            Scalar array(Num)    region(Scalar) region(array(Num))
  *               |          \      /                   |
@@ -29,16 +29,16 @@ namespace domains {
  *
  **/
 class type_value: public lattice_domain_api<type_value> {
-  
-  boost::optional<variable_type> m_type;
+
+  std::optional<variable_type> m_type;
   bool m_is_bottom;
-  
+
   type_value(bool is_bottom);
-  
+
 public:
 
   type_value();
-  
+
   type_value(variable_type ty);
 
   static type_value bottom();
@@ -52,7 +52,7 @@ public:
   void set_to_top() override;
 
   void set_to_bottom() override;
-  
+
   bool is_bottom() const override;
 
   bool is_top() const override;
@@ -62,7 +62,7 @@ public:
   bool operator==(const type_value &o) const;
 
   void operator|=(const type_value &o) override;
-  
+
   type_value operator|(const type_value &o) const override;
 
   type_value operator||(const type_value &o) const override;
@@ -78,7 +78,7 @@ public:
   variable_type get() const;
 
   void set(variable_type ty);
-    
+
   void write(crab::crab_os &o) const override;
 
   friend inline crab_os &operator<<(crab_os &o, const type_value &c) {
@@ -87,7 +87,7 @@ public:
   }
 
   std::string domain_name() const override;
-  
+
 };
 } // namespace domains
 } // namespace crab

@@ -17,19 +17,19 @@ void intra_run_impl(CFG *cfg, crab::cfg_impl::basic_block_label_t entry,
   using cfg_ref_t = crab::cfg::cfg_ref<CFG>;
   using basic_block_t = typename CFG::basic_block_t;
   using assumption_map_t = typename IntraFwdAnalyzer::assumption_map_t;
-  
+
   crab::analyzer::live_and_dead_analysis<cfg_ref_t> live(*cfg);
   if (run_liveness) {
     live.exec();
   }
   // Run fixpoint
-  auto absval_fac = init.make_top();  
+  auto absval_fac = init.make_top();
   crab::outs() << "Invariants using " << absval_fac.domain_name() << "\n";
   crab::fixpoint_parameters fixpo_params;
   fixpo_params.get_widening_delay() = widening;
   fixpo_params.get_descending_iterations() = narrowing;
   fixpo_params.get_max_thresholds() = jump_set_size;
-  IntraFwdAnalyzer a(*cfg, absval_fac, (run_liveness) ? &live : nullptr, 
+  IntraFwdAnalyzer a(*cfg, absval_fac, (run_liveness) ? &live : nullptr,
                      fixpo_params);
 
   assumption_map_t assumptions;
@@ -38,7 +38,7 @@ void intra_run_impl(CFG *cfg, crab::cfg_impl::basic_block_label_t entry,
   CRAB_LOG("crab-tests-print-invariants",
 	   print_invariants = true
 	   );
-  
+
   if (print_invariants) {
     // Print invariants in DFS to enforce a fixed order
     std::set<crab::cfg_impl::basic_block_label_t> visited;

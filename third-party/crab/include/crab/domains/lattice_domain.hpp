@@ -4,7 +4,7 @@
 #include <string>
 
 namespace crab {
-namespace domains {  
+namespace domains {
 template<class LatticeDomain>
 class lattice_domain_api {
 public:
@@ -16,7 +16,7 @@ public:
   virtual bool is_top() const = 0;
   virtual bool is_bottom() const = 0;
   virtual bool operator<=(const LatticeDomain &other) const = 0;
-  virtual void operator|=(const LatticeDomain &other) = 0;  
+  virtual void operator|=(const LatticeDomain &other) = 0;
   virtual LatticeDomain operator|(const LatticeDomain &other) const = 0;
   virtual LatticeDomain operator||(const LatticeDomain &other) const = 0;
   virtual LatticeDomain operator&(const LatticeDomain &other) const = 0;

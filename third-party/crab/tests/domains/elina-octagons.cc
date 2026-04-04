@@ -9,7 +9,7 @@ using namespace crab::cfg_impl;
 using namespace crab::domain_impl;
 
 
-// from TOPLAS paper Fig 1.b: version 1 
+// from TOPLAS paper Fig 1.b: version 1
 // (computing expression y:= 200-2*x in two instructions:
 //  tmp:= 2*x; y:= 200-tmp;)
 z_cfg_t* prog6(variable_factory_t &vfac)  {
@@ -27,14 +27,14 @@ z_cfg_t* prog6(variable_factory_t &vfac)  {
   z_basic_block_t& loop_body_1 = cfg->insert("loop_body_1");
   z_basic_block_t& loop_body_2 = cfg->insert("loop_body_2");
   z_basic_block_t& loop_body_3 = cfg->insert("loop_body_3");
-  z_basic_block_t& loop_body_4 = cfg->insert("loop_body_4");  
+  z_basic_block_t& loop_body_4 = cfg->insert("loop_body_4");
   z_basic_block_t& ret = cfg->insert("ret");
   // adding control flow
   entry >> loop;
   loop >> loop_body_1;
   loop_body_1 >> loop_body_2;
   loop_body_2 >> loop_body_3;
-  loop_body_3 >> loop_body_4;    
+  loop_body_3 >> loop_body_4;
   loop_body_4 >> loop;
   loop >> ret;
   // adding statements
@@ -103,7 +103,7 @@ z_cfg_t* prog8(variable_factory_t &vfac)  {
   z_var y(vfac ["y"], crab::INT_TYPE, 32);
   z_var x1(vfac ["x1"], crab::INT_TYPE, 32);
   z_var y1(vfac ["y1"], crab::INT_TYPE, 32);
-  
+
   z_var t(vfac ["t"], crab::INT_TYPE, 32);
   // entry and exit block
   z_cfg_t* cfg = new z_cfg_t("entry","ret");
@@ -113,7 +113,7 @@ z_cfg_t* prog8(variable_factory_t &vfac)  {
   z_basic_block_t& loop_body_1 = cfg->insert("loop_body_1");
   z_basic_block_t& loop_body_2 = cfg->insert("loop_body_2");
   z_basic_block_t& loop_body_3 = cfg->insert("loop_body_3");
-  z_basic_block_t& loop_body_4 = cfg->insert("loop_body_4");  
+  z_basic_block_t& loop_body_4 = cfg->insert("loop_body_4");
   z_basic_block_t& ret = cfg->insert("ret");
   // adding control flow
   entry >> loop;
@@ -135,16 +135,16 @@ z_cfg_t* prog8(variable_factory_t &vfac)  {
   // loop_body_3.assign(y, 200 -2*x1);
   // loop_body_4.assign(x, x1);
   loop_body_2.assign(x1, x);
-  loop_body_3.add(x1, x1, 1);  
+  loop_body_3.add(x1, x1, 1);
   loop_body_4.assign(y, 200 -2*x1);
   loop_body_4.assign(x, x1);
-  #endif 
+  #endif
   ret.assume(x >= 100);
   ret.assertion(x + y <= 200);
   return cfg;
 }
 
-// from TOPLAS paper Fig 1.a: 
+// from TOPLAS paper Fig 1.a:
 // (computing expression y:= 200+2*x in two instructions:
 //  tmp:= 2*x; y:= 200+tmp;)
 z_cfg_t* prog9(variable_factory_t &vfac)  {
@@ -162,14 +162,14 @@ z_cfg_t* prog9(variable_factory_t &vfac)  {
   z_basic_block_t& loop_body_1 = cfg->insert("loop_body_1");
   z_basic_block_t& loop_body_2 = cfg->insert("loop_body_2");
   z_basic_block_t& loop_body_3 = cfg->insert("loop_body_3");
-  z_basic_block_t& loop_body_4 = cfg->insert("loop_body_4");  
+  z_basic_block_t& loop_body_4 = cfg->insert("loop_body_4");
   z_basic_block_t& ret = cfg->insert("ret");
   // adding control flow
   entry >> loop;
   loop >> loop_body_1;
   loop_body_1 >> loop_body_2;
   loop_body_2 >> loop_body_3;
-  loop_body_3 >> loop_body_4;    
+  loop_body_3 >> loop_body_4;
   loop_body_4 >> loop;
   loop >> ret;
   // adding statements
@@ -197,7 +197,7 @@ z_cfg_t* prog10(variable_factory_t &vfac)  {
   z_var x1(vfac ["x1"], crab::INT_TYPE, 32);
   z_var y1(vfac ["y1"], crab::INT_TYPE, 32);
   z_var t(vfac ["t"], crab::INT_TYPE, 32);
-  
+
   // entry and exit block
   z_cfg_t* cfg = new z_cfg_t("entry","ret");
   // adding blocks
@@ -225,7 +225,7 @@ z_cfg_t* prog10(variable_factory_t &vfac)  {
 
 
 int main(int argc, char** argv) {
-#ifdef HAVE_ELINA  
+#ifdef HAVE_ELINA
   bool stats_enabled = false;
   if (!crab_tests::parse_user_options(argc,argv,stats_enabled)) {
       return 0;
@@ -271,7 +271,7 @@ int main(int argc, char** argv) {
     delete cfg;
   }
   // crab::outs() << "##============================================##\n";
-  { 
+  {
     variable_factory_t vfac;
     z_cfg_t* cfg = prog10(vfac);
     crab::outs() << *cfg << "\n";
@@ -279,6 +279,6 @@ int main(int argc, char** argv) {
     run_and_check<z_oct_elina_domain_t>(cfg, cfg->entry(), inv, false, 1, 2, 20, stats_enabled);
     delete cfg;
   }
-#endif          
+#endif
   return 0;
 }

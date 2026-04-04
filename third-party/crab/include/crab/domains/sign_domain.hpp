@@ -16,7 +16,7 @@
 #include <crab/domains/sign.hpp>
 #include <crab/support/stats.hpp>
 
-#include <boost/optional.hpp>
+#include <optional>
 
 namespace crab {
 namespace domains {
@@ -343,7 +343,7 @@ public:
     m_env = m_env & o.m_env;
     CRAB_LOG("sign-domain", crab::outs() << "Res=" << m_env << "\n";);
   }
-  
+
   sign_domain_t operator&(const sign_domain_t &o) const override {
     crab::CrabStats::count(domain_name() + ".count.meet");
     crab::ScopedCrabStats __st__(domain_name() + ".meet");
@@ -373,7 +373,7 @@ public:
   void operator-=(const variable_t &v) override {
     crab::CrabStats::count(domain_name() + ".count.forget");
     crab::ScopedCrabStats __st__(domain_name() + ".forget");
-    if (!is_bottom()) {    
+    if (!is_bottom()) {
       m_env -= v;
     }
   }
@@ -395,13 +395,13 @@ public:
   }
 
   DEFAULT_ENTAILS(sign_domain_t)
-  
+
   void assign(const variable_t &x, const linear_expression_t &e) override {
     crab::CrabStats::count(domain_name() + ".count.assign");
     crab::ScopedCrabStats __st__(domain_name() + ".assign");
     CRAB_LOG("sign-domain", crab::outs() << x << " := " << e << "\n";);
-    if (!is_bottom()) {    
-      if (boost::optional<variable_t> v = e.get_variable()) {
+    if (!is_bottom()) {
+      if (std::optional<variable_t> v = e.get_variable()) {
 	m_env.set(x, m_env.at(*v));
       } else {
 	m_env.set(x, eval_expr(e));
@@ -414,8 +414,8 @@ public:
     crab::CrabStats::count(domain_name() + ".count.weak_assign");
     crab::ScopedCrabStats __st__(domain_name() + ".weak_assign");
     CRAB_LOG("sign-domain", crab::outs() << "weak_assign(" << x << "," << e << ")\n";);
-    if (!is_bottom()) {        
-      if (boost::optional<variable_t> v = e.get_variable()) {
+    if (!is_bottom()) {
+      if (std::optional<variable_t> v = e.get_variable()) {
 	m_env.join(x, m_env.at(*v));
       } else {
 	m_env.join(x, eval_expr(e));
@@ -423,13 +423,13 @@ public:
     }
     CRAB_LOG("sign-domain", crab::outs() << "RES=" << m_env.at(x) << "\n";);
   }
-  
+
 
   void apply(crab::domains::arith_operation_t op, const variable_t &x,
              const variable_t &y, const variable_t &z) override {
     crab::CrabStats::count(domain_name() + ".count.apply");
     crab::ScopedCrabStats __st__(domain_name() + ".apply");
-    if (!is_bottom()) {        
+    if (!is_bottom()) {
       sign_t yi = m_env.at(y);
       sign_t zi = m_env.at(z);
       sign_t xi = sign_t::bottom();
@@ -464,11 +464,11 @@ public:
              const variable_t &y, number_t k) override {
     crab::CrabStats::count(domain_name() + ".count.apply");
     crab::ScopedCrabStats __st__(domain_name() + ".apply");
-    if (!is_bottom()) {        
+    if (!is_bottom()) {
       sign_t yi = m_env.at(y);
       sign_t zi(k);
       sign_t xi = sign_t::bottom();
-      
+
       switch (op) {
       case crab::domains::OP_ADDITION:
 	xi = yi + zi;
@@ -544,28 +544,28 @@ public:
              const variable_t &y, const variable_t &z) override {
     crab::CrabStats::count(domain_name() + ".count.apply");
     crab::ScopedCrabStats __st__(domain_name() + ".apply");
-    if (!is_bottom()) {        
+    if (!is_bottom()) {
       sign_t yi = m_env.at(y);
       sign_t zi = m_env.at(z);
       sign_t xi = sign_t::bottom();
-      
+
       switch (op) {
-      case crab::domains::OP_AND: 
+      case crab::domains::OP_AND:
 	xi = yi.And(zi);
 	break;
-      case crab::domains::OP_OR: 
+      case crab::domains::OP_OR:
 	xi = yi.Or(zi);
 	break;
-      case crab::domains::OP_XOR: 
+      case crab::domains::OP_XOR:
 	xi = yi.Xor(zi);
 	break;
-      case crab::domains::OP_SHL: 
+      case crab::domains::OP_SHL:
 	xi = yi.Shl(zi);
 	break;
-      case crab::domains::OP_LSHR: 
+      case crab::domains::OP_LSHR:
 	xi = yi.LShr(zi);
 	break;
-      case crab::domains::OP_ASHR: 
+      case crab::domains::OP_ASHR:
 	xi = yi.AShr(zi);
 	break;
       }
@@ -577,28 +577,28 @@ public:
              const variable_t &y, number_t k) override {
     crab::CrabStats::count(domain_name() + ".count.apply");
     crab::ScopedCrabStats __st__(domain_name() + ".apply");
-    if (!is_bottom()) {            
+    if (!is_bottom()) {
       sign_t yi = m_env.at(y);
       sign_t zi(k);
       sign_t xi = sign_t::bottom();
-      
+
       switch (op) {
-      case crab::domains::OP_AND: 
+      case crab::domains::OP_AND:
 	xi = yi.And(zi);
 	break;
-      case crab::domains::OP_OR: 
+      case crab::domains::OP_OR:
 	xi = yi.Or(zi);
 	break;
-      case crab::domains::OP_XOR: 
+      case crab::domains::OP_XOR:
 	xi = yi.Xor(zi);
 	break;
-      case crab::domains::OP_SHL: 
+      case crab::domains::OP_SHL:
 	xi = yi.Shl(zi);
 	break;
-      case crab::domains::OP_LSHR: 
+      case crab::domains::OP_LSHR:
 	xi = yi.LShr(zi);
 	break;
-      case crab::domains::OP_ASHR: 
+      case crab::domains::OP_ASHR:
 	xi = yi.AShr(zi);
 	break;
       }

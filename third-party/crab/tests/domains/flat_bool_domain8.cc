@@ -39,7 +39,7 @@ exit:
   entry >> bb2;
   bb1 >> exit;
   bb2 >> exit;
-  
+
   z_var b1(vfac["b1"], crab::BOOL_TYPE, 1);
   z_var b2(vfac["b2"], crab::BOOL_TYPE, 1);
   z_var b3(vfac["b3"], crab::BOOL_TYPE, 1);
@@ -82,7 +82,7 @@ int main(int argc, char **argv) {
     run_and_check(cfg, cfg->entry(), init, false, 1, 2, 20, stats_enabled);
     delete cfg;
   }
-  
+
   return 0;
-  
+
 }

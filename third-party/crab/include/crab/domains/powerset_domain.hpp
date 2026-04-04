@@ -34,7 +34,7 @@ public:
   using typename abstract_domain_t::linear_expression_t;
   using typename abstract_domain_t::reference_constraint_t;
   using typename abstract_domain_t::variable_or_constant_t;
-  using typename abstract_domain_t::variable_or_constant_vector_t;  
+  using typename abstract_domain_t::variable_or_constant_vector_t;
   using typename abstract_domain_t::variable_t;
   using typename abstract_domain_t::variable_vector_t;
 
@@ -303,7 +303,7 @@ public:
     // TODO: improve this by avoiding the copy of the left operand.
     *this = *this & other;
   }
-  
+
   virtual powerset_domain_t
   operator||(const powerset_domain_t &other) const override {
     Domain left = smash_disjuncts(*this);
@@ -343,7 +343,7 @@ public:
       }
     }
   }
-  
+
   virtual void apply(arith_operation_t op, const variable_t &x,
                      const variable_t &y, const variable_t &z) override {
     if (!is_bottom()) {
@@ -370,7 +370,7 @@ public:
       }
     }
   }
-  
+
   virtual void backward_assign(const variable_t &x,
                                const linear_expression_t &e,
                                const powerset_domain_t &invariant) override {
@@ -414,15 +414,15 @@ public:
     if (is_bottom()) {
       return true;
     }
-    
+
     for (unsigned i = 0, sz = m_disjuncts.size(); i < sz; ++i) {
       if (!m_disjuncts[i].entails(cst)) {
 	return false;
-      } 
+      }
     }
     return true;
   }
-  
+
   virtual void operator-=(const variable_t &v) override {
     if (!is_bottom()) {
       for (unsigned i = 0, sz = m_disjuncts.size(); i < sz; ++i) {
@@ -588,7 +588,7 @@ public:
       }
     }
   }
-  
+
   virtual void ref_make(const variable_t &ref, const variable_t &reg,
 			const variable_or_constant_t &size,
 			const allocation_site &as) override {
@@ -606,7 +606,7 @@ public:
       }
     }
   }
-  
+
   virtual void ref_load(const variable_t &ref, const variable_t &reg,
                         const variable_t &res) override {
     if (!is_bottom()) {
@@ -671,9 +671,9 @@ public:
   void select_ref(const variable_t &lhs_ref, const variable_t &lhs_rgn,
 		  const variable_t &cond,
 		  const variable_or_constant_t &ref1,
-		  const boost::optional<variable_t> &rgn1,
+		  const std::optional<variable_t> &rgn1,
 		  const variable_or_constant_t &ref2,
-		  const boost::optional<variable_t> &rgn2) override {
+		  const std::optional<variable_t> &rgn2) override {
     if (!is_bottom()) {
       for (unsigned i = 0, sz = m_disjuncts.size(); i < sz; ++i) {
         m_disjuncts[i].select_ref(lhs_ref, lhs_rgn, cond, ref1, rgn1, ref2, rgn2);
@@ -715,7 +715,7 @@ public:
     }
     return false;
   }
-  
+
   // boolean operators
   virtual void assign_bool_cst(const variable_t &lhs,
                                const linear_constraint_t &rhs) override {
@@ -761,7 +761,7 @@ public:
       }
     }
   }
-  
+
   virtual void apply_binary_bool(bool_operation_t op, const variable_t &x,
                                  const variable_t &y,
                                  const variable_t &z) override {
@@ -795,7 +795,7 @@ public:
       }
     }
   }
-  
+
   // backward boolean operators
   virtual void backward_assign_bool_cst(const variable_t &lhs,
                                         const linear_constraint_t &rhs,
@@ -855,14 +855,14 @@ public:
     if (m_disjuncts.empty()) {
       return interval_t::top();
     }
-    
+
     interval_t res = m_disjuncts[0].at(v);
     for (unsigned i = 1, sz = m_disjuncts.size(); i < sz; ++i) {
       res = res | m_disjuncts[i].at(v);
     }
     return res;
   }
-  
+
   void set(const variable_t &v, interval_t intv) {
     if (!is_bottom()) {
       for (unsigned i = 0, sz = m_disjuncts.size(); i < sz; ++i) {

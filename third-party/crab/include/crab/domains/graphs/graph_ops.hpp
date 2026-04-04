@@ -4,7 +4,7 @@
 #include <crab/domains/graphs/util/Heap.h>
 
 #include <algorithm> // std::sort
-#include <boost/optional.hpp>
+#include <optional>
 #include <vector>
 
 /**

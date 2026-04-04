@@ -10,7 +10,7 @@ namespace crab {
 namespace domains {
 
 template <typename Domain> class checker_domain_traits;
-  
+
 // Perform constraint simplifications depending on the abstract domain
 template <typename Domain> class constraint_simp_domain_traits {
 public:
@@ -21,12 +21,12 @@ public:
       !std::is_same<Domain,
                    abstract_domain_ref<typename Domain::variable_t>>::value,
       "constraint_simp_domain_traits not supported for generic domain");
-  
+
   using number_t = typename Domain::number_t;
-  using variable_t = typename Domain::variable_t;  
-  using linear_expression_t = typename Domain::linear_expression_t;  
+  using variable_t = typename Domain::variable_t;
+  using linear_expression_t = typename Domain::linear_expression_t;
   using linear_constraint_t = typename Domain::linear_constraint_t;
-  using linear_constraint_system_t = typename Domain::linear_constraint_system_t; 
+  using linear_constraint_system_t = typename Domain::linear_constraint_system_t;
 
   // Convert a disequality into a strict inequality:
   // - if cst is x!=y and abs_val |= x <= y then add x < y
@@ -36,8 +36,8 @@ public:
 				linear_constraint_system_t &out_csts) {
 
     // TODO: we could use abs_val to infer more disequalities from cst.
-    auto get_binary_operands = [](const linear_constraint_t &c) -> 
-      boost::optional<std::pair<variable_t, variable_t>> {
+    auto get_binary_operands = [](const linear_constraint_t &c) ->
+      std::optional<std::pair<variable_t, variable_t>> {
 	if (c.is_disequation()) {
 	  if (c.size() == 2 && c.constant() == 0) {
 	    auto it = c.begin();
@@ -52,9 +52,9 @@ public:
 	    }
 	  }
 	}
-      return boost::none;
+      return std::nullopt;
     };
-    
+
     if (auto pair = get_binary_operands(cst)) {
       variable_t x = (*pair).first;
       variable_t y = (*pair).second;
@@ -64,13 +64,13 @@ public:
 	out_csts += x_lt_y;
       } else {
 	linear_constraint_t x_ge_y(x >= y);
-	linear_constraint_t x_gt_y(linear_expression_t(x) > linear_expression_t(y));	    
+	linear_constraint_t x_gt_y(linear_expression_t(x) > linear_expression_t(y));
 	if (abs_val.entails(x_ge_y)) {
-	  out_csts += x_gt_y;	      
-	} 
+	  out_csts += x_gt_y;
+	}
       }
     }
-  }  
+  }
 };
 
 // Special operations for applying reduction between domains.
@@ -83,7 +83,7 @@ public:
       !std::is_same<Domain,
                    abstract_domain_ref<typename Domain::variable_t>>::value,
       "reduced_domain_traits not supported for generic domain");
-  
+
   using variable_t = typename Domain::variable_t;
   using linear_constraint_t = typename Domain::linear_constraint_t;
   typedef
@@ -107,7 +107,7 @@ public:
 
 // Default implementation of integer cast instructions:
 // signed-extension, zero-extension and truncation.
-// 
+//
 // This implementation assumes that the abstract domain Domain models
 // integers as mathematical integers and hence, bit-widths are mostly
 // ignored. Moreover, it assumes that Domain does not model Booleans.
@@ -123,7 +123,7 @@ public:
       !std::is_same<Domain,
                    abstract_domain_ref<typename Domain::variable_t>>::value,
       "int_cast_domain_traits not supported for generic domain");
-  
+
   static void apply(Domain &dom, int_conv_operation_t op,
 		    const variable_t &dst, const variable_t &src) {
 
@@ -132,7 +132,7 @@ public:
     } else {
       dom -= dst;
     }
-    
+
     /// Refine dst based on src's type
     if (op == crab::domains::OP_ZEXT) {
       if (src.get_type().is_bool()) {
@@ -270,6 +270,6 @@ public:
 //     return !dom.is_bottom();
 //   }
 // };
-  
+
 } // end namespace domains
 } // end namespace crab

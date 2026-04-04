@@ -122,7 +122,7 @@ public:
   necessary_preconditions_fixpoint_iterator(
       CFG cfg, AbsDom absval_fac,
       const fixpoint_parameters &fixpo_params)
-    : fixpoint_iterator_t(crab::cfg::cfg_rev<CFG>(cfg), absval_fac, 
+    : fixpoint_iterator_t(crab::cfg::cfg_rev<CFG>(cfg), absval_fac,
 			  fixpo_params),
       m_cfg(cfg), m_absval_fac(absval_fac), m_good_states(false) {}
 
@@ -131,17 +131,17 @@ public:
   necessary_preconditions_fixpoint_iterator(
       CFG cfg, AbsDom absval_fac, bool good_states,
       const fixpoint_parameters &fixpo_params)
-    : fixpoint_iterator_t(crab::cfg::cfg_rev<CFG>(cfg), absval_fac, 
+    : fixpoint_iterator_t(crab::cfg::cfg_rev<CFG>(cfg), absval_fac,
 			  fixpo_params),
       m_cfg(cfg), m_absval_fac(absval_fac), m_good_states(good_states) {}
-  
-  
-  // postcond: final states that we want to propagate backwards  
-  void run_backward(AbsDom postcond) { 
+
+
+  // postcond: final states that we want to propagate backwards
+  void run_backward(AbsDom postcond) {
     this->run(postcond);
   }
 
-  // postcond: final states that we want to propagate backwards  
+  // postcond: final states that we want to propagate backwards
   void run_backward(AbsDom postcond,
 		    const std::unordered_map<typename CFG::basic_block_label_t,
 		    AbsDom> &fwd_invariants) {
@@ -367,8 +367,8 @@ public:
 
   intra_forward_backward_analyzer(CFG cfg, AbsDom absval_fac)
     : m_cfg(cfg), m_absval_fac(absval_fac), m_wto(nullptr),
-      m_abs_tr(new abs_tr_t(absval_fac.make_top())) {} 
-        
+      m_abs_tr(new abs_tr_t(absval_fac.make_top())) {}
+
   ~intra_forward_backward_analyzer() = default;
   intra_forward_backward_analyzer(const intra_forward_backward_analyzer &o) = delete;
   intra_forward_backward_analyzer &
@@ -382,7 +382,7 @@ public:
            const assumption_map_t &assumptions,
            // liveness information
            const liveness_t *live,
-           // users parameters 
+           // users parameters
 	   const fixpoint_parameters &fixpo_params,
 	   const fwd_bwd_parameters &params) {
     run(m_cfg.entry(), init_states, assumptions, live, fixpo_params, params);
@@ -394,7 +394,7 @@ public:
            const assumption_map_t &assumptions,
            // liveness information
            const liveness_t *live,
-           // user parameters 
+           // user parameters
 	   const fixpoint_parameters &fixpo_params,
 	   const fwd_bwd_parameters &params) {
 
@@ -417,7 +417,7 @@ public:
 		     basic_block_traits<basic_block_t>::to_string(node) << "\n";
 		     crab::outs() << "New value(from backward)=" << new_val << "\n";
 		     );
-            new_table.insert({node, std::move(new_val)});	    
+            new_table.insert({node, std::move(new_val)});
             return true;
           } else {
             AbsDom old_val = it->second;
@@ -507,7 +507,7 @@ public:
       if(B) {
 	B->clear();
       }
-      
+
       // run forward analysis refined with preconditions from error
       // states
       F.run(entry, init_states, refined_assumptions);
@@ -543,7 +543,7 @@ public:
       CRAB_VERBOSE_IF(1, get_msg_stream() << "Started backward analysis.\n";);
       if (B == nullptr) {
 	B = std::unique_ptr<bwd_analyzer_t>(new bwd_analyzer_t
-			    (m_cfg, m_absval_fac, 
+			    (m_cfg, m_absval_fac,
 			     // negate assertions: preconditions from error states
 			     false, fixpo_params));
       }
@@ -617,10 +617,10 @@ public:
 
 
     if (params.get_use_refined_invariants()) {
-      // We store the refined (last iteration) forward invariants 
+      // We store the refined (last iteration) forward invariants
       store_results(F);
     }
-    
+
     CRAB_VERBOSE_IF(1, get_msg_stream()
                            << "Combined forward+backward analysis done after "
                            << iters << " iterations.\n";);

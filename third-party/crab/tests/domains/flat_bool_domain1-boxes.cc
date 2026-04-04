@@ -94,6 +94,6 @@ int main(int argc, char **argv) {
   z_boxes_domain_t init;
   run(cfg, cfg->entry(), init, false, 1, 2, 20, stats_enabled);
   delete cfg;
-#endif  
+#endif
   return 0;
 }

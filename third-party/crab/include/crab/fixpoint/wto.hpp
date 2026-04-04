@@ -353,7 +353,7 @@ public:
   using const_iterator =
       boost::indirect_iterator<typename wto_component_list_t::const_iterator>;
 
-private:  
+private:
   wto_component_list_ptr _wto_components;
   dfn_table_ptr _dfn_table;
   dfn_t _num;
@@ -363,15 +363,15 @@ private:
   wto(wto_component_list_ptr &&wto_components,
       dfn_table_ptr &&dfn_table,
       dfn_t num,
-      stack_ptr &&stack, 
+      stack_ptr &&stack,
       nesting_table_ptr &&nesting_table):
     _wto_components(std::move(wto_components)),
     _dfn_table(std::move(dfn_table)),
     _num(num),
     _stack(std::move(stack)),
     _nesting_table(std::move(nesting_table)) {}
-  
-  
+
+
   class nesting_builder : public wto_component_visitor<G> {
   public:
     using wto_vertex_t = wto_vertex<G>;
@@ -380,7 +380,7 @@ private:
   private:
     wto_nesting_t _nesting;
     nesting_table_ptr _nesting_table;
-      
+
   public:
     nesting_builder(nesting_table_ptr nesting_table)
         : _nesting_table(nesting_table) {}
@@ -625,7 +625,7 @@ private:
   }
 
 public:
-  
+
   wto(G g)
       : _wto_components(std::make_shared<wto_component_list_t>()),
         _dfn_table(std::make_shared<dfn_table_t>()), _num(0),
@@ -654,11 +654,11 @@ public:
 
   wto(const wto_t &other) = delete;
   wto_t &operator=(const wto_t &other) = delete;
-  wto(wto_t &&other) = default;  
+  wto(wto_t &&other) = default;
   wto_t &operator=(wto_t &&other) = default;
 
   // deep copy
-  wto_t clone() const {    
+  wto_t clone() const {
     auto wto_components = std::make_shared<wto_component_list_t>(*_wto_components);
     auto dfn_table = _dfn_table ? std::make_shared<dfn_table_t>(*_dfn_table) : nullptr;
     auto stack = _stack ? std::make_shared<stack_t>(*_stack) : nullptr;
@@ -666,7 +666,7 @@ public:
     return wto_t(std::move(wto_components), std::move(dfn_table),
 		 _num, std::move(stack), std::move(nesting_table));
   }
-  
+
   iterator begin() {
     return boost::make_indirect_iterator(_wto_components->begin());
   }
@@ -683,11 +683,11 @@ public:
     return boost::make_indirect_iterator(_wto_components->end());
   }
 
-  boost::optional<wto_nesting_t>
+  std::optional<wto_nesting_t>
   nesting(typename boost::graph_traits<G>::vertex_descriptor n) {
     typename nesting_table_t::iterator it = this->_nesting_table->find(n);
     if (it == this->_nesting_table->end()) {
-      return boost::optional<wto_nesting_t>();
+      return std::optional<wto_nesting_t>();
     } else {
       return it->second;
     }

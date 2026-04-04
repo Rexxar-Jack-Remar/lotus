@@ -15,14 +15,14 @@ function (AddTest testSrc dirName)
     target_link_libraries(${testName} ${Boost_PROGRAM_OPTIONS_LIBRARY} InterCrab)
   elseif (${dirName} MATCHES "backward")
     target_link_libraries(${testName} ${Boost_PROGRAM_OPTIONS_LIBRARY} BackwardCrab)
-  else ()  
+  else ()
     target_link_libraries(${testName} ${Boost_PROGRAM_OPTIONS_LIBRARY} IntraCrab)
   endif ()
   #move testing binaries into a ${TEST_DIR} directory
-  set_target_properties(${testName} PROPERTIES 
+  set_target_properties(${testName} PROPERTIES
     RUNTIME_OUTPUT_DIRECTORY  ${TEST_DIR})
   #Finally add it to test execution
-  add_test(NAME ${testName} 
+  add_test(NAME ${testName}
     WORKING_DIRECTORY ${TEST_DIR}
     COMMAND ${TEST_DIR}/${testName} --disable-warnings)
 endfunction()
@@ -37,10 +37,10 @@ function (AddTestDir dirName)
     if (${testSrc} IN_LIST EXCLUDE_FILES)
       message (STATUS " ##### Excluding ${testSrc} from compilation")
     else()
-      AddTest (${testSrc} ${dirName})      
+      AddTest (${testSrc} ${dirName})
     endif()
   endforeach(testSrc)
-endfunction ()  
+endfunction ()
 
 AddTestDir(assertion_crawler)
 AddTestDir(domains)

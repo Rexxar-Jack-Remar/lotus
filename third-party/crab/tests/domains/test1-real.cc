@@ -48,6 +48,6 @@ int main(int argc, char **argv) {
 
   q_interval_domain_t init;
   run(cfg, cfg->entry(), init, false, 1, 2, 20, stats_enabled);
-  
+
   return 0;
 }

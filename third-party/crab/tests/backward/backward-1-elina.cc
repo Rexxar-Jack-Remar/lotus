@@ -43,7 +43,7 @@ z_cfg_t *prog(variable_factory_t &vfac) {
 }
 
 int main(int argc, char **argv) {
-#ifdef HAVE_ELINA  
+#ifdef HAVE_ELINA
   bool stats_enabled = false;
   if (!crab_tests::parse_user_options(argc, argv, stats_enabled)) {
     return 0;

@@ -4,7 +4,7 @@
 #include <crab/support/os.hpp>
 #include <crab/types/variable.hpp>
 
-#include <boost/optional.hpp>
+#include <optional>
 
 namespace crab {
 
@@ -16,7 +16,7 @@ public:
   using reference_constraint_t = reference_constraint<number_t, VariableName>;
 
 private:
-  using opt_var_t = boost::optional<variable_t>;
+  using opt_var_t = std::optional<variable_t>;
   using cst_kind_t = enum {
     REF_EQ,
     REF_LT,
@@ -305,7 +305,7 @@ public:
 	    m_lhs < o.m_lhs &&
 	    m_rhs < o.m_rhs);
   }
-  
+
   void write(crab_os &o) const {
     if (is_contradiction()) {
       o << "false";

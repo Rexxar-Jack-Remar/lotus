@@ -144,7 +144,7 @@ private:
 
   // Return the representative after merging all elements in elems.
   // Pre-condition: if dom != none then forall v \in elems:: contains(v)
-  boost::optional<element_t>
+  std::optional<element_t>
   merge_elems(const element_set_t &elems,
               std::shared_ptr<domain_t> absval = nullptr) {
     crab::CrabStats::count("union_find.count.merge_elements");
@@ -153,32 +153,32 @@ private:
     auto it = elems.begin();
     auto et = elems.end();
     if (it == et) {
-      return boost::none;
+      return std::nullopt;
     }
     element_t v = *it;
     if (absval && !contains(v)) {
       make(v, absval);
       if (is_bottom()) {
-        return boost::none;
+        return std::nullopt;
       }
     }
     ++it;
 
     if (it == et) {
-      return (contains(v) ? boost::optional<element_t>(find(v)) : boost::none);
+      return (contains(v) ? std::optional<element_t>(find(v)) : std::nullopt);
     }
 
-    boost::optional<element_t> repr;
+    std::optional<element_t> repr;
     for (; it != et; ++it) {
       if (absval && !contains(*it)) {
         make(*it, absval);
         if (is_bottom()) {
-          return boost::none;
+          return std::nullopt;
         }
       }
       repr = join(v, *it);
       if (!repr /*is_bottom()*/) {
-        return boost::none;
+        return std::nullopt;
       }
     }
     return repr;
@@ -257,7 +257,7 @@ private:
 
       // Merge equivalence classes from the left to the right
       for (auto &kv : left_equiv_classes) {
-        boost::optional<element_t> right_repr = right.merge_elems(kv.second);
+        std::optional<element_t> right_repr = right.merge_elems(kv.second);
         if (!right_repr) {
           // this shouldn't happen
           CRAB_ERROR("unexpected situation in join_or_widening 1");
@@ -269,7 +269,7 @@ private:
       // joining/widening the domains associated to the equivalence
       // classes.
       for (auto &kv : right_equiv_classes) {
-        boost::optional<element_t> left_repr = left.merge_elems(kv.second);
+        std::optional<element_t> left_repr = left.merge_elems(kv.second);
         if (!left_repr) {
           // this shouldn't happen
           CRAB_ERROR("unexpected situation in join_or_widening 2");
@@ -318,7 +318,7 @@ private:
         std::shared_ptr<domain_t> left_absval =
             left.get_equiv_class(kv.first).detach_and_get_absval();
         // add elements on the right if they do not exist
-        boost::optional<element_t> right_repr =
+        std::optional<element_t> right_repr =
             right.merge_elems(kv.second, left_absval);
         if (!right_repr) {
           // this shouldn't happen
@@ -332,7 +332,7 @@ private:
       for (auto &kv : right_equiv_classes) {
         std::shared_ptr<domain_t> right_absval =
             right.get_equiv_class(kv.first).detach_and_get_absval();
-        boost::optional<element_t> left_repr =
+        std::optional<element_t> left_repr =
             left.merge_elems(kv.second, right_absval);
         if (!left_repr) {
           // this shouldn't happen
@@ -466,7 +466,7 @@ public:
   // Post-condition: merge x and y. If the result is not bottom then
   // it returns the representative of the new equivalence class,
   // otherwise, none.
-  boost::optional<element_t> join(const element_t &x, const element_t &y) {
+  std::optional<element_t> join(const element_t &x, const element_t &y) {
     crab::CrabStats::count("union_find.count.union");
     crab::ScopedCrabStats __st__("union_find.union");
 
@@ -482,7 +482,7 @@ public:
         merge_op.apply(*dom_x, *dom_y);
         if (merge_op.is_bottom_absorbing() && dom_x->is_bottom()) {
           set_to_bottom();
-          return boost::none;
+          return std::nullopt;
         }
         m_parents.at(rep_y) = rep_x;
         m_classes.erase(rep_y);
@@ -493,7 +493,7 @@ public:
         merge_op.apply(*dom_y, *dom_x);
         if (merge_op.is_bottom_absorbing() && dom_y->is_bottom()) {
           set_to_bottom();
-          return boost::none;
+          return std::nullopt;
         }
         m_parents.at(rep_x) = rep_y;
         if (ec_x.get_rank() == ec_y.get_rank()) {
@@ -806,7 +806,7 @@ public:
         ForgetElementInDomain{}(*(ec.detach_and_get_absval()), v);
       } else {
         // v is the representative of the equivalence class
-        boost::optional<element_t> new_rep;
+        std::optional<element_t> new_rep;
         for (auto &kv : m_parents) {
           if (kv.first != v && kv.second == v) {
             if (!new_rep) {
@@ -876,7 +876,7 @@ public:
       if (contains(x)) {
         // remove the key-value entry where key==x
         // rename key-value entries   where value==x
-        boost::optional<element_t> parent_x;
+        std::optional<element_t> parent_x;
         for (auto it = m_parents.begin(), et = m_parents.end(); it != et;) {
           if ((*it).first == x) {
             parent_x = (*it).second;

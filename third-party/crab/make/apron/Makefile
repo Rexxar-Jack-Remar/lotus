@@ -18,7 +18,7 @@ LDD_LIBS := \
     $(CRAB_INSTALL)/ldd/lib/libst.a \
     $(CRAB_INSTALL)/ldd/lib/libutil.a \
     $(CRAB_INSTALL)/ldd/lib/libmtr.a \
-    $(CRAB_INSTALL)/ldd/lib/libepd.a 
+    $(CRAB_INSTALL)/ldd/lib/libepd.a
 
 APRON_LIBS := \
     $(CRAB_INSTALL)/apron/lib/libpolkaMPQ.a \
@@ -32,7 +32,7 @@ APRON_LIBS := \
 CXXFLAGS += \
      -I $(MPFR_DIR)/include \
      -I $(CRAB_INSTALL)/ldd/include/ldd \
-     -I $(CRAB_INSTALL)/apron/include 
+     -I $(CRAB_INSTALL)/apron/include
 
 LDFLAGS += $(LDD_LIBS) $(APRON_LIBS)
 LDFLAGS += -L$(MPFR_DIR)/lib -lmpfr

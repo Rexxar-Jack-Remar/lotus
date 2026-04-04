@@ -1,6 +1,6 @@
 #pragma once
 
-#include <boost/optional.hpp>
+#include <optional>
 #include <vector>
 
 /**
@@ -186,7 +186,7 @@ public:
   protected:
     const std::vector<vert_id> &perm;
     const std::vector<vert_id> &inv;
-    boost::optional<RG> adj;
+    std::optional<RG> adj;
   };
 
   // public typedefs

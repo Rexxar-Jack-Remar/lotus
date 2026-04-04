@@ -124,7 +124,7 @@ z_cfg_t *m(variable_factory_t &vfac) {
 }
 
 int main(int argc, char **argv) {
-#ifdef HAVE_APRON  
+#ifdef HAVE_APRON
   bool stats_enabled = false;
   if (!crab_tests::parse_user_options(argc, argv, stats_enabled)) {
     return 0;
@@ -151,7 +151,7 @@ int main(int argc, char **argv) {
 
   using callgraph_t = call_graph<z_cfg_ref_t>;
   using inter_params_t = inter_analyzer_parameters<callgraph_t>;
-  
+
   std::unique_ptr<callgraph_t> cg(new callgraph_t(cfgs));
   inter_params_t params;
   params.widening_delay = 2;

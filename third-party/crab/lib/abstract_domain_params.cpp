@@ -12,8 +12,8 @@ void elina_domain_params::update_params(const elina_domain_params &params) {
 
 void elina_domain_params::write(crab::crab_os &o) const {
   o << "Elina domains parameters:\n";
-  o << "\tuse_tree_expressions="<< m_use_tree_expressions<<"\n";  
-  
+  o << "\tuse_tree_expressions="<< m_use_tree_expressions<<"\n";
+
 }
 
 void array_adaptive_domain_params::update_nonsmashable_params() {
@@ -66,7 +66,7 @@ void region_domain_params::update_params(const region_domain_params &params) {
   m_deallocation = params.region_deallocation();
   m_tag_analysis = params.region_tag_analysis();
   m_is_dereferenceable = params.region_is_dereferenceable();
-  m_skip_unknown_regions = params.region_skip_unknown_regions(); 
+  m_skip_unknown_regions = params.region_skip_unknown_regions();
 }
 
 void region_domain_params::write(crab::crab_os &o) const {
@@ -90,7 +90,7 @@ void zones_domain_params::write(crab::crab_os &o) const {
   o << "\tchrome_dijkstra=" << m_chrome_dijkstra << "\n";
   o << "\twiden_restabilize=" << m_widen_restabilize << "\n";
   o << "\tspecial_assign=" << m_special_assign << "\n";
-  o << "\tclose_bounds_inline=" << m_close_bounds_inline << "\n";  
+  o << "\tclose_bounds_inline=" << m_close_bounds_inline << "\n";
 }
 
 void oct_domain_params::update_params(const oct_domain_params &params) {
@@ -98,7 +98,7 @@ void oct_domain_params::update_params(const oct_domain_params &params) {
   m_widen_restabilize = params.oct_widen_restabilize();
   m_special_assign = params.oct_special_assign();
   m_close_bounds_inline = params.oct_close_bounds_inline();
-  
+
 }
 
 void oct_domain_params::write(crab::crab_os &o) const {
@@ -106,7 +106,7 @@ void oct_domain_params::write(crab::crab_os &o) const {
   o << "\tchrome_dijkstra=" << m_chrome_dijkstra << "\n";
   o << "\twiden_restabilize=" << m_widen_restabilize << "\n";
   o << "\tspecial_assign=" << m_special_assign << "\n";
-  o << "\tclose_bounds_inline=" << m_close_bounds_inline << "\n";  
+  o << "\tclose_bounds_inline=" << m_close_bounds_inline << "\n";
 }
 
 const std::vector<unsigned>& fixed_tvpi_domain_params::coefficients() const {
@@ -116,13 +116,13 @@ const std::vector<unsigned>& fixed_tvpi_domain_params::coefficients() const {
  std::vector<unsigned>& fixed_tvpi_domain_params::coefficients() {
   return m_coefficients;
 }
-  
+
 void fixed_tvpi_domain_params::update_params(const fixed_tvpi_domain_params& p) {
   m_coefficients.clear();
   m_coefficients.insert(m_coefficients.end(),
 			p.m_coefficients.begin(), p.m_coefficients.end());
 }
-  
+
 void fixed_tvpi_domain_params::write(crab::crab_os &o) const {
   o << "Fixed-TVPI parameters:\n";
   o << "\ttracked coefficients={";
@@ -136,7 +136,7 @@ void fixed_tvpi_domain_params::write(crab::crab_os &o) const {
   o << "}\n";
 }
 
-  
+
 void crab_domain_params::update_params(const crab_domain_params &p) {
   elina_domain_params e_p(p.elina_use_tree_expressions());
   array_adaptive_domain_params aa_p(p.array_adaptive_is_smashable(),
@@ -162,7 +162,7 @@ void crab_domain_params::update_params(const crab_domain_params &p) {
 			p.oct_special_assign(),
 			p.oct_close_bounds_inline());
   fixed_tvpi_domain_params tvpi_p(p.coefficients());
-  
+
   elina_domain_params::update_params(e_p);
   array_adaptive_domain_params::update_params(aa_p);
   boxes_domain_params::update_params(b_p);
@@ -191,7 +191,7 @@ static int to_int(const std::string &val) {
     CRAB_ERROR("parameter value ", val, " cannot be converted to an integer");
   } catch(std::out_of_range const& e) {
     CRAB_ERROR("parameter value ", val, " is out of range for an integer");
-  } 
+  }
 }
 
 static unsigned to_uint(const std::string &val) {
@@ -202,7 +202,7 @@ static unsigned to_uint(const std::string &val) {
     CRAB_ERROR("parameter value ", val, " cannot be converted to an unsigned integer");
   } catch(std::out_of_range const& e) {
     CRAB_ERROR("parameter value ", val, " is out of range for an unsigned integer");
-  } 
+  }
 }
 
 static std::vector<unsigned> to_list_of_unsigned(const std::string &val) {
@@ -215,7 +215,7 @@ static std::vector<unsigned> to_list_of_unsigned(const std::string &val) {
   }
   return res;
 }
-  
+
 void crab_domain_params::set_param(const std::string &param, const std::string &val) {
   if (param == "elina.use_tree_expressions") {
     elina_domain_params::m_use_tree_expressions = to_bool(val);
@@ -256,15 +256,15 @@ void crab_domain_params::set_param(const std::string &param, const std::string &
   } else if (param == "zones.close_bounds_inline") {
     zones_domain_params::m_close_bounds_inline = to_bool(val);
   } else if (param == "oct.chrome_dijkstra") {
-    oct_domain_params::m_chrome_dijkstra = to_bool(val);    
+    oct_domain_params::m_chrome_dijkstra = to_bool(val);
   } else if (param == "oct.widen_restabilize") {
-    oct_domain_params::m_widen_restabilize = to_bool(val);    
+    oct_domain_params::m_widen_restabilize = to_bool(val);
   } else if (param == "oct.special_assign") {
-    oct_domain_params::m_special_assign = to_bool(val);    
+    oct_domain_params::m_special_assign = to_bool(val);
   } else if (param == "oct.close_bounds_inline") {
-    oct_domain_params::m_close_bounds_inline = to_bool(val);    
+    oct_domain_params::m_close_bounds_inline = to_bool(val);
   } else if (param == "fixed_tvpi.coefficients") {
-    fixed_tvpi_domain_params::m_coefficients = to_list_of_unsigned(val);    
+    fixed_tvpi_domain_params::m_coefficients = to_list_of_unsigned(val);
   } else {
     CRAB_WARN("Ignored unsupported parameter ",  param);
   }

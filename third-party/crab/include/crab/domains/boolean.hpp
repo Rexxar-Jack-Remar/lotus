@@ -38,7 +38,7 @@ public:
   void set_to_top() override;
 
   void set_to_bottom() override;
-  
+
   static boolean_value get_true();
 
   static boolean_value get_false();
@@ -60,7 +60,7 @@ public:
   bool operator==(const boolean_value &other) const;
 
   void operator|=(const boolean_value &other) override;
-  
+
   boolean_value operator|(const boolean_value &other) const override;
 
   boolean_value operator&(const boolean_value &other) const override;
@@ -88,6 +88,6 @@ inline crab_os &operator<<(crab_os &o, const boolean_value &v) {
   v.write(o);
   return o;
 }
-  
+
 } //end namespace domains
 } //end namespace crab

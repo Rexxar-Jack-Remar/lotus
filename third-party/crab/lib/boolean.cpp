@@ -38,7 +38,7 @@ void boolean_value::set_to_top()  {
   void boolean_value::set_to_bottom()  {
   _value = Bottom;
 }
-  
+
 bool boolean_value::is_bottom() const { return (_value == Bottom); }
 
 bool boolean_value::is_top() const { return (_value == Top); }
@@ -64,11 +64,11 @@ bool boolean_value::operator<=(const boolean_value &other) const {
 bool boolean_value::operator==(const boolean_value &other) const {
   return (_value == other._value);
 }
-  
+
 void boolean_value::operator|=(const boolean_value &other) {
   *this = *this | other;
 }
-  
+
 boolean_value boolean_value::operator|(const boolean_value &other) const {
   if (is_bottom())
     return other;
@@ -195,6 +195,6 @@ void boolean_value::write(crab_os &o) const {
 std::string boolean_value::domain_name() const {
   return "Bool";
 }
-  
+
 } // end namespace domains
 } // end namespace crab

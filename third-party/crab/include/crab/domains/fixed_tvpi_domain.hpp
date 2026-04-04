@@ -25,13 +25,13 @@ namespace domains {
  ** and arithmetic operations, and linear constraints to use
  ** GHOST(v,N).
  **
- ** 
+ **
  ** For instance, fixed_tvpi_domain cannot prove this program while tvpi does:
  **    int i,x;
  **    int N = nd_int();
  **   __CRAB_assume(N > 0);
  **   i = 0;
- **   x = 0; 
+ **   x = 0;
  **   while (i < N) {
  **     i++;
  **     if (*) {
@@ -40,12 +40,12 @@ namespace domains {
  **      x = x+3;
  **     }
  **   }
- **   __CRAB_assert(x >= 2*N); 
- **   __CRAB_assert(x <= 3*N); 
- ** 
+ **   __CRAB_assert(x >= 2*N);
+ **   __CRAB_assert(x <= 3*N);
+ **
  ** The reason is that we assign two different ghost variables for x/2
  ** and x/3 so at the join point of the if-then-else we lose track of
- ** them. 
+ ** them.
  **/
 template<typename OctLikeDomain>
 class fixed_tvpi_domain
@@ -82,8 +82,8 @@ private:
   }
 
   // (TODO): needed for pretty-printing
-  // static std::pair<variable_t, unsigned> get_rev_ghost_var(const variable_t &gv) { 
-  // 
+  // static std::pair<variable_t, unsigned> get_rev_ghost_var(const variable_t &gv) {
+  //
   //}
 
   bool can_rewrite_linear_expression(const linear_expression_t &e,
@@ -94,9 +94,9 @@ private:
     if (!((e.constant() % tracked_coeff) == 0)) {
       return false;
     }
-    
+
     return true;
-    
+
     // for (auto it = e.begin(), et = e.end(); it != et; ++it) {
     //   const number_t &coeff = (*it).first;
     //   if (coeff == tracked_coeff || coeff == -tracked_coeff) {
@@ -159,7 +159,7 @@ private:
     variable_t ghost_x = get_ghost_var(x, coefficient);
     auto x_intv = m_base_absval.at(x);
     number_t tracked_coefficient(coefficient);
-    if (boost::optional<number_t> n = x_intv.singleton()) {
+    if (std::optional<number_t> n = x_intv.singleton()) {
       if ((*n) % tracked_coefficient == 0) {
         // rewrite("x := n") = "x/COEF := n/COEF"
 	if (!weak) {
@@ -170,14 +170,14 @@ private:
       } else {
         m_base_absval -= ghost_x;
       }
-    } else if (boost::optional<variable_t> y = e.get_variable()) {
+    } else if (std::optional<variable_t> y = e.get_variable()) {
       // rewrite("x := y") = "x/COEF := y/COEF"
       variable_t ghost_y = get_ghost_var(*y, coefficient);
       if (!weak) {
 	m_base_absval.assign(ghost_x, ghost_y);
       } else {
-	m_base_absval.weak_assign(ghost_x, ghost_y);	
-      } 
+	m_base_absval.weak_assign(ghost_x, ghost_y);
+      }
     } else {
       if (can_rewrite_linear_expression(e, coefficient)) {
 	if (!weak) {
@@ -185,7 +185,7 @@ private:
 			       rewrite_linear_expression(e, coefficient));
 	} else {
 	  m_base_absval.weak_assign(ghost_x,
-				    rewrite_linear_expression(e, coefficient));	  
+				    rewrite_linear_expression(e, coefficient));
 	}
       } else {
         m_base_absval -= ghost_x;
@@ -196,7 +196,7 @@ private:
   void rewrite_apply(arith_operation_t op, const variable_t &x,
                      const variable_t &y, number_t z, unsigned coefficient) {
     assert(coefficient > 1);
-    
+
     variable_t ghost_x = get_ghost_var(x, coefficient);
     number_t tracked_coefficient(coefficient);
     if (op == OP_ADDITION || op == OP_SUBTRACTION) {
@@ -242,19 +242,19 @@ private:
     assert(coefficient > 1);
     // TODO: ignored case if op is a subtraction or division
     // TODO: ignored cases if y or z are not singleton
-    
-    if (boost::optional<number_t> n = m_base_absval.at(z).singleton()) {
+
+    if (std::optional<number_t> n = m_base_absval.at(z).singleton()) {
       rewrite_apply(op, x, y, *n, coefficient);
       return;
     }
 
     if (op == OP_ADDITION || op == OP_MULTIPLICATION) {
-      if (boost::optional<number_t> n = m_base_absval.at(y).singleton()) {
+      if (std::optional<number_t> n = m_base_absval.at(y).singleton()) {
         rewrite_apply(op, x, z, *n, coefficient);
 	return;
       }
     }
-    
+
     // default case: forget x
     variable_t ghost_x = get_ghost_var(x, coefficient);
     m_base_absval -= ghost_x;
@@ -416,20 +416,20 @@ public:
           set_to_bottom();
           break;
         }
-	
+
         if (cst.is_tautology()) {
           continue;
         }
 
         CRAB_LOG("fixed-tvpi", crab::outs() << "fixed_tvpi_domain processing "
                                             << cst << "\n");
-	
+
         m_base_absval += cst;
         if (m_base_absval.is_bottom()) {
           break;
         }
 
-	for (auto coefficient: crab_domain_params_man::get().coefficients()) {	
+	for (auto coefficient: crab_domain_params_man::get().coefficients()) {
 	  if (can_rewrite_linear_constraint(cst, coefficient)) {
 	    auto gcst = rewrite_linear_constraint(cst, coefficient);
 	    CRAB_LOG("fixed-tvpi", crab::outs() << "\tRewritten " << cst
@@ -453,18 +453,18 @@ public:
   bool entails(const linear_constraint_t &cst) const override {
     if (is_bottom()) {
       return true;
-    } else if (cst.is_tautology()) {						
-      return true;							
-    } else if (cst.is_contradiction()) {					
-      return false;							
+    } else if (cst.is_tautology()) {
+      return true;
+    } else if (cst.is_contradiction()) {
+      return false;
     }
-    
+
     if (m_base_absval.entails(cst)) {
-      return true;      
+      return true;
     }
-    
+
     // The entailment holds if one cst's version is entailed.
-    for (auto coefficient: crab_domain_params_man::get().coefficients()) {	    
+    for (auto coefficient: crab_domain_params_man::get().coefficients()) {
       if (can_rewrite_linear_constraint(cst, coefficient)) {
 	linear_constraint_t gcst = rewrite_linear_constraint(cst, coefficient);
 	if (m_base_absval.entails(gcst)) {
@@ -475,12 +475,12 @@ public:
 
     return false;
   }
-  
+
   void assign(const variable_t &x, const linear_expression_t &e) override {
     if (!is_bottom()) {
       m_base_absval.assign(x, e);
-      
-      for (auto coefficient: crab_domain_params_man::get().coefficients()) {	          
+
+      for (auto coefficient: crab_domain_params_man::get().coefficients()) {
 	rewrite_assign(x, e, coefficient, false /*!weak*/);
       }
     }
@@ -489,19 +489,19 @@ public:
   void weak_assign(const variable_t &x, const linear_expression_t &e) override {
     if (!is_bottom()) {
       m_base_absval.weak_assign(x, e);
-      
-      for (auto coefficient: crab_domain_params_man::get().coefficients()) {	          
+
+      for (auto coefficient: crab_domain_params_man::get().coefficients()) {
 	rewrite_assign(x, e, coefficient, true /*weak*/);
       }
     }
   }
-  
+
   void apply(arith_operation_t op, const variable_t &x, const variable_t &y,
              number_t z) override {
     if (!is_bottom()) {
       m_base_absval.apply(op, x, y, z);
-      
-      for (auto coefficient: crab_domain_params_man::get().coefficients()) {	                
+
+      for (auto coefficient: crab_domain_params_man::get().coefficients()) {
 	rewrite_apply(op, x, y, z, coefficient);
       }
     }
@@ -511,7 +511,7 @@ public:
              const variable_t &z) override {
     if (!is_bottom()) {
       m_base_absval.apply(op, x, y, z);
-      
+
       for (auto coefficient : crab_domain_params_man::get().coefficients()) {
         rewrite_apply_var(op, x, y, z, coefficient);
       }
@@ -522,10 +522,10 @@ public:
              const variable_t &src) override {
     if (!is_bottom()) {
       m_base_absval.apply(op, dst, src);
-      
+
       // WARNING: we ignore the actual conversion because we assume
       // mathematical integers.
-      for (auto coefficient: crab_domain_params_man::get().coefficients()) {      
+      for (auto coefficient: crab_domain_params_man::get().coefficients()) {
 	variable_t ghost_dst = get_ghost_var(dst, coefficient);
 	variable_t ghost_src = get_ghost_var(src, coefficient);
 	m_base_absval.assign(ghost_dst, ghost_src);
@@ -538,7 +538,7 @@ public:
     if (!is_bottom()) {
       m_base_absval.apply(op, x, y, z);
 
-      for (auto coefficient: crab_domain_params_man::get().coefficients()) {            
+      for (auto coefficient: crab_domain_params_man::get().coefficients()) {
 	variable_t ghost_x = get_ghost_var(x, coefficient);
 	m_base_absval -= ghost_x;
       }
@@ -549,8 +549,8 @@ public:
              number_t k) override {
     if (!is_bottom()) {
       m_base_absval.apply(op, x, y, k);
-      
-      for (auto coefficient: crab_domain_params_man::get().coefficients()) {       
+
+      for (auto coefficient: crab_domain_params_man::get().coefficients()) {
 	variable_t ghost_x = get_ghost_var(x, coefficient);
 	m_base_absval -= ghost_x;
       }
@@ -588,7 +588,7 @@ public:
     if (is_top()) {
       return linear_constraint_system_t(linear_constraint_t::get_true());
     }
-    
+
     // TODO: eliminate ghost variables
     return m_base_absval.to_linear_constraint_system();
 
@@ -607,7 +607,7 @@ public:
       variable_vector_t allvars(variables);
       for (auto const &v : variables) {
 
-	for (auto coefficient: crab_domain_params_man::get().coefficients()) { 	
+	for (auto coefficient: crab_domain_params_man::get().coefficients()) {
 	  variable_t gv = get_ghost_var(v, coefficient);
 	  allvars.push_back(gv);
 	}
@@ -621,7 +621,7 @@ public:
       variable_vector_t allvars(variables);
       for (auto const &v : variables) {
 
-	for (auto coefficient: crab_domain_params_man::get().coefficients()) {	
+	for (auto coefficient: crab_domain_params_man::get().coefficients()) {
 	  variable_t gv = get_ghost_var(v, coefficient);
 	  allvars.push_back(gv);
 	}
@@ -686,12 +686,12 @@ public:
     return "FixedTVPIDomain(" + dom.domain_name() + ")";
   }
 };
-  
+
 template<typename OctLikeDomain>
 struct abstract_domain_traits<fixed_tvpi_domain<OctLikeDomain>> {
   using number_t = typename OctLikeDomain::number_t;
   using varname_t = typename OctLikeDomain::varname_t;
 };
-  
+
 } // end namespace domains
 } // end namespace crab

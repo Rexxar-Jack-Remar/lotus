@@ -13,7 +13,7 @@ The `run` function should be called from your test (see step 3).
 If the domain is defined over rational instead of integers then use
 
 	    Q_RUNNER(...)
-		
+
 3. Add your test `wrapped_interval_domain_test.cc`. You can use
    `domains/test1.cc` as a template.
 
@@ -21,7 +21,7 @@ If the domain is defined over rational instead of integers then use
    `CMakeLists.txt`. For instance, if your test is under a
    subdirectory called `domains/wrapint`:
 
-        AddTestDir(domains)        
+        AddTestDir(domains)
 		...
         AddTestDir (domains/wrapint) # directory where your test is located
 
@@ -30,4 +30,4 @@ you can skip step 4.
 
 **IMPORTANT:** Tests are only compiled if option `-DCRAB_ENABLE_TESTS=ON`
 is enabled in the `cmake` command.
-		
+

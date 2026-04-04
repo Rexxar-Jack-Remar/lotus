@@ -82,7 +82,7 @@ static void print_invariants(z_cfg_ref_t cfg, Analyzer &analyser) {
 
     auto pre = analyser.get_pre(cur_label);
     auto post = analyser.get_post(cur_label);
-    
+
     crab::outs() << crab::basic_block_traits<z_basic_block_t>::to_string(cur_label)
 		 << "=" << pre << " ==> " << post
                  << "\n";
@@ -111,7 +111,7 @@ void check(z_cfg_ref_t cfg, variable_factory_t &vfac) {
 
   // Run analyses
   z_sdbm_domain_t absval_fac, init;
-  crab::fixpoint_parameters fixpo_params;    
+  crab::fixpoint_parameters fixpo_params;
   num_analyzer_t num_a(cfg, absval_fac, nullptr, fixpo_params);
   num_a.run(init);
   crab::outs() << "Analysis using " << init.domain_name() << "\n";
@@ -154,7 +154,7 @@ int main(int argc, char **argv) {
   using assertion_crawler_t = crab::analyzer::assertion_crawler<z_cfg_ref_t>;
   typename assertion_crawler_t::assert_map_t assert_map;
   typename assertion_crawler_t::summary_map_t summaries;
-  
+
   assertion_crawler_t assert_crawler(*p, assert_map, summaries);
   assert_crawler.exec();
   crab::outs() << "\n";

@@ -19,7 +19,7 @@
 #include <crab/support/debug.hpp>
 #include <crab/support/stats.hpp>
 
-#include <boost/optional.hpp>
+#include <optional>
 #include <boost/range/iterator_range.hpp>
 
 namespace crab {
@@ -305,7 +305,7 @@ public:
     }
   }
 
-  boost::optional<Number> singleton() const {
+  std::optional<Number> singleton() const {
     interval_t i = approx();
     return i.singleton();
   }
@@ -998,7 +998,7 @@ inline dis_z_interval_t trim_interval(const dis_z_interval_t &x,
   if (x.is_bottom())
     return x;
 
-  boost::optional<z_number> s = y.singleton();
+  std::optional<z_number> s = y.singleton();
   if (!s)
     return x;
   z_number c = *s;
@@ -1170,7 +1170,7 @@ public:
   void operator&=(const dis_interval_domain_t &e) override {
     this->_env = this->_env & e._env;
   }
-  
+
   dis_interval_domain_t
   operator&(const dis_interval_domain_t &e) const override {
     crab::CrabStats::count(domain_name() + ".count.meet");
@@ -1262,7 +1262,7 @@ public:
     crab::CrabStats::count(domain_name() + ".count.assign");
     crab::ScopedCrabStats __st__(domain_name() + ".assign");
 
-    if (boost::optional<variable_t> v = e.get_variable()) {
+    if (std::optional<variable_t> v = e.get_variable()) {
       this->_env.set(x, this->_env.at(*v));
     } else {
       dis_interval_t r(e.constant());
@@ -1276,7 +1276,7 @@ public:
     crab::CrabStats::count(domain_name() + ".count.weak_assign");
     crab::ScopedCrabStats __st__(domain_name() + ".weak_assign");
 
-    if (boost::optional<variable_t> v = e.get_variable()) {
+    if (std::optional<variable_t> v = e.get_variable()) {
       this->_env.join(x, this->_env.at(*v));
     } else {
       dis_interval_t r(e.constant());
@@ -1285,7 +1285,7 @@ public:
       this->_env.join(x, r);
     }
   }
-  
+
   void apply(arith_operation_t op, const variable_t &x, const variable_t &y,
              number_t z) override {
     crab::CrabStats::count(domain_name() + ".count.apply");
@@ -1448,7 +1448,7 @@ public:
   }
 
   DEFAULT_SELECT(dis_interval_domain_t)
-  
+
   /// dis_interval_domain implements only standard abstract operations
   /// of a numerical domain so it is intended to be used as a leaf
   /// domain in the hierarchy of domains.

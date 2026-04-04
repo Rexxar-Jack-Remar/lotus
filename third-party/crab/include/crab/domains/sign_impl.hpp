@@ -4,7 +4,7 @@
 #include <crab/support/debug.hpp>
 #include <crab/support/stats.hpp>
 
-#include <boost/optional.hpp>
+#include <optional>
 
 namespace crab {
 namespace domains {

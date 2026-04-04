@@ -144,11 +144,11 @@ template <typename Number> bool congruence<Number>::is_top() const {
 }
 
 template <typename Number>
-boost::optional<Number> congruence<Number>::singleton() const {
+std::optional<Number> congruence<Number>::singleton() const {
   if (!this->is_bottom() && m_a == 0) {
-    return boost::optional<Number>(m_b);
+    return std::optional<Number>(m_b);
   } else {
-    return boost::optional<Number>();
+    return std::optional<Number>();
   }
 }
 
@@ -510,7 +510,7 @@ congruence<Number> congruence<Number>::AShr(const congruence<Number> &o) const {
 
     if (singleton() && o.singleton()) {
       auto res = to_interval(*this).AShr(to_interval(o));
-      if (boost::optional<Number> n = res.singleton()) {
+      if (std::optional<Number> n = res.singleton()) {
         return congruence(*n);
       }
     }
@@ -538,7 +538,7 @@ congruence<Number> congruence<Number>::LShr(const congruence<Number> &o) const {
     }
     if (singleton() && o.singleton()) {
       auto res = to_interval(*this).LShr(to_interval(o));
-      if (boost::optional<Number> n = res.singleton()) {
+      if (std::optional<Number> n = res.singleton()) {
         return congruence(*n);
       }
     }

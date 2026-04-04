@@ -14,9 +14,9 @@ term_operator_t term_operator_t::make_operator(uint32_t value) {
 }
 
 crab::crab_os &operator<<(crab::crab_os &o, term_operator_t op) {
- 
+
   if (!op.is_reserved()) {
-    // User-defined operator      
+    // User-defined operator
     o << "UF_SYM_" << std::to_string(op.value());
   } else {
     // Crab predefined operators
@@ -81,7 +81,7 @@ crab::crab_os &operator<<(crab::crab_os &o, term_operator_t op) {
   }
   return o;
 }
-  
+
 term::term_operator_t conv2termop(arith_operation_t op) {
   switch (op) {
   case OP_ADDITION:
@@ -101,7 +101,7 @@ term::term_operator_t conv2termop(arith_operation_t op) {
   }
 }
 
-boost::optional<arith_operation_t> conv2arith(term::term_operator_t op) {
+std::optional<arith_operation_t> conv2arith(term::term_operator_t op) {
   switch (op) {
   case term::TERM_OP_ADD:
     return OP_ADDITION;
@@ -118,7 +118,7 @@ boost::optional<arith_operation_t> conv2arith(term::term_operator_t op) {
   case term::TERM_OP_UREM:
     return OP_UREM;
   default:
-    return boost::optional<arith_operation_t>();
+    return std::optional<arith_operation_t>();
   }
 }
 
@@ -139,7 +139,7 @@ term::term_operator_t conv2termop(bitwise_operation_t op) {
   }
 }
 
-boost::optional<bitwise_operation_t> conv2bitwise(term::term_operator_t op) {
+std::optional<bitwise_operation_t> conv2bitwise(term::term_operator_t op) {
   switch (op) {
   case term::TERM_OP_AND:
     return OP_AND;
@@ -154,7 +154,7 @@ boost::optional<bitwise_operation_t> conv2bitwise(term::term_operator_t op) {
   case term::TERM_OP_ASHR:
     return OP_ASHR;
   default:
-    return boost::optional<bitwise_operation_t>();
+    return std::optional<bitwise_operation_t>();
   }
 }
 
@@ -169,7 +169,7 @@ term::term_operator_t conv2termop(bool_operation_t op) {
   }
 }
 
-boost::optional<bool_operation_t> conv2bool(term::term_operator_t op) {
+std::optional<bool_operation_t> conv2bool(term::term_operator_t op) {
   switch (op) {
   case term::TERM_OP_BAND:
     return OP_BAND;
@@ -178,7 +178,7 @@ boost::optional<bool_operation_t> conv2bool(term::term_operator_t op) {
   case term::TERM_OP_BXOR:
     return OP_BXOR;
   default:
-    return boost::optional<bool_operation_t>();
+    return std::optional<bool_operation_t>();
   }
 }
 

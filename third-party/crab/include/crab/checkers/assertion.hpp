@@ -32,7 +32,7 @@ class assert_property_checker : public property_checker<Analyzer> {
   using typename base_checker_t::var_t;
 
   bool entails(const abs_dom_t &lhs, const lin_cst_t &rhs) const {
-    CRAB_LOG("checker-entailment", 
+    CRAB_LOG("checker-entailment",
 	     crab::outs() << "Checking whether\n"
 	                  << lhs << "\nentails " << rhs << "\n";);
 
@@ -44,7 +44,7 @@ class assert_property_checker : public property_checker<Analyzer> {
               });
      return res;
   }
-  
+
 public:
   using analyzer_t = Analyzer;
 

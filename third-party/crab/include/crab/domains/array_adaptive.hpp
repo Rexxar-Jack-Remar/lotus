@@ -63,7 +63,7 @@
 #include <unordered_map>
 #include <vector>
 
-#include <boost/optional.hpp>
+#include <optional>
 
 namespace crab {
 namespace domains {
@@ -314,7 +314,7 @@ private:
   class join_op : public binary_op_t {
     // apply is called when two bindings (one each from a
     // different map) have the same key(i.e., offset).
-    std::pair<bool, boost::optional<cell_set_t>>
+    std::pair<bool, std::optional<cell_set_t>>
     apply(const offset_t &, const cell_set_t &x, const cell_set_t &y) override {
       return {false, cell_set_impl::set_union(x, y)};
     }
@@ -323,7 +323,7 @@ private:
   };
 
   class meet_op : public binary_op_t {
-    std::pair<bool, boost::optional<cell_set_t>>
+    std::pair<bool, std::optional<cell_set_t>>
     apply(const offset_t &, const cell_set_t &x, const cell_set_t &y) override {
       return {false, cell_set_impl::set_union(x, y)};
     }
@@ -511,11 +511,11 @@ public:
     return m_map[array].end();
   }
 
-  boost::optional<variable_t> find(const variable_t &array,
+  std::optional<variable_t> find(const variable_t &array,
                                    const cell_t &c) const {
     auto it = m_map.find(array);
     if (it == m_map.end()) {
-      return boost::none;
+      return std::nullopt;
     }
 
     const sorted_cell_var_vector &cell_vars = it->second;
@@ -524,7 +524,7 @@ public:
     if (lb != cell_vars.end() && !(c < (*lb).first)) {
       return (*lb).second;
     } else {
-      return boost::none;
+      return std::nullopt;
     }
   }
 
@@ -644,14 +644,14 @@ public:
   cell_ghost_man() {}
 
   variable_t get_or_insert_ghost(const variable_t &a, const cell_t &c) {
-    if (boost::optional<variable_t> scalar_v = m_map.find(a, c)) {
+    if (std::optional<variable_t> scalar_v = m_map.find(a, c)) {
       return *scalar_v;
     } else {
       return insert_ghost(a, c);
     }
   }
 
-  boost::optional<variable_t> get_ghost(const variable_t &a,
+  std::optional<variable_t> get_ghost(const variable_t &a,
                                         const cell_t &c) const {
     return m_map.find(a, c);
   }
@@ -675,7 +675,7 @@ public:
         const cell_t &c = cv.first;
         const variable_t &v1 = cv.second;
         auto &vfac = const_cast<varname_t *>(&(v1.name()))->get_var_factory();
-        if (boost::optional<variable_t> v2 = right_map.find(array_var, c)) {
+        if (std::optional<variable_t> v2 = right_map.find(array_var, c)) {
           if (v1 != *v2) {
             assert(v1.name().str() == (*v2).name().str());
             assert(v1.get_type() == (*v2).get_type());
@@ -721,7 +721,7 @@ public:
         const cell_t &c = cv.first;
         const variable_t &v1 = cv.second;
         auto &vfac = const_cast<varname_t *>(&(v1.name()))->get_var_factory();
-        if (boost::optional<variable_t> v2 = right_map.find(array_var, c)) {
+        if (std::optional<variable_t> v2 = right_map.find(array_var, c)) {
           if (v1 != *v2) {
             // same key but different ghost -> create a fresh common ghost
             assert(v1.name().str() == (*v2).name().str());
@@ -819,7 +819,7 @@ public:
 
   bound_t val() const;
 
-  boost::optional<uint64_t> get_uint64_val() const;
+  std::optional<uint64_t> get_uint64_val() const;
 
   static constant_value bottom();
 
@@ -933,7 +933,7 @@ private:
         return;
       }
 
-      if (boost::optional<uint64_t> sz_opt = elem_sz.get_uint64_val()) {
+      if (std::optional<uint64_t> sz_opt = elem_sz.get_uint64_val()) {
         bool can_be_smashed = true;
         for (unsigned k = 0, num_cells = cells.size(); k < num_cells; ++k) {
           const cell_t &c = cells[k];
@@ -946,7 +946,7 @@ private:
           }
           const bool is_strong_update = (k == 0);
           linear_expression_t idx(number_t(c.get_offset().index()));
-          if (boost::optional<variable_t> c_scalar_var = cm.get_ghost(a, c)) {
+          if (std::optional<variable_t> c_scalar_var = cm.get_ghost(a, c)) {
             base_dom.array_store(a, c.get_size(), idx, *c_scalar_var,
                                  is_strong_update);
           } else {
@@ -964,7 +964,7 @@ private:
         if (can_be_smashed) {
           for (unsigned k = 0, num_cells = cells.size(); k < num_cells; ++k) {
             const cell_t &c = cells[k];
-            if (boost::optional<variable_t> c_scalar_var = cm.get_ghost(a, c)) {
+            if (std::optional<variable_t> c_scalar_var = cm.get_ghost(a, c)) {
               // remove the synthethic cell from the base domain and
               // from the offset map
               base_dom -= *c_scalar_var;
@@ -1197,12 +1197,12 @@ private:
           : m_cm_left(cm_left), m_dom_left(dom_left), m_cm_right(cm_right),
             m_dom_right(dom_right) {}
 
-      std::pair<bool, boost::optional<array_state>>
+      std::pair<bool, std::optional<array_state>>
       apply(const variable_t &k, const array_state &x,
             const array_state &y) override {
         array_state z =
             x.join(k, y, m_cm_left, m_dom_left, m_cm_right, m_dom_right);
-        return {false, boost::optional<array_state>(z)};
+        return {false, std::optional<array_state>(z)};
       }
 
       bool default_is_absorbing() override { return true; }
@@ -1220,12 +1220,12 @@ private:
           : m_cm_left(cm_left), m_dom_left(dom_left), m_cm_right(cm_right),
             m_dom_right(dom_right) {}
 
-      std::pair<bool, boost::optional<array_state>>
+      std::pair<bool, std::optional<array_state>>
       apply(const variable_t &k, const array_state &x,
             const array_state &y) override {
         array_state z =
             x.meet(k, y, m_cm_left, m_dom_left, m_cm_right, m_dom_right);
-        return {false, boost::optional<array_state>(z)};
+        return {false, std::optional<array_state>(z)};
       }
       bool default_is_absorbing() override { return false; }
     }; // class meet_op
@@ -1327,7 +1327,7 @@ private:
           }
         }
 
-        if (boost::optional<array_state> k_val_opt = m_tree.lookup(k)) {
+        if (std::optional<array_state> k_val_opt = m_tree.lookup(k)) {
           if (!(*k_val_opt).is_top()) {
             m_tree.insert(new_k, *k_val_opt);
           }
@@ -1397,7 +1397,7 @@ private:
     return {c, scalar_v};
   }
 
-  using variable_opt_t = boost::optional<variable_t>;
+  using variable_opt_t = std::optional<variable_t>;
   variable_opt_t get_scalar(const variable_t &array_v, const cell_t &c) {
     if (!array_v.get_type().is_array()) {
       CRAB_ERROR("array_adaptive::get_scalar only if array variable");
@@ -1619,7 +1619,7 @@ private:
 
   uint64_t check_and_get_elem_size(const linear_expression_t &elem_size) {
     interval_t i_elem_size = to_interval(elem_size);
-    if (boost::optional<number_t> n_bytes = i_elem_size.singleton()) {
+    if (std::optional<number_t> n_bytes = i_elem_size.singleton()) {
       if (static_cast<int64_t>(*n_bytes) > 0) {
         return (uint64_t) static_cast<int64_t>(*n_bytes);
       }
@@ -1667,7 +1667,7 @@ private:
                            std::move(out_cell_ghost_man));
     return res;
   }
-  
+
   array_adaptive_domain(base_domain_t &&inv, array_state_map_t &&amap,
                         cell_ghost_man_t &&cgman)
       : m_base_dom(std::move(inv)), m_array_map(std::move(amap)),
@@ -1875,10 +1875,10 @@ public:
 
       base_domain_t &left_dom = m_base_dom;
       cell_ghost_man_t &left_cell_ghost_man = m_cell_ghost_man;
-      
+
       base_domain_t right_dom(other.m_base_dom);
       cell_ghost_man_t right_cell_ghost_man(other.m_cell_ghost_man);
-      
+
       // Must be done before the renaming.
       auto out_array_map =
         m_array_map.meet(other.m_array_map, left_cell_ghost_man, left_dom,
@@ -1890,11 +1890,11 @@ public:
       left_dom &= right_dom;
       m_array_map = std::move(out_array_map);
       m_cell_ghost_man = std::move(out_cell_ghost_man);
-					   
+
       CRAB_LOG("array-adaptive", crab::outs() << "Res=" << *this << "\n";);
     }
   }
-  
+
   array_adaptive_domain_t
   operator||(const array_adaptive_domain_t &other) const override {
     crab::CrabStats::count(domain_name() + ".count.widening");
@@ -2138,7 +2138,7 @@ public:
   bool entails(const linear_constraint_t &cst) const override {
     return m_base_dom.entails(cst);
   }
-  
+
   void operator-=(const variable_t &var) override {
     crab::CrabStats::count(domain_name() + ".count.forget");
     crab::ScopedCrabStats __st__(domain_name() + ".forget");
@@ -2173,7 +2173,7 @@ public:
     CRAB_LOG("array-adaptive", crab::outs() << "weak_assign(" << x << "," << e
 	                                    << ")=" << *this << "\n";);
   }
-    
+
   void apply(arith_operation_t op, const variable_t &x, const variable_t &y,
              number_t z) override {
     crab::CrabStats::count(domain_name() + ".count.apply");
@@ -2210,7 +2210,7 @@ public:
     m_base_dom = std::move(s.left_dom);
     m_array_map = std::move(s.array_map);
     m_cell_ghost_man = std::move(s.cell_ghost_man);
-    
+
     m_base_dom.backward_assign(x, e, s.right_dom);
   }
 
@@ -2221,7 +2221,7 @@ public:
     m_base_dom = std::move(s.left_dom);
     m_array_map = std::move(s.array_map);
     m_cell_ghost_man = std::move(s.cell_ghost_man);
-    
+
     m_base_dom.backward_apply(op, x, y, z, s.right_dom);
   }
 
@@ -2232,8 +2232,8 @@ public:
     m_base_dom = std::move(s.left_dom);
     m_array_map = std::move(s.array_map);
     m_cell_ghost_man = std::move(s.cell_ghost_man);
-    
-    m_base_dom.backward_apply(op, x, y, z, s.right_dom);    
+
+    m_base_dom.backward_apply(op, x, y, z, s.right_dom);
   }
 
   void apply(int_conv_operation_t op, const variable_t &dst,
@@ -2293,7 +2293,7 @@ public:
 				    bool is_not_rhs) override {
     m_base_dom.weak_assign_bool_var(lhs, rhs, is_not_rhs);
   }
-  
+
   virtual void apply_binary_bool(bool_operation_t op, const variable_t &x,
                                  const variable_t &y,
                                  const variable_t &z) override {
@@ -2319,7 +2319,7 @@ public:
     m_base_dom = std::move(s.left_dom);
     m_array_map = std::move(s.array_map);
     m_cell_ghost_man = std::move(s.cell_ghost_man);
-    
+
     m_base_dom.backward_assign_bool_cst(lhs, rhs, s.right_dom);
   }
 
@@ -2331,7 +2331,7 @@ public:
     m_base_dom = std::move(s.left_dom);
     m_array_map = std::move(s.array_map);
     m_cell_ghost_man = std::move(s.cell_ghost_man);
-    
+
     m_base_dom.backward_assign_bool_ref_cst(lhs, rhs, s.right_dom);
   }
 
@@ -2343,7 +2343,7 @@ public:
     m_base_dom = std::move(s.left_dom);
     m_array_map = std::move(s.array_map);
     m_cell_ghost_man = std::move(s.cell_ghost_man);
-    
+
     m_base_dom.backward_assign_bool_var(lhs, rhs, is_not_rhs, s.right_dom);
   }
 
@@ -2355,7 +2355,7 @@ public:
     m_base_dom = std::move(s.left_dom);
     m_array_map = std::move(s.array_map);
     m_cell_ghost_man = std::move(s.cell_ghost_man);
-    
+
     m_base_dom.backward_apply_binary_bool(op, x, y, z, s.right_dom);
   }
 
@@ -2418,7 +2418,7 @@ public:
       }
     } else {
       interval_t ii = to_interval(i);
-      if (boost::optional<number_t> n = ii.singleton()) {
+      if (std::optional<number_t> n = ii.singleton()) {
         array_state next_as(as); // important to make the copy
         offset_map_t &offset_map = next_as.get_offset_map();
         offset_t o(static_cast<int64_t>(*n));
@@ -2542,7 +2542,7 @@ public:
       interval_t ii = to_interval(i);
       array_state next_as(as);
       offset_map_t &offset_map = next_as.get_offset_map();
-      boost::optional<number_t> n_opt = ii.singleton();
+      std::optional<number_t> n_opt = ii.singleton();
       if (n_opt &&
           (offset_map.get_number_cells() <
            crab_domain_params_man::get().array_adaptive_max_array_size())) {
@@ -2835,7 +2835,7 @@ public:
     m_base_dom = std::move(s.left_dom);
     m_array_map = std::move(s.array_map);
     m_cell_ghost_man = std::move(s.cell_ghost_man);
-       
+
     const array_state &as = lookup_array_state(a);
     if (as.is_smashed()) {
       CRAB_WARN("array_adaptive::backward_array_load not implemented if array "
@@ -2844,7 +2844,7 @@ public:
       // We use the forward invariant to extract the array index.
       // it's ok that invariant is not renamed here.
       interval_t ii = to_interval(i, invariant.get_content_domain());
-      if (boost::optional<number_t> n = ii.singleton()) {
+      if (std::optional<number_t> n = ii.singleton()) {
         array_state next_as(as);
         offset_map_t &om = next_as.get_offset_map();
         offset_t o(static_cast<int64_t>(*n));
@@ -2891,7 +2891,7 @@ public:
     m_base_dom = std::move(s.left_dom);
     m_array_map = std::move(s.array_map);
     m_cell_ghost_man = std::move(s.cell_ghost_man);
-    
+
     uint64_t e_sz = check_and_get_elem_size(elem_size);
     const array_state &as = lookup_array_state(a);
     if (as.is_smashed()) {
@@ -2903,7 +2903,7 @@ public:
       // We use the forward invariant to extract the array index.
       // it's ok to use "invariant" without being renamed.
       interval_t ii = to_interval(i, invariant.m_base_dom);
-      if (boost::optional<number_t> n = ii.singleton()) {
+      if (std::optional<number_t> n = ii.singleton()) {
         // -- Constant index and the store updated one single cell:
         // -- backward assign in the base domain.
         offset_t o(static_cast<int64_t>(*n));

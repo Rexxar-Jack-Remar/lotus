@@ -6,8 +6,7 @@
 #include <string>
 
 #include <boost/functional/hash.hpp>
-#include <boost/utility/string_view.hpp>
-#include <boost/version.hpp>
+#include <string_view>
 
 namespace ikos {
 namespace bignums_impl {
@@ -74,7 +73,7 @@ uint64_t* z_number::to_raw_data(size_t &num_words, bool &sign, bool order) {
   return (uint64_t*)mpz_export(nullptr, &num_words, (order? 1: -1),
 			       sizeof(uint64_t), 0, 0, _n);
 }
-  
+
 z_number::z_number(const std::string &s, unsigned base) {
   int res = mpz_init_set_str(_n, s.c_str(), base);
   if (res == -1) {
@@ -121,27 +120,20 @@ std::string z_number::get_str(unsigned base) const {
   bignums_impl::scoped_cstring res(mpz_get_str(0, base, _n));
   return std::string(res.m_str);
 }
-  
-std::size_t z_number::hash() const {  
+
+std::size_t z_number::hash() const {
   // Inspired by
   // https://www.boost.org/doc/libs/1_66_0/libs/multiprecision/doc/html/boost_multiprecision/tut/hash.html
   auto hash_val = [](const mpz_srcptr v) {
-    boost::string_view view(reinterpret_cast<char*>(v->_mp_d),
+    std::string_view view(reinterpret_cast<char*>(v->_mp_d),
 			    abs(v->_mp_size) * sizeof(mp_limb_t));
-#if BOOST_VERSION / 100 % 100 >= 74
-    // I don't know for sure which boost version started supporting
-    // direct hashing of boost::string_view.  I only know that 1.68
-    // didn't and 1.74 does for sure.
-    size_t result = boost::hash<boost::string_view>{}(view);
-#else    
-    size_t result = boost::hash_range(view.begin(), view.end());
-#endif     
+    size_t result = std::hash<std::string_view>{}(view);
     // produce different hashes for negative x
     if (v->_mp_size < 0) {
       result = ~result;
     }
-    return result;    
-  };  
+    return result;
+  };
   return hash_val(static_cast<mpz_srcptr>(_n));
 }
 
@@ -310,10 +302,10 @@ z_number z_number::operator^(z_number x) const {
   return res;
 }
 
-// left shift  
+// left shift
 z_number z_number::operator<<(z_number x) const {
   mpz_t mp_r;
-  mpz_init(mp_r);  
+  mpz_init(mp_r);
   // TODO: check for potential overflow
   mpz_mul_2exp(mp_r, _n, mpz_get_ui(x._n));
   z_number res = from_mpz_t(mp_r);
@@ -321,9 +313,9 @@ z_number z_number::operator<<(z_number x) const {
   return res;
 }
 
-// arithmetic right shift  
+// arithmetic right shift
 z_number z_number::operator>>(z_number x) const {
-  
+
   mpz_t mp_r;
   mpz_init(mp_r);
   // TODO: check for potential overflow
@@ -430,7 +422,7 @@ std::string q_number::get_str(unsigned base) const {
 
 std::size_t q_number::hash() const {
   // TOFIX: this needs to be faster.
-  return std::hash<std::string>{}(get_str());  
+  return std::hash<std::string>{}(get_str());
 }
 
 q_number q_number::operator+(q_number x) const {
@@ -591,7 +583,7 @@ bool q_number::operator>(q_number x) const { return mpq_cmp(_n, x._n) > 0; }
 
 bool q_number::operator>=(q_number x) const { return mpq_cmp(_n, x._n) >= 0; }
 
-// left shift  
+// left shift
 q_number q_number::operator<<(q_number x) const {
   auto to_z_number = [](q_number n) {
     z_number num = n.numerator();
@@ -602,11 +594,11 @@ q_number q_number::operator<<(q_number x) const {
       CRAB_ERROR("q_number cannot be converted to z_number without rounding in left shift");
     }
     return q;
-  };  
+  };
   mpq_t mp_r;
-  mpq_init(mp_r); 
+  mpq_init(mp_r);
   z_number shift = to_z_number(x);
-  // TODO: check for potential overflow  
+  // TODO: check for potential overflow
   mpq_mul_2exp(mp_r, _n, mpz_get_ui(shift._n));
   q_number res = from_mpq_t(mp_r);
   mpq_clear(mp_r);

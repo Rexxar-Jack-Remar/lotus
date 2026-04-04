@@ -2,9 +2,9 @@ cmake_minimum_required(VERSION 3.10)
 
 project(crab)
 
-if (CMAKE_SOURCE_DIR STREQUAL CMAKE_BINARY_DIR ) 
-  message (FATAL_ERROR 
-    "In-source builds are not allowed. Please clean your source tree and try again.")  
+if (CMAKE_SOURCE_DIR STREQUAL CMAKE_BINARY_DIR )
+  message (FATAL_ERROR
+    "In-source builds are not allowed. Please clean your source tree and try again.")
 endif()
 
 # Determine if this is top-level or embedded project
@@ -47,7 +47,7 @@ set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -std=c++11")
 if (CRAB_ENABLE_TESTS)
   #Setup CMake to run tests
   enable_testing()
-  
+
   ## Enforce these flags only when compiling our tests
   set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wall")
 
@@ -55,12 +55,12 @@ if (CRAB_ENABLE_TESTS)
      set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fsanitize=address -fno-omit-frame-pointer")
      message(STATUS "Crab: enabled Address Sanitizer")
    endif()
-   
+
   # Directory where all (binary) tests will be located
   # Binary tests do not go to install directory by default
   if (NOT TEST_DIR)
     set(TEST_DIR ${CMAKE_BINARY_DIR}/test-bin)
-  endif()  
+  endif()
 endif()
 
 # Save old CMAKE_FIND_LIBRARY_SUFFIXES
@@ -71,7 +71,7 @@ set(_CRAB_ORIG_CMAKE_FIND_LIBRARY_SUFFIXES ${CMAKE_FIND_LIBRARY_SUFFIXES})
 #set(CMAKE_FIND_LIBRARY_SUFFIXES .so .dylib .a)
 if (NOT CRAB_BUILD_LIBS_SHARED)
    set(CMAKE_FIND_LIBRARY_SUFFIXES ".a" ${CMAKE_FIND_LIBRARY_SUFFIXES})
-endif ()    
+endif ()
 
 if (CRAB_BUILD_LIBS_SHARED)
   set(_DYNAMIC_LIBS_EXC_STR "")
@@ -84,14 +84,14 @@ if (CRAB_BUILD_LIBS_SHARED)
   if(CRAB_USE_PPLITE)
     set(_DYNAMIC_LIBS_EXC_STR "${_DYNAMIC_LIBS_EXC_STR}\n  - except pplite")
   endif()
-  message (STATUS "Crab: libraries and dependencies are built dynamically ${_DYNAMIC_LIBS_EXC_STR}")  
+  message (STATUS "Crab: libraries and dependencies are built dynamically ${_DYNAMIC_LIBS_EXC_STR}")
   set(CRAB_LIBS_TYPE SHARED)
 else()
   set(_STATIC_LIBS_EXC_STR "")
   if(CRAB_USE_ELINA)
     set(_STATIC_LIBS_EXC_STR "${_STATIC_LIBS_EXC_STR}\n  - except elina")
   endif()
-  message (STATUS "Crab: libraries and dependencies are built statically ${_STATIC_LIBS_EXC_STR}")  
+  message (STATUS "Crab: libraries and dependencies are built statically ${_STATIC_LIBS_EXC_STR}")
   set(CRAB_LIBS_TYPE STATIC)
 endif ()
 
@@ -102,7 +102,7 @@ set(CMAKE_INSTALL_RPATH_USE_LINK_PATH TRUE)
 if(${CMAKE_SYSTEM_NAME} MATCHES "Darwin")
   # Mac OS X specific code
   set(CMAKE_MACOSX_RPATH TRUE)
-endif ()  
+endif ()
 if (NOT CMAKE_INSTALL_RPATH )
   set(CMAKE_INSTALL_RPATH "${CMAKE_INSTALL_PREFIX}/crab/lib")
 endif()
@@ -134,7 +134,7 @@ endif ()
 set(GMP_USE_STATIC_LIBS ON)
 if (CRAB_BUILD_LIBS_SHARED)
   set(GMP_USE_STATIC_LIBS OFF)
-endif ()  
+endif ()
 find_package(GMP REQUIRED)
 if (GMP_FOUND)
   include_directories (${GMP_INCLUDE_DIR})
@@ -191,7 +191,7 @@ if (CRAB_USE_LDD)
      set (LDD_ROOT ${INSTALL_DIR} CACHE FILEPATH "Forced location of ldd" FORCE)
      message (WARNING "Crab: no ldd found. Run \n\tcmake --build . --target ldd && cmake ${CMAKE_SOURCE_DIR}")
      # restore old CMAKE_FIND_LIBRARY_SUFFIXES
-     set(CMAKE_FIND_LIBRARY_SUFFIXES ${_CRAB_ORIG_CMAKE_FIND_LIBRARY_SUFFIXES})     
+     set(CMAKE_FIND_LIBRARY_SUFFIXES ${_CRAB_ORIG_CMAKE_FIND_LIBRARY_SUFFIXES})
      return()
   endif()
 endif ()
@@ -224,7 +224,7 @@ if (CRAB_USE_APRON)
     set (APRON_ROOT ${INSTALL_DIR} CACHE FILEPATH "Forced location of apron" FORCE)
     message (WARNING "Crab: no apron found. Run \n\tcmake --build . --target apron && cmake ${CMAKE_SOURCE_DIR}")
     # restore old CMAKE_FIND_LIBRARY_SUFFIXES
-    set(CMAKE_FIND_LIBRARY_SUFFIXES ${_CRAB_ORIG_CMAKE_FIND_LIBRARY_SUFFIXES})     
+    set(CMAKE_FIND_LIBRARY_SUFFIXES ${_CRAB_ORIG_CMAKE_FIND_LIBRARY_SUFFIXES})
     return()
   endif()
 endif ()
@@ -235,7 +235,7 @@ if (CRAB_USE_ELINA)
     include_directories (${ELINA_INCLUDE_DIR})
     set (ELINA_LIBS ${ELINA_LIBRARY})
     set (HAVE_ELINA TRUE)
-    if(${CMAKE_SYSTEM_NAME} MATCHES "Linux")    
+    if(${CMAKE_SYSTEM_NAME} MATCHES "Linux")
       set(CMAKE_EXE_LINKER_FLAGS "-Wl,--disable-new-dtags")
     endif()
   else()
@@ -243,7 +243,7 @@ if (CRAB_USE_ELINA)
     set (ELINA_ROOT ${INSTALL_DIR} CACHE FILEPATH "Forced location of elina" FORCE)
     message (WARNING "Crab: no elina found. Run \n\tcmake --build . --target elina && cmake ${CMAKE_SOURCE_DIR}")
     # restore old CMAKE_FIND_LIBRARY_SUFFIXES
-    set(CMAKE_FIND_LIBRARY_SUFFIXES ${_CRAB_ORIG_CMAKE_FIND_LIBRARY_SUFFIXES})         
+    set(CMAKE_FIND_LIBRARY_SUFFIXES ${_CRAB_ORIG_CMAKE_FIND_LIBRARY_SUFFIXES})
     return()
   endif()
 endif ()
@@ -251,9 +251,9 @@ endif ()
 
 if (CRAB_USE_LDD)
   set_target_properties(ldd PROPERTIES EXCLUDE_FROM_ALL ON)
-  message (STATUS "Crab: Boxes domain will be available")  
+  message (STATUS "Crab: Boxes domain will be available")
 else ()
-  message (STATUS "Crab: Boxes domain will NOT be available")  
+  message (STATUS "Crab: Boxes domain will NOT be available")
 endif ()
 
 if (CRAB_USE_APRON)
@@ -286,22 +286,22 @@ if (CRAB_ENABLE_STATS)
 else()
   set(CRAB_STATS FALSE)
 endif()
-    
+
 #------- Create CRAB_LIBS and CRAB_INCLUDE_DIRS for Crab clients -------#
 set (CRAB_DEPS_LIBS
-  ${LDD_LIBRARY} 
+  ${LDD_LIBRARY}
   ${PPLITE_LIBRARY}
   ${APRON_LIBRARY}
   ${FLINT_LIBRARY}
   ${ELINA_LIBRARY}
-  ${MPFR_LIBRARIES} 
+  ${MPFR_LIBRARIES}
   ${GMP_LIB})
 
 if (TopLevel)
   set (CRAB_LIBS Crab ${CRAB_DEPS_LIBS})
 else ()
   ## Propagate CRAB_LIBS and CRAB_INCLUDE_DIRS to parent
-  set (_CRAB_INCLUDE_DIRS 
+  set (_CRAB_INCLUDE_DIRS
        ${crab_SOURCE_DIR}/include
        ## crab config.h
        ${CMAKE_BINARY_DIR}/include )
@@ -318,9 +318,9 @@ else ()
      set (_CRAB_INCLUDE_DIRS ${_CRAB_INCLUDE_DIRS} ${ELINA_INCLUDE_DIR})
   endif ()
 
-  set(CRAB_LIBS Crab ${CRAB_DEPS_LIBS} PARENT_SCOPE)  
-  set(CRAB_INCLUDE_DIRS ${_CRAB_INCLUDE_DIRS} PARENT_SCOPE)  
-endif()  
+  set(CRAB_LIBS Crab ${CRAB_DEPS_LIBS} PARENT_SCOPE)
+  set(CRAB_INCLUDE_DIRS ${_CRAB_INCLUDE_DIRS} PARENT_SCOPE)
+endif()
 
 #------- Compile Crab library and optionally tests -----#
 include_directories(${crab_SOURCE_DIR}/include)
@@ -337,7 +337,7 @@ if (CRAB_ENABLE_TESTS)
 endif ()
 
 # restore old CMAKE_FIND_LIBRARY_SUFFIXES
-set(CMAKE_FIND_LIBRARY_SUFFIXES ${_CRAB_ORIG_CMAKE_FIND_LIBRARY_SUFFIXES})     
+set(CMAKE_FIND_LIBRARY_SUFFIXES ${_CRAB_ORIG_CMAKE_FIND_LIBRARY_SUFFIXES})
 
 
 ###----------------- INSTALL --------------------------####
@@ -348,23 +348,23 @@ install(DIRECTORY include/
 install(FILES ${CMAKE_BINARY_DIR}/include/crab/config.h DESTINATION crab/include/crab)
 
 if (CRAB_USE_LDD)
-  ExternalProject_Get_Property (ldd INSTALL_DIR)  
-  install(DIRECTORY ${INSTALL_DIR} DESTINATION .)         
+  ExternalProject_Get_Property (ldd INSTALL_DIR)
+  install(DIRECTORY ${INSTALL_DIR} DESTINATION .)
 endif()
 
 if (CRAB_USE_APRON)
-  ExternalProject_Get_Property (apron INSTALL_DIR)  
-  install(DIRECTORY ${INSTALL_DIR} DESTINATION .)          
+  ExternalProject_Get_Property (apron INSTALL_DIR)
+  install(DIRECTORY ${INSTALL_DIR} DESTINATION .)
 endif()
 
 if (CRAB_USE_PPLITE)
-  ExternalProject_Get_Property (pplite INSTALL_DIR)  
-  install(DIRECTORY ${INSTALL_DIR} DESTINATION .)          
+  ExternalProject_Get_Property (pplite INSTALL_DIR)
+  install(DIRECTORY ${INSTALL_DIR} DESTINATION .)
 endif()
 
 if (CRAB_USE_ELINA)
-  ExternalProject_Get_Property (elina INSTALL_DIR)  
-  install(DIRECTORY ${INSTALL_DIR} DESTINATION .)    
+  ExternalProject_Get_Property (elina INSTALL_DIR)
+  install(DIRECTORY ${INSTALL_DIR} DESTINATION .)
   if (NOT TopLevel)
     ## This is ugly fix so that seahorn and crab-llvm can find elina's
     ## shared libraries. It has to do with how CMAKE_INSTALL_RPATH is
@@ -372,7 +372,7 @@ if (CRAB_USE_ELINA)
     foreach(library ${ELINA_LIBRARY})
       get_filename_component(library_name ${library} NAME_WE)
       file(COPY ${library} DESTINATION ${CMAKE_INSTALL_PREFIX}/lib)
-    endforeach(library)	
+    endforeach(library)
   endif()
 endif ()
 
@@ -380,14 +380,14 @@ if (TopLevel)
    install(FILES LICENSE DESTINATION .)
    install(FILES README.md DESTINATION .)
    install(FILES IKOS_LICENSE.pdf DESTINATION .)
-endif () 
+endif ()
 
 
-# Print cmake command 
+# Print cmake command
 if (CRAB_ENABLE_TESTS)
   message(STATUS "Crab: cmake -DCMAKE_BUILD_TYPE=${CMAKE_BUILD_TYPE} -DCMAKE_INSTALL_PREFIX=${CMAKE_INSTALL_PREFIX} -DCRAB_USE_APRON=${CRAB_USE_APRON} -DCRAB_USE_PPLITE=${CRAB_USE_PPLITE} -DCRAB_USE_ELINA=${CRAB_USE_ELINA} -DCRAB_USE_LDD=${CRAB_USE_LDD} -DCRAB_BUILD_LIBS_SHARED=${CRAB_BUILD_LIBS_SHARED} -DCRAB_ENABLE_TESTS=${CRAB_ENABLE_TESTS} -DTEST_DIR=${TEST_DIR}")
 else()
   message(STATUS "Crab: cmake -DCMAKE_BUILD_TYPE=${CMAKE_BUILD_TYPE} -DCMAKE_INSTALL_PREFIX=${CMAKE_INSTALL_PREFIX} -DCRAB_USE_APRON=${CRAB_USE_APRON} -DCRAB_USE_PPLITE=${CRAB_USE_PPLITE} -DCRAB_USE_ELINA=${CRAB_USE_ELINA} -DCRAB_USE_LDD=${CRAB_USE_LDD} -DCRAB_BUILD_LIBS_SHARED=${CRAB_BUILD_LIBS_SHARED}")
-endif() 
+endif()
 
 

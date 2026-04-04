@@ -24,11 +24,11 @@ enum class check_kind {
 
 // Toy database to store invariants
 class checks_db {
-public:  
+public:
   using checks_map_t =
       std::map<crab::cfg::debug_info, std::vector<check_kind>>;
 private:
-  
+
   checks_map_t m_db;
   unsigned m_total_safe;
   unsigned m_total_err;
@@ -79,7 +79,7 @@ public:
   const checks_map_t& get_all_checks() const {
     return m_db;
   }
-  
+
   unsigned get_total_safe() const { return m_total_safe + m_total_unreach; }
 
   unsigned get_total_warning() const { return m_total_warn; }
@@ -421,7 +421,7 @@ protected:
       return;
     s.accept(&*this->m_abs_tr); // propagate m_inv to the next stmt
   }
-  
+
   virtual void check(make_ref_t &s) {
     if (!this->m_abs_tr)
       return;
@@ -433,7 +433,7 @@ protected:
       return;
     s.accept(&*this->m_abs_tr); // propagate m_inv to the next stmt
   }
-  
+
   virtual void check(load_from_ref_t &s) {
     if (!this->m_abs_tr)
       return;
@@ -536,9 +536,9 @@ public:
   virtual void visit(arr_load_t &s) override { check(s); }
   virtual void visit(region_init_t &s) override { check(s); }
   virtual void visit(region_copy_t &s) override { check(s); }
-  virtual void visit(region_cast_t &s) override { check(s); }  
+  virtual void visit(region_cast_t &s) override { check(s); }
   virtual void visit(make_ref_t &s) override { check(s); }
-  virtual void visit(remove_ref_t &s) override { check(s); }  
+  virtual void visit(remove_ref_t &s) override { check(s); }
   virtual void visit(load_from_ref_t &s) override { check(s); }
   virtual void visit(store_to_ref_t &s) override { check(s); }
   virtual void visit(gep_ref_t &s) override { check(s); }

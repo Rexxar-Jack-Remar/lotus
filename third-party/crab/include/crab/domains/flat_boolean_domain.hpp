@@ -36,7 +36,7 @@ public:
   using typename abstract_domain_t::variable_or_constant_t;
   using typename abstract_domain_t::variable_t;
   using typename abstract_domain_t::variable_vector_t;
-  using typename abstract_domain_t::variable_or_constant_vector_t;  
+  using typename abstract_domain_t::variable_or_constant_vector_t;
   using bool_t = boolean_value;
   using separate_domain_t = ikos::separate_domain<variable_t, boolean_value>;
   using iterator = typename separate_domain_t::iterator;
@@ -122,7 +122,7 @@ public:
     m_env = m_env | o.m_env;
     CRAB_LOG("flat-boolean", crab::outs() << *this << "\n");
   }
-  
+
   flat_boolean_domain_t
   operator&(const flat_boolean_domain_t &o) const override {
     crab::CrabStats::count(domain_name() + ".count.meet");
@@ -143,7 +143,7 @@ public:
     m_env = m_env & o.m_env;
     CRAB_LOG("flat-boolean", crab::outs() << *this << "\n");
   }
-  
+
 
   flat_boolean_domain_t
   operator||(const flat_boolean_domain_t &o) const override {
@@ -199,8 +199,8 @@ public:
     CRAB_LOG("flat-boolean", auto bx = m_env.at(x);
              crab::outs() << "weak_assign(" << x << "," << bx << ")\n");
   }
-  
-  
+
+
   void assign_bool_ref_cst(const variable_t &x,
                            const reference_constraint_t &cst) override {
     m_env -= x;
@@ -231,7 +231,7 @@ public:
              else crab::outs() << y;
              crab::outs() << " --->" << x << "=" << bx << "\n");
   }
-  
+
   void apply_binary_bool(bool_operation_t op, const variable_t &x,
                          const variable_t &y, const variable_t &z) override {
     crab::CrabStats::count(domain_name() + ".count.apply_binary_bool");
@@ -283,20 +283,20 @@ public:
 	  m_env.set(lhs, m_env.at(b2));
 	  return;
 	}
-	
-	
+
+
 	flat_boolean_domain_t inv2(*this);
 	inv2.assume_bool(cond, negate);
 	if (inv2.is_bottom()) {
 	  m_env.set(lhs, m_env.at(b1));
 	  return;
 	}
-	
+
 	m_env.set(lhs, m_env.at(b1) | m_env.at(b2));
       }
     }
   }
-  
+
   void set_bool(const variable_t &x, boolean_value v) { m_env.set(x, v); }
 
   boolean_value get_bool(const variable_t &x) const { return m_env.at(x); }
@@ -490,7 +490,7 @@ struct abstract_domain_traits<flat_boolean_domain<Number, VariableName>> {
 
 // Simple reduced product of the flat boolean domain with an arbitrary
 // abstract domain.
-// 
+//
 // REVISIT: this product domain should be specialized to a numerical
 // domain so that we don't need to support operations over reference
 // variables and constraints.
@@ -499,7 +499,7 @@ struct abstract_domain_traits<flat_boolean_domain<Number, VariableName>> {
 //    (1) when bvar := linear_constraint from non-boolean domain to boolean.
 //    (2) when bvar := reference_constraint from non-boolean domain to boolean.
 //    (3) when assume_bool(bvar) from boolean to non-boolean domain.
-// 
+//
 // The step (3) is quite weak. Very importantly, we don't trigger any
 // reduction from the non-boolean domain to the boolean domain with
 // assume(linear_constraint) or assume(reference_constraint).
@@ -524,18 +524,18 @@ struct abstract_domain_traits<flat_boolean_domain<Number, VariableName>> {
 //   b2 := (y>=0);
 //   b3 := b1 or b2;
 //   assume(b3); // we will miss that either x or y is non-negative.
-// 
+//
 // The reduction code also supports reference constraints:
-//     bvar := reference_constraint 
+//     bvar := reference_constraint
 //     ref_assume(bvar)
 //
 // However, note that if the flat_boolean_numerical_domain is part of
 // the base domain used by the region_domain then the following
 // abstract operations will never be called:
-// 
+//
 // - assign_bool_ref_cst: because region domain map reference
 //   variables to numerical ones.
-// - all region/reference operations 
+// - all region/reference operations
 //
 //
 template <typename Dom>
@@ -557,11 +557,11 @@ public:
   using typename abstract_domain_t::variable_or_constant_t;
   using typename abstract_domain_t::variable_t;
   using typename abstract_domain_t::variable_vector_t;
-  using typename abstract_domain_t::variable_or_constant_vector_t;  
+  using typename abstract_domain_t::variable_or_constant_vector_t;
   using bound_t = ikos::bound<number_t>;
 
 private:
-  
+
   using reduced_domain_product2_t =
       reduced_domain_product2<number_t, varname_t, bool_domain_t, Dom>;
   struct lincst_cmp {
@@ -578,19 +578,19 @@ private:
   using refcst_set_t = dual_set_domain<set_domain<reference_constraint_t, refcst_cmp>>;
   using bool_set_t = dual_set_domain<ikos::discrete_domain<variable_t>>;
   using invariance_domain_t = dual_set_domain<ikos::discrete_domain<variable_t>>;
-  using bool_to_lincons_env_t = ikos::separate_domain<variable_t, lincst_set_t>;  
+  using bool_to_lincons_env_t = ikos::separate_domain<variable_t, lincst_set_t>;
   using bool_to_refcons_env_t = ikos::separate_domain<variable_t, refcst_set_t>;
-  using bool_to_bools_env_t = ikos::separate_domain<variable_t, bool_set_t>; 
-  
+  using bool_to_bools_env_t = ikos::separate_domain<variable_t, bool_set_t>;
+
   // Reduced product of flat boolean domain and an arbitrary domain.
   reduced_domain_product2_t m_product;
-  /** 
+  /**
    * These specialized subdomains (m_bool_to_X) are used to remember
    * simple boolean combinations (mostly and's) of constraints in a
    * very local way (i.e., involving few basic blocks within the same
    * function). This allows to trigger some reduction once some
    * Booleans becomes true or false.
-   * 
+   *
    * REVISIT: a more systematic way would be to build these booleans
    * combinations of constraints as uninterpreted functions and
    * evaluate them later when Booleans are known to be true or false.
@@ -607,7 +607,7 @@ private:
    * statements b:= lin_cst or b:= ref_cst.  This allows us to decide
    * which constraints still hold at the time the reduction from
    * boolean variables to non-boolean ones is done. For instance,
-   *   
+   *
    *  a := x > y;
    *  // unchanged = {x,y}
    *  if (*) {
@@ -634,7 +634,7 @@ private:
     if (env.is_top() || env.is_bottom()) {
       return;
     }
-    
+
     std::vector<typename BoolEnv::value_type> worklist;
     for (auto it=env.begin(), et=env.end(); it!=et; ++it) {
       if (pred(it->second)) {
@@ -652,7 +652,7 @@ private:
     }
   }
 
-  
+
   template<class BoolToCstEnv>
   void propagate_assign_bool_var(BoolToCstEnv &env,
 				 const variable_t &x, const variable_t &y,
@@ -665,14 +665,14 @@ private:
 	// cst is either linear_constraint or reference_constraint
         auto cst = *(csts.begin());
         env.set(x, typename BoolToCstEnv::mapped_type(cst.negate()));
-      } else if (csts.size() > 1) { 
+      } else if (csts.size() > 1) {
 	// we do not negate multiple conjunctions because it would
 	// become a disjunction so we give up
         env -= x;
       }
     }
   }
-  
+
   // return true if cst's variables haven't been modified. As
   // side-effect, it adds cst into the non-boolean domain if the
   // returned value is true.
@@ -707,9 +707,9 @@ private:
 
   // Return true if cond evaluates definitely to true
   bool eval_true(const variable_t &cond) const {
-    return (m_product.first().get_bool(cond) == boolean_value::get_true());    
+    return (m_product.first().get_bool(cond) == boolean_value::get_true());
   }
-  
+
   template<class BoolToCstEnv>
   void bwd_reduction_assume_bool(BoolToCstEnv &env,
 				 const variable_t &x, bool is_negated) {
@@ -750,7 +750,7 @@ private:
   }
 
   /**
-   * Given lhs:= select(cond, b1, b2) 
+   * Given lhs:= select(cond, b1, b2)
    * if cond is true then
    *     lhs := b1
    * if cond is false then
@@ -758,7 +758,7 @@ private:
    **/
   void fwd_reduction_select_bool(const variable_t &lhs, const variable_t &cond,
 				 const variable_t &b1, const variable_t &b2) {
-    if (eval_true(cond)) {     
+    if (eval_true(cond)) {
       m_bool_to_lincsts.set(lhs, m_bool_to_lincsts.at(b1));
       m_bool_to_refcsts.set(lhs, m_bool_to_refcsts.at(b1));
       m_bool_to_bools.set(lhs, m_bool_to_bools.at(b1) & bool_set_t(b1));
@@ -770,7 +770,7 @@ private:
       m_bool_to_lincsts -= lhs;
       m_bool_to_refcsts -= lhs;
       m_bool_to_bools -= lhs;
-    } 
+    }
   }
 
 
@@ -785,7 +785,7 @@ private:
    **/
   template<class BoolToCstEnv>
   void propagate_select_bool(BoolToCstEnv &env,
-			     const boolean_value &b1_val, const boolean_value &b2_val,   
+			     const boolean_value &b1_val, const boolean_value &b2_val,
 			     const variable_t &lhs, const variable_t &cond,
 			     const variable_t &b1, const variable_t &b2) {
     // lhs := true false true
@@ -805,7 +805,7 @@ private:
       }
     }
   }
-  
+
   /** End helpers to update subdomains **/
 
   /**
@@ -821,12 +821,12 @@ private:
       for (auto const& v:  bool_vars) {
 	m_product.first().assume_bool(v, is_negated);
 	m_bool_to_lincsts.set(x, m_bool_to_lincsts.at(x) & m_bool_to_lincsts.at(v));
-	m_bool_to_refcsts.set(x, m_bool_to_refcsts.at(x) & m_bool_to_refcsts.at(v));	
+	m_bool_to_refcsts.set(x, m_bool_to_refcsts.at(x) & m_bool_to_refcsts.at(v));
       }
 
       bwd_reduction_assume_bool(m_bool_to_lincsts, x, is_negated);
       bwd_reduction_assume_bool(m_bool_to_refcsts, x, is_negated);
-      
+
     } else {
       /**
        * The kind of facts that we keep track in m_bool_to_lincsts
@@ -838,14 +838,14 @@ private:
        * that C or b' are false.
        *
        * TODO: Missing propagation.
-       * 
+       *
        * However, if we know that b' is false and we have inferred the
        * fact "if b is true then b' is true" then we can conclude that
        * b must be false.
        **/
     }
   }
-  
+
 
   /**
    * Reduction from the non-boolean domain to the flat boolean domain.
@@ -855,19 +855,19 @@ private:
     if (cst.is_tautology()) {
       m_product.first().set_bool(x, boolean_value::get_true());
     } else if (cst.is_contradiction()) {
-      m_product.first().set_bool(x, boolean_value::get_false());	
+      m_product.first().set_bool(x, boolean_value::get_false());
     } else {
       if (m_product.second().entails(cst)) {
 	// -- definitely true
 	m_product.first().set_bool(x, boolean_value::get_true());
       } else if (m_product.second().entails(cst.negate())) {
 	// -- definitely false
-	m_product.first().set_bool(x, boolean_value::get_false());	
+	m_product.first().set_bool(x, boolean_value::get_false());
       } else {
 	// -- inconclusive
 	m_product.first().set_bool(x, boolean_value::top());
       }
-      
+
       m_bool_to_lincsts.set(x, lincst_set_t(cst));
       // We assume all variables in cst are unchanged unless the
       // opposite is proven
@@ -880,13 +880,13 @@ private:
 
   /**
    * Reduction from the non-boolean domain to the flat boolean domain.
-   */  
+   */
   void reduce_ref_cst_to_bool(const variable_t &x,
 			      const reference_constraint_t &cst) {
     if (cst.is_tautology()) {
       m_product.first().set_bool(x, boolean_value::get_true());
     } else if (cst.is_contradiction()) {
-      m_product.first().set_bool(x, boolean_value::get_false());	
+      m_product.first().set_bool(x, boolean_value::get_false());
     } else {
       Dom inv1(m_product.second());
       inv1.ref_assume(cst);
@@ -915,7 +915,7 @@ private:
 
   }
 
-  
+
   flat_boolean_numerical_domain(reduced_domain_product2_t &&product,
                                 bool_to_lincons_env_t &&bool_to_lincsts,
 				bool_to_refcons_env_t &&bool_to_refcsts,
@@ -1026,7 +1026,7 @@ public:
     m_bool_to_lincsts = m_bool_to_lincsts | other.m_bool_to_lincsts;
     m_bool_to_refcsts = m_bool_to_refcsts | other.m_bool_to_refcsts;
     m_bool_to_bools = m_bool_to_bools | other.m_bool_to_bools;
-    
+
     m_unchanged_vars = m_unchanged_vars | other.m_unchanged_vars;
     CRAB_LOG("flat-boolean",
              crab::outs() << "*** After join ***\n"
@@ -1035,7 +1035,7 @@ public:
 	                  << "\tlinear constraints for reduction=" << m_bool_to_lincsts << "\n"
 	                  << "\tref constraints for reduction=" << m_bool_to_refcsts << "\n"
 	                  << "\tBooleans for reduction=" << m_bool_to_bools << "\n";);
-    
+
   }
 
   bool_num_domain_t operator|(const bool_num_domain_t &other) const override {
@@ -1069,7 +1069,7 @@ public:
     m_bool_to_bools = m_bool_to_bools & other.m_bool_to_bools;
     m_unchanged_vars = m_unchanged_vars & other.m_unchanged_vars;
   }
-  
+
   bool_num_domain_t operator||(const bool_num_domain_t &other) const override {
     return bool_num_domain_t(m_product || other.m_product,
                              m_bool_to_lincsts || other.m_bool_to_lincsts,
@@ -1119,13 +1119,13 @@ public:
     m_product.weak_assign(x, e);
     m_unchanged_vars -= x;
   }
-  
+
   void select(const variable_t &lhs, const linear_constraint_t &cond,
 	      const linear_expression_t &e1,  const linear_expression_t &e2) override {
     m_product.select(lhs, cond, e1, e2);
     m_unchanged_vars -= lhs;
-    
-  }  
+
+  }
   void backward_assign(const variable_t &x, const linear_expression_t &e,
                        const bool_num_domain_t &invariant) override {
     m_product.backward_assign(x, e, invariant.m_product);
@@ -1217,7 +1217,7 @@ public:
   bool entails(const linear_constraint_t &cst) const override {
     return m_product.second().entails(cst);
   }
-  
+
   void set(const variable_t &x, interval_t intv) {
     // reduced_domain_product2 does not define set method
     m_product.second().set(x, intv); // only on the numerical domain
@@ -1230,7 +1230,7 @@ public:
     interval_t isecond = m_product.second()[v];
     if (bv.is_bottom() || isecond.is_bottom()) {
       return interval_t::bottom();
-    }     
+    }
     if (bv.is_true()) {
       return interval_t(number_t(1)) & isecond;
     } else if (bv.is_false()) {
@@ -1255,7 +1255,7 @@ public:
       return isecond;
     }
   }
-  
+
   void operator-=(const variable_t &v) override {
     m_product -= v;
     if (v.get_type().is_bool()) {
@@ -1269,16 +1269,16 @@ public:
     transform_if(m_bool_to_bools,
 		 [&v](const bool_set_t &s) { return s.at(v);},
 		 [&v](bool_set_t &s) { s -= v;});
-    
+
     // We should also remove any constraint in
     // m_bool_to_lincsts/m_bool_to_refcsts that involves v.  We don't
     // do it because v is marked as possibly changed so those
     // constraints will not be considered anyway.
-    
+
   }
 
   // boolean_operators
-    
+
   void assign_bool_cst(const variable_t &x,
                        const linear_constraint_t &cst) override {
     crab::CrabStats::count(domain_name() + ".count.assign_bool_cst");
@@ -1311,7 +1311,7 @@ public:
 
     m_product.assign_bool_ref_cst(x, cst);
     reduce_ref_cst_to_bool(x, cst);
-    
+
     CRAB_LOG("flat-boolean", auto bx = m_product.first().get_bool(x);
              crab::outs() << "*** Reduction non-boolean --> boolean\n "
                           << "\t" << x << " := (" << cst << ")\n"
@@ -1321,7 +1321,7 @@ public:
                           << "\n";);
   }
 
-				 
+
   void assign_bool_var(const variable_t &x, const variable_t &y,
                        bool is_negated) override {
     crab::CrabStats::count(domain_name() + ".count.assign_bool_var");
@@ -1350,7 +1350,7 @@ public:
   }
 
   DEFAULT_WEAK_BOOL_ASSIGN(bool_num_domain_t)
-  
+
   void apply_binary_bool(bool_operation_t op, const variable_t &x,
                          const variable_t &y, const variable_t &z) override {
     crab::CrabStats::count(domain_name() + ".count.apply_binary_bool");
@@ -1401,7 +1401,7 @@ public:
     if (is_bottom()) {
       return;
     }
-    
+
     m_product.assume_bool(x, is_negated);
 
     CRAB_LOG("flat-boolean",
@@ -1413,13 +1413,13 @@ public:
 	                  << "\tlinear constraints for reduction=" << m_bool_to_lincsts << "\n"
 	                  << "\tref constraints for reduction=" << m_bool_to_refcsts << "\n"
 	                  << "\tBooleans for reduction=" << m_bool_to_bools << "\n";);
-    
+
     if (is_bottom()) {
-      return; 
+      return;
     }
 
     reduce_bool_to_csts(x, is_negated);
-    
+
     CRAB_LOG("flat-boolean",
              crab::outs() << "\tAfter reduction=" << m_product << "\n";);
   }
@@ -1454,7 +1454,7 @@ public:
                           << "\tunchanged vars=" << m_unchanged_vars << "\n"
 	                  << "\tlinear constraints for reduction=" << m_bool_to_lincsts << "\n"
 	                  << "\tref constraints for reduction=" << m_bool_to_refcsts << "\n"
-	                  << "\tBooleans for reduction=" << m_bool_to_bools << "\n";);	      
+	                  << "\tBooleans for reduction=" << m_bool_to_bools << "\n";);
   }
 
   void backward_assign_bool_cst(const variable_t &lhs,
@@ -1538,7 +1538,7 @@ public:
         m_product.second().assign(dst, number_t(0));
       } else {
 	m_product.second().apply(op, dst, src);
-	
+
         // The flat boolean domain shouldn't know whether we try to
         // model integers faithfully or not (i.e., obeying
         // machine-arithmetic laws). This code should probably go to
@@ -1676,7 +1676,7 @@ public:
                    const variable_t &dst_reg) override {
     m_product.region_cast(src_reg, dst_reg);
   }
-  
+
   void ref_make(const variable_t &ref, const variable_t &reg,
 		const variable_or_constant_t &size,
 		const allocation_site &as) override {
@@ -1686,13 +1686,13 @@ public:
     override {
     m_product.ref_free(reg, ref);
   }
-  
+
   void ref_load(const variable_t &ref, const variable_t &reg,
                 const variable_t &res) override {
     m_product.ref_load(ref, reg, res);
     if (res.get_type().is_integer() || res.get_type().is_real()) {
       m_unchanged_vars -= res;
-    }    
+    }
   }
   void ref_store(const variable_t &ref, const variable_t &reg,
                  const variable_or_constant_t &val) override {
@@ -1718,9 +1718,9 @@ public:
   void select_ref(const variable_t &lhs_ref, const variable_t &lhs_rgn,
 		  const variable_t &cond,
 		  const variable_or_constant_t &ref1,
-		  const boost::optional<variable_t> &rgn1,
+		  const std::optional<variable_t> &rgn1,
 		  const variable_or_constant_t &ref2,
-		  const boost::optional<variable_t> &rgn2) override {
+		  const std::optional<variable_t> &rgn2) override {
     m_product.select_ref(lhs_ref, lhs_rgn, cond, ref1, rgn1, ref2, rgn2);
   }
   boolean_value is_null_ref(const variable_t &ref) override {
@@ -1734,7 +1734,7 @@ public:
 		std::vector<uint64_t> &out) override {
     return m_product.get_tags(rgn, ref, out);
   }
-  
+
   void write(crab_os &o) const override { m_product.write(o); }
 
   linear_constraint_system_t to_linear_constraint_system() const override {
@@ -1783,7 +1783,7 @@ public:
     }
 
     m_product.forget(variables);
-    
+
     for (const variable_t &v : variables) {
       if (v.get_type().is_bool()) {
 	m_bool_to_lincsts -= v;
@@ -1799,7 +1799,7 @@ public:
 		   for (auto const& v: variables) {
 		     if (s.at(v)) {
 		       return true;
-		     } 
+		     }
 		   }
 		   return false;
 		 },
@@ -1847,7 +1847,7 @@ public:
     if (is_bottom() || is_top()) {
       return;
     }
-    
+
     assert(from.size() == to.size());
     m_product.rename(from, to);
 
@@ -1874,7 +1874,7 @@ public:
       }
     }
   }
-  
+
   void expand(const variable_t &x, const variable_t &new_x) override {
     crab::CrabStats::count(domain_name() + ".count.expand");
     crab::ScopedCrabStats __st__(domain_name() + ".expand");
@@ -1896,7 +1896,7 @@ public:
     }
   }
 }; // class flat_boolean_numerical_domain
-  
+
 template <typename Num>
 struct abstract_domain_traits<flat_boolean_numerical_domain<Num>> {
   using number_t = typename Num::number_t;

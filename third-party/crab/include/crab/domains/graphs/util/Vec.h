@@ -79,7 +79,7 @@ public:
     o.sz = 0;
     o.cap = 0;
   }
-  
+
   vec<T> &operator=(vec<T> &&o) {
     if (this != &o) {
       clear(true);
@@ -114,7 +114,7 @@ public:
     cap = 0;
     return ret;
   }
-  
+
   operator T *(void) { return data; } // (unsafe but convenient)
   operator const T *(void)const { return data; }
 
@@ -144,7 +144,7 @@ public:
     new (&data[sz]) T();
     sz++;
   }
-  
+
   // void   push  (const T& elem)     { if (sz == cap) { cap = imax(2,
   // (cap*3+1)>>1); data = (T*)realloc(data, cap * sizeof(T)); } new (&data[sz])
   // T(elem); sz++; }
@@ -163,7 +163,7 @@ public:
   const T &operator[](int index) const { return data[index]; }
   T &operator[](int index) { return data[index]; }
   bool empty() const { return sz == 0;}
-  void push_back(const T &elem) { push(elem);} 
+  void push_back(const T &elem) { push(elem);}
   const T &back(void) const { return last(); }
   T &back(void) { return last(); }
   void pop_back(void) { return pop(); }

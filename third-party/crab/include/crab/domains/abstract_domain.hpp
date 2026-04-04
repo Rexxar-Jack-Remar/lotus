@@ -13,12 +13,12 @@
 namespace crab {
 
 using allocation_site = crab::tag;
-  
+
 namespace domains {
 
 template <class Dom> struct abstract_domain_traits;
 template <class Number, class VariableName> class abstract_domain_results_api;
-  
+
 /**
  * All abstract domains must derive from the abstract_domain_api class
  * and expose publicly all its public typedef's.
@@ -50,10 +50,10 @@ template <class Number, class VariableName> class abstract_domain_results_api;
  * (3) (forward and backward) Boolean operations
  * (4) (only forward) Region and reference operations
  * (5) (forward and backward) Array operations
- * 
+ *
  * Where forward (backward) means forward (backward) semantics. The
  * abstract_domain_api API doesn't provide backward versions for (4)
- * but it should. 
+ * but it should.
  **/
 template <class Dom> class abstract_domain_api:
   public abstract_domain_results_api<typename abstract_domain_traits<Dom>::number_t,
@@ -140,13 +140,13 @@ public:
   // if(cond) lhs := e1 else lhs := e2
   virtual void select(const variable_t &lhs, const linear_constraint_t &cond,
 		      const linear_expression_t &e1,  const linear_expression_t &e2) = 0;
-  
+
   /**************************** Boolean operations ****************************/
   // lhs := rhs
   virtual void assign_bool_cst(const variable_t &lhs,
-                               const linear_constraint_t &rhs) = 0;  
+                               const linear_constraint_t &rhs) = 0;
   virtual void assign_bool_ref_cst(const variable_t &lhs,
-                                   const reference_constraint_t &rhs) = 0; 
+                                   const reference_constraint_t &rhs) = 0;
   // lhs := not(rhs) if is_not_rhs
   // lhs := rhs      otherwise
   virtual void assign_bool_var(const variable_t &lhs, const variable_t &rhs,
@@ -170,7 +170,7 @@ public:
   // lhs, cond, b1, and b2 are boolean variables
   virtual void select_bool(const variable_t &lhs, const variable_t &cond,
 			   const variable_t &b1, const variable_t &b2) = 0;
-  
+
   /**************************** Array operations *****************************/
   // make a fresh array with contents a[j] initialized to val such that
   // j \in [lb_idx,ub_idx] and j % elem_size == val.
@@ -201,7 +201,7 @@ public:
   virtual void array_assign(const variable_t &a, const variable_t &b) = 0;
 
   /***************** Regions and reference operations *****************/
-  // Initialize a region 
+  // Initialize a region
   virtual void region_init(const variable_t &reg) = 0;
   // Make a copy of a region
   virtual void region_copy(const variable_t &lhs_reg,
@@ -209,13 +209,13 @@ public:
   // Cast between regions of different types
   virtual void region_cast(const variable_t &src_reg,
                            const variable_t &dst_reg) = 0;
-  // Create a new reference ref associated with as within region reg 
+  // Create a new reference ref associated with as within region reg
   virtual void ref_make(const variable_t &ref, const variable_t &reg,
 			/* size of the allocation in bytes */
 			const variable_or_constant_t &size,
 			/* identifier for the allocation site */
 			const allocation_site &as) = 0;
-  // Remove a reference ref within region reg 
+  // Remove a reference ref within region reg
   virtual void ref_free(const variable_t &reg, const variable_t &ref) = 0;
   // Read the content of reference ref within reg. The content is
   // stored in res.
@@ -229,7 +229,7 @@ public:
   // The reference ref2 is created by adding offset to ref1.
   virtual void ref_gep(const variable_t &ref1, const variable_t &reg1,
                        const variable_t &ref2, const variable_t &reg2,
-                       const linear_expression_t &offset) = 0; 
+                       const linear_expression_t &offset) = 0;
   // Add constraints between references
   virtual void ref_assume(const reference_constraint_t &cst) = 0;
   // Convert a reference to an integer variable
@@ -244,10 +244,10 @@ public:
   virtual void select_ref(const variable_t &lhs_ref, const variable_t &lhs_rgn,
 			  const variable_t &cond,
 			  const variable_or_constant_t &ref1,
-			  const boost::optional<variable_t> &rgn1,
+			  const std::optional<variable_t> &rgn1,
 			  const variable_or_constant_t &ref2,
-			  const boost::optional<variable_t> &rgn2) = 0;
-  
+			  const std::optional<variable_t> &rgn2) = 0;
+
   /**************************** Backward numerical operations ***************/
   // x = y op z
   // Substitute x with y op z in the abstract value
@@ -321,7 +321,7 @@ public:
 
   // Similar to operator[] but it doesn't modify the internal state.
   virtual interval_t at(const variable_t &v) const = 0;
-  
+
   // Convert the abstract state into a conjunction of linear constraints.
   virtual linear_constraint_system_t to_linear_constraint_system() const = 0;
 
@@ -377,20 +377,20 @@ public:
   }
 };
 
-/* 
+/*
  * Extend abstract_domain_api to answer specialized queries which are
  * not possible by abstract_domain_api methods such as operator[],
  * to_linear_constraint_system and
  * to_disjunctive_linear_constraint_system.
  */
-template<class Number, class VariableName>  
+template<class Number, class VariableName>
 class abstract_domain_results_api {
 public:
   using number_t = Number;
   using variable_t = variable<Number, VariableName>;
 
   virtual ~abstract_domain_results_api() {}
-  
+
   // Return a 3-valued boolean about whether the reference variable
   // ref is null.
   virtual boolean_value is_null_ref(const variable_t &ref) = 0;
@@ -406,12 +406,12 @@ public:
   // return false then nothing is known about its tags.
   virtual bool get_tags(const variable_t &rgn, const variable_t &ref,
 			std::vector<uint64_t> &out) = 0;
-  
+
 };
 
 
 #include "./abstract_domain_macros.def"
-  
+
 } // end namespace domains
 } // end namespace crab
 

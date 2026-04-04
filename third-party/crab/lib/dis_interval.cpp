@@ -15,7 +15,7 @@ z_dis_interval_t trim_interval(const z_dis_interval_t &x,
   if (x.is_bottom())
     return x;
 
-  boost::optional<z_number> s = y.singleton();
+  std::optional<z_number> s = y.singleton();
   if (!s)
     return x;
   z_number c = *s;

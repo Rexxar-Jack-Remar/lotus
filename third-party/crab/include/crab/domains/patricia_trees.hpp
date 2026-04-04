@@ -47,7 +47,7 @@
 
 #include <algorithm>
 #include <boost/iterator/iterator_facade.hpp>
-#include <boost/optional.hpp>
+#include <optional>
 #include <memory>
 #include <type_traits>
 #include <vector>
@@ -59,15 +59,15 @@ public:
   virtual bool leq(const Value &, const Value &) = 0;
 
   // True if the default value is the top element for the partial
-  // order (false if it is bottom)  
-  virtual bool default_is_top() = 0; 
+  // order (false if it is bottom)
+  virtual bool default_is_top() = 0;
 
   virtual ~partial_order() {}
 };
 
 template <typename Value> class unary_op {
 public:
-  virtual boost::optional<Value> apply(const Value &) = 0;
+  virtual std::optional<Value> apply(const Value &) = 0;
 
   virtual ~unary_op() {}
 };
@@ -78,21 +78,21 @@ public:
   // If first element of the result_type is true then bottom and
   // ignore second element. Otherwise, if second element of
   // result_type is empty then top. Otherwise, the value stored in the
-  // second element of the pair.  
-  using result_type = std::pair<bool, boost::optional<Value>>; 
+  // second element of the pair.
+  using result_type = std::pair<bool, std::optional<Value>>;
 
   virtual ~binary_op() {}
-  
+
   // Given two trees t1 and t2, v1 (v2) is the value associated to key
   // k in t1 (t2). This operation returns a new value from v1 and v2.
   //
   // The operation is idempotent: apply(_, x, x) = x
   virtual result_type apply(const Key &k, const Value &v1, const Value &v2) = 0;
-  
+
   // True if the default value is absorbing (false if it is neutral)
-  virtual bool default_is_absorbing() = 0;    
+  virtual bool default_is_absorbing() = 0;
 };
-  
+
 namespace patricia_trees_impl {
 template <typename Key, typename Value, typename ValueEqual> class tree;
 } // end namespace patricia_trees_impl
@@ -125,7 +125,7 @@ public:
     friend class patricia_tree<Key, Value, ValueEqual>;
 
     typename tree_t::iterator _it;
-    
+
     iterator(tree_ptr t) : _it(t) {}
 
     void increment() { ++this->_it; }
@@ -142,9 +142,9 @@ public:
   }; // class iterator
 
   class insert_op : public binary_op_t {
-    std::pair<bool, boost::optional<Value>>
+    std::pair<bool, std::optional<Value>>
     apply(const Key & /*key*/, const Value & /* old_value */, const Value &new_value) override {
-      return {false, boost::optional<Value>(new_value)};
+      return {false, std::optional<Value>(new_value)};
     }
     bool default_is_absorbing() override { return false; }
   }; // class insert_op
@@ -171,11 +171,11 @@ public:
 
   iterator end() const { return iterator(); }
 
-  boost::optional<Value> lookup(const Key &key) const {
+  std::optional<Value> lookup(const Key &key) const {
     if (this->_tree) {
       return this->_tree->lookup(key);
     } else {
-      return boost::optional<Value>();
+      return std::optional<Value>();
     }
   }
 
@@ -186,7 +186,7 @@ public:
       return nullptr;
     }
   }
- 
+
   bool merge_with(const patricia_tree_t &t, binary_op_t &op) {
     std::pair<bool, tree_ptr> res;
     res = tree_t::merge(this->_tree, t._tree, op, true);
@@ -198,7 +198,7 @@ public:
     }
   }
 
- 
+
   void insert(const Key &key, const Value &value) {
     insert_op op;
     std::pair<bool, tree_ptr> res;
@@ -237,22 +237,22 @@ public:
 private:
 
   class union_op : public binary_op_t {
-    virtual std::pair<bool, boost::optional<bool>>
+    virtual std::pair<bool, std::optional<bool>>
     apply(const Element &, const bool & /* x */, const bool & /* y */) override {
-      return {false, boost::optional<bool>(true)};
+      return {false, std::optional<bool>(true)};
     };
 
     virtual bool default_is_absorbing() override { return false; }
-  }; 
+  };
 
   class intersection_op : public binary_op_t {
-    virtual std::pair<bool, boost::optional<bool>>
+    virtual std::pair<bool, std::optional<bool>>
     apply(const Element &, const bool & /* x */, const bool & /* y */) override {
-      return {false, boost::optional<bool>(true)};
+      return {false, std::optional<bool>(true)};
     };
 
     virtual bool default_is_absorbing() override { return true; }
-  }; 
+  };
 
   class subset_po : public partial_order_t {
     virtual bool leq(const bool & /* x */, const bool & /* y */) override {
@@ -260,13 +260,13 @@ private:
     };
 
     virtual bool default_is_top() override { return false; }
-  }; 
+  };
 
-  
+
   patricia_tree_t _tree;
 
   patricia_tree_set(patricia_tree_t &&t) : _tree(std::move(t)) {}
-  
+
   patricia_tree_t do_union(patricia_tree_t t1,
                            const patricia_tree_t &t2) const {
     union_op o;
@@ -291,14 +291,14 @@ private:
     _tree.merge_with(t, o);
   }
 
-  
+
 public:
   class iterator
       : public boost::iterator_facade<iterator, Element,
                                       boost::forward_traversal_tag, Element> {
     friend class boost::iterator_core_access;
     friend class patricia_tree_set<Element>;
-    
+
     typename patricia_tree_t::iterator _it;
     iterator(patricia_tree_t t) : _it(t) {}
 
@@ -313,7 +313,7 @@ public:
 
     iterator(const patricia_tree_set_t &ptset) : _it(ptset._tree) {}
   }; // class iterator
-  
+
   patricia_tree_set() {}
 
   patricia_tree_set(const Element &e) { this->_tree.insert(e, true); }
@@ -333,7 +333,7 @@ public:
   iterator end() const { return iterator(); }
 
   bool operator[](const Element &x) const {
-    boost::optional<bool> r = this->_tree.lookup(x);
+    std::optional<bool> r = this->_tree.lookup(x);
     if (!r)
       return false;
     else
@@ -464,7 +464,7 @@ public:
   };
 
   static tree_ptr make_node(index_t, index_t, tree_ptr, tree_ptr);
-  static tree_ptr make_leaf(const Key &, const Value &);  
+  static tree_ptr make_leaf(const Key &, const Value &);
   static tree_ptr join(tree_ptr t0, tree_ptr t1);
   static std::pair<bool, tree_ptr> merge(tree_ptr, tree_ptr, binary_op_t &, bool);
   static std::pair<bool, tree_ptr> insert(tree_ptr, const Key &, const Value &,
@@ -472,9 +472,9 @@ public:
   static tree_ptr transform(tree_ptr, unary_op_t &);
   static tree_ptr remove(tree_ptr, const Key &);
   static bool compare(tree_ptr, tree_ptr, partial_order_t &, bool);
-  virtual boost::optional<Value> lookup(const Key &) const = 0;
+  virtual std::optional<Value> lookup(const Key &) const = 0;
   virtual const Value *find(const Key &) const = 0;
-  
+
   virtual std::size_t size() const = 0;
   virtual bool is_leaf() const = 0;
   virtual binding_t binding() const = 0;
@@ -482,7 +482,7 @@ public:
   virtual tree_ptr right_branch() const = 0;
   virtual index_t prefix() const = 0;
   virtual index_t branching_bit() const = 0;
-  
+
   bool is_node() const { return !is_leaf(); }
 
   virtual ~tree() {}
@@ -493,10 +493,10 @@ public:
     friend class boost::iterator_core_access;
     using branching_t = std::pair<tree_ptr, int>;
     using branching_stack_t = std::vector<branching_t>;
-    
+
     tree_ptr _current;
     branching_stack_t _stack;
-    
+
     void look_for_next_leaf(tree_ptr t) {
       if (t) {
         if (t->is_leaf()) {
@@ -567,7 +567,7 @@ public:
         CRAB_ERROR("Patricia tree: trying to dereference an empty iterator");
       }
     }
-    
+
   public:
     iterator() {}
 
@@ -624,18 +624,18 @@ public:
 
   virtual tree_ptr right_branch() const override { return this->_right_branch; }
 
-  virtual boost::optional<Value> lookup(const Key &key) const override {
+  virtual std::optional<Value> lookup(const Key &key) const override {
     if (key.index() <= this->_prefix) {
       if (this->_left_branch) {
         return this->_left_branch->lookup(key);
       } else {
-        return boost::optional<Value>();
+        return std::optional<Value>();
       }
     } else {
       if (this->_right_branch) {
         return this->_right_branch->lookup(key);
       } else {
-        return boost::optional<Value>();
+        return std::optional<Value>();
       }
     }
   }
@@ -694,11 +694,11 @@ public:
     CRAB_ERROR("Patricia tree: trying to call right_branch() on a leaf");
   }
 
-  virtual boost::optional<Value> lookup(const Key &key_) const override {
+  virtual std::optional<Value> lookup(const Key &key_) const override {
     if (this->_key.index() == key_.index()) {
-      return boost::optional<Value>(this->_value);
+      return std::optional<Value>(this->_value);
     } else {
-      return boost::optional<Value>();
+      return std::optional<Value>();
     }
   }
 
@@ -770,7 +770,7 @@ tree<Key, Value, ValueEqual>::insert(
   using tree_ptr = typename tree<Key, Value, ValueEqual>::ptr;
   tree_ptr nil;
   std::pair<bool, tree_ptr> res, res_lb, res_rb;
-  std::pair<bool, boost::optional<Value>> new_value;
+  std::pair<bool, std::optional<Value>> new_value;
   std::pair<bool, tree_ptr> bottom = {true, nil};
   if (t) {
     if (t->is_node()) {
@@ -895,7 +895,7 @@ tree<Key, Value, ValueEqual>::transform(
     } else {
       binding_t b = t->binding();
       const Value &value = b.second;
-      boost::optional<Value> new_value = op.apply(value);
+      std::optional<Value> new_value = op.apply(value);
       if (new_value) {
         ValueEqual eq;
         if (eq(*new_value, value)) {
@@ -911,7 +911,7 @@ tree<Key, Value, ValueEqual>::transform(
     return t;
   }
 }
-  
+
 template <typename Key, typename Value, typename ValueEqual>
 typename tree<Key, Value, ValueEqual>::ptr tree<Key, Value, ValueEqual>::remove(
     typename tree<Key, Value, ValueEqual>::ptr t, const Key &key_) {
@@ -972,7 +972,7 @@ tree<Key, Value, ValueEqual>::merge(
   using tree_ptr = typename tree<Key, Value, ValueEqual>::ptr;
   tree_ptr nil;
   std::pair<bool, tree_ptr> res, res_lb, res_rb;
-  std::pair<bool, boost::optional<Value>> new_value;
+  std::pair<bool, std::optional<Value>> new_value;
   std::pair<bool, tree_ptr> bottom = {true, nil};
   if (s) {
     if (t) {

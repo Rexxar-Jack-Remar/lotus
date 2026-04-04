@@ -6,23 +6,23 @@
 namespace crab{
 namespace analyzer {
 
-template<class CFG, class Dom>  
+template<class CFG, class Dom>
 class inter_analyzer_summary;
 
-/*** Any inter-procedural analysis must implement this API ***/  
+/*** Any inter-procedural analysis must implement this API ***/
 template<class CallGraph, class InvariantDom, class SummaryDom>
 class inter_analyzer_api {
 public:
-  /* API type definitions */  
+  /* API type definitions */
   using cg_t = CallGraph;
-  using cg_node_t = typename CallGraph::node_t;  
+  using cg_node_t = typename CallGraph::node_t;
   using cfg_t = typename CallGraph::cfg_t;
-  using basic_block_label_t = typename cfg_t::basic_block_label_t;  
+  using basic_block_label_t = typename cfg_t::basic_block_label_t;
   using basic_block_t = typename cfg_t::basic_block_t;
   using invariant_abs_dom_t = InvariantDom;
   using summary_abs_dom_t = SummaryDom;
   using summary_t = inter_analyzer_summary<cfg_t, summary_abs_dom_t>;
-  
+
   /* API methods */
   virtual ~inter_analyzer_api() {}
   virtual void run(invariant_abs_dom_t init) = 0;
@@ -35,7 +35,7 @@ public:
   virtual void clear() = 0;
 };
 
-  
+
 /*** Definition of function summaries (aka contracts) ****/
 /* A summary is a collection of pre- and post-condition pairs and a
  *  set of input and output variables.  Given the collection
@@ -43,8 +43,8 @@ public:
  *  summary is interpreted as
  *
  *   (pre1(I) => post1(I,O)) or ... or (preN(I) => postN(I,O))
- */   
-template<class CFG, class AbsDom>  
+ */
+template<class CFG, class AbsDom>
 class inter_analyzer_summary {
 public:
   class pre_post_pair {
@@ -60,15 +60,15 @@ public:
     AbsDom m_post;
   };
 
-private:  
+private:
   using pre_post_pair_vector = std::vector<pre_post_pair>;
 
-public:  
+public:
   using function_decl_t = typename CFG::fdecl_t;
   using variable_t = typename CFG::variable_t;
   using const_iterator = typename pre_post_pair_vector::const_iterator;
   using iterator = typename pre_post_pair_vector::iterator;
-  
+
   inter_analyzer_summary(const function_decl_t &fdecl)
     : m_fdecl(fdecl) {
     // Initially empty summary
@@ -88,10 +88,10 @@ public:
   }
 
   iterator begin() { return m_pre_post_pairs.begin();}
-  iterator end() { return m_pre_post_pairs.end();}  
+  iterator end() { return m_pre_post_pairs.end();}
   const_iterator begin() const { return m_pre_post_pairs.begin();}
-  const_iterator end() const { return m_pre_post_pairs.end();}  
-  
+  const_iterator end() const { return m_pre_post_pairs.end();}
+
   const function_decl_t &get_function_declaration() const
   { return m_fdecl; }
 
@@ -115,9 +115,9 @@ public:
     sum.write(o);
     return o;
   }
-  
+
 private:
-  const function_decl_t &m_fdecl;  
+  const function_decl_t &m_fdecl;
   std::vector<pre_post_pair> m_pre_post_pairs;
 };
 

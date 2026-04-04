@@ -5,11 +5,11 @@ namespace crab {
 namespace domains {
 
 type_value::type_value()
-  : m_type(boost::none), m_is_bottom(false) {}
-  
+  : m_type(std::nullopt), m_is_bottom(false) {}
+
 type_value::type_value(bool is_bottom)
-  : m_type(boost::none), m_is_bottom(is_bottom) {}
-  
+  : m_type(std::nullopt), m_is_bottom(is_bottom) {}
+
 type_value::type_value(variable_type ty) : m_type(ty), m_is_bottom(false) {}
 
 type_value type_value::bottom() { return type_value(true); }
@@ -34,7 +34,7 @@ void type_value::set_to_top()  {
 void type_value::set_to_bottom()  {
   *this = make_bottom();
 }
-  
+
 bool type_value::operator<=(const type_value &o) const {
   if (is_bottom() || o.is_top()) {
     return true;
@@ -51,9 +51,9 @@ bool type_value::operator==(const type_value &o) const {
 }
 
 void type_value::operator|=(const type_value &o)  {
-  *this = *this | o;   
+  *this = *this | o;
 }
-  
+
 type_value type_value::operator|(const type_value &o) const {
   if (is_bottom() || o.is_top())
     return o;
@@ -117,7 +117,7 @@ variable_type type_value::get() const {
 void type_value::set(variable_type ty) {
   m_type = ty;
 }
-    
+
 void type_value::write(crab::crab_os &o) const {
   if (is_bottom()) {
     o << "_|_";
@@ -159,11 +159,11 @@ void type_value::write(crab::crab_os &o) const {
       // this shouldn't happen
       o << "top";
     }
-  }  
+  }
 }
-  
+
 std::string  type_value::domain_name() const {
   return "TypeDomain";
-}  
+}
 } // end namespace domains
 } // end namespace crab

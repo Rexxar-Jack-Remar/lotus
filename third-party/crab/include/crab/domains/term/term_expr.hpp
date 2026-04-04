@@ -6,7 +6,7 @@
 #include <vector>
 
 #include <boost/container/flat_set.hpp>
-#include <boost/optional.hpp>
+#include <optional>
 
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wsign-compare"
@@ -48,7 +48,7 @@ public:
   term_ref(term_ptr _p) : p(_p) {}
   term_ref(term_t *_p) : p(_p) {}
   bool operator<(const term_ref &other) const { return *p < *(other.p); }
-  
+
   term_ptr p;
 };
 
@@ -58,7 +58,7 @@ public:
   const_term(Num _val) : val(_val) {}
   virtual term_kind kind(void) const override { return TERM_CONST; }
   virtual void write(crab_os &o) const override { o << "c(" << val << ")"; }
-  
+
   Num val;
 };
 
@@ -67,7 +67,7 @@ public:
   var_term(var_id _var) : var(_var) {}
   virtual term_kind kind(void) const override { return TERM_VAR; }
   virtual void write(crab_os &o) const override { o << "v(" << var << ")"; }
-  
+
   var_id var;
 };
 
@@ -123,7 +123,7 @@ bool term<Num, Ftor>::operator<(const term_t &other) const {
   switch (kind()) {
   case TERM_CONST: {
     return term_const(this) < term_const(&other);
-  } 
+  }
   case TERM_VAR: {
     return term_var(this) < term_var(&other);
   }
@@ -167,7 +167,7 @@ public:
   using gener_map_t = std::map<std::pair<term_id, term_id>, term_id>;
 
 private:
-  
+
   term_id fresh_term(term_ref_t ref) {
     if (m_free_terms.size() > 0) {
       term_id t = m_free_terms.back();
@@ -220,9 +220,9 @@ private:
   std::vector<unsigned int> m_ref_count;
   std::vector<unsigned int> m_depth;
   std::vector<term_id> m_free_terms;
-  
+
 public:
-  
+
   term_table(void) : m_free_var(0) {}
   term_table(const term_table_t &o) = default;
   term_table_t &operator=(const term_table_t &o) = default;
@@ -233,7 +233,7 @@ public:
     term_ref_t ref(new const_term_t(n));
     return add_term(ref);
   };
-  boost::optional<term_id> find_const(const Num &n) {
+  std::optional<term_id> find_const(const Num &n) {
     term_ref_t ref(new const_term_t(n));
     return find_term(ref);
   }
@@ -269,13 +269,13 @@ public:
     return apply_ftor(f, ids);
   }
 
-  boost::optional<term_id> find_ftor(Ftor &f, const std::vector<term_id> &ids) {
+  std::optional<term_id> find_ftor(Ftor &f, const std::vector<term_id> &ids) {
     term_ref_t ref(new ftor_term_t(f, ids));
     return find_term(ref);
   }
 
   template <typename... Types>
-  boost::optional<term_id> find_ftor(Ftor &f, Types... args) {
+  std::optional<term_id> find_ftor(Ftor &f, Types... args) {
     std::vector<term_id> ids;
     collect_args(ids, args...);
     return find_ftor(f, ids);
@@ -443,13 +443,13 @@ public:
 
   int depth(term_id t) { return m_depth[t]; }
 
-  boost::optional<term_id> find_term(term_ref_t ref) const {
+  std::optional<term_id> find_term(term_ref_t ref) const {
     auto it = m_map.find(ref);
     if (it != m_map.end())
-      return boost::optional<term_id>(it->second);
+      return std::optional<term_id>(it->second);
     else
-      return boost::optional<term_id>();
-  }  
+      return std::optional<term_id>();
+  }
 };
 
 template <class Num, class Ftor>

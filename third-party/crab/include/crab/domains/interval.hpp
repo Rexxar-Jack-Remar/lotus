@@ -10,7 +10,7 @@
 #include <crab/support/debug.hpp>
 #include <crab/support/os.hpp>
 
-#include <boost/optional.hpp>
+#include <optional>
 #include <string>
 
 namespace ikos {
@@ -100,7 +100,7 @@ public:
 
   bound_t abs() const;
 
-  boost::optional<Number> number() const;
+  std::optional<Number> number() const;
 
   void write(crab::crab_os &o) const;
 
@@ -211,7 +211,7 @@ public:
 
   interval_t &operator/=(const interval_t &x);
 
-  boost::optional<Number> singleton() const;
+  std::optional<Number> singleton() const;
 
   bool operator[](Number n) const;
 

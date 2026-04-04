@@ -72,7 +72,7 @@ public:
   using typename abstract_domain_t::variable_or_constant_t;
   using typename abstract_domain_t::variable_t;
   using typename abstract_domain_t::variable_vector_t;
-  using typename abstract_domain_t::variable_or_constant_vector_t;  
+  using typename abstract_domain_t::variable_or_constant_vector_t;
   using number_t = Number;
   using varname_t = VariableName;
 
@@ -186,7 +186,7 @@ public:
     crab::ScopedCrabStats __st__(domain_name() + ".meet");
     this->_env = this->_env & e._env;
   }
-  
+
   interval_domain_t operator&(const interval_domain_t &e) const override {
     crab::CrabStats::count(domain_name() + ".count.meet");
     crab::ScopedCrabStats __st__(domain_name() + ".meet");
@@ -243,20 +243,20 @@ public:
     this->add(csts);
   }
 
-  virtual bool entails(const linear_constraint_t &cst) const override {	
-    if (is_bottom()) {							
-      return true;							
-    } if (cst.is_tautology()) {						
-      return true;							
-    } if (cst.is_contradiction()) {					
-      return false;							
+  virtual bool entails(const linear_constraint_t &cst) const override {
+    if (is_bottom()) {
+      return true;
+    } if (cst.is_tautology()) {
+      return true;
+    } if (cst.is_contradiction()) {
+      return false;
     }
 
     // val is modified after the check
-    auto entailmentFn = [](interval_domain_t &val, const linear_constraint_t &c) -> bool {	
-      linear_constraint_t neg_c = c.negate();			        
-      val += neg_c;						        
-      return val.is_bottom();					        
+    auto entailmentFn = [](interval_domain_t &val, const linear_constraint_t &c) -> bool {
+      linear_constraint_t neg_c = c.negate();
+      val += neg_c;
+      return val.is_bottom();
     };
 
     // Get only relevant state wrt cst variables
@@ -265,24 +265,24 @@ public:
       val.set(v, at(v));
     }
 
-    if (cst.is_equality()) {						
+    if (cst.is_equality()) {
       linear_constraint_t pob1(cst.expression(),linear_constraint_t::INEQUALITY);
       interval_domain_t tmp(val);
       if (!entailmentFn(tmp, pob1)) {
 	return false;
       }
-      linear_constraint_t pob2(cst.expression() * number_t(-1), linear_constraint_t::INEQUALITY);   	 
-      return entailmentFn(val, pob2);		
-    } else {								
-      return entailmentFn(val, cst);						
-    }									
+      linear_constraint_t pob2(cst.expression() * number_t(-1), linear_constraint_t::INEQUALITY);
+      return entailmentFn(val, pob2);
+    } else {
+      return entailmentFn(val, cst);
+    }
   }
-  
+
   void assign(const variable_t &x, const linear_expression_t &e) override {
     crab::CrabStats::count(domain_name() + ".count.assign");
     crab::ScopedCrabStats __st__(domain_name() + ".assign");
 
-    if (boost::optional<variable_t> v = e.get_variable()) {
+    if (std::optional<variable_t> v = e.get_variable()) {
       this->_env.set(x, this->_env.at(*v));
     } else {
       interval_t r = e.constant();
@@ -297,7 +297,7 @@ public:
     crab::CrabStats::count(domain_name() + ".count.weak_assign");
     crab::ScopedCrabStats __st__(domain_name() + ".weak_assign");
 
-    if (boost::optional<variable_t> v = e.get_variable()) {
+    if (std::optional<variable_t> v = e.get_variable()) {
       this->_env.join(x, this->_env.at(*v));
     } else {
       interval_t r = e.constant();
@@ -308,7 +308,7 @@ public:
     }
   }
 
-  
+
   void apply(crab::domains::arith_operation_t op, const variable_t &x,
              const variable_t &y, const variable_t &z) override {
     crab::CrabStats::count(domain_name() + ".count.apply");
@@ -500,7 +500,7 @@ public:
       break;
     }
     default:
-      //case crab::domains::OP_ASHR: 
+      //case crab::domains::OP_ASHR:
       xi = yi.AShr(zi);
       break;
     }
@@ -511,7 +511,7 @@ public:
 		      const linear_expression_t &e1,  const linear_expression_t &e2) override {
     crab::CrabStats::count(domain_name() + ".count.select");
     crab::ScopedCrabStats __st__(domain_name() + ".select");
-    
+
     if (!is_bottom()) {
       interval_domain_t inv1(*this);
       inv1 += cond;
@@ -519,7 +519,7 @@ public:
 	assign(lhs, e2);
 	return;
       }
-      
+
       interval_domain_t inv2(*this);
       inv2 += cond.negate();
       if (inv2.is_bottom()) {
@@ -530,7 +530,7 @@ public:
       set(lhs, this->operator[](e1) | this->operator[](e2));
     }
   }
-  
+
   /// interval_domain implements only standard abstract operations of
   /// a numerical domain so it is intended to be used as a leaf domain
   /// in the hierarchy of domains.
@@ -538,7 +538,7 @@ public:
   ARRAY_OPERATIONS_NOT_IMPLEMENTED(interval_domain_t)
   REGION_AND_REFERENCE_OPERATIONS_NOT_IMPLEMENTED(interval_domain_t)
 
-  
+
   void forget(const variable_vector_t &variables) override {
     if (is_bottom() || is_top()) {
       return;
@@ -601,8 +601,8 @@ public:
     for (iterator it = this->_env.begin(); it != this->_env.end(); ++it) {
       const variable_t &v = it->first;
       interval_t i = it->second;
-      boost::optional<number_t> lb = i.lb().number();
-      boost::optional<number_t> ub = i.ub().number();
+      std::optional<number_t> lb = i.lb().number();
+      std::optional<number_t> ub = i.ub().number();
       if (lb)
         csts += linear_constraint_t(v >= *lb);
       if (ub)

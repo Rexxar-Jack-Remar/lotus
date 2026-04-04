@@ -56,7 +56,7 @@ public:
 
 #include <algorithm>
 #include <boost/bimap.hpp>
-#include <boost/optional.hpp>
+#include <optional>
 
 /**
  * If template parameter Number is ikos::q_number then the Elina
@@ -86,7 +86,7 @@ public:
   using typename abstract_domain_t::variable_or_constant_t;
   using typename abstract_domain_t::variable_t;
   using typename abstract_domain_t::variable_vector_t;
-  using typename abstract_domain_t::variable_or_constant_vector_t;  
+  using typename abstract_domain_t::variable_or_constant_vector_t;
   using number_t = Number;
   using varname_t = VariableName;
 
@@ -139,16 +139,16 @@ private:
   size_t get_dims() const { return get_dims(m_apstate); }
 
   // If v is in the map then it maps v to a dimension, otherwise null
-  boost::optional<elina_dim_t> get_var_dim(const var_map_t &m,
+  std::optional<elina_dim_t> get_var_dim(const var_map_t &m,
                                            variable_t v) const {
     auto it = m.left.find(v);
     if (it != m.left.end())
       return it->second;
     else
-      return boost::optional<elina_dim_t>();
+      return std::optional<elina_dim_t>();
   }
 
-  boost::optional<elina_dim_t> get_var_dim(variable_t v) const {
+  std::optional<elina_dim_t> get_var_dim(variable_t v) const {
     return get_var_dim(m_var_map, v);
   }
 
@@ -337,9 +337,9 @@ private:
     free(ymap1);
     free(ymap2);
 
-#if 0          
+#if 0
       crab::outs() << "Permutations \n";
-      elina_dimperm_fprint(stdout, perm_x);          
+      elina_dimperm_fprint(stdout, perm_x);
       crab::outs() << "Permutations \n";
       elina_dimperm_fprint(stdout, perm_y);
 #endif
@@ -607,7 +607,7 @@ private:
       return bound_t::plus_infinity();
     default: /* finite */
       assert(elina_scalar_infty(scalar) == 0);
-      
+
       switch(scalar->discr) {
       case ELINA_SCALAR_DOUBLE: {
 	number_t val;
@@ -623,9 +623,9 @@ private:
 	CRAB_ERROR("elina translation only covers double or mpq scalars");
       }
     }
-  }    
+  }
 
-  
+
   void dump(const var_map_t &m, elina_state_ptr apstate) const {
     crab::outs() << "\nNumber of dimensions=" << get_dims(apstate) << "\n";
     crab::outs() << "variable map [";
@@ -1044,7 +1044,7 @@ public:
           std::move(m));
     }
   }
-  
+
   void operator&=(const elina_domain_t &o) override {
     crab::CrabStats::count(domain_name() + ".count.meet");
     crab::ScopedCrabStats __st__(domain_name() + ".meet");
@@ -1062,7 +1062,7 @@ public:
 	get_man(), elina_abstract0_meet(get_man(), false, &*m_apstate, &*x));
     }
   }
-  
+
   elina_domain_t operator&(const elina_domain_t &o) const override {
     crab::CrabStats::count(domain_name() + ".count.meet");
     crab::ScopedCrabStats __st__(domain_name() + ".meet");
@@ -1102,10 +1102,10 @@ public:
     var_map_t m = merge_var_map(m_var_map, x, o.m_var_map, y);
 
     // widening precondition: the old value is included in the new value.
-    // widen(old, new) = widen(old,(join(old,new)))    
+    // widen(old, new) = widen(old,(join(old,new)))
     elina_state_ptr x_join_y = elinaPtr(get_man(),
 					elina_abstract0_join(get_man(), false, &*x, &*y));
-    
+
     return elina_domain_t(
         elinaPtr(get_man(), elina_abstract0_widening(get_man(), &*x, &*x_join_y)),
         std::move(m), false /* do not compact */);
@@ -1150,24 +1150,24 @@ public:
 /////
 #if 0
       // widening w/o thresholds in the elina domain
-      elina_domain_t res(elinaPtr(get_man(), 
-				  elina_abstract0_widening(get_man(), 
+      elina_domain_t res(elinaPtr(get_man(),
+				  elina_abstract0_widening(get_man(),
 							   &*x, &*y)),
 			 std::move(m));
       // widening w/ thresholds in the interval domain
       auto intv_this  = this->to_interval_domain();
       auto intv_o     = o.to_interval_domain();
-      auto intv_widen = intv_this.widening_thresholds(intv_o, ts);	    
+      auto intv_widen = intv_this.widening_thresholds(intv_o, ts);
       // refine the elina domain using the widen intervals
       elina_domain_t elina_intv_widen;
       elina_intv_widen += intv_widen.to_linear_constraint_system();
       return res & elina_intv_widen;
 #else
     // widening precondition: the old value is included in the new value.
-    // widen(old, new) = widen(old,(join(old,new)))    
+    // widen(old, new) = widen(old,(join(old,new)))
     elina_state_ptr x_join_y = elinaPtr(get_man(),
 					elina_abstract0_join(get_man(), false, &*x, &*y));
-      
+
     elina_lincons0_array_t csts = make_thresholds(o, ts);
     elina_domain_t res(elinaPtr(get_man(), elina_abstract0_widening_threshold(
                                                get_man(), &*x, &*x_join_y, &csts)),
@@ -1324,7 +1324,7 @@ public:
   interval_t operator[](const variable_t &v) override {
     return at(v);
   }
-  
+
   interval_t at(const variable_t &v) const override {
     crab::CrabStats::count(domain_name() + ".count.to_intervals");
     crab::ScopedCrabStats __st__(domain_name() + ".to_intervals");
@@ -1388,7 +1388,7 @@ public:
                                    << *this << "\n";);
   }
 
-  
+
   void operator+=(const linear_constraint_system_t &_csts) override {
     crab::CrabStats::count(domain_name() + ".count.add_constraints");
     crab::ScopedCrabStats __st__(domain_name() + ".add_constraints");
@@ -1448,7 +1448,7 @@ public:
   }
 
   DEFAULT_ENTAILS(elina_domain_t)
-  
+
   void assign(const variable_t &x, const linear_expression_t &e) override {
     crab::CrabStats::count(domain_name() + ".count.assign");
     crab::ScopedCrabStats __st__(domain_name() + ".assign");
@@ -1642,8 +1642,8 @@ public:
   }
 
   DEFAULT_SELECT(elina_domain_t)
-  DEFAULT_WEAK_ASSIGN(elina_domain_t)      
-  
+  DEFAULT_WEAK_ASSIGN(elina_domain_t)
+
   void backward_assign(const variable_t &x, const linear_expression_t &e,
                        const elina_domain_t &invariant) override {
     crab::CrabStats::count(domain_name() + ".count.backward_assign");
@@ -1788,7 +1788,7 @@ public:
   BOOL_OPERATIONS_NOT_IMPLEMENTED(elina_domain_t)
   ARRAY_OPERATIONS_NOT_IMPLEMENTED(elina_domain_t)
   REGION_AND_REFERENCE_OPERATIONS_NOT_IMPLEMENTED(elina_domain_t)
-  
+
   interval_domain_t to_interval_domain() {
     crab::CrabStats::count(domain_name() + ".count.to_interval_domain");
     crab::ScopedCrabStats __st__(domain_name() + ".to_interval_domain");

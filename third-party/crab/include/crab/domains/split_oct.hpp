@@ -48,7 +48,7 @@
 #include <crab/support/debug.hpp>
 #include <crab/support/stats.hpp>
 
-#include <boost/optional.hpp>
+#include <optional>
 #include <unordered_set>
 
 #pragma GCC diagnostic push
@@ -260,7 +260,7 @@ public:
   using typename abstract_domain_t::variable_or_constant_t;
   using typename abstract_domain_t::variable_t;
   using typename abstract_domain_t::variable_vector_t;
-  using typename abstract_domain_t::variable_or_constant_vector_t;    
+  using typename abstract_domain_t::variable_or_constant_vector_t;
   using number_t = Number;
   using varname_t = VariableName;
   using constraint_kind_t = typename linear_constraint_t::kind_t;
@@ -269,7 +269,7 @@ private:
   using bound_t = ikos::bound<number_t>;
   using Wt = typename Params::Wt;
   using graph_t = typename Params::graph_t;
-  using wt_ref_t = typename graph_t::wt_ref_t;  
+  using wt_ref_t = typename graph_t::wt_ref_t;
   using ntow = DBM_impl::NtoW<number_t, Wt>;
   using vert_id = typename graph_t::vert_id;
   // (variable: (vert_id of pos, vert_id of neg))
@@ -281,7 +281,7 @@ private:
       std::unordered_map<variable_t, std::pair<vert_id, vert_id>>;
 #endif
   using vmap_elt_t = typename vert_map_t::value_type;
-  using rev_map_t = std::vector<boost::optional<variable_t>>;
+  using rev_map_t = std::vector<std::optional<variable_t>>;
   using GrOps = GraphOps<graph_t>;
   using GrPerm = GraphPerm<graph_t>;
   using edge_vector = typename GrOps::edge_vector;
@@ -478,7 +478,7 @@ private:
                           std::vector<std::pair<variable_t, Wt>> &oct_csts) {
 
     crab::ScopedCrabStats __st__(domain_name() + ".oct_csts_of_assign");
-    boost::optional<variable_t> unbounded_pos_var, unbounded_neg_var;
+    std::optional<variable_t> unbounded_pos_var, unbounded_neg_var;
     std::vector<std::pair<variable_t, Wt>> diff_terms, oct_terms;
     bool overflow;
 
@@ -619,7 +619,7 @@ private:
 
     // {{v,coeff}, polarity} where polarity is true iff the term is positive
     // Invariant: unbounded_var2 != None => unbounded_var1 != None
-    boost::optional<std::pair<std::pair<variable_t, Wt>, bool>> unbounded_var1,
+    std::optional<std::pair<std::pair<variable_t, Wt>, bool>> unbounded_var1,
         unbounded_var2;
     bool underflow, overflow;
 
@@ -1494,7 +1494,7 @@ private:
   }
 
   interval_t get_interval(const vert_map_t &m, const graph_t &r, const variable_t &x) const {
-                          
+
     auto it = m.find(x);
     if (it == m.end())
       return interval_t::top();
@@ -1933,7 +1933,7 @@ private:
   bool need_normalization() const {
     return !m_unstable.empty();
   }
-  
+
   split_oct_domain(vert_map_t &&_vert_map, rev_map_t &&_rev_map,
                    graph_t &&_graph, std::vector<Wt> &&_potential,
                    vert_set_t &&_unstable)
@@ -2043,7 +2043,7 @@ public:
 	// left operand is normalized, right doesn't need to.
 
 	wt_ref_t wx, wy, wz;
-	
+
 	if (left.m_vert_map.size() < right.m_vert_map.size()) {
 	  return false;
 	}
@@ -2060,16 +2060,16 @@ public:
 	      right.m_graph.preds(p.second.first).size() == 0 &&
 	      right.m_graph.preds(p.second.second).size() == 0)
 	    continue;
-	  
+
 	  vert_renaming[p.second.first] = (*it).second.first;
 	  vert_renaming[p.second.second] = (*it).second.second;
 	}
-	
+
 	assert(left.m_graph.size() >= 0);
 	for (vert_id ox : right.m_graph.verts()) {
 	  if (right.m_graph.succs(ox).size() == 0)
 	    continue;
-	  
+
 	  assert(vert_renaming[ox] != -1);
 	  vert_id x = vert_renaming[ox];
 	  for (auto edge : right.m_graph.e_succs(ox)) {
@@ -2079,11 +2079,11 @@ public:
 	      continue;
 	    vert_id y = vert_renaming[oy];
 	    Wt ow = edge.val;
-	    
+
 	    // explicit edge on the left operand
 	    if (left.m_graph.lookup(x, y, wx) && (wx.get() <= ow))
 	      continue;
-	    
+
           // implicit edge on the left operand
 	    if (x % 2 == 0 && y % 2 == 0) { // both pos
 	      // y-x <= k in o: check if -2x <= k1 and 2y <= k2 in this and
@@ -2095,7 +2095,7 @@ public:
 	      if (!((Wt)(wx.get() + wy.get()) / (Wt)2 <= ow)) {
 		return false;
 	      }
-	      
+
           } else if (x % 2 == 0 && y % 2 != 0) { // x pos
 	      // -y-x <= k in o: check if -2x <= k1 and -2y <= k2 in this and
 	      //                         k1+k2/2 <= k
@@ -2164,7 +2164,7 @@ public:
       auto join_op =
 	[this](const split_oct_domain_t &left,  const split_oct_domain_t &right) -> split_oct_domain_t {
 	  // Both left and right are normalized
-	  
+
 	  CRAB_LOG("octagon-join", crab::outs() << "rev_map 1={";
 		   for (unsigned i = 0, e = left.m_rev_vert_map.size(); i != e; i++) {
 		     if (left.m_rev_vert_map[i])
@@ -2177,16 +2177,16 @@ public:
 		     if (right.m_rev_vert_map[i])
 		       crab::outs() << *(right.m_rev_vert_map[i]) << "(" << i << ");";
 		   } crab::outs() << "}\n";);
-	  
+
 
 	  check_potential(left.m_graph, left.m_potential, __LINE__);
 	  check_potential(right.m_graph, right.m_potential, __LINE__);
-	  
+
 	  std::vector<vert_id> perm_x, perm_y;
 	  std::vector<Wt> pot_rx, pot_ry;
 	  vert_map_t out_vmap;
 	  rev_map_t out_revmap;
-	  
+
 	  for (auto p : left.m_vert_map) {
 	    auto it = right.m_vert_map.find(p.first);
 	    if (it != right.m_vert_map.end()) {
@@ -2203,15 +2203,15 @@ public:
 	      perm_y.push_back((*it).second.second);
 	    }
 	  }
-	  
+
 	  unsigned int sz = perm_x.size();
-	  
+
 	  // Build the permuted view of x and y.
 	  assert(left.m_graph.size() > 0);
 	  GrPerm gx(perm_x, left.m_graph);
 	  assert(right.m_graph.size() > 0);
 	  GrPerm gy(perm_y, right.m_graph);
-	  
+
 	  // Compute the deferred relations for gy
 	  graph_t g_ix_ry = split_rels(gx, gy, sz);
 	  // Apply the deferred relations, and re-close.
@@ -2245,7 +2245,7 @@ public:
 		       crab::outs() << *(out_revmap[i]) << "(" << i << ");";
 		   } crab::outs()
 		   << "}\n";);
-	  
+
 	  CRAB_LOG("octagon-join", crab::outs()
 		   << "\tBefore joined:\n\tg_rx:" << g_rx
 		   << "\n\tg_ry:" << g_ry << "\n");
@@ -2253,7 +2253,7 @@ public:
 	  // We now have the relevant set of relations. Because g_rx and
 	  // g_ry are closed, the result is also closed.
 	  graph_t join_g(GrOps::join(g_rx, g_ry));
-	  
+
 	  CRAB_LOG("octagon-join", crab::outs() << "Joined graph:\n"
 		   << join_g << "\n");
 
@@ -2315,7 +2315,7 @@ public:
 		   for (vert_id s : ub_left) {
 		     crab::outs() << s << ";";
 		   } crab::outs() << "}\n";);
-	  
+
 	  Wt_min min_op;
 	  for (vert_id s : lb_left) {
 	    Wt dx_s = gx.edge_val(s, s + 1) / (Wt)2;
@@ -2363,7 +2363,7 @@ public:
 				 d + 1, min_op);
 	    }
       }
-	  
+
 	  for (vert_id s : ub_left) {
 	    Wt dx_s = gx.edge_val(s + 1, s) / (Wt)2;
 	    Wt dy_s = gy.edge_val(s + 1, s) / (Wt)2;
@@ -2425,8 +2425,8 @@ public:
 	      join_g.forget(v + 1);
 	      if (out_revmap[v]) {
 		out_vmap.erase(*(out_revmap[v]));
-		out_revmap[v] = boost::none;
-		out_revmap[v + 1] = boost::none;
+		out_revmap[v] = std::nullopt;
+		out_revmap[v + 1] = std::nullopt;
 	      }
 	    }
 	  }
@@ -2487,7 +2487,7 @@ public:
 	  rev_map_t out_revmap;
 	  std::vector<Wt> widen_pot;
 	  vert_set_t widen_unstable(left.m_unstable);
-	  
+
 	  assert(left.m_potential.size() > 0);
 	  for (auto p : left.m_vert_map) {
 	    auto it = right.m_vert_map.find(p.first);
@@ -2509,7 +2509,7 @@ public:
 	  GrPerm gx(perm_x, left.m_graph);
 	  assert(right.m_graph.size() > 0);
 	  GrPerm gy(perm_y, right.m_graph);
-	  
+
 	  CRAB_LOG("octagon-widening", crab::outs()
                                        << "== After permutations == \n";
                crab::outs() << "DBM 1:\n"; gx.write(crab::outs());
@@ -2524,11 +2524,11 @@ public:
 
 	  // Now perform the widening
 	  graph_t widen_g(split_widen(gx, gy, widen_unstable));
-	  
+
 	  CRAB_LOG("octagon-widening", crab::outs()
 		   << "Unstable list after point-wise widening{";
           for (vert_id v : widen_unstable) {
-		 
+
             crab::outs() << *out_revmap[v] << ((v % 2 == 0) ? "+" : "-") << ";";
           } crab::outs()
           << "}\n");
@@ -2536,14 +2536,14 @@ public:
 	  split_oct_domain_t res(std::move(out_vmap), std::move(out_revmap),
 				 std::move(widen_g), std::move(widen_pot),
 				 std::move(widen_unstable));
-	  
+
 	  CRAB_LOG("octagon-widening", crab::outs() << "Result widening:\n"
 		   << res.m_graph << "\n";);
 	  CRAB_LOG("octagon",
 		   crab::outs() << "Result widening:\n" << res << "\n";);
 	  return res;
 	};
-      
+
       // Do not normalize left operand
       const split_oct_domain_t &left = *this;
       if (o.need_normalization()) {
@@ -2553,7 +2553,7 @@ public:
       } else {
 	return widen_op(left, o);
       }
-      
+
     }
   }
 
@@ -2580,13 +2580,13 @@ public:
 	  rev_map_t meet_rev;
 	  std::vector<vert_id> perm_x, perm_y;
 	  std::vector<Wt> meet_pi;
-	  
+
 	  for (auto p : left.m_vert_map) {
 	    vert_id vv = perm_x.size();
 	    meet_verts.insert(vmap_elt_t(p.first, {vv, vv + 1}));
 	    meet_rev.push_back(p.first);
 	    meet_rev.push_back(p.first);
-	    
+
 	    perm_x.push_back(p.second.first);
 	    perm_x.push_back(p.second.second);
 	    perm_y.push_back(-1);
@@ -2594,16 +2594,16 @@ public:
 	    meet_pi.push_back(left.m_potential[p.second.first]);
 	    meet_pi.push_back(left.m_potential[p.second.second]);
 	  }
-	  
+
 	  // Add missing mappings from the right operand.
 	  for (auto p : right.m_vert_map) {
 	    auto it = meet_verts.find(p.first);
-	    
+
 	    if (it == meet_verts.end()) {
 	      vert_id vv = perm_y.size();
 	      meet_rev.push_back(p.first);
 	      meet_rev.push_back(p.first);
-	      
+
 	      perm_y.push_back(p.second.first);
 	      perm_y.push_back(p.second.second);
 	      perm_x.push_back(-1);
@@ -2616,13 +2616,13 @@ public:
 	      perm_y[(*it).second.second] = p.second.second;
 	    }
 	  }
-	  
+
 	  // Build the permuted view of x and y.
 	  assert(left.m_graph.size() > 0);
 	  GrPerm gx(perm_x, left.m_graph);
 	  assert(right.m_graph.size() > 0);
 	  GrPerm gy(perm_y, right.m_graph);
-	  
+
 	  // Compute the syntactic meet of the permuted graphs.
 	  bool is_closed;
 	  graph_t meet_g(GrOps::meet(gx, gy, is_closed));
@@ -2639,13 +2639,13 @@ public:
 	    // JN: this code needs to be tested
 	    edge_vector delta;
 	    split_octagons_impl::SplitOctGraph<graph_t> meet_g_oct(meet_g);
-	    
+
 	    if (crab_domain_params_man::get().oct_chrome_dijkstra()) {
 	      GrOps::close_after_meet(meet_g_oct, meet_pi, gx, gy, delta);
 	    } else {
 	      GrOps::close_johnson(meet_g_oct, meet_pi, delta);
 	    }
-	    
+
 	    // JN: we should be fine calling GrOps::apply_delta
 	    update_delta(meet_g, delta);
 
@@ -2685,7 +2685,7 @@ public:
 	  split_oct_domain_t res(std::move(meet_verts), std::move(meet_rev),
 				 std::move(meet_g), std::move(meet_pi),
 				 vert_set_t());
-	  
+
 	  CRAB_LOG("octagon", crab::outs() << "Result meet:\n" << res << "\n");
 	  return res;
 	};
@@ -2710,7 +2710,7 @@ public:
 	return meet_op(*this, o);
       }
 
-      
+
     }
   }
 
@@ -2741,7 +2741,7 @@ public:
 	  meet_verts.insert(vmap_elt_t(p.first, {vv, vv + 1}));
 	  meet_rev.push_back(p.first);
 	  meet_rev.push_back(p.first);
-	  
+
 	  perm_x.push_back(p.second.first);
 	  perm_x.push_back(p.second.second);
 	  perm_y.push_back(-1);
@@ -2749,16 +2749,16 @@ public:
 	  meet_pi.push_back(left.m_potential[p.second.first]);
 	  meet_pi.push_back(left.m_potential[p.second.second]);
 	}
-	
+
 	// Add missing mappings from the right operand.
 	for (auto p : right.m_vert_map) {
 	  auto it = meet_verts.find(p.first);
-	  
+
 	  if (it == meet_verts.end()) {
 	    vert_id vv = perm_y.size();
 	    meet_rev.push_back(p.first);
 	    meet_rev.push_back(p.first);
-	    
+
 	    perm_y.push_back(p.second.first);
 	    perm_y.push_back(p.second.second);
 	    perm_x.push_back(-1);
@@ -2771,17 +2771,17 @@ public:
 	    perm_y[(*it).second.second] = p.second.second;
 	  }
 	}
-	
+
 	// Build the permuted view of x and y.
 	assert(left.m_graph.size() > 0);
 	GrPerm gx(perm_x, left.m_graph);
 	assert(right.m_graph.size() > 0);
 	GrPerm gy(perm_y, right.m_graph);
-	
+
 	// Compute the syntactic meet of the permuted graphs.
 	bool is_closed;
 	graph_t meet_g(GrOps::meet(gx, gy, is_closed));
-	
+
 	// Compute updated potentials on the zero-enriched graph
 	// vector<Wt> meet_pi(meet_g.size());
 	// We've warm-started pi with the operand potentials
@@ -2790,7 +2790,7 @@ public:
 	  set_to_bottom();
 	  return;
 	}
-	
+
 	if (!is_closed) {
 	  edge_vector delta;
 	  split_octagons_impl::SplitOctGraph<graph_t> meet_g_oct(meet_g);
@@ -2801,16 +2801,16 @@ public:
 	  }
 	  update_delta(meet_g, delta);
 	}
-	
+
 	check_potential(meet_g, meet_pi, __LINE__);
-	
+
 	left.m_vert_map = std::move(meet_verts);
 	left.m_rev_vert_map = std::move(meet_rev);
 	left.m_graph = std::move(meet_g);
 	left.m_potential = std::move(meet_pi);
 	left.m_unstable.clear();
 	left.m_is_bottom = false;
-	
+
 	CRAB_LOG("octagon", crab::outs() << "Result meet:\n" << left << "\n");
       };
 
@@ -2824,10 +2824,10 @@ public:
       } else {
 	meet_op(left, o);
       }
-     
+
     }
   }
-  
+
   split_oct_domain_t widening_thresholds(
       const split_oct_domain_t &o,
       const thresholds<number_t> &ts) const override {
@@ -2858,14 +2858,14 @@ public:
       // Narrowing as a no-op: sound and it will terminate
       if (need_normalization()) {
 	split_oct_domain_t res(*this);
-	res.normalize();      
+	res.normalize();
 	CRAB_LOG("octagon", crab::outs() << "Result narrowing:\n" << res << "\n");
 	return res;
       } else {
 	CRAB_LOG("octagon", crab::outs() << "Result narrowing:\n" << *this << "\n");
 	return *this;
       }
-#endif      
+#endif
     }
   }
 
@@ -2884,8 +2884,8 @@ public:
     if (it != m_vert_map.end()) {
       m_graph.forget((*it).second.first);
       m_graph.forget((*it).second.second);
-      m_rev_vert_map[(*it).second.first] = boost::none;
-      m_rev_vert_map[(*it).second.second] = boost::none;
+      m_rev_vert_map[(*it).second.first] = std::nullopt;
+      m_rev_vert_map[(*it).second.second] = std::nullopt;
       m_vert_map.erase(v);
     }
   }
@@ -2897,12 +2897,12 @@ public:
     if (cst.is_tautology()) {
       return;
     }
-    
+
     if (cst.is_contradiction()) {
       set_to_bottom();
       return;
     }
-    
+
     if (is_bottom()) {
       return;
     }
@@ -2943,7 +2943,7 @@ public:
       }
 
       if (!is_bottom()) {
-	// We handle here the case x != c      
+	// We handle here the case x != c
 	add_disequation(cst.expression());
       }
     }
@@ -2960,7 +2960,7 @@ public:
   }
 
   DEFAULT_ENTAILS(split_oct_domain_t)
-  
+
   interval_t operator[](const variable_t &x) override {
     crab::CrabStats::count(domain_name() + ".count.to_intervals");
     crab::ScopedCrabStats __st__(domain_name() + ".to_intervals");
@@ -2977,11 +2977,11 @@ public:
   interval_t at(const variable_t &x) const override {
     crab::CrabStats::count(domain_name() + ".count.to_intervals");
     crab::ScopedCrabStats __st__(domain_name() + ".to_intervals");
-    
+
     return (is_bottom() ? interval_t::bottom() :
 	    get_interval(m_vert_map, m_graph, x));
   }
-  
+
   void normalize(void) override {
     crab::CrabStats::count(domain_name() + ".count.normalize");
     crab::ScopedCrabStats __st__(domain_name() + ".normalize");
@@ -3098,7 +3098,7 @@ public:
     } else {
       interval_t x_int = eval_interval(e);
 
-      boost::optional<Wt> lb_w, ub_w;
+      std::optional<Wt> lb_w, ub_w;
       bool overflow;
       if (x_int.lb().is_finite()) {
         lb_w = ntow::convert(-number_t(2) * (*(x_int.lb().number())), overflow);
@@ -3121,7 +3121,7 @@ public:
         }
       }
 
-      if (boost::optional<number_t> x_n = x_int.singleton()) {
+      if (std::optional<number_t> x_n = x_int.singleton()) {
         set(x, *x_n);
       } else {
         std::vector<std::pair<variable_t, Wt>> diffs_lb, diffs_ub;
@@ -3375,7 +3375,7 @@ public:
 
   void apply(int_conv_operation_t op, const variable_t &dst,
              const variable_t &src) override {
-    int_cast_domain_traits<split_oct_domain_t>::apply(*this, op, dst, src);    
+    int_cast_domain_traits<split_oct_domain_t>::apply(*this, op, dst, src);
   }
 
   void apply(bitwise_operation_t op, const variable_t &x, const variable_t &y,
@@ -3413,7 +3413,7 @@ public:
       break;
     }
     default:
-      //  case OP_ASHR: 
+      //  case OP_ASHR:
       xi = yi.AShr(zi);
       break;
     }
@@ -3455,7 +3455,7 @@ public:
       break;
     }
     default:
-      //case OP_ASHR: 
+      //case OP_ASHR:
       xi = yi.AShr(zi);
       break;
     }
@@ -3604,7 +3604,7 @@ public:
   ARRAY_OPERATIONS_NOT_IMPLEMENTED(split_oct_domain_t)
   REGION_AND_REFERENCE_OPERATIONS_NOT_IMPLEMENTED(split_oct_domain_t)
   DEFAULT_SELECT(split_oct_domain_t)
-  DEFAULT_WEAK_ASSIGN(split_oct_domain_t)  
+  DEFAULT_WEAK_ASSIGN(split_oct_domain_t)
 
   /* begin intrinsics operations */
   void intrinsic(std::string name,

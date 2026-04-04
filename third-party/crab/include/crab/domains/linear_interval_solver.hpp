@@ -276,7 +276,7 @@ public:
                                  linear_constraint_t::kind_t::INEQUALITY);
           linear_constraint_t c2(cst.expression(),
                                  linear_constraint_t::kind_t::DISEQUATION);
-          cst_size = c1.size() + c2.size();	  
+          cst_size = c1.size() + c2.size();
           m_cst_table.emplace_back(std::move(c1));
           m_cst_table.emplace_back(std::move(c2));
         } else {

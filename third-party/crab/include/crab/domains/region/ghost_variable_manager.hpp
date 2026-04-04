@@ -17,7 +17,7 @@ namespace region_domain_impl {
    typedef ghost_variables_t;
 
    ghost_variables_t get_or_insert(const variable_t &v);
-   boost::optional<ghost_variables_t> get(const variable_t &v) const;
+   std::optional<ghost_variables_t> get(const variable_t &v) const;
 
    static bool need_renaming();
    ghost_var_manager_t join(const ghost_var_manager_t &right_man,
@@ -44,12 +44,12 @@ namespace region_domain_impl {
    ghost_linear_constraint_system_t
    rename_linear_cst_sys(const linear_constraint_system_t &csts);
 
-   boost::optional<variable_t> rev_rename_var(const ghost_variable_t &v,
+   std::optional<variable_t> rev_rename_var(const ghost_variable_t &v,
                                               bool ignore_references) const;
-   boost::optional<linear_expression_t>
+   std::optional<linear_expression_t>
    rev_rename_linear_expr(const ghost_linear_expression_t &e,
                           bool ignore_references) const;
-   boost::optional<linear_constraint_t>
+   std::optional<linear_constraint_t>
    rev_rename_linear_cst(const ghost_linear_constraint_t &cst,
                          bool ignore_references) const;
  */
@@ -89,7 +89,7 @@ class ghost_variable_manager_with_fixed_naming {
 public:
   using ghost_variables_t =
       ghost_variables<Domain, GhostDomain, GhostDomainVarAlloc>;
-  using ghost_variable_kind = typename ghost_variables_t::ghost_variable_kind;  
+  using ghost_variable_kind = typename ghost_variables_t::ghost_variable_kind;
   using get_type_fn = std::function<variable_type(const variable_t &)>;
 
 private:
@@ -111,7 +111,7 @@ public:
     return *gvars_opt;
   }
 
-  boost::optional<ghost_variables_t> get(const variable_t &v) const {
+  std::optional<ghost_variables_t> get(const variable_t &v) const {
     auto &vfac = const_cast<varname_t *>(&(v.name()))->get_var_factory();
     auto alloc_fn = [](GhostDomainVarAlloc &alloc, const varname_t &name,
                        const std::string &role) {
@@ -150,7 +150,7 @@ public:
   }
 
   void forget(const variable_t &var, GhostDomain &val) {
-    if (boost::optional<ghost_variables_t> gvars = get(var)) {
+    if (std::optional<ghost_variables_t> gvars = get(var)) {
       (*gvars).forget(val);
     }
   }
@@ -158,7 +158,7 @@ public:
   void project(const variable_vector_t &vars, GhostDomain &val) {
     ghost_variable_vector_t gvars_vec;
     for (auto const &v : vars) {
-      if (boost::optional<ghost_variables_t> gvars = get(v)) {
+      if (std::optional<ghost_variables_t> gvars = get(v)) {
         (*gvars).add(gvars_vec);
       }
     }
@@ -184,7 +184,7 @@ public:
     ghost_variable_vector_t old_ghost_vars, new_ghost_vars;
     for (unsigned i = 0, sz = old_vars.size(); i < sz; ++i) {
       variable_t old_var = old_vars[i];
-      if (boost::optional<ghost_variables_t> old_gvars = get(old_var)) {
+      if (std::optional<ghost_variables_t> old_gvars = get(old_var)) {
         (*old_gvars).add(old_ghost_vars);
         variable_t new_var = new_vars[i];
         ghost_variables_t new_gvars = get_or_insert(new_var);
@@ -199,13 +199,13 @@ public:
   // The ghost domain doesn't know about references so we convert a
   // reference constraint into a linear constraint.
   // A reference variable can be ghosted by multiple ghost variables.
-  // The parameter @kind tells which one.  
+  // The parameter @kind tells which one.
   ghost_linear_constraint_t
   ghosting_ref_cst_to_linear_cst(const reference_constraint_t &ref_cst,
 				 ghost_variable_kind kind) {
 
     auto get_ghost_var = [this](const variable_t &var, ghost_variable_kind kind) ->
-      boost::optional<ghost_variable_t> {
+      std::optional<ghost_variable_t> {
       auto ghost_vars  = get_or_insert(var);
       if (kind == ghost_variable_kind::ADDRESS) {
 	return ghost_vars.get_var();
@@ -218,9 +218,9 @@ public:
 	  return ghost_vars.get_offset_and_size().get_size();
 	}
       }
-      return boost::none;
+      return std::nullopt;
     };
-      
+
     if (ref_cst.is_tautology()) {
       return ghost_linear_constraint_t::get_true();
     } else if (ref_cst.is_contradiction()) {
@@ -245,8 +245,8 @@ public:
       } else {
         assert(ref_cst.lhs().get_type().is_reference());
         assert(ref_cst.rhs().get_type().is_reference());
-	boost::optional<ghost_variable_t> x = get_ghost_var(ref_cst.lhs(), kind);
-	boost::optional<ghost_variable_t> y = get_ghost_var(ref_cst.rhs(), kind);
+	std::optional<ghost_variable_t> x = get_ghost_var(ref_cst.lhs(), kind);
+	std::optional<ghost_variable_t> y = get_ghost_var(ref_cst.rhs(), kind);
 	if (!x || !y) {
 	  return ghost_linear_constraint_t::get_true();
 	}
@@ -295,43 +295,43 @@ public:
     return std::move(csts);
   }
 
-  boost::optional<variable_t> rev_rename_var(const ghost_variable_t &v,
+  std::optional<variable_t> rev_rename_var(const ghost_variable_t &v,
                                              bool ignore_references) const {
 
     if (!ignore_references || !v.get_type().is_reference()) {
       return v;
     } else {
-      return boost::none;
+      return std::nullopt;
     }
   }
 
-  boost::optional<linear_expression_t>
+  std::optional<linear_expression_t>
   rev_rename_linear_expr(const ghost_linear_expression_t &e,
                          bool ignore_references) const {
     linear_expression_t out(e.constant());
     for (auto it = e.begin(), et = e.end(); it != et; ++it) {
       const ghost_variable_t &v = (*it).second;
       const number_t &coef = (*it).first;
-      if (boost::optional<variable_t> v_opt =
+      if (std::optional<variable_t> v_opt =
               rev_rename_var(v, ignore_references)) {
         out = out + (coef * (*v_opt));
       } else {
-        return boost::optional<linear_expression_t>();
+        return std::optional<linear_expression_t>();
       }
     }
     return out;
   }
 
-  boost::optional<linear_constraint_t>
+  std::optional<linear_constraint_t>
   rev_rename_linear_cst(const ghost_linear_constraint_t &cst,
                         bool ignore_references) const {
-    if (boost::optional<linear_expression_t> e =
+    if (std::optional<linear_expression_t> e =
             rev_rename_linear_expr(cst.expression(), ignore_references)) {
 
       return linear_constraint_t(
             *e, (typename linear_constraint_t::kind_t)cst.kind());
     } else {
-      return boost::optional<linear_constraint_t>();
+      return std::optional<linear_constraint_t>();
     }
   }
 };
@@ -356,7 +356,7 @@ public:
  *  ------------------------------
  * | region domain               |     variable
  *  ------------------------------
- * | array_adaptive domain       |     variable on non-smashed arrays and none for smashed 
+ * | array_adaptive domain       |     variable on non-smashed arrays and none for smashed
  *  ------------------------------
  * | array_smashing              |     fixed
  *  ------------------------------
@@ -413,7 +413,7 @@ class ghost_variable_manager_with_variable_naming {
   using ghost_variable_t = typename GhostDomain::variable_t;
   using ghost_variable_vector_t = typename GhostDomain::variable_vector_t;
   using ghost_varname_t = typename GhostDomain::varname_t;
-  
+
 public:
   using get_type_fn = std::function<variable_type(const variable_t &)>;
   // Map from variable to its ghost variables
@@ -488,12 +488,12 @@ public:
     }
   }
 
-  boost::optional<ghost_variables_t> get(const variable_t &v) const {
+  std::optional<ghost_variables_t> get(const variable_t &v) const {
     auto it = m_map.find(v);
     if (it != m_map.end()) {
       return it->second;
     } else {
-      return boost::none;
+      return std::nullopt;
     }
   }
 
@@ -655,7 +655,7 @@ public:
     new_left_vars.reserve(variables.size());
     new_right_vars.reserve(variables.size());
     for (const variable_t &v : variables) {
-      if (boost::optional<ghost_variables_t> old_right_gvars =
+      if (std::optional<ghost_variables_t> old_right_gvars =
               right_man.get(v)) {
         ghost_variables_t new_left_gvars = get_or_insert(v);
         ghost_variables_t new_right_gvars = create_gvars(right_alloc, v);
@@ -693,7 +693,7 @@ public:
   void project(const variable_vector_t &vars, GhostDomain &val) {
     ghost_variable_vector_t gvars_vec;
     for (auto const &v : vars) {
-      if (boost::optional<ghost_variables_t> gvars = get(v)) {
+      if (std::optional<ghost_variables_t> gvars = get(v)) {
         (*gvars).add(gvars_vec);
       }
     }
@@ -752,7 +752,7 @@ public:
   ghosting_ref_cst_to_linear_cst(const reference_constraint_t &ref_cst,
 				 ghost_variable_kind kind) {
     auto get_ghost_var = [this](const variable_t &var, ghost_variable_kind kind) ->
-      boost::optional<ghost_variable_t> {
+      std::optional<ghost_variable_t> {
       auto ghost_vars  = get_or_insert(var);
       if (kind == ghost_variable_kind::ADDRESS) {
 	return ghost_vars.get_var();
@@ -765,9 +765,9 @@ public:
 	  return ghost_vars.get_offset_and_size().get_size();
 	}
       }
-      return boost::none;
+      return std::nullopt;
     };
-      
+
     if (ref_cst.is_tautology()) {
       return ghost_linear_constraint_t::get_true();
     } else if (ref_cst.is_contradiction()) {
@@ -792,11 +792,11 @@ public:
       } else {
         assert(ref_cst.lhs().get_type().is_reference());
         assert(ref_cst.rhs().get_type().is_reference());
-	boost::optional<ghost_variable_t> x = get_ghost_var(ref_cst.lhs(), kind);
-	boost::optional<ghost_variable_t> y = get_ghost_var(ref_cst.rhs(), kind);
+	std::optional<ghost_variable_t> x = get_ghost_var(ref_cst.lhs(), kind);
+	std::optional<ghost_variable_t> y = get_ghost_var(ref_cst.rhs(), kind);
 	if (!x || !y) {
 	  return ghost_linear_constraint_t::get_true();
-	}	
+	}
         number_t offset = ref_cst.offset();
         if (ref_cst.is_equality()) {
           return ghost_linear_constraint_t(*x == *y + offset);
@@ -867,7 +867,7 @@ public:
     return out;
   }
 
-  boost::optional<variable_t> rev_rename_var(const ghost_variable_t &v,
+  std::optional<variable_t> rev_rename_var(const ghost_variable_t &v,
                                              bool ignore_references) const {
     auto it = m_rev_map.find(v);
     if (it != m_rev_map.end()) {
@@ -882,36 +882,36 @@ public:
         }
       }
     }
-    return boost::none;
+    return std::nullopt;
   }
 
-  boost::optional<linear_expression_t>
+  std::optional<linear_expression_t>
   rev_rename_linear_expr(const ghost_linear_expression_t &e,
                          bool ignore_references) const {
     linear_expression_t out(e.constant());
     for (auto it = e.begin(), et = e.end(); it != et; ++it) {
       const ghost_variable_t &v = (*it).second;
       const number_t &coef = (*it).first;
-      if (boost::optional<variable_t> v_opt =
+      if (std::optional<variable_t> v_opt =
               rev_rename_var(v, ignore_references)) {
         out = out + (coef * (*v_opt));
       } else {
-        return boost::optional<linear_expression_t>();
+        return std::optional<linear_expression_t>();
       }
     }
     return out;
   }
 
-  boost::optional<linear_constraint_t>
+  std::optional<linear_constraint_t>
   rev_rename_linear_cst(const ghost_linear_constraint_t &cst,
                         bool ignore_references) const {
-    if (boost::optional<linear_expression_t> e =
+    if (std::optional<linear_expression_t> e =
             rev_rename_linear_expr(cst.expression(), ignore_references)) {
 
       return linear_constraint_t(
             *e, (typename linear_constraint_t::kind_t)cst.kind());
     } else {
-      return boost::optional<linear_constraint_t>();
+      return std::optional<linear_constraint_t>();
     }
   }
 };

@@ -46,8 +46,8 @@ class apron_domain final
 public:
   std::string not_implemented_msg() const override {
     return "No Apron. Run cmake with -DCRAB_USE_APRON=ON";
-  }    
-};  
+  }
+};
 } // namespace domains
 } // namespace crab
 #else
@@ -169,16 +169,16 @@ private:
   size_t get_dims() const { return get_dims(m_apstate); }
 
   // If v is in the map then it maps v to a dimension, otherwise null
-  boost::optional<ap_dim_t> get_var_dim(const var_map_t &m,
+  std::optional<ap_dim_t> get_var_dim(const var_map_t &m,
                                         variable_t v) const {
     auto it = m.left.find(v);
     if (it != m.left.end())
       return it->second;
     else
-      return boost::optional<ap_dim_t>();
+      return std::optional<ap_dim_t>();
   }
 
-  boost::optional<ap_dim_t> get_var_dim(variable_t v) const {
+  std::optional<ap_dim_t> get_var_dim(variable_t v) const {
     return get_var_dim(m_var_map, v);
   }
 
@@ -369,7 +369,7 @@ private:
 
 #if 0
           crab::outs() << "Permutations \n";
-          ap_dimperm_fprint(stdout, perm_x);          
+          ap_dimperm_fprint(stdout, perm_x);
           crab::outs() << "Permutations \n";
           ap_dimperm_fprint(stdout, perm_y);
 #endif
@@ -559,7 +559,7 @@ private:
       return bound_t::plus_infinity();
     default: /* finite */
       assert(ap_scalar_infty(scalar) == 0);
-      
+
       switch(scalar->discr) {
       case AP_SCALAR_DOUBLE: {
 	number_t val;
@@ -575,7 +575,7 @@ private:
 	CRAB_ERROR("apron translation only covers double or mpq scalars");
       }
     }
-  }    
+  }
 
   void dump(const var_map_t &m, ap_state_ptr apstate) {
     crab::outs() << "\nNumber of dimensions=" << get_dims(apstate) << "\n";
@@ -827,7 +827,7 @@ public:
 	get_man(), ap_abstract0_meet(get_man(), false, &*m_apstate, &*x));
     }
   }
-  
+
   apron_domain_t operator&(const apron_domain_t &o) const override {
     crab::CrabStats::count(domain_name() + ".count.meet");
     crab::ScopedCrabStats __st__(domain_name() + ".meet");
@@ -859,7 +859,7 @@ public:
     //   return *this;
     // else {
 
-    
+
     ap_state_ptr x =
         apPtr(get_man(), ap_abstract0_copy(get_man(), &*m_apstate));
 
@@ -869,10 +869,10 @@ public:
     var_map_t m = merge_var_map(m_var_map, x, o.m_var_map, y);
 
     // widening precondition: the old value is included in the new value.
-    // widen(old, new) = widen(old,(join(old,new)))    
+    // widen(old, new) = widen(old,(join(old,new)))
     ap_state_ptr x_join_y = apPtr(get_man(),
 				  ap_abstract0_join(get_man(), false, &*x, &*y));
-    
+
     return apron_domain_t(
         apPtr(get_man(), ap_abstract0_widening(get_man(), &*x, &*x_join_y)),
         std::move(m), false /* do not compact */);
@@ -915,24 +915,24 @@ public:
 /////
 #if 0
 	  // widening w/o thresholds in the apron domain
-	  apron_domain_t res(apPtr(get_man(), 
-				   ap_abstract0_widening(get_man(), 
+	  apron_domain_t res(apPtr(get_man(),
+				   ap_abstract0_widening(get_man(),
 							 &*x, &*y)),
 			     std::move(m));
 	  // widening w/ thresholds in the interval domain
 	  auto intv_this  = this->to_interval_domain();
 	  auto intv_o     = o.to_interval_domain();
-	  auto intv_widen = intv_this.widening_thresholds(intv_o, ts);	    
+	  auto intv_widen = intv_this.widening_thresholds(intv_o, ts);
 	  // refine the apron domain using the widen intervals
 	  apron_domain_t apron_intv_widen;
 	  apron_intv_widen += intv_widen.to_linear_constraint_system();
 	  return res & apron_intv_widen;
 #else
     // widening precondition: the old value is included in the new value.
-    // widen(old, new) = widen(old,(join(old,new)))    
+    // widen(old, new) = widen(old,(join(old,new)))
     ap_state_ptr x_join_y = apPtr(get_man(),
 				  ap_abstract0_join(get_man(), false, &*x, &*y));
-	  
+
     ap_lincons0_array_t csts = make_thresholds(o, ts);
     apron_domain_t res(apPtr(get_man(), ap_abstract0_widening_threshold(
                                             get_man(), &*x, &*x_join_y, &csts)),
@@ -1067,7 +1067,7 @@ public:
   virtual interval_t operator[](const variable_t &v) override {
     return at(v);
   }
-  
+
   virtual interval_t at(const variable_t &v) const override {
     crab::CrabStats::count(domain_name() + ".count.to_intervals");
     crab::ScopedCrabStats __st__(domain_name() + ".to_intervals");
@@ -1081,7 +1081,7 @@ public:
     if (auto dim = get_var_dim(v)) {
       ap_interval_t *intv =
 	ap_abstract0_bound_dimension(get_man(), &*m_apstate, *dim);
-      
+
       if (ap_interval_is_top(intv)) {
         ap_interval_free(intv);
         return interval_t::top();
@@ -1210,7 +1210,7 @@ public:
   }
 
   DEFAULT_ENTAILS(apron_domain_t)
-  
+
   void assign(const variable_t &x, const linear_expression_t &e) override {
     crab::CrabStats::count(domain_name() + ".count.assign");
     crab::ScopedCrabStats __st__(domain_name() + ".assign");
@@ -1423,8 +1423,8 @@ public:
   }
 
   DEFAULT_SELECT(apron_domain_t)
-  DEFAULT_WEAK_ASSIGN(apron_domain_t)    
-  
+  DEFAULT_WEAK_ASSIGN(apron_domain_t)
+
   void backward_assign(const variable_t &x, const linear_expression_t &e,
                        const apron_domain_t &invariant) override {
     crab::CrabStats::count(domain_name() + ".count.backward_assign");
@@ -1574,7 +1574,7 @@ public:
   BOOL_OPERATIONS_NOT_IMPLEMENTED(apron_domain_t)
   ARRAY_OPERATIONS_NOT_IMPLEMENTED(apron_domain_t)
   REGION_AND_REFERENCE_OPERATIONS_NOT_IMPLEMENTED(apron_domain_t)
-  
+
   interval_domain_t to_interval_domain() {
     crab::CrabStats::count(domain_name() + ".count.to_interval_domain");
     crab::ScopedCrabStats __st__(domain_name() + ".to_interval_domain");
@@ -1752,7 +1752,7 @@ public:
   }
 
   /* begin intrinsics operations */
-  void intrinsic(std::string name, 
+  void intrinsic(std::string name,
 		 const variable_or_constant_vector_t &inputs,
                  const variable_vector_t &outputs) override {
     CRAB_WARN("Intrinsics ", name, " not implemented by ", domain_name());

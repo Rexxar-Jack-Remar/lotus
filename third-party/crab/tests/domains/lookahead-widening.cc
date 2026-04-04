@@ -10,7 +10,7 @@ using namespace crab::domain_impl;
 z_cfg_t *prog(variable_factory_t &vfac) {
 
   /*
-    x := 0; 
+    x := 0;
     y := 0;
     while (true) {
       if (x<=50) {
@@ -35,7 +35,7 @@ z_cfg_t *prog(variable_factory_t &vfac) {
   z_basic_block_t &bb4 = cfg->insert("bb4");
   z_basic_block_t &bb5 = cfg->insert("bb5");
   z_basic_block_t &bb6 = cfg->insert("bb6");
-  z_basic_block_t &bb7 = cfg->insert("bb7");    
+  z_basic_block_t &bb7 = cfg->insert("bb7");
   z_basic_block_t &exit = cfg->insert("exit");
   // adding control flow
   entry >> bb1;
@@ -83,7 +83,7 @@ int main(int argc, char **argv) {
     z_soct_domain_lw_t init;
     run(cfg, cfg->entry(), init, false, 2, 1, 0, stats_enabled);
   }
-  
+
   // free the CFG
   delete cfg;
 

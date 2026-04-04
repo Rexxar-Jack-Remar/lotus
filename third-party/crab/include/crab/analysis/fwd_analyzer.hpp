@@ -120,7 +120,7 @@ private:
           if (!suspicious_vars.is_bottom()) {
             crab::outs() << "\n*** Sanity check failed: " << suspicious_vars
                          << " might not be initialized  in "
-                         << get_cfg().get_func_decl().get_func_name() 
+                         << get_cfg().get_func_decl().get_func_name()
 			 << "\n    This lack of initialization can be legitimate with region statements "
 			 << "such as make_ref, gep_ref, int_to_ref "
 			 << "if the used regions are not read or modified in the code under analysis.\n";
@@ -142,9 +142,9 @@ private:
         for (unsigned i = 0; i < fdecl.get_num_outputs(); i++)
           m_formals += fdecl.get_output_name(i);
       }
-    }    
+    }
   }
-  
+
 public:
   fwd_analyzer(CFG cfg, abs_tr_t *abs_tr,
 	       // to create top and bottom abstract values
@@ -268,7 +268,7 @@ public:
 			     const fixpoint_parameters &fixpo_params)
     : m_abs_tr(new abs_tr_t(absval_fac.make_top())),
       m_analyzer(cfg, &*m_abs_tr, absval_fac, live,  fixpo_params) {}
-  
+
   intra_fwd_analyzer_wrapper(const intra_fwd_analyzer_wrapper &o) = delete;
 
   intra_fwd_analyzer_wrapper &

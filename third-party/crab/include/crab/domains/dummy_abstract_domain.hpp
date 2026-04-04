@@ -46,7 +46,7 @@ public:
   }
   void operator&=(const Derived &other) override {
     CRAB_ERROR(not_implemented_msg());
-  }  
+  }
   Derived operator&(const Derived &other) const override {
     CRAB_ERROR(not_implemented_msg());
   }
@@ -69,7 +69,7 @@ public:
   }
   interval_t at(const variable_t &v) const override {
     CRAB_ERROR(not_implemented_msg());
-  }  
+  }
   void operator+=(const linear_constraint_system_t &csts) override {
     CRAB_ERROR(not_implemented_msg());
   }
@@ -124,7 +124,7 @@ public:
   void assign_bool_cst(const variable_t &lhs,
                        const linear_constraint_t &rhs) override {
     CRAB_ERROR(not_implemented_msg());
-  }  
+  }
   void assign_bool_ref_cst(const variable_t &lhs,
                            const reference_constraint_t &rhs) override {
     CRAB_ERROR(not_implemented_msg());
@@ -136,7 +136,7 @@ public:
   void weak_assign_bool_cst(const variable_t &lhs,
                        const linear_constraint_t &rhs) override {
     CRAB_ERROR(not_implemented_msg());
-  }  
+  }
   void weak_assign_bool_var(const variable_t &lhs, const variable_t &rhs,
                        bool is_not_rhs) override {
     CRAB_ERROR(not_implemented_msg());
@@ -275,9 +275,9 @@ public:
   }
   void select_ref(const variable_t &lhs_ref, const variable_t &lhs_rgn,
                   const variable_t &cond, const variable_or_constant_t &ref1,
-                  const boost::optional<variable_t> &rgn1,
+                  const std::optional<variable_t> &rgn1,
                   const variable_or_constant_t &ref2,
-                  const boost::optional<variable_t> &rgn2) override {
+                  const std::optional<variable_t> &rgn2) override {
     CRAB_ERROR(not_implemented_msg());
   }
   boolean_value is_null_ref(const variable_t &ref) override {

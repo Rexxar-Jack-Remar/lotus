@@ -11,7 +11,7 @@
 #include <boost/graph/adjacency_list.hpp>
 #include <boost/graph/graph_traits.hpp>
 #include <boost/iterator/transform_iterator.hpp>
-#include <boost/optional.hpp>
+#include <optional>
 
 #include <functional> // for wrapper_reference and hash
 #include <memory>
@@ -469,7 +469,7 @@ public:
   using callsite_t = typename CG::callsite_t;
 
 private:
-  boost::optional<std::reference_wrapper<CG>> _ref;
+  std::optional<std::reference_wrapper<CG>> _ref;
 
 public:
   call_graph_ref(CG &cg) : _ref(std::reference_wrapper<CG>(cg)) {}

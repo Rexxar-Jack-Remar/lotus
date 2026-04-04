@@ -3,7 +3,7 @@
 #include <crab/fixpoint/thresholds.hpp>
 #include <crab/support/os.hpp>
 
-#include <boost/optional.hpp>
+#include <optional>
 
 namespace crab {
 namespace domains {
@@ -11,7 +11,7 @@ namespace domains {
 template <typename Number> class constant {
   using constant_t = constant<Number>;
 
-  boost::optional<Number> m_constant;
+  std::optional<Number> m_constant;
   bool m_is_bottom;
 
   constant(bool is_bottom);

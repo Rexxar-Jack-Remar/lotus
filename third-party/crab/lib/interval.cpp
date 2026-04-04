@@ -12,12 +12,12 @@ template <> q_interval_t q_interval_t::operator/(const q_interval_t &x) const {
   if (is_bottom() || x.is_bottom()) {
     return bottom();
   } else {
-    boost::optional<q_number> d = x.singleton();
+    std::optional<q_number> d = x.singleton();
     if (d && *d == 0) {
       // [_, _] / 0 = _|_
       return bottom();
     } else if (x[0]) {
-      boost::optional<q_number> n = singleton();
+      std::optional<q_number> n = singleton();
       if (n && *n == 0) {
         // 0 / [_, _] = 0
         return interval_t(q_number(0));
@@ -42,7 +42,7 @@ template <> z_interval_t z_interval_t::operator/(const z_interval_t &x) const {
     // Divisor is a singleton:
     //   the linear interval solver can perform many divisions where
     //   the divisor is a singleton interval. We optimize for this case.
-    if (boost::optional<z_number> n = x.singleton()) {
+    if (std::optional<z_number> n = x.singleton()) {
       z_number c = *n;
       if (c == 1) {
         return *this;
@@ -150,8 +150,8 @@ template <> z_interval_t z_interval_t::And(const z_interval_t &x) const {
   if (is_bottom() || x.is_bottom()) {
     return bottom();
   } else {
-    boost::optional<z_number> left_op = singleton();
-    boost::optional<z_number> right_op = x.singleton();
+    std::optional<z_number> left_op = singleton();
+    std::optional<z_number> right_op = x.singleton();
 
     if (left_op && right_op) {
       return interval_t((*left_op) & (*right_op));
@@ -167,14 +167,14 @@ template <> z_interval_t z_interval_t::Or(const z_interval_t &x) const {
   if (is_bottom() || x.is_bottom()) {
     return bottom();
   } else {
-    boost::optional<z_number> left_op = singleton();
-    boost::optional<z_number> right_op = x.singleton();
+    std::optional<z_number> left_op = singleton();
+    std::optional<z_number> right_op = x.singleton();
 
     if (left_op && right_op) {
       return interval_t((*left_op) | (*right_op));
     } else if (lb() >= 0 && x.lb() >= 0) {
-      boost::optional<z_number> left_ub = ub().number();
-      boost::optional<z_number> right_ub = x.ub().number();
+      std::optional<z_number> left_ub = ub().number();
+      std::optional<z_number> right_ub = x.ub().number();
 
       if (left_ub && right_ub) {
         z_number m = (*left_ub > *right_ub ? *left_ub : *right_ub);
@@ -192,8 +192,8 @@ template <> z_interval_t z_interval_t::Xor(const z_interval_t &x) const {
   if (is_bottom() || x.is_bottom()) {
     return bottom();
   } else {
-    boost::optional<z_number> left_op = singleton();
-    boost::optional<z_number> right_op = x.singleton();
+    std::optional<z_number> left_op = singleton();
+    std::optional<z_number> right_op = x.singleton();
 
     if (left_op && right_op) {
       return interval_t((*left_op) ^ (*right_op));
@@ -207,7 +207,7 @@ template <> z_interval_t z_interval_t::Shl(const z_interval_t &x) const {
   if (is_bottom() || x.is_bottom()) {
     return bottom();
   } else {
-    if (boost::optional<z_number> shift = x.singleton()) {
+    if (std::optional<z_number> shift = x.singleton()) {
       z_number k = *shift;
       if (k < 0) {
         // CRAB_ERROR("lshr shift operand cannot be negative");
@@ -232,7 +232,7 @@ template <> z_interval_t z_interval_t::AShr(const z_interval_t &x) const {
   if (is_bottom() || x.is_bottom()) {
     return bottom();
   } else {
-    if (boost::optional<z_number> shift = x.singleton()) {
+    if (std::optional<z_number> shift = x.singleton()) {
       z_number k = *shift;
       if (k < 0) {
         return top();
@@ -256,7 +256,7 @@ template <> z_interval_t z_interval_t::LShr(const z_interval_t &x) const {
   if (is_bottom() || x.is_bottom()) {
     return bottom();
   } else {
-    if (boost::optional<z_number> shift = x.singleton()) {
+    if (std::optional<z_number> shift = x.singleton()) {
       z_number k = *shift;
       if (k < 0) {
         return top();
@@ -296,7 +296,7 @@ void convert_bounds(q_bound_t b1, z_bound_t &b2) {
 namespace linear_interval_solver_impl {
 template <>
 z_interval_t trim_interval(const z_interval_t &i, const z_interval_t &j) {
-  if (boost::optional<z_number> c = j.singleton()) {
+  if (std::optional<z_number> c = j.singleton()) {
     if (i.lb() == *c) {
       return z_interval_t(*c + 1, i.ub());
     } else if (i.ub() == *c) {

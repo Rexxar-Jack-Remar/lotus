@@ -320,7 +320,7 @@ Constant *getConstantInt(CfgBuilder *clamCfgBuilder, clam_abstract_domain inv, c
     llvm::Optional<var_t> lhs = clamCfgBuilder->getCrabVariable(v);
     if (lhs.hasValue()) {
       auto interval = inv[lhs.getValue()];
-      if (boost::optional<number_t> constant_opt = interval.singleton()) {
+      if (auto constant_opt = interval.singleton()) {
 	if ((*constant_opt).fits_int64()) {
 	  return ConstantInt::get(v.getType(), (int64_t)(*constant_opt), 10);	      
 	}

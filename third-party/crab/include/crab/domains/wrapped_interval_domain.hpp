@@ -18,7 +18,7 @@
 #include <crab/numbers/wrapint.hpp>
 #include <crab/support/stats.hpp>
 
-#include <boost/optional.hpp>
+#include <optional>
 
 namespace crab {
 namespace domains {
@@ -65,7 +65,7 @@ private:
   void add(const linear_constraint_system_t &csts,
            std::size_t threshold = max_reduction_cycles) {
     if (!this->is_bottom()) {
-      solver_t solver(csts, threshold);      
+      solver_t solver(csts, threshold);
       solver.run(this->_env);
     }
   }
@@ -165,7 +165,7 @@ public:
     this->_env = this->_env & e._env;
     CRAB_LOG("wrapped-int", crab::outs() << *this << "\n";);
   }
-  
+
   wrapped_interval_domain_t
   operator&(const wrapped_interval_domain_t &e) const override {
     crab::CrabStats::count(domain_name() + ".count.meet");
@@ -264,7 +264,7 @@ public:
   void assign(const variable_t &x, const linear_expression_t &e) override {
     crab::CrabStats::count(domain_name() + ".count.assign");
     crab::ScopedCrabStats __st__(domain_name() + ".assign");
-    if (boost::optional<variable_t> v = e.get_variable()) {
+    if (std::optional<variable_t> v = e.get_variable()) {
       this->_env.set(x, this->_env.at(*v));
     } else {
       wrapped_interval_t r = eval_expr(
@@ -279,7 +279,7 @@ public:
   void weak_assign(const variable_t &x, const linear_expression_t &e) override {
     crab::CrabStats::count(domain_name() + ".count.weak_assign");
     crab::ScopedCrabStats __st__(domain_name() + ".weak_assign");
-    if (boost::optional<variable_t> v = e.get_variable()) {
+    if (std::optional<variable_t> v = e.get_variable()) {
       this->_env.join(x, this->_env.at(*v));
     } else {
       wrapped_interval_t r = eval_expr(
@@ -290,7 +290,7 @@ public:
     CRAB_LOG("wrapped-int", crab::outs()
 	     << "weak_assign(" << x << "," << e << ")=" << _env.at(x) << "\n");
   }
-  
+
   void apply(arith_operation_t op, const variable_t &x, const variable_t &y,
              const variable_t &z) override {
     crab::CrabStats::count(domain_name() + ".count.apply");
@@ -423,22 +423,22 @@ public:
     wrapped_interval_t xi = wrapped_interval_t::bottom();
 
     switch (op) {
-    case OP_AND: 
+    case OP_AND:
       xi = yi.And(zi);
       break;
-    case OP_OR: 
+    case OP_OR:
       xi = yi.Or(zi);
       break;
-    case OP_XOR: 
+    case OP_XOR:
       xi = yi.Xor(zi);
       break;
-    case OP_SHL: 
+    case OP_SHL:
       xi = yi.Shl(zi);
       break;
-    case OP_LSHR: 
+    case OP_LSHR:
       xi = yi.LShr(zi);
       break;
-    case OP_ASHR: 
+    case OP_ASHR:
       xi = yi.AShr(zi);
       break;
     }
@@ -456,22 +456,22 @@ public:
         (x.get_type().is_integer() ? x.get_type().get_integer_bitwidth() : 0));
     wrapped_interval_t xi = wrapped_interval_t::bottom();
     switch (op) {
-    case OP_AND: 
+    case OP_AND:
       xi = yi.And(zi);
       break;
-    case OP_OR: 
+    case OP_OR:
       xi = yi.Or(zi);
       break;
-    case OP_XOR: 
+    case OP_XOR:
       xi = yi.Xor(zi);
       break;
-    case OP_SHL: 
+    case OP_SHL:
       xi = yi.Shl(zi);
       break;
-    case OP_LSHR: 
+    case OP_LSHR:
       xi = yi.LShr(zi);
       break;
-    case OP_ASHR: 
+    case OP_ASHR:
       xi = yi.AShr(zi);
       break;
     }
@@ -510,7 +510,7 @@ public:
     copy += neg_cst;
     return copy.is_bottom();
   }
-  
+
   // backward arithmetic operations
   void backward_assign(const variable_t &x, const linear_expression_t &e,
                        const wrapped_interval_domain_t &inv) override {
@@ -539,7 +539,7 @@ public:
   ARRAY_OPERATIONS_NOT_IMPLEMENTED(wrapped_interval_domain_t)
   REGION_AND_REFERENCE_OPERATIONS_NOT_IMPLEMENTED(wrapped_interval_domain_t)
   DEFAULT_SELECT(wrapped_interval_domain_t)
-  
+
   void forget(const variable_vector_t &variables) override {
     if (is_bottom() || is_top()) {
       return;
@@ -893,7 +893,7 @@ public:
   using typename abstract_domain_t::variable_or_constant_t;
   using typename abstract_domain_t::variable_t;
   using typename abstract_domain_t::variable_vector_t;
-  using typename abstract_domain_t::variable_or_constant_vector_t;    
+  using typename abstract_domain_t::variable_or_constant_vector_t;
   using number_t = Number;
   using varname_t = VariableName;
   using wrapped_interval_t = wrapped_interval<number_t>;
@@ -1071,7 +1071,7 @@ public:
     _limit_env = _limit_env & o._limit_env;
     _init_set = _init_set & o._init_set;
   }
-  
+
   this_type operator&(const this_type &o) const override {
     return this_type(_w_int_dom & o._w_int_dom, _limit_env & o._limit_env,
                      _init_set & o._init_set);
@@ -1134,7 +1134,7 @@ public:
   virtual interval_t at(const variable_t &v) const override {
     return _w_int_dom.at(v);
   }
-  
+
   wrapped_interval_t get_wrapped_interval(const variable_t &v) const {
     return _w_int_dom.get_wrapped_interval(v);
   }
@@ -1241,7 +1241,7 @@ public:
   }
 
   DEFAULT_WEAK_ASSIGN(this_type)
-  
+
   void backward_assign(const variable_t &x, const linear_expression_t &e,
                        const this_type &invariant) override {
     _w_int_dom.backward_assign(x, e, invariant._w_int_dom);
@@ -1335,7 +1335,7 @@ public:
   ARRAY_OPERATIONS_NOT_IMPLEMENTED(this_type)
   REGION_AND_REFERENCE_OPERATIONS_NOT_IMPLEMENTED(this_type)
   DEFAULT_SELECT(this_type)
-  
+
   void write(crab_os &o) const override {
     // o << "(" << _w_int_dom << "," << _limit_env << "," << _init_set << ")";
     o << "(" << _w_int_dom << "," << _limit_env << ")";
@@ -1519,7 +1519,7 @@ public:
   using typename abstract_domain_t::variable_or_constant_t;
   using typename abstract_domain_t::variable_t;
   using typename abstract_domain_t::variable_vector_t;
-  using typename abstract_domain_t::variable_or_constant_vector_t;    
+  using typename abstract_domain_t::variable_or_constant_vector_t;
   using number_t = typename NumDom::number_t;
   using varname_t = typename NumDom::varname_t;
   using bitwidth_t = typename variable_t::bitwidth_t;
@@ -1728,12 +1728,12 @@ private:
     }
 
 #if 0
-    { // Propagate wrapped intervals to the relational domain. 
+    { // Propagate wrapped intervals to the relational domain.
       linear_constraint_system_t csts;
       for (auto const& v: rel_vars) {
 	interval_t i = _product.first()[v];
-	boost::optional<number_t> lb = i.lb().number();
-	boost::optional<number_t> ub = i.ub().number();
+	std::optional<number_t> lb = i.lb().number();
+	std::optional<number_t> ub = i.ub().number();
 	if (lb) csts += linear_constraint_t(v >= *lb);
 	if (ub) csts += linear_constraint_t(v <= *ub);
       }
@@ -1822,7 +1822,7 @@ public:
     _product &= other._product;
     CRAB_LOG("wrapped-num", crab::outs() << _product << "\n";);
   }
-  
+
   wrapped_numerical_domain_t
   operator&(const wrapped_numerical_domain_t &other) const override {
     CRAB_LOG("wrapped-num", crab::outs() << "MEET " << _product << " "
@@ -1956,7 +1956,7 @@ public:
   bool entails(const linear_constraint_t &cst) const override {
     return _produc.second().entails(cst);
   }
-  
+
   void set(const variable_t &x, interval_t intv) {
     // reduced_domain_product2 does not define set method
     _product.first().set(x, intv);
@@ -1970,7 +1970,7 @@ public:
   virtual interval_t at(const variable_t &v) const override {
     return _product.at(v);
   }
-  
+
   void operator-=(const variable_t &v) { _product -= v; }
 
   // backward arithmetic operations

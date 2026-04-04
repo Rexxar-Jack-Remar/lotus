@@ -32,7 +32,7 @@ q_cfg_t *prog(variable_factory_t &vfac) {
 
 /* Example of how to infer invariants from the above CFG */
 int main(int argc, char **argv) {
-#ifdef HAVE_LDD  
+#ifdef HAVE_LDD
   bool stats_enabled = false;
   if (!crab_tests::parse_user_options(argc, argv, stats_enabled)) {
     return 0;

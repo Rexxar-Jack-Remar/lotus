@@ -198,13 +198,13 @@ z_cfg_t *m(variable_factory_t &vfac) {
   exit.callsite("foo", {w}, {z3});
   exit.assertion(w == 17); // provable even if we don't join calling contexts
   /// At this callsite, z3 = 14
-  /// We have the summary (after joining calling contexts): 
+  /// We have the summary (after joining calling contexts):
   ///	I={x -> [3, 14]}
   ///   O={x -> [3, 14], z -> [6, 17], z-x<=3, x-z<=-3}
   /// Without the difference constraints w should be [6,17]. However,
   /// with the difference constraints, w is 17 (i.e., no lose of
   /// precision).
-  /// 
+  ///
   exit.callsite("bar", {y4}, {x3});
   exit.assertion(y4 == 7);
   exit.callsite("bar", {y5}, {x4});
@@ -223,7 +223,7 @@ using inter_params_t = top_down_inter_analyzer_parameters<callgraph_t>;
 
 int main(int argc, char **argv) {
 #ifdef HAVE_ELINA
-  
+
   bool stats_enabled = false;
   if (!crab_tests::parse_user_options(argc, argv, stats_enabled)) {
     return 0;
@@ -246,14 +246,14 @@ int main(int argc, char **argv) {
   z_oct_elina_domain_t init;
   crab::outs() << "Running top-down inter-procedural analysis with "
 	       << init.domain_name() << "\n";
-  
+
   /////////////////////////////////////////
   // it should prove all assertions
   /////////////////////////////////////////
   inter_params_t params1;
   td_inter_run(cg, init, params1, true, false, false);
   /////////////////////////////////////////
-  // it should prove all assertions (see above comments)    
+  // it should prove all assertions (see above comments)
   /////////////////////////////////////////
   inter_params_t params2;
   params2.max_call_contexts = 3;

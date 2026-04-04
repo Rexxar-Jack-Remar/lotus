@@ -198,13 +198,13 @@ z_cfg_t *m(variable_factory_t &vfac) {
   exit.callsite("foo", {w}, {z3});
   exit.assertion(w == 17); // provable even if we don't join calling contexts
   /// At this callsite, z3 = 14
-  /// We have the summary (after joining calling contexts): 
+  /// We have the summary (after joining calling contexts):
   ///	I={x -> [3, 14]}
   ///   O={x -> [3, 14], z -> [6, 17], z-x<=3, x-z<=-3}
   /// Without the difference constraints w should be [6,17]. However,
   /// with the difference constraints, w is 17 (i.e., no lose of
   /// precision).
-  /// 
+  ///
   exit.callsite("bar", {y4}, {x3});
   exit.assertion(y4 == 7);
   exit.callsite("bar", {y5}, {x4});

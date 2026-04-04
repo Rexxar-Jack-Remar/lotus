@@ -11,7 +11,7 @@ z_wrapped_interval_t mk_interval(z_number c,
 				 typename crab::wrapint::bitwidth_t w) {
   return z_wrapped_interval_t::mk_winterval(c, w);
 }
-  
+
 template <>
 q_wrapped_interval_t mk_interval(q_number c,
 				 typename crab::wrapint::bitwidth_t w) {
@@ -76,7 +76,7 @@ z_wrapped_interval_t upper_half_line(const z_wrapped_interval_t &i,
 				     bool is_signed) {
   return i.upper_half_line(is_signed);
 }
-  
+
 template <>
 q_wrapped_interval_t upper_half_line(const q_wrapped_interval_t &i,
 				     bool is_signed) {

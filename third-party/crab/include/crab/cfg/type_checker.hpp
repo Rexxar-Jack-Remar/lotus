@@ -4,7 +4,7 @@
 #include <crab/support/debug.hpp>
 #include <crab/support/os.hpp>
 
-#include <boost/optional.hpp>
+#include <optional>
 #include <boost/range/iterator_range.hpp>
 
 namespace crab {
@@ -304,7 +304,7 @@ public:
     check_varname(lhs);
     check_num(lhs, "lhs must be integer or real", s);
 
-    if (boost::optional<variable_t> v1 = op1.get_variable()) {
+    if (std::optional<variable_t> v1 = op1.get_variable()) {
       check_varname(*v1);
       check_same_type(lhs, *v1,
                       "first operand cannot have different type from lhs", s);
@@ -312,7 +312,7 @@ public:
       CRAB_ERROR("(type checking) first binary operand must be a variable in ",
                  s);
     }
-    if (boost::optional<variable_t> v2 = op2.get_variable()) {
+    if (std::optional<variable_t> v2 = op2.get_variable()) {
       check_varname(*v2);
       check_same_type(lhs, *v2,
                       "second operand cannot have different type from lhs", s);
@@ -521,7 +521,7 @@ public:
     check_num_or_var(e_sz, "array element size must be number or variable", s);
     check_num_or_var(v, "array value must be number or variable", s);
     // TODO: check_varname lb and ub if variables
-    if (boost::optional<variable_t> vv = v.get_variable()) {
+    if (std::optional<variable_t> vv = v.get_variable()) {
       check_varname(*vv);
       check_array_and_scalar_type(a, *vv, s);
     }
@@ -557,7 +557,7 @@ public:
     }
     check_num_or_var(e_sz, "array element size must be number or variable", s);
     check_num_or_var(v, "array value must be number or variable", s);
-    if (boost::optional<variable_t> vv = v.get_variable()) {
+    if (std::optional<variable_t> vv = v.get_variable()) {
       check_varname(*vv);
       check_array_and_scalar_type(a, *vv, s);
     }

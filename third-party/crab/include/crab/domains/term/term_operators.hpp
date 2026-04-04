@@ -4,8 +4,7 @@
 #include <crab/support/debug.hpp>
 #include <crab/support/os.hpp>
 
-#include <boost/optional.hpp>
-#include <boost/utility/string_ref.hpp>
+#include <optional>
 
 namespace crab {
 namespace domains {
@@ -19,12 +18,12 @@ public:
   constexpr term_operator_t(uint32_t value, bool is_reserved = true)
     : m_value(value), m_reserved(is_reserved) {}
   // used for defining new user operators
-  static term_operator_t make_operator(uint32_t value);  
+  static term_operator_t make_operator(uint32_t value);
   ~term_operator_t() = default;
   constexpr operator uint32_t() const { return m_value; }
   constexpr uint32_t value() const { return m_value; }
   constexpr bool is_reserved() const { return m_reserved;}
-  constexpr static uint32_t first_nonreserved_value() { return 100;}  
+  constexpr static uint32_t first_nonreserved_value() { return 100;}
   friend crab::crab_os &operator<<(crab::crab_os &o, term_operator_t op);
 };
 
@@ -45,15 +44,15 @@ constexpr term_operator_t TERM_OP_XOR(13);
 constexpr term_operator_t TERM_OP_SHL(14);
 constexpr term_operator_t TERM_OP_LSHR(15);
 constexpr term_operator_t TERM_OP_ASHR(16);
-constexpr term_operator_t TERM_OP_FUNCTION(17);  
-  
+constexpr term_operator_t TERM_OP_FUNCTION(17);
+
 /* Convert between Crab operators and term domain uninterpreted functors */
 term_operator_t conv2termop(arith_operation_t op);
 term_operator_t conv2termop(bitwise_operation_t op);
 term_operator_t conv2termop(bool_operation_t op);
-boost::optional<arith_operation_t> conv2arith(term_operator_t op);
-boost::optional<bitwise_operation_t> conv2bitwise(term_operator_t op);
-boost::optional<bool_operation_t> conv2bool(term_operator_t op);
+std::optional<arith_operation_t> conv2arith(term_operator_t op);
+std::optional<bitwise_operation_t> conv2bitwise(term_operator_t op);
+std::optional<bool_operation_t> conv2bool(term_operator_t op);
 } // end namespace term
 } // end namespace domains
 } // end namespace crab

@@ -66,7 +66,7 @@ private:
     virtual void operator|=(const abstract_domain_concept &abs) = 0;
     virtual std::unique_ptr<abstract_domain_concept>
     operator&(const abstract_domain_concept &abs) const = 0;
-    virtual void operator&=(const abstract_domain_concept &abs) = 0;    
+    virtual void operator&=(const abstract_domain_concept &abs) = 0;
     virtual std::unique_ptr<abstract_domain_concept>
     operator||(const abstract_domain_concept &abs) const = 0;
     virtual std::unique_ptr<abstract_domain_concept>
@@ -79,9 +79,9 @@ private:
     virtual void apply(arith_operation_t op, const variable_t &x,
                        const variable_t &y, number_t k) = 0;
     virtual void assign(const variable_t &x, const linear_expression_t &e) = 0;
-    virtual void weak_assign(const variable_t &x, const linear_expression_t &e) = 0;    
+    virtual void weak_assign(const variable_t &x, const linear_expression_t &e) = 0;
     virtual void operator+=(const linear_constraint_system_t &csts) = 0;
-    virtual bool entails(const linear_constraint_t &cst) const = 0;    
+    virtual bool entails(const linear_constraint_t &cst) const = 0;
     virtual void apply(bitwise_operation_t op, const variable_t &x,
                        const variable_t &y, const variable_t &z) = 0;
     virtual void apply(bitwise_operation_t op, const variable_t &x,
@@ -89,7 +89,7 @@ private:
     virtual void apply(int_conv_operation_t op, const variable_t &dst,
                        const variable_t &src) = 0;
     virtual void select(const variable_t &lhs, const linear_constraint_t &cond,
-			const linear_expression_t &e1,  const linear_expression_t &e2) = 0;    
+			const linear_expression_t &e1,  const linear_expression_t &e2) = 0;
     virtual void assign_bool_cst(const variable_t &lhs,
                                  const linear_constraint_t &rhs) = 0;
     virtual void assign_bool_ref_cst(const variable_t &lhs,
@@ -149,15 +149,15 @@ private:
     virtual void select_ref(const variable_t &lhs_ref, const variable_t &lhs_rgn,
 			    const variable_t &cond,
 			    const variable_or_constant_t &ref1,
-			    const boost::optional<variable_t> &rgn1,
+			    const std::optional<variable_t> &rgn1,
 			    const variable_or_constant_t &ref2,
-			    const boost::optional<variable_t> &rgn2) = 0;
-    virtual boolean_value is_null_ref(const variable_t &ref) = 0;    
+			    const std::optional<variable_t> &rgn2) = 0;
+    virtual boolean_value is_null_ref(const variable_t &ref) = 0;
     virtual bool get_allocation_sites(const variable_t &ref,
 				      std::vector<allocation_site> &alloc_sites) = 0;
     virtual bool get_tags(const variable_t &rgn, const variable_t &ref,
 			  std::vector<uint64_t> &tags) = 0;
-    
+
     virtual void backward_apply(arith_operation_t op, const variable_t &x,
                                 const variable_t &y, const variable_t &z,
                                 const abstract_domain_concept &invariant) = 0;
@@ -207,7 +207,7 @@ private:
                           const abstract_domain_concept &invariant) = 0;
     virtual void operator-=(const variable_t &v) = 0;
     virtual interval_t operator[](const variable_t &v) = 0;
-    virtual interval_t at(const variable_t &v) const = 0;    
+    virtual interval_t at(const variable_t &v) const = 0;
     virtual linear_constraint_system_t to_linear_constraint_system() const = 0;
     virtual disjunctive_linear_constraint_system_t
     to_disjunctive_linear_constraint_system() const = 0;
@@ -286,7 +286,7 @@ private:
     void operator&=(const abstract_domain_concept &abs) override {
       m_inv &= static_cast<const abstract_domain_model *>(&abs)->m_inv;
     }
-    
+
     // unsafe: if the underlying domain in abs is not Domain then it will crash
     std::unique_ptr<abstract_domain_concept>
     operator&(const abstract_domain_concept &abs) const override {
@@ -425,7 +425,7 @@ private:
     void region_cast(const variable_t &src_reg,
                      const variable_t &dst_reg) override {
       m_inv.region_cast(src_reg, dst_reg);
-    }    
+    }
     void ref_make(const variable_t &ref, const variable_t &reg,
 		  const variable_or_constant_t &size,
 		  const allocation_site &as) override {
@@ -462,9 +462,9 @@ private:
     void select_ref(const variable_t &lhs_ref, const variable_t &lhs_rgn,
 		    const variable_t &cond,
 		    const variable_or_constant_t &ref1,
-		    const boost::optional<variable_t> &rgn1,
+		    const std::optional<variable_t> &rgn1,
 		    const variable_or_constant_t &ref2,
-		    const boost::optional<variable_t> &rgn2) override {
+		    const std::optional<variable_t> &rgn2) override {
       m_inv.select_ref(lhs_ref, lhs_rgn, cond, ref1, rgn1, ref2, rgn2);
     }
     boolean_value is_null_ref(const variable_t &ref) override {
@@ -478,7 +478,7 @@ private:
 		  std::vector<uint64_t> &tags) override {
       return m_inv.get_tags(rgn, ref, tags);
     }
-        
+
     // unsafe: if the underlying domain in invariant is not Domain then it will
     // crash
     void backward_apply(arith_operation_t op, const variable_t &x,
@@ -600,7 +600,7 @@ private:
     }
     interval_t at(const variable_t &v) const override {
       return m_inv.at(v);
-    }    
+    }
     linear_constraint_system_t to_linear_constraint_system() const override {
       return m_inv.to_linear_constraint_system();
     }
@@ -694,7 +694,7 @@ public:
   }
   void operator&=(const abstract_domain &abs) override {
     m_concept->operator&=(*(abs.m_concept));
-  }  
+  }
   abstract_domain operator&(const abstract_domain &abs) const override {
     return abstract_domain(std::move(m_concept->operator&(*(abs.m_concept))));
   }
@@ -850,9 +850,9 @@ public:
   void select_ref(const variable_t &lhs_ref, const variable_t &lhs_rgn,
 		  const variable_t &cond,
 		  const variable_or_constant_t &ref1,
-		  const boost::optional<variable_t> &rgn1,
+		  const std::optional<variable_t> &rgn1,
 		  const variable_or_constant_t &ref2,
-		  const boost::optional<variable_t> &rgn2) override {
+		  const std::optional<variable_t> &rgn2) override {
     m_concept->select_ref(lhs_ref, lhs_rgn, cond, ref1, rgn1, ref2, rgn2);
   }
   boolean_value is_null_ref(const variable_t &ref) override {
@@ -866,7 +866,7 @@ public:
 		std::vector<uint64_t> &tags) override {
     return m_concept->get_tags(rgn, ref, tags);
   }
-  
+
   void backward_apply(arith_operation_t op, const variable_t &x,
                       const variable_t &y, const variable_t &z,
                       const abstract_domain &invariant) override {
@@ -944,7 +944,7 @@ public:
   }
   interval_t at(const variable_t &v) const override {
     return m_concept->at(v);
-  }  
+  }
   linear_constraint_system_t to_linear_constraint_system() const override {
     return m_concept->to_linear_constraint_system();
   }
@@ -1105,7 +1105,7 @@ public:
     detach();
     norm() &= o.norm();
   }
-  
+
   abstract_domain_ref operator&(const abstract_domain_ref &o) const override {
     return create(norm() & o.norm());
   }
@@ -1140,7 +1140,7 @@ public:
     detach();
     norm().assign(x, e);
   }
-  
+
   void weak_assign(const variable_t &x, const linear_expression_t &e) override {
     detach();
     norm().weak_assign(x, e);
@@ -1150,7 +1150,7 @@ public:
     detach();
     norm().operator+=(csts);
   }
-  
+
   bool entails(const linear_constraint_t &cst) const override {
     return norm().entails(cst);
   }
@@ -1206,7 +1206,7 @@ public:
     detach();
     norm().weak_assign_bool_var(lhs, rhs, is_not_rhs);
   }
-  
+
   void apply_binary_bool(bool_operation_t op, const variable_t &x,
                          const variable_t &y, const variable_t &z) override {
     detach();
@@ -1274,14 +1274,14 @@ public:
     detach();
     norm().region_cast(src_reg, dst_reg);
   }
-  
+
   void ref_make(const variable_t &ref, const variable_t &reg,
 		const variable_or_constant_t &size,
 		const allocation_site &as) override {
     detach();
     norm().ref_make(ref, reg, size, as);
   }
-  
+
   void ref_free(const variable_t &reg, const variable_t &ref) override {
     detach();
     norm().ref_free(reg, ref);
@@ -1326,9 +1326,9 @@ public:
   void select_ref(const variable_t &lhs_ref, const variable_t &lhs_rgn,
 		  const variable_t &cond,
 		  const variable_or_constant_t &ref1,
-		  const boost::optional<variable_t> &rgn1,
+		  const std::optional<variable_t> &rgn1,
 		  const variable_or_constant_t &ref2,
-		  const boost::optional<variable_t> &rgn2) override {
+		  const std::optional<variable_t> &rgn2) override {
     detach();
     norm().select_ref(lhs_ref, lhs_rgn, cond, ref1, rgn1, ref2, rgn2);
   }
@@ -1346,7 +1346,7 @@ public:
     detach();
     return norm().get_tags(rgn, ref, tags);
   }
-  
+
   void backward_apply(arith_operation_t op, const variable_t &x,
                       const variable_t &y, const variable_t &z,
                       const abstract_domain_ref &invariant) override {
@@ -1450,7 +1450,7 @@ public:
     detach();
     return norm().operator[](v);
   }
-  
+
   interval_t at(const variable_t &v) const override {
     return norm().at(v);
   }

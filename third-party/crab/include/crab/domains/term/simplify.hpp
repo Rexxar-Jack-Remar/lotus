@@ -1,6 +1,6 @@
 #pragma once
 
-#include <boost/optional.hpp>
+#include <optional>
 #include <crab/domains/term/term_expr.hpp>
 #include <crab/domains/term/term_operators.hpp>
 
@@ -30,7 +30,7 @@ public:
   // This should not modify the term table
   // FIXME: cannot make const the method without changing
   // constness of other methods.
-  virtual boost::optional<term_id_t> simplify_term(term_id_t t) = 0;
+  virtual std::optional<term_id_t> simplify_term(term_id_t t) = 0;
 };
 
 // Trivial simplifier by giving standard mathematical meaning
@@ -44,7 +44,7 @@ template <class Num> class NumSimplifier : Simplifier<Num, term_operator_t> {
   using term_t = typename term_table_t::term_t;
 
   // Simplify term f(left,right)
-  boost::optional<term_id_t> simplify_term(term_operator_t f, term_id_t left,
+  std::optional<term_id_t> simplify_term(term_operator_t f, term_id_t left,
                                            term_id_t right) {
     // Only consider these two rules:
     //   '/'('*'(x,y),x) = y
@@ -68,7 +68,7 @@ template <class Num> class NumSimplifier : Simplifier<Num, term_operator_t> {
       }
     }
     default:
-      return boost::optional<term_id_t>();
+      return std::optional<term_id_t>();
     }
   }
 
@@ -77,7 +77,7 @@ public:
 
   void simplify() {}
 
-  boost::optional<term_id_t> simplify_term(term_id_t t) {
+  std::optional<term_id_t> simplify_term(term_id_t t) {
     if (term_t *tt = this->_ttbl.get_term_ptr(t)) {
       if (tt->kind() == TERM_APP) {
         const std::vector<term_id_t> &args(term_args(tt));
@@ -85,7 +85,7 @@ public:
         return simplify_term(term_ftor(tt), args[0], args[1]);
       }
     }
-    return boost::optional<term_id_t>();
+    return std::optional<term_id_t>();
   }
 };
 
