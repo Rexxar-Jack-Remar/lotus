@@ -3,11 +3,12 @@
 
 #include "Checker/Pulse/Core/PulseAbstractValue.h"
 
+#include <cstdint>
 #include <map>
-#include <set>
-#include <vector>
-
 #include <optional>
+#include <set>
+#include <string>
+#include <vector>
 
 namespace pulse {
 
