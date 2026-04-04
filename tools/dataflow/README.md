@@ -50,23 +50,26 @@ canonical dump format.
 lotus-dfa --analysis=liveness --engine=both --out-dir=/tmp/dfa /path/to/file.bc
 
 # Run APA with a specific elimination backend
-lotus-dfa-apa --analysis=liveness --elim-method=adt-simple /path/to/file.bc
+lotus-dfa-apa --analysis=liveness --elim-method=adt-simple --stdout /path/to/file.bc
 
 # Run only one engine (for debugging)
 lotus-dfa --analysis=liveness --engine=elim --out-dir=/tmp/dfa /path/to/file.bc
 ```
 
+By default these tools stay quiet unless you provide `--out-dir`. Pass
+`--stdout` to print analysis results to the terminal explicitly.
+
 ## Engine-specific tools
 
 ```bash
 # APA / elimination-based driver
-lotus-dfa-apa --analysis=liveness --elim-method=adt-simple /path/to/file.bc
+lotus-dfa-apa --analysis=liveness --elim-method=adt-simple --stdout /path/to/file.bc
 
 # Mono-based driver
-lotus-dfa-mono --analysis=liveness /path/to/file.bc
+lotus-dfa-mono --analysis=liveness --stdout /path/to/file.bc
 
 # IFDS driver
-lotus-dfa-ifds --analysis=taint /path/to/file.bc
+lotus-dfa-ifds --analysis=taint --stdout /path/to/file.bc
 ```
 
 ## Canonical format

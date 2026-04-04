@@ -2,6 +2,7 @@
 #define LOTUS_DATAFLOW_MONO_ANALYSES_INTRA_INTRALIVEVARIABLES_H_
 
 #include "Dataflow/Mono/Support/Result.h"
+#include "Dataflow/Mono/Support/MonoDebug.h"
 
 #include <memory>
 
@@ -30,7 +31,9 @@ namespace mono {
  * @param f The function to analyze
  * @return DataFlowResult containing live SSA value sets for each instruction
  */
-std::unique_ptr<DataFlowResult> runLiveVariablesAnalysis(llvm::Function *f);
+std::unique_ptr<DataFlowResult>
+runLiveVariablesAnalysis(llvm::Function *f,
+                         const DebugConfig &DebugCfg = DebugConfig{});
 
 } // namespace mono
 

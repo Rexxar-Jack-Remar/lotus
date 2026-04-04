@@ -73,13 +73,15 @@ public:
 } // namespace
 
 // SSA register liveness analysis
-std::unique_ptr<DataFlowResult> runLiveVariablesAnalysis(Function *f) {
+std::unique_ptr<DataFlowResult> runLiveVariablesAnalysis(Function *f,
+                                                         const DebugConfig &DebugCfg) {
   if (f == nullptr || f->isDeclaration()) {
     return nullptr;
   }
 
   LiveVariablesProblem Problem(f);
   IntraMonoSolver<LiveVariablesDomain> Solver(Problem);
+  Solver.setDebugConfig(DebugCfg);
   Solver.solve();
 
   // For a backward analysis the solver's direction is reversed:

@@ -418,7 +418,8 @@ private:
 } // namespace
 
 std::unordered_map<llvm::Instruction *, ConstantPropagationMap>
-runIntraMonoConstantPropagation(llvm::Function *F) {
+runIntraMonoConstantPropagation(llvm::Function *F,
+                                const DebugConfig &DebugCfg) {
   if (F == nullptr || F->isDeclaration()) {
     return {};
   }
@@ -430,6 +431,7 @@ runIntraMonoConstantPropagation(llvm::Function *F) {
                       lotus::AAConfig::Solver::Default));
   IntraMonoConstantPropagation Problem(F, AA.get());
   ConstantPropagationSolver Solver(Problem);
+  Solver.setDebugConfig(DebugCfg);
   Solver.solve();
   return Solver.getInResults();
 }

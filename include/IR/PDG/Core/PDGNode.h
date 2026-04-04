@@ -186,11 +186,17 @@ protected:
 ///
 /// @tparam NodeTy The node type (typically Node or derived class)
 template <typename NodeTy>
-class EdgeIterator : public std::iterator<std::input_iterator_tag, NodeTy> {
+class EdgeIterator {
   typename Node::EdgeSet::iterator _edge_iter;
   using this_type = EdgeIterator<NodeTy>;
 
 public:
+  using iterator_category = std::input_iterator_tag;
+  using value_type = NodeTy;
+  using difference_type = std::ptrdiff_t;
+  using pointer = NodeTy *;
+  using reference = NodeTy &;
+
   /// @brief Constructs an iterator pointing to the beginning of the edge set
   /// @param N The node whose edges to iterate over
   EdgeIterator(NodeTy *N) : _edge_iter(N->begin()) {}

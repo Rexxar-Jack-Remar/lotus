@@ -39,6 +39,10 @@ static cl::opt<std::string> InputFilename(cl::Positional, cl::desc("<bitcode>"),
                                           cl::Required);
 static cl::opt<std::string> OutDir("out-dir", cl::desc("Output directory"),
                                    cl::value_desc("dir"), cl::init(""));
+static cl::opt<bool>
+    StdoutOpt("stdout",
+              cl::desc("Write analysis results to stdout when --out-dir is not set"),
+              cl::init(false));
 static cl::opt<std::string> AnalysisOpt(
     "analysis",
     cl::desc("Analysis: liveness (default), reaching_defs, uninitialized, "
@@ -57,6 +61,12 @@ namespace {
 
 using lotus::dataflow_tool::FunctionView;
 using lotus::dataflow_tool::ValueIdMap;
+
+mono::DebugConfig quietMonoDebugConfig() {
+  mono::DebugConfig Config;
+  Config.collect_statistics = false;
+  return Config;
+}
 
 elimination::EliminationOptions getElimOptions() {
   elimination::EliminationOptions Opts;
@@ -216,11 +226,15 @@ class OutputManager {
   std::unique_ptr<raw_fd_ostream> ElimOut;
   std::unique_ptr<raw_fd_ostream> MonoOut;
   std::unique_ptr<raw_fd_ostream> IFDSOut;
+  raw_null_ostream NullOut;
 
 public:
   raw_ostream &getStream(StringRef Engine) {
-    if (OutDir.empty())
-      return outs();
+    if (OutDir.empty()) {
+      if (StdoutOpt)
+        return outs();
+      return NullOut;
+    }
 
     auto open = [&](std::unique_ptr<raw_fd_ostream> &Out,
                     const char *Name) -> raw_ostream & {
@@ -231,7 +245,9 @@ public:
           errs() << "warning: cannot create " << Name << ": " << EC.message()
                  << "\n";
       }
-      return Out ? *Out : outs();
+      if (Out)
+        return *Out;
+      return NullOut;
     };
 
     if (Engine == "elim")
@@ -240,7 +256,9 @@ public:
       return open(MonoOut, "mono.txt");
     if (Engine == "ifds")
       return open(IFDSOut, "ifds.txt");
-    return outs();
+    if (StdoutOpt)
+      return outs();
+    return NullOut;
   }
 };
 
@@ -331,21 +349,24 @@ struct MonoHandler final {
 };
 
 void runMonoLiveness(raw_ostream &OS, const FunctionView &View) {
-  if (auto Res = mono::runLiveVariablesAnalysis(&View.Function))
+  if (auto Res =
+          mono::runLiveVariablesAnalysis(&View.Function, quietMonoDebugConfig()))
     printInstructionStates(OS, View, [&](Instruction *I) {
       formatValueSet(OS, Res->IN(I), View.ValueToId);
     });
 }
 
 void runMonoReachable(raw_ostream &OS, const FunctionView &View) {
-  if (auto Res = mono::runReachableAnalysis(&View.Function))
+  if (auto Res =
+          mono::runReachableAnalysis(&View.Function, quietMonoDebugConfig()))
     printInstructionStates(OS, View, [&](Instruction *I) {
       formatValueSet(OS, Res->IN(I), View.ValueToId);
     });
 }
 
 void runMonoConstantPropagation(raw_ostream &OS, const FunctionView &View) {
-  auto Res = mono::runIntraMonoConstantPropagation(&View.Function);
+  auto Res = mono::runIntraMonoConstantPropagation(&View.Function,
+                                                   quietMonoDebugConfig());
   printInstructionStates(OS, View, [&](Instruction *I) {
     auto It = Res.find(I);
     if (It != Res.end())
@@ -357,7 +378,8 @@ void runMonoConstantPropagation(raw_ostream &OS, const FunctionView &View) {
 }
 
 void runMonoUninitialized(raw_ostream &OS, const FunctionView &View) {
-  if (auto Res = mono::runIntraMonoUninitVariables(&View.Function))
+  if (auto Res = mono::runIntraMonoUninitVariables(&View.Function,
+                                                   quietMonoDebugConfig()))
     printInstructionStates(OS, View, [&](Instruction *I) {
       formatValueSet(OS, Res->IN(I), View.ValueToId);
     });
@@ -434,6 +456,8 @@ const IFDSHandler IFDSHandlers[] = {
 template <typename HandlerT>
 bool emitHeader(raw_ostream &OS, StringRef Engine, const HandlerT *Handler) {
   if (!OutDir.empty())
+    return Handler != nullptr;
+  if (!StdoutOpt)
     return Handler != nullptr;
   OS << "[" << Engine << ":" << AnalysisOpt << "]\n";
   return Handler != nullptr;

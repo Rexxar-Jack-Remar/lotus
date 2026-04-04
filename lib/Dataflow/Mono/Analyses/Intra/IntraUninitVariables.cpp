@@ -289,7 +289,8 @@ private:
 
 } // namespace
 
-std::unique_ptr<DataFlowResult> runIntraMonoUninitVariables(Function *F) {
+std::unique_ptr<DataFlowResult> runIntraMonoUninitVariables(
+    Function *F, const DebugConfig &DebugCfg) {
   if (F == nullptr || F->isDeclaration()) {
     return nullptr;
   }
@@ -301,6 +302,7 @@ std::unique_ptr<DataFlowResult> runIntraMonoUninitVariables(Function *F) {
                       lotus::AAConfig::Solver::Default));
   UninitVariablesProblem Problem(F, AA.get());
   IntraMonoSolver<UninitVariablesDomain> Solver(Problem);
+  Solver.setDebugConfig(DebugCfg);
   Solver.solve();
 
   auto Result = std::make_unique<DataFlowResult>();

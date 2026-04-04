@@ -34,6 +34,10 @@ static cl::opt<std::string> InputFilename(cl::Positional, cl::desc("<bitcode>"),
                                           cl::Required);
 static cl::opt<std::string> OutDir("out-dir", cl::desc("Output directory"),
                                    cl::value_desc("dir"), cl::init(""));
+static cl::opt<bool>
+    StdoutOpt("stdout",
+              cl::desc("Write analysis results to stdout when --out-dir is not set"),
+              cl::init(false));
 static cl::opt<std::string> AnalysisOpt(
     "analysis",
     cl::desc("Analysis: liveness (default), reaching_defs, uninitialized, "
@@ -552,7 +556,10 @@ int main(int argc, char **argv) {
 
   lotus::dataflow_tool::prepareModule(*M);
 
-  raw_ostream *OutOS = &outs();
+  raw_null_ostream NullOS;
+  raw_ostream *OutOS = &NullOS;
+  if (StdoutOpt)
+    OutOS = &outs();
   std::unique_ptr<raw_fd_ostream> FileOS;
   if (!OutDir.empty()) {
     std::error_code EC;

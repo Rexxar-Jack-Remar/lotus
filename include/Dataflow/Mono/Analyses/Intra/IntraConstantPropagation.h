@@ -7,6 +7,7 @@
 
 #include "Dataflow/Mono/Core/Domain.h"
 #include "Dataflow/Mono/Solver/IntraSolver.h"
+#include "Dataflow/Mono/Support/MonoDebug.h"
 
 #include <cstdint>
 #include <unordered_map>
@@ -37,7 +38,8 @@ struct ConstantPropagationDomain
 using ConstantPropagationSolver = IntraMonoSolver<ConstantPropagationDomain>;
 
 std::unordered_map<llvm::Instruction *, ConstantPropagationMap>
-runIntraMonoConstantPropagation(llvm::Function *F);
+runIntraMonoConstantPropagation(llvm::Function *F,
+                                const DebugConfig &DebugCfg = DebugConfig{});
 
 } // namespace mono
 

@@ -41,8 +41,8 @@ option(CRAB_ENABLE_ASAN "Enable Address Sanitizer" OFF)
 option(CRAB_USE_GENERIC_WRAPPER
   "If tests enabled then use the generic abstract domain" OFF)
 
-# Enforce c++11
-set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -std=c++11")
+# Enforce c++17
+set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -std=c++17")
 #--------------- TESTS ----------------------------#
 if (CRAB_ENABLE_TESTS)
   #Setup CMake to run tests

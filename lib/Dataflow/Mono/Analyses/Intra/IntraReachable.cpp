@@ -32,7 +32,8 @@ namespace mono {
  */
 std::unique_ptr<DataFlowResult>
 runReachableAnalysis(Function *f,
-                     const std::function<bool(Instruction *i)> &filter) {
+                     const std::function<bool(Instruction *i)> &filter,
+                     const DebugConfig &DebugCfg) {
 
   if (f == nullptr || f->isDeclaration()) {
     return nullptr;
@@ -99,6 +100,7 @@ runReachableAnalysis(Function *f,
 
   ReachableProblem Problem(f, filter);
   IntraMonoSolver<ReachableDomain> Solver(Problem);
+  Solver.setDebugConfig(DebugCfg);
   Solver.solve();
 
   auto Result = std::make_unique<DataFlowResult>();
@@ -116,7 +118,8 @@ runReachableAnalysis(Function *f,
   return Result;
 }
 
-std::unique_ptr<DataFlowResult> runReachableAnalysis(Function *f) {
+std::unique_ptr<DataFlowResult> runReachableAnalysis(Function *f,
+                                                     const DebugConfig &DebugCfg) {
 
   /*
    * Create the function that doesn't filter out instructions.
@@ -126,7 +129,7 @@ std::unique_ptr<DataFlowResult> runReachableAnalysis(Function *f) {
   /*
    * Run the analysis
    */
-  return runReachableAnalysis(f, noFilter);
+  return runReachableAnalysis(f, noFilter, DebugCfg);
 }
 
 } // namespace mono
