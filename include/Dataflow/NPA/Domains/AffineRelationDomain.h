@@ -1,7 +1,7 @@
 #ifndef NPA_AFFINE_RELATION_DOMAIN_H
 #define NPA_AFFINE_RELATION_DOMAIN_H
 
-#include "Dataflow/NPA/Core/NPACommon.h"
+#include "Dataflow/NPA/Core/Base/Runtime.h"
 
 #include <map>
 #include <vector>

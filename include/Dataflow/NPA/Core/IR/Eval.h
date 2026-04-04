@@ -15,8 +15,8 @@
  * t1·X·t2). Star and Mu are least fixpoints in the bound variable.
  */
 
-#include "Dataflow/NPA/Core/Expressions.h"
-#include "Dataflow/NPA/Core/Fixpoint.h"
+#include "Dataflow/NPA/Core/IR/Expressions.h"
+#include "Dataflow/NPA/Core/Solve/Fixpoint.h"
 
 namespace npa {
 

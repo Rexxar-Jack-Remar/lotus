@@ -1,7 +1,7 @@
 #ifndef NPA_PREDICATE_RELATION_DOMAIN_H
 #define NPA_PREDICATE_RELATION_DOMAIN_H
 
-#include "Dataflow/NPA/Core/NPACommon.h"
+#include "Dataflow/NPA/Core/Base/Runtime.h"
 
 #include <array>
 #include <cstdint>
@@ -119,7 +119,7 @@ public:
 
 } // namespace npa
 
-#include "Dataflow/NPA/Core/TensorSemiring.h"
+#include "Dataflow/NPA/Core/Solve/TensorSemiring.h"
 
 namespace npa {
 

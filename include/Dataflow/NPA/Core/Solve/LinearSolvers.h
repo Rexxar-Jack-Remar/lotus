@@ -16,9 +16,10 @@
  * regularization via tensor product, Alg. 3.4).
  */
 
-#include "Dataflow/NPA/Core/Diff.h"
-#include "Dataflow/NPA/Core/Eval.h"
-#include "Dataflow/NPA/Core/LCFLDetector.h"
+#include "Dataflow/NPA/Core/IR/Diff.h"
+#include "Dataflow/NPA/Core/Base/Runtime.h"
+#include "Dataflow/NPA/Core/IR/Eval.h"
+#include "Dataflow/NPA/Core/IR/LCFLDetector.h"
 #include "Utils/Parallel/ThreadPool.h"
 
 #include <atomic>

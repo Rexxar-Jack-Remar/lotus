@@ -9,9 +9,9 @@
 
 #include "Analysis/TypeHirarchy/DIBasedTypeHierarchyData.h"
 
-#include "llvm/Support/JSON.h"
 #include "llvm/ADT/StringRef.h"
 #include "llvm/ADT/Twine.h"
+#include "llvm/Support/JSON.h"
 #include "llvm/Support/raw_ostream.h"
 
 #include <fstream>

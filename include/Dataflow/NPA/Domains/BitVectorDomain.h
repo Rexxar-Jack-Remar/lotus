@@ -1,7 +1,7 @@
 #ifndef NPA_BIT_VECTOR_DOMAIN_H
 #define NPA_BIT_VECTOR_DOMAIN_H
 
-#include "Dataflow/NPA/Core/NPACommon.h"
+#include "Dataflow/NPA/Core/Base/Runtime.h"
 #include "Utils/LLVM/SystemHeaders.h"
 
 #include <llvm/ADT/APInt.h>

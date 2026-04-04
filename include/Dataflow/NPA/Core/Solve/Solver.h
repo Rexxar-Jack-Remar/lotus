@@ -31,7 +31,7 @@
  * References: Esparza et al. (JACM); Reps et al. (TOPLAS 2016).
  */
 
-#include "Dataflow/NPA/Core/TensorLinearSolve.h"
+#include "Dataflow/NPA/Core/Solve/TensorLinearSolve.h"
 #include "Utils/Parallel/ThreadPool.h"
 
 #include <exception>

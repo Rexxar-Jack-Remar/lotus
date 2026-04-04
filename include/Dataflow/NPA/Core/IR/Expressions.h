@@ -23,7 +23,10 @@
  *   (a_{i,j,k} ⊗ Y_i ⊗ b_{i,j,k}); Concat encodes a·Y·b.
  */
 
-#include "Dataflow/NPA/Core/NPACommon.h"
+#include "Dataflow/NPA/Core/Base/Foundation.h"
+
+#include <memory>
+#include <unordered_set>
 
 namespace npa {
 

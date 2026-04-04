@@ -12,7 +12,7 @@
  * can regularize the system; otherwise we use worklist/SCC only.
  */
 
-#include "Dataflow/NPA/Core/Expressions.h"
+#include "Dataflow/NPA/Core/IR/Expressions.h"
 
 namespace npa {
 

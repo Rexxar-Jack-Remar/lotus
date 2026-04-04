@@ -1,7 +1,7 @@
 #ifndef NPA_TENSOR_PRODUCT_DOMAIN_H
 #define NPA_TENSOR_PRODUCT_DOMAIN_H
 
-#include "Dataflow/NPA/Core/NPACommon.h"
+#include "Dataflow/NPA/Core/Base/Runtime.h"
 
 #include <utility>
 

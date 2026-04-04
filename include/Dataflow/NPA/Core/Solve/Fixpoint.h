@@ -12,7 +12,9 @@
  * Δ^(i) as the least solution of Df|ν^(i)(X) + δ^(i) = X (Esparza et al.).
  */
 
-#include "Dataflow/NPA/Core/NPACommon.h"
+#include "Dataflow/NPA/Core/Base/Runtime.h"
+
+#include <iostream>
 
 namespace npa {
 

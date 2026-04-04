@@ -1,7 +1,7 @@
 #ifndef NPA_TAINT_TRANSFER_DOMAIN_H
 #define NPA_TAINT_TRANSFER_DOMAIN_H
 
-#include "Dataflow/NPA/Core/NPACommon.h"
+#include "Dataflow/NPA/Core/Base/Runtime.h"
 #include "Utils/LLVM/SystemHeaders.h"
 
 #include <vector>

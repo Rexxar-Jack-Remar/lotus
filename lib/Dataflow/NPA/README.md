@@ -50,18 +50,20 @@ The public API lives under `include/Dataflow/NPA/`:
 ```text
 include/Dataflow/NPA/
 ├── NPA.h                      # Umbrella header; Kleene/Newton entry points
-├── Core/                      # Expressions, differentiation, solvers, tensor support
+├── Core/
+│   ├── Base/                  # Public types, domain helpers, runtime bookkeeping
+│   ├── IR/                    # Expressions, evaluation, differentiation
+│   └── Solve/                 # Fixpoint, linear solvers, tensor support
 ├── Domains/                   # Semiring/domain implementations
 └── Analyses/                  # Intraprocedural and interprocedural clients
 ```
 
 Notable entry points:
 
-- `Core/Solver.h` contains the core Kleene/Newton iteration logic.
-- `Core/Diff.h` and `Core/TensorDiff.h` implement ordinary and tensor-side
-  differentials.
-- `Core/LinearSolvers.h` and `Core/TensorLinearSolve.h` implement the
-  linearized-system solvers.
+- `Core/Solve/Solver.h` contains the core Kleene/Newton iteration logic.
+- `Core/IR/Diff.h` implements both ordinary and tensor-side differentials.
+- `Core/Solve/LinearSolvers.h` and `Core/Solve/TensorLinearSolve.h` implement
+  the linearized-system solvers.
 - `Analyses/Interprocedural/` contains the public analysis wrappers used by
   the in-tree constant-propagation, interval, taint, nullability, and related
   clients.

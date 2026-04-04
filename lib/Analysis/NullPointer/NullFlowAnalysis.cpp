@@ -36,8 +36,8 @@
 #include "Analysis/NullPointer/API.h"
 #include "Utils/LLVM/RecursiveTimer.h"
 
-#include <limits>
 #include <llvm/IR/InstIterator.h>
+#include <limits>
 
 /**
  * @brief CLI option to limit non-null edges considered per round

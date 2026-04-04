@@ -186,7 +186,7 @@ Core Implementation (include/Dataflow/NPA/Core)
 
 The core headers implement the algorithms from Esparza et al. (JACM) and Reps et al. (TOPLAS 2016):
 
-* **NPACommon.h**: Domain concept (ω-continuous semiring), ``LinearStrategy``
+* **Base/Foundation.h**: Domain concept (ω-continuous semiring), ``LinearStrategy``
   (Naive, Worklist, SCC, TensorProduct).
 * **Expressions.h**: ``Exp0`` (polynomial equation AST), ``Exp1`` (linearized AST);
   ``Concat`` encodes the LCFL form :math:`a \cdot X \cdot b`; ``Star`` is the

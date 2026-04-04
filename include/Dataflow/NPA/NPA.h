@@ -20,19 +20,20 @@
  * Based on OCaml NPA-PMA by Di Wang.
  *
  * Implementation split:
- *   - Core/NPACommon.h         : domain concept (semiring) + LinearStrategy
- *   - Core/Expressions.h       : Exp0 (polynomial) / Exp1 (linearized) AST
- *   - Core/Fixpoint.h         : fix / fix_vec (Kleene-like iteration)
- *   - Core/Eval.h             : I0 (Exp0) / I1 (Exp1) evaluators
- *   - Core/Diff.h              : differential Df|ν construction
- *   - Core/LCFLDetector.h     : detect LCFL structure (Concat/Star)
- *   - Core/LinearSolvers.h    : SCC-based and tensor linear solvers
- *   - Core/TensorLinearSolve.h: tensor-product solver (Alg. 3.4)
- *   - Core/Solver.h           : KleeneIter / NewtonIter, Solver<D,ITER>
+ *   - Core/Base/Foundation.h       : public NPA types + domain helpers
+ *   - Core/Base/Runtime.h          : runtime bookkeeping and errors
+ *   - Core/IR/Expressions.h        : Exp0 (polynomial) / Exp1 (linearized) AST
+ *   - Core/IR/Eval.h               : I0 (Exp0) / I1 (Exp1) evaluators
+ *   - Core/IR/Diff.h               : ordinary and tensor differentials
+ *   - Core/IR/LCFLDetector.h       : detect LCFL structure (Concat/Star)
+ *   - Core/Solve/Fixpoint.h        : fix / fix_vec (Kleene-like iteration)
+ *   - Core/Solve/LinearSolvers.h   : SCC-based linear solvers
+ *   - Core/Solve/TensorLinearSolve.h: tensor-product solver (Alg. 3.4)
+ *   - Core/Solve/Solver.h          : KleeneIter / NewtonIter, Solver<D,ITER>
  *********************************************************************/
 #ifndef NPA_HPP
 #define NPA_HPP
 
-#include "Dataflow/NPA/Core/Solver.h"
+#include "Dataflow/NPA/Core/Solve/Solver.h"
 
 #endif /* NPA_HPP */

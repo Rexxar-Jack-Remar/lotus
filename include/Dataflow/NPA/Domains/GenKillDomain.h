@@ -1,7 +1,7 @@
 #ifndef NPA_GEN_KILL_DOMAIN_H
 #define NPA_GEN_KILL_DOMAIN_H
 
-#include "Dataflow/NPA/Core/NPACommon.h"
+#include "Dataflow/NPA/Core/Base/Runtime.h"
 
 #include <utility>
 
