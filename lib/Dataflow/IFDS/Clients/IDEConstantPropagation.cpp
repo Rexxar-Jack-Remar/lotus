@@ -61,7 +61,7 @@ bool IDEConstantPropagation::isCopy(const llvm::Instruction *I,
   return false;
 }
 
-llvm::Optional<long long>
+std::optional<long long>
 IDEConstantPropagation::asConst(const llvm::Value *v) {
   if (auto *ci = llvm::dyn_cast<llvm::ConstantInt>(v)) {
     return static_cast<long long>(ci->getSExtValue());
@@ -70,12 +70,12 @@ IDEConstantPropagation::asConst(const llvm::Value *v) {
     const llvm::Value *ptrOp = load->getPointerOperand()->stripPointerCasts();
     const auto *allocaInst = llvm::dyn_cast<llvm::AllocaInst>(ptrOp);
     if (!allocaInst) {
-      return llvm::None;
+      return std::nullopt;
     }
 
     const llvm::BasicBlock *parent = load->getParent();
     if (!parent) {
-      return llvm::None;
+      return std::nullopt;
     }
 
     auto it = load->getIterator();
@@ -96,43 +96,43 @@ IDEConstantPropagation::asConst(const llvm::Value *v) {
       return asConst(store->getValueOperand());
     }
   }
-  return llvm::None;
+  return std::nullopt;
 }
 
-llvm::Optional<long long>
+std::optional<long long>
 IDEConstantPropagation::applyBinOp(unsigned opcode, long long a, long long b) {
   long long res = 0;
   switch (opcode) {
   case llvm::Instruction::Add:
     if (llvm::AddOverflow(a, b, res))
-      return llvm::None;
+      return std::nullopt;
     return res;
   case llvm::Instruction::Sub:
     if (llvm::SubOverflow(a, b, res))
-      return llvm::None;
+      return std::nullopt;
     return res;
   case llvm::Instruction::Mul:
     if (llvm::MulOverflow(a, b, res))
-      return llvm::None;
+      return std::nullopt;
     return res;
   case llvm::Instruction::SDiv:
     if (b == 0)
-      return llvm::None;
+      return std::nullopt;
     if (a == std::numeric_limits<long long>::min() && b == -1)
-      return llvm::None;
+      return std::nullopt;
     return a / b;
   case llvm::Instruction::UDiv:
     if (b == 0)
-      return llvm::None;
+      return std::nullopt;
     return static_cast<long long>(static_cast<unsigned long long>(a) /
                                   static_cast<unsigned long long>(b));
   case llvm::Instruction::SRem:
     if (b == 0)
-      return llvm::None;
+      return std::nullopt;
     return a % b;
   case llvm::Instruction::URem:
     if (b == 0)
-      return llvm::None;
+      return std::nullopt;
     return static_cast<long long>(static_cast<unsigned long long>(a) %
                                   static_cast<unsigned long long>(b));
   case llvm::Instruction::And:
@@ -142,7 +142,7 @@ IDEConstantPropagation::applyBinOp(unsigned opcode, long long a, long long b) {
   case llvm::Instruction::Xor:
     return a ^ b;
   default:
-    return llvm::None;
+    return std::nullopt;
   }
 }
 
@@ -191,7 +191,7 @@ IDEConstantPropagation::normal_flow(const llvm::Instruction *stmt,
     if (auto *bin = llvm::dyn_cast<llvm::BinaryOperator>(stmt)) {
       const llvm::Value *op0 = bin->getOperand(0);
       const llvm::Value *op1 = bin->getOperand(1);
-      if (!fact && asConst(op0).hasValue() && asConst(op1).hasValue()) {
+      if (!fact && asConst(op0).has_value() && asConst(op1).has_value()) {
         out.insert(def);
       }
       if (fact == op0 || fact == op1) {
@@ -293,8 +293,8 @@ IDEConstantPropagation::normal_edge_function(const llvm::Instruction *stmt,
     if (tgt_fact == ptrOp) {
       if (!src_fact) {
         auto c = asConst(valueOp);
-        if (c.hasValue()) {
-          long long k = c.getValue();
+        if (c.has_value()) {
+          long long k = c.value();
           return [k](const Value & /*v*/) { return Value::constant(k); };
         }
         return [](const Value & /*v*/) { return LCPValue::top(); };
@@ -336,30 +336,30 @@ IDEConstantPropagation::normal_edge_function(const llvm::Instruction *stmt,
         return [opc, op0, op1, src_fact](const Value &v) {
           auto c0 = asConst(op0);
           auto c1 = asConst(op1);
-          if (!src_fact && c0.hasValue() && c1.hasValue()) {
-            auto r = applyBinOp(opc, c0.getValue(), c1.getValue());
-            return r.hasValue() ? LCPValue::constant(r.getValue())
+          if (!src_fact && c0.has_value() && c1.has_value()) {
+            auto r = applyBinOp(opc, c0.value(), c1.value());
+            return r.has_value() ? LCPValue::constant(r.value())
                                 : LCPValue::top();
           }
-          if (src_fact == op0 && c1.hasValue()) {
+          if (src_fact == op0 && c1.has_value()) {
             if (v.kind == LCPValue::Const) {
-              auto r = applyBinOp(opc, v.value, c1.getValue());
-              return r.hasValue() ? LCPValue::constant(r.getValue())
+              auto r = applyBinOp(opc, v.value, c1.value());
+              return r.has_value() ? LCPValue::constant(r.value())
                                   : LCPValue::top();
             }
             return v;
           }
-          if (src_fact == op1 && c0.hasValue()) {
+          if (src_fact == op1 && c0.has_value()) {
             if (v.kind == LCPValue::Const) {
-              auto r = applyBinOp(opc, c0.getValue(), v.value);
-              return r.hasValue() ? LCPValue::constant(r.getValue())
+              auto r = applyBinOp(opc, c0.value(), v.value);
+              return r.has_value() ? LCPValue::constant(r.value())
                                   : LCPValue::top();
             }
             return v;
           }
-          if (c0.hasValue() && c1.hasValue()) {
-            auto r = applyBinOp(opc, c0.getValue(), c1.getValue());
-            return r.hasValue() ? LCPValue::constant(r.getValue())
+          if (c0.has_value() && c1.has_value()) {
+            auto r = applyBinOp(opc, c0.value(), c1.value());
+            return r.has_value() ? LCPValue::constant(r.value())
                                 : LCPValue::top();
           }
           return LCPValue::bottom();
@@ -385,8 +385,8 @@ IDEConstantPropagation::EdgeFunction IDEConstantPropagation::call_edge_function(
         const llvm::Value *actual = call->getArgOperand(idx);
         if (!src_fact) {
           auto c = asConst(actual);
-          if (c.hasValue()) {
-            long long k = c.getValue();
+          if (c.has_value()) {
+            long long k = c.value();
             return [k](const Value & /*v*/) { return Value::constant(k); };
           }
         }
@@ -506,29 +506,29 @@ IDEConstantPropagation::summary_edge_function(const llvm::CallBase *call,
   return [opc, op0, op1, src_fact](const Value &v) {
     auto c0 = asConst(op0);
     auto c1 = asConst(op1);
-    if (!src_fact && c0.hasValue() && c1.hasValue()) {
-      auto r = applyBinOp(opc, c0.getValue(), c1.getValue());
-      return r.hasValue() ? LCPValue::constant(r.getValue()) : LCPValue::top();
+    if (!src_fact && c0.has_value() && c1.has_value()) {
+      auto r = applyBinOp(opc, c0.value(), c1.value());
+      return r.has_value() ? LCPValue::constant(r.value()) : LCPValue::top();
     }
-    if (src_fact == op0 && c1.hasValue()) {
+    if (src_fact == op0 && c1.has_value()) {
       if (v.kind == LCPValue::Const) {
-        auto r = applyBinOp(opc, v.value, c1.getValue());
-        return r.hasValue() ? LCPValue::constant(r.getValue())
+        auto r = applyBinOp(opc, v.value, c1.value());
+        return r.has_value() ? LCPValue::constant(r.value())
                             : LCPValue::top();
       }
       return v;
     }
-    if (src_fact == op1 && c0.hasValue()) {
+    if (src_fact == op1 && c0.has_value()) {
       if (v.kind == LCPValue::Const) {
-        auto r = applyBinOp(opc, c0.getValue(), v.value);
-        return r.hasValue() ? LCPValue::constant(r.getValue())
+        auto r = applyBinOp(opc, c0.value(), v.value);
+        return r.has_value() ? LCPValue::constant(r.value())
                             : LCPValue::top();
       }
       return v;
     }
-    if (c0.hasValue() && c1.hasValue()) {
-      auto r = applyBinOp(opc, c0.getValue(), c1.getValue());
-      return r.hasValue() ? LCPValue::constant(r.getValue()) : LCPValue::top();
+    if (c0.has_value() && c1.has_value()) {
+      auto r = applyBinOp(opc, c0.value(), c1.value());
+      return r.has_value() ? LCPValue::constant(r.value()) : LCPValue::top();
     }
     return LCPValue::bottom();
   };

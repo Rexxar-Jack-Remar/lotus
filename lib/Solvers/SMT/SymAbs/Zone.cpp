@@ -54,7 +54,7 @@
 #include <algorithm>
 #include <cassert>
 
-#include <llvm/ADT/Optional.h>
+#include <optional>
 #include <z3++.h>
 #include <z3.h>
 
@@ -155,8 +155,8 @@ std::vector<ZoneConstraint> alpha_zone_V(z3::expr phi,
 
     // Compute maximum value of v_i using Algorithm 7
     auto bound = alpha_lin_exp(phi, lexpr, config);
-    if (bound.hasValue()) {
-      constraints.emplace_back(variables[i], bound.getValue());
+    if (bound.has_value()) {
+      constraints.emplace_back(variables[i], bound.value());
     }
 
     // Note: Lower bounds can be computed similarly by maximizing -v_i
@@ -187,8 +187,8 @@ std::vector<ZoneConstraint> alpha_zone_V(z3::expr phi,
 
       // Compute maximum of v_i - v_j using Algorithm 7
       auto bound = alpha_lin_exp(phi, lexpr, config);
-      if (bound.hasValue()) {
-        constraints.emplace_back(variables[i], variables[j], bound.getValue());
+      if (bound.has_value()) {
+        constraints.emplace_back(variables[i], variables[j], bound.value());
       }
     }
   }

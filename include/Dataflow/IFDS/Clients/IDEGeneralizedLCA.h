@@ -4,7 +4,7 @@
 
 #include <set>
 
-#include <llvm/ADT/Optional.h>
+#include <optional>
 
 namespace ifds {
 
@@ -76,8 +76,8 @@ public:
       const Fact &tgt_fact) override;
 
 private:
-  static llvm::Optional<int64_t> as_const(const llvm::Value *v);
-  static llvm::Optional<int64_t> apply_binop(unsigned opcode, int64_t a,
+  static std::optional<int64_t> as_const(const llvm::Value *v);
+  static std::optional<int64_t> apply_binop(unsigned opcode, int64_t a,
                                              int64_t b);
   static Value cap_constants(std::set<int64_t> values);
   static constexpr size_t kMaxSetSize = 8;

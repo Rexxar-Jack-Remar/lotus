@@ -125,9 +125,9 @@ private:
   std::set<Instruction *> m_div_zero_insts;
 
   // SMT solving
-  llvm::Optional<z3::solver> m_solver;
+  std::optional<z3::solver> m_solver;
   std::unique_ptr<SmtMemory> m_smt_mem;
-  DenseMap<const Value *, llvm::Optional<z3::expr>> m_v2sym;
+  DenseMap<const Value *, std::optional<z3::expr>> m_v2sym;
   std::map<const BasicBlock *, SmallVector<BasicBlock *, 2>> m_bbpaths;
   std::chrono::time_point<std::chrono::steady_clock> m_function_start_time;
   unsigned m_function_timeout;
@@ -151,18 +151,18 @@ private:
   // Memory/object abstraction for pointer reasoning (SMT only)
   const DataLayout *m_dl = nullptr;
   unsigned m_ptr_bits = 0;
-  DenseMap<const Value *, llvm::Optional<z3::expr>>
+  DenseMap<const Value *, std::optional<z3::expr>>
       m_obj_base; // base address for allocation-like objects
-  DenseMap<const Value *, llvm::Optional<z3::expr>>
+  DenseMap<const Value *, std::optional<z3::expr>>
       m_obj_size; // size in bytes (bit-vector, ptr width)
   std::vector<const Value *>
       m_obj_list; // stable iteration order for constraints
-  DenseMap<const Value *, llvm::Optional<z3::expr>>
+  DenseMap<const Value *, std::optional<z3::expr>>
       m_obj_mem; // per-object byte arrays
   struct SymChange {
     const Value *key = nullptr;
     bool hadOld = false;
-    llvm::Optional<z3::expr> oldValue;
+    std::optional<z3::expr> oldValue;
   };
   std::vector<SymChange> m_sym_change_log;
   std::vector<size_t> m_sym_change_frames;

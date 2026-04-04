@@ -9,7 +9,7 @@
 
 #include <cstdint>
 
-#include <llvm/ADT/Optional.h>
+#include <optional>
 #include <z3++.h>
 
 namespace SymAbs {
@@ -35,9 +35,9 @@ struct Congruence {
  * @param phi The formula
  * @param variable The variable v to abstract
  * @param config Configuration
- * @return The congruence, or llvm::None on failure
+ * @return The congruence, or std::nullopt on failure
  */
-llvm::Optional<Congruence>
+std::optional<Congruence>
 alpha_a_cong(z3::expr phi, z3::expr variable,
              const AbstractionConfig &config = AbstractionConfig{});
 

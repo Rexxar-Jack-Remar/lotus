@@ -317,16 +317,16 @@ public:
 // Generate bitcode for the value of v if it is a constant
 Constant *getConstantInt(CfgBuilder *clamCfgBuilder, clam_abstract_domain inv, const Value &v) {
   if (v.getType()->isIntegerTy()) {
-    llvm::Optional<var_t> lhs = clamCfgBuilder->getCrabVariable(v);
-    if (lhs.hasValue()) {
-      auto interval = inv[lhs.getValue()];
+    std::optional<var_t> lhs = clamCfgBuilder->getCrabVariable(v);
+    if (lhs.has_value()) {
+      auto interval = inv[lhs.value()];
       if (auto constant_opt = interval.singleton()) {
 	if ((*constant_opt).fits_int64()) {
 	  return ConstantInt::get(v.getType(), (int64_t)(*constant_opt), 10);	      
 	}
       } else {
       CRAB_LOG("clam-opt",
-	       crab::outs() << "Found crab variable " << lhs.getValue();
+	       crab::outs() << "Found crab variable " << lhs.value();
 	       llvm::errs() << " for " << v << " ";
 	       crab::outs() << "but " << interval << " is not a constant\n";);
       }
@@ -541,10 +541,10 @@ static bool markDeadBlocksAndEdges(ClamGlobalAnalysis  &clam,
   }
 
   // Mark whether the block is dead
-  llvm::Optional<clam_abstract_domain> pre = 
+  std::optional<clam_abstract_domain> pre = 
     clam.getPre(&B, false /*do not keep ghost variables*/);    
-  if (pre.hasValue()) {
-    if (pre.getValue().is_bottom()) {
+  if (pre.has_value()) {
+    if (pre.value().is_bottom()) {
       CRAB_LOG("clam-opt",
 	       llvm::errs() << "clam-opt detected dead block "
 	       << B.getName () << " in function "
@@ -718,17 +718,17 @@ bool Optimizer::runOnFunction(Function &F) {
 	m_invLoc == InvariantsLocation::LOOP_HEADER || 
 	m_invLoc == InvariantsLocation::ALL) {
       const bool keep_ghost = false;
-      llvm::Optional<clam_abstract_domain> pre = m_clam.getPre(&B, keep_ghost);
-      if (pre.hasValue()) {
+      std::optional<clam_abstract_domain> pre = m_clam.getPre(&B, keep_ghost);
+      if (pre.has_value()) {
 	if (m_invLoc == InvariantsLocation::BLOCK ||
 	    m_invLoc == InvariantsLocation::ALL) {
-	  auto csts = pre.getValue().to_linear_constraint_system();
+	  auto csts = pre.value().to_linear_constraint_system();
 	  change |= instrumentBlock(csts, &B, F.getContext(), m_cg, dt, m_assumeFn);
 	} else {
 	  assert(m_invLoc == InvariantsLocation::LOOP_HEADER);
 	  LoopInfo *LI = m_li(&F); // it can be nullptr
 	  if (LI && LI->isLoopHeader(&B)) {
-	    auto csts = pre.getValue().to_linear_constraint_system();
+	    auto csts = pre.value().to_linear_constraint_system();
 	    change |= instrumentBlock(csts, &B, F.getContext(), m_cg, dt, m_assumeFn);
 	  }
 	}
@@ -738,24 +738,24 @@ bool Optimizer::runOnFunction(Function &F) {
     if ((m_invLoc == InvariantsLocation::LOAD_INST ||
 	 m_invLoc == InvariantsLocation::ALL) && readMemory(B)) {
       const bool keep_ghost = true;
-      llvm::Optional<clam_abstract_domain> pre = m_clam.getPre(&B, keep_ghost);
-      if (pre.hasValue()) {
+      std::optional<clam_abstract_domain> pre = m_clam.getPre(&B, keep_ghost);
+      if (pre.has_value()) {
 	auto *cfg_builder_ptr = m_clam.getCfgBuilderMan().getCfgBuilder(F);
 	assert(cfg_builder_ptr);
 	basic_block_label_t bb_label = cfg_builder_ptr->getCrabBasicBlock(&B);
-	change |= instrumentLoadInst(pre.getValue(), cfg.get_node(bb_label),
+	change |= instrumentLoadInst(pre.value(), cfg.get_node(bb_label),
 				     F.getContext(), m_cg, m_assumeFn);
       }
     }
 
     if (m_replaceWithConstants) {
       const bool keep_ghost = false;
-      llvm::Optional<clam_abstract_domain> pre = m_clam.getPre(&B, keep_ghost);
-      if (pre.hasValue()) {
+      std::optional<clam_abstract_domain> pre = m_clam.getPre(&B, keep_ghost);
+      if (pre.has_value()) {
 	auto *cfg_builder_ptr = m_clam.getCfgBuilderMan().getCfgBuilder(F);
 	assert(cfg_builder_ptr);	
 	basic_block_label_t bb_label = cfg_builder_ptr->getCrabBasicBlock(&B);
-	change |= constantReplacement(cfg_builder_ptr, pre.getValue(), cfg.get_node(bb_label));
+	change |= constantReplacement(cfg_builder_ptr, pre.value(), cfg.get_node(bb_label));
       }
     }
   }

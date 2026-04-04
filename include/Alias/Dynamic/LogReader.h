@@ -1,10 +1,9 @@
 #pragma once
 
-#include "llvm/ADT/Optional.h"
-
 #include "Alias/Dynamic/LogRecord.h"
 
 #include <fstream>
+#include <optional>
 #include <vector>
 
 namespace dynamic {
@@ -23,7 +22,7 @@ private:
 public:
   LazyLogReader(const char *fileName);
 
-  llvm::Optional<LogRecord> readLogRecord();
+  std::optional<LogRecord> readLogRecord();
 };
 
 } // namespace dynamic

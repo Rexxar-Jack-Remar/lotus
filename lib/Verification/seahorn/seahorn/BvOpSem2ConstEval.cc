@@ -150,7 +150,7 @@ Optional<GenericValue> ConstantExprEvaluator::evaluate(const Constant *C) {
     case Instruction::PtrToInt: {
       auto OGV = evaluate(Op0);
       if (!OGV.hasValue())
-        return llvm::None;
+        return None;
       GenericValue GV = OGV.getValue();
 
       uint32_t PtrWidth = getDataLayout().getTypeSizeInBits(Op0->getType());
@@ -379,7 +379,7 @@ Optional<GenericValue> ConstantExprEvaluator::evaluate(const Constant *C) {
       }
       WARN << "Unhandled function pointer in a constant expression:  " << *C
            << "\n";
-      return llvm::None;
+      return None;
     } else if (const GlobalVariable *GV = dyn_cast<GlobalVariable>(C)) {
       if (m_ctx) {
         Expr reg = m_ctx->getRegister(*GV);
@@ -406,7 +406,7 @@ Optional<GenericValue> ConstantExprEvaluator::evaluate(const Constant *C) {
       // Result = PTOGV((void*)ctx.getPtrToGlobal(*GV));
       WARN << "Unhandled global variable in a constant expression: " << *C
            << "\n";
-      return llvm::None;
+      return None;
     } else
       llvm_unreachable("Unknown constant pointer type!");
     break;
@@ -513,7 +513,7 @@ Optional<GenericValue> ConstantExprEvaluator::evaluate(const Constant *C) {
     const auto *CAZ = dyn_cast<ConstantAggregateZero>(C);
     if (!STy) {
       LOG("opsem", WARN << "unable to cast " << *C->getType() << " into a StructType";);
-      return llvm::None;
+      return None;
     }
     unsigned int elemNum = STy->getNumElements();
     Result.AggregateVal.resize(elemNum);
@@ -527,7 +527,7 @@ Optional<GenericValue> ConstantExprEvaluator::evaluate(const Constant *C) {
         OPI = UndefValue::get(ElemTy);
       else {
         LOG("opsem", WARN << "unsupported struct constant " << C;);
-        return llvm::None;
+        return None;
       }
       if (isa<UndefValue>(OPI)) {
         // if field not defined, just return default garbage
@@ -550,12 +550,12 @@ Optional<GenericValue> ConstantExprEvaluator::evaluate(const Constant *C) {
           else {
             LOG("opsem",
                 WARN << "evaluating struct, no value set on this index:" << i;);
-            return llvm::None;
+            return None;
           }
         } else {
           LOG("opsem",
               WARN << "unsupported element type " << *ElemTy << " in const struct.";);
-          return llvm::None;
+          return None;
         }
       }
     }

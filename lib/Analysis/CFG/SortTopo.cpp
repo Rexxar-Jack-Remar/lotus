@@ -1,6 +1,6 @@
 #include "Analysis/CFG/SortTopo.h"
 
-#include "llvm/ADT/Optional.h"
+#include <optional>
 #include "llvm/ADT/PostOrderIterator.h"
 #include "llvm/Analysis/CFG.h"
 #include "llvm/IR/CFG.h"
@@ -35,7 +35,7 @@ public:
   explicit po_iterator_storage(BlockedEdges &VSet) : Visited(VSet) {}
   po_iterator_storage(const po_iterator_storage &S) = default;
 
-  bool insertEdge(Optional<const BasicBlock *> src, const BasicBlock *dst) {
+  bool insertEdge(llvm::Optional<const BasicBlock *> src, const BasicBlock *dst) {
     if (!src)
       return Visited.insert(dst);
 

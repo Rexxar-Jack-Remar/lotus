@@ -70,7 +70,7 @@ std::vector<ExecutionDomain> PulseChecker::executeInstruction(
   // This may miss bugs (false negatives) but will not fabricate a witness.
   if (auto *Sel = llvm::dyn_cast<llvm::SelectInst>(I)) {
     if (Sel->getType()->isPointerTy()) {
-      llvm::Optional<bool> truth = llvm::None;
+      std::optional<bool> truth = std::nullopt;
       if (auto *ICmp = llvm::dyn_cast<llvm::ICmpInst>(Sel->getCondition())) {
         llvm::Value *op0 = ICmp->getOperand(0);
         llvm::Value *op1 = ICmp->getOperand(1);
@@ -516,7 +516,7 @@ ExecutionDomain PulseChecker::handleLoad(const llvm::LoadInst *LI,
 
   auto read_result = ops_.readDeref(*astate, *ptr_opt, LI);
   OperationResult result = read_result.first;
-  llvm::Optional<Address> value_opt = read_result.second;
+  auto value_opt = read_result.second;
 
   if (result != OperationResult::Success) {
     Trace trace = Trace::fromValueHistory(ptr_opt->history);
@@ -1095,7 +1095,7 @@ ExecutionDomain PulseChecker::handleAlloca(const llvm::AllocaInst *AI,
 ExecutionDomain PulseChecker::handleReturn(const llvm::ReturnInst *RI,
                                            ExecutionDomain exec_state) {
   auto *astate = exec_state.getAstate();
-  llvm::Optional<AbstractValue> returned_value = llvm::None;
+  std::optional<AbstractValue> returned_value = std::nullopt;
   if (RI && astate && RI->getNumOperands() > 0) {
     const llvm::Value *ret_v = RI->getReturnValue();
     if (ret_v && ret_v->getType()->isPointerTy()) {
@@ -1220,15 +1220,15 @@ PulseChecker::handleComparison(const llvm::Instruction *I,
   return exec_state;
 }
 
-llvm::Optional<ExecutionDomain> PulseChecker::applyBranchCondition(
+std::optional<ExecutionDomain> PulseChecker::applyBranchCondition(
     ExecutionDomain state, const llvm::BranchInst *BI, unsigned successor_index,
     const llvm::BasicBlock *pred_bb) {
   if (!BI->isConditional() || successor_index > 1)
-    return llvm::Optional<ExecutionDomain>(std::move(state));
+    return std::optional<ExecutionDomain>(std::move(state));
   ExecutionDomain forked = state.clone();
   auto *astate = forked.getAstate();
   if (!astate)
-    return llvm::Optional<ExecutionDomain>(std::move(state));
+    return std::optional<ExecutionDomain>(std::move(state));
   llvm::Value *cond = BI->getCondition();
   auto *ICmp = llvm::dyn_cast<llvm::ICmpInst>(cond);
   if (!ICmp)
@@ -1244,7 +1244,7 @@ llvm::Optional<ExecutionDomain> PulseChecker::applyBranchCondition(
     llvm::Value *ptr = op0_null ? op1 : op0;
     auto ptr_opt = ops_.eval(*astate, ptr, ICmp, pred_bb);
     if (!ptr_opt)
-      return llvm::Optional<ExecutionDomain>(std::move(state));
+      return std::optional<ExecutionDomain>(std::move(state));
     AbstractValue ptr_av = ptr_opt->addr;
     AbstractValue canon_ptr_av = astate->getCanonical(ptr_av);
 
@@ -1260,11 +1260,11 @@ llvm::Optional<ExecutionDomain> PulseChecker::applyBranchCondition(
       // NullDereference
       if (cmp_pred == llvm::ICmpInst::ICMP_EQ && is_then) {
         // This is the null path (ptr == null) - skip it
-        return llvm::None;
+        return std::nullopt;
       }
       if (cmp_pred == llvm::ICmpInst::ICMP_NE && !is_then) {
         // This is the null path (ptr != null, else branch) - skip it
-        return llvm::None;
+        return std::nullopt;
       }
     }
 
@@ -1301,14 +1301,14 @@ llvm::Optional<ExecutionDomain> PulseChecker::applyBranchCondition(
                                       LatentIssue::IssueKind::NullDereference,
                                       canon_ptr_av, ICmp, trace.clone());
           latent_issues_.back().addCallingContext(ICmp->getFunction(), ICmp);
-          return llvm::Optional<ExecutionDomain>(
+          return std::optional<ExecutionDomain>(
               ExecutionDomain::latentAbortProgram(
                   std::make_unique<AbductiveDomain>(astate->clone()),
                   &latent_issues_.back()));
         }
 
         if (!astate->getPathFormula().addNull(canon_ptr_av))
-          return llvm::None;
+          return std::nullopt;
         // Don't set Null attribute here - only null constants set the Null
         // attribute This ensures NPD checker only tracks null constants as
         // sources
@@ -1324,14 +1324,14 @@ llvm::Optional<ExecutionDomain> PulseChecker::applyBranchCondition(
         // constants
       } else {
         if (!astate->getPathFormula().addNull(canon_ptr_av))
-          return llvm::None;
+          return std::nullopt;
         // Don't set Null attribute here - only null constants set the Null
         // attribute
       }
     } else {
-      return llvm::Optional<ExecutionDomain>(std::move(state));
+      return std::optional<ExecutionDomain>(std::move(state));
     }
-    return llvm::Optional<ExecutionDomain>(std::move(forked));
+    return std::optional<ExecutionDomain>(std::move(forked));
   }
 
   // Integer comparisons contribute to path constraints too.
@@ -1339,7 +1339,7 @@ llvm::Optional<ExecutionDomain> PulseChecker::applyBranchCondition(
     auto a0_opt = ops_.eval(*astate, op0, ICmp, pred_bb);
     auto a1_opt = ops_.eval(*astate, op1, ICmp, pred_bb);
     if (!a0_opt || !a1_opt)
-      return llvm::Optional<ExecutionDomain>(std::move(state));
+      return std::optional<ExecutionDomain>(std::move(state));
     AbstractValue av0 = astate->getCanonical(a0_opt->addr);
     AbstractValue av1 = astate->getCanonical(a1_opt->addr);
 
@@ -1347,20 +1347,20 @@ llvm::Optional<ExecutionDomain> PulseChecker::applyBranchCondition(
         is_then ? cmp_pred : detail::invertIcmpPred(cmp_pred);
     if (!detail::applyIntegerIcmpConstraint(astate->getPathFormula(), eff_pred,
                                             av0, av1)) {
-      return llvm::None;
+      return std::nullopt;
     }
-    return llvm::Optional<ExecutionDomain>(std::move(forked));
+    return std::optional<ExecutionDomain>(std::move(forked));
   }
 
   if (cmp_pred != llvm::ICmpInst::ICMP_EQ &&
       cmp_pred != llvm::ICmpInst::ICMP_NE)
-    return llvm::Optional<ExecutionDomain>(std::move(state));
+    return std::optional<ExecutionDomain>(std::move(state));
 
   if (op0->getType()->isPointerTy() && op1->getType()->isPointerTy()) {
     auto av0_opt = ops_.eval(*astate, op0, ICmp, pred_bb);
     auto av1_opt = ops_.eval(*astate, op1, ICmp, pred_bb);
     if (!av0_opt || !av1_opt)
-      return llvm::Optional<ExecutionDomain>(std::move(state));
+      return std::optional<ExecutionDomain>(std::move(state));
     AbstractValue av0 = av0_opt->addr;
     AbstractValue av1 = av1_opt->addr;
 
@@ -1368,15 +1368,15 @@ llvm::Optional<ExecutionDomain> PulseChecker::applyBranchCondition(
         (cmp_pred == llvm::ICmpInst::ICMP_EQ) ? is_then : !is_then;
     if (should_be_equal) {
       if (!astate->getPathFormula().addEquality(av0, av1))
-        return llvm::None;
+        return std::nullopt;
     } else {
       if (!astate->getPathFormula().addDisequality(av0, av1))
-        return llvm::None;
+        return std::nullopt;
     }
-    return llvm::Optional<ExecutionDomain>(std::move(forked));
+    return std::optional<ExecutionDomain>(std::move(forked));
   }
 
-  return llvm::Optional<ExecutionDomain>(std::move(state));
+  return std::optional<ExecutionDomain>(std::move(state));
 }
 
 } // namespace pulse

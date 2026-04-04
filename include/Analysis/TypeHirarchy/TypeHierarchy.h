@@ -30,9 +30,10 @@
 #ifndef LOTUS_ANALYSIS_TYPEHIERARCHY_TYPEHIERARCHY_H
 #define LOTUS_ANALYSIS_TYPEHIERARCHY_TYPEHIERARCHY_H
 
-#include "llvm/ADT/Optional.h"
 #include "llvm/Support/raw_ostream.h"
+#include <optional>
 
+#include <optional>
 #include <set>
 #include <vector>
 
@@ -83,7 +84,7 @@ public:
    * @param TypeName The name of the type to find
    * @return Optional containing the type if found, empty otherwise
    */
-  __attribute__((warn_unused_result)) virtual llvm::Optional<T>
+  __attribute__((warn_unused_result)) virtual std::optional<T>
   getType(llvm::StringRef TypeName) const = 0;
 
   /**

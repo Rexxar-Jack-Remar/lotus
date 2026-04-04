@@ -16,7 +16,7 @@
 #include <cstdint>
 #include <vector>
 
-#include <llvm/ADT/Optional.h>
+#include <optional>
 #include <z3++.h>
 
 namespace SymAbs {
@@ -32,7 +32,7 @@ z3::expr bv_signed_to_int(const z3::expr &bv);
 /**
  * @brief Extract a signed 64-bit integer from a Z3 numeral expression.
  */
-llvm::Optional<int64_t> to_int64(const z3::expr &val);
+std::optional<int64_t> to_int64(const z3::expr &val);
 
 /**
  * @brief Extract integer value from a Z3 model for a given expression.

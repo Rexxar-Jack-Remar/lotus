@@ -37,15 +37,15 @@ private:
   PulseFormula pre_formula_;
   std::unique_ptr<AbductiveDomain> post_;
   PulseFormula post_formula_;
-  llvm::Optional<AbstractValue> return_value_;
+  std::optional<AbstractValue> return_value_;
 
-  llvm::Optional<LatentIssueSummary> latent_issue_;
+  std::optional<LatentIssueSummary> latent_issue_;
 
 public:
   SummaryEntry(std::unique_ptr<AbductiveDomain> pre, PulseFormula pre_formula,
                std::unique_ptr<AbductiveDomain> post, PulseFormula post_formula,
-               llvm::Optional<AbstractValue> ret_val,
-               llvm::Optional<LatentIssueSummary> latent_issue = llvm::None);
+               std::optional<AbstractValue> ret_val,
+               std::optional<LatentIssueSummary> latent_issue = std::nullopt);
 
   // Move constructor and assignment
   SummaryEntry(SummaryEntry &&) = default;
@@ -59,8 +59,8 @@ public:
   const AbductiveDomain *getPost() const { return post_.get(); }
   const PulseFormula &getPreFormula() const { return pre_formula_; }
   const PulseFormula &getPostFormula() const { return post_formula_; }
-  llvm::Optional<AbstractValue> getReturnValue() const { return return_value_; }
-  const llvm::Optional<LatentIssueSummary> &getLatentIssue() const {
+  std::optional<AbstractValue> getReturnValue() const { return return_value_; }
+  const std::optional<LatentIssueSummary> &getLatentIssue() const {
     return latent_issue_;
   }
 
@@ -91,7 +91,7 @@ public:
   PulseSummary(const llvm::Function *F, std::unique_ptr<AbductiveDomain> pre,
                PulseFormula pre_formula, std::unique_ptr<AbductiveDomain> post,
                PulseFormula post_formula,
-               llvm::Optional<AbstractValue> ret_val);
+               std::optional<AbstractValue> ret_val);
 
   const llvm::Function *getFunction() const { return function_; }
 
@@ -121,12 +121,12 @@ public:
   const AbductiveDomain *getPost() const;
   const PulseFormula &getPreFormula() const;
   const PulseFormula &getPostFormula() const;
-  llvm::Optional<AbstractValue> getReturnValue() const;
+  std::optional<AbstractValue> getReturnValue() const;
 
   /**
    * Get abstract value for a formal parameter
    */
-  llvm::Optional<AbstractValue> getFormalAV(const llvm::Value *formal) const;
+  std::optional<AbstractValue> getFormalAV(const llvm::Value *formal) const;
 
   /**
    * Set mapping from formal to abstract value

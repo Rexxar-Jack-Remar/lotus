@@ -7,7 +7,7 @@
 #include <set>
 #include <vector>
 
-#include <llvm/ADT/Optional.h>
+#include <optional>
 
 namespace pulse {
 
@@ -231,12 +231,12 @@ public:
   /**
    * Get lower bound for value (if known)
    */
-  llvm::Optional<int64_t> getLowerBound(AbstractValue v) const;
+  std::optional<int64_t> getLowerBound(AbstractValue v) const;
 
   /**
    * Get upper bound for value (if known)
    */
-  llvm::Optional<int64_t> getUpperBound(AbstractValue v) const;
+  std::optional<int64_t> getUpperBound(AbstractValue v) const;
 
   /**
    * Check if formula is UNSAT (unsatisfiable) using basic reasoning.

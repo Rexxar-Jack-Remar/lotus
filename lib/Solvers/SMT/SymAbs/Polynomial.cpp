@@ -73,14 +73,14 @@ static int64_t eval_monomial(const expr &monomial, const model &m,
 
   if (monomial.is_numeral()) {
     auto as_int = SymAbs::to_int64(monomial);
-    return as_int.hasValue() ? as_int.getValue() : 0;
+    return as_int.has_value() ? as_int.value() : 0;
   }
 
   if (monomial.is_const()) {
     expr val = m.eval(monomial, true);
     if (val.is_numeral()) {
       auto as_int = SymAbs::to_int64(val);
-      return as_int.hasValue() ? as_int.getValue() : 0;
+      return as_int.has_value() ? as_int.value() : 0;
     }
   }
 
@@ -240,7 +240,7 @@ std::vector<AffineEquality> alpha_poly_V(z3::expr phi,
       for (size_t j = 0; j < n; ++j) {
         expr val = m.eval(variables[j], true);
         auto as_int = SymAbs::to_int64(val);
-        model_values.push_back(as_int.hasValue() ? as_int.getValue() : 0);
+        model_values.push_back(as_int.has_value() ? as_int.value() : 0);
       }
 
       // Evaluate monomials

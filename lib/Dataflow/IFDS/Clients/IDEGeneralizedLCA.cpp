@@ -8,39 +8,39 @@
 
 namespace ifds {
 
-llvm::Optional<int64_t> IDEGeneralizedLCA::as_const(const llvm::Value *v) {
+std::optional<int64_t> IDEGeneralizedLCA::as_const(const llvm::Value *v) {
   if (const auto *ci = llvm::dyn_cast_or_null<llvm::ConstantInt>(v)) {
     return ci->getSExtValue();
   }
-  return llvm::None;
+  return std::nullopt;
 }
 
-llvm::Optional<int64_t> IDEGeneralizedLCA::apply_binop(unsigned opcode,
+std::optional<int64_t> IDEGeneralizedLCA::apply_binop(unsigned opcode,
                                                        int64_t a, int64_t b) {
   int64_t out = 0;
   switch (opcode) {
   case llvm::Instruction::Add:
     if (llvm::AddOverflow(a, b, out)) {
-      return llvm::None;
+      return std::nullopt;
     }
     return out;
   case llvm::Instruction::Sub:
     if (llvm::SubOverflow(a, b, out)) {
-      return llvm::None;
+      return std::nullopt;
     }
     return out;
   case llvm::Instruction::Mul:
     if (llvm::MulOverflow(a, b, out)) {
-      return llvm::None;
+      return std::nullopt;
     }
     return out;
   case llvm::Instruction::SDiv:
     if (b == 0 || (a == std::numeric_limits<int64_t>::min() && b == -1)) {
-      return llvm::None;
+      return std::nullopt;
     }
     return a / b;
   default:
-    return llvm::None;
+    return std::nullopt;
   }
 }
 
@@ -189,17 +189,17 @@ IDEGeneralizedLCA::EdgeFunction IDEGeneralizedLCA::normal_edge_function(
       auto c0 = as_const(op0);
       auto c1 = as_const(op1);
 
-      if (src_fact == zero_fact() && c0.hasValue() && c1.hasValue()) {
-        auto r = apply_binop(opcode, c0.getValue(), c1.getValue());
-        if (r.hasValue()) {
-          const int64_t c = r.getValue();
+      if (src_fact == zero_fact() && c0.has_value() && c1.has_value()) {
+        auto r = apply_binop(opcode, c0.value(), c1.value());
+        if (r.has_value()) {
+          const int64_t c = r.value();
           return [c](const Value & /*v*/) { return Value::singleton(c); };
         }
         return [](const Value & /*v*/) { return Value::top(); };
       }
 
-      if (src_fact == op0 && c1.hasValue()) {
-        const int64_t k = c1.getValue();
+      if (src_fact == op0 && c1.has_value()) {
+        const int64_t k = c1.value();
         return [opcode, k](const Value &v) {
           if (v.kind == Value::Top || v.kind == Value::Bottom) {
             return v;
@@ -207,17 +207,17 @@ IDEGeneralizedLCA::EdgeFunction IDEGeneralizedLCA::normal_edge_function(
           std::set<int64_t> out;
           for (int64_t c : v.constants) {
             auto r = apply_binop(opcode, c, k);
-            if (!r.hasValue()) {
+            if (!r.has_value()) {
               return Value::top();
             }
-            out.insert(r.getValue());
+            out.insert(r.value());
           }
           return cap_constants(std::move(out));
         };
       }
 
-      if (src_fact == op1 && c0.hasValue()) {
-        const int64_t k = c0.getValue();
+      if (src_fact == op1 && c0.has_value()) {
+        const int64_t k = c0.value();
         return [opcode, k](const Value &v) {
           if (v.kind == Value::Top || v.kind == Value::Bottom) {
             return v;
@@ -225,10 +225,10 @@ IDEGeneralizedLCA::EdgeFunction IDEGeneralizedLCA::normal_edge_function(
           std::set<int64_t> out;
           for (int64_t c : v.constants) {
             auto r = apply_binop(opcode, k, c);
-            if (!r.hasValue()) {
+            if (!r.has_value()) {
               return Value::top();
             }
-            out.insert(r.getValue());
+            out.insert(r.value());
           }
           return cap_constants(std::move(out));
         };

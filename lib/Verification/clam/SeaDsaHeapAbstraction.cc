@@ -9,7 +9,7 @@
 
 #include "llvm/ADT/DenseMap.h"
 #include "llvm/ADT/ImmutableSet.h"
-#include "llvm/ADT/Optional.h"
+#include <optional>
 #include "llvm/ADT/iterator_range.h"
 #include "llvm/IR/Function.h"
 #include "llvm/IR/InstIterator.h"

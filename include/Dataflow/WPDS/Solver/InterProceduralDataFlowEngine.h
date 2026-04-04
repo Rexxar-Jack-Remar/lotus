@@ -1,8 +1,6 @@
 #ifndef ANALYSIS_DATAFLOW_WPDS_INTERPROCEDURALDATAFLOWENGINE_H_
 #define ANALYSIS_DATAFLOW_WPDS_INTERPROCEDURALDATAFLOWENGINE_H_
 
-#include "llvm/ADT/Optional.h"
-
 #include "Dataflow/Mono/Support/Result.h"
 #include "Dataflow/WPDS/Core/GenKillTransformer.h"
 #include "Dataflow/WPDS/Core/MemoryObjectFact.h"
@@ -16,6 +14,7 @@
 #include <functional>
 #include <map>
 #include <memory>
+#include <optional>
 #include <set>
 #include <string>
 #include <unordered_map>
@@ -181,7 +180,7 @@ private:
   std::unique_ptr<mono::DataFlowResult> currentResult;
   std::unique_ptr<wpds::CA<GenKillTransformer>> lastResultCA;
   Query lastQuery = Query::user();
-  llvm::Optional<wpds::wpds_key_t> lastAcceptState;
+  std::optional<wpds::wpds_key_t> lastAcceptState;
   CalleeResolver calleeResolver;
   ExternalCallPolicy externalCallPolicy;
 

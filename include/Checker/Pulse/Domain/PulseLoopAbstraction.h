@@ -108,7 +108,7 @@ public:
    * Infer loop invariant: attempt to infer an invariant for a loop
    * Returns the inferred invariant state, or empty if inference failed
    */
-  llvm::Optional<ExecutionDomain>
+  std::optional<ExecutionDomain>
   inferInvariant(const llvm::BasicBlock *BB, const ExecutionDomain &entry_state,
                  const ExecutionDomain &current_state);
 

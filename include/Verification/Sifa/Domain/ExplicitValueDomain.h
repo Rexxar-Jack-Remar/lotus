@@ -13,7 +13,6 @@
 #ifndef LOTUS_VERIFICATION_SIFA_DOMAIN_EXPLICITVALUEDOMAIN_H
 #define LOTUS_VERIFICATION_SIFA_DOMAIN_EXPLICITVALUEDOMAIN_H
 
-#include "llvm/ADT/Optional.h"
 #include "llvm/IR/BasicBlock.h"
 #include "llvm/IR/Constants.h"
 #include "llvm/IR/Instructions.h"
@@ -25,6 +24,7 @@
 #include "Verification/Sifa/Domain/AbstractDomain.h"
 #include "Verification/Sifa/RegionMemory.h"
 
+#include <optional>
 #include <unordered_map>
 
 namespace lotus {
@@ -34,11 +34,11 @@ namespace sifa {
 /// Single explicit value: constant or top (no info). Ultimate
 /// INonrelationalValue for constants.
 struct ExplicitValue {
-  llvm::Optional<int64_t> value;
+  std::optional<int64_t> value;
 
-  static ExplicitValue top() { return {llvm::None}; }
+  static ExplicitValue top() { return {std::nullopt}; }
   static ExplicitValue constant(int64_t c) { return {c}; }
-  bool isTop() const { return !value.hasValue(); }
+  bool isTop() const { return !value.has_value(); }
   bool isBottom() const {
     return false;
   } // no explicit bottom in constant domain
@@ -46,7 +46,7 @@ struct ExplicitValue {
   ExplicitValue join(const ExplicitValue &rhs) const {
     if (isTop() || rhs.isTop())
       return top();
-    if (value.getValue() == rhs.value.getValue())
+    if (*value == *rhs.value)
       return *this;
     return top();
   }
@@ -66,10 +66,10 @@ struct ExplicitValueState {
   explicit ExplicitValueState(bool isBottom) : isBottom_(isBottom) {}
 
   bool isBottom() const { return isBottom_; }
-  llvm::Optional<ExplicitValue> get(const llvm::Value *v) const {
+  std::optional<ExplicitValue> get(const llvm::Value *v) const {
     auto it = map_.find(v);
     if (it == map_.end())
-      return llvm::Optional<ExplicitValue>(ExplicitValue::top());
+      return ExplicitValue::top();
     return it->second;
   }
   void set(const llvm::Value *v, ExplicitValue val) {
@@ -78,10 +78,10 @@ struct ExplicitValueState {
     else
       map_[v] = std::move(val);
   }
-  llvm::Optional<ExplicitValue> getMemory(const llvm::Value *region) const {
+  std::optional<ExplicitValue> getMemory(const llvm::Value *region) const {
     auto it = memory_.find(region);
     if (it == memory_.end())
-      return llvm::Optional<ExplicitValue>(ExplicitValue::top());
+      return ExplicitValue::top();
     return it->second;
   }
   void setMemory(const llvm::Value *region, ExplicitValue val) {
@@ -136,20 +136,20 @@ public:
       return false;
     for (const auto &kv : a.map_) {
       auto ob = b.get(kv.first);
-      if (!ob.hasValue() || ob.getValue().isTop())
+      if (!ob.has_value() || ob->isTop())
         continue;
       if (kv.second.isTop())
         return false;
-      if (kv.second.value != ob.getValue().value)
+      if (kv.second.value != ob->value)
         return false;
     }
     for (const auto &kv : a.memory_) {
       auto ob = b.getMemory(kv.first);
-      if (!ob.hasValue() || ob.getValue().isTop())
+      if (!ob.has_value() || ob->isTop())
         continue;
       if (kv.second.isTop())
         return false;
-      if (kv.second.value != ob.getValue().value)
+      if (kv.second.value != ob->value)
         return false;
     }
     return true;
@@ -163,8 +163,8 @@ public:
     for (const auto &kv : a.map_) {
       auto ob = b.get(kv.first);
       ExplicitValue j = kv.second;
-      if (ob.hasValue())
-        j = j.join(ob.getValue());
+      if (ob.has_value())
+        j = j.join(*ob);
       if (!j.isTop())
         r.set(kv.first, j);
     }
@@ -173,16 +173,16 @@ public:
         continue;
       auto oa = a.get(kv.first);
       ExplicitValue j = kv.second;
-      if (oa.hasValue())
-        j = j.join(oa.getValue());
+      if (oa.has_value())
+        j = j.join(*oa);
       if (!j.isTop())
         r.set(kv.first, j);
     }
     for (const auto &kv : a.memory_) {
       auto ob = b.getMemory(kv.first);
       ExplicitValue j = kv.second;
-      if (ob.hasValue())
-        j = j.join(ob.getValue());
+      if (ob.has_value())
+        j = j.join(*ob);
       if (!j.isTop())
         r.setMemory(kv.first, j);
     }
@@ -191,8 +191,8 @@ public:
         continue;
       auto oa = a.getMemory(kv.first);
       ExplicitValue j = kv.second;
-      if (oa.hasValue())
-        j = j.join(oa.getValue());
+      if (oa.has_value())
+        j = j.join(*oa);
       if (!j.isTop())
         r.setMemory(kv.first, j);
     }
@@ -479,7 +479,7 @@ private:
     if (!target)
       return out;
 
-    llvm::Optional<int64_t> matchedCase;
+    std::optional<int64_t> matchedCase;
     bool targetIsCase = false;
     for (const auto &caseHandle : switchInst.cases()) {
       if (caseHandle.getCaseSuccessor() != target)
@@ -492,7 +492,7 @@ private:
     }
 
     if (targetIsCase) {
-      if (!matchedCase.hasValue())
+      if (!matchedCase.has_value())
         return out;
       if (!current.isTop() && *current.value != *matchedCase)
         return bottomState();

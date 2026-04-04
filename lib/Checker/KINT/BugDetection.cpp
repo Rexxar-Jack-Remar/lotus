@@ -141,7 +141,7 @@ bool BugDetection::add_range_cons(
 
 void BugDetection::binary_check(
     BinaryOperator *op, z3::solver &solver,
-    const DenseMap<const Value *, llvm::Optional<z3::expr>> &v2sym,
+    const DenseMap<const Value *, std::optional<z3::expr>> &v2sym,
     std::set<Instruction *> &overflow_insts,
     std::set<Instruction *> &bad_shift_insts,
     std::set<Instruction *> &div_zero_insts, bool robust_mode,
@@ -338,7 +338,7 @@ void BugDetection::binary_check(
 
 z3::expr BugDetection::binary_op_propagate(
     BinaryOperator *op,
-    const DenseMap<const Value *, llvm::Optional<z3::expr>> &v2sym,
+    const DenseMap<const Value *, std::optional<z3::expr>> &v2sym,
     z3::solver &solver) {
   auto lhs = this->v2sym(op->getOperand(0), v2sym, solver);
   auto rhs = this->v2sym(op->getOperand(1), v2sym, solver);
@@ -379,11 +379,11 @@ z3::expr BugDetection::binary_op_propagate(
 
 z3::expr BugDetection::v2sym(
     const Value *v,
-    const DenseMap<const Value *, llvm::Optional<z3::expr>> &v2sym_map,
+    const DenseMap<const Value *, std::optional<z3::expr>> &v2sym_map,
     z3::solver &solver) {
   auto it = v2sym_map.find(v);
   if (it != v2sym_map.end())
-    return it->second.getValue();
+    return it->second.value();
 
   auto *lconst = dyn_cast<ConstantInt>(v);
   if (lconst != nullptr) {
@@ -421,7 +421,7 @@ void BugDetection::recordBug(const Instruction *inst, interr type) {
 
 z3::expr BugDetection::cast_op_propagate(
     CastInst *op,
-    const DenseMap<const Value *, llvm::Optional<z3::expr>> &v2sym,
+    const DenseMap<const Value *, std::optional<z3::expr>> &v2sym,
     z3::solver &solver) {
   const uint32_t bits = op->getType()->getIntegerBitWidth();
   const std::string fallback_sym = "%cast." + std::to_string(op->getValueID());

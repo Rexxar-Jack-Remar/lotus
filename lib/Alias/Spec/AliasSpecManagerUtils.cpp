@@ -218,7 +218,7 @@ const char *lotus::alias::categoryToString(FunctionCategory cat) {
  * @param str String representation of the category
  * @return Optional containing the category if parsing succeeds, None otherwise
  */
-llvm::Optional<FunctionCategory>
+std::optional<FunctionCategory>
 lotus::alias::stringToCategory(const std::string &str) {
   if (str == "Allocator")
     return FunctionCategory::Allocator;
@@ -236,5 +236,5 @@ lotus::alias::stringToCategory(const std::string &str) {
     return FunctionCategory::ExitFunction;
   if (str == "ReturnArgument")
     return FunctionCategory::ReturnArgument;
-  return llvm::None;
+  return std::nullopt;
 }

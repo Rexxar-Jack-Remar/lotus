@@ -19,6 +19,7 @@
 #include "Verification/Sifa/Domain/IntervalDomain.h"
 #include "Verification/Sifa/Domain/OctagonMatrix.h"
 
+#include <optional>
 #include <unordered_map>
 #include <vector>
 
@@ -52,10 +53,10 @@ public:
   }
   const OctagonMatrix &matrix() const { return matrix_; }
 
-  llvm::Optional<Interval> getMemory(const llvm::Value *region) const {
+  std::optional<Interval> getMemory(const llvm::Value *region) const {
     auto it = memory_.find(region);
     if (it == memory_.end())
-      return llvm::None;
+      return std::nullopt;
     return it->second;
   }
   void setMemory(const llvm::Value *region, Interval i) {
@@ -159,7 +160,7 @@ public:
   }
 
   /// Invalidate the cached strong closure (call after mutating matrix_).
-  void invalidateClosureCache() { closureCache_ = llvm::None; }
+  void invalidateClosureCache() { closureCache_ = std::nullopt; }
 
 private:
   static OctagonMatrix expandAndRearrange(const OctagonMatrix &m,
@@ -185,7 +186,7 @@ private:
   std::unordered_map<const llvm::Value *, Interval> memory_;
   /// Lazily computed strong closure cache. Mutable so hasNegativeSelfLoop() is
   /// const.
-  mutable llvm::Optional<OctagonMatrix> closureCache_;
+  mutable std::optional<OctagonMatrix> closureCache_;
 };
 
 /// Octagon domain implementing AbstractDomain<Transition, OctagonState>.

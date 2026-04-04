@@ -171,11 +171,11 @@ private:
   // Helper methods
   static bool defines_value(const llvm::Instruction *inst);
   static const llvm::Value *get_defined_value(const llvm::Instruction *inst);
-  static llvm::Optional<int64_t> as_const(const llvm::Value *val);
-  static llvm::Optional<int64_t> apply_binop(unsigned opcode, int64_t lhs,
+  static std::optional<int64_t> as_const(const llvm::Value *val);
+  static std::optional<int64_t> apply_binop(unsigned opcode, int64_t lhs,
                                              int64_t rhs);
   static bool is_linear_operation(const llvm::Instruction *inst);
-  static llvm::Optional<int64_t>
+  static std::optional<int64_t>
   compute_linear_transformation(const llvm::Instruction *inst,
                                 int64_t input_val);
 

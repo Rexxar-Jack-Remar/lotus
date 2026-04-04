@@ -10,6 +10,8 @@
 
 #include "Verification/Sifa/Domain/IntervalDomain.h"
 
+#include <optional>
+
 #include "llvm/IR/Constants.h"
 #include "llvm/IR/Instructions.h"
 #include "llvm/IR/Operator.h"
@@ -81,8 +83,8 @@ Interval getInterval(const IntervalState &state, const llvm::Value *V) {
   if (!V)
     return Interval::top();
   auto opt = state.get(V);
-  if (opt.hasValue())
-    return opt.getValue();
+  if (opt.has_value())
+    return *opt;
   if (const auto *C = llvm::dyn_cast<llvm::ConstantInt>(V)) {
     if (C->getBitWidth() > 64)
       return Interval::top();
@@ -102,46 +104,46 @@ bool isFunctionLocalValue(const llvm::Function *F, const llvm::Value *V) {
   return false;
 }
 
-llvm::Optional<int64_t> decrementBound(const llvm::Optional<int64_t> &bound,
+std::optional<int64_t> decrementBound(const std::optional<int64_t> &bound,
                                        bool &overflowed) {
-  if (!bound.hasValue())
-    return llvm::None;
+  if (!bound.has_value())
+    return std::nullopt;
   if (*bound == std::numeric_limits<int64_t>::min()) {
     overflowed = true;
-    return llvm::None;
+    return std::nullopt;
   }
   return *bound - 1;
 }
 
-llvm::Optional<int64_t> incrementBound(const llvm::Optional<int64_t> &bound,
+std::optional<int64_t> incrementBound(const std::optional<int64_t> &bound,
                                        bool &overflowed) {
-  if (!bound.hasValue())
-    return llvm::None;
+  if (!bound.has_value())
+    return std::nullopt;
   if (*bound == std::numeric_limits<int64_t>::max()) {
     overflowed = true;
-    return llvm::None;
+    return std::nullopt;
   }
   return *bound + 1;
 }
 
 Interval intersectWithUpper(const Interval &input,
-                            const llvm::Optional<int64_t> &upper) {
+                            const std::optional<int64_t> &upper) {
   if (input.isBottom())
     return input;
-  Interval bound{llvm::None, upper, false};
+  Interval bound{std::nullopt, upper, false};
   return input.intersect(bound);
 }
 
 Interval intersectWithLower(const Interval &input,
-                            const llvm::Optional<int64_t> &lower) {
+                            const std::optional<int64_t> &lower) {
   if (input.isBottom())
     return input;
-  Interval bound{lower, llvm::None, false};
+  Interval bound{lower, std::nullopt, false};
   return input.intersect(bound);
 }
 
 bool isDefinitelyNonNegative(const Interval &interval) {
-  return interval.lo.hasValue() && *interval.lo >= 0;
+  return interval.lo.has_value() && *interval.lo >= 0;
 }
 
 bool evaluateUnsignedPredicate(llvm::CmpInst::Predicate predicate, uint64_t lhs,
@@ -331,7 +333,7 @@ IntervalState refineForSwitch(const Transition &t, IntervalState out,
   if (!target)
     return out;
 
-  llvm::Optional<int64_t> matchedCase;
+  std::optional<int64_t> matchedCase;
   bool targetIsCase = false;
   for (const auto &caseHandle : switchInst.cases()) {
     if (caseHandle.getCaseSuccessor() != target)
@@ -344,7 +346,7 @@ IntervalState refineForSwitch(const Transition &t, IntervalState out,
   }
 
   if (targetIsCase) {
-    if (!matchedCase.hasValue())
+    if (!matchedCase.has_value())
       return out;
     const Interval refined = condition.intersect(Interval::point(*matchedCase));
     if (refined.isBottom())
@@ -355,7 +357,7 @@ IntervalState refineForSwitch(const Transition &t, IntervalState out,
 
   if (switchInst.getDefaultDest() != target)
     return out;
-  if (condition.isPoint() && condition.lo.hasValue()) {
+  if (condition.isPoint() && condition.lo.has_value()) {
     for (const auto &caseHandle : switchInst.cases()) {
       if (caseHandle.getCaseValue()->getBitWidth() > 64)
         continue;
@@ -454,12 +456,12 @@ Interval restrictToSigned(const Interval &i, unsigned bits) {
     return i;
   int64_t minVal = -(1LL << (bits - 1));
   int64_t maxVal = (1LL << (bits - 1)) - 1;
-  llvm::Optional<int64_t> lo = i.lo.hasValue()
-                                   ? std::max(*i.lo, minVal)
-                                   : llvm::Optional<int64_t>(minVal);
-  llvm::Optional<int64_t> hi = i.hi.hasValue()
-                                   ? std::min(*i.hi, maxVal)
-                                   : llvm::Optional<int64_t>(maxVal);
+  std::optional<int64_t> lo = i.lo.has_value()
+                                  ? std::max(*i.lo, minVal)
+                                  : std::optional<int64_t>(minVal);
+  std::optional<int64_t> hi = i.hi.has_value()
+                                  ? std::min(*i.hi, maxVal)
+                                  : std::optional<int64_t>(maxVal);
   if (lo && hi && *lo > *hi)
     return Interval::bottom();
   return Interval{lo, hi, false};
@@ -472,11 +474,11 @@ Interval restrictToUnsigned(const Interval &i, unsigned bits) {
   if (bits >= 64)
     return i;
   int64_t maxVal = (bits == 64) ? INT64_MAX : ((1LL << bits) - 1);
-  llvm::Optional<int64_t> lo = i.lo.hasValue() ? std::max(*i.lo, int64_t{0})
-                                               : llvm::Optional<int64_t>(0);
-  llvm::Optional<int64_t> hi = i.hi.hasValue()
-                                   ? std::min(*i.hi, maxVal)
-                                   : llvm::Optional<int64_t>(maxVal);
+  std::optional<int64_t> lo = i.lo.has_value() ? std::max(*i.lo, int64_t{0})
+                                                : std::optional<int64_t>(0);
+  std::optional<int64_t> hi = i.hi.has_value()
+                                  ? std::min(*i.hi, maxVal)
+                                  : std::optional<int64_t>(maxVal);
   if (lo && hi && *lo > *hi)
     return Interval::bottom();
   return Interval{lo, hi, false};
@@ -910,12 +912,12 @@ void IntervalState::print(llvm::raw_ostream &out) const {
       out << "  " << name << " : [-inf, +inf]\n";
     else {
       out << "  " << name << " : [";
-      if (i.lo.hasValue())
+      if (i.lo.has_value())
         out << *i.lo;
       else
         out << "-inf";
       out << ", ";
-      if (i.hi.hasValue())
+      if (i.hi.has_value())
         out << *i.hi;
       else
         out << "+inf";
@@ -938,7 +940,7 @@ void IntervalState::print(llvm::raw_ostream &out) const {
     else if (i.isTop())
       out << "[-inf, +inf]\n";
     else
-      out << "[" << (i.lo.hasValue() ? std::to_string(*i.lo) : "-inf") << ", "
-          << (i.hi.hasValue() ? std::to_string(*i.hi) : "+inf") << "]\n";
+      out << "[" << (i.lo.has_value() ? std::to_string(*i.lo) : "-inf") << ", "
+          << (i.hi.has_value() ? std::to_string(*i.hi) : "+inf") << "]\n";
   }
 }

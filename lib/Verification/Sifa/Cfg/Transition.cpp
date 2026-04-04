@@ -113,19 +113,19 @@ Transition Transition::from(const CallReturnSummary &c) {
   return makeReturnSummary(c.id, c.source, c.target, 0, 0, c.callee);
 }
 
-llvm::Optional<LocationMarkerTransition>
+std::optional<LocationMarkerTransition>
 Transition::getLocationMarkerTransition() const {
   if (kind != TransitionKind::Marker)
-    return llvm::None;
+    return std::nullopt;
   LocationMarkerTransition m;
   m.markedTarget = target;
   m.uniqueId = id;
   return m;
 }
 
-llvm::Optional<CallReturnSummary> Transition::getCallReturnSummary() const {
+std::optional<CallReturnSummary> Transition::getCallReturnSummary() const {
   if (kind != TransitionKind::ReturnSummary)
-    return llvm::None;
+    return std::nullopt;
   CallReturnSummary c;
   c.source = source;
   c.target = target;

@@ -89,9 +89,9 @@ expr bv_signed_to_int(const expr &bv) {
  * @note Returns None if val is not a numeral expression
  * @note May fail for very large integers that exceed int64_t range
  */
-llvm::Optional<int64_t> to_int64(const expr &val) {
+std::optional<int64_t> to_int64(const expr &val) {
   if (!val.is_numeral()) {
-    return llvm::None;
+    return std::nullopt;
   }
   int64_t out = 0;
   // Try Z3's native extraction first (efficient)
@@ -104,7 +104,7 @@ llvm::Optional<int64_t> to_int64(const expr &val) {
     std::string s = Z3_get_numeral_string(val.ctx(), val);
     return std::stoll(s);
   } catch (...) {
-    return llvm::None;
+    return std::nullopt;
   }
 }
 

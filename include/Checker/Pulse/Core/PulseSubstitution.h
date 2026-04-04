@@ -17,7 +17,7 @@ private:
 
 public:
   void add(AbstractValue formal, AbstractValue actual);
-  llvm::Optional<AbstractValue> substitute(AbstractValue formal) const;
+  std::optional<AbstractValue> substitute(AbstractValue formal) const;
   AbstractValue substituteOrIdentity(AbstractValue formal) const;
 
   bool empty() const { return formal_to_actual_.empty(); }

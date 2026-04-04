@@ -4,7 +4,7 @@
 
 #include "seahorn/Expr/ExprLlvm.hh"
 #include "seahorn/Support/BoostLlvmGraphTraits.hh"
-#include "llvm/ADT/Optional.h"
+#include <optional>
 #include "llvm/ADT/SCCIterator.h"
 #include "llvm/Analysis/CFG.h"
 #include "llvm/Analysis/CallGraph.h"
@@ -139,14 +139,14 @@ struct FunctionNameMatcher
   using argument_type = const Function &;
   using result_type = bool;
 
-  llvm::Optional<llvm::Regex> m_re;
+  std::optional<llvm::Regex> m_re;
   explicit FunctionNameMatcher(const std::string &s) {
     if (!s.empty()) {
       m_re = llvm::Regex(s);
       std::string Error;
       if (!m_re->isValid(Error)) {
         WARN << "syntax error in regex '" << s << "' " << Error;
-        m_re = llvm::None;
+        m_re = std::nullopt;
       }
     }
   }

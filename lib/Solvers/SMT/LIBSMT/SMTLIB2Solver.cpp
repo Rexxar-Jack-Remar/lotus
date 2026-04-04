@@ -19,7 +19,7 @@
 #include "Solvers/SMT/LIBSMT/SMTLIB2Solver.h"
 
 #include "llvm/ADT/APInt.h"
-#include "llvm/ADT/Optional.h"
+#include <optional>
 #include "llvm/ADT/SmallString.h"
 #include "llvm/ADT/Statistic.h"
 #include "llvm/ADT/StringRef.h"
@@ -310,7 +310,8 @@ SolverProgram makeExternalSolverProgram(StringRef Path) {
     std::vector<StringRef> ArgPtrs;
     ArgPtrs.push_back(PathStr);
     ArgPtrs.insert(ArgPtrs.end(), Args.begin(), Args.end());
-    Optional<StringRef> Redirects[] = {RedirectIn, RedirectOut, RedirectErr};
+    llvm::Optional<StringRef> Redirects[] = {RedirectIn, RedirectOut,
+                                             RedirectErr};
     return sys::ExecuteAndWait(PathStr, ArgPtrs, {}, Redirects, Timeout);
   };
 }

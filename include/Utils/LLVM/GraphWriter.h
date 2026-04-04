@@ -422,7 +422,7 @@ void ViewGraphWithSelection(llvm::Function *F, const std::string &FileName,
     args.emplace_back(OutputFilename);
     llvm::errs() << "Trying 'dot' program " << ProgramPath << "\n";
     std::string ErrMsg;
-    llvm::sys::ExecuteAndWait(ProgramPath, args, llvm::None, {}, 0, 0, &ErrMsg);
+    llvm::sys::ExecuteAndWait(ProgramPath, args, std::nullopt, {}, 0, 0, &ErrMsg);
     llvm::sys::fs::remove(FileName);
   }
 }

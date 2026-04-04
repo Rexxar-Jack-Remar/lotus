@@ -17,7 +17,6 @@
 #define LOTUS_VERIFICATION_SIFA_SIFA_H
 
 #include "llvm/ADT/ArrayRef.h"
-#include "llvm/ADT/Optional.h"
 
 #include "Verification/Sifa/BlockTransferPolicy.h"
 #include "Verification/Sifa/Cfg/Transition.h"
@@ -39,6 +38,7 @@
 #include "Verification/Sifa/Summarizers/FixpointLoopSummarizer.h"
 
 #include <cstddef>
+#include <optional>
 
 // Needed for getEntryBlock() in the header-only analyzeTo().
 #include "llvm/IR/Function.h"
@@ -77,7 +77,7 @@ struct SifaOptions {
   /// "block-wise" set use a fast havoc transfer; others use
   /// instruction-by-instruction. Enables precision-performance trade-offs (e.g.
   /// block-wise for hot/large blocks).
-  llvm::Optional<BlockTransferPolicy> blockTransferPolicy;
+  std::optional<BlockTransferPolicy> blockTransferPolicy;
   /// Optional alias analysis (lib/Alias). When set with a value domain
   /// (Interval, Octagon, etc.), enables region-based memory: Load/Store use AA
   /// to resolve pointers to regions (allocas, globals) for sound transfer.

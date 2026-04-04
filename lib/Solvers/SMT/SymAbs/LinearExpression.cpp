@@ -45,7 +45,7 @@
 
 #include <cassert>
 
-#include <llvm/ADT/Optional.h>
+#include <optional>
 #include <z3++.h>
 #include <z3.h>
 
@@ -113,26 +113,26 @@ static expr build_integer_linear_expr(const LinearExpression &lexpr,
  * reached
  *
  * **Termination:**
- * - Returns llvm::None if φ is unsatisfiable
- * - Returns llvm::None if no valid integer value can be extracted
+ * - Returns std::nullopt if φ is unsatisfiable
+ * - Returns std::nullopt if no valid integer value can be extracted
  * - Returns the maximum value (least upper bound) on success
  * - May return a sub-optimal value if max_iterations is exceeded
  *
  * @param phi The formula constraining the variables (bit-vector SMT formula)
  * @param lexpr The linear expression to maximize (Σ λ_i · ⟨⟨v_i⟩⟩)
  * @param config Configuration including timeout and iteration limits
- * @return The least upper bound d ∈ Z, or llvm::None if computation fails
+ * @return The least upper bound d ∈ Z, or std::nullopt if computation fails
  *
  * @note The result is computed over unbounded integers (via bv_signed_to_int),
  *       which avoids wrap-around issues present in bit-vector arithmetic.
  * @note This function may be computationally expensive for complex formulas,
  *       especially when the fallback iterative search is triggered.
  */
-llvm::Optional<int64_t> alpha_lin_exp(const z3::expr &phi,
+std::optional<int64_t> alpha_lin_exp(const z3::expr &phi,
                                       const LinearExpression &lexpr,
                                       const AbstractionConfig &config) {
   if (lexpr.variables.empty()) {
-    return llvm::None;
+    return std::nullopt;
   }
 
   context &ctx = phi.ctx();
@@ -153,14 +153,14 @@ llvm::Optional<int64_t> alpha_lin_exp(const z3::expr &phi,
     model m = opt.get_model();
     expr val = m.eval(int_expr, true);
     auto as_int = SymAbs::to_int64(val);
-    if (as_int.hasValue()) {
+    if (as_int.has_value()) {
       return as_int;
     }
   }
 
   if (check_res == unsat) {
     // Formula is unsatisfiable, so no maximum exists
-    return llvm::None;
+    return std::nullopt;
   }
 
   // Fallback: bounded ascending search using a plain solver when optimize
@@ -172,17 +172,17 @@ llvm::Optional<int64_t> alpha_lin_exp(const z3::expr &phi,
 
   // Find an initial satisfying model to start the search
   if (sol.check() != sat) {
-    return llvm::None;
+    return std::nullopt;
   }
 
   model m0 = sol.get_model();
   expr v0 = m0.eval(int_expr, true);
   auto best_opt = SymAbs::to_int64(v0);
-  if (!best_opt.hasValue()) {
-    return llvm::None;
+  if (!best_opt.has_value()) {
+    return std::nullopt;
   }
 
-  int64_t best = best_opt.getValue();
+  int64_t best = best_opt.value();
   unsigned iter = 0;
 
   // Iterative improvement: keep searching for better values until
@@ -202,15 +202,15 @@ llvm::Optional<int64_t> alpha_lin_exp(const z3::expr &phi,
     expr v_new = m_new.eval(int_expr, true);
     auto v_int = SymAbs::to_int64(v_new);
     sol.pop(); // Restore state
-    if (!v_int.hasValue()) {
+    if (!v_int.has_value()) {
       // Cannot extract integer value, stop search
       break;
     }
-    best = v_int.getValue();
+    best = v_int.value();
     ++iter;
   }
 
-  return best_opt.hasValue() ? llvm::Optional<int64_t>(best) : llvm::None;
+  return best_opt.has_value() ? std::optional<int64_t>(best) : std::nullopt;
 }
 
 /**
@@ -227,9 +227,9 @@ llvm::Optional<int64_t> alpha_lin_exp(const z3::expr &phi,
  * @param phi The formula constraining the variable
  * @param variable The variable to minimize
  * @param config Configuration for the algorithm
- * @return The minimum value, or llvm::None if computation fails
+ * @return The minimum value, or std::nullopt if computation fails
  */
-llvm::Optional<int64_t> minimum(const z3::expr &phi, const z3::expr &variable,
+std::optional<int64_t> minimum(const z3::expr &phi, const z3::expr &variable,
                                 const AbstractionConfig &config) {
   // Minimize v by maximizing -v (reuse alpha_lin_exp with negated coefficient)
   LinearExpression neg_expr;
@@ -237,12 +237,12 @@ llvm::Optional<int64_t> minimum(const z3::expr &phi, const z3::expr &variable,
   neg_expr.coefficients.push_back(-1);
 
   auto max_neg = alpha_lin_exp(phi, neg_expr, config);
-  if (!max_neg.hasValue()) {
-    return llvm::None;
+  if (!max_neg.has_value()) {
+    return std::nullopt;
   }
 
   // Negate the result to get the minimum
-  return -max_neg.getValue();
+  return -max_neg.value();
 }
 
 /**
@@ -255,9 +255,9 @@ llvm::Optional<int64_t> minimum(const z3::expr &phi, const z3::expr &variable,
  * @param phi The formula constraining the variable
  * @param variable The variable to maximize
  * @param config Configuration for the algorithm
- * @return The maximum value, or llvm::None if computation fails
+ * @return The maximum value, or std::nullopt if computation fails
  */
-llvm::Optional<int64_t> maximum(const z3::expr &phi, const z3::expr &variable,
+std::optional<int64_t> maximum(const z3::expr &phi, const z3::expr &variable,
                                 const AbstractionConfig &config) {
   // Build linear expression: 1 * variable
   LinearExpression expr;

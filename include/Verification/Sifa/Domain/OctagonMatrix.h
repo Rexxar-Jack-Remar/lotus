@@ -9,10 +9,9 @@
 #ifndef LOTUS_VERIFICATION_SIFA_DOMAIN_OCTAGONMATRIX_H
 #define LOTUS_VERIFICATION_SIFA_DOMAIN_OCTAGONMATRIX_H
 
-#include "llvm/ADT/Optional.h"
-
 #include <cstddef>
 #include <limits>
+#include <optional>
 #include <vector>
 
 namespace lotus {
@@ -23,15 +22,15 @@ class OctagonMatrix {
 public:
   explicit OctagonMatrix(std::size_t nVars = 0) : n_(nVars) {
     std::size_t dim = 2 * nVars;
-    matrix_.assign(dim, std::vector<llvm::Optional<int64_t>>(dim, llvm::None));
+    matrix_.assign(dim, std::vector<std::optional<int64_t>>(dim, std::nullopt));
   }
 
   std::size_t numVars() const { return n_; }
   std::size_t dim() const { return matrix_.size(); }
 
-  llvm::Optional<int64_t> get(std::size_t i, std::size_t j) const {
+  std::optional<int64_t> get(std::size_t i, std::size_t j) const {
     if (i >= matrix_.size() || j >= matrix_.size())
-      return llvm::None;
+      return std::nullopt;
     return matrix_[i][j];
   }
   void set(std::size_t i, std::size_t j, int64_t c) {
@@ -144,7 +143,7 @@ public:
 
 private:
   std::size_t n_;
-  std::vector<std::vector<llvm::Optional<int64_t>>> matrix_;
+  std::vector<std::vector<std::optional<int64_t>>> matrix_;
 };
 
 } // namespace sifa

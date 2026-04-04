@@ -10,7 +10,7 @@
 #include <cstdint>
 #include <vector>
 
-#include <llvm/ADT/Optional.h>
+#include <optional>
 #include <z3++.h>
 
 namespace SymAbs {
@@ -39,23 +39,23 @@ struct LinearExpression {
  * @param phi The formula constraining the variables
  * @param expr The linear expression to maximize
  * @param config Configuration for the algorithm
- * @return The least upper bound d ∈ Z, or llvm::None on failure
+ * @return The least upper bound d ∈ Z, or std::nullopt on failure
  */
-llvm::Optional<int64_t>
+std::optional<int64_t>
 alpha_lin_exp(const z3::expr &phi, const LinearExpression &expr,
               const AbstractionConfig &config = AbstractionConfig{});
 
 /**
  * @brief Compute minimum value (using negation of linear expression)
  */
-llvm::Optional<int64_t>
+std::optional<int64_t>
 minimum(const z3::expr &phi, const z3::expr &variable,
         const AbstractionConfig &config = AbstractionConfig{});
 
 /**
  * @brief Compute maximum value
  */
-llvm::Optional<int64_t>
+std::optional<int64_t>
 maximum(const z3::expr &phi, const z3::expr &variable,
         const AbstractionConfig &config = AbstractionConfig{});
 

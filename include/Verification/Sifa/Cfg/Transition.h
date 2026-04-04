@@ -18,11 +18,11 @@
 #ifndef LOTUS_VERIFICATION_SIFA_CFG_TRANSITION_H
 #define LOTUS_VERIFICATION_SIFA_CFG_TRANSITION_H
 
-#include "llvm/ADT/Optional.h"
 #include "llvm/IR/BasicBlock.h"
 #include "llvm/IR/Function.h"
 
 #include <cstdint>
+#include <optional>
 #include <ostream>
 #include <string>
 
@@ -122,9 +122,9 @@ struct Transition {
   static Transition from(const CallReturnSummary &c);
 
   /// When kind == Marker, view as LocationMarkerTransition.
-  llvm::Optional<LocationMarkerTransition> getLocationMarkerTransition() const;
+  std::optional<LocationMarkerTransition> getLocationMarkerTransition() const;
   /// When kind == ReturnSummary, view as CallReturnSummary.
-  llvm::Optional<CallReturnSummary> getCallReturnSummary() const;
+  std::optional<CallReturnSummary> getCallReturnSummary() const;
 
   bool landsAtBlockEntry() const {
     return target != nullptr && targetOrdinal == 0;

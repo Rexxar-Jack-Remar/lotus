@@ -343,10 +343,10 @@ AliasSpecManager::buildAllocatorInfo(const std::string &name,
  * @return Optional containing AllocatorInfo if function is an allocator, None
  * otherwise
  */
-llvm::Optional<AllocatorInfo>
+std::optional<AllocatorInfo>
 AliasSpecManager::getAllocatorInfo(const llvm::Function *F) const {
   if (!F)
-    return llvm::None;
+    return std::nullopt;
   return getAllocatorInfo(normalizeFunctionName(F));
 }
 
@@ -357,7 +357,7 @@ AliasSpecManager::getAllocatorInfo(const llvm::Function *F) const {
  * @return Optional containing AllocatorInfo if function is an allocator, None
  * otherwise
  */
-llvm::Optional<AllocatorInfo>
+std::optional<AllocatorInfo>
 AliasSpecManager::getAllocatorInfo(const std::string &functionName) const {
   if (cacheEnabled_) {
     auto it = allocatorCache_.find(functionName);
@@ -366,7 +366,7 @@ AliasSpecManager::getAllocatorInfo(const std::string &functionName) const {
   }
 
   const FunctionSpec *spec = lookupSpec(functionName);
-  llvm::Optional<AllocatorInfo> result = llvm::None;
+  std::optional<AllocatorInfo> result = std::nullopt;
 
   if (spec && spec->isAllocator) {
     result = buildAllocatorInfo(functionName, *spec);

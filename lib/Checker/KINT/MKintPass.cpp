@@ -63,13 +63,13 @@ static const char *bugTypeToString(interr t) {
   }
 }
 
-static llvm::Optional<uint64_t> getConstantU64(const llvm::Value *v) {
+static std::optional<uint64_t> getConstantU64(const llvm::Value *v) {
   if (!v)
-    return llvm::None;
+    return std::nullopt;
   if (const auto *ci = llvm::dyn_cast<llvm::ConstantInt>(v)) {
     return ci->getZExtValue();
   }
-  return llvm::None;
+  return std::nullopt;
 }
 
 static std::atomic<uint64_t> g_obj_mem_id{0};
@@ -124,7 +124,7 @@ computeWithOverflow(const llvm::WithOverflowInst *woi, z3::solver &solver,
 }
 
 MKintPass::MKintPass()
-    : m_solver(llvm::None), m_function_timeout(FunctionTimeout),
+    : m_solver(std::nullopt), m_function_timeout(FunctionTimeout),
       m_path_limit(MaxPathsPerFunction) {
   m_range_analysis = std::make_unique<RangeAnalysis>();
   m_taint_analysis = std::make_unique<TaintAnalysis>();
@@ -448,7 +448,7 @@ void MKintPass::smt_solving(Module &M) {
     for (auto &GV : M.globals()) {
       const uint64_t bytes = m_dl->getTypeAllocSize(GV.getValueType());
       ensureObject(&GV, ("global." + GV.getName()).str(),
-                   m_solver.getValue().ctx().bv_val(bytes, m_ptr_bits),
+                   m_solver.value().ctx().bv_val(bytes, m_ptr_bits),
                    /*sizeKnown=*/true);
     }
 
@@ -459,11 +459,11 @@ void MKintPass::smt_solving(Module &M) {
           const uint64_t elemBytes =
               m_dl->getTypeAllocSize(ai->getAllocatedType());
           z3::expr sizeBytesExpr =
-              m_solver.getValue().ctx().bv_val(elemBytes, m_ptr_bits);
+              m_solver.value().ctx().bv_val(elemBytes, m_ptr_bits);
           bool known = true;
           if (ai->isArrayAllocation()) {
             if (auto *ci = dyn_cast<ConstantInt>(ai->getArraySize())) {
-              sizeBytesExpr = m_solver.getValue().ctx().bv_val(
+              sizeBytesExpr = m_solver.value().ctx().bv_val(
                   elemBytes * ci->getZExtValue(), m_ptr_bits);
             } else {
               auto countExpr =
@@ -473,7 +473,7 @@ void MKintPass::smt_solving(Module &M) {
                 countExpr = z3::zext(countExpr, m_ptr_bits - cbw);
               else if (cbw > m_ptr_bits)
                 countExpr = countExpr.extract(m_ptr_bits - 1, 0);
-              sizeBytesExpr = countExpr * m_solver.getValue().ctx().bv_val(
+              sizeBytesExpr = countExpr * m_solver.value().ctx().bv_val(
                                               elemBytes, m_ptr_bits);
               known = countExpr.is_numeral();
             }
@@ -496,7 +496,7 @@ void MKintPass::smt_solving(Module &M) {
       }
     }
 
-    m_solver.getValue().push();
+    m_solver.value().push();
     pushSymFrame();
     m_smt_mem->push();
     pushConstraintFrame();
@@ -506,16 +506,16 @@ void MKintPass::smt_solving(Module &M) {
       const std::string arg_name =
           (F->getName() + "." + std::to_string(arg.getArgNo())).str();
       if (arg.getType()->isIntegerTy()) {
-        const auto argv = m_solver.getValue().ctx().bv_const(
+        const auto argv = m_solver.value().ctx().bv_const(
             arg_name.c_str(), arg.getType()->getIntegerBitWidth());
         setSym(&arg, argv);
         m_bug_detection->add_range_cons(
             m_range_analysis->get_range_by_bb(
                 &arg, &(F->getEntryBlock()), m_func2range_info, m_global2range),
-            argv, m_solver.getValue(),
+            argv, m_solver.value(),
             [this](const z3::expr &e) { addConstraint(e); });
       } else if (arg.getType()->isPointerTy()) {
-        const auto argv = m_solver.getValue().ctx().bv_const(
+        const auto argv = m_solver.value().ctx().bv_const(
             (arg_name + ".ptr").c_str(), m_ptr_bits);
         setSym(&arg, argv);
       }
@@ -526,7 +526,7 @@ void MKintPass::smt_solving(Module &M) {
     m_smt_mem->pop();
     popSymFrame();
     popConstraintFrame();
-    m_solver.getValue().pop();
+    m_solver.value().pop();
 
     // Report analysis time
     auto elapsed = std::chrono::duration_cast<std::chrono::seconds>(
@@ -594,7 +594,7 @@ void MKintPass::path_solving(BasicBlock *cur, BasicBlock *pred) {
 
         // If the condition is an ICmp, encode it precisely (including pointer
         // equality).
-        z3::expr condBool = m_solver.getValue().ctx().bool_val(true);
+        z3::expr condBool = m_solver.value().ctx().bool_val(true);
         if (auto *cmp = dyn_cast<ICmpInst>(cond)) {
           // Do not hard-prune based on range analysis; let SMT decide
           // satisfiability.
@@ -639,7 +639,7 @@ void MKintPass::path_solving(BasicBlock *cur, BasicBlock *pred) {
             default:
               MKINT_WARN() << "Unsupported icmp predicate in branch condition: "
                            << *cmp;
-              condBool = m_solver.getValue().ctx().bool_val(true);
+              condBool = m_solver.value().ctx().bool_val(true);
               break;
             }
           } else if (lhs->getType()->isPointerTy() &&
@@ -657,7 +657,7 @@ void MKintPass::path_solving(BasicBlock *cur, BasicBlock *pred) {
               MKINT_WARN()
                   << "Unsupported pointer icmp predicate in branch condition: "
                   << *cmp;
-              condBool = m_solver.getValue().ctx().bool_val(true);
+              condBool = m_solver.value().ctx().bool_val(true);
               break;
             }
           } else {
@@ -677,13 +677,13 @@ void MKintPass::path_solving(BasicBlock *cur, BasicBlock *pred) {
         } else if (cond->getType()->isIntegerTy(1)) {
           // Generic i1 condition.
           const auto c = getIntExpr(cond, pred, nullptr);
-          condBool = (c == m_solver.getValue().ctx().bv_val(1, 1));
+          condBool = (c == m_solver.value().ctx().bv_val(1, 1));
         } else {
           MKINT_WARN() << "Unsupported branch condition: " << *cond;
         }
 
         addConstraint(is_true_br ? condBool : !condBool);
-        if (m_solver.getValue().check() == z3::unsat) {
+        if (m_solver.value().check() == z3::unsat) {
           MKINT_DEBUG() << "[SMT Solving] Pruned unsat edge into "
                         << cur->getName();
           return;
@@ -697,7 +697,7 @@ void MKintPass::path_solving(BasicBlock *cur, BasicBlock *pred) {
           for (auto c : swt->cases()) {
             auto *case_val = c.getCaseValue();
             addConstraint(getIntExpr(cond, pred, nullptr) !=
-                          bvValFromAPInt(m_solver.getValue().ctx(),
+                          bvValFromAPInt(m_solver.value().ctx(),
                                          case_val->getValue()));
           }
         } else {
@@ -705,7 +705,7 @@ void MKintPass::path_solving(BasicBlock *cur, BasicBlock *pred) {
             if (c.getCaseSuccessor() == cur) {
               auto *case_val = c.getCaseValue();
               addConstraint(getIntExpr(cond, pred, nullptr) ==
-                            bvValFromAPInt(m_solver.getValue().ctx(),
+                            bvValFromAPInt(m_solver.value().ctx(),
                                            case_val->getValue()));
               break;
             }
@@ -737,7 +737,7 @@ void MKintPass::path_solving(BasicBlock *cur, BasicBlock *pred) {
           m_bug_detection->add_range_cons(
               m_range_analysis->get_range_by_bb(phi, cur, m_func2range_info,
                                                 m_global2range),
-              incomingExpr, m_solver.getValue(),
+              incomingExpr, m_solver.value(),
               [this](const z3::expr &e) { addConstraint(e); });
         }
       }
@@ -753,8 +753,8 @@ void MKintPass::path_solving(BasicBlock *cur, BasicBlock *pred) {
       const auto *cond = assumeI->getArgOperand(0);
       if (cond && cond->getType()->isIntegerTy(1)) {
         const auto c = getIntExpr(cond, cur, pred);
-        addConstraint(c == m_solver.getValue().ctx().bv_val(1, 1));
-        if (m_solver.getValue().check() == z3::unsat)
+        addConstraint(c == m_solver.value().ctx().bv_val(1, 1));
+        if (m_solver.value().check() == z3::unsat)
           return;
       }
       continue;
@@ -765,11 +765,11 @@ void MKintPass::path_solving(BasicBlock *cur, BasicBlock *pred) {
       // intrinsics. Bug checking: if overflow is satisfiable under current path
       // constraints, report an overflow.
       if (CheckIntOverflow) {
-        z3::expr res = m_solver.getValue().ctx().bv_val(
+        z3::expr res = m_solver.value().ctx().bv_val(
             0, woi->getArgOperand(0)->getType()->getIntegerBitWidth());
-        z3::expr ov = m_solver.getValue().ctx().bool_val(false);
+        z3::expr ov = m_solver.value().ctx().bool_val(false);
         if (computeWithOverflow(
-                woi, m_solver.getValue(),
+                woi, m_solver.value(),
                 [&](const llvm::Value *x) { return getIntExpr(x, cur, pred); },
                 res, ov)) {
           if (checkBugCondition(woi, interr::INT_OVERFLOW, ov)) {
@@ -793,7 +793,7 @@ void MKintPass::path_solving(BasicBlock *cur, BasicBlock *pred) {
         if (*len <= kMaxBytes) {
           const Value *obj = getObjectForPtr(memsetI->getRawDest());
           if (obj && m_obj_mem.count(obj)) {
-            const auto base = m_obj_base[obj].getValue();
+            const auto base = m_obj_base[obj].value();
             const auto off = dst - base;
             z3::expr b = val;
             const unsigned bw = b.get_sort().bv_size();
@@ -801,10 +801,10 @@ void MKintPass::path_solving(BasicBlock *cur, BasicBlock *pred) {
               b = z3::zext(b, 8 - bw);
             else if (bw > 8)
               b = b.extract(7, 0);
-            z3::expr curMem = m_obj_mem[obj].getValue();
+            z3::expr curMem = m_obj_mem[obj].value();
             for (uint64_t i = 0; i < *len; ++i) {
               curMem = z3::store(
-                  curMem, off + m_solver.getValue().ctx().bv_val(i, m_ptr_bits),
+                  curMem, off + m_solver.value().ctx().bv_val(i, m_ptr_bits),
                   b);
             }
             m_obj_mem[obj] = curMem;
@@ -840,19 +840,19 @@ void MKintPass::path_solving(BasicBlock *cur, BasicBlock *pred) {
           const Value *srcObj = getObjectForPtr(memcpyI->getRawSource());
           if (dstObj && srcObj && m_obj_mem.count(dstObj) &&
               m_obj_mem.count(srcObj)) {
-            const auto dstBase = m_obj_base[dstObj].getValue();
-            const auto srcBase = m_obj_base[srcObj].getValue();
+            const auto dstBase = m_obj_base[dstObj].value();
+            const auto srcBase = m_obj_base[srcObj].value();
             z3::expr dstOff = dst - dstBase;
             z3::expr srcOff = src - srcBase;
-            z3::expr dstMem = m_obj_mem[dstObj].getValue();
-            z3::expr srcMem = m_obj_mem[srcObj].getValue();
+            z3::expr dstMem = m_obj_mem[dstObj].value();
+            z3::expr srcMem = m_obj_mem[srcObj].value();
             for (uint64_t i = 0; i < *len; ++i) {
               z3::expr b = z3::select(
                   srcMem,
-                  srcOff + m_solver.getValue().ctx().bv_val(i, m_ptr_bits));
+                  srcOff + m_solver.value().ctx().bv_val(i, m_ptr_bits));
               dstMem = z3::store(
                   dstMem,
-                  dstOff + m_solver.getValue().ctx().bv_val(i, m_ptr_bits), b);
+                  dstOff + m_solver.value().ctx().bv_val(i, m_ptr_bits), b);
             }
             m_obj_mem[dstObj] = dstMem;
           } else if (dstObj) {
@@ -891,19 +891,19 @@ void MKintPass::path_solving(BasicBlock *cur, BasicBlock *pred) {
           const Value *srcObj = getObjectForPtr(memmoveI->getRawSource());
           if (dstObj && srcObj && m_obj_mem.count(dstObj) &&
               m_obj_mem.count(srcObj)) {
-            const auto dstBase = m_obj_base[dstObj].getValue();
-            const auto srcBase = m_obj_base[srcObj].getValue();
+            const auto dstBase = m_obj_base[dstObj].value();
+            const auto srcBase = m_obj_base[srcObj].value();
             z3::expr dstOff = dst - dstBase;
             z3::expr srcOff = src - srcBase;
-            z3::expr dstMem = m_obj_mem[dstObj].getValue();
-            z3::expr srcMem = m_obj_mem[srcObj].getValue();
+            z3::expr dstMem = m_obj_mem[dstObj].value();
+            z3::expr srcMem = m_obj_mem[srcObj].value();
             for (uint64_t i = 0; i < *len; ++i) {
               z3::expr b = z3::select(
                   srcMem,
-                  srcOff + m_solver.getValue().ctx().bv_val(i, m_ptr_bits));
+                  srcOff + m_solver.value().ctx().bv_val(i, m_ptr_bits));
               dstMem = z3::store(
                   dstMem,
-                  dstOff + m_solver.getValue().ctx().bv_val(i, m_ptr_bits), b);
+                  dstOff + m_solver.value().ctx().bv_val(i, m_ptr_bits), b);
             }
             m_obj_mem[dstObj] = dstMem;
           } else if (dstObj) {
@@ -933,16 +933,16 @@ void MKintPass::path_solving(BasicBlock *cur, BasicBlock *pred) {
     if (auto *ai = dyn_cast<AllocaInst>(&inst)) {
       // Bind the alloca instruction to its base address.
       if (m_obj_base.count(ai)) {
-        setSym(ai, m_obj_base[ai].getValue());
+        setSym(ai, m_obj_base[ai].value());
       } else {
         const uint64_t elemBytes =
             m_dl->getTypeAllocSize(ai->getAllocatedType());
         z3::expr sizeBytesExpr =
-            m_solver.getValue().ctx().bv_val(elemBytes, m_ptr_bits);
+            m_solver.value().ctx().bv_val(elemBytes, m_ptr_bits);
         bool known = true;
         if (ai->isArrayAllocation()) {
           if (auto *ci = dyn_cast<ConstantInt>(ai->getArraySize())) {
-            sizeBytesExpr = m_solver.getValue().ctx().bv_val(
+            sizeBytesExpr = m_solver.value().ctx().bv_val(
                 elemBytes * ci->getZExtValue(), m_ptr_bits);
           } else {
             auto countExpr = getIntExpr(ai->getArraySize(), cur, pred);
@@ -951,7 +951,7 @@ void MKintPass::path_solving(BasicBlock *cur, BasicBlock *pred) {
               countExpr = z3::zext(countExpr, m_ptr_bits - cbw);
             else if (cbw > m_ptr_bits)
               countExpr = countExpr.extract(m_ptr_bits - 1, 0);
-            sizeBytesExpr = countExpr * m_solver.getValue().ctx().bv_val(
+            sizeBytesExpr = countExpr * m_solver.value().ctx().bv_val(
                                             elemBytes, m_ptr_bits);
             known = countExpr.is_numeral();
           }
@@ -960,7 +960,7 @@ void MKintPass::path_solving(BasicBlock *cur, BasicBlock *pred) {
                      ("alloca." + cur->getParent()->getName().str() + "." +
                       std::to_string((uintptr_t)ai)),
                      sizeBytesExpr, known);
-        setSym(ai, m_obj_base[ai].getValue());
+        setSym(ai, m_obj_base[ai].value());
       }
       continue;
     }
@@ -981,9 +981,9 @@ void MKintPass::path_solving(BasicBlock *cur, BasicBlock *pred) {
         const Value *obj = getObjectForPtr(load->getPointerOperand());
         z3::expr v = m_smt_mem->loadInt(addr, bw, bytes, isLittleEndian());
         if (obj && m_obj_mem.count(obj)) {
-          const auto base = m_obj_base[obj].getValue();
+          const auto base = m_obj_base[obj].value();
           const auto off = addr - base;
-          z3::expr bytesExpr = loadBytesFromMem(m_obj_mem[obj].getValue(), off,
+          z3::expr bytesExpr = loadBytesFromMem(m_obj_mem[obj].value(), off,
                                                 bytes, isLittleEndian());
           const unsigned loadedBits = bytes * 8;
           if (bw == loadedBits) {
@@ -1017,7 +1017,7 @@ void MKintPass::path_solving(BasicBlock *cur, BasicBlock *pred) {
         if (!m_bug_detection->add_range_cons(
                 m_range_analysis->get_range_by_bb(load, cur, m_func2range_info,
                                                   m_global2range),
-                v, m_solver.getValue(),
+                v, m_solver.value(),
                 [this](const z3::expr &e) { addConstraint(e); }))
           return;
       }
@@ -1036,9 +1036,9 @@ void MKintPass::path_solving(BasicBlock *cur, BasicBlock *pred) {
         const auto v = getIntExpr(val, cur, pred);
         const Value *obj = getObjectForPtr(store->getPointerOperand());
         if (obj && m_obj_mem.count(obj)) {
-          const auto base = m_obj_base[obj].getValue();
+          const auto base = m_obj_base[obj].value();
           const auto off = addr - base;
-          z3::expr newMem = storeBytesToMem(m_obj_mem[obj].getValue(), off, v,
+          z3::expr newMem = storeBytesToMem(m_obj_mem[obj].value(), off, v,
                                             bytes, isLittleEndian());
           m_obj_mem[obj] = newMem;
         } else {
@@ -1082,7 +1082,7 @@ void MKintPass::path_solving(BasicBlock *cur, BasicBlock *pred) {
             if (*len <= kMaxBytes) {
               const Value *obj = getObjectForPtr(call->getArgOperand(0));
               if (obj && m_obj_mem.count(obj)) {
-                const auto base = m_obj_base[obj].getValue();
+                const auto base = m_obj_base[obj].value();
                 const auto off = dst - base;
                 z3::expr b = val;
                 const unsigned bw = b.get_sort().bv_size();
@@ -1090,11 +1090,11 @@ void MKintPass::path_solving(BasicBlock *cur, BasicBlock *pred) {
                   b = z3::zext(b, 8 - bw);
                 else if (bw > 8)
                   b = b.extract(7, 0);
-                z3::expr curMem = m_obj_mem[obj].getValue();
+                z3::expr curMem = m_obj_mem[obj].value();
                 for (uint64_t i = 0; i < *len; ++i) {
                   curMem = z3::store(
                       curMem,
-                      off + m_solver.getValue().ctx().bv_val(i, m_ptr_bits), b);
+                      off + m_solver.value().ctx().bv_val(i, m_ptr_bits), b);
                 }
                 m_obj_mem[obj] = curMem;
               } else {
@@ -1131,19 +1131,19 @@ void MKintPass::path_solving(BasicBlock *cur, BasicBlock *pred) {
               const Value *srcObj = getObjectForPtr(call->getArgOperand(1));
               if (dstObj && srcObj && m_obj_mem.count(dstObj) &&
                   m_obj_mem.count(srcObj)) {
-                const auto dstBase = m_obj_base[dstObj].getValue();
-                const auto srcBase = m_obj_base[srcObj].getValue();
+                const auto dstBase = m_obj_base[dstObj].value();
+                const auto srcBase = m_obj_base[srcObj].value();
                 z3::expr dstOff = dst - dstBase;
                 z3::expr srcOff = src - srcBase;
-                z3::expr dstMem = m_obj_mem[dstObj].getValue();
-                z3::expr srcMem = m_obj_mem[srcObj].getValue();
+                z3::expr dstMem = m_obj_mem[dstObj].value();
+                z3::expr srcMem = m_obj_mem[srcObj].value();
                 for (uint64_t i = 0; i < *len; ++i) {
                   z3::expr b = z3::select(
                       srcMem,
-                      srcOff + m_solver.getValue().ctx().bv_val(i, m_ptr_bits));
+                      srcOff + m_solver.value().ctx().bv_val(i, m_ptr_bits));
                   dstMem = z3::store(
                       dstMem,
-                      dstOff + m_solver.getValue().ctx().bv_val(i, m_ptr_bits),
+                      dstOff + m_solver.value().ctx().bv_val(i, m_ptr_bits),
                       b);
                 }
                 m_obj_mem[dstObj] = dstMem;
@@ -1183,19 +1183,19 @@ void MKintPass::path_solving(BasicBlock *cur, BasicBlock *pred) {
               const Value *srcObj = getObjectForPtr(call->getArgOperand(1));
               if (dstObj && srcObj && m_obj_mem.count(dstObj) &&
                   m_obj_mem.count(srcObj)) {
-                const auto dstBase = m_obj_base[dstObj].getValue();
-                const auto srcBase = m_obj_base[srcObj].getValue();
+                const auto dstBase = m_obj_base[dstObj].value();
+                const auto srcBase = m_obj_base[srcObj].value();
                 z3::expr dstOff = dst - dstBase;
                 z3::expr srcOff = src - srcBase;
-                z3::expr dstMem = m_obj_mem[dstObj].getValue();
-                z3::expr srcMem = m_obj_mem[srcObj].getValue();
+                z3::expr dstMem = m_obj_mem[dstObj].value();
+                z3::expr srcMem = m_obj_mem[srcObj].value();
                 for (uint64_t i = 0; i < *len; ++i) {
                   z3::expr b = z3::select(
                       srcMem,
-                      srcOff + m_solver.getValue().ctx().bv_val(i, m_ptr_bits));
+                      srcOff + m_solver.value().ctx().bv_val(i, m_ptr_bits));
                   dstMem = z3::store(
                       dstMem,
-                      dstOff + m_solver.getValue().ctx().bv_val(i, m_ptr_bits),
+                      dstOff + m_solver.value().ctx().bv_val(i, m_ptr_bits),
                       b);
                 }
                 m_obj_mem[dstObj] = dstMem;
@@ -1251,7 +1251,7 @@ void MKintPass::path_solving(BasicBlock *cur, BasicBlock *pred) {
         Function *callee = call->getCalledFunction();
         if (callee) {
           const auto name = callee->getName();
-          z3::expr sizeBytes = m_solver.getValue().ctx().bv_val(0, m_ptr_bits);
+          z3::expr sizeBytes = m_solver.value().ctx().bv_val(0, m_ptr_bits);
           bool sizeKnown = false;
           if (name == "malloc" || name == "kmalloc" || name == "kzalloc" ||
               name == "vmalloc") {
@@ -1303,7 +1303,7 @@ void MKintPass::path_solving(BasicBlock *cur, BasicBlock *pred) {
                          ("heap." + cur->getParent()->getName().str() + "." +
                           std::to_string((uintptr_t)call)),
                          sizeBytes, sizeKnown);
-            setSym(call, m_obj_base[call].getValue());
+            setSym(call, m_obj_base[call].value());
             continue;
           }
         }
@@ -1330,7 +1330,7 @@ void MKintPass::path_solving(BasicBlock *cur, BasicBlock *pred) {
         (void)getIntExpr(op->getOperand(0), cur, pred);
         (void)getIntExpr(op->getOperand(1), cur, pred);
         m_bug_detection->binary_check(
-            op, m_solver.getValue(), m_v2sym, m_overflow_insts,
+            op, m_solver.value(), m_v2sym, m_overflow_insts,
             m_bad_shift_insts, m_div_zero_insts, m_robust_reachability,
             &m_path_constraints, &m_universal_vars,
             [this, op](interr type, const z3::expr &q) {
@@ -1340,23 +1340,23 @@ void MKintPass::path_solving(BasicBlock *cur, BasicBlock *pred) {
         if (!addWellDefinedConstraints(op, cur, pred))
           return;
         const auto r = m_bug_detection->binary_op_propagate(
-            op, m_v2sym, m_solver.getValue());
+            op, m_v2sym, m_solver.value());
         setSym(op, r);
         if (!m_bug_detection->add_range_cons(
                 m_range_analysis->get_range_by_bb(op, cur, m_func2range_info,
                                                   m_global2range),
-                r, m_solver.getValue(),
+                r, m_solver.value(),
                 [this](const z3::expr &e) { addConstraint(e); }))
           return;
       } else if (auto *op = dyn_cast<CastInst>(&inst)) {
         (void)getValueExpr(op->getOperand(0), cur, pred);
         const auto r = m_bug_detection->cast_op_propagate(op, m_v2sym,
-                                                          m_solver.getValue());
+                                                          m_solver.value());
         setSym(op, r);
         if (!m_bug_detection->add_range_cons(
                 m_range_analysis->get_range_by_bb(op, cur, m_func2range_info,
                                                   m_global2range),
-                r, m_solver.getValue(),
+                r, m_solver.value(),
                 [this](const z3::expr &e) { addConstraint(e); }))
           return;
       } else {
@@ -1368,7 +1368,7 @@ void MKintPass::path_solving(BasicBlock *cur, BasicBlock *pred) {
   }
 
   for (auto *succ : m_bbpaths[cur]) {
-    m_solver.getValue().push();
+    m_solver.value().push();
     pushSymFrame();
     m_smt_mem->push();
     pushConstraintFrame();
@@ -1384,7 +1384,7 @@ void MKintPass::path_solving(BasicBlock *cur, BasicBlock *pred) {
     m_smt_mem->pop();
     popSymFrame();
     popConstraintFrame();
-    m_solver.getValue().pop();
+    m_solver.value().pop();
   }
 }
 
@@ -1445,7 +1445,7 @@ void MKintPass::popConstraintFrame() {
 }
 
 void MKintPass::addConstraint(const z3::expr &e) {
-  m_solver.getValue().add(e);
+  m_solver.value().add(e);
   if (m_robust_reachability) {
     m_path_constraints.push_back(e);
   }
@@ -1464,7 +1464,7 @@ const Value *MKintPass::getObjectForPtr(const Value *ptr) const {
 z3::expr MKintPass::loadBytesFromMem(const z3::expr &mem,
                                      const z3::expr &offset, unsigned numBytes,
                                      bool littleEndian) const {
-  auto &ctx = m_solver.getValue().ctx();
+  auto &ctx = m_solver.value().ctx();
   if (numBytes == 0)
     return ctx.bv_val(0, 0);
   z3::expr result = z3::select(
@@ -1480,7 +1480,7 @@ z3::expr MKintPass::loadBytesFromMem(const z3::expr &mem,
 z3::expr MKintPass::storeBytesToMem(const z3::expr &mem, const z3::expr &offset,
                                     const z3::expr &value, unsigned numBytes,
                                     bool littleEndian) const {
-  auto &ctx = m_solver.getValue().ctx();
+  auto &ctx = m_solver.value().ctx();
   if (numBytes == 0)
     return mem;
   const unsigned targetBits = numBytes * 8;
@@ -1505,7 +1505,7 @@ z3::expr MKintPass::storeBytesToMem(const z3::expr &mem, const z3::expr &offset,
 void MKintPass::havocObject(const Value *obj, const std::string &hint) {
   if (!obj)
     return;
-  auto &ctx = m_solver.getValue().ctx();
+  auto &ctx = m_solver.value().ctx();
   const auto id = g_obj_mem_id.fetch_add(1, std::memory_order_relaxed);
   const std::string name = "%objmem." + hint + "." + std::to_string(id);
   m_obj_mem[obj] = ctx.constant(
@@ -1532,7 +1532,7 @@ bool MKintPass::callMayModObject(llvm::CallBase *call, const Value *obj) const {
 }
 
 z3::expr MKintPass::buildPathConstraintConjunction() const {
-  auto &ctx = m_solver.getValue().ctx();
+  auto &ctx = m_solver.value().ctx();
   if (m_path_constraints.empty())
     return ctx.bool_val(true);
   z3::expr_vector pcs(ctx);
@@ -1578,17 +1578,17 @@ void MKintPass::dumpEfConstraint(const Instruction *inst, interr type,
 bool MKintPass::checkBugCondition(const Instruction *inst, interr type,
                                   const z3::expr &bugCond) {
   if (!m_robust_reachability) {
-    m_solver.getValue().push();
-    m_solver.getValue().add(bugCond);
-    const bool sat = (m_solver.getValue().check() == z3::sat);
-    m_solver.getValue().pop();
+    m_solver.value().push();
+    m_solver.value().add(bugCond);
+    const bool sat = (m_solver.value().check() == z3::sat);
+    m_solver.value().pop();
     return sat;
   }
   if (type != interr::NONE && !isRobustBugEnabled(type)) {
     return false;
   }
 
-  auto &ctx = m_solver.getValue().ctx();
+  auto &ctx = m_solver.value().ctx();
   z3::solver qsolver(ctx);
   z3::expr body = buildPathConstraintConjunction() && bugCond;
   z3::expr q = body;
@@ -1654,7 +1654,7 @@ void MKintPass::ensureObject(const Value *obj, const std::string &hintName,
   if (m_obj_base.count(obj))
     return;
 
-  auto &ctx = m_solver.getValue().ctx();
+  auto &ctx = m_solver.value().ctx();
   const auto base = ctx.bv_const(hintName.c_str(), m_ptr_bits);
 
   m_obj_base[obj] = base;
@@ -1671,8 +1671,8 @@ void MKintPass::ensureObject(const Value *obj, const std::string &hintName,
       continue;
     if (!m_obj_base.count(other) || !m_obj_size.count(other))
       continue;
-    const auto otherBase = m_obj_base[other].getValue();
-    const auto otherSize = m_obj_size[other].getValue();
+    const auto otherBase = m_obj_base[other].value();
+    const auto otherSize = m_obj_size[other].value();
     if (sizeKnown) {
       // Non-overlap: [base, base+size) does not overlap [otherBase,
       // otherBase+otherSize)
@@ -1715,13 +1715,13 @@ bool MKintPass::maybeCheckOOB(const Instruction *at, const Value *ptrOperand,
 
   const auto baseOpt = m_obj_base[obj];
   const auto sizeOpt = m_obj_size[obj];
-  if (!baseOpt.hasValue() || !sizeOpt.hasValue())
+  if (!baseOpt.has_value() || !sizeOpt.has_value())
     return true;
 
-  auto &solver = m_solver.getValue();
+  auto &solver = m_solver.value();
   auto &ctx = solver.ctx();
-  const auto &base = baseOpt.getValue();
-  const auto &size = sizeOpt.getValue();
+  const auto &base = baseOpt.value();
+  const auto &size = sizeOpt.value();
   const auto addr = getPtrExpr(ptrOperand, cur, pred);
   const auto len = ctx.bv_val(accessBytes, m_ptr_bits);
 
@@ -1748,7 +1748,7 @@ bool MKintPass::addWellDefinedConstraints(BinaryOperator *op, BasicBlock *cur,
                                           BasicBlock *pred) {
   if (!op || !m_solver)
     return true;
-  auto &solver = m_solver.getValue();
+  auto &solver = m_solver.value();
   auto &ctx = solver.ctx();
 
   const auto lhs = getIntExpr(op->getOperand(0), cur, pred);
@@ -1820,23 +1820,23 @@ bool MKintPass::addWellDefinedConstraints(BinaryOperator *op, BasicBlock *cur,
 z3::expr MKintPass::getValueExpr(const Value *v, BasicBlock *cur,
                                  BasicBlock *pred) {
   if (!v)
-    return m_solver.getValue().ctx().bv_val(0, 1);
+    return m_solver.value().ctx().bv_val(0, 1);
   if (v->getType()->isIntegerTy())
     return getIntExpr(v, cur, pred);
   if (v->getType()->isPointerTy())
     return getPtrExpr(v, cur, pred);
   // Unsupported sort: return a fresh 1-bit value to keep the solver going.
   const std::string name = "%unsupported." + std::to_string((uintptr_t)v);
-  return m_solver.getValue().ctx().bv_const(name.c_str(), 1);
+  return m_solver.value().ctx().bv_const(name.c_str(), 1);
 }
 
 z3::expr MKintPass::getIntExpr(const Value *v, BasicBlock *cur,
                                BasicBlock *pred) {
   auto it = m_v2sym.find(v);
   if (it != m_v2sym.end())
-    return it->second.getValue();
+    return it->second.value();
 
-  auto &ctx = m_solver.getValue().ctx();
+  auto &ctx = m_solver.value().ctx();
 
   if (const auto *ci = dyn_cast<ConstantInt>(v)) {
     return bvValFromAPInt(ctx, ci->getValue());
@@ -1857,7 +1857,7 @@ z3::expr MKintPass::getIntExpr(const Value *v, BasicBlock *cur,
             0, woi->getArgOperand(0)->getType()->getIntegerBitWidth());
         z3::expr ov = ctx.bool_val(false);
         if (computeWithOverflow(
-                woi, m_solver.getValue(),
+                woi, m_solver.value(),
                 [&](const llvm::Value *x) { return getIntExpr(x, cur, pred); },
                 res, ov)) {
           if (idx == 0) {
@@ -1996,7 +1996,7 @@ z3::expr MKintPass::getIntExpr(const Value *v, BasicBlock *cur,
         m_bug_detection->add_range_cons(
             m_range_analysis->get_range_by_bb(call, cur, m_func2range_info,
                                               m_global2range),
-            r, m_solver.getValue(),
+            r, m_solver.value(),
             [this](const z3::expr &e) { addConstraint(e); });
       }
       return r;
@@ -2012,7 +2012,7 @@ z3::expr MKintPass::getIntExpr(const Value *v, BasicBlock *cur,
     m_bug_detection->add_range_cons(
         m_range_analysis->get_range_by_bb(v, cur, m_func2range_info,
                                           m_global2range),
-        r, m_solver.getValue(),
+        r, m_solver.value(),
         [this](const z3::expr &e) { addConstraint(e); });
   }
   return r;
@@ -2020,7 +2020,7 @@ z3::expr MKintPass::getIntExpr(const Value *v, BasicBlock *cur,
 
 z3::expr MKintPass::gepOffsetBytes(const GetElementPtrInst *gep,
                                    BasicBlock *cur, BasicBlock *pred) {
-  auto &ctx = m_solver.getValue().ctx();
+  auto &ctx = m_solver.value().ctx();
   if (!gep || !m_dl)
     return ctx.bv_val(0, m_ptr_bits);
 
@@ -2080,9 +2080,9 @@ z3::expr MKintPass::getPtrExpr(const Value *v, BasicBlock *cur,
                                BasicBlock *pred) {
   auto it = m_v2sym.find(v);
   if (it != m_v2sym.end())
-    return it->second.getValue();
+    return it->second.value();
 
-  auto &ctx = m_solver.getValue().ctx();
+  auto &ctx = m_solver.value().ctx();
 
   if (isa<ConstantPointerNull>(v)) {
     return ctx.bv_val(0, m_ptr_bits);
@@ -2094,8 +2094,8 @@ z3::expr MKintPass::getPtrExpr(const Value *v, BasicBlock *cur,
       ensureObject(gv, ("global." + gv->getName()).str(),
                    ctx.bv_val(bytes, m_ptr_bits), true);
     }
-    setSym(v, m_obj_base[gv].getValue());
-    return m_obj_base[gv].getValue();
+    setSym(v, m_obj_base[gv].value());
+    return m_obj_base[gv].value();
   }
 
   if (const auto *fr = dyn_cast<FreezeInst>(v)) {
@@ -2129,8 +2129,8 @@ z3::expr MKintPass::getPtrExpr(const Value *v, BasicBlock *cur,
                     std::to_string((uintptr_t)ai)),
                    sizeBytesExpr, known);
     }
-    setSym(v, m_obj_base[ai].getValue());
-    return m_obj_base[ai].getValue();
+    setSym(v, m_obj_base[ai].value());
+    return m_obj_base[ai].value();
   }
 
   if (const auto *arg = dyn_cast<Argument>(v)) {

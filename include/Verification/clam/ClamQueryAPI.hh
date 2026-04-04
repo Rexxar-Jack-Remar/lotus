@@ -10,9 +10,9 @@
 
 #pragma once
 
-#include "llvm/ADT/Optional.h"
 #include "llvm/Analysis/AliasAnalysis.h"
 #include "llvm/IR/ConstantRange.h"
+#include <optional>
 
 #include <limits>
 #include <vector>
@@ -76,13 +76,13 @@ public:
   /// @brief Get tags associated with the LHS of instruction I
   /// @param I The instruction to query
   /// @return Optional vector of tags, or None if type is not pointer
-  virtual llvm::Optional<TagVector> tags(const llvm::Instruction &I) const = 0;
+  virtual std::optional<TagVector> tags(const llvm::Instruction &I) const = 0;
 
   /// @brief Get tags associated with value V at entry of basic block B
   /// @param B The basic block
   /// @param V The value to query
   /// @return Optional vector of tags, or None if type is not pointer
-  virtual llvm::Optional<TagVector> tags(const llvm::BasicBlock &B,
+  virtual std::optional<TagVector> tags(const llvm::BasicBlock &B,
                                          const llvm::Value &V) const = 0;
 };
 } // end namespace clam

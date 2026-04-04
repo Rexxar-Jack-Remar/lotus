@@ -9,7 +9,7 @@
 #include <set>
 #include <tuple>
 
-#include <llvm/ADT/Optional.h>
+#include <optional>
 
 namespace pulse {
 
@@ -29,7 +29,7 @@ public:
    * Join two abductive domains with their path contexts.
    * Returns joined domain and path context, or None if join fails.
    */
-  static llvm::Optional<std::pair<AbductiveDomain, PathContext>>
+  static std::optional<std::pair<AbductiveDomain, PathContext>>
   join(const AbductiveDomain &lhs, const PathContext &path_lhs,
        const AbductiveDomain &rhs, const PathContext &path_rhs);
 
@@ -37,7 +37,7 @@ public:
    * Join two abductive domains (without path context).
    * Returns joined domain or None if join fails.
    */
-  static llvm::Optional<AbductiveDomain>
+  static std::optional<AbductiveDomain>
   joinAbductive(const AbductiveDomain &lhs, const AbductiveDomain &rhs);
 
   /**
@@ -51,18 +51,18 @@ private:
   struct JoinState {
     // Maps (lhs_value, rhs_value) -> joined_value
     std::map<
-        std::pair<llvm::Optional<AbstractValue>, llvm::Optional<AbstractValue>>,
+        std::pair<std::optional<AbstractValue>, std::optional<AbstractValue>>,
         AbstractValue>
         subst;
 
     // Reverse map: joined_value -> (lhs_value, rhs_value)
-    std::map<AbstractValue, std::pair<llvm::Optional<AbstractValue>,
-                                      llvm::Optional<AbstractValue>>>
+    std::map<AbstractValue, std::pair<std::optional<AbstractValue>,
+                                      std::optional<AbstractValue>>>
         rev_subst;
 
     // Visited pairs to avoid cycles
     std::set<
-        std::pair<llvm::Optional<AbstractValue>, llvm::Optional<AbstractValue>>>
+        std::pair<std::optional<AbstractValue>, std::optional<AbstractValue>>>
         visited;
 
     AbstractValueFactory *factory;
@@ -85,9 +85,9 @@ private:
   static std::pair<JoinState &, std::pair<AbstractValue, ValueHistory>>
   joinValuesHistsOpts(
       JoinState &state, const AbductiveDomain &lhs_astate,
-      llvm::Optional<std::pair<AbstractValue, ValueHistory>> lhs_opt,
+      std::optional<std::pair<AbstractValue, ValueHistory>> lhs_opt,
       const AbductiveDomain &rhs_astate,
-      llvm::Optional<std::pair<AbstractValue, ValueHistory>> rhs_opt);
+      std::optional<std::pair<AbstractValue, ValueHistory>> rhs_opt);
 
   /**
    * Join heaps recursively.
@@ -95,9 +95,9 @@ private:
   static std::pair<JoinState &, Heap>
   joinHeaps(JoinState &state, Heap &heap_join,
             const AbductiveDomain &lhs_astate,
-            llvm::Optional<std::pair<AbstractValue, ValueHistory>> lhs_opt,
+            std::optional<std::pair<AbstractValue, ValueHistory>> lhs_opt,
             const AbductiveDomain &rhs_astate,
-            llvm::Optional<std::pair<AbstractValue, ValueHistory>> rhs_opt);
+            std::optional<std::pair<AbstractValue, ValueHistory>> rhs_opt);
 
   /**
    * Join stacks.
@@ -113,18 +113,18 @@ private:
   joinAttributes(JoinState &state, const AbductiveDomain &lhs_astate,
                  const AbductiveDomain &rhs_astate, bool use_pre_attrs,
                  AbstractValue joined_addr,
-                 llvm::Optional<AbstractValue> lhs_addr_opt,
-                 llvm::Optional<AbstractValue> rhs_addr_opt);
+                 std::optional<AbstractValue> lhs_addr_opt,
+                 std::optional<AbstractValue> rhs_addr_opt);
 
   /**
    * Join one-sided attribute (only in one branch).
    */
-  static llvm::Optional<Attribute> joinOneSidedAttribute(Attribute attr);
+  static std::optional<Attribute> joinOneSidedAttribute(Attribute attr);
 
   /**
    * Join two-sided attribute (in both branches).
    */
-  static llvm::Optional<Attribute>
+  static std::optional<Attribute>
   joinTwoSidedAttribute(JoinState &state, Attribute attr1, Attribute attr2,
                         AbstractValue lhs_val, AbstractValue rhs_val);
 

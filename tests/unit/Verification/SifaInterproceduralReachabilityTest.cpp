@@ -46,8 +46,8 @@ static void expectOctagonPoint(const lotus::sifa::OctagonState &state,
   const lotus::sifa::OctagonMatrix closed = state.matrix().strongClosure();
   auto lowerConstraint = closed.get(2 * it->second, 2 * it->second + 1);
   auto upperConstraint = closed.get(2 * it->second + 1, 2 * it->second);
-  ASSERT_TRUE(lowerConstraint.hasValue());
-  ASSERT_TRUE(upperConstraint.hasValue());
+  ASSERT_TRUE(lowerConstraint.has_value());
+  ASSERT_TRUE(upperConstraint.has_value());
   EXPECT_EQ(-(*lowerConstraint) / 2, point);
   EXPECT_EQ((*upperConstraint) / 2, point);
 }
@@ -384,7 +384,7 @@ TEST(SifaInterproceduralReachability,
           *M, mainFn, *mainFn, *target, lotus::sifa::IntervalState{},
           intervalDomain);
   auto interval = intervalResult.get(phi);
-  ASSERT_TRUE(interval.hasValue());
+  ASSERT_TRUE(interval.has_value());
   EXPECT_EQ(*interval, lotus::sifa::Interval::point(41));
 
   lotus::sifa::ExplicitValueDomain explicitDomain(nullptr, nullptr);
@@ -393,8 +393,8 @@ TEST(SifaInterproceduralReachability,
           *M, mainFn, *mainFn, *target, lotus::sifa::ExplicitValueState{},
           explicitDomain);
   auto explicitValue = explicitResult.get(phi);
-  ASSERT_TRUE(explicitValue.hasValue());
-  ASSERT_TRUE(explicitValue->value.hasValue());
+  ASSERT_TRUE(explicitValue.has_value());
+  ASSERT_TRUE(explicitValue->value.has_value());
   EXPECT_EQ(*explicitValue->value, 41);
 
   lotus::sifa::EqDomain eqDomain(nullptr, nullptr);

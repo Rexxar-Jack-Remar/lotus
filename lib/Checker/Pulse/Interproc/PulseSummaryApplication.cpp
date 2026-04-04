@@ -551,7 +551,7 @@ std::vector<ExecutionDomain> PulseChecker::applySummaryImproved(
       continue;
     }
 
-    llvm::Optional<AbstractValue> caller_ret = llvm::None;
+    std::optional<AbstractValue> caller_ret = std::nullopt;
     if (entry.getReturnValue()) {
       AbstractValue formal_ret = post->getCanonical(*entry.getReturnValue());
       auto caller_ret_opt = substitution.substitute(formal_ret);

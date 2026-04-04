@@ -69,9 +69,9 @@
 #include <unordered_map>
 #include <vector>
 
-#include <llvm/ADT/Optional.h>
 #include <llvm/IR/Function.h>
 #include <llvm/IR/Module.h>
+#include <optional>
 
 namespace lotus {
 namespace alias {
@@ -254,10 +254,10 @@ public:
   bool isAllocator(const std::string &functionName) const;
 
   /// @brief Return detailed allocator information for @p F, or `None`.
-  llvm::Optional<AllocatorInfo> getAllocatorInfo(const llvm::Function *F) const;
+  std::optional<AllocatorInfo> getAllocatorInfo(const llvm::Function *F) const;
   /// @brief Return detailed allocator information for the named function, or
   /// `None`.
-  llvm::Optional<AllocatorInfo>
+  std::optional<AllocatorInfo>
   getAllocatorInfo(const std::string &functionName) const;
 
   // =========================================================================
@@ -410,7 +410,7 @@ private:
   mutable std::unordered_map<std::string, FunctionCategory> categoryCache_;
   mutable std::unordered_map<std::string, std::set<FunctionCategory>>
       categoriesCache_;
-  mutable std::unordered_map<std::string, llvm::Optional<AllocatorInfo>>
+  mutable std::unordered_map<std::string, std::optional<AllocatorInfo>>
       allocatorCache_;
   mutable std::unordered_map<std::string, std::vector<CopyInfo>> copyCache_;
   mutable std::unordered_map<std::string, std::vector<ReturnAliasInfo>>
@@ -461,7 +461,7 @@ std::string getSpecFilePath(const std::string &specFileName);
 const char *categoryToString(FunctionCategory cat);
 
 /// @brief Parse a `FunctionCategory` from a string, or return `None`.
-llvm::Optional<FunctionCategory> stringToCategory(const std::string &str);
+std::optional<FunctionCategory> stringToCategory(const std::string &str);
 
 } // namespace alias
 } // namespace lotus

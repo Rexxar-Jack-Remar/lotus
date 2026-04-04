@@ -38,7 +38,7 @@ computeReachable(const AbductiveDomain &astate, const Heap &heap,
 
 static AbductiveDomain pruneForSummary(const llvm::Function *F,
                                        const AbductiveDomain &astate,
-                                       llvm::Optional<AbstractValue> ret_val) {
+                                       std::optional<AbstractValue> ret_val) {
   AbductiveDomain pruned = astate.clone();
 
   // Roots: formals, return value (if any), and globals.
@@ -207,13 +207,13 @@ void PulseChecker::createSummary(
     }
 
     const PulseFormula formula = astate->getPathFormula().clone();
-    AbductiveDomain pruned = pruneForSummary(F, *astate, llvm::None);
+    AbductiveDomain pruned = pruneForSummary(F, *astate, std::nullopt);
     auto pre = std::make_unique<AbductiveDomain>(pruned.clone());
     auto post = std::make_unique<AbductiveDomain>(std::move(pruned));
     summary.addPrePost(SummaryEntry(
         std::move(pre), formula.clone(), std::move(post), formula.clone(),
-        llvm::None,
-        llvm::Optional<SummaryEntry::LatentIssueSummary>(std::move(latent))));
+        std::nullopt,
+        std::optional<SummaryEntry::LatentIssueSummary>(std::move(latent))));
     latent_added++;
   }
 
@@ -234,7 +234,7 @@ void PulseChecker::createSummary(
 
     has_any_entry = true;
     const PulseFormula formula = astate->getPathFormula().clone();
-    llvm::Optional<AbstractValue> ret_val = llvm::None;
+    std::optional<AbstractValue> ret_val = std::nullopt;
     if (exit_state.isStopped()) {
       ret_val = exit_state.getStoppedExecution().return_value;
     }

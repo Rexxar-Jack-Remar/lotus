@@ -83,7 +83,7 @@ IntervalState lotus::sifa::analyzeToWithIntervalDomain(
     const llvm::Function &F, const llvm::BasicBlock &target,
     const IntervalState &initial, const IFluid<IntervalState> &fluid,
     SifaOptions options) {
-  IntervalDomain domain(options.blockTransferPolicy.hasValue()
+  IntervalDomain domain(options.blockTransferPolicy.has_value()
                             ? &*options.blockTransferPolicy
                             : nullptr,
                         options.aliasAnalysis);
@@ -101,7 +101,7 @@ OctagonState lotus::sifa::analyzeToWithOctagonDomain(
     const llvm::Function &F, const llvm::BasicBlock &target,
     const OctagonState &initial, const IFluid<OctagonState> &fluid,
     SifaOptions options) {
-  OctagonDomain domain(options.blockTransferPolicy.hasValue()
+  OctagonDomain domain(options.blockTransferPolicy.has_value()
                            ? &*options.blockTransferPolicy
                            : nullptr,
                        options.aliasAnalysis);
@@ -120,7 +120,7 @@ EqState lotus::sifa::analyzeToWithEqDomain(const llvm::Function &F,
                                            const EqState &initial,
                                            const IFluid<EqState> &fluid,
                                            SifaOptions options) {
-  EqDomain domain(options.blockTransferPolicy.hasValue()
+  EqDomain domain(options.blockTransferPolicy.has_value()
                       ? &*options.blockTransferPolicy
                       : nullptr,
                   options.aliasAnalysis);
@@ -139,7 +139,7 @@ ExplicitValueState lotus::sifa::analyzeToWithExplicitValueDomain(
     const llvm::Function &F, const llvm::BasicBlock &target,
     const ExplicitValueState &initial, const IFluid<ExplicitValueState> &fluid,
     SifaOptions options) {
-  ExplicitValueDomain domain(options.blockTransferPolicy.hasValue()
+  ExplicitValueDomain domain(options.blockTransferPolicy.has_value()
                                  ? &*options.blockTransferPolicy
                                  : nullptr,
                              options.aliasAnalysis);
@@ -158,7 +158,7 @@ static IntervalState runToReturnWithIntervalDomain(
     const llvm::Function &F, const IntervalState &initial,
     const IFluid<IntervalState> &fluid, SifaOptions options) {
   SifaStats stats;
-  IntervalDomain domain(options.blockTransferPolicy.hasValue()
+  IntervalDomain domain(options.blockTransferPolicy.has_value()
                             ? &*options.blockTransferPolicy
                             : nullptr,
                         options.aliasAnalysis);
@@ -189,7 +189,7 @@ static OctagonState runToReturnWithOctagonDomain(
     const llvm::Function &F, const OctagonState &initial,
     const IFluid<OctagonState> &fluid, SifaOptions options) {
   SifaStats stats;
-  OctagonDomain domain(options.blockTransferPolicy.hasValue()
+  OctagonDomain domain(options.blockTransferPolicy.has_value()
                            ? &*options.blockTransferPolicy
                            : nullptr,
                        options.aliasAnalysis);

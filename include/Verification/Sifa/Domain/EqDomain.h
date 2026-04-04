@@ -23,6 +23,7 @@
 #include "Verification/Sifa/Domain/AbstractDomain.h"
 #include "Verification/Sifa/RegionMemory.h"
 
+#include <optional>
 #include <unordered_map>
 #include <unordered_set>
 
@@ -479,7 +480,7 @@ private:
     const llvm::ConstantInt *known =
         knownConstant(out, switchInst.getCondition());
 
-    llvm::Optional<int64_t> matchedCase;
+    std::optional<int64_t> matchedCase;
     bool targetIsCase = false;
     for (const auto &caseHandle : switchInst.cases()) {
       if (caseHandle.getCaseSuccessor() != target)
@@ -492,7 +493,7 @@ private:
     }
 
     if (targetIsCase) {
-      if (!matchedCase.hasValue())
+      if (!matchedCase.has_value())
         return out;
       if (known && known->getSExtValue() != *matchedCase)
         return bottomState();

@@ -48,7 +48,7 @@ void compareResults(const DIBasedTypeHierarchy &Orig,
   for (const auto *OrigCurrentType : Orig.getAllTypes()) {
     // check types
     auto DeserTy = Deser.getType(Orig.getTypeName(OrigCurrentType));
-    ASSERT_TRUE(DeserTy.hasValue())
+    ASSERT_TRUE(DeserTy.has_value())
         << "Failed to match type with name '"
         << Orig.getTypeName(OrigCurrentType).str() << "'";
 

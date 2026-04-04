@@ -2,6 +2,7 @@
 
 #include <cassert>
 #include <iostream>
+#include <optional>
 
 namespace dynamic {
 
@@ -13,7 +14,7 @@ template <typename T> static bool readData(std::istream &is, T *data) {
 }
 
 /// Reads a single log record from the binary stream based on its type tag
-static llvm::Optional<LogRecord> readRecord(std::istream &is) {
+static std::optional<LogRecord> readRecord(std::istream &is) {
   LogRecord rec;
 
   bool succ = true;
@@ -47,8 +48,8 @@ static llvm::Optional<LogRecord> readRecord(std::istream &is) {
   rec.type = static_cast<LogRecordType>(type);
 
   if (!succ)
-    return llvm::None;
-  return llvm::Optional<LogRecord>(std::move(rec));
+    return std::nullopt;
+  return std::optional<LogRecord>(std::move(rec));
 }
 
 /// Reads all log records from a file into memory (eager loading)
@@ -82,7 +83,7 @@ LazyLogReader::LazyLogReader(const char *fileName)
 }
 
 /// Reads the next log record from the file (lazy loading, one at a time)
-llvm::Optional<LogRecord> LazyLogReader::readLogRecord() {
+std::optional<LogRecord> LazyLogReader::readLogRecord() {
   return readRecord(ifs);
 }
 

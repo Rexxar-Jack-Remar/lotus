@@ -65,8 +65,8 @@ static void expectOctagonPoint(const lotus::sifa::OctagonState &state,
   const lotus::sifa::OctagonMatrix closed = state.matrix().strongClosure();
   auto lowerConstraint = closed.get(2 * it->second, 2 * it->second + 1);
   auto upperConstraint = closed.get(2 * it->second + 1, 2 * it->second);
-  ASSERT_TRUE(lowerConstraint.hasValue());
-  ASSERT_TRUE(upperConstraint.hasValue());
+  ASSERT_TRUE(lowerConstraint.has_value());
+  ASSERT_TRUE(upperConstraint.has_value());
   EXPECT_EQ(-(*lowerConstraint) / 2, point);
   EXPECT_EQ((*upperConstraint) / 2, point);
 }
@@ -433,8 +433,8 @@ TEST(SifaDagInterpreter, NativeDomainsApplyDestinationPhisAtBlockEntry) {
   lotus::sifa::IntervalState intervalState =
       lotus::sifa::analyzeToWithIntervalDomain(*F, *merge, lotus::sifa::IntervalState{});
   auto interval = intervalState.get(phi);
-  ASSERT_TRUE(interval.hasValue());
-  EXPECT_EQ(interval.getValue(), lotus::sifa::Interval::point(7));
+  ASSERT_TRUE(interval.has_value());
+  EXPECT_EQ(*interval, lotus::sifa::Interval::point(7));
 
   lotus::sifa::EqState eqState =
       lotus::sifa::analyzeToWithEqDomain(*F, *merge, lotus::sifa::EqState{});
@@ -445,8 +445,8 @@ TEST(SifaDagInterpreter, NativeDomainsApplyDestinationPhisAtBlockEntry) {
       lotus::sifa::analyzeToWithExplicitValueDomain(
           *F, *merge, lotus::sifa::ExplicitValueState{});
   auto explicitValue = explicitState.get(phi);
-  ASSERT_TRUE(explicitValue.hasValue());
-  ASSERT_TRUE(explicitValue->value.hasValue());
+  ASSERT_TRUE(explicitValue.has_value());
+  ASSERT_TRUE(explicitValue->value.has_value());
   EXPECT_EQ(*explicitValue->value, 7);
 
   lotus::sifa::OctagonState octagonState =
@@ -493,7 +493,7 @@ TEST(SifaDagInterpreter, NativeDomainsRefineTakenBranchGuards) {
       lotus::sifa::analyzeToWithIntervalDomain(*F, *merge,
                                                lotus::sifa::IntervalState{});
   auto interval = intervalState.get(phi);
-  ASSERT_TRUE(interval.hasValue());
+  ASSERT_TRUE(interval.has_value());
   EXPECT_EQ(*interval, lotus::sifa::Interval::point(7));
 
   lotus::sifa::EqState eqState =
@@ -505,8 +505,8 @@ TEST(SifaDagInterpreter, NativeDomainsRefineTakenBranchGuards) {
       lotus::sifa::analyzeToWithExplicitValueDomain(
           *F, *merge, lotus::sifa::ExplicitValueState{});
   auto explicitValue = explicitState.get(phi);
-  ASSERT_TRUE(explicitValue.hasValue());
-  ASSERT_TRUE(explicitValue->value.hasValue());
+  ASSERT_TRUE(explicitValue.has_value());
+  ASSERT_TRUE(explicitValue->value.has_value());
   EXPECT_EQ(*explicitValue->value, 7);
 
   lotus::sifa::OctagonState octagonState =

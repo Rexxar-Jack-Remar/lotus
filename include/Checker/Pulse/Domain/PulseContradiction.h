@@ -9,7 +9,7 @@
 #include <string>
 #include <vector>
 
-#include <llvm/ADT/Optional.h>
+#include <optional>
 
 namespace llvm {
 class Value;
@@ -166,7 +166,7 @@ struct Contradiction {
  * Check for contradictions when applying a summary.
  * Returns None if no contradiction, Some(contradiction) if found.
  */
-llvm::Optional<Contradiction> checkContradiction(
+std::optional<Contradiction> checkContradiction(
     const PulseFormula &caller_formula, const PulseFormula &callee_pre_formula,
     const std::map<AbstractValue, AbstractValue> &formal_to_actual_map,
     const std::map<AbstractValue, std::set<AbstractValue>>
@@ -176,14 +176,14 @@ llvm::Optional<Contradiction> checkContradiction(
  * Check for aliasing contradictions: distinct formals in pre that map to same
  * actual.
  */
-llvm::Optional<Contradiction> checkAliasingContradiction(
+std::optional<Contradiction> checkAliasingContradiction(
     const std::map<AbstractValue, AbstractValue> &formal_to_actual_map,
     const PulseFormula &callee_pre_formula);
 
 /**
  * Check if merged formulas are UNSAT (path condition contradiction).
  */
-llvm::Optional<Contradiction>
+std::optional<Contradiction>
 checkPathConditionContradiction(const PulseFormula &caller_formula,
                                 const PulseFormula &callee_pre_formula);
 
@@ -191,7 +191,7 @@ checkPathConditionContradiction(const PulseFormula &caller_formula,
  * Check for AliasingWithAllAliases contradiction
  * Collects all alias classes before raising contradiction
  */
-llvm::Optional<Contradiction> checkAliasingWithAllAliases(
+std::optional<Contradiction> checkAliasingWithAllAliases(
     const std::map<AbstractValue, AbstractValue> &formal_to_actual_map,
     const std::map<AbstractValue, std::set<AbstractValue>>
         &actual_to_formals_map,
@@ -202,13 +202,13 @@ llvm::Optional<Contradiction> checkAliasingWithAllAliases(
  * Returns map of heap paths to abstract values that need dynamic type
  * specialization
  */
-llvm::Optional<Contradiction> checkDynamicTypeNeeded(
+std::optional<Contradiction> checkDynamicTypeNeeded(
     const std::map<HeapPath, AbstractValue> &heap_paths_to_values);
 
 /**
  * Check for CapturedFormalActualLength contradiction
  */
-llvm::Optional<Contradiction> checkCapturedFormalActualLength(
+std::optional<Contradiction> checkCapturedFormalActualLength(
     unsigned captured_formal_count, unsigned captured_actual_count,
     const std::vector<AbstractValue> &captured_formals = {},
     const std::vector<AbstractValue> &captured_actuals = {});
@@ -218,20 +218,20 @@ llvm::Optional<Contradiction> checkCapturedFormalActualLength(
  * merge all possible contradictions into a single one.
  * Aligned with Infer's merge_contradictions.
  */
-llvm::Optional<Contradiction>
-mergeContradictions(const llvm::Optional<Contradiction> &c1,
-                    const llvm::Optional<Contradiction> &c2);
+std::optional<Contradiction>
+mergeContradictions(const std::optional<Contradiction> &c1,
+                    const std::optional<Contradiction> &c2);
 
 /**
  * Check if contradiction is DynamicTypeNeeded and extract the map
  */
-llvm::Optional<std::map<HeapPath, AbstractValue>>
+std::optional<std::map<HeapPath, AbstractValue>>
 isDynamicTypeNeededContradiction(const Contradiction &c);
 
 /**
  * Enhanced contradiction checking with call_state support
  */
-llvm::Optional<Contradiction> checkContradictionWithCallState(
+std::optional<Contradiction> checkContradictionWithCallState(
     const PulseFormula &caller_formula, const PulseFormula &callee_pre_formula,
     const std::map<AbstractValue, AbstractValue> &formal_to_actual_map,
     const std::map<AbstractValue, std::set<AbstractValue>>
@@ -241,7 +241,7 @@ llvm::Optional<Contradiction> checkContradictionWithCallState(
 /**
  * Check for AliasingWithAllAliases with heap path support
  */
-llvm::Optional<Contradiction> checkAliasingWithAllAliases(
+std::optional<Contradiction> checkAliasingWithAllAliases(
     const std::map<AbstractValue, AbstractValue> &formal_to_actual_map,
     const std::map<AbstractValue, std::set<AbstractValue>>
         &actual_to_formals_map,

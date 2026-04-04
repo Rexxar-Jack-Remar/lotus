@@ -1,6 +1,6 @@
 /* Externalize functions selected by command line */
 
-#include "llvm/ADT/Optional.h"
+#include <optional>
 #include "Utils/LLVM/Demangle.h"
 #include "llvm/ADT/SmallPtrSet.h"
 #include "llvm/IR/BasicBlock.h"
@@ -44,14 +44,14 @@ class ExternalizeFunctions : public ModulePass {
     using argument_type = Function *;
     using result_type = bool;
 
-    llvm::Optional<llvm::Regex> m_re;
+    std::optional<llvm::Regex> m_re;
     explicit MatchRegex(const std::string &s) {
       if (!s.empty()) {
         m_re = llvm::Regex(s);
         std::string Error;
         if (!m_re->isValid(Error)) {
           WARN << "Syntax error in regex '" << s << "' " << Error;
-          m_re = llvm::None;
+          m_re = std::nullopt;
         }
       }
     }

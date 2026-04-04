@@ -10,19 +10,19 @@
 namespace pulse {
 namespace detail {
 
-static llvm::Optional<int64_t> getI64Constant(const llvm::Value *v,
+static std::optional<int64_t> getI64Constant(const llvm::Value *v,
                                               bool is_signed) {
   if (!v)
-    return llvm::None;
+    return std::nullopt;
   auto *CI = llvm::dyn_cast<llvm::ConstantInt>(v);
   if (!CI)
-    return llvm::None;
+    return std::nullopt;
   if (CI->getBitWidth() > 64)
-    return llvm::None;
+    return std::nullopt;
   if (is_signed)
     return CI->getSExtValue();
   if (CI->getBitWidth() == 64 && CI->isNegative())
-    return llvm::None;
+    return std::nullopt;
   return static_cast<int64_t>(CI->getZExtValue());
 }
 

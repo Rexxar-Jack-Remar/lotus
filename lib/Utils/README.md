@@ -150,6 +150,5 @@ Type utilities:
 
 - `Nullable.h` – Nullable type wrapper
 - `Offset.h` – Offset representation
-- `Optional.h` – Optional type
 - `range.h` – Range utilities
 - `ScopeExit.h` – Scope exit guard

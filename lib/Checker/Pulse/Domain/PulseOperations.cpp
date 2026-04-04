@@ -49,14 +49,14 @@ static bool isNullPointerConstantValue(const llvm::Value *v) {
   return false;
 }
 
-static llvm::Optional<int64_t> getI64Constant(const llvm::Value *v) {
+static std::optional<int64_t> getI64Constant(const llvm::Value *v) {
   if (!v)
-    return llvm::None;
+    return std::nullopt;
   if (auto *CI = llvm::dyn_cast<llvm::ConstantInt>(v)) {
     if (CI->getBitWidth() <= 64)
       return CI->getSExtValue();
   }
-  return llvm::None;
+  return std::nullopt;
 }
 } // namespace
 
@@ -186,7 +186,7 @@ bool PulseOperations::isNullConstantSource(const Address &addr) {
   return false;
 }
 
-llvm::Optional<Address> PulseOperations::eval(AbductiveDomain &astate,
+std::optional<Address> PulseOperations::eval(AbductiveDomain &astate,
                                               const llvm::Value *exp,
                                               const llvm::Instruction *loc,
                                               const llvm::BasicBlock *pred) {
@@ -197,7 +197,7 @@ llvm::Optional<Address> PulseOperations::eval(AbductiveDomain &astate,
       llvm::isa<llvm::GlobalValue>(exp)) {
     AbstractValue gv_av = factory_->getOrCreate(exp);
     astate.getPostAttrs().add(gv_av, Attribute::Global);
-    return llvm::Optional<Address>(Address(gv_av));
+    return std::optional<Address>(Address(gv_av));
   }
 
   // Pointer-typed null constants.
@@ -206,7 +206,7 @@ llvm::Optional<Address> PulseOperations::eval(AbductiveDomain &astate,
     Address addr(null_addr);
     astate.getPostAttrs().add(null_addr, Attribute::Null);
     astate.getPathFormula().addNull(null_addr);
-    return llvm::Optional<Address>(addr);
+    return std::optional<Address>(addr);
   }
 
   // Integer constants: treat as integers, not null pointers.
@@ -214,7 +214,7 @@ llvm::Optional<Address> PulseOperations::eval(AbductiveDomain &astate,
     AbstractValue av = factory_->getOrCreate(exp);
     astate.getPathFormula().addIntegerConstraint(av);
     (void)astate.getPathFormula().addBounds(av, *c, *c);
-    return llvm::Optional<Address>(Address(av));
+    return std::optional<Address>(Address(av));
   }
 
   if (auto *addr = astate.getPostStack().find(exp)) {
@@ -228,7 +228,7 @@ llvm::Optional<Address> PulseOperations::eval(AbductiveDomain &astate,
     // used The attributes are already on canon_addr, so they'll be checked in
     // readDeref
 
-    return llvm::Optional<Address>(result);
+    return std::optional<Address>(result);
   }
 
   // Handle bitcast instructions - they preserve pointer identity and attributes
@@ -242,7 +242,7 @@ llvm::Optional<Address> PulseOperations::eval(AbductiveDomain &astate,
       result.history = src_opt->history;
       // Attributes (Allocated, Invalid, Null) are already on src_canon, so
       // they're preserved
-      return llvm::Optional<Address>(result);
+      return std::optional<Address>(result);
     }
   }
 
@@ -255,7 +255,7 @@ llvm::Optional<Address> PulseOperations::eval(AbductiveDomain &astate,
         Address result(src_canon);
         result.history = src_opt->history;
         // Attributes are preserved through canonical value
-        return llvm::Optional<Address>(result);
+        return std::optional<Address>(result);
       }
     }
   }
@@ -273,7 +273,7 @@ llvm::Optional<Address> PulseOperations::eval(AbductiveDomain &astate,
   if (auto *GEP = llvm::dyn_cast<llvm::GEPOperator>(exp)) {
     auto base_opt = eval(astate, GEP->getPointerOperand(), loc, pred);
     if (!base_opt)
-      return llvm::None;
+      return std::nullopt;
 
     // Check if base pointer is null or invalid before indexing
     AbstractValue base_canon = astate.getCanonical(base_opt->addr);
@@ -286,11 +286,11 @@ llvm::Optional<Address> PulseOperations::eval(AbductiveDomain &astate,
         !astate.getPathFormula().isNonNull(base_canon)) {
       // Base is null (from null constant) - return None to signal error (will
       // be caught by caller)
-      return llvm::None;
+      return std::nullopt;
     }
     if (astate.getPostAttrs().has(base_canon, Attribute::Invalid)) {
       // Base is invalid (use-after-free) - return None to signal error
-      return llvm::None;
+      return std::nullopt;
     }
 
     Address base = *base_opt;
@@ -307,7 +307,7 @@ llvm::Optional<Address> PulseOperations::eval(AbductiveDomain &astate,
                                      : nullptr;
 
     // Bounds tracking: use allocation size (when known) to prove OOB.
-    llvm::Optional<uint64_t> alloc_size_opt =
+    std::optional<uint64_t> alloc_size_opt =
         astate.getAllocationSize(base_canon);
     bool offset_known = true;
     int64_t total_offset = 0;
@@ -323,12 +323,12 @@ llvm::Optional<Address> PulseOperations::eval(AbductiveDomain &astate,
         auto *C = llvm::dyn_cast<llvm::ConstantInt>(idx);
         if (!C) {
           // Struct indexing must be constant; bail out rather than conflate.
-          return llvm::None;
+          return std::nullopt;
         }
         uint64_t field = C->getZExtValue();
         if (field >= ST->getNumElements()) {
           // Invalid field access. Be conservative: treat as unknown.
-          return llvm::None;
+          return std::nullopt;
         }
         acc = Access(static_cast<unsigned>(field));
 
@@ -460,12 +460,12 @@ llvm::Optional<Address> PulseOperations::eval(AbductiveDomain &astate,
     astate.getPostHeap().addEdge(gepAv, deref, Address(cur));
     astate.abduceToPre(gepAv, deref, Address(cur));
     astate.abduceAttrToPre(gepAv, Attribute::Allocated);
-    return llvm::Optional<Address>(gepAddr);
+    return std::optional<Address>(gepAddr);
   }
 
   if (auto *Phi = llvm::dyn_cast<llvm::PHINode>(exp)) {
     if (!pred)
-      return llvm::None;
+      return std::nullopt;
     // Check if pred is actually a predecessor of the PHI node
     bool is_predecessor = false;
     for (unsigned i = 0; i < Phi->getNumIncomingValues(); ++i) {
@@ -479,7 +479,7 @@ llvm::Optional<Address> PulseOperations::eval(AbductiveDomain &astate,
       if (Phi->getNumIncomingValues() > 0) {
         pred = Phi->getIncomingBlock(0);
       } else {
-        return llvm::None;
+        return std::nullopt;
       }
     }
     const llvm::Value *incoming = Phi->getIncomingValueForBlock(pred);
@@ -488,14 +488,14 @@ llvm::Optional<Address> PulseOperations::eval(AbductiveDomain &astate,
 
   if (llvm::isa<llvm::Instruction>(exp)) {
     AbstractValue av = factory_->getOrCreate(exp);
-    return llvm::Optional<Address>(Address(av));
+    return std::optional<Address>(Address(av));
   }
 
   AbstractValue av = factory_->getOrCreate(exp);
-  return llvm::Optional<Address>(Address(av));
+  return std::optional<Address>(Address(av));
 }
 
-std::pair<OperationResult, llvm::Optional<Address>>
+std::pair<OperationResult, std::optional<Address>>
 PulseOperations::evalDeref(AbductiveDomain &astate, Address ptr,
                            const llvm::Instruction *loc) {
   // Canonicalize pointer
@@ -505,7 +505,7 @@ PulseOperations::evalDeref(AbductiveDomain &astate, Address ptr,
   // NullDereference) This prevents false positives where we report
   // NullDereference when UseAfterFree is correct
   if (astate.getPostAttrs().has(canon_ptr, Attribute::Invalid)) {
-    return {OperationResult::UseAfterFree, llvm::None};
+    return {OperationResult::UseAfterFree, std::nullopt};
   }
 
   // Check if pointer is null (using formula and attributes)
@@ -517,7 +517,7 @@ PulseOperations::evalDeref(AbductiveDomain &astate, Address ptr,
     Address canon_ptr_addr(canon_ptr);
     canon_ptr_addr.history = ptr.history; // Preserve history for source check
     if (isNullConstantSource(canon_ptr_addr)) {
-      return {OperationResult::NullDereference, llvm::None};
+      return {OperationResult::NullDereference, std::nullopt};
     }
   }
 
@@ -529,7 +529,7 @@ PulseOperations::evalDeref(AbductiveDomain &astate, Address ptr,
       Address canon_ptr_addr(canon_ptr);
       canon_ptr_addr.history = ptr.history; // Preserve history for source check
       if (isNullConstantSource(canon_ptr_addr)) {
-        return {OperationResult::NullDereference, llvm::None};
+        return {OperationResult::NullDereference, std::nullopt};
       }
     }
   }
@@ -567,7 +567,7 @@ PulseOperations::evalDeref(AbductiveDomain &astate, Address ptr,
   astate.abduceToPre(canon_ptr, deref, target);
   astate.abduceAttrToPre(canon_ptr, Attribute::Allocated);
 
-  return {OperationResult::Success, llvm::Optional<Address>(target)};
+  return {OperationResult::Success, std::optional<Address>(target)};
 }
 
 OperationResult PulseOperations::checkAddrAccess(AbductiveDomain &astate,
@@ -739,19 +739,19 @@ OperationResult PulseOperations::writeDeref(AbductiveDomain &astate,
   return OperationResult::Success;
 }
 
-std::pair<OperationResult, llvm::Optional<Address>>
+std::pair<OperationResult, std::optional<Address>>
 PulseOperations::readDeref(AbductiveDomain &astate, Address ptr,
                            const llvm::Instruction *loc) {
   // PRIORITY: Check Invalid FIRST before other checks
   AbstractValue canon_ptr = astate.getCanonical(ptr.addr);
   if (astate.getPostAttrs().has(canon_ptr, Attribute::Invalid)) {
-    return {OperationResult::UseAfterFree, llvm::None};
+    return {OperationResult::UseAfterFree, std::nullopt};
   }
 
   // Check access (will check Null, Uninitialized, etc.)
   auto result = checkAddrAccess(astate, ptr, loc);
   if (result != OperationResult::Success) {
-    return {result, llvm::None};
+    return {result, std::nullopt};
   }
 
   // Evaluate dereference
@@ -781,13 +781,13 @@ OperationResult PulseOperations::checkNull(AbductiveDomain &astate,
   return OperationResult::Success;
 }
 
-std::pair<OperationResult, llvm::Optional<Address>>
+std::pair<OperationResult, std::optional<Address>>
 PulseOperations::shallowCopy(AbductiveDomain &astate, Address source,
                              const llvm::Instruction *loc) {
   // Check source is valid
   auto result = checkAddrAccess(astate, source, loc);
   if (result != OperationResult::Success) {
-    return {result, llvm::None};
+    return {result, std::nullopt};
   }
 
   // Create fresh address for copy
@@ -817,16 +817,16 @@ PulseOperations::shallowCopy(AbductiveDomain &astate, Address source,
     }
   }
 
-  return {OperationResult::Success, llvm::Optional<Address>(copy)};
+  return {OperationResult::Success, std::optional<Address>(copy)};
 }
 
-std::pair<OperationResult, llvm::Optional<Address>>
+std::pair<OperationResult, std::optional<Address>>
 PulseOperations::deepCopy(AbductiveDomain &astate, Address source,
                           const llvm::Instruction *loc, unsigned depth_max) {
   // Check source is valid
   auto result = checkAddrAccess(astate, source, loc);
   if (result != OperationResult::Success) {
-    return {result, llvm::None};
+    return {result, std::nullopt};
   }
 
   // Create fresh address for copy
@@ -842,7 +842,7 @@ PulseOperations::deepCopy(AbductiveDomain &astate, Address source,
   AbstractValue canon_source = astate.getCanonical(source.addr);
   deepCopyRecursive(astate, canon_source, copy_addr, depth_max, 0);
 
-  return {OperationResult::Success, llvm::Optional<Address>(copy)};
+  return {OperationResult::Success, std::optional<Address>(copy)};
 }
 
 void PulseOperations::deepCopyRecursive(AbductiveDomain &astate,

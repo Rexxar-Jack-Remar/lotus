@@ -12,22 +12,21 @@
 #ifndef LOTUS_VERIFICATION_SIFA_DOMAIN_INTERVALDOMAIN_H
 #define LOTUS_VERIFICATION_SIFA_DOMAIN_INTERVALDOMAIN_H
 
-#include "llvm/ADT/Optional.h"
-
 #include "Verification/Sifa/BlockTransferPolicy.h"
 #include "Verification/Sifa/Cfg/Transition.h"
 #include "Verification/Sifa/Domain/AbstractDomain.h"
 
 namespace llvm {
 class raw_ostream;
-}
+} // namespace llvm
 namespace lotus {
 class AliasAnalysisWrapper;
-}
+} // namespace lotus
 #include "llvm/IR/BasicBlock.h"
 #include "llvm/IR/Value.h"
 
 #include <algorithm>
+#include <optional>
 #include <unordered_map>
 
 namespace lotus {
@@ -38,8 +37,8 @@ struct SatisfyingInputs;
 /// Single interval [lo, hi]; unbounded when optional is nullopt
 /// (Ultimate-aligned). Bottom = empty set; top = [-inf, +inf] (no bounds).
 struct Interval {
-  llvm::Optional<int64_t> lo;
-  llvm::Optional<int64_t> hi;
+  std::optional<int64_t> lo;
+  std::optional<int64_t> hi;
   /// True iff this interval represents bottom (empty set). When false and both
   /// lo/hi nullopt, interval is top.
   bool isBottom_ = false;
@@ -49,17 +48,17 @@ struct Interval {
     i.isBottom_ = true;
     return i;
   }
-  static Interval top() { return {llvm::None, llvm::None, false}; }
+  static Interval top() { return {std::nullopt, std::nullopt, false}; }
   static Interval point(int64_t p) { return {p, p, false}; }
   bool isBottom() const { return isBottom_; }
   bool isTop() const { return !isBottom_ && !lo && !hi; }
   bool isUnbounded() const { return !lo || !hi; }
 
   /// Ultimate: hasLower/hasUpper — finite bound.
-  bool hasLower() const { return lo.hasValue(); }
-  bool hasUpper() const { return hi.hasValue(); }
-  int64_t getLower() const { return lo.getValueOr(0); }
-  int64_t getUpper() const { return hi.getValueOr(0); }
+  bool hasLower() const { return lo.has_value(); }
+  bool hasUpper() const { return hi.has_value(); }
+  int64_t getLower() const { return lo.value_or(0); }
+  int64_t getUpper() const { return hi.value_or(0); }
   bool isPoint() const { return lo && hi && *lo == *hi; }
   bool containsZero() const {
     if (isBottom_)
@@ -75,10 +74,10 @@ struct Interval {
     if (rhs.isBottom())
       return *this;
     Interval r;
-    r.lo = (lo && rhs.lo) ? llvm::Optional<int64_t>(std::min(*lo, *rhs.lo))
-                          : llvm::None;
-    r.hi = (hi && rhs.hi) ? llvm::Optional<int64_t>(std::max(*hi, *rhs.hi))
-                          : llvm::None;
+    r.lo = (lo && rhs.lo) ? std::optional<int64_t>(std::min(*lo, *rhs.lo))
+                          : std::nullopt;
+    r.hi = (hi && rhs.hi) ? std::optional<int64_t>(std::max(*hi, *rhs.hi))
+                          : std::nullopt;
     return r;
   }
   /// Standard widening (Ultimate-aligned). Bottom is identity.
@@ -88,16 +87,16 @@ struct Interval {
     if (rhs.isBottom())
       return *this;
     Interval r;
-    r.lo = (lo && rhs.lo && *rhs.lo < *lo) ? llvm::None : rhs.lo;
-    r.hi = (hi && rhs.hi && *rhs.hi > *hi) ? llvm::None : rhs.hi;
+    r.lo = (lo && rhs.lo && *rhs.lo < *lo) ? std::nullopt : rhs.lo;
+    r.hi = (hi && rhs.hi && *rhs.hi > *hi) ? std::nullopt : rhs.hi;
     return r;
   }
   Interval negate() const {
     if (isBottom())
       return bottom();
     Interval r;
-    r.lo = hi ? llvm::Optional<int64_t>(-*hi) : llvm::None;
-    r.hi = lo ? llvm::Optional<int64_t>(-*lo) : llvm::None;
+    r.lo = hi ? std::optional<int64_t>(-*hi) : std::nullopt;
+    r.hi = lo ? std::optional<int64_t>(-*lo) : std::nullopt;
     return r;
   }
   Interval add(const Interval &rhs) const {
@@ -107,14 +106,14 @@ struct Interval {
     if (lo && rhs.lo) {
       int64_t sum;
       r.lo = __builtin_add_overflow(*lo, *rhs.lo, &sum)
-                 ? llvm::None
-                 : llvm::Optional<int64_t>(sum);
+                 ? std::nullopt
+                 : std::optional<int64_t>(sum);
     }
     if (hi && rhs.hi) {
       int64_t sum;
       r.hi = __builtin_add_overflow(*hi, *rhs.hi, &sum)
-                 ? llvm::None
-                 : llvm::Optional<int64_t>(sum);
+                 ? std::nullopt
+                 : std::optional<int64_t>(sum);
     }
     return r;
   }
@@ -125,14 +124,14 @@ struct Interval {
     if (lo && rhs.hi) {
       int64_t diff;
       r.lo = __builtin_sub_overflow(*lo, *rhs.hi, &diff)
-                 ? llvm::None
-                 : llvm::Optional<int64_t>(diff);
+                 ? std::nullopt
+                 : std::optional<int64_t>(diff);
     }
     if (hi && rhs.lo) {
       int64_t diff;
       r.hi = __builtin_sub_overflow(*hi, *rhs.lo, &diff)
-                 ? llvm::None
-                 : llvm::Optional<int64_t>(diff);
+                 ? std::nullopt
+                 : std::optional<int64_t>(diff);
     }
     return r;
   }
@@ -170,9 +169,9 @@ struct Interval {
   Interval intersect(const Interval &rhs) const {
     if (isBottom() || rhs.isBottom())
       return bottom();
-    llvm::Optional<int64_t> l =
+    std::optional<int64_t> l =
         (lo && rhs.lo) ? std::max(*lo, *rhs.lo) : (lo ? lo : rhs.lo);
-    llvm::Optional<int64_t> h =
+    std::optional<int64_t> h =
         (hi && rhs.hi) ? std::min(*hi, *rhs.hi) : (hi ? hi : rhs.hi);
     if (l && h && *l > *h)
       return bottom();
@@ -190,9 +189,9 @@ struct Interval {
     if (!hasLower() && !hasUpper())
       return bottom();
     if (hasLower() && !hasUpper())
-      return {llvm::None, llvm::Optional<int64_t>(*lo - 1), false};
+      return {std::nullopt, std::optional<int64_t>(*lo - 1), false};
     if (!hasLower() && hasUpper())
-      return {llvm::Optional<int64_t>(*hi + 1), llvm::None, false};
+      return {std::optional<int64_t>(*hi + 1), std::nullopt, false};
     return top();
   }
   SatisfyingInputs satisfyEqual(const Interval &rhs) const;
@@ -247,10 +246,10 @@ public:
   bool isBottom() const { return isBottom_; }
   void setBottom(bool b) { isBottom_ = b; }
 
-  llvm::Optional<Interval> get(const llvm::Value *v) const {
+  std::optional<Interval> get(const llvm::Value *v) const {
     auto it = intervals_.find(v);
     if (it == intervals_.end())
-      return llvm::None;
+      return std::nullopt;
     return it->second;
   }
   void set(const llvm::Value *v, Interval i) { intervals_[v] = std::move(i); }
@@ -259,10 +258,10 @@ public:
   }
 
   /// Region memory (allocas, globals). Used when alias analysis is set.
-  llvm::Optional<Interval> getMemory(const llvm::Value *region) const {
+  std::optional<Interval> getMemory(const llvm::Value *region) const {
     auto it = memory_.find(region);
     if (it == memory_.end())
-      return llvm::None;
+      return std::nullopt;
     return it->second;
   }
   void setMemory(const llvm::Value *region, Interval i) {
@@ -347,9 +346,9 @@ public:
         continue;
       const Interval &ia = kv.second;
       const Interval &ib = *ob;
-      if (ia.lo.hasValue() && (!ib.lo.hasValue() || *ia.lo < *ib.lo))
+      if (ia.lo.has_value() && (!ib.lo.has_value() || *ia.lo < *ib.lo))
         return false;
-      if (ia.hi.hasValue() && (!ib.hi.hasValue() || *ia.hi > *ib.hi))
+      if (ia.hi.has_value() && (!ib.hi.has_value() || *ia.hi > *ib.hi))
         return false;
     }
     for (const auto &kv : a.memory()) {
@@ -358,9 +357,9 @@ public:
         continue;
       const Interval &ia = kv.second;
       const Interval &ib = *ob;
-      if (ia.lo.hasValue() && (!ib.lo.hasValue() || *ia.lo < *ib.lo))
+      if (ia.lo.has_value() && (!ib.lo.has_value() || *ia.lo < *ib.lo))
         return false;
-      if (ia.hi.hasValue() && (!ib.hi.hasValue() || *ia.hi > *ib.hi))
+      if (ia.hi.has_value() && (!ib.hi.has_value() || *ia.hi > *ib.hi))
         return false;
     }
     return true;
@@ -384,11 +383,11 @@ public:
       }
       Interval hull;
       hull.lo = (oa->lo && i.lo)
-                    ? llvm::Optional<int64_t>(std::min(*oa->lo, *i.lo))
-                    : llvm::None;
+                    ? std::optional<int64_t>(std::min(*oa->lo, *i.lo))
+                    : std::nullopt;
       hull.hi = (oa->hi && i.hi)
-                    ? llvm::Optional<int64_t>(std::max(*oa->hi, *i.hi))
-                    : llvm::None;
+                    ? std::optional<int64_t>(std::max(*oa->hi, *i.hi))
+                    : std::nullopt;
       r.set(v, hull);
     }
     for (const auto &kv : a.memory())
@@ -403,11 +402,11 @@ public:
       }
       Interval hull;
       hull.lo = (oa->lo && i.lo)
-                    ? llvm::Optional<int64_t>(std::min(*oa->lo, *i.lo))
-                    : llvm::None;
+                    ? std::optional<int64_t>(std::min(*oa->lo, *i.lo))
+                    : std::nullopt;
       hull.hi = (oa->hi && i.hi)
-                    ? llvm::Optional<int64_t>(std::max(*oa->hi, *i.hi))
-                    : llvm::None;
+                    ? std::optional<int64_t>(std::max(*oa->hi, *i.hi))
+                    : std::nullopt;
       r.setMemory(reg, hull);
     }
     return r;
@@ -428,12 +427,12 @@ public:
         continue;
       }
       Interval w;
-      if (op->lo.hasValue() && in.lo.hasValue() && *in.lo < *op->lo)
-        w.lo = llvm::None;
+      if (op->lo.has_value() && in.lo.has_value() && *in.lo < *op->lo)
+        w.lo = std::nullopt;
       else
         w.lo = in.lo;
-      if (op->hi.hasValue() && in.hi.hasValue() && *in.hi > *op->hi)
-        w.hi = llvm::None;
+      if (op->hi.has_value() && in.hi.has_value() && *in.hi > *op->hi)
+        w.hi = std::nullopt;
       else
         w.hi = in.hi;
       r.set(v, w);
@@ -447,12 +446,12 @@ public:
         continue;
       }
       Interval w;
-      if (op->lo.hasValue() && in.lo.hasValue() && *in.lo < *op->lo)
-        w.lo = llvm::None;
+      if (op->lo.has_value() && in.lo.has_value() && *in.lo < *op->lo)
+        w.lo = std::nullopt;
       else
         w.lo = in.lo;
-      if (op->hi.hasValue() && in.hi.hasValue() && *in.hi > *op->hi)
-        w.hi = llvm::None;
+      if (op->hi.has_value() && in.hi.has_value() && *in.hi > *op->hi)
+        w.hi = std::nullopt;
       else
         w.hi = in.hi;
       r.setMemory(reg, w);

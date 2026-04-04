@@ -77,13 +77,13 @@ public:
   __attribute__((warn_unused_result)) llvm::iterator_range<const ClassType *>
   subTypesOf(ClassType Ty) const noexcept;
 
-  __attribute__((warn_unused_result)) llvm::Optional<ClassType>
+  __attribute__((warn_unused_result)) std::optional<ClassType>
   getType(llvm::StringRef TypeName) const noexcept override {
     auto It = NameToType.find(TypeName);
     if (It != NameToType.end()) {
       return It->second;
     }
-    return llvm::None;
+    return std::nullopt;
   }
 
   __attribute__((warn_unused_result)) std::vector<ClassType> getAllTypes() const override {

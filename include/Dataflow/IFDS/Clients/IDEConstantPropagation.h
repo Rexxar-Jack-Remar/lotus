@@ -2,7 +2,7 @@
 
 #include "Dataflow/IFDS/Core/IFDSFramework.h"
 
-#include <llvm/ADT/Optional.h>
+#include <optional>
 #include <llvm/IR/Constants.h>
 #include <llvm/IR/Instruction.h>
 #include <llvm/IR/Operator.h>
@@ -92,8 +92,8 @@ private:
   static bool definesValue(const llvm::Instruction *I);
   static const llvm::Value *getDefinedValue(const llvm::Instruction *I);
   static bool isCopy(const llvm::Instruction *I, const llvm::Value *&from);
-  static llvm::Optional<long long> asConst(const llvm::Value *v);
-  static llvm::Optional<long long> applyBinOp(unsigned opcode, long long a,
+  static std::optional<long long> asConst(const llvm::Value *v);
+  static std::optional<long long> applyBinOp(unsigned opcode, long long a,
                                               long long b);
 };
 

@@ -60,7 +60,7 @@ static uint64_t storageSize(const Type *t, const DataLayout &dl) {
   return dl.getTypeStoreSize(const_cast<Type *>(t));
 }
 
-static Optional<uint64_t> sizeOf(const Graph::Set &types,
+static std::optional<uint64_t> sizeOf(const Graph::Set &types,
                                  const DataLayout &dl) {
   if (types.isEmpty()) {
     return 0;
@@ -76,7 +76,7 @@ static Optional<uint64_t> sizeOf(const Graph::Set &types,
           })) {
         return sz;
       } else {
-        return None;
+        return std::nullopt;
       }
     }
   }
@@ -117,10 +117,10 @@ static bool mayAlias(const Cell &c1, const Cell &c2, const DataLayout &dl) {
   if (!n1->hasAccessedType(o1)) { return true; }
 
   auto sizeOfOffset1 = sizeOf(n1->getAccessedType(o1), dl);
-  if (!sizeOfOffset1.hasValue()) { return true; }
+  if (!sizeOfOffset1.has_value()) { return true; }
 
   // if offsets can overlap then may alias
-  return (o1 + sizeOfOffset1.getValue()) >= o2;
+  return (o1 + sizeOfOffset1.value()) >= o2;
 }
 
 llvm::AliasResult SeaDsaAAResult::alias(const llvm::MemoryLocation &LocA,

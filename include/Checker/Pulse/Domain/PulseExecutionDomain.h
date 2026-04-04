@@ -7,7 +7,7 @@
 #include <string>
 #include <vector>
 
-#include <llvm/ADT/Optional.h>
+#include <optional>
 #include <llvm/IR/BasicBlock.h>
 #include <llvm/IR/Function.h>
 #include <llvm/IR/Instruction.h>
@@ -58,7 +58,7 @@ public:
   struct StoppedExecution {
     StoppedExecutionKind kind;
     std::unique_ptr<AbductiveDomain> astate; // Full state
-    llvm::Optional<AbstractValue> return_value;
+    std::optional<AbstractValue> return_value;
 
     // For AbortProgram
     OperationResult diagnostic;
@@ -69,7 +69,7 @@ public:
 
     // For LatentInvalidAccess
     AbstractValue address;
-    std::pair<Trace, llvm::Optional<InvalidationKind>> must_be_valid;
+    std::pair<Trace, std::optional<InvalidationKind>> must_be_valid;
     std::vector<std::pair<const llvm::Function *, const llvm::Instruction *>>
         calling_context;
 
@@ -132,12 +132,12 @@ public:
     void reset() {
       kind = StoppedExecutionKind::ExitProgram;
       astate.reset();
-      return_value = llvm::None;
+      return_value = std::nullopt;
       latent_issue = nullptr;
       diagnostic = OperationResult::Success;
       trace_to_issue = Trace();
       address = AbstractValue();
-      must_be_valid = std::make_pair(Trace(), llvm::None);
+      must_be_valid = std::make_pair(Trace(), std::nullopt);
       calling_context.clear();
       specialized_type.clear();
       type_trace = Trace();
@@ -249,8 +249,8 @@ public:
   }
 
   static ExecutionDomain exitProgram(std::unique_ptr<AbductiveDomain> astate,
-                                     llvm::Optional<AbstractValue> ret_val =
-                                         llvm::None) {
+                                     std::optional<AbstractValue> ret_val =
+                                         std::nullopt) {
     ExecutionDomain d;
     d.variant_ = Variant::Stopped;
     d.stopped_execution_.kind = StoppedExecutionKind::ExitProgram;
@@ -283,7 +283,7 @@ public:
 
   static ExecutionDomain latentInvalidAccess(
       std::unique_ptr<AbductiveDomain> astate, AbstractValue address,
-      std::pair<Trace, llvm::Optional<InvalidationKind>> must_be_valid,
+      std::pair<Trace, std::optional<InvalidationKind>> must_be_valid,
       std::vector<std::pair<const llvm::Function *, const llvm::Instruction *>>
           calling_context) {
     ExecutionDomain d;
@@ -371,7 +371,7 @@ public:
     } else {
       variant_ = Variant::Stopped;
       stopped_execution_.kind = StoppedExecutionKind::ExitProgram;
-      stopped_execution_.return_value = llvm::None;
+      stopped_execution_.return_value = std::nullopt;
     }
   }
 

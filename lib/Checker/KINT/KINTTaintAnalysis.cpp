@@ -65,14 +65,14 @@ static Function *resolveCalledFunction(const CallBase *call) {
   return nullptr;
 }
 
-static llvm::Optional<size_t> getSinkArgIndex(const Function *callee) {
+static std::optional<size_t> getSinkArgIndex(const Function *callee) {
   if (!callee)
-    return llvm::None;
+    return std::nullopt;
   const auto dname = DemangleUtils::demangle(callee->getName().str());
   auto it = std::find_if(MKINT_SINKS.begin(), MKINT_SINKS.end(),
                          [&dname](const auto &s) { return dname == s.first; });
   if (it == MKINT_SINKS.end())
-    return llvm::None;
+    return std::nullopt;
   return it->second;
 }
 

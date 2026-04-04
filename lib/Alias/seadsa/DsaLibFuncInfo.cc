@@ -286,7 +286,7 @@ void DsaLibFuncInfo::generateSpec(const llvm::Function &F,
 
   Value *retVal = nullptr;
   if (F.getReturnType()->isPointerTy() && G->hasRetCell(F)) {
-    retVal = builder.CreateCall(specFnMk, llvm::None, "ret");
+    retVal = builder.CreateCall(specFnMk, {}, "ret");
     visitStack.push({G->getRetCell(F).getNode(), retVal});
   }
 

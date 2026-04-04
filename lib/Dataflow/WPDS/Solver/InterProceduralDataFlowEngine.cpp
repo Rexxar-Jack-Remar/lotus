@@ -9,9 +9,9 @@
 #ifdef WITNESS_TRACE
 #include "Solvers/WPDS/Witness.h"
 #endif
-#include "llvm/ADT/Optional.h"
 #include "llvm/IR/CFG.h"
 
+#include <optional>
 #include <sstream>
 #include <unordered_map>
 
@@ -144,7 +144,7 @@ InterProceduralDataFlowEngine::runAnalysisWithAutomaton(
 
   // Build initial configuration automaton (in-place)
   CA<GenKillTransformer> resultCA(semiring);
-  lastAcceptState = llvm::None;
+  lastAcceptState = std::nullopt;
   buildInitialCA(resultCA);
 
   // Run saturation algorithm
@@ -679,16 +679,16 @@ void InterProceduralDataFlowEngine::extractResults(
   // Cache value-at-symbol queries to avoid repeated reglang_query work.
   struct KeyQueryResult {
     std::set<Value *> facts;
-    llvm::Optional<std::set<Value *>> gen;
-    llvm::Optional<std::set<Value *>> kill;
+    std::optional<std::set<Value *>> gen;
+    std::optional<std::set<Value *>> kill;
   };
   std::unordered_map<wpds_key_t, KeyQueryResult> cache;
 
   auto querySymbol = [&](wpds_key_t sym,
                          bool wantGenKill) -> const KeyQueryResult & {
     auto it = cache.find(sym);
-    if (it != cache.end() && (!wantGenKill || (it->second.gen.hasValue() &&
-                                               it->second.kill.hasValue()))) {
+    if (it != cache.end() && (!wantGenKill || (it->second.gen.has_value() &&
+                                               it->second.kill.has_value()))) {
       return it->second;
     }
 
@@ -894,7 +894,7 @@ std::string InterProceduralDataFlowEngine::getWitnessDagDotForTransition(
 
 std::string InterProceduralDataFlowEngine::getWitnessDagDotForInstruction(
     Instruction *inst) const {
-  if (!lastAcceptState.hasValue()) {
+  if (!lastAcceptState.has_value()) {
     return "";
   }
   auto it = instToKey.find(inst);

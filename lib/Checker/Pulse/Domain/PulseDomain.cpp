@@ -147,12 +147,12 @@ void AbductiveDomain::setInvalidationInfo(AbstractValue addr,
   invalidation_info_[addr] = {kind, loc};
 }
 
-llvm::Optional<std::pair<InvalidationKind, const llvm::Instruction *>>
+std::optional<std::pair<InvalidationKind, const llvm::Instruction *>>
 AbductiveDomain::getInvalidationInfo(AbstractValue addr) const {
   auto it = invalidation_info_.find(addr);
   if (it != invalidation_info_.end())
     return it->second;
-  return llvm::None;
+  return std::nullopt;
 }
 
 AbductiveDomain AbductiveDomain::clone() const {
@@ -335,7 +335,7 @@ void AbductiveDomain::canonicalize() {
   }
 }
 
-llvm::Optional<AbductiveDomain>
+std::optional<AbductiveDomain>
 AbductiveDomain::merge(const AbductiveDomain &d1, const AbductiveDomain &d2) {
   // Merge path formulas first to check for contradictions
   PulseFormula merged_formula;
@@ -350,7 +350,7 @@ AbductiveDomain::merge(const AbductiveDomain &d1, const AbductiveDomain &d2) {
   }
 
   if (!merged_formula.isConsistent()) {
-    return llvm::None;
+    return std::nullopt;
   }
 
   AbductiveDomain merged;

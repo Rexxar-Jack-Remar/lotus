@@ -21,14 +21,14 @@ SummaryEntry::SummaryEntry(std::unique_ptr<AbductiveDomain> pre,
                            PulseFormula pre_formula,
                            std::unique_ptr<AbductiveDomain> post,
                            PulseFormula post_formula,
-                           llvm::Optional<AbstractValue> ret_val,
-                           llvm::Optional<LatentIssueSummary> latent_issue)
+                           std::optional<AbstractValue> ret_val,
+                           std::optional<LatentIssueSummary> latent_issue)
     : pre_(std::move(pre)), pre_formula_(std::move(pre_formula)),
       post_(std::move(post)), post_formula_(std::move(post_formula)),
       return_value_(ret_val), latent_issue_(std::move(latent_issue)) {}
 
 SummaryEntry SummaryEntry::clone() const {
-  llvm::Optional<LatentIssueSummary> latent;
+  std::optional<LatentIssueSummary> latent;
   if (latent_issue_) {
     LatentIssueSummary copied;
     copied.diagnostic = latent_issue_->diagnostic;
@@ -52,7 +52,7 @@ PulseSummary::PulseSummary(const llvm::Function *F,
                            PulseFormula pre_formula,
                            std::unique_ptr<AbductiveDomain> post,
                            PulseFormula post_formula,
-                           llvm::Optional<AbstractValue> ret_val)
+                           std::optional<AbstractValue> ret_val)
     : function_(F) {
   // Create a single pre/post entry
   pre_post_list_.emplace_back(std::move(pre), std::move(pre_formula),
@@ -60,13 +60,13 @@ PulseSummary::PulseSummary(const llvm::Function *F,
                               ret_val);
 }
 
-llvm::Optional<AbstractValue>
+std::optional<AbstractValue>
 PulseSummary::getFormalAV(const llvm::Value *formal) const {
   auto it = formal_to_av_.find(formal);
   if (it != formal_to_av_.end()) {
     return it->second;
   }
-  return llvm::None;
+  return std::nullopt;
 }
 
 void PulseSummary::setFormalAV(const llvm::Value *formal, AbstractValue av) {
@@ -108,9 +108,9 @@ const PulseFormula &PulseSummary::getPostFormula() const {
   return pre_post_list_[0].getPostFormula();
 }
 
-llvm::Optional<AbstractValue> PulseSummary::getReturnValue() const {
+std::optional<AbstractValue> PulseSummary::getReturnValue() const {
   if (pre_post_list_.empty()) {
-    return llvm::None;
+    return std::nullopt;
   }
   return pre_post_list_[0].getReturnValue();
 }

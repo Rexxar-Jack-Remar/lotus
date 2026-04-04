@@ -89,7 +89,7 @@ namespace SymAbs {
  * @note The result is exact: all values satisfying φ are congruent mod m to c
  * @note Modulus m = 0 indicates a singleton set (only one value possible)
  */
-llvm::Optional<Congruence> alpha_a_cong(z3::expr phi, z3::expr variable,
+std::optional<Congruence> alpha_a_cong(z3::expr phi, z3::expr variable,
                                         const AbstractionConfig &config) {
 
   context &ctx = phi.ctx();
@@ -103,7 +103,7 @@ llvm::Optional<Congruence> alpha_a_cong(z3::expr phi, z3::expr variable,
   // m = 0 means no constraint yet (will be set when second value found)
   // c_opt = None means no value found yet
   uint64_t m = 0;
-  llvm::Optional<int64_t> c_opt;
+  std::optional<int64_t> c_opt;
   z3::expr current_phi =
       phi; // Working formula (gets constrained during iteration)
   unsigned iteration = 0;
@@ -125,13 +125,13 @@ llvm::Optional<Congruence> alpha_a_cong(z3::expr phi, z3::expr variable,
     bool ok = eval_model_value(m_model, variable, v_val);
     assert(ok && "Failed to extract model value");
 
-    if (!c_opt.hasValue()) {
+    if (!c_opt.has_value()) {
       // First value found: initialize congruence
       c_opt = v_val;
       m = 0; // m = 0 indicates singleton so far (only one value seen)
     } else {
       // Update modulus using GCD of differences
-      int64_t c_val = c_opt.getValue();
+      int64_t c_val = c_opt.value();
       int64_t d = std::abs(v_val - c_val);
       if (d == 0) {
         // Same value as before (shouldn't happen due to exclusion, but handle
@@ -163,12 +163,12 @@ llvm::Optional<Congruence> alpha_a_cong(z3::expr phi, z3::expr variable,
       current_phi =
           current_phi &&
           (variable !=
-           ctx.bv_val(static_cast<uint64_t>(c_opt.getValue()), bv_size));
+           ctx.bv_val(static_cast<uint64_t>(c_opt.value()), bv_size));
     } else {
       // Non-singleton: exclude entire congruence class v mod m = c mod m
       // This forces discovery of values in different congruence classes
       z3::expr v_int = SymAbs::bv_signed_to_int(variable);
-      z3::expr c_int = ctx.int_val(c_opt.getValue());
+      z3::expr c_int = ctx.int_val(c_opt.value());
       z3::expr mod_val =
           z3::mod(v_int - c_int, ctx.int_val(static_cast<int64_t>(m)));
       current_phi =
@@ -178,13 +178,13 @@ llvm::Optional<Congruence> alpha_a_cong(z3::expr phi, z3::expr variable,
     ++iteration;
   }
 
-  if (!c_opt.hasValue()) {
+  if (!c_opt.has_value()) {
     // No models found for φ
-    return llvm::None;
+    return std::nullopt;
   }
 
   // Normalize remainder: c ← c mod m (ensure c ∈ [0, m-1])
-  int64_t c_normalized = c_opt.getValue();
+  int64_t c_normalized = c_opt.value();
   if (m > 0) {
     int64_t c_mod = c_normalized % static_cast<int64_t>(m);
     // Handle negative remainder (ensure non-negative)

@@ -151,13 +151,13 @@ static expr build_not_poly(const std::vector<AffineEquality> &poly,
  * @note Returns None if nullspace dimension ≠ 1 (points don't define a unique
  * facet)
  */
-static llvm::Optional<std::vector<int64_t>>
+static std::optional<std::vector<int64_t>>
 compute_normal_from_subset(const std::vector<std::vector<int64_t>> &subset) {
   if (subset.empty())
-    return llvm::None;
+    return std::nullopt;
   const size_t n = subset.front().size();
   if (subset.size() != n) {
-    return llvm::None;
+    return std::nullopt;
   }
 
   // Build matrix of difference vectors (n-1 rows, n columns).
@@ -190,7 +190,7 @@ compute_normal_from_subset(const std::vector<std::vector<int64_t>> &subset) {
   if (free_cols.size() != 1) {
     // Nullspace dimension not equal to 1 -> not a unique facet.
     // For a valid facet in n dimensions, we need exactly 1 free column.
-    return llvm::None;
+    return std::nullopt;
   }
 
   // Build basis vector for the nullspace
@@ -210,7 +210,7 @@ compute_normal_from_subset(const std::vector<std::vector<int64_t>> &subset) {
     scale = SymAbs::lcm64(scale, v.denominator());
   }
   if (scale == 0) {
-    return llvm::None;
+    return std::nullopt;
   }
 
   // Convert to integer vector
@@ -375,10 +375,10 @@ convex_hull_halfspaces(const std::vector<std::vector<int64_t>> &points,
       }
 
       auto normal_opt = compute_normal_from_subset(subset);
-      if (!normal_opt.hasValue()) {
+      if (!normal_opt.has_value()) {
         return;
       }
-      auto normal = normal_opt.getValue();
+      auto normal = normal_opt.value();
       int64_t bound = dot(normal, subset.front());
       if (!normalize(normal, bound)) {
         return;
@@ -551,11 +551,11 @@ std::vector<AffineEquality> alpha_conv_V(z3::expr phi,
       };
 
       // Try to extract points at extremal values
-      if (min_val.hasValue()) {
-        add_model_point(min_val.getValue());
+      if (min_val.has_value()) {
+        add_model_point(min_val.value());
       }
-      if (max_val.hasValue()) {
-        add_model_point(max_val.getValue());
+      if (max_val.has_value()) {
+        add_model_point(max_val.value());
       }
     }
 
@@ -634,7 +634,7 @@ relax_conv(z3::expr phi,
 
     // Compute least upper bound using Algorithm 7
     auto bound = alpha_lin_exp(phi, lexpr, config);
-    if (!bound.hasValue()) {
+    if (!bound.has_value()) {
       // Cannot compute bound, skip this constraint
       continue;
     }
@@ -642,7 +642,7 @@ relax_conv(z3::expr phi,
     // Create relaxed constraint with optimized bound
     AffineEquality relaxed = templ;
     relaxed.constant =
-        bound.getValue(); // Replace template bound with optimal bound
+        bound.value(); // Replace template bound with optimal bound
     result.push_back(std::move(relaxed));
   }
 

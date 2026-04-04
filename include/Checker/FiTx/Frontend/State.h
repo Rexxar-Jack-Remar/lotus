@@ -225,8 +225,8 @@ private:
   };
 
   std::vector<Log> transition_logs_;
-  llvm::Optional<State> least_significant_source_;
-  llvm::Optional<State> most_significant_target_;
+  std::optional<State> least_significant_source_;
+  std::optional<State> most_significant_target_;
   bool warned_;
 };
 

@@ -42,9 +42,9 @@ TEST(DIBasedTypeHierarchyTest, BasicTHReconstruction_1) {
   // check for all types
   EXPECT_EQ(DBTH.getAllTypes().size(), 2U);
   auto BaseType = DBTH.getType("_ZTS4Base");
-  ASSERT_TRUE(BaseType.hasValue());
+  ASSERT_TRUE(BaseType.has_value());
   auto ChildType = DBTH.getType("_ZTS5Child");
-  ASSERT_TRUE(ChildType.hasValue());
+  ASSERT_TRUE(ChildType.has_value());
 
   EXPECT_TRUE(DBTH.hasType(*BaseType));
   EXPECT_TRUE(DBTH.hasType(*ChildType));
@@ -63,9 +63,9 @@ TEST(DIBasedTypeHierarchyTest, BasicTHReconstruction_2) {
   // check for all types
   EXPECT_EQ(DBTH.getAllTypes().size(), 2U);
   auto BaseType = DBTH.getType("_ZTS4Base");
-  ASSERT_TRUE(BaseType.hasValue());
+  ASSERT_TRUE(BaseType.has_value());
   auto ChildType = DBTH.getType("_ZTS5Child");
-  ASSERT_TRUE(ChildType.hasValue());
+  ASSERT_TRUE(ChildType.has_value());
 
   EXPECT_TRUE(DBTH.hasType(*BaseType));
   EXPECT_TRUE(DBTH.hasType(*ChildType));
@@ -84,9 +84,9 @@ TEST(DIBasedTypeHierarchyTest, BasicTHReconstruction_3) {
   // check for all types
   EXPECT_EQ(DBTH.getAllTypes().size(), 2U);
   auto BaseType = DBTH.getType("_ZTS4Base");
-  ASSERT_TRUE(BaseType.hasValue());
+  ASSERT_TRUE(BaseType.has_value());
   auto ChildType = DBTH.getType("_ZTS5Child");
-  ASSERT_TRUE(ChildType.hasValue());
+  ASSERT_TRUE(ChildType.has_value());
 
   EXPECT_TRUE(DBTH.hasType(*BaseType));
   EXPECT_TRUE(DBTH.hasType(*ChildType));
@@ -105,9 +105,9 @@ TEST(DIBasedTypeHierarchyTest, BasicTHReconstruction_4) {
   // check for all types
   EXPECT_EQ(DBTH.getAllTypes().size(), 2U);
   auto BaseType = DBTH.getType("_ZTS4Base");
-  ASSERT_TRUE(BaseType.hasValue());
+  ASSERT_TRUE(BaseType.has_value());
   auto ChildType = DBTH.getType("_ZTS5Child");
-  ASSERT_TRUE(ChildType.hasValue());
+  ASSERT_TRUE(ChildType.has_value());
 
   EXPECT_TRUE(DBTH.hasType(*BaseType));
   EXPECT_TRUE(DBTH.hasType(*ChildType));
@@ -126,11 +126,11 @@ TEST(DIBasedTypeHierarchyTest, BasicTHReconstruction_5) {
   // check for all types
   EXPECT_EQ(DBTH.getAllTypes().size(), 3U);
   auto BaseType = DBTH.getType("_ZTS4Base");
-  ASSERT_TRUE(BaseType.hasValue());
+  ASSERT_TRUE(BaseType.has_value());
   auto OtherBaseType = DBTH.getType("_ZTS9OtherBase");
-  ASSERT_TRUE(OtherBaseType.hasValue());
+  ASSERT_TRUE(OtherBaseType.has_value());
   auto ChildType = DBTH.getType("_ZTS5Child");
-  ASSERT_TRUE(ChildType.hasValue());
+  ASSERT_TRUE(ChildType.has_value());
 
   EXPECT_TRUE(DBTH.hasType(*BaseType));
   EXPECT_TRUE(DBTH.hasType(*OtherBaseType));
@@ -152,9 +152,9 @@ TEST(DIBasedTypeHierarchyTest, BasicTHReconstruction_6) {
   // check for all types
   EXPECT_EQ(DBTH.getAllTypes().size(), 2U);
   auto BaseType = DBTH.getType("_ZTS4Base");
-  ASSERT_TRUE(BaseType.hasValue());
+  ASSERT_TRUE(BaseType.has_value());
   auto ChildType = DBTH.getType("_ZTS5Child");
-  ASSERT_TRUE(ChildType.hasValue());
+  ASSERT_TRUE(ChildType.has_value());
 
   EXPECT_TRUE(DBTH.hasType(*BaseType));
   EXPECT_TRUE(DBTH.hasType(*ChildType));
@@ -173,19 +173,19 @@ TEST(DIBasedTypeHierarchyTest, BasicTHReconstruction_7) {
   // check for all types
   EXPECT_EQ(DBTH.getAllTypes().size(), 7U);
   auto AType = DBTH.getType("_ZTS1A");
-  ASSERT_TRUE(AType.hasValue());
+  ASSERT_TRUE(AType.has_value());
   auto BType = DBTH.getType("_ZTS1B");
-  ASSERT_TRUE(BType.hasValue());
+  ASSERT_TRUE(BType.has_value());
   auto CType = DBTH.getType("_ZTS1C");
-  ASSERT_TRUE(CType.hasValue());
+  ASSERT_TRUE(CType.has_value());
   auto DType = DBTH.getType("_ZTS1D");
-  ASSERT_TRUE(DType.hasValue());
+  ASSERT_TRUE(DType.has_value());
   auto XType = DBTH.getType("_ZTS1X");
-  ASSERT_TRUE(XType.hasValue());
+  ASSERT_TRUE(XType.has_value());
   auto YType = DBTH.getType("_ZTS1Y");
-  ASSERT_TRUE(YType.hasValue());
+  ASSERT_TRUE(YType.has_value());
   auto ZType = DBTH.getType("_ZTS1Z");
-  ASSERT_TRUE(ZType.hasValue());
+  ASSERT_TRUE(ZType.has_value());
 
   EXPECT_TRUE(DBTH.hasType(*AType));
   EXPECT_TRUE(DBTH.hasType(*BType));
@@ -225,17 +225,17 @@ TEST(DIBasedTypeHierarchyTest, BasicTHReconstruction_7_b) {
   // check for all types
   EXPECT_EQ(DBTH.getAllTypes().size(), 6U);
   auto AType = DBTH.getType("A");
-  ASSERT_TRUE(AType.hasValue());
+  ASSERT_TRUE(AType.has_value());
   auto CType = DBTH.getType("_ZTS1C");
-  ASSERT_TRUE(CType.hasValue());
+  ASSERT_TRUE(CType.has_value());
   auto XType = DBTH.getType("X");
-  ASSERT_TRUE(XType.hasValue());
+  ASSERT_TRUE(XType.has_value());
   auto YType = DBTH.getType("_ZTS1Y");
-  ASSERT_TRUE(YType.hasValue());
+  ASSERT_TRUE(YType.has_value());
   auto ZType = DBTH.getType("_ZTS1Z");
-  ASSERT_TRUE(ZType.hasValue());
+  ASSERT_TRUE(ZType.has_value());
   auto OmegaType = DBTH.getType("_ZTS5Omega");
-  ASSERT_TRUE(OmegaType.hasValue());
+  ASSERT_TRUE(OmegaType.has_value());
 
   EXPECT_TRUE(DBTH.hasType(*AType));
   EXPECT_TRUE(DBTH.hasType(*CType));
@@ -273,13 +273,13 @@ TEST(DIBasedTypeHierarchyTest, BasicTHReconstruction_8) {
   // check for all types
   EXPECT_EQ(DBTH.getAllTypes().size(), 4U);
   auto BaseType = DBTH.getType("_ZTS4Base");
-  ASSERT_TRUE(BaseType.hasValue());
+  ASSERT_TRUE(BaseType.has_value());
   auto ChildType = DBTH.getType("_ZTS5Child");
-  ASSERT_TRUE(ChildType.hasValue());
+  ASSERT_TRUE(ChildType.has_value());
   auto NonvirtualClassType = DBTH.getType("_ZTS15NonvirtualClass");
-  EXPECT_TRUE(NonvirtualClassType.hasValue());
+  EXPECT_TRUE(NonvirtualClassType.has_value());
   auto NonvirtualStructType = DBTH.getType("_ZTS16NonvirtualStruct");
-  EXPECT_TRUE(NonvirtualStructType.hasValue());
+  EXPECT_TRUE(NonvirtualStructType.has_value());
 
   EXPECT_TRUE(DBTH.hasType(*BaseType));
   EXPECT_TRUE(DBTH.hasType(*ChildType));
@@ -300,9 +300,9 @@ TEST(DIBasedTypeHierarchyTest, BasicTHReconstruction_9) {
   // check for all types
   EXPECT_EQ(DBTH.getAllTypes().size(), 2U);
   auto BaseType = DBTH.getType("_ZTS4Base");
-  ASSERT_TRUE(BaseType.hasValue());
+  ASSERT_TRUE(BaseType.has_value());
   auto ChildType = DBTH.getType("_ZTS5Child");
-  ASSERT_TRUE(ChildType.hasValue());
+  ASSERT_TRUE(ChildType.has_value());
 
   EXPECT_TRUE(DBTH.hasType(*BaseType));
   EXPECT_TRUE(DBTH.hasType(*ChildType));
@@ -321,9 +321,9 @@ TEST(DIBasedTypeHierarchyTest, BasicTHReconstruction_10) {
   // check for all types
   EXPECT_EQ(DBTH.getAllTypes().size(), 2U);
   auto BaseType = DBTH.getType("_ZTS4Base");
-  ASSERT_TRUE(BaseType.hasValue());
+  ASSERT_TRUE(BaseType.has_value());
   auto ChildType = DBTH.getType("_ZTS5Child");
-  ASSERT_TRUE(ChildType.hasValue());
+  ASSERT_TRUE(ChildType.has_value());
 
   EXPECT_TRUE(DBTH.hasType(*BaseType));
   EXPECT_TRUE(DBTH.hasType(*ChildType));
@@ -342,9 +342,9 @@ TEST(DIBasedTypeHierarchyTest, BasicTHReconstruction_11) {
   // check for all types
   EXPECT_EQ(DBTH.getAllTypes().size(), 2U);
   auto BaseType = DBTH.getType("_ZTS4Base");
-  ASSERT_TRUE(BaseType.hasValue());
+  ASSERT_TRUE(BaseType.has_value());
   auto ChildType = DBTH.getType("_ZTS5Child");
-  ASSERT_TRUE(ChildType.hasValue());
+  ASSERT_TRUE(ChildType.has_value());
 
   EXPECT_TRUE(DBTH.hasType(*BaseType));
   EXPECT_TRUE(DBTH.hasType(*ChildType));
@@ -363,9 +363,9 @@ TEST(DIBasedTypeHierarchyTest, BasicTHReconstruction_12) {
   // check for all types
   EXPECT_EQ(DBTH.getAllTypes().size(), 2U);
   auto BaseType = DBTH.getType("_ZTS4Base");
-  ASSERT_TRUE(BaseType.hasValue());
+  ASSERT_TRUE(BaseType.has_value());
   auto ChildType = DBTH.getType("_ZTS5Child");
-  ASSERT_TRUE(ChildType.hasValue());
+  ASSERT_TRUE(ChildType.has_value());
 
   EXPECT_TRUE(DBTH.hasType(*BaseType));
   EXPECT_TRUE(DBTH.hasType(*ChildType));
@@ -384,11 +384,11 @@ TEST(DIBasedTypeHierarchyTest, BasicTHReconstruction_12_b) {
   // check for all types
   EXPECT_EQ(DBTH.getAllTypes().size(), 3U);
   auto BaseType = DBTH.getType("Base");
-  ASSERT_TRUE(BaseType.hasValue());
+  ASSERT_TRUE(BaseType.has_value());
   auto ChildType = DBTH.getType("Child");
-  ASSERT_TRUE(ChildType.hasValue());
+  ASSERT_TRUE(ChildType.has_value());
   auto ChildsChildType = DBTH.getType("_ZTS11ChildsChild");
-  ASSERT_TRUE(ChildsChildType.hasValue());
+  ASSERT_TRUE(ChildsChildType.has_value());
 
   EXPECT_TRUE(DBTH.hasType(*BaseType));
   EXPECT_TRUE(DBTH.hasType(*ChildType));
@@ -414,9 +414,9 @@ TEST(DIBasedTypeHierarchyTest, BasicTHReconstruction_12_c) {
   // check for all types
   EXPECT_EQ(DBTH.getAllTypes().size(), 2U);
   auto ChildType = DBTH.getType("Child");
-  ASSERT_TRUE(ChildType.hasValue());
+  ASSERT_TRUE(ChildType.has_value());
   auto ChildsChildType = DBTH.getType("_ZTS11ChildsChild");
-  ASSERT_TRUE(ChildsChildType.hasValue());
+  ASSERT_TRUE(ChildsChildType.has_value());
 
   EXPECT_TRUE(DBTH.hasType(*ChildType));
   EXPECT_TRUE(DBTH.hasType(*ChildsChildType));
@@ -441,7 +441,7 @@ TEST(DIBasedTypeHierarchyTest, BasicTHReconstruction_14) {
   // check for all types
   EXPECT_EQ(DBTH.getAllTypes().size(), 1U);
   auto BaseType = DBTH.getType("Base");
-  ASSERT_TRUE(BaseType.hasValue());
+  ASSERT_TRUE(BaseType.has_value());
 
   EXPECT_TRUE(DBTH.hasType(*BaseType));
 
@@ -457,9 +457,9 @@ TEST(DIBasedTypeHierarchyTest, BasicTHReconstruction_15) {
   // check for all types
   EXPECT_EQ(DBTH.getAllTypes().size(), 2U);
   auto BaseType = DBTH.getType("Base");
-  ASSERT_TRUE(BaseType.hasValue());
+  ASSERT_TRUE(BaseType.has_value());
   auto ChildType = DBTH.getType("Child");
-  ASSERT_TRUE(ChildType.hasValue());
+  ASSERT_TRUE(ChildType.has_value());
 
   EXPECT_TRUE(DBTH.hasType(*BaseType));
   EXPECT_TRUE(DBTH.hasType(*ChildType));
@@ -478,16 +478,16 @@ TEST(DIBasedTypeHierarchyTest, BasicTHReconstruction_16) {
   // check for all types
   EXPECT_EQ(DBTH.getAllTypes().size(), 5U);
   auto BaseType = DBTH.getType("_ZTS4Base");
-  ASSERT_TRUE(BaseType.hasValue());
+  ASSERT_TRUE(BaseType.has_value());
   auto ChildType = DBTH.getType("_ZTS5Child");
-  ASSERT_TRUE(ChildType.hasValue());
+  ASSERT_TRUE(ChildType.has_value());
   // Since ChildsChild is never used, it is optimized out
   // auto ChildsChildType = DBTH.getType("ChildsChild");
-  // ASSERT_FALSE(ChildsChildType.hasValue());
+  // ASSERT_FALSE(ChildsChildType.has_value());
   auto BaseTwoType = DBTH.getType("_ZTS7BaseTwo");
-  ASSERT_TRUE(BaseTwoType.hasValue());
+  ASSERT_TRUE(BaseTwoType.has_value());
   auto ChildTwoType = DBTH.getType("_ZTS8ChildTwo");
-  ASSERT_TRUE(ChildTwoType.hasValue());
+  ASSERT_TRUE(ChildTwoType.has_value());
 
   EXPECT_TRUE(DBTH.hasType(*BaseType));
   EXPECT_TRUE(DBTH.hasType(*ChildType));
@@ -515,16 +515,16 @@ TEST(DIBasedTypeHierarchyTest, BasicTHReconstruction_17) {
   // check for all types
   // EXPECT_EQ(DBTH.getAllTypes().size(), 5U);
   auto BaseType = DBTH.getType("_ZTS4Base");
-  ASSERT_TRUE(BaseType.hasValue());
+  ASSERT_TRUE(BaseType.has_value());
   auto ChildType = DBTH.getType("_ZTS5Child");
-  ASSERT_TRUE(ChildType.hasValue());
+  ASSERT_TRUE(ChildType.has_value());
   // auto Child2Type = DBTH.getType("Child2");
   // Since Child2Type is never used, it is optimized out
-  // ASSERT_FALSE(Child2Type.hasValue());
+  // ASSERT_FALSE(Child2Type.has_value());
   auto Base2Type = DBTH.getType("_ZTS5Base2");
-  ASSERT_TRUE(Base2Type.hasValue());
+  ASSERT_TRUE(Base2Type.has_value());
   auto KidType = DBTH.getType("_ZTS3Kid");
-  ASSERT_TRUE(KidType.hasValue());
+  ASSERT_TRUE(KidType.has_value());
 
   EXPECT_TRUE(DBTH.hasType(*BaseType));
   EXPECT_TRUE(DBTH.hasType(*ChildType));
@@ -552,14 +552,14 @@ TEST(DIBasedTypeHierarchyTest, BasicTHReconstruction_18) {
   // check for all types
   EXPECT_EQ(DBTH.getAllTypes().size(), 4U);
   auto BaseType = DBTH.getType("_ZTS4Base");
-  ASSERT_TRUE(BaseType.hasValue());
+  ASSERT_TRUE(BaseType.has_value());
   auto ChildType = DBTH.getType("_ZTS5Child");
-  ASSERT_TRUE(ChildType.hasValue());
+  ASSERT_TRUE(ChildType.has_value());
   // auto Child_2Type = DBTH.getType("Child_2");
   // Since Child2Type is never used, it is optimized out
-  // ASSERT_FALSE(Child2Type.hasValue());
+  // ASSERT_FALSE(Child2Type.has_value());
   auto Child3Type = DBTH.getType("_ZTS7Child_3");
-  ASSERT_TRUE(Child3Type.hasValue());
+  ASSERT_TRUE(Child3Type.has_value());
 
   EXPECT_TRUE(DBTH.hasType(*BaseType));
   EXPECT_TRUE(DBTH.hasType(*ChildType));
@@ -586,17 +586,17 @@ TEST(DIBasedTypeHierarchyTest, BasicTHReconstruction_19) {
   // check for all types
   EXPECT_EQ(DBTH.getAllTypes().size(), 6U);
   auto BaseType = DBTH.getType("_ZTS4Base");
-  ASSERT_TRUE(BaseType.hasValue());
+  ASSERT_TRUE(BaseType.has_value());
   auto ChildType = DBTH.getType("_ZTS5Child");
-  ASSERT_TRUE(ChildType.hasValue());
+  ASSERT_TRUE(ChildType.has_value());
   auto FooType = DBTH.getType("_ZTS3Foo");
-  ASSERT_TRUE(FooType.hasValue());
+  ASSERT_TRUE(FooType.has_value());
   auto BarType = DBTH.getType("_ZTS3Bar");
-  ASSERT_TRUE(BarType.hasValue());
+  ASSERT_TRUE(BarType.has_value());
   auto LoremType = DBTH.getType("_ZTS5Lorem");
-  ASSERT_TRUE(LoremType.hasValue());
+  ASSERT_TRUE(LoremType.has_value());
   auto ImpsumType = DBTH.getType("_ZTS6Impsum");
-  ASSERT_TRUE(ImpsumType.hasValue());
+  ASSERT_TRUE(ImpsumType.has_value());
 
   EXPECT_TRUE(DBTH.hasType(*BaseType));
   EXPECT_TRUE(DBTH.hasType(*ChildType));
@@ -623,11 +623,11 @@ TEST(DIBasedTypeHierarchyTest, BasicTHReconstruction_20) {
   // check for all types
   EXPECT_EQ(DBTH.getAllTypes().size(), 3U);
   auto BaseType = DBTH.getType("_ZTS4Base");
-  ASSERT_TRUE(BaseType.hasValue());
+  ASSERT_TRUE(BaseType.has_value());
   auto Base2Type = DBTH.getType("_ZTS5Base2");
-  ASSERT_TRUE(Base2Type.hasValue());
+  ASSERT_TRUE(Base2Type.has_value());
   auto ChildType = DBTH.getType("_ZTS5Child");
-  ASSERT_TRUE(ChildType.hasValue());
+  ASSERT_TRUE(ChildType.has_value());
 
   EXPECT_TRUE(DBTH.hasType(*BaseType));
   EXPECT_TRUE(DBTH.hasType(*Base2Type));
@@ -649,15 +649,15 @@ TEST(DIBasedTypeHierarchyTest, BasicTHReconstruction_21) {
   // check for all types
   EXPECT_EQ(DBTH.getAllTypes().size(), 5U);
   auto BaseType = DBTH.getType("_ZTS4Base");
-  ASSERT_TRUE(BaseType.hasValue());
+  ASSERT_TRUE(BaseType.has_value());
   auto Base2Type = DBTH.getType("_ZTS5Base2");
-  ASSERT_TRUE(Base2Type.hasValue());
+  ASSERT_TRUE(Base2Type.has_value());
   auto Base3Type = DBTH.getType("_ZTS5Base3");
-  ASSERT_TRUE(Base3Type.hasValue());
+  ASSERT_TRUE(Base3Type.has_value());
   auto ChildType = DBTH.getType("_ZTS5Child");
-  ASSERT_TRUE(ChildType.hasValue());
+  ASSERT_TRUE(ChildType.has_value());
   auto Child2Type = DBTH.getType("_ZTS6Child2");
-  ASSERT_TRUE(Child2Type.hasValue());
+  ASSERT_TRUE(Child2Type.has_value());
 
   EXPECT_TRUE(DBTH.hasType(*BaseType));
   EXPECT_TRUE(DBTH.hasType(*Base2Type));
@@ -690,9 +690,9 @@ TEST(DIBasedTypeHierarchyTest, TransitivelyReachableTypes_1) {
 
   // check for all types
   auto BaseType = DBTH.getType("_ZTS4Base");
-  ASSERT_TRUE(BaseType.hasValue());
+  ASSERT_TRUE(BaseType.has_value());
   auto ChildType = DBTH.getType("_ZTS5Child");
-  ASSERT_TRUE(ChildType.hasValue());
+  ASSERT_TRUE(ChildType.has_value());
 
   auto ReachableTypesBase = DBTH.getSubTypes(*BaseType);
   auto ReachableTypesChild = DBTH.getSubTypes(*ChildType);
@@ -713,9 +713,9 @@ TEST(DIBasedTypeHierarchyTest, TransitivelyReachableTypes_2) {
 
   // check for all types
   auto BaseType = DBTH.getType("_ZTS4Base");
-  ASSERT_TRUE(BaseType.hasValue());
+  ASSERT_TRUE(BaseType.has_value());
   auto ChildType = DBTH.getType("_ZTS5Child");
-  ASSERT_TRUE(ChildType.hasValue());
+  ASSERT_TRUE(ChildType.has_value());
 
   auto ReachableTypesBase = DBTH.getSubTypes(*BaseType);
   auto ReachableTypesChild = DBTH.getSubTypes(*ChildType);
@@ -736,9 +736,9 @@ TEST(DIBasedTypeHierarchyTest, TransitivelyReachableTypes_3) {
 
   // check for all types
   auto BaseType = DBTH.getType("_ZTS4Base");
-  ASSERT_TRUE(BaseType.hasValue());
+  ASSERT_TRUE(BaseType.has_value());
   auto ChildType = DBTH.getType("_ZTS5Child");
-  ASSERT_TRUE(ChildType.hasValue());
+  ASSERT_TRUE(ChildType.has_value());
 
   auto ReachableTypesBase = DBTH.getSubTypes(*BaseType);
   auto ReachableTypesChild = DBTH.getSubTypes(*ChildType);
@@ -757,9 +757,9 @@ TEST(DIBasedTypeHierarchyTest, TransitivelyReachableTypes_4) {
 
   // check for all types
   auto BaseType = DBTH.getType("_ZTS4Base");
-  ASSERT_TRUE(BaseType.hasValue());
+  ASSERT_TRUE(BaseType.has_value());
   auto ChildType = DBTH.getType("_ZTS5Child");
-  ASSERT_TRUE(ChildType.hasValue());
+  ASSERT_TRUE(ChildType.has_value());
 
   auto ReachableTypesBase = DBTH.getSubTypes(*BaseType);
   auto ReachableTypesChild = DBTH.getSubTypes(*ChildType);
@@ -780,11 +780,11 @@ TEST(DIBasedTypeHierarchyTest, TransitivelyReachableTypes_5) {
 
   // check for all types
   auto BaseType = DBTH.getType("_ZTS4Base");
-  ASSERT_TRUE(BaseType.hasValue());
+  ASSERT_TRUE(BaseType.has_value());
   auto OtherBaseType = DBTH.getType("_ZTS9OtherBase");
-  ASSERT_TRUE(OtherBaseType.hasValue());
+  ASSERT_TRUE(OtherBaseType.has_value());
   auto ChildType = DBTH.getType("_ZTS5Child");
-  ASSERT_TRUE(ChildType.hasValue());
+  ASSERT_TRUE(ChildType.has_value());
 
   auto ReachableTypesBase = DBTH.getSubTypes(*BaseType);
   auto ReachableTypesOtherBase = DBTH.getSubTypes(*OtherBaseType);
@@ -810,9 +810,9 @@ TEST(DIBasedTypeHierarchyTest, TransitivelyReachableTypes_6) {
 
   // check for all types
   auto BaseType = DBTH.getType("_ZTS4Base");
-  ASSERT_TRUE(BaseType.hasValue());
+  ASSERT_TRUE(BaseType.has_value());
   auto ChildType = DBTH.getType("_ZTS5Child");
-  ASSERT_TRUE(ChildType.hasValue());
+  ASSERT_TRUE(ChildType.has_value());
 
   auto ReachableTypesBase = DBTH.getSubTypes(*BaseType);
   auto ReachableTypesChild = DBTH.getSubTypes(*ChildType);
@@ -833,19 +833,19 @@ TEST(DIBasedTypeHierarchyTest, TransitivelyReachableTypes_7) {
 
   // check for all types
   auto AType = DBTH.getType("_ZTS1A");
-  ASSERT_TRUE(AType.hasValue());
+  ASSERT_TRUE(AType.has_value());
   auto BType = DBTH.getType("_ZTS1B");
-  ASSERT_TRUE(BType.hasValue());
+  ASSERT_TRUE(BType.has_value());
   auto CType = DBTH.getType("_ZTS1C");
-  ASSERT_TRUE(CType.hasValue());
+  ASSERT_TRUE(CType.has_value());
   auto DType = DBTH.getType("_ZTS1D");
-  ASSERT_TRUE(DType.hasValue());
+  ASSERT_TRUE(DType.has_value());
   auto XType = DBTH.getType("_ZTS1X");
-  ASSERT_TRUE(XType.hasValue());
+  ASSERT_TRUE(XType.has_value());
   auto YType = DBTH.getType("_ZTS1Y");
-  ASSERT_TRUE(YType.hasValue());
+  ASSERT_TRUE(YType.has_value());
   auto ZType = DBTH.getType("_ZTS1Z");
-  ASSERT_TRUE(ZType.hasValue());
+  ASSERT_TRUE(ZType.has_value());
 
   auto ReachableTypesA = DBTH.getSubTypes(*AType);
   auto ReachableTypesB = DBTH.getSubTypes(*BType);
@@ -889,17 +889,17 @@ TEST(DIBasedTypeHierarchyTest, TransitivelyReachableTypes_7_b) {
 
   // check for all types
   auto AType = DBTH.getType("A");
-  ASSERT_TRUE(AType.hasValue());
+  ASSERT_TRUE(AType.has_value());
   auto CType = DBTH.getType("_ZTS1C");
-  ASSERT_TRUE(CType.hasValue());
+  ASSERT_TRUE(CType.has_value());
   auto XType = DBTH.getType("X");
-  ASSERT_TRUE(XType.hasValue());
+  ASSERT_TRUE(XType.has_value());
   auto YType = DBTH.getType("_ZTS1Y");
-  ASSERT_TRUE(YType.hasValue());
+  ASSERT_TRUE(YType.has_value());
   auto ZType = DBTH.getType("_ZTS1Z");
-  ASSERT_TRUE(ZType.hasValue());
+  ASSERT_TRUE(ZType.has_value());
   auto OmegaType = DBTH.getType("_ZTS5Omega");
-  ASSERT_TRUE(OmegaType.hasValue());
+  ASSERT_TRUE(OmegaType.has_value());
 
   auto ReachableTypesA = DBTH.getSubTypes(*AType);
   auto ReachableTypesC = DBTH.getSubTypes(*CType);
@@ -942,13 +942,13 @@ TEST(DIBasedTypeHierarchyTest, TransitivelyReachableTypes_8) {
 
   // check for all types
   auto BaseType = DBTH.getType("_ZTS4Base");
-  ASSERT_TRUE(BaseType.hasValue());
+  ASSERT_TRUE(BaseType.has_value());
   auto ChildType = DBTH.getType("_ZTS5Child");
-  ASSERT_TRUE(ChildType.hasValue());
+  ASSERT_TRUE(ChildType.has_value());
   auto NonvirtualClassType = DBTH.getType("_ZTS15NonvirtualClass");
-  EXPECT_TRUE(NonvirtualClassType.hasValue());
+  EXPECT_TRUE(NonvirtualClassType.has_value());
   auto NonvirtualStructType = DBTH.getType("_ZTS16NonvirtualStruct");
-  EXPECT_TRUE(NonvirtualStructType.hasValue());
+  EXPECT_TRUE(NonvirtualStructType.has_value());
 
   auto ReachableTypesBase = DBTH.getSubTypes(*BaseType);
   auto ReachableTypesChild = DBTH.getSubTypes(*ChildType);
@@ -976,9 +976,9 @@ TEST(DIBasedTypeHierarchyTest, TransitivelyReachableTypes_9) {
 
   // check for all types
   auto BaseType = DBTH.getType("_ZTS4Base");
-  ASSERT_TRUE(BaseType.hasValue());
+  ASSERT_TRUE(BaseType.has_value());
   auto ChildType = DBTH.getType("_ZTS5Child");
-  ASSERT_TRUE(ChildType.hasValue());
+  ASSERT_TRUE(ChildType.has_value());
 
   auto ReachableTypesBase = DBTH.getSubTypes(*BaseType);
   auto ReachableTypesChild = DBTH.getSubTypes(*ChildType);
@@ -999,9 +999,9 @@ TEST(DIBasedTypeHierarchyTest, TransitivelyReachableTypes_10) {
 
   // check for all types
   auto BaseType = DBTH.getType("_ZTS4Base");
-  ASSERT_TRUE(BaseType.hasValue());
+  ASSERT_TRUE(BaseType.has_value());
   auto ChildType = DBTH.getType("_ZTS5Child");
-  ASSERT_TRUE(ChildType.hasValue());
+  ASSERT_TRUE(ChildType.has_value());
 
   auto ReachableTypesBase = DBTH.getSubTypes(*BaseType);
   auto ReachableTypesChild = DBTH.getSubTypes(*ChildType);
@@ -1022,9 +1022,9 @@ TEST(DIBasedTypeHierarchyTest, TransitivelyReachableTypes_11) {
 
   // check for all types
   auto BaseType = DBTH.getType("_ZTS4Base");
-  ASSERT_TRUE(BaseType.hasValue());
+  ASSERT_TRUE(BaseType.has_value());
   auto ChildType = DBTH.getType("_ZTS5Child");
-  ASSERT_TRUE(ChildType.hasValue());
+  ASSERT_TRUE(ChildType.has_value());
 
   auto ReachableTypesBase = DBTH.getSubTypes(*BaseType);
   auto ReachableTypesChild = DBTH.getSubTypes(*ChildType);
@@ -1045,9 +1045,9 @@ TEST(DIBasedTypeHierarchyTest, TransitivelyReachableTypes_12) {
 
   // check for all types
   auto BaseType = DBTH.getType("_ZTS4Base");
-  ASSERT_TRUE(BaseType.hasValue());
+  ASSERT_TRUE(BaseType.has_value());
   auto ChildType = DBTH.getType("_ZTS5Child");
-  ASSERT_TRUE(ChildType.hasValue());
+  ASSERT_TRUE(ChildType.has_value());
 
   auto ReachableTypesBase = DBTH.getSubTypes(*BaseType);
   auto ReachableTypesChild = DBTH.getSubTypes(*ChildType);
@@ -1068,11 +1068,11 @@ TEST(DIBasedTypeHierarchyTest, TransitivelyReachableTypes_12_b) {
 
   // check for all types
   auto BaseType = DBTH.getType("Base");
-  ASSERT_TRUE(BaseType.hasValue());
+  ASSERT_TRUE(BaseType.has_value());
   auto ChildType = DBTH.getType("Child");
-  ASSERT_TRUE(ChildType.hasValue());
+  ASSERT_TRUE(ChildType.has_value());
   auto ChildsChildType = DBTH.getType("_ZTS11ChildsChild");
-  ASSERT_TRUE(ChildsChildType.hasValue());
+  ASSERT_TRUE(ChildsChildType.has_value());
 
   auto ReachableTypesBase = DBTH.getSubTypes(*BaseType);
   auto ReachableTypesChild = DBTH.getSubTypes(*ChildType);
@@ -1097,9 +1097,9 @@ TEST(DIBasedTypeHierarchyTest, TransitivelyReachableTypes_12_c) {
 
   // check for all types
   auto ChildType = DBTH.getType("Child");
-  ASSERT_TRUE(ChildType.hasValue());
+  ASSERT_TRUE(ChildType.has_value());
   auto ChildsChildType = DBTH.getType("_ZTS11ChildsChild");
-  ASSERT_TRUE(ChildsChildType.hasValue());
+  ASSERT_TRUE(ChildsChildType.has_value());
 
   auto ReachableTypesChild = DBTH.getSubTypes(*ChildType);
   auto ReachableTypesChildsChild = DBTH.getSubTypes(*ChildsChildType);
@@ -1119,7 +1119,7 @@ TEST(DIBasedTypeHierarchyTest, TransitivelyReachableTypes_14) {
 
   // check for all types
   auto BaseType = DBTH.getType("Base");
-  ASSERT_TRUE(BaseType.hasValue());
+  ASSERT_TRUE(BaseType.has_value());
 
   auto ReachableTypesBase = DBTH.getSubTypes(*BaseType);
 
@@ -1135,9 +1135,9 @@ TEST(DIBasedTypeHierarchyTest, TransitivelyReachableTypes_15) {
 
   // check for all types
   auto BaseType = DBTH.getType("Base");
-  ASSERT_TRUE(BaseType.hasValue());
+  ASSERT_TRUE(BaseType.has_value());
   auto ChildType = DBTH.getType("Child");
-  ASSERT_TRUE(ChildType.hasValue());
+  ASSERT_TRUE(ChildType.has_value());
 
   auto ReachableTypesBase = DBTH.getSubTypes(*BaseType);
   auto ReachableTypesChild = DBTH.getSubTypes(*ChildType);
@@ -1158,13 +1158,13 @@ TEST(DIBasedTypeHierarchyTest, TransitivelyReachableTypes_16) {
 
   // check for all types
   auto BaseType = DBTH.getType("_ZTS4Base");
-  ASSERT_TRUE(BaseType.hasValue());
+  ASSERT_TRUE(BaseType.has_value());
   auto ChildType = DBTH.getType("_ZTS5Child");
-  ASSERT_TRUE(ChildType.hasValue());
+  ASSERT_TRUE(ChildType.has_value());
   auto BaseTwoType = DBTH.getType("_ZTS7BaseTwo");
-  ASSERT_TRUE(BaseTwoType.hasValue());
+  ASSERT_TRUE(BaseTwoType.has_value());
   auto ChildTwoType = DBTH.getType("_ZTS8ChildTwo");
-  ASSERT_TRUE(ChildTwoType.hasValue());
+  ASSERT_TRUE(ChildTwoType.has_value());
 
   auto ReachableTypesBase = DBTH.getSubTypes(*BaseType);
   auto ReachableTypesChild = DBTH.getSubTypes(*ChildType);
@@ -1193,13 +1193,13 @@ TEST(DIBasedTypeHierarchyTest, TransitivelyReachableTypes_17) {
 
   // check for all types
   auto BaseType = DBTH.getType("_ZTS4Base");
-  ASSERT_TRUE(BaseType.hasValue());
+  ASSERT_TRUE(BaseType.has_value());
   auto ChildType = DBTH.getType("_ZTS5Child");
-  ASSERT_TRUE(ChildType.hasValue());
+  ASSERT_TRUE(ChildType.has_value());
   auto Base2Type = DBTH.getType("_ZTS5Base2");
-  ASSERT_TRUE(Base2Type.hasValue());
+  ASSERT_TRUE(Base2Type.has_value());
   auto KidType = DBTH.getType("_ZTS3Kid");
-  ASSERT_TRUE(KidType.hasValue());
+  ASSERT_TRUE(KidType.has_value());
 
   auto ReachableTypesBase = DBTH.getSubTypes(*BaseType);
   auto ReachableTypesChild = DBTH.getSubTypes(*ChildType);
@@ -1228,11 +1228,11 @@ TEST(DIBasedTypeHierarchyTest, TransitivelyReachableTypes_18) {
 
   // check for all types
   auto BaseType = DBTH.getType("_ZTS4Base");
-  ASSERT_TRUE(BaseType.hasValue());
+  ASSERT_TRUE(BaseType.has_value());
   auto ChildType = DBTH.getType("_ZTS5Child");
-  ASSERT_TRUE(ChildType.hasValue());
+  ASSERT_TRUE(ChildType.has_value());
   auto Child3Type = DBTH.getType("_ZTS7Child_3");
-  ASSERT_TRUE(Child3Type.hasValue());
+  ASSERT_TRUE(Child3Type.has_value());
 
   auto ReachableTypesBase = DBTH.getSubTypes(*BaseType);
   auto ReachableTypesChild = DBTH.getSubTypes(*ChildType);
@@ -1256,17 +1256,17 @@ TEST(DIBasedTypeHierarchyTest, TransitivelyReachableTypes_19) {
 
   // check for all types
   auto BaseType = DBTH.getType("_ZTS4Base");
-  ASSERT_TRUE(BaseType.hasValue());
+  ASSERT_TRUE(BaseType.has_value());
   auto ChildType = DBTH.getType("_ZTS5Child");
-  ASSERT_TRUE(ChildType.hasValue());
+  ASSERT_TRUE(ChildType.has_value());
   auto FooType = DBTH.getType("_ZTS3Foo");
-  ASSERT_TRUE(FooType.hasValue());
+  ASSERT_TRUE(FooType.has_value());
   auto BarType = DBTH.getType("_ZTS3Bar");
-  ASSERT_TRUE(BarType.hasValue());
+  ASSERT_TRUE(BarType.has_value());
   auto LoremType = DBTH.getType("_ZTS5Lorem");
-  ASSERT_TRUE(LoremType.hasValue());
+  ASSERT_TRUE(LoremType.has_value());
   auto ImpsumType = DBTH.getType("_ZTS6Impsum");
-  ASSERT_TRUE(ImpsumType.hasValue());
+  ASSERT_TRUE(ImpsumType.has_value());
 
   auto ReachableTypesBase = DBTH.getSubTypes(*BaseType);
   auto ReachableTypesChild = DBTH.getSubTypes(*ChildType);
@@ -1303,11 +1303,11 @@ TEST(DIBasedTypeHierarchyTest, TransitivelyReachableTypes_20) {
 
   // check for all types
   auto BaseType = DBTH.getType("_ZTS4Base");
-  ASSERT_TRUE(BaseType.hasValue());
+  ASSERT_TRUE(BaseType.has_value());
   auto Base2Type = DBTH.getType("_ZTS5Base2");
-  ASSERT_TRUE(Base2Type.hasValue());
+  ASSERT_TRUE(Base2Type.has_value());
   auto ChildType = DBTH.getType("_ZTS5Child");
-  ASSERT_TRUE(ChildType.hasValue());
+  ASSERT_TRUE(ChildType.has_value());
 
   auto ReachableTypesBase = DBTH.getSubTypes(*BaseType);
   auto ReachableTypesBase2 = DBTH.getSubTypes(*Base2Type);
@@ -1333,15 +1333,15 @@ TEST(DIBasedTypeHierarchyTest, TransitivelyReachableTypes_21) {
 
   // check for all types
   auto BaseType = DBTH.getType("_ZTS4Base");
-  ASSERT_TRUE(BaseType.hasValue());
+  ASSERT_TRUE(BaseType.has_value());
   auto Base2Type = DBTH.getType("_ZTS5Base2");
-  ASSERT_TRUE(Base2Type.hasValue());
+  ASSERT_TRUE(Base2Type.has_value());
   auto Base3Type = DBTH.getType("_ZTS5Base3");
-  ASSERT_TRUE(Base3Type.hasValue());
+  ASSERT_TRUE(Base3Type.has_value());
   auto ChildType = DBTH.getType("_ZTS5Child");
-  ASSERT_TRUE(ChildType.hasValue());
+  ASSERT_TRUE(ChildType.has_value());
   auto Child2Type = DBTH.getType("_ZTS6Child2");
-  ASSERT_TRUE(Child2Type.hasValue());
+  ASSERT_TRUE(Child2Type.has_value());
 
   auto ReachableTypesBase = DBTH.getSubTypes(*BaseType);
   auto ReachableTypesBase2 = DBTH.getSubTypes(*Base2Type);

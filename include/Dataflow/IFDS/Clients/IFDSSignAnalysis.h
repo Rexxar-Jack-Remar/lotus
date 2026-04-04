@@ -8,7 +8,7 @@
 
 #include "Dataflow/IFDS/Core/IFDSFramework.h"
 
-#include <llvm/ADT/Optional.h>
+#include <optional>
 
 namespace ifds {
 
@@ -77,9 +77,9 @@ public:
   FactSet initial_facts(const llvm::Function *main) override;
 
 private:
-  static llvm::Optional<int64_t> as_const_i64(const llvm::Value *v);
+  static std::optional<int64_t> as_const_i64(const llvm::Value *v);
   static SignFact::Sign sign_of(int64_t v);
-  static llvm::Optional<SignFact::Sign> eval_binary(unsigned opcode, int64_t a,
+  static std::optional<SignFact::Sign> eval_binary(unsigned opcode, int64_t a,
                                                     int64_t b);
 };
 

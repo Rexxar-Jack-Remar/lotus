@@ -8,11 +8,11 @@
 
 namespace ifds {
 
-llvm::Optional<int64_t> SignAnalysis::as_const_i64(const llvm::Value *v) {
+std::optional<int64_t> SignAnalysis::as_const_i64(const llvm::Value *v) {
   if (const auto *ci = llvm::dyn_cast_or_null<llvm::ConstantInt>(v)) {
     return ci->getSExtValue();
   }
-  return llvm::None;
+  return std::nullopt;
 }
 
 SignFact::Sign SignAnalysis::sign_of(int64_t v) {
@@ -25,32 +25,32 @@ SignFact::Sign SignAnalysis::sign_of(int64_t v) {
   return SignFact::Sign::Zero;
 }
 
-llvm::Optional<SignFact::Sign> SignAnalysis::eval_binary(unsigned opcode,
+std::optional<SignFact::Sign> SignAnalysis::eval_binary(unsigned opcode,
                                                          int64_t a, int64_t b) {
   int64_t out = 0;
   switch (opcode) {
   case llvm::Instruction::Add:
     if (llvm::AddOverflow(a, b, out)) {
-      return llvm::None;
+      return std::nullopt;
     }
     return sign_of(out);
   case llvm::Instruction::Sub:
     if (llvm::SubOverflow(a, b, out)) {
-      return llvm::None;
+      return std::nullopt;
     }
     return sign_of(out);
   case llvm::Instruction::Mul:
     if (llvm::MulOverflow(a, b, out)) {
-      return llvm::None;
+      return std::nullopt;
     }
     return sign_of(out);
   case llvm::Instruction::SDiv:
     if (b == 0 || (a == std::numeric_limits<int64_t>::min() && b == -1)) {
-      return llvm::None;
+      return std::nullopt;
     }
     return sign_of(a / b);
   default:
-    return llvm::None;
+    return std::nullopt;
   }
 }
 

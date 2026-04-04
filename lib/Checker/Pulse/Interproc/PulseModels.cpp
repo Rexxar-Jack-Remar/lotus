@@ -14,23 +14,23 @@
 namespace pulse {
 
 namespace {
-static llvm::Optional<uint64_t> getConstUInt64(const llvm::Value *v) {
+static std::optional<uint64_t> getConstUInt64(const llvm::Value *v) {
   if (!v)
-    return llvm::None;
+    return std::nullopt;
   if (auto *CI = llvm::dyn_cast<llvm::ConstantInt>(v)) {
     if (CI->getBitWidth() <= 64) {
       if (CI->isNegative())
-        return llvm::None;
+        return std::nullopt;
       return CI->getZExtValue();
     }
   }
-  return llvm::None;
+  return std::nullopt;
 }
 
-static llvm::Optional<uint64_t> mulConstU64(uint64_t a, uint64_t b) {
+static std::optional<uint64_t> mulConstU64(uint64_t a, uint64_t b) {
   __int128 prod = static_cast<__int128>(a) * static_cast<__int128>(b);
   if (prod < 0 || prod > std::numeric_limits<uint64_t>::max()) {
-    return llvm::None;
+    return std::nullopt;
   }
   return static_cast<uint64_t>(prod);
 }

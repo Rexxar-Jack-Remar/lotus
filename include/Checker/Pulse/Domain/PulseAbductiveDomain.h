@@ -142,7 +142,7 @@ public:
   // Invalidation info (for UseAfterFree diagnostics)
   void setInvalidationInfo(AbstractValue addr, InvalidationKind kind,
                            const llvm::Instruction *loc);
-  llvm::Optional<std::pair<InvalidationKind, const llvm::Instruction *>>
+  std::optional<std::pair<InvalidationKind, const llvm::Instruction *>>
   getInvalidationInfo(AbstractValue addr) const;
 
   // Allocation size tracking
@@ -153,12 +153,12 @@ public:
       allocation_sizes_[addr] = size_bytes;
     }
   }
-  llvm::Optional<uint64_t> getAllocationSize(AbstractValue addr) const {
+  std::optional<uint64_t> getAllocationSize(AbstractValue addr) const {
     auto it = allocation_sizes_.find(addr);
     if (it != allocation_sizes_.end()) {
       return it->second;
     }
-    return llvm::None;
+    return std::nullopt;
   }
   const std::map<AbstractValue, uint64_t> &getAllocationSizes() const {
     return allocation_sizes_;
@@ -264,7 +264,7 @@ public:
 
   // Merge two domains (for joining exit states)
   // Returns merged domain or empty if merge is impossible
-  static llvm::Optional<AbductiveDomain> merge(const AbductiveDomain &d1,
+  static std::optional<AbductiveDomain> merge(const AbductiveDomain &d1,
                                                const AbductiveDomain &d2);
 };
 

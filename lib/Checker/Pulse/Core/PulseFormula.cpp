@@ -745,22 +745,22 @@ bool PulseFormula::isInteger(AbstractValue v) const {
   return integer_values_.count(rep) > 0;
 }
 
-llvm::Optional<int64_t> PulseFormula::getLowerBound(AbstractValue v) const {
+std::optional<int64_t> PulseFormula::getLowerBound(AbstractValue v) const {
   AbstractValue rep = const_cast<PulseFormula *>(this)->findRep(v);
   auto it = lower_bounds_.find(rep);
   if (it != lower_bounds_.end()) {
     return it->second;
   }
-  return llvm::None;
+  return std::nullopt;
 }
 
-llvm::Optional<int64_t> PulseFormula::getUpperBound(AbstractValue v) const {
+std::optional<int64_t> PulseFormula::getUpperBound(AbstractValue v) const {
   AbstractValue rep = const_cast<PulseFormula *>(this)->findRep(v);
   auto it = upper_bounds_.find(rep);
   if (it != upper_bounds_.end()) {
     return it->second;
   }
-  return llvm::None;
+  return std::nullopt;
 }
 
 bool PulseFormula::isUnsat() const {

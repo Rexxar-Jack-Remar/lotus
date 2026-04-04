@@ -250,7 +250,7 @@ TEST_F(KINTCheckerTest, WideConstantPreservesHighBits) {
 
   z3::context ctx;
   z3::solver solver(ctx);
-  DenseMap<const Value *, llvm::Optional<z3::expr>> empty;
+  DenseMap<const Value *, std::optional<z3::expr>> empty;
   kint::BugDetection bug_detection;
   z3::expr actual = bug_detection.v2sym(ci, empty, solver);
   z3::expr expected = bvValFromAPInt(ctx, ci->getValue());

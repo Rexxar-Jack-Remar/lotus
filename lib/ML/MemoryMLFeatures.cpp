@@ -5,7 +5,7 @@
 
 #include "ML/MemoryMLFeatures.h"
 
-#include "llvm/ADT/Optional.h"
+#include <optional>
 #include "llvm/Analysis/CallGraph.h"
 #include "llvm/Analysis/MemoryBuiltins.h"
 #include "llvm/Analysis/TargetLibraryInfo.h"
@@ -129,10 +129,10 @@ class MemoryMLFeaturesPassImpl {
   }
 
   // Get the size of the allocation site for Ptr
-  Optional<size_t> getAllocSize(Value *Ptr) {
+  std::optional<size_t> getAllocSize(Value *Ptr) {
     assert(Ptr);
     if (!isKnownAlloc(Ptr))
-      return None;
+      return std::nullopt;
 
     ObjectSizeOpts Opts;
     Opts.RoundToAlign = true;
@@ -141,12 +141,12 @@ class MemoryMLFeaturesPassImpl {
     ObjectSizeOffsetVisitor OSOV(m_dl, m_tli, m_ctx, Opts);
     auto OffsetAlign = OSOV.compute(Ptr);
     if (!OSOV.knownSize(OffsetAlign))
-      return None;
+      return std::nullopt;
     const int64_t I = OffsetAlign.first.getSExtValue();
     if (I >= 0) {
       return size_t(I);
     } else {
-      return None;
+      return std::nullopt;
     }
   }
 
@@ -160,7 +160,7 @@ class MemoryMLFeaturesPassImpl {
       // We mark it as interesting
       return true;
     } else {
-      Optional<size_t> AllocSize = getAllocSize(Alloc);
+      std::optional<size_t> AllocSize = getAllocSize(Alloc);
       return AllocSize && size_t(LoadEnd) > *AllocSize;
     }
   }

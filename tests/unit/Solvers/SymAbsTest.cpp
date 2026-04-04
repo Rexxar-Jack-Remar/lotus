@@ -22,12 +22,12 @@ TEST(SymAbsLinearExpressionTest, MaximumAndMinimumInRange) {
     expr phi = sge(x, ctx.bv_val(0, 8)) && sle(x, ctx.bv_val(10, 8));
 
     auto max_val = SymAbs::maximum(phi, x);
-    ASSERT_TRUE(max_val.hasValue());
-    EXPECT_EQ(10, max_val.getValue());
+    ASSERT_TRUE(max_val.has_value());
+    EXPECT_EQ(10, max_val.value());
 
     auto min_val = SymAbs::minimum(phi, x);
-    ASSERT_TRUE(min_val.hasValue());
-    EXPECT_EQ(0, min_val.getValue());
+    ASSERT_TRUE(min_val.has_value());
+    EXPECT_EQ(0, min_val.value());
 }
 
 TEST(SymAbsCongruenceTest, FindsModulusAndRemainder) {
@@ -39,7 +39,7 @@ TEST(SymAbsCongruenceTest, FindsModulusAndRemainder) {
                (x == ctx.bv_val(10, 8));
 
     auto cong = SymAbs::alpha_a_cong(phi, x);
-    ASSERT_TRUE(cong.hasValue());
+    ASSERT_TRUE(cong.has_value());
     EXPECT_EQ(4u, cong->modulus);
     EXPECT_EQ(2, cong->remainder);
 }
@@ -78,12 +78,12 @@ TEST(SymAbsLinearExpressionTest, HandlesNegativeRange) {
     expr phi = sge(x, ctx.bv_val(-5, 8)) && sle(x, ctx.bv_val(-2, 8));
 
     auto max_val = SymAbs::maximum(phi, x);
-    ASSERT_TRUE(max_val.hasValue());
-    EXPECT_EQ(-2, max_val.getValue());
+    ASSERT_TRUE(max_val.has_value());
+    EXPECT_EQ(-2, max_val.value());
 
     auto min_val = SymAbs::minimum(phi, x);
-    ASSERT_TRUE(min_val.hasValue());
-    EXPECT_EQ(-5, min_val.getValue());
+    ASSERT_TRUE(min_val.has_value());
+    EXPECT_EQ(-5, min_val.value());
 }
 
 TEST(SymAbsCongruenceTest, SingletonKeepsZeroModulus) {
@@ -93,7 +93,7 @@ TEST(SymAbsCongruenceTest, SingletonKeepsZeroModulus) {
     expr phi = (x == ctx.bv_val(7, 8));
 
     auto cong = SymAbs::alpha_a_cong(phi, x);
-    ASSERT_TRUE(cong.hasValue());
+    ASSERT_TRUE(cong.has_value());
     EXPECT_EQ(0u, cong->modulus);
     EXPECT_EQ(7, cong->remainder);
 }

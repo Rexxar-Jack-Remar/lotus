@@ -299,7 +299,7 @@ IDELinearConstantAnalysis::normal_edge_function(const llvm::Instruction *stmt,
       }
 
       // One operand is the source fact, other is constant
-      llvm::Optional<int64_t> const_val;
+      std::optional<int64_t> const_val;
 
       if (bin_op->getOperand(0) == src_fact) {
         const_val = as_const(bin_op->getOperand(1));
@@ -307,8 +307,8 @@ IDELinearConstantAnalysis::normal_edge_function(const llvm::Instruction *stmt,
         const_val = as_const(bin_op->getOperand(0));
       }
 
-      if (const_val.hasValue()) {
-        int64_t c = const_val.getValue();
+      if (const_val.has_value()) {
+        int64_t c = const_val.value();
         switch (opcode) {
         case llvm::Instruction::Add:
           return create_linear(1, c);
@@ -493,15 +493,15 @@ IDELinearConstantAnalysis::get_defined_value(const llvm::Instruction *inst) {
   return nullptr;
 }
 
-llvm::Optional<int64_t>
+std::optional<int64_t>
 IDELinearConstantAnalysis::as_const(const llvm::Value *val) {
   if (const auto *const_int = llvm::dyn_cast<llvm::ConstantInt>(val)) {
     return const_int->getSExtValue();
   }
-  return llvm::None;
+  return std::nullopt;
 }
 
-llvm::Optional<int64_t> IDELinearConstantAnalysis::apply_binop(unsigned opcode,
+std::optional<int64_t> IDELinearConstantAnalysis::apply_binop(unsigned opcode,
                                                                int64_t lhs,
                                                                int64_t rhs) {
   switch (opcode) {
@@ -538,7 +538,7 @@ llvm::Optional<int64_t> IDELinearConstantAnalysis::apply_binop(unsigned opcode,
   default:
     break;
   }
-  return llvm::None;
+  return std::nullopt;
 }
 
 bool IDELinearConstantAnalysis::is_linear_operation(
@@ -552,8 +552,8 @@ bool IDELinearConstantAnalysis::is_linear_operation(
         opcode == llvm::Instruction::LShr) {
 
       // Check if at least one operand is constant
-      if (as_const(bin_op->getOperand(0)).hasValue() ||
-          as_const(bin_op->getOperand(1)).hasValue()) {
+      if (as_const(bin_op->getOperand(0)).has_value() ||
+          as_const(bin_op->getOperand(1)).has_value()) {
         return true;
       }
     }
@@ -561,29 +561,29 @@ bool IDELinearConstantAnalysis::is_linear_operation(
   return false;
 }
 
-llvm::Optional<int64_t>
+std::optional<int64_t>
 IDELinearConstantAnalysis::compute_linear_transformation(
     const llvm::Instruction *inst, int64_t input_val) {
 
   if (const auto *bin_op = llvm::dyn_cast<llvm::BinaryOperator>(inst)) {
     unsigned opcode = bin_op->getOpcode();
 
-    llvm::Optional<int64_t> const_op;
+    std::optional<int64_t> const_op;
     bool input_is_lhs = false;
 
-    if (as_const(bin_op->getOperand(0)).hasValue()) {
+    if (as_const(bin_op->getOperand(0)).has_value()) {
       const_op = as_const(bin_op->getOperand(0));
       input_is_lhs = false;
-    } else if (as_const(bin_op->getOperand(1)).hasValue()) {
+    } else if (as_const(bin_op->getOperand(1)).has_value()) {
       const_op = as_const(bin_op->getOperand(1));
       input_is_lhs = true;
     }
 
-    if (!const_op.hasValue()) {
-      return llvm::None;
+    if (!const_op.has_value()) {
+      return std::nullopt;
     }
 
-    int64_t c = const_op.getValue();
+    int64_t c = const_op.value();
 
     switch (opcode) {
     case llvm::Instruction::Add:
@@ -612,7 +612,7 @@ IDELinearConstantAnalysis::compute_linear_transformation(
     }
   }
 
-  return llvm::None;
+  return std::nullopt;
 }
 
 // ============================================================================

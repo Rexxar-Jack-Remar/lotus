@@ -11,7 +11,7 @@
 #include <string>
 #include <vector>
 
-#include <llvm/ADT/Optional.h>
+#include <optional>
 #include <llvm/IR/Value.h>
 
 // Forward declarations
@@ -96,9 +96,9 @@ public:
       return new_path;
     }
 
-    llvm::Optional<HeapPath> force() const {
+    std::optional<HeapPath> force() const {
       if (kind_ == Kind::Unsupported || !pvar_) {
-        return llvm::None;
+        return std::nullopt;
       }
       std::vector<HeapPath::Element> path_elements;
       path_elements.push_back(HeapPath::Element(HeapPath::PathElement::Pvar));
@@ -150,7 +150,7 @@ private:
   std::vector<CalleeIndexToVisit> array_indices_to_visit_;
 
   // First error during materialization
-  llvm::Optional<AbstractValue> first_error_;
+  std::optional<AbstractValue> first_error_;
 
   // Alias tracking: if alias detected between addr_callee and addr_callee' with
   // paths, aliases[addr_callee] contains addr_callee' Simplified: map from
@@ -188,7 +188,7 @@ public:
     return array_indices_to_visit_;
   }
 
-  llvm::Optional<AbstractValue> getFirstError() const { return first_error_; }
+  std::optional<AbstractValue> getFirstError() const { return first_error_; }
   void setFirstError(AbstractValue addr) {
     if (!first_error_) {
       first_error_ = addr;
@@ -221,23 +221,23 @@ public:
   /**
    * Find callee address for caller address
    */
-  llvm::Optional<std::pair<AbstractValue, LazyHeapPath>>
+  std::optional<std::pair<AbstractValue, LazyHeapPath>>
   toCalleeAddr(AbstractValue addr_caller) const {
     auto it = rev_subst_.find(addr_caller);
     if (it != rev_subst_.end()) {
       return it->second;
     }
-    return llvm::None;
+    return std::nullopt;
   }
 
   /**
    * Find caller value for callee address (with normalization)
    */
-  llvm::Optional<std::pair<AbstractValue, ValueHistory>>
+  std::optional<std::pair<AbstractValue, ValueHistory>>
   toCallerValue(AbstractValue addr_callee) const {
     auto caller_opt = subst_.substitute(addr_callee);
     if (!caller_opt) {
-      return llvm::None;
+      return std::nullopt;
     }
     // Normalize caller value
     AbstractValue caller_canon = astate_->getCanonical(*caller_opt);

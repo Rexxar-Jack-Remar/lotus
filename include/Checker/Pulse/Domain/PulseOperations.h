@@ -9,7 +9,7 @@
 #include <atomic>
 #include <functional>
 
-#include <llvm/ADT/Optional.h>
+#include <optional>
 #include <llvm/IR/Instruction.h>
 #include <llvm/IR/Value.h>
 
@@ -53,14 +53,14 @@ public:
    * pred: predecessor block when resolving PHI incoming value (PHI handled in
    * checker).
    */
-  llvm::Optional<Address> eval(AbductiveDomain &astate, const llvm::Value *exp,
+  std::optional<Address> eval(AbductiveDomain &astate, const llvm::Value *exp,
                                const llvm::Instruction *loc,
                                const llvm::BasicBlock *pred = nullptr);
 
   /**
    * Evaluate a dereference: *ptr
    */
-  std::pair<OperationResult, llvm::Optional<Address>>
+  std::pair<OperationResult, std::optional<Address>>
   evalDeref(AbductiveDomain &astate, Address ptr, const llvm::Instruction *loc);
 
   /**
@@ -92,7 +92,7 @@ public:
   /**
    * Read from memory: value = *ptr
    */
-  std::pair<OperationResult, llvm::Optional<Address>>
+  std::pair<OperationResult, std::optional<Address>>
   readDeref(AbductiveDomain &astate, Address ptr, const llvm::Instruction *loc);
 
   /**
@@ -116,7 +116,7 @@ public:
    * Shallow copy: create a new cell with the same edges as the original
    * Returns the address of the new cell
    */
-  std::pair<OperationResult, llvm::Optional<Address>>
+  std::pair<OperationResult, std::optional<Address>>
   shallowCopy(AbductiveDomain &astate, Address source,
               const llvm::Instruction *loc);
 
@@ -124,7 +124,7 @@ public:
    * Deep copy: create a new cell with copied edges from the original
    * depth_max: maximum depth to copy (0 = unlimited)
    */
-  std::pair<OperationResult, llvm::Optional<Address>>
+  std::pair<OperationResult, std::optional<Address>>
   deepCopy(AbductiveDomain &astate, Address source,
            const llvm::Instruction *loc, unsigned depth_max = 0);
 

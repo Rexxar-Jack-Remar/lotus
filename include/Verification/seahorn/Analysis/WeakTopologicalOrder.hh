@@ -13,12 +13,12 @@
 #include "boost/iterator/indirect_iterator.hpp"
 #include "boost/iterator/transform_iterator.hpp"
 #include "boost/make_shared.hpp"
-#include "boost/optional.hpp"
 #include "boost/range/iterator_range.hpp"
 #include "boost/unordered_map.hpp"
 #include <boost/graph/graph_traits.hpp>
 #include <boost/graph/properties.hpp>
 #include <boost/shared_ptr.hpp>
+#include <optional>
 
 
 /*
@@ -164,11 +164,11 @@ private:
   // A helper class to extend an unsigned number with +oo;
   class Number {
 
-    boost::optional<unsigned> m_n;
+    std::optional<unsigned> m_n;
 
   public:
     // +oo
-    Number() : m_n(boost::none) {}
+    Number() : m_n(std::nullopt) {}
 
     static Number plus_infinite() { return Number(); }
 
@@ -181,7 +181,7 @@ private:
       return *this;
     }
 
-    bool is_plus_infinite() const { return m_n == boost::none; }
+    bool is_plus_infinite() const { return m_n == std::nullopt; }
 
     bool is_finite() const { return !is_plus_infinite(); }
 

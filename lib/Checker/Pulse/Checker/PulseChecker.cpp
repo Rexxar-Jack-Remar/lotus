@@ -502,7 +502,7 @@ void PulseChecker::analyzeFunction(const llvm::Function *F) {
         if (st.isStopped())
           continue;
         for (unsigned i = 0; i < 2; i++) {
-          llvm::Optional<ExecutionDomain> fork_opt =
+          std::optional<ExecutionDomain> fork_opt =
               applyBranchCondition(st.clone(), BI, i, pred_bb);
           if (!fork_opt)
             continue;
@@ -552,12 +552,12 @@ ExecutionDomain PulseChecker::initializeFunction(const llvm::Function *F) {
   return exec_state;
 }
 
-std::vector<std::pair<ExecutionDomain, llvm::Optional<AbstractValue>>>
+std::vector<std::pair<ExecutionDomain, std::optional<AbstractValue>>>
 PulseChecker::runCallee(const llvm::Function *callee,
                         const ExecutionDomain &caller_state,
                         const llvm::CallInst *CI, const llvm::BasicBlock *pred,
                         unsigned call_depth) {
-  std::vector<std::pair<ExecutionDomain, llvm::Optional<AbstractValue>>> result;
+  std::vector<std::pair<ExecutionDomain, std::optional<AbstractValue>>> result;
   if (call_depth >= kMaxCallDepth)
     return result;
 
@@ -580,7 +580,7 @@ PulseChecker::runCallee(const llvm::Function *callee,
         astate->getPostStack().add(CI, ret_addr);
       }
     }
-    result.push_back({std::move(state), llvm::Optional<AbstractValue>()});
+    result.push_back({std::move(state), std::optional<AbstractValue>()});
     return result;
   }
 

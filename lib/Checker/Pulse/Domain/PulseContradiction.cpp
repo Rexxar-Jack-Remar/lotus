@@ -16,7 +16,7 @@ namespace pulse {
 // witnesses (false negatives).
 //===----------------------------------------------------------------------===//
 
-llvm::Optional<Contradiction> checkAliasingContradiction(
+std::optional<Contradiction> checkAliasingContradiction(
     const std::map<AbstractValue, AbstractValue> &formal_to_actual_map,
     const PulseFormula &callee_pre_formula) {
 
@@ -60,10 +60,10 @@ llvm::Optional<Contradiction> checkAliasingContradiction(
     }
   }
 
-  return llvm::None;
+  return std::nullopt;
 }
 
-llvm::Optional<Contradiction>
+std::optional<Contradiction>
 checkPathConditionContradiction(const PulseFormula &caller_formula,
                                 const PulseFormula &callee_pre_formula) {
 
@@ -80,10 +80,10 @@ checkPathConditionContradiction(const PulseFormula &caller_formula,
   // This is a simplified check - full implementation would use SMT solver
   // For now, we rely on isConsistent() which checks basic contradictions
 
-  return llvm::None;
+  return std::nullopt;
 }
 
-llvm::Optional<Contradiction> checkContradiction(
+std::optional<Contradiction> checkContradiction(
     const PulseFormula &caller_formula, const PulseFormula &callee_pre_formula,
     const std::map<AbstractValue, AbstractValue> &formal_to_actual_map,
     const std::map<AbstractValue, std::set<AbstractValue>>
@@ -104,11 +104,11 @@ llvm::Optional<Contradiction> checkContradiction(
     return path_contradiction;
   }
 
-  return llvm::None;
+  return std::nullopt;
 }
 
 // Old version kept for backward compatibility - delegates to new version
-llvm::Optional<Contradiction> checkAliasingWithAllAliases(
+std::optional<Contradiction> checkAliasingWithAllAliases(
     const std::map<AbstractValue, AbstractValue> &formal_to_actual_map,
     const std::map<AbstractValue, std::set<AbstractValue>>
         &actual_to_formals_map,
@@ -122,20 +122,20 @@ llvm::Optional<Contradiction> checkAliasingWithAllAliases(
  * Returns map of heap paths to abstract values that need dynamic type
  * specialization
  */
-llvm::Optional<Contradiction> checkDynamicTypeNeeded(
+std::optional<Contradiction> checkDynamicTypeNeeded(
     const std::map<HeapPath, AbstractValue> &heap_paths_to_values) {
 
   if (!heap_paths_to_values.empty()) {
     return Contradiction::makeDynamicTypeNeeded(heap_paths_to_values);
   }
 
-  return llvm::None;
+  return std::nullopt;
 }
 
 /**
  * Check for CapturedFormalActualLength contradiction
  */
-llvm::Optional<Contradiction> checkCapturedFormalActualLength(
+std::optional<Contradiction> checkCapturedFormalActualLength(
     unsigned captured_formal_count, unsigned captured_actual_count,
     const std::vector<AbstractValue> &captured_formals,
     const std::vector<AbstractValue> &captured_actuals) {
@@ -146,16 +146,16 @@ llvm::Optional<Contradiction> checkCapturedFormalActualLength(
         captured_actuals);
   }
 
-  return llvm::None;
+  return std::nullopt;
 }
 
 /**
  * Merge contradictions: when applying a summary with multiple disjuncts,
  * merge all possible contradictions into a single one.
  */
-llvm::Optional<Contradiction>
-mergeContradictions(const llvm::Optional<Contradiction> &c1,
-                    const llvm::Optional<Contradiction> &c2) {
+std::optional<Contradiction>
+mergeContradictions(const std::optional<Contradiction> &c1,
+                    const std::optional<Contradiction> &c2) {
 
   if (!c1)
     return c2;
@@ -220,18 +220,18 @@ mergeContradictions(const llvm::Optional<Contradiction> &c1,
 /**
  * Check if contradiction is DynamicTypeNeeded and extract the map
  */
-llvm::Optional<std::map<HeapPath, AbstractValue>>
+std::optional<std::map<HeapPath, AbstractValue>>
 isDynamicTypeNeededContradiction(const Contradiction &c) {
   if (c.kind == ContradictionKind::DynamicTypeNeeded) {
     return c.dynamic_type_paths;
   }
-  return llvm::None;
+  return std::nullopt;
 }
 
 /**
  * Enhanced contradiction checking with call_state support
  */
-llvm::Optional<Contradiction> checkContradictionWithCallState(
+std::optional<Contradiction> checkContradictionWithCallState(
     const PulseFormula &caller_formula, const PulseFormula &callee_pre_formula,
     const std::map<AbstractValue, AbstractValue> &formal_to_actual_map,
     const std::map<AbstractValue, std::set<AbstractValue>>
@@ -254,7 +254,7 @@ llvm::Optional<Contradiction> checkContradictionWithCallState(
 /**
  * Check for AliasingWithAllAliases with heap path support
  */
-llvm::Optional<Contradiction> checkAliasingWithAllAliases(
+std::optional<Contradiction> checkAliasingWithAllAliases(
     const std::map<AbstractValue, AbstractValue> &formal_to_actual_map,
     const std::map<AbstractValue, std::set<AbstractValue>>
         &actual_to_formals_map,
@@ -312,7 +312,7 @@ llvm::Optional<Contradiction> checkAliasingWithAllAliases(
     return Contradiction::makeAliasingWithAllAliases(alias_classes);
   }
 
-  return llvm::None;
+  return std::nullopt;
 }
 
 } // namespace pulse

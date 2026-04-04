@@ -88,8 +88,8 @@ static ValueHistory joinHistories(const ValueHistory &hist1,
   return ValueHistory();
 }
 
-static ValueHistory joinHistoriesOpts(llvm::Optional<ValueHistory> hist1_opt,
-                                      llvm::Optional<ValueHistory> hist2_opt) {
+static ValueHistory joinHistoriesOpts(std::optional<ValueHistory> hist1_opt,
+                                      std::optional<ValueHistory> hist2_opt) {
   if (hist1_opt && hist2_opt) {
     return joinHistories(*hist1_opt, *hist2_opt);
   }
@@ -107,12 +107,12 @@ PulseJoin::joinValuesHists(JoinState &state, const AbstractValue &lhs_val,
                            const AbstractValue &rhs_val,
                            const ValueHistory &rhs_hist) {
   using Key =
-      std::pair<llvm::Optional<AbstractValue>, llvm::Optional<AbstractValue>>;
+      std::pair<std::optional<AbstractValue>, std::optional<AbstractValue>>;
 
   if (lhs_val == rhs_val) {
     // Same value: x↦v ⊔ x↦v = x↦v
-    Key key{llvm::Optional<AbstractValue>(lhs_val),
-            llvm::Optional<AbstractValue>(rhs_val)};
+    Key key{std::optional<AbstractValue>(lhs_val),
+            std::optional<AbstractValue>(rhs_val)};
     auto &rev_subst = state.rev_subst;
     rev_subst[lhs_val] = key;
     ValueHistory hist_join = joinHistories(lhs_hist, rhs_hist);
@@ -120,8 +120,8 @@ PulseJoin::joinValuesHists(JoinState &state, const AbstractValue &lhs_val,
   }
 
   // Different values: x↦v ⊔ x↦v' = x↦v''
-  Key key{llvm::Optional<AbstractValue>(lhs_val),
-          llvm::Optional<AbstractValue>(rhs_val)};
+  Key key{std::optional<AbstractValue>(lhs_val),
+          std::optional<AbstractValue>(rhs_val)};
   auto it = state.subst.find(key);
   if (it != state.subst.end()) {
     // Already joined this pair
@@ -141,11 +141,11 @@ PulseJoin::joinValuesHists(JoinState &state, const AbstractValue &lhs_val,
 std::pair<PulseJoin::JoinState &, std::pair<AbstractValue, ValueHistory>>
 PulseJoin::joinValuesHistsOpts(
     JoinState &state, const AbductiveDomain &lhs_astate,
-    llvm::Optional<std::pair<AbstractValue, ValueHistory>> lhs_opt,
+    std::optional<std::pair<AbstractValue, ValueHistory>> lhs_opt,
     const AbductiveDomain &rhs_astate,
-    llvm::Optional<std::pair<AbstractValue, ValueHistory>> rhs_opt) {
+    std::optional<std::pair<AbstractValue, ValueHistory>> rhs_opt) {
   using Key =
-      std::pair<llvm::Optional<AbstractValue>, llvm::Optional<AbstractValue>>;
+      std::pair<std::optional<AbstractValue>, std::optional<AbstractValue>>;
 
   if (!lhs_opt && !rhs_opt) {
     // Both empty - shouldn't happen
@@ -158,24 +158,24 @@ PulseJoin::joinValuesHistsOpts(
     // One-sided: x↦v ⊔ emp = x↦v' (v' fresh)
     AbstractValue v_join = state.factory->createFresh(nullptr);
     ValueHistory hist_join = joinHistoriesOpts(
-        lhs_opt ? llvm::Optional<ValueHistory>(lhs_opt->second) : llvm::None,
-        rhs_opt ? llvm::Optional<ValueHistory>(rhs_opt->second) : llvm::None);
+        lhs_opt ? std::optional<ValueHistory>(lhs_opt->second) : std::nullopt,
+        rhs_opt ? std::optional<ValueHistory>(rhs_opt->second) : std::nullopt);
     return {state, {v_join, hist_join}};
   }
 
   // Both sides have values
   if (lhs_opt->first == rhs_opt->first) {
     // Same value: x↦v ⊔ x↦v = x↦v
-    Key key{llvm::Optional<AbstractValue>(lhs_opt->first),
-            llvm::Optional<AbstractValue>(rhs_opt->first)};
+    Key key{std::optional<AbstractValue>(lhs_opt->first),
+            std::optional<AbstractValue>(rhs_opt->first)};
     state.rev_subst[lhs_opt->first] = key;
     ValueHistory hist_join = joinHistories(lhs_opt->second, rhs_opt->second);
     return {state, {lhs_opt->first, hist_join}};
   }
 
   // Different values: use cached join
-  Key key{llvm::Optional<AbstractValue>(lhs_opt->first),
-          llvm::Optional<AbstractValue>(rhs_opt->first)};
+  Key key{std::optional<AbstractValue>(lhs_opt->first),
+          std::optional<AbstractValue>(rhs_opt->first)};
   auto it = state.subst.find(key);
   if (it != state.subst.end()) {
     ValueHistory hist_join = joinHistories(lhs_opt->second, rhs_opt->second);
@@ -192,19 +192,19 @@ PulseJoin::joinValuesHistsOpts(
 
 std::pair<PulseJoin::JoinState &, Heap> PulseJoin::joinHeaps(
     JoinState &state, Heap &heap_join, const AbductiveDomain &lhs_astate,
-    llvm::Optional<std::pair<AbstractValue, ValueHistory>> lhs_opt,
+    std::optional<std::pair<AbstractValue, ValueHistory>> lhs_opt,
     const AbductiveDomain &rhs_astate,
-    llvm::Optional<std::pair<AbstractValue, ValueHistory>> rhs_opt) {
+    std::optional<std::pair<AbstractValue, ValueHistory>> rhs_opt) {
   using Key =
-      std::pair<llvm::Optional<AbstractValue>, llvm::Optional<AbstractValue>>;
+      std::pair<std::optional<AbstractValue>, std::optional<AbstractValue>>;
 
   if (!lhs_opt && !rhs_opt) {
     return {state, heap_join};
   }
 
   Key visited_key{
-      lhs_opt ? llvm::Optional<AbstractValue>(lhs_opt->first) : llvm::None,
-      rhs_opt ? llvm::Optional<AbstractValue>(rhs_opt->first) : llvm::None};
+      lhs_opt ? std::optional<AbstractValue>(lhs_opt->first) : std::nullopt,
+      rhs_opt ? std::optional<AbstractValue>(rhs_opt->first) : std::nullopt};
 
   if (state.visited.count(visited_key) > 0) {
     return {state, heap_join}; // Already visited
@@ -240,8 +240,8 @@ std::pair<PulseJoin::JoinState &, Heap> PulseJoin::joinHeaps(
 
   // Join edges
   for (const Access &access : all_accesses) {
-    llvm::Optional<std::pair<AbstractValue, ValueHistory>> lhs_target_opt;
-    llvm::Optional<std::pair<AbstractValue, ValueHistory>> rhs_target_opt;
+    std::optional<std::pair<AbstractValue, ValueHistory>> lhs_target_opt;
+    std::optional<std::pair<AbstractValue, ValueHistory>> rhs_target_opt;
 
     if (lhs_opt) {
       const auto *lhs_target =
@@ -303,8 +303,8 @@ PulseJoin::joinStacks(JoinState &state, const AbductiveDomain &lhs_astate,
     const Address *lhs_addr = lhs_astate.getPreStack().find(var);
     const Address *rhs_addr = rhs_astate.getPreStack().find(var);
 
-    llvm::Optional<std::pair<AbstractValue, ValueHistory>> lhs_opt;
-    llvm::Optional<std::pair<AbstractValue, ValueHistory>> rhs_opt;
+    std::optional<std::pair<AbstractValue, ValueHistory>> lhs_opt;
+    std::optional<std::pair<AbstractValue, ValueHistory>> rhs_opt;
 
     if (lhs_addr) {
       lhs_opt = {{lhs_addr->addr, lhs_addr->history}};
@@ -339,7 +339,7 @@ PulseJoin::joinStacks(JoinState &state, const AbductiveDomain &lhs_astate,
 // Attribute Joining
 //===----------------------------------------------------------------------===//
 
-llvm::Optional<Attribute> PulseJoin::joinOneSidedAttribute(Attribute attr) {
+std::optional<Attribute> PulseJoin::joinOneSidedAttribute(Attribute attr) {
   // One-sided attributes: keep if they're "weak" (true in some branches),
   // drop if they're "strong" (must be true in all branches)
   switch (attr) {
@@ -350,13 +350,13 @@ llvm::Optional<Attribute> PulseJoin::joinOneSidedAttribute(Attribute attr) {
   case Attribute::Stack:
   case Attribute::Global:
     // Base-kind facts must be stable; drop on one-sided to avoid guessing.
-    return llvm::None;
+    return std::nullopt;
 
   case Attribute::Invalid:
   case Attribute::Null:
   case Attribute::Uninitialized:
     // Drop: these are "strong" - if only in one branch, we can't assume them
-    return llvm::None;
+    return std::nullopt;
 
   case Attribute::Tainted:
     // Keep: if tainted in one branch, conservatively assume tainted
@@ -367,14 +367,14 @@ llvm::Optional<Attribute> PulseJoin::joinOneSidedAttribute(Attribute attr) {
   case Attribute::Lock:
   case Attribute::AsyncResource:
     // Drop: resource attributes are too strong for one-sided join
-    return llvm::None;
+    return std::nullopt;
 
   default:
-    return llvm::None;
+    return std::nullopt;
   }
 }
 
-llvm::Optional<Attribute>
+std::optional<Attribute>
 PulseJoin::joinTwoSidedAttribute(JoinState &state, Attribute attr1,
                                  Attribute attr2, AbstractValue lhs_val,
                                  AbstractValue rhs_val) {
@@ -389,40 +389,40 @@ PulseJoin::joinTwoSidedAttribute(JoinState &state, Attribute attr1,
       return Attribute::Allocated; // Both allocated
     }
     // Allocated vs Invalid/Null - incompatible
-    return llvm::None;
+    return std::nullopt;
 
   case Attribute::Stack:
     if (attr2 == Attribute::Stack) {
       return Attribute::Stack;
     }
-    return llvm::None;
+    return std::nullopt;
 
   case Attribute::Global:
     if (attr2 == Attribute::Global) {
       return Attribute::Global;
     }
-    return llvm::None;
+    return std::nullopt;
 
   case Attribute::Invalid:
     if (attr2 == Attribute::Invalid) {
       return Attribute::Invalid; // Both invalid
     }
     // Invalid vs Allocated - incompatible
-    return llvm::None;
+    return std::nullopt;
 
   case Attribute::Null:
     if (attr2 == Attribute::Null) {
       return Attribute::Null; // Both null
     }
     // Null vs NonNull - incompatible
-    return llvm::None;
+    return std::nullopt;
 
   case Attribute::Uninitialized:
     if (attr2 == Attribute::Uninitialized) {
       return Attribute::Uninitialized; // Both uninitialized
     }
     // Uninitialized vs Initialized - incompatible
-    return llvm::None;
+    return std::nullopt;
 
   case Attribute::Tainted:
     if (attr2 == Attribute::Tainted) {
@@ -439,11 +439,11 @@ PulseJoin::joinTwoSidedAttribute(JoinState &state, Attribute attr1,
       return attr1;
     }
     // Different resources - incompatible
-    return llvm::None;
+    return std::nullopt;
 
   default:
     // Unknown attribute type - incompatible
-    return llvm::None;
+    return std::nullopt;
   }
 }
 
@@ -451,8 +451,8 @@ AttributeSet
 PulseJoin::joinAttributes(JoinState &state, const AbductiveDomain &lhs_astate,
                           const AbductiveDomain &rhs_astate, bool use_pre_attrs,
                           AbstractValue joined_addr,
-                          llvm::Optional<AbstractValue> lhs_addr_opt,
-                          llvm::Optional<AbstractValue> rhs_addr_opt) {
+                          std::optional<AbstractValue> lhs_addr_opt,
+                          std::optional<AbstractValue> rhs_addr_opt) {
   AttributeSet result;
 
   AttributeSet lhs_attrs;
@@ -481,7 +481,7 @@ PulseJoin::joinAttributes(JoinState &state, const AbductiveDomain &lhs_astate,
     bool in_lhs = lhs_attrs.count(attr) > 0;
     bool in_rhs = rhs_attrs.count(attr) > 0;
 
-    llvm::Optional<Attribute> joined_attr;
+    std::optional<Attribute> joined_attr;
     if (in_lhs && in_rhs) {
       // Two-sided
       if (lhs_addr_opt && rhs_addr_opt) {
@@ -530,7 +530,7 @@ PulseFormula PulseJoin::joinFormulas(const AbductiveDomain &lhs,
 // Main Join Operations
 //===----------------------------------------------------------------------===//
 
-llvm::Optional<AbductiveDomain>
+std::optional<AbductiveDomain>
 PulseJoin::joinAbductive(const AbductiveDomain &lhs,
                          const AbductiveDomain &rhs) {
   PulseLogger::trace("Joining abductive domains");
@@ -541,7 +541,7 @@ PulseJoin::joinAbductive(const AbductiveDomain &lhs,
   if (!preliminary_formula.isConsistent() || preliminary_formula.isUnsat()) {
     PulseLogger::debug("Join failed: formula contradiction");
     PulseLogger::incrementCounter("joins.failed");
-    return llvm::None; // Contradiction
+    return std::nullopt; // Contradiction
   }
 
   // Create join state with factory
@@ -576,8 +576,8 @@ PulseJoin::joinAbductive(const AbductiveDomain &lhs,
     const Address *lhs_addr = lhs.getPostStack().find(var);
     const Address *rhs_addr = rhs.getPostStack().find(var);
 
-    llvm::Optional<std::pair<AbstractValue, ValueHistory>> lhs_opt;
-    llvm::Optional<std::pair<AbstractValue, ValueHistory>> rhs_opt;
+    std::optional<std::pair<AbstractValue, ValueHistory>> lhs_opt;
+    std::optional<std::pair<AbstractValue, ValueHistory>> rhs_opt;
 
     if (lhs_addr) {
       lhs_opt = {{lhs_addr->addr, lhs_addr->history}};
@@ -611,8 +611,8 @@ PulseJoin::joinAbductive(const AbductiveDomain &lhs,
   for (const auto &kv : join_state.rev_subst) {
     AbstractValue v_join = kv.first;
     const auto &pair_opt = kv.second;
-    llvm::Optional<AbstractValue> lhs_addr_opt = pair_opt.first;
-    llvm::Optional<AbstractValue> rhs_addr_opt = pair_opt.second;
+    std::optional<AbstractValue> lhs_addr_opt = pair_opt.first;
+    std::optional<AbstractValue> rhs_addr_opt = pair_opt.second;
 
     // Join post attributes
     AttributeSet joined_post_attrs =
@@ -719,17 +719,17 @@ PulseJoin::joinAbductive(const AbductiveDomain &lhs,
   return joined;
 }
 
-llvm::Optional<std::pair<AbductiveDomain, PathContext>>
+std::optional<std::pair<AbductiveDomain, PathContext>>
 PulseJoin::join(const AbductiveDomain &lhs, const PathContext &path_lhs,
                 const AbductiveDomain &rhs, const PathContext &path_rhs) {
   auto joined_domain_opt = joinAbductive(lhs, rhs);
   if (!joined_domain_opt) {
-    return llvm::None;
+    return std::nullopt;
   }
 
   PathContext joined_path = PathContext::join(path_lhs, path_rhs);
   // Use std::make_pair to avoid copy constructor issues
-  return llvm::Optional<std::pair<AbductiveDomain, PathContext>>(
+  return std::optional<std::pair<AbductiveDomain, PathContext>>(
       std::make_pair(std::move(*joined_domain_opt), joined_path));
 }
 

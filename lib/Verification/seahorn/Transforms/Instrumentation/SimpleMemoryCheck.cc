@@ -128,7 +128,7 @@ struct CheckContext {
       if (!DsaGraph)
         return;
       auto optAS = DsaGraph->getAllocSite(v);
-      assert(optAS.hasValue());
+      assert(optAS.has_value());
       seadsa::DsaAllocSite &AS = **optAS;
       if (AS.hasCallPaths())
         AS.printCallPaths(OS);
@@ -293,7 +293,7 @@ public:
   virtual llvm::StringRef getPassName() const override { return "SimpleMemoryCheck"; }
 
   /// Returns size of a known allocation
-  llvm::Optional<size_t> getAllocSize(Value *Ptr);
+  std::optional<size_t> getAllocSize(Value *Ptr);
 
 private:
   LLVMContext *m_Ctx;
@@ -366,10 +366,10 @@ bool SimpleMemoryCheck::isKnownAlloc(Value *Ptr) {
 
 /// For a known allocation, returns its size if known
 /// \sa isKnownAlloc
-llvm::Optional<size_t> SimpleMemoryCheck::getAllocSize(Value *Ptr) {
+std::optional<size_t> SimpleMemoryCheck::getAllocSize(Value *Ptr) {
   assert(Ptr);
   if (!isKnownAlloc(Ptr))
-    return None;
+    return std::nullopt;
 
   llvm::ObjectSizeOpts Opts;
   Opts.RoundToAlign = true;
@@ -377,7 +377,7 @@ llvm::Optional<size_t> SimpleMemoryCheck::getAllocSize(Value *Ptr) {
   ObjectSizeOffsetVisitor OSOV(*m_DL, m_TLI, *m_Ctx, Opts);
   auto OffsetAlign = OSOV.compute(Ptr);
   if (!OSOV.knownSize(OffsetAlign))
-    return llvm::None;
+    return std::nullopt;
 
   const int64_t I = OffsetAlign.first.getSExtValue();
   assert(I >= 0);
@@ -595,7 +595,7 @@ CheckContext SimpleMemoryCheck::getUnsafeCandidates(Instruction *Inst,
   if (m_SDSA && !OriginCell)
     return Check;
 
-  if (Optional<size_t> AllocSize = getAllocSize(Origin.Ptr)) {
+  if (std::optional<size_t> AllocSize = getAllocSize(Origin.Ptr)) {
     if (int64_t(Origin.Offset) + Sz > int64_t(*AllocSize)) {
       errs() << "Unsafe access found!\n";
       errs() << "  Allocated: " << (*AllocSize) << ", access size " << Sz
@@ -667,7 +667,7 @@ bool SimpleMemoryCheck::isInterestingAllocSite(Value *Ptr, int64_t LoadEnd,
   assert(Alloc);
   assert(LoadEnd > 0);
 
-  Optional<size_t> AllocSize = getAllocSize(Alloc);
+  std::optional<size_t> AllocSize = getAllocSize(Alloc);
   return AllocSize && size_t(LoadEnd) > *AllocSize;
 }
 
@@ -815,7 +815,7 @@ void SimpleMemoryCheck::emitGlobalInstrumentation(CheckContext &Candidate,
     auto *GlobalIsBegin = IRB.CreateICmpEQ(I8GV, NDPtrBegin, "global.is.begin");
     createAssume(GlobalIsBegin, Main, IRB);
 
-    Optional<size_t> AllocSize = getAllocSize(TrackedAlloc);
+    std::optional<size_t> AllocSize = getAllocSize(TrackedAlloc);
     assert(AllocSize);
 
     auto *GlobalEnd = IRB.CreateGEP(IRB.getInt8Ty(),
@@ -935,7 +935,7 @@ void SimpleMemoryCheck::emitAllocSiteInstrumentation(CheckContext &Candidate,
         IRB.CreateICmpEQ(AllocI8, TrackedBegin, "alloc.is.begin");
     createAssume(AllocIsBegin, CSFn, IRB);
 
-    Optional<size_t> AllocSize = getAllocSize(AI);
+    std::optional<size_t> AllocSize = getAllocSize(AI);
     assert(AllocSize);
 
     auto *End = IRB.CreateGEP(IRB.getInt8Ty(),
@@ -1168,7 +1168,7 @@ struct SizeStats {
     SizeStats Stats;
 
     for (auto *V : C) {
-      Optional<size_t> Size = SMC.getAllocSize(V);
+      std::optional<size_t> Size = SMC.getAllocSize(V);
       assert(Size);
 
       ++Stats.N;

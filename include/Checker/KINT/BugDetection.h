@@ -2,6 +2,7 @@
 
 #include <functional>
 #include <map>
+#include <optional>
 #include <set>
 #include <vector>
 
@@ -69,7 +70,7 @@ public:
   // SMT-based bug detection
   void
   binary_check(BinaryOperator *op, z3::solver &solver,
-               const DenseMap<const Value *, llvm::Optional<z3::expr>> &v2sym,
+               const DenseMap<const Value *, std::optional<z3::expr>> &v2sym,
                std::set<Instruction *> &overflow_insts,
                std::set<Instruction *> &bad_shift_insts,
                std::set<Instruction *> &div_zero_insts,
@@ -82,15 +83,15 @@ public:
   // SMT expression generation
   z3::expr binary_op_propagate(
       BinaryOperator *op,
-      const DenseMap<const Value *, llvm::Optional<z3::expr>> &v2sym,
+      const DenseMap<const Value *, std::optional<z3::expr>> &v2sym,
       z3::solver &solver);
   z3::expr cast_op_propagate(
       CastInst *op,
-      const DenseMap<const Value *, llvm::Optional<z3::expr>> &v2sym,
+      const DenseMap<const Value *, std::optional<z3::expr>> &v2sym,
       z3::solver &solver);
   z3::expr
   v2sym(const Value *v,
-        const DenseMap<const Value *, llvm::Optional<z3::expr>> &v2sym_map,
+        const DenseMap<const Value *, std::optional<z3::expr>> &v2sym_map,
         z3::solver &solver);
 
   // Range constraint generation

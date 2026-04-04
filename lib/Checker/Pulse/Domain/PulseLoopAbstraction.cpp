@@ -140,13 +140,13 @@ std::set<const llvm::BasicBlock *> LoopAbstraction::getLoopHeaders() const {
   return headers;
 }
 
-llvm::Optional<ExecutionDomain>
+std::optional<ExecutionDomain>
 LoopAbstraction::inferInvariant(const llvm::BasicBlock *BB,
                                 const ExecutionDomain &entry_state,
                                 const ExecutionDomain &current_state) {
   auto it = loop_headers_.find(BB);
   if (it == loop_headers_.end()) {
-    return llvm::None;
+    return std::nullopt;
   }
 
   // Production-ready invariant inference:
@@ -155,7 +155,7 @@ LoopAbstraction::inferInvariant(const llvm::BasicBlock *BB,
   // 3. Compute fixpoint by finding common properties
 
   if (it->second.iterations < 2) {
-    return llvm::None;
+    return std::nullopt;
   }
 
   // Check convergence: if path stamps are the same, we've converged
@@ -163,15 +163,15 @@ LoopAbstraction::inferInvariant(const llvm::BasicBlock *BB,
     // Path condition has stabilized. For sound incorrectness, avoid
     // constructing a potentially non-witnessable "merged" invariant; keep a
     // representative witness state.
-    return llvm::Optional<ExecutionDomain>(current_state.clone());
+    return std::optional<ExecutionDomain>(current_state.clone());
   }
 
   // If we've exceeded max iterations, use entry state as invariant
   if (it->second.iterations >= kMaxInvariantIterations) {
-    return llvm::Optional<ExecutionDomain>(entry_state.clone());
+    return std::optional<ExecutionDomain>(entry_state.clone());
   }
 
-  return llvm::None;
+  return std::nullopt;
 }
 
 bool LoopAbstraction::isInferringInvariant(const llvm::BasicBlock *BB) const {

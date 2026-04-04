@@ -12,8 +12,6 @@
 #ifndef LOTUS_VERIFICATION_SIFA_SUMMARIZERS_TOPINPUTCALLSUMMARIZER_H
 #define LOTUS_VERIFICATION_SIFA_SUMMARIZERS_TOPINPUTCALLSUMMARIZER_H
 
-#include "llvm/ADT/Optional.h"
-
 #include "Verification/Sifa/Caches/ProcedureResourceCache.h"
 #include "Verification/Sifa/Cfg/Transition.h"
 #include "Verification/Sifa/Domain/AbstractDomain.h"
@@ -22,6 +20,7 @@
 #include "Verification/Sifa/Statistics/SifaStats.h"
 #include "Verification/Sifa/Summarizers/ICallSummarizer.h"
 
+#include <optional>
 #include <string>
 #include <unordered_map>
 
@@ -84,7 +83,7 @@ private:
   }
 
   bool useStub_ = true;
-  llvm::Optional<StateT> topState_; // stub only
+  std::optional<StateT> topState_; // stub only
 
   SifaStats *stats_ = nullptr;
   const Domain *domain_ = nullptr;

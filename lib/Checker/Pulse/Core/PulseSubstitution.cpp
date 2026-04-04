@@ -6,13 +6,13 @@ void Substitution::add(AbstractValue formal, AbstractValue actual) {
   formal_to_actual_[formal] = actual;
 }
 
-llvm::Optional<AbstractValue>
+std::optional<AbstractValue>
 Substitution::substitute(AbstractValue formal) const {
   auto it = formal_to_actual_.find(formal);
   if (it != formal_to_actual_.end()) {
     return it->second;
   }
-  return llvm::None;
+  return std::nullopt;
 }
 
 AbstractValue Substitution::substituteOrIdentity(AbstractValue formal) const {

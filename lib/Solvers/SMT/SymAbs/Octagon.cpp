@@ -47,7 +47,7 @@
 #include <cassert>
 #include <cmath>
 
-#include <llvm/ADT/Optional.h>
+#include <optional>
 #include <z3++.h>
 #include <z3.h>
 
@@ -168,7 +168,7 @@ alpha_oct_V(z3::expr phi, const std::vector<z3::expr> &variables,
 
         // Compute the least upper bound using Algorithm 7
         auto bound = alpha_lin_exp(phi, lexpr, config);
-        if (!bound.hasValue()) {
+        if (!bound.has_value()) {
           // Cannot compute bound, skip this constraint
           continue;
         }
@@ -177,12 +177,12 @@ alpha_oct_V(z3::expr phi, const std::vector<z3::expr> &variables,
           // Normalize unary constraint: 2·λ_i · v_i ≤ d  ⇒  λ_i · v_i ≤ ⌊d/2⌋
           // Using floor division ensures soundness (the normalized constraint
           // is at least as strong as the original)
-          int64_t normalized = SymAbs::div_floor(bound.getValue(), 2);
+          int64_t normalized = SymAbs::div_floor(bound.value(), 2);
           constraints.emplace_back(variables[i], lambda_i, normalized);
         } else {
           // Binary constraint: λ_i · v_i + λ_j · v_j ≤ d
           constraints.emplace_back(variables[i], variables[j], lambda_i,
-                                   lambda_j, bound.getValue());
+                                   lambda_j, bound.value());
         }
       }
     }

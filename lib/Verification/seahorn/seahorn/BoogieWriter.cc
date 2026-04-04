@@ -27,10 +27,10 @@
 #include "llvm/Support/ErrorHandling.h"
 #include "llvm/Support/raw_ostream.h"
 
-#include "boost/optional.hpp"
 #include "boost/range/iterator_range.hpp"
 #include "boost/unordered_map.hpp"
 #include "boost/unordered_set.hpp"
+#include <optional>
 
 namespace seahorn {
 // main class
@@ -72,14 +72,14 @@ static bool isInteger(const Type *t) {
 #if 0
 static bool isInteger(const Value &v) { return isInteger(v.getType()); }
 #endif
-static boost::optional<int64_t> getIntConstant(const ConstantInt *CI) {
+static std::optional<int64_t> getIntConstant(const ConstantInt *CI) {
   if (CI->getType()->isIntegerTy(1)) {
     return (int64_t)CI->getZExtValue();
   } else if (CI->getValue().getMinSignedBits() <= 64) {
     return CI->getSExtValue();
   } else {
     llvm::errs() << "Warning: " << *CI << " does not fit in int64_t.";
-    return boost::optional<int64_t>();
+    return std::nullopt;
   }
 }
 static bool isIntToBool(const CastInst &I) {
@@ -123,8 +123,8 @@ using type_t = std::string;
 /** Factory to create boogie instructions **/
 class instruction_factory {
 public:
-  using opt_term_t = boost::optional<term_t>;
-  using opt_type_t = boost::optional<type_t>;
+  using opt_term_t = std::optional<term_t>;
+  using opt_type_t = std::optional<type_t>;
 
 private:
   // map Value to term
@@ -194,7 +194,7 @@ instruction_factory::opt_term_t instruction_factory::get_value(const Value &v) {
   if (is_tracked(v)) {
     if (const llvm::ConstantInt *c =
             llvm::dyn_cast<const llvm::ConstantInt>(&v)) {
-      if (boost::optional<int64_t> n = getIntConstant(c)) {
+      if (std::optional<int64_t> n = getIntConstant(c)) {
         term_t tv;
         if (isBool(v)) {
           if (*n == 0)
@@ -983,10 +983,10 @@ public:
         //   continue;
         // }
         auto absDomOpt = m_clam->getPre(&B);
-        if (absDomOpt.hasValue()) {
+        if (absDomOpt.has_value()) {
           crab::crab_string_os out;
           clam::lin_cst_sys_t csts =
-              absDomOpt.getValue().to_linear_constraint_system();
+              absDomOpt.value().to_linear_constraint_system();
           typename clam::lin_cst_sys_t::iterator it = csts.begin();
           typename clam::lin_cst_sys_t::iterator et = csts.end();
           for (; it != et;) {

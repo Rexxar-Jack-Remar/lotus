@@ -10,11 +10,11 @@
 #ifndef LOTUS_VERIFICATION_SIFA_DOMAIN_NONRELATIONALSTATE_H
 #define LOTUS_VERIFICATION_SIFA_DOMAIN_NONRELATIONALSTATE_H
 
-#include "llvm/ADT/Optional.h"
 #include "llvm/IR/Value.h"
 
 #include "Verification/Sifa/Domain/INonrelationalValue.h"
 
+#include <optional>
 #include <unordered_map>
 
 namespace lotus {
@@ -36,10 +36,10 @@ public:
   const Map &getMap() const { return map_; }
   Map &getMap() { return map_; }
 
-  llvm::Optional<V> get(const llvm::Value *v) const {
+  std::optional<V> get(const llvm::Value *v) const {
     auto it = map_.find(v);
     if (it == map_.end())
-      return llvm::None;
+      return std::nullopt;
     return it->second;
   }
   void set(const llvm::Value *v, V val) { map_[v] = std::move(val); }
