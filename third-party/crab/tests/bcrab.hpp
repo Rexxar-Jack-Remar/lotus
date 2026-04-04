@@ -1,8 +1,8 @@
 #ifndef __CRAB_BACKWARD_ANALYZERS__
 #define __CRAB_BACKWARD_ANALYZERS__
 
-#include "./crab_lang.hpp"
 #include "./crab_dom.hpp"
+#include "./crab_lang.hpp"
 
 template <typename Dom>
 extern void z_backward_run(crab::cfg_impl::z_cfg_t *cfg,

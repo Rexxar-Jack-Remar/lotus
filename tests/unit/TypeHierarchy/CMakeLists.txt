@@ -68,7 +68,7 @@ foreach(case_name ${TYPE_HIERARCHY_CASES})
       OUTPUT ${ll_file}
       COMMAND ${TYPE_HIERARCHY_CLANGXX}
               ${TYPE_HIERARCHY_CLANGXX_EXTRA_ARGS}
-              -std=c++14 -S -emit-llvm -g -O0
+              -std=c++17 -S -emit-llvm -g -O0
               ${src_file} -o ${ll_file}
       DEPENDS ${src_file}
       COMMENT "Generating debug LLVM IR for ${case_name}"

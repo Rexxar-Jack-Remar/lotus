@@ -5,17 +5,17 @@
 #include <crab/cg/cg.hpp>
 #include <crab/config.h>
 #include <crab/support/debug.hpp>
-#include <crab/types/varname_factory.hpp>
 #include <crab/types/tag.hpp>
+#include <crab/types/varname_factory.hpp>
 
-/** 
+/**
  * Here we define control flow graphs, call graphs, basic blocks,
  * variable, linear expresssions, etc. Crab depends on three basic
  * parametric types that any client must be instantiated:
  *
  * - A variable name: varname_t. From a variable name, Crab builds
  *   variables which consist of a variable name and a type.
- * 
+ *
  * - A basic block label: basic_block_label_t. From a basic block
  *   label, Crab builds a basic block and from there a CFG and a call
  *   graph.
@@ -46,7 +46,7 @@ using z_var_or_cst_t = variable_or_constant<ikos::z_number, varname_t>;
 using z_lin_exp_t = ikos::linear_expression<ikos::z_number, varname_t>;
 using z_lin_cst_t = ikos::linear_constraint<ikos::z_number, varname_t>;
 using z_ref_cst_t = reference_constraint<ikos::z_number, varname_t>;
-  
+
 /// To define CFG over rationals
 using q_cfg_t = cfg::cfg<basic_block_label_t, varname_t, ikos::q_number>;
 using q_cfg_ref_t = cfg::cfg_ref<q_cfg_t>;
@@ -64,34 +64,24 @@ using z_cg_t = cg::call_graph<cfg_impl::z_cfg_ref_t>;
 using z_cg_ref_t = cg::call_graph_ref<z_cg_t>;
 } // namespace cg_impl
 
-
 /* ===== BEGIN TO BE DEFINED BY CRAB CLIENT ===== */
 
-template<>
-class variable_name_traits<std::string> {
+template <> class variable_name_traits<std::string> {
 public:
-  static std::string to_string(std::string varname) {
-    return varname;
-  }
-};
-  
-template<>
-class basic_block_traits<cfg_impl::z_basic_block_t> {
-public:
-  using bb_label_t = typename cfg_impl::z_basic_block_t::basic_block_label_t;  
-  static std::string to_string(const bb_label_t &bbl) {
-    return bbl;
-  }
+  static std::string to_string(std::string varname) { return varname; }
 };
 
-template<>
-class basic_block_traits<cfg_impl::q_basic_block_t> {
+template <> class basic_block_traits<cfg_impl::z_basic_block_t> {
+public:
+  using bb_label_t = typename cfg_impl::z_basic_block_t::basic_block_label_t;
+  static std::string to_string(const bb_label_t &bbl) { return bbl; }
+};
+
+template <> class basic_block_traits<cfg_impl::q_basic_block_t> {
 public:
   using bb_label_t = typename cfg_impl::q_basic_block_t::basic_block_label_t;
-  static std::string to_string(const bb_label_t &bbl) {
-    return bbl;
-  }
+  static std::string to_string(const bb_label_t &bbl) { return bbl; }
 };
 /* ===== END TO BE DEFINED BY CRAB CLIENT ===== */
-  
+
 } // namespace crab

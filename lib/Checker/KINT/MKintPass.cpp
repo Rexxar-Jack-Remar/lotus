@@ -170,7 +170,6 @@ void MKintPass::backedge_analysis(const Function &F) {
   stack.push_back(std::make_pair(&F.getEntryBlock(), false));
 
   while (!stack.empty()) {
-    // C++14: no structured bindings; use .first/.second explicitly.
     const BasicBlock *bb = stack.back().first;
     const bool leaving = stack.back().second;
     stack.pop_back();

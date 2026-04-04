@@ -11,9 +11,9 @@ void nisse_pass_print_data(long long *count_array, int *index_array, int size) {
     perror("Could not open file");
     return;
   }
-  
+
   for (int i = 0; i < size; i++) {
-    fprintf(file, "%d %Ld\n", index_array[i], count_array[i]);
-  } 
+    fprintf(file, "%d %lld\n", index_array[i], count_array[i]);
+  }
   fclose(file);
 }

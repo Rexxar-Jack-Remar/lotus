@@ -36,7 +36,6 @@ namespace ifds {
 
 // Import thread-safe data structures from Support/ADT
 using lotus::ShardedMap;
-using lotus::SimpleOptional;
 using lotus::ThreadSafeMap;
 using lotus::ThreadSafeSet;
 using lotus::ThreadSafeVector;

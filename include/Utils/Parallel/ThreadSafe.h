@@ -12,49 +12,12 @@
 #include <array>
 #include <functional>
 #include <mutex>
+#include <optional>
 #include <unordered_map>
 #include <unordered_set>
 #include <vector>
 
 namespace lotus {
-
-// ============================================================================
-// Simple Optional Type for C++14 Compatibility
-// ============================================================================
-
-template <typename T> class SimpleOptional {
-private:
-  T *m_value;
-  bool m_has_value;
-
-public:
-  SimpleOptional() : m_value(nullptr), m_has_value(false) {}
-  SimpleOptional(const T &value) : m_value(new T(value)), m_has_value(true) {}
-  SimpleOptional(const SimpleOptional &other) : m_has_value(other.m_has_value) {
-    if (m_has_value)
-      m_value = new T(*other.m_value);
-    else
-      m_value = nullptr;
-  }
-  SimpleOptional &operator=(const SimpleOptional &other) {
-    if (this != &other) {
-      T *new_value = other.m_has_value ? new T(*other.m_value) : nullptr;
-      if (m_value)
-        delete m_value;
-      m_value = new_value;
-      m_has_value = other.m_has_value;
-    }
-    return *this;
-  }
-  ~SimpleOptional() {
-    if (m_value)
-      delete m_value;
-  }
-  bool has_value() const { return m_has_value; }
-  const T &value() const { return *m_value; }
-  T &value() { return *m_value; }
-  explicit operator bool() const { return m_has_value; }
-};
 
 // ============================================================================
 // Thread-Safe Set
@@ -133,11 +96,10 @@ public:
     return m_map.erase(key) != 0;
   }
 
-  SimpleOptional<V> get(const K &key) const {
+  std::optional<V> get(const K &key) const {
     std::lock_guard<std::mutex> lock(m_mutex);
     auto it = m_map.find(key);
-    return it != m_map.end() ? SimpleOptional<V>(it->second)
-                             : SimpleOptional<V>();
+    return it != m_map.end() ? std::optional<V>(it->second) : std::nullopt;
   }
 
   bool contains(const K &key) const {
@@ -222,14 +184,14 @@ public:
     return m_vector.empty();
   }
 
-  SimpleOptional<T> pop_back() {
+  std::optional<T> pop_back() {
     std::lock_guard<std::mutex> lock(m_mutex);
     if (m_vector.empty()) {
-      return SimpleOptional<T>();
+      return std::nullopt;
     }
     T value = m_vector.back();
     m_vector.pop_back();
-    return SimpleOptional<T>(value);
+    return value;
   }
 
   // Bulk pop for better performance
@@ -297,12 +259,11 @@ public:
     }
   }
 
-  SimpleOptional<V> get(const K &key) const {
+  std::optional<V> get(const K &key) const {
     const auto &shard = get_shard(key);
     std::lock_guard<std::mutex> lock(shard.mutex);
     auto it = shard.map.find(key);
-    return it != shard.map.end() ? SimpleOptional<V>(it->second)
-                                 : SimpleOptional<V>();
+    return it != shard.map.end() ? std::optional<V>(it->second) : std::nullopt;
   }
 
   bool contains(const K &key) const {

@@ -1,14 +1,14 @@
 #include <crab/config.h>
-#include <crab/types/linear_constraints.hpp>
-#include <crab/types/varname_factory.hpp>
-#include <crab/types/variable.hpp>
 #include <crab/numbers/bignums.hpp>
 #include <crab/support/debug.hpp>
 #include <crab/support/os.hpp>
+#include <crab/types/linear_constraints.hpp>
+#include <crab/types/variable.hpp>
+#include <crab/types/varname_factory.hpp>
 
 // Abstract domains
-#include <crab/domains/intervals.hpp>
 #include <crab/domains/elina_domains.hpp>
+#include <crab/domains/intervals.hpp>
 
 using namespace crab;
 using namespace ikos;
@@ -16,28 +16,25 @@ using namespace ikos;
 // A variable factory based on strings
 using variable_factory_t = var_factory_impl::str_variable_factory;
 namespace crab {
-template<>
-class variable_name_traits<std::string> {
+template <> class variable_name_traits<std::string> {
 public:
-  static std::string to_string(std::string varname) {
-    return varname;
-  }
+  static std::string to_string(std::string varname) { return varname; }
 };
-} // end namespace crab  
+} // end namespace crab
 // Expressions
 using varname_t = typename variable_factory_t::varname_t;
 using var_t = variable<z_number, varname_t>;
 using lin_exp_t = linear_expression<z_number, varname_t>;
-using lin_cst_t = linear_constraint<z_number, varname_t> ;
-using lin_cst_sys_t = linear_constraint_system<z_number, varname_t> ;
+using lin_cst_t = linear_constraint<z_number, varname_t>;
+using lin_cst_sys_t = linear_constraint_system<z_number, varname_t>;
 
 ///////// Begin Crab Abstract Domains /////////////
-using interval_domain_t = interval_domain<z_number,varname_t>;
-using pk_domain_t = domains::elina_domain<z_number,varname_t,
-					  domains::elina_domain_id_t::ELINA_PK>;
+using interval_domain_t = interval_domain<z_number, varname_t>;
+using pk_domain_t = domains::elina_domain<z_number, varname_t,
+                                          domains::elina_domain_id_t::ELINA_PK>;
 ///////// End Crab Abstract Domains /////////////
 
-int main(int argc, char**argv) {
+int main(int argc, char **argv) {
 
   variable_factory_t vfac;
   var_t x(vfac["x"], INT_TYPE, 32);
@@ -49,10 +46,10 @@ int main(int argc, char**argv) {
     interval_domain_t inv1, inv2;
     inv1.assign(x, 5);
     inv1.assign(y, 10);
-    outs() << "inv1=" << inv1 << "\n";  
+    outs() << "inv1=" << inv1 << "\n";
     inv2.assign(x, 10);
     inv2.assign(y, 20);
-    outs() << "inv2=" << inv1 << "\n";    
+    outs() << "inv2=" << inv1 << "\n";
     interval_domain_t inv3 = inv1 | inv2;
     inv3.apply(domains::OP_ADDITION, z, x, y);
     outs() << "inv1 | inv2 = " << inv3 << "\n";
@@ -63,14 +60,14 @@ int main(int argc, char**argv) {
     pk_domain_t inv1, inv2;
     inv1.assign(x, 5);
     inv1.assign(y, 10);
-    outs() << "inv1=" << inv1 << "\n";  
+    outs() << "inv1=" << inv1 << "\n";
     inv2.assign(x, 10);
     inv2.assign(y, 20);
-    outs() << "inv2=" << inv1 << "\n";    
+    outs() << "inv2=" << inv1 << "\n";
     pk_domain_t inv3 = inv1 | inv2;
     inv3.apply(domains::OP_ADDITION, z, x, y);
     outs() << "inv1 | inv2 = " << inv3 << "\n";
   }
-  
+
   return 0;
 }

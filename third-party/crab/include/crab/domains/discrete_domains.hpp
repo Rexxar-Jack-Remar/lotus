@@ -1,27 +1,27 @@
 #pragma once
 
 /** Several implementations of set-based domains:
- * 
+ *
  * - discrete_domain uses patricia trees to implement sets. As a
  *   constraint, it requires the set element to be indexable. Given a
  *   set of elements E, the discrete domain is a finite lattice that
  *   consists of all subsets of E. For instance if E={x,y,z}:
- * 
+ *
  *              {x,y,z}    least precise element
  *              /  |   \
- *          {x,y} {x,z} {y,z} 
+ *          {x,y} {x,z} {y,z}
  *           \   /    /  /
  *            \ / \  / \/
  *            {x} {y} {z}
- *              \  | / 
+ *              \  | /
  *                { }      most precise element
  *
  * - set_domain has the same functionality than discrete_domain but it
  *   uses std::set. It should be used only when the set element cannot
  *   be indexable because set_domain is slower than discrete_domain.
- * 
+ *
  * - dual_set_domain: it takes a set-based domain (discrete_domain or
- *   set_domain) and invert it. That is, 
+ *   set_domain) and invert it. That is,
  *
  *                { }      least precise element
  *               / |  \
@@ -37,8 +37,8 @@
 #include <crab/domains/patricia_trees.hpp>
 #include <crab/support/debug.hpp>
 
-#include "boost/range/iterator_range_core.hpp"
 #include "boost/optional.hpp"
+#include "boost/range/iterator_range_core.hpp"
 
 namespace ikos {
 
@@ -81,7 +81,7 @@ namespace ikos {
  * UNILATERAL TERMINATION OF THIS AGREEMENT.
  *
  ******************************************************************************/
-  
+
 template <typename Element> class discrete_domain {
 
 private:
@@ -91,7 +91,7 @@ private:
 public:
   using element_t = Element;
   using iterator = typename ptset_t::iterator;
-  
+
 private:
   bool m_is_top;
   ptset_t m_set;
@@ -113,7 +113,7 @@ public:
   discrete_domain(const discrete_domain_t &other) = default;
   discrete_domain(discrete_domain_t &&other) = default;
   discrete_domain_t &operator=(const discrete_domain_t &other) = default;
-  discrete_domain_t &operator=(discrete_domain_t &&other) = default;  
+  discrete_domain_t &operator=(discrete_domain_t &&other) = default;
 
   discrete_domain(Element s) : m_is_top(false), m_set(s) {}
 
@@ -231,26 +231,28 @@ public:
       return m_set[e];
     }
   }
-  
-  void rename(const std::vector<Element> &from, const std::vector<Element> &to) {
+
+  void rename(const std::vector<Element> &from,
+              const std::vector<Element> &to) {
     if (is_top() || is_bottom()) {
       return;
     }
     if (from.size() != to.size()) {
-      CRAB_ERROR("discrete_domain::rename with input vectors of different sizes");
+      CRAB_ERROR(
+          "discrete_domain::rename with input vectors of different sizes");
     }
 
-    for(unsigned i=0, sz=from.size(); i<sz; ++i) {
+    for (unsigned i = 0, sz = from.size(); i < sz; ++i) {
       if (from[i] == to[i]) {
-	continue;
+        continue;
       }
       if (contain(from[i])) {
-	this->operator-=(from[i]);
-	this->operator+=(to[i]);
+        this->operator-=(from[i]);
+        this->operator+=(to[i]);
       }
     }
   }
-  
+
   std::size_t size() const {
     if (m_is_top) {
       assert(false);
@@ -262,7 +264,7 @@ public:
 
   iterator begin() const {
     if (m_is_top) {
-      assert(false);      
+      assert(false);
       CRAB_ERROR("Iterator for discrete domain TOP is undefined");
     } else {
       return m_set.begin();
@@ -271,7 +273,7 @@ public:
 
   iterator end() const {
     if (m_is_top) {
-      assert(false);      
+      assert(false);
       CRAB_ERROR("Iterator for discrete domain TOP is undefined");
     } else {
       return m_set.end();
@@ -299,14 +301,12 @@ inline crab::crab_os &operator<<(crab::crab_os &o,
 
 } // namespace ikos
 
-
 namespace crab {
 namespace domains {
-  
-//===================================================================//  
-//        The NOSA license does not apply to this code  
-//===================================================================//  
 
+//===================================================================//
+//        The NOSA license does not apply to this code
+//===================================================================//
 
 /**
  * This domain is semantically equivalent to discrete_domain but it
@@ -314,16 +314,15 @@ namespace domains {
  * datastructure. Because of this, this domain is slower than
  * discrete_domain so the only reason to use it is when Element cannot
  * be a subclass of indexable.
-**/
+ **/
 
-template <class Element, class Compare>
-class set_domain {
+template <class Element, class Compare> class set_domain {
 private:
   using set_t = std::set<Element, Compare>;
   using set_domain_t = set_domain<Element, Compare>;
 
 public:
-  using element_t = Element;  
+  using element_t = Element;
   using iterator = typename set_t::const_iterator;
 
 private:
@@ -336,30 +335,29 @@ private:
 public:
   // Default constructor creates an empty set rather than top
   set_domain() : m_is_top(false) {}
-  set_domain(Element s) : m_is_top(false) {
-    m_set.insert(s);
-  }  
+  set_domain(Element s) : m_is_top(false) { m_set.insert(s); }
   set_domain(const set_domain_t &other) = default;
   set_domain(set_domain_t &&other) = default;
   set_domain_t &operator=(const set_domain_t &other) = default;
-  set_domain_t &operator=(set_domain_t &&other) = default;  
+  set_domain_t &operator=(set_domain_t &&other) = default;
 
   // Return an empty set
   static set_domain_t bottom() { return set_domain_t(false); }
   // Return a set with all variables
   static set_domain_t top() { return set_domain_t(true); }
-  
+
   bool is_top() const { return m_is_top; }
   bool is_bottom() const { return (!m_is_top && m_set.empty()); }
 
   bool operator<=(const set_domain_t &other) const {
     return other.m_is_top ||
-      (!m_is_top && std::includes(other.m_set.begin(), other.m_set.end(),
-				  m_set.begin(), m_set.end(),
-				  [](const Element &e1, const Element &e2) {
-				    Compare cmp;
-				    return cmp(e1,e2);
-				  }));
+           (!m_is_top &&
+            std::includes(other.m_set.begin(), other.m_set.end(), m_set.begin(),
+                          m_set.end(),
+                          [](const Element &e1, const Element &e2) {
+                            Compare cmp;
+                            return cmp(e1, e2);
+                          }));
   }
 
   bool operator==(const set_domain_t &other) const {
@@ -395,13 +393,12 @@ public:
       return *this;
     } else {
       set_t s;
-      std::set_intersection(m_set.begin(), m_set.end(),
-			    other.m_set.begin(), other.m_set.end(),
-			    std::inserter(s, s.end()),
-			    [](const Element &e1, const Element &e2) {
-			      Compare cmp;
-			      return cmp(e1,e2);
-			    });
+      std::set_intersection(m_set.begin(), m_set.end(), other.m_set.begin(),
+                            other.m_set.end(), std::inserter(s, s.end()),
+                            [](const Element &e1, const Element &e2) {
+                              Compare cmp;
+                              return cmp(e1, e2);
+                            });
       return set_domain_t(s);
     }
   }
@@ -449,8 +446,9 @@ public:
       return m_set.count(e) > 0;
     }
   }
-  
-  void rename(const std::vector<Element> &from, const std::vector<Element> &to) {
+
+  void rename(const std::vector<Element> &from,
+              const std::vector<Element> &to) {
     if (is_top() || is_bottom()) {
       return;
     }
@@ -458,17 +456,17 @@ public:
       CRAB_ERROR("set domain::rename with input vectors of different sizes");
     }
 
-    for(unsigned i=0, sz=from.size(); i<sz; ++i) {
+    for (unsigned i = 0, sz = from.size(); i < sz; ++i) {
       if (from[i] == to[i]) {
-	continue;
+        continue;
       }
       if (contain(from[i])) {
-	this->operator-=(from[i]);
-	this->operator+=(to[i]);
+        this->operator-=(from[i]);
+        this->operator+=(to[i]);
       }
     }
   }
-  
+
   std::size_t size() const {
     if (is_top()) {
       assert(false);
@@ -480,7 +478,7 @@ public:
 
   iterator begin() const {
     if (is_top()) {
-      assert(false);      
+      assert(false);
       CRAB_ERROR("Iterator for set domain TOP is undefined");
     } else {
       return m_set.begin();
@@ -489,7 +487,7 @@ public:
 
   iterator end() const {
     if (is_top()) {
-      assert(false);      
+      assert(false);
       CRAB_ERROR("Iterator for set domain TOP is undefined");
     } else {
       return m_set.end();
@@ -503,12 +501,12 @@ public:
       o << "{}";
     } else {
       o << "{";
-      for (auto it = m_set.begin(), et = m_set.end(); it!=et; ) {
-	o << *it;
-	++it;
-	if (it != et) {
-	  o << ",";
-	}
+      for (auto it = m_set.begin(), et = m_set.end(); it != et;) {
+        o << *it;
+        ++it;
+        if (it != et) {
+          o << ",";
+        }
       }
       o << "}";
     }
@@ -516,37 +514,34 @@ public:
 
 }; // class set_domain
 
-template<class Element, class Compare>
+template <class Element, class Compare>
 inline crab::crab_os &operator<<(crab::crab_os &o,
-                                 const set_domain<Element,Compare> &d) {
+                                 const set_domain<Element, Compare> &d) {
   d.write(o);
   return o;
 }
 
 // Dual of set_domain/discrete_domain: the larger is the set, the more
 // precise is the domain.
-template<class Set>
-class dual_set_domain {
+template <class Set> class dual_set_domain {
   using dual_set_domain_t = dual_set_domain<Set>;
-       
+
 public:
-  using set_domain_t = Set;   
+  using set_domain_t = Set;
   using element_t = typename set_domain_t::element_t;
   using iterator = typename set_domain_t::iterator;
 
 private:
-    set_domain_t m_set;
+  set_domain_t m_set;
+
 public:
-  
-  dual_set_domain()
-    : m_set(set_domain_t::bottom()) /*top by default*/ {}
-  dual_set_domain(set_domain_t s)
-    : m_set(s) {}
+  dual_set_domain() : m_set(set_domain_t::bottom()) /*top by default*/ {}
+  dual_set_domain(set_domain_t s) : m_set(s) {}
 
   dual_set_domain(const dual_set_domain_t &other) = default;
-  dual_set_domain(dual_set_domain_t &&other) = default;  
-  dual_set_domain_t&operator=(const dual_set_domain_t &other) = default;
-  dual_set_domain_t&operator=(dual_set_domain_t &&other) = default;  
+  dual_set_domain(dual_set_domain_t &&other) = default;
+  dual_set_domain_t &operator=(const dual_set_domain_t &other) = default;
+  dual_set_domain_t &operator=(dual_set_domain_t &&other) = default;
 
   static dual_set_domain_t bottom() { return set_domain_t::top(); }
   static dual_set_domain_t top() { return set_domain_t::bottom(); }
@@ -594,16 +589,16 @@ public:
     return *this;
   }
 
-  bool at(const element_t &e) const{
+  bool at(const element_t &e) const {
     dual_set_domain_t s(e);
     return (s <= *this);
   }
-  
+
   std::size_t size() { return m_set.size(); }
 
-  iterator begin() const  { return m_set.begin(); }
+  iterator begin() const { return m_set.begin(); }
   iterator end() const { return m_set.end(); }
-  
+
   void write(crab::crab_os &o) const {
     if (is_bottom()) {
       o << "_|_";
@@ -615,21 +610,20 @@ public:
   }
 
   friend crab::crab_os &operator<<(crab::crab_os &o,
-				   const dual_set_domain_t &dom) {
+                                   const dual_set_domain_t &dom) {
     dom.write(o);
     return o;
   }
 }; // end dual_set_domain
 
-
 /*
  * Represent sets of pairs (Key,Value).
- * 
+ *
  * The pair must consist of a Key (must inherit from indexable class)
- * and a Value that can be a generic abstract domain. 
- * 
+ * and a Value that can be a generic abstract domain.
+ *
  * Bottom means empty set rather than failure.
- */ 
+ */
 template <typename Key, typename Value> class discrete_pair_domain {
 
 private:
@@ -663,7 +657,7 @@ private:
 
   class join_op : public binary_op_t {
     virtual std::pair<bool, boost::optional<Value>>
-    apply(const Key &/*key*/, const Value &x, const Value &y) override {
+    apply(const Key & /*key*/, const Value &x, const Value &y) override {
       Value z = x.operator|(y);
       if (z.is_top()) {
         return {false, boost::optional<Value>()};
@@ -676,7 +670,7 @@ private:
 
   class meet_op : public binary_op_t {
     virtual std::pair<bool, boost::optional<Value>>
-    apply(const Key &/*key*/, const Value &x, const Value &y) override {
+    apply(const Key & /*key*/, const Value &x, const Value &y) override {
       Value z = x.operator&(y);
       if (z.is_bottom()) {
         return {true, boost::optional<Value>()};
@@ -688,27 +682,26 @@ private:
   }; // class meet_op
 
   class domain_po : public partial_order_t {
-    virtual bool leq(const Value &x, const Value &y) override { return x.operator<=(y); }
+    virtual bool leq(const Value &x, const Value &y) override {
+      return x.operator<=(y);
+    }
     virtual bool default_is_top() override { return false; }
   }; // class domain_po
 
 public:
-  static discrete_pair_domain_t top() {
-    return discrete_pair_domain_t(true);
-  }
+  static discrete_pair_domain_t top() { return discrete_pair_domain_t(true); }
 
   static discrete_pair_domain_t bottom() {
     return discrete_pair_domain_t(false);
   }
-  
-  discrete_pair_domain() : m_is_top(false), m_tree(patricia_tree_t()) {}
 
+  discrete_pair_domain() : m_is_top(false), m_tree(patricia_tree_t()) {}
 
   discrete_pair_domain(const discrete_pair_domain_t &o) = default;
   discrete_pair_domain(discrete_pair_domain_t &&o) = default;
-  discrete_pair_domain_t &operator=(const discrete_pair_domain_t &o)  = default;
-  discrete_pair_domain_t &operator=(discrete_pair_domain_t &&o)  = default;
-  
+  discrete_pair_domain_t &operator=(const discrete_pair_domain_t &o) = default;
+  discrete_pair_domain_t &operator=(discrete_pair_domain_t &&o) = default;
+
   iterator begin() const {
     if (is_top()) {
       CRAB_ERROR("discrete_pair_domain: trying to invoke iterator on top");
@@ -734,8 +727,7 @@ public:
     return (o.is_top() || (!is_top() && (m_tree.leq(o.m_tree, po))));
   }
 
-  discrete_pair_domain_t
-  operator|(const discrete_pair_domain_t &o) const {
+  discrete_pair_domain_t operator|(const discrete_pair_domain_t &o) const {
     if (is_top() || o.is_top()) {
       return discrete_pair_domain_t::top();
     } else {
@@ -746,8 +738,7 @@ public:
     }
   }
 
-  discrete_pair_domain_t
-  operator&(const discrete_pair_domain_t &o) const {
+  discrete_pair_domain_t operator&(const discrete_pair_domain_t &o) const {
     if (is_top()) {
       return o;
     } else if (o.is_top()) {
@@ -789,7 +780,7 @@ public:
       }
     }
   }
-  
+
   void write(crab::crab_os &o) const {
     if (is_top()) {
       o << "{...}";
@@ -815,10 +806,11 @@ public:
 }; // class discrete_pair_domain
 
 template <typename Key, typename Value>
-inline crab_os &operator<<(crab_os &o, const discrete_pair_domain<Key, Value> &d) {
+inline crab_os &operator<<(crab_os &o,
+                           const discrete_pair_domain<Key, Value> &d) {
   d.write(o);
   return o;
 }
 
-} //end namespace domains
-} //end namespace crab
+} // end namespace domains
+} // end namespace crab

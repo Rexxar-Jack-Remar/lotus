@@ -2047,10 +2047,10 @@ bool IntegrationAttempt::tryEvaluateMultiInst(ShadowInstruction *SI,
       // Flatten to single value, using each combination of each involved field.
 
       ImprovedValSetSingle *NewIVS = newIVS();
-      uint32_t useIndices[setSizesInRange.size()];
+      std::vector<uint32_t> useIndices(setSizesInRange.size());
 
       flattenIVM(InIVM, (uint64_t)resSize, ShiftInt, setSizesInRange.size(), 0,
-                 useIndices, setSizesInRange, *NewIVS);
+                 useIndices.data(), setSizesInRange, *NewIVS);
       NewIV = NewIVS;
 
     } else {

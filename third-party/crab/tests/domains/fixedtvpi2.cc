@@ -1,6 +1,5 @@
-#include "../program_options.hpp"
 #include "../common.hpp"
-
+#include "../program_options.hpp"
 
 using namespace crab::analyzer;
 using namespace crab::cfg;
@@ -42,7 +41,7 @@ z_cfg_t *prog1(variable_factory_t &vfac) {
   header_1.assume(z - x >= 3);
   exit.assertion(y == 2 * x);
   exit.assertion(z2 - y >= 6);
-  exit.assertion(2*z - y >= 6);
+  exit.assertion(2 * z - y >= 6);
 
   return cfg;
 }
@@ -156,15 +155,15 @@ z_cfg_t *prog3(variable_factory_t &vfac) {
   return cfg;
 }
 
-int main (int argc, char** argv) {
-  bool stats_enabled = false;  
-  if (!crab_tests::parse_user_options(argc,argv,stats_enabled)) {
-      return 0;
+int main(int argc, char **argv) {
+  bool stats_enabled = false;
+  if (!crab_tests::parse_user_options(argc, argv, stats_enabled)) {
+    return 0;
   }
 
   {
     crab_domain_params_man::get().coefficients().push_back(2);
-    crab_domain_params_man::get().coefficients().push_back(3); 
+    crab_domain_params_man::get().coefficients().push_back(3);
     variable_factory_t vfac;
     z_cfg_t *cfg = prog1(vfac);
     z_fixed_tvpi_domain_t init;
@@ -176,7 +175,7 @@ int main (int argc, char** argv) {
 
   {
     crab_domain_params_man::get().coefficients().push_back(2);
-    crab_domain_params_man::get().coefficients().push_back(3); 
+    crab_domain_params_man::get().coefficients().push_back(3);
     variable_factory_t vfac;
     z_cfg_t *cfg = prog2(vfac);
     z_fixed_tvpi_domain_t init;

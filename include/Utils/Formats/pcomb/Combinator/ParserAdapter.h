@@ -3,6 +3,8 @@
 
 #include "Utils/Formats/pcomb/Parser/Parser.h"
 
+#include <type_traits>
+
 namespace pcomb {
 
 // The ParserAdapter combinator takes another parser p0, fails if p0 fails, and
@@ -10,13 +12,14 @@ namespace pcomb {
 // succeeds.
 template <typename Converter, typename ParserA>
 class ParserAdapter
-    : public Parser<std::result_of_t<Converter(typename ParserA::OutputType)>> {
+    : public Parser<
+          std::invoke_result_t<Converter, typename ParserA::OutputType>> {
 private:
   ParserA pa;
   Converter conv;
 
   using AdapterInputType = typename ParserA::OutputType;
-  using AdapterOutputType = std::result_of_t<Converter(AdapterInputType)>;
+  using AdapterOutputType = std::invoke_result_t<Converter, AdapterInputType>;
 
 public:
   using OutputType = AdapterOutputType;

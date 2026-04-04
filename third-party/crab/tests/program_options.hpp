@@ -1,9 +1,9 @@
 #pragma once
 
 #include <boost/program_options.hpp>
+#include <crab/domains/abstract_domain_params.hpp>
 #include <crab/support/debug.hpp>
 #include <crab/support/stats.hpp>
-#include <crab/domains/abstract_domain_params.hpp>
 
 #include <iostream>
 
@@ -19,7 +19,7 @@ int parse_user_options(int argc, char **argv, bool &stats_enabled) {
                    boost::program_options::value<std::vector<std::string>>(),
                    "Set abstract domain parameter: arg must be \"param=val\"");
   po.add_options()("display-domain-params",
-		   "Display abstract domain parameter values");
+                   "Display abstract domain parameter values");
   po.add_options()("verbose", boost::program_options::value<unsigned>(),
                    "Enable verbosity level");
   po.add_options()("stats", boost::program_options::bool_switch(&stats_enabled),
@@ -46,15 +46,16 @@ int parse_user_options(int argc, char **argv, bool &stats_enabled) {
     for (unsigned int i = 0; i < loggers.size(); i++)
       crab::CrabEnableLog(loggers[i]);
   }
-  
+
   if (vm.count("domain-param")) {
-    std::vector<std::string> parameters = vm["domain-param"].as<std::vector<std::string>>();
+    std::vector<std::string> parameters =
+        vm["domain-param"].as<std::vector<std::string>>();
     std::string delimiter("=");
     for (unsigned int i = 0; i < parameters.size(); i++) {
       std::string s = parameters[i];
       int pos = s.find(delimiter);
       std::string param = s.substr(0, pos);
-      std::string val = s.substr(pos+delimiter.length());
+      std::string val = s.substr(pos + delimiter.length());
       crab::domains::crab_domain_params_man::get().set_param(param, val);
     }
   }
@@ -62,7 +63,7 @@ int parse_user_options(int argc, char **argv, bool &stats_enabled) {
   if (vm.count("display-domain-params")) {
     crab::domains::crab_domain_params_man::get().write(crab::outs());
   }
-  
+
   if (vm.count("verbose")) {
     crab::CrabEnableVerbosity(vm["verbose"].as<unsigned>());
   }
