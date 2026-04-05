@@ -70,6 +70,14 @@ static bool isCallsiteFunctionCompatible(CallBase *call, Function *callee) {
   return isPointerAnalysisCallsiteCompatible(call, callee);
 }
 
+static bool canPartitionIndirectCallTargets(Value *called_value) {
+  if (!called_value || isa<UndefValue>(called_value) ||
+      isa<PoisonValue>(called_value))
+    return false;
+
+  return isa<Instruction>(called_value) || isa<Argument>(called_value);
+}
+
 /// Conservatively handles unknown library calls by invalidating pointer
 /// arguments.
 ///
@@ -153,7 +161,7 @@ void IntraLotusAA::processCall(CallBase *call) {
 
     if (callee_idx == 0) {
       callee_cond = getEmptyCond();
-    } else {
+    } else if (canPartitionIndirectCallTargets(call->getCalledOperand())) {
       callee_cond = findOrCreateAndRegion(
           callee_cond, getCallTargetCond(call->getCalledOperand(), callee));
     }

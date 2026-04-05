@@ -45,6 +45,7 @@ public:
   }
 
   Value *getBase() const { return base_; }
+  Value *get_base_ptr() const { return base_; }
   int getDepth() const { return static_cast<int>(offsets_reversed_.size()); }
   int64_t getOffset(int idx) const {
     assert(idx >= 0 && idx < getDepth() && "Invalid access path offset index");
@@ -146,7 +147,14 @@ public:
   void addChild(GuardedValueFlowNode *child, float confidence = 1.0f,
                 ConditionRef condition = ConditionRef::none());
   void clearChildren();
+  GuardedValueFlowNode *getChild(unsigned idx) const {
+    assert(idx < children_.size() && "Invalid child index");
+    return children_[idx].target;
+  }
   ArrayRef<Edge> children() const { return children_; }
+  unsigned getNumChildren() const {
+    return static_cast<unsigned>(children_.size());
+  }
   ArrayRef<Edge> parents() const { return parents_; }
   unsigned getNumParents() const {
     return static_cast<unsigned>(parents_.size());
@@ -473,6 +481,8 @@ public:
                    GuardedValueFlowNode *condition_node, bool condition_sense,
                    ConditionRef condition);
   ArrayRef<Incoming> incoming() const { return incoming_; }
+  auto begin() const { return incoming_.begin(); }
+  auto end() const { return incoming_.end(); }
 
 private:
   std::vector<Incoming> incoming_;

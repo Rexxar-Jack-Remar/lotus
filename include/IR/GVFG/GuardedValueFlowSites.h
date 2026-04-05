@@ -23,6 +23,16 @@ class GuardedValueFlowGraph;
 class GuardedValueFlowNode;
 class GuardedValueFlowRegionNode;
 
+struct GuardedValueFlowCallSiteInput {
+  GuardedValueFlowNode *InputNode{nullptr};
+  size_t InputIndex{0};
+  bool IsCommonInput{false};
+
+  GuardedValueFlowCallSiteInput() = default;
+  GuardedValueFlowCallSiteInput(GuardedValueFlowNode *N, size_t I, bool C)
+      : InputNode(N), InputIndex(I), IsCommonInput(C) {}
+};
+
 // Sites annotate instructions that are semantically important to later
 // analyses. Nodes carry the value-flow graph; sites carry the original program
 // operation and the operands that made that operation interesting.
@@ -144,6 +154,27 @@ private:
   std::set<Function *> back_edge_callees_;
   std::map<Function *, ConditionRef> callee_conditions_;
   std::map<Function *, GuardedValueFlowRegionNode *> callee_condition_regions_;
+  mutable std::vector<GuardedValueFlowCallSiteInput> compat_inputs_cache_;
+
+public:
+  auto input_begin(Function *callee) const {
+    compat_inputs_cache_.clear();
+    for (size_t idx = 0; idx < common_inputs_.size(); ++idx) {
+      compat_inputs_cache_.emplace_back(common_inputs_[idx], idx, true);
+    }
+    auto pseudo_it = pseudo_inputs_.find(callee);
+    if (pseudo_it != pseudo_inputs_.end()) {
+      for (size_t idx = 0; idx < pseudo_it->second.size(); ++idx) {
+        compat_inputs_cache_.emplace_back(pseudo_it->second[idx], idx, false);
+      }
+    }
+    return compat_inputs_cache_.begin();
+  }
+
+  auto input_end(Function *callee) const {
+    (void)input_begin(callee);
+    return compat_inputs_cache_.end();
+  }
 };
 
 class GuardedValueFlowDereferenceSite : public GuardedValueFlowSite {

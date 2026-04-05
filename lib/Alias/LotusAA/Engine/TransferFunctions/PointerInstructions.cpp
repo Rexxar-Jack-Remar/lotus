@@ -41,7 +41,16 @@ using namespace llvm;
 namespace {
 
 static bool canSplitSelectCondition(Value *cond) {
-  return cond && !isa<UndefValue>(cond) && !isa<PoisonValue>(cond);
+  if (!cond || isa<UndefValue>(cond) || isa<PoisonValue>(cond))
+    return false;
+
+  if (isa<Instruction>(cond) || isa<Argument>(cond))
+    return true;
+
+  if (auto *CI = dyn_cast<ConstantInt>(cond))
+    return CI->getBitWidth() == 1;
+
+  return false;
 }
 
 static Value *tracebackPointerCastChain(Value *ptr) {

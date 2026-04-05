@@ -5,6 +5,7 @@
 
 #include <map>
 #include <memory>
+#include <type_traits>
 #include <unordered_map>
 
 #include <llvm/ADT/ArrayRef.h>
@@ -67,6 +68,7 @@ public:
   ~GuardedValueFlowGraph();
 
   Function *getBaseFunction() const { return base_function_; }
+  Function *getBaseFunc() const { return base_function_; }
 
   template <typename NodeT, typename... Args>
   NodeT *createNode(Args &&...args) {
@@ -162,6 +164,50 @@ public:
   }
   GuardedValueFlowNode *getPseudoArgument(unsigned idx) const;
   GuardedValueFlowReturnNode *getPseudoReturn(unsigned idx) const;
+  const GuardedValueFlowReturnNode *getCommonReturn() const;
+  unsigned getNumCommonArgument() const;
+  unsigned getNumPseudoArgument() const {
+    return static_cast<unsigned>(pseudo_arguments_.size());
+  }
+  unsigned getNumVarArgument() const;
+  GuardedValueFlowNode *getCommonArgument(unsigned idx) const;
+  GuardedValueFlowNode *getVarArgument(unsigned idx) const;
+  std::vector<GuardedValueFlowNode *> getCommonArguments() const;
+  std::vector<GuardedValueFlowReturnNode *> getReturnNodes() const;
+  auto arg_begin() const {
+    refreshCompatCaches();
+    return compat_arg_nodes_.begin();
+  }
+  auto arg_end() const {
+    refreshCompatCaches();
+    return compat_arg_nodes_.end();
+  }
+  auto return_begin() const {
+    refreshCompatCaches();
+    return compat_return_nodes_.begin();
+  }
+  auto return_end() const {
+    refreshCompatCaches();
+    return compat_return_nodes_.end();
+  }
+  auto pseudo_return_begin() const {
+    return pseudo_returns_.begin();
+  }
+  auto pseudo_return_end() const {
+    return pseudo_returns_.end();
+  }
+
+  template <typename SiteT> SiteT *findSite(Instruction *inst) const {
+    if (!inst)
+      return nullptr;
+    if constexpr (std::is_same_v<SiteT, GuardedValueFlowCallSite>) {
+      return findCallSite(inst);
+    } else if constexpr (std::is_same_v<SiteT, GuardedValueFlowReturnSite>) {
+      return findReturnSite(inst);
+    } else {
+      return nullptr;
+    }
+  }
   GuardedValueFlowNode *findFunctionSummaryArgumentNode(unsigned ap_depth,
                                                         Value *source) const;
   void mapFunctionSummaryArgumentNode(unsigned ap_depth, Value *source,
@@ -293,8 +339,11 @@ private:
   GuardedValueFlowRegionNode *always_false_region_{nullptr};
   std::vector<Value *> owned_synthetic_values_;
   std::vector<Diagnostic> diagnostics_;
+  mutable std::vector<GuardedValueFlowNode *> compat_arg_nodes_;
+  mutable std::vector<GuardedValueFlowReturnNode *> compat_return_nodes_;
 
   void assignNodeRegion(GuardedValueFlowNode *node);
+  void refreshCompatCaches() const;
 };
 
 class GuardedValueFlowGraphBuilderPass : public ModulePass {

@@ -98,7 +98,16 @@ template <typename T> static pair<T, T> canonicalCondPair(T lhs, T rhs) {
 }
 
 static bool canSplitSelectCondition(Value *cond) {
-  return cond && !isa<UndefValue>(cond) && !isa<PoisonValue>(cond);
+  if (!cond || isa<UndefValue>(cond) || isa<PoisonValue>(cond))
+    return false;
+
+  if (isa<Instruction>(cond) || isa<Argument>(cond))
+    return true;
+
+  if (auto *CI = dyn_cast<ConstantInt>(cond))
+    return CI->getBitWidth() == 1;
+
+  return false;
 }
 
 static bool isCompositeCond(path_cond_t cond) {
@@ -1203,7 +1212,10 @@ path_cond_t PTGraph::findOrCreateUnitPhiRegion(BasicBlock *cur_bb,
                     : getUnitRegion(incoming_bb);
     }
 
-    cond = findOrCreateAndRegion(cond, getCFGEdgeCond(incoming_bb, cur_bb));
+    if (auto *br = dyn_cast_or_null<BranchInst>(incoming_bb->getTerminator())) {
+      if (br->isConditional())
+        cond = findOrCreateAndRegion(cond, getCFGEdgeCond(incoming_bb, cur_bb));
+    }
   }
   phi_region_cache[cur_bb][incoming_bb] = cond;
   return cond;

@@ -22,6 +22,7 @@
 #include "Dataflow/NPA/Core/IR/LCFLDetector.h"
 #include "Utils/Parallel/ThreadPool.h"
 
+#include <algorithm>
 #include <atomic>
 #include <exception>
 #include <set>

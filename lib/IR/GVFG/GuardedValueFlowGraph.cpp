@@ -618,6 +618,77 @@ GuardedValueFlowGraph::getPseudoReturn(unsigned idx) const {
   return idx < pseudo_returns_.size() ? pseudo_returns_[idx] : nullptr;
 }
 
+const GuardedValueFlowReturnNode *GuardedValueFlowGraph::getCommonReturn() const {
+  for (const auto &node : nodes_) {
+    if (node->getKind() == GuardedValueFlowNode::Kind::CommonReturn)
+      return dyn_cast<GuardedValueFlowReturnNode>(node.get());
+  }
+  return nullptr;
+}
+
+unsigned GuardedValueFlowGraph::getNumCommonArgument() const {
+  unsigned count = 0;
+  for (const auto &node : nodes_) {
+    if (node->getKind() == GuardedValueFlowNode::Kind::CommonArgument)
+      ++count;
+  }
+  return count;
+}
+
+unsigned GuardedValueFlowGraph::getNumVarArgument() const { return 0; }
+
+GuardedValueFlowNode *GuardedValueFlowGraph::getCommonArgument(unsigned idx) const {
+  unsigned current = 0;
+  for (const auto &node : nodes_) {
+    if (node->getKind() != GuardedValueFlowNode::Kind::CommonArgument)
+      continue;
+    if (current == idx)
+      return node.get();
+    ++current;
+  }
+  return nullptr;
+}
+
+GuardedValueFlowNode *GuardedValueFlowGraph::getVarArgument(unsigned idx) const {
+  (void)idx;
+  return nullptr;
+}
+
+std::vector<GuardedValueFlowNode *> GuardedValueFlowGraph::getCommonArguments() const {
+  std::vector<GuardedValueFlowNode *> result;
+  for (const auto &node : nodes_) {
+    if (node->getKind() == GuardedValueFlowNode::Kind::CommonArgument)
+      result.push_back(node.get());
+  }
+  return result;
+}
+
+std::vector<GuardedValueFlowReturnNode *> GuardedValueFlowGraph::getReturnNodes() const {
+  std::vector<GuardedValueFlowReturnNode *> result;
+  if (auto *common = const_cast<GuardedValueFlowReturnNode *>(getCommonReturn()))
+    result.push_back(common);
+  for (auto *node : pseudo_returns_)
+    result.push_back(node);
+  return result;
+}
+
+void GuardedValueFlowGraph::refreshCompatCaches() const {
+  compat_arg_nodes_.clear();
+  compat_return_nodes_.clear();
+
+  for (const auto &node : nodes_) {
+    if (node->getKind() == GuardedValueFlowNode::Kind::CommonArgument)
+      compat_arg_nodes_.push_back(node.get());
+  }
+  for (auto *node : pseudo_arguments_)
+    compat_arg_nodes_.push_back(node);
+
+  if (auto *common = const_cast<GuardedValueFlowReturnNode *>(getCommonReturn()))
+    compat_return_nodes_.push_back(common);
+  for (auto *node : pseudo_returns_)
+    compat_return_nodes_.push_back(node);
+}
+
 GuardedValueFlowNode *
 GuardedValueFlowGraph::findFunctionSummaryArgumentNode(unsigned ap_depth,
                                                        Value *source) const {
