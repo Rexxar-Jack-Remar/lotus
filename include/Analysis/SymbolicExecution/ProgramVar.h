@@ -22,6 +22,13 @@ using namespace llvm;
 namespace SymbolicExecution {
 using lotus::gvfg::GuardedValueFlowNode;
 
+/// Base class for symbolic execution values that can appear as variable roots.
+///
+/// The engine reasons about program state through a small set of stable value
+/// identifiers instead of raw LLVM SSA nodes alone. A ProgramValue either wraps
+/// a GVFG node, which ties the symbolic state to the guarded value-flow graph,
+/// or represents an auxiliary placeholder introduced by the analysis for
+/// synthetic memory objects, summaries, or temporary symbolic names.
 class ProgramValue {
 public:
   enum ValKind { VK_GVFG, VK_AUX };
@@ -131,8 +138,14 @@ public:
 
   bool isNull() const { return Data == nullptr; }
 
+  /// Returns the underlying LLVM value when this wrapper names a GVFG-backed
+  /// program value. Auxiliary values intentionally have no direct LLVM peer.
   Value *getLLVMVal() const;
 
+  /// Returns the LLVM type carried by the wrapped program value.
+  ///
+  /// For GVFG-backed values this comes from the underlying IR value. For
+  /// auxiliary values it comes from the synthetic type supplied at creation.
   Type *getType() const;
 
   bool isVacuous() const { return Data == nullptr; }
@@ -188,6 +201,8 @@ public:
 
   bool isConstant() const;
 
+  /// Extracts a concrete integer when the wrapped value is recognized as a
+  /// constant leaf in the symbolic state.
   BigInteger getAsConstant() const;
 
   void dump() const;
@@ -212,8 +227,15 @@ public:
 
   bool operator<(const Var &R) const { return Data < R.Data; }
 
+  /// Returns the IR value that seeded this symbolic variable, if any.
+  ///
+  /// Many higher-level components, including `PropertySymExpr`, path-condition
+  /// construction, and bug reporting, use `Var` as the canonical handle for
+  /// symbolic variables while still being able to recover the originating LLVM
+  /// instruction or argument when one exists.
   inline Value *getLLVMValue() const { return Data.getLLVMVal(); }
 
+  /// Returns the underlying program-level identity used by the symbolic state.
   ProgramValuePtr getValue() const { return Data; }
 
   bool isConstant() const { return Data.isConstant(); }

@@ -1,4 +1,10 @@
-
+//===----------------------------------------------------------------------===//
+//
+// AnalysisDriver orchestrates whole-module symbolic execution. It decides which
+// functions to run, in what order summaries become available, and how per-
+// function results are merged back into the module-level bug-trace store.
+//
+//===----------------------------------------------------------------------===//
 
 #include "Analysis/SymbolicExecution/AnalysisDriver.h"
 
@@ -22,6 +28,9 @@ using namespace SymbolicExecution;
 namespace {
 
 static void topsortCFG(std::vector<BasicBlock *> &sorted, Function *F) {
+  // Symbolic execution is still path sensitive, but visiting blocks in an
+  // acyclic predecessor-first order reduces avoidable reprocessing for the
+  // common forward-only cases. Backedges are appended afterwards.
   if (!F)
     return;
 
@@ -157,6 +166,8 @@ static cl::opt<std::string> SymexCheckers(
 AnalysisDriver::AnalysisDriver() { initBugType(); }
 
 void AnalysisDriver::initBugType() {
+  // Checker selection is normalized into one bitmask here so the per-function
+  // executor can stay focused on state transfer and bug queries.
   // Parse comma-separated list of checkers if provided
   if (!SymexCheckers.empty()) {
     std::string checkers = SymexCheckers;
@@ -278,6 +289,8 @@ void AnalysisDriver::runOnModuleParallel(Module *M) {
   AnalysisState::INT8_TY = Type::getInt8Ty(M->getContext());
   SummarySolverManager::get().init();
 
+  // getFuncSeq returns a summary-friendly order over the call graph. We walk it
+  // in reverse so callees tend to finish before callers ask for their summary.
   seg_utility::getTopoOrder(*M);
   const auto &FuncSeq = seg_utility::getFuncSeq();
   assert(!FuncSeq.empty());
@@ -341,6 +354,8 @@ void AnalysisDriver::runOnModule(Module *M) {
   AnalysisState::INT8_TY = Type::getInt8Ty(M->getContext());
   SummarySolverManager::get().init();
 
+  // The sequential path uses the same scheduling policy as the parallel one so
+  // summary availability and debugging behavior stay comparable.
   seg_utility::getTopoOrder(*M);
   const auto &FuncSeq = seg_utility::getFuncSeq();
   assert(!FuncSeq.empty());
@@ -419,6 +434,9 @@ void AnalysisDriver::releaseMemForFunction(Function *F) {
   assert(Smry->getFunc() == F);
 
   if (Smry->isSolverShared()) {
+    // Shared summary solvers outlive individual summaries. Lock the solver
+    // before erasing SMT-owned state so another thread cannot read half-torn
+    // expressions while initializing a dependent summary.
     auto *Solver = Smry->getSmrySolver();
     // Erasing summary will destruct exprs constructed by the shared smry Solver
     // Another thread may be trying to init summary using this solver.
@@ -444,6 +462,8 @@ void AnalysisDriver::runOnFunction(GuardedValueFlowGraph *Graph) {
     topsortCFG(topBBs, F);
   }
 
+  // Each function gets a fresh AnalysisState, but the driver supplies the
+  // module-wide summary and trace plumbing around it.
   AnalysisState State(static_cast<AnalysisState::SymexBugType>(BugTy), Graph,
                       F);
   for (auto *BB : topBBs) {
@@ -468,6 +488,10 @@ void AnalysisDriver::runOnFunction(GuardedValueFlowGraph *Graph) {
       {
         std::lock_guard<std::mutex> Lock(AnalysisMtx);
         auto *SinkPos = QuerySteps.front().Inst;
+        // Multiple paths can collapse onto the same sink instruction once the
+        // state has been summarized. Keep the first trace per sink so the final
+        // wrapper emits one stable report instead of a burst of
+        // near-duplicates.
         if (!SinkInsts.count(SinkPos)) {
           SinkInsts.insert(SinkPos);
           Traces.emplace_back(CurTrace);

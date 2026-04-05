@@ -32,6 +32,10 @@ using namespace SymbolicExecution;
 
 /// Finalize analysis state into a summary.
 void AnalysisState::finalizeSummary() {
+  // Summary finalization packages the parts of the current function state that
+  // can be consumed interprocedurally. Return facts, taint facts, and pending
+  // bug queries are all normalized here so callers can import one summary
+  // object instead of replaying the callee analysis.
   processReturn();
   buildTaintSummary();
   buildQuerySummary();
@@ -40,6 +44,12 @@ void AnalysisState::finalizeSummary() {
 /// Process a function call by inlining the callee's summary.
 void AnalysisState::processCall(CallInst *Inst, Function *Callee,
                                 const AnalysisSummary &Smry) {
+  // Import is organized in phases. First we build formal-to-real mappings for
+  // ordinary arguments, synthetic length values, and escape-related symbols.
+  // Then we re-instantiate the callee summary into caller state: memory facts,
+  // points-to facts, scalar values, taint information, and deferred bug
+  // queries. Each phase uses the same renaming context so conditions and
+  // symbolic expressions stay aligned at this call site.
   initializeFormalToRealMap(Inst, Smry);
 
   auto *GraphCS = Graph->findSite<GuardedValueFlowCallSite>(Inst);
@@ -49,7 +59,9 @@ void AnalysisState::processCall(CallInst *Inst, Function *Callee,
   addFormalToRealLenMap(GraphCS, Callee, Smry);
   addFormalToRealEscapeMap(GraphCS, Callee, Smry);
 
-  // collect incoming values for input node
+  // Collect incoming memory-backed values for call inputs before output facts
+  // are inlined. This preserves the load/store view that the callee summary
+  // expects when pseudo inputs represent memory-visible values.
   for (auto Iter = GraphCS->input_begin(Callee),
             EIter = GraphCS->input_end(Callee);
        Iter != EIter; ++Iter) {
@@ -86,7 +98,9 @@ void AnalysisState::processCall(CallInst *Inst, Function *Callee,
     addFormalToRealValues(GraphCS, Callee, P.first, P.second);
   }
 
-  // need to clone escape object before inlining output pts
+  // Escape objects conceptually allocate caller-visible memory during summary
+  // import. They must exist before output points-to facts are installed so any
+  // returned or stored pointer can target the recreated object immediately.
   Condition CSCond = getLocalCond(Inst->getParent());
   const auto &EscapeAllocToSizes = Smry.getEscapeInfo();
   for (const auto &P : FormalToRealEscapeMap.at(Inst)) {
@@ -106,7 +120,9 @@ void AnalysisState::processCall(CallInst *Inst, Function *Callee,
   const auto &OutputPts = Smry.OutputPts;
   const auto &RetSymbolicValMap = Smry.getOutSymbolicValMap();
 
-  /// Inline points-to result of callee
+  /// Inline the callee's points-to summary for returns and pseudo returns.
+  /// This recreates the callee's output heap view in caller coordinates using
+  /// the formal-to-real mapping and the call-site condition.
   for (auto Iter = CalleeGraph->return_begin(),
             EIter = CalleeGraph->return_end();
        Iter != EIter; ++Iter) {
@@ -126,13 +142,17 @@ void AnalysisState::processCall(CallInst *Inst, Function *Callee,
     }
   }
 
-  /// compute string length values
+  /// Rebuild derived string-length facts after pointer outputs are available,
+  /// because length summaries may refer to the same imported buffers.
   StrState.onProcessCall(Inst, Callee, *this, Smry.StrState);
   for (const auto &P : FormalToRealLenMap.at(Inst)) {
     addFormalToRealValues(GraphCS, Callee, P.first, P.second);
   }
 
-  /// Inline symbolic values for the return nodes of the callee
+  /// Re-instantiate scalar summary facts for return nodes. If a summary carries
+  /// no concrete symbolic alternatives, we still seed the receiver with its own
+  /// symbolic variable so downstream transfer functions can keep referring to
+  /// the returned value.
   for (auto Iter = CalleeGraph->return_begin(),
             EIter = CalleeGraph->return_end();
        Iter != EIter; ++Iter) {
@@ -178,6 +198,10 @@ SummarySolverManager &SummarySolverManager::get() {
 PathCondSolver *SummarySolverManager::getSharedSmrySolver() {
   std::lock_guard<std::mutex> LK(Mtx);
 
+  // Shared summary solvers are used once the dedicated per-function solver pool
+  // is full. Round-robin reuse keeps summary materialization progressing, but
+  // any summary placed on a shared solver must be translated away from the
+  // original AnalysisState-owned solver before that state can be discarded.
   auto *Res = Solvers[NextSolverIdx].get();
   NextSolverIdx = (NextSolverIdx + 1) % Solvers.size();
   return Res;
@@ -186,6 +210,9 @@ PathCondSolver *SummarySolverManager::getSharedSmrySolver() {
 PathCondSolver *SummarySolverManager::getSmrySolver(AnalysisState State) {
   std::lock_guard<std::mutex> LK(Mtx);
 
+  // When capacity allows, a summary keeps the solver that built its symbolic
+  // state. That avoids immediate translation and lets later imports reuse the
+  // exact SMT objects created during the callee analysis.
   auto *Func = State.F;
   FuncSolvers.insert(std::make_pair(Func, std::move(State.Solver)));
   return FuncSolvers.at(Func).get();
@@ -211,6 +238,9 @@ void AnalysisSummary::translate() {
 
   std::lock_guard<std::mutex> LK(SmrySolver->getSolverLock());
 
+  // Translation rewrites every SMT-backed payload in the summary onto the
+  // shared summary solver. This is the ownership boundary between an ephemeral
+  // AnalysisState and the persistent interprocedural summary object.
   forEachMap(OutSymbolicValMap,
              [&](const ProgramValuePtr &, GuardedSymbolicValSet &V) {
                V.translate(SmrySolver);
@@ -244,6 +274,10 @@ AnalysisSummary::AnalysisSummary(AnalysisState State)
       EscapeAllocToSizes(State.EscapeAllocToSizes), OutputPts(State.OutputPts),
       UnknownSyms(State.UnknownSyms), StrState(State.StrState),
       TaintSmry(State.TaintSmry), QueryToTraces(State.QueryToTraces) {
+  // Summary construction snapshots the interprocedural portion of an analyzed
+  // function. The solver choice determines whether the snapshot can keep the
+  // original solver alive or must first translate all stored formulas into a
+  // shared solver that outlives the transient AnalysisState.
   auto &Mgr = SummarySolverManager::get();
   if (Mgr.isFuncSolverFull()) {
     SmrySolver = Mgr.getSharedSmrySolver();
@@ -259,6 +293,7 @@ AnalysisSummary::AnalysisSummary(AnalysisState State)
 void AnalysisState::addFormalToRealLenMap(GuardedValueFlowCallSite *GraphCS,
                                           Function *Callee,
                                           const AnalysisSummary &Smry) {
+  (void)Callee;
   auto *CS = GraphCS->getInstruction();
   for (const auto &P : Smry.getStrState().getLenPts()) {
     auto LenV = P.first;
@@ -271,6 +306,7 @@ void AnalysisState::addFormalToRealLenMap(GuardedValueFlowCallSite *GraphCS,
 void AnalysisState::addFormalToRealEscapeMap(GuardedValueFlowCallSite *GraphCS,
                                              Function *Callee,
                                              const AnalysisSummary &Smry) {
+  (void)Callee;
   const auto &EscapeAllocToSizes = Smry.getEscapeInfo();
   auto *CS = GraphCS->getInstruction();
 
@@ -347,6 +383,10 @@ void AnalysisState::addFormalToRealValues(GuardedValueFlowCallSite *GraphCS,
   }
   FormalToRealSymM[Formal].addValues(RealSyms);
 
+  // The rename context ties a callee formal to the caller-side SMT expression
+  // that should replace it. Summary import reuses this context for conditions,
+  // symbolic values, and deferred queries so every translated fact refers to
+  // the same call-site specific variables.
   if (!SMTMap.count(Formal)) {
     auto LE = Solver->getExpr(Var(Formal));
     assert(LE.isBitVector());
@@ -400,6 +440,11 @@ Condition AnalysisState::transCond(Instruction *CS, Function *Callee,
     return InlineCondCache.at(CS).at(CondIndex);
   }
 
+  // Conditions are imported by translating them onto the caller solver, then
+  // renaming any callee-local symbols with the call-site suffix and the formal-
+  // to-real mapping constraints. The cache is keyed by call site and callee
+  // condition identity because the same summary fact may be used repeatedly
+  // while inlining points-to, scalar, taint, and query information.
   bool ToUnknown = false;
   Condition CurCons(CalleeCond.translate(getSolver(), ToUnknown));
   if (!ToUnknown) {
@@ -416,6 +461,10 @@ Condition AnalysisState::transCond(Instruction *CS, Function *Callee,
 GuardedSymbolicValSet
 AnalysisState::inlineVals(const GuardedSymbolicValSet &Vals, Instruction *CS,
                           Function *Callee, const Condition &CSCond) const {
+  // This is the common scalar-summary import path. Each summarized value is
+  // re-expressed in caller variables, then guarded by both the translated
+  // callee condition and the local call-site condition before it is merged into
+  // caller state.
   return Vals.reduce<GuardedSymbolicValSet>(
       [&](const PropertyValuePtr &Val, const Condition &C,
           GuardedSymbolicValSet &Res) {
@@ -427,6 +476,10 @@ AnalysisState::inlineVals(const GuardedSymbolicValSet &Vals, Instruction *CS,
 
 QuerySet AnalysisState::inlineVals(const QuerySet &Vals, Instruction *CS,
                                    Function *Callee) const {
+  // Deferred bug queries are imported the same way as other summary facts, but
+  // each query may expand into multiple caller-side queries after formal
+  // substitution. The cache avoids rebuilding those bug predicates every time a
+  // summary is reused at the same call site.
   auto Res = Vals.reduce<QuerySet>(
       [&](const NumericalQueryPtr &Q, const Condition &CalleeCond,
           QuerySet &Res) {
@@ -454,6 +507,10 @@ AnalysisState::inlineVals(const PtsSet &Vals, Instruction *CS, Function *Callee,
   const auto &FormalToReal = FormalToRealMap.at(CS);
   bool Degenerate = false;
 
+  // Points-to import is where summary facts become heap facts again. Formal
+  // base objects are rebound to the caller's points-to set, offsets are
+  // translated into caller expressions, and the result is guarded by both the
+  // translated callee condition and the caller's local path condition.
   auto PtsRes = Vals.reduce<PtsSet>(
       [&](const PTItem &Pt, const Condition &CalleeCond, PtsSet &Res) {
         if (Res.isFull()) {

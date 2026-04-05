@@ -1,8 +1,9 @@
 //===----------------------------------------------------------------------===//
 //
 // AnalysisState taint analysis implementation.
-// Handles taint initialization (sources), propagation (transfer functions),
-// and taint summaries.
+// This file is the taint-specific half of AnalysisState. It injects source
+// facts, threads them through symbolic values and modeled calls, then exports
+// summary information so callers can continue the same taint story.
 //
 //===----------------------------------------------------------------------===//
 
@@ -35,6 +36,9 @@
 using namespace SymbolicExecution;
 
 void AnalysisState::taintInit(Function *Func) {
+  // Seed taint only at well-known entry boundaries. The rest of the engine
+  // treats these marks like any other guarded symbolic fact, so the special
+  // handling stays local to setup.
   if (Func->getName() == "main") {
     auto &EntryBB = Func->getEntryBlock();
 
@@ -76,6 +80,9 @@ void AnalysisState::taintTransfer(Instruction *Inst) {
 }
 
 void AnalysisState::processCallTaintSources(Instruction *Inst) {
+  // Declarations are where the taint model injects external source facts.
+  // Defined callees are handled by normal summary import instead, which keeps
+  // the source specification focused on library and environment boundaries.
   Function *CalleeFunc = seg_utility::getCallee(Inst);
   if (!CalleeFunc || !CalleeFunc->isDeclaration()) {
     return;
@@ -103,6 +110,9 @@ void AnalysisState::processCallTaintSources(Instruction *Inst) {
 void AnalysisState::taintVal(const ProgramValuePtr &V,
                              const std::vector<TaintStep> &Steps,
                              const Condition &PreCond, bool Peel) {
+  // markTaint records the explicit destination first. The optional peeling step
+  // then walks symbolic definitions so taint follows the variables that explain
+  // the current value, not just the surface GVFG node that received it.
   markTaint(V, Steps, PreCond);
 
   if (!Peel) {
@@ -198,7 +208,9 @@ void AnalysisState::processTaintPropagation(Instruction *Inst) {
     return;
   }
 
-  // Propagate by data dependence
+  // For non-call instructions, taint follows the same symbolic dataflow that
+  // builds scalar expressions. That keeps taint aligned with the guarded value
+  // set instead of inventing a separate transfer relation.
   ProgramValuePtr DstV(getNode(Inst));
   bool IsDstPointer = DstV.getType()->isPointerTy();
 
@@ -238,6 +250,9 @@ void AnalysisState::propagateTaint(const ProgramValuePtr &Src,
                                    const ProgramValuePtr &Dst,
                                    Instruction *Inst, const Condition &Cond,
                                    bool Peel) {
+  // Taint only moves along paths where the source is already reachable. The
+  // propagated condition therefore intersects the caller-supplied edge guard
+  // with the source's accumulated taint guard.
   Condition PreCond = getTaintedCond(Src) && Cond;
   std::vector<TaintStep> Steps;
   if (!PreCond.isFalse()) {
@@ -263,7 +278,9 @@ AnalysisState::getTaintTransferTargets(Instruction *Inst) const {
     return Res;
   }
 
-  // Now Inst must be a call instruction.
+  // At call sites we first ask the taint specification for explicit source to
+  // destination transfers. If no model applies, fall back to a narrow set of
+  // memory intrinsics whose dataflow is simple enough to encode locally.
   assert(!seg_utility::isDefiniteCall(Inst));
   for (size_t Idx = 0; Idx < CS->arg_size(); ++Idx) {
     Value *ArgVal = CS->getArgOperand(Idx);
@@ -317,6 +334,9 @@ void AnalysisState::propagateTaintPointer(const ProgramValuePtr &LdPtr,
                                           const ProgramValuePtr &LdVal,
                                           Instruction *Inst,
                                           const Condition &Cond) {
+  // Loads often read through derived pointers. We taint the loaded value from
+  // the pointer itself, then also from pointer-producing symbolic operands so a
+  // zero-offset GEP style derivation still carries the source object taint.
   propagateTaint(LdPtr, LdVal, Inst, Cond);
 
   const auto &Vals = getSymbolicVals(LdPtr);
@@ -348,6 +368,9 @@ Condition AnalysisState::getTaintedCond(const ProgramValuePtr &V) const {
 }
 
 void AnalysisState::buildTaintSummary() {
+  // Summaries only expose the taint that crosses function boundaries. Internal
+  // temporaries stay inside AnalysisState, while guarded formals, returns, and
+  // their step histories are preserved for caller-side replay.
   TaintValSet TaintedFormals;
   TaintValSet TaintedRets;
 
@@ -368,6 +391,9 @@ void AnalysisState::buildTaintSummary() {
 
 void AnalysisState::taintProcessCall(CallInst *Inst, Function *Callee,
                                      const TaintSummary &Smry) {
+  // Importing a callee summary is the dual of buildTaintSummary. Conditions are
+  // translated into the caller context, then the callee's step history gains a
+  // call-boundary marker before it is attached to actual arguments or returns.
   const auto &FormalToReal = FormalToRealMap.at(Inst);
   const auto &CalleeTaintedSteps = Smry.TaintedSteps;
   auto *GraphCS = Graph->findSite<GuardedValueFlowCallSite>(Inst);

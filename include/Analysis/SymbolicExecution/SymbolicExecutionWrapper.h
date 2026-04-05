@@ -6,6 +6,11 @@
 
 namespace llvm {
 
+/// LLVM module pass entry point for the SymbolicExecution subsystem.
+///
+/// The wrapper requests the analyses needed by the symbolic execution engine,
+/// runs the AnalysisDriver over the module, and converts collected traces into
+/// Lotus bug reports.
 class SymbolicExecutionWrapper : public ModulePass {
 public:
   static char ID;

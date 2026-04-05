@@ -64,6 +64,10 @@ AnalysisState::AnalysisState(SymexBugType BugTy, GuardedValueFlowGraph *Graph,
                              Function *Func)
     : BugTy(BugTy), Graph(Graph), F(Func),
       TaintSpec(seg_utility::getTaintSpec()), Solver(new PathCondSolver()) {
+  // Seed the entry state from the GVFG interface. Pointer-like formals start
+  // with a symbolic heap object so later loads/stores have something to talk
+  // about, while every argument also gets a symbolic register value because
+  // callers may constrain scalars even when no precise definition exists here.
   for (auto Iter = Graph->arg_begin(), EIter = Graph->arg_end(); Iter != EIter;
        ++Iter) {
     // common arg or pseduo arg node
@@ -101,6 +105,9 @@ void AnalysisState::createMemoryObject(const ProgramValuePtr &Ptr,
                                        PTItem::MemObjKind Kind,
                                        const PropertyValuePtr &Sz,
                                        const Condition &Cond) {
+  // The points-to map is the heap model for this executor. We attach a guarded
+  // PTItem instead of mutating a separate heap store so one program value can
+  // simultaneously name several abstract objects under different path facts.
   const auto &Pt = PTItem(Ptr, Kind, 0, Sz);
   PointsTo[Ptr].addValue(Pt, Cond);
 }
@@ -179,6 +186,10 @@ void AnalysisState::transfer(Instruction *Inst, AnalysisDriver &Driver) {
   Function *CurFun = Inst->getParent()->getParent();
   // The return insts should be unified.
   assert(!Driver.hasSummary(CurFun));
+  // Normalize non-instruction operands up front. Most transfer helpers assume
+  // `Regs` already has an entry for constants, arguments, and function values,
+  // and `initSymbol` gives them an explicit unknown when no stronger fact is
+  // available yet.
   // example: branch inst --- create val for cond
   // gep p 0 1 2  -- create val for const
   for (unsigned Idx = 0; Idx < Inst->getNumOperands(); ++Idx) {
@@ -294,6 +305,10 @@ void AnalysisState::transfer(Instruction *Inst, AnalysisDriver &Driver) {
       }
       processMemAlloc(CallI, AllocSizeArgs);
     } else {
+      // Calls split into three cases: unresolved/declaration calls go through
+      // library modeling, summarized definitions are instantiated on demand,
+      // and deep recursion falls back to the unknown-library model to avoid
+      // unbounded inlining.
       // Callee == nullptr, i.e., unresolved function pointers.
       // or Callee->isDeclaration()
       if (!seg_utility::isDefiniteCall(Inst)) {
@@ -362,6 +377,9 @@ void AnalysisState::processAlloca(Instruction *Inst) {
   ProgramValuePtr _numV(NumElements);
   ProgramValuePtr NumV(NumElements);
   if (NumV.isVacuous()) {
+    // A vacuous size means the builder could not recover a meaningful array
+    // bound. Keep the location alive with a placeholder object so downstream
+    // checks still see a dereferenceable abstract region.
     createMemoryObject(Dst, PTItem::MK_PLACEHOLDER);
     // Avoid crashing and return a conservative object.
     return;
@@ -379,6 +397,9 @@ void AnalysisState::processAlloca(Instruction *Inst) {
     PropertyValuePtr AllocSize = GetProperty<PropertyInteger>(std::move(Sz));
     createMemoryObject(Dst, PTItem::MK_CONCRETE, AllocSize);
   } else {
+    // Non-constant stack extents stay path-sensitive. Each guarded symbolic
+    // size becomes its own memory object so later BOF checks can reason about
+    // feasible sizes rather than collapsing them to one unknown blob.
     auto SizeVals = Regs.at(NumElements) * PropertyInteger(TySize);
     for (const auto &SizeCond : SizeVals) {
       createMemoryObject(Dst, PTItem::MK_CONCRETE, SizeCond.first,
@@ -405,6 +426,9 @@ void AnalysisState::assignVal(const ProgramValuePtr &Dst,
     Regs[Dst].addValues(Regs.at(Src), Cond);
   }
 
+  // Pointer-typed facts travel alongside scalar facts. This keeps the value
+  // domain and the points-to domain synchronized when a move/cast copies a
+  // pointer without touching memory.
   if (PointsTo.count(Src)) {
     PointsTo[Dst].addValues(PointsTo.at(Src), Cond);
   }
@@ -444,6 +468,10 @@ void AnalysisState::assignPtr(const ProgramValuePtr &Dst,
   }
 
   const auto &SrcPts = PointsTo.at(Src);
+  // Pointer arithmetic is modeled by shifting every reachable abstract object
+  // by every feasible offset. The destination is optionally strong-updated
+  // because GEP results replace an SSA value, not because the underlying heap
+  // object changed.
   SrcPts.forEach2(
       Offset,
       [&](const PTItem &Target, const PropertyValuePtr &OffVal,
@@ -481,6 +509,10 @@ void AnalysisState::processGEP(Instruction *Inst) {
   auto *SrcPtr = getNode(seg_utility::getPointerOperand(GEP));
   initPointsToTarget(SrcPtr, Inst);
 
+  // `PropertySymExpr` offsets are computed in bytes, mirroring LLVM GEP
+  // semantics, while PTItem offsets are tracked in bits. Keep both views: the
+  // points-to set feeds memory-region reasoning, and the register value keeps
+  // the affine pointer expression used by later arithmetic and summary code.
   auto OffsetInBits = OffsetVals * PropertyInteger(8);
 
   auto *Dst = getNode(Inst);
@@ -510,6 +542,10 @@ void AnalysisState::initPointsToTarget(const ProgramValuePtr &Ptr,
     return;
   }
 
+  // Loads, stores, and unknown calls require every dereferenceable pointer to
+  // name at least one abstract region. Globals and pseudo-arguments are treated
+  // as valid but size-unknown objects, while everything else falls back to a
+  // placeholder region so the executor stays conservative instead of failing.
   if (isGloablLLVMVal(Ptr) || isPseudoArgVal(Ptr)) {
     createMemoryObject(Ptr, PTItem::MK_SYMBOLIC);
   } else {
@@ -530,6 +566,9 @@ void AnalysisState::processLoad(Instruction *Inst) {
   if (LdInstNode->getNumChildren() >= 1) {
     if (auto *LdMemNode =
             dyn_cast<GuardedValueFlowNode>(LdInstNode->getChild(0))) {
+      // The GVFG memory child identifies which reaching definitions can feed
+      // this load. `processLoadPtr` then materializes the guarded values from
+      // that region into the SSA destination.
       auto *Dst = getNode(Inst);
       processLoadPtr(LdPtr, LdMemNode, Dst, Inst);
     }
@@ -546,6 +585,9 @@ void AnalysisState::processLoadPtr(const ProgramValuePtr &Ptr,
 
   auto Incomings = seg_utility::getIncomingValuesForLoad(LdMemNode);
 
+  // Loads do not read a concrete heap cell here. Instead they merge the GVFG
+  // producers that reach the memory node, guarded by the region condition that
+  // says when that producer is the active store for this access.
   for (auto &Item : Incomings) {
     Condition Cond = getRegionCond(Item.second);
 
@@ -576,6 +618,9 @@ void AnalysisState::collectEscapeObjs() {
 void AnalysisState::processReturn() {
   auto *RetNode = Graph->getCommonReturn();
   if (RetNode) {
+    // Summaries export through GVFG return nodes rather than raw LLVM return
+    // instructions. This keeps ordinary returns and pseudo returns in one
+    // format so callers can instantiate them uniformly.
     if (RetNode->getNumChildren() >= 1) {
       auto *RetValNode = cast<GuardedValueFlowNode>(RetNode->getChild(0));
       initSymbol(RetValNode);
@@ -621,6 +666,9 @@ void AnalysisState::processReturn() {
 void AnalysisState::processStore(Instruction *Inst) {
   auto *StoreI = cast<StoreInst>(Inst);
   ProgramValuePtr StPtr = getNode(seg_utility::getPointerOperand(StoreI));
+  // The actual def-use effect of a store is represented in the GVFG. The local
+  // transfer only makes sure the destination pointer has a memory object so BOF
+  // and null/UAF queries can still reason about the access site itself.
   initPointsToTarget(StPtr, Inst);
 }
 
@@ -699,7 +747,9 @@ void AnalysisState::processFreeCall(CallInst *Inst) {
   auto *PtrNode = getNode(Ptr);
   Condition BBCond = getLocalCond(Inst->getParent());
 
-  // Mark this pointer as freed
+  // Track both the SSA pointer passed to free and every allocation object it
+  // may reference. Double-free checks care about repeated frees of the same
+  // value, while UAF checks usually need the freed allocation site.
   FreedPtrSet.addValue(PtrNode, BBCond);
 
   // Also mark all points-to targets as freed
@@ -724,6 +774,9 @@ void AnalysisState::processLibraryCall(CallInst *Inst) {
     return;
   }
 
+  // Declarations are handled by a small set of explicit models. Anything not
+  // recognized here either has no state effect that matters to this analysis,
+  // or is handed to the conservative unknown-library fallback below.
   // Handle free() calls for UAF and Double-Free detection
   std::string CalleeName = Callee->getName().str();
   if (CalleeName == "free" || CalleeName == "_ZdlPv" ||
@@ -756,6 +809,9 @@ void AnalysisState::processLibraryCall(CallInst *Inst) {
     auto IntrinsicID = Callee->getIntrinsicID();
 
     if (IntrinsicID == Intrinsic::expect) { // compiled from __builtin_expect
+      // `llvm.expect` carries branch-likelihood metadata only, so preserve
+      // the value unchanged and let the normal condition machinery decide
+      // feasibility elsewhere.
       if (Inst->arg_size() >= 1) {
         auto *Arg0 = getNode(Inst->getArgOperand(0));
         bool hasArg0 = Regs.count(Arg0);
@@ -765,6 +821,9 @@ void AnalysisState::processLibraryCall(CallInst *Inst) {
         Regs[Dst].setValues(getRegsSafe(Arg0, "expect"));
       }
     } else if (IntrinsicID == Intrinsic::umul_with_overflow) {
+      // The full struct result is not modeled precisely. We keep the product
+      // because that is the part used by current integer-range clients, and
+      // fall back to a placeholder object if the operands are unavailable.
       auto *Arg0 = getNode(Inst->getArgOperand(0));
       auto *Arg1 = getNode(Inst->getArgOperand(1));
       bool has0 = Regs.count(Arg0);
@@ -842,11 +901,16 @@ void AnalysisState::processAsUnknownLib(CallInst *Inst) {
         continue;
       }
 
+      // Unknown calls are allowed to read or clobber non-aggregate pointees.
+      // Initializing their abstract targets here makes that side effect visible
+      // to later checks without exploding every field-sensitive aggregate.
       initPointsToTarget(getNode(Arg), Inst);
     }
   }
 
   if (Inst->getType()->isPointerTy()) {
+    // A pointer result from an opaque call is treated as a fresh unknown region
+    // rather than aliasing any specific incoming object.
     initPointsToTarget(getNode(Inst), Inst);
   }
 }
@@ -856,6 +920,10 @@ Condition AnalysisState::getLocalCond(BasicBlock *BB) const {
   if (LocalCondMap.count(BB)) {
     return LocalCondMap.at(BB);
   } else {
+    // Local control conditions are memoized because the same block guard is
+    // reused by queries, taint propagation, and free tracking. Call-site output
+    // constraints are conjoined so summarized callees stay linked to the actual
+    // values returned at this instantiation site.
     Condition BBCond(Solver->getCtrlDeps(BB, Graph), Solver.get());
 
     // FIXME
@@ -871,6 +939,9 @@ Condition AnalysisState::getDataDepsCond(GuardedValueFlowNode *N) const {
   if (DataDepsCondMap.count(N)) {
     return DataDepsCondMap.at(N);
   } else {
+    // Data-dependence conditions capture the symbolic guards attached to a GVFG
+    // producer. They are threaded into pointer arithmetic and summary mapping
+    // so imported facts stay valid only when their defining values are valid.
     Condition CurDeps(Solver->getDataDeps(N), Solver.get());
     CurDeps = CurDeps && getCallSiteOutDeps();
     DataDepsCondMap.insert(std::make_pair(N, CurDeps));
@@ -881,6 +952,9 @@ Condition AnalysisState::getDataDepsCond(GuardedValueFlowNode *N) const {
 Condition AnalysisState::getCallSiteOutDeps() const {
   auto UsedCSOuts = Solver->getUsedCallSiteOutput();
   Condition ResCond = Condition::getTrueCond();
+  // Summary instantiation introduces call-site output variables. Whenever one
+  // appears in a cached condition, tie it back to the concrete symbolic values
+  // observed at this caller so imported path constraints remain meaningful.
   for (auto *CSO : UsedCSOuts) {
     if (CSOutputCondMap.count(CSO)) {
       Condition CurCond = CSOutputCondMap.at(CSO);
@@ -904,6 +978,9 @@ Condition AnalysisState::getRegionCond(GuardedValueFlowRegionNode *R) const {
   if (RegionCondMap.count(R)) {
     return RegionCondMap.at(R);
   } else {
+    // Region nodes encode which store/load edge is active in the symbolic heap.
+    // Caching the resulting condition avoids rebuilding the same SMT fragment
+    // for every load, query, and summary export that touches the region.
     Condition Cond(R, getSolver());
     // FIXME
     Cond = Cond && getCallSiteOutDeps();
@@ -915,6 +992,9 @@ Condition AnalysisState::getRegionCond(GuardedValueFlowRegionNode *R) const {
 Condition AnalysisState::getPhiCond(
     const GuardedValueFlowPhiNode *PhiNode,
     const GuardedValueFlowPhiNode::Incoming InNode) const {
+  // Phi guards are path predicates supplied by the GVFG builder. We only add
+  // call-site output constraints here, not new control structure, so summary
+  // imports can reuse the same incoming-edge semantics as intraprocedural flow.
   auto PhiCond = Solver->getPhiGated(PhiNode, InNode);
   auto ResCond = Condition(PhiCond, Solver.get());
   // FIXME
@@ -951,6 +1031,10 @@ GuardedSymbolicValSet AnalysisState::evalExpr(
     return E;
   }
 
+  // `PropertySymExpr` is an affine template over program variables. Evaluating
+  // it substitutes each variable with the guarded values known in `M`; when a
+  // binding is missing we materialize a fresh free variable so summaries remain
+  // sound instead of silently dropping that dimension.
   std::vector<GuardedSymbolicValSet> FreeVarStorage;
   GuardedSymbolicValSet Result;
   std::vector<
@@ -1048,6 +1132,10 @@ Condition AnalysisState::getMappingCond(Instruction *CS,
     return MappingCondCache.at(CS);
   }
 
+  // Summary import is guarded by a single mapping condition that equates each
+  // callee formal with the caller-side SMT expression chosen for this callsite.
+  // That condition also pulls in data dependencies for non-constant actuals so
+  // the instantiated summary only fires along feasible caller paths.
   std::string CSSuffix = getCallsiteSuffix(CS);
   SMTExprVec Vec = Solver->createEmptySMTExprVec();
   std::vector<Condition> RealDataDeps;

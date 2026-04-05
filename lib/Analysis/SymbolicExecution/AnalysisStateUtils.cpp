@@ -1,8 +1,10 @@
 //===----------------------------------------------------------------------===//
 //
 // AnalysisState utility implementations.
-// Includes helper methods for points-to items, guarded sets, and C-string
-// state.
+// This file holds the small abstractions that keep the core transfer logic from
+// being buried in container bookkeeping. Most helpers here preserve guarded
+// symbolic facts while moving between points-to items, value sets, and the
+// conservative CStringState cache.
 //
 //===----------------------------------------------------------------------===//
 
@@ -86,6 +88,9 @@ std::string PTItem::getID() const { return AP.getID(); }
 PtsSet PtsSet::offsetBy(const GuardedSymbolicValSet &Offs) const {
   PtsSet Res;
 
+  // The guarded cartesian product is central to symbolic memory updates. Each
+  // points-to item is paired with each feasible offset, and the resulting guard
+  // remembers which path allows that derived access path.
   forEach2(
       Offs,
       [&](const PTItem &Pt, const PropertyValuePtr &Off,
@@ -105,6 +110,9 @@ GuardedSymbolicValSet::binOp(const GuardedSymbolicValSet &Rhs,
                              PropertyValue::BinOp Op, size_t Threshold) const {
   GuardedSymbolicValSet Result;
 
+  // These utility combinators are the scalar analogue of state transfer. They
+  // preserve path guards while bounding explosion through Threshold so callers
+  // can reuse one implementation for arithmetic, offsets, and comparisons.
   forEach2(
       Rhs,
       [&](const PropertyValuePtr &Val1, const PropertyValuePtr &Val2,
@@ -143,6 +151,9 @@ GuardedSymbolicValSet::cmp(const GuardedSymbolicValSet &Rhs,
                                 Condition::getFalseCond(),
                                 Condition::getFalseCond()};
 
+  // cmp groups pairwise comparison outcomes back into guard sets for false,
+  // true, and unknown. Branch transfer can then ask which outcomes stay
+  // feasible without re-enumerating the cross product itself.
   std::vector<std::pair<unsigned, Condition>> CmpRes =
       zip2<GuardedSymbolicValSet, unsigned>(
           Rhs, [=](const PropertyValuePtr &Val1, const PropertyValuePtr &Val2) {
@@ -167,6 +178,9 @@ GuardedSymbolicValSet GuardedSymbolicValSet::seqAdd(
   GuardedSymbolicValSet Res;
   std::vector<std::pair<PropertyValuePtr, Condition>> Selections(Seq.size());
 
+  // seqAdd incrementally picks one value from each guarded sequence and folds
+  // the selected affine terms into a single symbolic result. CString and memory
+  // helpers use it when they need one shared routine for guarded linear sums.
   bool Advanced = false;
   do {
     Advanced = false;
@@ -221,6 +235,10 @@ ProgramValuePtr CStringState::getLenVAtCaller(const ProgramValuePtr &LenV,
 void CStringState::handleCStrLen(const ProgramValuePtr &Ptr, Instruction *Loc,
                                  const Condition &Cond, AnalysisState &CurState,
                                  bool IsDirect) {
+  // CStringState does not attempt a full string domain. Instead it tracks just
+  // enough symbolic length information for library summaries and bug queries,
+  // falling back to fresh unknowns when the underlying memory reasoning is too
+  // imprecise.
   ProgramValuePtr Len = getLenVariable(Ptr, Loc, CurState, IsDirect);
   GuardedSymbolicValSet LenValues;
   if (CurState.hasPts(Ptr)) {
@@ -249,6 +267,9 @@ ProgramValuePtr CStringState::getLenVariable(const ProgramValuePtr &Ptr,
                                              Instruction *Loc,
                                              const AnalysisState &CurState,
                                              bool IsDirect) const {
+  // Direct queries reuse the GVFG node of the length-producing instruction.
+  // Indirect ones synthesize a stable auxiliary name so summaries can carry the
+  // same symbolic length fact across calls.
   ProgramValuePtr Len;
   if (IsDirect) {
     Len = CurState.getNode(Loc);
@@ -264,6 +285,7 @@ CStringState::computeCStrLength(const ProgramValuePtr &Len, Instruction *Loc,
                                 const PtsSet &Pts, AnalysisState &CurState,
                                 const Condition &Cond) {
   GuardedSymbolicValSet LenValues;
+  (void)Cond;
 
   Pts.forEach(
       [&](const PTItem &Pt, const Condition &Cond) {
@@ -300,6 +322,9 @@ GuardedSymbolicValSet AnalysisState::computeCStrLength(Instruction *Pos,
 void CStringState::onProcessCall(Instruction *Inst, Function *Callee,
                                  AnalysisState &CurState,
                                  const CStringState &Smry) {
+  // Summary import re-materializes callee-side length variables in the caller.
+  // The inlineVals result tells us which caller points-to items correspond to
+  // each summarized string, after which length facts are recomputed locally.
   const Condition &CSCond = CurState.getLocalCond(Inst->getParent());
   for (const auto &P : Smry.getLenPts()) {
     auto LenV = P.first;

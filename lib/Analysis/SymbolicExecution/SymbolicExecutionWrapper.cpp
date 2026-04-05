@@ -1,3 +1,12 @@
+//===----------------------------------------------------------------------===//
+//
+// SymbolicExecutionWrapper is the bridge from the internal symbolic executor to
+// Lotus's checker reporting pipeline. It runs the driver as a legacy module
+// pass, then turns taint and execution traces into BugReport objects with the
+// metadata and step labels expected by downstream consumers.
+//
+//===----------------------------------------------------------------------===//
+
 #include "Analysis/SymbolicExecution/SymbolicExecutionWrapper.h"
 
 #include "llvm/IR/Instructions.h"
@@ -28,6 +37,9 @@ struct SymexBugTypeInfo {
 };
 
 SymexBugTypeInfo getBugTypeInfo(AnalysisState::SymexBugType bug_type) {
+  // Keep the mapping from internal bug kind to external report vocabulary in a
+  // single table-like switch. The driver and AnalysisState only traffic in the
+  // enum, while the wrapper owns presentation details such as CWE and severity.
   switch (bug_type) {
   case AnalysisState::BUG_TY_BOF:
     return {"Symbolic Execution Buffer Overflow", BugDescription::BI_HIGH,
@@ -225,6 +237,9 @@ int llvm::SymbolicExecutionWrapper::getBugTypeId(
 
 void llvm::SymbolicExecutionWrapper::emitBugReports(
     const SymbolicExecution::AnalysisDriver &driver) const {
+  // emitBugReports materializes the final user-facing report. Taint steps are
+  // emitted first so source-to-sink context is visible before the execution
+  // trace is replayed back toward the primary bug instruction.
   auto bug_traces = driver.getBugTraces();
   auto &mgr = BugReportMgr::get_instance();
 
@@ -260,6 +275,8 @@ void llvm::SymbolicExecutionWrapper::emitBugReports(
       if (it->Inst == nullptr) {
         continue;
       }
+      // The internal trace stores the sink separately. Skip the degenerate
+      // endpoints here, then append one canonical primary bug step below.
       if (it == trace_steps.rbegin() && trace_steps.size() == 1) {
         continue;
       }
@@ -299,6 +316,9 @@ void llvm::SymbolicExecutionWrapper::getAnalysisUsage(AnalysisUsage &AU) const {
 }
 
 bool llvm::SymbolicExecutionWrapper::runOnModule(Module &M) {
+  // The wrapper owns pass-pipeline integration and report emission only. All
+  // symbolic state propagation and summary scheduling live underneath in
+  // AnalysisDriver and AnalysisState.
   auto &builder = getAnalysis<lotus::gvfg::GuardedValueFlowGraphBuilderPass>();
   seg_utility::initAnalysisInterface(&M, &M.getDataLayout(), &builder);
 

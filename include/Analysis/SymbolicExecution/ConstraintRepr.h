@@ -17,12 +17,25 @@
 #include <vector>
 
 namespace SymbolicExecution {
+
+/// Encodes symbolic path conditions used by the symbolic execution engine.
+///
+/// This header keeps the public condition abstraction lightweight. Most clients
+/// manipulate Condition values symbolically and only materialize solver terms
+/// when a query needs to be discharged.
+
 using lotus::gvfg::GuardedValueFlowRegionNode;
 
 class PathCondSolver;
 
 class AnalysisState;
 
+/// A solver backed boolean condition attached to symbolic states and sets.
+///
+/// Conditions are either literals or SMT expressions owned by a
+/// PathCondSolver. They serve as the shared guard representation for symbolic
+/// values, points to facts, and bug queries, which lets the analysis combine
+/// dataflow style joins with path sensitive reasoning.
 class SMTCondition {
 public:
   SMTCondition() = default;

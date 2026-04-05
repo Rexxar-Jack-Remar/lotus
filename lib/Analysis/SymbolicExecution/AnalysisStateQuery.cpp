@@ -134,6 +134,11 @@ StringRef simplifyIntrinsicName(StringRef IntrinsicName) {
 /// Build queries for the current instruction if applicable (e.g., memory access
 /// for BOF).
 void AnalysisState::buildQuery(Instruction *Inst) {
+  // This is the per-instruction dispatch point for bug querying. The executor
+  // has already propagated symbolic state to Inst, so the remaining job here is
+  // to recognize bug-relevant instructions and hand each one to the bug-class
+  // specific encoder that knows how to turn the current abstract state into one
+  // or more NumericalQuery objects.
   // The return insts should be unified.
   auto OpC = Inst->getOpcode();
   if (OpC == Instruction::Load && (BugTy & BUG_TY_BOF)) {
@@ -261,6 +266,10 @@ void AnalysisState::buildQuery(Instruction *Inst) {
 void AnalysisState::buildBofQueryLoadStore(Instruction *Inst,
                                            const ProgramValuePtr &Ptr,
                                            Type *AccTy) {
+  // BOF queries are emitted from each feasible points-to target of the access.
+  // The per-target condition is kept with the query trace so later summary
+  // export and reporting can still tell which heap object and path made the
+  // access potentially unsafe.
   const PtsSet &Pts = getPts(Ptr);
   auto AccSz =
       GetProperty<PropertyInteger>(seg_utility::getTypeSizeInBits(AccTy));
@@ -276,6 +285,10 @@ void AnalysisState::buildBofQueryLoadStore(Instruction *Inst,
 }
 
 void AnalysisState::buildDbzQuery(Instruction *Inst) {
+  // DBZ uses the divisor value directly as the bug condition. Concrete zero
+  // becomes an unconditional error query. Symbolic divisors become direct
+  // numerical predicates that later ask whether the divisor can equal zero
+  // under the current path condition and any taint requirements.
   const auto &DivisorVals = getSymbolicVals(getNode(Inst->getOperand(1)));
   DivisorVals.forEach([&](const PropertyValuePtr &Val, const Condition &Cond) {
     if (Val == (int64_t)0) {
@@ -299,6 +312,11 @@ AnalysisState::createBofQuery(const PTItem &Pt, const PropertyValuePtr &AccSz,
     return {};
   }
 
+  // BOF encoding splits along the memory model. Concrete objects can often be
+  // discharged immediately by comparing offset and access size with the object
+  // extent. Symbolic objects keep the alloc site and arithmetic ingredients in
+  // an indirect query so the same summary can be re-instantiated at callers
+  // with caller-specific points-to and offset facts.
   auto Off = Pt.getOffset();
   // under read/write of a concrete memory object ==> must error
   if (Pt.isConcrete() && Off < int64_t(0)) {
@@ -440,6 +458,10 @@ void AnalysisState::buildBofQueryLibCall(CallInst *Inst) {
     return seg_utility::isMatchLib(Inst, FuncName.str(), Target);
   };
 
+  // Library models reuse the same BOF query builders as regular loads and
+  // stores. The difference is only how access size is reconstructed from the
+  // API contract, for example byte counts, strlen-derived sizes, or tainted
+  // source buffers when the size is not materialized as a direct value.
   if (matchLib("memset") || matchLib("llvm.memset")) {
     Value *Ptr = Inst->getArgOperand(0);
     Value *NumBytes = Inst->getArgOperand(2);
@@ -792,6 +814,10 @@ void IndirectNumericalQuery::dump() const {
 void AnalysisState::queryProcessCall(
     Instruction *Inst, Function *Callee,
     const std::vector<std::pair<QuerySet, std::vector<TraceStep>>> &Smry) {
+  // Query summaries are imported lazily at call sites. Each summarized query is
+  // re-instantiated in caller terms, then extended with a call trace step so a
+  // later report can explain both the sink in the callee and the call edge that
+  // brought the summary into the caller.
   for (const auto &P : Smry) {
     auto Trace = P.second;
     Trace.emplace_back(TraceStep(TraceStep::TRACE_STEP_CALL, Inst, Inst));
@@ -951,6 +977,11 @@ QuerySet AnalysisState::inlineBofQuery(const NumericalQueryPtr &Q,
 
     return Res;
   } else {
+    // Indirect BOF summaries are the interprocedural form used when the callee
+    // only knows a symbolic base object. Re-instantiation replaces that formal
+    // base with the caller's points-to set, adds caller offsets and access
+    // sizes, and collapses back to direct must-error or symbolic queries when a
+    // concrete caller object makes the check precise enough.
     const auto *IDQ = cast<IndirectNumericalQuery>(Qptr);
     auto BasePtr = IDQ->getBasePtr();
     auto Offset = IDQ->getOffset();
@@ -1068,6 +1099,11 @@ void AnalysisState::buildQuerySummary() {
 
   std::vector<std::pair<QuerySet, std::vector<TraceStep>>> RemainingQueries;
 
+  // QueryToTraces stores one query with the trace that led to its sink. Before
+  // reporting, we reorganize that stream into context-sharing batches so the
+  // solver can answer many bug predicates under the same path condition in one
+  // pass. Queries that still need more precise handling are kept for later
+  // stages by rebuilding QueryToTraces from the unresolved subset.
   // Group queries by shared context (QDepCond) for batch checking
   struct QueryInfo {
     NumericalQueryPtr Query;
@@ -1083,7 +1119,10 @@ void AnalysisState::buildQuerySummary() {
   // batch checking of queries that differ only by callsite renaming
   std::map<std::string, std::vector<size_t>> ContextGroups;
 
-  // Collect all queries and group by context
+  // Collect all queries and group by context. The normalization step strips the
+  // callsite-specific suffixes that summary import adds during renaming, which
+  // lets equivalent caller contexts share a batch even though their SMT names
+  // differ.
   for (size_t i = 0; i < QueryToTraces.size(); ++i) {
     const auto &P = QueryToTraces[i];
     const auto &Trace = P.second;
@@ -1198,7 +1237,10 @@ void AnalysisState::buildQuerySummary() {
       llvm::errs() << "[MPA] Checking batch with " << Indices.size()
                    << " queries sharing normalized context\n";
 
-      // Separate "must sat" queries from regular queries
+      // Separate unconditional bug conditions from predicate-bearing queries.
+      // "Must sat" entries only need the shared context to be feasible, while
+      // the others contribute an additional bug predicate on top of that
+      // context.
       std::vector<size_t> MustSatIndices;
       std::vector<size_t> RegularIndices;
 
@@ -1233,7 +1275,10 @@ void AnalysisState::buildQuerySummary() {
         }
       }
 
-      // Batch check regular queries that share the same context
+      // Batch checking covers the pure numerical predicate. Taint-sensitive
+      // filtering is still delegated to the existing per-bug reporting path,
+      // so the optimization reduces repeated context solving without changing
+      // the bug-specific report criteria.
       if (!RegularIndices.empty()) {
         // llvm::errs() << "[MPA] Batch checking " << RegularIndices.size()
         //              << " regular queries\n";

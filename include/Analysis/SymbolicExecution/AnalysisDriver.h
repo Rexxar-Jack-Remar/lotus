@@ -8,6 +8,14 @@
 
 namespace SymbolicExecution {
 
+/// Drives whole function and whole module symbolic execution.
+///
+/// The driver owns per function summaries, schedules analysis over GVFG based
+/// symbolic execution, and collects bug reports in a form that the wrapper pass
+/// can turn into user visible diagnostics. Summaries are stored by callee so
+/// later analyses can reuse interprocedural results instead of re executing the
+/// same function body.
+
 class AnalysisDriver {
 public:
   AnalysisDriver();

@@ -12,6 +12,14 @@
 #include <vector>
 
 namespace SymbolicExecution {
+
+/// Builds and checks SMT formulas for SymbolicExecution path conditions.
+///
+/// The solver is the bridge between Lotus symbolic values and SMT terms. It
+/// translates PropertyValue based expressions, region guards, and dependence
+/// information from the GVFG into formulas that can be reused across many
+/// satisfiability queries during one analysis run.
+
 using llvm::BasicBlock;
 using llvm::Function;
 using lotus::gvfg::GuardedValueFlowCallOutputNode;
@@ -22,6 +30,14 @@ using lotus::gvfg::GuardedValueFlowRegionNode;
 using lotus::gvfg::GuardedValueFlowSolver;
 class Query;
 class PropertySymExpr;
+
+/// Solver owned context for constructing and checking symbolic path predicates.
+///
+/// A PathCondSolver caches the SMT factory, dependence queries, and auxiliary
+/// state needed to express symbolic access path constraints. AnalysisState and
+/// summaries use separate solver instances when they need isolated ownership of
+/// expressions, and translate conditions when moving facts across solver
+/// boundaries.
 class PathCondSolver {
 public:
   PathCondSolver();

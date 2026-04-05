@@ -45,7 +45,19 @@ template <> struct hash<SymbolicExecution::PTItem> {
 namespace SymbolicExecution {
 class PTItem;
 
-/// Represents an abstract memory location: Base + Offset
+/// Public symbolic state abstractions for the SymbolicExecution engine.
+///
+/// The types in this header model symbolic access paths, guarded facts, and
+/// per function analysis state. They provide the public vocabulary used by the
+/// ISSTA'24 BOF style analysis, where symbolic access paths are tracked under
+/// path conditions and summaries are reused across calls.
+
+/// Represents a symbolic access path, base object plus abstract offset.
+///
+/// AccessPath is the canonical memory designator used throughout the analysis.
+/// The base identifies the allocation site or pointer root, while the offset is
+/// a PropertyValue that can stay symbolic when exact byte precision is not
+/// known.
 class AccessPath {
   friend class PTItem;
 
@@ -100,7 +112,12 @@ public:
   }
 };
 
-/// Points-to set item. Represents a memory object with size and kind.
+/// Describes one abstract memory object reachable by symbolic execution.
+///
+/// PTItem pairs an access path with object metadata. The kind records whether
+/// the object is concrete, symbolic, or a placeholder approximation, and the
+/// optional size is used by clients that reason about disjointness, bounds, and
+/// memory object reuse.
 class PTItem {
 public:
   enum MemObjKind { MK_CONCRETE, MK_SYMBOLIC, MK_PLACEHOLDER };
@@ -152,7 +169,12 @@ private:
 
 class GuardedSymbolicValSet;
 
-/// A generic map from KeyTy to PathCondition, enforcing a size limit.
+/// CRTP container for sets of facts guarded by path conditions.
+///
+/// GuardedSet stores one condition per abstract fact and joins duplicate keys
+/// by disjunction. The size cap keeps path sensitive state finite, while the
+/// guard representation preserves the path conditions under which each fact
+/// holds.
 template <typename Derived, typename KeyTy,
           unsigned *Threshold = &AnalysisLimit::VALUE_SET_LIMIT_V>
 class GuardedSet {
@@ -355,7 +377,7 @@ public:
   PtsSet offsetBy(const GuardedSymbolicValSet &Offs) const;
 };
 
-/// Tracks a set of symbolic values with path conditions.
+/// Symbolic values paired with the conditions that make each value feasible.
 class GuardedSymbolicValSet
     : public GuardedSet<GuardedSymbolicValSet, PropertyValuePtr,
                         &AnalysisLimit::SYMBOLIC_VAL_SET_LIMIT_V> {
@@ -407,12 +429,15 @@ public:
                              unsigned Pred) const;
 };
 
+/// Set of program values whose membership is guarded by path conditions.
 class GuardedProgramValSet
     : public GuardedSet<GuardedProgramValSet, ProgramValuePtr> {
 public:
   GuardedProgramValSet() = default;
   GuardedProgramValSet(const ProgramValuePtr &V) { addValue(V); }
 };
+
+/// Set of symbolic access paths guarded by path conditions.
 class GuardedAccessPathSet
     : public GuardedSet<GuardedAccessPathSet, AccessPath> {};
 
@@ -469,7 +494,11 @@ class TaintStep;
 
 class TaintValSet : public GuardedSet<TaintValSet, ProgramValuePtr,
                                       &AnalysisLimit::TAINT_VAL_SET_LIMIT_V> {};
-/// Summary of taint information for a function.
+/// Summary of taint facts exported from one analyzed function.
+///
+/// The summary records which formals and returns are tainted, plus the steps
+/// needed to reconstruct a taint trace after the summary is reused at a call
+/// site.
 class TaintSummary {
   friend class AnalysisState;
   friend class AnalysisSummary;
@@ -503,7 +532,11 @@ public:
 class NumericalQueryPtr;
 class QuerySet;
 
-/// Abstract base class for numerical bug queries (BOF, DBZ, etc.).
+/// Abstract bug query discharged against the current symbolic state.
+///
+/// Queries capture the safety property that should hold at a program point.
+/// Some queries ask about a single symbolic expression, while others reason
+/// about a symbolic access path together with an access size.
 class NumericalQuery {
   friend class NumericalQueryPtr;
 
@@ -543,7 +576,11 @@ private:
   void translate(PathCondSolver *Solver) const { Deps.translate(Solver); }
 };
 
-/// A direct query involves checking a specific condition or value.
+/// Query over one symbolic predicate or value expression.
+///
+/// Direct queries are used when the bug check can be phrased as a pure numeric
+/// condition, such as divisor non zero or overflow guards for an arithmetic
+/// expression.
 class DirectNumericalQuery : public NumericalQuery {
   DirectNumericalQuery(unsigned BugTy, const PropertyValuePtr &Qr, bool Eq,
                        const GuardedProgramValSet &Deps)
@@ -678,7 +715,11 @@ private:
   bool Eq = false;
 };
 
-/// An indirect query involves base pointer, offset, and access size.
+/// Query over a symbolic memory access.
+///
+/// Indirect queries keep the base pointer, symbolic offset, and access size
+/// separate so the analysis can combine pointer facts with numerical reasoning
+/// when approximating memory safety checks such as BOF.
 class IndirectNumericalQuery : public NumericalQuery {
   IndirectNumericalQuery(unsigned BugTy, const ProgramValuePtr &BasePtr,
                          const PropertyValuePtr &Offset,
@@ -815,7 +856,13 @@ private:
 };
 
 class TraceStep;
-/// Captures the analysis results for a function to be used as a summary.
+
+/// Interprocedural summary exported from one analyzed function.
+///
+/// The summary stores the observable state needed by callers: symbolic return
+/// values, escaped object sizes, points to facts, taint information, and the
+/// query traces that justify reported bugs. Conditions are translated into a
+/// summary owned solver so the summary can outlive the local AnalysisState.
 class AnalysisSummary {
   friend class AnalysisState;
 
@@ -907,9 +954,14 @@ public:
   Value *V2;
 };
 
-/// The main state class for symbolic execution within a function.
-/// Manages registers (symbolic values), memory (points-to graph), constraints,
-/// and taint info.
+/// Symbolic state maintained while analyzing one function.
+///
+/// AnalysisState is the core mutable abstraction of the subsystem. It tracks
+/// symbolic register values, points to information over symbolic access paths,
+/// path conditions, taint propagation, freed memory facts, and call mapping
+/// state used to instantiate summaries. When a function finishes, the relevant
+/// portion of this state is packaged into an AnalysisSummary for reuse by later
+/// callers.
 class AnalysisState {
   friend class AnalysisSummary;
   friend class CStringState;

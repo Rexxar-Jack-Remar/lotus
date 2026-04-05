@@ -23,6 +23,14 @@ class PropertySymExpr;
 class Var;
 
 class PropertyValuePtr;
+
+/// Base class for symbolic properties attached to program values and memory.
+///
+/// A `PropertyValue` is the arithmetic layer of the symbolic execution engine.
+/// Analysis state uses these objects for offsets, sizes, scalar facts, and
+/// path-sensitive comparisons. Concrete integers and affine symbolic
+/// expressions share this interface so transfer functions can propagate values
+/// without committing to one representation too early.
 class PropertyValue {
 public:
   enum BinOp { Add, Sub, Mul, UDiv, SDiv };
@@ -49,7 +57,9 @@ public:
   PropertyValuePtr binOp(const PropertyValuePtr &Rhs, BinOp Op) const;
   PropertyValuePtr binOp(const PropertyValue &Rhs, BinOp Op) const;
 
-  // 0 - false; 1 - true; 2 -unknown
+  /// Path-sensitive comparison used when a client wants a three-way answer.
+  /// Returns 0 for false, 1 for true, and 2 when the current representation is
+  /// not precise enough to decide.
   unsigned cmp(const PropertyValue *Rhs, unsigned Pred) const;
 
   // handle the NumRes = 2 case
@@ -58,10 +68,18 @@ public:
 
   PropertyValueKind getKind() const { return ValKind; }
 
+  /// Renames symbolic variables according to `M`.
+  ///
+  /// This is the main hook used by call/return summary application and by state
+  /// rewrites that move facts from one symbolic context to another.
   virtual PropertyValuePtr map(const std::unordered_map<Var, Var> &M,
                                bool Total = true) const;
   virtual PropertyValuePtr mapWithDefault(const std::unordered_map<Var, Var> &M,
                                           Var DefaultV) const;
+
+  /// Substitutes symbolic variables with already computed property values.
+  /// Clients use this when simplifying state fragments or instantiating summary
+  /// facts with concrete caller-side expressions.
   virtual PropertyValuePtr
   map(const std::unordered_map<Var, PropertyValuePtr> &M) const;
 
@@ -83,6 +101,13 @@ private:
 };
 
 class ProgramValuePtr;
+
+/// Shared wrapper used throughout the engine to pass property values by value.
+///
+/// `PropertyValuePtr` gives transfer functions lightweight algebraic syntax and
+/// structural equality while keeping the underlying objects immutable to most
+/// clients. This is the value type that appears in access paths, memory object
+/// sizes, constraint construction, and summary materialization.
 class PropertyValuePtr {
 public:
   PropertyValuePtr() {}

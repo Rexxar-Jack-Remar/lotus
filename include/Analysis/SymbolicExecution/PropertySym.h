@@ -9,6 +9,13 @@
 
 namespace SymbolicExecution {
 
+/// Affine symbolic expression used by the symbolic executor.
+///
+/// The current property domain models values as `a1*x1 + ... + an*xn + c`,
+/// where each `xi` is a `Var` and `c` is a `BigInteger` constant. This keeps
+/// offsets, sizes, and scalar equalities cheap to rewrite and compare, while
+/// still preserving enough structure for path-condition generation and summary
+/// application.
 class PropertySymExpr : public PropertyValue {
 public:
   PropertySymExpr(Var V);
@@ -26,6 +33,8 @@ public:
   PropertySymExpr operator-(const BigInteger &R) const;
   PropertySymExpr doBinOp(const BigInteger &R, BinOp Op) const;
 
+  /// True when the affine form has no symbolic variables and therefore reduces
+  /// to a concrete integer constant.
   bool isConstant() const { return coeffs.empty(); }
 
   BigInteger getAsConstant() const {
@@ -33,8 +42,10 @@ public:
     return offsets;
   }
 
+  /// True when the expression is exactly one symbolic variable plus zero.
   bool isVar() const;
 
+  /// Returns that symbolic variable in the degenerate single-variable case.
   Var getAsVar() const;
 
   PropertyValuePtr map(const std::unordered_map<Var, Var> &M,
@@ -58,12 +69,17 @@ public:
 
   size_t hash() const override;
 
+  /// Enumerates the symbolic variables referenced by this expression.
+  /// This is used by callers that need to recover dependencies before solving,
+  /// summary export, or taint-to-value correlation.
   std::unordered_set<Var> getUsedVars() const;
 
   bool operator==(const PropertySymExpr &R) const {
     return coeffs == R.coeffs && offsets == R.offsets;
   }
 
+  /// Adds or updates one affine term. Zero coefficients are normalized away by
+  /// the implementation so downstream clients see a canonical form.
   void addTerm(Var var, BigInteger C);
   void setConstTerm(const BigInteger &C);
   void addConstTerm(const BigInteger &C);
@@ -76,7 +92,9 @@ public:
   PropertyValue *clone() const override { return new PropertySymExpr(*this); }
 
 private:
-  std::map<Var, BigInteger> coeffs; // ordered by pointer address of seg node
+  // Ordered by the underlying symbolic variable identity so hashing, equality,
+  // and debug rendering remain stable across users of the expression.
+  std::map<Var, BigInteger> coeffs;
   BigInteger offsets = 0;
 };
 } // namespace SymbolicExecution
