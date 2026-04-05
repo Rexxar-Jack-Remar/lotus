@@ -2,6 +2,7 @@
 
 #include "Analysis/SymbolicExecution/PathCondSolver.h"
 
+#include <atomic>
 #include <sstream>
 
 using namespace SymbolicExecution;

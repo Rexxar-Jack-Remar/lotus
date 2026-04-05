@@ -7,6 +7,7 @@
 #include "IR/GVFG/GuardedValueFlowSolver.h"
 #include "Solvers/SMT/LIBSMT/SMTFactory.h"
 
+#include <atomic>
 #include <memory>
 #include <vector>
 

@@ -23,6 +23,7 @@ add_library(CanarySymbolicExecution STATIC ${CanarySymbolicExecution_SOURCES})
 
 target_link_libraries(CanarySymbolicExecution PUBLIC
   CanaryGuardedValueFlow
+  CanaryFormats
   #CanarySMT
   #LLVMCore
   LLVMAnalysis

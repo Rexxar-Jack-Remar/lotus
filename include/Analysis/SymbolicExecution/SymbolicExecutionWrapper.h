@@ -3,7 +3,6 @@
 #include "llvm/Pass.h"
 
 #include "Analysis/SymbolicExecution/AnalysisDriver.h"
-#include "IR/GVFG/GuardedValueFlowGraph.h"
 
 namespace llvm {
 
@@ -15,6 +14,11 @@ public:
 
   void getAnalysisUsage(AnalysisUsage &AU) const override;
   bool runOnModule(Module &M) override;
+
+private:
+  static int
+  getBugTypeId(SymbolicExecution::AnalysisState::SymexBugType bug_type);
+  void emitBugReports(const SymbolicExecution::AnalysisDriver &driver) const;
 };
 
 } // namespace llvm

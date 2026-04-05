@@ -2,7 +2,400 @@
 #include "Analysis/SymbolicExecution/TaintModel.h"
 
 #include "llvm/Support/CommandLine.h"
+#include "llvm/Support/MemoryBuffer.h"
 #include "llvm/Support/raw_ostream.h"
+
+#include "Utils/Formats/cJSON.h"
+
+#include <initializer_list>
+
+namespace {
+
+void warnInvalidSpec(const Twine &Message) {
+  llvm::errs() << "Warning: failed to load bof taint spec: " << Message << "\n";
+}
+
+const cJSON *getObjectItemByAliases(const cJSON *Object,
+                                    std::initializer_list<const char *> Keys) {
+  if (!Object || !cJSON_IsObject(Object)) {
+    return nullptr;
+  }
+
+  for (const char *Key : Keys) {
+    if (const cJSON *Item = cJSON_GetObjectItemCaseSensitive(Object, Key)) {
+      return Item;
+    }
+  }
+  return nullptr;
+}
+
+std::string getFunctionName(const cJSON *Item) {
+  if (!Item || !cJSON_IsObject(Item)) {
+    return "";
+  }
+
+  if (const cJSON *Name =
+          getObjectItemByAliases(Item, {"function", "name", "callee"})) {
+    if (cJSON_IsString(Name) && Name->valuestring) {
+      return Name->valuestring;
+    }
+  }
+
+  return "";
+}
+
+bool appendIntSpec(const cJSON *Item, std::vector<int> &Out,
+                   const Twine &Context) {
+  if (!Item) {
+    warnInvalidSpec(Context + ": missing integer list");
+    return false;
+  }
+
+  if (cJSON_IsNumber(Item)) {
+    Out.push_back(Item->valueint);
+    return true;
+  }
+
+  if (!cJSON_IsArray(Item)) {
+    warnInvalidSpec(Context + ": expected integer or integer array");
+    return false;
+  }
+
+  cJSON *Elem = nullptr;
+  cJSON_ArrayForEach(Elem, Item) {
+    if (!cJSON_IsNumber(Elem)) {
+      warnInvalidSpec(Context + ": array contains a non-integer entry");
+      return false;
+    }
+    Out.push_back(Elem->valueint);
+  }
+
+  return true;
+}
+
+void mergeFunctionSet(const cJSON *Section, std::set<std::string> &Target,
+                      const Twine &Context) {
+  if (!Section) {
+    return;
+  }
+
+  if (cJSON_IsArray(Section)) {
+    cJSON *Entry = nullptr;
+    cJSON_ArrayForEach(Entry, Section) {
+      if (cJSON_IsString(Entry) && Entry->valuestring) {
+        Target.insert(Entry->valuestring);
+        continue;
+      }
+
+      std::string Name = getFunctionName(Entry);
+      if (!Name.empty()) {
+        Target.insert(std::move(Name));
+        continue;
+      }
+
+      warnInvalidSpec(Context + ": expected function name string or object");
+    }
+    return;
+  }
+
+  if (cJSON_IsObject(Section)) {
+    cJSON *Entry = nullptr;
+    cJSON_ArrayForEach(Entry, Section) {
+      if (!Entry->string) {
+        continue;
+      }
+
+      if (cJSON_IsFalse(Entry) || cJSON_IsNull(Entry)) {
+        continue;
+      }
+
+      Target.insert(Entry->string);
+    }
+    return;
+  }
+
+  warnInvalidSpec(Context + ": expected array or object");
+}
+
+void mergeFunctionIntMap(
+    const cJSON *Section,
+    std::unordered_map<std::string, std::vector<int>> &Target,
+    const Twine &Context) {
+  if (!Section) {
+    return;
+  }
+
+  if (cJSON_IsObject(Section)) {
+    cJSON *Entry = nullptr;
+    cJSON_ArrayForEach(Entry, Section) {
+      if (!Entry->string) {
+        continue;
+      }
+
+      std::vector<int> Values;
+      if (!appendIntSpec(Entry, Values,
+                         Context + " for function '" + Entry->string + "'")) {
+        continue;
+      }
+      Target[Entry->string] = std::move(Values);
+    }
+    return;
+  }
+
+  if (cJSON_IsArray(Section)) {
+    cJSON *Entry = nullptr;
+    cJSON_ArrayForEach(Entry, Section) {
+      std::string Name = getFunctionName(Entry);
+      if (Name.empty()) {
+        warnInvalidSpec(Context + ": missing function name");
+        continue;
+      }
+
+      const cJSON *Args =
+          getObjectItemByAliases(Entry, {"args", "indices", "arguments"});
+      std::vector<int> Values;
+      if (!appendIntSpec(Args, Values,
+                         Context + " for function '" + Name + "'")) {
+        continue;
+      }
+      Target[Name] = std::move(Values);
+    }
+    return;
+  }
+
+  warnInvalidSpec(Context + ": expected array or object");
+}
+
+void mergeTransferSection(const cJSON *Section,
+                          std::multimap<std::string, std::vector<int>> &Target,
+                          const Twine &Context) {
+  auto AddTransfer = [&](const std::string &Name, const cJSON *Spec) {
+    if (!Spec) {
+      warnInvalidSpec(Context + " for function '" + Name +
+                      "': missing transfer spec");
+      return;
+    }
+
+    if (cJSON_IsObject(Spec)) {
+      const cJSON *Src =
+          getObjectItemByAliases(Spec, {"src", "source", "from"});
+      const cJSON *Dsts =
+          getObjectItemByAliases(Spec, {"dst", "dests", "destinations", "to"});
+      if (!Src || !Dsts) {
+        warnInvalidSpec(Context + " for function '" + Name +
+                        "': missing src/dst fields");
+        return;
+      }
+
+      std::vector<int> Mapping;
+      if (!appendIntSpec(Src, Mapping,
+                         Context + " for function '" + Name + "' source") ||
+          Mapping.size() != 1) {
+        warnInvalidSpec(Context + " for function '" + Name +
+                        "': source must be a single integer");
+        return;
+      }
+
+      std::vector<int> DstsVec;
+      if (!appendIntSpec(Dsts, DstsVec,
+                         Context + " for function '" + Name +
+                             "' destinations")) {
+        return;
+      }
+      Mapping.insert(Mapping.end(), DstsVec.begin(), DstsVec.end());
+      if (Mapping.size() < 2) {
+        warnInvalidSpec(Context + " for function '" + Name +
+                        "': transfer needs source and destination");
+        return;
+      }
+      Target.emplace(Name, std::move(Mapping));
+      return;
+    }
+
+    if (cJSON_IsArray(Spec)) {
+      cJSON *Elem = cJSON_GetArrayItem(Spec, 0);
+      if (Elem && cJSON_IsArray(Elem)) {
+        cJSON *MappingSpec = nullptr;
+        cJSON_ArrayForEach(MappingSpec, Spec) {
+          std::vector<int> Mapping;
+          if (!appendIntSpec(MappingSpec, Mapping,
+                             Context + " for function '" + Name + "'")) {
+            continue;
+          }
+          if (Mapping.size() < 2) {
+            warnInvalidSpec(Context + " for function '" + Name +
+                            "': transfer needs source and destination");
+            continue;
+          }
+          Target.emplace(Name, std::move(Mapping));
+        }
+        return;
+      }
+
+      std::vector<int> Mapping;
+      if (!appendIntSpec(Spec, Mapping,
+                         Context + " for function '" + Name + "'")) {
+        return;
+      }
+      if (Mapping.size() < 2) {
+        warnInvalidSpec(Context + " for function '" + Name +
+                        "': transfer needs source and destination");
+        return;
+      }
+      Target.emplace(Name, std::move(Mapping));
+      return;
+    }
+
+    warnInvalidSpec(Context + " for function '" + Name +
+                    "': expected object or array");
+  };
+
+  if (!Section) {
+    return;
+  }
+
+  if (cJSON_IsObject(Section)) {
+    cJSON *Entry = nullptr;
+    cJSON_ArrayForEach(Entry, Section) {
+      if (!Entry->string) {
+        continue;
+      }
+      AddTransfer(Entry->string, Entry);
+    }
+    return;
+  }
+
+  if (cJSON_IsArray(Section)) {
+    cJSON *Entry = nullptr;
+    cJSON_ArrayForEach(Entry, Section) {
+      std::string Name = getFunctionName(Entry);
+      if (Name.empty()) {
+        warnInvalidSpec(Context + ": missing function name");
+        continue;
+      }
+
+      const cJSON *Mappings = getObjectItemByAliases(
+          Entry, {"mappings", "mapping", "transfers", "transfer", "rules"});
+      AddTransfer(Name, Mappings ? Mappings : Entry);
+    }
+    return;
+  }
+
+  warnInvalidSpec(Context + ": expected array or object");
+}
+
+bool loadExternalTaintSpec(
+    const std::string &Path, std::set<std::string> &RetAsSourceFunctions,
+    std::unordered_map<std::string, std::vector<int>> &ArgAsSourceFunctions,
+    std::multimap<std::string, std::vector<int>> &DataTransferFunctions,
+    std::unordered_map<std::string, std::vector<int>> &SinkFunctions) {
+  auto BufferOrErr = llvm::MemoryBuffer::getFile(Path);
+  if (!BufferOrErr) {
+    warnInvalidSpec("cannot open '" + Path +
+                    "': " + BufferOrErr.getError().message());
+    return false;
+  }
+
+  std::string Json = BufferOrErr.get()->getBuffer().str();
+  cJSON *Root = cJSON_Parse(Json.c_str());
+  if (!Root) {
+    const char *ErrorPtr = cJSON_GetErrorPtr();
+    warnInvalidSpec("invalid JSON in '" + Path + "'" +
+                    (ErrorPtr ? (Twine(" near: ") + ErrorPtr) : Twine("")));
+    return false;
+  }
+
+  if (!cJSON_IsObject(Root)) {
+    warnInvalidSpec("top-level value in '" + Path + "' must be an object");
+    cJSON_Delete(Root);
+    return false;
+  }
+
+  mergeFunctionSet(
+      getObjectItemByAliases(Root, {"ret_as_source", "return_as_source",
+                                    "ret_sources", "return_sources"}),
+      RetAsSourceFunctions, "return-source section");
+  mergeFunctionIntMap(
+      getObjectItemByAliases(Root,
+                             {"arg_as_source", "arg_sources", "source_args"}),
+      ArgAsSourceFunctions, "argument-source section");
+  mergeFunctionIntMap(getObjectItemByAliases(Root, {"sinks", "sink_functions"}),
+                      SinkFunctions, "sink section");
+  mergeTransferSection(
+      getObjectItemByAliases(
+          Root, {"transfers", "transfer_functions", "propagations"}),
+      DataTransferFunctions, "transfer section");
+
+  if (const cJSON *Sources = getObjectItemByAliases(Root, {"sources"})) {
+    if (cJSON_IsObject(Sources)) {
+      mergeFunctionSet(
+          getObjectItemByAliases(
+              Sources, {"ret", "return", "ret_as_source", "return_as_source"}),
+          RetAsSourceFunctions, "sources.return section");
+      mergeFunctionIntMap(
+          getObjectItemByAliases(Sources,
+                                 {"arg", "args", "arg_as_source", "arguments"}),
+          ArgAsSourceFunctions, "sources.argument section");
+
+      cJSON *Entry = nullptr;
+      cJSON_ArrayForEach(Entry, Sources) {
+        if (!Entry->string || !cJSON_IsObject(Entry)) {
+          continue;
+        }
+
+        if (const cJSON *Ret =
+                getObjectItemByAliases(Entry, {"ret", "return", "retval"})) {
+          if (cJSON_IsTrue(Ret)) {
+            RetAsSourceFunctions.insert(Entry->string);
+          }
+        }
+
+        if (const cJSON *Args = getObjectItemByAliases(
+                Entry, {"args", "indices", "arguments"})) {
+          std::vector<int> Values;
+          if (appendIntSpec(Args, Values,
+                            Twine("sources section for function '") +
+                                Entry->string + "'")) {
+            ArgAsSourceFunctions[Entry->string] = std::move(Values);
+          }
+        }
+      }
+    } else if (cJSON_IsArray(Sources)) {
+      cJSON *Entry = nullptr;
+      cJSON_ArrayForEach(Entry, Sources) {
+        std::string Name = getFunctionName(Entry);
+        if (Name.empty()) {
+          warnInvalidSpec("sources section: missing function name");
+          continue;
+        }
+
+        if (const cJSON *Ret =
+                getObjectItemByAliases(Entry, {"ret", "return", "retval"})) {
+          if (cJSON_IsTrue(Ret)) {
+            RetAsSourceFunctions.insert(Name);
+          }
+        }
+
+        if (const cJSON *Args = getObjectItemByAliases(
+                Entry, {"args", "indices", "arguments"})) {
+          std::vector<int> Values;
+          if (appendIntSpec(Args, Values,
+                            Twine("sources section for function '") + Name +
+                                "'")) {
+            ArgAsSourceFunctions[Name] = std::move(Values);
+          }
+        }
+      }
+    } else {
+      warnInvalidSpec("sources section: expected array or object");
+    }
+  }
+
+  cJSON_Delete(Root);
+  return true;
+}
+
+} // namespace
 
 static cl::opt<std::string>
     bof_taint_spec("bof-taint-spec",
@@ -267,9 +660,9 @@ TaintModel::TaintModel() {
   };
 
   if (!bof_taint_spec.empty()) {
-    llvm::errs()
-        << "Warning: external taint JSON specs are not migrated in Lotus "
-           "symbolic execution yet; using built-in specifications only.\n";
+    loadExternalTaintSpec(bof_taint_spec, RetAsSourceFunctions,
+                          ArgAsSourceFunctions, DataTransferFunctions,
+                          SinkFunctions);
   }
 }
 

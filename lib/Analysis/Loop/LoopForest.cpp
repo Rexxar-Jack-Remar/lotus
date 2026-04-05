@@ -1,5 +1,5 @@
 /*
- * Copyright 2019 - 2025  Simone Campanoni, Lotus contributors
+ * Copyright 2019 - 2025  Simone Campanoni
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to

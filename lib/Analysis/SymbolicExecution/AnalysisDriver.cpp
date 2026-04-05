@@ -8,9 +8,11 @@
 
 #include "Analysis/SymbolicExecution/MemoryAPI.h"
 #include "Analysis/SymbolicExecution/SegUtility.h"
+#include "Utils/Parallel/ThreadPool.h"
 
 #include <algorithm>
-#include <functional>
+#include <atomic>
+#include <mutex>
 #include <numeric>
 #include <sstream>
 #include <string>
@@ -272,10 +274,66 @@ void AnalysisDriver::initBugType() {
 }
 
 void AnalysisDriver::runOnModuleParallel(Module *M) {
-  // Lotus does not carry the old Clearblue thread-pool dependency used here.
-  // Keep a correct migration by reusing the sequential execution path until a
-  // native parallel scheduler is reintroduced for symex.
-  runOnModule(M);
+  AnalysisState::NON_PTR_TY = Type::getInt64Ty(M->getContext());
+  AnalysisState::INT8_TY = Type::getInt8Ty(M->getContext());
+  SummarySolverManager::get().init();
+
+  seg_utility::getTopoOrder(*M);
+  const auto &FuncSeq = seg_utility::getFuncSeq();
+  assert(!FuncSeq.empty());
+
+  std::vector<GuardedValueFlowGraph *> Worklist;
+  Worklist.reserve(FuncSeq.size());
+
+  for (auto Iter = FuncSeq.rbegin(), EIter = FuncSeq.rend(); Iter != EIter;
+       ++Iter) {
+    Function *CurFunc = *Iter;
+    if (CurFunc->isDeclaration()) {
+      continue;
+    }
+
+    auto *Graph = seg_utility::getGraph(CurFunc);
+    if (!Graph) {
+      continue;
+    }
+
+    unsigned FunDepth = seg_utility::getFunctionDepth(CurFunc);
+    if (FunDepth > AnalysisLimit::FUNC_INLINE_LIMIT_V) {
+      llvm::errs() << "Skip function " << CurFunc->getName()
+                   << " due to inline threshold!\n";
+      continue;
+    }
+
+    Worklist.push_back(Graph);
+  }
+
+  std::atomic<unsigned> NumRemain(Worklist.size());
+  std::mutex ProgressMtx;
+
+  llvm::errs() << "[Progress] Start ... " << NumRemain.load()
+               << "functions to run!\n";
+
+  ThreadPool::get()->parallelForEach(
+      Worklist, 1,
+      [this, &NumRemain, &ProgressMtx](GuardedValueFlowGraph *Graph) {
+        Function *CurFunc = Graph->getBaseFunction();
+        unsigned FunDepth = seg_utility::getFunctionDepth(CurFunc);
+
+        {
+          std::lock_guard<std::mutex> Lock(ProgressMtx);
+          llvm::errs() << "Running on " << CurFunc->getName()
+                       << "(depth=" << FunDepth << ")"
+                       << "\n";
+        }
+
+        runOnFunction(Graph);
+
+        unsigned Remain = NumRemain.fetch_sub(1) - 1;
+        {
+          std::lock_guard<std::mutex> Lock(ProgressMtx);
+          llvm::errs() << "[Progress] " << Remain << "functions remains!\n";
+        }
+      });
 }
 
 void AnalysisDriver::runOnModule(Module *M) {

@@ -81,6 +81,18 @@ add_lotus_analysis_test(nullpointer_api_test NullPointerAPITest.cpp)
 add_lotus_analysis_test(nullpointer_legacy_helpers_test NullPointerLegacyHelpersTest.cpp)
 add_lotus_analysis_test(context_sensitive_nullcheck_analysis_test
                ContextSensitiveNullCheckAnalysisTest.cpp)
+add_lotus_targeted_test(symbolic_execution_spec_compat_test
+               SymbolicExecutionSpecCompatTest.cpp
+               LINK_LIBS
+                   CanarySymbolicExecution
+                   CanaryGuardedValueFlow
+                   LLVMAnalysis)
+add_lotus_targeted_test(symbolic_execution_taint_model_test
+               SymbolicExecutionTaintModelTest.cpp
+               LINK_LIBS
+                   CanarySymbolicExecution
+                   CanaryGuardedValueFlow
+                   LLVMAnalysis)
 add_lotus_spectre_test(spectre_analysis_test SpectreAnalysisTest.cpp)
 add_lotus_crypto_test(crypto_analysis_test CryptoAnalysisTest.cpp)
 add_lotus_targeted_test(prue_pass_test

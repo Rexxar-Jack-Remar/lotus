@@ -39,7 +39,7 @@ std::vector<std::pair<SymbolicExecution::GuardedValueFlowNode *,
                       SymbolicExecution::GuardedValueFlowRegionNode *>>
 getIncomingValuesForLoad(const SymbolicExecution::GuardedValueFlowNode *node);
 
-llvm::Function *getEnclosingFunc(SymbolicExecution::Var v);
+llvm::Function *getEnclosingFunc(const SymbolicExecution::Var &v);
 llvm::Function *getCallee(llvm::Instruction *I);
 bool isDefiniteCall(llvm::Instruction *I);
 bool isMatchLib(llvm::CallInst *CallI, const std::string &callee_name,
