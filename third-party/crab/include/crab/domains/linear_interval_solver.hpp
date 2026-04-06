@@ -52,7 +52,6 @@
 #include <crab/types/linear_constraints.hpp>
 #include <crab/types/variable.hpp>
 
-
 #include <map>
 #include <set>
 #include <vector>
@@ -104,8 +103,6 @@ public:
   using uint_set_t = std::set<unsigned int>;
   using trigger_table_t = std::map<variable_t, uint_set_t>;
   using variable_set_t = std::set<variable_t>;
-
-  
 
   std::size_t m_max_cycles;
   std::size_t m_max_op;
@@ -161,7 +158,7 @@ public:
       if (!(v == pivot)) {
         residual =
             residual -
-	  (interval_traits::mk_interval<Interval>(kv.first, w) * env.at(v));
+            (interval_traits::mk_interval<Interval>(kv.first, w) * env.at(v));
         ++(m_op_count);
         if (residual.is_top())
           break;
@@ -196,15 +193,11 @@ public:
         }
       } else if (cst.is_inequality()) {
         if (c > 0) {
-          if (refine(pivot,
-                     interval_traits::lower_half_line(rhs, true /*cst is always signed*/),
-                     env)) {
+          if (refine(pivot, interval_traits::lower_half_line(rhs, true), env)) {
             return true;
           }
         } else {
-          if (refine(pivot,
-                     interval_traits::upper_half_line(rhs, true /*cst is always signed*/),
-                     env)) {
+          if (refine(pivot, interval_traits::upper_half_line(rhs, true), env)) {
             return true;
           }
         }
@@ -228,7 +221,6 @@ public:
   }
 
 public:
-
   bool solve_large_system(IntervalCollection &env) {
     m_op_count = 0;
     m_refined_variables.clear();
@@ -289,7 +281,7 @@ public:
                                  linear_constraint_t::kind_t::INEQUALITY);
           linear_constraint_t c2(cst.expression(),
                                  linear_constraint_t::kind_t::DISEQUATION);
-          cst_size = c1.size() + c2.size();	  
+          cst_size = c1.size() + c2.size();
           m_cst_table.emplace_back(std::move(c1));
           m_cst_table.emplace_back(std::move(c2));
         } else {

@@ -791,12 +791,12 @@ stnum<Number> stnum<Number>::operator&(const stnum<Number> &x) const {
      res.set_tnum_0(tnum_0 & x.tnum_0);
    }
 
-   /*if(is_top_1()){
-     res.set_tnum_1(x.tnum_1);
-   }else if(x.is_top_1()){
-     CRAB_LOG("stnum-imply-meet",
-     crab::outs() <<"stnum-imply-meet 2: " << (tnum_1 & x.tnum_1) << " \n";);
-     res.set_tnum_1(tnum_1);
+   // if(is_top_1()){
+   //   res.set_tnum_1(x.tnum_1);
+   // }else if(x.is_top_1()){
+   //   CRAB_LOG("stnum-imply-meet",
+   //   crab::outs() <<"stnum-imply-meet 2: " << (tnum_1 & x.tnum_1) << " \n";);
+   //   res.set_tnum_1(tnum_1);
    }else if(!is_bottom_1() && !x.is_bottom_1()){
      //res.set_tnum_1(tnum_1 & x.tnum_1);
      res.tnum_1 = tnum_1 & x.tnum_1;
