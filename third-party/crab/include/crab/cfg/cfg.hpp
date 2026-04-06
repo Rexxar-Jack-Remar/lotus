@@ -106,11 +106,11 @@
 
 #include <boost/iterator/indirect_iterator.hpp>
 #include <boost/iterator/transform_iterator.hpp>
-#include <optional>
 #include <boost/range/iterator_range.hpp>
-#include <variant>
+#include <optional>
 #include <unordered_map>
 #include <unordered_set>
+#include <variant>
 
 namespace crab {
 namespace cfg {

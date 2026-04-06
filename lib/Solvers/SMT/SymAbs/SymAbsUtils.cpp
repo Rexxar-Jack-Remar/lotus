@@ -23,8 +23,8 @@
 #include <algorithm>
 #include <cassert>
 #include <limits>
-#include <optional>
 #include <numeric>
+#include <optional>
 
 #include <z3++.h>
 #include <z3.h>

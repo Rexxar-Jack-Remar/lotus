@@ -10,8 +10,8 @@
 #include <crab/support/os.hpp>
 #include <crab/types/indexable.hpp>
 
-#include <optional>
 #include <boost/range/iterator_range.hpp>
+#include <optional>
 
 #include <functional>
 #include <limits>

@@ -2,10 +2,10 @@
 
 #include <boost/functional/hash_fwd.hpp> // for hash_combine
 #include <cassert>
-#include <optional>
 #include <crab/support/debug.hpp>
 #include <crab/support/os.hpp>
 #include <crab/types/indexable.hpp>
+#include <optional>
 
 namespace crab {
 

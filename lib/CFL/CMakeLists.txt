@@ -1,3 +1,4 @@
 add_subdirectory(CSIndex)
 add_subdirectory(MutualRefinement)
 add_subdirectory(InterDyckGraphReduce)
+add_subdirectory(Aria)

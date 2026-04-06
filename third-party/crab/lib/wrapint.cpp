@@ -4,9 +4,9 @@
 //#include <boost/functional/hash.hpp>
 
 #include <climits>
+#include <functional>
 #include <sstream>
 #include <string>
-#include <functional>
 
 namespace crab {
 

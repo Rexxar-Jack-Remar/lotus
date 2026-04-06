@@ -49,8 +49,8 @@
 #include <boost/container/flat_map.hpp>
 #include <boost/functional/hash_fwd.hpp> // for hash_combine
 #include <boost/iterator/transform_iterator.hpp>
-#include <optional>
 #include <boost/range/iterator_range.hpp>
+#include <optional>
 
 #include <functional>
 #include <memory>

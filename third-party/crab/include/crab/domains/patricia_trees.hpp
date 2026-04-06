@@ -47,8 +47,8 @@
 
 #include <algorithm>
 #include <boost/iterator/iterator_facade.hpp>
-#include <optional>
 #include <memory>
+#include <optional>
 #include <type_traits>
 #include <vector>
 

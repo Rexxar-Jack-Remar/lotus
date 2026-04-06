@@ -1,8 +1,8 @@
 #pragma once
 
-#include <optional>
 #include <crab/domains/term/term_expr.hpp>
 #include <crab/domains/term/term_operators.hpp>
+#include <optional>
 
 /*
    Simplifiers for table terms after giving meaning to functors.

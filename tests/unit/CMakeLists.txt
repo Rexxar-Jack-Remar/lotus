@@ -2,6 +2,7 @@ include(${CMAKE_CURRENT_LIST_DIR}/UnitTestHelpers.cmake)
 
 add_subdirectory(Analysis)
 add_subdirectory(Checker)
+add_subdirectory(CFL)
 add_subdirectory(Concurrency)
 add_subdirectory(ControlFlow)
 add_subdirectory(DataFlow)

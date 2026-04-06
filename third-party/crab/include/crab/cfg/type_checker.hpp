@@ -4,8 +4,8 @@
 #include <crab/support/debug.hpp>
 #include <crab/support/os.hpp>
 
-#include <optional>
 #include <boost/range/iterator_range.hpp>
+#include <optional>
 
 namespace crab {
 namespace cfg {

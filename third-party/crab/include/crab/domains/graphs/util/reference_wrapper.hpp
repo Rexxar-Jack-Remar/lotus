@@ -22,4 +22,4 @@ public:
 private:
   T* m_p;
 };
-} // end namespace
+} // namespace crab

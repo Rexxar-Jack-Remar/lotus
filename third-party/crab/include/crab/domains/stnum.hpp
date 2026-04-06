@@ -1,8 +1,8 @@
 #pragma once
 
 #include <crab/domains/interval.hpp>
-#include <crab/domains/tnum.hpp>
 #include <crab/domains/linear_tnum_solver.hpp>
+#include <crab/domains/tnum.hpp>
 #include <crab/fixpoint/thresholds.hpp>
 #include <crab/numbers/bignums.hpp>
 #include <crab/numbers/wrapint.hpp>
