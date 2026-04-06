@@ -20,6 +20,7 @@ public:
   static constexpr const char *kEpsilonSymbol = "<epsilon>";
 
   static Grammar parseFromFile(const std::string &path);
+  static Grammar parseFromText(const std::string &text);
 
   const ProductionMap &productions() const { return productions_; }
   const std::vector<std::string> &nullableSymbols() const {

@@ -4,4 +4,5 @@ add_library(CanaryAriaCFL STATIC
     Graph.cpp
     CFLSolver.cpp
     SCSolver.cpp
+    SVFPort.cpp
 )

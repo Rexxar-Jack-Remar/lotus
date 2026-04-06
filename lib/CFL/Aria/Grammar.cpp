@@ -90,6 +90,13 @@ Grammar Grammar::parseFromFile(const std::string &path) {
   return grammar;
 }
 
+Grammar Grammar::parseFromText(const std::string &text) {
+  Grammar grammar;
+  grammar.loadFromText(text);
+  grammar.buildIndices();
+  return grammar;
+}
+
 void Grammar::loadFromText(const std::string &text) {
   const auto productions_pos = text.find("Productions:");
   if (productions_pos == std::string::npos) {

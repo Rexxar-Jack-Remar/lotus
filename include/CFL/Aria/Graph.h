@@ -47,6 +47,8 @@ public:
   edgesForLabel(const std::string &label) const;
   std::vector<std::pair<std::size_t, std::size_t>>
   edgesForLabelCopy(const std::string &label) const;
+  std::vector<std::size_t> predecessorsForLabel(std::size_t target,
+                                                const std::string &label) const;
 
 private:
   void loadFromTextFile(const std::string &path);

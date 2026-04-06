@@ -111,6 +111,20 @@ LabeledGraph::edgesForLabelCopy(const std::string &label) const {
   return edgesForLabel(label);
 }
 
+std::vector<std::size_t>
+LabeledGraph::predecessorsForLabel(std::size_t target,
+                                   const std::string &label) const {
+  std::vector<std::size_t> predecessors;
+  if (const auto it = label_pairs_.find(label); it != label_pairs_.end()) {
+    for (const auto &[source, dst] : it->second) {
+      if (dst == target) {
+        predecessors.push_back(source);
+      }
+    }
+  }
+  return predecessors;
+}
+
 void LabeledGraph::loadFromTextFile(const std::string &path) {
   std::ifstream input(path);
   if (!input) {
