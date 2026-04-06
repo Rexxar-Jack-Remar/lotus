@@ -42,6 +42,136 @@
  * UNILATERAL TERMINATION OF THIS AGREEMENT.
  *
  ******************************************************************************/
+/*
+#pragma once
+
+#include <crab/numbers/bignums.hpp>
+#include <crab/numbers/wrapint.hpp>
+#include <crab/support/debug.hpp>
+#include <crab/support/stats.hpp>
+#include <crab/types/linear_constraints.hpp>
+#include <crab/types/variable.hpp>
+
+
+#include <map>
+#include <set>
+#include <vector>
+
+#include <crab/domains/linear_interval_solver.hpp>
+
+
+namespace ikos {
+
+template <typename Number, typename VariableName, typename IntervalCollection>
+class linear_tnum_solver : public linear_interval_solver<Number, VariableName, IntervalCollection>{
+
+public:
+  using Interval = typename IntervalCollection::mapped_type;
+  using variable_t = crab::variable<Number, VariableName>;
+  using linear_expression_t = linear_expression<Number, VariableName>;
+  using linear_constraint_t = linear_constraint<Number, VariableName>;
+  using linear_constraint_system_t =
+      linear_constraint_system<Number, VariableName>;
+  using bitwidth_t = typename variable_t::bitwidth_t;
+
+
+
+
+  using cst_table_t = std::vector<linear_constraint_t>;
+  using uint_set_t = std::set<unsigned int>;
+  using trigger_table_t = std::map<variable_t, uint_set_t>;
+  using variable_set_t = std::set<variable_t>;
+
+  
+
+  std::size_t m_max_cycles;
+  std::size_t m_max_op;
+  bool m_is_contradiction;
+  bool m_is_large_system;
+  cst_table_t m_cst_table;
+  trigger_table_t m_trigger_table;
+  variable_set_t m_refined_variables;
+  std::size_t m_op_count;
+
+  static const std::size_t _large_system_cst_threshold = 3;
+  // cost of one propagation cycle for a dense 3x3 system of constraints
+  static const std::size_t _large_system_op_threshold = 27;
+
+public:
+
+  linear_tnum_solver(const linear_constraint_system_t &csts,
+                         std::size_t max_cycles) : linear_interval_solver<Number, VariableName, IntervalCollection>(csts, max_cycles){}
+
+  // return true if bottom found while propagation
+  // donot use lower_half_line nor upper_half_line
+  bool propagate(const linear_constraint_t &cst, IntervalCollection &env)  {
+    crab::ScopedCrabStats __st__("Linear Interval Solver.Solving propagation");
+    namespace interval_traits = linear_interval_solver_impl;
+
+    CRAB_LOG("interval-solver",
+             crab::outs() << "Interval solver tnum version processing " << cst << "\n";);
+
+    for (auto kv : cst) {
+      Number c = kv.first;
+      const variable_t &pivot = kv.second;
+      Interval res = compute_residual(cst, pivot, env);
+      Interval rhs = Interval::top();
+      if (!res.is_top()) {
+        Interval ic =
+            interval_traits::mk_interval<Interval>(c, get_bitwidth(pivot));
+        rhs = res / ic;
+      }
+
+      if (cst.is_equality()) {
+        if (refine(pivot, rhs, env)) {
+          return true;
+        }
+      } else if (cst.is_inequality()) {
+        Interval old_pivot = env.at(pivot);
+        if (c > 0) {
+          CRAB_LOG("interval-solver",
+             crab::outs() << "c>0:" << interval_traits::lower_half_line(old_pivot, rhs, true) << "\n";);
+          if (refine(pivot,
+                     interval_traits::lower_half_line(old_pivot, rhs, true /*cst is always signed*),
+                     env)) {
+            return true;
+          }
+        } else {
+          CRAB_LOG("interval-solver",
+             crab::outs() << "c<=0:" << interval_traits::upper_half_line(old_pivot, rhs, true) << "\n";);
+          if (refine(pivot,
+                     interval_traits::upper_half_line(old_pivot, rhs, true /*cst is always signed*),
+                     env)) {
+            return true;
+          }
+        }
+      } else if (cst.is_strict_inequality()) {
+        // do nothing
+      } else {
+        // cst is a disequation
+        Interval old_i = env.at(pivot);
+        Interval new_i = interval_traits::trim_interval(old_i, rhs);
+        if (new_i.is_bottom()) {
+          return true;
+        }
+        if (!(old_i == new_i)) {
+          env.set(pivot, new_i);
+          m_refined_variables.insert(pivot);
+        }
+        ++(m_op_count);
+      }
+    }
+    return false;
+  }
+
+ 
+}; // class linear_tnum_solver
+
+} // namespace ikos
+
+*/
+
+
 
 #pragma once
 
@@ -59,36 +189,10 @@
 
 namespace ikos {
 
-// Interval traits:
-// The solver is parametric on the kind of Interval
-namespace linear_interval_solver_impl {
-// gamma(i) \ gamma(j)
-template <typename Interval>
-inline Interval trim_interval(const Interval &i, const Interval &j);
 
-template <typename Interval, typename Number>
-inline Interval mk_interval(Number n,
-                            typename crab::wrapint::bitwidth_t bitwidth) {
-  // default implementation ignores bitwidth
-  return Interval(n);
-}
-
-template <typename Interval>
-Interval lower_half_line(const Interval &i, bool is_signed);
-
-template <typename Interval>
-Interval lower_half_line(const Interval &x, const Interval &y, bool is_signed);
-
-template <typename Interval>
-Interval upper_half_line(const Interval &i, bool is_signed);
-
-template <typename Interval>
-Interval upper_half_line(const Interval &x, const Interval &y, bool is_signed);
-
-} // namespace linear_interval_solver_impl
 
 template <typename Number, typename VariableName, typename IntervalCollection>
-class linear_interval_solver {
+class linear_tnum_solver {
 
 public:
   using Interval = typename IntervalCollection::mapped_type;
@@ -126,7 +230,11 @@ public:
     CRAB_LOG("interval-solver",
              crab::outs() << "\tRefine " << v << " with " << i << "\n";);
     Interval old_i = env.at(v);
+    
+    //         crab::outs() << "\tRefine 1"  << "\n";
     Interval new_i = old_i & i;
+
+    //         crab::outs() << "\tRefine 2"  << "\n";
     CRAB_LOG("interval-solver",
              crab::outs() << "\tOld=" << old_i << " New=" << new_i << "\n";);
     if (new_i.is_bottom()) {
@@ -156,28 +264,41 @@ public:
     bitwidth_t w = get_bitwidth(pivot);
     Interval residual =
         interval_traits::mk_interval<Interval>(cst.constant(), w);
+         //CRAB_LOG("interval-solver",
+         //    crab::outs() << "residual init =  " << residual << "\n";);
     for (auto kv : cst) {
       const variable_t &v = kv.second;
       if (!(v == pivot)) {
+        CRAB_LOG("interval-solver",
+             crab::outs() << "env at "<< v << "is: " << env.at(v) <<"\n";);
+        CRAB_LOG("interval-solver",
+             crab::outs() << "kv fst is: " <<interval_traits::mk_interval<Interval>(kv.first, w)<<"\n";);
+         //CRAB_LOG("interval-solver",
+             //crab::outs() << "residual =  " << residual << "-" << v<< ":"<< 
+              //  (interval_traits::mk_interval<Interval>(kv.first, w) * env.at(v))<< "=" ;);
         residual =
             residual -
 	  (interval_traits::mk_interval<Interval>(kv.first, w) * env.at(v));
+   // CRAB_LOG("interval-solver",
+     //        crab::outs() << residual <<"\n";);
         ++(m_op_count);
         if (residual.is_top())
           break;
       }
     }
+    CRAB_LOG("interval-solver",
+             crab::outs() << "residual =  " << residual << "\n";);
     return residual;
   }
 
 public:
   // return true if bottom found while propagation
-  bool propagate(const linear_constraint_t &cst, IntervalCollection &env) {
+ bool propagate(const linear_constraint_t &cst, IntervalCollection &env)  {
     crab::ScopedCrabStats __st__("Linear Interval Solver.Solving propagation");
     namespace interval_traits = linear_interval_solver_impl;
 
     CRAB_LOG("interval-solver",
-             crab::outs() << "Interval solver processing " << cst << "\n";);
+             crab::outs() << "Interval solver tnum version processing " << cst << "\n";);
 
     for (auto kv : cst) {
       Number c = kv.first;
@@ -189,21 +310,31 @@ public:
             interval_traits::mk_interval<Interval>(c, get_bitwidth(pivot));
         rhs = res / ic;
       }
+  CRAB_LOG("interval-solver",
+             crab::outs() << "rhs =  " << rhs << "\n";);
 
       if (cst.is_equality()) {
         if (refine(pivot, rhs, env)) {
           return true;
         }
       } else if (cst.is_inequality()) {
+        Interval old_pivot = env.at(pivot);
         if (c > 0) {
+          // for x <= rhs
+          CRAB_LOG("interval-solver",
+             crab::outs() << "c>0:" << interval_traits::lower_half_line(old_pivot, rhs, true) << "\n";);
           if (refine(pivot,
-                     interval_traits::lower_half_line(rhs, true /*cst is always signed*/),
+                     interval_traits::lower_half_line(old_pivot, rhs, true /*cst is always signed*/),
                      env)) {
+            //CRAB_LOG("interval-solver", crab::outs() << "c>=0 return true\n");
             return true;
           }
         } else {
+          //for x >= rhs
+          CRAB_LOG("interval-solver",
+             crab::outs() << "c<=0:" << interval_traits::upper_half_line(old_pivot, rhs, true) << "\n";);
           if (refine(pivot,
-                     interval_traits::upper_half_line(rhs, true /*cst is always signed*/),
+                     interval_traits::upper_half_line(old_pivot, rhs, true /*cst is always signed*/),
                      env)) {
             return true;
           }
@@ -267,7 +398,7 @@ public:
   }
 
 public:
-  linear_interval_solver(const linear_constraint_system_t &csts,
+  linear_tnum_solver(const linear_constraint_system_t &csts,
                          std::size_t max_cycles)
       : m_max_cycles(max_cycles), m_is_contradiction(false),
         m_is_large_system(false), m_op_count(0) {
@@ -334,6 +465,7 @@ public:
     }
   }
 
-}; // class linear_interval_solver
+}; // class linear_tnum_solver
 
 } // namespace ikos
+

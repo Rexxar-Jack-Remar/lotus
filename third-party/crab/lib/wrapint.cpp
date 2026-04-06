@@ -4,9 +4,9 @@
 //#include <boost/functional/hash.hpp>
 
 #include <climits>
-#include <functional>
 #include <sstream>
 #include <string>
+#include <functional>
 
 namespace crab {
 
@@ -124,6 +124,70 @@ bool wrapint::msb() const {
   return (_n & ((uint64_t)1 << (uint64_t)(_width - 1)));
 }
 
+bool wrapint::is_odd() const{
+  if (_n & (uint64_t)1)
+    return true;
+  else 
+    return false;
+}
+
+bool wrapint::is_even() const{
+  if (_n & (uint64_t)1)
+    return false;
+  else 
+    return true;
+}
+
+// position number from 0 to width-1
+void wrapint::setBit(uint64_t pos) {
+  assert(pos < _width);
+  _n |= ((uint64_t)1 << pos);
+}
+  
+void wrapint::clearBit(uint64_t pos) {
+  assert(pos < _width);
+  _n &= ~((uint64_t)1 << pos);
+}
+
+void wrapint::clearLowBits(uint64_t n) {
+  assert(n <= _width);
+  _n &= (~((uint64_t)0)) << n;
+}
+  
+void wrapint::clearHighBits(uint64_t n) {
+  assert(n <= _width);
+  _n &= ((uint64_t)1 << (_width - n)) - (uint64_t)1;
+}
+
+void wrapint::setHighBits(uint64_t n) {
+  assert(n <= _width);
+  _n |= (((uint64_t)1 << (uint64_t)_width) - 1) ^ (((uint64_t)1 << (_width - n)) - (uint64_t)1);
+}
+
+uint64_t wrapint::countr_zero() const{
+  if (_n == 0) {
+    return _width;
+  }
+  return __builtin_ctzll(_n);
+}
+ 
+uint64_t wrapint::countl_zero() const{
+  if (_n == 0) {
+    return _width;
+  }
+  return __builtin_clzll(_n) - (64 - _width);
+}
+
+uint64_t wrapint::fls() const{
+  //crab::outs() << "in fls (__builtin_clzll(_n)) =" << (__builtin_clzll(_n)) << "\n";
+  if(_n == 0){
+    return 0;
+  }
+  return (uint64_t)64 - (uint64_t)(__builtin_clzll(_n));
+}
+
+
+
 // return 01111...1
 wrapint wrapint::get_signed_max(bitwidth_t w) {
   return wrapint(((uint64_t)1 << (uint64_t)(w - 1)) - 1, w);
@@ -185,6 +249,30 @@ ikos::z_number wrapint::get_signed_bignum() const {
 
 bool wrapint::is_zero() const { return _n == 0; }
 
+// is 01111...1
+bool wrapint::is_signed_max() const{
+  return _n == (((uint64_t)1 << (uint64_t)(_width - 1)) - 1);
+}
+
+// is 1000....0
+bool wrapint::is_signed_min() const{
+  return _n == ((uint64_t)1 << (uint64_t)(_width - 1));
+}
+
+// is 1111....1
+bool wrapint::is_unsigned_max() const{
+  if(_width == 64)
+    return UINT64_MAX == _n;
+  else
+    return _n ==(((uint64_t)1 << (uint64_t)_width) - 1);
+}
+
+// is 0000....0
+bool wrapint::is_unsigned_min() const{
+  return _n == 0;
+}
+
+
 std::size_t wrapint::hash() const {
   auto combine = [](size_t seed, size_t hash_val) -> size_t {
     // Similar to boost::hash_combine
@@ -195,6 +283,14 @@ std::size_t wrapint::hash() const {
   size_t y = std::hash<uint64_t>{}(_width);
   size_t z = std::hash<uint64_t>{}(_mod);
   return combine(combine(x, y), z);
+}
+
+wrapint wrapint::min(wrapint x, wrapint y)  {
+  return x < y? x: y;
+}
+
+wrapint wrapint::max(wrapint x, wrapint y)  {
+  return y < x? x: y;
 }
 
 wrapint wrapint::operator+(wrapint x) const {
@@ -357,6 +453,12 @@ bool wrapint::operator>(wrapint x) const {
 bool wrapint::operator>=(wrapint x) const {
   sanity_check_bitwidths(x);
   return _n >= x._n;
+}
+
+wrapint wrapint::operator~() const {
+  wrapint allOne = get_unsigned_max(_width);
+  wrapint res = *this ^ allOne;
+  return res;
 }
 
 wrapint wrapint::operator&(wrapint x) const {

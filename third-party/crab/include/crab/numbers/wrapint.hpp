@@ -54,6 +54,29 @@ public:
   // return true iff most significant bit is 1.
   bool msb() const;
 
+  bool is_odd() const;
+
+  bool is_even() const;
+
+  void setBit(uint64_t pos) ;
+  
+  void clearBit(uint64_t pos) ;
+
+  void clearLowBits(uint64_t n) ;
+
+  void clearHighBits(uint64_t n) ;
+
+  void setHighBits(uint64_t n) ;
+
+  // Count the number of trailing zero bits.
+  uint64_t countr_zero() const;
+
+  // Count the number of leading zero bits.
+  uint64_t countl_zero() const;
+
+  // return the heightest number of the first 1, fls(4) = 3
+  uint64_t fls() const;
+
   // return 01111...1
   static wrapint get_signed_max(bitwidth_t w);
 
@@ -69,13 +92,14 @@ public:
   // return the wrapint as an unsigned number
   std::string get_unsigned_str() const;
 
+
   // return the wrapint as a signed number
   std::string get_signed_str() const;
 
   uint64_t get_uint64_t() const;
 
   std::size_t hash() const;
-
+  
   // return the wrapint as an unsigned big number
   ikos::z_number get_unsigned_bignum() const;
 
@@ -83,6 +107,21 @@ public:
   ikos::z_number get_signed_bignum() const;
 
   bool is_zero() const;
+
+  // is 01111...1
+  bool is_signed_max() const;
+
+  // is 1000....0
+  bool is_signed_min() const;
+
+  // is 1111....1
+  bool is_unsigned_max() const;
+
+  // is 0000....0
+  bool is_unsigned_min() const;
+
+  static wrapint min(wrapint x, wrapint y);
+  static wrapint max(wrapint x, wrapint y);
 
   wrapint operator+(wrapint x) const;
 
@@ -137,6 +176,9 @@ public:
   bool operator>(wrapint x) const;
 
   bool operator>=(wrapint x) const;
+
+  // bitwise complement, but not llvm instruction
+  wrapint operator~() const;
 
   wrapint operator&(wrapint x) const;
 
