@@ -74,6 +74,158 @@ TEST_F(OpenMPTaskGraphTest, ParsesStackBuiltDependencies) {
   EXPECT_FALSE(graph.mayBeParallel(tasks[0].get(), tasks[1].get()));
 }
 
+TEST_F(OpenMPTaskGraphTest,
+       LaterStoresDoNotRewriteEarlierStackBuiltDependencies) {
+  const char *source = R"(
+    %kmp_depend_info = type { i8*, i64, i8 }
+
+    @first = global i32 0, align 4
+    @second = global i32 0, align 4
+
+    declare i32 @__kmpc_omp_task_with_deps(i8*, i32, i8*, i32,
+                                           %kmp_depend_info*, i32,
+                                           %kmp_depend_info*)
+
+    define i32 @main() {
+    entry:
+      %deps = alloca [1 x %kmp_depend_info], align 8
+
+      %addr = getelementptr inbounds [1 x %kmp_depend_info],
+              [1 x %kmp_depend_info]* %deps, i64 0, i64 0, i32 0
+      %len = getelementptr inbounds [1 x %kmp_depend_info],
+             [1 x %kmp_depend_info]* %deps, i64 0, i64 0, i32 1
+      %flags = getelementptr inbounds [1 x %kmp_depend_info],
+               [1 x %kmp_depend_info]* %deps, i64 0, i64 0, i32 2
+      %dep = getelementptr inbounds [1 x %kmp_depend_info],
+             [1 x %kmp_depend_info]* %deps, i64 0, i64 0
+
+      store i8* bitcast (i32* @first to i8*), i8** %addr, align 8
+      store i64 4, i64* %len, align 8
+      store i8 2, i8* %flags, align 1
+      call i32 @__kmpc_omp_task_with_deps(
+          i8* null, i32 0, i8* null, i32 1,
+          %kmp_depend_info* %dep, i32 0, %kmp_depend_info* null)
+
+      store i8* bitcast (i32* @second to i8*), i8** %addr, align 8
+      store i64 4, i64* %len, align 8
+      store i8 2, i8* %flags, align 1
+      call i32 @__kmpc_omp_task_with_deps(
+          i8* null, i32 0, i8* null, i32 1,
+          %kmp_depend_info* %dep, i32 0, %kmp_depend_info* null)
+      ret i32 0
+    }
+  )";
+
+  auto module = parseModule(source);
+  ASSERT_NE(module, nullptr);
+
+  OpenMPTaskGraph graph(*module);
+  graph.analyze();
+
+  const auto &tasks = graph.getAllTasks();
+  ASSERT_EQ(tasks.size(), 2u);
+  ASSERT_EQ(tasks[0]->dependencies.size(), 1u);
+  ASSERT_EQ(tasks[1]->dependencies.size(), 1u);
+  EXPECT_EQ(tasks[0]->dependencies[0].canonical_base,
+            module->getNamedGlobal("first"));
+  EXPECT_EQ(tasks[1]->dependencies[0].canonical_base,
+            module->getNamedGlobal("second"));
+  EXPECT_EQ(graph.classifyTaskRelation(tasks[0].get(), tasks[1].get()),
+            OpenMPTaskGraph::TaskRelation::Parallel);
+}
+
+TEST_F(OpenMPTaskGraphTest, LoadedNdepsStillDecodesDependencyList) {
+  const char *source = R"(
+    %kmp_depend_info = type { i8*, i64, i8 }
+
+    @shared = global i32 0, align 4
+    @deps = global [1 x %kmp_depend_info] [
+      %kmp_depend_info {
+        i8* bitcast (i32* @shared to i8*),
+        i64 4,
+        i8 2
+      }
+    ]
+
+    declare i32 @__kmpc_omp_task_with_deps(i8*, i32, i8*, i32,
+                                           %kmp_depend_info*, i32,
+                                           %kmp_depend_info*)
+
+    define i32 @main() {
+    entry:
+      %count = alloca i32, align 4
+      store i32 1, i32* %count, align 4
+      %ndeps = load i32, i32* %count, align 4
+      %dep = getelementptr inbounds [1 x %kmp_depend_info],
+              [1 x %kmp_depend_info]* @deps, i64 0, i64 0
+      call i32 @__kmpc_omp_task_with_deps(
+          i8* null, i32 0, i8* null, i32 %ndeps,
+          %kmp_depend_info* %dep, i32 0, %kmp_depend_info* null)
+      ret i32 0
+    }
+  )";
+
+  auto module = parseModule(source);
+  ASSERT_NE(module, nullptr);
+
+  OpenMPTaskGraph graph(*module);
+  graph.analyze();
+
+  const auto &tasks = graph.getAllTasks();
+  ASSERT_EQ(tasks.size(), 1u);
+  ASSERT_EQ(tasks[0]->dependencies.size(), 1u);
+  EXPECT_EQ(tasks[0]->dependencies[0].canonical_base,
+            module->getNamedGlobal("shared"));
+}
+
+TEST_F(OpenMPTaskGraphTest, MemcpyCopiedDependencyArrayIsDecoded) {
+  const char *source = R"(
+    %kmp_depend_info = type { i8*, i64, i8 }
+
+    @shared = global i32 0, align 4
+    @deps = private constant [1 x %kmp_depend_info] [
+      %kmp_depend_info {
+        i8* bitcast (i32* @shared to i8*),
+        i64 4,
+        i8 2
+      }
+    ], align 8
+
+    declare i32 @__kmpc_omp_task_with_deps(i8*, i32, i8*, i32,
+                                           %kmp_depend_info*, i32,
+                                           %kmp_depend_info*)
+    declare void @llvm.memcpy.p0i8.p0i8.i64(i8* noalias writeonly,
+                                            i8* noalias readonly,
+                                            i64, i1 immarg)
+
+    define i32 @main() {
+    entry:
+      %local = alloca [1 x %kmp_depend_info], align 8
+      %dst = bitcast [1 x %kmp_depend_info]* %local to i8*
+      %src = bitcast [1 x %kmp_depend_info]* @deps to i8*
+      call void @llvm.memcpy.p0i8.p0i8.i64(i8* %dst, i8* %src, i64 24, i1 false)
+      %dep = getelementptr inbounds [1 x %kmp_depend_info],
+              [1 x %kmp_depend_info]* %local, i64 0, i64 0
+      call i32 @__kmpc_omp_task_with_deps(
+          i8* null, i32 0, i8* null, i32 1,
+          %kmp_depend_info* %dep, i32 0, %kmp_depend_info* null)
+      ret i32 0
+    }
+  )";
+
+  auto module = parseModule(source);
+  ASSERT_NE(module, nullptr);
+
+  OpenMPTaskGraph graph(*module);
+  graph.analyze();
+
+  const auto &tasks = graph.getAllTasks();
+  ASSERT_EQ(tasks.size(), 1u);
+  ASSERT_EQ(tasks[0]->dependencies.size(), 1u);
+  EXPECT_EQ(tasks[0]->dependencies[0].canonical_base,
+            module->getNamedGlobal("shared"));
+}
+
 TEST_F(OpenMPTaskGraphTest, DisjointOffsetsDoNotConflict) {
   const char *source = R"(
     %kmp_depend_info = type { i8*, i64, i8 }
@@ -1055,7 +1207,8 @@ TEST_F(OpenMPTaskGraphTest, ReduceNowaitEndProducesPartialBoundary) {
   EXPECT_GT(graph.getSummary().reduction_nowait_boundary_count, 0u);
 }
 
-TEST_F(OpenMPTaskGraphTest, DependencyConflictClassificationDelegatesToSemantics) {
+TEST_F(OpenMPTaskGraphTest,
+       DependencyConflictClassificationDelegatesToSemantics) {
   const char *source = R"(
     define i32 @main() {
     entry:

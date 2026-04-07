@@ -44,7 +44,7 @@ Machine Learning Features
 See :doc:`../ml/index` for ML feature extraction APIs.
 
 * **CanaryML** – Memory-related feature extraction using Sea-DSA for ML applications
-  (``lib/ML/``). Provides ``MemoryMLFeaturesPass`` for extracting memory access
+  (``lib/Analysis/FeatureExtraction/``). Provides ``MemoryMLFeaturesPass`` for extracting memory access
   patterns and structural features from call sites, useful for training memory
   safety predictors.
 

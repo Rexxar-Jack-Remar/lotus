@@ -478,6 +478,73 @@ TEST_F(OpenMPSemanticsTest,
   }
 }
 
+TEST_F(OpenMPSemanticsTest,
+       DetachedTaskCompletionDoesNotCreateSyntheticWaitBoundary) {
+  const char *source = R"(
+    declare i8* @__kmpc_omp_task_alloc(i8*, i32, i32, i64, i64, void ()*)
+    declare i32 @__kmpc_omp_task(i8*, i32, i8*)
+    declare void @__kmpc_omp_task_complete_if0(i8*, i32, i8*)
+
+    define internal void @detached_body() {
+    entry:
+      ret void
+    }
+
+    define i32 @main() {
+    entry:
+      %detached = call i8* @__kmpc_omp_task_alloc(
+          i8* null, i32 0, i32 65, i64 32, i64 0, void ()* @detached_body)
+      call i32 @__kmpc_omp_task(i8* null, i32 0, i8* %detached)
+      call void @__kmpc_omp_task_complete_if0(i8* null, i32 0, i8* %detached)
+      ret i32 0
+    }
+  )";
+
+  auto module = parseModule(source);
+  ASSERT_NE(module, nullptr);
+
+  OpenMPSemantics semantics(*module);
+  semantics.analyze();
+
+  EXPECT_EQ(semantics.getSummary().detach_completion_count, 1u);
+  EXPECT_EQ(semantics.getSummary().wait_boundary_count, 0u);
+  EXPECT_TRUE(semantics.getWaitBoundaryInfos().empty());
+}
+
+TEST_F(OpenMPSemanticsTest, SectionsInitCreatesDedicatedSemanticRegion) {
+  const char *source = R"(
+    declare i32 @__kmpc_sections_init(i8*, i32)
+    declare void @__kmpc_end_sections(i8*, i32)
+
+    define i32 @main() {
+    entry:
+      call i32 @__kmpc_sections_init(i8* null, i32 0)
+      call void @__kmpc_end_sections(i8* null, i32 0)
+      ret i32 0
+    }
+  )";
+
+  auto module = parseModule(source);
+  ASSERT_NE(module, nullptr);
+
+  OpenMPSemantics semantics(*module);
+  semantics.analyze();
+
+  size_t sections_entities = 0;
+  for (const SemanticEntity &entity : semantics.getSemanticEntities()) {
+    if (entity.kind == SemanticEntityKind::SectionsRegion) {
+      ++sections_entities;
+    }
+  }
+
+  EXPECT_EQ(semantics.getSummary().sections_region_count, 1u);
+  EXPECT_EQ(sections_entities, 1u);
+  ASSERT_EQ(semantics.getWaitBoundaryInfos().size(), 1u);
+  EXPECT_EQ(semantics.getWaitBoundaryInfos().front().kind,
+            WaitBoundaryInfo::Kind::SectionsEnd);
+  EXPECT_NE(semantics.getWaitBoundaryInfos().front().region_id, 0u);
+}
+
 TEST_F(OpenMPSemanticsTest, CriticalRegionsCreateSemanticEntitiesAndEvents) {
   const char *source = R"(
     @crit = global [8 x i32] zeroinitializer

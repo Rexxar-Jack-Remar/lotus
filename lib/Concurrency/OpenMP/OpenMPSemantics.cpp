@@ -4,6 +4,7 @@
 #include "Concurrency/Utils/ThreadAPI.h"
 
 #include <deque>
+#include <optional>
 
 #include <llvm/Analysis/CFG.h>
 #include <llvm/Analysis/LoopInfo.h>
@@ -11,6 +12,7 @@
 #include <llvm/IR/Constants.h>
 #include <llvm/IR/Dominators.h>
 #include <llvm/IR/InstIterator.h>
+#include <llvm/IR/IntrinsicInst.h>
 #include <llvm/IR/Operator.h>
 
 using namespace llvm;
@@ -246,6 +248,211 @@ constexpr uint64_t kLibompTaskMergedIf0Mask = 0x4ULL;
 constexpr uint64_t kLibompTaskProxyMask = 0x10ULL;
 constexpr uint64_t kLibompTaskDetachableMask = 0x40ULL;
 
+struct PartialDependency {
+  const Value *address = nullptr;
+  uint64_t size = 0;
+  uint64_t flags = 0;
+  DependencySourceKind source_kind = DependencySourceKind::RegionSummary;
+  DependencyProof proof = DependencyProof::Unknown;
+  bool has_address = false;
+  bool has_size = false;
+  bool has_flags = false;
+};
+
+std::optional<uint64_t>
+resolveDependencyCount(const Value *value, const Instruction *before,
+                       std::set<const Value *> &visiting) {
+  if (!value) {
+    return std::nullopt;
+  }
+
+  value = value->stripPointerCasts();
+  if (!visiting.insert(value).second) {
+    return std::nullopt;
+  }
+
+  if (const auto *ci = dyn_cast<ConstantInt>(value)) {
+    visiting.erase(value);
+    return ci->getZExtValue();
+  }
+
+  if (const auto *cast = dyn_cast<CastInst>(value)) {
+    auto resolved =
+        resolveDependencyCount(cast->getOperand(0), before, visiting);
+    visiting.erase(value);
+    return resolved;
+  }
+
+  if (const auto *ce = dyn_cast<ConstantExpr>(value)) {
+    if (ce->isCast()) {
+      auto resolved =
+          resolveDependencyCount(ce->getOperand(0), before, visiting);
+      visiting.erase(value);
+      return resolved;
+    }
+  }
+
+  if (const auto *select = dyn_cast<SelectInst>(value)) {
+    auto true_value =
+        resolveDependencyCount(select->getTrueValue(), before, visiting);
+    auto false_value =
+        resolveDependencyCount(select->getFalseValue(), before, visiting);
+    if (true_value && false_value && *true_value == *false_value) {
+      visiting.erase(value);
+      return true_value;
+    }
+    visiting.erase(value);
+    return std::nullopt;
+  }
+
+  if (const auto *phi = dyn_cast<PHINode>(value)) {
+    std::optional<uint64_t> resolved;
+    for (const Value *incoming : phi->incoming_values()) {
+      auto incoming_value = resolveDependencyCount(incoming, before, visiting);
+      if (!incoming_value) {
+        visiting.erase(value);
+        return std::nullopt;
+      }
+      if (!resolved) {
+        resolved = incoming_value;
+        continue;
+      }
+      if (*resolved != *incoming_value) {
+        visiting.erase(value);
+        return std::nullopt;
+      }
+    }
+    visiting.erase(value);
+    return resolved;
+  }
+
+  if (const auto *load = dyn_cast<LoadInst>(value)) {
+    const Value *storage = getUnderlyingObject(load->getPointerOperand());
+    if (!storage) {
+      storage = load->getPointerOperand()->stripPointerCasts();
+    }
+
+    if (const auto *gv = dyn_cast<GlobalVariable>(storage)) {
+      if (const auto *init = dyn_cast<ConstantInt>(gv->getInitializer())) {
+        visiting.erase(value);
+        return init->getZExtValue();
+      }
+    }
+
+    const Function *parent = before ? before->getFunction() : nullptr;
+    if (!parent) {
+      visiting.erase(value);
+      return std::nullopt;
+    }
+
+    const StoreInst *latest_store = nullptr;
+    for (const Instruction &inst : instructions(parent)) {
+      const auto *store = dyn_cast<StoreInst>(&inst);
+      if (!store || !mustHappenBefore(store, before)) {
+        continue;
+      }
+      const Value *store_target =
+          getUnderlyingObject(store->getPointerOperand());
+      if (!store_target) {
+        store_target = store->getPointerOperand()->stripPointerCasts();
+      }
+      if (store_target != storage) {
+        continue;
+      }
+      if (!latest_store || mustHappenBefore(latest_store, store)) {
+        latest_store = store;
+      }
+    }
+
+    if (latest_store) {
+      auto resolved = resolveDependencyCount(latest_store->getValueOperand(),
+                                             before, visiting);
+      visiting.erase(value);
+      return resolved;
+    }
+  }
+
+  visiting.erase(value);
+  return std::nullopt;
+}
+
+std::optional<uint64_t> resolveDependencyCount(const Value *value,
+                                               const Instruction *before) {
+  std::set<const Value *> visiting;
+  return resolveDependencyCount(value, before, visiting);
+}
+
+uint64_t getDependencyArrayCapacity(const Value *dep_base) {
+  dep_base = dep_base ? dep_base->stripPointerCasts() : nullptr;
+  if (!dep_base) {
+    return 0;
+  }
+
+  if (const auto *gv = dyn_cast<GlobalVariable>(dep_base)) {
+    if (const auto *array = dyn_cast<ArrayType>(gv->getValueType())) {
+      return array->getNumElements();
+    }
+  }
+
+  if (const auto *alloca = dyn_cast<AllocaInst>(dep_base)) {
+    if (const auto *array = dyn_cast<ArrayType>(alloca->getAllocatedType())) {
+      return array->getNumElements();
+    }
+  }
+
+  return 0;
+}
+
+uint64_t getDependencyStartIndex(const Value *dep_root, const Value *dep_base) {
+  if (!dep_root || !dep_base) {
+    return 0;
+  }
+
+  dep_root = dep_root->stripPointerCasts();
+  dep_base = dep_base->stripPointerCasts();
+  if (dep_root == dep_base) {
+    return 0;
+  }
+
+  const auto *gep = dyn_cast<GEPOperator>(dep_root);
+  if (!gep || getUnderlyingObject(gep->getPointerOperand()) != dep_base) {
+    return 0;
+  }
+
+  SmallVector<uint64_t, 4> indices;
+  for (unsigned i = 0; i < gep->getNumIndices(); ++i) {
+    const auto *ci = dyn_cast<ConstantInt>(gep->getOperand(i + 1));
+    if (!ci) {
+      return 0;
+    }
+    indices.push_back(ci->getZExtValue());
+  }
+
+  if (indices.empty()) {
+    return 0;
+  }
+  return indices.back();
+}
+
+void seedPartialDependencies(std::map<uint64_t, PartialDependency> &partials,
+                             const std::vector<Dependency> &deps,
+                             uint64_t start_index) {
+  for (size_t i = 0; i < deps.size(); ++i) {
+    PartialDependency &partial = partials[start_index + i];
+    partial.address = deps[i].address;
+    partial.size = deps[i].size;
+    partial.flags = deps[i].type == DependType::IN              ? 0x1
+                    : deps[i].type == DependType::OUT           ? 0x2
+                    : deps[i].type == DependType::MUTEXINOUTSET ? 0x4
+                                                                : 0x3;
+    partial.source_kind = deps[i].source_kind;
+    partial.proof = deps[i].proof;
+    partial.has_address = deps[i].address != nullptr;
+    partial.has_size = true;
+    partial.has_flags = true;
+  }
+}
+
 } // namespace
 
 OpenMPSemantics::OpenMPSemantics(Module &module) : m_module(module) {}
@@ -435,7 +642,6 @@ void OpenMPSemantics::rebuildWaitBoundaryViews() {
 
   for (const OpenMPTaskEvent &event : m_task_events) {
     switch (event.kind) {
-    case OpenMPTaskEvent::Kind::TaskComplete:
     case OpenMPTaskEvent::Kind::Taskwait:
     case OpenMPTaskEvent::Kind::TaskwaitDeps:
     case OpenMPTaskEvent::Kind::TaskgroupEnd:
@@ -1252,6 +1458,8 @@ void OpenMPSemantics::scanSchedulingContext(
         continue;
       }
       if (type == ThreadAPI::TD_OMP_SECTIONS_INIT) {
+        pushRegion(WaitBoundaryInfo::Kind::SectionsEnd,
+                   SemanticEntityKind::SectionsRegion, call);
         ++m_summary.sections_region_count;
         continue;
       }
@@ -1453,6 +1661,7 @@ void OpenMPSemantics::scanSchedulingContext(
         TraversalState::RegionFrame frame;
         const bool should_pop_region =
             type == ThreadAPI::TD_OMP_SINGLE_END ||
+            type == ThreadAPI::TD_OMP_SECTIONS_END ||
             type == ThreadAPI::TD_OMP_FOR_STATIC_FINI ||
             type == ThreadAPI::TD_OMP_FOR_DISPATCH_FINI;
         if (should_pop_region) {
@@ -1625,12 +1834,6 @@ std::vector<Dependency> OpenMPSemantics::extractRuntimeDependencies(
   }
 
   const Value *ndeps_val = task_call->getArgOperand(ndeps_arg_idx);
-  const ConstantInt *CI = dyn_cast<ConstantInt>(ndeps_val);
-  if (!CI) {
-    return deps;
-  }
-  uint64_t ndeps = CI->getZExtValue();
-
   const Value *dep_list = task_call->getArgOperand(dep_arg_idx);
   const Value *dep_root = resolveDependencyListValue(dep_list);
   const Value *dep_base =
@@ -1639,11 +1842,25 @@ std::vector<Dependency> OpenMPSemantics::extractRuntimeDependencies(
     dep_base = dep_root->stripPointerCasts();
   }
 
+  const std::optional<uint64_t> resolved_ndeps =
+      resolveDependencyCount(ndeps_val, task_call);
+  uint64_t start_index = getDependencyStartIndex(dep_root, dep_base);
+  uint64_t max_entries = resolved_ndeps.value_or(0);
+  if (max_entries == 0) {
+    uint64_t capacity = getDependencyArrayCapacity(dep_base);
+    if (capacity > start_index) {
+      max_entries = capacity - start_index;
+    }
+  }
+  if (max_entries == 0) {
+    return deps;
+  }
+
   if (const auto *gv = dyn_cast_or_null<GlobalVariable>(dep_base)) {
     if (const auto *init = gv->getInitializer()) {
       if (const auto *array = dyn_cast<ConstantArray>(init)) {
-        for (unsigned i = 0; i < array->getNumOperands() && deps.size() < ndeps;
-             ++i) {
+        for (unsigned i = start_index;
+             i < array->getNumOperands() && deps.size() < max_entries; ++i) {
           Dependency dep;
           if (decodeConstantDependency(dyn_cast<Constant>(array->getOperand(i)),
                                        dep)) {
@@ -1660,25 +1877,79 @@ std::vector<Dependency> OpenMPSemantics::extractRuntimeDependencies(
       }
     }
   } else if (const auto *alloca = dyn_cast_or_null<AllocaInst>(dep_base)) {
-    struct PartialDependency {
-      const Value *address = nullptr;
-      uint64_t size = 0;
-      uint64_t flags = 0;
-      DependencySourceKind source_kind = DependencySourceKind::RegionSummary;
-      DependencyProof proof = DependencyProof::Unknown;
-      bool has_address = false;
-      bool has_size = false;
-      bool has_flags = false;
-    };
-
     std::map<uint64_t, PartialDependency> partials;
     const Function *parent = alloca->getFunction();
     if (!parent) {
       return deps;
     }
+
+    const MemTransferInst *latest_transfer = nullptr;
+    for (const Instruction &inst : instructions(parent)) {
+      const auto *transfer = dyn_cast<MemTransferInst>(&inst);
+      if (!transfer || !mustHappenBefore(transfer, task_call)) {
+        continue;
+      }
+      const Value *dest = getUnderlyingObject(transfer->getRawDest());
+      if (!dest) {
+        dest = transfer->getRawDest()->stripPointerCasts();
+      }
+      if (dest != alloca) {
+        continue;
+      }
+      if (!latest_transfer || mustHappenBefore(latest_transfer, transfer)) {
+        latest_transfer = transfer;
+      }
+    }
+
+    if (latest_transfer) {
+      const Value *source_root =
+          resolveDependencyListValue(latest_transfer->getRawSource());
+      const Value *source_base =
+          source_root ? getUnderlyingObject(source_root->stripPointerCasts())
+                      : nullptr;
+      if (!source_base && source_root) {
+        source_base = source_root->stripPointerCasts();
+      }
+
+      std::vector<Dependency> seeded;
+      if (const auto *source_gv =
+              dyn_cast_or_null<GlobalVariable>(source_base)) {
+        if (const auto *init = source_gv->getInitializer()) {
+          if (const auto *array = dyn_cast<ConstantArray>(init)) {
+            uint64_t source_start =
+                getDependencyStartIndex(source_root, source_base);
+            for (unsigned i = source_start;
+                 i < array->getNumOperands() && seeded.size() < max_entries;
+                 ++i) {
+              Dependency dep;
+              if (!decodeConstantDependency(
+                      dyn_cast<Constant>(array->getOperand(i)), dep)) {
+                continue;
+              }
+              dep.source_kind = source_gv->isConstant()
+                                    ? DependencySourceKind::DirectAddress
+                                    : DependencySourceKind::RegionSummary;
+              dep.proof = source_gv->isConstant() ? DependencyProof::Definite
+                                                  : DependencyProof::Possible;
+              dep.canonical_base = canonicalizeDependencyAddress(
+                  dep.address, DL, dep.offset, dep.has_precise_offset);
+              seeded.push_back(dep);
+            }
+          }
+        }
+      }
+
+      if (!seeded.empty()) {
+        seedPartialDependencies(partials, seeded, start_index);
+      }
+    }
+
     for (const Instruction &inst : instructions(parent)) {
       const auto *store = dyn_cast<StoreInst>(&inst);
       if (!store) {
+        continue;
+      }
+      if (!mustHappenBefore(store, task_call)) {
         continue;
       }
       const auto *gep = dyn_cast<GEPOperator>(store->getPointerOperand());
@@ -1705,7 +1976,7 @@ std::vector<Dependency> OpenMPSemantics::extractRuntimeDependencies(
 
       uint64_t dep_idx = indices[indices.size() - 2];
       unsigned field_idx = indices.back();
-      if (dep_idx >= ndeps) {
+      if (dep_idx < start_index || dep_idx >= start_index + max_entries) {
         continue;
       }
 
@@ -1730,7 +2001,7 @@ std::vector<Dependency> OpenMPSemantics::extractRuntimeDependencies(
       }
     }
 
-    for (uint64_t i = 0; i < ndeps; ++i) {
+    for (uint64_t i = start_index; i < start_index + max_entries; ++i) {
       auto it = partials.find(i);
       if (it == partials.end() || !it->second.has_address) {
         continue;

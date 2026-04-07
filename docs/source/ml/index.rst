@@ -7,12 +7,12 @@ specifically the ``CanaryML`` library for memory-related feature extraction usin
 Overview
 --------
 
-The ``CanaryML`` library (built from ``lib/ML/``) provides utilities for extracting
+The ``CanaryML`` library (built from ``lib/Analysis/FeatureExtraction/``) provides utilities for extracting
 memory-related features from program call sites. These features are designed for
 machine learning applications, particularly for predicting memory safety properties
 or learning memory access patterns.
 
-**Location**: ``lib/ML/``
+**Location**: ``lib/Analysis/FeatureExtraction/``
 
 **Library Name**: ``CanaryML``
 
@@ -31,12 +31,12 @@ features for each call site in a module.
 **Header**:
 .. code-block:: cpp
 
-   #include "ML/MemoryMLFeatures.h"
+   #include "Analysis/FeatureExtraction/MemoryMLFeatures.h"
 
 **Basic Usage**:
 .. code-block:: cpp
 
-   #include "ML/MemoryMLFeatures.h"
+   #include "Analysis/FeatureExtraction/MemoryMLFeatures.h"
 
    // Create and run the pass
    previrt::MemoryMLFeaturesPass ml_features_pass;
