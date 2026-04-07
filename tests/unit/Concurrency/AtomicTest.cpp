@@ -1,6 +1,6 @@
-#include "Analysis/Concurrency/MHP/HappensBeforeAnalysis.h"
-#include "Analysis/Concurrency/MHP/MHPAnalysis.h"
-#include "Analysis/Concurrency/Utils/CppAtomics.h"
+#include "Concurrency/MHP/HappensBeforeAnalysis.h"
+#include "Concurrency/MHP/MHPAnalysis.h"
+#include "Concurrency/Utils/CppAtomics.h"
 
 #include "TestUtils/LLVMHelpers.h"
 

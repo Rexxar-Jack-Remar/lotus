@@ -1,4 +1,4 @@
-#include "Analysis/Concurrency/ConcurrencyFacade.h"
+#include "Concurrency/ConcurrencyFacade.h"
 
 #include "TestUtils/LLVMHelpers.h"
 

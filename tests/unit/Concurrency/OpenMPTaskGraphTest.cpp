@@ -1,4 +1,4 @@
-#include "Analysis/Concurrency/OpenMP/OpenMPTaskGraph.h"
+#include "Concurrency/OpenMP/OpenMPTaskGraph.h"
 
 #include "TestUtils/LLVMHelpers.h"
 

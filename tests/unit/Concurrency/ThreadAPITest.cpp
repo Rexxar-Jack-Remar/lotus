@@ -1,4 +1,4 @@
-#include "Analysis/Concurrency/Utils/ThreadAPI.h"
+#include "Concurrency/Utils/ThreadAPI.h"
 
 #include "TestUtils/LLVMHelpers.h"
 

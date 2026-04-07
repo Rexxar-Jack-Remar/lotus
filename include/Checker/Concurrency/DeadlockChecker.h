@@ -1,10 +1,10 @@
 #ifndef DEADLOCK_CHECKER_H
 #define DEADLOCK_CHECKER_H
 
-#include "Analysis/Concurrency/LockSet/LockSetAnalysis.h"
-#include "Analysis/Concurrency/MHP/HappensBeforeAnalysis.h"
-#include "Analysis/Concurrency/MHP/IMHPAnalysis.h"
-#include "Analysis/Concurrency/Utils/ThreadAPI.h"
+#include "Concurrency/LockSet/LockSetAnalysis.h"
+#include "Concurrency/MHP/HappensBeforeAnalysis.h"
+#include "Concurrency/MHP/IMHPAnalysis.h"
+#include "Concurrency/Utils/ThreadAPI.h"
 #include "Checker/Concurrency/ConcurrencyBugReport.h"
 
 #include <string>

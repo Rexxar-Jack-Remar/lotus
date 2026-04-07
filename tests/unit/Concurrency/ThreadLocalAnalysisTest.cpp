@@ -1,4 +1,4 @@
-#include "Analysis/Concurrency/Utils/ThreadLocalAnalysis.h"
+#include "Concurrency/Utils/ThreadLocalAnalysis.h"
 #include "TestUtils/LLVMHelpers.h"
 
 #include <gtest/gtest.h>

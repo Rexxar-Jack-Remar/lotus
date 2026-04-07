@@ -3,10 +3,10 @@
  * @brief Unit tests for Lock Set Analysis
  */
 
-#include "Analysis/Concurrency/LockSet/LockSetAnalysis.h"
+#include "Concurrency/LockSet/LockSetAnalysis.h"
 
 #include "Alias/AliasAnalysisWrapper/AliasAnalysisWrapper.h"
-#include "Analysis/Concurrency/Utils/RAIILockTracker.h"
+#include "Concurrency/Utils/RAIILockTracker.h"
 #include "TestUtils/LLVMHelpers.h"
 
 #include <algorithm>

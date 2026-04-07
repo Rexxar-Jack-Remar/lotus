@@ -1,4 +1,4 @@
-#include "Analysis/Concurrency/JoinTarget/JoinTargetAnalysis.h"
+#include "Concurrency/JoinTarget/JoinTargetAnalysis.h"
 
 #include "TestUtils/LLVMHelpers.h"
 

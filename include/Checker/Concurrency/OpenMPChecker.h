@@ -1,7 +1,7 @@
 #pragma once
 
-#include "Analysis/Concurrency/OpenMP/OpenMPTaskGraph.h"
-#include "Analysis/Concurrency/Utils/ThreadAPI.h"
+#include "Concurrency/OpenMP/OpenMPTaskGraph.h"
+#include "Concurrency/Utils/ThreadAPI.h"
 #include "Checker/Concurrency/ConcurrencyBugReport.h"
 
 #include <memory>

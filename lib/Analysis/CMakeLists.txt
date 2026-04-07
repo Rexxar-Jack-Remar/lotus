@@ -1,7 +1,5 @@
 add_subdirectory(CFG)
 add_subdirectory(NullPointer)
-add_subdirectory(Concurrency)
-add_subdirectory(Spectre)
 add_subdirectory(TypeHirarchy)
 add_subdirectory(Crypto)
 add_subdirectory(DebugInfo)

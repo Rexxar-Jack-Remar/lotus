@@ -1,8 +1,8 @@
 #pragma once
 
-#include "Analysis/Concurrency/MPI/MPIAnalysis.h"
+#include "Concurrency/MPI/MPIAnalysis.h"
 
-#include "Analysis/Concurrency/MPI/MPISemantics.h"
+#include "Concurrency/MPI/MPISemantics.h"
 
 #include "TestUtils/LLVMHelpers.h"
 

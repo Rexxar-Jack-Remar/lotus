@@ -1,4 +1,4 @@
-#include "Analysis/Concurrency/OpenMP/DataSharingAnalysis.h"
+#include "Concurrency/OpenMP/DataSharingAnalysis.h"
 
 #include "TestUtils/LLVMHelpers.h"
 

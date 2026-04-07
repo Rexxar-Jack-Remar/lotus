@@ -1,6 +1,6 @@
 #pragma once
 
-#include "Analysis/Concurrency/MPI/MPIRankAnalysis.h"
+#include "Concurrency/MPI/MPIRankAnalysis.h"
 #include "TestUtils/LLVMHelpers.h"
 
 #include <gtest/gtest.h>

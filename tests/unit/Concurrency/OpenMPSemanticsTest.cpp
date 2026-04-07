@@ -1,4 +1,4 @@
-#include "Analysis/Concurrency/OpenMP/OpenMPSemantics.h"
+#include "Concurrency/OpenMP/OpenMPSemantics.h"
 
 #include "TestUtils/LLVMHelpers.h"
 

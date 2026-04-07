@@ -1,4 +1,4 @@
-#include "Analysis/Concurrency/LockSet/LockSetAnalysis.h"
+#include "Concurrency/LockSet/LockSetAnalysis.h"
 #include "TestUtils/LLVMHelpers.h"
 #include <gtest/gtest.h>
 

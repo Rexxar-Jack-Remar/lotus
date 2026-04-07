@@ -3,8 +3,8 @@
 #include "Checker/Concurrency/ConcurrencyChecker.h"
 
 #include "Alias/AliasAnalysisWrapper/AliasAnalysisWrapper.h"
-#include "Analysis/Concurrency/MHP/HappensBeforeAnalysis.h"
-#include "Analysis/Concurrency/Utils/ThreadAPI.h"
+#include "Concurrency/MHP/HappensBeforeAnalysis.h"
+#include "Concurrency/Utils/ThreadAPI.h"
 #include "Checker/Concurrency/ConcurrencyAnalysisDumper.h"
 
 #include "Alias/seadsa/DsaAnalysis.hh"

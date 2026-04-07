@@ -1,6 +1,6 @@
 #pragma once
 
-#include "Analysis/Concurrency/MPI/MPIAnalysis.h"
+#include "Concurrency/MPI/MPIAnalysis.h"
 #include "Checker/Concurrency/ConcurrencyBugReport.h"
 
 #include <memory>

@@ -10,6 +10,7 @@ Bug checkers and reporting infrastructure.
 | **Concurrency** | Thread-safety: Atomicity, ConditionVariable, DataRace, Deadlock, LockMismatch. | ⚠️ Unstable |
 | **FiTx** | Detectors: double-free, double-lock/unlock, leak, null-ptr, ref/ unref, UAF, use-before-init. | ✅ Stable |
 | **KINT** | Integer bug detection. Taint analysis, SMT (Z3). | ⚠️ Unstable |
-| **Pulse** | Biabductive analysis (Infer Pulse–style). Witnessable bugs, disjunctive domain, loop abstraction. | ⚠️ Migrated (from Infer), Unstable |
+| **Pulse** | Biabductive analysis (Infer Pulse-style). Witnessable bugs, disjunctive domain, loop abstraction. | ⚠️ Migrated (from Infer), Unstable |
 | **Saber** | Source-sink bug detector. Migrated from SVF's SABER engine. Checkers: memory leak, double-free, file operations (fopen/fclose). | ⚠️ Migrated (from SVF), unstable |
+| **Security** | Security-oriented checker families such as Spectre. | ⚠️ Evolving |
 | **Report** | Shared reporting: BugReport, BugReportMgr, BugTypes, SARIF, SuppressionManager. | ✅ Stable |

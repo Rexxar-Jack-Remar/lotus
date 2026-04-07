@@ -3,9 +3,9 @@ Concurrency Analysis
 
 Thread-aware analyses for concurrent programs.
 
-**Headers**: ``include/Analysis/Concurrency``
+**Headers**: ``include/Concurrency``
 
-**Implementation**: ``lib/Analysis/Concurrency``
+**Implementation**: ``lib/Concurrency``
 
 Overview
 --------
@@ -278,7 +278,7 @@ Usage
 
 .. code-block:: cpp
 
-   #include <Analysis/Concurrency/MHP/MHPAnalysis.h>
+   #include <Concurrency/MHP/MHPAnalysis.h>
 
    llvm::Module &M = ...;
    mhp::MHPAnalysis mhp(M);
@@ -295,7 +295,7 @@ Usage
 
 .. code-block:: cpp
 
-   #include <Analysis/Concurrency/LockSet/LockSetAnalysis.h>
+   #include <Concurrency/LockSet/LockSetAnalysis.h>
 
    llvm::Module &M = ...;
    mhp::LockSetAnalysis lsa(M);
@@ -309,9 +309,9 @@ Usage
 
 .. code-block:: cpp
 
-   #include <Analysis/Concurrency/MHP/MHPAnalysis.h>
-   #include <Analysis/Concurrency/LockSet/LockSetAnalysis.h>
-   #include <Analysis/Concurrency/Memory/EscapeAnalysis.h>
+   #include <Concurrency/MHP/MHPAnalysis.h>
+   #include <Concurrency/LockSet/LockSetAnalysis.h>
+   #include <Concurrency/Memory/EscapeAnalysis.h>
 
    llvm::Module &M = ...;
    
@@ -341,7 +341,7 @@ Usage
 
 .. code-block:: cpp
 
-   #include <Analysis/Concurrency/Utils/ThreadAPI.h>
+   #include <Concurrency/Utils/ThreadAPI.h>
 
    ThreadAPI *api = ThreadAPI::getThreadAPI();
    
@@ -427,4 +427,3 @@ Limitations
 
 - **Real-Time Constraints**: The analysis does not model real-time scheduling
   constraints or priority-based execution ordering.
-

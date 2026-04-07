@@ -4,7 +4,7 @@
  */
 #include "Checker/Concurrency/LockMismatchChecker.h"
 
-#include "Analysis/Concurrency/Utils/RAIILockTracker.h"
+#include "Concurrency/Utils/RAIILockTracker.h"
 
 #include <llvm/IR/InstIterator.h>
 #include <llvm/IR/Instructions.h>

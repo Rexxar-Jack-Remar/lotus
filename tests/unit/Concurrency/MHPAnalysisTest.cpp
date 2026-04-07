@@ -3,9 +3,9 @@
  * @brief Simplified unit tests for MHP Analysis
  */
 
-#include "Analysis/Concurrency/MHP/MHPAnalysis.h"
+#include "Concurrency/MHP/MHPAnalysis.h"
 
-#include "Analysis/Concurrency/MHP/HappensBeforeAnalysis.h"
+#include "Concurrency/MHP/HappensBeforeAnalysis.h"
 #include "TestUtils/LLVMHelpers.h"
 
 using namespace llvm;

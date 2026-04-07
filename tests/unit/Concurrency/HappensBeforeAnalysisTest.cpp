@@ -1,4 +1,4 @@
-#include "Analysis/Concurrency/MHP/HappensBeforeAnalysis.h"
+#include "Concurrency/MHP/HappensBeforeAnalysis.h"
 
 #include "TestUtils/LLVMHelpers.h"
 

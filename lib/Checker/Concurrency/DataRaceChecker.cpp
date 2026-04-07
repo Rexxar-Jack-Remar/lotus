@@ -5,8 +5,8 @@
 #include "Checker/Concurrency/DataRaceChecker.h"
 
 #include "Alias/AliasAnalysisWrapper/AliasAnalysisWrapper.h"
-#include "Analysis/Concurrency/MHP/HappensBeforeAnalysis.h"
-#include "Analysis/Concurrency/Utils/CppAtomics.h"
+#include "Concurrency/MHP/HappensBeforeAnalysis.h"
+#include "Concurrency/Utils/CppAtomics.h"
 
 #include <deque>
 #include <set>

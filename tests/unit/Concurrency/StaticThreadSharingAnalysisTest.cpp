@@ -1,8 +1,8 @@
-#include "Analysis/Concurrency/Memory/StaticThreadSharingAnalysis.h"
+#include "Concurrency/Memory/StaticThreadSharingAnalysis.h"
 
 #include "Alias/seadsa/DsaAnalysis.hh"
 #include "Alias/seadsa/InitializePasses.hh"
-#include "Analysis/Concurrency/Utils/ThreadAPI.h"
+#include "Concurrency/Utils/ThreadAPI.h"
 
 #include "TestUtils/LLVMHelpers.h"
 

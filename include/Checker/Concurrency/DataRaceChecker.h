@@ -1,12 +1,12 @@
 #ifndef DATA_RACE_CHECKER_H
 #define DATA_RACE_CHECKER_H
 
-#include "Analysis/Concurrency/LockSet/LockSetAnalysis.h"
-#include "Analysis/Concurrency/MHP/IMHPAnalysis.h"
-#include "Analysis/Concurrency/Memory/EscapeAnalysis.h"
-#include "Analysis/Concurrency/Memory/StaticThreadSharingAnalysis.h"
-#include "Analysis/Concurrency/Utils/ThreadAPI.h"
-#include "Analysis/Concurrency/Utils/ThreadLocalAnalysis.h"
+#include "Concurrency/LockSet/LockSetAnalysis.h"
+#include "Concurrency/MHP/IMHPAnalysis.h"
+#include "Concurrency/Memory/EscapeAnalysis.h"
+#include "Concurrency/Memory/StaticThreadSharingAnalysis.h"
+#include "Concurrency/Utils/ThreadAPI.h"
+#include "Concurrency/Utils/ThreadLocalAnalysis.h"
 #include "Checker/Concurrency/ConcurrencyBugReport.h"
 
 #include <string>

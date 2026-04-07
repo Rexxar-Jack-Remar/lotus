@@ -1,8 +1,8 @@
 #ifndef LOCK_MISMATCH_CHECKER_H
 #define LOCK_MISMATCH_CHECKER_H
 
-#include "Analysis/Concurrency/LockSet/LockSetAnalysis.h"
-#include "Analysis/Concurrency/Utils/ThreadAPI.h"
+#include "Concurrency/LockSet/LockSetAnalysis.h"
+#include "Concurrency/Utils/ThreadAPI.h"
 #include "Checker/Concurrency/ConcurrencyBugReport.h"
 
 #include <string>

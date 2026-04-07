@@ -1,4 +1,4 @@
-#include "Analysis/Concurrency/MHP/StaticVectorClockMHP.h"
+#include "Concurrency/MHP/StaticVectorClockMHP.h"
 
 #include "TestUtils/LLVMHelpers.h"
 

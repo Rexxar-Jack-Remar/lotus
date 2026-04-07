@@ -14,9 +14,10 @@ Lotus is a **program analysis, verification, and optimization framework** built 
 lotus/
 ├── include/           # Public headers (mirrors lib structure)
 │   ├── Alias/         # Alias analysis (DyckAA, AserPTA, LotusAA, SparrowAA, etc.)
-│   ├── Analysis/      # Analysis utilities (NullPointer, Concurrency, CFG, etc.)
+│   ├── Analysis/      # Analysis utilities (NullPointer, SymbolicExecution, CFG, etc.)
 │   ├── CFL/           # CFL reachability
-│   ├── Checker/       # Bug checkers (Concurrency, FiTx, KINT, Pulse, etc.)
+│   ├── Checker/       # Bug checkers (Concurrency, Security, FiTx, KINT, Pulse, etc.)
+│   ├── Concurrency/   # Concurrency analyses (MHP, lockset, MPI, OpenMP, kernel)
 │   ├── Dataflow/      # APA, IFDS/IDE, Mono, NPA, WPDS
 │   ├── IR/            # GSA, ICFG, MemorySSA, PDG, SSI, SVFG, vSSA
 │   ├── Solvers/       # SMT
