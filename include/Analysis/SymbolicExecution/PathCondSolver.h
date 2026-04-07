@@ -124,8 +124,9 @@ private:
 
   void resetSolverState();
   void updateUsedCSOuts();
-  void normalizeExprWidth(SMTExpr &L, SMTExpr &R);
-  void normalizeExprWidth(SMTExpr &E1, SMTExpr &E2, SMTExpr &E3);
+  void normalizeExprWidth(SMTExpr &L, SMTExpr &R, bool SignExtend = true);
+  void normalizeExprWidth(SMTExpr &E1, SMTExpr &E2, SMTExpr &E3,
+                          bool SignExtend = true);
   SMTExpr buildSymExpr(const PropertySymExpr *V);
   SMTExpr buildIntExpr(const BigInteger &I);
 };

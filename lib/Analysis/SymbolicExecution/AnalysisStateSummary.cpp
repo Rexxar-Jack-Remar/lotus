@@ -128,7 +128,7 @@ void AnalysisState::processCall(CallInst *Inst, Function *Callee,
        Iter != EIter; ++Iter) {
     auto *RetNode = *Iter;
     const GuardedValueFlowNode *OutNode = nullptr;
-    if (isa<GuardedValueFlowReturnNode>(RetNode)) {
+    if (RetNode->getKind() == GuardedValueFlowNode::Kind::CommonReturn) {
       OutNode = getNode(Inst);
     } else {
       OutNode = GraphCS->getPseudoOutput(
@@ -158,7 +158,7 @@ void AnalysisState::processCall(CallInst *Inst, Function *Callee,
        Iter != EIter; ++Iter) {
     auto *RetNode = *Iter;
     const GuardedValueFlowNode *OutNode = nullptr;
-    if (isa<GuardedValueFlowReturnNode>(RetNode)) {
+    if (RetNode->getKind() == GuardedValueFlowNode::Kind::CommonReturn) {
       OutNode = getNode(Inst);
     } else {
       OutNode = GraphCS->getPseudoOutput(

@@ -63,6 +63,15 @@ extern cl::opt<std::string> SymexDebugFunName;
 
 namespace {
 
+bool isFreeLikeFunction(const Function *callee) {
+  if (!callee) {
+    return false;
+  }
+
+  StringRef name = callee->getName();
+  return name == "free" || name == "_ZdlPv" || name == "_ZdaPv";
+}
+
 bool needsCheck(const SymbolicExecution::PTItem &Pt) {
   if (Pt.isPlaceHolder()) {
     return false;
@@ -244,7 +253,10 @@ void AnalysisState::buildQuery(Instruction *Inst) {
 
   if (BugTy & BUG_TY_DOUBLE_FREE) {
     if (OpC == Instruction::Call) {
-      buildDoubleFreeQuery(Inst);
+      auto *Callee = seg_utility::getCallee(Inst);
+      if (!isFreeLikeFunction(Callee)) {
+        buildDoubleFreeQuery(Inst);
+      }
     }
   }
 
@@ -1992,9 +2004,7 @@ void AnalysisState::buildDoubleFreeQuery(Instruction *Inst) {
   if (!Callee)
     return;
 
-  // Check if this is a free() or delete call
-  std::string CalleeName = Callee->getName().str();
-  if (CalleeName != "free" && CalleeName != "_ZdlPv" && CalleeName != "_ZdaPv")
+  if (!isFreeLikeFunction(Callee))
     return;
 
   if (CallI->arg_size() < 1)
@@ -2003,14 +2013,40 @@ void AnalysisState::buildDoubleFreeQuery(Instruction *Inst) {
   Value *Ptr = CallI->getArgOperand(0);
   auto *PtrNode = getNode(Ptr);
 
-  // Check if this pointer was already freed
+  bool has_double_free = false;
+  Condition double_free_cond = Condition::getFalseCond();
+
   if (FreedPtrSet.hasValue(PtrNode)) {
-    auto FreeCond = FreedPtrSet.getGuardForValue(PtrNode);
-    if (!FreeCond.isFalse()) {
-      auto Q = DirectNumericalQuery::getDoubleFreeMustErrQuery();
-      addQueryTrace(Q, FreeCond,
-                    TraceStep(TraceStep::TRACE_STEP_CALL, Inst, Ptr));
-    }
+    has_double_free = true;
+    double_free_cond = FreedPtrSet.getGuardForValue(PtrNode);
+  }
+
+  if (hasPts(PtrNode)) {
+    const PtsSet &Pts = getPts(PtrNode);
+    Pts.forEach([&](const PTItem &Pt, const Condition &Cond) {
+      auto AllocSite = Pt.getAllocSite();
+      if (!FreedPtrSet.hasValue(AllocSite)) {
+        return;
+      }
+
+      Condition CombinedCond = Cond && FreedPtrSet.getGuardForValue(AllocSite);
+      if (CombinedCond.isFalse()) {
+        return;
+      }
+
+      if (has_double_free) {
+        double_free_cond.orCond(CombinedCond);
+      } else {
+        has_double_free = true;
+        double_free_cond = CombinedCond;
+      }
+    });
+  }
+
+  if (has_double_free && !double_free_cond.isFalse()) {
+    auto Q = DirectNumericalQuery::getDoubleFreeMustErrQuery();
+    addQueryTrace(Q, double_free_cond,
+                  TraceStep(TraceStep::TRACE_STEP_CALL, Inst, Ptr));
   }
 }
 

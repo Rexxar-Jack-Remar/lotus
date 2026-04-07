@@ -60,6 +60,19 @@ Type *AnalysisState::NON_PTR_TY = nullptr;
 
 Type *AnalysisState::INT8_TY = nullptr;
 
+namespace {
+
+bool isFreeLikeFunction(const Function *callee) {
+  if (!callee) {
+    return false;
+  }
+
+  StringRef name = callee->getName();
+  return name == "free" || name == "_ZdlPv" || name == "_ZdaPv";
+}
+
+} // namespace
+
 AnalysisState::AnalysisState(SymexBugType BugTy, GuardedValueFlowGraph *Graph,
                              Function *Func)
     : BugTy(BugTy), Graph(Graph), F(Func),
@@ -778,9 +791,10 @@ void AnalysisState::processLibraryCall(CallInst *Inst) {
   // recognized here either has no state effect that matters to this analysis,
   // or is handed to the conservative unknown-library fallback below.
   // Handle free() calls for UAF and Double-Free detection
-  std::string CalleeName = Callee->getName().str();
-  if (CalleeName == "free" || CalleeName == "_ZdlPv" ||
-      CalleeName == "_ZdaPv") {
+  if (isFreeLikeFunction(Callee)) {
+    if (BugTy & BUG_TY_DOUBLE_FREE) {
+      buildDoubleFreeQuery(Inst);
+    }
     processFreeCall(Inst);
     return;
   }

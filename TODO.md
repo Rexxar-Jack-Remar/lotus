@@ -50,10 +50,6 @@ We have AliasWrapper.cpp that wraps various alias analyses (to be tested),
 
 ## 3. Intermediate Representations (IR) 
 
-### VFG (Value Flow Graph)
-
-The DyckAA module has a DyckVFG, which is used by the null pointer analysis (lib/NullPointer).
-Maybe we can design a VFG independent from DyckAA (e.g., it can use the results of other pointer analyses)
 
 ### PDG (Program Dependence Graph)
 
@@ -67,16 +63,6 @@ Implement other algorithms
 - TOPLAS 21: On Time-sensitive Control Dependencies
 
 ## 4. Applications 
-
-### Slicing
-
-Use VFG or PDG to answer slicing queries.
-
-* Program chopping
-* Thin slicing
-* ...
-
-(Maybe refer to the implementation in DG)
 
 ### Bug Detection
 

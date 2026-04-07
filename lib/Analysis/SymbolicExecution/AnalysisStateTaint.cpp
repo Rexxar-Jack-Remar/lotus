@@ -422,7 +422,7 @@ void AnalysisState::taintProcessCall(CallInst *Inst, Function *Callee,
     auto Steps = CalleeTaintedSteps.at(P.first);
     Steps.emplace_back(TaintStep(TaintStep::TAINT_STEP_CALL, Inst));
 
-    if (isa<GuardedValueFlowReturnNode>(RetNode)) {
+    if (RetNode->getKind() == GuardedValueFlowNode::Kind::CommonReturn) {
       OutNode = getNode(Inst);
     } else {
       OutNode = GraphCS->getPseudoOutput(

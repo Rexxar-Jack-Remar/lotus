@@ -1,10 +1,34 @@
 #include "Analysis/SymbolicExecution/PathCondSolver.h"
+
+#include "llvm/ADT/StringExtras.h"
+
 #include "Analysis/SymbolicExecution/PropertyInteger.h"
 #include "Analysis/SymbolicExecution/PropertySym.h"
 
 #include <vector>
 
 using namespace SymbolicExecution;
+
+namespace {
+
+bool shouldUseSignExtension(unsigned Pred) {
+  switch (Pred) {
+  case CmpInst::ICMP_UGE:
+  case CmpInst::ICMP_UGT:
+  case CmpInst::ICMP_ULE:
+  case CmpInst::ICMP_ULT:
+    return false;
+  default:
+    return true;
+  }
+}
+
+void extendExprWidth(SMTExpr &Expr, unsigned ExtWidth, bool SignExtend) {
+  Expr =
+      SignExtend ? Expr.array_sext(ExtWidth, 1) : Expr.array_zext(ExtWidth, 1);
+}
+
+} // namespace
 
 std::atomic<uint32_t> PathCondSolver::ID;
 
@@ -80,7 +104,7 @@ SMTExpr PathCondSolver::buildPredicate(const PropertyValue *Va1,
 
   SMTExpr Va1Expr = buildExprForVal(Va1);
   SMTExpr Va2Expr = buildExprForVal(Va2);
-  normalizeExprWidth(Va1Expr, Va2Expr);
+  normalizeExprWidth(Va1Expr, Va2Expr, shouldUseSignExtension(Pred));
 
   static std::function<SMTExpr(SMTExpr &, SMTExpr &)> eqPred =
       [](SMTExpr &Va1Expr, SMTExpr &Va2Expr) { return Va1Expr == Va2Expr; };
@@ -158,10 +182,9 @@ SMTExpr PathCondSolver::getDataDeps(const GuardedValueFlowNode *N) {
 }
 
 SMTExpr PathCondSolver::buildIntExpr(const BigInteger &I) {
-  // FIXME: support large bitwidth
   APInt IntVal = I.getVal();
-  unsigned Width = IntVal.getBitWidth() > 64 ? 64 : IntVal.getBitWidth();
-  return Fctry.createBitVecVal(I.getAsBoundInt(), Width);
+  return Fctry.createBitVecVal(llvm::toString(IntVal, 10, false),
+                               IntVal.getBitWidth());
 }
 
 void PathCondSolver::resetSolverState() {
@@ -177,33 +200,35 @@ void PathCondSolver::updateUsedCSOuts() {
   }
 }
 
-void PathCondSolver::normalizeExprWidth(SMTExpr &L, SMTExpr &R) {
+void PathCondSolver::normalizeExprWidth(SMTExpr &L, SMTExpr &R,
+                                        bool SignExtend) {
   if (L.getBitVecSize() == R.getBitVecSize()) {
     return;
   }
 
   if (L.getBitVecSize() < R.getBitVecSize()) {
     auto ExtWidth = R.getBitVecSize() - L.getBitVecSize();
-    L = L.array_sext(ExtWidth, 1);
+    extendExprWidth(L, ExtWidth, SignExtend);
   } else if (L.getBitVecSize() > R.getBitVecSize()) {
     auto ExtWidth = L.getBitVecSize() - R.getBitVecSize();
-    R = R.array_sext(ExtWidth, 1);
+    extendExprWidth(R, ExtWidth, SignExtend);
   }
 
   assert(L.getBitVecSize() == R.getBitVecSize());
 }
 
-void PathCondSolver::normalizeExprWidth(SMTExpr &E1, SMTExpr &E2, SMTExpr &E3) {
+void PathCondSolver::normalizeExprWidth(SMTExpr &E1, SMTExpr &E2, SMTExpr &E3,
+                                        bool SignExtend) {
   unsigned W1 = E1.getBitVecSize();
   unsigned W2 = E2.getBitVecSize();
   unsigned W3 = E3.getBitVecSize();
 
   unsigned MaxWidth = std::max(std::max(W1, W2), W3);
 
-  auto normalizeToWidth = [](SMTExpr &E, unsigned W) {
+  auto normalizeToWidth = [SignExtend](SMTExpr &E, unsigned W) {
     if (E.getBitVecSize() < W) {
       auto ExtWidth = W - E.getBitVecSize();
-      return E.array_sext(ExtWidth, 1);
+      return SignExtend ? E.array_sext(ExtWidth, 1) : E.array_zext(ExtWidth, 1);
     } else {
       assert(E.getBitVecSize() == W);
       return E;

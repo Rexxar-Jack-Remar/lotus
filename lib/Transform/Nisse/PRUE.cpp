@@ -3,10 +3,9 @@
 // Optimizer-friendly event quantification based on delayed delta-counter
 // updates and a late PRUE rewrite.
 //
-// ASPLOS 2026: Optimizer-Friendly Instrumentation for Event Quantification with PRUE Algorithm
+// ASPLOS 2026: Optimizer-Friendly Instrumentation for Event Quantification with
+// PRUE Algorithm
 //===----------------------------------------------------------------------===//
-
-#include "Transform/Nisse/Nisse.h"
 
 #include "llvm/ADT/SmallPtrSet.h"
 #include "llvm/ADT/SmallVector.h"
@@ -19,6 +18,8 @@
 #include "llvm/IR/IntrinsicInst.h"
 #include "llvm/IR/Operator.h"
 #include "llvm/Transforms/Utils/BasicBlockUtils.h"
+
+#include "Transform/Nisse/Nisse.h"
 
 #include <algorithm>
 #include <deque>
@@ -84,7 +85,8 @@ static bool hasMustTailReturn(const Function &F) {
       continue;
     }
 
-    if (const Instruction *prev = BB.getTerminator()->getPrevNonDebugInstruction()) {
+    if (const Instruction *prev =
+            BB.getTerminator()->getPrevNonDebugInstruction()) {
       if (const auto *call = dyn_cast<CallInst>(prev)) {
         if (call->isMustTailCall()) {
           return true;
@@ -150,7 +152,8 @@ static MDNode *makePrueMetadata(LLVMContext &ctx, uint64_t counter_index) {
   return MDNode::get(ctx, ops);
 }
 
-static bool extractCounterIndex(const StoreInst *store, uint64_t &counter_index) {
+static bool extractCounterIndex(const StoreInst *store,
+                                uint64_t &counter_index) {
   auto *node = store->getMetadata(kPrueUpdateMetadata);
   if (!node || node->getNumOperands() != 1) {
     return false;
@@ -236,20 +239,22 @@ static bool sameLoop(BasicBlock *lhs, BasicBlock *rhs, LoopInfo &li) {
   return li.getLoopFor(lhs) == li.getLoopFor(rhs);
 }
 
-static bool extractCounterLocation(StoreInst *store, GlobalVariable *&counter_array,
+static bool extractCounterLocation(StoreInst *store,
+                                   GlobalVariable *&counter_array,
                                    uint64_t &counter_index) {
   auto *gep = dyn_cast<GEPOperator>(store->getPointerOperand());
   if (!gep || gep->getNumOperands() < 2) {
     return false;
   }
 
-  counter_array = dyn_cast<GlobalVariable>(
-      gep->getPointerOperand()->stripPointerCasts());
+  counter_array =
+      dyn_cast<GlobalVariable>(gep->getPointerOperand()->stripPointerCasts());
   if (!counter_array) {
     return false;
   }
 
-  auto *index = dyn_cast<ConstantInt>(gep->getOperand(gep->getNumOperands() - 1));
+  auto *index =
+      dyn_cast<ConstantInt>(gep->getOperand(gep->getNumOperands() - 1));
   if (!index) {
     return false;
   }
@@ -330,9 +335,9 @@ static bool parseUpdateStore(StoreInst *store, GlobalVariable *counter_array,
     Value *acc = castToInt64(delta_terms.front(), builder);
     for (unsigned i = 1; i < delta_terms.size(); ++i) {
       Value *rhs = castToInt64(delta_terms[i], builder);
-      acc = builder.CreateAdd(acc, rhs, i + 1 == delta_terms.size()
-                                            ? "prue.delta.expr"
-                                            : "prue.delta.part");
+      acc = builder.CreateAdd(acc, rhs,
+                              i + 1 == delta_terms.size() ? "prue.delta.expr"
+                                                          : "prue.delta.part");
     }
     operand = acc;
     synthetic_delta = dyn_cast<Instruction>(acc);
@@ -375,9 +380,8 @@ static StoreInst *createUpdate(BasicBlock *block, GlobalVariable *counter_array,
   IRBuilder<> builder(block->getTerminator());
   Type *int64Ty = builder.getInt64Ty();
   Value *index_list[] = {builder.getInt32(0), builder.getInt32(counter_index)};
-  auto *ptr =
-      builder.CreateInBoundsGEP(counter_array->getValueType(), counter_array,
-                                index_list);
+  auto *ptr = builder.CreateInBoundsGEP(counter_array->getValueType(),
+                                        counter_array, index_list);
   auto *old_value = builder.CreateLoad(int64Ty, ptr);
   auto *delta_value = castToInt64(operand, builder);
   auto *new_value = builder.CreateAdd(old_value, delta_value, "prue.update");
@@ -438,7 +442,8 @@ static bool canSplitPhi(const ParsedUpdate &update) {
   return true;
 }
 
-static bool applySplit(const ParsedUpdate &update, std::deque<UpdateTask> &worklist,
+static bool applySplit(const ParsedUpdate &update,
+                       std::deque<UpdateTask> &worklist,
                        FunctionPRUEContext &ctx) {
   auto *phi = dyn_cast<PHINode>(update.operand);
   if (!phi || phi->getParent() != update.store->getParent()) {
@@ -500,8 +505,9 @@ static std::vector<Loop *> getExitLoops(BasicBlock *block, LoopInfo &li) {
       loops.push_back(loop);
     }
   }
-  std::sort(loops.begin(), loops.end(),
-            [](Loop *lhs, Loop *rhs) { return lhs->getLoopDepth() < rhs->getLoopDepth(); });
+  std::sort(loops.begin(), loops.end(), [](Loop *lhs, Loop *rhs) {
+    return lhs->getLoopDepth() < rhs->getLoopDepth();
+  });
   return loops;
 }
 
@@ -580,10 +586,12 @@ static bool collectLoopClosure(const ParsedUpdate &update,
       }
 
       if (auto *select = dyn_cast<SelectInst>(user)) {
-        if (select->getTrueValue() != current && select->getFalseValue() != current) {
+        if (select->getTrueValue() != current &&
+            select->getFalseValue() != current) {
           continue;
         }
-        if (!ctx.pdt.dominates(update.store->getParent(), select->getParent())) {
+        if (!ctx.pdt.dominates(update.store->getParent(),
+                               select->getParent())) {
           return false;
         }
         enqueueLoopClosureValue(select, closure, worklist);
@@ -640,8 +648,9 @@ static bool collectLoopClosure(const ParsedUpdate &update,
   return true;
 }
 
-static bool getSingleExitingBlock(Loop *loop, BasicBlock *&exiting_block,
-                                  SmallVectorImpl<BasicBlock *> &outside_succs) {
+static bool
+getSingleExitingBlock(Loop *loop, BasicBlock *&exiting_block,
+                      SmallVectorImpl<BasicBlock *> &outside_succs) {
   exiting_block = nullptr;
   outside_succs.clear();
   SmallPtrSet<BasicBlock *, 4> seen_succs;
@@ -673,7 +682,8 @@ static bool isDefinedOutsideLoop(Value *value, Loop *loop, Function &function) {
   return !def_block || !loop->contains(def_block);
 }
 
-static Value *getExternalOperand(BinaryOperator *add, const LoopClosure &closure) {
+static Value *getExternalOperand(BinaryOperator *add,
+                                 const LoopClosure &closure) {
   if (closure.members.count(add->getOperand(0))) {
     return add->getOperand(1);
   }
@@ -741,10 +751,12 @@ static bool applyOffload(const ParsedUpdate &update,
   }
 
   for (SelectInst *select : closure.selects) {
-    if (isDefinedOutsideLoop(select->getTrueValue(), selected_loop, ctx.function)) {
+    if (isDefinedOutsideLoop(select->getTrueValue(), selected_loop,
+                             ctx.function)) {
       select->setTrueValue(ConstantInt::get(select->getType(), 0));
     }
-    if (isDefinedOutsideLoop(select->getFalseValue(), selected_loop, ctx.function)) {
+    if (isDefinedOutsideLoop(select->getFalseValue(), selected_loop,
+                             ctx.function)) {
       select->setFalseValue(ConstantInt::get(select->getType(), 0));
     }
   }
@@ -753,9 +765,8 @@ static bool applyOffload(const ParsedUpdate &update,
   for (BasicBlock *outside_succ : selected_outside_succs) {
     BasicBlock *dedicated_exit =
         SplitEdge(selected_exiting_block, outside_succ, &ctx.dt, &ctx.li);
-    StoreInst *store =
-        createUpdate(dedicated_exit, update.counter_array, update.counter_index,
-                     x_plus, false);
+    StoreInst *store = createUpdate(dedicated_exit, update.counter_array,
+                                    update.counter_index, x_plus, false);
     new_tasks.push_back(
         UpdateTask{store, update.counter_array, update.counter_index});
   }
@@ -785,9 +796,9 @@ static bool applyUnpack(const ParsedUpdate &update,
 
   SmallVector<UpdateTask, 4> new_tasks;
   for (BinaryOperator *add : closure.adds) {
-    StoreInst *store =
-        createUpdate(add->getParent(), update.counter_array, update.counter_index,
-                     getExternalOperand(add, closure), false);
+    StoreInst *store = createUpdate(add->getParent(), update.counter_array,
+                                    update.counter_index,
+                                    getExternalOperand(add, closure), false);
     new_tasks.push_back(
         UpdateTask{store, update.counter_array, update.counter_index});
   }
@@ -873,7 +884,8 @@ PreservedAnalyses DeltaCounterPass::run(Module &M, ModuleAnalysisManager &MAM) {
     local_counters.reserve(edges.size());
 
     int index = Offset;
-    for (std::vector<Edge>::const_iterator it = edges.begin(), end = edges.end();
+    for (std::vector<Edge>::const_iterator it = edges.begin(),
+                                           end = edges.end();
          it != end; ++it, ++index) {
       AllocaInst *slot = entry_builder.CreateAlloca(
           int64Ty, nullptr, "prue.delta." + Twine(index));
@@ -889,7 +901,8 @@ PreservedAnalyses DeltaCounterPass::run(Module &M, ModuleAnalysisManager &MAM) {
     }
 
     unsigned local_index = 0;
-    for (std::vector<Edge>::const_iterator it = edges.begin(), end = edges.end();
+    for (std::vector<Edge>::const_iterator it = edges.begin(),
+                                           end = edges.end();
          it != end; ++it, ++local_index) {
       it->insertDeltaIncrFn(local_counters[local_index]);
     }
@@ -912,8 +925,9 @@ PreservedAnalyses DeltaCounterPass::run(Module &M, ModuleAnalysisManager &MAM) {
         auto *new_value =
             builder.CreateAdd(old_value, delta_value, "prue.delayed.update");
         auto *store = builder.CreateStore(new_value, global_ptr);
-        store->setMetadata(kPrueUpdateMetadata,
-                           makePrueMetadata(builder.getContext(), global_index));
+        store->setMetadata(
+            kPrueUpdateMetadata,
+            makePrueMetadata(builder.getContext(), global_index));
       }
     }
 
@@ -965,7 +979,7 @@ PreservedAnalyses PruePass::run(Module &M, ModuleAnalysisManager &) {
 
     FunctionPRUEContext ctx(F);
     for (std::vector<UpdateTask>::const_iterator it = roots.begin(),
-                                                end = roots.end();
+                                                 end = roots.end();
          it != end; ++it) {
       std::deque<UpdateTask> worklist;
       worklist.push_back(*it);
@@ -978,8 +992,8 @@ PreservedAnalyses PruePass::run(Module &M, ModuleAnalysisManager &) {
         }
 
         ParsedUpdate update;
-        if (!parseUpdateStore(task.store, task.counter_array, task.counter_index,
-                              update)) {
+        if (!parseUpdateStore(task.store, task.counter_array,
+                              task.counter_index, update)) {
           continue;
         }
 
@@ -991,9 +1005,9 @@ PreservedAnalyses PruePass::run(Module &M, ModuleAnalysisManager &) {
 
         BasicBlock *relocate_target = findRelocationTarget(update, ctx);
         if (relocate_target) {
-          StoreInst *store = createUpdate(relocate_target, update.counter_array,
-                                          update.counter_index, update.operand,
-                                          false);
+          StoreInst *store =
+              createUpdate(relocate_target, update.counter_array,
+                           update.counter_index, update.operand, false);
           eraseUpdate(update);
           UpdateTask subtask;
           subtask.store = store;
