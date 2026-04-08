@@ -74,6 +74,18 @@ struct Task {
   std::vector<DataSharingEntry> data_sharing_entries;
 };
 
+struct TaskCompletionEvent {
+  const llvm::Instruction *inst = nullptr;
+  const Task *task = nullptr;
+  size_t scheduling_context_id = 0;
+  size_t sequence_index = 0;
+  size_t event_order = 0;
+  size_t phase_id = 0;
+  size_t taskgroup_id = 0;
+  size_t region_id = 0;
+  size_t semantic_entity_id = 0;
+};
+
 struct WaitBoundaryInfo {
   enum class Kind {
     Taskwait,
@@ -283,6 +295,9 @@ public:
   const std::vector<OpenMPTaskEvent> &getTaskEvents() const {
     return m_task_events;
   }
+  const std::vector<TaskCompletionEvent> &getTaskCompletionEvents() const {
+    return m_task_completion_events;
+  }
   const std::map<std::pair<const Task *, const Task *>, concurrency::Relation> &
   getRelations() const {
     return m_relations;
@@ -338,6 +353,7 @@ private:
   std::vector<SemanticEntity> m_entities;
   std::vector<SemanticEvent> m_events;
   std::vector<OpenMPTaskEvent> m_task_events;
+  std::vector<TaskCompletionEvent> m_task_completion_events;
   std::map<std::pair<const Task *, const Task *>, concurrency::Relation>
       m_relations;
   AnalysisSummary m_summary;

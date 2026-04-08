@@ -10,11 +10,11 @@
 
 #include "Verification/Sifa/Domain/OctagonDomain.h"
 
-#include <optional>
 #include "llvm/IR/Constants.h"
 #include "llvm/IR/Instructions.h"
 #include "llvm/Support/Casting.h"
 #include "llvm/Support/raw_ostream.h"
+#include <optional>
 
 #include "Alias/AliasAnalysisWrapper/AliasAnalysisWrapper.h"
 #include "Verification/Sifa/RegionMemory.h"

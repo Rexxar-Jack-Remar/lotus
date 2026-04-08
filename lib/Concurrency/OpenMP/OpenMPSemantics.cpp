@@ -465,6 +465,7 @@ void OpenMPSemantics::analyze() {
   m_entities.clear();
   m_events.clear();
   m_task_events.clear();
+  m_task_completion_events.clear();
   m_relations.clear();
   m_summary = AnalysisSummary{};
   m_nested_depth = 0;
@@ -1090,9 +1091,8 @@ void OpenMPSemantics::buildTaskRelations() {
     }
   }
 
-  for (const OpenMPTaskEvent &event : m_task_events) {
-    if (event.kind != OpenMPTaskEvent::Kind::TaskComplete || !event.task ||
-        !event.inst) {
+  for (const TaskCompletionEvent &event : m_task_completion_events) {
+    if (!event.task || !event.inst) {
       continue;
     }
     Task *completed_task = const_cast<Task *>(event.task);
@@ -1586,20 +1586,34 @@ void OpenMPSemantics::scanSchedulingContext(
         continue;
       }
       if (type == ThreadAPI::TD_OMP_TASK_COMPLETE) {
-        ++m_summary.detach_completion_count;
         const Task *completed_task =
             call->arg_size() >= 3 ? getTaskForHandle(call->getArgOperand(2))
                                   : nullptr;
-        if (!completed_task) {
-          ++m_deferred_reason_counts["omp_detached_task_completion_unresolved"];
+        const bool detached_completion =
+            completed_task && completed_task->is_detached;
+        if (detached_completion) {
+          ++m_summary.detach_completion_count;
         }
         const size_t event_order = nextEventOrder();
+        TaskCompletionEvent completion_event;
+        completion_event.inst = call;
+        completion_event.task = detached_completion ? completed_task : nullptr;
+        completion_event.scheduling_context_id = state.scheduling_context_id;
+        completion_event.sequence_index = state.sequence_index;
+        completion_event.event_order = event_order;
+        completion_event.phase_id = currentPhaseToken();
+        completion_event.taskgroup_id =
+            state.taskgroup_stack.empty() ? 0 : state.taskgroup_stack.back();
+        completion_event.region_id = currentRegionId();
+        completion_event.semantic_entity_id = currentRegionEntityId();
+        m_task_completion_events.push_back(completion_event);
         addTaskEvent(
             OpenMPTaskEvent::Kind::TaskComplete, call,
             state.scheduling_context_id, state.sequence_index, event_order,
             currentPhaseToken(),
             state.taskgroup_stack.empty() ? 0 : state.taskgroup_stack.back(),
-            currentRegionId(), currentRegionEntityId(), completed_task);
+            currentRegionId(), currentRegionEntityId(),
+            completion_event.task);
         continue;
       }
       if (type == ThreadAPI::TD_OMP_TEAMS ||
@@ -2210,15 +2224,15 @@ void OpenMPSemantics::applyTaskExecutionHints(Task &task,
   }
 
   const uint64_t value = flags->getZExtValue();
-  if ((value & kLibompTaskMergedIf0Mask) != 0) {
-    task.execution_mode = TaskExecutionMode::Included;
-  }
+  const bool is_merged_if0 = (value & kLibompTaskMergedIf0Mask) != 0;
   task.is_final = (value & kLibompTaskFinalMask) != 0;
   task.is_detached = (value & kLibompTaskDetachableMask) != 0 ||
                      (value & kLibompTaskProxyMask) != 0;
   task.is_untied = (value & kLibompTaskTiednessMask) == 0;
 
-  if (task.is_detached) {
+  if (is_merged_if0) {
+    task.execution_mode = TaskExecutionMode::Included;
+  } else if (task.is_detached) {
     task.execution_mode = TaskExecutionMode::Detached;
   } else if (task.is_final) {
     task.execution_mode = TaskExecutionMode::Final;

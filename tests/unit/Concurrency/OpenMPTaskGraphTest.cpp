@@ -788,6 +788,36 @@ TEST_F(OpenMPTaskGraphTest, InlineTaskRuntimeVariantIsTracked) {
             TaskExecutionMode::Included);
 }
 
+TEST_F(OpenMPTaskGraphTest, ZeroTaskAllocFlagsRemainDeferred) {
+  const char *source = R"(
+    declare i8* @__kmpc_omp_task_alloc(i8*, i32, i32, i64, i64, void ()*)
+    declare i32 @__kmpc_omp_task(i8*, i32, i8*)
+
+    define internal void @task_body() {
+    entry:
+      ret void
+    }
+
+    define i32 @main() {
+    entry:
+      %task = call i8* @__kmpc_omp_task_alloc(
+          i8* null, i32 0, i32 0, i64 32, i64 0, void ()* @task_body)
+      call i32 @__kmpc_omp_task(i8* null, i32 0, i8* %task)
+      ret i32 0
+    }
+  )";
+
+  auto module = parseModule(source);
+  ASSERT_NE(module, nullptr);
+
+  OpenMPTaskGraph graph(*module);
+  graph.analyze();
+
+  ASSERT_EQ(graph.getAllTasks().size(), 1u);
+  EXPECT_NE(graph.getAllTasks().front()->execution_mode,
+            TaskExecutionMode::Included);
+}
+
 TEST_F(OpenMPTaskGraphTest,
        SameBaseUnknownOffsetsAreDeferredWithoutDefiniteHB) {
   const char *source = R"(

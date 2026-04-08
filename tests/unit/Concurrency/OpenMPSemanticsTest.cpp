@@ -962,6 +962,76 @@ TEST_F(OpenMPSemanticsTest, TaskAllocFlagsPopulateExecutionModeSummary) {
   EXPECT_TRUE(saw_detached);
 }
 
+TEST_F(OpenMPSemanticsTest, ZeroTaskAllocFlagsDoNotMarkTaskAsIncluded) {
+  const char *source = R"(
+    declare i8* @__kmpc_omp_task_alloc(i8*, i32, i32, i64, i64, void ()*)
+    declare i32 @__kmpc_omp_task(i8*, i32, i8*)
+
+    define internal void @task_body() {
+    entry:
+      ret void
+    }
+
+    define i32 @main() {
+    entry:
+      %task = call i8* @__kmpc_omp_task_alloc(
+          i8* null, i32 0, i32 0, i64 32, i64 0, void ()* @task_body)
+      call i32 @__kmpc_omp_task(i8* null, i32 0, i8* %task)
+      ret i32 0
+    }
+  )";
+
+  auto module = parseModule(source);
+  ASSERT_NE(module, nullptr);
+
+  OpenMPSemantics semantics(*module);
+  semantics.analyze();
+
+  ASSERT_EQ(semantics.getTasks().size(), 1u);
+  EXPECT_EQ(semantics.getSummary().included_task_count, 0u);
+  EXPECT_NE(semantics.getTasks().front()->execution_mode,
+            TaskExecutionMode::Included);
+}
+
+TEST_F(OpenMPSemanticsTest,
+       NonDetachedTaskCompletionDoesNotIncrementDetachedCompletionSummary) {
+  const char *source = R"(
+    declare i8* @__kmpc_omp_task_alloc(i8*, i32, i32, i64, i64, void ()*)
+    declare i32 @__kmpc_omp_task(i8*, i32, i8*)
+    declare void @__kmpc_omp_task_complete_if0(i8*, i32, i8*)
+
+    define internal void @task_body() {
+    entry:
+      ret void
+    }
+
+    define i32 @main() {
+    entry:
+      %task = call i8* @__kmpc_omp_task_alloc(
+          i8* null, i32 0, i32 0, i64 32, i64 0, void ()* @task_body)
+      call i32 @__kmpc_omp_task(i8* null, i32 0, i8* %task)
+      call void @__kmpc_omp_task_complete_if0(i8* null, i32 0, i8* %task)
+      ret i32 0
+    }
+  )";
+
+  auto module = parseModule(source);
+  ASSERT_NE(module, nullptr);
+
+  OpenMPSemantics semantics(*module);
+  semantics.analyze();
+
+  EXPECT_EQ(semantics.getSummary().detached_task_count, 0u);
+  EXPECT_EQ(semantics.getSummary().detach_completion_count, 0u);
+  const auto &reasons = semantics.getDeferredReasonCounts();
+  auto unresolved_it = reasons.find("omp_detached_task_completion_unresolved");
+  if (unresolved_it != reasons.end()) {
+    EXPECT_EQ(unresolved_it->second, 0u);
+  }
+  EXPECT_TRUE(semantics.getTaskCompletionEvents().empty() ||
+              semantics.getTaskCompletionEvents().front().task == nullptr);
+}
+
 #ifndef LOTUS_GTEST_NO_MAIN
 int main(int argc, char **argv) {
   ::testing::InitGoogleTest(&argc, argv);

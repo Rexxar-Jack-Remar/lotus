@@ -677,9 +677,9 @@ void MHPAnalysis::lowerOpenMPTasks(const OpenMP::OpenMPSemantics &semantics) {
     }
   }
 
-  for (const OpenMP::OpenMPTaskEvent &event : semantics.getTaskEvents()) {
-    if (event.kind != OpenMP::OpenMPTaskEvent::Kind::TaskComplete ||
-        !event.task || !event.task->task_create || !event.inst) {
+  for (const OpenMP::TaskCompletionEvent &event :
+       semantics.getTaskCompletionEvents()) {
+    if (!event.task || !event.task->task_create || !event.inst) {
       continue;
     }
 
