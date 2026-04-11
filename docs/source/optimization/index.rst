@@ -1,152 +1,107 @@
 Optimization
 ============
 
-This section covers optimization passes and utilities provided by Lotus.
-These passes are useful for preparing code for analysis or for improving
-performance. They complement the code transformations available in
-:doc:`../transform/index`.
+This section documents the optimization libraries under ``lib/Optimization/``.
+They complement the transformation utilities in :doc:`../transform/index` and
+provide both standalone passes and reusable integration helpers.
 
-**Headers**: ``include/Optimization``
+**Headers**: ``include/Optimization/``
 
-**Implementation**: ``lib/Optimization``
+**Implementation**: ``lib/Optimization/``
+
+Subdirectories
+--------------
+
+- ``Pipeline/`` exposes a small API for running LLVM's default O0-O3 pipelines.
+- ``Scalar/`` contains LLVM-style scalar passes such as aggressive inlining,
+  dead-store elimination, GVN, and LICM.
+- ``IPO/`` contains interprocedural optimizations built on SeaDsa ShadowMem and
+  Lotus MemorySSA instrumentation.
+- ``PartialEvaluation/`` contains the LLPE specialization and partial
+  evaluation subsystem.
+- ``Prefetch/`` contains the profile-guided software prefetching pass.
 
 ModuleOptimizer
 ---------------
 
-**File**: ``lib/Optimization/Pipeline/ModuleOptimizer.cpp``, ``include/Optimization/Pipeline/ModuleOptimizer.h``
+**Files**: ``include/Optimization/Pipeline/ModuleOptimizer.h``,
+``lib/Optimization/Pipeline/ModuleOptimizer.cpp``
 
-Provides a simple interface for applying standard LLVM optimization pipelines
-(O0, O1, O2, or O3) to an entire module.
-
-**Usage**:
+``llvm_utils::optimiseModule`` runs LLVM's default per-module optimization
+pipeline using ``llvm::PassBuilder`` and an ``llvm::OptimizationLevel``.
 
 .. code-block:: cpp
 
    #include <Optimization/Pipeline/ModuleOptimizer.h>
 
    llvm::Module *M = ...;
-   
-   // Apply O2 optimizations
    llvm_utils::optimiseModule(M, llvm::OptimizationLevel::O2);
 
-**When to use**:
+Use it when a tool wants standard LLVM cleanup before running Lotus analyses or
+custom optimization passes.
 
-- Apply standard LLVM optimizations before running analyses
-- Prepare code for verification or further transformation
-- Test analysis tools on optimized code
+Scalar passes
+-------------
 
-AInliner (Aggressive Inliner)
-------------------------------
+``lib/Optimization/Scalar/`` currently builds ``CanaryOptimizationScalar`` from
+four passes:
 
-**File**: ``lib/Optimization/Scalar/AggressiveInliner.cpp``
+- ``AggressiveInliner`` (legacy pass name ``ainline``)
+- ``DSE`` / ``createDeadStoreEliminationPass()``
+- ``GVN`` / ``createGVNPass()``
+- ``LICM`` / ``createLICMPass()``
 
-An aggressive inliner that attempts to inline as many function calls as
-possible. This pass is tuned for analysis-friendly IR where maximum inlining
-may be beneficial.
+See :doc:`scalar` for the pass-level details and available entry points.
 
-**Features**:
+Interprocedural MemorySSA optimizations
+---------------------------------------
 
-- Inlines function calls aggressively
-- Supports exclusion list via ``-ainline-noinline`` command-line option
-- Operates at the module level
+``lib/Optimization/IPO/`` contains four legacy ``ModulePass`` implementations
+that operate on ShadowMem-instrumented IR:
 
-**Command-line options**:
+- ``IPDeadStoreElimination`` removes stores and some global initializers whose
+  ShadowMem def-use chains never reach an observable load.
+- ``IPRedundantLoadElimination`` removes repeated loads within a block when the
+  pointer and TLVar are unchanged.
+- ``IPStoreSinking`` moves stores closer to their first observable use within a
+  basic block.
+- ``IPStoreToLoadForwarding`` replaces loads with a unique reaching store value
+  found by traversing MemorySSA edges across calls and phis.
 
-.. code-block:: bash
+See :doc:`ip` for prerequisites, pass names, and behavior.
 
-   -ainline-noinline="func1,func2"  # Functions to exclude from inlining
+Partial evaluation
+------------------
 
-**When to use**:
+``lib/Optimization/PartialEvaluation/`` contains the historical LLPE engine,
+ported to LLVM 14.x and built as ``CanaryPE``. It provides the ``llpe-analysis``
+and ``llpe`` legacy passes plus supporting infrastructure for specialization,
+symbolic reasoning, and committed IR rewriting.
 
-- Reduce inter-procedural complexity for analysis
-- Improve precision of intra-procedural analyses
-- Prepare code where maximum inlining is desired
+See :doc:`pe` for the main components and integration notes.
 
-**Limitations**:
+Software prefetching
+--------------------
 
-- May significantly increase code size
-- Use with caution on large codebases
+``lib/Optimization/Prefetch/`` implements the ``SWPrefetchingLLVMPass`` legacy
+function pass for profile-guided software prefetching of indirect memory
+accesses.
 
-LICM (Loop Invariant Code Motion)
-----------------------------------
+See :doc:`swprefetching` for its distance providers, options, and workflow.
 
-**File**: ``lib/Optimization/Scalar/LICM.cpp``, ``include/Optimization/Scalar/LICM.h``
+Integration pattern
+-------------------
 
-Loop Invariant Code Motion pass taken from LLVM 14. This pass moves loop-invariant
-code out of loops to improve performance.
+Typical consumers of this subtree use one of these patterns:
 
-**Features**:
-
-- Hoists loop-invariant instructions to loop preheader
-- Sinks code to exit blocks when safe
-- Promotes must-aliased memory locations to registers
-- Uses alias analysis for precise memory operations
-
-**When to use**:
-
-- Optimize loops by moving invariant computations outside
-- Evaluate alias analysis precision (LICM relies on alias analysis)
-- Improve code before analysis or verification
-
-**Note**: This is the LLVM 14 version of LICM, used internally by Lotus for
-evaluating alias analysis algorithms.
-
-SWPrefetching (Software Prefetching)
--------------------------------------
-
-See :doc:`swprefetching` for details on the profile-guided software prefetching
-pass.
-
-MemorySSA Optimizations
------------------------
-
-Interprocedural optimizations that use MemorySSA instrumentation (ShadowMem):
-
-- ``IPDeadStoreElimination``: removes stores (and some global initializers) whose
-  shadow.mem def-use chains never reach a load. Traverses into callees/callers
-  via shadow.mem.arg.* and shadow.mem.in/out.
-- ``IPRedundantLoadElimination``: within a block, removes repeated loads when
-  the MemorySSA version (TLVar) and pointer operand are identical and no memory
-  side effects intervene.
-- ``IPStoreToLoadForwarding``: replaces loads with the unique reaching store
-  value by following MemorySSA def-use chains across calls/phis. Rewrites when
-  exactly one non-conflicting value is found.
-- ``IPStoreSinking``: sinks stores (and their shadow.mem.store) forward within a
-  block to just before the first observed use when instructions in between are
-  side-effect free.
-
-All implemented under ``lib/Optimization/IPO`` and default to singleton regions
-unless configured otherwise.
-
-See :doc:`ip` for the dedicated page for the ``lib/Optimization/IPO/`` subtree.
-
-Integration with Analysis
--------------------------
-
-These optimization passes can be used to prepare code for analysis:
-
-.. code-block:: cpp
-
-   #include <Optimization/Pipeline/ModuleOptimizer.h>
-   #include <Optimization/Prefetch/Prefetch.h>
-   
-   llvm::Module &M = ...;
-   
-   // Apply standard optimizations
-   llvm_utils::optimiseModule(&M, llvm::OptimizationLevel::O1);
-   
-   // Then run analyses
-   // ...
-
-**Typical pipeline**:
-
-1. Apply optimizations (ModuleOptimizer, AInliner, etc.)
-2. Run alias analysis or other static analyses
-3. Perform verification or bug detection
+1. Run ``llvm_utils::optimiseModule`` to apply a standard LLVM cleanup pipeline.
+2. Add selected scalar or interprocedural legacy passes to a pass manager.
+3. Run Lotus analyses, verification, or checker pipelines on the optimized IR.
 
 .. toctree::
    :maxdepth: 2
 
+   scalar
    ip
    pe
    swprefetching

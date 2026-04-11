@@ -3,6 +3,19 @@ CFL Reachability Components
 
 Advanced CFL reachability algorithms and graph analysis frameworks.
 
+Aria
+----
+
+Grammar-driven CFL reachability utilities, solver backends, and SVF adapters.
+
+**Location**: ``include/CFL/Aria/``, ``lib/CFL/Aria/``
+
+**Features**:
+* Grammar parsing and CNF/STBDU normalization helpers
+* Labeled graph construction for text, DOT, PAG, and PEG-style encodings
+* Classical and set-constraint solvers for reachability closure
+* Adapters for alias and value-flow problems built on SVF structures
+
 CSIndex (Context-Sensitive Indexing)
 -----------------------------------
 
@@ -38,6 +51,7 @@ Mutual refinement algorithms for CFL analysis.
 
 See also:
 
+- :doc:`aria`
 - :doc:`csindex`
 - :doc:`inter_dyck_graph_reduce`
 - :doc:`mutual_refinement`

@@ -1,7 +1,8 @@
 PE
 ==
 
-``Optimization/PartialEvaluation`` contains the LLPE partial-evaluation infrastructure.
+``lib/Optimization/PartialEvaluation/`` contains the LLPE partial-evaluation
+infrastructure.
 
 **Headers**: ``include/Optimization/PartialEvaluation/``
 
@@ -12,7 +13,8 @@ Overview
 
 This subsystem contains the historical LLPE code used for aggressive
 specialization, symbolic execution style reasoning, and partial evaluation over
-LLVM IR. It is a large internal subsystem and is not currently surfaced through
+LLVM IR. It is built as the ``CanaryPE`` static library and is separate from
+the scalar, IPO, and prefetch libraries. It is not currently surfaced through
 the ``lotus-ipo`` or ``lotus-prefetch`` frontends.
 
 Main components
@@ -24,6 +26,22 @@ Main components
 - ``SharedTree.h`` provides persistent tree structures used to represent shared
   analysis state.
 - ``LLPECopyPaste.h`` contains cloning and IR-rewriting helpers.
+- ``TopLevel.cpp`` registers the ``llpe-analysis`` legacy ``ModulePass``.
+- ``Integrator.cpp`` registers the ``llpe`` legacy ``ModulePass`` that commits
+  the specialization chosen by the analysis.
+
+Passes and options
+------------------
+
+- ``llpe-analysis`` performs the analysis phase and constructs specialization
+  contexts.
+- ``llpe`` runs the integrator and commits the rewritten IR.
+- ``-llpe-root=<name>`` selects the root function to specialize; the default is
+  ``main``.
+
+The subsystem also exposes a large set of LLPE-specific debugging and tuning
+flags in ``CommandLine.cpp`` for controlling graph dumps, specialization limits,
+environment modeling, statistics, and optional transforms.
 
 Notes
 -----

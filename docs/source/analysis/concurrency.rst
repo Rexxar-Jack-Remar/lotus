@@ -136,34 +136,22 @@ Essential for data race detection, deadlock detection, and precise MHP analysis.
 - ``getMustLockSetAt(inst)`` – Get must-lockset at an instruction
 - ``isLockHeldAt(lock, inst)`` – Check if a specific lock is held
 
-MemUseDefAnalysis
-~~~~~~~~~~~~~~~~~
+JoinTargetAnalysis
+~~~~~~~~~~~~~~~~~~
 
-**File**: ``Memory/MemUseDefAnalysis.cpp``, ``Memory/MemUseDefAnalysis.h``
+**File**: ``JoinTarget/JoinTargetAnalysis.cpp``,
+``JoinTarget/JoinTargetAnalysis.h``
 
-Performs memory use-def analysis based on MemorySSA to track memory dependencies
-in concurrent contexts. Identifies which memory definitions may reach each
-memory use, accounting for concurrent execution.
+Computes which ``pthread_create`` sites may match a given ``pthread_join`` by
+reasoning about the joined thread handle. This is used to refine thread
+termination effects beyond a simple name-based match.
 
-**Analysis Process**:
+**Use cases**:
 
-1. **MemorySSA Construction**: Builds MemorySSA representation for each function
-2. **Reaching Def Analysis**: Computes reaching definitions using dataflow analysis
-3. **Interprocedural Propagation**: Propagates memory definitions across function calls
-4. **Concurrent Context Integration**: Accounts for concurrent memory accesses
-
-**Key Features**:
-
-- MemorySSA-based analysis for precise memory modeling
-- Interprocedural memory dataflow analysis
-- Support for indirect calls and function pointers
-- Integration with alias analysis for memory location identification
-
-**Use Cases**:
-
-- Identifying memory dependencies in concurrent code
-- Supporting data race detection by tracking memory accesses
-- Enabling precise analysis of shared memory operations
+- Refining join reasoning when multiple thread handles may alias
+- Supporting more precise MHP pruning around thread termination
+- Providing a dedicated analysis for the ``JoinTarget/`` subdirectory that now
+  exists in the source tree
 
 ThreadAPI
 ~~~~~~~~~

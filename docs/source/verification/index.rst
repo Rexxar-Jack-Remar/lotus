@@ -8,6 +8,7 @@ This section documents the verification tools and frameworks used throughout Lot
 
    analysis
    backend
+   crab
    clam
    sifa
    symabs-ai

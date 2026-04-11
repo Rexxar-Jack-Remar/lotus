@@ -1,17 +1,22 @@
 SWPrefetching (Software Prefetching)
 ====================================
 
-**File**: ``lib/Optimization/Prefetch/``, ``include/Optimization/Prefetch/Prefetch.h``
+**Files**: ``lib/Optimization/Prefetch/``,
+``include/Optimization/Prefetch/Prefetch.h``
 
 Implements profile-guided software prefetching for indirect memory accesses.
 This pass injects ``llvm.prefetch`` intrinsics to reduce cache misses.
+
+**Library target**: ``CanarySWPrefetching``
+
+**Pass name**: ``SWPrefetchingLLVMPass``
 
 Features
 --------
 
 - Profile-guided prefetch distance computation
-- Supports Sample FDO profiles, user-provided LBR (Last Branch Record) distances,
-  or user-specified LLM distances
+- Supports Sample FDO profiles, user-provided LBR distances, or user-specified
+  LLM distances
 - Discovers loop-carried induction variables that feed load addresses
 - Clones dependence chains to compute future addresses before issuing prefetches
 
@@ -21,9 +26,12 @@ Command-line options
 .. code-block:: bash
 
    -prefetch-distance-provider=profile|lbr|llm|static
-   -input-file=<filename>        # Sample profile (profile mode only)
-   -dist=<value>                  # LBR distances (lbr mode, or fallback)
+   -input-file=<filename>         # Legacy sample-profile option
+   -dist=<value>                  # LBR distances (lbr mode)
    -llm-dist=<value>              # LLM-provided distances (llm mode)
+
+The ``lotus-prefetch`` frontend also accepts ``--profile=<file>`` and forwards
+it to the underlying ``-input-file`` option when ``profile`` mode is selected.
 
 Distance providers
 ------------------
@@ -46,6 +54,15 @@ The pass:
 2. Discovers loop-carried induction variables feeding load addresses
 3. Clones the dependence chain to compute a future address
 4. Issues ``llvm.prefetch`` intrinsics at the computed distance
+
+Integration
+-----------
+
+- ``SWPrefetchingLLVMPass`` is a legacy ``FunctionPass`` declared in
+  ``include/Optimization/Prefetch/Prefetch.h``.
+- It requires ``LoopInfoWrapperPass`` and preserves the CFG.
+- ``doInitialization(Module &)`` loads the sample profile when profile-guided
+  mode is selected.
 
 When to use
 -----------

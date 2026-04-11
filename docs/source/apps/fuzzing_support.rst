@@ -67,12 +67,7 @@ The ``Analysis/`` directory provides the main reusable analyses:
 * **TargetGeneration.cpp**
   * Shared support code in ``lib/Fuzzing/`` for generating fuzzing targets
 
-**Usage**:
-.. code-block:: cpp
-
-   #include <Fuzzing/Analysis/BasicBlockDistance.h>
-   auto distance = BasicBlockDistance(module);
-   auto distances = distance.computeDistances(targetFunctions);
+Public headers for this layer live under ``include/Fuzzing/Analysis/``.
 
 Compiler and Linker Plugins
 ---------------------------
@@ -100,9 +95,5 @@ Target Detection
 
 Automatic target identification support for the directed fuzzing pipeline.
 
-**Usage**:
-.. code-block:: cpp
-
-   #include <Fuzzing/Analysis/TargetDetection.h>
-   auto detector = TargetDetection(module);
-   auto targets = detector.findTargets();
+The target-detection interface is exposed through
+``include/Fuzzing/Analysis/TargetDetection.h``.
