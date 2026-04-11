@@ -1,12 +1,18 @@
 Applications
 ============
 
-This section covers the high-level applications and tools built on Lotus, organized to match the structure of ``lib/Verification/``.
+This section covers the application-oriented parts of Lotus that currently have
+dedicated documentation here.
 
 Components
 ----------
 
-* **Fuzzing** – Directed greybox fuzzing support (``lib/Fuzzing/``)
+* **Fuzzing**: Directed greybox fuzzing support and analyses
+  (``lib/Fuzzing/``)
+
+At the moment this section mainly tracks the directed fuzzing stack under
+``lib/Fuzzing/``. The pages below distinguish between the analysis layer and the
+compiler or linker side pieces that are still present in the source tree.
 
 
 .. toctree::

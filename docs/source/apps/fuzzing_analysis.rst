@@ -8,12 +8,18 @@ distance and target-discovery analyses used by the Lotus directed fuzzing stack.
 
 **Main analyses**:
 
-- ``AFLGoBasicBlockDistanceAnalysis`` computes block-to-target distances.
-- ``AFLGoFunctionDistanceAnalysis`` computes function-level distances.
-- ``ExtendedCallGraphAnalysis`` enriches the call graph with pointer-analysis
-  information.
-- ``AFLGoTargetDetectionAnalysis`` discovers or validates fuzzing targets.
-- ``DAFLAnalysis`` adds data-dependence guidance.
+- ``AFLGoBasicBlockDistanceAnalysis`` computes basic-block distances.
+- ``AFLGoFunctionDistanceAnalysis`` computes function-level distances, with a
+  mode used for Hawkeye-style guidance.
+- ``ExtendedCallGraphAnalysis`` enriches the call graph that those distance
+  analyses consume.
+- ``AFLGoTargetDetectionAnalysis`` discovers target basic blocks and annotated
+  target instructions.
+- ``DAFLAnalysis`` reads target input and produces optional block weights.
+
+These are the strongest source-backed pieces of the fuzzing stack today. The
+compiler and linker plugin directories are documented separately, but the active
+analysis layer is the part clearly wired into ``lib/Fuzzing/CMakeLists.txt``.
 
 These analyses are consumed by the compiler and linker plugins documented in
 :doc:`aflgo_compiler` and :doc:`aflgo_linker`.

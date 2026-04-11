@@ -10,26 +10,48 @@ Thread-aware analyses for concurrent programs.
 Overview
 --------
 
-The Concurrency analysis module provides a comprehensive suite of static analyses
-for reasoning about multithreaded programs. It enables detection of data races,
-deadlocks, and other concurrency bugs by analyzing thread creation, synchronization
-operations, and memory accesses.
+The concurrency analysis module provides the shared analysis layer used by Lotus
+concurrency checking. It centers on thread creation, synchronization operations,
+memory accesses, and communication structure that can be recovered from LLVM IR.
 
-The module supports multiple threading models:
+The module supports multiple concurrency models:
 
-- **POSIX threads (pthreads)**: Standard pthread API functions
-- **C++11 threads**: std::thread, std::mutex, std::condition_variable
-- **OpenMP**: Parallel regions, barriers, critical sections
-- **Custom threading models**: Configurable via ThreadAPI
+- **POSIX threads (pthreads)**: standard pthread APIs
+- **Modern C++ concurrency**: ``std::thread``, mutexes, condition variables,
+  futures/promises, atomics, and several C++20 primitives that are recognized
+- **OpenMP**: parallel regions, barriers, tasks, and lock operations
+- **MPI**: a separate SPMD communication analysis in ``Concurrency/MPI/``
+- **Custom APIs**: configurable through ``config/thread.spec`` and
+  ``ThreadAPI``
 
 **Key capabilities**:
 
-- May-Happen-in-Parallel (MHP) analysis to determine concurrent execution
-- Lock-set analysis for data race detection
-- Happens-before relationship computation
-- Memory use-def analysis in concurrent contexts
-- Escape analysis to identify shared memory locations
-- Thread flow graph construction for synchronization modeling
+- May-Happen-in-Parallel (MHP) analysis for shared-memory overlap reasoning
+- Lock-set analysis for race and deadlock checking
+- Happens-before computation from thread-flow and synchronizes-with edges
+- Escape and thread-sharing analyses for shared-memory filtering
+- Join-target reasoning for refining ``pthread_join`` effects
+- Thread flow graph construction and thread API classification utilities
+
+Directory layout
+----------------
+
+The source tree is grouped by subdirectory under ``include/Concurrency/`` and
+``lib/Concurrency/``:
+
+- ``Utils/``: ``ThreadAPI``, ``ThreadFlowGraph``, vector-clock utilities,
+  RAII lock tracking, and language models for C++, OpenMP, MPI, and Linux kernel
+  APIs
+- ``MHP/``: ``MHPAnalysis``, ``StaticVectorClockMHP``, and
+  ``HappensBeforeAnalysis``
+- ``LockSet/``: ``LockSetAnalysis``
+- ``Memory/``: ``EscapeAnalysis`` and ``StaticThreadSharingAnalysis``
+- ``JoinTarget/``: ``JoinTargetAnalysis``
+- ``MPI/``: ``MPIAnalysis`` and its process, collective, rank, and RMA analyses
+
+``Concurrency/MPI/`` models MPI communication in the SPMD setting. It complements
+the shared-memory analyses above, but it is not another thread library layered on
+top of ``MHPAnalysis``.
 
 Main Components
 ---------------
@@ -188,16 +210,22 @@ reasoning about memory ordering and data races.
 **Happens-Before Sources**:
 
 1. **Program Order**: Sequential execution within a thread
-2. **Fork-Join**: Thread creation establishes happens-before
-3. **Locks**: Lock acquire happens-before lock release
-4. **Condition Variables**: Signal happens-before wait completion
-5. **Barriers**: Barrier wait establishes happens-before
+2. **Fork-Join**: Thread creation and join edges
+3. **Locks**: lock and unlock synchronization
+4. **Condition Variables**: wait, signal, and broadcast are recognized as thread
+   flow boundaries
+5. **Barriers and atomics**: barriers, fences, and selected atomic patterns
 
 **Features**:
 
-- Vector clock-based implementation (FBVClock, BVClock)
+- Vector clock-based implementation (``FBVClock``, ``BVClock``)
 - Efficient query interface
 - Integration with MHP analysis
+
+Some synchronization constructs are recognized more precisely than they are
+fully proved. For example, ``std::call_once``, ``std::latch``,
+``std::barrier``, and condition-variable signaling are modeled conservatively,
+and definite happens-before edges are still limited for some of them.
 
 ThreadFlowGraph
 ~~~~~~~~~~~~~~~

@@ -1,11 +1,13 @@
 Command-Line Tools
 ==================
 
-Lotus provides various command-line tools for alias analysis, CFL reachability,
-bug detection, PDG querying, abstract interpretation, and model checking.
+Lotus provides command-line tools for alias analysis, CFL reachability, bug
+detection, IR querying, optimization, verification, and solver experiments.
 
-This section focuses on the primary front-end binaries built from ``tools/``.
-The documentation is organized by subdirectory to match the source structure.
+This section focuses on the front-end binaries and tool families under
+``tools/``. The documentation is organized by subdirectory to match the source
+structure, but some pages also note when a tool family contains source-present
+experiments that are not built by default.
 
 For a feature-oriented walk-through, see :doc:`../user_guide/tutorials` and
 :doc:`../user_guide/bug_detection`.

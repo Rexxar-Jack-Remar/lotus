@@ -2,18 +2,19 @@ Solver Tools
 ============
 
 This page documents the small command-line front-ends under ``tools/solver/``.
+At present, only ``owl`` is built by ``tools/solver/CMakeLists.txt``. ``slot``
+and ``staub`` remain source-present experimental tools.
 
 OWL – SMT/Model Checking Front-End
 ----------------------------------
 
-``owl`` is a lightweight front-end for feeding SMT-LIB2 problems to the
-configured SMT solver (Z3 in the default build).
+``owl`` is the supported solver front-end currently built from this directory.
+It feeds SAT or SMT problems to the configured solver stack.
 
 **Binary**: ``owl``  
 **Location**: ``tools/solver/owl.cpp``
 
-**Note**: This tool is optional and must be enabled with ``BUILD_OWL=ON`` during
-CMake configuration.
+**Build status**: built by default from ``tools/solver/CMakeLists.txt``.
 
 **Usage**:
 
@@ -35,9 +36,12 @@ SLOT – SMT-LIB to LLVM Translator
 ``slot`` translates SMT-LIB2 formulas into LLVM IR and can optionally run a
 small optimization pipeline over the generated function.
 
-**Binary**: ``slot``
+**Binary**: ``slot`` (source present, not built by default)
 
 **Source**: ``tools/solver/slot.cpp``
+
+The source remains useful as documentation of the workflow, but the binary is
+not wired into the default build today.
 
 Basic usage:
 
@@ -63,9 +67,12 @@ STAUB – Bounded-Theory Conversion Front-End
 ``staub`` rewrites unbounded SMT constraints into bounded encodings before
 translation or solving.
 
-**Binary**: ``staub``
+**Binary**: ``staub`` (source present, not built by default)
 
 **Source**: ``tools/solver/staub.cpp``
+
+Like ``slot``, this front-end is kept in the tree as an experimental source
+tool, not as a default-built binary.
 
 Basic usage:
 

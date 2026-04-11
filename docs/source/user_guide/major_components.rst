@@ -21,7 +21,7 @@ See :doc:`../alias/alias_analysis` for detailed instructions and command example
   call-graph construction (``lib/Alias/SparrowAA``).
 * **FPA** – Function Pointer Analysis toolbox (FLTA, MLTA, MLTADF, KELP) under
   ``lib/Alias/FPA`` for resolving indirect calls.
-* **DynAA** – Dynamic checker living in ``tools/dynaa`` that validates static
+* **DynAA** – Dynamic checker living in ``tools/alias/dynaa`` that validates static
   alias analyses against runtime traces.
 * **OriginAA** – K-callsite-sensitive, origin-sensitive analysis targeting
   thread-creation semantics.

@@ -11,7 +11,7 @@ these logs against the results of a chosen static AA.
 
 * **Static side**: e.g., SparrowAA, AserPTA, LotusAA.
 * **Dynamic side**: runtime traces collected by DynAA
-* **Location**: ``tools/dynaa``
+* **Location**: ``tools/alias/dynaa``
 
 Workflow
 ========
@@ -67,7 +67,6 @@ Features and Use Cases
 * Detects mismatches between static AA predictions and observed behavior.
 * Helps evaluate **precision** and **soundness** of new alias analyses.
 * Useful for regression testing and benchmarking AA implementations.
-
 
 
 

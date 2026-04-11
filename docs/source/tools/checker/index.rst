@@ -100,8 +100,9 @@ IFDS-based interprocedural taint analysis tool.
 
 **Detects**:
 
-- Flows from untrusted sources (e.g., input) to sensitive sinks (e.g., system calls)
+- Flows from untrusted sources to sensitive sinks
 - Optional reaching-definitions analysis mode
+- Optional micro-benchmark evaluation mode
 
 **Usage**:
 
@@ -113,10 +114,20 @@ Key options:
 
 - ``-analysis=0`` – Taint analysis (default)
 - ``-analysis=1`` – Reaching-definitions analysis
+- ``--aa=<kind>`` – Select the alias analysis used by the taint pipeline
 - ``-sources=<f1,f2,...>`` – Custom source functions
 - ``-sinks=<f1,f2,...>`` – Custom sink functions
 - ``-max-results=<N>`` – Limit number of detailed flows
 - ``-verbose`` – Detailed path information
+
+Typical workflow:
+
+.. code-block:: bash
+
+   ./build/bin/lotus-taint test.bc \
+     --aa=dyck \
+     --sources=recv,getenv \
+     --sinks=system,execve
 
 For end-to-end examples (command injection, SQL injection, etc.), see
 :doc:`../../user_guide/bug_detection` and :doc:`../../dataflow/ifds_ide`.
@@ -159,6 +170,57 @@ Typical workflow:
 
 Detailed concurrency examples and recommended patterns are in
 :doc:`../../user_guide/bug_detection`.
+
+lotus-pulse – Pulse-Inspired Bug Finder
+---------------------------------------
+
+Biabductive bug finder for memory-safety style defects.
+
+**Binary**: ``lotus-pulse``  
+**Location**: ``tools/checker/lotus_pulse.cpp``
+
+**Usage**:
+
+.. code-block:: bash
+
+   ./build/bin/lotus-pulse [options] input.bc
+
+Key options:
+
+- ``--no-smt`` – Disable SMT solving during analysis
+- ``--json-output <file>`` – Write findings to a JSON file
+
+Typical workflow:
+
+.. code-block:: bash
+
+   ./build/bin/lotus-pulse test.bc --json-output pulse.json
+
+lotus-fitx – FiTx Multi-Checker Driver
+--------------------------------------
+
+Driver for the FiTx checker suite.
+
+**Binary**: ``lotus-fitx``  
+**Location**: ``tools/checker/lotus_fitx.cpp``
+
+**Usage**:
+
+.. code-block:: bash
+
+   ./build/bin/lotus-fitx [options] input.bc
+
+**Detects**:
+
+- FiTx detectors such as ``df``, ``dl``, ``dul``, ``leak``, ``nullptr``,
+  ``uaf``, and ``ubi``
+- Reference-count checkers
+
+Typical workflow:
+
+.. code-block:: bash
+
+   ./build/bin/lotus-fitx test.bc --detector=uaf
 
 lotus-saber – Source-Sink Resource Checker
 ------------------------------------------

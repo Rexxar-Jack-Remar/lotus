@@ -1,16 +1,22 @@
 Fuzzing Support
 ================
 
-Lotus provides directed greybox fuzzing techniques and profiling infrastructure for test generation.
+Lotus provides directed greybox fuzzing analyses and support code for target
+driven instrumentation.
 
 Overview
 --------
 
-Integrates AFLGo, Hawkeye, and DAFL algorithms for directed greybox fuzzing. The implementation is based on libaflgo and provides modular distance analysis and instrumentation.
+The fuzzing tree re-implements the directed fuzzing analyses used by AFLGo,
+Hawkeye, and DAFL in a modular form. The analysis layer is active under
+``lib/Fuzzing/Analysis/``, while the AFLGo compiler and linker plugins remain in
+the source tree as integration pieces that are not wired into the top-level
+``lib/Fuzzing/CMakeLists.txt``.
 
 **Location**: ``lib/Fuzzing/``
 
-**Components**: Directed fuzzing algorithms, distance analysis, target detection, compiler/linker plugins, IR mutation utilities.
+**Components**: distance analyses, target detection, target generation, and
+source-present AFLGo compiler or linker plugin code.
 
 Detailed module pages:
 
@@ -18,44 +24,48 @@ Detailed module pages:
 - :doc:`aflgo_compiler`
 - :doc:`aflgo_linker`
 
-**Algorithms Supported**:
-* **AFLGo (CCS 17)**: Distance-based power scheduling, call graph distances
-* **Hawkeye (CCS 18)**: Function-level analysis, rare branch prioritization
-* **DAFL (USENIX Security 23)**: Data dependency guided, taint integration
+**Algorithms represented in the analysis code**:
+* **AFLGo (CCS 17)**: basic block and call graph distance computation
+* **Hawkeye (CCS 18)**: function-level distance computation
+* **DAFL (USENIX Security 23)**: data-dependence guided weighting
 
 Directed Greybox Fuzzing Algorithms
 ------------------------------------
 
-**AFLGo (CCS 17)**: Distance-based power scheduling using call graph distances.
+**AFLGo (CCS 17)**: Distance-based guidance using function and basic-block
+distances.
 
-**Hawkeye (CCS 18)**: Function-level analysis with rare branch prioritization.
+**Hawkeye (CCS 18)**: Function-level distance analysis.
 
-**DAFL (USENIX Security 23)**: Data dependency guided fuzzing with taint integration.
+**DAFL (USENIX Security 23)**: Data-dependence guided weighting.
 
 Distance Analysis
 -----------------
 
-The ``Analysis/`` directory provides distance computation for directed fuzzing:
+The ``Analysis/`` directory provides the main reusable analyses:
 
-* **BasicBlockDistance.cpp** – AFLGo basic block distance analysis
-  * Computes distances from basic blocks to target functions
-  * Uses call graph analysis for distance calculation
+* **BasicBlockDistance.cpp**
+  * Implements ``AFLGoBasicBlockDistanceAnalysis``
+  * Computes basic-block distances using function-distance results
 
-* **FunctionDistance.cpp** – Hawkeye function distance analysis
-  * Function-level distance computation
-  * Rare branch prioritization support
+* **FunctionDistance.cpp**
+  * Implements ``AFLGoFunctionDistanceAnalysis``
+  * Computes function-level distances for AFLGo and Hawkeye-style guidance
 
-* **DAFL.cpp** – DAFL data-flow distance analysis
-  * Data dependency guided distance computation
-  * Memory tracking and taint integration
+* **DAFL.cpp**
+  * Implements ``DAFLAnalysis``
+  * Computes optional basic-block weights from input target data
 
-* **ExtendedCallGraphAnalysis.cpp** – Enhanced call graph with pointer analysis
-  * Extends standard call graph with pointer analysis information
-  * Improves accuracy of distance calculations
+* **ExtendedCallGraphAnalysis.cpp**
+  * Implements ``ExtendedCallGraphAnalysis``
+  * Enriches the call graph used by the distance analyses
 
-* **TargetDetection.cpp** – Target identification for instrumentation
-  * Automatic target detection from program structure
-  * Supports manual target specification
+* **TargetDetection.cpp**
+  * Implements ``AFLGoTargetDetectionAnalysis``
+  * Finds target basic blocks and annotated instructions
+
+* **TargetGeneration.cpp**
+  * Shared support code in ``lib/Fuzzing/`` for generating fuzzing targets
 
 **Usage**:
 .. code-block:: cpp
@@ -65,14 +75,18 @@ The ``Analysis/`` directory provides distance computation for directed fuzzing:
    auto distances = distance.computeDistances(targetFunctions);
 
 Compiler and Linker Plugins
-----------------------------
+---------------------------
 
-**AFLGoCompiler/** – LLVM compiler plugin for compile-time instrumentation:
+``AFLGoCompiler/`` and ``AFLGoLinker/`` are still worth reading as source-level
+pipeline components, but they are not part of the default ``lib/Fuzzing`` build
+today.
+
+**AFLGoCompiler/**: LLVM compiler plugin sources for compile-time target injection:
 
 * ``Plugin.cpp`` – LLVM plugin entry point for AFLGo instrumentation
 * ``TargetInjection.cpp`` – Target injection for directed fuzzing
 
-**AFLGoLinker/** – LLVM linker plugin for link-time instrumentation:
+**AFLGoLinker/**: LLVM linker plugin sources for link-time instrumentation:
 
 * ``Plugin.cpp`` – Link-time instrumentation plugin
 * ``DAFL.cpp`` – DAFL-specific instrumentation
@@ -81,17 +95,10 @@ Compiler and Linker Plugins
 * ``DuplicateTargetRemoval.cpp`` – Target deduplication
 * ``TargetInjectionFixup.cpp`` – Target injection fixup
 
-IR Mutation
------------
-
-**IRMutate/** – LLVM IR mutation utilities:
-
-* ``llvm_mutate.cpp`` – LLVM IR mutation passes
-
 Target Detection
 ----------------
 
-Automatic target identification and instrumentation support.
+Automatic target identification support for the directed fuzzing pipeline.
 
 **Usage**:
 .. code-block:: cpp
