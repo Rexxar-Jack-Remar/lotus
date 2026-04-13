@@ -21,4 +21,5 @@ add_library(SeaTransformsUtils STATIC
 
 target_link_libraries(SeaTransformsUtils PUBLIC
   CanaryLLVMUtils
+  CanaryTransform
 )

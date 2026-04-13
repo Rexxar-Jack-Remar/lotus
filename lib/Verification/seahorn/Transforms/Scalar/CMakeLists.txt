@@ -21,3 +21,7 @@ add_library (SeaTransformsScalar STATIC
   LowerIsDeref.cc
   CrabLowerIsDeref.cc
   )
+
+target_link_libraries(SeaTransformsScalar PUBLIC
+  CanaryTransform
+)

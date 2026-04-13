@@ -15,6 +15,10 @@ add_library(CanaryTransform STATIC
         SimplifyExtractValue.cpp
         SimplifyInsertValue.cpp
         CastElimPass.cpp
+        DummyExitBlock.cpp
+        KillVarArgFn.cpp
+        RemoveUnreachableBlocks.cpp
+        StripLifetime.cpp
 )
 
 add_subdirectory(Nisse)

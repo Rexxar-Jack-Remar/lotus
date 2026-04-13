@@ -14,3 +14,7 @@ add_library(SeaInstrumentation STATIC
   BranchSentinelPass.cc
   GeneratePartialFnPass.cc
   )
+
+target_link_libraries(SeaInstrumentation PUBLIC
+  CanaryTransform
+)
