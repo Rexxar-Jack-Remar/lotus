@@ -35,9 +35,8 @@ static cl::opt<unsigned>
                         "without launching worker threads."),
                cl::value_desc("num of workers"), cl::init(0));
 
-// Global thread pool instance and thread-safe initialization.
-static std::once_flag ThreadPoolOnce;
-static ThreadPool *Threads = nullptr;
+// Global thread pool instance with managed shutdown via llvm_shutdown().
+static llvm::ManagedStatic<ThreadPool> Threads;
 
 /// Hook functions to run at the beginning and end of a thread
 /// @{
@@ -46,9 +45,13 @@ void (*after_thread_complete_hook)() = nullptr;
 /// @}
 
 // Returns the global thread pool instance, creating it if necessary.
-ThreadPool *ThreadPool::get() {
-  std::call_once(ThreadPoolOnce, []() { Threads = new ThreadPool; });
-  return Threads;
+ThreadPool *ThreadPool::get() { return &*Threads; }
+
+void ThreadPool::registerCurrentWorkerThread() {
+  std::lock_guard<std::mutex> Lock(WorkerStateMutex);
+  const std::thread::id Id = std::this_thread::get_id();
+  WorkerIds.insert(Id);
+  ThreadLocals.try_emplace(Id, nullptr);
 }
 
 // Constructs the thread pool and launches worker threads.
@@ -66,6 +69,8 @@ ThreadPool::ThreadPool() : IsStop(false) {
 
   for (unsigned I = 0; I < NumWorkers.getValue(); ++I) {
     Workers.emplace_back([this] {
+      registerCurrentWorkerThread();
+
       if (before_thread_start_hook)
         before_thread_start_hook();
 
@@ -102,9 +107,6 @@ ThreadPool::ThreadPool() : IsStop(false) {
         }
       }
     });
-
-    ThreadLocals[Workers.back().get_id()] = nullptr;
-    WorkerIds.insert(Workers.back().get_id());
   }
 }
 

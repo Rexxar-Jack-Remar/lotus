@@ -19,7 +19,7 @@
 #include "llvm/IR/Instructions.h"
 #include "llvm/IR/Module.h"
 #include "llvm/IR/Operator.h"
-#include "llvm/Pass.h"
+#include "llvm/IR/PassManager.h"
 #include "llvm/Transforms/Utils/Cloning.h"
 
 #include <vector>
@@ -46,7 +46,7 @@ static bool simplifyGEP(GetElementPtrInst *GEP);
 //  true  - The module was modified.
 //  false - The module was not modified.
 //
-bool MergeArrayGEP::runOnModule(Module &M) {
+PreservedAnalyses MergeArrayGEP::run(Module &M, ModuleAnalysisManager &) {
   bool changed;
   bool changed_any = false;
   do {
@@ -65,7 +65,7 @@ bool MergeArrayGEP::runOnModule(Module &M) {
       }
     }
   } while (changed);
-  return changed_any;
+  return changed_any ? PreservedAnalyses::none() : PreservedAnalyses::all();
 }
 
 //
@@ -156,10 +156,3 @@ static bool simplifyGEP(GetElementPtrInst *GEP) {
   }
   return false;
 }
-
-// Pass ID variable
-char MergeArrayGEP::ID = 0;
-
-// Register the pass
-static RegisterPass<MergeArrayGEP> X("mergearrgep",
-                                     "Merge GEPs for arrays indexing");

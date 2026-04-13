@@ -7,7 +7,7 @@
 #ifndef LOTUS_VERIFICATION_TRANSFORM_BREAK_CRIT_LOOPS_H
 #define LOTUS_VERIFICATION_TRANSFORM_BREAK_CRIT_LOOPS_H
 
-#include "llvm/Pass.h"
+#include "llvm/IR/PassManager.h"
 
 namespace llvm {
 class Function;
@@ -26,17 +26,10 @@ namespace transform {
  * edges (from simplifycfg pass) and splits these blocks to improve control
  * dependence computation. This is useful before running PDG-based slicing.
  */
-class BreakCritLoopsPass : public llvm::FunctionPass {
+class BreakCritLoopsPass : public llvm::PassInfoMixin<BreakCritLoopsPass> {
 public:
-  static char ID;
-
-  BreakCritLoopsPass() : FunctionPass(ID) {}
-
-  bool runOnFunction(llvm::Function &F) override;
-
-  void getAnalysisUsage(llvm::AnalysisUsage &AU) const override {
-    AU.setPreservesCFG();
-  }
+  llvm::PreservedAnalyses run(llvm::Function &F,
+                              llvm::FunctionAnalysisManager &FAM);
 };
 
 } // namespace transform

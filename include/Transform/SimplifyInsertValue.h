@@ -14,16 +14,14 @@
 
 #include "llvm/IR/Instructions.h"
 #include "llvm/IR/Module.h"
-#include "llvm/Pass.h"
+#include "llvm/IR/PassManager.h"
 
 namespace llvm {
 //
 // Class: SimplifyIV
 //
-class SimplifyIV : public ModulePass {
+class SimplifyIV : public PassInfoMixin<SimplifyIV> {
 public:
-  static char ID;
-  SimplifyIV() : ModulePass(ID) {}
-  virtual bool runOnModule(Module &M) override;
+  PreservedAnalyses run(Module &M, ModuleAnalysisManager &MAM);
 };
 } // namespace llvm

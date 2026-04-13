@@ -5,8 +5,7 @@
 #include "llvm/IR/Instructions.h"
 #include "llvm/IR/Intrinsics.h"
 #include "llvm/IR/Module.h"
-#include "llvm/InitializePasses.h"
-#include "llvm/Pass.h"
+#include "llvm/IR/PassManager.h"
 #include "llvm/Transforms/Utils/BasicBlockUtils.h"
 
 using namespace llvm;
@@ -15,11 +14,10 @@ namespace lotus {
 namespace verification {
 namespace transform {
 
-char PrepareOverflowsPass::ID = 0;
-
-bool PrepareOverflowsPass::runOnFunction(Function &F) {
+llvm::PreservedAnalyses PrepareOverflowsPass::run(Function &F,
+                                                  FunctionAnalysisManager &) {
   if (F.isDeclaration())
-    return false;
+    return PreservedAnalyses::all();
 
   Module *M = F.getParent();
   LLVMContext &Ctx = M->getContext();
@@ -65,22 +63,20 @@ bool PrepareOverflowsPass::runOnFunction(Function &F) {
     BO->eraseFromParent();
     changed = true;
   }
-  return changed;
+  return changed ? PreservedAnalyses::none() : PreservedAnalyses::all();
 }
 
 } // namespace transform
 } // namespace verification
 } // namespace lotus
 
-static llvm::RegisterPass<lotus::verification::transform::PrepareOverflowsPass>
-    Z("prepare-overflows",
-      "Instrument signed arithmetic with explicit overflow checks");
-
 namespace lotus {
 namespace verification {
 namespace transform {
 
-llvm::Pass *createPrepareOverflowsPass() { return new PrepareOverflowsPass(); }
+PrepareOverflowsPass createPrepareOverflowsPass() {
+  return PrepareOverflowsPass();
+}
 
 } // namespace transform
 } // namespace verification

@@ -14,7 +14,7 @@
 
 #include <llvm/IR/Constants.h>
 #include <llvm/IR/Module.h>
-#include <llvm/Pass.h>
+#include <llvm/IR/PassManager.h>
 
 using namespace llvm;
 
@@ -28,36 +28,24 @@ using namespace llvm;
  * - Memory access patterns
  * - Analysis accuracy for constant data
  */
-class LowerGlobalConstantArraySelect : public ModulePass {
+class LowerGlobalConstantArraySelect
+    : public PassInfoMixin<LowerGlobalConstantArraySelect> {
 private:
   /// Map of value to selection function
   std::map<Value *, Function *> SelectFuncMap;
 
 public:
-  static char ID;
-
-  /**
-   * \brief Default constructor
-   */
-  LowerGlobalConstantArraySelect() : ModulePass(ID) {}
-
   /**
    * \brief Default virtual destructor
    */
-  ~LowerGlobalConstantArraySelect() override = default;
-
-  /**
-   * \brief Specify analysis usage
-   * \param AU Analysis usage object to populate
-   */
-  void getAnalysisUsage(AnalysisUsage &) const override;
+  ~LowerGlobalConstantArraySelect() = default;
 
   /**
    * \brief Run the pass on a module
    * \param M The module to transform
    * \return true if the module was modified
    */
-  bool runOnModule(Module &) override;
+  PreservedAnalyses run(Module &M, ModuleAnalysisManager &MAM);
 
 private:
   /**

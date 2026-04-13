@@ -2,8 +2,7 @@
 
 #include "llvm/IR/Function.h"
 #include "llvm/IR/Instructions.h"
-#include "llvm/InitializePasses.h"
-#include "llvm/Pass.h"
+#include "llvm/IR/PassManager.h"
 #include "llvm/Support/raw_ostream.h"
 #include "llvm/Transforms/Utils/BasicBlockUtils.h"
 
@@ -25,11 +24,10 @@ namespace lotus {
 namespace verification {
 namespace transform {
 
-char BreakCritLoopsPass::ID = 0;
-
-bool BreakCritLoopsPass::runOnFunction(Function &F) {
+llvm::PreservedAnalyses BreakCritLoopsPass::run(Function &F,
+                                                FunctionAnalysisManager &) {
   if (F.isDeclaration())
-    return false;
+    return PreservedAnalyses::all();
 
   std::vector<BasicBlock *> toProcess;
 
@@ -55,28 +53,25 @@ bool BreakCritLoopsPass::runOnFunction(Function &F) {
   bool Changed = false;
   for (BasicBlock *BB : toProcess) {
     BasicBlock::iterator SplitPoint = --BB->end();
-    BasicBlock *NewBB = BB->splitBasicBlock(SplitPoint, "crit.blk.split");
+    BB->splitBasicBlock(SplitPoint, "crit.blk.split");
     if (!CloneMetadata(BB->getTerminator(), BB->getTerminator())) {
       errs() << "[BreakCritLoops] Failed assigning metadata\n";
     }
     Changed = true;
   }
 
-  return Changed;
+  return Changed ? PreservedAnalyses::none() : PreservedAnalyses::all();
 }
 
 } // namespace transform
 } // namespace verification
 } // namespace lotus
 
-static llvm::RegisterPass<lotus::verification::transform::BreakCritLoopsPass>
-    X("break-crit-loops", "Break critical loops for better slicing");
-
 namespace lotus {
 namespace verification {
 namespace transform {
 
-llvm::Pass *createBreakCritLoopsPass() { return new BreakCritLoopsPass(); }
+BreakCritLoopsPass createBreakCritLoopsPass() { return BreakCritLoopsPass(); }
 
 } // namespace transform
 } // namespace verification

@@ -7,7 +7,7 @@
 #ifndef LOTUS_VERIFICATION_TRANSFORM_PREPARE_OVERFLOWS_H
 #define LOTUS_VERIFICATION_TRANSFORM_PREPARE_OVERFLOWS_H
 
-#include "llvm/Pass.h"
+#include "llvm/IR/PassManager.h"
 
 namespace llvm {
 class Function;
@@ -25,17 +25,11 @@ namespace transform {
  * replaces them with overflow-checking intrinsics. If overflow is detected,
  * __VERIFIER_error() is called. This is useful for overflow property checking.
  */
-class PrepareOverflowsPass : public llvm::FunctionPass {
+class PrepareOverflowsPass
+    : public llvm::PassInfoMixin<PrepareOverflowsPass> {
 public:
-  static char ID;
-
-  PrepareOverflowsPass() : FunctionPass(ID) {}
-
-  bool runOnFunction(llvm::Function &F) override;
-
-  void getAnalysisUsage(llvm::AnalysisUsage &AU) const override {
-    AU.setPreservesCFG();
-  }
+  llvm::PreservedAnalyses run(llvm::Function &F,
+                              llvm::FunctionAnalysisManager &FAM);
 };
 
 } // namespace transform

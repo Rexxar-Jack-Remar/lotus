@@ -10,7 +10,7 @@
 #include "llvm/IR/Function.h"
 #include "llvm/IR/Instructions.h"
 #include "llvm/IR/Intrinsics.h"
-#include "llvm/Pass.h"
+#include "llvm/IR/PassManager.h"
 
 #include <set>
 
@@ -26,7 +26,7 @@ namespace lotus {
  * into explicit conditional branches that can be analyzed by static analysis
  * tools, making the assumptions visible in the control flow graph.
  */
-class ExpandAssume : public llvm::FunctionPass {
+class ExpandAssume : public llvm::PassInfoMixin<ExpandAssume> {
 private:
   /**
    * \brief Set of already processed assume calls to avoid infinite loops
@@ -84,25 +84,13 @@ private:
   bool processAssumeCall(llvm::CallInst *assumeCall);
 
 public:
-  static char ID;
-
-  /**
-   * \brief Constructor
-   */
-  ExpandAssume();
-
   /**
    * \brief Run the pass on a function
    * \param function The function to analyze
    * \return true if the function was modified
    */
-  bool runOnFunction(llvm::Function &function) override;
-
-  /**
-   * \brief Get analysis usage information
-   * \param AU Analysis usage object to populate
-   */
-  void getAnalysisUsage(llvm::AnalysisUsage &AU) const override;
+  llvm::PreservedAnalyses run(llvm::Function &function,
+                              llvm::FunctionAnalysisManager &FAM);
 
   /**
    * \brief Get the number of assume calls processed

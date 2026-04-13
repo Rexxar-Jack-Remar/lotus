@@ -18,6 +18,7 @@
 #include "llvm/ADT/Statistic.h"
 #include "llvm/IR/DataLayout.h"
 #include "llvm/IR/DerivedTypes.h"
+#include "llvm/IR/PassManager.h"
 #include "llvm/IR/PatternMatch.h"
 #include "llvm/Support/FormattedStream.h"
 #include "llvm/Transforms/Utils/Cloning.h"
@@ -48,7 +49,7 @@ STATISTIC(numErased, "Number of Instructions Deleted");
 // true  - The module was modified.
 // false - The module was not modified.
 //
-bool SimplifyIV::runOnModule(Module &M) {
+PreservedAnalyses SimplifyIV::run(Module &M, ModuleAnalysisManager &) {
   bool erased_this_run = false;
   // Repeat till no change
   bool changed;
@@ -102,11 +103,6 @@ bool SimplifyIV::runOnModule(Module &M) {
       SI->eraseFromParent();
     }
   } while (changed);
-  return erased_this_run;
+  return erased_this_run ? PreservedAnalyses::none()
+                         : PreservedAnalyses::all();
 }
-
-// Pass ID variable
-char SimplifyIV::ID = 0;
-
-// Register the pass
-static RegisterPass<SimplifyIV> X("simplify-iv", "Simplify insert value");

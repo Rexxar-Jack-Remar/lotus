@@ -1,6 +1,7 @@
 // LLVM API compatibility helpers
 #pragma once
 
+#include <llvm/Config/llvm-config.h>
 #include <llvm/IR/DerivedTypes.h>
 #include <llvm/IR/DataLayout.h>
 #include <llvm/IR/DIBuilder.h>
@@ -17,7 +18,32 @@
 #include <llvm/Support/FileSystem.h>
 #include <string>
 
-#if defined(USE_LLVM_6_TO_9) || defined(USE_LLVM_15)
+#if LLVM_VERSION_MAJOR >= 14
+#define LOTUS_LLVM_COMPAT_GE_14 1
+#else
+#define LOTUS_LLVM_COMPAT_GE_14 0
+#endif
+
+#if LLVM_VERSION_MAJOR >= 15
+#define LOTUS_LLVM_COMPAT_GE_15 1
+#else
+#define LOTUS_LLVM_COMPAT_GE_15 0
+#endif
+
+// LLVM 14 already uses most of the APIs that this header historically gated
+// behind USE_LLVM_15. Keep the legacy branches intact, but route 14+ builds
+// through the newer code paths while preserving truly 15-only checks below.
+#if LOTUS_LLVM_COMPAT_GE_14 && !defined(USE_LLVM_6_TO_9) && !defined(USE_LLVM_15)
+#define LOTUS_LLVM_COMPAT_TEMP_USE_LLVM_6_TO_9 1
+#define USE_LLVM_6_TO_9 1
+#endif
+
+#if LOTUS_LLVM_COMPAT_GE_14 || defined(USE_LLVM_15)
+#include <llvm/Analysis/ConstantFolding.h>
+#include <llvm/Bitcode/BitcodeReader.h>
+#include <llvm/Bitcode/BitcodeWriter.h>
+#include <llvm/IR/DebugInfoMetadata.h>
+#elif defined(USE_LLVM_6_TO_9)
 #include <llvm/IR/ConstantFold.h>
 #include <llvm/Bitcode/BitcodeReader.h>
 #include <llvm/Bitcode/BitcodeWriter.h>
@@ -27,7 +53,7 @@
 #include <llvm/IR/DebugInfo.h>
 #endif
 
-#if !defined(USE_LLVM_15)
+#if LLVM_VERSION_MAJOR < 8
 #include <llvm/IR/CallSite.h>
 #endif
 
@@ -291,7 +317,7 @@ inline uint64_t getDbgValueOffset(const llvm::DbgValueInst* dbgValue)
         return 0;
     }
 
-#if defined(USE_LLVM_15)
+#if LOTUS_LLVM_COMPAT_GE_14 || defined(USE_LLVM_15)
     if (auto* expr = dbgValue->getExpression())
     {
         int64_t offset = 0;
@@ -311,39 +337,29 @@ inline uint64_t getDbgValueOffset(const llvm::DbgValueInst* dbgValue)
 //------------------------------------------------------------------------------
 inline bool isLlvm36()
 {
-#if !defined(USE_LLVM_6_TO_9) && !defined(USE_LLVM_15)
-    return true;
-#else
-    return false;
-#endif
+    return LLVM_VERSION_MAJOR < 6;
 }
 
 inline bool isLlvm6To9()
 {
-#if defined(USE_LLVM_6_TO_9)
-    return true;
-#else
-    return false;
-#endif
+    return LLVM_VERSION_MAJOR >= 6 && LLVM_VERSION_MAJOR < 10;
 }
 
 inline bool isLlvm15()
 {
-#if defined(USE_LLVM_15) || defined(USE_LLVM_6_TO_9)
-    return true;
-#else
-    return false;
-#endif
+    return LLVM_VERSION_MAJOR >= 15;
 }
 
 inline bool preferTypedPointers(llvm::LLVMContext& context)
 {
-#if defined(USE_LLVM_15)
+#if LOTUS_LLVM_COMPAT_GE_15 || defined(USE_LLVM_15)
     if (!context.hasSetOpaquePointersValue())
     {
         context.setOpaquePointers(false);
         return true;
     }
+    return context.supportsTypedPointers();
+#elif LOTUS_LLVM_COMPAT_GE_14
     return context.supportsTypedPointers();
 #else
     (void)context;
@@ -570,7 +586,7 @@ inline void replaceUsesOfWithOnConstant(
         llvm::Value* to,
         llvm::Use* use = nullptr)
 {
-#if defined(USE_LLVM_15)
+#if LOTUS_LLVM_COMPAT_GE_14 || defined(USE_LLVM_15)
     (void)use;
     constant->handleOperandChange(from, to);
 #else
@@ -675,7 +691,7 @@ inline llvm::AttributeSet getParamAttributes(
         const FunctionAttrList& attrs,
         unsigned argNo)
 {
-#if defined(USE_LLVM_15)
+#if LOTUS_LLVM_COMPAT_GE_14 || defined(USE_LLVM_15)
     return attrs.getParamAttrs(argNo);
 #elif defined(USE_LLVM_6_TO_9)
     return attrs.getParamAttributes(argNo);
@@ -686,7 +702,7 @@ inline llvm::AttributeSet getParamAttributes(
 
 inline llvm::AttributeSet getReturnAttributes(const FunctionAttrList& attrs)
 {
-#if defined(USE_LLVM_15)
+#if LOTUS_LLVM_COMPAT_GE_14 || defined(USE_LLVM_15)
     return attrs.getRetAttrs();
 #elif defined(USE_LLVM_6_TO_9)
     return attrs.getRetAttributes();
@@ -697,7 +713,7 @@ inline llvm::AttributeSet getReturnAttributes(const FunctionAttrList& attrs)
 
 inline llvm::AttributeSet getFnAttributes(const FunctionAttrList& attrs)
 {
-#if defined(USE_LLVM_15)
+#if LOTUS_LLVM_COMPAT_GE_14 || defined(USE_LLVM_15)
     return attrs.getFnAttrs();
 #elif defined(USE_LLVM_6_TO_9)
     return attrs.getFnAttributes();
@@ -721,7 +737,7 @@ inline FunctionAttrList addAttributesAtIndex(
         unsigned index,
         llvm::AttributeSet toAdd)
 {
-#if defined(USE_LLVM_15)
+#if LOTUS_LLVM_COMPAT_GE_14 || defined(USE_LLVM_15)
     llvm::AttrBuilder builder(ctx, toAdd);
     return attrs.addAttributesAtIndex(ctx, index, builder);
 #elif defined(USE_LLVM_6_TO_9)
@@ -736,7 +752,7 @@ inline void addArgumentAttributes(
         llvm::Argument* arg,
         llvm::AttributeSet attrs)
 {
-#if defined(USE_LLVM_15)
+#if LOTUS_LLVM_COMPAT_GE_14 || defined(USE_LLVM_15)
     llvm::AttrBuilder builder(arg->getContext(), attrs);
     arg->addAttrs(builder);
 #elif defined(USE_LLVM_6_TO_9)
@@ -750,7 +766,7 @@ inline void addArgumentAttributes(
 //------------------------------------------------------------------------------
 // Call-like instruction wrappers (CallSite/CallBase)
 //------------------------------------------------------------------------------
-#if defined(USE_LLVM_15)
+#if LLVM_VERSION_MAJOR >= 8 || defined(USE_LLVM_15)
 using CallSiteCompat = llvm::CallBase*;
 #else
 using CallSiteCompat = llvm::CallSite;
@@ -758,7 +774,7 @@ using CallSiteCompat = llvm::CallSite;
 
 inline CallSiteCompat nullCallSite()
 {
-#if defined(USE_LLVM_15)
+#if LLVM_VERSION_MAJOR >= 8 || defined(USE_LLVM_15)
     return nullptr;
 #else
     return llvm::CallSite();
@@ -767,7 +783,7 @@ inline CallSiteCompat nullCallSite()
 
 inline CallSiteCompat makeCallSite(llvm::Instruction* inst)
 {
-#if defined(USE_LLVM_15)
+#if LLVM_VERSION_MAJOR >= 8 || defined(USE_LLVM_15)
     return llvm::dyn_cast<llvm::CallBase>(inst);
 #else
     return llvm::CallSite(inst);
@@ -776,7 +792,7 @@ inline CallSiteCompat makeCallSite(llvm::Instruction* inst)
 
 inline bool isValidCallSite(CallSiteCompat cs)
 {
-#if defined(USE_LLVM_15)
+#if LLVM_VERSION_MAJOR >= 8 || defined(USE_LLVM_15)
     return cs != nullptr;
 #else
     return cs.getInstruction() != nullptr;
@@ -785,7 +801,7 @@ inline bool isValidCallSite(CallSiteCompat cs)
 
 inline llvm::Instruction* getCallSiteInstruction(CallSiteCompat cs)
 {
-#if defined(USE_LLVM_15)
+#if LLVM_VERSION_MAJOR >= 8 || defined(USE_LLVM_15)
     return cs;
 #else
     return cs.getInstruction();
@@ -794,7 +810,7 @@ inline llvm::Instruction* getCallSiteInstruction(CallSiteCompat cs)
 
 inline llvm::Type* getCallSiteType(CallSiteCompat cs)
 {
-#if defined(USE_LLVM_15)
+#if LLVM_VERSION_MAJOR >= 8 || defined(USE_LLVM_15)
     return cs ? cs->getType() : nullptr;
 #else
     return cs.getInstruction() ? cs.getType() : nullptr;
@@ -803,7 +819,7 @@ inline llvm::Type* getCallSiteType(CallSiteCompat cs)
 
 inline unsigned getCallSiteArgSize(CallSiteCompat cs)
 {
-#if defined(USE_LLVM_15)
+#if LLVM_VERSION_MAJOR >= 8 || defined(USE_LLVM_15)
     return cs ? cs->arg_size() : 0;
 #else
     return cs.getInstruction() ? cs.arg_size() : 0;
@@ -812,7 +828,7 @@ inline unsigned getCallSiteArgSize(CallSiteCompat cs)
 
 inline llvm::Value* getCallSiteArgOperand(CallSiteCompat cs, unsigned idx)
 {
-#if defined(USE_LLVM_15)
+#if LLVM_VERSION_MAJOR >= 8 || defined(USE_LLVM_15)
     return cs ? cs->getArgOperand(idx) : nullptr;
 #else
     return cs.getInstruction() ? cs.getArgument(idx) : nullptr;
@@ -821,7 +837,7 @@ inline llvm::Value* getCallSiteArgOperand(CallSiteCompat cs, unsigned idx)
 
 inline llvm::Function* getCallSiteCalledFunction(CallSiteCompat cs)
 {
-#if defined(USE_LLVM_15)
+#if LLVM_VERSION_MAJOR >= 8 || defined(USE_LLVM_15)
     return cs ? cs->getCalledFunction() : nullptr;
 #else
     return cs.getCalledFunction();
@@ -830,7 +846,7 @@ inline llvm::Function* getCallSiteCalledFunction(CallSiteCompat cs)
 
 inline auto getCallSiteArgBegin(CallSiteCompat cs)
 {
-#if defined(USE_LLVM_15)
+#if LLVM_VERSION_MAJOR >= 8 || defined(USE_LLVM_15)
     return cs->arg_begin();
 #else
     return cs.arg_begin();
@@ -839,7 +855,7 @@ inline auto getCallSiteArgBegin(CallSiteCompat cs)
 
 inline auto getCallSiteArgEnd(CallSiteCompat cs)
 {
-#if defined(USE_LLVM_15)
+#if LLVM_VERSION_MAJOR >= 8 || defined(USE_LLVM_15)
     return cs->arg_end();
 #else
     return cs.arg_end();
@@ -856,7 +872,7 @@ inline llvm::LoadInst* createLoad(
         llvm::Value* ptr,
         const llvm::Twine& name = "")
 {
-#if defined(USE_LLVM_15)
+#if LOTUS_LLVM_COMPAT_GE_14 || defined(USE_LLVM_15)
     return irb.CreateLoad(getPointerElementType(ptr), ptr, name);
 #else
     return irb.CreateLoad(ptr, name);
@@ -870,7 +886,7 @@ inline llvm::LoadInst* createLoad(
         llvm::Value* ptr,
         const llvm::Twine& name = "")
 {
-#if defined(USE_LLVM_15)
+#if LOTUS_LLVM_COMPAT_GE_14 || defined(USE_LLVM_15)
     return irb.CreateLoad(type, ptr, name);
 #else
     (void)type;
@@ -883,7 +899,7 @@ inline llvm::LoadInst* newLoadInst(
         const llvm::Twine& name = "",
         llvm::Instruction* insertBefore = nullptr)
 {
-#if defined(USE_LLVM_15)
+#if LOTUS_LLVM_COMPAT_GE_14 || defined(USE_LLVM_15)
     if (insertBefore == nullptr)
     {
         return new llvm::LoadInst(
@@ -910,7 +926,7 @@ inline llvm::AllocaInst* newAllocaInst(
         llvm::Instruction* insertBefore = nullptr,
         unsigned addrSpace = 0)
 {
-#if defined(USE_LLVM_15)
+#if LOTUS_LLVM_COMPAT_GE_14 || defined(USE_LLVM_15)
     return new llvm::AllocaInst(allocatedType, addrSpace, name, insertBefore);
 #else
     (void)addrSpace;
@@ -920,7 +936,7 @@ inline llvm::AllocaInst* newAllocaInst(
 
 inline unsigned getAlignment(const llvm::AllocaInst* allocaInst)
 {
-#if defined(USE_LLVM_15)
+#if LOTUS_LLVM_COMPAT_GE_14 || defined(USE_LLVM_15)
     return allocaInst->getAlign().value();
 #else
     return allocaInst->getAlignment();
@@ -929,7 +945,7 @@ inline unsigned getAlignment(const llvm::AllocaInst* allocaInst)
 
 inline void setAlignment(llvm::AllocaInst* allocaInst, unsigned alignment)
 {
-#if defined(USE_LLVM_15)
+#if LOTUS_LLVM_COMPAT_GE_14 || defined(USE_LLVM_15)
     if (alignment == 0)
     {
         return;
@@ -966,7 +982,7 @@ inline AtomicSyncScope getSyncScopeID(const llvm::AtomicCmpXchgInst* atomicCmpXc
 
 inline unsigned getAlignment(const llvm::AtomicRMWInst* atomicRMWInst)
 {
-#if defined(USE_LLVM_15)
+#if LOTUS_LLVM_COMPAT_GE_14 || defined(USE_LLVM_15)
     return atomicRMWInst->getAlign().value();
 #else
     (void)atomicRMWInst;
@@ -985,7 +1001,7 @@ inline AtomicSyncScope getSyncScopeID(const llvm::AtomicRMWInst* atomicRMWInst)
 
 inline unsigned getAlignment(const llvm::AtomicCmpXchgInst* atomicCmpXchgInst)
 {
-#if defined(USE_LLVM_15)
+#if LOTUS_LLVM_COMPAT_GE_14 || defined(USE_LLVM_15)
     return atomicCmpXchgInst->getAlign().value();
 #else
     (void)atomicCmpXchgInst;
@@ -1012,7 +1028,7 @@ inline llvm::AtomicCmpXchgInst* newAtomicCmpXchgInst(
         llvm::Instruction* insertBefore = nullptr,
         unsigned alignment = 1)
 {
-#if defined(USE_LLVM_15)
+#if LOTUS_LLVM_COMPAT_GE_14 || defined(USE_LLVM_15)
     if (alignment == 0)
     {
         alignment = 1;
@@ -1044,7 +1060,7 @@ inline llvm::StoreInst* newStoreInst(
         llvm::Value* ptr,
         llvm::Instruction* insertBefore = nullptr)
 {
-#if defined(USE_LLVM_15)
+#if LOTUS_LLVM_COMPAT_GE_14 || defined(USE_LLVM_15)
     if (insertBefore == nullptr)
     {
         return new llvm::StoreInst(
@@ -1064,7 +1080,7 @@ inline llvm::StoreInst* newStoreInst(
         bool isVolatile,
         llvm::Instruction* insertBefore = nullptr)
 {
-#if defined(USE_LLVM_15)
+#if LOTUS_LLVM_COMPAT_GE_14 || defined(USE_LLVM_15)
     if (insertBefore == nullptr)
     {
         return new llvm::StoreInst(
@@ -1213,7 +1229,7 @@ inline llvm::CallInst* createMemCpy(
         unsigned alignment = 1,
         bool isVolatile = false)
 {
-#if defined(USE_LLVM_15)
+#if LOTUS_LLVM_COMPAT_GE_14 || defined(USE_LLVM_15)
     return irb.CreateMemCpy(
             dst,
             llvm::MaybeAlign(alignment),
@@ -1280,7 +1296,7 @@ inline llvm::AtomicRMWInst* newAtomicRMWInst(
         llvm::Instruction* insertBefore = nullptr,
         unsigned alignment = 1)
 {
-#if defined(USE_LLVM_15)
+#if LOTUS_LLVM_COMPAT_GE_14 || defined(USE_LLVM_15)
     if (alignment == 0)
     {
         alignment = 1;
@@ -1806,3 +1822,11 @@ inline DISubprogramRef createFunction(
 } // namespace llvm_compat
 } // namespace utils
 } // namespace lotus
+
+#ifdef LOTUS_LLVM_COMPAT_TEMP_USE_LLVM_6_TO_9
+#undef USE_LLVM_6_TO_9
+#undef LOTUS_LLVM_COMPAT_TEMP_USE_LLVM_6_TO_9
+#endif
+
+#undef LOTUS_LLVM_COMPAT_GE_15
+#undef LOTUS_LLVM_COMPAT_GE_14

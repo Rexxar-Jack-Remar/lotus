@@ -3,12 +3,9 @@
 #include <llvm/ADT/SmallPtrSet.h>
 #include <llvm/Analysis/ValueTracking.h>
 #include <llvm/IR/BasicBlock.h>
+#include <llvm/IR/PassManager.h>
 #include <llvm/Support/Casting.h>
 #include <llvm/Support/Debug.h>
-
-void CastElimPass::getAnalysisUsage(llvm::AnalysisUsage &AU) const {
-  AU.setPreservesCFG();
-}
 
 namespace {
 llvm::Value *findSubstitute(llvm::CastInst &CI) {
@@ -26,7 +23,8 @@ llvm::Value *findSubstitute(llvm::CastInst &CI) {
 }
 } // namespace
 
-bool CastElimPass::runOnFunction(llvm::Function &F) {
+llvm::PreservedAnalyses CastElimPass::run(llvm::Function &F,
+                                          llvm::FunctionAnalysisManager &) {
   size_t eliminated = 0;
 
   for (auto BBI = F.begin(); BBI != F.end(); ++BBI) {
@@ -43,9 +41,6 @@ bool CastElimPass::runOnFunction(llvm::Function &F) {
   // if (eliminated != 0)
   //   llvm::dbgs() << "Eliminated " << std::to_string(eliminated)
   //                << " casts from " << F.getName() << "\n";
-  return eliminated != 0;
+  return eliminated != 0 ? llvm::PreservedAnalyses::none()
+                         : llvm::PreservedAnalyses::all();
 }
-
-char CastElimPass::ID = 0;
-static llvm::RegisterPass<CastElimPass> X("cast-elim",
-                                          "Eliminate some unnecessary casts.");

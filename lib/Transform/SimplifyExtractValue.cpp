@@ -20,6 +20,7 @@
 #include "llvm/ADT/Statistic.h"
 #include "llvm/IR/DataLayout.h"
 #include "llvm/IR/DerivedTypes.h"
+#include "llvm/IR/PassManager.h"
 #include "llvm/Transforms/Utils/Cloning.h"
 
 using namespace llvm;
@@ -44,7 +45,7 @@ STATISTIC(numErased, "Number of Instructions Deleted");
 // true  - The module was modified.
 // false - The module was not modified.
 //
-bool SimplifyEV::runOnModule(Module &M) {
+PreservedAnalyses SimplifyEV::run(Module &M, ModuleAnalysisManager &) {
   bool erased_this_run = false;
   // Repeat till no change
   bool changed;
@@ -217,12 +218,6 @@ bool SimplifyEV::runOnModule(Module &M) {
       }
     }
   } while (changed);
-  return erased_this_run;
+  return erased_this_run ? PreservedAnalyses::none()
+                         : PreservedAnalyses::all();
 }
-
-// Pass ID variable
-char SimplifyEV::ID = 0;
-
-// Register the pass
-static RegisterPass<SimplifyEV> X("simplify-ev",
-                                  "Simplify extract/insert value insts");

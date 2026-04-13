@@ -57,7 +57,11 @@ cancelledReturnValue() {
 
 class ThreadPool {
 private:
+  friend struct llvm::object_creator<ThreadPool>;
+  friend struct llvm::object_deleter<ThreadPool>;
+
   ThreadPool();
+  ~ThreadPool();
   bool runOnePendingTaskOrWait();
 
 public:
@@ -214,13 +218,12 @@ public:
     }
   };
 
-  ~ThreadPool();
-
   unsigned workerCount() const { return Workers.size(); }
 
   bool hasWorkers() const { return workerCount() != 0; }
 
   bool isWorkerThread() const {
+    std::lock_guard<std::mutex> Lock(WorkerStateMutex);
     return WorkerIds.find(std::this_thread::get_id()) != WorkerIds.end();
   }
 
@@ -273,6 +276,7 @@ public:
   /// and makeThreadLocalReducer().
   template <class LocalTy> void initThreadLocal() {
     // Add main thread id
+    std::lock_guard<std::mutex> Lock(WorkerStateMutex);
     auto Id = std::this_thread::get_id();
     if (ThreadLocals.find(Id) == ThreadLocals.end()) {
       ThreadLocals[Id] = new LocalTy;
@@ -287,6 +291,7 @@ public:
   }
 
   template <class LocalTy> void deinitThreadLocal() {
+    std::lock_guard<std::mutex> Lock(WorkerStateMutex);
     for (auto &It : ThreadLocals) {
       delete (LocalTy *)It.second;
       It.second = nullptr;
@@ -294,6 +299,7 @@ public:
   }
 
   template <class LocalTy> LocalTy *getThreadLocal() const {
+    std::lock_guard<std::mutex> Lock(WorkerStateMutex);
     auto It = ThreadLocals.find(std::this_thread::get_id());
     assert(It != ThreadLocals.end());
     return (LocalTy *)It->second;
@@ -316,6 +322,7 @@ private:
   };
 
   void enqueuePendingTask(PendingTask Task);
+  void registerCurrentWorkerThread();
 
   /// We need to keep track of threads so we can join them recording the
   /// workers of the thread pool.
@@ -330,6 +337,7 @@ private:
   bool IsStop;        ///< identifying if the thread pool is running
   int NumRunningTask; /// < number of running task
 
+  mutable std::mutex WorkerStateMutex;
   std::map<std::thread::id, void *> ThreadLocals;
   std::set<std::thread::id> WorkerIds;
 

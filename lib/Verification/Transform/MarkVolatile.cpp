@@ -5,8 +5,7 @@
 #include "llvm/IR/Instructions.h"
 #include "llvm/IR/IntrinsicInst.h"
 #include "llvm/IR/Module.h"
-#include "llvm/InitializePasses.h"
-#include "llvm/Pass.h"
+#include "llvm/IR/PassManager.h"
 
 using namespace llvm;
 
@@ -14,11 +13,10 @@ namespace lotus {
 namespace verification {
 namespace transform {
 
-char MarkVolatilePass::ID = 0;
-
-bool MarkVolatilePass::runOnFunction(Function &F) {
+llvm::PreservedAnalyses MarkVolatilePass::run(Function &F,
+                                              FunctionAnalysisManager &) {
   if (F.isDeclaration())
-    return false;
+    return PreservedAnalyses::all();
 
   bool modified = false;
   LLVMContext &ctx = F.getParent()->getContext();
@@ -61,21 +59,18 @@ bool MarkVolatilePass::runOnFunction(Function &F) {
       }
     }
   }
-  return modified;
+  return modified ? PreservedAnalyses::none() : PreservedAnalyses::all();
 }
 
 } // namespace transform
 } // namespace verification
 } // namespace lotus
 
-static llvm::RegisterPass<lotus::verification::transform::MarkVolatilePass>
-    X("mark-volatile", "Make marked instructions as volatile");
-
 namespace lotus {
 namespace verification {
 namespace transform {
 
-llvm::Pass *createMarkVolatilePass() { return new MarkVolatilePass(); }
+MarkVolatilePass createMarkVolatilePass() { return MarkVolatilePass(); }
 
 } // namespace transform
 } // namespace verification

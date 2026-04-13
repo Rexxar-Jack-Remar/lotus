@@ -7,7 +7,7 @@
 #ifndef LOTUS_VERIFICATION_TRANSFORM_MARK_VOLATILE_H
 #define LOTUS_VERIFICATION_TRANSFORM_MARK_VOLATILE_H
 
-#include "llvm/Pass.h"
+#include "llvm/IR/PassManager.h"
 
 namespace llvm {
 class Function;
@@ -25,17 +25,10 @@ namespace transform {
  * instruction (load/store/memcpy) volatile, preventing optimizations that
  * might remove or reorder these memory operations.
  */
-class MarkVolatilePass : public llvm::FunctionPass {
+class MarkVolatilePass : public llvm::PassInfoMixin<MarkVolatilePass> {
 public:
-  static char ID;
-
-  MarkVolatilePass() : FunctionPass(ID) {}
-
-  bool runOnFunction(llvm::Function &F) override;
-
-  void getAnalysisUsage(llvm::AnalysisUsage &AU) const override {
-    AU.setPreservesCFG();
-  }
+  llvm::PreservedAnalyses run(llvm::Function &F,
+                              llvm::FunctionAnalysisManager &FAM);
 };
 
 } // namespace transform

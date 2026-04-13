@@ -7,7 +7,7 @@
 #ifndef LOTUS_VERIFICATION_TRANSFORM_REMOVE_ERROR_CALLS_H
 #define LOTUS_VERIFICATION_TRANSFORM_REMOVE_ERROR_CALLS_H
 
-#include "llvm/Pass.h"
+#include "llvm/IR/PassManager.h"
 
 namespace llvm {
 class Function;
@@ -26,17 +26,11 @@ namespace transform {
  * Useful for certain verification scenarios where error paths should be
  * eliminated.
  */
-class RemoveErrorCallsPass : public llvm::FunctionPass {
+class RemoveErrorCallsPass
+    : public llvm::PassInfoMixin<RemoveErrorCallsPass> {
 public:
-  static char ID;
-
-  RemoveErrorCallsPass() : FunctionPass(ID) {}
-
-  bool runOnFunction(llvm::Function &F) override;
-
-  void getAnalysisUsage(llvm::AnalysisUsage &AU) const override {
-    AU.setPreservesCFG();
-  }
+  llvm::PreservedAnalyses run(llvm::Function &F,
+                              llvm::FunctionAnalysisManager &FAM);
 };
 
 } // namespace transform

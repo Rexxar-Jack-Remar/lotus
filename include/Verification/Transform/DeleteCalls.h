@@ -7,7 +7,7 @@
 #ifndef LOTUS_VERIFICATION_TRANSFORM_DELETE_CALLS_H
 #define LOTUS_VERIFICATION_TRANSFORM_DELETE_CALLS_H
 
-#include "llvm/Pass.h"
+#include "llvm/IR/PassManager.h"
 
 namespace llvm {
 class Function;
@@ -26,17 +26,10 @@ namespace transform {
  * - Replaces return values with UndefValue
  * - Useful for removing unwanted function calls during verification
  */
-class DeleteCallsPass : public llvm::FunctionPass {
+class DeleteCallsPass : public llvm::PassInfoMixin<DeleteCallsPass> {
 public:
-  static char ID;
-
-  DeleteCallsPass() : FunctionPass(ID) {}
-
-  bool runOnFunction(llvm::Function &F) override;
-
-  void getAnalysisUsage(llvm::AnalysisUsage &AU) const override {
-    AU.setPreservesCFG();
-  }
+  llvm::PreservedAnalyses run(llvm::Function &F,
+                              llvm::FunctionAnalysisManager &FAM);
 };
 
 } // namespace transform

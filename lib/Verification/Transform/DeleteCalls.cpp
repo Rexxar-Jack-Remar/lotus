@@ -2,8 +2,7 @@
 
 #include "llvm/IR/Function.h"
 #include "llvm/IR/Instructions.h"
-#include "llvm/InitializePasses.h"
-#include "llvm/Pass.h"
+#include "llvm/IR/PassManager.h"
 #include "llvm/Support/CommandLine.h"
 #include "llvm/Support/raw_ostream.h"
 
@@ -20,14 +19,13 @@ namespace lotus {
 namespace verification {
 namespace transform {
 
-char DeleteCallsPass::ID = 0;
-
-bool DeleteCallsPass::runOnFunction(Function &F) {
+llvm::PreservedAnalyses DeleteCallsPass::run(Function &F,
+                                             FunctionAnalysisManager &) {
   bool changed = false;
   std::set<std::string> callsset{CallsToDelete.begin(), CallsToDelete.end()};
 
   if (callsset.empty())
-    return false;
+    return PreservedAnalyses::all();
 
   for (auto &B : F) {
     for (auto it = B.begin(), et = B.end(); it != et;) {
@@ -51,22 +49,18 @@ bool DeleteCallsPass::runOnFunction(Function &F) {
     }
   }
 
-  return changed;
+  return changed ? PreservedAnalyses::none() : PreservedAnalyses::all();
 }
 
 } // namespace transform
 } // namespace verification
 } // namespace lotus
 
-static RegisterPass<lotus::verification::transform::DeleteCallsPass>
-    X("delete-calls", "Delete (direct) calls of the given function", false,
-      false);
-
 namespace lotus {
 namespace verification {
 namespace transform {
 
-llvm::Pass *createDeleteCallsPass() { return new DeleteCallsPass(); }
+DeleteCallsPass createDeleteCallsPass() { return DeleteCallsPass(); }
 
 } // namespace transform
 } // namespace verification

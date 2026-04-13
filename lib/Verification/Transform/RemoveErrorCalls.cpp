@@ -5,8 +5,7 @@
 #include "llvm/IR/InstIterator.h"
 #include "llvm/IR/Instructions.h"
 #include "llvm/IR/Module.h"
-#include "llvm/InitializePasses.h"
-#include "llvm/Pass.h"
+#include "llvm/IR/PassManager.h"
 #include "llvm/Support/CommandLine.h"
 #include "llvm/Transforms/Utils/BasicBlockUtils.h"
 
@@ -33,11 +32,10 @@ namespace lotus {
 namespace verification {
 namespace transform {
 
-char RemoveErrorCallsPass::ID = 0;
-
-bool RemoveErrorCallsPass::runOnFunction(Function &F) {
+llvm::PreservedAnalyses RemoveErrorCallsPass::run(Function &F,
+                                                  FunctionAnalysisManager &) {
   if (F.isDeclaration())
-    return false;
+    return PreservedAnalyses::all();
 
   bool modified = false;
   Module *M = F.getParent();
@@ -82,21 +80,20 @@ bool RemoveErrorCallsPass::runOnFunction(Function &F) {
       }
     }
   }
-  return modified;
+  return modified ? PreservedAnalyses::none() : PreservedAnalyses::all();
 }
 
 } // namespace transform
 } // namespace verification
 } // namespace lotus
 
-static llvm::RegisterPass<lotus::verification::transform::RemoveErrorCallsPass>
-    X("remove-error-calls", "Remove calls to __VERIFIER_error");
-
 namespace lotus {
 namespace verification {
 namespace transform {
 
-llvm::Pass *createRemoveErrorCallsPass() { return new RemoveErrorCallsPass(); }
+RemoveErrorCallsPass createRemoveErrorCallsPass() {
+  return RemoveErrorCallsPass();
+}
 
 } // namespace transform
 } // namespace verification

@@ -10,31 +10,21 @@
 #include "llvm/IR/Instructions.h"
 #include "llvm/IR/Intrinsics.h"
 #include "llvm/IR/MDBuilder.h"
+#include "llvm/IR/PassManager.h"
 // #include "llvm/IR/Metadata.h"
 
 #include <vector>
 
 namespace lotus {
 
-char ExpandAssume::ID = 0;
-
 // ============================================================================
 // ExpandAssume Implementation
 // ============================================================================
 
-ExpandAssume::ExpandAssume() : FunctionPass(ID) { processedAssumes.clear(); }
-
-bool ExpandAssume::runOnFunction(llvm::Function &function) {
-  bool modified = false;
-
-  // Process the function for assume expansion
-  modified = processFunction(function);
-
-  return modified;
-}
-
-void ExpandAssume::getAnalysisUsage(llvm::AnalysisUsage &AU) const {
-  AU.setPreservesCFG();
+llvm::PreservedAnalyses ExpandAssume::run(llvm::Function &function,
+                                          llvm::FunctionAnalysisManager &) {
+  return processFunction(function) ? llvm::PreservedAnalyses::none()
+                                   : llvm::PreservedAnalyses::all();
 }
 
 size_t ExpandAssume::getProcessedAssumeCount() const {
@@ -187,16 +177,8 @@ bool ExpandAssume::processAssumeCall(llvm::CallInst *assumeCall) {
   }
 
   // Get the basic block containing the assume call
-  llvm::BasicBlock *block = assumeCall->getParent();
-
-  // Find the position of the assume call in the block
-  llvm::BasicBlock::iterator it = assumeCall->getIterator();
-  llvm::Instruction *nextInst =
-      (it != block->end()) ? &*std::next(it) : nullptr;
-
   // Create conditional branch based on the assume condition
-  llvm::Instruction *branch =
-      createConditionalBranch(condition, block, assumeCall);
+  (void)createConditionalBranch(condition, assumeCall->getParent(), assumeCall);
 
   // Remove the original assume call
   assumeCall->eraseFromParent();

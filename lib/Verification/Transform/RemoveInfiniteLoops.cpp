@@ -5,8 +5,7 @@
 #include "llvm/IR/Function.h"
 #include "llvm/IR/Instructions.h"
 #include "llvm/IR/Module.h"
-#include "llvm/InitializePasses.h"
-#include "llvm/Pass.h"
+#include "llvm/IR/PassManager.h"
 #include "llvm/Support/raw_ostream.h"
 
 #include <set>
@@ -29,8 +28,6 @@ bool CloneMetadata(const Instruction *i1, Instruction *i2) {
 namespace lotus {
 namespace verification {
 namespace transform {
-
-char RemoveInfiniteLoopsPass::ID = 0;
 
 static bool isLoop(BasicBlock *block) {
   // Check if this is a block that unconditionally jumps on itself
@@ -62,9 +59,10 @@ static bool isLoop(BasicBlock *block) {
   return false;
 }
 
-bool RemoveInfiniteLoopsPass::runOnFunction(Function &F) {
+llvm::PreservedAnalyses RemoveInfiniteLoopsPass::run(
+    Function &F, FunctionAnalysisManager &) {
   if (F.isDeclaration())
-    return false;
+    return PreservedAnalyses::all();
 
   Module *M = F.getParent();
   std::vector<BasicBlock *> to_process;
@@ -74,7 +72,7 @@ bool RemoveInfiniteLoopsPass::runOnFunction(Function &F) {
   }
 
   if (to_process.empty())
-    return false;
+    return PreservedAnalyses::all();
 
   LLVMContext &Ctx = M->getContext();
   Type *argTy = Type::getInt32Ty(Ctx);
@@ -97,24 +95,19 @@ bool RemoveInfiniteLoopsPass::runOnFunction(Function &F) {
   }
 
   errs() << "Removed infinite loop in " << F.getName() << "\n";
-  return true;
+  return PreservedAnalyses::none();
 }
 
 } // namespace transform
 } // namespace verification
 } // namespace lotus
 
-static llvm::RegisterPass<
-    lotus::verification::transform::RemoveInfiniteLoopsPass>
-    X("remove-infinite-loops",
-      "Delete patterns like LABEL: goto LABEL and replace them with exit(0)");
-
 namespace lotus {
 namespace verification {
 namespace transform {
 
-llvm::Pass *createRemoveInfiniteLoopsPass() {
-  return new RemoveInfiniteLoopsPass();
+RemoveInfiniteLoopsPass createRemoveInfiniteLoopsPass() {
+  return RemoveInfiniteLoopsPass();
 }
 
 } // namespace transform

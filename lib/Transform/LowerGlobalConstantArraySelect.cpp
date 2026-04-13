@@ -4,6 +4,7 @@
 
 #include <llvm/IR/Constants.h>
 #include <llvm/IR/Instructions.h>
+#include <llvm/IR/PassManager.h>
 #include <llvm/IR/Verifier.h>
 #include <llvm/Support/CommandLine.h>
 #include <llvm/Support/Debug.h>
@@ -18,16 +19,11 @@ static cl::opt<unsigned>
                                     "global array that we try to handle"),
                            cl::init(15));
 
-char LowerGlobalConstantArraySelect::ID = 0;
-static RegisterPass<LowerGlobalConstantArraySelect>
-    X(DEBUG_TYPE, "G[a] -> switch(a) -> phi(G[x])");
-
-void LowerGlobalConstantArraySelect::getAnalysisUsage(AnalysisUsage &) const {}
-
 // Main pass entry point. Scans for GEP instructions that access global constant
 // arrays and replaces them with function calls that use switch statements for
 // element selection.
-bool LowerGlobalConstantArraySelect::runOnModule(Module &M) {
+PreservedAnalyses
+LowerGlobalConstantArraySelect::run(Module &M, ModuleAnalysisManager &) {
   std::vector<Instruction *> ToRemoveLd;
   std::vector<Instruction *> ToRemoveGep;
   bool Changed = false;
@@ -83,7 +79,7 @@ bool LowerGlobalConstantArraySelect::runOnModule(Module &M) {
   if (verifyModule(M, &errs()))
     llvm_unreachable("Error: LowerGlobalConstantArraySelect fails...");
 
-  return Changed;
+  return Changed ? PreservedAnalyses::none() : PreservedAnalyses::all();
 }
 
 // Check if an instruction is a GEP that accesses a global constant array with a

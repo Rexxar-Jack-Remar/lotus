@@ -7,7 +7,7 @@
 #ifndef LOTUS_VERIFICATION_TRANSFORM_REMOVE_INFINITE_LOOPS_H
 #define LOTUS_VERIFICATION_TRANSFORM_REMOVE_INFINITE_LOOPS_H
 
-#include "llvm/Pass.h"
+#include "llvm/IR/PassManager.h"
 
 namespace llvm {
 class Function;
@@ -25,17 +25,11 @@ namespace transform {
  * themselves without side effects) and replaces them with __VERIFIER_assume(0)
  * followed by unreachable, effectively removing the loop.
  */
-class RemoveInfiniteLoopsPass : public llvm::FunctionPass {
+class RemoveInfiniteLoopsPass
+    : public llvm::PassInfoMixin<RemoveInfiniteLoopsPass> {
 public:
-  static char ID;
-
-  RemoveInfiniteLoopsPass() : FunctionPass(ID) {}
-
-  bool runOnFunction(llvm::Function &F) override;
-
-  void getAnalysisUsage(llvm::AnalysisUsage &AU) const override {
-    AU.setPreservesCFG();
-  }
+  llvm::PreservedAnalyses run(llvm::Function &F,
+                              llvm::FunctionAnalysisManager &FAM);
 };
 
 } // namespace transform
