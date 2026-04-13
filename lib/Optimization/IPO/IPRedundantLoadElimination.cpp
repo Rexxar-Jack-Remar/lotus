@@ -176,5 +176,9 @@ char IPRedundantLoadElimination::ID = 0;
 static RegisterPass<IPRedundantLoadElimination>
     X("ip-rle", "Interprocedural Redundant Load Elimination");
 
+llvm::ModulePass *createIPRedundantLoadEliminationPass() {
+  return new IPRedundantLoadElimination();
+}
+
 } // namespace transforms
 } // namespace previrt

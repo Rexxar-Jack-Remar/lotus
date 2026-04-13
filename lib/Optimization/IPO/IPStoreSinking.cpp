@@ -190,5 +190,7 @@ char IPStoreSinking::ID = 0;
 static RegisterPass<IPStoreSinking> X("ip-sink",
                                       "Interprocedural Store Sinking");
 
+llvm::ModulePass *createIPStoreSinkingPass() { return new IPStoreSinking(); }
+
 } // namespace transforms
 } // namespace previrt

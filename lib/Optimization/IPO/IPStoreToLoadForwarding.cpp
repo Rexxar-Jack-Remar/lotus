@@ -299,5 +299,9 @@ char IPStoreToLoadForwarding::ID = 0;
 static RegisterPass<IPStoreToLoadForwarding>
     X("ip-forward", "Interprocedural Store-to-Load Forwarding");
 
+llvm::ModulePass *createIPStoreToLoadForwardingPass() {
+  return new IPStoreToLoadForwarding();
+}
+
 } // namespace transforms
 } // namespace previrt

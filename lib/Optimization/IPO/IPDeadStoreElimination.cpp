@@ -569,3 +569,11 @@ char IPDeadStoreElimination::ID = 0;
 
 static llvm::RegisterPass<previrt::transforms::IPDeadStoreElimination>
     X("ipdse", "Inter-procedural Dead Store Elimination");
+
+namespace previrt {
+namespace transforms {
+llvm::ModulePass *createIPDeadStoreEliminationPass() {
+  return new IPDeadStoreElimination();
+}
+} // namespace transforms
+} // namespace previrt
