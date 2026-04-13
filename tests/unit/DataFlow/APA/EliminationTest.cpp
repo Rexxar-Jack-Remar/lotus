@@ -238,6 +238,56 @@ TEST(EliminationTest, ExprToStoredForEveryNode) {
   EXPECT_TRUE(Res.ExprTo(2));
 }
 
+TEST(EliminationTest, PathExprFactoryHashConsesAtomsAndComposites) {
+  elimination::PathExprFactory<int> Exprs;
+
+  auto A1 = Exprs.atom(7);
+  auto A2 = Exprs.atom(7);
+  auto B = Exprs.atom(9);
+
+  EXPECT_EQ(A1, A2);
+  EXPECT_NE(A1, B);
+
+  auto U1 = Exprs.unite(A1, B);
+  auto U2 = Exprs.unite(A2, B);
+  auto U3 = Exprs.unite(B, A1);
+  EXPECT_EQ(U1, U2);
+  EXPECT_NE(U1, U3);
+
+  auto C1 = Exprs.concat(A1, B);
+  auto C2 = Exprs.concat(A2, B);
+  auto C3 = Exprs.concat(B, A1);
+  EXPECT_EQ(C1, C2);
+  EXPECT_NE(C1, C3);
+
+  auto S1 = Exprs.star(U1);
+  auto S2 = Exprs.star(U2);
+  EXPECT_EQ(S1, S2);
+}
+
+TEST(EliminationTest, SolverReusesExpressionNodesAcrossEquivalentPaths) {
+  std::unordered_map<int, std::vector<int>> Succs = {
+      {0, {1, 2}}, {1, {3}}, {2, {3}}, {3, {}}};
+  ReachabilityProblem Problem(0, Succs);
+
+  elimination::IntraEliminationSolver<TestDomain> Solver(Problem);
+  ASSERT_EQ(Solver.solve(), elimination::SolveStatus::Ok);
+  const auto &Res = Solver.getResults();
+
+  auto ExprTo1 = Res.ExprTo(1);
+  auto ExprTo2 = Res.ExprTo(2);
+  auto ExprTo3 = Res.ExprTo(3);
+
+  ASSERT_TRUE(ExprTo1);
+  ASSERT_TRUE(ExprTo2);
+  ASSERT_TRUE(ExprTo3);
+  ASSERT_EQ(ExprTo1->K, elimination::PathExprFactory<int>::Kind::Atom);
+  ASSERT_EQ(ExprTo2->K, elimination::PathExprFactory<int>::Kind::Atom);
+  EXPECT_EQ(ExprTo1->Transfer, ExprTo3->L->L->Transfer);
+  EXPECT_EQ(ExprTo2->Transfer, ExprTo3->R->L->Transfer);
+  EXPECT_EQ(ExprTo3->L->R, ExprTo3->R->R);
+}
+
 TEST(EliminationTest, LinearChain) {
   // 0 -> 1 -> 2 -> 3
   std::unordered_map<int, std::vector<int>> Succs = {
