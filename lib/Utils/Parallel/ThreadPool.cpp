@@ -160,17 +160,24 @@ void ThreadPool::enqueuePendingTask(PendingTask Task) {
 }
 
 void ThreadPool::cancelPendingTasks() {
-  bool RemovedTask = false;
+  std::vector<PendingTask> CancelledTasks;
   {
     std::unique_lock<std::mutex> Lock(QueueMutex);
     for (auto It = TaskQueue.begin(); It != TaskQueue.end();) {
-      if (It->TryCancel && It->TryCancel()) {
+      if (It->CanCancel && It->CanCancel()) {
+        CancelledTasks.push_back(std::move(*It));
         It = TaskQueue.erase(It);
-        RemovedTask = true;
       } else {
         ++It;
       }
     }
+  }
+
+  bool RemovedTask = false;
+  for (auto &Task : CancelledTasks) {
+    RemovedTask = true;
+    if (Task.RunOnCancel)
+      Task.RunOnCancel();
   }
 
   if (RemovedTask)

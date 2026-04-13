@@ -5,6 +5,7 @@
 #include <memory>
 #include <set>
 #include <string>
+#include <vector>
 
 #include <llvm/IR/Function.h>
 #include <llvm/Support/Casting.h>

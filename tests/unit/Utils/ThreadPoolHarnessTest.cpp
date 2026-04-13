@@ -107,6 +107,14 @@ TEST(ThreadPoolHarnessTest, TaskGroupRethrowsFirstWorkerException) {
   EXPECT_THROW(group.wait(), std::runtime_error);
 }
 
+TEST(ThreadPoolHarnessTest, TaskGroupWaitStillRethrowsAfterFutureObservedFailure) {
+  ThreadPool *pool = ThreadPool::get();
+  auto group = pool->makeTaskGroup();
+  auto future = group.async([]() -> int { throw std::runtime_error("boom"); });
+  EXPECT_THROW(future.get(), std::runtime_error);
+  EXPECT_THROW(group.wait(), std::runtime_error);
+}
+
 TEST(ThreadPoolHarnessTest, TaskGroupSetupFailureDoesNotLeavePhantomPendingWork) {
   ThreadPool *pool = ThreadPool::get();
 
@@ -253,6 +261,50 @@ TEST(ThreadPoolHarnessTest, PreCancelledTaskGroupReturnsDefaultFutureValue) {
 
   auto group = pool->makeTaskGroup();
   auto future = group.async(cancel.token(), []() { return 42; });
+  EXPECT_THROW(future.get(), lotus::TaskCancelledError);
+  EXPECT_THROW(group.wait(), lotus::TaskCancelledError);
+}
+
+TEST(ThreadPoolHarnessTest,
+     CancelPendingTasksDoesNotRunCancellationHooksUnderQueueLock) {
+  ThreadPool *pool = ThreadPool::get();
+  if (!pool->hasWorkers())
+    GTEST_SKIP() << "This regression requires worker threads.";
+
+  lotus::CancellationSource cancel;
+  auto group = pool->makeTaskGroup();
+
+  std::promise<void> entered_user_code;
+  auto entered_future = entered_user_code.get_future();
+  std::atomic<bool> user_code_ran(false);
+
+  auto future = group.async(cancel.token(), [&]() -> int {
+    user_code_ran.store(true, std::memory_order_release);
+    entered_user_code.set_value();
+    return 7;
+  });
+
+  cancel.cancel();
+  pool->cancelPendingTasks();
+
+  EXPECT_EQ(entered_future.wait_for(std::chrono::milliseconds(50)),
+            std::future_status::timeout);
+  EXPECT_FALSE(user_code_ran.load(std::memory_order_acquire));
+  EXPECT_THROW(future.get(), lotus::TaskCancelledError);
+  EXPECT_THROW(group.wait(), lotus::TaskCancelledError);
+}
+
+TEST(ThreadPoolHarnessTest,
+     CancellableTaskSupportsNonDefaultConstructibleReturnTypes) {
+  ThreadPool *pool = ThreadPool::get();
+  lotus::CancellationSource cancel;
+  cancel.cancel();
+
+  auto group = pool->makeTaskGroup();
+  auto future = group.async(cancel.token(), []() {
+    return std::unique_ptr<int>(new int(42));
+  });
+
   EXPECT_THROW(future.get(), lotus::TaskCancelledError);
   EXPECT_THROW(group.wait(), lotus::TaskCancelledError);
 }

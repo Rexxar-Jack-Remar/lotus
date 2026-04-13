@@ -220,7 +220,7 @@ void LoopIterationSpaceAnalysis::computeMemoryAccessSpace(
       } else if (auto *load = dyn_cast<LoadInst>(accessor)) {
         accessedType = load->getType();
       } else if (auto *gep = dyn_cast<GetElementPtrInst>(accessor)) {
-        accessedType = gep->getType();
+        accessedType = gep->getResultElementType();
       }
       if (accessedType != nullptr) {
         break;

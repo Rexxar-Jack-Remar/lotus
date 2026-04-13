@@ -318,7 +318,8 @@ public:
 private:
   struct PendingTask {
     std::function<void()> Run;
-    std::function<bool()> TryCancel;
+    std::function<bool()> CanCancel;
+    std::function<void()> RunOnCancel;
   };
 
   void enqueuePendingTask(PendingTask Task);
@@ -359,7 +360,7 @@ auto ThreadPool::enqueue(F &&Func, Args &&...Arguments)
     return Res;
   }
 
-  enqueuePendingTask(PendingTask{[Task]() { (*Task)(); }, {}});
+  enqueuePendingTask(PendingTask{[Task]() { (*Task)(); }, {}, {}});
   return Res;
 }
 
@@ -393,14 +394,22 @@ auto ThreadPool::TaskGroup::async(F &&Func, Args &&...Arguments)
 
   try {
     auto CompleteTask = [State, Task]() mutable {
-      (*Task)();
+      try {
+        (*Task)();
+      } catch (...) {
+        std::lock_guard<std::mutex> Lock(State->Mutex);
+        assert(State->PendingTasks != 0 && "TaskGroup pending count underflow");
+        --State->PendingTasks;
+        State->Condition.notify_all();
+        throw;
+      }
 
       std::lock_guard<std::mutex> Lock(State->Mutex);
       assert(State->PendingTasks != 0 && "TaskGroup pending count underflow");
       --State->PendingTasks;
       State->Condition.notify_all();
     };
-    Owner->enqueuePendingTask(PendingTask{CompleteTask, {}});
+    Owner->enqueuePendingTask(PendingTask{CompleteTask, {}, {}});
   } catch (...) {
     std::lock_guard<std::mutex> Lock(State->Mutex);
     assert(State->PendingTasks != 0 && "TaskGroup pending count underflow");
@@ -416,11 +425,6 @@ auto ThreadPool::TaskGroup::async(const lotus::CancellationToken &Token,
                                   F &&Func, Args &&...Arguments)
     -> std::future<decltype(std::declval<F>()(std::declval<Args>()...))> {
   using return_type = decltype(std::declval<F>()(std::declval<Args>()...));
-
-  static_assert(std::is_void<return_type>::value ||
-                    std::is_default_constructible<return_type>::value,
-                "cancellable async requires void or default-constructible "
-                "return types");
 
   assert(Owner && GroupState && "scheduling work on a moved-from TaskGroup");
 
@@ -449,7 +453,15 @@ auto ThreadPool::TaskGroup::async(const lotus::CancellationToken &Token,
 
   try {
     auto CompleteTask = [State, Task]() mutable {
-      (*Task)();
+      try {
+        (*Task)();
+      } catch (...) {
+        std::lock_guard<std::mutex> Lock(State->Mutex);
+        assert(State->PendingTasks != 0 && "TaskGroup pending count underflow");
+        --State->PendingTasks;
+        State->Condition.notify_all();
+        throw;
+      }
 
       std::lock_guard<std::mutex> Lock(State->Mutex);
       assert(State->PendingTasks != 0 && "TaskGroup pending count underflow");
@@ -458,12 +470,8 @@ auto ThreadPool::TaskGroup::async(const lotus::CancellationToken &Token,
     };
     Owner->enqueuePendingTask(PendingTask{
         CompleteTask,
-        [Token, CompleteTask]() mutable {
-          if (!Token.isCancelled())
-            return false;
-          CompleteTask();
-          return true;
-        }});
+        [Token]() { return Token.isCancelled(); },
+        CompleteTask});
   } catch (...) {
     std::lock_guard<std::mutex> Lock(State->Mutex);
     assert(State->PendingTasks != 0 && "TaskGroup pending count underflow");

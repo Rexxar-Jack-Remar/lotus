@@ -15,7 +15,7 @@ static RegisterPass<ParallelSchedulerPass>
     X(DEBUG_TYPE, "Parallel Scheduler Pass for Generic Analysis");
 
 ParallelSchedulerPass::ParallelSchedulerPass()
-    : ModulePass(ID), Name("Parallel Scheduler"), AnalysisType(1),
+    : ModulePass(ID), Name("Parallel Scheduler"), AnalysisType(AM_BottomUp),
       EnableGC(true) {}
 
 ParallelSchedulerPass::~ParallelSchedulerPass() {}
@@ -39,20 +39,18 @@ bool ParallelSchedulerPass::runOnModule(Module &M) {
   // Determine analysis type
   PipelineScheduler::AnalysisType AT;
   switch (AnalysisType) {
-  case 0:
+  case AM_Local:
     AT = PipelineScheduler::AT_Local;
     llvm::outs() << "Analysis type: Local\n";
     break;
-  case 1:
+  case AM_BottomUp:
     AT = PipelineScheduler::AT_BottomUp;
     llvm::outs() << "Analysis type: Bottom-up\n";
     break;
-  case 2:
+  case AM_TopDown:
     AT = PipelineScheduler::AT_TopDown;
     llvm::outs() << "Analysis type: Top-down\n";
     break;
-  default:
-    AT = PipelineScheduler::AT_BottomUp;
   }
 
   // Create and configure scheduler

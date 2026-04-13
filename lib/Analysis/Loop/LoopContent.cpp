@@ -4,6 +4,10 @@
 #include "Analysis/Loop/LoopContent.h"
 
 #include "Alias/Spec/AliasSpecManager.h"
+#include "llvm/IR/CFG.h"
+
+#include <queue>
+#include <unordered_set>
 
 namespace lotus {
 namespace analysis {
@@ -107,6 +111,30 @@ bool LoopContent::canInstructionReachWithinSameIteration(
     }
     return false;
   }
+
+  std::queue<BasicBlock *> worklist;
+  std::unordered_set<BasicBlock *> visited;
+  auto *header = this->getLoopStructure()->getHeader();
+  worklist.push(from->getParent());
+  visited.insert(from->getParent());
+
+  while (!worklist.empty()) {
+    auto *current = worklist.front();
+    worklist.pop();
+
+    for (auto *succ : successors(current)) {
+      if (!this->getLoopStructure()->isIncluded(succ) || succ == header) {
+        continue;
+      }
+      if (succ == to->getParent()) {
+        return true;
+      }
+      if (visited.insert(succ).second) {
+        worklist.push(succ);
+      }
+    }
+  }
+
   return false;
 }
 

@@ -28,6 +28,8 @@
 #include "Analysis/Loop/LoopSCCDAG.h"
 #include "Analysis/Loop/ScalarEvolutionReferencer.h"
 
+#include <memory>
+
 #include "llvm/Analysis/ScalarEvolution.h"
 
 namespace lotus {
@@ -118,6 +120,7 @@ private:
   std::set<Value *> valuesInScopeOfInductionVariable;
   std::unordered_set<Instruction *> instructions;
   std::unordered_set<Instruction *> derivedInstructions;
+  std::unique_ptr<BasicBlock> stepComputationScratchBlock;
 };
 
 } // namespace loop

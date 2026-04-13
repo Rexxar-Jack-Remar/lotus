@@ -168,12 +168,16 @@ public:
   PipelineScheduler(Module &M, CallGraph &CG, AnalysisType AT = AT_BottomUp);
   virtual ~PipelineScheduler();
 
-  /// Set the task callback that will be invoked for each function
+  /// Set the task callback that will be invoked for each function.
+  /// The callback may run concurrently on multiple worker threads and must be
+  /// safe for parallel execution.
   void setTaskCallback(std::function<void(const Function *)> CB) {
     TaskCallback = CB;
   }
 
-  /// Set the garbage collection callback for memory cleanup
+  /// Set the garbage collection callback for memory cleanup.
+  /// The callback may run concurrently with analysis callbacks and must be safe
+  /// for parallel execution.
   void setGCCallback(std::function<void(const Function *)> CB) {
     GCCallback = CB;
   }

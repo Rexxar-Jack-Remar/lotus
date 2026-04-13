@@ -6,6 +6,7 @@
 
 #include <llvm/IR/Module.h>
 #include <llvm/Pass.h>
+#include <llvm/Support/ErrorHandling.h>
 
 using namespace llvm;
 
@@ -21,6 +22,18 @@ using namespace llvm;
  *   Pass->runOnModule(M);
  */
 class ParallelSchedulerPass : public ModulePass {
+public:
+  enum AnalysisMode {
+    AM_Local = 0,
+    AM_BottomUp = 1,
+    AM_TopDown = 2
+  };
+
+  static char ID;
+
+  ParallelSchedulerPass();
+  virtual ~ParallelSchedulerPass();
+
 private:
   /// Client-provided analysis callback
   std::function<void(const Function *)> AnalysisCallback;
@@ -32,16 +45,10 @@ private:
   std::string Name;
 
   /// Analysis type (local, bottom-up, or top-down)
-  int AnalysisType; // 0=Local, 1=BottomUp, 2=TopDown
+  AnalysisMode AnalysisType;
 
   /// Enable garbage collection
   bool EnableGC;
-
-public:
-  static char ID;
-
-  ParallelSchedulerPass();
-  virtual ~ParallelSchedulerPass();
 
   void getAnalysisUsage(AnalysisUsage &AU) const override;
   bool runOnModule(Module &M) override;
@@ -60,8 +67,24 @@ public:
     GCCallback = CB;
   }
 
-  /// Set analysis type: 0=Local, 1=BottomUp, 2=TopDown
-  void setAnalysisType(int Type) { AnalysisType = Type; }
+  /// Set analysis type.
+  void setAnalysisType(AnalysisMode Type) { AnalysisType = Type; }
+
+  /// Set analysis type: 0=Local, 1=BottomUp, 2=TopDown.
+  /// Invalid values are rejected immediately instead of silently changing the
+  /// scheduler mode.
+  void setAnalysisType(int Type) {
+    switch (Type) {
+    case AM_Local:
+    case AM_BottomUp:
+    case AM_TopDown:
+      AnalysisType = static_cast<AnalysisMode>(Type);
+      return;
+    default:
+      report_fatal_error("ParallelSchedulerPass received invalid analysis "
+                         "type");
+    }
+  }
 
   /// Enable/disable automatic garbage collection
   void setEnableGC(bool Enable) { EnableGC = Enable; }

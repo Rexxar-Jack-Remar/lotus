@@ -36,7 +36,8 @@ InductionVariable::InductionVariable(
       valuesToReferenceInComputingStepValue{},
       valuesInScopeOfInductionVariable{},
       instructions{std::move(instructions)},
-      derivedInstructions{std::move(derivedInstructions)} {}
+      derivedInstructions{std::move(derivedInstructions)},
+      stepComputationScratchBlock{} {}
 
 InductionVariable::InductionVariable(
     LoopStructure *LS,
@@ -63,7 +64,8 @@ InductionVariable::InductionVariable(
       valuesToReferenceInComputingStepValue{},
       valuesInScopeOfInductionVariable{},
       instructions{},
-      derivedInstructions{} {
+      derivedInstructions{},
+      stepComputationScratchBlock{} {
   this->traverseCycleThroughLoopEntryPHIToGetAllIVInstructions();
   this->traverseConsumersOfIVInstructionsToGetAllDerivedSCEVInstructions(IVM, SE);
   this->collectValuesInternalAndExternalToLoopAndSCC(loopEnvironment);
@@ -102,7 +104,8 @@ InductionVariable::InductionVariable(
       valuesToReferenceInComputingStepValue{},
       valuesInScopeOfInductionVariable{},
       instructions{},
-      derivedInstructions{} {
+      derivedInstructions{},
+      stepComputationScratchBlock{} {
   auto bbs = LS->getBasicBlocks();
   for (auto i = 0u; i < loopEntryPHI->getNumIncomingValues(); ++i) {
     auto *incomingBB = loopEntryPHI->getIncomingBlock(i);
@@ -379,7 +382,8 @@ bool InductionVariable::deriveStepValueFromCompositeSCEV(
   }
 
   delete stepSizeReferenceTree;
-  tempBlock->eraseFromParent();
+  tempBlock->removeFromParent();
+  this->stepComputationScratchBlock.reset(tempBlock);
   return true;
 }
 
