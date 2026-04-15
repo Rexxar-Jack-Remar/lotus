@@ -22,8 +22,8 @@
 #include "crab/domains/generic_abstract_domain.hpp"
 
 #include "llvm/ADT/DenseMap.h"
-#include <optional>
 #include "llvm/Pass.h"
+#include <optional>
 
 #include <memory>
 

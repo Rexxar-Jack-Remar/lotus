@@ -19,7 +19,6 @@
 #include "Solvers/SMT/LIBSMT/SMTLIB2Solver.h"
 
 #include "llvm/ADT/APInt.h"
-#include <optional>
 #include "llvm/ADT/SmallString.h"
 #include "llvm/ADT/Statistic.h"
 #include "llvm/ADT/StringRef.h"
@@ -27,6 +26,7 @@
 #include "llvm/Support/MemoryBuffer.h"
 #include "llvm/Support/Program.h"
 #include "llvm/Support/raw_ostream.h"
+#include <optional>
 
 #include <fcntl.h>
 // #include <stdio.h>

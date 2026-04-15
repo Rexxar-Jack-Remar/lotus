@@ -69,5 +69,5 @@ namespace seadsa
     
     void write (llvm::raw_ostream &o) const ;
   };
-}
+} // namespace seadsa
 #endif

@@ -7,10 +7,10 @@
 #include <string>
 #include <vector>
 
-#include <optional>
 #include <llvm/IR/BasicBlock.h>
 #include <llvm/IR/Function.h>
 #include <llvm/IR/Instruction.h>
+#include <optional>
 
 namespace pulse {
 

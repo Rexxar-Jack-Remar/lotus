@@ -6,12 +6,12 @@
 #include "clam/HeapAbstraction.hh"
 #include "clam/crab/crab_lang.hh"
 
+#include <optional>
 #include <unordered_map>
-#include <optional>
 
-#include <optional>
 #include <llvm/IR/Instructions.h>
 #include <llvm/Support/raw_ostream.h>
+#include <optional>
 
 namespace clam {
 

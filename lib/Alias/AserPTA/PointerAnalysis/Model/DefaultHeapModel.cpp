@@ -12,8 +12,8 @@
 
 #include "Alias/AserPTA/Util/Util.h"
 
-#include <Alias/AserPTA/PointerAnalysis/Program/CallSite.h>
 #include <llvm/IR/Instructions.h>
+#include <Alias/AserPTA/PointerAnalysis/Program/CallSite.h>
 
 using namespace llvm;
 using namespace aser;

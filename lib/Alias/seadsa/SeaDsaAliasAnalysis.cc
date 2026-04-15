@@ -17,7 +17,6 @@
 #define DEBUG_TYPE "sea-aa"
 using namespace llvm;
 using namespace seadsa;
-namespace dsa = seadsa;
 
 namespace seadsa {
 

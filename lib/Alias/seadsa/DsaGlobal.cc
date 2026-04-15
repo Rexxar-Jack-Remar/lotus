@@ -1,4 +1,3 @@
-#include <optional>
 #include <llvm/ADT/SCCIterator.h>
 #include <llvm/Analysis/CallGraph.h>
 #include <llvm/Analysis/LoopInfo.h>
@@ -12,6 +11,7 @@
 #include <llvm/Pass.h>
 #include <llvm/Support/CommandLine.h>
 #include <llvm/Support/raw_ostream.h>
+#include <optional>
 
 #include "Alias/seadsa/AllocWrapInfo.hh"
 #include "Alias/seadsa/BottomUp.hh"

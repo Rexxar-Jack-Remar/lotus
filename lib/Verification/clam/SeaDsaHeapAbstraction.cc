@@ -9,7 +9,6 @@
 
 #include "llvm/ADT/DenseMap.h"
 #include "llvm/ADT/ImmutableSet.h"
-#include <optional>
 #include "llvm/ADT/iterator_range.h"
 #include "llvm/IR/Function.h"
 #include "llvm/IR/InstIterator.h"
@@ -17,6 +16,7 @@
 #include "llvm/IR/Module.h"
 #include "llvm/IR/Value.h"
 #include "llvm/Support/raw_ostream.h"
+#include <optional>
 
 #include "seadsa/AllocWrapInfo.hh"
 #include "seadsa/CallSite.hh"

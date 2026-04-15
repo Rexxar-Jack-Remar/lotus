@@ -11,8 +11,8 @@
 #include <string>
 #include <vector>
 
-#include <optional>
 #include <llvm/IR/Value.h>
+#include <optional>
 
 // Forward declarations
 namespace pulse {

@@ -9,9 +9,9 @@
 #include <atomic>
 #include <functional>
 
-#include <optional>
 #include <llvm/IR/Instruction.h>
 #include <llvm/IR/Value.h>
+#include <optional>
 
 // Forward declaration
 namespace pulse {

@@ -1,10 +1,10 @@
-#include <optional>
 #include "llvm/ADT/SCCIterator.h"
 #include "llvm/Analysis/CallGraph.h"
 #include "llvm/IR/Function.h"
 #include "llvm/IR/Instructions.h"
 #include "llvm/IR/Module.h"
 #include "llvm/Support/raw_ostream.h"
+#include <optional>
 
 #include "Alias/seadsa/CallGraphUtils.hh"
 #include "Alias/seadsa/CallGraphWrapper.hh"

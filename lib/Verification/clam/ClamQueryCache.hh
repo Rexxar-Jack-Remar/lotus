@@ -5,8 +5,8 @@
 
 #include <llvm/ADT/DenseMap.h>
 #include <llvm/ADT/DenseSet.h>
-#include <optional>
 #include <llvm/IR/ConstantRange.h>
+#include <optional>
 
 namespace llvm {
 class Instruction;

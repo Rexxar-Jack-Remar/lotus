@@ -25,7 +25,7 @@
 
 namespace seadsa {
 std::string DotOutputDir;
-}
+} // namespace seadsa
 
 static llvm::cl::opt<std::string, true>
     XDotOutputDir("sea-dsa-dot-outdir",

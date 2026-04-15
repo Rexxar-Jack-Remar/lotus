@@ -1,10 +1,10 @@
 #include "Analysis/CFG/SortTopo.h"
 
-#include <optional>
 #include "llvm/ADT/PostOrderIterator.h"
 #include "llvm/Analysis/CFG.h"
 #include "llvm/IR/CFG.h"
 #include "llvm/Support/raw_ostream.h"
+#include <optional>
 
 namespace llvm {
 class BlockedEdges {

@@ -12,11 +12,11 @@ namespace llvm {
   class Function;
   class Module;
   class raw_ostream;
-}
+} // namespace llvm
 
 namespace seadsa  {
   class DsaInfo;
-}
+} // namespace seadsa
 
 namespace seadsa {
 
@@ -32,5 +32,5 @@ namespace seadsa {
 
   };
   
-}
+} // namespace seadsa
 #endif 

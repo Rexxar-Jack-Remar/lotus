@@ -4,8 +4,8 @@
  */
 #pragma once
 #include "llvm/ADT/StringRef.h"
-#include "llvm/Pass.h"
 #include "llvm/Analysis/TargetLibraryInfo.h"
+#include "llvm/Pass.h"
 
 #include <set>
 #include <string>

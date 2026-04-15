@@ -1,12 +1,12 @@
 #include "llvm/Analysis/CFGPrinter.h"
 #include "llvm/ADT/GraphTraits.h"
-#include <optional>
 #include "llvm/Analysis/LoopInfo.h"
 #include "llvm/Pass.h"
 #include "llvm/Support/CommandLine.h"
 #include "llvm/Support/DOTGraphTraits.h"
 #include "llvm/Support/FileSystem.h"
 #include "llvm/Support/GraphWriter.h"
+#include <optional>
 
 #include "clam/Clam.hh"
 

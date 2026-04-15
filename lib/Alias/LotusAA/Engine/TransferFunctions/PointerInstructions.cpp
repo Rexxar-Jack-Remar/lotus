@@ -30,11 +30,11 @@
 #include "Alias/LotusAA/Engine/IntraProceduralAnalysis.h"
 
 #include <llvm/ADT/APInt.h>
-#include <optional>
 #include <llvm/ADT/SmallPtrSet.h>
 #include <llvm/IR/Constants.h>
 #include <llvm/IR/Instructions.h>
 #include <llvm/IR/Operator.h>
+#include <optional>
 
 using namespace llvm;
 
