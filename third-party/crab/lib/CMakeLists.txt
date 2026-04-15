@@ -29,6 +29,9 @@ add_library(Crab ${CRAB_LIBS_TYPE}
   varname_factory.cpp
   ##types
   tag.cpp
+
+  # NTT
+  ntt_intervals.cpp
   )
 
 target_link_libraries(Crab ${GMP_LIB})
