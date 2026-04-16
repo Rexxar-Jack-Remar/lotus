@@ -1,7 +1,11 @@
 #include "Concurrency/ConcurrencyFacade.h"
 
+#include "Concurrency/CUDA/CUDAAnalysis.h"
 #include "Concurrency/MPI/MPIAnalysis.h"
 #include "Concurrency/OpenMP/OpenMPTaskGraph.h"
+#include "Concurrency/Utils/ThreadAPI.h"
+
+#include <llvm/IR/InstIterator.h>
 
 #include <numeric>
 
@@ -237,6 +241,91 @@ ConcurrencyFacade::analyzeMPI(llvm::Module &module) {
       normalizationCount(mpi::NormalizationConfidence::KnownOpenMPIForwarder);
   summary.normalization_unknown_internal_count =
       normalizationCount(mpi::NormalizationConfidence::UnknownVendorInternal);
+  return summary;
+}
+
+ConcurrencyFacade::CUDASummary
+ConcurrencyFacade::analyzeCUDA(llvm::Module &module) {
+  cuda::CUDAAnalysis analysis(module);
+  analysis.runAnalysis();
+  CUDASummary summary;
+
+  summary.kernel_count = analysis.getKernelSummaries().size();
+  summary.kernel_launch_count = analysis.getLaunches().size();
+  for (const auto &launch : analysis.getLaunches()) {
+    ++summary.operation_count;
+    if (launch.dimensions.hasSymbolicGrid() ||
+        launch.dimensions.hasSymbolicBlock()) {
+      ++summary.symbolic_launch_count;
+    }
+  }
+  for (const auto &kernel : analysis.getKernelSummaries()) {
+    summary.shared_access_count += kernel.shared_access_count;
+    summary.device_access_count += kernel.device_access_count;
+    summary.global_access_count += kernel.global_access_count;
+    summary.constant_access_count += kernel.constant_access_count;
+    summary.local_access_count += kernel.local_access_count;
+    summary.atomic_count += kernel.atomic_count;
+    if (kernel.has_warp_divergence) {
+      ++summary.warp_divergence_count;
+    }
+    if (kernel.has_shared_race) {
+      ++summary.shared_race_count;
+    }
+    if (kernel.has_global_race) {
+      ++summary.global_race_count;
+    }
+    if (kernel.has_barrier_mismatch) {
+      ++summary.barrier_mismatch_count;
+    }
+    if (kernel.has_bank_conflict) {
+      ++summary.bank_conflict_count;
+    }
+    if (kernel.has_uncoalesced_access) {
+      ++summary.uncoalesced_access_count;
+    }
+    if (kernel.has_volatile_missing) {
+      ++summary.volatile_missing_count;
+    }
+  }
+
+  ThreadAPI *api = ThreadAPI::getThreadAPI();
+  for (llvm::Function &function : module) {
+    if (function.isDeclaration()) {
+      continue;
+    }
+    for (llvm::inst_iterator it = llvm::inst_begin(function),
+                             end = llvm::inst_end(function);
+         it != end; ++it) {
+      const auto *call = llvm::dyn_cast<llvm::CallBase>(&*it);
+      if (!call) {
+        continue;
+      }
+      const llvm::Function *callee = api->getCallee(call);
+      if (!callee || api->getRuntimeLibrary(callee) !=
+                         ThreadAPI::RuntimeLibrary::CUDA) {
+        continue;
+      }
+      ++summary.operation_count;
+      switch (api->getType(callee)) {
+      case ThreadAPI::TD_CUDA_DEVICE_SYNC:
+        ++summary.device_sync_count;
+        break;
+      case ThreadAPI::TD_CUDA_BARRIER:
+        ++summary.barrier_count;
+        break;
+      case ThreadAPI::TD_CUDA_WARP_BARRIER:
+        ++summary.warp_barrier_count;
+        break;
+      case ThreadAPI::TD_CUDA_MEMORY_BARRIER:
+        ++summary.memory_barrier_count;
+        break;
+      default:
+        break;
+      }
+    }
+  }
+
   return summary;
 }
 

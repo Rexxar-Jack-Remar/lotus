@@ -4,7 +4,7 @@
 
 #include "Analysis/Crypto/ctllvm.h"
 
-#include "CTInternal.h"
+#include "Analysis/Crypto/CTInternal.h"
 
 #include "llvm/Passes/PassBuilder.h"
 #include "llvm/Transforms/Utils/Mem2Reg.h"

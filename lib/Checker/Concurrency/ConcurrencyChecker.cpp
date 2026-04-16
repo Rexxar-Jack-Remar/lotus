@@ -3,9 +3,9 @@
 #include "Checker/Concurrency/ConcurrencyChecker.h"
 
 #include "Alias/AliasAnalysisWrapper/AliasAnalysisWrapper.h"
+#include "Checker/Concurrency/ConcurrencyAnalysisDumper.h"
 #include "Concurrency/MHP/HappensBeforeAnalysis.h"
 #include "Concurrency/Utils/ThreadAPI.h"
-#include "Checker/Concurrency/ConcurrencyAnalysisDumper.h"
 
 #include "Alias/seadsa/DsaAnalysis.hh"
 #include "Alias/seadsa/InitializePasses.hh"
@@ -79,6 +79,42 @@ ConcurrencyChecker::ConcurrencyChecker(Module &module)
   m_mpiWindowLeakTypeId = mgr.register_bug_type(
       "MPI Window Leak", BugDescription::BI_MEDIUM, BugDescription::BC_ERROR,
       "RMA window may not be freed");
+  m_cudaSharedRaceTypeId = mgr.register_bug_type(
+      "CUDA Shared-Memory Race", BugDescription::BI_HIGH,
+      BugDescription::BC_ERROR,
+      "Conflicting shared-memory accesses without sufficient synchronization");
+  m_cudaGlobalRaceTypeId = mgr.register_bug_type(
+      "CUDA Global-Memory Race", BugDescription::BI_HIGH,
+      BugDescription::BC_ERROR,
+      "Conflicting global/device-memory accesses without sufficient synchronization");
+  m_cudaBarrierMismatchTypeId = mgr.register_bug_type(
+      "CUDA Barrier Mismatch", BugDescription::BI_HIGH,
+      BugDescription::BC_ERROR,
+      "Not all threads reach the same CUDA barrier");
+  m_cudaWarpDivergenceTypeId = mgr.register_bug_type(
+      "CUDA Warp Divergence", BugDescription::BI_MEDIUM,
+      BugDescription::BC_PERFORMANCE,
+      "Warp executes divergent control-flow paths");
+  m_cudaBankConflictTypeId = mgr.register_bug_type(
+      "CUDA Bank Conflict", BugDescription::BI_MEDIUM,
+      BugDescription::BC_PERFORMANCE,
+      "Shared-memory accesses may map multiple lanes to the same bank");
+  m_cudaUncoalescedTypeId = mgr.register_bug_type(
+      "CUDA Uncoalesced Access", BugDescription::BI_MEDIUM,
+      BugDescription::BC_PERFORMANCE,
+      "Global-memory accesses may not coalesce");
+  m_cudaVolatileMissingTypeId = mgr.register_bug_type(
+      "CUDA Missing Volatile", BugDescription::BI_LOW,
+      BugDescription::BC_WARNING,
+      "Potential missing volatile on inter-thread CUDA memory");
+  m_cudaSymbolicConfigTypeId = mgr.register_bug_type(
+      "CUDA Symbolic Launch Configuration", BugDescription::BI_LOW,
+      BugDescription::BC_WARNING,
+      "Kernel launch uses symbolic or unknown thread/block sizing");
+  m_cudaMemorySpaceTypeId = mgr.register_bug_type(
+      "CUDA Memory Space Ambiguity", BugDescription::BI_LOW,
+      BugDescription::BC_WARNING,
+      "Could not classify CUDA memory space precisely");
 
   m_stats.totalInstructions = 0;
   m_stats.mhpPairs = 0;
@@ -90,8 +126,10 @@ ConcurrencyChecker::ConcurrencyChecker(Module &module)
   m_stats.lockMismatchesFound = 0;
   m_stats.openMPBugsFound = 0;
   m_stats.mpiBugsFound = 0;
+  m_stats.cudaBugsFound = 0;
   m_stats.openMPSummary = OpenMP::OpenMPTaskGraph::AnalysisSummary{};
   m_stats.mpiSummary = ConcurrencyFacade::MPISummary{};
+  m_stats.cudaSummary = ConcurrencyFacade::CUDASummary{};
 
   for (Function &func : module) {
     if (!func.isDeclaration()) {
@@ -115,8 +153,10 @@ void ConcurrencyChecker::runAnalyses() {
   m_mpiAnalysis.reset();
   m_stats.mhpPairs = 0;
   m_stats.locksAnalyzed = 0;
+  m_stats.cudaBugsFound = 0;
   m_stats.openMPSummary = OpenMP::OpenMPTaskGraph::AnalysisSummary{};
   m_stats.mpiSummary = ConcurrencyFacade::MPISummary{};
+  m_stats.cudaSummary = ConcurrencyFacade::CUDASummary{};
 
   // Config-driven activation: run only analyses required by enabled checks
   // (Goblint-style)
@@ -131,6 +171,7 @@ void ConcurrencyChecker::runAnalyses() {
   bool needHappensBefore = m_checkDataRaces;
   bool needOpenMP = m_checkOpenMP;
   bool needMPI = m_checkMPI;
+  bool needCUDA = m_checkCUDA;
 
   if (needMHP) {
     if (m_mhpBackend == MHPBackendKind::StaticVectorClock) {
@@ -253,6 +294,10 @@ void ConcurrencyChecker::runAnalyses() {
         m_mpiAnalysis->getProtocolDiagnosticCount("collective_slots_tracked");
   }
 
+  if (needCUDA) {
+    m_stats.cudaSummary = ConcurrencyFacade::analyzeCUDA(m_module);
+  }
+
   lotus::AliasAnalysisWrapper *aa = m_aliasAnalysis;
   if (!aa && regionMHP)
     aa = regionMHP->getAliasAnalysis();
@@ -273,6 +318,7 @@ void ConcurrencyChecker::runAnalyses() {
   m_openMPChecker = std::make_unique<OpenMPChecker>(
       m_module, m_openMPTaskGraph.get(), m_threadAPI);
   m_mpiChecker = std::make_unique<MPIChecker>(m_module, m_mpiAnalysis.get());
+  m_cudaChecker = std::make_unique<CUDAChecker>(m_module);
 }
 
 void ConcurrencyChecker::runChecks() {
@@ -302,6 +348,10 @@ void ConcurrencyChecker::runChecks() {
 
   if (m_checkMPI) {
     checkMPIBugs();
+  }
+
+  if (m_checkCUDA) {
+    checkCUDABugs();
   }
 }
 
@@ -408,6 +458,48 @@ void ConcurrencyChecker::checkMPIBugs() {
       break;
     case ConcurrencyBugType::MPI_WINDOW_LEAK:
       reportBug(report, m_mpiWindowLeakTypeId);
+      break;
+    default:
+      break;
+    }
+  }
+}
+
+void ConcurrencyChecker::checkCUDABugs() {
+  if (!m_cudaChecker) {
+    return;
+  }
+
+  auto reports = m_cudaChecker->checkCUDABugs();
+  m_stats.cudaBugsFound = reports.size();
+  for (const auto &report : reports) {
+    switch (report.bugType) {
+    case ConcurrencyBugType::CUDA_SHARED_MEMORY_RACE:
+      reportBug(report, m_cudaSharedRaceTypeId);
+      break;
+    case ConcurrencyBugType::CUDA_GLOBAL_MEMORY_RACE:
+      reportBug(report, m_cudaGlobalRaceTypeId);
+      break;
+    case ConcurrencyBugType::CUDA_BARRIER_MISMATCH:
+      reportBug(report, m_cudaBarrierMismatchTypeId);
+      break;
+    case ConcurrencyBugType::CUDA_WARP_DIVERGENCE:
+      reportBug(report, m_cudaWarpDivergenceTypeId);
+      break;
+    case ConcurrencyBugType::CUDA_BANK_CONFLICT:
+      reportBug(report, m_cudaBankConflictTypeId);
+      break;
+    case ConcurrencyBugType::CUDA_UNCOALESCED_ACCESS:
+      reportBug(report, m_cudaUncoalescedTypeId);
+      break;
+    case ConcurrencyBugType::CUDA_VOLATILE_MISSING:
+      reportBug(report, m_cudaVolatileMissingTypeId);
+      break;
+    case ConcurrencyBugType::CUDA_SYMBOLIC_CONFIG_RISK:
+      reportBug(report, m_cudaSymbolicConfigTypeId);
+      break;
+    case ConcurrencyBugType::CUDA_SHARED_GLOBAL_SPACE_MISMATCH:
+      reportBug(report, m_cudaMemorySpaceTypeId);
       break;
     default:
       break;

@@ -2,7 +2,7 @@
  * Inlining helpers for the ctllvm pass.
  */
 
-#include "CTInternal.h"
+#include "Analysis/Crypto/CTInternal.h"
 
 #include "llvm/IR/InstIterator.h"
 #include "llvm/IR/Instructions.h"

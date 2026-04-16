@@ -1079,6 +1079,11 @@ void HappensBeforeAnalysis::buildSynchronizesWith() {
       case ThreadAPI::TD_BARRIER_WAIT_CPP20:
         barrier_waits.push_back(inst);
         break;
+      case ThreadAPI::TD_CUDA_BARRIER:
+      case ThreadAPI::TD_CUDA_WARP_BARRIER:
+        barrier_arrives.push_back(inst);
+        barrier_waits.push_back(inst);
+        break;
       case ThreadAPI::TD_OMP_TASK:
       case ThreadAPI::TD_OMP_TASKWAIT:
       case ThreadAPI::TD_OMP_TASKWAIT_DEPS:
@@ -1388,6 +1393,8 @@ void HappensBeforeAnalysis::buildSynchronizesWith() {
         if (type != ThreadAPI::TD_BARRIER_ARRIVE &&
             type != ThreadAPI::TD_BARRIER_WAIT_CPP20 &&
             type != ThreadAPI::TD_BARRIER_ARRIVE_WAIT &&
+            type != ThreadAPI::TD_CUDA_BARRIER &&
+            type != ThreadAPI::TD_CUDA_WARP_BARRIER &&
             type != ThreadAPI::TD_BAR_WAIT) {
           continue;
         }

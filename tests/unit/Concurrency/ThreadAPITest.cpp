@@ -148,6 +148,90 @@ TEST_F(ThreadAPITest, MatchesSpecificOpenMPTargetDataBeforeGenericTarget) {
             ThreadAPI::TD_OMP_TARGET_DATA_END);
 }
 
+TEST_F(ThreadAPITest, ClassifiesCUDAOperations) {
+  const char *source = R"(
+    declare void @__set_CUDAConfig(i32, i32)
+    declare i32 @cudaDeviceSynchronize()
+    declare void @llvm.nvvm.barrier0()
+    declare void @llvm.nvvm.bar.warp.sync(i32)
+    declare void @llvm.nvvm.membar.gl()
+    declare i32 @atomicAdd(i32*, i32)
+
+    define void @kernel(i32* %ptr) {
+    entry:
+      call void @llvm.nvvm.barrier0()
+      call void @llvm.nvvm.bar.warp.sync(i32 -1)
+      call void @llvm.nvvm.membar.gl()
+      %old = call i32 @atomicAdd(i32* %ptr, i32 1)
+      ret void
+    }
+
+    define i32 @main(i32* %ptr) {
+    entry:
+      call void @__set_CUDAConfig(i32 2, i32 32)
+      call void @kernel(i32* %ptr)
+      %sync = call i32 @cudaDeviceSynchronize()
+      ret i32 %sync
+    }
+  )";
+
+  auto module = parseModule(source);
+  ASSERT_NE(module, nullptr);
+
+  ThreadAPI::resetThreadAPI();
+  ThreadAPI *api = ThreadAPI::getThreadAPI();
+
+  EXPECT_EQ(api->getType(module->getFunction("__set_CUDAConfig")),
+            ThreadAPI::TD_CUDA_KERNEL_LAUNCH);
+  EXPECT_EQ(api->getType(module->getFunction("cudaDeviceSynchronize")),
+            ThreadAPI::TD_CUDA_DEVICE_SYNC);
+  EXPECT_EQ(api->getType(module->getFunction("llvm.nvvm.barrier0")),
+            ThreadAPI::TD_CUDA_BARRIER);
+  EXPECT_EQ(api->getType(module->getFunction("llvm.nvvm.bar.warp.sync")),
+            ThreadAPI::TD_CUDA_WARP_BARRIER);
+  EXPECT_EQ(api->getType(module->getFunction("llvm.nvvm.membar.gl")),
+            ThreadAPI::TD_CUDA_MEMORY_BARRIER);
+  EXPECT_EQ(api->getType(module->getFunction("atomicAdd")),
+            ThreadAPI::TD_CUDA_ATOMIC);
+}
+
+TEST_F(ThreadAPITest, ResolvesKernelFunctionFromCUDAConfigLaunchPair) {
+  const char *source = R"(
+    declare void @__set_CUDAConfig(i32, i32)
+
+    define void @kernel(i32* %ptr) {
+    entry:
+      ret void
+    }
+
+    define void @main(i32* %ptr) {
+    entry:
+      call void @__set_CUDAConfig(i32 2, i32 32)
+      call void @kernel(i32* %ptr)
+      ret void
+    }
+  )";
+
+  auto module = parseModule(source);
+  ASSERT_NE(module, nullptr);
+
+  ThreadAPI::resetThreadAPI();
+  ThreadAPI *api = ThreadAPI::getThreadAPI();
+  const Function *main_func = module->getFunction("main");
+  ASSERT_NE(main_func, nullptr);
+
+  auto it = main_func->getEntryBlock().begin();
+  const Instruction *launch = &*it++;
+  const Instruction *kernel_call = &*it++;
+
+  EXPECT_TRUE(api->isTDFork(launch));
+  EXPECT_EQ(api->getForkedFun(launch), module->getFunction("kernel"));
+  auto payloads = api->getForkPayloadArgs(launch);
+  ASSERT_EQ(payloads.size(), 1u);
+  EXPECT_EQ(payloads[0], main_func->getArg(0));
+  EXPECT_TRUE(api->isCUDAKernelCallImmediatelyAfterLaunch(kernel_call));
+}
+
 TEST_F(ThreadAPITest, PreservesMangledCppAsyncNamesDuringClassification) {
   const char *source = R"(
     declare void @_ZNSt5async12launch_asyncEv(i32)

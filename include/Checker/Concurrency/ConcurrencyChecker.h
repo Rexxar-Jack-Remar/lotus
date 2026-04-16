@@ -15,6 +15,7 @@
 #include "Checker/Concurrency/AtomicityChecker.h"
 #include "Checker/Concurrency/ConcurrencyBugReport.h"
 #include "Checker/Concurrency/ConditionVariableChecker.h"
+#include "Checker/Concurrency/CUDAChecker.h"
 #include "Checker/Concurrency/DataRaceChecker.h"
 #include "Checker/Concurrency/DeadlockChecker.h"
 #include "Checker/Concurrency/LockMismatchChecker.h"
@@ -105,6 +106,11 @@ public:
   void checkMPIBugs();
 
   /**
+   * @brief Run dedicated CUDA checks and report to BugReportMgr
+   */
+  void checkCUDABugs();
+
+  /**
    * @brief Set alias analysis wrapper for better precision
    */
   void setAliasAnalysis(lotus::AliasAnalysisWrapper *aa) {
@@ -130,6 +136,7 @@ public:
   void enableLockMismatchCheck(bool enable) { m_checkLockMismatches = enable; }
   void enableOpenMPCheck(bool enable) { m_checkOpenMP = enable; }
   void enableMPICheck(bool enable) { m_checkMPI = enable; }
+  void enableCUDACheck(bool enable) { m_checkCUDA = enable; }
   void setMHPBackend(MHPBackendKind backend) { m_mhpBackend = backend; }
 
   /**
@@ -146,8 +153,10 @@ public:
     size_t lockMismatchesFound;
     size_t openMPBugsFound;
     size_t mpiBugsFound;
+    size_t cudaBugsFound;
     OpenMP::OpenMPTaskGraph::AnalysisSummary openMPSummary;
     ConcurrencyFacade::MPISummary mpiSummary;
+    ConcurrencyFacade::CUDASummary cudaSummary;
   };
 
   Statistics getStatistics() const { return m_stats; }
@@ -190,6 +199,7 @@ private:
   std::unique_ptr<LockMismatchChecker> m_lockMismatchChecker;
   std::unique_ptr<OpenMPChecker> m_openMPChecker;
   std::unique_ptr<MPIChecker> m_mpiChecker;
+  std::unique_ptr<CUDAChecker> m_cudaChecker;
 
   // Configuration
   bool m_checkDataRaces = true;
@@ -199,6 +209,7 @@ private:
   bool m_checkLockMismatches = true;
   bool m_checkOpenMP = true;
   bool m_checkMPI = true;
+  bool m_checkCUDA = true;
   MHPBackendKind m_mhpBackend = MHPBackendKind::Region;
 
   // Bug type IDs (registered with BugReportMgr)
@@ -217,6 +228,15 @@ private:
   int m_mpiUnsyncRMATypeId;
   int m_mpiRMARaceTypeId;
   int m_mpiWindowLeakTypeId;
+  int m_cudaSharedRaceTypeId;
+  int m_cudaGlobalRaceTypeId;
+  int m_cudaBarrierMismatchTypeId;
+  int m_cudaWarpDivergenceTypeId;
+  int m_cudaBankConflictTypeId;
+  int m_cudaUncoalescedTypeId;
+  int m_cudaVolatileMissingTypeId;
+  int m_cudaSymbolicConfigTypeId;
+  int m_cudaMemorySpaceTypeId;
 
   // Results tracking
   Statistics m_stats;

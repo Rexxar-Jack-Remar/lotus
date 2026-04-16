@@ -17,6 +17,7 @@
 #include "Concurrency/Utils/ThreadAPI.h"
 
 #include "Concurrency/MPI/MPISymbol.h"
+#include "Concurrency/Utils/CUDA.h"
 #include "Concurrency/Utils/CppThreading.h"
 #include "Concurrency/Utils/LinuxKernel.h"
 #include "Concurrency/Utils/RAIILockTracker.h"
@@ -130,6 +131,8 @@ static ThreadAPI::RuntimeLibrary parseRuntimeLibrary(StringRef value) {
     return ThreadAPI::RuntimeLibrary::MPI;
   if (lowered == "cpp")
     return ThreadAPI::RuntimeLibrary::Cpp;
+  if (lowered == "cuda")
+    return ThreadAPI::RuntimeLibrary::CUDA;
   if (lowered == "linux-kernel")
     return ThreadAPI::RuntimeLibrary::LinuxKernel;
   if (lowered == "hare")
@@ -708,6 +711,13 @@ ThreadAPI::RuntimeLibrary ThreadAPI::inferLibrary(TD_TYPE type) const {
   case TD_SEMAPHORE_RELEASE:
   case TD_SEMAPHORE_TRY_ACQUIRE:
     return RuntimeLibrary::Cpp;
+  case TD_CUDA_KERNEL_LAUNCH:
+  case TD_CUDA_DEVICE_SYNC:
+  case TD_CUDA_BARRIER:
+  case TD_CUDA_WARP_BARRIER:
+  case TD_CUDA_MEMORY_BARRIER:
+  case TD_CUDA_ATOMIC:
+    return RuntimeLibrary::CUDA;
   case TD_OMP_TASK:
   case TD_OMP_TASKWAIT:
   case TD_OMP_TASKWAIT_DEPS:
@@ -1033,6 +1043,10 @@ bool isBarrierHBType(TD type) {
   case TD::TD_BARRIER_ARRIVE_WAIT:
   case TD::TD_BARRIER_ARRIVE:
   case TD::TD_BARRIER_WAIT_CPP20:
+  case TD::TD_CUDA_BARRIER:
+  case TD::TD_CUDA_WARP_BARRIER:
+  case TD::TD_CUDA_DEVICE_SYNC:
+  case TD::TD_CUDA_MEMORY_BARRIER:
   case TD::TD_CALL_ONCE:
   case TD::TD_FUTURE_GET:
   case TD::TD_FUTURE_WAIT:
@@ -1063,10 +1077,14 @@ bool isMHPThreadType(TD type) {
   case TD::TD_DETACH:
   case TD::TD_EXIT:
   case TD::TD_CANCEL:
+  case TD::TD_CUDA_KERNEL_LAUNCH:
   case TD::TD_COND_WAIT:
   case TD::TD_COND_SIGNAL:
   case TD::TD_COND_BROADCAST:
   case TD::TD_BAR_WAIT:
+  case TD::TD_CUDA_BARRIER:
+  case TD::TD_CUDA_WARP_BARRIER:
+  case TD::TD_CUDA_DEVICE_SYNC:
   case TD::TD_JTHREAD_FORK:
   case TD::TD_JTHREAD_JOIN:
   case TD::TD_ASYNC:
@@ -1171,6 +1189,9 @@ LoweringInfo makeLoweringInfo(TD type, ThreadAPI::RuntimeLibrary library,
   case ThreadAPI::RuntimeLibrary::MPI:
     owners |= ownerMask(Owner::MPI);
     break;
+  case ThreadAPI::RuntimeLibrary::CUDA:
+    owners |= ownerMask(Owner::MHP, Owner::HB);
+    break;
   case ThreadAPI::RuntimeLibrary::PThread:
   case ThreadAPI::RuntimeLibrary::Cpp:
   case ThreadAPI::RuntimeLibrary::LinuxKernel:
@@ -1216,6 +1237,8 @@ bool ThreadAPI::isLibraryEnabled(RuntimeLibrary library) const {
     return m_config.enable_mpi();
   case RuntimeLibrary::Cpp:
     return m_config.enable_cpp11();
+  case RuntimeLibrary::CUDA:
+    return m_config.enable_cuda();
   case RuntimeLibrary::LinuxKernel:
     return m_config.enable_linux_kernel();
   case RuntimeLibrary::PThread:
@@ -1487,6 +1510,21 @@ ThreadAPI::TD_TYPE ThreadAPI::getType(const Function *F) const {
       return TD_SEMAPHORE_RELEASE;
     if (CppThreadingModel::isSemaphoreTryAcquire(name))
       return TD_SEMAPHORE_TRY_ACQUIRE;
+  }
+
+  if (m_config.enable_cuda()) {
+    if (CUDAModel::isKernelLaunch(name))
+      return TD_CUDA_KERNEL_LAUNCH;
+    if (CUDAModel::isDeviceSynchronize(name))
+      return TD_CUDA_DEVICE_SYNC;
+    if (CUDAModel::isBarrier(name))
+      return TD_CUDA_BARRIER;
+    if (CUDAModel::isWarpBarrier(name))
+      return TD_CUDA_WARP_BARRIER;
+    if (CUDAModel::isMemoryBarrier(name))
+      return TD_CUDA_MEMORY_BARRIER;
+    if (CUDAModel::isAtomic(name))
+      return TD_CUDA_ATOMIC;
   }
 
   // 4. Linux Kernel Support (if enabled)
@@ -2018,6 +2056,18 @@ const char *ThreadAPI::tdTypeToString(TD_TYPE t) {
     return "TD_OMP_DOACROSS_WAIT";
   case TD_OMP_DOACROSS_SUBMIT:
     return "TD_OMP_DOACROSS_SUBMIT";
+  case TD_CUDA_KERNEL_LAUNCH:
+    return "TD_CUDA_KERNEL_LAUNCH";
+  case TD_CUDA_DEVICE_SYNC:
+    return "TD_CUDA_DEVICE_SYNC";
+  case TD_CUDA_BARRIER:
+    return "TD_CUDA_BARRIER";
+  case TD_CUDA_WARP_BARRIER:
+    return "TD_CUDA_WARP_BARRIER";
+  case TD_CUDA_MEMORY_BARRIER:
+    return "TD_CUDA_MEMORY_BARRIER";
+  case TD_CUDA_ATOMIC:
+    return "TD_CUDA_ATOMIC";
   case TD_MPI_SESSION_INIT:
     return "TD_MPI_SESSION_INIT";
   case TD_MPI_SESSION_FINALIZE:

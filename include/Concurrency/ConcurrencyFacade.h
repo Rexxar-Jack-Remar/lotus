@@ -88,8 +88,33 @@ public:
     size_t normalization_unknown_internal_count = 0;
   };
 
+  struct CUDASummary {
+    size_t operation_count = 0;
+    size_t kernel_launch_count = 0;
+    size_t device_sync_count = 0;
+    size_t barrier_count = 0;
+    size_t warp_barrier_count = 0;
+    size_t memory_barrier_count = 0;
+    size_t atomic_count = 0;
+    size_t symbolic_launch_count = 0;
+    size_t kernel_count = 0;
+    size_t warp_divergence_count = 0;
+    size_t shared_race_count = 0;
+    size_t global_race_count = 0;
+    size_t barrier_mismatch_count = 0;
+    size_t bank_conflict_count = 0;
+    size_t uncoalesced_access_count = 0;
+    size_t volatile_missing_count = 0;
+    size_t shared_access_count = 0;
+    size_t device_access_count = 0;
+    size_t global_access_count = 0;
+    size_t constant_access_count = 0;
+    size_t local_access_count = 0;
+  };
+
   static OpenMPSummary analyzeOpenMP(llvm::Module &module);
   static MPISummary analyzeMPI(llvm::Module &module);
+  static CUDASummary analyzeCUDA(llvm::Module &module);
   static void printOpenMPResults(llvm::Module &module, llvm::raw_ostream &os);
 };
 

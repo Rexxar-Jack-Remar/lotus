@@ -2,7 +2,7 @@
  * Debug-info helpers for the ctllvm pass.
  */
 
-#include "CTInternal.h"
+#include "Analysis/Crypto/CTInternal.h"
 
 using namespace llvm;
 

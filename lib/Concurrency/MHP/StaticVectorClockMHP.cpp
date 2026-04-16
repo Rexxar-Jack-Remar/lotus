@@ -1017,6 +1017,9 @@ void StaticVectorClockMHP::processFunction(const Function *func, ThreadID tid,
         } else if (type == ThreadAPI::TD_DETACH) {
           handleThreadDetach(&inst);
         } else {
+          if (m_thread_api->isCUDAKernelCallImmediatelyAfterLaunch(&inst)) {
+            continue;
+          }
           auto processCallee = [&](const Function *callee) {
             if (!callee || callee->isDeclaration())
               return;
@@ -1263,6 +1266,23 @@ void StaticVectorClockMHP::handleThreadFork(const Instruction *fork_inst,
 void StaticVectorClockMHP::handleThreadJoin(const Instruction *join_inst,
                                             SyncNode *node,
                                             ThreadID parent_tid) {
+  if (m_thread_api->getType(m_thread_api->getCallee(join_inst)) ==
+      ThreadAPI::TD_CUDA_DEVICE_SYNC) {
+    for (const auto &fork_entry : m_thread_parents) {
+      ThreadID child_tid = fork_entry.first;
+      if (fork_entry.second != parent_tid || m_detached_threads.count(child_tid)) {
+        continue;
+      }
+      std::vector<SyncNode *> child_exits = m_tfg->getThreadExitNodes(child_tid);
+      for (SyncNode *child_exit : child_exits) {
+        if (child_exit) {
+          m_tfg->addInterThreadEdge(child_exit, node, EdgeKind::Join);
+        }
+      }
+    }
+    return;
+  }
+
   const Value *joined_thread_val = m_thread_api->getJoinedThread(join_inst);
   ThreadID joined_tid = 0;
   bool found = false;

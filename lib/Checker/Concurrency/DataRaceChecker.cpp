@@ -683,6 +683,8 @@ void DataRaceChecker::buildSyncObjectSet() {
         case ThreadAPI::TD_BARRIER_ARRIVE_WAIT:
         case ThreadAPI::TD_BARRIER_ARRIVE:
         case ThreadAPI::TD_BARRIER_WAIT_CPP20:
+        case ThreadAPI::TD_CUDA_BARRIER:
+        case ThreadAPI::TD_CUDA_WARP_BARRIER:
           // Barrier object
           if (cb->arg_size() >= 1)
             v = cb->getArgOperand(0);

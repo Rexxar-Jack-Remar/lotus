@@ -8,7 +8,8 @@ add_lotus_concurrency_test_suite(concurrency_core_tests
   StaticThreadSharingAnalysisTest.cpp
   ThreadLocalAnalysisTest.cpp
   ThreadAPITest.cpp
-  JoinTargetAnalysisTest.cpp)
+  JoinTargetAnalysisTest.cpp
+  CUDAAnalysisTest.cpp)
 
 add_lotus_concurrency_test_suite(concurrency_openmp_tests
   OpenMPTaskGraphTest.cpp

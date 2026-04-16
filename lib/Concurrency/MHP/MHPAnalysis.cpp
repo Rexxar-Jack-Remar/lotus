@@ -822,6 +822,9 @@ void MHPAnalysis::processFunction(const Function *func, ThreadID tid,
         } else if (type == ThreadAPI::TD_DETACH) {
           handleThreadDetach(&inst);
         } else {
+          if (m_thread_api->isCUDAKernelCallImmediatelyAfterLaunch(&inst)) {
+            continue;
+          }
           // Handle both direct and indirect calls
           const Function *callee = m_thread_api->getCallee(cb);
           auto wireDirectCall = [&](const Function *target) {
@@ -1067,6 +1070,23 @@ const Value *MHPAnalysis::tracePthreadT(const Value *val) const {
 
 void MHPAnalysis::handleThreadJoin(const Instruction *join_inst, SyncNode *node,
                                    ThreadID parent_tid) {
+  if (m_thread_api->getType(m_thread_api->getCallee(join_inst)) ==
+      ThreadAPI::TD_CUDA_DEVICE_SYNC) {
+    for (const auto &fork_entry : m_thread_parents) {
+      ThreadID child_tid = fork_entry.first;
+      if (fork_entry.second != parent_tid || m_detached_threads.count(child_tid)) {
+        continue;
+      }
+      std::vector<SyncNode *> child_exits = m_tfg->getThreadExitNodes(child_tid);
+      for (SyncNode *child_exit : child_exits) {
+        if (child_exit) {
+          m_tfg->addInterThreadEdge(child_exit, node, EdgeKind::Join);
+        }
+      }
+    }
+    return;
+  }
+
   // Track which thread is being joined using value analysis
   // pthread_join takes the pthread_t value (not pointer) as first argument
 

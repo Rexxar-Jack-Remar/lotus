@@ -35,6 +35,7 @@ enum class ThreadingModelOptions : uint32_t {
   EnableOpenMP = 1 << 2,          ///< Enable OpenMP analysis
   EnableMPI = 1 << 3,             ///< Enable MPI (Message Passing Interface) analysis
   EnableLinuxKernel = 1 << 4,     ///< Enable Linux kernel concurrency primitives
+  EnableCUDA = 1 << 5,            ///< Enable CUDA host/device concurrency primitives
   All = ~0U                       ///< Enable all threading models (default)
 };
 
@@ -100,6 +101,17 @@ struct ConcurrencyConfig {
       m_options |= static_cast<uint32_t>(ThreadingModelOptions::EnableLinuxKernel);
     else
       m_options &= ~static_cast<uint32_t>(ThreadingModelOptions::EnableLinuxKernel);
+  }
+
+  /// Enable/disable CUDA concurrency primitive analysis
+  bool enable_cuda() const {
+    return (m_options & static_cast<uint32_t>(ThreadingModelOptions::EnableCUDA)) != 0;
+  }
+  void set_enable_cuda(bool enable = true) {
+    if (enable)
+      m_options |= static_cast<uint32_t>(ThreadingModelOptions::EnableCUDA);
+    else
+      m_options &= ~static_cast<uint32_t>(ThreadingModelOptions::EnableCUDA);
   }
 
   /// Get raw options value

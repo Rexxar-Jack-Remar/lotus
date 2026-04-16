@@ -182,6 +182,8 @@ TEST_F(MHPAnalysisTest, WrapperAcquireUsesUnderlyingMutexForHBHandoff) {
 
   MHPAnalysis mhp(*module);
   mhp.analyze();
+  auto stats = mhp.getStatistics();
+  EXPECT_GE(stats.num_joins, 1u);
   HappensBeforeAnalysis hb(*module, mhp);
   hb.analyze();
 
@@ -318,6 +320,51 @@ TEST_F(MHPAnalysisTest, JoinStatistics) {
   auto stats = mhp.getStatistics();
   EXPECT_GE(stats.num_forks, 1);
   EXPECT_GE(stats.num_joins, 1);
+}
+
+TEST_F(MHPAnalysisTest, CUDADeviceSynchronizeOrdersKernelCompletion) {
+  const char *source = R"(
+    @shared = global i32 0, align 4
+
+    declare void @__set_CUDAConfig(i32, i32)
+    declare i32 @cudaDeviceSynchronize()
+
+    define void @kernel() {
+    entry:
+      store i32 1, i32* @shared, align 4
+      ret void
+    }
+
+    define i32 @main() {
+    entry:
+      call void @__set_CUDAConfig(i32 1, i32 32)
+      call void @kernel()
+      %sync = call i32 @cudaDeviceSynchronize()
+      %after = load i32, i32* @shared, align 4
+      ret i32 %after
+    }
+  )";
+
+  auto module = parseModule(source);
+  ASSERT_NE(module, nullptr);
+
+  MHPAnalysis mhp(*module);
+  mhp.analyze();
+  HappensBeforeAnalysis hb(*module, mhp);
+  hb.analyze();
+
+  const Function *kernel = module->getFunction("kernel");
+  const Function *main_func = module->getFunction("main");
+  ASSERT_NE(kernel, nullptr);
+  ASSERT_NE(main_func, nullptr);
+
+  const Instruction *kernel_store = &kernel->getEntryBlock().front();
+  const Instruction *after = findInstructionByName(*main_func, "after");
+  ASSERT_NE(kernel_store, nullptr);
+  ASSERT_NE(after, nullptr);
+
+  EXPECT_FALSE(mhp.mayHappenInParallel(kernel_store, after));
+  EXPECT_TRUE(hb.mustPrecede(kernel_store, after));
 }
 
 TEST_F(MHPAnalysisTest, RecursiveCallGraphDoesNotExplodeContexts) {

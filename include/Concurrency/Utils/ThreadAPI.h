@@ -63,6 +63,7 @@ public:
     OpenMP,
     MPI,
     Cpp,
+    CUDA,
     LinuxKernel,
     Hare,
     Custom
@@ -231,6 +232,14 @@ public:
     TD_OMP_DOACROSS_INIT,   ///< __kmpc_doacross*
     TD_OMP_DOACROSS_WAIT,   ///< __kmpc_doacross_wait*
     TD_OMP_DOACROSS_SUBMIT, ///< __kmpc_doacross_submit*
+
+    // CUDA / NVVM
+    TD_CUDA_KERNEL_LAUNCH,   ///< CUDA kernel launch configuration or launch
+    TD_CUDA_DEVICE_SYNC,     ///< cudaDeviceSynchronize/cudaThreadSynchronize
+    TD_CUDA_BARRIER,         ///< __syncthreads / llvm.nvvm.barrier0
+    TD_CUDA_WARP_BARRIER,    ///< __syncwarp / llvm.nvvm.bar.warp.sync
+    TD_CUDA_MEMORY_BARRIER,  ///< threadfence / nvvm membar intrinsics
+    TD_CUDA_ATOMIC,          ///< CUDA/NVVM atomic and reduction intrinsics
 
     // MPI Session Management (MPI-4.0)
     TD_MPI_SESSION_INIT,             ///< MPI_Session_init
@@ -707,11 +716,59 @@ public:
   const llvm::CallBase *getLLVMCallSite(const llvm::Instruction *inst) const;
   //@}
 
+  inline const llvm::CallBase *
+  getNextCallInBlock(const llvm::Instruction *inst) const {
+    if (!inst) {
+      return nullptr;
+    }
+    const llvm::Instruction *next = inst->getNextNode();
+    while (next) {
+      if (const auto *cb = llvm::dyn_cast<llvm::CallBase>(next)) {
+        return cb;
+      }
+      next = next->getNextNode();
+    }
+    return nullptr;
+  }
+
+  inline const llvm::Function *
+  getCUDALaunchedKernel(const llvm::Instruction *inst) const {
+    if (!inst || getType(getCallee(inst)) != TD_CUDA_KERNEL_LAUNCH) {
+      return nullptr;
+    }
+    const llvm::CallBase *next_call = getNextCallInBlock(inst);
+    if (!next_call) {
+      return nullptr;
+    }
+    return getCallee(next_call);
+  }
+
+  inline bool isCUDAKernelCallImmediatelyAfterLaunch(
+      const llvm::Instruction *inst) const {
+    if (!inst) {
+      return false;
+    }
+    const llvm::Function *callee = getCallee(inst);
+    const llvm::Instruction *prev = inst->getPrevNode();
+    while (prev) {
+      if (const auto *prev_call = llvm::dyn_cast<llvm::CallBase>(prev)) {
+        const llvm::Function *prev_callee = getCallee(prev_call);
+        if (getType(prev_callee) != TD_CUDA_KERNEL_LAUNCH) {
+          return false;
+        }
+        return getCUDALaunchedKernel(prev) == callee;
+      }
+      prev = prev->getPrevNode();
+    }
+    return false;
+  }
+
   /// Return true if this call create a new thread
   //@{
   inline bool isForkLike(const llvm::Instruction *inst) const {
     TD_TYPE t = getType(getCallee(inst));
     return t == TD_FORK || t == TD_JTHREAD_FORK ||
+           t == TD_CUDA_KERNEL_LAUNCH ||
            (t == TD_ASYNC && !isProvablyDeferredAsyncLaunch(inst));
   }
   inline bool isForkLike(const llvm::CallBase *cb) const {
@@ -744,7 +801,7 @@ public:
     if (!isForkLike(inst))
       return nullptr;
     const llvm::Function *callee = getCallee(inst);
-    if (getType(callee) == TD_ASYNC)
+    if (getType(callee) == TD_ASYNC || getType(callee) == TD_CUDA_KERNEL_LAUNCH)
       return nullptr;
     if (isCppThreadLikeFork(callee))
       return getCallArg(inst, 0);
@@ -764,6 +821,10 @@ public:
     const llvm::Function *callee = getCallee(inst);
     if (isCppThreadLikeFork(callee))
       return getCppThreadCallable(inst);
+
+    if (getType(callee) == TD_CUDA_KERNEL_LAUNCH) {
+      return getCUDALaunchedKernel(inst);
+    }
 
     if (hasSemanticTag(callee, "fork")) {
       unsigned idx = hasMappedAPIEntry(callee)
@@ -797,7 +858,8 @@ public:
   getActualParmAtForkSite(const llvm::Instruction *inst) const {
     if (!isForkLike(inst))
       return nullptr;
-    if (isCppThreadLikeFork(getCallee(inst)) ||
+    if (getType(getCallee(inst)) == TD_CUDA_KERNEL_LAUNCH ||
+        isCppThreadLikeFork(getCallee(inst)) ||
         !hasMappedAPIEntry(getCallee(inst)))
       return nullptr;
     unsigned idx = getForkArgIndices(getCallee(inst)).arg_arg;
@@ -821,6 +883,15 @@ public:
     const llvm::CallBase *cb = getLLVMCallSite(inst);
     const llvm::Function *callee = getCallee(inst);
     if (!cb || !callee) {
+      return payload_args;
+    }
+
+    if (getType(callee) == TD_CUDA_KERNEL_LAUNCH) {
+      if (const llvm::CallBase *kernel_call = getNextCallInBlock(inst)) {
+        for (unsigned idx = 0; idx < kernel_call->arg_size(); ++idx) {
+          payload_args.push_back(kernel_call->getArgOperand(idx));
+        }
+      }
       return payload_args;
     }
 
@@ -896,7 +967,7 @@ public:
   //@{
   inline bool isJoinLike(const llvm::Instruction *inst) const {
     TD_TYPE t = getType(getCallee(inst));
-    return t == TD_JOIN || t == TD_JTHREAD_JOIN;
+    return t == TD_JOIN || t == TD_JTHREAD_JOIN || t == TD_CUDA_DEVICE_SYNC;
   }
   inline bool isJoinLike(const llvm::CallBase *cb) const {
     return isJoinLike(llvm::dyn_cast<llvm::Instruction>(cb));
@@ -916,6 +987,9 @@ public:
   inline const llvm::Value *
   getJoinedThread(const llvm::Instruction *inst) const {
     assert(isTDJoin(inst) && "not a thread join function!");
+    if (getType(getCallee(inst)) == TD_CUDA_DEVICE_SYNC) {
+      return nullptr;
+    }
     const llvm::CallBase *cb = getLLVMCallSite(inst);
     unsigned idx = getJoinArgIndices(getCallee(inst)).thread_arg;
     llvm::Value *join = cb->getArgOperand(idx);
@@ -936,6 +1010,9 @@ public:
   inline const llvm::Value *
   getRetParmAtJoinedSite(const llvm::Instruction *inst) const {
     assert(isTDJoin(inst) && "not a thread join function!");
+    if (getType(getCallee(inst)) == TD_CUDA_DEVICE_SYNC) {
+      return nullptr;
+    }
     const llvm::CallBase *cb = getLLVMCallSite(inst);
     unsigned idx = getJoinArgIndices(getCallee(inst)).ret_arg;
     return cb->getArgOperand(idx);
@@ -1401,6 +1478,7 @@ public:
     return t == TD_BAR_WAIT || t == TD_BAR_INIT || t == TD_LATCH_COUNT_DOWN ||
            t == TD_LATCH_WAIT || t == TD_LATCH_ARRIVE_WAIT ||
            t == TD_BARRIER_ARRIVE_WAIT || t == TD_BARRIER_ARRIVE ||
+           t == TD_CUDA_BARRIER || t == TD_CUDA_WARP_BARRIER ||
            t == TD_BARRIER_WAIT_CPP20;
   }
 
@@ -1450,7 +1528,8 @@ public:
     }
     TD_TYPE t = getType(callee);
     return t == TD_BAR_WAIT || t == TD_LATCH_ARRIVE_WAIT ||
-           t == TD_BARRIER_ARRIVE_WAIT || t == TD_BARRIER_WAIT_CPP20;
+           t == TD_BARRIER_ARRIVE_WAIT || t == TD_BARRIER_WAIT_CPP20 ||
+           t == TD_CUDA_BARRIER || t == TD_CUDA_WARP_BARRIER;
   }
 
   inline bool isBarrierLike(const llvm::Instruction *inst) const {
