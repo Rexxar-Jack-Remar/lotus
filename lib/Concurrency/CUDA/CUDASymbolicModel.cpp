@@ -311,7 +311,7 @@ CUDASymbolicModel::extractAffineAccessPattern(const Value *value) {
     }
 
     Type *element_type = gep->getSourceElementType();
-    auto idx_it = gep->idx_begin();
+    const auto *idx_it = gep->idx_begin();
     for (; idx_it != gep->idx_end(); ++idx_it) {
       AffineAccessPattern index_pattern = extractAffineAccessPattern(*idx_it);
       if (!index_pattern.valid) {

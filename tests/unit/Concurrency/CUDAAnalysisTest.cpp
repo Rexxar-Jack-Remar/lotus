@@ -647,9 +647,12 @@ TEST_F(CUDAAnalysisTest, MarksBarrierMustReachOnlyWhenAllThreadsReach) {
   analysis.runAnalysis();
 
   const auto &summary = analysis.getKernelSummaries().front();
-  ASSERT_FALSE(summary.barrier_phases.empty());
-  EXPECT_FALSE(summary.barrier_phases.front().all_threads_reach);
-  EXPECT_FALSE(summary.barrier_phases.front().exact);
+  ASSERT_FALSE(summary.synchronizations.empty());
+  EXPECT_EQ(summary.synchronizations.front().primitive,
+            concurrency::cuda::SynchronizationPrimitive::BlockBarrier);
+  EXPECT_EQ(summary.synchronizations.front().participation,
+            concurrency::cuda::ParticipationKind::Conditional);
+  EXPECT_FALSE(summary.synchronizations.front().exact);
 }
 
 TEST_F(CUDAAnalysisTest, SuppressesOrderedInterKernelRaceAfterDeviceSync) {

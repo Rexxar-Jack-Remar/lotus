@@ -1,12 +1,12 @@
 #include "Concurrency/CUDA/CUDAMemoryModel.h"
 
+#include <llvm/ADT/SmallPtrSet.h>
 #include <llvm/IR/Argument.h>
 #include <llvm/IR/CallingConv.h>
 #include <llvm/IR/Constants.h>
 #include <llvm/IR/Function.h>
 #include <llvm/IR/Instructions.h>
 #include <llvm/IR/Operator.h>
-#include <llvm/ADT/SmallPtrSet.h>
 
 using namespace llvm;
 

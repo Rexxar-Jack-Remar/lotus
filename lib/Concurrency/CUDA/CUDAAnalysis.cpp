@@ -7,6 +7,8 @@
 
 #include <llvm/ADT/SetVector.h>
 #include <llvm/ADT/SmallPtrSet.h>
+#include <llvm/Analysis/AliasAnalysis.h>
+#include <llvm/Analysis/MemoryLocation.h>
 #include <llvm/Analysis/PostDominators.h>
 #include <llvm/IR/CFG.h>
 #include <llvm/IR/Constants.h>
@@ -22,19 +24,30 @@ namespace concurrency::cuda {
 namespace {
 
 struct LaunchOrderingState {
-  bool ordered_since_last_launch = false;
-  SynchronizationScope scope = SynchronizationScope::None;
-  LaunchOrderingSource source = LaunchOrderingSource::None;
-  const Instruction *inst = nullptr;
-  const Value *stream = nullptr;
-  bool stream_known = false;
+  struct StreamState {
+    bool ordered_since_last_launch = false;
+    SynchronizationScope scope = SynchronizationScope::None;
+    LaunchOrderingSource source = LaunchOrderingSource::None;
+    SynchronizationPrimitive primitive = SynchronizationPrimitive::None;
+  };
+
+  bool device_synchronized = false;
+  DenseMap<const Value *, StreamState> stream_states;
+  StreamState unknown_stream;
 };
 
 struct RaceDecision {
   bool aliases = false;
   bool symbolic = false;
   AliasPrecision precision = AliasPrecision::NonAffine;
+  AliasSource source = AliasSource::Local;
   double confidence = 0.0;
+};
+
+struct AliasQueryResult {
+  AliasResult relation = AliasResult::MayAlias;
+  AliasPrecision precision = AliasPrecision::NonAffine;
+  AliasSource source = AliasSource::Local;
 };
 
 static bool isNVVMKernel(const Function *function) {
@@ -140,6 +153,11 @@ static const Value *getPotentialStream(const CallBase *call) {
   if (!call || call->arg_empty()) {
     return nullptr;
   }
+  ThreadAPI *thread_api = ThreadAPI::getThreadAPI();
+  if (thread_api && thread_api->getType(call) == ThreadAPI::TD_CUDA_KERNEL_LAUNCH &&
+      call->arg_size() <= 6) {
+    return nullptr;
+  }
   return call->getArgOperand(call->arg_size() - 1);
 }
 
@@ -151,6 +169,33 @@ static LaunchOrderingSource getOrderingSource(ThreadAPI::TD_TYPE type) {
     return LaunchOrderingSource::MemoryBarrier;
   default:
     return LaunchOrderingSource::Unknown;
+  }
+}
+
+static SynchronizationPrimitive getSynchronizationPrimitive(
+    ThreadAPI::TD_TYPE type, const Instruction *inst = nullptr) {
+  switch (type) {
+  case ThreadAPI::TD_CUDA_WARP_BARRIER:
+    return SynchronizationPrimitive::WarpBarrier;
+  case ThreadAPI::TD_CUDA_BARRIER:
+    return SynchronizationPrimitive::BlockBarrier;
+  case ThreadAPI::TD_CUDA_DEVICE_SYNC:
+    return SynchronizationPrimitive::DeviceSynchronize;
+  case ThreadAPI::TD_CUDA_MEMORY_BARRIER:
+    if (const auto *call = dyn_cast_or_null<CallBase>(inst)) {
+      if (const Function *callee = call->getCalledFunction()) {
+        StringRef name = callee->getName();
+        if (name.contains("threadfence_block") || name.contains("membar.cta")) {
+          return SynchronizationPrimitive::BlockFence;
+        }
+        if (name.contains("threadfence_system") || name.contains("membar.sys")) {
+          return SynchronizationPrimitive::SystemFence;
+        }
+      }
+    }
+    return SynchronizationPrimitive::DeviceFence;
+  default:
+    return SynchronizationPrimitive::None;
   }
 }
 
@@ -208,6 +253,39 @@ static bool isFenceInstruction(const Instruction *inst, ThreadAPI *thread_api) {
     return false;
   }
   return thread_api->getType(call) == ThreadAPI::TD_CUDA_MEMORY_BARRIER;
+}
+
+static bool isExecutionSynchronizingPrimitive(SynchronizationPrimitive primitive) {
+  switch (primitive) {
+  case SynchronizationPrimitive::WarpBarrier:
+  case SynchronizationPrimitive::BlockBarrier:
+  case SynchronizationPrimitive::DeviceSynchronize:
+  case SynchronizationPrimitive::StreamProgramOrder:
+    return true;
+  default:
+    return false;
+  }
+}
+
+static bool ordersMemorySpace(SynchronizationPrimitive primitive,
+                              MemorySpace space) {
+  switch (primitive) {
+  case SynchronizationPrimitive::WarpBarrier:
+  case SynchronizationPrimitive::BlockBarrier:
+      return space == MemorySpace::Shared || space == MemorySpace::Global ||
+             space == MemorySpace::Device;
+  case SynchronizationPrimitive::BlockFence:
+  case SynchronizationPrimitive::DeviceFence:
+  case SynchronizationPrimitive::DeviceSynchronize:
+  case SynchronizationPrimitive::StreamProgramOrder:
+      return space == MemorySpace::Global || space == MemorySpace::Device;
+  case SynchronizationPrimitive::SystemFence:
+      return space == MemorySpace::Global || space == MemorySpace::Device ||
+             space == MemorySpace::Host;
+  case SynchronizationPrimitive::None:
+      return false;
+  }
+  return false;
 }
 
 static SmallVector<const BasicBlock *, 8>
@@ -444,15 +522,25 @@ static RaceDecision evaluateRaceDecision(const AccessInfo &lhs,
                                          const AccessInfo &rhs,
                                          const LaunchDimensions &dims,
                                          const DeviceConfig &config,
-                                         bool allow_cross_block) {
+                                         bool allow_cross_block,
+                                         const AliasQueryResult &alias) {
   RaceDecision decision;
-  decision.aliases =
-      hasDistinctThreadAlias(lhs, rhs, dims, config, allow_cross_block);
+  decision.aliases = alias.relation != AliasResult::NoAlias &&
+                     hasDistinctThreadAlias(lhs, rhs, dims, config,
+                                            allow_cross_block);
   decision.symbolic = dims.hasSymbolicGrid() || dims.hasSymbolicBlock() ||
                       !lhs.exact_address || !rhs.exact_address ||
                       lhs.has_ambiguous_base || rhs.has_ambiguous_base;
-  decision.precision = std::max(getAliasPrecision(lhs), getAliasPrecision(rhs));
+  decision.precision =
+      std::max(alias.precision, std::max(getAliasPrecision(lhs),
+                                        getAliasPrecision(rhs)));
+  decision.source = alias.source;
   decision.confidence = decision.aliases ? 0.9 : 0.0;
+  if (alias.relation == AliasResult::MustAlias) {
+    decision.confidence = 0.98;
+  } else if (alias.relation == AliasResult::PartialAlias) {
+    decision.confidence *= 0.85;
+  }
   if (decision.precision == AliasPrecision::SymbolicAffine) {
     decision.confidence *= 0.75;
   } else if (decision.precision == AliasPrecision::Ambiguous) {
@@ -612,9 +700,101 @@ bool LaunchDimensions::hasSymbolicBlock() const {
   });
 }
 
-CUDAAnalysis::CUDAAnalysis(Module &module, DeviceConfig config)
+static SynchronizationScope requiredOrderingScope(const AccessInfo &lhs,
+                                                  const AccessInfo &rhs) {
+  if (lhs.space == MemorySpace::Shared && rhs.space == MemorySpace::Shared) {
+    return SynchronizationScope::Block;
+  }
+  return (lhs.depends_on_block_idx || rhs.depends_on_block_idx)
+             ? SynchronizationScope::Device
+             : SynchronizationScope::Block;
+}
+
+static AliasQueryResult queryAlias(const AccessInfo &lhs, const AccessInfo &rhs,
+                                   lotus::AliasAnalysisWrapper *aa) {
+  AliasQueryResult result;
+  result.precision = std::max(lhs.alias_precision, rhs.alias_precision);
+  result.source =
+      lhs.alias_source == AliasSource::AserPTA || rhs.alias_source == AliasSource::AserPTA
+          ? AliasSource::AserPTA
+          : (lhs.alias_source == AliasSource::Wrapper ||
+                     rhs.alias_source == AliasSource::Wrapper
+                 ? AliasSource::Wrapper
+                 : AliasSource::Local);
+
+  if (!aa || !aa->isInitialized() || !lhs.pointer || !rhs.pointer) {
+    result.relation = sharesBaseObject(lhs, rhs) ? AliasResult::MayAlias
+                                                 : AliasResult::NoAlias;
+    return result;
+  }
+
+  result.relation = aa->query(lhs.pointer, rhs.pointer);
+  result.source =
+      aa->getConfig().impl == lotus::AAConfig::Implementation::AserPTA
+          ? AliasSource::AserPTA
+          : AliasSource::Wrapper;
+  if (result.relation == AliasResult::NoAlias && sharesBaseObject(lhs, rhs)) {
+    result.relation = AliasResult::MayAlias;
+    result.precision = AliasPrecision::SymbolicAffine;
+    return result;
+  }
+  if (result.relation == AliasResult::NoAlias ||
+      result.relation == AliasResult::MustAlias) {
+    result.precision = AliasPrecision::Exact;
+  } else if (result.precision == AliasPrecision::Exact) {
+    result.precision = AliasPrecision::SymbolicAffine;
+  }
+  return result;
+}
+
+static bool streamOrderSeparates(const KernelLaunchInfo &earlier,
+                                 const KernelLaunchInfo &later) {
+  if (!later.ordered_after_previous) {
+    return false;
+  }
+  if (later.ordering_source == LaunchOrderingSource::DeviceSynchronize) {
+    return true;
+  }
+  if (later.ordering_source == LaunchOrderingSource::ProgramOrder) {
+    return earlier.stream_known && later.stream_known &&
+           earlier.stream == later.stream;
+  }
+  return false;
+}
+
+static bool launchesOrdered(const std::vector<KernelLaunchInfo> &launches,
+                            size_t earlier_idx, size_t later_idx) {
+  if (earlier_idx >= later_idx || later_idx >= launches.size()) {
+    return false;
+  }
+
+  const KernelLaunchInfo &earlier = launches[earlier_idx];
+  const KernelLaunchInfo &later = launches[later_idx];
+  for (size_t mid = earlier_idx + 1; mid <= later_idx; ++mid) {
+    const KernelLaunchInfo &cur = launches[mid];
+    if (cur.ordering_source == LaunchOrderingSource::DeviceSynchronize) {
+      return true;
+    }
+  }
+
+  const bool same_stream =
+      earlier.stream_known && later.stream_known &&
+      earlier.stream == later.stream;
+  return same_stream;
+}
+
+CUDAAnalysis::CUDAAnalysis(Module &module,
+                           lotus::AliasAnalysisWrapper *alias_analysis,
+                           DeviceConfig config)
     : m_module(module), m_thread_api(ThreadAPI::getThreadAPI()),
-      m_device_config(config) {}
+      m_alias_analysis(alias_analysis), m_device_config(config) {
+  if (!m_alias_analysis) {
+    initializeDefaultAliasAnalysis();
+  }
+}
+
+CUDAAnalysis::CUDAAnalysis(Module &module, DeviceConfig config)
+    : CUDAAnalysis(module, nullptr, config) {}
 
 void CUDAAnalysis::runAnalysis() {
   m_launches.clear();
@@ -629,7 +809,6 @@ void CUDAAnalysis::runAnalysis() {
     }
 
     LaunchOrderingState ordering_state;
-    const CallBase *pending_launch = nullptr;
     for (const Instruction &inst : instructions(function)) {
       const auto *call = dyn_cast<CallBase>(&inst);
       if (!call) {
@@ -639,42 +818,66 @@ void CUDAAnalysis::runAnalysis() {
       ThreadAPI::TD_TYPE type =
           callee ? m_thread_api->getType(callee) : ThreadAPI::TD_DUMMY;
 
-      if (type == ThreadAPI::TD_CUDA_KERNEL_LAUNCH) {
-        pending_launch = call;
-        continue;
-      }
-
       if (type == ThreadAPI::TD_CUDA_DEVICE_SYNC ||
           type == ThreadAPI::TD_CUDA_MEMORY_BARRIER) {
-        ordering_state.ordered_since_last_launch = true;
-        ordering_state.scope = getSyncScope(type);
-        ordering_state.source = getOrderingSource(type);
-        ordering_state.inst = &inst;
-        ordering_state.stream = getPotentialStream(call);
-        ordering_state.stream_known = ordering_state.stream != nullptr;
+        ordering_state.device_synchronized =
+            type == ThreadAPI::TD_CUDA_DEVICE_SYNC;
+        const Value *stream = getPotentialStream(call);
+        auto &stream_state = stream ? ordering_state.stream_states[stream]
+                                    : ordering_state.unknown_stream;
+        stream_state.ordered_since_last_launch = true;
+        stream_state.scope = getSyncScope(type);
+        stream_state.source = getOrderingSource(type);
+        stream_state.primitive = getSynchronizationPrimitive(type, &inst);
         continue;
       }
 
-      if (!pending_launch || !isCUDAKernelCandidate(callee)) {
+      if (type != ThreadAPI::TD_CUDA_KERNEL_LAUNCH) {
         continue;
       }
+
+      const Function *kernel = m_thread_api->getCUDALaunchedKernel(&inst);
+      if (!isCUDAKernelCandidate(kernel)) {
+        continue;
+      }
+
+      const Value *stream = getPotentialStream(call);
+      const bool stream_known = stream != nullptr;
+      auto &stream_state = stream_known ? ordering_state.stream_states[stream]
+                                        : ordering_state.unknown_stream;
 
       KernelLaunchInfo launch;
-      launch.launch = pending_launch;
-      launch.dimensions = getLaunchDimensions(pending_launch);
+      launch.launch = &inst;
+      launch.dimensions = getLaunchDimensions(&inst);
       launch.sequence = launch_sequence++;
-      launch.kernel = callee;
-      launch.ordered_after_previous = ordering_state.ordered_since_last_launch;
-      launch.ordering_scope = ordering_state.scope;
-      launch.ordering_source = ordering_state.source;
-      launch.stream = ordering_state.stream;
-      launch.stream_known = ordering_state.stream_known;
+      launch.kernel = kernel;
+      launch.stream = stream;
+      launch.stream_known = stream_known;
+      launch.predecessor = SynchronizationPrimitive::None;
+      launch.host_happens_before = false;
 
-      if (!m_launches.empty() && !launch.ordered_after_previous) {
-        if (sharesStream(m_launches.back(), launch)) {
+      if (ordering_state.device_synchronized) {
+        launch.ordered_after_previous = true;
+        launch.ordering_scope = SynchronizationScope::Device;
+        launch.ordering_source = LaunchOrderingSource::DeviceSynchronize;
+        launch.predecessor = SynchronizationPrimitive::DeviceSynchronize;
+        launch.host_happens_before = true;
+      } else if (stream_state.ordered_since_last_launch) {
+        launch.ordered_after_previous = true;
+        launch.ordering_scope = stream_state.scope;
+        launch.ordering_source = stream_state.source;
+        launch.predecessor = stream_state.primitive;
+        launch.host_happens_before = true;
+      } else if (!m_launches.empty()) {
+        const KernelLaunchInfo &prev = m_launches.back();
+        const bool same_stream =
+            stream_known && prev.stream_known && prev.stream == stream;
+        if (same_stream) {
           launch.ordered_after_previous = true;
           launch.ordering_scope = SynchronizationScope::Device;
           launch.ordering_source = LaunchOrderingSource::ProgramOrder;
+          launch.predecessor = SynchronizationPrimitive::StreamProgramOrder;
+          launch.host_happens_before = true;
         }
       }
 
@@ -682,8 +885,11 @@ void CUDAAnalysis::runAnalysis() {
       if (!m_kernel_index.count(launch.kernel)) {
         analyzeKernel(launch.kernel, &m_launches.back());
       }
-      pending_launch = nullptr;
-      ordering_state = LaunchOrderingState{};
+      stream_state.ordered_since_last_launch = false;
+      stream_state.scope = SynchronizationScope::None;
+      stream_state.source = LaunchOrderingSource::None;
+      stream_state.primitive = SynchronizationPrimitive::None;
+      ordering_state.device_synchronized = false;
     }
   }
 
@@ -737,7 +943,7 @@ void CUDAAnalysis::analyzeKernel(const Function *kernel,
 
   analyzeDivergence(summary, kernel);
   analyzeWarpUniformity(summary, kernel);
-  analyzeBarrierPhases(summary, kernel);
+  analyzeSynchronization(summary, kernel);
   analyzeRaces(summary);
   analyzeVolatile(summary);
 
@@ -773,6 +979,27 @@ void CUDAAnalysis::recordAccess(KernelSummary &summary, const Instruction *inst,
   access.address_pattern = extractAffineAccessPattern(pointer);
   access.exact_address = access.address_pattern.valid && access.address_pattern.exact;
   access.alias_precision = getAliasPrecision(access);
+  access.alias_source = AliasSource::Local;
+  if (hasAliasAnalysis() && pointer && pointer->getType()->isPointerTy()) {
+    std::vector<const Value *> pts;
+    if (m_alias_analysis->getPointsToSet(pointer, pts) && !pts.empty()) {
+      access.base_objects.clear();
+      for (const Value *pt : pts) {
+        if (pt) {
+          access.base_objects.push_back(pt);
+        }
+      }
+      access.base = access.base_objects.empty() ? nullptr : access.base_objects.front();
+      access.has_ambiguous_base = access.base_objects.size() > 1;
+      access.alias_precision =
+          access.has_ambiguous_base ? AliasPrecision::Ambiguous
+                                    : AliasPrecision::Exact;
+      access.alias_source = m_alias_analysis->getConfig().impl ==
+                                    lotus::AAConfig::Implementation::AserPTA
+                                ? AliasSource::AserPTA
+                                : AliasSource::Wrapper;
+    }
+  }
   if (const auto *call = dyn_cast<CallBase>(inst)) {
     access.ordering_scope = getSyncScope(m_thread_api->getType(call));
     access.has_fence_relevance = access.ordering_scope != SynchronizationScope::None;
@@ -895,63 +1122,82 @@ void CUDAAnalysis::analyzeDivergence(KernelSummary &summary,
   }
 }
 
-static bool isOrderedByBarrier(const AccessInfo &lhs, const AccessInfo &rhs,
-                               const KernelSummary &summary) {
-  for (const auto &phase : summary.barrier_phases) {
-    const Instruction *barrier_inst = phase.barrier;
-    if (!barrier_inst)
+static bool isOrderedBySynchronization(const AccessInfo &lhs,
+                                       const AccessInfo &rhs,
+                                       const KernelSummary &summary,
+                                       SynchronizationScope required_scope) {
+  for (const auto &sync : summary.synchronizations) {
+    if (!sync.inst || !sync.orders_memory) {
       continue;
-
-    bool lhs_before = false;
-    bool rhs_after = false;
-    if (lhs.inst && lhs.inst->getParent() == barrier_inst->getParent()) {
-      lhs_before = comesBeforeInBlock(lhs.inst, barrier_inst);
     }
+    if (required_scope == SynchronizationScope::Device &&
+        sync.scope != SynchronizationScope::Device &&
+        sync.scope != SynchronizationScope::System) {
+      continue;
+    }
+    if (required_scope == SynchronizationScope::Block &&
+        sync.scope == SynchronizationScope::Warp &&
+        (lhs.space == MemorySpace::Shared || rhs.space == MemorySpace::Shared)) {
+      continue;
+    }
+    if (!ordersMemorySpace(sync.primitive, lhs.space) ||
+        !ordersMemorySpace(sync.primitive, rhs.space)) {
+      continue;
+    }
+
+    bool lhs_before = lhs.inst && lhs.inst->getParent() == sync.inst->getParent() &&
+                      comesBeforeInBlock(lhs.inst, sync.inst);
+    bool rhs_after = rhs.inst && rhs.inst->getParent() == sync.inst->getParent() &&
+                     comesBeforeInBlock(sync.inst, rhs.inst);
+
     if (!lhs_before) {
-      for (const auto *pred : phase.preceding_blocks) {
+      for (const auto *pred : sync.preceding_blocks) {
         if (lhs.inst && lhs.inst->getParent() == pred) {
           lhs_before = true;
           break;
         }
       }
     }
-    if (rhs.inst && rhs.inst->getParent() == barrier_inst->getParent()) {
-      rhs_after = comesBeforeInBlock(barrier_inst, rhs.inst);
-    }
     if (!rhs_after) {
-      for (const auto *succ : phase.following_blocks) {
+      for (const auto *succ : sync.following_blocks) {
         if (rhs.inst && rhs.inst->getParent() == succ) {
           rhs_after = true;
           break;
         }
       }
     }
-    if (phase.all_threads_reach && lhs_before && rhs_after &&
-        (phase.scope == SynchronizationScope::Block ||
-         phase.scope == SynchronizationScope::Device ||
-         phase.scope == SynchronizationScope::Warp)) {
+    if (!lhs_before || !rhs_after) {
+      continue;
+    }
+    if (sync.execution_rendezvous) {
+      if (sync.participation == ParticipationKind::Exact) {
+        return true;
+      }
+      continue;
+    }
+    if (lhs.participation <= sync.participating_threads &&
+        rhs.participation <= sync.participating_threads) {
       return true;
     }
   }
   return false;
 }
 
-static const BarrierPhaseInfo *findProtectingPhase(const AccessInfo &lhs,
-                                                   const AccessInfo &rhs,
-                                                   const KernelSummary &summary) {
-  for (const auto &phase : summary.barrier_phases) {
-    const Instruction *barrier_inst = phase.barrier;
-    if (!barrier_inst) {
+static bool hasWarpOnlyOrderingBetween(const AccessInfo &lhs,
+                                       const AccessInfo &rhs,
+                                       const KernelSummary &summary) {
+  for (const auto &sync : summary.synchronizations) {
+    if (!sync.inst || sync.scope != SynchronizationScope::Warp) {
       continue;
     }
 
-    bool lhs_before = lhs.inst && lhs.inst->getParent() == barrier_inst->getParent() &&
-                      comesBeforeInBlock(lhs.inst, barrier_inst);
-    bool rhs_after = rhs.inst && rhs.inst->getParent() == barrier_inst->getParent() &&
-                     comesBeforeInBlock(barrier_inst, rhs.inst);
+    bool lhs_before = lhs.inst && lhs.inst->getParent() == sync.inst->getParent() &&
+                      comesBeforeInBlock(lhs.inst, sync.inst);
+    bool rhs_after = rhs.inst && rhs.inst->getParent() == sync.inst->getParent() &&
+                     comesBeforeInBlock(sync.inst, rhs.inst);
 
     if (!lhs_before) {
-      for (const auto *pred : phase.preceding_blocks) {
+      for (const auto *pred : sync.preceding_blocks) {
         if (lhs.inst && lhs.inst->getParent() == pred) {
           lhs_before = true;
           break;
@@ -959,19 +1205,18 @@ static const BarrierPhaseInfo *findProtectingPhase(const AccessInfo &lhs,
       }
     }
     if (!rhs_after) {
-      for (const auto *succ : phase.following_blocks) {
+      for (const auto *succ : sync.following_blocks) {
         if (rhs.inst && rhs.inst->getParent() == succ) {
           rhs_after = true;
           break;
         }
       }
     }
-
-    if (phase.all_threads_reach && lhs_before && rhs_after) {
-      return &phase;
+    if (lhs_before && rhs_after) {
+      return true;
     }
   }
-  return nullptr;
+  return false;
 }
 
 static bool isUniformControlled(const AccessInfo &lhs, const AccessInfo &rhs,
@@ -1013,13 +1258,17 @@ void CUDAAnalysis::analyzeRaces(KernelSummary &summary) {
     for (size_t j = i + 1; j < summary.accesses.size(); ++j) {
       const AccessInfo &lhs = summary.accesses[i];
       const AccessInfo &rhs = summary.accesses[j];
-      if (!accessesConflict(lhs, rhs)) {
+      if (!(lhs.is_write || rhs.is_write)) {
+        continue;
+      }
+      if (lhs.space != rhs.space &&
+          !((lhs.space == MemorySpace::Global || lhs.space == MemorySpace::Device) &&
+            (rhs.space == MemorySpace::Global || rhs.space == MemorySpace::Device))) {
         continue;
       }
 
-      const BarrierPhaseInfo *phase = findProtectingPhase(lhs, rhs, summary);
-      if (phase && (phase->scope == SynchronizationScope::Block ||
-                    phase->scope == SynchronizationScope::Device)) {
+      const AliasQueryResult alias = queryAlias(lhs, rhs, m_alias_analysis);
+      if (alias.relation == AliasResult::NoAlias) {
         continue;
       }
 
@@ -1028,11 +1277,19 @@ void CUDAAnalysis::analyzeRaces(KernelSummary &summary) {
         continue;
       }
 
+      const SynchronizationScope required_scope =
+          requiredOrderingScope(lhs, rhs);
+      if (isOrderedBySynchronization(lhs, rhs, summary, required_scope)) {
+        continue;
+      }
+
       if (isSharedRaceRelevant(lhs) && isSharedRaceRelevant(rhs)) {
         RaceDecision decision = evaluateRaceDecision(
-            lhs, rhs, summary.dimensions, m_device_config, false);
+            lhs, rhs, summary.dimensions, m_device_config, false, alias);
         if (decision.aliases) {
           summary.has_shared_race = true;
+          const bool warp_only_ordering =
+              hasWarpOnlyOrderingBetween(lhs, rhs, summary);
           RaceInfo race;
           race.first = lhs.inst;
           race.second = rhs.inst;
@@ -1042,23 +1299,27 @@ void CUDAAnalysis::analyzeRaces(KernelSummary &summary) {
           race.same_block_only = true;
           race.cross_block = false;
           race.symbolic = decision.symbolic;
-          race.kind = phase && phase->scope == SynchronizationScope::Warp
+          race.kind = warp_only_ordering
                           ? RaceKind::MissingFence
                           : ((lhs.is_atomic || rhs.is_atomic)
                                  ? RaceKind::AtomicOrderingRisk
                                  : RaceKind::DataRace);
-          race.scope = phase ? phase->scope : SynchronizationScope::Block;
+          race.scope = SynchronizationScope::Block;
           race.ordering_reason =
               race.kind == RaceKind::MissingFence
                   ? "warp synchronization does not order block-wide shared communication"
                   : ((lhs.is_atomic || rhs.is_atomic)
                          ? "atomic access is mixed with non-atomic access without ordering"
                          : "missing block synchronization");
-          race.ordering_inst = phase ? phase->barrier : nullptr;
+          race.ordering_inst = nullptr;
           race.required_fence_scope =
               race.kind == RaceKind::MissingFence ? SynchronizationScope::Block
                                                   : SynchronizationScope::None;
           race.alias_precision = decision.precision;
+          race.alias_source = decision.source;
+          race.missing_ordering = required_scope == SynchronizationScope::Block
+                                      ? SynchronizationPrimitive::BlockBarrier
+                                      : SynchronizationPrimitive::DeviceFence;
           race.confidence = decision.confidence;
           race.exact = !race.symbolic && decision.precision == AliasPrecision::Exact;
           summary.shared_races.push_back(std::move(race));
@@ -1067,7 +1328,7 @@ void CUDAAnalysis::analyzeRaces(KernelSummary &summary) {
         const bool cross_block =
             lhs.depends_on_block_idx || rhs.depends_on_block_idx;
         RaceDecision decision = evaluateRaceDecision(
-            lhs, rhs, summary.dimensions, m_device_config, cross_block);
+            lhs, rhs, summary.dimensions, m_device_config, cross_block, alias);
         if (decision.aliases) {
           summary.has_global_race = true;
           RaceInfo race;
@@ -1081,8 +1342,7 @@ void CUDAAnalysis::analyzeRaces(KernelSummary &summary) {
           race.symbolic = decision.symbolic;
           race.kind = (lhs.is_atomic || rhs.is_atomic)
                           ? RaceKind::AtomicOrderingRisk
-                          : (phase && phase->is_fence ? RaceKind::DataRace
-                                                      : RaceKind::MissingFence);
+                          : RaceKind::MissingFence;
           race.scope = cross_block ? SynchronizationScope::Device
                                    : SynchronizationScope::Block;
           race.ordering_reason =
@@ -1090,11 +1350,14 @@ void CUDAAnalysis::analyzeRaces(KernelSummary &summary) {
                   ? "atomic/global communication requires stronger ordering"
                   : (cross_block ? "missing device ordering"
                                  : "missing intra-kernel fence or ordering");
-          race.ordering_inst = phase ? phase->barrier : nullptr;
+          race.ordering_inst = nullptr;
           race.required_fence_scope =
               cross_block ? SynchronizationScope::Device
                           : SynchronizationScope::Block;
           race.alias_precision = decision.precision;
+          race.alias_source = decision.source;
+          race.missing_ordering = cross_block ? SynchronizationPrimitive::DeviceFence
+                                              : SynchronizationPrimitive::BlockFence;
           race.confidence = decision.confidence;
           race.exact = !race.symbolic && decision.precision == AliasPrecision::Exact;
           summary.global_races.push_back(std::move(race));
@@ -1177,8 +1440,8 @@ void CUDAAnalysis::analyzeWarpUniformity(KernelSummary &summary,
   }
 }
 
-void CUDAAnalysis::analyzeBarrierPhases(KernelSummary &summary,
-                                        const Function *kernel) {
+void CUDAAnalysis::analyzeSynchronization(KernelSummary &summary,
+                                          const Function *kernel) {
   if (!kernel || kernel->empty()) {
     return;
   }
@@ -1196,10 +1459,16 @@ void CUDAAnalysis::analyzeBarrierPhases(KernelSummary &summary,
         continue;
       }
 
-      BarrierPhaseInfo info;
-      info.barrier = &inst;
+      SynchronizationRecord info;
+      info.inst = &inst;
+      info.primitive = getSynchronizationPrimitive(type, &inst);
       info.scope = getSyncScope(type);
-      info.is_fence = type == ThreadAPI::TD_CUDA_MEMORY_BARRIER;
+      info.orders_memory = info.scope != SynchronizationScope::None;
+      info.execution_rendezvous = type == ThreadAPI::TD_CUDA_BARRIER ||
+                                  type == ThreadAPI::TD_CUDA_WARP_BARRIER;
+      info.participating_threads =
+          type == ThreadAPI::TD_CUDA_WARP_BARRIER ? ParticipationScope::Warp
+                                                  : ParticipationScope::Block;
 
       for (const BasicBlock &candidate : *kernel) {
         if (&candidate == &bb) {
@@ -1212,10 +1481,12 @@ void CUDAAnalysis::analyzeBarrierPhases(KernelSummary &summary,
           info.following_blocks.push_back(&candidate);
         }
       }
-      info.all_threads_reach =
-          info.is_fence ? true : mustReachBarrier(&inst, kernel);
-      info.exact = info.all_threads_reach;
-      summary.barrier_phases.push_back(std::move(info));
+      const bool all_threads_reach =
+          info.execution_rendezvous ? mustReachBarrier(&inst, kernel) : false;
+      info.participation = all_threads_reach ? ParticipationKind::Exact
+                                             : ParticipationKind::Conditional;
+      info.exact = all_threads_reach || !info.execution_rendezvous;
+      summary.synchronizations.push_back(std::move(info));
     }
   }
 }
@@ -1238,6 +1509,7 @@ void CUDAAnalysis::analyzeInterKernelRaces() {
       size_t idx_b = m_kernel_index[launch_b.kernel];
       const KernelSummary &summary_a = m_kernel_summaries[idx_a];
       const KernelSummary &summary_b = m_kernel_summaries[idx_b];
+      bool ordered = launchesOrdered(m_launches, i, j);
 
       for (const AccessInfo &access_a : summary_a.accesses) {
         if (!access_a.base)
@@ -1250,9 +1522,15 @@ void CUDAAnalysis::analyzeInterKernelRaces() {
         for (const AccessInfo &access_b : summary_b.accesses) {
           if (!access_b.base)
             continue;
-          if (access_b.space != access_a.space)
+          if (access_b.space != access_a.space &&
+              !((access_a.space == MemorySpace::Global ||
+                 access_a.space == MemorySpace::Device) &&
+                (access_b.space == MemorySpace::Global ||
+                 access_b.space == MemorySpace::Device)))
             continue;
-          if (!sharesBaseObject(access_a, access_b)) {
+          const AliasQueryResult alias =
+              queryAlias(access_a, access_b, m_alias_analysis);
+          if (alias.relation == AliasResult::NoAlias) {
             continue;
           }
           if ((access_a.is_write || access_b.is_write) &&
@@ -1266,7 +1544,7 @@ void CUDAAnalysis::analyzeInterKernelRaces() {
           race.first_kernel = launch_a.kernel;
           race.second_kernel = launch_b.kernel;
           race.shared_base = access_a.base;
-          race.ordered = launch_b.ordered_after_previous;
+          race.ordered = ordered;
           race.ordering_reason = race.ordered
                                      ? toString(launch_b.ordering_source)
                                      : "unordered";
@@ -1283,8 +1561,9 @@ void CUDAAnalysis::analyzeInterKernelRaces() {
           race.kind = (access_a.is_atomic || access_b.is_atomic)
                           ? RaceKind::AtomicOrderingRisk
                           : RaceKind::InterKernelHazard;
-          race.alias_precision =
-              std::max(getAliasPrecision(access_a), getAliasPrecision(access_b));
+          race.alias_precision = alias.precision;
+          race.alias_source = alias.source;
+          race.missing_ordering = launch_b.predecessor;
           race.required_fence_scope = SynchronizationScope::Device;
           race.confidence = race.alias_precision == AliasPrecision::Exact ? 0.9 : 0.6;
           if (race.ordered) {
@@ -1411,6 +1690,40 @@ const char *CUDAAnalysis::toString(AliasPrecision precision) {
   return "non-affine";
 }
 
+const char *CUDAAnalysis::toString(AliasSource source) {
+  switch (source) {
+  case AliasSource::Local:
+    return "local";
+  case AliasSource::AserPTA:
+    return "aser-pta";
+  case AliasSource::Wrapper:
+    return "wrapper";
+  }
+  return "local";
+}
+
+const char *CUDAAnalysis::toString(SynchronizationPrimitive primitive) {
+  switch (primitive) {
+  case SynchronizationPrimitive::None:
+    return "none";
+  case SynchronizationPrimitive::WarpBarrier:
+    return "warp-barrier";
+  case SynchronizationPrimitive::BlockBarrier:
+    return "block-barrier";
+  case SynchronizationPrimitive::BlockFence:
+    return "block-fence";
+  case SynchronizationPrimitive::DeviceFence:
+    return "device-fence";
+  case SynchronizationPrimitive::SystemFence:
+    return "system-fence";
+  case SynchronizationPrimitive::DeviceSynchronize:
+    return "device-synchronize";
+  case SynchronizationPrimitive::StreamProgramOrder:
+    return "stream-program-order";
+  }
+  return "none";
+}
+
 const Value *CUDAAnalysis::getMemoryOperand(const Instruction *inst) {
   if (const auto *load = dyn_cast<LoadInst>(inst)) {
     return load->getPointerOperand();
@@ -1461,6 +1774,25 @@ LaunchDimensions CUDAAnalysis::getLaunchDimensions(const Instruction *launch) {
   }
 
   return dims;
+}
+
+void CUDAAnalysis::initializeDefaultAliasAnalysis() {
+  m_owned_alias_analysis = lotus::AliasAnalysisFactory::createAserPTA(m_module, 0);
+  if (m_owned_alias_analysis && m_owned_alias_analysis->isInitialized()) {
+    m_alias_analysis = m_owned_alias_analysis.get();
+    return;
+  }
+  m_owned_alias_analysis = lotus::AliasAnalysisFactory::createSparrowAA(m_module, 0);
+  if (m_owned_alias_analysis && m_owned_alias_analysis->isInitialized()) {
+    m_alias_analysis = m_owned_alias_analysis.get();
+    return;
+  }
+  m_owned_alias_analysis.reset();
+  m_alias_analysis = nullptr;
+}
+
+bool CUDAAnalysis::hasAliasAnalysis() const {
+  return m_alias_analysis && m_alias_analysis->isInitialized();
 }
 
 } // namespace concurrency::cuda
