@@ -1,5 +1,10 @@
 #include "Concurrency/CUDA/CUDAAnalysis.h"
 
+#include <algorithm>
+#include <cmath>
+#include <limits>
+#include <queue>
+
 #include <llvm/ADT/SetVector.h>
 #include <llvm/ADT/SmallPtrSet.h>
 #include <llvm/Analysis/PostDominators.h>
@@ -9,12 +14,6 @@
 #include <llvm/IR/InstIterator.h>
 #include <llvm/IR/IntrinsicInst.h>
 #include <llvm/IR/Operator.h>
-
-#include <algorithm>
-#include <cmath>
-#include <limits>
-#include <numeric>
-#include <queue>
 
 using namespace llvm;
 
@@ -27,73 +26,14 @@ static bool isNVVMKernel(const Function *function) {
                       function->getCallingConv() == CallingConv::PTX_Kernel);
 }
 
-static bool isCUDAThreadBuiltinName(StringRef name) {
-  return name.equals("threadIdx") || name.equals("threadIdx.x") ||
-         name.equals("threadIdx.y") || name.equals("threadIdx.z") ||
-         name.equals("blockIdx") || name.equals("blockIdx.x") ||
-         name.equals("blockIdx.y") || name.equals("blockIdx.z") ||
-         name.equals("blockDim") || name.equals("blockDim.x") ||
-         name.equals("blockDim.y") || name.equals("blockDim.z") ||
-         name.equals("gridDim") || name.equals("gridDim.x") ||
-         name.equals("gridDim.y") || name.equals("gridDim.z") ||
-         name.contains("tid.") || name.contains("ctaid.") ||
-         name.contains("ntid.") || name.contains("nctaid.") ||
-         name.contains("laneid");
-}
-
-static const Value *stripCastsAndGEPBase(const Value *value) {
-  const Value *current = value ? value->stripPointerCasts() : nullptr;
-  while (current) {
-    if (const auto *gep = dyn_cast<GEPOperator>(current)) {
-      current = gep->getPointerOperand()->stripPointerCasts();
-      continue;
-    }
-    if (const auto *ce = dyn_cast<ConstantExpr>(current)) {
-      if (ce->isCast()) {
-        current = ce->getOperand(0)->stripPointerCasts();
-        continue;
-      }
-      if (ce->getOpcode() == Instruction::GetElementPtr) {
-        current = ce->getOperand(0)->stripPointerCasts();
-        continue;
-      }
-    }
-    break;
-  }
-  return current;
-}
-
-static bool valueContainsName(const Value *value, StringRef needle) {
-  if (!value) {
-    return false;
-  }
-  if (const auto *gv = dyn_cast<GlobalValue>(value)) {
-    return gv->getName().contains(needle);
-  }
-  if (const auto *inst = dyn_cast<Instruction>(value)) {
-    return inst->hasName() && inst->getName().contains(needle);
-  }
-  if (const auto *arg = dyn_cast<Argument>(value)) {
-    return arg->hasName() && arg->getName().contains(needle);
-  }
-  return false;
-}
-
-static std::optional<int64_t> addIfKnown(const std::optional<int64_t> &lhs,
-                                         const std::optional<int64_t> &rhs,
-                                         bool subtract = false) {
-  if (!lhs || !rhs) {
-    return std::nullopt;
-  }
-  return subtract ? (*lhs - *rhs) : (*lhs + *rhs);
-}
-
 static bool isSharedRaceRelevant(const AccessInfo &access) {
-  return access.space == MemorySpace::Shared && access.base && !access.is_atomic;
+  return access.space == MemorySpace::Shared && access.base &&
+         !access.is_atomic;
 }
 
 static bool isGlobalRaceRelevant(const AccessInfo &access) {
-  return (access.space == MemorySpace::Global || access.space == MemorySpace::Device) &&
+  return (access.space == MemorySpace::Global ||
+          access.space == MemorySpace::Device) &&
          access.base && !access.is_atomic;
 }
 
@@ -163,13 +103,32 @@ static uint32_t getActiveLaneCount(const LaunchDimensions &dims,
 }
 
 static std::optional<int64_t>
-evaluateAddressForThread(const AffineAccessPattern &pattern, int64_t tid_x,
-                         int64_t block_x) {
+evaluateAddressForThread(const AffineAccessPattern &pattern,
+                         const LaunchDimensions &dims, int64_t tid_x,
+                         int64_t tid_y, int64_t tid_z, int64_t block_x,
+                         int64_t block_y, int64_t block_z) {
   if (!pattern.valid) {
     return std::nullopt;
   }
+  int64_t dim_x = getConcreteExtent(dims.block[0], 32);
+  int64_t dim_y = getConcreteExtent(dims.block[1], 1);
+  int64_t dim_z = getConcreteExtent(dims.block[2], 1);
+  int64_t linear_tid =
+      AffineAccessPattern::linearize(tid_x, tid_y, tid_z, dim_x, dim_y, dim_z);
   return pattern.constant + pattern.thread_idx_x * tid_x +
-         pattern.block_idx_x * block_x;
+         pattern.thread_idx_y * tid_y + pattern.thread_idx_z * tid_z +
+         pattern.block_idx_x * block_x + pattern.block_idx_y * block_y +
+         pattern.block_idx_z * block_z + pattern.lane_id * (linear_tid % 32);
+}
+
+static std::optional<int64_t>
+evaluateAddressForThread(const AffineAccessPattern &pattern, int64_t tid_x,
+                         int64_t block_x) {
+  LaunchDimensions dummy_dims;
+  dummy_dims.block[0].kind = SymbolicValueKind::Constant;
+  dummy_dims.block[0].constant = 32;
+  return evaluateAddressForThread(pattern, dummy_dims, tid_x, 0, 0, block_x, 0,
+                                  0);
 }
 
 static bool hasDistinctThreadAlias(const AccessInfo &lhs, const AccessInfo &rhs,
@@ -183,8 +142,9 @@ static bool hasDistinctThreadAlias(const AccessInfo &lhs, const AccessInfo &rhs,
 
   const uint32_t lanes = getActiveLaneCount(dims, config);
   const uint32_t block_count =
-      allow_cross_block ? std::min<uint32_t>(2, getConcreteExtent(dims.grid[0], 2))
-                        : 1;
+      allow_cross_block
+          ? std::min<uint32_t>(2, getConcreteExtent(dims.grid[0], 2))
+          : 1;
 
   for (uint32_t block_l = 0; block_l < block_count; ++block_l) {
     for (uint32_t block_r = 0; block_r < block_count; ++block_r) {
@@ -222,11 +182,20 @@ computeBankConflict(const AccessInfo &access, const LaunchDimensions &dims,
   const uint32_t bank_width = config.shared_bank_width;
   const uint32_t bank_count = config.shared_bank_count;
   SmallVector<uint32_t, 32> occupancies(bank_count, 0);
+  SmallVector<uint32_t, 32> lane_banks;
+  lane_banks.reserve(lanes);
+  bool all_same_address = true;
+  std::optional<int64_t> first_addr;
 
   for (uint32_t lane = 0; lane < lanes; ++lane) {
     auto addr = evaluateAddressForThread(access.address_pattern, lane, 0);
     if (!addr) {
       return std::nullopt;
+    }
+    if (!first_addr) {
+      first_addr = *addr;
+    } else if (*first_addr != *addr) {
+      all_same_address = false;
     }
 
     SmallVector<bool, 32> touched_banks(bank_count, false);
@@ -235,6 +204,9 @@ computeBankConflict(const AccessInfo &access, const LaunchDimensions &dims,
       const uint32_t bank =
           static_cast<uint32_t>((absolute / bank_width) % bank_count);
       touched_banks[bank] = true;
+      if (byte == 0) {
+        lane_banks.push_back(bank);
+      }
     }
     for (uint32_t bank = 0; bank < bank_count; ++bank) {
       if (touched_banks[bank]) {
@@ -247,7 +219,15 @@ computeBankConflict(const AccessInfo &access, const LaunchDimensions &dims,
   for (uint32_t occupancy : occupancies) {
     max_occupancy = std::max(max_occupancy, occupancy);
   }
-  if (max_occupancy <= 1) {
+  SmallVector<bool, 32> seen_bank(bank_count, false);
+  uint32_t unique_bank_count = 0;
+  for (uint32_t bank : lane_banks) {
+    if (!seen_bank[bank]) {
+      seen_bank[bank] = true;
+      ++unique_bank_count;
+    }
+  }
+  if (all_same_address || max_occupancy <= 1) {
     return std::nullopt;
   }
 
@@ -257,6 +237,10 @@ computeBankConflict(const AccessInfo &access, const LaunchDimensions &dims,
   info.bank_width = bank_width;
   info.conflict_degree = max_occupancy;
   info.threads_per_bank = max_occupancy;
+  info.bank_stride_bytes =
+      static_cast<uint32_t>(std::abs(access.address_pattern.thread_idx_x));
+  info.unique_banks = unique_bank_count;
+  info.is_broadcast = all_same_address;
   info.exact = true;
   return info;
 }
@@ -271,15 +255,18 @@ computeCoalescing(const AccessInfo &access, const LaunchDimensions &dims,
   const uint32_t lanes = getActiveLaneCount(dims, config);
   const uint32_t transaction_bytes = config.global_transaction_bytes;
   SmallVector<uint32_t, 32> segments;
+  std::optional<int64_t> min_addr;
+  std::optional<int64_t> max_addr;
   for (uint32_t lane = 0; lane < lanes; ++lane) {
     auto addr = evaluateAddressForThread(access.address_pattern, lane, 0);
     if (!addr) {
       return std::nullopt;
     }
-    const uint32_t start =
-        static_cast<uint32_t>(*addr / transaction_bytes);
-    const uint32_t end =
-        static_cast<uint32_t>((*addr + access.access_size - 1) / transaction_bytes);
+    min_addr = !min_addr ? *addr : std::min(*min_addr, *addr);
+    max_addr = !max_addr ? *addr : std::max(*max_addr, *addr);
+    const uint32_t start = static_cast<uint32_t>(*addr / transaction_bytes);
+    const uint32_t end = static_cast<uint32_t>(
+        (*addr + access.access_size - 1) / transaction_bytes);
     for (uint32_t seg = start; seg <= end; ++seg) {
       if (std::find(segments.begin(), segments.end(), seg) == segments.end()) {
         segments.push_back(seg);
@@ -291,9 +278,18 @@ computeCoalescing(const AccessInfo &access, const LaunchDimensions &dims,
   info.inst = access.inst;
   info.transaction_bytes = transaction_bytes;
   info.estimated_transactions = segments.size();
-  if (segments.size() <= 1) {
+  info.participating_lanes = lanes;
+  info.unique_segments = segments.size();
+  if (min_addr && max_addr) {
+    info.covered_bytes =
+        static_cast<uint32_t>(*max_addr - *min_addr + access.access_size);
+  }
+  const uint32_t contiguous_bytes =
+      lanes * std::max<uint32_t>(1, access.access_size);
+  if (segments.size() <= 1 && info.covered_bytes <= transaction_bytes) {
     info.quality = CoalescingQuality::FullyCoalesced;
-  } else if (segments.size() <= 4) {
+  } else if (segments.size() <= 2 &&
+             info.covered_bytes <= contiguous_bytes * 2) {
     info.quality = CoalescingQuality::PartiallyCoalesced;
   } else {
     info.quality = CoalescingQuality::Uncoalesced;
@@ -345,7 +341,8 @@ void CUDAAnalysis::runAnalysis() {
 
       KernelLaunchInfo launch;
       launch.launch = inst;
-      launch.kernel = dyn_cast_or_null<Function>(m_thread_api->getForkedFun(inst));
+      launch.kernel =
+          dyn_cast_or_null<Function>(m_thread_api->getForkedFun(inst));
       launch.dimensions = getLaunchDimensions(inst);
       m_launches.push_back(launch);
 
@@ -362,6 +359,8 @@ void CUDAAnalysis::runAnalysis() {
     }
     analyzeKernel(&function, nullptr);
   }
+
+  analyzeInterKernelRaces();
 }
 
 void CUDAAnalysis::analyzeKernel(const Function *kernel,
@@ -370,6 +369,16 @@ void CUDAAnalysis::analyzeKernel(const Function *kernel,
   summary.kernel = kernel;
   if (launch) {
     summary.dimensions = launch->dimensions;
+  }
+  for (unsigned i = 0; i < 3; ++i) {
+    if (summary.dimensions.grid[i].kind == SymbolicValueKind::Unknown) {
+      summary.dimensions.grid[i].kind = SymbolicValueKind::Constant;
+      summary.dimensions.grid[i].constant = 1;
+    }
+    if (summary.dimensions.block[i].kind == SymbolicValueKind::Unknown) {
+      summary.dimensions.block[i].kind = SymbolicValueKind::Constant;
+      summary.dimensions.block[i].constant = 1;
+    }
   }
 
   for (const Instruction &inst : instructions(*kernel)) {
@@ -392,6 +401,8 @@ void CUDAAnalysis::analyzeKernel(const Function *kernel,
   }
 
   analyzeDivergence(summary, kernel);
+  analyzeWarpUniformity(summary, kernel);
+  analyzeBarrierPhases(summary, kernel);
   analyzeRaces(summary);
   analyzeVolatile(summary);
 
@@ -405,10 +416,12 @@ void CUDAAnalysis::recordAccess(KernelSummary &summary, const Instruction *inst,
   access.inst = inst;
   access.pointer = pointer;
   access.base = getCanonicalBase(pointer);
-  access.space = classifyMemorySpace(pointer);
+  const MemorySpaceInfo space_info = CUDAMemoryModel::classify(pointer);
+  access.space = space_info.space;
+  access.exact_space = space_info.exact;
+  access.address_space = space_info.address_space;
   access.is_write = is_write;
-  access.is_atomic =
-      isa<AtomicRMWInst>(inst) || isa<AtomicCmpXchgInst>(inst);
+  access.is_atomic = isa<AtomicRMWInst>(inst) || isa<AtomicCmpXchgInst>(inst);
   if (const auto *load = dyn_cast<LoadInst>(inst)) {
     access.is_volatile = load->isVolatile();
   } else if (const auto *store = dyn_cast<StoreInst>(inst)) {
@@ -424,8 +437,8 @@ void CUDAAnalysis::recordAccess(KernelSummary &summary, const Instruction *inst,
     access.access_size =
         static_cast<uint32_t>(dl.getTypeStoreSize(load->getType()));
   } else if (const auto *store = dyn_cast<StoreInst>(inst)) {
-    access.access_size =
-        static_cast<uint32_t>(dl.getTypeStoreSize(store->getValueOperand()->getType()));
+    access.access_size = static_cast<uint32_t>(
+        dl.getTypeStoreSize(store->getValueOperand()->getType()));
   } else if (const auto *rmw = dyn_cast<AtomicRMWInst>(inst)) {
     access.access_size = static_cast<uint32_t>(
         dl.getTypeStoreSize(rmw->getValOperand()->getType()));
@@ -440,8 +453,8 @@ void CUDAAnalysis::recordAccess(KernelSummary &summary, const Instruction *inst,
   case MemorySpace::Shared: {
     ++summary.shared_access_count;
     if (access.depends_on_thread_idx) {
-      if (auto conflict =
-              computeBankConflict(access, summary.dimensions, m_device_config)) {
+      if (auto conflict = computeBankConflict(access, summary.dimensions,
+                                              m_device_config)) {
         summary.has_bank_conflict = true;
         summary.bank_conflicts.push_back(*conflict);
       }
@@ -458,9 +471,8 @@ void CUDAAnalysis::recordAccess(KernelSummary &summary, const Instruction *inst,
     if (access.depends_on_thread_idx) {
       if (auto info =
               computeCoalescing(access, summary.dimensions, m_device_config);
-          info &&
-          (info->quality == CoalescingQuality::PartiallyCoalesced ||
-           info->quality == CoalescingQuality::Uncoalesced)) {
+          info && (info->quality == CoalescingQuality::PartiallyCoalesced ||
+                   info->quality == CoalescingQuality::Uncoalesced)) {
         summary.has_uncoalesced_access = true;
         summary.coalescing_issues.push_back(*info);
       }
@@ -499,7 +511,9 @@ void CUDAAnalysis::analyzeDivergence(KernelSummary &summary,
 
     DivergenceRegion region;
     region.branch = branch;
-    region.depends_on_thread_idx = dependsOnThreadBuiltin(branch->getCondition());
+    region.depends_on_thread_idx =
+        dependsOnThreadBuiltin(branch->getCondition());
+    region.depends_on_block_idx = dependsOnBlockBuiltin(branch->getCondition());
     region.depends_on_lane_id = dependsOnLaneBuiltin(branch->getCondition());
 
     if (const DomTreeNodeBase<BasicBlock> *node = pdt.getNode(&bb)) {
@@ -508,15 +522,15 @@ void CUDAAnalysis::analyzeDivergence(KernelSummary &summary,
       }
     }
     if (!region.merge_block) {
-      region.merge_block = pdt.findNearestCommonDominator(branch->getSuccessor(0),
-                                                          branch->getSuccessor(1));
+      region.merge_block = pdt.findNearestCommonDominator(
+          branch->getSuccessor(0), branch->getSuccessor(1));
     }
 
     for (unsigned succ_index = 0; succ_index < branch->getNumSuccessors();
          ++succ_index) {
-      for (const BasicBlock *reachable :
-           collectReachableBlocks(branch->getSuccessor(succ_index),
-                                  region.merge_block)) {
+      for (const BasicBlock *reachable : collectReachableBlocks(
+               branch->getSuccessor(succ_index), region.merge_block)) {
+        region.region_blocks.push_back(reachable);
         if (const Instruction *barrier =
                 getFirstBarrierInBlock(reachable, m_thread_api)) {
           region.nested_barriers.push_back(barrier);
@@ -531,6 +545,53 @@ void CUDAAnalysis::analyzeDivergence(KernelSummary &summary,
   }
 }
 
+static bool isOrderedByBarrier(const AccessInfo &lhs, const AccessInfo &rhs,
+                               const KernelSummary &summary) {
+  for (const auto &phase : summary.barrier_phases) {
+    const Instruction *barrier_inst = phase.barrier;
+    if (!barrier_inst)
+      continue;
+
+    bool lhs_before = false, rhs_after = false;
+    for (const auto *pred : phase.preceding_blocks) {
+      if (lhs.inst && lhs.inst->getParent() == pred)
+        lhs_before = true;
+    }
+    for (const auto *succ : phase.following_blocks) {
+      if (rhs.inst && rhs.inst->getParent() == succ)
+        rhs_after = true;
+    }
+    if (phase.all_threads_reach && lhs_before && rhs_after) {
+      return true;
+    }
+  }
+  return false;
+}
+
+static bool isUniformControlled(const AccessInfo &lhs, const AccessInfo &rhs,
+                                const KernelSummary &summary) {
+  for (const auto &uniform : summary.warp_uniform_regions) {
+    if (!uniform.uniform_within_warp)
+      continue;
+
+    const Instruction *branch = uniform.branch;
+    if (!branch)
+      continue;
+
+    bool lhs_after = false, rhs_after = false;
+    if (lhs.inst && lhs.inst->getParent()) {
+      lhs_after = true;
+    }
+    if (rhs.inst && rhs.inst->getParent()) {
+      rhs_after = true;
+    }
+    if (lhs_after && rhs_after) {
+      return true;
+    }
+  }
+  return false;
+}
+
 void CUDAAnalysis::analyzeRaces(KernelSummary &summary) {
   for (size_t i = 0; i < summary.accesses.size(); ++i) {
     for (size_t j = i + 1; j < summary.accesses.size(); ++j) {
@@ -539,21 +600,39 @@ void CUDAAnalysis::analyzeRaces(KernelSummary &summary) {
       if (!accessesConflict(lhs, rhs)) {
         continue;
       }
+
+      if (lhs.is_atomic || rhs.is_atomic) {
+        continue;
+      }
+
+      if (isOrderedByBarrier(lhs, rhs, summary)) {
+        continue;
+      }
+
+      if (lhs.space == MemorySpace::Shared &&
+          isUniformControlled(lhs, rhs, summary)) {
+        continue;
+      }
+
       if (isSharedRaceRelevant(lhs) && isSharedRaceRelevant(rhs)) {
-        if (hasDistinctThreadAlias(lhs, rhs, summary.dimensions, m_device_config,
-                                   false)) {
+        if (hasDistinctThreadAlias(lhs, rhs, summary.dimensions,
+                                   m_device_config, false)) {
           summary.has_shared_race = true;
           summary.shared_races.push_back(
-              {lhs.inst, rhs.inst, lhs.base, MemorySpace::Shared, true, false});
+              {lhs.inst, rhs.inst, lhs.base, MemorySpace::Shared, true, false,
+               summary.dimensions.hasSymbolicBlock()});
         }
       } else if (isGlobalRaceRelevant(lhs) && isGlobalRaceRelevant(rhs)) {
         const bool cross_block =
             lhs.depends_on_block_idx || rhs.depends_on_block_idx;
-        if (hasDistinctThreadAlias(lhs, rhs, summary.dimensions, m_device_config,
-                                   cross_block)) {
+        if (hasDistinctThreadAlias(lhs, rhs, summary.dimensions,
+                                   m_device_config, cross_block)) {
           summary.has_global_race = true;
           summary.global_races.push_back(
-              {lhs.inst, rhs.inst, lhs.base, lhs.space, !cross_block, cross_block});
+              {lhs.inst, rhs.inst, lhs.base, lhs.space, !cross_block,
+               cross_block,
+               summary.dimensions.hasSymbolicGrid() ||
+                   summary.dimensions.hasSymbolicBlock()});
         }
       }
     }
@@ -573,7 +652,8 @@ void CUDAAnalysis::analyzeVolatile(KernelSummary &summary) {
     if (access.is_atomic || access.is_volatile || !access.base) {
       continue;
     }
-    if (access.space != MemorySpace::Shared && access.space != MemorySpace::Global &&
+    if (access.space != MemorySpace::Shared &&
+        access.space != MemorySpace::Global &&
         access.space != MemorySpace::Device) {
       continue;
     }
@@ -591,88 +671,125 @@ void CUDAAnalysis::analyzeVolatile(KernelSummary &summary) {
   }
 }
 
+void CUDAAnalysis::analyzeWarpUniformity(KernelSummary &summary,
+                                         const Function *kernel) {
+  if (!kernel || kernel->empty()) {
+    return;
+  }
+
+  for (const BasicBlock &bb : *kernel) {
+    const auto *branch = dyn_cast<BranchInst>(bb.getTerminator());
+    if (!branch || !branch->isConditional()) {
+      continue;
+    }
+
+    bool uniform_within_warp = !dependsOnThreadBuiltin(branch->getCondition());
+    bool uniform_within_block =
+        uniform_within_warp || dependsOnBlockBuiltin(branch->getCondition());
+
+    if (uniform_within_warp || uniform_within_block) {
+      WarpUniformInfo info;
+      info.branch = branch;
+      info.uniform_within_warp = uniform_within_warp;
+      info.uniform_within_block = uniform_within_block;
+      summary.warp_uniform_regions.push_back(std::move(info));
+    }
+  }
+}
+
+void CUDAAnalysis::analyzeBarrierPhases(KernelSummary &summary,
+                                        const Function *kernel) {
+  if (!kernel || kernel->empty()) {
+    return;
+  }
+
+  PostDominatorTree pdt;
+  pdt.recalculate(const_cast<Function &>(*kernel));
+
+  for (const BasicBlock &bb : *kernel) {
+    for (const Instruction &inst : bb) {
+      const auto *call = dyn_cast<CallBase>(&inst);
+      if (!call) {
+        continue;
+      }
+      ThreadAPI::TD_TYPE type = m_thread_api->getType(call);
+      if (type != ThreadAPI::TD_CUDA_BARRIER &&
+          type != ThreadAPI::TD_CUDA_WARP_BARRIER) {
+        continue;
+      }
+
+      BarrierPhaseInfo info;
+      info.barrier = &inst;
+
+      if (const DomTreeNodeBase<BasicBlock> *node = pdt.getNode(&bb)) {
+        if (const DomTreeNodeBase<BasicBlock> *idom = node->getIDom()) {
+          info.preceding_blocks.push_back(idom->getBlock());
+        }
+      }
+      for (const BasicBlock *succ : successors(&bb)) {
+        info.following_blocks.push_back(succ);
+      }
+      info.all_threads_reach = true;
+      summary.barrier_phases.push_back(std::move(info));
+    }
+  }
+}
+
+void CUDAAnalysis::analyzeInterKernelRaces() {
+  if (m_launches.size() < 2) {
+    return;
+  }
+
+  for (size_t i = 0; i < m_launches.size(); ++i) {
+    for (size_t j = i + 1; j < m_launches.size(); ++j) {
+      const KernelLaunchInfo &launch_a = m_launches[i];
+      const KernelLaunchInfo &launch_b = m_launches[j];
+
+      if (!launch_a.kernel || !launch_b.kernel) {
+        continue;
+      }
+
+      size_t idx_a = m_kernel_index[launch_a.kernel];
+      size_t idx_b = m_kernel_index[launch_b.kernel];
+      const KernelSummary &summary_a = m_kernel_summaries[idx_a];
+      const KernelSummary &summary_b = m_kernel_summaries[idx_b];
+
+      for (const AccessInfo &access_a : summary_a.accesses) {
+        if (!access_a.base)
+          continue;
+        if (access_a.space != MemorySpace::Global &&
+            access_a.space != MemorySpace::Device) {
+          continue;
+        }
+
+        for (const AccessInfo &access_b : summary_b.accesses) {
+          if (!access_b.base)
+            continue;
+          if (access_b.space != access_a.space)
+            continue;
+          if (access_b.base != access_a.base)
+            continue;
+
+          if ((access_a.is_write || access_b.is_write) && access_b.is_atomic) {
+            continue;
+          }
+
+          InterKernelRaceInfo race;
+          race.first_launch = launch_a.launch;
+          race.second_launch = launch_b.launch;
+          race.first_kernel = launch_a.kernel;
+          race.second_kernel = launch_b.kernel;
+          race.shared_base = access_a.base;
+          race.ordered = false;
+          m_inter_kernel_races.push_back(std::move(race));
+        }
+      }
+    }
+  }
+}
+
 MemorySpace CUDAAnalysis::classifyMemorySpace(const Value *value) {
-  const Value *base = stripCastsAndGEPBase(value);
-  if (!base) {
-    return MemorySpace::Unknown;
-  }
-
-  if (isa<AllocaInst>(base)) {
-    return MemorySpace::Local;
-  }
-
-  auto classify_addrspace = [](unsigned addrspace) {
-    switch (addrspace) {
-    case 0:
-      return MemorySpace::Host;
-    case 1:
-      return MemorySpace::Global;
-    case 3:
-      return MemorySpace::Shared;
-    case 4:
-      return MemorySpace::Constant;
-    case 5:
-      return MemorySpace::Local;
-    case 101:
-      return MemorySpace::Device;
-    default:
-      return MemorySpace::Unknown;
-    }
-  };
-
-  if (const auto *ptr_ty = dyn_cast<PointerType>(base->getType())) {
-    MemorySpace by_as = classify_addrspace(ptr_ty->getAddressSpace());
-    if (by_as != MemorySpace::Unknown) {
-      return by_as;
-    }
-  }
-
-  if (const auto *gv = dyn_cast<GlobalValue>(base)) {
-    if (gv->hasSection()) {
-      StringRef section = gv->getSection();
-      if (section.contains("shared")) {
-        return MemorySpace::Shared;
-      }
-      if (section.contains("constant")) {
-        return MemorySpace::Constant;
-      }
-      if (section.contains("device")) {
-        return MemorySpace::Device;
-      }
-    }
-    if (gv->getName().startswith("__device_")) {
-      return MemorySpace::Device;
-    }
-    if (isCUDAThreadBuiltinName(gv->getName())) {
-      return MemorySpace::Local;
-    }
-    return MemorySpace::Host;
-  }
-  if (const auto *arg = dyn_cast<Argument>(base)) {
-    if (base->getType()->getPointerAddressSpace() == 1) {
-      return MemorySpace::Global;
-    }
-    if (arg->hasByValAttr()) {
-      return MemorySpace::Host;
-    }
-    if (arg->hasName()) {
-      if (arg->getName().contains("shared")) {
-        return MemorySpace::Shared;
-      }
-      if (arg->getName().contains("constant")) {
-        return MemorySpace::Constant;
-      }
-      if (arg->getName().contains("device")) {
-        return MemorySpace::Device;
-      }
-    }
-    if (arg->getParent() && isNVVMKernel(arg->getParent())) {
-      return MemorySpace::Global;
-    }
-    return MemorySpace::Unknown;
-  }
-
-  return MemorySpace::Unknown;
+  return CUDAMemoryModel::classify(value).space;
 }
 
 const char *CUDAAnalysis::toString(MemorySpace space) {
@@ -723,372 +840,6 @@ const Value *CUDAAnalysis::getMemoryOperand(const Instruction *inst) {
     return cas->getPointerOperand();
   }
   return nullptr;
-}
-
-const Value *CUDAAnalysis::getCanonicalBase(const Value *value) {
-  return stripCastsAndGEPBase(value);
-}
-
-BuiltinKind CUDAAnalysis::classifyBuiltin(const Value *value) {
-  if (!value) {
-    return BuiltinKind::None;
-  }
-
-  auto classify_name = [](StringRef name) {
-    if (name.contains("tid.x") || name.contains("threadIdx.x")) {
-      return BuiltinKind::ThreadIdxX;
-    }
-    if (name.contains("tid.y") || name.contains("threadIdx.y")) {
-      return BuiltinKind::ThreadIdxY;
-    }
-    if (name.contains("tid.z") || name.contains("threadIdx.z")) {
-      return BuiltinKind::ThreadIdxZ;
-    }
-    if (name.contains("ctaid.x") || name.contains("blockIdx.x")) {
-      return BuiltinKind::BlockIdxX;
-    }
-    if (name.contains("ctaid.y") || name.contains("blockIdx.y")) {
-      return BuiltinKind::BlockIdxY;
-    }
-    if (name.contains("ctaid.z") || name.contains("blockIdx.z")) {
-      return BuiltinKind::BlockIdxZ;
-    }
-    if (name.contains("ntid.x") || name.contains("blockDim.x")) {
-      return BuiltinKind::BlockDimX;
-    }
-    if (name.contains("ntid.y") || name.contains("blockDim.y")) {
-      return BuiltinKind::BlockDimY;
-    }
-    if (name.contains("ntid.z") || name.contains("blockDim.z")) {
-      return BuiltinKind::BlockDimZ;
-    }
-    if (name.contains("nctaid.x") || name.contains("gridDim.x")) {
-      return BuiltinKind::GridDimX;
-    }
-    if (name.contains("nctaid.y") || name.contains("gridDim.y")) {
-      return BuiltinKind::GridDimY;
-    }
-    if (name.contains("nctaid.z") || name.contains("gridDim.z")) {
-      return BuiltinKind::GridDimZ;
-    }
-    if (name.contains("laneid")) {
-      return BuiltinKind::LaneId;
-    }
-    return BuiltinKind::None;
-  };
-
-  if (const auto *call = dyn_cast<CallBase>(value)) {
-    if (const Function *callee = call->getCalledFunction()) {
-      return classify_name(callee->getName());
-    }
-  }
-  if (const auto *gv = dyn_cast<GlobalValue>(value)) {
-    return classify_name(gv->getName());
-  }
-  if (const auto *inst = dyn_cast<Instruction>(value)) {
-    if (inst->hasName()) {
-      BuiltinKind kind = classify_name(inst->getName());
-      if (kind != BuiltinKind::None) {
-        return kind;
-      }
-    }
-  }
-  if (const auto *arg = dyn_cast<Argument>(value)) {
-    if (arg->hasName()) {
-      return classify_name(arg->getName());
-    }
-  }
-  return BuiltinKind::None;
-}
-
-bool CUDAAnalysis::dependsOnThreadBuiltin(const Value *value) {
-  if (!value) {
-    return false;
-  }
-  SmallVector<const Value *, 8> worklist;
-  SmallPtrSet<const Value *, 16> visited;
-  worklist.push_back(value);
-
-  while (!worklist.empty()) {
-    const Value *current = worklist.pop_back_val();
-    if (!visited.insert(current).second) {
-      continue;
-    }
-
-    BuiltinKind builtin = classifyBuiltin(current);
-    if (builtin == BuiltinKind::ThreadIdxX || builtin == BuiltinKind::ThreadIdxY ||
-        builtin == BuiltinKind::ThreadIdxZ || builtin == BuiltinKind::LaneId) {
-      return true;
-    }
-
-    if (const auto *inst = dyn_cast<Instruction>(current)) {
-      for (const Value *operand : inst->operands()) {
-        worklist.push_back(operand);
-      }
-    } else if (const auto *ce = dyn_cast<ConstantExpr>(current)) {
-      for (const Value *operand : ce->operands()) {
-        worklist.push_back(operand);
-      }
-    }
-  }
-
-  return false;
-}
-
-bool CUDAAnalysis::dependsOnBlockBuiltin(const Value *value) {
-  if (!value) {
-    return false;
-  }
-  SmallVector<const Value *, 8> worklist;
-  SmallPtrSet<const Value *, 16> visited;
-  worklist.push_back(value);
-
-  while (!worklist.empty()) {
-    const Value *current = worklist.pop_back_val();
-    if (!visited.insert(current).second) {
-      continue;
-    }
-
-    BuiltinKind builtin = classifyBuiltin(current);
-    if (builtin == BuiltinKind::BlockIdxX || builtin == BuiltinKind::BlockIdxY ||
-        builtin == BuiltinKind::BlockIdxZ) {
-      return true;
-    }
-
-    if (const auto *inst = dyn_cast<Instruction>(current)) {
-      for (const Value *operand : inst->operands()) {
-        worklist.push_back(operand);
-      }
-    } else if (const auto *ce = dyn_cast<ConstantExpr>(current)) {
-      for (const Value *operand : ce->operands()) {
-        worklist.push_back(operand);
-      }
-    }
-  }
-
-  return false;
-}
-
-bool CUDAAnalysis::dependsOnLaneBuiltin(const Value *value) {
-  if (!value) {
-    return false;
-  }
-  SmallVector<const Value *, 8> worklist;
-  SmallPtrSet<const Value *, 16> visited;
-  worklist.push_back(value);
-
-  while (!worklist.empty()) {
-    const Value *current = worklist.pop_back_val();
-    if (!visited.insert(current).second) {
-      continue;
-    }
-    if (classifyBuiltin(current) == BuiltinKind::LaneId) {
-      return true;
-    }
-    if (const auto *inst = dyn_cast<Instruction>(current)) {
-      for (const Value *operand : inst->operands()) {
-        worklist.push_back(operand);
-      }
-    } else if (const auto *ce = dyn_cast<ConstantExpr>(current)) {
-      for (const Value *operand : ce->operands()) {
-        worklist.push_back(operand);
-      }
-    }
-  }
-
-  return false;
-}
-
-std::optional<int64_t> CUDAAnalysis::evaluateConstantInt(const Value *value) {
-  if (!value) {
-    return std::nullopt;
-  }
-  if (const auto *ci = dyn_cast<ConstantInt>(value)) {
-    return ci->getSExtValue();
-  }
-  if (const auto *ce = dyn_cast<ConstantExpr>(value)) {
-    if (ce->getOpcode() == Instruction::Add) {
-      return addIfKnown(evaluateConstantInt(ce->getOperand(0)),
-                        evaluateConstantInt(ce->getOperand(1)));
-    }
-    if (ce->getOpcode() == Instruction::Sub) {
-      return addIfKnown(evaluateConstantInt(ce->getOperand(0)),
-                        evaluateConstantInt(ce->getOperand(1)), true);
-    }
-    if (ce->getOpcode() == Instruction::Mul) {
-      auto lhs = evaluateConstantInt(ce->getOperand(0));
-      auto rhs = evaluateConstantInt(ce->getOperand(1));
-      if (lhs && rhs) {
-        return (*lhs) * (*rhs);
-      }
-    }
-    return std::nullopt;
-  }
-  if (const auto *inst = dyn_cast<Instruction>(value)) {
-    if (inst->getOpcode() == Instruction::Add) {
-      return addIfKnown(evaluateConstantInt(inst->getOperand(0)),
-                        evaluateConstantInt(inst->getOperand(1)));
-    }
-    if (inst->getOpcode() == Instruction::Sub) {
-      return addIfKnown(evaluateConstantInt(inst->getOperand(0)),
-                        evaluateConstantInt(inst->getOperand(1)), true);
-    }
-    if (inst->getOpcode() == Instruction::Mul ||
-        inst->getOpcode() == Instruction::Shl) {
-      auto lhs = evaluateConstantInt(inst->getOperand(0));
-      auto rhs = evaluateConstantInt(inst->getOperand(1));
-      if (lhs && rhs) {
-        return inst->getOpcode() == Instruction::Mul ? (*lhs) * (*rhs)
-                                                     : (*lhs) << (*rhs);
-      }
-    }
-  }
-  return std::nullopt;
-}
-
-AffineAccessPattern CUDAAnalysis::extractAffineAccessPattern(const Value *value) {
-  AffineAccessPattern pattern;
-  if (!value) {
-    return pattern;
-  }
-
-  BuiltinKind builtin = classifyBuiltin(value);
-  switch (builtin) {
-  case BuiltinKind::ThreadIdxX:
-    pattern.thread_idx_x = 1;
-    pattern.valid = true;
-    return pattern;
-  case BuiltinKind::BlockIdxX:
-    pattern.block_idx_x = 1;
-    pattern.valid = true;
-    return pattern;
-  case BuiltinKind::LaneId:
-    pattern.lane_id = 1;
-    pattern.valid = true;
-    return pattern;
-  default:
-    break;
-  }
-
-  if (const auto *ci = dyn_cast<ConstantInt>(value)) {
-    pattern.constant = ci->getSExtValue();
-    pattern.valid = true;
-    return pattern;
-  }
-
-  auto merge = [](AffineAccessPattern &dst, const AffineAccessPattern &lhs,
-                  const AffineAccessPattern &rhs, bool subtract = false) {
-    if (!lhs.valid || !rhs.valid) {
-      dst.valid = false;
-      return;
-    }
-    dst.constant = subtract ? lhs.constant - rhs.constant
-                            : lhs.constant + rhs.constant;
-    dst.thread_idx_x = subtract ? lhs.thread_idx_x - rhs.thread_idx_x
-                                : lhs.thread_idx_x + rhs.thread_idx_x;
-    dst.block_idx_x = subtract ? lhs.block_idx_x - rhs.block_idx_x
-                               : lhs.block_idx_x + rhs.block_idx_x;
-    dst.lane_id = subtract ? lhs.lane_id - rhs.lane_id
-                           : lhs.lane_id + rhs.lane_id;
-    dst.valid = true;
-  };
-
-  if (const auto *gep = dyn_cast<GEPOperator>(value)) {
-    if (gep->getNumIndices() == 0) {
-      return extractAffineAccessPattern(gep->getPointerOperand());
-    }
-    const Value *last_index = gep->idx_end()[-1];
-    AffineAccessPattern index_pattern = extractAffineAccessPattern(last_index);
-    if (!index_pattern.valid) {
-      return pattern;
-    }
-    Type *element_type = gep->getSourceElementType();
-    int64_t elem_size = 4;
-    if (element_type->isIntegerTy()) {
-      elem_size = std::max<int64_t>(1, element_type->getIntegerBitWidth() / 8);
-    } else if (element_type->isFloatTy()) {
-      elem_size = 4;
-    } else if (element_type->isDoubleTy()) {
-      elem_size = 8;
-    } else if (element_type->isPointerTy()) {
-      elem_size = 8;
-    }
-    index_pattern.constant *= elem_size;
-    index_pattern.thread_idx_x *= elem_size;
-    index_pattern.block_idx_x *= elem_size;
-    index_pattern.lane_id *= elem_size;
-    return index_pattern;
-  }
-
-  if (const auto *op = dyn_cast<Operator>(value)) {
-    if (op->getOpcode() == Instruction::Add) {
-      AffineAccessPattern lhs = extractAffineAccessPattern(op->getOperand(0));
-      AffineAccessPattern rhs = extractAffineAccessPattern(op->getOperand(1));
-      merge(pattern, lhs, rhs);
-      return pattern;
-    }
-    if (op->getOpcode() == Instruction::Sub) {
-      AffineAccessPattern lhs = extractAffineAccessPattern(op->getOperand(0));
-      AffineAccessPattern rhs = extractAffineAccessPattern(op->getOperand(1));
-      merge(pattern, lhs, rhs, true);
-      return pattern;
-    }
-    if (op->getOpcode() == Instruction::Mul ||
-        op->getOpcode() == Instruction::Shl) {
-      auto lhs_const = evaluateConstantInt(op->getOperand(0));
-      auto rhs_const = evaluateConstantInt(op->getOperand(1));
-      if (lhs_const && !rhs_const) {
-        AffineAccessPattern rhs = extractAffineAccessPattern(op->getOperand(1));
-        if (!rhs.valid) {
-          return pattern;
-        }
-        const int64_t scale = *lhs_const;
-        rhs.constant *= scale;
-        rhs.thread_idx_x *= scale;
-        rhs.block_idx_x *= scale;
-        rhs.lane_id *= scale;
-        return rhs;
-      }
-      if (!lhs_const && rhs_const) {
-        AffineAccessPattern lhs = extractAffineAccessPattern(op->getOperand(0));
-        if (!lhs.valid) {
-          return pattern;
-        }
-        const int64_t scale =
-            op->getOpcode() == Instruction::Shl ? (int64_t{1} << *rhs_const)
-                                                : *rhs_const;
-        lhs.constant *= scale;
-        lhs.thread_idx_x *= scale;
-        lhs.block_idx_x *= scale;
-        lhs.lane_id *= scale;
-        return lhs;
-      }
-    }
-  }
-
-  return pattern;
-}
-
-SymbolicDimension CUDAAnalysis::classifyDimension(const Value *value) {
-  SymbolicDimension dim;
-  dim.value = value;
-  if (!value) {
-    return dim;
-  }
-  if (const auto constant = evaluateConstantInt(value)) {
-    dim.kind = SymbolicValueKind::Constant;
-    dim.constant = static_cast<uint64_t>(*constant);
-    return dim;
-  }
-  if (classifyBuiltin(value) != BuiltinKind::None) {
-    dim.kind = SymbolicValueKind::DerivedFromBuiltin;
-    return dim;
-  }
-  if (isa<Argument>(value) || isa<Instruction>(value)) {
-    dim.kind = SymbolicValueKind::Symbolic;
-    return dim;
-  }
-  return dim;
 }
 
 LaunchDimensions CUDAAnalysis::getLaunchDimensions(const Instruction *launch) {

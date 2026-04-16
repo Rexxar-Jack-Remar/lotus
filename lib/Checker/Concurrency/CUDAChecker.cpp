@@ -29,7 +29,9 @@ std::vector<ConcurrencyBugReport> CUDAChecker::checkCUDABugs() {
         report.addStep(region.branch,
                        region.depends_on_lane_id
                            ? "Lane-dependent branch splits a warp execution path"
-                           : "Thread-index-dependent branch splits a warp execution path");
+                           : (region.depends_on_block_idx
+                                  ? "Block/thread-dependent branch diverges across kernel instances"
+                                  : "Thread-index-dependent branch splits a warp execution path"));
       }
       reports.push_back(std::move(report));
     }
@@ -46,6 +48,26 @@ std::vector<ConcurrencyBugReport> CUDAChecker::checkCUDABugs() {
                        "Another block-local thread may access the same shared location");
       }
       reports.push_back(std::move(report));
+
+      bool has_symbolic = llvm::any_of(summary.shared_races, [](const auto &race) {
+        return race.symbolic;
+      });
+      if (has_symbolic) {
+        ConcurrencyBugReport symbolic(
+            ConcurrencyBugType::CUDA_PARAMETRIC_RACE_RISK,
+            "Shared-memory race depends on symbolic thread/block parameters",
+            BugDescription::BI_MEDIUM, BugDescription::BC_WARNING);
+        for (const auto &race : summary.shared_races) {
+          if (!race.symbolic) {
+            continue;
+          }
+          symbolic.addStep(race.first,
+                           "First conflicting access remains feasible under symbolic block sizing");
+          symbolic.addStep(race.second,
+                           "Second conflicting access aliases under a parametric thread pair");
+        }
+        reports.push_back(std::move(symbolic));
+      }
     }
 
     if (summary.has_global_race) {
@@ -63,6 +85,28 @@ std::vector<ConcurrencyBugReport> CUDAChecker::checkCUDABugs() {
                        "Second conflicting access aliases the same global/device object");
       }
       reports.push_back(std::move(report));
+
+      bool has_symbolic = llvm::any_of(summary.global_races, [](const auto &race) {
+        return race.symbolic;
+      });
+      if (has_symbolic) {
+        ConcurrencyBugReport symbolic(
+            ConcurrencyBugType::CUDA_PARAMETRIC_RACE_RISK,
+            "Global/device-memory race depends on symbolic grid/block parameters",
+            BugDescription::BI_MEDIUM, BugDescription::BC_WARNING);
+        for (const auto &race : summary.global_races) {
+          if (!race.symbolic) {
+            continue;
+          }
+          symbolic.addStep(
+              race.first,
+              race.cross_block ? "Conflicting access remains feasible for symbolic block pairs"
+                               : "Conflicting access remains feasible for symbolic thread pairs");
+          symbolic.addStep(race.second,
+                           "Alias survives parametric CUDA launch dimensions");
+        }
+        reports.push_back(std::move(symbolic));
+      }
     }
 
     if (summary.has_barrier_mismatch) {
@@ -88,7 +132,8 @@ std::vector<ConcurrencyBugReport> CUDAChecker::checkCUDABugs() {
         std::string description =
             "Shared-memory access maps multiple lanes to the same bank with "
             "estimated conflict degree " +
-            std::to_string(conflict.conflict_degree);
+            std::to_string(conflict.conflict_degree) + ", touching " +
+            std::to_string(conflict.unique_banks) + " unique banks";
         report.addStep(
             conflict.inst, description);
       }
@@ -105,7 +150,8 @@ std::vector<ConcurrencyBugReport> CUDAChecker::checkCUDABugs() {
             "Warp access is " +
             std::string(cuda::CUDAAnalysis::toString(issue.quality)) +
             " with about " + std::to_string(issue.estimated_transactions) +
-            " memory transactions";
+            " memory transactions over " + std::to_string(issue.covered_bytes) +
+            " bytes";
         report.addStep(
             issue.inst, description);
       }
@@ -138,13 +184,14 @@ std::vector<ConcurrencyBugReport> CUDAChecker::checkCUDABugs() {
     }
 
     for (const cuda::AccessInfo &access : summary.accesses) {
-      if (access.space == cuda::MemorySpace::Unknown && access.inst) {
+      if ((!access.exact_space || access.space == cuda::MemorySpace::Unknown) &&
+          access.inst) {
         ConcurrencyBugReport report(
             ConcurrencyBugType::CUDA_SHARED_GLOBAL_SPACE_MISMATCH,
             "CUDA memory space could not be classified precisely",
             BugDescription::BI_LOW, BugDescription::BC_WARNING);
         report.addStep(access.inst,
-                       "Address space was not resolved to shared/global/local/constant");
+                       "Address space was not resolved exactly to shared/global/local/constant");
         reports.push_back(std::move(report));
         break;
       }

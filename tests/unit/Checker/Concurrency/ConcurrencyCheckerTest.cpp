@@ -991,6 +991,54 @@ TEST_F(ConcurrencyCheckerTest, CUDACheckerReportsBarrierMismatchAndCrossBlockRac
   EXPECT_GT(stats.cudaBugsFound, 0u);
 }
 
+TEST_F(ConcurrencyCheckerTest, CUDACheckerReportsParametricRaceAndMemoryAmbiguity) {
+  const char *source = R"(
+    @shared_arr = addrspace(3) global [32 x i32] zeroinitializer
+
+    declare void @__set_CUDAConfig(i32, i32)
+    declare i32 @llvm.nvvm.read.ptx.sreg.tid.x()
+
+    define void @kernel(i32* %mystery) {
+    entry:
+      %tid = call i32 @llvm.nvvm.read.ptx.sreg.tid.x()
+      %slot = and i32 %tid, 1
+      %shared_idx = getelementptr [32 x i32], [32 x i32] addrspace(3)* @shared_arr, i32 0, i32 %slot
+      store i32 %tid, i32 addrspace(3)* %shared_idx
+      store i32 1, i32 addrspace(3)* %shared_idx
+      %ptr = getelementptr i32, i32* %mystery, i32 %slot
+      store i32 %tid, i32* %ptr
+      store i32 2, i32* %ptr
+      ret void
+    }
+
+    define void @main(i32 %sym_block, i32* %mystery) {
+    entry:
+      call void @__set_CUDAConfig(i32 1, i32 %sym_block)
+      call void @kernel(i32* %mystery)
+      ret void
+    }
+  )";
+
+  auto module = parseModule(source);
+  ASSERT_NE(module, nullptr);
+
+  concurrency::ConcurrencyChecker checker(*module);
+  checker.enableDataRaceCheck(false);
+  checker.enableDeadlockCheck(false);
+  checker.enableAtomicityCheck(false);
+  checker.enableCondVarCheck(false);
+  checker.enableLockMismatchCheck(false);
+  checker.enableOpenMPCheck(false);
+  checker.enableMPICheck(false);
+  checker.enableCUDACheck(true);
+  checker.runAnalyses();
+  checker.checkCUDABugs();
+
+  auto stats = checker.getStatistics();
+  EXPECT_GT(stats.cudaSummary.shared_race_count, 0u);
+  EXPECT_GT(stats.cudaBugsFound, 1u);
+}
+
 TEST_F(ConcurrencyCheckerTest, ConditionalMayLockDoesNotSuppressRealRace) {
   const char *source = R"(
     @lock = global i8 0

@@ -1,0 +1,413 @@
+#include "Concurrency/CUDA/CUDASymbolicModel.h"
+
+#include <llvm/ADT/SmallPtrSet.h>
+#include <llvm/ADT/SmallVector.h>
+#include <llvm/IR/Argument.h>
+#include <llvm/IR/Constants.h>
+#include <llvm/IR/Instructions.h>
+#include <llvm/IR/Operator.h>
+
+using namespace llvm;
+
+namespace concurrency::cuda {
+
+namespace {
+
+static std::optional<int64_t> addIfKnown(const std::optional<int64_t> &lhs,
+                                         const std::optional<int64_t> &rhs,
+                                         bool subtract = false) {
+  if (!lhs || !rhs) {
+    return std::nullopt;
+  }
+  return subtract ? (*lhs - *rhs) : (*lhs + *rhs);
+}
+
+static BuiltinKind classifyName(StringRef name) {
+  if (name.contains("tid.x") || name.contains("threadIdx.x")) {
+    return BuiltinKind::ThreadIdxX;
+  }
+  if (name.contains("tid.y") || name.contains("threadIdx.y")) {
+    return BuiltinKind::ThreadIdxY;
+  }
+  if (name.contains("tid.z") || name.contains("threadIdx.z")) {
+    return BuiltinKind::ThreadIdxZ;
+  }
+  if (name.contains("ctaid.x") || name.contains("blockIdx.x")) {
+    return BuiltinKind::BlockIdxX;
+  }
+  if (name.contains("ctaid.y") || name.contains("blockIdx.y")) {
+    return BuiltinKind::BlockIdxY;
+  }
+  if (name.contains("ctaid.z") || name.contains("blockIdx.z")) {
+    return BuiltinKind::BlockIdxZ;
+  }
+  if (name.contains("ntid.x") || name.contains("blockDim.x")) {
+    return BuiltinKind::BlockDimX;
+  }
+  if (name.contains("ntid.y") || name.contains("blockDim.y")) {
+    return BuiltinKind::BlockDimY;
+  }
+  if (name.contains("ntid.z") || name.contains("blockDim.z")) {
+    return BuiltinKind::BlockDimZ;
+  }
+  if (name.contains("nctaid.x") || name.contains("gridDim.x")) {
+    return BuiltinKind::GridDimX;
+  }
+  if (name.contains("nctaid.y") || name.contains("gridDim.y")) {
+    return BuiltinKind::GridDimY;
+  }
+  if (name.contains("nctaid.z") || name.contains("gridDim.z")) {
+    return BuiltinKind::GridDimZ;
+  }
+  if (name.contains("laneid")) {
+    return BuiltinKind::LaneId;
+  }
+  return BuiltinKind::None;
+}
+
+static bool dependsOnBuiltins(const Value *value,
+                              std::initializer_list<BuiltinKind> kinds) {
+  if (!value) {
+    return false;
+  }
+
+  SmallVector<const Value *, 8> worklist;
+  SmallPtrSet<const Value *, 16> visited;
+  worklist.push_back(value);
+
+  while (!worklist.empty()) {
+    const Value *current = worklist.pop_back_val();
+    if (!visited.insert(current).second) {
+      continue;
+    }
+
+    const BuiltinKind builtin = CUDASymbolicModel::classifyBuiltin(current);
+    if (llvm::is_contained(kinds, builtin)) {
+      return true;
+    }
+
+    if (const auto *inst = dyn_cast<Instruction>(current)) {
+      for (const Value *operand : inst->operands()) {
+        worklist.push_back(operand);
+      }
+    } else if (const auto *ce = dyn_cast<ConstantExpr>(current)) {
+      for (const Value *operand : ce->operands()) {
+        worklist.push_back(operand);
+      }
+    }
+  }
+
+  return false;
+}
+
+static void mergePatterns(AffineAccessPattern &dst,
+                          const AffineAccessPattern &lhs,
+                          const AffineAccessPattern &rhs,
+                          bool subtract = false) {
+  if (!lhs.valid || !rhs.valid) {
+    dst.valid = false;
+    return;
+  }
+  dst.constant =
+      subtract ? lhs.constant - rhs.constant : lhs.constant + rhs.constant;
+  dst.thread_idx_x = subtract ? lhs.thread_idx_x - rhs.thread_idx_x
+                              : lhs.thread_idx_x + rhs.thread_idx_x;
+  dst.thread_idx_y = subtract ? lhs.thread_idx_y - rhs.thread_idx_y
+                              : lhs.thread_idx_y + rhs.thread_idx_y;
+  dst.thread_idx_z = subtract ? lhs.thread_idx_z - rhs.thread_idx_z
+                              : lhs.thread_idx_z + rhs.thread_idx_z;
+  dst.block_idx_x = subtract ? lhs.block_idx_x - rhs.block_idx_x
+                             : lhs.block_idx_x + rhs.block_idx_x;
+  dst.block_idx_y = subtract ? lhs.block_idx_y - rhs.block_idx_y
+                             : lhs.block_idx_y + rhs.block_idx_y;
+  dst.block_idx_z = subtract ? lhs.block_idx_z - rhs.block_idx_z
+                             : lhs.block_idx_z + rhs.block_idx_z;
+  dst.lane_id =
+      subtract ? lhs.lane_id - rhs.lane_id : lhs.lane_id + rhs.lane_id;
+  dst.valid = true;
+}
+
+} // namespace
+
+BuiltinKind CUDASymbolicModel::classifyBuiltin(const Value *value) {
+  if (!value) {
+    return BuiltinKind::None;
+  }
+  if (const auto *call = dyn_cast<CallBase>(value)) {
+    if (const Function *callee = call->getCalledFunction()) {
+      return classifyName(callee->getName());
+    }
+  }
+  if (const auto *gv = dyn_cast<GlobalValue>(value)) {
+    return classifyName(gv->getName());
+  }
+  if (const auto *inst = dyn_cast<Instruction>(value);
+      inst && inst->hasName()) {
+    return classifyName(inst->getName());
+  }
+  if (const auto *arg = dyn_cast<Argument>(value); arg && arg->hasName()) {
+    return classifyName(arg->getName());
+  }
+  return BuiltinKind::None;
+}
+
+bool CUDASymbolicModel::dependsOnThreadBuiltin(const Value *value) {
+  return dependsOnBuiltins(value,
+                           {BuiltinKind::ThreadIdxX, BuiltinKind::ThreadIdxY,
+                            BuiltinKind::ThreadIdxZ, BuiltinKind::LaneId});
+}
+
+bool CUDASymbolicModel::dependsOnBlockBuiltin(const Value *value) {
+  return dependsOnBuiltins(
+      value,
+      {BuiltinKind::BlockIdxX, BuiltinKind::BlockIdxY, BuiltinKind::BlockIdxZ});
+}
+
+bool CUDASymbolicModel::dependsOnLaneBuiltin(const Value *value) {
+  return dependsOnBuiltins(value, {BuiltinKind::LaneId});
+}
+
+std::optional<int64_t>
+CUDASymbolicModel::evaluateConstantInt(const Value *value) {
+  if (!value) {
+    return std::nullopt;
+  }
+  if (const auto *ci = dyn_cast<ConstantInt>(value)) {
+    return ci->getSExtValue();
+  }
+  if (const auto *ce = dyn_cast<ConstantExpr>(value)) {
+    if (ce->getOpcode() == Instruction::Add) {
+      return addIfKnown(evaluateConstantInt(ce->getOperand(0)),
+                        evaluateConstantInt(ce->getOperand(1)));
+    }
+    if (ce->getOpcode() == Instruction::Sub) {
+      return addIfKnown(evaluateConstantInt(ce->getOperand(0)),
+                        evaluateConstantInt(ce->getOperand(1)), true);
+    }
+    if (ce->getOpcode() == Instruction::Mul) {
+      auto lhs = evaluateConstantInt(ce->getOperand(0));
+      auto rhs = evaluateConstantInt(ce->getOperand(1));
+      if (lhs && rhs) {
+        return (*lhs) * (*rhs);
+      }
+    }
+    return std::nullopt;
+  }
+  if (const auto *inst = dyn_cast<Instruction>(value)) {
+    if (inst->getOpcode() == Instruction::Add) {
+      return addIfKnown(evaluateConstantInt(inst->getOperand(0)),
+                        evaluateConstantInt(inst->getOperand(1)));
+    }
+    if (inst->getOpcode() == Instruction::Sub) {
+      return addIfKnown(evaluateConstantInt(inst->getOperand(0)),
+                        evaluateConstantInt(inst->getOperand(1)), true);
+    }
+    if (inst->getOpcode() == Instruction::Mul ||
+        inst->getOpcode() == Instruction::Shl) {
+      auto lhs = evaluateConstantInt(inst->getOperand(0));
+      auto rhs = evaluateConstantInt(inst->getOperand(1));
+      if (lhs && rhs) {
+        return inst->getOpcode() == Instruction::Mul ? (*lhs) * (*rhs)
+                                                     : (*lhs) << (*rhs);
+      }
+    }
+    if (inst->getOpcode() == Instruction::And) {
+      auto lhs = evaluateConstantInt(inst->getOperand(0));
+      auto rhs = evaluateConstantInt(inst->getOperand(1));
+      if (lhs && rhs) {
+        return (*lhs) & (*rhs);
+      }
+    }
+  }
+  return std::nullopt;
+}
+
+AffineAccessPattern
+CUDASymbolicModel::extractAffineAccessPattern(const Value *value) {
+  AffineAccessPattern pattern;
+  if (!value) {
+    return pattern;
+  }
+
+  switch (classifyBuiltin(value)) {
+  case BuiltinKind::ThreadIdxX:
+    pattern.thread_idx_x = 1;
+    pattern.valid = true;
+    return pattern;
+  case BuiltinKind::ThreadIdxY:
+    pattern.thread_idx_y = 1;
+    pattern.valid = true;
+    return pattern;
+  case BuiltinKind::ThreadIdxZ:
+    pattern.thread_idx_z = 1;
+    pattern.valid = true;
+    return pattern;
+  case BuiltinKind::BlockIdxX:
+    pattern.block_idx_x = 1;
+    pattern.valid = true;
+    return pattern;
+  case BuiltinKind::BlockIdxY:
+    pattern.block_idx_y = 1;
+    pattern.valid = true;
+    return pattern;
+  case BuiltinKind::BlockIdxZ:
+    pattern.block_idx_z = 1;
+    pattern.valid = true;
+    return pattern;
+  case BuiltinKind::LaneId:
+    pattern.lane_id = 1;
+    pattern.valid = true;
+    return pattern;
+  default:
+    break;
+  }
+
+  if (const auto *ci = dyn_cast<ConstantInt>(value)) {
+    pattern.constant = ci->getSExtValue();
+    pattern.valid = true;
+    return pattern;
+  }
+
+  if (const auto *gep = dyn_cast<GEPOperator>(value)) {
+    if (gep->getNumIndices() == 0) {
+      return extractAffineAccessPattern(gep->getPointerOperand());
+    }
+    const Value *last_index = gep->idx_end()[-1];
+    AffineAccessPattern index_pattern = extractAffineAccessPattern(last_index);
+    if (!index_pattern.valid) {
+      return pattern;
+    }
+
+    Type *element_type = gep->getSourceElementType();
+    int64_t elem_size = 4;
+    if (element_type->isIntegerTy()) {
+      elem_size = std::max<int64_t>(1, element_type->getIntegerBitWidth() / 8);
+    } else if (element_type->isDoubleTy()) {
+      elem_size = 8;
+    } else if (element_type->isPointerTy()) {
+      elem_size = 8;
+    }
+    index_pattern.constant *= elem_size;
+    index_pattern.thread_idx_x *= elem_size;
+    index_pattern.thread_idx_y *= elem_size;
+    index_pattern.thread_idx_z *= elem_size;
+    index_pattern.block_idx_x *= elem_size;
+    index_pattern.block_idx_y *= elem_size;
+    index_pattern.block_idx_z *= elem_size;
+    index_pattern.lane_id *= elem_size;
+    return index_pattern;
+  }
+
+  if (const auto *op = dyn_cast<Operator>(value)) {
+    if (op->getOpcode() == Instruction::Add) {
+      mergePatterns(pattern, extractAffineAccessPattern(op->getOperand(0)),
+                    extractAffineAccessPattern(op->getOperand(1)));
+      return pattern;
+    }
+    if (op->getOpcode() == Instruction::Sub) {
+      mergePatterns(pattern, extractAffineAccessPattern(op->getOperand(0)),
+                    extractAffineAccessPattern(op->getOperand(1)), true);
+      return pattern;
+    }
+    if (op->getOpcode() == Instruction::And) {
+      if (auto mask = evaluateConstantInt(op->getOperand(1))) {
+        AffineAccessPattern lhs = extractAffineAccessPattern(op->getOperand(0));
+        if (lhs.valid && lhs.thread_idx_x == 0 && lhs.block_idx_x == 1 &&
+            lhs.lane_id == 0) {
+          lhs.constant &= *mask;
+          return lhs;
+        }
+      }
+    }
+    if (op->getOpcode() == Instruction::Mul ||
+        op->getOpcode() == Instruction::Shl) {
+      auto lhs_const = evaluateConstantInt(op->getOperand(0));
+      auto rhs_const = evaluateConstantInt(op->getOperand(1));
+      if (lhs_const && !rhs_const) {
+        AffineAccessPattern rhs = extractAffineAccessPattern(op->getOperand(1));
+        if (!rhs.valid) {
+          return pattern;
+        }
+        const int64_t scale = *lhs_const;
+        rhs.constant *= scale;
+        rhs.thread_idx_x *= scale;
+        rhs.thread_idx_y *= scale;
+        rhs.thread_idx_z *= scale;
+        rhs.block_idx_x *= scale;
+        rhs.block_idx_y *= scale;
+        rhs.block_idx_z *= scale;
+        rhs.lane_id *= scale;
+        return rhs;
+      }
+      if (!lhs_const && rhs_const) {
+        AffineAccessPattern lhs = extractAffineAccessPattern(op->getOperand(0));
+        if (!lhs.valid) {
+          return pattern;
+        }
+        const int64_t scale = op->getOpcode() == Instruction::Shl
+                                  ? (int64_t{1} << *rhs_const)
+                                  : *rhs_const;
+        lhs.constant *= scale;
+        lhs.thread_idx_x *= scale;
+        lhs.thread_idx_y *= scale;
+        lhs.thread_idx_z *= scale;
+        lhs.block_idx_x *= scale;
+        lhs.block_idx_y *= scale;
+        lhs.block_idx_z *= scale;
+        lhs.lane_id *= scale;
+        return lhs;
+      }
+    }
+  }
+
+  return pattern;
+}
+
+SymbolicDimension CUDASymbolicModel::classifyDimension(const Value *value) {
+  SymbolicDimension dim;
+  dim.value = value;
+  if (!value) {
+    return dim;
+  }
+  if (const auto constant = evaluateConstantInt(value)) {
+    dim.kind = SymbolicValueKind::Constant;
+    dim.constant = static_cast<uint64_t>(*constant);
+    return dim;
+  }
+  if (classifyBuiltin(value) != BuiltinKind::None) {
+    dim.kind = SymbolicValueKind::DerivedFromBuiltin;
+    return dim;
+  }
+  if (isa<Argument>(value) || isa<Instruction>(value)) {
+    dim.kind = SymbolicValueKind::Symbolic;
+    return dim;
+  }
+  return dim;
+}
+
+int64_t AffineAccessPattern::linearize(int64_t x, int64_t y, int64_t z,
+                                       int64_t dim_x, int64_t dim_y,
+                                       int64_t dim_z) {
+  if (dim_x <= 0)
+    dim_x = 1;
+  if (dim_y <= 0)
+    dim_y = 1;
+  if (dim_z <= 0)
+    dim_z = 1;
+  return (z * dim_y + y) * dim_x + x;
+}
+
+void AffineAccessPattern::delinearize(int64_t linear, int64_t dim_x,
+                                      int64_t dim_y, int64_t &x, int64_t &y,
+                                      int64_t &z) {
+  if (dim_x <= 0)
+    dim_x = 1;
+  if (dim_y <= 0)
+    dim_y = 1;
+  x = linear % dim_x;
+  int64_t rest = linear / dim_x;
+  y = rest % dim_y;
+  z = rest / dim_y;
+}
+
+} // namespace concurrency::cuda

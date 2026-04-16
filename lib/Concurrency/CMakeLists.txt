@@ -16,6 +16,8 @@ set(Concurrency_SOURCES
   LockSet/LockSetAnalysis.cpp
   Memory/EscapeAnalysis.cpp
   Memory/StaticThreadSharingAnalysis.cpp
+  CUDA/CUDAMemoryModel.cpp
+  CUDA/CUDASymbolicModel.cpp
   CUDA/CUDAAnalysis.cpp
   JoinTarget/JoinTargetAnalysis.cpp
   MPI/MPIAnalysis.cpp

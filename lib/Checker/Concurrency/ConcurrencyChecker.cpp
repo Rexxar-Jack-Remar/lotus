@@ -115,6 +115,10 @@ ConcurrencyChecker::ConcurrencyChecker(Module &module)
       "CUDA Memory Space Ambiguity", BugDescription::BI_LOW,
       BugDescription::BC_WARNING,
       "Could not classify CUDA memory space precisely");
+  m_cudaParametricRaceTypeId = mgr.register_bug_type(
+      "CUDA Parametric Race Risk", BugDescription::BI_MEDIUM,
+      BugDescription::BC_WARNING,
+      "Parametric CUDA thread/block reasoning exposes a potential race");
 
   m_stats.totalInstructions = 0;
   m_stats.mhpPairs = 0;
@@ -500,6 +504,9 @@ void ConcurrencyChecker::checkCUDABugs() {
       break;
     case ConcurrencyBugType::CUDA_SHARED_GLOBAL_SPACE_MISMATCH:
       reportBug(report, m_cudaMemorySpaceTypeId);
+      break;
+    case ConcurrencyBugType::CUDA_PARAMETRIC_RACE_RISK:
+      reportBug(report, m_cudaParametricRaceTypeId);
       break;
     default:
       break;

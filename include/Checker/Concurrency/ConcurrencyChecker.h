@@ -2,6 +2,17 @@
 #define CONCURRENCY_CHECKER_H
 
 #include "Concurrency/ConcurrencyFacade.h"
+#include "Checker/Concurrency/AtomicityChecker.h"
+#include "Checker/Concurrency/CUDAChecker.h"
+#include "Checker/Concurrency/ConcurrencyBugReport.h"
+#include "Checker/Concurrency/ConditionVariableChecker.h"
+#include "Checker/Concurrency/DataRaceChecker.h"
+#include "Checker/Concurrency/DeadlockChecker.h"
+#include "Checker/Concurrency/LockMismatchChecker.h"
+#include "Checker/Concurrency/MPIChecker.h"
+#include "Checker/Concurrency/OpenMPChecker.h"
+#include "Checker/Report/BugReport.h"
+#include "Checker/Report/BugReportMgr.h"
 #include "Concurrency/LockSet/LockSetAnalysis.h"
 #include "Concurrency/MHP/HappensBeforeAnalysis.h"
 #include "Concurrency/MHP/IMHPAnalysis.h"
@@ -12,17 +23,6 @@
 #include "Concurrency/Memory/StaticThreadSharingAnalysis.h"
 #include "Concurrency/OpenMP/OpenMPTaskGraph.h"
 #include "Concurrency/Utils/ThreadLocalAnalysis.h"
-#include "Checker/Concurrency/AtomicityChecker.h"
-#include "Checker/Concurrency/ConcurrencyBugReport.h"
-#include "Checker/Concurrency/ConditionVariableChecker.h"
-#include "Checker/Concurrency/CUDAChecker.h"
-#include "Checker/Concurrency/DataRaceChecker.h"
-#include "Checker/Concurrency/DeadlockChecker.h"
-#include "Checker/Concurrency/LockMismatchChecker.h"
-#include "Checker/Concurrency/MPIChecker.h"
-#include "Checker/Concurrency/OpenMPChecker.h"
-#include "Checker/Report/BugReport.h"
-#include "Checker/Report/BugReportMgr.h"
 
 #include <memory>
 #include <string>
@@ -237,6 +237,7 @@ private:
   int m_cudaVolatileMissingTypeId;
   int m_cudaSymbolicConfigTypeId;
   int m_cudaMemorySpaceTypeId;
+  int m_cudaParametricRaceTypeId;
 
   // Results tracking
   Statistics m_stats;
