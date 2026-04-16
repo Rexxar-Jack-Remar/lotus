@@ -1525,6 +1525,22 @@ ThreadAPI::TD_TYPE ThreadAPI::getType(const Function *F) const {
       return TD_CUDA_MEMORY_BARRIER;
     if (CUDAModel::isAtomic(name))
       return TD_CUDA_ATOMIC;
+    if (CUDAModel::isMemcpy(name))
+      return TD_CUDA_MEMCPY;
+    if (CUDAModel::isMemset(name))
+      return TD_CUDA_MEMSET;
+    if (CUDAModel::isMalloc(name))
+      return TD_CUDA_MALLOC;
+    if (CUDAModel::isTexture(name))
+      return TD_CUDA_TEXTURE;
+    if (CUDAModel::isSurface(name))
+      return TD_CUDA_SURFACE;
+    if (CUDAModel::isUnifiedMemory(name))
+      return TD_CUDA_UNIFIED_MEMORY;
+    if (CUDAModel::isDeviceManagement(name))
+      return TD_CUDA_DEVICE_MGMT;
+    if (CUDAModel::isErrorHandling(name))
+      return TD_CUDA_ERROR;
   }
 
   // 4. Linux Kernel Support (if enabled)
@@ -2068,6 +2084,22 @@ const char *ThreadAPI::tdTypeToString(TD_TYPE t) {
     return "TD_CUDA_MEMORY_BARRIER";
   case TD_CUDA_ATOMIC:
     return "TD_CUDA_ATOMIC";
+  case TD_CUDA_MEMCPY:
+    return "TD_CUDA_MEMCPY";
+  case TD_CUDA_MEMSET:
+    return "TD_CUDA_MEMSET";
+  case TD_CUDA_MALLOC:
+    return "TD_CUDA_MALLOC";
+  case TD_CUDA_UNIFIED_MEMORY:
+    return "TD_CUDA_UNIFIED_MEMORY";
+  case TD_CUDA_TEXTURE:
+    return "TD_CUDA_TEXTURE";
+  case TD_CUDA_SURFACE:
+    return "TD_CUDA_SURFACE";
+  case TD_CUDA_DEVICE_MGMT:
+    return "TD_CUDA_DEVICE_MGMT";
+  case TD_CUDA_ERROR:
+    return "TD_CUDA_ERROR";
   case TD_MPI_SESSION_INIT:
     return "TD_MPI_SESSION_INIT";
   case TD_MPI_SESSION_FINALIZE:

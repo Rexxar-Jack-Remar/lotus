@@ -64,6 +64,45 @@ static BuiltinKind classifyName(StringRef name) {
   if (name.contains("laneid")) {
     return BuiltinKind::LaneId;
   }
+  if (name.contains("shuffle.down") || name.contains("nvvm.shfl.down")) {
+    return BuiltinKind::ShuffleDown;
+  }
+  if (name.contains("shuffle.up") || name.contains("nvvm.shfl.up")) {
+    return BuiltinKind::ShuffleUp;
+  }
+  if (name.contains("shuffle.xor") || name.contains("nvvm.shfl.xor")) {
+    return BuiltinKind::ShuffleXor;
+  }
+  if (name.contains("shuffle") || name.contains("nvvm.shfl")) {
+    return BuiltinKind::Shuffle;
+  }
+  if (name.contains("vote") || name.contains("nvvm.vote")) {
+    if (name.contains("any")) {
+      return BuiltinKind::VoteAny;
+    }
+    if (name.contains("all")) {
+      return BuiltinKind::VoteAll;
+    }
+    return BuiltinKind::VoteBallot;
+  }
+  if (name.contains("lanemask") || name.contains("nvvm.lanemask")) {
+    if (name.contains("lt")) {
+      return BuiltinKind::LaneMaskLt;
+    }
+    if (name.contains("le")) {
+      return BuiltinKind::LaneMaskLe;
+    }
+    if (name.contains("gt")) {
+      return BuiltinKind::LaneMaskGt;
+    }
+    if (name.contains("ge")) {
+      return BuiltinKind::LaneMaskGe;
+    }
+    return BuiltinKind::LaneMaskLt;
+  }
+  if (name.contains("warpsize") || name.contains("nvvm.warpsize")) {
+    return BuiltinKind::WarpSize;
+  }
   return BuiltinKind::None;
 }
 
@@ -329,7 +368,8 @@ CUDASymbolicModel::extractAffineAccessPattern(const Value *value) {
           element_type = ptr->getPointerElementType();
         }
         if (element_type->isIntegerTy()) {
-          elem_size = std::max<int64_t>(1, element_type->getIntegerBitWidth() / 8);
+          elem_size =
+              std::max<int64_t>(1, element_type->getIntegerBitWidth() / 8);
         } else if (element_type->isDoubleTy() || element_type->isPointerTy()) {
           elem_size = 8;
         } else if (const auto *arr = dyn_cast<ArrayType>(element_type)) {
@@ -502,6 +542,20 @@ UniformityClass CUDASymbolicModel::classifyUniformity(const Value *value) {
   case BuiltinKind::ThreadIdxZ:
   case BuiltinKind::LaneId:
     return UniformityClass::ThreadVarying;
+  case BuiltinKind::Shuffle:
+  case BuiltinKind::ShuffleDown:
+  case BuiltinKind::ShuffleUp:
+  case BuiltinKind::ShuffleXor:
+    return UniformityClass::WarpUniform;
+  case BuiltinKind::VoteAny:
+  case BuiltinKind::VoteAll:
+  case BuiltinKind::VoteBallot:
+  case BuiltinKind::LaneMaskLt:
+  case BuiltinKind::LaneMaskLe:
+  case BuiltinKind::LaneMaskGt:
+  case BuiltinKind::LaneMaskGe:
+  case BuiltinKind::WarpSize:
+    return UniformityClass::WarpUniform;
   case BuiltinKind::BlockIdxX:
   case BuiltinKind::BlockIdxY:
   case BuiltinKind::BlockIdxZ:
@@ -540,7 +594,8 @@ UniformityClass CUDASymbolicModel::classifyUniformity(const Value *value) {
   return UniformityClass::Unknown;
 }
 
-ParticipationScope CUDASymbolicModel::classifyParticipation(const Value *value) {
+ParticipationScope
+CUDASymbolicModel::classifyParticipation(const Value *value) {
   AffineAccessPattern pattern = extractAffineAccessPattern(value);
   return pattern.valid ? pattern.participation : ParticipationScope::Unknown;
 }

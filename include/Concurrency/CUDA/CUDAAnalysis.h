@@ -25,13 +25,7 @@ enum class CoalescingQuality {
   Uncoalesced
 };
 
-enum class SynchronizationScope {
-  None,
-  Warp,
-  Block,
-  Device,
-  System
-};
+enum class SynchronizationScope { None, Warp, Block, Device, System };
 
 enum class RaceKind {
   DataRace,
@@ -49,18 +43,9 @@ enum class LaunchOrderingSource {
   Unknown
 };
 
-enum class AliasPrecision {
-  Exact,
-  SymbolicAffine,
-  Ambiguous,
-  NonAffine
-};
+enum class AliasPrecision { Exact, SymbolicAffine, Ambiguous, NonAffine };
 
-enum class AliasSource {
-  Local,
-  AserPTA,
-  Wrapper
-};
+enum class AliasSource { Local, AserPTA, Wrapper };
 
 enum class SynchronizationPrimitive {
   None,
@@ -73,11 +58,7 @@ enum class SynchronizationPrimitive {
   StreamProgramOrder
 };
 
-enum class ParticipationKind {
-  Exact,
-  Conditional,
-  Partial
-};
+enum class ParticipationKind { Exact, Conditional, Partial };
 
 struct LaunchDimensions {
   std::array<SymbolicDimension, 3> grid{};
@@ -165,6 +146,56 @@ struct CoalescingInfo {
   uint32_t covered_bytes = 0;
   uint32_t participating_lanes = 0;
   uint32_t unique_segments = 0;
+};
+
+enum class TransferKind {
+  Unknown,
+  HostToDevice,
+  DeviceToHost,
+  DeviceToDevice,
+  HostToHost
+};
+
+struct MemoryTransferInfo {
+  const llvm::Instruction *inst = nullptr;
+  const llvm::Value *src = nullptr;
+  const llvm::Value *dst = nullptr;
+  MemorySpace src_space = MemorySpace::Unknown;
+  MemorySpace dst_space = MemorySpace::Unknown;
+  TransferKind kind = TransferKind::Unknown;
+  bool is_async = false;
+  uint64_t size = 0;
+};
+
+struct ConstantAccessInfo {
+  const llvm::Instruction *inst = nullptr;
+  const llvm::Value *base = nullptr;
+  uint32_t access_size = 0;
+  bool strided = false;
+  int64_t stride = 0;
+};
+
+struct UnifiedMemoryInfo {
+  const llvm::Instruction *inst = nullptr;
+  const llvm::Value *ptr = nullptr;
+  uint64_t size = 0;
+  bool is_managed = false;
+  bool is_prefetch = false;
+  int device_id = -1;
+};
+
+struct TextureAccessInfo {
+  const llvm::Instruction *inst = nullptr;
+  const llvm::Value *texref = nullptr;
+  uint32_t dimensions = 0;
+  bool is_write = false;
+};
+
+struct SurfaceAccessInfo {
+  const llvm::Instruction *inst = nullptr;
+  const llvm::Value *surfref = nullptr;
+  uint32_t dimensions = 0;
+  bool is_write = false;
 };
 
 struct RaceInfo {
@@ -255,6 +286,10 @@ struct KernelSummary {
   size_t constant_access_count = 0;
   size_t local_access_count = 0;
   size_t atomic_count = 0;
+  size_t transfer_count = 0;
+  bool has_uncoalesced_constant = false;
+  bool has_texture_access = false;
+  bool has_surface_access = false;
   llvm::SmallVector<DivergenceRegion, 4> divergence_regions;
   llvm::SmallVector<BankConflictInfo, 4> bank_conflicts;
   llvm::SmallVector<CoalescingInfo, 4> coalescing_issues;
@@ -264,6 +299,10 @@ struct KernelSummary {
   llvm::SmallVector<VolatileMissingInfo, 4> volatile_missing;
   llvm::SmallVector<WarpUniformInfo, 4> warp_uniform_regions;
   llvm::SmallVector<SynchronizationRecord, 4> synchronizations;
+  llvm::SmallVector<MemoryTransferInfo, 4> memory_transfers;
+  llvm::SmallVector<ConstantAccessInfo, 4> constant_accesses;
+  llvm::SmallVector<TextureAccessInfo, 4> texture_accesses;
+  llvm::SmallVector<SurfaceAccessInfo, 4> surface_accesses;
   std::vector<AccessInfo> accesses;
 };
 
@@ -285,6 +324,9 @@ public:
   }
   const std::vector<InterKernelRaceInfo> &getInterKernelRaces() const {
     return m_inter_kernel_races;
+  }
+  const std::vector<MemoryTransferInfo> &getMemoryTransfers() const {
+    return m_memory_transfers;
   }
   const DeviceConfig &getDeviceConfig() const { return m_device_config; }
 
@@ -308,6 +350,8 @@ private:
   std::vector<KernelLaunchInfo> m_launches;
   std::vector<KernelSummary> m_kernel_summaries;
   std::vector<InterKernelRaceInfo> m_inter_kernel_races;
+  std::vector<MemoryTransferInfo> m_memory_transfers;
+  std::vector<UnifiedMemoryInfo> m_unified_memory;
   std::unordered_map<const llvm::Function *, size_t> m_kernel_index;
 
   void analyzeKernel(const llvm::Function *kernel,
@@ -322,6 +366,8 @@ private:
   void analyzeSynchronization(KernelSummary &summary,
                               const llvm::Function *kernel);
   void analyzeInterKernelRaces();
+  void analyzeMemoryTransfers();
+  void analyzeConstantAccesses(KernelSummary &summary);
 
   static const llvm::Value *getMemoryOperand(const llvm::Instruction *inst);
   static const llvm::Value *getCanonicalBase(const llvm::Value *value) {

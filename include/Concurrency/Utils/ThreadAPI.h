@@ -234,12 +234,20 @@ public:
     TD_OMP_DOACROSS_SUBMIT, ///< __kmpc_doacross_submit*
 
     // CUDA / NVVM
-    TD_CUDA_KERNEL_LAUNCH,   ///< CUDA kernel launch configuration or launch
-    TD_CUDA_DEVICE_SYNC,     ///< cudaDeviceSynchronize/cudaThreadSynchronize
-    TD_CUDA_BARRIER,         ///< __syncthreads / llvm.nvvm.barrier0
-    TD_CUDA_WARP_BARRIER,    ///< __syncwarp / llvm.nvvm.bar.warp.sync
-    TD_CUDA_MEMORY_BARRIER,  ///< threadfence / nvvm membar intrinsics
-    TD_CUDA_ATOMIC,          ///< CUDA/NVVM atomic and reduction intrinsics
+    TD_CUDA_KERNEL_LAUNCH,  ///< CUDA kernel launch configuration or launch
+    TD_CUDA_DEVICE_SYNC,    ///< cudaDeviceSynchronize/cudaThreadSynchronize
+    TD_CUDA_BARRIER,        ///< __syncthreads / llvm.nvvm.barrier0
+    TD_CUDA_WARP_BARRIER,   ///< __syncwarp / llvm.nvvm.bar.warp.sync
+    TD_CUDA_MEMORY_BARRIER, ///< threadfence / nvvm membar intrinsics
+    TD_CUDA_ATOMIC,
+    TD_CUDA_MEMCPY,
+    TD_CUDA_MEMSET,
+    TD_CUDA_MALLOC,
+    TD_CUDA_UNIFIED_MEMORY,
+    TD_CUDA_TEXTURE,
+    TD_CUDA_SURFACE,
+    TD_CUDA_DEVICE_MGMT,
+    TD_CUDA_ERROR,
 
     // MPI Session Management (MPI-4.0)
     TD_MPI_SESSION_INIT,             ///< MPI_Session_init
@@ -743,8 +751,8 @@ public:
     return getCallee(next_call);
   }
 
-  inline bool isCUDAKernelCallImmediatelyAfterLaunch(
-      const llvm::Instruction *inst) const {
+  inline bool
+  isCUDAKernelCallImmediatelyAfterLaunch(const llvm::Instruction *inst) const {
     if (!inst) {
       return false;
     }
@@ -767,8 +775,7 @@ public:
   //@{
   inline bool isForkLike(const llvm::Instruction *inst) const {
     TD_TYPE t = getType(getCallee(inst));
-    return t == TD_FORK || t == TD_JTHREAD_FORK ||
-           t == TD_CUDA_KERNEL_LAUNCH ||
+    return t == TD_FORK || t == TD_JTHREAD_FORK || t == TD_CUDA_KERNEL_LAUNCH ||
            (t == TD_ASYNC && !isProvablyDeferredAsyncLaunch(inst));
   }
   inline bool isForkLike(const llvm::CallBase *cb) const {

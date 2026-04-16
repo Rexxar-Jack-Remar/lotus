@@ -29,7 +29,19 @@ enum class BuiltinKind {
   GridDimX,
   GridDimY,
   GridDimZ,
-  LaneId
+  LaneId,
+  Shuffle,
+  ShuffleDown,
+  ShuffleUp,
+  ShuffleXor,
+  VoteAny,
+  VoteAll,
+  VoteBallot,
+  WarpSize,
+  LaneMaskLt,
+  LaneMaskLe,
+  LaneMaskGt,
+  LaneMaskGe
 };
 
 enum class UniformityClass {
@@ -39,13 +51,7 @@ enum class UniformityClass {
   ThreadVarying
 };
 
-enum class ParticipationScope {
-  Unknown,
-  Lane,
-  Warp,
-  Block,
-  Grid
-};
+enum class ParticipationScope { Unknown, Lane, Warp, Block, Grid };
 
 struct SymbolicDimension {
   SymbolicValueKind kind = SymbolicValueKind::Unknown;
