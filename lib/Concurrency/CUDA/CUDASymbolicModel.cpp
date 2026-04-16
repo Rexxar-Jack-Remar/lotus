@@ -133,6 +133,17 @@ static void mergePatterns(AffineAccessPattern &dst,
   dst.participation = std::max(lhs.participation, rhs.participation);
 }
 
+static void scalePattern(AffineAccessPattern &pattern, int64_t scale) {
+  pattern.constant *= scale;
+  pattern.thread_idx_x *= scale;
+  pattern.thread_idx_y *= scale;
+  pattern.thread_idx_z *= scale;
+  pattern.block_idx_x *= scale;
+  pattern.block_idx_y *= scale;
+  pattern.block_idx_z *= scale;
+  pattern.lane_id *= scale;
+}
+
 static UniformityClass mergeUniformity(UniformityClass lhs,
                                        UniformityClass rhs) {
   return std::max(lhs, rhs);
@@ -298,31 +309,44 @@ CUDASymbolicModel::extractAffineAccessPattern(const Value *value) {
     if (gep->getNumIndices() == 0) {
       return extractAffineAccessPattern(gep->getPointerOperand());
     }
-    const Value *last_index = gep->idx_end()[-1];
-    AffineAccessPattern index_pattern = extractAffineAccessPattern(last_index);
-    if (!index_pattern.valid) {
-      return pattern;
-    }
 
     Type *element_type = gep->getSourceElementType();
-    int64_t elem_size = 4;
-    if (element_type->isIntegerTy()) {
-      elem_size = std::max<int64_t>(1, element_type->getIntegerBitWidth() / 8);
-    } else if (element_type->isDoubleTy()) {
-      elem_size = 8;
-    } else if (element_type->isPointerTy()) {
-      elem_size = 8;
+    auto idx_it = gep->idx_begin();
+    for (; idx_it != gep->idx_end(); ++idx_it) {
+      AffineAccessPattern index_pattern = extractAffineAccessPattern(*idx_it);
+      if (!index_pattern.valid) {
+        pattern.non_affine = true;
+        return pattern;
+      }
+
+      int64_t elem_size = 1;
+      if (element_type->isSized()) {
+        if (const auto *arr = dyn_cast<ArrayType>(element_type)) {
+          element_type = arr->getElementType();
+        } else if (const auto *vec = dyn_cast<VectorType>(element_type)) {
+          element_type = vec->getElementType();
+        } else if (const auto *ptr = dyn_cast<PointerType>(element_type)) {
+          element_type = ptr->getPointerElementType();
+        }
+        if (element_type->isIntegerTy()) {
+          elem_size = std::max<int64_t>(1, element_type->getIntegerBitWidth() / 8);
+        } else if (element_type->isDoubleTy() || element_type->isPointerTy()) {
+          elem_size = 8;
+        } else if (const auto *arr = dyn_cast<ArrayType>(element_type)) {
+          elem_size = static_cast<int64_t>(arr->getNumElements());
+          element_type = arr->getElementType();
+        }
+      }
+
+      scalePattern(index_pattern, elem_size);
+      if (!pattern.valid) {
+        pattern = index_pattern;
+      } else {
+        mergePatterns(pattern, pattern, index_pattern);
+      }
     }
-    index_pattern.constant *= elem_size;
-    index_pattern.thread_idx_x *= elem_size;
-    index_pattern.thread_idx_y *= elem_size;
-    index_pattern.thread_idx_z *= elem_size;
-    index_pattern.block_idx_x *= elem_size;
-    index_pattern.block_idx_y *= elem_size;
-    index_pattern.block_idx_z *= elem_size;
-    index_pattern.lane_id *= elem_size;
-    index_pattern.exact = index_pattern.exact && elem_size > 0;
-    return index_pattern;
+    pattern.exact = pattern.exact && !pattern.non_affine;
+    return pattern;
   }
 
   if (const auto *op = dyn_cast<Operator>(value)) {
@@ -365,6 +389,24 @@ CUDASymbolicModel::extractAffineAccessPattern(const Value *value) {
         }
       }
     }
+    if (op->getOpcode() == Instruction::Or) {
+      auto lhs_const = evaluateConstantInt(op->getOperand(0));
+      auto rhs_const = evaluateConstantInt(op->getOperand(1));
+      if (lhs_const && !rhs_const) {
+        pattern = extractAffineAccessPattern(op->getOperand(1));
+        if (pattern.valid) {
+          pattern.constant |= *lhs_const;
+        }
+        return pattern;
+      }
+      if (!lhs_const && rhs_const) {
+        pattern = extractAffineAccessPattern(op->getOperand(0));
+        if (pattern.valid) {
+          pattern.constant |= *rhs_const;
+        }
+        return pattern;
+      }
+    }
     if (op->getOpcode() == Instruction::Mul ||
         op->getOpcode() == Instruction::Shl) {
       auto lhs_const = evaluateConstantInt(op->getOperand(0));
@@ -375,15 +417,7 @@ CUDASymbolicModel::extractAffineAccessPattern(const Value *value) {
           return pattern;
         }
         const int64_t scale = *lhs_const;
-        rhs.constant *= scale;
-        rhs.thread_idx_x *= scale;
-        rhs.thread_idx_y *= scale;
-        rhs.thread_idx_z *= scale;
-        rhs.block_idx_x *= scale;
-        rhs.block_idx_y *= scale;
-        rhs.block_idx_z *= scale;
-        rhs.lane_id *= scale;
-        rhs.exact = rhs.exact;
+        scalePattern(rhs, scale);
         return rhs;
       }
       if (!lhs_const && rhs_const) {
@@ -394,15 +428,37 @@ CUDASymbolicModel::extractAffineAccessPattern(const Value *value) {
         const int64_t scale = op->getOpcode() == Instruction::Shl
                                   ? (int64_t{1} << *rhs_const)
                                   : *rhs_const;
-        lhs.constant *= scale;
-        lhs.thread_idx_x *= scale;
-        lhs.thread_idx_y *= scale;
-        lhs.thread_idx_z *= scale;
-        lhs.block_idx_x *= scale;
-        lhs.block_idx_y *= scale;
-        lhs.block_idx_z *= scale;
-        lhs.lane_id *= scale;
-        lhs.exact = lhs.exact;
+        scalePattern(lhs, scale);
+        return lhs;
+      }
+    }
+    if (op->getOpcode() == Instruction::SDiv ||
+        op->getOpcode() == Instruction::UDiv ||
+        op->getOpcode() == Instruction::AShr ||
+        op->getOpcode() == Instruction::LShr) {
+      auto divisor = evaluateConstantInt(op->getOperand(1));
+      AffineAccessPattern lhs = extractAffineAccessPattern(op->getOperand(0));
+      if (divisor && lhs.valid && *divisor != 0) {
+        const int64_t scale = (op->getOpcode() == Instruction::AShr ||
+                               op->getOpcode() == Instruction::LShr)
+                                  ? (int64_t{1} << *divisor)
+                                  : *divisor;
+        if (lhs.constant % scale == 0 && lhs.thread_idx_x % scale == 0 &&
+            lhs.thread_idx_y % scale == 0 && lhs.thread_idx_z % scale == 0 &&
+            lhs.block_idx_x % scale == 0 && lhs.block_idx_y % scale == 0 &&
+            lhs.block_idx_z % scale == 0 && lhs.lane_id % scale == 0) {
+          lhs.constant /= scale;
+          lhs.thread_idx_x /= scale;
+          lhs.thread_idx_y /= scale;
+          lhs.thread_idx_z /= scale;
+          lhs.block_idx_x /= scale;
+          lhs.block_idx_y /= scale;
+          lhs.block_idx_z /= scale;
+          lhs.lane_id /= scale;
+          return lhs;
+        }
+        lhs.valid = false;
+        lhs.non_affine = true;
         return lhs;
       }
     }

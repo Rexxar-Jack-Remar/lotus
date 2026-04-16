@@ -38,6 +38,22 @@ enum class RaceKind {
   InterKernelHazard
 };
 
+enum class LaunchOrderingSource {
+  None,
+  DeviceSynchronize,
+  StreamSynchronize,
+  MemoryBarrier,
+  ProgramOrder,
+  Unknown
+};
+
+enum class AliasPrecision {
+  Exact,
+  SymbolicAffine,
+  Ambiguous,
+  NonAffine
+};
+
 struct LaunchDimensions {
   std::array<SymbolicDimension, 3> grid{};
   std::array<SymbolicDimension, 3> block{};
@@ -60,6 +76,9 @@ struct KernelLaunchInfo {
   size_t sequence = 0;
   SynchronizationScope ordering_scope = SynchronizationScope::None;
   bool ordered_after_previous = false;
+  LaunchOrderingSource ordering_source = LaunchOrderingSource::None;
+  const llvm::Value *stream = nullptr;
+  bool stream_known = false;
 };
 
 struct AccessInfo {
@@ -82,6 +101,9 @@ struct AccessInfo {
   ParticipationScope participation = ParticipationScope::Unknown;
   SynchronizationScope ordering_scope = SynchronizationScope::None;
   bool exact_address = false;
+  bool has_fence_relevance = false;
+  bool fence_precedes = false;
+  AliasPrecision alias_precision = AliasPrecision::NonAffine;
   AffineAccessPattern address_pattern;
 };
 
@@ -130,6 +152,10 @@ struct RaceInfo {
   SynchronizationScope scope = SynchronizationScope::None;
   const char *ordering_reason = nullptr;
   bool exact = false;
+  const llvm::Instruction *ordering_inst = nullptr;
+  SynchronizationScope required_fence_scope = SynchronizationScope::None;
+  AliasPrecision alias_precision = AliasPrecision::NonAffine;
+  double confidence = 0.0;
 };
 
 struct BarrierMismatchInfo {
@@ -151,6 +177,7 @@ struct BarrierPhaseInfo {
   bool all_threads_reach = false;
   SynchronizationScope scope = SynchronizationScope::Block;
   bool exact = false;
+  bool is_fence = false;
 };
 
 struct InterKernelRaceInfo {
@@ -163,6 +190,13 @@ struct InterKernelRaceInfo {
   RaceKind kind = RaceKind::InterKernelHazard;
   const char *ordering_reason = nullptr;
   bool symbolic = false;
+  const llvm::Instruction *ordering_inst = nullptr;
+  LaunchOrderingSource ordering_source = LaunchOrderingSource::None;
+  const llvm::Value *stream = nullptr;
+  bool stream_known = false;
+  AliasPrecision alias_precision = AliasPrecision::NonAffine;
+  SynchronizationScope required_fence_scope = SynchronizationScope::None;
+  double confidence = 0.0;
 };
 
 struct VolatileMissingInfo {
@@ -222,6 +256,8 @@ public:
   static const char *toString(UniformityClass uniformity);
   static const char *toString(SynchronizationScope scope);
   static const char *toString(RaceKind kind);
+  static const char *toString(LaunchOrderingSource source);
+  static const char *toString(AliasPrecision precision);
 
 private:
   llvm::Module &m_module;

@@ -695,7 +695,210 @@ TEST_F(CUDAAnalysisTest, SuppressesOrderedInterKernelRaceAfterDeviceSync) {
 
   EXPECT_EQ(analysis.getLaunches().size(), 2u);
   EXPECT_TRUE(analysis.getLaunches()[1].ordered_after_previous);
+  EXPECT_EQ(analysis.getLaunches()[1].ordering_source,
+            concurrency::cuda::LaunchOrderingSource::DeviceSynchronize);
   EXPECT_TRUE(analysis.getInterKernelRaces().empty());
+}
+
+TEST_F(CUDAAnalysisTest, DetectsNonAdjacentUnorderedInterKernelHazard) {
+  const char *source = R"(
+    @global_arr = addrspace(1) global [64 x i32] zeroinitializer
+
+    declare void @__set_CUDAConfig(i32, i32)
+    declare i32 @llvm.nvvm.read.ptx.sreg.tid.x()
+
+    define void @kernel_a() {
+    entry:
+      %tid = call i32 @llvm.nvvm.read.ptx.sreg.tid.x()
+      %gep = getelementptr [64 x i32], [64 x i32] addrspace(1)* @global_arr, i32 0, i32 %tid
+      store i32 %tid, i32 addrspace(1)* %gep
+      ret void
+    }
+
+    define void @kernel_mid() {
+    entry:
+      ret void
+    }
+
+    define void @kernel_b() {
+    entry:
+      %tid = call i32 @llvm.nvvm.read.ptx.sreg.tid.x()
+      %gep = getelementptr [64 x i32], [64 x i32] addrspace(1)* @global_arr, i32 0, i32 %tid
+      %v = load i32, i32 addrspace(1)* %gep
+      ret void
+    }
+
+    define void @main() {
+    entry:
+      call void @__set_CUDAConfig(i32 1, i32 32)
+      call void @kernel_a()
+      call void @__set_CUDAConfig(i32 1, i32 32)
+      call void @kernel_mid()
+      call void @__set_CUDAConfig(i32 1, i32 32)
+      call void @kernel_b()
+      ret void
+    }
+  )";
+
+  auto module = parseModule(source);
+  ASSERT_NE(module, nullptr);
+
+  concurrency::cuda::CUDAAnalysis analysis(*module);
+  analysis.runAnalysis();
+
+  ASSERT_FALSE(analysis.getInterKernelRaces().empty());
+  bool found = false;
+  for (const auto &race : analysis.getInterKernelRaces()) {
+    if (race.first_kernel && race.second_kernel &&
+        race.first_kernel->getName() == "kernel_a" &&
+        race.second_kernel->getName() == "kernel_b") {
+      found = true;
+      EXPECT_FALSE(race.ordered);
+      EXPECT_EQ(race.kind, concurrency::cuda::RaceKind::InterKernelHazard);
+    }
+  }
+  EXPECT_TRUE(found);
+}
+
+TEST_F(CUDAAnalysisTest, ReportsMissingFenceForWarpOnlyOrdering) {
+  const char *source = R"(
+    @shared_arr = addrspace(3) global [64 x i32] zeroinitializer
+
+    declare void @__set_CUDAConfig(i32, i32)
+    declare i32 @llvm.nvvm.read.ptx.sreg.tid.x()
+    declare void @llvm.nvvm.bar.warp.sync(i32)
+
+    define void @kernel() {
+    entry:
+      %tid = call i32 @llvm.nvvm.read.ptx.sreg.tid.x()
+      %slot = and i32 %tid, 1
+      %gep = getelementptr [64 x i32], [64 x i32] addrspace(3)* @shared_arr, i32 0, i32 %slot
+      store i32 %tid, i32 addrspace(3)* %gep
+      call void @llvm.nvvm.bar.warp.sync(i32 -1)
+      store i32 7, i32 addrspace(3)* %gep
+      ret void
+    }
+
+    define void @main() {
+    entry:
+      call void @__set_CUDAConfig(i32 1, i32 64)
+      call void @kernel()
+      ret void
+    }
+  )";
+
+  auto module = parseModule(source);
+  ASSERT_NE(module, nullptr);
+
+  concurrency::cuda::CUDAAnalysis analysis(*module);
+  analysis.runAnalysis();
+
+  const auto &summary = analysis.getKernelSummaries().front();
+  ASSERT_FALSE(summary.shared_races.empty());
+  EXPECT_TRUE(llvm::any_of(summary.shared_races, [](const auto &race) {
+    return race.kind == concurrency::cuda::RaceKind::MissingFence;
+  }));
+}
+
+TEST_F(CUDAAnalysisTest, ReportsAtomicOrderingRiskForMixedAtomicAndNonAtomic) {
+  const char *source = R"(
+    @global_arr = addrspace(1) global [4 x i32] zeroinitializer
+
+    declare void @__set_CUDAConfig(i32, i32)
+    declare i32 @llvm.nvvm.read.ptx.sreg.tid.x()
+
+    define void @kernel() {
+    entry:
+      %tid = call i32 @llvm.nvvm.read.ptx.sreg.tid.x()
+      %gep = getelementptr [4 x i32], [4 x i32] addrspace(1)* @global_arr, i32 0, i32 0
+      %old = atomicrmw add i32 addrspace(1)* %gep, i32 1 seq_cst
+      store i32 %tid, i32 addrspace(1)* %gep
+      ret void
+    }
+
+    define void @main() {
+    entry:
+      call void @__set_CUDAConfig(i32 1, i32 32)
+      call void @kernel()
+      ret void
+    }
+  )";
+
+  auto module = parseModule(source);
+  ASSERT_NE(module, nullptr);
+
+  concurrency::cuda::CUDAAnalysis analysis(*module);
+  analysis.runAnalysis();
+
+  const auto &summary = analysis.getKernelSummaries().front();
+  ASSERT_FALSE(summary.global_races.empty());
+  EXPECT_TRUE(llvm::any_of(summary.global_races, [](const auto &race) {
+    return race.kind == concurrency::cuda::RaceKind::AtomicOrderingRisk;
+  }));
+}
+
+TEST_F(CUDAAnalysisTest, ClassifiesAddrSpaceZeroKernelPointerAsGlobal) {
+  const char *source = R"(
+    define ptx_kernel void @kernel(i32* %param) !nvvm.annotations !0 {
+    entry:
+      %gep = getelementptr i32, i32* %param, i32 0
+      store i32 1, i32* %gep
+      ret void
+    }
+
+    !0 = !{!1}
+    !1 = !{void (i32*)* @kernel, !"kernel", i32 1}
+  )";
+
+  auto module = parseModule(source);
+  ASSERT_NE(module, nullptr);
+
+  concurrency::cuda::CUDAAnalysis analysis(*module);
+  analysis.runAnalysis();
+
+  const auto &summary = analysis.getKernelSummaries().front();
+  ASSERT_FALSE(summary.accesses.empty());
+  EXPECT_EQ(summary.accesses.front().space, concurrency::cuda::MemorySpace::Global);
+}
+
+TEST_F(CUDAAnalysisTest, ExtractsAffinePatternThroughCastsShiftsAndDivides) {
+  const char *source = R"(
+    @global_arr = addrspace(1) global [256 x i32] zeroinitializer
+
+    declare void @__set_CUDAConfig(i32, i32)
+    declare i32 @llvm.nvvm.read.ptx.sreg.tid.x()
+
+    define void @kernel() {
+    entry:
+      %tid = call i32 @llvm.nvvm.read.ptx.sreg.tid.x()
+      %wide = zext i32 %tid to i64
+      %shift = shl i64 %wide, 2
+      %half = lshr i64 %shift, 1
+      %idx = udiv i64 %half, 2
+      %ptr = getelementptr [256 x i32], [256 x i32] addrspace(1)* @global_arr, i64 0, i64 %idx
+      store i32 %tid, i32 addrspace(1)* %ptr
+      ret void
+    }
+
+    define void @main() {
+    entry:
+      call void @__set_CUDAConfig(i32 1, i32 32)
+      call void @kernel()
+      ret void
+    }
+  )";
+
+  auto module = parseModule(source);
+  ASSERT_NE(module, nullptr);
+
+  concurrency::cuda::CUDAAnalysis analysis(*module);
+  analysis.runAnalysis();
+
+  const auto &summary = analysis.getKernelSummaries().front();
+  ASSERT_FALSE(summary.accesses.empty());
+  EXPECT_TRUE(summary.accesses.front().address_pattern.valid);
+  EXPECT_NE(summary.accesses.front().alias_precision,
+            concurrency::cuda::AliasPrecision::NonAffine);
 }
 
 // Gap 6: Multidimensional coalescing analysis

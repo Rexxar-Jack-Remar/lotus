@@ -47,23 +47,44 @@ std::vector<ConcurrencyBugReport> CUDAChecker::checkCUDABugs() {
           ConcurrencyBugType::CUDA_SHARED_MEMORY_RACE,
           "Potential shared-memory race inside a block",
           BugDescription::BI_HIGH, BugDescription::BC_ERROR);
+      ConcurrencyBugReport ordering(
+          ConcurrencyBugType::CUDA_PARAMETRIC_RACE_RISK,
+          "CUDA shared-memory ordering/fence risk",
+          BugDescription::BI_MEDIUM, BugDescription::BC_WARNING);
       for (const auto &race : summary.shared_races) {
         if (!emitted_races
                  .emplace(race.first, race.second, race.space, race.kind)
                  .second) {
           continue;
         }
-        report.addStep(race.first,
-                       std::string("Conflicting shared-memory access participates in a ") +
-                           cuda::CUDAAnalysis::toString(race.kind) +
-                           " at " + cuda::CUDAAnalysis::toString(race.scope) +
-                           " scope");
-        report.addStep(race.second,
-                       race.ordering_reason ? race.ordering_reason
-                                            : "Another block-local thread may access the same shared location");
+        if (race.kind == cuda::RaceKind::MissingFence ||
+            race.kind == cuda::RaceKind::AtomicOrderingRisk) {
+          ordering.addStep(
+              race.first,
+              std::string(cuda::CUDAAnalysis::toString(race.kind)) + " at " +
+                  cuda::CUDAAnalysis::toString(race.scope) + " scope");
+          ordering.addStep(
+              race.second,
+              race.ordering_reason ? race.ordering_reason
+                                   : "Ordering is insufficient for shared communication");
+          continue;
+        }
+        report.addStep(
+            race.first,
+            std::string("Conflicting shared-memory access participates in a ") +
+                cuda::CUDAAnalysis::toString(race.kind) + " at " +
+                cuda::CUDAAnalysis::toString(race.scope) + " scope");
+        report.addStep(
+            race.second,
+            race.ordering_reason
+                ? race.ordering_reason
+                : "Another block-local thread may access the same shared location");
       }
       if (!report.steps.empty()) {
         reports.push_back(std::move(report));
+      }
+      if (!ordering.steps.empty()) {
+        reports.push_back(std::move(ordering));
       }
 
       bool has_symbolic = llvm::any_of(summary.shared_races, [](const auto &race) {
@@ -94,10 +115,26 @@ std::vector<ConcurrencyBugReport> CUDAChecker::checkCUDABugs() {
           ConcurrencyBugType::CUDA_GLOBAL_MEMORY_RACE,
           "Potential global/device-memory race across CUDA threads",
           BugDescription::BI_HIGH, BugDescription::BC_ERROR);
+      ConcurrencyBugReport ordering(
+          ConcurrencyBugType::CUDA_PARAMETRIC_RACE_RISK,
+          "CUDA global/device ordering risk",
+          BugDescription::BI_MEDIUM, BugDescription::BC_WARNING);
       for (const auto &race : summary.global_races) {
         if (!emitted_races
                  .emplace(race.first, race.second, race.space, race.kind)
                  .second) {
+          continue;
+        }
+        if (race.kind == cuda::RaceKind::MissingFence ||
+            race.kind == cuda::RaceKind::AtomicOrderingRisk) {
+          ordering.addStep(
+              race.first,
+              std::string(cuda::CUDAAnalysis::toString(race.kind)) + " at " +
+                  cuda::CUDAAnalysis::toString(race.scope) + " scope");
+          ordering.addStep(
+              race.second,
+              race.ordering_reason ? race.ordering_reason
+                                   : "Global/device communication lacks required ordering");
           continue;
         }
         report.addStep(
@@ -110,6 +147,9 @@ std::vector<ConcurrencyBugReport> CUDAChecker::checkCUDABugs() {
       }
       if (!report.steps.empty()) {
         reports.push_back(std::move(report));
+      }
+      if (!ordering.steps.empty()) {
+        reports.push_back(std::move(ordering));
       }
 
       bool has_symbolic = llvm::any_of(summary.global_races, [](const auto &race) {
@@ -241,7 +281,10 @@ std::vector<ConcurrencyBugReport> CUDAChecker::checkCUDABugs() {
                    std::string("Launch of kernel '") +
                        (race.second_kernel ? race.second_kernel->getName().str()
                                            : "<unknown>") +
-                       "' may access the same memory without device ordering");
+                       "' may access the same memory without device ordering (" +
+                       std::string(cuda::CUDAAnalysis::toString(
+                           race.ordering_source)) +
+                       ")");
     reports.push_back(std::move(report));
   }
 

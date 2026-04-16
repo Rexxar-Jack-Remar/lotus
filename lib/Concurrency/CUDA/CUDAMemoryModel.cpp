@@ -89,6 +89,22 @@ static void collectBaseObjects(const Value *value, BaseObjectInfo &info,
     }
   }
 
+  if (const auto *inst = dyn_cast<Instruction>(base)) {
+    if (const auto *call = dyn_cast<CallBase>(inst)) {
+      if (!call->getType()->isPointerTy()) {
+        appendUniqueBase(base, info, seen);
+        return;
+      }
+    }
+
+    if (inst->getOpcode() == Instruction::AddrSpaceCast ||
+        inst->getOpcode() == Instruction::BitCast ||
+        inst->getOpcode() == Instruction::IntToPtr) {
+      collectBaseObjects(inst->getOperand(0), info, seen, depth + 1);
+      return;
+    }
+  }
+
   appendUniqueBase(base, info, seen);
 }
 
@@ -186,8 +202,7 @@ MemorySpaceInfo CUDAMemoryModel::classify(const Value *value) {
       }
     }
     if (arg->getParent() && isNVVMKernel(arg->getParent())) {
-      return {addrspace == 0 ? MemorySpace::Unknown : MemorySpace::Global, false,
-              addrspace};
+      return {MemorySpace::Global, addrspace != 0, addrspace};
     }
     return {MemorySpace::Unknown, false, addrspace};
   }
