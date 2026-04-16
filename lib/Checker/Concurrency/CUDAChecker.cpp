@@ -1,5 +1,7 @@
 #include "Checker/Concurrency/CUDAChecker.h"
 
+#include <set>
+
 using namespace llvm;
 
 namespace concurrency {
@@ -18,6 +20,10 @@ std::vector<ConcurrencyBugReport> CUDAChecker::checkCUDABugs() {
   if (!m_analysis) {
     return reports;
   }
+
+  std::set<std::tuple<const llvm::Instruction *, const llvm::Instruction *,
+                      cuda::MemorySpace, cuda::RaceKind>>
+      emitted_races;
 
   for (const cuda::KernelSummary &summary : m_analysis->getKernelSummaries()) {
     if (summary.has_warp_divergence) {
@@ -42,12 +48,23 @@ std::vector<ConcurrencyBugReport> CUDAChecker::checkCUDABugs() {
           "Potential shared-memory race inside a block",
           BugDescription::BI_HIGH, BugDescription::BC_ERROR);
       for (const auto &race : summary.shared_races) {
+        if (!emitted_races
+                 .emplace(race.first, race.second, race.space, race.kind)
+                 .second) {
+          continue;
+        }
         report.addStep(race.first,
-                       "Conflicting shared-memory access participates in the race");
+                       std::string("Conflicting shared-memory access participates in a ") +
+                           cuda::CUDAAnalysis::toString(race.kind) +
+                           " at " + cuda::CUDAAnalysis::toString(race.scope) +
+                           " scope");
         report.addStep(race.second,
-                       "Another block-local thread may access the same shared location");
+                       race.ordering_reason ? race.ordering_reason
+                                            : "Another block-local thread may access the same shared location");
       }
-      reports.push_back(std::move(report));
+      if (!report.steps.empty()) {
+        reports.push_back(std::move(report));
+      }
 
       bool has_symbolic = llvm::any_of(summary.shared_races, [](const auto &race) {
         return race.symbolic;
@@ -66,7 +83,9 @@ std::vector<ConcurrencyBugReport> CUDAChecker::checkCUDABugs() {
           symbolic.addStep(race.second,
                            "Second conflicting access aliases under a parametric thread pair");
         }
-        reports.push_back(std::move(symbolic));
+        if (!symbolic.steps.empty()) {
+          reports.push_back(std::move(symbolic));
+        }
       }
     }
 
@@ -76,15 +95,22 @@ std::vector<ConcurrencyBugReport> CUDAChecker::checkCUDABugs() {
           "Potential global/device-memory race across CUDA threads",
           BugDescription::BI_HIGH, BugDescription::BC_ERROR);
       for (const auto &race : summary.global_races) {
+        if (!emitted_races
+                 .emplace(race.first, race.second, race.space, race.kind)
+                 .second) {
+          continue;
+        }
         report.addStep(
             race.first,
-            race.cross_block
-                ? "Conflicting global access may be reachable from different blocks"
-                : "Conflicting global access may be reachable from different threads");
+            std::string(cuda::CUDAAnalysis::toString(race.kind)) + " at " +
+                cuda::CUDAAnalysis::toString(race.scope) + " scope");
         report.addStep(race.second,
-                       "Second conflicting access aliases the same global/device object");
+                       race.ordering_reason ? race.ordering_reason
+                                            : "Second conflicting access aliases the same global/device object");
       }
-      reports.push_back(std::move(report));
+      if (!report.steps.empty()) {
+        reports.push_back(std::move(report));
+      }
 
       bool has_symbolic = llvm::any_of(summary.global_races, [](const auto &race) {
         return race.symbolic;
@@ -105,7 +131,9 @@ std::vector<ConcurrencyBugReport> CUDAChecker::checkCUDABugs() {
           symbolic.addStep(race.second,
                            "Alias survives parametric CUDA launch dimensions");
         }
-        reports.push_back(std::move(symbolic));
+        if (!symbolic.steps.empty()) {
+          reports.push_back(std::move(symbolic));
+        }
       }
     }
 
@@ -196,6 +224,25 @@ std::vector<ConcurrencyBugReport> CUDAChecker::checkCUDABugs() {
         break;
       }
     }
+  }
+
+  for (const auto &race : m_analysis->getInterKernelRaces()) {
+    ConcurrencyBugReport report(
+        ConcurrencyBugType::CUDA_GLOBAL_MEMORY_RACE,
+        "Potential inter-kernel global/device-memory hazard",
+        BugDescription::BI_HIGH, BugDescription::BC_ERROR);
+    report.addStep(race.first_launch,
+                   std::string("Launch of kernel '") +
+                       (race.first_kernel ? race.first_kernel->getName().str()
+                                          : "<unknown>") +
+                       "' is " + (race.ordering_reason ? race.ordering_reason
+                                                       : "unordered"));
+    report.addStep(race.second_launch,
+                   std::string("Launch of kernel '") +
+                       (race.second_kernel ? race.second_kernel->getName().str()
+                                           : "<unknown>") +
+                       "' may access the same memory without device ordering");
+    reports.push_back(std::move(report));
   }
 
   return reports;

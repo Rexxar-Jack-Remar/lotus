@@ -32,6 +32,21 @@ enum class BuiltinKind {
   LaneId
 };
 
+enum class UniformityClass {
+  Unknown,
+  WarpUniform,
+  BlockUniform,
+  ThreadVarying
+};
+
+enum class ParticipationScope {
+  Unknown,
+  Lane,
+  Warp,
+  Block,
+  Grid
+};
+
 struct SymbolicDimension {
   SymbolicValueKind kind = SymbolicValueKind::Unknown;
   uint64_t constant = 0;
@@ -48,6 +63,9 @@ struct AffineAccessPattern {
   int64_t block_idx_z = 0;
   int64_t lane_id = 0;
   bool valid = false;
+  bool exact = false;
+  bool non_affine = false;
+  ParticipationScope participation = ParticipationScope::Unknown;
 
   // Derive linear thread ID from multidimensional coordinates
   // Assumes row-major: linear_id = z * (blockDim.x * blockDim.y) + y *
@@ -70,6 +88,8 @@ public:
   static AffineAccessPattern
   extractAffineAccessPattern(const llvm::Value *value);
   static SymbolicDimension classifyDimension(const llvm::Value *value);
+  static UniformityClass classifyUniformity(const llvm::Value *value);
+  static ParticipationScope classifyParticipation(const llvm::Value *value);
 };
 
 } // namespace concurrency::cuda

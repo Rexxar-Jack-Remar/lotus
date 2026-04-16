@@ -1,5 +1,7 @@
 #include "Concurrency/CUDA/CUDASymbolicModel.h"
 
+#include <algorithm>
+
 #include <llvm/ADT/SmallPtrSet.h>
 #include <llvm/ADT/SmallVector.h>
 #include <llvm/IR/Argument.h>
@@ -23,6 +25,24 @@ static std::optional<int64_t> addIfKnown(const std::optional<int64_t> &lhs,
 }
 
 static BuiltinKind classifyName(StringRef name) {
+  if (name.contains("nctaid.x") || name.contains("gridDim.x")) {
+    return BuiltinKind::GridDimX;
+  }
+  if (name.contains("nctaid.y") || name.contains("gridDim.y")) {
+    return BuiltinKind::GridDimY;
+  }
+  if (name.contains("nctaid.z") || name.contains("gridDim.z")) {
+    return BuiltinKind::GridDimZ;
+  }
+  if (name.contains("ntid.x") || name.contains("blockDim.x")) {
+    return BuiltinKind::BlockDimX;
+  }
+  if (name.contains("ntid.y") || name.contains("blockDim.y")) {
+    return BuiltinKind::BlockDimY;
+  }
+  if (name.contains("ntid.z") || name.contains("blockDim.z")) {
+    return BuiltinKind::BlockDimZ;
+  }
   if (name.contains("tid.x") || name.contains("threadIdx.x")) {
     return BuiltinKind::ThreadIdxX;
   }
@@ -40,24 +60,6 @@ static BuiltinKind classifyName(StringRef name) {
   }
   if (name.contains("ctaid.z") || name.contains("blockIdx.z")) {
     return BuiltinKind::BlockIdxZ;
-  }
-  if (name.contains("ntid.x") || name.contains("blockDim.x")) {
-    return BuiltinKind::BlockDimX;
-  }
-  if (name.contains("ntid.y") || name.contains("blockDim.y")) {
-    return BuiltinKind::BlockDimY;
-  }
-  if (name.contains("ntid.z") || name.contains("blockDim.z")) {
-    return BuiltinKind::BlockDimZ;
-  }
-  if (name.contains("nctaid.x") || name.contains("gridDim.x")) {
-    return BuiltinKind::GridDimX;
-  }
-  if (name.contains("nctaid.y") || name.contains("gridDim.y")) {
-    return BuiltinKind::GridDimY;
-  }
-  if (name.contains("nctaid.z") || name.contains("gridDim.z")) {
-    return BuiltinKind::GridDimZ;
   }
   if (name.contains("laneid")) {
     return BuiltinKind::LaneId;
@@ -106,6 +108,7 @@ static void mergePatterns(AffineAccessPattern &dst,
                           bool subtract = false) {
   if (!lhs.valid || !rhs.valid) {
     dst.valid = false;
+    dst.non_affine = lhs.non_affine || rhs.non_affine;
     return;
   }
   dst.constant =
@@ -125,6 +128,14 @@ static void mergePatterns(AffineAccessPattern &dst,
   dst.lane_id =
       subtract ? lhs.lane_id - rhs.lane_id : lhs.lane_id + rhs.lane_id;
   dst.valid = true;
+  dst.exact = lhs.exact && rhs.exact;
+  dst.non_affine = lhs.non_affine || rhs.non_affine;
+  dst.participation = std::max(lhs.participation, rhs.participation);
+}
+
+static UniformityClass mergeUniformity(UniformityClass lhs,
+                                       UniformityClass rhs) {
+  return std::max(lhs, rhs);
 }
 
 } // namespace
@@ -233,30 +244,44 @@ CUDASymbolicModel::extractAffineAccessPattern(const Value *value) {
   case BuiltinKind::ThreadIdxX:
     pattern.thread_idx_x = 1;
     pattern.valid = true;
+    pattern.exact = true;
+    pattern.participation = ParticipationScope::Block;
     return pattern;
   case BuiltinKind::ThreadIdxY:
     pattern.thread_idx_y = 1;
     pattern.valid = true;
+    pattern.exact = true;
+    pattern.participation = ParticipationScope::Block;
     return pattern;
   case BuiltinKind::ThreadIdxZ:
     pattern.thread_idx_z = 1;
     pattern.valid = true;
+    pattern.exact = true;
+    pattern.participation = ParticipationScope::Block;
     return pattern;
   case BuiltinKind::BlockIdxX:
     pattern.block_idx_x = 1;
     pattern.valid = true;
+    pattern.exact = true;
+    pattern.participation = ParticipationScope::Grid;
     return pattern;
   case BuiltinKind::BlockIdxY:
     pattern.block_idx_y = 1;
     pattern.valid = true;
+    pattern.exact = true;
+    pattern.participation = ParticipationScope::Grid;
     return pattern;
   case BuiltinKind::BlockIdxZ:
     pattern.block_idx_z = 1;
     pattern.valid = true;
+    pattern.exact = true;
+    pattern.participation = ParticipationScope::Grid;
     return pattern;
   case BuiltinKind::LaneId:
     pattern.lane_id = 1;
     pattern.valid = true;
+    pattern.exact = true;
+    pattern.participation = ParticipationScope::Warp;
     return pattern;
   default:
     break;
@@ -265,6 +290,7 @@ CUDASymbolicModel::extractAffineAccessPattern(const Value *value) {
   if (const auto *ci = dyn_cast<ConstantInt>(value)) {
     pattern.constant = ci->getSExtValue();
     pattern.valid = true;
+    pattern.exact = true;
     return pattern;
   }
 
@@ -295,10 +321,30 @@ CUDASymbolicModel::extractAffineAccessPattern(const Value *value) {
     index_pattern.block_idx_y *= elem_size;
     index_pattern.block_idx_z *= elem_size;
     index_pattern.lane_id *= elem_size;
+    index_pattern.exact = index_pattern.exact && elem_size > 0;
     return index_pattern;
   }
 
   if (const auto *op = dyn_cast<Operator>(value)) {
+    if (op->getOpcode() == Instruction::ZExt ||
+        op->getOpcode() == Instruction::SExt ||
+        op->getOpcode() == Instruction::Trunc ||
+        op->getOpcode() == Instruction::BitCast) {
+      return extractAffineAccessPattern(op->getOperand(0));
+    }
+    if (op->getOpcode() == Instruction::Select) {
+      AffineAccessPattern lhs = extractAffineAccessPattern(op->getOperand(1));
+      AffineAccessPattern rhs = extractAffineAccessPattern(op->getOperand(2));
+      if (!lhs.valid || !rhs.valid) {
+        pattern.non_affine = true;
+        return pattern;
+      }
+      pattern = lhs;
+      pattern.exact = false;
+      pattern.non_affine = lhs.non_affine || rhs.non_affine;
+      pattern.participation = std::max(lhs.participation, rhs.participation);
+      return pattern;
+    }
     if (op->getOpcode() == Instruction::Add) {
       mergePatterns(pattern, extractAffineAccessPattern(op->getOperand(0)),
                     extractAffineAccessPattern(op->getOperand(1)));
@@ -337,6 +383,7 @@ CUDASymbolicModel::extractAffineAccessPattern(const Value *value) {
         rhs.block_idx_y *= scale;
         rhs.block_idx_z *= scale;
         rhs.lane_id *= scale;
+        rhs.exact = rhs.exact;
         return rhs;
       }
       if (!lhs_const && rhs_const) {
@@ -355,11 +402,13 @@ CUDASymbolicModel::extractAffineAccessPattern(const Value *value) {
         lhs.block_idx_y *= scale;
         lhs.block_idx_z *= scale;
         lhs.lane_id *= scale;
+        lhs.exact = lhs.exact;
         return lhs;
       }
     }
   }
 
+  pattern.non_affine = true;
   return pattern;
 }
 
@@ -383,6 +432,61 @@ SymbolicDimension CUDASymbolicModel::classifyDimension(const Value *value) {
     return dim;
   }
   return dim;
+}
+
+UniformityClass CUDASymbolicModel::classifyUniformity(const Value *value) {
+  if (!value) {
+    return UniformityClass::WarpUniform;
+  }
+
+  const BuiltinKind builtin = classifyBuiltin(value);
+  switch (builtin) {
+  case BuiltinKind::ThreadIdxX:
+  case BuiltinKind::ThreadIdxY:
+  case BuiltinKind::ThreadIdxZ:
+  case BuiltinKind::LaneId:
+    return UniformityClass::ThreadVarying;
+  case BuiltinKind::BlockIdxX:
+  case BuiltinKind::BlockIdxY:
+  case BuiltinKind::BlockIdxZ:
+    return UniformityClass::BlockUniform;
+  case BuiltinKind::BlockDimX:
+  case BuiltinKind::BlockDimY:
+  case BuiltinKind::BlockDimZ:
+  case BuiltinKind::GridDimX:
+  case BuiltinKind::GridDimY:
+  case BuiltinKind::GridDimZ:
+    return UniformityClass::WarpUniform;
+  default:
+    break;
+  }
+
+  if (isa<Constant>(value)) {
+    return UniformityClass::WarpUniform;
+  }
+
+  if (const auto *inst = dyn_cast<Instruction>(value)) {
+    UniformityClass result = UniformityClass::WarpUniform;
+    for (const Value *operand : inst->operands()) {
+      result = mergeUniformity(result, classifyUniformity(operand));
+    }
+    return result;
+  }
+
+  if (const auto *ce = dyn_cast<ConstantExpr>(value)) {
+    UniformityClass result = UniformityClass::WarpUniform;
+    for (const Value *operand : ce->operands()) {
+      result = mergeUniformity(result, classifyUniformity(operand));
+    }
+    return result;
+  }
+
+  return UniformityClass::Unknown;
+}
+
+ParticipationScope CUDASymbolicModel::classifyParticipation(const Value *value) {
+  AffineAccessPattern pattern = extractAffineAccessPattern(value);
+  return pattern.valid ? pattern.participation : ParticipationScope::Unknown;
 }
 
 int64_t AffineAccessPattern::linearize(int64_t x, int64_t y, int64_t z,

@@ -227,6 +227,46 @@ TEST_F(CUDAAnalysisTest, ClassifiesNVVMMemorySpacesPrecisely) {
   EXPECT_TRUE(saw_host);
 }
 
+TEST_F(CUDAAnalysisTest, TracksAmbiguousBaseSetsThroughSelectPointers) {
+  const char *source = R"(
+    @global_a = addrspace(1) global [8 x i32] zeroinitializer
+    @global_b = addrspace(1) global [8 x i32] zeroinitializer
+
+    declare void @__set_CUDAConfig(i32, i32)
+    declare i32 @llvm.nvvm.read.ptx.sreg.tid.x()
+
+    define void @kernel(i1 %pick_a) {
+    entry:
+      %tid = call i32 @llvm.nvvm.read.ptx.sreg.tid.x()
+      %a = getelementptr [8 x i32], [8 x i32] addrspace(1)* @global_a, i32 0, i32 %tid
+      %b = getelementptr [8 x i32], [8 x i32] addrspace(1)* @global_b, i32 0, i32 %tid
+      %ptr = select i1 %pick_a, i32 addrspace(1)* %a, i32 addrspace(1)* %b
+      store i32 %tid, i32 addrspace(1)* %ptr
+      ret void
+    }
+
+    define void @main(i1 %pick_a) {
+    entry:
+      call void @__set_CUDAConfig(i32 1, i32 32)
+      call void @kernel(i1 %pick_a)
+      ret void
+    }
+  )";
+
+  auto module = parseModule(source);
+  ASSERT_NE(module, nullptr);
+
+  concurrency::cuda::CUDAAnalysis analysis(*module);
+  analysis.runAnalysis();
+  ASSERT_EQ(analysis.getKernelSummaries().size(), 1u);
+
+  const auto &summary = analysis.getKernelSummaries().front();
+  ASSERT_FALSE(summary.accesses.empty());
+  const auto &access = summary.accesses.front();
+  EXPECT_TRUE(access.has_ambiguous_base);
+  EXPECT_GE(access.base_objects.size(), 2u);
+}
+
 TEST_F(CUDAAnalysisTest,
        TracksSymbolicParametricRaceAndImpreciseMemoryClassification) {
   const char *source = R"(
@@ -370,6 +410,7 @@ TEST_F(CUDAAnalysisTest, DetectsCrossKernelGlobalRaces) {
     entry:
       call void @__set_CUDAConfig(i32 1, i32 32)
       call void @kernel_producer()
+      call void @__set_CUDAConfig(i32 1, i32 32)
       call void @kernel_consumer()
       ret void
     }
@@ -381,9 +422,12 @@ TEST_F(CUDAAnalysisTest, DetectsCrossKernelGlobalRaces) {
   concurrency::cuda::CUDAAnalysis analysis(*module);
   analysis.runAnalysis();
 
-  // Gap: Currently only detects intra-kernel races
-  // EXPECTED: Should detect inter-kernel race via launch payload aliasing
   EXPECT_EQ(analysis.getLaunches().size(), 2u);
+  ASSERT_EQ(analysis.getInterKernelRaces().size(), 1u);
+  const auto &race = analysis.getInterKernelRaces().front();
+  EXPECT_EQ(race.first_kernel->getName(), "kernel_producer");
+  EXPECT_EQ(race.second_kernel->getName(), "kernel_consumer");
+  EXPECT_FALSE(race.ordered);
 }
 
 // Gap 3: CFG-aware race pruning - warp-uniform branches
@@ -433,10 +477,6 @@ TEST_F(CUDAAnalysisTest, AvoidsFalseRaceForUniformBranchControlledAccesses) {
 
   const auto &summary = analysis.getKernelSummaries().front();
 
-  // Gap: Currently flags races even when controlled by uniform predicates
-  // EXPECTED: Should NOT flag race when branch is warp-uniform (dependent only
-  // on blockIdx) This is a false positive - the branches are mutually exclusive
-  // per block
   EXPECT_FALSE(summary.has_global_race);
 }
 
@@ -479,9 +519,6 @@ TEST_F(CUDAAnalysisTest, AvoidsFalseRaceForBarrierProtectedSharedAccess) {
 
   const auto &summary = analysis.getKernelSummaries().front();
 
-  // Gap: Currently flags race even though __syncthreads() orders the
-  // communication EXPECTED: Should NOT flag same-block race when all threads
-  // execute barrier between access
   EXPECT_FALSE(summary.has_shared_race);
 }
 
@@ -527,9 +564,138 @@ TEST_F(CUDAAnalysisTest, AvoidsFalseDivergenceForUniformPredicates) {
 
   const auto &summary = analysis.getKernelSummaries().front();
 
-  // Gap: Currently flags any threadIdx in condition as divergence
-  // EXPECTED: Should NOT flag when predicate is uniform within warp
   EXPECT_FALSE(summary.has_warp_divergence);
+}
+
+TEST_F(CUDAAnalysisTest, TreatsCastBuiltinConditionsAsUniform) {
+  const char *source = R"(
+    declare void @__set_CUDAConfig(i32, i32)
+    declare i32 @llvm.nvvm.read.ptx.sreg.ntid.x()
+
+    define void @kernel() {
+    entry:
+      %ntid = call i32 @llvm.nvvm.read.ptx.sreg.ntid.x()
+      %wide = zext i32 %ntid to i64
+      %cond = icmp ugt i64 %wide, 16
+      br i1 %cond, label %then, label %else
+
+    then:
+      br label %merge
+
+    else:
+      br label %merge
+
+    merge:
+      ret void
+    }
+
+    define void @main() {
+    entry:
+      call void @__set_CUDAConfig(i32 1, i32 32)
+      call void @kernel()
+      ret void
+    }
+  )";
+
+  auto module = parseModule(source);
+  ASSERT_NE(module, nullptr);
+
+  concurrency::cuda::CUDAAnalysis analysis(*module);
+  analysis.runAnalysis();
+
+  const auto &summary = analysis.getKernelSummaries().front();
+  EXPECT_FALSE(summary.has_warp_divergence);
+  ASSERT_FALSE(summary.warp_uniform_regions.empty());
+  EXPECT_TRUE(summary.warp_uniform_regions.front().uniform_within_warp);
+}
+
+TEST_F(CUDAAnalysisTest, MarksBarrierMustReachOnlyWhenAllThreadsReach) {
+  const char *source = R"(
+    declare void @__set_CUDAConfig(i32, i32)
+    declare i32 @llvm.nvvm.read.ptx.sreg.tid.x()
+    declare void @llvm.nvvm.barrier0()
+
+    define void @kernel() {
+    entry:
+      %tid = call i32 @llvm.nvvm.read.ptx.sreg.tid.x()
+      %cond = icmp eq i32 %tid, 0
+      br i1 %cond, label %then, label %else
+
+    then:
+      call void @llvm.nvvm.barrier0()
+      br label %merge
+
+    else:
+      br label %merge
+
+    merge:
+      ret void
+    }
+
+    define void @main() {
+    entry:
+      call void @__set_CUDAConfig(i32 1, i32 32)
+      call void @kernel()
+      ret void
+    }
+  )";
+
+  auto module = parseModule(source);
+  ASSERT_NE(module, nullptr);
+
+  concurrency::cuda::CUDAAnalysis analysis(*module);
+  analysis.runAnalysis();
+
+  const auto &summary = analysis.getKernelSummaries().front();
+  ASSERT_FALSE(summary.barrier_phases.empty());
+  EXPECT_FALSE(summary.barrier_phases.front().all_threads_reach);
+  EXPECT_FALSE(summary.barrier_phases.front().exact);
+}
+
+TEST_F(CUDAAnalysisTest, SuppressesOrderedInterKernelRaceAfterDeviceSync) {
+  const char *source = R"(
+    @global_arr = addrspace(1) global [64 x i32] zeroinitializer
+
+    declare void @__set_CUDAConfig(i32, i32)
+    declare i32 @cudaDeviceSynchronize()
+    declare i32 @llvm.nvvm.read.ptx.sreg.tid.x()
+
+    define void @kernel_producer() {
+    entry:
+      %tid = call i32 @llvm.nvvm.read.ptx.sreg.tid.x()
+      %gep = getelementptr [64 x i32], [64 x i32] addrspace(1)* @global_arr, i32 0, i32 %tid
+      store i32 %tid, i32 addrspace(1)* %gep
+      ret void
+    }
+
+    define void @kernel_consumer() {
+    entry:
+      %tid = call i32 @llvm.nvvm.read.ptx.sreg.tid.x()
+      %gep = getelementptr [64 x i32], [64 x i32] addrspace(1)* @global_arr, i32 0, i32 %tid
+      %val = load i32, i32 addrspace(1)* %gep
+      ret void
+    }
+
+    define i32 @main() {
+    entry:
+      call void @__set_CUDAConfig(i32 1, i32 32)
+      call void @kernel_producer()
+      %sync = call i32 @cudaDeviceSynchronize()
+      call void @__set_CUDAConfig(i32 1, i32 32)
+      call void @kernel_consumer()
+      ret i32 %sync
+    }
+  )";
+
+  auto module = parseModule(source);
+  ASSERT_NE(module, nullptr);
+
+  concurrency::cuda::CUDAAnalysis analysis(*module);
+  analysis.runAnalysis();
+
+  EXPECT_EQ(analysis.getLaunches().size(), 2u);
+  EXPECT_TRUE(analysis.getLaunches()[1].ordered_after_previous);
+  EXPECT_TRUE(analysis.getInterKernelRaces().empty());
 }
 
 // Gap 6: Multidimensional coalescing analysis
@@ -578,14 +744,11 @@ TEST_F(CUDAAnalysisTest, DetectsRowVsColumnMajorCoalescing) {
   concurrency::cuda::CUDAAnalysis analysis(*module);
   analysis.runAnalysis();
 
-  // Gap: Currently only analyzes threadIdx.x patterns
-  // EXPECTED: Should detect row vs column major access patterns
-  // Row-major should be fully coalesced, column-major should be uncoalesced
   const auto &summary = analysis.getKernelSummaries().front();
-  // This test validates that multidimensional patterns can affect coalescing
-  // detection Currently passes - the enhancement will make it give different
-  // quality
-  EXPECT_TRUE(summary.has_uncoalesced_access);
+  EXPECT_FALSE(summary.has_uncoalesced_access);
+  for (const auto &issue : summary.coalescing_issues) {
+    EXPECT_NE(issue.quality, concurrency::cuda::CoalescingQuality::Uncoalesced);
+  }
 }
 
 // Gap 7: Volatile precision with atomics

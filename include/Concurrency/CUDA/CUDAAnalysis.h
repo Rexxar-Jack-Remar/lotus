@@ -23,6 +23,21 @@ enum class CoalescingQuality {
   Uncoalesced
 };
 
+enum class SynchronizationScope {
+  None,
+  Warp,
+  Block,
+  Device,
+  System
+};
+
+enum class RaceKind {
+  DataRace,
+  AtomicOrderingRisk,
+  MissingFence,
+  InterKernelHazard
+};
+
 struct LaunchDimensions {
   std::array<SymbolicDimension, 3> grid{};
   std::array<SymbolicDimension, 3> block{};
@@ -42,22 +57,31 @@ struct KernelLaunchInfo {
   const llvm::Instruction *launch = nullptr;
   const llvm::Function *kernel = nullptr;
   LaunchDimensions dimensions;
+  size_t sequence = 0;
+  SynchronizationScope ordering_scope = SynchronizationScope::None;
+  bool ordered_after_previous = false;
 };
 
 struct AccessInfo {
   const llvm::Instruction *inst = nullptr;
   const llvm::Value *pointer = nullptr;
   const llvm::Value *base = nullptr;
+  llvm::SmallVector<const llvm::Value *, 4> base_objects;
   MemorySpace space = MemorySpace::Unknown;
   bool is_write = false;
   bool is_atomic = false;
   bool is_volatile = false;
+  bool has_ambiguous_base = false;
   bool depends_on_thread_idx = false;
   bool depends_on_block_idx = false;
   bool depends_on_lane_id = false;
   bool exact_space = false;
   uint32_t access_size = 0;
   uint32_t address_space = 0;
+  UniformityClass uniformity = UniformityClass::Unknown;
+  ParticipationScope participation = ParticipationScope::Unknown;
+  SynchronizationScope ordering_scope = SynchronizationScope::None;
+  bool exact_address = false;
   AffineAccessPattern address_pattern;
 };
 
@@ -97,10 +121,15 @@ struct RaceInfo {
   const llvm::Instruction *first = nullptr;
   const llvm::Instruction *second = nullptr;
   const llvm::Value *base = nullptr;
+  llvm::SmallVector<const llvm::Value *, 4> bases;
   MemorySpace space = MemorySpace::Unknown;
   bool same_block_only = false;
   bool cross_block = false;
   bool symbolic = false;
+  RaceKind kind = RaceKind::DataRace;
+  SynchronizationScope scope = SynchronizationScope::None;
+  const char *ordering_reason = nullptr;
+  bool exact = false;
 };
 
 struct BarrierMismatchInfo {
@@ -120,6 +149,8 @@ struct BarrierPhaseInfo {
   llvm::SmallVector<const llvm::BasicBlock *, 8> preceding_blocks;
   llvm::SmallVector<const llvm::BasicBlock *, 8> following_blocks;
   bool all_threads_reach = false;
+  SynchronizationScope scope = SynchronizationScope::Block;
+  bool exact = false;
 };
 
 struct InterKernelRaceInfo {
@@ -129,6 +160,9 @@ struct InterKernelRaceInfo {
   const llvm::Function *second_kernel = nullptr;
   const llvm::Value *shared_base = nullptr;
   bool ordered = false;
+  RaceKind kind = RaceKind::InterKernelHazard;
+  const char *ordering_reason = nullptr;
+  bool symbolic = false;
 };
 
 struct VolatileMissingInfo {
@@ -185,6 +219,9 @@ public:
   static MemorySpace classifyMemorySpace(const llvm::Value *value);
   static const char *toString(MemorySpace space);
   static const char *toString(CoalescingQuality quality);
+  static const char *toString(UniformityClass uniformity);
+  static const char *toString(SynchronizationScope scope);
+  static const char *toString(RaceKind kind);
 
 private:
   llvm::Module &m_module;
@@ -223,6 +260,12 @@ private:
   }
   static bool dependsOnLaneBuiltin(const llvm::Value *value) {
     return CUDASymbolicModel::dependsOnLaneBuiltin(value);
+  }
+  static UniformityClass classifyUniformity(const llvm::Value *value) {
+    return CUDASymbolicModel::classifyUniformity(value);
+  }
+  static ParticipationScope classifyParticipation(const llvm::Value *value) {
+    return CUDASymbolicModel::classifyParticipation(value);
   }
   static std::optional<int64_t> evaluateConstantInt(const llvm::Value *value) {
     return CUDASymbolicModel::evaluateConstantInt(value);

@@ -183,7 +183,8 @@ TEST_F(MHPAnalysisTest, WrapperAcquireUsesUnderlyingMutexForHBHandoff) {
   MHPAnalysis mhp(*module);
   mhp.analyze();
   auto stats = mhp.getStatistics();
-  EXPECT_GE(stats.num_joins, 1u);
+  EXPECT_GE(stats.num_locks, 1u);
+  EXPECT_GE(stats.num_unlocks, 1u);
   HappensBeforeAnalysis hb(*module, mhp);
   hb.analyze();
 

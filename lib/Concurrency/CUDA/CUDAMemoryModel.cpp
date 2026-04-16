@@ -6,6 +6,7 @@
 #include <llvm/IR/Function.h>
 #include <llvm/IR/Instructions.h>
 #include <llvm/IR/Operator.h>
+#include <llvm/ADT/SmallPtrSet.h>
 
 using namespace llvm;
 
@@ -38,6 +39,57 @@ static const Value *stripCastsAndGEPBase(const Value *value) {
     break;
   }
   return current;
+}
+
+static void appendUniqueBase(const Value *value, BaseObjectInfo &info,
+                             SmallPtrSetImpl<const Value *> &seen) {
+  if (!value || !seen.insert(value).second) {
+    return;
+  }
+  info.objects.push_back(value);
+}
+
+static void collectBaseObjects(const Value *value, BaseObjectInfo &info,
+                               SmallPtrSetImpl<const Value *> &seen,
+                               unsigned depth = 0) {
+  if (!value || depth > 8) {
+    info.ambiguous = true;
+    return;
+  }
+
+  const Value *base = stripCastsAndGEPBase(value);
+  if (!base) {
+    return;
+  }
+
+  if (isa<AllocaInst>(base) || isa<Argument>(base) || isa<GlobalValue>(base)) {
+    appendUniqueBase(base, info, seen);
+    return;
+  }
+
+  if (const auto *select = dyn_cast<SelectInst>(base)) {
+    info.ambiguous = true;
+    collectBaseObjects(select->getTrueValue(), info, seen, depth + 1);
+    collectBaseObjects(select->getFalseValue(), info, seen, depth + 1);
+    return;
+  }
+
+  if (const auto *phi = dyn_cast<PHINode>(base)) {
+    info.ambiguous = true;
+    for (const Value *incoming : phi->incoming_values()) {
+      collectBaseObjects(incoming, info, seen, depth + 1);
+    }
+    return;
+  }
+
+  if (const auto *ce = dyn_cast<ConstantExpr>(base)) {
+    if (ce->isCast() || ce->getOpcode() == Instruction::GetElementPtr) {
+      collectBaseObjects(ce->getOperand(0), info, seen, depth + 1);
+      return;
+    }
+  }
+
+  appendUniqueBase(base, info, seen);
 }
 
 static MemorySpaceInfo classifyAddressSpace(unsigned addrspace) {
@@ -164,6 +216,16 @@ MemorySpaceInfo CUDAMemoryModel::classify(const Value *value) {
 
 const Value *CUDAMemoryModel::getCanonicalBase(const Value *value) {
   return stripCastsAndGEPBase(value);
+}
+
+BaseObjectInfo CUDAMemoryModel::getBaseObjectInfo(const Value *value) {
+  BaseObjectInfo info;
+  SmallPtrSet<const Value *, 8> seen;
+  collectBaseObjects(value, info, seen);
+  if (info.objects.size() > 1) {
+    info.ambiguous = true;
+  }
+  return info;
 }
 
 } // namespace concurrency::cuda
