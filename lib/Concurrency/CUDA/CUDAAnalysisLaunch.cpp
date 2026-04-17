@@ -53,7 +53,7 @@ const Value *getStreamOperand(const CallBase *call) {
     return call->arg_size() >= 1 ? call->getArgOperand(0) : nullptr;
   }
   if (name.contains("cudaLaunchKernel")) {
-    return call->arg_size() >= 7 ? call->getArgOperand(6) : nullptr;
+    return call->arg_size() >= 9 ? call->getArgOperand(8) : nullptr;
   }
   return nullptr;
 }
@@ -90,6 +90,31 @@ const Value *getPotentialStream(const CallBase *call) {
     return nullptr;
   }
   return call->getArgOperand(call->arg_size() - 1);
+}
+
+HostStreamKind classifyHostStream(const CallBase *call, const Value *stream) {
+  if (!call) {
+    return HostStreamKind::Unknown;
+  }
+  ThreadAPI *thread_api = ThreadAPI::getThreadAPI();
+  const bool is_runtime_launch =
+      thread_api && thread_api->getType(call) == ThreadAPI::TD_CUDA_KERNEL_LAUNCH &&
+      call->getCalledFunction() &&
+      call->getCalledFunction()->getName().contains("cudaLaunchKernel");
+  if (!stream) {
+    return is_runtime_launch ? HostStreamKind::LegacyDefault
+                             : HostStreamKind::Unknown;
+  }
+  if (const auto *constant = dyn_cast<Constant>(stream)) {
+    if (constant->isNullValue()) {
+      return HostStreamKind::LegacyDefault;
+    }
+    return HostStreamKind::Explicit;
+  }
+  const Value *base = stream->stripPointerCasts();
+  return isa<Argument>(base) || isa<GlobalValue>(base)
+             ? HostStreamKind::Explicit
+             : HostStreamKind::Unknown;
 }
 
 LaunchOrderingSource getOrderingSource(ThreadAPI::TD_TYPE type) {
@@ -168,9 +193,66 @@ bool launchesOrdered(const std::vector<KernelLaunchInfo> &launches,
     }
   }
 
-  const bool same_stream = earlier.stream_known && later.stream_known &&
-                           earlier.stream == later.stream;
-  return same_stream;
+  const bool same_stream =
+      earlier.stream_kind == HostStreamKind::Explicit &&
+      later.stream_kind == HostStreamKind::Explicit &&
+      earlier.stream_known && later.stream_known &&
+      earlier.stream == later.stream;
+  if (same_stream) {
+    return true;
+  }
+  return earlier.stream_kind == HostStreamKind::LegacyDefault &&
+         later.stream_kind == HostStreamKind::Explicit;
+}
+
+detail::LaunchOrderingState::StreamState *
+getMutableStreamState(detail::LaunchOrderingState &ordering_state,
+                      HostStreamKind stream_kind, const Value *stream) {
+  if (stream_kind == HostStreamKind::Explicit && stream) {
+    return &ordering_state.stream_states[stream];
+  }
+  if (stream_kind == HostStreamKind::LegacyDefault) {
+    return &ordering_state.default_stream;
+  }
+  return nullptr;
+}
+
+const detail::LaunchOrderingState::StreamState *
+getStreamState(const detail::LaunchOrderingState &ordering_state,
+               HostStreamKind stream_kind, const Value *stream) {
+  if (stream_kind == HostStreamKind::Explicit && stream) {
+    auto it = ordering_state.stream_states.find(stream);
+    return it == ordering_state.stream_states.end() ? nullptr : &it->second;
+  }
+  if (stream_kind == HostStreamKind::LegacyDefault) {
+    return &ordering_state.default_stream;
+  }
+  return nullptr;
+}
+
+void markStreamOrdered(detail::LaunchOrderingState &ordering_state,
+                       HostStreamKind stream_kind, const Value *stream,
+                       SynchronizationScope scope,
+                       LaunchOrderingSource source,
+                       SynchronizationPrimitive primitive) {
+  if (auto *stream_state =
+          getMutableStreamState(ordering_state, stream_kind, stream)) {
+    stream_state->ordered_since_last_launch = true;
+    stream_state->scope = scope;
+    stream_state->source = source;
+    stream_state->primitive = primitive;
+  }
+}
+
+void clearStreamOrdered(detail::LaunchOrderingState &ordering_state,
+                        HostStreamKind stream_kind, const Value *stream) {
+  if (auto *stream_state =
+          getMutableStreamState(ordering_state, stream_kind, stream)) {
+    stream_state->ordered_since_last_launch = false;
+    stream_state->scope = SynchronizationScope::None;
+    stream_state->source = LaunchOrderingSource::None;
+    stream_state->primitive = SynchronizationPrimitive::None;
+  }
 }
 
 } // namespace detail
@@ -231,16 +313,16 @@ void CUDAAnalysis::runAnalysis() {
         ordering_state.device_synchronized =
             type == ThreadAPI::TD_CUDA_DEVICE_SYNC;
         const Value *stream = detail::getPotentialStream(call);
-        auto &stream_state = stream ? ordering_state.stream_states[stream]
-                                    : ordering_state.unknown_stream;
-        stream_state.ordered_since_last_launch = true;
-        stream_state.scope = detail::getSyncScope(type);
-        stream_state.source = detail::getOrderingSource(type);
-        stream_state.primitive =
-            detail::getSynchronizationPrimitive(type, &inst);
+        const HostStreamKind stream_kind =
+            detail::classifyHostStream(call, stream);
+        detail::markStreamOrdered(ordering_state, stream_kind, stream,
+                                  detail::getSyncScope(type),
+                                  detail::getOrderingSource(type),
+                                  detail::getSynchronizationPrimitive(type,
+                                                                      &inst));
         if (type == ThreadAPI::TD_CUDA_DEVICE_SYNC) {
           automaton_builder.addDeviceSync(&inst);
-        } else if (stream) {
+        } else if (stream_kind != HostStreamKind::Unknown) {
           automaton_builder.addStreamSync(&inst, stream);
         }
         continue;
@@ -248,6 +330,8 @@ void CUDAAnalysis::runAnalysis() {
 
       if (type == ThreadAPI::TD_CUDA_STREAM) {
         const Value *stream = detail::getStreamOperand(call);
+        const HostStreamKind stream_kind =
+            detail::classifyHostStream(call, stream);
         const Value *event = detail::getEventOperand(call);
         const Function *called_fn = call->getCalledFunction();
         StringRef name = called_fn ? called_fn->getName() : StringRef{};
@@ -256,21 +340,26 @@ void CUDAAnalysis::runAnalysis() {
         } else if (name.contains("Destroy")) {
           automaton_builder.addStreamDestroy(&inst, stream);
         } else if (name.contains("Synchronize")) {
-          auto &stream_state = stream ? ordering_state.stream_states[stream]
-                                      : ordering_state.unknown_stream;
-          stream_state.ordered_since_last_launch = true;
-          stream_state.scope = SynchronizationScope::Device;
-          stream_state.source = LaunchOrderingSource::StreamSynchronize;
-          stream_state.primitive = SynchronizationPrimitive::StreamProgramOrder;
-          automaton_builder.addStreamSync(&inst, stream);
+          detail::markStreamOrdered(ordering_state, stream_kind, stream,
+                                    SynchronizationScope::Device,
+                                    LaunchOrderingSource::StreamSynchronize,
+                                    SynchronizationPrimitive::StreamProgramOrder);
+          if (stream_kind != HostStreamKind::Unknown) {
+            automaton_builder.addStreamSync(&inst, stream);
+          }
         } else if (name.contains("WaitEvent")) {
-          auto &stream_state = stream ? ordering_state.stream_states[stream]
-                                      : ordering_state.unknown_stream;
-          stream_state.ordered_since_last_launch = true;
-          stream_state.scope = SynchronizationScope::Device;
-          stream_state.source = LaunchOrderingSource::StreamSynchronize;
-          stream_state.primitive = SynchronizationPrimitive::StreamProgramOrder;
           automaton_builder.addEventWait(&inst, event, stream);
+          auto event_it = ordering_state.event_states.find(event);
+          if (event_it != ordering_state.event_states.end() &&
+              event_it->second.has_record &&
+              event_it->second.recorded_stream_kind == HostStreamKind::Explicit &&
+              stream_kind == HostStreamKind::Explicit &&
+              event_it->second.recorded_stream == stream) {
+            detail::markStreamOrdered(
+                ordering_state, stream_kind, stream, SynchronizationScope::Device,
+                LaunchOrderingSource::StreamSynchronize,
+                SynchronizationPrimitive::StreamProgramOrder);
+          }
         }
         continue;
       }
@@ -278,21 +367,33 @@ void CUDAAnalysis::runAnalysis() {
       if (type == ThreadAPI::TD_CUDA_EVENT) {
         const Value *event = detail::getEventOperand(call);
         const Value *stream = detail::getStreamOperand(call);
+        const HostStreamKind stream_kind =
+            detail::classifyHostStream(call, stream);
         const Function *called_fn = call->getCalledFunction();
         StringRef name = called_fn ? called_fn->getName() : StringRef{};
         if (name.contains("Record")) {
+          if (event) {
+            auto &event_state = ordering_state.event_states[event];
+            event_state.has_record = true;
+            event_state.recorded_stream = stream;
+            event_state.recorded_stream_kind = stream_kind;
+          }
           automaton_builder.addEvent(&inst, event, stream);
         } else if (name.contains("Wait")) {
-          auto &stream_state = stream ? ordering_state.stream_states[stream]
-                                      : ordering_state.unknown_stream;
-          stream_state.ordered_since_last_launch = true;
-          stream_state.scope = SynchronizationScope::Device;
-          stream_state.source = LaunchOrderingSource::StreamSynchronize;
-          stream_state.primitive = SynchronizationPrimitive::StreamProgramOrder;
           automaton_builder.addEventWait(&inst, event, stream);
+          auto event_it = ordering_state.event_states.find(event);
+          if (event_it != ordering_state.event_states.end() &&
+              event_it->second.has_record &&
+              event_it->second.recorded_stream_kind == HostStreamKind::Explicit &&
+              stream_kind == HostStreamKind::Explicit &&
+              event_it->second.recorded_stream == stream) {
+            detail::markStreamOrdered(
+                ordering_state, stream_kind, stream, SynchronizationScope::Device,
+                LaunchOrderingSource::StreamSynchronize,
+                SynchronizationPrimitive::StreamProgramOrder);
+          }
         } else if (name.contains("Synchronize")) {
           automaton_builder.addEventSync(&inst, event);
-          ordering_state.device_synchronized = true;
         }
         continue;
       }
@@ -301,7 +402,16 @@ void CUDAAnalysis::runAnalysis() {
           type == ThreadAPI::TD_CUDA_UNIFIED_MEMORY) {
         const Function *called_fn = call->getCalledFunction();
         if (called_fn && called_fn->getName().contains("Async")) {
-          if (const Value *stream = detail::getStreamOperand(call)) {
+          const Value *stream = detail::getStreamOperand(call);
+          const HostStreamKind stream_kind =
+              detail::classifyHostStream(call, stream);
+          if (stream_kind != HostStreamKind::Unknown) {
+            detail::markStreamOrdered(ordering_state, stream_kind, stream,
+                                      SynchronizationScope::Device,
+                                      LaunchOrderingSource::ProgramOrder,
+                                      SynchronizationPrimitive::StreamProgramOrder);
+          }
+          if (stream) {
             automaton_builder.addStream(stream);
             automaton_builder.addEvent(&inst, nullptr, stream);
           }
@@ -325,9 +435,11 @@ void CUDAAnalysis::runAnalysis() {
       }
 
       const Value *stream = detail::getPotentialStream(call);
-      const bool stream_known = stream != nullptr;
-      auto &stream_state = stream_known ? ordering_state.stream_states[stream]
-                                        : ordering_state.unknown_stream;
+      const HostStreamKind stream_kind =
+          detail::classifyHostStream(call, stream);
+      const bool stream_known = stream_kind != HostStreamKind::Unknown;
+      const auto *stream_state =
+          detail::getStreamState(ordering_state, stream_kind, stream);
 
       KernelLaunchInfo launch;
       launch.launch = &inst;
@@ -336,6 +448,7 @@ void CUDAAnalysis::runAnalysis() {
       launch.kernel = kernel;
       launch.stream = stream;
       launch.stream_known = stream_known;
+      launch.stream_kind = stream_kind;
       launch.predecessor = SynchronizationPrimitive::None;
       launch.host_happens_before = false;
 
@@ -345,17 +458,22 @@ void CUDAAnalysis::runAnalysis() {
         launch.ordering_source = LaunchOrderingSource::DeviceSynchronize;
         launch.predecessor = SynchronizationPrimitive::DeviceSynchronize;
         launch.host_happens_before = true;
-      } else if (stream_state.ordered_since_last_launch) {
+      } else if (stream_state && stream_state->ordered_since_last_launch) {
         launch.ordered_after_previous = true;
-        launch.ordering_scope = stream_state.scope;
-        launch.ordering_source = stream_state.source;
-        launch.predecessor = stream_state.primitive;
+        launch.ordering_scope = stream_state->scope;
+        launch.ordering_source = stream_state->source;
+        launch.predecessor = stream_state->primitive;
         launch.host_happens_before = true;
       } else if (!m_launches.empty()) {
         const KernelLaunchInfo &prev = m_launches.back();
         const bool same_stream =
-            stream_known && prev.stream_known && prev.stream == stream;
-        if (same_stream) {
+            prev.stream_kind == HostStreamKind::Explicit &&
+            stream_kind == HostStreamKind::Explicit && stream_known &&
+            prev.stream_known && prev.stream == stream;
+        const bool default_stream_orders =
+            prev.stream_kind == HostStreamKind::LegacyDefault &&
+            stream_kind == HostStreamKind::Explicit;
+        if (same_stream || default_stream_orders) {
           launch.ordered_after_previous = true;
           launch.ordering_scope = SynchronizationScope::Device;
           launch.ordering_source = LaunchOrderingSource::ProgramOrder;
@@ -374,10 +492,7 @@ void CUDAAnalysis::runAnalysis() {
                               "diagnostics",
                        0.5);
       }
-      stream_state.ordered_since_last_launch = false;
-      stream_state.scope = SynchronizationScope::None;
-      stream_state.source = LaunchOrderingSource::None;
-      stream_state.primitive = SynchronizationPrimitive::None;
+      detail::clearStreamOrdered(ordering_state, stream_kind, stream);
       ordering_state.device_synchronized = false;
     }
   }

@@ -15,6 +15,7 @@
 #include <llvm/IR/CFG.h>
 #include <llvm/IR/Constants.h>
 #include <llvm/IR/DataLayout.h>
+#include <llvm/IR/Dominators.h>
 #include <llvm/IR/InstIterator.h>
 #include <llvm/IR/IntrinsicInst.h>
 #include <llvm/IR/Operator.h>
@@ -26,6 +27,12 @@ namespace concurrency::cuda {
 namespace {
 
 static bool comesBeforeInBlock(const Instruction *lhs, const Instruction *rhs);
+
+struct SyncControlInfo {
+  DominatorTree dom_tree;
+  PostDominatorTree post_dom_tree;
+  bool valid = false;
+};
 
 struct RaceDecision {
   bool aliases = false;
@@ -150,12 +157,16 @@ static SmallVector<const Value *, 4> mergeBaseObjects(const AccessInfo &lhs,
 }
 
 static bool mustReachBarrier(const Instruction *barrier,
-                             const Function *kernel) {
+                             const Function *kernel,
+                             const PostDominatorTree *pdt = nullptr) {
   const BasicBlock *barrier_block = barrier ? barrier->getParent() : nullptr;
   const BasicBlock *entry =
       kernel && !kernel->empty() ? &kernel->getEntryBlock() : nullptr;
   if (!barrier_block || !entry) {
     return false;
+  }
+  if (pdt && pdt->getNode(barrier_block) && pdt->dominates(barrier_block, entry)) {
+    return true;
   }
 
   SmallVector<const BasicBlock *, 8> worklist;
@@ -177,6 +188,64 @@ static bool mustReachBarrier(const Instruction *barrier,
     }
   }
   return true;
+}
+
+static bool doesBlockDominate(const DominatorTree *dt, const BasicBlock *lhs,
+                              const BasicBlock *rhs) {
+  return dt && lhs && rhs && dt->getNode(lhs) && dt->getNode(rhs) &&
+         dt->dominates(lhs, rhs);
+}
+
+static bool doesBlockPostDominate(const PostDominatorTree *pdt,
+                                  const BasicBlock *lhs,
+                                  const BasicBlock *rhs) {
+  return pdt && lhs && rhs && pdt->getNode(lhs) && pdt->getNode(rhs) &&
+         pdt->dominates(lhs, rhs);
+}
+
+static bool isBeforeSynchronization(const AccessInfo &access,
+                                    const SynchronizationRecord &sync,
+                                    const SyncControlInfo &control) {
+  if (!access.inst || !sync.inst) {
+    return false;
+  }
+  const BasicBlock *access_block = access.inst->getParent();
+  const BasicBlock *sync_block = sync.inst->getParent();
+  if (!access_block || !sync_block) {
+    return false;
+  }
+  if (access_block == sync_block) {
+    return comesBeforeInBlock(access.inst, sync.inst);
+  }
+  return doesBlockDominate(&control.dom_tree, access_block, sync_block);
+}
+
+static bool isAfterSynchronization(const AccessInfo &access,
+                                   const SynchronizationRecord &sync,
+                                   const SyncControlInfo &control) {
+  if (!access.inst || !sync.inst) {
+    return false;
+  }
+  const BasicBlock *access_block = access.inst->getParent();
+  const BasicBlock *sync_block = sync.inst->getParent();
+  if (!access_block || !sync_block) {
+    return false;
+  }
+  if (access_block == sync_block) {
+    return comesBeforeInBlock(sync.inst, access.inst);
+  }
+  return doesBlockDominate(&control.dom_tree, sync_block, access_block);
+}
+
+static bool isFullWarpMask(const CallBase *call) {
+  if (!call || call->arg_empty()) {
+    return false;
+  }
+  const auto mask = CUDASymbolicModel::evaluateConstantInt(call->getArgOperand(0));
+  if (!mask) {
+    return false;
+  }
+  return *mask == -1 || static_cast<uint64_t>(*mask) == 0xffffffffULL;
 }
 
 static const Instruction *getFirstBarrierInBlock(const BasicBlock *bb,
@@ -972,7 +1041,8 @@ void CUDAAnalysis::analyzeDivergence(KernelSummary &summary,
 static bool isOrderedBySynchronization(const AccessInfo &lhs,
                                        const AccessInfo &rhs,
                                        const KernelSummary &summary,
-                                       SynchronizationScope required_scope) {
+                                       SynchronizationScope required_scope,
+                                       const SyncControlInfo &control) {
   for (const auto &sync : summary.synchronizations) {
     if (!sync.inst || !sync.orders_memory) {
       continue;
@@ -993,29 +1063,8 @@ static bool isOrderedBySynchronization(const AccessInfo &lhs,
       continue;
     }
 
-    bool lhs_before = lhs.inst &&
-                      lhs.inst->getParent() == sync.inst->getParent() &&
-                      comesBeforeInBlock(lhs.inst, sync.inst);
-    bool rhs_after = rhs.inst &&
-                     rhs.inst->getParent() == sync.inst->getParent() &&
-                     comesBeforeInBlock(sync.inst, rhs.inst);
-
-    if (!lhs_before) {
-      for (const auto *pred : sync.preceding_blocks) {
-        if (lhs.inst && lhs.inst->getParent() == pred) {
-          lhs_before = true;
-          break;
-        }
-      }
-    }
-    if (!rhs_after) {
-      for (const auto *succ : sync.following_blocks) {
-        if (rhs.inst && rhs.inst->getParent() == succ) {
-          rhs_after = true;
-          break;
-        }
-      }
-    }
+    const bool lhs_before = isBeforeSynchronization(lhs, sync, control);
+    const bool rhs_after = isAfterSynchronization(rhs, sync, control);
     if (!lhs_before || !rhs_after) {
       continue;
     }
@@ -1035,36 +1084,14 @@ static bool isOrderedBySynchronization(const AccessInfo &lhs,
 
 static bool hasWarpOnlyOrderingBetween(const AccessInfo &lhs,
                                        const AccessInfo &rhs,
-                                       const KernelSummary &summary) {
+                                       const KernelSummary &summary,
+                                       const SyncControlInfo &control) {
   for (const auto &sync : summary.synchronizations) {
     if (!sync.inst || sync.scope != SynchronizationScope::Warp) {
       continue;
     }
-
-    bool lhs_before = lhs.inst &&
-                      lhs.inst->getParent() == sync.inst->getParent() &&
-                      comesBeforeInBlock(lhs.inst, sync.inst);
-    bool rhs_after = rhs.inst &&
-                     rhs.inst->getParent() == sync.inst->getParent() &&
-                     comesBeforeInBlock(sync.inst, rhs.inst);
-
-    if (!lhs_before) {
-      for (const auto *pred : sync.preceding_blocks) {
-        if (lhs.inst && lhs.inst->getParent() == pred) {
-          lhs_before = true;
-          break;
-        }
-      }
-    }
-    if (!rhs_after) {
-      for (const auto *succ : sync.following_blocks) {
-        if (rhs.inst && rhs.inst->getParent() == succ) {
-          rhs_after = true;
-          break;
-        }
-      }
-    }
-    if (lhs_before && rhs_after) {
+    if (isBeforeSynchronization(lhs, sync, control) &&
+        isAfterSynchronization(rhs, sync, control)) {
       return true;
     }
   }
@@ -1128,6 +1155,12 @@ void CUDAAnalysis::recordModelGap(const Function *function, StringRef message,
 }
 
 void CUDAAnalysis::analyzeRaces(KernelSummary &summary) {
+  SyncControlInfo control;
+  if (summary.kernel && !summary.kernel->empty()) {
+    control.dom_tree.recalculate(const_cast<Function &>(*summary.kernel));
+    control.post_dom_tree.recalculate(const_cast<Function &>(*summary.kernel));
+    control.valid = true;
+  }
   for (size_t i = 0; i < summary.accesses.size(); ++i) {
     for (size_t j = i + 1; j < summary.accesses.size(); ++j) {
       const AccessInfo &lhs = summary.accesses[i];
@@ -1167,7 +1200,8 @@ void CUDAAnalysis::analyzeRaces(KernelSummary &summary) {
 
       const SynchronizationScope required_scope =
           requiredOrderingScope(lhs, rhs);
-      if (isOrderedBySynchronization(lhs, rhs, summary, required_scope)) {
+      if (isOrderedBySynchronization(lhs, rhs, summary, required_scope,
+                                     control)) {
         continue;
       }
 
@@ -1177,7 +1211,7 @@ void CUDAAnalysis::analyzeRaces(KernelSummary &summary) {
         if (decision.aliases) {
           summary.has_shared_race = true;
           const bool warp_only_ordering =
-              hasWarpOnlyOrderingBetween(lhs, rhs, summary);
+              hasWarpOnlyOrderingBetween(lhs, rhs, summary, control);
           RaceInfo race;
           race.first = lhs.inst;
           race.second = rhs.inst;
@@ -1341,6 +1375,11 @@ void CUDAAnalysis::analyzeSynchronization(KernelSummary &summary,
     return;
   }
 
+  SyncControlInfo control;
+  control.dom_tree.recalculate(const_cast<Function &>(*kernel));
+  control.post_dom_tree.recalculate(const_cast<Function &>(*kernel));
+  control.valid = true;
+
   for (const BasicBlock &bb : *kernel) {
     for (const Instruction &inst : bb) {
       const auto *call = dyn_cast<CallBase>(&inst);
@@ -1366,24 +1405,37 @@ void CUDAAnalysis::analyzeSynchronization(KernelSummary &summary,
                                   type == ThreadAPI::TD_CUDA_WARP_BARRIER;
       info.participating_threads = type == ThreadAPI::TD_CUDA_WARP_BARRIER
                                        ? ParticipationScope::Warp
-                                       : ParticipationScope::Block;
+                                       : (type == ThreadAPI::TD_CUDA_BARRIER
+                                              ? ParticipationScope::Block
+                                              : ParticipationScope::Grid);
+
+      if (type == ThreadAPI::TD_CUDA_WARP_BARRIER) {
+        info.participation = isFullWarpMask(call) ? ParticipationKind::Exact
+                                                  : ParticipationKind::Conditional;
+        info.exact = info.participation == ParticipationKind::Exact;
+      }
 
       for (const BasicBlock &candidate : *kernel) {
         if (&candidate == &bb) {
           continue;
         }
-        if (isReachable(&candidate, &bb)) {
+        if (doesBlockDominate(&control.dom_tree, &candidate, &bb)) {
           info.preceding_blocks.push_back(&candidate);
         }
-        if (isReachable(&bb, &candidate)) {
+        if (doesBlockDominate(&control.dom_tree, &bb, &candidate)) {
           info.following_blocks.push_back(&candidate);
         }
       }
-      const bool all_threads_reach =
-          info.execution_rendezvous ? mustReachBarrier(&inst, kernel) : false;
-      info.participation = all_threads_reach ? ParticipationKind::Exact
-                                             : ParticipationKind::Conditional;
-      info.exact = all_threads_reach || !info.execution_rendezvous;
+      if (type != ThreadAPI::TD_CUDA_WARP_BARRIER) {
+        const bool all_threads_reach = info.execution_rendezvous
+                                           ? mustReachBarrier(
+                                                 &inst, kernel,
+                                                 &control.post_dom_tree)
+                                           : false;
+        info.participation = all_threads_reach ? ParticipationKind::Exact
+                                               : ParticipationKind::Conditional;
+        info.exact = all_threads_reach || !info.execution_rendezvous;
+      }
       summary.synchronizations.push_back(std::move(info));
 
       CUDASynchronizationFact fact;

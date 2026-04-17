@@ -20,9 +20,16 @@ struct LaunchOrderingState {
     SynchronizationPrimitive primitive = SynchronizationPrimitive::None;
   };
 
+  struct EventState {
+    bool has_record = false;
+    const llvm::Value *recorded_stream = nullptr;
+    HostStreamKind recorded_stream_kind = HostStreamKind::Unknown;
+  };
+
   bool device_synchronized = false;
   llvm::DenseMap<const llvm::Value *, StreamState> stream_states;
-  StreamState unknown_stream;
+  StreamState default_stream;
+  llvm::DenseMap<const llvm::Value *, EventState> event_states;
 };
 
 bool isNVVMKernel(const llvm::Function *function);

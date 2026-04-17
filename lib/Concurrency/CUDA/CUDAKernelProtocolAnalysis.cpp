@@ -3,6 +3,7 @@
 #include "Concurrency/Utils/ThreadAPI.h"
 
 #include <llvm/Analysis/CFG.h>
+#include <llvm/Analysis/PostDominators.h>
 #include <llvm/IR/CFG.h>
 
 namespace concurrency::cuda {
@@ -16,6 +17,9 @@ void CUDAKernelProtocolAnalysis::runAnalysis() {
   if (!api) {
     return;
   }
+
+  llvm::PostDominatorTree pdt;
+  pdt.recalculate(const_cast<llvm::Function &>(m_kernel));
 
   llvm::SmallVector<const llvm::CallBase *, 8> barriers;
   llvm::SmallVector<const llvm::CallBase *, 8> warp_barriers;
@@ -117,20 +121,13 @@ void CUDAKernelProtocolAnalysis::runAnalysis() {
       if (!barrier) {
         continue;
       }
-      bool reachable_from_all_paths = true;
-      for (const auto &bb : m_kernel) {
-        if (&bb == barrier->getParent()) {
-          continue;
-        }
-        if (llvm::succ_empty(&bb)) {
-          continue;
-        }
-        if (!llvm::isPotentiallyReachable(&bb, barrier->getParent())) {
-          reachable_from_all_paths = false;
-          break;
-        }
-      }
-      if (!reachable_from_all_paths) {
+      const llvm::BasicBlock *barrier_bb = barrier->getParent();
+      const llvm::BasicBlock *entry =
+          m_kernel.empty() ? nullptr : &m_kernel.getEntryBlock();
+      const bool post_dominates_entry =
+          barrier_bb && entry && pdt.getNode(barrier_bb) && pdt.getNode(entry) &&
+          pdt.dominates(barrier_bb, entry);
+      if (!post_dominates_entry) {
         has_proper_sync = false;
         break;
       }

@@ -24,6 +24,7 @@ struct MemorySpaceInfo {
 struct BaseObjectInfo {
   llvm::SmallVector<const llvm::Value *, 4> objects;
   bool ambiguous = false;
+  bool unresolved = false;
 
   const llvm::Value *primary() const {
     return objects.empty() ? nullptr : objects.front();

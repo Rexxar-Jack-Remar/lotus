@@ -44,6 +44,8 @@ enum class LaunchOrderingSource {
   Unknown
 };
 
+enum class HostStreamKind { Unknown, LegacyDefault, Explicit };
+
 enum class AliasPrecision { Exact, SymbolicAffine, Ambiguous, NonAffine };
 
 enum class AliasSource { Local, AserPTA, Wrapper };
@@ -87,6 +89,7 @@ struct KernelLaunchInfo {
   LaunchOrderingSource ordering_source = LaunchOrderingSource::None;
   const llvm::Value *stream = nullptr;
   bool stream_known = false;
+  HostStreamKind stream_kind = HostStreamKind::Unknown;
   bool host_happens_before = false;
 };
 

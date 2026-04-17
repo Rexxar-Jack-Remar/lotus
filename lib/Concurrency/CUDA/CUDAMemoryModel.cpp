@@ -19,6 +19,21 @@ static bool isNVVMKernel(const Function *function) {
                       function->getCallingConv() == CallingConv::PTX_Kernel);
 }
 
+static const Function *getEnclosingFunction(const Value *value) {
+  if (const auto *arg = dyn_cast_or_null<Argument>(value)) {
+    return arg->getParent();
+  }
+  if (const auto *inst = dyn_cast_or_null<Instruction>(value)) {
+    return inst->getFunction();
+  }
+  return nullptr;
+}
+
+static const Function *getEnclosingKernel(const Value *value) {
+  const Function *function = getEnclosingFunction(value);
+  return isNVVMKernel(function) ? function : nullptr;
+}
+
 static const Value *stripCastsAndGEPBase(const Value *value) {
   const Value *current = value ? value->stripPointerCasts() : nullptr;
   while (current) {
@@ -49,69 +64,83 @@ static void appendUniqueBase(const Value *value, BaseObjectInfo &info,
   info.objects.push_back(value);
 }
 
+static void appendConservativeKernelBase(const Function *kernel,
+                                         BaseObjectInfo &info,
+                                         SmallPtrSetImpl<const Value *> &seen) {
+  info.unresolved = true;
+}
+
 static void collectBaseObjects(const Value *value, BaseObjectInfo &info,
                                SmallPtrSetImpl<const Value *> &seen,
+                               const Function *kernel = nullptr,
                                unsigned depth = 0) {
   if (!value || depth > 8) {
+    appendConservativeKernelBase(kernel, info, seen);
     info.ambiguous = true;
     return;
   }
 
   const Value *base = stripCastsAndGEPBase(value);
   if (!base) {
+    appendConservativeKernelBase(kernel, info, seen);
     return;
   }
 
-  if (isa<AllocaInst>(base) || isa<Argument>(base) || isa<GlobalValue>(base)) {
+  if (isa<AllocaInst>(base) || isa<GlobalValue>(base)) {
+    appendUniqueBase(base, info, seen);
+    return;
+  }
+
+  if (const auto *arg = dyn_cast<Argument>(base)) {
     appendUniqueBase(base, info, seen);
     return;
   }
 
   if (const auto *select = dyn_cast<SelectInst>(base)) {
     info.ambiguous = true;
-    collectBaseObjects(select->getTrueValue(), info, seen, depth + 1);
-    collectBaseObjects(select->getFalseValue(), info, seen, depth + 1);
+    collectBaseObjects(select->getTrueValue(), info, seen, kernel, depth + 1);
+    collectBaseObjects(select->getFalseValue(), info, seen, kernel, depth + 1);
     return;
   }
 
   if (const auto *phi = dyn_cast<PHINode>(base)) {
     info.ambiguous = true;
     for (const Value *incoming : phi->incoming_values()) {
-      collectBaseObjects(incoming, info, seen, depth + 1);
+      collectBaseObjects(incoming, info, seen, kernel, depth + 1);
     }
     return;
   }
 
   if (const auto *ce = dyn_cast<ConstantExpr>(base)) {
     if (ce->isCast() || ce->getOpcode() == Instruction::GetElementPtr) {
-      collectBaseObjects(ce->getOperand(0), info, seen, depth + 1);
+      collectBaseObjects(ce->getOperand(0), info, seen, kernel, depth + 1);
       return;
     }
   }
 
   if (const auto *inst = dyn_cast<Instruction>(base)) {
     if (const auto *call = dyn_cast<CallBase>(inst)) {
-      if (!call->getType()->isPointerTy()) {
+      if (call->getType()->isPointerTy()) {
+        appendConservativeKernelBase(kernel, info, seen);
+      } else {
         appendUniqueBase(base, info, seen);
-        return;
       }
+      return;
     }
 
     if (inst->getOpcode() == Instruction::AddrSpaceCast ||
         inst->getOpcode() == Instruction::BitCast ||
         inst->getOpcode() == Instruction::IntToPtr) {
-      collectBaseObjects(inst->getOperand(0), info, seen, depth + 1);
+      collectBaseObjects(inst->getOperand(0), info, seen, kernel, depth + 1);
       return;
     }
   }
 
-  appendUniqueBase(base, info, seen);
+  appendConservativeKernelBase(kernel, info, seen);
 }
 
 static MemorySpaceInfo classifyAddressSpace(unsigned addrspace) {
   switch (addrspace) {
-  case 0:
-    return {MemorySpace::Host, true, addrspace};
   case 1:
     return {MemorySpace::Global, true, addrspace};
   case 3:
@@ -139,9 +168,6 @@ static MemorySpaceInfo classifyByName(StringRef name, unsigned addrspace) {
   }
   if (name.contains("global")) {
     return {MemorySpace::Global, false, addrspace};
-  }
-  if (name.contains("host")) {
-    return {MemorySpace::Host, false, addrspace};
   }
   return {MemorySpace::Unknown, false, addrspace};
 }
@@ -195,14 +221,17 @@ MemorySpaceInfo CUDAMemoryModel::classify(const Value *value) {
     if (arg->hasByValAttr()) {
       return {MemorySpace::Host, false, addrspace};
     }
-    if (arg->hasName()) {
+    if (arg->hasName() && !isNVVMKernel(arg->getParent())) {
       MemorySpaceInfo by_name = classifyByName(arg->getName(), addrspace);
       if (by_name.space != MemorySpace::Unknown) {
         return by_name;
       }
     }
     if (arg->getParent() && isNVVMKernel(arg->getParent())) {
-      return {MemorySpace::Global, addrspace != 0, addrspace};
+      if (addrspace == 0) {
+        return {MemorySpace::Global, false, addrspace};
+      }
+      return {MemorySpace::Global, true, addrspace};
     }
     return {MemorySpace::Unknown, false, addrspace};
   }
@@ -214,7 +243,14 @@ MemorySpaceInfo CUDAMemoryModel::classify(const Value *value) {
         return by_as;
       }
     }
-    if (inst->hasName()) {
+    if (const Function *kernel = getEnclosingKernel(inst)) {
+      if (inst->getOpcode() != Instruction::IntToPtr &&
+          inst->getType()->isPointerTy() &&
+          inst->getType()->getPointerAddressSpace() == 0) {
+        return {MemorySpace::Global, false, 0};
+      }
+    }
+    if (inst->hasName() && !getEnclosingKernel(inst)) {
       return classifyByName(inst->getName(), 0);
     }
   }
@@ -236,7 +272,7 @@ const Value *CUDAMemoryModel::getCanonicalBase(const Value *value) {
 BaseObjectInfo CUDAMemoryModel::getBaseObjectInfo(const Value *value) {
   BaseObjectInfo info;
   SmallPtrSet<const Value *, 8> seen;
-  collectBaseObjects(value, info, seen);
+  collectBaseObjects(value, info, seen, getEnclosingKernel(value));
   if (info.objects.size() > 1) {
     info.ambiguous = true;
   }
