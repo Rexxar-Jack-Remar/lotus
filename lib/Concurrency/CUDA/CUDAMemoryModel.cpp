@@ -279,4 +279,52 @@ BaseObjectInfo CUDAMemoryModel::getBaseObjectInfo(const Value *value) {
   return info;
 }
 
+bool CUDAMemoryModel::isPotentiallyManaged(const Value *value) {
+  if (!value) {
+    return false;
+  }
+  const Value *base = getCanonicalBase(value);
+  if (!base) {
+    return false;
+  }
+  if (const auto *gv = dyn_cast<GlobalValue>(base)) {
+    StringRef name = gv->getName();
+    if (name.contains("managed") || name.contains("Managed") ||
+        name.contains("UM") || name.contains("um_")) {
+      return true;
+    }
+    if (gv->hasSection()) {
+      StringRef section = gv->getSection();
+      if (section.contains("managed")) {
+        return true;
+      }
+    }
+  }
+  if (const auto *arg = dyn_cast<Argument>(base)) {
+    StringRef name = arg->getName();
+    if (name.contains("managed") || name.contains("Managed") ||
+        name.contains("UM") || name.contains("um_")) {
+      return true;
+    }
+  }
+  if (const auto *inst = dyn_cast<Instruction>(base)) {
+    if (const auto *call = dyn_cast<CallBase>(inst)) {
+      if (const Function *callee = call->getCalledFunction()) {
+        StringRef name = callee->getName();
+        if (name.contains("Managed") || name.contains("cudaMallocManaged") ||
+            name.contains("cudaManaged")) {
+          return true;
+        }
+      }
+    }
+  }
+  if (const auto *ptr_ty = dyn_cast<PointerType>(base->getType())) {
+    unsigned addrspace = ptr_ty->getAddressSpace();
+    if (addrspace == 4) {
+      return true;
+    }
+  }
+  return false;
+}
+
 } // namespace concurrency::cuda

@@ -8,6 +8,8 @@
 
 namespace concurrency::cuda {
 
+struct DeviceConfig;
+
 enum class ParticipantRelation {
   Unknown,
   Overlaps,
@@ -27,7 +29,8 @@ struct CUDAParticipantPredicate {
 
 class CUDAParticipantAnalysis {
 public:
-  explicit CUDAParticipantAnalysis(const llvm::Function &kernel);
+  explicit CUDAParticipantAnalysis(const llvm::Function &kernel,
+                                   uint32_t warp_size = 32);
 
   CUDAParticipantSet getActiveParticipants(const llvm::Instruction *inst) const;
   CUDAParticipantSet getActiveSetAt(const llvm::Instruction *inst) const;
@@ -45,6 +48,7 @@ public:
 
 private:
   const llvm::Function &m_kernel;
+  uint32_t m_warp_size = 32;
 };
 
 ParticipantRelation computeOverlap(const CUDAParticipantSet &a,

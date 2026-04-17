@@ -48,8 +48,9 @@ void fillInstructionMetadata(CUDAParticipantSet &result,
 
 } // anonymous namespace
 
-CUDAParticipantAnalysis::CUDAParticipantAnalysis(const llvm::Function &kernel)
-    : m_kernel(kernel) {}
+CUDAParticipantAnalysis::CUDAParticipantAnalysis(const llvm::Function &kernel,
+                                                 uint32_t warp_size)
+    : m_kernel(kernel), m_warp_size(warp_size) {}
 
 CUDAParticipantSet CUDAParticipantAnalysis::getActiveParticipants(
     const llvm::Instruction *inst) const {
@@ -71,7 +72,7 @@ CUDAParticipantSet CUDAParticipantAnalysis::getActiveParticipants(
           if (type == ThreadAPI::TD_CUDA_WARP_BARRIER) {
             result.scopes.push_back(static_cast<int>(ParticipationScope::Warp));
             result.min_lane = 0;
-            result.max_lane = 31;
+            result.max_lane = m_warp_size - 1;
             result.is_exact = true;
             return result;
           }
@@ -79,7 +80,7 @@ CUDAParticipantSet CUDAParticipantAnalysis::getActiveParticipants(
             result.scopes.push_back(
                 static_cast<int>(ParticipationScope::Block));
             result.min_lane = 0;
-            result.max_lane = 31;
+            result.max_lane = m_warp_size - 1;
             result.is_exact = true;
             return result;
           }

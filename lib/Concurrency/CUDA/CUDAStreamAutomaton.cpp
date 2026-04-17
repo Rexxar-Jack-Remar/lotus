@@ -5,6 +5,27 @@
 
 namespace concurrency::cuda {
 
+namespace {
+
+bool isNullStream(const llvm::Value *stream) {
+  if (!stream) {
+    return true;
+  }
+  if (const auto *cv = llvm::dyn_cast<llvm::Constant>(stream)) {
+    return cv->isNullValue();
+  }
+  if (const auto *ce = llvm::dyn_cast<llvm::ConstantExpr>(stream)) {
+    if (ce->getOpcode() == llvm::Instruction::IntToPtr) {
+      if (auto *ci = llvm::dyn_cast<llvm::ConstantInt>(ce->getOperand(0))) {
+        return ci->isZero();
+      }
+    }
+  }
+  return false;
+}
+
+} // anonymous namespace
+
 CUDASteamAutomatonBuilder::CUDASteamAutomatonBuilder(CUDAAbstractState &state)
     : m_state(state) {}
 
@@ -19,6 +40,7 @@ void CUDASteamAutomatonBuilder::addStream(const llvm::Value *stream) {
   automaton.stream_class_id = class_id;
   automaton.stream = stream;
   automaton.current_state = StreamState::Created;
+  automaton.is_null_stream = isNullStream(stream);
 }
 
 void CUDASteamAutomatonBuilder::addEventObject(const llvm::Value *event) {
@@ -46,10 +68,20 @@ void CUDASteamAutomatonBuilder::addEvent(const llvm::Instruction *record_inst,
   }
   if (stream) {
     addStream(stream);
+  } else {
+    if (!m_seen_streams.count(nullptr)) {
+      m_seen_streams.insert(nullptr);
+      size_t class_id = m_stream_automata.size();
+      CUDAStreamAutomaton &automaton = m_stream_automata[class_id];
+      automaton.stream_class_id = class_id;
+      automaton.stream = nullptr;
+      automaton.current_state = StreamState::Created;
+      automaton.is_null_stream = true;
+    }
   }
 
   for (auto &pair : m_stream_automata) {
-    if (!stream || pair.second.stream == stream) {
+    if (!stream || pair.second.stream == stream || pair.second.is_null_stream) {
       CUDAStreamTransition transition;
       transition.inst = record_inst;
       transition.from_state = pair.second.current_state;
@@ -92,7 +124,7 @@ void CUDASteamAutomatonBuilder::addEventWait(const llvm::Instruction *wait_inst,
   }
 
   for (auto &pair : m_stream_automata) {
-    if (stream && pair.second.stream != stream) {
+    if (stream && pair.second.stream != stream && !pair.second.is_null_stream) {
       continue;
     }
     CUDAStreamTransition transition;
@@ -179,7 +211,7 @@ void CUDASteamAutomatonBuilder::addStreamDestroy(
   }
 
   for (auto &pair : m_stream_automata) {
-    if (stream && pair.second.stream != stream) {
+    if (stream && pair.second.stream != stream && !pair.second.is_null_stream) {
       continue;
     }
     CUDAStreamTransition transition;

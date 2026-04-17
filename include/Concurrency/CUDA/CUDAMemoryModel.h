@@ -36,6 +36,7 @@ public:
   static MemorySpaceInfo classify(const llvm::Value *value);
   static const llvm::Value *getCanonicalBase(const llvm::Value *value);
   static BaseObjectInfo getBaseObjectInfo(const llvm::Value *value);
+  static bool isPotentiallyManaged(const llvm::Value *value);
 };
 
 } // namespace concurrency::cuda

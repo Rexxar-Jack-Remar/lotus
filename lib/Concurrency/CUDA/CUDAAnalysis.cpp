@@ -53,10 +53,43 @@ static bool isGlobalRaceRelevant(const AccessInfo &access) {
          access.base;
 }
 
-static bool isStrongerThanRelaxed(AtomicOrdering ordering) {
-  return ordering != AtomicOrdering::NotAtomic &&
-         ordering != AtomicOrdering::Unordered &&
-         ordering != AtomicOrdering::Monotonic;
+static bool mightBeManagedMemory(const AccessInfo &access) {
+  if (!access.base) {
+    return false;
+  }
+  if (const auto *gv = dyn_cast<GlobalValue>(access.base)) {
+    StringRef name = gv->getName();
+    if (name.contains("managed") || name.contains("Managed") ||
+        name.contains("UM") || name.contains("um_")) {
+      return true;
+    }
+    if (gv->hasSection() && gv->getSection().contains("managed")) {
+      return true;
+    }
+  }
+  if (const auto *ptr_ty = dyn_cast<PointerType>(access.base->getType())) {
+    if (ptr_ty->getAddressSpace() == 4) {
+      return true;
+    }
+  }
+  return false;
+}
+
+static bool isCompatibleAtomicOrdering(AtomicOrdering lhs_order,
+                                       AtomicOrdering rhs_order) {
+  if ((lhs_order == AtomicOrdering::Release ||
+       lhs_order == AtomicOrdering::AcquireRelease ||
+       lhs_order == AtomicOrdering::SequentiallyConsistent) &&
+      (rhs_order == AtomicOrdering::Acquire ||
+       rhs_order == AtomicOrdering::AcquireRelease ||
+       rhs_order == AtomicOrdering::SequentiallyConsistent)) {
+    return true;
+  }
+  if (lhs_order == AtomicOrdering::SequentiallyConsistent &&
+      rhs_order == AtomicOrdering::SequentiallyConsistent) {
+    return true;
+  }
+  return false;
 }
 
 static bool isAtomicAccessOrdered(const AccessInfo &lhs, const AccessInfo &rhs,
@@ -64,9 +97,8 @@ static bool isAtomicAccessOrdered(const AccessInfo &lhs, const AccessInfo &rhs,
   if (!(lhs.is_atomic && rhs.is_atomic)) {
     return false;
   }
-  if (isStrongerThanRelaxed(lhs.atomic_ordering) &&
-      isStrongerThanRelaxed(rhs.atomic_ordering)) {
-    return true;
+  if (!isCompatibleAtomicOrdering(lhs.atomic_ordering, rhs.atomic_ordering)) {
+    return false;
   }
   for (const auto &sync : summary.synchronizations) {
     if (!sync.orders_memory && !sync.orders_atomics) {
@@ -156,8 +188,7 @@ static SmallVector<const Value *, 4> mergeBaseObjects(const AccessInfo &lhs,
   return bases;
 }
 
-static bool mustReachBarrier(const Instruction *barrier,
-                             const Function *kernel,
+static bool mustReachBarrier(const Instruction *barrier, const Function *kernel,
                              const PostDominatorTree *pdt = nullptr) {
   const BasicBlock *barrier_block = barrier ? barrier->getParent() : nullptr;
   const BasicBlock *entry =
@@ -165,7 +196,8 @@ static bool mustReachBarrier(const Instruction *barrier,
   if (!barrier_block || !entry) {
     return false;
   }
-  if (pdt && pdt->getNode(barrier_block) && pdt->dominates(barrier_block, entry)) {
+  if (pdt && pdt->getNode(barrier_block) &&
+      pdt->dominates(barrier_block, entry)) {
     return true;
   }
 
@@ -194,13 +226,6 @@ static bool doesBlockDominate(const DominatorTree *dt, const BasicBlock *lhs,
                               const BasicBlock *rhs) {
   return dt && lhs && rhs && dt->getNode(lhs) && dt->getNode(rhs) &&
          dt->dominates(lhs, rhs);
-}
-
-static bool doesBlockPostDominate(const PostDominatorTree *pdt,
-                                  const BasicBlock *lhs,
-                                  const BasicBlock *rhs) {
-  return pdt && lhs && rhs && pdt->getNode(lhs) && pdt->getNode(rhs) &&
-         pdt->dominates(lhs, rhs);
 }
 
 static bool isBeforeSynchronization(const AccessInfo &access,
@@ -241,7 +266,8 @@ static bool isFullWarpMask(const CallBase *call) {
   if (!call || call->arg_empty()) {
     return false;
   }
-  const auto mask = CUDASymbolicModel::evaluateConstantInt(call->getArgOperand(0));
+  const auto mask =
+      CUDASymbolicModel::evaluateConstantInt(call->getArgOperand(0));
   if (!mask) {
     return false;
   }
@@ -366,13 +392,15 @@ static uint32_t getActiveLaneCount(const LaunchDimensions &dims,
   return std::min(config.warp_size, getThreadsPerBlock(dims));
 }
 
-static std::array<int64_t, 3> getCanonicalBlockDims(const LaunchDimensions &dims) {
+static std::array<int64_t, 3>
+getCanonicalBlockDims(const LaunchDimensions &dims) {
   return {static_cast<int64_t>(getConcreteExtent(dims.block[0], 1)),
           static_cast<int64_t>(getConcreteExtent(dims.block[1], 1)),
           static_cast<int64_t>(getConcreteExtent(dims.block[2], 1))};
 }
 
-static std::array<int64_t, 3> getCanonicalGridDims(const LaunchDimensions &dims) {
+static std::array<int64_t, 3>
+getCanonicalGridDims(const LaunchDimensions &dims) {
   return {static_cast<int64_t>(getConcreteExtent(dims.grid[0], 1)),
           static_cast<int64_t>(getConcreteExtent(dims.grid[1], 1)),
           static_cast<int64_t>(getConcreteExtent(dims.grid[2], 1))};
@@ -517,10 +545,8 @@ static bool hasDistinctThreadAlias(const AccessInfo &lhs, const AccessInfo &rhs,
   }
 
   const uint32_t lanes = getActiveLaneCount(dims, config);
-  const uint32_t block_count =
-      allow_cross_block
-          ? std::min<uint32_t>(2, getConcreteExtent(dims.grid[0], 2))
-          : 1;
+  const uint32_t concrete_blocks = getConcreteExtent(dims.grid[0], 4);
+  const uint32_t block_count = allow_cross_block ? concrete_blocks : 1;
 
   for (uint32_t block_l = 0; block_l < block_count; ++block_l) {
     for (uint32_t block_r = 0; block_r < block_count; ++block_r) {
@@ -662,8 +688,9 @@ computeBankConflict(const AccessInfo &access, const LaunchDimensions &dims,
   info.bank_width = bank_width;
   info.conflict_degree = max_occupancy;
   info.threads_per_bank = max_occupancy;
-  info.bank_stride_bytes = static_cast<uint32_t>(std::abs(
-      canonical.thread_stride_bytes * std::max<int64_t>(1, access.access_size)));
+  info.bank_stride_bytes =
+      static_cast<uint32_t>(std::abs(canonical.thread_stride_bytes *
+                                     std::max<int64_t>(1, access.access_size)));
   info.unique_banks = unique_bank_count;
   info.is_broadcast = all_same_address;
   info.exact = true;
@@ -719,9 +746,8 @@ computeCoalescing(const AccessInfo &access, const LaunchDimensions &dims,
     info.covered_bytes =
         static_cast<uint32_t>(*max_addr - *min_addr + access.access_size);
   }
-  const uint32_t per_lane_stride =
-      std::max<uint32_t>(1, static_cast<uint32_t>(
-                                std::abs(canonical.thread_stride_bytes)));
+  const uint32_t per_lane_stride = std::max<uint32_t>(
+      1, static_cast<uint32_t>(std::abs(canonical.thread_stride_bytes)));
   const uint32_t contiguous_bytes =
       lanes * std::max<uint32_t>(1, access.access_size) * per_lane_stride;
   if (segments.size() <= 1 && info.covered_bytes <= transaction_bytes) {
@@ -1168,10 +1194,14 @@ void CUDAAnalysis::analyzeRaces(KernelSummary &summary) {
       if (!(lhs.is_write || rhs.is_write)) {
         continue;
       }
-      if (lhs.space != rhs.space && !((lhs.space == MemorySpace::Global ||
-                                       lhs.space == MemorySpace::Device) &&
-                                      (rhs.space == MemorySpace::Global ||
-                                       rhs.space == MemorySpace::Device))) {
+      bool different_spaces = lhs.space != rhs.space;
+      bool global_device_cross = (lhs.space == MemorySpace::Global ||
+                                  lhs.space == MemorySpace::Device) &&
+                                 (rhs.space == MemorySpace::Global ||
+                                  rhs.space == MemorySpace::Device);
+      bool might_be_managed =
+          mightBeManagedMemory(lhs) || mightBeManagedMemory(rhs);
+      if (different_spaces && !global_device_cross && !might_be_managed) {
         continue;
       }
 
@@ -1184,13 +1214,19 @@ void CUDAAnalysis::analyzeRaces(KernelSummary &summary) {
       if (alias.precision == AliasPrecision::Ambiguous ||
           alias.precision == AliasPrecision::NonAffine) {
         const Instruction *inst = lhs.inst ? lhs.inst : rhs.inst;
-        recordModelGap(inst, "Race check is proceeding with imprecise alias "
-                              "or non-affine address information",
+        recordModelGap(inst,
+                       "Race check is proceeding with imprecise alias "
+                       "or non-affine address information",
                        0.4);
       }
 
-      if (lhs.space == MemorySpace::Shared &&
-          isUniformControlled(lhs, rhs, summary)) {
+      if (lhs.space == MemorySpace::Shared) {
+        if (isUniformControlled(lhs, rhs, summary) &&
+            lhs.participation < ParticipationScope::Warp &&
+            rhs.participation < ParticipationScope::Warp) {
+          continue;
+        }
+      } else if (isUniformControlled(lhs, rhs, summary)) {
         continue;
       }
 
@@ -1399,19 +1435,20 @@ void CUDAAnalysis::analyzeSynchronization(KernelSummary &summary,
       info.primitive = detail::getSynchronizationPrimitive(type, &inst);
       info.scope = detail::getSyncScope(type);
       info.orders_memory = info.scope != SynchronizationScope::None;
-      info.orders_atomics = info.orders_memory ||
-                            type == ThreadAPI::TD_CUDA_DEVICE_SYNC;
+      info.orders_atomics =
+          info.orders_memory || type == ThreadAPI::TD_CUDA_DEVICE_SYNC;
       info.execution_rendezvous = type == ThreadAPI::TD_CUDA_BARRIER ||
                                   type == ThreadAPI::TD_CUDA_WARP_BARRIER;
-      info.participating_threads = type == ThreadAPI::TD_CUDA_WARP_BARRIER
-                                       ? ParticipationScope::Warp
-                                       : (type == ThreadAPI::TD_CUDA_BARRIER
-                                              ? ParticipationScope::Block
-                                              : ParticipationScope::Grid);
+      info.participating_threads =
+          type == ThreadAPI::TD_CUDA_WARP_BARRIER
+              ? ParticipationScope::Warp
+              : (type == ThreadAPI::TD_CUDA_BARRIER ? ParticipationScope::Block
+                                                    : ParticipationScope::Grid);
 
       if (type == ThreadAPI::TD_CUDA_WARP_BARRIER) {
-        info.participation = isFullWarpMask(call) ? ParticipationKind::Exact
-                                                  : ParticipationKind::Conditional;
+        info.participation = isFullWarpMask(call)
+                                 ? ParticipationKind::Exact
+                                 : ParticipationKind::Conditional;
         info.exact = info.participation == ParticipationKind::Exact;
       }
 
@@ -1427,11 +1464,10 @@ void CUDAAnalysis::analyzeSynchronization(KernelSummary &summary,
         }
       }
       if (type != ThreadAPI::TD_CUDA_WARP_BARRIER) {
-        const bool all_threads_reach = info.execution_rendezvous
-                                           ? mustReachBarrier(
-                                                 &inst, kernel,
-                                                 &control.post_dom_tree)
-                                           : false;
+        const bool all_threads_reach =
+            info.execution_rendezvous
+                ? mustReachBarrier(&inst, kernel, &control.post_dom_tree)
+                : false;
         info.participation = all_threads_reach ? ParticipationKind::Exact
                                                : ParticipationKind::Conditional;
         info.exact = all_threads_reach || !info.execution_rendezvous;

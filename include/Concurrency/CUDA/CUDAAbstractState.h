@@ -22,8 +22,14 @@ enum class TransferKind {
 
 enum class StreamState { Unknown, Created, Active, Synchronized, Destroyed };
 
-enum class EventState { Unknown, Created, Recorded, Waited, Synchronized,
-                        Destroyed };
+enum class EventState {
+  Unknown,
+  Created,
+  Recorded,
+  Waited,
+  Synchronized,
+  Destroyed
+};
 
 enum class ProtocolState {
   Unknown,
@@ -105,6 +111,7 @@ struct CUDAStreamAutomaton {
   std::vector<const llvm::Instruction *> pending_operations;
   bool is_ordered = false;
   bool is_exact = false;
+  bool is_null_stream = false;
 };
 
 struct CUDAEventAutomaton {
