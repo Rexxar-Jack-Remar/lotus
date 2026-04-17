@@ -54,13 +54,21 @@ The top-level results include:
 
 ## Supported Modeling
 
-- Point-to-point: blocking and non-blocking send/recv, plus `MPI_Sendrecv`
-- Collectives: barriers and common blocking/non-blocking collectives
-- Requests: `Wait*`, `Test*`, `Request_free`, `Cancel`
+- Point-to-point: blocking and non-blocking send/recv, matched-message
+  operations (`MPI_Mprobe`, `MPI_Improbe`, `MPI_Mrecv`, `MPI_Imrecv`), plus
+  `MPI_Sendrecv`
+- Collectives: barriers, common blocking/non-blocking collectives, neighbor
+  collectives, and intercommunicator broadcast classification
+- Requests: `Wait*`, `Test*`, `Request_free`, `Cancel`, persistent
+  request creation/activation, and request-bearing communicator duplication
+  (`MPI_Comm_idup`)
 - Symbol aliases: `PMPI_*`, `__wrap_MPI_*`, and OpenMPI internal
   `ompi_mpi_*` symbols are normalized to MPI semantics
-- Communicators: basic alias/canonicalization support for duplicated or split
+- Communicators: alias/canonicalization support for duplicated, split,
+  nonblocking-duplicated, intercommunicator-created, and topology-derived
   communicators
+- Sessions: MPI session lifecycle calls are recognized and surfaced as session
+  events
 - RMA: `Put`, `Get`, `Accumulate`, selected atomic ops, and lock/fence-style
   synchronization
 
@@ -70,6 +78,10 @@ The top-level results include:
   facts degrade to explicit model gaps.
 - Collective checking is summary-driven but still conservative when
   communicator, participant, or helper-summary scopes are unresolved.
+- Neighbor and intercommunicator collectives are classified more precisely, but
+  topology-specific participant inference is still coarse.
+- Session APIs are recognized, but session-created communicator derivation is
+  not yet modeled as deeply as world/split/dup communicator flows.
 - Unknown ranks, tags, or communicators are handled conservatively.
 - PSCW RMA synchronization is modeled, but unresolved access/exposure scopes
   still degrade to model gaps rather than strong proofs.

@@ -115,6 +115,107 @@ TEST_F(MPIAnalysisTest, CommunicatorDupPreservesSplitSubgroupFacts) {
             collectives[1].communicator_subgroup_id);
 }
 
+TEST_F(MPIAnalysisTest, CommIdupCreatesRequestAndDerivedCommunicatorFacts) {
+  const char *source = R"(
+    declare i32 @MPI_Comm_idup(i8*, i8**, i8*)
+    declare i32 @MPI_Wait(i8*, i8*)
+    declare i32 @MPI_Bcast(i8*, i32, i32, i32, i8*)
+
+    define i32 @main(i8* %comm) {
+    entry:
+      %dup = alloca i8*, align 8
+      %req = alloca i8, align 1
+      call i32 @MPI_Comm_idup(i8* %comm, i8** %dup, i8* %req)
+      call i32 @MPI_Wait(i8* %req, i8* null)
+      %dup_loaded = load i8*, i8** %dup, align 8
+      call i32 @MPI_Bcast(i8* null, i32 1, i32 0, i32 0, i8* %dup_loaded)
+      ret i32 0
+    }
+  )";
+
+  auto module = parseModule(source);
+  ASSERT_NE(module, nullptr);
+
+  MPIAnalysis analysis(*module);
+  analysis.runAnalysis();
+
+  const auto &ops = analysis.getProcessModel().getAllOperations();
+  const MPIOperation *idup = findOperation(ops, ThreadAPI::TD_MPI_COMM_DUP);
+  ASSERT_NE(idup, nullptr);
+  EXPECT_TRUE(idup->request_lifecycle_issue_nonblocking);
+  EXPECT_NE(idup->request, nullptr);
+
+  auto collectives = analysis.getProcessModel().getOperationsByKind(
+      MPIOpKind::COLLECTIVE_BLOCKING);
+  ASSERT_EQ(collectives.size(), 1u);
+  EXPECT_NE(collectives[0].communicator_class_id, 0u);
+
+  bool saw_dup_fact = false;
+  for (const auto &fact : analysis.getCommunicatorFacts()) {
+    if (fact.creation_kind == MPICommunicatorCreationKind::Dup) {
+      saw_dup_fact = true;
+      break;
+    }
+  }
+  EXPECT_TRUE(saw_dup_fact);
+}
+
+TEST_F(MPIAnalysisTest, IntercommCreateMarksCollectiveAsIntercommunicator) {
+  const char *source = R"(
+    declare i32 @MPI_Intercomm_create(i8*, i32, i8*, i32, i32, i8**)
+    declare i32 @MPI_Bcast(i8*, i32, i32, i32, i8*)
+
+    define i32 @main(i8* %local, i8* %peer) {
+    entry:
+      %inter = alloca i8*, align 8
+      call i32 @MPI_Intercomm_create(i8* %local, i32 0, i8* %peer, i32 0, i32 9, i8** %inter)
+      %inter_loaded = load i8*, i8** %inter, align 8
+      call i32 @MPI_Bcast(i8* null, i32 1, i32 0, i32 0, i8* %inter_loaded)
+      ret i32 0
+    }
+  )";
+
+  auto module = parseModule(source);
+  ASSERT_NE(module, nullptr);
+
+  MPIAnalysis analysis(*module);
+  analysis.runAnalysis();
+
+  auto collectives = analysis.getProcessModel().getOperationsByKind(
+      MPIOpKind::COLLECTIVE_BLOCKING);
+  ASSERT_EQ(collectives.size(), 1u);
+  EXPECT_TRUE(collectives[0].is_intercommunicator);
+  EXPECT_EQ(collectives[0].collective_shape,
+            MPICollectiveShape::Intercommunicator);
+}
+
+TEST_F(MPIAnalysisTest, NeighborCollectiveUsesNeighborClassificationWithoutSemanticTag) {
+  const char *source = R"(
+    declare i32 @MPI_Neighbor_allgather(i8*, i32, i32, i8*, i32, i32, i8*)
+
+    define i32 @main(i8* %comm) {
+    entry:
+      call i32 @MPI_Neighbor_allgather(i8* null, i32 1, i32 0,
+                                       i8* null, i32 2, i32 0, i8* %comm)
+      ret i32 0
+    }
+  )";
+
+  auto module = parseModule(source);
+  ASSERT_NE(module, nullptr);
+
+  MPIAnalysis analysis(*module);
+  analysis.runAnalysis();
+
+  auto collectives = analysis.getProcessModel().getOperationsByKind(
+      MPIOpKind::COLLECTIVE_BLOCKING);
+  ASSERT_EQ(collectives.size(), 1u);
+  EXPECT_EQ(collectives[0].collective_variant,
+            MPICollectiveVariant::NeighborAllgather);
+  EXPECT_EQ(collectives[0].collective_shape, MPICollectiveShape::Neighbor);
+  EXPECT_EQ(collectives[0].collective_protocol_class_id, 1u);
+}
+
 TEST_F(MPIAnalysisTest, UnrelatedCommunicatorArgumentsDoNotCollapseByPosition) {
   const char *source = R"(
     declare i32 @MPI_Bcast(i8*, i32, i32, i32, i8*)
@@ -817,4 +918,3 @@ TEST_F(MPIAnalysisTest, FlushLocalProducesLocalOnlySynchronizationFact) {
   }
   EXPECT_TRUE(saw_local_completion);
 }
-

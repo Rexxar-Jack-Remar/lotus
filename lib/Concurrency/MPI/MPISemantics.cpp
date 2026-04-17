@@ -14,6 +14,18 @@ namespace {
 using TD = ThreadAPI::TD_TYPE;
 
 MPISendMode classifySendMode(llvm::StringRef canonical_name) {
+  if (canonical_name.contains("Send_init")) {
+    if (canonical_name.contains("Ssend")) {
+      return MPISendMode::Synchronous;
+    }
+    if (canonical_name.contains("Bsend")) {
+      return MPISendMode::Buffered;
+    }
+    if (canonical_name.contains("Rsend")) {
+      return MPISendMode::Ready;
+    }
+    return MPISendMode::Standard;
+  }
   if (canonical_name.contains("Ssend")) {
     return MPISendMode::Synchronous;
   }
@@ -113,6 +125,28 @@ MPIRequestArity classifyRequestArity(TD type, llvm::StringRef canonical_name) {
 
 MPICollectiveVariant classifyCollectiveVariant(TD type,
                                               llvm::StringRef semantic_tag) {
+  if (semantic_tag.equals("intercomm-bcast")) {
+    return MPICollectiveVariant::IntercommBcast;
+  }
+  if (semantic_tag.startswith("neighbor-") ||
+      semantic_tag.startswith("ineighbor-")) {
+    if (semantic_tag.contains("allgatherv")) {
+      return MPICollectiveVariant::NeighborAllgatherv;
+    }
+    if (semantic_tag.contains("allgather")) {
+      return MPICollectiveVariant::NeighborAllgather;
+    }
+    if (semantic_tag.contains("alltoallw")) {
+      return MPICollectiveVariant::NeighborAlltoallw;
+    }
+    if (semantic_tag.contains("alltoallv")) {
+      return MPICollectiveVariant::NeighborAlltoallv;
+    }
+    if (semantic_tag.contains("alltoall")) {
+      return MPICollectiveVariant::NeighborAlltoall;
+    }
+  }
+
   switch (type) {
   case TD::TD_MPI_BARRIER:
     return MPICollectiveVariant::Barrier;
@@ -150,24 +184,6 @@ MPICollectiveVariant classifyCollectiveVariant(TD type,
                                            : MPICollectiveVariant::Scan;
   default:
     break;
-  }
-
-  if (semantic_tag.startswith("neighbor-") || semantic_tag.startswith("ineighbor-")) {
-    if (semantic_tag.contains("allgatherv")) {
-      return MPICollectiveVariant::NeighborAllgatherv;
-    }
-    if (semantic_tag.contains("allgather")) {
-      return MPICollectiveVariant::NeighborAllgather;
-    }
-    if (semantic_tag.contains("alltoallw")) {
-      return MPICollectiveVariant::NeighborAlltoallw;
-    }
-    if (semantic_tag.contains("alltoallv")) {
-      return MPICollectiveVariant::NeighborAlltoallv;
-    }
-    if (semantic_tag.contains("alltoall")) {
-      return MPICollectiveVariant::NeighborAlltoall;
-    }
   }
 
   return MPICollectiveVariant::Unknown;
@@ -662,6 +678,71 @@ void applySignedIndexOverride(int &slot, int override_value) {
   }
 }
 
+llvm::StringRef inferSemanticTagFromCanonicalName(llvm::StringRef canonical_name) {
+  if (canonical_name.equals("MPI_Comm_idup")) {
+    return "comm-idup";
+  }
+  if (canonical_name.equals("MPI_Comm_split_type")) {
+    return "comm-split-type";
+  }
+  if (canonical_name.equals("MPI_Comm_create_group")) {
+    return "comm-create-group";
+  }
+  if (canonical_name.equals("MPI_Intercomm_create")) {
+    return "intercomm-create";
+  }
+  if (canonical_name.equals("MPI_Intercomm_create_from_groups")) {
+    return "intercomm-create-from-groups";
+  }
+  if (canonical_name.equals("MPI_Intercomm_merge")) {
+    return "intercomm-merge";
+  }
+  if (canonical_name.equals("MPI_Cart_create")) {
+    return "topology-cart-create";
+  }
+  if (canonical_name.equals("MPI_Cart_sub")) {
+    return "topology-cart-sub";
+  }
+  if (canonical_name.equals("MPI_Dist_graph_create")) {
+    return "topology-dist-graph-create";
+  }
+  if (canonical_name.equals("MPI_Dist_graph_create_adjacent")) {
+    return "topology-dist-graph-create-adjacent";
+  }
+  if (canonical_name.equals("MPI_Graph_create")) {
+    return "topology-graph-create";
+  }
+  if (canonical_name.equals("MPI_Bcast") || canonical_name.equals("MPI_Ibcast")) {
+    return "bcast";
+  }
+  if (canonical_name.equals("MPI_Neighbor_allgather") ||
+      canonical_name.equals("MPI_Ineighbor_allgather")) {
+    return canonical_name.startswith("MPI_I") ? "ineighbor-allgather"
+                                              : "neighbor-allgather";
+  }
+  if (canonical_name.equals("MPI_Neighbor_allgatherv") ||
+      canonical_name.equals("MPI_Ineighbor_allgatherv")) {
+    return canonical_name.startswith("MPI_I") ? "ineighbor-allgatherv"
+                                              : "neighbor-allgatherv";
+  }
+  if (canonical_name.equals("MPI_Neighbor_alltoall") ||
+      canonical_name.equals("MPI_Ineighbor_alltoall")) {
+    return canonical_name.startswith("MPI_I") ? "ineighbor-alltoall"
+                                              : "neighbor-alltoall";
+  }
+  if (canonical_name.equals("MPI_Neighbor_alltoallv") ||
+      canonical_name.equals("MPI_Ineighbor_alltoallv")) {
+    return canonical_name.startswith("MPI_I") ? "ineighbor-alltoallv"
+                                              : "neighbor-alltoallv";
+  }
+  if (canonical_name.equals("MPI_Neighbor_alltoallw") ||
+      canonical_name.equals("MPI_Ineighbor_alltoallw")) {
+    return canonical_name.startswith("MPI_I") ? "ineighbor-alltoallw"
+                                              : "neighbor-alltoallw";
+  }
+  return {};
+}
+
 } // namespace
 
 const MPISemanticDescriptor *lookupMPISemantic(ThreadAPI::TD_TYPE type) {
@@ -693,6 +774,9 @@ MPIEffect buildMPIEffect(const llvm::Instruction *inst, ThreadAPI *api) {
   effect.confidence = normalization.confidence;
   effect.semantic_tag = api->getSemanticTag(callee);
   const llvm::StringRef canonical_name = normalization.canonical_name;
+  if (effect.semantic_tag.empty()) {
+    effect.semantic_tag = inferSemanticTagFromCanonicalName(canonical_name).str();
+  }
   effect.type = api->getType(callee);
   const MPISemanticDescriptor *base_descriptor = lookupMPISemantic(effect.type);
   if (!base_descriptor) {

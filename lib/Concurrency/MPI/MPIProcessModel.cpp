@@ -1614,6 +1614,12 @@ void MPIProcessModel::extractCollectiveDetails(
     op.communicator_subgroup_id = getCommunicatorSubgroupID(comm_arg);
     op.process_set_fact.subgroup_token_kind =
         getCommunicatorSubgroupTokenKind(comm_arg);
+    op.is_intercommunicator = intercommunicators_.count(op.communicator) != 0;
+    if (op.is_intercommunicator &&
+        op.collective_variant == MPICollectiveVariant::Bcast) {
+      op.collective_variant = MPICollectiveVariant::IntercommBcast;
+      op.collective_shape = MPICollectiveShape::Intercommunicator;
+    }
   }
 
   if (nonblocking) {
@@ -1649,6 +1655,13 @@ void MPIProcessModel::extractRequestDetails(
 
   if (op.td_type == ThreadAPI::TD_MPI_REQUEST_START) {
     op.request = getOperandBySignedIndex(cb, 0);
+    if (const Value *request_handle = op.request) {
+      std::vector<RequestID> requests =
+          collectRequestOperands(request_handle, op.inst);
+      if (!requests.empty()) {
+        op.request = requests.front();
+      }
+    }
   }
 }
 

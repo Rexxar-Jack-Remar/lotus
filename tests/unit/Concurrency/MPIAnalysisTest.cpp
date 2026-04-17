@@ -200,6 +200,51 @@ TEST_F(MPIAnalysisTest, MatchedMessageOperationsUseReceiveSemantics) {
   EXPECT_NE(imrecv->request, nullptr);
 }
 
+TEST_F(MPIAnalysisTest, PersistentStartallActivatesEachRecoveredRequest) {
+  const char *source = R"(
+    declare i32 @MPI_Send_init(i8*, i32, i32, i32, i32, i8*, i8*)
+    declare i32 @MPI_Startall(i32, i8**)
+    declare i32 @MPI_Wait(i8*, i8*)
+
+    define i32 @main(i8* %comm) {
+    entry:
+      %req0 = alloca i8, align 1
+      %req1 = alloca i8, align 1
+      %reqs = alloca [2 x i8*], align 8
+      %slot0 = getelementptr inbounds [2 x i8*], [2 x i8*]* %reqs, i64 0, i64 0
+      %slot1 = getelementptr inbounds [2 x i8*], [2 x i8*]* %reqs, i64 0, i64 1
+      store i8* %req0, i8** %slot0, align 8
+      store i8* %req1, i8** %slot1, align 8
+      call i32 @MPI_Send_init(i8* null, i32 1, i32 0, i32 1, i32 7, i8* %comm, i8* %req0)
+      call i32 @MPI_Send_init(i8* null, i32 1, i32 0, i32 2, i32 8, i8* %comm, i8* %req1)
+      call i32 @MPI_Startall(i32 2, i8** %slot0)
+      call i32 @MPI_Wait(i8* %req0, i8* null)
+      ret i32 0
+    }
+  )";
+
+  auto module = parseModule(source);
+  ASSERT_NE(module, nullptr);
+
+  MPIAnalysis analysis(*module);
+  analysis.runAnalysis();
+
+  EXPECT_EQ(analysis.getResults().orphaned_requests.size(), 1u);
+  bool saw_persistent_template = false;
+  bool saw_active_persistent = false;
+  for (const auto &fact : analysis.getRequestFacts()) {
+    saw_persistent_template =
+        saw_persistent_template || fact.is_persistent;
+    saw_active_persistent =
+        saw_active_persistent ||
+        (fact.is_persistent &&
+         (fact.state == MPIRequestState::Active ||
+          fact.state == MPIRequestState::MustComplete));
+  }
+  EXPECT_TRUE(saw_persistent_template);
+  EXPECT_TRUE(saw_active_persistent);
+}
+
 TEST_F(MPIAnalysisTest, BitcastedMPICallStillLowersIntoOperation) {
   const char *source = R"(
     declare i32 @MPI_Barrier(i8*)
