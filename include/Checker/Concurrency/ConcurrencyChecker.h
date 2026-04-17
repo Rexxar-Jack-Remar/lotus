@@ -1,7 +1,6 @@
 #ifndef CONCURRENCY_CHECKER_H
 #define CONCURRENCY_CHECKER_H
 
-#include "Concurrency/ConcurrencyFacade.h"
 #include "Checker/Concurrency/AtomicityChecker.h"
 #include "Checker/Concurrency/CUDAChecker.h"
 #include "Checker/Concurrency/ConcurrencyBugReport.h"
@@ -13,6 +12,7 @@
 #include "Checker/Concurrency/OpenMPChecker.h"
 #include "Checker/Report/BugReport.h"
 #include "Checker/Report/BugReportMgr.h"
+#include "Concurrency/ConcurrencyFacade.h"
 #include "Concurrency/LockSet/LockSetAnalysis.h"
 #include "Concurrency/MHP/HappensBeforeAnalysis.h"
 #include "Concurrency/MHP/IMHPAnalysis.h"
@@ -188,6 +188,7 @@ private:
   lotus::StaticThreadSharingAnalysis *m_staticThreadSharingAnalysis = nullptr;
   std::unique_ptr<OpenMP::OpenMPTaskGraph> m_openMPTaskGraph;
   std::unique_ptr<mpi::MPIAnalysis> m_mpiAnalysis;
+  std::unique_ptr<cuda::CUDAAnalysis> m_cudaAnalysis;
   lotus::AliasAnalysisWrapper *m_aliasAnalysis;
   ThreadAPI *m_threadAPI;
 
@@ -230,6 +231,7 @@ private:
   int m_mpiWindowLeakTypeId;
   int m_cudaSharedRaceTypeId;
   int m_cudaGlobalRaceTypeId;
+  int m_cudaInterKernelHazardTypeId;
   int m_cudaBarrierMismatchTypeId;
   int m_cudaWarpDivergenceTypeId;
   int m_cudaBankConflictTypeId;

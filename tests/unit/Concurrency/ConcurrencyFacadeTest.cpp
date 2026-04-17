@@ -328,6 +328,62 @@ TEST_F(ConcurrencyFacadeTest, SummarizesExtendedMPIProtocolCounters) {
   EXPECT_EQ(summary.wildcard_endpoint_operation_count, 1u);
 }
 
+TEST_F(ConcurrencyFacadeTest, SummarizesCUDAUnifiedMemoryAndHazards) {
+  const char *source = R"(
+    @global_arr = addrspace(1) global [64 x i32] zeroinitializer
+
+    declare void @__set_CUDAConfig(i32, i32)
+    declare i32 @cudaMallocManaged(i8**, i64, i32)
+    declare i32 @cudaMallocHost(i8**, i64)
+    declare i32 @cudaMemPrefetchAsync(i8*, i64, i32, i8*)
+    declare i32 @llvm.nvvm.read.ptx.sreg.tid.x()
+
+    define void @kernel_producer() {
+    entry:
+      %tid = call i32 @llvm.nvvm.read.ptx.sreg.tid.x()
+      %gep = getelementptr [64 x i32], [64 x i32] addrspace(1)* @global_arr, i32 0, i32 %tid
+      store i32 %tid, i32 addrspace(1)* %gep
+      ret void
+    }
+
+    define void @kernel_consumer() {
+    entry:
+      %tid = call i32 @llvm.nvvm.read.ptx.sreg.tid.x()
+      %gep = getelementptr [64 x i32], [64 x i32] addrspace(1)* @global_arr, i32 0, i32 %tid
+      %val = load i32, i32 addrspace(1)* %gep
+      ret void
+    }
+
+    define i32 @main() {
+    entry:
+      %managed = alloca i8*
+      %host = alloca i8*
+      %m = call i32 @cudaMallocManaged(i8** %managed, i64 64, i32 1)
+      %managed_ptr = load i8*, i8** %managed
+      %p = call i32 @cudaMemPrefetchAsync(i8* %managed_ptr, i64 64, i32 2, i8* null)
+      %h = call i32 @cudaMallocHost(i8** %host, i64 32)
+      call void @__set_CUDAConfig(i32 1, i32 32)
+      call void @kernel_producer()
+      call void @__set_CUDAConfig(i32 1, i32 32)
+      call void @kernel_consumer()
+      %sum = add i32 %m, %p
+      %sum2 = add i32 %sum, %h
+      ret i32 %sum2
+    }
+  )";
+
+  auto module = parseModule(source);
+  ASSERT_NE(module, nullptr);
+
+  auto summary = concurrency::ConcurrencyFacade::analyzeCUDA(*module);
+  EXPECT_EQ(summary.kernel_launch_count, 2u);
+  EXPECT_EQ(summary.inter_kernel_hazard_count, 1u);
+  EXPECT_EQ(summary.unified_memory_count, 3u);
+  EXPECT_EQ(summary.managed_allocation_count, 1u);
+  EXPECT_EQ(summary.unified_prefetch_count, 1u);
+  EXPECT_EQ(summary.unified_host_allocation_count, 1u);
+}
+
 TEST_F(ConcurrencyFacadeTest, PrintsOpenMPSummaryReport) {
   const char *source = R"(
     declare i32 @__kmpc_omp_task_begin_if0(i8*, i32, i8*)

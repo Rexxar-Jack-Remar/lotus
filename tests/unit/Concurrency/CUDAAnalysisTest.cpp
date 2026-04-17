@@ -861,7 +861,8 @@ TEST_F(CUDAAnalysisTest, ClassifiesAddrSpaceZeroKernelPointerAsGlobal) {
 
   const auto &summary = analysis.getKernelSummaries().front();
   ASSERT_FALSE(summary.accesses.empty());
-  EXPECT_EQ(summary.accesses.front().space, concurrency::cuda::MemorySpace::Global);
+  EXPECT_EQ(summary.accesses.front().space,
+            concurrency::cuda::MemorySpace::Global);
 }
 
 TEST_F(CUDAAnalysisTest, ExtractsAffinePatternThroughCastsShiftsAndDivides) {
@@ -1049,4 +1050,55 @@ TEST_F(CUDAAnalysisTest, ReportsAccurateBankConflictWithActiveLanes) {
   if (summary.has_bank_conflict) {
     EXPECT_LE(summary.bank_conflicts.front().conflict_degree, 16u);
   }
+}
+
+TEST_F(CUDAAnalysisTest, TracksUnifiedMemoryMetadata) {
+  const char *source = R"(
+    declare i32 @cudaMallocManaged(i8**, i64, i32)
+    declare i32 @cudaMallocHost(i8**, i64)
+    declare i32 @cudaMemPrefetchAsync(i8*, i64, i32, i8*)
+
+    define i32 @main() {
+    entry:
+      %managed = alloca i8*
+      %host = alloca i8*
+      %m = call i32 @cudaMallocManaged(i8** %managed, i64 64, i32 1)
+      %managed_ptr = load i8*, i8** %managed
+      %p = call i32 @cudaMemPrefetchAsync(i8* %managed_ptr, i64 64, i32 2, i8* null)
+      %h = call i32 @cudaMallocHost(i8** %host, i64 32)
+      %sum = add i32 %m, %p
+      %sum2 = add i32 %sum, %h
+      ret i32 %sum2
+    }
+  )";
+
+  auto module = parseModule(source);
+  ASSERT_NE(module, nullptr);
+
+  concurrency::cuda::CUDAAnalysis analysis(*module);
+  analysis.runAnalysis();
+
+  ASSERT_EQ(analysis.getUnifiedMemory().size(), 3u);
+
+  size_t managed_count = 0;
+  size_t prefetch_count = 0;
+  size_t host_count = 0;
+  for (const auto &info : analysis.getUnifiedMemory()) {
+    if (info.is_prefetch) {
+      ++prefetch_count;
+      EXPECT_EQ(info.size, 64u);
+      EXPECT_EQ(info.device_id, 2);
+    } else if (info.is_managed) {
+      ++managed_count;
+      EXPECT_EQ(info.size, 64u);
+      EXPECT_EQ(info.device_id, -1);
+    } else {
+      ++host_count;
+      EXPECT_EQ(info.size, 32u);
+    }
+  }
+
+  EXPECT_EQ(managed_count, 1u);
+  EXPECT_EQ(prefetch_count, 1u);
+  EXPECT_EQ(host_count, 1u);
 }

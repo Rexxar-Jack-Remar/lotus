@@ -1529,14 +1529,14 @@ ThreadAPI::TD_TYPE ThreadAPI::getType(const Function *F) const {
       return TD_CUDA_MEMCPY;
     if (CUDAModel::isMemset(name))
       return TD_CUDA_MEMSET;
+    if (CUDAModel::isUnifiedMemory(name))
+      return TD_CUDA_UNIFIED_MEMORY;
     if (CUDAModel::isMalloc(name))
       return TD_CUDA_MALLOC;
     if (CUDAModel::isTexture(name))
       return TD_CUDA_TEXTURE;
     if (CUDAModel::isSurface(name))
       return TD_CUDA_SURFACE;
-    if (CUDAModel::isUnifiedMemory(name))
-      return TD_CUDA_UNIFIED_MEMORY;
     if (CUDAModel::isDeviceManagement(name))
       return TD_CUDA_DEVICE_MGMT;
     if (CUDAModel::isErrorHandling(name))

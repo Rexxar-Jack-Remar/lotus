@@ -5,9 +5,9 @@
 #include "Concurrency/OpenMP/OpenMPTaskGraph.h"
 #include "Concurrency/Utils/ThreadAPI.h"
 
-#include <llvm/IR/InstIterator.h>
-
 #include <numeric>
+
+#include <llvm/IR/InstIterator.h>
 
 namespace concurrency {
 
@@ -248,10 +248,33 @@ ConcurrencyFacade::CUDASummary
 ConcurrencyFacade::analyzeCUDA(llvm::Module &module) {
   cuda::CUDAAnalysis analysis(module);
   analysis.runAnalysis();
+  return summarizeCUDA(analysis, module);
+}
+
+ConcurrencyFacade::CUDASummary
+ConcurrencyFacade::summarizeCUDA(const cuda::CUDAAnalysis &analysis,
+                                 llvm::Module &module) {
   CUDASummary summary;
 
   summary.kernel_count = analysis.getKernelSummaries().size();
   summary.kernel_launch_count = analysis.getLaunches().size();
+  summary.inter_kernel_hazard_count = analysis.getInterKernelRaces().size();
+  summary.transfer_count = analysis.getMemoryTransfers().size();
+  summary.unified_memory_count = analysis.getUnifiedMemory().size();
+  for (const auto &transfer : analysis.getMemoryTransfers()) {
+    if (transfer.is_async) {
+      ++summary.async_transfer_count;
+    }
+  }
+  for (const auto &info : analysis.getUnifiedMemory()) {
+    if (info.is_prefetch) {
+      ++summary.unified_prefetch_count;
+    } else if (info.is_managed) {
+      ++summary.managed_allocation_count;
+    } else {
+      ++summary.unified_host_allocation_count;
+    }
+  }
   for (const auto &launch : analysis.getLaunches()) {
     ++summary.operation_count;
     if (launch.dimensions.hasSymbolicGrid() ||
@@ -302,8 +325,8 @@ ConcurrencyFacade::analyzeCUDA(llvm::Module &module) {
         continue;
       }
       const llvm::Function *callee = api->getCallee(call);
-      if (!callee || api->getRuntimeLibrary(callee) !=
-                         ThreadAPI::RuntimeLibrary::CUDA) {
+      if (!callee ||
+          api->getRuntimeLibrary(callee) != ThreadAPI::RuntimeLibrary::CUDA) {
         continue;
       }
       ++summary.operation_count;

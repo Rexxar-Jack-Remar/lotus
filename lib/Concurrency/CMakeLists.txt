@@ -18,6 +18,8 @@ set(Concurrency_SOURCES
   Memory/StaticThreadSharingAnalysis.cpp
   CUDA/CUDAMemoryModel.cpp
   CUDA/CUDASymbolicModel.cpp
+  CUDA/CUDAAnalysisLaunch.cpp
+  CUDA/CUDAAnalysisMemory.cpp
   CUDA/CUDAAnalysis.cpp
   JoinTarget/JoinTargetAnalysis.cpp
   MPI/MPIAnalysis.cpp

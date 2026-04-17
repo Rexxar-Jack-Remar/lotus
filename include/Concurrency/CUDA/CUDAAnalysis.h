@@ -328,6 +328,9 @@ public:
   const std::vector<MemoryTransferInfo> &getMemoryTransfers() const {
     return m_memory_transfers;
   }
+  const std::vector<UnifiedMemoryInfo> &getUnifiedMemory() const {
+    return m_unified_memory;
+  }
   const DeviceConfig &getDeviceConfig() const { return m_device_config; }
 
   static MemorySpace classifyMemorySpace(const llvm::Value *value);
@@ -367,6 +370,7 @@ private:
                               const llvm::Function *kernel);
   void analyzeInterKernelRaces();
   void analyzeMemoryTransfers();
+  void analyzeUnifiedMemory();
   void analyzeConstantAccesses(KernelSummary &summary);
 
   static const llvm::Value *getMemoryOperand(const llvm::Instruction *inst);

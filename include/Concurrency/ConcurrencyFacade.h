@@ -5,6 +5,10 @@
 
 namespace concurrency {
 
+namespace cuda {
+class CUDAAnalysis;
+} // namespace cuda
+
 class ConcurrencyFacade {
 public:
   struct OpenMPSummary {
@@ -105,6 +109,13 @@ public:
     size_t bank_conflict_count = 0;
     size_t uncoalesced_access_count = 0;
     size_t volatile_missing_count = 0;
+    size_t inter_kernel_hazard_count = 0;
+    size_t transfer_count = 0;
+    size_t async_transfer_count = 0;
+    size_t unified_memory_count = 0;
+    size_t managed_allocation_count = 0;
+    size_t unified_prefetch_count = 0;
+    size_t unified_host_allocation_count = 0;
     size_t shared_access_count = 0;
     size_t device_access_count = 0;
     size_t global_access_count = 0;
@@ -115,6 +126,8 @@ public:
   static OpenMPSummary analyzeOpenMP(llvm::Module &module);
   static MPISummary analyzeMPI(llvm::Module &module);
   static CUDASummary analyzeCUDA(llvm::Module &module);
+  static CUDASummary summarizeCUDA(const cuda::CUDAAnalysis &analysis,
+                                   llvm::Module &module);
   static void printOpenMPResults(llvm::Module &module, llvm::raw_ostream &os);
 };
 

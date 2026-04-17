@@ -3,12 +3,11 @@
 #include "Checker/Concurrency/ConcurrencyChecker.h"
 
 #include "Alias/AliasAnalysisWrapper/AliasAnalysisWrapper.h"
+#include "Alias/seadsa/DsaAnalysis.hh"
+#include "Alias/seadsa/InitializePasses.hh"
 #include "Checker/Concurrency/ConcurrencyAnalysisDumper.h"
 #include "Concurrency/MHP/HappensBeforeAnalysis.h"
 #include "Concurrency/Utils/ThreadAPI.h"
-
-#include "Alias/seadsa/DsaAnalysis.hh"
-#include "Alias/seadsa/InitializePasses.hh"
 
 #include <llvm/Analysis/CallGraph.h>
 #include <llvm/IR/Constants.h>
@@ -83,18 +82,23 @@ ConcurrencyChecker::ConcurrencyChecker(Module &module)
       "CUDA Shared-Memory Race", BugDescription::BI_HIGH,
       BugDescription::BC_ERROR,
       "Conflicting shared-memory accesses without sufficient synchronization");
-  m_cudaGlobalRaceTypeId = mgr.register_bug_type(
-      "CUDA Global-Memory Race", BugDescription::BI_HIGH,
-      BugDescription::BC_ERROR,
-      "Conflicting global/device-memory accesses without sufficient synchronization");
+  m_cudaGlobalRaceTypeId =
+      mgr.register_bug_type("CUDA Global-Memory Race", BugDescription::BI_HIGH,
+                            BugDescription::BC_ERROR,
+                            "Conflicting global/device-memory accesses without "
+                            "sufficient synchronization");
+  m_cudaInterKernelHazardTypeId =
+      mgr.register_bug_type("CUDA Inter-Kernel Hazard", BugDescription::BI_HIGH,
+                            BugDescription::BC_ERROR,
+                            "Potential inter-kernel hazard across ordered or "
+                            "unordered CUDA launches");
   m_cudaBarrierMismatchTypeId = mgr.register_bug_type(
       "CUDA Barrier Mismatch", BugDescription::BI_HIGH,
-      BugDescription::BC_ERROR,
-      "Not all threads reach the same CUDA barrier");
-  m_cudaWarpDivergenceTypeId = mgr.register_bug_type(
-      "CUDA Warp Divergence", BugDescription::BI_MEDIUM,
-      BugDescription::BC_PERFORMANCE,
-      "Warp executes divergent control-flow paths");
+      BugDescription::BC_ERROR, "Not all threads reach the same CUDA barrier");
+  m_cudaWarpDivergenceTypeId =
+      mgr.register_bug_type("CUDA Warp Divergence", BugDescription::BI_MEDIUM,
+                            BugDescription::BC_PERFORMANCE,
+                            "Warp executes divergent control-flow paths");
   m_cudaBankConflictTypeId = mgr.register_bug_type(
       "CUDA Bank Conflict", BugDescription::BI_MEDIUM,
       BugDescription::BC_PERFORMANCE,
@@ -111,10 +115,10 @@ ConcurrencyChecker::ConcurrencyChecker(Module &module)
       "CUDA Symbolic Launch Configuration", BugDescription::BI_LOW,
       BugDescription::BC_WARNING,
       "Kernel launch uses symbolic or unknown thread/block sizing");
-  m_cudaMemorySpaceTypeId = mgr.register_bug_type(
-      "CUDA Memory Space Ambiguity", BugDescription::BI_LOW,
-      BugDescription::BC_WARNING,
-      "Could not classify CUDA memory space precisely");
+  m_cudaMemorySpaceTypeId =
+      mgr.register_bug_type("CUDA Memory Space Ambiguity",
+                            BugDescription::BI_LOW, BugDescription::BC_WARNING,
+                            "Could not classify CUDA memory space precisely");
   m_cudaParametricRaceTypeId = mgr.register_bug_type(
       "CUDA Parametric Race Risk", BugDescription::BI_MEDIUM,
       BugDescription::BC_WARNING,
@@ -155,6 +159,7 @@ void ConcurrencyChecker::runAnalyses() {
   m_staticThreadSharingAnalysis = nullptr;
   m_openMPTaskGraph.reset();
   m_mpiAnalysis.reset();
+  m_cudaAnalysis.reset();
   m_stats.mhpPairs = 0;
   m_stats.locksAnalyzed = 0;
   m_stats.cudaBugsFound = 0;
@@ -299,7 +304,10 @@ void ConcurrencyChecker::runAnalyses() {
   }
 
   if (needCUDA) {
-    m_stats.cudaSummary = ConcurrencyFacade::analyzeCUDA(m_module);
+    m_cudaAnalysis = std::make_unique<cuda::CUDAAnalysis>(m_module);
+    m_cudaAnalysis->runAnalysis();
+    m_stats.cudaSummary =
+        ConcurrencyFacade::summarizeCUDA(*m_cudaAnalysis, m_module);
   }
 
   lotus::AliasAnalysisWrapper *aa = m_aliasAnalysis;
@@ -307,9 +315,9 @@ void ConcurrencyChecker::runAnalyses() {
     aa = regionMHP->getAliasAnalysis();
 
   m_dataRaceChecker = std::make_unique<DataRaceChecker>(
-      m_module, m_mhpAnalysis, m_locksetAnalysisView,
-      m_escapeAnalysis.get(), m_threadLocalAnalysis.get(),
-      m_staticThreadSharingAnalysis, aa, m_happensBeforeAnalysis.get());
+      m_module, m_mhpAnalysis, m_locksetAnalysisView, m_escapeAnalysis.get(),
+      m_threadLocalAnalysis.get(), m_staticThreadSharingAnalysis, aa,
+      m_happensBeforeAnalysis.get());
   m_deadlockChecker = std::make_unique<DeadlockChecker>(
       m_module, m_locksetAnalysisView, m_mhpAnalysis,
       m_happensBeforeAnalysis.get(), m_threadAPI);
@@ -322,7 +330,7 @@ void ConcurrencyChecker::runAnalyses() {
   m_openMPChecker = std::make_unique<OpenMPChecker>(
       m_module, m_openMPTaskGraph.get(), m_threadAPI);
   m_mpiChecker = std::make_unique<MPIChecker>(m_module, m_mpiAnalysis.get());
-  m_cudaChecker = std::make_unique<CUDAChecker>(m_module);
+  m_cudaChecker = std::make_unique<CUDAChecker>(m_module, m_cudaAnalysis.get());
 }
 
 void ConcurrencyChecker::runChecks() {
@@ -484,6 +492,9 @@ void ConcurrencyChecker::checkCUDABugs() {
     case ConcurrencyBugType::CUDA_GLOBAL_MEMORY_RACE:
       reportBug(report, m_cudaGlobalRaceTypeId);
       break;
+    case ConcurrencyBugType::CUDA_INTER_KERNEL_HAZARD:
+      reportBug(report, m_cudaInterKernelHazardTypeId);
+      break;
     case ConcurrencyBugType::CUDA_BARRIER_MISMATCH:
       reportBug(report, m_cudaBarrierMismatchTypeId);
       break;
@@ -602,6 +613,36 @@ void ConcurrencyChecker::reportBug(const ConcurrencyBugReport &bug_report,
     report->add_metadata(
         "mpi_leaked_window_count",
         std::to_string(m_stats.mpiSummary.leaked_window_count));
+  } else if (bug_report.bugType == ConcurrencyBugType::CUDA_WARP_DIVERGENCE ||
+             bug_report.bugType ==
+                 ConcurrencyBugType::CUDA_SHARED_MEMORY_RACE ||
+             bug_report.bugType ==
+                 ConcurrencyBugType::CUDA_GLOBAL_MEMORY_RACE ||
+             bug_report.bugType ==
+                 ConcurrencyBugType::CUDA_INTER_KERNEL_HAZARD ||
+             bug_report.bugType == ConcurrencyBugType::CUDA_BARRIER_MISMATCH ||
+             bug_report.bugType == ConcurrencyBugType::CUDA_BANK_CONFLICT ||
+             bug_report.bugType ==
+                 ConcurrencyBugType::CUDA_UNCOALESCED_ACCESS ||
+             bug_report.bugType == ConcurrencyBugType::CUDA_VOLATILE_MISSING ||
+             bug_report.bugType ==
+                 ConcurrencyBugType::CUDA_SYMBOLIC_CONFIG_RISK ||
+             bug_report.bugType ==
+                 ConcurrencyBugType::CUDA_SHARED_GLOBAL_SPACE_MISMATCH ||
+             bug_report.bugType ==
+                 ConcurrencyBugType::CUDA_PARAMETRIC_RACE_RISK) {
+    report->add_metadata("checker", "CUDAChecker");
+    report->add_metadata(
+        "cuda_kernel_launch_count",
+        std::to_string(m_stats.cudaSummary.kernel_launch_count));
+    report->add_metadata(
+        "cuda_inter_kernel_hazard_count",
+        std::to_string(m_stats.cudaSummary.inter_kernel_hazard_count));
+    report->add_metadata("cuda_transfer_count",
+                         std::to_string(m_stats.cudaSummary.transfer_count));
+    report->add_metadata(
+        "cuda_unified_memory_count",
+        std::to_string(m_stats.cudaSummary.unified_memory_count));
   }
   report->add_metadata(
       "importance",

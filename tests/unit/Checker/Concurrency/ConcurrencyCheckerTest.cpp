@@ -10,6 +10,7 @@
  */
 
 #include "Checker/Concurrency/ConcurrencyChecker.h"
+
 #include "TestUtils/LLVMHelpers.h"
 
 #include <llvm/IR/Instructions.h>
@@ -522,7 +523,8 @@ TEST_F(ConcurrencyCheckerTest, DetectsOpenMPMissingSchedulePattern) {
   EXPECT_TRUE(found);
 }
 
-TEST_F(ConcurrencyCheckerTest, SuppressesPrivateInLoopWarningForSharedOnlyTask) {
+TEST_F(ConcurrencyCheckerTest,
+       SuppressesPrivateInLoopWarningForSharedOnlyTask) {
   const char *source = R"(
     declare void @__kmpc_for_static_init_4(i8*, i32, i32*, i32*, i32*, i32*, i32, i32)
     declare i32 @__kmpc_omp_task(i8*, i32, i8*)
@@ -559,7 +561,8 @@ TEST_F(ConcurrencyCheckerTest, SuppressesPrivateInLoopWarningForSharedOnlyTask) 
 
   bool found = false;
   for (const auto &report : reports) {
-    if (report.bugType == concurrency::ConcurrencyBugType::OMP_PRIVATE_IN_LOOP) {
+    if (report.bugType ==
+        concurrency::ConcurrencyBugType::OMP_PRIVATE_IN_LOOP) {
       found = true;
       break;
     }
@@ -605,7 +608,8 @@ TEST_F(ConcurrencyCheckerTest, DetectsPrivateInLoopWarningForPrivateLikeTask) {
 
   bool found = false;
   for (const auto &report : reports) {
-    if (report.bugType == concurrency::ConcurrencyBugType::OMP_PRIVATE_IN_LOOP) {
+    if (report.bugType ==
+        concurrency::ConcurrencyBugType::OMP_PRIVATE_IN_LOOP) {
       found = true;
       break;
     }
@@ -890,7 +894,8 @@ TEST_F(ConcurrencyCheckerTest, CUDAAnalysisReportsPerformanceRisks) {
   EXPECT_GT(stats.cudaBugsFound, 0u);
 }
 
-TEST_F(ConcurrencyCheckerTest, CUDACheckerAvoidsThreadPrivateSharedFalsePositive) {
+TEST_F(ConcurrencyCheckerTest,
+       CUDACheckerAvoidsThreadPrivateSharedFalsePositive) {
   const char *source = R"(
     @shared_arr = addrspace(3) global [64 x i32] zeroinitializer
 
@@ -934,7 +939,8 @@ TEST_F(ConcurrencyCheckerTest, CUDACheckerAvoidsThreadPrivateSharedFalsePositive
   EXPECT_EQ(stats.cudaSummary.volatile_missing_count, 0u);
 }
 
-TEST_F(ConcurrencyCheckerTest, CUDACheckerReportsBarrierMismatchAndCrossBlockRace) {
+TEST_F(ConcurrencyCheckerTest,
+       CUDACheckerReportsBarrierMismatchAndCrossBlockRace) {
   const char *source = R"(
     @global_arr = addrspace(1) global [16 x i32] zeroinitializer
 
@@ -991,7 +997,8 @@ TEST_F(ConcurrencyCheckerTest, CUDACheckerReportsBarrierMismatchAndCrossBlockRac
   EXPECT_GT(stats.cudaBugsFound, 0u);
 }
 
-TEST_F(ConcurrencyCheckerTest, CUDACheckerReportsParametricRaceAndMemoryAmbiguity) {
+TEST_F(ConcurrencyCheckerTest,
+       CUDACheckerReportsParametricRaceAndMemoryAmbiguity) {
   const char *source = R"(
     @shared_arr = addrspace(3) global [32 x i32] zeroinitializer
 
@@ -1091,6 +1098,7 @@ TEST_F(ConcurrencyCheckerTest, CUDACheckerSuppressesOrderedInterKernelHazard) {
 
   auto stats = checker.getStatistics();
   EXPECT_EQ(stats.cudaSummary.global_race_count, 0u);
+  EXPECT_EQ(stats.cudaSummary.inter_kernel_hazard_count, 0u);
 }
 
 TEST_F(ConcurrencyCheckerTest, CUDACheckerReportsUnorderedInterKernelHazard) {
@@ -1142,7 +1150,49 @@ TEST_F(ConcurrencyCheckerTest, CUDACheckerReportsUnorderedInterKernelHazard) {
   checker.checkCUDABugs();
 
   auto stats = checker.getStatistics();
+  EXPECT_EQ(stats.cudaSummary.inter_kernel_hazard_count, 1u);
   EXPECT_GT(stats.cudaBugsFound, 0u);
+}
+
+TEST_F(ConcurrencyCheckerTest, CUDACheckerSummarizesUnifiedMemoryOperations) {
+  const char *source = R"(
+    declare i32 @cudaMallocManaged(i8**, i64, i32)
+    declare i32 @cudaMallocHost(i8**, i64)
+    declare i32 @cudaMemPrefetchAsync(i8*, i64, i32, i8*)
+
+    define i32 @main() {
+    entry:
+      %managed = alloca i8*
+      %host = alloca i8*
+      %m = call i32 @cudaMallocManaged(i8** %managed, i64 64, i32 1)
+      %managed_ptr = load i8*, i8** %managed
+      %p = call i32 @cudaMemPrefetchAsync(i8* %managed_ptr, i64 64, i32 2, i8* null)
+      %h = call i32 @cudaMallocHost(i8** %host, i64 32)
+      %sum = add i32 %m, %p
+      %sum2 = add i32 %sum, %h
+      ret i32 %sum2
+    }
+  )";
+
+  auto module = parseModule(source);
+  ASSERT_NE(module, nullptr);
+
+  concurrency::ConcurrencyChecker checker(*module);
+  checker.enableDataRaceCheck(false);
+  checker.enableDeadlockCheck(false);
+  checker.enableAtomicityCheck(false);
+  checker.enableCondVarCheck(false);
+  checker.enableLockMismatchCheck(false);
+  checker.enableOpenMPCheck(false);
+  checker.enableMPICheck(false);
+  checker.enableCUDACheck(true);
+  checker.runAnalyses();
+
+  auto stats = checker.getStatistics();
+  EXPECT_EQ(stats.cudaSummary.unified_memory_count, 3u);
+  EXPECT_EQ(stats.cudaSummary.managed_allocation_count, 1u);
+  EXPECT_EQ(stats.cudaSummary.unified_prefetch_count, 1u);
+  EXPECT_EQ(stats.cudaSummary.unified_host_allocation_count, 1u);
 }
 
 TEST_F(ConcurrencyCheckerTest, ConditionalMayLockDoesNotSuppressRealRace) {
@@ -1445,8 +1495,7 @@ TEST_F(ConcurrencyCheckerTest,
   EXPECT_TRUE(checker.wouldReportDataRace(store1, store2));
 }
 
-TEST_F(ConcurrencyCheckerTest,
-       ReaderWriterLockReadWritePairStillReportsRace) {
+TEST_F(ConcurrencyCheckerTest, ReaderWriterLockReadWritePairStillReportsRace) {
   const char *source = R"(
     @shared = global i32 0, align 4
     @lock = global i8 0
