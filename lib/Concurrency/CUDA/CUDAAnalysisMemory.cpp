@@ -26,8 +26,13 @@ void CUDAAnalysis::analyzeMemoryTransfers() {
       if (type == ThreadAPI::TD_CUDA_MEMCPY && call->arg_size() >= 3) {
         MemoryTransferInfo transfer;
         transfer.inst = &inst;
-        transfer.src = call->getArgOperand(0);
-        transfer.dst = call->getArgOperand(1);
+        transfer.dst = call->getArgOperand(0);
+        transfer.src = call->getArgOperand(1);
+        if (call->arg_size() >= 3) {
+          if (auto size = evaluateConstantInt(call->getArgOperand(2))) {
+            transfer.size = static_cast<uint64_t>(*size);
+          }
+        }
         transfer.is_async =
             call->getCalledFunction() &&
             call->getCalledFunction()->getName().contains("Async");
@@ -54,12 +59,67 @@ void CUDAAnalysis::analyzeMemoryTransfers() {
         }
 
         m_memory_transfers.push_back(transfer);
+
+        CUDAMemoryTransferFact fact;
+        fact.transfer_class_id = m_abstract_state.memory_transfer_facts.size();
+        fact.inst = &inst;
+        fact.src = transfer.src;
+        fact.dst = transfer.dst;
+        if (call->arg_size() >= 3) {
+          if (auto size = evaluateConstantInt(call->getArgOperand(2))) {
+            fact.size = static_cast<uint64_t>(*size);
+          }
+        }
+        fact.kind = transfer.kind;
+        fact.is_async = transfer.is_async;
+        m_abstract_state.memory_transfer_facts.push_back(fact);
+        m_abstract_state.transfer_fact_by_class[fact.transfer_class_id] = fact;
+      }
+
+      if (type == ThreadAPI::TD_CUDA_MEMSET && call->arg_size() >= 3) {
+        MemoryTransferInfo transfer;
+        transfer.inst = &inst;
+        transfer.dst = call->getArgOperand(0);
+        transfer.src = nullptr;
+        if (call->arg_size() >= 3) {
+          if (auto size = evaluateConstantInt(call->getArgOperand(2))) {
+            transfer.size = static_cast<uint64_t>(*size);
+          }
+        }
+        transfer.dst_space = MemorySpace::Device;
+        transfer.src_space = MemorySpace::Host;
+        transfer.kind = TransferKind::HostToDevice;
+        transfer.is_async =
+            call->getCalledFunction() &&
+            call->getCalledFunction()->getName().contains("Async");
+
+        m_memory_transfers.push_back(transfer);
+
+        CUDAMemoryTransferFact fact;
+        fact.transfer_class_id = m_abstract_state.memory_transfer_facts.size();
+        fact.inst = &inst;
+        fact.src = nullptr;
+        fact.dst = transfer.dst;
+        if (call->arg_size() >= 3) {
+          if (auto size = evaluateConstantInt(call->getArgOperand(2))) {
+            fact.size = static_cast<uint64_t>(*size);
+          }
+        }
+        fact.kind = transfer.kind;
+        fact.is_async = transfer.is_async;
+        m_abstract_state.memory_transfer_facts.push_back(fact);
+        m_abstract_state.transfer_fact_by_class[fact.transfer_class_id] = fact;
       }
 
       if (type == ThreadAPI::TD_CUDA_MALLOC && call->arg_size() >= 1) {
         MemoryTransferInfo transfer;
         transfer.inst = &inst;
         transfer.dst = call->getArgOperand(0);
+        if (call->arg_size() >= 2) {
+          if (auto size = evaluateConstantInt(call->getArgOperand(1))) {
+            transfer.size = static_cast<uint64_t>(*size);
+          }
+        }
         const Function *callee = call->getCalledFunction();
         if (callee && callee->getName().contains("Managed")) {
           transfer.dst_space = MemorySpace::Unknown;
@@ -68,6 +128,20 @@ void CUDAAnalysis::analyzeMemoryTransfers() {
         }
         transfer.kind = TransferKind::HostToDevice;
         m_memory_transfers.push_back(transfer);
+
+        CUDAMemoryTransferFact fact;
+        fact.transfer_class_id = m_abstract_state.memory_transfer_facts.size();
+        fact.inst = &inst;
+        fact.dst = transfer.dst;
+        if (call->arg_size() >= 2) {
+          if (auto size = evaluateConstantInt(call->getArgOperand(1))) {
+            fact.size = static_cast<uint64_t>(*size);
+          }
+        }
+        fact.kind = transfer.kind;
+        fact.is_async = false;
+        m_abstract_state.memory_transfer_facts.push_back(fact);
+        m_abstract_state.transfer_fact_by_class[fact.transfer_class_id] = fact;
       }
     }
   }

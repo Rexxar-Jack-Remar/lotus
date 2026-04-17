@@ -1,6 +1,7 @@
 #pragma once
 
 #include "Alias/AliasAnalysisWrapper/AliasAnalysisWrapper.h"
+#include "Concurrency/CUDA/CUDAAbstractState.h"
 #include "Concurrency/CUDA/CUDAMemoryModel.h"
 #include "Concurrency/CUDA/CUDASymbolicModel.h"
 #include "Concurrency/Utils/ThreadAPI.h"
@@ -146,14 +147,6 @@ struct CoalescingInfo {
   uint32_t covered_bytes = 0;
   uint32_t participating_lanes = 0;
   uint32_t unique_segments = 0;
-};
-
-enum class TransferKind {
-  Unknown,
-  HostToDevice,
-  DeviceToHost,
-  DeviceToDevice,
-  HostToHost
 };
 
 struct MemoryTransferInfo {
@@ -333,6 +326,33 @@ public:
   }
   const DeviceConfig &getDeviceConfig() const { return m_device_config; }
 
+  const CUDAAbstractState &getAbstractState() const { return m_abstract_state; }
+  const std::vector<CUDAKernelFact> &getKernelFacts() const {
+    return m_abstract_state.getKernelFacts();
+  }
+  const std::vector<CUDAMemoryTransferFact> &getMemoryTransferFacts() const {
+    return m_abstract_state.getMemoryTransferFacts();
+  }
+  const std::vector<CUDASynchronizationFact> &getSynchronizationFacts() const {
+    return m_abstract_state.getSynchronizationFacts();
+  }
+  const std::vector<CUDAStreamAutomaton> &getStreamAutomata() const {
+    return m_abstract_state.getStreamAutomata();
+  }
+  const std::vector<CUDAProtocolEpoch> &getBarrierEpochs() const {
+    return m_abstract_state.getBarrierEpochs();
+  }
+  const std::vector<CUDAProtocolEpoch> &getFenceEpochs() const {
+    return m_abstract_state.getFenceEpochs();
+  }
+  const std::map<const llvm::Function *, CUDAFunctionSummary> &
+  getFunctionSummaries() const {
+    return m_abstract_state.getFunctionSummaries();
+  }
+  const std::vector<CUDAParticipantSet> &getParticipantSets() const {
+    return m_abstract_state.getParticipantSets();
+  }
+
   static MemorySpace classifyMemorySpace(const llvm::Value *value);
   static const char *toString(MemorySpace space);
   static const char *toString(CoalescingQuality quality);
@@ -356,6 +376,7 @@ private:
   std::vector<MemoryTransferInfo> m_memory_transfers;
   std::vector<UnifiedMemoryInfo> m_unified_memory;
   std::unordered_map<const llvm::Function *, size_t> m_kernel_index;
+  CUDAAbstractState m_abstract_state;
 
   void analyzeKernel(const llvm::Function *kernel,
                      const KernelLaunchInfo *launch);

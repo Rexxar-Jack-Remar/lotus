@@ -1,6 +1,8 @@
-#include "Concurrency/CUDA/CUDAAnalysis.h"
-
 #include "CUDAAnalysisInternal.h"
+#include "Concurrency/CUDA/CUDAAnalysis.h"
+#include "Concurrency/CUDA/CUDAFunctionSummary.h"
+#include "Concurrency/CUDA/CUDAKernelProtocolAnalysis.h"
+#include "Concurrency/CUDA/CUDAParticipantAnalysis.h"
 
 #include <llvm/IR/InstIterator.h>
 
@@ -57,9 +59,8 @@ SynchronizationScope getSyncScope(ThreadAPI::TD_TYPE type) {
   }
 }
 
-SynchronizationPrimitive
-getSynchronizationPrimitive(ThreadAPI::TD_TYPE type,
-                            const Instruction *inst) {
+SynchronizationPrimitive getSynchronizationPrimitive(ThreadAPI::TD_TYPE type,
+                                                     const Instruction *inst) {
   switch (type) {
   case ThreadAPI::TD_CUDA_WARP_BARRIER:
     return SynchronizationPrimitive::WarpBarrier;
@@ -140,6 +141,7 @@ void CUDAAnalysis::runAnalysis() {
   m_inter_kernel_races.clear();
   m_memory_transfers.clear();
   m_unified_memory.clear();
+  m_abstract_state.clear();
   size_t launch_sequence = 0;
 
   for (Function &function : m_module) {
@@ -167,7 +169,8 @@ void CUDAAnalysis::runAnalysis() {
         stream_state.ordered_since_last_launch = true;
         stream_state.scope = detail::getSyncScope(type);
         stream_state.source = detail::getOrderingSource(type);
-        stream_state.primitive = detail::getSynchronizationPrimitive(type, &inst);
+        stream_state.primitive =
+            detail::getSynchronizationPrimitive(type, &inst);
         continue;
       }
 
@@ -243,6 +246,78 @@ void CUDAAnalysis::runAnalysis() {
   analyzeMemoryTransfers();
   analyzeUnifiedMemory();
   analyzeInterKernelRaces();
+
+  CUDAFunctionSummaryAnalysis func_summary_analysis(m_module);
+  func_summary_analysis.runAnalysis();
+
+  for (const auto &pair : func_summary_analysis.getSummaries()) {
+    m_abstract_state.function_summaries[pair.first] = pair.second;
+  }
+
+  size_t kernel_class_counter = 0;
+  std::set<const llvm::Function *> analyzed_kernels;
+  for (const auto &pair : m_kernel_index) {
+    const llvm::Function *kernel = pair.first;
+    if (!kernel)
+      continue;
+    analyzed_kernels.insert(kernel);
+    CUDAParticipantAnalysis participant_analysis(*kernel);
+
+    for (const auto &bb : *kernel) {
+      for (const auto &inst : bb) {
+        if (llvm::isa<llvm::CallBase>(&inst)) {
+          auto set = participant_analysis.getActiveSetAt(&inst);
+          if (!set.scopes.empty()) {
+            set.kernel = kernel;
+            set.instruction = &inst;
+            m_abstract_state.participant_sets.push_back(set);
+          }
+        }
+      }
+    }
+
+    CUDAKernelProtocolAnalysis protocol_analysis(*kernel, m_abstract_state);
+    protocol_analysis.runAnalysis();
+  }
+
+  for (Function &function : m_module) {
+    for (const Instruction &inst : instructions(function)) {
+      const auto *call = dyn_cast<CallBase>(&inst);
+      if (!call) {
+        continue;
+      }
+      auto type = m_thread_api->getType(call);
+      if (type == ThreadAPI::TD_CUDA_DEVICE_SYNC) {
+        CUDASynchronizationFact fact;
+        fact.synchronization_class_id =
+            m_abstract_state.synchronization_facts.size();
+        fact.inst = call;
+        fact.primitive =
+            static_cast<int>(SynchronizationPrimitive::DeviceSynchronize);
+        fact.scope = static_cast<int>(SynchronizationScope::Device);
+        fact.ordering_effect = true;
+        fact.participating_threads = 0;
+        m_abstract_state.synchronization_facts.push_back(fact);
+        m_abstract_state
+            .synchronization_fact_by_class[fact.synchronization_class_id] =
+            fact;
+      }
+    }
+  }
+
+  for (const auto &launch : m_launches) {
+    if (!launch.kernel)
+      continue;
+    CUDAKernelFact fact;
+    fact.kernel_class_id = kernel_class_counter++;
+    fact.kernel = launch.kernel;
+    fact.launch_site = launch.launch;
+    fact.stream = launch.stream;
+    fact.stream_known = launch.stream_known;
+    fact.is_ordered_after_previous = launch.ordered_after_previous;
+    m_abstract_state.kernel_facts.push_back(fact);
+    m_abstract_state.kernel_fact_by_class[fact.kernel_class_id] = fact;
+  }
 }
 
 void CUDAAnalysis::analyzeInterKernelRaces() {

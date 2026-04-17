@@ -88,6 +88,57 @@ TEST_F(CUDAAnalysisTest, SummarizesMemorySpacesAndRisks) {
   EXPECT_GT(summary.coalescing_issues.front().covered_bytes, 0u);
 }
 
+TEST_F(CUDAAnalysisTest, PopulatesAccessFactsInAbstractState) {
+  const char *source = R"(
+    @global_arr = addrspace(1) global [64 x i32] zeroinitializer
+
+    declare void @__set_CUDAConfig(i32, i32)
+    declare i32 @llvm.nvvm.read.ptx.sreg.tid.x()
+
+    define void @kernel() {
+    entry:
+      %tid = call i32 @llvm.nvvm.read.ptx.sreg.tid.x()
+      %idx = getelementptr [64 x i32], [64 x i32] addrspace(1)* @global_arr, i32 0, i32 %tid
+      %val = load i32, i32 addrspace(1)* %idx
+      store i32 %val, i32 addrspace(1)* %idx
+      ret void
+    }
+
+    define i32 @main() {
+    entry:
+      call void @__set_CUDAConfig(i32 1, i32 1)
+      call void @kernel()
+      ret i32 0
+    }
+  )";
+
+  auto module = parseModule(source);
+  ASSERT_NE(module, nullptr);
+
+  concurrency::cuda::CUDAAnalysis analysis(*module);
+  analysis.runAnalysis();
+
+  ASSERT_EQ(analysis.getLaunches().size(), 1u);
+
+  const auto &abstract_state = analysis.getAbstractState();
+  const auto &access_facts = abstract_state.getAccessFacts();
+  EXPECT_FALSE(access_facts.empty());
+
+  size_t write_count = 0;
+  size_t read_count = 0;
+  for (const auto &fact : access_facts) {
+    if (fact.is_write) {
+      ++write_count;
+    } else {
+      ++read_count;
+    }
+  }
+  EXPECT_EQ(read_count, 1u);
+  EXPECT_EQ(write_count, 1u);
+
+  EXPECT_TRUE(abstract_state.getModelGaps().empty());
+}
+
 TEST_F(CUDAAnalysisTest,
        AvoidsFalseRaceAndBankConflictForThreadPrivateIndexing) {
   const char *source = R"(

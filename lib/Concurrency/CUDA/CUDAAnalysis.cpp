@@ -1,4 +1,5 @@
 #include "Concurrency/CUDA/CUDAAnalysis.h"
+
 #include "CUDAAnalysisInternal.h"
 
 #include <algorithm>
@@ -110,7 +111,6 @@ static SmallVector<const Value *, 4> mergeBaseObjects(const AccessInfo &lhs,
   }
   return bases;
 }
-
 
 static bool mustReachBarrier(const Instruction *barrier,
                              const Function *kernel) {
@@ -436,7 +436,8 @@ static bool hasDistinctThreadAlias(const AccessInfo &lhs, const AccessInfo &rhs,
 static RaceDecision
 evaluateRaceDecision(const AccessInfo &lhs, const AccessInfo &rhs,
                      const LaunchDimensions &dims, const DeviceConfig &config,
-                     bool allow_cross_block, const detail::AliasQueryResult &alias) {
+                     bool allow_cross_block,
+                     const detail::AliasQueryResult &alias) {
   RaceDecision decision;
   decision.aliases =
       alias.relation != AliasResult::NoAlias &&
@@ -611,9 +612,9 @@ static SynchronizationScope requiredOrderingScope(const AccessInfo &lhs,
              : SynchronizationScope::Block;
 }
 
-detail::AliasQueryResult detail::queryAlias(
-    const AccessInfo &lhs, const AccessInfo &rhs,
-    lotus::AliasAnalysisWrapper *aa) {
+detail::AliasQueryResult detail::queryAlias(const AccessInfo &lhs,
+                                            const AccessInfo &rhs,
+                                            lotus::AliasAnalysisWrapper *aa) {
   detail::AliasQueryResult result;
   result.precision = std::max(lhs.alias_precision, rhs.alias_precision);
   result.source = lhs.alias_source == AliasSource::AserPTA ||
@@ -771,6 +772,18 @@ void CUDAAnalysis::recordAccess(KernelSummary &summary, const Instruction *inst,
   }
 
   summary.accesses.push_back(access);
+
+  CUDAAccessFact fact;
+  fact.access_class_id = m_abstract_state.access_facts.size();
+  fact.instruction = access.inst;
+  fact.pointer = access.pointer;
+  fact.base = access.base;
+  fact.space = static_cast<int>(access.space);
+  fact.is_write = access.is_write;
+  fact.is_atomic = access.is_atomic;
+  fact.uniformity = static_cast<int>(access.uniformity);
+  m_abstract_state.access_facts.push_back(fact);
+  m_abstract_state.access_fact_by_class[fact.access_class_id] = fact;
 
   switch (access.space) {
   case MemorySpace::Shared: {
@@ -1022,7 +1035,8 @@ void CUDAAnalysis::analyzeRaces(KernelSummary &summary) {
         continue;
       }
 
-      const detail::AliasQueryResult alias = detail::queryAlias(lhs, rhs, m_alias_analysis);
+      const detail::AliasQueryResult alias =
+          detail::queryAlias(lhs, rhs, m_alias_analysis);
       if (alias.relation == AliasResult::NoAlias) {
         continue;
       }
@@ -1214,7 +1228,8 @@ void CUDAAnalysis::analyzeSynchronization(KernelSummary &summary,
       ThreadAPI::TD_TYPE type = m_thread_api->getType(call);
       if (type != ThreadAPI::TD_CUDA_BARRIER &&
           type != ThreadAPI::TD_CUDA_WARP_BARRIER &&
-          type != ThreadAPI::TD_CUDA_MEMORY_BARRIER) {
+          type != ThreadAPI::TD_CUDA_MEMORY_BARRIER &&
+          type != ThreadAPI::TD_CUDA_DEVICE_SYNC) {
         continue;
       }
 
@@ -1246,6 +1261,18 @@ void CUDAAnalysis::analyzeSynchronization(KernelSummary &summary,
                                              : ParticipationKind::Conditional;
       info.exact = all_threads_reach || !info.execution_rendezvous;
       summary.synchronizations.push_back(std::move(info));
+
+      CUDASynchronizationFact fact;
+      fact.synchronization_class_id =
+          m_abstract_state.synchronization_facts.size();
+      fact.inst = &inst;
+      fact.primitive = static_cast<int>(info.primitive);
+      fact.scope = static_cast<int>(info.scope);
+      fact.ordering_effect = info.orders_memory;
+      fact.participating_threads = static_cast<int>(info.participating_threads);
+      m_abstract_state.synchronization_facts.push_back(fact);
+      m_abstract_state
+          .synchronization_fact_by_class[fact.synchronization_class_id] = fact;
     }
   }
 }
