@@ -21,12 +21,29 @@ void CUDASteamAutomatonBuilder::addStream(const llvm::Value *stream) {
   automaton.current_state = StreamState::Created;
 }
 
+void CUDASteamAutomatonBuilder::addEventObject(const llvm::Value *event) {
+  if (!event || m_seen_events.count(event)) {
+    return;
+  }
+  m_seen_events.insert(event);
+
+  size_t class_id = m_event_automata.size();
+  CUDAEventAutomaton &automaton = m_event_automata[class_id];
+  automaton.event_class_id = class_id;
+  automaton.event = event;
+  automaton.current_state = EventState::Created;
+}
+
 void CUDASteamAutomatonBuilder::addEvent(const llvm::Instruction *record_inst,
+                                         const llvm::Value *event,
                                          const llvm::Value *stream) {
   if (!record_inst) {
     return;
   }
 
+  if (event) {
+    addEventObject(event);
+  }
   if (stream) {
     addStream(stream);
   }
@@ -43,16 +60,41 @@ void CUDASteamAutomatonBuilder::addEvent(const llvm::Instruction *record_inst,
       pair.second.pending_operations.push_back(record_inst);
     }
   }
+
+  for (auto &pair : m_event_automata) {
+    if (event && pair.second.event != event) {
+      continue;
+    }
+    CUDAEventTransition transition;
+    transition.inst = record_inst;
+    transition.from_state = pair.second.current_state;
+    transition.to_state = EventState::Recorded;
+    transition.is_ordering_boundary = false;
+    pair.second.transitions.push_back(transition);
+    pair.second.current_state = EventState::Recorded;
+    pair.second.recorded_stream = stream;
+    pair.second.has_record = true;
+  }
 }
 
 void CUDASteamAutomatonBuilder::addEventWait(const llvm::Instruction *wait_inst,
-                                             const llvm::Value *event) {
-  (void)event;
+                                             const llvm::Value *event,
+                                             const llvm::Value *stream) {
   if (!wait_inst) {
     return;
   }
 
+  if (event) {
+    addEventObject(event);
+  }
+  if (stream) {
+    addStream(stream);
+  }
+
   for (auto &pair : m_stream_automata) {
+    if (stream && pair.second.stream != stream) {
+      continue;
+    }
     CUDAStreamTransition transition;
     transition.inst = wait_inst;
     transition.from_state = pair.second.current_state;
@@ -60,6 +102,45 @@ void CUDASteamAutomatonBuilder::addEventWait(const llvm::Instruction *wait_inst,
     transition.is_ordering_boundary = true;
     pair.second.transitions.push_back(transition);
     pair.second.pending_operations.clear();
+  }
+
+  for (auto &pair : m_event_automata) {
+    if (event && pair.second.event != event) {
+      continue;
+    }
+    CUDAEventTransition transition;
+    transition.inst = wait_inst;
+    transition.from_state = pair.second.current_state;
+    transition.to_state = EventState::Waited;
+    transition.is_ordering_boundary = true;
+    pair.second.transitions.push_back(transition);
+    pair.second.current_state = EventState::Waited;
+    pair.second.pending_waits.push_back(wait_inst);
+    pair.second.has_wait = true;
+  }
+}
+
+void CUDASteamAutomatonBuilder::addEventSync(const llvm::Instruction *sync_inst,
+                                             const llvm::Value *event) {
+  if (!sync_inst) {
+    return;
+  }
+  if (event) {
+    addEventObject(event);
+  }
+
+  for (auto &pair : m_event_automata) {
+    if (event && pair.second.event != event) {
+      continue;
+    }
+    CUDAEventTransition transition;
+    transition.inst = sync_inst;
+    transition.from_state = pair.second.current_state;
+    transition.to_state = EventState::Synchronized;
+    transition.is_ordering_boundary = true;
+    pair.second.transitions.push_back(transition);
+    pair.second.current_state = EventState::Synchronized;
+    pair.second.pending_waits.clear();
   }
 }
 
@@ -88,6 +169,31 @@ void CUDASteamAutomatonBuilder::addStreamSync(
   }
 }
 
+void CUDASteamAutomatonBuilder::addStreamDestroy(
+    const llvm::Instruction *destroy_inst, const llvm::Value *stream) {
+  if (!destroy_inst) {
+    return;
+  }
+  if (stream) {
+    addStream(stream);
+  }
+
+  for (auto &pair : m_stream_automata) {
+    if (stream && pair.second.stream != stream) {
+      continue;
+    }
+    CUDAStreamTransition transition;
+    transition.inst = destroy_inst;
+    transition.from_state = pair.second.current_state;
+    transition.to_state = StreamState::Destroyed;
+    transition.is_ordering_boundary = true;
+    pair.second.transitions.push_back(transition);
+    pair.second.current_state = StreamState::Destroyed;
+    pair.second.is_ordered = true;
+    pair.second.pending_operations.clear();
+  }
+}
+
 void CUDASteamAutomatonBuilder::addDeviceSync(
     const llvm::Instruction *sync_inst) {
   if (!sync_inst) {
@@ -113,6 +219,19 @@ void CUDASteamAutomatonBuilder::finalize() {
         pair.second.current_state == StreamState::Active) {
       pair.second.is_exact = true;
     }
+    m_state.stream_automata.push_back(pair.second);
+    m_state.stream_automaton_by_class[pair.first] = pair.second;
+  }
+
+  for (auto &pair : m_event_automata) {
+    if (pair.second.current_state == EventState::Created ||
+        pair.second.current_state == EventState::Recorded ||
+        pair.second.current_state == EventState::Waited ||
+        pair.second.current_state == EventState::Synchronized) {
+      pair.second.is_exact = true;
+    }
+    m_state.event_automata.push_back(pair.second);
+    m_state.event_automaton_by_class[pair.first] = pair.second;
   }
 }
 

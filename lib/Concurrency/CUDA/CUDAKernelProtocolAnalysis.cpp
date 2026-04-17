@@ -2,6 +2,9 @@
 
 #include "Concurrency/Utils/ThreadAPI.h"
 
+#include <llvm/Analysis/CFG.h>
+#include <llvm/IR/CFG.h>
+
 namespace concurrency::cuda {
 
 CUDAKernelProtocolAnalysis::CUDAKernelProtocolAnalysis(
@@ -49,6 +52,7 @@ void CUDAKernelProtocolAnalysis::runAnalysis() {
     epoch.kernel = &m_kernel;
     epoch.state = ProtocolState::BarrierActive;
     epoch.entry = barrier;
+    epoch.exit = barrier;
     epoch.scope = static_cast<int>(2);
     m_barrier_epochs.push_back(epoch);
     m_state.barrier_epochs.push_back(epoch);
@@ -63,6 +67,7 @@ void CUDAKernelProtocolAnalysis::runAnalysis() {
     epoch.kernel = &m_kernel;
     epoch.state = ProtocolState::WarpSyncRequired;
     epoch.entry = warp_barrier;
+    epoch.exit = warp_barrier;
     epoch.scope = static_cast<int>(1);
     m_barrier_epochs.push_back(epoch);
     m_state.barrier_epochs.push_back(epoch);
@@ -88,6 +93,7 @@ void CUDAKernelProtocolAnalysis::runAnalysis() {
     epoch.kernel = &m_kernel;
     epoch.state = ProtocolState::FenceRequired;
     epoch.entry = fence;
+    epoch.exit = fence;
     epoch.scope = fence_scope;
     m_fence_epochs.push_back(epoch);
     m_state.fence_epochs.push_back(epoch);
@@ -98,6 +104,37 @@ void CUDAKernelProtocolAnalysis::runAnalysis() {
 
   if (barriers.empty() && !warp_barriers.empty()) {
     has_proper_sync = false;
+  }
+  for (const auto *barrier : barriers) {
+    if (!barrier || llvm::succ_empty(barrier->getParent())) {
+      has_proper_sync = false;
+      break;
+    }
+  }
+
+  if (!barriers.empty()) {
+    for (const auto *barrier : barriers) {
+      if (!barrier) {
+        continue;
+      }
+      bool reachable_from_all_paths = true;
+      for (const auto &bb : m_kernel) {
+        if (&bb == barrier->getParent()) {
+          continue;
+        }
+        if (llvm::succ_empty(&bb)) {
+          continue;
+        }
+        if (!llvm::isPotentiallyReachable(&bb, barrier->getParent())) {
+          reachable_from_all_paths = false;
+          break;
+        }
+      }
+      if (!reachable_from_all_paths) {
+        has_proper_sync = false;
+        break;
+      }
+    }
   }
 
   m_has_proper_sync = has_proper_sync;

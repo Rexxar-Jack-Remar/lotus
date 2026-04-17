@@ -183,6 +183,86 @@ static void scalePattern(AffineAccessPattern &pattern, int64_t scale) {
   pattern.lane_id *= scale;
 }
 
+static void markNonAffine(AffineAccessPattern &pattern) {
+  pattern = {};
+  pattern.non_affine = true;
+}
+
+static AffineAccessPattern makeConstantPattern(int64_t constant) {
+  AffineAccessPattern pattern;
+  pattern.constant = constant;
+  pattern.valid = true;
+  pattern.exact = true;
+  return pattern;
+}
+
+static AffineAccessPattern normalizePattern(AffineAccessPattern pattern) {
+  if (!pattern.valid) {
+    return pattern;
+  }
+  if (pattern.non_affine) {
+    pattern.exact = false;
+  }
+  return pattern;
+}
+
+static AffineAccessPattern mergeNormalizedPatterns(const AffineAccessPattern &lhs,
+                                                   const AffineAccessPattern &rhs,
+                                                   bool subtract = false) {
+  AffineAccessPattern merged;
+  mergePatterns(merged, lhs, rhs, subtract);
+  return normalizePattern(merged);
+}
+
+static bool tryScalePattern(AffineAccessPattern &pattern, int64_t scale) {
+  if (!pattern.valid) {
+    return false;
+  }
+  scalePattern(pattern, scale);
+  pattern = normalizePattern(pattern);
+  return true;
+}
+
+static bool tryDividePattern(AffineAccessPattern &pattern, int64_t divisor) {
+  if (!pattern.valid || divisor == 0 || !pattern.isDivisibleBy(divisor)) {
+    return false;
+  }
+  pattern.divideBy(divisor);
+  pattern = normalizePattern(pattern);
+  return true;
+}
+
+static int64_t normalizeDimension(int64_t dim) { return dim > 0 ? dim : 1; }
+
+static CanonicalAffineAccessPattern
+canonicalizePattern(const AffineAccessPattern &pattern,
+                    const std::array<int64_t, 3> &block_dims,
+                    const std::array<int64_t, 3> &grid_dims) {
+  CanonicalAffineAccessPattern canonical;
+  if (!pattern.valid) {
+    return canonical;
+  }
+
+  const int64_t block_x = normalizeDimension(block_dims[0]);
+  const int64_t block_y = normalizeDimension(block_dims[1]);
+  const int64_t grid_x = normalizeDimension(grid_dims[0]);
+  const int64_t grid_y = normalizeDimension(grid_dims[1]);
+
+  canonical.constant = pattern.constant;
+  canonical.linear_thread =
+      pattern.thread_idx_x + pattern.thread_idx_y * block_x +
+      pattern.thread_idx_z * block_x * block_y;
+  canonical.linear_block =
+      pattern.block_idx_x + pattern.block_idx_y * grid_x +
+      pattern.block_idx_z * grid_x * grid_y;
+  canonical.lane = pattern.lane_id;
+  canonical.thread_stride_bytes = canonical.linear_thread;
+  canonical.block_stride_bytes = canonical.linear_block;
+  canonical.valid = true;
+  canonical.exact = pattern.exact && !pattern.non_affine;
+  return canonical;
+}
+
 static UniformityClass mergeUniformity(UniformityClass lhs,
                                        UniformityClass rhs) {
   return std::max(lhs, rhs);
@@ -338,10 +418,7 @@ CUDASymbolicModel::extractAffineAccessPattern(const Value *value) {
   }
 
   if (const auto *ci = dyn_cast<ConstantInt>(value)) {
-    pattern.constant = ci->getSExtValue();
-    pattern.valid = true;
-    pattern.exact = true;
-    return pattern;
+    return makeConstantPattern(ci->getSExtValue());
   }
 
   if (const auto *gep = dyn_cast<GEPOperator>(value)) {
@@ -355,7 +432,7 @@ CUDASymbolicModel::extractAffineAccessPattern(const Value *value) {
       AffineAccessPattern index_pattern = extractAffineAccessPattern(*idx_it);
       if (!index_pattern.valid) {
         pattern.non_affine = true;
-        return pattern;
+        return normalizePattern(pattern);
       }
 
       int64_t elem_size = 1;
@@ -382,11 +459,10 @@ CUDASymbolicModel::extractAffineAccessPattern(const Value *value) {
       if (!pattern.valid) {
         pattern = index_pattern;
       } else {
-        mergePatterns(pattern, pattern, index_pattern);
+        pattern = mergeNormalizedPatterns(pattern, index_pattern);
       }
     }
-    pattern.exact = pattern.exact && !pattern.non_affine;
-    return pattern;
+    return normalizePattern(pattern);
   }
 
   if (const auto *op = dyn_cast<Operator>(value)) {
@@ -394,30 +470,29 @@ CUDASymbolicModel::extractAffineAccessPattern(const Value *value) {
         op->getOpcode() == Instruction::SExt ||
         op->getOpcode() == Instruction::Trunc ||
         op->getOpcode() == Instruction::BitCast) {
-      return extractAffineAccessPattern(op->getOperand(0));
+      return normalizePattern(extractAffineAccessPattern(op->getOperand(0)));
     }
     if (op->getOpcode() == Instruction::Select) {
       AffineAccessPattern lhs = extractAffineAccessPattern(op->getOperand(1));
       AffineAccessPattern rhs = extractAffineAccessPattern(op->getOperand(2));
       if (!lhs.valid || !rhs.valid) {
-        pattern.non_affine = true;
+        markNonAffine(pattern);
         return pattern;
       }
       pattern = lhs;
       pattern.exact = false;
       pattern.non_affine = lhs.non_affine || rhs.non_affine;
       pattern.participation = std::max(lhs.participation, rhs.participation);
-      return pattern;
+      return normalizePattern(pattern);
     }
     if (op->getOpcode() == Instruction::Add) {
-      mergePatterns(pattern, extractAffineAccessPattern(op->getOperand(0)),
-                    extractAffineAccessPattern(op->getOperand(1)));
-      return pattern;
+      return mergeNormalizedPatterns(extractAffineAccessPattern(op->getOperand(0)),
+                                     extractAffineAccessPattern(op->getOperand(1)));
     }
     if (op->getOpcode() == Instruction::Sub) {
-      mergePatterns(pattern, extractAffineAccessPattern(op->getOperand(0)),
-                    extractAffineAccessPattern(op->getOperand(1)), true);
-      return pattern;
+      return mergeNormalizedPatterns(extractAffineAccessPattern(op->getOperand(0)),
+                                     extractAffineAccessPattern(op->getOperand(1)),
+                                     true);
     }
     if (op->getOpcode() == Instruction::And) {
       if (auto mask = evaluateConstantInt(op->getOperand(1))) {
@@ -425,7 +500,7 @@ CUDASymbolicModel::extractAffineAccessPattern(const Value *value) {
         if (lhs.valid && lhs.thread_idx_x == 0 && lhs.block_idx_x == 1 &&
             lhs.lane_id == 0) {
           lhs.constant &= *mask;
-          return lhs;
+          return normalizePattern(lhs);
         }
       }
     }
@@ -437,14 +512,14 @@ CUDASymbolicModel::extractAffineAccessPattern(const Value *value) {
         if (pattern.valid) {
           pattern.constant |= *lhs_const;
         }
-        return pattern;
+        return normalizePattern(pattern);
       }
       if (!lhs_const && rhs_const) {
         pattern = extractAffineAccessPattern(op->getOperand(0));
         if (pattern.valid) {
           pattern.constant |= *rhs_const;
         }
-        return pattern;
+        return normalizePattern(pattern);
       }
     }
     if (op->getOpcode() == Instruction::Mul ||
@@ -457,8 +532,11 @@ CUDASymbolicModel::extractAffineAccessPattern(const Value *value) {
           return pattern;
         }
         const int64_t scale = *lhs_const;
-        scalePattern(rhs, scale);
-        return rhs;
+        if (tryScalePattern(rhs, scale)) {
+          return rhs;
+        }
+        markNonAffine(pattern);
+        return pattern;
       }
       if (!lhs_const && rhs_const) {
         AffineAccessPattern lhs = extractAffineAccessPattern(op->getOperand(0));
@@ -468,8 +546,11 @@ CUDASymbolicModel::extractAffineAccessPattern(const Value *value) {
         const int64_t scale = op->getOpcode() == Instruction::Shl
                                   ? (int64_t{1} << *rhs_const)
                                   : *rhs_const;
-        scalePattern(lhs, scale);
-        return lhs;
+        if (tryScalePattern(lhs, scale)) {
+          return lhs;
+        }
+        markNonAffine(pattern);
+        return pattern;
       }
     }
     if (op->getOpcode() == Instruction::SDiv ||
@@ -483,29 +564,53 @@ CUDASymbolicModel::extractAffineAccessPattern(const Value *value) {
                                op->getOpcode() == Instruction::LShr)
                                   ? (int64_t{1} << *divisor)
                                   : *divisor;
-        if (lhs.constant % scale == 0 && lhs.thread_idx_x % scale == 0 &&
-            lhs.thread_idx_y % scale == 0 && lhs.thread_idx_z % scale == 0 &&
-            lhs.block_idx_x % scale == 0 && lhs.block_idx_y % scale == 0 &&
-            lhs.block_idx_z % scale == 0 && lhs.lane_id % scale == 0) {
-          lhs.constant /= scale;
-          lhs.thread_idx_x /= scale;
-          lhs.thread_idx_y /= scale;
-          lhs.thread_idx_z /= scale;
-          lhs.block_idx_x /= scale;
-          lhs.block_idx_y /= scale;
-          lhs.block_idx_z /= scale;
-          lhs.lane_id /= scale;
+        if (tryDividePattern(lhs, scale)) {
           return lhs;
         }
-        lhs.valid = false;
-        lhs.non_affine = true;
+        markNonAffine(lhs);
         return lhs;
       }
     }
   }
 
-  pattern.non_affine = true;
+  markNonAffine(pattern);
   return pattern;
+}
+
+CanonicalAffineAccessPattern CUDASymbolicModel::normalizeAffineAccessPattern(
+    const AffineAccessPattern &pattern, const std::array<int64_t, 3> &block_dims,
+    const std::array<int64_t, 3> &grid_dims) {
+  return canonicalizePattern(normalizePattern(pattern), block_dims, grid_dims);
+}
+
+bool AffineAccessPattern::isZero() const {
+  return constant == 0 && thread_idx_x == 0 && thread_idx_y == 0 &&
+         thread_idx_z == 0 && block_idx_x == 0 && block_idx_y == 0 &&
+         block_idx_z == 0 && lane_id == 0;
+}
+
+bool AffineAccessPattern::isDivisibleBy(int64_t divisor) const {
+  if (divisor == 0) {
+    return false;
+  }
+  return constant % divisor == 0 && thread_idx_x % divisor == 0 &&
+         thread_idx_y % divisor == 0 && thread_idx_z % divisor == 0 &&
+         block_idx_x % divisor == 0 && block_idx_y % divisor == 0 &&
+         block_idx_z % divisor == 0 && lane_id % divisor == 0;
+}
+
+void AffineAccessPattern::divideBy(int64_t divisor) {
+  if (divisor == 0) {
+    return;
+  }
+  constant /= divisor;
+  thread_idx_x /= divisor;
+  thread_idx_y /= divisor;
+  thread_idx_z /= divisor;
+  block_idx_x /= divisor;
+  block_idx_y /= divisor;
+  block_idx_z /= divisor;
+  lane_id /= divisor;
 }
 
 SymbolicDimension CUDASymbolicModel::classifyDimension(const Value *value) {

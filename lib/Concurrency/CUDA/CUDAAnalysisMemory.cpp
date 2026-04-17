@@ -1,10 +1,60 @@
 #include "Concurrency/CUDA/CUDAAnalysis.h"
 
+#include "Concurrency/CUDA/CUDASemantics.h"
+
 #include <llvm/IR/InstIterator.h>
 
 using namespace llvm;
 
 namespace concurrency::cuda {
+
+namespace {
+
+static const Value *getLastArgument(const CallBase *call) {
+  if (!call || call->arg_empty()) {
+    return nullptr;
+  }
+  return call->getArgOperand(call->arg_size() - 1);
+}
+
+static const Value *getTransferStream(const CallBase *call) {
+  if (!call) {
+    return nullptr;
+  }
+  const Function *callee = call->getCalledFunction();
+  if (!callee || !callee->getName().contains("Async")) {
+    return nullptr;
+  }
+  return getLastArgument(call);
+}
+
+static bool isHostLikeSpace(MemorySpace space) {
+  return space == MemorySpace::Host;
+}
+
+static bool isDeviceLikeSpace(MemorySpace space) {
+  return space == MemorySpace::Device || space == MemorySpace::Global ||
+         space == MemorySpace::Shared || space == MemorySpace::Constant ||
+         space == MemorySpace::Local;
+}
+
+static TransferKind classifyTransferKind(MemorySpace src, MemorySpace dst) {
+  if (isHostLikeSpace(src) && isDeviceLikeSpace(dst)) {
+    return TransferKind::HostToDevice;
+  }
+  if (isDeviceLikeSpace(src) && isHostLikeSpace(dst)) {
+    return TransferKind::DeviceToHost;
+  }
+  if (isDeviceLikeSpace(src) && isDeviceLikeSpace(dst)) {
+    return TransferKind::DeviceToDevice;
+  }
+  if (isHostLikeSpace(src) && isHostLikeSpace(dst)) {
+    return TransferKind::HostToHost;
+  }
+  return TransferKind::Unknown;
+}
+
+} // namespace
 
 void CUDAAnalysis::analyzeMemoryTransfers() {
   m_memory_transfers.clear();
@@ -19,7 +69,9 @@ void CUDAAnalysis::analyzeMemoryTransfers() {
       ThreadAPI::TD_TYPE type = m_thread_api->getType(call);
       if (type != ThreadAPI::TD_CUDA_MEMCPY &&
           type != ThreadAPI::TD_CUDA_MEMSET &&
-          type != ThreadAPI::TD_CUDA_MALLOC) {
+          type != ThreadAPI::TD_CUDA_MALLOC &&
+          type != ThreadAPI::TD_CUDA_FREE &&
+          type != ThreadAPI::TD_CUDA_UNIFIED_MEMORY) {
         continue;
       }
 
@@ -36,6 +88,7 @@ void CUDAAnalysis::analyzeMemoryTransfers() {
         transfer.is_async =
             call->getCalledFunction() &&
             call->getCalledFunction()->getName().contains("Async");
+        const Value *stream = getTransferStream(call);
 
         const MemorySpaceInfo src_info =
             CUDAMemoryModel::classify(transfer.src);
@@ -43,19 +96,22 @@ void CUDAAnalysis::analyzeMemoryTransfers() {
             CUDAMemoryModel::classify(transfer.dst);
         transfer.src_space = src_info.space;
         transfer.dst_space = dst_info.space;
+        transfer.kind = classifyTransferKind(src_info.space, dst_info.space);
 
-        if (src_info.space == MemorySpace::Host &&
-            dst_info.space == MemorySpace::Device) {
-          transfer.kind = TransferKind::HostToDevice;
-        } else if (src_info.space == MemorySpace::Device &&
-                   dst_info.space == MemorySpace::Host) {
-          transfer.kind = TransferKind::DeviceToHost;
-        } else if (src_info.space == MemorySpace::Device &&
-                   dst_info.space == MemorySpace::Device) {
-          transfer.kind = TransferKind::DeviceToDevice;
-        } else if (src_info.space == MemorySpace::Host &&
-                   dst_info.space == MemorySpace::Host) {
-          transfer.kind = TransferKind::HostToHost;
+        if (transfer.kind == TransferKind::Unknown) {
+          const Function *callee = call->getCalledFunction();
+          const StringRef name = callee ? callee->getName() : StringRef{};
+          if (name.contains("ToSymbol")) {
+            transfer.kind = TransferKind::HostToDevice;
+            transfer.dst_space = MemorySpace::Constant;
+          } else if (name.contains("FromSymbol")) {
+            transfer.kind = TransferKind::DeviceToHost;
+            transfer.src_space = MemorySpace::Constant;
+          } else if (name.contains("Peer")) {
+            transfer.kind = TransferKind::DeviceToDevice;
+            transfer.src_space = MemorySpace::Device;
+            transfer.dst_space = MemorySpace::Device;
+          }
         }
 
         m_memory_transfers.push_back(transfer);
@@ -65,6 +121,7 @@ void CUDAAnalysis::analyzeMemoryTransfers() {
         fact.inst = &inst;
         fact.src = transfer.src;
         fact.dst = transfer.dst;
+        fact.stream = stream;
         if (call->arg_size() >= 3) {
           if (auto size = evaluateConstantInt(call->getArgOperand(2))) {
             fact.size = static_cast<uint64_t>(*size);
@@ -72,8 +129,16 @@ void CUDAAnalysis::analyzeMemoryTransfers() {
         }
         fact.kind = transfer.kind;
         fact.is_async = transfer.is_async;
+        fact.stream_known = stream != nullptr;
         m_abstract_state.memory_transfer_facts.push_back(fact);
         m_abstract_state.transfer_fact_by_class[fact.transfer_class_id] = fact;
+
+        if (transfer.kind == TransferKind::Unknown) {
+          recordModelGap(&inst, "CUDA memcpy-like operation has unknown "
+                                "transfer direction because memory spaces "
+                                "could not be classified precisely",
+                         0.45);
+        }
       }
 
       if (type == ThreadAPI::TD_CUDA_MEMSET && call->arg_size() >= 3) {
@@ -92,6 +157,7 @@ void CUDAAnalysis::analyzeMemoryTransfers() {
         transfer.is_async =
             call->getCalledFunction() &&
             call->getCalledFunction()->getName().contains("Async");
+        const Value *stream = getTransferStream(call);
 
         m_memory_transfers.push_back(transfer);
 
@@ -100,6 +166,7 @@ void CUDAAnalysis::analyzeMemoryTransfers() {
         fact.inst = &inst;
         fact.src = nullptr;
         fact.dst = transfer.dst;
+        fact.stream = stream;
         if (call->arg_size() >= 3) {
           if (auto size = evaluateConstantInt(call->getArgOperand(2))) {
             fact.size = static_cast<uint64_t>(*size);
@@ -107,6 +174,7 @@ void CUDAAnalysis::analyzeMemoryTransfers() {
         }
         fact.kind = transfer.kind;
         fact.is_async = transfer.is_async;
+        fact.stream_known = stream != nullptr;
         m_abstract_state.memory_transfer_facts.push_back(fact);
         m_abstract_state.transfer_fact_by_class[fact.transfer_class_id] = fact;
       }
@@ -142,6 +210,30 @@ void CUDAAnalysis::analyzeMemoryTransfers() {
         fact.is_async = false;
         m_abstract_state.memory_transfer_facts.push_back(fact);
         m_abstract_state.transfer_fact_by_class[fact.transfer_class_id] = fact;
+
+        if (callee && callee->getName().contains("Managed")) {
+          recordModelGap(&inst, "Managed allocation is modeled conservatively "
+                                "until unified-memory ownership is refined",
+                         0.55);
+        }
+      }
+
+      if (type == ThreadAPI::TD_CUDA_FREE && call->arg_size() >= 1) {
+        MemoryTransferInfo transfer;
+        transfer.inst = &inst;
+        transfer.src = call->getArgOperand(0);
+        transfer.src_space = CUDAMemoryModel::classify(transfer.src).space;
+        transfer.kind = TransferKind::DeviceToHost;
+        m_memory_transfers.push_back(transfer);
+
+        CUDAMemoryTransferFact fact;
+        fact.transfer_class_id = m_abstract_state.memory_transfer_facts.size();
+        fact.inst = &inst;
+        fact.src = transfer.src;
+        fact.kind = transfer.kind;
+        fact.is_async = false;
+        m_abstract_state.memory_transfer_facts.push_back(fact);
+        m_abstract_state.transfer_fact_by_class[fact.transfer_class_id] = fact;
       }
     }
   }
@@ -165,6 +257,9 @@ void CUDAAnalysis::analyzeUnifiedMemory() {
       const StringRef name = callee ? callee->getName() : StringRef{};
       info.is_prefetch = name.contains("Prefetch");
       info.is_managed = name.contains("Managed");
+      info.is_advise = name.contains("Advise");
+      info.is_attach = name.contains("AttachMem");
+      info.stream = getTransferStream(call);
 
       if (info.is_prefetch) {
         if (call->arg_size() >= 1) {
@@ -181,6 +276,26 @@ void CUDAAnalysis::analyzeUnifiedMemory() {
             info.device_id = static_cast<int>(*device);
           }
         }
+        if (call->arg_size() >= 4) {
+          info.stream = call->getArgOperand(3);
+        }
+      } else if (info.is_advise) {
+        if (call->arg_size() >= 1) {
+          info.ptr = call->getArgOperand(0);
+        }
+        if (call->arg_size() >= 2) {
+          if (auto size = evaluateConstantInt(call->getArgOperand(1));
+              size && *size > 0) {
+            info.size = static_cast<uint64_t>(*size);
+          }
+        }
+      } else if (info.is_attach) {
+        if (call->arg_size() >= 1) {
+          info.stream = call->getArgOperand(0);
+        }
+        if (call->arg_size() >= 2) {
+          info.ptr = call->getArgOperand(1);
+        }
       } else {
         if (call->arg_size() >= 1) {
           info.ptr = call->getArgOperand(0);
@@ -194,6 +309,14 @@ void CUDAAnalysis::analyzeUnifiedMemory() {
       }
 
       m_unified_memory.push_back(info);
+
+      if (info.ptr && CUDAMemoryModel::classify(info.ptr).space ==
+                          MemorySpace::Unknown &&
+          !info.is_managed) {
+        recordModelGap(&inst, "Unified-memory operation references a pointer "
+                              "with unknown memory-space classification",
+                       0.4);
+      }
     }
   }
 }
@@ -222,6 +345,36 @@ void CUDAAnalysis::analyzeConstantAccesses(KernelSummary &summary) {
 
     if (info.strided) {
       summary.has_uncoalesced_constant = true;
+    }
+  }
+}
+
+void CUDAAnalysis::analyzeTextureAndSurfaceAccesses(KernelSummary &summary) {
+  if (!summary.kernel) {
+    return;
+  }
+
+  for (const Instruction &inst : instructions(*summary.kernel)) {
+    const auto *call = dyn_cast<CallBase>(&inst);
+    if (!call) {
+      continue;
+    }
+    ThreadAPI::TD_TYPE type = m_thread_api->getType(call);
+    if (type == ThreadAPI::TD_CUDA_TEXTURE) {
+      TextureAccessInfo info;
+      info.inst = &inst;
+      info.texref = call->arg_size() > 0 ? call->getArgOperand(0) : nullptr;
+      info.dimensions = std::min<unsigned>(call->arg_size(), 3);
+      summary.has_texture_access = true;
+      summary.texture_accesses.push_back(info);
+    } else if (type == ThreadAPI::TD_CUDA_SURFACE) {
+      SurfaceAccessInfo info;
+      info.inst = &inst;
+      info.surfref = call->arg_size() > 0 ? call->getArgOperand(0) : nullptr;
+      info.dimensions = std::min<unsigned>(call->arg_size(), 3);
+      info.is_write = true;
+      summary.has_surface_access = true;
+      summary.surface_accesses.push_back(info);
     }
   }
 }

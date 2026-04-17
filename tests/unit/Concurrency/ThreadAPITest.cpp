@@ -195,6 +195,110 @@ TEST_F(ThreadAPITest, ClassifiesCUDAOperations) {
             ThreadAPI::TD_CUDA_ATOMIC);
 }
 
+TEST_F(ThreadAPITest, ClassifiesExtendedCUDAHostRuntimeOperations) {
+  const char *source = R"(
+    %stream_t = type opaque
+    %event_t = type opaque
+
+    declare i32 @cudaStreamCreate(%stream_t**)
+    declare i32 @cudaStreamSynchronize(%stream_t*)
+    declare i32 @cudaEventRecord(%event_t*, %stream_t*)
+    declare i32 @cudaEventSynchronize(%event_t*)
+    declare i32 @cudaMemcpyAsync(i8*, i8*, i64, i32, %stream_t*)
+    declare i32 @cudaFree(i8*)
+    declare i32 @cudaMemAdvise(i8*, i64, i32, i32)
+
+    define i32 @main(%stream_t** %s, %event_t* %e, i8* %dst, i8* %src) {
+    entry:
+      %stream = load %stream_t*, %stream_t** %s
+      %c0 = call i32 @cudaStreamCreate(%stream_t** %s)
+      %c1 = call i32 @cudaMemcpyAsync(i8* %dst, i8* %src, i64 64, i32 1, %stream_t* %stream)
+      %c2 = call i32 @cudaEventRecord(%event_t* %e, %stream_t* %stream)
+      %c3 = call i32 @cudaStreamSynchronize(%stream_t* %stream)
+      %c4 = call i32 @cudaEventSynchronize(%event_t* %e)
+      %c5 = call i32 @cudaFree(i8* %dst)
+      %c6 = call i32 @cudaMemAdvise(i8* %dst, i64 64, i32 0, i32 0)
+      ret i32 %c6
+    }
+  )";
+
+  auto module = parseModule(source);
+  ASSERT_NE(module, nullptr);
+
+  ThreadAPI::resetThreadAPI();
+  ThreadAPI *api = ThreadAPI::getThreadAPI();
+
+  EXPECT_EQ(api->getType(module->getFunction("cudaStreamCreate")),
+            ThreadAPI::TD_CUDA_STREAM);
+  EXPECT_EQ(api->getType(module->getFunction("cudaStreamSynchronize")),
+            ThreadAPI::TD_CUDA_STREAM);
+  EXPECT_EQ(api->getType(module->getFunction("cudaEventRecord")),
+            ThreadAPI::TD_CUDA_EVENT);
+  EXPECT_EQ(api->getType(module->getFunction("cudaEventSynchronize")),
+            ThreadAPI::TD_CUDA_EVENT);
+  EXPECT_EQ(api->getType(module->getFunction("cudaMemcpyAsync")),
+            ThreadAPI::TD_CUDA_MEMCPY);
+  EXPECT_EQ(api->getType(module->getFunction("cudaFree")),
+            ThreadAPI::TD_CUDA_FREE);
+  EXPECT_EQ(api->getType(module->getFunction("cudaMemAdvise")),
+            ThreadAPI::TD_CUDA_UNIFIED_MEMORY);
+}
+
+TEST_F(ThreadAPITest,
+       ClassifiesCUDAStreamWaitEventAndUnifiedMemoryAttachVariants) {
+  const char *source = R"(
+    %stream_t = type opaque
+    %event_t = type opaque
+
+    declare i32 @cudaStreamWaitEvent(%stream_t*, %event_t*, i32)
+    declare i32 @cudaStreamAttachMemAsync(%stream_t*, i8*, i64, i32)
+    declare i32 @cudaHostAlloc(i8**, i64, i32)
+
+    define i32 @main(%stream_t* %stream, %event_t* %event, i8** %host_slot,
+                     i8* %ptr) {
+    entry:
+      %wait = call i32 @cudaStreamWaitEvent(%stream_t* %stream,
+                                            %event_t* %event, i32 0)
+      %attach = call i32 @cudaStreamAttachMemAsync(%stream_t* %stream,
+                                                   i8* %ptr, i64 128, i32 1)
+      %host = call i32 @cudaHostAlloc(i8** %host_slot, i64 256, i32 0)
+      %sum = add i32 %wait, %attach
+      %sum2 = add i32 %sum, %host
+      ret i32 %sum2
+    }
+  )";
+
+  auto module = parseModule(source);
+  ASSERT_NE(module, nullptr);
+
+  ThreadAPI::resetThreadAPI();
+  ThreadAPI *api = ThreadAPI::getThreadAPI();
+
+  EXPECT_EQ(api->getType(module->getFunction("cudaStreamWaitEvent")),
+            ThreadAPI::TD_CUDA_STREAM);
+  EXPECT_EQ(api->getType(module->getFunction("cudaStreamAttachMemAsync")),
+            ThreadAPI::TD_CUDA_UNIFIED_MEMORY);
+  EXPECT_EQ(api->getType(module->getFunction("cudaHostAlloc")),
+            ThreadAPI::TD_CUDA_UNIFIED_MEMORY);
+}
+
+TEST_F(ThreadAPITest, CUDAStreamAndUnifiedMemoryLoweringStayExplicitlyModeled) {
+  ThreadAPI::resetThreadAPI();
+  ThreadAPI *api = ThreadAPI::getThreadAPI();
+
+  auto stream_info = api->getSemanticLoweringInfo(ThreadAPI::TD_CUDA_STREAM);
+  auto event_info = api->getSemanticLoweringInfo(ThreadAPI::TD_CUDA_EVENT);
+  auto unified_info =
+      api->getSemanticLoweringInfo(ThreadAPI::TD_CUDA_UNIFIED_MEMORY);
+
+  EXPECT_EQ(stream_info.kind, ThreadAPI::SemanticLoweringKind::Modeled);
+  EXPECT_EQ(event_info.kind, ThreadAPI::SemanticLoweringKind::Modeled);
+  EXPECT_EQ(unified_info.kind, ThreadAPI::SemanticLoweringKind::Modeled);
+  EXPECT_EQ(stream_info.reason, "modeled");
+  EXPECT_EQ(event_info.reason, "modeled");
+  EXPECT_EQ(unified_info.reason, "modeled");
+}
+
 TEST_F(ThreadAPITest, ResolvesKernelFunctionFromCUDAConfigLaunchPair) {
   const char *source = R"(
     declare void @__set_CUDAConfig(i32, i32)

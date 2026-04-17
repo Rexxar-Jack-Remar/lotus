@@ -9,6 +9,7 @@ void CUDAAbstractState::clear() {
   access_fact_by_class.clear();
   model_gap_by_class.clear();
   stream_automaton_by_class.clear();
+  event_automaton_by_class.clear();
   protocol_epoch_by_class.clear();
   kernel_facts.clear();
   memory_transfer_facts.clear();
@@ -16,6 +17,7 @@ void CUDAAbstractState::clear() {
   access_facts.clear();
   model_gaps.clear();
   stream_automata.clear();
+  event_automata.clear();
   barrier_epochs.clear();
   fence_epochs.clear();
   function_summaries.clear();
@@ -49,6 +51,11 @@ CUDAAbstractState::upsertStreamAutomaton(size_t stream_class_id) {
   return stream_automaton_by_class[stream_class_id];
 }
 
+CUDAEventAutomaton &
+CUDAAbstractState::upsertEventAutomaton(size_t event_class_id) {
+  return event_automaton_by_class[event_class_id];
+}
+
 CUDAProtocolEpoch &CUDAAbstractState::upsertProtocolEpoch(size_t epoch_id) {
   return protocol_epoch_by_class[epoch_id];
 }
@@ -75,6 +82,12 @@ CUDAAbstractState CUDAAbstractStateBuilder::build() const {
   }
   for (const auto &pair : m_access_facts.access_fact_by_class) {
     state.access_facts.push_back(pair.second);
+  }
+  for (const auto &pair : m_kernel_facts.stream_automaton_by_class) {
+    state.stream_automata.push_back(pair.second);
+  }
+  for (const auto &pair : m_kernel_facts.event_automaton_by_class) {
+    state.event_automata.push_back(pair.second);
   }
 
   return state;

@@ -63,4 +63,8 @@ const char *toString(CUDAEffectKind kind);
 /// Convert family to string
 const char *toString(CUDASemanticFamily family);
 
+bool isStreamOrderingOperation(ThreadAPI::TD_TYPE type);
+bool isEventOperation(ThreadAPI::TD_TYPE type);
+bool isMemoryTransferOperation(ThreadAPI::TD_TYPE type);
+
 } // namespace concurrency::cuda

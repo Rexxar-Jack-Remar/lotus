@@ -22,6 +22,9 @@ enum class TransferKind {
 
 enum class StreamState { Unknown, Created, Active, Synchronized, Destroyed };
 
+enum class EventState { Unknown, Created, Recorded, Waited, Synchronized,
+                        Destroyed };
+
 enum class ProtocolState {
   Unknown,
   Initial,
@@ -39,6 +42,13 @@ struct CUDAStreamTransition {
   bool is_ordering_boundary = false;
 };
 
+struct CUDAEventTransition {
+  const llvm::Instruction *inst = nullptr;
+  EventState from_state = EventState::Unknown;
+  EventState to_state = EventState::Unknown;
+  bool is_ordering_boundary = false;
+};
+
 struct CUDAKernelFact {
   size_t kernel_class_id = 0;
   const llvm::Function *kernel = nullptr;
@@ -53,9 +63,11 @@ struct CUDAMemoryTransferFact {
   const llvm::Instruction *inst = nullptr;
   const llvm::Value *src = nullptr;
   const llvm::Value *dst = nullptr;
+  const llvm::Value *stream = nullptr;
   uint64_t size = 0;
   TransferKind kind = TransferKind::Unknown;
   bool is_async = false;
+  bool stream_known = false;
 };
 
 struct CUDASynchronizationFact {
@@ -95,6 +107,18 @@ struct CUDAStreamAutomaton {
   bool is_exact = false;
 };
 
+struct CUDAEventAutomaton {
+  size_t event_class_id = 0;
+  const llvm::Value *event = nullptr;
+  EventState current_state = EventState::Unknown;
+  std::vector<CUDAEventTransition> transitions;
+  std::vector<const llvm::Instruction *> pending_waits;
+  const llvm::Value *recorded_stream = nullptr;
+  bool has_record = false;
+  bool has_wait = false;
+  bool is_exact = false;
+};
+
 struct CUDAProtocolEpoch {
   size_t epoch_id = 0;
   const llvm::Function *kernel = nullptr;
@@ -128,6 +152,7 @@ public:
   std::map<size_t, CUDAAccessFact> access_fact_by_class;
   std::map<size_t, CUDAModelGap> model_gap_by_class;
   std::map<size_t, CUDAStreamAutomaton> stream_automaton_by_class;
+  std::map<size_t, CUDAEventAutomaton> event_automaton_by_class;
   std::map<size_t, CUDAProtocolEpoch> protocol_epoch_by_class;
   std::map<const llvm::Function *, CUDAFunctionSummary> function_summaries;
 
@@ -137,6 +162,7 @@ public:
   std::vector<CUDAAccessFact> access_facts;
   std::vector<CUDAModelGap> model_gaps;
   std::vector<CUDAStreamAutomaton> stream_automata;
+  std::vector<CUDAEventAutomaton> event_automata;
   std::vector<CUDAProtocolEpoch> barrier_epochs;
   std::vector<CUDAProtocolEpoch> fence_epochs;
   std::vector<CUDAParticipantSet> participant_sets;
@@ -149,6 +175,7 @@ public:
   CUDAAccessFact &upsertAccessFact(size_t access_class_id);
   CUDAModelGap &upsertModelGap(size_t gap_class_id);
   CUDAStreamAutomaton &upsertStreamAutomaton(size_t stream_class_id);
+  CUDAEventAutomaton &upsertEventAutomaton(size_t event_class_id);
   CUDAProtocolEpoch &upsertProtocolEpoch(size_t epoch_id);
 
   const std::vector<CUDAKernelFact> &getKernelFacts() const {
@@ -166,6 +193,9 @@ public:
   const std::vector<CUDAModelGap> &getModelGaps() const { return model_gaps; }
   const std::vector<CUDAStreamAutomaton> &getStreamAutomata() const {
     return stream_automata;
+  }
+  const std::vector<CUDAEventAutomaton> &getEventAutomata() const {
+    return event_automata;
   }
   const std::vector<CUDAProtocolEpoch> &getBarrierEpochs() const {
     return barrier_epochs;

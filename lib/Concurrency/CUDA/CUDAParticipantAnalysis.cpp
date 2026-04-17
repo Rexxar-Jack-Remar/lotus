@@ -39,6 +39,13 @@ bool isSynchronizationInstruction(const llvm::Instruction *inst) {
          type == ThreadAPI::TD_CUDA_DEVICE_SYNC;
 }
 
+void fillInstructionMetadata(CUDAParticipantSet &result,
+                             const llvm::Function &kernel,
+                             const llvm::Instruction *inst) {
+  result.kernel = &kernel;
+  result.instruction = inst;
+}
+
 } // anonymous namespace
 
 CUDAParticipantAnalysis::CUDAParticipantAnalysis(const llvm::Function &kernel)
@@ -51,6 +58,7 @@ CUDAParticipantSet CUDAParticipantAnalysis::getActiveParticipants(
   }
 
   CUDAParticipantSet result;
+  fillInstructionMetadata(result, m_kernel, inst);
 
   if (isSynchronizationInstruction(inst)) {
     auto *call = llvm::dyn_cast<llvm::CallBase>(inst);
@@ -62,12 +70,16 @@ CUDAParticipantSet CUDAParticipantAnalysis::getActiveParticipants(
           auto type = api->getType(callee);
           if (type == ThreadAPI::TD_CUDA_WARP_BARRIER) {
             result.scopes.push_back(static_cast<int>(ParticipationScope::Warp));
+            result.min_lane = 0;
+            result.max_lane = 31;
             result.is_exact = true;
             return result;
           }
           if (type == ThreadAPI::TD_CUDA_BARRIER) {
             result.scopes.push_back(
                 static_cast<int>(ParticipationScope::Block));
+            result.min_lane = 0;
+            result.max_lane = 31;
             result.is_exact = true;
             return result;
           }
@@ -102,6 +114,7 @@ CUDAParticipantSet CUDAParticipantAnalysis::getActiveParticipants(
     result.scopes.push_back(static_cast<int>(ParticipationScope::Grid));
   }
 
+  result.is_symbolic = true;
   if (result.scopes.size() == 1 &&
       result.scopes[0] != static_cast<int>(ParticipationScope::Grid)) {
     result.is_exact = true;

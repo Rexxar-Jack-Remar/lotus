@@ -3,6 +3,7 @@
 #include "Concurrency/CUDA/CUDAFunctionSummary.h"
 #include "Concurrency/CUDA/CUDAKernelProtocolAnalysis.h"
 #include "Concurrency/CUDA/CUDAParticipantAnalysis.h"
+#include "Concurrency/CUDA/CUDAStreamAutomaton.h"
 
 #include <llvm/IR/InstIterator.h>
 
@@ -11,6 +12,11 @@ using namespace llvm;
 namespace concurrency::cuda {
 
 namespace detail {
+
+static bool isLegacyConfigureCall(const CallBase *call) {
+  const Function *callee = call ? call->getCalledFunction() : nullptr;
+  return callee && callee->getName().contains("cudaConfigureCall");
+}
 
 bool isNVVMKernel(const Function *function) {
   return function && (function->hasFnAttribute("nvvm.kernel") ||
@@ -21,9 +27,61 @@ bool isCUDAKernelCandidate(const Function *function) {
   return function && !function->isDeclaration();
 }
 
+const Value *getStreamOperand(const CallBase *call) {
+  if (!call || call->arg_empty()) {
+    return nullptr;
+  }
+  const Function *callee = call->getCalledFunction();
+  if (!callee) {
+    return nullptr;
+  }
+  StringRef name = callee->getName();
+  if (name.contains("cudaMemcpyAsync") || name.contains("cudaMemsetAsync")) {
+    return call->arg_size() >= 4 ? call->getArgOperand(call->arg_size() - 1)
+                                 : nullptr;
+  }
+  if (name.contains("cudaMemPrefetchAsync")) {
+    return call->arg_size() >= 4 ? call->getArgOperand(3) : nullptr;
+  }
+  if (name.contains("cudaStream")) {
+    return call->getArgOperand(0);
+  }
+  if (name.contains("cudaEventRecord")) {
+    return call->arg_size() >= 2 ? call->getArgOperand(1) : nullptr;
+  }
+  if (name.contains("cudaStreamWaitEvent")) {
+    return call->arg_size() >= 1 ? call->getArgOperand(0) : nullptr;
+  }
+  if (name.contains("cudaLaunchKernel")) {
+    return call->arg_size() >= 7 ? call->getArgOperand(6) : nullptr;
+  }
+  return nullptr;
+}
+
+const Value *getEventOperand(const CallBase *call) {
+  if (!call || call->arg_empty()) {
+    return nullptr;
+  }
+  const Function *callee = call->getCalledFunction();
+  if (!callee) {
+    return nullptr;
+  }
+  StringRef name = callee->getName();
+  if (name.contains("cudaEvent")) {
+    return call->getArgOperand(0);
+  }
+  if (name.contains("cudaStreamWaitEvent")) {
+    return call->arg_size() >= 2 ? call->getArgOperand(1) : nullptr;
+  }
+  return nullptr;
+}
+
 const Value *getPotentialStream(const CallBase *call) {
   if (!call || call->arg_empty()) {
     return nullptr;
+  }
+  if (const Value *stream = getStreamOperand(call)) {
+    return stream;
   }
   ThreadAPI *thread_api = ThreadAPI::getThreadAPI();
   if (thread_api &&
@@ -38,6 +96,8 @@ LaunchOrderingSource getOrderingSource(ThreadAPI::TD_TYPE type) {
   switch (type) {
   case ThreadAPI::TD_CUDA_DEVICE_SYNC:
     return LaunchOrderingSource::DeviceSynchronize;
+  case ThreadAPI::TD_CUDA_STREAM:
+    return LaunchOrderingSource::StreamSynchronize;
   case ThreadAPI::TD_CUDA_MEMORY_BARRIER:
     return LaunchOrderingSource::MemoryBarrier;
   default:
@@ -54,6 +114,9 @@ SynchronizationScope getSyncScope(ThreadAPI::TD_TYPE type) {
   case ThreadAPI::TD_CUDA_MEMORY_BARRIER:
   case ThreadAPI::TD_CUDA_DEVICE_SYNC:
     return SynchronizationScope::Device;
+  case ThreadAPI::TD_CUDA_STREAM:
+  case ThreadAPI::TD_CUDA_EVENT:
+    return SynchronizationScope::Device;
   default:
     return SynchronizationScope::None;
   }
@@ -68,6 +131,9 @@ SynchronizationPrimitive getSynchronizationPrimitive(ThreadAPI::TD_TYPE type,
     return SynchronizationPrimitive::BlockBarrier;
   case ThreadAPI::TD_CUDA_DEVICE_SYNC:
     return SynchronizationPrimitive::DeviceSynchronize;
+  case ThreadAPI::TD_CUDA_STREAM:
+  case ThreadAPI::TD_CUDA_EVENT:
+    return SynchronizationPrimitive::StreamProgramOrder;
   case ThreadAPI::TD_CUDA_MEMORY_BARRIER:
     if (const auto *call = dyn_cast_or_null<CallBase>(inst)) {
       if (const Function *callee = call->getCalledFunction()) {
@@ -143,6 +209,7 @@ void CUDAAnalysis::runAnalysis() {
   m_unified_memory.clear();
   m_abstract_state.clear();
   size_t launch_sequence = 0;
+  CUDASteamAutomatonBuilder automaton_builder(m_abstract_state);
 
   for (Function &function : m_module) {
     if (function.isDeclaration()) {
@@ -171,15 +238,89 @@ void CUDAAnalysis::runAnalysis() {
         stream_state.source = detail::getOrderingSource(type);
         stream_state.primitive =
             detail::getSynchronizationPrimitive(type, &inst);
+        if (type == ThreadAPI::TD_CUDA_DEVICE_SYNC) {
+          automaton_builder.addDeviceSync(&inst);
+        } else if (stream) {
+          automaton_builder.addStreamSync(&inst, stream);
+        }
         continue;
+      }
+
+      if (type == ThreadAPI::TD_CUDA_STREAM) {
+        const Value *stream = detail::getStreamOperand(call);
+        const Value *event = detail::getEventOperand(call);
+        const Function *called_fn = call->getCalledFunction();
+        StringRef name = called_fn ? called_fn->getName() : StringRef{};
+        if (name.contains("Create")) {
+          automaton_builder.addStream(stream);
+        } else if (name.contains("Destroy")) {
+          automaton_builder.addStreamDestroy(&inst, stream);
+        } else if (name.contains("Synchronize")) {
+          auto &stream_state = stream ? ordering_state.stream_states[stream]
+                                      : ordering_state.unknown_stream;
+          stream_state.ordered_since_last_launch = true;
+          stream_state.scope = SynchronizationScope::Device;
+          stream_state.source = LaunchOrderingSource::StreamSynchronize;
+          stream_state.primitive = SynchronizationPrimitive::StreamProgramOrder;
+          automaton_builder.addStreamSync(&inst, stream);
+        } else if (name.contains("WaitEvent")) {
+          auto &stream_state = stream ? ordering_state.stream_states[stream]
+                                      : ordering_state.unknown_stream;
+          stream_state.ordered_since_last_launch = true;
+          stream_state.scope = SynchronizationScope::Device;
+          stream_state.source = LaunchOrderingSource::StreamSynchronize;
+          stream_state.primitive = SynchronizationPrimitive::StreamProgramOrder;
+          automaton_builder.addEventWait(&inst, event, stream);
+        }
+        continue;
+      }
+
+      if (type == ThreadAPI::TD_CUDA_EVENT) {
+        const Value *event = detail::getEventOperand(call);
+        const Value *stream = detail::getStreamOperand(call);
+        const Function *called_fn = call->getCalledFunction();
+        StringRef name = called_fn ? called_fn->getName() : StringRef{};
+        if (name.contains("Record")) {
+          automaton_builder.addEvent(&inst, event, stream);
+        } else if (name.contains("Wait")) {
+          auto &stream_state = stream ? ordering_state.stream_states[stream]
+                                      : ordering_state.unknown_stream;
+          stream_state.ordered_since_last_launch = true;
+          stream_state.scope = SynchronizationScope::Device;
+          stream_state.source = LaunchOrderingSource::StreamSynchronize;
+          stream_state.primitive = SynchronizationPrimitive::StreamProgramOrder;
+          automaton_builder.addEventWait(&inst, event, stream);
+        } else if (name.contains("Synchronize")) {
+          automaton_builder.addEventSync(&inst, event);
+          ordering_state.device_synchronized = true;
+        }
+        continue;
+      }
+
+      if (type == ThreadAPI::TD_CUDA_MEMCPY || type == ThreadAPI::TD_CUDA_MEMSET ||
+          type == ThreadAPI::TD_CUDA_UNIFIED_MEMORY) {
+        const Function *called_fn = call->getCalledFunction();
+        if (called_fn && called_fn->getName().contains("Async")) {
+          if (const Value *stream = detail::getStreamOperand(call)) {
+            automaton_builder.addStream(stream);
+            automaton_builder.addEvent(&inst, nullptr, stream);
+          }
+        }
       }
 
       if (type != ThreadAPI::TD_CUDA_KERNEL_LAUNCH) {
         continue;
       }
 
+      if (detail::isLegacyConfigureCall(call)) {
+        continue;
+      }
+
       const Function *kernel = m_thread_api->getCUDALaunchedKernel(&inst);
       if (!detail::isCUDAKernelCandidate(kernel)) {
+        recordModelGap(&inst, "CUDA launch site could not be matched to a "
+                              "concrete kernel function",
+                       0.35);
         continue;
       }
 
@@ -227,6 +368,12 @@ void CUDAAnalysis::runAnalysis() {
       if (!m_kernel_index.count(launch.kernel)) {
         analyzeKernel(launch.kernel, &m_launches.back());
       }
+      if (launch.dimensions.hasSymbolicGrid() || launch.dimensions.hasSymbolicBlock()) {
+        recordModelGap(&inst, "CUDA launch dimensions remain symbolic, "
+                              "reducing precision for race and performance "
+                              "diagnostics",
+                       0.5);
+      }
       stream_state.ordered_since_last_launch = false;
       stream_state.scope = SynchronizationScope::None;
       stream_state.source = LaunchOrderingSource::None;
@@ -235,11 +382,17 @@ void CUDAAnalysis::runAnalysis() {
     }
   }
 
+  automaton_builder.finalize();
+
   for (Function &function : m_module) {
     if (function.isDeclaration() || !detail::isNVVMKernel(&function) ||
         m_kernel_index.count(&function)) {
       continue;
     }
+    recordModelGap(&function, "Kernel analyzed without an explicit host-side "
+                              "launch context; launch dimensions defaulted "
+                              "conservatively",
+                   0.55);
     analyzeKernel(&function, nullptr);
   }
 

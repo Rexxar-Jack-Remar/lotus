@@ -73,6 +73,10 @@ struct AffineAccessPattern {
   bool non_affine = false;
   ParticipationScope participation = ParticipationScope::Unknown;
 
+  bool isZero() const;
+  bool isDivisibleBy(int64_t divisor) const;
+  void divideBy(int64_t divisor);
+
   // Derive linear thread ID from multidimensional coordinates
   // Assumes row-major: linear_id = z * (blockDim.x * blockDim.y) + y *
   // blockDim.x + x
@@ -84,6 +88,17 @@ struct AffineAccessPattern {
                           int64_t &x, int64_t &y, int64_t &z);
 };
 
+struct CanonicalAffineAccessPattern {
+  int64_t constant = 0;
+  int64_t linear_thread = 0;
+  int64_t linear_block = 0;
+  int64_t lane = 0;
+  int64_t thread_stride_bytes = 0;
+  int64_t block_stride_bytes = 0;
+  bool valid = false;
+  bool exact = false;
+};
+
 class CUDASymbolicModel {
 public:
   static BuiltinKind classifyBuiltin(const llvm::Value *value);
@@ -93,6 +108,10 @@ public:
   static std::optional<int64_t> evaluateConstantInt(const llvm::Value *value);
   static AffineAccessPattern
   extractAffineAccessPattern(const llvm::Value *value);
+  static CanonicalAffineAccessPattern normalizeAffineAccessPattern(
+      const AffineAccessPattern &pattern,
+      const std::array<int64_t, 3> &block_dims = {1, 1, 1},
+      const std::array<int64_t, 3> &grid_dims = {1, 1, 1});
   static SymbolicDimension classifyDimension(const llvm::Value *value);
   static UniformityClass classifyUniformity(const llvm::Value *value);
   static ParticipationScope classifyParticipation(const llvm::Value *value);

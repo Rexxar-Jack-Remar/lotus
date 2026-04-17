@@ -16,6 +16,10 @@ struct CUDAFunctionSummary {
   std::vector<const llvm::CallBase *> memory_transfers;
   std::vector<const llvm::CallBase *> synchronizations;
   std::vector<const llvm::CallBase *> atomics;
+  std::vector<const llvm::CallBase *> stream_ops;
+  std::vector<const llvm::CallBase *> event_ops;
+  std::vector<const llvm::CallBase *> texture_ops;
+  std::vector<const llvm::CallBase *> surface_ops;
   bool is_device_function = false;
   bool is_host_wrapper = false;
   bool recursive = false;

@@ -14,11 +14,17 @@ public:
 
   void addStream(const llvm::Value *stream);
   void addEvent(const llvm::Instruction *record_inst,
+                const llvm::Value *event,
                 const llvm::Value *stream);
   void addEventWait(const llvm::Instruction *wait_inst,
+                    const llvm::Value *event,
+                    const llvm::Value *stream);
+  void addEventSync(const llvm::Instruction *sync_inst,
                     const llvm::Value *event);
   void addStreamSync(const llvm::Instruction *sync_inst,
                      const llvm::Value *stream);
+  void addStreamDestroy(const llvm::Instruction *destroy_inst,
+                        const llvm::Value *stream);
   void addDeviceSync(const llvm::Instruction *sync_inst);
 
   void finalize();
@@ -26,11 +32,18 @@ public:
   const std::map<size_t, CUDAStreamAutomaton> &getAutomata() const {
     return m_stream_automata;
   }
+  const std::map<size_t, CUDAEventAutomaton> &getEventAutomata() const {
+    return m_event_automata;
+  }
 
 private:
+  void addEventObject(const llvm::Value *event);
+
   CUDAAbstractState &m_state;
   std::map<size_t, CUDAStreamAutomaton> m_stream_automata;
+  std::map<size_t, CUDAEventAutomaton> m_event_automata;
   std::set<const llvm::Value *> m_seen_streams;
+  std::set<const llvm::Value *> m_seen_events;
 };
 
 } // namespace concurrency::cuda

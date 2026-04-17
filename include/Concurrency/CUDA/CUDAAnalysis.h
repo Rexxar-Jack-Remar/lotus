@@ -99,6 +99,7 @@ struct AccessInfo {
   bool is_write = false;
   bool is_atomic = false;
   bool is_volatile = false;
+  llvm::AtomicOrdering atomic_ordering = llvm::AtomicOrdering::NotAtomic;
   bool has_ambiguous_base = false;
   bool depends_on_thread_idx = false;
   bool depends_on_block_idx = false;
@@ -171,9 +172,12 @@ struct ConstantAccessInfo {
 struct UnifiedMemoryInfo {
   const llvm::Instruction *inst = nullptr;
   const llvm::Value *ptr = nullptr;
+  const llvm::Value *stream = nullptr;
   uint64_t size = 0;
   bool is_managed = false;
   bool is_prefetch = false;
+  bool is_advise = false;
+  bool is_attach = false;
   int device_id = -1;
 };
 
@@ -230,6 +234,7 @@ struct SynchronizationRecord {
   SynchronizationScope scope = SynchronizationScope::None;
   bool orders_memory = false;
   bool execution_rendezvous = false;
+  bool orders_atomics = false;
   ParticipationScope participating_threads = ParticipationScope::Unknown;
   ParticipationKind participation = ParticipationKind::Partial;
   llvm::SmallVector<const llvm::BasicBlock *, 8> preceding_blocks;
@@ -339,6 +344,9 @@ public:
   const std::vector<CUDAStreamAutomaton> &getStreamAutomata() const {
     return m_abstract_state.getStreamAutomata();
   }
+  const std::vector<CUDAEventAutomaton> &getEventAutomata() const {
+    return m_abstract_state.getEventAutomata();
+  }
   const std::vector<CUDAProtocolEpoch> &getBarrierEpochs() const {
     return m_abstract_state.getBarrierEpochs();
   }
@@ -393,6 +401,11 @@ private:
   void analyzeMemoryTransfers();
   void analyzeUnifiedMemory();
   void analyzeConstantAccesses(KernelSummary &summary);
+  void analyzeTextureAndSurfaceAccesses(KernelSummary &summary);
+  void recordModelGap(const llvm::Instruction *inst, llvm::StringRef message,
+                      double confidence = 0.5);
+  void recordModelGap(const llvm::Function *function, llvm::StringRef message,
+                      double confidence = 0.5);
 
   static const llvm::Value *getMemoryOperand(const llvm::Instruction *inst);
   static const llvm::Value *getCanonicalBase(const llvm::Value *value) {

@@ -25,8 +25,14 @@ constexpr CUDASemanticDescriptor kDescriptors[] = {
      CUDASemanticFamily::MemoryTransfer, -1, -1, 2, 0, -1},
     {TD::TD_CUDA_MALLOC, CUDAEffectKind::Malloc,
      CUDASemanticFamily::MemoryManagement, -1, -1, 1, 0, -1},
+    {TD::TD_CUDA_FREE, CUDAEffectKind::Free, CUDASemanticFamily::MemoryManagement,
+     -1, -1, -1, 0, -1},
     {TD::TD_CUDA_UNIFIED_MEMORY, CUDAEffectKind::UnifiedMalloc,
      CUDASemanticFamily::MemoryManagement, -1, -1, -1, -1, -1},
+    {TD::TD_CUDA_STREAM, CUDAEffectKind::StreamSync,
+     CUDASemanticFamily::StreamOperation, 0, -1, -1, -1, -1},
+    {TD::TD_CUDA_EVENT, CUDAEffectKind::EventRecord,
+     CUDASemanticFamily::EventOperation, 1, -1, -1, -1, -1},
 };
 
 } // anonymous namespace
@@ -108,6 +114,24 @@ const char *toString(CUDASemanticFamily family) {
     return "EventOperation";
   }
   return "Unknown";
+}
+
+bool isStreamOrderingOperation(ThreadAPI::TD_TYPE type) {
+  return type == ThreadAPI::TD_CUDA_STREAM ||
+         type == ThreadAPI::TD_CUDA_DEVICE_SYNC ||
+         type == ThreadAPI::TD_CUDA_MEMORY_BARRIER;
+}
+
+bool isEventOperation(ThreadAPI::TD_TYPE type) {
+  return type == ThreadAPI::TD_CUDA_EVENT;
+}
+
+bool isMemoryTransferOperation(ThreadAPI::TD_TYPE type) {
+  return type == ThreadAPI::TD_CUDA_MEMCPY ||
+         type == ThreadAPI::TD_CUDA_MEMSET ||
+         type == ThreadAPI::TD_CUDA_MALLOC ||
+         type == ThreadAPI::TD_CUDA_FREE ||
+         type == ThreadAPI::TD_CUDA_UNIFIED_MEMORY;
 }
 
 } // namespace concurrency::cuda

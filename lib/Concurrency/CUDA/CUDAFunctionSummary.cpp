@@ -2,6 +2,8 @@
 
 #include "Concurrency/Utils/ThreadAPI.h"
 
+#include <llvm/ADT/STLExtras.h>
+
 namespace concurrency::cuda {
 
 namespace {
@@ -46,6 +48,9 @@ void CUDAFunctionSummaryAnalysis::runAnalysis() {
             break;
           case ThreadAPI::TD_CUDA_MEMCPY:
           case ThreadAPI::TD_CUDA_MEMSET:
+          case ThreadAPI::TD_CUDA_MALLOC:
+          case ThreadAPI::TD_CUDA_FREE:
+          case ThreadAPI::TD_CUDA_UNIFIED_MEMORY:
             summary.memory_transfers.push_back(call);
             break;
           case ThreadAPI::TD_CUDA_DEVICE_SYNC:
@@ -56,6 +61,18 @@ void CUDAFunctionSummaryAnalysis::runAnalysis() {
             break;
           case ThreadAPI::TD_CUDA_ATOMIC:
             summary.atomics.push_back(call);
+            break;
+          case ThreadAPI::TD_CUDA_STREAM:
+            summary.stream_ops.push_back(call);
+            break;
+          case ThreadAPI::TD_CUDA_EVENT:
+            summary.event_ops.push_back(call);
+            break;
+          case ThreadAPI::TD_CUDA_TEXTURE:
+            summary.texture_ops.push_back(call);
+            break;
+          case ThreadAPI::TD_CUDA_SURFACE:
+            summary.surface_ops.push_back(call);
             break;
           default:
             break;
@@ -94,6 +111,10 @@ void CUDAFunctionSummaryAnalysis::runAnalysis() {
       size_t orig_transfer_count = summary.memory_transfers.size();
       size_t orig_sync_count = summary.synchronizations.size();
       size_t orig_atomic_count = summary.atomics.size();
+      size_t orig_stream_count = summary.stream_ops.size();
+      size_t orig_event_count = summary.event_ops.size();
+      size_t orig_texture_count = summary.texture_ops.size();
+      size_t orig_surface_count = summary.surface_ops.size();
 
       for (const llvm::Function *callee : summary.callees) {
         auto it = m_summaries.find(callee);
@@ -154,6 +175,30 @@ void CUDAFunctionSummaryAnalysis::runAnalysis() {
           }
         }
 
+        for (const auto *call : callee_summary.stream_ops) {
+          if (!llvm::is_contained(summary.stream_ops, call)) {
+            summary.stream_ops.push_back(call);
+          }
+        }
+
+        for (const auto *call : callee_summary.event_ops) {
+          if (!llvm::is_contained(summary.event_ops, call)) {
+            summary.event_ops.push_back(call);
+          }
+        }
+
+        for (const auto *call : callee_summary.texture_ops) {
+          if (!llvm::is_contained(summary.texture_ops, call)) {
+            summary.texture_ops.push_back(call);
+          }
+        }
+
+        for (const auto *call : callee_summary.surface_ops) {
+          if (!llvm::is_contained(summary.surface_ops, call)) {
+            summary.surface_ops.push_back(call);
+          }
+        }
+
         if (callee_summary.recursive) {
           summary.recursive = true;
         }
@@ -162,7 +207,11 @@ void CUDAFunctionSummaryAnalysis::runAnalysis() {
       if (summary.kernel_launches.size() != orig_kernel_count ||
           summary.memory_transfers.size() != orig_transfer_count ||
           summary.synchronizations.size() != orig_sync_count ||
-          summary.atomics.size() != orig_atomic_count) {
+          summary.atomics.size() != orig_atomic_count ||
+          summary.stream_ops.size() != orig_stream_count ||
+          summary.event_ops.size() != orig_event_count ||
+          summary.texture_ops.size() != orig_texture_count ||
+          summary.surface_ops.size() != orig_surface_count) {
         changed = true;
       }
     }
