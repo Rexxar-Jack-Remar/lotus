@@ -1,0 +1,9 @@
+PyYaml==6.0.2
+smac==2.2.0
+ConfigSpace==1.2.0
+asgi_correlation_id==4.3.4
+numpy==1.26.4
+scikit-learn==1.5.2
+matplotlib
+pandas
+seaborn

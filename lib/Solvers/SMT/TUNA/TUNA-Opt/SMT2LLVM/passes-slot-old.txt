@@ -1,0 +1,10 @@
+instcombine
+aggressive-instcombine
+reassociate
+sccp
+dce
+adce
+instsimplify
+gvn
+mergeicmps
+memprof

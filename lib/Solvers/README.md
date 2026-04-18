@@ -12,6 +12,7 @@ SMT solver wrappers and utilities:
 - **SMTSampler** – SMT model sampling
 - **STAUB** – STAUB solver integration
 - **SymAbs** – SMT formula abstraction (bit-vector to linear integer)
+- **TUNA** – Accelerates SMT solving via SMT↔LLVM optimization, with GA-based LLVM pass selection
 
 ## References
 

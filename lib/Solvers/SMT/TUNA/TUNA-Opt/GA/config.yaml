@@ -1,0 +1,16 @@
+# slot二进制存放目录（需要包含smt2llvm/llvm2smt）
+slot_dir: /home/ljc/NEW/COS-for-SMT/code/LJC/build/
+# llvm二进制目录（目录下有opt可执行文件）
+llvm_dir: /home/ljc/NEW/llvm-project/build/bin
+# SMTLIB数据集目录路径
+#dataset_dir: /home/ljc/test/QF_BV
+dataset_dir: /data/ljc/SMTCOMP/QF_BV
+# SMT-solver 路径
+# /home/ljc/NEW/cvc5-Linux-x86_64-static-gpl/bin/cvc5
+# /home/ljc/NEW/boolector/build/bin/boolector
+# /usr/bin/z3
+smt_solver_path: /home/ljc/NEW/cvc5-Linux-x86_64-static-gpl/bin/cvc5
+# 导出CSV路径
+output_csv_path: /home/ljc/slot-shiyan/QF_BV_RQ1/RQ1.csv
+# SMAC
+smac_log_output_directory: /home/ljc/SMAC
