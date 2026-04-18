@@ -275,6 +275,8 @@ struct VolatileMissingInfo {
 struct KernelSummary {
   const llvm::Function *kernel = nullptr;
   LaunchDimensions dimensions;
+  bool has_symbolic_grid = false;
+  bool has_symbolic_block = false;
   bool has_warp_divergence = false;
   bool has_bank_conflict = false;
   bool has_uncoalesced_access = false;
@@ -387,7 +389,42 @@ private:
   std::vector<InterKernelRaceInfo> m_inter_kernel_races;
   std::vector<MemoryTransferInfo> m_memory_transfers;
   std::vector<UnifiedMemoryInfo> m_unified_memory;
-  std::unordered_map<const llvm::Function *, size_t> m_kernel_index;
+
+  struct LaunchContextKey {
+    const llvm::Function *kernel = nullptr;
+    LaunchDimensions dimensions;
+    bool operator==(const LaunchContextKey &other) const {
+      if (kernel != other.kernel) {
+        return false;
+      }
+      for (int i = 0; i < 3; ++i) {
+        if (dimensions.grid[i].kind != other.dimensions.grid[i].kind ||
+            dimensions.grid[i].constant != other.dimensions.grid[i].constant) {
+          return false;
+        }
+        if (dimensions.block[i].kind != other.dimensions.block[i].kind ||
+            dimensions.block[i].constant != other.dimensions.block[i].constant) {
+          return false;
+        }
+      }
+      return true;
+    }
+  };
+
+  struct LaunchContextKeyHash {
+    size_t operator()(const LaunchContextKey &key) const {
+      size_t h = reinterpret_cast<size_t>(key.kernel);
+      for (int i = 0; i < 3; ++i) {
+        h ^= std::hash<int>{}(static_cast<int>(key.dimensions.grid[i].kind));
+        h ^= std::hash<int64_t>{}(key.dimensions.grid[i].constant);
+        h ^= std::hash<int>{}(static_cast<int>(key.dimensions.block[i].kind));
+        h ^= std::hash<int64_t>{}(key.dimensions.block[i].constant);
+      }
+      return h;
+    }
+  };
+
+  std::unordered_map<LaunchContextKey, size_t, LaunchContextKeyHash> m_launch_context_index;
   CUDAAbstractState m_abstract_state;
 
   void analyzeKernel(const llvm::Function *kernel,

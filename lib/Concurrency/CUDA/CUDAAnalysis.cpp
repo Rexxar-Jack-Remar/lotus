@@ -818,16 +818,18 @@ void CUDAAnalysis::analyzeKernel(const Function *kernel,
   if (launch) {
     summary.dimensions = launch->dimensions;
   }
+  bool grid_known = true;
+  bool block_known = true;
   for (unsigned i = 0; i < 3; ++i) {
     if (summary.dimensions.grid[i].kind == SymbolicValueKind::Unknown) {
-      summary.dimensions.grid[i].kind = SymbolicValueKind::Constant;
-      summary.dimensions.grid[i].constant = 1;
+      grid_known = false;
     }
     if (summary.dimensions.block[i].kind == SymbolicValueKind::Unknown) {
-      summary.dimensions.block[i].kind = SymbolicValueKind::Constant;
-      summary.dimensions.block[i].constant = 1;
+      block_known = false;
     }
   }
+  summary.has_symbolic_grid = !grid_known;
+  summary.has_symbolic_block = !block_known;
 
   for (const Instruction &inst : instructions(*kernel)) {
     if (const auto *load = dyn_cast<LoadInst>(&inst)) {
@@ -856,7 +858,6 @@ void CUDAAnalysis::analyzeKernel(const Function *kernel,
   analyzeConstantAccesses(summary);
   analyzeTextureAndSurfaceAccesses(summary);
 
-  m_kernel_index[kernel] = m_kernel_summaries.size();
   m_kernel_summaries.push_back(std::move(summary));
 }
 
@@ -1194,17 +1195,6 @@ void CUDAAnalysis::analyzeRaces(KernelSummary &summary) {
       if (!(lhs.is_write || rhs.is_write)) {
         continue;
       }
-      bool different_spaces = lhs.space != rhs.space;
-      bool global_device_cross = (lhs.space == MemorySpace::Global ||
-                                  lhs.space == MemorySpace::Device) &&
-                                 (rhs.space == MemorySpace::Global ||
-                                  rhs.space == MemorySpace::Device);
-      bool might_be_managed =
-          mightBeManagedMemory(lhs) || mightBeManagedMemory(rhs);
-      if (different_spaces && !global_device_cross && !might_be_managed) {
-        continue;
-      }
-
       const detail::AliasQueryResult alias =
           detail::queryAlias(lhs, rhs, m_alias_analysis);
       if (alias.relation == AliasResult::NoAlias) {
@@ -1224,21 +1214,31 @@ void CUDAAnalysis::analyzeRaces(KernelSummary &summary) {
         if (isUniformControlled(lhs, rhs, summary) &&
             lhs.participation < ParticipationScope::Warp &&
             rhs.participation < ParticipationScope::Warp) {
+        }
+      }
+
+      if (isGlobalRaceRelevant(lhs) && isGlobalRaceRelevant(rhs)) {
+        const bool syntactic_block_dep = lhs.depends_on_block_idx || rhs.depends_on_block_idx;
+        const bool known_multi_block = summary.dimensions.grid[0].kind == SymbolicValueKind::Constant && summary.dimensions.grid[0].constant > 1;
+        const bool can_cross = summary.has_symbolic_grid || known_multi_block;
+        if (can_cross && !syntactic_block_dep) {
+          summary.has_global_race = true;
+          RaceInfo race;
+          race.first = lhs.inst;
+          race.second = rhs.inst;
+          race.base = lhs.base;
+          race.space = MemorySpace::Global;
+          race.same_block_only = false;
+          race.cross_block = true;
+          race.symbolic = summary.has_symbolic_grid;
+          race.kind = RaceKind::DataRace;
+          race.scope = SynchronizationScope::Device;
+          race.confidence = 0.75;
+          race.exact = known_multi_block && !summary.has_symbolic_grid;
+          race.ordering_reason = "multi-block constant address";
+          summary.global_races.push_back(race);
           continue;
         }
-      } else if (isUniformControlled(lhs, rhs, summary)) {
-        continue;
-      }
-
-      if (isAtomicAccessOrdered(lhs, rhs, summary)) {
-        continue;
-      }
-
-      const SynchronizationScope required_scope =
-          requiredOrderingScope(lhs, rhs);
-      if (isOrderedBySynchronization(lhs, rhs, summary, required_scope,
-                                     control)) {
-        continue;
       }
 
       if (isSharedRaceRelevant(lhs) && isSharedRaceRelevant(rhs)) {
@@ -1277,17 +1277,39 @@ void CUDAAnalysis::analyzeRaces(KernelSummary &summary) {
                                           : SynchronizationScope::None;
           race.alias_precision = decision.precision;
           race.alias_source = decision.source;
-          race.missing_ordering = required_scope == SynchronizationScope::Block
-                                      ? SynchronizationPrimitive::BlockBarrier
-                                      : SynchronizationPrimitive::DeviceFence;
+          race.missing_ordering = SynchronizationPrimitive::DeviceFence;
           race.confidence = decision.confidence;
           race.exact =
               !race.symbolic && decision.precision == AliasPrecision::Exact;
           summary.shared_races.push_back(std::move(race));
         }
       } else if (isGlobalRaceRelevant(lhs) && isGlobalRaceRelevant(rhs)) {
-        const bool cross_block =
+        const bool syntactic_block_dep =
             lhs.depends_on_block_idx || rhs.depends_on_block_idx;
+        const bool known_multi_block =
+            summary.dimensions.grid[0].kind == SymbolicValueKind::Constant &&
+            summary.dimensions.grid[0].constant > 1;
+        const bool can_have_multiple_blocks =
+            summary.has_symbolic_grid || known_multi_block;
+        const bool cross_block = syntactic_block_dep || can_have_multiple_blocks;
+        if (cross_block && !syntactic_block_dep && can_have_multiple_blocks) {
+          summary.has_global_race = true;
+          RaceInfo race;
+          race.first = lhs.inst;
+          race.second = rhs.inst;
+          race.base = lhs.base;
+          race.space = MemorySpace::Global;
+          race.same_block_only = false;
+          race.cross_block = true;
+          race.symbolic = summary.has_symbolic_grid;
+          race.kind = RaceKind::DataRace;
+          race.scope = SynchronizationScope::Device;
+          race.confidence = 0.7;
+          race.exact = false;
+          race.ordering_reason = "multiple blocks may execute, constant address";
+          summary.global_races.push_back(std::move(race));
+          continue;
+        }
         RaceDecision decision = evaluateRaceDecision(
             lhs, rhs, summary.dimensions, m_device_config, cross_block, alias);
         if (decision.aliases) {

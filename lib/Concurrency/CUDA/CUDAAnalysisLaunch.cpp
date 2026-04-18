@@ -41,6 +41,17 @@ bool isCUDAKernelCandidate(const Function *function) {
   return function && !function->isDeclaration();
 }
 
+const Function *getKernelFromRuntimeLaunch(const CallBase *call) {
+  if (!call) {
+    return nullptr;
+  }
+  const auto *callee = dyn_cast<Function>(call->getArgOperand(0)->stripPointerCasts());
+  if (callee && !callee->isDeclaration()) {
+    return callee;
+  }
+  return nullptr;
+}
+
 const Value *getStreamOperand(const CallBase *call) {
   if (!call || call->arg_empty()) {
     return nullptr;
@@ -329,7 +340,7 @@ CUDAAnalysis::CUDAAnalysis(Module &module, DeviceConfig config)
 void CUDAAnalysis::runAnalysis() {
   m_launches.clear();
   m_kernel_summaries.clear();
-  m_kernel_index.clear();
+  m_launch_context_index.clear();
   m_inter_kernel_races.clear();
   m_memory_transfers.clear();
   m_unified_memory.clear();
@@ -520,7 +531,13 @@ void CUDAAnalysis::runAnalysis() {
         continue;
       }
 
-      const Function *kernel = m_thread_api->getCUDALaunchedKernel(&inst);
+      const Function *kernel = nullptr;
+      if (const auto *runtime_call = dyn_cast<CallBase>(&inst)) {
+        kernel = detail::getKernelFromRuntimeLaunch(runtime_call);
+      }
+      if (!kernel) {
+        kernel = m_thread_api->getCUDALaunchedKernel(&inst);
+      }
       if (!detail::isCUDAKernelCandidate(kernel)) {
         recordModelGap(&inst, "CUDA launch site could not be matched to a "
                               "concrete kernel function",
@@ -595,8 +612,12 @@ void CUDAAnalysis::runAnalysis() {
       }
 
       m_launches.push_back(launch);
-      if (!m_kernel_index.count(launch.kernel)) {
+      LaunchContextKey key;
+      key.kernel = launch.kernel;
+      key.dimensions = launch.dimensions;
+      if (!m_launch_context_index.count(key)) {
         analyzeKernel(launch.kernel, &m_launches.back());
+        m_launch_context_index[key] = m_kernel_summaries.size() - 1;
       }
       if (launch.dimensions.hasSymbolicGrid() || launch.dimensions.hasSymbolicBlock()) {
         recordModelGap(&inst, "CUDA launch dimensions remain symbolic, "
@@ -612,8 +633,13 @@ void CUDAAnalysis::runAnalysis() {
   automaton_builder.finalize();
 
   for (Function &function : m_module) {
-    if (function.isDeclaration() || !detail::isNVVMKernel(&function) ||
-        m_kernel_index.count(&function)) {
+    if (function.isDeclaration() || !detail::isNVVMKernel(&function)) {
+      continue;
+    }
+    LaunchContextKey key;
+    key.kernel = &function;
+    key.dimensions = LaunchDimensions();
+    if (m_launch_context_index.count(key)) {
       continue;
     }
     recordModelGap(&function, "Kernel analyzed without an explicit host-side "
@@ -636,8 +662,8 @@ void CUDAAnalysis::runAnalysis() {
 
   size_t kernel_class_counter = 0;
   std::set<const llvm::Function *> analyzed_kernels;
-  for (const auto &pair : m_kernel_index) {
-    const llvm::Function *kernel = pair.first;
+  for (size_t i = 0; i < m_kernel_summaries.size(); ++i) {
+    const llvm::Function *kernel = m_kernel_summaries[i].kernel;
     if (!kernel)
       continue;
     analyzed_kernels.insert(kernel);
@@ -705,6 +731,15 @@ void CUDAAnalysis::analyzeInterKernelRaces() {
     return;
   }
 
+  for (const auto &func : m_module) {
+    if (!func.isDeclaration() && detail::isNVVMKernel(&func)) {
+      recordModelGap(&func, "Inter-kernel race analysis requires "
+                    "launch-context indexing for accurate summary lookup; "
+                    "conservative over-approximation may report false positives",
+                   0.3);
+      break;
+    }
+  }
   for (size_t i = 0; i < m_launches.size(); ++i) {
     for (size_t j = i + 1; j < m_launches.size(); ++j) {
       const KernelLaunchInfo &launch_a = m_launches[i];
@@ -714,8 +749,19 @@ void CUDAAnalysis::analyzeInterKernelRaces() {
         continue;
       }
 
-      size_t idx_a = m_kernel_index[launch_a.kernel];
-      size_t idx_b = m_kernel_index[launch_b.kernel];
+      LaunchContextKey key_a;
+      key_a.kernel = launch_a.kernel;
+      key_a.dimensions = launch_a.dimensions;
+      LaunchContextKey key_b;
+      key_b.kernel = launch_b.kernel;
+      key_b.dimensions = launch_b.dimensions;
+
+      if (!m_launch_context_index.count(key_a) || !m_launch_context_index.count(key_b)) {
+        continue;
+      }
+
+      size_t idx_a = m_launch_context_index[key_a];
+      size_t idx_b = m_launch_context_index[key_b];
       const KernelSummary &summary_a = m_kernel_summaries[idx_a];
       const KernelSummary &summary_b = m_kernel_summaries[idx_b];
       bool ordered = detail::launchesOrdered(m_launches, i, j);
