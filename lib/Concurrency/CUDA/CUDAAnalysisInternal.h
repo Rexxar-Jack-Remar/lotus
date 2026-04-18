@@ -15,18 +15,24 @@ struct AliasQueryResult {
 struct LaunchOrderingState {
   struct StreamState {
     bool ordered_since_last_launch = false;
+    bool usable_for_unknown_launch = false;
     SynchronizationScope scope = SynchronizationScope::None;
     LaunchOrderingSource source = LaunchOrderingSource::None;
     SynchronizationPrimitive primitive = SynchronizationPrimitive::None;
+    const llvm::Value *stream = nullptr;
+    HostStreamKind stream_kind = HostStreamKind::Unknown;
+    llvm::SmallVector<size_t, 4> ordered_dependencies;
   };
 
   struct EventState {
     bool has_record = false;
     const llvm::Value *recorded_stream = nullptr;
     HostStreamKind recorded_stream_kind = HostStreamKind::Unknown;
+    llvm::SmallVector<size_t, 4> recorded_dependencies;
   };
 
   bool device_synchronized = false;
+  StreamState host_state;
   llvm::DenseMap<const llvm::Value *, StreamState> stream_states;
   StreamState default_stream;
   llvm::DenseMap<const llvm::Value *, EventState> event_states;

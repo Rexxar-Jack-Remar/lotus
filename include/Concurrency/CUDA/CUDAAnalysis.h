@@ -83,6 +83,7 @@ struct KernelLaunchInfo {
   const llvm::Function *kernel = nullptr;
   LaunchDimensions dimensions;
   size_t sequence = 0;
+  llvm::SmallVector<size_t, 4> ordered_dependencies;
   SynchronizationPrimitive predecessor = SynchronizationPrimitive::None;
   SynchronizationScope ordering_scope = SynchronizationScope::None;
   bool ordered_after_previous = false;

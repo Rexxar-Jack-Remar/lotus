@@ -1024,6 +1024,59 @@ TEST_F(CUDAAnalysisTest, SuppressesOrderedInterKernelRaceAfterDeviceSync) {
 }
 
 TEST_F(CUDAAnalysisTest,
+       SuppressesInterKernelHazardAfterCrossStreamSynchronize) {
+  const char *source = R"(
+    @global_arr = addrspace(1) global [64 x i32] zeroinitializer
+    %stream_t = type opaque
+
+    declare i32 @cudaStreamSynchronize(%stream_t*)
+    declare i64 @cudaLaunchKernel(i8*, i64, i64, i64, i64, i64, i8**, i64, %stream_t*)
+    declare i32 @llvm.nvvm.read.ptx.sreg.tid.x()
+
+    define void @kernel_producer() {
+    entry:
+      %tid = call i32 @llvm.nvvm.read.ptx.sreg.tid.x()
+      %gep = getelementptr [64 x i32], [64 x i32] addrspace(1)* @global_arr, i32 0, i32 %tid
+      store i32 %tid, i32 addrspace(1)* %gep
+      ret void
+    }
+
+    define void @kernel_consumer() {
+    entry:
+      %tid = call i32 @llvm.nvvm.read.ptx.sreg.tid.x()
+      %gep = getelementptr [64 x i32], [64 x i32] addrspace(1)* @global_arr, i32 0, i32 %tid
+      %val = load i32, i32 addrspace(1)* %gep
+      ret void
+    }
+
+    define i64 @main(i8* %producer_kernel, i8* %consumer_kernel, i8** %args) {
+    entry:
+      %producer = inttoptr i64 1 to %stream_t*
+      %consumer = inttoptr i64 2 to %stream_t*
+      %l0 = call i64 @cudaLaunchKernel(i8* %producer_kernel, i64 1, i64 32, i64 1, i64 1, i64 1, i8** %args, i64 0, %stream_t* %producer)
+      call void @kernel_producer()
+      %sync = call i32 @cudaStreamSynchronize(%stream_t* %producer)
+      %l1 = call i64 @cudaLaunchKernel(i8* %consumer_kernel, i64 1, i64 32, i64 1, i64 1, i64 1, i8** %args, i64 0, %stream_t* %consumer)
+      call void @kernel_consumer()
+      ret i64 %l1
+    }
+  )";
+
+  auto module = parseModule(source);
+  ASSERT_NE(module, nullptr);
+
+  concurrency::cuda::CUDAAnalysis analysis(*module);
+  analysis.runAnalysis();
+
+  ASSERT_EQ(analysis.getLaunches().size(), 2u);
+  EXPECT_TRUE(analysis.getLaunches()[1].ordered_after_previous);
+  EXPECT_TRUE(analysis.getLaunches()[1].host_happens_before);
+  EXPECT_EQ(analysis.getLaunches()[1].ordering_source,
+            concurrency::cuda::LaunchOrderingSource::StreamSynchronize);
+  EXPECT_TRUE(analysis.getInterKernelRaces().empty());
+}
+
+TEST_F(CUDAAnalysisTest,
        AvoidsClaimingOrderedAfterForUnknownStreamEventSynchronization) {
   const char *source = R"(
     @global_arr = addrspace(1) global [64 x i32] zeroinitializer
@@ -1078,6 +1131,63 @@ TEST_F(CUDAAnalysisTest,
   EXPECT_EQ(race.second_kernel->getName(), "kernel_consumer");
   EXPECT_FALSE(race.ordered);
   EXPECT_FALSE(race.stream_known);
+}
+
+TEST_F(CUDAAnalysisTest,
+       SuppressesInterKernelHazardAfterRecordedEventSynchronization) {
+  const char *source = R"(
+    @global_arr = addrspace(1) global [64 x i32] zeroinitializer
+    %stream_t = type opaque
+    %event_t = type opaque
+
+    declare i32 @cudaEventRecord(%event_t*, %stream_t*)
+    declare i32 @cudaStreamWaitEvent(%stream_t*, %event_t*, i32)
+    declare i64 @cudaLaunchKernel(i8*, i64, i64, i64, i64, i64, i8**, i64, %stream_t*)
+    declare i32 @llvm.nvvm.read.ptx.sreg.tid.x()
+
+    define void @kernel_producer() {
+    entry:
+      %tid = call i32 @llvm.nvvm.read.ptx.sreg.tid.x()
+      %gep = getelementptr [64 x i32], [64 x i32] addrspace(1)* @global_arr, i32 0, i32 %tid
+      store i32 %tid, i32 addrspace(1)* %gep
+      ret void
+    }
+
+    define void @kernel_consumer() {
+    entry:
+      %tid = call i32 @llvm.nvvm.read.ptx.sreg.tid.x()
+      %gep = getelementptr [64 x i32], [64 x i32] addrspace(1)* @global_arr, i32 0, i32 %tid
+      %val = load i32, i32 addrspace(1)* %gep
+      ret void
+    }
+
+    define i64 @main(%event_t* %event, i8* %producer_kernel, i8* %consumer_kernel,
+                     i8** %args) {
+    entry:
+      %producer = inttoptr i64 1 to %stream_t*
+      %consumer = inttoptr i64 2 to %stream_t*
+      %l0 = call i64 @cudaLaunchKernel(i8* %producer_kernel, i64 1, i64 32, i64 1, i64 1, i64 1, i8** %args, i64 0, %stream_t* %producer)
+      call void @kernel_producer()
+      %record = call i32 @cudaEventRecord(%event_t* %event, %stream_t* %producer)
+      %wait = call i32 @cudaStreamWaitEvent(%stream_t* %consumer, %event_t* %event, i32 0)
+      %l1 = call i64 @cudaLaunchKernel(i8* %consumer_kernel, i64 1, i64 32, i64 1, i64 1, i64 1, i8** %args, i64 0, %stream_t* %consumer)
+      call void @kernel_consumer()
+      ret i64 %l1
+    }
+  )";
+
+  auto module = parseModule(source);
+  ASSERT_NE(module, nullptr);
+
+  concurrency::cuda::CUDAAnalysis analysis(*module);
+  analysis.runAnalysis();
+
+  ASSERT_EQ(analysis.getLaunches().size(), 2u);
+  EXPECT_TRUE(analysis.getLaunches()[1].ordered_after_previous);
+  EXPECT_TRUE(analysis.getLaunches()[1].host_happens_before);
+  EXPECT_EQ(analysis.getLaunches()[1].ordering_source,
+            concurrency::cuda::LaunchOrderingSource::StreamSynchronize);
+  EXPECT_TRUE(analysis.getInterKernelRaces().empty());
 }
 
 TEST_F(CUDAAnalysisTest,
@@ -2032,8 +2142,10 @@ TEST_F(CUDAAnalysisTest, PrefetchOrderingRequiresMatchingConcreteStream) {
   EXPECT_TRUE(analysis.getLaunches()[1].host_happens_before);
   EXPECT_EQ(analysis.getLaunches()[1].ordering_source,
             concurrency::cuda::LaunchOrderingSource::ProgramOrder);
-  EXPECT_FALSE(analysis.getLaunches()[2].ordered_after_previous);
-  EXPECT_FALSE(analysis.getLaunches()[2].host_happens_before);
+  EXPECT_TRUE(analysis.getLaunches()[2].ordered_after_previous);
+  EXPECT_TRUE(analysis.getLaunches()[2].host_happens_before);
+  EXPECT_EQ(analysis.getLaunches()[2].ordering_source,
+            concurrency::cuda::LaunchOrderingSource::ProgramOrder);
 }
 
 TEST_F(CUDAAnalysisTest, EventWaitNeedsMatchingRecordedEventToOrderLaunch) {

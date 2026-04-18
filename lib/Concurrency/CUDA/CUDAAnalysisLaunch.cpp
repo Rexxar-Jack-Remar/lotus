@@ -13,6 +13,20 @@ namespace concurrency::cuda {
 
 namespace detail {
 
+static void addOrderedDependency(llvm::SmallVectorImpl<size_t> &deps,
+                                 size_t dep) {
+  if (!llvm::is_contained(deps, dep)) {
+    deps.push_back(dep);
+  }
+}
+
+static void addOrderedDependencies(llvm::SmallVectorImpl<size_t> &deps,
+                                   llvm::ArrayRef<size_t> more) {
+  for (size_t dep : more) {
+    addOrderedDependency(deps, dep);
+  }
+}
+
 static bool isLegacyConfigureCall(const CallBase *call) {
   const Function *callee = call ? call->getCalledFunction() : nullptr;
   return callee && callee->getName().contains("cudaConfigureCall");
@@ -107,11 +121,21 @@ HostStreamKind classifyHostStream(const CallBase *call, const Value *stream) {
   }
   if (const auto *constant = dyn_cast<Constant>(stream)) {
     if (constant->isNullValue()) {
-      return HostStreamKind::LegacyDefault;
+      return is_runtime_launch ? HostStreamKind::LegacyDefault
+                               : HostStreamKind::Unknown;
     }
     return HostStreamKind::Explicit;
   }
   const Value *base = stream->stripPointerCasts();
+  if (const auto *int_to_ptr = dyn_cast<IntToPtrInst>(base)) {
+    if (const auto *ci = dyn_cast<ConstantInt>(int_to_ptr->getOperand(0))) {
+      if (ci->isZero()) {
+        return is_runtime_launch ? HostStreamKind::LegacyDefault
+                                 : HostStreamKind::Unknown;
+      }
+      return HostStreamKind::Explicit;
+    }
+  }
   return isa<Argument>(base) || isa<GlobalValue>(base)
              ? HostStreamKind::Explicit
              : HostStreamKind::Unknown;
@@ -186,8 +210,14 @@ bool launchesOrdered(const std::vector<KernelLaunchInfo> &launches,
 
   const KernelLaunchInfo &earlier = launches[earlier_idx];
   const KernelLaunchInfo &later = launches[later_idx];
+  if (llvm::is_contained(later.ordered_dependencies, earlier_idx)) {
+    return true;
+  }
   for (size_t mid = earlier_idx + 1; mid <= later_idx; ++mid) {
     const KernelLaunchInfo &cur = launches[mid];
+    if (llvm::is_contained(cur.ordered_dependencies, earlier_idx)) {
+      return true;
+    }
     if (cur.ordering_source == LaunchOrderingSource::DeviceSynchronize) {
       return true;
     }
@@ -217,6 +247,16 @@ getMutableStreamState(detail::LaunchOrderingState &ordering_state,
   return nullptr;
 }
 
+static detail::LaunchOrderingState::StreamState &
+getHostState(detail::LaunchOrderingState &ordering_state,
+             HostStreamKind stream_kind, const Value *stream) {
+  if (auto *stream_state =
+          getMutableStreamState(ordering_state, stream_kind, stream)) {
+    return *stream_state;
+  }
+  return ordering_state.host_state;
+}
+
 const detail::LaunchOrderingState::StreamState *
 getStreamState(const detail::LaunchOrderingState &ordering_state,
                HostStreamKind stream_kind, const Value *stream) {
@@ -235,24 +275,28 @@ void markStreamOrdered(detail::LaunchOrderingState &ordering_state,
                        SynchronizationScope scope,
                        LaunchOrderingSource source,
                        SynchronizationPrimitive primitive) {
-  if (auto *stream_state =
-          getMutableStreamState(ordering_state, stream_kind, stream)) {
-    stream_state->ordered_since_last_launch = true;
-    stream_state->scope = scope;
-    stream_state->source = source;
-    stream_state->primitive = primitive;
-  }
+  auto &stream_state = getHostState(ordering_state, stream_kind, stream);
+  stream_state.ordered_since_last_launch = true;
+  stream_state.usable_for_unknown_launch =
+      stream_kind != HostStreamKind::Unknown;
+  stream_state.scope = scope;
+  stream_state.source = source;
+  stream_state.primitive = primitive;
+  stream_state.stream = stream;
+  stream_state.stream_kind = stream_kind;
 }
 
 void clearStreamOrdered(detail::LaunchOrderingState &ordering_state,
                         HostStreamKind stream_kind, const Value *stream) {
-  if (auto *stream_state =
-          getMutableStreamState(ordering_state, stream_kind, stream)) {
-    stream_state->ordered_since_last_launch = false;
-    stream_state->scope = SynchronizationScope::None;
-    stream_state->source = LaunchOrderingSource::None;
-    stream_state->primitive = SynchronizationPrimitive::None;
-  }
+  auto &stream_state = getHostState(ordering_state, stream_kind, stream);
+  stream_state.ordered_since_last_launch = false;
+  stream_state.usable_for_unknown_launch = false;
+  stream_state.scope = SynchronizationScope::None;
+  stream_state.source = LaunchOrderingSource::None;
+  stream_state.primitive = SynchronizationPrimitive::None;
+  stream_state.stream = nullptr;
+  stream_state.stream_kind = HostStreamKind::Unknown;
+  stream_state.ordered_dependencies.clear();
 }
 
 } // namespace detail
@@ -315,6 +359,12 @@ void CUDAAnalysis::runAnalysis() {
         const Value *stream = detail::getPotentialStream(call);
         const HostStreamKind stream_kind =
             detail::classifyHostStream(call, stream);
+        auto &host_state =
+            detail::getHostState(ordering_state, stream_kind, stream);
+        host_state.ordered_dependencies.clear();
+        for (size_t dep = 0; dep < m_launches.size(); ++dep) {
+          detail::addOrderedDependency(host_state.ordered_dependencies, dep);
+        }
         detail::markStreamOrdered(ordering_state, stream_kind, stream,
                                   detail::getSyncScope(type),
                                   detail::getOrderingSource(type),
@@ -340,10 +390,17 @@ void CUDAAnalysis::runAnalysis() {
         } else if (name.contains("Destroy")) {
           automaton_builder.addStreamDestroy(&inst, stream);
         } else if (name.contains("Synchronize")) {
+          auto &host_state =
+              detail::getHostState(ordering_state, stream_kind, stream);
+          host_state.ordered_dependencies.clear();
+          for (size_t dep = 0; dep < m_launches.size(); ++dep) {
+            detail::addOrderedDependency(host_state.ordered_dependencies, dep);
+          }
           detail::markStreamOrdered(ordering_state, stream_kind, stream,
                                     SynchronizationScope::Device,
                                     LaunchOrderingSource::StreamSynchronize,
                                     SynchronizationPrimitive::StreamProgramOrder);
+          ordering_state.host_state = host_state;
           if (stream_kind != HostStreamKind::Unknown) {
             automaton_builder.addStreamSync(&inst, stream);
           }
@@ -352,13 +409,18 @@ void CUDAAnalysis::runAnalysis() {
           auto event_it = ordering_state.event_states.find(event);
           if (event_it != ordering_state.event_states.end() &&
               event_it->second.has_record &&
-              event_it->second.recorded_stream_kind == HostStreamKind::Explicit &&
-              stream_kind == HostStreamKind::Explicit &&
-              event_it->second.recorded_stream == stream) {
+              stream_kind == HostStreamKind::Explicit && stream) {
+            auto &host_state =
+                detail::getHostState(ordering_state, stream_kind, stream);
+            host_state.ordered_dependencies.clear();
+            detail::addOrderedDependencies(
+                host_state.ordered_dependencies,
+                event_it->second.recorded_dependencies);
             detail::markStreamOrdered(
                 ordering_state, stream_kind, stream, SynchronizationScope::Device,
                 LaunchOrderingSource::StreamSynchronize,
                 SynchronizationPrimitive::StreamProgramOrder);
+            ordering_state.host_state = host_state;
           }
         }
         continue;
@@ -377,6 +439,11 @@ void CUDAAnalysis::runAnalysis() {
             event_state.has_record = true;
             event_state.recorded_stream = stream;
             event_state.recorded_stream_kind = stream_kind;
+            event_state.recorded_dependencies.clear();
+            for (size_t dep = 0; dep < m_launches.size(); ++dep) {
+              detail::addOrderedDependency(event_state.recorded_dependencies,
+                                           dep);
+            }
           }
           automaton_builder.addEvent(&inst, event, stream);
         } else if (name.contains("Wait")) {
@@ -384,15 +451,35 @@ void CUDAAnalysis::runAnalysis() {
           auto event_it = ordering_state.event_states.find(event);
           if (event_it != ordering_state.event_states.end() &&
               event_it->second.has_record &&
-              event_it->second.recorded_stream_kind == HostStreamKind::Explicit &&
-              stream_kind == HostStreamKind::Explicit &&
-              event_it->second.recorded_stream == stream) {
+              stream_kind == HostStreamKind::Explicit && stream) {
+            auto &host_state =
+                detail::getHostState(ordering_state, stream_kind, stream);
+            host_state.ordered_dependencies.clear();
+            detail::addOrderedDependencies(
+                host_state.ordered_dependencies,
+                event_it->second.recorded_dependencies);
             detail::markStreamOrdered(
                 ordering_state, stream_kind, stream, SynchronizationScope::Device,
                 LaunchOrderingSource::StreamSynchronize,
                 SynchronizationPrimitive::StreamProgramOrder);
           }
         } else if (name.contains("Synchronize")) {
+          if (event) {
+            auto event_it = ordering_state.event_states.find(event);
+            if (event_it != ordering_state.event_states.end() &&
+                event_it->second.has_record) {
+              ordering_state.host_state.ordered_dependencies.clear();
+              detail::addOrderedDependencies(
+                  ordering_state.host_state.ordered_dependencies,
+                  event_it->second.recorded_dependencies);
+              detail::markStreamOrdered(
+                  ordering_state, HostStreamKind::Unknown, nullptr,
+                  SynchronizationScope::Device,
+                  LaunchOrderingSource::StreamSynchronize,
+                  SynchronizationPrimitive::StreamProgramOrder);
+              ordering_state.host_state.usable_for_unknown_launch = true;
+            }
+          }
           automaton_builder.addEventSync(&inst, event);
         }
         continue;
@@ -406,10 +493,17 @@ void CUDAAnalysis::runAnalysis() {
           const HostStreamKind stream_kind =
               detail::classifyHostStream(call, stream);
           if (stream_kind != HostStreamKind::Unknown) {
+            auto &host_state =
+                detail::getHostState(ordering_state, stream_kind, stream);
+            host_state.ordered_dependencies.clear();
+            for (size_t dep = 0; dep < m_launches.size(); ++dep) {
+              detail::addOrderedDependency(host_state.ordered_dependencies, dep);
+            }
             detail::markStreamOrdered(ordering_state, stream_kind, stream,
                                       SynchronizationScope::Device,
                                       LaunchOrderingSource::ProgramOrder,
                                       SynchronizationPrimitive::StreamProgramOrder);
+            ordering_state.host_state = host_state;
           }
           if (stream) {
             automaton_builder.addStream(stream);
@@ -440,7 +534,14 @@ void CUDAAnalysis::runAnalysis() {
       const bool stream_known = stream_kind != HostStreamKind::Unknown;
       const auto *stream_state =
           detail::getStreamState(ordering_state, stream_kind, stream);
-
+      const detail::LaunchOrderingState::StreamState *selected_state = nullptr;
+      if (stream_known && stream_state &&
+          stream_state->ordered_since_last_launch) {
+        selected_state = stream_state;
+      } else if (ordering_state.host_state.ordered_since_last_launch &&
+                 ordering_state.host_state.usable_for_unknown_launch) {
+        selected_state = &ordering_state.host_state;
+      }
       KernelLaunchInfo launch;
       launch.launch = &inst;
       launch.dimensions = getLaunchDimensions(&inst);
@@ -454,15 +555,26 @@ void CUDAAnalysis::runAnalysis() {
 
       if (ordering_state.device_synchronized) {
         launch.ordered_after_previous = true;
+        launch.ordered_dependencies.clear();
+        for (size_t dep = 0; dep < m_launches.size(); ++dep) {
+          launch.ordered_dependencies.push_back(dep);
+        }
         launch.ordering_scope = SynchronizationScope::Device;
         launch.ordering_source = LaunchOrderingSource::DeviceSynchronize;
         launch.predecessor = SynchronizationPrimitive::DeviceSynchronize;
         launch.host_happens_before = true;
-      } else if (stream_state && stream_state->ordered_since_last_launch) {
+      } else if (selected_state) {
+        if (selected_state == &ordering_state.host_state && !stream_known) {
+          launch.stream = selected_state->stream;
+          launch.stream_kind = selected_state->stream_kind;
+          launch.stream_known =
+              selected_state->stream_kind != HostStreamKind::Unknown;
+        }
         launch.ordered_after_previous = true;
-        launch.ordering_scope = stream_state->scope;
-        launch.ordering_source = stream_state->source;
-        launch.predecessor = stream_state->primitive;
+        launch.ordered_dependencies = selected_state->ordered_dependencies;
+        launch.ordering_scope = selected_state->scope;
+        launch.ordering_source = selected_state->source;
+        launch.predecessor = selected_state->primitive;
         launch.host_happens_before = true;
       } else if (!m_launches.empty()) {
         const KernelLaunchInfo &prev = m_launches.back();
