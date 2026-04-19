@@ -1,5 +1,7 @@
 #include "Concurrency/CUDA/CUDAMemoryModel.h"
 
+#include <optional>
+
 #include <llvm/ADT/SmallPtrSet.h>
 #include <llvm/IR/Argument.h>
 #include <llvm/IR/CallingConv.h>
