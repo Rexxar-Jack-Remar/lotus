@@ -2384,7 +2384,7 @@ TEST_F(CUDAAnalysisTest, ResolvesRuntimeCudaLaunchKernelWithExplicitOperand) {
     define i64 @main(i8** %args) {
     entry:
       %stream = inttoptr i64 1 to %stream_t*
-      %kernel_ptr = ptrtoint void()* @my_kernel to i8*
+      %kernel_ptr = bitcast void ()* @my_kernel to i8*
       %launch = call i64 @cudaLaunchKernel(i8* %kernel_ptr, i64 1, i64 32, i64 1, i64 1, i64 1, i8** %args, i64 0, %stream_t* %stream)
       ret i64 %launch
     }

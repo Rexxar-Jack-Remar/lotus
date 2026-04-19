@@ -160,9 +160,9 @@ int main(int argc, char **argv) {
            << " (" << targets.size() << " targets)\n";
   }
 
-  std::string jsonOutputFile = !report_options::JsonOutputFile.empty()
-                                   ? report_options::JsonOutputFile
-                                   : JsonOutput;
+  const std::string &jsonOutputFile = !report_options::JsonOutputFile.empty()
+                                          ? report_options::JsonOutputFile.getValue()
+                                          : JsonOutput.getValue();
   if (!jsonOutputFile.empty()) {
     std::error_code EC;
     raw_fd_ostream json_out(jsonOutputFile, EC);

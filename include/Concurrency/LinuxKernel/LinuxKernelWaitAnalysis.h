@@ -93,8 +93,6 @@ private:
   void identifyWaitContexts();
   void identifyCompletions();
   void identifyTimers();
-
-  const WaitQueueEntry *findMatchingWait(WaitQueueID queue) const;
 };
 
 } // namespace kernel

@@ -172,6 +172,56 @@ static MemorySpaceInfo classifyByName(StringRef name, unsigned addrspace) {
   return {MemorySpace::Unknown, false, addrspace};
 }
 
+static MemorySpaceInfo classifyKernelGenericPointer(const Value *value) {
+  const Function *kernel = getEnclosingKernel(value);
+  if (!kernel) {
+    return {};
+  }
+
+  BaseObjectInfo info;
+  SmallPtrSet<const Value *, 8> seen;
+  collectBaseObjects(value, info, seen, kernel);
+  if (info.objects.empty() || info.unresolved) {
+    return {};
+  }
+
+  std::optional<MemorySpace> inferred;
+  for (const Value *object : info.objects) {
+    MemorySpace space = MemorySpace::Unknown;
+    if (isa<AllocaInst>(object)) {
+      space = MemorySpace::Local;
+    } else if (isa<Argument>(object)) {
+      space = MemorySpace::Global;
+    } else if (const auto *gv = dyn_cast<GlobalValue>(object)) {
+      space = classifyAddressSpace(gv->getAddressSpace()).space;
+      if (space == MemorySpace::Unknown) {
+        MemorySpaceInfo by_name =
+            classifyByName(gv->getName(), gv->getAddressSpace());
+        space = by_name.space;
+      }
+      if (space == MemorySpace::Unknown) {
+        space = MemorySpace::Host;
+      }
+    }
+
+    if (space == MemorySpace::Unknown || space == MemorySpace::Host) {
+      return {};
+    }
+    if (!inferred) {
+      inferred = space;
+      continue;
+    }
+    if (*inferred != space) {
+      return {};
+    }
+  }
+
+  if (!inferred) {
+    return {};
+  }
+  return {*inferred, false, 0};
+}
+
 } // namespace
 
 MemorySpaceInfo CUDAMemoryModel::classify(const Value *value) {
@@ -244,10 +294,15 @@ MemorySpaceInfo CUDAMemoryModel::classify(const Value *value) {
       }
     }
     if (const Function *kernel = getEnclosingKernel(inst)) {
-      if (inst->getOpcode() != Instruction::IntToPtr &&
-          inst->getType()->isPointerTy() &&
+      if (inst->getType()->isPointerTy() &&
           inst->getType()->getPointerAddressSpace() == 0) {
-        return {MemorySpace::Global, false, 0};
+        MemorySpaceInfo by_base = classifyKernelGenericPointer(value);
+        if (by_base.space != MemorySpace::Unknown) {
+          return by_base;
+        }
+        if (inst->getOpcode() == Instruction::IntToPtr) {
+          return {};
+        }
       }
     }
     if (inst->hasName() && !getEnclosingKernel(inst)) {

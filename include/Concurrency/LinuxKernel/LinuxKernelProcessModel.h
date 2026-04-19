@@ -51,6 +51,17 @@ public:
 
   std::vector<KernelOperation> getOperationsByLock(LockID lock) const;
 
+  std::vector<const KernelOperation *>
+  getOperationsInFunction(const llvm::Function *function) const;
+
+  const KernelOperation *
+  getOperationForInstruction(const llvm::Instruction *inst) const;
+
+  bool isBeforeInFunction(const llvm::Instruction *lhs,
+                          const llvm::Instruction *rhs) const;
+
+  const llvm::Value *canonicalizeValue(const llvm::Value *value) const;
+
   const std::map<LockID, LockInfo> &getLockInfoMap() const {
     return lock_info_map_;
   }
@@ -91,6 +102,10 @@ private:
   std::map<WaitQueueID, WaitQueueEntry> wait_queue_entries_;
 
   std::map<std::pair<const llvm::Function *, LockID>, int> lock_depth_;
+  std::unordered_map<const llvm::Function *, std::vector<size_t>>
+      operations_by_function_;
+  std::unordered_map<const llvm::Instruction *, size_t> operation_index_by_inst_;
+  std::unordered_map<const llvm::Instruction *, size_t> instruction_order_;
 
   OperationKind classifyOperation(const llvm::Instruction *inst,
                                   const llvm::StringRef &func_name) const;

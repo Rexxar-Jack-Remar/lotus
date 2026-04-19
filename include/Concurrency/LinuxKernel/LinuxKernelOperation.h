@@ -149,6 +149,7 @@ struct KernelOperation {
   bool is_recursive = false;
   bool is_interruptible = false;
   bool is_raw = false;
+  bool has_timeout = false;
 
   // For wait queues
   WaitQueueID wait_queue = nullptr;

@@ -97,6 +97,10 @@ static bool isAtomicAccessOrdered(const AccessInfo &lhs, const AccessInfo &rhs,
   if (!(lhs.is_atomic && rhs.is_atomic)) {
     return false;
   }
+  if (lhs.atomic_ordering == AtomicOrdering::SequentiallyConsistent &&
+      rhs.atomic_ordering == AtomicOrdering::SequentiallyConsistent) {
+    return true;
+  }
   if (!isCompatibleAtomicOrdering(lhs.atomic_ordering, rhs.atomic_ordering)) {
     return false;
   }
@@ -118,6 +122,20 @@ static bool isAtomicAccessOrdered(const AccessInfo &lhs, const AccessInfo &rhs,
     }
   }
   return false;
+}
+
+static bool isConstantAddressAccess(const AccessInfo &access) {
+  if (!access.address_pattern.valid) {
+    return !access.depends_on_thread_idx && !access.depends_on_block_idx &&
+           !access.depends_on_lane_id;
+  }
+  return access.address_pattern.thread_idx_x == 0 &&
+         access.address_pattern.thread_idx_y == 0 &&
+         access.address_pattern.thread_idx_z == 0 &&
+         access.address_pattern.block_idx_x == 0 &&
+         access.address_pattern.block_idx_y == 0 &&
+         access.address_pattern.block_idx_z == 0 &&
+         access.address_pattern.lane_id == 0;
 }
 
 static AliasPrecision getAliasPrecision(const AccessInfo &access) {
@@ -921,7 +939,9 @@ void CUDAAnalysis::recordAccess(KernelSummary &summary, const Instruction *inst,
   if (!access.base || access.space == MemorySpace::Unknown ||
       !access.address_pattern.valid) {
     std::string msg = "CUDA access lost precision";
-    if (!access.base) {
+    if (!access.base && access.space == MemorySpace::Unknown) {
+      msg += ": unresolved base object and unknown memory space";
+    } else if (!access.base) {
       msg += ": unresolved base object";
     } else if (access.space == MemorySpace::Unknown) {
       msg += ": unknown memory space";
@@ -1188,6 +1208,40 @@ void CUDAAnalysis::analyzeRaces(KernelSummary &summary) {
     control.post_dom_tree.recalculate(const_cast<Function &>(*summary.kernel));
     control.valid = true;
   }
+  const bool known_multi_block =
+      summary.dimensions.grid[0].kind == SymbolicValueKind::Constant &&
+      summary.dimensions.grid[0].constant > 1;
+  const bool can_have_multiple_blocks =
+      summary.has_symbolic_grid || known_multi_block;
+
+  for (const AccessInfo &access : summary.accesses) {
+    if (!isGlobalRaceRelevant(access) || !access.is_write ||
+        isConstantAddressAccess(access) == false || !can_have_multiple_blocks ||
+        access.is_atomic) {
+      continue;
+    }
+    summary.has_global_race = true;
+    RaceInfo race;
+    race.first = access.inst;
+    race.second = access.inst;
+    race.base = access.base;
+    race.bases = access.base_objects;
+    race.space = access.space;
+    race.same_block_only = false;
+    race.cross_block = true;
+    race.symbolic = summary.has_symbolic_grid;
+    race.kind = RaceKind::DataRace;
+    race.scope = SynchronizationScope::Device;
+    race.ordering_reason = "multiple blocks may write the same constant address";
+    race.required_fence_scope = SynchronizationScope::Device;
+    race.alias_precision = access.alias_precision;
+    race.alias_source = access.alias_source;
+    race.missing_ordering = SynchronizationPrimitive::DeviceFence;
+    race.confidence = access.exact_address ? 0.9 : 0.7;
+    race.exact = known_multi_block && !summary.has_symbolic_grid;
+    summary.global_races.push_back(std::move(race));
+  }
+
   for (size_t i = 0; i < summary.accesses.size(); ++i) {
     for (size_t j = i + 1; j < summary.accesses.size(); ++j) {
       const AccessInfo &lhs = summary.accesses[i];
@@ -1245,6 +1299,10 @@ void CUDAAnalysis::analyzeRaces(KernelSummary &summary) {
         RaceDecision decision = evaluateRaceDecision(
             lhs, rhs, summary.dimensions, m_device_config, false, alias);
         if (decision.aliases) {
+          if (lhs.is_atomic && rhs.is_atomic &&
+              isAtomicAccessOrdered(lhs, rhs, summary)) {
+            continue;
+          }
           summary.has_shared_race = true;
           const bool warp_only_ordering =
               hasWarpOnlyOrderingBetween(lhs, rhs, summary, control);
@@ -1286,13 +1344,11 @@ void CUDAAnalysis::analyzeRaces(KernelSummary &summary) {
       } else if (isGlobalRaceRelevant(lhs) && isGlobalRaceRelevant(rhs)) {
         const bool syntactic_block_dep =
             lhs.depends_on_block_idx || rhs.depends_on_block_idx;
-        const bool known_multi_block =
-            summary.dimensions.grid[0].kind == SymbolicValueKind::Constant &&
-            summary.dimensions.grid[0].constant > 1;
-        const bool can_have_multiple_blocks =
-            summary.has_symbolic_grid || known_multi_block;
+        const bool constant_address =
+            isConstantAddressAccess(lhs) && isConstantAddressAccess(rhs);
         const bool cross_block = syntactic_block_dep || can_have_multiple_blocks;
-        if (cross_block && !syntactic_block_dep && can_have_multiple_blocks) {
+        if (cross_block && constant_address &&
+            (can_have_multiple_blocks || syntactic_block_dep)) {
           summary.has_global_race = true;
           RaceInfo race;
           race.first = lhs.inst;
@@ -1305,7 +1361,7 @@ void CUDAAnalysis::analyzeRaces(KernelSummary &summary) {
           race.kind = RaceKind::DataRace;
           race.scope = SynchronizationScope::Device;
           race.confidence = 0.7;
-          race.exact = false;
+          race.exact = known_multi_block && !summary.has_symbolic_grid;
           race.ordering_reason = "multiple blocks may execute, constant address";
           summary.global_races.push_back(std::move(race));
           continue;
@@ -1313,6 +1369,10 @@ void CUDAAnalysis::analyzeRaces(KernelSummary &summary) {
         RaceDecision decision = evaluateRaceDecision(
             lhs, rhs, summary.dimensions, m_device_config, cross_block, alias);
         if (decision.aliases) {
+          if (lhs.is_atomic && rhs.is_atomic &&
+              isAtomicAccessOrdered(lhs, rhs, summary)) {
+            continue;
+          }
           summary.has_global_race = true;
           RaceInfo race;
           race.first = lhs.inst;

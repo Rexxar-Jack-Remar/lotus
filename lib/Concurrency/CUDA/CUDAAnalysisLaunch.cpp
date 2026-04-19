@@ -41,11 +41,51 @@ bool isCUDAKernelCandidate(const Function *function) {
   return function && !function->isDeclaration();
 }
 
+static const Function *resolveFunctionFromValue(const Value *value) {
+  const Value *current = value;
+  SmallPtrSet<const Value *, 8> visited;
+  while (current && visited.insert(current).second) {
+    current = current->stripPointerCasts();
+    if (const auto *fn = dyn_cast<Function>(current)) {
+      return fn;
+    }
+    if (const auto *ce = dyn_cast<ConstantExpr>(current)) {
+      if (ce->isCast() || ce->getOpcode() == Instruction::PtrToInt ||
+          ce->getOpcode() == Instruction::IntToPtr) {
+        current = ce->getOperand(0);
+        continue;
+      }
+    }
+    if (const auto *inst = dyn_cast<Instruction>(current)) {
+      if (inst->getOpcode() == Instruction::BitCast ||
+          inst->getOpcode() == Instruction::AddrSpaceCast ||
+          inst->getOpcode() == Instruction::PtrToInt ||
+          inst->getOpcode() == Instruction::IntToPtr) {
+        current = inst->getOperand(0);
+        continue;
+      }
+    }
+    break;
+  }
+  return nullptr;
+}
+
+static bool usesExplicitKernelOperand(const CallBase *call) {
+  const Function *callee = call ? call->getCalledFunction() : nullptr;
+  if (!callee) {
+    return false;
+  }
+  StringRef name = callee->getName();
+  return name.contains("cudaLaunchKernel") ||
+         name.contains("cudaLaunchCooperativeKernel") ||
+         name.contains("cudaLaunchKernelEx") || name.startswith("cuLaunch");
+}
+
 const Function *getKernelFromRuntimeLaunch(const CallBase *call) {
   if (!call) {
     return nullptr;
   }
-  const auto *callee = dyn_cast<Function>(call->getArgOperand(0)->stripPointerCasts());
+  const auto *callee = resolveFunctionFromValue(call->getArgOperand(0));
   if (callee && !callee->isDeclaration()) {
     return callee;
   }
@@ -849,23 +889,25 @@ LaunchDimensions CUDAAnalysis::getLaunchDimensions(const Instruction *launch) {
     dims.block[i].constant = 1;
   }
 
-  if (call->arg_size() > 0) {
-    dims.grid[0] = classifyDimension(call->getArgOperand(0));
+  const unsigned dim_base = detail::usesExplicitKernelOperand(call) ? 1u : 0u;
+
+  if (call->arg_size() > dim_base + 0) {
+    dims.grid[0] = classifyDimension(call->getArgOperand(dim_base + 0));
   }
-  if (call->arg_size() > 1) {
-    dims.block[0] = classifyDimension(call->getArgOperand(1));
+  if (call->arg_size() > dim_base + 1) {
+    dims.block[0] = classifyDimension(call->getArgOperand(dim_base + 1));
   }
-  if (call->arg_size() > 2) {
-    dims.grid[1] = classifyDimension(call->getArgOperand(2));
+  if (call->arg_size() > dim_base + 2) {
+    dims.grid[1] = classifyDimension(call->getArgOperand(dim_base + 2));
   }
-  if (call->arg_size() > 3) {
-    dims.block[1] = classifyDimension(call->getArgOperand(3));
+  if (call->arg_size() > dim_base + 3) {
+    dims.block[1] = classifyDimension(call->getArgOperand(dim_base + 3));
   }
-  if (call->arg_size() > 4) {
-    dims.grid[2] = classifyDimension(call->getArgOperand(4));
+  if (call->arg_size() > dim_base + 4) {
+    dims.grid[2] = classifyDimension(call->getArgOperand(dim_base + 4));
   }
-  if (call->arg_size() > 5) {
-    dims.block[2] = classifyDimension(call->getArgOperand(5));
+  if (call->arg_size() > dim_base + 5) {
+    dims.block[2] = classifyDimension(call->getArgOperand(dim_base + 5));
   }
 
   return dims;

@@ -45,6 +45,7 @@ void LinuxKernelAnalysis::runAnalysis() {
   results_.double_completion = wait_analysis_.findDoubleCompletion();
   results_.timer_not_deleted = wait_analysis_.findTimerNotDeleted();
   results_.timer_use_after_delete = wait_analysis_.findTimerUseAfterDelete();
+  results_.timer_issues = process_model_.findTimerIssues();
 }
 
 void LinuxKernelAnalysis::printResults(raw_ostream &OS) const {
@@ -84,7 +85,10 @@ void LinuxKernelAnalysis::printResults(raw_ostream &OS) const {
   OS << "Missing wake-ups: " << results_.missing_wake_ups.size() << "\n";
   OS << "Missing completions: " << results_.missing_completion.size() << "\n";
   OS << "Double completions: " << results_.double_completion.size() << "\n";
-  OS << "Timers not deleted: " << results_.timer_not_deleted.size() << "\n\n";
+  OS << "Timers not deleted: " << results_.timer_not_deleted.size() << "\n";
+  OS << "Timer reuse after delete: " << results_.timer_use_after_delete.size()
+     << "\n";
+  OS << "Timer lifecycle issues: " << results_.timer_issues.size() << "\n\n";
 
   OS << "========================================\n";
 }
