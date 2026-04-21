@@ -28,10 +28,10 @@ static cl::opt<std::string> InputFilename(cl::Positional, cl::desc("<bitcode>"),
                                           cl::Required);
 static cl::opt<std::string> OutDir("out-dir", cl::desc("Output directory"),
                                    cl::value_desc("dir"), cl::init(""));
-static cl::opt<bool>
-    StdoutOpt("stdout",
-              cl::desc("Write analysis results to stdout when --out-dir is not set"),
-              cl::init(false));
+static cl::opt<bool> StdoutOpt(
+    "stdout",
+    cl::desc("Write analysis results to stdout when --out-dir is not set"),
+    cl::init(false));
 static cl::opt<std::string>
     AnalysisOpt("analysis",
                 cl::desc("Analysis: reaching_defs (default), uninitialized"),
@@ -93,8 +93,7 @@ const Instruction *getNextInstruction(const Instruction *I) {
 template <typename Fact, typename ResultsT>
 void printIFDSResults(raw_ostream &OS, const FunctionView &View,
                       const ResultsT &AllResults) {
-  for (auto *I : View.OrderedInsts) {
-    OS << "  " << View.ValueToId.at(I) << " IN: ";
+  lotus::dataflow_tool::printInstructionStates(OS, View, [&](Instruction *I) {
     if (const Instruction *NextInst = getNextInstruction(I)) {
       auto Node =
           typename ifds::ExplodedSupergraph<Fact>::Node(NextInst, Fact::zero());
@@ -102,8 +101,7 @@ void printIFDSResults(raw_ostream &OS, const FunctionView &View,
       if (It != AllResults.end())
         formatIFDSFactSet(OS, It->second, View.ValueToId);
     }
-    OS << "\n";
-  }
+  });
 }
 
 void runReachingDefinitions(raw_ostream &OS, Module &M) {
@@ -139,16 +137,10 @@ struct AnalysisHandler final {
   void (*Run)(raw_ostream &, Module &);
 };
 
-const AnalysisHandler *findHandler(StringRef Name) {
-  static const AnalysisHandler Handlers[] = {
-      {"reaching_defs", &runReachingDefinitions},
-      {"uninitialized", &runUninitialized},
-  };
-  for (const auto &Handler : Handlers)
-    if (Handler.Name == Name)
-      return &Handler;
-  return nullptr;
-}
+const AnalysisHandler Handlers[] = {
+    {"reaching_defs", &runReachingDefinitions},
+    {"uninitialized", &runUninitialized},
+};
 
 } // namespace
 
@@ -166,24 +158,18 @@ int main(int argc, char **argv) {
   lotus::dataflow_tool::prepareModule(*M);
 
   raw_null_ostream NullOS;
-  raw_ostream *OutOS = &NullOS;
-  if (StdoutOpt)
-    OutOS = &outs();
   std::unique_ptr<raw_fd_ostream> FileOS;
-  if (!OutDir.empty()) {
-    std::error_code EC;
-    FileOS =
-        lotus::dataflow_tool::openOutputFileOrReport(OutDir, "ifds.txt", EC);
-    if (EC) {
-      errs() << "error: cannot create " << OutDir
-             << "/ifds.txt: " << EC.message() << "\n";
-      return 1;
-    }
-    OutOS = FileOS.get();
+  std::error_code EC;
+  raw_ostream &OS = lotus::dataflow_tool::selectOutputStream(
+      StdoutOpt, OutDir, "ifds.txt", FileOS, NullOS, EC);
+  if (EC) {
+    errs() << "error: cannot create " << OutDir << "/ifds.txt: " << EC.message()
+           << "\n";
+    return 1;
   }
-  raw_ostream &OS = *OutOS;
 
-  const auto *Handler = findHandler(AnalysisOpt);
+  const auto *Handler =
+      lotus::dataflow_tool::findHandler(AnalysisOpt, Handlers);
   if (!Handler) {
     errs() << "error: unknown IFDS analysis '" << AnalysisOpt << "'\n";
     return 1;

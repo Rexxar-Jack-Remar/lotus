@@ -45,26 +45,33 @@ enum class NewtonSetupExecutionMode {
   ForceParallel,
 };
 
-inline std::size_t newton_parallel_setup_min_equations() {
-  return 4;
+inline std::size_t newton_parallel_setup_min_equations(
+    std::size_t worker_count) {
+  return std::max<std::size_t>(128, worker_count * 64);
 }
 
-inline bool
-should_parallelize_newton_setup(bool verbose, std::size_t equation_count,
-                                NewtonSetupExecutionMode mode =
-                                    NewtonSetupExecutionMode::Auto) {
+inline std::size_t newton_parallel_setup_min_equations() {
+  return newton_parallel_setup_min_equations(ThreadPool::get()->workerCount());
+}
+
+inline bool should_parallelize_newton_setup(
+    bool verbose, std::size_t equation_count,
+    NewtonSetupExecutionMode mode = NewtonSetupExecutionMode::Auto) {
   // Phase 2 contract: RHS assembly is parallelized only for non-verbose,
   // single-run setup work. Auto mode preserves the existing zero/one-worker
-  // fast path; tests may force either branch through the internal mode knob.
+  // fast path; a single worker still counts as sequential execution.
   if (verbose)
     return false;
   if (mode == NewtonSetupExecutionMode::ForceSerial)
     return false;
   if (mode == NewtonSetupExecutionMode::ForceParallel)
     return true;
-  if (equation_count < newton_parallel_setup_min_equations())
+  const std::size_t worker_count = ThreadPool::get()->workerCount();
+  if (worker_count <= 1)
     return false;
-  return ThreadPool::get()->hasWorkers();
+  if (equation_count < newton_parallel_setup_min_equations(worker_count))
+    return false;
+  return true;
 }
 
 template <class D>
@@ -169,8 +176,7 @@ template <class D> struct NewtonRhsTaskRecord {
 };
 
 template <class D>
-std::vector<std::pair<Symbol, DomVal<D>>>
-build_newton_initial_values(
+std::vector<std::pair<Symbol, DomVal<D>>> build_newton_initial_values(
     const std::vector<std::pair<Symbol, E0<D>>> &eqns,
     NewtonSetupExecutionMode mode = NewtonSetupExecutionMode::Auto) {
   using V = DomVal<D>;
@@ -198,15 +204,21 @@ build_newton_initial_values(
   std::vector<std::exception_ptr> errors(eqns.size());
   ThreadPool *pool = ThreadPool::get();
   const auto execution_context = capture_execution_context<D>();
-  pool->parallelFor<std::size_t>(0, eqns.size(), 1, [&](std::size_t i) {
-    ScopedExecutionContext<D> context_scope(execution_context);
-    try {
-      require_newton_compatible_expr<D>(eqns[i].second);
-      values[i] = I0<D>::eval(false, nu0, eqns[i].second);
-    } catch (...) {
-      errors[i] = std::current_exception();
-    }
-  });
+  const std::size_t grain_size = detail::parallel_task_grain_size(
+      eqns.size(), pool->workerCount());
+  pool->parallelFor<std::size_t>(0, eqns.size(), grain_size,
+                                 [&](std::size_t i) {
+                                   ScopedExecutionContext<D> context_scope(
+                                       execution_context);
+                                   try {
+                                     require_newton_compatible_expr<D>(
+                                         eqns[i].second);
+                                     values[i] =
+                                         I0<D>::eval(false, nu0, eqns[i].second);
+                                   } catch (...) {
+                                     errors[i] = std::current_exception();
+                                   }
+                                 });
   for (std::size_t i = 0; i < eqns.size(); ++i) {
     if (errors[i])
       std::rethrow_exception(errors[i]);
@@ -238,7 +250,8 @@ NewtonRoundSetup<D> build_newton_round_setup(
   setup.tensor_laws_validated =
       setup.tensor_admissible && tensor_paper_laws_validated<D>();
 
-  bool parallelize = should_parallelize_newton_setup(verbose, eqns.size(), mode);
+  bool parallelize =
+      should_parallelize_newton_setup(verbose, eqns.size(), mode);
   // The Newton setup path assumes per-equation AST ownership during cached
   // evaluation. Shared polynomial nodes force a conservative serial fallback.
   if (parallelize && equations_share_polynomial_nodes<D>(eqns))
@@ -270,8 +283,7 @@ NewtonRoundSetup<D> build_newton_round_setup(
           eqn.second->k == Exp0<D>::Project && tensor_d &&
           tensor_d->k == Exp1<TD>::Project) {
         tensor_rhs = Exp1<TD>::project(Exp1<TD>::add(
-            Exp1<TD>::term(TensorTraits::right_constant(delta0)),
-            tensor_d->t));
+            Exp1<TD>::term(TensorTraits::right_constant(delta0)), tensor_d->t));
       }
       record.rhs_tensor = tensor_rhs;
     }
@@ -293,27 +305,25 @@ NewtonRoundSetup<D> build_newton_round_setup(
   std::vector<NewtonRhsTaskRecord<D>> records(eqns.size());
   ThreadPool *pool = ThreadPool::get();
   const auto execution_context = capture_execution_context<D>();
-  pool->parallelFor<std::size_t>(0, eqns.size(), 1, [&](std::size_t i) {
-    ScopedExecutionContext<D> context_scope(execution_context);
-    try {
-      build_eqn_rhs(i, false, records[i]);
-    } catch (...) {
-      records[i].error = std::current_exception();
-    }
-  });
-
-  setup.has_lcfl_structure = pool->parallelReduce<std::size_t>(
-      0, records.size(), 1, false,
-      [&records](std::size_t i) {
-        return records[i].has_lcfl_structure;
-      },
-      [](bool has_lcfl, bool local_has_lcfl) {
-        return has_lcfl || local_has_lcfl;
-      });
+  const std::size_t grain_size = detail::parallel_task_grain_size(
+      eqns.size(), pool->workerCount());
+  pool->parallelFor<std::size_t>(0, eqns.size(), grain_size,
+                                 [&](std::size_t i) {
+                                   ScopedExecutionContext<D> context_scope(
+                                       execution_context);
+                                   try {
+                                     build_eqn_rhs(i, false, records[i]);
+                                   } catch (...) {
+                                     records[i].error =
+                                         std::current_exception();
+                                   }
+                                 });
 
   for (std::size_t i = 0; i < eqns.size(); ++i) {
     if (records[i].error)
       std::rethrow_exception(records[i].error);
+    setup.has_lcfl_structure =
+        setup.has_lcfl_structure || records[i].has_lcfl_structure;
     setup.rhs.emplace_back(eqns[i].first, records[i].rhs);
     if (setup.tensor_laws_validated)
       setup.rhs_tensor.emplace_back(eqns[i].first, records[i].rhs_tensor);
@@ -346,10 +356,9 @@ void annotate_adaptive_scc_plan(
     info.tensor_laws_validated = setup.tensor_laws_validated;
     info.tensor_projection_fragment_supported = projection_fragment_supported;
     for (int idx : info.members) {
-      info.has_lcfl_structure =
-          info.has_lcfl_structure ||
-          LCFLDetector<D>::has_lcfl_structure(rhs[static_cast<std::size_t>(idx)]
-                                                  .second);
+      info.has_lcfl_structure = info.has_lcfl_structure ||
+                                LCFLDetector<D>::has_lcfl_structure(
+                                    rhs[static_cast<std::size_t>(idx)].second);
       if (setup.tensor_laws_validated) {
         info.tensor_projection_sensitive =
             info.tensor_projection_sensitive ||
@@ -395,18 +404,25 @@ void annotate_adaptive_scc_plan(
 template <class D>
 void solve_linear_direct_component(
     const std::vector<std::pair<Symbol, E1<D>>> &rhs, const int idx,
-    const std::unordered_map<Symbol, DomVal<D>> &base_env,
+    const detail::LinearSccPlan<D> &plan,
+    const std::deque<DomVal<D>> &base_values,
     std::atomic<long> &shared_steps, detail::LinearSccTaskResult<D> &result) {
   result.values.clear();
-  const Symbol &sym = rhs[static_cast<std::size_t>(idx)].first;
-  if (!detail::try_claim_linear_step(shared_steps, domain_max_linear_steps<D>())) {
+  if (!detail::try_claim_linear_step(shared_steps,
+                                     domain_max_linear_steps<D>())) {
     result.hit_limit = true;
-    result.values.push_back(base_env.at(sym));
+    result.values.push_back(base_values[static_cast<std::size_t>(idx)]);
     return;
   }
   ++result.steps;
-  result.values.push_back(I1<D>::eval(
-      false, base_env, rhs[static_cast<std::size_t>(idx)].second));
+  auto lookup = [&](const Symbol &sym) -> const DomVal<D> & {
+    const auto it = plan.sym_to_idx.find(sym);
+    assert(it != plan.sym_to_idx.end() && "missing dense symbol index");
+    return base_values[static_cast<std::size_t>(it->second)];
+  };
+  result.values.push_back(
+      I1<D>::evalWithLookup(false, lookup,
+                            rhs[static_cast<std::size_t>(idx)].second));
 }
 
 template <class D>
@@ -415,8 +431,8 @@ void solve_linear_tensor_component(
     const std::vector<
         std::pair<Symbol, E1<typename TensorSemiringTraits<D>::tensor_domain>>>
         &rhs_tensor,
-    const std::vector<int> &scc,
-    const std::unordered_map<Symbol, DomVal<D>> &base_env,
+    const detail::LinearSccPlan<D> &plan, const std::vector<int> &scc,
+    const std::deque<DomVal<D>> &base_values,
     detail::LinearSccTaskResult<D> &result) {
   using TD = typename TensorSemiringTraits<D>::tensor_domain;
   std::vector<std::pair<Symbol, E1<D>>> local_rhs;
@@ -428,12 +444,11 @@ void solve_linear_tensor_component(
   for (int idx : scc) {
     local_rhs.push_back(rhs[static_cast<std::size_t>(idx)]);
     local_rhs_tensor.push_back(rhs_tensor[static_cast<std::size_t>(idx)]);
-    const Symbol &sym = rhs[static_cast<std::size_t>(idx)].first;
-    init.push_back(base_env.at(sym));
+    init.push_back(base_values[static_cast<std::size_t>(idx)]);
   }
-  result.values =
-      solve_linear_tensor_paper_impl<D>(verbose, local_rhs, local_rhs_tensor,
-                                        std::move(init));
+  (void)plan;
+  result.values = solve_linear_tensor_paper_impl<D>(
+      verbose, local_rhs, local_rhs_tensor, std::move(init));
 }
 
 template <class D>
@@ -443,10 +458,7 @@ std::vector<DomVal<D>> solve_linear_adaptive_scc_from_plan(
         std::pair<Symbol, E1<typename TensorSemiringTraits<D>::tensor_domain>>>
         &rhs_tensor,
     std::vector<DomVal<D>> init, const detail::LinearSccPlan<D> &plan) {
-  using V = DomVal<D>;
-  std::unordered_map<Symbol, V> env;
-  for (int i = 0; i < static_cast<int>(rhs.size()); ++i)
-    env[rhs[static_cast<std::size_t>(i)].first] = init[static_cast<std::size_t>(i)];
+  std::deque<DomVal<D>> values = detail::make_dense_value_buffer<D>(init);
 
   std::atomic<long> shared_steps(0);
   ThreadPool *pool = ThreadPool::get();
@@ -465,8 +477,7 @@ std::vector<DomVal<D>> solve_linear_adaptive_scc_from_plan(
         0, layer.size(), 1, AdaptiveSccStats(),
         [&](std::size_t pos) {
           AdaptiveSccStats local;
-          const auto &info =
-              plan.infos[static_cast<std::size_t>(layer[pos])];
+          const auto &info = plan.infos[static_cast<std::size_t>(layer[pos])];
           switch (info.strategy) {
           case detail::SccStrategy::Direct:
             ++local.direct_count;
@@ -502,16 +513,16 @@ std::vector<DomVal<D>> solve_linear_adaptive_scc_from_plan(
     const auto &scc = plan.sccs[static_cast<std::size_t>(sid)];
     switch (info.strategy) {
     case detail::SccStrategy::Direct:
-      solve_linear_direct_component<D>(rhs, scc.front(), env, shared_steps,
-                                       result);
+      solve_linear_direct_component<D>(rhs, scc.front(), plan, values,
+                                       shared_steps, result);
       break;
     case detail::SccStrategy::Tensor:
-      solve_linear_tensor_component<D>(verbose, rhs, rhs_tensor, scc, env,
-                                       result);
+      solve_linear_tensor_component<D>(verbose, rhs, rhs_tensor, plan, scc,
+                                       values, result);
       break;
     case detail::SccStrategy::Worklist:
       detail::solve_linear_scc_parallel_component<D>(
-          rhs, scc, plan.intra_scc_users, env, shared_steps, result);
+          plan, rhs, scc, values, shared_steps, result);
       break;
     }
   };
@@ -519,16 +530,20 @@ std::vector<DomVal<D>> solve_linear_adaptive_scc_from_plan(
   for (const auto &layer : plan.layers) {
     std::vector<detail::LinearSccTaskResult<D>> results(layer.size());
     if (parallelize && layer.size() > 1) {
-      pool->parallelFor<std::size_t>(0, layer.size(), 1,
+      const std::size_t grain_size =
+          detail::parallel_task_grain_size(layer.size(), pool->workerCount());
+      pool->parallelFor<std::size_t>(0, layer.size(), grain_size,
                                      [&](std::size_t pos) {
-        const int sid = layer[pos];
-        ScopedExecutionContext<D> context_scope(execution_context);
-        try {
-          solve_component(sid, results[pos]);
-        } catch (...) {
-          results[pos].error = std::current_exception();
-        }
-      });
+                                       const int sid = layer[pos];
+                                       ScopedExecutionContext<D> context_scope(
+                                           execution_context);
+                                       try {
+                                         solve_component(sid, results[pos]);
+                                       } catch (...) {
+                                         results[pos].error =
+                                             std::current_exception();
+                                       }
+                                     });
     } else {
       for (std::size_t pos = 0; pos < layer.size(); ++pos) {
         try {
@@ -539,6 +554,7 @@ std::vector<DomVal<D>> solve_linear_adaptive_scc_from_plan(
       }
     }
 
+    bool hit_limit = false;
     for (std::size_t pos = 0; pos < layer.size(); ++pos) {
       if (results[pos].error)
         std::rethrow_exception(results[pos].error);
@@ -546,15 +562,11 @@ std::vector<DomVal<D>> solve_linear_adaptive_scc_from_plan(
       const auto &scc = plan.sccs[static_cast<std::size_t>(sid)];
       for (std::size_t value_pos = 0; value_pos < scc.size(); ++value_pos) {
         const int idx = scc[value_pos];
-        env[rhs[static_cast<std::size_t>(idx)].first] =
-            results[pos].values[value_pos];
+        values[static_cast<std::size_t>(idx)] = results[pos].values[value_pos];
         init[static_cast<std::size_t>(idx)] = results[pos].values[value_pos];
       }
+      hit_limit = hit_limit || results[pos].hit_limit;
     }
-    const bool hit_limit = pool->parallelReduce<std::size_t>(
-        0, results.size(), 1, false,
-        [&results](std::size_t pos) { return results[pos].hit_limit; },
-        [](bool acc, bool value) { return acc || value; });
     note_layer_stats(layer);
     if (hit_limit) {
       npa_note_linear_limit_hit();
@@ -585,7 +597,8 @@ std::vector<std::pair<Symbol, DomVal<D>>> run_newton_iteration(
     LinearStrategy linStrat = LinearStrategy::SCC,
     NewtonSetupExecutionMode mode = NewtonSetupExecutionMode::Auto) {
   using V = DomVal<D>;
-  auto setup = build_newton_round_setup<D>(verbose, eqns, binds, linStrat, mode);
+  auto setup =
+      build_newton_round_setup<D>(verbose, eqns, binds, linStrat, mode);
   const bool use_tensor =
       setup.tensor_laws_validated && setup.has_lcfl_structure;
   if (linStrat == LinearStrategy::TensorProduct && verbose) {

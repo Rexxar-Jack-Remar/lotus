@@ -241,9 +241,12 @@ std::string buildPointerIdentityChainIR(unsigned depth) {
   return ir.str();
 }
 
-const unsigned kSafeCoreChainDepth =
-    static_cast<unsigned>(npa::detail::newton_parallel_setup_min_equations()) +
-    1U;
+unsigned safeCoreChainDepth() {
+  return static_cast<unsigned>(npa::detail::newton_parallel_setup_min_equations()) +
+         1U;
+}
+
+unsigned safeCoreChainLeafIndex() { return safeCoreChainDepth() - 1U; }
 
 } // namespace
 
@@ -291,7 +294,7 @@ TEST(NPAParallelRhsHarness, NewtonSolverPropagatesFixpointLimitFromSetupTasks) {
   using Exp0 = npa::Exp0<D>;
 
   std::vector<std::pair<npa::Symbol, E0>> eqns;
-  for (unsigned i = 0; i < kSafeCoreChainDepth; ++i) {
+  for (unsigned i = 0; i < safeCoreChainDepth(); ++i) {
     eqns.emplace_back(
         "X" + std::to_string(i),
         Exp0::star(Exp0::ndet(Exp0::bound("b"), Exp0::term(D::one())), "b"));
@@ -362,8 +365,7 @@ TEST(NPAParallelRhsHarness, SccPlanCapturesIndependentParallelLayer) {
   ASSERT_EQ(plan.layers.size(), 1u);
   ASSERT_EQ(plan.layers.front().size(), 2u);
   EXPECT_TRUE(plan.has_nontrivial_parallelism);
-  EXPECT_EQ(npa::detail::should_parallelize_linear_scc(false, plan),
-            ThreadPool::get()->hasWorkers());
+  EXPECT_FALSE(npa::detail::should_parallelize_linear_scc(false, plan));
 
   auto serial =
       npa::detail::solve_linear_scc_serial_from_plan<D>(false, rhs, init, plan);
@@ -480,11 +482,11 @@ TEST(NPAParallelRhsHarness, VerboseSccModeForcesSerialScheduling) {
 TEST(NPAParallelRhsHarness,
      MaybeUninitializedChainProducesExpectedFactsAcrossWorkerCounts) {
   llvm::LLVMContext ctx;
-  auto module = parseModule(ctx, buildPointerIdentityChainIR(kSafeCoreChainDepth));
+  auto module = parseModule(ctx, buildPointerIdentityChainIR(safeCoreChainDepth()));
   ASSERT_NE(module, nullptr);
 
   auto *Deep = module->getFunction(
-      ("g" + std::to_string(kSafeCoreChainDepth - 1)).c_str());
+      ("g" + std::to_string(safeCoreChainLeafIndex())).c_str());
   ASSERT_NE(Deep, nullptr);
 
   auto worklist = npa::InterproceduralMaybeUninitialized::run(
@@ -508,11 +510,11 @@ TEST(NPAParallelRhsHarness,
 TEST(NPAParallelRhsHarness,
      ReachingDefinitionsChainProducesExpectedFactsAcrossWorkerCounts) {
   llvm::LLVMContext ctx;
-  auto module = parseModule(ctx, buildScalarIdentityChainIR(kSafeCoreChainDepth));
+  auto module = parseModule(ctx, buildScalarIdentityChainIR(safeCoreChainDepth()));
   ASSERT_NE(module, nullptr);
 
   auto *Deep = module->getFunction(
-      ("f" + std::to_string(kSafeCoreChainDepth - 1)).c_str());
+      ("f" + std::to_string(safeCoreChainLeafIndex())).c_str());
   ASSERT_NE(Deep, nullptr);
 
   auto worklist = npa::InterproceduralRD::run(
@@ -536,11 +538,11 @@ TEST(NPAParallelRhsHarness,
 TEST(NPAParallelRhsHarness,
      LiveVariablesChainProducesExpectedFactsAcrossWorkerCounts) {
   llvm::LLVMContext ctx;
-  auto module = parseModule(ctx, buildScalarIdentityChainIR(kSafeCoreChainDepth));
+  auto module = parseModule(ctx, buildScalarIdentityChainIR(safeCoreChainDepth()));
   ASSERT_NE(module, nullptr);
 
   auto *Deep = module->getFunction(
-      ("f" + std::to_string(kSafeCoreChainDepth - 1)).c_str());
+      ("f" + std::to_string(safeCoreChainLeafIndex())).c_str());
   ASSERT_NE(Deep, nullptr);
   auto *Arg = &*Deep->arg_begin();
 
@@ -570,11 +572,11 @@ TEST(NPAParallelRhsHarness,
 TEST(NPAParallelRhsHarness,
      ConstantPropagationChainProducesExpectedFactsAcrossWorkerCounts) {
   llvm::LLVMContext ctx;
-  auto module = parseModule(ctx, buildScalarIdentityChainIR(kSafeCoreChainDepth));
+  auto module = parseModule(ctx, buildScalarIdentityChainIR(safeCoreChainDepth()));
   ASSERT_NE(module, nullptr);
 
   auto *Deep = module->getFunction(
-      ("f" + std::to_string(kSafeCoreChainDepth - 1)).c_str());
+      ("f" + std::to_string(safeCoreChainLeafIndex())).c_str());
   ASSERT_NE(Deep, nullptr);
   auto *Arg = &*Deep->arg_begin();
 
@@ -603,11 +605,11 @@ TEST(NPAParallelRhsHarness,
 TEST(NPAParallelRhsHarness,
      IntervalChainProducesExpectedFactsAcrossWorkerCounts) {
   llvm::LLVMContext ctx;
-  auto module = parseModule(ctx, buildScalarIdentityChainIR(kSafeCoreChainDepth));
+  auto module = parseModule(ctx, buildScalarIdentityChainIR(safeCoreChainDepth()));
   ASSERT_NE(module, nullptr);
 
   auto *Deep = module->getFunction(
-      ("f" + std::to_string(kSafeCoreChainDepth - 1)).c_str());
+      ("f" + std::to_string(safeCoreChainLeafIndex())).c_str());
   ASSERT_NE(Deep, nullptr);
   auto *Arg = &*Deep->arg_begin();
 
@@ -637,11 +639,11 @@ TEST(NPAParallelRhsHarness,
 TEST(NPAParallelRhsHarness,
      ConstantPropagationTensorFallbackPreservesResultsAcrossWorkerCounts) {
   llvm::LLVMContext ctx;
-  auto module = parseModule(ctx, buildScalarIdentityChainIR(kSafeCoreChainDepth));
+  auto module = parseModule(ctx, buildScalarIdentityChainIR(safeCoreChainDepth()));
   ASSERT_NE(module, nullptr);
 
   auto *Deep = module->getFunction(
-      ("f" + std::to_string(kSafeCoreChainDepth - 1)).c_str());
+      ("f" + std::to_string(safeCoreChainLeafIndex())).c_str());
   ASSERT_NE(Deep, nullptr);
   auto *Arg = &*Deep->arg_begin();
 
@@ -669,7 +671,7 @@ TEST(NPAParallelRhsHarness,
 TEST(NPAParallelRhsHarness,
      ConstantPropagationAdaptiveSccMatchesSccAndReportsStats) {
   llvm::LLVMContext ctx;
-  auto module = parseModule(ctx, buildScalarIdentityChainIR(kSafeCoreChainDepth));
+  auto module = parseModule(ctx, buildScalarIdentityChainIR(safeCoreChainDepth()));
   ASSERT_NE(module, nullptr);
 
   auto scc = npa::InterproceduralConstantPropagation::run(
@@ -691,7 +693,7 @@ TEST(NPAParallelRhsHarness,
 
 TEST(NPAParallelRhsHarness, IntervalAdaptiveSccMatchesSccAndReportsStats) {
   llvm::LLVMContext ctx;
-  auto module = parseModule(ctx, buildScalarIdentityChainIR(kSafeCoreChainDepth));
+  auto module = parseModule(ctx, buildScalarIdentityChainIR(safeCoreChainDepth()));
   ASSERT_NE(module, nullptr);
 
   auto scc = npa::InterproceduralIntervalAnalysis::run(

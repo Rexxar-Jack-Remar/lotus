@@ -29,10 +29,10 @@ static cl::opt<std::string> InputFilename(cl::Positional, cl::desc("<bitcode>"),
                                           cl::Required);
 static cl::opt<std::string> OutDir("out-dir", cl::desc("Output directory"),
                                    cl::value_desc("dir"), cl::init(""));
-static cl::opt<bool>
-    StdoutOpt("stdout",
-              cl::desc("Write analysis results to stdout when --out-dir is not set"),
-              cl::init(false));
+static cl::opt<bool> StdoutOpt(
+    "stdout",
+    cl::desc("Write analysis results to stdout when --out-dir is not set"),
+    cl::init(false));
 static cl::opt<std::string>
     AnalysisOpt("analysis",
                 cl::desc("Analysis: liveness (default), reachable, "
@@ -48,23 +48,6 @@ mono::DebugConfig quietMonoDebugConfig() {
   mono::DebugConfig Config;
   Config.collect_statistics = false;
   return Config;
-}
-
-template <typename T>
-void formatValueSet(raw_ostream &OS, const std::set<T> &S,
-                    const ValueIdMap &ValueToId) {
-  std::vector<std::string> ids;
-  for (const Value *V : S) {
-    auto It = ValueToId.find(V);
-    if (It != ValueToId.end())
-      ids.push_back(It->second);
-  }
-  std::sort(ids.begin(), ids.end());
-  for (size_t i = 0; i < ids.size(); ++i) {
-    if (i)
-      OS << ",";
-    OS << ids[i];
-  }
 }
 
 std::string formatMonoConstantValue(const mono::ConstantPropagationValue &Val) {
@@ -83,67 +66,41 @@ std::string formatMonoConstantValue(const mono::ConstantPropagationValue &Val) {
   return ss.str();
 }
 
-template <typename ValueType>
-void formatConstPropMap(raw_ostream &OS,
-                        const std::unordered_map<const Value *, ValueType> &M,
-                        const ValueIdMap &ValueToId) {
-  std::vector<std::string> entries;
-  for (const auto &Entry : M) {
-    std::ostringstream ss;
-    auto It = ValueToId.find(Entry.first);
-    ss << (It != ValueToId.end() ? It->second : "v") << "="
-       << formatMonoConstantValue(Entry.second);
-    entries.push_back(ss.str());
-  }
-  std::sort(entries.begin(), entries.end());
-  for (size_t i = 0; i < entries.size(); ++i) {
-    if (i)
-      OS << ",";
-    OS << entries[i];
-  }
-}
-
-template <typename Printer>
-void printInstructionStates(raw_ostream &OS, const FunctionView &View,
-                            Printer &&PrintState) {
-  for (auto *I : View.OrderedInsts) {
-    OS << "  " << View.ValueToId.at(I) << " IN: ";
-    PrintState(I);
-    OS << "\n";
-  }
-}
-
 void runLiveness(raw_ostream &OS, const FunctionView &View) {
-  if (auto Res =
-          mono::runLiveVariablesAnalysis(&View.Function, quietMonoDebugConfig()))
-    printInstructionStates(OS, View, [&](Instruction *I) {
-      formatValueSet(OS, Res->IN(I), View.ValueToId);
+  if (auto Res = mono::runLiveVariablesAnalysis(&View.Function,
+                                                quietMonoDebugConfig()))
+    lotus::dataflow_tool::printInstructionStates(OS, View, [&](Instruction *I) {
+      lotus::dataflow_tool::formatValueSet(OS, Res->IN(I), View.ValueToId);
     });
 }
 
 void runReachable(raw_ostream &OS, const FunctionView &View) {
   if (auto Res =
           mono::runReachableAnalysis(&View.Function, quietMonoDebugConfig()))
-    printInstructionStates(OS, View, [&](Instruction *I) {
-      formatValueSet(OS, Res->IN(I), View.ValueToId);
+    lotus::dataflow_tool::printInstructionStates(OS, View, [&](Instruction *I) {
+      lotus::dataflow_tool::formatValueSet(OS, Res->IN(I), View.ValueToId);
     });
 }
 
 void runConstantPropagation(raw_ostream &OS, const FunctionView &View) {
   auto Res = mono::runIntraMonoConstantPropagation(&View.Function,
                                                    quietMonoDebugConfig());
-  printInstructionStates(OS, View, [&](Instruction *I) {
+  lotus::dataflow_tool::printInstructionStates(OS, View, [&](Instruction *I) {
     auto It = Res.find(I);
     if (It != Res.end())
-      formatConstPropMap(OS, It->second, View.ValueToId);
+      lotus::dataflow_tool::formatValueMap(
+          OS, It->second, View.ValueToId,
+          [&](const mono::ConstantPropagationValue &Value) {
+            return formatMonoConstantValue(Value);
+          });
   });
 }
 
 void runUninitialized(raw_ostream &OS, const FunctionView &View) {
   if (auto Res = mono::runIntraMonoUninitVariables(&View.Function,
                                                    quietMonoDebugConfig()))
-    printInstructionStates(OS, View, [&](Instruction *I) {
-      formatValueSet(OS, Res->IN(I), View.ValueToId);
+    lotus::dataflow_tool::printInstructionStates(OS, View, [&](Instruction *I) {
+      lotus::dataflow_tool::formatValueSet(OS, Res->IN(I), View.ValueToId);
     });
 }
 
@@ -152,18 +109,12 @@ struct AnalysisHandler final {
   void (*Run)(raw_ostream &, const FunctionView &);
 };
 
-const AnalysisHandler *findHandler(StringRef Name) {
-  static const AnalysisHandler Handlers[] = {
-      {"liveness", &runLiveness},
-      {"reachable", &runReachable},
-      {"constant_prop", &runConstantPropagation},
-      {"uninitialized", &runUninitialized},
-  };
-  for (const auto &Handler : Handlers)
-    if (Handler.Name == Name)
-      return &Handler;
-  return nullptr;
-}
+const AnalysisHandler Handlers[] = {
+    {"liveness", &runLiveness},
+    {"reachable", &runReachable},
+    {"constant_prop", &runConstantPropagation},
+    {"uninitialized", &runUninitialized},
+};
 
 } // namespace
 
@@ -181,38 +132,26 @@ int main(int argc, char **argv) {
   lotus::dataflow_tool::prepareModule(*M);
 
   raw_null_ostream NullOS;
-  raw_ostream *OutOS = &NullOS;
-  if (StdoutOpt)
-    OutOS = &outs();
   std::unique_ptr<raw_fd_ostream> FileOS;
-  if (!OutDir.empty()) {
-    std::error_code EC;
-    FileOS =
-        lotus::dataflow_tool::openOutputFileOrReport(OutDir, "mono.txt", EC);
-    if (EC) {
-      errs() << "error: cannot create " << OutDir
-             << "/mono.txt: " << EC.message() << "\n";
-      return 1;
-    }
-    OutOS = FileOS.get();
+  std::error_code EC;
+  raw_ostream &OS = lotus::dataflow_tool::selectOutputStream(
+      StdoutOpt, OutDir, "mono.txt", FileOS, NullOS, EC);
+  if (EC) {
+    errs() << "error: cannot create " << OutDir << "/mono.txt: " << EC.message()
+           << "\n";
+    return 1;
   }
-  raw_ostream &OS = *OutOS;
 
-  const auto *Handler = findHandler(AnalysisOpt);
+  const auto *Handler =
+      lotus::dataflow_tool::findHandler(AnalysisOpt, Handlers);
   if (!Handler) {
     errs() << "error: unknown mono analysis '" << AnalysisOpt << "'\n";
     return 1;
   }
 
   OS << "[mono:" << AnalysisOpt << "]\n";
-  for (auto &F : *M) {
-    if (F.isDeclaration())
-      continue;
-
-    auto View = lotus::dataflow_tool::buildFunctionView(F);
-    OS << "FUNC " << F.getName() << "\n";
-    Handler->Run(OS, View);
-  }
+  lotus::dataflow_tool::forEachDefinedFunction(
+      *M, OS, [&](const FunctionView &View) { Handler->Run(OS, View); });
 
   return 0;
 }

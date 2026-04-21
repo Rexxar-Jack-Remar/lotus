@@ -39,10 +39,10 @@ static cl::opt<std::string> InputFilename(cl::Positional, cl::desc("<bitcode>"),
                                           cl::Required);
 static cl::opt<std::string> OutDir("out-dir", cl::desc("Output directory"),
                                    cl::value_desc("dir"), cl::init(""));
-static cl::opt<bool>
-    StdoutOpt("stdout",
-              cl::desc("Write analysis results to stdout when --out-dir is not set"),
-              cl::init(false));
+static cl::opt<bool> StdoutOpt(
+    "stdout",
+    cl::desc("Write analysis results to stdout when --out-dir is not set"),
+    cl::init(false));
 static cl::opt<std::string> AnalysisOpt(
     "analysis",
     cl::desc("Analysis: liveness (default), reaching_defs, uninitialized, "
@@ -66,34 +66,6 @@ mono::DebugConfig quietMonoDebugConfig() {
   mono::DebugConfig Config;
   Config.collect_statistics = false;
   return Config;
-}
-
-elimination::EliminationOptions getElimOptions() {
-  elimination::EliminationOptions Opts;
-  if (ElimMethodOpt == "adt-simple")
-    Opts.Method = elimination::EliminationMethod::ADTSimple;
-  else if (ElimMethodOpt == "adt-delayed")
-    Opts.Method = elimination::EliminationMethod::ADTDelayed;
-  else
-    Opts.Method = elimination::EliminationMethod::StateElimination;
-  return Opts;
-}
-
-template <typename T>
-void formatValueSet(raw_ostream &OS, const std::set<T> &S,
-                    const ValueIdMap &ValueToId) {
-  std::vector<std::string> ids;
-  for (const Value *V : S) {
-    auto It = ValueToId.find(V);
-    if (It != ValueToId.end())
-      ids.push_back(It->second);
-  }
-  std::sort(ids.begin(), ids.end());
-  for (size_t i = 0; i < ids.size(); ++i) {
-    if (i)
-      OS << ",";
-    OS << ids[i];
-  }
 }
 
 std::string formatExpressionKey(const elimination::ExpressionKey &Key) {
@@ -144,26 +116,6 @@ std::string formatMonoConstantValue(const mono::ConstantPropagationValue &Val) {
   return ss.str();
 }
 
-template <typename ValueType, typename Formatter>
-void formatMap(raw_ostream &OS,
-               const std::unordered_map<const Value *, ValueType> &Map,
-               const ValueIdMap &ValueToId, Formatter &&FormatValue) {
-  std::vector<std::string> entries;
-  for (const auto &Entry : Map) {
-    std::ostringstream ss;
-    auto It = ValueToId.find(Entry.first);
-    ss << (It != ValueToId.end() ? It->second : "v") << "="
-       << FormatValue(Entry.second);
-    entries.push_back(ss.str());
-  }
-  std::sort(entries.begin(), entries.end());
-  for (size_t i = 0; i < entries.size(); ++i) {
-    if (i)
-      OS << ",";
-    OS << entries[i];
-  }
-}
-
 std::string formatIFDSFact(const ifds::DefinitionFact &Fact,
                            const ValueIdMap &ValueToId) {
   if (Fact.is_zero())
@@ -212,16 +164,6 @@ const Instruction *getNextInstruction(const Instruction *I) {
   return nullptr;
 }
 
-template <typename Printer>
-void printInstructionStates(raw_ostream &OS, const FunctionView &View,
-                            Printer &&PrintState) {
-  for (auto *I : View.OrderedInsts) {
-    OS << "  " << View.ValueToId.at(I) << " IN: ";
-    PrintState(I);
-    OS << "\n";
-  }
-}
-
 class OutputManager {
   std::unique_ptr<raw_fd_ostream> ElimOut;
   std::unique_ptr<raw_fd_ostream> MonoOut;
@@ -262,19 +204,6 @@ public:
   }
 };
 
-template <typename HandlerT>
-const HandlerT *findHandler(StringRef Name, const HandlerT *Handlers,
-                            size_t Count) {
-  for (size_t Index = 0; Index < Count; ++Index)
-    if (Handlers[Index].Name == Name)
-      return &Handlers[Index];
-  return nullptr;
-}
-
-template <typename T, size_t N> constexpr size_t arraySize(const T (&)[N]) {
-  return N;
-}
-
 struct ElimHandler final {
   StringRef Name;
   void (*Run)(raw_ostream &, const FunctionView &,
@@ -284,8 +213,8 @@ struct ElimHandler final {
 void runElimLiveness(raw_ostream &OS, const FunctionView &View,
                      const elimination::EliminationOptions &Opts) {
   auto Res = elimination::runIntraElimLiveVariables(&View.Function, Opts);
-  printInstructionStates(OS, View, [&](Instruction *I) {
-    formatValueSet(OS, Res.IN(I), View.ValueToId);
+  lotus::dataflow_tool::printInstructionStates(OS, View, [&](Instruction *I) {
+    lotus::dataflow_tool::formatValueSet(OS, Res.IN(I), View.ValueToId);
   });
 }
 
@@ -293,8 +222,8 @@ void runElimReachingDefinitions(raw_ostream &OS, const FunctionView &View,
                                 const elimination::EliminationOptions &Opts) {
   auto Res = elimination::runIntraElimReachingDefinitions(&View.Function,
                                                           nullptr, Opts);
-  printInstructionStates(OS, View, [&](Instruction *I) {
-    formatValueSet(OS, Res.IN(I), View.ValueToId);
+  lotus::dataflow_tool::printInstructionStates(OS, View, [&](Instruction *I) {
+    lotus::dataflow_tool::formatValueSet(OS, Res.IN(I), View.ValueToId);
   });
 }
 
@@ -302,8 +231,8 @@ void runElimUninitialized(raw_ostream &OS, const FunctionView &View,
                           const elimination::EliminationOptions &Opts) {
   auto Res =
       elimination::runIntraElimUninitVariables(&View.Function, nullptr, Opts);
-  printInstructionStates(OS, View, [&](Instruction *I) {
-    formatValueSet(OS, Res.IN(I), View.ValueToId);
+  lotus::dataflow_tool::printInstructionStates(OS, View, [&](Instruction *I) {
+    lotus::dataflow_tool::formatValueSet(OS, Res.IN(I), View.ValueToId);
   });
 }
 
@@ -311,11 +240,11 @@ void runElimConstantPropagation(raw_ostream &OS, const FunctionView &View,
                                 const elimination::EliminationOptions &Opts) {
   auto Res = elimination::runIntraElimConstantPropagation(&View.Function,
                                                           nullptr, Opts);
-  printInstructionStates(OS, View, [&](Instruction *I) {
-    formatMap(OS, Res.IN(I), View.ValueToId,
-              [&](const ValueLatticeElement &Val) {
-                return formatValueLatticeElement(Val);
-              });
+  lotus::dataflow_tool::printInstructionStates(OS, View, [&](Instruction *I) {
+    lotus::dataflow_tool::formatValueMap(
+        OS, Res.IN(I), View.ValueToId, [&](const ValueLatticeElement &Val) {
+          return formatValueLatticeElement(Val);
+        });
   });
 }
 
@@ -323,7 +252,7 @@ void runElimAvailableExpressions(raw_ostream &OS, const FunctionView &View,
                                  const elimination::EliminationOptions &Opts) {
   auto Res = elimination::runIntraElimAvailableExpressions(&View.Function,
                                                            nullptr, Opts);
-  printInstructionStates(OS, View, [&](Instruction *I) {
+  lotus::dataflow_tool::printInstructionStates(OS, View, [&](Instruction *I) {
     std::vector<std::string> Exprs;
     for (const auto &Expr : Res.IN(I))
       Exprs.push_back(formatExpressionKey(Expr));
@@ -339,7 +268,7 @@ void runElimAvailableExpressions(raw_ostream &OS, const FunctionView &View,
 void runElimReachable(raw_ostream &OS, const FunctionView &View,
                       const elimination::EliminationOptions &Opts) {
   auto Res = elimination::runIntraElimReachable(&View.Function, Opts);
-  printInstructionStates(
+  lotus::dataflow_tool::printInstructionStates(
       OS, View, [&](Instruction *I) { OS << (Res.IN(I) ? "true" : "false"); });
 }
 
@@ -349,39 +278,40 @@ struct MonoHandler final {
 };
 
 void runMonoLiveness(raw_ostream &OS, const FunctionView &View) {
-  if (auto Res =
-          mono::runLiveVariablesAnalysis(&View.Function, quietMonoDebugConfig()))
-    printInstructionStates(OS, View, [&](Instruction *I) {
-      formatValueSet(OS, Res->IN(I), View.ValueToId);
+  if (auto Res = mono::runLiveVariablesAnalysis(&View.Function,
+                                                quietMonoDebugConfig()))
+    lotus::dataflow_tool::printInstructionStates(OS, View, [&](Instruction *I) {
+      lotus::dataflow_tool::formatValueSet(OS, Res->IN(I), View.ValueToId);
     });
 }
 
 void runMonoReachable(raw_ostream &OS, const FunctionView &View) {
   if (auto Res =
           mono::runReachableAnalysis(&View.Function, quietMonoDebugConfig()))
-    printInstructionStates(OS, View, [&](Instruction *I) {
-      formatValueSet(OS, Res->IN(I), View.ValueToId);
+    lotus::dataflow_tool::printInstructionStates(OS, View, [&](Instruction *I) {
+      lotus::dataflow_tool::formatValueSet(OS, Res->IN(I), View.ValueToId);
     });
 }
 
 void runMonoConstantPropagation(raw_ostream &OS, const FunctionView &View) {
   auto Res = mono::runIntraMonoConstantPropagation(&View.Function,
                                                    quietMonoDebugConfig());
-  printInstructionStates(OS, View, [&](Instruction *I) {
+  lotus::dataflow_tool::printInstructionStates(OS, View, [&](Instruction *I) {
     auto It = Res.find(I);
     if (It != Res.end())
-      formatMap(OS, It->second, View.ValueToId,
-                [&](const mono::ConstantPropagationValue &Val) {
-                  return formatMonoConstantValue(Val);
-                });
+      lotus::dataflow_tool::formatValueMap(
+          OS, It->second, View.ValueToId,
+          [&](const mono::ConstantPropagationValue &Val) {
+            return formatMonoConstantValue(Val);
+          });
   });
 }
 
 void runMonoUninitialized(raw_ostream &OS, const FunctionView &View) {
   if (auto Res = mono::runIntraMonoUninitVariables(&View.Function,
                                                    quietMonoDebugConfig()))
-    printInstructionStates(OS, View, [&](Instruction *I) {
-      formatValueSet(OS, Res->IN(I), View.ValueToId);
+    lotus::dataflow_tool::printInstructionStates(OS, View, [&](Instruction *I) {
+      lotus::dataflow_tool::formatValueSet(OS, Res->IN(I), View.ValueToId);
     });
 }
 
@@ -393,7 +323,7 @@ struct IFDSHandler final {
 template <typename Fact, typename ResultsT>
 void printIFDSResults(raw_ostream &OS, const FunctionView &View,
                       const ResultsT &AllResults) {
-  printInstructionStates(OS, View, [&](Instruction *I) {
+  lotus::dataflow_tool::printInstructionStates(OS, View, [&](Instruction *I) {
     if (const Instruction *NextInst = getNextInstruction(I)) {
       auto Node =
           typename ifds::ExplodedSupergraph<Fact>::Node(NextInst, Fact::zero());
@@ -409,13 +339,10 @@ void runIFDSReachingDefinitions(raw_ostream &OS, Module &M) {
   ifds::IFDSSolver<ifds::ReachingDefinitionsAnalysis> Solver(Problem);
   Solver.solve(M);
   const auto AllResults = Solver.get_all_results();
-  for (auto &F : M) {
-    if (F.isDeclaration())
-      continue;
-    auto View = lotus::dataflow_tool::buildFunctionView(F);
-    OS << "FUNC " << F.getName() << "\n";
-    printIFDSResults<ifds::DefinitionFact>(OS, View, AllResults);
-  }
+  lotus::dataflow_tool::forEachDefinedFunction(
+      M, OS, [&](const FunctionView &View) {
+        printIFDSResults<ifds::DefinitionFact>(OS, View, AllResults);
+      });
 }
 
 void runIFDSUninitialized(raw_ostream &OS, Module &M) {
@@ -423,13 +350,10 @@ void runIFDSUninitialized(raw_ostream &OS, Module &M) {
   ifds::IFDSSolver<ifds::UninitializedVariablesAnalysis> Solver(Problem);
   Solver.solve(M);
   const auto AllResults = Solver.get_all_results();
-  for (auto &F : M) {
-    if (F.isDeclaration())
-      continue;
-    auto View = lotus::dataflow_tool::buildFunctionView(F);
-    OS << "FUNC " << F.getName() << "\n";
-    printIFDSResults<ifds::UninitVarFact>(OS, View, AllResults);
-  }
+  lotus::dataflow_tool::forEachDefinedFunction(
+      M, OS, [&](const FunctionView &View) {
+        printIFDSResults<ifds::UninitVarFact>(OS, View, AllResults);
+      });
 }
 
 const ElimHandler ElimHandlers[] = {
@@ -466,40 +390,31 @@ bool emitHeader(raw_ostream &OS, StringRef Engine, const HandlerT *Handler) {
 void runEliminationAnalysis(Module &M, OutputManager &OutMgr,
                             const elimination::EliminationOptions &ElimOpts) {
   raw_ostream &OS = OutMgr.getStream("elim");
-  const auto *Handler = findHandler(StringRef(AnalysisOpt), ElimHandlers,
-                                    arraySize(ElimHandlers));
+  const auto *Handler =
+      lotus::dataflow_tool::findHandler(StringRef(AnalysisOpt), ElimHandlers);
   if (!emitHeader(OS, "elim", Handler))
     return;
 
-  for (auto &F : M) {
-    if (F.isDeclaration())
-      continue;
-    auto View = lotus::dataflow_tool::buildFunctionView(F);
-    OS << "FUNC " << F.getName() << "\n";
-    Handler->Run(OS, View, ElimOpts);
-  }
+  lotus::dataflow_tool::forEachDefinedFunction(
+      M, OS,
+      [&](const FunctionView &View) { Handler->Run(OS, View, ElimOpts); });
 }
 
 void runMonoAnalysis(Module &M, OutputManager &OutMgr) {
   raw_ostream &OS = OutMgr.getStream("mono");
-  const auto *Handler = findHandler(StringRef(AnalysisOpt), MonoHandlers,
-                                    arraySize(MonoHandlers));
+  const auto *Handler =
+      lotus::dataflow_tool::findHandler(StringRef(AnalysisOpt), MonoHandlers);
   if (!emitHeader(OS, "mono", Handler))
     return;
 
-  for (auto &F : M) {
-    if (F.isDeclaration())
-      continue;
-    auto View = lotus::dataflow_tool::buildFunctionView(F);
-    OS << "FUNC " << F.getName() << "\n";
-    Handler->Run(OS, View);
-  }
+  lotus::dataflow_tool::forEachDefinedFunction(
+      M, OS, [&](const FunctionView &View) { Handler->Run(OS, View); });
 }
 
 void runIFDSAnalysis(Module &M, OutputManager &OutMgr) {
   raw_ostream &OS = OutMgr.getStream("ifds");
-  const auto *Handler = findHandler(StringRef(AnalysisOpt), IFDSHandlers,
-                                    arraySize(IFDSHandlers));
+  const auto *Handler =
+      lotus::dataflow_tool::findHandler(StringRef(AnalysisOpt), IFDSHandlers);
   if (!OutDir.empty() && !Handler)
     return;
 
@@ -527,7 +442,8 @@ int main(int argc, char **argv) {
   lotus::dataflow_tool::prepareModule(*M);
 
   OutputManager OutMgr;
-  const auto ElimOpts = getElimOptions();
+  const auto ElimOpts =
+      lotus::dataflow_tool::parseEliminationOptions(ElimMethodOpt);
   const bool RunElim = EngineOpt == "elim" || EngineOpt == "all";
   const bool RunMono = EngineOpt == "mono" || EngineOpt == "all";
   const bool RunIFDS = EngineOpt == "ifds" || EngineOpt == "all";

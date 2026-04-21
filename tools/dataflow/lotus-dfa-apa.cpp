@@ -34,10 +34,10 @@ static cl::opt<std::string> InputFilename(cl::Positional, cl::desc("<bitcode>"),
                                           cl::Required);
 static cl::opt<std::string> OutDir("out-dir", cl::desc("Output directory"),
                                    cl::value_desc("dir"), cl::init(""));
-static cl::opt<bool>
-    StdoutOpt("stdout",
-              cl::desc("Write analysis results to stdout when --out-dir is not set"),
-              cl::init(false));
+static cl::opt<bool> StdoutOpt(
+    "stdout",
+    cl::desc("Write analysis results to stdout when --out-dir is not set"),
+    cl::init(false));
 static cl::opt<std::string> AnalysisOpt(
     "analysis",
     cl::desc("Analysis: liveness (default), reaching_defs, uninitialized, "
@@ -99,34 +99,6 @@ const char *toString(elimination::FallbackReason R) {
     return "invalid-problem";
   }
   return "unknown";
-}
-
-elimination::EliminationOptions getElimOptions() {
-  elimination::EliminationOptions Opts;
-  if (ElimMethodOpt == "adt-simple")
-    Opts.Method = elimination::EliminationMethod::ADTSimple;
-  else if (ElimMethodOpt == "adt-delayed")
-    Opts.Method = elimination::EliminationMethod::ADTDelayed;
-  else
-    Opts.Method = elimination::EliminationMethod::StateElimination;
-  return Opts;
-}
-
-template <typename T>
-void formatValueSet(raw_ostream &OS, const std::set<T> &S,
-                    const ValueIdMap &ValueToId) {
-  std::vector<std::string> ids;
-  for (const Value *V : S) {
-    auto It = ValueToId.find(V);
-    if (It != ValueToId.end())
-      ids.push_back(It->second);
-  }
-  std::sort(ids.begin(), ids.end());
-  for (size_t i = 0; i < ids.size(); ++i) {
-    if (i)
-      OS << ",";
-    OS << ids[i];
-  }
 }
 
 std::string formatExpressionKey(const elimination::ExpressionKey &Key) {
@@ -397,36 +369,13 @@ void dumpProfile(raw_ostream &OS, const FunctionView &View,
   }
 }
 
-template <typename ValueType>
-void formatConstPropMap(raw_ostream &OS,
-                        const std::unordered_map<const Value *, ValueType> &M,
-                        const ValueIdMap &ValueToId) {
-  std::vector<std::string> entries;
-  for (const auto &Entry : M) {
-    std::ostringstream ss;
-    auto It = ValueToId.find(Entry.first);
-    ss << (It != ValueToId.end() ? It->second : "v") << "="
-       << formatValueLatticeElement(Entry.second);
-    entries.push_back(ss.str());
-  }
-  std::sort(entries.begin(), entries.end());
-  for (size_t i = 0; i < entries.size(); ++i) {
-    if (i)
-      OS << ",";
-    OS << entries[i];
-  }
-}
-
 template <typename ResultT, typename Printer>
 void dumpTimedResult(raw_ostream &OS, const FunctionView &View, ResultT &Result,
                      std::chrono::microseconds Elapsed, Printer &&PrintState) {
   if (DumpProfileOpt || DumpExprsOpt)
     dumpProfile(OS, View, Result, Elapsed);
-  for (auto *I : View.OrderedInsts) {
-    OS << "  " << View.ValueToId.at(I) << " IN: ";
-    PrintState(I, Result);
-    OS << "\n";
-  }
+  lotus::dataflow_tool::printInstructionStates(
+      OS, View, [&](Instruction *I) { PrintState(I, Result); });
 }
 
 template <typename Runner, typename Printer>
@@ -448,7 +397,7 @@ void runLiveness(raw_ostream &OS, const FunctionView &View,
         return elimination::runIntraElimLiveVariables(&F, Opts);
       },
       [&](Instruction *I, auto &Result) {
-        formatValueSet(OS, Result.IN(I), View.ValueToId);
+        lotus::dataflow_tool::formatValueSet(OS, Result.IN(I), View.ValueToId);
       });
 }
 
@@ -460,7 +409,7 @@ void runReachingDefinitions(raw_ostream &OS, const FunctionView &View,
         return elimination::runIntraElimReachingDefinitions(&F, nullptr, Opts);
       },
       [&](Instruction *I, auto &Result) {
-        formatValueSet(OS, Result.IN(I), View.ValueToId);
+        lotus::dataflow_tool::formatValueSet(OS, Result.IN(I), View.ValueToId);
       });
 }
 
@@ -472,7 +421,7 @@ void runUninitialized(raw_ostream &OS, const FunctionView &View,
         return elimination::runIntraElimUninitVariables(&F, nullptr, Opts);
       },
       [&](Instruction *I, auto &Result) {
-        formatValueSet(OS, Result.IN(I), View.ValueToId);
+        lotus::dataflow_tool::formatValueSet(OS, Result.IN(I), View.ValueToId);
       });
 }
 
@@ -484,7 +433,11 @@ void runConstantPropagation(raw_ostream &OS, const FunctionView &View,
         return elimination::runIntraElimConstantPropagation(&F, nullptr, Opts);
       },
       [&](Instruction *I, auto &Result) {
-        formatConstPropMap(OS, Result.IN(I), View.ValueToId);
+        lotus::dataflow_tool::formatValueMap(
+            OS, Result.IN(I), View.ValueToId,
+            [&](const ValueLatticeElement &Value) {
+              return formatValueLatticeElement(Value);
+            });
       });
 }
 
@@ -526,20 +479,14 @@ struct AnalysisHandler final {
               const elimination::EliminationOptions &);
 };
 
-const AnalysisHandler *findHandler(StringRef Name) {
-  static const AnalysisHandler Handlers[] = {
-      {"liveness", &runLiveness},
-      {"reaching_defs", &runReachingDefinitions},
-      {"uninitialized", &runUninitialized},
-      {"constant_prop", &runConstantPropagation},
-      {"available_exprs", &runAvailableExpressions},
-      {"reachable", &runReachable},
-  };
-  for (const auto &Handler : Handlers)
-    if (Handler.Name == Name)
-      return &Handler;
-  return nullptr;
-}
+const AnalysisHandler Handlers[] = {
+    {"liveness", &runLiveness},
+    {"reaching_defs", &runReachingDefinitions},
+    {"uninitialized", &runUninitialized},
+    {"constant_prop", &runConstantPropagation},
+    {"available_exprs", &runAvailableExpressions},
+    {"reachable", &runReachable},
+};
 
 } // namespace
 
@@ -557,38 +504,29 @@ int main(int argc, char **argv) {
   lotus::dataflow_tool::prepareModule(*M);
 
   raw_null_ostream NullOS;
-  raw_ostream *OutOS = &NullOS;
-  if (StdoutOpt)
-    OutOS = &outs();
   std::unique_ptr<raw_fd_ostream> FileOS;
-  if (!OutDir.empty()) {
-    std::error_code EC;
-    FileOS =
-        lotus::dataflow_tool::openOutputFileOrReport(OutDir, "elim.txt", EC);
-    if (EC) {
-      errs() << "error: cannot create " << OutDir
-             << "/elim.txt: " << EC.message() << "\n";
-      return 1;
-    }
-    OutOS = FileOS.get();
+  std::error_code EC;
+  raw_ostream &OS = lotus::dataflow_tool::selectOutputStream(
+      StdoutOpt, OutDir, "elim.txt", FileOS, NullOS, EC);
+  if (EC) {
+    errs() << "error: cannot create " << OutDir << "/elim.txt: " << EC.message()
+           << "\n";
+    return 1;
   }
-  raw_ostream &OS = *OutOS;
 
-  const auto *Handler = findHandler(AnalysisOpt);
+  const auto *Handler =
+      lotus::dataflow_tool::findHandler(AnalysisOpt, Handlers);
   if (!Handler) {
     errs() << "error: unknown elimination analysis '" << AnalysisOpt << "'\n";
     return 1;
   }
 
-  const auto ElimOpts = getElimOptions();
+  const auto ElimOpts =
+      lotus::dataflow_tool::parseEliminationOptions(ElimMethodOpt);
   OS << "[elim:" << AnalysisOpt << "]\n";
-  for (auto &F : *M) {
-    if (F.isDeclaration())
-      continue;
-    auto View = lotus::dataflow_tool::buildFunctionView(F);
-    OS << "FUNC " << F.getName() << "\n";
-    Handler->Run(OS, View, ElimOpts);
-  }
+  lotus::dataflow_tool::forEachDefinedFunction(
+      *M, OS,
+      [&](const FunctionView &View) { Handler->Run(OS, View, ElimOpts); });
 
   return 0;
 }

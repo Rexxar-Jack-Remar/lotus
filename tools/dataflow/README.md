@@ -2,7 +2,7 @@
 
 This directory contains command-line frontends for Lotus dataflow engines in
 `lib/Dataflow/`, including APA/elimination-style analyses, Mono analyses, IFDS
-analyses, and a differential-testing driver.
+analyses, NPA analyses, and a differential-testing driver.
 
 ## Build
 
@@ -21,6 +21,7 @@ The binaries are written to `build/bin/`.
 | `lotus-dfa-apa` | APA / elimination driver | Runs elimination-based dataflow analyses and can dump engine results. |
 | `lotus-dfa-mono` | Mono analysis driver | Runs Mono-based analyses on LLVM bitcode. |
 | `lotus-dfa-ifds` | IFDS analysis driver | Runs IFDS-based analyses with alias-analysis support when needed. |
+| `lotus-dfa-npa` | NPA analysis driver | Runs NPA intraprocedural and selected interprocedural analyses on LLVM bitcode, with module-level function scheduling and eligible NPA parallel execution via `-nworkers`. |
 
 ## Diff testing (`lotus-dfa`)
 
@@ -70,7 +71,34 @@ lotus-dfa-mono --analysis=liveness --stdout /path/to/file.bc
 
 # IFDS driver
 lotus-dfa-ifds --analysis=taint --stdout /path/to/file.bc
+
+# NPA driver
+lotus-dfa-npa --analysis=liveness --solver=newton --stdout /path/to/file.bc
+
+# NPA interprocedural constant propagation
+lotus-dfa-npa --analysis=constant_prop --stdout /path/to/file.bc
+
+# NPA driver with module-level and NPA-internal parallel execution
+lotus-dfa-npa --analysis=liveness --solver=newton -nworkers=8 --stdout /path/to/file.bc
 ```
+
+`lotus-dfa-npa` inherits the global `ThreadPool` flag `-nworkers=<N>`. When
+`-nworkers` is above `1`, the frontend schedules independent function analyses
+across the module in parallel and each NPA solve may additionally use the
+engine's internal parallel setup/SCC execution paths when the problem
+structure is eligible. `-nworkers=0` and `-nworkers=1` both stay on the
+sequential path.
+
+Currently exposed NPA analyses:
+
+- Intraprocedural: `liveness`, `reaching_defs`, `reachable`
+- Interprocedural: `inter_liveness`, `inter_reaching_defs`,
+  `inter_uninitialized`, `constant_prop`, `interval`, `affine_eqs`,
+  `nullability`
+
+`--solver={newton,kleene}` applies to the intraprocedural analyses. The
+module-level interprocedural clients use the interprocedural engine's default
+module solve path and currently reject `--solver=kleene`.
 
 ## Canonical format
 

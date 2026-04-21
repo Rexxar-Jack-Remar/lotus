@@ -111,7 +111,8 @@ C_FILE="${TMPDIR:-/tmp}/diff_dfa_$$.c"
 BC_FILE="${TMPDIR:-/tmp}/diff_dfa_$$.bc"
 
 if [[ ! -x "$CSMITH" ]]; then
-  echo "CSmith not found at $CSMITH. Provide a .c or .bc file: $0 <file.c|file.bc>"
+  echo "CSmith not found at $CSMITH."
+  echo "Run $SCRIPT_DIR/build_csmisth.sh first, or provide a .c or .bc file: $0 <file.c|file.bc>"
   exit 1
 fi
 

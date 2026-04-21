@@ -9,6 +9,12 @@ BUILD_DIR="$PROJECT_ROOT/build"
 CSMITH="$BUILD_DIR/csmith-install/bin/csmith"
 CSMITH_HOME="$BUILD_DIR/csmith-install/include"
 
+if [[ ! -x "$CSMITH" ]]; then
+    echo "csmith not found at $CSMITH"
+    echo "Run $SCRIPT_DIR/build_csmisth.sh first."
+    exit 1
+fi
+
 # Get SDK path only on macOS
 SDK_PATH=""
 if [[ "$OSTYPE" == "darwin"* ]]; then
