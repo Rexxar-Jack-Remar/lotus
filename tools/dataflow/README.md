@@ -79,15 +79,18 @@ lotus-dfa-npa --analysis=liveness --solver=newton --stdout /path/to/file.bc
 lotus-dfa-npa --analysis=constant_prop --stdout /path/to/file.bc
 
 # NPA driver with module-level and NPA-internal parallel execution
-lotus-dfa-npa --analysis=liveness --solver=newton -nworkers=8 --stdout /path/to/file.bc
+lotus-dfa-npa --analysis=liveness --solver=newton --linear-solver=scc -nworkers=8 --stdout /path/to/file.bc
 ```
 
-`lotus-dfa-npa` inherits the global `ThreadPool` flag `-nworkers=<N>`. When
-`-nworkers` is above `1`, the frontend schedules independent function analyses
+`lotus-dfa-npa` inherits the global `ThreadPool` flag `-nworkers=<N>`.
+For intraprocedural analyses, the frontend schedules independent functions
 across the module in parallel and each NPA solve may additionally use the
 engine's internal parallel setup/SCC execution paths when the problem
-structure is eligible. `-nworkers=0` and `-nworkers=1` both stay on the
-sequential path.
+structure is eligible.
+
+For module-level interprocedural analyses, scheduling lives inside the
+interprocedural engine rather than in the CLI driver. `-nworkers=0` and
+`-nworkers=1` both stay on the sequential path.
 
 Currently exposed NPA analyses:
 
@@ -97,8 +100,10 @@ Currently exposed NPA analyses:
   `nullability`
 
 `--solver={newton,kleene}` applies to the intraprocedural analyses. The
-module-level interprocedural clients use the interprocedural engine's default
-module solve path and currently reject `--solver=kleene`.
+module-level interprocedural clients use Newton and currently reject
+`--solver=kleene`. `--linear-solver={scc,adaptive_scc,tensor}` selects the
+Newton linearized-system solver for both intraprocedural Newton runs and
+module-level interprocedural runs.
 
 ## Canonical format
 

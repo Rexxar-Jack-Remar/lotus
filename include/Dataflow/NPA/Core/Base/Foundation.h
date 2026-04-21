@@ -68,6 +68,9 @@ struct Stat {
 
 struct AnalysisStatus {
   Stat summary_solve;
+  double phase_artifact_construction_time = 0.0;
+  double phase_summary_materialization_time = 0.0;
+  double phase_propagation_time = 0.0;
   long propagation_steps = 0;
   bool propagation_converged = true;
   bool propagation_hit_limit = false;

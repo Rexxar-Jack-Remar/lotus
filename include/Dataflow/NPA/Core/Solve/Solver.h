@@ -47,7 +47,7 @@ enum class NewtonSetupExecutionMode {
 
 inline std::size_t newton_parallel_setup_min_equations(
     std::size_t worker_count) {
-  return std::max<std::size_t>(128, worker_count * 64);
+  return std::max<std::size_t>(64, worker_count * 16);
 }
 
 inline std::size_t newton_parallel_setup_min_equations() {

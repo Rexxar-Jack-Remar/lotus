@@ -15,7 +15,8 @@ namespace npa {
 class ReachableBlocks {
 public:
   static std::set<const llvm::BasicBlock *>
-  run(llvm::Function &F, SolverStrategy strategy = SolverStrategy::Newton);
+  run(llvm::Function &F, SolverStrategy strategy = SolverStrategy::Newton,
+      LinearStrategy linearStrategy = LinearStrategy::SCC);
 };
 
 } // namespace npa

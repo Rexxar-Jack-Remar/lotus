@@ -37,9 +37,10 @@ public:
 };
 
 std::set<const llvm::BasicBlock *>
-ReachableBlocks::run(llvm::Function &F, SolverStrategy strategy) {
+ReachableBlocks::run(llvm::Function &F, SolverStrategy strategy,
+                     LinearStrategy linearStrategy) {
   ReachableInfo info;
-  auto result = BitVectorSolver::run(F, info, strategy);
+  auto result = BitVectorSolver::run(F, info, strategy, linearStrategy);
 
   std::set<const llvm::BasicBlock *> reachable;
   for (auto &entry : result.OUT) {

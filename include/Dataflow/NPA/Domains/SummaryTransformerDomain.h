@@ -126,8 +126,78 @@ private:
   static typename std::enable_if<!HasPointerDest<T>::value, void>::type
   noteWrite(value_type &, const T &) {}
 
+  template <typename T, typename = void>
+  struct HasSummaryCanBeOverwritten : std::false_type {};
+
+  template <typename T>
+  struct HasSummaryCanBeOverwritten<
+      T, void_t<decltype(std::declval<const T &>().summaryCanBeOverwritten())>>
+      : std::true_type {};
+
+  template <typename T, typename = void>
+  struct HasSummaryCanOverwritePrevious : std::false_type {};
+
+  template <typename T>
+  struct HasSummaryCanOverwritePrevious<
+      T, void_t<decltype(std::declval<const T &>().summaryCanOverwritePrevious())>>
+      : std::true_type {};
+
+  static typename value_type::transformer_type
+  canonicalizeTransformer(typename value_type::transformer_type transformer) {
+    typename value_type::transformer_type out;
+    out.reserve(transformer.size());
+
+    for (const auto &op : transformer) {
+      if (!out.empty() && canFoldTrailingWrite(out.back(), op)) {
+        out.back() = op;
+      } else {
+        out.push_back(op);
+      }
+    }
+    return out;
+  }
+
+  template <typename T = Op>
+  static typename std::enable_if<HasPointerDest<T>::value, bool>::type
+  canFoldTrailingWrite(const T &previous, const T &current) {
+    return previous.dest && previous.dest == current.dest &&
+           summaryCanBeOverwritten(previous) &&
+           summaryCanOverwritePrevious(current);
+  }
+
+  template <typename T = Op>
+  static typename std::enable_if<!HasPointerDest<T>::value, bool>::type
+  canFoldTrailingWrite(const T &, const T &) {
+    return false;
+  }
+
+  template <typename T = Op>
+  static typename std::enable_if<HasSummaryCanBeOverwritten<T>::value, bool>::type
+  summaryCanBeOverwritten(const T &op) {
+    return op.summaryCanBeOverwritten();
+  }
+
+  template <typename T = Op>
+  static typename std::enable_if<!HasSummaryCanBeOverwritten<T>::value, bool>::type
+  summaryCanBeOverwritten(const T &) {
+    return false;
+  }
+
+  template <typename T = Op>
+  static typename std::enable_if<HasSummaryCanOverwritePrevious<T>::value, bool>::type
+  summaryCanOverwritePrevious(const T &op) {
+    return op.summaryCanOverwritePrevious();
+  }
+
+  template <typename T = Op>
+  static typename std::enable_if<!HasSummaryCanOverwritePrevious<T>::value, bool>::type
+  summaryCanOverwritePrevious(const T &) {
+    return false;
+  }
+
   static void insertTransformer(value_type &out,
                                 typename value_type::transformer_type transformer) {
+    transformer = canonicalizeTransformer(std::move(transformer));
     for (const auto &op : transformer)
       noteWrite(out, op);
     if (transformer.size() > max_transformer_length) {

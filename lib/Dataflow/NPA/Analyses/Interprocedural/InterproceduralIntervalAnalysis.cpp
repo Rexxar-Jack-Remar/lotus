@@ -293,6 +293,40 @@ bool IntervalOp::operator==(const IntervalOp &other) const {
          inputs == other.inputs;
 }
 
+bool IntervalOp::summaryCanBeOverwritten() const {
+  switch (kind) {
+  case Kind::AssignConst:
+  case Kind::Copy:
+  case Kind::Cast:
+  case Kind::Binary:
+  case Kind::Compare:
+  case Kind::Forget:
+    return true;
+  case Kind::AssumeNotCases:
+  case Kind::Select:
+  case Kind::Phi:
+    return false;
+  }
+  return false;
+}
+
+bool IntervalOp::summaryCanOverwritePrevious() const {
+  switch (kind) {
+  case Kind::AssignConst:
+  case Kind::Copy:
+  case Kind::Cast:
+  case Kind::Binary:
+  case Kind::Compare:
+  case Kind::Forget:
+    return true;
+  case Kind::AssumeNotCases:
+  case Kind::Select:
+  case Kind::Phi:
+    return false;
+  }
+  return false;
+}
+
 namespace {
 
 class IntervalAnalysis {

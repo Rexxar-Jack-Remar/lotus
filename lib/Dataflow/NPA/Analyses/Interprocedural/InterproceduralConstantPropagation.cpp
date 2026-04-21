@@ -90,6 +90,40 @@ bool ConstantPropagationOp::operator==(
          apIntEqual(constant, other.constant) && inputs == other.inputs;
 }
 
+bool ConstantPropagationOp::summaryCanBeOverwritten() const {
+  switch (kind) {
+  case Kind::AssignConst:
+  case Kind::Copy:
+  case Kind::Cast:
+  case Kind::Binary:
+  case Kind::Compare:
+  case Kind::Forget:
+    return true;
+  case Kind::AssumeNotCases:
+  case Kind::Phi:
+  case Kind::Select:
+    return false;
+  }
+  return false;
+}
+
+bool ConstantPropagationOp::summaryCanOverwritePrevious() const {
+  switch (kind) {
+  case Kind::AssignConst:
+  case Kind::Copy:
+  case Kind::Cast:
+  case Kind::Binary:
+  case Kind::Compare:
+  case Kind::Forget:
+    return true;
+  case Kind::AssumeNotCases:
+  case Kind::Phi:
+  case Kind::Select:
+    return false;
+  }
+  return false;
+}
+
 namespace {
 
 class ConstantPropagationAnalysis {

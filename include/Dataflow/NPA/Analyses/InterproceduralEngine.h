@@ -7,11 +7,13 @@
 
 #include <deque>
 #include <map>
+#include <mutex>
 #include <set>
 #include <string>
 #include <unordered_map>
 #include <unordered_set>
 #include <vector>
+#include <chrono>
 
 #include <llvm/IR/Function.h>
 #include <llvm/IR/Instructions.h>
@@ -106,6 +108,39 @@ public:
     }
     return matches;
   }
+
+  class CalleeCache {
+  public:
+    CalleeCache(Analysis &analysis, llvm::Module &module,
+                IndirectCallResolutionMode mode)
+        : analysis_(analysis), module_(module), mode_(mode) {}
+
+    std::vector<llvm::Function *> get(const llvm::CallBase &call) {
+      {
+        std::lock_guard<std::mutex> lock(mutex_);
+        auto It = cache_.find(&call);
+        if (It != cache_.end())
+          return It->second;
+      }
+
+      std::vector<llvm::Function *> resolved =
+          getPossibleCalleesForAnalysis(analysis_, module_, call, mode_, 0);
+
+      {
+        std::lock_guard<std::mutex> lock(mutex_);
+        auto Inserted = cache_.emplace(&call, std::move(resolved));
+        return Inserted.first->second;
+      }
+    }
+
+  private:
+    Analysis &analysis_;
+    llvm::Module &module_;
+    IndirectCallResolutionMode mode_;
+    std::mutex mutex_;
+    std::unordered_map<const llvm::CallBase *, std::vector<llvm::Function *>>
+        cache_;
+  };
 
   static bool typesAreCompatible(const llvm::Type *lhs, const llvm::Type *rhs) {
     if (lhs == rhs)
@@ -381,6 +416,13 @@ public:
     std::unordered_map<std::string, E> blockExitExprs;
   };
 
+  struct PreparedFunctionArtifacts {
+    llvm::Function *function = nullptr;
+    FunctionRegexArtifacts artifacts;
+    AnalysisStatus status_delta;
+    std::vector<llvm::Function *> discovered_callees;
+  };
+
   static bool isZeroExpr(const E &expr) {
     return expr && expr->k == Exp::Term && D::equal(expr->c, D::zero());
   }
@@ -491,7 +533,7 @@ public:
   }
 
   static E buildBlockBodyExpr(Analysis &analysis, llvm::Instruction &I,
-                              E currentPath, llvm::Module &M,
+                              E currentPath, CalleeCache &calleeCache,
                               std::deque<llvm::Function *> &worklist,
                               std::set<llvm::Function *> &visited,
                               AnalysisStatus &status,
@@ -499,8 +541,7 @@ public:
     if (auto *CI = llvm::dyn_cast<llvm::CallBase>(&I)) {
       if (CI->getCalledFunction() == nullptr)
         ++status.indirect_calls_seen;
-      std::vector<llvm::Function *> Callees = getPossibleCalleesForAnalysis(
-          analysis, M, *CI, callResolutionMode, 0);
+      std::vector<llvm::Function *> Callees = calleeCache.get(*CI);
       if (!Callees.empty()) {
         E callBranches = nullptr;
         for (llvm::Function *Callee : Callees) {
@@ -550,8 +591,70 @@ public:
     return analysis.getTransfer(I, currentPath);
   }
 
+  static E buildBlockBodyExprPrepared(Analysis &analysis, llvm::Instruction &I,
+                                      E currentPath, CalleeCache &calleeCache,
+                                      std::vector<llvm::Function *> &discovered,
+                                      AnalysisStatus &status,
+                                      IndirectCallResolutionMode callResolutionMode) {
+    if (auto *CI = llvm::dyn_cast<llvm::CallBase>(&I)) {
+      if (CI->getCalledFunction() == nullptr)
+        ++status.indirect_calls_seen;
+      std::vector<llvm::Function *> Callees = calleeCache.get(*CI);
+      if (!Callees.empty()) {
+        E callBranches = nullptr;
+        for (llvm::Function *Callee : Callees) {
+          if (!Callee->isDeclaration())
+            discovered.push_back(Callee);
+          E branch = nullptr;
+          if (Callee->isDeclaration()) {
+            branch = Exp::seq(getCallReturnTransfer(analysis, *CI, *Callee, 0),
+                              currentPath);
+          } else {
+            const Symbol callee_sym = getFuncSymbol(Callee);
+            branch = Exp::seq(getCallEntryTransfer(analysis, *CI, *Callee, 0),
+                              currentPath);
+            branch = multiplyExpr(makeCallSummaryExpr(callee_sym), branch);
+            branch = Exp::seq(getCallReturnTransfer(analysis, *CI, *Callee, 0),
+                              branch);
+          }
+          callBranches = combineExpr(callBranches, branch);
+        }
+        Val fallbackTransfer =
+            getCallFallbackTransfer(analysis, *CI, Callees, 0);
+        if (!D::equal(fallbackTransfer, D::zero())) {
+          ++status.fallback_call_edges;
+          E fallbackBranch = Exp::seq(fallbackTransfer, currentPath);
+          callBranches = callBranches
+                             ? Exp::ndet(callBranches, fallbackBranch)
+                             : fallbackBranch;
+        }
+        currentPath = callBranches;
+      } else {
+        if (CI->getCalledFunction() == nullptr) {
+          ++status.unresolved_indirect_calls;
+          if (callResolutionMode ==
+              IndirectCallResolutionMode::CustomResolverRequired) {
+            status.requires_external_callee_resolver = true;
+            status.approximated = true;
+          }
+        }
+        Val fallbackTransfer =
+            getCallFallbackTransfer(analysis, *CI, Callees, 0);
+        if (!D::equal(fallbackTransfer, D::zero())) {
+          ++status.fallback_call_edges;
+          currentPath = Exp::seq(fallbackTransfer, currentPath);
+        } else {
+          currentPath =
+              Exp::seq(getCallToReturnTransfer(analysis, *CI, 0), currentPath);
+        }
+      }
+    }
+    return analysis.getTransfer(I, currentPath);
+  }
+
   static FunctionRegexArtifacts buildFunctionRegexArtifacts(
       llvm::Module &M, llvm::Function &F, Analysis &analysis,
+      CalleeCache &calleeCache,
       std::deque<llvm::Function *> &worklist,
       std::set<llvm::Function *> &visited, AnalysisStatus &status,
       IndirectCallResolutionMode callResolutionMode) {
@@ -589,8 +692,9 @@ public:
 
       E currentPath = Exp::term(D::one());
       for (auto &I : BB)
-        currentPath = buildBlockBodyExpr(analysis, I, currentPath, M, worklist,
-                                         visited, status, callResolutionMode);
+        currentPath = buildBlockBodyExpr(analysis, I, currentPath, calleeCache,
+                                         worklist, visited, status,
+                                         callResolutionMode);
       blockBodyExprs.emplace(getBlockSymbol(&BB), currentPath);
 
       auto *Term = BB.getTerminator();
@@ -632,6 +736,86 @@ public:
     return out;
   }
 
+  static PreparedFunctionArtifacts prepareFunctionRegexArtifacts(
+      llvm::Module &M, llvm::Function &F, Analysis &analysis,
+      CalleeCache &calleeCache,
+      IndirectCallResolutionMode callResolutionMode) {
+    using Graph = lotus::pathexpressions::GenericLabeledGraph<int, int>;
+
+    std::unordered_map<const llvm::BasicBlock *, int> blockIds;
+    int nextId = 1;
+    for (auto &BB : F)
+      blockIds[&BB] = nextId++;
+    const int sourceId = 0;
+    const int entryId = blockIds.at(&F.getEntryBlock());
+    const int exitId = nextId;
+
+    Graph graph;
+    graph.addNode(sourceId);
+    graph.addNode(exitId);
+
+    std::vector<E> labels;
+    labels.reserve(F.size() * 2U + 1U);
+    std::unordered_map<std::string, E> blockBodyExprs;
+    auto addLabel = [&](E expr) {
+      labels.push_back(expr ? expr : Exp::term(D::zero()));
+      return static_cast<int>(labels.size() - 1);
+    };
+
+    PreparedFunctionArtifacts prepared;
+    prepared.function = &F;
+
+    graph.addEdge(sourceId,
+                  addLabel(Exp::term(getBlockEntryTransfer(
+                      analysis, F.getEntryBlock(), nullptr))),
+                  entryId);
+
+    for (auto &BB : F) {
+      const int fromId = blockIds.at(&BB);
+      graph.addNode(fromId);
+
+      E currentPath = Exp::term(D::one());
+      for (auto &I : BB)
+        currentPath = buildBlockBodyExprPrepared(
+            analysis, I, currentPath, calleeCache, prepared.discovered_callees,
+            prepared.status_delta, callResolutionMode);
+      blockBodyExprs.emplace(getBlockSymbol(&BB), currentPath);
+
+      auto *Term = BB.getTerminator();
+      if (!Term || Term->getNumSuccessors() == 0) {
+        graph.addEdge(fromId, addLabel(currentPath), exitId);
+        continue;
+      }
+
+      for (unsigned i = 0; i < Term->getNumSuccessors(); ++i) {
+        auto *Succ = Term->getSuccessor(i);
+        if (!Succ)
+          continue;
+        E edgeExpr =
+            Exp::seq(getEdgeTransfer(analysis, *Term, *Succ, 0), currentPath);
+        graph.addEdge(fromId, addLabel(edgeExpr), blockIds.at(Succ));
+      }
+    }
+
+    lotus::pathexpressions::PathExpressionComputer<int, int> computer(graph);
+    unsigned starCounter = 0;
+    prepared.artifacts.fullSummaryExpr =
+        translateRegex(computer.exprBetween(sourceId, exitId),
+                       labels, starCounter);
+    prepared.artifacts.summaryExpr =
+        makeSummaryEquationExpr(prepared.artifacts.fullSummaryExpr);
+    for (auto &BB : F) {
+      const std::string bSym = getBlockSymbol(&BB);
+      E entryExpr = translateRegex(computer.exprBetween(sourceId,
+                                                        blockIds.at(&BB)),
+                         labels, starCounter);
+      prepared.artifacts.blockEntryExprs.emplace(bSym, entryExpr);
+      prepared.artifacts.blockExitExprs.emplace(
+          bSym, multiplyExpr(blockBodyExprs.at(bSym), entryExpr));
+    }
+    return prepared;
+  }
+
 public:
   static std::vector<llvm::Function *> getEntryFunctions(llvm::Module &M) {
     if (llvm::Function *Main = M.getFunction("main"))
@@ -669,12 +853,12 @@ public:
                     IndirectCallResolutionMode callResolutionMode =
                         IndirectCallResolutionMode::ClosedWorldTypeCompatible) {
     std::vector<std::pair<Symbol, E>> eqns;
-    std::deque<llvm::Function *> worklist;
     std::set<llvm::Function *> visited;
     std::unordered_map<std::string, FunctionKey> functionSymbols;
     std::unordered_map<std::string, E> fullSummaryExprs;
     std::unordered_map<std::string, E> blockEntryExprs;
     std::unordered_map<std::string, E> blockExitExprs;
+    CalleeCache calleeCache(analysis, M, callResolutionMode);
 
     Result res;
     res.status.call_resolution_mode = callResolutionMode;
@@ -683,27 +867,63 @@ public:
         IndirectCallResolutionMode::ClosedWorldTypeCompatible;
 
     std::vector<llvm::Function *> entries = getEntryFunctions(M);
-    for (llvm::Function *Entry : entries) {
-      worklist.push_back(Entry);
-      visited.insert(Entry);
-    }
+    std::vector<llvm::Function *> frontier(entries.begin(), entries.end());
+    visited.insert(frontier.begin(), frontier.end());
 
-    while (!worklist.empty()) {
-      llvm::Function *F = worklist.front();
-      worklist.pop_front();
+    const auto ArtifactStart = std::chrono::steady_clock::now();
+    while (!frontier.empty()) {
+      std::vector<PreparedFunctionArtifacts> prepared(frontier.size());
+      ThreadPool *pool = ThreadPool::get();
+      const bool parallel_frontier =
+          pool->workerCount() > 1 && frontier.size() > 1;
+      if (parallel_frontier) {
+        const std::size_t grain_size = detail::parallel_task_grain_size(
+            frontier.size(), pool->workerCount(), 2);
+        pool->parallelFor<std::size_t>(
+            0, frontier.size(), grain_size, [&](std::size_t index) {
+              prepared[index] = prepareFunctionRegexArtifacts(
+                  M, *frontier[index], analysis, calleeCache,
+                  res.status.call_resolution_mode);
+            });
+      } else {
+        for (std::size_t index = 0; index < frontier.size(); ++index) {
+          prepared[index] = prepareFunctionRegexArtifacts(
+              M, *frontier[index], analysis, calleeCache,
+              res.status.call_resolution_mode);
+        }
+      }
 
-      std::string fSym = getFuncSymbol(F);
-      functionSymbols[fSym] = {F};
-      auto artifacts = buildFunctionRegexArtifacts(
-          M, *F, analysis, worklist, visited, res.status,
-          res.status.call_resolution_mode);
-      eqns.emplace_back(fSym, artifacts.summaryExpr);
-      fullSummaryExprs.emplace(fSym, artifacts.fullSummaryExpr);
-      for (auto &blockExpr : artifacts.blockEntryExprs)
-        blockEntryExprs.emplace(blockExpr.first, blockExpr.second);
-      for (auto &blockExpr : artifacts.blockExitExprs)
-        blockExitExprs.emplace(blockExpr.first, blockExpr.second);
+      std::vector<llvm::Function *> next_frontier;
+      for (auto &item : prepared) {
+        llvm::Function *F = item.function;
+        std::string fSym = getFuncSymbol(F);
+        functionSymbols[fSym] = {F};
+        eqns.emplace_back(fSym, item.artifacts.summaryExpr);
+        fullSummaryExprs.emplace(fSym, item.artifacts.fullSummaryExpr);
+        for (auto &blockExpr : item.artifacts.blockEntryExprs)
+          blockEntryExprs.emplace(blockExpr.first, blockExpr.second);
+        for (auto &blockExpr : item.artifacts.blockExitExprs)
+          blockExitExprs.emplace(blockExpr.first, blockExpr.second);
+        res.status.indirect_calls_seen += item.status_delta.indirect_calls_seen;
+        res.status.unresolved_indirect_calls +=
+            item.status_delta.unresolved_indirect_calls;
+        res.status.fallback_call_edges += item.status_delta.fallback_call_edges;
+        res.status.requires_external_callee_resolver =
+            res.status.requires_external_callee_resolver ||
+            item.status_delta.requires_external_callee_resolver;
+        res.status.approximated =
+            res.status.approximated || item.status_delta.approximated;
+        for (llvm::Function *callee : item.discovered_callees) {
+          if (callee && visited.insert(callee).second)
+            next_frontier.push_back(callee);
+        }
+      }
+      frontier.swap(next_frontier);
     }
+    res.status.phase_artifact_construction_time =
+        std::chrono::duration<double>(std::chrono::steady_clock::now() -
+                                      ArtifactStart)
+            .count();
 
     auto rawRes = NewtonSolver<D>::solve(eqns, verbose, -1, linearStrategy);
     std::unordered_map<Symbol, Val> solvedMap;
@@ -715,6 +935,7 @@ public:
         rawRes.second.hit_linear_limit || rawRes.second.hit_fixpoint_limit;
     res.status.approximated =
         !rawRes.second.converged || res.status.used_bounded_inner_solve;
+    const auto SummaryMaterializationStart = std::chrono::steady_clock::now();
     for (const auto &entry : functionSymbols) {
       auto exprIt = fullSummaryExprs.find(entry.first);
       if (exprIt == fullSummaryExprs.end())
@@ -724,6 +945,10 @@ public:
         res.status.approximated = true;
       res.summaries[entry.second] = summary;
     }
+    res.status.phase_summary_materialization_time =
+        std::chrono::duration<double>(std::chrono::steady_clock::now() -
+                                      SummaryMaterializationStart)
+            .count();
 
     std::deque<llvm::Function *> worklist2;
     std::set<llvm::Function *> inWorklist2;
@@ -740,6 +965,7 @@ public:
       inWorklist2.insert(Entry);
     }
 
+    const auto PropagationStart = std::chrono::steady_clock::now();
     while (!worklist2.empty()) {
       if (maxPropagationSteps >= 0 &&
           propagationSteps++ >= maxPropagationSteps) {
@@ -793,9 +1019,7 @@ public:
           if (auto *CI = llvm::dyn_cast<llvm::CallBase>(&I)) {
             if (CI->getCalledFunction() == nullptr)
               ++res.status.indirect_calls_seen;
-            std::vector<llvm::Function *> Callees =
-                getPossibleCalleesForAnalysis(
-                    analysis, M, *CI, res.status.call_resolution_mode, 0);
+            std::vector<llvm::Function *> Callees = calleeCache.get(*CI);
             if (!Callees.empty()) {
               Val currentPathVal = I0<D>::eval(false, solvedMap, currentPath);
               E callBranches = nullptr;
@@ -882,6 +1106,10 @@ public:
         }
       }
     }
+    res.status.phase_propagation_time =
+        std::chrono::duration<double>(std::chrono::steady_clock::now() -
+                                      PropagationStart)
+            .count();
     if (approx_flags.used_summary_overflow) {
       res.status.used_summary_overflow = true;
       res.status.approximated = true;

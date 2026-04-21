@@ -55,6 +55,10 @@ static cl::opt<std::string>
 static cl::opt<std::string>
     SolverOpt("solver", cl::desc("Solver: newton (default), kleene"),
               cl::init("newton"));
+static cl::opt<std::string> LinearSolverOpt(
+    "linear-solver",
+    cl::desc("Newton linear solver: scc (default), adaptive_scc, tensor"),
+    cl::init("scc"));
 
 namespace {
 
@@ -62,7 +66,7 @@ using lotus::dataflow_tool::FunctionView;
 using ModuleValueIdMap = std::unordered_map<const Value *, std::string>;
 
 struct BlockView final {
-  Function &Function;
+  Function &Func;
   FunctionView InstView;
   std::vector<const BasicBlock *> OrderedBlocks;
   std::unordered_map<const BasicBlock *, std::string> BlockToId;
@@ -291,6 +295,14 @@ npa::SolverStrategy parseSolverStrategy(StringRef Name) {
   return npa::SolverStrategy::Newton;
 }
 
+npa::LinearStrategy parseLinearStrategy(StringRef Name) {
+  if (Name == "adaptive_scc")
+    return npa::LinearStrategy::AdaptiveScc;
+  if (Name == "tensor")
+    return npa::LinearStrategy::TensorProduct;
+  return npa::LinearStrategy::SCC;
+}
+
 void formatBitSet(raw_ostream &OS, const APInt &Bits,
                   const std::vector<std::string> &BitLabels) {
   bool First = true;
@@ -316,9 +328,10 @@ void printBlockStates(raw_ostream &OS, const BlockView &View,
   }
 }
 
-void runLiveness(raw_ostream &OS, Function &F, npa::SolverStrategy Strategy) {
+void runLiveness(raw_ostream &OS, Function &F, npa::SolverStrategy Strategy,
+                 npa::LinearStrategy LinearStrategy) {
   BlockView View = buildBlockView(F);
-  auto Result = npa::LiveVariables::run(F, Strategy);
+  auto Result = npa::LiveVariables::run(F, Strategy, LinearStrategy);
   lotus::dataflow_tool::emitFunctionHeader(OS, F);
   printBlockStates(OS, View, [&](const BasicBlock *BB) {
     auto It = Result.IN.find(BB);
@@ -328,9 +341,10 @@ void runLiveness(raw_ostream &OS, Function &F, npa::SolverStrategy Strategy) {
 }
 
 void runReachingDefinitions(raw_ostream &OS, Function &F,
-                            npa::SolverStrategy Strategy) {
+                            npa::SolverStrategy Strategy,
+                            npa::LinearStrategy LinearStrategy) {
   BlockView View = buildBlockView(F);
-  auto Result = npa::ReachingDefinitions::run(F, Strategy);
+  auto Result = npa::ReachingDefinitions::run(F, Strategy, LinearStrategy);
   lotus::dataflow_tool::emitFunctionHeader(OS, F);
   printBlockStates(OS, View, [&](const BasicBlock *BB) {
     auto It = Result.IN.find(BB);
@@ -339,9 +353,10 @@ void runReachingDefinitions(raw_ostream &OS, Function &F,
   });
 }
 
-void runReachable(raw_ostream &OS, Function &F, npa::SolverStrategy Strategy) {
+void runReachable(raw_ostream &OS, Function &F, npa::SolverStrategy Strategy,
+                  npa::LinearStrategy LinearStrategy) {
   BlockView View = buildBlockView(F);
-  auto Reachable = npa::ReachableBlocks::run(F, Strategy);
+  auto Reachable = npa::ReachableBlocks::run(F, Strategy, LinearStrategy);
   lotus::dataflow_tool::emitFunctionHeader(OS, F);
   printBlockStates(OS, View, [&](const BasicBlock *BB) {
     OS << (Reachable.count(BB) ? "reachable" : "unreachable");
@@ -363,9 +378,19 @@ void printModuleBlockStates(raw_ostream &OS, Module &M, Printer &&PrintState) {
   }
 }
 
-void runInterproceduralLiveness(raw_ostream &OS, Module &M) {
+void runInterproceduralLiveness(raw_ostream &OS, Module &M,
+                                npa::LinearStrategy LinearStrategy) {
   const ModuleView View = buildModuleView(M);
-  auto Result = npa::InterproceduralLiveVariables::run(M);
+  auto Result =
+      npa::InterproceduralLiveVariables::run(M, false, LinearStrategy);
+  OS << "  [profile] phase=artifact_construction seconds="
+     << Result.status.phase_artifact_construction_time << "\n";
+  OS << "  [profile] phase=summary_solve seconds="
+     << Result.status.summary_solve.time << "\n";
+  OS << "  [profile] phase=summary_materialization seconds="
+     << Result.status.phase_summary_materialization_time << "\n";
+  OS << "  [profile] phase=propagation seconds="
+     << Result.status.phase_propagation_time << "\n";
   printModuleBlockStates(OS, M, [&](const BasicBlock *BB) {
     auto It = Result.blockFacts.find(npa::BlockKey{BB});
     if (It != Result.blockFacts.end())
@@ -373,9 +398,18 @@ void runInterproceduralLiveness(raw_ostream &OS, Module &M) {
   });
 }
 
-void runInterproceduralReachingDefinitions(raw_ostream &OS, Module &M) {
+void runInterproceduralReachingDefinitions(raw_ostream &OS, Module &M,
+                                           npa::LinearStrategy LinearStrategy) {
   const ModuleView View = buildModuleView(M);
-  auto Result = npa::InterproceduralRD::run(M);
+  auto Result = npa::InterproceduralRD::run(M, false, LinearStrategy);
+  OS << "  [profile] phase=artifact_construction seconds="
+     << Result.status.phase_artifact_construction_time << "\n";
+  OS << "  [profile] phase=summary_solve seconds="
+     << Result.status.summary_solve.time << "\n";
+  OS << "  [profile] phase=summary_materialization seconds="
+     << Result.status.phase_summary_materialization_time << "\n";
+  OS << "  [profile] phase=propagation seconds="
+     << Result.status.phase_propagation_time << "\n";
   printModuleBlockStates(OS, M, [&](const BasicBlock *BB) {
     auto It = Result.blockFacts.find(npa::BlockKey{BB});
     if (It != Result.blockFacts.end())
@@ -383,10 +417,20 @@ void runInterproceduralReachingDefinitions(raw_ostream &OS, Module &M) {
   });
 }
 
-void runInterproceduralMaybeUninitialized(raw_ostream &OS, Module &M) {
+void runInterproceduralMaybeUninitialized(raw_ostream &OS, Module &M,
+                                          npa::LinearStrategy LinearStrategy) {
   const ModuleView View = buildModuleView(M);
   const auto Labels = buildMaybeUninitializedLabels(M, View.ValueToId);
-  auto Result = npa::InterproceduralMaybeUninitialized::run(M);
+  auto Result =
+      npa::InterproceduralMaybeUninitialized::run(M, false, LinearStrategy);
+  OS << "  [profile] phase=artifact_construction seconds="
+     << Result.status.phase_artifact_construction_time << "\n";
+  OS << "  [profile] phase=summary_solve seconds="
+     << Result.status.summary_solve.time << "\n";
+  OS << "  [profile] phase=summary_materialization seconds="
+     << Result.status.phase_summary_materialization_time << "\n";
+  OS << "  [profile] phase=propagation seconds="
+     << Result.status.phase_propagation_time << "\n";
   printModuleBlockStates(OS, M, [&](const BasicBlock *BB) {
     auto It = Result.blockFacts.find(npa::BlockKey{BB});
     if (It != Result.blockFacts.end())
@@ -394,9 +438,19 @@ void runInterproceduralMaybeUninitialized(raw_ostream &OS, Module &M) {
   });
 }
 
-void runInterproceduralConstantPropagation(raw_ostream &OS, Module &M) {
+void runInterproceduralConstantPropagation(raw_ostream &OS, Module &M,
+                                           npa::LinearStrategy LinearStrategy) {
   const ModuleView View = buildModuleView(M);
-  auto Result = npa::InterproceduralConstantPropagation::run(M);
+  auto Result =
+      npa::InterproceduralConstantPropagation::run(M, false, LinearStrategy);
+  OS << "  [profile] phase=artifact_construction seconds="
+     << Result.status.phase_artifact_construction_time << "\n";
+  OS << "  [profile] phase=summary_solve seconds="
+     << Result.status.summary_solve.time << "\n";
+  OS << "  [profile] phase=summary_materialization seconds="
+     << Result.status.phase_summary_materialization_time << "\n";
+  OS << "  [profile] phase=propagation seconds="
+     << Result.status.phase_propagation_time << "\n";
   printModuleBlockStates(OS, M, [&](const BasicBlock *BB) {
     auto It = Result.blockFacts.find(npa::BlockKey{BB});
     if (It == Result.blockFacts.end())
@@ -410,9 +464,19 @@ void runInterproceduralConstantPropagation(raw_ostream &OS, Module &M) {
   });
 }
 
-void runInterproceduralInterval(raw_ostream &OS, Module &M) {
+void runInterproceduralInterval(raw_ostream &OS, Module &M,
+                                npa::LinearStrategy LinearStrategy) {
   const ModuleView View = buildModuleView(M);
-  auto Result = npa::InterproceduralIntervalAnalysis::run(M);
+  auto Result =
+      npa::InterproceduralIntervalAnalysis::run(M, false, LinearStrategy);
+  OS << "  [profile] phase=artifact_construction seconds="
+     << Result.status.phase_artifact_construction_time << "\n";
+  OS << "  [profile] phase=summary_solve seconds="
+     << Result.status.summary_solve.time << "\n";
+  OS << "  [profile] phase=summary_materialization seconds="
+     << Result.status.phase_summary_materialization_time << "\n";
+  OS << "  [profile] phase=propagation seconds="
+     << Result.status.phase_propagation_time << "\n";
   printModuleBlockStates(OS, M, [&](const BasicBlock *BB) {
     auto It = Result.blockFacts.find(npa::BlockKey{BB});
     if (It == Result.blockFacts.end())
@@ -424,9 +488,19 @@ void runInterproceduralInterval(raw_ostream &OS, Module &M) {
   });
 }
 
-void runInterproceduralAffineEqualities(raw_ostream &OS, Module &M) {
+void runInterproceduralAffineEqualities(raw_ostream &OS, Module &M,
+                                        npa::LinearStrategy LinearStrategy) {
   const ModuleView View = buildModuleView(M);
-  auto Result = npa::InterproceduralAffineEqualities::run(M);
+  auto Result =
+      npa::InterproceduralAffineEqualities::run(M, false, LinearStrategy);
+  OS << "  [profile] phase=artifact_construction seconds="
+     << Result.status.phase_artifact_construction_time << "\n";
+  OS << "  [profile] phase=summary_solve seconds="
+     << Result.status.summary_solve.time << "\n";
+  OS << "  [profile] phase=summary_materialization seconds="
+     << Result.status.phase_summary_materialization_time << "\n";
+  OS << "  [profile] phase=propagation seconds="
+     << Result.status.phase_propagation_time << "\n";
   printModuleBlockStates(OS, M, [&](const BasicBlock *BB) {
     auto It = Result.blockRelations.find(npa::BlockKey{BB});
     if (It == Result.blockRelations.end())
@@ -441,9 +515,18 @@ void runInterproceduralAffineEqualities(raw_ostream &OS, Module &M) {
   });
 }
 
-void runInterproceduralNullability(raw_ostream &OS, Module &M) {
+void runInterproceduralNullability(raw_ostream &OS, Module &M,
+                                   npa::LinearStrategy LinearStrategy) {
   const ModuleView View = buildModuleView(M);
-  auto Result = npa::InterproceduralNullability::run(M);
+  auto Result = npa::InterproceduralNullability::run(M, false, LinearStrategy);
+  OS << "  [profile] phase=artifact_construction seconds="
+     << Result.status.phase_artifact_construction_time << "\n";
+  OS << "  [profile] phase=summary_solve seconds="
+     << Result.status.summary_solve.time << "\n";
+  OS << "  [profile] phase=summary_materialization seconds="
+     << Result.status.phase_summary_materialization_time << "\n";
+  OS << "  [profile] phase=propagation seconds="
+     << Result.status.phase_propagation_time << "\n";
   std::vector<std::string> Labels;
   assignBitLabels(Labels, Result.valueBits, View.ValueToId, "");
   assignBitLabels(Labels, Result.memoryBits, View.ValueToId, "mem");
@@ -460,8 +543,9 @@ void runInterproceduralNullability(raw_ostream &OS, Module &M) {
 struct AnalysisHandler final {
   StringRef Name;
   bool ModuleScoped = false;
-  void (*RunFunction)(raw_ostream &, Function &, npa::SolverStrategy) = nullptr;
-  void (*RunModule)(raw_ostream &, Module &) = nullptr;
+  void (*RunFunction)(raw_ostream &, Function &, npa::SolverStrategy,
+                      npa::LinearStrategy) = nullptr;
+  void (*RunModule)(raw_ostream &, Module &, npa::LinearStrategy) = nullptr;
 };
 
 const AnalysisHandler Handlers[] = {
@@ -473,23 +557,27 @@ const AnalysisHandler Handlers[] = {
      &runInterproceduralReachingDefinitions},
     {"inter_uninitialized", true, nullptr,
      &runInterproceduralMaybeUninitialized},
-    {"constant_prop", true, nullptr, &runInterproceduralConstantPropagation},
-    {"interval", true, nullptr, &runInterproceduralInterval},
-    {"affine_eqs", true, nullptr, &runInterproceduralAffineEqualities},
-    {"nullability", true, nullptr, &runInterproceduralNullability},
+    {"inter_constant_prop", true, nullptr, &runInterproceduralConstantPropagation},
+    {"inter_interval", true, nullptr, &runInterproceduralInterval},
+    {"inter_affine_eqs", true, nullptr, &runInterproceduralAffineEqualities},
+    {"inter_nullability", true, nullptr, &runInterproceduralNullability},
 };
 
 std::string runAnalysisToString(const AnalysisHandler &Handler, Function &F,
-                                npa::SolverStrategy Strategy) {
+                                npa::SolverStrategy Strategy,
+                                npa::LinearStrategy LinearStrategy) {
   std::string Buffer;
   raw_string_ostream FunctionOS(Buffer);
-  Handler.RunFunction(FunctionOS, F, Strategy);
+  Handler.RunFunction(FunctionOS, F, Strategy, LinearStrategy);
   return FunctionOS.str();
 }
 
-void runAnalysisOnModule(raw_ostream &OS, Module &M,
-                         const AnalysisHandler &Handler,
-                         npa::SolverStrategy Strategy) {
+void runIntraproceduralAnalysesOnModule(raw_ostream &OS, Module &M,
+                                        const AnalysisHandler &Handler,
+                                        npa::SolverStrategy Strategy,
+                                        npa::LinearStrategy LinearStrategy) {
+  assert(!Handler.ModuleScoped &&
+         "module-scoped interprocedural analyses schedule inside the engine");
   std::vector<Function *> Functions;
   for (auto &F : M) {
     if (!F.isDeclaration())
@@ -502,15 +590,17 @@ void runAnalysisOnModule(raw_ostream &OS, Module &M,
       Pool->workerCount() > 1 && Functions.size() > 1;
 
   if (ParallelFunctions) {
+    const std::size_t GrainSize = npa::detail::parallel_task_grain_size(
+        Functions.size(), Pool->workerCount(), 2);
     Pool->parallelFor<std::size_t>(
-        0, Functions.size(), 1, [&](std::size_t Index) {
-          Outputs[Index] =
-              runAnalysisToString(Handler, *Functions[Index], Strategy);
+        0, Functions.size(), GrainSize, [&](std::size_t Index) {
+          Outputs[Index] = runAnalysisToString(Handler, *Functions[Index],
+                                               Strategy, LinearStrategy);
         });
   } else {
     for (std::size_t Index = 0; Index < Functions.size(); ++Index)
-      Outputs[Index] =
-          runAnalysisToString(Handler, *Functions[Index], Strategy);
+      Outputs[Index] = runAnalysisToString(Handler, *Functions[Index], Strategy,
+                                           LinearStrategy);
   }
 
   for (const auto &Output : Outputs)
@@ -524,11 +614,16 @@ int main(int argc, char **argv) {
   cl::ParseCommandLineOptions(
       argc, argv,
       "NPA engine testing\n"
-      "Use -nworkers=<N> to enable module-level function scheduling and "
-      "eligible NPA parallel execution.\n");
+      "Use -nworkers=<N> to enable intraprocedural module scheduling and "
+      "eligible NPA/internal interprocedural parallel execution.\n");
 
   if (SolverOpt != "newton" && SolverOpt != "kleene") {
     errs() << "error: unknown NPA solver '" << SolverOpt << "'\n";
+    return 1;
+  }
+  if (LinearSolverOpt != "scc" && LinearSolverOpt != "adaptive_scc" &&
+      LinearSolverOpt != "tensor") {
+    errs() << "error: unknown NPA linear solver '" << LinearSolverOpt << "'\n";
     return 1;
   }
 
@@ -568,6 +663,8 @@ int main(int argc, char **argv) {
   }
 
   const npa::SolverStrategy Strategy = parseSolverStrategy(SolverOpt);
+  const npa::LinearStrategy LinearStrategy =
+      parseLinearStrategy(LinearSolverOpt);
   const unsigned WorkerCount = ThreadPool::get()->workerCount();
   const bool ParallelEnabled = WorkerCount > 1;
   OS << "[npa:" << AnalysisOpt;
@@ -575,12 +672,13 @@ int main(int argc, char **argv) {
     OS << ":module";
   else
     OS << ":" << SolverOpt;
-  OS << ":workers=" << WorkerCount
+  OS << ":linear=" << LinearSolverOpt << ":workers=" << WorkerCount
      << ":parallel=" << (ParallelEnabled ? "on" : "off") << "]\n";
   if (Handler->ModuleScoped)
-    Handler->RunModule(OS, *M);
+    Handler->RunModule(OS, *M, LinearStrategy);
   else
-    runAnalysisOnModule(OS, *M, *Handler, Strategy);
+    runIntraproceduralAnalysesOnModule(OS, *M, *Handler, Strategy,
+                                       LinearStrategy);
 
   return 0;
 }

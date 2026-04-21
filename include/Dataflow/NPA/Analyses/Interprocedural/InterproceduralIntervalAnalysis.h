@@ -102,6 +102,8 @@ struct IntervalOp {
 
   bool operator<(const IntervalOp &other) const;
   bool operator==(const IntervalOp &other) const;
+  bool summaryCanBeOverwritten() const;
+  bool summaryCanOverwritePrevious() const;
 };
 
 using IntervalDomain = SummaryTransformerDomain<IntervalOp>;

@@ -72,6 +72,8 @@ struct ConstantPropagationOp {
 
   bool operator<(const ConstantPropagationOp &other) const;
   bool operator==(const ConstantPropagationOp &other) const;
+  bool summaryCanBeOverwritten() const;
+  bool summaryCanOverwritePrevious() const;
 };
 
 using ConstantPropagationDomain =

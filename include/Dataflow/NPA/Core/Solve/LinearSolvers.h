@@ -91,7 +91,7 @@ inline std::size_t parallel_task_grain_size(std::size_t total,
 }
 
 inline std::size_t linear_parallel_min_equations(std::size_t worker_count) {
-  return std::max<std::size_t>(128, worker_count * 64);
+  return std::max<std::size_t>(64, worker_count * 16);
 }
 
 template <class D> struct LinearSccTaskResult {
@@ -276,9 +276,9 @@ bool should_parallelize_linear_scc(bool verbose, const LinearSccPlan<D> &plan) {
   const std::size_t min_layer_width = std::min<std::size_t>(worker_count, 4);
   if (plan.max_parallel_layer_width < min_layer_width)
     return false;
-  if (plan.parallel_scc_count < worker_count * 2)
+  if (plan.parallel_scc_count < worker_count)
     return false;
-  if (plan.parallel_equation_volume < worker_count * 16)
+  if (plan.parallel_equation_volume < worker_count * 4)
     return false;
   return true;
 }

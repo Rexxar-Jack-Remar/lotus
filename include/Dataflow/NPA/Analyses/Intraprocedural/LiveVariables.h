@@ -10,7 +10,8 @@ namespace npa {
 class LiveVariables {
 public:
   static BitVectorSolver::Result
-  run(llvm::Function &F, SolverStrategy strategy = SolverStrategy::Newton);
+  run(llvm::Function &F, SolverStrategy strategy = SolverStrategy::Newton,
+      LinearStrategy linearStrategy = LinearStrategy::SCC);
 };
 
 } // namespace npa
