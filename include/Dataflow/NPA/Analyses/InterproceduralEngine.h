@@ -5,6 +5,7 @@
 #include "Dataflow/NPA/NPA.h"
 #include "Utils/Algorithms/PathExpressions/PathExpressions.h"
 
+#include <chrono>
 #include <deque>
 #include <map>
 #include <mutex>
@@ -13,7 +14,6 @@
 #include <unordered_map>
 #include <unordered_set>
 #include <vector>
-#include <chrono>
 
 #include <llvm/IR/Function.h>
 #include <llvm/IR/Instructions.h>

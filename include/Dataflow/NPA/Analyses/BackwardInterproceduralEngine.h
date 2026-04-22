@@ -3,15 +3,15 @@
 
 #include "Dataflow/NPA/Analyses/InterproceduralEngine.h"
 #include "Dataflow/NPA/NPA.h"
-#include "Utils/Parallel/ThreadPool.h"
 #include "Utils/Algorithms/PathExpressions/PathExpressions.h"
+#include "Utils/Parallel/ThreadPool.h"
 
+#include <chrono>
 #include <deque>
 #include <map>
 #include <set>
 #include <unordered_map>
 #include <vector>
-#include <chrono>
 
 #include <llvm/IR/Function.h>
 #include <llvm/IR/Instructions.h>
