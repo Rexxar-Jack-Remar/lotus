@@ -20,14 +20,21 @@
 #include <array>
 #include <atomic>
 #include <cstdint>
+#include <cstring>
+#include <map>
 #include <sstream>
 #include <unordered_set>
 #include <utility>
+#include <vector>
 
 #include <llvm/ADT/DenseSet.h>
+#include <llvm/ADT/SmallString.h>
 #include <llvm/ADT/Statistic.h>
 #include <llvm/IR/Module.h>
 #include <llvm/Support/CommandLine.h>
+#include <llvm/Support/FileSystem.h>
+#include <llvm/Support/Path.h>
+#include <llvm/Support/ToolOutputFile.h>
 #include <llvm/Support/raw_ostream.h>
 
 #define DEBUG_TYPE "andersen"
@@ -59,6 +66,18 @@ cl::opt<bool> DumpConstraintInfo("dump-cons",
                                  cl::desc("Dump constraint info into stderr"),
                                  cl::init(false), cl::Hidden,
                                  cl::cat(AndersenCategory));
+cl::opt<std::string>
+    AndersenDumpConstraintsAfterCollect(
+        "andersen-dump-constraints-after-collect",
+        cl::desc("Write GPU-oriented binary constraints snapshot immediately "
+                 "after collection"),
+        cl::init(""), cl::cat(AndersenCategory));
+cl::opt<std::string>
+    AndersenDumpConstraintsAfterOptimize(
+        "andersen-dump-constraints-after-optimize",
+        cl::desc("Write GPU-oriented binary constraints snapshot immediately "
+                 "after optimization"),
+        cl::init(""), cl::cat(AndersenCategory));
 cl::opt<unsigned>
     AndersenKContext("andersen-k-cs",
                      cl::desc("Context-sensitive Andersen k-callsite depth "
@@ -70,6 +89,11 @@ cl::opt<bool> AndersenUseBDDPointsTo(
     cl::init(false), cl::cat(AndersenCategory));
 
 namespace {
+
+struct SerializedEdges {
+  std::vector<uint32_t> rowOffsets;
+  std::vector<uint32_t> columns;
+};
 
 // A lightweight, self-contained K-call-site context to avoid depending on
 // the buggy KCallSite equality from AserPTA while still honoring the
@@ -448,6 +472,9 @@ bool Andersen::runOnModule(const Module &M) {
   LOG_INFO("Starting Andersen analysis on module: {}", M.getName().str());
   visitedFunctions.clear();
   collectConstraints(M);
+  if (!AndersenDumpConstraintsAfterCollect.empty())
+    serializeConstraints(AndersenDumpConstraintsAfterCollect,
+                         sparrow_aa::SnapshotPhase::Collect);
 
   // Update statistics after constraint collection
   size_t numConstraints = constraints.size();
@@ -479,6 +506,9 @@ bool Andersen::runOnModule(const Module &M) {
   LOG_INFO("Starting constraint optimization...");
   optimizeConstraints();
   LOG_INFO("Constraint optimization completed");
+  if (!AndersenDumpConstraintsAfterOptimize.empty())
+    serializeConstraints(AndersenDumpConstraintsAfterOptimize,
+                         sparrow_aa::SnapshotPhase::Optimize);
 
   if (DumpConstraintInfo)
     dumpConstraints();
@@ -564,4 +594,206 @@ void Andersen::dumpPtsGraphPlainVanilla() const {
       LOG_DEBUG("{}", ss.str());
     }
   }
+}
+
+void Andersen::serializeConstraints(
+    StringRef outputPath, sparrow_aa::SnapshotPhase phase) const {
+  SmallString<256> path(outputPath);
+  if (path.empty())
+    return;
+
+  SmallString<256> parentPath(sys::path::parent_path(path));
+  if (!parentPath.empty())
+    sys::fs::create_directories(parentPath);
+
+  std::error_code errInfo;
+  ToolOutputFile outFile(path, errInfo, sys::fs::OF_Text);
+  if (errInfo) {
+    LOG_ERROR("Failed to open constraint dump '{}': {}", outputPath.str(),
+              errInfo.message());
+    return;
+  }
+
+  auto formatValue = [](const llvm::Value *value) -> std::string {
+    if (value == nullptr)
+      return "-";
+    if (value->hasName())
+      return value->getName().str();
+
+    std::string rendered;
+    raw_string_ostream os(rendered);
+    value->printAsOperand(os, false);
+    os.flush();
+    return rendered;
+  };
+  auto internString = [](llvm::StringRef value, std::string &blob,
+                         llvm::StringMap<uint32_t> &offsets) -> uint32_t {
+    auto it = offsets.find(value);
+    if (it != offsets.end())
+      return it->second;
+    uint32_t offset = static_cast<uint32_t>(blob.size());
+    blob.append(value.data(), value.size());
+    blob.push_back('\0');
+    offsets[value] = offset;
+    return offset;
+  };
+
+  std::map<AndersNodeFactory::CtxKey, unsigned> contextIds;
+  for (unsigned i = 0, e = nodeFactory.getNumNodes(); i < e; ++i) {
+    const auto *ctx = nodeFactory.getContextForNode(i);
+    if (ctx == nullptr)
+      continue;
+    contextIds.try_emplace(ctx, contextIds.size());
+  }
+
+  std::vector<AndersConstraint> stableConstraints = constraints;
+  std::stable_sort(stableConstraints.begin(), stableConstraints.end());
+
+  std::string stringBlob;
+  llvm::StringMap<uint32_t> stringOffsets;
+  internString(ctxPolicy.name, stringBlob, stringOffsets);
+
+  std::vector<sparrow_aa::SnapshotContextRecord> contextRecords;
+  contextRecords.reserve(contextIds.size());
+  for (const auto &entry : contextIds) {
+    std::string label = contextToString(entry.first, false);
+    uint32_t labelOffset = internString(label, stringBlob, stringOffsets);
+    contextRecords.push_back({entry.second, labelOffset});
+  }
+  std::sort(contextRecords.begin(), contextRecords.end(),
+            [](const sparrow_aa::SnapshotContextRecord &lhs,
+               const sparrow_aa::SnapshotContextRecord &rhs) {
+              return lhs.context_id < rhs.context_id;
+            });
+
+  std::vector<sparrow_aa::SnapshotNodeRecord> nodeRecords;
+  nodeRecords.reserve(nodeFactory.getNumNodes());
+  for (unsigned i = 0, e = nodeFactory.getNumNodes(); i < e; ++i) {
+    auto ctx = nodeFactory.getContextForNode(i);
+    uint32_t contextId =
+        ctx == nullptr ? sparrow_aa::kInvalidContextId
+                       : static_cast<uint32_t>(contextIds.at(ctx));
+    uint32_t valueOffset =
+        internString(formatValue(nodeFactory.getValueForNode(i)), stringBlob,
+                     stringOffsets);
+    nodeRecords.push_back(
+        {i,
+         nodeFactory.getMergeTarget(i),
+         contextId,
+         static_cast<uint16_t>(nodeFactory.getTypeForNode(i)),
+         static_cast<uint16_t>(nodeFactory.getRoleForNode(i)),
+         valueOffset});
+  }
+
+  auto buildEdgePartition = [&](AndersConstraint::ConstraintType type) {
+    SerializedEdges edges;
+    edges.rowOffsets.assign(nodeFactory.getNumNodes() + 1, 0);
+    for (const auto &constraint : stableConstraints) {
+      if (constraint.getType() != type)
+        continue;
+      ++edges.rowOffsets[constraint.getDest() + 1];
+    }
+    for (size_t i = 1; i < edges.rowOffsets.size(); ++i)
+      edges.rowOffsets[i] += edges.rowOffsets[i - 1];
+
+    edges.columns.resize(edges.rowOffsets.back());
+    std::vector<uint32_t> cursor = edges.rowOffsets;
+    for (const auto &constraint : stableConstraints) {
+      if (constraint.getType() != type)
+        continue;
+      edges.columns[cursor[constraint.getDest()]++] = constraint.getSrc();
+    }
+    return edges;
+  };
+
+  SerializedEdges addrOfEdges = buildEdgePartition(AndersConstraint::ADDR_OF);
+  SerializedEdges copyEdges = buildEdgePartition(AndersConstraint::COPY);
+  SerializedEdges loadEdges = buildEdgePartition(AndersConstraint::LOAD);
+  SerializedEdges storeEdges = buildEdgePartition(AndersConstraint::STORE);
+
+  std::vector<sparrow_aa::SnapshotSectionHeader> sections;
+  sections.reserve(11);
+  uint64_t offset = sizeof(sparrow_aa::SnapshotHeader) +
+                    sizeof(sparrow_aa::SnapshotSectionHeader) * 11;
+  auto addSection = [&](sparrow_aa::SnapshotSectionKind kind, uint64_t byteSize,
+                        uint64_t elementCount) {
+    sections.push_back(
+        {static_cast<uint32_t>(kind), 0, offset, byteSize, elementCount});
+    offset += byteSize;
+  };
+
+  addSection(sparrow_aa::SnapshotSectionKind::Contexts,
+             sizeof(sparrow_aa::SnapshotContextRecord) * contextRecords.size(),
+             contextRecords.size());
+  addSection(sparrow_aa::SnapshotSectionKind::Nodes,
+             sizeof(sparrow_aa::SnapshotNodeRecord) * nodeRecords.size(),
+             nodeRecords.size());
+  addSection(sparrow_aa::SnapshotSectionKind::Strings, stringBlob.size(),
+             stringBlob.size());
+  addSection(sparrow_aa::SnapshotSectionKind::AddrOfRowOffsets,
+             sizeof(uint32_t) * addrOfEdges.rowOffsets.size(),
+             addrOfEdges.rowOffsets.size());
+  addSection(sparrow_aa::SnapshotSectionKind::AddrOfColumns,
+             sizeof(uint32_t) * addrOfEdges.columns.size(),
+             addrOfEdges.columns.size());
+  addSection(sparrow_aa::SnapshotSectionKind::CopyRowOffsets,
+             sizeof(uint32_t) * copyEdges.rowOffsets.size(),
+             copyEdges.rowOffsets.size());
+  addSection(sparrow_aa::SnapshotSectionKind::CopyColumns,
+             sizeof(uint32_t) * copyEdges.columns.size(),
+             copyEdges.columns.size());
+  addSection(sparrow_aa::SnapshotSectionKind::LoadRowOffsets,
+             sizeof(uint32_t) * loadEdges.rowOffsets.size(),
+             loadEdges.rowOffsets.size());
+  addSection(sparrow_aa::SnapshotSectionKind::LoadColumns,
+             sizeof(uint32_t) * loadEdges.columns.size(),
+             loadEdges.columns.size());
+  addSection(sparrow_aa::SnapshotSectionKind::StoreRowOffsets,
+             sizeof(uint32_t) * storeEdges.rowOffsets.size(),
+             storeEdges.rowOffsets.size());
+  addSection(sparrow_aa::SnapshotSectionKind::StoreColumns,
+             sizeof(uint32_t) * storeEdges.columns.size(),
+             storeEdges.columns.size());
+
+  sparrow_aa::SnapshotHeader header{};
+  std::memcpy(header.magic, "SPAA2BIN", 8);
+  header.version = sparrow_aa::kSnapshotVersion;
+  header.phase = static_cast<uint32_t>(phase);
+  header.node_count = nodeFactory.getNumNodes();
+  header.context_count = contextRecords.size();
+  header.string_bytes = stringBlob.size();
+  header.section_count = sections.size();
+  header.section_table_offset = sizeof(sparrow_aa::SnapshotHeader);
+
+  raw_fd_ostream &os = outFile.os();
+  os.write(reinterpret_cast<const char *>(&header), sizeof(header));
+  os.write(reinterpret_cast<const char *>(sections.data()),
+           sizeof(sparrow_aa::SnapshotSectionHeader) * sections.size());
+  if (!contextRecords.empty()) {
+    os.write(reinterpret_cast<const char *>(contextRecords.data()),
+             sizeof(sparrow_aa::SnapshotContextRecord) * contextRecords.size());
+  }
+  if (!nodeRecords.empty()) {
+    os.write(reinterpret_cast<const char *>(nodeRecords.data()),
+             sizeof(sparrow_aa::SnapshotNodeRecord) * nodeRecords.size());
+  }
+  if (!stringBlob.empty())
+    os.write(stringBlob.data(), stringBlob.size());
+
+  auto writeUInt32Vector = [&](const std::vector<uint32_t> &values) {
+    if (!values.empty()) {
+      os.write(reinterpret_cast<const char *>(values.data()),
+               sizeof(uint32_t) * values.size());
+    }
+  };
+  writeUInt32Vector(addrOfEdges.rowOffsets);
+  writeUInt32Vector(addrOfEdges.columns);
+  writeUInt32Vector(copyEdges.rowOffsets);
+  writeUInt32Vector(copyEdges.columns);
+  writeUInt32Vector(loadEdges.rowOffsets);
+  writeUInt32Vector(loadEdges.columns);
+  writeUInt32Vector(storeEdges.rowOffsets);
+  writeUInt32Vector(storeEdges.columns);
+
+  outFile.keep();
 }

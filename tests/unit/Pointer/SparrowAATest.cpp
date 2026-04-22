@@ -7,13 +7,23 @@
  */
 
 #include "Alias/SparrowAA/AndersenAA.h"
+#include "Alias/SparrowAA/ConstraintSnapshot.h"
 #include "TestUtils/LLVMHelpers.h"
 
 #include <algorithm>
+#include <unistd.h>
+
+#include <fstream>
+#include <iterator>
 #include <set>
+#include <string>
+#include <vector>
 
 #include <llvm/Analysis/MemoryLocation.h>
+#include <llvm/ADT/SmallString.h>
 #include <llvm/IR/Instructions.h>
+#include <llvm/Support/CommandLine.h>
+#include <llvm/Support/FileSystem.h>
 #include <gtest/gtest.h>
 
 using namespace llvm;
@@ -24,6 +34,19 @@ protected:
   bool pointsToSetContains(const std::vector<const Value *> &ptsSet,
                            const Value *v) {
     return std::find(ptsSet.begin(), ptsSet.end(), v) != ptsSet.end();
+  }
+
+  static std::string readFile(llvm::StringRef path) {
+    std::ifstream input(path.str());
+    return std::string(std::istreambuf_iterator<char>(input),
+                       std::istreambuf_iterator<char>());
+  }
+
+  template <typename T>
+  static T readStruct(std::ifstream &input) {
+    T value{};
+    input.read(reinterpret_cast<char *>(&value), sizeof(T));
+    return value;
   }
 };
 
@@ -110,6 +133,145 @@ TEST_F(SparrowAATest, NoAliasDisjointPointsTo) {
   AA.getPointsToSet(x, ptsSet);
   AA.getPointsToSet(y, ptsSet);
   EXPECT_FALSE(ptsSet.empty());
+}
+
+TEST_F(SparrowAATest, SerializesCollectedConstraints) {
+  const char *source = R"(
+    define void @test() {
+      %x = alloca i32
+      %p = alloca i32*
+      store i32* %x, i32** %p
+      %q = load i32*, i32** %p
+      ret void
+    }
+  )";
+
+  auto module = parseModule(source);
+  ASSERT_NE(module, nullptr);
+
+  llvm::SmallString<256> collectPath;
+  int fd = -1;
+  ASSERT_FALSE(llvm::sys::fs::createTemporaryFile("sparrow-collect", "txt", fd,
+                                                  collectPath));
+  ::close(fd);
+
+  extern llvm::cl::opt<std::string> AndersenDumpConstraintsAfterCollect;
+  extern llvm::cl::opt<std::string> AndersenDumpConstraintsAfterOptimize;
+
+  const std::string oldCollect = AndersenDumpConstraintsAfterCollect;
+  const std::string oldOptimize = AndersenDumpConstraintsAfterOptimize;
+  AndersenDumpConstraintsAfterCollect = std::string(collectPath.str());
+  AndersenDumpConstraintsAfterOptimize = "";
+
+  {
+    AndersenAAResult AA(*module);
+    (void)AA;
+  }
+
+  AndersenDumpConstraintsAfterCollect = oldCollect;
+  AndersenDumpConstraintsAfterOptimize = oldOptimize;
+
+  std::ifstream input(collectPath.str().str(), std::ios::binary);
+  ASSERT_TRUE(input.is_open());
+  auto header = readStruct<sparrow_aa::SnapshotHeader>(input);
+  EXPECT_EQ(std::string(header.magic, header.magic + 8), "SPAA2BIN");
+  EXPECT_EQ(header.version, sparrow_aa::kSnapshotVersion);
+  EXPECT_EQ(header.phase,
+            static_cast<uint32_t>(sparrow_aa::SnapshotPhase::Collect));
+  EXPECT_GT(header.node_count, 0u);
+  EXPECT_EQ(header.section_count, 11u);
+
+  std::vector<sparrow_aa::SnapshotSectionHeader> sections(header.section_count);
+  input.read(reinterpret_cast<char *>(sections.data()),
+             sizeof(sparrow_aa::SnapshotSectionHeader) * sections.size());
+  EXPECT_EQ(sections[0].kind,
+            static_cast<uint32_t>(sparrow_aa::SnapshotSectionKind::Contexts));
+  EXPECT_EQ(sections[3].kind, static_cast<uint32_t>(
+                                 sparrow_aa::SnapshotSectionKind::
+                                     AddrOfRowOffsets));
+  EXPECT_EQ(sections[4].kind,
+            static_cast<uint32_t>(sparrow_aa::SnapshotSectionKind::AddrOfColumns));
+}
+
+TEST_F(SparrowAATest, SerializesOptimizedConstraints) {
+  const char *source = R"(
+    define i32* @id(i32* %p) {
+      ret i32* %p
+    }
+
+    define i32* @test() {
+      %x = alloca i32
+      %p = call i32* @id(i32* %x)
+      ret i32* %p
+    }
+  )";
+
+  auto module = parseModule(source);
+  ASSERT_NE(module, nullptr);
+
+  llvm::SmallString<256> optimizePath;
+  int fd = -1;
+  ASSERT_FALSE(llvm::sys::fs::createTemporaryFile("sparrow-optimize", "txt",
+                                                  fd, optimizePath));
+  ::close(fd);
+
+  extern llvm::cl::opt<std::string> AndersenDumpConstraintsAfterCollect;
+  extern llvm::cl::opt<std::string> AndersenDumpConstraintsAfterOptimize;
+
+  const std::string oldCollect = AndersenDumpConstraintsAfterCollect;
+  const std::string oldOptimize = AndersenDumpConstraintsAfterOptimize;
+  AndersenDumpConstraintsAfterCollect = "";
+  AndersenDumpConstraintsAfterOptimize = std::string(optimizePath.str());
+
+  {
+    AndersenAAResult AA(*module);
+    (void)AA;
+  }
+
+  AndersenDumpConstraintsAfterCollect = oldCollect;
+  AndersenDumpConstraintsAfterOptimize = oldOptimize;
+
+  std::ifstream input(optimizePath.str().str(), std::ios::binary);
+  ASSERT_TRUE(input.is_open());
+  auto header = readStruct<sparrow_aa::SnapshotHeader>(input);
+  EXPECT_EQ(std::string(header.magic, header.magic + 8), "SPAA2BIN");
+  EXPECT_EQ(header.version, sparrow_aa::kSnapshotVersion);
+  EXPECT_EQ(header.phase,
+            static_cast<uint32_t>(sparrow_aa::SnapshotPhase::Optimize));
+  EXPECT_GT(header.node_count, 0u);
+  EXPECT_EQ(header.section_count, 11u);
+
+  std::vector<sparrow_aa::SnapshotSectionHeader> sections(header.section_count);
+  input.read(reinterpret_cast<char *>(sections.data()),
+             sizeof(sparrow_aa::SnapshotSectionHeader) * sections.size());
+
+  const auto &copyRows = sections[5];
+  const auto &copyCols = sections[6];
+  const auto &loadRows = sections[7];
+  const auto &storeRows = sections[9];
+  EXPECT_EQ(copyRows.kind, static_cast<uint32_t>(
+                               sparrow_aa::SnapshotSectionKind::CopyRowOffsets));
+  EXPECT_EQ(copyCols.kind,
+            static_cast<uint32_t>(sparrow_aa::SnapshotSectionKind::CopyColumns));
+  EXPECT_EQ(loadRows.kind, static_cast<uint32_t>(
+                               sparrow_aa::SnapshotSectionKind::LoadRowOffsets));
+  EXPECT_EQ(storeRows.kind, static_cast<uint32_t>(
+                                sparrow_aa::SnapshotSectionKind::StoreRowOffsets));
+  EXPECT_GT(copyCols.element_count, 0u);
+
+  input.seekg(sections[1].offset, std::ios::beg);
+  std::vector<sparrow_aa::SnapshotNodeRecord> nodes(sections[1].element_count);
+  input.read(reinterpret_cast<char *>(nodes.data()),
+             sizeof(sparrow_aa::SnapshotNodeRecord) * nodes.size());
+  bool sawReturnRole = false;
+  for (const auto &node : nodes) {
+    if (node.node_role ==
+        static_cast<uint16_t>(AndersNode::RETURN_NODE)) {
+      sawReturnRole = true;
+      break;
+    }
+  }
+  EXPECT_TRUE(sawReturnRole);
 }
 
 TEST_F(SparrowAATest, GlobalVariablePointsTo) {

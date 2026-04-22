@@ -68,6 +68,7 @@
 #define TCFS_ANDERSEN_H
 
 #include "Alias/SparrowAA/Constraint.h"
+#include "Alias/SparrowAA/ConstraintSnapshot.h"
 #include "Alias/SparrowAA/NodeFactory.h"
 #include "Alias/SparrowAA/TemplatePtsSet.h"
 #include "Alias/Spec/AliasSpecManager.h"
@@ -80,6 +81,7 @@
 #include <llvm/ADT/DenseMap.h>
 #include <llvm/ADT/DenseSet.h>
 #include <llvm/ADT/Hashing.h>
+#include <llvm/ADT/StringRef.h>
 #include <llvm/IR/DataLayout.h>
 #include <llvm/IR/InstrTypes.h> // For CallBase
 
@@ -221,6 +223,8 @@ private:
   void dumpConstraints() const;
   void dumpConstraintsPlainVanilla() const;
   void dumpPtsGraphPlainVanilla() const;
+  void serializeConstraints(llvm::StringRef outputPath,
+                            sparrow_aa::SnapshotPhase phase) const;
 
 public:
   static char ID;

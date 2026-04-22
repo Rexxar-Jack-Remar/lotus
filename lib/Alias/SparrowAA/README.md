@@ -22,7 +22,7 @@ All optimizations are **disabled by default**. HVN and HU run during the constra
 ## Context sensitivity
 
 - `--andersen-k-cs=<k>` selects the call-site sensitivity (`0 <= k <= 32`):
-  - `0` (default): context-insensitive
+  - `0` (default): context-infiel
   - `1`: 1-CFA (last call site)
   - `2`: 2-CFA (last two call sites)
   - `k > 2`: k-CFA (last `k` call sites)
@@ -32,3 +32,11 @@ All optimizations are **disabled by default**. HVN and HU run during the constra
   history distinct while still sharing universal/null nodes. This avoids the
   equality bug in the external `KCallSite` helper and ensures points-to facts are
   tracked per context as expected.
+
+## Constraint export
+
+- `--andersen-dump-constraints-after-collect=<path>` writes a stable binary `SPAA2BIN` snapshot immediately after collection.
+- `--andersen-dump-constraints-after-optimize=<path>` writes the same format after `optimizeConstraints()`.
+- The dump has a fixed header plus a section table. Sections include context records, node records, a string table, and CSR partitions for each constraint kind.
+- Constraint edges are partitioned by type into separate CSR arrays: `addr_of`, `copy`, `load`, and `store`. Each partition has a row-offset section and a column section keyed by destination node.
+- For GPU work, the CSR sections avoid parsing text and avoid filtering a mixed edge stream before launching kernels.

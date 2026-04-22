@@ -80,6 +80,17 @@ public:
     OBJ_NODE    ///< Represents a memory object (allocation site).
   };
 
+  /// Captures the node's semantic role in the serialized graph.
+  enum NodeRole {
+    REGULAR_NODE,
+    RETURN_NODE,
+    VARARG_NODE,
+    UNIVERSAL_PTR_NODE,
+    UNIVERSAL_OBJ_NODE,
+    NULL_PTR_NODE,
+    NULL_OBJ_NODE
+  };
+
 private:
   AndersNodeType type;   ///< Whether this is a value node or an object node.
   NodeIndex idx;         ///< This node's unique index in the factory's vector.
@@ -87,15 +98,25 @@ private:
                          ///< if not merged).
   const llvm::Value *value; ///< The LLVM value this node corresponds to, or
                             ///< nullptr for artificial nodes.
+  const void *context;      ///< The context instance this node belongs to.
+  NodeRole role;            ///< The node's semantic role.
 
-  AndersNode(AndersNodeType t, unsigned i, const llvm::Value *v = nullptr)
-      : type(t), idx(i), mergeTarget(i), value(v) {}
+  AndersNode(AndersNodeType t, unsigned i, const llvm::Value *v = nullptr,
+             const void *ctx = nullptr, NodeRole nodeRole = REGULAR_NODE)
+      : type(t), idx(i), mergeTarget(i), value(v), context(ctx),
+        role(nodeRole) {}
 
 public:
   /// @brief Return this node's index in the factory.
   NodeIndex getIndex() const { return idx; }
   /// @brief Return the LLVM value associated with this node, or nullptr.
   const llvm::Value *getValue() const { return value; }
+  /// @brief Return the context associated with this node.
+  const void *getContext() const { return context; }
+  /// @brief Return the node's semantic role.
+  NodeRole getRole() const { return role; }
+  /// @brief Return whether this is a value node or object node.
+  AndersNodeType getType() const { return type; }
 
   friend class AndersNodeFactory;
 };
@@ -193,6 +214,15 @@ public:
   // Value getters
   const llvm::Value *getValueForNode(NodeIndex i) const {
     return nodes.at(i).getValue();
+  }
+  CtxKey getContextForNode(NodeIndex i) const {
+    return static_cast<CtxKey>(nodes.at(i).getContext());
+  }
+  AndersNode::NodeRole getRoleForNode(NodeIndex i) const {
+    return nodes.at(i).getRole();
+  }
+  AndersNode::AndersNodeType getTypeForNode(NodeIndex i) const {
+    return nodes.at(i).getType();
   }
   void getAllocSites(std::vector<const llvm::Value *> &) const;
 

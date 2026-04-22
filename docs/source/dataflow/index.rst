@@ -10,5 +10,6 @@ This section covers data flow analysis engines and tools.
    control_flow
    mono
    ifds_ide
+   vasco
    wpds
    npa

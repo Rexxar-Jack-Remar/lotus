@@ -47,14 +47,18 @@ AndersNodeFactory::AndersNodeFactory() {
 
   // Node #0 is always the universal ptr: the ptr that we don't know anything
   // about.
-  nodes.push_back(AndersNode(AndersNode::VALUE_NODE, 0));
+  nodes.push_back(AndersNode(AndersNode::VALUE_NODE, 0, nullptr, nullptr,
+                             AndersNode::UNIVERSAL_PTR_NODE));
   // Node #1 is always the universal obj: the obj that we don't know anything
   // about.
-  nodes.push_back(AndersNode(AndersNode::OBJ_NODE, 1));
+  nodes.push_back(AndersNode(AndersNode::OBJ_NODE, 1, nullptr, nullptr,
+                             AndersNode::UNIVERSAL_OBJ_NODE));
   // Node #2 always represents the null pointer.
-  nodes.push_back(AndersNode(AndersNode::VALUE_NODE, 2));
+  nodes.push_back(AndersNode(AndersNode::VALUE_NODE, 2, nullptr, nullptr,
+                             AndersNode::NULL_PTR_NODE));
   // Node #3 is the object that null pointer points to
-  nodes.push_back(AndersNode(AndersNode::OBJ_NODE, 3));
+  nodes.push_back(AndersNode(AndersNode::OBJ_NODE, 3, nullptr, nullptr,
+                             AndersNode::NULL_OBJ_NODE));
 
   assert(nodes.size() == 4);
 }
@@ -85,7 +89,8 @@ NodeIndex AndersNodeFactory::createValueNode(const Value *val, CtxKey ctx) {
   }
 
   unsigned nextIdx = nodes.size();
-  nodes.push_back(AndersNode(AndersNode::VALUE_NODE, nextIdx, val));
+  nodes.push_back(AndersNode(AndersNode::VALUE_NODE, nextIdx, val,
+                             ctxKeyOrNull(ctx)));
   if (val != nullptr) {
     auto &bucket = valueNodeMap[ctxKeyOrNull(ctx)];
     bucket[val] = nextIdx;
@@ -116,7 +121,8 @@ NodeIndex AndersNodeFactory::createObjectNode(const Value *val, CtxKey ctx) {
   }
 
   unsigned nextIdx = nodes.size();
-  nodes.push_back(AndersNode(AndersNode::OBJ_NODE, nextIdx, val));
+  nodes.push_back(
+      AndersNode(AndersNode::OBJ_NODE, nextIdx, val, ctxKeyOrNull(ctx)));
   if (val != nullptr) {
     auto &bucket = objNodeMap[ctxKeyOrNull(ctx)];
     bucket[val] = nextIdx;
@@ -146,7 +152,8 @@ NodeIndex AndersNodeFactory::createReturnNode(const llvm::Function *f,
   }
 
   unsigned nextIdx = nodes.size();
-  nodes.push_back(AndersNode(AndersNode::VALUE_NODE, nextIdx, f));
+  nodes.push_back(AndersNode(AndersNode::VALUE_NODE, nextIdx, f,
+                             ctxKeyOrNull(ctx), AndersNode::RETURN_NODE));
   bucket[f] = nextIdx;
 
   return nextIdx;
@@ -162,7 +169,8 @@ NodeIndex AndersNodeFactory::createVarargNode(const llvm::Function *f,
   }
 
   unsigned nextIdx = nodes.size();
-  nodes.push_back(AndersNode(AndersNode::OBJ_NODE, nextIdx, f));
+  nodes.push_back(AndersNode(AndersNode::OBJ_NODE, nextIdx, f,
+                             ctxKeyOrNull(ctx), AndersNode::VARARG_NODE));
   bucket[f] = nextIdx;
 
   return nextIdx;
@@ -430,9 +438,9 @@ void AndersNodeFactory::getAllocSites(
 
 void AndersNodeFactory::dumpNode(NodeIndex idx) const {
   const AndersNode &n = nodes.at(idx);
-  if (n.type == AndersNode::VALUE_NODE)
+  if (n.getType() == AndersNode::VALUE_NODE)
     errs() << "[V ";
-  else if (n.type == AndersNode::OBJ_NODE)
+  else if (n.getType() == AndersNode::OBJ_NODE)
     errs() << "[O ";
   else
     assert(false && "Wrong type number!");
@@ -444,9 +452,9 @@ void AndersNodeFactory::dumpNodeInfo() const {
   for (auto const &node : nodes) {
     std::stringstream ss;
     const AndersNode &n = nodes.at(node.getIndex());
-    if (n.type == AndersNode::VALUE_NODE)
+    if (n.getType() == AndersNode::VALUE_NODE)
       ss << "[V #" << n.idx << "]";
-    else if (n.type == AndersNode::OBJ_NODE)
+    else if (n.getType() == AndersNode::OBJ_NODE)
       ss << "[O #" << n.idx << "]";
     else
       assert(false && "Wrong type number!");

@@ -1,58 +1,127 @@
 # VASCO for Lotus
 
-This directory hosts a faithful C++ migration of the original VASCO
-inter-procedural value-context framework (SOAP 2013).
+This directory contains Lotus's C++ port of **VASCO**, the value-context
+interprocedural data-flow framework from:
 
-- SOPA 13: Interprocedural Data Flow Analysis in Soot using Value Contexts.
-Rohan Padhye and Uday P. Khedker.
+- Rohan Padhye and Uday P. Khedker, *Interprocedural Data Flow Analysis in
+  Soot using Value Contexts* (SOAP 2013).
 
-The migration keeps the original framework structure:
+The port preserves the paper's central idea: analyze a procedure in a
+**value context** instead of a call-string context. A value context is the pair
+`<method, entry-flow-value>` for forward analyses and, dually,
+`<method, exit-flow-value>` for backward analyses. When two calls reach the same
+procedure with the same context value, they reuse the same context and the same
+computed summary. This gives precise valid-path propagation, including recursive
+programs, without requiring distributive flow functions.
 
-- `ProgramRepresentation` abstracts entry points, CFGs, and call resolution.
-- `Context` models value contexts keyed by method plus entry/exit flow.
-- `ContextTransitionTable` records call-site to callee-context edges.
-- `InterProceduralAnalysis` provides the shared context/worklist machinery.
-- `ForwardInterProceduralAnalysis` and `BackwardInterProceduralAnalysis`
-  implement the core algorithm from Figure 1 of the paper.
+## Why this exists
 
-The implementation is header-only to stay generic over Lotus method, node,
-and lattice types.
+VASCO fills the gap between:
 
-LLVM-specific surfaces are provided for the migrated client-analysis layer:
+- context-insensitive solvers, which merge unrelated callers too early, and
+- IFDS/IDE-style frameworks, which require distributive transfer functions.
 
-- `LLVM/DefaultLLVMProgramRepresentation.h` adapts LLVM IR to the generic
-  VASCO API using instruction-level CFGs and direct-call resolution.
-- `Clients/LLVMSignAnalysis.h` ports the original sign-analysis example to
-  LLVM IR values and instructions.
-- `Clients/LLVMCopyConstantAnalysis.h` ports the original copy-constant
-  propagation example to LLVM IR.
-- `Clients/LLVMPointsToAnalysis.h` ports the original points-to/call-target
-  client to LLVM IR using allocation-site objects, field-sensitive byte
-  offsets, and the legacy VASCO call handling API that the original Java
-  client relied on.
+The framework instead assumes:
 
-Current LLVM scope and known limits:
+- a finite lattice of data-flow values, and
+- monotone transfer functions.
 
-- The generic value-context framework from the paper is present, including
-  forward/backward inter-procedural propagation, context reuse by entry/exit
-  values, default-call-site tracking, and meet-over-valid-paths aggregation.
-- The default LLVM program representation is intentionally lightweight: it uses
-  an instruction-level intraprocedural CFG and default direct-call resolution,
-  with support for custom target resolvers supplied by clients.
-- Unknown/indirect calls are modeled as default sites and the sample LLVM
-  analyses conservatively degrade returned values at such calls.
-- The original Java `vasco.callgraph` client now has an LLVM migration with a
-  dedicated C++ implementation under `lib/Dataflow/VASCO/`: it models pointer
-  locals, globals, heap allocations, field-sensitive GEP/load/store effects,
-  direct calls, and indirect calls through function-pointer values.
-- The LLVM migration is still lighter-weight than the Soot implementation in a
-  few places: external/native callees are summarized conservatively, arrays are
-  tracked by byte-offset rather than per-element explosion, and there is no
-  attempt to recreate JVM-specific models or Soot Scene call-graph objects.
-- Production caveat: this client is a usable LLVM migration and now field-
-  sensitive for constant-offset memory accesses, but it is still conservative
-  around unknown offsets, heap-modeling beyond malloc-like allocation sites,
-  and advanced external-library summaries.
-- For whole-program LLVM analysis that needs richer indirect-call resolution,
-  clients are expected to plug in Lotus alias/call-graph infrastructure through
-  the custom resolver hook rather than rely on the default representation.
+That makes it suitable for analyses such as sign analysis, copy-constant
+propagation, and points-to analysis, including clients whose transfer functions
+operate on the whole abstract state rather than on independent facts.
+
+## Mapping from the paper to the code
+
+The generic implementation lives under `include/Dataflow/VASCO/` and is mostly
+header-only so it stays parameterized over method, CFG-node, and lattice types.
+
+- `Core/ProgramRepresentation.h`
+  abstracts entry points, control-flow graphs, and call-target resolution.
+- `Core/Context.h`
+  stores one value context, including entry/exit values, per-node IN/OUT maps,
+  and a pseudo-topologically ordered worklist.
+- `Core/ContextTransitionTable.h`
+  records caller-context/call-site to callee-context transitions, matching the
+  transition relation described in the paper.
+- `Core/InterProceduralAnalysis.h`
+  owns the global set of contexts, the transition table, and utilities such as
+  `getContexts()` and `getMeetOverValidPathsSolution()`.
+- `Analyses/ForwardInterProceduralAnalysis.h`
+  implements the forward algorithm corresponding to Figure 1 in the paper.
+- `Analyses/BackwardInterProceduralAnalysis.h`
+  provides the backward dual of the same algorithm.
+- `Analyses/OldForwardInterProceduralAnalysis.h`
+  keeps the older stack-driven forward engine used by the migrated LLVM
+  points-to client.
+
+In the forward solver, call handling is split exactly along the paper's API:
+
+- `callEntryFlowFunction(...)` computes the callee entry value,
+- `callExitFlowFunction(...)` maps the callee summary back to the caller,
+- `callLocalFlowFunction(...)` preserves local effects across the call,
+- `normalFlowFunction(...)` handles non-call instructions.
+
+When a callee context finishes and its entry/exit summary changes,
+`wakeCallers(...)` re-enqueues the corresponding call sites so the updated
+summary is propagated to all valid callers.
+
+## Result forms
+
+The framework exposes two useful result views:
+
+- **context-sensitive** results via `Context::getValueBefore()` and
+  `Context::getValueAfter()` for a particular value context, and
+- **meet-over-valid-paths** results via
+  `InterProceduralAnalysis::getMeetOverValidPathsSolution()`, which merges all
+  surviving contexts for each CFG node.
+
+This mirrors the distinction in the paper between explicit value contexts and
+the final merged solution over valid interprocedural paths.
+
+## LLVM instantiation in Lotus
+
+Lotus provides an LLVM-facing instantiation of the generic framework:
+
+- `LLVM/DefaultLLVMProgramRepresentation.h`
+  adapts LLVM IR to VASCO using instruction-level CFGs and direct-call
+  resolution, with an optional custom resolver hook for stronger call-graph
+  information.
+- `Clients/LLVMSignAnalysis.h`
+  ports the paper's sign-analysis example to LLVM IR.
+- `Clients/LLVMCopyConstantAnalysis.h`
+  ports copy-constant propagation.
+- `Clients/LLVMPointsToAnalysis.h`
+  ports the original points-to/call-graph client to LLVM using allocation-site
+  objects, field-sensitive byte offsets, and function-pointer target
+  resolution.
+
+## LLVM-specific behavior and limits
+
+- The generic value-context framework from the paper is present in Lotus,
+  including context reuse, recursion handling, forward/backward propagation, and
+  caller reprocessing when callee summaries improve.
+- The default LLVM program representation is intentionally lightweight. Out of
+  the box it resolves direct calls and treats unresolved or declaration-only
+  callees conservatively.
+- Unknown or indirect calls without a stronger resolver fall back to
+  conservative call-local handling.
+- The LLVM points-to client is field-sensitive for constant-offset accesses, but
+  it remains conservative for unknown offsets, external-library behavior, and
+  richer heap models.
+- For production use, clients that need more precise indirect-call handling are
+  expected to plug Lotus alias-analysis or call-graph information into the
+  `DefaultLLVMProgramRepresentation` resolver callback.
+
+## Practical extension points
+
+To add a new VASCO-based analysis in Lotus:
+
+1. Choose `ForwardInterProceduralAnalysis` or
+   `BackwardInterProceduralAnalysis`.
+2. Define the lattice operations: `topValue()`, `boundaryValue()`, `copy()`,
+   and `meet()`.
+3. Implement the direction-specific flow hooks.
+4. Supply a `ProgramRepresentation` for your IR and call-resolution policy.
+5. Run `doAnalysis()` and inspect either per-context or merged results.
+
+For user-facing Sphinx documentation, see `docs/source/dataflow/vasco.rst`.
