@@ -119,6 +119,15 @@ protected:
     return AfterCallValue;
   }
 
+  DomainType unknownCallFlowFunction(ContextPtr, const NodeType &Node,
+                                     const DomainType &InValue) override {
+    DomainType AfterCallValue = copy(InValue);
+    if (Node->getType()->isIntegerTy() && !Node->getType()->isVoidTy()) {
+      AfterCallValue[ValueKey::forValue(Node)] = Sign::Bottom;
+    }
+    return AfterCallValue;
+  }
+
 private:
   Sign signOf(const llvm::Value *Value, const DomainType &State) const {
     if (Value == nullptr) {

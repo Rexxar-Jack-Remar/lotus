@@ -188,4 +188,104 @@ TEST_F(VASCOLLVMClientTest, DefaultLLVMProgramRepresentationTreatsIndirectAsUnkn
   EXPECT_FALSE(Targets.has_value());
 }
 
+TEST_F(VASCOLLVMClientTest, DefaultLLVMProgramRepresentationResolvesAliasedDirectCall) {
+  auto Module = parse(R"(
+    define i32 @callee(i32 %x) {
+    entry:
+      ret i32 %x
+    }
+
+    @callee.alias = alias i32 (i32), i32 (i32)* @callee
+
+    define i32 @main() {
+    entry:
+      %r = call i32 @callee.alias(i32 7)
+      ret i32 %r
+    }
+  )");
+
+  vasco::llvmir::DefaultLLVMProgramRepresentation Program(Module.get());
+  auto *Main = Module->getFunction("main");
+  auto *Call = llvm::dyn_cast<llvm::CallBase>(
+      lotus::unittest::findInstructionByName(Main, "r"));
+  ASSERT_NE(Call, nullptr);
+
+  auto Targets = Program.resolveTargets(Main, Call);
+  ASSERT_TRUE(Targets.has_value());
+  ASSERT_EQ(Targets->size(), 1U);
+  EXPECT_EQ(Targets->front(), Module->getFunction("callee"));
+}
+
+TEST_F(VASCOLLVMClientTest, UnknownCallsConservativelyKillCopyConstantResult) {
+  auto Module = parse(R"(
+    define i32 @main(i32 (i32)* %fp) {
+    entry:
+      %x = call i32 %fp(i32 1)
+      ret i32 %x
+    }
+  )");
+
+  vasco::llvmir::DefaultLLVMProgramRepresentation Program(Module.get(),
+                                                          {Module->getFunction("main")});
+  vasco::llvmir::CopyConstantAnalysis Analysis(Program);
+  Analysis.doAnalysis();
+
+  auto *Main = Module->getFunction("main");
+  auto *XCall = lotus::unittest::findInstructionByName(Main, "x");
+  ASSERT_NE(XCall, nullptr);
+
+  const auto Solution = Analysis.getMeetOverValidPathsSolution();
+  EXPECT_EQ(Solution.getValueAfter(XCall).at(vasco::llvmir::ValueKey::forValue(XCall)),
+            nullptr);
+}
+
+TEST_F(VASCOLLVMClientTest, UnknownCallsConservativelyBottomSignResult) {
+  auto Module = parse(R"(
+    define i32 @main(i32 (i32)* %fp) {
+    entry:
+      %x = call i32 %fp(i32 1)
+      ret i32 %x
+    }
+  )");
+
+  vasco::llvmir::DefaultLLVMProgramRepresentation Program(Module.get(),
+                                                          {Module->getFunction("main")});
+  vasco::llvmir::SignAnalysis Analysis(Program);
+  Analysis.doAnalysis();
+
+  auto *Main = Module->getFunction("main");
+  auto *XCall = lotus::unittest::findInstructionByName(Main, "x");
+  ASSERT_NE(XCall, nullptr);
+
+  const auto Solution = Analysis.getMeetOverValidPathsSolution();
+  EXPECT_EQ(Solution.getValueAfter(XCall).at(vasco::llvmir::ValueKey::forValue(XCall)),
+            vasco::llvmir::Sign::Bottom);
+}
+
+TEST_F(VASCOLLVMClientTest, SignAnalysisHandlesUnreachableExitAsTail) {
+  auto Module = parse(R"(
+    define i32 @abort_like() {
+    entry:
+      unreachable
+    }
+
+    define i32 @main() {
+    entry:
+      %r = call i32 @abort_like()
+      ret i32 0
+    }
+  )");
+
+  vasco::llvmir::DefaultLLVMProgramRepresentation Program(Module.get());
+  vasco::llvmir::SignAnalysis Analysis(Program);
+  Analysis.doAnalysis();
+
+  auto *AbortLike = Module->getFunction("abort_like");
+  ASSERT_NE(AbortLike, nullptr);
+
+  const auto &Contexts = Analysis.getContexts(AbortLike);
+  ASSERT_EQ(Contexts.size(), 1U);
+  EXPECT_TRUE(Contexts.front()->isAnalysed());
+}
+
 } // namespace

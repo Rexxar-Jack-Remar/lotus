@@ -115,6 +115,15 @@ protected:
     return AfterCallValue;
   }
 
+  DomainType unknownCallFlowFunction(ContextPtr, const NodeType &Node,
+                                     const DomainType &InValue) override {
+    DomainType AfterCallValue = copy(InValue);
+    if (!Node->getType()->isVoidTy()) {
+      AfterCallValue[ValueKey::forValue(Node)] = nullptr;
+    }
+    return AfterCallValue;
+  }
+
 private:
   const llvm::Constant *constantOf(const llvm::Value *Value,
                                    const DomainType &State) const {

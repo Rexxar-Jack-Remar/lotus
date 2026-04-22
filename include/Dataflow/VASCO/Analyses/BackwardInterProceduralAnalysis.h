@@ -58,6 +58,7 @@ public:
           if (!MaybeTargets.has_value()) {
             this->ContextTransitions.addTransition(CallSiteType(CurrentContext, Node),
                                                    nullptr);
+            In = unknownCallFlowFunction(CurrentContext, Node, Out);
           } else {
             for (const auto &TargetMethod : *MaybeTargets) {
               const A ExitValue =
@@ -153,6 +154,10 @@ protected:
                                  const N &Node, const A &OutValue) = 0;
   virtual A callLocalFlowFunction(ContextPtr Context, const N &Node,
                                   const A &OutValue) = 0;
+  virtual A unknownCallFlowFunction(ContextPtr Context, const N &Node,
+                                    const A &OutValue) {
+    return callLocalFlowFunction(Context, Node, OutValue);
+  }
 };
 
 } // namespace vasco

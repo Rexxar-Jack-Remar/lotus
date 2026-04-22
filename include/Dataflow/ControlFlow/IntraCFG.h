@@ -184,7 +184,7 @@ LLVMIntraCFG::getForwardExitPoints(f_t Function) {
   }
   for (auto &BB : *Function) {
     if (auto *Term = BB.getTerminator()) {
-      if (llvm::isa<llvm::ReturnInst>(Term)) {
+      if (getForwardSuccs(Term).empty()) {
         Exit.push_back(Term);
       }
     }

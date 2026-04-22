@@ -5,6 +5,7 @@
 #include "Dataflow/VASCO/Core/ProgramRepresentation.h"
 
 #include <llvm/IR/Function.h>
+#include <llvm/IR/GlobalAlias.h>
 #include <llvm/IR/Instructions.h>
 #include <llvm/IR/Module.h>
 
@@ -102,12 +103,14 @@ public:
       return std::vector<MethodType>{};
     }
 
-    auto *Callee = Call->getCalledFunction();
-    if (Callee == nullptr || isPhantomMethod(Callee)) {
-      return std::nullopt;
+    if (auto *Callee = resolveDirectCallee(Call)) {
+      if (isPhantomMethod(Callee)) {
+        return std::nullopt;
+      }
+      return std::vector<MethodType>{Callee};
     }
 
-    return std::vector<MethodType>{Callee};
+    return std::nullopt;
   }
 
   bool isPhantomMethod(const MethodType &Method) const override {
@@ -115,6 +118,24 @@ public:
   }
 
 private:
+  static MethodType resolveDirectCallee(const llvm::CallBase *Call) {
+    if (Call == nullptr) {
+      return nullptr;
+    }
+
+    if (auto *Direct = Call->getCalledFunction()) {
+      return Direct;
+    }
+
+    llvm::Value *CalledOperand = Call->getCalledOperand();
+    if (CalledOperand == nullptr) {
+      return nullptr;
+    }
+
+    CalledOperand = CalledOperand->stripPointerCastsAndAliases();
+    return llvm::dyn_cast<llvm::Function>(CalledOperand);
+  }
+
   llvm::Module *Module = nullptr;
   std::vector<MethodType> EntryPoints;
   ResolveTargetsFn Resolver;
