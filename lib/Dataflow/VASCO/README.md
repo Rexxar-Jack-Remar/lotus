@@ -26,6 +26,10 @@ LLVM-specific surfaces are provided for the migrated client-analysis layer:
   LLVM IR values and instructions.
 - `Clients/LLVMCopyConstantAnalysis.h` ports the original copy-constant
   propagation example to LLVM IR.
+- `Clients/LLVMPointsToAnalysis.h` ports the original points-to/call-target
+  client to LLVM IR using allocation-site objects, field-sensitive byte
+  offsets, and the legacy VASCO call handling API that the original Java
+  client relied on.
 
 Current LLVM scope and known limits:
 
@@ -37,9 +41,18 @@ Current LLVM scope and known limits:
   with support for custom target resolvers supplied by clients.
 - Unknown/indirect calls are modeled as default sites and the sample LLVM
   analyses conservatively degrade returned values at such calls.
-- The paper's larger Soot-side demonstration, namely on-the-fly
-  flow-/context-sensitive points-to analysis and context-sensitive call-graph
-  construction, has not been migrated into this VASCO subtree.
+- The original Java `vasco.callgraph` client now has an LLVM migration with a
+  dedicated C++ implementation under `lib/Dataflow/VASCO/`: it models pointer
+  locals, globals, heap allocations, field-sensitive GEP/load/store effects,
+  direct calls, and indirect calls through function-pointer values.
+- The LLVM migration is still lighter-weight than the Soot implementation in a
+  few places: external/native callees are summarized conservatively, arrays are
+  tracked by byte-offset rather than per-element explosion, and there is no
+  attempt to recreate JVM-specific models or Soot Scene call-graph objects.
+- Production caveat: this client is a usable LLVM migration and now field-
+  sensitive for constant-offset memory accesses, but it is still conservative
+  around unknown offsets, heap-modeling beyond malloc-like allocation sites,
+  and advanced external-library summaries.
 - For whole-program LLVM analysis that needs richer indirect-call resolution,
   clients are expected to plug in Lotus alias/call-graph infrastructure through
   the custom resolver hook rather than rely on the default representation.

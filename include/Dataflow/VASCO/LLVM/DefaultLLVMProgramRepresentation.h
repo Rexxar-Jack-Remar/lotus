@@ -76,6 +76,8 @@ public:
 
   std::vector<MethodType> getEntryPoints() const override { return EntryPoints; }
 
+  llvm::Module *getModule() const { return Module; }
+
   GraphPtr getControlFlowGraph(const MethodType &Method) const override {
     auto It = GraphCache.find(Method);
     if (It != GraphCache.end()) {

@@ -88,7 +88,7 @@ protected:
       if (I >= CalledMethod->arg_size()) {
         break;
       }
-      auto ArgIt = CalledMethod->arg_begin();
+      auto *ArgIt = CalledMethod->arg_begin();
       std::advance(ArgIt, I);
       EntryValue[ValueKey::forValue(&*ArgIt)] =
           signOf(Call->getArgOperand(I), InValue);

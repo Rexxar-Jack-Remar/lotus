@@ -4,6 +4,7 @@
 #include "Dataflow/VASCO/Analyses/ForwardInterProceduralAnalysis.h"
 #include "Dataflow/VASCO/Analyses/OldForwardInterProceduralAnalysis.h"
 #include "Dataflow/VASCO/Clients/LLVMCopyConstantAnalysis.h"
+#include "Dataflow/VASCO/Clients/LLVMPointsToAnalysis.h"
 #include "Dataflow/VASCO/Clients/LLVMSignAnalysis.h"
 #include "Dataflow/VASCO/Core/CallSite.h"
 #include "Dataflow/VASCO/Core/Context.h"
@@ -13,3 +14,5 @@
 #include "Dataflow/VASCO/Core/InterProceduralAnalysis.h"
 #include "Dataflow/VASCO/Core/ProgramRepresentation.h"
 #include "Dataflow/VASCO/LLVM/DefaultLLVMProgramRepresentation.h"
+#include "Dataflow/VASCO/Support/LLVMPointsToMemory.h"
+#include "Dataflow/VASCO/Support/LLVMPointsToTypes.h"
