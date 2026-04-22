@@ -5,12 +5,34 @@
 #include "Dataflow/VASCO/Core/ProgramRepresentation.h"
 
 #include <cassert>
+#include <iostream>
 #include <map>
 #include <memory>
+#include <ostream>
 #include <set>
+#include <stdexcept>
+#include <type_traits>
 #include <vector>
 
 namespace vasco {
+
+namespace detail {
+
+template <typename T, typename = void> struct IsOstreamWritable : std::false_type {};
+
+template <typename T>
+struct IsOstreamWritable<
+    T, std::void_t<decltype(std::declval<std::ostream &>()
+                            << std::declval<const T &>())>> : std::true_type {};
+
+template <typename T>
+void appendIfStreamable(std::ostream &OS, const T &Value) {
+  if constexpr (IsOstreamWritable<T>::value) {
+    OS << Value;
+  }
+}
+
+} // namespace detail
 
 template <typename M, typename N, typename A> struct ContextPtrComparator {
   bool operator()(const std::shared_ptr<Context<M, N, A>> &LHS,
@@ -75,6 +97,12 @@ public:
   }
 
   DataFlowSolution<N, A> getMeetOverValidPathsSolution() const {
+    if (FreeResultsOnTheFly) {
+      throw std::logic_error(
+          "VASCO meet-over-valid-paths solution is unavailable when "
+          "FreeResultsOnTheFly is enabled");
+    }
+
     std::map<N, A> InValues;
     std::map<N, A> OutValues;
 
@@ -91,7 +119,9 @@ public:
 
         for (const auto &Context : MethodEntry.second) {
           if (Context->isFreed()) {
-            continue;
+            throw std::logic_error(
+                "VASCO meet-over-valid-paths solution encountered freed context "
+                "state");
           }
           In = meetConst(In, Context->getValueBefore(Node));
           Out = meetConst(Out, Context->getValueAfter(Node));
@@ -180,7 +210,17 @@ protected:
   void sanityCheckAnalysedContexts() const {
     for (const auto &MethodEntry : Contexts) {
       for (const auto &Context : MethodEntry.second) {
-        (void)Context;
+        if (Context->isAnalysed()) {
+          continue;
+        }
+
+        std::cerr << "*** ATTENTION ***: Only partial analysis of X"
+                  << Context->getId();
+        if constexpr (detail::IsOstreamWritable<M>::value) {
+          std::cerr << ' ';
+          detail::appendIfStreamable(std::cerr, Context->getMethod());
+        }
+        std::cerr << '\n';
       }
     }
   }

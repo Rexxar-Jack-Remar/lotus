@@ -170,6 +170,11 @@ Lotus ships an LLVM adaptation of the generic framework.
   ports the paper's sign-analysis example.
 * ``Clients/LLVMCopyConstantAnalysis.h``
   ports copy-constant propagation.
+* ``Clients/LLVMLiveVariablesAnalysis.h``
+  adds a backward interprocedural liveness client over LLVM SSA values.
+* ``Clients/LLVMNullnessAnalysis.h``
+  tracks whether pointer-valued LLVM SSA results are null, non-null, or
+  maybe-null.
 * ``Clients/LLVMPointsToAnalysis.h``
   ports the original VASCO points-to / call-target client to LLVM.
 

@@ -59,6 +59,8 @@ public:
             this->ContextTransitions.addTransition(CallSiteType(CurrentContext, Node),
                                                    nullptr);
             In = unknownCallFlowFunction(CurrentContext, Node, Out);
+          } else if (MaybeTargets->empty()) {
+            In = callLocalFlowFunction(CurrentContext, Node, Out);
           } else {
             for (const auto &TargetMethod : *MaybeTargets) {
               const A ExitValue =

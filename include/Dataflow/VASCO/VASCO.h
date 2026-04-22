@@ -4,6 +4,8 @@
 #include "Dataflow/VASCO/Analyses/ForwardInterProceduralAnalysis.h"
 #include "Dataflow/VASCO/Analyses/OldForwardInterProceduralAnalysis.h"
 #include "Dataflow/VASCO/Clients/LLVMCopyConstantAnalysis.h"
+#include "Dataflow/VASCO/Clients/LLVMLiveVariablesAnalysis.h"
+#include "Dataflow/VASCO/Clients/LLVMNullnessAnalysis.h"
 #include "Dataflow/VASCO/Clients/LLVMPointsToAnalysis.h"
 #include "Dataflow/VASCO/Clients/LLVMSignAnalysis.h"
 #include "Dataflow/VASCO/Core/CallSite.h"

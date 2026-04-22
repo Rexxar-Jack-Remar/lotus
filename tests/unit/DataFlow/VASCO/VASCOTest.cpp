@@ -2,9 +2,11 @@
 
 #include <gtest/gtest.h>
 
+#include <sstream>
 #include <map>
 #include <memory>
 #include <optional>
+#include <stdexcept>
 #include <set>
 #include <string>
 #include <utility>
@@ -142,6 +144,13 @@ public:
   }
   Sign topValue() override { return Sign::Top; }
 
+  void registerContextForTest(
+      std::shared_ptr<vasco::Context<Method, Node, Sign>> Context) {
+    this->registerContext(std::move(Context));
+  }
+
+  void runSanityCheckForTest() const { this->sanityCheckAnalysedContexts(); }
+
 protected:
   Sign normalFlowFunction(ContextPtr, const Node &NodeName,
                           const Sign &InValue) override {
@@ -237,6 +246,52 @@ protected:
     FactSet Result = OutValue;
     Result.erase("x");
     return Result;
+  }
+
+private:
+  const ToyProgramRepresentation &Program;
+};
+
+class BackwardIdentityAnalysis final
+    : public vasco::BackwardInterProceduralAnalysis<Method, Node, FactSet> {
+public:
+  explicit BackwardIdentityAnalysis(const ToyProgramRepresentation &Program)
+      : Program(Program) {}
+
+  FactSet boundaryValue(const Method &) override { return {"ret"}; }
+  FactSet copy(const FactSet &Src) override { return Src; }
+
+  FactSet meet(const FactSet &LHS, const FactSet &RHS) override {
+    FactSet Result = LHS;
+    Result.insert(RHS.begin(), RHS.end());
+    return Result;
+  }
+
+  const vasco::ProgramRepresentation<Method, Node> &
+  programRepresentation() const override {
+    return Program;
+  }
+
+  FactSet topValue() override { return {}; }
+
+protected:
+  FactSet normalFlowFunction(ContextPtr, const Node &, const FactSet &OutValue) override {
+    return OutValue;
+  }
+
+  FactSet callEntryFlowFunction(ContextPtr, const Method &, const Node &,
+                                const FactSet &EntryValue) override {
+    return EntryValue;
+  }
+
+  FactSet callExitFlowFunction(ContextPtr, const Method &, const Node &,
+                               const FactSet &OutValue) override {
+    return OutValue;
+  }
+
+  FactSet callLocalFlowFunction(ContextPtr, const Node &,
+                                const FactSet &OutValue) override {
+    return OutValue;
   }
 
 private:
@@ -376,6 +431,70 @@ TEST(VASCOTest, ForwardMarksUnknownTargetsAsDefaultSites) {
       Analysis.getContextTransitionTable().getDefaultCallSites();
   ASSERT_EQ(Defaults.size(), 1U);
   EXPECT_EQ(Defaults.begin()->getCallNode(), "main.call");
+}
+
+TEST(VASCOTest, MeetOverValidPathsRejectsFreedContexts) {
+  ToyProgramRepresentation Program;
+  Program.addMethod("main", std::make_shared<ToyGraph>(
+                                std::vector<Node>{"main.assign", "main.exit"},
+                                std::vector<Node>{"main.assign"},
+                                std::vector<Node>{"main.exit"},
+                                std::vector<std::pair<Node, Node>>{
+                                    {"main.assign", "main.exit"}}));
+  Program.addEntryPoint("main");
+
+  ForwardSignAnalysis Analysis(Program);
+  Analysis.setFreeResultsOnTheFly(true);
+  Analysis.doAnalysis();
+
+  EXPECT_THROW(
+      {
+        auto Solution = Analysis.getMeetOverValidPathsSolution();
+        (void)Solution;
+      },
+      std::logic_error);
+}
+
+TEST(VASCOTest, BackwardTreatsEmptyTargetCallAsLocalFlow) {
+  ToyProgramRepresentation Program;
+  Program.addMethod("main", std::make_shared<ToyGraph>(
+                                std::vector<Node>{"main.call", "main.return"},
+                                std::vector<Node>{"main.call"},
+                                std::vector<Node>{"main.return"},
+                                std::vector<std::pair<Node, Node>>{
+                                    {"main.call", "main.return"}}));
+  Program.addEntryPoint("main");
+  Program.addCall("main.call", {});
+
+  BackwardIdentityAnalysis Analysis(Program);
+  Analysis.doAnalysis();
+
+  const auto &MainContexts = Analysis.getContexts("main");
+  ASSERT_EQ(MainContexts.size(), 1U);
+  EXPECT_EQ(MainContexts.front()->getEntryValue(), (FactSet{"ret"}));
+}
+
+TEST(VASCOTest, SanityCheckReportsPartialContexts) {
+  ToyProgramRepresentation Program;
+  Program.addMethod("main", std::make_shared<ToyGraph>(
+                                std::vector<Node>{"main.assign", "main.exit"},
+                                std::vector<Node>{"main.assign"},
+                                std::vector<Node>{"main.exit"},
+                                std::vector<std::pair<Node, Node>>{
+                                    {"main.assign", "main.exit"}}));
+  Program.addEntryPoint("main");
+
+  ForwardSignAnalysis Analysis(Program);
+  auto Context = std::make_shared<vasco::Context<Method, Node, Sign>>("main");
+  Analysis.registerContextForTest(Context);
+
+  std::stringstream Err;
+  auto *Old = std::cerr.rdbuf(Err.rdbuf());
+  Analysis.runSanityCheckForTest();
+  std::cerr.rdbuf(Old);
+
+  EXPECT_NE(Err.str().find("Only partial analysis of X"), std::string::npos);
+  EXPECT_NE(Err.str().find("main"), std::string::npos);
 }
 
 } // namespace

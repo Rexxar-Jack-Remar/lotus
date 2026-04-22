@@ -2,3 +2,5 @@
 
 add_lotus_vasco_test(vasco_test VASCOTest.cpp)
 add_lotus_vasco_test(vasco_llvm_client_test VASCOLLVMClientTest.cpp)
+add_lotus_vasco_test(vasco_additional_llvm_client_test
+                     VASCOAdditionalLLVMClientTest.cpp)

@@ -90,6 +90,10 @@ Lotus provides an LLVM-facing instantiation of the generic framework:
   ports the paper's sign-analysis example to LLVM IR.
 - `Clients/LLVMCopyConstantAnalysis.h`
   ports copy-constant propagation.
+- `Clients/LLVMLiveVariablesAnalysis.h`
+  adds a backward interprocedural liveness client over LLVM SSA values.
+- `Clients/LLVMNullnessAnalysis.h`
+  tracks whether pointer-valued SSA results are null, non-null, or maybe-null.
 - `Clients/LLVMPointsToAnalysis.h`
   ports the original points-to/call-graph client to LLVM using allocation-site
   objects, field-sensitive byte offsets, and function-pointer target
