@@ -17,19 +17,36 @@ public:
     while (start < text.size()) {
       size_t end = text.find(',', start);
       std::string clause =
-          trim(end == std::string::npos ? std::string_view(text).substr(start)
-                                        : std::string_view(text).substr(start, end - start));
+          trim(end == std::string::npos
+                   ? std::string_view(text).substr(start)
+                   : std::string_view(text).substr(start, end - start));
       if (!clause.empty()) {
-        size_t eq = clause.find('=');
-        if (eq == std::string::npos) {
+        std::vector<std::string> parts;
+        size_t part_start = 0;
+        while (part_start <= clause.size()) {
+          size_t eq = clause.find('=', part_start);
+          std::string part =
+              trim(eq == std::string::npos
+                       ? std::string_view(clause).substr(part_start)
+                       : std::string_view(clause).substr(part_start,
+                                                         eq - part_start));
+          if (!part.empty()) {
+            parts.push_back(std::move(part));
+          }
+          if (eq == std::string::npos) {
+            break;
+          }
+          part_start = eq + 1;
+        }
+
+        if (parts.size() < 2) {
           throw std::runtime_error("Malformed multipattern clause");
         }
-        Var var = Var::parse(trim(std::string_view(clause).substr(0, eq)));
-        std::string rhs = trim(std::string_view(clause).substr(eq + 1));
-        if (rhs.empty()) {
-          throw std::runtime_error("Malformed multipattern clause");
+
+        Var var = Var::parse(parts.front());
+        for (size_t i = 1; i < parts.size(); ++i) {
+          clauses.emplace_back(var, Pattern<L>::parse(parts[i]));
         }
-        clauses.emplace_back(var, Pattern<L>::parse(rhs));
       }
       if (end == std::string::npos) {
         break;
@@ -41,11 +58,63 @@ public:
 
   template <typename A>
   std::vector<Subst> search(const EGraph<L, A> &egraph) const {
-    return searchClauses(egraph, 0, Subst{});
+    std::vector<Subst> out;
+    for (const auto &match :
+         searchWithLimit(egraph, std::numeric_limits<size_t>::max())) {
+      out.insert(out.end(), match.substs.begin(), match.substs.end());
+    }
+    return out;
   }
 
   template <typename A>
-  std::vector<Id> apply(EGraph<L, A> &egraph, const std::vector<Subst> &matches) const {
+  std::vector<SearchMatches<L>> searchWithLimit(const EGraph<L, A> &egraph,
+                                                size_t limit) const {
+    if (clauses_.empty() || limit == 0) {
+      return {};
+    }
+
+    std::vector<SearchMatches<L>> results;
+    for (Id eclass : egraph.classIds()) {
+      if (limit == 0) {
+        break;
+      }
+      auto found = searchEClassWithLimit(egraph, eclass, limit);
+      if (found && !found->substs.empty()) {
+        limit -= std::min(limit, found->substs.size());
+        results.push_back(std::move(*found));
+      }
+    }
+    return results;
+  }
+
+  template <typename A>
+  std::optional<SearchMatches<L>>
+  searchEClassWithLimit(const EGraph<L, A> &egraph, Id eclass,
+                        size_t limit) const {
+    if (clauses_.empty() || limit == 0) {
+      return std::nullopt;
+    }
+    auto seed = Subst{};
+    seed.insert(clauses_.front().first, eclass);
+    auto results = searchClauses(egraph, 0, seed, &eclass, limit);
+    if (results.empty()) {
+      return std::nullopt;
+    }
+    return SearchMatches<L>{eclass, std::move(results)};
+  }
+
+  template <typename A> size_t nMatches(const EGraph<L, A> &egraph) const {
+    size_t total = 0;
+    for (const auto &match :
+         searchWithLimit(egraph, std::numeric_limits<size_t>::max())) {
+      total += match.substs.size();
+    }
+    return total;
+  }
+
+  template <typename A>
+  std::vector<Id> apply(EGraph<L, A> &egraph,
+                        const std::vector<Subst> &matches) const {
     std::vector<Id> added;
     for (const auto &match : matches) {
       Subst subst = match;
@@ -77,18 +146,73 @@ public:
     return vars;
   }
 
+  std::vector<Var> applierVars() const {
+    std::unordered_set<Var> bound;
+    std::vector<Var> vars;
+    for (const auto &[bound_var, pat] : clauses_) {
+      for (const auto &var : pat.vars()) {
+        if (!bound.count(var)) {
+          vars.push_back(var);
+        }
+      }
+      bound.insert(bound_var);
+    }
+    std::sort(vars.begin(), vars.end());
+    vars.erase(std::unique(vars.begin(), vars.end()), vars.end());
+    return vars;
+  }
+
+  template <typename A>
+  std::vector<Id>
+  applyMatches(EGraph<L, A> &egraph,
+               const std::vector<SearchMatches<L>> &matches) const {
+    std::vector<Id> added;
+    for (const auto &match : matches) {
+      for (const auto &subst : match.substs) {
+        Subst current = subst;
+        for (size_t i = 0; i < clauses_.size(); ++i) {
+          Id id = clauses_[i].second.apply(egraph, current);
+          if (auto existing = current.insert(clauses_[i].first, id)) {
+            egraph.unite(id, *existing);
+          }
+          if (i == 0) {
+            added.push_back(id);
+          }
+        }
+      }
+    }
+    return added;
+  }
+
 private:
   template <typename A>
-  std::vector<Subst> searchClauses(const EGraph<L, A> &egraph, size_t index,
-                                   const Subst &seed) const {
+  std::vector<Subst>
+  searchClauses(const EGraph<L, A> &egraph, size_t index, const Subst &seed,
+                const Id *root_eclass = nullptr,
+                size_t limit = std::numeric_limits<size_t>::max()) const {
     if (index >= clauses_.size()) {
       return {seed};
     }
+    if (limit == 0) {
+      return {};
+    }
 
     std::vector<Subst> results;
-    auto matches = clauses_[index].second.search(egraph);
+    std::vector<SearchMatches<L>> matches;
+    if (index == 0 && root_eclass) {
+      auto found = clauses_[index].second.searchEClassWithLimit(
+          egraph, *root_eclass, limit);
+      if (found) {
+        matches.push_back(std::move(*found));
+      }
+    } else {
+      matches = clauses_[index].second.searchWithLimit(egraph, limit);
+    }
     for (const auto &match : matches) {
       for (const auto &candidate : match.substs) {
+        if (results.size() >= limit) {
+          return results;
+        }
         const Var &bound_var = clauses_[index].first;
         if (const Id *existing = seed.get(bound_var)) {
           if (egraph.find(*existing) != egraph.find(match.eclass)) {
@@ -101,7 +225,8 @@ private:
         }
 
         Subst merged = merge(seed, candidate, bound_var, match.eclass);
-        auto tail = searchClauses(egraph, index + 1, merged);
+        auto tail = searchClauses(egraph, index + 1, merged, nullptr,
+                                  limit - results.size());
         results.insert(results.end(), tail.begin(), tail.end());
       }
     }

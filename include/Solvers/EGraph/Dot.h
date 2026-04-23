@@ -2,6 +2,11 @@
 
 #include "Solvers/EGraph/EGraph.h"
 
+#include <cstdlib>
+#include <filesystem>
+
+#include <unistd.h>
+
 namespace lotus::egraph {
 
 template <typename L, typename A> class Dot {
@@ -62,19 +67,74 @@ public:
     out << str();
   }
 
-  void toSvg(const std::string &path) const { toDot(path); }
-  void toPng(const std::string &path) const { toDot(path); }
-  void toPdf(const std::string &path) const { toDot(path); }
+  void toSvg(const std::string &path) const { runDotImpl("svg", path); }
+  void toPng(const std::string &path) const { runDotImpl("png", path); }
+  void toPdf(const std::string &path) const { runDotImpl("pdf", path); }
 
-  template <typename Range> void runDot(const Range &) const {
-    throw std::runtime_error("Graphviz execution is not implemented in Lotus EGraph");
+  template <typename Range> void runDot(const Range &args) const {
+    run("dot", args);
   }
 
-  template <typename Program, typename Range> void run(const Program &, const Range &) const {
-    throw std::runtime_error("External dot runners are not implemented in Lotus EGraph");
+  template <typename Program, typename Range>
+  void run(const Program &program, const Range &args) const {
+    namespace fs = std::filesystem;
+    std::string path_template =
+        (fs::temp_directory_path() / "lotus-egraph-dot-XXXXXX.dot").string();
+    std::vector<char> tmp(path_template.begin(), path_template.end());
+    tmp.push_back('\0');
+
+    int fd = mkstemps(tmp.data(), 4);
+    if (fd == -1) {
+      throw std::runtime_error("Failed to create temporary dot file");
+    }
+    ::close(fd);
+
+    fs::path input_path(tmp.data());
+    try {
+      toDot(input_path.string());
+
+      std::ostringstream cmd;
+      cmd << quoteShell(program);
+      for (const auto &arg : args) {
+        cmd << ' ' << quoteShell(arg);
+      }
+      cmd << ' ' << quoteShell(input_path.string());
+
+      int rc = std::system(cmd.str().c_str());
+      fs::remove(input_path);
+      if (rc != 0) {
+        throw std::runtime_error("Graphviz command failed with exit code " +
+                                 std::to_string(rc));
+      }
+    } catch (...) {
+      std::error_code ec;
+      fs::remove(input_path, ec);
+      throw;
+    }
   }
 
 private:
+  template <typename T> static std::string quoteShell(const T &value) {
+    std::ostringstream oss;
+    oss << value;
+    std::string text = oss.str();
+    std::string quoted = "'";
+    for (char ch : text) {
+      if (ch == '\'') {
+        quoted += "'\\''";
+      } else {
+        quoted += ch;
+      }
+    }
+    quoted += "'";
+    return quoted;
+  }
+
+  void runDotImpl(const char *format, const std::string &path) const {
+    std::vector<std::string> args = {std::string("-T") + format, "-o", path};
+    runDot(args);
+  }
+
   const EGraph<L, A> &egraph_;
   std::vector<std::string> config_;
   bool use_anchors_ = true;

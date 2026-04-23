@@ -9,6 +9,20 @@ namespace lotus::egraph {
 
 template <typename L> class PatternProgram;
 
+template <typename L> struct ENodeOrVarDiscriminant {
+  std::variant<typename L::Discriminant, Var> value;
+
+  friend bool operator==(const ENodeOrVarDiscriminant &lhs,
+                         const ENodeOrVarDiscriminant &rhs) {
+    return lhs.value == rhs.value;
+  }
+
+  friend bool operator!=(const ENodeOrVarDiscriminant &lhs,
+                         const ENodeOrVarDiscriminant &rhs) {
+    return !(lhs == rhs);
+  }
+};
+
 template <typename L> struct ENodeOrVar {
   std::variant<L, Var> value;
 
@@ -45,11 +59,11 @@ template <typename L> struct ENodeOrVar {
     return node().matches(other.node());
   }
 
-  Symbol discriminant() const {
+  ENodeOrVarDiscriminant<L> discriminant() const {
     if (isVar()) {
-      return var().name();
+      return ENodeOrVarDiscriminant<L>{var()};
     }
-    return displayNode(node());
+    return ENodeOrVarDiscriminant<L>{node().discriminant()};
   }
 
   template <typename F> ENodeOrVar mapChildren(F &&fn) const {
@@ -69,8 +83,8 @@ template <typename L> struct ENodeOrVar {
 };
 
 template <typename L> struct LanguageOps<ENodeOrVar<L>> {
-  static std::optional<ENodeOrVar<L>>
-  fromOp(std::string_view op, const std::vector<Id> &children) {
+  static std::optional<ENodeOrVar<L>> fromOp(std::string_view op,
+                                             const std::vector<Id> &children) {
     if (!op.empty() && op.front() == '?' && children.empty()) {
       return ENodeOrVar<L>(Var::parse(op));
     }
@@ -99,7 +113,9 @@ public:
   explicit Pattern(PatternAst<L> ast);
   explicit Pattern(const RecExpr<L> &expr);
 
-  static Pattern parse(std::string_view input) { return Pattern(PatternAst<L>::parse(input)); }
+  static Pattern parse(std::string_view input) {
+    return Pattern(PatternAst<L>::parse(input));
+  }
 
   const PatternAst<L> &ast() const { return ast_; }
 
@@ -179,15 +195,16 @@ public:
   template <typename A>
   std::optional<SearchMatches<L>> searchEClass(const EGraph<L, A> &egraph,
                                                Id eclass) const {
-    return searchEClassWithLimit(egraph, eclass, std::numeric_limits<size_t>::max());
+    return searchEClassWithLimit(egraph, eclass,
+                                 std::numeric_limits<size_t>::max());
   }
 
   template <typename A>
-  std::optional<SearchMatches<L>> searchEClassWithLimit(const EGraph<L, A> &egraph,
-                                                        Id eclass, size_t limit) const;
+  std::optional<SearchMatches<L>>
+  searchEClassWithLimit(const EGraph<L, A> &egraph, Id eclass,
+                        size_t limit) const;
 
-  template <typename A>
-  size_t nMatches(const EGraph<L, A> &egraph) const {
+  template <typename A> size_t nMatches(const EGraph<L, A> &egraph) const {
     size_t total = 0;
     for (const auto &match : search(egraph)) {
       total += match.substs.size();
@@ -208,26 +225,22 @@ public:
 
 private:
   void compact() {
-    std::unordered_map<std::string, Id> seen;
+    std::unordered_map<Id, Id> ids;
+    std::unordered_map<ENodeOrVar<L>, Id> seen;
     std::vector<ENodeOrVar<L>> compacted;
     compacted.reserve(ast_.size());
 
-    for (const auto &node : ast_.items()) {
-      if (node.isVar()) {
+    for (size_t i = 0; i < ast_.size(); ++i) {
+      Id old_id = Id::fromIndex(i);
+      ENodeOrVar<L> node =
+          ast_.items()[i].mapChildren([&](Id id) { return ids.at(id); });
+
+      auto [it, inserted] =
+          seen.try_emplace(node, Id::fromIndex(compacted.size()));
+      if (inserted) {
         compacted.push_back(node);
-        continue;
       }
-
-      std::string key = displayNode(node.node()) + "#";
-      for (Id child : node.node().children()) {
-        key += std::to_string(child.value()) + ",";
-      }
-
-      auto it = seen.find(key);
-      if (it == seen.end()) {
-        seen.emplace(key, Id::fromIndex(compacted.size()));
-      }
-      compacted.push_back(node);
+      ids.emplace(old_id, it->second);
     }
 
     ast_ = PatternAst<L>(std::move(compacted));
@@ -241,7 +254,8 @@ private:
     }
 
     const auto &node = item.node();
-    auto materialized = node.mapChildren([&](Id child) { return applyNode(egraph, child, subst); });
+    auto materialized = node.mapChildren(
+        [&](Id child) { return applyNode(egraph, child, subst); });
     return egraph.add(materialized);
   }
 
@@ -275,9 +289,11 @@ template <typename L> inline Pattern<L> pattern(std::string_view text) {
 
 namespace lotus::egraph {
 
-template <typename L> inline Pattern<L>::Pattern(PatternAst<L> ast) : ast_(std::move(ast)) {
+template <typename L>
+inline Pattern<L>::Pattern(PatternAst<L> ast) : ast_(std::move(ast)) {
   compact();
-  program_ = std::make_shared<PatternProgram<L>>(PatternProgram<L>::compileFromPattern(*this));
+  program_ = std::make_shared<PatternProgram<L>>(
+      PatternProgram<L>::compileFromPattern(*this));
 }
 
 template <typename L> inline Pattern<L>::Pattern(const RecExpr<L> &expr) {
@@ -287,13 +303,15 @@ template <typename L> inline Pattern<L>::Pattern(const RecExpr<L> &expr) {
   }
   ast_ = std::move(ast);
   compact();
-  program_ = std::make_shared<PatternProgram<L>>(PatternProgram<L>::compileFromPattern(*this));
+  program_ = std::make_shared<PatternProgram<L>>(
+      PatternProgram<L>::compileFromPattern(*this));
 }
 
 template <typename L>
 template <typename A>
 inline std::optional<SearchMatches<L>>
-Pattern<L>::searchEClassWithLimit(const EGraph<L, A> &egraph, Id eclass, size_t limit) const {
+Pattern<L>::searchEClassWithLimit(const EGraph<L, A> &egraph, Id eclass,
+                                  size_t limit) const {
   if (limit == 0) {
     return std::nullopt;
   }
@@ -314,6 +332,22 @@ template <typename L> struct std::hash<lotus::egraph::ENodeOrVar<L>> {
       return seed;
     }
     lotus::egraph::hashCombine(seed, value.node());
+    return seed;
+  }
+};
+
+template <typename L>
+struct std::hash<lotus::egraph::ENodeOrVarDiscriminant<L>> {
+  size_t operator()(
+      const lotus::egraph::ENodeOrVarDiscriminant<L> &value) const noexcept {
+    size_t seed = value.value.index();
+    if (std::holds_alternative<typename L::Discriminant>(value.value)) {
+      lotus::egraph::hashCombine(
+          seed, std::get<typename L::Discriminant>(value.value));
+    } else {
+      lotus::egraph::hashCombine(seed,
+                                 std::get<lotus::egraph::Var>(value.value));
+    }
     return seed;
   }
 };

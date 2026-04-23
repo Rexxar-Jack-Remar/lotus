@@ -53,12 +53,16 @@ template <typename L, typename D> struct EClass {
 };
 
 template <typename L, typename D, typename F>
-inline void forEachMatchingNode(const EClass<L, D> &klass, const L &node, F &&fn) {
+inline bool forEachMatchingNode(const EClass<L, D> &klass, const L &node,
+                                F &&fn) {
   for (const auto &candidate : klass.nodes) {
     if (node.matches(candidate)) {
-      fn(candidate);
+      if (!fn(candidate)) {
+        return false;
+      }
     }
   }
+  return true;
 }
 
 } // namespace lotus::egraph

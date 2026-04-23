@@ -70,9 +70,11 @@ template <typename L> struct Instruction {
 template <typename L> class Machine {
 public:
   template <typename A, typename Yield>
-  void run(const EGraph<L, A> &egraph, const std::vector<Instruction<L>> &instructions,
+  void run(const EGraph<L, A> &egraph,
+           const std::vector<Instruction<L>> &instructions,
            const Subst &subst_template, Yield &&yield_fn) {
-    runFrom(egraph, instructions, 0, subst_template, std::forward<Yield>(yield_fn));
+    runFrom(egraph, instructions, 0, subst_template,
+            std::forward<Yield>(yield_fn));
   }
 
   void seed(Id id) {
@@ -82,8 +84,9 @@ public:
 
 private:
   template <typename A, typename Yield>
-  bool runFrom(const EGraph<L, A> &egraph, const std::vector<Instruction<L>> &instructions,
-               size_t pc, const Subst &subst_template, Yield &&yield_fn) {
+  bool runFrom(const EGraph<L, A> &egraph,
+               const std::vector<Instruction<L>> &instructions, size_t pc,
+               const Subst &subst_template, Yield &&yield_fn) {
     if (pc >= instructions.size()) {
       return yield_fn(*this, subst_template);
     }
@@ -92,14 +95,13 @@ private:
     switch (inst.kind) {
     case Instruction<L>::Kind::Bind: {
       const auto &klass = egraph[reg(inst.i)];
-      forEachMatchingNode(klass, inst.node, [&](const L &matched) {
+      return forEachMatchingNode(klass, inst.node, [&](const L &matched) {
         regs_.resize(inst.out.value);
         for (Id child : matched.children()) {
           regs_.push_back(child);
         }
         return runFrom(egraph, instructions, pc + 1, subst_template, yield_fn);
       });
-      return true;
     }
     case Instruction<L>::Kind::Compare:
       if (egraph.find(reg(inst.i)) != egraph.find(reg(inst.j))) {
@@ -110,9 +112,8 @@ private:
       lookup_.clear();
       for (const auto &entry : inst.term) {
         if (entry.isNode()) {
-          auto rebuilt = entry.node().mapChildren([&](Id child) {
-            return lookup_.at(child.index());
-          });
+          auto rebuilt = entry.node().mapChildren(
+              [&](Id child) { return lookup_.at(child.index()); });
           auto found = egraph.lookup(rebuilt);
           if (!found) {
             return true;
@@ -200,7 +201,8 @@ public:
         auto op = node.mapChildren([](Id) { return Id::fromIndex(0); });
         instructions_.push_back(Instruction<L>::bind(op, reg, out));
         for (size_t i = 0; i < node.children().size(); ++i) {
-          addTodo(pattern, node.children()[i], Reg<L>{out.value + static_cast<uint32_t>(i)});
+          addTodo(pattern, node.children()[i],
+                  Reg<L>{out.value + static_cast<uint32_t>(i)});
         }
       }
     }
@@ -245,7 +247,8 @@ private:
       } else {
         size = 1;
         for (Id child : entry.node().children()) {
-          free.insert(free_vars_.at(child.index()).begin(), free_vars_.at(child.index()).end());
+          free.insert(free_vars_.at(child.index()).begin(),
+                      free_vars_.at(child.index()).end());
           size += subtree_size_.at(child.index());
         }
       }
@@ -275,8 +278,9 @@ private:
         }
       }
       size_t n_free = free_vars_.at(index).size() - n_bound;
-      return std::tuple<bool, size_t, long long>(n_free == 0, n_free,
-                                                 -static_cast<long long>(subtree_size_.at(index)));
+      return std::tuple<bool, size_t, long long>(
+          n_free == 0, n_free,
+          -static_cast<long long>(subtree_size_.at(index)));
     };
     for (auto it = todo_nodes_.begin(); it != todo_nodes_.end(); ++it) {
       if (score(*it) > score(*best)) {
@@ -321,7 +325,8 @@ public:
   }
 
   template <typename A>
-  std::vector<Subst> runWithLimit(const EGraph<L, A> &egraph, Id eclass, size_t limit) const {
+  std::vector<Subst> runWithLimit(const EGraph<L, A> &egraph, Id eclass,
+                                  size_t limit) const {
     if (!egraph.clean()) {
       throw std::runtime_error("Tried to search a dirty e-graph");
     }
@@ -332,32 +337,34 @@ public:
     detail::Machine<L> machine;
     machine.seed(eclass);
     std::vector<Subst> matches;
-    machine.run(egraph, instructions_, subst_template_, [&](const auto &machine_state,
-                                                            const Subst &template_subst) {
-      if (!egraph.analysis().allowEMatchingCycles()) {
-        const auto &regs = machine_state.regs();
-        if (!regs.empty()) {
-          for (size_t i = 1; i < regs.size(); ++i) {
-            if (egraph.find(regs[i]) == egraph.find(regs[0])) {
-              return true;
-            }
-          }
-        }
-      }
+    machine.run(egraph, instructions_, subst_template_,
+                [&](const auto &machine_state, const Subst &template_subst) {
+                  if (!egraph.analysis().allowEMatchingCycles()) {
+                    const auto &regs = machine_state.regs();
+                    if (!regs.empty()) {
+                      for (size_t i = 1; i < regs.size(); ++i) {
+                        if (egraph.find(regs[i]) == egraph.find(regs[0])) {
+                          return true;
+                        }
+                      }
+                    }
+                  }
 
-      Subst subst = Subst::withCapacity(template_subst.bindings().size());
-      for (const auto &[var, reg_id] : template_subst.bindings()) {
-        subst.insert(var, machine_state.regs().at(reg_id.index()));
-      }
-      matches.push_back(std::move(subst));
-      return matches.size() < limit;
-    });
+                  Subst subst =
+                      Subst::withCapacity(template_subst.bindings().size());
+                  for (const auto &[var, reg_id] : template_subst.bindings()) {
+                    subst.insert(var, machine_state.regs().at(reg_id.index()));
+                  }
+                  matches.push_back(std::move(subst));
+                  return matches.size() < limit;
+                });
     return matches;
   }
 
 private:
   PatternProgram(std::vector<detail::Instruction<L>> instructions, Subst subst)
-      : instructions_(std::move(instructions)), subst_template_(std::move(subst)) {}
+      : instructions_(std::move(instructions)),
+        subst_template_(std::move(subst)) {}
 
   std::vector<detail::Instruction<L>> instructions_;
   Subst subst_template_;

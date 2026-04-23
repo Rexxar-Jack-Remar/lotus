@@ -10,7 +10,12 @@ template <typename L> struct AstSize {
   template <typename F> Cost operator()(const L &node, F &&child_cost) const {
     size_t total = 1;
     for (Id child : node.children()) {
-      total = total + child_cost(child);
+      size_t child_total = child_cost(child);
+      if (child_total > std::numeric_limits<size_t>::max() - total) {
+        total = std::numeric_limits<size_t>::max();
+      } else {
+        total += child_total;
+      }
     }
     return total;
   }
@@ -48,7 +53,9 @@ public:
     return best_.at(egraph_.find(eclass)).node;
   }
 
-  Cost findBestCost(Id eclass) const { return best_.at(egraph_.find(eclass)).cost; }
+  Cost findBestCost(Id eclass) const {
+    return best_.at(egraph_.find(eclass)).cost;
+  }
 
 private:
   struct Entry {
@@ -85,8 +92,8 @@ private:
         }
 
         auto &slot = best_[id];
-        if (best_entry.valid &&
-            (!slot.valid || best_entry.cost < slot.cost || best_entry.node != slot.node)) {
+        if (best_entry.valid && (!slot.valid || best_entry.cost < slot.cost ||
+                                 best_entry.node != slot.node)) {
           slot = best_entry;
           changed = true;
         }

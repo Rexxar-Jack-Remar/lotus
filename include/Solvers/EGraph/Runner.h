@@ -382,6 +382,12 @@ private:
     for (const auto &rule : rules) {
       ++counts[rule.name()];
     }
+    for (const auto &[name, count] : counts) {
+      if (count > 1) {
+        std::cerr << "WARNING: rule '" << name << "' appears " << count
+                  << " times; scheduling and reporting may be affected\n";
+      }
+    }
   }
 
   Iteration<IterData> runOne(size_t iteration_index,
