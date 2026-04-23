@@ -1,5 +1,6 @@
 #include "Solvers/EGraph.h"
 
+#include <cstdlib>
 #include <filesystem>
 #include <fstream>
 
@@ -82,9 +83,11 @@ TEST(EGraphFeatureTest, DotAndExplanationSurfacesAreAvailable) {
   auto explanation = explainEquivalence(egraph, a, b);
   ASSERT_TRUE(explanation.has_value());
   const auto &flat = explanation->makeFlatExplanation();
-  ASSERT_EQ(flat.size(), 1u);
-  EXPECT_EQ(flat.front().forward_rule, std::optional<std::string>("manual"));
-  EXPECT_EQ(flat.front().expr.toString(), "b");
+  ASSERT_EQ(flat.size(), 2u);
+  EXPECT_EQ(flat.front().forward_rule, std::nullopt);
+  EXPECT_EQ(flat.front().expr.toString(), "a");
+  EXPECT_EQ(flat.back().forward_rule, std::optional<Symbol>(Symbol("manual")));
+  EXPECT_EQ(flat.back().expr.toString(), "b");
 
   std::string dot = toDot(egraph);
   EXPECT_NE(dot.find("digraph egraph"), std::string::npos);
@@ -180,8 +183,9 @@ TEST(EGraphFeatureTest, ExplanationSupportsExpressionQueries) {
   ASSERT_TRUE(explanation.has_value());
   EXPECT_FALSE(explanation->getFlatStrings().empty());
   EXPECT_FALSE(explanation->explanationTrees().empty());
-  EXPECT_EQ(explanation->makeFlatExplanation().front().forward_rule,
-            std::optional<std::string>("manual"));
+  ASSERT_GE(explanation->makeFlatExplanation().size(), 2u);
+  EXPECT_EQ(explanation->makeFlatExplanation().back().forward_rule,
+            std::optional<Symbol>(Symbol("manual")));
 }
 
 TEST(EGraphFeatureTest, EquivsReturnsMatchingEClasses) {
@@ -257,16 +261,18 @@ TEST(EGraphFeatureTest, ExplanationOptimizationFlagRequiresExplanations) {
                   .optimizeExplanationLengths());
 }
 
-TEST(EGraphFeatureTest, DotRunSurfacesFailLoudlyInsteadOfSilentlyNooping) {
+TEST(EGraphFeatureTest, DotRunMatchesEggBehaviorWhenGraphvizIsAvailable) {
   EGraph<SymbolLang> egraph;
   egraph.addExpr(RecExpr<SymbolLang>::parse("(f a)"));
   egraph.rebuild();
 
   Dot<SymbolLang, NoAnalysis<SymbolLang>> dot(egraph);
-  EXPECT_THROW(dot.runDot(std::vector<std::string>{"-Tsvg"}),
-               std::runtime_error);
-  EXPECT_THROW(dot.run(std::string("dot"), std::vector<std::string>{"-Tsvg"}),
-               std::runtime_error);
+  if (std::system("command -v dot >/dev/null 2>&1") != 0) {
+    GTEST_SKIP() << "Graphviz 'dot' not available";
+  }
+
+  EXPECT_NO_THROW(dot.runDot(std::vector<std::string>{"-Tsvg"}));
+  EXPECT_NO_THROW(dot.run(std::string("dot"), std::vector<std::string>{"-Tsvg"}));
 }
 
 TEST(EGraphFeatureTest, LpExtractorTimeoutValidationAndCanonicalRoots) {
@@ -283,4 +289,28 @@ TEST(EGraphFeatureTest, LpExtractorTimeoutValidationAndCanonicalRoots) {
   EXPECT_EQ(result.second[1], egraph.find(b));
   EXPECT_THROW((void)extractor.solveWithTimeout(a, 0, -1.0),
                std::runtime_error);
+}
+
+LOTUS_EGRAPH_DEFINE_LANGUAGE(TestLang, {
+  LOTUS_EGRAPH_LANG_OP("+", 2)
+  LOTUS_EGRAPH_LANG_OP("*", 2)
+  LOTUS_EGRAPH_LANG_OP("x", 0)
+  LOTUS_EGRAPH_LANG_OP("y", 0)
+});
+
+TEST(EGraphFeatureTest, DefineLanguageSurfaceConstrainsFromOp) {
+  auto plus = RecExpr<TestLang>::parse("(+ x y)");
+  EXPECT_EQ(plus.toString(), "(+ x y)");
+
+  EGraph<TestLang> egraph;
+  Id root = egraph.addExpr(plus);
+  egraph.rebuild();
+
+  auto pat = Pattern<TestLang>::parse("(+ ?a ?b)");
+  auto matches = pat.search(egraph);
+  ASSERT_EQ(matches.size(), 1u);
+  EXPECT_EQ(egraph.find(matches.front().eclass), egraph.find(root));
+
+  EXPECT_THROW((void)RecExpr<TestLang>::parse("z"), std::runtime_error);
+  EXPECT_THROW((void)RecExpr<TestLang>::parse("(- x y)"), std::runtime_error);
 }

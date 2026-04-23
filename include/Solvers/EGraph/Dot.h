@@ -49,10 +49,18 @@ public:
         for (size_t arg = 0; arg < klass.nodes[i].children().size(); ++arg) {
           Id child = klass.nodes[i].children()[arg];
           Id leader = egraph_.find(child);
-          oss << "  " << id.value() << "." << i << " -> " << leader.value()
-              << ".0 [lhead = cluster_" << leader.value();
-          if (!use_anchors_) {
-            oss << ", label=" << arg;
+          auto [anchor, label] =
+              edge(arg, klass.nodes[i].children().size(), use_anchors_);
+          if (leader == id) {
+            oss << "  " << id.value() << "." << i << anchor << " -> "
+                << id.value() << "." << i << ":n [lhead = cluster_"
+                << id.value();
+          } else {
+            oss << "  " << id.value() << "." << i << anchor << " -> "
+                << child.value() << ".0 [lhead = cluster_" << leader.value();
+          }
+          if (!label.empty()) {
+            oss << ", " << label;
           }
           oss << "]\n";
         }
@@ -99,6 +107,7 @@ public:
         cmd << ' ' << quoteShell(arg);
       }
       cmd << ' ' << quoteShell(input_path.string());
+      cmd << " > /dev/null";
 
       int rc = std::system(cmd.str().c_str());
       fs::remove(input_path);
@@ -114,6 +123,26 @@ public:
   }
 
 private:
+  static std::pair<std::string, std::string>
+  edge(size_t i, size_t len, bool use_anchors) {
+    if (i >= len) {
+      throw std::runtime_error("Dot edge index out of range");
+    }
+    if (!use_anchors) {
+      return {"", "label=" + std::to_string(i)};
+    }
+    switch (len) {
+    case 1:
+      return {"", ""};
+    case 2:
+      return {i == 0 ? ":sw" : ":se", ""};
+    case 3:
+      return {i == 0 ? ":sw" : (i == 1 ? ":s" : ":se"), ""};
+    default:
+      return {"", "label=" + std::to_string(i)};
+    }
+  }
+
   template <typename T> static std::string quoteShell(const T &value) {
     std::ostringstream oss;
     oss << value;

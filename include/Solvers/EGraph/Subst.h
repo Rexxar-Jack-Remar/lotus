@@ -10,33 +10,36 @@ public:
   Var() = default;
   explicit Var(Symbol name) : name_(std::move(name)) {}
 
-  static Var fromU32(uint32_t num) { return Var("?#" + std::to_string(num)); }
+  static Var fromU32(uint32_t num) {
+    Var var;
+    var.numeric_ = num;
+    var.name_ = Symbol("?#" + std::to_string(num));
+    return var;
+  }
 
   static Var parse(std::string_view text) {
     if (text.size() < 2 || text[0] != '?') {
       throw std::runtime_error("Pattern variable must start with '?'");
     }
     if (text.size() >= 3 && text[1] == '#') {
-      size_t pos = 2;
-      while (pos < text.size() && text[pos] == '0') {
-        ++pos;
-      }
-      for (size_t i = pos; i < text.size(); ++i) {
+      for (size_t i = 2; i < text.size(); ++i) {
         if (!std::isdigit(static_cast<unsigned char>(text[i]))) {
           throw std::runtime_error("Malformed numeric pattern variable");
         }
       }
+      if (text.size() == 2) {
+        throw std::runtime_error("Malformed numeric pattern variable");
+      }
+      return fromU32(static_cast<uint32_t>(
+          std::stoul(std::string(text.substr(2)))));
     }
-    return Var(std::string(text));
+    return Var(Symbol(text));
   }
 
   const Symbol &name() const { return name_; }
 
   std::optional<uint32_t> asU32() const {
-    if (name_.size() >= 3 && name_[0] == '?' && name_[1] == '#') {
-      return static_cast<uint32_t>(std::stoul(name_.substr(2)));
-    }
-    return std::nullopt;
+    return numeric_;
   }
 
   friend bool operator==(const Var &lhs, const Var &rhs) {
@@ -48,6 +51,7 @@ public:
 
 private:
   Symbol name_;
+  std::optional<uint32_t> numeric_;
 };
 
 inline std::ostream &operator<<(std::ostream &os, const Var &var) {

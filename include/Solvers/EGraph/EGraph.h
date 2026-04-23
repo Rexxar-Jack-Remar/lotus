@@ -15,7 +15,7 @@ template <typename L> using PatternAst = RecExpr<ENodeOrVar<L>>;
 struct UnionEvent {
   Id left;
   Id right;
-  std::string reason;
+  Symbol reason;
   bool rewrite = false;
   std::optional<std::string> left_expr;
   std::optional<std::string> right_expr;
@@ -32,7 +32,7 @@ struct ExplanationConnection {
   bool is_rewrite_forward = false;
   Id next = Id::fromIndex(0);
   Id current = Id::fromIndex(0);
-  std::string rule;
+  Symbol rule;
 };
 
 struct ExplanationNode {
@@ -181,15 +181,15 @@ public:
     return explanation_nodes_;
   }
 
-  std::vector<std::tuple<Id, Id, std::string>> getUnionEqualities() const {
+  std::vector<std::tuple<Id, Id, Symbol>> getUnionEqualities() const {
     if (!explanations_enabled_) {
       throw std::runtime_error(
           "Use withExplanationsEnabled before requesting union equalities");
     }
-    std::vector<std::tuple<Id, Id, std::string>> out;
+    std::vector<std::tuple<Id, Id, Symbol>> out;
     out.reserve(union_events_.size());
     for (const auto &event : union_events_) {
-      if (!event.reason.empty()) {
+      if (event.rewrite && event.reason != Symbol()) {
         out.emplace_back(event.left, event.right, event.reason);
       }
     }
@@ -352,20 +352,20 @@ public:
     return addInstantiationNoncanonical(pat, subst);
   }
 
-  Id unite(Id lhs, Id rhs, const std::string &reason = {}) {
-    auto [id, _] = uniteImpl(lhs, rhs, reason, !reason.empty());
+  Id unite(Id lhs, Id rhs, const Symbol &reason = {}) {
+    auto [id, _] = uniteImpl(lhs, rhs, reason, reason != Symbol());
     return id;
   }
 
   std::pair<Id, bool> uniteChecked(Id lhs, Id rhs,
-                                   const std::string &reason = {}) {
-    return uniteImpl(lhs, rhs, reason, !reason.empty());
+                                   const Symbol &reason = {}) {
+    return uniteImpl(lhs, rhs, reason, reason != Symbol());
   }
 
   std::pair<Id, bool> unionInstantiations(const PatternAst<L> &from_pat,
                                           const PatternAst<L> &to_pat,
                                           const Subst &subst,
-                                          const std::string &reason);
+                                          const Symbol &reason);
 
   std::vector<Id> equivs(const RecExpr<L> &expr1,
                          const RecExpr<L> &expr2) const {
@@ -506,13 +506,13 @@ private:
   }
 
   void addExplanationNeighbor(Id lhs, Id rhs, ExplanationJustificationKind kind,
-                              bool forward, std::string rule = {}) {
+                              bool forward, Symbol rule = {}) {
     explanation_nodes_.at(lhs.index())
         .neighbors.push_back(
             ExplanationConnection{kind, forward, rhs, lhs, std::move(rule)});
   }
 
-  void recordExplanation(Id lhs, Id rhs, const std::string &reason,
+  void recordExplanation(Id lhs, Id rhs, const Symbol &reason,
                          bool rewrite) {
     if (!explanations_enabled_) {
       return;
@@ -641,9 +641,10 @@ private:
 
   Id addInstantiationNoncanonical(const PatternAst<L> &pat, const Subst &subst);
 
-  std::pair<Id, bool> uniteImpl(Id lhs, Id rhs, const std::string &reason,
+  std::pair<Id, bool> uniteImpl(Id lhs, Id rhs, const Symbol &reason,
                                 bool rewrite) {
-    analysis_.preUnion(*this, lhs, rhs, reason.empty() ? nullptr : &reason);
+    analysis_.preUnion(*this, lhs, rhs,
+                       reason == Symbol() ? nullptr : &reason);
 
     clean_ = false;
     lhs = findMut(lhs);
@@ -693,7 +694,7 @@ private:
     return {lhs, true};
   }
 
-  void recordUnion(Id lhs, Id rhs, const std::string &reason, bool rewrite) {
+  void recordUnion(Id lhs, Id rhs, const Symbol &reason, bool rewrite) {
     if (explanations_enabled_) {
       union_events_.push_back(
           {lhs, rhs, reason, rewrite, tryIdToString(lhs), tryIdToString(rhs)});
@@ -961,7 +962,7 @@ inline Id EGraph<L, AnalysisT>::addInstantiation(const PatternAst<L> &pat,
 template <typename L, typename AnalysisT>
 inline std::pair<Id, bool> EGraph<L, AnalysisT>::unionInstantiations(
     const PatternAst<L> &from_pat, const PatternAst<L> &to_pat,
-    const Subst &subst, const std::string &reason) {
+    const Subst &subst, const Symbol &reason) {
   Id from = addInstantiationNoncanonical(from_pat, subst);
   Id to = addInstantiationNoncanonical(to_pat, subst);
   return uniteImpl(from, to, reason, true);

@@ -3,12 +3,14 @@
 #include <algorithm>
 #include <cctype>
 #include <chrono>
+#include <deque>
 #include <fstream>
 #include <functional>
 #include <iostream>
 #include <limits>
 #include <map>
 #include <memory>
+#include <mutex>
 #include <optional>
 #include <ostream>
 #include <sstream>
@@ -23,7 +25,85 @@
 
 namespace lotus::egraph {
 
-using Symbol = std::string;
+class Symbol {
+public:
+  Symbol() = default;
+  Symbol(const char *text) : id_(intern(text ? std::string_view(text) : std::string_view())) {}
+  Symbol(std::string text) : id_(intern(text)) {}
+  Symbol(std::string_view text) : id_(intern(text)) {}
+
+  uint32_t id() const { return id_; }
+
+  const std::string &str() const { return table().strings.at(id_); }
+  const char *c_str() const { return str().c_str(); }
+  std::string_view view() const { return str(); }
+
+  operator std::string() const { return str(); }
+  operator std::string_view() const { return view(); }
+
+  friend bool operator==(Symbol lhs, Symbol rhs) { return lhs.id_ == rhs.id_; }
+  friend bool operator!=(Symbol lhs, Symbol rhs) { return !(lhs == rhs); }
+  friend bool operator<(Symbol lhs, Symbol rhs) { return lhs.id_ < rhs.id_; }
+  friend bool operator<=(Symbol lhs, Symbol rhs) { return !(rhs < lhs); }
+  friend bool operator>(Symbol lhs, Symbol rhs) { return rhs < lhs; }
+  friend bool operator>=(Symbol lhs, Symbol rhs) { return !(lhs < rhs); }
+
+  friend bool operator==(Symbol lhs, std::string_view rhs) {
+    return lhs.view() == rhs;
+  }
+  friend bool operator==(std::string_view lhs, Symbol rhs) { return rhs == lhs; }
+  friend bool operator==(Symbol lhs, const char *rhs) {
+    return lhs.view() == std::string_view(rhs ? rhs : "");
+  }
+  friend bool operator==(const char *lhs, Symbol rhs) { return rhs == lhs; }
+  friend bool operator!=(Symbol lhs, std::string_view rhs) {
+    return !(lhs == rhs);
+  }
+  friend bool operator!=(std::string_view lhs, Symbol rhs) {
+    return !(lhs == rhs);
+  }
+  friend bool operator!=(Symbol lhs, const char *rhs) { return !(lhs == rhs); }
+  friend bool operator!=(const char *lhs, Symbol rhs) { return !(lhs == rhs); }
+
+private:
+  struct Table {
+    std::mutex mu;
+    std::unordered_map<std::string, uint32_t> ids;
+    std::deque<std::string> strings;
+
+    Table() {
+      strings.emplace_back("");
+      ids.emplace(strings.back(), 0);
+    }
+  };
+
+  static Table &table() {
+    static Table tbl;
+    return tbl;
+  }
+
+  static uint32_t intern(std::string_view text) {
+    Table &tbl = table();
+    std::lock_guard<std::mutex> lock(tbl.mu);
+    auto it = tbl.ids.find(std::string(text));
+    if (it != tbl.ids.end()) {
+      return it->second;
+    }
+
+    uint32_t id = static_cast<uint32_t>(tbl.strings.size());
+    tbl.strings.emplace_back(text);
+    tbl.ids.emplace(tbl.strings.back(), id);
+    return id;
+  }
+
+  uint32_t id_ = 0;
+};
+
+inline std::ostream &operator<<(std::ostream &os, Symbol sym) {
+  os << sym.view();
+  return os;
+}
+
 using Duration = std::chrono::steady_clock::duration;
 using Instant = std::chrono::steady_clock::time_point;
 
@@ -75,3 +155,9 @@ inline std::string joinStrings(const Range &items, std::string_view sep) {
 }
 
 } // namespace lotus::egraph
+
+template <> struct std::hash<lotus::egraph::Symbol> {
+  size_t operator()(const lotus::egraph::Symbol &value) const noexcept {
+    return std::hash<uint32_t>{}(value.id());
+  }
+};

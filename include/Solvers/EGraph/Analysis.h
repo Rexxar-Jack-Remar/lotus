@@ -1,6 +1,7 @@
 #pragma once
 
 #include "Solvers/EGraph/Id.h"
+#include "Solvers/EGraph/Util.h"
 
 #include <optional>
 #include <variant>
@@ -30,7 +31,7 @@ template <typename L> struct NoAnalysis {
 
   template <typename AnyAnalysis>
   void preUnion(const EGraph<L, AnyAnalysis> &, Id, Id,
-                const std::string *) const {}
+                const Symbol *) const {}
 
   DidMerge merge(Data &, Data) { return {}; }
 

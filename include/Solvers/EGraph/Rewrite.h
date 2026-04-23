@@ -83,11 +83,11 @@ public:
   virtual std::vector<Id> applyOne(EGraph<L, A> &egraph, Id eclass,
                                    const Subst &subst,
                                    const PatternAst<L> *searcher_ast,
-                                   const std::string &rule_name) const = 0;
+                                   const Symbol &rule_name) const = 0;
 
   virtual std::vector<Id> applyMatches(
       EGraph<L, A> &egraph, const std::vector<SearchMatches<L>> &matches,
-      const PatternAst<L> *searcher_ast, const std::string &rule_name) const {
+      const PatternAst<L> *searcher_ast, const Symbol &rule_name) const {
     std::vector<Id> ids;
     for (const auto &match : matches) {
       for (const auto &subst : match.substs) {
@@ -137,7 +137,7 @@ public:
 
   std::vector<Id> applyOne(EGraph<L, A> &egraph, Id eclass, const Subst &subst,
                            const PatternAst<L> *searcher_ast,
-                           const std::string &rule_name) const override {
+                           const Symbol &rule_name) const override {
     if (!egraph.analysis().allowEMatchingCycles() &&
         pattern_.containsEClass(egraph, subst, eclass)) {
       return {};
@@ -195,7 +195,7 @@ public:
 
   std::vector<Id> applyOne(EGraph<L, A> &, Id, const Subst &,
                            const PatternAst<L> *,
-                           const std::string &) const override {
+                           const Symbol &) const override {
     throw std::runtime_error(
         "MultiPatternApplier does not support applyOne; use applyMatches");
   }
@@ -203,7 +203,7 @@ public:
   std::vector<Id> applyMatches(EGraph<L, A> &egraph,
                                const std::vector<SearchMatches<L>> &matches,
                                const PatternAst<L> *,
-                               const std::string &) const override {
+                               const Symbol &) const override {
     return pattern_.applyMatches(egraph, matches);
   }
 
@@ -258,7 +258,7 @@ public:
 
   std::vector<Id> applyOne(EGraph<L, A> &egraph, Id eclass, const Subst &subst,
                            const PatternAst<L> *searcher_ast,
-                           const std::string &rule_name) const override {
+                           const Symbol &rule_name) const override {
     if (!condition_(egraph, eclass, subst)) {
       return {};
     }
@@ -268,7 +268,7 @@ public:
   std::vector<Id> applyMatches(EGraph<L, A> &egraph,
                                const std::vector<SearchMatches<L>> &matches,
                                const PatternAst<L> *searcher_ast,
-                               const std::string &rule_name) const override {
+                               const Symbol &rule_name) const override {
     std::vector<Id> ids;
     for (const auto &match : matches) {
       for (const auto &subst : match.substs) {
@@ -303,14 +303,14 @@ template <typename L, typename A = NoAnalysis<L>> class Rewrite {
 public:
   Rewrite() = default;
 
-  Rewrite(std::string name, std::shared_ptr<const Searcher<L, A>> searcher,
+  Rewrite(Symbol name, std::shared_ptr<const Searcher<L, A>> searcher,
           std::shared_ptr<const Applier<L, A>> applier)
       : name_(std::move(name)), searcher_(std::move(searcher)),
         applier_(std::move(applier)) {
     validateBoundVars();
   }
 
-  Rewrite(std::string name, Pattern<L> searcher, Pattern<L> applier,
+  Rewrite(Symbol name, Pattern<L> searcher, Pattern<L> applier,
           std::vector<Condition<L, A>> conditions = {})
       : name_(std::move(name)),
         searcher_(
@@ -324,14 +324,14 @@ public:
     validateBoundVars();
   }
 
-  Rewrite(std::string name, Pattern<L> searcher,
+  Rewrite(Symbol name, Pattern<L> searcher,
           ConditionalApplier<L, A> applier)
       : Rewrite(
             std::move(name),
             std::make_shared<PatternSearcher<L, A>>(std::move(searcher)),
             std::make_shared<ConditionalApplier<L, A>>(std::move(applier))) {}
 
-  Rewrite(std::string name, MultiPattern<L> searcher, MultiPattern<L> applier)
+  Rewrite(Symbol name, MultiPattern<L> searcher, MultiPattern<L> applier)
       : Rewrite(
             std::move(name),
             std::make_shared<MultiPatternSearcher<L, A>>(std::move(searcher)),
@@ -340,11 +340,11 @@ public:
   template <typename S, typename Ap,
             typename = std::enable_if_t<std::is_base_of_v<Searcher<L, A>, S> &&
                                         std::is_base_of_v<Applier<L, A>, Ap>>>
-  Rewrite(std::string name, S searcher, Ap applier)
+  Rewrite(Symbol name, S searcher, Ap applier)
       : Rewrite(std::move(name), std::make_shared<S>(std::move(searcher)),
                 std::make_shared<Ap>(std::move(applier))) {}
 
-  const std::string &name() const { return name_; }
+  const Symbol &name() const { return name_; }
 
   const Searcher<L, A> &searcher() const { return *searcher_; }
   const Applier<L, A> &applier() const { return *applier_; }
@@ -370,19 +370,20 @@ private:
     for (const auto &var : applier_->vars()) {
       if (std::find(bound_vars.begin(), bound_vars.end(), var) ==
           bound_vars.end()) {
-        throw std::runtime_error("Rewrite " + name_ +
-                                 " refers to unbound var " + var.name());
+        throw std::runtime_error("Rewrite " + std::string(name_.view()) +
+                                 " refers to unbound var " +
+                                 std::string(var.name().view()));
       }
     }
   }
 
-  std::string name_;
+  Symbol name_;
   std::shared_ptr<const Searcher<L, A>> searcher_;
   std::shared_ptr<const Applier<L, A>> applier_;
 };
 
 template <typename L, typename A = NoAnalysis<L>>
-inline Rewrite<L, A> makeRewrite(std::string name, std::string_view lhs,
+inline Rewrite<L, A> makeRewrite(Symbol name, std::string_view lhs,
                                  std::string_view rhs,
                                  std::vector<Condition<L, A>> conditions = {}) {
   return Rewrite<L, A>(std::move(name), Pattern<L>::parse(lhs),
@@ -390,7 +391,7 @@ inline Rewrite<L, A> makeRewrite(std::string name, std::string_view lhs,
 }
 
 template <typename L, typename A = NoAnalysis<L>, typename C>
-inline Rewrite<L, A> makeConditionalRewrite(std::string name,
+inline Rewrite<L, A> makeConditionalRewrite(Symbol name,
                                             std::string_view lhs,
                                             std::string_view rhs, C condition) {
   auto searcher = Pattern<L>::parse(lhs);
@@ -410,7 +411,7 @@ inline Rewrite<L, A> makeConditionalRewrite(std::string name,
 }
 
 template <typename L, typename A = NoAnalysis<L>>
-inline Rewrite<L, A> makeMultiRewrite(std::string name,
+inline Rewrite<L, A> makeMultiRewrite(Symbol name,
                                       MultiPattern<L> searcher,
                                       MultiPattern<L> applier) {
   return Rewrite<L, A>(std::move(name), std::move(searcher),

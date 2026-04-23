@@ -1,6 +1,7 @@
 #pragma once
 
 #include "Solvers/EGraph/Analysis.h"
+#include "Solvers/EGraph/DefineLanguage.h"
 #include "Solvers/EGraph/Dot.h"
 #include "Solvers/EGraph/EClass.h"
 #include "Solvers/EGraph/EGraph.h"

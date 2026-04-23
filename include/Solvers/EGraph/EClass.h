@@ -55,11 +55,28 @@ template <typename L, typename D> struct EClass {
 template <typename L, typename D, typename F>
 inline bool forEachMatchingNode(const EClass<L, D> &klass, const L &node,
                                 F &&fn) {
-  for (const auto &candidate : klass.nodes) {
-    if (node.matches(candidate)) {
-      if (!fn(candidate)) {
+  if (klass.nodes.size() < 50) {
+    for (const auto &candidate : klass.nodes) {
+      if (node.matches(candidate) && !fn(candidate)) {
         return false;
       }
+    }
+    return true;
+  }
+
+  auto discr = node.discriminant();
+  auto begin = std::lower_bound(
+      klass.nodes.begin(), klass.nodes.end(), node,
+      [](const L &lhs, const L &rhs) { return lhs < rhs; });
+  while (begin != klass.nodes.begin() &&
+         (begin - 1)->discriminant() == discr) {
+    --begin;
+  }
+
+  for (auto it = begin; it != klass.nodes.end() && it->discriminant() == discr;
+       ++it) {
+    if (node.matches(*it) && !fn(*it)) {
+      return false;
     }
   }
   return true;

@@ -13,6 +13,7 @@ public:
 
   RecExpr() = default;
   explicit RecExpr(std::vector<L> items) : items_(std::move(items)) {}
+  template <typename It> RecExpr(It begin, It end) : items_(begin, end) {}
 
   Id add(const L &node) {
     items_.push_back(node);

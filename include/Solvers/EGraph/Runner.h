@@ -17,7 +17,7 @@ enum class StopReasonKind {
 
 struct StopReason {
   StopReasonKind kind = StopReasonKind::None;
-  std::string detail;
+  Symbol detail;
 };
 
 struct RunnerLimits {
@@ -34,11 +34,11 @@ struct RunnerLimits {
     }
     if (egraph.totalSize() > node_limit) {
       return StopReason{StopReasonKind::NodeLimit,
-                        std::to_string(egraph.totalSize())};
+                        Symbol(std::to_string(egraph.totalSize()))};
     }
     if (iteration >= iter_limit) {
       return StopReason{StopReasonKind::IterationLimit,
-                        std::to_string(iteration)};
+                        Symbol(std::to_string(iteration))};
     }
     return std::nullopt;
   }
@@ -47,7 +47,7 @@ struct RunnerLimits {
 template <typename IterData> struct Iteration {
   size_t egraph_nodes = 0;
   size_t egraph_classes = 0;
-  std::unordered_map<std::string, size_t> applied;
+  std::unordered_map<Symbol, size_t> applied;
   double hook_time = 0.0;
   double search_time = 0.0;
   double apply_time = 0.0;
@@ -151,18 +151,18 @@ public:
     return *this;
   }
 
-  BackoffScheduler &doNotBan(std::string name) {
+  BackoffScheduler &doNotBan(Symbol name) {
     auto &stats = ruleStats(std::move(name));
     stats.match_limit = std::numeric_limits<size_t>::max();
     return *this;
   }
 
-  BackoffScheduler &ruleMatchLimit(std::string name, size_t limit) {
+  BackoffScheduler &ruleMatchLimit(Symbol name, size_t limit) {
     ruleStats(std::move(name)).match_limit = limit;
     return *this;
   }
 
-  BackoffScheduler &ruleBanLength(std::string name, size_t length) {
+  BackoffScheduler &ruleBanLength(Symbol name, size_t length) {
     ruleStats(std::move(name)).ban_length = length;
     return *this;
   }
@@ -229,7 +229,7 @@ private:
     size_t ban_length = 5;
   };
 
-  RuleStats &ruleStats(std::string name) {
+  RuleStats &ruleStats(Symbol name) {
     auto [it, inserted] = stats_.try_emplace(std::move(name));
     if (inserted) {
       it->second.match_limit = default_match_limit_;
@@ -240,7 +240,7 @@ private:
 
   size_t default_match_limit_ = 1000;
   size_t default_ban_length_ = 5;
-  std::unordered_map<std::string, RuleStats> stats_;
+  std::unordered_map<Symbol, RuleStats> stats_;
 };
 
 template <typename L, typename A, typename IterData> class Runner {
@@ -274,7 +274,7 @@ public:
     return *this;
   }
 
-  Runner &withHook(std::function<std::optional<std::string>(Runner &)> hook) {
+  Runner &withHook(std::function<std::optional<Symbol>(Runner &)> hook) {
     hooks.push_back(std::move(hook));
     return *this;
   }
@@ -374,11 +374,11 @@ public:
   std::vector<Iteration<IterData>> iterations;
   std::vector<Id> roots;
   StopReason stop_reason;
-  std::vector<std::function<std::optional<std::string>(Runner &)>> hooks;
+  std::vector<std::function<std::optional<Symbol>(Runner &)>> hooks;
 
 private:
   void checkRules(const std::vector<Rewrite<L, A>> &rules) const {
-    std::unordered_map<std::string, size_t> counts;
+    std::unordered_map<Symbol, size_t> counts;
     for (const auto &rule : rules) {
       ++counts[rule.name()];
     }

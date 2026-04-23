@@ -96,7 +96,8 @@ template <typename L> struct LanguageOps<ENodeOrVar<L>> {
   }
 
   static std::string display(const ENodeOrVar<L> &item) {
-    return item.isVar() ? item.var().name() : displayNode(item.node());
+    return item.isVar() ? std::string(item.var().name().view())
+                        : displayNode(item.node());
   }
 };
 

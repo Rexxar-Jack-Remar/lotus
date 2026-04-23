@@ -7,6 +7,16 @@ namespace lotus::egraph {
 template <typename L> struct AstSize {
   using Cost = size_t;
 
+  Cost costRec(const RecExpr<L> &expr) const {
+    std::unordered_map<Id, Cost> costs;
+    costs.reserve(expr.size());
+    for (size_t i = 0; i < expr.size(); ++i) {
+      Id id = Id::fromIndex(i);
+      costs.emplace(id, (*this)(expr[id], [&](Id child) { return costs.at(child); }));
+    }
+    return costs.at(expr.root());
+  }
+
   template <typename F> Cost operator()(const L &node, F &&child_cost) const {
     size_t total = 1;
     for (Id child : node.children()) {
@@ -23,6 +33,16 @@ template <typename L> struct AstSize {
 
 template <typename L> struct AstDepth {
   using Cost = size_t;
+
+  Cost costRec(const RecExpr<L> &expr) const {
+    std::unordered_map<Id, Cost> costs;
+    costs.reserve(expr.size());
+    for (size_t i = 0; i < expr.size(); ++i) {
+      Id id = Id::fromIndex(i);
+      costs.emplace(id, (*this)(expr[id], [&](Id child) { return costs.at(child); }));
+    }
+    return costs.at(expr.root());
+  }
 
   template <typename F> Cost operator()(const L &node, F &&child_cost) const {
     size_t depth = 1;

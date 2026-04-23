@@ -86,10 +86,12 @@ private:
 template <> struct LanguageOps<SymbolLang> {
   static std::optional<SymbolLang> fromOp(std::string_view op,
                                           const std::vector<Id> &children) {
-    return SymbolLang(std::string(op), children);
+    return SymbolLang(Symbol(op), children);
   }
 
-  static std::string display(const SymbolLang &node) { return node.op(); }
+  static std::string display(const SymbolLang &node) {
+    return std::string(node.op().view());
+  }
 };
 
 template <typename L>

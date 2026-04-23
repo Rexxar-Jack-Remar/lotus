@@ -96,7 +96,9 @@ private:
     case Instruction<L>::Kind::Bind: {
       const auto &klass = egraph[reg(inst.i)];
       return forEachMatchingNode(klass, inst.node, [&](const L &matched) {
-        regs_.resize(inst.out.value);
+        if (regs_.size() > inst.out.value) {
+          regs_.resize(inst.out.value);
+        }
         for (Id child : matched.children()) {
           regs_.push_back(child);
         }
@@ -130,7 +132,9 @@ private:
     }
     case Instruction<L>::Kind::Scan:
       for (Id id : egraph.classIds()) {
-        regs_.resize(inst.out.value);
+        if (regs_.size() > inst.out.value) {
+          regs_.resize(inst.out.value);
+        }
         regs_.push_back(id);
         if (!runFrom(egraph, instructions, pc + 1, subst_template, yield_fn)) {
           return false;
@@ -343,7 +347,7 @@ public:
                     const auto &regs = machine_state.regs();
                     if (!regs.empty()) {
                       for (size_t i = 1; i < regs.size(); ++i) {
-                        if (egraph.find(regs[i]) == egraph.find(regs[0])) {
+                        if (regs[i] == regs[0]) {
                           return true;
                         }
                       }

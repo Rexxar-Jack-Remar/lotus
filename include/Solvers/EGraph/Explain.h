@@ -13,27 +13,130 @@ template <typename L, typename A> class Rewrite;
 
 template <typename L> struct FlatTerm {
   RecExpr<L> expr;
-  std::optional<std::string> backward_rule;
-  std::optional<std::string> forward_rule;
+  std::optional<Symbol> backward_rule;
+  std::optional<Symbol> forward_rule;
   std::vector<FlatTerm<L>> children;
 
   static FlatTerm fromExpr(const RecExpr<L> &expr, Id id) {
     const auto &node = expr[id];
-    FlatTerm term;
-    term.expr.add(node.mapChildren([&](Id) { return Id::fromIndex(0); }));
+    std::vector<FlatTerm<L>> children;
+    children.reserve(node.children().size());
     for (Id child : node.children()) {
-      term.children.push_back(fromExpr(expr, child));
+      children.push_back(fromExpr(expr, child));
     }
+    return fromNodeAndChildren(node, std::move(children));
+  }
+
+  std::string toString() const { return formatDisplay(*this); }
+
+  bool hasRewriteForward() const {
+    if (forward_rule) {
+      return true;
+    }
+    for (const auto &child : children) {
+      if (child.hasRewriteForward()) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  bool hasRewriteBackward() const {
+    if (backward_rule) {
+      return true;
+    }
+    for (const auto &child : children) {
+      if (child.hasRewriteBackward()) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  FlatTerm removeRewrites() const {
+    FlatTerm copy = *this;
+    copy.backward_rule.reset();
+    copy.forward_rule.reset();
+    for (auto &child : copy.children) {
+      child = child.removeRewrites();
+    }
+    return copy;
+  }
+
+  void combineRewrites(const FlatTerm &other) {
+    if (!backward_rule) {
+      backward_rule = other.backward_rule;
+    }
+    if (!forward_rule) {
+      forward_rule = other.forward_rule;
+    }
+    for (size_t i = 0; i < children.size() && i < other.children.size(); ++i) {
+      children[i].combineRewrites(other.children[i]);
+    }
+  }
+
+  static FlatTerm fromNodeAndChildren(const L &node,
+                                      std::vector<FlatTerm<L>> children) {
+    FlatTerm term;
+    term.children = std::move(children);
+
+    RecExpr<L> expr;
+    std::vector<Id> child_roots;
+    child_roots.reserve(term.children.size());
+    for (const auto &child : term.children) {
+      child_roots.push_back(appendExpr(expr, child.expr));
+    }
+    auto rebuilt = node;
+    size_t child_index = 0;
+    for (Id &child : rebuilt.childrenMut()) {
+      child = child_roots.at(child_index++);
+    }
+    expr.add(rebuilt);
+    term.expr = std::move(expr);
     return term;
   }
 
-  std::string toString() const { return expr.toString(); }
+private:
+  static std::string formatDisplay(const FlatTerm &term) {
+    const auto &root = term.expr[term.expr.root()];
+    std::string out;
+    if (term.children.empty()) {
+      out = displayNode(root);
+    } else {
+      std::vector<std::string> parts;
+      parts.reserve(term.children.size() + 1);
+      parts.push_back(displayNode(root));
+      for (const auto &child : term.children) {
+        parts.push_back(formatDisplay(child));
+      }
+      out = "(" + joinStrings(parts, " ") + ")";
+    }
+
+    if (term.forward_rule) {
+      out = "(Rewrite=> " + std::string(term.forward_rule->view()) + " " +
+            out + ")";
+    } else if (term.backward_rule) {
+      out = "(Rewrite<= " + std::string(term.backward_rule->view()) + " " +
+            out + ")";
+    }
+    return out;
+  }
+
+  static Id appendExpr(RecExpr<L> &dst, const RecExpr<L> &src) {
+    std::vector<Id> ids;
+    ids.reserve(src.size());
+    for (const auto &node : src.items()) {
+      ids.push_back(
+          dst.add(node.mapChildren([&](Id id) { return ids[id.index()]; })));
+    }
+    return ids.back();
+  }
 };
 
 template <typename L> struct TreeTerm {
   RecExpr<L> expr;
-  std::optional<std::string> backward_rule;
-  std::optional<std::string> forward_rule;
+  std::optional<Symbol> backward_rule;
+  std::optional<Symbol> forward_rule;
   std::vector<std::vector<std::shared_ptr<TreeTerm<L>>>> child_proofs;
   Id last = Id::fromIndex(0);
   Id current = Id::fromIndex(0);
@@ -72,7 +175,16 @@ public:
     return joinStrings(getFlatStrings(), "\n");
   }
 
-  std::string getString() const { return formatTrees(explanation_trees_); }
+  std::string getString() const {
+    if (explanation_trees_.empty()) {
+      return "(Explanation)";
+    }
+    std::vector<std::string> parts;
+    for (const auto &tree : explanation_trees_) {
+      parts.push_back(formatTree(*tree));
+    }
+    return "(Explanation " + joinStrings(parts, " ") + ")";
+  }
   std::string getStringWithLet() const {
     std::unordered_map<std::string, size_t> counts;
     for (const auto &tree : explanation_trees_) {
@@ -89,8 +201,9 @@ public:
     for (const auto &tree : explanation_trees_) {
       parts.push_back(formatTreeWithBindings(*tree, bindings, true));
     }
-    std::string result =
-        parts.empty() ? "(Explanation)" : joinStrings(parts, "\n");
+    std::string result = parts.empty()
+                             ? "(Explanation)"
+                             : "(Explanation " + joinStrings(parts, " ") + ")";
     for (auto it = ordered_bindings.rbegin(); it != ordered_bindings.rend();
          ++it) {
       result = "(let (" + it->first + " " +
@@ -148,9 +261,11 @@ private:
   static std::string formatTree(const TreeTerm<L> &tree) {
     std::string out = tree.expr.toString();
     if (tree.forward_rule) {
-      out = "(Rewrite=> " + *tree.forward_rule + " " + out + ")";
+      out = "(Rewrite=> " + std::string(tree.forward_rule->view()) + " " +
+            out + ")";
     } else if (tree.backward_rule) {
-      out = "(Rewrite<= " + *tree.backward_rule + " " + out + ")";
+      out = "(Rewrite<= " + std::string(tree.backward_rule->view()) + " " +
+            out + ")";
     }
     if (!tree.child_proofs.empty()) {
       std::vector<std::string> children;
@@ -163,14 +278,7 @@ private:
   }
 
   static std::string formatFlat(const FlatTerm<L> &term) {
-    std::string out = term.expr.toString();
-    if (term.forward_rule) {
-      return "(Rewrite=> " + *term.forward_rule + " " + out + ")";
-    }
-    if (term.backward_rule) {
-      return "(Rewrite<= " + *term.backward_rule + " " + out + ")";
-    }
-    return out;
+    return term.toString();
   }
 
   static std::string fingerprint(const TreeTerm<L> &tree) {
@@ -183,8 +291,10 @@ private:
       children.push_back("[" + joinStrings(nested, ",") + "]");
     }
     return tree.expr.toString() +
-           "|f=" + (tree.forward_rule ? *tree.forward_rule : "") +
-           "|b=" + (tree.backward_rule ? *tree.backward_rule : "") +
+           "|f=" +
+           (tree.forward_rule ? std::string(tree.forward_rule->view()) : "") +
+           "|b=" +
+           (tree.backward_rule ? std::string(tree.backward_rule->view()) : "") +
            "|c=" + joinStrings(children, ";");
   }
 
@@ -235,9 +345,11 @@ private:
 
     std::string out = tree.expr.toString();
     if (tree.forward_rule) {
-      out = "(Rewrite=> " + *tree.forward_rule + " " + out + ")";
+      out = "(Rewrite=> " + std::string(tree.forward_rule->view()) + " " +
+            out + ")";
     } else if (tree.backward_rule) {
-      out = "(Rewrite<= " + *tree.backward_rule + " " + out + ")";
+      out = "(Rewrite<= " + std::string(tree.backward_rule->view()) + " " +
+            out + ")";
     }
     if (!tree.child_proofs.empty()) {
       std::vector<std::string> children;
@@ -256,22 +368,58 @@ private:
   static FlatExplanation flattenProof(const TreeExplanation &trees) {
     FlatExplanation flat;
     for (const auto &tree : trees) {
-      flattenTree(*tree, flat);
+      auto explanation = flattenTree(*tree);
+      if (!flat.empty() && !explanation.empty() &&
+          !explanation.front().hasRewriteForward() &&
+          !explanation.front().hasRewriteBackward()) {
+        FlatTerm<L> last = flat.back();
+        flat.pop_back();
+        explanation.front().combineRewrites(last);
+      }
+      flat.insert(flat.end(), explanation.begin(), explanation.end());
     }
     return flat;
   }
 
-  static void flattenTree(const TreeTerm<L> &tree, FlatExplanation &out) {
-    FlatTerm<L> term;
-    term.expr = tree.expr;
-    term.backward_rule = tree.backward_rule;
-    term.forward_rule = tree.forward_rule;
-    for (const auto &proofs : tree.child_proofs) {
-      for (const auto &child : proofs) {
-        flattenTree(child, out);
-      }
+  static FlatExplanation flattenTree(const TreeTerm<L> &tree) {
+    const auto &root = tree.expr[tree.expr.root()];
+
+    std::vector<FlatExplanation> child_proofs;
+    std::vector<FlatTerm<L>> representative_terms;
+    child_proofs.reserve(tree.child_proofs.size());
+    representative_terms.reserve(tree.child_proofs.size());
+
+    for (const auto &child_explanation : tree.child_proofs) {
+      auto flat_proof = flattenProof(child_explanation);
+      representative_terms.push_back(flat_proof.front().removeRewrites());
+      child_proofs.push_back(std::move(flat_proof));
     }
-    out.push_back(std::move(term));
+
+    FlatExplanation proof;
+    proof.push_back(FlatTerm<L>::fromNodeAndChildren(root, representative_terms));
+
+    for (size_t i = 0; i < child_proofs.size(); ++i) {
+      proof.back().children[i] = child_proofs[i].front();
+
+      for (size_t j = 1; j < child_proofs[i].size(); ++j) {
+        std::vector<FlatTerm<L>> children;
+        children.reserve(proof.back().children.size());
+        for (size_t k = 0; k < proof.back().children.size(); ++k) {
+          if (k == i) {
+            children.push_back(child_proofs[i][j]);
+          } else {
+            children.push_back(representative_terms[k]);
+          }
+        }
+        proof.push_back(FlatTerm<L>::fromNodeAndChildren(root, std::move(children)));
+      }
+
+      representative_terms[i] = child_proofs[i].back().removeRewrites();
+    }
+
+    proof.front().backward_rule = tree.backward_rule;
+    proof.front().forward_rule = tree.forward_rule;
+    return proof;
   }
 
   TreeExplanation explanation_trees_;
@@ -291,6 +439,9 @@ struct PathEntry {
 
 using PathMemo = std::unordered_map<std::pair<Id, Id>, PathEntry, PairHash>;
 using ActivePairs = std::unordered_set<std::pair<Id, Id>, PairHash>;
+template <typename L>
+using NodeExplanationCache =
+    std::unordered_map<Id, std::shared_ptr<TreeTerm<L>>>;
 
 template <typename L, typename A>
 inline std::optional<std::vector<ExplanationConnection>>
@@ -517,11 +668,16 @@ inline PathEntry shortestExplanationPath(const EGraph<L, A> &egraph, Id lhs,
 
 template <typename L, typename A>
 inline std::shared_ptr<TreeTerm<L>>
-nodeToExplanation(const EGraph<L, A> &egraph, Id id) {
+nodeToExplanation(const EGraph<L, A> &egraph, Id id,
+                  NodeExplanationCache<L> &node_cache) {
+  if (auto it = node_cache.find(id); it != node_cache.end()) {
+    return it->second;
+  }
   auto term = std::make_shared<TreeTerm<L>>();
   term->expr = egraph.originalExpr(id);
   term->current = id;
   term->last = id;
+  node_cache.emplace(id, term);
   return term;
 }
 
@@ -529,17 +685,20 @@ template <typename L, typename A>
 inline std::shared_ptr<TreeTerm<L>> explainAdjacent(
     const EGraph<L, A> &egraph, const ExplanationConnection &connection,
     std::unordered_map<std::pair<Id, Id>, std::shared_ptr<TreeTerm<L>>,
-                       PairHash> &cache);
+                       PairHash> &cache,
+    NodeExplanationCache<L> &node_cache, PathMemo *path_memo = nullptr,
+    ActivePairs *active = nullptr);
 
 template <typename L, typename A>
 inline typename Explanation<L>::TreeExplanation
 explainEnodes(const EGraph<L, A> &egraph, Id left, Id right,
               std::unordered_map<std::pair<Id, Id>,
                                  std::shared_ptr<TreeTerm<L>>, PairHash> &cache,
+              NodeExplanationCache<L> &node_cache,
               PathMemo *path_memo = nullptr, ActivePairs *active = nullptr) {
   using TreeExplanation = typename Explanation<L>::TreeExplanation;
   TreeExplanation proof;
-  proof.push_back(nodeToExplanation(egraph, left));
+  proof.push_back(nodeToExplanation(egraph, left, node_cache));
   if (left == right) {
     return proof;
   }
@@ -568,7 +727,8 @@ explainEnodes(const EGraph<L, A> &egraph, Id left, Id right,
 
   for (const auto &connection : path) {
     proof.push_back(
-        explainAdjacent(egraph, connection, cache, path_memo, active));
+        explainAdjacent(egraph, connection, cache, node_cache, path_memo,
+                        active));
   }
   return proof;
 }
@@ -578,7 +738,8 @@ inline std::shared_ptr<TreeTerm<L>> explainAdjacent(
     const EGraph<L, A> &egraph, const ExplanationConnection &connection,
     std::unordered_map<std::pair<Id, Id>, std::shared_ptr<TreeTerm<L>>,
                        PairHash> &cache,
-    PathMemo *path_memo = nullptr, ActivePairs *active = nullptr) {
+    NodeExplanationCache<L> &node_cache, PathMemo *path_memo,
+    ActivePairs *active) {
   auto key = std::make_pair(connection.current, connection.next);
   if (auto it = cache.find(key); it != cache.end()) {
     return it->second;
@@ -586,7 +747,7 @@ inline std::shared_ptr<TreeTerm<L>> explainAdjacent(
 
   std::shared_ptr<TreeTerm<L>> tree;
   if (connection.justification == ExplanationJustificationKind::Rule) {
-    tree = nodeToExplanation(egraph, connection.next);
+    tree = nodeToExplanation(egraph, connection.next, node_cache);
     if (connection.is_rewrite_forward) {
       tree->forward_rule = connection.rule;
     } else {
@@ -595,7 +756,7 @@ inline std::shared_ptr<TreeTerm<L>> explainAdjacent(
     tree->current = connection.next;
     tree->last = connection.current;
   } else {
-    tree = nodeToExplanation(egraph, connection.current);
+    tree = nodeToExplanation(egraph, connection.current, node_cache);
     const auto &left_node = egraph.originalNode(connection.current);
     const auto &right_node = egraph.originalNode(connection.next);
     if (left_node.matches(right_node)) {
@@ -605,6 +766,7 @@ inline std::shared_ptr<TreeTerm<L>> explainAdjacent(
            ++i) {
         tree->child_proofs.push_back(explainEnodes(egraph, left_children[i],
                                                    right_children[i], cache,
+                                                   node_cache,
                                                    path_memo, active));
       }
     }
@@ -622,6 +784,9 @@ template <typename L, typename A>
 inline std::optional<Explanation<L>>
 explainEquivalence(const EGraph<L, A> &egraph, const RecExpr<L> &lhs,
                    const RecExpr<L> &rhs) {
+  if (!egraph.areExplanationsEnabled()) {
+    return std::nullopt;
+  }
   EGraph<L, A> clone = egraph;
   Id left = clone.addExprUncanonical(lhs);
   Id right = clone.addExprUncanonical(rhs);
@@ -636,6 +801,9 @@ template <typename L, typename A>
 inline std::optional<Explanation<L>>
 explainMatches(const EGraph<L, A> &egraph, const RecExpr<L> &left,
                const PatternAst<L> &right, const Subst &subst) {
+  if (!egraph.areExplanationsEnabled()) {
+    return std::nullopt;
+  }
   EGraph<L, A> clone = egraph;
   Id left_id = clone.addExprUncanonical(left);
   Id right_id = clone.addInstantiationUncanonical(right, subst);
@@ -649,22 +817,27 @@ explainMatches(const EGraph<L, A> &egraph, const RecExpr<L> &left,
 template <typename L, typename A>
 inline std::optional<Explanation<L>>
 explainEquivalence(const EGraph<L, A> &egraph, Id lhs, Id rhs) {
+  if (!egraph.areExplanationsEnabled()) {
+    return std::nullopt;
+  }
   if (egraph.find(lhs) != egraph.find(rhs)) {
     return std::nullopt;
   }
 
   std::unordered_map<std::pair<Id, Id>, std::shared_ptr<TreeTerm<L>>, PairHash>
       cache;
+  detail::NodeExplanationCache<L> node_cache;
   detail::PathMemo path_memo;
   detail::ActivePairs active;
   return Explanation<L>(
-      detail::explainEnodes(egraph, lhs, rhs, cache, &path_memo, &active));
+      detail::explainEnodes(egraph, lhs, rhs, cache, node_cache, &path_memo,
+                            &active));
 }
 
 template <typename L, typename A>
 inline bool checkEachExplain(const EGraph<L, A> &egraph,
                              const std::vector<Rewrite<L, A>> &rules) {
-  std::unordered_map<std::string, const Rewrite<L, A> *> by_name;
+  std::unordered_map<Symbol, const Rewrite<L, A> *> by_name;
   for (const auto &rule : rules) {
     by_name.emplace(rule.name(), &rule);
   }

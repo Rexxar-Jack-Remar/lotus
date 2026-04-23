@@ -94,6 +94,11 @@ public:
     if (clauses_.empty() || limit == 0) {
       return std::nullopt;
     }
+    if (clauses_.front().second.ast().size() == 1 &&
+        clauses_.front().second.ast().items().front().isVar()) {
+      throw std::runtime_error(
+          "Bare pattern variable cannot be first in multipattern");
+    }
     auto seed = Subst{};
     seed.insert(clauses_.front().first, eclass);
     auto results = searchClauses(egraph, 0, seed, &eclass, limit);
@@ -115,6 +120,10 @@ public:
   template <typename A>
   std::vector<Id> apply(EGraph<L, A> &egraph,
                         const std::vector<Subst> &matches) const {
+    if (egraph.areExplanationsEnabled()) {
+      throw std::runtime_error(
+          "Multipattern application does not support explanations");
+    }
     std::vector<Id> added;
     for (const auto &match : matches) {
       Subst subst = match;
@@ -166,6 +175,10 @@ public:
   std::vector<Id>
   applyMatches(EGraph<L, A> &egraph,
                const std::vector<SearchMatches<L>> &matches) const {
+    if (egraph.areExplanationsEnabled()) {
+      throw std::runtime_error(
+          "Multipattern application does not support explanations");
+    }
     std::vector<Id> added;
     for (const auto &match : matches) {
       for (const auto &subst : match.substs) {

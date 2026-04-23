@@ -56,7 +56,7 @@ struct ConstantFold {
   }
 
   void preUnion(const EGraph<SymbolLang, ConstantFold> &, Id, Id,
-                const std::string *) const {}
+                const Symbol *) const {}
 
   DidMerge merge(Data &target, Data source) {
     return mergeOption(target, source, [](double &lhs, double rhs) {
