@@ -2,6 +2,11 @@
 
 SMT and BDD solver integrations for Lotus.
 
+## Generic Solver Infrastructure
+
+- **EGraph** - Solver-agnostic equality graph and rewrite engine inspired by
+  `egg`
+
 ## SMT
 
 SMT solver wrappers and utilities:

@@ -1,1 +1,5 @@
 add_lotus_solver_test(sym_abs_test SymAbsTest.cpp)
+add_lotus_egraph_test(egraph_core_test EGraphCoreTest.cpp)
+add_lotus_egraph_test(egraph_simple_test EGraphSimpleTest.cpp)
+add_lotus_egraph_test(egraph_math_test EGraphMathTest.cpp)
+add_lotus_egraph_test(egraph_feature_test EGraphFeatureTest.cpp)
