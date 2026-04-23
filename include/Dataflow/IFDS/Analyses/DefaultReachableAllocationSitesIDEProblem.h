@@ -71,7 +71,7 @@ public:
         },
         [this](const Fact &source) { return this->is_zero_fact(source); },
         [](const Fact &source) {
-          return source && llvm::isa<llvm::GlobalValue>(source);
+          return llvm::isa_and_nonnull<llvm::GlobalValue>(source);
         },
         /*PropagateGlobals=*/true,
         /*PropagateZero=*/true);
@@ -115,7 +115,7 @@ public:
         [call](const llvm::Value *, const Fact &) { return call; },
         [this](const Fact &source) { return this->is_zero_fact(source); },
         [](const Fact &source) {
-          return source && llvm::isa<llvm::GlobalValue>(source);
+          return llvm::isa_and_nonnull<llvm::GlobalValue>(source);
         },
         /*PropagateGlobals=*/true,
         /*PropagateZero=*/true,
@@ -147,7 +147,7 @@ public:
         },
         [this](const Fact &source) { return this->is_zero_fact(source); },
         [](const Fact &source) {
-          return source && llvm::isa<llvm::GlobalValue>(source);
+          return llvm::isa_and_nonnull<llvm::GlobalValue>(source);
         },
         /*PropagateGlobals=*/false,
         /*PropagateZero=*/true);

@@ -47,7 +47,6 @@ The following tests were reorganized from the flat structure:
 - SparrowAATest.cpp - Sparrow alias analysis tests
 
 **Support/**
-- EGraphTest.cpp - E-graph data structure tests
 - EquivalenceClassMapTest.cpp - Equivalence class map ADT tests
 - LowerSelectTest.cpp - Select instruction lowering tests
 - MHPAnalysisTest.cpp - May-happen-in-parallel analysis tests
@@ -113,4 +112,3 @@ The `TestUtils/TestConfig.h` file provides common configuration:
 - `PathToLLTestFiles` - Path to LLVM test files
 - `PathToTxtTestFiles` - Path to text test files
 - `PathToJSONTestFiles` - Path to JSON test files
-

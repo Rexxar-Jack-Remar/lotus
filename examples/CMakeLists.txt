@@ -1,13 +1,11 @@
 # Examples CMakeLists.txt
 
 set(EXAMPLES
-  EGraphExample.cpp
   how-to/build-pdg/PDGExample.cpp
   how-to/query-alias-info/PointerAnalysisExample.cpp
 )
 
 set(EXAMPLES_NAMES
-  EGraphExample
   PDGExample
   PointerAnalysisExample
 )
@@ -21,7 +19,7 @@ llvm_map_components_to_libnames(llvm_libs irreader analysis)
 set(LOTUS_EXAMPLE_BIN_DIR ${CMAKE_BINARY_DIR}/bin/examples)
 
 # Add executables and include directories
-foreach(idx RANGE 0 2)
+foreach(idx RANGE 0 1)
   list(GET EXAMPLES_NAMES ${idx} example_name)
   list(GET EXAMPLES ${idx} example_file)
   add_executable(${example_name} ${example_file})
@@ -48,4 +46,3 @@ target_link_libraries(PointerAnalysisExample PRIVATE
     SeaDsaAnalysis
     ${llvm_libs}
 )
-

@@ -26,9 +26,12 @@ std::string aliasForwardLabel(const AliasConstraintEdge &edge) {
     return "load";
   case AliasConstraintEdgeKind::VariantGep:
     return "vgep";
-  case AliasConstraintEdgeKind::NormalGep:
-    return "gep_" + std::to_string(
-                        edge.attribute.value_or(static_cast<std::uint32_t>(0)));
+  case AliasConstraintEdgeKind::NormalGep: {
+    std::string label = "gep_";
+    label +=
+        std::to_string(edge.attribute.value_or(static_cast<std::uint32_t>(0)));
+    return label;
+  }
   }
 
   throw std::invalid_argument("Unsupported alias edge kind");
@@ -46,9 +49,12 @@ std::string aliasReverseLabel(const AliasConstraintEdge &edge) {
     return "loadbar";
   case AliasConstraintEdgeKind::VariantGep:
     return "vgepbar";
-  case AliasConstraintEdgeKind::NormalGep:
-    return "gepbar_" + std::to_string(edge.attribute.value_or(
-                           static_cast<std::uint32_t>(0)));
+  case AliasConstraintEdgeKind::NormalGep: {
+    std::string label = "gepbar_";
+    label +=
+        std::to_string(edge.attribute.value_or(static_cast<std::uint32_t>(0)));
+    return label;
+  }
   }
 
   throw std::invalid_argument("Unsupported alias edge kind");
@@ -96,20 +102,57 @@ std::string buildPagGrammarText(const AliasConstraintGraph &graph) {
   std::vector<std::string> gepbar_non_zero;
 
   for (std::uint32_t attr : attrs) {
-    const std::string gep = "gep_" + std::to_string(attr);
-    const std::string gepbar = "gepbar_" + std::to_string(attr);
-    v_alternatives.push_back(gepbar + " V " + gep);
-    v_alternatives.push_back(gepbar + " F " + gep);
-    v_alternatives.push_back(gepbar + " Fbar " + gep);
-    memflow_alternatives.push_back(gep + " Memflow " + gepbar);
-    memflow_alternatives.push_back(gepbar + " Memflow " + gep);
-    memflowbar_alternatives.push_back(gep + " Memflowbar " + gepbar);
-    memflowbar_alternatives.push_back(gepbar + " Memflowbar " + gep);
+    std::string gep = "gep_";
+    gep += std::to_string(attr);
+    std::string gepbar = "gepbar_";
+    gepbar += std::to_string(attr);
+
+    std::string gep_v_alternative = gepbar;
+    gep_v_alternative += " V ";
+    gep_v_alternative += gep;
+    v_alternatives.push_back(std::move(gep_v_alternative));
+
+    std::string gep_f_alternative = gepbar;
+    gep_f_alternative += " F ";
+    gep_f_alternative += gep;
+    v_alternatives.push_back(std::move(gep_f_alternative));
+
+    std::string gep_fbar_alternative = gepbar;
+    gep_fbar_alternative += " Fbar ";
+    gep_fbar_alternative += gep;
+    v_alternatives.push_back(std::move(gep_fbar_alternative));
+
+    std::string gep_memflow_alternative = gep;
+    gep_memflow_alternative += " Memflow ";
+    gep_memflow_alternative += gepbar;
+    memflow_alternatives.push_back(std::move(gep_memflow_alternative));
+
+    std::string gepbar_memflow_alternative = gepbar;
+    gepbar_memflow_alternative += " Memflow ";
+    gepbar_memflow_alternative += gep;
+    memflow_alternatives.push_back(std::move(gepbar_memflow_alternative));
+
+    std::string gep_memflowbar_alternative = gep;
+    gep_memflowbar_alternative += " Memflowbar ";
+    gep_memflowbar_alternative += gepbar;
+    memflowbar_alternatives.push_back(std::move(gep_memflowbar_alternative));
+
+    std::string gepbar_memflowbar_alternative = gepbar;
+    gepbar_memflowbar_alternative += " Memflowbar ";
+    gepbar_memflowbar_alternative += gep;
+    memflowbar_alternatives.push_back(std::move(gepbar_memflowbar_alternative));
 
     if (attr != 0) {
-      gep_non_zero.push_back(gep + " -> gep_0 F vgep | gep_0 F " + gep);
-      gepbar_non_zero.push_back(gepbar + " -> " + gepbar +
-                                " Fbar gepbar_0 | vgepbar Fbar gepbar_0");
+      std::string gep_rule = gep;
+      gep_rule += " -> gep_0 F vgep | gep_0 F ";
+      gep_rule += gep;
+      gep_non_zero.push_back(std::move(gep_rule));
+
+      std::string gepbar_rule = gepbar;
+      gepbar_rule += " -> ";
+      gepbar_rule += gepbar;
+      gepbar_rule += " Fbar gepbar_0 | vgepbar Fbar gepbar_0";
+      gepbar_non_zero.push_back(std::move(gepbar_rule));
     }
   }
 
@@ -147,13 +190,31 @@ std::string buildPegGrammarText(const AliasConstraintGraph &graph) {
   std::vector<std::string> memcpy_alternatives = {"addrbar V addr",
                                                   "F Memcpy Fbar"};
   for (std::uint32_t attr : attrs) {
-    const std::string gep = "gep_" + std::to_string(attr);
-    const std::string gepbar = "gepbar_" + std::to_string(attr);
-    v_alternatives.push_back(gepbar + " V " + gep);
-    v_alternatives.push_back(gepbar + " Memcpy " + gep);
-    v_alternatives.push_back(gep + " Memcpy " + gepbar);
-    memcpy_alternatives.push_back(gep + " Memcpy " + gepbar);
-    memcpy_alternatives.push_back(gepbar + " Memcpy " + gep);
+    std::string gep = "gep_";
+    gep += std::to_string(attr);
+    std::string gepbar = "gepbar_";
+    gepbar += std::to_string(attr);
+
+    std::string gep_v_alternative = gepbar;
+    gep_v_alternative += " V ";
+    gep_v_alternative += gep;
+    v_alternatives.push_back(std::move(gep_v_alternative));
+
+    std::string gepbar_memcpy_alternative = gepbar;
+    gepbar_memcpy_alternative += " Memcpy ";
+    gepbar_memcpy_alternative += gep;
+    v_alternatives.push_back(std::move(gepbar_memcpy_alternative));
+
+    std::string gep_memcpy_alternative = gep;
+    gep_memcpy_alternative += " Memcpy ";
+    gep_memcpy_alternative += gepbar;
+    v_alternatives.push_back(gep_memcpy_alternative);
+    memcpy_alternatives.push_back(gep_memcpy_alternative);
+
+    std::string gepbar_memcpy_rule = gepbar;
+    gepbar_memcpy_rule += " Memcpy ";
+    gepbar_memcpy_rule += gep;
+    memcpy_alternatives.push_back(std::move(gepbar_memcpy_rule));
   }
 
   std::ostringstream grammar;
@@ -181,7 +242,10 @@ std::vector<std::size_t> findAddrSources(const AliasConstraintGraph &graph,
 }
 
 std::string encodeCallLabel(const std::string &base, std::uint32_t id) {
-  return base + "_" + std::to_string(id);
+  std::string label = base;
+  label += '_';
+  label += std::to_string(id);
+  return label;
 }
 
 std::uint32_t
@@ -254,8 +318,13 @@ LabeledGraph encodeBiPEGGraph(const AliasConstraintGraph &graph) {
   std::size_t synthetic_id = graph.nodeNames().size();
   auto makeSyntheticDeref = [&](std::size_t original_node,
                                 const std::string &tag) -> std::size_t {
-    return encoded.addVertex("peg_deref_" + std::to_string(original_node) +
-                             "_" + tag + "_" + std::to_string(synthetic_id++));
+    std::string label = "peg_deref_";
+    label += std::to_string(original_node);
+    label += '_';
+    label += tag;
+    label += '_';
+    label += std::to_string(synthetic_id++);
+    return encoded.addVertex(label);
   };
 
   for (const AliasConstraintEdge &edge : graph.edges()) {
@@ -426,10 +495,15 @@ Grammar buildVfgGrammar(const lotus::analysis::SVFG &svfg) {
                                                 "<epsilon>"};
 
   for (std::uint32_t id : callsite_ids) {
-    a_alternatives.push_back(encodeCallLabel("call", id) + " A " +
-                             encodeCallLabel("ret", id));
-    abar_alternatives.push_back(encodeCallLabel("retbar", id) + " Abar " +
-                                encodeCallLabel("callbar", id));
+    std::string a_alternative = encodeCallLabel("call", id);
+    a_alternative += " A ";
+    a_alternative += encodeCallLabel("ret", id);
+    a_alternatives.push_back(std::move(a_alternative));
+
+    std::string abar_alternative = encodeCallLabel("retbar", id);
+    abar_alternative += " Abar ";
+    abar_alternative += encodeCallLabel("callbar", id);
+    abar_alternatives.push_back(std::move(abar_alternative));
   }
 
   std::ostringstream grammar;

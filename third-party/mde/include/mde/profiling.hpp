@@ -114,12 +114,12 @@ struct PerformanceStatistics {
 		}
 
 		s << '\n' << "Profiler Statistics:" << '\n';
-		for (auto k : counters) {
+		for (const auto& k : counters) {
 			s << "    "
 				 << "'" << k.first << "'"
 				 << ": " << k.second << '\n';
 		}
-		for (auto t : timers) {
+		for (const auto& t : timers) {
 			if (timers.size() > 1) {
 				s << "Thread " << t.first << ":" << '\n';
 			}

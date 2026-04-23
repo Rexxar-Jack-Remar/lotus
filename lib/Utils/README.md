@@ -12,7 +12,6 @@ Abstract data structures:
 - `anatree.h` – AnaTree (analysis tree) structure
 - `BDD.h` – Binary Decision Diagrams
 - `DisjointSet.h` – Alternative disjoint set implementation
-- `egraphs.h` – E-graph for equality reasoning
 - `EquivalenceClassMap.h` – Equivalence class mapping
 - `GraphSlicer.h` – Graph slicing utilities
 - `Hashing.h` – Hashing utilities

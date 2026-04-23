@@ -8,7 +8,11 @@
 namespace lotus::cfl::aria {
 namespace {
 
-std::string nodeVariable(std::size_t id) { return "X" + std::to_string(id); }
+std::string nodeVariable(std::size_t id) {
+  std::string variable = "X";
+  variable += std::to_string(id);
+  return variable;
+}
 
 } // namespace
 
@@ -30,7 +34,11 @@ SCSolver::buildConstraintSystem(const LabeledGraph &graph,
   for (std::size_t i = 0; i < graph.vertexCount(); ++i) {
     const auto index = std::to_string(i);
     const auto x = nodeVariable(i);
-    system.con0[x].insert(x + ",node" + index);
+
+    std::string node_constraint = x;
+    node_constraint += ",node";
+    node_constraint += index;
+    system.con0[x].insert(std::move(node_constraint));
     system.set_variables.insert(x);
   }
 
@@ -38,7 +46,13 @@ SCSolver::buildConstraintSystem(const LabeledGraph &graph,
     for (const auto &[source, target] : pairs) {
       const auto left = nodeVariable(source);
       const auto right = nodeVariable(target);
-      system.con1[left].insert(left + "," + label + "," + right);
+
+      std::string edge_constraint = left;
+      edge_constraint += ',';
+      edge_constraint += label;
+      edge_constraint += ',';
+      edge_constraint += right;
+      system.con1[left].insert(std::move(edge_constraint));
     }
   }
 
@@ -48,12 +62,34 @@ SCSolver::buildConstraintSystem(const LabeledGraph &graph,
         for (std::size_t i = 0; i < graph.vertexCount(); ++i) {
           const auto index = std::to_string(i);
           const auto x = nodeVariable(i);
-          const auto rchd = "Rchd" + right[0] + "1" + index;
-          const auto dst = "Dst" + left + index;
+          std::string rchd = "Rchd";
+          rchd += right[0];
+          rchd += '1';
+          rchd += index;
+          std::string dst = "Dst";
+          dst += left;
+          dst += index;
 
-          system.pro[x].insert(rchd + "," + right[0] + "1," + x);
-          system.pro[rchd].insert(dst + "," + right[1] + "1," + rchd);
-          system.con1[x].insert(x + "," + left + "," + dst);
+          std::string pro_from_x = rchd;
+          pro_from_x += ',';
+          pro_from_x += right[0];
+          pro_from_x += "1,";
+          pro_from_x += x;
+          system.pro[x].insert(std::move(pro_from_x));
+
+          std::string pro_from_rchd = dst;
+          pro_from_rchd += ',';
+          pro_from_rchd += right[1];
+          pro_from_rchd += "1,";
+          pro_from_rchd += rchd;
+          system.pro[rchd].insert(std::move(pro_from_rchd));
+
+          std::string con1_constraint = x;
+          con1_constraint += ',';
+          con1_constraint += left;
+          con1_constraint += ',';
+          con1_constraint += dst;
+          system.con1[x].insert(std::move(con1_constraint));
           system.set_variables.insert(rchd);
           system.set_variables.insert(dst);
         }
@@ -62,13 +98,32 @@ SCSolver::buildConstraintSystem(const LabeledGraph &graph,
           const auto index = std::to_string(i);
           const auto x = nodeVariable(i);
           if (right[0] == Grammar::kEpsilonSymbol) {
-            system.con1[x].insert(x + "," + left + "," + x);
+            std::string epsilon_constraint = x;
+            epsilon_constraint += ',';
+            epsilon_constraint += left;
+            epsilon_constraint += ',';
+            epsilon_constraint += x;
+            system.con1[x].insert(std::move(epsilon_constraint));
             continue;
           }
 
-          const auto dst = "Dst" + left + index;
-          system.con1[x].insert(x + "," + left + "," + dst);
-          system.pro[x].insert(dst + "," + right[0] + "1," + x);
+          std::string dst = "Dst";
+          dst += left;
+          dst += index;
+
+          std::string con1_constraint = x;
+          con1_constraint += ',';
+          con1_constraint += left;
+          con1_constraint += ',';
+          con1_constraint += dst;
+          system.con1[x].insert(std::move(con1_constraint));
+
+          std::string pro_constraint = dst;
+          pro_constraint += ',';
+          pro_constraint += right[0];
+          pro_constraint += "1,";
+          pro_constraint += x;
+          system.pro[x].insert(std::move(pro_constraint));
           system.set_variables.insert(dst);
         }
       }

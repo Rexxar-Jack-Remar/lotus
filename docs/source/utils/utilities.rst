@@ -65,7 +65,6 @@ Data structures in ``lib/Utils/ADT/`` and ``include/Utils/ADT/``:
 * **VectorMap.h** / **VectorSet.h** - Vector-based map/set containers
 * **anatree.h** - Tree analysis utilities
 * **GraphSlicer.h** - Graph slicing utilities
-* **egraphs.h** - E-graph data structure
 * **PdQsort.h** - Parallel quicksort implementation
 
 Iterator utilities (``include/Utils/ADT/Iterator/``):
