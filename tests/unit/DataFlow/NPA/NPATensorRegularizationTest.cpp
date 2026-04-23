@@ -1,5 +1,5 @@
-#include "Dataflow/NPA/Core/Solve/LinearSolvers.h"
-#include "Dataflow/NPA/Core/Solve/TensorLinearSolve.h"
+#include "Dataflow/NPA/Solver/LinearSolvers.h"
+#include "Dataflow/NPA/Solver/TensorLinearSolve.h"
 #include "Dataflow/NPA/Domains/PredicateRelationDomain.h"
 #include "Dataflow/NPA/NPA.h"
 

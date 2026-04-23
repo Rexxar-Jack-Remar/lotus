@@ -20,7 +20,7 @@ the post* or pre* algorithm using the WALi library
 include/Dataflow/WPDS/
 ├── Core/                          # Public fact/weight/builder abstractions
 ├── Solver/                        # Public engine interface
-├── Clients/                       # Public client analysis wrappers
+├── Analyses/                       # Public client analysis wrappers
 └── InterProceduralDataFlow.h      # Umbrella header
 
 lib/Dataflow/WPDS/
@@ -29,11 +29,11 @@ lib/Dataflow/WPDS/
 │   └── GenKillTransformer.cpp   # Semiring weight implementation
 ├── Solver/                       # Fixpoint solvers
 │   └── InterProceduralDataFlowEngine.cpp  # WPDS solver engine
-├── Clients/                       # Client analysis implementations
-│   ├── WPDSTaintAnalysis.cpp
-│   ├── WPDSConstantPropagation.cpp
-│   ├── WPDSLivenessAnalysis.cpp
-│   └── WPDSUninitializedVariables.cpp
+├── Analyses/                       # Client analysis implementations
+│   ├── TaintAnalysis.cpp
+│   ├── ConstantPropagationAnalysis.cpp
+│   ├── LivenessAnalysis.cpp
+│   └── UninitializedVariablesAnalysis.cpp
 ├── CMakeLists.txt
 └── README.md
 ```

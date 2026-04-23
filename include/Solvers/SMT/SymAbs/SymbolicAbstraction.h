@@ -42,14 +42,14 @@
  *
  * This is a convenience header that includes all symbolic abstraction headers.
  * For better compile times, include only the specific headers you need:
- * - Solvers/SMT/SymAbs/Config.h - Configuration types
- * - Solvers/SMT/SymAbs/LinearExpression.h - Linear expression maximization
- * - Solvers/SMT/SymAbs/Octagon.h - Octagonal abstraction
- * - Solvers/SMT/SymAbs/Zone.h - Zone abstraction (DBM)
- * - Solvers/SMT/SymAbs/Affine.h - Affine equality abstraction
- * - Solvers/SMT/SymAbs/Polyhedron.h - Convex polyhedral abstraction
- * - Solvers/SMT/SymAbs/Congruence.h - Congruence abstraction
- * - Solvers/SMT/SymAbs/Polynomial.h - Polynomial abstraction
+ * - Solver/SMT/SymAbs/Config.h - Configuration types
+ * - Solver/SMT/SymAbs/LinearExpression.h - Linear expression maximization
+ * - Solver/SMT/SymAbs/Octagon.h - Octagonal abstraction
+ * - Solver/SMT/SymAbs/Zone.h - Zone abstraction (DBM)
+ * - Solver/SMT/SymAbs/Affine.h - Affine equality abstraction
+ * - Solver/SMT/SymAbs/Polyhedron.h - Convex polyhedral abstraction
+ * - Solver/SMT/SymAbs/Congruence.h - Congruence abstraction
+ * - Solver/SMT/SymAbs/Polynomial.h - Polynomial abstraction
  */
 
 #include "Solvers/SMT/SymAbs/Affine.h"

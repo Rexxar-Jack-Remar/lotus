@@ -19,10 +19,10 @@
 #include <cstdlib>
 #include <optional>
 
-#include <gtest/gtest.h>
 #include <llvm/IR/Instructions.h>
 #include <llvm/IR/LLVMContext.h>
 #include <llvm/IR/Module.h>
+#include <gtest/gtest.h>
 
 using namespace llvm;
 using namespace lotus::analysis;

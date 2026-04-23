@@ -9,6 +9,6 @@
 
 // Solver engines and LLVM adapters.
 #include "Dataflow/APA/Adapters/LLVM/ForwardProblem.h"
-#include "Dataflow/APA/Engines/Solver.h"
+#include "Dataflow/APA/Solver/Solver.h"
 
 #endif // DATAFLOW_APA_APA_H_

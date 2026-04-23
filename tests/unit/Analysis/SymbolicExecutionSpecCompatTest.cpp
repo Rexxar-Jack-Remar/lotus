@@ -1,8 +1,8 @@
 #include "Analysis/SymbolicExecution/SegUtility.h"
 #include "TestUtils/LLVMHelpers.h"
 
-#include <gtest/gtest.h>
 #include <llvm/IR/Instructions.h>
+#include <gtest/gtest.h>
 
 using namespace llvm;
 using namespace lotus::unittest;

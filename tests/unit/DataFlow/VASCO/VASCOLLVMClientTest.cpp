@@ -86,7 +86,7 @@ TEST_F(VASCOLLVMClientTest, SignAnalysisTracksRecursiveExample) {
   ASSERT_EQ(FContexts.size(), 2U);
   ASSERT_EQ(GContexts.size(), 1U);
 
-  auto ArgIt = F->arg_begin();
+  auto *ArgIt = F->arg_begin();
   auto *AArg = &*ArgIt++;
   auto *BArg = &*ArgIt++;
   EXPECT_EQ(

@@ -1,6 +1,6 @@
 //===-- Verification/Sifa/Interpreter/RegexInterpreter.h ------------------===//
 //
-// Interpret path-expression regexes (Utils/Algorithms/PathExpressions/Regex.h)
+// Interpret path-expression regexes (Support/Algorithms/PathExpressions/Regex.h)
 // using an abstract domain.
 //
 // Semantics:

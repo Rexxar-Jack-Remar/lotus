@@ -18,9 +18,9 @@ Main components
 ---------------
 
 - ``Core/`` defines generic problem, result, and option abstractions.
-- ``Engines/`` contains solver implementations such as state elimination,
+- ``Solver/`` contains solver implementations such as state elimination,
   ADT-simple, and ADT-delayed solvers.
-- ``Clients/LLVM/Intra/`` provides ready-made intraprocedural analyses:
+- ``Analyses/LLVM/Intra/`` provides ready-made intraprocedural analyses:
 
   - available expressions
   - constant propagation

@@ -2,10 +2,10 @@
 #include <llvm/IR/LLVMContext.h>
 #include <llvm/IR/Module.h>
 #include <gtest/gtest.h>
-#include <Dataflow/IFDS/Clients/IDEConstantPropagation.h>
+#include <Dataflow/IFDS/Analyses/IDEConstantPropagation.h>
 #include <Dataflow/IFDS/Core/IFDSFramework.h>
-#include <Dataflow/IFDS/Solvers/IDESolver.h>
-#include <Dataflow/IFDS/Solvers/IFDSSolver.h>
+#include <Dataflow/IFDS/Solver/IDESolver.h>
+#include <Dataflow/IFDS/Solver/IFDSSolver.h>
 #include <TestUtils/LLVMHelpers.h>
 
 namespace ifds {

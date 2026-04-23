@@ -9,10 +9,10 @@ set(WPDS_FRAMEWORK_SOURCES
 
 # Client analyses
 set(WPDS_CLIENT_SOURCES
-  Clients/WPDSUninitializedVariables.cpp
-  Clients/WPDSConstantPropagation.cpp
-  Clients/WPDSLivenessAnalysis.cpp
-  Clients/WPDSTaintAnalysis.cpp
+  Analyses/UninitializedVariablesAnalysis.cpp
+  Analyses/ConstantPropagationAnalysis.cpp
+  Analyses/LivenessAnalysis.cpp
+  Analyses/TaintAnalysis.cpp
 )
 
 set(WPDS_SOURCES ${WPDS_FRAMEWORK_SOURCES} ${WPDS_CLIENT_SOURCES})

@@ -1,12 +1,12 @@
 #include <gtest/gtest.h>
-#include <Dataflow/IFDS/Clients/DefaultReachableAllocationSitesIDEProblem.h>
-#include <Dataflow/IFDS/Clients/IDEExtendedTaintAnalysis.h>
-#include <Dataflow/IFDS/Clients/IDEFeatureTaintAnalysis.h>
-#include <Dataflow/IFDS/Clients/IDEGeneralizedLCA.h>
-#include <Dataflow/IFDS/Clients/IDEInstInteractionAnalysis.h>
-#include <Dataflow/IFDS/Clients/IDESecureHeapPropagation.h>
-#include <Dataflow/IFDS/Clients/IDETypeState.h>
-#include <Dataflow/IFDS/Solvers/IDESolver.h>
+#include <Dataflow/IFDS/Analyses/DefaultReachableAllocationSitesIDEProblem.h>
+#include <Dataflow/IFDS/Analyses/IDEExtendedTaintAnalysis.h>
+#include <Dataflow/IFDS/Analyses/IDEFeatureTaintAnalysis.h>
+#include <Dataflow/IFDS/Analyses/IDEGeneralizedLCA.h>
+#include <Dataflow/IFDS/Analyses/IDEInstInteractionAnalysis.h>
+#include <Dataflow/IFDS/Analyses/IDESecureHeapPropagation.h>
+#include <Dataflow/IFDS/Analyses/IDETypeState.h>
+#include <Dataflow/IFDS/Solver/IDESolver.h>
 #include <TestUtils/LLVMHelpers.h>
 
 #include <llvm/IR/LLVMContext.h>

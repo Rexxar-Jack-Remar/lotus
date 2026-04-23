@@ -669,7 +669,7 @@ void Andersen::serializeConstraints(
   std::vector<sparrow_aa::SnapshotNodeRecord> nodeRecords;
   nodeRecords.reserve(nodeFactory.getNumNodes());
   for (unsigned i = 0, e = nodeFactory.getNumNodes(); i < e; ++i) {
-    auto ctx = nodeFactory.getContextForNode(i);
+    const auto *ctx = nodeFactory.getContextForNode(i);
     uint32_t contextId =
         ctx == nullptr ? sparrow_aa::kInvalidContextId
                        : static_cast<uint32_t>(contextIds.at(ctx));

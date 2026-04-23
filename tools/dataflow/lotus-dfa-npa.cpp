@@ -13,19 +13,19 @@
 #include "llvm/Support/raw_ostream.h"
 
 #include "Dataflow/NPA/Analyses/BitVectorSolver.h"
-#include "Dataflow/NPA/Analyses/Interprocedural/InterproceduralAffineEqualities.h"
-#include "Dataflow/NPA/Analyses/Interprocedural/InterproceduralConstantPropagation.h"
-#include "Dataflow/NPA/Analyses/Interprocedural/InterproceduralIntervalAnalysis.h"
-#include "Dataflow/NPA/Analyses/Interprocedural/InterproceduralLiveVariables.h"
-#include "Dataflow/NPA/Analyses/Interprocedural/InterproceduralMaybeUninitialized.h"
-#include "Dataflow/NPA/Analyses/Interprocedural/InterproceduralNullability.h"
-#include "Dataflow/NPA/Analyses/Interprocedural/InterproceduralRD.h"
-#include "Dataflow/NPA/Analyses/InterproceduralEngine.h"
-#include "Dataflow/NPA/Analyses/Intraprocedural/LiveVariables.h"
-#include "Dataflow/NPA/Analyses/Intraprocedural/ReachableBlocks.h"
-#include "Dataflow/NPA/Analyses/Intraprocedural/ReachingDefinitions.h"
-#include "ToolSupport.h"
+#include "Dataflow/NPA/Analyses/Inter/InterAffineEqualities.h"
+#include "Dataflow/NPA/Analyses/Inter/InterConstantPropagation.h"
+#include "Dataflow/NPA/Analyses/Inter/InterIntervalAnalysis.h"
+#include "Dataflow/NPA/Analyses/Inter/InterLiveVariables.h"
+#include "Dataflow/NPA/Analyses/Inter/InterMaybeUninitialized.h"
+#include "Dataflow/NPA/Analyses/Inter/InterNullability.h"
+#include "Dataflow/NPA/Analyses/Inter/InterReachingDefinitions.h"
+#include "Dataflow/NPA/Analyses/InterEngine.h"
+#include "Dataflow/NPA/Analyses/Intra/LiveVariables.h"
+#include "Dataflow/NPA/Analyses/Intra/ReachableBlocks.h"
+#include "Dataflow/NPA/Analyses/Intra/ReachingDefinitions.h"
 #include "Utils/Parallel/ThreadPool.h"
+#include "ToolSupport.h"
 
 #include <algorithm>
 #include <memory>
@@ -381,8 +381,7 @@ void printModuleBlockStates(raw_ostream &OS, Module &M, Printer &&PrintState) {
 void runInterproceduralLiveness(raw_ostream &OS, Module &M,
                                 npa::LinearStrategy LinearStrategy) {
   const ModuleView View = buildModuleView(M);
-  auto Result =
-      npa::InterproceduralLiveVariables::run(M, false, LinearStrategy);
+  auto Result = npa::InterLiveVariables::run(M, false, LinearStrategy);
   OS << "  [profile] phase=artifact_construction seconds="
      << Result.status.phase_artifact_construction_time << "\n";
   OS << "  [profile] phase=summary_solve seconds="
@@ -401,7 +400,7 @@ void runInterproceduralLiveness(raw_ostream &OS, Module &M,
 void runInterproceduralReachingDefinitions(raw_ostream &OS, Module &M,
                                            npa::LinearStrategy LinearStrategy) {
   const ModuleView View = buildModuleView(M);
-  auto Result = npa::InterproceduralRD::run(M, false, LinearStrategy);
+  auto Result = npa::InterReachingDefinitions::run(M, false, LinearStrategy);
   OS << "  [profile] phase=artifact_construction seconds="
      << Result.status.phase_artifact_construction_time << "\n";
   OS << "  [profile] phase=summary_solve seconds="
@@ -421,8 +420,7 @@ void runInterproceduralMaybeUninitialized(raw_ostream &OS, Module &M,
                                           npa::LinearStrategy LinearStrategy) {
   const ModuleView View = buildModuleView(M);
   const auto Labels = buildMaybeUninitializedLabels(M, View.ValueToId);
-  auto Result =
-      npa::InterproceduralMaybeUninitialized::run(M, false, LinearStrategy);
+  auto Result = npa::InterMaybeUninitialized::run(M, false, LinearStrategy);
   OS << "  [profile] phase=artifact_construction seconds="
      << Result.status.phase_artifact_construction_time << "\n";
   OS << "  [profile] phase=summary_solve seconds="
@@ -441,8 +439,7 @@ void runInterproceduralMaybeUninitialized(raw_ostream &OS, Module &M,
 void runInterproceduralConstantPropagation(raw_ostream &OS, Module &M,
                                            npa::LinearStrategy LinearStrategy) {
   const ModuleView View = buildModuleView(M);
-  auto Result =
-      npa::InterproceduralConstantPropagation::run(M, false, LinearStrategy);
+  auto Result = npa::InterConstantPropagation::run(M, false, LinearStrategy);
   OS << "  [profile] phase=artifact_construction seconds="
      << Result.status.phase_artifact_construction_time << "\n";
   OS << "  [profile] phase=summary_solve seconds="
@@ -467,8 +464,7 @@ void runInterproceduralConstantPropagation(raw_ostream &OS, Module &M,
 void runInterproceduralInterval(raw_ostream &OS, Module &M,
                                 npa::LinearStrategy LinearStrategy) {
   const ModuleView View = buildModuleView(M);
-  auto Result =
-      npa::InterproceduralIntervalAnalysis::run(M, false, LinearStrategy);
+  auto Result = npa::InterIntervalAnalysis::run(M, false, LinearStrategy);
   OS << "  [profile] phase=artifact_construction seconds="
      << Result.status.phase_artifact_construction_time << "\n";
   OS << "  [profile] phase=summary_solve seconds="
@@ -491,8 +487,7 @@ void runInterproceduralInterval(raw_ostream &OS, Module &M,
 void runInterproceduralAffineEqualities(raw_ostream &OS, Module &M,
                                         npa::LinearStrategy LinearStrategy) {
   const ModuleView View = buildModuleView(M);
-  auto Result =
-      npa::InterproceduralAffineEqualities::run(M, false, LinearStrategy);
+  auto Result = npa::InterAffineEqualities::run(M, false, LinearStrategy);
   OS << "  [profile] phase=artifact_construction seconds="
      << Result.status.phase_artifact_construction_time << "\n";
   OS << "  [profile] phase=summary_solve seconds="
@@ -518,7 +513,7 @@ void runInterproceduralAffineEqualities(raw_ostream &OS, Module &M,
 void runInterproceduralNullability(raw_ostream &OS, Module &M,
                                    npa::LinearStrategy LinearStrategy) {
   const ModuleView View = buildModuleView(M);
-  auto Result = npa::InterproceduralNullability::run(M, false, LinearStrategy);
+  auto Result = npa::InterNullability::run(M, false, LinearStrategy);
   OS << "  [profile] phase=artifact_construction seconds="
      << Result.status.phase_artifact_construction_time << "\n";
   OS << "  [profile] phase=summary_solve seconds="
@@ -557,7 +552,8 @@ const AnalysisHandler Handlers[] = {
      &runInterproceduralReachingDefinitions},
     {"inter_uninitialized", true, nullptr,
      &runInterproceduralMaybeUninitialized},
-    {"inter_constant_prop", true, nullptr, &runInterproceduralConstantPropagation},
+    {"inter_constant_prop", true, nullptr,
+     &runInterproceduralConstantPropagation},
     {"inter_interval", true, nullptr, &runInterproceduralInterval},
     {"inter_affine_eqs", true, nullptr, &runInterproceduralAffineEqualities},
     {"inter_nullability", true, nullptr, &runInterproceduralNullability},

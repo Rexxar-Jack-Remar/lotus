@@ -119,7 +119,7 @@ public:
 
 } // namespace npa
 
-#include "Dataflow/NPA/Core/Solve/TensorSemiring.h"
+#include "Dataflow/NPA/Solver/TensorSemiring.h"
 
 namespace npa {
 

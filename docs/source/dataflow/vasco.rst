@@ -115,8 +115,8 @@ Directional Solvers
 
 Client analyses extend one of:
 
-* ``Analyses/ForwardInterProceduralAnalysis.h``
-* ``Analyses/BackwardInterProceduralAnalysis.h``
+* ``Solver/ForwardInterProceduralAnalysis.h``
+* ``Solver/BackwardInterProceduralAnalysis.h``
 
 They must provide lattice hooks:
 
@@ -161,21 +161,21 @@ LLVM Instantiation in Lotus
 
 Lotus ships an LLVM adaptation of the generic framework.
 
-* ``LLVM/DefaultLLVMProgramRepresentation.h``
+* ``Adapters/LLVM/DefaultLLVMProgramRepresentation.h``
   adapts LLVM IR to VASCO using instruction-level CFGs. By default it resolves
   direct calls and treats declarations or unresolved callees conservatively. It
   also accepts a custom resolver callback, which is the intended integration
   point for stronger Lotus call-graph information.
-* ``Clients/LLVMSignAnalysis.h``
+* ``Analyses/LLVMSignAnalysis.h``
   ports the paper's sign-analysis example.
-* ``Clients/LLVMCopyConstantAnalysis.h``
+* ``Analyses/LLVMCopyConstantAnalysis.h``
   ports copy-constant propagation.
-* ``Clients/LLVMLiveVariablesAnalysis.h``
+* ``Analyses/LLVMLiveVariablesAnalysis.h``
   adds a backward interprocedural liveness client over LLVM SSA values.
-* ``Clients/LLVMNullnessAnalysis.h``
+* ``Analyses/LLVMNullnessAnalysis.h``
   tracks whether pointer-valued LLVM SSA results are null, non-null, or
   maybe-null.
-* ``Clients/LLVMPointsToAnalysis.h``
+* ``Analyses/LLVMPointsToAnalysis.h``
   ports the original VASCO points-to / call-target client to LLVM.
 
 The LLVM points-to client models:

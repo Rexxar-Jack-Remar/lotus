@@ -19,7 +19,7 @@
 
 #include "Dataflow/NPA/Core/IR/Expressions.h"
 #include "Dataflow/NPA/Core/Base/Runtime.h"
-#include "Dataflow/NPA/Core/Solve/TensorSemiring.h"
+#include "Dataflow/NPA/Solver/TensorSemiring.h"
 
 #include <mutex>
 #include <sstream>

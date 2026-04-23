@@ -1,8 +1,8 @@
 #include <Alias/AliasAnalysisWrapper/AliasAnalysisWrapper.h>
-#include <Dataflow/IFDS/Clients/IFDSConstAnalysis.h>
-#include <Dataflow/IFDS/Clients/IFDSReachingDefinitions.h>
-#include <Dataflow/IFDS/Clients/IFDSTaintAnalysis.h>
-#include <Dataflow/IFDS/Solvers/IFDSSolver.h>
+#include <Dataflow/IFDS/Analyses/IFDSConstAnalysis.h>
+#include <Dataflow/IFDS/Analyses/IFDSReachingDefinitions.h>
+#include <Dataflow/IFDS/Analyses/IFDSTaintAnalysis.h>
+#include <Dataflow/IFDS/Solver/IFDSSolver.h>
 #include <TestUtils/LLVMHelpers.h>
 
 #include <gtest/gtest.h>

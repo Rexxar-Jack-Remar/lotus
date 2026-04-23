@@ -60,20 +60,19 @@ include/Dataflow/NPA/
 
 Notable entry points:
 
-- `Core/Solve/Solver.h` contains the core Kleene/Newton iteration logic.
+- `Solver/Solver.h` contains the core Kleene/Newton iteration logic.
 - `Core/IR/Diff.h` implements both ordinary and tensor-side differentials.
-- `Core/Solve/LinearSolvers.h` and `Core/Solve/TensorLinearSolve.h` implement
+- `Solver/LinearSolvers.h` and `Solver/TensorLinearSolve.h` implement
   the linearized-system solvers.
-- `Analyses/Interprocedural/` contains the public analysis wrappers used by
+- `Analyses/Inter/` contains the public analysis wrappers used by
   the in-tree constant-propagation, interval, taint, nullability, and related
   clients.
 
 ## Usage notes
 
 - Intraprocedural clients can use `BitVectorSolver` and related local engines.
-- Interprocedural forward clients use `InterproceduralEngine<Domain, Analysis>`.
-- Interprocedural backward clients use
-  `BackwardInterproceduralEngine<Domain, Analysis>`.
+- Inter forward clients use `InterEngine<Domain, Analysis>`.
+- Inter backward clients use `BackwardInterEngine<Domain, Analysis>`.
 - `SummaryTransformerDomain` is the current bounded abstract-summary path used
   by in-tree subdistributive clients such as interprocedural constant
   propagation and interval analysis.

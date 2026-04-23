@@ -1,8 +1,8 @@
-#include "Dataflow/NPA/Analyses/Interprocedural/InterproceduralConstantPropagation.h"
-#include "Dataflow/NPA/Analyses/Interprocedural/InterproceduralIntervalAnalysis.h"
-#include "Dataflow/NPA/Analyses/Interprocedural/InterproceduralLiveVariables.h"
-#include "Dataflow/NPA/Analyses/Interprocedural/InterproceduralMaybeUninitialized.h"
-#include "Dataflow/NPA/Analyses/Interprocedural/InterproceduralRD.h"
+#include "Dataflow/NPA/Analyses/Inter/InterConstantPropagation.h"
+#include "Dataflow/NPA/Analyses/Inter/InterIntervalAnalysis.h"
+#include "Dataflow/NPA/Analyses/Inter/InterLiveVariables.h"
+#include "Dataflow/NPA/Analyses/Inter/InterMaybeUninitialized.h"
+#include "Dataflow/NPA/Analyses/Inter/InterReachingDefinitions.h"
 #include "Dataflow/NPA/Domains/PredicateRelationDomain.h"
 #include "Dataflow/NPA/NPA.h"
 #include "TestUtils/LLVMHelpers.h"
@@ -14,11 +14,11 @@
 #include <unordered_map>
 #include <vector>
 
+#include <gtest/gtest.h>
 #include <llvm/ADT/APInt.h>
 #include <llvm/IR/LLVMContext.h>
 #include <llvm/IR/Module.h>
 #include <llvm/Support/CommandLine.h>
-#include <gtest/gtest.h>
 
 namespace {
 
@@ -122,7 +122,8 @@ void expectAnalysisStatusEquivalent(const npa::AnalysisStatus &lhs,
                                     const npa::AnalysisStatus &rhs) {
   EXPECT_EQ(lhs.summary_solve.converged, rhs.summary_solve.converged);
   EXPECT_EQ(lhs.summary_solve.hit_limit, rhs.summary_solve.hit_limit);
-  EXPECT_EQ(lhs.summary_solve.hit_outer_limit, rhs.summary_solve.hit_outer_limit);
+  EXPECT_EQ(lhs.summary_solve.hit_outer_limit,
+            rhs.summary_solve.hit_outer_limit);
   EXPECT_EQ(lhs.summary_solve.hit_linear_limit,
             rhs.summary_solve.hit_linear_limit);
   EXPECT_EQ(lhs.summary_solve.hit_fixpoint_limit,
@@ -179,7 +180,8 @@ void expectConstValue(const npa::ConstantPropagationValue &value,
   EXPECT_TRUE(value.constant.eq(expected));
 }
 
-void expectIntervalPoint(const npa::Interval &value, const llvm::APInt &expected,
+void expectIntervalPoint(const npa::Interval &value,
+                         const llvm::APInt &expected,
                          npa::IntervalOrdering ordering) {
   EXPECT_FALSE(value.bottom);
   EXPECT_TRUE(value.hasLower);
@@ -242,7 +244,8 @@ std::string buildPointerIdentityChainIR(unsigned depth) {
 }
 
 unsigned safeCoreChainDepth() {
-  return static_cast<unsigned>(npa::detail::newton_parallel_setup_min_equations()) +
+  return static_cast<unsigned>(
+             npa::detail::newton_parallel_setup_min_equations()) +
          1U;
 }
 
@@ -259,10 +262,10 @@ TEST(NPAParallelRhsHarness, NewtonInitMatchesAcrossSetupModes) {
   eqns.emplace_back("x", Exp0::hole("y"));
   eqns.emplace_back("y", Exp0::term(D::one()));
 
-  auto serial = npa::detail::build_newton_initial_values<
-      D>(eqns, npa::detail::NewtonSetupExecutionMode::ForceSerial);
-  auto parallel = npa::detail::build_newton_initial_values<
-      D>(eqns, npa::detail::NewtonSetupExecutionMode::ForceParallel);
+  auto serial = npa::detail::build_newton_initial_values<D>(
+      eqns, npa::detail::NewtonSetupExecutionMode::ForceSerial);
+  auto parallel = npa::detail::build_newton_initial_values<D>(
+      eqns, npa::detail::NewtonSetupExecutionMode::ForceParallel);
 
   EXPECT_EQ(toMap<D>(serial), toMap<D>(parallel));
 }
@@ -276,14 +279,14 @@ TEST(NPAParallelRhsHarness, NewtonRunMatchesAcrossSetupModes) {
   eqns.emplace_back("x", Exp0::hole("y"));
   eqns.emplace_back("y", Exp0::term(D::one()));
 
-  auto binds = npa::detail::build_newton_initial_values<
-      D>(eqns, npa::detail::NewtonSetupExecutionMode::ForceSerial);
-  auto serial = npa::detail::run_newton_iteration<
-      D>(false, eqns, binds, npa::LinearStrategy::SCC,
-         npa::detail::NewtonSetupExecutionMode::ForceSerial);
-  auto parallel = npa::detail::run_newton_iteration<
-      D>(false, eqns, binds, npa::LinearStrategy::SCC,
-         npa::detail::NewtonSetupExecutionMode::ForceParallel);
+  auto binds = npa::detail::build_newton_initial_values<D>(
+      eqns, npa::detail::NewtonSetupExecutionMode::ForceSerial);
+  auto serial = npa::detail::run_newton_iteration<D>(
+      false, eqns, binds, npa::LinearStrategy::SCC,
+      npa::detail::NewtonSetupExecutionMode::ForceSerial);
+  auto parallel = npa::detail::run_newton_iteration<D>(
+      false, eqns, binds, npa::LinearStrategy::SCC,
+      npa::detail::NewtonSetupExecutionMode::ForceParallel);
 
   EXPECT_EQ(toMap<D>(serial), toMap<D>(parallel));
 }
@@ -300,8 +303,8 @@ TEST(NPAParallelRhsHarness, NewtonSolverPropagatesFixpointLimitFromSetupTasks) {
         Exp0::star(Exp0::ndet(Exp0::bound("b"), Exp0::term(D::one())), "b"));
   }
 
-  auto result = npa::NewtonSolver<D>::solve(eqns, false, -1,
-                                            npa::LinearStrategy::SCC);
+  auto result =
+      npa::NewtonSolver<D>::solve(eqns, false, -1, npa::LinearStrategy::SCC);
   auto solved = toMap<D>(result.first);
 
   EXPECT_FALSE(result.second.converged);
@@ -337,14 +340,14 @@ TEST(NPAParallelRhsHarness, TensorNewtonSetupMatchesAcrossSetupModes) {
   std::vector<std::pair<npa::Symbol, E0>> eqns;
   eqns.emplace_back("X", rhs);
 
-  auto binds = npa::detail::build_newton_initial_values<
-      D>(eqns, npa::detail::NewtonSetupExecutionMode::ForceSerial);
-  auto serial = npa::detail::run_newton_iteration<
-      D>(false, eqns, binds, npa::LinearStrategy::TensorProduct,
-         npa::detail::NewtonSetupExecutionMode::ForceSerial);
-  auto parallel = npa::detail::run_newton_iteration<
-      D>(false, eqns, binds, npa::LinearStrategy::TensorProduct,
-         npa::detail::NewtonSetupExecutionMode::ForceParallel);
+  auto binds = npa::detail::build_newton_initial_values<D>(
+      eqns, npa::detail::NewtonSetupExecutionMode::ForceSerial);
+  auto serial = npa::detail::run_newton_iteration<D>(
+      false, eqns, binds, npa::LinearStrategy::TensorProduct,
+      npa::detail::NewtonSetupExecutionMode::ForceSerial);
+  auto parallel = npa::detail::run_newton_iteration<D>(
+      false, eqns, binds, npa::LinearStrategy::TensorProduct,
+      npa::detail::NewtonSetupExecutionMode::ForceParallel);
 
   ASSERT_EQ(serial.size(), 1u);
   ASSERT_EQ(parallel.size(), 1u);
@@ -482,27 +485,28 @@ TEST(NPAParallelRhsHarness, VerboseSccModeForcesSerialScheduling) {
 TEST(NPAParallelRhsHarness,
      MaybeUninitializedChainProducesExpectedFactsAcrossWorkerCounts) {
   llvm::LLVMContext ctx;
-  auto module = parseModule(ctx, buildPointerIdentityChainIR(safeCoreChainDepth()));
+  auto module =
+      parseModule(ctx, buildPointerIdentityChainIR(safeCoreChainDepth()));
   ASSERT_NE(module, nullptr);
 
   auto *Deep = module->getFunction(
       ("g" + std::to_string(safeCoreChainLeafIndex())).c_str());
   ASSERT_NE(Deep, nullptr);
 
-  auto worklist = npa::InterproceduralMaybeUninitialized::run(
-      *module, false, npa::LinearStrategy::SCC);
-  auto scc = npa::InterproceduralMaybeUninitialized::run(
-      *module, false, npa::LinearStrategy::SCC);
-  llvm::APInt entry_fact = unionFactForBlock(scc.blockFacts, &Deep->getEntryBlock());
+  auto worklist = npa::InterMaybeUninitialized::run(*module, false,
+                                                    npa::LinearStrategy::SCC);
+  auto scc = npa::InterMaybeUninitialized::run(*module, false,
+                                               npa::LinearStrategy::SCC);
+  llvm::APInt entry_fact =
+      unionFactForBlock(scc.blockFacts, &Deep->getEntryBlock());
   EXPECT_GT(entry_fact.countPopulation(), 0u);
   expectSummariesEqual(worklist.summaries, scc.summaries,
                        [](const auto &lhs, const auto &rhs) {
                          return npa::TaintTransferDomain::equal(lhs, rhs);
                        });
-  expectBlockFactsEqual(worklist.blockFacts, scc.blockFacts,
-                        [](const auto &lhs, const auto &rhs) {
-                          return lhs == rhs;
-                        });
+  expectBlockFactsEqual(
+      worklist.blockFacts, scc.blockFacts,
+      [](const auto &lhs, const auto &rhs) { return lhs == rhs; });
   expectAnalysisStatusEquivalent(worklist.status, scc.status);
   EXPECT_TRUE(scc.status.summary_solve.converged);
 }
@@ -510,27 +514,27 @@ TEST(NPAParallelRhsHarness,
 TEST(NPAParallelRhsHarness,
      ReachingDefinitionsChainProducesExpectedFactsAcrossWorkerCounts) {
   llvm::LLVMContext ctx;
-  auto module = parseModule(ctx, buildScalarIdentityChainIR(safeCoreChainDepth()));
+  auto module =
+      parseModule(ctx, buildScalarIdentityChainIR(safeCoreChainDepth()));
   ASSERT_NE(module, nullptr);
 
   auto *Deep = module->getFunction(
       ("f" + std::to_string(safeCoreChainLeafIndex())).c_str());
   ASSERT_NE(Deep, nullptr);
 
-  auto worklist = npa::InterproceduralRD::run(
-      *module, false, npa::LinearStrategy::SCC);
-  auto scc = npa::InterproceduralRD::run(*module, false,
-                                         npa::LinearStrategy::SCC);
-  llvm::APInt entry_fact = unionFactForBlock(scc.blockFacts, &Deep->getEntryBlock());
+  auto worklist = npa::InterReachingDefinitions::run(*module, false,
+                                                     npa::LinearStrategy::SCC);
+  auto scc = npa::InterReachingDefinitions::run(*module, false,
+                                                npa::LinearStrategy::SCC);
+  llvm::APInt entry_fact =
+      unionFactForBlock(scc.blockFacts, &Deep->getEntryBlock());
   EXPECT_GT(entry_fact.countPopulation(), 0u);
-  expectSummariesEqual(worklist.summaries, scc.summaries,
-                       [](const auto &lhs, const auto &rhs) {
-                         return lhs == rhs;
-                       });
-  expectBlockFactsEqual(worklist.blockFacts, scc.blockFacts,
-                        [](const auto &lhs, const auto &rhs) {
-                          return lhs == rhs;
-                        });
+  expectSummariesEqual(
+      worklist.summaries, scc.summaries,
+      [](const auto &lhs, const auto &rhs) { return lhs == rhs; });
+  expectBlockFactsEqual(
+      worklist.blockFacts, scc.blockFacts,
+      [](const auto &lhs, const auto &rhs) { return lhs == rhs; });
   expectAnalysisStatusEquivalent(worklist.status, scc.status);
   EXPECT_TRUE(scc.status.summary_solve.converged);
 }
@@ -538,7 +542,8 @@ TEST(NPAParallelRhsHarness,
 TEST(NPAParallelRhsHarness,
      LiveVariablesChainProducesExpectedFactsAcrossWorkerCounts) {
   llvm::LLVMContext ctx;
-  auto module = parseModule(ctx, buildScalarIdentityChainIR(safeCoreChainDepth()));
+  auto module =
+      parseModule(ctx, buildScalarIdentityChainIR(safeCoreChainDepth()));
   ASSERT_NE(module, nullptr);
 
   auto *Deep = module->getFunction(
@@ -546,23 +551,23 @@ TEST(NPAParallelRhsHarness,
   ASSERT_NE(Deep, nullptr);
   auto *Arg = &*Deep->arg_begin();
 
-  auto worklist = npa::InterproceduralLiveVariables::run(
-      *module, false, npa::LinearStrategy::SCC);
-  auto scc = npa::InterproceduralLiveVariables::run(*module, false,
-                                                    npa::LinearStrategy::SCC);
+  auto worklist =
+      npa::InterLiveVariables::run(*module, false, npa::LinearStrategy::SCC);
+  auto scc =
+      npa::InterLiveVariables::run(*module, false, npa::LinearStrategy::SCC);
   auto bit_it = scc.valueBits.find(Arg);
   ASSERT_NE(bit_it, scc.valueBits.end());
 
-  llvm::APInt live_in = unionFactForBlock(scc.blockFacts, &Deep->getEntryBlock());
+  llvm::APInt live_in =
+      unionFactForBlock(scc.blockFacts, &Deep->getEntryBlock());
   EXPECT_TRUE(live_in[bit_it->second]);
   expectSummariesEqual(worklist.summaries, scc.summaries,
                        [](const auto &lhs, const auto &rhs) {
                          return npa::TaintTransferDomain::equal(lhs, rhs);
                        });
-  expectBlockFactsEqual(worklist.blockFacts, scc.blockFacts,
-                        [](const auto &lhs, const auto &rhs) {
-                          return lhs == rhs;
-                        });
+  expectBlockFactsEqual(
+      worklist.blockFacts, scc.blockFacts,
+      [](const auto &lhs, const auto &rhs) { return lhs == rhs; });
   EXPECT_EQ(worklist.valueBits, scc.valueBits);
   EXPECT_EQ(worklist.bitWidth, scc.bitWidth);
   expectAnalysisStatusEquivalent(worklist.status, scc.status);
@@ -572,7 +577,8 @@ TEST(NPAParallelRhsHarness,
 TEST(NPAParallelRhsHarness,
      ConstantPropagationChainProducesExpectedFactsAcrossWorkerCounts) {
   llvm::LLVMContext ctx;
-  auto module = parseModule(ctx, buildScalarIdentityChainIR(safeCoreChainDepth()));
+  auto module =
+      parseModule(ctx, buildScalarIdentityChainIR(safeCoreChainDepth()));
   ASSERT_NE(module, nullptr);
 
   auto *Deep = module->getFunction(
@@ -580,23 +586,21 @@ TEST(NPAParallelRhsHarness,
   ASSERT_NE(Deep, nullptr);
   auto *Arg = &*Deep->arg_begin();
 
-  auto worklist = npa::InterproceduralConstantPropagation::run(
-      *module, false, npa::LinearStrategy::SCC);
-  auto scc = npa::InterproceduralConstantPropagation::run(
-      *module, false, npa::LinearStrategy::SCC);
+  auto worklist = npa::InterConstantPropagation::run(*module, false,
+                                                     npa::LinearStrategy::SCC);
+  auto scc = npa::InterConstantPropagation::run(*module, false,
+                                                npa::LinearStrategy::SCC);
   auto states = statesForBlock(scc.blockFacts, &Deep->getEntryBlock());
   ASSERT_EQ(states.size(), 1u);
   auto it = states.front()->values.find(Arg);
   ASSERT_NE(it, states.front()->values.end());
   expectConstValue(it->second, signedAPInt(32, 5));
-  expectSummariesEqual(worklist.summaries, scc.summaries,
-                       [](const auto &lhs, const auto &rhs) {
-                         return lhs == rhs;
-                       });
-  expectBlockFactsEqual(worklist.blockFacts, scc.blockFacts,
-                        [](const auto &lhs, const auto &rhs) {
-                          return lhs == rhs;
-                        });
+  expectSummariesEqual(
+      worklist.summaries, scc.summaries,
+      [](const auto &lhs, const auto &rhs) { return lhs == rhs; });
+  expectBlockFactsEqual(
+      worklist.blockFacts, scc.blockFacts,
+      [](const auto &lhs, const auto &rhs) { return lhs == rhs; });
   expectAnalysisStatusEquivalent(worklist.status, scc.status);
   EXPECT_TRUE(scc.status.summary_solve.converged);
   EXPECT_TRUE(scc.status.overall_converged);
@@ -605,41 +609,8 @@ TEST(NPAParallelRhsHarness,
 TEST(NPAParallelRhsHarness,
      IntervalChainProducesExpectedFactsAcrossWorkerCounts) {
   llvm::LLVMContext ctx;
-  auto module = parseModule(ctx, buildScalarIdentityChainIR(safeCoreChainDepth()));
-  ASSERT_NE(module, nullptr);
-
-  auto *Deep = module->getFunction(
-      ("f" + std::to_string(safeCoreChainLeafIndex())).c_str());
-  ASSERT_NE(Deep, nullptr);
-  auto *Arg = &*Deep->arg_begin();
-
-  auto worklist = npa::InterproceduralIntervalAnalysis::run(
-      *module, false, npa::LinearStrategy::SCC);
-  auto scc = npa::InterproceduralIntervalAnalysis::run(
-      *module, false, npa::LinearStrategy::SCC);
-  auto states = statesForBlock(scc.blockFacts, &Deep->getEntryBlock());
-  ASSERT_EQ(states.size(), 1u);
-  auto it = states.front()->values.find(Arg);
-  ASSERT_NE(it, states.front()->values.end());
-  expectIntervalPoint(it->second, signedAPInt(32, 5),
-                      npa::IntervalOrdering::Signed);
-  expectSummariesEqual(worklist.summaries, scc.summaries,
-                       [](const auto &lhs, const auto &rhs) {
-                         return lhs == rhs;
-                       });
-  expectBlockFactsEqual(worklist.blockFacts, scc.blockFacts,
-                        [](const auto &lhs, const auto &rhs) {
-                          return lhs == rhs;
-                        });
-  expectAnalysisStatusEquivalent(worklist.status, scc.status);
-  EXPECT_TRUE(scc.status.summary_solve.converged);
-  EXPECT_TRUE(scc.status.overall_converged);
-}
-
-TEST(NPAParallelRhsHarness,
-     ConstantPropagationTensorFallbackPreservesResultsAcrossWorkerCounts) {
-  llvm::LLVMContext ctx;
-  auto module = parseModule(ctx, buildScalarIdentityChainIR(safeCoreChainDepth()));
+  auto module =
+      parseModule(ctx, buildScalarIdentityChainIR(safeCoreChainDepth()));
   ASSERT_NE(module, nullptr);
 
   auto *Deep = module->getFunction(
@@ -648,13 +619,47 @@ TEST(NPAParallelRhsHarness,
   auto *Arg = &*Deep->arg_begin();
 
   auto worklist =
-      npa::InterproceduralConstantPropagation::run(*module, false,
-                                                   npa::LinearStrategy::SCC);
-  auto tensor = npa::InterproceduralConstantPropagation::run(
+      npa::InterIntervalAnalysis::run(*module, false, npa::LinearStrategy::SCC);
+  auto scc =
+      npa::InterIntervalAnalysis::run(*module, false, npa::LinearStrategy::SCC);
+  auto states = statesForBlock(scc.blockFacts, &Deep->getEntryBlock());
+  ASSERT_EQ(states.size(), 1u);
+  auto it = states.front()->values.find(Arg);
+  ASSERT_NE(it, states.front()->values.end());
+  expectIntervalPoint(it->second, signedAPInt(32, 5),
+                      npa::IntervalOrdering::Signed);
+  expectSummariesEqual(
+      worklist.summaries, scc.summaries,
+      [](const auto &lhs, const auto &rhs) { return lhs == rhs; });
+  expectBlockFactsEqual(
+      worklist.blockFacts, scc.blockFacts,
+      [](const auto &lhs, const auto &rhs) { return lhs == rhs; });
+  expectAnalysisStatusEquivalent(worklist.status, scc.status);
+  EXPECT_TRUE(scc.status.summary_solve.converged);
+  EXPECT_TRUE(scc.status.overall_converged);
+}
+
+TEST(NPAParallelRhsHarness,
+     ConstantPropagationTensorFallbackPreservesResultsAcrossWorkerCounts) {
+  llvm::LLVMContext ctx;
+  auto module =
+      parseModule(ctx, buildScalarIdentityChainIR(safeCoreChainDepth()));
+  ASSERT_NE(module, nullptr);
+
+  auto *Deep = module->getFunction(
+      ("f" + std::to_string(safeCoreChainLeafIndex())).c_str());
+  ASSERT_NE(Deep, nullptr);
+  auto *Arg = &*Deep->arg_begin();
+
+  auto worklist = npa::InterConstantPropagation::run(*module, false,
+                                                     npa::LinearStrategy::SCC);
+  auto tensor = npa::InterConstantPropagation::run(
       *module, false, npa::LinearStrategy::TensorProduct);
 
-  auto worklist_states = statesForBlock(worklist.blockFacts, &Deep->getEntryBlock());
-  auto tensor_states = statesForBlock(tensor.blockFacts, &Deep->getEntryBlock());
+  auto worklist_states =
+      statesForBlock(worklist.blockFacts, &Deep->getEntryBlock());
+  auto tensor_states =
+      statesForBlock(tensor.blockFacts, &Deep->getEntryBlock());
   ASSERT_EQ(worklist_states.size(), 1u);
   ASSERT_EQ(tensor_states.size(), 1u);
   auto wl_it = worklist_states.front()->values.find(Arg);
@@ -671,44 +676,42 @@ TEST(NPAParallelRhsHarness,
 TEST(NPAParallelRhsHarness,
      ConstantPropagationAdaptiveSccMatchesSccAndReportsStats) {
   llvm::LLVMContext ctx;
-  auto module = parseModule(ctx, buildScalarIdentityChainIR(safeCoreChainDepth()));
+  auto module =
+      parseModule(ctx, buildScalarIdentityChainIR(safeCoreChainDepth()));
   ASSERT_NE(module, nullptr);
 
-  auto scc = npa::InterproceduralConstantPropagation::run(
-      *module, false, npa::LinearStrategy::SCC);
-  auto adaptive = npa::InterproceduralConstantPropagation::run(
+  auto scc = npa::InterConstantPropagation::run(*module, false,
+                                                npa::LinearStrategy::SCC);
+  auto adaptive = npa::InterConstantPropagation::run(
       *module, false, npa::LinearStrategy::AdaptiveScc);
 
-  expectSummariesEqual(scc.summaries, adaptive.summaries,
-                       [](const auto &lhs, const auto &rhs) {
-                         return lhs == rhs;
-                       });
-  expectBlockFactsEqual(scc.blockFacts, adaptive.blockFacts,
-                        [](const auto &lhs, const auto &rhs) {
-                          return lhs == rhs;
-                        });
+  expectSummariesEqual(
+      scc.summaries, adaptive.summaries,
+      [](const auto &lhs, const auto &rhs) { return lhs == rhs; });
+  expectBlockFactsEqual(
+      scc.blockFacts, adaptive.blockFacts,
+      [](const auto &lhs, const auto &rhs) { return lhs == rhs; });
   EXPECT_TRUE(adaptive.status.summary_solve.adaptive_scc_used);
   EXPECT_GE(adaptive.status.summary_solve.adaptive_scc_direct_count, 1);
 }
 
 TEST(NPAParallelRhsHarness, IntervalAdaptiveSccMatchesSccAndReportsStats) {
   llvm::LLVMContext ctx;
-  auto module = parseModule(ctx, buildScalarIdentityChainIR(safeCoreChainDepth()));
+  auto module =
+      parseModule(ctx, buildScalarIdentityChainIR(safeCoreChainDepth()));
   ASSERT_NE(module, nullptr);
 
-  auto scc = npa::InterproceduralIntervalAnalysis::run(
-      *module, false, npa::LinearStrategy::SCC);
-  auto adaptive = npa::InterproceduralIntervalAnalysis::run(
+  auto scc =
+      npa::InterIntervalAnalysis::run(*module, false, npa::LinearStrategy::SCC);
+  auto adaptive = npa::InterIntervalAnalysis::run(
       *module, false, npa::LinearStrategy::AdaptiveScc);
 
-  expectSummariesEqual(scc.summaries, adaptive.summaries,
-                       [](const auto &lhs, const auto &rhs) {
-                         return lhs == rhs;
-                       });
-  expectBlockFactsEqual(scc.blockFacts, adaptive.blockFacts,
-                        [](const auto &lhs, const auto &rhs) {
-                          return lhs == rhs;
-                        });
+  expectSummariesEqual(
+      scc.summaries, adaptive.summaries,
+      [](const auto &lhs, const auto &rhs) { return lhs == rhs; });
+  expectBlockFactsEqual(
+      scc.blockFacts, adaptive.blockFacts,
+      [](const auto &lhs, const auto &rhs) { return lhs == rhs; });
   EXPECT_TRUE(adaptive.status.summary_solve.adaptive_scc_used);
   EXPECT_GE(adaptive.status.summary_solve.adaptive_scc_direct_count, 1);
 }
@@ -729,8 +732,8 @@ TEST(NPAParallelRhsHarness,
   std::vector<std::pair<npa::Symbol, E0>> eqns;
   eqns.emplace_back("X", rhs);
 
-  auto worklist = npa::NewtonSolver<D>::solve(eqns, false, -1,
-                                              npa::LinearStrategy::SCC);
+  auto worklist =
+      npa::NewtonSolver<D>::solve(eqns, false, -1, npa::LinearStrategy::SCC);
   auto tensor = npa::NewtonSolver<D>::solve(eqns, false, -1,
                                             npa::LinearStrategy::TensorProduct);
 
@@ -760,8 +763,8 @@ TEST(NPAParallelRhsHarness,
 
   auto tensor = npa::NewtonSolver<D>::solve(eqns, false, -1,
                                             npa::LinearStrategy::TensorProduct);
-  auto scc = npa::NewtonSolver<D>::solve(eqns, false, -1,
-                                         npa::LinearStrategy::SCC);
+  auto scc =
+      npa::NewtonSolver<D>::solve(eqns, false, -1, npa::LinearStrategy::SCC);
 
   ASSERT_EQ(tensor.first.size(), 1u);
   ASSERT_EQ(scc.first.size(), 1u);
@@ -841,7 +844,8 @@ TEST(NPAParallelRhsHarness, AdaptiveSccPlanChoosesTensorForLcflCycle) {
   EXPECT_TRUE(plan.infos.front().tensor_eligible);
 }
 
-TEST(NPAParallelRhsHarness, AdaptiveSccPlanTracksTensorFallbackWhenUnavailable) {
+TEST(NPAParallelRhsHarness,
+     AdaptiveSccPlanTracksTensorFallbackWhenUnavailable) {
   using D = BoolSemiring;
   using Exp1 = npa::Exp1<D>;
   using E1 = npa::E1<D>;
@@ -952,7 +956,6 @@ TEST(NPAParallelRhsHarness,
 
 int main(int argc, char **argv) {
   testing::InitGoogleTest(&argc, argv);
-  llvm::cl::ParseCommandLineOptions(argc, argv,
-                                    "NPA parallel RHS harness\n");
+  llvm::cl::ParseCommandLineOptions(argc, argv, "NPA parallel RHS harness\n");
   return RUN_ALL_TESTS();
 }

@@ -1,13 +1,13 @@
-#include "Dataflow/NPA/Analyses/Interprocedural/InterproceduralAffineEqualities.h"
 #include "Dataflow/NPA/Domains/AffineRelationDomain.h"
+
+#include "Dataflow/NPA/Analyses/Inter/InterAffineEqualities.h"
 #include "TestUtils/LLVMHelpers.h"
 
-#include <gtest/gtest.h>
+#include <set>
 
+#include <gtest/gtest.h>
 #include <llvm/IR/LLVMContext.h>
 #include <llvm/IR/Module.h>
-
-#include <set>
 
 namespace {
 
@@ -20,12 +20,14 @@ npa::AffineRelationVocabulary buildVocabulary(const llvm::Module &M) {
     if (F.isDeclaration())
       continue;
     for (const auto &Arg : F.args()) {
-      if (Arg.getType()->isIntegerTy() && Arg.getType()->getIntegerBitWidth() <= 64)
+      if (Arg.getType()->isIntegerTy() &&
+          Arg.getType()->getIntegerBitWidth() <= 64)
         ordered.insert(&Arg);
     }
     for (const auto &BB : F) {
       for (const auto &I : BB) {
-        if (I.getType()->isIntegerTy() && I.getType()->getIntegerBitWidth() <= 64)
+        if (I.getType()->isIntegerTy() &&
+            I.getType()->getIntegerBitWidth() <= 64)
           ordered.insert(&I);
       }
     }
@@ -79,8 +81,8 @@ TEST(AffineRelationDomain, ComposeWithIdentityPreservesAssignment) {
   auto *Y = &*F->getEntryBlock().begin();
 
   auto assign = npa::AffineRelationDomain::makeAffineAssignment(Y, 4, {{X, 1}});
-  auto composed =
-      npa::AffineRelationDomain::extend(assign, npa::AffineRelationDomain::identity());
+  auto composed = npa::AffineRelationDomain::extend(
+      assign, npa::AffineRelationDomain::identity());
   auto state = npa::materializeAffineExpressions(composed);
 
   auto It = state.values.find(Y);
@@ -150,10 +152,8 @@ TEST(AffineRelationDomain, CondCombineRespectsBooleanGuard) {
   auto id = npa::AffineRelationDomain::identity();
   auto bottom = npa::AffineRelationDomain::zero();
 
-  EXPECT_TRUE(
-      npa::AffineRelationDomain::equal(
-          npa::AffineRelationDomain::condCombine(true, id, bottom), id));
-  EXPECT_TRUE(
-      npa::AffineRelationDomain::equal(
-          npa::AffineRelationDomain::condCombine(false, id, bottom), bottom));
+  EXPECT_TRUE(npa::AffineRelationDomain::equal(
+      npa::AffineRelationDomain::condCombine(true, id, bottom), id));
+  EXPECT_TRUE(npa::AffineRelationDomain::equal(
+      npa::AffineRelationDomain::condCombine(false, id, bottom), bottom));
 }

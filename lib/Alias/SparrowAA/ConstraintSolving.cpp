@@ -100,17 +100,17 @@ public:
 
   iterator begin() { return copyEdges.begin(); }
   iterator end() { return copyEdges.end(); }
-  const_iterator begin() const { return copyEdges.begin(); }
-  const_iterator end() const { return copyEdges.end(); }
+  [[nodiscard]] const_iterator begin() const { return copyEdges.begin(); }
+  [[nodiscard]] const_iterator end() const { return copyEdges.end(); }
 
-  const_iterator load_begin() const { return loadEdges.begin(); }
-  const_iterator load_end() const { return loadEdges.end(); }
+  [[nodiscard]] const_iterator load_begin() const { return loadEdges.begin(); }
+  [[nodiscard]] const_iterator load_end() const { return loadEdges.end(); }
   llvm::iterator_range<const_iterator> loads() const {
     return llvm::iterator_range<const_iterator>(load_begin(), load_end());
   }
 
-  const_iterator store_begin() const { return storeEdges.begin(); }
-  const_iterator store_end() const { return storeEdges.end(); }
+  [[nodiscard]] const_iterator store_begin() const { return storeEdges.begin(); }
+  [[nodiscard]] const_iterator store_end() const { return storeEdges.end(); }
   llvm::iterator_range<const_iterator> stores() const {
     return llvm::iterator_range<const_iterator>(store_begin(), store_end());
   }

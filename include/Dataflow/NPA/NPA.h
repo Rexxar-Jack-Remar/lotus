@@ -26,14 +26,14 @@
  *   - Core/IR/Eval.h               : I0 (Exp0) / I1 (Exp1) evaluators
  *   - Core/IR/Diff.h               : ordinary and tensor differentials
  *   - Core/IR/LCFLDetector.h       : detect LCFL structure (Concat/Star)
- *   - Core/Solve/Fixpoint.h        : fix / fix_vec (Kleene-like iteration)
- *   - Core/Solve/LinearSolvers.h   : SCC-based linear solvers
- *   - Core/Solve/TensorLinearSolve.h: tensor-product solver (Alg. 3.4)
- *   - Core/Solve/Solver.h          : KleeneIter / NewtonIter, Solver<D,ITER>
+ *   - Solver/Fixpoint.h            : fix / fix_vec (Kleene-like iteration)
+ *   - Solver/LinearSolvers.h       : SCC-based linear solvers
+ *   - Solver/TensorLinearSolve.h   : tensor-product solver (Alg. 3.4)
+ *   - Solver/Solver.h              : KleeneIter / NewtonIter, Solver<D,ITER>
  *********************************************************************/
 #ifndef NPA_HPP
 #define NPA_HPP
 
-#include "Dataflow/NPA/Core/Solve/Solver.h"
+#include "Dataflow/NPA/Solver/Solver.h"
 
 #endif /* NPA_HPP */

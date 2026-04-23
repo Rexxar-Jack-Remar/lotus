@@ -10,12 +10,12 @@
 #include "llvm/Support/InitLLVM.h"
 #include "llvm/Support/raw_ostream.h"
 
-#include "Dataflow/APA/Clients/LLVM/Intra/AvailableExpressions.h"
-#include "Dataflow/APA/Clients/LLVM/Intra/ConstantPropagation.h"
-#include "Dataflow/APA/Clients/LLVM/Intra/LiveVariables.h"
-#include "Dataflow/APA/Clients/LLVM/Intra/Reachability.h"
-#include "Dataflow/APA/Clients/LLVM/Intra/ReachingDefinitions.h"
-#include "Dataflow/APA/Clients/LLVM/Intra/UninitializedVariables.h"
+#include "Dataflow/APA/Analyses/LLVM/Intra/AvailableExpressions.h"
+#include "Dataflow/APA/Analyses/LLVM/Intra/ConstantPropagation.h"
+#include "Dataflow/APA/Analyses/LLVM/Intra/LiveVariables.h"
+#include "Dataflow/APA/Analyses/LLVM/Intra/Reachability.h"
+#include "Dataflow/APA/Analyses/LLVM/Intra/ReachingDefinitions.h"
+#include "Dataflow/APA/Analyses/LLVM/Intra/UninitializedVariables.h"
 #include "ToolSupport.h"
 
 #include <algorithm>

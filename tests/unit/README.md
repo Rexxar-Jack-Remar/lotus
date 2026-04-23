@@ -11,7 +11,7 @@ tests/unit/
 │   ├── IfdsIde/       # IFDS/IDE solver tests
 │   └── Mono/          # Monotone dataflow tests
 ├── Pointer/           # Pointer and alias analysis tests
-├── Utils/             # Utility class and helper tests
+├── Support/             # Utility class and helper tests
 └── TestUtils/         # Common test utilities and helpers
 ```
 
@@ -46,7 +46,7 @@ The following tests were reorganized from the flat structure:
 - DyckAATest.cpp - Dyck-based alias analysis tests
 - SparrowAATest.cpp - Sparrow alias analysis tests
 
-**Utils/**
+**Support/**
 - EGraphTest.cpp - E-graph data structure tests
 - EquivalenceClassMapTest.cpp - Equivalence class map ADT tests
 - LowerSelectTest.cpp - Select instruction lowering tests

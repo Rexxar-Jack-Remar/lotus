@@ -7,7 +7,7 @@
 #include <llvm/IR/LLVMContext.h>
 #include <llvm/IR/Module.h>
 #include <gtest/gtest.h>
-#include <Dataflow/IFDS/Utils/LLVMFlowHelpers.h>
+#include <Dataflow/IFDS/Support/LLVMFlowHelpers.h>
 #include <TestUtils/LLVMHelpers.h>
 
 namespace {

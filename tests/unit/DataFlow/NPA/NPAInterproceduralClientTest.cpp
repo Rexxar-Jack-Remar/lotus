@@ -1,9 +1,9 @@
-#include "Dataflow/NPA/Analyses/BackwardInterproceduralEngine.h"
-#include "Dataflow/NPA/Analyses/Interprocedural/InterproceduralAffineEqualities.h"
-#include "Dataflow/NPA/Analyses/Interprocedural/InterproceduralConstantPropagation.h"
-#include "Dataflow/NPA/Analyses/Interprocedural/InterproceduralIntervalAnalysis.h"
-#include "Dataflow/NPA/Analyses/Interprocedural/InterproceduralLiveVariables.h"
-#include "Dataflow/NPA/Analyses/Interprocedural/InterproceduralMaybeUninitialized.h"
+#include "Dataflow/NPA/Analyses/BackwardInterEngine.h"
+#include "Dataflow/NPA/Analyses/Inter/InterAffineEqualities.h"
+#include "Dataflow/NPA/Analyses/Inter/InterConstantPropagation.h"
+#include "Dataflow/NPA/Analyses/Inter/InterIntervalAnalysis.h"
+#include "Dataflow/NPA/Analyses/Inter/InterLiveVariables.h"
+#include "Dataflow/NPA/Analyses/Inter/InterMaybeUninitialized.h"
 #include "Dataflow/NPA/Domains/PredicateRelationDomain.h"
 #include "Dataflow/NPA/Domains/ProgramTransferDomain.h"
 #include "TestUtils/LLVMHelpers.h"
@@ -16,10 +16,10 @@
 #include <string>
 #include <vector>
 
+#include <gtest/gtest.h>
 #include <llvm/ADT/APInt.h>
 #include <llvm/IR/LLVMContext.h>
 #include <llvm/IR/Module.h>
-#include <gtest/gtest.h>
 
 namespace {
 
@@ -441,7 +441,7 @@ TEST(NPAInterproceduralClients, MaybeUninitializedFlowsThroughCall) {
   auto *Id = module->getFunction("id");
   ASSERT_NE(Id, nullptr);
 
-  auto result = npa::InterproceduralMaybeUninitialized::run(*module);
+  auto result = npa::InterMaybeUninitialized::run(*module);
   llvm::APInt entryFact =
       unionFactForBlock(result.blockFacts, &Id->getEntryBlock());
   EXPECT_GT(entryFact.countPopulation(), 0u);
@@ -469,7 +469,7 @@ TEST(NPAInterproceduralClients, MaybeUninitializedStoreClearsBeforeCall) {
   auto *Id = module->getFunction("id");
   ASSERT_NE(Id, nullptr);
 
-  auto result = npa::InterproceduralMaybeUninitialized::run(*module);
+  auto result = npa::InterMaybeUninitialized::run(*module);
   llvm::APInt entryFact =
       unionFactForBlock(result.blockFacts, &Id->getEntryBlock());
   EXPECT_EQ(entryFact.countPopulation(), 0u);
@@ -494,7 +494,7 @@ TEST(NPAInterproceduralClients,
 
   EntryHookAnalysis analysis;
   auto result =
-      npa::InterproceduralEngine<EntryHookDomain, EntryHookAnalysis>::run(
+      npa::InterEngine<EntryHookDomain, EntryHookAnalysis>::run(
           *module, analysis, false, npa::LinearStrategy::SCC);
 
   auto *Main = module->getFunction("main");
@@ -529,7 +529,7 @@ TEST(NPAInterproceduralClients,
 
   LimitedBoolAnalysis analysis;
   auto result =
-      npa::InterproceduralEngine<LimitedBoolDomain, LimitedBoolAnalysis>::run(
+      npa::InterEngine<LimitedBoolDomain, LimitedBoolAnalysis>::run(
           *module, analysis, false, npa::LinearStrategy::SCC);
 
   EXPECT_FALSE(result.status.summary_solve.converged);
@@ -562,7 +562,7 @@ TEST(NPAInterproceduralClients,
 
   RecursivePropagationLimitedForwardAnalysis analysis;
   auto result =
-      npa::InterproceduralEngine<RecursiveSummaryDomain,
+      npa::InterEngine<RecursiveSummaryDomain,
                                  RecursivePropagationLimitedForwardAnalysis>::
           run(*module, analysis, false, npa::LinearStrategy::SCC);
 
@@ -601,7 +601,7 @@ TEST(NPAInterproceduralClients,
   ASSERT_NE(Add2, nullptr);
   auto *Arg = &*Add2->arg_begin();
 
-  auto result = npa::InterproceduralConstantPropagation::run(*module);
+  auto result = npa::InterConstantPropagation::run(*module);
   auto states = statesForBlock(result.blockFacts, &Add2->getEntryBlock());
   ASSERT_EQ(states.size(), 1u);
   auto It = states.front()->values.find(Arg);
@@ -637,7 +637,7 @@ TEST(NPAInterproceduralClients, ConstantPropagationReportsSummaryOverflow) {
   auto module = parseModule(ctx, moduleText.c_str());
   ASSERT_NE(module, nullptr);
 
-  auto result = npa::InterproceduralConstantPropagation::run(*module);
+  auto result = npa::InterConstantPropagation::run(*module);
 
   EXPECT_TRUE(result.status.summary_solve.converged);
   EXPECT_TRUE(result.status.used_summary_overflow);
@@ -667,7 +667,7 @@ TEST(NPAInterproceduralClients,
   ASSERT_NE(Id, nullptr);
   auto *Arg = &*Id->arg_begin();
 
-  auto result = npa::InterproceduralConstantPropagation::run(
+  auto result = npa::InterConstantPropagation::run(
       *module, false, npa::LinearStrategy::TensorProduct);
   EXPECT_TRUE(result.status.summary_solve.converged);
   EXPECT_FALSE(result.status.summary_solve.hit_limit);
@@ -700,7 +700,7 @@ TEST(NPAInterproceduralClients,
   ASSERT_NE(module, nullptr);
 
   ProjectedSummaryAnalysis analysis;
-  auto result = npa::InterproceduralEngine<
+  auto result = npa::InterEngine<
       ProjectedStringDomain,
       ProjectedSummaryAnalysis>::run(*module, analysis, false,
                                      npa::LinearStrategy::SCC);
@@ -730,7 +730,7 @@ TEST(NPAInterproceduralClients,
   ASSERT_NE(module, nullptr);
 
   ProjectedSummaryAnalysis analysis;
-  auto result = npa::InterproceduralEngine<
+  auto result = npa::InterEngine<
       ProjectedStringDomain,
       ProjectedSummaryAnalysis>::run(*module, analysis, false,
                                      npa::LinearStrategy::SCC);
@@ -776,12 +776,12 @@ TEST(NPAInterproceduralClients,
   npa::PredicateRelationDomain::configure(2, 1);
   PredicateProjectedLoopAnalysis analysis;
 
-  auto worklist = npa::InterproceduralEngine<
+  auto worklist = npa::InterEngine<
       npa::PredicateRelationDomain,
       PredicateProjectedLoopAnalysis>::run(*module, analysis, false,
                                            npa::LinearStrategy::SCC);
 
-  auto tensor = npa::InterproceduralEngine<
+  auto tensor = npa::InterEngine<
       npa::PredicateRelationDomain,
       PredicateProjectedLoopAnalysis>::run(*module, analysis, false,
                                            npa::LinearStrategy::TensorProduct);
@@ -829,7 +829,7 @@ TEST(NPAInterproceduralClients,
   ASSERT_NE(module, nullptr);
 
   testing::internal::CaptureStderr();
-  auto result = npa::InterproceduralConstantPropagation::run(
+  auto result = npa::InterConstantPropagation::run(
       *module, true, npa::LinearStrategy::TensorProduct);
   std::string stderrOutput = testing::internal::GetCapturedStderr();
 
@@ -878,7 +878,7 @@ TEST(NPAInterproceduralClients, ConstantPropagationUsesLLVMIntegerSemantics) {
   ASSERT_NE(NextIt, Main->end());
   auto *Next = &*NextIt;
 
-  auto result = npa::InterproceduralConstantPropagation::run(*module);
+  auto result = npa::InterConstantPropagation::run(*module);
   auto states = statesForBlock(result.blockFacts, Next);
   ASSERT_EQ(states.size(), 1u);
 
@@ -926,7 +926,7 @@ TEST(NPAInterproceduralClients,
   ASSERT_NE(NextIt, Main->end());
   auto *Next = &*NextIt;
 
-  auto result = npa::InterproceduralConstantPropagation::run(*module);
+  auto result = npa::InterConstantPropagation::run(*module);
   auto states = statesForBlock(result.blockFacts, Next);
   ASSERT_EQ(states.size(), 1u);
 
@@ -974,7 +974,7 @@ TEST(NPAInterproceduralClients,
   ASSERT_NE(NextIt, Main->end());
   auto *Next = &*NextIt;
 
-  auto result = npa::InterproceduralConstantPropagation::run(*module);
+  auto result = npa::InterConstantPropagation::run(*module);
   auto states = statesForBlock(result.blockFacts, Next);
   ASSERT_EQ(states.size(), 1u);
 
@@ -1005,7 +1005,7 @@ TEST(NPAInterproceduralClients,
   ASSERT_NE(Id, nullptr);
   auto *Arg = &*Id->arg_begin();
 
-  auto result = npa::InterproceduralConstantPropagation::run(*module);
+  auto result = npa::InterConstantPropagation::run(*module);
   auto states = statesForBlock(result.blockFacts, &Id->getEntryBlock());
   ASSERT_EQ(states.size(), 1u);
 
@@ -1037,11 +1037,11 @@ TEST(NPAInterproceduralClients,
 
   EntryHookAnalysis analysis;
   auto closedWorld =
-      npa::InterproceduralEngine<EntryHookDomain, EntryHookAnalysis>::run(
+      npa::InterEngine<EntryHookDomain, EntryHookAnalysis>::run(
           *module, analysis, false, npa::LinearStrategy::SCC,
           npa::IndirectCallResolutionMode::ClosedWorldTypeCompatible);
   auto fallbackOnly =
-      npa::InterproceduralEngine<EntryHookDomain, EntryHookAnalysis>::run(
+      npa::InterEngine<EntryHookDomain, EntryHookAnalysis>::run(
           *module, analysis, false, npa::LinearStrategy::SCC,
           npa::IndirectCallResolutionMode::DeclaredOnlyFallback);
 
@@ -1080,7 +1080,7 @@ TEST(NPAInterproceduralClients,
   )");
   ASSERT_NE(module, nullptr);
 
-  auto result = npa::InterproceduralConstantPropagation::run(
+  auto result = npa::InterConstantPropagation::run(
       *module, false, npa::LinearStrategy::SCC,
       npa::IndirectCallResolutionMode::DeclaredOnlyFallback);
   EXPECT_EQ(result.status.call_resolution_mode,
@@ -1122,7 +1122,7 @@ TEST(NPAInterproceduralClients,
   auto *IdArg = &*Id->arg_begin();
   auto *IncArg = &*Inc->arg_begin();
 
-  auto result = npa::InterproceduralConstantPropagation::run(*module);
+  auto result = npa::InterConstantPropagation::run(*module);
   auto idStates = statesForBlock(result.blockFacts, &Id->getEntryBlock());
   auto incStates = statesForBlock(result.blockFacts, &Inc->getEntryBlock());
   ASSERT_EQ(idStates.size(), 1u);
@@ -1165,7 +1165,7 @@ TEST(NPAInterproceduralClients,
   ASSERT_NE(NextIt, Main->end());
   auto *Next = &*NextIt;
 
-  auto result = npa::InterproceduralConstantPropagation::run(*module);
+  auto result = npa::InterConstantPropagation::run(*module);
   auto states = statesForBlock(result.blockFacts, Next);
   ASSERT_EQ(states.size(), 1u);
 
@@ -1195,7 +1195,7 @@ TEST(NPAInterproceduralClients,
   ASSERT_NE(Id, nullptr);
   auto *Arg = &*Id->arg_begin();
 
-  auto result = npa::InterproceduralConstantPropagation::run(*module);
+  auto result = npa::InterConstantPropagation::run(*module);
   auto states = statesForBlock(result.blockFacts, &Id->getEntryBlock());
   ASSERT_EQ(states.size(), 1u);
 
@@ -1243,7 +1243,7 @@ TEST(NPAInterproceduralClients,
   ASSERT_NE(NextIt, Main->end());
   auto *Next = &*NextIt;
 
-  auto result = npa::InterproceduralConstantPropagation::run(*module);
+  auto result = npa::InterConstantPropagation::run(*module);
   auto states = statesForBlock(result.blockFacts, Next);
   ASSERT_EQ(states.size(), 1u);
   auto It = states.front()->values.find(X);
@@ -1273,7 +1273,7 @@ TEST(NPAInterproceduralClients, IntervalAnalysisJoinsAtSingleFunctionEntry) {
   ASSERT_NE(Id, nullptr);
   auto *Arg = &*Id->arg_begin();
 
-  auto result = npa::InterproceduralIntervalAnalysis::run(*module);
+  auto result = npa::InterIntervalAnalysis::run(*module);
   auto states = statesForBlock(result.blockFacts, &Id->getEntryBlock());
   ASSERT_EQ(states.size(), 1u);
   auto It = states.front()->values.find(Arg);
@@ -1309,7 +1309,7 @@ TEST(NPAInterproceduralClients, AffineEqualitiesTransferSymbolicRelations) {
   auto *Y = &*YIt;
   auto *A = &*Caller->arg_begin();
 
-  auto result = npa::InterproceduralAffineEqualities::run(*module);
+  auto result = npa::InterAffineEqualities::run(*module);
   auto relations =
       relationsForBlock(result.blockRelations, &Sink->getEntryBlock());
   ASSERT_EQ(relations.size(), 1u);
@@ -1357,7 +1357,7 @@ TEST(NPAInterproceduralClients, LiveVariablesFlowBackThroughCall) {
   ASSERT_NE(Id, nullptr);
   auto *Arg = &*Id->arg_begin();
 
-  auto result = npa::InterproceduralLiveVariables::run(*module);
+  auto result = npa::InterLiveVariables::run(*module);
   auto BitIt = result.valueBits.find(Arg);
   ASSERT_NE(BitIt, result.valueBits.end());
 
@@ -1385,7 +1385,7 @@ TEST(NPAInterproceduralClients,
   ASSERT_NE(module, nullptr);
 
   RecursivePropagationLimitedBackwardAnalysis analysis;
-  auto result = npa::BackwardInterproceduralEngine<
+  auto result = npa::BackwardInterEngine<
       RecursiveSummaryDomain, RecursivePropagationLimitedBackwardAnalysis>::
       run(*module, analysis, false, npa::LinearStrategy::SCC);
 
@@ -1444,7 +1444,7 @@ TEST(NPAInterproceduralClients, RecursiveIntervalAnalysisConverges) {
   ASSERT_NE(F, nullptr);
   auto *Arg = &*F->arg_begin();
 
-  auto result = npa::InterproceduralIntervalAnalysis::run(*module);
+  auto result = npa::InterIntervalAnalysis::run(*module);
   auto states = statesForBlock(result.blockFacts, &F->getEntryBlock());
   ASSERT_EQ(states.size(), 1u);
   EXPECT_TRUE(states.front()->reachable);
@@ -1478,7 +1478,7 @@ TEST(NPAInterproceduralClients, IntervalAnalysisReportsFactWidening) {
   )");
   ASSERT_NE(module, nullptr);
 
-  auto result = npa::InterproceduralIntervalAnalysis::run(*module);
+  auto result = npa::InterIntervalAnalysis::run(*module);
 
   EXPECT_TRUE(result.status.summary_solve.converged);
   EXPECT_TRUE(result.status.used_fact_widening);
@@ -1508,7 +1508,7 @@ TEST(NPAInterproceduralClients, IntervalCastKeepsZextTrueAsOne) {
   ASSERT_NE(NextIt, Main->end());
   auto *Next = &*NextIt;
 
-  auto result = npa::InterproceduralIntervalAnalysis::run(*module);
+  auto result = npa::InterIntervalAnalysis::run(*module);
   auto states = statesForBlock(result.blockFacts, Next);
   ASSERT_EQ(states.size(), 1u);
 
@@ -1542,7 +1542,7 @@ TEST(NPAInterproceduralClients, IntervalSignedDivisionUsesAllEndpointPairs) {
   ASSERT_NE(NextIt, Main->end());
   auto *Next = &*NextIt;
 
-  auto result = npa::InterproceduralIntervalAnalysis::run(*module);
+  auto result = npa::InterIntervalAnalysis::run(*module);
   auto states = statesForBlock(result.blockFacts, Next);
   ASSERT_EQ(states.size(), 1u);
 
@@ -1577,7 +1577,7 @@ TEST(NPAInterproceduralClients, IntervalUnsignedOpsUseUnsignedSemantics) {
   ASSERT_NE(NextIt, Main->end());
   auto *Next = &*NextIt;
 
-  auto result = npa::InterproceduralIntervalAnalysis::run(*module);
+  auto result = npa::InterIntervalAnalysis::run(*module);
   auto states = statesForBlock(result.blockFacts, Next);
   ASSERT_EQ(states.size(), 1u);
 
@@ -1614,7 +1614,7 @@ TEST(NPAInterproceduralClients, IntervalSupportsLargeUnsignedValues) {
   ASSERT_NE(NextIt, Main->end());
   auto *Next = &*NextIt;
 
-  auto result = npa::InterproceduralIntervalAnalysis::run(*module);
+  auto result = npa::InterIntervalAnalysis::run(*module);
   auto states = statesForBlock(result.blockFacts, Next);
   ASSERT_EQ(states.size(), 1u);
 
@@ -1658,7 +1658,7 @@ TEST(NPAInterproceduralClients, IntervalPreservesPhiConditionCorrelation) {
   ASSERT_NE(NextIt, Main->end());
   auto *Next = &*NextIt;
 
-  auto result = npa::InterproceduralIntervalAnalysis::run(*module);
+  auto result = npa::InterIntervalAnalysis::run(*module);
   auto states = statesForBlock(result.blockFacts, Next);
   ASSERT_EQ(states.size(), 1u);
 
@@ -1700,7 +1700,7 @@ TEST(NPAInterproceduralClients,
   ASSERT_NE(DefaultIt, Main->end());
   auto *Default = &*DefaultIt;
 
-  auto result = npa::InterproceduralIntervalAnalysis::run(*module);
+  auto result = npa::InterIntervalAnalysis::run(*module);
   auto states = statesForBlock(result.blockFacts, Default);
   ASSERT_EQ(states.size(), 1u);
 
@@ -1742,7 +1742,7 @@ TEST(NPAInterproceduralClients,
   ASSERT_NE(DefaultIt, Main->end());
   auto *Default = &*DefaultIt;
 
-  auto result = npa::InterproceduralAffineEqualities::run(*module);
+  auto result = npa::InterAffineEqualities::run(*module);
   auto states =
       materializedAffineStatesForBlock(result.blockRelations, Default);
   ASSERT_EQ(states.size(), 1u);
@@ -1784,7 +1784,7 @@ TEST(NPAInterproceduralClients, AffineCastAndSelectUseKnownConditionValue) {
   ASSERT_NE(NextIt, Main->end());
   auto *Next = &*NextIt;
 
-  auto result = npa::InterproceduralAffineEqualities::run(*module);
+  auto result = npa::InterAffineEqualities::run(*module);
   auto states = materializedAffineStatesForBlock(result.blockRelations, Next);
   ASSERT_EQ(states.size(), 1u);
 
@@ -1826,7 +1826,7 @@ TEST(NPAInterproceduralClients, AffineCompareOfSameValueProducesConstant) {
   ASSERT_NE(NextIt, Main->end());
   auto *Next = &*NextIt;
 
-  auto result = npa::InterproceduralAffineEqualities::run(*module);
+  auto result = npa::InterAffineEqualities::run(*module);
   auto states = materializedAffineStatesForBlock(result.blockRelations, Next);
   ASSERT_EQ(states.size(), 1u);
 
@@ -1875,7 +1875,7 @@ TEST(NPAInterproceduralClients, AffinePhiKeepsBranchConditionAtMerge) {
   auto *X = findInstructionByName(*Main, "x");
   ASSERT_NE(X, nullptr);
 
-  auto result = npa::InterproceduralAffineEqualities::run(*module);
+  auto result = npa::InterAffineEqualities::run(*module);
   auto states = materializedAffineStatesForBlock(result.blockRelations, Merge);
   ASSERT_EQ(states.size(), 1u);
 
@@ -2067,7 +2067,7 @@ TEST(NPAInterproceduralClients, BackwardEngineAppliesEdgeTransfers) {
   ASSERT_NE(Main, nullptr);
 
   BackwardEdgeTransferAnalysis analysis;
-  auto result = npa::BackwardInterproceduralEngine<
+  auto result = npa::BackwardInterEngine<
       TraceTransferDomain, BackwardEdgeTransferAnalysis>::run(*module,
                                                               analysis);
 
@@ -2096,7 +2096,7 @@ TEST(NPAInterproceduralClients,
 
   BackwardTensorAnalysis analysis;
   testing::internal::CaptureStderr();
-  auto result = npa::BackwardInterproceduralEngine<
+  auto result = npa::BackwardInterEngine<
       BackwardTensorLangDomain,
       BackwardTensorAnalysis>::run(*module, analysis, true,
                                    npa::LinearStrategy::TensorProduct);
@@ -2144,7 +2144,7 @@ TEST(NPAInterproceduralClients, AffineTracksModularWrapForConstants) {
   ASSERT_NE(NextIt, Main->end());
   auto *Next = &*NextIt;
 
-  auto result = npa::InterproceduralAffineEqualities::run(*module);
+  auto result = npa::InterAffineEqualities::run(*module);
   auto states = materializedAffineStatesForBlock(result.blockRelations, Next);
   ASSERT_EQ(states.size(), 1u);
 
@@ -2178,7 +2178,7 @@ TEST(NPAInterproceduralClients, AffineZextOfBooleanArgumentStaysSymbolic) {
   ASSERT_NE(NextIt, Main->end());
   auto *Next = &*NextIt;
 
-  auto result = npa::InterproceduralAffineEqualities::run(*module);
+  auto result = npa::InterAffineEqualities::run(*module);
   auto states = materializedAffineStatesForBlock(result.blockRelations, Next);
   ASSERT_EQ(states.size(), 1u);
 
@@ -2219,7 +2219,7 @@ TEST(NPAInterproceduralClients, IntervalCompareAndSelectUseForcedRanges) {
   ASSERT_NE(NextIt, Main->end());
   auto *Next = &*NextIt;
 
-  auto result = npa::InterproceduralIntervalAnalysis::run(*module);
+  auto result = npa::InterIntervalAnalysis::run(*module);
   auto states = statesForBlock(result.blockFacts, Next);
   ASSERT_EQ(states.size(), 1u);
 

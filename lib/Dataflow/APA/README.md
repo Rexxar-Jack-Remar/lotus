@@ -25,9 +25,9 @@ The public API lives under `include/Dataflow/APA/`:
 include/Dataflow/APA/
 ├── APA.h                          # Canonical umbrella for the framework
 ├── Core/                          # Generic problem, path-expression, options, results
-├── Engines/                       # Solver facade and concrete elimination engines
+├── Solver/                       # Solver facade and concrete elimination engines
 ├── Adapters/LLVM/                 # LLVM CFG adapters
-├── Clients/LLVM/Intra/            # Concrete LLVM analyses
+├── Analyses/LLVM/Intra/            # Concrete LLVM analyses
 └── Passes/                        # Legacy-pass wrappers
 ```
 
@@ -38,12 +38,12 @@ compatibility aliases for an older pre-reorg layout.
 
 - Framework umbrella: `#include "Dataflow/APA/APA.h"`
 - Minimal framework surface: `Core/Problem.h`, `Core/Result.h`,
-  `Engines/Solver.h`, `Adapters/LLVM/ForwardProblem.h`
-- LLVM clients: `Clients/LLVM/Intra/*.h`
+  `Solver/Solver.h`, `Adapters/LLVM/ForwardProblem.h`
+- LLVM clients: `Analyses/LLVM/Intra/*.h`
 - Passes: `#include "Dataflow/APA/Passes/EliminationPasses.h"`
-- Internal engine headers: `Engines/SolverContext.h` and the concrete
+- Internal engine headers: `Solver/SolverContext.h` and the concrete
   `*Solver.h` files are solver internals; downstream clients should normally
-  include only `Engines/Solver.h`.
+  include only `Solver/Solver.h`.
 
 ## References
 
@@ -69,10 +69,10 @@ The solver constructs **path expressions** (regular-expression-like ASTs) over e
 
 This corresponds to a **meet-over-all-paths (MOP)** computation. For classic distributive frameworks, MOP equals the standard maximal fixed point (MFP) solution.
 
-## Relation to `Utils/Algorithms/PathExpressions`
+## Relation to `Support/Algorithms/PathExpressions`
 
 Lotus also ships a generic path-expression utility under
-`include/Utils/Algorithms/PathExpressions/`. That component computes ordinary
+`include/Support/Algorithms/PathExpressions/`. That component computes ordinary
 regular expressions over edge labels in arbitrary labeled graphs.
 
 The APA solver is different:
@@ -86,9 +86,9 @@ The APA solver is different:
 ## Layering
 
 - `Core/` is generic and does not depend on LLVM.
-- `Engines/` is generic and builds/evaluates path expressions.
+- `Solver/` is generic and builds/evaluates path expressions.
 - `Adapters/LLVM/` maps LLVM CFGs into the generic problem interface.
-- `Clients/LLVM/` supplies lattice semantics and transfer behavior for concrete
+- `Analyses/LLVM/` supplies lattice semantics and transfer behavior for concrete
   analyses.
 
 APA is therefore a generic elimination framework, not a complete
@@ -122,8 +122,8 @@ Three elimination-style solvers are exposed via `elimination::EliminationOptions
 - `NonConvergentStarPolicy = Fail | ReturnLast | ReturnIdentity`
 - `MaxStarIterations` (0 means use `Problem.maxStarIterations()`).
 
-The public facade `Engines/Solver.h` dispatches to one of three engine headers
-in `include/Dataflow/APA/Engines/`:
+The public facade `Solver/Solver.h` dispatches to one of three engine headers
+in `include/Dataflow/APA/Solver/`:
 
 - `SolverContext.h` (shared internals: reducible-view construction, ADT
   building, expression evaluation)

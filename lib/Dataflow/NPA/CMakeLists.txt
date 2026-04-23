@@ -7,17 +7,17 @@ set(NPA_SOURCES
   Domains/TaintTransferDomain.cpp
 
   Analyses/BitVectorSolver.cpp
-  Analyses/Intraprocedural/LiveVariables.cpp
-  Analyses/Interprocedural/InterproceduralAffineEqualities.cpp
-  Analyses/Interprocedural/InterproceduralConstantPropagation.cpp
-  Analyses/Interprocedural/InterproceduralIntervalAnalysis.cpp
-  Analyses/Interprocedural/InterproceduralLiveVariables.cpp
-  Analyses/Interprocedural/InterproceduralNullability.cpp
-  Analyses/Intraprocedural/ReachingDefinitions.cpp
-  Analyses/Intraprocedural/ReachableBlocks.cpp
-  Analyses/Interprocedural/InterproceduralMaybeUninitialized.cpp
-  Analyses/Interprocedural/InterproceduralRD.cpp
-  Analyses/Interprocedural/InterproceduralTaint.cpp
+  Analyses/Intra/LiveVariables.cpp
+  Analyses/Inter/InterAffineEqualities.cpp
+  Analyses/Inter/InterConstantPropagation.cpp
+  Analyses/Inter/InterIntervalAnalysis.cpp
+  Analyses/Inter/InterLiveVariables.cpp
+  Analyses/Inter/InterNullability.cpp
+  Analyses/Intra/ReachingDefinitions.cpp
+  Analyses/Intra/ReachableBlocks.cpp
+  Analyses/Inter/InterMaybeUninitialized.cpp
+  Analyses/Inter/InterReachingDefinitions.cpp
+  Analyses/Inter/InterTaint.cpp
 )
 
 add_library(NPADataFlow STATIC ${NPA_SOURCES})

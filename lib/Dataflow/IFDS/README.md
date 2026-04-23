@@ -11,14 +11,14 @@
   - **EdgeFunctionCache.h** – Edge function memoization.
   - **SolverGraphContext.h** – Shared ICFG/callgraph/successor/seed construction.
   - **SolverRunState.h** – Shared monotonic path/summary edge run-state containers.
-- **Solvers/** – Header-only solver implementations:
+- **Solver/** – Header-only solver implementations:
   - **IFDSSolver.h** / **IFDSSolver.tpp** – Sequential IFDS tabulation solver.
   - **IDESolver.h** / **IDESolver.tpp** – IDE solver.
   - **PathAwareIFDSSolver.h** – Path-tracking IFDS solver.
   - **PathAwareIDESolver.h** – Path-tracking IDE solver.
-- **Utils/** – Utility headers:
+- **Support/** – Utility headers:
   - **LLVMFlowHelpers.h** – LLVM-specific flow function helpers.
-- **Clients/** – Analysis problem definitions (IFDSTaintAnalysis, IDEConstantPropagation, etc.).
+- **Analyses/** – Analysis problem definitions (IFDSTaintAnalysis, IDEConstantPropagation, etc.).
 
 ### API notes
 
@@ -32,9 +32,9 @@
 ### Include paths
 
 - Core: `#include "Dataflow/IFDS/Core/IFDSFramework.h"`
-- Solvers: `#include "Dataflow/IFDS/Solvers/IFDSSolver.h"`
-- Utils: `#include "Dataflow/IFDS/Utils/LLVMFlowHelpers.h"`
-- Clients: `#include "Dataflow/IFDS/Clients/IFDSTaintAnalysis.h"`
+- Solver: `#include "Dataflow/IFDS/Solver/IFDSSolver.h"`
+- Support: `#include "Dataflow/IFDS/Support/LLVMFlowHelpers.h"`
+- Analyses: `#include "Dataflow/IFDS/Analyses/IFDSTaintAnalysis.h"`
 
 ### Solver features (aligned with Phasar where applicable)
 
@@ -48,7 +48,7 @@
 ### lib/Dataflow/IFDS/
 
 - **Debug/** – Framework debug helpers (e.g. IFDSDebugUtils).
-- **Clients/** – Concrete analyses built on the framework.
+- **Analyses/** – Concrete analyses built on the framework.
 
 ## Writing An Analysis
 

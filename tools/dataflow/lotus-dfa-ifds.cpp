@@ -10,9 +10,9 @@
 #include "llvm/Support/InitLLVM.h"
 #include "llvm/Support/raw_ostream.h"
 
-#include "Dataflow/IFDS/Clients/IFDSReachingDefinitions.h"
-#include "Dataflow/IFDS/Clients/IFDSUninitializedVariables.h"
-#include "Dataflow/IFDS/Solvers/IFDSSolver.h"
+#include "Dataflow/IFDS/Analyses/IFDSReachingDefinitions.h"
+#include "Dataflow/IFDS/Analyses/IFDSUninitializedVariables.h"
+#include "Dataflow/IFDS/Solver/IFDSSolver.h"
 #include "ToolSupport.h"
 
 #include <algorithm>

@@ -1,7 +1,7 @@
 #include <llvm/IR/LLVMContext.h>
 #include <llvm/IR/Module.h>
 #include <gtest/gtest.h>
-#include <Dataflow/IFDS/Solvers/IDESolver.h>
+#include <Dataflow/IFDS/Solver/IDESolver.h>
 #include <TestUtils/LLVMHelpers.h>
 
 namespace ifds {

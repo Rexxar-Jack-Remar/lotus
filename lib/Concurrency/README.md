@@ -6,7 +6,7 @@ Headers live under `include/Concurrency/`, sources under `lib/Concurrency/`, gro
 
 | Subdirectory | Contents |
 |--------------|----------|
-| **Utils/** | ThreadAPI, ThreadFlowGraph, ThreadInfo, BVClock, FBVClock, CppAtomics, RAIILockTracker, LanguageModel/ (CppThreading, OpenMP, MPI, LinuxKernel) |
+| **Support/** | ThreadAPI, ThreadFlowGraph, ThreadInfo, BVClock, FBVClock, CppAtomics, RAIILockTracker, LanguageModel/ (CppThreading, OpenMP, MPI, LinuxKernel) |
 | **MHP/** | MHPAnalysis, StaticVectorClockMHP, HappensBeforeAnalysis |
 | **LockSet/** | LockSetAnalysis |
 | **Memory/** | EscapeAnalysis, StaticThreadSharingAnalysis |

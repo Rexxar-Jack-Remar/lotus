@@ -9,9 +9,9 @@
 #include "lotus_taint_microbench.h"
 
 #include <Alias/AliasAnalysisWrapper/AliasAnalysisWrapper.h>
-#include <Dataflow/IFDS/Clients/IFDSTaintAnalysis.h>
+#include <Dataflow/IFDS/Analyses/IFDSTaintAnalysis.h>
 #include <Dataflow/IFDS/Core/IFDSFramework.h>
-#include <Dataflow/IFDS/Solvers/IFDSSolver.h>
+#include <Dataflow/IFDS/Solver/IFDSSolver.h>
 
 #include <chrono>
 #include <memory>

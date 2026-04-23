@@ -1,7 +1,7 @@
 # IFDS Framework - Independent Analysis Library
 #
-# Layout: Debug/, Clients/
-# Solver implementations are header-only (include/Dataflow/IFDS/Solvers/*.tpp).
+# Layout: Debug/, Analyses/
+# Solver implementations are header-only (include/Dataflow/IFDS/Solver/*.tpp).
 
 # Framework core
 set(IFDS_FRAMEWORK_SOURCES
@@ -10,23 +10,23 @@ set(IFDS_FRAMEWORK_SOURCES
 
 # Client analyses
 set(IFDS_CLIENT_SOURCES
-  Clients/IFDSTaintAnalysis.cpp
-  Clients/IFDSTaintAnalysisFlows.cpp
-  Clients/IFDSTaintAnalysisReporting.cpp
-  Clients/IFDSReachingDefinitions.cpp
-  Clients/IDEConstantPropagation.cpp
-  Clients/IDETypeState.cpp
-  Clients/IDEProtoAnalysis.cpp
-  Clients/IDEExtendedTaintAnalysis.cpp
-  Clients/IDEFeatureTaintAnalysis.cpp
-  Clients/IDESecureHeapPropagation.cpp
-  Clients/IDEInstInteractionAnalysis.cpp
-  Clients/IDEGeneralizedLCA.cpp
-  Clients/IFDSUninitializedVariables.cpp
-  Clients/IFDSConstAnalysis.cpp
-  Clients/IDELinearConstantAnalysis.cpp
-  Clients/IFDSTypeAnalysis.cpp
-  Clients/IFDSSignAnalysis.cpp
+  Analyses/IFDSTaintAnalysis.cpp
+  Analyses/IFDSTaintAnalysisFlows.cpp
+  Analyses/IFDSTaintAnalysisReporting.cpp
+  Analyses/IFDSReachingDefinitions.cpp
+  Analyses/IDEConstantPropagation.cpp
+  Analyses/IDETypeState.cpp
+  Analyses/IDEProtoAnalysis.cpp
+  Analyses/IDEExtendedTaintAnalysis.cpp
+  Analyses/IDEFeatureTaintAnalysis.cpp
+  Analyses/IDESecureHeapPropagation.cpp
+  Analyses/IDEInstInteractionAnalysis.cpp
+  Analyses/IDEGeneralizedLCA.cpp
+  Analyses/IFDSUninitializedVariables.cpp
+  Analyses/IFDSConstAnalysis.cpp
+  Analyses/IDELinearConstantAnalysis.cpp
+  Analyses/IFDSTypeAnalysis.cpp
+  Analyses/IFDSSignAnalysis.cpp
 )
 
 set(IFDS_SOURCES ${IFDS_FRAMEWORK_SOURCES} ${IFDS_CLIENT_SOURCES})

@@ -452,8 +452,8 @@ private:
 // ============================================================================
 // IFDS/IDE Solvers
 // ============================================================================
-// Solver declarations: include/Dataflow/IFDS/Solvers/IFDSSolver.h and
-// include/Dataflow/IFDS/Solvers/IDESolver.h
+// Solver declarations: include/Dataflow/IFDS/Solver/IFDSSolver.h and
+// include/Dataflow/IFDS/Solver/IDESolver.h
 
 } // namespace ifds
 

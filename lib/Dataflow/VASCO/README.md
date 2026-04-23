@@ -46,11 +46,11 @@ header-only so it stays parameterized over method, CFG-node, and lattice types.
 - `Core/InterProceduralAnalysis.h`
   owns the global set of contexts, the transition table, and utilities such as
   `getContexts()` and `getMeetOverValidPathsSolution()`.
-- `Analyses/ForwardInterProceduralAnalysis.h`
+- `Solver/ForwardInterProceduralAnalysis.h`
   implements the forward algorithm corresponding to Figure 1 in the paper.
-- `Analyses/BackwardInterProceduralAnalysis.h`
+- `Solver/BackwardInterProceduralAnalysis.h`
   provides the backward dual of the same algorithm.
-- `Analyses/OldForwardInterProceduralAnalysis.h`
+- `Solver/OldForwardInterProceduralAnalysis.h`
   keeps the older stack-driven forward engine used by the migrated LLVM
   points-to client.
 
@@ -82,19 +82,19 @@ the final merged solution over valid interprocedural paths.
 
 Lotus provides an LLVM-facing instantiation of the generic framework:
 
-- `LLVM/DefaultLLVMProgramRepresentation.h`
+- `Adapters/LLVM/DefaultLLVMProgramRepresentation.h`
   adapts LLVM IR to VASCO using instruction-level CFGs and direct-call
   resolution, with an optional custom resolver hook for stronger call-graph
   information.
-- `Clients/LLVMSignAnalysis.h`
+- `Analyses/LLVMSignAnalysis.h`
   ports the paper's sign-analysis example to LLVM IR.
-- `Clients/LLVMCopyConstantAnalysis.h`
+- `Analyses/LLVMCopyConstantAnalysis.h`
   ports copy-constant propagation.
-- `Clients/LLVMLiveVariablesAnalysis.h`
+- `Analyses/LLVMLiveVariablesAnalysis.h`
   adds a backward interprocedural liveness client over LLVM SSA values.
-- `Clients/LLVMNullnessAnalysis.h`
+- `Analyses/LLVMNullnessAnalysis.h`
   tracks whether pointer-valued SSA results are null, non-null, or maybe-null.
-- `Clients/LLVMPointsToAnalysis.h`
+- `Analyses/LLVMPointsToAnalysis.h`
   ports the original points-to/call-graph client to LLVM using allocation-site
   objects, field-sensitive byte offsets, and function-pointer target
   resolution.

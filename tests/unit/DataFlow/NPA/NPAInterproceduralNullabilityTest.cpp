@@ -1,9 +1,8 @@
-#include "Dataflow/NPA/Analyses/Interprocedural/InterproceduralNullability.h"
 #include "Alias/AliasAnalysisWrapper/AliasAnalysisWrapper.h"
+#include "Dataflow/NPA/Analyses/Inter/InterNullability.h"
 #include "TestUtils/LLVMHelpers.h"
 
 #include <gtest/gtest.h>
-
 #include <llvm/IR/LLVMContext.h>
 #include <llvm/IR/Module.h>
 
@@ -36,7 +35,7 @@ TEST(NPA, InterproceduralNullabilityTracksNullStoreAndLoad) {
   )");
   ASSERT_TRUE(module);
 
-  auto result = npa::InterproceduralNullability::run(*module);
+  auto result = npa::InterNullability::run(*module);
   const auto *mainFn = module->getFunction("main");
   ASSERT_NE(mainFn, nullptr);
   const auto *after = findBlock(*mainFn, "after");
@@ -63,7 +62,7 @@ TEST(NPA, InterproceduralNullabilityUsesBlockExitFactsForQueries) {
   )");
   ASSERT_TRUE(module);
 
-  auto result = npa::InterproceduralNullability::run(*module);
+  auto result = npa::InterNullability::run(*module);
   const auto *mainFn = module->getFunction("main");
   ASSERT_NE(mainFn, nullptr);
   const auto *entry = findBlock(*mainFn, "entry");
@@ -91,7 +90,7 @@ TEST(NPA, InterproceduralNullabilityTreatsAllocaPointersAsNonNull) {
   )");
   ASSERT_TRUE(module);
 
-  auto result = npa::InterproceduralNullability::run(*module);
+  auto result = npa::InterNullability::run(*module);
   const auto *mainFn = module->getFunction("main");
   ASSERT_NE(mainFn, nullptr);
   const auto *after = findBlock(*mainFn, "after");
@@ -127,7 +126,7 @@ TEST(NPA, InterproceduralNullabilityPropagatesThroughPhi) {
   )");
   ASSERT_TRUE(module);
 
-  auto result = npa::InterproceduralNullability::run(*module);
+  auto result = npa::InterNullability::run(*module);
   const auto *mainFn = module->getFunction("main");
   ASSERT_NE(mainFn, nullptr);
   const auto *after = findBlockByName(*mainFn, "after");
@@ -157,7 +156,7 @@ TEST(NPA, InterproceduralNullabilityPropagatesNullThroughReturn) {
   )");
   ASSERT_TRUE(module);
 
-  auto result = npa::InterproceduralNullability::run(*module);
+  auto result = npa::InterNullability::run(*module);
   const auto *mainFn = module->getFunction("main");
   ASSERT_NE(mainFn, nullptr);
   const auto *after = findBlockByName(*mainFn, "after");
@@ -195,7 +194,7 @@ TEST(NPA, InterproceduralNullabilityPreservesConstantNullReturnBranches) {
   )");
   ASSERT_TRUE(module);
 
-  auto result = npa::InterproceduralNullability::run(*module);
+  auto result = npa::InterNullability::run(*module);
   const auto *mainFn = module->getFunction("main");
   ASSERT_NE(mainFn, nullptr);
   const auto *after = findBlockByName(*mainFn, "after");
@@ -231,7 +230,7 @@ TEST(NPA, InterproceduralNullabilityTracksCalleePointerStoreNullWrites) {
   )");
   ASSERT_TRUE(module);
 
-  auto result = npa::InterproceduralNullability::run(*module);
+  auto result = npa::InterNullability::run(*module);
   const auto *mainFn = module->getFunction("main");
   ASSERT_NE(mainFn, nullptr);
   const auto *after = findBlockByName(*mainFn, "after");
@@ -245,7 +244,8 @@ TEST(NPA, InterproceduralNullabilityTracksCalleePointerStoreNullWrites) {
   EXPECT_TRUE(result.isMaybeNull(after, p));
 }
 
-TEST(NPA, InterproceduralNullabilityTreatsUnknownExternalPointerReturnsAsMaybeNull) {
+TEST(NPA,
+     InterproceduralNullabilityTreatsUnknownExternalPointerReturnsAsMaybeNull) {
   llvm::LLVMContext ctx;
   auto module = parseModule(ctx, R"(
     declare i8* @ext()
@@ -261,7 +261,7 @@ TEST(NPA, InterproceduralNullabilityTreatsUnknownExternalPointerReturnsAsMaybeNu
   )");
   ASSERT_TRUE(module);
 
-  auto result = npa::InterproceduralNullability::run(*module);
+  auto result = npa::InterNullability::run(*module);
   const auto *mainFn = module->getFunction("main");
   ASSERT_NE(mainFn, nullptr);
   const auto *after = findBlockByName(*mainFn, "after");
@@ -295,7 +295,7 @@ TEST(NPA, InterproceduralNullabilitySeparatesSiblingFields) {
   )");
   ASSERT_TRUE(module);
 
-  auto result = npa::InterproceduralNullability::run(*module);
+  auto result = npa::InterNullability::run(*module);
   const auto *mainFn = module->getFunction("main");
   ASSERT_NE(mainFn, nullptr);
   const auto *after = findBlockByName(*mainFn, "after");
@@ -330,7 +330,7 @@ TEST(NPA, InterproceduralNullabilitySeedsPointerFieldsInGlobalAggregates) {
   )");
   ASSERT_TRUE(module);
 
-  auto result = npa::InterproceduralNullability::run(*module);
+  auto result = npa::InterNullability::run(*module);
   const auto *mainFn = module->getFunction("main");
   ASSERT_NE(mainFn, nullptr);
   const auto *after = findBlockByName(*mainFn, "after");
@@ -374,7 +374,7 @@ TEST(NPA, InterproceduralNullabilityMapsPartitionedFieldsAcrossCalls) {
   )");
   ASSERT_TRUE(module);
 
-  auto result = npa::InterproceduralNullability::run(*module);
+  auto result = npa::InterNullability::run(*module);
   const auto *mainFn = module->getFunction("main");
   ASSERT_NE(mainFn, nullptr);
   const auto *after = findBlockByName(*mainFn, "after");
@@ -406,7 +406,7 @@ TEST(NPA, InterproceduralNullabilityUsesWeakUpdatesForMergedUnknownOffsets) {
   )");
   ASSERT_TRUE(module);
 
-  auto result = npa::InterproceduralNullability::run(*module);
+  auto result = npa::InterNullability::run(*module);
   const auto *mainFn = module->getFunction("main");
   ASSERT_NE(mainFn, nullptr);
   const auto *after = findBlockByName(*mainFn, "after");
@@ -451,7 +451,7 @@ TEST(NPA, InterproceduralNullabilityUsesWeakUpdatesForMergedPointerCells) {
   )");
   ASSERT_TRUE(module);
 
-  auto result = npa::InterproceduralNullability::run(*module);
+  auto result = npa::InterNullability::run(*module);
   const auto *mainFn = module->getFunction("main");
   ASSERT_NE(mainFn, nullptr);
   const auto *after = findBlockByName(*mainFn, "after");
@@ -465,7 +465,8 @@ TEST(NPA, InterproceduralNullabilityUsesWeakUpdatesForMergedPointerCells) {
   EXPECT_TRUE(result.isMaybeNull(after, x));
 }
 
-TEST(NPA, InterproceduralNullabilityPropagatesImpreciseFormalMemoryAcrossCalls) {
+TEST(NPA,
+     InterproceduralNullabilityPropagatesImpreciseFormalMemoryAcrossCalls) {
   llvm::LLVMContext ctx;
   auto module = parseModule(ctx, R"(
     define void @clear_at(i8** %base, i64 %idx) {
@@ -493,7 +494,7 @@ TEST(NPA, InterproceduralNullabilityPropagatesImpreciseFormalMemoryAcrossCalls) 
   )");
   ASSERT_TRUE(module);
 
-  auto result = npa::InterproceduralNullability::run(*module);
+  auto result = npa::InterNullability::run(*module);
   const auto *mainFn = module->getFunction("main");
   ASSERT_NE(mainFn, nullptr);
   const auto *after = findBlockByName(*mainFn, "after");
@@ -504,7 +505,8 @@ TEST(NPA, InterproceduralNullabilityPropagatesImpreciseFormalMemoryAcrossCalls) 
   EXPECT_TRUE(result.isMaybeNull(after, x));
 }
 
-TEST(NPA, InterproceduralNullabilityMapsExactOffsetsBackToImpreciseCallerCells) {
+TEST(NPA,
+     InterproceduralNullabilityMapsExactOffsetsBackToImpreciseCallerCells) {
   llvm::LLVMContext ctx;
   auto module = parseModule(ctx, R"(
     define void @clear_next(i8** %base) {
@@ -533,7 +535,7 @@ TEST(NPA, InterproceduralNullabilityMapsExactOffsetsBackToImpreciseCallerCells) 
   )");
   ASSERT_TRUE(module);
 
-  auto result = npa::InterproceduralNullability::run(*module);
+  auto result = npa::InterNullability::run(*module);
   const auto *mainFn = module->getFunction("main");
   ASSERT_NE(mainFn, nullptr);
   const auto *after = findBlockByName(*mainFn, "after");
@@ -570,7 +572,7 @@ TEST(NPA, InterproceduralNullabilityClobbersReachableFieldsAtExternalCalls) {
   )");
   ASSERT_TRUE(module);
 
-  auto result = npa::InterproceduralNullability::run(*module);
+  auto result = npa::InterNullability::run(*module);
   const auto *mainFn = module->getFunction("main");
   ASSERT_NE(mainFn, nullptr);
   const auto *after = findBlockByName(*mainFn, "after");
@@ -626,7 +628,7 @@ TEST(NPA, InterproceduralNullabilityMapsNonZeroFieldWritesFromAliasingActuals) {
   )");
   ASSERT_TRUE(module);
 
-  auto result = npa::InterproceduralNullability::run(*module);
+  auto result = npa::InterNullability::run(*module);
   const auto *mainFn = module->getFunction("main");
   ASSERT_NE(mainFn, nullptr);
   const auto *after = findBlockByName(*mainFn, "after");
@@ -657,9 +659,9 @@ TEST(NPA, InterproceduralNullabilityPropagatesAcrossMayAliasMemory) {
 
   lotus::AliasAnalysisWrapper wrapper(*module,
                                       lotus::AAConfig::SparrowAA_NoCtx());
-  npa::InterproceduralNullability::Options options;
+  npa::InterNullability::Options options;
   options.seed_entry_pointer_args = false;
-  auto result = npa::InterproceduralNullability::run(*module, wrapper, options);
+  auto result = npa::InterNullability::run(*module, wrapper, options);
 
   const auto *mainFn = module->getFunction("main");
   ASSERT_NE(mainFn, nullptr);

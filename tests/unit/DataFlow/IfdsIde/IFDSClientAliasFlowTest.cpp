@@ -1,5 +1,5 @@
-#include <Dataflow/IFDS/Clients/IFDSConstAnalysis.h>
-#include <Dataflow/IFDS/Clients/IFDSReachingDefinitions.h>
+#include <Dataflow/IFDS/Analyses/IFDSConstAnalysis.h>
+#include <Dataflow/IFDS/Analyses/IFDSReachingDefinitions.h>
 #include <TestUtils/LLVMHelpers.h>
 
 #include <gtest/gtest.h>

@@ -1,9 +1,9 @@
 # VASCO value-context interprocedural dataflow framework
 
 add_library(VASCODataFlow
-  LLVMPointsToAnalysis.cpp
-  LLVMPointsToMemory.cpp
-  LLVMPointsToTypes.cpp)
+  Analyses/LLVMPointsToAnalysis.cpp
+  Support/LLVMPointsToMemory.cpp
+  Support/LLVMPointsToTypes.cpp)
 
 target_include_directories(VASCODataFlow
   PUBLIC

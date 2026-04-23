@@ -4,9 +4,9 @@
  */
 
 #include "Dataflow/APA/APA.h"
-#include "Dataflow/APA/Clients/LLVM/Intra/ConstantPropagation.h"
-#include "Dataflow/APA/Clients/LLVM/Intra/LiveVariables.h"
-#include "Dataflow/APA/Clients/LLVM/Intra/Reachability.h"
+#include "Dataflow/APA/Analyses/LLVM/Intra/ConstantPropagation.h"
+#include "Dataflow/APA/Analyses/LLVM/Intra/LiveVariables.h"
+#include "Dataflow/APA/Analyses/LLVM/Intra/Reachability.h"
 #include "TestUtils/LLVMHelpers.h"
 
 #include <set>

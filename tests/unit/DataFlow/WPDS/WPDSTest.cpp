@@ -1,13 +1,13 @@
-#include "Dataflow/WPDS/Clients/WPDSLivenessAnalysis.h"
-#include "Dataflow/WPDS/Clients/WPDSUninitializedVariables.h"
+#include "Dataflow/WPDS/Analyses/LivenessAnalysis.h"
+#include "Dataflow/WPDS/Analyses/UninitializedVariablesAnalysis.h"
 #include "Dataflow/WPDS/InterProceduralDataFlow.h"
 #include "TestUtils/LLVMHelpers.h"
 
+#include <gtest/gtest.h>
 #include <llvm/IR/Constants.h>
 #include <llvm/IR/Instructions.h>
 #include <llvm/IR/LLVMContext.h>
 #include <llvm/IR/Type.h>
-#include <gtest/gtest.h>
 
 using namespace llvm;
 using namespace wpds;
@@ -25,14 +25,12 @@ protected:
     Ctx = std::make_unique<LLVMContext>();
   }
 
-  Value *fact(int N) {
-    return ConstantInt::get(Type::getInt32Ty(*Ctx), N);
-  }
+  Value *fact(int N) { return ConstantInt::get(Type::getInt32Ty(*Ctx), N); }
 
-  GenKillTransformer *makeTransformer(std::initializer_list<Value *> Kill,
-                                      std::initializer_list<Value *> Gen,
-                                      std::map<Value *, DataFlowFacts> Flow =
-                                          {}) {
+  GenKillTransformer *
+  makeTransformer(std::initializer_list<Value *> Kill,
+                  std::initializer_list<Value *> Gen,
+                  std::map<Value *, DataFlowFacts> Flow = {}) {
     DataFlowFacts KillFacts;
     DataFlowFacts GenFacts;
     for (auto *V : Kill) {
@@ -259,9 +257,8 @@ protected:
         ret i32 0
       }
     )");
-    StoreInstForLiveness = cast<StoreInst>(&*std::next(M->getFunction("main")
-                                                           ->front()
-                                                           .begin()));
+    StoreInstForLiveness =
+        cast<StoreInst>(&*std::next(M->getFunction("main")->front().begin()));
     PointerAllocaForLiveness = findInstructionByName(*M, "p");
     PtrUseInst = findInstructionByName(*M, "ptr_use");
     return M;
@@ -341,8 +338,8 @@ TEST_F(WPDSTest, ExtendIsAssociativeAndHasIdentityAndZeroLaws) {
   EXPECT_TRUE(GenKillTransformer::one()->extend(T1)->equal(T1));
   EXPECT_TRUE(T1->extend(GenKillTransformer::zero())
                   ->equal(GenKillTransformer::zero()));
-  EXPECT_TRUE(GenKillTransformer::zero()->extend(T1)
-                  ->equal(GenKillTransformer::zero()));
+  EXPECT_TRUE(GenKillTransformer::zero()->extend(T1)->equal(
+      GenKillTransformer::zero()));
   EXPECT_TRUE(T1->combine(GenKillTransformer::zero())->equal(T1));
 }
 
@@ -370,8 +367,7 @@ TEST_F(WPDSTest, ForwardAnalysisRetainsResultForAccessorQueries) {
   auto *SeedFact = fact(7);
 
   auto Result = Engine.runForwardAnalysis(
-      *M,
-      [&](Instruction *I) -> GenKillTransformer * {
+      *M, [&](Instruction *I) -> GenKillTransformer * {
         if (I->getName() == "first") {
           return makeTransformer({}, {SeedFact});
         }
@@ -394,8 +390,7 @@ TEST_F(WPDSTest, EngineStoresLocalGenKillInsteadOfPathSummaryEffects) {
   auto *SeedFact = fact(11);
 
   auto Result = Engine.runForwardAnalysis(
-      *M,
-      [&](Instruction *I) -> GenKillTransformer * {
+      *M, [&](Instruction *I) -> GenKillTransformer * {
         if (I->getName() == "first") {
           return makeTransformer({}, {SeedFact});
         }
@@ -419,8 +414,7 @@ TEST_F(WPDSTest, MayJoinPreservesFactSeenOnOnlyOneBranch) {
   InterProceduralDataFlowEngine Engine;
 
   auto Result = Engine.runForwardAnalysis(
-      *M,
-      [&](Instruction *I) -> GenKillTransformer * {
+      *M, [&](Instruction *I) -> GenKillTransformer * {
         if (I->getName() == "then_fact") {
           return makeTransformer({}, {I});
         }
@@ -457,8 +451,8 @@ TEST_F(WPDSTest, LivenessTreatsStorePointerAsUseNotDefinition) {
   ASSERT_NE(PointerAllocaForLiveness, nullptr);
   ASSERT_NE(PtrUseInst, nullptr);
 
-  EXPECT_TRUE(containsFact(Result->IN(StoreInstForLiveness),
-                           PointerAllocaForLiveness));
+  EXPECT_TRUE(
+      containsFact(Result->IN(StoreInstForLiveness), PointerAllocaForLiveness));
 }
 
 TEST_F(WPDSTest, UninitializedVariablesDocumentsAliasingLimitation) {
@@ -522,8 +516,7 @@ TEST_F(WPDSTest, QueryHelpersExposeProgramPointFactsAndSummaries) {
   auto *SeedFact = fact(21);
 
   auto Result = Engine.runForwardAnalysis(
-      *M,
-      [&](Instruction *I) -> GenKillTransformer * {
+      *M, [&](Instruction *I) -> GenKillTransformer * {
         if (I->getName() == "first") {
           return makeTransformer({}, {SeedFact});
         }
@@ -539,7 +532,8 @@ TEST_F(WPDSTest, QueryHelpersExposeProgramPointFactsAndSummaries) {
   EXPECT_NE(Engine.getProgramPointKeyAfterInstruction(First), WPDS_EPSILON);
   EXPECT_NE(Engine.getProgramPointKeyBeforeInstruction(Second), WPDS_EPSILON);
   EXPECT_TRUE(containsFact(Engine.queryFactsAfterInstruction(First), SeedFact));
-  EXPECT_TRUE(containsFact(Engine.queryFactsBeforeInstruction(Second), SeedFact));
+  EXPECT_TRUE(
+      containsFact(Engine.queryFactsBeforeInstruction(Second), SeedFact));
   auto Summary = Engine.querySummaryAfterInstruction(First);
   ASSERT_TRUE(Summary.get_ptr() != nullptr);
   EXPECT_FALSE(Summary->equal(GenKillTransformer::zero()));
@@ -550,8 +544,7 @@ TEST_F(WPDSTest, CallOutSetUsesAfterCallProgramPoint) {
   InterProceduralDataFlowEngine Engine;
 
   auto Result = Engine.runForwardAnalysis(
-      *M,
-      [&](Instruction *I) -> GenKillTransformer * {
+      *M, [&](Instruction *I) -> GenKillTransformer * {
         if (I->getName() == "seed") {
           return makeTransformer({}, {I});
         }
@@ -571,8 +564,7 @@ TEST_F(WPDSTest, BackwardAnalysisMapsCalleeReturnBackToActual) {
   InterProceduralDataFlowEngine Engine;
 
   auto Result = Engine.runBackwardAnalysis(
-      *M,
-      [&](Instruction *I) -> GenKillTransformer * {
+      *M, [&](Instruction *I) -> GenKillTransformer * {
         if (auto *RI = dyn_cast<ReturnInst>(I)) {
           if (Value *RV = RI->getReturnValue()) {
             return makeTransformer({}, {RV});
@@ -610,13 +602,13 @@ TEST_F(WPDSTest, UnknownCallPolicyCanSummarizeReturnPointerAndGlobalEffects) {
     if (!Call->getType()->isVoidTy()) {
       genSet.insert(Call);
     }
-    return GenKillTransformer::makeGenKillTransformer(
-        DataFlowFacts::EmptySet(), DataFlowFacts(genSet));
+    return GenKillTransformer::makeGenKillTransformer(DataFlowFacts::EmptySet(),
+                                                      DataFlowFacts(genSet));
   };
   Engine.setExternalCallPolicy(Policy);
 
-  auto Result = Engine.runForwardAnalysis(
-      *M, [](Instruction *) -> GenKillTransformer * {
+  auto Result =
+      Engine.runForwardAnalysis(*M, [](Instruction *) -> GenKillTransformer * {
         return GenKillTransformer::one();
       });
   ASSERT_NE(Result, nullptr);
@@ -647,12 +639,12 @@ TEST_F(WPDSTest, UnknownCallPolicyCanDropIdentityWhileKeepingReturnSummary) {
   auto *P = findInstructionByName(*M, "p");
   ASSERT_NE(P, nullptr);
 
-  auto Result = Engine.runForwardAnalysis(
-      *M,
-      [](Instruction *) -> GenKillTransformer * {
-        return GenKillTransformer::one();
-      },
-      {P});
+  auto Result =
+      Engine.runForwardAnalysis(*M,
+                                [](Instruction *) -> GenKillTransformer * {
+                                  return GenKillTransformer::one();
+                                },
+                                {P});
   ASSERT_NE(Result, nullptr);
 
   auto *Call = findInstructionByName(*M, "ext_result");
@@ -769,8 +761,8 @@ TEST_F(WPDSTest, ExplodedWPDSBuilderAddsRules) {
   wpds_key_t Ret = str2key("ret");
 
   std::set<wpds_key_t> ControlStates = {Lambda, N1};
-  std::vector<std::pair<wpds_key_t, wpds_key_t>> NormalEdges = {
-      {Lambda, N1}, {N1, N2}};
+  std::vector<std::pair<wpds_key_t, wpds_key_t>> NormalEdges = {{Lambda, N1},
+                                                                {N1, N2}};
   std::vector<std::tuple<wpds_key_t, wpds_key_t, wpds_key_t>> CallEdges = {
       std::make_tuple(N2, Entry, Ret)};
 
@@ -796,9 +788,9 @@ TEST_F(WPDSTest, ExplodedWPDSBuilderAddsRules) {
   buildExplodedWPDS<GenKillTransformer>(
       Wpds, Semiring, ControlStates, NormalEdges, CallEdges,
       std::function<GenKillTransformer *(wpds_key_t, wpds_key_t, wpds_key_t,
-                                        wpds_key_t)>(GetNormal),
+                                         wpds_key_t)>(GetNormal),
       std::function<GenKillTransformer *(wpds_key_t, wpds_key_t, wpds_key_t,
-                                        wpds_key_t, wpds_key_t)>(GetCall));
+                                         wpds_key_t, wpds_key_t)>(GetCall));
   EXPECT_GE(Wpds.count_rules(), 1u);
 }
 

@@ -106,7 +106,7 @@ TEST_F(VASCOAdditionalLLVMClientTest,
   auto *Call = lotus::unittest::findInstructionByName(Main, "r");
   ASSERT_NE(Call, nullptr);
 
-  auto ArgIt = Main->arg_begin();
+  auto *ArgIt = Main->arg_begin();
   auto *FpArg = &*ArgIt++;
   auto *XArg = &*ArgIt++;
 

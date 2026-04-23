@@ -8,8 +8,8 @@
 
 #include <llvm/IR/Instructions.h>
 #include <llvm/Support/raw_ostream.h>
-#include <Dataflow/IFDS/Clients/IFDSTaintAnalysis.h>
-#include <Dataflow/IFDS/Solvers/IFDSSolver.h>
+#include <Dataflow/IFDS/Analyses/IFDSTaintAnalysis.h>
+#include <Dataflow/IFDS/Solver/IFDSSolver.h>
 
 namespace {
 

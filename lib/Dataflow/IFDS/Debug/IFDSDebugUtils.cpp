@@ -7,8 +7,8 @@
  * Author: rainoftime
  */
 
-#include "Dataflow/IFDS/Clients/IFDSReachingDefinitions.h"
-#include "Dataflow/IFDS/Clients/IFDSTaintAnalysis.h"
+#include "Dataflow/IFDS/Analyses/IFDSReachingDefinitions.h"
+#include "Dataflow/IFDS/Analyses/IFDSTaintAnalysis.h"
 #include "Dataflow/IFDS/Core/IFDSFramework.h"
 
 #include <llvm/Support/raw_ostream.h>
