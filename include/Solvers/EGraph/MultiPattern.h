@@ -10,9 +10,71 @@ public:
   explicit MultiPattern(std::vector<std::pair<Var, Pattern<L>>> clauses)
       : clauses_(std::move(clauses)) {}
 
+  static MultiPattern parse(std::string_view input) {
+    std::vector<std::pair<Var, Pattern<L>>> clauses;
+    std::string text(input);
+    size_t start = 0;
+    while (start < text.size()) {
+      size_t end = text.find(',', start);
+      std::string clause =
+          trim(end == std::string::npos ? std::string_view(text).substr(start)
+                                        : std::string_view(text).substr(start, end - start));
+      if (!clause.empty()) {
+        size_t eq = clause.find('=');
+        if (eq == std::string::npos) {
+          throw std::runtime_error("Malformed multipattern clause");
+        }
+        Var var = Var::parse(trim(std::string_view(clause).substr(0, eq)));
+        std::string rhs = trim(std::string_view(clause).substr(eq + 1));
+        if (rhs.empty()) {
+          throw std::runtime_error("Malformed multipattern clause");
+        }
+        clauses.emplace_back(var, Pattern<L>::parse(rhs));
+      }
+      if (end == std::string::npos) {
+        break;
+      }
+      start = end + 1;
+    }
+    return MultiPattern(std::move(clauses));
+  }
+
   template <typename A>
   std::vector<Subst> search(const EGraph<L, A> &egraph) const {
     return searchClauses(egraph, 0, Subst{});
+  }
+
+  template <typename A>
+  std::vector<Id> apply(EGraph<L, A> &egraph, const std::vector<Subst> &matches) const {
+    std::vector<Id> added;
+    for (const auto &match : matches) {
+      Subst subst = match;
+      for (size_t i = 0; i < clauses_.size(); ++i) {
+        Id id = clauses_[i].second.apply(egraph, subst);
+        if (const Id *existing = subst.get(clauses_[i].first)) {
+          egraph.unite(id, *existing);
+        } else {
+          subst.insert(clauses_[i].first, id);
+        }
+        if (i == 0) {
+          added.push_back(id);
+        }
+      }
+    }
+    return added;
+  }
+
+  std::vector<Var> vars() const {
+    std::vector<Var> vars;
+    for (const auto &[bound, pat] : clauses_) {
+      vars.push_back(bound);
+      for (const auto &var : pat.vars()) {
+        vars.push_back(var);
+      }
+    }
+    std::sort(vars.begin(), vars.end());
+    vars.erase(std::unique(vars.begin(), vars.end()), vars.end());
+    return vars;
   }
 
 private:

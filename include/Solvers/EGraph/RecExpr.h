@@ -38,6 +38,13 @@ public:
   auto begin() const { return items_.begin(); }
   auto end() const { return items_.end(); }
 
+  RecExpr extract(Id new_root) const {
+    std::unordered_map<Id, Id> cache;
+    RecExpr out;
+    extractInto(*this, out, new_root, cache);
+    return out;
+  }
+
   std::string toString() const { return toString(root()); }
 
   std::string toString(Id id) const {
@@ -64,6 +71,19 @@ public:
   }
 
 private:
+  static Id extractInto(const RecExpr &expr, RecExpr &out, Id id,
+                        std::unordered_map<Id, Id> &cache) {
+    if (auto it = cache.find(id); it != cache.end()) {
+      return it->second;
+    }
+    const auto &node = expr[id];
+    auto copied =
+        node.mapChildren([&](Id child) { return extractInto(expr, out, child, cache); });
+    Id added = out.add(copied);
+    cache.emplace(id, added);
+    return added;
+  }
+
   static Id buildFromSExp(RecExpr &expr, const SExp &sexp) {
     if (sexp.isAtom()) {
       auto node = LanguageOps<L>::fromOp(sexp.atom(), {});

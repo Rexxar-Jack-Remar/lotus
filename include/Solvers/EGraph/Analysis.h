@@ -46,7 +46,22 @@ inline DidMerge mergeMax(T &target, T source) {
     target = std::move(source);
     return {true, false};
   }
-  return {false, target != source};
+  if (source == target) {
+    return {false, false};
+  }
+  return {false, true};
+}
+
+template <typename T>
+inline DidMerge mergeMin(T &target, T source) {
+  if (source < target) {
+    target = std::move(source);
+    return {true, false};
+  }
+  if (source == target) {
+    return {false, false};
+  }
+  return {false, true};
 }
 
 template <typename T, typename F>

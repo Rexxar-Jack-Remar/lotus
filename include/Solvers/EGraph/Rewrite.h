@@ -29,6 +29,11 @@ public:
     return searcher_.search(egraph);
   }
 
+  std::vector<SearchMatches<L>> searchWithLimit(const EGraph<L, A> &egraph,
+                                                size_t limit) const {
+    return searcher_.searchWithLimit(egraph, limit);
+  }
+
   std::vector<Id> apply(EGraph<L, A> &egraph,
                         const std::vector<SearchMatches<L>> &matches) const {
     std::vector<Id> ids;
@@ -51,8 +56,10 @@ public:
         }
 
         Id rhs = applier_.apply(egraph, subst);
-        Id merged = egraph.unite(match.eclass, rhs, name_);
-        ids.push_back(merged);
+        auto [merged, changed] = egraph.uniteChecked(match.eclass, rhs, name_);
+        if (changed) {
+          ids.push_back(merged);
+        }
       }
     }
     return ids;

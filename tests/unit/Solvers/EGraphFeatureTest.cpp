@@ -1,5 +1,8 @@
 #include "Solvers/EGraph.h"
 
+#include <filesystem>
+#include <fstream>
+
 #include <gtest/gtest.h>
 
 using namespace lotus::egraph;
@@ -78,8 +81,10 @@ TEST(EGraphFeatureTest, DotAndExplanationSurfacesAreAvailable) {
 
   auto explanation = explainEquivalence(egraph, a, b);
   ASSERT_TRUE(explanation.has_value());
-  ASSERT_EQ(explanation->steps().size(), 1u);
-  EXPECT_EQ(explanation->steps().front().reason, "manual");
+  const auto &flat = explanation->makeFlatExplanation();
+  ASSERT_EQ(flat.size(), 1u);
+  EXPECT_EQ(flat.front().forward_rule, std::optional<std::string>("manual"));
+  EXPECT_EQ(flat.front().expr.toString(), "b");
 
   std::string dot = toDot(egraph);
   EXPECT_NE(dot.find("digraph egraph"), std::string::npos);
@@ -106,10 +111,11 @@ struct NoCycleAnalysis : NoAnalysis<SymbolLang> {
 
 TEST(EGraphFeatureTest, RewriteRespectsCyclePolicy) {
   EGraph<SymbolLang, NoCycleAnalysis> egraph;
-  Id a = egraph.add(SymbolLang::leaf("a"));
+  egraph.add(SymbolLang::leaf("a"));
   egraph.rebuild();
 
-  auto cycle = makeRewrite<SymbolLang, NoCycleAnalysis>("self-wrap", "?x", "(f ?x)");
+  auto cycle =
+      makeRewrite<SymbolLang, NoCycleAnalysis>("self-wrap", "?x", "(f ?x)");
   auto matches = cycle.search(egraph);
   auto applied = cycle.apply(egraph, matches);
   egraph.rebuild();
@@ -130,4 +136,151 @@ TEST(EGraphFeatureTest, RunnerTreatsUnionOnlyRewriteAsProgress) {
   ASSERT_FALSE(runner.iterations.empty());
   EXPECT_EQ(runner.stop_reason.kind, StopReasonKind::Saturated);
   EXPECT_EQ(runner.egraph.numberOfClasses(), 1u);
+}
+
+TEST(EGraphFeatureTest, PatternSearchWithLimitUsesOperatorIndex) {
+  EGraph<SymbolLang> egraph;
+  egraph.addExpr(RecExpr<SymbolLang>::parse("(+ a b)"));
+  egraph.addExpr(RecExpr<SymbolLang>::parse("(+ a c)"));
+  egraph.addExpr(RecExpr<SymbolLang>::parse("(* a b)"));
+  egraph.rebuild();
+
+  auto pat = Pattern<SymbolLang>::parse("(+ ?x ?y)");
+  auto matches = pat.searchWithLimit(egraph, 1);
+
+  ASSERT_EQ(matches.size(), 1u);
+  ASSERT_EQ(matches.front().substs.size(), 1u);
+}
+
+TEST(EGraphFeatureTest, MultiPatternParsesAndApplies) {
+  EGraph<SymbolLang> egraph;
+  egraph.addExpr(RecExpr<SymbolLang>::parse("(f a b)"));
+  egraph.addExpr(RecExpr<SymbolLang>::parse("(g a b)"));
+  egraph.rebuild();
+
+  auto mp = MultiPattern<SymbolLang>::parse("?u = (f ?x ?y), ?v = (g ?x ?y)");
+  auto matches = mp.search(egraph);
+  ASSERT_EQ(matches.size(), 1u);
+
+  auto added = mp.apply(egraph, matches);
+  egraph.rebuild();
+  EXPECT_EQ(added.size(), 1u);
+}
+
+TEST(EGraphFeatureTest, ExplanationSupportsExpressionQueries) {
+  EGraph<SymbolLang> egraph = EGraph<SymbolLang>().withExplanationsEnabled();
+  Id a = egraph.addExpr(RecExpr<SymbolLang>::parse("a"));
+  Id b = egraph.addExpr(RecExpr<SymbolLang>::parse("b"));
+  egraph.rebuild();
+  egraph.unite(a, b, "manual");
+  egraph.rebuild();
+
+  auto explanation = explainEquivalence(egraph, RecExpr<SymbolLang>::parse("a"),
+                                        RecExpr<SymbolLang>::parse("b"));
+  ASSERT_TRUE(explanation.has_value());
+  EXPECT_FALSE(explanation->getFlatStrings().empty());
+  EXPECT_FALSE(explanation->explanationTrees().empty());
+  EXPECT_EQ(explanation->makeFlatExplanation().front().forward_rule,
+            std::optional<std::string>("manual"));
+}
+
+TEST(EGraphFeatureTest, EquivsReturnsMatchingEClasses) {
+  EGraph<SymbolLang> egraph;
+  egraph.addExpr(RecExpr<SymbolLang>::parse("(f a)"));
+  egraph.addExpr(RecExpr<SymbolLang>::parse("(f a)"));
+  egraph.rebuild();
+
+  auto matches = egraph.equivs(RecExpr<SymbolLang>::parse("(f a)"),
+                               RecExpr<SymbolLang>::parse("(f a)"));
+  EXPECT_FALSE(matches.empty());
+  EXPECT_TRUE(egraph.equivalent(RecExpr<SymbolLang>::parse("(f a)"),
+                                RecExpr<SymbolLang>::parse("(f a)")));
+}
+
+TEST(EGraphFeatureTest, PatternAlphaRenameCanonicalizesVariables) {
+  auto pat = Pattern<SymbolLang>::parse("(f ?a ?b ?a)");
+  auto renamed = pat.alphaRename();
+  EXPECT_EQ(renamed.toString(), "(f ?x ?y ?x)");
+}
+
+TEST(EGraphFeatureTest, NumericVarsAndSubstInsertBehaveLikeEgg) {
+  Var v = Var::parse("?#0012");
+  ASSERT_TRUE(v.asU32().has_value());
+  EXPECT_EQ(*v.asU32(), 12u);
+
+  Subst subst = Subst::withCapacity(2);
+  EXPECT_FALSE(subst.insert(v, Id::fromIndex(1)).has_value());
+  auto old = subst.insert(v, Id::fromIndex(2));
+  ASSERT_TRUE(old.has_value());
+  EXPECT_EQ(old->value(), 1u);
+}
+
+TEST(EGraphFeatureTest, DotWrapperCanSerializeToFile) {
+  EGraph<SymbolLang> egraph;
+  egraph.addExpr(RecExpr<SymbolLang>::parse("(f a)"));
+  egraph.rebuild();
+
+  auto path = std::filesystem::temp_directory_path() / "lotus_egraph_test.dot";
+  Dot<SymbolLang, NoAnalysis<SymbolLang>>(egraph).toDot(path.string());
+  std::ifstream in(path);
+  ASSERT_TRUE(in.good());
+  std::string text((std::istreambuf_iterator<char>(in)),
+                   std::istreambuf_iterator<char>());
+  EXPECT_NE(text.find("digraph egraph"), std::string::npos);
+  std::filesystem::remove(path);
+}
+
+TEST(EGraphFeatureTest, PatternProgramRunsWithLimit) {
+  EGraph<SymbolLang> egraph;
+  egraph.addExpr(RecExpr<SymbolLang>::parse("(f a)"));
+  egraph.addExpr(RecExpr<SymbolLang>::parse("(f b)"));
+  egraph.rebuild();
+
+  auto pattern = Pattern<SymbolLang>::parse("(f ?x)");
+  auto program = PatternProgram<SymbolLang>::compileFromPattern(pattern);
+  auto ids = egraph.classIds();
+  auto substs = program.runWithLimit(egraph, ids.front(), 1);
+  EXPECT_LE(substs.size(), 1u);
+}
+
+TEST(EGraphFeatureTest, ExplanationOptimizationFlagRequiresExplanations) {
+  EGraph<SymbolLang> egraph;
+  EXPECT_THROW((void)egraph.withoutExplanationLengthOptimization(),
+               std::runtime_error);
+  EXPECT_THROW((void)egraph.withExplanationLengthOptimization(),
+               std::runtime_error);
+
+  auto explained =
+      egraph.withExplanationsEnabled().withoutExplanationLengthOptimization();
+  EXPECT_FALSE(explained.optimizeExplanationLengths());
+  EXPECT_TRUE(explained.withExplanationLengthOptimization()
+                  .optimizeExplanationLengths());
+}
+
+TEST(EGraphFeatureTest, DotRunSurfacesFailLoudlyInsteadOfSilentlyNooping) {
+  EGraph<SymbolLang> egraph;
+  egraph.addExpr(RecExpr<SymbolLang>::parse("(f a)"));
+  egraph.rebuild();
+
+  Dot<SymbolLang, NoAnalysis<SymbolLang>> dot(egraph);
+  EXPECT_THROW(dot.runDot(std::vector<std::string>{"-Tsvg"}),
+               std::runtime_error);
+  EXPECT_THROW(dot.run(std::string("dot"), std::vector<std::string>{"-Tsvg"}),
+               std::runtime_error);
+}
+
+TEST(EGraphFeatureTest, LpExtractorTimeoutValidationAndCanonicalRoots) {
+  EGraph<SymbolLang> egraph;
+  Id a = egraph.addExpr(RecExpr<SymbolLang>::parse("a"));
+  Id b = egraph.addExpr(RecExpr<SymbolLang>::parse("b"));
+  egraph.unite(a, b, "manual");
+  egraph.rebuild();
+
+  LpExtractor<SymbolLang> extractor(egraph);
+  auto result = extractor.solveMultiple({a, b});
+  ASSERT_EQ(result.second.size(), 2u);
+  EXPECT_EQ(result.second[0], egraph.find(a));
+  EXPECT_EQ(result.second[1], egraph.find(b));
+  EXPECT_THROW((void)extractor.solveWithTimeout(a, 0, -1.0),
+               std::runtime_error);
 }

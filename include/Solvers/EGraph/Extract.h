@@ -10,7 +10,7 @@ template <typename L> struct AstSize {
   template <typename F> Cost operator()(const L &node, F &&child_cost) const {
     size_t total = 1;
     for (Id child : node.children()) {
-      total += child_cost(child);
+      total = total + child_cost(child);
     }
     return total;
   }
@@ -43,6 +43,12 @@ public:
     const auto &entry = best_.at(canonical);
     return {entry.cost, buildExpr(canonical)};
   }
+
+  const L &findBestNode(Id eclass) const {
+    return best_.at(egraph_.find(eclass)).node;
+  }
+
+  Cost findBestCost(Id eclass) const { return best_.at(egraph_.find(eclass)).cost; }
 
 private:
   struct Entry {
@@ -103,7 +109,7 @@ private:
   }
 
   const EGraph<L, A> &egraph_;
-  CostFn cost_fn_;
+  mutable CostFn cost_fn_;
   std::unordered_map<Id, Entry> best_;
 };
 

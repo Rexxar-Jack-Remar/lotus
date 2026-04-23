@@ -7,10 +7,18 @@
 
 namespace lotus::egraph {
 
+class Subst;
+template <typename L> struct ENodeOrVar;
+template <typename L> class Pattern;
+template <typename L> using PatternAst = RecExpr<ENodeOrVar<L>>;
+
 struct UnionEvent {
   Id left;
   Id right;
   std::string reason;
+  bool rewrite = false;
+  std::optional<std::string> left_expr;
+  std::optional<std::string> right_expr;
 };
 
 template <typename L, typename AnalysisT> class EGraph {
@@ -25,68 +33,10 @@ public:
   AnalysisT &analysis() { return analysis_; }
   const AnalysisT &analysis() const { return analysis_; }
 
-  Id add(const L &node) {
-    clean_ = false;
-    L canonical = canonicalize(node);
-    auto memo_it = memo_.find(canonical);
-    if (memo_it != memo_.end()) {
-      return find(memo_it->second);
-    }
-
-    Id id = union_find_.makeSet();
-    memo_.emplace(canonical, id);
-
-    Class klass{id, {canonical}, AnalysisT::make(*this, canonical, id), {}};
-    classes_.emplace(id, std::move(klass));
-    classes_by_op_[canonical.discriminant()].insert(id);
-
-    for (Id child : canonical.children()) {
-      classes_.at(find(child)).parents.push_back(id);
-    }
-    return id;
-  }
-
-  Id addExpr(const RecExpr<L> &expr) {
-    std::vector<Id> ids;
-    ids.reserve(expr.size());
-    for (const auto &node : expr.items()) {
-      ids.push_back(add(node.mapChildren([&](Id id) { return ids[id.index()]; })));
-    }
-    return ids.back();
-  }
-
-  std::optional<Id> lookup(const L &node) const {
-    L canonical = canonicalize(node);
-    auto it = memo_.find(canonical);
-    if (it == memo_.end()) {
-      return std::nullopt;
-    }
-    return find(it->second);
-  }
-
-  Id find(Id id) const { return union_find_.find(id); }
-  Id findMut(Id id) { return union_find_.findMut(id); }
-
-  Class &operator[](Id id) { return classes_.at(findMut(id)); }
-  const Class &operator[](Id id) const { return classes_.at(find(id)); }
-
-  size_t totalSize() const { return memo_.size(); }
-  size_t numberOfClasses() const { return classes_.size(); }
-  bool empty() const { return classes_.empty(); }
-  bool clean() const { return clean_; }
-
-  std::vector<Id> classIds() const {
-    std::vector<Id> ids;
-    ids.reserve(classes_.size());
-    for (const auto &[id, _] : classes_) {
-      ids.push_back(id);
-    }
-    std::sort(ids.begin(), ids.end());
-    return ids;
-  }
-
   std::vector<std::reference_wrapper<const Class>> classes() const {
+    assertClean();
     std::vector<std::reference_wrapper<const Class>> out;
+    out.reserve(classes_.size());
     for (const auto &[_, klass] : classes_) {
       out.emplace_back(klass);
     }
@@ -95,7 +45,19 @@ public:
     return out;
   }
 
+  std::vector<std::reference_wrapper<Class>> classesMut() {
+    std::vector<std::reference_wrapper<Class>> out;
+    out.reserve(classes_.size());
+    for (auto &[_, klass] : classes_) {
+      out.emplace_back(klass);
+    }
+    std::sort(out.begin(), out.end(),
+              [](const auto &lhs, const auto &rhs) { return lhs.get().id < rhs.get().id; });
+    return out;
+  }
+
   std::vector<Id> classesForOp(const typename L::Discriminant &op) const {
+    assertClean();
     std::vector<Id> ids;
     auto it = classes_by_op_.find(op);
     if (it == classes_by_op_.end()) {
@@ -106,114 +68,484 @@ public:
     return ids;
   }
 
-  Id unite(Id lhs, Id rhs, const std::string &reason = {}) {
-    lhs = findMut(lhs);
-    rhs = findMut(rhs);
-    if (lhs == rhs) {
-      return lhs;
-    }
+  const std::vector<L> &nodes() const { return nodes_; }
+  const L &originalNode(Id id) const { return nodes_.at(id.index()); }
 
-    if (rhs < lhs) {
-      std::swap(lhs, rhs);
+  bool empty() const { return memo_.empty(); }
+  bool clean() const { return clean_; }
+  size_t totalSize() const { return memo_.size(); }
+  size_t totalNumberOfNodes() const {
+    size_t total = 0;
+    for (const auto &[_, klass] : classes_) {
+      total += klass.nodes.size();
     }
-
-    analysis_.preUnion(*this, lhs, rhs, reason.empty() ? nullptr : &reason);
-    if (explanations_enabled_) {
-      union_events_.push_back({lhs, rhs, reason});
-    }
-    union_find_.unite(lhs, rhs);
-
-    auto &left_class = classes_.at(lhs);
-    auto right_it = classes_.find(rhs);
-    if (right_it != classes_.end()) {
-      auto right_class = std::move(right_it->second);
-      auto merge_result = analysis_.merge(left_class.data, std::move(right_class.data));
-      (void)merge_result;
-      left_class.nodes.insert(left_class.nodes.end(), right_class.nodes.begin(),
-                              right_class.nodes.end());
-      left_class.parents.insert(left_class.parents.end(), right_class.parents.begin(),
-                                right_class.parents.end());
-      classes_.erase(right_it);
-    }
-
-    analysis_.modify(*this, lhs);
-    clean_ = false;
-    return lhs;
+    return total;
   }
+  size_t numberOfClasses() const { return classes_.size(); }
 
-  void setAnalysisData(Id id, Data data) {
-    (*this)[id].data = std::move(data);
-    analysis_.modify(*this, findMut(id));
-  }
+  Id find(Id id) const { return union_find_.find(id); }
+  Id findMut(Id id) { return union_find_.findMut(id); }
 
-  void rebuild() {
-    bool changed = false;
-    do {
-      changed = false;
+  Class &operator[](Id id) { return classes_.at(findMut(id)); }
+  const Class &operator[](Id id) const { return classes_.at(find(id)); }
 
-      for (auto &[_, klass] : classes_) {
-        for (auto &node : klass.nodes) {
-          for (Id &child : node.childrenMut()) {
-            child = findMut(child);
-          }
-        }
-
-        std::unordered_set<L> unique_nodes;
-        std::vector<L> deduped;
-        deduped.reserve(klass.nodes.size());
-        for (const auto &node : klass.nodes) {
-          if (unique_nodes.insert(node).second) {
-            deduped.push_back(node);
-          }
-        }
-        klass.nodes = std::move(deduped);
-      }
-
-      memo_.clear();
-      classes_by_op_.clear();
-
-      auto ids = classIds();
-      for (Id id : ids) {
-        auto &klass = classes_.at(id);
-        for (const auto &node : klass.nodes) {
-          auto memo_it = memo_.find(node);
-          if (memo_it == memo_.end()) {
-            memo_.emplace(node, id);
-            classes_by_op_[node.discriminant()].insert(id);
-            continue;
-          }
-
-          Id other = findMut(memo_it->second);
-          if (other != id) {
-            unite(other, id, "congruence");
-            changed = true;
-            break;
-          }
-        }
-      }
-    } while (changed);
-
-    recomputeParents();
-    recomputeAnalysis();
-    clean_ = true;
+  std::vector<Id> classIds() const {
+    assertClean();
+    std::vector<Id> ids;
+    ids.reserve(classes_.size());
+    for (const auto &[id, _] : classes_) {
+      ids.push_back(id);
+    }
+    std::sort(ids.begin(), ids.end());
+    return ids;
   }
 
   EGraph withExplanationsEnabled() const {
+    if (explanations_enabled_) {
+      return *this;
+    }
+    if (!nodes_.empty()) {
+      throw std::runtime_error(
+          "Need to set explanations enabled before adding any expressions to the egraph");
+    }
     EGraph copy = *this;
     copy.explanations_enabled_ = true;
+    copy.optimize_explanation_lengths_ = true;
+    return copy;
+  }
+
+  EGraph withExplanationsDisabled() const {
+    EGraph copy = *this;
+    copy.explanations_enabled_ = false;
+    copy.union_events_.clear();
+    copy.uncanonical_memo_.clear();
+    return copy;
+  }
+
+  EGraph withoutExplanations() const { return withExplanationsDisabled(); }
+
+  EGraph withoutExplanationLengthOptimization() const {
+    if (!explanations_enabled_) {
+      throw std::runtime_error(
+          "Need to set explanations enabled before setting length optimization");
+    }
+    EGraph copy = *this;
+    copy.optimize_explanation_lengths_ = false;
+    return copy;
+  }
+
+  EGraph withExplanationLengthOptimization() const {
+    if (!explanations_enabled_) {
+      throw std::runtime_error(
+          "Need to set explanations enabled before setting length optimization");
+    }
+    EGraph copy = *this;
+    copy.optimize_explanation_lengths_ = true;
     return copy;
   }
 
   bool areExplanationsEnabled() const { return explanations_enabled_; }
+  bool optimizeExplanationLengths() const { return optimize_explanation_lengths_; }
   const std::vector<UnionEvent> &unionEvents() const { return union_events_; }
 
-private:
-  L canonicalize(const L &node) const {
-    auto copy = node;
-    for (Id &child : copy.childrenMut()) {
-      child = find(child);
+  std::vector<std::tuple<Id, Id, std::string>> getUnionEqualities() const {
+    if (!explanations_enabled_) {
+      throw std::runtime_error(
+          "Use withExplanationsEnabled before requesting union equalities");
+    }
+    std::vector<std::tuple<Id, Id, std::string>> out;
+    out.reserve(union_events_.size());
+    for (const auto &event : union_events_) {
+      if (!event.reason.empty()) {
+        out.emplace_back(event.left, event.right, event.reason);
+      }
+    }
+    return out;
+  }
+
+  std::optional<Id> lookupInternal(L node) const {
+    canonicalizeInPlace(node);
+    return memoLookup(node);
+  }
+
+  EGraph copyWithoutUnions(AnalysisT analysis) const {
+    if (!explanations_enabled_) {
+      throw std::runtime_error(
+          "Use withExplanationsEnabled before copying an egraph without unions");
+    }
+    EGraph copy(std::move(analysis));
+    for (const auto &node : nodes_) {
+      copy.add(node);
     }
     return copy;
+  }
+
+  void egraphUnion(const EGraph &other) {
+    if (!explanations_enabled_) {
+      throw std::runtime_error(
+          "Use withExplanationsEnabled before unioning egraphs with explanations");
+    }
+    for (const auto &[left, right, why] : other.getUnionEqualities()) {
+      unite(left, right, why);
+    }
+    rebuild();
+  }
+
+  Id add(const L &node) { return find(addUncanonical(node)); }
+
+  Id addUncanonical(const L &node) {
+    clean_ = false;
+
+    L canonical = node;
+    canonicalizeInPlace(canonical);
+    if (auto existing = memoLookup(canonical)) {
+      if (!explanations_enabled_) {
+        return *existing;
+      }
+
+      auto uncanon_it = uncanonical_memo_.find(node);
+      if (uncanon_it != uncanonical_memo_.end()) {
+        return uncanon_it->second;
+      }
+
+      Id new_id = union_find_.makeSet();
+      ensureNodeStorage(new_id, node);
+      uncanonical_memo_.emplace(node, new_id);
+      union_find_.unite(find(*existing), new_id);
+      recordUnion(*existing, new_id, "congruence", false);
+      return new_id;
+    }
+
+    return makeNewEClass(canonical, node);
+  }
+
+  Id addExpr(const RecExpr<L> &expr) {
+    std::vector<Id> ids;
+    ids.reserve(expr.size());
+    for (const auto &node : expr.items()) {
+      ids.push_back(addUncanonical(node.mapChildren([&](Id id) { return ids[id.index()]; })));
+    }
+    return find(ids.back());
+  }
+
+  std::optional<Id> lookup(const L &node) const {
+    assertClean();
+    L canonical = node;
+    canonicalizeInPlace(canonical);
+    auto found = memoLookup(canonical);
+    if (!found) {
+      return std::nullopt;
+    }
+    return find(*found);
+  }
+
+  std::optional<Id> lookupExpr(const RecExpr<L> &expr) const {
+    auto ids = lookupExprIds(expr);
+    if (!ids || ids->empty()) {
+      return std::nullopt;
+    }
+    return ids->back();
+  }
+
+  std::optional<std::vector<Id>> lookupExprIds(const RecExpr<L> &expr) const {
+    assertClean();
+    std::vector<Id> ids;
+    ids.reserve(expr.size());
+    for (const auto &node : expr.items()) {
+      L mapped = node.mapChildren([&](Id id) { return ids[id.index()]; });
+      auto found = lookup(mapped);
+      if (!found) {
+        return std::nullopt;
+      }
+      ids.push_back(*found);
+    }
+    return ids;
+  }
+
+  std::optional<std::vector<Id>> lookupExprUncanonicalIds(const RecExpr<L> &expr) const {
+    assertClean();
+    std::vector<Id> ids;
+    ids.reserve(expr.size());
+
+    for (const auto &node : expr.items()) {
+      L materialized = node.mapChildren([&](Id id) { return ids[id.index()]; });
+
+      std::optional<Id> exact;
+      for (size_t i = 0; i < nodes_.size(); ++i) {
+        if (nodes_[i] == materialized) {
+          exact = Id::fromIndex(i);
+          break;
+        }
+      }
+
+      if (exact) {
+        ids.push_back(*exact);
+        continue;
+      }
+
+      auto canonical = lookup(materialized);
+      if (!canonical) {
+        return std::nullopt;
+      }
+      ids.push_back(*canonical);
+    }
+
+    return ids;
+  }
+
+  Id addInstantiation(const PatternAst<L> &pat, const Subst &subst);
+
+  Id unite(Id lhs, Id rhs, const std::string &reason = {}) {
+    auto [id, _] = uniteImpl(lhs, rhs, reason, !reason.empty());
+    return id;
+  }
+
+  std::pair<Id, bool> uniteChecked(Id lhs, Id rhs, const std::string &reason = {}) {
+    return uniteImpl(lhs, rhs, reason, !reason.empty());
+  }
+
+  std::pair<Id, bool> unionInstantiations(const PatternAst<L> &from_pat,
+                                          const PatternAst<L> &to_pat,
+                                          const Subst &subst,
+                                          const std::string &reason);
+
+  std::vector<Id> equivs(const RecExpr<L> &expr1, const RecExpr<L> &expr2) const {
+    assertClean();
+    Pattern<L> pat1(expr1);
+    Pattern<L> pat2(expr2);
+    auto matches1 = pat1.search(*this);
+    auto matches2 = pat2.search(*this);
+
+    std::vector<Id> out;
+    for (const auto &lhs : matches1) {
+      for (const auto &rhs : matches2) {
+        if (find(lhs.eclass) == find(rhs.eclass)) {
+          out.push_back(lhs.eclass);
+        }
+      }
+    }
+    return out;
+  }
+
+  bool equivalent(const RecExpr<L> &expr1, const RecExpr<L> &expr2) const {
+    return !equivs(expr1, expr2).empty();
+  }
+
+  RecExpr<L> idToExpr(Id id) const {
+    std::unordered_map<Id, Id> cache;
+    RecExpr<L> expr;
+    idToExprInternal(expr, find(id), cache);
+    return expr;
+  }
+
+  RecExpr<L> originalExpr(Id id) const {
+    std::unordered_map<Id, Id> cache;
+    RecExpr<L> expr;
+    originalExprInternal(expr, id, cache);
+    return expr;
+  }
+
+  RecExpr<L> idToExprFlat(Id id) const {
+    RecExpr<L> expr;
+    const auto &node = classes_.at(find(id)).nodes.front();
+    expr.add(node);
+    return expr;
+  }
+
+  std::pair<Pattern<L>, Subst> idToPattern(
+      Id id, const std::unordered_map<Id, Id> &substitutions) const;
+
+  void setAnalysisData(Id id, Data data) {
+    Id canonical = findMut(id);
+    auto &klass = classes_.at(canonical);
+    klass.data = std::move(data);
+    for (Id parent : klass.parents) {
+      analysis_pending_.push_back(parent);
+    }
+    analysis_.modify(*this, canonical);
+  }
+
+  size_t rebuild() {
+    size_t unions = 0;
+    unions += processPending();
+    rebuildClasses();
+    clean_ = true;
+    return unions;
+  }
+
+private:
+  void assertClean() const {
+    if (!clean_) {
+      throw std::runtime_error("Tried to query a dirty e-graph; call rebuild() first");
+    }
+  }
+
+  void ensureNodeStorage(Id id, const L &node) {
+    if (nodes_.size() != id.index()) {
+      throw std::runtime_error("EGraph node storage out of sync");
+    }
+    nodes_.push_back(node);
+  }
+
+  void canonicalizeInPlace(L &node) const {
+    for (Id &child : node.childrenMut()) {
+      child = find(child);
+    }
+  }
+
+  std::optional<Id> memoLookup(const L &node) const {
+    auto it = memo_.find(node);
+    if (it == memo_.end()) {
+      return std::nullopt;
+    }
+    return it->second;
+  }
+
+  Id makeNewEClass(const L &canonical, const L &original) {
+    Id id = union_find_.makeSet();
+    ensureNodeStorage(id, original);
+
+    Class klass{id, {canonical}, AnalysisT::make(*this, original, id), {}};
+    for (Id child : canonical.children()) {
+      classes_.at(findMut(child)).parents.push_back(id);
+    }
+
+    classes_.emplace(id, std::move(klass));
+    memo_[canonical] = id;
+    pending_.push_back(id);
+    analysis_.modify(*this, id);
+    return id;
+  }
+
+  Id addInstantiationNoncanonical(const PatternAst<L> &pat, const Subst &subst);
+
+  std::pair<Id, bool> uniteImpl(Id lhs, Id rhs, const std::string &reason, bool rewrite) {
+    analysis_.preUnion(*this, lhs, rhs, reason.empty() ? nullptr : &reason);
+
+    clean_ = false;
+    lhs = findMut(lhs);
+    rhs = findMut(rhs);
+    if (lhs == rhs) {
+      if (rewrite && explanations_enabled_) {
+        recordUnion(lhs, rhs, reason, true);
+      }
+      return {lhs, false};
+    }
+
+    if (classes_.at(lhs).parents.size() < classes_.at(rhs).parents.size()) {
+      std::swap(lhs, rhs);
+    }
+
+    recordUnion(lhs, rhs, reason, rewrite);
+    union_find_.unite(lhs, rhs);
+
+    auto right_class = std::move(classes_.at(rhs));
+    classes_.erase(rhs);
+    auto &left_class = classes_.at(lhs);
+
+    pending_.insert(pending_.end(), right_class.parents.begin(), right_class.parents.end());
+    DidMerge did_merge = analysis_.merge(left_class.data, std::move(right_class.data));
+    if (did_merge.left_changed) {
+      analysis_pending_.insert(analysis_pending_.end(), left_class.parents.begin(),
+                               left_class.parents.end());
+    }
+    if (did_merge.right_changed) {
+      analysis_pending_.insert(analysis_pending_.end(), right_class.parents.begin(),
+                               right_class.parents.end());
+    }
+
+    left_class.nodes.insert(left_class.nodes.end(), right_class.nodes.begin(),
+                            right_class.nodes.end());
+    left_class.parents.insert(left_class.parents.end(), right_class.parents.begin(),
+                              right_class.parents.end());
+
+    analysis_.modify(*this, lhs);
+    return {lhs, true};
+  }
+
+  void recordUnion(Id lhs, Id rhs, const std::string &reason, bool rewrite) {
+    if (explanations_enabled_) {
+      union_events_.push_back({lhs, rhs, reason, rewrite, tryIdToString(lhs), tryIdToString(rhs)});
+    }
+  }
+
+  std::optional<std::string> tryIdToString(Id id) const {
+    auto it = classes_.find(find(id));
+    if (it == classes_.end() || it->second.nodes.empty()) {
+      return std::nullopt;
+    }
+
+    try {
+      return idToExpr(id).toString();
+    } catch (...) {
+      return std::nullopt;
+    }
+  }
+
+  void rebuildClasses() {
+    classes_by_op_.clear();
+
+    for (auto &[_, klass] : classes_) {
+      for (auto &node : klass.nodes) {
+        canonicalizeInPlace(node);
+      }
+      std::sort(klass.nodes.begin(), klass.nodes.end());
+      klass.nodes.erase(std::unique(klass.nodes.begin(), klass.nodes.end()), klass.nodes.end());
+
+      for (size_t i = 0; i < klass.nodes.size(); ++i) {
+        if (i == 0 || !klass.nodes[i - 1].matches(klass.nodes[i])) {
+          classes_by_op_[klass.nodes[i].discriminant()].insert(klass.id);
+        }
+      }
+    }
+  }
+
+  size_t processPending() {
+    size_t unions = 0;
+    while (!pending_.empty() || !analysis_pending_.empty()) {
+      while (!pending_.empty()) {
+        Id id = pending_.back();
+        pending_.pop_back();
+
+        L node = nodes_.at(id.index());
+        canonicalizeInPlace(node);
+
+        auto existing = memo_.find(node);
+        if (existing != memo_.end()) {
+          auto [_, changed] = uniteImpl(existing->second, id, "congruence", false);
+          unions += changed ? 1u : 0u;
+        } else {
+          memo_[node] = id;
+        }
+      }
+
+      while (!analysis_pending_.empty()) {
+        Id class_id = analysis_pending_.back();
+        analysis_pending_.pop_back();
+
+        if (class_id.index() >= nodes_.size()) {
+          continue;
+        }
+
+        L node = nodes_[class_id.index()];
+        Id canonical = findMut(class_id);
+        auto it = classes_.find(canonical);
+        if (it == classes_.end()) {
+          continue;
+        }
+
+        Data node_data = AnalysisT::remake(*this, node, canonical);
+        DidMerge did_merge = analysis_.merge(it->second.data, std::move(node_data));
+        if (did_merge.left_changed) {
+          analysis_pending_.insert(analysis_pending_.end(), it->second.parents.begin(),
+                                   it->second.parents.end());
+          analysis_.modify(*this, canonical);
+        }
+      }
+    }
+
+    recomputeParents();
+    return unions;
   }
 
   void recomputeParents() {
@@ -229,32 +561,127 @@ private:
     }
   }
 
-  void recomputeAnalysis() {
-    for (Id id : classIds()) {
-      auto &klass = classes_.at(id);
-      std::optional<Data> merged;
-      for (const auto &node : klass.nodes) {
-        Data data = AnalysisT::remake(*this, node, id);
-        if (!merged) {
-          merged = std::move(data);
-        } else {
-          analysis_.merge(*merged, std::move(data));
-        }
-      }
-      if (merged) {
-        klass.data = std::move(*merged);
-      }
+  Id idToExprInternal(RecExpr<L> &expr, Id id, std::unordered_map<Id, Id> &cache) const {
+    auto it = cache.find(id);
+    if (it != cache.end()) {
+      return it->second;
     }
+
+    const auto &node = classes_.at(find(id)).nodes.front();
+    auto materialized = node.mapChildren(
+        [&](Id child) { return idToExprInternal(expr, find(child), cache); });
+    Id added = expr.add(materialized);
+    cache.emplace(id, added);
+    return added;
   }
+
+  Id originalExprInternal(RecExpr<L> &expr, Id id, std::unordered_map<Id, Id> &cache) const {
+    if (auto it = cache.find(id); it != cache.end()) {
+      return it->second;
+    }
+
+    const auto &node = nodes_.at(id.index());
+    auto materialized = node.mapChildren(
+        [&](Id child) { return originalExprInternal(expr, child, cache); });
+    Id added = expr.add(materialized);
+    cache.emplace(id, added);
+    return added;
+  }
+
+  Id idToPatternInternal(RecExpr<ENodeOrVar<L>> &pat, Id id,
+                         const std::unordered_map<Id, Id> &substitutions, Subst &subst,
+                         std::unordered_map<Id, Id> &cache) const;
 
   AnalysisT analysis_;
   UnionFind union_find_;
+  std::vector<L> nodes_;
   std::unordered_map<L, Id> memo_;
+  std::unordered_map<L, Id> uncanonical_memo_;
+  std::vector<Id> pending_;
+  std::vector<Id> analysis_pending_;
   std::unordered_map<Id, Class> classes_;
   std::unordered_map<typename L::Discriminant, std::unordered_set<Id>> classes_by_op_;
   std::vector<UnionEvent> union_events_;
   bool clean_ = false;
   bool explanations_enabled_ = false;
+  bool optimize_explanation_lengths_ = true;
 };
+
+} // namespace lotus::egraph
+
+#include "Solvers/EGraph/Pattern.h"
+
+namespace lotus::egraph {
+
+template <typename L, typename AnalysisT>
+inline Id EGraph<L, AnalysisT>::addInstantiation(const PatternAst<L> &pat, const Subst &subst) {
+  return find(addInstantiationNoncanonical(pat, subst));
+}
+
+template <typename L, typename AnalysisT>
+inline std::pair<Id, bool>
+EGraph<L, AnalysisT>::unionInstantiations(const PatternAst<L> &from_pat,
+                                          const PatternAst<L> &to_pat,
+                                          const Subst &subst,
+                                          const std::string &reason) {
+  Id from = addInstantiationNoncanonical(from_pat, subst);
+  Id to = addInstantiationNoncanonical(to_pat, subst);
+  return uniteImpl(from, to, reason, true);
+}
+
+template <typename L, typename AnalysisT>
+inline std::pair<Pattern<L>, Subst>
+EGraph<L, AnalysisT>::idToPattern(Id id,
+                                  const std::unordered_map<Id, Id> &substitutions) const {
+  RecExpr<ENodeOrVar<L>> pat;
+  Subst subst;
+  std::unordered_map<Id, Id> cache;
+  idToPatternInternal(pat, find(id), substitutions, subst, cache);
+  return {Pattern<L>(std::move(pat)), subst};
+}
+
+template <typename L, typename AnalysisT>
+inline Id EGraph<L, AnalysisT>::addInstantiationNoncanonical(const PatternAst<L> &pat,
+                                                             const Subst &subst) {
+  std::vector<Id> ids;
+  ids.reserve(pat.size());
+  for (const auto &node : pat.items()) {
+    if (node.isVar()) {
+      ids.push_back(find(subst.at(node.var())));
+    } else {
+      ids.push_back(
+          addUncanonical(node.node().mapChildren([&](Id id) { return ids[id.index()]; })));
+    }
+  }
+  return ids.back();
+}
+
+template <typename L, typename AnalysisT>
+inline Id EGraph<L, AnalysisT>::idToPatternInternal(
+    RecExpr<ENodeOrVar<L>> &pat, Id id, const std::unordered_map<Id, Id> &substitutions,
+    Subst &subst, std::unordered_map<Id, Id> &cache) const {
+  if (auto cached = cache.find(id); cached != cache.end()) {
+    return cached->second;
+  }
+
+  if (auto sub_it = substitutions.find(id); sub_it != substitutions.end()) {
+    Var var("?v" + std::to_string(sub_it->second.value()));
+    subst.insert(var, id);
+    Id added = pat.add(ENodeOrVar<L>(var));
+    cache.emplace(id, added);
+    return added;
+  }
+
+  const auto &node = classes_.at(find(id)).nodes.front();
+  std::vector<Id> children;
+  children.reserve(node.children().size());
+  for (Id child : node.children()) {
+    children.push_back(idToPatternInternal(pat, find(child), substitutions, subst, cache));
+  }
+  auto rebuilt = node.mapChildren([&](Id child) { return children[child.index()]; });
+  Id added = pat.add(ENodeOrVar<L>(rebuilt));
+  cache.emplace(id, added);
+  return added;
+}
 
 } // namespace lotus::egraph

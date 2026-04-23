@@ -10,14 +10,34 @@ public:
   Var() = default;
   explicit Var(Symbol name) : name_(std::move(name)) {}
 
+  static Var fromU32(uint32_t num) { return Var("?#" + std::to_string(num)); }
+
   static Var parse(std::string_view text) {
     if (text.size() < 2 || text[0] != '?') {
       throw std::runtime_error("Pattern variable must start with '?'");
+    }
+    if (text.size() >= 3 && text[1] == '#') {
+      size_t pos = 2;
+      while (pos < text.size() && text[pos] == '0') {
+        ++pos;
+      }
+      for (size_t i = pos; i < text.size(); ++i) {
+        if (!std::isdigit(static_cast<unsigned char>(text[i]))) {
+          throw std::runtime_error("Malformed numeric pattern variable");
+        }
+      }
     }
     return Var(std::string(text));
   }
 
   const Symbol &name() const { return name_; }
+
+  std::optional<uint32_t> asU32() const {
+    if (name_.size() >= 3 && name_[0] == '?' && name_[1] == '#') {
+      return static_cast<uint32_t>(std::stoul(name_.substr(2)));
+    }
+    return std::nullopt;
+  }
 
   friend bool operator==(const Var &lhs, const Var &rhs) {
     return lhs.name_ == rhs.name_;
@@ -37,14 +57,22 @@ inline std::ostream &operator<<(std::ostream &os, const Var &var) {
 
 class Subst {
 public:
-  void insert(const Var &var, Id id) {
+  static Subst withCapacity(size_t capacity) {
+    Subst subst;
+    subst.bindings_.reserve(capacity);
+    return subst;
+  }
+
+  std::optional<Id> insert(const Var &var, Id id) {
     for (auto &[bound_var, bound_id] : bindings_) {
       if (bound_var == var) {
+        Id old = bound_id;
         bound_id = id;
-        return;
+        return old;
       }
     }
     bindings_.push_back({var, id});
+    return std::nullopt;
   }
 
   const Id *get(const Var &var) const {
@@ -57,6 +85,13 @@ public:
   }
 
   Id at(const Var &var) const {
+    if (const Id *id = get(var)) {
+      return *id;
+    }
+    throw std::runtime_error("Substitution variable not found");
+  }
+
+  const Id &operator[](const Var &var) const {
     if (const Id *id = get(var)) {
       return *id;
     }
