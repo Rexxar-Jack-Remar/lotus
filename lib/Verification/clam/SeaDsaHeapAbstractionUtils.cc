@@ -5,7 +5,7 @@
 #include "llvm/IR/Value.h"
 #include "llvm/Support/raw_ostream.h"
 
-#include "seadsa/Graph.hh"
+#include "Alias/UnificationBased/seadsa/Graph.hh"
 
 #include "SeaDsaHeapAbstractionUtils.hh"
 

@@ -17,11 +17,10 @@ set(SVFG_SOURCES
 add_library(SVFG STATIC ${SVFG_SOURCES} ${SVFG_HEADERS})
 
 # Link dependencies
-# AserPTA is the default pointer analysis (lib/Alias/AserPTA)
+# AserPTA is the default pointer analysis (lib/Alias/InclusionBased/AserPTA)
 target_link_libraries(SVFG PUBLIC
     CanaryICFG
     AserPTA
     LLVMCore
     LLVMSupport
 )
-

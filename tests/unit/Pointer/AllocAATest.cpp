@@ -10,7 +10,7 @@
  * - Object can-point-to-same checks
  */
 
-#include "Alias/AllocAA/AllocAA.h"
+#include "Alias/Specialized/AllocAA/AllocAA.h"
 #include "TestUtils/LLVMHelpers.h"
 
 #include <llvm/Analysis/CallGraph.h>

@@ -1,7 +1,7 @@
 Pointer Analysis Metrics
 ========================
 
-``include/Alias/Metrics/`` and ``lib/Alias/Metrics/`` provide helpers for
+``include/Alias/Infrastructure/Metrics/`` and ``lib/Alias/Infrastructure/Metrics/`` provide helpers for
 measuring precision and soundness-related properties of alias analyses.
 
 **Main components**:

@@ -10,7 +10,7 @@ UnderApproxAA is a **sound but incomplete** alias analysis that computes
 are **guaranteed** to point to the same memory; otherwise the result is
 unknown.
 
-* **Location**: ``include/Alias/UnderApproxAA/``
+* **Location**: ``include/Alias/Specialized/UnderApproxAA/`` / ``lib/Alias/Specialized/UnderApproxAA/``
 * **Style**: Intra-procedural, under-approximate
 * **Goal**: Cheap, reliable must-alias facts for safety-critical reasoning
 
@@ -64,7 +64,6 @@ UnderApproxAA is exposed via the AA wrapper and can be enabled where
 **must-alias** information is preferable to may-alias over-approximation.
 It is especially useful as a building block in verification and
 sanity-checking passes.
-
 
 
 

@@ -11,10 +11,10 @@
 #include "llvm/IR/DebugLoc.h"
 #include "llvm/IR/Instructions.h"
 
-#include "Alias/seadsa/AllocWrapInfo.hh"
-#include "Alias/seadsa/DsaLibFuncInfo.hh"
-#include "Alias/seadsa/Global.hh"
-#include "Alias/seadsa/Graph.hh"
+#include "Alias/UnificationBased/seadsa/AllocWrapInfo.hh"
+#include "Alias/UnificationBased/seadsa/DsaLibFuncInfo.hh"
+#include "Alias/UnificationBased/seadsa/Global.hh"
+#include "Alias/UnificationBased/seadsa/Graph.hh"
 
 #include "seahorn/clam_CfgBuilder.hh"
 #include "seahorn/clam_Clam.hh"

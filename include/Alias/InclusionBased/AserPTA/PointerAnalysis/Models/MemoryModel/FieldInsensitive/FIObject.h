@@ -1,0 +1,117 @@
+//
+// Created by peiming on 11/3/19.
+//
+#ifndef ASER_PTA_FIOBJECT_H
+#define ASER_PTA_FIOBJECT_H
+
+#include "Alias/InclusionBased/AserPTA/PointerAnalysis/Context/CtxTrait.h"
+#include "Alias/InclusionBased/AserPTA/PointerAnalysis/Models/MemoryModel/AllocSite.h"
+
+namespace aser {
+
+using NodeID = uint64_t;
+template <typename MemModel> class CGObjNode;
+template <typename ctx> class FIMemModel;
+
+template <typename ctx> class FIObject {
+private:
+  using CT = CtxTrait<ctx>;
+  using ObjNode = CGObjNode<FIMemModel<ctx>>;
+
+  // the allocation site
+  // for field-insentive PTA, each allocation site correponding to one object.
+  const AllocSite<ctx> allocSite;
+  ObjNode *objNode = nullptr;
+
+  inline void setObjNode(ObjNode *node) {
+    assert(objNode == nullptr);
+    objNode = node;
+  }
+
+public:
+  FIObject(const ctx *c, const llvm::Value *v, const AllocType t)
+      : allocSite(c, v, t) {};
+  // can not be moved/copied
+  FIObject(const FIObject<ctx> &) = delete;
+  FIObject(FIObject<ctx> &&) = delete;
+  FIObject<ctx> &operator=(const FIObject<ctx> &) = delete;
+  FIObject<ctx> &operator=(FIObject<ctx> &&) = delete;
+
+  __attribute__((warn_unused_result)) inline const AllocSite<ctx> &getAllocSite() const {
+    return this->allocSite;
+  }
+
+  __attribute__((warn_unused_result)) inline const ctx *getContext() const {
+    return this->getAllocSite().getContext();
+  }
+
+  __attribute__((warn_unused_result)) inline const llvm::Value *getValue() const {
+    return this->getAllocSite().getValue();
+  }
+
+  __attribute__((warn_unused_result)) inline ObjNode *getObjNode() const { return objNode; }
+
+  __attribute__((warn_unused_result)) inline AllocType getAllocType() const {
+    return this->getAllocSite().getAllocType();
+  }
+
+  __attribute__((warn_unused_result)) inline bool isFunction() const {
+    return this->getAllocType() == AllocType::Functions;
+  }
+
+  __attribute__((warn_unused_result)) inline const llvm::Type *getType() const {
+    return this->allocSite.getValue()->getType();
+  }
+
+  __attribute__((warn_unused_result)) inline bool isGlobalObj() const {
+    return this->getAllocType() == AllocType::Globals;
+  }
+
+  __attribute__((warn_unused_result)) inline bool isStackObj() const {
+    return this->getAllocType() == AllocType::Stack;
+  }
+
+  __attribute__((warn_unused_result)) inline bool isHeapObj() const {
+    return this->getAllocType() == AllocType::Heap;
+  }
+
+  __attribute__((warn_unused_result)) inline std::string toString(bool detailed = true) const {
+    if (detailed) {
+      std::string ctxStr = CT::toString(getContext(), detailed);
+      llvm::raw_string_ostream os(ctxStr);
+      os << "\n" << *getValue();
+      return os.str();
+    } else {
+      if (getValue()->hasName()) {
+        return getValue()->getName().str();
+      }
+      return "";
+    }
+  }
+
+  friend FIMemModel<ctx>;
+  friend CGObjNode<FIMemModel<ctx>>;
+};
+
+template <typename ctx>
+bool operator==(const FIObject<ctx> &lhs, const FIObject<ctx> &rhs) {
+  return lhs.getValue() == rhs.getValue() &&
+         lhs.getContext() == rhs.getContext();
+}
+
+} // namespace aser
+
+// for container operation
+namespace std {
+
+template <typename ctx> struct hash<aser::FIObject<ctx>> {
+  size_t operator()(const aser::FIObject<ctx> &obj) const {
+    llvm::hash_code seed = llvm::hash_value(obj.getContext());
+    llvm::hash_code hash = llvm::hash_combine(obj.getValue(), seed);
+    return hash_value(hash);
+  }
+};
+
+} // namespace std
+
+#endif

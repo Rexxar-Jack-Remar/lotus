@@ -1,5 +1,5 @@
-#include "Alias/DyckAA/DyckAliasAnalysis.h"
-#include "Alias/DyckAA/DyckModRefAnalysis.h"
+#include "Alias/UnificationBased/DyckAA/DyckAliasAnalysis.h"
+#include "Alias/UnificationBased/DyckAA/DyckModRefAnalysis.h"
 #include "Analysis/NullPointer/ContextSensitiveNullCheckAnalysis.h"
 #include "TestUtils/LLVMHelpers.h"
 

@@ -41,7 +41,7 @@ MemorySSA works with shadow memory instructions inserted by Sea-DSA's ShadowMem 
 
 ```cpp
 #include "IR/MemorySSA/MemorySSA.h"
-#include "Alias/seadsa/ShadowMem.hh"
+#include "Alias/UnificationBased/seadsa/ShadowMem.hh"
 
 // First, run ShadowMem pass to instrument the code
 legacy::PassManager PM;

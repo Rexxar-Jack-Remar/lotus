@@ -131,7 +131,7 @@ Usage
 .. code-block:: cpp
 
    #include "IR/MemorySSA/MemorySSA.h"
-   #include "Alias/seadsa/ShadowMem.hh"
+   #include "Alias/UnificationBased/seadsa/ShadowMem.hh"
    
    using namespace llvm;
    using namespace previrt::analysis;

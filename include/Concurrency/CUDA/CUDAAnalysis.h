@@ -1,6 +1,6 @@
 #pragma once
 
-#include "Alias/AliasAnalysisWrapper/AliasAnalysisWrapper.h"
+#include "Alias/Infrastructure/AliasAnalysisWrapper/AliasAnalysisWrapper.h"
 #include "Concurrency/CUDA/CUDAAbstractState.h"
 #include "Concurrency/CUDA/CUDAMemoryModel.h"
 #include "Concurrency/CUDA/CUDASymbolicModel.h"

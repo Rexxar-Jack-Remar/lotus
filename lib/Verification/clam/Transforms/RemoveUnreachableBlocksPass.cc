@@ -4,8 +4,8 @@
 
 #include "clam/config.h"
 
-#include "seadsa/DsaAnalysis.hh"
-#include "seadsa/ShadowMem.hh"
+#include "Alias/UnificationBased/seadsa/DsaAnalysis.hh"
+#include "Alias/UnificationBased/seadsa/ShadowMem.hh"
 
 using namespace llvm;
 

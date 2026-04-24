@@ -10,7 +10,7 @@ modular engine with **interprocedural**, **flow-sensitive**, and
 **field-sensitive** reasoning, designed to integrate tightly with other Lotus
 analyses.
 
-* **Location**: ``include/Alias/LotusAA/``
+* **Location**: ``include/Alias/InclusionBased/LotusAA/``
 
 Components
 ==========

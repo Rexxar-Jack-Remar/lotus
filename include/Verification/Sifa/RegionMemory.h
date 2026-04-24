@@ -21,7 +21,7 @@
 #include "llvm/IR/Instructions.h"
 #include "llvm/IR/Value.h"
 
-#include "Alias/AliasAnalysisWrapper/AliasAnalysisWrapper.h"
+#include "Alias/Infrastructure/AliasAnalysisWrapper/AliasAnalysisWrapper.h"
 
 #include <vector>
 

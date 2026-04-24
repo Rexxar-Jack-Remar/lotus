@@ -8,7 +8,7 @@ Overview
 TPA is an **inclusion-based**, **flow- and context-sensitive** pointer analysis framework with k-limiting support.
 It uses a **semi-sparse** program representation to achieve both precision and scalability for large C/C++ programs.
 
-* **Location**: ``lib/Alias/TPA``
+* **Location**: ``lib/Alias/InclusionBased/TPA``
 
 Architecture
 ============

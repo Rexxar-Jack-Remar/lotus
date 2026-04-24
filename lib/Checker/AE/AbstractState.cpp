@@ -6,9 +6,9 @@
 
 #include "Checker/AE/AbstractState.h"
 
-#include "Alias/AserPTA/PointerAnalysis/Context/NoCtx.h"
-#include "Alias/AserPTA/PointerAnalysis/Models/MemoryModel/FieldSensitive/FSObject.h"
-#include "Alias/AserPTA/PointerAnalysis/Models/MemoryModel/FieldSensitive/MemBlock.h"
+#include "Alias/InclusionBased/AserPTA/PointerAnalysis/Context/NoCtx.h"
+#include "Alias/InclusionBased/AserPTA/PointerAnalysis/Models/MemoryModel/FieldSensitive/FSObject.h"
+#include "Alias/InclusionBased/AserPTA/PointerAnalysis/Models/MemoryModel/FieldSensitive/MemBlock.h"
 #include "Checker/AE/AbstractInterpretation.h"
 #include "Checker/AE/SVFIRWrapper.h"
 

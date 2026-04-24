@@ -127,7 +127,7 @@ Example: run interval analysis with region memory using SparrowAA.
 
 ```cpp
 #include "Verification/Sifa/Sifa.h"
-#include "Alias/AliasAnalysisWrapper/AliasAnalysisWrapper.h"
+#include "Alias/Infrastructure/AliasAnalysisWrapper/AliasAnalysisWrapper.h"
 
 lotus::AAConfig aaConfig = lotus::AAConfig::SparrowAA_NoCtx();
 auto AA = lotus::AliasAnalysisFactory::create(M, aaConfig);

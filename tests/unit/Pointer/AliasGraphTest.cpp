@@ -3,7 +3,7 @@
  * @brief Unit tests for AliasGraph (CC'18 must-alias data structure).
  */
 
-#include "Alias/UnderApproxAA/AliasGraph.h"
+#include "Alias/Specialized/UnderApproxAA/AliasGraph.h"
 
 #include <gtest/gtest.h>
 

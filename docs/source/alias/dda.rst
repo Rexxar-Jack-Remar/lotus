@@ -3,9 +3,9 @@ DDA
 
 ``DDA`` provides demand-driven alias-analysis infrastructure.
 
-**Headers**: ``include/Alias/DDA/``
+**Headers**: ``include/Alias/DemandDriven/DDA/``
 
-**Implementation**: ``lib/Alias/DDA/``
+**Implementation**: ``lib/Alias/DemandDriven/DDA/``
 
 Overview
 --------

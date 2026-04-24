@@ -55,8 +55,8 @@
 #include "llvm/Support/raw_ostream.h"
 #include "llvm/Transforms/Utils/UnifyFunctionExitNodes.h"
 
-#include "Alias/seadsa/InitializePasses.hh"
-#include "Alias/seadsa/ShadowMem.hh"
+#include "Alias/UnificationBased/seadsa/InitializePasses.hh"
+#include "Alias/UnificationBased/seadsa/ShadowMem.hh"
 #include "IR/MemorySSA/MemorySSA.h"
 
 #include <cstddef>

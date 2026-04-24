@@ -21,14 +21,14 @@
 #include "llvm/Support/ToolOutputFile.h"
 #include "llvm/Support/raw_ostream.h"
 
-#include "Alias/AliasAnalysisWrapper/CLIUtils.h"
-#include "Alias/seadsa/CompleteCallGraph.hh"
-#include "Alias/seadsa/DsaAnalysis.hh"
-#include "Alias/seadsa/DsaLibFuncInfo.hh"
-#include "Alias/seadsa/InitializePasses.hh"
-#include "Alias/seadsa/SeaDsaAliasAnalysis.hh"
-#include "Alias/seadsa/support/RemovePtrToInt.hh"
-// #include "Alias/seadsa/support/Debug.h"
+#include "Alias/Infrastructure/AliasAnalysisWrapper/CLIUtils.h"
+#include "Alias/UnificationBased/seadsa/CompleteCallGraph.hh"
+#include "Alias/UnificationBased/seadsa/DsaAnalysis.hh"
+#include "Alias/UnificationBased/seadsa/DsaLibFuncInfo.hh"
+#include "Alias/UnificationBased/seadsa/InitializePasses.hh"
+#include "Alias/UnificationBased/seadsa/SeaDsaAliasAnalysis.hh"
+#include "Alias/UnificationBased/seadsa/support/RemovePtrToInt.hh"
+// #include "Alias/UnificationBased/seadsa/support/Debug.h"
 
 static llvm::cl::opt<std::string>
     InputFilename(llvm::cl::Positional,

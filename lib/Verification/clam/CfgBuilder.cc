@@ -74,8 +74,8 @@
 #include "crab/support/debug.hpp"
 #include "crab/support/stats.hpp"
 #include "crab/transforms/dce.hpp"
-#include "seadsa/Global.hh"
-#include "seadsa/Graph.hh"
+#include "Alias/UnificationBased/seadsa/Global.hh"
+#include "Alias/UnificationBased/seadsa/Graph.hh"
 
 #include <algorithm>
 #include <unordered_map>

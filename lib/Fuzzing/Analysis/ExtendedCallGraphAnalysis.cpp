@@ -1,9 +1,9 @@
 // ExtendedCallGraph using DyckAA for indirect call resolution
 #include "Fuzzing/Analysis/ExtendedCallGraph.h"
 
-#include "Alias/DyckAA/DyckAliasAnalysis.h"
-#include "Alias/DyckAA/DyckCallGraph.h"
-#include "Alias/DyckAA/DyckCallGraphNode.h"
+#include "Alias/UnificationBased/DyckAA/DyckAliasAnalysis.h"
+#include "Alias/UnificationBased/DyckAA/DyckCallGraph.h"
+#include "Alias/UnificationBased/DyckAA/DyckCallGraphNode.h"
 
 #include <llvm/Analysis/CallGraph.h>
 #include <llvm/IR/Instructions.h>

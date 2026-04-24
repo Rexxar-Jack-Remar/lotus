@@ -1,6 +1,6 @@
 #include "seahorn/Transforms/Instrumentation/SimpleMemoryCheck.hh"
 
-#include "Alias/seadsa/InitializePasses.hh"
+#include "Alias/UnificationBased/seadsa/InitializePasses.hh"
 #include "seahorn/InitializePasses.hh"
 
 #include "llvm/ADT/DenseMap.h"
@@ -20,8 +20,8 @@
 #include "llvm/Transforms/Utils/Cloning.h"
 #include "llvm/Transforms/Utils/Local.h"
 
-#include "Alias/seadsa/AllocWrapInfo.hh"
-#include "Alias/seadsa/DsaAnalysis.hh"
+#include "Alias/UnificationBased/seadsa/AllocWrapInfo.hh"
+#include "Alias/UnificationBased/seadsa/DsaAnalysis.hh"
 #include "seahorn/Support/SeaDebug.h"
 #include "seahorn/Support/SeaLog.hh"
 

@@ -1,6 +1,6 @@
 #pragma once
 
-#include "Alias/LotusAA/MemoryModel/Types.h"
+#include "Alias/InclusionBased/LotusAA/MemoryModel/Types.h"
 #include "IR/GSA/GSA.h"
 
 #include <string>

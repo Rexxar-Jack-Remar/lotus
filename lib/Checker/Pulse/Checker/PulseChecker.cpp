@@ -1,7 +1,7 @@
 
 #include "Checker/Pulse/Checker/PulseChecker.h"
 
-#include "Alias/AliasAnalysisWrapper/AliasAnalysisWrapper.h"
+#include "Alias/Infrastructure/AliasAnalysisWrapper/AliasAnalysisWrapper.h"
 #include "Checker/Pulse/Checker/PulseCheckerUtils.h"
 #include "Checker/Pulse/Core/PulseFormula.h"
 #include "Checker/Pulse/Core/PulseSubstitution.h"

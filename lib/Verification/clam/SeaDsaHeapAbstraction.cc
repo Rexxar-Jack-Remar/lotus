@@ -18,11 +18,11 @@
 #include "llvm/Support/raw_ostream.h"
 #include <optional>
 
-#include "seadsa/AllocWrapInfo.hh"
-#include "seadsa/CallSite.hh"
-#include "seadsa/DsaLibFuncInfo.hh"
-#include "seadsa/Global.hh"
-#include "seadsa/Graph.hh"
+#include "Alias/UnificationBased/seadsa/AllocWrapInfo.hh"
+#include "Alias/UnificationBased/seadsa/CallSite.hh"
+#include "Alias/UnificationBased/seadsa/DsaLibFuncInfo.hh"
+#include "Alias/UnificationBased/seadsa/Global.hh"
+#include "Alias/UnificationBased/seadsa/Graph.hh"
 
 #include "SeaDsaHeapAbstractionUtils.hh"
 #include "SeaDsaToRegion.hh"

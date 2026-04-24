@@ -31,8 +31,8 @@
 
 #include "Analysis/NullPointer/NullFlowAnalysis.h"
 
-#include "Alias/DyckAA/DyckAliasAnalysis.h"
-#include "Alias/DyckAA/DyckValueFlowAnalysis.h"
+#include "Alias/UnificationBased/DyckAA/DyckAliasAnalysis.h"
+#include "Alias/UnificationBased/DyckAA/DyckValueFlowAnalysis.h"
 #include "Analysis/NullPointer/API.h"
 #include "Utils/LLVM/RecursiveTimer.h"
 

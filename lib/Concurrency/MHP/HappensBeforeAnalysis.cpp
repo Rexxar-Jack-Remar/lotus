@@ -1,6 +1,6 @@
 #include "Concurrency/MHP/HappensBeforeAnalysis.h"
 
-#include "Alias/AliasAnalysisWrapper/AliasAnalysisWrapper.h"
+#include "Alias/Infrastructure/AliasAnalysisWrapper/AliasAnalysisWrapper.h"
 #include "Concurrency/OpenMP/OpenMPSemantics.h"
 #include "Concurrency/Utils/ThreadMultiplicity.h"
 

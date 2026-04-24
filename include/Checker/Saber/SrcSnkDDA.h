@@ -7,7 +7,7 @@
 #ifndef SRCSNKANALYSIS_H_
 #define SRCSNKANALYSIS_H_
 
-#include "Alias/DDA/CxtDPItem.h"
+#include "Alias/DemandDriven/DDA/CxtDPItem.h"
 #include "Checker/Saber/ProgSlice.h"
 #include "Checker/Saber/SaberSVFGBuilder.h"
 #include "Checker/Saber/SrcSnkSolver.h"

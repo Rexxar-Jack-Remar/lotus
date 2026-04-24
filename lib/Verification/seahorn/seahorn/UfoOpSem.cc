@@ -17,7 +17,7 @@
 #include "seahorn/Support/SeaDebug.h"
 #include "seahorn/Support/Stats.hh"
 
-#include "Alias/seadsa/Global.hh"
+#include "Alias/UnificationBased/seadsa/Global.hh"
 
 using namespace seadsa;
 namespace seahorn {

@@ -8,7 +8,7 @@
 
 #pragma once
 
-#include "Alias/AliasAnalysisWrapper/AliasAnalysisWrapper.h"
+#include "Alias/Infrastructure/AliasAnalysisWrapper/AliasAnalysisWrapper.h"
 #include "Dataflow/IFDS/Core/IFDSFramework.h"
 
 #include <set>

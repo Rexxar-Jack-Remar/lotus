@@ -3,7 +3,7 @@
 #include "llvm/IR/Constants.h"
 #include "llvm/IR/Instructions.h"
 
-#include "Alias/AliasAnalysisWrapper/AliasAnalysisWrapper.h"
+#include "Alias/Infrastructure/AliasAnalysisWrapper/AliasAnalysisWrapper.h"
 #include "Dataflow/Mono/Core/Problem.h"
 #include "Dataflow/Mono/Solver/InterSolver.h"
 

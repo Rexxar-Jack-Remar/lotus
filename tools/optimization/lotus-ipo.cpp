@@ -4,13 +4,13 @@
  * lib/Optimization/IPO.
  */
 
-#include "Alias/seadsa/AllocSiteInfo.hh"
-#include "Alias/seadsa/AllocWrapInfo.hh"
-#include "Alias/seadsa/DsaAnalysis.hh"
-#include "Alias/seadsa/DsaLibFuncInfo.hh"
-#include "Alias/seadsa/InitializePasses.hh"
-#include "Alias/seadsa/ShadowMem.hh"
-#include "Alias/seadsa/support/RemovePtrToInt.hh"
+#include "Alias/UnificationBased/seadsa/AllocSiteInfo.hh"
+#include "Alias/UnificationBased/seadsa/AllocWrapInfo.hh"
+#include "Alias/UnificationBased/seadsa/DsaAnalysis.hh"
+#include "Alias/UnificationBased/seadsa/DsaLibFuncInfo.hh"
+#include "Alias/UnificationBased/seadsa/InitializePasses.hh"
+#include "Alias/UnificationBased/seadsa/ShadowMem.hh"
+#include "Alias/UnificationBased/seadsa/support/RemovePtrToInt.hh"
 
 #include <memory>
 #include <string>

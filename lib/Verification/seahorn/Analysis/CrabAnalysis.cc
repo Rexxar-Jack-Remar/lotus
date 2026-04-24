@@ -14,7 +14,7 @@
 #include "seahorn/Support/SeaLog.hh"
 #include "seahorn/Support/Stats.hh"
 
-#include "Alias/seadsa/Global.hh"
+#include "Alias/UnificationBased/seadsa/Global.hh"
 
 namespace {
 clam::CrabDomain::Type CrabDom;

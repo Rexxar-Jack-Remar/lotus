@@ -150,7 +150,7 @@ Programmatic Usage
 
 .. code-block:: cpp
 
-   #include "Alias/AliasAnalysisWrapper/AliasAnalysisWrapper.h"
+   #include "Alias/Infrastructure/AliasAnalysisWrapper/AliasAnalysisWrapper.h"
    #include "Checker/Pulse/Checker/PulseChecker.h"
    #include "Checker/Report/BugReportMgr.h"
 

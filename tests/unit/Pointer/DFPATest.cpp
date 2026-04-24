@@ -1,10 +1,10 @@
-#include "Alias/DFPA/DFPAPass.h"
+#include "Alias/Specialized/DFPA/DFPAPass.h"
 
-#include "Alias/AserPTA/PreProcessing/Passes/CanonicalizeGEPPass.h"
-#include "Alias/AserPTA/PreProcessing/Passes/LoweringMemCpyPass.h"
-#include "Alias/AserPTA/PreProcessing/Passes/RemoveASMInstPass.h"
-#include "Alias/AserPTA/PreProcessing/Passes/RemoveExceptionHandlerPass.h"
-#include "Alias/AserPTA/PreProcessing/Passes/StandardHeapAPIRewritePass.h"
+#include "Alias/InclusionBased/AserPTA/PreProcessing/Passes/CanonicalizeGEPPass.h"
+#include "Alias/InclusionBased/AserPTA/PreProcessing/Passes/LoweringMemCpyPass.h"
+#include "Alias/InclusionBased/AserPTA/PreProcessing/Passes/RemoveASMInstPass.h"
+#include "Alias/InclusionBased/AserPTA/PreProcessing/Passes/RemoveExceptionHandlerPass.h"
+#include "Alias/InclusionBased/AserPTA/PreProcessing/Passes/StandardHeapAPIRewritePass.h"
 #include "TestUtils/LLVMHelpers.h"
 
 #include <llvm/IR/InstIterator.h>

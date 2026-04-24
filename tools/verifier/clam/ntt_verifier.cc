@@ -18,9 +18,9 @@
 #include "llvm/Support/SourceMgr.h"
 
 // Seadsa
-#include "seadsa/AllocWrapInfo.hh"
-#include "seadsa/DsaLibFuncInfo.hh"
-#include "seadsa/support/RemovePtrToInt.hh"
+#include "Alias/UnificationBased/seadsa/AllocWrapInfo.hh"
+#include "Alias/UnificationBased/seadsa/DsaLibFuncInfo.hh"
+#include "Alias/UnificationBased/seadsa/support/RemovePtrToInt.hh"
 
 // Clam support
 #include "clam/Passes.hh"

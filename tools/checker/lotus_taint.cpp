@@ -8,7 +8,7 @@
 #include "Utils/LLVM/Demangle.h"
 #include "lotus_taint_microbench.h"
 
-#include <Alias/AliasAnalysisWrapper/AliasAnalysisWrapper.h>
+#include <Alias/Infrastructure/AliasAnalysisWrapper/AliasAnalysisWrapper.h>
 #include <Dataflow/IFDS/Analyses/IFDSTaintAnalysis.h>
 #include <Dataflow/IFDS/Core/IFDSFramework.h>
 #include <Dataflow/IFDS/Solver/IFDSSolver.h>

@@ -1,7 +1,7 @@
-#include "Alias/TypeQualifier/Config.h"
-#include "Alias/TypeQualifier/FunctionSummary.h"
-#include "Alias/TypeQualifier/QualifierAnalysis.h"
-#include "Alias/TypeQualifier/QualifierTypes.h"
+#include "Alias/Specialized/TypeQualifier/Config.h"
+#include "Alias/Specialized/TypeQualifier/FunctionSummary.h"
+#include "Alias/Specialized/TypeQualifier/QualifierAnalysis.h"
+#include "Alias/Specialized/TypeQualifier/QualifierTypes.h"
 #include "TestUtils/LLVMHelpers.h"
 
 #include <llvm/IR/Instructions.h>

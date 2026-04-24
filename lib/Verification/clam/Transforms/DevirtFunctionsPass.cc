@@ -9,8 +9,8 @@
 #include "llvm/Support/CommandLine.h"
 #include "llvm/Support/raw_ostream.h"
 
-#include "seadsa/CompleteCallGraph.hh"
-#include "seadsa/support/RemovePtrToInt.hh"
+#include "Alias/UnificationBased/seadsa/CompleteCallGraph.hh"
+#include "Alias/UnificationBased/seadsa/support/RemovePtrToInt.hh"
 
 llvm::cl::opt<clam::CallSiteResolverKind> DevirtResolver(
     "devirt-resolver",

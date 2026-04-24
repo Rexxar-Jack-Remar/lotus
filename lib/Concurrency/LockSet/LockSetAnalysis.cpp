@@ -17,7 +17,7 @@
 
 #include "Concurrency/LockSet/LockSetAnalysis.h"
 
-#include "Alias/AliasAnalysisWrapper/AliasAnalysisWrapper.h"
+#include "Alias/Infrastructure/AliasAnalysisWrapper/AliasAnalysisWrapper.h"
 #include "Concurrency/Utils/RAIILockTracker.h"
 
 #include <algorithm>

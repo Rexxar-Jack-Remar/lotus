@@ -17,7 +17,7 @@
 #ifndef VERIFICATION_FAILUREDIRECTEDTRIMMING_IMPL_H
 #define VERIFICATION_FAILUREDIRECTEDTRIMMING_IMPL_H
 
-#include "Alias/AliasAnalysisWrapper/AliasAnalysisWrapper.h"
+#include "Alias/Infrastructure/AliasAnalysisWrapper/AliasAnalysisWrapper.h"
 
 #include <llvm/ADT/ArrayRef.h>
 #include <llvm/ADT/DenseMap.h>

@@ -16,9 +16,9 @@
 #include "llvm/Support/CommandLine.h"
 #include "llvm/Support/raw_ostream.h"
 
-#include "Alias/seadsa/AllocWrapInfo.hh"
-#include "Alias/seadsa/CompleteCallGraph.hh"
-#include "Alias/seadsa/DsaLibFuncInfo.hh"
+#include "Alias/UnificationBased/seadsa/AllocWrapInfo.hh"
+#include "Alias/UnificationBased/seadsa/CompleteCallGraph.hh"
+#include "Alias/UnificationBased/seadsa/DsaLibFuncInfo.hh"
 
 static llvm::cl::opt<seahorn::CallSiteResolverKind> Devirt(
     "devirt-functions-method",

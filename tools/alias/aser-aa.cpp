@@ -5,21 +5,21 @@
  * sensitivities and solver algorithms.
  */
 
-#include "Alias/AliasAnalysisWrapper/CLIUtils.h"
-#include "Alias/AserPTA/PTADriver.h"
-#include "Alias/AserPTA/PointerAnalysis/Context/KCallSite.h"
-#include "Alias/AserPTA/PointerAnalysis/Context/KOrigin.h"
-#include "Alias/AserPTA/PointerAnalysis/Context/NoCtx.h"
-#include "Alias/AserPTA/PointerAnalysis/Models/LanguageModel/DefaultLangModel/DefaultLangModel.h"
-#include "Alias/AserPTA/PointerAnalysis/Models/MemoryModel/FieldInsensitive/FIMemModel.h"
-#include "Alias/AserPTA/PointerAnalysis/Models/MemoryModel/FieldSensitive/FSMemModel.h"
-#include "Alias/AserPTA/PointerAnalysis/Solver/DeepPropagation.h"
-#include "Alias/AserPTA/PointerAnalysis/Solver/PartialUpdateSolver.h"
-#include "Alias/AserPTA/PointerAnalysis/Solver/PointsTo/BDDPts.h"
-#include "Alias/AserPTA/PointerAnalysis/Solver/PointsTo/BitVectorPTS.h"
-#include "Alias/AserPTA/PointerAnalysis/Solver/PointsTo/PointsToSelector.h"
-#include "Alias/AserPTA/PointerAnalysis/Solver/WavePropagation.h"
-#include "Alias/Spec/AliasSpecManager.h"
+#include "Alias/Infrastructure/AliasAnalysisWrapper/CLIUtils.h"
+#include "Alias/InclusionBased/AserPTA/PTADriver.h"
+#include "Alias/InclusionBased/AserPTA/PointerAnalysis/Context/KCallSite.h"
+#include "Alias/InclusionBased/AserPTA/PointerAnalysis/Context/KOrigin.h"
+#include "Alias/InclusionBased/AserPTA/PointerAnalysis/Context/NoCtx.h"
+#include "Alias/InclusionBased/AserPTA/PointerAnalysis/Models/LanguageModel/DefaultLangModel/DefaultLangModel.h"
+#include "Alias/InclusionBased/AserPTA/PointerAnalysis/Models/MemoryModel/FieldInsensitive/FIMemModel.h"
+#include "Alias/InclusionBased/AserPTA/PointerAnalysis/Models/MemoryModel/FieldSensitive/FSMemModel.h"
+#include "Alias/InclusionBased/AserPTA/PointerAnalysis/Solver/DeepPropagation.h"
+#include "Alias/InclusionBased/AserPTA/PointerAnalysis/Solver/PartialUpdateSolver.h"
+#include "Alias/InclusionBased/AserPTA/PointerAnalysis/Solver/PointsTo/BDDPts.h"
+#include "Alias/InclusionBased/AserPTA/PointerAnalysis/Solver/PointsTo/BitVectorPTS.h"
+#include "Alias/InclusionBased/AserPTA/PointerAnalysis/Solver/PointsTo/PointsToSelector.h"
+#include "Alias/InclusionBased/AserPTA/PointerAnalysis/Solver/WavePropagation.h"
+#include "Alias/Infrastructure/Spec/AliasSpecManager.h"
 
 #include <llvm/ADT/Statistic.h>
 #include <llvm/IR/IRPrintingPasses.h>

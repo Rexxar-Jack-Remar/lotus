@@ -6,8 +6,8 @@
  *
  */
 
-#include "Alias/AliasAnalysisWrapper/CLIUtils.h"
-#include "Alias/LotusAA/Engine/InterProceduralPass.h"
+#include "Alias/Infrastructure/AliasAnalysisWrapper/CLIUtils.h"
+#include "Alias/InclusionBased/LotusAA/Engine/InterProceduralPass.h"
 
 #include <memory>
 

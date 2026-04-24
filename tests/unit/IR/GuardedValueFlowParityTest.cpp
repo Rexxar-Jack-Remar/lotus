@@ -1,4 +1,4 @@
-#include "Alias/LotusAA/Engine/InterProceduralPass.h"
+#include "Alias/InclusionBased/LotusAA/Engine/InterProceduralPass.h"
 #include "IR/GVFG/GuardedValueFlowGraph.h"
 #include "IR/GVFG/LotusAdapter.h"
 #include "TestUtils/LLVMHelpers.h"

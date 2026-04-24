@@ -1,4 +1,4 @@
-#include <Alias/AliasAnalysisWrapper/AliasAnalysisWrapper.h>
+#include <Alias/Infrastructure/AliasAnalysisWrapper/AliasAnalysisWrapper.h>
 #include <Dataflow/IFDS/Analyses/IFDSConstAnalysis.h>
 #include <Dataflow/IFDS/Analyses/IFDSReachingDefinitions.h>
 #include <Dataflow/IFDS/Analyses/IFDSTaintAnalysis.h>

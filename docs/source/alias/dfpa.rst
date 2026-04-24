@@ -3,9 +3,9 @@ DFPA
 
 ``DFPA`` is a demand-refined function-pointer analysis.
 
-**Headers**: ``include/Alias/DFPA/``
+**Headers**: ``include/Alias/Specialized/DFPA/``
 
-**Implementation**: ``lib/Alias/DFPA/``
+**Implementation**: ``lib/Alias/Specialized/DFPA/``
 
 **Tool**: ``dfpa`` in ``tools/alias/dfpa.cpp``
 

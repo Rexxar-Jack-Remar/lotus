@@ -5,7 +5,7 @@
 
 #include "Concurrency/JoinTarget/JoinTargetAnalysis.h"
 
-#include "Alias/AliasAnalysisWrapper/AliasAnalysisWrapper.h"
+#include "Alias/Infrastructure/AliasAnalysisWrapper/AliasAnalysisWrapper.h"
 #include "Concurrency/Utils/ThreadMultiplicity.h"
 
 #include <algorithm>

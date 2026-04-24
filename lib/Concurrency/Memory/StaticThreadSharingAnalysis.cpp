@@ -33,9 +33,9 @@ shared data.
 #include "llvm/Support/Debug.h"
 #include "llvm/Support/raw_ostream.h"
 
-#include "Alias/seadsa/DsaAnalysis.hh"
-#include "Alias/seadsa/Global.hh"
-#include "Alias/seadsa/Graph.hh"
+#include "Alias/UnificationBased/seadsa/DsaAnalysis.hh"
+#include "Alias/UnificationBased/seadsa/Global.hh"
+#include "Alias/UnificationBased/seadsa/Graph.hh"
 #include "Concurrency/Utils/ThreadAPI.h"
 #include "Concurrency/Utils/ThreadMultiplicity.h"
 

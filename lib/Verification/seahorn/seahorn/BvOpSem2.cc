@@ -35,7 +35,7 @@
 #include "seahorn/clam_CfgBuilder.hh"
 #include "seahorn/clam_Clam.hh"
 
-#include "Alias/seadsa/ShadowMem.hh"
+#include "Alias/UnificationBased/seadsa/ShadowMem.hh"
 
 #include <fstream>
 #include <optional>

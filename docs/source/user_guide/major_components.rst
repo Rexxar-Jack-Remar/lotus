@@ -13,14 +13,14 @@ See :doc:`../alias/alias_analysis` for detailed instructions and command example
 * **AllocAA** – Lightweight alias analysis built from simple heuristics for
   allocation tracking.
 * **DyckAA** – Unification-based exhaustive alias analysis
-  (``lib/Alias/DyckAA``).
+  (``lib/Alias/UnificationBased/DyckAA``).
 * **CFL (via LLVM)** – Context-Free Language alias analysis from LLVM (used by the alias wrapper).
 * **Sea-DSA** – Context-sensitive and field-sensitive analysis with
-  Sea-DSA (``lib/Alias/seadsa``). Does not require Boost.
+  Sea-DSA (``lib/Alias/UnificationBased/seadsa``). Does not require Boost.
 * **SparrowAA** – Inclusion-based pointer analysis without on-the-fly
-  call-graph construction (``lib/Alias/SparrowAA``).
+  call-graph construction (``lib/Alias/InclusionBased/SparrowAA``).
 * **FPA** – Function Pointer Analysis toolbox (FLTA, MLTA, MLTADF, KELP) under
-  ``lib/Alias/FPA`` for resolving indirect calls.
+  ``lib/Alias/Specialized/FPA`` for resolving indirect calls.
 * **DynAA** – Dynamic checker living in ``tools/alias/dynaa`` that validates static
   alias analyses against runtime traces.
 * **OriginAA** – K-callsite-sensitive, origin-sensitive analysis targeting
@@ -36,7 +36,7 @@ See :doc:`../ir/index` for builder APIs and code snippets.
 * **Static Single Information (SSI)** – Planned extension of SSA to encode
   predicate information.
 * **DyckVFG** – Value Flow Graph variant designed for Dyck-based alias
-  analyses (``lib/Alias/DyckAA/DyckVFG.cpp``).
+  analyses (``lib/Alias/UnificationBased/DyckAA/DyckVFG.cpp``).
 
 Machine Learning Features
 ------------------------

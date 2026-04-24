@@ -5,7 +5,7 @@
  * Uses UnderApproxAA for must-alias canonicalization.
  */
 
-#include "Alias/AliasAnalysisWrapper/AliasAnalysisWrapper.h"
+#include "Alias/Infrastructure/AliasAnalysisWrapper/AliasAnalysisWrapper.h"
 #include "Checker/Pulse/Checker/PulseChecker.h"
 #include "Checker/Pulse/Report/PulseLogger.h"
 #include "Checker/Pulse/Report/PulseOptions.h"

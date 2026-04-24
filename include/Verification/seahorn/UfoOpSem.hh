@@ -7,7 +7,7 @@
 
 #include "seahorn/VCGen.hh"
 
-#include "Alias/seadsa/ShadowMem.hh"
+#include "Alias/UnificationBased/seadsa/ShadowMem.hh"
 #include "seahorn/InterMemPreProc.hh"
 
 namespace llvm {

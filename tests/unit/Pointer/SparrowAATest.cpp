@@ -6,8 +6,8 @@
  * using field-sensitive and flow-insensitive techniques.
  */
 
-#include "Alias/SparrowAA/AndersenAA.h"
-#include "Alias/SparrowAA/ConstraintSnapshot.h"
+#include "Alias/InclusionBased/SparrowAA/AndersenAA.h"
+#include "Alias/InclusionBased/SparrowAA/ConstraintSnapshot.h"
 #include "TestUtils/LLVMHelpers.h"
 
 #include <algorithm>

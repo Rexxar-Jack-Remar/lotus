@@ -1,9 +1,9 @@
 #pragma once
 
-#include "Alias/seadsa/CompleteCallGraph.hh"
-#include "Alias/seadsa/DsaColor.hh"
-#include "Alias/seadsa/Mapper.hh"
-#include "Alias/seadsa/ShadowMem.hh"
+#include "Alias/UnificationBased/seadsa/CompleteCallGraph.hh"
+#include "Alias/UnificationBased/seadsa/DsaColor.hh"
+#include "Alias/UnificationBased/seadsa/Mapper.hh"
+#include "Alias/UnificationBased/seadsa/ShadowMem.hh"
 #include "seahorn/Expr/ExprCore.hh"
 #include "seahorn/LegacyOperationalSemantics.hh"
 

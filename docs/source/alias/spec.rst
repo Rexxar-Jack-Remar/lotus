@@ -1,7 +1,7 @@
 Alias Specification Manager
 ===========================
 
-``include/Alias/Spec/`` and ``lib/Alias/Spec/`` provide a unified specification
+``include/Alias/Infrastructure/Spec/`` and ``lib/Alias/Infrastructure/Spec/`` provide a unified specification
 layer for library functions used by pointer and alias analyses.
 
 **Main components**:

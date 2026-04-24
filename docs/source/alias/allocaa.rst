@@ -10,7 +10,7 @@ primarily about **allocation sites**. It is designed to be extremely fast and
 cheap in memory, making it suitable as a **baseline analysis** or as a
 pre-filter before more expensive passes.
 
-* **Location**: ``lib/Alias/AllocAA``
+* **Location**: ``lib/Alias/Specialized/AllocAA``
 * **Style**: Flow-insensitive, context-insensitive
 * **Goal**: Quickly classify obvious non-aliases and simple must-alias cases
 
@@ -51,5 +51,4 @@ In most cases you do not run it directly; instead you enable it in the
 pass pipeline (e.g., through the Lotus AA driver or Clam configuration).
 
 AllocAA is integrated as LLVM ModulePass for basic alias queries.
-
 

@@ -2,19 +2,19 @@
 // AserPTA Tests - Pointer analysis with field-sensitivity and
 // context-sensitivity
 //
-#include "Alias/AserPTA/PointerAnalysis/Context/KCallSite.h"
-#include "Alias/AserPTA/PointerAnalysis/Context/KOrigin.h"
-#include "Alias/AserPTA/PointerAnalysis/Context/NoCtx.h"
-#include "Alias/AserPTA/PointerAnalysis/Models/LanguageModel/DefaultLangModel/DefaultLangModel.h"
-#include "Alias/AserPTA/PointerAnalysis/Models/MemoryModel/FieldInsensitive/FIMemModel.h"
-#include "Alias/AserPTA/PointerAnalysis/Models/MemoryModel/FieldSensitive/FSMemModel.h"
-#include "Alias/AserPTA/PointerAnalysis/PointerAnalysisPass.h"
-#include "Alias/AserPTA/PointerAnalysis/Program/CallSite.h"
-#include "Alias/AserPTA/PointerAnalysis/Solver/PartialUpdateSolver.h"
-#include "Alias/AserPTA/PreProcessing/Passes/CanonicalizeGEPPass.h"
-#include "Alias/AserPTA/PreProcessing/Passes/InsertGlobalCtorCallPass.h"
-#include "Alias/AserPTA/PreProcessing/Passes/LoweringMemCpyPass.h"
-#include "Alias/AserPTA/PreProcessing/Passes/RemoveExceptionHandlerPass.h"
+#include "Alias/InclusionBased/AserPTA/PointerAnalysis/Context/KCallSite.h"
+#include "Alias/InclusionBased/AserPTA/PointerAnalysis/Context/KOrigin.h"
+#include "Alias/InclusionBased/AserPTA/PointerAnalysis/Context/NoCtx.h"
+#include "Alias/InclusionBased/AserPTA/PointerAnalysis/Models/LanguageModel/DefaultLangModel/DefaultLangModel.h"
+#include "Alias/InclusionBased/AserPTA/PointerAnalysis/Models/MemoryModel/FieldInsensitive/FIMemModel.h"
+#include "Alias/InclusionBased/AserPTA/PointerAnalysis/Models/MemoryModel/FieldSensitive/FSMemModel.h"
+#include "Alias/InclusionBased/AserPTA/PointerAnalysis/PointerAnalysisPass.h"
+#include "Alias/InclusionBased/AserPTA/PointerAnalysis/Program/CallSite.h"
+#include "Alias/InclusionBased/AserPTA/PointerAnalysis/Solver/PartialUpdateSolver.h"
+#include "Alias/InclusionBased/AserPTA/PreProcessing/Passes/CanonicalizeGEPPass.h"
+#include "Alias/InclusionBased/AserPTA/PreProcessing/Passes/InsertGlobalCtorCallPass.h"
+#include "Alias/InclusionBased/AserPTA/PreProcessing/Passes/LoweringMemCpyPass.h"
+#include "Alias/InclusionBased/AserPTA/PreProcessing/Passes/RemoveExceptionHandlerPass.h"
 #include "TestUtils/LLVMHelpers.h"
 
 #include <llvm/IR/Instructions.h>

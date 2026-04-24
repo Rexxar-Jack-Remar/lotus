@@ -1,7 +1,7 @@
 #include "Analysis/NullPointer/ContextSensitiveNullFlowAnalysis.h"
 
-#include "Alias/DyckAA/DyckAliasAnalysis.h"
-#include "Alias/DyckAA/DyckCallGraphNode.h"
+#include "Alias/UnificationBased/DyckAA/DyckAliasAnalysis.h"
+#include "Alias/UnificationBased/DyckAA/DyckCallGraphNode.h"
 #include "Analysis/NullPointer/API.h"
 #include "Analysis/NullPointer/NullEquivalenceAnalysis.h"
 #include "Dataflow/ControlFlow/InterCFG.h"

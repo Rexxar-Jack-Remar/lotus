@@ -1,5 +1,5 @@
-#include "Alias/LotusAA/Engine/InterProceduralPass.h"
-#include "Alias/LotusAA/Engine/IntraProceduralAnalysis.h"
+#include "Alias/InclusionBased/LotusAA/Engine/InterProceduralPass.h"
+#include "Alias/InclusionBased/LotusAA/Engine/IntraProceduralAnalysis.h"
 #include "IR/GSA/GSA.h"
 #include "IR/GVFG/GuardedValueFlowGraph.h"
 #include "IR/GVFG/GuardedValueFlowSolver.h"

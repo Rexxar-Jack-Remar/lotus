@@ -14,7 +14,7 @@
 //   call f(args); assume(false); unreachable }. 3) Compute safety conditions
 //   (paper §4 Fig. 3), negate, bound/simplify (paper §6), insert assumes.
 
-#include "Alias/AliasAnalysisWrapper/AliasAnalysisWrapper.h"
+#include "Alias/Infrastructure/AliasAnalysisWrapper/AliasAnalysisWrapper.h"
 #include "FailureDirectedTrimmingImpl.h"
 #include "Verification/FailureDirectedTrimming/FailureDirectedTrimming.h"
 

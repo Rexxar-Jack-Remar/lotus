@@ -14,7 +14,7 @@ The technique combines:
 * A symbolic Range Analysis pass, and
 * A constraint solver for strict inequalities.
 
-* **Location**: ``lib/Alias/SRAA``
+* **Location**: ``lib/Alias/Specialized/SRAA``
 
 Highlights
 ==========
@@ -262,4 +262,3 @@ Summary of Properties
 ================
 End of document.
 ================
-

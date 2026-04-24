@@ -18,11 +18,11 @@
 
 #include "IR/SVFG/SVFGBuilder.h"
 
-#include "Alias/AserPTA/PointerAnalysis/Context/NoCtx.h"
-#include "Alias/AserPTA/PointerAnalysis/Graph/ConstraintGraph/CGObjNode.h"
-#include "Alias/AserPTA/PointerAnalysis/Models/LanguageModel/DefaultLangModel/DefaultLangModel.h"
-#include "Alias/AserPTA/PointerAnalysis/Models/MemoryModel/FieldSensitive/FSMemModel.h"
-#include "Alias/AserPTA/PointerAnalysis/Solver/DeepPropagation.h"
+#include "Alias/InclusionBased/AserPTA/PointerAnalysis/Context/NoCtx.h"
+#include "Alias/InclusionBased/AserPTA/PointerAnalysis/Graph/ConstraintGraph/CGObjNode.h"
+#include "Alias/InclusionBased/AserPTA/PointerAnalysis/Models/LanguageModel/DefaultLangModel/DefaultLangModel.h"
+#include "Alias/InclusionBased/AserPTA/PointerAnalysis/Models/MemoryModel/FieldSensitive/FSMemModel.h"
+#include "Alias/InclusionBased/AserPTA/PointerAnalysis/Solver/DeepPropagation.h"
 #include "IR/ICFG/ICFG.h"
 #include "IR/SVFG/SVFG.h"
 #include "IR/SVFG/SVFGEdge.h"
@@ -50,9 +50,9 @@
 #undef DEBUG_TYPE
 #endif
 #define DEBUG_TYPE "SVFGBuilder"
-#include "Alias/AserPTA/PointerAnalysis/Solver/PartialUpdateSolver.h"
-#include "Alias/AserPTA/PointerAnalysis/Solver/SolverBase.h"
-#include "Alias/AserPTA/PointerAnalysis/Solver/WavePropagation.h"
+#include "Alias/InclusionBased/AserPTA/PointerAnalysis/Solver/PartialUpdateSolver.h"
+#include "Alias/InclusionBased/AserPTA/PointerAnalysis/Solver/SolverBase.h"
+#include "Alias/InclusionBased/AserPTA/PointerAnalysis/Solver/WavePropagation.h"
 
 #include <llvm/IR/IntrinsicInst.h>
 

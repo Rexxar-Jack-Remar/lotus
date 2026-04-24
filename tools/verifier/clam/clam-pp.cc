@@ -29,7 +29,7 @@
 #include "llvm_seahorn/Transforms/Scalar.h"
 #endif
 
-#include "Alias/seadsa/InitializePasses.hh"
+#include "Alias/UnificationBased/seadsa/InitializePasses.hh"
 
 static llvm::cl::opt<std::string>
     InputFilename(llvm::cl::Positional,

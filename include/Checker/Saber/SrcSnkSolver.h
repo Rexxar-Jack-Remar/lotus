@@ -8,7 +8,7 @@
 #ifndef SRC_SNK_SOLVER_H
 #define SRC_SNK_SOLVER_H
 
-#include "Alias/DDA/DPItem.h"
+#include "Alias/DemandDriven/DDA/DPItem.h"
 #include "IR/SVFG/SVFG.h"
 
 #include <deque>

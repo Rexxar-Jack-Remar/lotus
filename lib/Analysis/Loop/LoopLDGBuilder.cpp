@@ -10,7 +10,7 @@
 #include "Analysis/Loop/LoopIterationSpaceAnalysis.h"
 #include "Analysis/Loop/MemoryCloningAnalysis.h"
 
-#include "Alias/Spec/AliasSpecManager.h"
+#include "Alias/Infrastructure/Spec/AliasSpecManager.h"
 
 #include <queue>
 #include <unordered_set>

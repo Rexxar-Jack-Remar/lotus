@@ -5,9 +5,9 @@
 
 #include "seahorn/Support/SeaDebug.h"
 
-#include "Alias/seadsa/CallGraphUtils.hh"
-#include "Alias/seadsa/DsaAnalysis.hh"
-#include "Alias/seadsa/Global.hh"
+#include "Alias/UnificationBased/seadsa/CallGraphUtils.hh"
+#include "Alias/UnificationBased/seadsa/DsaAnalysis.hh"
+#include "Alias/UnificationBased/seadsa/Global.hh"
 
 #include "seahorn/Expr/ExprApi.hh"
 #include "seahorn/Expr/ExprOpArray.hh"

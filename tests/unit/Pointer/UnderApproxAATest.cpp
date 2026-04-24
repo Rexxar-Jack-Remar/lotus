@@ -3,8 +3,8 @@
  * @brief Unit tests for UnderApproxAA/EquivDB must-alias inference.
  */
 
-#include "Alias/UnderApproxAA/EquivDB.h"
-#include "Alias/UnderApproxAA/UnderApproxAA.h"
+#include "Alias/Specialized/UnderApproxAA/EquivDB.h"
+#include "Alias/Specialized/UnderApproxAA/UnderApproxAA.h"
 #include "TestUtils/LLVMHelpers.h"
 
 #include <memory>

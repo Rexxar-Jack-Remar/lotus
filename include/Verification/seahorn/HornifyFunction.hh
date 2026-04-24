@@ -9,7 +9,7 @@
 #include "seahorn/LiveSymbols.hh"
 #include "seahorn/UfoOpSem.hh"
 
-#include "Alias/seadsa/ShadowMem.hh"
+#include "Alias/UnificationBased/seadsa/ShadowMem.hh"
 
 /// Constructs Horn clauses for a single function
 

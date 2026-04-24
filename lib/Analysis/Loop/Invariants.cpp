@@ -3,7 +3,7 @@
  */
 #include "Analysis/Loop/Invariants.h"
 
-#include "Alias/Spec/AliasSpecManager.h"
+#include "Alias/Infrastructure/Spec/AliasSpecManager.h"
 
 namespace lotus {
 namespace analysis {

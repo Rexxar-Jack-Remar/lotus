@@ -35,12 +35,12 @@
 #include "crab/output/json/write_json.hh"
 #include "crab/path_analysis/path_analyzer.hpp"
 
-#include "seadsa/AllocWrapInfo.hh"
-#include "seadsa/CompleteCallGraph.hh"
-#include "seadsa/DsaLibFuncInfo.hh"
-#include "seadsa/InitializePasses.hh"
-#include "seadsa/Printer.hh"
-#include "seadsa/support/Debug.h"
+#include "Alias/UnificationBased/seadsa/AllocWrapInfo.hh"
+#include "Alias/UnificationBased/seadsa/CompleteCallGraph.hh"
+#include "Alias/UnificationBased/seadsa/DsaLibFuncInfo.hh"
+#include "Alias/UnificationBased/seadsa/InitializePasses.hh"
+#include "Alias/UnificationBased/seadsa/Printer.hh"
+#include "Alias/UnificationBased/seadsa/support/Debug.h"
 
 #include "crab/analysis/bwd_analyzer.hpp"
 #include "crab/analysis/dataflow/assertion_crawler.hpp"

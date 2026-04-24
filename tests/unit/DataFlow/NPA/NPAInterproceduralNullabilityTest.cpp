@@ -1,4 +1,4 @@
-#include "Alias/AliasAnalysisWrapper/AliasAnalysisWrapper.h"
+#include "Alias/Infrastructure/AliasAnalysisWrapper/AliasAnalysisWrapper.h"
 #include "Dataflow/NPA/Analyses/Inter/InterNullability.h"
 #include "TestUtils/LLVMHelpers.h"
 

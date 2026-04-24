@@ -10,7 +10,7 @@ context sensitivities, memory models, and solver algorithms. It targets
 large C/C++ programs and supports both **whole-program** and **modular**
 analyses.
 
-* **Location**: ``lib/Alias/AserPTA``
+* **Location**: ``lib/Alias/InclusionBased/AserPTA``
 * **Design**: Constraint-based, graph-driven
 * **Key Features**:
   - Multiple context sensitivities (CI, K-call-site, K-origin)
@@ -125,5 +125,4 @@ The standalone driver can be invoked as:
 
 In Lotus, AserPTA is also accessible through the AA wrapper and configuration
 files that select it as the primary alias analysis engine.
-
 

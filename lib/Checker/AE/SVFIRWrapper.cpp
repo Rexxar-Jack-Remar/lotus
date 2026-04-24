@@ -6,14 +6,14 @@
 
 #include "Checker/AE/SVFIRWrapper.h"
 
-#include "Alias/AserPTA/PointerAnalysis/Context/NoCtx.h"
-#include "Alias/AserPTA/PointerAnalysis/Graph/CallGraph.h"
-#include "Alias/AserPTA/PointerAnalysis/Models/LanguageModel/DefaultLangModel/DefaultLangModel.h"
-#include "Alias/AserPTA/PointerAnalysis/Models/MemoryModel/FieldSensitive/FSMemModel.h"
-#include "Alias/AserPTA/PointerAnalysis/Models/MemoryModel/FieldSensitive/FSObject.h"
-#include "Alias/AserPTA/PointerAnalysis/PointerAnalysisPass.h"
-#include "Alias/AserPTA/PointerAnalysis/Solver/PointsTo/BitVectorPTS.h"
-#include "Alias/AserPTA/PointerAnalysis/Solver/WavePropagation.h"
+#include "Alias/InclusionBased/AserPTA/PointerAnalysis/Context/NoCtx.h"
+#include "Alias/InclusionBased/AserPTA/PointerAnalysis/Graph/CallGraph.h"
+#include "Alias/InclusionBased/AserPTA/PointerAnalysis/Models/LanguageModel/DefaultLangModel/DefaultLangModel.h"
+#include "Alias/InclusionBased/AserPTA/PointerAnalysis/Models/MemoryModel/FieldSensitive/FSMemModel.h"
+#include "Alias/InclusionBased/AserPTA/PointerAnalysis/Models/MemoryModel/FieldSensitive/FSObject.h"
+#include "Alias/InclusionBased/AserPTA/PointerAnalysis/PointerAnalysisPass.h"
+#include "Alias/InclusionBased/AserPTA/PointerAnalysis/Solver/PointsTo/BitVectorPTS.h"
+#include "Alias/InclusionBased/AserPTA/PointerAnalysis/Solver/WavePropagation.h"
 
 namespace lotus {
 namespace analysis {

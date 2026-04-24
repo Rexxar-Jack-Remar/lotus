@@ -9,7 +9,7 @@ Sea-DSA is a **context-sensitive, field-sensitive** alias and memory analysis
 based on **Data Structure Analysis (DSA)**. It builds **heap graphs** that
 summarize program memory and supports modular, interprocedural reasoning.
 
-* **Location**: ``lib/Alias/seadsa``
+* **Location**: ``lib/Alias/UnificationBased/seadsa``
 * **Tools**: ``sea-dsa-dg``, ``seadsa-tool``
 * **Use Cases**: Precise mod/ref information, call-graph construction,
   memory-shape reasoning
@@ -72,7 +72,6 @@ patterns, pointer relationships, and potential memory-related issues in programs
 
 Sea-DSA results are consumed by other analyses (e.g., mod/ref, verification
 tools) to obtain a precise view of heap structure and aliasing.
-
 
 
 

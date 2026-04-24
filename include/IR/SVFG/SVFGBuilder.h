@@ -22,7 +22,7 @@
 //
 // SVFGBuilder: Production-ready builder using AserPTA for pointer analysis.
 //
-// This builder integrates with AserPTA (lib/Alias/AserPTA) which provides:
+// This builder integrates with AserPTA (lib/Alias/InclusionBased/AserPTA) which provides:
 // - Context-insensitive and k-call-site sensitive analysis
 // - Field-sensitive and field-insensitive memory models
 // - Multiple solver algorithms (Andersen, WavePropagation, DeepPropagation)

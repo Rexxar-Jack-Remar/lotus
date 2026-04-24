@@ -2,9 +2,9 @@
 
 #include "Checker/Concurrency/ConcurrencyChecker.h"
 
-#include "Alias/AliasAnalysisWrapper/AliasAnalysisWrapper.h"
-#include "Alias/seadsa/DsaAnalysis.hh"
-#include "Alias/seadsa/InitializePasses.hh"
+#include "Alias/Infrastructure/AliasAnalysisWrapper/AliasAnalysisWrapper.h"
+#include "Alias/UnificationBased/seadsa/DsaAnalysis.hh"
+#include "Alias/UnificationBased/seadsa/InitializePasses.hh"
 #include "Checker/Concurrency/ConcurrencyAnalysisDumper.h"
 #include "Concurrency/MHP/HappensBeforeAnalysis.h"
 #include "Concurrency/Utils/ThreadAPI.h"

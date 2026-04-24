@@ -5,7 +5,7 @@
 #include "clam/CfgBuilderParams.hh"
 #include "clam/CrabDomainParser.hh"
 #include "clam/HeapAbstraction.hh"
-#include "seadsa/support/Debug.h"
+#include "Alias/UnificationBased/seadsa/support/Debug.h"
 
 namespace clam {
 CrabBuilderPrecision CrabTrackLev;

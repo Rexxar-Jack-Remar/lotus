@@ -3,8 +3,8 @@
 
 #include "seahorn/config.h"
 
-#include "Alias/seadsa/DsaAnalysis.hh"
-#include "Alias/seadsa/ShadowMem.hh"
+#include "Alias/UnificationBased/seadsa/DsaAnalysis.hh"
+#include "Alias/UnificationBased/seadsa/ShadowMem.hh"
 
 using namespace llvm;
 

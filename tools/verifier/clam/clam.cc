@@ -26,8 +26,8 @@
 #include "Verification/clam/Clam.hh"
 #include "Verification/clam/Passes.hh"
 
-#include "Alias/seadsa/InitializePasses.hh"
-#include "Alias/seadsa/support/RemovePtrToInt.hh"
+#include "Alias/UnificationBased/seadsa/InitializePasses.hh"
+#include "Alias/UnificationBased/seadsa/support/RemovePtrToInt.hh"
 
 extern llvm::cl::OptionCategory ClamOptCat;
 

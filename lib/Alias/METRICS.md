@@ -97,7 +97,7 @@ So today **points-to size** metrics are filled for **SparrowAA, AserPTA, TPA, Co
 ## Files
 
 - **Design**: this file (`lib/Alias/METRICS.md`).
-- **API**: `PointerAnalysisMetrics` and `collectMetricsFromWrapper()` in `lib/Alias/Metrics/` (see header and implementation).
+- **API**: `PointerAnalysisMetrics` and `collectMetricsFromWrapper()` in `lib/Alias/Infrastructure/Metrics/` (see header and implementation).
 - **Wrapper**: `getPointsToSetSize()` for SparrowAA and TPA; `getPointsToSet()` for SparrowAA (and AserPTA fallback); `getIndirectCallTargets()` for SparrowAA and TPA.
 
 ## References

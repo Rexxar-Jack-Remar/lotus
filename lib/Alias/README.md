@@ -54,20 +54,26 @@ This directory contains various alias analysis implementations and toolkits used
 
 ## Subdirectories
 
-`lib/Alias/` contains both native Lotus analyses and wrappers around external implementations.
+`lib/Alias/` is now organized by higher-level taxonomy:
 
-- `DDA/`: demand-driven pointer analysis infrastructure, including `FlowDDA` and `ContextDDA`. The design was originally inspired by SVF's demand-driven analyses, but the code in this tree was migrated and reimplemented by the Lotus team and should be treated as a native Lotus subdirectory rather than a vendored third-party component.
-- `DFPA/`: indirect-call target analysis with coarse whole-program propagation
-  and demand-driven refinement.
-- `DyckAA/`: unification-based alias analysis using Dyck-style constraints.
-- `seadsa/`: SeaDsa-based heap and alias analysis integration.
+- `InclusionBased/`: inclusion-style whole-program pointer analyses such as
+  `AserPTA`, `SparrowAA`, `LotusAA`, `TPA`, and `CclyzerAA`.
+- `UnificationBased/`: unification/CFL-style analyses such as `DyckAA` and
+  `seadsa`.
+- `DemandDriven/`: on-demand query-driven analyses such as `DDA`.
+- `Specialized/`: targeted analyses such as `AllocAA`, `DFPA`, `FPA`, `SRAA`,
+  `TypeQualifier`, and `UnderApproxAA`.
+- `Infrastructure/`: shared support layers such as `AliasAnalysisWrapper`,
+  `PtsSet`, `Metrics`, and `Spec`.
+- `Dynamic/`: runtime-based alias instrumentation and validation support. This
+  remains directly under `lib/Alias/` by design.
 
 ## Comparing precision and soundness: metrics
 
-To compare pointer analyses (e.g. SparrowAA vs TPA vs AserPTA), use the built-in **metrics** layer under `lib/Alias/Metrics/`:
+To compare pointer analyses (e.g. SparrowAA vs TPA vs AserPTA), use the built-in **metrics** layer under `lib/Alias/Infrastructure/Metrics/`:
 
 - **Design**: See [METRICS.md](METRICS.md) for the rationale and mapping from Java points-to metrics (e.g. hybrid context-sensitivity, PLDI’13) to C/C++.
-- **API**: `PointerAnalysisMetrics` and `collectMetricsFromWrapper(AliasAnalysisWrapper&, Module&, PointerAnalysisMetrics&)` in `include/Alias/Metrics/PointerAnalysisMetrics.h`.
+- **API**: `PointerAnalysisMetrics` and `collectMetricsFromWrapper(AliasAnalysisWrapper&, Module&, PointerAnalysisMetrics&)` in `include/Alias/Infrastructure/Metrics/PointerAnalysisMetrics.h`.
 - **Metrics**: Points-to set size (avg/median/max), call-graph edges, indirect-call sites and “poly” indirect calls (sites with >1 target).
 
 **Which analyses support which metrics (via the wrapper):**

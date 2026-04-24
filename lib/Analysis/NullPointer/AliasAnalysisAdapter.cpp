@@ -6,7 +6,7 @@
 
 #include "Analysis/NullPointer/AliasAnalysisAdapter.h"
 
-#include "Alias/DyckAA/DyckAliasAnalysis.h"
+#include "Alias/UnificationBased/DyckAA/DyckAliasAnalysis.h"
 
 #include <llvm/IR/Constants.h>
 #include <llvm/IR/Function.h>

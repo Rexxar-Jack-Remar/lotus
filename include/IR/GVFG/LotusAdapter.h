@@ -1,6 +1,6 @@
 #pragma once
 
-#include "Alias/LotusAA/Engine/InterProceduralPass.h"
+#include "Alias/InclusionBased/LotusAA/Engine/InterProceduralPass.h"
 #include "IR/GVFG/GuardedValueFlowGraph.h"
 
 #include <llvm/Pass.h>

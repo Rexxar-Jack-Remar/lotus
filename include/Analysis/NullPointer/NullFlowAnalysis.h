@@ -21,8 +21,8 @@
 #ifndef NULLPOINTER_NULLFLOWANALYSIS_H
 #define NULLPOINTER_NULLFLOWANALYSIS_H
 
-#include "Alias/DyckAA/DyckAliasAnalysis.h"
-#include "Alias/DyckAA/DyckVFG.h"
+#include "Alias/UnificationBased/DyckAA/DyckAliasAnalysis.h"
+#include "Alias/UnificationBased/DyckAA/DyckVFG.h"
 
 #include <llvm/Pass.h>
 #include <llvm/Support/CommandLine.h>

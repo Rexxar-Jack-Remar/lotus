@@ -130,7 +130,7 @@ inline llvm::FunctionPass *createInstCombine() {
 } // namespace seahorn
 #endif
 
-#include "Alias/seadsa/ShadowMem.hh"
+#include "Alias/UnificationBased/seadsa/ShadowMem.hh"
 namespace seahorn {
 inline llvm::Pass *createSeaDsaShadowMemPass() {
   return seadsa::createShadowMemPass();

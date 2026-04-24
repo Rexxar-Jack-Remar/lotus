@@ -3,9 +3,9 @@
 #include "Fuzzing/Analysis/DAFL.h"
 #include "Fuzzing/Analysis/TargetDetection.h"
 
-#include "Alias/DyckAA/DyckAliasAnalysis.h"
-#include "Alias/DyckAA/DyckModRefAnalysis.h"
-#include "Alias/DyckAA/DyckVFG.h"
+#include "Alias/UnificationBased/DyckAA/DyckAliasAnalysis.h"
+#include "Alias/UnificationBased/DyckAA/DyckModRefAnalysis.h"
+#include "Alias/UnificationBased/DyckAA/DyckVFG.h"
 
 #include <llvm/ADT/SetVector.h>
 #include <llvm/ADT/SmallSet.h>

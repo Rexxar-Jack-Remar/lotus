@@ -8,7 +8,7 @@ Overview
 The FPA module implements several **function pointer analysis** algorithms to
 resolve indirect calls with different precision/performance trade-offs.
 
-* **Location**: ``lib/Alias/FPA``
+* **Location**: ``lib/Alias/Specialized/FPA``
 * **Focus**: Indirect call resolution and call-graph construction
 * **Algorithms**:
   - **FLTA** (1) – Flow-insensitive, type-based analysis
@@ -62,5 +62,4 @@ Examples
 FPA results can be consumed directly (for security analyses or refactoring)
 or fed into other components that benefit from precise indirect call
 resolution.
-
 

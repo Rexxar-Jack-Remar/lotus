@@ -412,7 +412,7 @@ CLAM && Crab
    limitations under the License.
 
 
-lib/Alias/SparrowAA
+lib/Alias/InclusionBased/SparrowAA
 -------------------------------------------------------------------------------
 
 (migrated to LLVM 14 by rainoftime)

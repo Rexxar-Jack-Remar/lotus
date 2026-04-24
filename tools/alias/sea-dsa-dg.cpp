@@ -15,16 +15,16 @@
 #include "llvm/Support/Signals.h"
 #include "llvm/Support/raw_ostream.h"
 
-#include "Alias/AliasAnalysisWrapper/CLIUtils.h"
-#include "Alias/seadsa/DsaAnalysis.hh"
-#include "Alias/seadsa/DsaPrinter.hh"
-#include "Alias/seadsa/Global.hh"
-#include "Alias/seadsa/InitializePasses.hh"
+#include "Alias/Infrastructure/AliasAnalysisWrapper/CLIUtils.h"
+#include "Alias/UnificationBased/seadsa/DsaAnalysis.hh"
+#include "Alias/UnificationBased/seadsa/DsaPrinter.hh"
+#include "Alias/UnificationBased/seadsa/Global.hh"
+#include "Alias/UnificationBased/seadsa/InitializePasses.hh"
 
 // Add these includes for proper registration
-#include "Alias/seadsa/AllocWrapInfo.hh"
-#include "Alias/seadsa/DsaLibFuncInfo.hh"
-#include "Alias/seadsa/support/RemovePtrToInt.hh"
+#include "Alias/UnificationBased/seadsa/AllocWrapInfo.hh"
+#include "Alias/UnificationBased/seadsa/DsaLibFuncInfo.hh"
+#include "Alias/UnificationBased/seadsa/support/RemovePtrToInt.hh"
 
 static llvm::cl::opt<std::string>
     InputFilename(llvm::cl::Positional,

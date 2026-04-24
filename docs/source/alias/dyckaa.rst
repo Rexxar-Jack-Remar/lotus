@@ -10,7 +10,7 @@ Dyck **Context-Free Language (CFL) reachability** to model pointer
 relationships. It is designed for **maximum precision** and is well suited to
 function-pointer resolution and detailed value-flow reasoning.
 
-* **Location**: ``lib/Alias/DyckAA``
+* **Location**: ``lib/Alias/UnificationBased/DyckAA``
 * **Context**: Context-insensitive
 * **Precision**: Field-sensitive, CFL-based alias sets
 
@@ -150,5 +150,4 @@ Advanced Features
 - **DyckVFG**: Value Flow Graph construction for tracking value propagation
 - **ModRef Analysis**: Modified/Referenced analysis for optimization
 - **Call Graph**: Precise indirect call resolution
-
 

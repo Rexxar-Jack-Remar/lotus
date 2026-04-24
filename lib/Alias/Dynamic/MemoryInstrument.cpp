@@ -4,7 +4,7 @@
 #include "Alias/Dynamic/DynamicHooks.h"
 #include "Alias/Dynamic/FeatureCheck.h"
 #include "Alias/Dynamic/IDAssigner.h"
-#include "Alias/Spec/AliasSpecManager.h"
+#include "Alias/Infrastructure/Spec/AliasSpecManager.h"
 
 #include <llvm/IR/Constants.h>
 #include <llvm/IR/Instructions.h>

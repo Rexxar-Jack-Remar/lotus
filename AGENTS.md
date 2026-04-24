@@ -33,7 +33,7 @@ lotus/
 └── docs/              # Sphinx documentation (source/)
 ```
 
-**Convention**: `include/` holds headers; `lib/` holds `.cpp` sources. Directory names match between them (e.g., `include/Alias/DyckAA/`, `lib/Alias/DyckAA/`).
+**Convention**: `include/` holds headers; `lib/` holds `.cpp` sources. Directory names match between them (e.g., `include/Alias/UnificationBased/DyckAA/`, `lib/Alias/UnificationBased/DyckAA/`).
 
 ## Build System
 
@@ -118,4 +118,4 @@ LLVM (Module, Function, BasicBlock, Instruction) | Solvers
 
 - User guide, architecture, major components: `docs/source/user_guide/`
 - Developer guide (adding analyses, checkers, domains): `docs/source/developer/developer_guide.rst`
-- Component READMEs: e.g., `lib/Alias/LotusAA/README.md`, `lib/CFL/CSIndex/README.md`
+- Component READMEs: e.g., `lib/Alias/InclusionBased/LotusAA/README.md`, `lib/CFL/CSIndex/README.md`

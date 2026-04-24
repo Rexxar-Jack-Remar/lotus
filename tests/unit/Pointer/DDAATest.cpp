@@ -3,10 +3,10 @@
  * @brief Unit tests for SVF-style demand-driven analysis (DDA) on SVFG
  */
 
-#include "Alias/DDA/ContextDDA.h"
-#include "Alias/DDA/CxtDPItem.h"
-#include "Alias/DDA/DDAPass.h"
-#include "Alias/DDA/FlowDDA.h"
+#include "Alias/DemandDriven/DDA/ContextDDA.h"
+#include "Alias/DemandDriven/DDA/CxtDPItem.h"
+#include "Alias/DemandDriven/DDA/DDAPass.h"
+#include "Alias/DemandDriven/DDA/FlowDDA.h"
 #include "IR/SVFG/SVFG.h"
 #include "IR/SVFG/SVFGNode.h"
 #include "IR/SVFG/SVFGStats.h"

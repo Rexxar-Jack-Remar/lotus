@@ -7,7 +7,7 @@ Overview
 
 SparrowAA is an inclusion-based points-to analysis.
 
-* **Location**: ``lib/Alias/SparrowAA``
+* **Location**: ``lib/Alias/InclusionBased/SparrowAA``
 * **Algorithm**: Inclusion/subset-based pointer analysis with constraint graph construction and worklist-based solving.
 * **Typical Use**: Fast whole-program call-graph and mod/ref precomputation
 
@@ -36,7 +36,7 @@ Optimizations
 =============
 
 The implementation supports several optional optimizations (see the README in
-``lib/Alias/SparrowAA`` for details):
+``lib/Alias/InclusionBased/SparrowAA`` for details):
 
 * **HVN / HU** – Hash-based value numbering and Heintze–Ullman style
   equivalence to collapse redundant nodes.
@@ -72,4 +72,3 @@ In integrated settings (e.g., Clam or LotusAA), it can be selected through
 the corresponding configuration files or command-line switches.
 
 Note: this module have some redundancies with aserpta, and reuses some header files from it (from context abstraction).
-

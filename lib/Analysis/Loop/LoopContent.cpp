@@ -3,7 +3,7 @@
  */
 #include "Analysis/Loop/LoopContent.h"
 
-#include "Alias/Spec/AliasSpecManager.h"
+#include "Alias/Infrastructure/Spec/AliasSpecManager.h"
 #include "llvm/IR/CFG.h"
 
 #include <queue>

@@ -15,10 +15,10 @@
 #include "llvm/Pass.h"
 #include "llvm/Support/CommandLine.h"
 
-#include "Alias/seadsa/AllocWrapInfo.hh"
-#include "Alias/seadsa/DsaLibFuncInfo.hh"
-#include "Alias/seadsa/Global.hh"
-#include "Alias/seadsa/TopDown.hh"
+#include "Alias/UnificationBased/seadsa/AllocWrapInfo.hh"
+#include "Alias/UnificationBased/seadsa/DsaLibFuncInfo.hh"
+#include "Alias/UnificationBased/seadsa/Global.hh"
+#include "Alias/UnificationBased/seadsa/TopDown.hh"
 
 #include <optional>
 

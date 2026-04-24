@@ -4,9 +4,9 @@ CclyzerAA
 ``CclyzerAA`` is an alias-analysis integration layer for the cclyzer-style
 points-to pipeline.
 
-**Headers**: ``include/Alias/CclyzerAA/``
+**Headers**: ``include/Alias/InclusionBased/CclyzerAA/``
 
-**Implementation**: ``lib/Alias/CclyzerAA/``
+**Implementation**: ``lib/Alias/InclusionBased/CclyzerAA/``
 
 Overview
 --------
@@ -20,7 +20,7 @@ Primary entry point
 
 .. code-block:: cpp
 
-   #include "Alias/CclyzerAA/CclyzerAA.h"
+   #include "Alias/InclusionBased/CclyzerAA/CclyzerAA.h"
 
    lotus::cclyzer::CclyzerAA analysis;
    analysis.analyze(module);

@@ -13,7 +13,7 @@ Include headers:
 
 .. code-block:: cpp
 
-   #include "Alias/DyckAA/DyckAliasAnalysis.h"
+   #include "Alias/UnificationBased/DyckAA/DyckAliasAnalysis.h"
 
 Basic usage as LLVM pass:
 
@@ -24,7 +24,7 @@ Basic usage as LLVM pass:
    #include "llvm/IRReader/IRReader.h"
    #include "llvm/Support/SourceMgr.h"
    #include "llvm/IR/LegacyPassManager.h"
-   #include "Alias/DyckAA/DyckAliasAnalysis.h"
+   #include "Alias/UnificationBased/DyckAA/DyckAliasAnalysis.h"
    
    using namespace llvm;
    
@@ -76,7 +76,7 @@ Access Dyck graph:
 
 .. code-block:: cpp
 
-   #include "Alias/DyckAA/DyckGraph.h"
+   #include "Alias/UnificationBased/DyckAA/DyckGraph.h"
    
    DyckGraph *graph = DAA->getDyckGraph();
    
@@ -97,16 +97,16 @@ Include headers:
 
 .. code-block:: cpp
 
-   #include "Alias/AserPTA/PointerAnalysis/PointerAnalysis.h"
-   #include "Alias/AserPTA/PointerAnalysis/Context/Context.h"
-   #include "Alias/AserPTA/PointerAnalysis/Solver/Solver.h"
+   #include "Alias/InclusionBased/AserPTA/PointerAnalysis/PointerAnalysis.h"
+   #include "Alias/InclusionBased/AserPTA/PointerAnalysis/Context/Context.h"
+   #include "Alias/InclusionBased/AserPTA/PointerAnalysis/Solver/Solver.h"
 
 Configure and run analysis:
 
 .. code-block:: cpp
 
-   #include "Alias/AserPTA/PointerAnalysis/Program/Program.h"
-   #include "Alias/AserPTA/PointerAnalysis/PointerAnalysis.h"
+   #include "Alias/InclusionBased/AserPTA/PointerAnalysis/Program/Program.h"
+   #include "Alias/InclusionBased/AserPTA/PointerAnalysis/PointerAnalysis.h"
    
    using namespace aser;
    
@@ -152,7 +152,7 @@ Include headers:
 
 .. code-block:: cpp
 
-   #include "Alias/LotusAA/Engine/InterProceduralPass.h"
+   #include "Alias/InclusionBased/LotusAA/Engine/InterProceduralPass.h"
 
 Use as LLVM pass:
 
@@ -690,7 +690,7 @@ Include headers:
 
 .. code-block:: cpp
 
-   #include "Alias/AserPTA/PointerAnalysis/Model/MemModels.h"
+   #include "Alias/InclusionBased/AserPTA/PointerAnalysis/Model/MemModels.h"
 
 Query memory objects:
 
@@ -745,7 +745,7 @@ Here's a complete example of building a custom analysis tool:
    #include "llvm/IRReader/IRReader.h"
    #include "llvm/Support/SourceMgr.h"
    #include "llvm/IR/LegacyPassManager.h"
-   #include "Alias/DyckAA/DyckAliasAnalysis.h"
+   #include "Alias/UnificationBased/DyckAA/DyckAliasAnalysis.h"
    #include "IR/PDG/Core/ProgramDependencyGraph.h"
    #include "Dataflow/TaintAnalysis/TaintAnalysis.h"
    #include "Checker/KINT/MKintPass.h"

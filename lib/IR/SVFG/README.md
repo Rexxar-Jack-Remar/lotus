@@ -2,7 +2,7 @@
 
 This is a re-implementation of the Sparse Value-Flow Graph (SVFG) in SVF. The SVFG provides a sparse representation of value flows, enabling efficient interprocedural analysis with Memory SSA integration.
 
-**This implementation uses [AserPTA](lib/Alias/AserPTA) as its points-to analysis engine** to compute points-to sets for building value-flow edges and Memory SSA.
+**This implementation uses [AserPTA](lib/Alias/InclusionBased/AserPTA) as its points-to analysis engine** to compute points-to sets for building value-flow edges and Memory SSA.
 
 ## What is SVFG?
 
@@ -59,7 +59,7 @@ AddrNode(x) --> CopyNode(p) --> LoadNode(y)
 
 ## DDA-Oriented Design Notes
 
-Lotus DDA (`lib/Alias/DDA`) consumes SVFG with a few strict assumptions:
+Lotus DDA (`lib/Alias/DemandDriven/DDA`) consumes SVFG with a few strict assumptions:
 
 - **Object-ID namespace is disjoint from SVFG node IDs**.
   - Object IDs represent abstract memory objects in edge guards.

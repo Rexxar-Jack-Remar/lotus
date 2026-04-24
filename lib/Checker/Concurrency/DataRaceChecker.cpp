@@ -4,7 +4,7 @@
  */
 #include "Checker/Concurrency/DataRaceChecker.h"
 
-#include "Alias/AliasAnalysisWrapper/AliasAnalysisWrapper.h"
+#include "Alias/Infrastructure/AliasAnalysisWrapper/AliasAnalysisWrapper.h"
 #include "Concurrency/MHP/HappensBeforeAnalysis.h"
 #include "Concurrency/Utils/CppAtomics.h"
 

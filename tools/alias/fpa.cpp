@@ -9,12 +9,12 @@
 #include "llvm/Support/PrettyStackTrace.h"
 #include "llvm/Support/Signals.h"
 
-#include "Alias/AliasAnalysisWrapper/CLIUtils.h"
-#include "Alias/FPA/Config.h"
-#include "Alias/FPA/FLTAPass.h"
-#include "Alias/FPA/KELPPass.h"
-#include "Alias/FPA/MLTADFPass.h"
-#include "Alias/FPA/MLTAPass.h"
+#include "Alias/Infrastructure/AliasAnalysisWrapper/CLIUtils.h"
+#include "Alias/Specialized/FPA/Config.h"
+#include "Alias/Specialized/FPA/FLTAPass.h"
+#include "Alias/Specialized/FPA/KELPPass.h"
+#include "Alias/Specialized/FPA/MLTADFPass.h"
+#include "Alias/Specialized/FPA/MLTAPass.h"
 
 #include <iostream>
 #include <memory>

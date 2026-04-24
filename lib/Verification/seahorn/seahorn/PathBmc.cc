@@ -42,8 +42,8 @@ seahorn::PathBmcTrace seahorn::PathBmcEngine::getTrace() {
 #include <optional>
 #include "clam/SeaDsaHeapAbstraction.hh"
 
-#include "Alias/seadsa/Global.hh"
-#include "Alias/seadsa/SeaMemorySSA.hh"
+#include "Alias/UnificationBased/seadsa/Global.hh"
+#include "Alias/UnificationBased/seadsa/SeaMemorySSA.hh"
 
 #include "llvm/ADT/DenseMap.h"
 #include "llvm/ADT/STLExtras.h"

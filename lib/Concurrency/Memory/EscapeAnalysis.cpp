@@ -1,5 +1,5 @@
 #include "Concurrency/Memory/EscapeAnalysis.h"
-#include "Alias/AliasAnalysisWrapper/AliasAnalysisWrapper.h"
+#include "Alias/Infrastructure/AliasAnalysisWrapper/AliasAnalysisWrapper.h"
 #include "Concurrency/Utils/ThreadAPI.h"
 
 #include <deque>

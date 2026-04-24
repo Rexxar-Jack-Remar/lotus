@@ -32,7 +32,7 @@
 #include "seahorn/Transforms/Utils/NameValues.hh"
 #include "seahorn/config.h"
 
-#include "Alias/seadsa/ShadowMem.hh"
+#include "Alias/UnificationBased/seadsa/ShadowMem.hh"
 
 namespace seahorn {
 // defined in HornCex.cc

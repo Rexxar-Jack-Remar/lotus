@@ -1,6 +1,6 @@
 #include "TestUtils/LLVMHelpers.h"
 
-#include "Alias/AliasAnalysisWrapper/AliasAnalysisWrapper.h"
+#include "Alias/Infrastructure/AliasAnalysisWrapper/AliasAnalysisWrapper.h"
 
 #include <llvm/AsmParser/Parser.h>
 #include <llvm/InitializePasses.h>
@@ -12,9 +12,9 @@
 
 #define private public
 #define protected public
-#include "Alias/LotusAA/Engine/InterProceduralPass.h"
-#include "Alias/LotusAA/Engine/IntraProceduralAnalysis.h"
-#include "Alias/LotusAA/Support/Config.h"
+#include "Alias/InclusionBased/LotusAA/Engine/InterProceduralPass.h"
+#include "Alias/InclusionBased/LotusAA/Engine/IntraProceduralAnalysis.h"
+#include "Alias/InclusionBased/LotusAA/Support/Config.h"
 #undef protected
 #undef private
 

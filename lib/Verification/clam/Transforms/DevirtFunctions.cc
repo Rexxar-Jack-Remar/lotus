@@ -682,7 +682,7 @@ void DevirtStats::dump() const {
 
 /* Template instantiations */
 // sea-dsa
-#include "seadsa/CompleteCallGraph.hh"
+#include "Alias/UnificationBased/seadsa/CompleteCallGraph.hh"
 namespace clam {
 template class CallSiteResolverByDsa<seadsa::CompleteCallGraph>;
 } // namespace clam

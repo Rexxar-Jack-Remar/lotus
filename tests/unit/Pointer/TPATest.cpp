@@ -4,10 +4,10 @@
  * analysis)
  */
 
-#include "Alias/TPA/PointerAnalysis/Analysis/SemiSparsePointerAnalysis.h"
-#include "Alias/TPA/PointerAnalysis/FrontEnd/SemiSparseProgramBuilder.h"
-#include "Alias/TPA/PointerAnalysis/Support/PtsSet.h"
-#include "Alias/TPA/Transforms/RunPrepass.h"
+#include "Alias/InclusionBased/TPA/PointerAnalysis/Analysis/SemiSparsePointerAnalysis.h"
+#include "Alias/InclusionBased/TPA/PointerAnalysis/FrontEnd/SemiSparseProgramBuilder.h"
+#include "Alias/InclusionBased/TPA/PointerAnalysis/Support/PtsSet.h"
+#include "Alias/InclusionBased/TPA/Transforms/RunPrepass.h"
 #include "TestUtils/LLVMHelpers.h"
 
 #include <llvm/IR/Instructions.h>

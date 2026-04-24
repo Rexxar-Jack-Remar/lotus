@@ -1,7 +1,7 @@
 Points-To Set Backends
 ======================
 
-``include/Alias/PtsSet/`` contains alternative data structures for representing
+``include/Alias/Infrastructure/PtsSet/`` contains alternative data structures for representing
 points-to sets inside alias analyses.
 
 **Backends in this tree**:

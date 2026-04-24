@@ -21,7 +21,7 @@
 #ifndef MHP_ANALYSIS_H
 #define MHP_ANALYSIS_H
 
-#include "Alias/AliasAnalysisWrapper/AliasAnalysisWrapper.h"
+#include "Alias/Infrastructure/AliasAnalysisWrapper/AliasAnalysisWrapper.h"
 #include "Concurrency/JoinTarget/JoinTargetAnalysis.h"
 #include "Concurrency/LockSet/LockSetAnalysis.h"
 #include "Concurrency/MHP/IMHPAnalysis.h"

@@ -1,6 +1,6 @@
 #include "IR/GVFG/LotusAdapter.h"
 
-#include "Alias/LotusAA/Engine/IntraProceduralAnalysis.h"
+#include "Alias/InclusionBased/LotusAA/Engine/IntraProceduralAnalysis.h"
 #include "IR/GVFG/ConditionRef.h"
 
 #include <string>

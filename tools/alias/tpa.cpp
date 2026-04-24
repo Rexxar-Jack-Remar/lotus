@@ -12,15 +12,15 @@ k-CFA at all calls; selective = 0-CFA at direct calls, k-CFA at indirect
 (default: klimit)
 */
 
-#include "Alias/AliasAnalysisWrapper/CLIUtils.h"
-#include "Alias/TPA/Context/ContextPolicy.h"
-#include "Alias/TPA/Context/KLimitContext.h"
-#include "Alias/TPA/PointerAnalysis/Analysis/SemiSparsePointerAnalysis.h"
-#include "Alias/TPA/PointerAnalysis/FrontEnd/SemiSparseProgramBuilder.h"
-#include "Alias/TPA/Transforms/RunPrepass.h"
-#include "Alias/TPA/Util/IO/PointerAnalysis/Printer.h"
-#include "Alias/TPA/Util/IO/PointerAnalysis/WriteDotFile.h"
-#include "Alias/TPA/Util/Log.h"
+#include "Alias/Infrastructure/AliasAnalysisWrapper/CLIUtils.h"
+#include "Alias/InclusionBased/TPA/Context/ContextPolicy.h"
+#include "Alias/InclusionBased/TPA/Context/KLimitContext.h"
+#include "Alias/InclusionBased/TPA/PointerAnalysis/Analysis/SemiSparsePointerAnalysis.h"
+#include "Alias/InclusionBased/TPA/PointerAnalysis/FrontEnd/SemiSparseProgramBuilder.h"
+#include "Alias/InclusionBased/TPA/Transforms/RunPrepass.h"
+#include "Alias/InclusionBased/TPA/Util/IO/PointerAnalysis/Printer.h"
+#include "Alias/InclusionBased/TPA/Util/IO/PointerAnalysis/WriteDotFile.h"
+#include "Alias/InclusionBased/TPA/Util/Log.h"
 #include "Utils/LLVM/IO/WriteIR.h"
 
 #include <cstdlib>

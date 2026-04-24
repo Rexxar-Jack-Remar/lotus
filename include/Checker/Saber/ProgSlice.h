@@ -7,7 +7,7 @@
 #ifndef PROGSLICE_H_
 #define PROGSLICE_H_
 
-#include "Alias/DDA/CxtDPItem.h"
+#include "Alias/DemandDriven/DDA/CxtDPItem.h"
 #include "Checker/Saber/SaberCondAllocator.h"
 #include "IR/SVFG/SVFG.h"
 

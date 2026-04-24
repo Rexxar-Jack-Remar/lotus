@@ -10,7 +10,7 @@
 #include "llvm/IR/InstIterator.h"
 #include "llvm/Transforms/Utils/CallPromotionUtils.h"
 
-#include "Alias/seadsa/CompleteCallGraph.hh"
+#include "Alias/UnificationBased/seadsa/CompleteCallGraph.hh"
 
 #undef DEBUG_TYPE
 #define DEBUG_TYPE "devirt"

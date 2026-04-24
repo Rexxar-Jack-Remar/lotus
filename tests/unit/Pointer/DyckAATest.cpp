@@ -7,7 +7,7 @@
  * It uses equivalence classes to merge pointers that may alias.
  */
 
-#include "Alias/DyckAA/DyckAliasAnalysis.h"
+#include "Alias/UnificationBased/DyckAA/DyckAliasAnalysis.h"
 #include "TestUtils/LLVMHelpers.h"
 
 #include <llvm/IR/Instructions.h>

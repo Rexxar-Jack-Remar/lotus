@@ -29,8 +29,8 @@
 #include "llvm/Transforms/Utils.h"
 #include "llvm/Transforms/Utils/Cloning.h"
 
-#include "Alias/seadsa/InitializePasses.hh"
-#include "Alias/seadsa/ShadowMem.hh"
+#include "Alias/UnificationBased/seadsa/InitializePasses.hh"
+#include "Alias/UnificationBased/seadsa/ShadowMem.hh"
 #include "seahorn/Analysis/CanFail.hh"
 #include "seahorn/Analysis/CutPointGraph.hh"
 #include "seahorn/Analysis/SeaBuiltinsInfo.hh"

@@ -33,14 +33,14 @@
 #include "Verification/seahorn/InitializePasses.hh"
 #include "Verification/seahorn/Passes.hh"
 
-#include "Alias/seadsa/InitializePasses.hh"
-#include "Alias/seadsa/support/RemovePtrToInt.hh"
+#include "Alias/UnificationBased/seadsa/InitializePasses.hh"
+#include "Alias/UnificationBased/seadsa/support/RemovePtrToInt.hh"
 
 #ifdef HAVE_LLVM_SEAHORN
 #include "llvm_seahorn/Transforms/Scalar.h"
 #endif
 
-#include "Alias/seadsa/InitializePasses.hh"
+#include "Alias/UnificationBased/seadsa/InitializePasses.hh"
 
 #include "Verification/seahorn/Expr/Smt/EZ3.hh"
 #include "Verification/seahorn/Support/SeaLog.hh"

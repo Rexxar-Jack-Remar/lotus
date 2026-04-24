@@ -3,9 +3,9 @@
  * CFL-reachability based alias analysis using fast unification.
  */
 
-#include "Alias/AliasAnalysisWrapper/CLIUtils.h"
-#include "Alias/DyckAA/DyckAliasAnalysis.h"
-#include "Alias/DyckAA/DyckCallGraph.h"
+#include "Alias/Infrastructure/AliasAnalysisWrapper/CLIUtils.h"
+#include "Alias/UnificationBased/DyckAA/DyckAliasAnalysis.h"
+#include "Alias/UnificationBased/DyckAA/DyckCallGraph.h"
 
 #include <llvm/ADT/Statistic.h>
 #include <llvm/IR/LLVMContext.h>
