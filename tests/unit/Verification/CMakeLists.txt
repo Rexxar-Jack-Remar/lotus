@@ -10,7 +10,6 @@ add_lotus_targeted_test(boolean_program_frontend_test BooleanProgramFrontendTest
                         LINK_LIBS
                         VerificationFrontend
                         NPADataFlow
-                        CanaryAliasAnalysisWrapper
                         CanaryParallel)
 
 set_tests_properties(sifa_symabs_smoke_test PROPERTIES TIMEOUT 900)

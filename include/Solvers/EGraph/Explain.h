@@ -28,6 +28,9 @@ template <typename L> struct FlatTerm {
     return fromNodeAndChildren(node, std::move(children));
   }
 
+  const RecExpr<L> &getRecExpr() const { return expr; }
+  std::string getString() const { return toString(); }
+
   std::string toString() const { return formatDisplay(*this); }
 
   bool hasRewriteForward() const {
@@ -62,6 +65,12 @@ template <typename L> struct FlatTerm {
       child = child.removeRewrites();
     }
     return copy;
+  }
+
+  FlatTerm rewrite(const PatternAst<L> &lhs, const PatternAst<L> &rhs) const {
+    std::unordered_map<Var, const FlatTerm<L> *> bindings;
+    makeBindings(*this, lhs, lhs.root(), bindings);
+    return fromPattern(rhs, rhs.root(), bindings);
   }
 
   void combineRewrites(const FlatTerm &other) {
@@ -106,6 +115,63 @@ template <typename L> struct FlatTerm {
   }
 
 private:
+  static FlatTerm
+  fromPattern(const PatternAst<L> &pattern, Id location,
+              const std::unordered_map<Var, const FlatTerm<L> *> &bindings) {
+    const auto &item = pattern[location];
+    if (item.isVar()) {
+      return *bindings.at(item.var());
+    }
+
+    std::vector<FlatTerm<L>> children;
+    children.reserve(item.node().children().size());
+    for (Id child : item.node().children()) {
+      children.push_back(fromPattern(pattern, child, bindings));
+    }
+    return fromNodeAndChildren(item.node(), std::move(children));
+  }
+
+  static void makeBindings(const FlatTerm<L> &term, const PatternAst<L> &pattern,
+                           Id location,
+                           std::unordered_map<Var, const FlatTerm<L> *> &bindings) {
+    const auto &item = pattern[location];
+    if (item.isVar()) {
+      auto it = bindings.find(item.var());
+      if (it != bindings.end()) {
+        if (!flattenedEqual(*it->second, term)) {
+          throw std::runtime_error(
+              "Invalid explanation: inconsistent variable binding in proof");
+        }
+      } else {
+        bindings.emplace(item.var(), &term);
+      }
+      return;
+    }
+
+    const auto &node = item.node();
+    if (!node.matches(term.expr[term.expr.root()])) {
+      throw std::runtime_error("Invalid explanation: proof rewrite root mismatch");
+    }
+    for (size_t i = 0; i < node.children().size(); ++i) {
+      makeBindings(term.children[i], pattern, node.children()[i], bindings);
+    }
+  }
+
+  static bool flattenedEqual(const FlatTerm<L> &lhs, const FlatTerm<L> &rhs) {
+    if (!lhs.expr[lhs.expr.root()].matches(rhs.expr[rhs.expr.root()])) {
+      return false;
+    }
+    if (lhs.children.size() != rhs.children.size()) {
+      return false;
+    }
+    for (size_t i = 0; i < lhs.children.size(); ++i) {
+      if (!flattenedEqual(lhs.children[i], rhs.children[i])) {
+        return false;
+      }
+    }
+    return true;
+  }
+
   static std::string formatDisplay(const FlatTerm &term) {
     const auto &root = term.expr[term.expr.root()];
     std::string out;
@@ -418,6 +484,14 @@ private:
   }
 
   static FlatExplanation flattenTree(const TreeTerm<L> &tree) {
+    if (tree.child_proofs.empty()) {
+      FlatExplanation proof;
+      proof.push_back(FlatTerm<L>::fromExpr(tree.expr, tree.expr.root()));
+      proof.front().backward_rule = tree.backward_rule;
+      proof.front().forward_rule = tree.forward_rule;
+      return proof;
+    }
+
     const auto &root = tree.expr[tree.expr.root()];
 
     std::vector<FlatExplanation> child_proofs;
@@ -849,6 +923,12 @@ nodeToExplanation(const EGraph<L, A> &egraph, Id id,
   return term;
 }
 
+template <typename L>
+inline std::shared_ptr<TreeTerm<L>>
+cloneTreeTerm(const std::shared_ptr<TreeTerm<L>> &term) {
+  return std::make_shared<TreeTerm<L>>(*term);
+}
+
 template <typename L, typename A>
 inline std::shared_ptr<TreeTerm<L>> explainAdjacent(
     const EGraph<L, A> &egraph, const ExplanationConnection &connection,
@@ -915,7 +995,7 @@ inline std::shared_ptr<TreeTerm<L>> explainAdjacent(
 
   std::shared_ptr<TreeTerm<L>> tree;
   if (connection.justification.isRule()) {
-    tree = nodeToExplanation(egraph, connection.next, node_cache);
+    tree = cloneTreeTerm(nodeToExplanation(egraph, connection.next, node_cache));
     if (connection.is_rewrite_forward) {
       tree->forward_rule = connection.justification.rule;
     } else {
@@ -924,7 +1004,8 @@ inline std::shared_ptr<TreeTerm<L>> explainAdjacent(
     tree->current = connection.next;
     tree->last = connection.current;
   } else {
-    tree = nodeToExplanation(egraph, connection.current, node_cache);
+    tree = std::make_shared<TreeTerm<L>>();
+    tree->expr = egraph.originalExpr(connection.current);
     const auto &left_node = egraph.originalNode(connection.current);
     const auto &right_node = egraph.originalNode(connection.next);
     if (left_node.matches(right_node)) {
@@ -1012,49 +1093,49 @@ inline bool checkEachExplain(const EGraph<L, A> &egraph,
 
   const auto &nodes = egraph.explanationNodes();
   for (size_t i = 0; i < nodes.size(); ++i) {
-    for (const auto &connection : nodes[i].neighbors) {
-      if (!connection.justification.isRule()) {
-        continue;
-      }
+    Id current = Id::fromIndex(i);
+    const auto &connection = nodes[i].parent_connection;
+    if (connection.next == current || !connection.justification.isRule()) {
+      continue;
+    }
 
-      auto it = by_name.find(connection.justification.rule);
-      if (it == by_name.end()) {
-        continue;
-      }
-      const auto *searcher_ast = it->second->searcher().getPatternAst();
-      const auto *applier_ast = it->second->applier().getPatternAst();
-      if (!searcher_ast || !applier_ast) {
-        continue;
-      }
+    auto it = by_name.find(connection.justification.rule);
+    if (it == by_name.end()) {
+      continue;
+    }
+    const auto *searcher_ast = it->second->searcher().getPatternAst();
+    const auto *applier_ast = it->second->applier().getPatternAst();
+    if (!searcher_ast || !applier_ast) {
+      continue;
+    }
 
-      EGraph<L, A> validation(egraph.analysis());
-      Id current_id = validation.addExpr(egraph.originalExpr(connection.current));
-      Id next_id = validation.addExpr(egraph.originalExpr(connection.next));
+    EGraph<L, A> validation(egraph.analysis());
+    Id current_id = validation.addExpr(egraph.originalExpr(current));
+    Id next_id = validation.addExpr(egraph.originalExpr(connection.next));
+    validation.rebuild();
+
+    const PatternAst<L> *lhs_ast =
+        connection.is_rewrite_forward ? searcher_ast : applier_ast;
+    const PatternAst<L> *rhs_ast =
+        connection.is_rewrite_forward ? applier_ast : searcher_ast;
+    Pattern<L> lhs_pattern(*lhs_ast);
+
+    auto matches = lhs_pattern.searchEClassWithLimit(validation, current_id, 8);
+    if (!matches || matches->substs.empty()) {
+      return false;
+    }
+
+    bool any_valid = false;
+    for (const auto &subst : matches->substs) {
+      Id applied = validation.addInstantiation(*rhs_ast, subst);
       validation.rebuild();
-
-      const PatternAst<L> *lhs_ast =
-          connection.is_rewrite_forward ? searcher_ast : applier_ast;
-      const PatternAst<L> *rhs_ast =
-          connection.is_rewrite_forward ? applier_ast : searcher_ast;
-      Pattern<L> lhs_pattern(*lhs_ast);
-
-      auto matches = lhs_pattern.searchEClassWithLimit(validation, current_id, 8);
-      if (!matches || matches->substs.empty()) {
-        return false;
+      if (validation.find(applied) == validation.find(next_id)) {
+        any_valid = true;
+        break;
       }
-
-      bool any_valid = false;
-      for (const auto &subst : matches->substs) {
-        Id applied = validation.addInstantiation(*rhs_ast, subst);
-        validation.rebuild();
-        if (validation.find(applied) == validation.find(next_id)) {
-          any_valid = true;
-          break;
-        }
-      }
-      if (!any_valid) {
-        return false;
-      }
+    }
+    if (!any_valid) {
+      return false;
     }
   }
   return true;

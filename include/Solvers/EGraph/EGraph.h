@@ -6,6 +6,14 @@
 #include "Solvers/EGraph/Subst.h"
 #include "Solvers/EGraph/UnionFind.h"
 
+#ifndef LOTUS_EGRAPH_ENABLE_JSON
+#define LOTUS_EGRAPH_ENABLE_JSON 1
+#endif
+
+#if LOTUS_EGRAPH_ENABLE_JSON
+#include "Utils/Formats/json11.hpp"
+#endif
+
 namespace lotus::egraph {
 
 template <typename L> struct ENodeOrVar;
@@ -194,10 +202,6 @@ public:
   }
 
   EGraph copyWithoutUnions(AnalysisT analysis) const {
-    if (!explanations_enabled_) {
-      throw std::runtime_error("Use withExplanationsEnabled before copying an "
-                               "egraph without unions");
-    }
     EGraph copy(std::move(analysis));
     for (const auto &node : nodes_) {
       copy.add(node);
@@ -425,10 +429,102 @@ public:
     return !equivs(expr1, expr2).empty();
   }
 
+  #if LOTUS_EGRAPH_ENABLE_JSON
+  json11::Json toJson() const {
+    if (!clean_) {
+      EGraph copy = *this;
+      copy.rebuild();
+      return copy.toJson();
+    }
+
+    json11::Json::array nodes_json;
+    nodes_json.reserve(nodes_.size());
+    for (const auto &node : nodes_) {
+      nodes_json.emplace_back(nodeToJson(node));
+    }
+
+    json11::Json::array classes_json;
+    auto class_refs = classes();
+    classes_json.reserve(class_refs.size());
+    for (const auto &class_ref : class_refs) {
+      const auto &klass = class_ref.get();
+      json11::Json::array class_nodes;
+      class_nodes.reserve(klass.nodes.size());
+      for (const auto &node : klass.nodes) {
+        class_nodes.emplace_back(nodeToJson(node));
+      }
+
+      json11::Json::array parents_json;
+      parents_json.reserve(klass.parents.size());
+      for (Id parent : klass.parents) {
+        parents_json.emplace_back(static_cast<int>(parent.value()));
+      }
+
+      classes_json.emplace_back(json11::Json::object{
+          {"id", static_cast<int>(klass.id.value())},
+          {"nodes", std::move(class_nodes)},
+          {"parents", std::move(parents_json)},
+      });
+    }
+
+    json11::Json::object root{
+        {"nodes", std::move(nodes_json)},
+        {"classes", std::move(classes_json)},
+        {"memo_size", static_cast<int>(memo_.size())},
+        {"clean", clean_},
+        {"explanations_enabled", explanations_enabled_},
+    };
+    return root;
+  }
+
+  static EGraph fromJson(const json11::Json &json, AnalysisT analysis = AnalysisT()) {
+    std::string error;
+    if (!json.is_object()) {
+      throw std::runtime_error("EGraph JSON must be an object");
+    }
+
+    const auto &obj = json.object_items();
+    auto classes_it = obj.find("classes");
+    if (classes_it == obj.end() || !classes_it->second.is_array()) {
+      throw std::runtime_error("EGraph JSON missing classes array");
+    }
+
+    std::vector<std::pair<L, Id>> enodes;
+    for (const auto &class_json : classes_it->second.array_items()) {
+      if (!class_json.is_object()) {
+        throw std::runtime_error("EClass JSON must be an object");
+      }
+      const auto &class_obj = class_json.object_items();
+      auto id_it = class_obj.find("id");
+      auto nodes_it = class_obj.find("nodes");
+      if (id_it == class_obj.end() || nodes_it == class_obj.end() ||
+          !id_it->second.is_number() || !nodes_it->second.is_array()) {
+        throw std::runtime_error("EClass JSON missing id or nodes");
+      }
+      Id class_id =
+          Id::fromIndex(static_cast<size_t>(id_it->second.int_value()));
+      for (const auto &node_json : nodes_it->second.array_items()) {
+        enodes.emplace_back(nodeFromJson(node_json), class_id);
+      }
+    }
+
+    return fromEnodes(std::move(enodes), std::move(analysis));
+  }
+
+  static EGraph parseJson(std::string_view text, AnalysisT analysis = AnalysisT()) {
+    std::string error;
+    auto json = json11::Json::parse(std::string(text), error);
+    if (!error.empty()) {
+      throw std::runtime_error("Failed to parse EGraph JSON: " + error);
+    }
+    return fromJson(json, std::move(analysis));
+  }
+  #endif
+
   RecExpr<L> idToExpr(Id id) const {
     std::unordered_map<Id, Id> cache;
     RecExpr<L> expr;
-    originalExprInternal(expr, id, cache);
+    idToExprInternal(expr, id, cache);
     return expr;
   }
 
@@ -495,6 +591,46 @@ public:
   }
 
 private:
+  #if LOTUS_EGRAPH_ENABLE_JSON
+  static json11::Json nodeToJson(const L &node) {
+    json11::Json::array children;
+    children.reserve(node.children().size());
+    for (Id child : node.children()) {
+      children.emplace_back(static_cast<int>(child.value()));
+    }
+    return json11::Json::object{{"op", displayNode(node)},
+                                {"children", std::move(children)}};
+  }
+
+  static L nodeFromJson(const json11::Json &json) {
+    if (!json.is_object()) {
+      throw std::runtime_error("Node JSON must be an object");
+    }
+    const auto &obj = json.object_items();
+    auto op_it = obj.find("op");
+    auto children_it = obj.find("children");
+    if (op_it == obj.end() || children_it == obj.end() ||
+        !op_it->second.is_string() || !children_it->second.is_array()) {
+      throw std::runtime_error("Node JSON missing op or children");
+    }
+
+    std::vector<Id> children;
+    children.reserve(children_it->second.array_items().size());
+    for (const auto &child_json : children_it->second.array_items()) {
+      if (!child_json.is_number()) {
+        throw std::runtime_error("Node child must be numeric");
+      }
+      children.push_back(Id::fromIndex(static_cast<size_t>(child_json.int_value())));
+    }
+
+    auto node = LanguageOps<L>::fromOp(op_it->second.string_value(), children);
+    if (!node) {
+      throw std::runtime_error("Failed to decode node from JSON");
+    }
+    return *node;
+  }
+  #endif
+
   template <typename SrcL, typename SrcA, typename DstL, typename DstA>
   friend struct LanguageMapper;
 
@@ -845,9 +981,12 @@ private:
       return it->second;
     }
 
-    const auto &node = classes_.at(find(id)).nodes.front();
-    auto materialized = node.mapChildren(
-        [&](Id child) { return idToExprInternal(expr, find(child), cache); });
+    const bool preserve_original = explanations_enabled_;
+    const auto &node =
+        preserve_original ? nodes_.at(id.index()) : classes_.at(find(id)).nodes.front();
+    auto materialized = node.mapChildren([&](Id child) {
+      return idToExprInternal(expr, preserve_original ? child : find(child), cache);
+    });
     Id added = expr.add(materialized);
     cache.emplace(id, added);
     return added;
@@ -932,18 +1071,13 @@ struct LanguageMapper {
     for (const auto &[node, id] : src_egraph.memo_) {
       dst_egraph.memo_.emplace(mapNode(node), id);
     }
-    for (const auto &[node, id] : src_egraph.uncanonical_memo_) {
-      dst_egraph.uncanonical_memo_.emplace(mapNode(node), id);
-    }
-
     dst_egraph.pending_ = src_egraph.pending_;
     for (const auto &id : src_egraph.analysis_pending_) {
       dst_egraph.analysis_pending_.insert(id);
     }
     dst_egraph.clean_ = src_egraph.clean_;
-    dst_egraph.explanations_enabled_ = src_egraph.explanations_enabled_;
-    dst_egraph.optimize_explanation_lengths_ =
-        src_egraph.optimize_explanation_lengths_;
+    dst_egraph.explanations_enabled_ = false;
+    dst_egraph.optimize_explanation_lengths_ = true;
 
     for (const auto &[id, klass] : src_egraph.classes_) {
       dst_egraph.classes_.emplace(id, mapEClass(klass));
@@ -951,12 +1085,6 @@ struct LanguageMapper {
     for (const auto &[discriminant, ids] : src_egraph.classes_by_op_) {
       dst_egraph.classes_by_op_.emplace(mapDiscriminant(discriminant), ids);
     }
-    for (const auto &event : src_egraph.union_events_) {
-      dst_egraph.union_events_.push_back({event.left, event.right,
-                                          event.justification, std::nullopt,
-                                          std::nullopt});
-    }
-    dst_egraph.explanation_nodes_ = src_egraph.explanation_nodes_;
 
     return dst_egraph;
   }
@@ -968,31 +1096,26 @@ struct SimpleLanguageMapper final : LanguageMapper<SrcL, SrcA, DstL, DstA> {
 
   typename DstL::Discriminant mapDiscriminant(
       const typename SrcL::Discriminant &discriminant) const override {
-    if constexpr (std::is_constructible_v<typename DstL::Discriminant,
-                                          typename SrcL::Discriminant>) {
-      return typename DstL::Discriminant(discriminant);
-    } else {
-      return static_cast<typename DstL::Discriminant>(discriminant);
-    }
+    static_assert(std::is_constructible_v<typename DstL::Discriminant,
+                                          typename SrcL::Discriminant>,
+                  "SimpleLanguageMapper requires a constructible target "
+                  "discriminant conversion");
+    return typename DstL::Discriminant(discriminant);
   }
 
   DstA mapAnalysis(const SrcA &analysis) const override {
-    if constexpr (std::is_constructible_v<DstA, SrcA>) {
-      return DstA(analysis);
-    } else {
-      (void)analysis;
-      return DstA{};
-    }
+    static_assert(std::is_constructible_v<DstA, SrcA>,
+                  "SimpleLanguageMapper requires a constructible target "
+                  "analysis conversion");
+    return DstA(analysis);
   }
 
   typename DstA::Data mapData(const typename SrcA::Data &data) const override {
-    if constexpr (std::is_constructible_v<typename DstA::Data,
-                                          typename SrcA::Data>) {
-      return typename DstA::Data(data);
-    } else {
-      (void)data;
-      return typename DstA::Data{};
-    }
+    static_assert(std::is_constructible_v<typename DstA::Data,
+                                          typename SrcA::Data>,
+                  "SimpleLanguageMapper requires a constructible target "
+                  "analysis data conversion");
+    return typename DstA::Data(data);
   }
 };
 

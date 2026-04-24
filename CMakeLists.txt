@@ -86,6 +86,9 @@ if(BUILD_EXAMPLES)
     add_subdirectory(examples)
 endif()
 
+option(LOTUS_EGRAPH_ENABLE_DOT "Enable DOT/Graphviz helpers in Lotus EGraph" ON)
+option(LOTUS_EGRAPH_ENABLE_JSON "Enable JSON serialization helpers in Lotus EGraph" ON)
+
 # Add tests if enabled
 option(BUILD_TESTS "Build tests" ON)
 if(BUILD_TESTS)

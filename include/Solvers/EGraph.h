@@ -2,7 +2,6 @@
 
 #include "Solvers/EGraph/Analysis.h"
 #include "Solvers/EGraph/DefineLanguage.h"
-#include "Solvers/EGraph/Dot.h"
 #include "Solvers/EGraph/EClass.h"
 #include "Solvers/EGraph/EGraph.h"
 #include "Solvers/EGraph/Explain.h"
@@ -20,3 +19,7 @@
 #include "Solvers/EGraph/UnionFind.h"
 #include "Solvers/EGraph/Util.h"
 #include "Solvers/EGraph/Version.h"
+
+#if LOTUS_EGRAPH_ENABLE_DOT
+#include "Solvers/EGraph/Dot.h"
+#endif

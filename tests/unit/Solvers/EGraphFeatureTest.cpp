@@ -1,5 +1,9 @@
 #include "Solvers/EGraph.h"
 
+#if LOTUS_EGRAPH_ENABLE_JSON
+#include "Utils/Formats/json11.hpp"
+#endif
+
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
@@ -89,8 +93,10 @@ TEST(EGraphFeatureTest, DotAndExplanationSurfacesAreAvailable) {
   EXPECT_EQ(flat.back().forward_rule, std::optional<Symbol>(Symbol("manual")));
   EXPECT_EQ(flat.back().expr.toString(), "b");
 
+#if LOTUS_EGRAPH_ENABLE_DOT
   std::string dot = toDot(egraph);
   EXPECT_NE(dot.find("digraph egraph"), std::string::npos);
+#endif
   EXPECT_STREQ(version(), "lotus-egraph-egg-port");
 }
 
@@ -104,10 +110,92 @@ TEST(EGraphFeatureTest, ExplanationUnavailableWithoutRecordedPath) {
   EXPECT_FALSE(explainEquivalence(egraph, a, b).has_value());
 }
 
+TEST(EGraphFeatureTest, IdToExprUsesCanonicalRepresentativeTerm) {
+  EGraph<SymbolLang> egraph;
+  Id a = egraph.addExpr(RecExpr<SymbolLang>::parse("a"));
+  Id b = egraph.addExpr(RecExpr<SymbolLang>::parse("b"));
+  egraph.rebuild();
+
+  egraph.unite(a, b, "manual");
+  egraph.rebuild();
+
+  EXPECT_EQ(egraph.idToExpr(a).toString(), "a");
+  EXPECT_EQ(egraph.idToExpr(b).toString(), "a");
+  EXPECT_EQ(egraph.originalExpr(b).toString(), "b");
+}
+
+TEST(EGraphFeatureTest, IdToExprPreservesUncanonicalShapeWithExplanations) {
+  EGraph<SymbolLang> egraph = EGraph<SymbolLang>().withExplanationsEnabled();
+  Id a = egraph.addUncanonical(SymbolLang::leaf("a"));
+  Id b = egraph.addUncanonical(SymbolLang::leaf("b"));
+  egraph.unite(a, b, "manual");
+  egraph.rebuild();
+
+  Id fa = egraph.addUncanonical(SymbolLang(Symbol("f"), {a}));
+  Id fb = egraph.addUncanonical(SymbolLang(Symbol("f"), {b}));
+  egraph.rebuild();
+
+  EXPECT_EQ(egraph.idToExpr(fa).toString(), "(f a)");
+  EXPECT_EQ(egraph.idToExpr(fb).toString(), "(f b)");
+  EXPECT_EQ(egraph.originalExpr(fa).toString(), "(f a)");
+  EXPECT_EQ(egraph.originalExpr(fb).toString(), "(f b)");
+}
+
+TEST(EGraphFeatureTest, DisablingExplanationsDropsUncanonicalIdentity) {
+  EGraph<SymbolLang> egraph = EGraph<SymbolLang>().withExplanationsEnabled();
+  Id a = egraph.addUncanonical(SymbolLang::leaf("a"));
+  Id b = egraph.addUncanonical(SymbolLang::leaf("b"));
+  egraph.unite(a, b, "manual");
+  egraph.rebuild();
+
+  Id fa = egraph.addUncanonical(SymbolLang(Symbol("f"), {a}));
+  Id fb = egraph.addUncanonical(SymbolLang(Symbol("f"), {b}));
+  egraph.rebuild();
+
+  EXPECT_EQ(egraph.idToExpr(fa).toString(), "(f a)");
+  EXPECT_EQ(egraph.idToExpr(fb).toString(), "(f b)");
+
+  auto disabled = egraph.withExplanationsDisabled();
+  EXPECT_FALSE(disabled.areExplanationsEnabled());
+  EXPECT_EQ(disabled.idToExpr(fa).toString(), "(f a)");
+  EXPECT_EQ(disabled.idToExpr(fb).toString(), "(f a)");
+}
+
 namespace {
 
 struct NoCycleAnalysis : NoAnalysis<SymbolLang> {
   bool allowEMatchingCycles() const { return false; }
+};
+
+struct BorrowedSearcher final : Searcher<SymbolLang> {
+  explicit BorrowedSearcher(const Pattern<SymbolLang> &pattern)
+      : pattern(pattern) {}
+
+  std::optional<SearchMatches<SymbolLang>>
+  searchEClassWithLimit(const EGraph<SymbolLang> &egraph, Id eclass,
+                        size_t limit) const override {
+    return pattern.searchEClassWithLimit(egraph, eclass, limit);
+  }
+
+  std::vector<Var> vars() const override { return pattern.vars(); }
+
+  const PatternAst<SymbolLang> *getPatternAst() const override {
+    return &pattern.ast();
+  }
+
+  const Pattern<SymbolLang> &pattern;
+};
+
+struct BorrowedVarCondition {
+  explicit BorrowedVarCondition(const Var &required) : required(required) {}
+
+  bool operator()(EGraph<SymbolLang> &, Id, const Subst &) const {
+    return true;
+  }
+
+  std::vector<Var> vars() const { return {required}; }
+
+  const Var &required;
 };
 
 } // namespace
@@ -152,6 +240,59 @@ TEST(EGraphFeatureTest, RunnerTreatsUnionOnlyRewriteAsProgress) {
   EXPECT_EQ(runner.egraph.numberOfClasses(), 1u);
 }
 
+TEST(EGraphFeatureTest, RunnerHookStopRecordsOtherReasonAndSkipsRuleApplication) {
+  auto rule = makeRewrite<SymbolLang>("expand", "a", "(f a)");
+
+  Runner<SymbolLang> runner;
+  runner.withExpr(RecExpr<SymbolLang>::parse("a"))
+      .withHook(std::function<std::optional<std::string>(Runner<SymbolLang> &)>(
+          [](auto &) -> std::optional<std::string> {
+            return std::string("hook stop");
+          }))
+      .run({rule});
+
+  ASSERT_EQ(runner.iterations.size(), 1u);
+  ASSERT_EQ(runner.stop_reason.kind, StopReasonKind::Other);
+  EXPECT_EQ(runner.stop_reason.other_message, "hook stop");
+  EXPECT_TRUE(runner.iterations.front().applied.empty());
+  ASSERT_TRUE(runner.iterations.front().stop_reason.has_value());
+  EXPECT_EQ(runner.iterations.front().stop_reason->kind, StopReasonKind::Other);
+  EXPECT_EQ(runner.iterations.front().stop_reason->other_message, "hook stop");
+}
+
+TEST(EGraphFeatureTest, RunnerSearchLimitStopSkipsApplyPhase) {
+  auto rule = makeRewrite<SymbolLang>("expand", "a", "(f a)");
+
+  Runner<SymbolLang> runner;
+  runner.withExpr(RecExpr<SymbolLang>::parse("a"))
+      .withNodeLimit(0)
+      .run({rule});
+
+  ASSERT_EQ(runner.iterations.size(), 1u);
+  ASSERT_EQ(runner.stop_reason.kind, StopReasonKind::NodeLimit);
+  EXPECT_EQ(runner.stop_reason.limit, 1u);
+  EXPECT_TRUE(runner.iterations.front().applied.empty());
+  EXPECT_EQ(runner.egraph.totalSize(), 1u);
+}
+
+TEST(EGraphFeatureTest, RunnerBackoffDoNotBanDoesNotOverflowSearchLimit) {
+  auto rule = makeRewrite<SymbolLang>("self", "a", "a");
+
+  Runner<SymbolLang> runner;
+  BackoffScheduler<SymbolLang, NoAnalysis<SymbolLang>> scheduler;
+  scheduler.doNotBan("self");
+
+  runner.withExpr(RecExpr<SymbolLang>::parse("a"))
+      .withIterLimit(1)
+      .withScheduler(std::move(scheduler))
+      .run({rule});
+
+  ASSERT_EQ(runner.iterations.size(), 1u);
+  EXPECT_NE(runner.stop_reason.kind, StopReasonKind::NodeLimit);
+  EXPECT_NE(runner.stop_reason.kind, StopReasonKind::Other);
+  EXPECT_TRUE(runner.iterations.front().applied.empty());
+}
+
 TEST(EGraphFeatureTest, PatternSearchWithLimitUsesOperatorIndex) {
   EGraph<SymbolLang> egraph;
   egraph.addExpr(RecExpr<SymbolLang>::parse("(+ a b)"));
@@ -164,6 +305,57 @@ TEST(EGraphFeatureTest, PatternSearchWithLimitUsesOperatorIndex) {
 
   ASSERT_EQ(matches.size(), 1u);
   ASSERT_EQ(matches.front().substs.size(), 1u);
+}
+
+TEST(EGraphFeatureTest, RewriteBorrowSupportsBorrowedSearcher) {
+  Pattern<SymbolLang> lhs = Pattern<SymbolLang>::parse("(+ ?a ?b)");
+  Pattern<SymbolLang> rhs = Pattern<SymbolLang>::parse("(+ ?b ?a)");
+  BorrowedSearcher searcher(lhs);
+  RewriteBorrow<SymbolLang> rewrite =
+      makeRewriteBorrow<SymbolLang>("commute", searcher, rhs);
+
+  EGraph<SymbolLang> egraph;
+  egraph.addExpr(RecExpr<SymbolLang>::parse("(+ x y)"));
+  egraph.rebuild();
+
+  auto matches = rewrite.search(egraph);
+  ASSERT_EQ(matches.size(), 1u);
+  auto applied = rewrite.apply(egraph, matches);
+  EXPECT_EQ(applied.size(), 1u);
+}
+
+TEST(EGraphFeatureTest, BorrowedSearcherExposesSearchEClassAndNMatchesParity) {
+  Pattern<SymbolLang> lhs = Pattern<SymbolLang>::parse("(+ ?a ?b)");
+  BorrowedSearcher searcher(lhs);
+
+  EGraph<SymbolLang> egraph;
+  Id root = egraph.addExpr(RecExpr<SymbolLang>::parse("(+ x y)"));
+  egraph.addExpr(RecExpr<SymbolLang>::parse("(+ y z)"));
+  egraph.rebuild();
+
+  auto match = searcher.searchEClass(egraph, root);
+  ASSERT_TRUE(match.has_value());
+  EXPECT_EQ(match->substs.size(), 1u);
+  EXPECT_EQ(searcher.nMatches(egraph), 2u);
+}
+
+TEST(EGraphFeatureTest,
+     MakeConditionalRewriteBorrowSupportsConditionWithBorrowedVarState) {
+  Var shared = Var::parse("?x");
+  BorrowedVarCondition condition(shared);
+
+  EXPECT_NO_THROW((void)makeConditionalRewriteBorrow<SymbolLang>(
+      "borrowed-cond", "?x", "(f ?x)", condition));
+}
+
+TEST(EGraphFeatureTest,
+     MakeConditionalRewriteBorrowRejectsUnboundBorrowedConditionVar) {
+  Var shared = Var::parse("?y");
+  BorrowedVarCondition condition(shared);
+
+  EXPECT_THROW((void)makeConditionalRewriteBorrow<SymbolLang>(
+                   "borrowed-cond", "?x", "(f ?x)", condition),
+               std::runtime_error);
 }
 
 TEST(EGraphFeatureTest, MultiPatternParsesAndApplies) {
@@ -231,6 +423,9 @@ TEST(EGraphFeatureTest, NumericVarsAndSubstInsertBehaveLikeEgg) {
 }
 
 TEST(EGraphFeatureTest, DotWrapperCanSerializeToFile) {
+#if !LOTUS_EGRAPH_ENABLE_DOT
+  GTEST_SKIP() << "DOT support disabled at compile time";
+#else
   EGraph<SymbolLang> egraph;
   egraph.addExpr(RecExpr<SymbolLang>::parse("(f a)"));
   egraph.rebuild();
@@ -243,6 +438,7 @@ TEST(EGraphFeatureTest, DotWrapperCanSerializeToFile) {
                    std::istreambuf_iterator<char>());
   EXPECT_NE(text.find("digraph egraph"), std::string::npos);
   std::filesystem::remove(path);
+#endif
 }
 
 TEST(EGraphFeatureTest, PatternProgramRunsWithLimit) {
@@ -403,6 +599,9 @@ TEST(EGraphFeatureTest, MultiPatternAllowsBareVariableAfterFirstClause) {
 }
 
 TEST(EGraphFeatureTest, DotRunMatchesEggBehaviorWhenGraphvizIsAvailable) {
+#if !LOTUS_EGRAPH_ENABLE_DOT
+  GTEST_SKIP() << "DOT support disabled at compile time";
+#else
   EGraph<SymbolLang> egraph;
   egraph.addExpr(RecExpr<SymbolLang>::parse("(f a)"));
   egraph.rebuild();
@@ -414,6 +613,7 @@ TEST(EGraphFeatureTest, DotRunMatchesEggBehaviorWhenGraphvizIsAvailable) {
 
   EXPECT_NO_THROW(dot.runDot(std::vector<std::string>{"-Tsvg"}));
   EXPECT_NO_THROW(dot.run(std::string("dot"), std::vector<std::string>{"-Tsvg"}));
+#endif
 }
 
 namespace {
@@ -484,6 +684,62 @@ TEST(EGraphFeatureTest, ExplanationCheckProofAcceptsEggStyleProofs) {
   EXPECT_NO_THROW(check());
 }
 
+TEST(EGraphFeatureTest,
+     CheckEachExplainIgnoresAlternateRewriteNeighborsLikeEgg) {
+  EGraph<SymbolLang> egraph = EGraph<SymbolLang>().withExplanationsEnabled();
+  Id a = egraph.addExpr(RecExpr<SymbolLang>::parse("a"));
+  Id b = egraph.addExpr(RecExpr<SymbolLang>::parse("b"));
+  egraph.rebuild();
+
+  egraph.unionInstantiations(Pattern<SymbolLang>::parse("a").ast(),
+                             Pattern<SymbolLang>::parse("b").ast(), Subst{},
+                             "good");
+  egraph.rebuild();
+
+  egraph.unionInstantiations(Pattern<SymbolLang>::parse("a").ast(),
+                             Pattern<SymbolLang>::parse("b").ast(), Subst{},
+                             "bad");
+  egraph.rebuild();
+
+  std::vector<Rewrite<SymbolLang>> rules = {
+      makeRewrite<SymbolLang>("good", "a", "b"),
+      makeRewrite<SymbolLang>("bad", "(f ?x)", "?x"),
+  };
+
+  EXPECT_TRUE(checkEachExplain(egraph, rules));
+}
+
+TEST(EGraphFeatureTest,
+     ExplanationKeepsDistinctRuleAnnotationsForSharedTargetNodes) {
+  EGraph<SymbolLang> egraph = EGraph<SymbolLang>().withExplanationsEnabled();
+  Id a = egraph.addExpr(RecExpr<SymbolLang>::parse("a"));
+  Id b = egraph.addExpr(RecExpr<SymbolLang>::parse("b"));
+  Id c = egraph.addExpr(RecExpr<SymbolLang>::parse("c"));
+  RecExpr<SymbolLang> left = RecExpr<SymbolLang>::parse("(pair a c)");
+  RecExpr<SymbolLang> right = RecExpr<SymbolLang>::parse("(pair b b)");
+  egraph.addExpr(left);
+  egraph.addExpr(right);
+
+  egraph.unionInstantiations(Pattern<SymbolLang>::parse("a").ast(),
+                             Pattern<SymbolLang>::parse("b").ast(), Subst{},
+                             "ab");
+  egraph.unionInstantiations(Pattern<SymbolLang>::parse("c").ast(),
+                             Pattern<SymbolLang>::parse("b").ast(), Subst{},
+                             "cb");
+  egraph.rebuild();
+
+  auto explanation = explainEquivalence(egraph, left, right);
+  ASSERT_TRUE(explanation.has_value());
+  const auto &flat = explanation->makeFlatExplanation();
+  ASSERT_EQ(flat.size(), 3u);
+  ASSERT_EQ(flat[1].children.size(), 2u);
+  ASSERT_EQ(flat[2].children.size(), 2u);
+  EXPECT_EQ(flat[1].children[0].forward_rule, std::optional<Symbol>(Symbol("ab")));
+  EXPECT_EQ(flat[1].children[1].forward_rule, std::nullopt);
+  EXPECT_EQ(flat[2].children[0].forward_rule, std::nullopt);
+  EXPECT_EQ(flat[2].children[1].forward_rule, std::optional<Symbol>(Symbol("cb")));
+}
+
 TEST(EGraphFeatureTest, ExplanationStringWithLetUsesPointerSharingOnly) {
   auto mk_leaf = [](std::string_view expr_text) {
     auto term = std::make_shared<TreeTerm<SymbolLang>>();
@@ -522,6 +778,17 @@ TEST(EGraphFeatureTest, ExplanationStringWithLetUsesPointerSharingOnly) {
             std::string::npos);
 }
 
+TEST(EGraphFeatureTest, FlatTermRewriteMatchesEggProofRewritingModel) {
+  auto expr = RecExpr<SymbolLang>::parse("(+ a a)");
+  auto term = FlatTerm<SymbolLang>::fromExpr(expr, expr.root());
+
+  auto rewritten = term.rewrite(Pattern<SymbolLang>::parse("(+ ?x ?x)").ast(),
+                                Pattern<SymbolLang>::parse("(* 2 ?x)").ast());
+
+  EXPECT_EQ(rewritten.getString(), "(* 2 a)");
+  EXPECT_EQ(rewritten.getRecExpr().toString(), "(* 2 a)");
+}
+
 TEST(EGraphFeatureTest, ExtractorAstSizeOverflowKeepsMonotoneCosting) {
   std::vector<Rewrite<SymbolLang>> rules = {makeRewrite<SymbolLang>(
       "explode", "(meow ?a)", "(meow (meow ?a ?a))")};
@@ -533,6 +800,79 @@ TEST(EGraphFeatureTest, ExtractorAstSizeOverflowKeepsMonotoneCosting) {
   Extractor<SymbolLang> extractor(runner.egraph);
   auto best = extractor.findBest(runner.roots[0]).second;
   EXPECT_EQ(best.toString(), start.toString());
+}
+
+namespace {
+
+struct CountingCostFn : CostFunction<CountingCostFn, SymbolLang, size_t> {
+  using Cost = typename CostFunction<CountingCostFn, SymbolLang, size_t>::Cost;
+  size_t calls = 0;
+
+  template <typename ChildCostFn>
+  Cost cost(const SymbolLang &node, ChildCostFn &&child_cost) {
+    ++calls;
+    size_t total = node.op() == "cheap" ? 1 : 5;
+    for (Id child : node.children()) {
+      total = std::min(std::numeric_limits<size_t>::max(),
+                       total + child_cost(child));
+    }
+    return total;
+  }
+};
+
+} // namespace
+
+TEST(EGraphFeatureTest, ExtractorSupportsEggStyleMutableCostFunctionApi) {
+  EGraph<SymbolLang> egraph;
+  Id root =
+      egraph.addExpr(RecExpr<SymbolLang>::parse("(root (cheap a) (expensive b))"));
+  egraph.rebuild();
+
+  CountingCostFn cost_fn;
+  EXPECT_EQ(
+      cost_fn.costRec(RecExpr<SymbolLang>::parse("(root (cheap a) (expensive b))")),
+      21u);
+  EXPECT_GT(cost_fn.calls, 0u);
+
+  Extractor<SymbolLang, NoAnalysis<SymbolLang>, CountingCostFn> extractor(
+      egraph, std::move(cost_fn));
+  auto [cost, best] = extractor.findBest(root);
+  EXPECT_EQ(cost, 21u);
+  EXPECT_EQ(best.toString(), "(root (cheap a) (expensive b))");
+  EXPECT_EQ(extractor.findBestCost(root), 21u);
+  EXPECT_EQ(extractor.findBestNode(root).op(), "root");
+}
+
+TEST(EGraphFeatureTest, AstDepthCostRecMatchesEggStyleDepthMetric) {
+  AstDepth<SymbolLang> depth;
+  auto expr = RecExpr<SymbolLang>::parse("(f (g (h a)) b)");
+  EXPECT_EQ(depth.costRec(expr), 4u);
+}
+
+TEST(EGraphFeatureTest, AstDepthSaturatesOnOverflowingChildDepth) {
+  AstDepth<SymbolLang> depth;
+  SymbolLang node(Symbol("f"), {Id::fromIndex(0)});
+
+  EXPECT_EQ(depth.cost(node, [&](Id) { return std::numeric_limits<size_t>::max(); }),
+            std::numeric_limits<size_t>::max());
+}
+
+TEST(EGraphFeatureTest, ExtractorKeepsExtractableLeafRepresentativeInCycleClass) {
+  EGraph<SymbolLang> egraph;
+  Id a = egraph.add(SymbolLang::leaf("a"));
+  Id fa = egraph.addExpr(RecExpr<SymbolLang>::parse("(f a)"));
+  Id root = egraph.addExpr(RecExpr<SymbolLang>::parse("(g ok)"));
+  egraph.rebuild();
+  egraph.unite(a, fa);
+  egraph.rebuild();
+
+  Extractor<SymbolLang> extractor(egraph);
+  auto [cost, best] = extractor.findBest(root);
+  EXPECT_EQ(cost, 2u);
+  EXPECT_EQ(best.toString(), "(g ok)");
+  auto [cyclic_cost, cyclic_best] = extractor.findBest(a);
+  EXPECT_EQ(cyclic_cost, 1u);
+  EXPECT_EQ(cyclic_best.toString(), "a");
 }
 
 TEST(EGraphFeatureTest, IdToPatternPreservesSuppliedUncanonicalId) {
@@ -599,7 +939,7 @@ TEST(EGraphFeatureTest, AnalysisPendingQueueDeduplicatesParentsLikeEgg) {
   EXPECT_EQ(DedupAnalysis::remake_calls, 1);
 }
 
-TEST(EGraphFeatureTest, SearchMatchesCarryPerMatchAstIntoAppliers) {
+TEST(EGraphFeatureTest, SearchMatchesCarryPerMatchAstIntoSearcherResults) {
   EGraph<SymbolLang> egraph = EGraph<SymbolLang>().withExplanationsEnabled();
   egraph.addExpr(RecExpr<SymbolLang>::parse("(f a)"));
   egraph.addExpr(RecExpr<SymbolLang>::parse("(f b)"));
@@ -612,21 +952,25 @@ TEST(EGraphFeatureTest, SearchMatchesCarryPerMatchAstIntoAppliers) {
     ASSERT_TRUE(match.ast.has_value());
     EXPECT_EQ(match.ast->toString(), "(f ?x)");
   }
+}
 
-  auto applied = rewrite.apply(egraph, matches);
-  EXPECT_EQ(applied.size(), 2u);
+TEST(EGraphFeatureTest,
+     PatternApplierReturnsMatchedEClassIdWithoutExplanations) {
+  EGraph<SymbolLang> egraph;
+  Id a = egraph.addExpr(RecExpr<SymbolLang>::parse("a"));
+  Id b = egraph.addExpr(RecExpr<SymbolLang>::parse("b"));
+  egraph.addExpr(RecExpr<SymbolLang>::parse("(f b)"));
   egraph.rebuild();
 
-  auto proof_a = explainEquivalence(egraph, RecExpr<SymbolLang>::parse("(f a)"),
-                                    RecExpr<SymbolLang>::parse("a"));
-  auto proof_b = explainEquivalence(egraph, RecExpr<SymbolLang>::parse("(f b)"),
-                                    RecExpr<SymbolLang>::parse("b"));
-  ASSERT_TRUE(proof_a.has_value());
-  ASSERT_TRUE(proof_b.has_value());
-  EXPECT_EQ(proof_a->makeFlatExplanation().back().forward_rule,
-            std::optional<Symbol>(Symbol("strip-f")));
-  EXPECT_EQ(proof_b->makeFlatExplanation().back().forward_rule,
-            std::optional<Symbol>(Symbol("strip-f")));
+  auto rewrite = makeRewrite<SymbolLang>("a-to-b", "a", "b");
+  auto matches = rewrite.search(egraph);
+  ASSERT_EQ(matches.size(), 1u);
+  ASSERT_EQ(matches.front().eclass, a);
+
+  auto applied = rewrite.apply(egraph, matches);
+  ASSERT_EQ(applied.size(), 1u);
+  EXPECT_EQ(applied.front(), a);
+  EXPECT_NE(applied.front(), b);
 }
 
 TEST(EGraphFeatureTest, UnionTrustedRecordsExplanationReason) {
@@ -739,6 +1083,92 @@ TEST(EGraphFeatureTest, EGraphMediumIntersectMatchesEggExample) {
   auto egraph3 = egraph1.egraphIntersect(egraph2, NoAnalysis<DynamicLang>{});
   EXPECT_EQ(egraph3.addExpr(RecExpr<DynamicLang>::parse("(ln k)")),
             egraph3.addExpr(RecExpr<DynamicLang>::parse("(+ (* k pi) (* k pi))")));
+}
+
+TEST(EGraphFeatureTest, LanguageMapperDropsExplanationStateLikeEgg) {
+  EGraph<SymbolLang> source = EGraph<SymbolLang>().withExplanationsEnabled();
+  Id a = source.addUncanonical(SymbolLang::leaf("a"));
+  Id b = source.addUncanonical(SymbolLang::leaf("b"));
+  source.unite(a, b, "manual");
+  Id fa = source.addUncanonical(SymbolLang(Symbol("f"), {a}));
+  Id fb = source.addUncanonical(SymbolLang(Symbol("f"), {b}));
+  source.rebuild();
+
+  SimpleLanguageMapper<SymbolLang, NoAnalysis<SymbolLang>, SymbolLang,
+                       NoAnalysis<SymbolLang>>
+      mapper;
+  auto mapped = mapper.mapEGraph(source);
+
+  EXPECT_FALSE(mapped.areExplanationsEnabled());
+  EXPECT_TRUE(mapped.clean());
+  EXPECT_EQ(mapped.addExpr(RecExpr<SymbolLang>::parse("a")),
+            mapped.addExpr(RecExpr<SymbolLang>::parse("b")));
+  EXPECT_EQ(mapped.idToExpr(fa).toString(), "(f a)");
+  EXPECT_EQ(mapped.idToExpr(fb).toString(), "(f a)");
+  EXPECT_TRUE(mapped.unionEvents().empty());
+  EXPECT_TRUE(mapped.explanationNodes().empty());
+  EXPECT_FALSE(explainEquivalence(mapped, a, b).has_value());
+}
+
+TEST(EGraphFeatureTest, CopyWithoutUnionsWorksWithoutExplanations) {
+  EGraph<SymbolLang> egraph;
+  Id a = egraph.addExpr(RecExpr<SymbolLang>::parse("a"));
+  Id b = egraph.addExpr(RecExpr<SymbolLang>::parse("b"));
+  Id fa = egraph.addExpr(RecExpr<SymbolLang>::parse("(f a)"));
+  egraph.unite(a, b, "manual");
+  egraph.rebuild();
+
+  auto copy = egraph.copyWithoutUnions(NoAnalysis<SymbolLang>{});
+  copy.rebuild();
+
+  auto copy_a = copy.lookupExpr(RecExpr<SymbolLang>::parse("a"));
+  auto copy_b = copy.lookupExpr(RecExpr<SymbolLang>::parse("b"));
+  auto copy_fa = copy.lookupExpr(RecExpr<SymbolLang>::parse("(f a)"));
+  ASSERT_TRUE(copy_a.has_value());
+  ASSERT_TRUE(copy_b.has_value());
+  ASSERT_TRUE(copy_fa.has_value());
+  EXPECT_NE(copy.find(*copy_a), copy.find(*copy_b));
+  EXPECT_EQ(copy.idToExpr(*copy_fa).toString(), "(f a)");
+  EXPECT_EQ(copy.numberOfClasses(), 3u);
+  EXPECT_EQ(copy.totalSize(), 3u);
+  EXPECT_EQ(egraph.find(a), egraph.find(b));
+  EXPECT_EQ(egraph.find(fa), egraph.find(*copy_fa));
+}
+
+TEST(EGraphFeatureTest, EGraphJsonRoundTripsCoreShape) {
+#if !LOTUS_EGRAPH_ENABLE_JSON
+  GTEST_SKIP() << "JSON support disabled at compile time";
+#else
+  EGraph<SymbolLang> egraph;
+  egraph.addExpr(RecExpr<SymbolLang>::parse("(f a)"));
+  egraph.addExpr(RecExpr<SymbolLang>::parse("(f b)"));
+  egraph.unite(egraph.addExpr(RecExpr<SymbolLang>::parse("a")),
+               egraph.addExpr(RecExpr<SymbolLang>::parse("b")), "eq");
+  egraph.rebuild();
+
+  auto json = egraph.toJson();
+  auto restored = EGraph<SymbolLang>::fromJson(json);
+  restored.rebuild();
+
+  EXPECT_TRUE(restored.clean());
+  EXPECT_EQ(restored.totalSize(), 3u);
+  EXPECT_EQ(restored.numberOfClasses(), 2u);
+  EXPECT_EQ(restored.addExpr(RecExpr<SymbolLang>::parse("a")),
+            restored.addExpr(RecExpr<SymbolLang>::parse("b")));
+  EXPECT_EQ(restored.addExpr(RecExpr<SymbolLang>::parse("(f a)")),
+            restored.addExpr(RecExpr<SymbolLang>::parse("(f b)")));
+#endif
+}
+
+TEST(EGraphFeatureTest, EGraphJsonParseRejectsMalformedInput) {
+#if !LOTUS_EGRAPH_ENABLE_JSON
+  GTEST_SKIP() << "JSON support disabled at compile time";
+#else
+  EXPECT_THROW((void)EGraph<SymbolLang>::parseJson("{not valid json}"),
+               std::runtime_error);
+  EXPECT_THROW((void)EGraph<SymbolLang>::fromJson(json11::Json::object{}),
+               std::runtime_error);
+#endif
 }
 
 LOTUS_EGRAPH_DEFINE_LANGUAGE(TestLang, {

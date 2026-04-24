@@ -2,6 +2,12 @@
 
 #include "Solvers/EGraph/EGraph.h"
 
+#ifndef LOTUS_EGRAPH_ENABLE_DOT
+#define LOTUS_EGRAPH_ENABLE_DOT 1
+#endif
+
+#if LOTUS_EGRAPH_ENABLE_DOT
+
 #include <cstdlib>
 #include <filesystem>
 
@@ -175,3 +181,5 @@ inline std::string toDot(const EGraph<L, A> &egraph) {
 }
 
 } // namespace lotus::egraph
+
+#endif

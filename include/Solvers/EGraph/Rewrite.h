@@ -4,6 +4,9 @@
 
 namespace lotus::egraph {
 
+template <typename L, typename A> class Searcher;
+template <typename L, typename A> class Applier;
+
 template <typename L, typename A>
 using Condition = std::function<bool(EGraph<L, A> &, Id, const Subst &)>;
 
@@ -50,6 +53,26 @@ inline std::vector<Var> sortedUnique(std::vector<Var> vars) {
   return vars;
 }
 
+template <typename L, typename A>
+inline void validateRewriteBoundVars(
+    std::string_view name, const Searcher<L, A> &searcher,
+    const Applier<L, A> &applier) {
+  auto bound_vars = searcher.vars();
+  for (const auto &var : applier.vars()) {
+    if (std::find(bound_vars.begin(), bound_vars.end(), var) ==
+        bound_vars.end()) {
+      throw std::runtime_error("Rewrite " + std::string(name) +
+                               " refers to unbound var " +
+                               std::string(var.name().view()));
+    }
+  }
+}
+
+template <typename T>
+inline std::shared_ptr<const T> borrowShared(const T &obj) {
+  return std::shared_ptr<const T>(std::shared_ptr<const T>{}, &obj);
+}
+
 } // namespace detail
 
 template <typename L, typename A = NoAnalysis<L>> class Searcher {
@@ -60,6 +83,12 @@ public:
   searchEClassWithLimit(const EGraph<L, A> &egraph, Id eclass,
                         size_t limit) const = 0;
 
+  virtual std::optional<SearchMatches<L>>
+  searchEClass(const EGraph<L, A> &egraph, Id eclass) const {
+    return searchEClassWithLimit(egraph, eclass,
+                                 std::numeric_limits<size_t>::max());
+  }
+
   virtual std::vector<SearchMatches<L>>
   searchWithLimit(const EGraph<L, A> &egraph, size_t limit) const {
     return detail::searchEclassesWithLimit<L, A>(*this, egraph,
@@ -69,6 +98,14 @@ public:
   virtual std::vector<SearchMatches<L>>
   search(const EGraph<L, A> &egraph) const {
     return searchWithLimit(egraph, std::numeric_limits<size_t>::max());
+  }
+
+  virtual size_t nMatches(const EGraph<L, A> &egraph) const {
+    size_t total = 0;
+    for (const auto &match : search(egraph)) {
+      total += match.substs.size();
+    }
+    return total;
   }
 
   virtual std::vector<Var> vars() const = 0;
@@ -90,8 +127,10 @@ public:
       const Symbol &rule_name) const {
     std::vector<Id> ids;
     for (const auto &match : matches) {
-      const PatternAst<L> *match_ast =
-          match.ast ? &*match.ast : getPatternAst();
+      const PatternAst<L> *match_ast = nullptr;
+      if (egraph.areExplanationsEnabled()) {
+        match_ast = match.ast ? &*match.ast : nullptr;
+      }
       for (const auto &subst : match.substs) {
         auto added = applyOne(egraph, match.eclass, subst, match_ast, rule_name);
         ids.insert(ids.end(), added.begin(), added.end());
@@ -147,7 +186,8 @@ public:
 
     Id rhs = pattern_.apply(egraph, subst);
     auto [merged, changed] = egraph.uniteChecked(eclass, rhs, rule_name);
-    return changed ? std::vector<Id>{merged} : std::vector<Id>{};
+    (void)merged;
+    return changed ? std::vector<Id>{eclass} : std::vector<Id>{};
   }
 
   const PatternAst<L> *getPatternAst() const override {
@@ -265,8 +305,10 @@ public:
                                const Symbol &rule_name) const override {
     std::vector<Id> ids;
     for (const auto &match : matches) {
-      const PatternAst<L> *match_ast =
-          match.ast ? &*match.ast : applier_->getPatternAst();
+      const PatternAst<L> *match_ast = nullptr;
+      if (egraph.areExplanationsEnabled()) {
+        match_ast = match.ast ? &*match.ast : nullptr;
+      }
       for (const auto &subst : match.substs) {
         if (!condition_(egraph, match.eclass, subst)) {
           continue;
@@ -295,29 +337,131 @@ private:
   std::vector<Var> required_vars_;
 };
 
-template <typename L, typename A = NoAnalysis<L>> class Rewrite {
+template <typename L, typename A, typename C>
+class ConditionalApplierT final : public Applier<L, A> {
 public:
-  Rewrite() = default;
+  ConditionalApplierT(C condition, std::shared_ptr<const Applier<L, A>> applier)
+      : condition_(std::move(condition)), applier_(std::move(applier)) {}
 
-  Rewrite(Symbol name, std::shared_ptr<const Searcher<L, A>> searcher,
-          std::shared_ptr<const Applier<L, A>> applier)
+  ConditionalApplierT(C condition, Pattern<L> applier)
+      : ConditionalApplierT(
+            std::move(condition),
+            std::make_shared<PatternApplier<L, A>>(std::move(applier))) {}
+
+  std::vector<Id> applyOne(EGraph<L, A> &egraph, Id eclass, const Subst &subst,
+                           const PatternAst<L> *match_ast,
+                           const Symbol &rule_name) const override {
+    if (!condition_(egraph, eclass, subst)) {
+      return {};
+    }
+    return applier_->applyOne(egraph, eclass, subst, match_ast, rule_name);
+  }
+
+  std::vector<Id> applyMatches(EGraph<L, A> &egraph,
+                               const std::vector<SearchMatches<L>> &matches,
+                               const Symbol &rule_name) const override {
+    std::vector<Id> ids;
+    for (const auto &match : matches) {
+      const PatternAst<L> *match_ast = nullptr;
+      if (egraph.areExplanationsEnabled()) {
+        match_ast = match.ast ? &*match.ast : nullptr;
+      }
+      for (const auto &subst : match.substs) {
+        if (!condition_(egraph, match.eclass, subst)) {
+          continue;
+        }
+        auto added = applier_->applyOne(egraph, match.eclass, subst,
+                                        match_ast, rule_name);
+        ids.insert(ids.end(), added.begin(), added.end());
+      }
+    }
+    return ids;
+  }
+
+  const PatternAst<L> *getPatternAst() const override {
+    return applier_->getPatternAst();
+  }
+
+  std::vector<Var> vars() const override {
+    auto vars = applier_->vars();
+    auto required_vars = detail::conditionVars(condition_);
+    vars.insert(vars.end(), required_vars.begin(), required_vars.end());
+    return detail::sortedUnique(std::move(vars));
+  }
+
+private:
+  C condition_;
+  std::shared_ptr<const Applier<L, A>> applier_;
+};
+
+template <typename L, typename A = NoAnalysis<L>> class RewriteBorrow {
+public:
+  RewriteBorrow() = default;
+
+  RewriteBorrow(Symbol name, std::shared_ptr<const Searcher<L, A>> searcher,
+                std::shared_ptr<const Applier<L, A>> applier)
       : name_(std::move(name)), searcher_(std::move(searcher)),
         applier_(std::move(applier)) {
     validateBoundVars();
   }
 
+  template <typename S, typename Ap,
+            typename = std::enable_if_t<std::is_base_of_v<Searcher<L, A>, S> &&
+                                        std::is_base_of_v<Applier<L, A>, Ap>>>
+  RewriteBorrow(Symbol name, const S &searcher, const Ap &applier)
+      : RewriteBorrow(std::move(name), detail::borrowShared(searcher),
+                      detail::borrowShared(applier)) {}
+
+  const Symbol &name() const { return name_; }
+
+  const Searcher<L, A> &searcher() const { return *searcher_; }
+  const Applier<L, A> &applier() const { return *applier_; }
+
+  std::vector<SearchMatches<L>> search(const EGraph<L, A> &egraph) const {
+    return searcher_->search(egraph);
+  }
+
+  std::vector<SearchMatches<L>> searchWithLimit(const EGraph<L, A> &egraph,
+                                                size_t limit) const {
+    return searcher_->searchWithLimit(egraph, limit);
+  }
+
+  std::vector<Id> apply(EGraph<L, A> &egraph,
+                        const std::vector<SearchMatches<L>> &matches) const {
+    return applier_->applyMatches(egraph, matches, name_);
+  }
+
+protected:
+  RewriteBorrow(Symbol name, std::shared_ptr<const Searcher<L, A>> searcher)
+      : name_(std::move(name)), searcher_(std::move(searcher)) {}
+
+  void validateBoundVars() const {
+    detail::validateRewriteBoundVars(std::string_view(name_.view()), *searcher_,
+                                     *applier_);
+  }
+
+  Symbol name_;
+  std::shared_ptr<const Searcher<L, A>> searcher_;
+  std::shared_ptr<const Applier<L, A>> applier_;
+};
+
+template <typename L, typename A = NoAnalysis<L>>
+class Rewrite : public RewriteBorrow<L, A> {
+public:
+  using RewriteBorrow<L, A>::RewriteBorrow;
+
   Rewrite(Symbol name, Pattern<L> searcher, Pattern<L> applier,
           std::vector<Condition<L, A>> conditions = {})
-      : name_(std::move(name)),
-        searcher_(
+      : RewriteBorrow<L, A>(
+            std::move(name),
             std::make_shared<PatternSearcher<L, A>>(std::move(searcher))) {
     std::shared_ptr<const Applier<L, A>> wrapped =
         std::make_shared<PatternApplier<L, A>>(std::move(applier));
     for (auto it = conditions.rbegin(); it != conditions.rend(); ++it) {
       wrapped = std::make_shared<ConditionalApplier<L, A>>(*it, wrapped);
     }
-    applier_ = std::move(wrapped);
-    validateBoundVars();
+    this->applier_ = std::move(wrapped);
+    this->validateBoundVars();
   }
 
   Rewrite(Symbol name, Pattern<L> searcher,
@@ -339,42 +483,6 @@ public:
   Rewrite(Symbol name, S searcher, Ap applier)
       : Rewrite(std::move(name), std::make_shared<S>(std::move(searcher)),
                 std::make_shared<Ap>(std::move(applier))) {}
-
-  const Symbol &name() const { return name_; }
-
-  const Searcher<L, A> &searcher() const { return *searcher_; }
-  const Applier<L, A> &applier() const { return *applier_; }
-
-  std::vector<SearchMatches<L>> search(const EGraph<L, A> &egraph) const {
-    return searcher_->search(egraph);
-  }
-
-  std::vector<SearchMatches<L>> searchWithLimit(const EGraph<L, A> &egraph,
-                                                size_t limit) const {
-    return searcher_->searchWithLimit(egraph, limit);
-  }
-
-  std::vector<Id> apply(EGraph<L, A> &egraph,
-                        const std::vector<SearchMatches<L>> &matches) const {
-    return applier_->applyMatches(egraph, matches, name_);
-  }
-
-private:
-  void validateBoundVars() const {
-    auto bound_vars = searcher_->vars();
-    for (const auto &var : applier_->vars()) {
-      if (std::find(bound_vars.begin(), bound_vars.end(), var) ==
-          bound_vars.end()) {
-        throw std::runtime_error("Rewrite " + std::string(name_.view()) +
-                                 " refers to unbound var " +
-                                 std::string(var.name().view()));
-      }
-    }
-  }
-
-  Symbol name_;
-  std::shared_ptr<const Searcher<L, A>> searcher_;
-  std::shared_ptr<const Applier<L, A>> applier_;
 };
 
 template <typename L, typename A = NoAnalysis<L>>
@@ -398,11 +506,10 @@ inline Rewrite<L, A> makeConditionalRewrite(Symbol name,
       throw std::runtime_error("Rewrite condition refers to unbound variable");
     }
   }
-  Condition<L, A> wrapped = std::move(condition);
-  return Rewrite<L, A>(std::move(name), std::move(searcher),
-                       ConditionalApplier<L, A>(std::move(wrapped),
-                                                Pattern<L>::parse(rhs),
-                                                std::move(required_vars)));
+  return Rewrite<L, A>(
+      std::move(name), std::move(searcher),
+      ConditionalApplierT<L, A, std::decay_t<C>>(std::move(condition),
+                                                 Pattern<L>::parse(rhs)));
 }
 
 template <typename L, typename A = NoAnalysis<L>>
@@ -411,6 +518,45 @@ inline Rewrite<L, A> makeMultiRewrite(Symbol name,
                                       MultiPattern<L> applier) {
   return Rewrite<L, A>(std::move(name), std::move(searcher),
                        std::move(applier));
+}
+
+template <typename L, typename A = NoAnalysis<L>, typename S, typename Ap,
+          typename = std::enable_if_t<std::is_base_of_v<Searcher<L, A>, S> &&
+                                      std::is_base_of_v<Applier<L, A>, Ap>>>
+inline RewriteBorrow<L, A> makeRewriteBorrow(Symbol name, const S &searcher,
+                                             const Ap &applier) {
+  return RewriteBorrow<L, A>(std::move(name), searcher, applier);
+}
+
+template <typename L, typename A = NoAnalysis<L>, typename S,
+          typename = std::enable_if_t<std::is_base_of_v<Searcher<L, A>, S>>>
+inline RewriteBorrow<L, A> makeRewriteBorrow(Symbol name, const S &searcher,
+                                             Pattern<L> applier) {
+  return RewriteBorrow<L, A>(
+      std::move(name), std::make_shared<S>(searcher),
+      std::make_shared<PatternApplier<L, A>>(std::move(applier)));
+}
+
+template <typename L, typename A = NoAnalysis<L>, typename C>
+inline RewriteBorrow<L, A>
+makeConditionalRewriteBorrow(Symbol name, std::string_view lhs,
+                             std::string_view rhs, const C &condition) {
+  auto searcher = Pattern<L>::parse(lhs);
+  auto bound_vars = searcher.vars();
+  auto required_vars = detail::conditionVars(condition);
+  for (const auto &var : required_vars) {
+    if (std::find(bound_vars.begin(), bound_vars.end(), var) ==
+        bound_vars.end()) {
+      throw std::runtime_error("Rewrite condition refers to unbound variable");
+    }
+  }
+  auto owned_searcher =
+      std::make_shared<PatternSearcher<L, A>>(std::move(searcher));
+  auto applier =
+      std::make_shared<ConditionalApplierT<L, A, C>>(condition,
+                                                     Pattern<L>::parse(rhs));
+  return RewriteBorrow<L, A>(std::move(name), std::move(owned_searcher),
+                             std::move(applier));
 }
 
 } // namespace lotus::egraph

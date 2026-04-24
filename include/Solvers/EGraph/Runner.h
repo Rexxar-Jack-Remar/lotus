@@ -17,7 +17,60 @@ enum class StopReasonKind {
 
 struct StopReason {
   StopReasonKind kind = StopReasonKind::None;
-  Symbol detail;
+  size_t limit = 0;
+  double time_limit = 0.0;
+  std::string other_message;
+
+  static StopReason saturated() {
+    return StopReason{StopReasonKind::Saturated};
+  }
+
+  static StopReason iterationLimit(size_t value) {
+    StopReason out;
+    out.kind = StopReasonKind::IterationLimit;
+    out.limit = value;
+    return out;
+  }
+
+  static StopReason nodeLimit(size_t value) {
+    StopReason out;
+    out.kind = StopReasonKind::NodeLimit;
+    out.limit = value;
+    return out;
+  }
+
+  static StopReason timeLimit(double seconds) {
+    StopReason out;
+    out.kind = StopReasonKind::TimeLimit;
+    out.time_limit = seconds;
+    return out;
+  }
+
+  static StopReason other(std::string message) {
+    StopReason out;
+    out.kind = StopReasonKind::Other;
+    out.other_message = std::move(message);
+    return out;
+  }
+};
+
+template <typename T> struct RunnerResult {
+  std::optional<T> value;
+  std::optional<StopReason> stop_reason;
+
+  static RunnerResult success(T v) {
+    RunnerResult out;
+    out.value = std::move(v);
+    return out;
+  }
+
+  static RunnerResult stop(StopReason reason) {
+    RunnerResult out;
+    out.stop_reason = std::move(reason);
+    return out;
+  }
+
+  explicit operator bool() const { return value.has_value(); }
 };
 
 struct RunnerLimits {
@@ -29,16 +82,17 @@ struct RunnerLimits {
   template <typename L, typename A>
   std::optional<StopReason> check(size_t iteration,
                                   const EGraph<L, A> &egraph) const {
-    if (start_time && now() - *start_time > time_limit) {
-      return StopReason{StopReasonKind::TimeLimit, "time limit exceeded"};
+    if (start_time) {
+      double elapsed = std::chrono::duration<double>(now() - *start_time).count();
+      if (now() - *start_time > time_limit) {
+        return StopReason::timeLimit(elapsed);
+      }
     }
     if (egraph.totalSize() > node_limit) {
-      return StopReason{StopReasonKind::NodeLimit,
-                        Symbol(std::to_string(egraph.totalSize()))};
+      return StopReason::nodeLimit(egraph.totalSize());
     }
     if (iteration >= iter_limit) {
-      return StopReason{StopReasonKind::IterationLimit,
-                        Symbol(std::to_string(iteration))};
+      return StopReason::iterationLimit(iteration);
     }
     return std::nullopt;
   }
@@ -87,17 +141,48 @@ inline std::ostream &operator<<(std::ostream &os,
   return os;
 }
 
+inline std::ostream &operator<<(std::ostream &os, const StopReason &reason) {
+  switch (reason.kind) {
+  case StopReasonKind::None:
+    os << "None";
+    break;
+  case StopReasonKind::Saturated:
+    os << "Saturated";
+    break;
+  case StopReasonKind::IterationLimit:
+    os << "IterationLimit(" << reason.limit << ")";
+    break;
+  case StopReasonKind::NodeLimit:
+    os << "NodeLimit(" << reason.limit << ")";
+    break;
+  case StopReasonKind::TimeLimit:
+    os << "TimeLimit(" << reason.time_limit << ")";
+    break;
+  case StopReasonKind::Other:
+    os << "Other(" << reason.other_message << ")";
+    break;
+  }
+  return os;
+}
+
 inline std::ostream &operator<<(std::ostream &os, const Report &report) {
   os << "Runner report\n"
-     << "  Stop reason: " << static_cast<int>(report.stop_reason.kind) << "\n"
+     << "=============\n"
+     << "  Stop reason: " << report.stop_reason << "\n"
      << "  Iterations: " << report.iterations << "\n"
      << "  Egraph size: " << report.egraph_nodes << " nodes, "
      << report.egraph_classes << " classes, " << report.memo_size << " memo\n"
      << "  Rebuilds: " << report.rebuilds << "\n"
      << "  Total time: " << report.total_time << "\n"
-     << "  Search time: " << report.search_time << "\n"
-     << "  Apply time: " << report.apply_time << "\n"
-     << "  Rebuild time: " << report.rebuild_time;
+     << "    Search:  ("
+     << (report.total_time == 0.0 ? 0.0 : report.search_time / report.total_time)
+     << ") " << report.search_time << "\n"
+     << "    Apply:   ("
+     << (report.total_time == 0.0 ? 0.0 : report.apply_time / report.total_time)
+     << ") " << report.apply_time << "\n"
+     << "    Rebuild: ("
+     << (report.total_time == 0.0 ? 0.0 : report.rebuild_time / report.total_time)
+     << ") " << report.rebuild_time;
   return os;
 }
 
@@ -113,7 +198,7 @@ public:
     return rewrite.search(egraph);
   }
 
-  virtual std::vector<std::vector<SearchMatches<L>>>
+  virtual RunnerResult<std::vector<std::vector<SearchMatches<L>>>>
   searchRewrites(size_t iteration, const EGraph<L, A> &egraph,
                  const std::vector<Rewrite<L, A>> &rewrites,
                  const RunnerLimits &limits) {
@@ -121,11 +206,13 @@ public:
     out.reserve(rewrites.size());
     for (const auto &rewrite : rewrites) {
       out.push_back(searchRewrite(iteration, egraph, rewrite));
-      if (limits.check(iteration, egraph)) {
-        break;
+      if (auto stop_reason = limits.check(iteration, egraph)) {
+        return RunnerResult<std::vector<std::vector<SearchMatches<L>>>>::stop(
+            *stop_reason);
       }
     }
-    return out;
+    return RunnerResult<std::vector<std::vector<SearchMatches<L>>>>::success(
+        std::move(out));
   }
 
   virtual size_t applyRewrite(size_t, EGraph<L, A> &egraph,
@@ -201,7 +288,10 @@ public:
     if (stats.times_banned < sizeof(size_t) * 8) {
       threshold = threshold << stats.times_banned;
     }
-    auto matches = rewrite.searchWithLimit(egraph, threshold + 1);
+    size_t search_limit =
+        threshold == std::numeric_limits<size_t>::max() ? threshold
+                                                        : threshold + 1;
+    auto matches = rewrite.searchWithLimit(egraph, search_limit);
     size_t total = 0;
     for (const auto &match : matches) {
       total += match.substs.size();
@@ -274,8 +364,24 @@ public:
     return *this;
   }
 
-  Runner &withHook(std::function<std::optional<Symbol>(Runner &)> hook) {
-    hooks.push_back(std::move(hook));
+  template <typename Hook> Runner &withHook(Hook hook) {
+    hooks.push_back([hook = std::move(hook)](Runner &runner)
+                        mutable -> std::optional<std::string> {
+      using Result = std::invoke_result_t<Hook &, Runner &>;
+      if constexpr (std::is_same_v<Result, std::optional<std::string>>) {
+        return hook(runner);
+      } else if constexpr (std::is_same_v<Result, std::optional<Symbol>>) {
+        auto result = hook(runner);
+        if (!result) {
+          return std::nullopt;
+        }
+        return result->str();
+      } else {
+        static_assert(std::is_same_v<Result, void>,
+                      "Runner hook must return std::optional<std::string> or std::optional<Symbol>");
+        return std::nullopt;
+      }
+    });
     return *this;
   }
 
@@ -374,7 +480,7 @@ public:
   std::vector<Iteration<IterData>> iterations;
   std::vector<Id> roots;
   StopReason stop_reason;
-  std::vector<std::function<std::optional<Symbol>(Runner &)>> hooks;
+  std::vector<std::function<std::optional<std::string>(Runner &)>> hooks;
 
 private:
   void checkRules(const std::vector<Rewrite<L, A>> &rules) const {
@@ -395,48 +501,53 @@ private:
     Iteration<IterData> iteration;
     iteration.egraph_nodes = egraph.totalSize();
     iteration.egraph_classes = egraph.numberOfClasses();
-
     Instant iteration_start = now();
 
-    auto limit_stop = limits_.check(iteration_index, egraph);
-    if (limit_stop) {
-      iteration.stop_reason = *limit_stop;
-      return iteration;
-    }
+    std::optional<StopReason> result = limits_.check(iteration_index, egraph);
 
     Instant hook_start = now();
-    for (auto &hook : hooks) {
-      if (auto stop = hook(*this)) {
-        iteration.hook_time =
-            std::chrono::duration<double>(now() - hook_start).count();
-        iteration.total_time =
-            std::chrono::duration<double>(now() - iteration_start).count();
-        iteration.stop_reason = StopReason{StopReasonKind::Other, *stop};
-        return iteration;
+    auto saved_hooks = std::move(this->hooks);
+    if (!result) {
+      for (auto &hook : saved_hooks) {
+        if (auto stop = hook(*this)) {
+          result = StopReason::other(*stop);
+          break;
+        }
       }
     }
+    this->hooks = std::move(saved_hooks);
     iteration.hook_time =
         std::chrono::duration<double>(now() - hook_start).count();
 
     size_t egraph_nodes_after_hooks = egraph.totalSize();
     size_t egraph_classes_after_hooks = egraph.numberOfClasses();
 
+    std::vector<std::vector<SearchMatches<L>>> matches;
     Instant search_start = now();
-    auto matches =
-        scheduler_->searchRewrites(iteration_index, egraph, rules, limits_);
+    if (!result) {
+      auto search_result =
+          scheduler_->searchRewrites(iteration_index, egraph, rules, limits_);
+      if (search_result) {
+        matches = std::move(*search_result.value);
+      } else {
+        result = search_result.stop_reason;
+      }
+    }
     iteration.search_time =
         std::chrono::duration<double>(now() - search_start).count();
 
     Instant apply_start = now();
-    for (size_t i = 0; i < matches.size(); ++i) {
-      size_t applied = scheduler_->applyRewrite(
-          iteration_index, egraph, rules[i], std::move(matches[i]));
-      if (applied > 0) {
-        iteration.applied[rules[i].name()] += applied;
-      }
-      if (auto stop = limits_.check(iteration_index, egraph)) {
-        iteration.stop_reason = *stop;
-        break;
+    if (!result) {
+      for (size_t i = 0; i < matches.size(); ++i) {
+        size_t applied = scheduler_->applyRewrite(
+            iteration_index, egraph, rules[i], std::move(matches[i]));
+        if (applied > 0) {
+          iteration.applied[rules[i].name()] += applied;
+        }
+        if (auto stop = limits_.check(iteration_index, egraph)) {
+          result = *stop;
+          break;
+        }
       }
     }
     iteration.apply_time =
@@ -456,13 +567,14 @@ private:
         iteration.egraph_classes == egraph_classes_after_hooks &&
         iteration.egraph_nodes == egraph.totalSize() &&
         iteration.egraph_classes == egraph.numberOfClasses();
-    if (can_be_saturated && !iteration.stop_reason) {
-      iteration.stop_reason = StopReason{StopReasonKind::Saturated, {}};
+    if (can_be_saturated && !result) {
+      result = StopReason::saturated();
     }
 
     iteration.data = IterationData<L, A, IterData>::make(*this);
     iteration.total_time =
         std::chrono::duration<double>(now() - iteration_start).count();
+    iteration.stop_reason = result;
     return iteration;
   }
 

@@ -2,54 +2,96 @@
 
 #include "Solvers/EGraph/EGraph.h"
 
+#include <functional>
+#include <limits>
+#include <optional>
+#include <type_traits>
+
 namespace lotus::egraph {
 
-template <typename L> struct AstSize {
-  using Cost = size_t;
+namespace detail {
 
-  Cost costRec(const RecExpr<L> &expr) const {
+template <typename...> using void_t = void;
+
+template <typename CF, typename L, typename = void>
+struct HasCostMethod : std::false_type {};
+
+template <typename CF, typename L>
+struct HasCostMethod<
+    CF, L,
+    void_t<decltype(std::declval<CF &>().cost(
+        std::declval<const L &>(),
+        std::function<typename CF::Cost(Id)>{}))>> : std::true_type {};
+
+template <typename CF, typename L, typename = void>
+struct HasCallOperator : std::false_type {};
+
+template <typename CF, typename L>
+struct HasCallOperator<
+    CF, L,
+    void_t<decltype(std::declval<CF &>()(
+        std::declval<const L &>(),
+        std::function<typename CF::Cost(Id)>{}))>> : std::true_type {};
+
+template <typename CF, typename L, typename ChildCostFn>
+auto invokeCost(CF &cost_fn, const L &node, ChildCostFn &&child_cost)
+    -> typename CF::Cost {
+  if constexpr (HasCostMethod<CF, L>::value) {
+    return cost_fn.cost(node, std::forward<ChildCostFn>(child_cost));
+  } else {
+    static_assert(HasCallOperator<CF, L>::value,
+                  "Cost function must define Cost and either cost(node, child_cost) "
+                  "or operator()(node, child_cost)");
+    return cost_fn(node, std::forward<ChildCostFn>(child_cost));
+  }
+}
+
+template <typename T>
+T saturatingAdd(T lhs, T rhs) {
+  static_assert(std::is_unsigned<T>::value,
+                "saturatingAdd only supports unsigned integral types");
+  constexpr T limit = std::numeric_limits<T>::max();
+  return rhs > limit - lhs ? limit : static_cast<T>(lhs + rhs);
+}
+
+} // namespace detail
+
+template <typename Derived, typename L, typename CostT> struct CostFunction {
+  using Cost = CostT;
+
+  Cost costRec(const RecExpr<L> &expr) {
     std::unordered_map<Id, Cost> costs;
     costs.reserve(expr.size());
+    auto &derived = static_cast<Derived &>(*this);
     for (size_t i = 0; i < expr.size(); ++i) {
       Id id = Id::fromIndex(i);
-      costs.emplace(id, (*this)(expr[id], [&](Id child) { return costs.at(child); }));
+      costs.emplace(id, derived.cost(expr[id], [&](Id child) { return costs.at(child); }));
     }
     return costs.at(expr.root());
   }
+};
 
-  template <typename F> Cost operator()(const L &node, F &&child_cost) const {
+template <typename L> struct AstSize : CostFunction<AstSize<L>, L, size_t> {
+  using Cost = typename CostFunction<AstSize<L>, L, size_t>::Cost;
+
+  template <typename C> Cost cost(const L &node, C &&child_cost) {
     size_t total = 1;
     for (Id child : node.children()) {
-      size_t child_total = child_cost(child);
-      if (child_total > std::numeric_limits<size_t>::max() - total) {
-        total = std::numeric_limits<size_t>::max();
-      } else {
-        total += child_total;
-      }
+      total = detail::saturatingAdd(total, child_cost(child));
     }
     return total;
   }
 };
 
-template <typename L> struct AstDepth {
-  using Cost = size_t;
+template <typename L> struct AstDepth : CostFunction<AstDepth<L>, L, size_t> {
+  using Cost = typename CostFunction<AstDepth<L>, L, size_t>::Cost;
 
-  Cost costRec(const RecExpr<L> &expr) const {
-    std::unordered_map<Id, Cost> costs;
-    costs.reserve(expr.size());
-    for (size_t i = 0; i < expr.size(); ++i) {
-      Id id = Id::fromIndex(i);
-      costs.emplace(id, (*this)(expr[id], [&](Id child) { return costs.at(child); }));
-    }
-    return costs.at(expr.root());
-  }
-
-  template <typename F> Cost operator()(const L &node, F &&child_cost) const {
-    size_t depth = 1;
+  template <typename C> Cost cost(const L &node, C &&child_cost) {
+    size_t max_child_depth = 0;
     for (Id child : node.children()) {
-      depth = std::max(depth, size_t(1) + child_cost(child));
+      max_child_depth = std::max(max_child_depth, child_cost(child));
     }
-    return depth;
+    return detail::saturatingAdd<size_t>(1, max_child_depth);
   }
 };
 
@@ -81,7 +123,6 @@ private:
   struct Entry {
     Cost cost{};
     L node;
-    bool valid = false;
   };
 
   void compute() {
@@ -90,35 +131,52 @@ private:
       changed = false;
       for (Id id : egraph_.classIds()) {
         const auto &klass = egraph_[id];
-        Entry best_entry;
+        std::optional<Entry> best_entry;
         for (const auto &node : klass.nodes) {
-          bool all_children_known = true;
-          auto child_cost = [&](Id child) -> Cost {
+          auto child_cost = [&](Id child) -> std::optional<Cost> {
             auto it = best_.find(egraph_.find(child));
-            if (it == best_.end() || !it->second.valid) {
-              all_children_known = false;
-              return Cost{};
+            if (it == best_.end()) {
+              return std::nullopt;
             }
             return it->second.cost;
           };
 
-          Cost cost = cost_fn_(node, child_cost);
-          if (!all_children_known) {
+          auto total_cost = nodeTotalCost(node, child_cost);
+          if (!total_cost) {
             continue;
           }
-          if (!best_entry.valid || cost < best_entry.cost) {
-            best_entry = Entry{cost, node, true};
+          if (!best_entry || total_cost.value() < best_entry->cost) {
+            best_entry = Entry{total_cost.value(), node};
           }
         }
 
-        auto &slot = best_[id];
-        if (best_entry.valid && (!slot.valid || best_entry.cost < slot.cost ||
-                                 best_entry.node != slot.node)) {
-          slot = best_entry;
+        if (!best_entry) {
+          continue;
+        }
+
+        auto it = best_.find(id);
+        if (it == best_.end() || best_entry->cost < it->second.cost) {
+          best_[id] = *best_entry;
           changed = true;
         }
       }
     }
+  }
+
+  template <typename ChildCostFn>
+  std::optional<Cost> nodeTotalCost(const L &node, ChildCostFn &&child_cost) {
+    std::unordered_map<Id, Cost> cached_costs;
+    cached_costs.reserve(node.children().size());
+    for (Id child : node.children()) {
+      auto cost = child_cost(child);
+      if (!cost) {
+        return std::nullopt;
+      }
+      cached_costs.emplace(child, *cost);
+    }
+
+    return detail::invokeCost(cost_fn_, node,
+                              [&](Id child) { return cached_costs.at(child); });
   }
 
   RecExpr<L> buildExpr(Id eclass) const {
