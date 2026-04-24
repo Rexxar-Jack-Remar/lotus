@@ -6,11 +6,57 @@
 #include <array>
 #include <cstdint>
 #include <memory>
+#include <optional>
+#include <string>
 #include <tuple>
 #include <utility>
 #include <vector>
 
 namespace npa {
+
+enum class PredicateVariableVersion { Current, Next };
+
+class PredicateFormula {
+public:
+  struct Impl;
+
+  PredicateFormula();
+  explicit PredicateFormula(std::shared_ptr<const Impl> impl_in);
+  PredicateFormula(const PredicateFormula &);
+  PredicateFormula(PredicateFormula &&) noexcept;
+  PredicateFormula &operator=(const PredicateFormula &);
+  PredicateFormula &operator=(PredicateFormula &&) noexcept;
+  ~PredicateFormula();
+
+  static PredicateFormula constant(bool value);
+  static PredicateFormula variable(
+      unsigned predicate,
+      PredicateVariableVersion version = PredicateVariableVersion::Current);
+  static PredicateFormula negate(const PredicateFormula &operand);
+  static PredicateFormula conjunction(const PredicateFormula &lhs,
+                                      const PredicateFormula &rhs);
+  static PredicateFormula disjunction(const PredicateFormula &lhs,
+                                      const PredicateFormula &rhs);
+  static PredicateFormula exclusiveOr(const PredicateFormula &lhs,
+                                      const PredicateFormula &rhs);
+  static PredicateFormula implication(const PredicateFormula &lhs,
+                                      const PredicateFormula &rhs);
+  static PredicateFormula equals(const PredicateFormula &lhs,
+                                 const PredicateFormula &rhs);
+  static PredicateFormula notEquals(const PredicateFormula &lhs,
+                                    const PredicateFormula &rhs);
+  static PredicateFormula ite(const PredicateFormula &cond,
+                              const PredicateFormula &then_value,
+                              const PredicateFormula &else_value);
+
+  std::shared_ptr<const Impl> impl;
+};
+
+struct PredicateUpdate {
+  unsigned predicate = 0;
+  std::optional<PredicateFormula> can_be_false;
+  std::optional<PredicateFormula> can_be_true;
+};
 
 class PredicateRelation {
 public:
@@ -58,6 +104,12 @@ public:
 
   static value_type assume(unsigned predicate, bool truthy);
   static value_type assignConst(unsigned predicate, bool value);
+  static value_type intersect(const value_type &a, const value_type &b);
+  static value_type fromFormula(const PredicateFormula &formula);
+  static value_type guard(const PredicateFormula &formula);
+  static value_type
+  parallelAssign(const std::vector<PredicateUpdate> &updates,
+                 const std::optional<PredicateFormula> &constraint = std::nullopt);
   static value_type transpose(const value_type &relation);
   static value_type project(const value_type &relation);
   static value_type merge(const value_type &lhs, const value_type &rhs);

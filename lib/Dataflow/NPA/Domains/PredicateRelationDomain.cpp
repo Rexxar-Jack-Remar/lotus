@@ -10,6 +10,38 @@
 
 namespace npa {
 
+struct PredicateFormula::Impl {
+  enum class Kind {
+    Constant,
+    Variable,
+    Not,
+    And,
+    Or,
+    Xor,
+    Implies,
+    Eq,
+    Neq,
+    Ite
+  };
+
+  explicit Impl(bool value_in) : kind(Kind::Constant), bool_value(value_in) {}
+  Impl(unsigned predicate_in, PredicateVariableVersion version_in)
+      : kind(Kind::Variable), predicate(predicate_in), version(version_in) {}
+  Impl(Kind kind_in, std::shared_ptr<const Impl> lhs_in,
+       std::shared_ptr<const Impl> rhs_in = nullptr,
+       std::shared_ptr<const Impl> extra_in = nullptr)
+      : kind(kind_in), lhs(std::move(lhs_in)), rhs(std::move(rhs_in)),
+        extra(std::move(extra_in)) {}
+
+  Kind kind;
+  bool bool_value = false;
+  unsigned predicate = 0;
+  PredicateVariableVersion version = PredicateVariableVersion::Current;
+  std::shared_ptr<const Impl> lhs;
+  std::shared_ptr<const Impl> rhs;
+  std::shared_ptr<const Impl> extra;
+};
+
 struct PredicateRelation::Impl {
   Impl(unsigned predicate_count_in, DdNode *root)
       : predicate_count(predicate_count_in), bdd(root) {}
@@ -672,6 +704,93 @@ implOf(const PredicateTensorRelation &value) {
   return value.impl;
 }
 
+DdNode *formulaNode(const PredicateFormula &formula, unsigned predicate_count) {
+  const auto &impl = formula.impl;
+  assert(impl && "PredicateFormula must have an implementation");
+  DdManager *manager = getBaseManager(predicate_count);
+  switch (impl->kind) {
+  case PredicateFormula::Impl::Kind::Constant: {
+    DdNode *node = impl->bool_value ? logicOne(manager) : logicZero(manager);
+    Cudd_Ref(node);
+    return node;
+  }
+  case PredicateFormula::Impl::Kind::Variable: {
+    assert(impl->predicate < predicate_count);
+    DdNode *node = baseVarAt(predicate_count,
+                            impl->version == PredicateVariableVersion::Current
+                                ? BaseVarGroup::Cur
+                                : BaseVarGroup::Next,
+                            impl->predicate);
+    Cudd_Ref(node);
+    return node;
+  }
+  case PredicateFormula::Impl::Kind::Not: {
+    DdNode *operand = formulaNode(PredicateFormula(impl->lhs), predicate_count);
+    DdNode *node = withRef(manager, [&] { return Cudd_Not(operand); });
+    Cudd_RecursiveDeref(manager, operand);
+    return node;
+  }
+  case PredicateFormula::Impl::Kind::And:
+  case PredicateFormula::Impl::Kind::Or:
+  case PredicateFormula::Impl::Kind::Xor:
+  case PredicateFormula::Impl::Kind::Implies:
+  case PredicateFormula::Impl::Kind::Eq:
+  case PredicateFormula::Impl::Kind::Neq: {
+    DdNode *lhs = formulaNode(PredicateFormula(impl->lhs), predicate_count);
+    DdNode *rhs = formulaNode(PredicateFormula(impl->rhs), predicate_count);
+    DdNode *node = nullptr;
+    switch (impl->kind) {
+    case PredicateFormula::Impl::Kind::And:
+      node = bddAnd(manager, lhs, rhs);
+      break;
+    case PredicateFormula::Impl::Kind::Or:
+      node = bddOr(manager, lhs, rhs);
+      break;
+    case PredicateFormula::Impl::Kind::Xor:
+      node = withRef(manager, [&] { return Cudd_bddXor(manager, lhs, rhs); });
+      break;
+    case PredicateFormula::Impl::Kind::Implies: {
+      DdNode *not_lhs = withRef(manager, [&] { return Cudd_Not(lhs); });
+      node = bddOr(manager, not_lhs, rhs);
+      Cudd_RecursiveDeref(manager, not_lhs);
+      break;
+    }
+    case PredicateFormula::Impl::Kind::Eq:
+      node = bddXnor(manager, lhs, rhs);
+      break;
+    case PredicateFormula::Impl::Kind::Neq: {
+      DdNode *eq = bddXnor(manager, lhs, rhs);
+      node = withRef(manager, [&] { return Cudd_Not(eq); });
+      Cudd_RecursiveDeref(manager, eq);
+      break;
+    }
+    default:
+      break;
+    }
+    Cudd_RecursiveDeref(manager, lhs);
+    Cudd_RecursiveDeref(manager, rhs);
+    return node;
+  }
+  case PredicateFormula::Impl::Kind::Ite: {
+    DdNode *cond = formulaNode(PredicateFormula(impl->lhs), predicate_count);
+    DdNode *then_node = formulaNode(PredicateFormula(impl->rhs), predicate_count);
+    DdNode *else_node =
+        formulaNode(PredicateFormula(impl->extra), predicate_count);
+    DdNode *node = withRef(
+        manager, [&] { return Cudd_bddIte(manager, cond, then_node, else_node); });
+    Cudd_RecursiveDeref(manager, cond);
+    Cudd_RecursiveDeref(manager, then_node);
+    Cudd_RecursiveDeref(manager, else_node);
+    return node;
+  }
+  }
+
+  assert(false && "unsupported predicate formula kind");
+  DdNode *node = logicZero(manager);
+  Cudd_Ref(node);
+  return node;
+}
+
 PredicateRelation relationFromTransitionsImpl(
     unsigned predicate_count,
     const std::vector<std::pair<std::uint64_t, std::uint64_t>> &transitions) {
@@ -869,6 +988,96 @@ PredicateRelation projectRelationImpl(const PredicateRelation &relation) {
   Cudd_RecursiveDeref(manager, abstracted);
   Cudd_RecursiveDeref(manager, eq);
   return relationFromNode(predicate_count, projected);
+}
+
+PredicateRelation formulaRelationImpl(const PredicateFormula &formula) {
+  return relationFromNode(activePredicateCount(),
+                          formulaNode(formula, activePredicateCount()));
+}
+
+PredicateRelation guardRelationImpl(const PredicateFormula &formula) {
+  const unsigned predicate_count = activePredicateCount();
+  DdManager *manager = getBaseManager(predicate_count);
+  DdNode *node = relationIdentityNode(predicate_count);
+  DdNode *guard = formulaNode(formula, predicate_count);
+  DdNode *result = bddAnd(manager, node, guard);
+  Cudd_RecursiveDeref(manager, node);
+  Cudd_RecursiveDeref(manager, guard);
+  return relationFromNode(predicate_count, result);
+}
+
+PredicateRelation parallelAssignImpl(
+    const std::vector<PredicateUpdate> &updates,
+    const std::optional<PredicateFormula> &constraint) {
+  const unsigned predicate_count = activePredicateCount();
+  DdManager *manager = getBaseManager(predicate_count);
+
+  std::vector<bool> assigned(predicate_count, false);
+  std::vector<std::optional<PredicateFormula>> can_be_false(predicate_count);
+  std::vector<std::optional<PredicateFormula>> can_be_true(predicate_count);
+  for (const auto &update : updates) {
+    assert(update.predicate < predicate_count);
+    assigned[update.predicate] = true;
+    can_be_false[update.predicate] = update.can_be_false;
+    can_be_true[update.predicate] = update.can_be_true;
+  }
+
+  DdNode *node = logicOne(manager);
+  Cudd_Ref(node);
+  for (unsigned predicate = 0; predicate < predicate_count; ++predicate) {
+    DdNode *constraint_node = nullptr;
+    if (assigned[predicate]) {
+      DdNode *true_case = nullptr;
+      DdNode *false_case = nullptr;
+      if (can_be_true[predicate].has_value()) {
+        DdNode *rhs_true = formulaNode(*can_be_true[predicate], predicate_count);
+        true_case = bddAnd(manager,
+                           baseVarAt(predicate_count, BaseVarGroup::Next, predicate),
+                           rhs_true);
+        Cudd_RecursiveDeref(manager, rhs_true);
+      }
+      if (can_be_false[predicate].has_value()) {
+        DdNode *rhs_false =
+            formulaNode(*can_be_false[predicate], predicate_count);
+        false_case = bddAnd(
+            manager,
+            Cudd_Not(baseVarAt(predicate_count, BaseVarGroup::Next, predicate)),
+            rhs_false);
+        Cudd_RecursiveDeref(manager, rhs_false);
+      }
+      if (true_case && false_case) {
+        constraint_node = bddOr(manager, true_case, false_case);
+        Cudd_RecursiveDeref(manager, true_case);
+        Cudd_RecursiveDeref(manager, false_case);
+      } else if (true_case) {
+        constraint_node = true_case;
+      } else if (false_case) {
+        constraint_node = false_case;
+      } else {
+        continue;
+      }
+    } else if (!assigned[predicate]) {
+      constraint_node =
+          bddXnor(manager, baseVarAt(predicate_count, BaseVarGroup::Cur, predicate),
+                  baseVarAt(predicate_count, BaseVarGroup::Next, predicate));
+    } else {
+      continue;
+    }
+    DdNode *tmp = bddAnd(manager, node, constraint_node);
+    Cudd_RecursiveDeref(manager, node);
+    Cudd_RecursiveDeref(manager, constraint_node);
+    node = tmp;
+  }
+
+  if (constraint.has_value()) {
+    DdNode *extra = formulaNode(*constraint, predicate_count);
+    DdNode *tmp = bddAnd(manager, node, extra);
+    Cudd_RecursiveDeref(manager, node);
+    Cudd_RecursiveDeref(manager, extra);
+    node = tmp;
+  }
+
+  return relationFromNode(predicate_count, node);
 }
 
 PredicateTensorRelation
@@ -1120,6 +1329,74 @@ PredicateRelation &
 PredicateRelation::operator=(PredicateRelation &&) noexcept = default;
 PredicateRelation::~PredicateRelation() = default;
 
+PredicateFormula::PredicateFormula() = default;
+PredicateFormula::PredicateFormula(std::shared_ptr<const Impl> impl_in)
+    : impl(std::move(impl_in)) {}
+PredicateFormula::PredicateFormula(const PredicateFormula &) = default;
+PredicateFormula::PredicateFormula(PredicateFormula &&) noexcept = default;
+PredicateFormula &PredicateFormula::operator=(const PredicateFormula &) = default;
+PredicateFormula &PredicateFormula::operator=(PredicateFormula &&) noexcept =
+    default;
+PredicateFormula::~PredicateFormula() = default;
+
+PredicateFormula PredicateFormula::constant(bool value) {
+  return PredicateFormula(std::make_shared<Impl>(value));
+}
+
+PredicateFormula PredicateFormula::variable(unsigned predicate,
+                                            PredicateVariableVersion version) {
+  return PredicateFormula(std::make_shared<Impl>(predicate, version));
+}
+
+PredicateFormula PredicateFormula::negate(const PredicateFormula &operand) {
+  return PredicateFormula(
+      std::make_shared<Impl>(Impl::Kind::Not, operand.impl));
+}
+
+PredicateFormula PredicateFormula::conjunction(const PredicateFormula &lhs,
+                                               const PredicateFormula &rhs) {
+  return PredicateFormula(
+      std::make_shared<Impl>(Impl::Kind::And, lhs.impl, rhs.impl));
+}
+
+PredicateFormula PredicateFormula::disjunction(const PredicateFormula &lhs,
+                                               const PredicateFormula &rhs) {
+  return PredicateFormula(
+      std::make_shared<Impl>(Impl::Kind::Or, lhs.impl, rhs.impl));
+}
+
+PredicateFormula PredicateFormula::exclusiveOr(const PredicateFormula &lhs,
+                                               const PredicateFormula &rhs) {
+  return PredicateFormula(
+      std::make_shared<Impl>(Impl::Kind::Xor, lhs.impl, rhs.impl));
+}
+
+PredicateFormula PredicateFormula::implication(const PredicateFormula &lhs,
+                                               const PredicateFormula &rhs) {
+  return PredicateFormula(
+      std::make_shared<Impl>(Impl::Kind::Implies, lhs.impl, rhs.impl));
+}
+
+PredicateFormula PredicateFormula::equals(const PredicateFormula &lhs,
+                                          const PredicateFormula &rhs) {
+  return PredicateFormula(
+      std::make_shared<Impl>(Impl::Kind::Eq, lhs.impl, rhs.impl));
+}
+
+PredicateFormula PredicateFormula::notEquals(const PredicateFormula &lhs,
+                                             const PredicateFormula &rhs) {
+  return PredicateFormula(
+      std::make_shared<Impl>(Impl::Kind::Neq, lhs.impl, rhs.impl));
+}
+
+PredicateFormula PredicateFormula::ite(const PredicateFormula &cond,
+                                       const PredicateFormula &then_value,
+                                       const PredicateFormula &else_value) {
+  return PredicateFormula(std::make_shared<Impl>(Impl::Kind::Ite, cond.impl,
+                                                 then_value.impl,
+                                                 else_value.impl));
+}
+
 PredicateTensorRelation::PredicateTensorRelation()
     : impl(makeTensorImpl(
           activePredicateCount(),
@@ -1291,6 +1568,31 @@ PredicateRelationDomain::assignConst(unsigned predicate, bool value) {
     node = tmp;
   }
   return relationFromNode(predicate_count, node);
+}
+
+PredicateRelationDomain::value_type
+PredicateRelationDomain::intersect(const value_type &a, const value_type &b) {
+  assert(implOf(a)->predicate_count == implOf(b)->predicate_count);
+  const unsigned predicate_count = implOf(a)->predicate_count;
+  return relationFromNode(predicate_count,
+                          bddAnd(getBaseManager(predicate_count), implOf(a)->bdd,
+                                 implOf(b)->bdd));
+}
+
+PredicateRelationDomain::value_type
+PredicateRelationDomain::fromFormula(const PredicateFormula &formula) {
+  return formulaRelationImpl(formula);
+}
+
+PredicateRelationDomain::value_type
+PredicateRelationDomain::guard(const PredicateFormula &formula) {
+  return guardRelationImpl(formula);
+}
+
+PredicateRelationDomain::value_type PredicateRelationDomain::parallelAssign(
+    const std::vector<PredicateUpdate> &updates,
+    const std::optional<PredicateFormula> &constraint) {
+  return parallelAssignImpl(updates, constraint);
 }
 
 PredicateRelationDomain::value_type
