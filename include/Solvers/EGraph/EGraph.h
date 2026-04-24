@@ -339,10 +339,19 @@ public:
       L materialized = node.mapChildren([&](Id id) { return ids[id.index()]; });
 
       std::optional<Id> exact;
-      for (size_t i = 0; i < nodes_.size(); ++i) {
-        if (nodes_[i] == materialized) {
-          exact = Id::fromIndex(i);
-          break;
+      if (explanations_enabled_) {
+        auto it = uncanonical_memo_.find(materialized);
+        if (it != uncanonical_memo_.end()) {
+          exact = it->second;
+        }
+      }
+
+      if (!exact) {
+        for (size_t i = 0; i < nodes_.size(); ++i) {
+          if (nodes_[i] == materialized) {
+            exact = Id::fromIndex(i);
+            break;
+          }
         }
       }
 
@@ -474,15 +483,12 @@ public:
     Id canonical = findMut(id);
     auto &klass = classes_.at(canonical);
     klass.data = std::move(data);
-    for (Id parent : klass.parents) {
-      analysis_pending_.push_back(parent);
-    }
+    analysis_pending_.extend(klass.parents);
     analysis_.modify(*this, canonical);
   }
 
   size_t rebuild() {
-    size_t unions = 0;
-    unions += processPending();
+    size_t unions = processPending();
     rebuildClasses();
     clean_ = true;
     return unions;
@@ -710,14 +716,10 @@ private:
     DidMerge did_merge =
         analysis_.merge(left_class.data, std::move(right_class.data));
     if (did_merge.left_changed) {
-      analysis_pending_.insert(analysis_pending_.end(),
-                               left_class.parents.begin(),
-                               left_class.parents.end());
+      analysis_pending_.extend(left_class.parents);
     }
     if (did_merge.right_changed) {
-      analysis_pending_.insert(analysis_pending_.end(),
-                               right_class.parents.begin(),
-                               right_class.parents.end());
+      analysis_pending_.extend(right_class.parents);
     }
 
     left_class.nodes.insert(left_class.nodes.end(), right_class.nodes.begin(),
@@ -792,8 +794,11 @@ private:
       }
 
       while (!analysis_pending_.empty()) {
-        Id class_id = analysis_pending_.back();
-        analysis_pending_.pop_back();
+        auto class_id_opt = analysis_pending_.pop();
+        if (!class_id_opt) {
+          break;
+        }
+        Id class_id = *class_id_opt;
 
         if (class_id.index() >= nodes_.size()) {
           continue;
@@ -810,9 +815,7 @@ private:
         DidMerge did_merge =
             analysis_.merge(it->second.data, std::move(node_data));
         if (did_merge.left_changed) {
-          analysis_pending_.insert(analysis_pending_.end(),
-                                   it->second.parents.begin(),
-                                   it->second.parents.end());
+          analysis_pending_.extend(it->second.parents);
           analysis_.modify(*this, canonical);
         }
       }
@@ -874,7 +877,7 @@ private:
   std::unordered_map<L, Id> memo_;
   std::unordered_map<L, Id> uncanonical_memo_;
   std::vector<Id> pending_;
-  std::vector<Id> analysis_pending_;
+  UniqueQueue<Id> analysis_pending_;
   std::unordered_map<Id, Class> classes_;
   std::unordered_map<typename L::Discriminant, std::unordered_set<Id>>
       classes_by_op_;
@@ -934,7 +937,9 @@ struct LanguageMapper {
     }
 
     dst_egraph.pending_ = src_egraph.pending_;
-    dst_egraph.analysis_pending_ = src_egraph.analysis_pending_;
+    for (const auto &id : src_egraph.analysis_pending_) {
+      dst_egraph.analysis_pending_.insert(id);
+    }
     dst_egraph.clean_ = src_egraph.clean_;
     dst_egraph.explanations_enabled_ = src_egraph.explanations_enabled_;
     dst_egraph.optimize_explanation_lengths_ =

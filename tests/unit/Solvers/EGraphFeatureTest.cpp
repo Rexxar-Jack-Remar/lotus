@@ -113,6 +113,16 @@ struct NoCycleAnalysis : NoAnalysis<SymbolLang> {
 } // namespace
 
 TEST(EGraphFeatureTest, RewriteRespectsCyclePolicy) {
+  EGraph<SymbolLang, NoCycleAnalysis> cyclic;
+  Id a = cyclic.add(SymbolLang::leaf("a"));
+  Id fa = cyclic.addExpr(RecExpr<SymbolLang>::parse("(f a)"));
+  cyclic.rebuild();
+  cyclic.unite(a, fa);
+  cyclic.rebuild();
+
+  auto pat = Pattern<SymbolLang>::parse("(f ?x)");
+  EXPECT_TRUE(pat.search(cyclic).empty());
+
   EGraph<SymbolLang, NoCycleAnalysis> egraph;
   egraph.add(SymbolLang::leaf("a"));
   egraph.rebuild();
@@ -123,8 +133,9 @@ TEST(EGraphFeatureTest, RewriteRespectsCyclePolicy) {
   auto applied = cycle.apply(egraph, matches);
   egraph.rebuild();
 
-  EXPECT_TRUE(applied.empty());
-  EXPECT_EQ(egraph.totalSize(), 1u);
+  ASSERT_EQ(matches.size(), 1u);
+  ASSERT_EQ(applied.size(), 1u);
+  EXPECT_EQ(egraph.totalSize(), 2u);
 }
 
 TEST(EGraphFeatureTest, RunnerTreatsUnionOnlyRewriteAsProgress) {
@@ -540,6 +551,52 @@ TEST(EGraphFeatureTest, IdToPatternPreservesSuppliedUncanonicalId) {
   EXPECT_TRUE(subst_b.bindings().empty());
   EXPECT_EQ(pat_a.ast().toString(), "a");
   EXPECT_EQ(pat_b.ast().toString(), "b");
+}
+
+namespace {
+
+struct DedupAnalysis {
+  using Data = int;
+
+  inline static int remake_calls = 0;
+
+  static void reset() { remake_calls = 0; }
+
+  static Data make(EGraph<SymbolLang, DedupAnalysis> &, const SymbolLang &, Id) {
+    return 0;
+  }
+
+  static Data remake(EGraph<SymbolLang, DedupAnalysis> &, const SymbolLang &, Id) {
+    ++remake_calls;
+    return 0;
+  }
+
+  void preUnion(const EGraph<SymbolLang, DedupAnalysis> &, Id, Id,
+                const std::optional<Justification> &) const {}
+  DidMerge merge(Data &, Data) { return {}; }
+  void modify(EGraph<SymbolLang, DedupAnalysis> &, Id) const {}
+  bool allowEMatchingCycles() const { return true; }
+};
+
+} // namespace
+
+TEST(EGraphFeatureTest, AnalysisPendingQueueDeduplicatesParentsLikeEgg) {
+  DedupAnalysis::reset();
+  EGraph<SymbolLang, DedupAnalysis> egraph;
+
+  Id x = egraph.add(SymbolLang::leaf("x"));
+  Id y = egraph.add(SymbolLang::leaf("y"));
+  Id plus1 = egraph.add(SymbolLang(Symbol("+"), {x, y}));
+  Id plus2 = egraph.add(SymbolLang(Symbol("+"), {x, y}));
+  (void)plus1;
+  (void)plus2;
+  egraph.rebuild();
+
+  DedupAnalysis::reset();
+  egraph.setAnalysisData(x, 7);
+  egraph.rebuild();
+
+  EXPECT_EQ(DedupAnalysis::remake_calls, 1);
 }
 
 TEST(EGraphFeatureTest, SearchMatchesCarryPerMatchAstIntoAppliers) {

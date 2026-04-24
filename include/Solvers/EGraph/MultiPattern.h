@@ -8,7 +8,15 @@ template <typename L> class MultiPattern {
 public:
   MultiPattern() = default;
   explicit MultiPattern(std::vector<std::pair<Var, Pattern<L>>> clauses)
-      : clauses_(std::move(clauses)) {}
+      : clauses_(std::move(clauses)) {
+    std::vector<std::pair<Var, PatternAst<L>>> asts;
+    asts.reserve(clauses_.size());
+    for (const auto &[var, pattern] : clauses_) {
+      asts.emplace_back(var, pattern.ast());
+    }
+    program_ = std::make_shared<PatternProgram<L>>(
+        PatternProgram<L>::compileFromMultiPattern(asts));
+  }
 
   static MultiPattern parse(std::string_view input) {
     std::vector<std::pair<Var, Pattern<L>>> clauses;
@@ -99,9 +107,7 @@ public:
       throw std::runtime_error(
           "Bare pattern variable cannot be first in multipattern");
     }
-    auto seed = Subst{};
-    seed.insert(clauses_.front().first, eclass);
-    auto results = searchClauses(egraph, 0, seed, &eclass, limit);
+    auto results = program_->runWithLimit(egraph, eclass, limit);
     if (results.empty()) {
       return std::nullopt;
     }
@@ -198,78 +204,8 @@ public:
   }
 
 private:
-  template <typename A>
-  std::vector<Subst>
-  searchClauses(const EGraph<L, A> &egraph, size_t index, const Subst &seed,
-                const Id *root_eclass = nullptr,
-                size_t limit = std::numeric_limits<size_t>::max()) const {
-    if (index >= clauses_.size()) {
-      return {seed};
-    }
-    if (limit == 0) {
-      return {};
-    }
-
-    std::vector<Subst> results;
-    std::vector<SearchMatches<L>> matches;
-    if (index == 0 && root_eclass) {
-      auto found = clauses_[index].second.searchEClassWithLimit(
-          egraph, *root_eclass, limit);
-      if (found) {
-        matches.push_back(std::move(*found));
-      }
-    } else {
-      matches = clauses_[index].second.searchWithLimit(egraph, limit);
-    }
-    for (const auto &match : matches) {
-      for (const auto &candidate : match.substs) {
-        if (results.size() >= limit) {
-          return results;
-        }
-        const Var &bound_var = clauses_[index].first;
-        if (const Id *existing = seed.get(bound_var)) {
-          if (egraph.find(*existing) != egraph.find(match.eclass)) {
-            continue;
-          }
-        }
-
-        if (!compatible(egraph, seed, candidate)) {
-          continue;
-        }
-
-        Subst merged = merge(seed, candidate, bound_var, match.eclass);
-        auto tail = searchClauses(egraph, index + 1, merged, nullptr,
-                                  limit - results.size());
-        results.insert(results.end(), tail.begin(), tail.end());
-      }
-    }
-    return results;
-  }
-
-  template <typename A>
-  static bool compatible(const EGraph<L, A> &egraph, const Subst &lhs,
-                         const Subst &rhs) {
-    for (const auto &[var, id] : lhs.bindings()) {
-      if (const Id *other = rhs.get(var)) {
-        if (egraph.find(*other) != egraph.find(id)) {
-          return false;
-        }
-      }
-    }
-    return true;
-  }
-
-  static Subst merge(const Subst &lhs, const Subst &rhs, const Var &bound_var,
-                     Id bound_id) {
-    Subst merged = lhs;
-    for (const auto &[var, id] : rhs.bindings()) {
-      merged.insert(var, id);
-    }
-    merged.insert(bound_var, bound_id);
-    return merged;
-  }
-
   std::vector<std::pair<Var, Pattern<L>>> clauses_;
+  std::shared_ptr<PatternProgram<L>> program_;
 };
 
 } // namespace lotus::egraph

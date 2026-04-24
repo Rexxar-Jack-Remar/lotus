@@ -154,6 +154,45 @@ inline std::string joinStrings(const Range &items, std::string_view sep) {
   return oss.str();
 }
 
+template <typename T> class UniqueQueue {
+public:
+  void insert(const T &value) {
+    auto [it, inserted] = set_.insert(value);
+    if (inserted) {
+      queue_.push_back(*it);
+    }
+  }
+
+  template <typename It> void extend(It begin, It end) {
+    for (auto it = begin; it != end; ++it) {
+      insert(*it);
+    }
+  }
+
+  template <typename Range> void extend(const Range &range) {
+    extend(range.begin(), range.end());
+  }
+
+  std::optional<T> pop() {
+    if (queue_.empty()) {
+      return std::nullopt;
+    }
+    T value = queue_.front();
+    queue_.pop_front();
+    set_.erase(value);
+    return value;
+  }
+
+  bool empty() const { return queue_.empty(); }
+  size_t size() const { return queue_.size(); }
+  auto begin() const { return queue_.begin(); }
+  auto end() const { return queue_.end(); }
+
+private:
+  std::unordered_set<T> set_;
+  std::deque<T> queue_;
+};
+
 } // namespace lotus::egraph
 
 template <> struct std::hash<lotus::egraph::Symbol> {

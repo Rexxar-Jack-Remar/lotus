@@ -1012,49 +1012,49 @@ inline bool checkEachExplain(const EGraph<L, A> &egraph,
 
   const auto &nodes = egraph.explanationNodes();
   for (size_t i = 0; i < nodes.size(); ++i) {
-    const auto &connection = nodes[i].parent_connection;
-    if (connection.next == Id::fromIndex(i) ||
-        !connection.justification.isRule()) {
-      continue;
-    }
-
-    auto it = by_name.find(connection.justification.rule);
-    if (it == by_name.end()) {
-      continue;
-    }
-    const auto *searcher_ast = it->second->searcher().getPatternAst();
-    const auto *applier_ast = it->second->applier().getPatternAst();
-    if (!searcher_ast || !applier_ast) {
-      continue;
-    }
-
-    EGraph<L, A> validation(egraph.analysis());
-    Id current_id = validation.addExpr(egraph.originalExpr(connection.current));
-    Id next_id = validation.addExpr(egraph.originalExpr(connection.next));
-    validation.rebuild();
-
-    const PatternAst<L> *lhs_ast =
-        connection.is_rewrite_forward ? searcher_ast : applier_ast;
-    const PatternAst<L> *rhs_ast =
-        connection.is_rewrite_forward ? applier_ast : searcher_ast;
-    Pattern<L> lhs_pattern(*lhs_ast);
-
-    auto matches = lhs_pattern.searchEClassWithLimit(validation, current_id, 8);
-    if (!matches || matches->substs.empty()) {
-      return false;
-    }
-
-    bool any_valid = false;
-    for (const auto &subst : matches->substs) {
-      Id applied = validation.addInstantiation(*rhs_ast, subst);
-      validation.rebuild();
-      if (validation.find(applied) == validation.find(next_id)) {
-        any_valid = true;
-        break;
+    for (const auto &connection : nodes[i].neighbors) {
+      if (!connection.justification.isRule()) {
+        continue;
       }
-    }
-    if (!any_valid) {
-      return false;
+
+      auto it = by_name.find(connection.justification.rule);
+      if (it == by_name.end()) {
+        continue;
+      }
+      const auto *searcher_ast = it->second->searcher().getPatternAst();
+      const auto *applier_ast = it->second->applier().getPatternAst();
+      if (!searcher_ast || !applier_ast) {
+        continue;
+      }
+
+      EGraph<L, A> validation(egraph.analysis());
+      Id current_id = validation.addExpr(egraph.originalExpr(connection.current));
+      Id next_id = validation.addExpr(egraph.originalExpr(connection.next));
+      validation.rebuild();
+
+      const PatternAst<L> *lhs_ast =
+          connection.is_rewrite_forward ? searcher_ast : applier_ast;
+      const PatternAst<L> *rhs_ast =
+          connection.is_rewrite_forward ? applier_ast : searcher_ast;
+      Pattern<L> lhs_pattern(*lhs_ast);
+
+      auto matches = lhs_pattern.searchEClassWithLimit(validation, current_id, 8);
+      if (!matches || matches->substs.empty()) {
+        return false;
+      }
+
+      bool any_valid = false;
+      for (const auto &subst : matches->substs) {
+        Id applied = validation.addInstantiation(*rhs_ast, subst);
+        validation.rebuild();
+        if (validation.find(applied) == validation.find(next_id)) {
+          any_valid = true;
+          break;
+        }
+      }
+      if (!any_valid) {
+        return false;
+      }
     }
   }
   return true;

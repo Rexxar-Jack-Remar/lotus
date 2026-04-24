@@ -139,11 +139,6 @@ public:
   std::vector<Id> applyOne(EGraph<L, A> &egraph, Id eclass, const Subst &subst,
                            const PatternAst<L> *match_ast,
                            const Symbol &rule_name) const override {
-    if (!egraph.analysis().allowEMatchingCycles() &&
-        pattern_.containsEClass(egraph, subst, eclass)) {
-      return {};
-    }
-
     if (match_ast && egraph.areExplanationsEnabled()) {
       auto [merged, changed] = egraph.unionInstantiations(
           *match_ast, pattern_.ast(), subst, rule_name);
