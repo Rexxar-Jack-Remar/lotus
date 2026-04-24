@@ -15,7 +15,6 @@
 #include "llvm/Support/WithColor.h"
 #include "llvm/Support/raw_ostream.h"
 
-#include "Alias/Infrastructure/AliasAnalysisWrapper/CLIUtils.h"
 #include "Alias/InclusionBased/AserPTA/PointerAnalysis/Context/KCallSite.h"
 #include "Alias/InclusionBased/AserPTA/PointerAnalysis/Context/NoCtx.h"
 #include "Alias/InclusionBased/AserPTA/PointerAnalysis/Models/LanguageModel/DefaultLangModel/DefaultLangModel.h"
@@ -28,10 +27,10 @@
 #include "Alias/InclusionBased/AserPTA/PreProcessing/Passes/RemoveExceptionHandlerPass.h"
 #include "Alias/InclusionBased/AserPTA/PreProcessing/Passes/StandardHeapAPIRewritePass.h"
 #include "Alias/InclusionBased/AserPTA/Util/Log.h"
+#include "Alias/InclusionBased/LotusAA/Engine/InterProceduralPass.h"
+#include "Alias/InclusionBased/LotusAA/Support/FunctionPointerResults.h"
+#include "Alias/Infrastructure/AliasAnalysisWrapper/CLIUtils.h"
 #include "Alias/Specialized/DFPA/DFPAPass.h"
-#include "Alias/UnificationBased/DyckAA/DyckAliasAnalysis.h"
-#include "Alias/UnificationBased/DyckAA/DyckCallGraph.h"
-#include "Alias/UnificationBased/DyckAA/DyckCallGraphNode.h"
 #include "Alias/Specialized/FPA/CallGraphPass.h"
 #include "Alias/Specialized/FPA/Common.h"
 #include "Alias/Specialized/FPA/Config.h"
@@ -39,8 +38,9 @@
 #include "Alias/Specialized/FPA/KELPPass.h"
 #include "Alias/Specialized/FPA/MLTADFPass.h"
 #include "Alias/Specialized/FPA/MLTAPass.h"
-#include "Alias/InclusionBased/LotusAA/Engine/InterProceduralPass.h"
-#include "Alias/InclusionBased/LotusAA/Support/FunctionPointerResults.h"
+#include "Alias/UnificationBased/DyckAA/DyckAliasAnalysis.h"
+#include "Alias/UnificationBased/DyckAA/DyckCallGraph.h"
+#include "Alias/UnificationBased/DyckAA/DyckCallGraphNode.h"
 
 #include <chrono>
 #include <map>

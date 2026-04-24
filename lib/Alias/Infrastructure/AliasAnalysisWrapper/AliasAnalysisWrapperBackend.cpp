@@ -11,13 +11,13 @@
  */
 
 #include "Alias/Infrastructure/AliasAnalysisWrapper/AliasAnalysisWrapper.h"
-#include "Alias/Specialized/AllocAA/AllocAA.h"
 #include "Alias/DemandDriven/DDA/FlowDDA.h"
-#include "Alias/UnificationBased/DyckAA/DyckAliasAnalysis.h"
 #include "Alias/InclusionBased/SparrowAA/AndersenAA.h"
 #include "Alias/InclusionBased/TPA/PointerAnalysis/Analysis/SemiSparsePointerAnalysis.h"
 #include "Alias/InclusionBased/TPA/PointerAnalysis/Support/PtsSet.h"
+#include "Alias/Specialized/AllocAA/AllocAA.h"
 #include "Alias/Specialized/UnderApproxAA/UnderApproxAA.h"
+#include "Alias/UnificationBased/DyckAA/DyckAliasAnalysis.h"
 #include "Alias/UnificationBased/seadsa/SeaDsaAliasAnalysis.hh"
 #include <llvm/ADT/SmallVector.h>
 #include <llvm/Analysis/AliasAnalysis.h>

@@ -13,9 +13,9 @@
 
 #include "Alias/Infrastructure/AliasAnalysisWrapper/AliasAnalysisWrapper.h"
 #include "Alias/DemandDriven/DDA/FlowDDA.h"
-#include "Alias/UnificationBased/DyckAA/DyckAliasAnalysis.h"
 #include "Alias/InclusionBased/SparrowAA/AndersenAA.h"
 #include "Alias/InclusionBased/TPA/PointerAnalysis/Analysis/SemiSparsePointerAnalysis.h"
+#include "Alias/UnificationBased/DyckAA/DyckAliasAnalysis.h"
 #include <llvm/ADT/SmallVector.h>
 #include <llvm/Analysis/AliasAnalysis.h>
 #include <llvm/Analysis/MemoryLocation.h>

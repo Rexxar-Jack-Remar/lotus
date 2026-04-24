@@ -7,12 +7,12 @@
 #include "llvm/Support/PrettyStackTrace.h"
 #include "llvm/Support/Signals.h"
 
-#include "Alias/Infrastructure/AliasAnalysisWrapper/CLIUtils.h"
 #include "Alias/InclusionBased/AserPTA/PreProcessing/Passes/CanonicalizeGEPPass.h"
 #include "Alias/InclusionBased/AserPTA/PreProcessing/Passes/LoweringMemCpyPass.h"
 #include "Alias/InclusionBased/AserPTA/PreProcessing/Passes/RemoveASMInstPass.h"
 #include "Alias/InclusionBased/AserPTA/PreProcessing/Passes/RemoveExceptionHandlerPass.h"
 #include "Alias/InclusionBased/AserPTA/PreProcessing/Passes/StandardHeapAPIRewritePass.h"
+#include "Alias/Infrastructure/AliasAnalysisWrapper/CLIUtils.h"
 #include "Alias/Specialized/DFPA/DFPAPass.h"
 
 #include <fstream>

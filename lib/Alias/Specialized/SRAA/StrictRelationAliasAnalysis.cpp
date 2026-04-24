@@ -423,7 +423,7 @@ bool StrictRelations::aliastest3(const Value *p1, const Value *p2) {
     return false;
   }
 
-  for (auto i : dp1->locs)
+  for (const auto *i : dp1->locs)
     if (dp2->locs.count(i)) {
       t = clock() - t;
       test3 += ((float)t) / CLOCKS_PER_SEC;

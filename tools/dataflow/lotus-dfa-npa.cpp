@@ -24,8 +24,8 @@
 #include "Dataflow/NPA/Analyses/Intra/LiveVariables.h"
 #include "Dataflow/NPA/Analyses/Intra/ReachableBlocks.h"
 #include "Dataflow/NPA/Analyses/Intra/ReachingDefinitions.h"
-#include "Utils/Parallel/ThreadPool.h"
 #include "ToolSupport.h"
+#include "Utils/Parallel/ThreadPool.h"
 
 #include <algorithm>
 #include <memory>

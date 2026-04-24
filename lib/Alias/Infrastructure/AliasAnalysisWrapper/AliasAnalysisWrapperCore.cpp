@@ -10,9 +10,7 @@
  */
 
 #include "Alias/Infrastructure/AliasAnalysisWrapper/AliasAnalysisWrapper.h"
-#include "Alias/Specialized/AllocAA/AllocAA.h"
 #include "Alias/DemandDriven/DDA/FlowDDA.h"
-#include "Alias/UnificationBased/DyckAA/DyckAliasAnalysis.h"
 #include "Alias/InclusionBased/SparrowAA/AndersenAA.h"
 #include "Alias/InclusionBased/TPA/Context/ContextPolicy.h"
 #include "Alias/InclusionBased/TPA/Context/KLimitContext.h"
@@ -20,7 +18,9 @@
 #include "Alias/InclusionBased/TPA/PointerAnalysis/FrontEnd/SemiSparseProgramBuilder.h"
 #include "Alias/InclusionBased/TPA/PointerAnalysis/Support/PtsSet.h"
 #include "Alias/InclusionBased/TPA/Transforms/RunPrepass.h"
+#include "Alias/Specialized/AllocAA/AllocAA.h"
 #include "Alias/Specialized/UnderApproxAA/UnderApproxAA.h"
+#include "Alias/UnificationBased/DyckAA/DyckAliasAnalysis.h"
 #include "Alias/UnificationBased/seadsa/SeaDsaAliasAnalysis.hh"
 #include <llvm/Analysis/CFLAndersAliasAnalysis.h>
 #include <llvm/Analysis/CFLSteensAliasAnalysis.h>
