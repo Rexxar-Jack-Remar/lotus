@@ -9,7 +9,6 @@
 #include "Solvers/EGraph/Extract.h"
 #include "Solvers/EGraph/Id.h"
 #include "Solvers/EGraph/Language.h"
-#include "Solvers/EGraph/LpExtract.h"
 #include "Solvers/EGraph/MultiPattern.h"
 #include "Solvers/EGraph/Pattern.h"
 #include "Solvers/EGraph/PatternMachine.h"

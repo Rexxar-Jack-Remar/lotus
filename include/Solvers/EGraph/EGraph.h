@@ -15,24 +15,16 @@ template <typename L> using PatternAst = RecExpr<ENodeOrVar<L>>;
 struct UnionEvent {
   Id left;
   Id right;
-  Symbol reason;
-  bool rewrite = false;
+  Justification justification = Justification::congruence();
   std::optional<std::string> left_expr;
   std::optional<std::string> right_expr;
 };
 
-enum class ExplanationJustificationKind {
-  Congruence,
-  Rule,
-};
-
 struct ExplanationConnection {
-  ExplanationJustificationKind justification =
-      ExplanationJustificationKind::Congruence;
+  Justification justification = Justification::congruence();
   bool is_rewrite_forward = false;
   Id next = Id::fromIndex(0);
   Id current = Id::fromIndex(0);
-  Symbol rule;
 };
 
 struct ExplanationNode {
@@ -189,8 +181,8 @@ public:
     std::vector<std::tuple<Id, Id, Symbol>> out;
     out.reserve(union_events_.size());
     for (const auto &event : union_events_) {
-      if (event.rewrite && event.reason != Symbol()) {
-        out.emplace_back(event.left, event.right, event.reason);
+      if (event.justification.isRule()) {
+        out.emplace_back(event.left, event.right, event.justification.rule);
       }
     }
     return out;
@@ -214,6 +206,18 @@ public:
   }
 
   EGraph egraphIntersect(const EGraph &other, AnalysisT analysis) const {
+    if (!clean_ || !other.clean_) {
+      EGraph lhs = *this;
+      EGraph rhs = other;
+      if (!lhs.clean_) {
+        lhs.rebuild();
+      }
+      if (!rhs.clean_) {
+        rhs.rebuild();
+      }
+      return lhs.egraphIntersect(rhs, std::move(analysis));
+    }
+
     std::unordered_map<std::pair<Id, Id>, Id, PairHash> product_map;
     std::vector<std::pair<L, Id>> enodes;
 
@@ -228,6 +232,16 @@ public:
   }
 
   void egraphUnion(const EGraph &other) {
+    if (!clean_) {
+      rebuild();
+    }
+    if (!other.clean_) {
+      EGraph copy = other;
+      copy.rebuild();
+      egraphUnion(copy);
+      return;
+    }
+
     for (const auto &[left, right, why] : other.getUnionEqualities()) {
       auto [left_pat, left_subst] = other.idToPattern(left, {});
       auto [right_pat, right_subst] = other.idToPattern(right, {});
@@ -261,8 +275,8 @@ public:
       ensureNodeStorage(new_id, node);
       uncanonical_memo_.emplace(node, new_id);
       union_find_.unite(find(*existing), new_id);
-      recordExplanation(*existing, new_id, "congruence", false);
-      recordUnion(*existing, new_id, "congruence", false);
+      recordExplanation(*existing, new_id, Justification::congruence());
+      recordUnion(*existing, new_id, Justification::congruence());
       return new_id;
     }
 
@@ -353,19 +367,31 @@ public:
   }
 
   Id unite(Id lhs, Id rhs, const Symbol &reason = {}) {
-    auto [id, _] = uniteImpl(lhs, rhs, reason, reason != Symbol());
+    std::optional<Justification> justification;
+    if (reason != Symbol()) {
+      justification = Justification::ruleJustification(reason);
+    }
+    auto [id, _] = uniteImpl(lhs, rhs, justification);
     return id;
   }
 
   std::pair<Id, bool> uniteChecked(Id lhs, Id rhs,
                                    const Symbol &reason = {}) {
-    return uniteImpl(lhs, rhs, reason, reason != Symbol());
+    std::optional<Justification> justification;
+    if (reason != Symbol()) {
+      justification = Justification::ruleJustification(reason);
+    }
+    return uniteImpl(lhs, rhs, justification);
   }
 
   std::pair<Id, bool> unionInstantiations(const PatternAst<L> &from_pat,
                                           const PatternAst<L> &to_pat,
                                           const Subst &subst,
                                           const Symbol &reason);
+
+  bool unionTrusted(Id from, Id to, const Symbol &reason) {
+    return uniteImpl(from, to, Justification::ruleJustification(reason)).second;
+  }
 
   std::vector<Id> equivs(const RecExpr<L> &expr1,
                          const RecExpr<L> &expr2) const {
@@ -422,8 +448,7 @@ public:
     std::unordered_set<std::pair<Id, Id>, PairHash> edges;
     for (size_t i = 0; i < explanation_nodes_.size(); ++i) {
       for (const auto &neighbor : explanation_nodes_[i].neighbors) {
-        if (neighbor.justification !=
-            ExplanationJustificationKind::Congruence) {
+        if (!neighbor.justification.isCongruence()) {
           continue;
         }
         Id a = Id::fromIndex(i);
@@ -486,7 +511,7 @@ private:
       explanation_nodes_.push_back(ExplanationNode{
           {},
           ExplanationConnection{
-              ExplanationJustificationKind::Congruence, false, id, id, {}}});
+              Justification::congruence(), false, id, id}});
     }
   }
 
@@ -501,41 +526,51 @@ private:
         explanation_nodes_.at(node.index()).parent_connection;
     explanation_nodes_.at(next.index()).parent_connection =
         ExplanationConnection{node_connection.justification,
-                              !node_connection.is_rewrite_forward, node, next,
-                              node_connection.rule};
+                              !node_connection.is_rewrite_forward, node, next};
   }
 
-  void addExplanationNeighbor(Id lhs, Id rhs, ExplanationJustificationKind kind,
-                              bool forward, Symbol rule = {}) {
-    explanation_nodes_.at(lhs.index())
-        .neighbors.push_back(
-            ExplanationConnection{kind, forward, rhs, lhs, std::move(rule)});
+  void addExplanationNeighbor(Id lhs, Id rhs,
+                              const Justification &justification,
+                              bool forward) {
+    explanation_nodes_.at(lhs.index()).neighbors.push_back(
+        ExplanationConnection{justification, forward, rhs, lhs});
   }
 
-  void recordExplanation(Id lhs, Id rhs, const Symbol &reason,
-                         bool rewrite) {
+  void addAlternateRewrite(Id lhs, Id rhs, const Symbol &reason) {
+    if (!explanations_enabled_ || lhs == rhs) {
+      return;
+    }
+    Justification justification = Justification::ruleJustification(reason);
+    explanation_nodes_.at(lhs.index()).neighbors.insert(
+        explanation_nodes_.at(lhs.index()).neighbors.begin(),
+        ExplanationConnection{justification, true, rhs, lhs});
+    explanation_nodes_.at(rhs.index()).neighbors.insert(
+        explanation_nodes_.at(rhs.index()).neighbors.begin(),
+        ExplanationConnection{justification, false, lhs, rhs});
+  }
+
+  void recordExplanation(Id lhs, Id rhs,
+                         const std::optional<Justification> &justification) {
     if (!explanations_enabled_) {
       return;
     }
 
-    ExplanationJustificationKind kind =
-        rewrite ? ExplanationJustificationKind::Rule
-                : ExplanationJustificationKind::Congruence;
+    Justification edge_justification =
+        justification.value_or(Justification::congruence());
 
     if (lhs == rhs) {
-      if (!rewrite) {
-        return;
+      if (edge_justification.isRule()) {
+        addExplanationNeighbor(lhs, rhs, edge_justification, true);
+        addExplanationNeighbor(rhs, lhs, edge_justification, false);
       }
-      addExplanationNeighbor(lhs, rhs, kind, true, reason);
-      addExplanationNeighbor(rhs, lhs, kind, false, reason);
       return;
     }
 
     makeExplanationLeader(lhs);
     explanation_nodes_.at(lhs.index()).parent_connection =
-        ExplanationConnection{kind, true, rhs, lhs, reason};
-    addExplanationNeighbor(lhs, rhs, kind, true, reason);
-    addExplanationNeighbor(rhs, lhs, kind, false, reason);
+        ExplanationConnection{edge_justification, true, rhs, lhs};
+    addExplanationNeighbor(lhs, rhs, edge_justification, true);
+    addExplanationNeighbor(rhs, lhs, edge_justification, false);
   }
 
   void canonicalizeInPlace(L &node) const {
@@ -641,33 +676,34 @@ private:
 
   Id addInstantiationNoncanonical(const PatternAst<L> &pat, const Subst &subst);
 
-  std::pair<Id, bool> uniteImpl(Id lhs, Id rhs, const Symbol &reason,
-                                bool rewrite) {
-    analysis_.preUnion(*this, lhs, rhs,
-                       reason == Symbol() ? nullptr : &reason);
+  std::pair<Id, bool> uniteImpl(Id lhs, Id rhs,
+                                const std::optional<Justification> &justification) {
+    analysis_.preUnion(*this, lhs, rhs, justification);
 
     clean_ = false;
-    lhs = findMut(lhs);
-    rhs = findMut(rhs);
-    if (lhs == rhs) {
-      if (rewrite && explanations_enabled_) {
-        recordExplanation(lhs, rhs, reason, true);
-        recordUnion(lhs, rhs, reason, true);
+    Id original_lhs = lhs;
+    Id original_rhs = rhs;
+    Id lhs_class = findMut(lhs);
+    Id rhs_class = findMut(rhs);
+    if (lhs_class == rhs_class) {
+      if (justification && justification->isRule() && explanations_enabled_) {
+        addAlternateRewrite(original_lhs, original_rhs, justification->rule);
+        recordUnion(original_lhs, original_rhs, justification);
       }
-      return {lhs, false};
+      return {lhs_class, false};
     }
 
-    if (classes_.at(lhs).parents.size() < classes_.at(rhs).parents.size()) {
-      std::swap(lhs, rhs);
+    if (classes_.at(lhs_class).parents.size() < classes_.at(rhs_class).parents.size()) {
+      std::swap(lhs_class, rhs_class);
     }
 
-    recordExplanation(lhs, rhs, reason, rewrite);
-    recordUnion(lhs, rhs, reason, rewrite);
-    union_find_.unite(lhs, rhs);
+    recordExplanation(original_lhs, original_rhs, justification);
+    recordUnion(original_lhs, original_rhs, justification);
+    union_find_.unite(lhs_class, rhs_class);
 
-    auto right_class = std::move(classes_.at(rhs));
-    classes_.erase(rhs);
-    auto &left_class = classes_.at(lhs);
+    auto right_class = std::move(classes_.at(rhs_class));
+    classes_.erase(rhs_class);
+    auto &left_class = classes_.at(lhs_class);
 
     pending_.insert(pending_.end(), right_class.parents.begin(),
                     right_class.parents.end());
@@ -690,14 +726,16 @@ private:
                               right_class.parents.begin(),
                               right_class.parents.end());
 
-    analysis_.modify(*this, lhs);
-    return {lhs, true};
+    analysis_.modify(*this, lhs_class);
+    return {lhs_class, true};
   }
 
-  void recordUnion(Id lhs, Id rhs, const Symbol &reason, bool rewrite) {
+  void recordUnion(Id lhs, Id rhs,
+                   const std::optional<Justification> &justification) {
     if (explanations_enabled_) {
       union_events_.push_back(
-          {lhs, rhs, reason, rewrite, tryIdToString(lhs), tryIdToString(rhs)});
+          {lhs, rhs, justification.value_or(Justification::congruence()),
+           tryIdToString(lhs), tryIdToString(rhs)});
     }
   }
 
@@ -746,7 +784,7 @@ private:
         auto existing = memo_.find(node);
         if (existing != memo_.end()) {
           auto [_, changed] =
-              uniteImpl(existing->second, id, "congruence", false);
+              uniteImpl(existing->second, id, Justification::congruence());
           unions += changed ? 1u : 0u;
         } else {
           memo_[node] = id;
@@ -909,8 +947,8 @@ struct LanguageMapper {
       dst_egraph.classes_by_op_.emplace(mapDiscriminant(discriminant), ids);
     }
     for (const auto &event : src_egraph.union_events_) {
-      dst_egraph.union_events_.push_back({event.left, event.right, event.reason,
-                                          event.rewrite, std::nullopt,
+      dst_egraph.union_events_.push_back({event.left, event.right,
+                                          event.justification, std::nullopt,
                                           std::nullopt});
     }
     dst_egraph.explanation_nodes_ = src_egraph.explanation_nodes_;
@@ -965,7 +1003,7 @@ inline std::pair<Id, bool> EGraph<L, AnalysisT>::unionInstantiations(
     const Subst &subst, const Symbol &reason) {
   Id from = addInstantiationNoncanonical(from_pat, subst);
   Id to = addInstantiationNoncanonical(to_pat, subst);
-  return uniteImpl(from, to, reason, true);
+  return uniteImpl(from, to, Justification::ruleJustification(reason));
 }
 
 template <typename L, typename AnalysisT>
@@ -974,7 +1012,7 @@ inline std::pair<Pattern<L>, Subst> EGraph<L, AnalysisT>::idToPattern(
   RecExpr<ENodeOrVar<L>> pat;
   Subst subst;
   std::unordered_map<Id, Id> cache;
-  idToPatternInternal(pat, find(id), substitutions, subst, cache);
+  idToPatternInternal(pat, id, substitutions, subst, cache);
   return {Pattern<L>(std::move(pat)), subst};
 }
 

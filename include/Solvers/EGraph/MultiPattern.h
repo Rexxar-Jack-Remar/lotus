@@ -105,7 +105,7 @@ public:
     if (results.empty()) {
       return std::nullopt;
     }
-    return SearchMatches<L>{eclass, std::move(results)};
+    return SearchMatches<L>{eclass, std::move(results), std::nullopt};
   }
 
   template <typename A> size_t nMatches(const EGraph<L, A> &egraph) const {

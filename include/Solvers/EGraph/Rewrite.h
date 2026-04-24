@@ -82,17 +82,18 @@ public:
 
   virtual std::vector<Id> applyOne(EGraph<L, A> &egraph, Id eclass,
                                    const Subst &subst,
-                                   const PatternAst<L> *searcher_ast,
+                                   const PatternAst<L> *match_ast,
                                    const Symbol &rule_name) const = 0;
 
   virtual std::vector<Id> applyMatches(
       EGraph<L, A> &egraph, const std::vector<SearchMatches<L>> &matches,
-      const PatternAst<L> *searcher_ast, const Symbol &rule_name) const {
+      const Symbol &rule_name) const {
     std::vector<Id> ids;
     for (const auto &match : matches) {
+      const PatternAst<L> *match_ast =
+          match.ast ? &*match.ast : getPatternAst();
       for (const auto &subst : match.substs) {
-        auto added =
-            applyOne(egraph, match.eclass, subst, searcher_ast, rule_name);
+        auto added = applyOne(egraph, match.eclass, subst, match_ast, rule_name);
         ids.insert(ids.end(), added.begin(), added.end());
       }
     }
@@ -136,16 +137,16 @@ public:
   explicit PatternApplier(Pattern<L> pattern) : pattern_(std::move(pattern)) {}
 
   std::vector<Id> applyOne(EGraph<L, A> &egraph, Id eclass, const Subst &subst,
-                           const PatternAst<L> *searcher_ast,
+                           const PatternAst<L> *match_ast,
                            const Symbol &rule_name) const override {
     if (!egraph.analysis().allowEMatchingCycles() &&
         pattern_.containsEClass(egraph, subst, eclass)) {
       return {};
     }
 
-    if (searcher_ast && egraph.areExplanationsEnabled()) {
+    if (match_ast && egraph.areExplanationsEnabled()) {
       auto [merged, changed] = egraph.unionInstantiations(
-          *searcher_ast, pattern_.ast(), subst, rule_name);
+          *match_ast, pattern_.ast(), subst, rule_name);
       return changed ? std::vector<Id>{merged} : std::vector<Id>{};
     }
 
@@ -202,7 +203,6 @@ public:
 
   std::vector<Id> applyMatches(EGraph<L, A> &egraph,
                                const std::vector<SearchMatches<L>> &matches,
-                               const PatternAst<L> *,
                                const Symbol &) const override {
     return pattern_.applyMatches(egraph, matches);
   }
@@ -257,26 +257,27 @@ public:
             std::move(required_vars)) {}
 
   std::vector<Id> applyOne(EGraph<L, A> &egraph, Id eclass, const Subst &subst,
-                           const PatternAst<L> *searcher_ast,
+                           const PatternAst<L> *match_ast,
                            const Symbol &rule_name) const override {
     if (!condition_(egraph, eclass, subst)) {
       return {};
     }
-    return applier_->applyOne(egraph, eclass, subst, searcher_ast, rule_name);
+    return applier_->applyOne(egraph, eclass, subst, match_ast, rule_name);
   }
 
   std::vector<Id> applyMatches(EGraph<L, A> &egraph,
                                const std::vector<SearchMatches<L>> &matches,
-                               const PatternAst<L> *searcher_ast,
                                const Symbol &rule_name) const override {
     std::vector<Id> ids;
     for (const auto &match : matches) {
+      const PatternAst<L> *match_ast =
+          match.ast ? &*match.ast : applier_->getPatternAst();
       for (const auto &subst : match.substs) {
         if (!condition_(egraph, match.eclass, subst)) {
           continue;
         }
         auto added = applier_->applyOne(egraph, match.eclass, subst,
-                                        searcher_ast, rule_name);
+                                        match_ast, rule_name);
         ids.insert(ids.end(), added.begin(), added.end());
       }
     }
@@ -360,8 +361,7 @@ public:
 
   std::vector<Id> apply(EGraph<L, A> &egraph,
                         const std::vector<SearchMatches<L>> &matches) const {
-    return applier_->applyMatches(egraph, matches, searcher_->getPatternAst(),
-                                  name_);
+    return applier_->applyMatches(egraph, matches, name_);
   }
 
 private:

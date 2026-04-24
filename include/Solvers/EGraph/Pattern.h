@@ -106,6 +106,7 @@ template <typename L> using PatternAst = RecExpr<ENodeOrVar<L>>;
 template <typename L> struct SearchMatches {
   Id eclass;
   std::vector<Subst> substs;
+  std::optional<PatternAst<L>> ast;
 };
 
 template <typename L> class Pattern {
@@ -320,7 +321,9 @@ Pattern<L>::searchEClassWithLimit(const EGraph<L, A> &egraph, Id eclass,
   if (substs.empty()) {
     return std::nullopt;
   }
-  return SearchMatches<L>{eclass, std::move(substs)};
+  SearchMatches<L> matches{eclass, std::move(substs), std::nullopt};
+  matches.ast = ast_;
+  return matches;
 }
 
 } // namespace lotus::egraph

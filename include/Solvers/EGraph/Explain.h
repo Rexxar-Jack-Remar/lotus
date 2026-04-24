@@ -1,6 +1,7 @@
 #pragma once
 
 #include "Solvers/EGraph/EGraph.h"
+#include "Solvers/EGraph/Pattern.h"
 #include "Solvers/EGraph/RecExpr.h"
 #include "Solvers/EGraph/Subst.h"
 
@@ -64,11 +65,19 @@ template <typename L> struct FlatTerm {
   }
 
   void combineRewrites(const FlatTerm &other) {
-    if (!backward_rule) {
-      backward_rule = other.backward_rule;
-    }
-    if (!forward_rule) {
+    if (other.forward_rule) {
+      if (forward_rule) {
+        throw std::runtime_error(
+            "Invalid explanation: duplicate forward rewrite annotation");
+      }
       forward_rule = other.forward_rule;
+    }
+    if (other.backward_rule) {
+      if (backward_rule) {
+        throw std::runtime_error(
+            "Invalid explanation: duplicate backward rewrite annotation");
+      }
+      backward_rule = other.backward_rule;
     }
     for (size_t i = 0; i < children.size() && i < other.children.size(); ++i) {
       children[i].combineRewrites(other.children[i]);
@@ -175,6 +184,47 @@ public:
     return joinStrings(getFlatStrings(), "\n");
   }
 
+  template <typename R, typename A>
+  void checkProof(R &&rules) const {
+    using RewriteT = Rewrite<L, A>;
+    std::vector<const RewriteT *> collected;
+    for (const auto &rule : rules) {
+      collected.push_back(&rule);
+    }
+
+    std::unordered_map<Symbol, const RewriteT *> table;
+    for (const RewriteT *rule : collected) {
+      table.emplace(rule->name(), rule);
+    }
+
+    const auto &flat = makeFlatExplanation();
+    if (flat.empty()) {
+      return;
+    }
+
+    if (flat.front().hasRewriteForward() || flat.front().hasRewriteBackward()) {
+      throw std::runtime_error(
+          "Invalid explanation: first flat step carries a rewrite annotation");
+    }
+
+    for (size_t i = 0; i + 1 < flat.size(); ++i) {
+      const auto &current = flat[i];
+      const auto &next = flat[i + 1];
+      bool has_forward = next.hasRewriteForward();
+      bool has_backward = next.hasRewriteBackward();
+      if (has_forward == has_backward) {
+        throw std::runtime_error(
+            "Invalid explanation: each step must contain exactly one rewrite");
+      }
+
+      bool ok = has_forward ? checkRewriteAt(current, next, table, true)
+                            : checkRewriteAt(current, next, table, false);
+      if (!ok) {
+        throw std::runtime_error("Explanation proof check failed");
+      }
+    }
+  }
+
   std::string getString() const {
     if (explanation_trees_.empty()) {
       return "(Explanation)";
@@ -186,20 +236,26 @@ public:
     return "(Explanation " + joinStrings(parts, " ") + ")";
   }
   std::string getStringWithLet() const {
-    std::unordered_map<std::string, size_t> counts;
+    std::unordered_set<const TreeTerm<L> *> shared;
+    std::vector<const TreeTerm<L> *> to_bind;
     for (const auto &tree : explanation_trees_) {
-      collectFingerprints(*tree, counts);
+      findSharedTerms(tree, shared, to_bind);
     }
 
-    std::unordered_map<std::string, std::string> bindings;
+    std::unordered_map<const TreeTerm<L> *, std::string> bindings;
     std::vector<std::pair<std::string, const TreeTerm<L> *>> ordered_bindings;
-    for (const auto &tree : explanation_trees_) {
-      assignBindings(*tree, counts, bindings, ordered_bindings);
+    for (const TreeTerm<L> *tree : to_bind) {
+      if (bindings.count(tree)) {
+        continue;
+      }
+      std::string name = "v_" + std::to_string(bindings.size());
+      bindings.emplace(tree, name);
+      ordered_bindings.emplace_back(name, tree);
     }
 
     std::vector<std::string> parts;
     for (const auto &tree : explanation_trees_) {
-      parts.push_back(formatTreeWithBindings(*tree, bindings, true));
+      parts.push_back(formatTreeWithBindings(tree, bindings, true));
     }
     std::string result = parts.empty()
                              ? "(Explanation)"
@@ -281,64 +337,44 @@ private:
     return term.toString();
   }
 
-  static std::string fingerprint(const TreeTerm<L> &tree) {
-    std::vector<std::string> children;
-    for (const auto &proofs : tree.child_proofs) {
-      std::vector<std::string> nested;
-      for (const auto &child : proofs) {
-        nested.push_back(fingerprint(*child));
-      }
-      children.push_back("[" + joinStrings(nested, ",") + "]");
-    }
-    return tree.expr.toString() +
-           "|f=" +
-           (tree.forward_rule ? std::string(tree.forward_rule->view()) : "") +
-           "|b=" +
-           (tree.backward_rule ? std::string(tree.backward_rule->view()) : "") +
-           "|c=" + joinStrings(children, ";");
-  }
-
-  static void
-  collectFingerprints(const TreeTerm<L> &tree,
-                      std::unordered_map<std::string, size_t> &counts) {
-    std::string key = fingerprint(tree);
-    ++counts[key];
-    for (const auto &proofs : tree.child_proofs) {
-      for (const auto &child : proofs) {
-        collectFingerprints(*child, counts);
-      }
-    }
-  }
-
-  static void
-  assignBindings(const TreeTerm<L> &tree,
-                 const std::unordered_map<std::string, size_t> &counts,
-                 std::unordered_map<std::string, std::string> &bindings,
-                 std::vector<std::pair<std::string, const TreeTerm<L> *>>
-                     &ordered_bindings) {
-    for (const auto &proofs : tree.child_proofs) {
-      for (const auto &child : proofs) {
-        assignBindings(*child, counts, bindings, ordered_bindings);
+  static std::string formatTreeWithBindings(
+      const std::shared_ptr<TreeTerm<L>> &tree,
+      const std::unordered_map<const TreeTerm<L> *, std::string> &bindings,
+      bool is_root = false) {
+    if (!is_root) {
+      if (auto it = bindings.find(tree.get()); it != bindings.end()) {
+        return it->second;
       }
     }
 
-    std::string key = fingerprint(tree);
-    auto count_it = counts.find(key);
-    if (count_it != counts.end() && count_it->second > 1 &&
-        !bindings.count(key)) {
-      std::string name = "v_" + std::to_string(bindings.size());
-      bindings.emplace(key, name);
-      ordered_bindings.emplace_back(name, &tree);
+    std::string out = tree->expr.toString();
+    if (tree->forward_rule) {
+      out = "(Rewrite=> " + std::string(tree->forward_rule->view()) + " " +
+            out + ")";
+    } else if (tree->backward_rule) {
+      out = "(Rewrite<= " + std::string(tree->backward_rule->view()) + " " +
+            out + ")";
     }
+    if (!tree->child_proofs.empty()) {
+      std::vector<std::string> children;
+      for (const auto &proofs : tree->child_proofs) {
+        std::vector<std::string> nested;
+        for (const auto &child : proofs) {
+          nested.push_back(formatTreeWithBindings(child, bindings));
+        }
+        children.push_back("(Explanation " + joinStrings(nested, "\n") + ")");
+      }
+      out = "(Explanation " + out + " " + joinStrings(children, " ") + ")";
+    }
+    return out;
   }
 
   static std::string formatTreeWithBindings(
       const TreeTerm<L> &tree,
-      const std::unordered_map<std::string, std::string> &bindings,
+      const std::unordered_map<const TreeTerm<L> *, std::string> &bindings,
       bool is_root = false) {
-    std::string key = fingerprint(tree);
     if (!is_root) {
-      if (auto it = bindings.find(key); it != bindings.end()) {
+      if (auto it = bindings.find(&tree); it != bindings.end()) {
         return it->second;
       }
     }
@@ -356,7 +392,7 @@ private:
       for (const auto &proofs : tree.child_proofs) {
         std::vector<std::string> nested;
         for (const auto &child : proofs) {
-          nested.push_back(formatTreeWithBindings(*child, bindings));
+          nested.push_back(formatTreeWithBindings(child, bindings));
         }
         children.push_back("(Explanation " + joinStrings(nested, "\n") + ")");
       }
@@ -420,6 +456,138 @@ private:
     proof.front().backward_rule = tree.backward_rule;
     proof.front().forward_rule = tree.forward_rule;
     return proof;
+  }
+
+  template <typename A>
+  static std::unordered_map<Symbol, const Rewrite<L, A> *>
+  makeRuleTable(const std::vector<const Rewrite<L, A> *> &rules) {
+    std::unordered_map<Symbol, const Rewrite<L, A> *> table;
+    for (const Rewrite<L, A> *rule : rules) {
+      table.emplace(rule->name(), rule);
+    }
+    return table;
+  }
+
+  template <typename A>
+  static bool checkRewriteAt(
+      const FlatTerm<L> &current, const FlatTerm<L> &next,
+      const std::unordered_map<Symbol, const Rewrite<L, A> *> &table,
+      bool is_forward) {
+    if (is_forward && next.forward_rule) {
+      auto it = table.find(*next.forward_rule);
+      return it == table.end() ? true : checkRewrite(current, next, *it->second);
+    }
+    if (!is_forward && next.backward_rule) {
+      auto it = table.find(*next.backward_rule);
+      return it == table.end() ? true : checkRewrite(next, current, *it->second);
+    }
+
+    if (current.children.size() != next.children.size()) {
+      return false;
+    }
+
+    for (size_t i = 0; i < current.children.size() && i < next.children.size();
+         ++i) {
+      if (!checkRewriteAt(current.children[i], next.children[i], table,
+                          is_forward)) {
+        return false;
+      }
+    }
+    return true;
+  }
+
+  template <typename A>
+  static bool checkRewrite(const FlatTerm<L> &current, const FlatTerm<L> &next,
+                           const Rewrite<L, A> &rewrite) {
+    const PatternAst<L> *lhs = rewrite.searcher().getPatternAst();
+    const PatternAst<L> *rhs = rewrite.applier().getPatternAst();
+    if (!lhs || !rhs) {
+      return true;
+    }
+
+    FlatTerm<L> rewritten = rewriteFlatTerm(current, *lhs, *rhs);
+    return flattenedEqual(rewritten, next);
+  }
+
+  static FlatTerm<L> rewriteFlatTerm(const FlatTerm<L> &term,
+                                     const PatternAst<L> &lhs,
+                                     const PatternAst<L> &rhs) {
+    std::unordered_map<Var, const FlatTerm<L> *> bindings;
+    makeBindings(term, lhs, lhs.root(), bindings);
+    return fromPattern(rhs, rhs.root(), bindings);
+  }
+
+  static FlatTerm<L>
+  fromPattern(const PatternAst<L> &pattern, Id location,
+              const std::unordered_map<Var, const FlatTerm<L> *> &bindings) {
+    const auto &node = pattern[location];
+    if (node.isVar()) {
+      return *bindings.at(node.var());
+    }
+
+    std::vector<FlatTerm<L>> children;
+    for (Id child : node.node().children()) {
+      children.push_back(fromPattern(pattern, child, bindings));
+    }
+    return FlatTerm<L>::fromNodeAndChildren(node.node(), std::move(children));
+  }
+
+  static void makeBindings(const FlatTerm<L> &term, const PatternAst<L> &pattern,
+                           Id location,
+                           std::unordered_map<Var, const FlatTerm<L> *> &bindings) {
+    const auto &item = pattern[location];
+    if (item.isVar()) {
+      auto it = bindings.find(item.var());
+      if (it != bindings.end()) {
+        if (!flattenedEqual(*it->second, term)) {
+          throw std::runtime_error(
+              "Invalid explanation: inconsistent variable binding in proof");
+        }
+      } else {
+        bindings.emplace(item.var(), &term);
+      }
+      return;
+    }
+
+    const auto &node = item.node();
+    if (!node.matches(term.expr[term.expr.root()])) {
+      throw std::runtime_error("Invalid explanation: proof rewrite root mismatch");
+    }
+    for (size_t i = 0; i < node.children().size(); ++i) {
+      makeBindings(term.children[i], pattern, node.children()[i], bindings);
+    }
+  }
+
+  static bool flattenedEqual(const FlatTerm<L> &lhs, const FlatTerm<L> &rhs) {
+    if (!lhs.expr[lhs.expr.root()].matches(rhs.expr[rhs.expr.root()])) {
+      return false;
+    }
+    if (lhs.children.size() != rhs.children.size()) {
+      return false;
+    }
+    for (size_t i = 0; i < lhs.children.size(); ++i) {
+      if (!flattenedEqual(lhs.children[i], rhs.children[i])) {
+        return false;
+      }
+    }
+    return true;
+  }
+
+  static void findSharedTerms(const std::shared_ptr<TreeTerm<L>> &term,
+                              std::unordered_set<const TreeTerm<L> *> &seen,
+                              std::vector<const TreeTerm<L> *> &to_bind) {
+    if (term->child_proofs.empty()) {
+      return;
+    }
+    if (seen.insert(term.get()).second) {
+      for (const auto &proofs : term->child_proofs) {
+        for (const auto &child : proofs) {
+          findSharedTerms(child, seen, to_bind);
+        }
+      }
+    } else {
+      to_bind.push_back(term.get());
+    }
   }
 
   TreeExplanation explanation_trees_;
@@ -548,7 +716,7 @@ template <typename L, typename A>
 inline size_t connectionCost(const EGraph<L, A> &egraph,
                              const ExplanationConnection &connection,
                              PathMemo &memo, ActivePairs &active) {
-  if (connection.justification == ExplanationJustificationKind::Rule) {
+  if (connection.justification.isRule()) {
     return 1;
   }
 
@@ -746,12 +914,12 @@ inline std::shared_ptr<TreeTerm<L>> explainAdjacent(
   }
 
   std::shared_ptr<TreeTerm<L>> tree;
-  if (connection.justification == ExplanationJustificationKind::Rule) {
+  if (connection.justification.isRule()) {
     tree = nodeToExplanation(egraph, connection.next, node_cache);
     if (connection.is_rewrite_forward) {
-      tree->forward_rule = connection.rule;
+      tree->forward_rule = connection.justification.rule;
     } else {
-      tree->backward_rule = connection.rule;
+      tree->backward_rule = connection.justification.rule;
     }
     tree->current = connection.next;
     tree->last = connection.current;
@@ -846,11 +1014,11 @@ inline bool checkEachExplain(const EGraph<L, A> &egraph,
   for (size_t i = 0; i < nodes.size(); ++i) {
     const auto &connection = nodes[i].parent_connection;
     if (connection.next == Id::fromIndex(i) ||
-        connection.justification != ExplanationJustificationKind::Rule) {
+        !connection.justification.isRule()) {
       continue;
     }
 
-    auto it = by_name.find(connection.rule);
+    auto it = by_name.find(connection.justification.rule);
     if (it == by_name.end()) {
       continue;
     }

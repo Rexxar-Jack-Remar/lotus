@@ -13,6 +13,36 @@ struct DidMerge {
   bool right_changed = false;
 };
 
+struct Justification {
+  enum class Kind {
+    Congruence,
+    Rule,
+  };
+
+  Kind kind = Kind::Congruence;
+  Symbol rule;
+
+  static Justification congruence() { return Justification{}; }
+
+  static Justification ruleJustification(Symbol reason) {
+    Justification justification;
+    justification.kind = Kind::Rule;
+    justification.rule = std::move(reason);
+    return justification;
+  }
+
+  bool isCongruence() const { return kind == Kind::Congruence; }
+  bool isRule() const { return kind == Kind::Rule; }
+
+  friend bool operator==(const Justification &lhs, const Justification &rhs) {
+    return lhs.kind == rhs.kind && lhs.rule == rhs.rule;
+  }
+
+  friend bool operator!=(const Justification &lhs, const Justification &rhs) {
+    return !(lhs == rhs);
+  }
+};
+
 template <typename L> struct NoAnalysis;
 template <typename L, typename AnalysisT = NoAnalysis<L>> class EGraph;
 
@@ -31,7 +61,7 @@ template <typename L> struct NoAnalysis {
 
   template <typename AnyAnalysis>
   void preUnion(const EGraph<L, AnyAnalysis> &, Id, Id,
-                const Symbol *) const {}
+                const std::optional<Justification> &) const {}
 
   DidMerge merge(Data &, Data) { return {}; }
 

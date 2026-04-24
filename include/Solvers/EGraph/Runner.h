@@ -444,6 +444,9 @@ private:
 
     Instant rebuild_start = now();
     iteration.n_rebuilds = egraph.rebuild();
+    if (egraph.areExplanationsEnabled() && !checkEachExplain(egraph, rules)) {
+      throw std::runtime_error("EGraph explanation consistency check failed");
+    }
     iteration.rebuild_time =
         std::chrono::duration<double>(now() - rebuild_start).count();
 

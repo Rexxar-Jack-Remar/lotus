@@ -2,9 +2,7 @@ add_library(LotusEGraph STATIC
   EGraph.cpp
 )
 
-target_include_directories(LotusEGraph
+target_link_libraries(LotusEGraph
   PUBLIC
-    ${CMAKE_SOURCE_DIR}/include
+   # ${Z3_LIBRARIES}
 )
-
-target_compile_features(LotusEGraph PUBLIC cxx_std_17)

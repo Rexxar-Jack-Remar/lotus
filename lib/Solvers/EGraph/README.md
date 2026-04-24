@@ -16,14 +16,16 @@ needed for equality saturation and rewrite-driven normalization:
 - `Extractor`
 - `MultiPattern`
 - lightweight explanation and dot-export surfaces
+- no LP extractor surface: the previous Z3-backed DAG extractor was not a
+  faithful migration of `egg`'s `good_lp`-based implementation and has been
+  removed pending a proper redesign
 
 ## Design goals
 
-- no Z3 dependency in the public API
 - reusable outside SMT-specific clients
 - small, header-driven C++ surface compatible with Lotus build conventions
-- enough parity with `egg`'s core model to support direct migration of simple
-  rewrite workloads
+- preserve `egg` semantics for the core e-graph, rewrite, runner, and
+  explanation pipelines before adding optional extensions
 
 ## Current shape
 
@@ -53,3 +55,10 @@ These tests cover:
 - repeated-variable patterns
 - multipattern plumbing
 - explanation/dot/version surfaces
+
+## Removed surface
+
+`egg`'s optional LP extraction module is currently not exposed by the C++
+port. The previous implementation diverged from upstream solver/backend
+semantics and added a mandatory Z3 dependency to the public header surface.
+Until there is a faithful replacement, use the greedy `Extractor`.

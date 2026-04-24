@@ -39,3 +39,52 @@ TEST(EGraphCoreTest, LookupUsesCanonicalChildren) {
   ASSERT_TRUE(gb.has_value());
   EXPECT_EQ(egraph.find(ga), egraph.find(*gb));
 }
+
+TEST(EGraphCoreTest, UnionFindMatchesEggRepresentativeBehavior) {
+  UnionFind uf;
+  for (size_t i = 0; i < 10; ++i) {
+    uf.makeSet();
+  }
+
+  uf.unite(Id::fromIndex(0), Id::fromIndex(1));
+  uf.unite(Id::fromIndex(0), Id::fromIndex(2));
+  uf.unite(Id::fromIndex(0), Id::fromIndex(3));
+
+  uf.unite(Id::fromIndex(6), Id::fromIndex(7));
+  uf.unite(Id::fromIndex(6), Id::fromIndex(8));
+  uf.unite(Id::fromIndex(6), Id::fromIndex(9));
+
+  for (size_t i = 0; i < 10; ++i) {
+    (void)uf.findMut(Id::fromIndex(i));
+  }
+
+  EXPECT_EQ(uf.find(Id::fromIndex(0)), Id::fromIndex(0));
+  EXPECT_EQ(uf.find(Id::fromIndex(1)), Id::fromIndex(0));
+  EXPECT_EQ(uf.find(Id::fromIndex(2)), Id::fromIndex(0));
+  EXPECT_EQ(uf.find(Id::fromIndex(3)), Id::fromIndex(0));
+  EXPECT_EQ(uf.find(Id::fromIndex(4)), Id::fromIndex(4));
+  EXPECT_EQ(uf.find(Id::fromIndex(5)), Id::fromIndex(5));
+  EXPECT_EQ(uf.find(Id::fromIndex(6)), Id::fromIndex(6));
+  EXPECT_EQ(uf.find(Id::fromIndex(7)), Id::fromIndex(6));
+  EXPECT_EQ(uf.find(Id::fromIndex(8)), Id::fromIndex(6));
+  EXPECT_EQ(uf.find(Id::fromIndex(9)), Id::fromIndex(6));
+}
+
+TEST(EGraphCoreTest, SimpleAddFromEggDoesNotBreakRebuild) {
+  EGraph<SymbolLang> egraph = EGraph<SymbolLang>().withExplanationsEnabled();
+
+  Id x = egraph.add(SymbolLang::leaf("x"));
+  Id x2 = egraph.add(SymbolLang::leaf("x"));
+  Id plus = egraph.add(SymbolLang("+", {x, x2}));
+
+  auto [merged, changed] = egraph.unionInstantiations(
+      Pattern<SymbolLang>::parse("x").ast(),
+      Pattern<SymbolLang>::parse("y").ast(), Subst{}, "union x and y");
+  EXPECT_TRUE(changed);
+  egraph.rebuild();
+
+  EXPECT_EQ(egraph.find(x), egraph.find(merged));
+  EXPECT_TRUE(egraph.lookup(SymbolLang("+", {x, x2})).has_value());
+  EXPECT_EQ(egraph.find(plus),
+            egraph.find(*egraph.lookup(SymbolLang("+", {x, x2}))));
+}
