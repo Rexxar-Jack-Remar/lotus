@@ -8,6 +8,7 @@
 #include "Alias/Infrastructure/AliasAnalysisWrapper/AliasAnalysisWrapper.h"
 
 #include <llvm/IR/InstIterator.h>
+#include <algorithm>
 
 using namespace llvm;
 using namespace lotus;
@@ -21,11 +22,7 @@ JoinTargetAnalysis::JoinTargetAnalysis(Module &module,
 
 void JoinTargetAnalysis::analyze() {
   collectForksAndJoins();
-  m_forkToRoot.clear();
-  m_joinToForks.clear();
-  m_joinToFeasibleForks.clear();
-  m_joinHasUnknownLiveFork.clear();
-  m_unambiguousJoins.clear();
+  m_joinResolutions.clear();
   m_functionSummaries.clear();
   m_blockInStates.clear();
   m_blockOutStates.clear();
@@ -33,11 +30,6 @@ void JoinTargetAnalysis::analyze() {
   if (!m_threadMultiplicity) {
     m_threadMultiplicity =
         std::make_unique<concurrency::ThreadMultiplicityAnalysis>(m_module);
-  }
-
-  for (const Instruction *forkInst : m_forkInsts) {
-    m_forkToRoot[forkInst] = traceThreadHandleRoot(
-        m_threadAPI->getForkedThread(forkInst), &m_module);
   }
 
   buildFunctionSummaries();
@@ -49,17 +41,11 @@ void JoinTargetAnalysis::analyze() {
   }
 
   for (const Instruction *joinInst : m_joinInsts) {
-    auto feasibleIt = m_joinToFeasibleForks.find(joinInst);
-    if (feasibleIt == m_joinToFeasibleForks.end() ||
-        feasibleIt->second.size() != 1 ||
-        m_joinHasUnknownLiveFork[joinInst]) {
+    auto it = m_joinResolutions.find(joinInst);
+    if (it == m_joinResolutions.end()) {
       continue;
     }
-
-    const Instruction *targetFork = feasibleIt->second.front();
-    if (!m_threadMultiplicity->instructionMayExecuteMultipleTimes(targetFork)) {
-      m_unambiguousJoins.insert(joinInst);
-    }
+    finalizeJoinResolution(joinInst, it->second);
   }
 }
 
@@ -83,20 +69,22 @@ void JoinTargetAnalysis::collectForksAndJoins() {
 
 std::vector<const Instruction *>
 JoinTargetAnalysis::getPossibleJoinedForks(const Instruction *joinInst) const {
-  auto it = m_joinToForks.find(joinInst);
-  if (it != m_joinToForks.end()) {
-    return it->second;
-  }
-  return {};
+  return getJoinResolution(joinInst).possible_forks;
 }
 
 std::vector<const Instruction *>
 JoinTargetAnalysis::getFeasibleJoinedForks(const Instruction *joinInst) const {
-  auto it = m_joinToFeasibleForks.find(joinInst);
-  if (it != m_joinToFeasibleForks.end()) {
-    return it->second;
-  }
-  return {};
+  return getJoinResolution(joinInst).feasible_forks;
+}
+
+std::vector<ThreadInstance>
+JoinTargetAnalysis::getPossibleJoinedInstances(const Instruction *joinInst) const {
+  return getJoinResolution(joinInst).possible_instances;
+}
+
+std::vector<ThreadInstance>
+JoinTargetAnalysis::getFeasibleJoinedInstances(const Instruction *joinInst) const {
+  return getJoinResolution(joinInst).feasible_instances;
 }
 
 const Instruction *JoinTargetAnalysis::getDefiniteFeasibleJoinedFork(
@@ -112,7 +100,16 @@ const Instruction *JoinTargetAnalysis::getDefiniteFeasibleJoinedFork(
 }
 
 bool JoinTargetAnalysis::isUnambiguousJoin(const Instruction *joinInst) const {
-  return m_unambiguousJoins.count(joinInst) != 0;
+  return getJoinResolution(joinInst).unambiguous;
+}
+
+JoinResolution
+JoinTargetAnalysis::getJoinResolution(const Instruction *joinInst) const {
+  auto it = m_joinResolutions.find(joinInst);
+  if (it != m_joinResolutions.end()) {
+    return it->second;
+  }
+  return {};
 }
 
 JoinTargetAnalysis::CandidateCountKind JoinTargetAnalysis::classifyJoinForks(

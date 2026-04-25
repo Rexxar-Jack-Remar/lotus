@@ -1,8 +1,8 @@
 #include <memory>
 #include <set>
 
-#include <llvm/IR/Constants.h>
 #include <llvm/IR/Argument.h>
+#include <llvm/IR/Constants.h>
 #include <llvm/IR/Instructions.h>
 #include <llvm/IR/LLVMContext.h>
 #include <llvm/IR/Module.h>
@@ -85,7 +85,7 @@ SRetFixtureIR buildSRetFixture() {
       lotus::unittest::findInstructionByName(*IR.Mod->getFunction("main"),
                                              "actual");
   if (IR.Callee) {
-    auto FormalIt = IR.Callee->arg_begin();
+    const auto *FormalIt = IR.Callee->arg_begin();
     if (FormalIt != IR.Callee->arg_end()) {
       ++FormalIt;
     }

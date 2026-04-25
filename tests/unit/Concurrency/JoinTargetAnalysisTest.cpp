@@ -3,6 +3,7 @@
 #include "TestUtils/LLVMHelpers.h"
 
 #include <llvm/ADT/SmallVector.h>
+#include <algorithm>
 
 using namespace llvm;
 using namespace mhp;
@@ -1087,6 +1088,180 @@ TEST_F(JoinTargetAnalysisTest, WrapperFieldStoreKeepsDistinctFieldsSeparated) {
   EXPECT_EQ(analysis.getPossibleJoinedForks(join_inst).size(), 1u);
   EXPECT_EQ(analysis.getFeasibleJoinedForks(join_inst).size(), 1u);
   EXPECT_NE(analysis.getDefiniteFeasibleJoinedFork(join_inst), nullptr);
+}
+
+TEST_F(JoinTargetAnalysisTest,
+       JoinResolutionMarksRepeatedForkSiteAsAmbiguous) {
+  const char *source = R"(
+    declare i32 @pthread_create(i8*, i8*, i8* (i8*)*, i8*)
+    declare i32 @pthread_join(i8*, i8*)
+
+    define i8* @worker(i8* %arg) {
+    entry:
+      ret i8* null
+    }
+
+    define void @spawn_helper(i8* %tid) {
+    entry:
+      call i32 @pthread_create(i8* %tid, i8* null, i8* (i8*)* @worker, i8* null)
+      ret void
+    }
+
+    define i32 @main(i1 %cond) {
+    entry:
+      %tid = alloca i8
+      br i1 %cond, label %left, label %right
+
+    left:
+      call void @spawn_helper(i8* %tid)
+      br label %join
+
+    right:
+      call void @spawn_helper(i8* %tid)
+      br label %join
+
+    join:
+      call i32 @pthread_join(i8* %tid, i8* null)
+      ret i32 0
+    }
+  )";
+
+  auto module = parseModule(source);
+  ASSERT_NE(module, nullptr);
+
+  JoinTargetAnalysis analysis(*module);
+  analysis.analyze();
+
+  const Function *main_func = module->getFunction("main");
+  ASSERT_NE(main_func, nullptr);
+  const Instruction *join_inst = nullptr;
+  for (const Instruction &inst : instructions(main_func)) {
+    if (const auto *cb = dyn_cast<CallBase>(&inst)) {
+      if (cb->getCalledFunction() &&
+          cb->getCalledFunction()->getName() == "pthread_join") {
+        join_inst = &inst;
+        break;
+      }
+    }
+  }
+
+  ASSERT_NE(join_inst, nullptr);
+  JoinResolution resolution = analysis.getJoinResolution(join_inst);
+  EXPECT_FALSE(resolution.unambiguous);
+  ASSERT_EQ(resolution.feasible_instances.size(), 1u);
+  EXPECT_EQ(resolution.feasible_instances.front().execution_class,
+            ThreadExecutionClass::RepeatedExecution);
+  EXPECT_NE(std::find(resolution.ambiguity_reasons.begin(),
+                      resolution.ambiguity_reasons.end(),
+                      JoinAmbiguityReason::RepeatedForkSite),
+            resolution.ambiguity_reasons.end());
+}
+
+TEST_F(JoinTargetAnalysisTest, JoinResolutionCarriesPathAlternativesForSelect) {
+  const char *source = R"(
+    declare i32 @pthread_create(i8*, i8*, i8* (i8*)*, i8*)
+    declare i32 @pthread_join(i8*, i8*)
+
+    define i8* @worker1(i8* %arg) {
+    entry:
+      ret i8* null
+    }
+
+    define i8* @worker2(i8* %arg) {
+    entry:
+      ret i8* null
+    }
+
+    define i32 @main(i1 %cond) {
+    entry:
+      %tid1 = alloca i8
+      %tid2 = alloca i8
+      call i32 @pthread_create(i8* %tid1, i8* null, i8* (i8*)* @worker1, i8* null)
+      call i32 @pthread_create(i8* %tid2, i8* null, i8* (i8*)* @worker2, i8* null)
+      %join_tid = select i1 %cond, i8* %tid1, i8* %tid2
+      call i32 @pthread_join(i8* %join_tid, i8* null)
+      ret i32 0
+    }
+  )";
+
+  auto module = parseModule(source);
+  ASSERT_NE(module, nullptr);
+
+  JoinTargetAnalysis analysis(*module);
+  analysis.analyze();
+
+  const Function *main_func = module->getFunction("main");
+  ASSERT_NE(main_func, nullptr);
+  const Instruction *join_inst = nullptr;
+  for (const Instruction &inst : instructions(main_func)) {
+    if (const auto *cb = dyn_cast<CallBase>(&inst)) {
+      if (cb->getCalledFunction() &&
+          cb->getCalledFunction()->getName() == "pthread_join") {
+        join_inst = &inst;
+        break;
+      }
+    }
+  }
+
+  ASSERT_NE(join_inst, nullptr);
+  JoinResolution resolution = analysis.getJoinResolution(join_inst);
+  EXPECT_TRUE(resolution.is_path_sensitive);
+  EXPECT_EQ(resolution.path_alternatives.size(), 2u);
+  EXPECT_EQ(resolution.feasible_instances.size(), 2u);
+  EXPECT_NE(std::find(resolution.ambiguity_reasons.begin(),
+                      resolution.ambiguity_reasons.end(),
+                      JoinAmbiguityReason::PathMergedAlternatives),
+            resolution.ambiguity_reasons.end());
+}
+
+TEST_F(JoinTargetAnalysisTest,
+       JoinResolutionReportsNoFeasibleInstanceAfterDetach) {
+  const char *source = R"(
+    declare i32 @pthread_create(i8*, i8*, i8* (i8*)*, i8*)
+    declare i32 @pthread_detach(i8*)
+    declare i32 @pthread_join(i8*, i8*)
+
+    define i8* @worker(i8* %arg) {
+    entry:
+      ret i8* null
+    }
+
+    define i32 @main() {
+    entry:
+      %tid = alloca i8
+      call i32 @pthread_create(i8* %tid, i8* null, i8* (i8*)* @worker, i8* null)
+      call i32 @pthread_detach(i8* %tid)
+      call i32 @pthread_join(i8* %tid, i8* null)
+      ret i32 0
+    }
+  )";
+
+  auto module = parseModule(source);
+  ASSERT_NE(module, nullptr);
+
+  JoinTargetAnalysis analysis(*module);
+  analysis.analyze();
+
+  const Function *main_func = module->getFunction("main");
+  ASSERT_NE(main_func, nullptr);
+  const Instruction *join_inst = nullptr;
+  for (const Instruction &inst : instructions(main_func)) {
+    if (const auto *cb = dyn_cast<CallBase>(&inst)) {
+      if (cb->getCalledFunction() &&
+          cb->getCalledFunction()->getName() == "pthread_join") {
+        join_inst = &inst;
+        break;
+      }
+    }
+  }
+
+  ASSERT_NE(join_inst, nullptr);
+  JoinResolution resolution = analysis.getJoinResolution(join_inst);
+  EXPECT_TRUE(resolution.feasible_instances.empty());
+  EXPECT_NE(std::find(resolution.ambiguity_reasons.begin(),
+                      resolution.ambiguity_reasons.end(),
+                      JoinAmbiguityReason::NoFeasibleInstance),
+            resolution.ambiguity_reasons.end());
 }
 
 #ifndef LOTUS_GTEST_NO_MAIN

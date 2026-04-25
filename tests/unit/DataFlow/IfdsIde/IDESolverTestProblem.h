@@ -13,10 +13,10 @@
 #include <unordered_map>
 #include <vector>
 
-#include <Dataflow/IFDS/Core/IFDSFramework.h>
 #include <llvm/IR/Instructions.h>
 #include <llvm/IR/Value.h>
 #include <llvm/Support/raw_ostream.h>
+#include <Dataflow/IFDS/Core/IFDSFramework.h>
 
 namespace ifds {
 
