@@ -4,6 +4,11 @@
  */
 
 #include "Dataflow/APA/APA.h"
+#include "Dataflow/APA/Analyses/LLVM/Inter/ConstantPropagation.h"
+#include "Dataflow/APA/Analyses/LLVM/Inter/LiveVariables.h"
+#include "Dataflow/APA/Analyses/LLVM/Inter/ReachingDefinitions.h"
+#include "Dataflow/APA/Analyses/LLVM/Inter/Reachability.h"
+#include "Dataflow/APA/Analyses/LLVM/Inter/UninitializedVariables.h"
 #include "Dataflow/APA/Analyses/LLVM/Intra/ConstantPropagation.h"
 #include "Dataflow/APA/Analyses/LLVM/Intra/LiveVariables.h"
 #include "Dataflow/APA/Analyses/LLVM/Intra/Reachability.h"
@@ -653,6 +658,313 @@ TEST_F(APATest, LLVMLiveVariablesMergesFactsAcrossMultipleReturns) {
   EXPECT_EQ(RetSumFacts->find(A), RetSumFacts->end());
   EXPECT_NE(RetAFacts->find(A), RetAFacts->end());
   EXPECT_EQ(RetAFacts->find(B), RetAFacts->end());
+}
+
+TEST_F(APATest, InterproceduralReachabilityDirectCallAndDeadFunction) {
+  const char *Source = R"(
+    define i32 @id(i32 %x) {
+    entry:
+      %sum = add i32 %x, 0
+      ret i32 %sum
+    }
+
+    define i32 @dead() {
+    entry:
+      %unused = add i32 7, 8
+      ret i32 %unused
+    }
+
+    define i32 @main() {
+    entry:
+      %call = call i32 @id(i32 3)
+      ret i32 %call
+    }
+  )";
+
+  auto Module = lotus::unittest::parseModule(Context, Source, "APATest");
+  ASSERT_NE(Module, nullptr);
+
+  auto *Main = Module->getFunction("main");
+  auto *Id = Module->getFunction("id");
+  auto *Dead = Module->getFunction("dead");
+  ASSERT_NE(Main, nullptr);
+  ASSERT_NE(Id, nullptr);
+  ASSERT_NE(Dead, nullptr);
+
+  auto Result = elimination::runInterElimReachable(Main);
+  ASSERT_TRUE(Result.hasSolveMetadata());
+  EXPECT_EQ(Result.solveStatus(), elimination::SolveStatus::Ok);
+
+  auto *Call = findFirst<llvm::CallInst>(Main);
+  auto *MainRet = findFirst<llvm::ReturnInst>(Main);
+  auto *CalleeEntry = &*Id->getEntryBlock().begin();
+  auto *CalleeRet = findFirst<llvm::ReturnInst>(Id);
+  auto *DeadInst = findInstructionByName(Dead, "unused");
+  ASSERT_NE(Call, nullptr);
+  ASSERT_NE(MainRet, nullptr);
+  ASSERT_NE(CalleeEntry, nullptr);
+  ASSERT_NE(CalleeRet, nullptr);
+  ASSERT_NE(DeadInst, nullptr);
+
+  EXPECT_NE(Result.tryIN(Call, {}), nullptr);
+  EXPECT_NE(Result.tryIN(MainRet, {}), nullptr);
+  EXPECT_NE(Result.tryIN(CalleeEntry, {Call}), nullptr);
+  EXPECT_NE(Result.tryIN(CalleeRet, {Call}), nullptr);
+  EXPECT_EQ(Result.tryIN(DeadInst, {}), nullptr);
+}
+
+TEST_F(APATest, InterproceduralConstantPropagationReturnThroughIdentity) {
+  const char *Source = R"(
+    define i32 @id(i32 %x) {
+    entry:
+      ret i32 %x
+    }
+
+    define i32 @dead() {
+    entry:
+      %unused = add i32 9, 9
+      ret i32 %unused
+    }
+
+    define i32 @main() {
+    entry:
+      %seed = add i32 1, 2
+      %call = call i32 @id(i32 %seed)
+      ret i32 %call
+    }
+  )";
+
+  auto Module = lotus::unittest::parseModule(Context, Source, "APATest");
+  ASSERT_NE(Module, nullptr);
+
+  auto *Main = Module->getFunction("main");
+  auto *Id = Module->getFunction("id");
+  auto *Dead = Module->getFunction("dead");
+  ASSERT_NE(Main, nullptr);
+  ASSERT_NE(Id, nullptr);
+  ASSERT_NE(Dead, nullptr);
+
+  auto Result = elimination::runInterElimConstantPropagation(Main);
+  ASSERT_TRUE(Result.hasSolveMetadata());
+  EXPECT_EQ(Result.solveStatus(), elimination::SolveStatus::Ok);
+
+  auto *Call = findFirst<llvm::CallInst>(Main);
+  auto *MainRet = findFirst<llvm::ReturnInst>(Main);
+  auto *DeadInst = findInstructionByName(Dead, "unused");
+  ASSERT_NE(Call, nullptr);
+  ASSERT_NE(MainRet, nullptr);
+  ASSERT_NE(DeadInst, nullptr);
+  auto *CallerFacts = Result.tryIN(MainRet, {});
+  ASSERT_NE(CallerFacts, nullptr);
+  auto It = CallerFacts->find(Call);
+  ASSERT_NE(It, CallerFacts->end());
+  if (It->second.isConstant()) {
+    auto *CI = llvm::dyn_cast<llvm::ConstantInt>(It->second.getConstant());
+    ASSERT_NE(CI, nullptr);
+    EXPECT_EQ(CI->getSExtValue(), 3);
+  }
+
+  auto *CalleeFacts = Result.tryIN(&*Id->getEntryBlock().begin(), {Call});
+  ASSERT_NE(CalleeFacts, nullptr);
+  auto FormalIt = CalleeFacts->find(&*Id->arg_begin());
+  ASSERT_NE(FormalIt, CalleeFacts->end());
+  if (FormalIt->second.isConstant()) {
+    auto *FormalCI =
+        llvm::dyn_cast<llvm::ConstantInt>(FormalIt->second.getConstant());
+    ASSERT_NE(FormalCI, nullptr);
+    EXPECT_EQ(FormalCI->getSExtValue(), 3);
+  }
+
+  EXPECT_FALSE(It->second.isUnknown());
+  EXPECT_FALSE(FormalIt->second.isUnknown());
+
+  EXPECT_EQ(Result.tryIN(DeadInst, {}), nullptr);
+}
+
+TEST_F(APATest, InterproceduralLiveVariablesBackwardAcrossCall) {
+  const char *Source = R"(
+    define i32 @id(i32 %x) {
+    entry:
+      ret i32 %x
+    }
+
+    define i32 @main() {
+    entry:
+      %seed = add i32 1, 2
+      %unused = add i32 %seed, 5
+      %call = call i32 @id(i32 %seed)
+      ret i32 %call
+    }
+  )";
+
+  auto Module = lotus::unittest::parseModule(Context, Source, "APATest");
+  ASSERT_NE(Module, nullptr);
+
+  auto *Main = Module->getFunction("main");
+  auto *Id = Module->getFunction("id");
+  ASSERT_NE(Main, nullptr);
+  ASSERT_NE(Id, nullptr);
+
+  auto Result = elimination::runInterElimLiveVariables(Main);
+  ASSERT_TRUE(Result.hasSolveMetadata());
+  EXPECT_EQ(Result.solveStatus(), elimination::SolveStatus::Ok);
+
+  auto *Seed = findInstructionByName(Main, "seed");
+  auto *Unused = findInstructionByName(Main, "unused");
+  auto *Call = findFirst<llvm::CallInst>(Main);
+  auto *MainRet = findFirst<llvm::ReturnInst>(Main);
+  auto *CalleeRet = findFirst<llvm::ReturnInst>(Id);
+  ASSERT_NE(Seed, nullptr);
+  ASSERT_NE(Unused, nullptr);
+  ASSERT_NE(Call, nullptr);
+  ASSERT_NE(MainRet, nullptr);
+  ASSERT_NE(CalleeRet, nullptr);
+
+  auto *CallFacts = Result.tryIN(Call, {});
+  ASSERT_NE(CallFacts, nullptr);
+  EXPECT_NE(CallFacts->find(Seed), CallFacts->end());
+  EXPECT_EQ(CallFacts->find(Unused), CallFacts->end());
+
+  auto *CalleeFacts = Result.tryOUT(CalleeRet, {Call});
+  ASSERT_NE(CalleeFacts, nullptr);
+  EXPECT_NE(CalleeFacts->find(&*Id->arg_begin()), CalleeFacts->end());
+
+  auto *RetFacts = Result.tryOUT(MainRet, {});
+  ASSERT_NE(RetFacts, nullptr);
+  EXPECT_NE(RetFacts->find(Call), RetFacts->end());
+}
+
+TEST_F(APATest, InterproceduralConstantPropagationThroughPointerArgument) {
+  const char *Source = R"(
+    define void @set42(i32* %p) {
+    entry:
+      store i32 42, i32* %p
+      ret void
+    }
+
+    define i32 @main() {
+    entry:
+      %slot = alloca i32
+      store i32 7, i32* %slot
+      call void @set42(i32* %slot)
+      %loaded = load i32, i32* %slot
+      ret i32 %loaded
+    }
+  )";
+
+  auto Module = lotus::unittest::parseModule(Context, Source, "APATest");
+  ASSERT_NE(Module, nullptr);
+
+  auto *Main = Module->getFunction("main");
+  ASSERT_NE(Main, nullptr);
+
+  auto Result = elimination::runInterElimConstantPropagation(Main);
+  ASSERT_TRUE(Result.hasSolveMetadata());
+  EXPECT_EQ(Result.solveStatus(), elimination::SolveStatus::Ok);
+
+  auto *Slot = findInstructionByName(Main, "slot");
+  auto *Load = findInstructionByName(Main, "loaded");
+  auto *Ret = findFirst<llvm::ReturnInst>(Main);
+  ASSERT_NE(Slot, nullptr);
+  ASSERT_NE(Load, nullptr);
+  ASSERT_NE(Ret, nullptr);
+
+  auto *Facts = Result.tryIN(Ret, {});
+  ASSERT_NE(Facts, nullptr);
+  auto SlotIt = Facts->find(Slot);
+  ASSERT_NE(SlotIt, Facts->end());
+  EXPECT_FALSE(SlotIt->second.isUnknown());
+
+  auto LoadIt = Facts->find(Load);
+  ASSERT_NE(LoadIt, Facts->end());
+  EXPECT_FALSE(LoadIt->second.isUnknown());
+}
+
+TEST_F(APATest, InterproceduralReachingDefinitionsAcrossCall) {
+  const char *Source = R"(
+    define i32 @id(i32 %x) {
+    entry:
+      ret i32 %x
+    }
+
+    define i32 @main() {
+    entry:
+      %seed = add i32 1, 2
+      %call = call i32 @id(i32 %seed)
+      ret i32 %call
+    }
+  )";
+
+  auto Module = lotus::unittest::parseModule(Context, Source, "APATest");
+  ASSERT_NE(Module, nullptr);
+
+  auto *Main = Module->getFunction("main");
+  auto *Id = Module->getFunction("id");
+  ASSERT_NE(Main, nullptr);
+  ASSERT_NE(Id, nullptr);
+
+  auto Result = elimination::runInterElimReachingDefinitions(Main);
+  ASSERT_TRUE(Result.hasSolveMetadata());
+  EXPECT_EQ(Result.solveStatus(), elimination::SolveStatus::Ok);
+
+  auto *Call = findFirst<llvm::CallInst>(Main);
+  auto *MainRet = findFirst<llvm::ReturnInst>(Main);
+  auto *CalleeEntry = &*Id->getEntryBlock().begin();
+  ASSERT_NE(Call, nullptr);
+  ASSERT_NE(MainRet, nullptr);
+  ASSERT_NE(CalleeEntry, nullptr);
+
+  auto *CalleeFacts = Result.tryIN(CalleeEntry, {Call});
+  ASSERT_NE(CalleeFacts, nullptr);
+  EXPECT_NE(CalleeFacts->find(&*Id->arg_begin()), CalleeFacts->end());
+
+  auto *RetFacts = Result.tryIN(MainRet, {});
+  ASSERT_NE(RetFacts, nullptr);
+  EXPECT_NE(RetFacts->find(Call), RetFacts->end());
+}
+
+TEST_F(APATest, InterproceduralUninitializedVariablesAcrossCall) {
+  const char *Source = R"(
+    define i32 @loadit(i32* %p) {
+    entry:
+      %v = load i32, i32* %p
+      ret i32 %v
+    }
+
+    define i32 @main() {
+    entry:
+      %slot = alloca i32
+      %call = call i32 @loadit(i32* %slot)
+      ret i32 %call
+    }
+  )";
+
+  auto Module = lotus::unittest::parseModule(Context, Source, "APATest");
+  ASSERT_NE(Module, nullptr);
+
+  auto *Main = Module->getFunction("main");
+  auto *LoadIt = Module->getFunction("loadit");
+  ASSERT_NE(Main, nullptr);
+  ASSERT_NE(LoadIt, nullptr);
+
+  auto Result = elimination::runInterElimUninitVariables(Main);
+  ASSERT_TRUE(Result.hasSolveMetadata());
+  EXPECT_EQ(Result.solveStatus(), elimination::SolveStatus::Ok);
+
+  auto *Call = findFirst<llvm::CallInst>(Main);
+  auto *CalleeEntry = &*LoadIt->getEntryBlock().begin();
+  auto *Load = findInstructionByName(LoadIt, "v");
+  ASSERT_NE(Call, nullptr);
+  ASSERT_NE(CalleeEntry, nullptr);
+  ASSERT_NE(Load, nullptr);
+
+  auto *CalleeFacts = Result.tryIN(CalleeEntry, {Call});
+  ASSERT_NE(CalleeFacts, nullptr);
+  EXPECT_NE(CalleeFacts->find(&*LoadIt->arg_begin()), CalleeFacts->end());
+
+  auto *LoadFacts = Result.tryOUT(Load, {Call});
+  ASSERT_NE(LoadFacts, nullptr);
+  EXPECT_NE(LoadFacts->find(Load), LoadFacts->end());
 }
 
 int main(int argc, char **argv) {

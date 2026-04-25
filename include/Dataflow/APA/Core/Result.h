@@ -5,6 +5,7 @@
 #include "Dataflow/APA/Core/PathExpr.h"
 
 #include <unordered_map>
+#include <vector>
 
 namespace elimination {
 
@@ -51,6 +52,15 @@ public:
   bool hasSolveMetadata() const { return HasSolveMetadata; }
   SolveStatus solveStatus() const { return Status; }
   const SolveDiagnostics &solveDiagnostics() const { return Diagnostics; }
+
+  std::vector<NodeT> nodes() const {
+    std::vector<NodeT> Keys;
+    Keys.reserve(In.size());
+    for (const auto &Entry : In) {
+      Keys.push_back(Entry.first);
+    }
+    return Keys;
+  }
 
 private:
   std::unordered_map<NodeT, FactT> In;

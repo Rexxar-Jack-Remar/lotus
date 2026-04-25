@@ -13,14 +13,17 @@ namespace dataflow {
 namespace controlflow {
 
 /// Instruction-level interprocedural CFG interface (Phasar-like).
-class InterCFG : public IntraCFG {
+template <typename NodeT, typename FunctionT, typename ModuleT>
+class GenericInterCFG : public GenericIntraCFG<NodeT, FunctionT> {
 public:
-  using m_t = llvm::Module *;
-  using IntraCFG::getExitPointsOf;
-  using IntraCFG::getStartPointsOf;
-  using IntraCFG::isExitInst;
+  using n_t = NodeT;
+  using f_t = FunctionT;
+  using m_t = ModuleT;
+  using GenericIntraCFG<NodeT, FunctionT>::getExitPointsOf;
+  using GenericIntraCFG<NodeT, FunctionT>::getStartPointsOf;
+  using GenericIntraCFG<NodeT, FunctionT>::isExitInst;
 
-  virtual ~InterCFG() = default;
+  virtual ~GenericInterCFG() = default;
 
   virtual bool isCallSite(n_t Inst) const = 0;
   virtual bool isExitInst(n_t Inst) const = 0;
@@ -35,6 +38,9 @@ public:
 
   virtual m_t getModule() const = 0;
 };
+
+using InterCFG =
+    GenericInterCFG<llvm::Instruction *, llvm::Function *, llvm::Module *>;
 
 /// Default LLVM-backed interprocedural CFG with pluggable callee resolution.
 ///

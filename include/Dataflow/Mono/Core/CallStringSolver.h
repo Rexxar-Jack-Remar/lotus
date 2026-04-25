@@ -344,10 +344,12 @@ namespace dataflow {
  * @tparam ContainerT Fact container type (e.g., std::set<Value*>,
  * BitVectorSet<Value*>)
  */
-template <unsigned K, typename ContainerT>
+template <unsigned K, typename ContainerT,
+          typename NodeT = llvm::Instruction *>
 class ContextSensitiveDataFlowResult {
 public:
-  using Context = mono::CallStringCTX<llvm::Instruction *, K>;
+  using n_t = NodeT;
+  using Context = mono::CallStringCTX<n_t, K>;
 
   /**
    * @brief Key type for context-sensitive fact storage
@@ -359,7 +361,7 @@ public:
    * clustering improves cache locality when iterating results.
    */
   struct ContextKey {
-    llvm::Instruction *Inst;
+    n_t Inst;
     Context Ctx;
 
     bool operator<(const ContextKey &Rhs) const {
@@ -372,15 +374,15 @@ public:
 
   ContextSensitiveDataFlowResult() = default;
 
-  ContainerT &GEN(llvm::Instruction *Inst) { return Gens[Inst]; }
-  ContainerT &KILL(llvm::Instruction *Inst) { return Kills[Inst]; }
+  ContainerT &GEN(n_t Inst) { return Gens[Inst]; }
+  ContainerT &KILL(n_t Inst) { return Kills[Inst]; }
 
   ContainerT &IN(const ContextKey &Key) { return Ins[Key]; }
   ContainerT &OUT(const ContextKey &Key) { return Outs[Key]; }
-  ContainerT &IN(llvm::Instruction *Inst, const Context &Ctx) {
+  ContainerT &IN(n_t Inst, const Context &Ctx) {
     return IN(ContextKey{Inst, Ctx});
   }
-  ContainerT &OUT(llvm::Instruction *Inst, const Context &Ctx) {
+  ContainerT &OUT(n_t Inst, const Context &Ctx) {
     return OUT(ContextKey{Inst, Ctx});
   }
 
@@ -410,10 +412,10 @@ public:
     }
     return It->second;
   }
-  const ContainerT &IN(llvm::Instruction *Inst, const Context &Ctx) const {
+  const ContainerT &IN(n_t Inst, const Context &Ctx) const {
     return IN(ContextKey{Inst, Ctx});
   }
-  const ContainerT &OUT(llvm::Instruction *Inst, const Context &Ctx) const {
+  const ContainerT &OUT(n_t Inst, const Context &Ctx) const {
     return OUT(ContextKey{Inst, Ctx});
   }
 
@@ -425,17 +427,17 @@ public:
 
   const std::map<ContextKey, ContainerT> &getOUTMap() const { return Outs; }
 
-  const std::map<llvm::Instruction *, ContainerT> &getGENMap() const {
+  const std::map<n_t, ContainerT> &getGENMap() const {
     return Gens;
   }
 
-  const std::map<llvm::Instruction *, ContainerT> &getKILLMap() const {
+  const std::map<n_t, ContainerT> &getKILLMap() const {
     return Kills;
   }
 
 private:
-  std::map<llvm::Instruction *, ContainerT> Gens;
-  std::map<llvm::Instruction *, ContainerT> Kills;
+  std::map<n_t, ContainerT> Gens;
+  std::map<n_t, ContainerT> Kills;
   std::map<ContextKey, ContainerT> Ins;
   std::map<ContextKey, ContainerT> Outs;
   /// Per-instance fallback returned for missing keys.

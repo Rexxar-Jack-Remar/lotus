@@ -10,6 +10,11 @@
 #include "llvm/Support/InitLLVM.h"
 #include "llvm/Support/raw_ostream.h"
 
+#include "Dataflow/APA/Analyses/LLVM/Inter/ConstantPropagation.h"
+#include "Dataflow/APA/Analyses/LLVM/Inter/LiveVariables.h"
+#include "Dataflow/APA/Analyses/LLVM/Inter/Reachability.h"
+#include "Dataflow/APA/Analyses/LLVM/Inter/ReachingDefinitions.h"
+#include "Dataflow/APA/Analyses/LLVM/Inter/UninitializedVariables.h"
 #include "Dataflow/APA/Analyses/LLVM/Intra/AvailableExpressions.h"
 #include "Dataflow/APA/Analyses/LLVM/Intra/ConstantPropagation.h"
 #include "Dataflow/APA/Analyses/LLVM/Intra/LiveVariables.h"
@@ -41,8 +46,14 @@ static cl::opt<bool> StdoutOpt(
 static cl::opt<std::string> AnalysisOpt(
     "analysis",
     cl::desc("Analysis: liveness (default), reaching_defs, uninitialized, "
-             "constant_prop, available_exprs, reachable"),
+             "constant_prop, available_exprs, reachable, inter_liveness, "
+             "inter_reaching_defs, inter_uninitialized, inter_constant_prop, "
+             "inter_reachable"),
     cl::init("liveness"));
+static cl::opt<std::string>
+    EntryFunctionOpt("entry-function",
+                     cl::desc("Entry function for interprocedural analyses"),
+                     cl::init("main"));
 static cl::opt<std::string> ElimMethodOpt(
     "elim-method",
     cl::desc("Elimination solver method: state|adt-simple|adt-delayed"),
@@ -62,6 +73,38 @@ using lotus::dataflow_tool::FunctionView;
 using lotus::dataflow_tool::ValueIdMap;
 using InstructionExprFactory = elimination::PathExprFactory<Instruction *>;
 using InstructionExprRef = InstructionExprFactory::Ref;
+
+ValueIdMap buildModuleValueIdMap(Module &M) {
+  ValueIdMap ValueToId;
+  for (auto &G : M.globals()) {
+    ValueToId[&G] = (G.hasName() ? G.getName() : "global").str();
+  }
+
+  for (auto &F : M) {
+    if (F.isDeclaration())
+      continue;
+    const std::string Prefix = F.getName().str();
+    unsigned ArgIdx = 0;
+    for (auto &Arg : F.args()) {
+      ValueToId[&Arg] = Prefix + ".arg" + std::to_string(ArgIdx++);
+    }
+
+    unsigned InstIdx = 0;
+    for (auto &BB : F) {
+      for (auto &I : BB) {
+        ValueToId[&I] = Prefix + ".i" + std::to_string(InstIdx++);
+      }
+    }
+  }
+  return ValueToId;
+}
+
+template <typename ContextT> std::string contextToString(const ContextT &Ctx) {
+  std::string Buffer;
+  raw_string_ostream OS(Buffer);
+  Ctx.print(OS);
+  return OS.str();
+}
 
 const char *toString(elimination::EliminationMethod M) {
   switch (M) {
@@ -292,6 +335,15 @@ void printSolveMetadata(raw_ostream &OS, const ResultT &Result) {
      << ", max_star_hit=" << (Diag.max_star_hit ? "true" : "false") << "\n";
 }
 
+template <unsigned K, typename FactT, typename TransferT, typename NodeT>
+void printSolveMetadata(
+    raw_ostream &OS,
+    const elimination::InterDataFlowResultT<K, FactT, TransferT, NodeT> &Result) {
+  if (!Result.hasSolveMetadata())
+    return;
+  OS << "  [solver] status=" << toString(Result.solveStatus()) << "\n";
+}
+
 template <typename ResultT>
 void dumpProfile(raw_ostream &OS, const FunctionView &View,
                  const ResultT &Result, std::chrono::microseconds Elapsed) {
@@ -389,39 +441,128 @@ void runTimedAnalysis(raw_ostream &OS, const FunctionView &View,
   dumpTimedResult(OS, View, Result, Elapsed, std::forward<Printer>(PrintState));
 }
 
+template <typename ResultT, typename Printer>
+void dumpInterproceduralResult(raw_ostream &OS, Module &M,
+                               const ValueIdMap &ValueToId,
+                               const ResultT &Result, Printer &&PrintState) {
+  for (auto &F : M) {
+    if (F.isDeclaration())
+      continue;
+    lotus::dataflow_tool::emitFunctionHeader(OS, F);
+    for (auto &BB : F) {
+      for (auto &I : BB) {
+        auto Contexts = Result.contextsForInstruction(&I);
+        std::sort(Contexts.begin(), Contexts.end(),
+                  [&](const auto &Lhs, const auto &Rhs) {
+                    return contextToString(Lhs.Ctx) < contextToString(Rhs.Ctx);
+                  });
+        if (Contexts.empty()) {
+          OS << "  " << ValueToId.at(&I) << " IN: <no-context>\n";
+          continue;
+        }
+        for (const auto &Key : Contexts) {
+          OS << "  " << ValueToId.at(&I) << " IN ["
+             << contextToString(Key.Ctx) << "]: ";
+          PrintState(Key, Result);
+          OS << "\n";
+        }
+      }
+    }
+  }
+}
+
+template <typename Runner, typename Printer>
+void runTimedInterproceduralAnalysis(raw_ostream &OS, Module &M,
+                                      Function &Entry, Runner &&Run,
+                                      Printer &&PrintState) {
+  const auto Start = std::chrono::steady_clock::now();
+  auto Result = Run(Entry);
+  const auto Elapsed = std::chrono::duration_cast<std::chrono::microseconds>(
+      std::chrono::steady_clock::now() - Start);
+  const auto ValueToId = buildModuleValueIdMap(M);
+  OS << "  [profile] elapsed_us=" << Elapsed.count() << "\n";
+  printSolveMetadata(OS, Result);
+  dumpInterproceduralResult(OS, M, ValueToId, Result,
+                            [&](const auto &Key, const auto &Res) {
+                              PrintState(Key, Res, ValueToId);
+                            });
+}
+
+template <typename Runner>
+void runSetIntraAnalysis(raw_ostream &OS, const FunctionView &View,
+                         const elimination::EliminationOptions &ElimOpts,
+                         Runner &&Run) {
+  runTimedAnalysis(
+      OS, View, ElimOpts, std::forward<Runner>(Run),
+      [&](Instruction *I, auto &Result) {
+        lotus::dataflow_tool::formatValueSet(OS, Result.IN(I), View.ValueToId);
+      });
+}
+
+template <typename Runner>
+void runBoolIntraAnalysis(raw_ostream &OS, const FunctionView &View,
+                          const elimination::EliminationOptions &ElimOpts,
+                          Runner &&Run) {
+  runTimedAnalysis(
+      OS, View, ElimOpts, std::forward<Runner>(Run),
+      [&](Instruction *I, auto &Result) { OS << (Result.IN(I) ? "true" : "false"); });
+}
+
+template <typename Runner>
+void runSetInterAnalysis(raw_ostream &OS, Module &M, Function &Entry,
+                         Runner &&Run) {
+  runTimedInterproceduralAnalysis(
+      OS, M, Entry, std::forward<Runner>(Run),
+      [&](const auto &Key, const auto &Result, const auto &ValueToId) {
+        lotus::dataflow_tool::formatValueSet(OS, Result.IN(Key), ValueToId);
+      });
+}
+
+template <typename Runner, typename Formatter>
+void runMapInterAnalysis(raw_ostream &OS, Module &M, Function &Entry,
+                         Runner &&Run, Formatter &&FormatValue) {
+  runTimedInterproceduralAnalysis(
+      OS, M, Entry, std::forward<Runner>(Run),
+      [&](const auto &Key, const auto &Result, const auto &ValueToId) {
+        lotus::dataflow_tool::formatValueMap(OS, Result.IN(Key), ValueToId,
+                                             FormatValue);
+      });
+}
+
+template <typename Runner>
+void runBoolInterAnalysis(raw_ostream &OS, Module &M, Function &Entry,
+                          Runner &&Run) {
+  runTimedInterproceduralAnalysis(
+      OS, M, Entry, std::forward<Runner>(Run),
+      [&](const auto &Key, const auto &Result, const auto & /*ValueToId*/) {
+        OS << (Result.IN(Key) ? "true" : "false");
+      });
+}
+
 void runLiveness(raw_ostream &OS, const FunctionView &View,
                  const elimination::EliminationOptions &ElimOpts) {
-  runTimedAnalysis(
+  runSetIntraAnalysis(
       OS, View, ElimOpts,
       [](Function &F, const elimination::EliminationOptions &Opts) {
         return elimination::runIntraElimLiveVariables(&F, Opts);
-      },
-      [&](Instruction *I, auto &Result) {
-        lotus::dataflow_tool::formatValueSet(OS, Result.IN(I), View.ValueToId);
       });
 }
 
 void runReachingDefinitions(raw_ostream &OS, const FunctionView &View,
                             const elimination::EliminationOptions &ElimOpts) {
-  runTimedAnalysis(
+  runSetIntraAnalysis(
       OS, View, ElimOpts,
       [](Function &F, const elimination::EliminationOptions &Opts) {
         return elimination::runIntraElimReachingDefinitions(&F, nullptr, Opts);
-      },
-      [&](Instruction *I, auto &Result) {
-        lotus::dataflow_tool::formatValueSet(OS, Result.IN(I), View.ValueToId);
       });
 }
 
 void runUninitialized(raw_ostream &OS, const FunctionView &View,
                       const elimination::EliminationOptions &ElimOpts) {
-  runTimedAnalysis(
+  runSetIntraAnalysis(
       OS, View, ElimOpts,
       [](Function &F, const elimination::EliminationOptions &Opts) {
         return elimination::runIntraElimUninitVariables(&F, nullptr, Opts);
-      },
-      [&](Instruction *I, auto &Result) {
-        lotus::dataflow_tool::formatValueSet(OS, Result.IN(I), View.ValueToId);
       });
 }
 
@@ -463,29 +604,67 @@ void runAvailableExpressions(raw_ostream &OS, const FunctionView &View,
 
 void runReachable(raw_ostream &OS, const FunctionView &View,
                   const elimination::EliminationOptions &ElimOpts) {
-  runTimedAnalysis(
+  runBoolIntraAnalysis(
       OS, View, ElimOpts,
       [](Function &F, const elimination::EliminationOptions &Opts) {
         return elimination::runIntraElimReachable(&F, Opts);
-      },
-      [&](Instruction *I, auto &Result) {
-        OS << (Result.IN(I) ? "true" : "false");
       });
+}
+
+void runInterLiveness(raw_ostream &OS, Module &M, Function &Entry) {
+  runSetInterAnalysis(
+      OS, M, Entry,
+      [](Function &F) { return elimination::runInterElimLiveVariables(&F); });
+}
+
+void runInterReachingDefinitions(raw_ostream &OS, Module &M, Function &Entry) {
+  runSetInterAnalysis(OS, M, Entry, [](Function &F) {
+        return elimination::runInterElimReachingDefinitions(&F);
+      });
+}
+
+void runInterUninitialized(raw_ostream &OS, Module &M, Function &Entry) {
+  runSetInterAnalysis(
+      OS, M, Entry,
+      [](Function &F) { return elimination::runInterElimUninitVariables(&F); });
+}
+
+void runInterConstantPropagation(raw_ostream &OS, Module &M, Function &Entry) {
+  runMapInterAnalysis(
+      OS, M, Entry, [](Function &F) {
+        return elimination::runInterElimConstantPropagation(&F);
+      },
+      [&](const ValueLatticeElement &Value) {
+        return formatValueLatticeElement(Value);
+      });
+}
+
+void runInterReachable(raw_ostream &OS, Module &M, Function &Entry) {
+  runBoolInterAnalysis(
+      OS, M, Entry,
+      [](Function &F) { return elimination::runInterElimReachable(&F); });
 }
 
 struct AnalysisHandler final {
   StringRef Name;
-  void (*Run)(raw_ostream &, const FunctionView &,
-              const elimination::EliminationOptions &);
+  bool ModuleScoped = false;
+  void (*RunFunction)(raw_ostream &, const FunctionView &,
+                      const elimination::EliminationOptions &) = nullptr;
+  void (*RunModule)(raw_ostream &, Module &, Function &) = nullptr;
 };
 
 const AnalysisHandler Handlers[] = {
-    {"liveness", &runLiveness},
-    {"reaching_defs", &runReachingDefinitions},
-    {"uninitialized", &runUninitialized},
-    {"constant_prop", &runConstantPropagation},
-    {"available_exprs", &runAvailableExpressions},
-    {"reachable", &runReachable},
+    {"liveness", false, &runLiveness, nullptr},
+    {"reaching_defs", false, &runReachingDefinitions, nullptr},
+    {"uninitialized", false, &runUninitialized, nullptr},
+    {"constant_prop", false, &runConstantPropagation, nullptr},
+    {"available_exprs", false, &runAvailableExpressions, nullptr},
+    {"reachable", false, &runReachable, nullptr},
+    {"inter_liveness", true, nullptr, &runInterLiveness},
+    {"inter_reaching_defs", true, nullptr, &runInterReachingDefinitions},
+    {"inter_uninitialized", true, nullptr, &runInterUninitialized},
+    {"inter_constant_prop", true, nullptr, &runInterConstantPropagation},
+    {"inter_reachable", true, nullptr, &runInterReachable},
 };
 
 } // namespace
@@ -524,9 +703,21 @@ int main(int argc, char **argv) {
   const auto ElimOpts =
       lotus::dataflow_tool::parseEliminationOptions(ElimMethodOpt);
   OS << "[elim:" << AnalysisOpt << "]\n";
-  lotus::dataflow_tool::forEachDefinedFunction(
-      *M, OS,
-      [&](const FunctionView &View) { Handler->Run(OS, View, ElimOpts); });
+
+  if (Handler->ModuleScoped) {
+    Function *Entry = M->getFunction(EntryFunctionOpt);
+    if (Entry == nullptr || Entry->isDeclaration()) {
+      errs() << "error: entry function '" << EntryFunctionOpt
+             << "' not found or is a declaration\n";
+      return 1;
+    }
+    Handler->RunModule(OS, *M, *Entry);
+  } else {
+    lotus::dataflow_tool::forEachDefinedFunction(
+        *M, OS, [&](const FunctionView &View) {
+          Handler->RunFunction(OS, View, ElimOpts);
+        });
+  }
 
   return 0;
 }

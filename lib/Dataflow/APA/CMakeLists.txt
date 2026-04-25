@@ -14,6 +14,11 @@ set(APA_SOURCES
   Analyses/Intra/IntraLiveVariables.cpp
   Analyses/Intra/IntraVeryBusyExpressions.cpp
   Analyses/Intra/IntraNonNull.cpp
+  Analyses/Inter/InterReachable.cpp
+  Analyses/Inter/InterConstantPropagation.cpp
+  Analyses/Inter/InterLiveVariables.cpp
+  Analyses/Inter/InterReachingDefinitions.cpp
+  Analyses/Inter/InterUninitVariables.cpp
 )
 
 add_library(APADataFlow STATIC ${APA_SOURCES})

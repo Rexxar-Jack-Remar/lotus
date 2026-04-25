@@ -14,12 +14,12 @@ namespace dataflow {
 namespace controlflow {
 
 /// Instruction-level intraprocedural CFG interface (Phasar-like).
-class IntraCFG {
+template <typename NodeT, typename FunctionT> class GenericIntraCFG {
 public:
-  using n_t = llvm::Instruction *;
-  using f_t = llvm::Function *;
+  using n_t = NodeT;
+  using f_t = FunctionT;
 
-  virtual ~IntraCFG() = default;
+  virtual ~GenericIntraCFG() = default;
 
   virtual std::vector<n_t> getSuccsOf(n_t Inst, FlowDirection Dir) const = 0;
   virtual std::vector<n_t> getPredsOf(n_t Inst, FlowDirection Dir) const = 0;
@@ -53,6 +53,8 @@ public:
   /// True iff \p Inst is an exit node for the given direction.
   virtual bool isExitInst(n_t Inst, FlowDirection Dir) const = 0;
 };
+
+using IntraCFG = GenericIntraCFG<llvm::Instruction *, llvm::Function *>;
 
 /// Default LLVM-backed intraprocedural instruction CFG.
 class LLVMIntraCFG final : public IntraCFG {
