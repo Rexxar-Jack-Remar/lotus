@@ -697,27 +697,6 @@ tnum<Number>::operator||(const tnum<Number> &x) const {
       crab::outs() << "tnum-imply-widen, tr_zero > xtr_zero, use join \n";
       return *this | x;
     }
-    /*tnum<Number> jr = *this | x;
-    wrapint max = jr.m_value + jr.m_mask;
-    uint64_t leadingzero = max.countl_zero();
-    bitwidth_t w = max.get_bitwidth(); 
-    wrapint unsignMax = wrapint::get_unsigned_max(w);
-    wrapint unsignMin = wrapint::get_unsigned_min(w);
-    unsignMax.clearHighBits(leadingzero);
-    wrapint resValue = wrapint::get_unsigned_min(w);
-    tnum<Number> common = tnum<Number>(common_value, unsignMin);
-    
-    //crab::outs() << "tnum-imply-widen , resValue = "<< resValue << ",unsignMax = " << unsignMax << "  \n";
-    tnum<Number> res  = tnum<Number>(resValue, unsignMax);
-     //crab::outs() << "tnum-imply-widen res = "<< res << "  \n";
-    
-    /*if(!common_value.is_zero()){
-      res = res & common;
-    }
-    wrapint different = ~common_value;
-    tnum<Number> res  = tnum<Number>(common_value, different);
-    crab::outs() << "tnum-imply-widen res = "<< res << "  \n";
-    return res;*/
   }
 }
 
@@ -915,7 +894,7 @@ tnum<Number>::remGetLowBits(const tnum<Number> &LHS, const tnum<Number> &RHS) co
   wrapint::bitwidth_t  w = LHS.get_bitwidth(__LINE__);
   if(!RHS.is_zero() && RHS.m_value.is_even() && RHS.m_mask.is_even()) {
     uint64_t qzero = RHS.countMinTrailingZeros();
-    if(qzero = 0) return top(w); // 
+    if(qzero == 0) return top(w); // 
     wrapint mask((((uint64_t)1 << (uint64_t)(qzero - 1)) - 1), w);
     wrapint res_value = LHS.m_value & mask;
     wrapint res_mask = LHS.m_mask & mask;

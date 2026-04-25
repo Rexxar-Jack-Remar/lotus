@@ -14,6 +14,9 @@ set(Concurrency_SOURCES
   MHP/StaticVectorClockMHP.cpp
   MHP/HappensBeforeAnalysis.cpp
   LockSet/LockSetAnalysis.cpp
+  LockSet/LockSetAnalysisDataflow.cpp
+  LockSet/LockSetAnalysisModel.cpp
+  LockSet/LockSetAnalysisInterprocedural.cpp
   Memory/EscapeAnalysis.cpp
   Memory/StaticThreadSharingAnalysis.cpp
   CUDA/CUDASemantics.cpp
@@ -28,6 +31,8 @@ set(Concurrency_SOURCES
   CUDA/CUDAAnalysisMemory.cpp
   CUDA/CUDAAnalysis.cpp
   JoinTarget/JoinTargetAnalysis.cpp
+  JoinTarget/JoinTargetLocations.cpp
+  JoinTarget/JoinTargetTransfer.cpp
   MPI/MPIAnalysis.cpp
   MPI/MPIAbstractState.cpp
   MPI/MPISemantics.cpp
