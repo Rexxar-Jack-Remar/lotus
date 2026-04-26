@@ -133,7 +133,7 @@ IDESecureHeapPropagation::EdgeFunction
 IDESecureHeapPropagation::normal_edge_function(
     const llvm::Instruction * /*stmt*/, const llvm::Instruction * /*succ*/,
     const Fact & /*src_fact*/, const Fact & /*tgt_fact*/) {
-  return [](const Value &v) { return v; };
+  return edge::identity<Value>();
 }
 
 IDESecureHeapPropagation::EdgeFunction
@@ -141,7 +141,7 @@ IDESecureHeapPropagation::call_edge_function(const llvm::CallBase * /*call*/,
                                              const llvm::Function * /*callee*/,
                                              const Fact & /*src_fact*/,
                                              const Fact & /*tgt_fact*/) {
-  return [](const Value &v) { return v; };
+  return edge::identity<Value>();
 }
 
 IDESecureHeapPropagation::EdgeFunction
@@ -151,7 +151,7 @@ IDESecureHeapPropagation::return_edge_function(
     const llvm::Instruction *return_site, const Fact & /*exit_fact*/,
     const Fact & /*ret_fact*/) {
   (void)return_site;
-  return [](const Value &v) { return v; };
+  return edge::identity<Value>();
 }
 
 IDESecureHeapPropagation::EdgeFunction
@@ -160,7 +160,7 @@ IDESecureHeapPropagation::call_to_return_edge_function(
     llvm::ArrayRef<const llvm::Function *> /*callees*/,
     const Fact & /*src_fact*/, const Fact & /*tgt_fact*/) {
   (void)return_site;
-  return [](const Value &v) { return v; };
+  return edge::identity<Value>();
 }
 
 IDESecureHeapPropagation::FactSet
@@ -191,29 +191,29 @@ IDESecureHeapPropagation::summary_edge_function(
   (void)call;
   (void)return_site;
   if (!callee) {
-    return [](const Value &v) { return v; };
+    return edge::identity<Value>();
   }
   const std::string name = callee->getName().str();
   if (m_allocators.count(name) > 0) {
-    return [](const Value & /*v*/) { return Value::allocated(); };
+    return edge::constant<Value>(Value::allocated());
   }
   if (m_securers.count(name) > 0) {
-    return [](const Value &v) {
+    return edge::lambda<Value>("secure-heap-secure", [](const Value &v) {
       if (v.kind == Value::Freed) {
         return Value::error();
       }
       return Value::secured();
-    };
+    });
   }
   if (m_releasers.count(name) > 0) {
-    return [](const Value &v) {
+    return edge::lambda<Value>("secure-heap-release", [](const Value &v) {
       if (v.kind == Value::Freed) {
         return Value::error();
       }
       return Value::freed();
-    };
+    });
   }
-  return [](const Value &v) { return v; };
+  return edge::identity<Value>();
 }
 
 } // namespace ifds

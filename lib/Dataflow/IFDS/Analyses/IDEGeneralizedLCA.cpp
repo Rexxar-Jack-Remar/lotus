@@ -168,17 +168,17 @@ IDEGeneralizedLCA::EdgeFunction IDEGeneralizedLCA::normal_edge_function(
     const Fact &src_fact, const Fact &tgt_fact) {
   (void)succ;
   if (!stmt) {
-    return [](const Value &v) { return v; };
+    return edge::identity<Value>();
   }
 
   if (src_fact == tgt_fact) {
-    return [](const Value &v) { return v; };
+    return edge::identity<Value>();
   }
 
   if (tgt_fact == stmt) {
     if (const auto *const_int = llvm::dyn_cast<llvm::ConstantInt>(stmt)) {
       const int64_t c = const_int->getSExtValue();
-      return [c](const Value & /*v*/) { return Value::singleton(c); };
+      return edge::constant<Value>(Value::singleton(c));
     }
 
     if (const auto *bin = llvm::dyn_cast<llvm::BinaryOperator>(stmt)) {
@@ -192,14 +192,14 @@ IDEGeneralizedLCA::EdgeFunction IDEGeneralizedLCA::normal_edge_function(
         auto r = apply_binop(opcode, c0.value(), c1.value());
         if (r.has_value()) {
           const int64_t c = r.value();
-          return [c](const Value & /*v*/) { return Value::singleton(c); };
+          return edge::constant<Value>(Value::singleton(c));
         }
-        return [](const Value & /*v*/) { return Value::top(); };
+        return all_top();
       }
 
       if (src_fact == op0 && c1.has_value()) {
         const int64_t k = c1.value();
-        return [opcode, k](const Value &v) {
+        return edge::lambda<Value>("glca-binop-lhs", [opcode, k](const Value &v) {
           if (v.kind == Value::Top || v.kind == Value::Bottom) {
             return v;
           }
@@ -212,12 +212,12 @@ IDEGeneralizedLCA::EdgeFunction IDEGeneralizedLCA::normal_edge_function(
             out.insert(r.value());
           }
           return cap_constants(std::move(out));
-        };
+        });
       }
 
       if (src_fact == op1 && c0.has_value()) {
         const int64_t k = c0.value();
-        return [opcode, k](const Value &v) {
+        return edge::lambda<Value>("glca-binop-rhs", [opcode, k](const Value &v) {
           if (v.kind == Value::Top || v.kind == Value::Bottom) {
             return v;
           }
@@ -230,18 +230,18 @@ IDEGeneralizedLCA::EdgeFunction IDEGeneralizedLCA::normal_edge_function(
             out.insert(r.value());
           }
           return cap_constants(std::move(out));
-        };
+        });
       }
     }
   }
 
-  return [](const Value &v) { return v; };
+  return edge::identity<Value>();
 }
 
 IDEGeneralizedLCA::EdgeFunction IDEGeneralizedLCA::call_edge_function(
     const llvm::CallBase * /*call*/, const llvm::Function * /*callee*/,
     const Fact & /*src_fact*/, const Fact & /*tgt_fact*/) {
-  return [](const Value &v) { return v; };
+  return edge::identity<Value>();
 }
 
 IDEGeneralizedLCA::EdgeFunction IDEGeneralizedLCA::return_edge_function(
@@ -250,7 +250,7 @@ IDEGeneralizedLCA::EdgeFunction IDEGeneralizedLCA::return_edge_function(
     const llvm::Instruction *return_site, const Fact & /*exit_fact*/,
     const Fact & /*ret_fact*/) {
   (void)return_site;
-  return [](const Value &v) { return v; };
+  return edge::identity<Value>();
 }
 
 IDEGeneralizedLCA::EdgeFunction IDEGeneralizedLCA::call_to_return_edge_function(
@@ -258,7 +258,7 @@ IDEGeneralizedLCA::EdgeFunction IDEGeneralizedLCA::call_to_return_edge_function(
     llvm::ArrayRef<const llvm::Function *> /*callees*/,
     const Fact & /*src_fact*/, const Fact & /*tgt_fact*/) {
   (void)return_site;
-  return [](const Value &v) { return v; };
+  return edge::identity<Value>();
 }
 
 } // namespace ifds

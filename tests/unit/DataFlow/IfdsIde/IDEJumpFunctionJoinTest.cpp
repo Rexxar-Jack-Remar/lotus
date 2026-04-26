@@ -87,10 +87,10 @@ public:
                                     const Fact & /*tgt_fact*/) override {
     if (const auto *bin = llvm::dyn_cast<llvm::BinaryOperator>(stmt)) {
       if (bin->getName() == "then_add") {
-        return [](const Value & /*in*/) { return Value::singleton(2); };
+        return edge::constant<Value>(Value::singleton(2));
       }
       if (bin->getName() == "else_add") {
-        return [](const Value & /*in*/) { return Value::singleton(4); };
+        return edge::constant<Value>(Value::singleton(4));
       }
     }
     return identity();
@@ -171,7 +171,7 @@ public:
                                     const Fact &) override {
     if (const auto *bin = llvm::dyn_cast<llvm::BinaryOperator>(stmt)) {
       if (bin->getName() == "loop_add") {
-        return [](const Value &) { return Value::singleton(7); };
+        return edge::constant<Value>(Value::singleton(7));
       }
     }
     return identity();

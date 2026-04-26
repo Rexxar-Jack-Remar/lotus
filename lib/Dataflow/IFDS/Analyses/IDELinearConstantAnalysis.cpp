@@ -621,18 +621,18 @@ std::optional<int64_t> IDELinearConstantAnalysis::compute_linear_transformation(
 
 IDELinearConstantAnalysis::EdgeFunction
 IDELinearConstantAnalysis::create_identity() const {
-  return [](const Value &v) { return v; };
+  return edge::identity<Value>();
 }
 
 IDELinearConstantAnalysis::EdgeFunction
 IDELinearConstantAnalysis::create_constant(int64_t val) const {
-  return [val](const Value & /*v*/) { return Value::constant(val); };
+  return edge::constant<Value>(Value::constant(val));
 }
 
 IDELinearConstantAnalysis::EdgeFunction
 IDELinearConstantAnalysis::create_linear(int64_t multiplier,
                                          int64_t offset) const {
-  return [multiplier, offset](const Value &v) {
+  return edge::lambda<Value>("lca-linear", [multiplier, offset](const Value &v) {
     if (v.is_bottom())
       return Value::bottom();
     if (v.is_top())
@@ -642,12 +642,12 @@ IDELinearConstantAnalysis::create_linear(int64_t multiplier,
       return Value::constant(result);
     }
     return Value::bottom();
-  };
+  });
 }
 
 IDELinearConstantAnalysis::EdgeFunction
 IDELinearConstantAnalysis::create_bottom() const {
-  return [](const Value & /*v*/) { return Value::bottom(); };
+  return all_bottom();
 }
 
 } // namespace ifds

@@ -1,9 +1,13 @@
 /*
- * Path-Aware IDE Solver
+ * ESG-Recording IDE Solver
  *
- * This solver extends the standard IDE solver to explicitly track and maintain
- * the exploded supergraph (ESG), enabling path queries and path-sensitive
- * debugging.
+ * This solver extends the standard IDE solver with explicit exploded supergraph
+ * (ESG) recording. The recorded ESG is intended for debugging, visualization,
+ * and bounded path exploration over the flow edges discovered by the solver.
+ *
+ * This wrapper does not change the IDE tabulation semantics: jump functions are
+ * still joined normally, and path queries do not perform path-feasibility checks
+ * or disjunctive path-sensitive analysis.
  *
  * Based on Phasar's PathAwareIDESolver design.
  */
@@ -259,7 +263,7 @@ private:
 };
 
 // ============================================================================
-// Path-Aware IDE Solver
+// ESG-Recording IDE Solver
 // ============================================================================
 
 template <typename Problem>
@@ -295,7 +299,8 @@ public:
 
   ExplicitExplodedSupergraph<Fact> &get_esg() { return m_esg; }
 
-  // Path queries
+  // Bounded ESG path exploration. These paths are structural paths in the
+  // recorded ESG; they are not checked for branch feasibility.
   std::vector<std::vector<ESGEdge>>
   find_paths(const llvm::Instruction *start_inst, const Fact &start_fact,
              const llvm::Instruction *end_inst, const Fact &end_fact,

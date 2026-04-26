@@ -8,6 +8,7 @@
 #include <Dataflow/IFDS/Analyses/IFDSTaintAnalysis.h>
 #include <Dataflow/IFDS/Core/IFDSFramework.h>
 #include <Dataflow/IFDS/Core/SolverGraphContext.h>
+#include <Dataflow/IFDS/Support/FlowFunctionUtils.h>
 #include <TestUtils/LLVMHelpers.h>
 
 namespace ifds {
@@ -213,6 +214,42 @@ TEST_F(IFDSFrameworkCoreTest, FactSetOperations) {
   EXPECT_FALSE(facts.count(SimpleIntFact(2)));
   EXPECT_TRUE(facts.count(SimpleIntFact(1)));
   EXPECT_TRUE(facts.count(SimpleIntFact(3)));
+}
+
+TEST_F(IFDSFrameworkCoreTest, FlowFunctionFactoriesCoverCommonIFDSCases) {
+  auto id = flow::identity<SimpleIntFact>();
+  EXPECT_EQ(id(SimpleIntFact(1)), flow::FactSet<SimpleIntFact>{SimpleIntFact(1)});
+
+  auto kill_zero = flow::kill_if<SimpleIntFact>([](const SimpleIntFact &fact) {
+    return fact.value == 0;
+  });
+  EXPECT_TRUE(kill_zero(SimpleIntFact(0)).empty());
+  EXPECT_EQ(kill_zero(SimpleIntFact(2)),
+            flow::FactSet<SimpleIntFact>{SimpleIntFact(2)});
+
+  auto generate = flow::generate<SimpleIntFact>({SimpleIntFact(10)});
+  EXPECT_EQ(generate(SimpleIntFact(2)),
+            (flow::FactSet<SimpleIntFact>{SimpleIntFact(2),
+                                          SimpleIntFact(10)}));
+
+  auto transfer = flow::transfer<SimpleIntFact>(SimpleIntFact(2),
+                                                SimpleIntFact(20));
+  EXPECT_EQ(transfer(SimpleIntFact(2)),
+            flow::FactSet<SimpleIntFact>{SimpleIntFact(20)});
+  EXPECT_EQ(transfer(SimpleIntFact(3)),
+            flow::FactSet<SimpleIntFact>{SimpleIntFact(3)});
+}
+
+TEST_F(IFDSFrameworkCoreTest, FlowFunctionUnionCombinesResults) {
+  auto gen10 = flow::generate<SimpleIntFact>({SimpleIntFact(10)});
+  auto transfer = flow::transfer<SimpleIntFact>(SimpleIntFact(1),
+                                                SimpleIntFact(100));
+  auto combined = flow::union_flows<SimpleIntFact>(gen10, transfer);
+
+  EXPECT_EQ(combined(SimpleIntFact(1)),
+            (flow::FactSet<SimpleIntFact>{SimpleIntFact(1),
+                                          SimpleIntFact(10),
+                                          SimpleIntFact(100)}));
 }
 
 TEST_F(IFDSFrameworkCoreTest, ModuleCreation) {

@@ -142,33 +142,33 @@ IDEInstInteractionAnalysis::normal_edge_function(const llvm::Instruction *stmt,
                                                  const Fact &tgt_fact) {
   if (const auto *load = llvm::dyn_cast<llvm::LoadInst>(stmt)) {
     if (src_fact == load->getPointerOperand() && tgt_fact == load) {
-      return [](const Value &v) {
+      return edge::lambda<Value>("inst-interaction-read", [](const Value &v) {
         if (v.kind == Value::Write || v.kind == Value::ReadWrite) {
           return Value::read_write();
         }
         return Value::read();
-      };
+      });
     }
   }
   if (const auto *store = llvm::dyn_cast<llvm::StoreInst>(stmt)) {
     if (src_fact == store->getPointerOperand() &&
         tgt_fact == store->getPointerOperand()) {
-      return [](const Value &v) {
+      return edge::lambda<Value>("inst-interaction-write", [](const Value &v) {
         if (v.kind == Value::Read || v.kind == Value::ReadWrite) {
           return Value::read_write();
         }
         return Value::write();
-      };
+      });
     }
   }
-  return [](const Value &v) { return v; };
+  return edge::identity<Value>();
 }
 
 IDEInstInteractionAnalysis::EdgeFunction
 IDEInstInteractionAnalysis::call_edge_function(
     const llvm::CallBase * /*call*/, const llvm::Function * /*callee*/,
     const Fact & /*src_fact*/, const Fact & /*tgt_fact*/) {
-  return [](const Value &v) { return v; };
+  return edge::identity<Value>();
 }
 
 IDEInstInteractionAnalysis::EdgeFunction
@@ -178,7 +178,7 @@ IDEInstInteractionAnalysis::return_edge_function(
     const llvm::Instruction *return_site, const Fact & /*exit_fact*/,
     const Fact & /*ret_fact*/) {
   (void)return_site;
-  return [](const Value &v) { return v; };
+  return edge::identity<Value>();
 }
 
 IDEInstInteractionAnalysis::EdgeFunction
@@ -187,7 +187,7 @@ IDEInstInteractionAnalysis::call_to_return_edge_function(
     llvm::ArrayRef<const llvm::Function *> /*callees*/,
     const Fact & /*src_fact*/, const Fact & /*tgt_fact*/) {
   (void)return_site;
-  return [](const Value &v) { return v; };
+  return edge::identity<Value>();
 }
 
 } // namespace ifds

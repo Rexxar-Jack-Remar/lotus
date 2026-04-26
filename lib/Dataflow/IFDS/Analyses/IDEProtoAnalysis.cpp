@@ -50,26 +50,26 @@ IDEProtoAnalysis::EdgeFunction
 IDEProtoAnalysis::normal_edge_function(const llvm::Instruction *,
                                        const llvm::Instruction *, const Fact &,
                                        const Fact &) {
-  return [](const Value &v) { return v; };
+  return edge::identity<Value>();
 }
 
 IDEProtoAnalysis::EdgeFunction
 IDEProtoAnalysis::call_edge_function(const llvm::CallBase *,
                                      const llvm::Function *, const Fact &,
                                      const Fact &) {
-  return [](const Value &v) { return v; };
+  return edge::identity<Value>();
 }
 
 IDEProtoAnalysis::EdgeFunction IDEProtoAnalysis::return_edge_function(
     const llvm::CallBase *, const llvm::Function *, const llvm::Instruction *,
     const llvm::Instruction *, const Fact &, const Fact &) {
-  return [](const Value &v) { return v; };
+  return edge::identity<Value>();
 }
 
 IDEProtoAnalysis::EdgeFunction IDEProtoAnalysis::call_to_return_edge_function(
     const llvm::CallBase *, const llvm::Instruction *,
     llvm::ArrayRef<const llvm::Function *>, const Fact &, const Fact &) {
-  return [](const Value &v) { return v; };
+  return edge::identity<Value>();
 }
 
 } // namespace ifds

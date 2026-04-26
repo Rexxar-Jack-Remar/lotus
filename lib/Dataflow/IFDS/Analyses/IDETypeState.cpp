@@ -338,7 +338,7 @@ IDETypeState::normal_edge_function(const llvm::Instruction *stmt,
   (void)tgt_fact;
 
   if (!m_property) {
-    return [](const Value &v) { return v; };
+    return edge::identity<Value>();
   }
 
   // Get transitions for this instruction
@@ -346,7 +346,7 @@ IDETypeState::normal_edge_function(const llvm::Instruction *stmt,
 
   if (transitions.empty()) {
     // Identity function
-    return [](const Value &v) { return v; };
+    return edge::identity<Value>();
   }
 
   return make_transition_function(transitions);
@@ -361,7 +361,7 @@ IDETypeState::call_edge_function(const llvm::CallBase *call,
   (void)tgt_fact;
 
   if (!m_property) {
-    return [](const Value &v) { return v; };
+    return edge::identity<Value>();
   }
 
   // Get transitions for this call
@@ -369,7 +369,7 @@ IDETypeState::call_edge_function(const llvm::CallBase *call,
 
   if (transitions.empty()) {
     // Identity function
-    return [](const Value &v) { return v; };
+    return edge::identity<Value>();
   }
 
   return make_transition_function(transitions);
@@ -387,7 +387,7 @@ IDETypeState::EdgeFunction IDETypeState::return_edge_function(
   (void)ret_fact;
 
   // Identity function (transitions happen at call site)
-  return [](const Value &v) { return v; };
+  return edge::identity<Value>();
 }
 
 IDETypeState::EdgeFunction IDETypeState::call_to_return_edge_function(
@@ -401,7 +401,7 @@ IDETypeState::EdgeFunction IDETypeState::call_to_return_edge_function(
   (void)tgt_fact;
 
   // Identity function (local facts are preserved)
-  return [](const Value &v) { return v; };
+  return edge::identity<Value>();
 }
 
 IDETypeState::FactSet IDETypeState::summary_flow(const llvm::CallBase *call,
@@ -461,7 +461,7 @@ IDETypeState::EdgeFunction IDETypeState::summary_edge_function(
     const Fact &tgt_fact) {
   (void)return_site;
   if (!m_description || !call || !callee) {
-    return [](const Value &v) { return v; };
+    return edge::identity<Value>();
   }
 
   const llvm::StringRef callee_name = callee->getName();
@@ -489,11 +489,12 @@ IDETypeState::EdgeFunction IDETypeState::summary_edge_function(
       }
     }
     if (applies) {
-      return
-          [description = m_description, token, call](const Value &) -> Value {
+      return edge::lambda<Value>(
+          "typestate-factory", [description = m_description, token,
+                                call](const Value &) -> Value {
             return Value(description->get_next_state(
                 token, description->uninitialized_state(), call));
-          };
+          });
     }
   }
 
@@ -511,12 +512,12 @@ IDETypeState::EdgeFunction IDETypeState::summary_edge_function(
       if (actual == tgt_fact || (actual->getType()->isPointerTy() &&
                                  tgt_fact->getType()->isPointerTy() &&
                                  may_alias_or_equal(actual, tgt_fact))) {
-        return apply_api_transition;
+        return edge::lambda<Value>("typestate-api", apply_api_transition);
       }
     }
   }
 
-  return [](const Value &v) { return v; };
+  return edge::identity<Value>();
 }
 
 bool IDETypeState::should_track(const llvm::Value *val) const {
@@ -586,7 +587,7 @@ IDETypeState::EdgeFunction IDETypeState::make_transition_function(
     const std::vector<TypeStateProperty::Transition> &transitions) const {
 
   // Capture transitions by value
-  return [transitions](const Value &v) -> Value {
+  return edge::lambda<Value>("typestate-transition", [transitions](const Value &v) -> Value {
     // If value is top or bottom, no transition
     if (v.is_special()) {
       return v;
@@ -602,7 +603,7 @@ IDETypeState::EdgeFunction IDETypeState::make_transition_function(
 
     // No matching transition, return unchanged
     return v;
-  };
+  });
 }
 
 // ============================================================================

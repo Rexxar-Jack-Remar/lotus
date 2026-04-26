@@ -1,8 +1,14 @@
 /*
- * Path-Aware IFDS Solver
+ * ESG-Recording IFDS Solver
  *
- * This solver wraps the path-aware IDE solver to provide path tracking
- * for IFDS problems.
+ * This solver wraps an IFDS problem as a binary-valued IDE problem and uses the
+ * ESG-recording IDE solver to expose the discovered exploded-supergraph edges.
+ * The recorded ESG is intended for debugging, visualization, and bounded path
+ * exploration.
+ *
+ * This wrapper does not make the IFDS analysis path-sensitive: facts are still
+ * propagated with standard IFDS/IDE tabulation semantics, and path queries do
+ * not perform branch-feasibility checks.
  */
 
 #pragma once
@@ -163,7 +169,8 @@ public:
     return m_solver.get_esg();
   }
 
-  // Path queries
+  // Bounded ESG path exploration. These paths are structural paths in the
+  // recorded ESG; they are not checked for branch feasibility.
   std::vector<std::vector<ESGEdge>>
   find_paths(const llvm::Instruction *start_inst, const Fact &start_fact,
              const llvm::Instruction *end_inst, const Fact &end_fact,

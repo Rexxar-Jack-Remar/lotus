@@ -9,10 +9,13 @@
 
 #pragma once
 
-#include <functional>
+#include "Dataflow/IFDS/Support/EdgeFunctionUtils.h"
+
 #include <memory>
 #include <mutex>
 #include <unordered_map>
+
+#include <llvm/Support/raw_ostream.h>
 
 namespace ifds {
 
@@ -73,7 +76,7 @@ struct EdgeFunctionCacheStats {
 
 template <typename Value> class EdgeFunctionWrapper {
 public:
-  using EdgeFunction = std::function<Value(const Value &)>;
+  using EdgeFunction = edge::EdgeFunction<Value>;
   using EdgeFunctionPtr = std::shared_ptr<EdgeFunctionWrapper<Value>>;
 
   explicit EdgeFunctionWrapper(EdgeFunction ef, bool is_identity = false)
@@ -96,7 +99,7 @@ private:
 
 template <typename Value> class EdgeFunctionCache {
 public:
-  using EdgeFunction = std::function<Value(const Value &)>;
+  using EdgeFunction = edge::EdgeFunction<Value>;
   using EdgeFunctionPtr = std::shared_ptr<EdgeFunctionWrapper<Value>>;
 
   EdgeFunctionCache(bool enable_stats = false) : m_enable_stats(enable_stats) {}
@@ -138,7 +141,7 @@ public:
     std::lock_guard<std::mutex> lock(m_mutex);
     if (!m_identity_func) {
       m_identity_func = std::make_shared<EdgeFunctionWrapper<Value>>(
-          [](const Value &v) { return v; }, true);
+          edge::identity<Value>(), true);
     }
     return m_identity_func;
   }
@@ -165,9 +168,9 @@ public:
     }
 
     // Create composed function
-    EdgeFunction composed = [f1, f2](const Value &v) {
-      return (*f1)((*f2)(v));
-    };
+    EdgeFunction composed = edge::lambda<Value>(
+        "cached-compose",
+        [f1, f2](const Value &v) { return (*f1)((*f2)(v)); });
 
     EdgeFunctionPtr result = get_or_create(composed, false);
 
@@ -200,9 +203,10 @@ public:
     }
 
     // Create joined function
-    EdgeFunction joined = [f1, f2, join_op](const Value &v) {
-      return join_op((*f1)(v), (*f2)(v));
-    };
+    EdgeFunction joined = edge::lambda<Value>(
+        "cached-join", [f1, f2, join_op](const Value &v) {
+          return join_op((*f1)(v), (*f2)(v));
+        });
 
     EdgeFunctionPtr result = get_or_create(joined, false);
 

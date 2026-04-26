@@ -143,7 +143,7 @@ IDEExtendedTaintAnalysis::EdgeFunction
 IDEExtendedTaintAnalysis::normal_edge_function(
     const llvm::Instruction * /*stmt*/, const llvm::Instruction * /*succ*/,
     const Fact & /*src_fact*/, const Fact & /*tgt_fact*/) {
-  return [](const Value &v) { return v; };
+  return edge::identity<Value>();
 }
 
 IDEExtendedTaintAnalysis::EdgeFunction
@@ -151,7 +151,7 @@ IDEExtendedTaintAnalysis::call_edge_function(const llvm::CallBase * /*call*/,
                                              const llvm::Function * /*callee*/,
                                              const Fact & /*src_fact*/,
                                              const Fact & /*tgt_fact*/) {
-  return [](const Value &v) { return v; };
+  return edge::identity<Value>();
 }
 
 IDEExtendedTaintAnalysis::EdgeFunction
@@ -161,7 +161,7 @@ IDEExtendedTaintAnalysis::return_edge_function(
     const llvm::Instruction *return_site, const Fact & /*exit_fact*/,
     const Fact & /*ret_fact*/) {
   (void)return_site;
-  return [](const Value &v) { return v; };
+  return edge::identity<Value>();
 }
 
 IDEExtendedTaintAnalysis::EdgeFunction
@@ -170,7 +170,7 @@ IDEExtendedTaintAnalysis::call_to_return_edge_function(
     llvm::ArrayRef<const llvm::Function *> /*callees*/,
     const Fact & /*src_fact*/, const Fact & /*tgt_fact*/) {
   (void)return_site;
-  return [](const Value &v) { return v; };
+  return edge::identity<Value>();
 }
 
 IDEExtendedTaintAnalysis::FactSet
@@ -200,12 +200,12 @@ IDEExtendedTaintAnalysis::summary_edge_function(
   (void)call;
   (void)return_site;
   if (is_source_function(callee)) {
-    return [](const Value & /*v*/) { return Value::tainted(); };
+    return edge::constant<Value>(Value::tainted());
   }
   if (is_sanitizer_function(callee)) {
-    return [](const Value & /*v*/) { return Value::sanitized(); };
+    return edge::constant<Value>(Value::sanitized());
   }
-  return [](const Value &v) { return v; };
+  return edge::identity<Value>();
 }
 
 } // namespace ifds

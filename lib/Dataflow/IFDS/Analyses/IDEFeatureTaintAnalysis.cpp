@@ -130,7 +130,7 @@ IDEFeatureTaintAnalysis::EdgeFunction
 IDEFeatureTaintAnalysis::normal_edge_function(
     const llvm::Instruction * /*stmt*/, const llvm::Instruction * /*succ*/,
     const Fact & /*src_fact*/, const Fact & /*tgt_fact*/) {
-  return [](const Value &v) { return v; };
+  return edge::identity<Value>();
 }
 
 IDEFeatureTaintAnalysis::EdgeFunction
@@ -138,7 +138,7 @@ IDEFeatureTaintAnalysis::call_edge_function(const llvm::CallBase * /*call*/,
                                             const llvm::Function * /*callee*/,
                                             const Fact & /*src_fact*/,
                                             const Fact & /*tgt_fact*/) {
-  return [](const Value &v) { return v; };
+  return edge::identity<Value>();
 }
 
 IDEFeatureTaintAnalysis::EdgeFunction
@@ -148,7 +148,7 @@ IDEFeatureTaintAnalysis::return_edge_function(
     const llvm::Instruction *return_site, const Fact & /*exit_fact*/,
     const Fact & /*ret_fact*/) {
   (void)return_site;
-  return [](const Value &v) { return v; };
+  return edge::identity<Value>();
 }
 
 IDEFeatureTaintAnalysis::EdgeFunction
@@ -157,7 +157,7 @@ IDEFeatureTaintAnalysis::call_to_return_edge_function(
     llvm::ArrayRef<const llvm::Function *> /*callees*/,
     const Fact & /*src_fact*/, const Fact & /*tgt_fact*/) {
   (void)return_site;
-  return [](const Value &v) { return v; };
+  return edge::identity<Value>();
 }
 
 IDEFeatureTaintAnalysis::FactSet
@@ -186,31 +186,31 @@ IDEFeatureTaintAnalysis::summary_edge_function(
   (void)call;
   (void)return_site;
   if (!callee) {
-    return [](const Value &v) { return v; };
+    return edge::identity<Value>();
   }
   const std::string name = callee->getName().str();
   auto srcIt = m_source_feature_bits.find(name);
   if (srcIt != m_source_feature_bits.end()) {
     const uint64_t bit = srcIt->second;
-    return [bit](const Value &v) {
+    return edge::lambda<Value>("feature-taint-source", [bit](const Value &v) {
       if (v.kind == Value::Top) {
         return v;
       }
       const uint64_t base = (v.kind == Value::Features) ? v.mask : 0;
       return Value::features(base | bit);
-    };
+    });
   }
   auto sanIt = m_sanitizer_clears.find(name);
   if (sanIt != m_sanitizer_clears.end()) {
     const uint64_t clearMask = sanIt->second;
-    return [clearMask](const Value &v) {
+    return edge::lambda<Value>("feature-taint-sanitizer", [clearMask](const Value &v) {
       if (v.kind == Value::Top || v.kind == Value::Bottom) {
         return v;
       }
       return Value::features(v.mask & ~clearMask);
-    };
+    });
   }
-  return [](const Value &v) { return v; };
+  return edge::identity<Value>();
 }
 
 } // namespace ifds

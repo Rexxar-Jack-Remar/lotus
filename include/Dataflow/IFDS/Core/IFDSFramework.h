@@ -7,9 +7,9 @@
 #pragma once
 
 #include "Alias/Infrastructure/AliasAnalysisWrapper/AliasAnalysisWrapper.h"
+#include "Dataflow/IFDS/Support/EdgeFunctionUtils.h"
 #include "Utils/Parallel/ThreadSafe.h"
 
-#include <functional>
 #include <memory>
 #include <set>
 #include <unordered_map>
@@ -296,7 +296,7 @@ template <typename Fact, typename Value>
 class IDEProblem : public IFDSProblem<Fact> {
 public:
   using ValueType = Value;
-  using EdgeFunction = std::function<Value(const Value &)>;
+  using EdgeFunction = edge::EdgeFunction<Value>;
   using FactSet = typename IFDSProblem<Fact>::FactSet;
   using IDEInitialSeeds = ifds::IDEInitialSeeds<Fact, Value>;
 
@@ -353,6 +353,8 @@ public:
 
   // Identity edge function
   EdgeFunction identity() const;
+  EdgeFunction all_top() const;
+  EdgeFunction all_bottom() const;
 
 protected:
   IDEInitialSeeds lift_ifds_initial_seeds(const llvm::Module &module,
@@ -533,79 +535,22 @@ template <typename Fact, typename Value>
 inline typename IDEProblem<Fact, Value>::EdgeFunction
 IDEProblem<Fact, Value>::compose(const EdgeFunction &f1,
                                  const EdgeFunction &f2) const {
-  return [f1, f2](const Value &v) { return f1(f2(v)); };
+  return edge::compose<Value>(f1, f2);
 }
 
 template <typename Fact, typename Value>
 inline typename IDEProblem<Fact, Value>::EdgeFunction
 IDEProblem<Fact, Value>::join_edge_functions(const EdgeFunction &f1,
                                              const EdgeFunction &f2) const {
-  return [this, f1, f2](const Value &v) { return join(f1(v), f2(v)); };
+  return edge::join<Value>(f1, f2, [this](const Value &v1, const Value &v2) {
+    return join(v1, v2);
+  });
 }
 
 template <typename Fact, typename Value>
 inline bool IDEProblem<Fact, Value>::edge_function_equivalent(
     const EdgeFunction &f1, const EdgeFunction &f2) const {
-  const Value top = top_value();
-  const Value bottom = bottom_value();
-  std::vector<Value> probes;
-  probes.push_back(top);
-  if (!(bottom == top)) {
-    probes.push_back(bottom);
-  }
-
-  const Value join_tb = join(top, bottom);
-  if (!(join_tb == top) && !(join_tb == bottom)) {
-    probes.push_back(join_tb);
-  }
-  const Value join_bt = join(bottom, top);
-  if (!(join_bt == top) && !(join_bt == bottom) && !(join_bt == join_tb)) {
-    probes.push_back(join_bt);
-  }
-
-  constexpr size_t MAX_PROBES = 16;
-  constexpr size_t MAX_ROUNDS = 3;
-  size_t idx = 0;
-  size_t rounds = 0;
-
-  while (idx < probes.size()) {
-    const Value &probe = probes[idx++];
-    Value out1 = f1(probe);
-    Value out2 = f2(probe);
-    if (!(out1 == out2)) {
-      return false;
-    }
-
-    if (rounds < MAX_ROUNDS && probes.size() < MAX_PROBES) {
-      bool seen1 = false;
-      for (const Value &v : probes) {
-        if (v == out1) {
-          seen1 = true;
-          break;
-        }
-      }
-      if (!seen1) {
-        probes.push_back(out1);
-      }
-
-      bool seen2 = false;
-      for (const Value &v : probes) {
-        if (v == out2) {
-          seen2 = true;
-          break;
-        }
-      }
-      if (!seen2 && probes.size() < MAX_PROBES) {
-        probes.push_back(out2);
-      }
-    }
-
-    if (idx == probes.size()) {
-      ++rounds;
-    }
-  }
-
-  return true;
+  return f1.structurally_equal(f2);
 }
 
 template <typename Fact, typename Value>
@@ -627,7 +572,19 @@ IDEProblem<Fact, Value>::lift_ifds_initial_seeds(const llvm::Module &module,
 template <typename Fact, typename Value>
 inline typename IDEProblem<Fact, Value>::EdgeFunction
 IDEProblem<Fact, Value>::identity() const {
-  return [](const Value &v) { return v; };
+  return edge::identity<Value>();
+}
+
+template <typename Fact, typename Value>
+inline typename IDEProblem<Fact, Value>::EdgeFunction
+IDEProblem<Fact, Value>::all_top() const {
+  return edge::all_top<Value>(top_value());
+}
+
+template <typename Fact, typename Value>
+inline typename IDEProblem<Fact, Value>::EdgeFunction
+IDEProblem<Fact, Value>::all_bottom() const {
+  return edge::all_bottom<Value>(bottom_value());
 }
 
 } // namespace ifds

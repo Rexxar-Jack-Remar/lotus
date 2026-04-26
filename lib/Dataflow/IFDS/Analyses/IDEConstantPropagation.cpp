@@ -282,7 +282,7 @@ IDEConstantPropagation::normal_edge_function(const llvm::Instruction *stmt,
   if (auto *allocaInst = llvm::dyn_cast<llvm::AllocaInst>(stmt)) {
     if (tgt_fact == allocaInst && !src_fact) {
       // A freshly-allocated stack slot is "undefined" until written.
-      return [](const Value & /*v*/) { return LCPValue::bottom(); };
+      return all_bottom();
     }
   }
 
@@ -294,28 +294,28 @@ IDEConstantPropagation::normal_edge_function(const llvm::Instruction *stmt,
         auto c = asConst(valueOp);
         if (c.has_value()) {
           long long k = c.value();
-          return [k](const Value & /*v*/) { return Value::constant(k); };
+          return edge::constant<Value>(Value::constant(k));
         }
-        return [](const Value & /*v*/) { return LCPValue::top(); };
+        return all_top();
       }
       if (src_fact == valueOp) {
-        return [](const Value &v) { return v; };
+        return edge::identity<Value>();
       }
-      return [](const Value & /*v*/) { return LCPValue::bottom(); };
+      return all_bottom();
     }
   }
 
   if (auto *load = llvm::dyn_cast<llvm::LoadInst>(stmt)) {
     const llvm::Value *ptrOp = load->getPointerOperand();
     if (tgt_fact == load && src_fact == ptrOp) {
-      return [](const Value &v) { return v; };
+      return edge::identity<Value>();
     }
   }
 
   if (auto *gep = llvm::dyn_cast<llvm::GetElementPtrInst>(stmt)) {
     const llvm::Value *ptrOp = gep->getPointerOperand();
     if (tgt_fact == gep && src_fact == ptrOp) {
-      return [](const Value &v) { return v; };
+      return edge::identity<Value>();
     }
   }
 
@@ -325,14 +325,14 @@ IDEConstantPropagation::normal_edge_function(const llvm::Instruction *stmt,
       // copy
       const llvm::Value *from = nullptr;
       if (isCopy(stmt, from) && from == src_fact) {
-        return [](const Value &v) { return v; };
+        return edge::identity<Value>();
       }
       // binary op
       if (auto *bin = llvm::dyn_cast<llvm::BinaryOperator>(stmt)) {
         const llvm::Value *op0 = bin->getOperand(0);
         const llvm::Value *op1 = bin->getOperand(1);
         unsigned opc = bin->getOpcode();
-        return [opc, op0, op1, src_fact](const Value &v) {
+        return edge::lambda<Value>("lcp-binop", [opc, op0, op1, src_fact](const Value &v) {
           auto c0 = asConst(op0);
           auto c1 = asConst(op1);
           if (!src_fact && c0.has_value() && c1.has_value()) {
@@ -362,14 +362,14 @@ IDEConstantPropagation::normal_edge_function(const llvm::Instruction *stmt,
                                  : LCPValue::top();
           }
           return LCPValue::bottom();
-        };
+        });
       }
       // otherwise, unknown definition => top
-      return [](const Value & /*v*/) { return LCPValue::top(); };
+      return all_top();
     }
   }
   // default: identity
-  return [](const Value &v) { return v; };
+  return edge::identity<Value>();
 }
 
 IDEConstantPropagation::EdgeFunction IDEConstantPropagation::call_edge_function(
@@ -386,18 +386,18 @@ IDEConstantPropagation::EdgeFunction IDEConstantPropagation::call_edge_function(
           auto c = asConst(actual);
           if (c.has_value()) {
             long long k = c.value();
-            return [k](const Value & /*v*/) { return Value::constant(k); };
+            return edge::constant<Value>(Value::constant(k));
           }
         }
         if (src_fact == actual) {
-          return [](const Value &v) { return v; };
+          return edge::identity<Value>();
         }
-        return [](const Value & /*v*/) { return LCPValue::bottom(); };
+        return all_bottom();
       }
       ++idx;
     }
   }
-  return [](const Value &v) { return v; };
+  return edge::identity<Value>();
 }
 
 IDEConstantPropagation::EdgeFunction
@@ -410,10 +410,10 @@ IDEConstantPropagation::return_edge_function(
     const llvm::Value *callDef = static_cast<const llvm::Value *>(call);
     if (ret_fact == callDef) {
       // propagate value from exit_fact (assumed return value) directly
-      return [](const Value &v) { return v; };
+      return edge::identity<Value>();
     }
   }
-  return [](const Value &v) { return v; };
+  return edge::identity<Value>();
 }
 
 IDEConstantPropagation::EdgeFunction
@@ -427,12 +427,12 @@ IDEConstantPropagation::call_to_return_edge_function(
   if (!call->getType()->isVoidTy()) {
     const llvm::Value *callDef = static_cast<const llvm::Value *>(call);
     if (tgt_fact == callDef) {
-      return [](const Value & /*v*/) { return LCPValue::top(); };
+      return all_top();
     }
   }
   (void)src_fact;
   (void)tgt_fact;
-  return [](const Value &v) { return v; };
+  return edge::identity<Value>();
 }
 
 IDEConstantPropagation::FactSet
@@ -465,15 +465,15 @@ IDEConstantPropagation::summary_edge_function(
     const Fact &tgt_fact) {
   (void)return_site;
   if (!callee || !callee->isIntrinsic()) {
-    return [](const Value &v) { return v; };
+    return edge::identity<Value>();
   }
   if (tgt_fact != static_cast<const llvm::Value *>(call)) {
-    return [](const Value &v) { return v; };
+    return edge::identity<Value>();
   }
 
   auto *intrinsic = llvm::dyn_cast<llvm::IntrinsicInst>(call);
   if (!intrinsic || intrinsic->arg_size() != 2) {
-    return [](const Value &v) { return v; };
+    return edge::identity<Value>();
   }
 
   unsigned opc = 0;
@@ -493,13 +493,13 @@ IDEConstantPropagation::summary_edge_function(
     opc = llvm::Instruction::Mul;
     break;
   default:
-    return [](const Value &v) { return v; };
+    return edge::identity<Value>();
   }
 
   const llvm::Value *op0 = intrinsic->getArgOperand(0);
   const llvm::Value *op1 = intrinsic->getArgOperand(1);
 
-  return [opc, op0, op1, src_fact](const Value &v) {
+  return edge::lambda<Value>("lcp-intrinsic-binop", [opc, op0, op1, src_fact](const Value &v) {
     auto c0 = asConst(op0);
     auto c1 = asConst(op1);
     if (!src_fact && c0.has_value() && c1.has_value()) {
@@ -525,7 +525,7 @@ IDEConstantPropagation::summary_edge_function(
       return r.has_value() ? LCPValue::constant(r.value()) : LCPValue::top();
     }
     return LCPValue::bottom();
-  };
+  });
 }
 
 } // namespace ifds
