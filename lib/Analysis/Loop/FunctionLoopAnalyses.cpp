@@ -96,13 +96,15 @@ void FunctionLoopAnalyses::materializeDependenceGraphs(pdg::ProgramGraph &pdg) {
   }
 }
 
-void FunctionLoopAnalyses::materializeScalarAnalyses(llvm::ScalarEvolution &SE,
-                                                     llvm::LoopInfo &LI) {
+void FunctionLoopAnalyses::materializeScalarAnalyses(
+    llvm::ScalarEvolution &SE,
+    llvm::LoopInfo &LI,
+    LoopLDGBuilderOptions options) {
   assert(this->dominatorTree != nullptr);
   assert(this->postDominatorTree != nullptr);
   noelle::DominatorSummary summary(*this->dominatorTree, *this->postDominatorTree);
   for (auto const &ownedContent : this->loopContents) {
-    ownedContent->materializeScalarAnalyses(SE, LI, summary);
+    ownedContent->materializeScalarAnalyses(SE, LI, summary, options);
     auto *llvmLoop = LI.getLoopFor(ownedContent->getLoopStructure()->getHeader());
     if (llvmLoop != nullptr) {
       ownedContent->setCompileTimeTripCount(SE.getSmallConstantTripCount(llvmLoop));

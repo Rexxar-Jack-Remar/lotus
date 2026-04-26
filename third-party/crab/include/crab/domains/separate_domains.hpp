@@ -41,7 +41,7 @@
 #pragma once
 
 #include <crab/domains/discrete_domains.hpp>
-#include  <crab/domains/patricia_trees.hpp>
+#include <crab/domains/patricia_trees.hpp>
 #include <crab/support/debug.hpp>
 
 #include <optional>

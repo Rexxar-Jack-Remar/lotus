@@ -95,6 +95,56 @@ bool componentHasCycle(std::vector<LoopDependenceNode *> const &members) {
 
 } // namespace
 
+LoopSCCDAGEdge::LoopSCCDAGEdge(LoopSCC *src, LoopSCC *dst)
+    : src{src}, dst{dst}, subEdges{} {}
+
+LoopSCC *LoopSCCDAGEdge::getSrc(void) const { return this->src; }
+
+LoopSCC *LoopSCCDAGEdge::getDst(void) const { return this->dst; }
+
+std::vector<LoopDependenceEdge *> LoopSCCDAGEdge::getSubEdges(void) const {
+  auto edges = this->subEdges;
+  std::sort(edges.begin(), edges.end(),
+            [](LoopDependenceEdge *lhs, LoopDependenceEdge *rhs) {
+              if (lhs->getSrc()->getID() != rhs->getSrc()->getID()) {
+                return lhs->getSrc()->getID() < rhs->getSrc()->getID();
+              }
+              if (lhs->getDst()->getID() != rhs->getDst()->getID()) {
+                return lhs->getDst()->getID() < rhs->getDst()->getID();
+              }
+              if (lhs->getKind() != rhs->getKind()) {
+                return static_cast<int>(lhs->getKind()) <
+                       static_cast<int>(rhs->getKind());
+              }
+              if (lhs->getMemoryKind() != rhs->getMemoryKind()) {
+                return static_cast<int>(lhs->getMemoryKind()) <
+                       static_cast<int>(rhs->getMemoryKind());
+              }
+              return static_cast<int>(lhs->getOrigin()) <
+                     static_cast<int>(rhs->getOrigin());
+            });
+  return edges;
+}
+
+uint64_t LoopSCCDAGEdge::getNumberOfSubEdges(void) const {
+  return this->subEdges.size();
+}
+
+bool LoopSCCDAGEdge::isLoopCarried(void) const {
+  for (auto *edge : this->subEdges) {
+    if (edge != nullptr && edge->isLoopCarried()) {
+      return true;
+    }
+  }
+  return false;
+}
+
+void LoopSCCDAGEdge::addSubEdge(LoopDependenceEdge *edge) {
+  if (edge != nullptr) {
+    this->subEdges.push_back(edge);
+  }
+}
+
 LoopSCC::LoopSCC(uint64_t id, std::vector<LoopDependenceNode *> members,
                  bool hasCycle, bool includedInLoop)
     : id{id}, internalNodes{std::move(members)}, externalNodes{},
@@ -122,6 +172,14 @@ std::vector<LoopSCC *> LoopSCC::getPredecessors(void) const {
 
 std::vector<LoopSCC *> LoopSCC::getSuccessors(void) const {
   return this->successors;
+}
+
+std::vector<LoopSCCDAGEdge *> LoopSCC::getIncomingEdges(void) const {
+  return this->incomingEdges;
+}
+
+std::vector<LoopSCCDAGEdge *> LoopSCC::getOutgoingEdges(void) const {
+  return this->outgoingEdges;
 }
 
 std::vector<LoopDependenceEdge *> LoopSCC::getEdges(void) const {
@@ -294,26 +352,33 @@ LoopSCCDAG::LoopSCCDAG(LoopDependenceGraph &graph) : graph{&graph} {
     }
   }
 
+  auto nodeSorter = [](LoopDependenceNode *lhs, LoopDependenceNode *rhs) {
+    return lhs->getID() < rhs->getID();
+  };
   for (auto &ownedSCC : this->ownedSCCs) {
     auto *scc = ownedSCC.get();
-    std::vector<LoopDependenceNode *> allMembers = std::move(scc->internalNodes);
-    scc->internalNodes.clear();
-    scc->externalNodes.clear();
-    for (auto *node : allMembers) {
-      if (node->isInternal()) {
-        scc->internalNodes.push_back(node);
-      } else {
-        scc->externalNodes.push_back(node);
+    std::set<LoopDependenceNode *> members(scc->internalNodes.begin(),
+                                           scc->internalNodes.end());
+    std::set<LoopDependenceNode *> externalNodes;
+    for (auto *node : scc->internalNodes) {
+      for (auto *edge : node->getOutgoingEdges()) {
+        auto *dst = edge ? edge->getDst() : nullptr;
+        if (dst != nullptr && members.count(dst) == 0) {
+          externalNodes.insert(dst);
+        }
+      }
+      for (auto *edge : node->getIncomingEdges()) {
+        auto *src = edge ? edge->getSrc() : nullptr;
+        if (src != nullptr && members.count(src) == 0) {
+          externalNodes.insert(src);
+        }
       }
     }
-    auto sorter = [](LoopDependenceNode *lhs, LoopDependenceNode *rhs) {
-      return lhs->getID() < rhs->getID();
-    };
-    std::sort(scc->internalNodes.begin(), scc->internalNodes.end(), sorter);
-    std::sort(scc->externalNodes.begin(), scc->externalNodes.end(), sorter);
+    scc->externalNodes.assign(externalNodes.begin(), externalNodes.end());
+    std::sort(scc->internalNodes.begin(), scc->internalNodes.end(), nodeSorter);
+    std::sort(scc->externalNodes.begin(), scc->externalNodes.end(), nodeSorter);
   }
 
-  std::set<std::pair<LoopSCC *, LoopSCC *>> seenPairs;
   for (auto *node : this->allNodes) {
     auto *srcSCC = this->sccByNode.at(node);
     for (auto *edge : node->getOutgoingEdges()) {
@@ -329,11 +394,23 @@ LoopSCCDAG::LoopSCCDAG(LoopDependenceGraph &graph) : graph{&graph} {
       if (srcSCC == dstSCC) {
         continue;
       }
-      if (!seenPairs.insert(std::make_pair(srcSCC, dstSCC)).second) {
-        continue;
+      auto key = std::make_pair(srcSCC, dstSCC);
+      auto edgeIt = this->edgeBySCCPair.find(key);
+      LoopSCCDAGEdge *sccEdge = nullptr;
+      if (edgeIt == this->edgeBySCCPair.end()) {
+        auto ownedEdge = std::unique_ptr<LoopSCCDAGEdge>(
+            new LoopSCCDAGEdge(srcSCC, dstSCC));
+        sccEdge = ownedEdge.get();
+        this->ownedEdges.push_back(std::move(ownedEdge));
+        this->edgeBySCCPair[key] = sccEdge;
+        srcSCC->successors.push_back(dstSCC);
+        dstSCC->predecessors.push_back(srcSCC);
+        srcSCC->outgoingEdges.push_back(sccEdge);
+        dstSCC->incomingEdges.push_back(sccEdge);
+      } else {
+        sccEdge = edgeIt->second;
       }
-      srcSCC->successors.push_back(dstSCC);
-      dstSCC->predecessors.push_back(srcSCC);
+      sccEdge->addSubEdge(edge);
     }
   }
 
@@ -344,6 +421,14 @@ LoopSCCDAG::LoopSCCDAG(LoopDependenceGraph &graph) : graph{&graph} {
     std::sort(
         ownedSCC->successors.begin(), ownedSCC->successors.end(),
         [](LoopSCC *lhs, LoopSCC *rhs) { return lhs->getID() < rhs->getID(); });
+    std::sort(ownedSCC->incomingEdges.begin(), ownedSCC->incomingEdges.end(),
+              [](LoopSCCDAGEdge *lhs, LoopSCCDAGEdge *rhs) {
+                return lhs->getSrc()->getID() < rhs->getSrc()->getID();
+              });
+    std::sort(ownedSCC->outgoingEdges.begin(), ownedSCC->outgoingEdges.end(),
+              [](LoopSCCDAGEdge *lhs, LoopSCCDAGEdge *rhs) {
+                return lhs->getDst()->getID() < rhs->getDst()->getID();
+              });
   }
   this->computeReachabilityAmongSCCs();
 }
@@ -353,9 +438,25 @@ LoopDependenceGraph *LoopSCCDAG::getLoopDependenceGraph(void) const {
 }
 
 std::vector<LoopSCC *> LoopSCCDAG::getSCCs(void) const {
+  return this->getInternalSCCs();
+}
+
+std::vector<LoopSCC *> LoopSCCDAG::getInternalSCCs(void) const {
   std::vector<LoopSCC *> sccs;
   sccs.reserve(this->includedSCCs.size());
   sccs.insert(sccs.end(), this->includedSCCs.begin(), this->includedSCCs.end());
+  std::sort(sccs.begin(), sccs.end(),
+            [](LoopSCC *lhs, LoopSCC *rhs) { return lhs->getID() < rhs->getID(); });
+  return sccs;
+}
+
+std::vector<LoopSCC *> LoopSCCDAG::getExternalSCCs(void) const {
+  std::vector<LoopSCC *> sccs;
+  for (auto *scc : this->allSCCs) {
+    if (scc != nullptr && !scc->isIncludedInLoop()) {
+      sccs.push_back(scc);
+    }
+  }
   std::sort(sccs.begin(), sccs.end(),
             [](LoopSCC *lhs, LoopSCC *rhs) { return lhs->getID() < rhs->getID(); });
   return sccs;
@@ -370,12 +471,42 @@ std::vector<LoopSCC *> LoopSCCDAG::getAllSCCs(void) const {
   return sccs;
 }
 
+std::vector<LoopSCCDAGEdge *> LoopSCCDAG::getEdges(void) const {
+  std::vector<LoopSCCDAGEdge *> edges;
+  edges.reserve(this->ownedEdges.size());
+  for (auto const &edge : this->ownedEdges) {
+    edges.push_back(edge.get());
+  }
+  std::sort(edges.begin(), edges.end(),
+            [](LoopSCCDAGEdge *lhs, LoopSCCDAGEdge *rhs) {
+              if (lhs->getSrc()->getID() != rhs->getSrc()->getID()) {
+                return lhs->getSrc()->getID() < rhs->getSrc()->getID();
+              }
+              return lhs->getDst()->getID() < rhs->getDst()->getID();
+            });
+  return edges;
+}
+
 LoopSCC *LoopSCCDAG::getSCC(Value *value) const {
   auto it = this->sccByValue.find(value);
   if (it == this->sccByValue.end()) {
     return nullptr;
   }
   return it->second;
+}
+
+bool LoopSCCDAG::doesItContain(Instruction *inst) const {
+  return this->getSCC(inst) != nullptr;
+}
+
+bool LoopSCCDAG::iterateOverLiveInAndLiveOut(
+    const std::function<bool(Value *)> &funcToInvoke) const {
+  for (auto *scc : this->getExternalSCCs()) {
+    if (scc != nullptr && scc->iterateOverValues(funcToInvoke)) {
+      return true;
+    }
+  }
+  return false;
 }
 
 bool LoopSCCDAG::orderedBefore(const LoopSCC *early,
@@ -385,6 +516,32 @@ bool LoopSCCDAG::orderedBefore(const LoopSCC *early,
     return false;
   }
   return it->second.count(late) != 0;
+}
+
+bool LoopSCCDAG::orderedBefore(const LoopSCC *early,
+                               const SCCSet &lates) const {
+  for (auto *late : lates) {
+    if (this->orderedBefore(early, late)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+bool LoopSCCDAG::orderedBefore(const SCCSet &earlies,
+                               const LoopSCC *late) const {
+  for (auto *early : earlies) {
+    if (this->orderedBefore(early, late)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+uint32_t LoopSCCDAG::getSCCIndex(const LoopSCC *scc) const {
+  auto it = this->sccIndexes.find(scc);
+  assert(it != this->sccIndexes.end());
+  return it->second;
 }
 
 void LoopSCCDAG::computeReachabilityAmongSCCs(void) {

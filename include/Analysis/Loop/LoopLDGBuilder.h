@@ -10,9 +10,22 @@
 #include "llvm/Analysis/LoopInfo.h"
 #include "llvm/Analysis/ScalarEvolution.h"
 
+#include <vector>
+
 namespace lotus {
 namespace analysis {
 namespace loop {
+
+class LoopAwareDependenceRefinementPass {
+public:
+  virtual ~LoopAwareDependenceRefinementPass() = default;
+
+  virtual void refine(LoopDependenceGraph &graph,
+                      LoopTree *loopNode,
+                      llvm::ScalarEvolution &SE,
+                      llvm::LoopInfo &LI,
+                      const noelle::DominatorSummary &DS) = 0;
+};
 
 struct LoopLDGBuilderOptions {
   bool enableLoopAwareDependenceAnalyses{true};
@@ -20,6 +33,12 @@ struct LoopLDGBuilderOptions {
   bool enableAffineIterationSpaceRefinement{true};
   bool enableMemoryCloningRefinement{true};
   bool enableThreadSafeLibraryRefinement{true};
+  bool enableExtendedIVRecognition{false};
+  bool assumePseudoRandomValueGeneratorsNonDeterministic{false};
+  std::vector<LoopAwareDependenceRefinementPass *> loopAwareRefinementPasses;
+
+  void addLoopAwareRefinementPass(LoopAwareDependenceRefinementPass *pass);
+  void removeLoopAwareRefinementPass(LoopAwareDependenceRefinementPass *pass);
 };
 
 class LoopLDGBuilder {
@@ -39,6 +58,13 @@ public:
       llvm::LoopInfo &LI,
       const noelle::DominatorSummary &DS,
       LoopLDGBuilderOptions options = {});
+
+  static std::unique_ptr<LoopDependenceGraph>
+  createInternalSubgraph(const LoopDependenceGraph &graph);
+
+  static std::unique_ptr<LoopSCCDAG>
+  computeSCCDAGWithOnlyVariableAndControlDependences(
+      const LoopDependenceGraph &graph);
 
 private:
   static void captureSnapshot(

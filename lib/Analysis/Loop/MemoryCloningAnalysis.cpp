@@ -406,8 +406,6 @@ ClonableMemoryObject::ClonableMemoryObject(AllocaInst *allocation,
   if (!this->isThereAMemoryDependenceBetweenLoopIterations(
           loop, allocation, ldg, this->storingInstructions) &&
       !this->isThereAMemoryDependenceBetweenLoopIterations(
-          loop, allocation, ldg, this->loadInstructions) &&
-      !this->isThereAMemoryDependenceBetweenLoopIterations(
           loop, allocation, ldg, this->nonStoringInstructions) &&
       !this->scopeWithinLoop) {
     return;

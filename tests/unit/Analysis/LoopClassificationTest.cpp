@@ -19,6 +19,7 @@
 namespace {
 
 using lotus::analysis::loop::FunctionLoopAnalyses;
+using lotus::analysis::loop::BinaryReductionSCC;
 using lotus::analysis::loop::GenericSCC;
 using lotus::analysis::loop::LoopDependenceEdgeKind;
 using lotus::analysis::loop::StackObjectClonableSCC;
@@ -141,6 +142,76 @@ TEST_F(LoopClassificationTest, ClassifiesIVAndReductionSCCsAndTripCount) {
   auto liveOutsNotReducible =
       attrs->getLiveOutVariablesThatAreNotReducable(content->getEnvironment());
   EXPECT_TRUE(liveOutsNotReducible.empty());
+}
+
+TEST_F(LoopClassificationTest, NormalizesSubReductions) {
+  llvm::LLVMContext context;
+  auto module = parseModuleChecked(context, R"(
+    define i32 @int_sub(i32 %x) {
+    entry:
+      br label %header
+
+    header:
+      %i = phi i32 [ 0, %entry ], [ %i.next, %latch ]
+      %acc = phi i32 [ 0, %entry ], [ %acc.next, %latch ]
+      %cmp = icmp slt i32 %i, 8
+      br i1 %cmp, label %body, label %exit
+
+    body:
+      %acc.next = sub i32 %acc, %x
+      br label %latch
+
+    latch:
+      %i.next = add i32 %i, 1
+      br label %header
+
+    exit:
+      ret i32 %acc
+    }
+  )");
+
+  buildPDG(*module);
+
+  auto check = [&](const char *name, llvm::Instruction::BinaryOps expectedOp,
+                   bool enableFloatAsReal) {
+    auto *function = module->getFunction(name);
+    ASSERT_NE(function, nullptr);
+
+    llvm::PassBuilder PB;
+    llvm::FunctionAnalysisManager FAM;
+    PB.registerFunctionAnalyses(FAM);
+    auto &DT = FAM.getResult<llvm::DominatorTreeAnalysis>(*function);
+    auto &PDT = FAM.getResult<llvm::PostDominatorTreeAnalysis>(*function);
+    auto &LI = FAM.getResult<llvm::LoopAnalysis>(*function);
+    auto &SE = FAM.getResult<llvm::ScalarEvolutionAnalysis>(*function);
+
+    FunctionLoopAnalyses analyses(*function, LI, DT, PDT);
+    analyses.materializeDependenceGraphs(graph);
+    analyses.materializeScalarAnalyses(SE, LI);
+    analyses.materializeLoopEnvironments();
+    analyses.materializeLoopCarriedDependencies(DT, PDT);
+    analyses.materializeIterationSpaceAnalyses(SE);
+    analyses.materializeSCCAttrs(DT, PDT, enableFloatAsReal);
+
+    auto *content = analyses.getLoopContent(**LI.begin());
+    ASSERT_NE(content, nullptr);
+    auto *accPhi = findPhi(function, "acc");
+    ASSERT_NE(accPhi, nullptr);
+    auto *accSCC = content->getSCCDAG()->getSCC(accPhi);
+    ASSERT_NE(accSCC, nullptr);
+    auto *info = content->getSCCAttrs()->getSCCAttrs(accSCC);
+    ASSERT_NE(info, nullptr);
+    ASSERT_EQ(info->getKind(), GenericSCC::BINARY_REDUCTION);
+
+    auto *reduction = dynamic_cast<BinaryReductionSCC *>(info);
+    ASSERT_NE(reduction, nullptr);
+    EXPECT_EQ(reduction->getReductionOperation(), expectedOp);
+    auto *identity = llvm::dyn_cast<llvm::Constant>(reduction->getIdentityValue());
+    ASSERT_NE(identity, nullptr);
+    EXPECT_TRUE(identity->isZeroValue());
+  };
+
+  check("int_sub", llvm::Instruction::Add, false);
 }
 
 TEST_F(LoopClassificationTest,

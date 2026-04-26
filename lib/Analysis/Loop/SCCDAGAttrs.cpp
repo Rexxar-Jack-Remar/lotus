@@ -462,14 +462,10 @@ SCCDAGAttrs::checkIfSCCOnlyContainsInductionVariables(
   std::set<InductionVariable *> contained;
   std::set<Instruction *> containedInsts;
   for (auto *iv : IVs) {
-    for (auto *inst : iv->getAllInstructions()) {
-      for (auto &pair : scc->internalNodePairs()) {
-        if (pair.first == inst) {
-          contained.insert(iv);
-          auto all = iv->getAllInstructions();
-          containedInsts.insert(all.begin(), all.end());
-        }
-      }
+    if (scc->isInternal(iv->getLoopEntryPHI())) {
+      contained.insert(iv);
+      auto all = iv->getAllInstructions();
+      containedInsts.insert(all.begin(), all.end());
     }
   }
   if (contained.empty()) {
@@ -738,9 +734,12 @@ SCCDAGAttrs::computeSCCDAGWhenSCCsAreIgnored(
 
   auto addIncomingNodes = [&](std::queue<LoopSCC *> &queue,
                               LoopSCC *scc) -> void {
-    for (auto *pred : scc->getPredecessors()) {
-      queue.push(pred);
-      edgesViaIgnored[scc].insert(std::make_pair(pred, scc));
+    for (auto *edge : scc->getIncomingEdges()) {
+      if (edge == nullptr || edge->getSrc() == nullptr) {
+        continue;
+      }
+      queue.push(edge->getSrc());
+      edgesViaIgnored[scc].insert(edge);
     }
   };
 

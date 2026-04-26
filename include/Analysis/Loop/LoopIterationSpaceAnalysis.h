@@ -84,7 +84,8 @@ private:
   bool isMemoryAccessSpaceEquivalentForTopLoopIVSubscript(
       MemoryAccessSpace *space1,
       MemoryAccessSpace *space2) const;
-  bool isOneToOneFunctionOnIV(LoopStructure *loopStructure,
+  bool isOneToOneFunctionOnIV(llvm::ScalarEvolution &SE,
+                              LoopStructure *loopStructure,
                               InductionVariable *IV,
                               Instruction *derivedInstruction) const;
   bool isInnerDimensionSubscriptsBounded(llvm::ScalarEvolution &SE,

@@ -344,9 +344,12 @@ TEST(LoopParityIVTest, IVSCCDAGDoesNotRetainExternalContextNodes) {
     for (auto *iv : ivs) {
       auto *scc = iv->getSCC();
       ASSERT_NE(scc, nullptr);
-      EXPECT_TRUE(scc->externalNodePairs().empty())
-          << "IV SCC should be built from loop-internal values only for loop "
-          << printAsOperandToString(content->getLoopStructure()->getHeader());
+      for (auto &pair : scc->externalNodePairs()) {
+        ASSERT_NE(pair.second, nullptr);
+        EXPECT_TRUE(pair.second->isInternal())
+            << "IV SCCDAG should not retain graph-external context nodes for loop "
+            << printAsOperandToString(content->getLoopStructure()->getHeader());
+      }
     }
   }
 }

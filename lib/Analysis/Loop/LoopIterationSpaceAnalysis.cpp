@@ -378,7 +378,7 @@ void LoopIterationSpaceAnalysis::
           bool isWrapping = false;
           isOneToOne = !isWrapping;
         } else {
-          isOneToOne = isOneToOneFunctionOnIV(rootLoopStructure, iv, inst);
+          isOneToOne = isOneToOneFunctionOnIV(SE, rootLoopStructure, iv, inst);
         }
         if (!isOneToOne) {
           continue;
@@ -518,7 +518,7 @@ LoopIterationSpaceAnalysis::MemoryAccessSpace::MemoryAccessSpace(
 }
 
 bool LoopIterationSpaceAnalysis::isOneToOneFunctionOnIV(
-    LoopStructure *loopStructure, InductionVariable *IV,
+    llvm::ScalarEvolution &SE, LoopStructure *loopStructure, InductionVariable *IV,
     Instruction *derivedInstruction) const {
   auto isInjectiveCast = [](Instruction *inst) -> bool {
     auto *castInst = dyn_cast<CastInst>(inst);
@@ -537,11 +537,58 @@ bool LoopIterationSpaceAnalysis::isOneToOneFunctionOnIV(
     if (isa<SExtInst>(castInst) || isa<ZExtInst>(castInst)) {
       return dstWidth >= srcWidth;
     }
+    if (isa<TruncInst>(castInst)) {
+      return dstWidth >= 32;
+    }
     if (isa<BitCastInst>(castInst)) {
       return dstWidth == srcWidth;
     }
 
     return false;
+  };
+
+  auto isInjectiveMul = [&](Instruction *inst) -> bool {
+    if (inst == nullptr || inst->getOpcode() != Instruction::Mul ||
+        !SE.isSCEVable(inst->getType())) {
+      return false;
+    }
+
+    auto *addRec = dyn_cast<llvm::SCEVAddRecExpr>(SE.getSCEV(inst));
+    if (addRec == nullptr) {
+      return false;
+    }
+    if (!addRec->hasNoSelfWrap() &&
+        !(addRec->hasNoSignedWrap() && addRec->hasNoUnsignedWrap())) {
+      return false;
+    }
+
+    unsigned ivDerivedOperands = 0;
+    for (auto &use : inst->operands()) {
+      auto *operand = use.get();
+      if (auto *constant = dyn_cast<ConstantInt>(operand)) {
+        if (constant->isZero()) {
+          return false;
+        }
+        continue;
+      }
+      if (this->ivManager.doesContributeToComputeAnInductionVariable(
+              dyn_cast<Instruction>(operand))) {
+        auto *operandInst = cast<Instruction>(operand);
+        if (!loopStructure->isIncluded(operandInst) ||
+            (!IV->isIVInstruction(operandInst) &&
+             !IV->isDerivedFromIVInstructions(operandInst))) {
+          return false;
+        }
+        ++ivDerivedOperands;
+        continue;
+      }
+      auto *operandInst = dyn_cast<Instruction>(operand);
+      if (operandInst != nullptr && loopStructure->isIncluded(operandInst)) {
+        return false;
+      }
+    }
+
+    return ivDerivedOperands == 1;
   };
 
   std::queue<Instruction *> derivingInsts;
@@ -556,8 +603,8 @@ bool LoopIterationSpaceAnalysis::isOneToOneFunctionOnIV(
     }
 
     auto op = inst->getOpcode();
-    bool isOneToOne =
-        (op == Instruction::Add || op == Instruction::Sub || isInjectiveCast(inst));
+    bool isOneToOne = op == Instruction::Add || op == Instruction::Sub ||
+                      isInjectiveMul(inst) || isInjectiveCast(inst);
     if (!isOneToOne) {
       return false;
     }

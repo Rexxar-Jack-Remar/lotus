@@ -119,6 +119,9 @@ public:
   std::vector<LoopDependenceNode *> getExternalNodes(void) const;
   std::vector<LoopDependenceNode *> getNodes(void) const;
   std::vector<LoopDependenceEdge *> getEdges(void) const;
+  std::vector<LoopDependenceEdge *> getDependences(Value *src,
+                                                   Value *dst) const;
+  std::vector<LoopDependenceEdge *> getSortedDependences(void) const;
 
   std::vector<std::pair<Value *, LoopDependenceNode *>>
   internalNodePairs(void) const;
@@ -176,7 +179,7 @@ private:
   void importEdgeIfIncluded(pdg::Edge *edge,
                             bool linkToExternal,
                             const std::unordered_set<Value *> &internalValues,
-                            std::set<std::tuple<pdg::Node *, pdg::Node *, int>> &seenEdges);
+                            std::unordered_set<pdg::Edge *> &seenEdges);
   void initialize(LoopTree *loopNode, pdg::ProgramGraph &programGraph);
   void addEdge(LoopDependenceNode *src,
                LoopDependenceNode *dst,

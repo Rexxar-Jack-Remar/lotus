@@ -214,8 +214,7 @@ public:
 class SCCDAGAttrs {
 public:
   using SCCParentMap = std::unordered_map<LoopSCC *, std::unordered_set<LoopSCC *>>;
-  using SCCEdgeSet =
-      std::set<std::pair<LoopSCC *, LoopSCC *>>;
+  using SCCEdgeSet = std::set<LoopSCCDAGEdge *>;
   using SCCEdgeMap = std::unordered_map<LoopSCC *, SCCEdgeSet>;
 
   SCCDAGAttrs(bool enableFloatAsReal,

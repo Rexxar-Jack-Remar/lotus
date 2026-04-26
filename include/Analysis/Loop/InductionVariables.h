@@ -42,11 +42,20 @@ public:
                            llvm::ScalarEvolution &SE,
                            llvm::LoopInfo &LI,
                            LoopSCCDAG &sccdag,
-                           LoopEnvironment &loopEnvironment);
+                           LoopEnvironment &loopEnvironment,
+                           bool enableExtendedRecognition = false);
 
   std::unordered_set<InductionVariable *> getInductionVariables(void) const;
   std::unordered_set<InductionVariable *> getInductionVariables(
+      Instruction *i) const;
+  std::unordered_set<InductionVariable *> getInductionVariables(
       LoopStructure &loop) const;
+  InductionVariable *getInductionVariable(LoopStructure &loop,
+                                          Instruction *i) const;
+  bool doesContributeToComputeAnInductionVariable(Instruction *i) const;
+  InductionVariable *getDerivingInductionVariable(
+      LoopStructure &loop,
+      Instruction *derivedInstruction) const;
   LoopGoverningInductionVariable *getLoopGoverningInductionVariable(
       void) const;
   LoopGoverningInductionVariable *getLoopGoverningInductionVariable(

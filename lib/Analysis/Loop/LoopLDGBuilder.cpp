@@ -12,6 +12,7 @@
 
 #include "Alias/Infrastructure/Spec/AliasSpecManager.h"
 
+#include <algorithm>
 #include <queue>
 #include <unordered_set>
 
@@ -94,6 +95,7 @@ bool canInstructionReachWithinSameIteration(const LoopStructure *loopStructure,
     for (auto &inst : *from->getParent()) {
       if (&inst == from) {
         seenFrom = true;
+        continue;
       }
       if (seenFrom && &inst == to) {
         return true;
@@ -126,17 +128,6 @@ bool canInstructionReachWithinSameIteration(const LoopStructure *loopStructure,
 
   return false;
 }
-
-class LoopAwareDependenceRefinementPass {
-public:
-  virtual ~LoopAwareDependenceRefinementPass() = default;
-
-  virtual void refine(LoopDependenceGraph &,
-                      LoopTree *,
-                      llvm::ScalarEvolution &,
-                      llvm::LoopInfo &,
-                      const noelle::DominatorSummary &) = 0;
-};
 
 bool isReadOnlyInstruction(const Instruction *instruction) {
   if (instruction == nullptr) {
@@ -257,9 +248,8 @@ public:
               llvm::LoopInfo &LI,
               const noelle::DominatorSummary &DS) override {
     InvariantManager temporaryInvariants(loopNode->getLoop(), &graph);
-    auto loopInternalValues = collectLoopInternalValues(loopNode->getLoop());
-    auto temporaryLoopInternalGraph = graph.createSubgraphFromValues(
-        loopInternalValues, /*linkToExternal=*/false);
+    auto temporaryLoopInternalGraph =
+        LoopLDGBuilder::createInternalSubgraph(graph);
     auto temporaryIVDependenceGraph =
         temporaryLoopInternalGraph->createSubgraph(/*includeControl=*/true,
                                                    /*includeVariable=*/true,
@@ -308,6 +298,36 @@ bool isThreadSafeLibraryCall(CallBase *call) {
   static const std::set<std::string> noelleThreadSafeFallback{
       "malloc", "calloc", "realloc", "free"};
   return noelleThreadSafeFallback.count(callee->getName().str()) != 0;
+}
+
+bool isPseudoRandomValueGenerator(CallBase *call) {
+  if (call == nullptr) {
+    return false;
+  }
+  auto *callee = call->getCalledFunction();
+  return callee != nullptr && callee->getName() == "rand";
+}
+
+void removePRVGMemoryDependences(LoopDependenceGraph &graph) {
+  std::vector<LoopDependenceEdge *> edgesToRemove;
+  for (auto *edge : graph.getEdges()) {
+    if (edge == nullptr || edge->getKind() != LoopDependenceEdgeKind::Memory) {
+      continue;
+    }
+
+    auto *src = dyn_cast_or_null<CallBase>(edge->getSrc()->getValue());
+    auto *dst = dyn_cast_or_null<CallBase>(edge->getDst()->getValue());
+    if (!isPseudoRandomValueGenerator(src) &&
+        !isPseudoRandomValueGenerator(dst)) {
+      continue;
+    }
+    edge->setLoopCarried(false);
+    edgesToRemove.push_back(edge);
+  }
+
+  for (auto *edge : edgesToRemove) {
+    graph.removeEdge(edge);
+  }
 }
 
 void removeThreadSafeLibraryDependences(LoopDependenceGraph &graph) {
@@ -403,6 +423,26 @@ void removeMemoryCloningNegatedDependences(LoopDependenceGraph &graph,
 
 } // namespace
 
+void LoopLDGBuilderOptions::addLoopAwareRefinementPass(
+    LoopAwareDependenceRefinementPass *pass) {
+  if (pass == nullptr) {
+    return;
+  }
+  if (std::find(this->loopAwareRefinementPasses.begin(),
+                this->loopAwareRefinementPasses.end(), pass) ==
+      this->loopAwareRefinementPasses.end()) {
+    this->loopAwareRefinementPasses.push_back(pass);
+  }
+}
+
+void LoopLDGBuilderOptions::removeLoopAwareRefinementPass(
+    LoopAwareDependenceRefinementPass *pass) {
+  this->loopAwareRefinementPasses.erase(
+      std::remove(this->loopAwareRefinementPasses.begin(),
+                  this->loopAwareRefinementPasses.end(), pass),
+      this->loopAwareRefinementPasses.end());
+}
+
 void LoopLDGBuilder::captureSnapshot(GraphBundle &bundle,
                                      const std::string &phase,
                                      const LoopDependenceGraph &graph) {
@@ -444,7 +484,7 @@ LoopLDGBuilder::GraphBundle LoopLDGBuilder::buildBaseLoopDependenceGraph(
     graph.fetchOrCreateNode(instruction, pdgNode, true);
   }
 
-  std::set<std::tuple<pdg::Node *, pdg::Node *, int>> seenEdges;
+  std::unordered_set<pdg::Edge *> seenEdges;
   for (auto *instruction : loopInstructions) {
     auto *pdgNode = pdg.getNode(*instruction);
     if (pdgNode == nullptr) {
@@ -467,6 +507,34 @@ LoopLDGBuilder::GraphBundle LoopLDGBuilder::buildBaseLoopDependenceGraph(
   return bundle;
 }
 
+std::unique_ptr<LoopDependenceGraph>
+LoopLDGBuilder::createInternalSubgraph(const LoopDependenceGraph &graph) {
+  std::vector<Value *> loopInternals;
+  for (auto pair : graph.internalNodePairs()) {
+    loopInternals.push_back(pair.first);
+  }
+  return graph.createSubgraphFromValues(loopInternals,
+                                        /*linkToExternal=*/false);
+}
+
+std::unique_ptr<LoopSCCDAG>
+LoopLDGBuilder::computeSCCDAGWithOnlyVariableAndControlDependences(
+    const LoopDependenceGraph &graph) {
+  auto internalGraph = LoopLDGBuilder::createInternalSubgraph(graph);
+  if (internalGraph == nullptr) {
+    return nullptr;
+  }
+
+  auto variableControlGraph =
+      internalGraph->createSubgraph(/*includeControl=*/true,
+                                    /*includeVariable=*/true,
+                                    /*includeMemory=*/false);
+  if (variableControlGraph == nullptr) {
+    return nullptr;
+  }
+  return std::unique_ptr<LoopSCCDAG>(new LoopSCCDAG(*variableControlGraph));
+}
+
 LoopLDGBuilder::GraphBundle LoopLDGBuilder::refineLoopDependenceGraph(
     std::unique_ptr<LoopDependenceGraph> graph,
     llvm::ScalarEvolution &SE,
@@ -481,18 +549,34 @@ LoopLDGBuilder::GraphBundle LoopLDGBuilder::refineLoopDependenceGraph(
 
   LoopCarriedDependencies::setLoopCarriedDependencies(loopNode, DS, resolvedGraph);
 
-  if (options.enableLoopAwareDependenceAnalyses &&
-      options.hasLoopAwareDependenceBackend) {
-    ImportedPDGLoopAwareDependenceRefinementPass loopAwarePass;
-    loopAwarePass.refine(resolvedGraph, loopNode, SE, LI, DS);
+  if (options.assumePseudoRandomValueGeneratorsNonDeterministic) {
+    removePRVGMemoryDependences(resolvedGraph);
+    LoopCarriedDependencies::setLoopCarriedDependencies(loopNode, DS,
+                                                        resolvedGraph);
   }
-  captureSnapshot(bundle, "after_loop_aware", resolvedGraph);
 
   if (options.enableAffineIterationSpaceRefinement) {
     AffineLoopDependenceRefinementPass affinePass;
     affinePass.refine(resolvedGraph, loopNode, SE, LI, DS);
   }
   captureSnapshot(bundle, "after_affine", resolvedGraph);
+
+  if (options.enableLoopAwareDependenceAnalyses) {
+    if (options.hasLoopAwareDependenceBackend) {
+      ImportedPDGLoopAwareDependenceRefinementPass loopAwarePass;
+      loopAwarePass.refine(resolvedGraph, loopNode, SE, LI, DS);
+    }
+
+    for (auto *pass : options.loopAwareRefinementPasses) {
+      if (pass == nullptr) {
+        continue;
+      }
+      pass->refine(resolvedGraph, loopNode, SE, LI, DS);
+      LoopCarriedDependencies::setLoopCarriedDependencies(loopNode, DS,
+                                                          resolvedGraph);
+    }
+  }
+  captureSnapshot(bundle, "after_loop_aware", resolvedGraph);
 
   if (options.enableMemoryCloningRefinement) {
     MemoryCloningAnalysis memoryCloning(loopNode->getLoop(),

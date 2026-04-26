@@ -101,6 +101,31 @@ Value *getIdentityValueForReduction(Type *type, Instruction::BinaryOps op) {
   }
 }
 
+Instruction::BinaryOps getReductionOperationForType(Type *type,
+                                                    Instruction::BinaryOps op) {
+  if (type == nullptr) {
+    return Instruction::BinaryOpsEnd;
+  }
+
+  switch (op) {
+  case Instruction::Sub:
+    if (type->isIntegerTy()) {
+      return Instruction::Add;
+    }
+    if (type->isFloatingPointTy()) {
+      return Instruction::FAdd;
+    }
+    return Instruction::BinaryOpsEnd;
+  case Instruction::FSub:
+    if (type->isFloatingPointTy()) {
+      return Instruction::FAdd;
+    }
+    return Instruction::BinaryOpsEnd;
+  default:
+    return op;
+  }
+}
+
 } // namespace
 
 namespace lotus {
@@ -244,8 +269,8 @@ bool EvolutionUpdate::isSubTransformableToAdd(void) const {
 
 bool EvolutionUpdate::isBothUpdatesAddOrSub(
     const EvolutionUpdate &other) const {
-  auto isThisAddOrSub = this->isAdd();
-  auto isOtherAddOrSub = other.isAdd();
+  auto isThisAddOrSub = this->isAdd() || this->isSubTransformableToAdd();
+  auto isOtherAddOrSub = other.isAdd() || other.isSubTransformableToAdd();
   return isThisAddOrSub && isOtherAddOrSub;
 }
 
@@ -484,8 +509,13 @@ bool LoopCarriedVariable::isEvolutionReducibleAcrossLoopIterations(void) const {
 
   auto operation = Instruction::BinaryOpsEnd;
   for (auto *update : arithmeticUpdates) {
-    auto currentOperation = static_cast<Instruction::BinaryOps>(
-        update->getUpdateInstruction()->getOpcode());
+    auto currentOperation = getReductionOperationForType(
+        this->declarationPHI->getType(),
+        static_cast<Instruction::BinaryOps>(
+            update->getUpdateInstruction()->getOpcode()));
+    if (currentOperation == Instruction::BinaryOpsEnd) {
+      return false;
+    }
     if (operation == Instruction::BinaryOpsEnd) {
       operation = currentOperation;
       continue;

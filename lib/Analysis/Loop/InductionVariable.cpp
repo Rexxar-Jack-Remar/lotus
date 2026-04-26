@@ -182,6 +182,7 @@ void InductionVariable::traverseCycleThroughLoopEntryPHIToGetAllIVInstructions(v
     }
   }
   this->instructions.insert(castsToAdd.begin(), castsToAdd.end());
+  this->nonPHIInstructions.insert(castsToAdd.begin(), castsToAdd.end());
 }
 
 void InductionVariable::traverseConsumersOfIVInstructionsToGetAllDerivedSCEVInstructions(

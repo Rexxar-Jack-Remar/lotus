@@ -56,7 +56,9 @@ public:
   std::vector<LoopContent *> getLoopContents(void) const;
 
   void materializeDependenceGraphs(pdg::ProgramGraph &pdg);
-  void materializeScalarAnalyses(llvm::ScalarEvolution &SE, llvm::LoopInfo &LI);
+  void materializeScalarAnalyses(llvm::ScalarEvolution &SE,
+                                 llvm::LoopInfo &LI,
+                                 LoopLDGBuilderOptions options = {});
   void materializeLoopEnvironments(void);
   void materializeLoopCarriedDependencies(llvm::DominatorTree &DT,
                                           llvm::PostDominatorTree &PDT);

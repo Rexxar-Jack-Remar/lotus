@@ -306,6 +306,52 @@ std::vector<LoopDependenceEdge *> LoopDependenceGraph::getEdges(void) const {
   return edges;
 }
 
+std::vector<LoopDependenceEdge *>
+LoopDependenceGraph::getDependences(Value *src, Value *dst) const {
+  std::vector<LoopDependenceEdge *> result;
+  auto *srcNode = this->getNode(src);
+  auto *dstNode = this->getNode(dst);
+  if (srcNode == nullptr || dstNode == nullptr) {
+    return result;
+  }
+
+  for (auto *edge : srcNode->getOutgoingEdges()) {
+    if (edge != nullptr && edge->getDst() == dstNode) {
+      result.push_back(edge);
+    }
+  }
+  return result;
+}
+
+std::vector<LoopDependenceEdge *>
+LoopDependenceGraph::getSortedDependences(void) const {
+  auto edges = this->getEdges();
+  std::sort(edges.begin(), edges.end(),
+            [](LoopDependenceEdge *lhs, LoopDependenceEdge *rhs) {
+              if (lhs->getSrc()->getID() != rhs->getSrc()->getID()) {
+                return lhs->getSrc()->getID() < rhs->getSrc()->getID();
+              }
+              if (lhs->getDst()->getID() != rhs->getDst()->getID()) {
+                return lhs->getDst()->getID() < rhs->getDst()->getID();
+              }
+              if (lhs->getKind() != rhs->getKind()) {
+                return static_cast<int>(lhs->getKind()) <
+                       static_cast<int>(rhs->getKind());
+              }
+              if (lhs->getOrigin() != rhs->getOrigin()) {
+                return static_cast<int>(lhs->getOrigin()) <
+                       static_cast<int>(rhs->getOrigin());
+              }
+              if (lhs->getMemoryKind() != rhs->getMemoryKind()) {
+                return static_cast<int>(lhs->getMemoryKind()) <
+                       static_cast<int>(rhs->getMemoryKind());
+              }
+              return static_cast<int>(lhs->getOriginalEdgeType()) <
+                     static_cast<int>(rhs->getOriginalEdgeType());
+            });
+  return edges;
+}
+
 std::vector<std::pair<Value *, LoopDependenceNode *>>
 LoopDependenceGraph::internalNodePairs(void) const {
   std::vector<std::pair<Value *, LoopDependenceNode *>> pairs;
@@ -521,7 +567,6 @@ std::unique_ptr<LoopDependenceGraph> LoopDependenceGraph::createSubgraphFromValu
     subgraph->fetchOrCreateNode(value, sourcePDGNode, true);
   }
 
-  std::set<std::tuple<pdg::Node *, pdg::Node *, int>> seenEdges;
   for (auto const &owned : this->ownedEdges) {
     auto *edge = owned.get();
     if (edgesToIgnore.count(edge) != 0) {
@@ -561,13 +606,6 @@ std::unique_ptr<LoopDependenceGraph> LoopDependenceGraph::createSubgraphFromValu
     auto *dstNode = subgraph->fetchOrCreateNode(
         dstValue, edge->getDst() ? edge->getDst()->getPDGNode() : nullptr,
         dstInternal);
-
-    auto key = std::make_tuple(srcNode ? srcNode->getPDGNode() : nullptr,
-                               dstNode ? dstNode->getPDGNode() : nullptr,
-                               static_cast<int>(edge->getOriginalEdgeType()));
-    if (!seenEdges.insert(key).second) {
-      continue;
-    }
 
     subgraph->addEdge(srcNode, dstNode, edge->getKind(), edge->getMemoryKind(),
                       edge->getOrigin(), edge->getOriginalEdgeType(),
@@ -719,7 +757,7 @@ void LoopDependenceGraph::importEdge(pdg::Edge *edge) {
 void LoopDependenceGraph::importEdgeIfIncluded(
     pdg::Edge *edge, bool linkToExternal,
     const std::unordered_set<Value *> &internalValues,
-    std::set<std::tuple<pdg::Node *, pdg::Node *, int>> &seenEdges) {
+    std::unordered_set<pdg::Edge *> &seenEdges) {
   if (edge == nullptr) {
     return;
   }
@@ -742,9 +780,7 @@ void LoopDependenceGraph::importEdgeIfIncluded(
     return;
   }
 
-  auto key = std::make_tuple(srcPDGNode, dstPDGNode,
-                             static_cast<int>(edge->getEdgeType()));
-  if (!seenEdges.insert(key).second) {
+  if (!seenEdges.insert(edge).second) {
     return;
   }
 
@@ -783,26 +819,7 @@ std::string LoopDependenceGraph::renderStable(void) const {
             [](LoopDependenceNode *lhs, LoopDependenceNode *rhs) {
               return lhs->getID() < rhs->getID();
             });
-  std::vector<LoopDependenceEdge *> orderedEdges = this->getEdges();
-  std::sort(orderedEdges.begin(), orderedEdges.end(),
-            [](LoopDependenceEdge *lhs, LoopDependenceEdge *rhs) {
-              if (lhs->getSrc()->getID() != rhs->getSrc()->getID()) {
-                return lhs->getSrc()->getID() < rhs->getSrc()->getID();
-              }
-              if (lhs->getDst()->getID() != rhs->getDst()->getID()) {
-                return lhs->getDst()->getID() < rhs->getDst()->getID();
-              }
-              if (lhs->getKind() != rhs->getKind()) {
-                return static_cast<int>(lhs->getKind()) <
-                       static_cast<int>(rhs->getKind());
-              }
-              if (lhs->getOrigin() != rhs->getOrigin()) {
-                return static_cast<int>(lhs->getOrigin()) <
-                       static_cast<int>(rhs->getOrigin());
-              }
-              return static_cast<int>(lhs->getMemoryKind()) <
-                     static_cast<int>(rhs->getMemoryKind());
-            });
+  std::vector<LoopDependenceEdge *> orderedEdges = this->getSortedDependences();
 
   std::string text;
   raw_string_ostream stream(text);

@@ -11,7 +11,8 @@ namespace {} // namespace
 
 InductionVariableManager::InductionVariableManager(
     LoopTree *loopNode, InvariantManager &IVM, llvm::ScalarEvolution &SE,
-    llvm::LoopInfo &LI, LoopSCCDAG &sccdag, LoopEnvironment &loopEnvironment)
+    llvm::LoopInfo &LI, LoopSCCDAG &sccdag, LoopEnvironment &loopEnvironment,
+    bool enableExtendedRecognition)
     : loop{loopNode}, ownedIVs{}, governingIVs{}, ownedGoverningIVs{} {
   assert(this->loop != nullptr);
 
@@ -24,7 +25,7 @@ InductionVariableManager::InductionVariableManager(
     auto &owned = this->ownedIVs[loop];
     auto *header = loop->getHeader();
     auto *preHeader = loop->getPreHeader();
-    if (header == nullptr || preHeader == nullptr) {
+    if (header == nullptr) {
       continue;
     }
 
@@ -33,12 +34,13 @@ InductionVariableManager::InductionVariableManager(
       llvm::InductionDescriptor ID{};
       bool llvmDeterminedValidIV = false;
       bool llvmLoopValidForInductionAnalysis =
-          (phi.getBasicBlockIndex(preHeader) >= 0) && (llvmLoop != nullptr);
+          preHeader != nullptr && (phi.getBasicBlockIndex(preHeader) >= 0) &&
+          (llvmLoop != nullptr);
       if (llvmLoopValidForInductionAnalysis &&
           llvm::InductionDescriptor::isInductionPHI(&phi, llvmLoop, &SE, ID)) {
         llvmDeterminedValidIV = true;
       } else if (phi.getType()->isFloatingPointTy() &&
-                 llvmLoopValidForInductionAnalysis &&
+                 llvmLoop != nullptr &&
                  llvm::InductionDescriptor::isFPInductionPHI(&phi, llvmLoop,
                                                              &SE, ID)) {
         llvmDeterminedValidIV = true;
@@ -212,7 +214,8 @@ InductionVariableManager::InductionVariableManager(
       }
 
     allocate_iv:
-      if (!IV && (noelleDeterminedValidIV || llvmDeterminedValidIV)) {
+      if (enableExtendedRecognition &&
+          !IV && (noelleDeterminedValidIV || llvmDeterminedValidIV)) {
         Value *startValue =
             llvmDeterminedValidIV ? ID.getStartValue() : nullptr;
         if (!llvmDeterminedValidIV) {
@@ -407,8 +410,18 @@ InductionVariableManager::InductionVariableManager(
           IV.reset(new InductionVariable(loop, sccContainingIV, &phi,
                                          startValue, stepSCEV, singleStepValue,
                                          stepPHIs, phis, nonPHIInstructions,
-                                         instructions, derivedInstructions));
+                                          instructions, derivedInstructions));
         }
+      }
+
+      if (!IV && noelleDeterminedValidIV && sccContainingIV != nullptr) {
+        IV.reset(new InductionVariable(
+            loop, IVM, SE, 1, &phi, std::unordered_set<PHINode *>({&phi}),
+            sccContainingIV, loopEnvironment, referentialExpander));
+      } else if (!IV && llvmDeterminedValidIV && sccContainingIV != nullptr) {
+        IV.reset(new InductionVariable(loop, IVM, SE, &phi, sccContainingIV,
+                                       loopEnvironment, referentialExpander,
+                                       ID));
       }
 
       if (!IV || !IV->getStepSCEV()) {
@@ -442,6 +455,24 @@ InductionVariableManager::getInductionVariables(void) const {
 }
 
 std::unordered_set<InductionVariable *>
+InductionVariableManager::getInductionVariables(Instruction *i) const {
+  std::unordered_set<InductionVariable *> result;
+  if (i == nullptr) {
+    return result;
+  }
+
+  for (auto const &loopIVPair : this->ownedIVs) {
+    for (auto const &ownedIV : loopIVPair.second) {
+      auto *iv = ownedIV.get();
+      if (iv != nullptr && iv->isIVInstruction(i)) {
+        result.insert(iv);
+      }
+    }
+  }
+  return result;
+}
+
+std::unordered_set<InductionVariable *>
 InductionVariableManager::getInductionVariables(LoopStructure &loop) const {
   std::unordered_set<InductionVariable *> ivs;
   auto it = this->ownedIVs.find(&loop);
@@ -452,6 +483,37 @@ InductionVariableManager::getInductionVariables(LoopStructure &loop) const {
     ivs.insert(owned.get());
   }
   return ivs;
+}
+
+InductionVariable *InductionVariableManager::getInductionVariable(
+    LoopStructure &loop, Instruction *i) const {
+  if (i == nullptr) {
+    return nullptr;
+  }
+  for (auto *iv : this->getInductionVariables(loop)) {
+    if (iv != nullptr && iv->isIVInstruction(i)) {
+      return iv;
+    }
+  }
+  return nullptr;
+}
+
+bool InductionVariableManager::doesContributeToComputeAnInductionVariable(
+    Instruction *i) const {
+  return !this->getInductionVariables(i).empty();
+}
+
+InductionVariable *InductionVariableManager::getDerivingInductionVariable(
+    LoopStructure &loop, Instruction *derivedInstruction) const {
+  if (derivedInstruction == nullptr) {
+    return nullptr;
+  }
+  for (auto *iv : this->getInductionVariables(loop)) {
+    if (iv != nullptr && iv->isDerivedFromIVInstructions(derivedInstruction)) {
+      return iv;
+    }
+  }
+  return nullptr;
 }
 
 LoopGoverningInductionVariable *

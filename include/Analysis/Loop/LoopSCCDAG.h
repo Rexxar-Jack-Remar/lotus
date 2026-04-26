@@ -24,9 +24,32 @@
 
 #include "Analysis/Loop/LoopDependenceGraph.h"
 
+#include <map>
+
 namespace lotus {
 namespace analysis {
 namespace loop {
+
+class LoopSCC;
+
+class LoopSCCDAGEdge {
+public:
+  LoopSCC *getSrc(void) const;
+  LoopSCC *getDst(void) const;
+  std::vector<LoopDependenceEdge *> getSubEdges(void) const;
+  uint64_t getNumberOfSubEdges(void) const;
+  bool isLoopCarried(void) const;
+
+private:
+  friend class LoopSCCDAG;
+
+  LoopSCCDAGEdge(LoopSCC *src, LoopSCC *dst);
+  void addSubEdge(LoopDependenceEdge *edge);
+
+  LoopSCC *src;
+  LoopSCC *dst;
+  std::vector<LoopDependenceEdge *> subEdges;
+};
 
 class LoopSCC {
 public:
@@ -37,6 +60,8 @@ public:
   std::vector<LoopDependenceNode *> getNodes(void) const;
   std::vector<LoopSCC *> getPredecessors(void) const;
   std::vector<LoopSCC *> getSuccessors(void) const;
+  std::vector<LoopSCCDAGEdge *> getIncomingEdges(void) const;
+  std::vector<LoopSCCDAGEdge *> getOutgoingEdges(void) const;
   std::vector<LoopDependenceEdge *> getEdges(void) const;
 
   std::vector<std::pair<Value *, LoopDependenceNode *>> internalNodePairs(void) const;
@@ -68,28 +93,43 @@ private:
   std::vector<LoopDependenceNode *> externalNodes;
   std::vector<LoopSCC *> predecessors;
   std::vector<LoopSCC *> successors;
+  std::vector<LoopSCCDAGEdge *> incomingEdges;
+  std::vector<LoopSCCDAGEdge *> outgoingEdges;
   bool cycle;
   bool includedInLoop;
 };
 
 class LoopSCCDAG {
 public:
+  using SCCSet = std::vector<LoopSCC *>;
+
   explicit LoopSCCDAG(LoopDependenceGraph &graph);
 
   LoopDependenceGraph *getLoopDependenceGraph(void) const;
 
   std::vector<LoopSCC *> getSCCs(void) const;
+  std::vector<LoopSCC *> getInternalSCCs(void) const;
+  std::vector<LoopSCC *> getExternalSCCs(void) const;
   std::vector<LoopSCC *> getAllSCCs(void) const;
+  std::vector<LoopSCCDAGEdge *> getEdges(void) const;
   LoopSCC *getSCC(Value *value) const;
+  bool doesItContain(Instruction *inst) const;
+  bool iterateOverLiveInAndLiveOut(
+      const std::function<bool(Value *)> &funcToInvoke) const;
   bool orderedBefore(const LoopSCC *early, const LoopSCC *late) const;
+  bool orderedBefore(const LoopSCC *early, const SCCSet &lates) const;
+  bool orderedBefore(const SCCSet &earlies, const LoopSCC *late) const;
+  uint32_t getSCCIndex(const LoopSCC *scc) const;
 
 private:
   LoopDependenceGraph *graph;
   std::vector<LoopDependenceNode *> internalNodes;
   std::vector<LoopDependenceNode *> allNodes;
   std::vector<std::unique_ptr<LoopSCC>> ownedSCCs;
+  std::vector<std::unique_ptr<LoopSCCDAGEdge>> ownedEdges;
   std::vector<LoopSCC *> includedSCCs;
   std::vector<LoopSCC *> allSCCs;
+  std::map<std::pair<LoopSCC *, LoopSCC *>, LoopSCCDAGEdge *> edgeBySCCPair;
   std::unordered_map<LoopDependenceNode *, LoopSCC *> sccByNode;
   std::unordered_map<Value *, LoopSCC *> sccByValue;
   std::unordered_map<const LoopSCC *, uint32_t> sccIndexes;

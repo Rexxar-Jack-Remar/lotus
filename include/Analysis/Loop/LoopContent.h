@@ -90,9 +90,11 @@ public:
     return this->inductionVariables.get();
   }
 
-  void materializeScalarAnalyses(llvm::ScalarEvolution &SE,
-                                 llvm::LoopInfo &LI,
-                                 const noelle::DominatorSummary &DS);
+  void materializeScalarAnalyses(
+      llvm::ScalarEvolution &SE,
+      llvm::LoopInfo &LI,
+      const noelle::DominatorSummary &DS,
+      LoopLDGBuilderOptions options = {});
 
   bool hasEnvironment(void) const { return this->environment != nullptr; }
 
@@ -138,15 +140,13 @@ public:
   }
 
 private:
-  void invalidateDerivedAnalyses(void);
-  void rebuildSCCDAG(void);
+  void invalidateAnalysesAfterDependenceGraph(void);
+  void invalidateAnalysesAfterScalarAnalyses(void);
   void buildEnvironment(const std::set<Value *> &excludeValues);
-  void removeMemoryCloningNegatedDependences(void);
-  void removeThreadSafeLibraryDependences(void);
-  void removeLoopCarriedDependencesProvedDisjoint(
-      LoopIterationSpaceAnalysis &analysis);
-  bool canInstructionReachWithinSameIteration(Instruction *from,
-                                              Instruction *to) const;
+  void materializeEnvironmentFromMemoryCloning(void);
+  void materializeInductionVariables(llvm::ScalarEvolution &SE,
+                                     llvm::LoopInfo &LI,
+                                     LoopLDGBuilderOptions const &options);
 
   LoopTree *loop;
   std::unique_ptr<LoopDependenceGraph> dependenceGraph;
