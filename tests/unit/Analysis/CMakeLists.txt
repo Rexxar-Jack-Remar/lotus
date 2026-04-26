@@ -77,6 +77,12 @@ endforeach()
 add_custom_target(noelle_loop_parity_ll_fixtures DEPENDS ${NOELLE_LOOP_PARITY_LL_OUTPUTS})
 
 add_lotus_debug_info_test(debug_info_analysis_test DebugInfoAnalysisTest.cpp)
+add_lotus_debug_info_test(unique_ir_marker_test UniqueIRMarkerTest.cpp)
+add_lotus_targeted_test(hot_profile_test
+               HotProfileTest.cpp
+               LINK_LIBS
+                   CanaryProfile
+                   LLVMAnalysis)
 add_lotus_analysis_test(nullpointer_api_test NullPointerAPITest.cpp)
 add_lotus_analysis_test(nullpointer_legacy_helpers_test NullPointerLegacyHelpersTest.cpp)
 add_lotus_analysis_test(context_sensitive_nullcheck_analysis_test
