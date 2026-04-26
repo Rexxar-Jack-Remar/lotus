@@ -6,9 +6,11 @@
 #include "Dataflow/APA/Analyses/LLVM/Intra/AvailableExpressions.h"
 #include "Dataflow/APA/Analyses/LLVM/Intra/ConstantPropagation.h"
 #include "Dataflow/APA/Analyses/LLVM/Intra/LiveVariables.h"
+#include "Dataflow/APA/Analyses/LLVM/Intra/Lockset.h"
 #include "Dataflow/APA/Analyses/LLVM/Intra/NonNull.h"
 #include "Dataflow/APA/Analyses/LLVM/Intra/Reachability.h"
 #include "Dataflow/APA/Analyses/LLVM/Intra/ReachingDefinitions.h"
+#include "Dataflow/APA/Analyses/LLVM/Intra/SignAnalysis.h"
 #include "Dataflow/APA/Analyses/LLVM/Intra/UninitializedVariables.h"
 #include "Dataflow/APA/Analyses/LLVM/Intra/VeryBusyExpressions.h"
 #include "Dataflow/APA/Core/Options.h"
@@ -117,6 +119,21 @@ private:
   LiveVariablesResult Result;
 };
 
+class ElimLocksetPass final : public llvm::FunctionPass {
+public:
+  static char ID;
+  ElimLocksetPass() : llvm::FunctionPass(ID) {}
+
+  void getAnalysisUsage(llvm::AnalysisUsage &AU) const override;
+  bool runOnFunction(llvm::Function &F) override;
+  llvm::StringRef getPassName() const override { return "Elimination Lockset"; }
+
+  const LocksetResult &getResult() const { return Result; }
+
+private:
+  LocksetResult Result;
+};
+
 class ElimVeryBusyExpressionsPass final : public llvm::FunctionPass {
 public:
   static char ID;
@@ -147,6 +164,23 @@ public:
 
 private:
   NonNullResult Result;
+};
+
+class ElimSignAnalysisPass final : public llvm::FunctionPass {
+public:
+  static char ID;
+  ElimSignAnalysisPass() : llvm::FunctionPass(ID) {}
+
+  void getAnalysisUsage(llvm::AnalysisUsage &AU) const override;
+  bool runOnFunction(llvm::Function &F) override;
+  llvm::StringRef getPassName() const override {
+    return "Elimination Sign Analysis";
+  }
+
+  const SignAnalysisResult &getResult() const { return Result; }
+
+private:
+  SignAnalysisResult Result;
 };
 
 } // namespace elimination

@@ -12,11 +12,14 @@ set(APA_SOURCES
   Analyses/Intra/IntraAvailableExpressions.cpp
   Analyses/Intra/IntraUninitVariables.cpp
   Analyses/Intra/IntraLiveVariables.cpp
+  Analyses/Intra/IntraLockset.cpp
   Analyses/Intra/IntraVeryBusyExpressions.cpp
   Analyses/Intra/IntraNonNull.cpp
+  Analyses/Intra/IntraSignAnalysis.cpp
   Analyses/Inter/InterReachable.cpp
   Analyses/Inter/InterConstantPropagation.cpp
   Analyses/Inter/InterLiveVariables.cpp
+  Analyses/Inter/InterLockset.cpp
   Analyses/Inter/InterReachingDefinitions.cpp
   Analyses/Inter/InterUninitVariables.cpp
 )

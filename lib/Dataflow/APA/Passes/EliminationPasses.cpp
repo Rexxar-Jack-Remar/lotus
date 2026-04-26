@@ -45,8 +45,12 @@ cl::opt<bool>
                    cl::init(false));
 
 cl::opt<bool> ElimLivePrint("elim-live-print",
-                            cl::desc("Print elimination live variables facts"),
-                            cl::init(false));
+                             cl::desc("Print elimination live variables facts"),
+                             cl::init(false));
+
+cl::opt<bool> ElimLocksetPrint("elim-lockset-print",
+                               cl::desc("Print elimination lockset facts"),
+                               cl::init(false));
 
 cl::opt<bool>
     ElimBusyPrint("elim-busy-print",
@@ -54,8 +58,12 @@ cl::opt<bool>
                   cl::init(false));
 
 cl::opt<bool> ElimNonNullPrint("elim-nonnull-print",
-                               cl::desc("Print elimination nonnull facts"),
-                               cl::init(false));
+                                cl::desc("Print elimination nonnull facts"),
+                                cl::init(false));
+
+cl::opt<bool> ElimSignPrint("elim-sign-print",
+                            cl::desc("Print elimination sign-analysis facts"),
+                            cl::init(false));
 
 cl::opt<bool> ElimUseMemorySSA(
     "elim-use-memssa",
@@ -148,6 +156,48 @@ void printInstSet(raw_ostream &OS, const std::set<const Instruction *> &Set) {
     }
     First = false;
     printValueShort(OS, I);
+  }
+  OS << "}";
+}
+
+void printSignValue(raw_ostream &OS, SignValue V) {
+  if (V.isBottom()) {
+    OS << "bottom";
+    return;
+  }
+  OS << "{";
+  bool First = true;
+  auto PrintPart = [&](bool Enabled, StringRef Name) {
+    if (!Enabled) {
+      return;
+    }
+    if (!First) {
+      OS << ",";
+    }
+    First = false;
+    OS << Name;
+  };
+  PrintPart(V.mayBeNegative(), "neg");
+  PrintPart(V.mayBeZero(), "zero");
+  PrintPart(V.mayBePositive(), "pos");
+  OS << "}";
+}
+
+void printSignMap(raw_ostream &OS, const SignMap &Map) {
+  if (Map.empty()) {
+    OS << "{}";
+    return;
+  }
+  OS << "{";
+  bool First = true;
+  for (const auto &Entry : Map) {
+    if (!First) {
+      OS << ", ";
+    }
+    First = false;
+    printValueShort(OS, Entry.first);
+    OS << "=";
+    printSignValue(OS, Entry.second);
   }
   OS << "}";
 }
@@ -437,6 +487,34 @@ bool ElimLiveVariablesPass::runOnFunction(Function &F) {
   return false;
 }
 
+void ElimLocksetPass::getAnalysisUsage(AnalysisUsage &AU) const {
+  AU.setPreservesAll();
+}
+
+bool ElimLocksetPass::runOnFunction(Function &F) {
+  Result = runIntraElimLockset(&F, getElimOptions());
+  if (ElimLocksetPrint) {
+    errs() << "== Elimination Lockset: " << F.getName() << " ==\n";
+    printSolveMetadata(errs(), Result);
+    for (auto &BB : F) {
+      for (auto &I : BB) {
+        errs() << "  ";
+        I.print(errs());
+        errs() << " :: ";
+        if (const auto *Fact = Result.tryIN(&I)) {
+          printValueSet(errs(), *Fact);
+        } else {
+          const LocksetFact Empty{};
+          printValueSet(errs(), Empty);
+        }
+        errs() << "\n";
+      }
+    }
+    errs() << "\n";
+  }
+  return false;
+}
+
 void ElimVeryBusyExpressionsPass::getAnalysisUsage(AnalysisUsage &AU) const {
   AU.setPreservesAll();
   AU.addRequired<AAResultsWrapperPass>();
@@ -510,6 +588,34 @@ bool ElimNonNullPass::runOnFunction(Function &F) {
   return false;
 }
 
+void ElimSignAnalysisPass::getAnalysisUsage(AnalysisUsage &AU) const {
+  AU.setPreservesAll();
+}
+
+bool ElimSignAnalysisPass::runOnFunction(Function &F) {
+  Result = runIntraElimSignAnalysis(&F, getElimOptions());
+  if (ElimSignPrint) {
+    errs() << "== Elimination Sign Analysis: " << F.getName() << " ==\n";
+    printSolveMetadata(errs(), Result);
+    for (auto &BB : F) {
+      for (auto &I : BB) {
+        errs() << "  ";
+        I.print(errs());
+        errs() << " :: ";
+        if (const auto *Fact = Result.tryIN(&I)) {
+          printSignMap(errs(), *Fact);
+        } else {
+          const SignMap Empty{};
+          printSignMap(errs(), Empty);
+        }
+        errs() << "\n";
+      }
+    }
+    errs() << "\n";
+  }
+  return false;
+}
+
 char ElimReachablePass::ID = 0;
 static RegisterPass<ElimReachablePass>
     X("elim-reachable", "Elimination-based reachability (intra)");
@@ -534,12 +640,20 @@ char ElimLiveVariablesPass::ID = 0;
 static RegisterPass<ElimLiveVariablesPass>
     LV("elim-live", "Elimination-based live variables (intra)");
 
+char ElimLocksetPass::ID = 0;
+static RegisterPass<ElimLocksetPass>
+    LS("elim-lockset", "Elimination-based may-lockset analysis (intra)");
+
 char ElimVeryBusyExpressionsPass::ID = 0;
 static RegisterPass<ElimVeryBusyExpressionsPass>
     VB("elim-busy", "Elimination-based very busy expressions (intra)");
 
 char ElimNonNullPass::ID = 0;
 static RegisterPass<ElimNonNullPass> NN("elim-nonnull",
-                                        "Elimination-based nonnull (intra)");
+                                         "Elimination-based nonnull (intra)");
+
+char ElimSignAnalysisPass::ID = 0;
+static RegisterPass<ElimSignAnalysisPass>
+    SA("elim-sign", "Elimination-based sign analysis (intra)");
 
 } // namespace elimination

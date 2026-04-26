@@ -160,12 +160,17 @@ paper), and serve as examples for adding additional analyses:
 - Reaching definitions (`runIntraElimReachingDefinitions`)
 - Available expressions (`runIntraElimAvailableExpressions`)
 - Live variables (`runIntraElimLiveVariables`)
+- Lockset analysis (`runIntraElimLockset`)
 - Very busy expressions (`runIntraElimVeryBusyExpressions`)
 - Non-null propagation (`runIntraElimNonNull`)
+- Sign analysis (`runIntraElimSignAnalysis`)
+
+Interprocedural call-string clients are also available for selected analyses,
+including may-lockset analysis (`runInterElimLockset`).
 
 ## LLVM pass wrappers
 
-For convenient use under LLVM's legacy pass manager, eight function passes are
+For convenient use under LLVM's legacy pass manager, ten function passes are
 provided:
 
 - `-elim-reachable` (reachability)
@@ -174,8 +179,10 @@ provided:
 - `-elim-available` (available expressions)
 - `-elim-uninit` (uninitialized variables)
 - `-elim-live` (live variables)
+- `-elim-lockset` (may-lockset analysis)
 - `-elim-busy` (very busy expressions)
 - `-elim-nonnull` (nonnull propagation)
+- `-elim-sign` (sign analysis)
 
 Use `-elim-method=state|adt-simple|adt-delayed` to select the solver.
 Printing is optional via:
@@ -186,8 +193,10 @@ Printing is optional via:
 - `-elim-available-print`
 - `-elim-uninit-print`
 - `-elim-live-print`
+- `-elim-lockset-print`
 - `-elim-busy-print`
 - `-elim-nonnull-print`
+- `-elim-sign-print`
 
 Memory modeling can be toggled with:
 
