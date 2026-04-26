@@ -21,50 +21,59 @@ void NonDisjunctiveDomain::addState(const AbductiveDomain &state) {
     return;
   }
 
-  // Compute intersection: keep only common parts
-  // This is simplified - full implementation would do proper intersection
-  AbductiveDomain intersection;
+  AbductiveDomain intersection = summary_->clone();
+  const AbductiveDomain &existing = *summary_;
 
-  // Intersect stacks: keep variables that exist in both
-  for (const auto &kv : state.getPostStack().getMap()) {
-    if (summary_->getPostStack().find(kv.first)) {
-      // Variable exists in both - keep it
-      intersection.getPostStack().add(kv.first, kv.second);
-    }
-  }
-
-  // Intersect heaps: keep edges that exist in both
-  for (const auto &kv : state.getPostHeap().getEdges()) {
-    auto summary_it = summary_->getPostHeap().getEdges().find(kv.first);
-    if (summary_it != summary_->getPostHeap().getEdges().end()) {
-      for (const auto &edge_kv : kv.second) {
-        if (summary_it->second.find(edge_kv.first) !=
-            summary_it->second.end()) {
-          // Edge exists in both - keep it
-          intersection.getPostHeap().addEdge(kv.first, edge_kv.first,
-                                             edge_kv.second);
-        }
+  {
+    Stack new_stack;
+    for (const auto &kv : existing.getPostStack().getMap()) {
+      const Address *rhs_addr = state.getPostStack().find(kv.first);
+      if (rhs_addr && existing.getCanonical(kv.second.addr) ==
+                          state.getCanonical(rhs_addr->addr)) {
+        new_stack.add(kv.first, kv.second);
       }
     }
+    intersection.getPostStack() = std::move(new_stack);
   }
 
-  // Intersect attributes: keep attributes that exist in both
-  for (const auto &kv : state.getPostAttrs().getAttrs()) {
-    if (summary_->getPostAttrs().has(kv.first, Attribute::Allocated)) {
-      // Keep common attributes
+  {
+    Heap new_heap;
+    for (const auto &kv : existing.getPostHeap().getEdges()) {
+      AbstractValue lhs_from = existing.getCanonical(kv.first);
+      for (const auto &edge_kv : kv.second) {
+        const Address *rhs_target = state.getPostHeap().findEdge(lhs_from, edge_kv.first);
+        if (!rhs_target) {
+          continue;
+        }
+        if (!(existing.getCanonical(edge_kv.second.addr) ==
+              state.getCanonical(rhs_target->addr))) {
+          continue;
+        }
+        new_heap.addEdge(lhs_from, edge_kv.first, edge_kv.second);
+      }
+    }
+    intersection.getPostHeap() = std::move(new_heap);
+  }
+
+  {
+    AddressAttributes new_attrs;
+    for (const auto &kv : existing.getPostAttrs().getAttrs()) {
+      AbstractValue canon = existing.getCanonical(kv.first);
       AttributeSet common;
-      const auto &summary_attrs = summary_->getPostAttrs().get(kv.first);
       for (Attribute attr : kv.second) {
-        if (summary_attrs.count(attr) > 0) {
+        if (state.getPostAttrs().has(canon, attr)) {
           common.insert(attr);
         }
       }
       for (Attribute attr : common) {
-        intersection.getPostAttrs().add(kv.first, attr);
+        new_attrs.add(canon, attr);
       }
     }
+    intersection.getPostAttrs() = std::move(new_attrs);
   }
 
+  intersection.getTaintDomain().join(existing.getTaintDomain());
+  intersection.canonicalize();
   summary_ = std::make_unique<AbductiveDomain>(std::move(intersection));
 }
 

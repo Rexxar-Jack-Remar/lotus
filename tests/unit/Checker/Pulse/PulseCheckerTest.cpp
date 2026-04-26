@@ -489,6 +489,106 @@ TEST_F(PulseCheckerTest, RejectedMultiEntrySummaryFallsBackToUnknownCall) {
   EXPECT_TRUE(astate->hasSkippedCall("pick_first"));
 }
 
+TEST_F(PulseCheckerTest, SummaryApplicationHandlesAliasedActuals) {
+  auto module = parseModule(context, R"(
+    define void @store_two(i8** %a, i8** %b, i8* %v) {
+    entry:
+      store i8* %v, i8** %a
+      store i8* %v, i8** %b
+      ret void
+    }
+
+    define void @caller(i8** %p, i8* %v) {
+    entry:
+      call void @store_two(i8** %p, i8** %p, i8* %v)
+      ret void
+    }
+  )");
+  ASSERT_NE(module, nullptr);
+
+  auto *callee = module->getFunction("store_two");
+  auto *caller = module->getFunction("caller");
+  ASSERT_NE(callee, nullptr);
+  ASSERT_NE(caller, nullptr);
+
+  PulseChecker checker(module.get());
+  checker.analyzeFunction(callee);
+
+  ExecutionDomain callerState = checker.initializeFunction(caller);
+  auto *call = findCallByCalleeName(caller, "store_two");
+  ASSERT_NE(call, nullptr);
+
+  auto applied = checker.applySummaryImproved(callee, callerState, call, nullptr);
+  ASSERT_FALSE(applied.empty());
+}
+
+TEST_F(PulseCheckerTest, UnknownCallHavocsPointerArguments) {
+  auto module = parseModule(context, R"(
+    declare void @mystery(i8**)
+
+    define void @caller() {
+    entry:
+      %slot = alloca i8*
+      %buf = alloca i8
+      store i8* %buf, i8** %slot
+      call void @mystery(i8** %slot)
+      %p = load i8*, i8** %slot
+      ret void
+    }
+  )");
+  ASSERT_NE(module, nullptr);
+
+  Function *F = module->getFunction("caller");
+  ASSERT_NE(F, nullptr);
+
+  PulseChecker checker(module.get());
+  ExecutionDomain state = checker.initializeFunction(F);
+  auto *call = findCallByCalleeName(F, "mystery");
+  ASSERT_NE(call, nullptr);
+
+  for (auto &I : F->getEntryBlock()) {
+    auto states = checker.executeInstruction(&I, std::move(state), nullptr, 0);
+    ASSERT_FALSE(states.empty());
+    state = std::move(states.front());
+    if (&I == call) {
+      break;
+    }
+  }
+
+  auto *astate = state.getAstate();
+  ASSERT_NE(astate, nullptr);
+  auto *slot = findNthInstruction<AllocaInst>(F, 0);
+  ASSERT_NE(slot, nullptr);
+  AbstractValue slot_av = checker.getFactory().getOrCreate(slot);
+  EXPECT_EQ(astate->getPostHeap().findEdge(astate->getCanonical(slot_av),
+                                           Access(AccessKind::Dereference)),
+            nullptr);
+}
+
+TEST_F(PulseCheckerTest, TaintSourceAndSinkProduceReport) {
+  auto module = parseModule(context, R"(
+    declare i8* @getenv(i8*)
+    declare i32 @system(i8*)
+
+    define i32 @taint_flow(i8* %name) {
+    entry:
+      %v = call i8* @getenv(i8* %name)
+      %r = call i32 @system(i8* %v)
+      ret i32 %r
+    }
+  )");
+  ASSERT_NE(module, nullptr);
+
+  BugReportMgr &mgr = BugReportMgr::get_instance();
+  const size_t reportsBefore = getReportCountForType(mgr, IssueType::TaintError);
+  {
+    PulseChecker checker(module.get());
+    checker.analyze();
+  }
+  const size_t reportsAfter = getReportCountForType(mgr, IssueType::TaintError);
+  ASSERT_EQ(reportsAfter, reportsBefore + 1);
+}
+
 TEST_F(PulseCheckerTest, LoopConvergenceRequiresEquivalentPathStamp) {
   auto module = parseModule(context, R"(
     define void @test_loop(i32 %n) {

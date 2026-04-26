@@ -2,6 +2,7 @@
 #include "Checker/Pulse/Domain/PulseTaint.h"
 
 #include "Checker/Pulse/Domain/PulseDomain.h"
+#include "Checker/Pulse/Report/PulseDiagnostic.h"
 #include "Checker/Report/BugReport.h"
 #include "Checker/Report/BugReportMgr.h"
 
@@ -97,16 +98,29 @@ bool TaintOperations::checkSink(AbductiveDomain &astate, AbstractValue v,
   if (taints.empty())
     return false;
 
-  // Get sink policies from config
   const TaintConfig &config = getConfig();
-  TaintKind sink_kind =
-      TaintKind::Unknown(); // Would be determined from sink_name
+  TaintKind sink_kind = TaintKind::Unknown();
+  if (sink_name == "system" || sink_name == "exec" || sink_name == "execl" ||
+      sink_name == "execlp" || sink_name == "execle" ||
+      sink_name == "execv" || sink_name == "execvp" ||
+      sink_name == "execve" || sink_name == "popen" ||
+      sink_name == "eval") {
+    sink_kind = TaintKind::UserInput();
+  } else if (sink_name == "printf" || sink_name == "fprintf" ||
+             sink_name == "sprintf" || sink_name == "snprintf") {
+    sink_kind = TaintKind::UserInput();
+  }
   const auto &policies = config.getSinkPolicies(sink_kind);
 
-  // Find unsanitized taint items that match sink policies
   std::vector<const TaintItem *> unsanitized_taints;
   for (const auto &item : taints) {
-    // Check if sanitized by any policy's sanitizer kinds
+    if (policies.empty()) {
+      if (!item.isSanitized()) {
+        unsanitized_taints.push_back(&item);
+      }
+      continue;
+    }
+
     bool sanitized = false;
     for (const auto &policy : policies) {
       if (item.isSanitizedBy(policy.sanitizer_kinds)) {
@@ -116,7 +130,6 @@ bool TaintOperations::checkSink(AbductiveDomain &astate, AbstractValue v,
     }
 
     if (!sanitized) {
-      // Check if item's kinds match policy's source kinds
       for (const auto &policy : policies) {
         for (const auto &item_kind : item.kinds) {
           for (const auto &source_kind : policy.source_kinds) {
@@ -135,7 +148,6 @@ bool TaintOperations::checkSink(AbductiveDomain &astate, AbstractValue v,
     return false; // All taints are sanitized or don't match policies
   }
 
-  // Report the most critical one
   const TaintItem *critical_item = nullptr;
   TaintKind critical_kind = TaintKind::Unknown();
 
@@ -164,20 +176,19 @@ bool TaintOperations::checkSink(AbductiveDomain &astate, AbstractValue v,
     return false;
   }
 
-  const TaintItem &item = *critical_item;
+  const TaintItem &critical = *critical_item;
 
   BugReportMgr &mgr = BugReportMgr::get_instance();
-  // Register type if not already (hacky, should be in
-  // PulseChecker::registerBugTypes)
-  int typeId = mgr.register_bug_type("Taint Flow", BugDescription::BI_HIGH,
+  int typeId = mgr.register_bug_type(IssueType::TaintError,
+                                     BugDescription::BI_HIGH,
                                      BugDescription::BC_SECURITY, "CWE-20");
 
   BugReport *report = new BugReport(typeId);
 
   // Describe the source first so the final step remains the sink/bug site.
-  if (item.source_instruction) {
+  if (critical.source_instruction) {
     std::string src_msg = "Taint source: ";
-    TaintKind primary = item.getPrimaryKind();
+    TaintKind primary = critical.getPrimaryKind();
     if (primary == TaintKind::Network()) {
       src_msg += "Network input";
     } else if (primary == TaintKind::UserInput()) {
@@ -193,16 +204,16 @@ bool TaintOperations::checkSink(AbductiveDomain &astate, AbstractValue v,
     }
 
     report->append_step(
-        const_cast<llvm::Instruction *>(item.source_instruction), src_msg, 0,
+        const_cast<llvm::Instruction *>(critical.source_instruction), src_msg, 0,
         {}, "source");
   }
 
   // Add propagation trace from source to sink.
-  const auto &events = item.history.getEvents();
+  const auto &events = critical.history.getEvents();
   unsigned step_num = 1;
   for (const auto &event : events) {
     if (event.location == nullptr ||
-        event.location == item.source_instruction) {
+        event.location == critical.source_instruction) {
       continue;
     }
 

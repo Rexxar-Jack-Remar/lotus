@@ -20,6 +20,9 @@ public:
   void add(AbstractValue formal, AbstractValue actual);
   std::optional<AbstractValue> substitute(AbstractValue formal) const;
   AbstractValue substituteOrIdentity(AbstractValue formal) const;
+  const std::map<AbstractValue, AbstractValue> &getMap() const {
+    return formal_to_actual_;
+  }
 
   bool empty() const { return formal_to_actual_.empty(); }
   void clear() { formal_to_actual_.clear(); }

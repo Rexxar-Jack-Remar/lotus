@@ -1,4 +1,5 @@
 #include "Checker/Pulse/Checker/PulseChecker.h"
+#include "Checker/Pulse/Core/PulseCallState.h"
 #include "Checker/Pulse/Core/PulseSubstitution.h"
 #include "Checker/Pulse/Core/PulseValueHistory.h"
 #include "Checker/Pulse/Domain/PulseContradiction.h"
@@ -125,7 +126,8 @@ static bool materializePreFromFormal(
     PulseOperations &ops, AbstractValueFactory &factory,
     const AbductiveDomain *callee_pre, const PulseSummary &summary,
     const llvm::Value *formal, AbstractValue actual_addr,
-    AbductiveDomain &caller_astate, Substitution &substitution) {
+    AbductiveDomain &caller_astate, Substitution &substitution,
+    CallState *call_state = nullptr) {
 
   const AbductiveDomain *pre = callee_pre;
   auto formal_av_opt = summary.getFormalAV(formal);
@@ -135,6 +137,10 @@ static bool materializePreFromFormal(
 
   AbstractValue formal_av = pre->getCanonical(*formal_av_opt);
   AbstractValue actual_canon = caller_astate.getCanonical(actual_addr);
+  if (call_state) {
+    call_state->addRevSubst(actual_canon, formal_av,
+                            CallState::LazyHeapPath::fromPvar(formal));
+  }
 
   // Check if formal is in pre stack
   const auto &pre_stack = pre->getPreStack().getMap();
@@ -302,9 +308,14 @@ applyPostCondition(const AbductiveDomain *callee_post,
  */
 std::vector<ExecutionDomain> PulseChecker::applySummaryImproved(
     const llvm::Function *callee, const ExecutionDomain &caller_state,
-    const llvm::CallInst *CI, const llvm::BasicBlock *pred) {
+    const llvm::CallInst *CI, const llvm::BasicBlock *pred,
+    const PulseSummary *summary_override) {
 
-  const PulseSummary *summary_ptr = summary_manager_.getSummary(callee);
+  const PulseSummary *summary_ptr = summary_override
+                                        ? summary_override
+                                        : resolveSummaryForCall(callee,
+                                                                caller_state,
+                                                                CI, pred);
   if (!summary_ptr || !summary_ptr->isValid()) {
     return {};
   }
@@ -334,93 +345,19 @@ std::vector<ExecutionDomain> PulseChecker::applySummaryImproved(
       continue;
     }
 
+    CallState call_state(std::make_unique<AbductiveDomain>(new_astate->clone()));
     Substitution substitution;
     std::map<AbstractValue, AbstractValue> formal_to_actual_map;
     std::map<AbstractValue, std::set<AbstractValue>> actual_to_formals_map;
 
-    // Track captured variables (for closures/lambdas)
-    // In LLVM, captured variables are typically passed as additional arguments
-    // or accessed through a closure structure
-    std::map<const llvm::Value *, AbstractValue> captured_vars;
-
     unsigned arg_idx = 0;
     bool entry_failed = false;
 
-    // Check formal/actual length mismatch first
     const unsigned actual_arg_count = CI->arg_size();
-
-    // Handle captured variables: check if this is a closure call
-    // In LLVM IR, closures often have a first argument that's the closure
-    // structure We need to extract captured variables from it Infer handles
-    // this via CapturedFormalActualLength contradiction
-    bool is_closure_call = false;
-    std::vector<AbstractValue> captured_actuals;
-
-    if (CI->arg_size() > 0) {
-      // Check if first argument looks like a closure (heuristic)
-      const llvm::Value *first_arg = CI->getArgOperand(0);
-      if (first_arg->getType()->isPointerTy()) {
-        // Try to evaluate it - if it has fields, might be a closure
-        auto closure_opt = ops_.eval(*new_astate, first_arg, CI, pred);
-        if (closure_opt) {
-          // Check if this address has closure-like structure
-          // In practice, we'd check for specific patterns or attributes
-          // For now, we'll handle it generically
-          is_closure_call = true;
-
-          // Extract captured variables from closure structure
-          // This is simplified - full implementation would traverse closure
-          // struct
-          AbstractValue closure_addr =
-              new_astate->getCanonical(closure_opt->addr);
-
-          // Mark closure address for later processing
-          // In full implementation, we'd extract each captured variable
-          captured_vars[first_arg] = closure_addr;
-          captured_actuals.push_back(closure_addr);
-
-          // In Infer, captured variables are tracked separately and checked
-          // via CapturedFormalActualLength contradiction
-        }
-      }
-    }
-
-    // Check formal/actual length mismatch (including captured variables)
-    // Infer uses FormalActualLength and CapturedFormalActualLength
-    // contradictions
-    if (!callee->isVarArg() && actual_arg_count != formal_arg_count &&
-        !is_closure_call) {
-      // Formal/actual length mismatch - this is a contradiction
-      // Report as FormalActualLength contradiction
-      auto contradiction = Contradiction::makeFormalActualLength(
-          formal_arg_count, actual_arg_count);
-      // Skip this entry, try next
+    if (!callee->isVarArg() && actual_arg_count != formal_arg_count) {
       continue;
     }
 
-    // If closure call, check captured formal/actual length match
-    // (In full implementation, we'd extract captured formals from callee
-    // signature)
-    if (is_closure_call && !captured_actuals.empty()) {
-      // Simplified: assume captured formals match if closure structure exists
-      // Full implementation would:
-      // 1. Extract captured formals from callee signature (from function
-      // attributes/metadata)
-      // 2. Compare with captured_actuals.size()
-      // 3. Report CapturedFormalActualLength contradiction if mismatch
-      //
-      // For now, we handle it generically - full implementation would check:
-      // unsigned captured_formal_count = extractCapturedFormals(callee).size();
-      // if (captured_formal_count != captured_actuals.size()) {
-      //     auto contradiction = Contradiction::makeCapturedFormalActualLength(
-      //         captured_formal_count, captured_actuals.size());
-      //     continue;  // Skip this entry
-      // }
-    }
-
-    // Build formal-to-actual mapping for ALL arguments first
-    // This ensures substitution is complete before applying post conditions
-    // Match formal parameters to actual arguments by position
     arg_idx = 0;
     for (const auto &Arg : callee->args()) {
       if (arg_idx >= CI->arg_size()) {
@@ -443,10 +380,12 @@ std::vector<ExecutionDomain> PulseChecker::applySummaryImproved(
         actual_to_formals_map[actual_addr].insert(formal_av);
 
         substitution.add(formal_av, actual_addr);
+        call_state.getSubst().add(formal_av, actual_addr);
         formal_to_actual_map[formal_av] = actual_addr;
 
         if (!materializePreFromFormal(ops_, factory_, pre, summary, &Arg,
-                                      actual_addr, *new_astate, substitution)) {
+                                      actual_addr, *new_astate, substitution,
+                                      &call_state)) {
           entry_failed = true;
           break;
         }
@@ -484,12 +423,11 @@ std::vector<ExecutionDomain> PulseChecker::applySummaryImproved(
         entry.getPreFormula().applySubstitution(substitution);
 
     // Enhanced contradiction detection using new module
-    auto contradiction_opt =
-        checkContradiction(caller_formula, callee_pre_formula,
-                           formal_to_actual_map, actual_to_formals_map);
+    auto contradiction_opt = checkContradictionWithCallState(
+        caller_formula, callee_pre_formula, formal_to_actual_map,
+        actual_to_formals_map, &call_state);
 
     if (contradiction_opt) {
-      // Contradiction detected - skip this entry
       continue;
     }
 
@@ -505,8 +443,6 @@ std::vector<ExecutionDomain> PulseChecker::applySummaryImproved(
       continue;
     }
 
-    // Additional normalization: ensure substitution maps use canonical values
-    // Rebuild substitution from formal_to_actual_map with canonical values
     Substitution normalized_substitution;
     for (const auto &kv : formal_to_actual_map) {
       AbstractValue formal_canon = pre->getCanonical(kv.first);
@@ -551,6 +487,7 @@ std::vector<ExecutionDomain> PulseChecker::applySummaryImproved(
     if (!merged_pre.isConsistent()) {
       continue;
     }
+    call_state.incorporateNewEqs(merged_pre);
 
     std::optional<AbstractValue> caller_ret = std::nullopt;
     if (entry.getReturnValue()) {

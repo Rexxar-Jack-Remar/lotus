@@ -72,6 +72,85 @@ PulseChecker::~PulseChecker() {
   DiagnosticManager::getInstance().flush();
 }
 
+const PulseSummary *PulseChecker::resolveSummaryForCall(
+    const llvm::Function *callee, const ExecutionDomain &caller_state,
+    const llvm::CallInst *CI, const llvm::BasicBlock *pred) {
+  const PulseSummary *base_summary = summary_manager_.getSummary(callee);
+  if (!base_summary || !base_summary->isValid()) {
+    return base_summary;
+  }
+
+  const AbductiveDomain *caller_astate = caller_state.getAstate();
+  if (!caller_astate) {
+    return base_summary;
+  }
+
+  std::vector<AbstractValue> actual_args;
+  actual_args.reserve(CI->arg_size());
+  AbductiveDomain eval_state = caller_astate->clone();
+  for (unsigned i = 0; i < CI->arg_size(); ++i) {
+    auto arg_opt = ops_.eval(eval_state, CI->getArgOperand(i), CI, pred);
+    if (!arg_opt) {
+      continue;
+    }
+    actual_args.push_back(eval_state.getCanonical(arg_opt->addr));
+  }
+
+  SpecializationKey key = SpecializationManager::computeSpecializationKey(
+      *caller_astate, CI, actual_args);
+  if (key.isBottom()) {
+    return base_summary;
+  }
+
+  if (!specialization_manager_.hasSpecializedSummary(callee, key)) {
+    specialization_manager_.requestSpecialization(callee, key);
+    materializeSpecializedSummary(callee, *base_summary, key);
+  }
+
+  if (const PulseSummary *specialized =
+          specialization_manager_.getSpecializedSummary(callee, key)) {
+    return specialized;
+  }
+
+  return base_summary;
+}
+
+void PulseChecker::materializeSpecializedSummary(
+    const llvm::Function *callee, const PulseSummary &base_summary,
+    const SpecializationKey &key) {
+  auto specialized = std::make_unique<PulseSummary>(callee);
+
+  for (const auto &entry : base_summary.getPrePostList()) {
+    SummaryEntry cloned = entry.clone();
+    const AbductiveDomain *entry_pre = cloned.getPre();
+    const AbductiveDomain *entry_post = cloned.getPost();
+    if (!entry_pre || !entry_post) {
+      specialized->addPrePost(std::move(cloned));
+      continue;
+    }
+
+    auto new_pre = std::make_unique<AbductiveDomain>(
+        SpecializationManager::applySpecialization(*entry_pre, key));
+    auto new_post = std::make_unique<AbductiveDomain>(
+        SpecializationManager::applySpecialization(*entry_post, key));
+
+    specialized->addPrePost(SummaryEntry(
+        std::move(new_pre), cloned.getPreFormula().clone(), std::move(new_post),
+        cloned.getPostFormula().clone(), cloned.getReturnValue(),
+        cloned.getLatentIssue()));
+  }
+
+  specialized->setNonDisj(base_summary.getNonDisj().clone());
+  for (const auto &Arg : callee->args()) {
+    if (auto formal_av = base_summary.getFormalAV(&Arg)) {
+      specialized->setFormalAV(&Arg, *formal_av);
+    }
+  }
+
+  specialization_manager_.addSpecializedSummary(callee, key,
+                                                std::move(specialized));
+}
+
 void PulseChecker::registerBugTypes() {
   BugReportMgr &mgr = BugReportMgr::get_instance();
   auto &diagMgr = DiagnosticManager::getInstance();

@@ -149,7 +149,9 @@ void TaintConfig::initializeDefault() {
   // Sink policies
   SinkPolicy command_injection(1, "Command injection");
   command_injection.source_kinds = {TaintKind::UserInput(),
-                                    TaintKind::Network()};
+                                    TaintKind::Network(),
+                                    TaintKind::Environment(),
+                                    TaintKind::FileSystem()};
   command_injection.sanitizer_kinds = {};
   default_config_->addSinkPolicy(TaintKind::UserInput(), command_injection);
 }

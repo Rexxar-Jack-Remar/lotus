@@ -7,6 +7,7 @@
 #include "Checker/Pulse/Domain/PulseLoopAbstraction.h"
 #include "Checker/Pulse/Domain/PulseNonDisjunctiveDomain.h"
 #include "Checker/Pulse/Domain/PulseOperations.h"
+#include "Checker/Pulse/Interproc/PulseSpecialization.h"
 #include "Checker/Pulse/Interproc/PulseSummary.h"
 #include "Checker/Pulse/Interproc/PulseTransitiveInfo.h"
 #include "Checker/Pulse/Report/PulseDiagnostic.h"
@@ -83,6 +84,7 @@ private:
       function_states_;
   NonDisjunctiveDomain analysis_non_disj_;
   SummaryManager summary_manager_;
+  SpecializationManager specialization_manager_;
 
   // Disjunctive analysis and loop abstraction (optional, can be nullptr)
   std::map<const llvm::Function *, DisjunctiveDomain> disjunctive_domains_;
@@ -173,7 +175,8 @@ public:
   std::vector<ExecutionDomain>
   applySummaryImproved(const llvm::Function *callee,
                        const ExecutionDomain &caller_state,
-                       const llvm::CallInst *CI, const llvm::BasicBlock *pred);
+                       const llvm::CallInst *CI, const llvm::BasicBlock *pred,
+                       const PulseSummary *summary_override = nullptr);
 
   /**
    * Handle comparison instructions (ICmp, FCmp) to update path conditions
@@ -201,6 +204,15 @@ public:
 
   void reportUnnecessaryCopies(const llvm::Function *F);
   void reportConstRefableParams(const llvm::Function *F);
+
+private:
+  const PulseSummary *resolveSummaryForCall(const llvm::Function *callee,
+                                            const ExecutionDomain &caller_state,
+                                            const llvm::CallInst *CI,
+                                            const llvm::BasicBlock *pred);
+  void materializeSpecializedSummary(const llvm::Function *callee,
+                                     const PulseSummary &base_summary,
+                                     const SpecializationKey &key);
 };
 
 } // namespace pulse

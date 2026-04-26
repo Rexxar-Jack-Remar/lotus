@@ -6,25 +6,56 @@
 namespace pulse {
 
 bool CallState::incorporateNewEqs(const PulseFormula &new_eqs) {
-  // Incorporate new equalities into astate
-  // This is a simplified version - full implementation would:
-  // 1. Add equalities to astate's path formula
-  // 2. Normalize values in subst and rev_subst
-  // 3. Update hist_map if needed
-
-  // Merge new_eqs into astate's path formula
   if (astate_) {
     PulseFormula merged =
         PulseFormula::merge(astate_->getPathFormula(), new_eqs);
     if (!merged.isConsistent()) {
-      return false; // Contradiction detected
+      return false;
     }
     astate_->setPathFormula(std::make_unique<PulseFormula>(std::move(merged)));
+    astate_->canonicalize();
   }
 
-  // Normalize substitution values
-  // This would require iterating through subst and normalizing each value
-  // For now, we'll just return true (success)
+  if (!astate_) {
+    return true;
+  }
+
+  Substitution normalized_subst;
+  for (const auto &kv : subst_.getMap()) {
+    normalized_subst.add(astate_->getCanonical(kv.first),
+                         astate_->getCanonical(kv.second));
+  }
+  subst_ = std::move(normalized_subst);
+
+  std::map<AbstractValue, std::pair<AbstractValue, LazyHeapPath>>
+      normalized_rev_subst;
+  for (const auto &kv : rev_subst_) {
+    normalized_rev_subst[astate_->getCanonical(kv.first)] =
+        std::make_pair(astate_->getCanonical(kv.second.first), kv.second.second);
+  }
+  rev_subst_ = std::move(normalized_rev_subst);
+
+  std::map<AbstractValue, ValueHistory> normalized_hist_map;
+  for (const auto &kv : hist_map_) {
+    normalized_hist_map[astate_->getCanonical(kv.first)] = kv.second;
+  }
+  hist_map_ = std::move(normalized_hist_map);
+
+  std::set<AbstractValue> normalized_visited;
+  for (AbstractValue v : visited_) {
+    normalized_visited.insert(astate_->getCanonical(v));
+  }
+  visited_ = std::move(normalized_visited);
+
+  std::map<AbstractValue, std::set<AbstractValue>> normalized_aliases;
+  for (const auto &kv : aliases_) {
+    AbstractValue canon_key = astate_->getCanonical(kv.first);
+    auto &targets = normalized_aliases[canon_key];
+    for (AbstractValue alias : kv.second) {
+      targets.insert(astate_->getCanonical(alias));
+    }
+  }
+  aliases_ = std::move(normalized_aliases);
 
   return true;
 }

@@ -887,13 +887,31 @@ void PulseOperations::havoc(AbductiveDomain &astate, Address addr,
   AbstractValue canon_addr = astate.getCanonical(addr.addr);
   astate.getPostHeap().removeEdges(canon_addr);
 
-  // Remove attributes (except allocation if it was allocated)
-  bool was_allocated =
-      astate.getPostAttrs().has(canon_addr, Attribute::Allocated);
-  astate.getPostAttrs().clear(canon_addr);
-  if (was_allocated) {
-    astate.getPostAttrs().add(canon_addr, Attribute::Allocated);
+  // Preserve provenance/resource facts while forgetting value-specific facts.
+  AttributeSet preserved;
+  for (Attribute attr : astate.getPostAttrs().get(canon_addr)) {
+    switch (attr) {
+    case Attribute::Allocated:
+    case Attribute::Stack:
+    case Attribute::Global:
+    case Attribute::FileHandle:
+    case Attribute::Lock:
+    case Attribute::AsyncResource:
+      preserved.insert(attr);
+      break;
+    case Attribute::Invalid:
+    case Attribute::Uninitialized:
+    case Attribute::Null:
+    case Attribute::OutOfBounds:
+    case Attribute::Tainted:
+      break;
+    }
   }
+  astate.getPostAttrs().clear(canon_addr);
+  for (Attribute attr : preserved) {
+    astate.getPostAttrs().add(canon_addr, attr);
+  }
+  astate.setAllocationSize(canon_addr, 0);
 }
 
 OperationResult

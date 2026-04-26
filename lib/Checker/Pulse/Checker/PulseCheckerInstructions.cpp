@@ -26,6 +26,34 @@
 
 namespace pulse {
 
+namespace {
+static void modelUnknownCallEffects(PulseOperations &ops,
+                                    AbductiveDomain &astate,
+                                    const llvm::CallInst *CI,
+                                    const llvm::BasicBlock *pred,
+                                    AbstractValueFactory &factory) {
+  for (unsigned i = 0; i < CI->arg_size(); ++i) {
+    const llvm::Value *arg = CI->getArgOperand(i);
+    if (!arg->getType()->isPointerTy()) {
+      continue;
+    }
+    auto arg_opt = ops.eval(astate, arg, CI, pred);
+    if (!arg_opt) {
+      continue;
+    }
+    ops.havoc(astate, *arg_opt, CI);
+  }
+
+  if (CI->getType()->isPointerTy()) {
+    AbstractValue ret_val = factory.createFresh(CI);
+    Address ret_addr(ret_val);
+    ret_addr.history.addEvent(ValueHistory::EventKind::FunctionCall, CI,
+                              CI->getFunction());
+    astate.getPostStack().add(CI, ret_addr);
+  }
+}
+} // namespace
+
 std::vector<ExecutionDomain> PulseChecker::executeInstruction(
     const llvm::Instruction *I, ExecutionDomain exec_state,
     const llvm::BasicBlock *pred, unsigned call_depth) {
@@ -1019,13 +1047,7 @@ PulseChecker::handleCall(const llvm::CallInst *CI, ExecutionDomain exec_state,
   if (current_scc_.count(F) > 0) {
     astate->addSkippedCall(F->getName().str());
     astate->declareUnknownValues();
-    if (CI->getType()->isPointerTy()) {
-      AbstractValue ret_val = factory_.createFresh(CI);
-      Address ret_addr(ret_val);
-      ret_addr.history.addEvent(ValueHistory::EventKind::FunctionCall, CI,
-                                CI->getFunction());
-      astate->getPostStack().add(CI, ret_addr);
-    }
+    modelUnknownCallEffects(ops_, *astate, CI, pred, factory_);
     return {exec_state};
   }
 
@@ -1033,13 +1055,7 @@ PulseChecker::handleCall(const llvm::CallInst *CI, ExecutionDomain exec_state,
     // External function with no model - record as skipped
     astate->addSkippedCall(F->getName().str());
     astate->declareUnknownValues();
-    if (CI->getType()->isPointerTy()) {
-      AbstractValue ret_val = factory_.createFresh(CI);
-      Address ret_addr(ret_val);
-      ret_addr.history.addEvent(ValueHistory::EventKind::FunctionCall, CI,
-                                CI->getFunction());
-      astate->getPostStack().add(CI, ret_addr);
-    }
+    modelUnknownCallEffects(ops_, *astate, CI, pred, factory_);
     return {exec_state};
   }
 
@@ -1055,13 +1071,7 @@ PulseChecker::handleCall(const llvm::CallInst *CI, ExecutionDomain exec_state,
   // No summary could be applied. Conservatively treat the call as unknown.
   astate->addSkippedCall(F->getName().str());
   astate->declareUnknownValues();
-  if (CI->getType()->isPointerTy()) {
-    AbstractValue ret_val = factory_.createFresh(CI);
-    Address ret_addr(ret_val);
-    ret_addr.history.addEvent(ValueHistory::EventKind::FunctionCall, CI,
-                              CI->getFunction());
-    astate->getPostStack().add(CI, ret_addr);
-  }
+  modelUnknownCallEffects(ops_, *astate, CI, pred, factory_);
   return {exec_state};
 }
 

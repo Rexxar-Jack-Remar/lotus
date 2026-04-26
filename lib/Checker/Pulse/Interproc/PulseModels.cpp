@@ -759,7 +759,32 @@ ModelResult PulseModels::modelTaintSource(const llvm::CallInst *call,
                                           ExecutionDomain &state,
                                           const llvm::BasicBlock *pred,
                                           const std::string &kind) {
-  // TODO: Mark return value as tainted
+  (void)pred;
+  auto *astate = state.getAstate();
+  if (!astate || !call->getType()->isPointerTy()) {
+    return ModelResult::success({state});
+  }
+
+  AbstractValue ret_val = factory_.createFresh(call);
+  Address ret_addr(ret_val);
+  ret_addr.history.addEvent(ValueHistory::EventKind::FunctionCall, call,
+                            call->getFunction());
+  astate->getPostStack().add(call, ret_addr);
+
+  TaintKind source_kind = TaintKind::UserInput();
+  if (kind == "network") {
+    source_kind = TaintKind::Network();
+  } else if (kind == "environment") {
+    source_kind = TaintKind::Environment();
+  } else if (kind == "filesystem") {
+    source_kind = TaintKind::FileSystem();
+  } else if (kind == "sensitive") {
+    source_kind = TaintKind::Sensitive();
+  }
+  TaintOperations::taint(*astate, ret_val, source_kind,
+                         call->getCalledFunction()
+                             ? call->getCalledFunction()->getName().str()
+                             : kind);
   return ModelResult::success({state});
 }
 
@@ -767,7 +792,23 @@ ModelResult PulseModels::modelTaintSink(const llvm::CallInst *call,
                                         ExecutionDomain &state,
                                         const llvm::BasicBlock *pred,
                                         const std::string &kind) {
-  // TODO: Check if args are tainted
+  (void)pred;
+  (void)kind;
+  auto *astate = state.getAstate();
+  if (!astate) {
+    return ModelResult::success({state});
+  }
+  const std::string sink_name =
+      call->getCalledFunction() ? call->getCalledFunction()->getName().str()
+                                : kind;
+  for (unsigned i = 0; i < call->arg_size(); ++i) {
+    auto arg_opt = ops_.eval(*astate, call->getArgOperand(i), call, pred);
+    if (!arg_opt) {
+      continue;
+    }
+    TaintOperations::checkSink(*astate, astate->getCanonical(arg_opt->addr),
+                               sink_name, call);
+  }
   return ModelResult::success({state});
 }
 

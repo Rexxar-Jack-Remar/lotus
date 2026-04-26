@@ -67,19 +67,11 @@ std::optional<Contradiction> checkAliasingContradiction(
 std::optional<Contradiction>
 checkPathConditionContradiction(const PulseFormula &caller_formula,
                                 const PulseFormula &callee_pre_formula) {
-
-  // Try to merge formulas - if merge fails, we have a contradiction
   PulseFormula merged = PulseFormula::merge(caller_formula, callee_pre_formula);
-  if (!merged.isConsistent()) {
-    return Contradiction::makePathCondition("Merged formula is inconsistent");
+  if (!merged.isConsistent() || merged.isUnsat()) {
+    return Contradiction::makePathCondition(
+        "Merged caller/precondition formula is unsatisfiable");
   }
-
-  // Check for specific contradictions:
-  // 1. Null vs non-null contradictions
-  // 2. Equality vs disequality contradictions
-
-  // This is a simplified check - full implementation would use SMT solver
-  // For now, we rely on isConsistent() which checks basic contradictions
 
   return std::nullopt;
 }
@@ -125,11 +117,7 @@ std::optional<Contradiction> checkAliasingWithAllAliases(
  */
 std::optional<Contradiction> checkDynamicTypeNeeded(
     const std::map<HeapPath, AbstractValue> &heap_paths_to_values) {
-
-  if (!heap_paths_to_values.empty()) {
-    return Contradiction::makeDynamicTypeNeeded(heap_paths_to_values);
-  }
-
+  (void)heap_paths_to_values;
   return std::nullopt;
 }
 
@@ -271,9 +259,10 @@ std::optional<Contradiction> checkAliasingWithAllAliases(
       continue;
     }
 
-    // Check if these formals are known to be distinct in pre
+    // Check if these formals are provably distinct in pre.
     std::vector<AbstractValue> formal_vec(formals.begin(), formals.end());
-    bool all_distinct = true;
+    bool has_proven_distinct_pair = false;
+    bool has_equal_pair = false;
 
     for (size_t i = 0; i < formal_vec.size(); ++i) {
       for (size_t j = i + 1; j < formal_vec.size(); ++j) {
@@ -281,15 +270,16 @@ std::optional<Contradiction> checkAliasingWithAllAliases(
         AbstractValue formal2 = formal_vec[j];
 
         if (callee_pre_formula.areEqual(formal1, formal2)) {
-          all_distinct = false;
-          break;
+          has_equal_pair = true;
+          continue;
+        }
+        if (callee_pre_formula.areDisequal(formal1, formal2)) {
+          has_proven_distinct_pair = true;
         }
       }
-      if (!all_distinct)
-        break;
     }
 
-    if (all_distinct) {
+    if (has_proven_distinct_pair && !has_equal_pair) {
       // Try to get heap paths from call_state when available
       std::vector<HeapPath> paths;
       if (call_state) {
@@ -302,9 +292,8 @@ std::optional<Contradiction> checkAliasingWithAllAliases(
           }
         }
       }
-      // Always add alias class when formals are distinct (aliasing
-      // contradiction). Use heap paths when available from call_state;
-      // otherwise empty (legacy).
+      // Raise aliasing contradiction only when the callee precondition proves
+      // the formals must stay distinct. Heap paths are attached when available.
       alias_classes.push_back(paths);
     }
   }

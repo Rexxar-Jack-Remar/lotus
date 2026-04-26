@@ -275,7 +275,8 @@ std::vector<ExecutionDomain> PulseChecker::applySummary(
     const llvm::Function *callee, const ExecutionDomain &caller_state,
     const llvm::CallInst *CI, const llvm::BasicBlock *pred) {
 
-  const PulseSummary *summary_ptr = summary_manager_.getSummary(callee);
+  const PulseSummary *summary_ptr =
+      resolveSummaryForCall(callee, caller_state, CI, pred);
   if (!summary_ptr || !summary_ptr->isValid()) {
     return {};
   }
