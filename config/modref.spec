@@ -33,19 +33,17 @@ rename REF Arg1 D
 setvbuf REF Arg0 D
 setvbuf REF Arg1 D
 
-IGNORE getpwuid
-IGNORE getegid
-IGNORE geteuid
-IGNORE getgid
-IGNORE getpgid
-IGNORE getpid
-IGNORE getppid
-IGNORE getsid
-IGNORE getuid
-IGNORE getresgid
-IGNORE getresuid
-IGNORE close
-
+getegid IGNORE
+geteuid IGNORE
+getgid IGNORE
+getpgid IGNORE
+getpid IGNORE
+getppid IGNORE
+getsid IGNORE
+getuid IGNORE
+getresgid IGNORE
+getresuid IGNORE
+close IGNORE
 # Process syscalls
 popen MOD Ret D
 popen REF Arg0 D
@@ -53,9 +51,7 @@ popen REF Arg1 D
 pclose REF Arg0 D
 execl REF AfterArg0 D
 execlp REF AfterArg0 D
-IGNORE alarm
-IGNORE signal
-
+alarm IGNORE
 # Network syscalls
 accept MOD Arg1 R
 accept MOD Arg2 D
@@ -65,17 +61,15 @@ recv MOD Arg1 R
 inet_addr REF Arg0 D
 connect REF Arg1 R
 bind REF Arg1 R
-IGNORE htons
-IGNORE htonl
-IGNORE ntohs
-IGNORE ntohl
-IGNORE socket
-IGNORE listen
-
+htons IGNORE
+htonl IGNORE
+ntohs IGNORE
+ntohl IGNORE
+socket IGNORE
+listen IGNORE
 # Time
-IGNORE clock 
-IGNORE exit
-IGNORE difftime
+clock IGNORE
+difftime IGNORE
 time MOD Arg0 R
 times MOD Arg0 R
 clock_gettime MOD Arg1 R
@@ -128,38 +122,35 @@ fprintf REF Arg0 D
 fprintf REF Arg1 D
 fwprintf REF Arg0 D
 fwprintf REF Arg1 D
-IGNORE getchar
-IGNORE putchar
-
+getchar IGNORE
+putchar IGNORE
 # Char
-IGNORE __ctype_b_loc
-IGNORE isalnum
-IGNORE isalpha
-IGNORE isascii
-IGNORE isblank
-IGNORE iscntrl
-IGNORE isdigit
-IGNORE isgraph
-IGNORE islower
-IGNORE isprint
-IGNORE ispunct
-IGNORE isspace
-IGNORE isupper
-IGNORE iswalnum
-IGNORE iswalpha
-IGNORE iswctype
-IGNORE iswdigit
-IGNORE iswlower
-IGNORE iswprint
-IGNORE iswspace
-IGNORE iswupper
-IGNORE isxdigit
-IGNORE iswxdigit
-IGNORE tolower
-IGNORE toupper
-IGNORE towlower
-IGNORE towupper
-
+isalnum IGNORE
+isalpha IGNORE
+isascii IGNORE
+isblank IGNORE
+iscntrl IGNORE
+isdigit IGNORE
+isgraph IGNORE
+islower IGNORE
+isprint IGNORE
+ispunct IGNORE
+isspace IGNORE
+isupper IGNORE
+iswalnum IGNORE
+iswalpha IGNORE
+iswctype IGNORE
+iswdigit IGNORE
+iswlower IGNORE
+iswprint IGNORE
+iswspace IGNORE
+iswupper IGNORE
+isxdigit IGNORE
+iswxdigit IGNORE
+tolower IGNORE
+toupper IGNORE
+towlower IGNORE
+towupper IGNORE
 # String
 strdup MOD Ret D
 strndup MOD Ret D
@@ -216,49 +207,46 @@ strpbrk REF Arg1 D
 
 # Math functions
 frexp MOD Arg1 D
-IGNORE abs
-IGNORE acos
-IGNORE asin
-IGNORE atan
-IGNORE atan2
-IGNORE ceil
-IGNORE cos
-IGNORE cosf
-IGNORE cosh
-IGNORE exp
-IGNORE exp10
-IGNORE exp2
-IGNORE fabs
-IGNORE fabsf
-IGNORE floor
-IGNORE floorf
-IGNORE hypot
-IGNORE ldexp
-IGNORE ldexpf
-IGNORE ldexpl
-IGNORE log
-IGNORE log10
-IGNORE lrand48
-IGNORE modf
-IGNORE fmod
-IGNORE fmodf
-IGNORE pow
-IGNORE seed48
-IGNORE sin
-IGNORE sinf
-IGNORE sinh
-IGNORE sqrt
-IGNORE sqrtf
-IGNORE tan
-IGNORE tanh
-IGNORE tmpfile
-
+abs IGNORE
+acos IGNORE
+asin IGNORE
+atan IGNORE
+atan2 IGNORE
+ceil IGNORE
+cos IGNORE
+cosf IGNORE
+cosh IGNORE
+exp IGNORE
+exp10 IGNORE
+exp2 IGNORE
+fabs IGNORE
+fabsf IGNORE
+floor IGNORE
+floorf IGNORE
+hypot IGNORE
+ldexp IGNORE
+ldexpf IGNORE
+ldexpl IGNORE
+log IGNORE
+log10 IGNORE
+lrand48 IGNORE
+modf IGNORE
+fmod IGNORE
+fmodf IGNORE
+pow IGNORE
+seed48 IGNORE
+sin IGNORE
+sinf IGNORE
+sinh IGNORE
+sqrt IGNORE
+sqrtf IGNORE
+tan IGNORE
+tanh IGNORE
 # Conversions
 atof REF Arg0 D
 atoi REF Arg0 D
 atol REF Arg0 D
-IGNORE btowc
-
+btowc IGNORE
 # Miscellaneous
 mktime REF Arg0 R
 mktime MOD Arg1 R
@@ -275,17 +263,12 @@ tmpnam REF Arg0 D
 tmpnam MOD Arg0 D
 _setjmp MOD Arg0 R
 longjmp REF Arg0 R
-IGNORE __errno_location
-IGNORE __assert_fail
-IGNORE _exit
-IGNORE abort
-IGNORE atexit
-IGNORE srand
-IGNORE srandom
-IGNORE sysconf
-IGNORE rand
-IGNORE random
-
+atexit IGNORE
+srand IGNORE
+srandom IGNORE
+sysconf IGNORE
+rand IGNORE
+random IGNORE
 # Memory management
 malloc MOD Ret D
 calloc MOD Ret D
@@ -330,13 +313,13 @@ llvm.memmove.p0i8.p0i8.i64 MOD Arg0 R
 llvm.memmove.p0i8.p0i8.i64 REF Arg1 R
 llvm.memset.p0i8.i64 MOD Arg0 R
 llvm.memset.p0i8.i32 MOD Arg0 R
-IGNORE llvm.bswap.i16
-IGNORE llvm.bswap.i32
-IGNORE llvm.ctlz.i64
-IGNORE llvm.dbg.declare
-IGNORE llvm.dbg.value
-IGNORE llvm.lifetime.end
-IGNORE llvm.lifetime.start
-IGNORE llvm.stackrestore
-IGNORE llvm.trap
-IGNORE llvm.umul.with.overflow.i64
+llvm.bswap.i16 IGNORE
+llvm.bswap.i32 IGNORE
+llvm.ctlz.i64 IGNORE
+llvm.dbg.declare IGNORE
+llvm.dbg.value IGNORE
+llvm.lifetime.end IGNORE
+llvm.lifetime.start IGNORE
+llvm.stackrestore IGNORE
+llvm.trap IGNORE
+llvm.umul.with.overflow.i64 IGNORE

@@ -203,13 +203,14 @@ class IPDeadStoreElimination : public ModulePass {
     for (auto it = I->getIterator(), et = I->getParent()->end(); it != et;
          ++it) {
       if (const CallBase *CB = dyn_cast<const CallBase>(&*it)) {
-        if (!CB->getCalledFunction()) {
-          return nullptr;
+        const Function *Called = CB->getCalledFunction();
+        if (!Called) {
+          continue;
         }
-        if (CB->getCalledFunction()->getName().startswith("shadow.mem")) {
+        if (Called->getName().startswith("shadow.mem")) {
           continue;
         } else {
-          return CB->getCalledFunction();
+          return Called;
         }
       }
     }
@@ -446,14 +447,14 @@ public:
               // Find callers
               Function *F = I->getParent()->getParent();
               for (auto &U : F->uses()) {
-                if (CallInst *CI = dyn_cast<CallInst>(U.getUser())) {
+                if (CallBase *CI = dyn_cast<CallBase>(U.getUser())) {
                   const MemorySSACallSite *MemSsaCS = MMan.getCallSite(CI);
-                  if (!MemSsaCS) {
-                    report_fatal_error("[IPDSE] cannot find MemorySSACallSite");
-                  }
-
                   // make things easier ...
                   if (!CI->getCalledFunction()) {
+                    markToKeep(w.storeInstOrGvInit);
+                    continue;
+                  }
+                  if (!MemSsaCS) {
                     markToKeep(w.storeInstOrGvInit);
                     continue;
                   }
@@ -537,11 +538,6 @@ public:
              << " def-use chains because they were too long\n";
       errs() << "Finished ip-dse\n";
     }
-
-    // Make sure that we remove all the shadow.mem functions
-    DSE_LOG(errs() << "Removing shadow.mem functions ... \n";);
-    seadsa::StripShadowMemPass SSMP;
-    SSMP.runOnModule(M);
 
     return (numUselessStores > 0 || numUselessGvInit > 0);
   }

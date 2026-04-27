@@ -110,6 +110,10 @@ public:
             if (!FirstUser)
               continue;
 
+            if (std::next(NextIt) == BB.end() || &*std::next(NextIt) == FirstUser) {
+              continue;
+            }
+
             bool Safe = true;
             const Value *StorePtr =
                 SI->getPointerOperand()->stripPointerCasts();
@@ -138,15 +142,6 @@ public:
                 }
               }
 
-              for (const Use &Op : Between->operands()) {
-                const Value *OpV = Op.get()->stripPointerCasts();
-                if (OpV == StorePtr) {
-                  Safe = false;
-                  break;
-                }
-              }
-              if (!Safe)
-                break;
             }
 
             if (!Safe)

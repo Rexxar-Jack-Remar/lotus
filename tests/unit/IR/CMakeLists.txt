@@ -17,3 +17,12 @@ add_lotus_gvfg_test_suite(ir_gvfg_tests
   GuardedValueFlowAdapterShapeTest.cpp
   GuardedValueFlowParityTest.cpp
   GuardedValueFlowSolverTest.cpp)
+
+add_lotus_targeted_test(ipo_memoryssa_test IPOMemorySSATest.cpp
+  LINK_LIBS
+    CanaryMemorySSA
+    CanaryOptimizationIPO
+    SeaDsaAnalysis
+    LLVMAsmParser
+    LLVMIRReader
+    LLVMPasses)

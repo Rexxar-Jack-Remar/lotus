@@ -169,6 +169,7 @@ int main(int argc, char **argv) {
     Ok &= addPassByName(PM, "ip-sink");
   if (EnableIPForward)
     Ok &= addPassByName(PM, "ip-forward");
+  Ok &= addPassByName(PM, "strip-shadow-sea-dsa");
 
   if (!Ok)
     return 1;

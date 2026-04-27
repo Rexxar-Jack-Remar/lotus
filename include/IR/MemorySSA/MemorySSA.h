@@ -304,12 +304,12 @@ inline bool hasMemSSALoadUser(const llvm::Value *V, bool onlySingleton) {
  */
 class MemorySSACallSite {
 
-  llvm::CallInst *m_ci;
+  llvm::CallBase *m_ci;
   std::vector<const llvm::CallBase *> m_actual_params;
   bool m_only_singleton;
 
 public:
-  MemorySSACallSite(llvm::CallInst *ci, bool only_singleton);
+  MemorySSACallSite(llvm::CallBase *ci, bool only_singleton);
 
   // Return number of memory-related actual parameters
   unsigned numParams() const { return m_actual_params.size(); }
@@ -358,7 +358,7 @@ class MemorySSAFunction {
   // Important: cannot use a vector because the indexes are not
   // necessarily consecutive.
   std::map<unsigned, const llvm::Value *> m_in_formal_params;
-  // XXX: we don't store out formal parameters for now.
+  std::map<unsigned, const llvm::CallBase *> m_out_formal_params;
   bool m_only_singleton;
 
 public:
@@ -366,8 +366,10 @@ public:
 
   // Return value can be null if not found
   const llvm::Value *getInFormal(unsigned idx) const;
+  const llvm::CallBase *getOutFormal(unsigned idx) const;
 
   unsigned getNumInFormals() const { return m_in_formal_params.size(); }
+  unsigned getNumOutFormals() const { return m_out_formal_params.size(); }
 };
 
 /*
@@ -376,7 +378,7 @@ public:
 */
 class MemorySSACallsManager {
   llvm::Module &m_M;
-  llvm::DenseMap<const llvm::CallInst *, MemorySSACallSite *> m_callsites;
+  llvm::DenseMap<const llvm::CallBase *, MemorySSACallSite *> m_callsites;
   llvm::DenseMap<const llvm::Function *, MemorySSAFunction *> m_functions;
   bool m_only_singleton;
 
@@ -387,7 +389,7 @@ public:
 
   const MemorySSAFunction *getFunction(const llvm::Function *F) const;
 
-  const MemorySSACallSite *getCallSite(const llvm::CallInst *CI) const;
+  const MemorySSACallSite *getCallSite(const llvm::CallBase *CI) const;
 };
 } // namespace analysis
 } // namespace previrt

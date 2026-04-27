@@ -39,7 +39,7 @@
 
 #include "IR/MemorySSA/MemorySSA.h"
 
-#include <queue>
+#include <deque>
 #include <unordered_set>
 
 namespace previrt {
@@ -54,6 +54,27 @@ static cl::opt<bool> OnlySingletonForward(
     cl::init(true));
 
 namespace {
+static const Function *findCalledFunction(const CallBase *MemSsaCB) {
+  if (!MemSsaCB) {
+    return nullptr;
+  }
+  const Instruction *I = MemSsaCB;
+  for (auto It = I->getIterator(), End = I->getParent()->end(); It != End;
+       ++It) {
+    if (const auto *CB = dyn_cast<CallBase>(&*It)) {
+      const Function *Called = CB->getCalledFunction();
+      if (!Called) {
+        continue;
+      }
+      if (Called->getName().startswith("shadow.mem")) {
+        continue;
+      }
+      return Called;
+    }
+  }
+  return nullptr;
+}
+
 /// @brief State structure for tracking store-to-load forwarding search
 struct ForwardSearchState {
   /// @brief The target pointer being searched for
@@ -97,9 +118,9 @@ struct ForwardSearchState {
 };
 
 /// @brief Add an instruction to the search queue if valid
-static void enqueueIfInstruction(std::queue<const Value *> &Q, const Value *V) {
+static void enqueueIfInstruction(std::deque<const Value *> &Q, const Value *V) {
   if (dyn_cast_or_null<const Instruction>(V)) {
-    Q.push(V);
+    Q.push_back(V);
   }
 }
 
@@ -119,13 +140,11 @@ static const Instruction *nextNonDebugInst(const Instruction *I) {
 ///
 static void exploreFunIn(const CallBase *CB, const Function *F, unsigned Idx,
                          ForwardSearchState &State,
-                         std::queue<const Value *> &Q) {
+                         std::deque<const Value *> &Q) {
   (void)CB;
   for (const Use &U : F->uses()) {
     const User *Usr = U.getUser();
-    // Handle direct calls only — getCallSite() requires a CallInst*.
-    // InvokeInst callers are conservatively ignored (no MemorySSACallSite).
-    const CallInst *CI = dyn_cast<CallInst>(Usr);
+    const CallBase *CI = dyn_cast<CallBase>(Usr);
     if (!CI)
       continue;
     // Only handle direct calls where the callee is exactly F.
@@ -140,17 +159,17 @@ static void exploreFunIn(const CallBase *CB, const Function *F, unsigned Idx,
   }
 }
 
-/// @brief Find the reaching store value for a load instruction via BFS.
+/// @brief Find the reaching store value for a load instruction via backward BFS.
 ///
-static bool findReachingStore(const Value *StartVal, const Function *CurF,
+static bool findReachingStore(const Value *StartVal,
                               ForwardSearchState &State) {
-  std::queue<const Value *> Q;
+  std::deque<const Value *> Q;
   std::unordered_set<const Value *> Visited;
   enqueueIfInstruction(Q, StartVal);
 
   while (!Q.empty() && !State.Conflict) {
     const Value *V = Q.front();
-    Q.pop();
+    Q.pop_front();
     if (!Visited.insert(V).second)
       continue;
 
@@ -169,22 +188,65 @@ static bool findReachingStore(const Value *StartVal, const Function *CurF,
       if (isMemSSAArgMod(CB, OnlySingletonForward) ||
           isMemSSAArgRefMod(CB, OnlySingletonForward) ||
           isMemSSAArgNew(CB, OnlySingletonForward)) {
-        // Follow the non-primed argument (arg 1 = the MemorySSA value).
-        enqueueIfInstruction(Q, CB->getArgOperand(1));
+        const int64_t Idx = getMemSSAParamIdx(CB);
+        const Function *Callee = findCalledFunction(CB);
+        if (Idx >= 0 && Callee) {
+          if (const MemorySSAFunction *CalleeInfo =
+                  State.MMan.getFunction(Callee)) {
+            enqueueIfInstruction(
+                Q, CalleeInfo->getOutFormal(static_cast<unsigned>(Idx)));
+          }
+        }
+        // For mod/ref_mod, the pre-call state is also a possible reaching def.
+        if (!isMemSSAArgNew(CB, OnlySingletonForward)) {
+          enqueueIfInstruction(
+              Q, getMemSSAParamNonPrimed(CB, OnlySingletonForward));
+        }
         continue;
       }
 
       if (isMemSSAFunIn(CB, OnlySingletonForward)) {
         int64_t Idx = getMemSSAParamIdx(CB);
         if (Idx >= 0) {
-          exploreFunIn(CB, CurF, static_cast<unsigned>(Idx), State, Q);
+          exploreFunIn(CB, CB->getFunction(), static_cast<unsigned>(Idx), State,
+                       Q);
         }
         continue;
       }
 
       if (isMemSSAFunOut(CB, OnlySingletonForward)) {
-        for (const Use &U : CB->uses()) {
-          enqueueIfInstruction(Q, dyn_cast<const Instruction>(U.getUser()));
+        int64_t Idx = getMemSSAParamIdx(CB);
+        if (Idx < 0) {
+          State.Conflict = true;
+          continue;
+        }
+        enqueueIfInstruction(Q, CB->getArgOperand(1));
+        const MemorySSAFunction *FunInfo = State.MMan.getFunction(CB->getFunction());
+        if (!FunInfo) {
+          State.Conflict = true;
+          continue;
+        }
+        const Value *InFormal = FunInfo->getInFormal(static_cast<unsigned>(Idx));
+        enqueueIfInstruction(Q, InFormal);
+        for (const Use &U : CB->getFunction()->uses()) {
+          const CallBase *Caller = dyn_cast<CallBase>(U.getUser());
+          if (!Caller || Caller->getCalledFunction() != CB->getFunction()) {
+            continue;
+          }
+          const MemorySSACallSite *CS = State.MMan.getCallSite(Caller);
+          if (!CS) {
+            State.Conflict = true;
+            continue;
+          }
+          if (static_cast<unsigned>(Idx) >= CS->numParams()) {
+            continue;
+          }
+          if (!CS->isMod(static_cast<unsigned>(Idx)) &&
+              !CS->isRefMod(static_cast<unsigned>(Idx)) &&
+              !CS->isNew(static_cast<unsigned>(Idx))) {
+            continue;
+          }
+          enqueueIfInstruction(Q, CS->getNonPrimed(static_cast<unsigned>(Idx)));
         }
         continue;
       }
@@ -251,8 +313,7 @@ public:
 
           const Value *Ptr = LI->getPointerOperand()->stripPointerCasts();
           ForwardSearchState State(Ptr, LI->getType(), MMan);
-          if (!findReachingStore(CB->getArgOperand(1), LI->getFunction(),
-                                 State))
+          if (!findReachingStore(CB->getArgOperand(1), State))
             continue;
 
           LI->replaceAllUsesWith(const_cast<Value *>(State.ReachingStoreVal));

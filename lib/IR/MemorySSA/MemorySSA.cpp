@@ -14,7 +14,7 @@ namespace analysis {
 
 using namespace llvm;
 
-MemorySSACallSite::MemorySSACallSite(CallInst *ci, bool only_singleton)
+MemorySSACallSite::MemorySSACallSite(CallBase *ci, bool only_singleton)
     : m_ci(ci), m_only_singleton(only_singleton) {
   // Traverse backwards up to the beginning of the block searching
   // for shadow.mem.XXX functions.
@@ -38,10 +38,10 @@ MemorySSACallSite::MemorySSACallSite(CallInst *ci, bool only_singleton)
       if (idx < 0) {
         report_fatal_error("[IP-DSE] cannot find index in shadow.mem function");
       }
-      if (first) {
+      if (first || static_cast<size_t>(idx) >= m_actual_params.size()) {
         m_actual_params.resize(idx + 1);
-        first = false;
       }
+      first = false;
       m_actual_params[idx] = CB;
     } else {
       // no more shadow.mem functions so that we can stop here
@@ -123,23 +123,17 @@ void MemorySSACallSite::dump() const { write(llvm::errs()); }
 
 MemorySSAFunction::MemorySSAFunction(Function &F, Pass &P, bool only_singleton)
     : m_F(F), m_only_singleton(only_singleton) {
+  (void)P;
   // XXX: We don't need main since it is the root of the call
   // graph so no need to store information about it
 
-  // Find the return block (UnifyFunctionExitNodes ensures at most one)
-  BasicBlock *exitBB = nullptr;
   for (auto &B : m_F) {
-    if (isa<ReturnInst>(B.getTerminator())) {
-      exitBB = &B;
-      break;
+    if (!isa<ReturnInst>(B.getTerminator())) {
+      continue;
     }
-  }
-
-  if (exitBB) {
-    // From the beginning of the block until the return we
-    // should have have a bunch of shadow.mem.in and shadow.mem.out
-    // calls.
-    for (auto const &inst : *exitBB) {
+    // From the beginning of an exit block until the return we should have
+    // shadow.mem.in and shadow.mem.out calls describing the summary state.
+    for (auto const &inst : B) {
       if (const CallBase *CB = dyn_cast<const CallBase>(&inst)) {
         if (CB->getCalledFunction() && isMemSSAFunIn(CB, m_only_singleton)) {
           int64_t idx = getMemSSAParamIdx(CB);
@@ -152,6 +146,14 @@ MemorySSAFunction::MemorySSAFunction(Function &F, Pass &P, bool only_singleton)
           // in_formal must be the return value of a call to
           // shadow.mem.arg.init
           m_in_formal_params.insert(std::make_pair((unsigned)idx, in_formal));
+        } else if (CB->getCalledFunction() &&
+                   isMemSSAFunOut(CB, m_only_singleton)) {
+          int64_t idx = getMemSSAParamIdx(CB);
+          if (idx < 0) {
+            report_fatal_error(
+                "[IP-DSE] Cannot find index in shadow.mem function");
+          }
+          m_out_formal_params.insert(std::make_pair((unsigned)idx, CB));
         }
       }
     }
@@ -168,6 +170,14 @@ const Value *MemorySSAFunction::getInFormal(unsigned idx) const {
   }
 }
 
+const CallBase *MemorySSAFunction::getOutFormal(unsigned idx) const {
+  auto it = m_out_formal_params.find(idx);
+  if (it != m_out_formal_params.end()) {
+    return it->second;
+  }
+  return nullptr;
+}
+
 MemorySSACallsManager::MemorySSACallsManager(Module &M, Pass &P,
                                              bool only_singleton)
     : m_M(M), m_only_singleton(only_singleton) {
@@ -179,7 +189,7 @@ MemorySSACallsManager::MemorySSACallsManager(Module &M, Pass &P,
     m_functions.insert(
         std::make_pair(&F, new MemorySSAFunction(F, P, m_only_singleton)));
     for (auto &I : instructions(&F)) {
-      if (CallInst *CI = dyn_cast<CallInst>(&I)) {
+      if (CallBase *CI = dyn_cast<CallBase>(&I)) {
         if (CI->getCalledFunction() &&
             !CI->getCalledFunction()->getName().startswith("shadow.mem")) {
           m_callsites.insert(
@@ -214,7 +224,7 @@ MemorySSACallsManager::getFunction(const Function *F) const {
 }
 
 const MemorySSACallSite *
-MemorySSACallsManager::getCallSite(const CallInst *CI) const {
+MemorySSACallsManager::getCallSite(const CallBase *CI) const {
   auto it = m_callsites.find(CI);
   if (it != m_callsites.end()) {
     return it->second;
