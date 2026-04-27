@@ -87,6 +87,14 @@ add_lotus_targeted_test(function_purity_analysis_test
                FunctionPurityAnalysisTest.cpp
                LINK_LIBS
                    CanaryPurityAnalysis
+                   CanaryMemorySSA
+                   AliasSpecManager
+                   LLVMAnalysis)
+add_lotus_targeted_test(purity_attr_inference_pass_test
+               PurityAttrInferencePassTest.cpp
+               LINK_LIBS
+                   CanaryPurityAnalysis
+                   CanaryMemorySSA
                    AliasSpecManager
                    LLVMAnalysis)
 add_lotus_analysis_test(nullpointer_api_test NullPointerAPITest.cpp)
