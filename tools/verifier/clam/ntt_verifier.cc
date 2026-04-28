@@ -8,12 +8,12 @@
 #include "llvm/Analysis/CallGraph.h"
 #include "llvm/Analysis/TargetLibraryInfo.h"
 #include "llvm/Bitcode/BitcodeWriter.h"
+#include "llvm/IR/Function.h"
 #include "llvm/IR/LLVMContext.h"
-#include "llvm/IR/Module.h"
 #include "llvm/IR/LegacyPassManager.h"
+#include "llvm/IR/Module.h"
 #include "llvm/IR/PassManager.h"
 #include "llvm/IRReader/IRReader.h"
-#include "llvm/IR/Function.h"
 #include "llvm/LinkAllPasses.h"
 #include "llvm/Support/SourceMgr.h"
 
@@ -23,17 +23,17 @@
 #include "Alias/UnificationBased/seadsa/support/RemovePtrToInt.hh"
 
 // Clam support
-#include "clam/Passes.hh"
-#include "clam/Clam.hh"
 #include "clam/CfgBuilder.hh"
+#include "clam/Clam.hh"
 #include "clam/HeapAbstraction.hh"
-#include "clam/SeaDsaHeapAbstraction.hh"
+#include "clam/Passes.hh"
 #include "clam/RegisterAnalysis.hh"
+#include "clam/SeaDsaHeapAbstraction.hh"
 #include "clam/Support/NameValues.hh"
 
 // Abstract domains
-#include "crab/domains/array_adaptive.hpp"
 #include "crab/domains/abstract_domain_params.hpp"
+#include "crab/domains/array_adaptive.hpp"
 #include "crab/domains/ntt_intervals.hpp"
 
 using namespace clam;
@@ -42,12 +42,12 @@ using namespace llvm;
 namespace clam {
 namespace CrabDomain {
 constexpr Type NTT_INTERVALS(1, "ntt-intervals", "ntt-intervals", false, false);  
-} //end CrabDomain
+} // namespace CrabDomain
 
 using ntt_interval_domain_t = ntt_verifier::ntt_interval_domain<number_t, varname_t>;
 using array_ntt_interval_domain_t =
   crab::domains::array_adaptive_domain<ntt_interval_domain_t>;
-} //end clam
+} // namespace clam
 
 static void registerDomain() {
   auto &map = DomainRegistry::getFactoryMap();		

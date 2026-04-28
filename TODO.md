@@ -84,6 +84,12 @@ Some related publications
 
 ## 5. Numerical Analysis
 
+- Crab/Lotus concurrent fixpoint performance:
+  - Study speculative concurrency for Crab's `concurrenty_fwd_fixpoint_iterator`: allow bounded stale reads inside a WPO SCC, then repair deterministically at loop heads.
+  - Use delta-based propagation for abstract states so workers transfer only changed facts, not full domains, across edges.
+  - Add instability-aware scheduling for concurrent fixpoint: prioritize hot loop heads, high-fanout nodes, and large abstract-state deltas.
+  - Explore a dual-lane design: conservative committed invariants plus speculative worker invariants, with commit only when speculation is safe.
+  - Compare against Crab's sequential/interleaved fixpoint and measure speedup, extra rework, convergence iterations, and precision loss (if any).
 
 
 ## 6. Data Flow Analysis

@@ -940,12 +940,12 @@ public:
 // https://gcc.gnu.org/bugzilla/show_bug.cgi?id=61414.
 namespace align {
 enum type { none, left, right, center, numeric };
-}
+} // namespace align
 using align_t = align::type;
 
 namespace sign {
 enum type { none, minus, plus, space };
-}
+} // namespace sign
 using sign_t = sign::type;
 
 // Format specifiers for built-in and string types.

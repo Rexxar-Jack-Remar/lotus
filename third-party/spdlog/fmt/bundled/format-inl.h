@@ -461,7 +461,7 @@ enum result {
     done,  // Done generating digits.
     error  // Digit generation cancelled due to an error.
 };
-}
+} // namespace digits
 
 // Generates output using the Grisu digit-gen algorithm.
 // error: the size of the region (lower, upper) outside of which numbers
