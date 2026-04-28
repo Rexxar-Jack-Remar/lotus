@@ -30,6 +30,7 @@ bool CrabBuildOnlyCFG;
 InvariantPrinterOptions CrabPrintInvariants;
 bool CrabPrintUnjustifiedAssumptions;
 bool CrabPrintVoi;
+FixpointEngine CrabFixpointEngine;
 unsigned int CrabWideningDelay;
 unsigned int CrabNarrowingIters;
 unsigned int CrabWideningJumpSet;
@@ -231,6 +232,19 @@ llvm::cl::desc("Print variables-of-influence of assertions"),
 llvm::cl::location(clam::CrabPrintVoi),
 llvm::cl::init(false),
 llvm::cl::cat(ClamOptCat));
+
+llvm::cl::opt<clam::FixpointEngine, true>
+XCrabFixpointEngine(
+    "crab-fixpoint-engine",
+    llvm::cl::desc("Fixpoint engine used by intra-procedural forward analysis"),
+    llvm::cl::values(
+        clEnumValN(clam::FixpointEngine::WTO, "wto",
+                   "Sequential WTO/interleaved fixpoint engine (default)"),
+        clEnumValN(clam::FixpointEngine::CONCURRENT_WPO, "concurrent-wpo",
+                   "Concurrent WPO fixpoint engine")),
+    llvm::cl::location(clam::CrabFixpointEngine),
+    llvm::cl::init(clam::FixpointEngine::WTO),
+    llvm::cl::cat(ClamOptCat));
 
 llvm::cl::opt<unsigned int, true>
 XCrabWideningDelay("crab-widening-delay", 

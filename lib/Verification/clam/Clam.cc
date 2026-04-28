@@ -45,6 +45,7 @@
 #include "crab/analysis/bwd_analyzer.hpp"
 #include "crab/analysis/dataflow/assertion_crawler.hpp"
 #include "crab/analysis/dataflow/assumptions.hpp"
+#include "crab/analysis/concurrent_fwd_analyzer.hpp"
 #include "crab/analysis/fwd_analyzer.hpp"
 #include "crab/analysis/inter/inter_params.hpp"
 #include "crab/analysis/inter/top_down_inter_analyzer.hpp"
@@ -81,10 +82,17 @@ using liveness_map_t = std::unordered_map<cfg_ref_t, const liveness_t *>;
 using intra_analyzer_t =
     crab::analyzer::intra_forward_backward_analyzer<cfg_ref_t,
                                                     clam_abstract_domain>;
+using intra_concurrent_analyzer_t =
+    crab::analyzer::intra_concurrent_fwd_analyzer<cfg_ref_t,
+                                                  clam_abstract_domain>;
 // -- intra property checker
 using intra_checker_t = crab::checker::intra_checker<intra_analyzer_t>;
 using assertion_property_checker_t =
     crab::checker::assert_property_checker<intra_analyzer_t>;
+using intra_concurrent_checker_t =
+    crab::checker::intra_checker<intra_concurrent_analyzer_t>;
+using concurrent_assertion_property_checker_t =
+    crab::checker::assert_property_checker<intra_concurrent_analyzer_t>;
 // -- inter-procedural analysis
 using inter_params_t =
     crab::analyzer::inter_analyzer_parameters<cg_t>;
@@ -206,6 +214,15 @@ void AnalysisParams::write(raw_ostream &o) const {
   o << "\t\texact summary reuse: " << exact_summary_reuse << "\n";
   o << "\t\tonly main as entry point: " << inter_entry_main << "\n";
   o << "\tFixpoint parameters" <<  "\n";
+  o << "\t\tfixpoint engine: ";
+  switch (fixpoint_engine) {
+  case FixpointEngine::WTO:
+    o << "wto\n";
+    break;
+  case FixpointEngine::CONCURRENT_WPO:
+    o << "concurrent-wpo\n";
+    break;
+  }
   o << "\t\twidening delay: " << widening_delay << "\n";
   o << "\t\tnarrowing iterations: " << narrowing_iters  << "\n";
   o << "\t\tsize of the widening jumpset: " << widening_jumpset << "\n";
@@ -356,8 +373,9 @@ private:
   edges_set m_infeasible_edges;
   checks_db_t m_checks_db;
 
+  template <typename Analyzer>
   void storeAndOutputResults(cfg_ref_t cfg, const AnalysisParams &params,
-			     const intra_analyzer_t &analyzer, AnalysisResults &results) {
+			     const Analyzer &analyzer, AnalysisResults &results) {
     /**
      * There are two output formats: crabir and json
      *
@@ -474,7 +492,6 @@ private:
                     << " for " << fdecl.get_func_name() << "  ... \n";);
 
     // -- run intra-procedural analysis
-    intra_analyzer_t analyzer(cfg, entry_abs);
     typename intra_analyzer_t::assumption_map_t crab_assumptions;
 
     // Reconstruct a crab assumption map from an abs_dom_map_t
@@ -491,13 +508,47 @@ private:
           {m_cfg_builder->getCrabBasicBlock(kv.first), absval});
     }
 
-    crab::analyzer::fwd_bwd_parameters fwd_bwd_params;
-    fwd_bwd_params.enable_backward() = params.run_backward;
     crab::fixpoint_parameters fixpo_params;
     fixpo_params.get_widening_delay() = params.widening_delay;
     fixpo_params.get_descending_iterations() = params.narrowing_iters;
     fixpo_params.get_max_thresholds() = params.widening_jumpset;
-    
+
+    if (params.fixpoint_engine == FixpointEngine::CONCURRENT_WPO) {
+      if (params.run_backward) {
+        CLAM_ERROR("concurrent-wpo fixpoint engine does not support "
+                   "crab-backward");
+      }
+
+      intra_concurrent_analyzer_t analyzer(cfg, entry_abs, live, fixpo_params);
+      analyzer.run(m_cfg_builder->getCrabBasicBlock(entry), entry_abs,
+                   crab_assumptions);
+      CRAB_VERBOSE_IF(1, crab::get_msg_stream()
+                             << "Finished intra-procedural analysis.\n");
+
+      // --- checking assertions
+      if (params.check == CheckerKind::ASSERTION) {
+        CRAB_VERBOSE_IF(1, crab::get_msg_stream()
+                               << "Checking assertions ... \n");
+        intra_concurrent_checker_t checker(
+            analyzer,
+            {std::make_shared<concurrent_assertion_property_checker_t>(
+                params.check_verbose)});
+        checker.run();
+        CRAB_VERBOSE_IF(1, llvm::outs() << "Function " << m_fun.getName() << "\n";
+                        checker.show(crab::outs()));
+        results.checksdb += checker.get_all_checks();
+        CRAB_VERBOSE_IF(1, crab::get_msg_stream()
+                               << "Finished assert checking.\n");
+      }
+
+      // -- (optionally) store and output results
+      storeAndOutputResults(cfg, params, analyzer, results);
+      return;
+    }
+
+    intra_analyzer_t analyzer(cfg, entry_abs);
+    crab::analyzer::fwd_bwd_parameters fwd_bwd_params;
+    fwd_bwd_params.enable_backward() = params.run_backward;
     analyzer.run(m_cfg_builder->getCrabBasicBlock(entry), entry_abs,
                  crab_assumptions, live, fixpo_params, fwd_bwd_params);
     CRAB_VERBOSE_IF(1, crab::get_msg_stream()
@@ -1413,6 +1464,7 @@ bool ClamPass::runOnModule(Module &M) {
   m_params.exact_summary_reuse = CrabInterExactSummaryReuse;
   m_params.inter_entry_main = CrabInterStartFromMain;
   m_params.run_liveness = CrabLive;
+  m_params.fixpoint_engine = CrabFixpointEngine;
   m_params.relational_threshold = CrabRelationalThreshold;
   m_params.widening_delay = CrabWideningDelay;
   m_params.narrowing_iters = CrabNarrowingIters;
@@ -1428,6 +1480,12 @@ bool ClamPass::runOnModule(Module &M) {
   m_params.check = (CrabCheck ?
 		    clam::CheckerKind::ASSERTION : clam::CheckerKind::NOCHECKS);
   m_params.check_verbose = CrabCheckVerbose;
+
+  if (m_params.run_inter &&
+      m_params.fixpoint_engine == FixpointEngine::CONCURRENT_WPO) {
+    CLAM_ERROR("concurrent-wpo fixpoint engine is only exposed for "
+               "intra-procedural analysis");
+  }
   
   unsigned num_analyzed_funcs = 0;
   CRAB_VERBOSE_IF(

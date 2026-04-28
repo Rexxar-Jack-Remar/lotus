@@ -16,6 +16,11 @@ enum class CheckerKind { NOCHECKS = 0, ASSERTION = 1 };
 ///  
 enum class InvariantPrinterOptions { NONE, BLOCKS, LOOPS};
 
+///
+// Fixpoint engine used by the intra-procedural forward analysis.
+///
+enum class FixpointEngine { WTO, CONCURRENT_WPO };
+
   
 /**
  * Class to set analysis options
@@ -35,6 +40,7 @@ struct AnalysisParams {
   bool inter_entry_main;
   /* end inter-procedural analysis */
   /* begin fixpoint parameters */
+  FixpointEngine fixpoint_engine;
   unsigned relational_threshold;
   unsigned widening_delay;
   unsigned narrowing_iters;
@@ -66,8 +72,9 @@ struct AnalysisParams {
 	run_backward(false), run_liveness(false),
         run_inter(false), max_calling_contexts(UINT_MAX),
         analyze_recursive_functions(false), exact_summary_reuse(true),
-	inter_entry_main(false), 
-        relational_threshold(10000), widening_delay(1), narrowing_iters(10),
+	inter_entry_main(false),
+        fixpoint_engine(FixpointEngine::WTO), relational_threshold(10000),
+        widening_delay(1), narrowing_iters(10),
         widening_jumpset(0), stats(false),
 	print_invars(InvariantPrinterOptions::NONE), 
 	print_unjustified_assumptions(false), print_preconds(false),

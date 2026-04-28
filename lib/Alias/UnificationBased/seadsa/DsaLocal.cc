@@ -274,13 +274,19 @@ public:
 /*****************************************************************************/
 class GlobalBuilder : public BlockBuilderBase {
 
+  static bool isFunctionPointerConstant(const Constant *Init) {
+    const Value *V = Init->stripPointerCasts();
+    return isa<Function>(V) || isa<GlobalIFunc>(V);
+  }
+
   /// from: llvm/lib/ExecutionEngine/ExecutionEngine.cpp
   void init(const Constant *Init, seadsa::Cell &c, unsigned offset) {
     if (isa<UndefValue>(Init)) return;
 
     if (const ConstantVector *CP = dyn_cast<ConstantVector>(Init)) {
       unsigned ElementSize =
-          m_dl.getTypeAllocSize(CP->getType()->getPointerElementType()).getFixedSize();
+          m_dl.getTypeAllocSize(cast<VectorType>(CP->getType())->getElementType())
+              .getFixedSize();
       for (unsigned i = 0, e = CP->getNumOperands(); i != e; ++i) {
         unsigned noffset = offset + i * ElementSize;
         seadsa::Cell nc = seadsa::Cell(c.getNode(), noffset);
@@ -293,7 +299,7 @@ class GlobalBuilder : public BlockBuilderBase {
 
     if (const ConstantArray *CPA = dyn_cast<ConstantArray>(Init)) {
       unsigned ElementSize =
-          m_dl.getTypeAllocSize(CPA->getType()->getPointerElementType())
+          m_dl.getTypeAllocSize(CPA->getType()->getArrayElementType())
               .getFixedSize();
       for (unsigned i = 0, e = CPA->getNumOperands(); i != e; ++i) {
         unsigned noffset = offset + i * ElementSize;
@@ -317,9 +323,7 @@ class GlobalBuilder : public BlockBuilderBase {
     if (isa<ConstantDataSequential>(Init)) { return; }
 
     if (Init->getType()->isPointerTy() && !isa<ConstantPointerNull>(Init)) {
-      if (cast<PointerType>(Init->getType())
-              ->getPointerElementType()
-              ->isFunctionTy()) {
+      if (isFunctionPointerConstant(Init)) {
         seadsa::Node &n = m_graph.mkNode();
         seadsa::Cell nc(n, 0);
         seadsa::DsaAllocSite *site = m_graph.mkAllocSite(*Init);

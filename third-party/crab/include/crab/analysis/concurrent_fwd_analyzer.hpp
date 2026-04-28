@@ -125,11 +125,11 @@ private:
 protected:
   abs_dom_t analyze(const basic_block_label_t &node, abs_dom_t &&inv) override {
     auto &b = get_cfg().get_node(node);
-    m_abs_tr->set_abs_value(std::move(inv));
+    abs_tr_t abs_tr(std::move(inv));
     for (auto &s : b) {
-      s.accept(&*m_abs_tr);
+      s.accept(&abs_tr);
     }
-    abs_dom_t &res = m_abs_tr->get_abs_value();
+    abs_dom_t &res = abs_tr.get_abs_value();
     prune_dead_variables(node, res);
     return res;
   }
@@ -213,10 +213,14 @@ class intra_concurrent_fwd_analyzer_wrapper {
 public:
   using abs_dom_t = AbsDomain;
   using liveness_t = live_and_dead_analysis<CFG>;
+  using cfg_t = CFG;
   using basic_block_label_t = typename CFG::basic_block_label_t;
+  using varname_t = typename CFG::varname_t;
+  using number_t = typename CFG::number_t;
   using stmt_t = typename CFG::statement_t;
   using abs_tr_t = typename fwd_analyzer_t::abs_tr_t;
-  using wpo_t = typename fwd_analyzer_t::wpo_t;
+  using wto_t = typename fwd_analyzer_t::wpo_t;
+  using wpo_t = wto_t;
   using assumption_map_t = typename fwd_analyzer_t::assumption_map_t;
   using invariant_map_t = typename fwd_analyzer_t::invariant_map_t;
   using iterator = typename fwd_analyzer_t::iterator;
@@ -271,8 +275,8 @@ public:
     return m_analyzer.get_post(b);
   }
 
-  wpo_t &get_wto() { return m_analyzer.get_wto(); }
-  const wpo_t &get_wto() const { return m_analyzer.get_wto(); }
+  wto_t &get_wto() { return m_analyzer.get_wpo(); }
+  const wto_t &get_wto() const { return m_analyzer.get_wpo(); }
 
   void clear() { m_analyzer.clear(); }
   CFG get_cfg() { return m_analyzer.get_cfg(); }

@@ -424,10 +424,18 @@ private:
   }
 
   void construct_wpo() {
-    std::vector<std::size_t> rank(this->_next_dfn);
-    std::vector<std::size_t> parent(this->_next_dfn);
-    boost::disjoint_sets<std::size_t *, std::size_t *> dsets(&rank[0],
-                                                             &parent[0]);
+    using RankMap = std::unordered_map<std::size_t, std::size_t>;
+    using RankPropertyMap = boost::associative_property_map<RankMap>;
+    using ParentMap = std::unordered_map<std::size_t, std::size_t>;
+    using ParentPropertyMap = boost::associative_property_map<ParentMap>;
+
+    RankMap rank_map;
+    ParentMap parent_map;
+    RankPropertyMap rank_property_map(rank_map);
+    ParentPropertyMap parent_property_map(parent_map);
+    boost::disjoint_sets<RankPropertyMap, ParentPropertyMap> dsets(
+        rank_property_map,
+        parent_property_map);
 
     std::vector<std::size_t> rep(this->_next_dfn);
     std::vector<std::size_t> exit(this->_next_dfn);
