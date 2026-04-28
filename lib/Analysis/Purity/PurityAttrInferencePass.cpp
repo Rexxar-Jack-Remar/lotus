@@ -54,15 +54,19 @@ bool inferAttributesForFunction(Function &function,
 
 } // namespace
 
-bool PurityAttrInferencePass::runOnModule(Module &module) {
-  FunctionPurityAnalysis analysis(module);
-  analysis.run();
-
+bool inferPurityAttributes(Module &module,
+                           const FunctionPurityAnalysis &analysis) {
   bool changed = false;
   for (Function &function : module) {
     changed |= inferAttributesForFunction(function, analysis);
   }
   return changed;
+}
+
+bool PurityAttrInferencePass::runOnModule(Module &module) {
+  FunctionPurityAnalysis analysis(module);
+  analysis.run();
+  return inferPurityAttributes(module, analysis);
 }
 
 } // namespace purity

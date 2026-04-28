@@ -1,12 +1,20 @@
+#include "Analysis/Purity/DeclarationSummaryProvider.h"
 #include "Analysis/Purity/FunctionPurityAnalysis.h"
 #include "TestUtils/LLVMHelpers.h"
 
 #include <gtest/gtest.h>
 
+#include <memory>
+
 using namespace llvm;
+using lotus::analysis::purity::ExternalPuritySummaryProvider;
 using lotus::analysis::purity::FunctionPurityAnalysis;
+using lotus::analysis::purity::FunctionPurityAnalysisOptions;
+using lotus::analysis::purity::FunctionEffectSummary;
 using lotus::analysis::purity::MemorySSAMode;
 using lotus::analysis::purity::PurityKind;
+using lotus::analysis::purity::SummaryConfidence;
+using lotus::analysis::purity::SummarySource;
 using lotus::unittest::parseModuleChecked;
 
 namespace {
@@ -287,6 +295,79 @@ TEST(FunctionPurityAnalysisTest, RejectsVolatileAndInlineAsmEffects) {
             PurityKind::Impure);
   EXPECT_EQ(analysis.getPurity(module->getFunction("asm_user")),
             PurityKind::Impure);
+}
+
+TEST(FunctionPurityAnalysisTest,
+     ProviderChainPrefersLocalAttributesOverExternalSummaries) {
+  LLVMContext context;
+  auto module = parseModuleChecked(context, R"(
+    declare i32 @reader_ext(i8*) readonly
+
+    define i32 @reader_wrapper(i8* %p) {
+    entry:
+      %call = call i32 @reader_ext(i8* %p)
+      ret i32 %call
+    }
+  )", "FunctionPurityAnalysisTest");
+
+  auto externalProvider = std::make_shared<ExternalPuritySummaryProvider>();
+  FunctionEffectSummary impureSummary;
+  impureSummary.writesReachableMemory = true;
+  externalProvider->setSummary("reader_ext", impureSummary);
+
+  FunctionPurityAnalysisOptions options;
+  options.externalSummaryProviders.push_back(externalProvider);
+
+  FunctionPurityAnalysis analysis(*module, options);
+  analysis.run();
+
+  EXPECT_EQ(analysis.getPurity(module->getFunction("reader_wrapper")),
+            PurityKind::Pure);
+}
+
+TEST(FunctionPurityAnalysisTest,
+     ExternalSummariesPropagateConfidenceAndDependencies) {
+  LLVMContext context;
+  auto module = parseModuleChecked(context, R"(
+    declare i32 @lib_reader(i8*)
+
+    define i32 @reader_wrapper(i8* %p) {
+    entry:
+      %call = call i32 @lib_reader(i8* %p)
+      ret i32 %call
+    }
+
+    define i32 @reader_top(i8* %p) {
+    entry:
+      %call = call i32 @reader_wrapper(i8* %p)
+      ret i32 %call
+    }
+  )", "FunctionPurityAnalysisTest");
+
+  auto externalProvider = std::make_shared<ExternalPuritySummaryProvider>();
+  FunctionEffectSummary pureSummary;
+  pureSummary.readsReachableMemory = true;
+  externalProvider->setSummary("lib_reader", pureSummary);
+
+  FunctionPurityAnalysisOptions options;
+  options.externalSummaryProviders.push_back(externalProvider);
+
+  FunctionPurityAnalysis analysis(*module, options);
+  analysis.run();
+
+  auto *wrapper = module->getFunction("reader_wrapper");
+  auto *top = module->getFunction("reader_top");
+  ASSERT_NE(wrapper, nullptr);
+  ASSERT_NE(top, nullptr);
+
+  EXPECT_EQ(analysis.getPurity(wrapper), PurityKind::Pure);
+  EXPECT_EQ(analysis.getPurity(top), PurityKind::Pure);
+
+  const auto topEffects = analysis.getEffects(top);
+  EXPECT_EQ(topEffects.source, SummarySource::Propagated);
+  EXPECT_EQ(topEffects.confidence, SummaryConfidence::Medium);
+  ASSERT_EQ(topEffects.dependsOn.size(), 1u);
+  EXPECT_EQ(topEffects.dependsOn.front(), "lib_reader");
 }
 
 } // namespace

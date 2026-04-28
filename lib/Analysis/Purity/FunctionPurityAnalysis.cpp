@@ -8,15 +8,17 @@ This classifier targets source-level attribute candidates:
 - Impure: writes reachable memory or has observable side effects.
 - Unknown: current summaries are insufficient to prove const/pure safely.
 */
+#include "Analysis/Purity/DeclarationSummaryProvider.h"
 #include "Analysis/Purity/FunctionPurityAnalysis.h"
 
-#include "Alias/Infrastructure/Spec/AliasSpecManager.h"
 #include "Analysis/Purity/MemorySSAPuritySummary.h"
 
 #include "llvm/IR/Attributes.h"
 #include "llvm/IR/InstIterator.h"
 #include "llvm/IR/Instructions.h"
 #include "llvm/IR/IntrinsicInst.h"
+
+#include <utility>
 
 namespace lotus::analysis::purity {
 
@@ -46,34 +48,43 @@ bool isShadowMemCall(const CallBase &call) {
   return callee && callee->getName().startswith("shadow.mem");
 }
 
-FunctionEffectSummary constSummary(bool fromMemorySSA = false) {
+FunctionEffectSummary constSummary(
+    SummarySource source = SummarySource::InternalAnalysis,
+    SummaryConfidence confidence = SummaryConfidence::High) {
   FunctionEffectSummary summary;
-  summary.fromMemorySSA = fromMemorySSA;
+  summary.source = source;
+  summary.confidence = confidence;
+  summary.fromMemorySSA = source == SummarySource::MemorySSA;
   return summary;
 }
 
-FunctionEffectSummary pureSummary(bool fromMemorySSA = false) {
-  FunctionEffectSummary summary;
+FunctionEffectSummary pureSummary(
+    SummarySource source = SummarySource::InternalAnalysis,
+    SummaryConfidence confidence = SummaryConfidence::High) {
+  FunctionEffectSummary summary = constSummary(source, confidence);
   summary.readsReachableMemory = true;
-  summary.fromMemorySSA = fromMemorySSA;
   return summary;
 }
 
-FunctionEffectSummary impureSummary(bool fromMemorySSA = false,
-                                    bool readsMemory = false) {
-  FunctionEffectSummary summary;
+FunctionEffectSummary impureSummary(
+    bool readsMemory = false,
+    SummarySource source = SummarySource::InternalAnalysis,
+    SummaryConfidence confidence = SummaryConfidence::High) {
+  FunctionEffectSummary summary = constSummary(source, confidence);
   summary.readsReachableMemory = readsMemory;
   summary.writesReachableMemory = true;
-  summary.fromMemorySSA = fromMemorySSA;
   return summary;
 }
 
-FunctionEffectSummary unknownSummary(bool fromMemorySSA = false,
-                                     bool readsMemory = false) {
-  FunctionEffectSummary summary;
+FunctionEffectSummary unknownSummary(
+    bool readsMemory = false,
+    SummarySource source = SummarySource::ConservativeFallback,
+    StringRef dependency = {},
+    SummaryConfidence confidence = SummaryConfidence::High) {
+  FunctionEffectSummary summary = constSummary(source, confidence);
   summary.readsReachableMemory = readsMemory;
   summary.hasUnknownEffects = true;
-  summary.fromMemorySSA = fromMemorySSA;
+  summary.addDependency(dependency);
   return summary;
 }
 
@@ -96,50 +107,44 @@ bool hasExplicitMemoryAttribute(const Function &function) {
          function.doesNotAccessMemory() || function.onlyReadsMemory();
 }
 
+void mergeDependencies(FunctionEffectSummary &target,
+                       const FunctionEffectSummary &source) {
+  for (const std::string &dependency : source.dependsOn) {
+    target.addDependency(dependency);
+  }
+}
+
+bool summariesEqual(const FunctionEffectSummary &lhs,
+                    const FunctionEffectSummary &rhs) {
+  return lhs.readsReachableMemory == rhs.readsReachableMemory &&
+         lhs.writesReachableMemory == rhs.writesReachableMemory &&
+         lhs.hasObservableSideEffects == rhs.hasObservableSideEffects &&
+         lhs.hasUnknownEffects == rhs.hasUnknownEffects &&
+         lhs.fromMemorySSA == rhs.fromMemorySSA &&
+         lhs.source == rhs.source && lhs.confidence == rhs.confidence &&
+         lhs.dependsOn == rhs.dependsOn;
+}
+
 } // namespace
-
-StringRef toString(PurityKind kind) {
-  switch (kind) {
-  case PurityKind::Const:
-    return "const";
-  case PurityKind::Pure:
-    return "pure";
-  case PurityKind::Impure:
-    return "impure";
-  case PurityKind::Unknown:
-    return "unknown";
-  }
-  llvm_unreachable("unknown PurityKind");
-}
-
-PurityKind FunctionEffectSummary::getPurityKind() const {
-  if (writesReachableMemory || hasObservableSideEffects) {
-    return PurityKind::Impure;
-  }
-  if (hasUnknownEffects) {
-    return PurityKind::Unknown;
-  }
-  if (readsReachableMemory) {
-    return PurityKind::Pure;
-  }
-  return PurityKind::Const;
-}
-
-bool FunctionEffectSummary::isConstCandidate() const {
-  return getPurityKind() == PurityKind::Const;
-}
-
-bool FunctionEffectSummary::isPureCandidate() const {
-  const PurityKind kind = getPurityKind();
-  return kind == PurityKind::Const || kind == PurityKind::Pure;
-}
 
 FunctionPurityAnalysis::FunctionPurityAnalysis(Module &module,
                                                MemorySSAMode memorySSAMode)
-    : module_(module), memorySSAMode_(memorySSAMode) {
-  if (memorySSAMode_ == MemorySSAMode::UseIfAvailable) {
+    : FunctionPurityAnalysis(module,
+                             FunctionPurityAnalysisOptions{memorySSAMode}) {}
+
+FunctionPurityAnalysis::FunctionPurityAnalysis(
+    Module &module, FunctionPurityAnalysisOptions options)
+    : module_(module), options_(std::move(options)) {
+  if (options_.memorySSAMode == MemorySSAMode::UseIfAvailable) {
     memorySSAProvider_ =
         std::make_unique<MemorySSAPuritySummaryProvider>(module_);
+  }
+
+  if (options_.declarationSummaryProviders.empty()) {
+    declarationSummaryProviders_ = createDefaultDeclarationSummaryProviders(
+        module_, memorySSAProvider_.get(), options_.externalSummaryProviders);
+  } else {
+    declarationSummaryProviders_ = options_.declarationSummaryProviders;
   }
 }
 
@@ -163,12 +168,7 @@ void FunctionPurityAnalysis::run() {
       }
       const FunctionEffectSummary next = analyzeFunction(function);
       auto it = summaries_.find(&function);
-      if (it == summaries_.end() ||
-          it->second.readsReachableMemory != next.readsReachableMemory ||
-          it->second.writesReachableMemory != next.writesReachableMemory ||
-          it->second.hasObservableSideEffects != next.hasObservableSideEffects ||
-          it->second.hasUnknownEffects != next.hasUnknownEffects ||
-          it->second.fromMemorySSA != next.fromMemorySSA) {
+      if (it == summaries_.end() || !summariesEqual(it->second, next)) {
         summaries_[&function] = next;
         changed = true;
       }
@@ -221,10 +221,11 @@ FunctionPurityAnalysis::initialSummary(const Function &function) const {
   if (hasMemorySSASummaries()) {
     if (auto summary = memorySSAProvider_->getFunctionSummary(function)) {
       if (summary->writesReachableMemory) {
-        return impureSummary(true, summary->readsReachableMemory);
+        return impureSummary(summary->readsReachableMemory,
+                             SummarySource::MemorySSA);
       }
-      return summary->readsReachableMemory ? pureSummary(true)
-                                           : constSummary(true);
+      return summary->readsReachableMemory ? pureSummary(SummarySource::MemorySSA)
+                                           : constSummary(SummarySource::MemorySSA);
     }
   }
   return constSummary();
@@ -233,6 +234,8 @@ FunctionPurityAnalysis::initialSummary(const Function &function) const {
 FunctionEffectSummary
 FunctionPurityAnalysis::analyzeFunction(const Function &function) const {
   FunctionEffectSummary result = initialSummary(function);
+  bool usedNonLocalCalleeSummary = false;
+  bool sawLocalEffect = false;
 
   for (const Instruction &inst : instructions(function)) {
     if (isa<ResumeInst>(inst) || isa<CleanupReturnInst>(inst) ||
@@ -240,28 +243,33 @@ FunctionPurityAnalysis::analyzeFunction(const Function &function) const {
         isa<AtomicRMWInst>(inst) || isa<AtomicCmpXchgInst>(inst) ||
         isa<VAArgInst>(inst)) {
       result.hasObservableSideEffects = true;
+      result.source = SummarySource::InternalAnalysis;
       return result;
     }
 
     if (const auto *load = dyn_cast<LoadInst>(&inst)) {
       if (load->isVolatile() || load->isAtomic()) {
         result.hasObservableSideEffects = true;
+        result.source = SummarySource::InternalAnalysis;
         return result;
       }
       if (!hasMemorySSASummaries()) {
         result = merge(result, pureSummary());
       }
+      sawLocalEffect = true;
       continue;
     }
 
     if (const auto *store = dyn_cast<StoreInst>(&inst)) {
       if (store->isVolatile() || store->isAtomic()) {
         result.hasObservableSideEffects = true;
+        result.source = SummarySource::InternalAnalysis;
         return result;
       }
       if (!hasMemorySSASummaries()) {
         return impureSummary();
       }
+      sawLocalEffect = true;
       continue;
     }
 
@@ -269,6 +277,7 @@ FunctionPurityAnalysis::analyzeFunction(const Function &function) const {
       if (isShadowMemCall(*call)) {
         continue;
       }
+      usedNonLocalCalleeSummary = true;
       result = merge(result, classifyCall(*call));
       if (result.getPurityKind() == PurityKind::Impure) {
         return result;
@@ -278,7 +287,15 @@ FunctionPurityAnalysis::analyzeFunction(const Function &function) const {
 
     if (inst.mayReadFromMemory() && !hasMemorySSASummaries()) {
       result = merge(result, pureSummary());
+      sawLocalEffect = true;
     }
+  }
+
+  if (!result.dependsOn.empty()) {
+    result.source = SummarySource::Propagated;
+  } else if (usedNonLocalCalleeSummary && !sawLocalEffect &&
+             result.source != SummarySource::MemorySSA) {
+    result.source = SummarySource::Propagated;
   }
 
   return result;
@@ -290,51 +307,17 @@ FunctionEffectSummary FunctionPurityAnalysis::classifyDeclaration(
     return classifyIntrinsic(function);
   }
 
-  if ((function.doesNotAccessMemory() ||
-       function.hasFnAttribute(Attribute::ReadNone))) {
-    return constSummary();
-  }
-
-  if ((function.onlyReadsMemory() ||
-       function.hasFnAttribute(Attribute::ReadOnly))) {
-    return pureSummary();
-  }
-
-  static lotus::alias::AliasSpecManager specs;
-  specs.initialize(module_);
-
-  if (specs.isNoEffect(&function)) {
-    return constSummary();
-  }
-
-  const auto modRef = specs.getModRefInfo(&function);
-  if (modRef.modifiedArgs.empty() && !modRef.modifiesReturn &&
-      (!modRef.referencedArgs.empty() || modRef.referencesReturn)) {
-    return pureSummary();
-  }
-  if (!modRef.modifiedArgs.empty() || modRef.modifiesReturn) {
-    return impureSummary(false, !modRef.referencedArgs.empty() ||
-                                    modRef.referencesReturn);
-  }
-
-  if (callSite && hasMemorySSASummaries()) {
-    if (auto callSummary = memorySSAProvider_->getCallSummary(*callSite)) {
-      if (callSummary->writesReachableMemory) {
-        return impureSummary(true, callSummary->readsReachableMemory);
-      }
-      if (callSummary->readsReachableMemory) {
-        if (hasExplicitMemoryAttribute(function)) {
-          return pureSummary(true);
-        }
-        return unknownSummary(true, true);
-      }
-      if (!hasExplicitMemoryAttribute(function)) {
-        return unknownSummary(true);
-      }
+  for (const auto &provider : declarationSummaryProviders_) {
+    if (!provider) {
+      continue;
+    }
+    if (auto summary = provider->getSummary(function, callSite)) {
+      return *summary;
     }
   }
 
-  return unknownSummary();
+  return unknownSummary(false, SummarySource::ConservativeFallback,
+                        function.getName());
 }
 
 FunctionEffectSummary
@@ -354,12 +337,12 @@ FunctionPurityAnalysis::classifyCall(const CallBase &call) const {
   const Function *callee = call.getCalledFunction();
   if (!callee) {
     if (call.doesNotAccessMemory()) {
-      return constSummary();
+      return constSummary(SummarySource::LocalAttributes);
     }
     if (call.onlyReadsMemory()) {
-      return pureSummary();
+      return pureSummary(SummarySource::LocalAttributes);
     }
-    return unknownSummary();
+    return unknownSummary(false, SummarySource::ConservativeFallback);
   }
 
   if (callee == call.getFunction()) {
@@ -394,7 +377,7 @@ FunctionPurityAnalysis::classifyIntrinsic(const Function &function) const {
   case Intrinsic::invariant_end:
   case Intrinsic::assume:
   case Intrinsic::expect:
-    return constSummary();
+    return constSummary(SummarySource::InternalAnalysis);
   case Intrinsic::memcpy:
   case Intrinsic::memmove:
   case Intrinsic::memset:
@@ -407,11 +390,11 @@ FunctionPurityAnalysis::classifyIntrinsic(const Function &function) const {
 
   if ((function.doesNotAccessMemory() ||
        function.hasFnAttribute(Attribute::ReadNone))) {
-    return constSummary();
+    return constSummary(SummarySource::LocalAttributes);
   }
   if ((function.onlyReadsMemory() ||
        function.hasFnAttribute(Attribute::ReadOnly))) {
-    return pureSummary();
+    return pureSummary(SummarySource::LocalAttributes);
   }
 
   return unknownSummary();
@@ -428,6 +411,10 @@ FunctionEffectSummary FunctionPurityAnalysis::merge(
       lhs.hasObservableSideEffects || rhs.hasObservableSideEffects;
   merged.hasUnknownEffects = lhs.hasUnknownEffects || rhs.hasUnknownEffects;
   merged.fromMemorySSA = lhs.fromMemorySSA || rhs.fromMemorySSA;
+  merged.confidence = minConfidence(lhs.confidence, rhs.confidence);
+  merged.source = lhs.source == rhs.source ? lhs.source : SummarySource::Propagated;
+  mergeDependencies(merged, lhs);
+  mergeDependencies(merged, rhs);
   return merged;
 }
 

@@ -1,10 +1,12 @@
 llvm_map_components_to_libnames(LLVM_LINK_COMPONENTS
+  BitWriter
   Core
   IRReader
   Passes
 )
 
 set(LOTUS_OPT_COMMON_LIBS
+  CanaryPurityAnalysis
   CanaryMemorySSA
   CanaryLLVMUtils
   SeaDsaAnalysis
@@ -36,3 +38,6 @@ configure_force_load(lotus-ipo CanaryOptimizationIPO)
 add_executable(lotus-prefetch lotus-prefetch.cpp)
 target_link_libraries(lotus-prefetch PRIVATE ${LOTUS_PREFETCH_COMMON_LIBS})
 configure_force_load(lotus-prefetch CanarySWPrefetching)
+
+add_executable(lotus-purity lotus-purity.cpp)
+target_link_libraries(lotus-purity PRIVATE ${LOTUS_OPT_COMMON_LIBS})

@@ -1,5 +1,7 @@
 #pragma once
 
+#include "Analysis/Purity/FunctionPurityAnalysis.h"
+
 #include "llvm/Pass.h"
 
 namespace llvm {
@@ -22,6 +24,9 @@ public:
     AU.setPreservesCFG();
   }
 };
+
+bool inferPurityAttributes(llvm::Module &module,
+                           const FunctionPurityAnalysis &analysis);
 
 llvm::Pass *createPurityAttrInferencePass();
 

@@ -1,50 +1,42 @@
 #pragma once
 
+#include "Analysis/Purity/PuritySummary.h"
+
 #include "llvm/ADT/DenseMap.h"
-#include "llvm/ADT/StringRef.h"
 #include "llvm/IR/Function.h"
 #include "llvm/IR/InstrTypes.h"
 #include "llvm/IR/Module.h"
 
 #include <memory>
+#include <vector>
 
 namespace lotus {
 namespace analysis {
 namespace purity {
-
-enum class PurityKind {
-  Const = 0,
-  Pure = 1,
-  Impure = 2,
-  Unknown = 3,
-};
 
 enum class MemorySSAMode {
   Disabled = 0,
   UseIfAvailable = 1,
 };
 
-llvm::StringRef toString(PurityKind kind);
-
-struct FunctionEffectSummary {
-  bool readsReachableMemory = false;
-  bool writesReachableMemory = false;
-  bool hasObservableSideEffects = false;
-  bool hasUnknownEffects = false;
-  bool fromMemorySSA = false;
-
-  PurityKind getPurityKind() const;
-  bool isConstCandidate() const;
-  bool isPureCandidate() const;
-};
-
+class DeclarationSummaryProvider;
 class MemorySSAPuritySummaryProvider;
+
+struct FunctionPurityAnalysisOptions {
+  MemorySSAMode memorySSAMode = MemorySSAMode::UseIfAvailable;
+  std::vector<std::shared_ptr<const DeclarationSummaryProvider>>
+      declarationSummaryProviders;
+  std::vector<std::shared_ptr<const DeclarationSummaryProvider>>
+      externalSummaryProviders;
+};
 
 class FunctionPurityAnalysis {
 public:
   explicit FunctionPurityAnalysis(
       llvm::Module &module,
       MemorySSAMode memorySSAMode = MemorySSAMode::UseIfAvailable);
+  FunctionPurityAnalysis(llvm::Module &module,
+                         FunctionPurityAnalysisOptions options);
   ~FunctionPurityAnalysis();
 
   void run();
@@ -62,9 +54,11 @@ public:
 
 private:
   llvm::Module &module_;
-  MemorySSAMode memorySSAMode_;
+  FunctionPurityAnalysisOptions options_;
   llvm::DenseMap<const llvm::Function *, FunctionEffectSummary> summaries_;
   std::unique_ptr<MemorySSAPuritySummaryProvider> memorySSAProvider_;
+  std::vector<std::shared_ptr<const DeclarationSummaryProvider>>
+      declarationSummaryProviders_;
   bool ran_ = false;
 
   FunctionEffectSummary initialSummary(const llvm::Function &function) const;
