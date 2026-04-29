@@ -116,6 +116,7 @@ Some related publications
 - [Andersen](https://github.com/grievejia/andersen) - Andersen's points-to analysis
 - [SUTURE](https://github.com/seclab-ucr/SUTURE) - Static analysis for security
 - [Phasar](https://github.com/secure-software-engineering/phasar):  a LLVM-based static analysis framework
+- [yapall]https://github.com/GaloisInc/yapall
 - [EOS](https://github.com/gpoesia/eos)
 - https://github.com/jumormt/PSTA-16 
 - [LLVM Opt Benchmark](https://github.com/dtcxzyw/llvm-opt-benchmark) - LLVM optimization benchmarks

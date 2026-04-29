@@ -72,8 +72,11 @@
 #include "Alias/InclusionBased/LotusAA/MemoryModel/MemObject.h"
 #include "Alias/InclusionBased/LotusAA/MemoryModel/PointsToGraph.h"
 #include "Alias/InclusionBased/LotusAA/Support/LotusConfig.h"
+#include "Utils/Parallel/ThreadPool.h"
 
 #include <algorithm>
+#include <limits>
+#include <mutex>
 
 #include <llvm/IR/Dominators.h>
 #include <llvm/IR/Instructions.h>
@@ -85,6 +88,8 @@ using namespace llvm;
 using namespace std;
 
 namespace {
+
+using FunctionRankMap = std::map<Function *, std::size_t, llvm_cmp>;
 
 static bool hasSameTargetMembership(const CallTargetSet *oldTargets,
                                     const CallTargetSet &newTargets) {
@@ -100,6 +105,164 @@ static bool hasSameTargetMembership(const CallTargetSet *oldTargets,
   }
 
   return true;
+}
+
+static FunctionRankMap buildBottomUpRanks(const std::vector<Function *> &funcSeq) {
+  FunctionRankMap ranks;
+  std::size_t rank = 0;
+  for (auto it = funcSeq.rbegin(); it != funcSeq.rend(); ++it) {
+    ranks[*it] = rank++;
+  }
+  return ranks;
+}
+
+struct TarjanSccBuilder {
+  const FunctionRelationMap &graph;
+  std::map<Function *, unsigned, llvm_cmp> index;
+  std::map<Function *, unsigned, llvm_cmp> lowlink;
+  std::vector<Function *> stack;
+  std::set<Function *, llvm_cmp> onStack;
+  std::vector<FunctionGroup> sccs;
+  unsigned nextIndex = 0;
+
+  explicit TarjanSccBuilder(const FunctionRelationMap &graph) : graph(graph) {}
+
+  void visit(Function *func) {
+    index[func] = nextIndex;
+    lowlink[func] = nextIndex;
+    ++nextIndex;
+    stack.push_back(func);
+    onStack.insert(func);
+
+    auto graphIt = graph.find(func);
+    if (graphIt != graph.end()) {
+      for (Function *callee : graphIt->second) {
+        if (!index.count(callee)) {
+          visit(callee);
+          lowlink[func] = std::min(lowlink[func], lowlink[callee]);
+        } else if (onStack.count(callee)) {
+          lowlink[func] = std::min(lowlink[func], index[callee]);
+        }
+      }
+    }
+
+    if (lowlink[func] != index[func])
+      return;
+
+    FunctionGroup scc;
+    while (!stack.empty()) {
+      Function *member = stack.back();
+      stack.pop_back();
+      onStack.erase(member);
+      scc.push_back(member);
+      if (member == func)
+        break;
+    }
+    sccs.push_back(std::move(scc));
+  }
+};
+
+static FunctionWaveList buildSccDagPlan(const CallGraphState &callGraphState,
+                                        const std::vector<Function *> &funcSeq) {
+  FunctionWaveList waves;
+  const FunctionRelationMap &graph = callGraphState.getTopDownMap();
+  TarjanSccBuilder builder(graph);
+
+  for (const auto &item : graph) {
+    if (!builder.index.count(item.first))
+      builder.visit(item.first);
+  }
+
+  const FunctionRankMap ranks = buildBottomUpRanks(funcSeq);
+  auto compareGroups = [&](const FunctionGroup &lhs, const FunctionGroup &rhs) {
+    auto lhsRank = ranks.find(lhs.front());
+    auto rhsRank = ranks.find(rhs.front());
+    std::size_t lhsValue =
+        (lhsRank == ranks.end()) ? std::numeric_limits<std::size_t>::max()
+                                 : lhsRank->second;
+    std::size_t rhsValue =
+        (rhsRank == ranks.end()) ? std::numeric_limits<std::size_t>::max()
+                                 : rhsRank->second;
+    if (lhsValue != rhsValue)
+      return lhsValue < rhsValue;
+    return lhs.front()->getName() < rhs.front()->getName();
+  };
+
+  for (FunctionGroup &group : builder.sccs) {
+    std::sort(group.begin(), group.end(), [&](Function *lhs, Function *rhs) {
+      auto lhsRank = ranks.find(lhs);
+      auto rhsRank = ranks.find(rhs);
+      std::size_t lhsValue =
+          (lhsRank == ranks.end()) ? std::numeric_limits<std::size_t>::max()
+                                   : lhsRank->second;
+      std::size_t rhsValue =
+          (rhsRank == ranks.end()) ? std::numeric_limits<std::size_t>::max()
+                                   : rhsRank->second;
+      if (lhsValue != rhsValue)
+        return lhsValue < rhsValue;
+      return lhs->getName() < rhs->getName();
+    });
+  }
+
+  std::map<Function *, std::size_t, llvm_cmp> componentIndex;
+  for (std::size_t idx = 0; idx < builder.sccs.size(); ++idx) {
+    for (Function *member : builder.sccs[idx]) {
+      componentIndex[member] = idx;
+    }
+  }
+
+  std::vector<std::set<std::size_t>> componentCallers(builder.sccs.size());
+  std::vector<std::set<std::size_t>> componentCallees(builder.sccs.size());
+  for (const auto &item : graph) {
+    auto callerIt = componentIndex.find(item.first);
+    if (callerIt == componentIndex.end())
+      continue;
+
+    for (Function *callee : item.second) {
+      auto calleeIt = componentIndex.find(callee);
+      if (calleeIt == componentIndex.end())
+        continue;
+      if (callerIt->second == calleeIt->second)
+        continue;
+
+      componentCallees[callerIt->second].insert(calleeIt->second);
+      componentCallers[calleeIt->second].insert(callerIt->second);
+    }
+  }
+
+  std::vector<std::size_t> remainingOutDegree(builder.sccs.size(), 0);
+  for (std::size_t idx = 0; idx < builder.sccs.size(); ++idx)
+    remainingOutDegree[idx] = componentCallees[idx].size();
+
+  std::vector<std::size_t> current;
+  for (std::size_t idx = 0; idx < builder.sccs.size(); ++idx) {
+    if (remainingOutDegree[idx] == 0)
+      current.push_back(idx);
+  }
+
+  while (!current.empty()) {
+    std::sort(current.begin(), current.end(), [&](std::size_t lhs,
+                                                  std::size_t rhs) {
+      return compareGroups(builder.sccs[lhs], builder.sccs[rhs]);
+    });
+
+    FunctionWave wave;
+    std::vector<std::size_t> next;
+    for (std::size_t component : current) {
+      wave.push_back(builder.sccs[component]);
+      for (std::size_t caller : componentCallers[component]) {
+        if (remainingOutDegree[caller] == 0)
+          continue;
+        --remainingOutDegree[caller];
+        if (remainingOutDegree[caller] == 0)
+          next.push_back(caller);
+      }
+    }
+    waves.push_back(std::move(wave));
+    current.swap(next);
+  }
+
+  return waves;
 }
 
 } // namespace
@@ -133,13 +296,37 @@ static cl::opt<unsigned> lotus_parallel_threads(
     "lotus-aa-threads", cl::desc("Number of threads for LotusAA (0 = auto)"),
     cl::init(1)); // Default to single-threaded to avoid concurrency bugs
 
+static cl::opt<bool> lotus_fixed_cg_parallel(
+    "lotus-aa-fixed-cg",
+    cl::desc("Use fixed-callgraph LotusAA scheduling (experimental)"),
+    cl::init(true));
+
 char LotusAA::ID = 0;
+unsigned LotusAA::testingParallelThreadsOverride_ =
+    std::numeric_limits<unsigned>::max();
+int LotusAA::testingFixedCallGraphModeOverride_ = -1;
 static RegisterPass<LotusAA> X("lotus-aa",
                                "LotusAA: Flow-sensitive alias analysis",
                                false, /* CFG only */
                                true /* is analysis */);
 
 LotusAA::LotusAA() : ModulePass(ID), DL(nullptr) {}
+
+void LotusAA::setParallelThreadsForTesting(unsigned thread_count) {
+  testingParallelThreadsOverride_ = thread_count;
+}
+
+void LotusAA::clearParallelThreadsForTesting() {
+  testingParallelThreadsOverride_ = std::numeric_limits<unsigned>::max();
+}
+
+void LotusAA::setFixedCallGraphModeForTesting(bool enabled) {
+  testingFixedCallGraphModeOverride_ = enabled ? 1 : 0;
+}
+
+void LotusAA::clearFixedCallGraphModeForTesting() {
+  testingFixedCallGraphModeOverride_ = -1;
+}
 
 LotusAA::~LotusAA() {
   delete MemObject::NullObj;
@@ -173,6 +360,10 @@ void LotusAA::getAnalysisUsage(AnalysisUsage &AU) const {
 
 bool LotusAA::runOnModule(Module &M) {
   DL = &M.getDataLayout();
+  analysisWaves_.clear();
+  parallelSingletonCounts_.clear();
+  stagedResults_.clear();
+  stagedResultsVisible_ = false;
 
   IntraLotusAAConfig::setParam();
 
@@ -346,6 +537,19 @@ void LotusAA::initCGBackedge() {
 
 void LotusAA::computePtsCgIteratively(Module &M,
                                       std::vector<Function *> &func_seq) {
+  unsigned requestedThreads = lotus_parallel_threads;
+  if (testingParallelThreadsOverride_ != std::numeric_limits<unsigned>::max())
+    requestedThreads = testingParallelThreadsOverride_;
+
+  bool useFixedCallGraph = lotus_fixed_cg_parallel;
+  if (testingFixedCallGraphModeOverride_ != -1)
+    useFixedCallGraph = testingFixedCallGraphModeOverride_ != 0;
+
+  if (useFixedCallGraph) {
+    computePtsWithFixedCallGraph(M, func_seq, requestedThreads);
+    return;
+  }
+
   initCGBackedge();
 
   bool changed = true;
@@ -468,6 +672,97 @@ void LotusAA::computePtsCgIteratively(Module &M,
   outs() << "[LotusAA] Analysis complete\n";
 }
 
+void LotusAA::computePtsWithFixedCallGraph(Module &M,
+                                           std::vector<Function *> &func_seq,
+                                           unsigned requested_threads) {
+  initCGBackedge();
+  initFuncProcessingSeq(M, func_seq);
+
+  analysisWaves_ = buildSccDagPlan(callGraphState_, func_seq);
+  parallelSingletonCounts_.clear();
+
+  unsigned resolvedThreads = requested_threads;
+  if (resolvedThreads == 0) {
+    resolvedThreads = ThreadPool::get()->workerCount();
+    if (resolvedThreads == 0)
+      resolvedThreads = 1;
+  }
+
+  outs() << "[LotusAA] Fixed-CG analysis using " << resolvedThreads
+         << " thread(s)\n";
+
+  for (FunctionWave &wave : analysisWaves_) {
+    AnalysisResultsMap waveResults;
+    std::vector<Function *> singletonFuncs;
+
+    for (const FunctionGroup &group : wave) {
+      if (group.size() == 1 &&
+          !callGraphState_.getCallees(group.front()).count(group.front())) {
+        singletonFuncs.push_back(group.front());
+        continue;
+      }
+
+      stagedResultsVisible_ = true;
+      stagedResults_.clear();
+      for (Function *func : group) {
+        IntraLotusAA *newResult = new IntraLotusAA(func, this);
+        newResult->computePTA();
+        stagedResults_[func] = newResult;
+        waveResults[func] = newResult;
+      }
+      stagedResultsVisible_ = false;
+      stagedResults_.clear();
+    }
+
+    const bool useParallelWorkers =
+        resolvedThreads > 1 && singletonFuncs.size() > 1;
+    parallelSingletonCounts_.push_back(
+        useParallelWorkers ? singletonFuncs.size() : 0u);
+
+    if (useParallelWorkers) {
+      std::mutex waveMutex;
+      const std::size_t batchSize =
+          std::max<std::size_t>(1, resolvedThreads);
+
+      for (std::size_t begin = 0; begin < singletonFuncs.size();
+           begin += batchSize) {
+        ThreadPool::TaskGroup tasks = ThreadPool::get()->makeTaskGroup();
+        const std::size_t end =
+            std::min(singletonFuncs.size(), begin + batchSize);
+        for (std::size_t idx = begin; idx < end; ++idx) {
+          Function *func = singletonFuncs[idx];
+          tasks.async([&, func]() {
+            IntraLotusAA *newResult = new IntraLotusAA(func, this);
+            newResult->computePTA();
+            std::lock_guard<std::mutex> lock(waveMutex);
+            waveResults[func] = newResult;
+          });
+        }
+        tasks.wait();
+      }
+    } else {
+      for (Function *func : singletonFuncs) {
+        IntraLotusAA *newResult = new IntraLotusAA(func, this);
+        newResult->computePTA();
+        waveResults[func] = newResult;
+      }
+    }
+
+    for (const auto &resultItem : waveResults) {
+      Function *func = resultItem.first;
+      IntraLotusAA *oldResult = intraResults_[func];
+      intraResults_[func] = resultItem.second;
+      if (oldResult && oldResult != resultItem.second)
+        delete oldResult;
+    }
+  }
+
+  stagedResultsVisible_ = false;
+  stagedResults_.clear();
+
+  outs() << "[LotusAA] Fixed-CG analysis complete\n";
+}
+
 void LotusAA::finalizeCg(std::vector<Function *> &func_seq) {
   if (lotus_print_cg) {
     for (Function *func : func_seq) {
@@ -509,6 +804,11 @@ bool LotusAA::computePTA(Function *F) {
 }
 
 IntraLotusAA *LotusAA::getPtGraph(Function *F) {
+  if (stagedResultsVisible_) {
+    auto stagedIt = stagedResults_.find(F);
+    if (stagedIt != stagedResults_.end())
+      return stagedIt->second;
+  }
   auto it = intraResults_.find(F);
   return (it == intraResults_.end()) ? nullptr : it->second;
 }

@@ -44,4 +44,5 @@ target_link_libraries(LotusAA PUBLIC
   AliasSpecManager
   CanaryPlatform
   CanaryGSA
+  CanaryParallel
 )

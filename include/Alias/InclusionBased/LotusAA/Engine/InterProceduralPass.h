@@ -15,6 +15,7 @@
 #include <map>
 #include <mutex>
 #include <set>
+#include <vector>
 
 #include "Alias/InclusionBased/LotusAA/MemoryModel/Types.h"
 #include "Alias/InclusionBased/LotusAA/Support/CallGraphState.h"
@@ -35,6 +36,9 @@ class PTGraph;
 // Type aliases for improved readability
 using AnalysisResultsMap = std::map<Function *, IntraLotusAA *, llvm_cmp>;
 using GlobalValueCache = std::map<Value *, std::set<Value *, llvm_cmp>, llvm_cmp>;
+using FunctionGroup = std::vector<Function *>;
+using FunctionWave = std::vector<FunctionGroup>;
+using FunctionWaveList = std::vector<FunctionWave>;
 
 /*
  * LotusAA - Top-level pass for Lotus Alias Analysis
@@ -47,6 +51,11 @@ public:
 
   LotusAA();
   virtual ~LotusAA();
+
+  static void setParallelThreadsForTesting(unsigned thread_count);
+  static void clearParallelThreadsForTesting();
+  static void setFixedCallGraphModeForTesting(bool enabled);
+  static void clearFixedCallGraphModeForTesting();
 
   void getAnalysisUsage(AnalysisUsage &) const override;
   bool runOnModule(Module &) override;
@@ -83,6 +92,11 @@ private:
   // Intra-procedural analysis results
   AnalysisResultsMap intraResults_;
 
+  // Staged results visible only during sequential SCC evaluation in the
+  // fixed-callgraph scheduler.
+  AnalysisResultsMap stagedResults_;
+  bool stagedResultsVisible_ = false;
+
   // Call graph state (caller-callee relationships, back edges)
   CallGraphState callGraphState_;
 
@@ -95,6 +109,10 @@ private:
   // Cached dominator trees for each function
   std::map<Function *, DominatorTree *, llvm_cmp> dominatorTrees_;
 
+  // Scheduler telemetry for tests.
+  FunctionWaveList analysisWaves_;
+  std::vector<unsigned> parallelSingletonCounts_;
+
   // Guards shared structures accessed from worker threads
   std::mutex domMutex_;
   
@@ -105,10 +123,15 @@ private:
   friend class IntraLotusAA;
 
 private:
+  static unsigned testingParallelThreadsOverride_;
+  static int testingFixedCallGraphModeOverride_;
+
   void initFuncProcessingSeq(Module &M, std::vector<Function *> &func_seq);
   void initCGBackedge();
   void computeGlobalHeuristic(Module &M);
   void computePtsCgIteratively(Module &M, std::vector<Function *> &func_seq);
+  void computePtsWithFixedCallGraph(Module &M, std::vector<Function *> &func_seq,
+                                    unsigned requested_threads);
   void finalizeCg(std::vector<Function *> &func_seq);
 };
 

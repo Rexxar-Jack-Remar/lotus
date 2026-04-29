@@ -10,6 +10,9 @@
 #include <llvm/PassRegistry.h>
 #include <gtest/gtest.h>
 
+#include <set>
+#include <string>
+
 #define private public
 #define protected public
 #include "Alias/InclusionBased/LotusAA/Engine/InterProceduralPass.h"
@@ -36,6 +39,39 @@ void initializePassInfra() {
 }
 
 LotusAA *runLotusAA(Module &M) {
+  initializePassInfra();
+  LotusAA::setFixedCallGraphModeForTesting(false);
+  auto *PM = new legacy::PassManager();
+  auto *Pass = new LotusAA();
+  PM->add(Pass);
+  PM->run(M);
+  LotusAA::clearFixedCallGraphModeForTesting();
+  return Pass;
+}
+
+struct LotusParallelThreadScope {
+  explicit LotusParallelThreadScope(unsigned thread_count) {
+    LotusAA::setParallelThreadsForTesting(thread_count);
+    LotusAA::setFixedCallGraphModeForTesting(true);
+  }
+
+  ~LotusParallelThreadScope() {
+    LotusAA::clearParallelThreadsForTesting();
+    LotusAA::clearFixedCallGraphModeForTesting();
+  }
+};
+
+LotusAA *runLotusAA(Module &M, unsigned thread_count) {
+  initializePassInfra();
+  LotusParallelThreadScope scope(thread_count);
+  auto *PM = new legacy::PassManager();
+  auto *Pass = new LotusAA();
+  PM->add(Pass);
+  PM->run(M);
+  return Pass;
+}
+
+LotusAA *runLotusAADefaultMode(Module &M) {
   initializePassInfra();
   auto *PM = new legacy::PassManager();
   auto *Pass = new LotusAA();
@@ -255,6 +291,24 @@ struct LotusConfigScope {
         restrict_inter_structure;
   }
 };
+
+std::set<std::string> collectFunctionNames(const FunctionGroup &group) {
+  std::set<std::string> names;
+  for (Function *func : group) {
+    if (func)
+      names.insert(std::string(func->getName()));
+  }
+  return names;
+}
+
+std::multiset<std::set<std::string>>
+collectWaveGroups(const FunctionWave &wave) {
+  std::multiset<std::set<std::string>> groups;
+  for (const FunctionGroup &group : wave) {
+    groups.insert(collectFunctionNames(group));
+  }
+  return groups;
+}
 
 } // namespace
 
@@ -2403,6 +2457,178 @@ TEST(LotusAA, RightValueTrackingUsesLegacyOuterRefinementTiming) {
 
   ASSERT_EQ(values.size(), 1u);
   EXPECT_EQ(values.front().val, Foo);
+}
+
+TEST(LotusAA, FixedCallGraphModeSeedsDirectCallTargetsPerCallsite) {
+  const char *IR = R"(
+    define void @callee() {
+    entry:
+      ret void
+    }
+
+    define void @caller() {
+    entry:
+      call void @callee()
+      ret void
+    }
+  )";
+
+  LLVMContext Ctx;
+  auto M = parseAssembly(Ctx, IR);
+  ASSERT_NE(M, nullptr);
+
+  std::unique_ptr<LotusAA> Pass(runLotusAA(*M, 2));
+  auto *Caller = M->getFunction("caller");
+  auto *Callee = M->getFunction("callee");
+  ASSERT_NE(Caller, nullptr);
+  ASSERT_NE(Callee, nullptr);
+
+  CallBase *Call = findCallByCallee(*Caller, "callee");
+  ASSERT_NE(Call, nullptr);
+
+  CallTargetSet *Targets = Pass->getCallees(Caller, Call);
+  ASSERT_NE(Targets, nullptr);
+  ASSERT_EQ(Targets->size(), 1u);
+  EXPECT_EQ(Targets->begin()->first, Callee);
+}
+
+TEST(LotusAA, DefaultModeUsesFixedCallGraphScheduler) {
+  const char *IR = R"(
+    define void @callee() {
+    entry:
+      ret void
+    }
+
+    define void @caller() {
+    entry:
+      call void @callee()
+      ret void
+    }
+  )";
+
+  LLVMContext Ctx;
+  auto M = parseAssembly(Ctx, IR);
+  ASSERT_NE(M, nullptr);
+
+  std::unique_ptr<LotusAA> Pass(runLotusAADefaultMode(*M));
+  ASSERT_EQ(Pass->analysisWaves_.size(), 2u);
+  ASSERT_EQ(Pass->parallelSingletonCounts_.size(), 2u);
+
+  auto *Caller = M->getFunction("caller");
+  ASSERT_NE(Caller, nullptr);
+  CallBase *Call = findCallByCallee(*Caller, "callee");
+  ASSERT_NE(Call, nullptr);
+  ASSERT_NE(Pass->getCallees(Caller, Call), nullptr);
+}
+
+TEST(LotusAA, FixedCallGraphModeBuildsParallelSingletonWaves) {
+  const char *IR = R"(
+    define void @leaf_a() {
+    entry:
+      ret void
+    }
+
+    define void @leaf_b() {
+    entry:
+      ret void
+    }
+
+    define void @caller_a() {
+    entry:
+      call void @leaf_a()
+      ret void
+    }
+
+    define void @caller_b() {
+    entry:
+      call void @leaf_b()
+      ret void
+    }
+
+    define void @main() {
+    entry:
+      call void @caller_a()
+      call void @caller_b()
+      ret void
+    }
+  )";
+
+  LLVMContext Ctx;
+  auto M = parseAssembly(Ctx, IR);
+  ASSERT_NE(M, nullptr);
+
+  std::unique_ptr<LotusAA> Pass(runLotusAA(*M, 2));
+  ASSERT_EQ(Pass->analysisWaves_.size(), 3u);
+  ASSERT_EQ(Pass->parallelSingletonCounts_.size(), 3u);
+
+  ASSERT_EQ(Pass->analysisWaves_[0].size(), 2u);
+  EXPECT_EQ(collectWaveGroups(Pass->analysisWaves_[0]),
+            (std::multiset<std::set<std::string>>{
+                {"leaf_a"},
+                {"leaf_b"},
+            }));
+  EXPECT_EQ(Pass->parallelSingletonCounts_[0], 2u);
+
+  ASSERT_EQ(Pass->analysisWaves_[1].size(), 2u);
+  EXPECT_EQ(collectWaveGroups(Pass->analysisWaves_[1]),
+            (std::multiset<std::set<std::string>>{
+                {"caller_a"},
+                {"caller_b"},
+            }));
+  EXPECT_EQ(Pass->parallelSingletonCounts_[1], 2u);
+
+  ASSERT_EQ(Pass->analysisWaves_[2].size(), 1u);
+  EXPECT_EQ(collectFunctionNames(Pass->analysisWaves_[2][0]),
+            std::set<std::string>({"main"}));
+  EXPECT_EQ(Pass->parallelSingletonCounts_[2], 0u);
+}
+
+TEST(LotusAA, FixedCallGraphModeKeepsRecursiveSccSequential) {
+  const char *IR = R"(
+    define void @mut_a(i1 %cond) {
+    entry:
+      br i1 %cond, label %recurse, label %exit
+    recurse:
+      call void @mut_b(i1 false)
+      br label %exit
+    exit:
+      ret void
+    }
+
+    define void @mut_b(i1 %cond) {
+    entry:
+      br i1 %cond, label %recurse, label %exit
+    recurse:
+      call void @mut_a(i1 false)
+      br label %exit
+    exit:
+      ret void
+    }
+
+    define void @main() {
+    entry:
+      call void @mut_a(i1 true)
+      ret void
+    }
+  )";
+
+  LLVMContext Ctx;
+  auto M = parseAssembly(Ctx, IR);
+  ASSERT_NE(M, nullptr);
+
+  std::unique_ptr<LotusAA> Pass(runLotusAA(*M, 2));
+  ASSERT_EQ(Pass->analysisWaves_.size(), 2u);
+  ASSERT_EQ(Pass->parallelSingletonCounts_.size(), 2u);
+
+  ASSERT_EQ(Pass->analysisWaves_[0].size(), 1u);
+  EXPECT_EQ(collectFunctionNames(Pass->analysisWaves_[0][0]),
+            std::set<std::string>({"mut_a", "mut_b"}));
+  EXPECT_EQ(Pass->parallelSingletonCounts_[0], 0u);
+
+  ASSERT_EQ(Pass->analysisWaves_[1].size(), 1u);
+  EXPECT_EQ(collectFunctionNames(Pass->analysisWaves_[1][0]),
+            std::set<std::string>({"main"}));
+  EXPECT_EQ(Pass->parallelSingletonCounts_[1], 0u);
 }
 
 #ifndef NDEBUG
