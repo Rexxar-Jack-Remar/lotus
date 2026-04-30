@@ -7,6 +7,8 @@ slicing, security analyses, and other dependence-aware queries.
 The PDG is field-sensitive and flow-insensitive. The query layer now exposes
 both context-insensitive and call/return-matched context-sensitive traversals
 through a single API in ``include/IR/PDG/Analysis/PDGQuery.h``.
+The Cypher query-language parser and executor live separately under
+``include/IR/PDG/QueryLanguage/`` and ``lib/IR/PDG/QueryLanguage/``.
 
 ## Key Features
 
@@ -116,3 +118,4 @@ Analysis mode accepts ``--scope-function``, ``--scope-query``,
 - Headers: `include/IR/PDG/`
 - Documentation: `docs/source/ir/pdg.rst`
 - Query API: `include/IR/PDG/Analysis/PDGQuery.h`
+- Cypher query language: `include/IR/PDG/QueryLanguage/Cypher.h`

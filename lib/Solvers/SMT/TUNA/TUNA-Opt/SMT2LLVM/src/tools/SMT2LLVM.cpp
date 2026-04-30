@@ -3,15 +3,15 @@
 //
 
 #include "SMTFormula.h"
+#include "Feature.h"
 #include "LLVMNode.h"
 #include "Utility.h"
-#include "Feature.h"
-#include <fstream>
-#include <streambuf>
-#include <sstream>
-#include <chrono>
-#include <iomanip>
 #include <llvm/Passes/StandardInstrumentations.h>
+#include <chrono>
+#include <fstream>
+#include <iomanip>
+#include <sstream>
+#include <streambuf>
 
 #ifndef LLMAPPING
 #define LLMAPPING std::map<std::string, llvm::Value *> &
@@ -49,7 +49,7 @@ int main(int argc, char *argv[])
     std::ifstream t(inputFilename);
     if (!t.is_open()) {
         std::cout << "Can't open file: " << inputFilename
-                  << ", error: " << std::strerror(errno) << std::endl;
+                  << ", error: " << std::strerror(errno) << '\n';
         return 0;
     }
     std::ostringstream buffer;

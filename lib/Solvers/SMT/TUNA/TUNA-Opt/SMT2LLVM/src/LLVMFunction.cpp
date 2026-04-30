@@ -70,4 +70,4 @@ namespace SLOT
         expr fromChildren = LLVMNode::MakeLLVMNode(shiftToMultiply, scx, *this, ((ReturnInst *)contents->getEntryBlock().getTerminator())->getOperand(0))->ToSMT();
         return (LLVMFunction::varCounter == 0) ? fromChildren : (extraVariables && fromChildren);    
     }
-}
+} // namespace SLOT

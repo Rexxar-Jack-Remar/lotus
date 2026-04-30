@@ -3,14 +3,14 @@
 //
 
 #include "SMTFormula.h"
+#include "Feature.h"
 #include "LLVMNode.h"
 #include "Utility.h"
-#include "Feature.h"
-#include <fstream>
-#include <sstream>
-#include <chrono>
-#include <iomanip>
 #include <llvm/Passes/StandardInstrumentations.h>
+#include <chrono>
+#include <fstream>
+#include <iomanip>
+#include <sstream>
 
 #ifndef LLMAPPING
 #define LLMAPPING std::map<std::string, llvm::Value *> &

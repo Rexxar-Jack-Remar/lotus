@@ -260,7 +260,7 @@ Include headers:
 
 .. code-block:: cpp
 
-   #include "IR/PDG/Analysis/CypherQuery.h"
+   #include "IR/PDG/QueryLanguage/Cypher.h"
    #include "IR/PDG/Core/ProgramDependencyGraph.h"
 
 Parse and execute Cypher queries:

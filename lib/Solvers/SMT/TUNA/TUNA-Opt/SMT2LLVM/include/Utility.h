@@ -1,11 +1,11 @@
 #ifndef UTILITY_H
 #define UTILITY_H
 
-#include <llvm/IR/Function.h>
-#include <string>
-#include <iostream>
 #include "llvm/IR/PassManager.h"
+#include <llvm/IR/Function.h>
 #include "llvm/Passes/PassBuilder.h"
+#include <iostream>
+#include <string>
 
 // 命令行解析相关的函数声明
 void Help();

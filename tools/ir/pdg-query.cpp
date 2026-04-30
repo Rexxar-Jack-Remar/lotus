@@ -14,7 +14,7 @@
 #include "llvm/Support/SourceMgr.h"
 #include "llvm/Support/raw_ostream.h"
 
-#include "IR/PDG/Analysis/CypherQuery.h"
+#include "IR/PDG/QueryLanguage/Cypher.h"
 #include "IR/PDG/Analysis/PDGQuery.h"
 #include "IR/PDG/Analysis/PropertyBasedSlicing.h"
 #include "IR/PDG/Core/ControlDependencyGraph.h"

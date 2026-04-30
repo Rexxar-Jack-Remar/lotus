@@ -1,6 +1,6 @@
 #include "IR/PDG/Analysis/PDGQuery.h"
 
-#include "IR/PDG/Analysis/CypherQuery.h"
+#include "IR/PDG/QueryLanguage/Cypher.h"
 #include "IR/PDG/Support/PDGUtils.h"
 
 #include "llvm/ADT/StringRef.h"

@@ -1,6 +1,9 @@
 # TUNA
 Code repository for [Compiler Optimization-Based SMT Simplifications: An In-Depth Study](https://dl.acm.org/doi/10.1145/3795879).
 
+
+NOTE: this dir is for LLVM 16 (not LLVM 14). Sot is not built by default.
+
 TUNA speeds up SMT solving by converting SMT formulas to LLVM IR, applying compiler optimizations, and converting back. It includes a genetic algorithm to automatically find the best combination of LLVM passes for a given dataset.
 
 ## Repository Structure

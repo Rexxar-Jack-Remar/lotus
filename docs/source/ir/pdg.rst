@@ -79,6 +79,10 @@ PDG is exposed as an LLVM ``ModulePass``. A typical usage pattern:
 For interactive querying and slicing, see the :doc:`../pdg_query_language`
 and the ``pdg-query`` tool described in :doc:`../tools/ir`.
 
+The Cypher selector language implementation is separated from these concrete
+analysis services under ``include/IR/PDG/QueryLanguage/`` and
+``lib/IR/PDG/QueryLanguage/``.
+
 `pdg-query` Analysis Mode
 =========================
 
@@ -100,4 +104,3 @@ Analysis mode uses Cypher as a selector front end:
 * ``--context-sensitive`` enables call/return matching
 * ``--thin`` enables thin slicing semantics
 * ``--format text|json|dot`` controls rendering
-

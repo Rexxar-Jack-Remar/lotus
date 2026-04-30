@@ -128,4 +128,4 @@ namespace SLOT
             builder.CreateRet(temp);
         }
     }
-}
+} // namespace SLOT

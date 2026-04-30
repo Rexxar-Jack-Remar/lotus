@@ -1,4 +1,4 @@
-#include "IR/PDG/Analysis/CypherQuery.h"
+#include "IR/PDG/QueryLanguage/Cypher.h"
 
 #include "llvm/IR/Instructions.h"
 #include "llvm/Support/raw_ostream.h"

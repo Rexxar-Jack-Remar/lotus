@@ -1,4 +1,4 @@
-#include "IR/PDG/Analysis/CypherQuery.h"
+#include "IR/PDG/QueryLanguage/Cypher.h"
 
 #include "llvm/IR/LLVMContext.h"
 #include "llvm/IR/Module.h"

@@ -14,7 +14,7 @@ add_library(CanaryPDG STATIC
   Core/PDGNode.cpp
   Core/ProgramDependencyGraph.cpp
   Core/Tree.cpp
-  Analysis/CypherQuery.cpp
+  QueryLanguage/Cypher.cpp
   Analysis/PDGQuery.cpp
   Analysis/SummaryQuery.cpp
   Analysis/ImpactQuery.cpp

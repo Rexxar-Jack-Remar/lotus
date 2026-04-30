@@ -1,5 +1,5 @@
 /**
- * @file CypherQueryExtensions.h
+ * @file CypherExtensions.h
  * @brief Extended Cypher query capabilities for PDG analysis
  *
  * This file extends the base CypherQuery implementation with:
@@ -24,7 +24,7 @@
 
 #pragma once
 
-#include "IR/PDG/Analysis/CypherQuery.h"
+#include "IR/PDG/QueryLanguage/Cypher.h"
 
 #include <functional>
 #include <numeric>

@@ -694,4 +694,4 @@ namespace SLOT
 
         }
     }
-}
+} // namespace SLOT

@@ -26,4 +26,4 @@ namespace SLOT
 
             //bool CheckAssignment(model m);
     };
-}
+} // namespace SLOT
