@@ -1,7 +1,7 @@
 #ifndef MY_SEMIRING_ELEMENT_H_
 #define MY_SEMIRING_ELEMENT_H_
-#include <iostream>
 #include "common.h"
+#include <iostream>
 
 class Elem {
     friend std::ostream& operator<<( std::ostream& o,const Elem& e )

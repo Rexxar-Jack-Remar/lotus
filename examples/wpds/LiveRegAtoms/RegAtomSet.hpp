@@ -39,9 +39,9 @@
 // e-mail: reps@cs.wisc.edu
 //////////////////////////////////////////////////////////////////////////////
 
+#include "common.h"
 #include <iostream>
 #include <limits.h>
-#include "common.h"
 
 // RegAtomSet ----------------------------------------
 

@@ -76,6 +76,7 @@ Some related publications
 
 ### Software Protection
 
+- Security 26: VeCT: Secure and Efficient Constant-Time Code Rewriting with Vector Extensions.
 - CCS 22: C2C: Fine-Grained Configuration-Driven System Call Filtering
 - USENIX Security 20: Temporal System Call Specialization for Attack Surface Reduction
 - USENIX Security 19:  Origin-Sensitive Control Flow Integrity

@@ -2,8 +2,8 @@
  * @author Nick Kidd
  */
 
-#include <iostream>
 #include "RegAtomSet.hpp"
+#include <iostream>
 
 const std::string RegAtomSet::regAtomNames[20] = {
     "al",

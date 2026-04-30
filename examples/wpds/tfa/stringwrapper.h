@@ -1,8 +1,8 @@
 #ifndef STRING_WRAPPER_H_
 #define STRING_WRAPPER_H_
-#include <string>
-#include <iostream>
 #include "common.h"
+#include <iostream>
+#include <string>
 
 class StringWrapper
 {

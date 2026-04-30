@@ -127,7 +127,7 @@ Create ``overflow.c``:
        int y = 20;
        
        int result1 = add_values(x, y);  // Bug: overflow
-       int result2 = multiply_values(1000, 1000000);  // Bug: overflow
+       int result2 = multiply_values(1000, 3000000);  // Bug: overflow
        int result3 = safe_add(x, y);  // Safe
        
        printf("Results: %d, %d, %d\n", result1, result2, result3);
@@ -140,7 +140,7 @@ Compile and Analyze
 .. code-block:: bash
 
    clang -emit-llvm -S -g overflow.c -o overflow.ll
-   ./build/bin/lotus-kint -check-int-overflow overflow.ll
+   ./build/bin/lotus-kint -check-int-overflow -analyze-all-functions overflow.ll
 
 Expected Output
 ~~~~~~~~~~~~~~~
@@ -164,7 +164,7 @@ Advanced: All Checks
 
 .. code-block:: bash
 
-   ./build/bin/lotus-kint -check-all overflow.ll
+   ./build/bin/lotus-kint -check-all -analyze-all-functions overflow.ll
 
 This enables all checkers: integer overflow, division by zero, bad shift, array bounds, and dead branches.
 

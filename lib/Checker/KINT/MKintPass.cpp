@@ -399,7 +399,15 @@ void MKintPass::print_all_ranges() const {
 }
 
 void MKintPass::smt_solving(Module &M) {
-  for (auto *F : m_taint_funcs) {
+  SetVector<Function *> funcs_to_analyze;
+  if (AnalyzeAllFunctions) {
+    for (auto *F : m_range_analysis_funcs)
+      funcs_to_analyze.insert(F);
+  }
+  for (auto *F : m_taint_funcs)
+    funcs_to_analyze.insert(F);
+
+  for (auto *F : funcs_to_analyze) {
     if (F->isDeclaration())
       continue;
 

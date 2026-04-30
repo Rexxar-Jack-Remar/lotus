@@ -16,6 +16,11 @@ llvm::cl::opt<unsigned> MaxPathsPerFunction(
     llvm::cl::desc(
         "Maximum number of path expansions per function (0 = no limit)"),
     llvm::cl::init(20000), llvm::cl::cat(PerformanceCategory));
+llvm::cl::opt<bool> AnalyzeAllFunctions(
+    "analyze-all-functions",
+    llvm::cl::desc("Run SMT bug checks for all functions initialized by range "
+                   "analysis instead of only taint/main entry points"),
+    llvm::cl::init(false), llvm::cl::cat(PerformanceCategory));
 
 // Checker options
 llvm::cl::OptionCategory

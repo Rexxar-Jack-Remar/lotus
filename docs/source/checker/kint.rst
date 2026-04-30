@@ -116,6 +116,12 @@ Usage
 
    ./build/bin/lotus-kint --check-all=true --function-timeout=60 input.bc
 
+**Analyze All Functions**:
+
+.. code-block:: bash
+
+   ./build/bin/lotus-kint --check-int-overflow=true --analyze-all-functions=true input.bc
+
 Command-Line Options
 --------------------
 
@@ -123,6 +129,7 @@ Command-Line Options
 
 * ``--check-all=<true|false>`` – Enable all checkers at once (default: false)
 * ``--check-int-overflow=<true|false>`` – Enable integer overflow detection (default: false)
+* ``--analyze-all-functions=<true|false>`` – Run SMT checks for all functions covered by range analysis instead of only taint/main entry points (default: false)
 * ``--check-div-by-zero=<true|false>`` – Enable division by zero detection (default: false)
 * ``--check-bad-shift=<true|false>`` – Enable bad shift detection (default: false)
 * ``--check-array-oob=<true|false>`` – Enable array out-of-bounds detection (default: false)
@@ -280,4 +287,3 @@ See Also
 - :doc:`index` – Checker Framework overview
 - :doc:`../solvers/index` – SMT solver integration
 - :doc:`../analysis/index` – Analysis infrastructure
-

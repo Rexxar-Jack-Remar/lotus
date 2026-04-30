@@ -1,11 +1,11 @@
 #ifndef GEN_KILL_TRANSFORMER_GUARD
 #define GEN_KILL_TRANSFORMER_GUARD 1
 
-#include <iostream>
-#include <climits>
-#include <cassert>
 #include "common.h"
 #include "ref_ptr.h"
+#include <cassert>
+#include <climits>
+#include <iostream>
 
 /*!
  * @class GenKillTransformer_T
