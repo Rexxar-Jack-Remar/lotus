@@ -1,4 +1,4 @@
-#include "IR/PDG/Analysis/PDGQuery.h"
+#include "IR/PDG/Analysis/Query.h"
 #include "IR/PDG/Core/ControlDependencyGraph.h"
 #include "IR/PDG/Core/DataDependencyGraph.h"
 #include "IR/PDG/Core/ProgramDependencyGraph.h"

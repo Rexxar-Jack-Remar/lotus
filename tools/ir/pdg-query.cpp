@@ -15,8 +15,8 @@
 #include "llvm/Support/raw_ostream.h"
 
 #include "IR/PDG/QueryLanguage/Cypher.h"
-#include "IR/PDG/Analysis/PDGQuery.h"
-#include "IR/PDG/Analysis/PropertyBasedSlicing.h"
+#include "IR/PDG/Analysis/Query.h"
+#include "IR/PDG/Analysis/PropertySpec.h"
 #include "IR/PDG/Core/ControlDependencyGraph.h"
 #include "IR/PDG/Core/DataDependencyGraph.h"
 #include "IR/PDG/Core/ProgramDependencyGraph.h"

@@ -1,402 +1,238 @@
-/**
- * @file DependenceQuery.cpp
- * @brief Implementation of pairwise dependence queries, transitive closure,
- *        and dependence distance computation over the PDG.
- *
- * References:
- * - Ferrante, Ottenstein & Warren, "The Program Dependence Graph and Its Use
- *   in Optimization", TOPLAS 1987.
- * - Horwitz, Reps & Binkley, "Interprocedural Slicing Using Dependence
- *   Graphs", TOPLAS 1990.
- */
-
 #include "IR/PDG/Analysis/DependenceQuery.h"
 
-#include "IR/PDG/Support/PDGUtils.h"
+#include "IR/PDG/Analysis/Query.h"
 
-#include <algorithm>
-#include <chrono>
-#include <queue>
+#include "QueryInternal.inc"
 
-using namespace llvm;
+DependenceQuery::DependenceQuery(ProgramGraph &pdg) : pdg_(pdg) {}
 
-namespace pdg {
-
-// ============================================================================
-// Helpers
-// ============================================================================
-
-namespace {
-
-bool isEdgeAllowed(EdgeType et, const std::set<EdgeType> &allowed) {
-  return allowed.empty() || allowed.count(et);
+PDGQueryResult DependenceQuery::reachability(const PDGCriteria &sources,
+                                             const PDGQueryOptions &options,
+                                             const Module *module) const {
+  SliceQuery slice(pdg_);
+  return slice.forward(sources, options, module);
 }
 
-} // namespace
+PDGQueryResult DependenceQuery::shortestPath(const PDGCriteria &sources,
+                                             const PDGCriteria &targets,
+                                             const PDGQueryOptions &options,
+                                             const Module *module) const {
+  PDGCriteriaResolver resolver(pdg_);
+  PDGQueryResult source_nodes = resolver.resolve(sources, options, module);
+  PDGQueryResult target_nodes = resolver.resolve(targets, options, module);
+  const NodeSet scoped_nodes = scopeNodes(pdg_, options.scope);
+  const std::set<EdgeType> edge_types = edgeTypesForPreset(options.edge_preset);
 
-// ============================================================================
-// PairwiseDependence
-// ============================================================================
-
-DependenceResult
-PairwiseDependence::query(Node &source, Node &target,
-                          const std::set<EdgeType> &edge_types) {
-  DependenceResult result;
-
-  if (&source == &target) {
-    result.has_dependence = true;
-    result.is_direct = false;
-    result.is_transitive = false;
-    result.distance = 0;
-    result.witness_path = {&source};
-    return result;
-  }
-
-  // BFS from source to target, recording predecessor map for witness path.
-  std::unordered_map<Node *, Node *> pred;        // child -> parent
-  std::unordered_map<Node *, EdgeType> pred_edge; // child -> edge from parent
-  std::unordered_set<Node *> visited;
-  std::queue<std::pair<Node *, size_t>> worklist; // <node, depth>
-
-  worklist.push({&source, 0});
-  visited.insert(&source);
-  pred[&source] = nullptr;
-
-  bool found = false;
-
-  while (!worklist.empty()) {
-    auto pair = worklist.front();
-    Node *current = pair.first;
-    size_t depth = pair.second;
-    worklist.pop();
-
-    for (auto *edge : current->getOutEdgeSet()) {
-      if (edge == nullptr)
-        continue;
-      if (!isEdgeAllowed(edge->getEdgeType(), edge_types))
-        continue;
-
-      Node *neighbor = edge->getDstNode();
-      if (neighbor == nullptr || visited.count(neighbor))
-        continue;
-
-      visited.insert(neighbor);
-      pred[neighbor] = current;
-      pred_edge[neighbor] = edge->getEdgeType();
-
-      if (neighbor == &target) {
-        found = true;
-        break;
-      }
-
-      worklist.push({neighbor, depth + 1});
-    }
-
-    if (found)
-      break;
-  }
-
-  if (!found)
-    return result;
-
-  // Reconstruct witness path.
-  result.has_dependence = true;
-  std::vector<Node *> path;
-  std::vector<EdgeType> edge_path;
-  for (Node *n = &target; n != nullptr; n = pred[n]) {
-    path.push_back(n);
-    if (pred.count(n) && pred[n] != nullptr)
-      edge_path.push_back(pred_edge[n]);
-  }
-  std::reverse(path.begin(), path.end());
-  std::reverse(edge_path.begin(), edge_path.end());
-
-  result.witness_path = std::move(path);
-  result.witness_edge_types = std::move(edge_path);
-  result.distance = result.witness_path.size() - 1;
-  result.is_direct = (result.distance == 1);
-  result.is_transitive = (result.distance > 1);
-
-  return result;
-}
-
-PairwiseDependence::DirectDepMap
-PairwiseDependence::directDependences(Node &node, bool forward,
-                                      const std::set<EdgeType> &edge_types) {
-  DirectDepMap result;
-  auto &edges = forward ? node.getOutEdgeSet() : node.getInEdgeSet();
-
-  for (auto *edge : edges) {
-    if (edge == nullptr)
-      continue;
-    if (!isEdgeAllowed(edge->getEdgeType(), edge_types))
-      continue;
-
-    Node *neighbor = forward ? edge->getDstNode() : edge->getSrcNode();
-    if (neighbor != nullptr)
-      result[neighbor].insert(edge->getEdgeType());
-  }
-
-  return result;
-}
-
-std::vector<std::vector<Node *>>
-PairwiseDependence::allShortestPaths(Node &source, Node &target,
-                                     const std::set<EdgeType> &edge_types,
-                                     size_t max_paths) {
-  std::vector<std::vector<Node *>> result;
-
-  if (&source == &target) {
-    result.push_back({&source});
-    return result;
-  }
-
-  // BFS that records *all* predecessors at the shortest distance.
-  std::unordered_map<Node *, size_t> dist;
-  std::unordered_map<Node *, std::vector<Node *>> preds;
   std::queue<Node *> worklist;
+  std::unordered_map<Node *, size_t> distances;
+  std::unordered_map<Node *, std::vector<std::pair<Node *, EdgeType>>> preds;
 
-  dist[&source] = 0;
-  worklist.push(&source);
+  for (NodeSet::const_iterator it = source_nodes.nodes.begin();
+       it != source_nodes.nodes.end(); ++it) {
+    worklist.push(*it);
+    distances[*it] = 0;
+  }
 
-  size_t target_dist = SIZE_MAX;
+  size_t best_distance = static_cast<size_t>(-1);
+  Node *best_target = nullptr;
 
   while (!worklist.empty()) {
     Node *current = worklist.front();
     worklist.pop();
-
-    size_t d = dist[current];
-    if (d >= target_dist)
+    const size_t distance_to_current = distances[current];
+    if (distance_to_current >= best_distance)
       continue;
 
-    for (auto *edge : current->getOutEdgeSet()) {
-      if (edge == nullptr)
+    for (Node::EdgeSet::const_iterator it = current->getOutEdgeSet().begin();
+         it != current->getOutEdgeSet().end(); ++it) {
+      Edge *edge = *it;
+      if (edge == nullptr || !isEdgeAllowed(edge->getEdgeType(), edge_types))
         continue;
-      if (!isEdgeAllowed(edge->getEdgeType(), edge_types))
-        continue;
-
       Node *neighbor = edge->getDstNode();
       if (neighbor == nullptr)
         continue;
+      if (!scoped_nodes.empty() && scoped_nodes.count(neighbor) == 0)
+        continue;
 
-      size_t nd = d + 1;
+      const size_t next_distance = distance_to_current + 1;
+      std::unordered_map<Node *, size_t>::iterator dist_it =
+          distances.find(neighbor);
+      if (dist_it == distances.end() || next_distance < dist_it->second) {
+        distances[neighbor] = next_distance;
+        preds[neighbor].clear();
+        preds[neighbor].push_back(std::make_pair(current, edge->getEdgeType()));
+        worklist.push(neighbor);
+      } else if (next_distance == dist_it->second) {
+        preds[neighbor].push_back(std::make_pair(current, edge->getEdgeType()));
+      }
 
-      if (dist.find(neighbor) == dist.end()) {
-        dist[neighbor] = nd;
-        preds[neighbor].push_back(current);
-        if (neighbor == &target)
-          target_dist = nd;
-        else
-          worklist.push(neighbor);
-      } else if (dist[neighbor] == nd) {
-        preds[neighbor].push_back(current);
+      if (target_nodes.nodes.count(neighbor) != 0 &&
+          next_distance < best_distance) {
+        best_distance = next_distance;
+        best_target = neighbor;
       }
     }
   }
 
-  if (target_dist == SIZE_MAX)
+  PDGQueryResult result;
+  result.criteria_nodes = source_nodes.nodes;
+  result.criteria_nodes.insert(target_nodes.nodes.begin(), target_nodes.nodes.end());
+  result.diagnostics = source_nodes.diagnostics;
+  result.diagnostics.unresolved_criteria.insert(
+      result.diagnostics.unresolved_criteria.end(),
+      target_nodes.diagnostics.unresolved_criteria.begin(),
+      target_nodes.diagnostics.unresolved_criteria.end());
+
+  if (best_target == nullptr)
     return result;
 
-  // Backtrack from target to source to enumerate all shortest paths.
-  std::vector<Node *> current_path = {&target};
-  std::function<void()> enumerate = [&]() {
-    Node *head = current_path.back();
-    if (head == &source) {
-      std::vector<Node *> path(current_path.rbegin(), current_path.rend());
-      result.push_back(std::move(path));
-      return;
-    }
-    if (max_paths > 0 && result.size() >= max_paths)
-      return;
-    for (Node *p : preds[head]) {
-      current_path.push_back(p);
-      enumerate();
-      current_path.pop_back();
-      if (max_paths > 0 && result.size() >= max_paths)
-        return;
-    }
-  };
-  enumerate();
+  Node *cursor = best_target;
+  std::vector<Node *> path_nodes;
+  std::vector<EdgeType> path_edges;
+  std::unordered_set<Node *> seen;
+  while (cursor != nullptr && seen.insert(cursor).second) {
+    path_nodes.push_back(cursor);
+    if (source_nodes.nodes.count(cursor) != 0)
+      break;
+    if (preds[cursor].empty())
+      break;
+    path_edges.push_back(preds[cursor].front().second);
+    result.predecessors[cursor].insert(preds[cursor].front().first);
+    cursor = preds[cursor].front().first;
+  }
+  std::reverse(path_nodes.begin(), path_nodes.end());
+  std::reverse(path_edges.begin(), path_edges.end());
 
+  result.nodes.insert(path_nodes.begin(), path_nodes.end());
+  result.edges = collectInducedEdges(result.nodes, edge_types);
+  result.distances[best_target] = best_distance;
+  if (options.explain) {
+    PDGWitnessPath witness;
+    witness.kind = PDGWitnessPathKind::ShortestPath;
+    witness.nodes = path_nodes;
+    witness.edge_types = path_edges;
+    result.witness_paths.push_back(witness);
+  }
   return result;
 }
 
-// ============================================================================
-// TransitiveClosure
-// ============================================================================
+std::vector<PDGWitnessPath>
+DependenceQuery::allShortestPaths(const PDGCriteria &sources,
+                                  const PDGCriteria &targets,
+                                  const PDGQueryOptions &options,
+                                  const Module *module) const {
+  PDGCriteriaResolver resolver(pdg_);
+  PDGQueryResult source_nodes = resolver.resolve(sources, options, module);
+  PDGQueryResult target_nodes = resolver.resolve(targets, options, module);
+  const NodeSet scoped_nodes = scopeNodes(pdg_, options.scope);
+  const std::set<EdgeType> edge_types = edgeTypesForPreset(options.edge_preset);
 
-void TransitiveClosure::build(const std::set<EdgeType> &edge_types,
-                              TransitiveClosureDiagnostics *diagnostics) {
-  NodeSet all_nodes(_pdg.begin(), _pdg.end());
-  build(all_nodes, edge_types, diagnostics);
-}
+  std::queue<Node *> worklist;
+  std::unordered_map<Node *, size_t> distances;
+  std::unordered_map<Node *, std::vector<std::pair<Node *, EdgeType>>> preds;
 
-void TransitiveClosure::build(const NodeSet &subgraph_nodes,
-                              const std::set<EdgeType> &edge_types,
-                              TransitiveClosureDiagnostics *diagnostics) {
-  reset();
-  auto t0 = std::chrono::steady_clock::now();
-
-  // Initialize maps.
-  for (Node *n : subgraph_nodes) {
-    _forward[n]; // create empty entry
-    _reverse[n];
+  for (NodeSet::const_iterator it = source_nodes.nodes.begin();
+       it != source_nodes.nodes.end(); ++it) {
+    worklist.push(*it);
+    distances[*it] = 0;
   }
 
-  // For every node, BFS forward collecting reachable nodes.
-  for (Node *src : subgraph_nodes) {
-    std::unordered_set<Node *> visited;
-    std::queue<Node *> worklist;
-    worklist.push(src);
-    visited.insert(src);
-
-    while (!worklist.empty()) {
-      Node *current = worklist.front();
-      worklist.pop();
-
-      for (auto *edge : current->getOutEdgeSet()) {
-        if (edge == nullptr)
-          continue;
-        if (!isEdgeAllowed(edge->getEdgeType(), edge_types))
-          continue;
-
-        Node *neighbor = edge->getDstNode();
-        if (neighbor == nullptr || visited.count(neighbor))
-          continue;
-        // Only track nodes inside the sub-graph.
-        if (_forward.find(neighbor) == _forward.end())
-          continue;
-
-        visited.insert(neighbor);
-        _forward[src].insert(neighbor);
-        _reverse[neighbor].insert(src);
-        worklist.push(neighbor);
-      }
-    }
-  }
-
-  _is_built = true;
-
-  if (diagnostics) {
-    auto t1 = std::chrono::steady_clock::now();
-    diagnostics->num_nodes = subgraph_nodes.size();
-    diagnostics->num_reachable_pairs = 0;
-    for (auto &kv : _forward)
-      diagnostics->num_reachable_pairs += kv.second.size();
-    diagnostics->build_time_ms =
-        std::chrono::duration<double, std::milli>(t1 - t0).count();
-  }
-}
-
-bool TransitiveClosure::canReach(Node &source, Node &target) const {
-  auto it = _forward.find(&source);
-  if (it == _forward.end())
-    return false;
-  return it->second.count(&target);
-}
-
-TransitiveClosure::NodeSet
-TransitiveClosure::getReachableSet(Node &source) const {
-  NodeSet result;
-  auto it = _forward.find(&source);
-  if (it != _forward.end())
-    result.insert(it->second.begin(), it->second.end());
-  return result;
-}
-
-TransitiveClosure::NodeSet
-TransitiveClosure::getPredecessorSet(Node &target) const {
-  NodeSet result;
-  auto it = _reverse.find(&target);
-  if (it != _reverse.end())
-    result.insert(it->second.begin(), it->second.end());
-  return result;
-}
-
-void TransitiveClosure::reset() {
-  _forward.clear();
-  _reverse.clear();
-  _is_built = false;
-}
-
-// ============================================================================
-// DependenceDistance
-// ============================================================================
-
-template <typename GetEdgesFunc, typename GetNeighborFunc>
-DependenceDistance::DistanceMap DependenceDistance::computeDistances(
-    Node &start, const std::set<EdgeType> &edge_types, size_t max_depth,
-    GetEdgesFunc get_edges, GetNeighborFunc get_neighbor) {
-  DistanceMap distances;
-  std::queue<std::pair<Node *, size_t>> worklist;
-  distances[&start] = 0;
-  worklist.push({&start, 0});
+  size_t best_distance = static_cast<size_t>(-1);
+  std::vector<Node *> best_targets;
 
   while (!worklist.empty()) {
-    auto pair = worklist.front();
-    Node *current = pair.first;
-    size_t depth = pair.second;
+    Node *current = worklist.front();
     worklist.pop();
-
-    if (max_depth > 0 && depth >= max_depth)
+    const size_t distance_to_current = distances[current];
+    if (distance_to_current >= best_distance)
       continue;
 
-    for (auto *edge : get_edges(current)) {
-      if (edge == nullptr)
+    for (Node::EdgeSet::const_iterator it = current->getOutEdgeSet().begin();
+         it != current->getOutEdgeSet().end(); ++it) {
+      Edge *edge = *it;
+      if (edge == nullptr || !isEdgeAllowed(edge->getEdgeType(), edge_types))
         continue;
-      if (!isEdgeAllowed(edge->getEdgeType(), edge_types))
-        continue;
-
-      Node *neighbor = get_neighbor(edge);
+      Node *neighbor = edge->getDstNode();
       if (neighbor == nullptr)
         continue;
+      if (!scoped_nodes.empty() && scoped_nodes.count(neighbor) == 0)
+        continue;
 
-      size_t nd = depth + 1;
-      if (distances.find(neighbor) == distances.end()) {
-        distances[neighbor] = nd;
-        worklist.push({neighbor, nd});
+      const size_t next_distance = distance_to_current + 1;
+      std::unordered_map<Node *, size_t>::iterator dist_it =
+          distances.find(neighbor);
+      if (dist_it == distances.end()) {
+        distances[neighbor] = next_distance;
+        preds[neighbor].push_back(std::make_pair(current, edge->getEdgeType()));
+        worklist.push(neighbor);
+      } else if (next_distance == dist_it->second) {
+        preds[neighbor].push_back(std::make_pair(current, edge->getEdgeType()));
+      }
+
+      if (target_nodes.nodes.count(neighbor) != 0) {
+        if (next_distance < best_distance) {
+          best_distance = next_distance;
+          best_targets.clear();
+          best_targets.push_back(neighbor);
+        } else if (next_distance == best_distance) {
+          best_targets.push_back(neighbor);
+        }
       }
     }
   }
 
-  return distances;
+  std::vector<PDGWitnessPath> results;
+  std::set<std::string> seen_paths;
+  std::function<void(Node *, std::vector<Node *> &, std::vector<EdgeType> &)>
+      build = [&](Node *current, std::vector<Node *> &nodes,
+                  std::vector<EdgeType> &edges) {
+        if (source_nodes.nodes.count(current) != 0) {
+          PDGWitnessPath witness;
+          witness.kind = PDGWitnessPathKind::AllShortestPath;
+          witness.nodes.assign(nodes.rbegin(), nodes.rend());
+          witness.edge_types.assign(edges.rbegin(), edges.rend());
+          const std::string key = pathKey(witness);
+          if (seen_paths.insert(key).second)
+            results.push_back(witness);
+          return;
+        }
+
+        std::vector<std::pair<Node *, EdgeType>> &pred_list = preds[current];
+        for (size_t i = 0; i < pred_list.size(); ++i) {
+          nodes.push_back(pred_list[i].first);
+          edges.push_back(pred_list[i].second);
+          build(pred_list[i].first, nodes, edges);
+          edges.pop_back();
+          nodes.pop_back();
+          if (options.limits.max_paths > 0 &&
+              results.size() >= options.limits.max_paths)
+            return;
+        }
+      };
+
+  for (size_t i = 0; i < best_targets.size(); ++i) {
+    std::vector<Node *> nodes;
+    std::vector<EdgeType> edges;
+    nodes.push_back(best_targets[i]);
+    build(best_targets[i], nodes, edges);
+    if (options.limits.max_paths > 0 &&
+        results.size() >= options.limits.max_paths)
+      break;
+  }
+
+  return results;
 }
 
-size_t DependenceDistance::distance(Node &source, Node &target,
-                                    const std::set<EdgeType> &edge_types) {
-  if (&source == &target)
-    return 0;
-
-  // Bidirectional BFS could be used here but plain BFS is simpler and
-  // sufficient for moderate-sized PDGs.
-  auto dists = forwardDistances(source, edge_types);
-  auto it = dists.find(&target);
-  return (it != dists.end()) ? it->second : SIZE_MAX;
+size_t DependenceQuery::distance(const PDGCriteria &sources,
+                                 const PDGCriteria &targets,
+                                 const PDGQueryOptions &options,
+                                 const Module *module) const {
+  PDGQueryResult result = shortestPath(sources, targets, options, module);
+  if (result.witness_paths.empty())
+    return static_cast<size_t>(-1);
+  return result.witness_paths.front().nodes.size() - 1;
 }
 
-DependenceDistance::DistanceMap DependenceDistance::forwardDistances(
-    Node &source, const std::set<EdgeType> &edge_types, size_t max_depth) {
-  return computeDistances(
-      source, edge_types, max_depth,
-      [](Node *n) -> Node::EdgeSet & { return n->getOutEdgeSet(); },
-      [](Edge *e) { return e->getDstNode(); });
-}
 
-DependenceDistance::DistanceMap DependenceDistance::backwardDistances(
-    Node &target, const std::set<EdgeType> &edge_types, size_t max_depth) {
-  return computeDistances(
-      target, edge_types, max_depth,
-      [](Node *n) -> Node::EdgeSet & { return n->getInEdgeSet(); },
-      [](Edge *e) { return e->getSrcNode(); });
-}
-
-size_t DependenceDistance::eccentricity(Node &node,
-                                        const std::set<EdgeType> &edge_types) {
-  auto dists = forwardDistances(node, edge_types);
-  size_t max_dist = 0;
-  for (auto &kv : dists)
-    max_dist = std::max(max_dist, kv.second);
-  return max_dist;
-}
 
 } // namespace pdg

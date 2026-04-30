@@ -11,7 +11,7 @@
 
 #include "IR/PDG/Analysis/SummaryQuery.h"
 
-#include "IR/PDG/Analysis/PDGQuery.h"
+#include "IR/PDG/Analysis/Query.h"
 
 #include "llvm/IR/Instructions.h"
 

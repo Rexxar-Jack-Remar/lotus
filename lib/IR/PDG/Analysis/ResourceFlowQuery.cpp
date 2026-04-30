@@ -9,7 +9,7 @@
 
 #include "IR/PDG/Analysis/ResourceFlowQuery.h"
 
-#include "IR/PDG/Analysis/PDGQuery.h"
+#include "IR/PDG/Analysis/Query.h"
 #include "IR/PDG/Analysis/SummaryQuery.h"
 
 #include "llvm/IR/Instructions.h"

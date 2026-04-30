@@ -1,25 +1,16 @@
 /**
- * @file PDGQueryCore.h
+ * @file QueryCore.h
  * @brief Shared types and core PDG query services.
  *
- * This header contains the common result/configuration vocabulary used by all
- * PDG analyses plus the foundational services that other higher-level queries
- * build on:
- * - criteria resolution
- * - slicing
- * - dependence/path queries
- * - dataflow convenience queries
- * - transform legality/scheduling helpers
- * - structural diffing
- *
- * Higher-level analyses such as SummaryQuery, ImpactQuery, and
- * ResourceFlowQuery are declared in their own headers to keep this file focused
- * on reusable query infrastructure.
+ * This header contains the shared result/configuration vocabulary used by the
+ * PDG query layer plus criteria resolution helpers. Concrete query services are
+ * declared in focused ``*Query`` headers to keep the public API aligned with
+ * the main types that clients instantiate.
  */
 
 #pragma once
 
-#include "IR/PDG/Analysis/PropertyBasedSlicing.h"
+#include "IR/PDG/Analysis/PropertySpec.h"
 #include "IR/PDG/Core/Graph.h"
 #include "IR/PDG/Core/PDGEdge.h"
 #include "IR/PDG/Core/PDGEnums.h"
@@ -218,63 +209,6 @@ private:
   ProgramGraph &pdg_;
 };
 
-/// Forward/backward slicing and chopping over the PDG.
-class SliceQuery {
-public:
-  explicit SliceQuery(ProgramGraph &pdg);
-
-  PDGQueryResult forward(const PDGCriteria &criteria,
-                         const PDGQueryOptions &options = PDGQueryOptions(),
-                         const llvm::Module *module = nullptr) const;
-
-  PDGQueryResult backward(const PDGCriteria &criteria,
-                          const PDGQueryOptions &options = PDGQueryOptions(),
-                          const llvm::Module *module = nullptr) const;
-
-  PDGQueryResult chop(const PDGCriteria &sources, const PDGCriteria &targets,
-                      const PDGQueryOptions &options = PDGQueryOptions(),
-                      const llvm::Module *module = nullptr) const;
-
-private:
-  ProgramGraph &pdg_;
-  mutable std::unordered_map<std::string, PDGQueryResult> result_cache_;
-  mutable std::unordered_map<std::string, PDGQueryResult::NodeSet>
-      criteria_cache_;
-  mutable unsigned long long cache_epoch_ = 0;
-};
-
-/// Reachability and shortest-path style dependence queries.
-class DependenceQuery {
-public:
-  explicit DependenceQuery(ProgramGraph &pdg);
-
-  PDGQueryResult reachability(
-      const PDGCriteria &sources,
-      const PDGQueryOptions &options = PDGQueryOptions(),
-      const llvm::Module *module = nullptr) const;
-
-  PDGQueryResult shortestPath(
-      const PDGCriteria &sources, const PDGCriteria &targets,
-      const PDGQueryOptions &options = PDGQueryOptions(),
-      const llvm::Module *module = nullptr) const;
-
-  std::vector<PDGWitnessPath> allShortestPaths(
-      const PDGCriteria &sources, const PDGCriteria &targets,
-      const PDGQueryOptions &options = PDGQueryOptions(),
-      const llvm::Module *module = nullptr) const;
-
-  size_t distance(const PDGCriteria &sources, const PDGCriteria &targets,
-                  const PDGQueryOptions &options = PDGQueryOptions(),
-                  const llvm::Module *module = nullptr) const;
-
-private:
-  ProgramGraph &pdg_;
-  mutable std::unordered_map<std::string,
-                             std::unordered_map<Node *, std::set<Node *>>>
-      closure_cache_;
-  mutable unsigned long long cache_epoch_ = 0;
-};
-
 struct DefUseLink {
   Node *from = nullptr;
   Node *to = nullptr;
@@ -284,46 +218,6 @@ struct DefUseLink {
 struct ControllingCondition {
   Node *predicate = nullptr;
   EdgeType edge_type = EdgeType::CONTROLDEP_BR;
-};
-
-/// Dataflow-flavored queries built on top of PDG traversal.
-class DataFlowQuery {
-public:
-  explicit DataFlowQuery(ProgramGraph &pdg) : pdg_(pdg) {}
-
-  PDGQueryResult reachingDefinitions(
-      const PDGCriteria &uses,
-      const PDGQueryOptions &options = PDGQueryOptions(),
-      const llvm::Module *module = nullptr) const;
-
-  std::vector<DefUseLink>
-  defUseChain(Node &definition,
-              const PDGQueryOptions &options = PDGQueryOptions()) const;
-
-  std::vector<DefUseLink>
-  useDefChain(Node &use,
-              const PDGQueryOptions &options = PDGQueryOptions()) const;
-
-  PDGQueryResult liveNodes(
-      const PDGQueryOptions &options = PDGQueryOptions()) const;
-
-  PDGQueryResult deadNodes(
-      const PDGQueryOptions &options = PDGQueryOptions()) const;
-
-  std::vector<ControllingCondition> immediateControllers(Node &node) const;
-
-  PDGQueryResult allControllers(
-      const PDGCriteria &criteria,
-      const PDGQueryOptions &options = PDGQueryOptions(),
-      const llvm::Module *module = nullptr) const;
-
-  PDGQueryResult controlRegion(
-      const PDGCriteria &criteria,
-      const PDGQueryOptions &options = PDGQueryOptions(),
-      const llvm::Module *module = nullptr) const;
-
-private:
-  ProgramGraph &pdg_;
 };
 
 /// Optional LLVM analyses used by transform-oriented PDG queries.
@@ -354,52 +248,6 @@ struct IndependenceCheckResult {
   PDGQueryDiagnostics diagnostics;
 };
 
-/// Dependence-aware transform legality and scheduling helpers.
-class TransformQuery {
-public:
-  explicit TransformQuery(ProgramGraph &pdg) : pdg_(pdg) {}
-
-  MotionCheckResult canMoveEarlier(Node &moving_node, Node &anchor_node,
-                                   const LLVMQueryContext &llvm_context,
-                                   const PDGQueryOptions &options =
-                                       PDGQueryOptions()) const;
-
-  MotionCheckResult canMoveLater(Node &moving_node, Node &anchor_node,
-                                 const LLVMQueryContext &llvm_context,
-                                 const PDGQueryOptions &options =
-                                     PDGQueryOptions()) const;
-
-  IndependenceCheckResult independent(
-      Node &a, Node &b, const LLVMQueryContext &llvm_context,
-      const PDGQueryOptions &options = PDGQueryOptions()) const;
-
-  PDGQueryResult readySet(const PDGQueryScope &scope,
-                          const PDGQueryResult::NodeSet &scheduled,
-                          const LLVMQueryContext &llvm_context,
-                          const PDGQueryOptions &options =
-                              PDGQueryOptions()) const;
-
-  std::vector<PDGQueryResult::NodeSet>
-  topologicalLevels(const PDGQueryScope &scope,
-                    const LLVMQueryContext &llvm_context,
-                    const PDGQueryOptions &options =
-                        PDGQueryOptions()) const;
-
-  std::vector<PDGQueryResult::NodeSet>
-  stronglyConnectedComponents(const PDGQueryScope &scope,
-                              const LLVMQueryContext &llvm_context,
-                              const PDGQueryOptions &options =
-                                  PDGQueryOptions()) const;
-
-  size_t criticalPathLength(const PDGQueryScope &scope,
-                            const LLVMQueryContext &llvm_context,
-                            const PDGQueryOptions &options =
-                                PDGQueryOptions()) const;
-
-private:
-  ProgramGraph &pdg_;
-};
-
 enum class DiffKind { Added, Removed, Preserved };
 
 enum class NodeMatchStrategy { PointerIdentity, CanonicalSource };
@@ -417,35 +265,6 @@ struct EdgeDiffEntry {
 struct DiffImpactSummary {
   std::unordered_map<std::string, size_t> functions;
   std::unordered_map<std::string, size_t> source_locations;
-};
-
-/// Structural diff result between two PDG subgraphs.
-struct DiffQueryResult {
-  std::vector<NodeDiffEntry> node_diffs;
-  std::vector<EdgeDiffEntry> edge_diffs;
-  DiffImpactSummary impact_summary;
-  PDGQueryDiagnostics diagnostics;
-
-  bool isIdentical() const;
-};
-
-/// Structural differencing for PDG query results or explicit scopes.
-class DiffQuery {
-public:
-  explicit DiffQuery(
-      ProgramGraph &pdg,
-      NodeMatchStrategy strategy = NodeMatchStrategy::PointerIdentity)
-      : pdg_(pdg), strategy_(strategy) {}
-
-  DiffQueryResult diff(const PDGQueryResult &before, const PDGQueryResult &after,
-                       const PDGQueryOptions &options = PDGQueryOptions()) const;
-
-  DiffQueryResult diff(const PDGQueryScope &before, const PDGQueryScope &after,
-                       const PDGQueryOptions &options = PDGQueryOptions()) const;
-
-private:
-  ProgramGraph &pdg_;
-  NodeMatchStrategy strategy_;
 };
 
 std::set<EdgeType> edgeTypesForPreset(PDGEdgePreset preset);

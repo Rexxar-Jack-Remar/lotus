@@ -26,7 +26,7 @@ The PDG infrastructure provides several LLVM passes:
 Unified Query API
 =================
 
-The public query layer lives in ``include/IR/PDG/Analysis/PDGQuery.h`` and is
+The public query layer lives in ``include/IR/PDG/Analysis/Query.h`` and is
 organized around five service objects:
 
 * ``SliceQuery`` – forward/backward slices, chops, and thin slices

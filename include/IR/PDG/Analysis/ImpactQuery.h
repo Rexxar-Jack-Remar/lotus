@@ -9,7 +9,7 @@
 
 #pragma once
 
-#include "IR/PDG/Analysis/PDGQueryCore.h"
+#include "IR/PDG/Analysis/DiffQuery.h"
 
 namespace pdg {
 

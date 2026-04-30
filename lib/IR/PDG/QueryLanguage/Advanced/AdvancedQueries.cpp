@@ -1,11 +1,11 @@
 /**
- * @file CypherExtensions.cpp
+ * @file AdvancedQueries.cpp
  * @brief Implementation of extended Cypher query capabilities
  */
 
-#include "IR/PDG/QueryLanguage/CypherExtensions.h"
+#include "IR/PDG/QueryLanguage/Advanced/AdvancedQueries.h"
 
-#include "IR/PDG/Analysis/Slicing.h"
+#include "IR/PDG/Analysis/SliceQuery.h"
 #include "IR/PDG/Support/PDGUtils.h"
 
 #include <algorithm>

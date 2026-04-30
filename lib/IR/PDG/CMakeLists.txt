@@ -14,12 +14,20 @@ add_library(CanaryPDG STATIC
   Core/PDGNode.cpp
   Core/ProgramDependencyGraph.cpp
   Core/Tree.cpp
-  QueryLanguage/Cypher.cpp
-  Analysis/PDGQuery.cpp
+  QueryLanguage/Execution/CypherExecutor.cpp
+  QueryLanguage/Execution/CypherResult.cpp
+  QueryLanguage/Parser/CypherParser.cpp
+  Analysis/Query.cpp
+  Analysis/QueryCore.cpp
+  Analysis/SliceQuery.cpp
+  Analysis/DependenceQuery.cpp
+  Analysis/DataFlowQuery.cpp
+  Analysis/TransformQuery.cpp
+  Analysis/DiffQuery.cpp
   Analysis/SummaryQuery.cpp
   Analysis/ImpactQuery.cpp
   Analysis/ResourceFlowQuery.cpp
-  Analysis/PropertyBasedSlicing.cpp
+  Analysis/PropertySpec.cpp
   Support/DebugInfoUtils.cpp
   Support/GraphWriter.cpp
   Support/PDGUtils.cpp

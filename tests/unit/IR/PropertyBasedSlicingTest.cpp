@@ -1,4 +1,4 @@
-#include "IR/PDG/Analysis/PropertyBasedSlicing.h"
+#include "IR/PDG/Analysis/PropertySpec.h"
 
 #include <gtest/gtest.h>
 #include <sstream>

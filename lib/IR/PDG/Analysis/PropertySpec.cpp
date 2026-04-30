@@ -1,4 +1,4 @@
-#include "IR/PDG/Analysis/PropertyBasedSlicing.h"
+#include "IR/PDG/Analysis/PropertySpec.h"
 
 #include "llvm/ADT/StringRef.h"
 #include "llvm/IR/Function.h"

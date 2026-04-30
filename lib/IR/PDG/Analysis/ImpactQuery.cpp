@@ -10,7 +10,7 @@
 
 #include "IR/PDG/Analysis/ImpactQuery.h"
 
-#include "IR/PDG/Analysis/PDGQuery.h"
+#include "IR/PDG/Analysis/Query.h"
 #include "IR/PDG/Analysis/SummaryQuery.h"
 
 #include "llvm/IR/DebugInfoMetadata.h"
