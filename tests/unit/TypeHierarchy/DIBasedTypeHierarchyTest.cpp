@@ -1,37 +1,4 @@
-/**
- * @file DIBasedTypeHierarchyTest.cpp
- * @brief Unit tests for DIBasedTypeHierarchy
- *
- * This file contains comprehensive tests for the DIBasedTypeHierarchy class,
- * which reconstructs C++ type hierarchies from LLVM IR with debug information.
- * Tests are migrated from PhasarLLVM TypeHierarchy tests.
- */
-
-#include "Analysis/TypeHirarchy/DIBasedTypeHierarchy.h"
-#include "TestUtils/LLVMHelpers.h"
-
-#include <gtest/gtest.h>
-
-#include "llvm/IR/LLVMContext.h"
-#include "llvm/IR/Module.h"
-
-using namespace llvm;
-using namespace lotus;
-
-namespace {
-
-using lotus::unittest::loadModule;
-
-// Helper function to get test file path
-std::string getTestFilePath(const std::string &FileName) {
-  return std::string(LOTUS_TYPE_HIERARCHY_LL_DIR) + "/" + FileName;
-}
-
-/*
----------------------------
-BasicTHReconstruction Tests
----------------------------
-*/
+#include "DIBasedTypeHierarchyTestSupport.h"
 
 TEST(DIBasedTypeHierarchyTest, BasicTHReconstruction_1) {
   LLVMContext Context;
@@ -53,7 +20,6 @@ TEST(DIBasedTypeHierarchyTest, BasicTHReconstruction_1) {
   auto SubTypes = DBTH.getSubTypes(*BaseType);
   EXPECT_TRUE(SubTypes.find(*ChildType) != SubTypes.end());
 }
-
 TEST(DIBasedTypeHierarchyTest, BasicTHReconstruction_2) {
   LLVMContext Context;
   auto M = loadModule(getTestFilePath("type_hierarchy_2_cpp_dbg.ll"), Context);
@@ -74,7 +40,6 @@ TEST(DIBasedTypeHierarchyTest, BasicTHReconstruction_2) {
   auto SubTypes = DBTH.getSubTypes(*BaseType);
   EXPECT_TRUE(SubTypes.find(*ChildType) != SubTypes.end());
 }
-
 TEST(DIBasedTypeHierarchyTest, BasicTHReconstruction_3) {
   LLVMContext Context;
   auto M = loadModule(getTestFilePath("type_hierarchy_3_cpp_dbg.ll"), Context);
@@ -95,7 +60,6 @@ TEST(DIBasedTypeHierarchyTest, BasicTHReconstruction_3) {
   auto SubTypes = DBTH.getSubTypes(*BaseType);
   EXPECT_TRUE(SubTypes.find(*ChildType) != SubTypes.end());
 }
-
 TEST(DIBasedTypeHierarchyTest, BasicTHReconstruction_4) {
   LLVMContext Context;
   auto M = loadModule(getTestFilePath("type_hierarchy_4_cpp_dbg.ll"), Context);
@@ -116,7 +80,6 @@ TEST(DIBasedTypeHierarchyTest, BasicTHReconstruction_4) {
   auto SubTypes = DBTH.getSubTypes(*BaseType);
   EXPECT_TRUE(SubTypes.find(*ChildType) != SubTypes.end());
 }
-
 TEST(DIBasedTypeHierarchyTest, BasicTHReconstruction_5) {
   LLVMContext Context;
   auto M = loadModule(getTestFilePath("type_hierarchy_5_cpp_dbg.ll"), Context);
@@ -142,7 +105,6 @@ TEST(DIBasedTypeHierarchyTest, BasicTHReconstruction_5) {
   auto SubTypesOtherBase = DBTH.getSubTypes(*OtherBaseType);
   EXPECT_TRUE(SubTypesOtherBase.find(*ChildType) != SubTypesOtherBase.end());
 }
-
 TEST(DIBasedTypeHierarchyTest, BasicTHReconstruction_6) {
   LLVMContext Context;
   auto M = loadModule(getTestFilePath("type_hierarchy_6_cpp_dbg.ll"), Context);
@@ -163,7 +125,6 @@ TEST(DIBasedTypeHierarchyTest, BasicTHReconstruction_6) {
   auto SubTypes = DBTH.getSubTypes(*BaseType);
   EXPECT_TRUE(SubTypes.find(*ChildType) != SubTypes.end());
 }
-
 TEST(DIBasedTypeHierarchyTest, BasicTHReconstruction_7) {
   LLVMContext Context;
   auto M = loadModule(getTestFilePath("type_hierarchy_7_cpp_dbg.ll"), Context);
@@ -215,7 +176,6 @@ TEST(DIBasedTypeHierarchyTest, BasicTHReconstruction_7) {
   auto SubTypesY = DBTH.getSubTypes(*YType);
   EXPECT_TRUE(SubTypesY.find(*ZType) != SubTypesY.end());
 }
-
 TEST(DIBasedTypeHierarchyTest, BasicTHReconstruction_7_b) {
   LLVMContext Context;
   auto M = loadModule(getTestFilePath("type_hierarchy_7_b_cpp_dbg.ll"), Context);
@@ -263,7 +223,6 @@ TEST(DIBasedTypeHierarchyTest, BasicTHReconstruction_7_b) {
   auto SubTypesZ = DBTH.getSubTypes(*ZType);
   EXPECT_TRUE(SubTypesZ.find(*OmegaType) != SubTypesZ.end());
 }
-
 TEST(DIBasedTypeHierarchyTest, BasicTHReconstruction_8) {
   LLVMContext Context;
   auto M = loadModule(getTestFilePath("type_hierarchy_8_cpp_dbg.ll"), Context);
@@ -290,7 +249,6 @@ TEST(DIBasedTypeHierarchyTest, BasicTHReconstruction_8) {
   auto SubTypes = DBTH.getSubTypes(*BaseType);
   EXPECT_TRUE(SubTypes.find(*ChildType) != SubTypes.end());
 }
-
 TEST(DIBasedTypeHierarchyTest, BasicTHReconstruction_9) {
   LLVMContext Context;
   auto M = loadModule(getTestFilePath("type_hierarchy_9_cpp_dbg.ll"), Context);
@@ -311,7 +269,6 @@ TEST(DIBasedTypeHierarchyTest, BasicTHReconstruction_9) {
   auto SubTypes = DBTH.getSubTypes(*BaseType);
   EXPECT_TRUE(SubTypes.find(*ChildType) != SubTypes.end());
 }
-
 TEST(DIBasedTypeHierarchyTest, BasicTHReconstruction_10) {
   LLVMContext Context;
   auto M = loadModule(getTestFilePath("type_hierarchy_10_cpp_dbg.ll"), Context);
@@ -332,7 +289,6 @@ TEST(DIBasedTypeHierarchyTest, BasicTHReconstruction_10) {
   auto SubTypes = DBTH.getSubTypes(*BaseType);
   EXPECT_TRUE(SubTypes.find(*ChildType) != SubTypes.end());
 }
-
 TEST(DIBasedTypeHierarchyTest, BasicTHReconstruction_11) {
   LLVMContext Context;
   auto M = loadModule(getTestFilePath("type_hierarchy_11_cpp_dbg.ll"), Context);
@@ -353,7 +309,6 @@ TEST(DIBasedTypeHierarchyTest, BasicTHReconstruction_11) {
   auto SubTypes = DBTH.getSubTypes(*BaseType);
   EXPECT_TRUE(SubTypes.find(*ChildType) != SubTypes.end());
 }
-
 TEST(DIBasedTypeHierarchyTest, BasicTHReconstruction_12) {
   LLVMContext Context;
   auto M = loadModule(getTestFilePath("type_hierarchy_12_cpp_dbg.ll"), Context);
@@ -374,7 +329,6 @@ TEST(DIBasedTypeHierarchyTest, BasicTHReconstruction_12) {
   auto SubTypes = DBTH.getSubTypes(*BaseType);
   EXPECT_TRUE(SubTypes.find(*ChildType) != SubTypes.end());
 }
-
 TEST(DIBasedTypeHierarchyTest, BasicTHReconstruction_12_b) {
   LLVMContext Context;
   auto M = loadModule(getTestFilePath("type_hierarchy_12_b_cpp_dbg.ll"), Context);
@@ -404,7 +358,6 @@ TEST(DIBasedTypeHierarchyTest, BasicTHReconstruction_12_b) {
   auto SubTypesChild = DBTH.getSubTypes(*ChildType);
   EXPECT_TRUE(SubTypesChild.find(*ChildsChildType) != SubTypesChild.end());
 }
-
 TEST(DIBasedTypeHierarchyTest, BasicTHReconstruction_12_c) {
   LLVMContext Context;
   auto M = loadModule(getTestFilePath("type_hierarchy_12_c_cpp_dbg.ll"), Context);
@@ -425,13 +378,9 @@ TEST(DIBasedTypeHierarchyTest, BasicTHReconstruction_12_c) {
   auto SubTypesChild = DBTH.getSubTypes(*ChildType);
   EXPECT_TRUE(SubTypesChild.find(*ChildsChildType) != SubTypesChild.end());
 }
-
-/*
 TEST(DIBasedTypeHierarchyTest, BasicTHReconstruction_13) {
   // Test file 13 has no types - skipped
 }
-*/
-
 TEST(DIBasedTypeHierarchyTest, BasicTHReconstruction_14) {
   LLVMContext Context;
   auto M = loadModule(getTestFilePath("type_hierarchy_14_cpp_dbg.ll"), Context);
@@ -447,7 +396,6 @@ TEST(DIBasedTypeHierarchyTest, BasicTHReconstruction_14) {
 
   // there are no subtypes here
 }
-
 TEST(DIBasedTypeHierarchyTest, BasicTHReconstruction_15) {
   LLVMContext Context;
   auto M = loadModule(getTestFilePath("type_hierarchy_15_cpp_dbg.ll"), Context);
@@ -468,7 +416,6 @@ TEST(DIBasedTypeHierarchyTest, BasicTHReconstruction_15) {
   auto SubTypes = DBTH.getSubTypes(*BaseType);
   EXPECT_TRUE(SubTypes.find(*ChildType) != SubTypes.end());
 }
-
 TEST(DIBasedTypeHierarchyTest, BasicTHReconstruction_16) {
   LLVMContext Context;
   auto M = loadModule(getTestFilePath("type_hierarchy_16_cpp_dbg.ll"), Context);
@@ -505,7 +452,6 @@ TEST(DIBasedTypeHierarchyTest, BasicTHReconstruction_16) {
   auto SubTypesTwo = DBTH.getSubTypes(*BaseTwoType);
   EXPECT_TRUE(SubTypesTwo.find(*ChildTwoType) != SubTypesTwo.end());
 }
-
 TEST(DIBasedTypeHierarchyTest, BasicTHReconstruction_17) {
   LLVMContext Context;
   auto M = loadModule(getTestFilePath("type_hierarchy_17_cpp_dbg.ll"), Context);
@@ -542,7 +488,6 @@ TEST(DIBasedTypeHierarchyTest, BasicTHReconstruction_17) {
   auto SubTypesBase2 = DBTH.getSubTypes(*Base2Type);
   EXPECT_TRUE(SubTypesBase2.find(*KidType) != SubTypesBase2.end());
 }
-
 TEST(DIBasedTypeHierarchyTest, BasicTHReconstruction_18) {
   LLVMContext Context;
   auto M = loadModule(getTestFilePath("type_hierarchy_18_cpp_dbg.ll"), Context);
@@ -576,7 +521,6 @@ TEST(DIBasedTypeHierarchyTest, BasicTHReconstruction_18) {
   auto SubTypesChild2 = DBTH.getSubTypes(*Child3Type);
   EXPECT_TRUE(SubTypesChild2.find(*Child3Type) != SubTypesChild2.end());
 }
-
 TEST(DIBasedTypeHierarchyTest, BasicTHReconstruction_19) {
   LLVMContext Context;
   auto M = loadModule(getTestFilePath("type_hierarchy_19_cpp_dbg.ll"), Context);
@@ -613,7 +557,6 @@ TEST(DIBasedTypeHierarchyTest, BasicTHReconstruction_19) {
   auto SubTypesLorem = DBTH.getSubTypes(*LoremType);
   EXPECT_TRUE(SubTypesLorem.find(*ImpsumType) != SubTypesLorem.end());
 }
-
 TEST(DIBasedTypeHierarchyTest, BasicTHReconstruction_20) {
   LLVMContext Context;
   auto M = loadModule(getTestFilePath("type_hierarchy_20_cpp_dbg.ll"), Context);
@@ -639,7 +582,6 @@ TEST(DIBasedTypeHierarchyTest, BasicTHReconstruction_20) {
   auto SubTypes2 = DBTH.getSubTypes(*Base2Type);
   EXPECT_TRUE(SubTypes2.find(*ChildType) != SubTypes2.end());
 }
-
 TEST(DIBasedTypeHierarchyTest, BasicTHReconstruction_21) {
   LLVMContext Context;
   auto M = loadModule(getTestFilePath("type_hierarchy_21_cpp_dbg.ll"), Context);
@@ -675,13 +617,6 @@ TEST(DIBasedTypeHierarchyTest, BasicTHReconstruction_21) {
   auto SubTypesBase3 = DBTH.getSubTypes(*Base3Type);
   EXPECT_TRUE(SubTypesBase3.find(*Child2Type) != SubTypesBase3.end());
 }
-
-/*
---------------------------------
-TransitivelyReachableTypes Tests
---------------------------------
-*/
-
 TEST(DIBasedTypeHierarchyTest, TransitivelyReachableTypes_1) {
   LLVMContext Context;
   auto M = loadModule(getTestFilePath("type_hierarchy_1_cpp_dbg.ll"), Context);
@@ -704,7 +639,6 @@ TEST(DIBasedTypeHierarchyTest, TransitivelyReachableTypes_1) {
   EXPECT_FALSE(ReachableTypesChild.count(*BaseType));
   EXPECT_TRUE(ReachableTypesChild.count(*ChildType));
 }
-
 TEST(DIBasedTypeHierarchyTest, TransitivelyReachableTypes_2) {
   LLVMContext Context;
   auto M = loadModule(getTestFilePath("type_hierarchy_2_cpp_dbg.ll"), Context);
@@ -727,7 +661,6 @@ TEST(DIBasedTypeHierarchyTest, TransitivelyReachableTypes_2) {
   EXPECT_FALSE(ReachableTypesChild.count(*BaseType));
   EXPECT_TRUE(ReachableTypesChild.count(*ChildType));
 }
-
 TEST(DIBasedTypeHierarchyTest, TransitivelyReachableTypes_3) {
   LLVMContext Context;
   auto M = loadModule(getTestFilePath("type_hierarchy_3_cpp_dbg.ll"), Context);
@@ -748,7 +681,6 @@ TEST(DIBasedTypeHierarchyTest, TransitivelyReachableTypes_3) {
   EXPECT_FALSE(ReachableTypesChild.count(*BaseType));
   EXPECT_TRUE(ReachableTypesChild.count(*ChildType));
 }
-
 TEST(DIBasedTypeHierarchyTest, TransitivelyReachableTypes_4) {
   LLVMContext Context;
   auto M = loadModule(getTestFilePath("type_hierarchy_4_cpp_dbg.ll"), Context);
@@ -771,7 +703,6 @@ TEST(DIBasedTypeHierarchyTest, TransitivelyReachableTypes_4) {
   EXPECT_FALSE(ReachableTypesChild.count(*BaseType));
   EXPECT_TRUE(ReachableTypesChild.count(*ChildType));
 }
-
 TEST(DIBasedTypeHierarchyTest, TransitivelyReachableTypes_5) {
   LLVMContext Context;
   auto M = loadModule(getTestFilePath("type_hierarchy_5_cpp_dbg.ll"), Context);
@@ -801,7 +732,6 @@ TEST(DIBasedTypeHierarchyTest, TransitivelyReachableTypes_5) {
   EXPECT_FALSE(ReachableTypesChild.count(*BaseType));
   EXPECT_FALSE(ReachableTypesChild.count(*OtherBaseType));
 }
-
 TEST(DIBasedTypeHierarchyTest, TransitivelyReachableTypes_6) {
   LLVMContext Context;
   auto M = loadModule(getTestFilePath("type_hierarchy_6_cpp_dbg.ll"), Context);
@@ -824,7 +754,6 @@ TEST(DIBasedTypeHierarchyTest, TransitivelyReachableTypes_6) {
   EXPECT_FALSE(ReachableTypesChild.count(*BaseType));
   EXPECT_TRUE(ReachableTypesChild.count(*ChildType));
 }
-
 TEST(DIBasedTypeHierarchyTest, TransitivelyReachableTypes_7) {
   LLVMContext Context;
   auto M = loadModule(getTestFilePath("type_hierarchy_7_cpp_dbg.ll"), Context);
@@ -880,7 +809,6 @@ TEST(DIBasedTypeHierarchyTest, TransitivelyReachableTypes_7) {
   EXPECT_TRUE(ReachableTypesY.count(*ZType));
   EXPECT_TRUE(ReachableTypesZ.count(*ZType));
 }
-
 TEST(DIBasedTypeHierarchyTest, TransitivelyReachableTypes_7_b) {
   LLVMContext Context;
   auto M = loadModule(getTestFilePath("type_hierarchy_7_b_cpp_dbg.ll"), Context);
@@ -933,7 +861,6 @@ TEST(DIBasedTypeHierarchyTest, TransitivelyReachableTypes_7_b) {
   EXPECT_TRUE(ReachableTypesZ.count(*OmegaType));
   EXPECT_TRUE(ReachableTypesOmega.count(*OmegaType));
 }
-
 TEST(DIBasedTypeHierarchyTest, TransitivelyReachableTypes_8) {
   LLVMContext Context;
   auto M = loadModule(getTestFilePath("type_hierarchy_8_cpp_dbg.ll"), Context);
@@ -967,409 +894,3 @@ TEST(DIBasedTypeHierarchyTest, TransitivelyReachableTypes_8) {
   EXPECT_TRUE(ReachableTypesNonvirtualClass.count(*NonvirtualClassType));
   EXPECT_TRUE(ReachableTypesNonvirtualStruct.count(*NonvirtualStructType));
 }
-
-TEST(DIBasedTypeHierarchyTest, TransitivelyReachableTypes_9) {
-  LLVMContext Context;
-  auto M = loadModule(getTestFilePath("type_hierarchy_9_cpp_dbg.ll"), Context);
-  ASSERT_NE(nullptr, M);
-  DIBasedTypeHierarchy DBTH(*M);
-
-  // check for all types
-  auto BaseType = DBTH.getType("_ZTS4Base");
-  ASSERT_TRUE(BaseType.has_value());
-  auto ChildType = DBTH.getType("_ZTS5Child");
-  ASSERT_TRUE(ChildType.has_value());
-
-  auto ReachableTypesBase = DBTH.getSubTypes(*BaseType);
-  auto ReachableTypesChild = DBTH.getSubTypes(*ChildType);
-
-  EXPECT_EQ(ReachableTypesBase.size(), 2U);
-  EXPECT_EQ(ReachableTypesChild.size(), 1U);
-  EXPECT_TRUE(ReachableTypesBase.count(*BaseType));
-  EXPECT_TRUE(ReachableTypesBase.count(*ChildType));
-  EXPECT_FALSE(ReachableTypesChild.count(*BaseType));
-  EXPECT_TRUE(ReachableTypesChild.count(*ChildType));
-}
-
-TEST(DIBasedTypeHierarchyTest, TransitivelyReachableTypes_10) {
-  LLVMContext Context;
-  auto M = loadModule(getTestFilePath("type_hierarchy_10_cpp_dbg.ll"), Context);
-  ASSERT_NE(nullptr, M);
-  DIBasedTypeHierarchy DBTH(*M);
-
-  // check for all types
-  auto BaseType = DBTH.getType("_ZTS4Base");
-  ASSERT_TRUE(BaseType.has_value());
-  auto ChildType = DBTH.getType("_ZTS5Child");
-  ASSERT_TRUE(ChildType.has_value());
-
-  auto ReachableTypesBase = DBTH.getSubTypes(*BaseType);
-  auto ReachableTypesChild = DBTH.getSubTypes(*ChildType);
-
-  EXPECT_EQ(ReachableTypesBase.size(), 2U);
-  EXPECT_EQ(ReachableTypesChild.size(), 1U);
-  EXPECT_TRUE(ReachableTypesBase.count(*BaseType));
-  EXPECT_TRUE(ReachableTypesBase.count(*ChildType));
-  EXPECT_FALSE(ReachableTypesChild.count(*BaseType));
-  EXPECT_TRUE(ReachableTypesChild.count(*ChildType));
-}
-
-TEST(DIBasedTypeHierarchyTest, TransitivelyReachableTypes_11) {
-  LLVMContext Context;
-  auto M = loadModule(getTestFilePath("type_hierarchy_11_cpp_dbg.ll"), Context);
-  ASSERT_NE(nullptr, M);
-  DIBasedTypeHierarchy DBTH(*M);
-
-  // check for all types
-  auto BaseType = DBTH.getType("_ZTS4Base");
-  ASSERT_TRUE(BaseType.has_value());
-  auto ChildType = DBTH.getType("_ZTS5Child");
-  ASSERT_TRUE(ChildType.has_value());
-
-  auto ReachableTypesBase = DBTH.getSubTypes(*BaseType);
-  auto ReachableTypesChild = DBTH.getSubTypes(*ChildType);
-
-  EXPECT_EQ(ReachableTypesBase.size(), 2U);
-  EXPECT_EQ(ReachableTypesChild.size(), 1U);
-  EXPECT_TRUE(ReachableTypesBase.count(*BaseType));
-  EXPECT_TRUE(ReachableTypesBase.count(*ChildType));
-  EXPECT_FALSE(ReachableTypesChild.count(*BaseType));
-  EXPECT_TRUE(ReachableTypesChild.count(*ChildType));
-}
-
-TEST(DIBasedTypeHierarchyTest, TransitivelyReachableTypes_12) {
-  LLVMContext Context;
-  auto M = loadModule(getTestFilePath("type_hierarchy_12_cpp_dbg.ll"), Context);
-  ASSERT_NE(nullptr, M);
-  DIBasedTypeHierarchy DBTH(*M);
-
-  // check for all types
-  auto BaseType = DBTH.getType("_ZTS4Base");
-  ASSERT_TRUE(BaseType.has_value());
-  auto ChildType = DBTH.getType("_ZTS5Child");
-  ASSERT_TRUE(ChildType.has_value());
-
-  auto ReachableTypesBase = DBTH.getSubTypes(*BaseType);
-  auto ReachableTypesChild = DBTH.getSubTypes(*ChildType);
-
-  EXPECT_EQ(ReachableTypesBase.size(), 2U);
-  EXPECT_EQ(ReachableTypesChild.size(), 1U);
-  EXPECT_TRUE(ReachableTypesBase.count(*BaseType));
-  EXPECT_TRUE(ReachableTypesBase.count(*ChildType));
-  EXPECT_FALSE(ReachableTypesChild.count(*BaseType));
-  EXPECT_TRUE(ReachableTypesChild.count(*ChildType));
-}
-
-TEST(DIBasedTypeHierarchyTest, TransitivelyReachableTypes_12_b) {
-  LLVMContext Context;
-  auto M = loadModule(getTestFilePath("type_hierarchy_12_b_cpp_dbg.ll"), Context);
-  ASSERT_NE(nullptr, M);
-  DIBasedTypeHierarchy DBTH(*M);
-
-  // check for all types
-  auto BaseType = DBTH.getType("Base");
-  ASSERT_TRUE(BaseType.has_value());
-  auto ChildType = DBTH.getType("Child");
-  ASSERT_TRUE(ChildType.has_value());
-  auto ChildsChildType = DBTH.getType("_ZTS11ChildsChild");
-  ASSERT_TRUE(ChildsChildType.has_value());
-
-  auto ReachableTypesBase = DBTH.getSubTypes(*BaseType);
-  auto ReachableTypesChild = DBTH.getSubTypes(*ChildType);
-  auto ReachableTypesChildsChild = DBTH.getSubTypes(*ChildsChildType);
-
-  EXPECT_EQ(ReachableTypesBase.size(), 3U);
-  EXPECT_EQ(ReachableTypesChild.size(), 2U);
-  EXPECT_EQ(ReachableTypesChildsChild.size(), 1U);
-  EXPECT_TRUE(ReachableTypesBase.count(*BaseType));
-  EXPECT_TRUE(ReachableTypesBase.count(*ChildType));
-  EXPECT_TRUE(ReachableTypesBase.count(*ChildsChildType));
-  EXPECT_TRUE(ReachableTypesChild.count(*ChildType));
-  EXPECT_TRUE(ReachableTypesChild.count(*ChildsChildType));
-  EXPECT_TRUE(ReachableTypesChildsChild.count(*ChildsChildType));
-}
-
-TEST(DIBasedTypeHierarchyTest, TransitivelyReachableTypes_12_c) {
-  LLVMContext Context;
-  auto M = loadModule(getTestFilePath("type_hierarchy_12_c_cpp_dbg.ll"), Context);
-  ASSERT_NE(nullptr, M);
-  DIBasedTypeHierarchy DBTH(*M);
-
-  // check for all types
-  auto ChildType = DBTH.getType("Child");
-  ASSERT_TRUE(ChildType.has_value());
-  auto ChildsChildType = DBTH.getType("_ZTS11ChildsChild");
-  ASSERT_TRUE(ChildsChildType.has_value());
-
-  auto ReachableTypesChild = DBTH.getSubTypes(*ChildType);
-  auto ReachableTypesChildsChild = DBTH.getSubTypes(*ChildsChildType);
-
-  EXPECT_EQ(ReachableTypesChild.size(), 2U);
-  EXPECT_EQ(ReachableTypesChildsChild.size(), 1U);
-  EXPECT_TRUE(ReachableTypesChild.count(*ChildType));
-  EXPECT_TRUE(ReachableTypesChild.count(*ChildsChildType));
-  EXPECT_TRUE(ReachableTypesChildsChild.count(*ChildsChildType));
-}
-
-TEST(DIBasedTypeHierarchyTest, TransitivelyReachableTypes_14) {
-  LLVMContext Context;
-  auto M = loadModule(getTestFilePath("type_hierarchy_14_cpp_dbg.ll"), Context);
-  ASSERT_NE(nullptr, M);
-  DIBasedTypeHierarchy DBTH(*M);
-
-  // check for all types
-  auto BaseType = DBTH.getType("Base");
-  ASSERT_TRUE(BaseType.has_value());
-
-  auto ReachableTypesBase = DBTH.getSubTypes(*BaseType);
-
-  EXPECT_EQ(ReachableTypesBase.size(), 1U);
-  EXPECT_TRUE(ReachableTypesBase.count(*BaseType));
-}
-
-TEST(DIBasedTypeHierarchyTest, TransitivelyReachableTypes_15) {
-  LLVMContext Context;
-  auto M = loadModule(getTestFilePath("type_hierarchy_15_cpp_dbg.ll"), Context);
-  ASSERT_NE(nullptr, M);
-  DIBasedTypeHierarchy DBTH(*M);
-
-  // check for all types
-  auto BaseType = DBTH.getType("Base");
-  ASSERT_TRUE(BaseType.has_value());
-  auto ChildType = DBTH.getType("Child");
-  ASSERT_TRUE(ChildType.has_value());
-
-  auto ReachableTypesBase = DBTH.getSubTypes(*BaseType);
-  auto ReachableTypesChild = DBTH.getSubTypes(*ChildType);
-
-  EXPECT_EQ(ReachableTypesBase.size(), 2U);
-  EXPECT_EQ(ReachableTypesChild.size(), 1U);
-  EXPECT_TRUE(ReachableTypesBase.count(*BaseType));
-  EXPECT_TRUE(ReachableTypesBase.count(*ChildType));
-  EXPECT_FALSE(ReachableTypesChild.count(*BaseType));
-  EXPECT_TRUE(ReachableTypesChild.count(*ChildType));
-}
-
-TEST(DIBasedTypeHierarchyTest, TransitivelyReachableTypes_16) {
-  LLVMContext Context;
-  auto M = loadModule(getTestFilePath("type_hierarchy_16_cpp_dbg.ll"), Context);
-  ASSERT_NE(nullptr, M);
-  DIBasedTypeHierarchy DBTH(*M);
-
-  // check for all types
-  auto BaseType = DBTH.getType("_ZTS4Base");
-  ASSERT_TRUE(BaseType.has_value());
-  auto ChildType = DBTH.getType("_ZTS5Child");
-  ASSERT_TRUE(ChildType.has_value());
-  auto BaseTwoType = DBTH.getType("_ZTS7BaseTwo");
-  ASSERT_TRUE(BaseTwoType.has_value());
-  auto ChildTwoType = DBTH.getType("_ZTS8ChildTwo");
-  ASSERT_TRUE(ChildTwoType.has_value());
-
-  auto ReachableTypesBase = DBTH.getSubTypes(*BaseType);
-  auto ReachableTypesChild = DBTH.getSubTypes(*ChildType);
-  auto ReachableTypesBaseTwo = DBTH.getSubTypes(*BaseTwoType);
-  auto ReachableTypesChildTwo = DBTH.getSubTypes(*ChildTwoType);
-
-  EXPECT_EQ(ReachableTypesBase.size(), 3U);
-  EXPECT_EQ(ReachableTypesChild.size(), 2U);
-  EXPECT_EQ(ReachableTypesBaseTwo.size(), 2U);
-  EXPECT_EQ(ReachableTypesChildTwo.size(), 1U);
-  EXPECT_TRUE(ReachableTypesBase.count(*BaseType));
-  EXPECT_TRUE(ReachableTypesBase.count(*ChildType));
-  EXPECT_FALSE(ReachableTypesChild.count(*BaseType));
-  EXPECT_TRUE(ReachableTypesChild.count(*ChildType));
-  EXPECT_TRUE(ReachableTypesBaseTwo.count(*BaseTwoType));
-  EXPECT_TRUE(ReachableTypesBaseTwo.count(*ChildTwoType));
-  EXPECT_FALSE(ReachableTypesChildTwo.count(*BaseTwoType));
-  EXPECT_TRUE(ReachableTypesChildTwo.count(*ChildTwoType));
-}
-
-TEST(DIBasedTypeHierarchyTest, TransitivelyReachableTypes_17) {
-  LLVMContext Context;
-  auto M = loadModule(getTestFilePath("type_hierarchy_17_cpp_dbg.ll"), Context);
-  ASSERT_NE(nullptr, M);
-  DIBasedTypeHierarchy DBTH(*M);
-
-  // check for all types
-  auto BaseType = DBTH.getType("_ZTS4Base");
-  ASSERT_TRUE(BaseType.has_value());
-  auto ChildType = DBTH.getType("_ZTS5Child");
-  ASSERT_TRUE(ChildType.has_value());
-  auto Base2Type = DBTH.getType("_ZTS5Base2");
-  ASSERT_TRUE(Base2Type.has_value());
-  auto KidType = DBTH.getType("_ZTS3Kid");
-  ASSERT_TRUE(KidType.has_value());
-
-  auto ReachableTypesBase = DBTH.getSubTypes(*BaseType);
-  auto ReachableTypesChild = DBTH.getSubTypes(*ChildType);
-  auto ReachableTypesBase2 = DBTH.getSubTypes(*Base2Type);
-  auto ReachableTypesKid = DBTH.getSubTypes(*KidType);
-
-  EXPECT_EQ(ReachableTypesBase.size(), 2U);
-  EXPECT_EQ(ReachableTypesChild.size(), 1U);
-  EXPECT_EQ(ReachableTypesBase2.size(), 2U);
-  EXPECT_EQ(ReachableTypesKid.size(), 1U);
-  EXPECT_TRUE(ReachableTypesBase.count(*BaseType));
-  EXPECT_TRUE(ReachableTypesBase.count(*ChildType));
-  EXPECT_FALSE(ReachableTypesChild.count(*BaseType));
-  EXPECT_TRUE(ReachableTypesChild.count(*ChildType));
-  EXPECT_TRUE(ReachableTypesBase2.count(*Base2Type));
-  EXPECT_TRUE(ReachableTypesBase2.count(*KidType));
-  EXPECT_FALSE(ReachableTypesKid.count(*Base2Type));
-  EXPECT_TRUE(ReachableTypesKid.count(*KidType));
-}
-
-TEST(DIBasedTypeHierarchyTest, TransitivelyReachableTypes_18) {
-  LLVMContext Context;
-  auto M = loadModule(getTestFilePath("type_hierarchy_18_cpp_dbg.ll"), Context);
-  ASSERT_NE(nullptr, M);
-  DIBasedTypeHierarchy DBTH(*M);
-
-  // check for all types
-  auto BaseType = DBTH.getType("_ZTS4Base");
-  ASSERT_TRUE(BaseType.has_value());
-  auto ChildType = DBTH.getType("_ZTS5Child");
-  ASSERT_TRUE(ChildType.has_value());
-  auto Child3Type = DBTH.getType("_ZTS7Child_3");
-  ASSERT_TRUE(Child3Type.has_value());
-
-  auto ReachableTypesBase = DBTH.getSubTypes(*BaseType);
-  auto ReachableTypesChild = DBTH.getSubTypes(*ChildType);
-  auto ReachableTypesChild3 = DBTH.getSubTypes(*Child3Type);
-
-  EXPECT_EQ(ReachableTypesBase.size(), 4U);
-  EXPECT_EQ(ReachableTypesChild.size(), 3U);
-  EXPECT_EQ(ReachableTypesChild3.size(), 1U);
-  EXPECT_TRUE(ReachableTypesBase.count(*BaseType));
-  EXPECT_TRUE(ReachableTypesBase.count(*ChildType));
-  EXPECT_FALSE(ReachableTypesChild.count(*BaseType));
-  EXPECT_TRUE(ReachableTypesChild.count(*ChildType));
-  EXPECT_TRUE(ReachableTypesChild3.count(*Child3Type));
-}
-
-TEST(DIBasedTypeHierarchyTest, TransitivelyReachableTypes_19) {
-  LLVMContext Context;
-  auto M = loadModule(getTestFilePath("type_hierarchy_19_cpp_dbg.ll"), Context);
-  ASSERT_NE(nullptr, M);
-  DIBasedTypeHierarchy DBTH(*M);
-
-  // check for all types
-  auto BaseType = DBTH.getType("_ZTS4Base");
-  ASSERT_TRUE(BaseType.has_value());
-  auto ChildType = DBTH.getType("_ZTS5Child");
-  ASSERT_TRUE(ChildType.has_value());
-  auto FooType = DBTH.getType("_ZTS3Foo");
-  ASSERT_TRUE(FooType.has_value());
-  auto BarType = DBTH.getType("_ZTS3Bar");
-  ASSERT_TRUE(BarType.has_value());
-  auto LoremType = DBTH.getType("_ZTS5Lorem");
-  ASSERT_TRUE(LoremType.has_value());
-  auto ImpsumType = DBTH.getType("_ZTS6Impsum");
-  ASSERT_TRUE(ImpsumType.has_value());
-
-  auto ReachableTypesBase = DBTH.getSubTypes(*BaseType);
-  auto ReachableTypesChild = DBTH.getSubTypes(*ChildType);
-  auto ReachableTypesFoo = DBTH.getSubTypes(*FooType);
-  auto ReachableTypesBar = DBTH.getSubTypes(*BarType);
-  auto ReachableTypesLorem = DBTH.getSubTypes(*LoremType);
-  auto ReachableTypesImpsum = DBTH.getSubTypes(*ImpsumType);
-
-  EXPECT_EQ(ReachableTypesBase.size(), 2U);
-  EXPECT_EQ(ReachableTypesChild.size(), 1U);
-  EXPECT_EQ(ReachableTypesFoo.size(), 2U);
-  EXPECT_EQ(ReachableTypesBar.size(), 1U);
-  EXPECT_EQ(ReachableTypesLorem.size(), 2U);
-  EXPECT_EQ(ReachableTypesImpsum.size(), 1U);
-  EXPECT_TRUE(ReachableTypesBase.count(*BaseType));
-  EXPECT_TRUE(ReachableTypesBase.count(*ChildType));
-  EXPECT_FALSE(ReachableTypesChild.count(*BaseType));
-  EXPECT_TRUE(ReachableTypesChild.count(*ChildType));
-  EXPECT_TRUE(ReachableTypesFoo.count(*FooType));
-  EXPECT_TRUE(ReachableTypesFoo.count(*BarType));
-  EXPECT_FALSE(ReachableTypesBar.count(*FooType));
-  EXPECT_TRUE(ReachableTypesBar.count(*BarType));
-  EXPECT_TRUE(ReachableTypesLorem.count(*LoremType));
-  EXPECT_TRUE(ReachableTypesLorem.count(*ImpsumType));
-  EXPECT_FALSE(ReachableTypesImpsum.count(*LoremType));
-  EXPECT_TRUE(ReachableTypesImpsum.count(*ImpsumType));
-}
-
-TEST(DIBasedTypeHierarchyTest, TransitivelyReachableTypes_20) {
-  LLVMContext Context;
-  auto M = loadModule(getTestFilePath("type_hierarchy_20_cpp_dbg.ll"), Context);
-  ASSERT_NE(nullptr, M);
-  DIBasedTypeHierarchy DBTH(*M);
-
-  // check for all types
-  auto BaseType = DBTH.getType("_ZTS4Base");
-  ASSERT_TRUE(BaseType.has_value());
-  auto Base2Type = DBTH.getType("_ZTS5Base2");
-  ASSERT_TRUE(Base2Type.has_value());
-  auto ChildType = DBTH.getType("_ZTS5Child");
-  ASSERT_TRUE(ChildType.has_value());
-
-  auto ReachableTypesBase = DBTH.getSubTypes(*BaseType);
-  auto ReachableTypesBase2 = DBTH.getSubTypes(*Base2Type);
-  auto ReachableTypesChild = DBTH.getSubTypes(*ChildType);
-
-  EXPECT_EQ(ReachableTypesBase.size(), 2U);
-  EXPECT_EQ(ReachableTypesBase2.size(), 2U);
-  EXPECT_EQ(ReachableTypesChild.size(), 1U);
-  EXPECT_TRUE(ReachableTypesBase.count(*BaseType));
-  EXPECT_TRUE(ReachableTypesBase.count(*ChildType));
-  EXPECT_TRUE(ReachableTypesBase2.count(*Base2Type));
-  EXPECT_TRUE(ReachableTypesBase2.count(*ChildType));
-  EXPECT_TRUE(ReachableTypesChild.count(*ChildType));
-  EXPECT_FALSE(ReachableTypesChild.count(*BaseType));
-  EXPECT_FALSE(ReachableTypesChild.count(*Base2Type));
-}
-
-TEST(DIBasedTypeHierarchyTest, TransitivelyReachableTypes_21) {
-  LLVMContext Context;
-  auto M = loadModule(getTestFilePath("type_hierarchy_21_cpp_dbg.ll"), Context);
-  ASSERT_NE(nullptr, M);
-  DIBasedTypeHierarchy DBTH(*M);
-
-  // check for all types
-  auto BaseType = DBTH.getType("_ZTS4Base");
-  ASSERT_TRUE(BaseType.has_value());
-  auto Base2Type = DBTH.getType("_ZTS5Base2");
-  ASSERT_TRUE(Base2Type.has_value());
-  auto Base3Type = DBTH.getType("_ZTS5Base3");
-  ASSERT_TRUE(Base3Type.has_value());
-  auto ChildType = DBTH.getType("_ZTS5Child");
-  ASSERT_TRUE(ChildType.has_value());
-  auto Child2Type = DBTH.getType("_ZTS6Child2");
-  ASSERT_TRUE(Child2Type.has_value());
-
-  auto ReachableTypesBase = DBTH.getSubTypes(*BaseType);
-  auto ReachableTypesBase2 = DBTH.getSubTypes(*Base2Type);
-  auto ReachableTypesBase3 = DBTH.getSubTypes(*Base3Type);
-  auto ReachableTypesChild = DBTH.getSubTypes(*ChildType);
-  auto ReachableTypesChild2 = DBTH.getSubTypes(*Child2Type);
-
-  EXPECT_EQ(ReachableTypesBase.size(), 3U);
-  EXPECT_EQ(ReachableTypesBase2.size(), 3U);
-  EXPECT_EQ(ReachableTypesBase3.size(), 2U);
-  EXPECT_EQ(ReachableTypesChild.size(), 2U);
-  EXPECT_EQ(ReachableTypesChild2.size(), 1U);
-  EXPECT_TRUE(ReachableTypesBase.count(*BaseType));
-  EXPECT_TRUE(ReachableTypesBase.count(*ChildType));
-  EXPECT_TRUE(ReachableTypesBase.count(*Child2Type));
-  EXPECT_TRUE(ReachableTypesBase2.count(*Base2Type));
-  EXPECT_TRUE(ReachableTypesBase2.count(*ChildType));
-  EXPECT_TRUE(ReachableTypesBase2.count(*Child2Type));
-  EXPECT_TRUE(ReachableTypesBase3.count(*Base3Type));
-  EXPECT_TRUE(ReachableTypesBase3.count(*Child2Type));
-  EXPECT_TRUE(ReachableTypesChild.count(*ChildType));
-  EXPECT_TRUE(ReachableTypesChild.count(*Child2Type));
-  EXPECT_FALSE(ReachableTypesChild.count(*BaseType));
-  EXPECT_FALSE(ReachableTypesChild.count(*Base2Type));
-  EXPECT_TRUE(ReachableTypesChild2.count(*Child2Type));
-  EXPECT_FALSE(ReachableTypesChild2.count(*BaseType));
-  EXPECT_FALSE(ReachableTypesChild2.count(*Base2Type));
-  EXPECT_FALSE(ReachableTypesChild2.count(*Base3Type));
-}
-
-} // namespace

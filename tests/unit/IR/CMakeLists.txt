@@ -6,7 +6,8 @@ add_lotus_ir_test_suite(ir_pdg_tests
 
 add_lotus_svfg_test_suite(ir_svfg_tests
   SVFGSerializerTest.cpp
-  SVFGMemorySSATest.cpp)
+  SVFGMemorySSATest.cpp
+  SVFGMemorySSATestPart2.cpp)
 
 add_lotus_gsa_test_suite(ir_gsa_tests
   GSATest.cpp)

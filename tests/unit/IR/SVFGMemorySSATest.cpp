@@ -1,80 +1,4 @@
-#include "IR/ICFG/CallGraph.h"
-#include "IR/ICFG/ICFG.h"
-#include "IR/ICFG/ICFGBuilder.h"
-#include "IR/SVFG/SVFG.h"
-#include "IR/SVFG/SVFGBuilder.h"
-#include "IR/SVFG/SVFGNode.h"
-#include "TestUtils/LLVMHelpers.h"
-
-#include <llvm/IR/Instructions.h>
-#include <gtest/gtest.h>
-
-using namespace llvm;
-using namespace lotus::analysis;
-using namespace lotus::unittest;
-
-namespace {
-
-class SVFGMemorySSATest : public LlvmModuleTest {
-protected:
-  std::unique_ptr<SVFG> buildSVFG(Module *module, ICFG &icfg) {
-    ICFGBuilder icfgBuilder(&icfg);
-    icfgBuilder.build(module);
-
-    SVFGBuilderConfig cfg;
-    cfg.usePointerAnalysis = false;
-    cfg.buildMSSA = true;
-
-    SVFGBuilder builder(cfg);
-    return std::unique_ptr<SVFG>(builder.build(&icfg));
-  }
-
-  static const CallBase *findDirectCall(const Function *F,
-                                        StringRef calleeName) {
-    for (const BasicBlock &BB : *F) {
-      for (const Instruction &I : BB) {
-        const auto *CB = dyn_cast<CallBase>(&I);
-        if (!CB)
-          continue;
-        const Function *callee = CB->getCalledFunction();
-        if (callee && callee->getName() == calleeName)
-          return CB;
-      }
-    }
-    return nullptr;
-  }
-
-  static const CallBase *findSingleIndirectCall(const Function *F) {
-    for (const BasicBlock &BB : *F) {
-      for (const Instruction &I : BB) {
-        const auto *CB = dyn_cast<CallBase>(&I);
-        if (CB && !CB->getCalledFunction())
-          return CB;
-      }
-    }
-    return nullptr;
-  }
-
-  static const LoadInst *findSingleLoad(const Function *F) {
-    for (const BasicBlock &BB : *F)
-      for (const Instruction &I : BB)
-        if (const auto *LI = dyn_cast<LoadInst>(&I))
-          return LI;
-    return nullptr;
-  }
-
-  static bool callGraphHasEdge(const LTCallGraph &cg, const Function *caller,
-                               const Instruction *callInst,
-                               const Function *callee) {
-    const LTCallGraphNode *node = cg[caller];
-    for (const auto &record : *node) {
-      if (record.first == callInst && record.second &&
-          record.second->getFunction() == callee)
-        return true;
-    }
-    return false;
-  }
-};
+#include "SVFGMemorySSATestSupport.h"
 
 TEST_F(SVFGMemorySSATest, ReadOnlyCalleeDoesNotCreateCallerSideDefs) {
   const char *source = R"(
@@ -122,7 +46,6 @@ TEST_F(SVFGMemorySSATest, ReadOnlyCalleeDoesNotCreateCallerSideDefs) {
   EXPECT_EQ(callMuCount, 0u);
   EXPECT_EQ(callChiCount, 0u);
 }
-
 TEST_F(SVFGMemorySSATest, SameReachingDefDoesNotCreateMemoryPhi) {
   const char *source = R"(
     define i32 @main(i1 %cond) {
@@ -154,7 +77,6 @@ TEST_F(SVFGMemorySSATest, SameReachingDefDoesNotCreateMemoryPhi) {
 
   EXPECT_EQ(phiCount, 0u);
 }
-
 TEST_F(SVFGMemorySSATest, DistinctReachingDefsCreateMemoryPhi) {
   const char *source = R"(
     define i32 @main(i1 %cond) {
@@ -193,7 +115,6 @@ TEST_F(SVFGMemorySSATest, DistinctReachingDefsCreateMemoryPhi) {
   EXPECT_GT(phiCount, 0u);
   EXPECT_TRUE(sawTwoOperandPhi);
 }
-
 TEST_F(SVFGMemorySSATest, MemoryPhiIncomingEdgesAreGuardedIndirectFlow) {
   const char *source = R"(
     define i32 @main(i1 %cond) {
@@ -236,7 +157,6 @@ TEST_F(SVFGMemorySSATest, MemoryPhiIncomingEdgesAreGuardedIndirectFlow) {
 
   EXPECT_TRUE(sawIncomingIndirectPhiEdge);
 }
-
 TEST_F(SVFGMemorySSATest, LoadCapturesReachingDefVersion) {
   const char *source = R"(
     @g = global i8* null
@@ -281,7 +201,6 @@ TEST_F(SVFGMemorySSATest, LoadCapturesReachingDefVersion) {
 
   EXPECT_TRUE(versionMatchesIncomingDef);
 }
-
 TEST_F(SVFGMemorySSATest, GlobalOnlyCalleeCreatesInterproceduralMemoryNodes) {
   const char *source = R"(
     @g = global i8 0
@@ -343,7 +262,6 @@ TEST_F(SVFGMemorySSATest, GlobalOnlyCalleeCreatesInterproceduralMemoryNodes) {
   }
   EXPECT_TRUE(sawStoreSeedIntoMain);
 }
-
 TEST_F(SVFGMemorySSATest, CallsiteMemoryNodesTrackOnlyTouchedArguments) {
   const char *source = R"(
     define i8 @touch_first(i8* %a, i8* %b) {
@@ -397,7 +315,6 @@ TEST_F(SVFGMemorySSATest, CallsiteMemoryNodesTrackOnlyTouchedArguments) {
 
   EXPECT_NE(actualIn->getMemReg(), 0u);
 }
-
 TEST_F(SVFGMemorySSATest, InterproceduralValueNodesUseEntryExitAndReturnSite) {
   const char *source = R"(
     declare i8* @sink(...)
@@ -470,7 +387,6 @@ TEST_F(SVFGMemorySSATest, InterproceduralValueNodesUseEntryExitAndReturnSite) {
   ASSERT_NE(actualRet, nullptr);
   EXPECT_EQ(actualRet->getICFGNode(), returnSiteNode);
 }
-
 TEST_F(SVFGMemorySSATest, InterproceduralMemoryNodesUseExitAndReturnSite) {
   const char *source = R"(
     define void @writer(i8* %p) {
@@ -531,7 +447,6 @@ TEST_F(SVFGMemorySSATest, InterproceduralMemoryNodesUseExitAndReturnSite) {
     EXPECT_EQ(actualOut->getICFGNode(), returnSiteNode);
   }
 }
-
 TEST_F(SVFGMemorySSATest, GlobalEntryFallbackCoversAllDirectUsersWithoutMain) {
   const char *source = R"(
     @g = global i8 0
@@ -600,7 +515,6 @@ TEST_F(SVFGMemorySSATest, GlobalEntryFallbackCoversAllDirectUsersWithoutMain) {
   EXPECT_TRUE(hasIncomingFromGlobalEntry(svfg->getFormalIns(fooFn)));
   EXPECT_TRUE(hasIncomingFromGlobalEntry(svfg->getFormalIns(barFn)));
 }
-
 TEST_F(SVFGMemorySSATest, OnTheFlyIndirectCallUpdatesRefinedCallGraph) {
   const char *source = R"(
     define void @target(i8* %p) {
@@ -657,7 +571,6 @@ TEST_F(SVFGMemorySSATest, OnTheFlyIndirectCallUpdatesRefinedCallGraph) {
   EXPECT_TRUE(callGraphHasEdge(*cg, applyFn, indCall, targetFn));
   ASSERT_EQ(cg, svfg->getRefinedCallGraph());
 }
-
 TEST_F(SVFGMemorySSATest, UpdateSVFGKeepsBuilderGraphAccessorsValid) {
   const char *source = R"(
     define void @target(i8* %p) {
@@ -701,7 +614,6 @@ TEST_F(SVFGMemorySSATest, UpdateSVFGKeepsBuilderGraphAccessorsValid) {
   ASSERT_EQ(cg, svfg->getRefinedCallGraph());
   EXPECT_TRUE(callGraphHasEdge(*cg, applyFn, call, targetFn));
 }
-
 TEST_F(SVFGMemorySSATest, SelectProducesPhiNodeAndPhiEdges) {
   const char *source = R"(
     define i8* @pick(i1 %cond, i8* %a, i8* %b) {
@@ -744,7 +656,6 @@ TEST_F(SVFGMemorySSATest, SelectProducesPhiNodeAndPhiEdges) {
   }
   EXPECT_EQ(phiInEdges, 2u);
 }
-
 TEST_F(SVFGMemorySSATest, InternalPointerReturningCallDoesNotCopyArgumentIntoResult) {
   const char *source = R"(
     define i8* @id(i8* %p) {
@@ -790,7 +701,6 @@ TEST_F(SVFGMemorySSATest, InternalPointerReturningCallDoesNotCopyArgumentIntoRes
   EXPECT_TRUE(sawActualRetBridge);
   EXPECT_FALSE(sawArgumentCopy);
 }
-
 TEST_F(SVFGMemorySSATest, ExternalPointerReturningCallSkipsActualRetNode) {
   const char *source = R"(
     declare i8* @ext(i8*)
@@ -818,7 +728,6 @@ TEST_F(SVFGMemorySSATest, ExternalPointerReturningCallSkipsActualRetNode) {
   EXPECT_TRUE(svfg->getActualRets(call).empty());
   ASSERT_NE(svfg->getDef(call), nullptr);
 }
-
 TEST_F(SVFGMemorySSATest, HeapReachableFromGlobalRemainsVisibleInSummaries) {
   const char *source = R"(
     @gp = global i8* null
@@ -900,7 +809,6 @@ TEST_F(SVFGMemorySSATest, HeapReachableFromGlobalRemainsVisibleInSummaries) {
 
   EXPECT_TRUE(callerSeesHeapSummary);
 }
-
 TEST_F(SVFGMemorySSATest, MultiReturnFunctionUsesDedicatedExitNode) {
   const char *source = R"(
     define i8* @pick(i1 %cond, i8* %a, i8* %b) {
@@ -940,7 +848,6 @@ TEST_F(SVFGMemorySSATest, MultiReturnFunctionUsesDedicatedExitNode) {
   ASSERT_NE(formalRet, nullptr);
   EXPECT_EQ(formalRet->getICFGNode(), exitNode);
 }
-
 TEST_F(SVFGMemorySSATest, NoReturnFunctionMemorySummaryUsesDedicatedExitNode) {
   const char *source = R"(
     declare void @abort() noreturn
@@ -982,7 +889,6 @@ TEST_F(SVFGMemorySSATest, NoReturnFunctionMemorySummaryUsesDedicatedExitNode) {
     EXPECT_EQ(formalOut->getICFGNode(), exitNode);
   }
 }
-
 TEST_F(SVFGMemorySSATest, UntouchedPointerFormalsDoNotCreateMemoryNodes) {
   const char *source = R"(
     define void @noop(i8* %p) {
@@ -1017,276 +923,3 @@ TEST_F(SVFGMemorySSATest, UntouchedPointerFormalsDoNotCreateMemoryNodes) {
   EXPECT_TRUE(svfg->getActualIns(call).empty());
   EXPECT_TRUE(svfg->getActualOuts(call).empty());
 }
-
-TEST_F(SVFGMemorySSATest, VarArgKeepsDeclaredPointerParameterSeparate) {
-  const char *source = R"(
-    define void @sink(i32 %tag, i8* %p, ...) {
-    entry:
-      %v = load i8, i8* %p
-      ret void
-    }
-
-    define i32 @main() {
-    entry:
-      %x = alloca i8
-      call void (i32, i8*, ...) @sink(i32 0, i8* %x, i8* %x)
-      ret i32 0
-    }
-  )";
-
-  auto module = parseModule(source);
-  ASSERT_NE(module, nullptr);
-
-  ICFG icfg;
-  std::unique_ptr<SVFG> svfg = buildSVFG(module.get(), icfg);
-  ASSERT_NE(svfg, nullptr);
-
-  const Function *mainFn = module->getFunction("main");
-  const Function *sinkFn = module->getFunction("sink");
-  ASSERT_NE(mainFn, nullptr);
-  ASSERT_NE(sinkFn, nullptr);
-  const CallBase *call = findDirectCall(mainFn, "sink");
-  ASSERT_NE(call, nullptr);
-
-  const ActualParmSVFGNode *fixedActual = nullptr;
-  const ActualParmSVFGNode *varArgActual = nullptr;
-  for (SVFGNode *node : svfg->getActualParms(call)) {
-    auto *actualParm = dyn_cast<ActualParmSVFGNode>(node);
-    ASSERT_NE(actualParm, nullptr);
-    if (actualParm->getParamIndex() == 1)
-      fixedActual = actualParm;
-    else if (actualParm->getParamIndex() == 2)
-      varArgActual = actualParm;
-  }
-  ASSERT_NE(fixedActual, nullptr);
-  ASSERT_NE(varArgActual, nullptr);
-
-  const FormalParmSVFGNode *fixedFormal = nullptr;
-  const VarArgSVFGNode *varArgFormal = nullptr;
-  for (SVFGNode *node : svfg->getFormalParms(sinkFn)) {
-    if (auto *formalParm = dyn_cast<FormalParmSVFGNode>(node)) {
-      if (formalParm->getParamIndex() == 1)
-        fixedFormal = formalParm;
-    } else if (auto *varArg = dyn_cast<VarArgSVFGNode>(node)) {
-      varArgFormal = varArg;
-    }
-  }
-  ASSERT_NE(fixedFormal, nullptr);
-  ASSERT_NE(varArgFormal, nullptr);
-
-  bool fixedReachesFormal = false;
-  bool fixedReachesVarArg = false;
-  for (SVFGEdge *edge : fixedActual->getOutEdges()) {
-    if (edge->getDstNode() == fixedFormal)
-      fixedReachesFormal = true;
-    if (edge->getDstNode() == varArgFormal)
-      fixedReachesVarArg = true;
-  }
-
-  bool extraArgReachesVarArg = false;
-  for (SVFGEdge *edge : varArgActual->getOutEdges()) {
-    if (edge->getDstNode() == varArgFormal)
-      extraArgReachesVarArg = true;
-  }
-
-  EXPECT_TRUE(fixedReachesFormal);
-  EXPECT_FALSE(fixedReachesVarArg);
-  EXPECT_TRUE(extraArgReachesVarArg);
-}
-
-TEST_F(SVFGMemorySSATest, FormalOutKeepsDistinctReturnPathDefs) {
-  const char *source = R"(
-    define void @maybe_store(i1 %cond, i8* %p) {
-    entry:
-      br i1 %cond, label %then, label %else
-
-    then:
-      store i8 1, i8* %p
-      ret void
-
-    else:
-      ret void
-    }
-
-    define i32 @main(i1 %cond) {
-    entry:
-      %x = alloca i8
-      call void @maybe_store(i1 %cond, i8* %x)
-      ret i32 0
-    }
-  )";
-
-  auto module = parseModule(source);
-  ASSERT_NE(module, nullptr);
-
-  ICFG icfg;
-  std::unique_ptr<SVFG> svfg = buildSVFG(module.get(), icfg);
-  ASSERT_NE(svfg, nullptr);
-
-  const Function *callee = module->getFunction("maybe_store");
-  ASSERT_NE(callee, nullptr);
-  ASSERT_EQ(svfg->getFormalOuts(callee).size(), 1u);
-
-  auto *formalOut =
-      dyn_cast<FormalOutSVFGNode>(*svfg->getFormalOuts(callee).begin());
-  ASSERT_NE(formalOut, nullptr);
-
-  ASSERT_EQ(formalOut->getInEdges().size(), 1u);
-  auto *exitPhi =
-      dyn_cast<IntraMSSAPhiSVFGNode>(formalOut->getInEdges().front()->getSrcNode());
-  ASSERT_NE(exitPhi, nullptr);
-
-  bool sawFormalIn = false;
-  bool sawStoreDef = false;
-  for (SVFGEdge *edge : exitPhi->getInEdges()) {
-    ASSERT_NE(edge, nullptr);
-    if (isa<FormalInSVFGNode>(edge->getSrcNode()))
-      sawFormalIn = true;
-    if (isa<StoreSVFGNode>(edge->getSrcNode()))
-      sawStoreDef = true;
-  }
-
-  EXPECT_TRUE(sawFormalIn);
-  EXPECT_TRUE(sawStoreDef);
-}
-
-TEST_F(SVFGMemorySSATest, ExternalModRefCallDoesNotBacklinkActualOut) {
-  const char *source = R"(
-    declare void @ext(i8*)
-
-    define i32 @main() {
-    entry:
-      %x = alloca i8
-      store i8 1, i8* %x
-      call void @ext(i8* %x)
-      %v = load i8, i8* %x
-      ret i32 0
-    }
-  )";
-
-  auto module = parseModule(source);
-  ASSERT_NE(module, nullptr);
-
-  ICFG icfg;
-  std::unique_ptr<SVFG> svfg = buildSVFG(module.get(), icfg);
-  ASSERT_NE(svfg, nullptr);
-
-  const Function *mainFn = module->getFunction("main");
-  ASSERT_NE(mainFn, nullptr);
-  const CallBase *call = findDirectCall(mainFn, "ext");
-  ASSERT_NE(call, nullptr);
-  ASSERT_EQ(svfg->getActualIns(call).size(), 1u);
-  ASSERT_EQ(svfg->getActualOuts(call).size(), 1u);
-
-  SVFGNode *actualIn = *svfg->getActualIns(call).begin();
-  SVFGNode *actualOut = *svfg->getActualOuts(call).begin();
-  ASSERT_TRUE(isa<ActualInSVFGNode>(actualIn));
-  ASSERT_TRUE(isa<ActualOutSVFGNode>(actualOut));
-
-  SVFGEdge *fallbackEdge =
-      svfg->getIntraVFGEdge(actualIn, actualOut, SVFGEdgeK::IntraIndirect);
-  EXPECT_EQ(fallbackEdge, nullptr);
-}
-
-TEST_F(SVFGMemorySSATest,
-       GlobalEntryEdgesSeedAllCandidateEntryFunctionsWithoutMain) {
-  const char *source = R"(
-    @g = global i8 0
-
-    define void @writer() {
-    entry:
-      store i8 1, i8* @g
-      ret void
-    }
-
-    define i8 @reader() {
-    entry:
-      %v = load i8, i8* @g
-      ret i8 %v
-    }
-  )";
-
-  auto module = parseModule(source);
-  ASSERT_NE(module, nullptr);
-
-  ICFG icfg;
-  std::unique_ptr<SVFG> svfg = buildSVFG(module.get(), icfg);
-  ASSERT_NE(svfg, nullptr);
-
-  const Function *writerFn = module->getFunction("writer");
-  const Function *readerFn = module->getFunction("reader");
-  ASSERT_NE(writerFn, nullptr);
-  ASSERT_NE(readerFn, nullptr);
-  ASSERT_FALSE(svfg->getFormalIns(writerFn).empty());
-  ASSERT_FALSE(svfg->getFormalIns(readerFn).empty());
-
-  bool writerSeeded = false;
-  for (SVFGNode *node : svfg->getFormalIns(writerFn)) {
-    auto *formalIn = dyn_cast<FormalInSVFGNode>(node);
-    ASSERT_NE(formalIn, nullptr);
-    if (!formalIn->getInEdges().empty())
-      writerSeeded = true;
-  }
-
-  bool readerSeeded = false;
-  for (SVFGNode *node : svfg->getFormalIns(readerFn)) {
-    auto *formalIn = dyn_cast<FormalInSVFGNode>(node);
-    ASSERT_NE(formalIn, nullptr);
-    if (!formalIn->getInEdges().empty())
-      readerSeeded = true;
-  }
-
-  EXPECT_TRUE(writerSeeded);
-  EXPECT_TRUE(readerSeeded);
-}
-
-TEST_F(SVFGMemorySSATest, BinaryOperatorsReceiveDirectValueFlowEdges) {
-  const char *source = R"(
-    define i32 @main() {
-    entry:
-      %a = add i32 1, 2
-      %b = add i32 %a, 3
-      ret i32 %b
-    }
-  )";
-
-  auto module = parseModule(source);
-  ASSERT_NE(module, nullptr);
-
-  ICFG icfg;
-  std::unique_ptr<SVFG> svfg = buildSVFG(module.get(), icfg);
-  ASSERT_NE(svfg, nullptr);
-
-  const Function *mainFn = module->getFunction("main");
-  ASSERT_NE(mainFn, nullptr);
-
-  const Instruction *firstAdd = nullptr;
-  const Instruction *secondAdd = nullptr;
-  for (const BasicBlock &bb : *mainFn) {
-    for (const Instruction &inst : bb) {
-      if (!isa<BinaryOperator>(&inst))
-        continue;
-      if (!firstAdd)
-        firstAdd = &inst;
-      else {
-        secondAdd = &inst;
-        break;
-      }
-    }
-  }
-
-  ASSERT_NE(firstAdd, nullptr);
-  ASSERT_NE(secondAdd, nullptr);
-
-  SVFGNode *src = svfg->getDef(firstAdd);
-  SVFGNode *dst = svfg->getDef(secondAdd);
-  ASSERT_NE(src, nullptr);
-  ASSERT_NE(dst, nullptr);
-  ASSERT_TRUE(isa<BinaryOpSVFGNode>(src));
-  ASSERT_TRUE(isa<BinaryOpSVFGNode>(dst));
-
-  SVFGEdge *edge = svfg->getIntraVFGEdge(src, dst, SVFGEdgeK::IntraDirect);
-  EXPECT_NE(edge, nullptr);
-}
-
-} // namespace

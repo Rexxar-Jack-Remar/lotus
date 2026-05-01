@@ -1,19 +1,30 @@
 add_lotus_concurrency_test_suite(concurrency_core_tests
   MHPAnalysisTest.cpp
+  MHPAnalysisTestPart2.cpp
   StaticVectorClockMHPTest.cpp
   HappensBeforeAnalysisTest.cpp
+  HappensBeforeAnalysisTestPart2.cpp
+  HappensBeforeAnalysisTestPart3.cpp
+  HappensBeforeAnalysisTestPart4.cpp
   AtomicTest.cpp
+  AtomicTestPart2.cpp
   LockSetAnalysisTest.cpp
+  LockSetAnalysisTestPart2.cpp
   EscapeAnalysisTest.cpp
   StaticThreadSharingAnalysisTest.cpp
   ThreadLocalAnalysisTest.cpp
   ThreadAPITest.cpp
+  ThreadAPITestPart2.cpp
   JoinTargetAnalysisTest.cpp
+  JoinTargetAnalysisTestPart2.cpp
   LinuxKernelAnalysisTest.cpp
-  CUDAAnalysisTest.cpp)
+  CUDAAnalysisTest.cpp
+  CUDAAnalysisTestPart2.cpp
+  CUDAAnalysisTestPart3.cpp)
 
 add_lotus_concurrency_test_suite(concurrency_openmp_tests
   OpenMPTaskGraphTest.cpp
+  OpenMPTaskGraphTestPart2.cpp
   OpenMPSemanticsTest.cpp
   DataSharingAnalysisTest.cpp
   ConcurrencyFacadeTest.cpp)
