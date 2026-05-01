@@ -1,14 +1,27 @@
 #include "Analysis/Purity/ExternalPuritySummaryStore.h"
+#include "Alias/UnificationBased/seadsa/AllocSiteInfo.hh"
+#include "Alias/UnificationBased/seadsa/AllocWrapInfo.hh"
+#include "Alias/UnificationBased/seadsa/DsaAnalysis.hh"
+#include "Alias/UnificationBased/seadsa/DsaLibFuncInfo.hh"
+#include "Alias/UnificationBased/seadsa/InitializePasses.hh"
+#include "Alias/UnificationBased/seadsa/ShadowMem.hh"
+#include "Alias/UnificationBased/seadsa/support/RemovePtrToInt.hh"
 #include "Analysis/Purity/PurityInferenceDriver.h"
 
 #include <memory>
 #include <string>
+#include <vector>
 
 #include <llvm/Bitcode/BitcodeWriter.h>
+#include <llvm/IR/InstIterator.h>
 #include <llvm/IR/LLVMContext.h>
+#include <llvm/IR/LegacyPassManager.h>
 #include <llvm/IR/Module.h>
 #include <llvm/IR/Verifier.h>
 #include <llvm/IRReader/IRReader.h>
+#include <llvm/InitializePasses.h>
+#include <llvm/Pass.h>
+#include <llvm/PassRegistry.h>
 #include <llvm/Support/CommandLine.h>
 #include <llvm/Support/FileSystem.h>
 #include <llvm/Support/InitLLVM.h>
@@ -27,7 +40,7 @@ static cl::opt<std::string> InputFilename(cl::Positional,
                                           cl::Required, cl::cat(PurityCat));
 
 static cl::opt<std::string> SummaryFile(
-    "summary-file",
+    "purity-summary-file",
     cl::desc("Path to the external purity summary JSON store"),
     cl::value_desc("filename"), cl::init(""), cl::cat(PurityCat));
 
@@ -60,6 +73,69 @@ static cl::list<std::string> InvalidateSummaries(
     cl::desc("Mark an external summary as rejected and recompute impacted "
              "functions"),
     cl::ZeroOrMore, cl::cat(PurityCat));
+
+static cl::opt<bool> DisableMemorySSAPreparation(
+    "disable-memoryssa-prep",
+    cl::desc("Skip the SeaDsa/ShadowMem preparation pipeline before running "
+             "purity inference"),
+    cl::init(false), cl::cat(PurityCat));
+
+static bool moduleContainsShadowMem(const Module &module) {
+  for (const Function &function : module) {
+    if (function.isDeclaration()) {
+      continue;
+    }
+    for (const Instruction &inst : instructions(function)) {
+      const auto *call = dyn_cast<CallBase>(&inst);
+      const Function *callee = call ? call->getCalledFunction() : nullptr;
+      if (callee && callee->getName().startswith("shadow.mem")) {
+        return true;
+      }
+    }
+  }
+  return false;
+}
+
+static void initializeLegacyPasses() {
+  PassRegistry &registry = *PassRegistry::getPassRegistry();
+  initializeCore(registry);
+  initializeAnalysis(registry);
+  initializeTransformUtils(registry);
+  initializeIPO(registry);
+  initializeCallGraphWrapperPassPass(registry);
+  initializeGlobalsAAWrapperPassPass(registry);
+  initializeTargetLibraryInfoWrapperPassPass(registry);
+  initializeDominatorTreeWrapperPassPass(registry);
+  initializeAssumptionCacheTrackerPass(registry);
+
+  seadsa::initializeAnalysisPasses(registry);
+  initializeRemovePtrToIntPass(registry);
+  initializeAllocWrapInfoPass(registry);
+  initializeDsaLibFuncInfoPass(registry);
+  initializeAllocSiteInfoPass(registry);
+  initializeDsaAnalysisPass(registry);
+  initializeShadowMemPassPass(registry);
+  initializeStripShadowMemPassPass(registry);
+}
+
+static void addMemorySSAPrerequisites(legacy::PassManager &pm) {
+  pm.add(new seadsa::RemovePtrToInt());
+  pm.add(new seadsa::AllocWrapInfo());
+  pm.add(new seadsa::DsaLibFuncInfo());
+  pm.add(new seadsa::AllocSiteInfo());
+  pm.add(new seadsa::DsaAnalysis());
+  pm.add(seadsa::createShadowMemPass());
+}
+
+static bool hasSeaDsaModeOverride(int argc, char **argv) {
+  for (int index = 1; index < argc; ++index) {
+    StringRef arg(argv[index]);
+    if (arg == "--sea-dsa" || arg.startswith("--sea-dsa=")) {
+      return true;
+    }
+  }
+  return false;
+}
 
 bool writeTextFile(StringRef path, StringRef contents, std::string &error) {
   std::error_code ec;
@@ -96,8 +172,24 @@ bool writeModuleToFile(const Module &module, StringRef path, bool asAssembly,
 
 int main(int argc, char **argv) {
   InitLLVM X(argc, argv);
+  initializeLegacyPasses();
+
+  std::vector<const char *> parseArgv;
+  parseArgv.reserve(static_cast<size_t>(argc) + 1);
+  for (int index = 0; index < argc; ++index) {
+    parseArgv.push_back(argv[index]);
+  }
+
+  std::string defaultSeaDsaArg;
+  if (!hasSeaDsaModeOverride(argc, argv)) {
+    // Purity only needs stable ShadowMem instrumentation; the default
+    // context-sensitive SeaDsa mode is less robust on large benchmarks.
+    defaultSeaDsaArg = "--sea-dsa=ci";
+    parseArgv.push_back(defaultSeaDsaArg.c_str());
+  }
+
   cl::ParseCommandLineOptions(
-      argc, argv,
+      static_cast<int>(parseArgv.size()), parseArgv.data(),
       "Lotus purity workflow tool for external summaries and reporting\n");
 
   LLVMContext context;
@@ -111,6 +203,15 @@ int main(int argc, char **argv) {
   if (verifyModule(*module, &errs())) {
     errs() << "error: module verification failed\n";
     return 1;
+  }
+
+  const bool hadShadowMemInput = moduleContainsShadowMem(*module);
+  const bool shouldPrepareMemorySSA =
+      !DisableMemorySSAPreparation && !hadShadowMemInput;
+  if (shouldPrepareMemorySSA) {
+    legacy::PassManager preparePM;
+    addMemorySSAPrerequisites(preparePM);
+    preparePM.run(*module);
   }
 
   lotus::analysis::purity::ExternalPuritySummaryStore summaryStore;
@@ -152,6 +253,12 @@ int main(int argc, char **argv) {
              << "': " << saveError << "\n";
       return 1;
     }
+  }
+
+  if (shouldPrepareMemorySSA) {
+    legacy::PassManager stripPM;
+    stripPM.add(seadsa::createStripShadowMemPass());
+    stripPM.run(*module);
   }
 
   if (!OutputFilename.empty()) {

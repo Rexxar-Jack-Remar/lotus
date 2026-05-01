@@ -33,6 +33,7 @@
 #include "llvm/IR/InstVisitor.h"
 #include "llvm/IR/Instructions.h"
 #include "llvm/IR/IntrinsicInst.h"
+#include "llvm/IR/Operator.h"
 #include "llvm/IR/PatternMatch.h"
 
 #include "Alias/UnificationBased/seadsa/AllocWrapInfo.hh"
@@ -246,13 +247,34 @@ protected:
       assert(cast->getOperand(0));
       // recursion is bounded by levels of bitcasts
       return isNullConstant(*cast->getOperand(0));
+    } else if (auto *cast = dyn_cast<BitCastOperator>(&v)) {
+      assert(cast->getOperand(0));
+      return isNullConstant(*cast->getOperand(0));
     } else if (auto *cast = dyn_cast<PtrToIntInst>(&v)) {
       assert(cast->getOperand(0));
       return isNullConstant(*cast->getOperand(0));
-    }
-    // Some LDV examples in SV-COMP benchmarks might contain gep null, ....
-    else if (const GetElementPtrInst *Gep =
+    } else if (auto *cast = dyn_cast<PtrToIntOperator>(&v)) {
+      assert(cast->getOperand(0));
+      return isNullConstant(*cast->getOperand(0));
+    } else if (auto *cast = dyn_cast<IntToPtrInst>(&v)) {
+      assert(cast->getOperand(0));
+      if (const auto *ci = dyn_cast<ConstantInt>(cast->getOperand(0))) {
+        return ci->isZero();
+      }
+    } else if (const auto *op = dyn_cast<Operator>(&v)) {
+      if (op->getOpcode() == Instruction::IntToPtr) {
+        assert(op->getOperand(0));
+        if (const auto *ci = dyn_cast<ConstantInt>(op->getOperand(0))) {
+          return ci->isZero();
+        }
+      }
+    } else if (const GetElementPtrInst *Gep =
                  dyn_cast<const GetElementPtrInst>(V)) {
+      // Some LDV examples in SV-COMP benchmarks might contain gep null, ....
+      const Value &base = *Gep->getPointerOperand();
+      if (const Constant *c = dyn_cast<Constant>(base.stripPointerCasts()))
+        return c->isNullValue();
+    } else if (const auto *Gep = dyn_cast<const GEPOperator>(V)) {
       const Value &base = *Gep->getPointerOperand();
       if (const Constant *c = dyn_cast<Constant>(base.stripPointerCasts()))
         return c->isNullValue();
@@ -564,6 +586,15 @@ seadsa::Cell BlockBuilderBase::valueCell(const Value &v) {
   if (auto *ptrtoint = dyn_cast<PtrToIntInst>(&v)) {
     return valueCell(*ptrtoint->getOperand(0));
   }
+  if (auto *ptrtoint = dyn_cast<PtrToIntOperator>(&v)) {
+    return valueCell(*ptrtoint->getOperand(0));
+  }
+  if (auto *bitcast = dyn_cast<BitCastOperator>(&v)) {
+    return valueCell(*bitcast->getOperand(0));
+  }
+  if (auto *addrspacecast = dyn_cast<AddrSpaceCastOperator>(&v)) {
+    return valueCell(*addrspacecast->getOperand(0));
+  }
 
   if (m_graph.hasCell(v)) {
     Cell &c = m_graph.mkCell(v, Cell());
@@ -621,14 +652,34 @@ seadsa::Cell BlockBuilderBase::valueCell(const Value &v) {
     }
   }
 
+  if (const auto *gep = dyn_cast<const GEPOperator>(&v)) {
+    const Value &base = *gep->getPointerOperand();
+    SmallVector<Value *, 8> indicies(gep->op_begin() + 1, gep->op_end());
+    visitGep(v, base, indicies);
+    if (m_graph.hasCell(v)) {
+      return m_graph.mkCell(v, Cell());
+    }
+  }
+
+  if (const auto *op = dyn_cast<Operator>(&v);
+      op && op->getOpcode() == Instruction::IntToPtr) {
+    visitCastIntToPtr(v);
+    if (m_graph.hasCell(v)) {
+      return m_graph.mkCell(v, Cell());
+    }
+  }
+
   const auto &vType = *v.getType();
   assert(vType.isPointerTy() || vType.isAggregateType() || vType.isVectorTy());
   (void)vType;
 
   LOG("dsa-warn",
       errs() << "Unexpected expression at valueCell: " << v << "\n");
-  assert(false && "Expression not handled");
-  return Cell();
+  LOG("dsa-warn",
+      errs() << "WARNING: unsound handling of an expression as a fresh "
+                "allocation: "
+             << v << "\n";);
+  return m_graph.mkCell(v, Cell(m_graph.mkNode(), 0));
 }
 
 void IntraBlockBuilder::visitInstruction(Instruction &I) {

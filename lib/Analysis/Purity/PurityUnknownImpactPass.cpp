@@ -17,6 +17,10 @@ using namespace llvm;
 
 namespace {
 
+bool isShadowMemHelperName(StringRef symbolName) {
+  return symbolName.startswith("shadow.mem");
+}
+
 void sortImpacts(std::vector<UnknownCalleeImpact> &impacts) {
   std::sort(impacts.begin(), impacts.end(),
             [](const UnknownCalleeImpact &lhs,
@@ -57,6 +61,9 @@ UnknownCalleeImpactAnalyzer::rankUnknownCallees(Module &module) const {
     if (analysis.getPurity(&function) == PurityKind::Unknown) {
       const auto effects = analysis.getEffects(&function);
       for (const std::string &dependency : effects.dependsOn) {
+        if (isShadowMemHelperName(dependency)) {
+          continue;
+        }
         transitiveCallers[dependency].insert(&function);
       }
     }
@@ -69,6 +76,9 @@ UnknownCalleeImpactAnalyzer::rankUnknownCallees(Module &module) const {
 
       const Function *callee = call->getCalledFunction();
       if (!callee || !callee->isDeclaration()) {
+        continue;
+      }
+      if (isShadowMemHelperName(callee->getName())) {
         continue;
       }
 

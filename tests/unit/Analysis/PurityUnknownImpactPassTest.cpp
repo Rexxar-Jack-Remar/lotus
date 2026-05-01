@@ -54,4 +54,26 @@ TEST(PurityUnknownImpactPassTest, RanksUnknownDeclarationsByCallerImpact) {
   EXPECT_EQ(impacts[1].transitiveCallerCount, 1u);
 }
 
+TEST(PurityUnknownImpactPassTest, IgnoresShadowMemHelperDeclarations) {
+  LLVMContext context;
+  auto module = parseModuleChecked(context, R"(
+    declare i32 @shadow.mem.load(i32, i32, i8*)
+    declare i32 @unknown_a(i8*)
+
+    define i32 @leaf(i8* %p) {
+    entry:
+      %mem = call i32 @shadow.mem.load(i32 0, i32 1, i8* null)
+      %call = call i32 @unknown_a(i8* %p)
+      %sum = add i32 %mem, %call
+      ret i32 %sum
+    }
+  )", "PurityUnknownImpactPassTest");
+
+  UnknownCalleeImpactAnalyzer analyzer;
+  const auto impacts = analyzer.rankUnknownCallees(*module);
+
+  ASSERT_EQ(impacts.size(), 1u);
+  EXPECT_EQ(impacts[0].symbolName, "unknown_a");
+}
+
 } // namespace

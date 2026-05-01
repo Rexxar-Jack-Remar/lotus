@@ -3,6 +3,17 @@
 
 using namespace seadsa;
 
+namespace {
+
+Field canonicalizeFieldForSeaDsaMode(Field field) {
+  if (FieldType::IsNotTypeAware()) {
+    return Field(field.getOffset(), FieldType::mkUnknown());
+  }
+  return field;
+}
+
+} // namespace
+
 void FunctionalMapper::insert(const Cell &src, const Cell &dst) {
   assert (!src.isNull());
   assert (!dst.isNull());
@@ -30,9 +41,11 @@ void FunctionalMapper::insert(const Cell &src, const Cell &dst) {
   for (auto &kv : src.getNode()->links()) {
     if (kv.first.getOffset() < srcOffset.getNumericOffset())
       continue;
-    if (dst.getNode()->hasLink(kv.first.addOffset(srcNodeOffset)))
+    const Field dstField =
+        canonicalizeFieldForSeaDsaMode(kv.first.addOffset(srcNodeOffset));
+    if (dst.getNode()->hasLink(dstField))
       insert(*kv.second,
-             dst.getNode()->getLink(kv.first.addOffset(srcNodeOffset)));
+             dst.getNode()->getLink(dstField));
   }
 }
 
@@ -70,6 +83,8 @@ bool SimulationMapper::insert(const Cell &c1, Cell &c2) {
 // Return true iff n1 (at offset 0) is simulated by n2 at offset o
 bool SimulationMapper::insert(const Node &n1, Node &n2, Field o)
 {
+  o = canonicalizeFieldForSeaDsaMode(o);
+
   // XXX: adjust the offset
   Node::Offset offset(n2, o.getOffset());
 
@@ -126,10 +141,11 @@ bool SimulationMapper::insert(const Node &n1, Node &n2, Field o)
     const unsigned j = n2.isOffsetCollapsed() ? 0 : kv.first.getOffset() +
                                          offset.getNumericOffset();
     const FieldType ty = kv.first.getType();
-    const Field adjusted(j, ty);
+    const Field adjusted = canonicalizeFieldForSeaDsaMode(Field(j, ty));
+    const bool useOmniFallback = !FieldType::IsNotTypeAware();
 
-    const Field omniField = adjusted.mkOmniField();
-    if (!n2.hasLink(adjusted) && !n2.hasLink(omniField))
+    if (!n2.hasLink(adjusted) &&
+        (!useOmniFallback || !n2.hasLink(adjusted.mkOmniField())))
     { m_sim.clear (); return false; }
     
     Node *n3 = kv.second->getNode ();
@@ -153,7 +169,8 @@ bool SimulationMapper::insert(const Node &n1, Node &n2, Field o)
     { m_sim.clear (); return false; }
 
     // Offsets must be adjusted     
-    if (!insert (*n3, *n4, Field(off2 - off1, ty)))
+    if (!insert (*n3, *n4,
+                 canonicalizeFieldForSeaDsaMode(Field(off2 - off1, ty))))
     { m_sim.clear (); return false; }
   }
   

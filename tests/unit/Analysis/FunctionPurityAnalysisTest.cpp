@@ -174,6 +174,25 @@ TEST(FunctionPurityAnalysisTest, TreatsIndirectCallsAsUnknown) {
             PurityKind::Unknown);
 }
 
+TEST(FunctionPurityAnalysisTest, TreatsShadowMemHelpersAsInternalBookkeeping) {
+  LLVMContext context;
+  auto module = parseModuleChecked(context, R"(
+    declare i32 @shadow.mem.load(i32, i32, i8*)
+
+    define i32 @shadow_user() {
+    entry:
+      %mem = call i32 @shadow.mem.load(i32 0, i32 1, i8* null)
+      ret i32 %mem
+    }
+  )", "FunctionPurityAnalysisTest");
+
+  FunctionPurityAnalysis analysis(*module);
+  analysis.run();
+
+  EXPECT_EQ(analysis.getPurity(module->getFunction("shadow_user")),
+            PurityKind::Const);
+}
+
 TEST(FunctionPurityAnalysisTest,
      UsesMemorySSASummaryToIgnoreNonEscapingLocalStores) {
   LLVMContext context;

@@ -26,3 +26,7 @@ add_lotus_targeted_test(ipo_memoryssa_test IPOMemorySSATest.cpp
     LLVMAsmParser
     LLVMIRReader
     LLVMPasses)
+
+add_lotus_targeted_test(seadsa_field_type_test SeaDsaFieldTypeTest.cpp
+  LINK_LIBS
+    SeaDsaAnalysis)

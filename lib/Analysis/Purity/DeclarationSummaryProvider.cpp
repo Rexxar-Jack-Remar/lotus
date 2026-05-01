@@ -56,6 +56,10 @@ bool hasExplicitMemoryAttribute(const Function &function) {
          function.doesNotAccessMemory() || function.onlyReadsMemory();
 }
 
+bool isShadowMemHelper(const Function &function) {
+  return function.getName().startswith("shadow.mem");
+}
+
 class LocalAttributePurityProvider final : public DeclarationSummaryProvider {
 public:
   llvm::StringRef getName() const override { return "local-attributes"; }
@@ -63,6 +67,10 @@ public:
   std::optional<FunctionEffectSummary>
   getSummary(const Function &function, const CallBase *callSite) const override {
     (void)callSite;
+
+    if (isShadowMemHelper(function)) {
+      return constSummary(SummarySource::InternalAnalysis);
+    }
 
     if (function.doesNotAccessMemory() ||
         function.hasFnAttribute(Attribute::ReadNone)) {
