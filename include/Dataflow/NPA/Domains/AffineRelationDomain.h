@@ -60,6 +60,10 @@ public:
   static value_type subtract(const value_type &lhs, const value_type &rhs);
 
   static value_type identity();
+  static value_type
+  addStateConstraint(const value_type &relation, int64_t constant,
+                     const std::vector<std::pair<const llvm::Value *, int64_t>>
+                         &terms);
   static value_type addPrecondition(const value_type &relation,
                                     const llvm::Value *value, int64_t constant);
   static value_type makeForget(const llvm::Value *dest);

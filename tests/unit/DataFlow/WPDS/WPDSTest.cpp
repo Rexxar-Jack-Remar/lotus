@@ -3,11 +3,11 @@
 #include "Dataflow/WPDS/InterProceduralDataFlow.h"
 #include "TestUtils/LLVMHelpers.h"
 
-#include <gtest/gtest.h>
 #include <llvm/IR/Constants.h>
 #include <llvm/IR/Instructions.h>
 #include <llvm/IR/LLVMContext.h>
 #include <llvm/IR/Type.h>
+#include <gtest/gtest.h>
 
 using namespace llvm;
 using namespace wpds;

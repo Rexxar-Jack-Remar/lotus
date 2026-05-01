@@ -7,6 +7,7 @@
 #include "Dataflow/NPA/Analyses/InterEngine.h"
 
 #include <algorithm>
+#include <optional>
 #include <unordered_set>
 
 #include <llvm/ADT/APInt.h>
@@ -85,6 +86,304 @@ AffineExpr scaleExpr(AffineExpr expr, int64_t factor, unsigned bitWidth) {
   for (auto &term : expr.terms)
     term.second *= factor;
   return normalizeExpr(std::move(expr), bitWidth);
+}
+
+AffineExpr variableExpr(const llvm::Value *value) {
+  AffineExpr out;
+  out.top = false;
+  out.terms[value] = 1;
+  return out;
+}
+
+std::optional<unsigned> integerBitWidth(const llvm::Value *value) {
+  auto *Ty = value ? value->getType() : nullptr;
+  if (!Ty || !Ty->isIntegerTy() || Ty->getIntegerBitWidth() > 64)
+    return std::nullopt;
+  return Ty->getIntegerBitWidth();
+}
+
+bool isEquivalentAffineExpr(const AffineExpr &lhs, const AffineExpr &rhs,
+                            unsigned bitWidth) {
+  return normalizeExpr(lhs, bitWidth) == normalizeExpr(rhs, bitWidth);
+}
+
+std::optional<AffineExpr>
+affineExprForValue(const llvm::Value *value,
+                   std::unordered_set<const llvm::Value *> &visiting);
+
+std::optional<AffineExpr> affineExprForBinary(const llvm::BinaryOperator &BinOp,
+                                              std::unordered_set<const llvm::Value *>
+                                                  &visiting) {
+  auto width = integerBitWidth(&BinOp);
+  if (!width)
+    return std::nullopt;
+
+  auto getExpr = [&](const llvm::Value *operand) {
+    return affineExprForValue(operand, visiting);
+  };
+
+  int64_t lhsConst = 0;
+  int64_t rhsConst = 0;
+  auto lhsExpr = getExpr(BinOp.getOperand(0));
+  auto rhsExpr = getExpr(BinOp.getOperand(1));
+
+  switch (BinOp.getOpcode()) {
+  case llvm::Instruction::Add:
+    if (lhsExpr && rhsExpr)
+      return addExpr(*lhsExpr, *rhsExpr, *width);
+    break;
+  case llvm::Instruction::Sub:
+    if (lhsExpr && rhsExpr)
+      return addExpr(*lhsExpr, scaleExpr(*rhsExpr, -1, *width), *width);
+    break;
+  case llvm::Instruction::Mul:
+    if (getConstantIntValue(BinOp.getOperand(0), lhsConst) && rhsExpr)
+      return scaleExpr(*rhsExpr, wrapToBitWidth(lhsConst, *width), *width);
+    if (getConstantIntValue(BinOp.getOperand(1), rhsConst) && lhsExpr)
+      return scaleExpr(*lhsExpr, wrapToBitWidth(rhsConst, *width), *width);
+    break;
+  case llvm::Instruction::Shl:
+    if (!lhsExpr || !getConstantIntValue(BinOp.getOperand(1), rhsConst) ||
+        rhsConst < 0 || static_cast<unsigned>(rhsConst) >= *width) {
+      break;
+    }
+    return scaleExpr(
+        *lhsExpr,
+        llvm::APInt(*width, 1).shl(static_cast<unsigned>(rhsConst)).getSExtValue(),
+        *width);
+  default:
+    break;
+  }
+
+  return std::nullopt;
+}
+
+std::optional<AffineExpr> affineExprForCast(const llvm::CastInst &Cast,
+                                            std::unordered_set<const llvm::Value *>
+                                                &visiting) {
+  auto dstWidth = integerBitWidth(&Cast);
+  auto srcWidth = integerBitWidth(Cast.getOperand(0));
+  if (!dstWidth || !srcWidth)
+    return std::nullopt;
+
+  auto operandExpr = affineExprForValue(Cast.getOperand(0), visiting);
+  if (!operandExpr)
+    return std::nullopt;
+
+  auto castConstant = [&](int64_t value) -> AffineExpr {
+    llvm::APInt bits(*srcWidth, static_cast<uint64_t>(value), true);
+    switch (Cast.getOpcode()) {
+    case llvm::Instruction::SExt:
+      return constExpr(bits.sext(*dstWidth).getSExtValue());
+    case llvm::Instruction::ZExt:
+      return constExpr(bits.zext(*dstWidth).getSExtValue());
+    case llvm::Instruction::Trunc:
+      return constExpr(bits.trunc(*dstWidth).getSExtValue());
+    default:
+      return topExpr();
+    }
+  };
+
+  if (operandExpr->terms.empty()) {
+    switch (Cast.getOpcode()) {
+    case llvm::Instruction::SExt:
+    case llvm::Instruction::ZExt:
+    case llvm::Instruction::Trunc:
+      return castConstant(operandExpr->constant);
+    default:
+      break;
+    }
+  }
+
+  switch (Cast.getOpcode()) {
+  case llvm::Instruction::SExt:
+    if (*srcWidth == *dstWidth)
+      return normalizeExpr(*operandExpr, *dstWidth);
+    if (*srcWidth == 1)
+      return scaleExpr(*operandExpr, -1, *dstWidth);
+    break;
+  case llvm::Instruction::ZExt:
+    if (*srcWidth == *dstWidth)
+      return normalizeExpr(*operandExpr, *dstWidth);
+    if (*srcWidth == 1)
+      return normalizeExpr(*operandExpr, *dstWidth);
+    break;
+  case llvm::Instruction::Trunc:
+    if (*srcWidth == *dstWidth)
+      return normalizeExpr(*operandExpr, *dstWidth);
+    break;
+  default:
+    break;
+  }
+
+  return std::nullopt;
+}
+
+std::optional<AffineExpr>
+affineExprForValue(const llvm::Value *value,
+                   std::unordered_set<const llvm::Value *> &visiting) {
+  int64_t constant = 0;
+  if (getConstantIntValue(value, constant)) {
+    auto width = integerBitWidth(value);
+    return width ? std::optional<AffineExpr>(constExpr(wrapToBitWidth(
+                       constant, *width)))
+                 : std::nullopt;
+  }
+
+  if (!isTrackedScalar(value))
+    return std::nullopt;
+  if (!visiting.insert(value).second)
+    return variableExpr(value);
+
+  std::optional<AffineExpr> out;
+  if (auto *Cast = llvm::dyn_cast<llvm::CastInst>(value)) {
+    out = affineExprForCast(*Cast, visiting);
+  } else if (auto *BinOp = llvm::dyn_cast<llvm::BinaryOperator>(value)) {
+    out = affineExprForBinary(*BinOp, visiting);
+  } else if (auto *Select = llvm::dyn_cast<llvm::SelectInst>(value)) {
+    int64_t cond = 0;
+    if (getConstantIntValue(Select->getCondition(), cond))
+      out = affineExprForValue(cond != 0 ? Select->getTrueValue()
+                                         : Select->getFalseValue(),
+                               visiting);
+    else {
+      auto trueExpr = affineExprForValue(Select->getTrueValue(), visiting);
+      auto falseExpr = affineExprForValue(Select->getFalseValue(), visiting);
+      auto width = integerBitWidth(value);
+      if (trueExpr && falseExpr && width &&
+          isEquivalentAffineExpr(*trueExpr, *falseExpr, *width)) {
+        out = normalizeExpr(*trueExpr, *width);
+      }
+    }
+  }
+
+  visiting.erase(value);
+  if (out)
+    return out;
+  return variableExpr(value);
+}
+
+std::optional<AffineExpr> affineExprForValue(const llvm::Value *value) {
+  std::unordered_set<const llvm::Value *> visiting;
+  return affineExprForValue(value, visiting);
+}
+
+Relation equalityConstraintForExprs(const AffineExpr &lhs, const AffineExpr &rhs,
+                                    unsigned bitWidth) {
+  std::unordered_map<const llvm::Value *, int64_t> coeffs = lhs.terms;
+  for (const auto &term : rhs.terms)
+    coeffs[term.first] -= term.second;
+
+  std::vector<std::pair<const llvm::Value *, int64_t>> terms;
+  for (const auto &term : coeffs) {
+    int64_t coeff = wrapToBitWidth(term.second, bitWidth);
+    if (coeff != 0)
+      terms.emplace_back(term.first, coeff);
+  }
+
+  int64_t constant = wrapToBitWidth(rhs.constant - lhs.constant, bitWidth);
+  if (terms.empty() && constant == 0)
+    return D::identity();
+  return D::addStateConstraint(D::identity(), constant, terms);
+}
+
+std::optional<bool>
+evaluateAffineComparison(const AffineExpr &lhs, const AffineExpr &rhs,
+                         llvm::CmpInst::Predicate predicate,
+                         unsigned bitWidth) {
+  AffineExpr diff = normalizeExpr(addExpr(lhs, scaleExpr(rhs, -1, bitWidth),
+                                          bitWidth),
+                                  bitWidth);
+  if (!diff.terms.empty())
+    return std::nullopt;
+
+  llvm::APInt lhsValue(bitWidth, static_cast<uint64_t>(lhs.constant), true);
+  llvm::APInt rhsValue(bitWidth, static_cast<uint64_t>(rhs.constant), true);
+  return llvm::ICmpInst::compare(lhsValue, rhsValue, predicate);
+}
+
+Relation identityWithConditionValue(const llvm::Value *condition, bool value) {
+  return D::isTrackedValue(condition)
+             ? D::addPrecondition(D::identity(), condition, value ? 1 : 0)
+             : D::identity();
+}
+
+Relation equalityConstraintForOperands(const llvm::Value *lhs,
+                                       const llvm::Value *rhs) {
+  auto width = integerBitWidth(lhs);
+  auto lhsExpr = affineExprForValue(lhs);
+  auto rhsExpr = affineExprForValue(rhs);
+  if (width && lhsExpr && rhsExpr)
+    return equalityConstraintForExprs(*lhsExpr, *rhsExpr, *width);
+
+  int64_t constant = 0;
+  if (D::isTrackedValue(lhs) && getConstantIntValue(rhs, constant)) {
+    return D::addStateConstraint(
+        D::identity(), wrapToBitWidth(constant, D::bitWidthOf(lhs)), {{lhs, 1}});
+  }
+  if (D::isTrackedValue(rhs) && getConstantIntValue(lhs, constant)) {
+    return D::addStateConstraint(
+        D::identity(), wrapToBitWidth(constant, D::bitWidthOf(rhs)), {{rhs, 1}});
+  }
+  if (D::isTrackedValue(lhs) && D::isTrackedValue(rhs)) {
+    return D::addStateConstraint(D::identity(), 0, {{lhs, 1}, {rhs, -1}});
+  }
+  return D::identity();
+}
+
+Relation conditionRefinement(const llvm::Value *condition, bool expectedValue) {
+  Relation relation = identityWithConditionValue(condition, expectedValue);
+  auto *Cmp = llvm::dyn_cast<llvm::ICmpInst>(condition);
+  if (!Cmp)
+    return relation;
+
+  Relation operandRefinement = D::identity();
+  switch (Cmp->getPredicate()) {
+  case llvm::CmpInst::ICMP_EQ:
+    if (expectedValue) {
+      operandRefinement = equalityConstraintForOperands(Cmp->getOperand(0),
+                                                        Cmp->getOperand(1));
+    }
+    break;
+  case llvm::CmpInst::ICMP_NE:
+    if (!expectedValue) {
+      operandRefinement = equalityConstraintForOperands(Cmp->getOperand(0),
+                                                        Cmp->getOperand(1));
+    }
+    break;
+  default:
+    break;
+  }
+  return D::extend(operandRefinement, relation);
+}
+
+std::optional<bool> evaluateConditionConstant(const llvm::Value *condition) {
+  int64_t constant = 0;
+  if (getConstantIntValue(condition, constant))
+    return constant != 0;
+
+  auto *Cmp = llvm::dyn_cast<llvm::ICmpInst>(condition);
+  if (!Cmp)
+    return std::nullopt;
+
+  int64_t lhs = 0, rhs = 0;
+  if (!getConstantIntValue(Cmp->getOperand(0), lhs) ||
+      !getConstantIntValue(Cmp->getOperand(1), rhs)) {
+    return std::nullopt;
+  }
+
+  llvm::APInt lhsValue(Cmp->getOperand(0)->getType()->getIntegerBitWidth(),
+                       static_cast<uint64_t>(lhs), true);
+  llvm::APInt rhsValue(Cmp->getOperand(1)->getType()->getIntegerBitWidth(),
+                       static_cast<uint64_t>(rhs), true);
+  return llvm::ICmpInst::compare(lhsValue, rhsValue, Cmp->getPredicate());
+}
+
+std::optional<int64_t> evaluateSwitchConstant(const llvm::Value *condition) {
+  int64_t constant = 0;
+  if (!getConstantIntValue(condition, constant))
+    return std::nullopt;
+  return constant;
 }
 
 bool isZeroRow(const Row &row) {
@@ -189,6 +488,18 @@ Row reorderToPostPreConst(const Row &row, unsigned vars) {
   out.insert(out.end(), row.begin(), row.begin() + vars);
   out.push_back(row.back());
   return out;
+}
+
+AffineEquality normalizeEquality(AffineEquality equality) {
+  equality.constant = wrapToBitWidth(equality.constant, equality.bitWidth);
+  for (auto It = equality.terms.begin(); It != equality.terms.end();) {
+    It->second = wrapToBitWidth(It->second, equality.bitWidth);
+    if (It->second == 0)
+      It = equality.terms.erase(It);
+    else
+      ++It;
+  }
+  return equality;
 }
 
 AffineState materializeAffineExpressionsImpl(const Relation &state) {
@@ -317,6 +628,36 @@ AffineState materializeAffineExpressionsImpl(const Relation &state) {
     else if (!preSolved[i].top)
       out.values[vocab->values[i]] = preSolved[i];
   }
+
+  for (const Row &row : rows) {
+    AffineEquality equality;
+    equality.bitWidth = D::componentBitWidth();
+    int64_t lhsConstant = row.back().getSExtValue();
+
+    for (unsigned postCol = 0; postCol < vars; ++postCol) {
+      if (!row[postCol].isZero()) {
+        equality.terms[vocab->values[postCol]] += row[postCol].getSExtValue();
+      }
+    }
+
+    for (unsigned preCol = 0; preCol < vars; ++preCol) {
+      if (row[vars + preCol].isZero())
+        continue;
+      int64_t coeff = row[vars + preCol].getSExtValue();
+      if (!preSolved[preCol].top) {
+        lhsConstant += coeff * preSolved[preCol].constant;
+        for (const auto &term : preSolved[preCol].terms)
+          equality.terms[term.first] += coeff * term.second;
+      } else {
+        equality.terms[vocab->values[preCol]] += coeff;
+      }
+    }
+
+    equality.constant = wrapToBitWidth(-lhsConstant, equality.bitWidth);
+    equality = normalizeEquality(std::move(equality));
+    if (!equality.terms.empty() || equality.constant != 0)
+      out.equalities.push_back(std::move(equality));
+  }
   return out;
 }
 
@@ -337,12 +678,20 @@ public:
     if (auto *Branch = llvm::dyn_cast<llvm::BranchInst>(&term)) {
       if (!Branch->isConditional())
         return D::identity();
-      if (!D::isTrackedValue(Branch->getCondition()))
-        return D::identity();
-      return D::addPrecondition(D::identity(), Branch->getCondition(),
-                                Branch->getSuccessor(0) == &succ ? 1 : 0);
+      bool expectTrue = Branch->getSuccessor(0) == &succ;
+      if (auto constant = evaluateConditionConstant(Branch->getCondition()))
+        return *constant == expectTrue ? D::identity() : D::zero();
+      return conditionRefinement(Branch->getCondition(), expectTrue);
     }
     if (auto *Switch = llvm::dyn_cast<llvm::SwitchInst>(&term)) {
+      if (auto constant = evaluateSwitchConstant(Switch->getCondition())) {
+        for (const auto &Case : Switch->cases()) {
+          if (Case.getCaseValue()->getSExtValue() == *constant) {
+            return Case.getCaseSuccessor() == &succ ? D::identity() : D::zero();
+          }
+        }
+        return Switch->getDefaultDest() == &succ ? D::identity() : D::zero();
+      }
       if (!D::isTrackedValue(Switch->getCondition()))
         return D::identity();
       for (const auto &Case : Switch->cases()) {
@@ -463,22 +812,25 @@ private:
   AffineRelationVocabulary Vocabulary;
 
   void buildVocabulary(llvm::Module &M) {
-    std::set<const llvm::Value *> ordered;
+    std::unordered_set<const llvm::Value *> seen;
+    auto record = [&](const llvm::Value *value) {
+      if (seen.insert(value).second)
+        Vocabulary.values.push_back(value);
+    };
     for (const auto &F : M) {
       if (F.isDeclaration())
         continue;
       for (const auto &Arg : F.args()) {
         if (isTrackedScalar(&Arg))
-          ordered.insert(&Arg);
+          record(&Arg);
       }
       for (const auto &BB : F) {
         for (const auto &I : BB) {
           if (isTrackedScalar(&I))
-            ordered.insert(&I);
+            record(&I);
         }
       }
     }
-    Vocabulary.values.assign(ordered.begin(), ordered.end());
     for (unsigned i = 0; i < Vocabulary.values.size(); ++i) {
       Vocabulary.indices[Vocabulary.values[i]] = i;
       Vocabulary.actualBitWidths[Vocabulary.values[i]] =
@@ -488,12 +840,13 @@ private:
 
   Relation relationForValue(const llvm::Value *dest,
                             const llvm::Value *src) const {
-    int64_t constant = 0;
-    if (getConstantIntValue(src, constant))
+    if (auto expr = affineExprForValue(src)) {
+      std::vector<std::pair<const llvm::Value *, int64_t>> terms;
+      for (const auto &term : expr->terms)
+        terms.emplace_back(term.first, term.second);
       return D::makeAffineAssignment(
-          dest, wrapToBitWidth(constant, D::bitWidthOf(dest)), {});
-    if (D::isTrackedValue(src))
-      return D::makeAffineAssignment(dest, 0, {{src, 1}});
+          dest, wrapToBitWidth(expr->constant, D::bitWidthOf(dest)), terms);
+    }
     return D::makeForget(dest);
   }
 
@@ -510,37 +863,28 @@ private:
   }
 
   Relation buildCastRelation(const llvm::CastInst &Cast) const {
-    int64_t constant = 0;
-    if (getConstantIntValue(Cast.getOperand(0), constant)) {
-      switch (Cast.getOpcode()) {
-      case llvm::Instruction::SExt:
-      case llvm::Instruction::ZExt:
-      case llvm::Instruction::Trunc:
-        return D::makeAffineAssignment(
-            &Cast, wrapToBitWidth(constant, D::bitWidthOf(&Cast)), {});
-      default:
-        return D::makeForget(&Cast);
-      }
+    if (auto expr = affineExprForValue(&Cast)) {
+      std::vector<std::pair<const llvm::Value *, int64_t>> terms;
+      for (const auto &term : expr->terms)
+        terms.emplace_back(term.first, term.second);
+      return D::makeAffineAssignment(
+          &Cast, wrapToBitWidth(expr->constant, D::bitWidthOf(&Cast)), terms);
     }
-    if (!D::isTrackedValue(Cast.getOperand(0)))
-      return D::makeForget(&Cast);
-    switch (Cast.getOpcode()) {
-    case llvm::Instruction::SExt:
-      return D::makeAffineAssignment(&Cast, 0, {{Cast.getOperand(0), 1}});
-    case llvm::Instruction::ZExt:
-      return D::bitWidthOf(Cast.getOperand(0)) == 1
-                 ? D::makeAffineAssignment(&Cast, 0, {{Cast.getOperand(0), 1}})
-                 : D::makeForget(&Cast);
-    case llvm::Instruction::Trunc:
-      return D::bitWidthOf(Cast.getOperand(0)) == D::bitWidthOf(&Cast)
-                 ? D::makeAffineAssignment(&Cast, 0, {{Cast.getOperand(0), 1}})
-                 : D::makeForget(&Cast);
-    default:
-      return D::makeForget(&Cast);
-    }
+    return D::makeForget(&Cast);
   }
 
   Relation buildCompareRelation(const llvm::ICmpInst &Cmp) const {
+    auto width = integerBitWidth(Cmp.getOperand(0));
+    auto lhsExpr = affineExprForValue(Cmp.getOperand(0));
+    auto rhsExpr = affineExprForValue(Cmp.getOperand(1));
+    if (width && lhsExpr && rhsExpr) {
+      if (auto result =
+              evaluateAffineComparison(*lhsExpr, *rhsExpr, Cmp.getPredicate(),
+                                       *width)) {
+        return D::makeAffineAssignment(&Cmp, *result ? 1 : 0, {});
+      }
+    }
+
     int64_t lhs = 0, rhs = 0;
     if (getConstantIntValue(Cmp.getOperand(0), lhs) &&
         getConstantIntValue(Cmp.getOperand(1), rhs)) {
@@ -588,6 +932,14 @@ private:
   }
 
   Relation buildBinaryRelation(const llvm::BinaryOperator &BinOp) const {
+    if (auto expr = affineExprForValue(&BinOp)) {
+      std::vector<std::pair<const llvm::Value *, int64_t>> terms;
+      for (const auto &term : expr->terms)
+        terms.emplace_back(term.first, term.second);
+      return D::makeAffineAssignment(
+          &BinOp, wrapToBitWidth(expr->constant, D::bitWidthOf(&BinOp)), terms);
+    }
+
     auto *L = BinOp.getOperand(0);
     auto *R = BinOp.getOperand(1);
     const unsigned width = D::bitWidthOf(&BinOp);

@@ -310,25 +310,39 @@ AffineRelationDomain::value_type AffineRelationDomain::identity() {
 }
 
 AffineRelationDomain::value_type
+AffineRelationDomain::addStateConstraint(
+    const value_type &relation, int64_t constant,
+    const std::vector<std::pair<const llvm::Value *, int64_t>> &terms) {
+  value_type out = relation;
+  unsigned bitWidth = componentBitWidth();
+  unsigned vars = numVarsFor(bitWidth);
+  Row preRow = zeroRow(bitWidth, 2 * vars + 1);
+  Row postRow = zeroRow(bitWidth, 2 * vars + 1);
+  preRow.back() = llvm::APInt(bitWidth, static_cast<uint64_t>(-constant), true);
+  postRow.back() =
+      llvm::APInt(bitWidth, static_cast<uint64_t>(-constant), true);
+  for (const auto &term : terms) {
+    if (!isTrackedValue(term.first))
+      return relation;
+    unsigned idx = indexOf(term.first);
+    llvm::APInt coeff(bitWidth, static_cast<uint64_t>(term.second), true);
+    preRow[idx] += coeff;
+    postRow[vars + idx] += coeff;
+  }
+  out.components[bitWidth].constraints.push_back(std::move(preRow));
+  out.components[bitWidth].constraints.push_back(std::move(postRow));
+  out.components[bitWidth] =
+      normalizeComponent(std::move(out.components[bitWidth]));
+  return out;
+}
+
+AffineRelationDomain::value_type
 AffineRelationDomain::addPrecondition(const value_type &relation,
                                       const llvm::Value *value,
                                       int64_t constant) {
   if (!isTrackedValue(value))
     return relation;
-  value_type out = relation;
-  unsigned bitWidth = componentBitWidth();
-  unsigned vars = numVarsFor(bitWidth);
-  Row row = zeroRow(bitWidth, 2 * vars + 1);
-  row[indexOf(value)] = llvm::APInt(bitWidth, 1);
-  row.back() = llvm::APInt(bitWidth, static_cast<uint64_t>(-constant), true);
-  out.components[bitWidth].constraints.push_back(std::move(row));
-  Row postRow = zeroRow(bitWidth, 2 * vars + 1);
-  postRow[vars + indexOf(value)] = llvm::APInt(bitWidth, 1);
-  postRow.back() = llvm::APInt(bitWidth, static_cast<uint64_t>(-constant), true);
-  out.components[bitWidth].constraints.push_back(std::move(postRow));
-  out.components[bitWidth] =
-      normalizeComponent(std::move(out.components[bitWidth]));
-  return out;
+  return addStateConstraint(relation, constant, {{value, 1}});
 }
 
 bool AffineRelationDomain::equal(const value_type &lhs, const value_type &rhs) {

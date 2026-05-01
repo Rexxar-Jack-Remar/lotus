@@ -1,12 +1,5 @@
 #pragma once
 
-/**
- ** Machine arithmetic interval domain based on the paper
- ** "Signedness-Agnostic Program Analysis: Precise Integer Bounds for
- ** Low-Level Code" by J.A.Navas, P.Schachte, H.Sondergaard, and
- ** P.J.Stuckey published in APLAS'12.
- **/
-
 #include <crab/domains/abstract_domain.hpp>
 #include <crab/domains/abstract_domain_specialized_traits.hpp>
 #include <crab/domains/combined_domains.hpp>

@@ -7,6 +7,7 @@
 #include <cstdint>
 #include <map>
 #include <unordered_map>
+#include <vector>
 
 namespace llvm {
 class Value;
@@ -26,12 +27,25 @@ struct AffineExpr {
   }
 };
 
+struct AffineEquality {
+  unsigned bitWidth = 0;
+  int64_t constant = 0;
+  std::unordered_map<const llvm::Value *, int64_t> terms;
+
+  bool operator==(const AffineEquality &other) const {
+    return bitWidth == other.bitWidth && constant == other.constant &&
+           terms == other.terms;
+  }
+};
+
 struct AffineState {
   bool reachable = false;
   std::unordered_map<const llvm::Value *, AffineExpr> values;
+  std::vector<AffineEquality> equalities;
 
   bool operator==(const AffineState &other) const {
-    return reachable == other.reachable && values == other.values;
+    return reachable == other.reachable && values == other.values &&
+           equalities == other.equalities;
   }
 };
 

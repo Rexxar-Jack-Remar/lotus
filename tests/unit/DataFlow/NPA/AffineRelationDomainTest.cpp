@@ -3,11 +3,11 @@
 #include "Dataflow/NPA/Analyses/Inter/InterAffineEqualities.h"
 #include "TestUtils/LLVMHelpers.h"
 
-#include <set>
+#include <unordered_set>
 
-#include <gtest/gtest.h>
 #include <llvm/IR/LLVMContext.h>
 #include <llvm/IR/Module.h>
+#include <gtest/gtest.h>
 
 namespace {
 
@@ -15,24 +15,27 @@ using lotus::unittest::parseModule;
 
 npa::AffineRelationVocabulary buildVocabulary(const llvm::Module &M) {
   npa::AffineRelationVocabulary vocab;
-  std::set<const llvm::Value *> ordered;
+  std::unordered_set<const llvm::Value *> seen;
+  auto record = [&](const llvm::Value *value) {
+    if (seen.insert(value).second)
+      vocab.values.push_back(value);
+  };
   for (const auto &F : M) {
     if (F.isDeclaration())
       continue;
     for (const auto &Arg : F.args()) {
       if (Arg.getType()->isIntegerTy() &&
           Arg.getType()->getIntegerBitWidth() <= 64)
-        ordered.insert(&Arg);
+        record(&Arg);
     }
     for (const auto &BB : F) {
       for (const auto &I : BB) {
         if (I.getType()->isIntegerTy() &&
             I.getType()->getIntegerBitWidth() <= 64)
-          ordered.insert(&I);
+          record(&I);
       }
     }
   }
-  vocab.values.assign(ordered.begin(), ordered.end());
   for (unsigned i = 0; i < vocab.values.size(); ++i) {
     vocab.indices[vocab.values[i]] = i;
     vocab.actualBitWidths[vocab.values[i]] =

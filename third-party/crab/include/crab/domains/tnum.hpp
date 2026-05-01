@@ -7,12 +7,6 @@
 #include <crab/numbers/wrapint.hpp>
 #include <crab/support/os.hpp>
 
-/**
- * Machine arithmetic intervals based on the paper
- * "Signedness-Agnostic Program Analysis: Precise Integer Bounds for
- * Low-Level Code" by J.A.Navas, P.Schachte, H.Sondergaard, and
- * P.J.Stuckey published in APLAS'12.
- **/
 
 namespace crab {
 namespace domains {

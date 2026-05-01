@@ -2,9 +2,9 @@
 #include "Dataflow/NPA/Analyses/Inter/InterNullability.h"
 #include "TestUtils/LLVMHelpers.h"
 
-#include <gtest/gtest.h>
 #include <llvm/IR/LLVMContext.h>
 #include <llvm/IR/Module.h>
+#include <gtest/gtest.h>
 
 namespace {
 

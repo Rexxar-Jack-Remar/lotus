@@ -14,11 +14,11 @@
 #include <unordered_map>
 #include <vector>
 
-#include <gtest/gtest.h>
 #include <llvm/ADT/APInt.h>
 #include <llvm/IR/LLVMContext.h>
 #include <llvm/IR/Module.h>
 #include <llvm/Support/CommandLine.h>
+#include <gtest/gtest.h>
 
 namespace {
 

@@ -1,10 +1,10 @@
 #include <llvm/IR/LLVMContext.h>
 #include <llvm/IR/Module.h>
 #include <gtest/gtest.h>
-#include <algorithm>
 #include <Dataflow/IFDS/Solver/IDESolver.h>
 #include <Dataflow/IFDS/Support/EdgeFunctionUtils.h>
 #include <TestUtils/LLVMHelpers.h>
+#include <algorithm>
 
 namespace ifds {
 namespace {
