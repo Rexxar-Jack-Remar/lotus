@@ -4,11 +4,13 @@
 #include "Dataflow/NPA/Core/Base/Foundation.h"
 #include "TestUtils/LLVMHelpers.h"
 
+#include <algorithm>
 #include <unordered_set>
+#include <vector>
 
+#include <gtest/gtest.h>
 #include <llvm/IR/LLVMContext.h>
 #include <llvm/IR/Module.h>
-#include <gtest/gtest.h>
 
 namespace {
 
@@ -43,6 +45,56 @@ npa::AffineRelationVocabulary buildVocabulary(const llvm::Module &M) {
         vocab.values[i]->getType()->getIntegerBitWidth();
   }
   return vocab;
+}
+
+using Matrix = std::vector<std::vector<llvm::APInt>>;
+
+Matrix makeMatrix(unsigned bitWidth,
+                  std::initializer_list<std::initializer_list<uint64_t>> rows) {
+  Matrix out;
+  for (auto row : rows) {
+    out.emplace_back();
+    for (uint64_t value : row)
+      out.back().emplace_back(bitWidth, value);
+  }
+  return out;
+}
+
+bool hasMatrix(const std::vector<Matrix> &matrices, const Matrix &expected) {
+  return std::find(matrices.begin(), matrices.end(), expected) !=
+         matrices.end();
+}
+
+llvm::APInt dot(const std::vector<llvm::APInt> &lhs,
+                const std::vector<llvm::APInt> &rhs) {
+  llvm::APInt out(lhs.front().getBitWidth(), 0);
+  for (size_t i = 0; i < lhs.size(); ++i)
+    out += lhs[i] * rhs[i];
+  return out;
+}
+
+bool rowsAreOrthogonal(const Matrix &lhs, const Matrix &rhs) {
+  for (const auto &lhsRow : lhs) {
+    for (const auto &rhsRow : rhs) {
+      if (!dot(lhsRow, rhsRow).isZero())
+        return false;
+    }
+  }
+  return true;
+}
+
+Matrix multiply(const Matrix &lhs, const Matrix &rhs, unsigned bitWidth) {
+  if (lhs.empty() || rhs.empty())
+    return {};
+  Matrix out(lhs.size(), std::vector<llvm::APInt>(rhs.front().size(),
+                                                  llvm::APInt(bitWidth, 0)));
+  for (size_t r = 0; r < lhs.size(); ++r) {
+    for (size_t k = 0; k < rhs.size(); ++k) {
+      for (size_t c = 0; c < rhs.front().size(); ++c)
+        out[r][c] += lhs[r][k] * rhs[k][c];
+    }
+  }
+  return out;
 }
 
 } // namespace
@@ -190,6 +242,8 @@ TEST(AffineRelationDomain, AffineGeneratorRoundTripPreservesKSRelation) {
   auto roundTrip = npa::AffineRelationDomain::fromAffineGenerator(ag);
 
   EXPECT_TRUE(ag.exact);
+  ASSERT_FALSE(ag.generators.empty());
+  EXPECT_FALSE(ag.generators.begin()->second.empty());
   EXPECT_TRUE(npa::AffineRelationDomain::equal(relation, roundTrip));
 }
 
@@ -223,6 +277,80 @@ TEST(AffineRelationDomain, AffineGeneratorJoinUsesKSJoinSemantics) {
       npa::AffineRelationDomain::combine(assign, id)));
 }
 
+TEST(AffineRelationDomain, PublicDualizePerpComputesOrthogonalComplement) {
+  Matrix constraints = makeMatrix(4, {
+                                         {1, 15, 0},
+                                     });
+
+  auto decomposition =
+      npa::AffineRelationDomain::diagonalDecompose(constraints, 4);
+  auto dual = npa::AffineRelationDomain::dualizePerp(constraints, 4, 3);
+  auto roundTrip = npa::AffineRelationDomain::dualizePerp(dual, 4, 3);
+
+  EXPECT_EQ(decomposition.bitWidth, 4u);
+  EXPECT_EQ(decomposition.dual, dual);
+  EXPECT_TRUE(rowsAreOrthogonal(constraints, dual));
+  EXPECT_TRUE(rowsAreOrthogonal(dual, roundTrip));
+  EXPECT_EQ(roundTrip, constraints);
+  EXPECT_EQ(multiply(multiply(decomposition.left, decomposition.diagonal, 4),
+                     decomposition.right, 4),
+            constraints);
+  EXPECT_EQ(multiply(decomposition.left, decomposition.leftInverse, 4),
+            makeMatrix(4, {{1}}));
+  EXPECT_EQ(multiply(decomposition.right, decomposition.rightInverse, 4),
+            makeMatrix(4, {{1, 0, 0}, {0, 1, 0}, {0, 0, 1}}));
+}
+
+TEST(AffineRelationDomain, DiagonalDecomposeTracksRectangularFactors) {
+  Matrix constraints = makeMatrix(4, {
+                                         {2, 6, 4},
+                                         {0, 4, 8},
+                                     });
+
+  auto decomposition =
+      npa::AffineRelationDomain::diagonalDecompose(constraints, 4);
+  auto dual = npa::AffineRelationDomain::dualizePerp(constraints, 4, 3);
+
+  EXPECT_EQ(multiply(multiply(decomposition.left, decomposition.diagonal, 4),
+                     decomposition.right, 4),
+            constraints);
+  EXPECT_EQ(multiply(decomposition.left, decomposition.leftInverse, 4),
+            makeMatrix(4, {{1, 0}, {0, 1}}));
+  EXPECT_EQ(multiply(decomposition.right, decomposition.rightInverse, 4),
+            makeMatrix(4, {{1, 0, 0}, {0, 1, 0}, {0, 0, 1}}));
+  EXPECT_EQ(decomposition.dual, dual);
+  EXPECT_TRUE(rowsAreOrthogonal(constraints, dual));
+}
+
+TEST(AffineRelationDomain, AffineGeneratorKSRoundTripPreservesGeneratorSpace) {
+  llvm::LLVMContext ctx;
+  auto module = parseModule(ctx, R"(
+    define void @f(i4 %x) {
+    entry:
+      ret void
+    }
+  )");
+  ASSERT_NE(module, nullptr);
+
+  auto vocab = buildVocabulary(*module);
+  npa::AffineRelationDomain::configure(&vocab);
+
+  npa::AffineGeneratorRelation ag;
+  ag.generators[4] = makeMatrix(4, {
+                                       {1, 0, 0},
+                                       {0, 1, 1},
+                                   });
+
+  auto relation = npa::AffineRelationDomain::fromAffineGenerator(ag);
+  auto roundTripAG = npa::AffineRelationDomain::toAffineGenerator(relation);
+  auto roundTripKS =
+      npa::AffineRelationDomain::fromAffineGenerator(roundTripAG);
+
+  ASSERT_FALSE(roundTripAG.generators.empty());
+  EXPECT_FALSE(roundTripAG.generators.begin()->second.empty());
+  EXPECT_TRUE(npa::AffineRelationDomain::equal(relation, roundTripKS));
+}
+
 TEST(AffineRelationDomain, MOSRoundTripPreservesKSRelation) {
   llvm::LLVMContext ctx;
   auto module = parseModule(ctx, R"(
@@ -249,7 +377,134 @@ TEST(AffineRelationDomain, MOSRoundTripPreservesKSRelation) {
 
   EXPECT_TRUE(mos.exact);
   EXPECT_EQ(mos.kind, npa::MOSRelation::ConversionKind::MakeExplicit);
+  ASSERT_FALSE(mos.transformers.empty());
+  EXPECT_FALSE(mos.transformers.begin()->second.empty());
   EXPECT_TRUE(npa::AffineRelationDomain::equal(relation, roundTrip));
+}
+
+TEST(AffineRelationDomain, MOSToKSConvertsExplicitAffineTransformer) {
+  llvm::LLVMContext ctx;
+  auto module = parseModule(ctx, R"(
+    define void @f(i4 %x) {
+    entry:
+      ret void
+    }
+  )");
+  ASSERT_NE(module, nullptr);
+
+  auto vocab = buildVocabulary(*module);
+  npa::AffineRelationDomain::configure(&vocab);
+
+  auto *X = &*module->getFunction("f")->arg_begin();
+  npa::MOSRelation mos;
+  mos.transformers[4] = {
+      makeMatrix(4, {{1, 3}, {0, 5}}),
+  };
+
+  auto relation = npa::AffineRelationDomain::fromMOS(mos);
+  auto state = npa::materializeAffineExpressions(relation);
+
+  auto It = state.values.find(X);
+  ASSERT_NE(It, state.values.end());
+  EXPECT_FALSE(It->second.top);
+  EXPECT_EQ(It->second.constant, 3);
+  ASSERT_EQ(It->second.terms.size(), 1u);
+  EXPECT_EQ(It->second.terms.at(X), 5);
+}
+
+TEST(AffineRelationDomain, GuardedKSToMOSVariantsProduceDistinctTransformers) {
+  llvm::LLVMContext ctx;
+  auto module = parseModule(ctx, R"(
+    define void @f(i4 %x) {
+    entry:
+      ret void
+    }
+  )");
+  ASSERT_NE(module, nullptr);
+
+  auto vocab = buildVocabulary(*module);
+  npa::AffineRelationDomain::configure(&vocab);
+
+  npa::AffineGeneratorRelation ag;
+  ag.generators[4] = makeMatrix(4, {
+                                       {1, 0, 0},
+                                       {0, 4, 12},
+                                   });
+  ag.relation = npa::AffineRelationDomain::fromAffineGenerator(ag);
+
+  auto havoc =
+      npa::AffineRelationDomain::toMOSWithHavocedPreStateGuards(ag.relation);
+  auto explicitMOS =
+      npa::AffineRelationDomain::toMOSWithMakeExplicit(ag.relation);
+
+  ASSERT_EQ(havoc.transformers.count(4), 1u);
+  ASSERT_EQ(explicitMOS.transformers.count(4), 1u);
+
+  EXPECT_TRUE(
+      hasMatrix(havoc.transformers.at(4), makeMatrix(4, {{1, 0}, {0, 0}})));
+  EXPECT_TRUE(
+      hasMatrix(havoc.transformers.at(4), makeMatrix(4, {{0, 4}, {0, 0}})));
+  EXPECT_TRUE(hasMatrix(explicitMOS.transformers.at(4),
+                        makeMatrix(4, {{1, 0}, {0, 3}})));
+  EXPECT_FALSE(
+      hasMatrix(havoc.transformers.at(4), makeMatrix(4, {{1, 0}, {0, 3}})));
+}
+
+TEST(AffineRelationDomain, MakeExplicitHandlesSkippedPreStateColumns) {
+  llvm::LLVMContext ctx;
+  auto module = parseModule(ctx, R"(
+    define void @f(i4 %x, i4 %y) {
+    entry:
+      ret void
+    }
+  )");
+  ASSERT_NE(module, nullptr);
+
+  auto vocab = buildVocabulary(*module);
+  npa::AffineRelationDomain::configure(&vocab);
+
+  npa::AffineGeneratorRelation ag;
+  ag.generators[4] = makeMatrix(4, {
+                                       {1, 0, 0, 0, 0},
+                                       {0, 0, 1, 0, 7},
+                                   });
+  ag.relation = npa::AffineRelationDomain::fromAffineGenerator(ag);
+
+  auto explicitMOS =
+      npa::AffineRelationDomain::toMOSWithMakeExplicit(ag.relation);
+
+  ASSERT_EQ(explicitMOS.transformers.count(4), 1u);
+  ASSERT_FALSE(explicitMOS.transformers.at(4).empty());
+  EXPECT_FALSE(npa::AffineRelationDomain::isBottom(
+      npa::AffineRelationDomain::fromMOS(explicitMOS)));
+}
+
+TEST(AffineRelationDomain, MakeExplicitSplitsEvenPreStateLeadingValues) {
+  llvm::LLVMContext ctx;
+  auto module = parseModule(ctx, R"(
+    define void @f(i4 %x) {
+    entry:
+      ret void
+    }
+  )");
+  ASSERT_NE(module, nullptr);
+
+  auto vocab = buildVocabulary(*module);
+  npa::AffineRelationDomain::configure(&vocab);
+
+  npa::AffineGeneratorRelation ag;
+  ag.generators[4] = makeMatrix(4, {
+                                       {1, 0, 0},
+                                       {0, 2, 6},
+                                   });
+  ag.relation = npa::AffineRelationDomain::fromAffineGenerator(ag);
+
+  auto explicitMOS =
+      npa::AffineRelationDomain::toMOSWithMakeExplicit(ag.relation);
+
+  ASSERT_EQ(explicitMOS.transformers.count(4), 1u);
+  EXPECT_TRUE(hasMatrix(explicitMOS.transformers.at(4),
+                        makeMatrix(4, {{1, 0}, {0, 3}})));
 }
 
 TEST(AffineRelationDomain, MOSJoinUsesKSJoinSemantics) {
@@ -389,8 +644,8 @@ TEST(AffineRelationDomain, SizeCountsSatisfyingTwoVocabularySolutions) {
   npa::AffineRelationDomain::configure(&vocab);
 
   auto *X = &*module->getFunction("f")->arg_begin();
-  auto idSize = npa::AffineRelationDomain::size(
-      npa::AffineRelationDomain::identity());
+  auto idSize =
+      npa::AffineRelationDomain::size(npa::AffineRelationDomain::identity());
   EXPECT_EQ(idSize.getZExtValue(), 256u);
 
   auto fixed = npa::AffineRelationDomain::addPrecondition(
@@ -430,8 +685,8 @@ TEST(AffineRelationDomain, MergePreservingLocalsKeepsCallerLocalValue) {
       npa::AffineRelationDomain::makeAffineAssignment(L, 0, {{G, 1}}),
       npa::AffineRelationDomain::makeAffineAssignment(G, 3, {{G, 1}}));
 
-  auto merged =
-      npa::AffineRelationDomain::mergePreservingLocals(callSite, calleeExit, {L});
+  auto merged = npa::AffineRelationDomain::mergePreservingLocals(
+      callSite, calleeExit, {L});
   auto state = npa::materializeAffineExpressions(merged);
 
   ASSERT_NE(state.values.find(G), state.values.end());
@@ -467,11 +722,9 @@ TEST(AffineRelationDomain, GenericProjectDropsConfiguredLocals) {
 
   auto relation = npa::AffineRelationDomain::addPrecondition(
       npa::AffineRelationDomain::identity(), G, 7);
-  relation =
-      npa::AffineRelationDomain::addPrecondition(relation, L, 11);
+  relation = npa::AffineRelationDomain::addPrecondition(relation, L, 11);
 
-  auto projected =
-      npa::domain_project<npa::AffineRelationDomain>(relation);
+  auto projected = npa::domain_project<npa::AffineRelationDomain>(relation);
   auto state = npa::materializeAffineExpressions(projected);
 
   ASSERT_NE(state.values.find(G), state.values.end());

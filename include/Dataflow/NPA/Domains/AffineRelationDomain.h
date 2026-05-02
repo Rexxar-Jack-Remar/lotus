@@ -14,6 +14,10 @@ class Value;
 
 namespace npa {
 
+using AffineRow = std::vector<llvm::APInt>;
+using AffineMatrix = std::vector<AffineRow>;
+using MOSTransformerSet = std::vector<AffineMatrix>;
+
 struct AffineRelationVocabulary {
   std::vector<const llvm::Value *> values;
   std::unordered_map<const llvm::Value *, unsigned> indices;
@@ -23,7 +27,7 @@ struct AffineRelationVocabulary {
 
 struct AffineRelationComponent {
   unsigned bitWidth = 0;
-  std::vector<std::vector<llvm::APInt>> constraints;
+  AffineMatrix constraints;
 
   bool operator==(const AffineRelationComponent &other) const;
 };
@@ -37,20 +41,31 @@ struct AffineRelation {
 
 struct AffineGeneratorRelation {
   AffineRelation relation;
-  std::map<unsigned, std::vector<std::vector<llvm::APInt>>> generators;
+  std::map<unsigned, AffineMatrix> generators;
+  bool bottom = false;
   bool exact = true;
 
   bool operator==(const AffineGeneratorRelation &other) const;
 };
 
+struct AffineDiagonalDecomposition {
+  unsigned bitWidth = 0;
+  AffineMatrix left;
+  AffineMatrix leftInverse;
+  AffineMatrix diagonal;
+  AffineMatrix right;
+  AffineMatrix rightInverse;
+  AffineMatrix dual;
+  bool exact = true;
+
+  bool operator==(const AffineDiagonalDecomposition &other) const;
+};
+
 struct MOSRelation {
-  enum class ConversionKind {
-    Direct,
-    HavocPreStateGuards,
-    MakeExplicit
-  };
+  enum class ConversionKind { Direct, HavocPreStateGuards, MakeExplicit };
 
   AffineRelation relation;
+  std::map<unsigned, MOSTransformerSet> transformers;
   ConversionKind kind = ConversionKind::Direct;
   bool exact = true;
 
@@ -84,22 +99,21 @@ public:
   static value_type condCombine(bool /*phi*/, const value_type &t,
                                 const value_type &e);
   static value_type extend(const value_type &outer, const value_type &inner);
-  static value_type extend_lin(const value_type &outer, const value_type &inner);
+  static value_type extend_lin(const value_type &outer,
+                               const value_type &inner);
   static value_type subtract(const value_type &lhs, const value_type &rhs);
   static value_type project(const value_type &relation);
 
   static value_type identity();
-  static value_type
-  addStateConstraint(const value_type &relation, int64_t constant,
-                     const std::vector<std::pair<const llvm::Value *, int64_t>>
-                         &terms);
+  static value_type addStateConstraint(
+      const value_type &relation, int64_t constant,
+      const std::vector<std::pair<const llvm::Value *, int64_t>> &terms);
   static value_type addPrecondition(const value_type &relation,
                                     const llvm::Value *value, int64_t constant);
   static value_type makeForget(const llvm::Value *dest);
   static value_type havoc(const value_type &relation, const llvm::Value *value);
-  static value_type
-  havoc(const value_type &relation,
-        const std::vector<const llvm::Value *> &values);
+  static value_type havoc(const value_type &relation,
+                          const std::vector<const llvm::Value *> &values);
   static value_type
   projectOnto(const value_type &relation,
               const std::vector<const llvm::Value *> &keepValues);
@@ -108,19 +122,23 @@ public:
                         const value_type &calleeExit,
                         const std::vector<const llvm::Value *> &locals);
   static llvm::APInt size(const value_type &relation);
-  static value_type
-  makeAffineAssignment(const llvm::Value *dest, int64_t constant,
-                       const std::vector<std::pair<const llvm::Value *, int64_t>>
-                           &terms);
+  static value_type makeAffineAssignment(
+      const llvm::Value *dest, int64_t constant,
+      const std::vector<std::pair<const llvm::Value *, int64_t>> &terms);
   static value_type makeAffineCongruenceAssignment(
       const llvm::Value *dest, unsigned modulusBits, int64_t constant,
       const std::vector<std::pair<const llvm::Value *, int64_t>> &terms);
 
   static AffineGeneratorRelation toAffineGenerator(const value_type &relation);
-  static value_type fromAffineGenerator(const AffineGeneratorRelation &relation);
+  static value_type
+  fromAffineGenerator(const AffineGeneratorRelation &relation);
   static AffineGeneratorRelation
   joinAffineGenerators(const AffineGeneratorRelation &lhs,
                        const AffineGeneratorRelation &rhs);
+  static AffineDiagonalDecomposition
+  diagonalDecompose(const AffineMatrix &matrix, unsigned bitWidth);
+  static AffineMatrix dualizePerp(const AffineMatrix &matrix, unsigned bitWidth,
+                                  unsigned columns);
 
   static MOSRelation toMOS(const value_type &relation);
   static MOSRelation toMOSWithHavocedPreStateGuards(const value_type &relation);
