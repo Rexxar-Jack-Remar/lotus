@@ -39,6 +39,7 @@ include(cmake/FindZ3.cmake)
 # Configure module options
 option(ENABLE_CLAM "Enable CLAM abstract interpretation framework" ON)
 option(ENABLE_SEAHORN "Enable SeaHorn" ON)
+option(ENABLE_SMACK "Enable SMACK LLVM-to-Boogie verifier frontend" OFF)
 option(LOTUS_USE_CCLYZER "Enable optional cclyzer++ alias analysis backend" OFF)
 option(ENABLE_TYPE_QUALIFIER
        "Enable the opt-in TypeQualifier uninitialized-data checker" OFF)
@@ -48,7 +49,7 @@ option(ENABLE_TYPE_QUALIFIER
 # - SeaHorn (ENABLE_SEAHORN)
 # - CLAM (ENABLE_CLAM)
 # - CclyzerAA (LOTUS_USE_CCLYZER)
-if(ENABLE_CLAM OR ENABLE_SEAHORN OR LOTUS_USE_CCLYZER)
+if(ENABLE_CLAM OR ENABLE_SEAHORN OR ENABLE_SMACK OR LOTUS_USE_CCLYZER)
     include(cmake/ConfigureBoost.cmake)
 endif()
 

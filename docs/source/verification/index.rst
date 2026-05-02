@@ -10,6 +10,7 @@ This section documents the verification tools and frameworks used throughout Lot
    backend
    crab
    clam
+   smack
    sifa
    symabs-ai
    seahorn
