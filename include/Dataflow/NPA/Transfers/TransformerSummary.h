@@ -1,5 +1,5 @@
-#ifndef NPA_SUMMARY_TRANSFORMER_DOMAIN_H
-#define NPA_SUMMARY_TRANSFORMER_DOMAIN_H
+#ifndef NPA_TRANSFORMER_SUMMARY_H
+#define NPA_TRANSFORMER_SUMMARY_H
 
 #include "Dataflow/NPA/Core/Base/Runtime.h"
 
@@ -17,13 +17,14 @@ template <class Op, class OpLess = std::less<Op>> struct TransformerLess {
   }
 };
 
-template <class Op, class OpLess = std::less<Op>> struct SummaryTransformer {
+template <class Op, class OpLess = std::less<Op>>
+struct TransformerSummaryValue {
   using transformer_type = std::vector<Op>;
   std::set<transformer_type, TransformerLess<Op, OpLess>> transformers;
   bool overflow = false;
   std::unordered_set<const void *> may_write;
 
-  bool operator==(const SummaryTransformer &other) const {
+  bool operator==(const TransformerSummaryValue &other) const {
     return overflow == other.overflow && transformers == other.transformers &&
            may_write == other.may_write;
   }
@@ -33,11 +34,11 @@ template <class Op, class OpLess = std::less<Op>> struct SummaryTransformer {
 ///
 /// The current implementation keeps a finite set of summary transformers and an
 /// overflow bit, which preserves the existing CP/IA behavior while decoupling
-/// them from the older ProgramTransferDomain-specific API.
+/// them from the older PathTransferSummary-specific API.
 template <class Op, class OpLess = std::less<Op>>
-class SummaryTransformerDomain {
+class TransformerSummary {
 public:
-  using value_type = SummaryTransformer<Op, OpLess>;
+  using value_type = TransformerSummaryValue<Op, OpLess>;
   using test_type = bool;
   static constexpr bool idempotent = true;
   static constexpr std::size_t max_transformers = 4096;
@@ -215,4 +216,4 @@ private:
 
 } // namespace npa
 
-#endif // NPA_SUMMARY_TRANSFORMER_DOMAIN_H
+#endif // NPA_TRANSFORMER_SUMMARY_H

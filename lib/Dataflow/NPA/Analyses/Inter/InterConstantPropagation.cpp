@@ -26,7 +26,7 @@ bool apIntEqual(const llvm::APInt &lhs, const llvm::APInt &rhs) {
   return lhs.getBitWidth() == rhs.getBitWidth() && lhs.eq(rhs);
 }
 
-using D = ConstantPropagationDomain;
+using D = ConstantPropagationSummary;
 using Exp = Exp0<D>;
 using E = E0<D>;
 
@@ -638,7 +638,7 @@ InterConstantPropagation::run(llvm::Module &M, bool verbose,
                               IndirectCallResolutionMode callResolutionMode) {
   ConstantPropagationAnalysis analysis;
   auto engineResult =
-      InterEngine<ConstantPropagationDomain, ConstantPropagationAnalysis>::run(
+      InterEngine<ConstantPropagationSummary, ConstantPropagationAnalysis>::run(
           M, analysis, verbose, linearStrategy, callResolutionMode);
 
   Result result;

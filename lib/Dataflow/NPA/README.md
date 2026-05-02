@@ -73,7 +73,7 @@ Notable entry points:
 - Intraprocedural clients can use `BitVectorSolver` and related local engines.
 - Inter forward clients use `InterEngine<Domain, Analysis>`.
 - Inter backward clients use `BackwardInterEngine<Domain, Analysis>`.
-- `SummaryTransformerDomain` is the current bounded abstract-summary path used
+- `TransformerSummary` is the current bounded abstract-summary path used
   by in-tree subdistributive clients such as interprocedural constant
   propagation and interval analysis.
 

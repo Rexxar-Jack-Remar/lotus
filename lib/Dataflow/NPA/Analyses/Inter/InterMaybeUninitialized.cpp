@@ -93,7 +93,7 @@ private:
 class MaybeUninitializedAnalysis {
 public:
   using FactType = llvm::APInt;
-  using D = TaintTransferDomain;
+  using D = TaintTransformer;
   using Exp = Exp0<D>;
   using E = E0<D>;
 
@@ -328,7 +328,7 @@ InterMaybeUninitialized::run(llvm::Module &M, bool verbose,
                              IndirectCallResolutionMode callResolutionMode) {
   MaybeUninitializedAnalysis analysis(M);
   auto engineResult =
-      InterEngine<TaintTransferDomain, MaybeUninitializedAnalysis>::run(
+      InterEngine<TaintTransformer, MaybeUninitializedAnalysis>::run(
           M, analysis, verbose, linearStrategy, callResolutionMode);
 
   InterMaybeUninitialized::Result result;

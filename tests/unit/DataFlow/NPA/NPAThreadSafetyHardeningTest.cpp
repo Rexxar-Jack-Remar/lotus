@@ -1,6 +1,6 @@
-#include "Dataflow/NPA/Domains/BitVectorDomain.h"
-#include "Dataflow/NPA/Domains/GenKillDomain.h"
-#include "Dataflow/NPA/Domains/TaintTransferDomain.h"
+#include "Dataflow/NPA/Domains/BitSetDomain.h"
+#include "Dataflow/NPA/Transfers/GenKillTransformer.h"
+#include "Dataflow/NPA/Transfers/TaintTransformer.h"
 
 #include <algorithm>
 #include <condition_variable>
@@ -55,15 +55,15 @@ bool runConcurrentPair(LhsFn lhs_fn, RhsFn rhs_fn) {
 
 TEST(NPAThreadSafetyHardening, BitVectorWidthScopesRemainIsolatedAcrossThreads) {
   auto run_case = [](unsigned width, unsigned expected_population) {
-    npa::BitVectorDomain::WidthScope scope(width);
+    npa::BitSetDomain::WidthScope scope(width);
     for (unsigned iteration = 0; iteration < 256; ++iteration) {
-      auto zero = npa::BitVectorDomain::zero();
-      auto one = npa::BitVectorDomain::one();
+      auto zero = npa::BitSetDomain::zero();
+      auto one = npa::BitSetDomain::one();
       if (zero.getBitWidth() != width || one.getBitWidth() != width)
         return false;
       if (one.countPopulation() != expected_population)
         return false;
-      if (npa::BitVectorDomain::combine(zero, one) != one)
+      if (npa::BitSetDomain::combine(zero, one) != one)
         return false;
     }
     return true;
@@ -75,18 +75,18 @@ TEST(NPAThreadSafetyHardening, BitVectorWidthScopesRemainIsolatedAcrossThreads) 
 
 TEST(NPAThreadSafetyHardening, GenKillWidthScopesRemainIsolatedAcrossThreads) {
   auto run_case = [](unsigned width) {
-    npa::GenKillTransferDomain::WidthScope scope(width);
+    npa::GenKillTransformer::WidthScope scope(width);
     for (unsigned iteration = 0; iteration < 256; ++iteration) {
-      auto zero = npa::GenKillTransferDomain::zero();
-      auto one = npa::GenKillTransferDomain::one();
+      auto zero = npa::GenKillTransformer::zero();
+      auto one = npa::GenKillTransformer::one();
       if (zero.first.getBitWidth() != width || zero.second.getBitWidth() != width)
         return false;
       if (one.first.getBitWidth() != width || one.second.getBitWidth() != width)
         return false;
       if (zero.first.countPopulation() != width || zero.second.countPopulation() != 0)
         return false;
-      if (!npa::GenKillTransferDomain::equal(
-              npa::GenKillTransferDomain::combine(one, zero), one)) {
+      if (!npa::GenKillTransformer::equal(
+              npa::GenKillTransformer::combine(one, zero), one)) {
         return false;
       }
     }
@@ -99,19 +99,19 @@ TEST(NPAThreadSafetyHardening, GenKillWidthScopesRemainIsolatedAcrossThreads) {
 
 TEST(NPAThreadSafetyHardening, TaintWidthScopesRemainIsolatedAcrossThreads) {
   auto run_case = [](unsigned width) {
-    npa::TaintTransferDomain::WidthScope scope(width);
+    npa::TaintTransformer::WidthScope scope(width);
     for (unsigned iteration = 0; iteration < 256; ++iteration) {
-      auto zero = npa::TaintTransferDomain::zero();
-      auto one = npa::TaintTransferDomain::one();
+      auto zero = npa::TaintTransformer::zero();
+      auto one = npa::TaintTransformer::one();
       if (zero.gen.getBitWidth() != width || one.gen.getBitWidth() != width)
         return false;
       if (one.rel.size() != width || one.rel.front().getBitWidth() != width)
         return false;
-      npa::TaintTransferDomain::addEdge(one, 0, width - 1);
-      npa::TaintTransferDomain::addGen(one, width - 1);
+      npa::TaintTransformer::addEdge(one, 0, width - 1);
+      npa::TaintTransformer::addGen(one, width - 1);
       llvm::APInt input(width, 0);
       input.setBit(0);
-      llvm::APInt output = npa::TaintTransferDomain::apply(one, input);
+      llvm::APInt output = npa::TaintTransformer::apply(one, input);
       if (!output[width - 1])
         return false;
     }
@@ -123,19 +123,19 @@ TEST(NPAThreadSafetyHardening, TaintWidthScopesRemainIsolatedAcrossThreads) {
 }
 
 TEST(NPAThreadSafetyHardening, SafeCoreDomainsSupportConcurrentReadOnlyOps) {
-  npa::TaintTransferDomain::WidthScope taint_scope(4);
-  npa::BitVectorDomain::WidthScope bit_scope(4);
-  npa::GenKillTransferDomain::WidthScope gen_kill_scope(4);
+  npa::TaintTransformer::WidthScope taint_scope(4);
+  npa::BitSetDomain::WidthScope bit_scope(4);
+  npa::GenKillTransformer::WidthScope gen_kill_scope(4);
 
-  auto transfer = npa::TaintTransferDomain::one();
-  npa::TaintTransferDomain::addEdge(transfer, 0, 1);
-  npa::TaintTransferDomain::addEdge(transfer, 1, 2);
-  npa::TaintTransferDomain::addGen(transfer, 3);
-  const auto composed = npa::TaintTransferDomain::extend(transfer, transfer);
+  auto transfer = npa::TaintTransformer::one();
+  npa::TaintTransformer::addEdge(transfer, 0, 1);
+  npa::TaintTransformer::addEdge(transfer, 1, 2);
+  npa::TaintTransformer::addGen(transfer, 3);
+  const auto composed = npa::TaintTransformer::extend(transfer, transfer);
   llvm::APInt input(4, 0);
   input.setBit(0);
   const llvm::APInt expectedTaint =
-      npa::TaintTransferDomain::apply(composed, input);
+      npa::TaintTransformer::apply(composed, input);
 
   llvm::APInt bitsA(4, 0);
   bitsA.setBit(0);
@@ -144,26 +144,26 @@ TEST(NPAThreadSafetyHardening, SafeCoreDomainsSupportConcurrentReadOnlyOps) {
   bitsB.setBit(1);
   bitsB.setBit(2);
   const llvm::APInt expectedBitVector =
-      npa::BitVectorDomain::combine(bitsA, bitsB);
+      npa::BitSetDomain::combine(bitsA, bitsB);
 
-  npa::GenKillTransferDomain::value_type genKillA{
+  npa::GenKillTransformer::value_type genKillA{
       llvm::APInt(4, 0b0011), llvm::APInt(4, 0b0100)};
-  npa::GenKillTransferDomain::value_type genKillB{
+  npa::GenKillTransformer::value_type genKillB{
       llvm::APInt(4, 0b1000), llvm::APInt(4, 0b0001)};
   const auto expectedGenKill =
-      npa::GenKillTransferDomain::extend(genKillA, genKillB);
+      npa::GenKillTransformer::extend(genKillA, genKillB);
 
   auto results = runOnThreads(4, [&] {
     for (unsigned iteration = 0; iteration < 128; ++iteration) {
-      if (npa::TaintTransferDomain::apply(composed, input) != expectedTaint)
+      if (npa::TaintTransformer::apply(composed, input) != expectedTaint)
         return false;
-      if (!npa::TaintTransferDomain::equal(
-              npa::TaintTransferDomain::extend(transfer, transfer), composed)) {
+      if (!npa::TaintTransformer::equal(
+              npa::TaintTransformer::extend(transfer, transfer), composed)) {
         return false;
       }
-      if (npa::BitVectorDomain::combine(bitsA, bitsB) != expectedBitVector)
+      if (npa::BitSetDomain::combine(bitsA, bitsB) != expectedBitVector)
         return false;
-      if (npa::GenKillTransferDomain::extend(genKillA, genKillB) !=
+      if (npa::GenKillTransformer::extend(genKillA, genKillB) !=
           expectedGenKill) {
         return false;
       }

@@ -2,20 +2,20 @@
  *
  * Author: rainoftime
  */
-#include "Dataflow/NPA/Domains/TaintTransferDomain.h"
+#include "Dataflow/NPA/Transfers/TaintTransformer.h"
 
 namespace npa {
 
-unsigned TaintTransferDomain::requireBitWidth() {
+unsigned TaintTransformer::requireBitWidth() {
   return width_context::require(
-      "TaintTransferDomain width must be installed via WidthScope");
+      "TaintTransformer width must be installed via WidthScope");
 }
 
-unsigned TaintTransferDomain::bitWidthOf(const value_type &value) {
+unsigned TaintTransformer::bitWidthOf(const value_type &value) {
   return value.gen.getBitWidth();
 }
 
-std::vector<llvm::APInt> TaintTransferDomain::identityRel(unsigned bit_width) {
+std::vector<llvm::APInt> TaintTransformer::identityRel(unsigned bit_width) {
   std::vector<llvm::APInt> rel;
   rel.reserve(bit_width);
   for (unsigned i = 0; i < bit_width; ++i) {
@@ -26,29 +26,29 @@ std::vector<llvm::APInt> TaintTransferDomain::identityRel(unsigned bit_width) {
   return rel;
 }
 
-TaintTransferDomain::value_type TaintTransferDomain::zero() {
+TaintTransformer::value_type TaintTransformer::zero() {
   return zero(requireBitWidth());
 }
 
-TaintTransferDomain::value_type TaintTransferDomain::zero(unsigned bit_width) {
+TaintTransformer::value_type TaintTransformer::zero(unsigned bit_width) {
   value_type out;
   out.rel.assign(bit_width, llvm::APInt(bit_width, 0));
   out.gen = llvm::APInt(bit_width, 0);
   return out;
 }
 
-TaintTransferDomain::value_type TaintTransferDomain::one() {
+TaintTransformer::value_type TaintTransformer::one() {
   return one(requireBitWidth());
 }
 
-TaintTransferDomain::value_type TaintTransferDomain::one(unsigned bit_width) {
+TaintTransformer::value_type TaintTransformer::one(unsigned bit_width) {
   value_type out;
   out.rel = identityRel(bit_width);
   out.gen = llvm::APInt(bit_width, 0);
   return out;
 }
 
-bool TaintTransferDomain::equal(const value_type &a, const value_type &b) {
+bool TaintTransformer::equal(const value_type &a, const value_type &b) {
   if (a.gen != b.gen || a.rel.size() != b.rel.size())
     return false;
   for (unsigned i = 0; i < a.rel.size(); ++i) {
@@ -58,8 +58,8 @@ bool TaintTransferDomain::equal(const value_type &a, const value_type &b) {
   return true;
 }
 
-TaintTransferDomain::value_type
-TaintTransferDomain::combine(const value_type &a, const value_type &b) {
+TaintTransformer::value_type
+TaintTransformer::combine(const value_type &a, const value_type &b) {
   const unsigned bit_width = bitWidthOf(a);
   assert(bit_width == bitWidthOf(b) && "taint widths must match");
   value_type out;
@@ -71,19 +71,19 @@ TaintTransferDomain::combine(const value_type &a, const value_type &b) {
   return out;
 }
 
-TaintTransferDomain::value_type
-TaintTransferDomain::ndetCombine(const value_type &a, const value_type &b) {
+TaintTransformer::value_type
+TaintTransformer::ndetCombine(const value_type &a, const value_type &b) {
   return combine(a, b);
 }
 
-TaintTransferDomain::value_type
-TaintTransferDomain::condCombine(bool phi, const value_type &t,
-                                 const value_type &e) {
+TaintTransformer::value_type
+TaintTransformer::condCombine(bool phi, const value_type &t,
+                              const value_type &e) {
   return phi ? t : e;
 }
 
-llvm::APInt TaintTransferDomain::applyRel(const std::vector<llvm::APInt> &rel,
-                                          const llvm::APInt &in) {
+llvm::APInt TaintTransformer::applyRel(const std::vector<llvm::APInt> &rel,
+                                       const llvm::APInt &in) {
   const unsigned bit_width = in.getBitWidth();
   assert(rel.size() == bit_width && "taint relation width must match input");
   llvm::APInt out(bit_width, 0);
@@ -94,8 +94,8 @@ llvm::APInt TaintTransferDomain::applyRel(const std::vector<llvm::APInt> &rel,
   return out;
 }
 
-TaintTransferDomain::value_type
-TaintTransferDomain::extend(const value_type &a, const value_type &b) {
+TaintTransformer::value_type
+TaintTransformer::extend(const value_type &a, const value_type &b) {
   // a after b: a o b
   const unsigned bit_width = bitWidthOf(a);
   assert(bit_width == bitWidthOf(b) && "taint widths must match");
@@ -108,30 +108,30 @@ TaintTransferDomain::extend(const value_type &a, const value_type &b) {
   return out;
 }
 
-TaintTransferDomain::value_type
-TaintTransferDomain::extend_lin(const value_type &a, const value_type &b) {
+TaintTransformer::value_type
+TaintTransformer::extend_lin(const value_type &a, const value_type &b) {
   return extend(a, b);
 }
 
-TaintTransferDomain::value_type
-TaintTransferDomain::subtract(const value_type &a, const value_type &b) {
+TaintTransformer::value_type
+TaintTransformer::subtract(const value_type &a, const value_type &b) {
   (void)b;
   return a;
 }
 
-llvm::APInt TaintTransferDomain::apply(const value_type &f,
-                                       const llvm::APInt &in) {
+llvm::APInt TaintTransformer::apply(const value_type &f,
+                                    const llvm::APInt &in) {
   return applyRel(f.rel, in) | f.gen;
 }
 
-void TaintTransferDomain::addEdge(value_type &f, unsigned from, unsigned to) {
+void TaintTransformer::addEdge(value_type &f, unsigned from, unsigned to) {
   const unsigned bit_width = bitWidthOf(f);
   if (from >= bit_width || to >= bit_width)
     return;
   f.rel[from].setBit(to);
 }
 
-void TaintTransferDomain::addGen(value_type &f, unsigned bit) {
+void TaintTransformer::addGen(value_type &f, unsigned bit) {
   if (bit >= bitWidthOf(f))
     return;
   f.gen.setBit(bit);

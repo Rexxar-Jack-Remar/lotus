@@ -2,7 +2,7 @@
 #define NPA_INTERPROC_TAINT_H
 
 #include "Dataflow/NPA/Analyses/InterEngine.h"
-#include "Dataflow/NPA/Domains/TaintTransferDomain.h"
+#include "Dataflow/NPA/Transfers/TaintTransformer.h"
 
 #include <map>
 #include <string>
@@ -37,7 +37,7 @@ public:
     };
 
     AnalysisStatus status;
-    std::map<FunctionKey, TaintTransferDomain::value_type> summaries;
+    std::map<FunctionKey, TaintTransformer::value_type> summaries;
     std::map<BlockKey, llvm::APInt> blockFacts;
     std::map<BlockKey, llvm::APInt> blockExitFacts;
     std::map<BlockKey,

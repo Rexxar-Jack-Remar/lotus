@@ -1,5 +1,5 @@
-#ifndef NPA_PROGRAM_TRANSFER_DOMAIN_H
-#define NPA_PROGRAM_TRANSFER_DOMAIN_H
+#ifndef NPA_PATH_TRANSFER_SUMMARY_H
+#define NPA_PATH_TRANSFER_SUMMARY_H
 
 #include "Dataflow/NPA/Core/Base/Runtime.h"
 
@@ -17,21 +17,22 @@ template <class Op, class OpLess = std::less<Op>> struct PathLess {
   }
 };
 
-template <class Op, class OpLess = std::less<Op>> struct ProgramTransfer {
+template <class Op, class OpLess = std::less<Op>>
+struct PathTransferSummaryValue {
   using path_type = std::vector<Op>;
   std::set<path_type, PathLess<Op, OpLess>> paths;
   bool overflow = false;
   std::unordered_set<const void *> may_write;
 
-  bool operator==(const ProgramTransfer &other) const {
+  bool operator==(const PathTransferSummaryValue &other) const {
     return overflow == other.overflow && paths == other.paths &&
            may_write == other.may_write;
   }
 };
 
-template <class Op, class OpLess = std::less<Op>> class ProgramTransferDomain {
+template <class Op, class OpLess = std::less<Op>> class PathTransferSummary {
 public:
-  using value_type = ProgramTransfer<Op, OpLess>;
+  using value_type = PathTransferSummaryValue<Op, OpLess>;
   using test_type = bool;
   static constexpr bool idempotent = true;
   static constexpr std::size_t max_paths = 4096;
@@ -136,4 +137,4 @@ private:
 
 } // namespace npa
 
-#endif // NPA_PROGRAM_TRANSFER_DOMAIN_H
+#endif // NPA_PATH_TRANSFER_SUMMARY_H

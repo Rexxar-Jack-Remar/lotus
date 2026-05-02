@@ -4,7 +4,7 @@
 #include "Dataflow/NPA/Analyses/Inter/InterLiveVariables.h"
 #include "Dataflow/NPA/Analyses/Inter/InterMaybeUninitialized.h"
 #include "Dataflow/NPA/Domains/PredicateRelationDomain.h"
-#include "Dataflow/NPA/Domains/ProgramTransferDomain.h"
+#include "Dataflow/NPA/Transfers/PathTransferSummary.h"
 #include "TestUtils/LLVMHelpers.h"
 
 #include <cctype>
@@ -56,9 +56,9 @@ llvm::APInt unionFactForBlock(const std::map<npa::BlockKey, llvm::APInt> &facts,
 }
 
 template <typename Op, typename OpLess>
-bool containsPath(const npa::ProgramTransfer<Op, OpLess> &transfer,
+bool containsPath(const npa::PathTransferSummaryValue<Op, OpLess> &transfer,
                   std::initializer_list<Op> expected) {
-  typename npa::ProgramTransfer<Op, OpLess>::path_type path(expected);
+  typename npa::PathTransferSummaryValue<Op, OpLess>::path_type path(expected);
   return transfer.paths.count(path) != 0;
 }
 
@@ -84,7 +84,7 @@ std::vector<std::pair<std::uint64_t, std::uint64_t>> sortedPredicateTransitions(
   return transitions;
 }
 
-using EntryHookDomain = npa::ProgramTransferDomain<char>;
+using EntryHookDomain = npa::PathTransferSummary<char>;
 
 struct ProjectedStringDomain {
   using value_type = std::set<std::string>;
@@ -283,7 +283,7 @@ public:
   }
 };
 
-using RecursiveSummaryDomain = npa::ProgramTransferDomain<char>;
+using RecursiveSummaryDomain = npa::PathTransferSummary<char>;
 
 class RecursivePropagationLimitedForwardAnalysis {
 public:

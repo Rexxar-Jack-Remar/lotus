@@ -31,8 +31,8 @@ TEST(NPAInterproceduralClients,
   EXPECT_NE(stderrOutput.find("already left-linear"), std::string::npos);
 }
 
-TEST(NPAInterproceduralClients, ProgramTransferDomainPreservesLongPaths) {
-  using Domain = npa::ProgramTransferDomain<char>;
+TEST(NPAInterproceduralClients, PathTransferSummaryPreservesLongPaths) {
+  using Domain = npa::PathTransferSummary<char>;
 
   Domain::value_type path = Domain::one();
   for (int i = 0; i < 300; ++i)

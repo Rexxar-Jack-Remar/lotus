@@ -134,7 +134,7 @@ std::vector<npa::DomVal<D>> solve_with_unchecked_tensorized_helper(
 
 namespace npa {
 template <> struct TensorSemiringTraits<BoundedLangSemiring> {
-  using tensor_domain = TensorProductExactDomain<BoundedLangSemiring>;
+  using tensor_domain = ExactTensorProductLift<BoundedLangSemiring>;
 
   static bool available() { return true; }
   static bool paper_admissible() { return false; }
@@ -171,7 +171,7 @@ template <> struct TensorSemiringTraits<BoundedLangSemiring> {
 };
 
 template <> struct TensorSemiringTraits<CustomTensorLangSemiring> {
-  using tensor_domain = TensorProductExactDomain<CustomTensorLangSemiring>;
+  using tensor_domain = ExactTensorProductLift<CustomTensorLangSemiring>;
 
   static bool available() { return true; }
   static bool paper_admissible() { return false; }

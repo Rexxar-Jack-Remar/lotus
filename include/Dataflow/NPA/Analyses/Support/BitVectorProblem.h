@@ -1,5 +1,5 @@
-#ifndef NPA_BIT_VECTOR_INFO_H
-#define NPA_BIT_VECTOR_INFO_H
+#ifndef NPA_BIT_VECTOR_PROBLEM_H
+#define NPA_BIT_VECTOR_PROBLEM_H
 
 #include "Utils/LLVM/SystemHeaders.h"
 
@@ -10,8 +10,8 @@ namespace npa {
 /**
  * @brief Abstract interface for defining a bit-vector dataflow problem.
  */
-struct BitVectorInfo {
-  virtual ~BitVectorInfo() = default;
+struct BitVectorProblem {
+  virtual ~BitVectorProblem() = default;
 
   /// Returns the number of bits in the vector (domain width)
   virtual unsigned getBitWidth() const = 0;
@@ -34,4 +34,4 @@ struct BitVectorInfo {
 
 } // namespace npa
 
-#endif // NPA_BIT_VECTOR_INFO_H
+#endif // NPA_BIT_VECTOR_PROBLEM_H

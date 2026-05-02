@@ -2,7 +2,7 @@
 #define NPA_INTERPROC_INTERVAL_ANALYSIS_H
 
 #include "Dataflow/NPA/Analyses/InterEngine.h"
-#include "Dataflow/NPA/Domains/SummaryTransformerDomain.h"
+#include "Dataflow/NPA/Transfers/TransformerSummary.h"
 
 #include <cstdint>
 #include <map>
@@ -106,13 +106,13 @@ struct IntervalOp {
   bool summaryCanOverwritePrevious() const;
 };
 
-using IntervalDomain = SummaryTransformerDomain<IntervalOp>;
+using IntervalSummary = TransformerSummary<IntervalOp>;
 
 class InterIntervalAnalysis {
 public:
   struct Result {
     AnalysisStatus status;
-    std::map<FunctionKey, IntervalDomain::value_type> summaries;
+    std::map<FunctionKey, IntervalSummary::value_type> summaries;
     std::map<BlockKey, IntervalState> blockFacts;
   };
 

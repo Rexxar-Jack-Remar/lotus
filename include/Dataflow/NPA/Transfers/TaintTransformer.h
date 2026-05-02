@@ -1,5 +1,5 @@
-#ifndef NPA_TAINT_TRANSFER_DOMAIN_H
-#define NPA_TAINT_TRANSFER_DOMAIN_H
+#ifndef NPA_TAINT_TRANSFORMER_H
+#define NPA_TAINT_TRANSFORMER_H
 
 #include "Dataflow/NPA/Core/Base/Runtime.h"
 #include "Utils/LLVM/SystemHeaders.h"
@@ -16,12 +16,12 @@ struct TaintTransfer {
   llvm::APInt gen;
 };
 
-class TaintTransferDomain {
+class TaintTransformer {
 public:
   using value_type = TaintTransfer;
   using test_type = bool;
   static constexpr bool idempotent = true;
-  using width_context = DomainWidthContext<TaintTransferDomain>;
+  using width_context = DomainWidthContext<TaintTransformer>;
   using RunState = typename width_context::state_type;
   using WidthScope = typename width_context::scope_type;
 
@@ -54,14 +54,14 @@ private:
 } // namespace npa
 
 namespace npa {
-template <> struct DomainExecutionStateTraits<TaintTransferDomain> {
-  using state_type = TaintTransferDomain::width_context::state_type;
-  using scope_type = TaintTransferDomain::width_context::scope_type;
+template <> struct DomainExecutionStateTraits<TaintTransformer> {
+  using state_type = TaintTransformer::width_context::state_type;
+  using scope_type = TaintTransformer::width_context::scope_type;
 
   static state_type capture() {
-    return TaintTransferDomain::width_context::capture();
+    return TaintTransformer::width_context::capture();
   }
 };
 } // namespace npa
 
-#endif // NPA_TAINT_TRANSFER_DOMAIN_H
+#endif // NPA_TAINT_TRANSFORMER_H

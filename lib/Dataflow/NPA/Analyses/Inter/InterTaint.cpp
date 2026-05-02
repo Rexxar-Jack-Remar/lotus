@@ -582,8 +582,8 @@ private:
 class TaintAnalysis {
 public:
   using FactType = llvm::APInt;
-  using D = TaintTransferDomain;
-  using Engine = InterEngine<TaintTransferDomain, TaintAnalysis>;
+  using D = TaintTransformer;
+  using Engine = InterEngine<TaintTransformer, TaintAnalysis>;
 
   static unsigned normalizeBitWidth(unsigned bit_width) {
     return bit_width == 0 ? 1u : bit_width;
@@ -1848,7 +1848,7 @@ InterTaint::Result InterTaint::run(llvm::Module &M,
     strategy = LinearStrategy::SCC;
     if (verbose)
       llvm::errs() << "[npa-taint] tensor strategy is unsupported for "
-                      "TaintTransferDomain; using SCC\n";
+                      "TaintTransformer; using SCC\n";
   }
 
   TaintAnalysis analysis(M, aliasAnalysis, options);
@@ -1861,7 +1861,7 @@ InterTaint::Result InterTaint::run(llvm::Module &M,
     res.status.overall_converged = false;
     return res;
   }
-  auto engineResult = InterEngine<TaintTransferDomain, TaintAnalysis>::run(
+  auto engineResult = InterEngine<TaintTransformer, TaintAnalysis>::run(
       M, analysis, verbose, strategy, options.call_resolution_mode);
 
   InterTaint::Result res;
@@ -1881,7 +1881,7 @@ InterTaint::Result InterTaint::run(llvm::Module &M,
   res.blockReachablePointerMemoryBits =
       analysis.buildFlowSensitiveReachablePointerMemoryBits();
 
-  std::unordered_map<const llvm::Function *, TaintTransferDomain::value_type>
+  std::unordered_map<const llvm::Function *, TaintTransformer::value_type>
       summaryMap;
   for (const auto &entry : engineResult.summaries)
     summaryMap.emplace(entry.first.function, entry.second);
@@ -1903,7 +1903,7 @@ InterTaint::Result InterTaint::run(llvm::Module &M,
         if (auto *call = llvm::dyn_cast<llvm::CallBase>(&I)) {
           auto callTransfer = analysis.buildCallTransfer(*call, summaryMap);
           llvm::APInt postFact =
-              TaintTransferDomain::apply(callTransfer, currentFact);
+              TaintTransformer::apply(callTransfer, currentFact);
           auto taintedInputs =
               analysis.triggeredSinkInputs(*call, currentFact, postFact);
           if (!taintedInputs.empty())
@@ -1911,7 +1911,7 @@ InterTaint::Result InterTaint::run(llvm::Module &M,
           currentFact = std::move(postFact);
         } else {
           auto transfer = analysis.buildNormalTransfer(I);
-          currentFact = TaintTransferDomain::apply(transfer, currentFact);
+          currentFact = TaintTransformer::apply(transfer, currentFact);
         }
       }
       res.blockExitFacts[{&BB}] = currentFact;

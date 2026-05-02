@@ -6,7 +6,7 @@
  * \brief Tensor-product linear solver (Reps et al. TOPLAS 2016, Alg. 3.4).
  *
  * Converts the LCFL linear system into a \e left-linear system over the
- * paired semiring (TensorProductDomain): pair (a,b) represents left/right
+ * paired semiring (TensorProductLift): pair (a,b) represents left/right
  * context so that a·Y·b becomes Y ⊗_p (a,b). The left-linear system is
  * solved by Tarjan-style parameterized path expressions (with a tensor-space
  * worklist fallback when extraction fails); then we \e project back to the base
@@ -140,7 +140,7 @@ private:
 };
 
 /// Converts linearized expression over D to a left-linear expression over
-/// TensorProductDomain<D> by rewriting Concat (a·X·b) into X ⊗_p (a,b).
+/// TensorProductLift<D> by rewriting Concat (a·X·b) into X ⊗_p (a,b).
 template <class D> struct Exp1ToTensor {
   using Traits = TensorSemiringTraits<D>;
   using TD = typename Traits::tensor_domain;
@@ -724,7 +724,7 @@ std::vector<DomVal<D>> solve_linear_tensor_paper_impl(
 }
 
 /// Solve LCFL linear system by lifting to tensor space: convert RHS to
-/// TensorProductDomain, solve (left-linear over pairs), project back via R.
+/// TensorProductLift, solve (left-linear over pairs), project back via R.
 template <class D>
 std::vector<DomVal<D>>
 solve_linear_tensor_impl(bool verbose,

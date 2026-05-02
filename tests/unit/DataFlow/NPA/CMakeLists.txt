@@ -1,7 +1,7 @@
 # NPA DataFlow Unit Tests
 
 add_lotus_npa_test(npa_solver_test NPASolverTest.cpp)
-add_lotus_npa_test(npa_tensor_domain_test TensorProductDomainTest.cpp)
+add_lotus_npa_test(npa_tensor_lift_test TensorProductLiftTest.cpp)
 add_lotus_npa_test(npa_tensor_regularization_test NPATensorRegularizationTest.cpp)
 add_lotus_npa_test(npa_interprocedural_client_test NPAInterproceduralClientTest.cpp)
 add_lotus_npa_test(npa_inter_affine_equalities_test InterAffineEqualitiesTest.cpp)

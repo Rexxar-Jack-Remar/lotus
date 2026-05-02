@@ -4,11 +4,11 @@
  */
 #include "Dataflow/NPA/Analyses/Intra/ReachableBlocks.h"
 
-#include "Dataflow/NPA/Domains/BitVectorInfo.h"
+#include "Dataflow/NPA/Analyses/Support/BitVectorProblem.h"
 
 namespace npa {
 
-class ReachableInfo : public BitVectorInfo {
+class ReachableInfo : public BitVectorProblem {
 public:
   // 1 bit: 0=Unreachable, 1=Reachable
   unsigned getBitWidth() const override { return 1; }

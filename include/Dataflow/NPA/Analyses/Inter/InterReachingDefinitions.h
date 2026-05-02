@@ -2,7 +2,7 @@
 #define NPA_INTERPROC_RD_H
 
 #include "Dataflow/NPA/Analyses/InterEngine.h"
-#include "Dataflow/NPA/Domains/GenKillDomain.h"
+#include "Dataflow/NPA/Transfers/GenKillTransformer.h"
 
 #include <map>
 
@@ -14,7 +14,7 @@ class InterReachingDefinitions {
 public:
   struct Result {
     AnalysisStatus status;
-    std::map<FunctionKey, GenKillDomain::value_type> summaries;
+    std::map<FunctionKey, GenKillTransformer::value_type> summaries;
     std::map<BlockKey, llvm::APInt> blockFacts;
   };
 

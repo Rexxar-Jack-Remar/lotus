@@ -2,7 +2,7 @@
 #define NPA_INTERPROC_NULLABILITY_H
 
 #include "Dataflow/NPA/Analyses/InterEngine.h"
-#include "Dataflow/NPA/Domains/TaintTransferDomain.h"
+#include "Dataflow/NPA/Transfers/TaintTransformer.h"
 
 #include <map>
 #include <unordered_map>
@@ -27,7 +27,7 @@ public:
 
   struct Result {
     AnalysisStatus status;
-    std::map<FunctionKey, TaintTransferDomain::value_type> summaries;
+    std::map<FunctionKey, TaintTransformer::value_type> summaries;
     std::map<BlockKey, llvm::APInt> blockFacts;
     std::map<BlockKey, llvm::APInt> blockExitFacts;
     std::unordered_map<const llvm::Value *, unsigned> valueBits;

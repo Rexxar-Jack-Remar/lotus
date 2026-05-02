@@ -1,5 +1,5 @@
-#ifndef NPA_TENSOR_PRODUCT_DOMAIN_H
-#define NPA_TENSOR_PRODUCT_DOMAIN_H
+#ifndef NPA_TENSOR_PRODUCT_LIFT_H
+#define NPA_TENSOR_PRODUCT_LIFT_H
 
 #include "Dataflow/NPA/Core/Base/Runtime.h"
 
@@ -8,13 +8,13 @@
 namespace npa {
 
 /**
- * TensorProductDomain<D> – utility paired domains for tensorized solving.
+ * TensorProductLift<D> – utility paired lift for tensorized solving.
  *
  * This file provides:
- * - TensorProductDomain<D>: the classic *pair* construction (fast, but when
+ * - TensorProductLift<D>: the classic *pair* construction (fast, but when
  *   used with readout R((a,b))=a⊗b after solving it can lose left/right
  *   correlation due to componentwise ⊕_p).
- * - TensorProductExactDomain<D>: an *exact correlated* representation for
+ * - ExactTensorProductLift<D>: an *exact correlated* representation for
  *   idempotent domains, modeling sums as finite sets of pairs so readout
  *   preserves correlation.
  *
@@ -24,7 +24,7 @@ namespace npa {
  * `TensorSemiringTraits<D>` specialization (for example, the predicate-relation
  * domain).
  */
-template <class D> struct TensorProductDomain {
+template <class D> struct TensorProductLift {
   using V = typename D::value_type;
   using value_type = std::pair<V, V>;
   using test_type = typename D::test_type;
@@ -66,7 +66,7 @@ template <class D> struct TensorProductDomain {
 };
 
 /**
- * TensorProductExactDomain<D> – exact correlated representation (idempotent).
+ * ExactTensorProductLift<D> – exact correlated representation (idempotent).
  *
  * value_type is a finite set of pairs (stored as a vector with dedup).
  * combine() is set-union, extend() is pairwise ⊗_p, and project() is ⊕ over
@@ -75,7 +75,7 @@ template <class D> struct TensorProductDomain {
  * This avoids the classic correlation loss where (a1,b1) ⊕_p (a2,b2) would
  * project to (a1⊕a2)⊗(b1⊕b2), introducing cross terms.
  */
-template <class D> struct TensorProductExactDomain {
+template <class D> struct ExactTensorProductLift {
   using V = typename D::value_type;
   using pair_type = std::pair<V, V>;
   using value_type = std::vector<pair_type>;
@@ -144,7 +144,7 @@ template <class D> struct TensorProductExactDomain {
   static value_type subtract(const value_type &, const value_type &) {
     static_assert(
         D::idempotent,
-        "TensorProductExactDomain is intended for idempotent domains");
+        "ExactTensorProductLift is intended for idempotent domains");
     return {};
   }
 
@@ -185,4 +185,4 @@ private:
 
 } // namespace npa
 
-#endif
+#endif // NPA_TENSOR_PRODUCT_LIFT_H

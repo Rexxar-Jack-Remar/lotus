@@ -2,7 +2,7 @@
  *
  * Author: rainoftime
  */
-#include "Dataflow/NPA/Domains/BitVectorDomain.h"
+#include "Dataflow/NPA/Domains/BitSetDomain.h"
 
 namespace npa {
 

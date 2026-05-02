@@ -1,10 +1,10 @@
 # NPA sources
 set(NPA_SOURCES
   Domains/AffineRelationDomain.cpp
-  Domains/BitVectorDomain.cpp
-  Domains/GenKillDomain.cpp
+  Domains/BitSetDomain.cpp
   Domains/PredicateRelationDomain.cpp
-  Domains/TaintTransferDomain.cpp
+  Transfers/GenKillTransformer.cpp
+  Transfers/TaintTransformer.cpp
 
   Analyses/BitVectorSolver.cpp
   Analyses/Intra/LiveVariables.cpp

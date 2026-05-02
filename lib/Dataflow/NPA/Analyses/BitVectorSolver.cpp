@@ -25,7 +25,7 @@ static std::string getBlockSymbol(const llvm::BasicBlock *BB,
 }
 
 BitVectorSolver::Result BitVectorSolver::run(llvm::Function &F,
-                                             const BitVectorInfo &info,
+                                             const BitVectorProblem &info,
                                              SolverStrategy strategy,
                                              LinearStrategy linearStrategy,
                                              bool verbose) {

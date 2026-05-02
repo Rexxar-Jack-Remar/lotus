@@ -1,4 +1,4 @@
-#include "Dataflow/NPA/Domains/TensorProductDomain.h"
+#include "Dataflow/NPA/Solver/TensorProductLift.h"
 
 #include <gtest/gtest.h>
 
@@ -41,7 +41,7 @@ struct TraceSemiring {
 
 TEST(NPA, TensorProductRightComponentUsesOppositeProduct) {
   using D = TraceSemiring;
-  using TD = npa::TensorProductDomain<D>;
+  using TD = npa::TensorProductLift<D>;
 
   // extend(a, b) means "a after b"
   //

@@ -28,7 +28,7 @@ bool apIntEqual(const llvm::APInt &lhs, const llvm::APInt &rhs) {
   return lhs.getBitWidth() == rhs.getBitWidth() && lhs.eq(rhs);
 }
 
-using D = IntervalDomain;
+using D = IntervalSummary;
 using Exp = Exp0<D>;
 using E = E0<D>;
 
@@ -966,7 +966,7 @@ InterIntervalAnalysis::run(llvm::Module &M, bool verbose,
                            LinearStrategy linearStrategy,
                            IndirectCallResolutionMode callResolutionMode) {
   IntervalAnalysis analysis;
-  auto engineResult = InterEngine<IntervalDomain, IntervalAnalysis>::run(
+  auto engineResult = InterEngine<IntervalSummary, IntervalAnalysis>::run(
       M, analysis, verbose, linearStrategy, callResolutionMode);
 
   Result result;

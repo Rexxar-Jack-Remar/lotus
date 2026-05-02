@@ -502,7 +502,7 @@ TEST(NPAParallelRhsHarness,
   EXPECT_GT(entry_fact.countPopulation(), 0u);
   expectSummariesEqual(worklist.summaries, scc.summaries,
                        [](const auto &lhs, const auto &rhs) {
-                         return npa::TaintTransferDomain::equal(lhs, rhs);
+                         return npa::TaintTransformer::equal(lhs, rhs);
                        });
   expectBlockFactsEqual(
       worklist.blockFacts, scc.blockFacts,
@@ -563,7 +563,7 @@ TEST(NPAParallelRhsHarness,
   EXPECT_TRUE(live_in[bit_it->second]);
   expectSummariesEqual(worklist.summaries, scc.summaries,
                        [](const auto &lhs, const auto &rhs) {
-                         return npa::TaintTransferDomain::equal(lhs, rhs);
+                         return npa::TaintTransformer::equal(lhs, rhs);
                        });
   expectBlockFactsEqual(
       worklist.blockFacts, scc.blockFacts,

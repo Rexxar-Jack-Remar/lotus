@@ -4,7 +4,7 @@
  */
 #include "Dataflow/NPA/Analyses/Intra/ReachingDefinitions.h"
 
-#include "Dataflow/NPA/Domains/BitVectorInfo.h"
+#include "Dataflow/NPA/Analyses/Support/BitVectorProblem.h"
 
 #include <unordered_map>
 
@@ -12,7 +12,7 @@
 
 namespace npa {
 
-class RDInfo : public BitVectorInfo {
+class RDInfo : public BitVectorProblem {
   unsigned bitWidth;
   std::unordered_map<const llvm::Value *, unsigned> valToBit;
   std::unordered_map<const llvm::BasicBlock *, llvm::APInt> genMap;

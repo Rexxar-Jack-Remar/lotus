@@ -717,7 +717,7 @@ TEST(NPAInterproceduralClients,
 
 namespace {
 
-using TraceTransferDomain = npa::ProgramTransferDomain<char>;
+using TraceTransferDomain = npa::PathTransferSummary<char>;
 
 struct BackwardTensorLangDomain {
   using value_type = std::set<std::string>;
@@ -832,7 +832,7 @@ public:
 
 namespace npa {
 template <> struct TensorSemiringTraits<BackwardTensorLangDomain> {
-  using tensor_domain = TensorProductExactDomain<BackwardTensorLangDomain>;
+  using tensor_domain = ExactTensorProductLift<BackwardTensorLangDomain>;
 
   static bool available() { return true; }
   static bool paper_admissible() { return false; }

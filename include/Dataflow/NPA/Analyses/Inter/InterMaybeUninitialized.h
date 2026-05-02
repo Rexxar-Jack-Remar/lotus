@@ -2,7 +2,7 @@
 #define NPA_INTERPROC_MAYBE_UNINITIALIZED_H
 
 #include "Dataflow/NPA/Analyses/InterEngine.h"
-#include "Dataflow/NPA/Domains/TaintTransferDomain.h"
+#include "Dataflow/NPA/Transfers/TaintTransformer.h"
 
 #include <map>
 
@@ -14,7 +14,7 @@ class InterMaybeUninitialized {
 public:
   struct Result {
     AnalysisStatus status;
-    std::map<FunctionKey, TaintTransferDomain::value_type> summaries;
+    std::map<FunctionKey, TaintTransformer::value_type> summaries;
     std::map<BlockKey, llvm::APInt> blockFacts;
   };
 

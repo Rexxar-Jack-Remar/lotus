@@ -565,7 +565,7 @@ private:
 class NullabilityAnalysis {
 public:
   using FactType = llvm::APInt;
-  using D = TaintTransferDomain;
+  using D = TaintTransformer;
   using Exp = Exp0<D>;
   using E = E0<D>;
   using Engine = InterEngine<D, NullabilityAnalysis>;
@@ -1229,7 +1229,7 @@ InterNullability::Result InterNullability::run(
     const Options &options, bool verbose, LinearStrategy linearStrategy) {
   NullabilityAnalysis analysis(M, aliasAnalysis, options);
   auto engineResult =
-      InterEngine<TaintTransferDomain, NullabilityAnalysis>::run(
+      InterEngine<TaintTransformer, NullabilityAnalysis>::run(
           M, analysis, verbose, linearStrategy, options.call_resolution_mode);
 
   InterNullability::Result result;
@@ -1242,7 +1242,7 @@ InterNullability::Result InterNullability::run(
   result.memoryBits = analysis.getMemoryBits();
   result.pointerMemoryBits = analysis.getPointerMemoryBits();
 
-  std::map<const llvm::Function *, TaintTransferDomain::value_type> summaryMap;
+  std::map<const llvm::Function *, TaintTransformer::value_type> summaryMap;
   for (const auto &entry : engineResult.summaries)
     summaryMap.emplace(entry.first.function, entry.second);
 
@@ -1263,14 +1263,14 @@ InterNullability::Result InterNullability::run(
       for (auto &I : BB) {
         if (auto *Call = llvm::dyn_cast<llvm::CallBase>(&I)) {
           auto transfer = analysis.buildCallTransfer(*Call, summaryMap);
-          currentFact = TaintTransferDomain::apply(transfer, currentFact);
+          currentFact = TaintTransformer::apply(transfer, currentFact);
           continue;
         }
 
-        TaintTransferDomain::value_type transfer = TaintTransferDomain::one();
+        TaintTransformer::value_type transfer = TaintTransformer::one();
         if (!analysis.buildNormalTransfer(I, transfer))
           continue;
-        currentFact = TaintTransferDomain::apply(transfer, currentFact);
+        currentFact = TaintTransformer::apply(transfer, currentFact);
       }
       result.blockExitFacts[{&BB}] = currentFact;
     }

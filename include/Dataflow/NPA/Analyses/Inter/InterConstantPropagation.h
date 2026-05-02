@@ -2,7 +2,7 @@
 #define NPA_INTERPROC_CONSTANT_PROPAGATION_H
 
 #include "Dataflow/NPA/Analyses/InterEngine.h"
-#include "Dataflow/NPA/Domains/SummaryTransformerDomain.h"
+#include "Dataflow/NPA/Transfers/TransformerSummary.h"
 
 #include <cstdint>
 #include <map>
@@ -76,14 +76,13 @@ struct ConstantPropagationOp {
   bool summaryCanOverwritePrevious() const;
 };
 
-using ConstantPropagationDomain =
-    SummaryTransformerDomain<ConstantPropagationOp>;
+using ConstantPropagationSummary = TransformerSummary<ConstantPropagationOp>;
 
 class InterConstantPropagation {
 public:
   struct Result {
     AnalysisStatus status;
-    std::map<FunctionKey, ConstantPropagationDomain::value_type> summaries;
+    std::map<FunctionKey, ConstantPropagationSummary::value_type> summaries;
     std::map<BlockKey, ConstantPropagationState> blockFacts;
   };
 

@@ -1,5 +1,5 @@
-#ifndef NPA_BIT_VECTOR_DOMAIN_H
-#define NPA_BIT_VECTOR_DOMAIN_H
+#ifndef NPA_BIT_SET_DOMAIN_H
+#define NPA_BIT_SET_DOMAIN_H
 
 #include "Dataflow/NPA/Core/Base/Runtime.h"
 #include "Utils/LLVM/SystemHeaders.h"
@@ -62,9 +62,6 @@ private:
   }
 };
 
-/// Backwards-compatible alias: older code may still refer to BitVectorDomain.
-using BitVectorDomain = BitSetDomain;
-
 template <> struct DomainExecutionStateTraits<BitSetDomain> {
   using state_type = BitSetDomain::width_context::state_type;
   using scope_type = BitSetDomain::width_context::scope_type;
@@ -74,4 +71,4 @@ template <> struct DomainExecutionStateTraits<BitSetDomain> {
 
 } // namespace npa
 
-#endif /* NPA_BIT_VECTOR_DOMAIN_H */
+#endif /* NPA_BIT_SET_DOMAIN_H */

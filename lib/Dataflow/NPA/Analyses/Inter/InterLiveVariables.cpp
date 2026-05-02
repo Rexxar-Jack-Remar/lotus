@@ -63,7 +63,7 @@ private:
 class InterproceduralLiveAnalysis {
 public:
   using FactType = llvm::APInt;
-  using D = TaintTransferDomain;
+  using D = TaintTransformer;
   using Exp = Exp0<D>;
   using E = E0<D>;
 
@@ -194,7 +194,7 @@ InterLiveVariables::run(llvm::Module &M, bool verbose,
                         IndirectCallResolutionMode callResolutionMode) {
   InterproceduralLiveAnalysis analysis(M);
   auto engineResult =
-      BackwardInterEngine<TaintTransferDomain,
+      BackwardInterEngine<TaintTransformer,
                           InterproceduralLiveAnalysis>::run(M, analysis,
                                                             verbose,
                                                             linearStrategy,

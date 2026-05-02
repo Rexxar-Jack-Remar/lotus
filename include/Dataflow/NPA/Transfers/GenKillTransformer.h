@@ -1,5 +1,5 @@
-#ifndef NPA_GEN_KILL_DOMAIN_H
-#define NPA_GEN_KILL_DOMAIN_H
+#ifndef NPA_GEN_KILL_TRANSFORMER_H
+#define NPA_GEN_KILL_TRANSFORMER_H
 
 #include "Dataflow/NPA/Core/Base/Runtime.h"
 
@@ -10,7 +10,7 @@
 namespace npa {
 
 /**
- * GenKillTransferDomain – Domain of Transfer Functions for Gen/Kill Problems
+ * GenKillTransformer – Transfer-function carrier for Gen/Kill problems
  * Elements are pairs (Kill, Gen) representing f(x) = (x \ Kill) U Gen
  *
  * Composition (extend):
@@ -21,12 +21,12 @@ namespace npa {
  * f1(x) U f2(x) = ((x \ K1) U G1) U ((x \ K2) U G2)
  *               = (x \ (K1 n K2)) U (G1 U G2)
  */
-class GenKillTransferDomain {
+class GenKillTransformer {
 public:
   using value_type = std::pair<llvm::APInt, llvm::APInt>;
   using test_type = bool;
   static constexpr bool idempotent = true;
-  using width_context = DomainWidthContext<GenKillTransferDomain>;
+  using width_context = DomainWidthContext<GenKillTransformer>;
   using RunState = typename width_context::state_type;
   using WidthScope = typename width_context::scope_type;
 
@@ -93,24 +93,21 @@ public:
 private:
   static unsigned requireBitWidth() {
     return width_context::require(
-        "GenKillTransferDomain width must be installed via WidthScope");
+        "GenKillTransformer width must be installed via WidthScope");
   }
 };
-
-/// Backwards-compatible alias: older code may still refer to GenKillDomain.
-using GenKillDomain = GenKillTransferDomain;
 
 } // namespace npa
 
 namespace npa {
-template <> struct DomainExecutionStateTraits<GenKillTransferDomain> {
-  using state_type = GenKillTransferDomain::width_context::state_type;
-  using scope_type = GenKillTransferDomain::width_context::scope_type;
+template <> struct DomainExecutionStateTraits<GenKillTransformer> {
+  using state_type = GenKillTransformer::width_context::state_type;
+  using scope_type = GenKillTransformer::width_context::scope_type;
 
   static state_type capture() {
-    return GenKillTransferDomain::width_context::capture();
+    return GenKillTransformer::width_context::capture();
   }
 };
 } // namespace npa
 
-#endif
+#endif // NPA_GEN_KILL_TRANSFORMER_H

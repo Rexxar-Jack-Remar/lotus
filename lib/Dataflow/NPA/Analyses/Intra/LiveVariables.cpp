@@ -4,7 +4,7 @@
  */
 #include "Dataflow/NPA/Analyses/Intra/LiveVariables.h"
 
-#include "Dataflow/NPA/Domains/BitVectorInfo.h"
+#include "Dataflow/NPA/Analyses/Support/BitVectorProblem.h"
 
 #include <unordered_map>
 
@@ -15,7 +15,7 @@ namespace npa {
 
 namespace {
 
-class LiveVariablesInfo : public BitVectorInfo {
+class LiveVariablesInfo : public BitVectorProblem {
 public:
   explicit LiveVariablesInfo(llvm::Function &F) {
     unsigned bit = 0;

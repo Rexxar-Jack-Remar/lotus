@@ -1,5 +1,6 @@
-#include "Dataflow/NPA/Domains/ProgramTransferDomain.h"
-#include "Dataflow/NPA/Domains/SummaryTransformerDomain.h"
+#include "Dataflow/NPA/Solver/TensorProductLift.h"
+#include "Dataflow/NPA/Transfers/PathTransferSummary.h"
+#include "Dataflow/NPA/Transfers/TransformerSummary.h"
 #include "Dataflow/NPA/NPA.h"
 
 #include <unordered_map>
@@ -434,7 +435,7 @@ struct WriteOp {
 
 namespace npa {
 template <> struct TensorSemiringTraits<BadDeltaSemiring> {
-  using tensor_domain = TensorProductDomain<BadDeltaSemiring>;
+  using tensor_domain = TensorProductLift<BadDeltaSemiring>;
 
   static bool available() { return false; }
   static bool paper_admissible() { return false; }
@@ -632,8 +633,8 @@ TEST(NPA, FixpointIterationLimitMarksMuClosureAsApproximate) {
   EXPECT_TRUE(result.second.hit_fixpoint_limit);
 }
 
-TEST(NPA, ProgramTransferDomainPreservesMayWriteAcrossCombineAndExtend) {
-  using D = npa::ProgramTransferDomain<WriteOp>;
+TEST(NPA, PathTransferSummaryPreservesMayWriteAcrossCombineAndExtend) {
+  using D = npa::PathTransferSummary<WriteOp>;
 
   static int slot_a = 0;
   static int slot_b = 0;
@@ -650,8 +651,8 @@ TEST(NPA, ProgramTransferDomainPreservesMayWriteAcrossCombineAndExtend) {
   EXPECT_TRUE(composed.may_write.count(&slot_b));
 }
 
-TEST(NPA, SummaryTransformerDomainPreservesMayWriteAcrossCombineAndExtend) {
-  using D = npa::SummaryTransformerDomain<WriteOp>;
+TEST(NPA, TransformerSummaryPreservesMayWriteAcrossCombineAndExtend) {
+  using D = npa::TransformerSummary<WriteOp>;
 
   static int slot_a = 0;
   static int slot_b = 0;
@@ -668,8 +669,8 @@ TEST(NPA, SummaryTransformerDomainPreservesMayWriteAcrossCombineAndExtend) {
   EXPECT_TRUE(composed.may_write.count(&slot_b));
 }
 
-TEST(NPA, ProgramTransferDomainCondCombineRespectsBooleanGuard) {
-  using D = npa::ProgramTransferDomain<char>;
+TEST(NPA, PathTransferSummaryCondCombineRespectsBooleanGuard) {
+  using D = npa::PathTransferSummary<char>;
 
   auto thenV = D::singleton('t');
   auto elseV = D::singleton('e');
@@ -686,8 +687,8 @@ TEST(NPA, ProgramTransferDomainCondCombineRespectsBooleanGuard) {
   EXPECT_FALSE(chosenElse.paths.count(std::vector<char>{'t'}));
 }
 
-TEST(NPA, SummaryTransformerDomainCondCombineRespectsBooleanGuard) {
-  using D = npa::SummaryTransformerDomain<char>;
+TEST(NPA, TransformerSummaryCondCombineRespectsBooleanGuard) {
+  using D = npa::TransformerSummary<char>;
 
   auto thenV = D::singleton('t');
   auto elseV = D::singleton('e');

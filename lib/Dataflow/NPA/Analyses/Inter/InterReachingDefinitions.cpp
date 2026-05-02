@@ -16,7 +16,7 @@ public:
   using FactType = llvm::APInt; // Fact type for Phase 2
 
 private:
-  using D = GenKillTransferDomain;
+  using D = GenKillTransformer;
   using Exp = Exp0<D>;
   using E = E0<D>;
 
@@ -77,7 +77,7 @@ InterReachingDefinitions::run(llvm::Module &M, bool verbose,
                               LinearStrategy linearStrategy,
                               IndirectCallResolutionMode callResolutionMode) {
   RDAnalysis analysis(M);
-  auto engineResult = InterEngine<GenKillTransferDomain, RDAnalysis>::run(
+  auto engineResult = InterEngine<GenKillTransformer, RDAnalysis>::run(
       M, analysis, verbose, linearStrategy, callResolutionMode);
 
   InterReachingDefinitions::Result res;

@@ -1,7 +1,7 @@
 #ifndef NPA_TENSOR_SEMIRING_H
 #define NPA_TENSOR_SEMIRING_H
 
-#include "Dataflow/NPA/Domains/TensorProductDomain.h"
+#include "Dataflow/NPA/Solver/TensorProductLift.h"
 
 namespace npa {
 
@@ -110,7 +110,7 @@ template <class D> inline void validate_tensor_trait_api() {
 /// This keeps `LinearStrategy::TensorProduct` from silently assuming that the
 /// generic paired utility domains are paper-faithful admissible semirings.
 template <class D> struct TensorSemiringTraits {
-  using tensor_domain = TensorProductExactDomain<D>;
+  using tensor_domain = ExactTensorProductLift<D>;
 
   static bool available() { return false; }
 
