@@ -138,6 +138,149 @@ TEST(AffineRelationDomain, BottomIsDistinctFromIdentity) {
   auto bottom = npa::AffineRelationDomain::zero();
   auto id = npa::AffineRelationDomain::identity();
   EXPECT_FALSE(npa::AffineRelationDomain::equal(bottom, id));
+  EXPECT_TRUE(npa::AffineRelationDomain::isBottom(bottom));
+  EXPECT_FALSE(npa::AffineRelationDomain::isBottom(id));
+}
+
+TEST(AffineRelationDomain, TopContainsIdentityAndBottom) {
+  llvm::LLVMContext ctx;
+  auto module = parseModule(ctx, R"(
+    define void @f(i32 %x) {
+    entry:
+      ret void
+    }
+  )");
+  ASSERT_NE(module, nullptr);
+
+  auto vocab = buildVocabulary(*module);
+  npa::AffineRelationDomain::configure(&vocab);
+
+  auto top = npa::AffineRelationDomain::top();
+  auto id = npa::AffineRelationDomain::identity();
+  auto bottom = npa::AffineRelationDomain::zero();
+
+  EXPECT_TRUE(npa::AffineRelationDomain::contains(top, id));
+  EXPECT_TRUE(npa::AffineRelationDomain::contains(top, bottom));
+  EXPECT_TRUE(npa::AffineRelationDomain::contains(id, bottom));
+  EXPECT_FALSE(npa::AffineRelationDomain::contains(id, top));
+}
+
+TEST(AffineRelationDomain, AffineGeneratorRoundTripPreservesKSRelation) {
+  llvm::LLVMContext ctx;
+  auto module = parseModule(ctx, R"(
+    define void @f(i32 %x) {
+    entry:
+      %y = add i32 %x, 4
+      ret void
+    }
+  )");
+  ASSERT_NE(module, nullptr);
+
+  auto vocab = buildVocabulary(*module);
+  npa::AffineRelationDomain::configure(&vocab);
+
+  auto *F = module->getFunction("f");
+  ASSERT_NE(F, nullptr);
+  auto *X = &*F->arg_begin();
+  auto *Y = &*F->getEntryBlock().begin();
+
+  auto relation =
+      npa::AffineRelationDomain::makeAffineAssignment(Y, 4, {{X, 1}});
+  auto ag = npa::AffineRelationDomain::toAffineGenerator(relation);
+  auto roundTrip = npa::AffineRelationDomain::fromAffineGenerator(ag);
+
+  EXPECT_TRUE(ag.exact);
+  EXPECT_TRUE(npa::AffineRelationDomain::equal(relation, roundTrip));
+}
+
+TEST(AffineRelationDomain, AffineGeneratorJoinUsesKSJoinSemantics) {
+  llvm::LLVMContext ctx;
+  auto module = parseModule(ctx, R"(
+    define void @f(i32 %x) {
+    entry:
+      %y = add i32 %x, 4
+      ret void
+    }
+  )");
+  ASSERT_NE(module, nullptr);
+
+  auto vocab = buildVocabulary(*module);
+  npa::AffineRelationDomain::configure(&vocab);
+
+  auto *F = module->getFunction("f");
+  ASSERT_NE(F, nullptr);
+  auto *X = &*F->arg_begin();
+  auto *Y = &*F->getEntryBlock().begin();
+
+  auto assign = npa::AffineRelationDomain::makeAffineAssignment(Y, 4, {{X, 1}});
+  auto id = npa::AffineRelationDomain::identity();
+  auto joined = npa::AffineRelationDomain::joinAffineGenerators(
+      npa::AffineRelationDomain::toAffineGenerator(assign),
+      npa::AffineRelationDomain::toAffineGenerator(id));
+
+  EXPECT_TRUE(npa::AffineRelationDomain::equal(
+      npa::AffineRelationDomain::fromAffineGenerator(joined),
+      npa::AffineRelationDomain::combine(assign, id)));
+}
+
+TEST(AffineRelationDomain, MOSRoundTripPreservesKSRelation) {
+  llvm::LLVMContext ctx;
+  auto module = parseModule(ctx, R"(
+    define void @f(i32 %x) {
+    entry:
+      %y = add i32 %x, 4
+      ret void
+    }
+  )");
+  ASSERT_NE(module, nullptr);
+
+  auto vocab = buildVocabulary(*module);
+  npa::AffineRelationDomain::configure(&vocab);
+
+  auto *F = module->getFunction("f");
+  ASSERT_NE(F, nullptr);
+  auto *X = &*F->arg_begin();
+  auto *Y = &*F->getEntryBlock().begin();
+
+  auto relation =
+      npa::AffineRelationDomain::makeAffineAssignment(Y, 4, {{X, 1}});
+  auto mos = npa::AffineRelationDomain::toMOSWithMakeExplicit(relation);
+  auto roundTrip = npa::AffineRelationDomain::fromMOS(mos);
+
+  EXPECT_TRUE(mos.exact);
+  EXPECT_EQ(mos.kind, npa::MOSRelation::ConversionKind::MakeExplicit);
+  EXPECT_TRUE(npa::AffineRelationDomain::equal(relation, roundTrip));
+}
+
+TEST(AffineRelationDomain, MOSJoinUsesKSJoinSemantics) {
+  llvm::LLVMContext ctx;
+  auto module = parseModule(ctx, R"(
+    define void @f(i32 %x) {
+    entry:
+      %y = add i32 %x, 4
+      ret void
+    }
+  )");
+  ASSERT_NE(module, nullptr);
+
+  auto vocab = buildVocabulary(*module);
+  npa::AffineRelationDomain::configure(&vocab);
+
+  auto *F = module->getFunction("f");
+  ASSERT_NE(F, nullptr);
+  auto *X = &*F->arg_begin();
+  auto *Y = &*F->getEntryBlock().begin();
+
+  auto assign = npa::AffineRelationDomain::makeAffineAssignment(Y, 4, {{X, 1}});
+  auto id = npa::AffineRelationDomain::identity();
+  auto joined = npa::AffineRelationDomain::joinMOS(
+      npa::AffineRelationDomain::toMOS(assign),
+      npa::AffineRelationDomain::toMOS(id));
+
+  EXPECT_EQ(joined.kind, npa::MOSRelation::ConversionKind::Direct);
+  EXPECT_TRUE(npa::AffineRelationDomain::equal(
+      npa::AffineRelationDomain::fromMOS(joined),
+      npa::AffineRelationDomain::combine(assign, id)));
 }
 
 TEST(AffineRelationDomain, CondCombineRespectsBooleanGuard) {

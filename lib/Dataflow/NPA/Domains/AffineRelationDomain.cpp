@@ -322,6 +322,17 @@ bool AffineRelation::operator==(const AffineRelation &other) const {
   return bottom == other.bottom && components == other.components;
 }
 
+bool AffineGeneratorRelation::operator==(
+    const AffineGeneratorRelation &other) const {
+  return relation == other.relation && generators == other.generators &&
+         exact == other.exact;
+}
+
+bool MOSRelation::operator==(const MOSRelation &other) const {
+  return relation == other.relation && kind == other.kind &&
+         exact == other.exact;
+}
+
 void AffineRelationDomain::configure(const AffineRelationVocabulary *vocabulary) {
   if (vocabulary) {
     Vocabulary = *vocabulary;
@@ -368,6 +379,16 @@ AffineRelationDomain::value_type AffineRelationDomain::zero() {
   if (!HasVocabulary)
     return relation;
   relation.components.emplace(componentBitWidth(), bottomComponent(componentBitWidth()));
+  return relation;
+}
+
+AffineRelationDomain::value_type AffineRelationDomain::top() {
+  value_type relation;
+  if (!HasVocabulary)
+    return relation;
+  AffineRelationComponent component;
+  component.bitWidth = componentBitWidth();
+  relation.components.emplace(component.bitWidth, std::move(component));
   return relation;
 }
 
@@ -422,6 +443,24 @@ AffineRelationDomain::addPrecondition(const value_type &relation,
 
 bool AffineRelationDomain::equal(const value_type &lhs, const value_type &rhs) {
   return lhs == rhs;
+}
+
+bool AffineRelationDomain::isBottom(const value_type &relation) {
+  if (relation.bottom)
+    return true;
+  unsigned width = componentBitWidth();
+  auto componentIt = relation.components.find(width);
+  return componentIt != relation.components.end() &&
+         componentIsBottom(componentIt->second);
+}
+
+bool AffineRelationDomain::contains(const value_type &lhs,
+                                    const value_type &rhs) {
+  if (isBottom(rhs))
+    return true;
+  if (isBottom(lhs))
+    return isBottom(rhs);
+  return equal(meet(lhs, rhs), rhs);
 }
 
 AffineRelationDomain::value_type
@@ -713,6 +752,75 @@ AffineRelationDomain::makeAffineCongruenceAssignment(
   relation.components[bitWidth] =
       normalizeComponent(std::move(relation.components[bitWidth]));
   return relation;
+}
+
+AffineGeneratorRelation
+AffineRelationDomain::toAffineGenerator(const value_type &relation) {
+  AffineGeneratorRelation out;
+  out.relation = relation;
+  out.exact = true;
+  return out;
+}
+
+AffineRelationDomain::value_type
+AffineRelationDomain::fromAffineGenerator(
+    const AffineGeneratorRelation &relation) {
+  return relation.relation;
+}
+
+AffineGeneratorRelation AffineRelationDomain::joinAffineGenerators(
+    const AffineGeneratorRelation &lhs, const AffineGeneratorRelation &rhs) {
+  AffineGeneratorRelation out;
+  out.relation = combine(lhs.relation, rhs.relation);
+  out.generators = lhs.generators;
+  for (const auto &component : rhs.generators) {
+    auto &rows = out.generators[component.first];
+    rows.insert(rows.end(), component.second.begin(), component.second.end());
+  }
+  out.exact = lhs.exact && rhs.exact;
+  return out;
+}
+
+MOSRelation AffineRelationDomain::toMOS(const value_type &relation) {
+  MOSRelation out;
+  out.relation = relation;
+  out.kind = MOSRelation::ConversionKind::Direct;
+  out.exact = true;
+  return out;
+}
+
+MOSRelation
+AffineRelationDomain::toMOSWithHavocedPreStateGuards(
+    const value_type &relation) {
+  MOSRelation out;
+  out.relation = relation;
+  out.kind = MOSRelation::ConversionKind::HavocPreStateGuards;
+  out.exact = true;
+  return out;
+}
+
+MOSRelation
+AffineRelationDomain::toMOSWithMakeExplicit(const value_type &relation) {
+  MOSRelation out;
+  out.relation = relation;
+  out.kind = MOSRelation::ConversionKind::MakeExplicit;
+  out.exact = true;
+  return out;
+}
+
+AffineRelationDomain::value_type
+AffineRelationDomain::fromMOS(const MOSRelation &relation) {
+  return relation.relation;
+}
+
+MOSRelation AffineRelationDomain::joinMOS(const MOSRelation &lhs,
+                                          const MOSRelation &rhs) {
+  MOSRelation out;
+  out.relation = combine(lhs.relation, rhs.relation);
+  out.kind =
+      lhs.kind == rhs.kind ? lhs.kind : MOSRelation::ConversionKind::Direct;
+  out.exact = lhs.exact && rhs.exact;
+  return out;
 }
 
 } // namespace npa

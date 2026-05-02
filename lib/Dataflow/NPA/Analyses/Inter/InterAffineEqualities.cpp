@@ -385,7 +385,168 @@ Relation equalityConstraintForOperands(const llvm::Value *lhs,
   return D::identity();
 }
 
+std::optional<bool> evaluateConditionConstant(const llvm::Value *condition);
+
+std::optional<Relation>
+singletonComparisonRefinement(const llvm::ICmpInst &Cmp, bool expectedValue) {
+  auto width = integerBitWidth(Cmp.getOperand(0));
+  if (!width)
+    return std::nullopt;
+
+  auto refineEqual = [&](const llvm::Value *value, const llvm::APInt &constant) {
+    auto expr = affineExprForValue(value);
+    if (!expr)
+      return D::identity();
+    return equalityConstraintForExprs(
+        *expr, constExpr(constant.getSExtValue()), *width);
+  };
+
+  llvm::CmpInst::Predicate predicate = Cmp.getPredicate();
+  auto *RC = llvm::dyn_cast<llvm::ConstantInt>(Cmp.getOperand(1));
+  const llvm::Value *value = nullptr;
+  llvm::APInt constant(*width, 0);
+  if (RC) {
+    value = Cmp.getOperand(0);
+    constant = RC->getValue();
+  } else if (auto *LC = llvm::dyn_cast<llvm::ConstantInt>(Cmp.getOperand(0))) {
+    value = Cmp.getOperand(1);
+    constant = LC->getValue();
+    predicate = llvm::CmpInst::getSwappedPredicate(predicate);
+  } else {
+    return std::nullopt;
+  }
+
+  llvm::APInt one(*width, 1);
+  llvm::APInt unsignedMax = llvm::APInt::getAllOnesValue(*width);
+  llvm::APInt signedMin = llvm::APInt::getSignedMinValue(*width);
+  llvm::APInt signedMax = llvm::APInt::getSignedMaxValue(*width);
+
+  switch (predicate) {
+  case llvm::CmpInst::ICMP_ULT:
+    if (expectedValue && constant.isOne())
+      return refineEqual(value, llvm::APInt(*width, 0));
+    if (!expectedValue && constant == unsignedMax)
+      return refineEqual(value, unsignedMax);
+    break;
+  case llvm::CmpInst::ICMP_ULE:
+    if (expectedValue && constant.isZero())
+      return refineEqual(value, llvm::APInt(*width, 0));
+    if (!expectedValue && constant == unsignedMax)
+      return D::zero();
+    if (!expectedValue && constant == unsignedMax - one)
+      return refineEqual(value, unsignedMax);
+    break;
+  case llvm::CmpInst::ICMP_UGT:
+    if (expectedValue && constant == unsignedMax - one)
+      return refineEqual(value, unsignedMax);
+    if (!expectedValue && constant.isZero())
+      return refineEqual(value, llvm::APInt(*width, 0));
+    break;
+  case llvm::CmpInst::ICMP_UGE:
+    if (expectedValue && constant == unsignedMax)
+      return refineEqual(value, unsignedMax);
+    if (!expectedValue && constant.isZero())
+      return D::zero();
+    if (!expectedValue && constant.isOne())
+      return refineEqual(value, llvm::APInt(*width, 0));
+    break;
+  case llvm::CmpInst::ICMP_SLT:
+    if (expectedValue && constant == signedMin + one)
+      return refineEqual(value, signedMin);
+    if (!expectedValue && constant == signedMax)
+      return refineEqual(value, signedMax);
+    break;
+  case llvm::CmpInst::ICMP_SLE:
+    if (expectedValue && constant == signedMin)
+      return refineEqual(value, signedMin);
+    if (!expectedValue && constant == signedMax)
+      return D::zero();
+    if (!expectedValue && constant == signedMax - one)
+      return refineEqual(value, signedMax);
+    break;
+  case llvm::CmpInst::ICMP_SGT:
+    if (expectedValue && constant == signedMax - one)
+      return refineEqual(value, signedMax);
+    if (!expectedValue && constant == signedMin)
+      return refineEqual(value, signedMin);
+    break;
+  case llvm::CmpInst::ICMP_SGE:
+    if (expectedValue && constant == signedMax)
+      return refineEqual(value, signedMax);
+    if (!expectedValue && constant == signedMin)
+      return D::zero();
+    if (!expectedValue && constant == signedMin + one)
+      return refineEqual(value, signedMin);
+    break;
+  default:
+    break;
+  }
+  return std::nullopt;
+}
+
+std::optional<bool> evaluateExtremeComparison(const llvm::ICmpInst &Cmp) {
+  auto width = integerBitWidth(Cmp.getOperand(0));
+  if (!width)
+    return std::nullopt;
+
+  llvm::CmpInst::Predicate predicate = Cmp.getPredicate();
+  llvm::APInt constant(*width, 0);
+  if (auto *RC = llvm::dyn_cast<llvm::ConstantInt>(Cmp.getOperand(1))) {
+    constant = RC->getValue();
+  } else if (auto *LC = llvm::dyn_cast<llvm::ConstantInt>(Cmp.getOperand(0))) {
+    constant = LC->getValue();
+    predicate = llvm::CmpInst::getSwappedPredicate(predicate);
+  } else {
+    return std::nullopt;
+  }
+
+  llvm::APInt unsignedMax = llvm::APInt::getAllOnesValue(*width);
+  llvm::APInt signedMin = llvm::APInt::getSignedMinValue(*width);
+  llvm::APInt signedMax = llvm::APInt::getSignedMaxValue(*width);
+
+  switch (predicate) {
+  case llvm::CmpInst::ICMP_ULT:
+    if (constant.isZero())
+      return false;
+    break;
+  case llvm::CmpInst::ICMP_ULE:
+    if (constant == unsignedMax)
+      return true;
+    break;
+  case llvm::CmpInst::ICMP_UGT:
+    if (constant == unsignedMax)
+      return false;
+    break;
+  case llvm::CmpInst::ICMP_UGE:
+    if (constant.isZero())
+      return true;
+    break;
+  case llvm::CmpInst::ICMP_SLT:
+    if (constant == signedMin)
+      return false;
+    break;
+  case llvm::CmpInst::ICMP_SLE:
+    if (constant == signedMax)
+      return true;
+    break;
+  case llvm::CmpInst::ICMP_SGT:
+    if (constant == signedMax)
+      return false;
+    break;
+  case llvm::CmpInst::ICMP_SGE:
+    if (constant == signedMin)
+      return true;
+    break;
+  default:
+    break;
+  }
+  return std::nullopt;
+}
+
 Relation conditionRefinement(const llvm::Value *condition, bool expectedValue) {
+  if (auto constant = evaluateConditionConstant(condition))
+    return *constant == expectedValue ? D::identity() : D::zero();
+
   Relation relation = identityWithConditionValue(condition, expectedValue);
   auto *Cmp = llvm::dyn_cast<llvm::ICmpInst>(condition);
   if (!Cmp)
@@ -406,6 +567,8 @@ Relation conditionRefinement(const llvm::Value *condition, bool expectedValue) {
     }
     break;
   default:
+    if (auto singleton = singletonComparisonRefinement(*Cmp, expectedValue))
+      operandRefinement = *singleton;
     break;
   }
   return D::extend(operandRefinement, relation);
@@ -419,6 +582,9 @@ std::optional<bool> evaluateConditionConstant(const llvm::Value *condition) {
   auto *Cmp = llvm::dyn_cast<llvm::ICmpInst>(condition);
   if (!Cmp)
     return std::nullopt;
+
+  if (auto result = evaluateExtremeComparison(*Cmp))
+    return result;
 
   if (auto width = integerBitWidth(Cmp->getOperand(0))) {
     auto lhsExpr = affineExprForValue(Cmp->getOperand(0));
@@ -1041,6 +1207,8 @@ private:
       return buildCompareRelation(*Cmp);
     if (auto *Select = llvm::dyn_cast<llvm::SelectInst>(&I))
       return buildSelectRelation(*Select);
+    if (auto *Freeze = llvm::dyn_cast<llvm::FreezeInst>(&I))
+      return relationForValue(Freeze, Freeze->getOperand(0));
     if (auto *BinOp = llvm::dyn_cast<llvm::BinaryOperator>(&I))
       return buildBinaryRelation(*BinOp);
     return D::makeForget(&I);
@@ -1049,10 +1217,27 @@ private:
   Relation buildCastRelation(const llvm::CastInst &Cast) const {
     if (auto expr = affineExprForValue(&Cast))
       return assignmentForExpr(&Cast, *expr);
+    auto operandExpr = affineExprForValue(Cast.getOperand(0));
+    auto srcWidth = integerBitWidth(Cast.getOperand(0));
+    auto dstWidth = integerBitWidth(&Cast);
+    if (operandExpr && srcWidth && dstWidth) {
+      switch (Cast.getOpcode()) {
+      case llvm::Instruction::Trunc:
+        return congruenceAssignmentForExpr(&Cast, *dstWidth, *operandExpr);
+      case llvm::Instruction::ZExt:
+      case llvm::Instruction::SExt:
+        return congruenceAssignmentForExpr(&Cast, *srcWidth, *operandExpr);
+      default:
+        break;
+      }
+    }
     return D::makeForget(&Cast);
   }
 
   Relation buildCompareRelation(const llvm::ICmpInst &Cmp) const {
+    if (auto result = evaluateExtremeComparison(Cmp))
+      return D::makeAffineAssignment(&Cmp, *result ? 1 : 0, {});
+
     auto width = integerBitWidth(Cmp.getOperand(0));
     auto lhsExpr = affineExprForValue(Cmp.getOperand(0));
     auto rhsExpr = affineExprForValue(Cmp.getOperand(1));
@@ -1237,9 +1422,9 @@ private:
       if (opcode == llvm::Instruction::And) {
         if (!lowMiddleBitIsOne)
           return congruenceAssignmentForConstant(&BinOp, modulusBits, lowResult);
+        llvm::APInt lessLow = lowBitsValue(less.value, knownBits);
         AffineExpr expr = addConstant(
-            lessExpr, lowResult.getSExtValue() - lowBitsValue(less.value, knownBits).getSExtValue(),
-            width);
+            lessExpr, lowResult.getSExtValue() - lessLow.getSExtValue(), width);
         return congruenceAssignmentForExpr(&BinOp, modulusBits, expr);
       }
       if (opcode == llvm::Instruction::Or) {
@@ -1250,23 +1435,23 @@ private:
           llvm::APInt constant = lowResult | middleMask;
           return congruenceAssignmentForConstant(&BinOp, modulusBits, constant);
         }
+        llvm::APInt lessLow = lowBitsValue(less.value, knownBits);
         AffineExpr expr = addConstant(
-            lessExpr, lowResult.getSExtValue() - lowBitsValue(less.value, knownBits).getSExtValue(),
-            width);
+            lessExpr, lowResult.getSExtValue() - lessLow.getSExtValue(), width);
         return congruenceAssignmentForExpr(&BinOp, modulusBits, expr);
       }
       if (opcode == llvm::Instruction::Xor) {
         if (!lowMiddleBitIsOne) {
+          llvm::APInt lessLow = lowBitsValue(less.value, knownBits);
           AffineExpr expr = addConstant(
-              lessExpr,
-              lowResult.getSExtValue() - lowBitsValue(less.value, knownBits).getSExtValue(),
+              lessExpr, lowResult.getSExtValue() - lessLow.getSExtValue(),
               width);
           return congruenceAssignmentForExpr(&BinOp, modulusBits, expr);
         }
+        llvm::APInt lessLow = lowBitsValue(less.value, knownBits);
         AffineExpr expr = addConstant(
             scaleExpr(lessExpr, -1, width),
-            lowBitsValue(less.value, knownBits).getSExtValue() +
-                lowResult.getSExtValue() -
+            lessLow.getSExtValue() + lowResult.getSExtValue() -
                 llvm::APInt(width, 1).shl(knownBits).getSExtValue(),
             width);
         return congruenceAssignmentForExpr(&BinOp, modulusBits, expr);
@@ -1354,6 +1539,19 @@ private:
           return D::makeAffineAssignment(
               &BinOp, lhsValue.srem(rhsValue).getSExtValue(), {});
         break;
+      default:
+        break;
+      }
+    }
+    if (L == R) {
+      switch (BinOp.getOpcode()) {
+      case llvm::Instruction::And:
+      case llvm::Instruction::Or:
+        if (auto expr = affineExprForValue(L))
+          return assignmentForExpr(&BinOp, *expr);
+        return D::makeForget(&BinOp);
+      case llvm::Instruction::Xor:
+        return D::makeAffineAssignment(&BinOp, 0, {});
       default:
         break;
       }

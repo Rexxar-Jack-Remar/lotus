@@ -454,6 +454,34 @@ TEST(InterAffineEqualities, AssumeLikeCallRefinesComparedValue) {
   EXPECT_TRUE(stateHasEquality(states.front(), 7, {{X, 1}}));
 }
 
+TEST(InterAffineEqualities, AssumeLikeCallWithFalseConditionIsBottom) {
+  llvm::LLVMContext ctx;
+  auto module = parseModule(ctx, R"(
+    declare void @__VERIFIER_assume(i1)
+
+    define void @main() {
+    entry:
+      call void @__VERIFIER_assume(i1 false)
+      br label %next
+
+    next:
+      ret void
+    }
+  )");
+  ASSERT_NE(module, nullptr);
+
+  auto *Main = module->getFunction("main");
+  ASSERT_NE(Main, nullptr);
+  auto NextIt = std::next(Main->begin());
+  ASSERT_NE(NextIt, Main->end());
+  auto *Next = &*NextIt;
+
+  auto result = npa::InterAffineEqualities::run(*module);
+  auto relations = relationsForBlock(result.blockRelations, Next);
+  ASSERT_EQ(relations.size(), 1u);
+  EXPECT_TRUE(npa::AffineRelationDomain::isBottom(*relations.front()));
+}
+
 TEST(InterAffineEqualities, FalseInequalityBranchRefinesComparedVariablesEqual) {
   llvm::LLVMContext ctx;
   auto module = parseModule(ctx, R"(
@@ -690,6 +718,216 @@ TEST(InterAffineEqualities, SextOfBooleanArgumentUsesSignSemantics) {
   EXPECT_EQ(CoeffIt->second, -1);
 }
 
+TEST(InterAffineEqualities, TruncKeepsLowBitCongruence) {
+  llvm::LLVMContext ctx;
+  auto module = parseModule(ctx, R"(
+    define void @main(i32 %x) {
+    entry:
+      %narrow = trunc i32 %x to i8
+      br label %next
+
+    next:
+      ret void
+    }
+  )");
+  ASSERT_NE(module, nullptr);
+
+  auto *Main = module->getFunction("main");
+  ASSERT_NE(Main, nullptr);
+  auto *X = &*Main->arg_begin();
+  auto *Narrow = findInstructionByName(*Main, "narrow");
+  ASSERT_NE(Narrow, nullptr);
+  auto NextIt = std::next(Main->begin());
+  ASSERT_NE(NextIt, Main->end());
+  auto *Next = &*NextIt;
+
+  auto result = npa::InterAffineEqualities::run(*module);
+  auto states = materializedAffineStatesForBlock(result.blockRelations, Next);
+  ASSERT_EQ(states.size(), 1u);
+
+  const int64_t Mod256Scale = congruenceScale(8);
+  EXPECT_TRUE(stateHasEquality(states.front(), 0,
+                               {{Narrow, Mod256Scale}, {X, -Mod256Scale}}));
+}
+
+TEST(InterAffineEqualities, ZextKeepsSourceLowBitCongruence) {
+  llvm::LLVMContext ctx;
+  auto module = parseModule(ctx, R"(
+    define void @main(i8 %x) {
+    entry:
+      %wide = zext i8 %x to i32
+      br label %next
+
+    next:
+      ret void
+    }
+  )");
+  ASSERT_NE(module, nullptr);
+
+  auto *Main = module->getFunction("main");
+  ASSERT_NE(Main, nullptr);
+  auto *X = &*Main->arg_begin();
+  auto *Wide = findInstructionByName(*Main, "wide");
+  ASSERT_NE(Wide, nullptr);
+  auto NextIt = std::next(Main->begin());
+  ASSERT_NE(NextIt, Main->end());
+  auto *Next = &*NextIt;
+
+  auto result = npa::InterAffineEqualities::run(*module);
+  auto states = materializedAffineStatesForBlock(result.blockRelations, Next);
+  ASSERT_EQ(states.size(), 1u);
+
+  const int64_t Mod256Scale = congruenceScale(8);
+  EXPECT_TRUE(stateHasEquality(states.front(), 0,
+                               {{Wide, Mod256Scale}, {X, -Mod256Scale}}));
+}
+
+TEST(InterAffineEqualities, SingletonUnsignedComparisonRefinesToConstant) {
+  llvm::LLVMContext ctx;
+  auto module = parseModule(ctx, R"(
+    define void @main(i32 %x) {
+    entry:
+      %cmp = icmp ult i32 %x, 1
+      br i1 %cmp, label %zero, label %other
+
+    zero:
+      br label %exit
+
+    other:
+      br label %exit
+
+    exit:
+      ret void
+    }
+  )");
+  ASSERT_NE(module, nullptr);
+
+  auto *Main = module->getFunction("main");
+  ASSERT_NE(Main, nullptr);
+  auto *X = &*Main->arg_begin();
+  auto ZeroIt = std::next(Main->begin());
+  ASSERT_NE(ZeroIt, Main->end());
+  auto *Zero = &*ZeroIt;
+
+  auto result = npa::InterAffineEqualities::run(*module);
+  auto states = materializedAffineStatesForBlock(result.blockRelations, Zero);
+  ASSERT_EQ(states.size(), 1u);
+
+  EXPECT_TRUE(stateHasEquality(states.front(), 0, {{X, 1}}));
+}
+
+TEST(InterAffineEqualities, FalseUnsignedComparisonRefinesToZeroConstant) {
+  llvm::LLVMContext ctx;
+  auto module = parseModule(ctx, R"(
+    define void @main(i32 %x) {
+    entry:
+      %cmp = icmp ugt i32 %x, 0
+      br i1 %cmp, label %nonzero, label %zero
+
+    nonzero:
+      br label %exit
+
+    zero:
+      br label %exit
+
+    exit:
+      ret void
+    }
+  )");
+  ASSERT_NE(module, nullptr);
+
+  auto *Main = module->getFunction("main");
+  ASSERT_NE(Main, nullptr);
+  auto *X = &*Main->arg_begin();
+  auto ZeroIt = std::next(Main->begin(), 2);
+  ASSERT_NE(ZeroIt, Main->end());
+  auto *Zero = &*ZeroIt;
+
+  auto result = npa::InterAffineEqualities::run(*module);
+  auto states = materializedAffineStatesForBlock(result.blockRelations, Zero);
+  ASSERT_EQ(states.size(), 1u);
+
+  EXPECT_TRUE(stateHasEquality(states.front(), 0, {{X, 1}}));
+}
+
+TEST(InterAffineEqualities, ExtremeComparisonProducesConstantResult) {
+  llvm::LLVMContext ctx;
+  auto module = parseModule(ctx, R"(
+    define void @main(i32 %x) {
+    entry:
+      %always = icmp uge i32 %x, 0
+      %never = icmp ult i32 %x, 0
+      br label %next
+
+    next:
+      ret void
+    }
+  )");
+  ASSERT_NE(module, nullptr);
+
+  auto *Main = module->getFunction("main");
+  ASSERT_NE(Main, nullptr);
+  auto *Always = findInstructionByName(*Main, "always");
+  auto *Never = findInstructionByName(*Main, "never");
+  ASSERT_NE(Always, nullptr);
+  ASSERT_NE(Never, nullptr);
+  auto NextIt = std::next(Main->begin());
+  ASSERT_NE(NextIt, Main->end());
+  auto *Next = &*NextIt;
+
+  auto result = npa::InterAffineEqualities::run(*module);
+  auto states = materializedAffineStatesForBlock(result.blockRelations, Next);
+  ASSERT_EQ(states.size(), 1u);
+
+  auto AlwaysIt = states.front().values.find(Always);
+  ASSERT_NE(AlwaysIt, states.front().values.end());
+  EXPECT_FALSE(AlwaysIt->second.top);
+  EXPECT_TRUE(AlwaysIt->second.terms.empty());
+  EXPECT_EQ(AlwaysIt->second.constant, 1);
+
+  auto NeverIt = states.front().values.find(Never);
+  ASSERT_NE(NeverIt, states.front().values.end());
+  EXPECT_FALSE(NeverIt->second.top);
+  EXPECT_TRUE(NeverIt->second.terms.empty());
+  EXPECT_EQ(NeverIt->second.constant, 0);
+}
+
+TEST(InterAffineEqualities, FreezePreservesAffineValue) {
+  llvm::LLVMContext ctx;
+  auto module = parseModule(ctx, R"(
+    define void @main(i32 %x) {
+    entry:
+      %sum = add i32 %x, 5
+      %frozen = freeze i32 %sum
+      br label %next
+
+    next:
+      ret void
+    }
+  )");
+  ASSERT_NE(module, nullptr);
+
+  auto *Main = module->getFunction("main");
+  ASSERT_NE(Main, nullptr);
+  auto *X = &*Main->arg_begin();
+  auto *Frozen = findInstructionByName(*Main, "frozen");
+  ASSERT_NE(Frozen, nullptr);
+  auto NextIt = std::next(Main->begin());
+  ASSERT_NE(NextIt, Main->end());
+  auto *Next = &*NextIt;
+
+  auto result = npa::InterAffineEqualities::run(*module);
+  auto states = materializedAffineStatesForBlock(result.blockRelations, Next);
+  ASSERT_EQ(states.size(), 1u);
+
+  auto It = states.front().values.find(Frozen);
+  ASSERT_NE(It, states.front().values.end());
+  EXPECT_FALSE(It->second.top);
+  EXPECT_EQ(It->second.constant, 5);
+  ASSERT_EQ(It->second.terms.size(), 1u);
+  EXPECT_EQ(It->second.terms.at(X), 1);
+}
+
 TEST(InterAffineEqualities, ShiftAndNegationStayAffine) {
   llvm::LLVMContext ctx;
   auto module = parseModule(ctx, R"(
@@ -837,6 +1075,60 @@ TEST(InterAffineEqualities, BitwiseAndMaskKeepsLowBitCongruence) {
   const int64_t Mod16Scale = congruenceScale(4);
   EXPECT_TRUE(stateHasEquality(states.front(), 0,
                                {{Y, Mod16Scale}, {X, -Mod16Scale}}));
+}
+
+TEST(InterAffineEqualities, BitwiseSelfOperationsStayPrecise) {
+  llvm::LLVMContext ctx;
+  auto module = parseModule(ctx, R"(
+    define void @main(i32 %x) {
+    entry:
+      %anded = and i32 %x, %x
+      %ored = or i32 %x, %x
+      %xored = xor i32 %x, %x
+      br label %next
+
+    next:
+      ret void
+    }
+  )");
+  ASSERT_NE(module, nullptr);
+
+  auto *Main = module->getFunction("main");
+  ASSERT_NE(Main, nullptr);
+  auto *X = &*Main->arg_begin();
+  auto *Anded = findInstructionByName(*Main, "anded");
+  auto *Ored = findInstructionByName(*Main, "ored");
+  auto *Xored = findInstructionByName(*Main, "xored");
+  ASSERT_NE(Anded, nullptr);
+  ASSERT_NE(Ored, nullptr);
+  ASSERT_NE(Xored, nullptr);
+  auto NextIt = std::next(Main->begin());
+  ASSERT_NE(NextIt, Main->end());
+  auto *Next = &*NextIt;
+
+  auto result = npa::InterAffineEqualities::run(*module);
+  auto states = materializedAffineStatesForBlock(result.blockRelations, Next);
+  ASSERT_EQ(states.size(), 1u);
+
+  auto AndIt = states.front().values.find(Anded);
+  ASSERT_NE(AndIt, states.front().values.end());
+  EXPECT_FALSE(AndIt->second.top);
+  EXPECT_EQ(AndIt->second.constant, 0);
+  ASSERT_EQ(AndIt->second.terms.size(), 1u);
+  EXPECT_EQ(AndIt->second.terms.at(X), 1);
+
+  auto OrIt = states.front().values.find(Ored);
+  ASSERT_NE(OrIt, states.front().values.end());
+  EXPECT_FALSE(OrIt->second.top);
+  EXPECT_EQ(OrIt->second.constant, 0);
+  ASSERT_EQ(OrIt->second.terms.size(), 1u);
+  EXPECT_EQ(OrIt->second.terms.at(X), 1);
+
+  auto XorIt = states.front().values.find(Xored);
+  ASSERT_NE(XorIt, states.front().values.end());
+  EXPECT_FALSE(XorIt->second.top);
+  EXPECT_TRUE(XorIt->second.terms.empty());
+  EXPECT_EQ(XorIt->second.constant, 0);
 }
 
 TEST(InterAffineEqualities, BitwiseAndClearedMaskKeepsZeroCongruence) {
@@ -1034,4 +1326,40 @@ TEST(InterAffineEqualities, BitwiseAndUsesPartialConstantMiddleOnes) {
   const int64_t Mod16Scale = congruenceScale(4);
   EXPECT_TRUE(stateHasEquality(states.front(), 0,
                                {{Z, Mod16Scale}, {Y, -Mod16Scale}}));
+}
+
+TEST(InterAffineEqualities, BitwiseXorUsesPartialConstantMiddleOnesComplement) {
+  llvm::LLVMContext ctx;
+  auto module = parseModule(ctx, R"(
+    define void @main(i32 %x, i32 %y) {
+    entry:
+      %shifted = shl i32 %x, 4
+      %lhs = add i32 %shifted, 15
+      %z = xor i32 %lhs, %y
+      br label %next
+
+    next:
+      ret void
+    }
+  )");
+  ASSERT_NE(module, nullptr);
+
+  auto *Main = module->getFunction("main");
+  ASSERT_NE(Main, nullptr);
+  auto *ArgIt = Main->arg_begin();
+  ++ArgIt;
+  auto *Y = &*ArgIt;
+  auto *Z = findInstructionByName(*Main, "z");
+  ASSERT_NE(Z, nullptr);
+  auto NextIt = std::next(Main->begin());
+  ASSERT_NE(NextIt, Main->end());
+  auto *Next = &*NextIt;
+
+  auto result = npa::InterAffineEqualities::run(*module);
+  auto states = materializedAffineStatesForBlock(result.blockRelations, Next);
+  ASSERT_EQ(states.size(), 1u);
+
+  const int64_t Mod16Scale = congruenceScale(4);
+  EXPECT_TRUE(stateHasEquality(states.front(), -Mod16Scale,
+                               {{Z, Mod16Scale}, {Y, Mod16Scale}}));
 }

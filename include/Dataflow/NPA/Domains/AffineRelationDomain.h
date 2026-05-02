@@ -35,6 +35,28 @@ struct AffineRelation {
   bool operator==(const AffineRelation &other) const;
 };
 
+struct AffineGeneratorRelation {
+  AffineRelation relation;
+  std::map<unsigned, std::vector<std::vector<llvm::APInt>>> generators;
+  bool exact = true;
+
+  bool operator==(const AffineGeneratorRelation &other) const;
+};
+
+struct MOSRelation {
+  enum class ConversionKind {
+    Direct,
+    HavocPreStateGuards,
+    MakeExplicit
+  };
+
+  AffineRelation relation;
+  ConversionKind kind = ConversionKind::Direct;
+  bool exact = true;
+
+  bool operator==(const MOSRelation &other) const;
+};
+
 class AffineRelationDomain {
 public:
   using value_type = AffineRelation;
@@ -51,8 +73,11 @@ public:
   static unsigned indexOf(const llvm::Value *value);
 
   static value_type zero();
+  static value_type top();
   static value_type one();
   static bool equal(const value_type &lhs, const value_type &rhs);
+  static bool isBottom(const value_type &relation);
+  static bool contains(const value_type &lhs, const value_type &rhs);
   static value_type meet(const value_type &lhs, const value_type &rhs);
   static value_type combine(const value_type &lhs, const value_type &rhs);
   static value_type ndetCombine(const value_type &lhs, const value_type &rhs);
@@ -90,6 +115,18 @@ public:
   static value_type makeAffineCongruenceAssignment(
       const llvm::Value *dest, unsigned modulusBits, int64_t constant,
       const std::vector<std::pair<const llvm::Value *, int64_t>> &terms);
+
+  static AffineGeneratorRelation toAffineGenerator(const value_type &relation);
+  static value_type fromAffineGenerator(const AffineGeneratorRelation &relation);
+  static AffineGeneratorRelation
+  joinAffineGenerators(const AffineGeneratorRelation &lhs,
+                       const AffineGeneratorRelation &rhs);
+
+  static MOSRelation toMOS(const value_type &relation);
+  static MOSRelation toMOSWithHavocedPreStateGuards(const value_type &relation);
+  static MOSRelation toMOSWithMakeExplicit(const value_type &relation);
+  static value_type fromMOS(const MOSRelation &relation);
+  static MOSRelation joinMOS(const MOSRelation &lhs, const MOSRelation &rhs);
 
 private:
   static AffineRelationVocabulary Vocabulary;

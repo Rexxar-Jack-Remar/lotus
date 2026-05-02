@@ -12,7 +12,7 @@ This module implements algorithms from "Automatic Abstraction of Bit-Vector Form
 |--------|------------------------------------------|----------------------------------------|
 | **Input** | SMT bit-vector formulas (Z3 expressions) | LLVM IR (program code) |
 | **Output** | Abstract constraints (intervals, octagons, etc.) | Abstract domain values for LLVM values |
-| **Approximation** | Converts bit-vectors to **linear integer formulas** | Works directly with program semantics |
+| **Approximation** | Converts bit-vectors to **linear integer formulas** | Works directly with bit-vector semantics |
 | **Level** | Formula-level abstraction algorithms | Program-level abstract interpretation |
 | **Integration** | Standalone SMT formula processing | Integrated LLVM pass with fixpoint engine |
 | **Use Case** | Abstracting SMT formulas for constraint solving | Static analysis and optimization of programs |
