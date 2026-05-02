@@ -1,6 +1,7 @@
 #include "Dataflow/NPA/Domains/AffineRelationDomain.h"
 
 #include <algorithm>
+#include <unordered_set>
 
 #include <llvm/IR/Value.h>
 
@@ -247,6 +248,70 @@ AffineRelationComponent joinComponent(const AffineRelationComponent &lhs,
   return projectSuffix(tmp, 2 * vars + 1);
 }
 
+AffineRelationComponent meetComponent(const AffineRelationComponent &lhs,
+                                      const AffineRelationComponent &rhs) {
+  if (componentIsBottom(lhs) || componentIsBottom(rhs))
+    return bottomComponent(lhs.bitWidth);
+  AffineRelationComponent out;
+  out.bitWidth = lhs.bitWidth;
+  out.constraints = lhs.constraints;
+  out.constraints.insert(out.constraints.end(), rhs.constraints.begin(),
+                         rhs.constraints.end());
+  return normalizeComponent(std::move(out));
+}
+
+AffineRelationComponent projectAwayColumns(
+    const AffineRelationComponent &component,
+    const std::vector<unsigned> &dropCols, unsigned totalCols) {
+  if (componentIsBottom(component) || dropCols.empty())
+    return component;
+
+  std::vector<bool> drop(totalCols, false);
+  for (unsigned col : dropCols) {
+    if (col < totalCols)
+      drop[col] = true;
+  }
+
+  std::vector<unsigned> order;
+  order.reserve(totalCols);
+  for (unsigned col = 0; col < totalCols; ++col) {
+    if (drop[col])
+      order.push_back(col);
+  }
+  const unsigned dropCount = static_cast<unsigned>(order.size());
+  for (unsigned col = 0; col < totalCols; ++col) {
+    if (!drop[col])
+      order.push_back(col);
+  }
+
+  Matrix permuted;
+  permuted.reserve(component.constraints.size());
+  for (const Row &row : component.constraints) {
+    Row out = zeroRow(component.bitWidth, totalCols);
+    for (unsigned newCol = 0; newCol < totalCols; ++newCol)
+      out[newCol] = row[order[newCol]];
+    permuted.push_back(std::move(out));
+  }
+
+  Matrix rows = howellize(std::move(permuted), component.bitWidth);
+  Matrix projected;
+  for (const Row &row : rows) {
+    int lead = leadingIndex(row);
+    if (lead < 0 || static_cast<unsigned>(lead) < dropCount)
+      continue;
+
+    Row expanded = zeroRow(component.bitWidth, totalCols);
+    for (unsigned newCol = dropCount; newCol < totalCols; ++newCol)
+      expanded[order[newCol]] = row[newCol];
+    if (!isZeroRow(expanded))
+      projected.push_back(std::move(expanded));
+  }
+
+  AffineRelationComponent out = component;
+  out.constraints = howellize(std::move(projected), component.bitWidth);
+  return out;
+}
+
 } // namespace
 
 bool AffineRelationComponent::operator==(const AffineRelationComponent &other) const {
@@ -280,7 +345,17 @@ unsigned AffineRelationDomain::bitWidthOf(const llvm::Value *value) {
   return it == Vocabulary.actualBitWidths.end() ? 0u : it->second;
 }
 
-unsigned AffineRelationDomain::componentBitWidth() { return 64; }
+unsigned AffineRelationDomain::componentBitWidth() {
+  if (!HasVocabulary || Vocabulary.actualBitWidths.empty())
+    return 64;
+  auto it = Vocabulary.actualBitWidths.begin();
+  unsigned width = it->second;
+  for (++it; it != Vocabulary.actualBitWidths.end(); ++it) {
+    if (it->second != width)
+      return 64;
+  }
+  return std::max(1u, width);
+}
 
 unsigned AffineRelationDomain::indexOf(const llvm::Value *value) {
   auto it = Vocabulary.indices.find(value);
@@ -350,6 +425,17 @@ bool AffineRelationDomain::equal(const value_type &lhs, const value_type &rhs) {
 }
 
 AffineRelationDomain::value_type
+AffineRelationDomain::meet(const value_type &lhs, const value_type &rhs) {
+  if (lhs.bottom || rhs.bottom)
+    return zero();
+  value_type out;
+  unsigned width = componentBitWidth();
+  out.components.emplace(
+      width, meetComponent(lhs.components.at(width), rhs.components.at(width)));
+  return out;
+}
+
+AffineRelationDomain::value_type
 AffineRelationDomain::combine(const value_type &lhs, const value_type &rhs) {
   if (lhs.bottom)
     return rhs;
@@ -396,6 +482,23 @@ AffineRelationDomain::subtract(const value_type &lhs, const value_type & /*rhs*/
 }
 
 AffineRelationDomain::value_type
+AffineRelationDomain::project(const value_type &relation) {
+  const auto *vocab = getVocabulary();
+  if (!vocab || vocab->localValues.empty() || relation.bottom)
+    return relation;
+
+  std::unordered_set<const llvm::Value *> locals(vocab->localValues.begin(),
+                                                 vocab->localValues.end());
+  std::vector<const llvm::Value *> keepValues;
+  keepValues.reserve(vocab->values.size());
+  for (const llvm::Value *value : vocab->values) {
+    if (!locals.count(value))
+      keepValues.push_back(value);
+  }
+  return projectOnto(relation, keepValues);
+}
+
+AffineRelationDomain::value_type
 AffineRelationDomain::makeForget(const llvm::Value *dest) {
   value_type relation = identity();
   if (!isTrackedValue(dest))
@@ -413,6 +516,141 @@ AffineRelationDomain::makeForget(const llvm::Value *dest) {
   relation.components[bitWidth] =
       normalizeComponent(std::move(relation.components[bitWidth]));
   return relation;
+}
+
+AffineRelationDomain::value_type
+AffineRelationDomain::havoc(const value_type &relation,
+                            const llvm::Value *value) {
+  return havoc(relation, std::vector<const llvm::Value *>{value});
+}
+
+AffineRelationDomain::value_type
+AffineRelationDomain::havoc(
+    const value_type &relation, const std::vector<const llvm::Value *> &values) {
+  if (relation.bottom)
+    return relation;
+  unsigned bitWidth = componentBitWidth();
+  unsigned vars = numVarsFor(bitWidth);
+  std::vector<unsigned> dropCols;
+  dropCols.reserve(values.size() * 2);
+  for (const llvm::Value *value : values) {
+    if (!isTrackedValue(value))
+      continue;
+    unsigned idx = indexOf(value);
+    dropCols.push_back(idx);
+    dropCols.push_back(vars + idx);
+  }
+  if (dropCols.empty())
+    return relation;
+
+  value_type out = relation;
+  out.components[bitWidth] = projectAwayColumns(
+      out.components.at(bitWidth), dropCols, 2 * vars + 1);
+  out.components[bitWidth] = normalizeComponent(std::move(out.components[bitWidth]));
+  return out;
+}
+
+AffineRelationDomain::value_type AffineRelationDomain::projectOnto(
+    const value_type &relation,
+    const std::vector<const llvm::Value *> &keepValues) {
+  if (relation.bottom)
+    return relation;
+  unsigned bitWidth = componentBitWidth();
+  unsigned vars = numVarsFor(bitWidth);
+  std::vector<bool> keep(vars, false);
+  for (const llvm::Value *value : keepValues) {
+    if (isTrackedValue(value))
+      keep[indexOf(value)] = true;
+  }
+
+  std::vector<unsigned> dropCols;
+  for (unsigned idx = 0; idx < vars; ++idx) {
+    if (keep[idx])
+      continue;
+    dropCols.push_back(idx);
+    dropCols.push_back(vars + idx);
+  }
+  if (dropCols.empty())
+    return relation;
+
+  value_type out = relation;
+  out.components[bitWidth] = projectAwayColumns(
+      out.components.at(bitWidth), dropCols, 2 * vars + 1);
+  out.components[bitWidth] = normalizeComponent(std::move(out.components[bitWidth]));
+  return out;
+}
+
+AffineRelationDomain::value_type
+AffineRelationDomain::mergePreservingLocals(
+    const value_type &callSite, const value_type &calleeExit,
+    const std::vector<const llvm::Value *> &locals) {
+  if (callSite.bottom || calleeExit.bottom)
+    return zero();
+
+  unsigned bitWidth = componentBitWidth();
+  unsigned vars = numVarsFor(bitWidth);
+  std::vector<unsigned> postLocalCols;
+  postLocalCols.reserve(locals.size());
+  for (const llvm::Value *local : locals) {
+    if (isTrackedValue(local))
+      postLocalCols.push_back(vars + indexOf(local));
+  }
+
+  value_type adjusted = calleeExit;
+  if (!postLocalCols.empty()) {
+    adjusted.components[bitWidth] = projectAwayColumns(
+        adjusted.components.at(bitWidth), postLocalCols, 2 * vars + 1);
+  }
+
+  auto &component = adjusted.components[bitWidth];
+  for (const llvm::Value *local : locals) {
+    if (!isTrackedValue(local))
+      continue;
+    unsigned idx = indexOf(local);
+    Row row = zeroRow(bitWidth, 2 * vars + 1);
+    row[idx] = llvm::APInt(bitWidth, 1);
+    row[vars + idx] = llvm::APInt(bitWidth, -1, true);
+    component.constraints.push_back(std::move(row));
+  }
+  adjusted.components[bitWidth] =
+      normalizeComponent(std::move(adjusted.components[bitWidth]));
+  return extend(adjusted, callSite);
+}
+
+llvm::APInt AffineRelationDomain::size(const value_type &relation) {
+  unsigned bitWidth = componentBitWidth();
+  unsigned vars = numVarsFor(bitWidth);
+  unsigned valueVars = 2 * vars;
+  unsigned resultBits = std::max(1u, bitWidth * valueVars + 1);
+  if (relation.bottom)
+    return llvm::APInt(resultBits, 0);
+
+  auto componentIt = relation.components.find(bitWidth);
+  if (componentIt == relation.components.end())
+    return llvm::APInt(resultBits, 0);
+  if (componentIsBottom(componentIt->second))
+    return llvm::APInt(resultBits, 0);
+
+  Matrix rows = howellize(componentIt->second.constraints, bitWidth);
+  std::vector<bool> hasLead(valueVars, false);
+  unsigned exponent = 0;
+  for (const Row &row : rows) {
+    int lead = leadingIndex(row);
+    if (lead < 0)
+      continue;
+    if (static_cast<unsigned>(lead) >= valueVars)
+      continue;
+    hasLead[lead] = true;
+    exponent += rankOf(row[lead]);
+  }
+  for (unsigned col = 0; col < valueVars; ++col) {
+    if (!hasLead[col])
+      exponent += bitWidth;
+  }
+
+  llvm::APInt out(resultBits, 1);
+  out <<= exponent;
+  return out;
 }
 
 AffineRelationDomain::value_type
@@ -434,6 +672,43 @@ AffineRelationDomain::makeAffineAssignment(
     row[indexOf(term.first)] =
         llvm::APInt(bitWidth, static_cast<uint64_t>(-term.second), true);
   }
+  relation.components[bitWidth].constraints.push_back(std::move(row));
+  relation.components[bitWidth] =
+      normalizeComponent(std::move(relation.components[bitWidth]));
+  return relation;
+}
+
+AffineRelationDomain::value_type
+AffineRelationDomain::makeAffineCongruenceAssignment(
+    const llvm::Value *dest, unsigned modulusBits, int64_t constant,
+    const std::vector<std::pair<const llvm::Value *, int64_t>> &terms) {
+  if (!isTrackedValue(dest))
+    return identity();
+
+  unsigned bitWidth = componentBitWidth();
+  if (modulusBits >= bitWidth)
+    return makeAffineAssignment(dest, constant, terms);
+
+  value_type relation = makeForget(dest);
+  if (modulusBits == 0)
+    return relation;
+
+  unsigned vars = numVarsFor(bitWidth);
+  unsigned idx = indexOf(dest);
+  llvm::APInt scale(bitWidth, 1);
+  scale <<= (bitWidth - modulusBits);
+
+  Row row = zeroRow(bitWidth, 2 * vars + 1);
+  row[vars + idx] = scale;
+  row.back() =
+      llvm::APInt(bitWidth, static_cast<uint64_t>(-constant), true) * scale;
+  for (const auto &term : terms) {
+    if (!isTrackedValue(term.first))
+      return makeForget(dest);
+    row[indexOf(term.first)] +=
+        llvm::APInt(bitWidth, static_cast<uint64_t>(-term.second), true) * scale;
+  }
+
   relation.components[bitWidth].constraints.push_back(std::move(row));
   relation.components[bitWidth] =
       normalizeComponent(std::move(relation.components[bitWidth]));

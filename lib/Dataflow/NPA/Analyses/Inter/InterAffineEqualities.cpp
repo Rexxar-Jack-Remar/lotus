@@ -27,6 +27,11 @@ using Relation = D::value_type;
 using Component = AffineRelationComponent;
 using Row = std::vector<llvm::APInt>;
 
+struct PartialConstant {
+  unsigned bits = 0;
+  llvm::APInt value;
+};
+
 bool isTrackedScalar(const llvm::Value *V) {
   auto *Ty = V ? V->getType() : nullptr;
   return Ty && Ty->isIntegerTy() && Ty->getIntegerBitWidth() <= 64;
@@ -111,6 +116,8 @@ std::optional<AffineExpr>
 affineExprForValue(const llvm::Value *value,
                    std::unordered_set<const llvm::Value *> &visiting);
 
+PartialConstant partialConstantForExpr(const AffineExpr &expr, unsigned bitWidth);
+
 std::optional<AffineExpr> affineExprForBinary(const llvm::BinaryOperator &BinOp,
                                               std::unordered_set<const llvm::Value *>
                                                   &visiting) {
@@ -156,6 +163,29 @@ std::optional<AffineExpr> affineExprForBinary(const llvm::BinaryOperator &BinOp,
   }
 
   return std::nullopt;
+}
+
+std::optional<AffineExpr> exactQuotientByPowerOfTwo(const AffineExpr &expr,
+                                                    unsigned bitWidth,
+                                                    unsigned shift) {
+  if (expr.top || shift >= bitWidth)
+    return std::nullopt;
+
+  PartialConstant known = partialConstantForExpr(expr, bitWidth);
+  if (known.bits < shift)
+    return std::nullopt;
+
+  AffineExpr out;
+  out.top = false;
+  llvm::APInt divisor(bitWidth, 1);
+  divisor <<= shift;
+  llvm::APInt constant(bitWidth, static_cast<uint64_t>(expr.constant), true);
+  out.constant = constant.udiv(divisor).getSExtValue();
+  for (const auto &term : expr.terms) {
+    llvm::APInt coeff(bitWidth, static_cast<uint64_t>(term.second), true);
+    out.terms[term.first] = coeff.udiv(divisor).getSExtValue();
+  }
+  return normalizeExpr(std::move(out), bitWidth);
 }
 
 std::optional<AffineExpr> affineExprForCast(const llvm::CastInst &Cast,
@@ -260,6 +290,11 @@ affineExprForValue(const llvm::Value *value,
   visiting.erase(value);
   if (out)
     return out;
+  if (llvm::isa<llvm::CastInst>(value) ||
+      llvm::isa<llvm::BinaryOperator>(value) ||
+      llvm::isa<llvm::SelectInst>(value)) {
+    return std::nullopt;
+  }
   return variableExpr(value);
 }
 
@@ -300,6 +335,25 @@ evaluateAffineComparison(const AffineExpr &lhs, const AffineExpr &rhs,
   llvm::APInt lhsValue(bitWidth, static_cast<uint64_t>(lhs.constant), true);
   llvm::APInt rhsValue(bitWidth, static_cast<uint64_t>(rhs.constant), true);
   return llvm::ICmpInst::compare(lhsValue, rhsValue, predicate);
+}
+
+std::optional<bool> compareEquivalentAffineExprs(llvm::CmpInst::Predicate predicate) {
+  switch (predicate) {
+  case llvm::CmpInst::ICMP_EQ:
+  case llvm::CmpInst::ICMP_UGE:
+  case llvm::CmpInst::ICMP_ULE:
+  case llvm::CmpInst::ICMP_SGE:
+  case llvm::CmpInst::ICMP_SLE:
+    return true;
+  case llvm::CmpInst::ICMP_NE:
+  case llvm::CmpInst::ICMP_UGT:
+  case llvm::CmpInst::ICMP_ULT:
+  case llvm::CmpInst::ICMP_SGT:
+  case llvm::CmpInst::ICMP_SLT:
+    return false;
+  default:
+    return std::nullopt;
+  }
 }
 
 Relation identityWithConditionValue(const llvm::Value *condition, bool value) {
@@ -366,6 +420,19 @@ std::optional<bool> evaluateConditionConstant(const llvm::Value *condition) {
   if (!Cmp)
     return std::nullopt;
 
+  if (auto width = integerBitWidth(Cmp->getOperand(0))) {
+    auto lhsExpr = affineExprForValue(Cmp->getOperand(0));
+    auto rhsExpr = affineExprForValue(Cmp->getOperand(1));
+    if (lhsExpr && rhsExpr) {
+      if (isEquivalentAffineExpr(*lhsExpr, *rhsExpr, *width))
+        return compareEquivalentAffineExprs(Cmp->getPredicate());
+      if (auto result = evaluateAffineComparison(*lhsExpr, *rhsExpr,
+                                                 Cmp->getPredicate(), *width)) {
+        return result;
+      }
+    }
+  }
+
   int64_t lhs = 0, rhs = 0;
   if (!getConstantIntValue(Cmp->getOperand(0), lhs) ||
       !getConstantIntValue(Cmp->getOperand(1), rhs)) {
@@ -381,9 +448,122 @@ std::optional<bool> evaluateConditionConstant(const llvm::Value *condition) {
 
 std::optional<int64_t> evaluateSwitchConstant(const llvm::Value *condition) {
   int64_t constant = 0;
-  if (!getConstantIntValue(condition, constant))
+  if (getConstantIntValue(condition, constant))
+    return constant;
+
+  auto width = integerBitWidth(condition);
+  auto expr = affineExprForValue(condition);
+  if (!width || !expr || expr->top || !expr->terms.empty())
     return std::nullopt;
-  return constant;
+  return wrapToBitWidth(expr->constant, *width);
+}
+
+unsigned countTrailingOnes(const llvm::APInt &value) {
+  unsigned count = 0;
+  for (; count < value.getBitWidth() && value[count]; ++count) {
+  }
+  return count;
+}
+
+std::optional<unsigned> exactPowerOfTwoLog(const llvm::APInt &value) {
+  if (value.isZero() || !value.isPowerOf2())
+    return std::nullopt;
+  return value.exactLogBase2();
+}
+
+PartialConstant partialConstantForExpr(const AffineExpr &expr,
+                                       unsigned bitWidth) {
+  PartialConstant out{bitWidth, llvm::APInt(bitWidth, expr.constant, true)};
+  if (expr.top) {
+    out.bits = 0;
+    return out;
+  }
+
+  for (const auto &term : expr.terms) {
+    llvm::APInt coeff(bitWidth, static_cast<uint64_t>(term.second), true);
+    out.bits = std::min(out.bits, coeff.countTrailingZeros());
+  }
+  if (out.bits < bitWidth) {
+    if (out.bits == 0)
+      out.value = llvm::APInt(bitWidth, 0);
+    else {
+      llvm::APInt mask = llvm::APInt::getLowBitsSet(bitWidth, out.bits);
+      out.value &= mask;
+    }
+  }
+  return out;
+}
+
+Relation congruenceAssignmentForConstant(const llvm::Value *dest,
+                                         unsigned modulusBits,
+                                         const llvm::APInt &constant) {
+  return D::makeAffineCongruenceAssignment(dest, modulusBits,
+                                           constant.getSExtValue(), {});
+}
+
+llvm::APInt lowBitsValue(const llvm::APInt &value, unsigned bits) {
+  if (bits == 0)
+    return llvm::APInt(value.getBitWidth(), 0);
+  return value & llvm::APInt::getLowBitsSet(value.getBitWidth(), bits);
+}
+
+AffineExpr addConstant(AffineExpr expr, int64_t constant, unsigned bitWidth) {
+  return addExpr(std::move(expr), constExpr(constant), bitWidth);
+}
+
+std::vector<std::pair<const llvm::Value *, int64_t>>
+termsForExpr(const AffineExpr &expr) {
+  std::vector<std::pair<const llvm::Value *, int64_t>> terms;
+  terms.reserve(expr.terms.size());
+  for (const auto &term : expr.terms)
+    terms.emplace_back(term.first, term.second);
+  return terms;
+}
+
+Relation assignmentForExpr(const llvm::Value *dest, const AffineExpr &expr) {
+  return D::makeAffineAssignment(
+      dest, wrapToBitWidth(expr.constant, D::bitWidthOf(dest)),
+      termsForExpr(expr));
+}
+
+Relation congruenceAssignmentForExpr(const llvm::Value *dest,
+                                     unsigned modulusBits,
+                                     const AffineExpr &expr) {
+  return D::makeAffineCongruenceAssignment(
+      dest, modulusBits, wrapToBitWidth(expr.constant, D::bitWidthOf(dest)),
+      termsForExpr(expr));
+}
+
+unsigned twoAdicRank(const llvm::APInt &value) {
+  return value.isZero() ? value.getBitWidth() : value.countTrailingZeros();
+}
+
+bool isAssumeLikeCall(const llvm::CallBase &call) {
+  auto *callee = call.getCalledFunction();
+  if (!callee)
+    return false;
+  if (callee->getName() == "llvm.assume")
+    return true;
+  return callee->getName() == "__VERIFIER_assume" ||
+         callee->getName() == "__SEA_assume" ||
+         callee->getName() == "assume";
+}
+
+Relation switchCaseRefinement(const llvm::Value *condition, int64_t caseValue) {
+  Relation relation = D::isTrackedValue(condition)
+                          ? D::addPrecondition(D::identity(), condition, caseValue)
+                          : D::identity();
+
+  auto width = integerBitWidth(condition);
+  auto expr = affineExprForValue(condition);
+  if (!width || !expr)
+    return relation;
+
+  Relation operandRefinement =
+      equalityConstraintForExprs(*expr,
+                                 constExpr(wrapToBitWidth(caseValue, *width)),
+                                 *width);
+  return D::extend(operandRefinement, relation);
 }
 
 bool isZeroRow(const Row &row) {
@@ -696,8 +876,8 @@ public:
         return D::identity();
       for (const auto &Case : Switch->cases()) {
         if (Case.getCaseSuccessor() == &succ) {
-          return D::addPrecondition(
-              D::identity(), Switch->getCondition(),
+          return switchCaseRefinement(
+              Switch->getCondition(),
               static_cast<int64_t>(Case.getCaseValue()->getSExtValue()));
         }
       }
@@ -735,8 +915,15 @@ public:
   }
 
   E getTransfer(llvm::Instruction &I, E currentPath) {
-    if (llvm::isa<llvm::PHINode>(&I) || llvm::isa<llvm::CallBase>(&I) ||
-        I.getType()->isVoidTy())
+    if (llvm::isa<llvm::PHINode>(&I))
+      return currentPath;
+    if (auto *Call = llvm::dyn_cast<llvm::CallBase>(&I)) {
+      if (isAssumeLikeCall(*Call) && Call->arg_size() >= 1)
+        return Exp::seq(conditionRefinement(Call->getArgOperand(0), true),
+                        currentPath);
+      return currentPath;
+    }
+    if (I.getType()->isVoidTy())
       return currentPath;
     if (!isTrackedScalar(&I))
       return currentPath;
@@ -826,8 +1013,10 @@ private:
       }
       for (const auto &BB : F) {
         for (const auto &I : BB) {
-          if (isTrackedScalar(&I))
+          if (isTrackedScalar(&I)) {
             record(&I);
+            Vocabulary.localValues.push_back(&I);
+          }
         }
       }
     }
@@ -840,13 +1029,8 @@ private:
 
   Relation relationForValue(const llvm::Value *dest,
                             const llvm::Value *src) const {
-    if (auto expr = affineExprForValue(src)) {
-      std::vector<std::pair<const llvm::Value *, int64_t>> terms;
-      for (const auto &term : expr->terms)
-        terms.emplace_back(term.first, term.second);
-      return D::makeAffineAssignment(
-          dest, wrapToBitWidth(expr->constant, D::bitWidthOf(dest)), terms);
-    }
+    if (auto expr = affineExprForValue(src))
+      return assignmentForExpr(dest, *expr);
     return D::makeForget(dest);
   }
 
@@ -863,13 +1047,8 @@ private:
   }
 
   Relation buildCastRelation(const llvm::CastInst &Cast) const {
-    if (auto expr = affineExprForValue(&Cast)) {
-      std::vector<std::pair<const llvm::Value *, int64_t>> terms;
-      for (const auto &term : expr->terms)
-        terms.emplace_back(term.first, term.second);
-      return D::makeAffineAssignment(
-          &Cast, wrapToBitWidth(expr->constant, D::bitWidthOf(&Cast)), terms);
-    }
+    if (auto expr = affineExprForValue(&Cast))
+      return assignmentForExpr(&Cast, *expr);
     return D::makeForget(&Cast);
   }
 
@@ -878,6 +1057,10 @@ private:
     auto lhsExpr = affineExprForValue(Cmp.getOperand(0));
     auto rhsExpr = affineExprForValue(Cmp.getOperand(1));
     if (width && lhsExpr && rhsExpr) {
+      if (isEquivalentAffineExpr(*lhsExpr, *rhsExpr, *width)) {
+        if (auto result = compareEquivalentAffineExprs(Cmp.getPredicate()))
+          return D::makeAffineAssignment(&Cmp, *result ? 1 : 0, {});
+      }
       if (auto result =
               evaluateAffineComparison(*lhsExpr, *rhsExpr, Cmp.getPredicate(),
                                        *width)) {
@@ -931,19 +1114,292 @@ private:
     return D::combine(lhs, rhs);
   }
 
-  Relation buildBinaryRelation(const llvm::BinaryOperator &BinOp) const {
-    if (auto expr = affineExprForValue(&BinOp)) {
-      std::vector<std::pair<const llvm::Value *, int64_t>> terms;
-      for (const auto &term : expr->terms)
-        terms.emplace_back(term.first, term.second);
-      return D::makeAffineAssignment(
-          &BinOp, wrapToBitWidth(expr->constant, D::bitWidthOf(&BinOp)), terms);
+  Relation buildBitwiseMaskRelation(const llvm::BinaryOperator &BinOp) const {
+    auto *L = BinOp.getOperand(0);
+    auto *R = BinOp.getOperand(1);
+    auto *LC = llvm::dyn_cast<llvm::ConstantInt>(L);
+    auto *RC = llvm::dyn_cast<llvm::ConstantInt>(R);
+    if (!LC && !RC)
+      return D::makeForget(&BinOp);
+
+    const llvm::Value *value = LC ? R : L;
+    const llvm::APInt mask = LC ? LC->getValue() : RC->getValue();
+    auto expr = affineExprForValue(value);
+    if (!expr)
+      return D::makeForget(&BinOp);
+
+    unsigned width = BinOp.getType()->getIntegerBitWidth();
+    switch (BinOp.getOpcode()) {
+    case llvm::Instruction::And: {
+      unsigned trailingOnes = countTrailingOnes(mask);
+      if (trailingOnes == width)
+        return assignmentForExpr(&BinOp, *expr);
+      unsigned trailingZeros = mask.countTrailingZeros();
+      if (trailingZeros >= width)
+        return D::makeAffineAssignment(&BinOp, 0, {});
+      if (trailingOnes > 0)
+        return congruenceAssignmentForExpr(&BinOp, trailingOnes, *expr);
+      if (trailingZeros > 0)
+        return D::makeAffineCongruenceAssignment(&BinOp, trailingZeros, 0, {});
+      break;
     }
+    case llvm::Instruction::Or: {
+      unsigned trailingOnes = countTrailingOnes(mask);
+      if (trailingOnes >= width)
+        return D::makeAffineAssignment(&BinOp, -1, {});
+      unsigned trailingZeros = mask.countTrailingZeros();
+      if (trailingZeros >= width)
+        return assignmentForExpr(&BinOp, *expr);
+      if (trailingOnes > 0) {
+        llvm::APInt lowOnes(width, 0);
+        lowOnes.setLowBits(trailingOnes);
+        return D::makeAffineCongruenceAssignment(
+            &BinOp, trailingOnes, lowOnes.getSExtValue(), {});
+      }
+      if (trailingZeros > 0)
+        return congruenceAssignmentForExpr(&BinOp, trailingZeros, *expr);
+      break;
+    }
+    case llvm::Instruction::Xor: {
+      unsigned trailingZeros = mask.countTrailingZeros();
+      if (trailingZeros >= width)
+        return assignmentForExpr(&BinOp, *expr);
+      unsigned trailingOnes = countTrailingOnes(mask);
+      if (trailingOnes >= width)
+        return assignmentForExpr(&BinOp,
+                                 scaleExpr(addExpr(*expr, constExpr(1), width),
+                                           -1, width));
+      if (trailingZeros > 0)
+        return congruenceAssignmentForExpr(&BinOp, trailingZeros, *expr);
+      if (trailingOnes > 0) {
+        AffineExpr lowComplement =
+            scaleExpr(addExpr(*expr, constExpr(1), width), -1, width);
+        return congruenceAssignmentForExpr(&BinOp, trailingOnes, lowComplement);
+      }
+      break;
+    }
+    default:
+      break;
+    }
+    return buildBitwisePartialRelation(BinOp);
+  }
+
+  Relation buildBitwisePartialRelation(const llvm::BinaryOperator &BinOp) const {
+    auto lhsExpr = affineExprForValue(BinOp.getOperand(0));
+    auto rhsExpr = affineExprForValue(BinOp.getOperand(1));
+    if (!lhsExpr || !rhsExpr)
+      return D::makeForget(&BinOp);
+
+    unsigned width = BinOp.getType()->getIntegerBitWidth();
+    PartialConstant lhs = partialConstantForExpr(*lhsExpr, width);
+    PartialConstant rhs = partialConstantForExpr(*rhsExpr, width);
+    unsigned knownBits = std::min(lhs.bits, rhs.bits);
+    llvm::APInt knownValue(width, 0);
+    switch (BinOp.getOpcode()) {
+    case llvm::Instruction::And:
+      knownValue = lhs.value & rhs.value;
+      break;
+    case llvm::Instruction::Or:
+      knownValue = lhs.value | rhs.value;
+      break;
+    case llvm::Instruction::Xor:
+      knownValue = lhs.value ^ rhs.value;
+      break;
+    default:
+      return D::makeForget(&BinOp);
+    }
+
+    if (knownBits >= width) {
+      return D::makeAffineAssignment(&BinOp, knownValue.getSExtValue(), {});
+    }
+
+    auto tryUseExtraKnownBits =
+        [&](const PartialConstant &more, const PartialConstant &less,
+            const AffineExpr &lessExpr,
+            llvm::Instruction::BinaryOps opcode) -> std::optional<Relation> {
+      if (more.bits <= knownBits)
+        return std::nullopt;
+
+      unsigned extraBits = more.bits - knownBits;
+      llvm::APInt middle =
+          more.value.lshr(knownBits) &
+          llvm::APInt::getLowBitsSet(width, extraBits);
+      bool lowMiddleBitIsOne = middle[0];
+      unsigned runBits =
+          lowMiddleBitIsOne ? countTrailingOnes(middle)
+                            : middle.countTrailingZeros();
+      runBits = std::min(runBits, extraBits);
+      if (runBits == 0)
+        return std::nullopt;
+
+      unsigned modulusBits = knownBits + runBits;
+      llvm::APInt lowResult = lowBitsValue(knownValue, knownBits);
+      if (opcode == llvm::Instruction::And) {
+        if (!lowMiddleBitIsOne)
+          return congruenceAssignmentForConstant(&BinOp, modulusBits, lowResult);
+        AffineExpr expr = addConstant(
+            lessExpr, lowResult.getSExtValue() - lowBitsValue(less.value, knownBits).getSExtValue(),
+            width);
+        return congruenceAssignmentForExpr(&BinOp, modulusBits, expr);
+      }
+      if (opcode == llvm::Instruction::Or) {
+        llvm::APInt middleMask =
+            llvm::APInt::getLowBitsSet(width, modulusBits) ^
+            llvm::APInt::getLowBitsSet(width, knownBits);
+        if (lowMiddleBitIsOne) {
+          llvm::APInt constant = lowResult | middleMask;
+          return congruenceAssignmentForConstant(&BinOp, modulusBits, constant);
+        }
+        AffineExpr expr = addConstant(
+            lessExpr, lowResult.getSExtValue() - lowBitsValue(less.value, knownBits).getSExtValue(),
+            width);
+        return congruenceAssignmentForExpr(&BinOp, modulusBits, expr);
+      }
+      if (opcode == llvm::Instruction::Xor) {
+        if (!lowMiddleBitIsOne) {
+          AffineExpr expr = addConstant(
+              lessExpr,
+              lowResult.getSExtValue() - lowBitsValue(less.value, knownBits).getSExtValue(),
+              width);
+          return congruenceAssignmentForExpr(&BinOp, modulusBits, expr);
+        }
+        AffineExpr expr = addConstant(
+            scaleExpr(lessExpr, -1, width),
+            lowBitsValue(less.value, knownBits).getSExtValue() +
+                lowResult.getSExtValue() -
+                llvm::APInt(width, 1).shl(knownBits).getSExtValue(),
+            width);
+        return congruenceAssignmentForExpr(&BinOp, modulusBits, expr);
+      }
+      return std::nullopt;
+    };
+
+    auto opcode = static_cast<llvm::Instruction::BinaryOps>(BinOp.getOpcode());
+    if (auto relation = tryUseExtraKnownBits(lhs, rhs, *rhsExpr, opcode))
+      return *relation;
+    if (auto relation = tryUseExtraKnownBits(rhs, lhs, *lhsExpr, opcode))
+      return *relation;
+
+    if (knownBits == 0)
+      return D::makeForget(&BinOp);
+    return congruenceAssignmentForConstant(&BinOp, knownBits, knownValue);
+  }
+
+  Relation buildRemainderRelation(const llvm::BinaryOperator &BinOp) const {
+    auto *Divisor = llvm::dyn_cast<llvm::ConstantInt>(BinOp.getOperand(1));
+    auto expr = affineExprForValue(BinOp.getOperand(0));
+    if (!Divisor || !expr)
+      return D::makeForget(&BinOp);
+
+    llvm::APInt divisor = Divisor->getValue();
+    if (divisor.isZero())
+      return D::makeForget(&BinOp);
+    if (BinOp.getOpcode() == llvm::Instruction::SRem && divisor.isNegative())
+      divisor = -divisor;
+
+    unsigned rank = twoAdicRank(divisor);
+    if (rank == 0)
+      return D::makeForget(&BinOp);
+    if (rank >= divisor.getBitWidth())
+      return D::makeAffineAssignment(&BinOp, 0, {});
+    return congruenceAssignmentForExpr(&BinOp, rank, *expr);
+  }
+
+  Relation buildBinaryRelation(const llvm::BinaryOperator &BinOp) const {
+    if (auto expr = affineExprForValue(&BinOp))
+      return assignmentForExpr(&BinOp, *expr);
 
     auto *L = BinOp.getOperand(0);
     auto *R = BinOp.getOperand(1);
     const unsigned width = D::bitWidthOf(&BinOp);
     int64_t lhsConst = 0, rhsConst = 0;
+    auto *LC = llvm::dyn_cast<llvm::ConstantInt>(L);
+    auto *RC = llvm::dyn_cast<llvm::ConstantInt>(R);
+    if (LC && RC) {
+      llvm::APInt lhsValue = LC->getValue();
+      llvm::APInt rhsValue = RC->getValue();
+      switch (BinOp.getOpcode()) {
+      case llvm::Instruction::And:
+        return D::makeAffineAssignment(&BinOp, (lhsValue & rhsValue).getSExtValue(),
+                                       {});
+      case llvm::Instruction::Or:
+        return D::makeAffineAssignment(&BinOp, (lhsValue | rhsValue).getSExtValue(),
+                                       {});
+      case llvm::Instruction::Xor:
+        return D::makeAffineAssignment(
+            &BinOp, (lhsValue ^ rhsValue).getSExtValue(), {});
+      case llvm::Instruction::LShr:
+        return D::makeAffineAssignment(
+            &BinOp, lhsValue.lshr(rhsValue.getLimitedValue()).getSExtValue(), {});
+      case llvm::Instruction::AShr:
+        return D::makeAffineAssignment(
+            &BinOp, lhsValue.ashr(rhsValue.getLimitedValue()).getSExtValue(), {});
+      case llvm::Instruction::UDiv:
+        if (!rhsValue.isZero())
+          return D::makeAffineAssignment(
+              &BinOp, lhsValue.udiv(rhsValue).getSExtValue(), {});
+        break;
+      case llvm::Instruction::SDiv:
+        if (!rhsValue.isZero())
+          return D::makeAffineAssignment(
+              &BinOp, lhsValue.sdiv(rhsValue).getSExtValue(), {});
+        break;
+      case llvm::Instruction::URem:
+        if (!rhsValue.isZero())
+          return D::makeAffineAssignment(
+              &BinOp, lhsValue.urem(rhsValue).getSExtValue(), {});
+        break;
+      case llvm::Instruction::SRem:
+        if (!rhsValue.isZero())
+          return D::makeAffineAssignment(
+              &BinOp, lhsValue.srem(rhsValue).getSExtValue(), {});
+        break;
+      default:
+        break;
+      }
+    }
+    switch (BinOp.getOpcode()) {
+    case llvm::Instruction::And:
+    case llvm::Instruction::Or:
+    case llvm::Instruction::Xor:
+      if (LC || RC) {
+        Relation partial = buildBitwisePartialRelation(BinOp);
+        if (!D::equal(partial, D::makeForget(&BinOp)))
+          return partial;
+        return buildBitwiseMaskRelation(BinOp);
+      }
+      return buildBitwisePartialRelation(BinOp);
+    case llvm::Instruction::LShr:
+      if (auto *Shift = llvm::dyn_cast<llvm::ConstantInt>(R)) {
+        auto lhsExpr = affineExprForValue(L);
+        if (!lhsExpr || Shift->getValue().uge(width))
+          return D::makeForget(&BinOp);
+        if (auto quotient = exactQuotientByPowerOfTwo(
+                *lhsExpr, width, Shift->getZExtValue())) {
+          return assignmentForExpr(&BinOp, *quotient);
+        }
+      }
+      return D::makeForget(&BinOp);
+    case llvm::Instruction::UDiv:
+      if (auto *Divisor = llvm::dyn_cast<llvm::ConstantInt>(R)) {
+        auto lhsExpr = affineExprForValue(L);
+        if (!lhsExpr || Divisor->isZero())
+          return D::makeForget(&BinOp);
+        if (auto log = exactPowerOfTwoLog(Divisor->getValue())) {
+          if (auto quotient =
+                  exactQuotientByPowerOfTwo(*lhsExpr, width, *log)) {
+            return assignmentForExpr(&BinOp, *quotient);
+          }
+        }
+      }
+      return D::makeForget(&BinOp);
+    case llvm::Instruction::URem:
+    case llvm::Instruction::SRem:
+      return buildRemainderRelation(BinOp);
+    default:
+      break;
+    }
+
     switch (BinOp.getOpcode()) {
     case llvm::Instruction::Add:
       if (getConstantIntValue(L, lhsConst) && getConstantIntValue(R, rhsConst))
