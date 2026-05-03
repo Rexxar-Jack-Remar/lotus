@@ -12,6 +12,45 @@
  * MemObject → ObjectLocator (field at offset) → LocValue (stored values)
  */
 
+/// @file MemObject.h
+/// @brief Memory object and field-level locator abstractions
+///
+/// ## MemObject
+///
+/// Represents an abstract memory space — a stack allocation, a heap object,
+/// a global variable, or a symbolic input from outside the function.
+/// Each `MemObject` owns a map of `ObjectLocator` instances, one per field
+/// offset, achieving **field-sensitive** tracking.
+///
+/// ### Object kinds
+///   - **CONCRETE** — allocation site is known (alloca, malloc wrapper, global)
+///   - **SYMBOLIC** (`SymbolicMemObject`) — value comes from outside the
+///     function (argument, pseudo-argument); may create synthetic
+///     `Argument` values for field accesses beyond what is locally defined
+///
+/// ### Special singletons
+///   - `MemObject::NullObj` — null-pointer target
+///   - `MemObject::UnknownObj` — conservative top element (any location)
+///
+/// ## ObjectLocator
+///
+/// A `(MemObject, offset)` pair representing a specific field within an
+/// object.  Values stored at this location are organised in **SSA form**:
+/// `LocValue` instances are grouped by defining basic block, with φ-placement
+/// in dominance frontiers to correctly merge values from different paths.
+///
+/// ### Strong vs. Weak updates
+///   - **Strong update** (`cond` is always satisfied): overwrites the previous
+///     value; the dominator walk stops at the first strong update reached.
+///   - **Weak update** (`cond` may not hold): merged with previous values;
+///     the anti-condition (`!cond`) is accumulated so earlier definitions
+///     are considered only when the weak update did not fire.
+///
+/// ### Value retrieval (`getValues`)
+/// Walks the dominator tree upward from the query instruction, collecting all
+/// reaching `LocValue` instances, stopping at strong updates and continuing
+/// through weak updates with anti-condition accumulation.
+
 #pragma once
 
 #include <list>
@@ -46,6 +85,8 @@ void lotus_clear_hash(T *to_clear) {
 }
 
 // Memory value item with path conditions and confidence.
+/// Memory value item — a value that was stored at a location, guarded by a
+/// path condition and carrying a confidence score.
 struct mem_value_item_t {
   path_cond_t cond;
   Instruction *pos;  // Where value was assigned (nullptr = from caller)
@@ -73,6 +114,9 @@ using mem_value_t = std::vector<mem_value_item_t>;
  * Represents heap objects, stack variables, or globals.
  * Manages memory locations at different offsets.
  */
+/// Abstract memory space — represents stack objects, heap objects, or global
+/// variables.  Manages memory locations at different field offsets via
+/// `ObjectLocator` instances.
 class MemObject {
 public:
   static MemObject *NullObj;
@@ -138,6 +182,8 @@ public:
 /*
  * LocValue - Value at a memory location with path conditions.
  */
+/// A value at a specific memory location, guarded by a path condition.
+/// Carries strong/weak update semantics for flow-sensitive analysis.
 class LocValue {
 public:
   enum UpdateType { STRONG, WEAK };
@@ -188,6 +234,9 @@ struct mem_obj_cmp {
  * ObjectLocator - Memory location (object + offset)
  * Organizes values in SSA form
  */
+/// A `(MemObject, offset)` pair representing a specific field within an
+/// object.  Organises stored values in SSA form grouped by defining basic
+/// block.
 class ObjectLocator {
 private:
   MemObject *object;
@@ -265,6 +314,9 @@ struct obj_loc_cmp {
 /*
  * SymbolicMemObject - Represents function input memory
  */
+/// Symbolic memory object — represents memory from outside function scope
+/// (e.g., function arguments).  May create pseudo-arguments for inaccessible
+/// field accesses, enabling inter-procedural side-effect tracking.
 class SymbolicMemObject : public MemObject {
 private:
   std::map<ObjectLocator *, Argument *, obj_loc_cmp> pseudo_args;

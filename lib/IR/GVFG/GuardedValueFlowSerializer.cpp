@@ -1,3 +1,6 @@
+/// @file GuardedValueFlowSerializer.cpp
+/// @brief Text and Graphviz DOT serialization of the GuardedValueFlowGraph
+
 #include "IR/GVFG/GuardedValueFlowSerializer.h"
 
 #include "IR/GVFG/GuardedValueFlowGraph.h"

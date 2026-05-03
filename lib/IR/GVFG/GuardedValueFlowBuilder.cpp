@@ -1,3 +1,53 @@
+/// @file GuardedValueFlowBuilder.cpp
+/// @brief Structural graph builder — constructs one GVFG per function from
+///        LLVM IR
+///
+/// **Construction phases** (in `buildGraph`):
+///   1. Reject functions containing unsupported instructions (invoke, landingpad,
+///      indirectbr, extractvalue, etc.).
+///   2. Create CommonArgument nodes for each formal parameter.
+///   3. Create a CommonReturn node (if the function returns non-void).
+///   4. Build block-level regions from the control-dependence analysis:
+///      collect per-block branch/switch guards, create unit regions, compose
+///      AND/OR chains.
+///   5. Process every instruction:
+///      - **Terminators**: branch, switch, ret, unreachable — build condition
+///        guards and return-site attachments.
+///      - **Binary arithmetic**: add, sub, mul, div, rem, and, or, xor, shl,
+///        lshr, ashr, fadd, fsub, fmul, fdiv, frem — create opcode nodes.
+///      - **Casts**: trunc, zext, sext, fptrunc, fpext, bitcast, inttoptr,
+///        ptrtoint, addrspacecast, *tofp, fp*to* — create cast-opcode nodes
+///        with source/destination bit-widths.
+///      - **ExtractElement / InsertElement**: create opcode nodes.
+///      - **Alloca**: create alloc site.
+///      - **Load**: create load-memory placeholder node + dereference site.
+///        The adapter populates memory edges later.
+///      - **Store**: create store-memory node keyed by (value, instruction),
+///        add the stored value as a child, and create a dereference site.
+///      - **GEP**: lower into address arithmetic (const-offset folding,
+///        dynamic-index multiplication, cast insertion) and create a GEP
+///        opcode node + GEP reference site.
+///      - **ICmp / FCmp**: create opcode node with predicate, compare site
+///        with LHS/RHS operands.
+///      - **PHI**: create phi node with incoming-value, incoming-block, and
+///        edge-local condition (branch direction or switch case).
+///      - **Call**: create call site, register callees, wire common inputs,
+///        create common output node.
+///      - **Select**: create select opcode node with condition, true-value,
+///        false-value children.
+///      - **VAArg**: create variable-argument node.
+///      - **Unsupported**: create Unknown node + emit diagnostic.
+///   6. Refresh node regions so every node inherits its block's path condition.
+///
+/// **Constant expressions** are expanded inline (casts, selects, GEPs, cmps,
+/// binary ops, concat aggregates) so downstream passes see a uniform
+/// value-flow graph.
+///
+/// **Switch handling** builds per-case compare predicates (ICMP_EQ against the
+/// case value) and composes them with OR for the matching cases and NOT for the
+/// default case.
+
+
 #include "IR/GSA/GSA.h"
 #include "IR/GVFG/GuardedValueFlowGraph.h"
 

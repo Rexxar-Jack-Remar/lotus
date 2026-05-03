@@ -1,3 +1,29 @@
+/// @file GuardedValueFlowNodes.cpp
+/// @brief Implementation of GVFG node types — edge management, value-flow
+///        parent classification, phi-incoming registration, and return-site
+///        pairing.
+///
+/// **Edge semantics**: `addChild(parent, child)` inserts a producer into the
+/// parent's `children_` vector and a back-reference into the child's
+/// `parents_` vector.  Duplicate edges update confidence and condition.
+/// `clearChildren` removes both sides.
+///
+/// **Value-flow parent classification** (`isValueFlowParent`):
+/// Region nodes are never value-flow parents.  Cast-opcode nodes are always
+/// value-flow parents.  For simple-opcode nodes, GEP, Add, and Sub are
+/// transparent (they represent address arithmetic); the true/false branches
+/// of Select are transparent, but the condition operand is not.
+/// Arithmetic-opcode nodes (Mul, Div, Rem, And, Or, Xor, etc.) are only
+/// transparent when `enable_arithmetic_flow` is true.
+///
+/// **Use sites**: `addUseSite` records a site in a deduplicated vector so
+/// downstream passes can walk from a value node back to every instruction
+/// that references it.
+///
+/// **Matching regions**: the adapter populates per-producer (region,
+/// provenance) pairs on load-memory nodes so the solver can attach the
+/// correct path condition to each memory producer.
+
 #include "IR/GVFG/GuardedValueFlowNodes.h"
 
 #include "IR/GVFG/GuardedValueFlowSites.h"

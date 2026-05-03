@@ -1,3 +1,25 @@
+/// @file GuardedValueFlowGraph.h
+/// @brief Per-function guarded value-flow graph and its builder pass
+///
+/// `GuardedValueFlowGraph` stores one function's SSA-backed value-flow
+/// structure: operand/opcode/region/phi/memory nodes, instruction-attached
+/// sites, block-level path conditions, and interprocedural interface
+/// channels.  The structural builder (`GuardedValueFlowGraphBuilderPass`)
+/// creates this shape from LLVM IR, and the adapter
+/// (`LotusGuardedValueFlowAdapterPass`) later populates memory-producer
+/// edges using pointer-analysis results.
+///
+/// **Key collections** (all public via const accessors):
+///   - `nodes()` — all `GuardedValueFlowNode` instances in the graph
+///   - `sites()` — all `GuardedValueFlowSite` instances
+///   - value-node and interface-node maps (`value_nodes_`, `interface_nodes_`)
+///   - block-level path conditions (`block_conditions_`)
+///   - region caches (And / Or / Not, unit, semantic, block)
+///   - load/store memory node registries
+///   - pseudo argument / pseudo return lists
+///   - function-bandary summary argument / return node registries
+///   - diagnostics produced during construction or adaptation
+
 #pragma once
 
 #include "IR/GVFG/GuardedValueFlowNodes.h"
@@ -33,6 +55,12 @@ using llvm::Value;
 
 // GuardedValueFlowGraph stores one function's value, memory, and path-sensitive
 // structure after the structural builder and optional LotusAA adapter have run.
+/// Per-function container for the guarded value-flow graph.
+///
+/// Owns all nodes and sites via `std::unique_ptr` vectors.  Provides
+/// canonical constructor accessors (`findNode`, `findOrCreateAndRegion`, …)
+/// and registration methods that the builder and adapter use.  Also emits
+/// `Diagnostic` records so callers can detect partial or degraded graphs.
 class GuardedValueFlowGraph {
 public:
   struct Diagnostic {
@@ -346,6 +374,13 @@ private:
   void refreshCompatCaches() const;
 };
 
+/// ModulePass that builds one `GuardedValueFlowGraph` per function.
+///
+/// The pass only creates **structural** nodes and edges — expression
+/// opcodes, phi nodes, load/store memory placeholders, block-level region
+/// nodes, and per-instruction sites.  Memory matching, interprocedural
+/// interface nodes, and imported path conditions are layered on later by
+/// `LotusGuardedValueFlowAdapterPass`.
 class GuardedValueFlowGraphBuilderPass : public ModulePass {
 public:
   static char ID;

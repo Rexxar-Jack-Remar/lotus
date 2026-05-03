@@ -1,3 +1,34 @@
+/// @file GuardedValueFlowGraph.cpp
+/// @brief Implementation of GuardedValueFlowGraph — graph container and region
+///        management
+///
+/// **Responsibilities:**
+///   - Owns per-function node and site storage via `std::unique_ptr` vectors.
+///   - Provides canonical constructor accessors for nodes of every kind
+///     (arguments, operands, opcodes, regions, phi, memory, call/output,
+///     summary, return).
+///   - Manages value→node lookups (ordinary `Value *` and synthetic
+///     interface `Value *` in separate namespaces).
+///   - Manages site registries (call sites, return sites, synthetic guard
+///     nodes for switch/branch conditions).
+///   - Implements region-node composition: unit regions (from branch/switch
+///     guards), AND / OR / NOT regions with constraint-state propagation
+///     and complementary-region detection.
+///   - Implements semantic region creation from `path_cond_t` pointers
+///     (imported interface regions from callees, local semantic regions).
+///   - Manages block-condition annotations and node→region assignment.
+///   - Manages load-memory and store-memory node registries keyed by
+///     instruction / (value, instruction) pairs.
+///   - Tracks pseudo-argument, pseudo-return, and summary-node indices.
+///   - Emits diagnostics for partial or degraded graphs.
+///   - Provides query helpers for downstream consumers:
+///     `getDirectDataDependencies`, `getEffectiveControlDependencies`,
+///     `getMemoryProducers`, `getResolvedCallTargets`.
+///
+/// **Region complementarity**: Two unit regions with the same condition node
+/// and opposite sense (true/false) are recognised as complementary; their
+/// AND collapses to AlwaysFalse and their OR to AlwaysTrue.
+
 #include "IR/GVFG/GuardedValueFlowGraph.h"
 
 #include <algorithm>

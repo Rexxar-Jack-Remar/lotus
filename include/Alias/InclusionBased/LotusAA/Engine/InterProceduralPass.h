@@ -1,14 +1,13 @@
-/*
- * LotusAA - Module-Level Alias Analysis Pass
- * 
- * Top-level LLVM pass that orchestrates pointer analysis across the entire module.
- * 
- * Key Responsibilities:
- * - Schedule bottom-up inter-procedural analysis
- * - Manage function-level analysis results
- * - Resolve indirect function calls using points-to information
- * - Provide query interface for alias analysis results
- */
+/// @file InterProceduralPass.h
+/// @brief Module-level alias analysis pass orchestrating interprocedural
+///        pointer analysis
+///
+/// `LotusAA` is the top-level LLVM `ModulePass` that manages:
+///   - Bottom-up scheduling of per-function analyses (`IntraLotusAA`),
+///   - Resolution of indirect calls using points-to information,
+///   - Call-graph construction and back-edge detection,
+///   - Global-value initialisation heuristics,
+///   - Iterative fixpoint computation across function summaries.
 
 #pragma once
 
@@ -40,11 +39,10 @@ using FunctionGroup = std::vector<Function *>;
 using FunctionWave = std::vector<FunctionGroup>;
 using FunctionWaveList = std::vector<FunctionWave>;
 
-/*
- * LotusAA - Top-level pass for Lotus Alias Analysis
- * 
- * Schedules intra-procedural and inter-procedural analysis bottom-up
- */
+/// Module-level driver pass for LotusAA.
+///
+/// Schedules intraprocedural analysis bottom-up, resolves indirect calls,
+/// manages call-graph state, and iterates to a global fixpoint.
 class LotusAA : public ModulePass {
 public:
   static char ID;

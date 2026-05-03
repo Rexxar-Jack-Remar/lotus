@@ -1,3 +1,12 @@
+/// @file GuardedValueFlowSites.cpp
+/// @brief Implementation of call-site interface management
+///
+/// **CallSite**: Manages callee lists, common-input argument arrays,
+/// per-callee pseudo-input and pseudo-output channels, per-(callee, ap_depth)
+/// summary nodes, back-edge tracking, and callee-specific path conditions.
+/// Also provides compatibility iterators that flatten common + pseudo inputs
+/// into a single `GuardedValueFlowCallSiteInput` sequence.
+
 #include "IR/GVFG/GuardedValueFlowSites.h"
 
 #include "IR/GVFG/GuardedValueFlowGraph.h"

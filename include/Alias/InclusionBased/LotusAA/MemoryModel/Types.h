@@ -5,6 +5,35 @@
  * Provides LLVM-compatible data structures and helper types.
  */
 
+/// @file Types.h
+/// @brief Path-condition atoms, constraint summaries, and common comparator
+///        types used throughout LotusAA and GVFG
+///
+/// ## PathCond — path-condition atoms
+///
+/// `PathCond` nodes form a Boolean expression tree over **atoms**
+/// (branch choices, value booleans, switch cases, invoke edges, block
+/// presence, call-target resolution, imported callee conditions).  The
+/// tree supports AND, OR, and NOT composition.  Each node carries a
+/// `ConstraintSummary` — a CNF-style set of cubes with explicit
+/// satisfiability flags — that enables:
+///
+///   - fast always-true / always-false queries (`isAlwaysSatisfied`,
+///     `isSatisfiable`),
+///   - complementary-literal detection for merge resolution (branch
+///     edge A vs branch edge B collapse to always-true), and
+///   - natural canonicalisation via subsumption and cube merging.
+///
+/// `path_cond_t` is just `PathCond *` — a lightweight, pointer-sized handle.
+///
+/// ## Comparators
+///
+/// `llvm_cmp` provides ordering for LLVM `Value *`, `BasicBlock *`, and
+/// `Function *` pointers in `std::map` / `std::set`.
+///
+/// `LLVMValueIndex` is a singleton used by `mem_obj_cmp` and `obj_loc_cmp`
+/// for consistent object/locator ordering.
+
 #pragma once
 
 #include <algorithm>
@@ -24,6 +53,15 @@
 
 namespace llvm {
 
+/// Boolean expression over path-condition atoms.
+///
+/// Allocates nodes via static factory methods (`createTrue`, `createFalse`,
+/// `createValueAtom`, `createBranchAtom`, `createSwitchCaseAtom`, …) and
+/// owns them via the controlling `PTGraph` (managed as `unique_ptr` vector).
+///
+/// `getConstraintSummary()` returns a normalised CNF representation so
+/// callers can test satisfiability and detect complementarity without
+/// invoking a solver.
 class PathCond {
 public:
   struct Literal {

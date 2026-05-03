@@ -1,3 +1,22 @@
+/// @file GuardedValueFlowSites.h
+/// @brief Site types annotating semantically important instructions in GVFG
+///
+/// Sites carry the original LLVM instruction and its operand relationships,
+/// complementing the value-flow nodes in the graph.
+///
+/// **Site kinds**:
+///   - `CallSite`            — direct / indirect call instructions
+///   - `ReturnSite`          — return instructions
+///   - `GEPReferenceSite`    — GetElementPtr instructions
+///   - `DereferenceSite`     — load / store instructions
+///   - `CompareSite`         — icmp / fcmp instructions
+///   - `DivSite`             — signed / unsigned / float division and remainder
+///   - `AllocSite`           — alloca instructions
+///   - `Unknown`             — unsupported / unlowered instructions
+///
+/// Sites expose operand pointers so downstream passes can walk from a node
+/// back to the instruction-level operation that references it.
+
 #pragma once
 
 #include "IR/GVFG/ConditionRef.h"
@@ -23,6 +42,7 @@ class GuardedValueFlowGraph;
 class GuardedValueFlowNode;
 class GuardedValueFlowRegionNode;
 
+/// Compact input record used by compatibility iterators on call sites.
 struct GuardedValueFlowCallSiteInput {
   GuardedValueFlowNode *InputNode{nullptr};
   size_t InputIndex{0};
@@ -33,9 +53,11 @@ struct GuardedValueFlowCallSiteInput {
       : InputNode(N), InputIndex(I), IsCommonInput(C) {}
 };
 
-// Sites annotate instructions that are semantically important to later
-// analyses. Nodes carry the value-flow graph; sites carry the original program
-// operation and the operands that made that operation interesting.
+/// Base class for instruction-attached sites.
+///
+/// Sites annotate instructions that are semantically important to later
+/// analyses.  Nodes carry the value-flow graph; sites carry the original
+/// program operation and the operands that made that operation interesting.
 class GuardedValueFlowSite {
 public:
   enum class Kind {
@@ -64,12 +86,15 @@ private:
   Instruction *inst_;
 };
 
+/// Alloca instruction site.
 class GuardedValueFlowAllocSite : public GuardedValueFlowSite {
 public:
   GuardedValueFlowAllocSite(GuardedValueFlowGraph *graph, Instruction *inst)
       : GuardedValueFlowSite(Kind::Alloc, graph, inst) {}
 };
 
+/// Call instruction site tracking callees, arguments, pseudo-interface
+/// channels, summary nodes, and callee-specific path conditions.
 class GuardedValueFlowCallSite : public GuardedValueFlowSite {
 public:
   GuardedValueFlowCallSite(GuardedValueFlowGraph *graph, Instruction *inst)
@@ -88,9 +113,6 @@ public:
     return common_inputs_;
   }
 
-  // CommonOutput is the direct non-void call result. Pseudo inputs/outputs are
-  // keyed by callee because different resolved callees may expose different
-  // side-effect channels.
   void setCommonOutput(GuardedValueFlowNode *node) { common_output_ = node; }
   GuardedValueFlowNode *getCommonOutput() const { return common_output_; }
 
@@ -177,6 +199,8 @@ public:
   }
 };
 
+/// Load / store instruction site.  For loads only the pointer operand is
+/// populated; for stores both pointer and value operands are recorded.
 class GuardedValueFlowDereferenceSite : public GuardedValueFlowSite {
 public:
   GuardedValueFlowDereferenceSite(GuardedValueFlowGraph *graph,
@@ -191,18 +215,20 @@ public:
   GuardedValueFlowNode *getValueOperand() const { return value_operand_; }
 
 private:
-  // For loads only the pointer operand is populated. For stores both pointer
-  // and value are recorded.
   GuardedValueFlowNode *pointer_operand_{nullptr};
   GuardedValueFlowNode *value_operand_{nullptr};
 };
 
+/// Return instruction site.
 class GuardedValueFlowReturnSite : public GuardedValueFlowSite {
 public:
   GuardedValueFlowReturnSite(GuardedValueFlowGraph *graph, Instruction *inst)
       : GuardedValueFlowSite(Kind::ReturnSite, graph, inst) {}
 };
 
+/// GEP instruction site recording the pointer operand, offset operands, and
+/// result node.  Offset operands stay aligned with the original IR indices
+/// even when internal lowering inserts temporary cast/add nodes.
 class GuardedValueFlowGEPReferenceSite : public GuardedValueFlowSite {
 public:
   GuardedValueFlowGEPReferenceSite(GuardedValueFlowGraph *graph,
@@ -223,13 +249,12 @@ public:
   GuardedValueFlowNode *getResultNode() const { return result_node_; }
 
 private:
-  // Offset operands stay aligned with the original IR indices even when the
-  // lowering inserts temporary cast/add nodes internally.
   GuardedValueFlowNode *pointer_operand_{nullptr};
   GuardedValueFlowNode *result_node_{nullptr};
   std::vector<GuardedValueFlowNode *> offset_operands_;
 };
 
+/// Compare instruction site (icmp / fcmp).
 class GuardedValueFlowCompareSite : public GuardedValueFlowSite {
 public:
   GuardedValueFlowCompareSite(GuardedValueFlowGraph *graph, Instruction *inst)
@@ -245,6 +270,7 @@ private:
   GuardedValueFlowNode *rhs_operand_{nullptr};
 };
 
+/// Division / remainder site (udiv, sdiv, fdiv, urem, srem, frem).
 class GuardedValueFlowDivSite : public GuardedValueFlowSite {
 public:
   GuardedValueFlowDivSite(GuardedValueFlowGraph *graph, Instruction *inst)

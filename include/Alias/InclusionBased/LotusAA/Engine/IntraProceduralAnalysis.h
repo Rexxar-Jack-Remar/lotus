@@ -11,6 +11,45 @@
  * - Support inter-procedural analysis via summaries
  */
 
+/// @file IntraProceduralAnalysis.h
+/// @brief Function-level pointer analysis — the core per-function engine
+///
+/// `IntraLotusAA` extends `PTGraph` with instruction-level transfer functions
+/// and interprocedural summary generation.  It processes one function at a
+/// time in topological block order.
+///
+/// ## Configuration (`IntraLotusAAConfig`)
+///
+/// Global settings controlling inlining depth, access-path depth, timeout,
+/// call-graph size, memory-tracking limits, and heuristic flags.
+///
+/// ## Analysis phases (`computePTA`)
+///
+/// 1. **Sequence numbering** — assigns a monotonic index to every instruction
+///    for dominance-based value versioning.
+/// 2. **Transfer functions** — dispatches each instruction to a specialised
+///    handler (processAlloca, processStore, processLoad, processPhi,
+///    processCall, processSelect, processGepBitcast, processCast,
+///    processBasePointer).
+/// 3. **Summary generation** — collects inputs (symbolic arguments +
+///    side-effect inputs), outputs (return value + side-effect outputs), and
+///    escaped objects for interprocedural analysis.
+///
+/// ## Key data structures
+///
+///   - `inputs` / `outputs` / `escape_objs` — function interface
+///   - `func_arg` — per-callsite / per-callee argument bindings
+///   - `func_ret` — per-callsite / per-callee return-value pseudo-arguments
+///   - `func_pseudo_ret_cache` — origin (callsite, index) of each pseudo-return
+///   - `cg_resolve_result` / `output_cg_summary` / `input_cg_summary` — CG data
+///   - `ret_insts` — return instructions with path conditions
+///
+/// ## Access Path
+///
+/// `AccessPath` encodes `(parent Value *, offset)` pairs representing
+/// field dereferences (e.g., `ptr->a->b` becomes a chain of AccessPath
+/// links).  Used to model side-effect inputs/outputs in function summaries.
+
 #pragma once
 
 #include "Alias/InclusionBased/LotusAA/Engine/InterProceduralPass.h"
@@ -31,6 +70,8 @@ namespace llvm {
 /*
  * Global configuration for LotusAA
  */
+/// Global configuration for LotusAA.  Static fields are initialised from
+/// command-line options; `setParam()` reconciles them after parsing.
 class IntraLotusAAConfig {
 public:
   static int lotus_restrict_inline_depth;
@@ -58,6 +99,11 @@ public:
 /*
  * IntraLotusAA - Intra-procedural pointer analysis
  */
+/// Per-function pointer analysis engine.
+///
+/// Instantiated once per function by the interprocedural pass.  Provides all
+/// instruction-level transfer functions and collects function summaries for
+/// interprocedural propagation.
 class IntraLotusAA : public PTGraph {
 public:
   PTGType getKind() const override { return IntraLotusAATy; }

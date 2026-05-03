@@ -1,3 +1,30 @@
+/// @file GuardedValueFlowNodes.h
+/// @brief Node types in the Guarded Value Flow Graph (GVFG)
+///
+/// GVFG models intra-procedural value flow as a directed graph.  Nodes
+/// fall into four broad categories:
+///
+///   - **Operand–like nodes** (arguments, simple operands, undef, load-mem,
+///     store-mem, call-output, return) carry an LLVM `Value *` and represent
+///     SSA values or memory-access placeholders.
+///
+///   - **Opcode nodes** (binary, cast, cmp, select, GEP, concat) carry the
+///     arithmetic / logic operation that produced them.  `getValueFlowParents`
+///     treats cast and address-arithmetic opcodes as transparent for
+///     value-flow traversal.
+///
+///   - **Region nodes** (`GuardedValueFlowRegionNode`) encode Boolean
+///     path conditions as dataflow sub-graphs, supporting AND / OR / NOT
+///     composition and satisfiability queries via `ConstraintState`.
+///
+///   - **Call-summary nodes** (`GuardedValueFlowCallSummaryNode`) model
+///     coarse access-path buckets that are intentionally coarser than the
+///     direct pseudo-interface channels.
+///
+/// **Edge direction**: child edges point *from* a consumer *to* its
+/// producer.  A parent is data-dependent on the child.  Each edge carries
+/// an optional `ConditionRef` guard and a float confidence.
+
 #pragma once
 
 #include "IR/GVFG/ConditionRef.h"
@@ -34,9 +61,9 @@ class GuardedValueFlowSite;
 class GuardedValueFlowReturnSite;
 class GuardedValueFlowRegionNode;
 
-// AccessPath records the abstract field path attached to interface nodes and
-// summary nodes. Offsets are stored from leaf to root so the adapter can append
-// newly discovered outer segments without rebuilding the whole path.
+/// Abstract field path attached to interface and summary nodes.
+/// Offsets are stored from leaf to root so the adapter can append newly
+/// discovered outer segments without rebuilding the whole path.
 class AccessPath {
 public:
   AccessPath() = default;
@@ -87,9 +114,20 @@ private:
   bool is_from_return_{false};
 };
 
-// GuardedValueFlowNode is the common node type for both SSA values and
-// structural helper nodes. Edges are directed from a result/consumer to the
-// value, memory node, or expression node it depends on.
+/// Common base for all GVFG nodes.
+///
+/// Every node carries:
+///   - a kind tag for `isa<>` / `dyn_cast<>`,
+///   - a parent basic block (for automatic region assignment),
+///   - an optional LLVM `Value *` (for operand-like nodes),
+///   - an optional debug `Instruction *` (for display).
+///
+/// **Edges** are stored bidirectionally: `children_` (consumed producers) and
+/// `parents_` (consumer back-references).  Each edge carries a `ConditionRef`
+/// guard and a float confidence.
+///
+/// **Matching regions** are populated by the adapter pass to record the path
+/// condition under which a load-memory node's producer is valid.
 class GuardedValueFlowNode {
 public:
   enum class Kind {
@@ -118,14 +156,10 @@ public:
   struct Edge {
     GuardedValueFlowNode *target{nullptr};
     float confidence{1.0f};
-    // Non-empty when the dependency only holds under a structural or imported
-    // path condition.
     ConditionRef condition;
   };
 
   struct MatchingRegion {
-    // `producer` is the node reachable from a load-memory node, while `region`
-    // records the path condition under which that producer is valid.
     GuardedValueFlowNode *producer{nullptr};
     GuardedValueFlowRegionNode *region{nullptr};
     ConditionRef provenance;
@@ -209,6 +243,7 @@ protected:
   friend class GuardedValueFlowGraph;
 };
 
+/// Argument node covering common arguments, pseudo arguments, and varargs.
 class GuardedValueFlowArgumentNode : public GuardedValueFlowNode {
 public:
   GuardedValueFlowArgumentNode(Kind kind, Type *type,
@@ -224,9 +259,19 @@ public:
   }
 };
 
-// Region nodes summarize control/path conditions for blocks, imported path
-// facts, and composed boolean guards. Non-region nodes inherit the region of
-// their parent block unless the adapter later places them elsewhere.
+/// Region nodes encode **Boolean path conditions** as dataflow sub-graphs.
+///
+/// **Forms**:
+///   - `AlwaysTrue` / `AlwaysFalse` — canonical constants
+///   - `Unit` — `(condition_node == sense)`, created from branch/switch guards
+///   - `Semantic` — backed by a `path_cond_t` from the constraint system
+///   - `ImportedInterface` — cross-function condition imported from a callee
+///   - `And` / `Or` / `Not` — Boolean composition of child regions
+///
+/// Each region carries a `ConstraintState` (assignment map) for satisfiability
+/// checks.  AND merges assignments; OR intersects them; NOT complements.
+/// Complementary unit regions (same condition node, opposite sense) collapse
+/// to AlwaysTrue / AlwaysFalse.
 class GuardedValueFlowRegionNode : public GuardedValueFlowNode {
 public:
   struct ConstraintState {
@@ -377,6 +422,10 @@ public:
   }
 };
 
+/// Opcode node encoding arithmetic, logic, cast, GEP, select, and cmp
+/// operations.  When `hasIntConstant()` is true, the node carries a single
+/// implicit constant child instead of two explicit operands (used for
+/// address arithmetic like `gep.dynamic.offset = idx * sizeof(elem)`).
 class GuardedValueFlowOpcodeNode : public GuardedValueFlowNode {
 public:
   enum class OpcodeKind {
@@ -458,14 +507,17 @@ public:
   }
 };
 
+/// PHI node with incoming-edge-local guards.
+///
+/// Each incoming edge carries the value node, incoming basic block, and an
+/// optional condition node derived from the incoming block's terminator.
+/// The condition is the edge-local guard (branch direction, switch case)
+/// that must hold for this particular incoming value to flow into the phi.
 class GuardedValueFlowPhiNode : public GuardedValueFlowNode {
 public:
   struct Incoming {
     GuardedValueFlowNode *value_node{nullptr};
     BasicBlock *incoming_block{nullptr};
-    // Immediate edge-local guard for this incoming value. This is narrower than
-    // the enclosing block region and is what downstream path-sensitive code
-    // should consult first for PHI semantics.
     GuardedValueFlowNode *condition_node{nullptr};
     bool condition_sense{true};
     ConditionRef condition;
@@ -493,6 +545,7 @@ public:
   }
 };
 
+/// Return node (common or pseudo) with per-value return-site tracking.
 class GuardedValueFlowReturnNode : public GuardedValueFlowNode {
 public:
   GuardedValueFlowReturnNode(Kind kind, Type *type,
@@ -517,10 +570,11 @@ public:
   }
 };
 
-// Call output nodes cover three interface roles:
-// - CommonOutput: direct non-void call result
-// - PseudoInput: per-callee incoming side-effect channel at a callsite
-// - PseudoOutput: per-callee outgoing side-effect channel at a callsite
+/// Call output node covering three interface roles:
+///   - **CommonOutput** — direct non-void call result (the function return value
+///     at the call site)
+///   - **PseudoInput** — per-callee incoming side-effect channel
+///   - **PseudoOutput** — per-callee outgoing side-effect channel
 class GuardedValueFlowCallOutputNode : public GuardedValueFlowNode {
 public:
   GuardedValueFlowCallOutputNode(Kind kind, Type *type,
@@ -546,9 +600,9 @@ public:
   }
 };
 
-// Summary nodes model access-path buckets that are intentionally coarser than
-// direct pseudo interfaces. They remain separate so callers can distinguish
-// exact interface channels from summary-only channels.
+/// Summary nodes model access-path buckets that are intentionally coarser than
+/// direct pseudo interfaces, used when an interface channel exceeds the
+/// configured access-path depth limit and must be merged into a summary.
 class GuardedValueFlowCallSummaryNode : public GuardedValueFlowNode {
 public:
   GuardedValueFlowCallSummaryNode(Kind kind, Type *type,

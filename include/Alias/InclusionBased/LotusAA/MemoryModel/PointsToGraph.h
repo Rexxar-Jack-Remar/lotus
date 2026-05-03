@@ -10,6 +10,36 @@
  * - Field-sensitive: Tracks individual struct fields separately
  */
 
+/// @file PointsToGraph.h
+/// @brief Points-to graph base class — per-function graph of (pointer → target
+///        set) relationships
+///
+/// `PTGraph` is the per-function container for points-to information.  It
+/// holds:
+///   - `pt_results` — map from LLVM `Value *` to `PTResult *` (points-to sets)
+///   - `mem_objs` — the set of `MemObject`s allocated in the function
+///   - `global_objects` — objects corresponding to global variables
+///   - `NullPTS` — a singleton null-pointer points-to set
+///   - load-load matching caches (`load_category`, `load_category_collection`)
+///   - object-to-call access-path depth caches
+///   - path-condition caches (unit regions, AND/OR/NOT regions, phi regions,
+///     block regions, semantic regions, call-target conditions)
+///   - dominator tree for SSA-style locator versioning
+///   - controlled-dependence info for path-condition construction
+///
+/// Subclasses (`IntraLotusAA`) implement the per-function analysis driver and
+/// transfer functions.
+///
+/// ## PTResult
+///
+/// A points-to set for a single pointer.  Targets are either:
+///   - **Direct**: `(ObjectLocator *)` — the pointer points to that locator
+///   - **Derived**: `(PTResult *src, int64_t offset)` — inherits src's targets
+///     plus an offset
+///
+/// Both carry a `path_cond_t` guard and are flattened on iteration via
+/// `PTResultIterator`.
+
 #pragma once
 
 #include <limits>
@@ -43,6 +73,14 @@ class PTGraph;
  * 1. Direct: <ObjectLocator> - ptr points to locator
  * 2. Derived: <PTResult', offset> - ptr points to (PTResult' + offset)
  */
+/// Points-to set for a single pointer value.
+///
+/// Two target forms:
+///   1. **Direct**:   `<path_cond_t, ObjectLocator>` — ptr → loc under cond
+///   2. **Derived**:  `<path_cond_t, PTResult*, int64_t offset>` — ptr inherits
+///      the targets of `src_pts` at additional `offset` under cond
+///
+/// `PTResultIterator` flattens both forms into a `map<ObjectLocator*, cond>`.
 class PTResult {
 public:
   // Direct points-to target
@@ -94,6 +132,10 @@ public:
 /*
  * PTResultIterator - Collect final points-to results
  */
+/// Iterator that flattens a `PTResult` (including derived targets) into a
+/// map from `ObjectLocator*` to `path_cond_t`.  Recursively visits the
+/// derived-target graph with cycle detection (a `visited` set).  On first
+/// construction caches the flattened result in the PTResult for O(1) reuse.
 class PTResultIterator {
 public:
   using iterator = std::map<ObjectLocator *, path_cond_t, obj_loc_cmp>::iterator;
@@ -124,6 +166,20 @@ public:
 /*
  * PTGraph - Points-to graph manager (simplified)
  */
+/// Per-function points-to graph manager.
+///
+/// Owns all `PTResult`, `MemObject`, and path-condition data for one function.
+/// Provides the core operations needed by instruction transfer functions:
+///   - `addPointsTo(ptr, obj, offset, cond)` — create a direct points-to edge
+///   - `derivePtsFrom(ptr, src_pts, offset, cond)` — create a derived edge
+///   - `assignPts(ptr, pts)` — assign a shared set (e.g. NullPTS)
+///   - `loadPtrAt(ptr, from_loc, result)` — load values from memory locations
+///   - `trackPtrRightValue(val, result)` — track through PHI/Select/Load
+///   - `refineResult(to_refine)` — merge duplicate values with OR conditions
+///
+/// Path-condition queries (`getEmptyCond`, `getValueCond`, `getBlockCond`,
+/// `findOrCreateUnitRegion`, `findOrCreateAndRegion`, etc.) are used by
+/// transfer functions to attach guards to points-to targets.
 class PTGraph {
 public:
   enum PTGType { PTGBegin, PTGraphTy, IntraLotusAATy, PTGEnd };

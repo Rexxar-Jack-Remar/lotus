@@ -1,3 +1,6 @@
+/// @file ConditionRef.cpp
+/// @brief Human-readable rendering of ConditionRef for debugging
+
 #include "IR/GVFG/ConditionRef.h"
 
 #include <llvm/Support/raw_ostream.h>

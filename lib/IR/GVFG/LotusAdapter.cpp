@@ -1,3 +1,35 @@
+/// @file LotusAdapter.cpp
+/// @brief LotusAA adapter — populates a GVFG with pointer-analysis results
+///
+/// For each function the adapter:
+///   1. **Memory matching**: walks every load-memory node, queries LotusAA's
+///      per-function points-to results to find the set of store-memory nodes
+///      that may reach it, and wires child edges with path-condition guards
+///      and confidence scores.
+///   2. **Call-site interface nodes**: creates PseudoInput, PseudoOutput, and
+///      argument/return summary nodes per callee.  These nodes live in the
+///      interface namespace (`mapInterfaceNode`) to avoid collisions with
+///      ordinary SSA values.
+///   3. **Escaped objects**: for each callee-escaped `MemObject`, creates a
+///      concrete escape object in the caller's graph and maps it via the
+///      callee's alloc-site.
+///   4. **Output point-to linking**: wires pseudo-output point-to results
+///      (from callee summaries) back to the caller's points-to targets.
+///   5. **Output value linking**: stores pseudo-output values into the
+///      appropriate caller-side object locators, equivalent to callee
+///      side-effect propagation.
+///   6. **Path-condition import**: creates `ImportedInterface` region nodes
+///      for cross-function conditions obtained from LotusAA.
+///   7. **Back-edge marking**: records back edges on callsites where LotusAA
+///      detected a cycle in the call graph.
+///   8. **Summary interface**: populates function-level summary argument and
+///      return nodes grouped by access-path depth, enabling coarse-grained
+///      inlining when the detailed interface exceeds configured limits.
+///
+/// The `safeLink` utility automatically inserts a cast-opcode node when the
+/// parent and child type sizes differ, keeping the value-flow graph
+/// well-typed.
+
 #include "IR/GVFG/LotusAdapter.h"
 
 #include "Alias/InclusionBased/LotusAA/Engine/IntraProceduralAnalysis.h"

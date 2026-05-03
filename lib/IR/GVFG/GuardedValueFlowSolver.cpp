@@ -1,3 +1,19 @@
+/// @file GuardedValueFlowSolver.cpp
+/// @brief SMT-based constraint solver over the GuardedValueFlowGraph
+///
+/// Translates value-flow dependencies and region-based path conditions into
+/// SMT bit-vector formulas.  Encodes binary/compare/cast/GEP/concat/extract/
+/// insert/select opcodes into the solver's SMTFactory API.  Supports:
+///   - getCtrlDeps — per-node / per-block control-dependence constraints
+///   - getDataDeps — recursive encoding of child opcode/operand chains
+///   - getPhiGated — incoming-edge-local guards from PHI nodes
+///   - getDeps / getDepsPair — combined Ctrl+Data for one assignment edge
+///   - getOrInsertExpr — SMT variable creation for each GVFG node
+///
+/// The dominator-aware variant `DTGuardedValueFlowSolver` suppresses
+/// control-dependence constraints already implied by the previously visited
+/// basic block, reducing redundant formula growth.
+
 #include "IR/GVFG/GuardedValueFlowSolver.h"
 
 #include <climits>

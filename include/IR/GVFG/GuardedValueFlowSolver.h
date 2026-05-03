@@ -1,3 +1,19 @@
+/// @file GuardedValueFlowSolver.h
+/// @brief SMT-based constraint solver over the GuardedValueFlowGraph
+///
+/// Translates value-flow dependencies and region-based path conditions into
+/// SMT formulas.  Supports:
+///   - control-dependence queries (per-node, per-block, paired)
+///   - data-dependence queries (recursive encoding of operand/opcode chains)
+///   - phi gating (incoming-edge-local guards with AND/OR semantics)
+///   - combined dependency queries (Ctrl+Data for a single assignment edge)
+///   - opcode encoding (binary, compare, cast, GEP, select, concat,
+///     extract/insert element)
+///
+/// `DTGuardedValueFlowSolver` is a dominator-aware variant that suppresses
+/// control-dependence constraints already implied by the previously visited
+/// basic block.
+
 #pragma once
 
 #include "IR/GVFG/GuardedValueFlowGraph.h"
@@ -26,6 +42,8 @@ using llvm::DominatorTree;
 // - data dependencies for a node
 // - gated predicates for PHI incoming values
 // - combined dependencies for one assignment edge
+/// Core solver that encodes value-flow and path-condition structure into
+/// SMT constraints using an `SMTFactory`.
 class GuardedValueFlowSolver : public SMTSolver {
 public:
   struct QueryContext {
