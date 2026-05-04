@@ -1,4 +1,4 @@
-#include "Checker/Security/Spectre/CacheSpecuAnalysis.h"
+#include "Security/Spectre/CacheSpecuAnalysis.h"
 
 #include "llvm/ADT/APInt.h"
 #include "llvm/IR/DataLayout.h"

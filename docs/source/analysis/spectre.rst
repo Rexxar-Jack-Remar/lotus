@@ -4,9 +4,9 @@ Spectre Cache Analysis
 Cache speculation analysis for detecting Spectre vulnerabilities related to
 cache timing side-channels.
 
-**Headers**: ``include/Checker/Security/Spectre``
+**Headers**: ``include/Security/Spectre``
 
-**Implementation**: ``lib/Checker/Security/Spectre``
+**Implementation**: ``lib/Security/Spectre``
 
 Overview
 --------

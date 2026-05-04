@@ -1,4 +1,4 @@
-#include "Checker/Security/Spectre/CacheSpecuAnalysis.h"
+#include "Security/Spectre/CacheSpecuAnalysis.h"
 #include "TestUtils/LLVMHelpers.h"
 
 #include <llvm/IR/LLVMContext.h>

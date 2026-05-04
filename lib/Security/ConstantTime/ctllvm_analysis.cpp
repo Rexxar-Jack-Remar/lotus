@@ -2,7 +2,7 @@
  * Core taint and alias analysis for the ctllvm pass.
  */
 
-#include "Analysis/Crypto/CTInternal.h"
+#include "Security/ConstantTime/CTInternal.h"
 
 #include "llvm/IR/InstIterator.h"
 #include "llvm/IR/Instructions.h"

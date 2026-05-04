@@ -1,4 +1,4 @@
-set(CryptoVerify_SOURCES
+set(ConstantTimeVerify_SOURCES
   ctllvm.cpp
   ctllvm_analysis.cpp
   ctllvm_debug_info.cpp
@@ -6,4 +6,4 @@ set(CryptoVerify_SOURCES
   ctllvm_reporting.cpp
   ctllvm_targets.cpp
 )
-add_library(CryptoVerify STATIC ${CryptoVerify_SOURCES})
+add_library(ConstantTimeVerify STATIC ${ConstantTimeVerify_SOURCES})

@@ -2,9 +2,9 @@
  * Public pass entrypoints and plugin registration for the ctllvm pass.
  */
 
-#include "Analysis/Crypto/ctllvm.h"
+#include "Security/ConstantTime/ctllvm.h"
 
-#include "Analysis/Crypto/CTInternal.h"
+#include "Security/ConstantTime/CTInternal.h"
 
 #include "llvm/Passes/PassBuilder.h"
 #include "llvm/Transforms/Utils/Mem2Reg.h"

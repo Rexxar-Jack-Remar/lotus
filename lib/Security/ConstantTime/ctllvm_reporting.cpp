@@ -2,7 +2,7 @@
  * Reporting and statistics helpers for the ctllvm pass.
  */
 
-#include "Analysis/Crypto/CTInternal.h"
+#include "Security/ConstantTime/CTInternal.h"
 
 #include "llvm/Support/raw_ostream.h"
 

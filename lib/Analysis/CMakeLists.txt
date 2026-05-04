@@ -1,7 +1,6 @@
 add_subdirectory(CFG)
 add_subdirectory(NullPointer)
 add_subdirectory(TypeHirarchy)
-add_subdirectory(Crypto)
 add_subdirectory(DebugInfo)
 add_subdirectory(FeatureExtraction)
 add_subdirectory(Loop)

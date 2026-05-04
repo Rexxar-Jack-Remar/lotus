@@ -16,6 +16,7 @@ The binaries are written to `build/bin/`.
 | Tool | Purpose | Notes |
 | --- | --- | --- |
 | `lotus-ipo` | Driver for Lotus interprocedural IPO passes | Runs the MemorySSA/ShadowMem-backed passes in `lib/Optimization/IPO`. |
+| `lotus-lif` | Driver for the migrated LIF isochronous transform | Implemented under the unified `Security/LIF` subsystem and currently built against Lotus's LLVM 14 toolchain. |
 | `lotus-purity` | Purity inference and summary workflow driver | Automatically prepares SeaDsa/ShadowMem-backed MemorySSA unless `--disable-memoryssa-prep` is passed; defaults that prep to `--sea-dsa=ci` for robustness, but accepts an explicit `--sea-dsa=...` override. |
 | `lotus-prefetch` | Driver for Lotus software prefetch passes | Runs the software prefetching pass in `lib/Optimization/Prefetch`. |
 
@@ -31,6 +32,23 @@ build/bin/lotus-purity test.bc --purity-summary-file summaries.json
 build/bin/lotus-ipo test.bc -S -o out.ll
 build/bin/lotus-prefetch test.bc -S -o prefetch.ll
 ```
+
+## LIF migration target
+
+`lotus-lif` is the Lotus-integrated frontend for the imported LIF
+isochronous transform.
+
+```bash
+cmake -S . -B build
+cmake --build build --target lotus-lif
+build/bin/lotus-lif input.ll -o output.ll
+```
+
+Current limitations:
+
+- The imported code still carries its original GPLv3 provenance and headers.
+- The LLVM 14 build migration is in place, but runtime validation is not yet
+  complete for all inputs.
 
 ## IPO passes
 

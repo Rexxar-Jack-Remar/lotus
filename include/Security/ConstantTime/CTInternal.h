@@ -6,7 +6,7 @@
 
 #define LLVM_ENABLE_DUMP
 
-#include "Analysis/Crypto/ctllvm.h"
+#include "Security/ConstantTime/ctllvm.h"
 
 #include "llvm/ADT/ArrayRef.h"
 #include "llvm/ADT/SetVector.h"

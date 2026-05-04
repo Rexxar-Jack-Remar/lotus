@@ -18,9 +18,6 @@
 
 #include "Optimization/PartialEvaluation/LLPE.h"
 
-#include <alloca.h>
-#include <errno.h>
-#include <fcntl.h>
 #include <llvm/Analysis/ConstantFolding.h>
 #include <llvm/IR/GetElementPtrTypeIterator.h>
 #include <llvm/IR/GlobalVariable.h>
@@ -29,6 +26,9 @@
 #include <llvm/IR/Type.h>
 #include <llvm/Support/Debug.h>
 #include <llvm/Support/raw_ostream.h>
+#include <alloca.h>
+#include <errno.h>
+#include <fcntl.h>
 #include <sys/stat.h>
 #include <sys/types.h>
 #include <unistd.h>

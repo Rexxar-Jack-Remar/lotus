@@ -48,6 +48,16 @@ document, but changing it is not allowed.
 
 
 
+LIF
+-------------------------------------------------------------------------------
+Portions of Lotus under `include/Security/LIF`, `lib/Security/LIF`, and
+`tools/optimization/lotus-lif.cpp`
+are derived from the LIF project by Luigi D. C. Soares.
+
+The migration source carried this license in `lif-master/lif/LICENSE.txt` and
+the imported files retain their original GPLv3 notices.
+
+
 LLVM
 -------------------------------------------------------------------------------
 ===============================================================================

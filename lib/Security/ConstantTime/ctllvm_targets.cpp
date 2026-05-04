@@ -2,7 +2,7 @@
  * Taint-source and declassification selection for the ctllvm pass.
  */
 
-#include "Analysis/Crypto/CTInternal.h"
+#include "Security/ConstantTime/CTInternal.h"
 
 using namespace llvm;
 

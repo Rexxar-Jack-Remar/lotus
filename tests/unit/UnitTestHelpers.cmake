@@ -112,10 +112,14 @@ function(add_lotus_spectre_test test_name source_file)
             Spectre)
 endfunction()
 
-function(add_lotus_crypto_test test_name source_file)
+function(add_lotus_constant_time_test test_name source_file)
     add_lotus_targeted_test(${test_name} ${source_file}
         LINK_LIBS
-            CryptoVerify)
+            ConstantTimeVerify)
+endfunction()
+
+function(add_lotus_crypto_test test_name source_file)
+    add_lotus_constant_time_test(${test_name} ${source_file})
 endfunction()
 
 function(add_lotus_checker_test test_name source_file)

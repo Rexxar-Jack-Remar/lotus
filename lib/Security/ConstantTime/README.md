@@ -1,13 +1,13 @@
-# Crypto
+# ConstantTime
 
-`lib/Analysis/Crypto` hosts Lotus's CT-LLVM-based constant-time analysis for
-side-channel detection in cryptographic code. The pass tracks tainted secret
+`lib/Security/ConstantTime` hosts Lotus's CT-LLVM-based constant-time analysis
+for side-channel detection in sensitive code. The pass tracks tainted secret
 values, propagates them through def-use and alias relationships, and reports
 cache, branch, and variable-timing leaks.
 
 ## Public entrypoints
 
-- Header: `Analysis/Crypto/ctllvm.h`
+- Header: `Security/ConstantTime/ctllvm.h`
 - Pass type: `CTPass`
 - Pipeline name: `ctllvm`
 - Plugin registration: `getPassPluginInfo()` and `llvmGetPassPluginInfo()`

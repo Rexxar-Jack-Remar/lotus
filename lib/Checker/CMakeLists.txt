@@ -1,6 +1,5 @@
 # Add subdirectories
 add_subdirectory(Report)
-add_subdirectory(Security)
 add_subdirectory(KINT)
 add_subdirectory(Concurrency)
 add_subdirectory(Pulse)

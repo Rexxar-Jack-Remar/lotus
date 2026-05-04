@@ -76,7 +76,12 @@ Some related publications
 
 ### Software Protection
 
+**Side Channel**
+- TOPLAS: Side-Channel Elimination via Partial Control-Flow Linearization.
 - Security 26: VeCT: Secure and Efficient Constant-Time Code Rewriting with Vector Extensions.
+- CCS 21: Constantine: Automatic Side-Channel Resistance Using Efficient Control and Data Flow Linearization. https://github.com/pietroborrello/constantine
+
+**Integriry?**
 - CCS 22: C2C: Fine-Grained Configuration-Driven System Call Filtering
 - USENIX Security 20: Temporal System Call Specialization for Attack Surface Reduction
 - USENIX Security 19:  Origin-Sensitive Control Flow Integrity

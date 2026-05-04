@@ -1,19 +1,19 @@
-Constant-Time Cryptographic Analysis
-====================================
+Constant-Time Analysis
+======================
 
 Static analysis for verifying constant-time programming in cryptographic code.
 
-**Headers**: ``include/Analysis/Crypto``
+**Headers**: ``include/Security/ConstantTime``
 
-**Implementation**: ``lib/Analysis/Crypto``
+**Implementation**: ``lib/Security/ConstantTime``
 
 Overview
 --------
 
-The Crypto analysis module implements CT-LLVM, a static analysis tool for
-verifying constant-time programming properties in cryptographic implementations.
+The ConstantTime module implements CT-LLVM, a static analysis tool for
+verifying constant-time programming properties in sensitive code.
 Constant-time programming is essential for preventing timing-based side-channel
-attacks.
+attacks, including but not limited to cryptographic workloads.
 
 **Related work**:
 
@@ -130,7 +130,7 @@ The CT-LLVM pass is typically invoked as part of an LLVM pass pipeline:
 
 .. code-block:: cpp
 
-   #include <Analysis/Crypto/ctllvm.h>
+   #include <Security/ConstantTime/ctllvm.h>
    
    ModulePassManager MPM;
    MPM.addPass(CTPass());

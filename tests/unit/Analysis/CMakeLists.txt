@@ -135,7 +135,7 @@ add_lotus_targeted_test(symbolic_execution_taint_model_test
                    CanaryGuardedValueFlow
                    LLVMAnalysis)
 add_lotus_spectre_test(spectre_analysis_test SpectreAnalysisTest.cpp)
-add_lotus_crypto_test(crypto_analysis_test CryptoAnalysisTest.cpp)
+add_lotus_constant_time_test(crypto_analysis_test CryptoAnalysisTest.cpp)
 add_lotus_targeted_test(prue_pass_test
                PruePassTest.cpp
                LINK_LIBS
