@@ -2,8 +2,10 @@
 #define ANALYSIS_SYMBOLICEXECUTION_PATHCONDSOLVER_H
 
 #include "Analysis/SymbolicExecution/BigInteger.h"
-#include "Analysis/SymbolicExecution/PropertyValue.h"
 #include "Analysis/SymbolicExecution/GVFGUtility.h"
+
+#include "Analysis/SymbolicExecution/PropertyValue.h"
+
 #include "IR/GVFG/GuardedValueFlowSolver.h"
 #include "Solvers/SMT/LIBSMT/SMTFactory.h"
 

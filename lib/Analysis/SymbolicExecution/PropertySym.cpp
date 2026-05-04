@@ -5,10 +5,10 @@
 #include "llvm/ADT/Hashing.h"
 #include "llvm/ADT/StringExtras.h"
 
+#include "Analysis/SymbolicExecution/GVFGUtility.h"
 #include "Analysis/SymbolicExecution/PropertyAllocator.h"
 #include "Analysis/SymbolicExecution/PropertyInteger.h"
 #include "Analysis/SymbolicExecution/PropertyValue.h"
-#include "Analysis/SymbolicExecution/GVFGUtility.h"
 
 using namespace SymbolicExecution;
 

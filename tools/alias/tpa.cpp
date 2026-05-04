@@ -12,7 +12,6 @@ k-CFA at all calls; selective = 0-CFA at direct calls, k-CFA at indirect
 (default: klimit)
 */
 
-#include "Alias/Infrastructure/AliasAnalysisWrapper/CLIUtils.h"
 #include "Alias/InclusionBased/TPA/Context/ContextPolicy.h"
 #include "Alias/InclusionBased/TPA/Context/KLimitContext.h"
 #include "Alias/InclusionBased/TPA/PointerAnalysis/Analysis/SemiSparsePointerAnalysis.h"
@@ -21,6 +20,7 @@ k-CFA at all calls; selective = 0-CFA at direct calls, k-CFA at indirect
 #include "Alias/InclusionBased/TPA/Util/IO/PointerAnalysis/Printer.h"
 #include "Alias/InclusionBased/TPA/Util/IO/PointerAnalysis/WriteDotFile.h"
 #include "Alias/InclusionBased/TPA/Util/Log.h"
+#include "Alias/Infrastructure/AliasAnalysisWrapper/CLIUtils.h"
 #include "Utils/LLVM/IO/WriteIR.h"
 
 #include <cstdlib>

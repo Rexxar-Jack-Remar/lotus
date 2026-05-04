@@ -47,9 +47,10 @@ static cl::opt<bool> DFreeCheck(
 static cl::opt<bool>
     AllChecks("all", cl::desc("Run all checkers (leak, double-free, file)"),
               cl::init(false));
-static cl::opt<bool> VerboseReports(
-    "v", cl::desc("Print trace and IR details for reported bugs"),
-    cl::init(false));
+static cl::opt<bool>
+    VerboseReports("v",
+                   cl::desc("Print trace and IR details for reported bugs"),
+                   cl::init(false));
 
 int main(int argc, char **argv) {
   sys::PrintStackTraceOnErrorSignal(argv[0]);
@@ -84,9 +85,9 @@ int main(int argc, char **argv) {
   }
 
   // Determine which checkers to run
-  const bool anyExplicitChecker =
-      MemoryLeakCheck.getNumOccurrences() != 0 ||
-      DFreeCheck.getNumOccurrences() != 0 || FileCheck.getNumOccurrences() != 0;
+  const bool anyExplicitChecker = MemoryLeakCheck.getNumOccurrences() != 0 ||
+                                  DFreeCheck.getNumOccurrences() != 0 ||
+                                  FileCheck.getNumOccurrences() != 0;
   bool runLeak = false;
   bool runDoubleFree = false;
   bool runFile = false;
@@ -226,9 +227,8 @@ int main(int argc, char **argv) {
     auto targets = lotus::fuzzing::collectTargets(findings);
 
     std::string errorMessage;
-    if (!lotus::fuzzing::writeTargetsToFile(targets,
-                                            report_options::TargetsOutputFile,
-                                            &errorMessage)) {
+    if (!lotus::fuzzing::writeTargetsToFile(
+            targets, report_options::TargetsOutputFile, &errorMessage)) {
       errs() << "Error writing fuzz targets: " << errorMessage << "\n";
       return 1;
     }

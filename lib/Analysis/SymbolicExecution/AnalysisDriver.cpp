@@ -12,8 +12,8 @@
 #include "llvm/IR/Module.h"
 #include "llvm/Support/CommandLine.h"
 
-#include "Analysis/SymbolicExecution/MemoryAPI.h"
 #include "Analysis/SymbolicExecution/GVFGUtility.h"
+#include "Analysis/SymbolicExecution/MemoryAPI.h"
 #include "Utils/Parallel/ThreadPool.h"
 
 #include <algorithm>

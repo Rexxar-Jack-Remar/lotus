@@ -33,20 +33,23 @@ cl::opt<unsigned>
                  cl::init(1));
 cl::opt<bool> RefineAmbiguousOnly(
     "refine-ambiguous-only",
-    cl::desc("Refine only ambiguous or unknown indirect calls"), cl::init(true));
+    cl::desc("Refine only ambiguous or unknown indirect calls"),
+    cl::init(true));
 cl::opt<unsigned> MaxOffsetDepth("max-offset-depth",
                                  cl::desc("Maximum offset path depth"),
                                  cl::init(8));
-cl::opt<unsigned long long> MaxDemandStates(
-    "max-demand-states", cl::desc("Demand refinement state budget"),
-    cl::init(50000));
+cl::opt<unsigned long long>
+    MaxDemandStates("max-demand-states",
+                    cl::desc("Demand refinement state budget"),
+                    cl::init(50000));
 cl::opt<bool> EnableSignatureFilter(
     "enable-signature-filter",
     cl::desc("Intersect candidates with normalized signature matches"),
     cl::init(true));
-cl::opt<std::string> OutputFilePath(
-    "output-file",
-    cl::desc("Output file path, or 'cout' for standard output"), cl::init(""));
+cl::opt<std::string>
+    OutputFilePath("output-file",
+                   cl::desc("Output file path, or 'cout' for standard output"),
+                   cl::init(""));
 
 void printStats(raw_ostream &OS, const DFPAResult &Result) {
   const DFPAStats &Stats = Result.getStats();

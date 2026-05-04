@@ -34,22 +34,22 @@ using TaintedInfo = llvm::DenseSet<llvm::Value *>;
 /// A pass that traverses the call graph of the module to taint values,
 /// following control and data dependencies.
 struct TaintAnalysis : public llvm::AnalysisInfoMixin<TaintAnalysis> {
-    using Result = TaintedInfo;
+  using Result = TaintedInfo;
 
-    /// Traverses the call graph of a module \p M, tainting values that
-    /// somehow depend on any secret data. We assume that secret data
-    /// is annotated with the key "secret". For example:
-    ///
-    /// \code{.c}
-    /// __attribute__((annotate("secret"))) int *key;
-    /// \endcode
-    ///
-    /// \returns the set of values that are tainted.
-    TaintedInfo run(llvm::Module &M, llvm::ModuleAnalysisManager &MAM);
+  /// Traverses the call graph of a module \p M, tainting values that
+  /// somehow depend on any secret data. We assume that secret data
+  /// is annotated with the key "secret". For example:
+  ///
+  /// \code{.c}
+  /// __attribute__((annotate("secret"))) int *key;
+  /// \endcode
+  ///
+  /// \returns the set of values that are tainted.
+  TaintedInfo run(llvm::Module &M, llvm::ModuleAnalysisManager &MAM);
 
-    // A special type used by analysis passes to provide an address that
-    // identifies that particular analysis pass type.
-    static llvm::AnalysisKey Key;
+  // A special type used by analysis passes to provide an address that
+  // identifies that particular analysis pass type.
+  static llvm::AnalysisKey Key;
 };
 
 /// Inspects the global variables to search for data annotated as secret.
@@ -64,8 +64,8 @@ void taintLocal(llvm::CallInst *Call, TaintedInfo &T);
 /// to propagate control dependence or not: control dependence is only
 /// propagated to values that escape the influence region of a tainted
 /// predicate (through a phi function or store + load).
-void taintFunction(
-    llvm::Function &F, TaintedInfo &T, llvm::FunctionAnalysisManager &FAM);
+void taintFunction(llvm::Function &F, TaintedInfo &T,
+                   llvm::FunctionAnalysisManager &FAM);
 }; // namespace lotus::lif::analysis
 
 #endif

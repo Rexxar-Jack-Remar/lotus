@@ -150,9 +150,8 @@ int main(int argc, char **argv) {
     auto targets = lotus::fuzzing::collectTargets(findings);
 
     std::string errorMessage;
-    if (!lotus::fuzzing::writeTargetsToFile(targets,
-                                            report_options::TargetsOutputFile,
-                                            &errorMessage)) {
+    if (!lotus::fuzzing::writeTargetsToFile(
+            targets, report_options::TargetsOutputFile, &errorMessage)) {
       errs() << "Error writing fuzz targets: " << errorMessage << "\n";
       return 1;
     }
@@ -160,9 +159,10 @@ int main(int argc, char **argv) {
            << " (" << targets.size() << " targets)\n";
   }
 
-  const std::string &jsonOutputFile = !report_options::JsonOutputFile.empty()
-                                          ? report_options::JsonOutputFile.getValue()
-                                          : JsonOutput.getValue();
+  const std::string &jsonOutputFile =
+      !report_options::JsonOutputFile.empty()
+          ? report_options::JsonOutputFile.getValue()
+          : JsonOutput.getValue();
   if (!jsonOutputFile.empty()) {
     std::error_code EC;
     raw_fd_ostream json_out(jsonOutputFile, EC);

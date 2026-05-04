@@ -14,12 +14,12 @@
 #include "llvm/Support/SourceMgr.h"
 #include "llvm/Support/raw_ostream.h"
 
-#include "IR/PDG/QueryLanguage/Cypher.h"
-#include "IR/PDG/Analysis/Query.h"
 #include "IR/PDG/Analysis/PropertySpec.h"
+#include "IR/PDG/Analysis/Query.h"
 #include "IR/PDG/Core/ControlDependencyGraph.h"
 #include "IR/PDG/Core/DataDependencyGraph.h"
 #include "IR/PDG/Core/ProgramDependencyGraph.h"
+#include "IR/PDG/QueryLanguage/Cypher.h"
 
 #include <algorithm>
 #include <fstream>
@@ -68,19 +68,19 @@ static cl::opt<int> UnboundedMaxHops(
     cl::desc("Default cap for unbounded traversals (e.g. *..), default: 5"),
     cl::init(5));
 
-static cl::opt<std::string>
-    Format("format", cl::desc("Output format: text, json, dot"),
-           cl::init("text"));
+static cl::opt<std::string> Format("format",
+                                   cl::desc("Output format: text, json, dot"),
+                                   cl::init("text"));
 
 static cl::list<std::string> QueryParams(
     "param",
     cl::desc("Query parameter key=value (repeatable); referenced as $key"),
     cl::ZeroOrMore, cl::value_desc("key=value"));
 
-static cl::opt<std::string> PropertyFile(
-    "property-file",
-    cl::desc("Resolve criteria from a Symbiotic-style .prp file"),
-    cl::value_desc("filename"), cl::init(""));
+static cl::opt<std::string>
+    PropertyFile("property-file",
+                 cl::desc("Resolve criteria from a Symbiotic-style .prp file"),
+                 cl::value_desc("filename"), cl::init(""));
 
 static cl::opt<std::string>
     SliceDirection("direction",
@@ -121,8 +121,7 @@ static cl::opt<std::string>
                   cl::init(""));
 
 static cl::opt<std::string>
-    ScopeQuery("scope-query",
-               cl::desc("Cypher query selecting analysis scope"),
+    ScopeQuery("scope-query", cl::desc("Cypher query selecting analysis scope"),
                cl::init(""));
 
 static cl::opt<std::string>
@@ -262,9 +261,9 @@ static bool executeQuery(CypherQueryExecutor &executor,
     params[kv.substr(0, eq)] = kv.substr(eq + 1);
   }
 
-  std::unique_ptr<CypherQuery> query =
-      params.empty() ? parser.parse(query_string)
-                     : parser.parse(query_string, params);
+  std::unique_ptr<CypherQuery> query = params.empty()
+                                           ? parser.parse(query_string)
+                                           : parser.parse(query_string, params);
   if (!query) {
     errs() << "Parse error: " << parser.getLastError().message << "\n";
     return false;
@@ -291,20 +290,18 @@ static bool executeQuery(CypherQueryExecutor &executor,
 
   outs() << "Result: " << result->toString() << "\n";
   if (result->getType() == CypherResult::ResultType::NODES) {
-    size_t limit = ResultLimit > 0
-                       ? std::min(result->getNodes().size(),
-                                  static_cast<size_t>(ResultLimit))
-                       : result->getNodes().size();
+    size_t limit = ResultLimit > 0 ? std::min(result->getNodes().size(),
+                                              static_cast<size_t>(ResultLimit))
+                                   : result->getNodes().size();
     for (size_t i = 0; i < limit; ++i)
       outs() << "  " << describeNode(result->getNodes()[i]) << "\n";
   } else if (result->getType() == CypherResult::ResultType::RELATIONSHIPS) {
-    size_t limit = ResultLimit > 0
-                       ? std::min(result->getRelationships().size(),
-                                  static_cast<size_t>(ResultLimit))
-                       : result->getRelationships().size();
+    size_t limit = ResultLimit > 0 ? std::min(result->getRelationships().size(),
+                                              static_cast<size_t>(ResultLimit))
+                                   : result->getRelationships().size();
     for (size_t i = 0; i < limit; ++i)
-      outs() << "  "
-             << describeEdge(executor, result->getRelationships()[i]) << "\n";
+      outs() << "  " << describeEdge(executor, result->getRelationships()[i])
+             << "\n";
   }
 
   return true;
@@ -365,7 +362,8 @@ static bool selectNodesWithCypher(CypherQueryExecutor &executor,
   return true;
 }
 
-static PDGQueryOptions buildAnalysisOptions(ProgramGraph &pdg, const Module &module,
+static PDGQueryOptions buildAnalysisOptions(ProgramGraph &pdg,
+                                            const Module &module,
                                             CypherQueryExecutor &executor) {
   PDGQueryOptions options;
   options.edge_preset = parseEdgePreset();
@@ -433,7 +431,8 @@ static void printResultJson(const PDGQueryResult &result) {
     for (size_t j = 0; j < result.witness_paths[i].nodes.size(); ++j) {
       if (j != 0)
         outs() << ",";
-      outs() << "\"" << jsonEscape(stableNodeKey(result.witness_paths[i].nodes[j]))
+      outs() << "\""
+             << jsonEscape(stableNodeKey(result.witness_paths[i].nodes[j]))
              << "\"";
     }
     outs() << "]";
@@ -486,9 +485,11 @@ static void printDiff(const DiffQueryResult &result) {
 
 static void printSummaryText(const SummaryQueryResult &result) {
   outs() << "function: "
-         << (result.summary.function ? result.summary.function->getName() : "<none>")
+         << (result.summary.function ? result.summary.function->getName()
+                                     : "<none>")
          << "\n";
-  outs() << "input_to_return: " << result.summary.input_to_return.size() << "\n";
+  outs() << "input_to_return: " << result.summary.input_to_return.size()
+         << "\n";
   outs() << "input_to_global_write: "
          << result.summary.input_to_global_write.size() << "\n";
   outs() << "input_to_callsite: " << result.summary.input_to_callsite.size()
@@ -497,7 +498,8 @@ static void printSummaryText(const SummaryQueryResult &result) {
   outs() << "global_writers: " << result.summary.global_writers.size() << "\n";
   outs() << "control_predicates: " << result.summary.control_predicates.size()
          << "\n";
-  outs() << "reachable_calls: " << result.summary.reachable_calls.size() << "\n";
+  outs() << "reachable_calls: " << result.summary.reachable_calls.size()
+         << "\n";
   if (!result.summary.may_allocate_resource_kinds.empty()) {
     outs() << "may_allocate_resource_kinds:";
     for (std::set<ResourceKind>::const_iterator it =
@@ -520,19 +522,23 @@ static void printSummaryJson(const SummaryQueryResult &result) {
   outs() << "{";
   outs() << "\"function\":\""
          << jsonEscape(result.summary.function
-                            ? result.summary.function->getName().str()
-                            : "")
+                           ? result.summary.function->getName().str()
+                           : "")
          << "\",";
-  outs() << "\"input_to_return\":" << result.summary.input_to_return.size() << ",";
+  outs() << "\"input_to_return\":" << result.summary.input_to_return.size()
+         << ",";
   outs() << "\"input_to_global_write\":"
          << result.summary.input_to_global_write.size() << ",";
   outs() << "\"input_to_callsite\":" << result.summary.input_to_callsite.size()
          << ",";
-  outs() << "\"global_readers\":" << result.summary.global_readers.size() << ",";
-  outs() << "\"global_writers\":" << result.summary.global_writers.size() << ",";
+  outs() << "\"global_readers\":" << result.summary.global_readers.size()
+         << ",";
+  outs() << "\"global_writers\":" << result.summary.global_writers.size()
+         << ",";
   outs() << "\"control_predicates\":"
          << result.summary.control_predicates.size() << ",";
-  outs() << "\"reachable_calls\":" << result.summary.reachable_calls.size() << ",";
+  outs() << "\"reachable_calls\":" << result.summary.reachable_calls.size()
+         << ",";
   outs() << "\"may_allocate_resource_kinds\":[";
   bool first = true;
   for (std::set<ResourceKind>::const_iterator it =
@@ -562,7 +568,8 @@ static void printImpactText(const ImpactQueryResult &result) {
   outs() << "transitively_impacted_nodes: "
          << result.transitively_impacted_nodes.nodes.size() << "\n";
   outs() << "impacted_functions:";
-  for (std::set<std::string>::const_iterator it = result.impacted_functions.begin();
+  for (std::set<std::string>::const_iterator it =
+           result.impacted_functions.begin();
        it != result.impacted_functions.end(); ++it)
     outs() << " " << *it;
   outs() << "\n";
@@ -578,7 +585,8 @@ static void printImpactText(const ImpactQueryResult &result) {
   for (size_t i = 0; i < result.ranked_impacts.size(); ++i) {
     outs() << "  " << result.ranked_impacts[i].stable_key
            << " dist=" << result.ranked_impacts[i].shortest_distance
-           << " crossings=" << result.ranked_impacts[i].interprocedural_crossings
+           << " crossings="
+           << result.ranked_impacts[i].interprocedural_crossings
            << " paths=" << result.ranked_impacts[i].path_count << "\n";
   }
 }
@@ -591,7 +599,8 @@ static void printImpactJson(const ImpactQueryResult &result) {
          << result.transitively_impacted_nodes.nodes.size() << ",";
   outs() << "\"impacted_functions\":[";
   bool first = true;
-  for (std::set<std::string>::const_iterator it = result.impacted_functions.begin();
+  for (std::set<std::string>::const_iterator it =
+           result.impacted_functions.begin();
        it != result.impacted_functions.end(); ++it) {
     if (!first)
       outs() << ",";
@@ -612,8 +621,8 @@ static void printImpactJson(const ImpactQueryResult &result) {
   for (size_t i = 0; i < result.ranked_impacts.size(); ++i) {
     if (i != 0)
       outs() << ",";
-    outs() << "{\"node\":\""
-           << jsonEscape(result.ranked_impacts[i].stable_key) << "\","
+    outs() << "{\"node\":\"" << jsonEscape(result.ranked_impacts[i].stable_key)
+           << "\","
            << "\"distance\":" << result.ranked_impacts[i].shortest_distance
            << ",\"crossings\":"
            << result.ranked_impacts[i].interprocedural_crossings
@@ -640,7 +649,8 @@ static void printResourceFlowJson(const ResourceFlowQueryResult &result) {
   outs() << "{";
   outs() << "\"acquire_sites\":" << result.acquire_sites.size() << ",";
   outs() << "\"release_sites\":" << result.release_sites.size() << ",";
-  outs() << "\"orphaned_resources\":" << result.orphaned_resources.size() << ",";
+  outs() << "\"orphaned_resources\":" << result.orphaned_resources.size()
+         << ",";
   outs() << "\"double_release_candidates\":"
          << result.double_release_candidates.size() << ",";
   outs() << "\"resource_kind_counts\":{";
@@ -651,8 +661,8 @@ static void printResourceFlowJson(const ResourceFlowQueryResult &result) {
     if (!first)
       outs() << ",";
     first = false;
-    outs() << "\"" << jsonEscape(resourceKindName(it->first)) << "\":"
-           << it->second;
+    outs() << "\"" << jsonEscape(resourceKindName(it->first))
+           << "\":" << it->second;
   }
   outs() << "}}\n";
 }
@@ -684,9 +694,11 @@ static bool executeAnalysis(ProgramGraph &pdg, const Module &module,
     criteria.property_specs.push_back(spec);
     if (AnalysisName.empty()) {
       if (SliceDirection == "forward")
-        const_cast<cl::opt<std::string> &>(AnalysisName).setValue("slice-forward");
+        const_cast<cl::opt<std::string> &>(AnalysisName)
+            .setValue("slice-forward");
       else
-        const_cast<cl::opt<std::string> &>(AnalysisName).setValue("slice-backward");
+        const_cast<cl::opt<std::string> &>(AnalysisName)
+            .setValue("slice-backward");
     }
   }
 
@@ -698,8 +710,10 @@ static bool executeAnalysis(ProgramGraph &pdg, const Module &module,
   if (criteria.empty() &&
       (AnalysisName != "live" && AnalysisName != "dead" &&
        AnalysisName != "resource-flow" &&
-       !(AnalysisName == "summary" && options.scope.kind == PDGQueryScope::Kind::Function))) {
-    errs() << "Analysis requires criteria. Use --criteria-query or --property-file\n";
+       !(AnalysisName == "summary" &&
+         options.scope.kind == PDGQueryScope::Kind::Function))) {
+    errs() << "Analysis requires criteria. Use --criteria-query or "
+              "--property-file\n";
     return false;
   }
 
@@ -738,7 +752,8 @@ static bool executeAnalysis(ProgramGraph &pdg, const Module &module,
       errs() << "chop requires --target-query\n";
       return false;
     }
-    PDGQueryResult result = slice_query.chop(criteria, targets, options, &module);
+    PDGQueryResult result =
+        slice_query.chop(criteria, targets, options, &module);
     if (Format == "json")
       printResultJson(result);
     else if (Format == "dot")
@@ -850,9 +865,10 @@ static bool executeAnalysis(ProgramGraph &pdg, const Module &module,
     ImpactPolicy policy;
     policy.changed_only = !baseline.empty();
     ImpactQueryResult result =
-        baseline.empty() ? impact_query.analyze(criteria, policy, options, &module)
-                         : impact_query.analyzeAgainstBaseline(
-                               criteria, baseline, policy, options, &module);
+        baseline.empty()
+            ? impact_query.analyze(criteria, policy, options, &module)
+            : impact_query.analyzeAgainstBaseline(criteria, baseline, policy,
+                                                  options, &module);
     if (Format == "json")
       printImpactJson(result);
     else

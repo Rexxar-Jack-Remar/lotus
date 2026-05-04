@@ -33,54 +33,53 @@
 
 using namespace lotus::lif::transform;
 
-LoopWrapper lotus::lif::transform::wrapLoop(
-    llvm::LoopInfo &LI, llvm::LLVMContext &Ctx
-) {
-    LoopWrapper LW(LI);
+LoopWrapper lotus::lif::transform::wrapLoop(llvm::LoopInfo &LI,
+                                            llvm::LLVMContext &Ctx) {
+  LoopWrapper LW(LI);
 
-    auto *BoolTy = llvm::IntegerType::getInt1Ty(Ctx);
-    auto *True = llvm::ConstantInt::getTrue(BoolTy);
-    auto *False = llvm::ConstantInt::getFalse(BoolTy);
+  auto *BoolTy = llvm::IntegerType::getInt1Ty(Ctx);
+  auto *True = llvm::ConstantInt::getTrue(BoolTy);
+  auto *False = llvm::ConstantInt::getFalse(BoolTy);
 
-    for (auto *L : LI.getLoopsInPreorder()) {
-        auto *Header = L->getHeader();
-        LW.Headers.insert(Header);
+  for (auto *L : LI.getLoopsInPreorder()) {
+    auto *Header = L->getHeader();
+    LW.Headers.insert(Header);
 
-        assert(L->getLoopPreheader() &&
-               "error: we require loops to have a preheader! please, run the "
-               "--loop-simplify pass.");
+    assert(L->getLoopPreheader() &&
+           "error: we require loops to have a preheader! please, run the "
+           "--loop-simplify pass.");
 
-        auto *Latch = L->getLoopLatch();
-        assert(
-            Latch &&
-            "error: we require loops to have a unique latch! please, run the "
-            "--loop-simplify pass.");
+    auto *Latch = L->getLoopLatch();
+    assert(Latch &&
+           "error: we require loops to have a unique latch! please, run the "
+           "--loop-simplify pass.");
 
-        // Save every loop latch for future use, if necessary.
-        LW.Latches.insert(Latch);
+    // Save every loop latch for future use, if necessary.
+    LW.Latches.insert(Latch);
 
-        // Insert a phi function to identify, during the execution, whether the
-        // backedge was taken or not.
-        auto NumHeaderPred = llvm::pred_size(Header);
-        auto *InsertionPoint = Header->getFirstNonPHI();
-        LW.FwedgeTakenPhi[Header] = llvm::PHINode::Create(
-            BoolTy, NumHeaderPred, "fwedge.taken", InsertionPoint);
+    // Insert a phi function to identify, during the execution, whether the
+    // backedge was taken or not.
+    auto NumHeaderPred = llvm::pred_size(Header);
+    auto *InsertionPoint = Header->getFirstNonPHI();
+    LW.FwedgeTakenPhi[Header] = llvm::PHINode::Create(
+        BoolTy, NumHeaderPred, "fwedge.taken", InsertionPoint);
 
-        LW.FwedgeTakenPhi[Header]->addIncoming(True, L->getLoopPreheader());
-        LW.FwedgeTakenPhi[Header]->addIncoming(False, Latch);
+    LW.FwedgeTakenPhi[Header]->addIncoming(True, L->getLoopPreheader());
+    LW.FwedgeTakenPhi[Header]->addIncoming(False, Latch);
 
-        llvm::SmallVector<llvm::BasicBlock *, 4> ExitingBlocks;
-        L->getExitingBlocks(ExitingBlocks);
+    llvm::SmallVector<llvm::BasicBlock *, 4> ExitingBlocks;
+    L->getExitingBlocks(ExitingBlocks);
 
-        for (auto *Exiting : ExitingBlocks) {
-            LW.ExitingBlocks.insert(Exiting);
-        }
-
-        // Save every loop exit block as well.
-        llvm::SmallVector<llvm::BasicBlock *, 4> ExitBlocks;
-        L->getExitBlocks(ExitBlocks);
-        for (auto *Exit : ExitBlocks) LW.ExitBlocks.insert(Exit);
+    for (auto *Exiting : ExitingBlocks) {
+      LW.ExitingBlocks.insert(Exiting);
     }
 
-    return LW;
+    // Save every loop exit block as well.
+    llvm::SmallVector<llvm::BasicBlock *, 4> ExitBlocks;
+    L->getExitBlocks(ExitBlocks);
+    for (auto *Exit : ExitBlocks)
+      LW.ExitBlocks.insert(Exit);
+  }
+
+  return LW;
 }

@@ -338,7 +338,8 @@ void printSolveMetadata(raw_ostream &OS, const ResultT &Result) {
 template <unsigned K, typename FactT, typename TransferT, typename NodeT>
 void printSolveMetadata(
     raw_ostream &OS,
-    const elimination::InterDataFlowResultT<K, FactT, TransferT, NodeT> &Result) {
+    const elimination::InterDataFlowResultT<K, FactT, TransferT, NodeT>
+        &Result) {
   if (!Result.hasSolveMetadata())
     return;
   OS << "  [solver] status=" << toString(Result.solveStatus()) << "\n";
@@ -461,8 +462,8 @@ void dumpInterproceduralResult(raw_ostream &OS, Module &M,
           continue;
         }
         for (const auto &Key : Contexts) {
-          OS << "  " << ValueToId.at(&I) << " IN ["
-             << contextToString(Key.Ctx) << "]: ";
+          OS << "  " << ValueToId.at(&I) << " IN [" << contextToString(Key.Ctx)
+             << "]: ";
           PrintState(Key, Result);
           OS << "\n";
         }
@@ -473,8 +474,8 @@ void dumpInterproceduralResult(raw_ostream &OS, Module &M,
 
 template <typename Runner, typename Printer>
 void runTimedInterproceduralAnalysis(raw_ostream &OS, Module &M,
-                                      Function &Entry, Runner &&Run,
-                                      Printer &&PrintState) {
+                                     Function &Entry, Runner &&Run,
+                                     Printer &&PrintState) {
   const auto Start = std::chrono::steady_clock::now();
   auto Result = Run(Entry);
   const auto Elapsed = std::chrono::duration_cast<std::chrono::microseconds>(
@@ -492,20 +493,21 @@ template <typename Runner>
 void runSetIntraAnalysis(raw_ostream &OS, const FunctionView &View,
                          const elimination::EliminationOptions &ElimOpts,
                          Runner &&Run) {
-  runTimedAnalysis(
-      OS, View, ElimOpts, std::forward<Runner>(Run),
-      [&](Instruction *I, auto &Result) {
-        lotus::dataflow_tool::formatValueSet(OS, Result.IN(I), View.ValueToId);
-      });
+  runTimedAnalysis(OS, View, ElimOpts, std::forward<Runner>(Run),
+                   [&](Instruction *I, auto &Result) {
+                     lotus::dataflow_tool::formatValueSet(OS, Result.IN(I),
+                                                          View.ValueToId);
+                   });
 }
 
 template <typename Runner>
 void runBoolIntraAnalysis(raw_ostream &OS, const FunctionView &View,
                           const elimination::EliminationOptions &ElimOpts,
                           Runner &&Run) {
-  runTimedAnalysis(
-      OS, View, ElimOpts, std::forward<Runner>(Run),
-      [&](Instruction *I, auto &Result) { OS << (Result.IN(I) ? "true" : "false"); });
+  runTimedAnalysis(OS, View, ElimOpts, std::forward<Runner>(Run),
+                   [&](Instruction *I, auto &Result) {
+                     OS << (Result.IN(I) ? "true" : "false");
+                   });
 }
 
 template <typename Runner>
@@ -612,26 +614,27 @@ void runReachable(raw_ostream &OS, const FunctionView &View,
 }
 
 void runInterLiveness(raw_ostream &OS, Module &M, Function &Entry) {
-  runSetInterAnalysis(
-      OS, M, Entry,
-      [](Function &F) { return elimination::runInterElimLiveVariables(&F); });
+  runSetInterAnalysis(OS, M, Entry, [](Function &F) {
+    return elimination::runInterElimLiveVariables(&F);
+  });
 }
 
 void runInterReachingDefinitions(raw_ostream &OS, Module &M, Function &Entry) {
   runSetInterAnalysis(OS, M, Entry, [](Function &F) {
-        return elimination::runInterElimReachingDefinitions(&F);
-      });
+    return elimination::runInterElimReachingDefinitions(&F);
+  });
 }
 
 void runInterUninitialized(raw_ostream &OS, Module &M, Function &Entry) {
-  runSetInterAnalysis(
-      OS, M, Entry,
-      [](Function &F) { return elimination::runInterElimUninitVariables(&F); });
+  runSetInterAnalysis(OS, M, Entry, [](Function &F) {
+    return elimination::runInterElimUninitVariables(&F);
+  });
 }
 
 void runInterConstantPropagation(raw_ostream &OS, Module &M, Function &Entry) {
   runMapInterAnalysis(
-      OS, M, Entry, [](Function &F) {
+      OS, M, Entry,
+      [](Function &F) {
         return elimination::runInterElimConstantPropagation(&F);
       },
       [&](const ValueLatticeElement &Value) {
@@ -640,9 +643,9 @@ void runInterConstantPropagation(raw_ostream &OS, Module &M, Function &Entry) {
 }
 
 void runInterReachable(raw_ostream &OS, Module &M, Function &Entry) {
-  runBoolInterAnalysis(
-      OS, M, Entry,
-      [](Function &F) { return elimination::runInterElimReachable(&F); });
+  runBoolInterAnalysis(OS, M, Entry, [](Function &F) {
+    return elimination::runInterElimReachable(&F);
+  });
 }
 
 struct AnalysisHandler final {

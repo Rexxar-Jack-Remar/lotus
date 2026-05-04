@@ -26,6 +26,9 @@
 #include "Security/LIF/Cond.h"
 #include "Security/LIF/Loop.h"
 
+#include <memory>
+#include <variant>
+
 #include <llvm/ADT/DenseMap.h>
 #include <llvm/ADT/DenseSet.h>
 #include <llvm/ADT/SmallPtrSet.h>
@@ -37,28 +40,25 @@
 #include <llvm/IR/Instructions.h>
 #include <llvm/IR/PassManager.h>
 
-#include <memory>
-#include <variant>
-
 namespace lotus::lif::transform {
 /// A wrapper around a function to store additional information.
 struct FuncWrapper {
-    /// The wrapped function.
-    llvm::Function &F;
-    /// Map of outgoing conditions for each basic block (see Cond.h).
-    OutMap OM;
-    /// Map of incoming conditions for each basic block (see Cond.h).
-    InMap IM;
-    /// Set of tainted values (global + local).
-    llvm::DenseSet<llvm::Value *> Tainted;
-    /// Instructions produced during the program transformation, which
-    /// do not need to be rewritten.
-    llvm::SmallPtrSet<llvm::Instruction *, 32> Skip;
-    /// A wrapper to extend informations about loops (see Loop.h).
-    std::unique_ptr<LoopWrapper> LW;
-    /// Takes a function \p F and produces a wrapper to extend \p F with useful
-    /// information.
-    FuncWrapper(llvm::Function &F) : F(F) {}
+  /// The wrapped function.
+  llvm::Function &F;
+  /// Map of outgoing conditions for each basic block (see Cond.h).
+  OutMap OM;
+  /// Map of incoming conditions for each basic block (see Cond.h).
+  InMap IM;
+  /// Set of tainted values (global + local).
+  llvm::DenseSet<llvm::Value *> Tainted;
+  /// Instructions produced during the program transformation, which
+  /// do not need to be rewritten.
+  llvm::SmallPtrSet<llvm::Instruction *, 32> Skip;
+  /// A wrapper to extend informations about loops (see Loop.h).
+  std::unique_ptr<LoopWrapper> LW;
+  /// Takes a function \p F and produces a wrapper to extend \p F with useful
+  /// information.
+  FuncWrapper(llvm::Function &F) : F(F) {}
 };
 
 /// The length of a value is represented as a list of llvm::Values. For
@@ -70,11 +70,11 @@ struct FuncWrapper {
 using ValueLength = std::shared_ptr<std::vector<llvm::Value *>>;
 
 inline ValueLength copyLength(ValueLength &Length) {
-    return ValueLength(Length);
+  return ValueLength(Length);
 }
 
 inline ValueLength makeLength(const std::vector<llvm::Value *> &Length) {
-    return std::make_shared<std::vector<llvm::Value *>>(Length);
+  return std::make_shared<std::vector<llvm::Value *>>(Length);
 }
 
 using LenMap = llvm::DenseMap<llvm::Value *, ValueLength>;
@@ -147,36 +147,32 @@ void rewriteFunc(FuncWrapper *FW, LenMap &LM,
 /// TODO: move to another file? This doesn't really relate to functions.
 ///
 /// \returns a list of the basic blocks that make up BB's influence region.
-std::vector<llvm::BasicBlock *> influenceRegion(
-    llvm::BasicBlock *BB, llvm::BasicBlock *PDom
-);
+std::vector<llvm::BasicBlock *> influenceRegion(llvm::BasicBlock *BB,
+                                                llvm::BasicBlock *PDom);
 
 /// If F has any tainted call site or F has any pointer argument, we
 /// augment its interface with wrapped structs and entry block condition.
 ///
 /// \returns The new function or nullptr if there's no change.
-llvm::Function *augmentInterface(
-    llvm::Function &F, llvm::DenseMap<llvm::Type *,
-    llvm::Type *> &WrappedTypes,
-    llvm::DenseMap<llvm::Type *, llvm::Type *> &UnwrappedTypes,
-    bool IsTaintedCallee
-);
+llvm::Function *
+augmentInterface(llvm::Function &F,
+                 llvm::DenseMap<llvm::Type *, llvm::Type *> &WrappedTypes,
+                 llvm::DenseMap<llvm::Type *, llvm::Type *> &UnwrappedTypes,
+                 bool IsTaintedCallee);
 
 /// Fix the call sites of a function that had its interface modified.
-void fixCallSites(
-    llvm::Function *OldF, llvm::Function *NewF, bool IsTaintedCallee,
-    llvm::DenseMap<llvm::Function *, std::unique_ptr<FuncWrapper>> &WrappedFuncs,
-    llvm::DenseMap<llvm::Type *, llvm::Type *> &WrappedTypes
-);
+void fixCallSites(llvm::Function *OldF, llvm::Function *NewF,
+                  bool IsTaintedCallee,
+                  llvm::DenseMap<llvm::Function *, std::unique_ptr<FuncWrapper>>
+                      &WrappedFuncs,
+                  llvm::DenseMap<llvm::Type *, llvm::Type *> &WrappedTypes);
 
 /// Takes a function \p F, computes its block (outgoing) & edge (incoming)
 /// conditions and wrap everything together into a single structure.
 ///
 /// \returns The wrapped function.
-FuncWrapper wrapFunc(
-    llvm::Function &F, llvm::DenseSet<llvm::Value *> &Tainted,
-    llvm::FunctionAnalysisManager &FAM
-);
+FuncWrapper wrapFunc(llvm::Function &F, llvm::DenseSet<llvm::Value *> &Tainted,
+                     llvm::FunctionAnalysisManager &FAM);
 } // namespace lotus::lif::transform
 
 #endif

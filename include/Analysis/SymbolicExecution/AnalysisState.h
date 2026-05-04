@@ -5,10 +5,10 @@
 
 #include "Analysis/SymbolicExecution/AnalysisLimit.h"
 #include "Analysis/SymbolicExecution/ConstraintRepr.h"
+#include "Analysis/SymbolicExecution/GVFGUtility.h"
 #include "Analysis/SymbolicExecution/PathCondSolver.h"
 #include "Analysis/SymbolicExecution/ProgramVar.h"
 #include "Analysis/SymbolicExecution/PropertyValue.h"
-#include "Analysis/SymbolicExecution/GVFGUtility.h"
 
 #include <mutex>
 #include <tuple>

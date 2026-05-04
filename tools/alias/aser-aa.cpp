@@ -5,7 +5,6 @@
  * sensitivities and solver algorithms.
  */
 
-#include "Alias/Infrastructure/AliasAnalysisWrapper/CLIUtils.h"
 #include "Alias/InclusionBased/AserPTA/PTADriver.h"
 #include "Alias/InclusionBased/AserPTA/PointerAnalysis/Context/KCallSite.h"
 #include "Alias/InclusionBased/AserPTA/PointerAnalysis/Context/KOrigin.h"
@@ -19,6 +18,7 @@
 #include "Alias/InclusionBased/AserPTA/PointerAnalysis/Solver/PointsTo/BitVectorPTS.h"
 #include "Alias/InclusionBased/AserPTA/PointerAnalysis/Solver/PointsTo/PointsToSelector.h"
 #include "Alias/InclusionBased/AserPTA/PointerAnalysis/Solver/WavePropagation.h"
+#include "Alias/Infrastructure/AliasAnalysisWrapper/CLIUtils.h"
 #include "Alias/Infrastructure/Spec/AliasSpecManager.h"
 
 #include <llvm/ADT/Statistic.h>

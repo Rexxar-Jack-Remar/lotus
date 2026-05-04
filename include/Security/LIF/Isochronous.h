@@ -36,13 +36,13 @@ namespace lotus::lif::transform {
 ///
 /// Requirement: functions must have unique exit points.
 class IsochronousPass : public llvm::PassInfoMixin<IsochronousPass> {
-  public:
-    /// Traverses the module \p M transforming functions into isochronous
-    /// versions.
-    ///
-    /// \returns the set of analyses preserved after running this pass.
-    llvm::PreservedAnalyses run(llvm::Module &M,
-                                llvm::ModuleAnalysisManager &MAM);
+public:
+  /// Traverses the module \p M transforming functions into isochronous
+  /// versions.
+  ///
+  /// \returns the set of analyses preserved after running this pass.
+  llvm::PreservedAnalyses run(llvm::Module &M,
+                              llvm::ModuleAnalysisManager &MAM);
 };
 } // namespace lotus::lif::transform
 

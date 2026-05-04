@@ -37,29 +37,29 @@ namespace lotus::lif::transform {
 /// isochronous pass, such as the phi-functions associated with predicates that
 /// branch to outside the loop (see function prepare).
 struct LoopWrapper {
-    /// LoopInfo produced by running LoopAnalysis.
-    llvm::LoopInfo &LI;
-    /// A map between the predicate that governs the outcome of a loop exiting,
-    /// and the associated phi-functions inserted at the loop header.
-    llvm::DenseMap<llvm::Value *, llvm::PHINode *> ExitPredPhi;
-    /// A map between a loop header and its corresponding phi function that says
-    /// whether the forward edge was taken or not.
-    llvm::DenseMap<llvm::BasicBlock *, llvm::PHINode *> FwedgeTakenPhi;
-    /// A set containing all the loop latches, so it is easy to check if a
-    /// basic block is one of them.
-    llvm::SmallPtrSet<llvm::BasicBlock *, 32> Latches;
-    /// A set containing all the loop headers, so it is easy to check if a
-    /// basic block is one of them.
-    llvm::SmallPtrSet<llvm::BasicBlock *, 32> Headers;
-    /// A set containing all the loop exiting blocks, so it is easy to check
-    /// if a basic block is one of them.
-    llvm::SmallPtrSet<llvm::BasicBlock *, 32> ExitingBlocks;
-    /// A set containing all the loop exit blocks, so it is easy to check if a
-    /// basic block is one of them.
-    llvm::SmallPtrSet<llvm::BasicBlock *, 32> ExitBlocks;
-    /// Takes LoopInfo and produces a wrapper to extend \p LI with useful
-    /// information.
-    LoopWrapper(llvm::LoopInfo &LI) : LI(LI) {}
+  /// LoopInfo produced by running LoopAnalysis.
+  llvm::LoopInfo &LI;
+  /// A map between the predicate that governs the outcome of a loop exiting,
+  /// and the associated phi-functions inserted at the loop header.
+  llvm::DenseMap<llvm::Value *, llvm::PHINode *> ExitPredPhi;
+  /// A map between a loop header and its corresponding phi function that says
+  /// whether the forward edge was taken or not.
+  llvm::DenseMap<llvm::BasicBlock *, llvm::PHINode *> FwedgeTakenPhi;
+  /// A set containing all the loop latches, so it is easy to check if a
+  /// basic block is one of them.
+  llvm::SmallPtrSet<llvm::BasicBlock *, 32> Latches;
+  /// A set containing all the loop headers, so it is easy to check if a
+  /// basic block is one of them.
+  llvm::SmallPtrSet<llvm::BasicBlock *, 32> Headers;
+  /// A set containing all the loop exiting blocks, so it is easy to check
+  /// if a basic block is one of them.
+  llvm::SmallPtrSet<llvm::BasicBlock *, 32> ExitingBlocks;
+  /// A set containing all the loop exit blocks, so it is easy to check if a
+  /// basic block is one of them.
+  llvm::SmallPtrSet<llvm::BasicBlock *, 32> ExitBlocks;
+  /// Takes LoopInfo and produces a wrapper to extend \p LI with useful
+  /// information.
+  LoopWrapper(llvm::LoopInfo &LI) : LI(LI) {}
 };
 
 /// In order to handle loops properly, we must insert a phi-function at the

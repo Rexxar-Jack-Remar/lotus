@@ -1,4 +1,3 @@
-#include "Analysis/Purity/ExternalPuritySummaryStore.h"
 #include "Alias/UnificationBased/seadsa/AllocSiteInfo.hh"
 #include "Alias/UnificationBased/seadsa/AllocWrapInfo.hh"
 #include "Alias/UnificationBased/seadsa/DsaAnalysis.hh"
@@ -6,6 +5,7 @@
 #include "Alias/UnificationBased/seadsa/InitializePasses.hh"
 #include "Alias/UnificationBased/seadsa/ShadowMem.hh"
 #include "Alias/UnificationBased/seadsa/support/RemovePtrToInt.hh"
+#include "Analysis/Purity/ExternalPuritySummaryStore.h"
 #include "Analysis/Purity/PurityInferenceDriver.h"
 
 #include <memory>
@@ -39,10 +39,10 @@ static cl::opt<std::string> InputFilename(cl::Positional,
                                           cl::desc("<input bitcode file>"),
                                           cl::Required, cl::cat(PurityCat));
 
-static cl::opt<std::string> SummaryFile(
-    "purity-summary-file",
-    cl::desc("Path to the external purity summary JSON store"),
-    cl::value_desc("filename"), cl::init(""), cl::cat(PurityCat));
+static cl::opt<std::string>
+    SummaryFile("purity-summary-file",
+                cl::desc("Path to the external purity summary JSON store"),
+                cl::value_desc("filename"), cl::init(""), cl::cat(PurityCat));
 
 static cl::opt<std::string>
     OutputFilename("o", cl::desc("Write the updated module to this file"),
@@ -62,11 +62,11 @@ static cl::opt<bool> ApplyAttributes(
     cl::desc("Materialize inferred readnone/readonly attributes in the module"),
     cl::init(false), cl::cat(PurityCat));
 
-static cl::opt<bool>
-    IncludeSuggested("include-suggested",
-                     cl::desc("Use suggested summaries in addition to validated "
-                              "ones during analysis"),
-                     cl::init(false), cl::cat(PurityCat));
+static cl::opt<bool> IncludeSuggested(
+    "include-suggested",
+    cl::desc("Use suggested summaries in addition to validated "
+             "ones during analysis"),
+    cl::init(false), cl::cat(PurityCat));
 
 static cl::list<std::string> InvalidateSummaries(
     "invalidate-summary",

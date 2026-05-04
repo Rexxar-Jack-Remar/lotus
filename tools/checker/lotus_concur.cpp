@@ -54,9 +54,10 @@ static cl::opt<bool> AnalysisOnly(
     "analysis-only",
     cl::desc("Run analysis only (no bug checking), dump analysis results"),
     cl::init(false));
-static cl::opt<bool> VerboseReports(
-    "v", cl::desc("Print trace and IR details for reported bugs"),
-    cl::init(false));
+static cl::opt<bool>
+    VerboseReports("v",
+                   cl::desc("Print trace and IR details for reported bugs"),
+                   cl::init(false));
 static cl::opt<std::string>
     AnalysisJsonOutput("analysis-json",
                        cl::desc("Output analysis results as JSON to specified "
@@ -244,9 +245,8 @@ int main(int argc, char **argv) {
     auto targets = lotus::fuzzing::collectTargets(findings);
 
     std::string errorMessage;
-    if (!lotus::fuzzing::writeTargetsToFile(targets,
-                                            report_options::TargetsOutputFile,
-                                            &errorMessage)) {
+    if (!lotus::fuzzing::writeTargetsToFile(
+            targets, report_options::TargetsOutputFile, &errorMessage)) {
       errs() << "Error writing fuzz targets: " << errorMessage << "\n";
       return 1;
     }

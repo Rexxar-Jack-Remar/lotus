@@ -30,9 +30,9 @@
 ///
 //===----------------------------------------------------------------------===//
 
-#include "Security/LIF/Taint.h"
 #include "Security/LIF/CCFG.h"
 #include "Security/LIF/Isochronous.h"
+#include "Security/LIF/Taint.h"
 
 #include <llvm/ADT/DenseSet.h>
 #include <llvm/ADT/PostOrderIterator.h>
@@ -88,95 +88,92 @@ const std::map<OptLevel, llvm::OptimizationLevel> OptM = {
 
 /// An optional argument that specifies whether the tool should optimize the
 /// original & transformed functions.
-static llvm::cl::opt<OptLevel> Opt(
-    llvm::cl::desc("Optimization level"),
-    llvm::cl::values(clEnumVal(O0, "Optimization level 0"),
-                     clEnumVal(O1, "Optimization level 1"),
-                     clEnumVal(O2, "Optimization level 2"),
-                     clEnumVal(O3, "Optimization level 3")),
-    llvm::cl::init(O0), llvm::cl::cat(LifCategory));
+static llvm::cl::opt<OptLevel>
+    Opt(llvm::cl::desc("Optimization level"),
+        llvm::cl::values(clEnumVal(O0, "Optimization level 0"),
+                         clEnumVal(O1, "Optimization level 1"),
+                         clEnumVal(O2, "Optimization level 2"),
+                         clEnumVal(O3, "Optimization level 3")),
+        llvm::cl::init(O0), llvm::cl::cat(LifCategory));
 
 /// Applies the Isochronous pass to the selected functions.
 void runIsochronousPass(llvm::Module &M) {
-    llvm::PassInstrumentationCallbacks PIC;
-    llvm::StandardInstrumentations SI(/* DebugLogging */ false);
-    SI.registerCallbacks(PIC);
+  llvm::PassInstrumentationCallbacks PIC;
+  llvm::StandardInstrumentations SI(/* DebugLogging */ false);
+  SI.registerCallbacks(PIC);
 
-    llvm::PassBuilder PB(
-        nullptr, llvm::PipelineTuningOptions(), llvm::None, &PIC);
+  llvm::PassBuilder PB(nullptr, llvm::PipelineTuningOptions(), llvm::None,
+                       &PIC);
 
-    llvm::LoopAnalysisManager LAM;
-    llvm::FunctionAnalysisManager FAM;
-    llvm::CGSCCAnalysisManager CGAM;
-    llvm::ModuleAnalysisManager MAM;
+  llvm::LoopAnalysisManager LAM;
+  llvm::FunctionAnalysisManager FAM;
+  llvm::CGSCCAnalysisManager CGAM;
+  llvm::ModuleAnalysisManager MAM;
 
-    MAM.registerPass([&] { return lotus::lif::analysis::TaintAnalysis(); });
+  MAM.registerPass([&] { return lotus::lif::analysis::TaintAnalysis(); });
 
-    PB.registerLoopAnalyses(LAM);
-    PB.registerFunctionAnalyses(FAM);
-    PB.registerCGSCCAnalyses(CGAM);
-    PB.registerModuleAnalyses(MAM);
-    PB.crossRegisterProxies(LAM, FAM, CGAM, MAM);
+  PB.registerLoopAnalyses(LAM);
+  PB.registerFunctionAnalyses(FAM);
+  PB.registerCGSCCAnalyses(CGAM);
+  PB.registerModuleAnalyses(MAM);
+  PB.crossRegisterProxies(LAM, FAM, CGAM, MAM);
 
-    llvm::ModulePassManager MPM;
-    llvm::FunctionPassManager FPM;
+  llvm::ModulePassManager MPM;
+  llvm::FunctionPassManager FPM;
 
-    FPM.addPass(llvm::LowerSwitchPass());
-    FPM.addPass(llvm::UnifyFunctionExitNodesPass());
-    FPM.addPass(llvm::LoopSimplifyPass());
-    FPM.addPass(llvm::LCSSAPass());
-    FPM.addPass(llvm::PromotePass());
-    MPM.addPass(llvm::createModuleToFunctionPassAdaptor(std::move(FPM)));
+  FPM.addPass(llvm::LowerSwitchPass());
+  FPM.addPass(llvm::UnifyFunctionExitNodesPass());
+  FPM.addPass(llvm::LoopSimplifyPass());
+  FPM.addPass(llvm::LCSSAPass());
+  FPM.addPass(llvm::PromotePass());
+  MPM.addPass(llvm::createModuleToFunctionPassAdaptor(std::move(FPM)));
 
-    MPM.addPass(lotus::lif::transform::IsochronousPass());
+  MPM.addPass(lotus::lif::transform::IsochronousPass());
 
-    // TODO: is there any optimization that may break side-channel defenses?
-    if (Opt != O0) {
-        MPM.addPass(PB.buildPerModuleDefaultPipeline(OptM.find(Opt)->second));
-    }
+  // TODO: is there any optimization that may break side-channel defenses?
+  if (Opt != O0) {
+    MPM.addPass(PB.buildPerModuleDefaultPipeline(OptM.find(Opt)->second));
+  }
 
-    MPM.run(M, MAM);
-
+  MPM.run(M, MAM);
 }
 
 int main(int Argc, char **Argv) {
-    // Hide all options apart from the ones specific to this tool.
-    llvm::cl::HideUnrelatedOptions(LifCategory);
+  // Hide all options apart from the ones specific to this tool.
+  llvm::cl::HideUnrelatedOptions(LifCategory);
 
-    // Parse the command-line options that should be passed to the isochronous
-    // pass.
-    llvm::cl::ParseCommandLineOptions(
-        Argc, Argv,
-        "transforms functions into versions that are isochronous.\n");
+  // Parse the command-line options that should be passed to the isochronous
+  // pass.
+  llvm::cl::ParseCommandLineOptions(
+      Argc, Argv, "transforms functions into versions that are isochronous.\n");
 
-    // Makes sure llvm_shutdown() is called (which cleans up LLVM objects)
-    //  http://llvm.org/docs/ProgrammersManual.html#ending-execution-with-llvm-shutdown
-    llvm::llvm_shutdown_obj SDO;
+  // Makes sure llvm_shutdown() is called (which cleans up LLVM objects)
+  //  http://llvm.org/docs/ProgrammersManual.html#ending-execution-with-llvm-shutdown
+  llvm::llvm_shutdown_obj SDO;
 
-    // Parse the IR file passed on the command line.
-    llvm::SMDiagnostic Err;
-    llvm::LLVMContext Ctx;
-    std::unique_ptr<llvm::Module> M = parseIRFile(InputModule, Err, Ctx);
+  // Parse the IR file passed on the command line.
+  llvm::SMDiagnostic Err;
+  llvm::LLVMContext Ctx;
+  std::unique_ptr<llvm::Module> M = parseIRFile(InputModule, Err, Ctx);
 
-    if (!M) {
-        llvm::errs() << "Error reading bitcode file: " << InputModule << "\n";
-        Err.print(Argv[0], llvm::errs());
-        return 1;
-    }
+  if (!M) {
+    llvm::errs() << "Error reading bitcode file: " << InputModule << "\n";
+    Err.print(Argv[0], llvm::errs());
+    return 1;
+  }
 
+  runIsochronousPass(*M);
 
-    runIsochronousPass(*M);
+  std::error_code EC;
+  llvm::raw_fd_ostream OS(OutputModule.getValue(), EC);
 
-    std::error_code EC;
-    llvm::raw_fd_ostream OS(OutputModule.getValue(), EC);
+  if (EC) {
+    llvm::errs() << "Couldn't open " << OutputModule.getValue() << ": "
+                 << EC.message() << "\n";
+    return 1;
+  }
 
-    if (EC) {
-        llvm::errs() << "Couldn't open " << OutputModule.getValue() << ": "
-                     << EC.message() << "\n";
-        return 1;
-    }
-
-    M->print(OS, nullptr);
-    OS.close();
-    return 0;
+  M->print(OS, nullptr);
+  OS.close();
+  return 0;
 }

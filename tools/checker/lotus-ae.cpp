@@ -74,9 +74,10 @@ static cl::opt<bool>
     StrictCheckpointOpt("strict-checkpoint",
                         cl::desc("Fail when checkpoints remain unchecked"),
                         cl::init(true));
-static cl::opt<bool> VerboseReports(
-    "v", cl::desc("Print trace and IR details for reported bugs"),
-    cl::init(false));
+static cl::opt<bool>
+    VerboseReports("v",
+                   cl::desc("Print trace and IR details for reported bugs"),
+                   cl::init(false));
 
 int main(int argc, char **argv) {
   sys::PrintStackTraceOnErrorSignal(argv[0]);
@@ -84,11 +85,12 @@ int main(int argc, char **argv) {
   llvm_shutdown_obj Y;
   report_options::initializeReportOptions();
 
-  cl::ParseCommandLineOptions(argc, argv,
-                              "Abstract Execution Bug Detector\n"
-                              "  [options] <input-bitcode>\n"
-                              "  Use --all to run all checkers.\n"
-                              "  Use --report-json=<file> or --report-sarif=<file> for output.\n");
+  cl::ParseCommandLineOptions(
+      argc, argv,
+      "Abstract Execution Bug Detector\n"
+      "  [options] <input-bitcode>\n"
+      "  Use --all to run all checkers.\n"
+      "  Use --report-json=<file> or --report-sarif=<file> for output.\n");
 
   LLVMContext Context;
   SMDiagnostic Err;
@@ -179,9 +181,8 @@ int main(int argc, char **argv) {
     auto targets = lotus::fuzzing::collectTargets(findings);
 
     std::string errorMessage;
-    if (!lotus::fuzzing::writeTargetsToFile(targets,
-                                            report_options::TargetsOutputFile,
-                                            &errorMessage)) {
+    if (!lotus::fuzzing::writeTargetsToFile(
+            targets, report_options::TargetsOutputFile, &errorMessage)) {
       errs() << "Error writing fuzz targets: " << errorMessage << "\n";
       return 1;
     }

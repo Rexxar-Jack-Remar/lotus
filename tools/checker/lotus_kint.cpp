@@ -24,9 +24,10 @@ using namespace llvm;
 // Command line options
 static cl::opt<std::string> InputFilename(cl::Positional, cl::desc("<IR file>"),
                                           cl::Required);
-static cl::opt<bool> VerboseReports(
-    "v", cl::desc("Print trace and IR details for reported bugs"),
-    cl::init(false));
+static cl::opt<bool>
+    VerboseReports("v",
+                   cl::desc("Print trace and IR details for reported bugs"),
+                   cl::init(false));
 
 // registering pass (new pass manager).
 extern "C" ::llvm::PassPluginLibraryInfo LLVM_ATTRIBUTE_WEAK
@@ -202,9 +203,8 @@ int main(int argc, char **argv) {
     auto targets = lotus::fuzzing::collectTargets(findings);
 
     std::string errorMessage;
-    if (!lotus::fuzzing::writeTargetsToFile(targets,
-                                            report_options::TargetsOutputFile,
-                                            &errorMessage)) {
+    if (!lotus::fuzzing::writeTargetsToFile(
+            targets, report_options::TargetsOutputFile, &errorMessage)) {
       llvm::errs() << "Error writing fuzz targets: " << errorMessage << "\n";
       return 1;
     }

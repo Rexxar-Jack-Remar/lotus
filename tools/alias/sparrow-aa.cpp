@@ -10,11 +10,11 @@
  * context-sensitive variants (k-CFA, where 0 <= k <= 32).
  */
 
-#include "Alias/Infrastructure/AliasAnalysisWrapper/CLIUtils.h"
 #include "Alias/InclusionBased/SparrowAA/Andersen.h"
 #include "Alias/InclusionBased/SparrowAA/AndersenAA.h"
 #include "Alias/InclusionBased/SparrowAA/Log.h"
 #include "Alias/InclusionBased/SparrowAA/ResultUtils.h"
+#include "Alias/Infrastructure/AliasAnalysisWrapper/CLIUtils.h"
 
 #include <cstring>
 #include <memory>
@@ -41,7 +41,8 @@ static cl::OptionCategory
     SparrowAACategory("Sparrow-AA Options",
                       "Options for the Sparrow-AA pointer analysis tool");
 
-// Andersen analysis options (defined in lib/Alias/InclusionBased/SparrowAA/Andersen.cpp)
+// Andersen analysis options (defined in
+// lib/Alias/InclusionBased/SparrowAA/Andersen.cpp)
 extern cl::OptionCategory AndersenCategory;
 extern cl::opt<unsigned> AndersenKContext;
 extern cl::opt<bool> AndersenUseBDDPointsTo;
@@ -114,7 +115,8 @@ int main(int argc, char **argv) {
       "Andersen's Pointer Analysis Tool\n\n"
       "Subset-based, flow-insensitive, field-sensitive pointer analysis.\n\n"
       "Context Sensitivity:\n"
-      "  --andersen-k-cs=<k>      Select call-site sensitivity (0 <= k <= 32):\n"
+      "  --andersen-k-cs=<k>      Select call-site sensitivity (0 <= k <= "
+      "32):\n"
       "                            0 = context-insensitive (default)\n"
       "                            1 = 1-CFA\n"
       "                            2 = 2-CFA\n"

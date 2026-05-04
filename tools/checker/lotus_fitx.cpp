@@ -208,8 +208,8 @@ void writeOptionalReports(const BugReportMgr &mgr) {
                              sys::fs::OF_None);
     if (!EC) {
       mgr.generate_sarif_report(sarif_out, report_options::MinConfidenceScore);
-      outs() << "SARIF report written to: "
-             << report_options::SarifOutputFile << "\n";
+      outs() << "SARIF report written to: " << report_options::SarifOutputFile
+             << "\n";
     } else {
       errs() << "Error writing SARIF report: " << EC.message() << "\n";
     }
@@ -267,7 +267,8 @@ int main(int argc, char **argv) {
       argc, argv,
       "FiTx Bug Finder\n"
       "  Use -v to print the transition trace for each finding\n"
-      "  Use --report-json=<file> or --report-sarif=<file> for structured output\n");
+      "  Use --report-json=<file> or --report-sarif=<file> for structured "
+      "output\n");
 
   SMDiagnostic Err;
   LLVMContext Context;
