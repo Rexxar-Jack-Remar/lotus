@@ -18,18 +18,12 @@ At a glance:
   dominance, and structural reasoning. See :doc:`cfg`.
 - **Concurrency** (``lib/Concurrency``): Thread-aware analyses for
   multi-threaded code (MHP, lock sets, thread modeling). See :doc:`concurrency`.
-- **ConstantTime** (``lib/Security/ConstantTime``): Constant-time programming
-  analysis for secret-dependent side channels. See :doc:`crypto`.
 - **DebugInfo** (``lib/Analysis/DebugInfo``): Source-location and metadata
   extraction support. See :doc:`debug_info`.
 - **Loop** (``lib/Analysis/Loop``): Loop-dependence, iteration-space, and
   transformation-oriented loop analyses. See :doc:`loop`.
 - **NullPointer** (``lib/Analysis/NullPointer``): A family of nullness and
   null-flow analyses. See :doc:`null_pointer`.
-- **LIF** (``lib/Security/LIF``): Isochronous control-flow transformation for
-  side-channel mitigation.
-- **Spectre** (``lib/Security/Spectre``): Security-oriented cache
-  speculation analysis for detecting Spectre vulnerabilities. See :doc:`spectre`.
 - **TypeHirarchy** (``lib/Analysis/TypeHirarchy``): Type-hierarchy and vtable
   recovery for object-oriented code. See :doc:`type_hierarchy`.
 
@@ -43,9 +37,7 @@ details.
 
    cfg
    concurrency
-   crypto
    debug_info
    loop
    null_pointer
-   spectre
    type_hierarchy

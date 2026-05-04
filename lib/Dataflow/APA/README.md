@@ -1,18 +1,27 @@
 # Algebraic Program Analysis (the Elimination Method for Dataflow Analysis)
 
-This directory provides an **elimination-based** intraprocedural solver that computes dataflow solutions by progressively summarizing paths, conceptually similar to state elimination in automata / Gaussian elimination over path expressions.
+This directory provides **elimination-based** dataflow solvers that compute
+solutions by progressively summarizing paths, conceptually similar to state
+elimination in automata / Gaussian elimination over path expressions. The
+current implementation includes both intraprocedural elimination and a
+call-string-based interprocedural layer that reuses the intraprocedural solver
+per procedure/context.
 
 ## Positioning: what "APA" means here
 
 The directory is named `APA` because it implements an **algebraic, path-expression-based**
 style of analysis, including paper-style ADT elimination variants on reducible flowgraphs.
 
-However, this is **not** a full general-purpose implementation of all "Algebraic Program
-Analysis" machinery. In Lotus today, this component should be read as:
+However, this is **not** a full general-purpose implementation of all
+"Algebraic Program Analysis" machinery. In Lotus today, this component should
+be read as:
 
-- an **intraprocedural** APA-inspired elimination engine,
-- specialized to LLVM function CFGs,
-- aimed at MOP-style dataflow clients (reachable, const-prop, RD, liveness, etc.).
+- an APA-inspired elimination engine with strong **intraprocedural** support,
+- a lightweight **call-string-sensitive interprocedural** extension for selected
+  LLVM analyses,
+- specialized to LLVM CFG / ICFG clients,
+- aimed at MOP-style dataflow clients (reachable, const-prop, RD, liveness,
+  etc.).
 
 For broader interprocedural formulations, see other frameworks in this repository
 (e.g., IFDS/IDE, WPDS, and NPA modules).
@@ -25,9 +34,10 @@ The public API lives under `include/Dataflow/APA/`:
 include/Dataflow/APA/
 ├── APA.h                          # Canonical umbrella for the framework
 ├── Core/                          # Generic problem, path-expression, options, results
-├── Solver/                       # Solver facade and concrete elimination engines
+├── Solver/                        # Solver facades and concrete elimination engines
 ├── Adapters/LLVM/                 # LLVM CFG adapters
-├── Analyses/LLVM/Intra/            # Concrete LLVM analyses
+├── Analyses/LLVM/Intra/           # Concrete intraprocedural LLVM analyses
+├── Analyses/LLVM/Inter/           # Concrete call-string interprocedural analyses
 └── Passes/                        # Legacy-pass wrappers
 ```
 
@@ -37,30 +47,38 @@ compatibility aliases for an older pre-reorg layout.
 ### Quick include guide
 
 - Framework umbrella: `#include "Dataflow/APA/APA.h"`
-- Minimal framework surface: `Core/Problem.h`, `Core/Result.h`,
+- Minimal intraprocedural surface: `Core/Problem.h`, `Core/Result.h`,
   `Solver/Solver.h`, `Adapters/LLVM/ForwardProblem.h`
-- LLVM clients: `Analyses/LLVM/Intra/*.h`
+- Minimal interprocedural surface: `Core/InterProblem.h`, `Core/InterResult.h`,
+  `Solver/InterSolver.h`
+- LLVM clients: `Analyses/LLVM/Intra/*.h` and `Analyses/LLVM/Inter/*.h`
 - Passes: `#include "Dataflow/APA/Passes/EliminationPasses.h"`
 - Internal engine headers: `Solver/SolverContext.h` and the concrete
   `*Solver.h` files are solver internals; downstream clients should normally
-  include only `Solver/Solver.h`.
+  include only `Solver/Solver.h` or `Solver/InterSolver.h`.
 
 ## References
 
 ### Classical Elimination-Based Dataflow Analysis
 
+NOTE: some of them may not use path expressions.
+
 - Static Analysis by Elimination. Pavle Subotic, Andrew E. Santosa,  and
 Bernhard Scholz.
-- ETAPS ’07:  A new elimination-based data flow analysis framework using
+- ETAPS’07:  A new elimination-based data flow analysis framework using
 annotated decomposition trees. B. Scholz and J. Blieberger.
-- CSUR 86: Elimination Algorithms for Data Flow Analysis. Babara Ryder and Marvin Paull.
+- TOPLAS'98: A new framework for elimination-based data flow analysis using DJ graphs. V. C. Sreedhar, G. R. Gao, and Y.-F. Lee. 
+- CSUR'86: Elimination Algorithms for Data Flow Analysis. Babara Ryder and Marvin Paull.
+- JACM'79: Applications of path compression on balanced trees. R. Tarjan.
+- JACM'76: Fast and usually linear algorithm for global flow analysis. S. L. Graham and M. Wegman.
+- SIAM J. Comput'77: A simple algorithm for global data flow analysis problems. M. S. Hecht and J. D. Ullman.
 
-### Algebraic Program Analysis (Reps & Kincaid)
+### Algebraic Program Analysis (Reps & Kincaid, etc.)
 
-- CAV 2021: Algebraic Program Analysis (Tutorial)
-- POPL 19: Refinement of Path Expressions for Static Analysis. John Cypher, Jason Breck, Zak Kincaid, Thomas Reps.
-- PLDI 2017: Compositional Recurrence Analysis Revisited
-- FMCAD 2015: Compositional Recurrence Analysis 
+- CAV'21: Algebraic Program Analysis (Tutorial)
+- POPL'19: Refinement of Path Expressions for Static Analysis. John Cypher, Jason Breck, Zak Kincaid, Thomas Reps.
+- PLDI'17: Compositional Recurrence Analysis Revisited
+- FMCAD'15: Compositional Recurrence Analysis 
 
 
 ## What it computes
@@ -86,8 +104,9 @@ The APA solver is different:
 ## Layering
 
 - `Core/` is generic and does not depend on LLVM.
-- `Solver/` is generic and builds/evaluates path expressions.
-- `Adapters/LLVM/` maps LLVM CFGs into the generic problem interface.
+- `Solver/` contains both the generic intraprocedural elimination engines and
+  the call-string interprocedural worklist solver.
+- `Adapters/LLVM/` maps LLVM CFGs / ICFGs into the generic problem interfaces.
 - `Analyses/LLVM/` supplies lattice semantics and transfer behavior for concrete
   analyses.
 
@@ -97,7 +116,9 @@ LLVM-specific modeling.
 
 ## Current gaps / non-goals
 
-- **Not interprocedural**: this solver works within a single function CFG.
+- **Interprocedural support is deliberately lightweight**: the current solver is
+  call-string based, solves one procedure/context at a time, and does not claim
+  parity with the repository's IFDS/IDE, WPDS, or NPA frameworks.
 - **Not a universal semiring-equation engine**: it uses path-expression elimination with
   problem-defined `meet`/`applyTransfer`, rather than exposing the full range of algebraic
   solver variants used across APA literature.
@@ -106,8 +127,8 @@ LLVM-specific modeling.
 - **No claim of complete APA feature parity**: this module does not attempt to cover all
   formulations (e.g., every interprocedural or Newtonian/tensor-product variant).
 - **Engineering tradeoff**: path-expression growth can still be substantial on large CFGs;
-  this module focuses on practical intraprocedural analyses rather than full APA scalability
-  research coverage.
+  this module focuses on practical LLVM analyses rather than full APA
+  scalability research coverage.
 
 ## Solver methods
 
@@ -147,6 +168,50 @@ The synthesized reducible view accepts ADT only when all nodes are entry-reachab
 immediate dominators are computable, and the non-back-edge subgraph is acyclic
 with entry first in topological order.
 
+## Interprocedural call-string solver
+
+Interprocedural APA clients are modeled by
+`elimination::InterEliminationProblem` and solved by
+`elimination::InterEliminationSolver<AnalysisDomainTy, K>`. The solver is
+context-sensitive via bounded call strings, using
+`mono::CallStringCTX<Instruction *, K>` as the context representation.
+
+The solver proceeds by:
+
+- maintaining `IN` / `OUT` facts keyed by `(instruction, call-string context)`,
+- computing a boundary fact for one procedure/context from `callFlow` or
+  `returnFlow`,
+- solving that single procedure with the existing `IntraEliminationSolver`,
+- propagating changes across normal, call, return, and call-to-return edges in
+  the ICFG worklist.
+
+Clients provide four interprocedural hooks on top of the normal-flow lattice:
+
+- `callFlow(CallSite, Callee, In)` to build the callee-entry fact,
+- `returnFlow(CallSite, Callee, ExitStmt, RetSite, In)` to map callee exit facts
+  back to the caller,
+- `callToRetFlow(CallSite, RetSite, Callees, In)` for the bypass edge,
+- `getCalleesOfCallAt(CallSite)` for call resolution.
+
+The default LLVM adapter `LLVMInterEliminationProblem` handles direct calls,
+provides a conservative signature-based fallback for indirect calls, and can
+optionally warn when indirect-call resolution is missing.
+
+### Context sensitivity
+
+The shipped interprocedural analyses currently use a default call-string bound
+of `K = 2`:
+
+- `kDefaultInterElimReachabilityCallStringLength`
+- `kDefaultInterElimConstantPropagationCallStringLength`
+- `kDefaultInterElimUninitVariablesCallStringLength`
+- `kDefaultInterElimReachingDefinitionsCallStringLength`
+- `kDefaultInterElimLiveVariablesCallStringLength`
+- `kDefaultInterElimLocksetCallStringLength`
+
+`K = 0` is also supported by the generic solver and degenerates to
+context-insensitive return propagation.
+
 
 ## Intraprocedural LLVM analyses
 
@@ -165,8 +230,21 @@ paper), and serve as examples for adding additional analyses:
 - Non-null propagation (`runIntraElimNonNull`)
 - Sign analysis (`runIntraElimSignAnalysis`)
 
-Interprocedural call-string clients are also available for selected analyses,
-including may-lockset analysis (`runInterElimLockset`).
+## Interprocedural LLVM analyses
+
+Selected LLVM analyses also expose call-string-sensitive entry points:
+
+- Reachability (`runInterElimReachable`)
+- Constant propagation (`runInterElimConstantPropagation`)
+- Uninitialized variables (`runInterElimUninitVariables`)
+- Reaching definitions (`runInterElimReachingDefinitions`)
+- Live variables (`runInterElimLiveVariables`)
+- Lockset analysis (`runInterElimLockset`)
+
+These clients reuse the same elimination machinery inside each procedure but
+define analysis-specific `callFlow`, `returnFlow`, and `callToRetFlow`
+semantics for argument passing, return-value transport, global facts, and
+memory effects.
 
 ## LLVM pass wrappers
 
@@ -212,9 +290,10 @@ counters.
   `Ok`, `FallbackToState`, `NonConvergentStar`, `InvalidProblem`.
 - `IntraEliminationSolver::getDiagnostics()` reports method/fallback/counters.
 - `DataFlowResultT` uses explicit read lookup:
-  - `containsNode(node)`
-  - `tryIN(node)` (nullable pointer)
-  and no longer returns implicit default facts for missing nodes.
+  `containsNode(node)` and `tryIN(node)` (nullable pointer), and no longer
+  returns implicit default facts for missing nodes.
+- `InterDataFlowResultT<K, ...>` extends the context-sensitive result type with
+  `tryIN(inst, ctx)`, `tryOUT(inst, ctx)`, and `contextsForInstruction(inst)`.
 
 ## Analysis coverage notes
 

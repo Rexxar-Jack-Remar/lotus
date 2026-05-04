@@ -35,6 +35,7 @@ Lotus is a comprehensive program analysis, verification, and optimization framew
    ir/index
    ml/index
    optimization/index
+   security/index
    solvers/index
    transform/index
    utils/index
