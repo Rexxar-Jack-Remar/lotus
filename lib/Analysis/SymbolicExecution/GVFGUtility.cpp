@@ -1,4 +1,4 @@
-#include "Analysis/SymbolicExecution/SegUtility.h"
+#include "Analysis/SymbolicExecution/GVFGUtility.h"
 
 #include "Analysis/SymbolicExecution/MemoryAPI.h"
 #include "Analysis/SymbolicExecution/ProgramVar.h"
@@ -10,7 +10,7 @@
 using namespace llvm;
 using namespace SymbolicExecution;
 
-namespace seg_utility {
+namespace gvfg_utility {
 
 namespace {
 
@@ -365,4 +365,4 @@ uint64_t getElementOffset(StructType *St, unsigned Idx) {
   return Analysis.dl->getStructLayout(St)->getElementOffset(Idx);
 }
 
-} // namespace seg_utility
+} // namespace gvfg_utility

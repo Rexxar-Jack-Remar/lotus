@@ -1,6 +1,6 @@
 set(CanarySymbolicExecution_SOURCES
   AnalysisLimit.cpp
-  SegUtility.cpp
+  GVFGUtility.cpp
   BigInteger.cpp
   PropertyValue.cpp
   PropertyInteger.cpp

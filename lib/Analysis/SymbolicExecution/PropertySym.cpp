@@ -8,7 +8,7 @@
 #include "Analysis/SymbolicExecution/PropertyAllocator.h"
 #include "Analysis/SymbolicExecution/PropertyInteger.h"
 #include "Analysis/SymbolicExecution/PropertyValue.h"
-#include "Analysis/SymbolicExecution/SegUtility.h"
+#include "Analysis/SymbolicExecution/GVFGUtility.h"
 
 using namespace SymbolicExecution;
 
@@ -96,7 +96,7 @@ Function *PropertySymExpr::getEnclosingFunc() const {
   Function *Func = nullptr;
   for (auto Iter = coeffs.begin(), EIter = coeffs.end(); Iter != EIter;
        ++Iter) {
-    Function *CurFunc = seg_utility::getEnclosingFunc(Iter->first);
+    Function *CurFunc = gvfg_utility::getEnclosingFunc(Iter->first);
     if (CurFunc) {
       if (!Func) {
         Func = CurFunc;
@@ -292,5 +292,5 @@ size_t PropertySymExpr::hash() const {
   }
   Hashes.push_back(llvm::hash_value(offsets.getVal()));
 
-  return seg_utility::hashHelper(Hashes);
+  return gvfg_utility::hashHelper(Hashes);
 }

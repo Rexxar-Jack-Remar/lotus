@@ -3,7 +3,7 @@
 
 #include "Analysis/SymbolicExecution/BigInteger.h"
 #include "Analysis/SymbolicExecution/PropertyValue.h"
-#include "Analysis/SymbolicExecution/SegUtility.h"
+#include "Analysis/SymbolicExecution/GVFGUtility.h"
 #include "IR/GVFG/GuardedValueFlowSolver.h"
 #include "Solvers/SMT/LIBSMT/SMTFactory.h"
 

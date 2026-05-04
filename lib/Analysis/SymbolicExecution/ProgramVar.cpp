@@ -4,14 +4,14 @@
 
 #include "llvm/IR/Constants.h"
 
-#include "Analysis/SymbolicExecution/SegUtility.h"
+#include "Analysis/SymbolicExecution/GVFGUtility.h"
 
 #include <sstream>
 
 using namespace SymbolicExecution;
 
 std::string GuardedValueFlowNodeValue::getID() const {
-  return seg_utility::ptrToString(N);
+  return gvfg_utility::ptrToString(N);
 }
 
 size_t GuardedValueFlowNodeValue::hash() const {
@@ -29,7 +29,7 @@ AuxValue::AuxValue(Type *Ty, std::string N)
     : ProgramValue(VK_AUX), Ty(Ty), Name(std::move(N)) {}
 
 size_t AuxValue::hash() const {
-  return seg_utility::hashHelper(
+  return gvfg_utility::hashHelper(
       {std::hash<Type *>()(Ty), std::hash<std::string>()(Name)});
 }
 

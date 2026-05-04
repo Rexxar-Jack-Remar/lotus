@@ -1,4 +1,4 @@
-#include "Analysis/SymbolicExecution/SegUtility.h"
+#include "Analysis/SymbolicExecution/GVFGUtility.h"
 #include "TestUtils/LLVMHelpers.h"
 
 #include <llvm/IR/Instructions.h>
@@ -28,7 +28,7 @@ TEST_F(SymbolicExecutionSpecCompatTest,
   auto *call = findInstruction<CallInst>(*caller);
   ASSERT_NE(call, nullptr);
 
-  EXPECT_FALSE(seg_utility::isDefiniteCall(call));
+  EXPECT_FALSE(gvfg_utility::isDefiniteCall(call));
 }
 
 TEST_F(SymbolicExecutionSpecCompatTest, DefinedCallIsTreatedAsDefiniteCall) {
@@ -51,7 +51,7 @@ TEST_F(SymbolicExecutionSpecCompatTest, DefinedCallIsTreatedAsDefiniteCall) {
   auto *call = findInstruction<CallInst>(*caller);
   ASSERT_NE(call, nullptr);
 
-  EXPECT_TRUE(seg_utility::isDefiniteCall(call));
+  EXPECT_TRUE(gvfg_utility::isDefiniteCall(call));
 }
 
 TEST_F(SymbolicExecutionSpecCompatTest, HeapAllocSizeRecognizesAllocatorsOnly) {
@@ -72,21 +72,21 @@ TEST_F(SymbolicExecutionSpecCompatTest, HeapAllocSizeRecognizesAllocatorsOnly) {
 
   auto *malloc_call = findInstruction<CallInst>(*caller, "buf");
   ASSERT_NE(malloc_call, nullptr);
-  auto malloc_sizes = seg_utility::getMemSpec()->getHeapAllocSize(malloc_call);
+  auto malloc_sizes = gvfg_utility::getMemSpec()->getHeapAllocSize(malloc_call);
   ASSERT_EQ(malloc_sizes.size(), 1u);
   EXPECT_EQ(malloc_sizes[0], 0);
 
   auto *memcpy_call = findInstruction<CallInst>(*caller, "copy");
   ASSERT_NE(memcpy_call, nullptr);
-  EXPECT_TRUE(seg_utility::getMemSpec()->getHeapAllocSize(memcpy_call).empty());
+  EXPECT_TRUE(gvfg_utility::getMemSpec()->getHeapAllocSize(memcpy_call).empty());
 }
 
 TEST(SymbolicExecutionSpecCompatStandaloneTest,
      KnownLibCoverageIncludesCoreLibs) {
-  EXPECT_TRUE(seg_utility::isKnownLib("strlen"));
-  EXPECT_TRUE(seg_utility::isKnownLib("memcpy"));
-  EXPECT_TRUE(seg_utility::isKnownLib("recv"));
-  EXPECT_FALSE(seg_utility::isKnownLib("definitely_not_a_known_lib"));
+  EXPECT_TRUE(gvfg_utility::isKnownLib("strlen"));
+  EXPECT_TRUE(gvfg_utility::isKnownLib("memcpy"));
+  EXPECT_TRUE(gvfg_utility::isKnownLib("recv"));
+  EXPECT_FALSE(gvfg_utility::isKnownLib("definitely_not_a_known_lib"));
 }
 
 } // namespace

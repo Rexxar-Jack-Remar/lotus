@@ -8,7 +8,7 @@
 #include "Analysis/SymbolicExecution/PathCondSolver.h"
 #include "Analysis/SymbolicExecution/ProgramVar.h"
 #include "Analysis/SymbolicExecution/PropertyValue.h"
-#include "Analysis/SymbolicExecution/SegUtility.h"
+#include "Analysis/SymbolicExecution/GVFGUtility.h"
 
 #include <mutex>
 #include <tuple>
@@ -100,7 +100,7 @@ public:
   }
 
   size_t hash() const {
-    return seg_utility::hashHelper({Parent.hash(), Offset.hash()});
+    return gvfg_utility::hashHelper({Parent.hash(), Offset.hash()});
   }
 
   std::string getID() const {
@@ -132,7 +132,7 @@ public:
   }
 
   size_t hash() const {
-    return seg_utility::hashHelper({AP.hash(), Size.hash(), (unsigned)K});
+    return gvfg_utility::hashHelper({AP.hash(), Size.hash(), (unsigned)K});
   }
 
   bool isSymbolic() const;
@@ -683,7 +683,7 @@ public:
   }
 
   size_t hash() const override {
-    return seg_utility::hashHelper({QK, Q.hash(), (unsigned)Eq});
+    return gvfg_utility::hashHelper({QK, Q.hash(), (unsigned)Eq});
   }
 
   static bool classof(const NumericalQuery *V) {
@@ -741,7 +741,7 @@ public:
   }
 
   size_t hash() const override {
-    return seg_utility::hashHelper(
+    return gvfg_utility::hashHelper(
         {QK, BasePtr.hash(), Offset.hash(), AccSize.hash()});
   }
 

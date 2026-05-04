@@ -13,7 +13,7 @@
 #include "llvm/Support/CommandLine.h"
 
 #include "Analysis/SymbolicExecution/MemoryAPI.h"
-#include "Analysis/SymbolicExecution/SegUtility.h"
+#include "Analysis/SymbolicExecution/GVFGUtility.h"
 #include "Utils/Parallel/ThreadPool.h"
 
 #include <algorithm>
@@ -170,7 +170,7 @@ void AnalysisDriver::initBugType() {
   // executor can stay focused on state transfer and bug queries.
   // Parse comma-separated list of checkers if provided
   if (!SymexCheckers.empty()) {
-    std::string checkers = SymexCheckers;
+    std::string checkers = SymexCheckers.getValue();
     // Remove whitespace
     checkers.erase(std::remove_if(checkers.begin(), checkers.end(), ::isspace),
                    checkers.end());
@@ -291,8 +291,8 @@ void AnalysisDriver::runOnModuleParallel(Module *M) {
 
   // getFuncSeq returns a summary-friendly order over the call graph. We walk it
   // in reverse so callees tend to finish before callers ask for their summary.
-  seg_utility::getTopoOrder(*M);
-  const auto &FuncSeq = seg_utility::getFuncSeq();
+  gvfg_utility::getTopoOrder(*M);
+  const auto &FuncSeq = gvfg_utility::getFuncSeq();
   assert(!FuncSeq.empty());
 
   std::vector<GuardedValueFlowGraph *> Worklist;
@@ -305,12 +305,12 @@ void AnalysisDriver::runOnModuleParallel(Module *M) {
       continue;
     }
 
-    auto *Graph = seg_utility::getGraph(CurFunc);
+    auto *Graph = gvfg_utility::getGraph(CurFunc);
     if (!Graph) {
       continue;
     }
 
-    unsigned FunDepth = seg_utility::getFunctionDepth(CurFunc);
+    unsigned FunDepth = gvfg_utility::getFunctionDepth(CurFunc);
     if (FunDepth > AnalysisLimit::FUNC_INLINE_LIMIT_V) {
       llvm::errs() << "Skip function " << CurFunc->getName()
                    << " due to inline threshold!\n";
@@ -330,7 +330,7 @@ void AnalysisDriver::runOnModuleParallel(Module *M) {
       Worklist, 1,
       [this, &NumRemain, &ProgressMtx](GuardedValueFlowGraph *Graph) {
         Function *CurFunc = Graph->getBaseFunction();
-        unsigned FunDepth = seg_utility::getFunctionDepth(CurFunc);
+        unsigned FunDepth = gvfg_utility::getFunctionDepth(CurFunc);
 
         {
           std::lock_guard<std::mutex> Lock(ProgressMtx);
@@ -356,14 +356,14 @@ void AnalysisDriver::runOnModule(Module *M) {
 
   // The sequential path uses the same scheduling policy as the parallel one so
   // summary availability and debugging behavior stay comparable.
-  seg_utility::getTopoOrder(*M);
-  const auto &FuncSeq = seg_utility::getFuncSeq();
+  gvfg_utility::getTopoOrder(*M);
+  const auto &FuncSeq = gvfg_utility::getFuncSeq();
   assert(!FuncSeq.empty());
 
   // The heartbleed bug: "ssl3_read_bytes"
   // Function *TargerFunc = M->getFunction("ssl3_read_bytes");
   // assert(TargerFunc);
-  // auto TargetSlice = seg_utility::getCallSlice(TargerFunc);
+  // auto TargetSlice = gvfg_utility::getCallSlice(TargerFunc);
 
   unsigned NumRemain = std::accumulate(FuncSeq.begin(), FuncSeq.end(), 0,
                                        [](unsigned Sum, Function *Fun) {
@@ -378,13 +378,13 @@ void AnalysisDriver::runOnModule(Module *M) {
   for (auto Iter = FuncSeq.rbegin(), EIter = FuncSeq.rend(); Iter != EIter;
        ++Iter) {
     Function *CurFunc = *Iter;
-    auto *Graph = seg_utility::getGraph(CurFunc);
+    auto *Graph = gvfg_utility::getGraph(CurFunc);
 
     if (!Graph) {
       continue;
     }
 
-    unsigned FunDepth = seg_utility::getFunctionDepth(CurFunc);
+    unsigned FunDepth = gvfg_utility::getFunctionDepth(CurFunc);
     if (FunDepth > AnalysisLimit::FUNC_INLINE_LIMIT_V) {
       llvm::errs() << "Skip function " << CurFunc->getName()
                    << " due to inline threshold!\n";

@@ -15,7 +15,7 @@ and delegates execution to `AnalysisDriver`.
 
 The usual analysis flow is:
 
-1. Initialize shared module context through `seg_utility`.
+1. Initialize shared module context through `gvfg_utility`.
 2. Build or query the per-function GVFG used as the symbolic execution graph.
 3. Run `AnalysisDriver` over functions, usually in a summary-friendly order.
 4. Propagate `AnalysisState` through GVFG nodes, memory operations, branches,
@@ -42,7 +42,7 @@ The usual analysis flow is:
   arithmetic.
 - `ConstraintRepr.*` and `PathCondSolver.*`: translate symbolic facts and path
   predicates into SMT expressions and satisfiability checks.
-- `MemoryAPI.*` and `SegUtility.*`: provide allocation modeling, library
+- `MemoryAPI.*` and `GVFGUtility.*`: provide allocation modeling, library
   compatibility hooks, data-layout queries, function-order helpers, and access
   to the active GVFG builder.
 - `TaintModel.*`: stores source, transfer, and sink specifications used when a
@@ -61,7 +61,7 @@ The usual analysis flow is:
 - `AnalysisState` tracks symbolic memory through access paths, points-to items,
   guarded value sets, and path conditions rather than through raw LLVM values
   alone.
-- `seg_utility` is the glue layer between the symbolic executor and other Lotus
+- `gvfg_utility` is the glue layer between the symbolic executor and other Lotus
   infrastructure. It hides module-global setup, graph lookup, library matching,
   and shared layout queries behind a narrow interface.
 - `TaintModel` is not the whole analysis by itself. Instead, it supplies one
@@ -82,5 +82,5 @@ evaluation alone describes.
 Public interfaces live under `include/Analysis/SymbolicExecution/`. New
 contributors usually want to start with `SymbolicExecutionWrapper.h`,
 `AnalysisDriver.h`, and `AnalysisState.h`, then read `ProgramVar.h`,
-`PropertyValue.h`, `PropertySym.h`, `SegUtility.h`, and `TaintModel.h` to see
+`PropertyValue.h`, `PropertySym.h`, `GVFGUtility.h`, and `TaintModel.h` to see
 how symbolic values, utility shims, and taint specifications fit together.

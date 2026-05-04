@@ -32,13 +32,13 @@ void extendExprWidth(SMTExpr &Expr, unsigned ExtWidth, bool SignExtend) {
 
 std::atomic<uint32_t> PathCondSolver::ID;
 
-// caution: init order! seg_utility should be inited before construction
+// caution: init order! gvfg_utility should be initialized before construction
 PathCondSolver::PathCondSolver() {
   SolverID = ID++;
-  assert(seg_utility::getDL() &&
+  assert(gvfg_utility::getDL() &&
          "PathCondSolver requires initialized DataLayout");
   GraphSolver = std::unique_ptr<GuardedValueFlowSolver>(
-      new GuardedValueFlowSolver(Fctry, *seg_utility::getDL()));
+      new GuardedValueFlowSolver(Fctry, *gvfg_utility::getDL()));
 }
 
 SMTExpr PathCondSolver::buildRegionCondition(GuardedValueFlowRegionNode *Cond) {
@@ -66,7 +66,7 @@ SMTExpr PathCondSolver::getExpr(Var V) {
         Val.getAs<GuardedValueFlowNodeValue>()->getNode());
   } else {
     std::string Symbol = Val.getAs<AuxValue>()->getName();
-    auto ValTySize = seg_utility::getTypeSizeInBits(Val.getType());
+    auto ValTySize = gvfg_utility::getTypeSizeInBits(Val.getType());
     // could happen for e.g., %struct.kwset_t = type opaque
     if (!ValTySize) {
       ValTySize = 8;

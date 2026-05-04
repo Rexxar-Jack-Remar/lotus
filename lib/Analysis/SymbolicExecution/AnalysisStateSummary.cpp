@@ -20,7 +20,6 @@
 #include "Analysis/SymbolicExecution/PropertyAllocator.h"
 #include "Analysis/SymbolicExecution/PropertyInteger.h"
 #include "Analysis/SymbolicExecution/PropertySym.h"
-#include "Analysis/SymbolicExecution/TSDataLayout.h"
 #include "Analysis/SymbolicExecution/TaintModel.h"
 
 #include <functional>

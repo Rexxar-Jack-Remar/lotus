@@ -22,7 +22,6 @@
 #include "Analysis/SymbolicExecution/PropertyAllocator.h"
 #include "Analysis/SymbolicExecution/PropertyInteger.h"
 #include "Analysis/SymbolicExecution/PropertySym.h"
-#include "Analysis/SymbolicExecution/TSDataLayout.h"
 #include "Analysis/SymbolicExecution/TaintModel.h"
 
 #include <functional>
@@ -227,7 +226,7 @@ GuardedSymbolicValSet GuardedSymbolicValSet::seqAdd(
 
 ProgramValuePtr CStringState::getLenVAtCaller(const ProgramValuePtr &LenV,
                                               Instruction *CS) {
-  std::string Name = LenV.getID() + "_" + seg_utility::ptrToString(CS);
+  std::string Name = LenV.getID() + "_" + gvfg_utility::ptrToString(CS);
   ProgramValuePtr LenVAtCaller(LenV.getType(), Name);
   return LenVAtCaller;
 }
@@ -274,7 +273,7 @@ ProgramValuePtr CStringState::getLenVariable(const ProgramValuePtr &Ptr,
   if (IsDirect) {
     Len = CurState.getNode(Loc);
   } else {
-    std::string Name = Ptr.getID() + "_len_" + seg_utility::ptrToString(Loc);
+    std::string Name = Ptr.getID() + "_len_" + gvfg_utility::ptrToString(Loc);
     Len = ProgramValuePtr(AnalysisState::NON_PTR_TY, Name);
   }
   return Len;

@@ -21,7 +21,6 @@
 #include "Analysis/SymbolicExecution/PropertyAllocator.h"
 #include "Analysis/SymbolicExecution/PropertyInteger.h"
 #include "Analysis/SymbolicExecution/PropertySym.h"
-#include "Analysis/SymbolicExecution/TSDataLayout.h"
 #include "Analysis/SymbolicExecution/TaintModel.h"
 
 #include <functional>
@@ -70,7 +69,7 @@ void AnalysisState::taintInit(Function *Func) {
 void AnalysisState::taintTransfer(Instruction *Inst) {
   auto OpC = Inst->getOpcode();
   if (OpC == Instruction::Call) {
-    if (!seg_utility::isDefiniteCall(Inst)) {
+    if (!gvfg_utility::isDefiniteCall(Inst)) {
       processCallTaintSources(Inst);
       processTaintPropagation(Inst);
     }
@@ -83,12 +82,12 @@ void AnalysisState::processCallTaintSources(Instruction *Inst) {
   // Declarations are where the taint model injects external source facts.
   // Defined callees are handled by normal summary import instead, which keeps
   // the source specification focused on library and environment boundaries.
-  Function *CalleeFunc = seg_utility::getCallee(Inst);
+  Function *CalleeFunc = gvfg_utility::getCallee(Inst);
   if (!CalleeFunc || !CalleeFunc->isDeclaration()) {
     return;
   }
 
-  std::set<Var> TaintedDsts = seg_utility::getTaintedVars(Inst, TaintSpec);
+  std::set<Var> TaintedDsts = gvfg_utility::getTaintedVars(Inst, TaintSpec);
   if (TaintedDsts.empty()) {
     return;
   }
@@ -281,7 +280,7 @@ AnalysisState::getTaintTransferTargets(Instruction *Inst) const {
   // At call sites we first ask the taint specification for explicit source to
   // destination transfers. If no model applies, fall back to a narrow set of
   // memory intrinsics whose dataflow is simple enough to encode locally.
-  assert(!seg_utility::isDefiniteCall(Inst));
+  assert(!gvfg_utility::isDefiniteCall(Inst));
   for (size_t Idx = 0; Idx < CS->arg_size(); ++Idx) {
     Value *ArgVal = CS->getArgOperand(Idx);
     if (!ArgVal) {
@@ -317,7 +316,7 @@ AnalysisState::getTaintTransferTargets(Instruction *Inst) const {
     return Res;
   }
 
-  Function *Callee = seg_utility::getCallee(Inst);
+  Function *Callee = gvfg_utility::getCallee(Inst);
   if (Callee && Callee->isIntrinsic()) {
     switch (Callee->getIntrinsicID()) {
     case Intrinsic::memset:

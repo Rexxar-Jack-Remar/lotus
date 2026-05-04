@@ -11,7 +11,7 @@
 
 #include "llvm/IR/Instructions.h"
 
-#include "Analysis/SymbolicExecution/SegUtility.h"
+#include "Analysis/SymbolicExecution/GVFGUtility.h"
 #include "Checker/Report/BugReport.h"
 #include "Checker/Report/BugReportMgr.h"
 #include "IR/GSA/GSA.h"
@@ -320,7 +320,7 @@ bool llvm::SymbolicExecutionWrapper::runOnModule(Module &M) {
   // symbolic state propagation and summary scheduling live underneath in
   // AnalysisDriver and AnalysisState.
   auto &builder = getAnalysis<lotus::gvfg::GuardedValueFlowGraphBuilderPass>();
-  seg_utility::initAnalysisInterface(&M, &M.getDataLayout(), &builder);
+  gvfg_utility::initAnalysisInterface(&M, &M.getDataLayout(), &builder);
 
   AnalysisDriver driver;
   driver.runOnModule(&M);

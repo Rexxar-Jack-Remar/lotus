@@ -3,7 +3,7 @@
 
 #include "llvm/Support/CommandLine.h"
 
-#include "Analysis/SymbolicExecution/SegUtility.h"
+#include "Analysis/SymbolicExecution/GVFGUtility.h"
 
 #include <map>
 

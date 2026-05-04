@@ -19,7 +19,7 @@ using lotus::gvfg::GuardedValueFlowRegionNode;
 
 class TaintModel;
 
-namespace seg_utility {
+namespace gvfg_utility {
 
 /// Compatibility layer for external-memory summaries used by symbolic memory
 /// modeling.
@@ -94,4 +94,4 @@ template <typename T> llvm::Value *getPointerOperand(T *V) {
   return V->getPointerOperand()->stripPointerCasts();
 }
 
-} // namespace seg_utility
+} // namespace gvfg_utility

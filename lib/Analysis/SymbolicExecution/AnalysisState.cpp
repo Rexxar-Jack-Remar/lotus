@@ -22,7 +22,6 @@
 #include "Analysis/SymbolicExecution/PropertyAllocator.h"
 #include "Analysis/SymbolicExecution/PropertyInteger.h"
 #include "Analysis/SymbolicExecution/PropertySym.h"
-#include "Analysis/SymbolicExecution/TSDataLayout.h"
 #include "Analysis/SymbolicExecution/TaintModel.h"
 
 #include <functional>
@@ -76,7 +75,7 @@ bool isFreeLikeFunction(const Function *callee) {
 AnalysisState::AnalysisState(SymexBugType BugTy, GuardedValueFlowGraph *Graph,
                              Function *Func)
     : BugTy(BugTy), Graph(Graph), F(Func),
-      TaintSpec(seg_utility::getTaintSpec()), Solver(new PathCondSolver()) {
+      TaintSpec(gvfg_utility::getTaintSpec()), Solver(new PathCondSolver()) {
   // Seed the entry state from the GVFG interface. Pointer-like formals start
   // with a symbolic heap object so later loads/stores have something to talk
   // about, while every argument also gets a symbolic register value because
@@ -136,7 +135,7 @@ PropertyValuePtr AnalysisState::computeOffsets(GEPOperator *GEP) {
     if (auto *st = dyn_cast<StructType>(current_type)) {
       const ConstantInt *ci = cast<ConstantInt>(index_operand);
       uint64_t Addend =
-          seg_utility::getElementOffset(st, (unsigned)ci->getZExtValue());
+          gvfg_utility::getElementOffset(st, (unsigned)ci->getZExtValue());
       ConstantOffset += static_cast<int64_t>(Addend);
       current_type =
           st->getElementType(static_cast<unsigned>(ci->getZExtValue()));
@@ -153,7 +152,7 @@ PropertyValuePtr AnalysisState::computeOffsets(GEPOperator *GEP) {
     else
       assert(false && "invalid GEP type");
 
-    uint64_t ElementSize = seg_utility::getTypeStoreSize(element_type);
+    uint64_t ElementSize = gvfg_utility::getTypeStoreSize(element_type);
     auto *IndexVal = getNode(index_operand);
     auto *CI = dyn_cast<ConstantInt>(IndexVal->getLLVMValue());
     if (CI) {
@@ -302,10 +301,10 @@ void AnalysisState::transfer(Instruction *Inst, AnalysisDriver &Driver) {
     break;
   }
   case llvm::Instruction::Call: {
-    Function *Callee = seg_utility::getCallee(Inst);
+    Function *Callee = gvfg_utility::getCallee(Inst);
     auto *CallI = cast<CallInst>(Inst);
 
-    auto AllocSizeArgsIdx = seg_utility::getMemSpec()->getHeapAllocSize(CallI);
+    auto AllocSizeArgsIdx = gvfg_utility::getMemSpec()->getHeapAllocSize(CallI);
     // The called function is a primitive memory allocation function (could
     // be defined or a lib).
     if (!AllocSizeArgsIdx.empty()) {
@@ -324,11 +323,11 @@ void AnalysisState::transfer(Instruction *Inst, AnalysisDriver &Driver) {
       // unbounded inlining.
       // Callee == nullptr, i.e., unresolved function pointers.
       // or Callee->isDeclaration()
-      if (!seg_utility::isDefiniteCall(Inst)) {
+      if (!gvfg_utility::isDefiniteCall(Inst)) {
         processLibraryCall(CallI);
       } else if (Driver.hasSummary(
                      Callee)) { // skip recursive calls, f call f itself.
-        unsigned FunDepth = seg_utility::getFunctionDepth(Callee);
+        unsigned FunDepth = gvfg_utility::getFunctionDepth(Callee);
         if (FunDepth > AnalysisLimit::FUNC_INLINE_LIMIT_V) {
           processAsUnknownLib(CallI);
         } else {
@@ -380,7 +379,7 @@ void AnalysisState::processAlloca(Instruction *Inst) {
   auto *NumElements = getNode(AllocI->getArraySize());
   auto *Dst = getNode(Inst);
 
-  uint64_t TySize = seg_utility::getTypeStoreSizeInBits(AllocatedTy);
+  uint64_t TySize = gvfg_utility::getTypeStoreSizeInBits(AllocatedTy);
   // For empty struct such as struct T {}
   if (TySize == 0) {
     TySize = 8;
@@ -519,7 +518,7 @@ void AnalysisState::processGEP(Instruction *Inst) {
   }
   OffsetVals = OffsetVals && IndexDataDeps;
 
-  auto *SrcPtr = getNode(seg_utility::getPointerOperand(GEP));
+  auto *SrcPtr = getNode(gvfg_utility::getPointerOperand(GEP));
   initPointsToTarget(SrcPtr, Inst);
 
   // `PropertySymExpr` offsets are computed in bytes, mirroring LLVM GEP
@@ -571,7 +570,7 @@ void AnalysisState::initPointsToTarget(const ProgramValuePtr &Ptr,
 
 void AnalysisState::processLoad(Instruction *Inst) {
   auto *LoadI = cast<LoadInst>(Inst);
-  auto *LdPtr = getNode(seg_utility::getPointerOperand(LoadI));
+  auto *LdPtr = getNode(gvfg_utility::getPointerOperand(LoadI));
 
   initPointsToTarget(LdPtr, Inst);
 
@@ -596,7 +595,7 @@ void AnalysisState::processLoadPtr(const ProgramValuePtr &Ptr,
     initSymbol(Ptr);
   }
 
-  auto Incomings = seg_utility::getIncomingValuesForLoad(LdMemNode);
+  auto Incomings = gvfg_utility::getIncomingValuesForLoad(LdMemNode);
 
   // Loads do not read a concrete heap cell here. Instead they merge the GVFG
   // producers that reach the memory node, guarded by the region condition that
@@ -678,7 +677,7 @@ void AnalysisState::processReturn() {
 // mark all the possible stores of constant zero values
 void AnalysisState::processStore(Instruction *Inst) {
   auto *StoreI = cast<StoreInst>(Inst);
-  ProgramValuePtr StPtr = getNode(seg_utility::getPointerOperand(StoreI));
+  ProgramValuePtr StPtr = getNode(gvfg_utility::getPointerOperand(StoreI));
   // The actual def-use effect of a store is represented in the GVFG. The local
   // transfer only makes sure the destination pointer has a memory object so BOF
   // and null/UAF queries can still reason about the access site itself.
@@ -860,26 +859,26 @@ void AnalysisState::processLibraryCall(CallInst *Inst) {
     }
   } else {
     Condition BBCond = getLocalCond(Inst->getParent());
-    auto *MemSpec = seg_utility::getMemSpec();
+    auto *MemSpec = gvfg_utility::getMemSpec();
     auto handleStringLen = [&](const ProgramValuePtr &Ptr, bool IsDirect) {
       StrState.handleCStrLen(Ptr, Inst, BBCond, *this, IsDirect);
     };
 
-    if (seg_utility::isMatchLib(Inst, Callee->getName().str(), "strlen")) {
+    if (gvfg_utility::isMatchLib(Inst, Callee->getName().str(), "strlen")) {
       auto *Ptr = getNode(Inst->getArgOperand(0));
       handleStringLen(Ptr, true);
       return;
     }
 
-    if (seg_utility::isMatchLib(Inst, Callee->getName().str(), "puts")) {
+    if (gvfg_utility::isMatchLib(Inst, Callee->getName().str(), "puts")) {
       auto *Ptr = getNode(Inst->getArgOperand(0));
       handleStringLen(Ptr, false);
       return;
     }
 
-    if (seg_utility::isMatchLib(Inst, Callee->getName().str(), "strcpy") ||
-        seg_utility::isMatchLib(Inst, Callee->getName().str(), "strcat") ||
-        seg_utility::isMatchLib(Inst, Callee->getName().str(), "strncat")) {
+    if (gvfg_utility::isMatchLib(Inst, Callee->getName().str(), "strcpy") ||
+        gvfg_utility::isMatchLib(Inst, Callee->getName().str(), "strcat") ||
+        gvfg_utility::isMatchLib(Inst, Callee->getName().str(), "strncat")) {
       handleStringLen(getNode(Inst->getArgOperand(0)), false);
       handleStringLen(getNode(Inst->getArgOperand(1)), false);
       return;
@@ -894,7 +893,7 @@ void AnalysisState::processLibraryCall(CallInst *Inst) {
     }
 
     if (MemSpec->isPureLib(Callee) ||
-        seg_utility::isKnownLib(Callee->getName().str())) {
+        gvfg_utility::isKnownLib(Callee->getName().str())) {
       return;
     }
 
@@ -1033,7 +1032,7 @@ GuardedSymbolicValSet AnalysisState::inlineExpr(const PropertyValuePtr &E,
 
 ProgramValuePtr AnalysisState::getFreeVar(Type *Ty) const {
   std::string Name =
-      "free_" + seg_utility::ptrToString(F) + "_" + std::to_string(FreeVarID++);
+      "free_" + gvfg_utility::ptrToString(F) + "_" + std::to_string(FreeVarID++);
   return {Ty, Name};
 }
 
@@ -1090,7 +1089,7 @@ GuardedSymbolicValSet AnalysisState::evalExpr(
 }
 
 std::string AnalysisState::getCallsiteSuffix(Instruction *CS) const {
-  return "_" + seg_utility::ptrToString(CS);
+  return "_" + gvfg_utility::ptrToString(CS);
 }
 
 SMTExpr

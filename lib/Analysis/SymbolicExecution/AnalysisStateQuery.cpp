@@ -20,7 +20,6 @@
 #include "Analysis/SymbolicExecution/PropertyAllocator.h"
 #include "Analysis/SymbolicExecution/PropertyInteger.h"
 #include "Analysis/SymbolicExecution/PropertySym.h"
-#include "Analysis/SymbolicExecution/TSDataLayout.h"
 #include "Analysis/SymbolicExecution/TaintModel.h"
 
 #include <functional>
@@ -152,13 +151,13 @@ void AnalysisState::buildQuery(Instruction *Inst) {
   auto OpC = Inst->getOpcode();
   if (OpC == Instruction::Load && (BugTy & BUG_TY_BOF)) {
     auto *LoadI = cast<LoadInst>(Inst);
-    buildBofQueryLoadStore(Inst, getNode(seg_utility::getPointerOperand(LoadI)),
+    buildBofQueryLoadStore(Inst, getNode(gvfg_utility::getPointerOperand(LoadI)),
                            LoadI->getType());
   } else if (OpC == Instruction::Store && (BugTy & BUG_TY_BOF)) {
     auto *StoreI = cast<StoreInst>(Inst);
     auto *StVal = StoreI->getValueOperand();
     buildBofQueryLoadStore(Inst,
-                           getNode(seg_utility::getPointerOperand(StoreI)),
+                           getNode(gvfg_utility::getPointerOperand(StoreI)),
                            StVal->getType());
   } else if (isInstUnmodelled(Inst)) {
     auto *Dst = getNode(Inst);
@@ -175,7 +174,7 @@ void AnalysisState::buildQuery(Instruction *Inst) {
       }
     }
   } else if (OpC == Instruction::Call) {
-    if (!seg_utility::isDefiniteCall(Inst)) {
+    if (!gvfg_utility::isDefiniteCall(Inst)) {
       if (BugTy & BUG_TY_BOF) {
         buildBofQueryLibCall(cast<CallInst>(Inst));
       }
@@ -253,7 +252,7 @@ void AnalysisState::buildQuery(Instruction *Inst) {
 
   if (BugTy & BUG_TY_DOUBLE_FREE) {
     if (OpC == Instruction::Call) {
-      auto *Callee = seg_utility::getCallee(Inst);
+      auto *Callee = gvfg_utility::getCallee(Inst);
       if (!isFreeLikeFunction(Callee)) {
         buildDoubleFreeQuery(Inst);
       }
@@ -284,7 +283,7 @@ void AnalysisState::buildBofQueryLoadStore(Instruction *Inst,
   // access potentially unsafe.
   const PtsSet &Pts = getPts(Ptr);
   auto AccSz =
-      GetProperty<PropertyInteger>(seg_utility::getTypeSizeInBits(AccTy));
+      GetProperty<PropertyInteger>(gvfg_utility::getTypeSizeInBits(AccTy));
 
   Pts.forEach([&](const PTItem &Pt, const Condition &Cond) {
     auto Qs = createBofQuery(Pt, AccSz);
@@ -467,7 +466,7 @@ void AnalysisState::buildBofQueryLibCall(CallInst *Inst) {
   };
 
   auto matchLib = [Inst, &FuncName](const std::string &Target) {
-    return seg_utility::isMatchLib(Inst, FuncName.str(), Target);
+    return gvfg_utility::isMatchLib(Inst, FuncName.str(), Target);
   };
 
   // Library models reuse the same BOF query builders as regular loads and
@@ -1542,7 +1541,7 @@ bool AnalysisState::tryReportBofQuery(const NumericalQueryPtr &QPtr,
     }
   } else if (isa<DirectNumericalQuery>(Q) ||
              (isa<IndirectNumericalQuery>(Q) &&
-              seg_utility::isFunctionTopLevel(F))) {
+              gvfg_utility::isFunctionTopLevel(F))) {
     std::vector<TaintStep> TaintSteps;
 
     bool QueryConsBuilt = false;
@@ -1909,7 +1908,7 @@ void AnalysisState::buildUninitializedReadQuery(Instruction *Inst) {
   if (!LoadI)
     return;
 
-  Value *Ptr = seg_utility::getPointerOperand(LoadI);
+  Value *Ptr = gvfg_utility::getPointerOperand(LoadI);
   const PtsSet &Pts = getPts(getNode(Ptr));
 
   // Track which memory locations have been written to
@@ -1931,9 +1930,9 @@ void AnalysisState::buildUninitializedReadQuery(Instruction *Inst) {
 void AnalysisState::buildNullDerefQuery(Instruction *Inst) {
   Value *Ptr = nullptr;
   if (LoadInst *LoadI = dyn_cast<LoadInst>(Inst)) {
-    Ptr = seg_utility::getPointerOperand(LoadI);
+    Ptr = gvfg_utility::getPointerOperand(LoadI);
   } else if (StoreInst *StoreI = dyn_cast<StoreInst>(Inst)) {
-    Ptr = seg_utility::getPointerOperand(StoreI);
+    Ptr = gvfg_utility::getPointerOperand(StoreI);
   }
   if (!Ptr)
     return;
@@ -1954,9 +1953,9 @@ void AnalysisState::buildNullDerefQuery(Instruction *Inst) {
 void AnalysisState::buildUafQuery(Instruction *Inst) {
   Value *Ptr = nullptr;
   if (LoadInst *LoadI = dyn_cast<LoadInst>(Inst)) {
-    Ptr = seg_utility::getPointerOperand(LoadI);
+    Ptr = gvfg_utility::getPointerOperand(LoadI);
   } else if (StoreInst *StoreI = dyn_cast<StoreInst>(Inst)) {
-    Ptr = seg_utility::getPointerOperand(StoreI);
+    Ptr = gvfg_utility::getPointerOperand(StoreI);
   }
   if (!Ptr)
     return;
@@ -2000,7 +1999,7 @@ void AnalysisState::buildDoubleFreeQuery(Instruction *Inst) {
   if (!CallI)
     return;
 
-  Function *Callee = seg_utility::getCallee(Inst);
+  Function *Callee = gvfg_utility::getCallee(Inst);
   if (!Callee)
     return;
 
