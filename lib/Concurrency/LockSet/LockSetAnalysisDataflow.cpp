@@ -7,6 +7,7 @@
 #include <set>
 
 #include <llvm/IR/InstIterator.h>
+#include <llvm/IR/Instructions.h>
 
 using namespace llvm;
 using namespace mhp;
@@ -19,7 +20,65 @@ void LockSetAnalysis::analyzeFunction(Function *func) {
   raii_tracker.analyzeFunction(func);
   m_raii_locks[func] = raii_tracker.getAllLockLifetimes();
 
+  detectTryLockSuccessBranches(func);
   computeIntraproceduralLockSets(func);
+}
+
+void LockSetAnalysis::detectTryLockSuccessBranches(Function *func) {
+  if (!func || func->isDeclaration())
+    return;
+
+  for (BasicBlock &bb : *func) {
+    auto *br = dyn_cast<BranchInst>(bb.getTerminator());
+    if (!br || !br->isConditional())
+      continue;
+
+    // Match: %cmp = icmp eq/ne %trylock_ret, 0
+    auto *cmp = dyn_cast<ICmpInst>(br->getCondition());
+    if (!cmp)
+      continue;
+
+    const Value *lhs = cmp->getOperand(0);
+    const Value *rhs = cmp->getOperand(1);
+
+    const ConstantInt *zero_const = dyn_cast<ConstantInt>(rhs);
+    const Value *trylock_ret = lhs;
+    if (!zero_const) {
+      zero_const = dyn_cast<ConstantInt>(lhs);
+      trylock_ret = rhs;
+    }
+    if (!zero_const || !zero_const->isZero())
+      continue;
+
+    const auto *trylock_call = dyn_cast<CallBase>(trylock_ret);
+    if (!trylock_call || !m_thread_api->isTryLock(trylock_call))
+      continue;
+
+    LockID lock = getLockValue(trylock_call);
+    if (!lock)
+      continue;
+
+    // Determine success convention from the TD_TYPE:
+    // - pthread_mutex_trylock (TD_TRY_ACQUIRE): returns 0 on success
+    // - kernel spin_trylock (TD_KERNEL_SPIN_TRYLOCK): returns non-zero on success
+    // - kernel mutex_trylock (TD_KERNEL_MUTEX_TRYLOCK): returns non-zero on
+    // success
+    // - semaphore try_acquire (TD_SEMAPHORE_TRY_ACQUIRE): returns 0 on success
+    ThreadAPI::TD_TYPE type = m_thread_api->getType(trylock_call);
+    bool zero_means_success = (type == ThreadAPI::TD_TRY_ACQUIRE ||
+                               type == ThreadAPI::TD_SEMAPHORE_TRY_ACQUIRE);
+
+    // For "icmp eq ret, 0": true-branch means ret==0
+    // For "icmp ne ret, 0": true-branch means ret!=0
+    bool true_branch_is_zero = (cmp->getPredicate() == ICmpInst::ICMP_EQ);
+    bool true_branch_is_success =
+        (true_branch_is_zero == zero_means_success);
+
+    BasicBlock *success_bb =
+        true_branch_is_success ? br->getSuccessor(0) : br->getSuccessor(1);
+    const Instruction *first = &success_bb->front();
+    m_trylock_success_must_inject[first].insert(lock);
+  }
 }
 
 void LockSetAnalysis::computeIntraproceduralLockSets(Function *func) {
@@ -41,6 +100,7 @@ void LockSetAnalysis::computeIntraproceduralLockSets(Function *func) {
       m_must_read_locks_exit.erase(key);
       m_must_write_locks_entry.erase(key);
       m_must_write_locks_exit.erase(key);
+      m_invoke_normal_must_exit.erase(key);
     }
   };
 
@@ -79,12 +139,46 @@ void LockSetAnalysis::computeIntraproceduralLockSets(Function *func) {
             continue;
           }
 
+          // For invoke instructions, use normal-path must facts when this
+          // block is the normal destination (not the unwind destination).
+          bool use_normal_must = false;
+          if (const auto *invoke = dyn_cast<InvokeInst>(pred_term)) {
+            if (invoke->getNormalDest() == bb) {
+              use_normal_must = true;
+            }
+          }
+
           auto it_may = m_may_locksets_exit.find(pred_term);
           auto it_must = m_must_locksets_exit.find(pred_term);
           auto it_mr = m_may_read_locks_exit.find(pred_term);
           auto it_mw = m_may_write_locks_exit.find(pred_term);
           auto it_ur = m_must_read_locks_exit.find(pred_term);
           auto it_uw = m_must_write_locks_exit.find(pred_term);
+
+          // Override must facts with normal-path facts for invoke normal dest
+          if (use_normal_must) {
+            auto normal_it = m_invoke_normal_must_exit.find(pred_term);
+            if (normal_it != m_invoke_normal_must_exit.end()) {
+              const auto &nf = normal_it->second;
+              if (it_may != m_may_locksets_exit.end()) {
+                may_inputs.push_back(it_may->second);
+                must_inputs.push_back(nf.must_lockset);
+                may_read_inputs.push_back(
+                    it_mr != m_may_read_locks_exit.end() ? it_mr->second
+                                                         : LockSet());
+                may_write_inputs.push_back(
+                    it_mw != m_may_write_locks_exit.end() ? it_mw->second
+                                                          : LockSet());
+                must_read_inputs.push_back(nf.must_read_lockset);
+                must_write_inputs.push_back(nf.must_write_lockset);
+              } else {
+                must_inputs.push_back(nf.must_lockset);
+                must_read_inputs.push_back(nf.must_read_lockset);
+                must_write_inputs.push_back(nf.must_write_lockset);
+              }
+              continue;
+            }
+          }
 
           if (it_may != m_may_locksets_exit.end()) {
             may_inputs.push_back(it_may->second);
@@ -150,6 +244,17 @@ void LockSetAnalysis::computeIntraproceduralLockSets(Function *func) {
     LockSet must_in = must_read_in;
     must_in.insert(must_write_in.begin(), must_write_in.end());
 
+    // Inject try-lock success must-set overrides
+    auto trylock_it = m_trylock_success_must_inject.find(inst);
+    if (trylock_it != m_trylock_success_must_inject.end()) {
+      for (LockID lock : trylock_it->second) {
+        must_in.insert(lock);
+        must_write_in.insert(lock);
+        may_in.insert(lock);
+        may_write_in.insert(lock);
+      }
+    }
+
     LockSet may_read_out, may_write_out, must_read_out, must_write_out;
     transferReadWrite(inst, may_read_in, may_write_in, may_read_out,
                       may_write_out, false);
@@ -161,6 +266,14 @@ void LockSetAnalysis::computeIntraproceduralLockSets(Function *func) {
 
     if (const auto *invoke = dyn_cast<InvokeInst>(inst)) {
       if (!invoke->doesNotThrow()) {
+        // Save the pre-clearing must facts for the normal destination.
+        // The cleared facts will flow to the unwind destination.
+        InvokeNormalMustFacts normal_facts;
+        normal_facts.must_lockset = must_out;
+        normal_facts.must_read_lockset = must_read_out;
+        normal_facts.must_write_lockset = must_write_out;
+        m_invoke_normal_must_exit[inst] = std::move(normal_facts);
+
         must_read_out.clear();
         must_write_out.clear();
         must_out.clear();

@@ -263,6 +263,61 @@ public:
   std::vector<std::pair<LockID, LockID>> detectLockOrderInversions() const;
 
   // ========================================================================
+  // Lock Ordering Graph Queries
+  // ========================================================================
+
+  /**
+   * @brief Get locks acquired while holding the given lock
+   */
+  std::vector<LockID> getLockOrderSuccessors(LockID lock) const;
+
+  /**
+   * @brief Get locks that are held when the given lock is acquired
+   */
+  std::vector<LockID> getLockOrderPredecessors(LockID lock) const;
+
+  /**
+   * @brief Detect all cycles in the lock ordering graph via DFS
+   * @return Each cycle as a vector of LockIDs forming the cycle
+   */
+  std::vector<std::vector<LockID>> detectDeadlockCycles() const;
+
+  // ========================================================================
+  // Critical Section Analysis
+  // ========================================================================
+
+  /**
+   * @brief Get all instructions where a lock is must-held
+   */
+  std::vector<const llvm::Instruction *>
+  getProtectedInstructions(LockID lock) const;
+
+  /**
+   * @brief Get (acquire, release) pairs bounding each critical section
+   */
+  std::vector<std::pair<const llvm::Instruction *, const llvm::Instruction *>>
+  getCriticalSections(LockID lock) const;
+
+  /**
+   * @brief Get the maximum instruction count in any critical section of a lock
+   */
+  size_t getMaxCriticalSectionSize(LockID lock) const;
+
+  // ========================================================================
+  // Condition Variable Validation
+  // ========================================================================
+
+  /**
+   * @brief Check if the associated mutex is must-held at a cond_wait call
+   */
+  bool isLockHeldAtCondWait(const llvm::Instruction *cond_wait_inst) const;
+
+  /**
+   * @brief Find all cond_wait calls where the associated mutex is not must-held
+   */
+  std::vector<const llvm::Instruction *> getUnprotectedCondWaits() const;
+
+  // ========================================================================
   // Statistics and Debugging
   // ========================================================================
 
@@ -273,7 +328,15 @@ public:
     size_t num_try_acquires;        ///< Total try-lock operations
     size_t max_nesting_depth;       ///< Maximum observed lock nesting
     size_t num_reentrant_locks;     ///< Number of reentrant locks
-    size_t num_potential_deadlocks; ///< Number of potential deadlocks
+    size_t num_potential_deadlocks; ///< Number of potential deadlocks (pairwise)
+    size_t num_functions_with_locks;      ///< Functions containing lock ops
+    size_t num_critical_sections;         ///< Total critical section count
+    double avg_critical_section_size;     ///< Average instructions per CS
+    size_t max_critical_section_size;     ///< Largest critical section
+    size_t num_rwlocks;                   ///< Distinct read-write locks
+    size_t num_condvar_waits;             ///< Condition variable wait operations
+    size_t num_unprotected_condvar_waits; ///< cond_waits without mutex held
+    size_t num_deadlock_cycles;           ///< Cycles in lock ordering graph
 
     void print(llvm::raw_ostream &os) const;
   };
@@ -381,6 +444,20 @@ private:
 
   std::unordered_map<const llvm::Function *, FunctionSummary>
       m_function_summaries;
+
+  // Invoke normal-path must-lockset (before clearing for exceptions)
+  struct InvokeNormalMustFacts {
+    LockSet must_lockset;
+    LockSet must_read_lockset;
+    LockSet must_write_lockset;
+  };
+  std::unordered_map<const llvm::Instruction *, InvokeNormalMustFacts>
+      m_invoke_normal_must_exit;
+
+  // Try-lock success branch must-set overrides: maps the first instruction
+  // of the success branch to the lock that is definitely held there.
+  std::unordered_map<const llvm::Instruction *, LockSet>
+      m_trylock_success_must_inject;
 
   // ========================================================================
   // Analysis Implementation
@@ -497,6 +574,12 @@ private:
    * @brief Perform bottom-up call graph traversal for interprocedural analysis
    */
   void bottomUpTraversal();
+
+  /**
+   * @brief Detect try-lock success branches and populate
+   * m_trylock_success_must_inject
+   */
+  void detectTryLockSuccessBranches(llvm::Function *func);
 };
 
 } // namespace mhp

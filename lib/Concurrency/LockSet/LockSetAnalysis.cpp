@@ -201,6 +201,8 @@ void LockSetAnalysis::analyze() {
   m_reentrant_locks.clear();
   m_raii_locks.clear();
   m_function_summaries.clear();
+  m_invoke_normal_must_exit.clear();
+  m_trylock_success_must_inject.clear();
 
   if (m_module) {
     if (!m_call_graph) {
@@ -661,19 +663,235 @@ LockSetAnalysis::detectLockOrderInversions() const {
 }
 
 // ============================================================================
+// Lock Ordering Graph Queries
+// ============================================================================
+
+std::vector<LockID> LockSetAnalysis::getLockOrderSuccessors(LockID lock) const {
+  std::vector<LockID> successors;
+  for (const auto &pair : m_observed_lock_orders) {
+    if (pair.first == lock) {
+      successors.push_back(pair.second);
+    }
+  }
+  return successors;
+}
+
+std::vector<LockID>
+LockSetAnalysis::getLockOrderPredecessors(LockID lock) const {
+  std::vector<LockID> predecessors;
+  for (const auto &pair : m_observed_lock_orders) {
+    if (pair.second == lock) {
+      predecessors.push_back(pair.first);
+    }
+  }
+  return predecessors;
+}
+
+std::vector<std::vector<LockID>>
+LockSetAnalysis::detectDeadlockCycles() const {
+  // Build adjacency list from observed lock orders
+  std::unordered_map<LockID, std::vector<LockID>> adj;
+  std::unordered_set<LockID> all_nodes;
+  for (const auto &pair : m_observed_lock_orders) {
+    adj[pair.first].push_back(pair.second);
+    all_nodes.insert(pair.first);
+    all_nodes.insert(pair.second);
+  }
+
+  std::vector<std::vector<LockID>> cycles;
+  // DFS-based cycle detection
+  enum Color { WHITE, GRAY, BLACK };
+  std::unordered_map<LockID, Color> color;
+  std::unordered_map<LockID, LockID> parent;
+  for (LockID node : all_nodes) {
+    color[node] = WHITE;
+  }
+
+  std::function<void(LockID, std::vector<LockID> &)> dfs =
+      [&](LockID u, std::vector<LockID> &path) {
+        color[u] = GRAY;
+        path.push_back(u);
+
+        auto it = adj.find(u);
+        if (it != adj.end()) {
+          for (LockID v : it->second) {
+            if (color[v] == GRAY) {
+              // Found a cycle - extract it from path
+              std::vector<LockID> cycle;
+              auto cycle_start =
+                  std::find(path.begin(), path.end(), v);
+              if (cycle_start != path.end()) {
+                cycle.assign(cycle_start, path.end());
+                cycle.push_back(v); // close the cycle
+                cycles.push_back(std::move(cycle));
+              }
+            } else if (color[v] == WHITE) {
+              dfs(v, path);
+            }
+          }
+        }
+
+        path.pop_back();
+        color[u] = BLACK;
+      };
+
+  for (LockID node : all_nodes) {
+    if (color[node] == WHITE) {
+      std::vector<LockID> path;
+      dfs(node, path);
+    }
+  }
+
+  return cycles;
+}
+
+// ============================================================================
+// Critical Section Analysis
+// ============================================================================
+
+std::vector<const Instruction *>
+LockSetAnalysis::getProtectedInstructions(LockID lock) const {
+  std::vector<const Instruction *> result;
+  lock = getCanonicalLock(lock);
+  if (!lock)
+    return result;
+
+  for (const auto &entry : m_must_locksets_entry) {
+    for (LockID held : entry.second) {
+      if (getCanonicalLock(held) == lock ||
+          (m_alias_analysis && m_alias_analysis->mustAlias(
+                                   getCanonicalLock(held), lock))) {
+        result.push_back(entry.first);
+        break;
+      }
+    }
+  }
+  return result;
+}
+
+std::vector<std::pair<const Instruction *, const Instruction *>>
+LockSetAnalysis::getCriticalSections(LockID lock) const {
+  std::vector<std::pair<const Instruction *, const Instruction *>> sections;
+  auto acquires = getLockAcquires(lock);
+  auto releases = getLockReleases(lock);
+
+  for (const Instruction *acq : acquires) {
+    // Find the nearest matching release in the same function
+    const Instruction *best_release = nullptr;
+    for (const Instruction *rel : releases) {
+      if (rel->getFunction() != acq->getFunction())
+        continue;
+      if (detail::instructionPrecedesOrEquals(acq, rel, acq->getFunction())) {
+        if (!best_release ||
+            detail::instructionPrecedesOrEquals(rel, best_release,
+                                                acq->getFunction())) {
+          best_release = rel;
+        }
+      }
+    }
+    if (best_release) {
+      sections.push_back({acq, best_release});
+    }
+  }
+  return sections;
+}
+
+size_t LockSetAnalysis::getMaxCriticalSectionSize(LockID lock) const {
+  size_t max_size = 0;
+  auto sections = getCriticalSections(lock);
+  for (const auto &section : sections) {
+    size_t count = 0;
+    const Function *func = section.first->getFunction();
+    bool in_section = false;
+    for (const BasicBlock &bb : *func) {
+      for (const Instruction &inst : bb) {
+        if (&inst == section.first)
+          in_section = true;
+        if (in_section)
+          ++count;
+        if (&inst == section.second) {
+          in_section = false;
+          break;
+        }
+      }
+      if (!in_section && count > 0)
+        break;
+    }
+    max_size = std::max(max_size, count);
+  }
+  return max_size;
+}
+
+// ============================================================================
+// Condition Variable Validation
+// ============================================================================
+
+bool LockSetAnalysis::isLockHeldAtCondWait(
+    const Instruction *cond_wait_inst) const {
+  if (!cond_wait_inst || !m_thread_api->isTDCondWait(cond_wait_inst))
+    return false;
+
+  const Value *mutex = m_thread_api->getCondMutex(cond_wait_inst);
+  if (!mutex)
+    return false;
+
+  LockID mutex_lock = getCanonicalLock(mutex);
+  if (!mutex_lock)
+    return false;
+
+  return mustHoldLock(cond_wait_inst, mutex_lock);
+}
+
+std::vector<const Instruction *>
+LockSetAnalysis::getUnprotectedCondWaits() const {
+  std::vector<const Instruction *> unprotected;
+
+  auto check_func = [&](const Function &func) {
+    for (const BasicBlock &bb : func) {
+      for (const Instruction &inst : bb) {
+        if (!m_thread_api->isTDCondWait(&inst))
+          continue;
+        if (!isLockHeldAtCondWait(&inst)) {
+          unprotected.push_back(&inst);
+        }
+      }
+    }
+  };
+
+  if (m_module) {
+    for (const Function &func : *m_module) {
+      if (!func.isDeclaration())
+        check_func(func);
+    }
+  } else if (m_single_function) {
+    check_func(*m_single_function);
+  }
+
+  return unprotected;
+}
+
+// ============================================================================
 // Statistics and Debugging
 // ============================================================================
 
 void LockSetAnalysis::Statistics::print(raw_ostream &os) const {
   os << "Lock Set Analysis Statistics:\n";
   os << "==============================\n";
-  os << "Locks:                " << num_locks << "\n";
-  os << "Lock Acquires:        " << num_acquires << "\n";
-  os << "Lock Releases:        " << num_releases << "\n";
-  os << "Try-Lock Operations:  " << num_try_acquires << "\n";
-  os << "Max Depth:     " << max_nesting_depth << "\n";
-  os << "Observed Reentrant Locks:     " << num_reentrant_locks << "\n";
-  os << "Potential Deadlocks:  " << num_potential_deadlocks << "\n";
+  os << "Locks:                       " << num_locks << "\n";
+  os << "Lock Acquires:               " << num_acquires << "\n";
+  os << "Lock Releases:               " << num_releases << "\n";
+  os << "Try-Lock Operations:         " << num_try_acquires << "\n";
+  os << "Max Nesting Depth:           " << max_nesting_depth << "\n";
+  os << "Observed Reentrant Locks:    " << num_reentrant_locks << "\n";
+  os << "Potential Deadlocks (pairs): " << num_potential_deadlocks << "\n";
+  os << "Functions with Locks:        " << num_functions_with_locks << "\n";
+  os << "Critical Sections:           " << num_critical_sections << "\n";
+  os << "Avg Critical Section Size:   " << avg_critical_section_size << "\n";
+  os << "Max Critical Section Size:   " << max_critical_section_size << "\n";
+  os << "Read-Write Locks:            " << num_rwlocks << "\n";
+  os << "CondVar Waits:               " << num_condvar_waits << "\n";
+  os << "Unprotected CondVar Waits:   " << num_unprotected_condvar_waits << "\n";
+  os << "Deadlock Cycles:             " << num_deadlock_cycles << "\n";
 }
 
 LockSetAnalysis::Statistics LockSetAnalysis::getStatistics() const {
@@ -704,6 +922,107 @@ LockSetAnalysis::Statistics LockSetAnalysis::getStatistics() const {
 
   stats.num_reentrant_locks = m_reentrant_locks.size();
   stats.num_potential_deadlocks = detectLockOrderInversions().size();
+
+  // Functions with lock operations
+  stats.num_functions_with_locks = 0;
+  if (m_module) {
+    for (Function &func : *m_module) {
+      if (func.isDeclaration())
+        continue;
+      bool has_lock = false;
+      for (inst_iterator I = inst_begin(func), E = inst_end(func); I != E;
+           ++I) {
+        if (isLockOperation(&*I)) {
+          has_lock = true;
+          break;
+        }
+      }
+      if (has_lock)
+        ++stats.num_functions_with_locks;
+    }
+  } else if (m_single_function) {
+    for (inst_iterator I = inst_begin(m_single_function),
+                       E = inst_end(m_single_function);
+         I != E; ++I) {
+      if (isLockOperation(&*I)) {
+        stats.num_functions_with_locks = 1;
+        break;
+      }
+    }
+  }
+
+  // Critical section metrics
+  stats.num_critical_sections = 0;
+  stats.max_critical_section_size = 0;
+  size_t total_cs_size = 0;
+  for (LockID lock : m_all_locks) {
+    auto sections = getCriticalSections(lock);
+    stats.num_critical_sections += sections.size();
+    for (const auto &section : sections) {
+      size_t cs_size = 0;
+      const Function *func = section.first->getFunction();
+      bool in_section = false;
+      for (const BasicBlock &bb : *func) {
+        for (const Instruction &inst : bb) {
+          if (&inst == section.first)
+            in_section = true;
+          if (in_section)
+            ++cs_size;
+          if (&inst == section.second) {
+            in_section = false;
+            break;
+          }
+        }
+        if (!in_section && cs_size > 0)
+          break;
+      }
+      total_cs_size += cs_size;
+      stats.max_critical_section_size =
+          std::max(stats.max_critical_section_size, cs_size);
+    }
+  }
+  stats.avg_critical_section_size =
+      stats.num_critical_sections > 0
+          ? static_cast<double>(total_cs_size) / stats.num_critical_sections
+          : 0.0;
+
+  // Read-write locks: locks that appear in both read and write lock sets
+  stats.num_rwlocks = 0;
+  std::unordered_set<LockID> read_locks, write_locks;
+  for (const auto &entry : m_may_read_locks_entry) {
+    read_locks.insert(entry.second.begin(), entry.second.end());
+  }
+  for (const auto &entry : m_may_write_locks_entry) {
+    write_locks.insert(entry.second.begin(), entry.second.end());
+  }
+  for (LockID lock : read_locks) {
+    if (write_locks.count(lock))
+      ++stats.num_rwlocks;
+  }
+
+  // Condition variable metrics
+  auto unprotected = getUnprotectedCondWaits();
+  stats.num_unprotected_condvar_waits = unprotected.size();
+  stats.num_condvar_waits = 0;
+  auto count_condwaits = [&](const Function &func) {
+    for (const BasicBlock &bb : func) {
+      for (const Instruction &inst : bb) {
+        if (m_thread_api->isTDCondWait(&inst))
+          ++stats.num_condvar_waits;
+      }
+    }
+  };
+  if (m_module) {
+    for (Function &func : *m_module) {
+      if (!func.isDeclaration())
+        count_condwaits(func);
+    }
+  } else if (m_single_function) {
+    count_condwaits(*m_single_function);
+  }
+
+  // Deadlock cycles
+  stats.num_deadlock_cycles = detectDeadlockCycles().size();
 
   return stats;
 }
@@ -744,6 +1063,32 @@ void LockSetAnalysis::printResults(raw_ostream &os) const {
       pair.first->printAsOperand(os, false);
       os << " and Lock ";
       pair.second->printAsOperand(os, false);
+      os << "\n";
+    }
+  }
+
+  // Print deadlock cycles
+  auto cycles = detectDeadlockCycles();
+  if (!cycles.empty()) {
+    os << "\n=== Deadlock Cycles (Lock Ordering Graph) ===\n";
+    for (size_t i = 0; i < cycles.size(); ++i) {
+      os << "Cycle " << (i + 1) << ": ";
+      for (size_t j = 0; j < cycles[i].size(); ++j) {
+        if (j > 0)
+          os << " -> ";
+        cycles[i][j]->printAsOperand(os, false);
+      }
+      os << "\n";
+    }
+  }
+
+  // Print unprotected condition variable waits
+  auto unprotected_cvs = getUnprotectedCondWaits();
+  if (!unprotected_cvs.empty()) {
+    os << "\n=== Unprotected Condition Variable Waits ===\n";
+    for (const auto *inst : unprotected_cvs) {
+      os << "  ";
+      inst->print(os);
       os << "\n";
     }
   }
