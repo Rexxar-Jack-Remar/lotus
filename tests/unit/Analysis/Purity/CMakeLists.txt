@@ -1,0 +1,37 @@
+# Analysis Purity Unit Tests
+
+add_lotus_targeted_test(function_purity_analysis_test
+               FunctionPurityAnalysisTest.cpp
+               LINK_LIBS
+                   CanaryPurityAnalysis
+                   CanaryMemorySSA
+                   AliasSpecManager
+                   LLVMAnalysis)
+add_lotus_targeted_test(external_purity_summary_store_test
+               ExternalPuritySummaryStoreTest.cpp
+               LINK_LIBS
+                   CanaryPurityAnalysis
+                   CanaryMemorySSA
+                   AliasSpecManager
+                   LLVMAnalysis)
+add_lotus_targeted_test(purity_inference_driver_test
+               PurityInferenceDriverTest.cpp
+               LINK_LIBS
+                   CanaryPurityAnalysis
+                   CanaryMemorySSA
+                   AliasSpecManager
+                   LLVMAnalysis)
+add_lotus_targeted_test(purity_unknown_impact_pass_test
+               PurityUnknownImpactPassTest.cpp
+               LINK_LIBS
+                   CanaryPurityAnalysis
+                   CanaryMemorySSA
+                   AliasSpecManager
+                   LLVMAnalysis)
+add_lotus_targeted_test(purity_attr_inference_pass_test
+               PurityAttrInferencePassTest.cpp
+               LINK_LIBS
+                   CanaryPurityAnalysis
+                   CanaryMemorySSA
+                   AliasSpecManager
+                   LLVMAnalysis)

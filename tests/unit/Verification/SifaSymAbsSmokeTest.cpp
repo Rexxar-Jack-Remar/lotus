@@ -11,25 +11,18 @@
 #include "Verification/SymAbsAI/Core/ModuleContext.h"
 #include "Verification/SymAbsAI/Utils/Config.h"
 
-#include "llvm/AsmParser/Parser.h"
-#include "llvm/IR/BasicBlock.h"
-#include "llvm/IR/Function.h"
-#include "llvm/IR/Module.h"
-#include "llvm/Support/SourceMgr.h"
+#include "TestUtils/LLVMHelpers.h"
 
 #include "gtest/gtest.h"
 
-#include <memory>
+using namespace llvm;
+using namespace lotus::unittest;
 
 namespace {
 
-static llvm::BasicBlock *getBlockByName(llvm::Function &F, const char *name) {
-  for (llvm::BasicBlock &BB : F) {
-    if (BB.getName() == name) {
-      return &BB;
-    }
-  }
-  return nullptr;
+template <typename FunctionT>
+static auto getBlockByName(FunctionT &F, const char *name) {
+  return findBlock(F, name);
 }
 
 static symabs_ai::configparser::Config makeSymAbsConfig() {
@@ -71,18 +64,13 @@ TEST(SifaSymAbs, SmokeIntervalsOctagonAndCalls) {
     }
   )IR";
 
-  llvm::LLVMContext ctx;
-  llvm::SMDiagnostic err;
-  std::unique_ptr<llvm::Module> M = llvm::parseAssemblyString(ir, err, ctx);
-  ASSERT_NE(M, nullptr);
+  LLVMContext ctx;
+  auto M = parseModuleChecked(ctx, ir, "SifaSymAbsSmokeTest");
 
-  llvm::Function *F = M->getFunction("f");
-  ASSERT_NE(F, nullptr);
+  Function *F = getFunctionChecked(*M, "f");
 
-  llvm::BasicBlock *body = getBlockByName(*F, "body");
-  llvm::BasicBlock *unreach = getBlockByName(*F, "unreach");
-  ASSERT_NE(body, nullptr);
-  ASSERT_NE(unreach, nullptr);
+  BasicBlock *body = getBlockChecked(*F, "body");
+  BasicBlock *unreach = getBlockChecked(*F, "unreach");
 
   lotus::sifa::SifaSymAbsOptions opt;
   opt.abstractDomain = "Interval, Octagon";
@@ -110,13 +98,10 @@ TEST(SifaSymAbs, SingleBlockFunctionReturnStateNotBottom) {
     }
   )IR";
 
-  llvm::LLVMContext ctx;
-  llvm::SMDiagnostic err;
-  std::unique_ptr<llvm::Module> M = llvm::parseAssemblyString(ir, err, ctx);
-  ASSERT_NE(M, nullptr);
+  LLVMContext ctx;
+  auto M = parseModuleChecked(ctx, ir, "SifaSymAbsSmokeTest");
 
-  llvm::Function *F = M->getFunction("f");
-  ASSERT_NE(F, nullptr);
+  Function *F = getFunctionChecked(*M, "f");
 
   lotus::sifa::SifaSymAbsOptions opt;
   opt.abstractDomain = "Interval";
@@ -151,18 +136,13 @@ TEST(SifaSymAbs, AnalyzeSymAbsToSpecificBlock) {
     }
   )IR";
 
-  llvm::LLVMContext ctx;
-  llvm::SMDiagnostic err;
-  std::unique_ptr<llvm::Module> M = llvm::parseAssemblyString(ir, err, ctx);
-  ASSERT_NE(M, nullptr);
+  LLVMContext ctx;
+  auto M = parseModuleChecked(ctx, ir, "SifaSymAbsSmokeTest");
 
-  llvm::Function *F = M->getFunction("f");
-  ASSERT_NE(F, nullptr);
+  Function *F = getFunctionChecked(*M, "f");
 
-  llvm::BasicBlock *body = getBlockByName(*F, "body");
-  llvm::BasicBlock *unreach = getBlockByName(*F, "unreach");
-  ASSERT_NE(body, nullptr);
-  ASSERT_NE(unreach, nullptr);
+  BasicBlock *body = getBlockChecked(*F, "body");
+  BasicBlock *unreach = getBlockChecked(*F, "unreach");
 
   lotus::sifa::SifaSymAbsOptions opt;
   opt.abstractDomain = "Interval, Octagon";
@@ -186,13 +166,10 @@ TEST(SifaSymAbs, IntervalOnlyDomain) {
     }
   )IR";
 
-  llvm::LLVMContext ctx;
-  llvm::SMDiagnostic err;
-  std::unique_ptr<llvm::Module> M = llvm::parseAssemblyString(ir, err, ctx);
-  ASSERT_NE(M, nullptr);
+  LLVMContext ctx;
+  auto M = parseModuleChecked(ctx, ir, "SifaSymAbsSmokeTest");
 
-  llvm::Function *F = M->getFunction("f");
-  ASSERT_NE(F, nullptr);
+  Function *F = getFunctionChecked(*M, "f");
 
   lotus::sifa::SifaSymAbsOptions opt;
   opt.abstractDomain = "Interval";
@@ -225,16 +202,12 @@ TEST(SifaSymAbs, HybridFallbackHandlesSplitCallTransitions) {
     }
   )IR";
 
-  llvm::LLVMContext ctx;
-  llvm::SMDiagnostic err;
-  std::unique_ptr<llvm::Module> M = llvm::parseAssemblyString(ir, err, ctx);
-  ASSERT_NE(M, nullptr);
+  LLVMContext ctx;
+  auto M = parseModuleChecked(ctx, ir, "SifaSymAbsSmokeTest");
 
-  llvm::Function *caller = M->getFunction("caller");
-  ASSERT_NE(caller, nullptr);
+  Function *caller = getFunctionChecked(*M, "caller");
 
-  llvm::BasicBlock *exit = getBlockByName(*caller, "exit");
-  ASSERT_NE(exit, nullptr);
+  BasicBlock *exit = getBlockChecked(*caller, "exit");
 
   symabs_ai::ModuleContext mctx(M.get(), makeSymAbsConfig());
   auto fctx = mctx.createFunctionContext(caller);
@@ -289,16 +262,12 @@ TEST(SifaSymAbs, HybridFallbackHandlesInvokeReturnSummary) {
     }
   )IR";
 
-  llvm::LLVMContext ctx;
-  llvm::SMDiagnostic err;
-  std::unique_ptr<llvm::Module> M = llvm::parseAssemblyString(ir, err, ctx);
-  ASSERT_NE(M, nullptr);
+  LLVMContext ctx;
+  auto M = parseModuleChecked(ctx, ir, "SifaSymAbsSmokeTest");
 
-  llvm::Function *caller = M->getFunction("caller");
-  ASSERT_NE(caller, nullptr);
+  Function *caller = getFunctionChecked(*M, "caller");
 
-  llvm::BasicBlock *cont = getBlockByName(*caller, "cont");
-  ASSERT_NE(cont, nullptr);
+  BasicBlock *cont = getBlockChecked(*caller, "cont");
 
   symabs_ai::ModuleContext mctx(M.get(), makeSymAbsConfig());
   auto fctx = mctx.createFunctionContext(caller);
@@ -350,20 +319,14 @@ TEST(SifaSymAbs, InterproceduralEnterCallProjectsArguments) {
     }
   )IR";
 
-  llvm::LLVMContext ctx;
-  llvm::SMDiagnostic err;
-  std::unique_ptr<llvm::Module> M = llvm::parseAssemblyString(ir, err, ctx);
-  ASSERT_NE(M, nullptr);
+  LLVMContext ctx;
+  auto M = parseModuleChecked(ctx, ir, "SifaSymAbsSmokeTest");
 
-  llvm::Function *mainFn = M->getFunction("main");
-  llvm::Function *calleeFn = M->getFunction("callee");
-  ASSERT_NE(mainFn, nullptr);
-  ASSERT_NE(calleeFn, nullptr);
+  Function *mainFn = getFunctionChecked(*M, "main");
+  Function *calleeFn = getFunctionChecked(*M, "callee");
 
-  llvm::BasicBlock *good = getBlockByName(*calleeFn, "good");
-  llvm::BasicBlock *bad = getBlockByName(*calleeFn, "bad");
-  ASSERT_NE(good, nullptr);
-  ASSERT_NE(bad, nullptr);
+  BasicBlock *good = getBlockChecked(*calleeFn, "good");
+  BasicBlock *bad = getBlockChecked(*calleeFn, "bad");
 
   symabs_ai::ModuleContext mctx(M.get(), makeSymAbsConfig());
   auto rootFctx = mctx.createFunctionContext(mainFn);

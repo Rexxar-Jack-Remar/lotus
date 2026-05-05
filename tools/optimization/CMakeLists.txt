@@ -1,10 +1,7 @@
 llvm_map_components_to_libnames(LLVM_LINK_COMPONENTS
   BitWriter
-  Core
   IRReader
   Passes
-  Analysis
-  TransformUtils
 )
 
 set(LOTUS_OPT_COMMON_LIBS
@@ -44,10 +41,9 @@ configure_force_load(lotus-prefetch CanarySWPrefetching)
 add_executable(lotus-purity lotus-purity.cpp)
 target_link_libraries(lotus-purity PRIVATE ${LOTUS_OPT_COMMON_LIBS})
 
-add_executable(lotus-lif lotus-lif.cpp)
-target_link_libraries(lotus-lif PRIVATE
-  CanaryLIF
-  #LLVMCore
-  LLVMIRReader
-  LLVMPasses
-)
+#add_executable(lotus-lif lotus-lif.cpp)
+#target_link_libraries(lotus-lif PRIVATE
+#  CanaryLIF
+#  LLVMIRReader
+#  LLVMPasses
+#)

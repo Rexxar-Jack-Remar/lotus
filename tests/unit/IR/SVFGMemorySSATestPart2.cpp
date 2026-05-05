@@ -27,7 +27,7 @@ TEST_F(SVFGMemorySSATest, VarArgKeepsDeclaredPointerParameterSeparate) {
   const Function *sinkFn = module->getFunction("sink");
   ASSERT_NE(mainFn, nullptr);
   ASSERT_NE(sinkFn, nullptr);
-  const CallBase *call = findDirectCall(mainFn, "sink");
+  const CallBase *call = findCallTo(mainFn, "sink");
   ASSERT_NE(call, nullptr);
 
   const ActualParmSVFGNode *fixedActual = nullptr;
@@ -153,7 +153,7 @@ TEST_F(SVFGMemorySSATest, ExternalModRefCallDoesNotBacklinkActualOut) {
 
   const Function *mainFn = module->getFunction("main");
   ASSERT_NE(mainFn, nullptr);
-  const CallBase *call = findDirectCall(mainFn, "ext");
+  const CallBase *call = findCallTo(mainFn, "ext");
   ASSERT_NE(call, nullptr);
   ASSERT_EQ(svfg->getActualIns(call).size(), 1u);
   ASSERT_EQ(svfg->getActualOuts(call).size(), 1u);

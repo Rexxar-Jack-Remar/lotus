@@ -166,17 +166,12 @@ protected:
       return nullptr;
     }
 
-    for (const BasicBlock &bb : *func) {
-      for (const Instruction &inst : bb) {
-        if (inst.getName() == instName) {
-          return &inst;
-        }
-      }
+    const auto *inst = lotus::unittest::findInstructionByName(*func, instName);
+    if (!inst) {
+      ADD_FAILURE() << "Instruction '" << instName.str() << "' not found in "
+                    << functionName.str();
     }
-
-    ADD_FAILURE() << "Instruction '" << instName.str() << "' not found in "
-                  << functionName.str();
-    return nullptr;
+    return inst;
   }
 
   AbstractValue getInstructionValue(const Instruction *inst) {

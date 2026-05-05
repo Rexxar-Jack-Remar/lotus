@@ -1,114 +1,60 @@
 # Lotus Unit Tests
 
-This directory contains organized unit tests for the Lotus analysis framework. The tests are structured to mirror the component organization of the codebase.
+`tests/unit` contains subsystem-level gtests for Lotus. Its structure follows
+the production taxonomy so contributors can move between `include/`, `lib/`,
+and `tests/unit/` without translating historical names.
 
-## Directory Structure
+## Layout
 
-```
-tests/unit/
-├── ControlFlow/       # Control flow graph tests (CFG, ICFG)
-├── DataFlow/          # Data flow analysis tests
-│   ├── IfdsIde/       # IFDS/IDE solver tests
-│   └── Mono/          # Monotone dataflow tests
-├── Pointer/           # Pointer and alias analysis tests
-├── Support/             # Utility class and helper tests
-└── TestUtils/         # Common test utilities and helpers
-```
+Top-level test buckets:
 
-## Migration Status
+- `Alias/` for alias-analysis and pointer-analysis tests
+- `Analysis/` for general analyses, with subdirectories such as `CFG/`,
+  `DebugInfo/`, `Loop/`, `NullPointer/`, `Profile/`, `Purity/`, and
+  `SymbolicExecution/`
+- `CFL/`
+- `Checker/`
+- `Concurrency/` with subdirectories such as `Threads/`, `OpenMP/`, `MPI/`,
+  `CUDA/`, and `Kernel/`
+- `Dataflow/`
+- `Fuzzing/`
+- `IR/`
+- `Solvers/`
+- `TypeHierarchy/`
+- `Utils/`
+- `Verification/`
+- `TestUtils/` for shared test-only headers
 
-### Completed
-- ✅ Organized directory structure created
-- ✅ TestUtils helper infrastructure (TestConfig.h)
-- ✅ CMakeLists.txt files for all subdirectories
-- ✅ Integration with main tests/CMakeLists.txt
-- ✅ EquivalenceClassMap unit tests migrated from phasar
+When adding tests, mirror the source tree where practical:
 
-### Existing Tests (Reorganized)
-The following tests were reorganized from the flat structure:
+- `include/Alias/...` and `lib/Alias/...` -> `tests/unit/Alias/...`
+- `include/Dataflow/...` and `lib/Dataflow/...` -> `tests/unit/Dataflow/...`
+- `include/Analysis/CFG/...` and `lib/Analysis/CFG/...` -> `tests/unit/Analysis/CFG/...`
 
-**ControlFlow/**
-- ICFGTest.cpp - Interprocedural control flow graph tests
-
-**DataFlow/IfdsIde/**
-- IFDSSolverTest.cpp - IFDS solver framework tests
-- TaintAnalysisTest.cpp - Taint analysis tests
-
-**DataFlow/Mono/**
-- MonoTest.cpp - Monotone dataflow analysis tests
-
-**DataFlow/**
-- WPDSTest.cpp - Weighted pushdown system tests
-
-**Pointer/**
-- AllocAATest.cpp - Allocation-based alias analysis tests
-- AserPTATest.cpp - Aser pointer analysis tests
-- DyckAATest.cpp - Dyck-based alias analysis tests
-- SparrowAATest.cpp - Sparrow alias analysis tests
-
-**Support/**
-- EquivalenceClassMapTest.cpp - Equivalence class map ADT tests
-- LowerSelectTest.cpp - Select instruction lowering tests
-- MHPAnalysisTest.cpp - May-happen-in-parallel analysis tests
-- pdg_slicing_test.cpp - Program dependence graph slicing tests
-- RemoveDeadBlockTest.cpp - Dead block elimination tests
-- SymAbsTest.cpp - Symbolic abstraction tests
-
-## Notes on Phasar Migration
-
-The migration from phasar-development encountered several challenges:
-
-1. **API Differences**: Phasar and Lotus have different APIs for core components like CFG, ICFG, and pointer analysis. Direct migration of many tests would require extensive adaptation.
-
-2. **Infrastructure Dependencies**: Many phasar tests depend on phasar-specific infrastructure:
-   - `LLVMProjectIRDB` for IR database management
-   - `HelperAnalyses` for analysis orchestration
-   - `LLVMBasedCFG/ICFG` classes with specific query interfaces
-   - Utility functions like `getNthInstruction()`, `getNthTermInstruction()`
-
-3. **Test Methodology**: Phasar uses a more comprehensive test infrastructure with helper functions for source code location tracking and result comparison that would need to be reimplemented for Lotus.
-
-4. **Recommended Approach**: For future test migration, consider:
-   - Creating Lotus-specific test utilities that mirror phasar's helper infrastructure
-   - Adapting tests to use Lotus's native APIs rather than direct translation
-   - Focusing on algorithm/logic tests rather than API-specific tests
-   - Building up a library of common test utilities incrementally
-
-## Running Tests
+## Build And Run
 
 ```bash
-# Build and run all tests
-mkdir build && cd build
-cmake ..
-make
-make test
-
-# Run only unit tests
-make run_unit_tests
-
-# Run specific test
-./bin/equivalence_class_map_test
+cmake -S . -B build
+cmake --build build --target <test_target>
+ctest --test-dir build --output-on-failure
 ```
 
-## Adding New Tests
+Examples:
 
-Use the helper functions defined in `tests/CMakeLists.txt`:
+- build one target: `cmake --build build --target icfg_test`
+- run one registered test: `ctest --test-dir build -R icfg_test --output-on-failure`
 
-```cmake
-# For regular tests
-add_lotus_test(test_name source_file.cpp)
+## Adding Tests
 
-# For PDG-related tests (needs LLVMTransformUtils)
-add_lotus_pdg_test(test_name source_file.cpp)
-```
+Use the subsystem helpers from `tests/unit/UnitTestHelpers.cmake`. Prefer the
+most specific helper available, such as:
 
-Tests are automatically registered with CTest and will be run with `make test`.
+- `add_lotus_analysis_test`
+- `add_lotus_concurrency_test`
+- `add_lotus_ir_test`
+- `add_lotus_pointer_test`
+- `add_lotus_verification_test`
+- `add_lotus_targeted_test` only when no subsystem helper fits
 
-## Test Configuration
-
-The `TestUtils/TestConfig.h` file provides common configuration:
-- `LOTUS_BUILD_DIR` - Build directory path
-- `LOTUS_SRC_DIR` - Source directory path
-- `PathToLLTestFiles` - Path to LLVM test files
-- `PathToTxtTestFiles` - Path to text test files
-- `PathToJSONTestFiles` - Path to JSON test files
+Keep test target names stable unless you intentionally want to update external
+scripts or CI filters.

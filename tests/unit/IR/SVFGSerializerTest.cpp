@@ -24,21 +24,6 @@ namespace {
 
 class SVFGSerializerTest : public LlvmModuleTest {
 protected:
-  static const CallBase *findDirectCall(const Function *F,
-                                        StringRef calleeName) {
-    for (const BasicBlock &BB : *F) {
-      for (const Instruction &I : BB) {
-        const auto *CB = dyn_cast<CallBase>(&I);
-        if (!CB)
-          continue;
-        const Function *callee = CB->getCalledFunction();
-        if (callee && callee->getName() == calleeName)
-          return CB;
-      }
-    }
-    return nullptr;
-  }
-
   static const LoadInst *findSingleLoad(const Function *F) {
     for (const BasicBlock &BB : *F)
       for (const Instruction &I : BB)
@@ -110,7 +95,7 @@ TEST_F(SVFGSerializerTest, RoundTripsSemanticBindings) {
 
   const LoadInst *load = findSingleLoad(mainFn);
   const StoreInst *store = findSingleStore(mainFn);
-  const CallBase *call = findDirectCall(mainFn, "id");
+  const CallBase *call = findCallTo(mainFn, "id");
   ASSERT_NE(load, nullptr);
   ASSERT_NE(store, nullptr);
   ASSERT_NE(call, nullptr);

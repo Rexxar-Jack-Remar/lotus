@@ -1,9 +1,5 @@
 #include "IR/PDG/QueryLanguage/Cypher.h"
-
-#include "llvm/IR/LLVMContext.h"
-#include "llvm/IR/Module.h"
-#include "llvm/IRReader/IRReader.h"
-#include "llvm/Support/SourceMgr.h"
+#include "TestUtils/LLVMHelpers.h"
 
 #include "IR/PDG/Core/ProgramDependencyGraph.h"
 
@@ -19,7 +15,6 @@ class CypherQueryTest : public ::testing::Test {
 protected:
   void SetUp() override {
     context_ = std::make_unique<LLVMContext>();
-    SMDiagnostic Err;
 
     std::string testIR = R"(
       define i32 @test_func(i32 %x) {
@@ -34,8 +29,8 @@ protected:
       }
     )";
 
-    module_ = parseIR(MemoryBuffer::getMemBuffer(testIR)->getMemBufferRef(),
-                      Err, *context_);
+    module_ = lotus::unittest::parseModuleChecked(*context_, testIR,
+                                                  "CypherQueryTest");
     if (module_) {
       pdg_ = &ProgramGraph::getInstance();
       pdg_->reset();

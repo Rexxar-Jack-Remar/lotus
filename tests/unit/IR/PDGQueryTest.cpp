@@ -61,9 +61,7 @@ protected:
 
   bool loadModule(const char *ir) {
     context = std::make_unique<LLVMContext>();
-    SMDiagnostic error;
-    module = parseIR(MemoryBuffer::getMemBuffer(ir)->getMemBufferRef(), error,
-                     *context);
+    module = lotus::unittest::parseModule(*context, ir, "PDGQueryTest");
     return module != nullptr;
   }
 

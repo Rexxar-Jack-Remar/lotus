@@ -8,35 +8,22 @@
 #include "Verification/Sifa/Storage/MapBasedStorage.h"
 #include "Verification/Sifa/Summarizers/ICallSummarizer.h"
 
-#include "llvm/AsmParser/Parser.h"
-#include "llvm/IR/BasicBlock.h"
-#include "llvm/IR/Function.h"
-#include "llvm/IR/Module.h"
-#include "llvm/Support/SourceMgr.h"
+#include "TestUtils/LLVMHelpers.h"
 
 #include "gtest/gtest.h"
 
-#include <memory>
+using namespace llvm;
+using namespace lotus::unittest;
 
 namespace {
 
-static llvm::BasicBlock *getBlockByName(llvm::Function &F, const char *name) {
-  for (llvm::BasicBlock &BB : F) {
-    if (BB.getName() == name) {
-      return &BB;
-    }
-  }
-  return nullptr;
+template <typename FunctionT>
+static auto getBlockByName(FunctionT &F, const char *name) {
+  return findBlock(F, name);
 }
 
-static const llvm::PHINode *getPhiByName(const llvm::BasicBlock &BB,
-                                         const char *name) {
-  for (const llvm::Instruction &I : BB) {
-    const auto *phi = llvm::dyn_cast<llvm::PHINode>(&I);
-    if (!phi) break;
-    if (phi->getName() == name) return phi;
-  }
-  return nullptr;
+static const PHINode *getPhiByName(const BasicBlock &BB, const char *name) {
+  return findPhi(BB, name);
 }
 
 static void expectOctagonPoint(const lotus::sifa::OctagonState &state,
@@ -83,10 +70,8 @@ TEST(SifaInterproceduralReachability, ReachesLoiInsideDirectCallee) {
     }
   )IR";
 
-  llvm::LLVMContext ctx;
-  llvm::SMDiagnostic err;
-  std::unique_ptr<llvm::Module> M = llvm::parseAssemblyString(ir, err, ctx);
-  ASSERT_NE(M, nullptr);
+  LLVMContext ctx;
+  auto M = parseModuleChecked(ctx, ir, "SifaInterproceduralReachability");
 
   llvm::Function *mainFn = M->getFunction("main");
   llvm::Function *gFn = M->getFunction("g");

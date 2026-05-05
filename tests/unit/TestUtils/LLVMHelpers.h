@@ -286,6 +286,24 @@ inline const BasicBlock *findBlock(const Function *func, StringRef name) {
   return func ? findBasicBlockByName(*func, name) : nullptr;
 }
 
+inline PHINode *findPhi(BasicBlock &block, StringRef name) {
+  for (auto &phi : block.phis()) {
+    if (phi.getName() == name) {
+      return &phi;
+    }
+  }
+  return nullptr;
+}
+
+inline const PHINode *findPhi(const BasicBlock &block, StringRef name) {
+  for (const auto &phi : block.phis()) {
+    if (phi.getName() == name) {
+      return &phi;
+    }
+  }
+  return nullptr;
+}
+
 inline PHINode *findPhi(Function &func, StringRef name) {
   for (auto &bb : func) {
     for (auto &phi : bb.phis()) {
@@ -323,8 +341,53 @@ inline const Instruction *getFirstInstruction(const Function &func) {
   return &func.getEntryBlock().front();
 }
 
+inline Instruction *getFirstInstruction(Function &func) {
+  if (func.empty()) {
+    return nullptr;
+  }
+  return &func.getEntryBlock().front();
+}
+
+template <typename InstTy>
+InstTy *getFirstInstructionAs(Function &func) {
+  return dyn_cast_or_null<InstTy>(getFirstInstruction(func));
+}
+
+template <typename InstTy>
+const InstTy *getFirstInstructionAs(const Function &func) {
+  return dyn_cast_or_null<InstTy>(getFirstInstruction(func));
+}
+
 inline Function *findFunctionByName(Module &module, StringRef name) {
   return module.getFunction(name);
+}
+
+inline const Function *findFunctionByName(const Module &module, StringRef name) {
+  return module.getFunction(name);
+}
+
+inline Function *getFunctionChecked(Module &module, StringRef name) {
+  auto *function = findFunctionByName(module, name);
+  EXPECT_NE(function, nullptr) << "missing function: " << name.str();
+  return function;
+}
+
+inline const Function *getFunctionChecked(const Module &module, StringRef name) {
+  auto *function = findFunctionByName(module, name);
+  EXPECT_NE(function, nullptr) << "missing function: " << name.str();
+  return function;
+}
+
+inline BasicBlock *getBlockChecked(Function &func, StringRef name) {
+  auto *block = findBlock(func, name);
+  EXPECT_NE(block, nullptr) << "missing block: " << name.str();
+  return block;
+}
+
+inline const BasicBlock *getBlockChecked(const Function &func, StringRef name) {
+  auto *block = findBlock(func, name);
+  EXPECT_NE(block, nullptr) << "missing block: " << name.str();
+  return block;
 }
 
 template <typename InstTy>

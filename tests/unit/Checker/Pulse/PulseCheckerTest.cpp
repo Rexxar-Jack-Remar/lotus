@@ -27,6 +27,7 @@
 
 using namespace llvm;
 using namespace pulse;
+using lotus::unittest::findCallTo;
 using lotus::unittest::parseModule;
 
 namespace {
@@ -82,21 +83,6 @@ InstT *findNthInstruction(Function *F, unsigned ordinal) {
           return inst;
         }
         ++seen;
-      }
-    }
-  }
-  return nullptr;
-}
-
-CallInst *findCallByCalleeName(Function *F, StringRef calleeName) {
-  for (auto &BB : *F) {
-    for (auto &I : BB) {
-      auto *call = dyn_cast<CallInst>(&I);
-      if (!call || !call->getCalledFunction()) {
-        continue;
-      }
-      if (call->getCalledFunction()->getName() == calleeName) {
-        return call;
       }
     }
   }
@@ -221,7 +207,7 @@ TEST_F(PulseCheckerTest, ReportsInvalidFreeOfStackPointer) {
 
   Function *F = module->getFunction("bad_free");
   ASSERT_NE(F, nullptr);
-  CallInst *freeCall = findCallByCalleeName(F, "free");
+  auto *freeCall = dyn_cast<CallInst>(findCallTo(F, "free"));
   ASSERT_NE(freeCall, nullptr);
 
   BugReportMgr &mgr = BugReportMgr::get_instance();
@@ -420,8 +406,8 @@ TEST_F(PulseCheckerTest, SummaryKeepsReturnValueFromMatchingExitPath) {
 
   Function *caller = module->getFunction("caller");
   ASSERT_NE(caller, nullptr);
-  CallInst *mallocCall = findCallByCalleeName(caller, "malloc");
-  CallInst *chooseCall = findCallByCalleeName(caller, "choose_ret");
+  auto *mallocCall = dyn_cast<CallInst>(findCallTo(caller, "malloc"));
+  auto *chooseCall = dyn_cast<CallInst>(findCallTo(caller, "choose_ret"));
   ASSERT_NE(mallocCall, nullptr);
   ASSERT_NE(chooseCall, nullptr);
 
@@ -477,7 +463,7 @@ TEST_F(PulseCheckerTest, RejectedMultiEntrySummaryFallsBackToUnknownCall) {
 
   Function *caller = module->getFunction("caller_same_ptr");
   ASSERT_NE(caller, nullptr);
-  CallInst *pickCall = findCallByCalleeName(caller, "pick_first");
+  auto *pickCall = dyn_cast<CallInst>(findCallTo(caller, "pick_first"));
   ASSERT_NE(pickCall, nullptr);
 
   PulseChecker checker(module.get());
@@ -515,7 +501,7 @@ TEST_F(PulseCheckerTest, SummaryApplicationHandlesAliasedActuals) {
   checker.analyzeFunction(callee);
 
   ExecutionDomain callerState = checker.initializeFunction(caller);
-  auto *call = findCallByCalleeName(caller, "store_two");
+  auto *call = dyn_cast<CallInst>(findCallTo(caller, "store_two"));
   ASSERT_NE(call, nullptr);
 
   auto applied = checker.applySummaryImproved(callee, callerState, call, nullptr);
@@ -543,7 +529,7 @@ TEST_F(PulseCheckerTest, UnknownCallHavocsPointerArguments) {
 
   PulseChecker checker(module.get());
   ExecutionDomain state = checker.initializeFunction(F);
-  auto *call = findCallByCalleeName(F, "mystery");
+  auto *call = dyn_cast<CallInst>(findCallTo(F, "mystery"));
   ASSERT_NE(call, nullptr);
 
   for (auto &I : F->getEntryBlock()) {

@@ -22,13 +22,7 @@
 
 using namespace llvm;
 
-class ConcurrencyCheckerTest : public ::testing::Test {
-protected:
-  LLVMContext context;
-  std::unique_ptr<Module> parseModule(const char *source) {
-    return lotus::unittest::parseModule(context, source,
-                                        "ConcurrencyCheckerTest");
-  }
+class ConcurrencyCheckerTest : public lotus::unittest::LlvmModuleTest {
 };
 
 // Test 1: Lock acquire/release pattern

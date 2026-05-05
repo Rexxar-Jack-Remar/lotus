@@ -29,21 +29,6 @@ protected:
     return std::unique_ptr<SVFG>(builder.build(&icfg));
   }
 
-  static const CallBase *findDirectCall(const Function *F,
-                                        StringRef calleeName) {
-    for (const BasicBlock &BB : *F) {
-      for (const Instruction &I : BB) {
-        const auto *CB = dyn_cast<CallBase>(&I);
-        if (!CB)
-          continue;
-        const Function *callee = CB->getCalledFunction();
-        if (callee && callee->getName() == calleeName)
-          return CB;
-      }
-    }
-    return nullptr;
-  }
-
   static const CallBase *findSingleIndirectCall(const Function *F) {
     for (const BasicBlock &BB : *F) {
       for (const Instruction &I : BB) {

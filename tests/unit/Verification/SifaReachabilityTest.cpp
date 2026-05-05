@@ -1,24 +1,15 @@
 #include "Verification/Sifa/Sifa.h"
 
-#include "llvm/AsmParser/Parser.h"
-#include "llvm/IR/BasicBlock.h"
-#include "llvm/IR/Function.h"
-#include "llvm/IR/Module.h"
-#include "llvm/Support/SourceMgr.h"
+#include "TestUtils/LLVMHelpers.h"
 
 #include "gtest/gtest.h"
 
-#include <memory>
+using namespace llvm;
+using namespace lotus::unittest;
 
-namespace {
-
-static const llvm::BasicBlock *getBlockByName(const llvm::Function &F, const char *name) {
-  for (const llvm::BasicBlock &BB : F) {
-    if (BB.getName() == name) {
-      return &BB;
-    }
-  }
-  return nullptr;
+template <typename FunctionT>
+static auto getBlockByName(FunctionT &F, const char *name) {
+  return findBlock(F, name);
 }
 
 TEST(SifaReachability, ReachableAndUnreachableBlocks) {
@@ -44,20 +35,14 @@ TEST(SifaReachability, ReachableAndUnreachableBlocks) {
     }
   )IR";
 
-  llvm::LLVMContext ctx;
-  llvm::SMDiagnostic err;
-  std::unique_ptr<llvm::Module> M = llvm::parseAssemblyString(ir, err, ctx);
-  ASSERT_NE(M, nullptr);
+  LLVMContext ctx;
+  auto M = parseModuleChecked(ctx, ir, "SifaReachability");
 
-  llvm::Function *F = M->getFunction("f");
-  ASSERT_NE(F, nullptr);
+  Function *F = getFunctionChecked(*M, "f");
 
-  const llvm::BasicBlock *body = getBlockByName(*F, "body");
-  const llvm::BasicBlock *exit = getBlockByName(*F, "exit");
-  const llvm::BasicBlock *unreach = getBlockByName(*F, "unreach");
-  ASSERT_NE(body, nullptr);
-  ASSERT_NE(exit, nullptr);
-  ASSERT_NE(unreach, nullptr);
+  const BasicBlock *body = getBlockChecked(*F, "body");
+  const BasicBlock *exit = getBlockChecked(*F, "exit");
+  const BasicBlock *unreach = getBlockChecked(*F, "unreach");
 
   EXPECT_TRUE(lotus::sifa::isReachable(*F, *body));
   EXPECT_TRUE(lotus::sifa::isReachable(*F, *exit));
@@ -73,14 +58,11 @@ TEST(SifaReachability, SingleBlockReachable) {
     }
   )IR";
 
-  llvm::LLVMContext ctx;
-  llvm::SMDiagnostic err;
-  std::unique_ptr<llvm::Module> M = llvm::parseAssemblyString(ir, err, ctx);
-  ASSERT_NE(M, nullptr);
+  LLVMContext ctx;
+  auto M = parseModuleChecked(ctx, ir, "SifaReachability");
 
-  llvm::Function *F = M->getFunction("f");
-  ASSERT_NE(F, nullptr);
-  const llvm::BasicBlock *entry = &F->getEntryBlock();
+  Function *F = getFunctionChecked(*M, "f");
+  const BasicBlock *entry = &F->getEntryBlock();
 
   EXPECT_TRUE(lotus::sifa::isReachable(*F, *entry));
 }
@@ -116,5 +98,3 @@ TEST(SifaReachability, ConditionalBranchBothTargetsReachable) {
   EXPECT_TRUE(lotus::sifa::isReachable(*F, *thenBB));
   EXPECT_TRUE(lotus::sifa::isReachable(*F, *elseBB));
 }
-
-} // namespace

@@ -36,26 +36,11 @@ static bool moduleHasFunctionWithPrefix(const Module &M, StringRef Prefix) {
   return false;
 }
 
-// Check if a call instruction exists in a function
-static const CallInst *findCallTo(const Function &F, StringRef CalleeName) {
-  for (const BasicBlock &BB : F) {
-    for (const Instruction &I : BB) {
-      auto *CI = dyn_cast<CallInst>(&I);
-      if (!CI)
-        continue;
-      const Function *Callee = CI->getCalledFunction();
-      if (Callee && Callee->getName() == CalleeName)
-        return CI;
-    }
-  }
-  return nullptr;
-}
-
 // Verify that a call is wrapped with a nondet split:
 //   if (nondet) call f.safe(...) else { call f(...); assume(false); unreachable }
 static bool verifyCallWrapping(const Function &F, StringRef OriginalCallee,
                                StringRef SafeCallee) {
-  const CallInst *SafeCall = findCallTo(F, SafeCallee);
+  const auto *SafeCall = dyn_cast_or_null<CallInst>(lotus::unittest::findCallTo(F, SafeCallee));
   if (!SafeCall)
     return false;
 

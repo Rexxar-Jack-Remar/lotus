@@ -13,24 +13,18 @@
 #include "Verification/SymAbsAI/Core/AbstractValue.h"
 #include "Verification/SymAbsAI/Core/InstructionSemantics.h"
 
-#include <llvm/AsmParser/Parser.h>
-#include <llvm/IR/BasicBlock.h>
-#include <llvm/IR/Function.h>
-#include <llvm/IR/Module.h>
-#include <llvm/Support/SourceMgr.h>
+#include "TestUtils/LLVMHelpers.h"
+
 #include <gtest/gtest.h>
 
-#include <memory>
+using namespace llvm;
+using namespace lotus::unittest;
 
 namespace {
 
-static llvm::BasicBlock *getBlockByName(llvm::Function &F, const char *name) {
-  for (llvm::BasicBlock &BB : F) {
-    if (BB.getName() == name) {
-      return &BB;
-    }
-  }
-  return nullptr;
+template <typename FunctionT>
+static auto getBlockByName(FunctionT &F, const char *name) {
+  return findBlock(F, name);
 }
 
 // Test 1: Simple arithmetic operations
@@ -42,13 +36,10 @@ TEST(SifaVerification, SimpleArithmetic) {
     }
   )IR";
 
-  llvm::LLVMContext ctx;
-  llvm::SMDiagnostic err;
-  std::unique_ptr<llvm::Module> M = llvm::parseAssemblyString(ir, err, ctx);
-  ASSERT_NE(M, nullptr);
+  LLVMContext ctx;
+  auto M = parseModuleChecked(ctx, ir, "SifaVerification");
 
-  llvm::Function *F = M->getFunction("add");
-  ASSERT_NE(F, nullptr);
+  Function *F = getFunctionChecked(*M, "add");
 
   lotus::sifa::SifaSymAbsOptions opt;
   opt.abstractDomain = "Interval";
@@ -71,22 +62,17 @@ TEST(SifaVerification, BranchReachability) {
     }
   )IR";
 
-  llvm::LLVMContext ctx;
-  llvm::SMDiagnostic err;
-  std::unique_ptr<llvm::Module> M = llvm::parseAssemblyString(ir, err, ctx);
-  ASSERT_NE(M, nullptr);
+  LLVMContext ctx;
+  auto M = parseModuleChecked(ctx, ir, "SifaVerification");
 
-  llvm::Function *F = M->getFunction("test_branch");
-  ASSERT_NE(F, nullptr);
+  Function *F = getFunctionChecked(*M, "test_branch");
 
   lotus::sifa::SifaSymAbsOptions opt;
   opt.abstractDomain = "Interval";
   opt.recursive = true;
 
-  llvm::BasicBlock *trueBB = getBlockByName(*F, "true_bb");
-  llvm::BasicBlock *falseBB = getBlockByName(*F, "false_bb");
-  ASSERT_NE(trueBB, nullptr);
-  ASSERT_NE(falseBB, nullptr);
+  BasicBlock *trueBB = getBlockChecked(*F, "true_bb");
+  BasicBlock *falseBB = getBlockChecked(*F, "false_bb");
 
   // Both branches should be reachable
   EXPECT_TRUE(lotus::sifa::isReachableSymAbs(*M, *F, *trueBB, opt));
@@ -113,22 +99,17 @@ TEST(SifaVerification, LoopAnalysis) {
     }
   )IR";
 
-  llvm::LLVMContext ctx;
-  llvm::SMDiagnostic err;
-  std::unique_ptr<llvm::Module> M = llvm::parseAssemblyString(ir, err, ctx);
-  ASSERT_NE(M, nullptr);
+  LLVMContext ctx;
+  auto M = parseModuleChecked(ctx, ir, "SifaVerification");
 
-  llvm::Function *F = M->getFunction("loop_sum");
-  ASSERT_NE(F, nullptr);
+  Function *F = getFunctionChecked(*M, "loop_sum");
 
   lotus::sifa::SifaSymAbsOptions opt;
   opt.abstractDomain = "Interval";
   opt.recursive = true;
 
-  llvm::BasicBlock *loop = getBlockByName(*F, "loop");
-  llvm::BasicBlock *exit = getBlockByName(*F, "exit");
-  ASSERT_NE(loop, nullptr);
-  ASSERT_NE(exit, nullptr);
+  BasicBlock *loop = getBlockChecked(*F, "loop");
+  BasicBlock *exit = getBlockChecked(*F, "exit");
 
   EXPECT_TRUE(lotus::sifa::isReachableSymAbs(*M, *F, *loop, opt));
   EXPECT_TRUE(lotus::sifa::isReachableSymAbs(*M, *F, *exit, opt));
@@ -148,13 +129,10 @@ TEST(SifaVerification, FunctionCallArgs) {
     }
   )IR";
 
-  llvm::LLVMContext ctx;
-  llvm::SMDiagnostic err;
-  std::unique_ptr<llvm::Module> M = llvm::parseAssemblyString(ir, err, ctx);
-  ASSERT_NE(M, nullptr);
+  LLVMContext ctx;
+  auto M = parseModuleChecked(ctx, ir, "SifaVerification");
 
-  llvm::Function *caller = M->getFunction("caller");
-  ASSERT_NE(caller, nullptr);
+  Function *caller = getFunctionChecked(*M, "caller");
 
   lotus::sifa::SifaSymAbsOptions opt;
   opt.abstractDomain = "Interval";
@@ -187,13 +165,10 @@ TEST(SifaVerification, NestedFunctionCalls) {
     }
   )IR";
 
-  llvm::LLVMContext ctx;
-  llvm::SMDiagnostic err;
-  std::unique_ptr<llvm::Module> M = llvm::parseAssemblyString(ir, err, ctx);
-  ASSERT_NE(M, nullptr);
+  LLVMContext ctx;
+  auto M = parseModuleChecked(ctx, ir, "SifaVerification");
 
-  llvm::Function *outer = M->getFunction("outer");
-  ASSERT_NE(outer, nullptr);
+  Function *outer = getFunctionChecked(*M, "outer");
 
   lotus::sifa::SifaSymAbsOptions opt;
   opt.abstractDomain = "Interval";
@@ -218,13 +193,10 @@ TEST(SifaVerification, ComparisonOperations) {
     }
   )IR";
 
-  llvm::LLVMContext ctx;
-  llvm::SMDiagnostic err;
-  std::unique_ptr<llvm::Module> M = llvm::parseAssemblyString(ir, err, ctx);
-  ASSERT_NE(M, nullptr);
+  LLVMContext ctx;
+  auto M = parseModuleChecked(ctx, ir, "SifaVerification");
 
-  llvm::Function *F = M->getFunction("compare");
-  ASSERT_NE(F, nullptr);
+  Function *F = getFunctionChecked(*M, "compare");
 
   lotus::sifa::SifaSymAbsOptions opt;
   opt.abstractDomain = "Interval";
@@ -248,13 +220,10 @@ TEST(SifaVerification, BitwiseOperations) {
     }
   )IR";
 
-  llvm::LLVMContext ctx;
-  llvm::SMDiagnostic err;
-  std::unique_ptr<llvm::Module> M = llvm::parseAssemblyString(ir, err, ctx);
-  ASSERT_NE(M, nullptr);
+  LLVMContext ctx;
+  auto M = parseModuleChecked(ctx, ir, "SifaVerification");
 
-  llvm::Function *F = M->getFunction("bitwise");
-  ASSERT_NE(F, nullptr);
+  Function *F = getFunctionChecked(*M, "bitwise");
 
   lotus::sifa::SifaSymAbsOptions opt;
   opt.abstractDomain = "Interval";
@@ -274,13 +243,10 @@ TEST(SifaVerification, SelectInstruction) {
     }
   )IR";
 
-  llvm::LLVMContext ctx;
-  llvm::SMDiagnostic err;
-  std::unique_ptr<llvm::Module> M = llvm::parseAssemblyString(ir, err, ctx);
-  ASSERT_NE(M, nullptr);
+  LLVMContext ctx;
+  auto M = parseModuleChecked(ctx, ir, "SifaVerification");
 
-  llvm::Function *F = M->getFunction("select_test");
-  ASSERT_NE(F, nullptr);
+  Function *F = getFunctionChecked(*M, "select_test");
 
   lotus::sifa::SifaSymAbsOptions opt;
   opt.abstractDomain = "Interval";
@@ -309,20 +275,16 @@ TEST(SifaVerification, PHINode) {
     }
   )IR";
 
-  llvm::LLVMContext ctx;
-  llvm::SMDiagnostic err;
-  std::unique_ptr<llvm::Module> M = llvm::parseAssemblyString(ir, err, ctx);
-  ASSERT_NE(M, nullptr);
+  LLVMContext ctx;
+  auto M = parseModuleChecked(ctx, ir, "SifaVerification");
 
-  llvm::Function *F = M->getFunction("phi_test");
-  ASSERT_NE(F, nullptr);
+  Function *F = getFunctionChecked(*M, "phi_test");
 
   lotus::sifa::SifaSymAbsOptions opt;
   opt.abstractDomain = "Interval";
   opt.recursive = true;
 
-  llvm::BasicBlock *merge = getBlockByName(*F, "merge");
-  ASSERT_NE(merge, nullptr);
+  BasicBlock *merge = getBlockChecked(*F, "merge");
 
   EXPECT_TRUE(lotus::sifa::isReachableSymAbs(*M, *F, *merge, opt));
 }
@@ -344,24 +306,18 @@ TEST(SifaVerification, SwitchInstruction) {
     }
   )IR";
 
-  llvm::LLVMContext ctx;
-  llvm::SMDiagnostic err;
-  std::unique_ptr<llvm::Module> M = llvm::parseAssemblyString(ir, err, ctx);
-  ASSERT_NE(M, nullptr);
+  LLVMContext ctx;
+  auto M = parseModuleChecked(ctx, ir, "SifaVerification");
 
-  llvm::Function *F = M->getFunction("switch_test");
-  ASSERT_NE(F, nullptr);
+  Function *F = getFunctionChecked(*M, "switch_test");
 
   lotus::sifa::SifaSymAbsOptions opt;
   opt.abstractDomain = "Interval";
   opt.recursive = true;
 
-  llvm::BasicBlock *case1 = getBlockByName(*F, "case1");
-  llvm::BasicBlock *case2 = getBlockByName(*F, "case2");
-  llvm::BasicBlock *defaultBB = getBlockByName(*F, "default");
-  ASSERT_NE(case1, nullptr);
-  ASSERT_NE(case2, nullptr);
-  ASSERT_NE(defaultBB, nullptr);
+  BasicBlock *case1 = getBlockChecked(*F, "case1");
+  BasicBlock *case2 = getBlockChecked(*F, "case2");
+  BasicBlock *defaultBB = getBlockChecked(*F, "default");
 
   // All switch targets should be reachable
   EXPECT_TRUE(lotus::sifa::isReachableSymAbs(*M, *F, *case1, opt));
@@ -383,22 +339,17 @@ TEST(SifaVerification, UnreachableCode) {
     }
   )IR";
 
-  llvm::LLVMContext ctx;
-  llvm::SMDiagnostic err;
-  std::unique_ptr<llvm::Module> M = llvm::parseAssemblyString(ir, err, ctx);
-  ASSERT_NE(M, nullptr);
+  LLVMContext ctx;
+  auto M = parseModuleChecked(ctx, ir, "SifaVerification");
 
-  llvm::Function *F = M->getFunction("unreachable_test");
-  ASSERT_NE(F, nullptr);
+  Function *F = getFunctionChecked(*M, "unreachable_test");
 
   lotus::sifa::SifaSymAbsOptions opt;
   opt.abstractDomain = "Interval";
   opt.recursive = true;
 
-  llvm::BasicBlock *reachable = getBlockByName(*F, "reachable");
-  llvm::BasicBlock *unreachable = getBlockByName(*F, "unreachable");
-  ASSERT_NE(reachable, nullptr);
-  ASSERT_NE(unreachable, nullptr);
+  BasicBlock *reachable = getBlockChecked(*F, "reachable");
+  BasicBlock *unreachable = getBlockChecked(*F, "unreachable");
 
   EXPECT_TRUE(lotus::sifa::isReachableSymAbs(*M, *F, *reachable, opt));
   EXPECT_TRUE(lotus::sifa::isReachableSymAbs(*M, *F, *unreachable, opt));
@@ -422,13 +373,10 @@ TEST(SifaVerification, RecursiveFunction) {
     }
   )IR";
 
-  llvm::LLVMContext ctx;
-  llvm::SMDiagnostic err;
-  std::unique_ptr<llvm::Module> M = llvm::parseAssemblyString(ir, err, ctx);
-  ASSERT_NE(M, nullptr);
+  LLVMContext ctx;
+  auto M = parseModuleChecked(ctx, ir, "SifaVerification");
 
-  llvm::Function *F = M->getFunction("fact");
-  ASSERT_NE(F, nullptr);
+  Function *F = getFunctionChecked(*M, "fact");
 
   lotus::sifa::SifaSymAbsOptions opt;
   opt.abstractDomain = "Interval";
@@ -451,13 +399,10 @@ TEST(SifaVerification, GlobalVariable) {
     }
   )IR";
 
-  llvm::LLVMContext ctx;
-  llvm::SMDiagnostic err;
-  std::unique_ptr<llvm::Module> M = llvm::parseAssemblyString(ir, err, ctx);
-  ASSERT_NE(M, nullptr);
+  LLVMContext ctx;
+  auto M = parseModuleChecked(ctx, ir, "SifaVerification");
 
-  llvm::Function *F = M->getFunction("read_global");
-  ASSERT_NE(F, nullptr);
+  Function *F = getFunctionChecked(*M, "read_global");
 
   lotus::sifa::SifaSymAbsOptions opt;
   opt.abstractDomain = "Interval";
@@ -481,13 +426,10 @@ TEST(SifaVerification, ExtensionOperations) {
     }
   )IR";
 
-  llvm::LLVMContext ctx;
-  llvm::SMDiagnostic err;
-  std::unique_ptr<llvm::Module> M = llvm::parseAssemblyString(ir, err, ctx);
-  ASSERT_NE(M, nullptr);
+  LLVMContext ctx;
+  auto M = parseModuleChecked(ctx, ir, "SifaVerification");
 
-  llvm::Function *F = M->getFunction("ext_test");
-  ASSERT_NE(F, nullptr);
+  Function *F = getFunctionChecked(*M, "ext_test");
 
   lotus::sifa::SifaSymAbsOptions opt;
   opt.abstractDomain = "Interval";

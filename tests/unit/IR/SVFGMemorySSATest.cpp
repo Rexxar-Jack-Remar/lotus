@@ -23,9 +23,8 @@ TEST_F(SVFGMemorySSATest, ReadOnlyCalleeDoesNotCreateCallerSideDefs) {
   std::unique_ptr<SVFG> svfg = buildSVFG(module.get(), icfg);
   ASSERT_NE(svfg, nullptr);
 
-  const Function *mainFn = module->getFunction("main");
-  ASSERT_NE(mainFn, nullptr);
-  const CallBase *call = findDirectCall(mainFn, "reader");
+  const Function *mainFn = getFunctionChecked(*module, "main");
+  const CallBase *call = findCallTo(mainFn, "reader");
   ASSERT_NE(call, nullptr);
 
   EXPECT_FALSE(svfg->getActualIns(call).empty());
@@ -177,8 +176,7 @@ TEST_F(SVFGMemorySSATest, LoadCapturesReachingDefVersion) {
   std::unique_ptr<SVFG> svfg = buildSVFG(module.get(), icfg);
   ASSERT_NE(svfg, nullptr);
 
-  const Function *mainFn = module->getFunction("main");
-  ASSERT_NE(mainFn, nullptr);
+  const Function *mainFn = getFunctionChecked(*module, "main");
   const LoadInst *load = findSingleLoad(mainFn);
   ASSERT_NE(load, nullptr);
 
@@ -229,7 +227,7 @@ TEST_F(SVFGMemorySSATest, GlobalOnlyCalleeCreatesInterproceduralMemoryNodes) {
   const Function *writerFn = module->getFunction("writer");
   ASSERT_NE(mainFn, nullptr);
   ASSERT_NE(writerFn, nullptr);
-  const CallBase *call = findDirectCall(mainFn, "writer");
+  const CallBase *call = findCallTo(mainFn, "writer");
   ASSERT_NE(call, nullptr);
 
   EXPECT_TRUE(svfg->getActualIns(call).empty());
@@ -289,7 +287,7 @@ TEST_F(SVFGMemorySSATest, CallsiteMemoryNodesTrackOnlyTouchedArguments) {
 
   const Function *mainFn = module->getFunction("main");
   ASSERT_NE(mainFn, nullptr);
-  const CallBase *call = findDirectCall(mainFn, "touch_first");
+  const CallBase *call = findCallTo(mainFn, "touch_first");
   ASSERT_NE(call, nullptr);
 
   EXPECT_EQ(svfg->getActualIns(call).size(), 1u);
@@ -354,7 +352,7 @@ TEST_F(SVFGMemorySSATest, InterproceduralValueNodesUseEntryExitAndReturnSite) {
   ASSERT_NE(idFn, nullptr);
   ASSERT_NE(callerFn, nullptr);
 
-  const CallBase *call = findDirectCall(callerFn, "id");
+  const CallBase *call = findCallTo(callerFn, "id");
   ASSERT_NE(call, nullptr);
 
   const ICFGNode *entryNode = icfg.getFunEntryICFGNode(idFn);
@@ -425,7 +423,7 @@ TEST_F(SVFGMemorySSATest, InterproceduralMemoryNodesUseExitAndReturnSite) {
   const Function *writerFn = module->getFunction("writer");
   ASSERT_NE(mainFn, nullptr);
   ASSERT_NE(writerFn, nullptr);
-  const CallBase *call = findDirectCall(mainFn, "writer");
+  const CallBase *call = findCallTo(mainFn, "writer");
   ASSERT_NE(call, nullptr);
 
   const ICFGNode *exitNode = icfg.getFunExitICFGNode(writerFn);
@@ -604,7 +602,7 @@ TEST_F(SVFGMemorySSATest, UpdateSVFGKeepsBuilderGraphAccessorsValid) {
   const Function *targetFn = module->getFunction("target");
   ASSERT_NE(applyFn, nullptr);
   ASSERT_NE(targetFn, nullptr);
-  const CallBase *call = findDirectCall(applyFn, "target");
+  const CallBase *call = findCallTo(applyFn, "target");
   ASSERT_NE(call, nullptr);
 
   ASSERT_TRUE(builder.updateSVFG(svfg.get()));
@@ -680,7 +678,7 @@ TEST_F(SVFGMemorySSATest, InternalPointerReturningCallDoesNotCopyArgumentIntoRes
 
   const Function *mainFn = module->getFunction("main");
   ASSERT_NE(mainFn, nullptr);
-  const CallBase *call = findDirectCall(mainFn, "id");
+  const CallBase *call = findCallTo(mainFn, "id");
   ASSERT_NE(call, nullptr);
 
   SVFGNode *callValue = svfg->getDef(call);
@@ -722,7 +720,7 @@ TEST_F(SVFGMemorySSATest, ExternalPointerReturningCallSkipsActualRetNode) {
 
   const Function *mainFn = module->getFunction("main");
   ASSERT_NE(mainFn, nullptr);
-  const CallBase *call = findDirectCall(mainFn, "ext");
+  const CallBase *call = findCallTo(mainFn, "ext");
   ASSERT_NE(call, nullptr);
 
   EXPECT_TRUE(svfg->getActualRets(call).empty());
@@ -791,7 +789,7 @@ TEST_F(SVFGMemorySSATest, HeapReachableFromGlobalRemainsVisibleInSummaries) {
 
   EXPECT_TRUE(foundHeapSummaryRegion);
 
-  const CallBase *readerCall = findDirectCall(mainFn, "reader");
+  const CallBase *readerCall = findCallTo(mainFn, "reader");
   ASSERT_NE(readerCall, nullptr);
   bool callerSeesHeapSummary = false;
   for (SVFGNode *node : svfg->getActualIns(readerCall)) {
@@ -915,7 +913,7 @@ TEST_F(SVFGMemorySSATest, UntouchedPointerFormalsDoNotCreateMemoryNodes) {
   const Function *mainFn = module->getFunction("main");
   ASSERT_NE(noopFn, nullptr);
   ASSERT_NE(mainFn, nullptr);
-  const CallBase *call = findDirectCall(mainFn, "noop");
+  const CallBase *call = findCallTo(mainFn, "noop");
   ASSERT_NE(call, nullptr);
 
   EXPECT_TRUE(svfg->getFormalIns(noopFn).empty());
