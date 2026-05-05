@@ -202,7 +202,7 @@ class Matrix {
         for (std::size_t c = 0; c < columns_; ++c) {
           ss << At(r, c) << " | ";
         }
-        ss << std::endl;
+        ss << '\n';
       }
       return ss.str();
     }

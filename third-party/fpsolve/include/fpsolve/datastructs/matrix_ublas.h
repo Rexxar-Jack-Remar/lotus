@@ -1,15 +1,15 @@
 #ifndef MATRIX_H
 #define MATRIX_H
 
-#include <string>
-#include <sstream>
-#include <vector>
+#include <boost/numeric/ublas/io.hpp>
+#include <boost/numeric/ublas/matrix.hpp>
+#include <boost/numeric/ublas/matrix_proxy.hpp>
 #include <cassert>
 #include <initializer_list>
 #include <memory>
-#include <boost/numeric/ublas/matrix.hpp>
-#include <boost/numeric/ublas/io.hpp>
-#include <boost/numeric/ublas/matrix_proxy.hpp>
+#include <sstream>
+#include <string>
+#include <vector>
 
 namespace ub = boost::numeric::ublas;
 
@@ -221,7 +221,7 @@ public:
 			{
 				ss << elements.at(r*columns+c) << " ";
 			}
-			ss << std::endl;
+			ss << '\n';
 		}
 		// TODO: use operator<< of ublas::matrix (in io.hpp)
 		return ss.str();

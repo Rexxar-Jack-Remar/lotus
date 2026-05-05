@@ -29,7 +29,7 @@ class FloatSemiring : public StarableSemiring<FloatSemiring,
       std::istringstream i(str_val);
       if (!(i >> value_))
       {
-        std::cerr << "ERROR: Bad string value (" << str_val << ") for float-SR constructor! Defaulting to 0.0"<< std::endl;
+        std::cerr << "ERROR: Bad string value (" << str_val << ") for float-SR constructor! Defaulting to 0.0"<< '\n';
         value_ = 0.0;
       }
     }

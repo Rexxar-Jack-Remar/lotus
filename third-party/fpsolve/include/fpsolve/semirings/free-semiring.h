@@ -4,8 +4,8 @@
 #include <unordered_map>
 
 #include "fpsolve/datastructs/hash.h"
-#include "fpsolve/datastructs/var.h"
 #include "fpsolve/datastructs/free-structure.h"
+#include "fpsolve/datastructs/var.h"
 
 #include "fpsolve/utils/profiling-macros.h"
 
