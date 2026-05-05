@@ -80,8 +80,9 @@ system configures Boost **only when** one of these is enabled:
 - **SeaHorn** (`ENABLE_SEAHORN`, default ON) — expression handling, Horn clause DB, graph traits
 - **CLAM** (`ENABLE_CLAM`, default ON) — abstract interpretation, JSON parsing (Boost 1.80+ for JSON)
 - **CclyzerAA** (`LOTUS_USE_CCLYZER`, default OFF) — alias analysis
+- **FPsolve** (`ENABLE_FPSOLVE`, default OFF) — vendored fixed-point solver library; also requires GMP
 
-If all three are disabled (e.g. `-DENABLE_CLAM=OFF -DENABLE_SEAHORN=OFF`), Boost will **not** be
+If all four are disabled (e.g. `-DENABLE_CLAM=OFF -DENABLE_SEAHORN=OFF -DENABLE_FPSOLVE=OFF`), Boost will **not** be
 configured. Sea-DSA no longer requires Boost.
 
 When Boost is needed, the build will download and build it if not found. You can specify a custom

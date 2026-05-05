@@ -1,0 +1,67 @@
+To compile you need the following tools and libraries (Tested under Ubuntu Linux version 13.10):
+
+- cmake (tested with version >= 2.8, probably also works with older versions)
+- g++ (version >= 4.8)
+- boost (version >=1.48, libs: program-options, filesystem, system)
+- cppunit: for unit-tests
+- GMP (and boost multiprecision)
+- optional: genepi, mona, lash + respective genepi plugins (only for semilinearsetNDD)
+- optional: libfa (if you want to use the "lossy-semiring" implemented in lossy-finite-automaton.h -- see HOWTO below for installing!)
+
+
+Then simply clone the repository:
+$ git clone https://github.com/mschlund/FPsolve.git
+
+Then the following commands should do the job. Note that cmake will complain if some library wasn't found -- pay attention to these errors!
+
+$ cd FPsolve
+$ cmake -S . -B build
+$ cmake --build build
+
+
+HOWTO: Install Genepi
+---------------------
+0. Install Mona (e.g. Ubuntu has it in the package repository)
+1. Either get genepi + genepi-mona-plugin from https://altarica.labri.fr/forge/embedded/altarica/downloads.html or use the bundled archive under `third_party/genepi/`
+2. Extract genepi + genepi-mona-plugin and install then (first genepi then the plugin). Install should work painlessly (./configure && make && make install).
+
+Genepi troubleshooting: the original configure script of the genepi-plugin has a tiny bug: you should replace the "else" statement in
+..
+if test "${exec_prefix}" != "NONE"; then
+    eval PKG_CONFIG_PATH=\"'$'PKG_CONFIG_PATH:${libdir}/pkgconfig\"
+    eval LDFLAGS=\"'$'LDFLAGS -L${libdir}\"
+    eval CPPFLAGS=\"'$'CPPFLAGS -I${includedir}\"
+else
+    PKG_CONFIG_PATH="$PKG_CONFIG_PATH:${prefix}/lib/pkgconfig"
+    LDFLAGS="$LDFLAGS -L${prefix}/lib"
+    CPPFLAGS="$CPPFLAGS -I${prefix}/include"
+fi
+.. 
+by "elif "${prefix}" != "NONE"; then"
+
+
+
+HOWTO: Modify LIBFA for Lossy-semiring
+--------------------------------------
+Integration of libfa (http://augeas.net/libfa/) is still a bit of a pain but should work if the instructions are followed.
+We had to change the source and header files slightly since we have to access the internal structure of the finite automata.
+
+0. get augeas source code (assumed to be in augeas-1.X.0/src)
+1. unpack the "libfa_parts_modified.tar.gz" from the FPsolve root-dir
+2. copy everything in "changed_source" into augeas-1.X.0/src
+3. run "./configure; make; sudo make install" in augeas-1.X.0
+4. copy "header_to_use_after_compilation_of_libfa/fa.h" to e.g. "/usr/local/include/fa.h"
+5. copy libfa.pc from the "libfa_parts_modified.tar.gz" to /usr/local/lib/pkgconfig (adapt paths if using a different location)
+
+
+
+
+
+
+Troubleshooting:
+----------------
+
+1) Compilation needs _lots_ of memory (due to boost and template-stuff) -- at least 3GB are recommended.
+2) compilation error ".. is missing emplace()" -- you need at least gcc 4.8 (gcc 4.7 does not yet support many c++11-features)
+3) when trying to execute program: ".. cannot open shared object file: No such file or directory"
+   -- make sure that $LD_LIBRARY_PATH includes the path you use for locally installed libraries (like genepi) e.g. "/usr/local/lib"

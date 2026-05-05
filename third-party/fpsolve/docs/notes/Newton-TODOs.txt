@@ -1,0 +1,83 @@
+# just a braindump... reference for us..
+# easy things on top of each list :)
+
+
+#--------------------
+# Design & Engineering :)
+#--------------------
+[DONE] Unit-Tests (possibly test-generation? large instances for performance-testing, also: over the free-semiring)
+- Output?
+
+#---------------
+# More Semirings
+#---------------
+[DONE] Product-Semiring-Construction (simple: (iterated) pair)
+[DONE] "Exotic" Semirings (tropical, arctic)
+[DONE] Viterbi-Semiring
+- ... (see: "Semirings for Breakfast"-presentation ---only the starable ones! additional element "infty" needed sometimes :)) use GMP for arbitrary precision ints/floats/...
+[DONE] Arbitrary-precision Real-Semiring (in fact: this is Q, elements are p/q with p,q integers)
+
+- Finite Semirings (e.g. finite Lattices) <--> specification (see UI)
+
+- Counting-Semiring (representation of Semiliniear-Sets)
+  [DONE] As Presburger-Formulae --> Automata (Mona)
+  [DONE] As (short!) Weighted Rational Expressions (together with some terminating (!) rewriting-system to produce "short" terms) -> Vaucanson?
+  - As (short!) rational Generating Functions (same as second one???)
+
+#---------------------
+# Efficient Algorithms
+#---------------------
+[DONE] simplified Newton-Iteration for (commutative) idempotent Semirings
+- efficient Algorithm for computing Mat-Star (Bandwidth-reduction for systems of (right-)linear fixpoint equations)
+[DONE] decomposed Newton-Method (split into SCCs and solve bottom-up)
+
+
+#----------------
+# UI/Usability
+#----------------
+- Easy building/specification of Semirings (input-language/config-file/GUI)
+[DONE] Define a Format + Parser of Polynomial equations (-> Inspiration Vaucanson (they use some XML-format I think)?)
+
+
+#-----------------------
+# Non-commutative Newton
+#-----------------------
+- Semiring of Contexts (over some alphabet)
+[DONE] non-commutative Polynomials
+
+
+#-------------------------------------------------------------
+# Newton as Grammar/Equation-Unfolding over the SR of formal Power Series (in commuting variables!)
+#-------------------------------------------------------------
+- Define the SR (perhaps Vaucanson can help?)
+- Unfold eqn-system up to depth d into a linear system
+- solve the resulting linear system
+- application to average-case analysis
+
+
+#----------------------
+# Tools/Libs to help us
+#----------------------
+- Vaucanson (automata, wrexp, semirings, series+polynomials)
+[DONE] Mona (automata, regexp, MSO/Presburger)
+
+
+#---------------------------------
+# Applications to Program Analysis
+#---------------------------------
+Tools:
+  - jMoped
+  - goblInt
+  - MaLiJAn
+Analyses:
+  - Average-case runtime analysis
+  - May-alias analysis
+  - ... (think about how to use the above SR for analyses!)
+  - Memory-usage (worst/average-case) --- is this even possible in our framework??
+  - Runtime-Analysis of Parallel-programs (possibly also with procedure calls?) --- again: is this even possible??
+
+
+
+
+
+
