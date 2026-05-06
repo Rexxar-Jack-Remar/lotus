@@ -20,5 +20,4 @@ add_subdirectory(Infrastructure/Metrics)
 if(LOTUS_CCLYZERPP_AVAILABLE)
   add_subdirectory(InclusionBased/CclyzerAA)
 endif()
-# add_subdirectory(Pestrie)  # not used fow now
 add_subdirectory(InclusionBased/TPA)

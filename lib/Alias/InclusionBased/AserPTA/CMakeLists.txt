@@ -19,10 +19,6 @@ add_library(AserPTA STATIC
     Util/Util.cpp
 )
 
-target_compile_options(AserPTA PRIVATE
-    -DSPDLOG_ACTIVE_LEVEL=2
-)
-
 # LLVM component libs needed by AserPTA.
 # Note: This must be expressed at the AserPTA target level so consumers (tests/tools)
 # reliably link the right LLVM libs on platforms where LLVM is split into many libs.

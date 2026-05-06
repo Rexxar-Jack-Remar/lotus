@@ -12,6 +12,6 @@ add_library(DDA STATIC
 
 target_link_libraries(DDA PUBLIC
   SVFG
-  LLVMCore
-  LLVMSupport
+  #LLVMCore
+  #LLVMSupport
 )

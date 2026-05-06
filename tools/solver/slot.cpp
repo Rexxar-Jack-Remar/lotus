@@ -143,7 +143,7 @@ unsigned short RunPasses(unsigned short flags, Function &fun) {
   PB.registerLoopAnalyses(LAM);
   PB.crossRegisterProxies(LAM, FAM, CGAM, MAM);
 
-  int count = fun.getEntryBlock().sizeWithoutDebug();
+  long count = fun.getEntryBlock().sizeWithoutDebug();
   unsigned short used = 0;
 
   if (flags & INST_COMBINE) {

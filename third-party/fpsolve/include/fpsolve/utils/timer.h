@@ -3,11 +3,11 @@
 #include <chrono>
 
 class Timer {
-  typedef std::chrono::high_resolution_clock clock;
+  using clock = std::chrono::high_resolution_clock;
 
   public:
-    typedef std::chrono::microseconds Microseconds;
-    typedef std::chrono::milliseconds Milliseconds;
+    using Microseconds = std::chrono::microseconds;
+    using Milliseconds = std::chrono::milliseconds;
 
     Timer() : start_(), stop_() {}
 

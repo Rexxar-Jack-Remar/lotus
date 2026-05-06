@@ -7,7 +7,6 @@ target_include_directories(LotusCclyzerAA
   PUBLIC ${CMAKE_SOURCE_DIR}/include
   PRIVATE ${CMAKE_SOURCE_DIR}/include/Alias/InclusionBased/CclyzerAA)
 
-target_compile_features(LotusCclyzerAA PUBLIC cxx_std_17)
 target_link_libraries(LotusCclyzerAA PRIVATE PAPass)
 
 if(NOT LLVM_ENABLE_RTTI)

@@ -16,8 +16,8 @@
 #include "fpsolve/datastructs/equations.h"
 
 #include "fpsolve/polynomials/commutative_polynomial.h"
-#include "fpsolve/polynomials/non_commutative_polynomial.h"
 #include "fpsolve/polynomials/lossy_non_commutative_polynomial.h"
+#include "fpsolve/polynomials/non_commutative_polynomial.h"
 
 
 #include "fpsolve/semirings/pseudo_linear_set.h"
@@ -48,7 +48,7 @@ void check_all_equal_commutative(const std::string& startsymbol, const std::vect
 
   auto nc_equations = p.free_parser(inputs[0]);
 
-  std::cout << "Eq (non-comm) : " << std::endl;
+  std::cout << "Eq (non-comm) : " << '\n';
   PrintEquations(nc_equations);
 
   // Use appropriate semiring (has to be commutative!)
@@ -57,7 +57,7 @@ void check_all_equal_commutative(const std::string& startsymbol, const std::vect
     return c.Eval(srconv);
   });
 
-  std::cout << "Eq (comm) : "  << std::endl;
+  std::cout << "Eq (comm) : "  << '\n';
   PrintEquations(equations_fst);
 
   Timer timer;
@@ -86,11 +86,11 @@ void check_all_equal_commutative(const std::string& startsymbol, const std::vect
     else {
 
       if(sol.find(Var::GetVarId(startsymbol)) == sol.end() || sol_fst.find(Var::GetVarId(startsymbol)) == sol_fst.end()) {
-        std::cout << "[ERROR] startsymbol (" << startsymbol << ") does not occur!"<< std::endl;
+        std::cout << "[ERROR] startsymbol (" << startsymbol << ") does not occur!"<< '\n';
         return;
       }
       else if(sol[Var::GetVarId(startsymbol)] != sol_fst[Var::GetVarId(startsymbol)]) {
-        std::cout << "[DIFF] Difference found for startsymbol (" << startsymbol << ")" << std::endl << "0:" << result_string(sol_fst)
+        std::cout << "[DIFF] Difference found for startsymbol (" << startsymbol << ")" << '\n' << "0:" << result_string(sol_fst)
                                                << std::endl << i << ":" << result_string(sol) << std::endl;
         all_equal = false;
         break;
@@ -100,7 +100,7 @@ void check_all_equal_commutative(const std::string& startsymbol, const std::vect
   }
 
   if(all_equal) {
-    std::cout << "[EQUIV] All grammars equivalent modulo commutativity" << std::endl;
+    std::cout << "[EQUIV] All grammars equivalent modulo commutativity" << '\n';
   }
 
   timer.Stop();
@@ -108,7 +108,7 @@ void check_all_equal_commutative(const std::string& startsymbol, const std::vect
   << "Total checking time:\t" << timer.GetMilliseconds().count()
   << " ms" << " ("
   << timer.GetMicroseconds().count()
-  << "us)" << std::endl;
+  << "us)" << '\n';
 
 }
 
@@ -156,7 +156,7 @@ void check_all_equal_lossy(const std::string& startsymbol, const std::vector<std
         std::cout << "[DIFF] Difference found for startsymbols (" << equations_fst[0].first << "," << equations[0].first << ")" << std::endl;
       }
       else {
-        std::cout << "[DIFF] Difference found for startsymbols (" << S_1 << "," << S_2 << ")" << std::endl;
+        std::cout << "[DIFF] Difference found for startsymbols (" << S_1 << "," << S_2 << ")" << '\n';
       }
         std::cout << "Witness: " << witness.string() << std::endl;
         all_equal = false;
@@ -165,7 +165,7 @@ void check_all_equal_lossy(const std::string& startsymbol, const std::vector<std
   }
 
   if(all_equal) {
-    std::cout << "[EQUIV] All grammars equivalent modulo subword-closure" << std::endl;
+    std::cout << "[EQUIV] All grammars equivalent modulo subword-closure" << '\n';
   }
 
   timer.Stop();
@@ -173,7 +173,7 @@ void check_all_equal_lossy(const std::string& startsymbol, const std::vector<std
   << "Total checking time:\t" << timer.GetMilliseconds().count()
   << " ms" << " ("
   << timer.GetMicroseconds().count()
-  << "us)" << std::endl;
+  << "us)" << '\n';
 
 }
 
@@ -205,7 +205,7 @@ int main(int argc, char* argv[]) {
   SemilinSetNdd::genepi_init();
 
   if(vm.count("help")) {
-    std::cout << generic << std::endl;
+    std::cout << generic << '\n';
     return EXIT_SUCCESS;
   }
 
@@ -217,10 +217,10 @@ int main(int argc, char* argv[]) {
 
   if(vm.count("startsymbol")) {
     startsymbol = vm["startsymbol"].as<std::string>();
-    std::cout << "Comparing startsymbols (" << startsymbol << ")" << std::endl;
+    std::cout << "Comparing startsymbols (" << startsymbol << ")" << '\n';
   }
   else {
-    std::cout << "No startsymbol specified, using defaults." << std::endl;
+    std::cout << "No startsymbol specified, using defaults." << '\n';
   }
 
   if (vm.count("input") && num_grammars > 1) {
@@ -230,7 +230,7 @@ int main(int argc, char* argv[]) {
     for(auto& filename : input_files) {
       file.open(filename, std::ifstream::in);
       if (file.fail()) {
-        std::cerr << "Could not open input file: " << filename << std::endl;
+        std::cerr << "Could not open input file: " << filename << '\n';
       }
       std::string line;
       std::vector<std::string> input;
@@ -242,24 +242,24 @@ int main(int argc, char* argv[]) {
       file.close();
     }
   } else {
-    std::cout << "Please provide at least two input files!" << std::endl;
+    std::cout << "Please provide at least two input files!" << '\n';
     return EXIT_FAILURE;
   }
 
   if(!vm.count("slset") && !vm.count("lossy")) {
-    std::cout << "Please specify the abstraction used for checking equivalence!" << std::endl;
+    std::cout << "Please specify the abstraction used for checking equivalence!" << '\n';
     return EXIT_FAILURE;
   }
 
   if(vm.count("slset")) {
-    std::cout << "Plain Semilinear Sets" << std::endl;
+    std::cout << "Plain Semilinear Sets" << '\n';
     // no overapproximation -- just plain semilinear sets with simplification
     // (the approximations are not sound for inequivalence-testing!)
     check_all_equal_commutative<SemilinearSetL>(startsymbol, inputs);
   }
 
   if(vm.count("lossy")) {
-    std::cout << "Lossy Approximation" << std::endl;
+    std::cout << "Lossy Approximation" << '\n';
 
     int refinementDepth = 0;
     if(vm.count("refD")) {

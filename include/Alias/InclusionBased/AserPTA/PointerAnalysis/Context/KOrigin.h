@@ -8,8 +8,8 @@
 #include "Alias/InclusionBased/AserPTA/PointerAnalysis/Context/CtxTrait.h"
 #include "Alias/InclusionBased/AserPTA/PointerAnalysis/Context/KCallSite.h"
 
-#include <Alias/InclusionBased/AserPTA/Util/Log.h>
 #include <llvm/ADT/StringSet.h>
+#include <Alias/InclusionBased/AserPTA/Util/Log.h>
 
 namespace aser {
 

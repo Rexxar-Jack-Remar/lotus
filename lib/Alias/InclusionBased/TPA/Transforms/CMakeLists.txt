@@ -10,4 +10,3 @@ RunPrepass.cpp)
 
 add_library(TPATransforms STATIC ${TransformSourceCodes})
 
-#target_link_libraries(TPATransforms LLVMTransformUtils LLVMipo LLVMSupport LLVMCore)

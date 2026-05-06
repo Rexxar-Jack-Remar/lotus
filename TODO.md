@@ -77,7 +77,7 @@ Some related publications
 ### Software Protection
 
 **Side Channel**
-- TOPLAS: Side-Channel Elimination via Partial Control-Flow Linearization.
+- TOPLAS 23: Side-Channel Elimination via Partial Control-Flow Linearization. Luigi Soares, Michael Canesche, and Fernando Magno Quintão Pereira。
 - Security 26: VeCT: Secure and Efficient Constant-Time Code Rewriting with Vector Extensions.
 - CCS 21: Constantine: Automatic Side-Channel Resistance Using Efficient Control and Data Flow Linearization. https://github.com/pietroborrello/constantine
 
