@@ -88,7 +88,7 @@ Notable entry points:
 - `Solver/NPASolver.h` contains the public Newton/NPA solver.
 - `Core/Base/Fixpoint.h` contains low-level fixpoint utilities reused
   internally.
-- `Core/IR/Diff.h` implements both ordinary and tensor-side differentials.
+- `Core/Expr/Diff.h` implements both ordinary and tensor-side differentials.
 - `Solver/NewtonLinear.h` implements the ordinary inner
   linearized-system machinery used by Newton/NPA.
 - `Core/Tensor/TensorSemiring.h` and `Core/Tensor/TensorProductLift.h`

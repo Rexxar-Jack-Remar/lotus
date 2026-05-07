@@ -28,10 +28,10 @@
  * Implementation split:
  *   - Core/Base/Foundation.h       : public NPA types + domain helpers
  *   - Core/Base/Runtime.h          : runtime bookkeeping and errors
- *   - Core/IR/Expressions.h        : Exp0 (polynomial) / Exp1 (linearized) AST
- *   - Core/IR/Eval.h               : I0 (Exp0) / I1 (Exp1) evaluators
- *   - Core/IR/Diff.h               : ordinary and tensor differentials
- *   - Core/IR/LCFLDetector.h       : detect LCFL structure (Concat/Star)
+ *   - Core/Expr/Expressions.h      : Exp0 (polynomial) / Exp1 (linearized) AST
+ *   - Core/Expr/Eval.h             : I0 (Exp0) / I1 (Exp1) evaluators
+ *   - Core/Expr/Diff.h             : ordinary and tensor differentials
+ *   - Core/Expr/LCFLDetector.h     : detect LCFL structure (Concat/Star)
  *   - Core/Base/Fixpoint.h         : low-level least-fixpoint utilities
  *   - Core/Tensor/TensorProductLift.h
  *                                  : tensor-product lift utilities

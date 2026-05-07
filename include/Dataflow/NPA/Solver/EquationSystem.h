@@ -15,7 +15,9 @@
  */
 
 #include "Dataflow/NPA/Core/Base/Runtime.h"
-#include "Dataflow/NPA/Core/IR/Expressions.h"
+#include "Dataflow/NPA/Core/Expr/Expressions.h"
+
+#include <chrono>
 
 namespace npa {
 

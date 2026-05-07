@@ -10,7 +10,7 @@
  * correction system, and it does not use `LinearStrategy`.
  */
 
-#include "Dataflow/NPA/Core/IR/Eval.h"
+#include "Dataflow/NPA/Core/Expr/Eval.h"
 #include "Dataflow/NPA/Solver/EquationSystem.h"
 
 #include <unordered_map>

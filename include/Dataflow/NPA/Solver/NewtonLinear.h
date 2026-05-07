@@ -25,9 +25,9 @@
  */
 
 #include "Dataflow/NPA/Core/Base/Runtime.h"
-#include "Dataflow/NPA/Core/IR/Diff.h"
-#include "Dataflow/NPA/Core/IR/Eval.h"
-#include "Dataflow/NPA/Core/IR/LCFLDetector.h"
+#include "Dataflow/NPA/Core/Expr/Diff.h"
+#include "Dataflow/NPA/Core/Expr/Eval.h"
+#include "Dataflow/NPA/Core/Expr/LCFLDetector.h"
 #include "Utils/Parallel/ThreadPool.h"
 
 #include <algorithm>

@@ -17,7 +17,7 @@
  * (TOPLAS 2016, Eq. (60)).
  */
 
-#include "Dataflow/NPA/Core/IR/Expressions.h"
+#include "Dataflow/NPA/Core/Expr/Expressions.h"
 #include "Dataflow/NPA/Core/Base/Runtime.h"
 #include "Dataflow/NPA/Core/Tensor/TensorSemiring.h"
 
