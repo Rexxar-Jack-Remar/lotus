@@ -1,15 +1,21 @@
 /**********************************************************************
  * Newtonian Program Analysis (NPA) – generic C++14 header
  *
- * Implements Newton-style program analysis over ω-continuous semirings:
- * - Kleene iteration: κ^(i+1) = f(κ^(i)).
- * - Newton iteration: ν^(i+1) = ν^(i) ⊔ Δ^(i), where Δ^(i) is the least
- *   solution of the \e linearized system Df|ν^(i)(X) + δ^(i) = X.
+ * Implements three related layers over ω-continuous semirings:
+ * - Kleene solving: solve `X = f(X)` directly by repeated evaluation.
+ * - JACM Newton/NPA: solve `X = f(X)` by outer Newton iteration, where each
+ *   round solves the least solution of the linearized system
+ *   `Df|ν^(i)(X) + δ^(i) = X`.
+ * - TOPLAS tensor-product regularization: an optional inner-solver
+ *   specialization for certain LCFL linearized systems and tensor-enabled
+ *   domains.
  *
- * The linearized system is an LCFL equation system when extend (⊗) is
- * non-commutative; it can be solved by SCC decomposition with local worklists,
- * or by tensor-product regularization (paired semiring → left-linear →
- * project back).
+ * The tensor path is not a separate outer solver. It is only an optional
+ * backend for the inner linearized system that appears inside Newton/NPA.
+ * When extend (⊗) is non-commutative, that linearized system may have LCFL
+ * structure; then the implementation can use SCC/worklist solving or, if the
+ * domain opts in, tensor-product regularization (paired semiring ->
+ * left-linear -> project back).
  *
  * References:
  * - Esparza et al., "Newtonian Program Analysis" (JACM): differential Df|ν,
@@ -26,14 +32,19 @@
  *   - Core/IR/Eval.h               : I0 (Exp0) / I1 (Exp1) evaluators
  *   - Core/IR/Diff.h               : ordinary and tensor differentials
  *   - Core/IR/LCFLDetector.h       : detect LCFL structure (Concat/Star)
- *   - Solver/Fixpoint.h            : fix / fix_vec (Kleene-like iteration)
- *   - Solver/LinearSolvers.h       : SCC-based linear solvers
- *   - Solver/TensorLinearSolve.h   : tensor-product solver (Alg. 3.4)
- *   - Solver/Solver.h              : KleeneIter / NewtonIter, Solver<D,ITER>
+ *   - Core/Base/Fixpoint.h         : low-level least-fixpoint utilities
+ *   - Core/Tensor/TensorProductLift.h
+ *                                  : tensor-product lift utilities
+ *   - Core/Tensor/TensorSemiring.h : tensor traits and tensor-side laws
+ *   - Solver/KleeneSolver.h        : public Kleene solver
+ *   - Solver/NewtonLinear.h        : ordinary inner Newton linear solvers
+ *   - Solver/TensorProduct.h       : optional TOPLAS tensor-product backend
+ *   - Solver/NPASolver.h           : public Newton/NPA solver
  *********************************************************************/
 #ifndef NPA_HPP
 #define NPA_HPP
 
-#include "Dataflow/NPA/Solver/Solver.h"
+#include "Dataflow/NPA/Solver/KleeneSolver.h"
+#include "Dataflow/NPA/Solver/NPASolver.h"
 
 #endif /* NPA_HPP */

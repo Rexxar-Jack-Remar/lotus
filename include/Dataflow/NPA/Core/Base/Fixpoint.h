@@ -3,13 +3,14 @@
 
 /**
  * \file
- * \brief Generic fixpoint iteration (Kleene-like).
+ * \brief Generic fixpoint/iteration primitives used by NPA internals.
  *
- * Used for:
- * (1) Kleene sequence κ^(i+1) = f(κ^(i)) (single variable);
- * (2) solving linear sub-systems (e.g. Star/Mu, or vector fixpoint for
- * the linearized system). NPA's Newton iteration uses these to compute
- * Δ^(i) as the least solution of Df|ν^(i)(X) + δ^(i) = X (Esparza et al.).
+ * This header is intentionally lower-level than the public solver entry points:
+ *
+ * This is a low-level Core utility, not a high-level equation-system solver.
+ * It provides reusable least-fixpoint iteration for:
+ * - local sub-problems such as `Star` / `Mu` during evaluation
+ * - synchronized iteration over already-linearized systems
  */
 
 #include "Dataflow/NPA/Core/Base/Runtime.h"
@@ -18,7 +19,7 @@
 
 namespace npa {
 
-/// Single-variable fixpoint: iterates until stable (κ^(i+1) = f(κ^(i))).
+/// Single-variable fixpoint: iterates until stable (`x_{i+1} = f(x_i)`).
 template <class D, class F> auto fix(bool verbose, DomVal<D> init, F f) {
   NPA_REQUIRE_DOMAIN(D);
   int cnt = 0;
@@ -42,8 +43,7 @@ template <class D, class F> auto fix(bool verbose, DomVal<D> init, F f) {
   }
 }
 
-/// Vector fixpoint: iterates until all components stable (e.g. for linear
-/// system in Naive strategy: update all variables each round).
+/// Vector fixpoint for synchronized iteration over a tuple of variables.
 template <class D, class Vec, class F>
 Vec fix_vec(bool verbose, Vec init, F f) {
   int cnt = 0;

@@ -18,8 +18,16 @@ namespace npa {
 
 using Symbol = std::string;
 
-/// Strategy for solving the \e linearized equation system on each Newton round.
-/// The linear system has the form Df|ν(X) + δ = X (LCFL equation system).
+/// Strategy for solving the \e linearized equation system inside Newton/NPA.
+///
+/// This does not choose between the outer algorithms `KleeneSolver<D>` and
+/// `NPASolver<D>`. It only selects the backend used for the inner
+/// linearized system `Df|ν(X) + δ = X` on each Newton round.
+///
+/// `Naive` and `SCC` are the ordinary general-purpose backends.
+/// `AdaptiveScc` and `TensorProduct` are TOPLAS-inspired LCFL/tensor
+/// extensions that become effective only when the linearized system has the
+/// right structure and the domain opts into tensor semantics.
 enum class LinearStrategy {
   Naive,
   SCC,

@@ -19,14 +19,34 @@ This generalizes:
 - counting semirings,
 - probabilistic and cost semirings.
 
+## Solver layers
+
+The current implementation exposes three related layers that are easy to blur
+together if you only look at file names:
+
+- **Kleene solver**: solves the full system `X = f(X)` directly by repeated
+  evaluation. Public entry point: `KleeneSolver<D>` in `Solver/KleeneSolver.h`.
+- **JACM Newton/NPA solver**: solves the same full system `X = f(X)` by outer
+  Newton iteration plus a linearized correction solve on each round. Public
+  entry point: `NPASolver<D>` in `Solver/NPASolver.h`.
+- **TOPLAS tensor-product machinery**: not a separate outer solver. It is an
+  optional backend for the inner linearized system `Df|ν(X) + δ = X`, and only
+  applies when the current system has LCFL structure and the domain explicitly
+  opts into tensor semantics.
+
+That means `LinearStrategy` is only relevant to the **Newton** path. It does
+not choose between Kleene and Newton; it only chooses the inner backend used by
+Newton for its current linearized system.
+
 
 
 ## TOPLAS 2016 / LCFL support
 
-The engine supports **TOPLAS 2016**-style algorithms for LCFL (linear context-free) linear sub-problems:
+The engine supports **TOPLAS 2016**-style algorithms for LCFL (linear
+context-free) linear sub-problems that arise inside Newton:
 
 - **LinearStrategy**: `Naive`, `SCC`, `AdaptiveScc`, `TensorProduct`
-- **SCC**: Solve in topological order of strongly connected components, using a local dependency-driven worklist within each SCC.
+- **SCC**: Solve in topological order of strongly connected components, using a local dependency-driven worklist within each SCC. This is the ordinary general-purpose inner backend.
 - **AdaptiveScc**: Solve the linearized system SCC-by-SCC. Singleton acyclic SCCs use direct evaluation, ordinary recursive SCCs use the SCC worklist solver, and tensor-eligible cyclic LCFL SCCs use the tensor solver locally.
 - **TensorProduct**: Rewrite LCFL terms into a tensorized left-linear system, solve there via Tarjan path expressions when extractable to a left-linear graph, and otherwise fall back to tensor-space worklist iteration.
 - **TensorDiff**: Direct tensor-side differential builder used by the Newton tensor path.
@@ -39,7 +59,11 @@ generic least fixpoint, but NPA rejects it on Newton/tensor paths.
 Domains that expose `project()` must additionally opt into `project_newton_safe`
 before projection is accepted on Newton/tensor paths.
 
-Use `NewtonSolver<D>::solve(eqns, verbose, -1, LinearStrategy::SCC)`, `LinearStrategy::AdaptiveScc`, or `LinearStrategy::TensorProduct`; or pass `LinearStrategy` into `BitVectorSolver::run` (optional 5th parameter).
+Use `KleeneSolver<D>::solve(eqns, ...)` for plain Kleene solving.
+Use `NPASolver<D>::solve(eqns, verbose, -1, LinearStrategy::SCC)`,
+`LinearStrategy::AdaptiveScc`, or `LinearStrategy::TensorProduct` for the JACM
+Newton/NPA outer solver with different inner linear backends; or pass
+`LinearStrategy` into `BitVectorSolver::run` (optional 5th parameter).
 
 When using `AdaptiveScc`, the solver reports aggregate counts for SCC-local direct/worklist/tensor choices and tensor fallbacks in `Stat`.
 
@@ -49,7 +73,7 @@ The public API lives under `include/Dataflow/NPA/`:
 
 ```text
 include/Dataflow/NPA/
-├── NPA.h                      # Umbrella header; Kleene/Newton entry points
+├── NPA.h                      # Umbrella header; Kleene/NPA entry points
 ├── Core/
 │   ├── Base/                  # Public types, domain helpers, runtime bookkeeping
 │   ├── IR/                    # Expressions, evaluation, differentiation
@@ -60,10 +84,17 @@ include/Dataflow/NPA/
 
 Notable entry points:
 
-- `Solver/Solver.h` contains the core Kleene/Newton iteration logic.
+- `Solver/KleeneSolver.h` contains the public Kleene solver.
+- `Solver/NPASolver.h` contains the public Newton/NPA solver.
+- `Core/Base/Fixpoint.h` contains low-level fixpoint utilities reused
+  internally.
 - `Core/IR/Diff.h` implements both ordinary and tensor-side differentials.
-- `Solver/LinearSolvers.h` and `Solver/TensorLinearSolve.h` implement
-  the linearized-system solvers.
+- `Solver/NewtonLinear.h` implements the ordinary inner
+  linearized-system machinery used by Newton/NPA.
+- `Core/Tensor/TensorSemiring.h` and `Core/Tensor/TensorProductLift.h`
+  contain tensor-side infrastructure.
+- `Solver/TensorProduct.h` implements the optional TOPLAS tensor
+  backend for suitable Newton/NPA sub-problems.
 - `Analyses/Inter/` contains the public analysis wrappers used by
   the in-tree constant-propagation, interval, taint, nullability, and related
   clients.
@@ -90,7 +121,7 @@ This section documents exactly what is parallel today.
 
 ### 1. Scope of current parallelism
 
-For one call to `NewtonSolver<D>::solve(...)`, execution looks like this:
+For one call to `NPASolver<D>::solve(...)`, execution looks like this:
 
 1. construct `nu^(0) = f(bot)`
 2. for each Newton round:

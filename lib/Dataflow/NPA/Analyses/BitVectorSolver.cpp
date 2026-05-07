@@ -143,7 +143,7 @@ BitVectorSolver::Result BitVectorSolver::run(llvm::Function &F,
   // 3. Solve
   std::pair<std::vector<std::pair<Symbol, D::value_type>>, Stat> rawRes;
   if (strategy == SolverStrategy::Newton) {
-    rawRes = NewtonSolver<D>::solve(eqns, verbose, -1, linearStrategy);
+    rawRes = NPASolver<D>::solve(eqns, verbose, -1, linearStrategy);
   } else {
     rawRes = KleeneSolver<D>::solve(eqns, verbose);
   }

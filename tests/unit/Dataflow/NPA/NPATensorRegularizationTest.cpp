@@ -1,7 +1,7 @@
-#include "Dataflow/NPA/Solver/LinearSolvers.h"
+#include "Dataflow/NPA/Solver/NewtonLinear.h"
 #include "Dataflow/NPA/Domains/PredicateRelationDomain.h"
 #include "Dataflow/NPA/NPA.h"
-#include "Dataflow/NPA/Solver/TensorLinearSolve.h"
+#include "Dataflow/NPA/Solver/TensorProduct.h"
 
 #include <set>
 #include <string>
@@ -676,7 +676,7 @@ TEST(NPA, NewtonInitUsesFOfBottom) {
   std::vector<std::pair<npa::Symbol, E0>> eqns;
   eqns.emplace_back("X", Exp0::term(singleton("a")));
 
-  auto res = npa::NewtonSolver<D>::solve(eqns, false, 0);
+  auto res = npa::NPASolver<D>::solve(eqns, false, 0);
   auto m = toMap<D>(res.first);
 
   EXPECT_EQ(m.at("X"), singleton("a"));
@@ -709,6 +709,6 @@ TEST(NPA, NewtonRejectsMuEquations) {
   std::vector<std::pair<npa::Symbol, E0>> eqns;
   eqns.emplace_back("X", Exp0::mu(Exp0::term(singleton("a")), "Z"));
 
-  EXPECT_THROW((void)npa::NewtonSolver<D>::solve(eqns, false, 1),
+  EXPECT_THROW((void)npa::NPASolver<D>::solve(eqns, false, 1),
                npa::UnsupportedNewtonMuError);
 }

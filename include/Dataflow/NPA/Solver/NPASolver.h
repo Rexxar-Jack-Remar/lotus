@@ -1,22 +1,25 @@
-#ifndef NPA_SOLVER_H
-#define NPA_SOLVER_H
+#ifndef NPA_NPA_SOLVER_H
+#define NPA_NPA_SOLVER_H
 
 /**
  * \file
- * \brief Outer iteration: Kleene vs Newton; dispatches linear strategy.
+ * \brief Public NPA solver for whole equation systems `X = f(X)`.
  *
- * Solver<D, ITER> runs ITER until the vector of equation values stabilizes.
- * - KleeneIter: κ^(i+1) = f(κ^(i)) (classical Kleene sequence, Eqn. (1) in
- *   Esparza et al.).
- * - NewtonIter: ν^(0) = f(⊥); ν^(i+1) = ν^(i) ⊔ LinearCorrectionTerm.
- *   The correction is Δ^(i) = least solution of Df|ν^(i)(X) + δ^(i) = X
- *   (Eqn. (2), (13)); then ν^(i+1) = ν^(i) ⊕ Δ^(i) (idempotent) or
- *   ν^(i+1) = ν^(i) + Δ^(i) (non-idempotent). The linear system is solved
- *   by Naive, SCC, AdaptiveScc, or TensorProduct (LinearStrategy).
- *   AdaptiveScc keeps Newton's outer iteration unchanged, but chooses the
- *   inner linear solver independently for each linearized SCC: direct for
- *   singleton acyclic SCCs, SCC worklist for ordinary recursive SCCs, and
- *   tensor solving for tensor-eligible cyclic LCFL SCCs.
+ * `NPASolver<D>` implements the JACM-style Newton outer algorithm:
+ * - ν^(0) = f(⊥)
+ * - ν^(i+1) = ν^(i) ⊔ LinearCorrectionTerm
+ *
+ * The correction term Δ^(i) is the least solution of the linearized system
+ * `Df|ν^(i)(X) + δ^(i) = X` (Eqn. (2), (13)); then
+ * `ν^(i+1) = ν^(i) ⊕ Δ^(i)` (idempotent) or
+ * `ν^(i+1) = ν^(i) + Δ^(i)` (non-idempotent).
+ *
+ * The inner linearized system is solved by `Naive`, `SCC`, `AdaptiveScc`, or
+ * `TensorProduct` (`LinearStrategy`). `AdaptiveScc` keeps NPA's outer
+ * iteration unchanged, but chooses the inner linear solver independently for
+ * each linearized SCC: direct for singleton acyclic SCCs, SCC worklist for
+ * ordinary recursive SCCs, and TOPLAS tensor solving for tensor-eligible
+ * cyclic LCFL SCCs.
  *
  * Exact-vs-approximate status:
  * - `Stat::converged` means theorem-faithful convergence: equality stabilized
@@ -28,10 +31,18 @@
  *   across all adaptive linear solves in the Newton run, not just the final
  *   converged round.
  *
- * References: Esparza et al. (JACM); Reps et al. (TOPLAS 2016).
+ * `LinearStrategy` selects only the backend used for this inner linearized
+ * system. It does not affect `KleeneSolver<D>`, which is a separate public
+ * solver in `KleeneSolver.h`.
+ *
+ * References:
+ * - Esparza et al. (JACM): NPA outer algorithm and linearization.
+ * - Reps et al. (TOPLAS 2016): optional tensor regularization for suitable
+ *   LCFL inner sub-problems.
  */
 
-#include "Dataflow/NPA/Solver/TensorLinearSolve.h"
+#include "Dataflow/NPA/Solver/EquationSystem.h"
+#include "Dataflow/NPA/Solver/TensorProduct.h"
 #include "Utils/Parallel/ThreadPool.h"
 
 #include <exception>
@@ -646,105 +657,6 @@ std::vector<std::pair<Symbol, DomVal<D>>> run_newton_iteration(
 }
 } // namespace detail
 
-template <class D, class ITER> struct Solver {
-  using V = DomVal<D>;
-  using Eqn = std::pair<Symbol, E0<D>>;
-  static std::pair<std::vector<std::pair<Symbol, V>>, Stat>
-  solve(const std::vector<Eqn> &eqns, bool verbose = false, int max = -1,
-        LinearStrategy linStrat = LinearStrategy::SCC,
-        DomainContractMode contractMode = DomainContractMode::Off) {
-    NPA_REQUIRE_DOMAIN(D);
-    ApproximationSourceCollector approximation_collector;
-    ScopedApproximationSourceCollector collector_scope(approximation_collector);
-    AdaptiveSccSolveCollector adaptive_scc_collector;
-    ScopedAdaptiveSccSolveCollector adaptive_scc_scope(adaptive_scc_collector);
-    npa_reset_limit_hit();
-    npa_reset_adaptive_scc_stats();
-    bool contractOk = true;
-    const bool checksRun = contractMode == DomainContractMode::BasicChecks;
-    if (checksRun) {
-      contractOk = run_basic_domain_contract_checks<D>(verbose);
-    }
-    std::vector<std::pair<Symbol, V>> cur = ITER::init(eqns);
-    auto tic = std::chrono::high_resolution_clock::now();
-    int it = 0;
-    bool converged = false;
-    while (max < 0 || it < max) {
-      auto nxt = ITER::run(verbose, eqns, cur, linStrat);
-      bool stable = true;
-      for (size_t i = 0; i < cur.size(); ++i)
-        if (!domain_equal<D>(cur[i].second, nxt[i].second)) {
-          stable = false;
-          break;
-        }
-      cur.swap(nxt);
-      ++it;
-      if (stable) {
-        converged = true;
-        if (verbose)
-          std::cerr << "[conv] " << it << "\n";
-        break;
-      }
-    }
-    const bool hit_outer_limit = !converged && max >= 0 && it >= max;
-    if (hit_outer_limit) {
-      npa_note_outer_limit_hit();
-      if (verbose)
-        std::cerr << "[conv] hit outer iteration cap=" << max << "\n";
-    }
-    auto toc = std::chrono::high_resolution_clock::now();
-    Stat st;
-    st.iters = it;
-    st.time = std::chrono::duration<double>(toc - tic).count();
-    st.hit_limit = npa_limit_hit();
-    st.hit_outer_limit = npa_hit_outer_limit();
-    st.hit_linear_limit = npa_hit_linear_limit();
-    st.hit_fixpoint_limit = npa_hit_fixpoint_limit();
-    st.equation_count = static_cast<int>(eqns.size());
-    st.requested_max_iters = max;
-    st.effective_max_iters = max;
-    st.linear_strategy = linStrat;
-    st.used_approx_equal = DomainHasApproxEqual<D>::value;
-    const auto adaptive_stats = npa_adaptive_scc_solve_stats();
-    st.adaptive_scc_used = adaptive_stats.used;
-    st.adaptive_scc_direct_count = adaptive_stats.direct_count;
-    st.adaptive_scc_worklist_count = adaptive_stats.worklist_count;
-    st.adaptive_scc_tensor_count = adaptive_stats.tensor_count;
-    st.adaptive_scc_tensor_fallback_count =
-        adaptive_stats.tensor_fallback_count;
-    st.converged = converged && !st.hit_limit && !st.used_approx_equal;
-    st.domain_contract_checks_run = checksRun;
-    st.domain_contract_checks_failed = checksRun && !contractOk;
-    return {cur, st};
-  }
-};
-
-/// Kleene iteration: one round = evaluate all equations under current ν.
-/// κ^(i+1) = f(κ^(i)); no linear correction (Esparza et al. Eqn. (1)).
-template <class D> struct KleeneIter {
-  using V = DomVal<D>;
-  using Eqn = std::pair<Symbol, E0<D>>;
-  static std::vector<std::pair<Symbol, V>> init(const std::vector<Eqn> &eqns) {
-    std::vector<std::pair<Symbol, V>> cur;
-    cur.reserve(eqns.size());
-    for (auto &e : eqns)
-      cur.emplace_back(e.first, D::zero());
-    return cur;
-  }
-  static std::vector<std::pair<Symbol, V>>
-  run(bool verbose, const std::vector<Eqn> &eqns,
-      const std::vector<std::pair<Symbol, V>> &binds,
-      LinearStrategy = LinearStrategy::SCC) {
-    std::unordered_map<Symbol, V> nu;
-    for (auto &b : binds)
-      nu[b.first] = b.second;
-    std::vector<std::pair<Symbol, V>> out;
-    for (auto &e : eqns)
-      out.emplace_back(e.first, I0<D>::eval(verbose, nu, e.second));
-    return out;
-  }
-};
-
 /// Newton iteration: one round = f(ν) plus least solution of Df|ν(X)+δ = X.
 /// δ = f(ν)−ν (or f(ν) when idempotent); Δ = solve linear system; ν' = ν⊕Δ.
 ///
@@ -768,8 +680,7 @@ template <class D> struct NewtonIter {
   }
 };
 
-template <class D> using KleeneSolver = Solver<D, KleeneIter<D>>;
-template <class D> struct NewtonSolver {
+template <class D> struct NPASolver {
   using V = DomVal<D>;
   using Eqn = std::pair<Symbol, E0<D>>;
   static std::pair<std::vector<std::pair<Symbol, V>>, Stat>
@@ -787,16 +698,16 @@ template <class D> struct NewtonSolver {
     if (auto_cap) {
       effective_max = static_cast<int>(eqns.size());
     }
-    auto res = Solver<D, NewtonIter<D>>::solve(eqns, verbose, effective_max,
-                                               linStrat, contractMode);
+    auto res = EquationSystemSolver<D, NewtonIter<D>>::solve(
+        eqns, verbose, effective_max, linStrat, contractMode);
     res.second.used_auto_n_cap = auto_cap;
     res.second.effective_max_iters = effective_max;
     if (auto_cap && !res.second.converged) {
       if (verbose)
         std::cerr << "[conv] automatic n-iteration bound was insufficient; "
                      "continuing without the cap\n";
-      res = Solver<D, NewtonIter<D>>::solve(eqns, verbose, -1, linStrat,
-                                            contractMode);
+      res = EquationSystemSolver<D, NewtonIter<D>>::solve(
+          eqns, verbose, -1, linStrat, contractMode);
       res.second.used_auto_n_cap = true;
       res.second.retried_without_auto_n_cap = true;
     }
@@ -806,4 +717,4 @@ template <class D> struct NewtonSolver {
 
 } // namespace npa
 
-#endif // NPA_SOLVER_H
+#endif // NPA_NPA_SOLVER_H

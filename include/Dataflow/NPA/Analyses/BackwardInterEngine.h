@@ -729,7 +729,7 @@ public:
                                       ArtifactStart)
             .count();
 
-    auto rawRes = NewtonSolver<D>::solve(eqns, verbose, -1, linearStrategy);
+    auto rawRes = NPASolver<D>::solve(eqns, verbose, -1, linearStrategy);
     std::unordered_map<Symbol, Val> solvedMap;
     for (auto &p : rawRes.first)
       solvedMap[p.first] = p.second;

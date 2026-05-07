@@ -16,7 +16,7 @@
  */
 
 #include "Dataflow/NPA/Core/IR/Expressions.h"
-#include "Dataflow/NPA/Solver/Fixpoint.h"
+#include "Dataflow/NPA/Core/Base/Fixpoint.h"
 
 namespace npa {
 

@@ -1,18 +1,29 @@
-#ifndef NPA_TENSOR_LINEAR_SOLVE_H
-#define NPA_TENSOR_LINEAR_SOLVE_H
+#ifndef NPA_TENSOR_PRODUCT_H
+#define NPA_TENSOR_PRODUCT_H
 
 /**
  * \file
- * \brief Tensor-product linear solver (Reps et al. TOPLAS 2016, Alg. 3.4).
+ * \brief Optional TOPLAS tensor-product backend for suitable linearized
+ * sub-problems.
  *
- * Converts the LCFL linear system into a \e left-linear system over the
- * paired semiring (TensorProductLift): pair (a,b) represents left/right
- * context so that a·Y·b becomes Y ⊗_p (a,b). The left-linear system is
- * solved by Tarjan-style parameterized path expressions (with a tensor-space
- * worklist fallback when extraction fails); then we \e project back to the base
- * domain (readout R((w1,w2)) = w1⊗w2). For domains that implement the Section 8
- * ProjectT laws, projected left-linear fragments stay on the tensor path by
- * pushing ProjectT down to tensor coefficients before extraction.
+ * This is not a second outer solver alongside Kleene or Newton. It is an
+ * optional backend for the inner linearized system that appears inside
+ * `NPASolver<D>`, and it is only applicable when all of the following hold:
+ *
+ * - the current Newton round produces an LCFL-shaped linearized system;
+ * - the chosen `LinearStrategy` requests tensor use;
+ * - the base domain opts into `TensorSemiringTraits<D>`;
+ * - those traits claim the TOPLAS admissibility laws.
+ *
+ * The implementation converts the LCFL linear system into a \e left-linear
+ * system over the paired semiring (TensorProductLift): pair `(a,b)`
+ * represents left/right context so that `a·Y·b` becomes `Y ⊗_p (a,b)`.
+ * The left-linear system is solved by Tarjan-style parameterized path
+ * expressions (with a tensor-space worklist fallback when extraction fails);
+ * then we \e project back to the base domain (readout `R((w1,w2)) = w1⊗w2`).
+ * For domains that implement the Section 8 `ProjectT` laws, projected
+ * left-linear fragments stay on the tensor path by pushing `ProjectT` down to
+ * tensor coefficients before extraction.
  *
  * The implementation uses an exact correlated representation in tensor space
  * for idempotent domains. This avoids correlation loss at projection time, at
@@ -20,8 +31,8 @@
  */
 
 #include "Dataflow/NPA/Core/IR/Diff.h"
-#include "Dataflow/NPA/Solver/LinearSolvers.h"
-#include "Dataflow/NPA/Solver/TensorSemiring.h"
+#include "Dataflow/NPA/Solver/NewtonLinear.h"
+#include "Dataflow/NPA/Core/Tensor/TensorSemiring.h"
 #include "Utils/Algorithms/PathExpressions/PathExpressions.h"
 
 #include <mutex>
@@ -773,4 +784,4 @@ solve_linear_tensor_impl(bool verbose,
 
 } // namespace npa
 
-#endif // NPA_TENSOR_LINEAR_SOLVE_H
+#endif // NPA_TENSOR_PRODUCT_H

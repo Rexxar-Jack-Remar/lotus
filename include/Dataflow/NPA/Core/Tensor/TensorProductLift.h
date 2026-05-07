@@ -1,5 +1,5 @@
-#ifndef NPA_TENSOR_PRODUCT_LIFT_H
-#define NPA_TENSOR_PRODUCT_LIFT_H
+#ifndef NPA_CORE_TENSOR_PRODUCT_LIFT_H
+#define NPA_CORE_TENSOR_PRODUCT_LIFT_H
 
 #include "Dataflow/NPA/Core/Base/Runtime.h"
 
@@ -185,4 +185,4 @@ private:
 
 } // namespace npa
 
-#endif // NPA_TENSOR_PRODUCT_LIFT_H
+#endif // NPA_CORE_TENSOR_PRODUCT_LIFT_H

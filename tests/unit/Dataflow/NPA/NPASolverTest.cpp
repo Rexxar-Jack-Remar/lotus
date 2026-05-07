@@ -1,4 +1,4 @@
-#include "Dataflow/NPA/Solver/TensorProductLift.h"
+#include "Dataflow/NPA/Core/Tensor/TensorProductLift.h"
 #include "Dataflow/NPA/Transfers/PathTransferSummary.h"
 #include "Dataflow/NPA/Transfers/TransformerSummary.h"
 #include "Dataflow/NPA/NPA.h"
@@ -63,7 +63,7 @@ TEST(NPA, HoleCanReferenceOtherEquationVariable) {
   // y = 1
   //
   // This exercises:
-  // - Exp0::Hole lookup against ν in I0 (Kleene/Newton evaluation)
+  // - Exp0::Hole lookup against ν in I0 (Kleene/NPA evaluation)
   // - Exp1::Hole lookup against the linear-solver environment in I1 (Newton
   // step)
   std::vector<std::pair<npa::Symbol, E>> eqns;
@@ -75,7 +75,7 @@ TEST(NPA, HoleCanReferenceOtherEquationVariable) {
   EXPECT_TRUE(kleeneMap.at("y"));
   EXPECT_TRUE(kleeneMap.at("x"));
 
-  auto newtonRes = npa::NewtonSolver<D>::solve(eqns);
+  auto newtonRes = npa::NPASolver<D>::solve(eqns);
   auto newtonMap = toMap<D>(newtonRes.first);
   EXPECT_TRUE(newtonMap.at("y"));
   EXPECT_TRUE(newtonMap.at("x"));
@@ -120,7 +120,7 @@ TEST(NPA, ExactModeNewtonReportsNoApproximationSources) {
   eqns.emplace_back("x", Exp::hole("y"));
   eqns.emplace_back("y", Exp::term(D::one()));
 
-  auto result = npa::NewtonSolver<D>::solve(eqns);
+  auto result = npa::NPASolver<D>::solve(eqns);
   auto solved = toMap<D>(result.first);
 
   EXPECT_TRUE(solved.at("x"));
@@ -504,7 +504,7 @@ TEST(NPA, InvalidNonIdempotentDeltaFailsFast) {
   std::vector<std::pair<npa::Symbol, E>> eqns;
   eqns.emplace_back("x", Exp::ndet(Exp::hole("x"), Exp::term(1)));
 
-  EXPECT_THROW((void)npa::NewtonSolver<D>::solve(eqns),
+  EXPECT_THROW((void)npa::NPASolver<D>::solve(eqns),
                npa::InvalidNewtonDeltaError);
 }
 
@@ -536,7 +536,7 @@ TEST(NPA, AutomaticNIterationBoundFallsBackWhenEqualityIsApproximate) {
   eqns.emplace_back("x", Exp::term(D::one()));
 
   testing::internal::CaptureStderr();
-  auto result = npa::NewtonSolver<D>::solve(eqns, true);
+  auto result = npa::NPASolver<D>::solve(eqns, true);
   std::string stderrOutput = testing::internal::GetCapturedStderr();
 
   auto solved = toMap<D>(result.first);
@@ -563,7 +563,7 @@ TEST(NPA, SolverCanReportDomainContractCheckFailures) {
   eqns.emplace_back("x", Exp::term(D::one()));
 
   auto result =
-      npa::NewtonSolver<D>::solve(eqns, false, 1, npa::LinearStrategy::SCC,
+      npa::NPASolver<D>::solve(eqns, false, 1, npa::LinearStrategy::SCC,
                                   npa::DomainContractMode::BasicChecks);
 
   EXPECT_TRUE(result.second.domain_contract_checks_run);
@@ -579,7 +579,7 @@ TEST(NPA, LinearStepLimitMarksNewtonResultAsApproximate) {
   eqns.emplace_back("x", Exp::hole("y"));
   eqns.emplace_back("y", Exp::term(D::one()));
 
-  auto result = npa::NewtonSolver<D>::solve(eqns, false, 1,
+  auto result = npa::NPASolver<D>::solve(eqns, false, 1,
                                             npa::LinearStrategy::SCC);
 
   EXPECT_FALSE(result.second.converged);
@@ -597,7 +597,7 @@ TEST(NPA, NewtonRejectsMuExpressions) {
   std::vector<std::pair<npa::Symbol, E>> eqns;
   eqns.emplace_back("x", Exp::mu(Exp::term(D::one()), "b"));
 
-  EXPECT_THROW((void)npa::NewtonSolver<D>::solve(eqns),
+  EXPECT_THROW((void)npa::NPASolver<D>::solve(eqns),
                npa::UnsupportedNewtonMuError);
 }
 
@@ -609,7 +609,7 @@ TEST(NPA, NewtonRejectsUnsafeProjectExpressions) {
   std::vector<std::pair<npa::Symbol, E>> eqns;
   eqns.emplace_back("x", Exp::project(Exp::term(D::one())));
 
-  EXPECT_THROW((void)npa::NewtonSolver<D>::solve(eqns),
+  EXPECT_THROW((void)npa::NPASolver<D>::solve(eqns),
                npa::UnsafeNewtonProjectError);
 }
 

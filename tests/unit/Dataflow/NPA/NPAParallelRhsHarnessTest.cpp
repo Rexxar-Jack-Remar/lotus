@@ -304,7 +304,7 @@ TEST(NPAParallelRhsHarness, NewtonSolverPropagatesFixpointLimitFromSetupTasks) {
   }
 
   auto result =
-      npa::NewtonSolver<D>::solve(eqns, false, -1, npa::LinearStrategy::SCC);
+      npa::NPASolver<D>::solve(eqns, false, -1, npa::LinearStrategy::SCC);
   auto solved = toMap<D>(result.first);
 
   EXPECT_FALSE(result.second.converged);
@@ -733,8 +733,8 @@ TEST(NPAParallelRhsHarness,
   eqns.emplace_back("X", rhs);
 
   auto worklist =
-      npa::NewtonSolver<D>::solve(eqns, false, -1, npa::LinearStrategy::SCC);
-  auto tensor = npa::NewtonSolver<D>::solve(eqns, false, -1,
+      npa::NPASolver<D>::solve(eqns, false, -1, npa::LinearStrategy::SCC);
+  auto tensor = npa::NPASolver<D>::solve(eqns, false, -1,
                                             npa::LinearStrategy::TensorProduct);
 
   ASSERT_EQ(worklist.first.size(), 1u);
@@ -761,10 +761,10 @@ TEST(NPAParallelRhsHarness,
   std::vector<std::pair<npa::Symbol, E0>> eqns;
   eqns.emplace_back("X", rhs);
 
-  auto tensor = npa::NewtonSolver<D>::solve(eqns, false, -1,
+  auto tensor = npa::NPASolver<D>::solve(eqns, false, -1,
                                             npa::LinearStrategy::TensorProduct);
   auto scc =
-      npa::NewtonSolver<D>::solve(eqns, false, -1, npa::LinearStrategy::SCC);
+      npa::NPASolver<D>::solve(eqns, false, -1, npa::LinearStrategy::SCC);
 
   ASSERT_EQ(tensor.first.size(), 1u);
   ASSERT_EQ(scc.first.size(), 1u);
@@ -881,8 +881,8 @@ TEST(NPAParallelRhsHarness,
   eqns.emplace_back("Y", Exp0::ndet(Exp0::term(true), Exp0::hole("X")));
 
   auto scc =
-      npa::NewtonSolver<D>::solve(eqns, false, -1, npa::LinearStrategy::SCC);
-  auto adaptive = npa::NewtonSolver<D>::solve(eqns, false, -1,
+      npa::NPASolver<D>::solve(eqns, false, -1, npa::LinearStrategy::SCC);
+  auto adaptive = npa::NPASolver<D>::solve(eqns, false, -1,
                                               npa::LinearStrategy::AdaptiveScc);
 
   EXPECT_EQ(toMap<D>(scc.first), toMap<D>(adaptive.first));
@@ -910,9 +910,9 @@ TEST(NPAParallelRhsHarness,
   std::vector<std::pair<npa::Symbol, E0>> eqns;
   eqns.emplace_back("X", rhs);
 
-  auto tensor = npa::NewtonSolver<D>::solve(eqns, false, -1,
+  auto tensor = npa::NPASolver<D>::solve(eqns, false, -1,
                                             npa::LinearStrategy::TensorProduct);
-  auto adaptive = npa::NewtonSolver<D>::solve(eqns, false, -1,
+  auto adaptive = npa::NPASolver<D>::solve(eqns, false, -1,
                                               npa::LinearStrategy::AdaptiveScc);
 
   ASSERT_EQ(tensor.first.size(), 1u);
@@ -943,8 +943,8 @@ TEST(NPAParallelRhsHarness,
   eqns.emplace_back("X", tensor_rhs);
 
   auto scc =
-      npa::NewtonSolver<D>::solve(eqns, false, -1, npa::LinearStrategy::SCC);
-  auto adaptive = npa::NewtonSolver<D>::solve(eqns, false, -1,
+      npa::NPASolver<D>::solve(eqns, false, -1, npa::LinearStrategy::SCC);
+  auto adaptive = npa::NPASolver<D>::solve(eqns, false, -1,
                                               npa::LinearStrategy::AdaptiveScc);
 
   ASSERT_EQ(scc.first.size(), adaptive.first.size());

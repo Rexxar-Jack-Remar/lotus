@@ -1,7 +1,7 @@
-#ifndef NPA_TENSOR_SEMIRING_H
-#define NPA_TENSOR_SEMIRING_H
+#ifndef NPA_CORE_TENSOR_SEMIRING_H
+#define NPA_CORE_TENSOR_SEMIRING_H
 
-#include "Dataflow/NPA/Solver/TensorProductLift.h"
+#include "Dataflow/NPA/Core/Tensor/TensorProductLift.h"
 
 namespace npa {
 
@@ -96,7 +96,7 @@ template <class D> inline void validate_tensor_trait_api() {
                 "with the expected tensor/base-domain types");
 }
 
-/// Tensor-side hook for TOPLAS-style regularization.
+/// Tensor-side hook for TOPLAS-style inner-solver regularization.
 ///
 /// Domains can specialize this trait to provide:
 /// - a tensor semiring (`tensor_domain`)
@@ -108,7 +108,9 @@ template <class D> inline void validate_tensor_trait_api() {
 /// The default is unavailable: domains must opt in explicitly with a
 /// specialization that defines the tensor-side semantics they want to use.
 /// This keeps `LinearStrategy::TensorProduct` from silently assuming that the
-/// generic paired utility domains are paper-faithful admissible semirings.
+/// generic paired utility domains are paper-faithful admissible semirings, and
+/// makes it explicit that TOPLAS tensor solving is domain-dependent rather than
+/// part of the always-available JACM Newton core.
 template <class D> struct TensorSemiringTraits {
   using tensor_domain = ExactTensorProductLift<D>;
 
@@ -171,4 +173,4 @@ template <class D> inline bool tensor_paper_laws_validated() {
 
 } // namespace npa
 
-#endif // NPA_TENSOR_SEMIRING_H
+#endif // NPA_CORE_TENSOR_SEMIRING_H

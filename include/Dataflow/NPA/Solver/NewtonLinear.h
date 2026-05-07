@@ -1,19 +1,27 @@
-#ifndef NPA_LINEAR_SOLVERS_H
-#define NPA_LINEAR_SOLVERS_H
+#ifndef NPA_NEWTON_LINEAR_SOLVERS_H
+#define NPA_NEWTON_LINEAR_SOLVERS_H
 
 /**
  * \file
- * \brief Solvers for the linearized equation system Df|ν(X) + δ = X.
+ * \brief Ordinary inner solvers for the linearized Newton/NPA system.
  *
- * Each Newton round requires solving an LCFL equation system (when extend
- * is non-commutative). Supported strategies:
+ * Each Newton round of JACM-style Newton/NPA requires solving the linearized
+ * system `Df|ν(X) + δ = X`. This header contains the non-tensor backends and
+ * the SCC planning/scheduling logic around them.
+ *
+ * Supported strategies here:
  * - SCC: global Tarjan SCC scheduling, with dependency-driven worklists inside
  *   each SCC (and optional layer-level parallelism across independent SCCs).
- * - Tensor (see TensorLinearSolve.h): lift to paired semiring, solve as
- *   left-linear (regular) system, project back (Reps et al. TOPLAS 2016).
+ * - Naive: synchronized fixpoint iteration over the whole linearized system.
  *
- * References: Esparza et al. (linearized system); Reps et al. (LCFL,
- * regularization via tensor product, Alg. 3.4).
+ * `AdaptiveScc` also reuses the SCC planning from this file, but it may
+ * delegate specific tensor-eligible SCCs to `TensorProduct.h`. The full
+ * tensor-product backend itself lives there, not here.
+ *
+ * References:
+ * - Esparza et al. (JACM): linearized system.
+ * - Reps et al. (TOPLAS 2016): tensor regularization, implemented separately
+ *   in `TensorProduct.h`.
  */
 
 #include "Dataflow/NPA/Core/Base/Runtime.h"
@@ -552,7 +560,7 @@ solve_linear_scc_impl(bool verbose,
 
 /// Solve linear system via tensor product (Reps et al. Alg. 3.4): convert
 /// LCFL system to left-linear system over paired semiring, solve there,
-/// project back. Implemented in TensorLinearSolve.h.
+/// project back. Implemented in TensorProduct.h.
 template <class D>
 std::vector<DomVal<D>>
 solve_linear_tensor_impl(bool verbose,
@@ -573,4 +581,4 @@ system_has_lcfl_structure(const std::vector<std::pair<Symbol, E1<D>>> &rhs) {
 
 } // namespace npa
 
-#endif // NPA_LINEAR_SOLVERS_H
+#endif // NPA_NEWTON_LINEAR_SOLVERS_H

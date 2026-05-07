@@ -406,11 +406,11 @@ TEST(
   std::vector<std::pair<npa::Symbol, E0>> eqns;
   eqns.emplace_back("X", rhs);
 
-  auto wl = npa::NewtonSolver<D>::solve(eqns, false, -1,
+  auto wl = npa::NPASolver<D>::solve(eqns, false, -1,
                                         npa::LinearStrategy::SCC);
 
   testing::internal::CaptureStderr();
-  auto tp = npa::NewtonSolver<D>::solve(eqns, true, -1,
+  auto tp = npa::NPASolver<D>::solve(eqns, true, -1,
                                         npa::LinearStrategy::TensorProduct);
   std::string stderr_output = testing::internal::GetCapturedStderr();
 
