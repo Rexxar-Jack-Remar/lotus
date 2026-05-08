@@ -538,6 +538,37 @@ TEST(AffineRelationDomain, MOSJoinUsesKSJoinSemantics) {
       npa::AffineRelationDomain::combine(assign, id)));
 }
 
+TEST(AffineRelationDomain, SubtractUsesAffineGeneratorResidual) {
+  llvm::LLVMContext ctx;
+  auto module = parseModule(ctx, R"(
+    define void @f(i32 %x) {
+    entry:
+      %y = add i32 %x, 4
+      ret void
+    }
+  )");
+  ASSERT_NE(module, nullptr);
+
+  auto vocab = buildVocabulary(*module);
+  npa::AffineRelationDomain::configure(&vocab);
+
+  auto *F = module->getFunction("f");
+  ASSERT_NE(F, nullptr);
+  auto *X = &*F->arg_begin();
+  auto *Y = &*F->getEntryBlock().begin();
+
+  auto assign = npa::AffineRelationDomain::makeAffineAssignment(Y, 4, {{X, 1}});
+  auto id = npa::AffineRelationDomain::identity();
+  auto residual = npa::AffineRelationDomain::subtract(assign, id);
+
+  EXPECT_TRUE(npa::AffineRelationDomain::equal(
+      npa::AffineRelationDomain::combine(residual, id),
+      npa::AffineRelationDomain::combine(assign, id)));
+  EXPECT_TRUE(npa::AffineRelationDomain::contains(assign, residual));
+  EXPECT_TRUE(npa::AffineRelationDomain::isBottom(
+      npa::AffineRelationDomain::subtract(assign, assign)));
+}
+
 TEST(AffineRelationDomain, CondCombineRespectsBooleanGuard) {
   llvm::LLVMContext ctx;
   auto module = parseModule(ctx, R"(

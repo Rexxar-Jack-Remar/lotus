@@ -659,6 +659,25 @@ Matrix agRowsFromMOSTransformer(const Matrix &transformer, unsigned bitWidth) {
   return rows;
 }
 
+bool rowInSpan(const Row &row, const Matrix &basis, unsigned bitWidth) {
+  Matrix withRow = basis;
+  withRow.push_back(row);
+  return howellize(std::move(withRow), bitWidth) == howellize(basis, bitWidth);
+}
+
+Matrix residualRows(const Matrix &lhs, const Matrix &rhs, unsigned bitWidth) {
+  Matrix span = howellize(rhs, bitWidth);
+  Matrix residual;
+  for (const Row &row : howellize(lhs, bitWidth)) {
+    if (rowInSpan(row, span, bitWidth))
+      continue;
+    residual.push_back(row);
+    span.push_back(row);
+    span = howellize(std::move(span), bitWidth);
+  }
+  return howellize(std::move(residual), bitWidth);
+}
+
 } // namespace
 
 bool AffineRelationComponent::operator==(
@@ -873,8 +892,33 @@ AffineRelationDomain::extend_lin(const value_type &outer,
 
 AffineRelationDomain::value_type
 AffineRelationDomain::subtract(const value_type &lhs,
-                               const value_type & /*rhs*/) {
-  return lhs;
+                               const value_type &rhs) {
+  if (isBottom(lhs) || isBottom(rhs))
+    return lhs;
+
+  AffineGeneratorRelation lhsAG = toAffineGenerator(lhs);
+  AffineGeneratorRelation rhsAG = toAffineGenerator(rhs);
+  AffineGeneratorRelation residual;
+  residual.exact = lhsAG.exact && rhsAG.exact;
+
+  bool hasResidual = false;
+  for (const auto &component : lhsAG.generators) {
+    auto rhsIt = rhsAG.generators.find(component.first);
+    const Matrix empty;
+    Matrix rows =
+        residualRows(component.second,
+                     rhsIt == rhsAG.generators.end() ? empty : rhsIt->second,
+                     component.first);
+    if (!rows.empty()) {
+      residual.generators.emplace(component.first, std::move(rows));
+      hasResidual = true;
+    }
+  }
+
+  if (!hasResidual)
+    return zero();
+  residual.relation = fromAffineGenerator(residual);
+  return residual.relation;
 }
 
 AffineRelationDomain::value_type
