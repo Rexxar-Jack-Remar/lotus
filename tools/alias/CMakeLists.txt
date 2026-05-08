@@ -38,13 +38,13 @@ target_link_libraries(fpa PRIVATE
 )
 
 # DFPA (Demand-refined function pointer analysis) Tool
-add_executable(dfpa dfpa.cpp)
-target_link_libraries(dfpa PRIVATE
-  CanaryDFPA
-  AserPTA
-  CanaryAliasCLIUtils
-  ${LLVM_LINK_COMPONENTS}
-)
+# add_executable(dfpa dfpa.cpp)
+#target_link_libraries(dfpa PRIVATE
+#  CanaryDFPA
+#  AserPTA
+#  CanaryAliasCLIUtils
+#  ${LLVM_LINK_COMPONENTS}
+#)
 
 # LotusAA Pointer Analysis Tool
 add_executable(lotus-aa lotus-aa.cpp)

@@ -80,20 +80,132 @@ static cl::opt<bool> DisableMemorySSAPreparation(
              "purity inference"),
     cl::init(false), cl::cat(PurityCat));
 
-static bool moduleContainsShadowMem(const Module &module) {
+static cl::opt<bool>
+    PurityLog("purity-log",
+              cl::desc("Print purity workflow diagnostics to stderr"),
+              cl::init(false), cl::cat(PurityCat));
+
+struct ModuleStats {
+  unsigned definitions = 0;
+  unsigned declarations = 0;
+  unsigned shadowMemCalls = 0;
+};
+
+static ModuleStats collectModuleStats(const Module &module) {
+  ModuleStats stats;
   for (const Function &function : module) {
     if (function.isDeclaration()) {
+      ++stats.declarations;
       continue;
     }
+
+    ++stats.definitions;
     for (const Instruction &inst : instructions(function)) {
       const auto *call = dyn_cast<CallBase>(&inst);
       const Function *callee = call ? call->getCalledFunction() : nullptr;
       if (callee && callee->getName().startswith("shadow.mem")) {
-        return true;
+        ++stats.shadowMemCalls;
       }
     }
   }
-  return false;
+  return stats;
+}
+
+static bool moduleContainsShadowMem(const Module &module) {
+  return collectModuleStats(module).shadowMemCalls != 0;
+}
+
+static void logModuleStats(StringRef label, const ModuleStats &stats) {
+  if (!PurityLog) {
+    return;
+  }
+
+  errs() << "[lotus-purity] " << label << ": definitions=" << stats.definitions
+         << " declarations=" << stats.declarations
+         << " shadow_mem_calls=" << stats.shadowMemCalls << "\n";
+}
+
+static void logWorkflow(StringRef message) {
+  if (PurityLog) {
+    errs() << "[lotus-purity] " << message << "\n";
+  }
+}
+
+static void
+logReportSummary(const lotus::analysis::purity::PurityInferenceReport &report) {
+  if (!PurityLog) {
+    return;
+  }
+
+  unsigned constCount = 0;
+  unsigned pureCount = 0;
+  unsigned impureCount = 0;
+  unsigned unknownCount = 0;
+  unsigned memorySSASourceCount = 0;
+  unsigned propagatedSourceCount = 0;
+  unsigned internalSourceCount = 0;
+  unsigned fallbackSourceCount = 0;
+  unsigned localAttributeSourceCount = 0;
+  unsigned builtinSpecSourceCount = 0;
+  unsigned externalSourceCount = 0;
+
+  using namespace lotus::analysis::purity;
+  for (const PurityFunctionReport &function : report.functions) {
+    switch (function.purity) {
+    case PurityKind::Const:
+      ++constCount;
+      break;
+    case PurityKind::Pure:
+      ++pureCount;
+      break;
+    case PurityKind::Impure:
+      ++impureCount;
+      break;
+    case PurityKind::Unknown:
+      ++unknownCount;
+      break;
+    }
+
+    switch (function.source) {
+    case SummarySource::MemorySSA:
+      ++memorySSASourceCount;
+      break;
+    case SummarySource::Propagated:
+      ++propagatedSourceCount;
+      break;
+    case SummarySource::InternalAnalysis:
+      ++internalSourceCount;
+      break;
+    case SummarySource::ConservativeFallback:
+      ++fallbackSourceCount;
+      break;
+    case SummarySource::LocalAttributes:
+      ++localAttributeSourceCount;
+      break;
+    case SummarySource::BuiltinSpec:
+      ++builtinSpecSourceCount;
+      break;
+    case SummarySource::ExternalSummary:
+      ++externalSourceCount;
+      break;
+    }
+  }
+
+  errs() << "[lotus-purity] report: functions=" << report.functions.size()
+         << " const=" << constCount << " pure=" << pureCount
+         << " impure=" << impureCount << " unknown=" << unknownCount << "\n";
+  errs() << "[lotus-purity] sources: memoryssa=" << memorySSASourceCount
+         << " propagated=" << propagatedSourceCount
+         << " internal=" << internalSourceCount
+         << " fallback=" << fallbackSourceCount
+         << " local_attrs=" << localAttributeSourceCount
+         << " builtin_spec=" << builtinSpecSourceCount
+         << " external=" << externalSourceCount << "\n";
+  errs() << "[lotus-purity] unknown_summaries="
+         << report.unknownSummaries.size()
+         << " invalidated_functions=" << report.invalidatedFunctions.size()
+         << " attributes_applied=" << (report.attributesApplied ? "yes" : "no")
+         << "\n";
 }
 
 static void initializeLegacyPasses() {
@@ -205,13 +317,25 @@ int main(int argc, char **argv) {
     return 1;
   }
 
+  logModuleStats("input", collectModuleStats(*module));
+
   const bool hadShadowMemInput = moduleContainsShadowMem(*module);
   const bool shouldPrepareMemorySSA =
       !DisableMemorySSAPreparation && !hadShadowMemInput;
+  if (DisableMemorySSAPreparation) {
+    logWorkflow("memoryssa preparation disabled by --disable-memoryssa-prep");
+  } else if (hadShadowMemInput) {
+    logWorkflow("input already contains shadow.mem instrumentation");
+  } else {
+    logWorkflow("running SeaDsa/ShadowMem preparation with default memoryssa "
+                "summaries");
+  }
+
   if (shouldPrepareMemorySSA) {
     legacy::PassManager preparePM;
     addMemorySSAPrerequisites(preparePM);
     preparePM.run(*module);
+    logModuleStats("after-memoryssa-prep", collectModuleStats(*module));
   }
 
   lotus::analysis::purity::ExternalPuritySummaryStore summaryStore;
@@ -231,7 +355,9 @@ int main(int argc, char **argv) {
                                       InvalidateSummaries.end());
 
   lotus::analysis::purity::PurityInferenceDriver driver(options);
+  logWorkflow("running purity propagation");
   const auto report = driver.run(*module, summaryStore);
+  logReportSummary(report);
 
   lotus::analysis::purity::printPurityInferenceReport(report, outs());
 
@@ -256,9 +382,11 @@ int main(int argc, char **argv) {
   }
 
   if (shouldPrepareMemorySSA) {
+    logWorkflow("stripping shadow.mem instrumentation from output module");
     legacy::PassManager stripPM;
     stripPM.add(seadsa::createStripShadowMemPass());
     stripPM.run(*module);
+    logModuleStats("after-shadowmem-strip", collectModuleStats(*module));
   }
 
   if (!OutputFilename.empty()) {

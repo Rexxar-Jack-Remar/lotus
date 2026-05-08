@@ -1,19 +1,20 @@
 // LLVM API compatibility helpers
 #pragma once
 
+#include <llvm/ADT/SmallVector.h>
+#include <llvm/Analysis/MemoryLocation.h>
 #include <llvm/Config/llvm-config.h>
-#include <llvm/IR/DerivedTypes.h>
-#include <llvm/IR/DataLayout.h>
+#include <llvm/IR/Attributes.h>
+#include <llvm/IR/Constants.h>
 #include <llvm/IR/DIBuilder.h>
+#include <llvm/IR/DataLayout.h>
+#include <llvm/IR/DerivedTypes.h>
+#include <llvm/IR/Dominators.h>
 #include <llvm/IR/Function.h>
 #include <llvm/IR/IRBuilder.h>
+#include <llvm/IR/Instructions.h>
 #include <llvm/IR/IntrinsicInst.h>
 #include <llvm/IR/Module.h>
-#include <llvm/IR/Constants.h>
-#include <llvm/IR/Attributes.h>
-#include <llvm/IR/Instructions.h>
-#include <llvm/IR/Dominators.h>
-#include <llvm/ADT/SmallVector.h>
 #include <llvm/Support/Allocator.h>
 #include <llvm/Support/FileSystem.h>
 #include <string>
@@ -28,6 +29,30 @@
 #define LOTUS_LLVM_COMPAT_GE_15 1
 #else
 #define LOTUS_LLVM_COMPAT_GE_15 0
+#endif
+
+#if LLVM_VERSION_MAJOR >= 16
+#define LOTUS_LLVM_COMPAT_GE_16 1
+#else
+#define LOTUS_LLVM_COMPAT_GE_16 0
+#endif
+
+#if LLVM_VERSION_MAJOR >= 18
+#define LOTUS_LLVM_COMPAT_GE_18 1
+#else
+#define LOTUS_LLVM_COMPAT_GE_18 0
+#endif
+
+#if LLVM_VERSION_MAJOR >= 19
+#define LOTUS_LLVM_COMPAT_GE_19 1
+#else
+#define LOTUS_LLVM_COMPAT_GE_19 0
+#endif
+
+#if LLVM_VERSION_MAJOR >= 20
+#define LOTUS_LLVM_COMPAT_GE_20 1
+#else
+#define LOTUS_LLVM_COMPAT_GE_20 0
 #endif
 
 // LLVM 14 already uses most of the APIs that this header historically gated
@@ -60,6 +85,29 @@
 namespace lotus {
 namespace utils {
 namespace llvm_compat {
+
+//------------------------------------------------------------------------------
+// Casting helpers
+//------------------------------------------------------------------------------
+template<typename To, typename From>
+inline auto dynCastIfPresent(From* value)
+{
+#if LOTUS_LLVM_COMPAT_GE_15
+    return llvm::dyn_cast_if_present<To>(value);
+#else
+    return llvm::dyn_cast_or_null<To>(value);
+#endif
+}
+
+template<typename To, typename From>
+inline auto dynCastIfPresent(const From* value)
+{
+#if LOTUS_LLVM_COMPAT_GE_15
+    return llvm::dyn_cast_if_present<To>(value);
+#else
+    return llvm::dyn_cast_or_null<To>(value);
+#endif
+}
 
 //------------------------------------------------------------------------------
 // Metadata kind wrappers
@@ -332,6 +380,107 @@ inline uint64_t getDbgValueOffset(const llvm::DbgValueInst* dbgValue)
 #endif
 }
 
+inline bool isDebugInstruction(const llvm::Instruction* inst)
+{
+    return inst != nullptr && llvm::isa<llvm::DbgInfoIntrinsic>(inst);
+}
+
+inline const llvm::Instruction* getNextNonDebugInstruction(
+        const llvm::Instruction* inst)
+{
+    if (inst == nullptr)
+    {
+        return nullptr;
+    }
+
+#if LOTUS_LLVM_COMPAT_GE_14 || defined(USE_LLVM_15)
+    return inst->getNextNonDebugInstruction(false);
+#else
+    const llvm::Instruction* cur = inst->getNextNode();
+    while (isDebugInstruction(cur))
+    {
+        cur = cur->getNextNode();
+    }
+    return cur;
+#endif
+}
+
+inline llvm::Instruction* getNextNonDebugInstruction(llvm::Instruction* inst)
+{
+    return const_cast<llvm::Instruction*>(
+            getNextNonDebugInstruction(static_cast<const llvm::Instruction*>(inst)));
+}
+
+inline const llvm::Instruction* getPrevNonDebugInstruction(
+        const llvm::Instruction* inst)
+{
+    if (inst == nullptr)
+    {
+        return nullptr;
+    }
+
+#if LOTUS_LLVM_COMPAT_GE_14 || defined(USE_LLVM_15)
+    return inst->getPrevNonDebugInstruction(false);
+#else
+    const llvm::Instruction* cur = inst->getPrevNode();
+    while (isDebugInstruction(cur))
+    {
+        cur = cur->getPrevNode();
+    }
+    return cur;
+#endif
+}
+
+inline llvm::Instruction* getPrevNonDebugInstruction(llvm::Instruction* inst)
+{
+    return const_cast<llvm::Instruction*>(
+            getPrevNonDebugInstruction(static_cast<const llvm::Instruction*>(inst)));
+}
+
+inline llvm::DILocalVariable* getDILocalVariable(const llvm::Value* value)
+{
+    if (value == nullptr)
+    {
+        return nullptr;
+    }
+
+#if LLVM_VERSION_MAJOR > 18
+    if (auto* valueAsMetadata = llvm::ValueAsMetadata::getIfExists(
+                const_cast<llvm::Value*>(value)))
+    {
+        for (const auto& use : valueAsMetadata->getAllDbgVariableRecordUsers())
+        {
+            if (auto* var = use->getVariable())
+            {
+                return var;
+            }
+        }
+    }
+#else
+    if (auto* valueAsMetadata = llvm::ValueAsMetadata::getIfExists(
+                const_cast<llvm::Value*>(value)))
+    {
+        if (auto* metadataAsValue =
+                    llvm::MetadataAsValue::getIfExists(value->getContext(), valueAsMetadata))
+        {
+            for (auto* user : metadataAsValue->users())
+            {
+                if (auto* dbgDeclare = llvm::dyn_cast<llvm::DbgDeclareInst>(user))
+                {
+                    return dbgDeclare->getVariable();
+                }
+                if (auto* dbgValue = llvm::dyn_cast<llvm::DbgValueInst>(user))
+                {
+                    return dbgValue->getVariable();
+                }
+            }
+        }
+    }
+#endif
+
+    return nullptr;
+}
+
 //------------------------------------------------------------------------------
 // Version flags
 //------------------------------------------------------------------------------
@@ -348,6 +497,11 @@ inline bool isLlvm6To9()
 inline bool isLlvm15()
 {
     return LLVM_VERSION_MAJOR >= 15;
+}
+
+inline unsigned llvmMajorVersion()
+{
+    return LLVM_VERSION_MAJOR;
 }
 
 inline bool preferTypedPointers(llvm::LLVMContext& context)
@@ -509,6 +663,17 @@ inline unsigned getConstantAggregateZeroNumElements(
 //------------------------------------------------------------------------------
 // Pointer element type wrappers
 //------------------------------------------------------------------------------
+inline bool isOpaquePointerType(const llvm::Type* ty)
+{
+#if LOTUS_LLVM_COMPAT_GE_14 || defined(USE_LLVM_15)
+    auto* pointerTy = llvm::dyn_cast<llvm::PointerType>(ty);
+    return pointerTy != nullptr && pointerTy->isOpaque();
+#else
+    (void)ty;
+    return false;
+#endif
+}
+
 inline llvm::Type* getPointerElementType(llvm::Type* ty)
 {
 #if defined(USE_LLVM_15) || defined(USE_LLVM_6_TO_9)
@@ -535,6 +700,86 @@ inline const llvm::Type* getPointerElementType(const llvm::Value* value)
 inline llvm::Type* getPointerElementType(llvm::Value* value)
 {
     return const_cast<llvm::Type*>(getPointerElementType(value->getType()));
+}
+
+inline llvm::Type* getPointerElementTypeOrNull(llvm::Type* ty)
+{
+    auto* pointerTy = llvm::dyn_cast<llvm::PointerType>(ty);
+    if (pointerTy == nullptr)
+    {
+        return nullptr;
+    }
+
+#if LOTUS_LLVM_COMPAT_GE_14 || defined(USE_LLVM_15)
+    if (pointerTy->isOpaque())
+    {
+        return nullptr;
+    }
+    return pointerTy->getNonOpaquePointerElementType();
+#else
+    return pointerTy->getPointerElementType();
+#endif
+}
+
+inline const llvm::Type* getPointerElementTypeOrNull(const llvm::Type* ty)
+{
+    return getPointerElementTypeOrNull(const_cast<llvm::Type*>(ty));
+}
+
+inline llvm::Type* getPointerElementTypeOrNull(llvm::Value* value)
+{
+    return value == nullptr ? nullptr : getPointerElementTypeOrNull(value->getType());
+}
+
+inline const llvm::Type* getPointerElementTypeOrNull(const llvm::Value* value)
+{
+    return value == nullptr ? nullptr : getPointerElementTypeOrNull(value->getType());
+}
+
+inline llvm::Type* inferPointeeTypeOrNull(const llvm::Value* value)
+{
+    if (value == nullptr || !value->getType()->isPointerTy())
+    {
+        return nullptr;
+    }
+
+    if (auto* elementTy = getPointerElementTypeOrNull(value))
+    {
+        return const_cast<llvm::Type*>(elementTy);
+    }
+
+    if (auto* arg = llvm::dyn_cast<llvm::Argument>(value))
+    {
+#if LOTUS_LLVM_COMPAT_GE_14 || defined(USE_LLVM_15)
+        if (auto* type = arg->getParamByValType())
+        {
+            return type;
+        }
+        if (auto* type = arg->getParamStructRetType())
+        {
+            return type;
+        }
+#endif
+    }
+
+    if (auto* alloca = llvm::dyn_cast<llvm::AllocaInst>(value))
+    {
+        return alloca->getAllocatedType();
+    }
+
+    return nullptr;
+}
+
+inline llvm::LocationSize getPreciseLocationSizeOrOne(
+        const llvm::Value* pointer,
+        const llvm::DataLayout& dataLayout)
+{
+    auto* elementTy = inferPointeeTypeOrNull(pointer);
+    if (elementTy != nullptr && elementTy->isSized())
+    {
+        return llvm::LocationSize::precise(dataLayout.getTypeStoreSize(elementTy));
+    }
+    return llvm::LocationSize::precise(1);
 }
 
 // https://github.com/llvm/llvm-project/commit/5548e807b5777fdda167b6795e0e05432a6163f1
