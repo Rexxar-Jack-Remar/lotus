@@ -3,8 +3,8 @@
 
 #include "RelationMaker.hpp"
 
-#include <wali/domains/binrel/ProgramBddContext.hpp>
 #include <wali/domains/binrel/BinRel.hpp>
+#include <wali/domains/binrel/ProgramBddContext.hpp>
 
 namespace wali
 {
@@ -85,7 +85,7 @@ namespace wali
                 return new BinRel(&voc, ident);
             }
         };
-    }
-}
+    } // namespace xfa
+} // namespace wali
 
 #endif /* WALI_XFA_BDD_RELATION_MAKER_HPP */

@@ -7,8 +7,8 @@ namespace wali {
     namespace util {
         std::string base64_encode(unsigned char const* , size_t len);
         std::string base64_decode(std::string const& s);
-    }
-}
+    } // namespace util
+} // namespace wali
 
 
 #endif

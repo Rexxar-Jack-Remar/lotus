@@ -8,8 +8,8 @@
  * @author kidd
  */
 
-#include <string>
 #include <iostream>
+#include <string>
 #include <xercesc/util/TransService.hpp>
 #include <xercesc/util/XMLString.hpp>
 

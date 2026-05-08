@@ -36,8 +36,8 @@ namespace wali
             sem_elem_t
             one() const = 0;
         };
-    }
-}
+    } // namespace xfa
+} // namespace wali
 
 
 #endif /* WALI_XFA_RELATIONMAKER_HPP */

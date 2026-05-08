@@ -1,8 +1,8 @@
 #ifndef WALI_UTIL_READ_FILE_HPP_INCLUDED
 #define WALI_UTIL_READ_FILE_HPP_INCLUDED
 
-#include <vector>
 #include <cstdio>
+#include <vector>
 
 namespace wali {
     namespace util {
@@ -13,7 +13,7 @@ namespace wali {
         extern
         std::vector<char>
         read_file(std::FILE* file);
-    }
-}
+    } // namespace util
+} // namespace wali
 
 #endif /* WALI_UTIL_READ_FILE_HPP_INCLUDED */

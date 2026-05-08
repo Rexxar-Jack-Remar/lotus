@@ -1,10 +1,10 @@
 #ifndef XFA_AST_HH
 #define XFA_AST_HH
 
-#include <memory>
-#include <vector>
-#include <string>
 #include <cassert>
+#include <memory>
+#include <string>
+#include <vector>
 
 namespace wali {
 namespace xfa {
@@ -156,10 +156,10 @@ struct XfaAst
 };
 
     
-}
+} // namespace ast
 
 using ast::XfaAst;
-}
-}
+} // namespace xfa
+} // namespace wali
 
 #endif
