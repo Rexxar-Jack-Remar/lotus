@@ -101,8 +101,13 @@ Some related publications
 ## 6. Data Flow Analysis
 
 * Revise the monotone data flow analysis module
-* Let the WPDS engine work 
 
+
+***WPDS-based Datafow analysis (lib/Dataflow/WPDS)**
+
+- How to design alias-aware WPDS analyses?
+- We use third-party/WPDS for now, but there is an extended, C++ version in third-party/WALi-OpenNWA. Shoud we try to use the new one?
+- Code ref.: https://github.com/icra-team/icra (it adds some extensions such as Newtonian Program Analysis?)
 
 
 ## Bindings

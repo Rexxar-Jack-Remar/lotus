@@ -7,9 +7,9 @@
  */
 
 #include "wali/Common.hpp"
-#include "wali/ref_ptr.hpp"
 #include "wali/SemElem.hpp"
 #include "wali/SemElemTensor.hpp"
+#include "wali/ref_ptr.hpp"
 #include <iostream>
 
 
@@ -52,7 +52,7 @@ namespace wali
 
   };
 
-} // namespacw wali
+} // namespace wali
 
 #endif // wali_IMERGE_FN_GUARD
 

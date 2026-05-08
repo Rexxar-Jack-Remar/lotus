@@ -68,4 +68,4 @@ sem_elem_t Reach::from_string( const std::string& s ) const {
   return (s == "ONE") ? one() : zero();
 }
 
-}
+} // namespace wali

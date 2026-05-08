@@ -1,14 +1,21 @@
-#include <iostream>
-#include <vector>
-#include <string>
 #include <cstdlib>
+
 #include <fstream>
+
+#include <iostream>
+
+#include <string>
+
+#include <vector>
+
 
 #include "opennwa/Nwa.hpp"
 #include "opennwa/NwaParser.hpp"
 
-#include "opennwa/construct/constructions.hpp"
 #include "opennwa/Expand.hpp"
+
+#include "opennwa/construct/constructions.hpp"
+
 
 using std::string;
 using std::ifstream;

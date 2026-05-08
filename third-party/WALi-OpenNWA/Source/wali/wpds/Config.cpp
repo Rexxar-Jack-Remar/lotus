@@ -4,8 +4,8 @@
  * @version $Id$
  */
 
-#include <sstream>
 #include "wali/wpds/Config.hpp"
+#include <sstream>
 
 namespace wali
 {

@@ -7,14 +7,14 @@
 
 #include "wali/Common.hpp"
 #include "wali/Countable.hpp"
-#include "wali/SemElem.hpp"
 #include "wali/MergeFn.hpp"
+#include "wali/SemElem.hpp"
 
 namespace wali
 {
   namespace wfa {
     class ITrans;
-  }
+  } // namespace wfa
 
   namespace wpds
   {
@@ -22,7 +22,7 @@ namespace wali
 
     namespace ewpds {
       class ERule;
-    }
+    } // namespace ewpds
 
     /**
      * @class Wrapper

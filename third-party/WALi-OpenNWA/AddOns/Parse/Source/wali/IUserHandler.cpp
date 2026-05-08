@@ -29,5 +29,5 @@ namespace wali
     return NULL;
   }
 
-}
+} // namespace wali
 

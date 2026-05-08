@@ -7,8 +7,8 @@
  */
 
 #include "wali/Common.hpp"
-#include "wali/ref_ptr.hpp"
 #include "wali/IMergeFn.hpp"
+#include "wali/ref_ptr.hpp"
 #include <iostream>
 
 
@@ -41,7 +41,7 @@ namespace wali
 
   };
 
-} // namespacw wali
+} // namespace wali
 
 #endif // wali_MERGE_FN_GUARD
 

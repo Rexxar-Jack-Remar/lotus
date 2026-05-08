@@ -1,17 +1,17 @@
 #ifndef WALI_UTIL_DETAILS_PARTITION_HPP
 #define WALI_UTIL_DETAILS_PARTITION_HPP
 
-#include <ostream>
-#include <set>
-#include <map>
-#include <sstream>
 #include <cassert>
 #include <list>
+#include <map>
+#include <ostream>
+#include <set>
+#include <sstream>
 
 #include <boost/pending/disjoint_sets.hpp>
 #include <boost/property_map/property_map.hpp>
-#include <boost/unordered_set.hpp>
 #include <boost/unordered_map.hpp>
+#include <boost/unordered_set.hpp>
 
 
 namespace wali
@@ -290,9 +290,9 @@ namespace details
   
 
 
-}
-}
-}
+} // namespace details
+} // namespace util
+} // namespace wali
 
 
 // Yo, Emacs!

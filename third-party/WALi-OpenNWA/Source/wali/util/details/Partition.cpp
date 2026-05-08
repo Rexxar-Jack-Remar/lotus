@@ -57,9 +57,9 @@ namespace details
   }
 
 
-}
-}
-}
+} // namespace details
+} // namespace util
+} // namespace wali
 
 // Yo, Emacs!
 // Local Variables:

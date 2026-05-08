@@ -7,8 +7,8 @@
 
 #include "wali/Common.hpp"
 #include "wali/Printable.hpp"
-#include <string>
 #include <stdexcept>
+#include <string>
 
 namespace wali
 {
@@ -48,6 +48,6 @@ namespace wali
       std::string msg;
   };
 
-}
+} // namespace wali
 #endif  // wali_EXCEPTION_GUARD
 

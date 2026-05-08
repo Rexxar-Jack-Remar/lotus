@@ -6,8 +6,8 @@
  */
 
 #include "wali/Common.hpp"
-#include "wali/KeySource.hpp"
 #include "wali/KeyContainer.hpp"
+#include "wali/KeySource.hpp"
 
 namespace wali
 {

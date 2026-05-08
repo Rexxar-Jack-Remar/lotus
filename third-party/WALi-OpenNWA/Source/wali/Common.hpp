@@ -5,10 +5,10 @@
  * @author Nicholas Kidd
  */
 
-#include <climits>
-#include <string>
-#include <iostream>
 #include "wali/Key.hpp"
+#include <climits>
+#include <iostream>
+#include <string>
 
 namespace wali
 {

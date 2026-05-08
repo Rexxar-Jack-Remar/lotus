@@ -41,7 +41,7 @@ class Reach : public SemElem
 
 };
 
-}
+} // namespace wali
 
 #endif	// REACH_GUARD
 

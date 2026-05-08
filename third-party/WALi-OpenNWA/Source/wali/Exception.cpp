@@ -25,5 +25,5 @@ namespace wali
     return o;
   }
 
-}
+} // namespace wali
 

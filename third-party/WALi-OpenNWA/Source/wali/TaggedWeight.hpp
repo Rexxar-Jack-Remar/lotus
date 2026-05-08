@@ -12,7 +12,7 @@ namespace wali
 {
   namespace walienum {
     enum ETag {NONE, CALL, RETURN};
-  }
+  } // namespace walienum
 
   class TaggedWeight : public Printable {
     public:

@@ -42,10 +42,10 @@
 #define __MATRIX_H
 
 
-#include <stdio.h>
 #include "HashMap.h"
 #include <climits>
 #include <iostream>
+#include <stdio.h>
 
 namespace AR {
     class Matrix;

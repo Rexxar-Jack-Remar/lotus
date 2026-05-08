@@ -5,8 +5,8 @@
  * @author Nicholas Kidd
  */
 
-#include <string>
 #include <iostream>
+#include <string>
 
 namespace wali
 {

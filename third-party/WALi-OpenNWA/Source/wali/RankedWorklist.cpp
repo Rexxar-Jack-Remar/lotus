@@ -71,5 +71,5 @@ namespace wali
       return doRankOf(a->weight());
     }
   }
-}
+} // namespace wali
 

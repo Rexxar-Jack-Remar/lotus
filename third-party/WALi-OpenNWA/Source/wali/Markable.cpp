@@ -46,5 +46,5 @@ namespace wali
   {
     return marker;
   }
-}
+} // namespace wali
 

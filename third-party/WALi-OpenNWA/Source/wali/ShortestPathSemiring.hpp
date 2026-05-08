@@ -2,9 +2,9 @@
 #define WALI_SHORTEST_PATH_SEMIRING_HPP
 
 #include "wali/SemElem.hpp"
+#include "wali/Key.hpp"
 #include "wali/MergeFn.hpp"
 #include "wali/ref_ptr.hpp"
-#include "wali/Key.hpp"
 #include <set>
 
 
@@ -68,6 +68,6 @@ namespace wali {
 
 
 
-}
+} // namespace wali
 
 #endif // REACH_SEMIRING

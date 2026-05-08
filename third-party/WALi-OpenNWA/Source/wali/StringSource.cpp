@@ -40,6 +40,6 @@ namespace wali
   {
     return s;
   }
-}
+} // namespace wali
 
 

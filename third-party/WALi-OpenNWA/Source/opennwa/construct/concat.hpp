@@ -37,8 +37,8 @@ namespace opennwa
     extern NwaRefPtr concat( Nwa const & first, Nwa const & second );
 
       
-  }
-}
+  } // namespace construct
+} // namespace opennwa
 
 
 // Yo, Emacs!

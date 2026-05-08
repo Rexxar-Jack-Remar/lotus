@@ -11,9 +11,9 @@
  * This file defines the interface to the WALi KeySpace and methods
  * for acting on Keys
  */
-#include <string>
-#include <set>
 #include "wali/ref_ptr.hpp"
+#include <set>
+#include <string>
 
 namespace wali
 {

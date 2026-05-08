@@ -8,8 +8,8 @@
 #include "wali/SemElemPair.hpp"
 #include "wali/wpds/Config.hpp"
 #include "wali/wpds/ewpds/ERule.hpp"
-#include <sstream>
 #include <list>
+#include <sstream>
 
 namespace wali
 {

@@ -3,8 +3,8 @@
  */
 
 #include "wali/Common.hpp"
-#include "wali/ShortestPathWorklist.hpp"
 #include "wali/ShortestPathSemiring.hpp"
+#include "wali/ShortestPathWorklist.hpp"
 #include "wali/wfa/Trans.hpp"
 #include <climits>
 #include <cstdlib>
@@ -42,5 +42,5 @@ namespace wali
     return rank;
   }
 
-}
+} // namespace wali
 

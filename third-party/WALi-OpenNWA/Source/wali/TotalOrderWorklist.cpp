@@ -15,5 +15,5 @@ namespace wali
   TotalOrderWorklist::~TotalOrderWorklist()
   {
   }
-}
+} // namespace wali
 

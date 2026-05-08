@@ -10,11 +10,11 @@
 #   pragma warning(disable: 4786)
 #endif
 
+#include "wali/hm_hash.hpp"
 #include <climits> // ULONG_MAX
-#include <utility>  // std::pair
 #include <functional>
 #include <iostream>
-#include "wali/hm_hash.hpp"
+#include <utility>  // std::pair
 #define HASHMAP_GROWTH_FRACTION 0.75
 #define HASHMAP_SHRINK_FRACTION 0.25
 

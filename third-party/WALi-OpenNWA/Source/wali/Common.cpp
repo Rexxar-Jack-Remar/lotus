@@ -6,8 +6,8 @@
 
 #include "wali/Common.hpp"
 
-#include <iostream>
 #include <cstdlib>
+#include <iostream>
 
 namespace wali
 {

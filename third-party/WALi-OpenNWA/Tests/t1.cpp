@@ -5,12 +5,12 @@
  *
  * Tests WFA intersection.
  */
-#include <iostream>
 #include "wali/wfa/WFA.hpp"
-#include "wali/wfa/Trans.hpp"
-#include "wali/wfa/State.hpp"
-#include "wali/wfa/WeightMaker.hpp"
 #include "Reach.hpp"
+#include "wali/wfa/State.hpp"
+#include "wali/wfa/Trans.hpp"
+#include "wali/wfa/WeightMaker.hpp"
+#include <iostream>
 
 void dot()
 {

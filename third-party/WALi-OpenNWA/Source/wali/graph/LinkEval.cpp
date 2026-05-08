@@ -41,5 +41,5 @@ namespace wali {
                 ancestor[v] = ancestor[ancestor[v]];
             }
         }
-    }
-}
+    } // namespace graph
+} // namespace wali

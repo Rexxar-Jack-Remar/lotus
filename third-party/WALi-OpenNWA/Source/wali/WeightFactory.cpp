@@ -12,5 +12,5 @@ namespace wali
 
   WeightFactory::~WeightFactory() {}
 
-}
+} // namespace wali
 

@@ -12,5 +12,5 @@ namespace wali
 
   MergeFnFactory::~MergeFnFactory() {}
 
-}
+} // namespace wali
 

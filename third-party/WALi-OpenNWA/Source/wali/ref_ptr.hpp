@@ -6,9 +6,9 @@
  * @author Evan Driscoll
  */
 
-#include <cstdio>
 #include <cassert>
 #include <climits>
+#include <cstdio>
 #include <iostream>
 
 namespace wali

@@ -4,8 +4,8 @@
  */
 
 #include "wali/Common.hpp"
-#include "wali/wpds/GenKeySource.hpp"
 #include "wali/hm_hash.hpp"
+#include "wali/wpds/GenKeySource.hpp"
 
 namespace wali
 {
