@@ -44,6 +44,7 @@ option(LOTUS_USE_CCLYZER "Enable optional cclyzer++ alias analysis backend" OFF)
 option(ENABLE_TYPE_QUALIFIER
        "Enable the opt-in TypeQualifier uninitialized-data checker" OFF)
 option(ENABLE_FPSOLVE "Build the vendored FPsolve library under third-party/fpsolve" OFF)
+option(ENABLE_WALI_OPENNWA "Build the vendored WALi/OpenNWA library under third-party/WALi-OpenNWA" OFF)
 
 # Configure Boost only if modules that require it are enabled
 # Sea-DSA no longer requires Boost, so Boost is only needed for:
