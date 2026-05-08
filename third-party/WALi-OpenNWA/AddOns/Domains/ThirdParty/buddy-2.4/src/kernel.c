@@ -40,11 +40,11 @@
 *************************************************************************/
 // NAK - remove dependence on config.h
 //#include "config.h"
+#include <assert.h>
+#include <math.h>
 #include <stdlib.h>
 #include <string.h>
-#include <math.h>
 #include <time.h>
-#include <assert.h>
 
 #include "kernel.h"
 #include "cache.h"

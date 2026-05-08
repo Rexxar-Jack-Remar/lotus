@@ -3,14 +3,14 @@
 #include "buddy/bdd.h"
 
 // ::std
+#include <cstdlib>
 #include <iostream>
-#include <vector>
-#include <utility>
 #include <limits>
+#include <map>
 #include <sstream>
 #include <string>
-#include <cstdlib>
-#include <map>
+#include <utility>
+#include <vector>
 
 #include <boost/cast.hpp>
 
@@ -18,8 +18,8 @@
 
 // ::wali::domains::binrel
 #include "wali/domains/binrel/BinRel.hpp"
-#include "wali/domains/binrel/nwa_detensor.hpp"
 #include "wali/domains/binrel/ProgramBddContext.hpp"
+#include "wali/domains/binrel/nwa_detensor.hpp"
 
 
 using namespace std;

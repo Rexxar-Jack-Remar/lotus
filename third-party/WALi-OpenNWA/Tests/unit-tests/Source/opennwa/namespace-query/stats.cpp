@@ -3,8 +3,8 @@
 #include "opennwa/Nwa.hpp"
 #include "opennwa/query/automaton.hpp"
 
-#include "Tests/unit-tests/Source/opennwa/fixtures.hpp"
 #include "Tests/unit-tests/Source/opennwa/class-NWA/supporting.hpp"
+#include "Tests/unit-tests/Source/opennwa/fixtures.hpp"
 
 using namespace opennwa;
 using namespace std;
@@ -66,5 +66,5 @@ namespace opennwa {
                     EXPECT_EQ(expected_returns, numReturnSites(nwas[nwa]));
                 }
             }
-    }
-}
+    } // namespace query
+} // namespace opennwa

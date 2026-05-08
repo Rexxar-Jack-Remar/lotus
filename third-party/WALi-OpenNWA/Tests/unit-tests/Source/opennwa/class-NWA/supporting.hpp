@@ -21,4 +21,4 @@ namespace opennwa
         /// doesn't change 'reference'.
         extern void expect_nwas_are_physically_different(Nwa const & reference, Nwa & copy);
 
-}
+} // namespace opennwa

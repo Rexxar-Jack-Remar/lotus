@@ -20,5 +20,5 @@ namespace opennwa {
                 wpds = plusWpds(nwa, wpds);
             }
 
-    }
-}
+    } // namespace nwa_pds
+} // namespace opennwa

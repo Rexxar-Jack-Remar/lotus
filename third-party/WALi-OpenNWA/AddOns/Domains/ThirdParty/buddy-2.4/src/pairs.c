@@ -34,9 +34,9 @@
   AUTH:  Jorn Lind
   DATE:  february 1997
 *************************************************************************/
-#include <stdlib.h>
-#include <limits.h>
 #include "kernel.h"
+#include <limits.h>
+#include <stdlib.h>
 
 /*======================================================================*/
 

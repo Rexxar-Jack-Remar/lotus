@@ -34,11 +34,11 @@
   AUTH:  Jorn Lind
   DATE:  (C) august 1997
 *************************************************************************/
-#include <string.h>
-#include <stdlib.h>
-#include <iomanip>
 #include "kernel.h"
 #include "bvec.h"
+#include <iomanip>
+#include <stdlib.h>
+#include <string.h>
 
 using namespace std;
 

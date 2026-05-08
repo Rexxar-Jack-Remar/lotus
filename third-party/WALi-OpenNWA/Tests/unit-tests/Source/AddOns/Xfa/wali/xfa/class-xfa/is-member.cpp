@@ -92,6 +92,6 @@ namespace wali {
             }
         }
 
-    }
-}
+    } // namespace xfa
+} // namespace wali
 

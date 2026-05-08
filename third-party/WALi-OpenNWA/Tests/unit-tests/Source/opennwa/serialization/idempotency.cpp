@@ -5,8 +5,8 @@
 #include "opennwa/Nwa.hpp"
 #include "opennwa/NwaParser.hpp"
 
-#include "Tests/unit-tests/Source/opennwa/fixtures.hpp"
 #include "Tests/unit-tests/Source/opennwa/class-NWA/supporting.hpp"
+#include "Tests/unit-tests/Source/opennwa/fixtures.hpp"
 
 using namespace opennwa;
 
@@ -53,5 +53,5 @@ namespace opennwa {
             }
         }
         
-}
+} // namespace opennwa
 

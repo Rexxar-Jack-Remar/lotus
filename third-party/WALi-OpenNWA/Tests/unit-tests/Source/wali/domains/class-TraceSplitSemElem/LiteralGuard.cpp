@@ -69,8 +69,8 @@ namespace wali {
       EXPECT_EQ("[0]", g.zero->toString());
     }
 
-  }
-}
+  } // namespace domains
+} // namespace wali
 
 
 // Yo emacs!

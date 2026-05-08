@@ -34,10 +34,10 @@
   AUTH:  Jorn Lind
   DATE:  (C) feb 2001
 *************************************************************************/
-#include <stdlib.h>
-#include <stdio.h>
-#include <time.h>
 #include "prime.h"
+#include <stdio.h>
+#include <stdlib.h>
+#include <time.h>
 
 
 #define Random(i) ( (rand() % (i)) + 1 )

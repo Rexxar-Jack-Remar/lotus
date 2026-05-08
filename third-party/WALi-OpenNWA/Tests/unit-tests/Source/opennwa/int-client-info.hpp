@@ -23,6 +23,6 @@ namespace opennwa {
             int n;
         };
         
-}
+} // namespace opennwa
 
 #endif

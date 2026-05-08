@@ -64,7 +64,7 @@ namespace opennwa
           {
             return SelectorEqualityPredicate<Selector>(selector, goal);
           }
-        }
+        } // namespace predicates
 
         
         /// This namespace defines filtering iterators.
@@ -163,10 +163,10 @@ namespace opennwa
           };
           
 
-      }
-    }
-  }
-}
+      } // namespace filter
+    } // namespace details
+  } // namespace query
+} // namespace opennwa
 
 // Yo, Emacs!
 // Local Variables:

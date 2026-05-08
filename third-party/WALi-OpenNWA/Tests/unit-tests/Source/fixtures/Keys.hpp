@@ -19,7 +19,7 @@ namespace testing
       b(wali::getKey("b"))
     {}
   };
-}
+} // namespace testing
 
 // Yo emacs!
 // Local Variables:

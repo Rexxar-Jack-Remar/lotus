@@ -16,13 +16,13 @@ namespace testing
       dist10, dist11, dist12, dist20, dist21, dist22,
       dist30, dist31, dist40, dist50, dist60,
       semiring_zero;
-  }
+  } // namespace ShortestPathWeights
 
   namespace ReachWeights
   {
     extern wali::sem_elem_t reachOne, reachZero;
-  }
-}
+  } // namespace ReachWeights
+} // namespace testing
 
 // Yo emacs!
 // Local Variables:

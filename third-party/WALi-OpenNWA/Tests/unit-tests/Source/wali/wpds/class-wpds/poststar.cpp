@@ -1,8 +1,8 @@
 #include "gtest/gtest.h"
 
 #include "wali/Reach.hpp"
-#include "wali/wpds/WPDS.hpp"
 #include "wali/wfa/TransFunctor.hpp"
+#include "wali/wpds/WPDS.hpp"
 
 using namespace wali;
 using namespace wali::wpds;
@@ -29,7 +29,7 @@ namespace {
             wfa.addTrans(start, symbol, accept, one);
         }
     };
-}
+} // namespace
 
 TEST(wali$wpds$WPDS$prestar, canTakePrestarOfEmptyWpds)
 {

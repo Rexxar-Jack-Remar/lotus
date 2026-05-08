@@ -1,8 +1,11 @@
-#include <boost/function_types/parameter_types.hpp>
-#include <boost/function_types/function_arity.hpp>
-#include <boost/test/unit_test.hpp>
-#include <boost/mpl/front.hpp>
 #include <boost/bind.hpp>
+
+#include <boost/function_types/function_arity.hpp>
+#include <boost/function_types/parameter_types.hpp>
+
+#include <boost/mpl/front.hpp>
+#include <boost/test/unit_test.hpp>
+
 
 
 namespace Arbitrary {
@@ -67,4 +70,4 @@ namespace Arbitrary {
 
     return suite;
   }
-}
+} // namespace Arbitrary

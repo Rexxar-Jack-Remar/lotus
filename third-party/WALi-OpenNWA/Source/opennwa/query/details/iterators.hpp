@@ -3,12 +3,12 @@
 
 #include "opennwa/Nwa.hpp"
 
+#include <algorithm>
 #include <iterator>
 #include <utility>
-#include <algorithm>
 
-#include <boost/iterator/iterator_facade.hpp>
 #include <boost/iterator/iterator_adaptor.hpp>
+#include <boost/iterator/iterator_facade.hpp>
 #include <boost/shared_ptr.hpp>
 
 namespace opennwa
@@ -238,10 +238,10 @@ namespace opennwa
 
           
 
-      }
-    }
-  }
-}
+      } // namespace iterators
+    } // namespace details
+  } // namespace query
+} // namespace opennwa
 
 // Yo, Emacs!
 // Local Variables:

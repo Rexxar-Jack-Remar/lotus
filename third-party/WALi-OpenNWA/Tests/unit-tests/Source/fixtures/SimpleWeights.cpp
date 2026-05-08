@@ -30,15 +30,15 @@ namespace testing
       dist50(new ShortestPathSemiring(50)),
       dist60(new ShortestPathSemiring(60)),
       semiring_zero = dist1->zero();
-  }
+  } // namespace ShortestPathWeights
 
   namespace ReachWeights
   {
     wali::sem_elem_t reach_dummy(new wali::Reach(true)),
       reachOne = reach_dummy->one(),
       reachZero = reach_dummy->zero();
-  }
-}
+  } // namespace ReachWeights
+} // namespace testing
 
 // Yo emacs!
 // Local Variables:

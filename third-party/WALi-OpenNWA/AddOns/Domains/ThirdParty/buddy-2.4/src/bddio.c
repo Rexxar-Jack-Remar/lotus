@@ -34,12 +34,12 @@
   AUTH:  Jorn Lind
   DATE:  (C) june 1997
 *************************************************************************/
-#include <string.h>
-#include <stdlib.h>
-#include <fcntl.h>
-#include <assert.h>
-#include <sys/stat.h>
 #include "kernel.h"
+#include <assert.h>
+#include <fcntl.h>
+#include <stdlib.h>
+#include <string.h>
+#include <sys/stat.h>
 
 static void bdd_printset_rec(FILE *, int, int *);
 static void bdd_fprintdot_rec(FILE*, BDD);

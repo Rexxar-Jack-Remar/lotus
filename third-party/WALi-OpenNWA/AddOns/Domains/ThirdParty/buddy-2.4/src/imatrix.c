@@ -33,11 +33,11 @@
   AUTH:  Jorn Lind
   DATE:  (C) february 2000
 *************************************************************************/
-#include <stdlib.h>
-#include <assert.h>
-#include <string.h>
 #include "kernel.h"
 #include "imatrix.h"
+#include <assert.h>
+#include <stdlib.h>
+#include <string.h>
 
 /*************************************************************************
 *************************************************************************/

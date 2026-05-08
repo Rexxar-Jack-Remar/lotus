@@ -66,7 +66,7 @@ namespace wali {
         }
 
 
-    }
-}
+    } // namespace util
+} // namespace wali
 
 

@@ -26,8 +26,8 @@ namespace opennwa
     wali::wpds::WPDS plusWpds( Nwa const & nwa, const wali::wpds::WPDS & base ); 
 
 
-  }
-}
+  } // namespace nwa_pds
+} // namespace opennwa
 
 // Yo, Emacs!
 // Local Variables:

@@ -24,9 +24,9 @@ bool operator==(matrix<T,O,S> const & m, matrix<T,O,S> const & n)
     return true;
 }
 
-}
-}
-}
+} // namespace ublas
+} // namespace numeric
+} // namespace boost
 
 #endif /* WALI_TESTS_DOMAIN_MATRIX_EQUAL_HPP */
 

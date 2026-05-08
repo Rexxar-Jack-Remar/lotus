@@ -27,9 +27,9 @@
     MODIFICATIONS.
 ========================================================================*/
 
-#include <string>
 #include "bdd.h"
 #include "bvec.h"
+#include <string>
 
 using namespace std;
 
@@ -38,7 +38,7 @@ using namespace std;
 
 static void fail(const string msg, const char* file, int lineNum)
 {
-  cout << "Error in " << file << "(" << lineNum << "): " << msg << endl;
+  cout << "Error in " << file << "(" << lineNum << "): " << msg << '\n';
   exit(1);
 }
 

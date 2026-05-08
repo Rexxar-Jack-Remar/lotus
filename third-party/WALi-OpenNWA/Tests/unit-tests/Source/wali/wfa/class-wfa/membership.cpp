@@ -1,9 +1,9 @@
 #include "gtest/gtest.h"
-#include "wali/wfa/WFA.hpp"
-#include "wali/ShortestPathSemiring.hpp"
 #include "wali/LongestSaturatingPathSemiring.hpp"
-#include "wali/domains/binrel/ProgramBddContext.hpp"
+#include "wali/ShortestPathSemiring.hpp"
 #include "wali/domains/binrel/BinRel.hpp"
+#include "wali/domains/binrel/ProgramBddContext.hpp"
+#include "wali/wfa/WFA.hpp"
 
 #include "fixtures.hpp"
 
@@ -73,5 +73,5 @@ namespace wali {
             }
         }
 
-    }
-}
+    } // namespace wfa
+} // namespace wali

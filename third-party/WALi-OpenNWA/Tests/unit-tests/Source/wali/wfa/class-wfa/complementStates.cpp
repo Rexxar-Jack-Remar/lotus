@@ -1,6 +1,6 @@
 #include "gtest/gtest.h"
-#include "wali/wfa/WFA.hpp"
 #include "wali/wfa/TransFunctor.hpp"
+#include "wali/wfa/WFA.hpp"
 
 #include "fixtures.hpp"
 
@@ -44,6 +44,6 @@ namespace wali {
             w.wfa.for_each(c2);
             EXPECT_EQ(c1.getNumTrans(), c2.getNumTrans());
         }
-    }
-}
+    } // namespace wfa
+} // namespace wali
 
