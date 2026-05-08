@@ -10,7 +10,7 @@ Overview
 The WPDS backend provides algorithms for reasoning about weighted pushdown
 systems, which can encode interprocedural programs with call/return structure.
 
-**Location**: ``lib/Solvers/WPDS/``
+**Location**: ``third-party/WPDS/``
 
 **Main capabilities**:
 
@@ -30,11 +30,9 @@ Basic Usage (C\+\+)
 
 .. code-block:: cpp
 
-   #include <Solvers/WPDS/WPDSSystem.h>
+   #include <WPDS/WPDS.h>
 
-   WPDSSystem System;
-   // configure rules and weights ...
-   auto Solution = System.solve();
+   // Instantiate wpds::WPDS<T> with an analysis-specific semiring weight.
 
 Features
 --------
@@ -51,5 +49,3 @@ Integration Notes
 The WPDS backend is typically used by higher-level analyses that require
 interprocedural reasoning with explicit call stacks. See :doc:`solvers` for a
 high-level overview of where WPDS fits in the solver architecture.
-
-

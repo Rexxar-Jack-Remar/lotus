@@ -1,7 +1,7 @@
 // A real BDD-backed points-to set built on CUDD.
 #include "Alias/Infrastructure/PtsSet/BDDPtsSet.h"
 
-#include "Solvers/CUDD/cudd.h"
+#include "CUDD/cudd.h"
 
 #include <atomic>
 #include <cctype>

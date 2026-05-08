@@ -1,6 +1,6 @@
 #include "Dataflow/NPA/Domains/PredicateRelationDomain.h"
 
-#include "Solvers/CUDD/cudd.h"
+#include "CUDD/cudd.h"
 
 #include <algorithm>
 #include <cassert>

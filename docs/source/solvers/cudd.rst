@@ -10,7 +10,7 @@ The CUDD backend provides a high-performance implementation of Binary Decision
 Diagrams (BDDs) that can be used to encode and manipulate Boolean functions and
 symbolic sets.
 
-**Location**: ``lib/Solvers/CUDD/``
+**Location**: ``third-party/CUDD/``
 
 **Main capabilities**:
 
@@ -31,14 +31,11 @@ Basic Usage (C\+\+)
 
 .. code-block:: cpp
 
-   #include <Solvers/CUDD/CUDDManager.h>
+   #include <CUDD/cudd.h>
 
-   CUDDManager Manager;
-   auto X = Manager.createVariable("x");
-   auto Y = Manager.createVariable("y");
-
-   // Boolean formula: x ∧ ¬y
-   auto Phi = X & !Y;
+   DdManager *Manager = Cudd_Init(0, 0, CUDD_UNIQUE_SLOTS, 127, 0);
+   DdNode *X = Cudd_bddIthVar(Manager, 0);
+   Cudd_Quit(Manager);
 
 Features
 --------
@@ -57,5 +54,3 @@ The CUDD backend is typically not used directly by end users. Instead, it is
 used by higher-level applications and analyses that require symbolic Boolean
 reasoning. See :doc:`solvers` for an overview of where CUDD fits in the solver
 stack.
-
-

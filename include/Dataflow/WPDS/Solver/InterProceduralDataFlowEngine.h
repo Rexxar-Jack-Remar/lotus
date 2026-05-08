@@ -4,12 +4,12 @@
 #include "Dataflow/Mono/Support/Result.h"
 #include "Dataflow/WPDS/Core/GenKillTransformer.h"
 #include "Dataflow/WPDS/Core/MemoryObjectFact.h"
-#include "Solvers/WPDS/CA.h"
-#include "Solvers/WPDS/WPDS.h"
-#include "Solvers/WPDS/key_source.h"
-#include "Solvers/WPDS/keys.h"
-#include "Solvers/WPDS/ref_ptr.h"
-#include "Solvers/WPDS/semiring.h"
+#include "WPDS/CA.h"
+#include "WPDS/WPDS.h"
+#include "WPDS/key_source.h"
+#include "WPDS/keys.h"
+#include "WPDS/ref_ptr.h"
+#include "WPDS/semiring.h"
 
 #include <functional>
 #include <map>

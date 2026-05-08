@@ -7,7 +7,7 @@ Overview
 The **WPDS engine** in ``lib/Dataflow/WPDS`` solves distributive
 interprocedural data-flow problems by encoding them as
 **Weighted Pushdown Systems (WPDS)**.
-It leverages the WALi library (``lib/Solvers/WPDS``) to compute
+It leverages the WALi-style library (``third-party/WPDS``) to compute
 post*/pre* reachability over a pushdown system that models both
 control-flow and call/return behavior.
 
@@ -80,5 +80,4 @@ reads from **possibly uninitialized memory**:
 Compared to IFDS/IDE, the explicit pushdown-system encoding makes the
 call stack and recursion behavior more visible and can be advantageous
 for certain classes of interprocedural problems.
-
 

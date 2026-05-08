@@ -4,10 +4,10 @@
  */
 #include "Dataflow/ControlFlow/InterCFG.h"
 #include "Dataflow/WPDS/InterProceduralDataFlow.h"
-#include "Solvers/WPDS/CA.h"
-#include "Solvers/WPDS/SaturationProcess.h"
+#include "WPDS/CA.h"
+#include "WPDS/SaturationProcess.h"
 #ifdef WITNESS_TRACE
-#include "Solvers/WPDS/Witness.h"
+#include "WPDS/Witness.h"
 #endif
 #include "llvm/IR/CFG.h"
 

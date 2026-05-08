@@ -1,6 +1,6 @@
 # Third-party libraries (CUDD, WPDS, spdlog)
-add_subdirectory(Solvers/CUDD)
-add_subdirectory(Solvers/WPDS)
+add_subdirectory(CUDD)
+add_subdirectory(WPDS)
 add_subdirectory(spdlog)
 if(ENABLE_FPSOLVE)
   # Vendor FPsolve as a library dependency without pulling in its optional

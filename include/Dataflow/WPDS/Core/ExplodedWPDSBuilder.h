@@ -13,9 +13,9 @@
  *      to Interprocedural Dataflow Analysis", Section 4
  */
 
-#include "Solvers/WPDS/WPDS.h"
-#include "Solvers/WPDS/keys.h"
-#include "Solvers/WPDS/semiring.h"
+#include "WPDS/WPDS.h"
+#include "WPDS/keys.h"
+#include "WPDS/semiring.h"
 
 #include <functional>
 #include <set>
