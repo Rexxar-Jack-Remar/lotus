@@ -5,7 +5,7 @@
 #include "llvm/IR/Dominators.h"
 #include "llvm/IR/Instructions.h"
 
-#include "Dataflow/APA/Analyses/LLVM/Intra/VeryBusyExpressions.h"
+#include "Dataflow/APA/Analyses/Intra/IntraVeryBusyExpressions.h"
 #include "Dataflow/APA/Core/Problem.h"
 #include "Dataflow/APA/Solver/Solver.h"
 #include "Dataflow/ControlFlow/IntraCFG.h"

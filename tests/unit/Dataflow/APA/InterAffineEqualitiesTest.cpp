@@ -1,4 +1,4 @@
-#include "Dataflow/NPA/Analyses/Inter/InterAffineEqualities.h"
+#include "Dataflow/APA/Analyses/Inter/InterAffineEqualities.h"
 
 #include "TestUtils/LLVMHelpers.h"
 
@@ -15,22 +15,22 @@ namespace {
 using lotus::unittest::findInstructionByName;
 using lotus::unittest::parseModule;
 
-std::vector<npa::AffineState> materializedAffineStatesForBlock(
-    const std::map<npa::BlockKey, npa::AffineRelationDomain::value_type> &facts,
+std::vector<elimination::AffineState> materializedAffineStatesForBlock(
+    const std::map<elimination::BlockKey, elimination::AffineRelationDomain::value_type> &facts,
     const llvm::BasicBlock *block) {
-  std::vector<npa::AffineState> out;
+  std::vector<elimination::AffineState> out;
   for (const auto &entry : facts) {
     if (entry.first.block != block)
       continue;
-    out.push_back(npa::materializeAffineExpressions(entry.second));
+    out.push_back(elimination::materializeAffineExpressions(entry.second));
   }
   return out;
 }
 
-std::vector<const npa::AffineRelationDomain::value_type *> relationsForBlock(
-    const std::map<npa::BlockKey, npa::AffineRelationDomain::value_type> &facts,
+std::vector<const elimination::AffineRelationDomain::value_type *> relationsForBlock(
+    const std::map<elimination::BlockKey, elimination::AffineRelationDomain::value_type> &facts,
     const llvm::BasicBlock *block) {
-  std::vector<const npa::AffineRelationDomain::value_type *> out;
+  std::vector<const elimination::AffineRelationDomain::value_type *> out;
   for (const auto &entry : facts) {
     if (entry.first.block != block)
       continue;
@@ -40,7 +40,7 @@ std::vector<const npa::AffineRelationDomain::value_type *> relationsForBlock(
 }
 
 bool equalityMatchesUpToNegation(
-    const npa::AffineEquality &equality, int64_t constant,
+    const elimination::AffineEquality &equality, int64_t constant,
     std::initializer_list<std::pair<const llvm::Value *, int64_t>> terms) {
   auto matches = [&](int sign) {
     if (equality.constant != sign * constant)
@@ -58,17 +58,17 @@ bool equalityMatchesUpToNegation(
 }
 
 bool stateHasEquality(
-    const npa::AffineState &state, int64_t constant,
+    const elimination::AffineState &state, int64_t constant,
     std::initializer_list<std::pair<const llvm::Value *, int64_t>> terms) {
   return std::any_of(state.equalities.begin(), state.equalities.end(),
-                     [&](const npa::AffineEquality &equality) {
+                     [&](const elimination::AffineEquality &equality) {
                        return equalityMatchesUpToNegation(equality, constant,
                                                           terms);
                      });
 }
 
 int64_t congruenceScale(unsigned modulusBits) {
-  unsigned width = npa::AffineRelationDomain::componentBitWidth();
+  unsigned width = elimination::AffineRelationDomain::componentBitWidth();
   return static_cast<int64_t>(uint64_t{1} << (width - modulusBits));
 }
 
@@ -101,7 +101,7 @@ TEST(InterAffineEqualities, TransferSymbolicRelationsAcrossCall) {
   auto *Y = &*YIt;
   auto *A = &*Caller->arg_begin();
 
-  auto result = npa::InterAffineEqualities::run(*module);
+  auto result = elimination::InterAffineEqualities::run(*module);
   auto relations =
       relationsForBlock(result.blockRelations, &Sink->getEntryBlock());
   ASSERT_EQ(relations.size(), 1u);
@@ -160,7 +160,7 @@ TEST(InterAffineEqualities, PreservesCallerLocalEffectAcrossResolvedCall) {
   ASSERT_NE(NextIt, Caller->end());
   auto *Next = &*NextIt;
 
-  auto result = npa::InterAffineEqualities::run(*module);
+  auto result = elimination::InterAffineEqualities::run(*module);
   auto states = materializedAffineStatesForBlock(result.blockRelations, Next);
   ASSERT_EQ(states.size(), 1u);
 
@@ -199,7 +199,7 @@ TEST(InterAffineEqualities, ExposesEqualityBasisRows) {
   auto *Y = &*YIt;
   auto *A = &*Caller->arg_begin();
 
-  auto result = npa::InterAffineEqualities::run(*module);
+  auto result = elimination::InterAffineEqualities::run(*module);
   auto states = materializedAffineStatesForBlock(result.blockRelations,
                                                  &Sink->getEntryBlock());
   ASSERT_EQ(states.size(), 1u);
@@ -246,7 +246,7 @@ TEST(InterAffineEqualities, DefaultSwitchRemainsUnrefinedByDisequality) {
   ASSERT_NE(DefaultIt, Main->end());
   auto *Default = &*DefaultIt;
 
-  auto result = npa::InterAffineEqualities::run(*module);
+  auto result = elimination::InterAffineEqualities::run(*module);
   auto states =
       materializedAffineStatesForBlock(result.blockRelations, Default);
   ASSERT_EQ(states.size(), 1u);
@@ -288,7 +288,7 @@ TEST(InterAffineEqualities, CastAndSelectUseKnownConditionValue) {
   ASSERT_NE(NextIt, Main->end());
   auto *Next = &*NextIt;
 
-  auto result = npa::InterAffineEqualities::run(*module);
+  auto result = elimination::InterAffineEqualities::run(*module);
   auto states = materializedAffineStatesForBlock(result.blockRelations, Next);
   ASSERT_EQ(states.size(), 1u);
 
@@ -330,7 +330,7 @@ TEST(InterAffineEqualities, CompareOfSameValueProducesConstant) {
   ASSERT_NE(NextIt, Main->end());
   auto *Next = &*NextIt;
 
-  auto result = npa::InterAffineEqualities::run(*module);
+  auto result = elimination::InterAffineEqualities::run(*module);
   auto states = materializedAffineStatesForBlock(result.blockRelations, Next);
   ASSERT_EQ(states.size(), 1u);
 
@@ -378,7 +378,7 @@ TEST(InterAffineEqualities, CompareEquivalentAffineExpressionsProducesConstant) 
   ASSERT_NE(OtherIt, Main->end());
   auto *Other = &*OtherIt;
 
-  auto result = npa::InterAffineEqualities::run(*module);
+  auto result = elimination::InterAffineEqualities::run(*module);
   auto takenStates =
       materializedAffineStatesForBlock(result.blockRelations, Taken);
   ASSERT_EQ(takenStates.size(), 1u);
@@ -416,7 +416,7 @@ TEST(InterAffineEqualities, TrueEqualityBranchRefinesComparedValue) {
   ASSERT_NE(EqualIt, Main->end());
   auto *Equal = &*EqualIt;
 
-  auto result = npa::InterAffineEqualities::run(*module);
+  auto result = elimination::InterAffineEqualities::run(*module);
   auto states = materializedAffineStatesForBlock(result.blockRelations, Equal);
   ASSERT_EQ(states.size(), 1u);
 
@@ -447,7 +447,7 @@ TEST(InterAffineEqualities, AssumeLikeCallRefinesComparedValue) {
   ASSERT_NE(NextIt, Main->end());
   auto *Next = &*NextIt;
 
-  auto result = npa::InterAffineEqualities::run(*module);
+  auto result = elimination::InterAffineEqualities::run(*module);
   auto states = materializedAffineStatesForBlock(result.blockRelations, Next);
   ASSERT_EQ(states.size(), 1u);
 
@@ -476,10 +476,10 @@ TEST(InterAffineEqualities, AssumeLikeCallWithFalseConditionIsBottom) {
   ASSERT_NE(NextIt, Main->end());
   auto *Next = &*NextIt;
 
-  auto result = npa::InterAffineEqualities::run(*module);
+  auto result = elimination::InterAffineEqualities::run(*module);
   auto relations = relationsForBlock(result.blockRelations, Next);
   ASSERT_EQ(relations.size(), 1u);
-  EXPECT_TRUE(npa::AffineRelationDomain::isBottom(*relations.front()));
+  EXPECT_TRUE(elimination::AffineRelationDomain::isBottom(*relations.front()));
 }
 
 TEST(InterAffineEqualities, FalseInequalityBranchRefinesComparedVariablesEqual) {
@@ -512,7 +512,7 @@ TEST(InterAffineEqualities, FalseInequalityBranchRefinesComparedVariablesEqual) 
   ASSERT_NE(EqualIt, Main->end());
   auto *Equal = &*EqualIt;
 
-  auto result = npa::InterAffineEqualities::run(*module);
+  auto result = elimination::InterAffineEqualities::run(*module);
   auto states = materializedAffineStatesForBlock(result.blockRelations, Equal);
   ASSERT_EQ(states.size(), 1u);
 
@@ -558,7 +558,7 @@ TEST(InterAffineEqualities, PhiKeepsBranchConditionAtMerge) {
   auto *X = findInstructionByName(*Main, "x");
   ASSERT_NE(X, nullptr);
 
-  auto result = npa::InterAffineEqualities::run(*module);
+  auto result = elimination::InterAffineEqualities::run(*module);
   auto states = materializedAffineStatesForBlock(result.blockRelations, Merge);
   ASSERT_EQ(states.size(), 1u);
 
@@ -601,7 +601,7 @@ TEST(InterAffineEqualities, SwitchOnAffineConstantRoutesToTakenCase) {
   ASSERT_NE(DefaultIt, Main->end());
   auto *Default = &*DefaultIt;
 
-  auto result = npa::InterAffineEqualities::run(*module);
+  auto result = elimination::InterAffineEqualities::run(*module);
   auto caseRelations = relationsForBlock(result.blockRelations, Case8);
   ASSERT_EQ(caseRelations.size(), 1u);
   EXPECT_FALSE(caseRelations.front()->bottom);
@@ -633,7 +633,7 @@ TEST(InterAffineEqualities, TracksModularWrapForConstants) {
   ASSERT_NE(NextIt, Main->end());
   auto *Next = &*NextIt;
 
-  auto result = npa::InterAffineEqualities::run(*module);
+  auto result = elimination::InterAffineEqualities::run(*module);
   auto states = materializedAffineStatesForBlock(result.blockRelations, Next);
   ASSERT_EQ(states.size(), 1u);
 
@@ -667,7 +667,7 @@ TEST(InterAffineEqualities, ZextOfBooleanArgumentStaysSymbolic) {
   ASSERT_NE(NextIt, Main->end());
   auto *Next = &*NextIt;
 
-  auto result = npa::InterAffineEqualities::run(*module);
+  auto result = elimination::InterAffineEqualities::run(*module);
   auto states = materializedAffineStatesForBlock(result.blockRelations, Next);
   ASSERT_EQ(states.size(), 1u);
 
@@ -704,7 +704,7 @@ TEST(InterAffineEqualities, SextOfBooleanArgumentUsesSignSemantics) {
   ASSERT_NE(NextIt, Main->end());
   auto *Next = &*NextIt;
 
-  auto result = npa::InterAffineEqualities::run(*module);
+  auto result = elimination::InterAffineEqualities::run(*module);
   auto states = materializedAffineStatesForBlock(result.blockRelations, Next);
   ASSERT_EQ(states.size(), 1u);
 
@@ -741,7 +741,7 @@ TEST(InterAffineEqualities, TruncKeepsLowBitCongruence) {
   ASSERT_NE(NextIt, Main->end());
   auto *Next = &*NextIt;
 
-  auto result = npa::InterAffineEqualities::run(*module);
+  auto result = elimination::InterAffineEqualities::run(*module);
   auto states = materializedAffineStatesForBlock(result.blockRelations, Next);
   ASSERT_EQ(states.size(), 1u);
 
@@ -773,7 +773,7 @@ TEST(InterAffineEqualities, ZextKeepsSourceLowBitCongruence) {
   ASSERT_NE(NextIt, Main->end());
   auto *Next = &*NextIt;
 
-  auto result = npa::InterAffineEqualities::run(*module);
+  auto result = elimination::InterAffineEqualities::run(*module);
   auto states = materializedAffineStatesForBlock(result.blockRelations, Next);
   ASSERT_EQ(states.size(), 1u);
 
@@ -809,7 +809,7 @@ TEST(InterAffineEqualities, SingletonUnsignedComparisonRefinesToConstant) {
   ASSERT_NE(ZeroIt, Main->end());
   auto *Zero = &*ZeroIt;
 
-  auto result = npa::InterAffineEqualities::run(*module);
+  auto result = elimination::InterAffineEqualities::run(*module);
   auto states = materializedAffineStatesForBlock(result.blockRelations, Zero);
   ASSERT_EQ(states.size(), 1u);
 
@@ -843,7 +843,7 @@ TEST(InterAffineEqualities, FalseUnsignedComparisonRefinesToZeroConstant) {
   ASSERT_NE(ZeroIt, Main->end());
   auto *Zero = &*ZeroIt;
 
-  auto result = npa::InterAffineEqualities::run(*module);
+  auto result = elimination::InterAffineEqualities::run(*module);
   auto states = materializedAffineStatesForBlock(result.blockRelations, Zero);
   ASSERT_EQ(states.size(), 1u);
 
@@ -875,7 +875,7 @@ TEST(InterAffineEqualities, ExtremeComparisonProducesConstantResult) {
   ASSERT_NE(NextIt, Main->end());
   auto *Next = &*NextIt;
 
-  auto result = npa::InterAffineEqualities::run(*module);
+  auto result = elimination::InterAffineEqualities::run(*module);
   auto states = materializedAffineStatesForBlock(result.blockRelations, Next);
   ASSERT_EQ(states.size(), 1u);
 
@@ -916,7 +916,7 @@ TEST(InterAffineEqualities, FreezePreservesAffineValue) {
   ASSERT_NE(NextIt, Main->end());
   auto *Next = &*NextIt;
 
-  auto result = npa::InterAffineEqualities::run(*module);
+  auto result = elimination::InterAffineEqualities::run(*module);
   auto states = materializedAffineStatesForBlock(result.blockRelations, Next);
   ASSERT_EQ(states.size(), 1u);
 
@@ -954,7 +954,7 @@ TEST(InterAffineEqualities, ShiftAndNegationStayAffine) {
   ASSERT_NE(NextIt, Main->end());
   auto *Next = &*NextIt;
 
-  auto result = npa::InterAffineEqualities::run(*module);
+  auto result = elimination::InterAffineEqualities::run(*module);
   auto states = materializedAffineStatesForBlock(result.blockRelations, Next);
   ASSERT_EQ(states.size(), 1u);
 
@@ -997,7 +997,7 @@ TEST(InterAffineEqualities, LogicalRightShiftKeepsExactAffineQuotientWhenDivisib
   ASSERT_NE(NextIt, Main->end());
   auto *Next = &*NextIt;
 
-  auto result = npa::InterAffineEqualities::run(*module);
+  auto result = elimination::InterAffineEqualities::run(*module);
   auto states = materializedAffineStatesForBlock(result.blockRelations, Next);
   ASSERT_EQ(states.size(), 1u);
 
@@ -1033,7 +1033,7 @@ TEST(InterAffineEqualities, UnsignedDivideByPowerOfTwoKeepsExactAffineQuotientWh
   ASSERT_NE(NextIt, Main->end());
   auto *Next = &*NextIt;
 
-  auto result = npa::InterAffineEqualities::run(*module);
+  auto result = elimination::InterAffineEqualities::run(*module);
   auto states = materializedAffineStatesForBlock(result.blockRelations, Next);
   ASSERT_EQ(states.size(), 1u);
 
@@ -1068,7 +1068,7 @@ TEST(InterAffineEqualities, BitwiseAndMaskKeepsLowBitCongruence) {
   ASSERT_NE(NextIt, Main->end());
   auto *Next = &*NextIt;
 
-  auto result = npa::InterAffineEqualities::run(*module);
+  auto result = elimination::InterAffineEqualities::run(*module);
   auto states = materializedAffineStatesForBlock(result.blockRelations, Next);
   ASSERT_EQ(states.size(), 1u);
 
@@ -1106,7 +1106,7 @@ TEST(InterAffineEqualities, BitwiseSelfOperationsStayPrecise) {
   ASSERT_NE(NextIt, Main->end());
   auto *Next = &*NextIt;
 
-  auto result = npa::InterAffineEqualities::run(*module);
+  auto result = elimination::InterAffineEqualities::run(*module);
   auto states = materializedAffineStatesForBlock(result.blockRelations, Next);
   ASSERT_EQ(states.size(), 1u);
 
@@ -1153,7 +1153,7 @@ TEST(InterAffineEqualities, BitwiseAndClearedMaskKeepsZeroCongruence) {
   ASSERT_NE(NextIt, Main->end());
   auto *Next = &*NextIt;
 
-  auto result = npa::InterAffineEqualities::run(*module);
+  auto result = elimination::InterAffineEqualities::run(*module);
   auto states = materializedAffineStatesForBlock(result.blockRelations, Next);
   ASSERT_EQ(states.size(), 1u);
 
@@ -1184,7 +1184,7 @@ TEST(InterAffineEqualities, PowerOfTwoRemainderKeepsLowBitCongruence) {
   ASSERT_NE(NextIt, Main->end());
   auto *Next = &*NextIt;
 
-  auto result = npa::InterAffineEqualities::run(*module);
+  auto result = elimination::InterAffineEqualities::run(*module);
   auto states = materializedAffineStatesForBlock(result.blockRelations, Next);
   ASSERT_EQ(states.size(), 1u);
 
@@ -1216,7 +1216,7 @@ TEST(InterAffineEqualities, CompositeUnsignedRemainderKeepsCommonLowBits) {
   ASSERT_NE(NextIt, Main->end());
   auto *Next = &*NextIt;
 
-  auto result = npa::InterAffineEqualities::run(*module);
+  auto result = elimination::InterAffineEqualities::run(*module);
   auto states = materializedAffineStatesForBlock(result.blockRelations, Next);
   ASSERT_EQ(states.size(), 1u);
 
@@ -1248,7 +1248,7 @@ TEST(InterAffineEqualities, CompositeSignedRemainderKeepsCommonLowBits) {
   ASSERT_NE(NextIt, Main->end());
   auto *Next = &*NextIt;
 
-  auto result = npa::InterAffineEqualities::run(*module);
+  auto result = elimination::InterAffineEqualities::run(*module);
   auto states = materializedAffineStatesForBlock(result.blockRelations, Next);
   ASSERT_EQ(states.size(), 1u);
 
@@ -1283,7 +1283,7 @@ TEST(InterAffineEqualities, BitwiseOrUsesPartialConstantMiddleZeros) {
   ASSERT_NE(NextIt, Main->end());
   auto *Next = &*NextIt;
 
-  auto result = npa::InterAffineEqualities::run(*module);
+  auto result = elimination::InterAffineEqualities::run(*module);
   auto states = materializedAffineStatesForBlock(result.blockRelations, Next);
   ASSERT_EQ(states.size(), 1u);
 
@@ -1319,7 +1319,7 @@ TEST(InterAffineEqualities, BitwiseAndUsesPartialConstantMiddleOnes) {
   ASSERT_NE(NextIt, Main->end());
   auto *Next = &*NextIt;
 
-  auto result = npa::InterAffineEqualities::run(*module);
+  auto result = elimination::InterAffineEqualities::run(*module);
   auto states = materializedAffineStatesForBlock(result.blockRelations, Next);
   ASSERT_EQ(states.size(), 1u);
 
@@ -1355,7 +1355,7 @@ TEST(InterAffineEqualities, BitwiseXorUsesPartialConstantMiddleOnesComplement) {
   ASSERT_NE(NextIt, Main->end());
   auto *Next = &*NextIt;
 
-  auto result = npa::InterAffineEqualities::run(*module);
+  auto result = elimination::InterAffineEqualities::run(*module);
   auto states = materializedAffineStatesForBlock(result.blockRelations, Next);
   ASSERT_EQ(states.size(), 1u);
 

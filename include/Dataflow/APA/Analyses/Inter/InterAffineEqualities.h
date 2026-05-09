@@ -1,8 +1,8 @@
-#ifndef NPA_INTERPROC_AFFINE_EQUALITIES_H
-#define NPA_INTERPROC_AFFINE_EQUALITIES_H
+#ifndef DATAFLOW_APA_ANALYSES_INTER_INTERAFFINEEQUALITIES_H_
+#define DATAFLOW_APA_ANALYSES_INTER_INTERAFFINEEQUALITIES_H_
 
-#include "Dataflow/NPA/Analyses/InterEngine.h"
-#include "Dataflow/NPA/Domains/AffineRelationDomain.h"
+#include "Dataflow/APA/Core/Options.h"
+#include "Dataflow/APA/Domains/AffineRelationDomain.h"
 
 #include <cstdint>
 #include <map>
@@ -10,11 +10,27 @@
 #include <vector>
 
 namespace llvm {
+class BasicBlock;
+class Function;
 class Value;
 class Module;
 } // namespace llvm
 
-namespace npa {
+namespace elimination {
+
+struct FunctionKey {
+  const llvm::Function *function = nullptr;
+
+  bool operator<(const FunctionKey &other) const {
+    return function < other.function;
+  }
+};
+
+struct BlockKey {
+  const llvm::BasicBlock *block = nullptr;
+
+  bool operator<(const BlockKey &other) const { return block < other.block; }
+};
 
 struct AffineExpr {
   bool top = true;
@@ -52,20 +68,17 @@ struct AffineState {
 class InterAffineEqualities {
 public:
   struct Result {
-    AnalysisStatus status;
+    SolveStatus status = SolveStatus::Ok;
     std::map<FunctionKey, AffineRelationDomain::value_type> summaries;
     std::map<BlockKey, AffineRelationDomain::value_type> blockRelations;
   };
 
-  static Result run(llvm::Module &M, bool verbose = false,
-                    LinearStrategy linearStrategy = LinearStrategy::SCC,
-                    IndirectCallResolutionMode callResolutionMode =
-                        IndirectCallResolutionMode::ClosedWorldTypeCompatible);
+  static Result run(llvm::Module &M, bool verbose = false);
 };
 
 AffineState
 materializeAffineExpressions(const AffineRelationDomain::value_type &relation);
 
-} // namespace npa
+} // namespace elimination
 
-#endif // NPA_INTERPROC_AFFINE_EQUALITIES_H
+#endif // DATAFLOW_APA_ANALYSES_INTER_INTERAFFINEEQUALITIES_H_

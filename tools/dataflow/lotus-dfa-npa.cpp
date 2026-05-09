@@ -13,7 +13,6 @@
 #include "llvm/Support/raw_ostream.h"
 
 #include "Dataflow/NPA/Analyses/BitVectorSolver.h"
-#include "Dataflow/NPA/Analyses/Inter/InterAffineEqualities.h"
 #include "Dataflow/NPA/Analyses/Inter/InterConstantPropagation.h"
 #include "Dataflow/NPA/Analyses/Inter/InterIntervalAnalysis.h"
 #include "Dataflow/NPA/Analyses/Inter/InterLiveVariables.h"
@@ -50,7 +49,7 @@ static cl::opt<std::string>
                 cl::desc("Analysis: liveness (default), reaching_defs, "
                          "reachable, inter_liveness, inter_reaching_defs, "
                          "inter_uninitialized, constant_prop, interval, "
-                         "affine_eqs, nullability"),
+                         "nullability"),
                 cl::init("liveness"));
 static cl::opt<std::string>
     SolverOpt("solver", cl::desc("Solver: newton (default), kleene"),
@@ -164,31 +163,6 @@ std::string formatInterval(const npa::Interval &Interval) {
                                                                      : "s") +
           "[" + Lower + "," + Upper + "]")
       .str();
-}
-
-std::string formatAffineExpr(const npa::AffineExpr &Expr,
-                             const ModuleValueIdMap &ValueToId) {
-  if (Expr.top)
-    return "top";
-
-  std::vector<std::string> Terms;
-  Terms.reserve(Expr.terms.size() + 1);
-  for (const auto &Term : Expr.terms) {
-    std::string Piece = std::to_string(Term.second) + "*" +
-                        lookupValueId(Term.first, ValueToId);
-    Terms.push_back(std::move(Piece));
-  }
-  std::sort(Terms.begin(), Terms.end());
-  if (Expr.constant != 0 || Terms.empty())
-    Terms.push_back(std::to_string(Expr.constant));
-
-  std::ostringstream OS;
-  for (size_t I = 0; I < Terms.size(); ++I) {
-    if (I)
-      OS << "+";
-    OS << Terms[I];
-  }
-  return OS.str();
 }
 
 std::vector<std::string>
@@ -484,32 +458,6 @@ void runInterproceduralInterval(raw_ostream &OS, Module &M,
   });
 }
 
-void runInterproceduralAffineEqualities(raw_ostream &OS, Module &M,
-                                        npa::LinearStrategy LinearStrategy) {
-  const ModuleView View = buildModuleView(M);
-  auto Result = npa::InterAffineEqualities::run(M, false, LinearStrategy);
-  OS << "  [profile] phase=artifact_construction seconds="
-     << Result.status.phase_artifact_construction_time << "\n";
-  OS << "  [profile] phase=summary_solve seconds="
-     << Result.status.summary_solve.time << "\n";
-  OS << "  [profile] phase=summary_materialization seconds="
-     << Result.status.phase_summary_materialization_time << "\n";
-  OS << "  [profile] phase=propagation seconds="
-     << Result.status.phase_propagation_time << "\n";
-  printModuleBlockStates(OS, M, [&](const BasicBlock *BB) {
-    auto It = Result.blockRelations.find(npa::BlockKey{BB});
-    if (It == Result.blockRelations.end())
-      return;
-    const npa::AffineState State =
-        npa::materializeAffineExpressions(It->second);
-    OS << (State.reachable ? "reachable:" : "unreachable:");
-    lotus::dataflow_tool::formatValueMap(
-        OS, State.values, View.ValueToId, [&](const npa::AffineExpr &Expr) {
-          return formatAffineExpr(Expr, View.ValueToId);
-        });
-  });
-}
-
 void runInterproceduralNullability(raw_ostream &OS, Module &M,
                                    npa::LinearStrategy LinearStrategy) {
   const ModuleView View = buildModuleView(M);
@@ -555,7 +503,6 @@ const AnalysisHandler Handlers[] = {
     {"inter_constant_prop", true, nullptr,
      &runInterproceduralConstantPropagation},
     {"inter_interval", true, nullptr, &runInterproceduralInterval},
-    {"inter_affine_eqs", true, nullptr, &runInterproceduralAffineEqualities},
     {"inter_nullability", true, nullptr, &runInterproceduralNullability},
 };
 
@@ -659,8 +606,7 @@ int main(int argc, char **argv) {
   }
 
   const npa::SolverStrategy Strategy = parseSolverStrategy(SolverOpt);
-  const npa::LinearStrategy LinearStrategy =
-      parseLinearStrategy(LinearSolverOpt);
+  const npa::LinearStrategy LinearStrategy = parseLinearStrategy(LinearSolverOpt);
   const unsigned WorkerCount = ThreadPool::get()->workerCount();
   const bool ParallelEnabled = WorkerCount > 1;
   OS << "[npa:" << AnalysisOpt;

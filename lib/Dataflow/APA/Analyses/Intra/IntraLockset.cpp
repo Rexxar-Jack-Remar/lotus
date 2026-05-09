@@ -1,4 +1,4 @@
-#include "Dataflow/APA/Analyses/LLVM/Intra/Lockset.h"
+#include "Dataflow/APA/Analyses/Intra/IntraLockset.h"
 
 #include "llvm/Analysis/ValueTracking.h"
 #include "llvm/IR/Instructions.h"

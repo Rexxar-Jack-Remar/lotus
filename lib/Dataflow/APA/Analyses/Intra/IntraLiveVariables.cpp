@@ -2,7 +2,7 @@
 #include "llvm/IR/IntrinsicInst.h"
 
 #include "Dataflow/APA/Adapters/LLVM/BackwardProblem.h"
-#include "Dataflow/APA/Analyses/LLVM/Intra/LiveVariables.h"
+#include "Dataflow/APA/Analyses/Intra/IntraLiveVariables.h"
 #include "Dataflow/APA/Core/Problem.h"
 #include "Dataflow/APA/Solver/Solver.h"
 #include "Dataflow/ControlFlow/IntraCFG.h"

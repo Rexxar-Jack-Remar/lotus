@@ -1,6 +1,5 @@
 # NPA sources
 set(NPA_SOURCES
-  Domains/AffineRelationDomain.cpp
   Domains/BitSetDomain.cpp
   Domains/PredicateRelationDomain.cpp
   Transfers/GenKillTransformer.cpp
@@ -8,7 +7,6 @@ set(NPA_SOURCES
 
   Analyses/BitVectorSolver.cpp
   Analyses/Intra/LiveVariables.cpp
-  Analyses/Inter/InterAffineEqualities.cpp
   Analyses/Inter/InterConstantPropagation.cpp
   Analyses/Inter/InterIntervalAnalysis.cpp
   Analyses/Inter/InterLiveVariables.cpp

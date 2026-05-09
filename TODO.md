@@ -98,12 +98,18 @@ Some related publications
   - Compare against Crab's sequential/interleaved fixpoint and measure speedup, extra rework, convergence iterations, and precision loss (if any).
 
 
-## 6. Data Flow Analysis
+## 6. Dataflow Analysis
 
-* Revise the monotone data flow analysis module
+**Facilities**
+
+The different engines have many clients that overlap.
+We need to extarct some common facilites, e.g., the abstract domains, instead of keeping the independent, ad-hoc implementations under different engines.
+
+**Monontone**
+* Revise the monotone dataflow analysis module
 
 
-***WPDS-based Datafow analysis (lib/Dataflow/WPDS)**
+**WPDS-based Datafow analysis (lib/Dataflow/WPDS)**
 
 - How to design alias-aware WPDS analyses?
 - We use third-party/WPDS for now, but there is an extended, C++ version in third-party/WALi-OpenNWA. Shoud we try to use the new one?

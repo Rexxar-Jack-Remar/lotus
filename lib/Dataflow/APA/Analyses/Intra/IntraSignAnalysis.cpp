@@ -1,4 +1,4 @@
-#include "Dataflow/APA/Analyses/LLVM/Intra/SignAnalysis.h"
+#include "Dataflow/APA/Analyses/Intra/IntraSignAnalysis.h"
 
 #include "llvm/Analysis/ValueTracking.h"
 #include "llvm/IR/Constants.h"

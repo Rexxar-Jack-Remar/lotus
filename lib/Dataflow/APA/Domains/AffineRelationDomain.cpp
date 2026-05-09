@@ -1,11 +1,11 @@
-#include "Dataflow/NPA/Domains/AffineRelationDomain.h"
+#include "Dataflow/APA/Domains/AffineRelationDomain.h"
 
 #include <algorithm>
 #include <unordered_set>
 
 #include <llvm/IR/Value.h>
 
-namespace npa {
+namespace elimination {
 
 AffineRelationVocabulary AffineRelationDomain::Vocabulary{};
 bool AffineRelationDomain::HasVocabulary = false;
@@ -1366,4 +1366,4 @@ MOSRelation AffineRelationDomain::joinMOS(const MOSRelation &lhs,
   return out;
 }
 
-} // namespace npa
+} // namespace elimination

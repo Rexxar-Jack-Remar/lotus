@@ -1,4 +1,4 @@
-#include "Dataflow/APA/Analyses/LLVM/Inter/UninitializedVariables.h"
+#include "Dataflow/APA/Analyses/Inter/InterUninitializedVariables.h"
 
 #include "Dataflow/APA/Adapters/LLVM/InterFlowHelpers.h"
 #include "Dataflow/APA/Adapters/LLVM/InterProblem.h"

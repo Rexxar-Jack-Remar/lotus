@@ -1,4 +1,4 @@
-#include "Dataflow/APA/Analyses/LLVM/Intra/AvailableExpressions.h"
+#include "Dataflow/APA/Analyses/Intra/IntraAvailableExpressions.h"
 
 #include "llvm/Analysis/MemoryLocation.h"
 #include "llvm/Analysis/MemorySSA.h"

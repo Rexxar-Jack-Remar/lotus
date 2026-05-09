@@ -9,7 +9,7 @@
 #include "llvm/IR/Instruction.h"
 
 #include "Dataflow/APA/APA.h"
-#include "Dataflow/APA/Analyses/LLVM/ExpressionKey.h"
+#include "Dataflow/APA/Analyses/ExpressionKey.h"
 
 #include <set>
 

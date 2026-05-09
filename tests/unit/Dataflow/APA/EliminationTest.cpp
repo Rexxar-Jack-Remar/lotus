@@ -4,14 +4,14 @@
  */
 
 #include "Dataflow/APA/APA.h"
-#include "Dataflow/APA/Analyses/LLVM/Inter/ConstantPropagation.h"
-#include "Dataflow/APA/Analyses/LLVM/Inter/LiveVariables.h"
-#include "Dataflow/APA/Analyses/LLVM/Inter/Reachability.h"
-#include "Dataflow/APA/Analyses/LLVM/Inter/ReachingDefinitions.h"
-#include "Dataflow/APA/Analyses/LLVM/Inter/UninitializedVariables.h"
-#include "Dataflow/APA/Analyses/LLVM/Intra/ConstantPropagation.h"
-#include "Dataflow/APA/Analyses/LLVM/Intra/LiveVariables.h"
-#include "Dataflow/APA/Analyses/LLVM/Intra/Reachability.h"
+#include "Dataflow/APA/Analyses/Inter/InterConstantPropagation.h"
+#include "Dataflow/APA/Analyses/Inter/InterLiveVariables.h"
+#include "Dataflow/APA/Analyses/Inter/InterReachability.h"
+#include "Dataflow/APA/Analyses/Inter/InterReachingDefinitions.h"
+#include "Dataflow/APA/Analyses/Inter/InterUninitializedVariables.h"
+#include "Dataflow/APA/Analyses/Intra/IntraConstantPropagation.h"
+#include "Dataflow/APA/Analyses/Intra/IntraLiveVariables.h"
+#include "Dataflow/APA/Analyses/Intra/IntraReachability.h"
 #include "TestUtils/LLVMHelpers.h"
 
 #include <set>

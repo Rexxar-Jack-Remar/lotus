@@ -96,7 +96,7 @@ Currently exposed NPA analyses:
 
 - Intraprocedural: `liveness`, `reaching_defs`, `reachable`
 - Interprocedural: `inter_liveness`, `inter_reaching_defs`,
-  `inter_uninitialized`, `constant_prop`, `interval`, `affine_eqs`,
+  `inter_uninitialized`, `constant_prop`, `interval`,
   `nullability`
 
 `--solver={newton,kleene}` applies to the intraprocedural analyses. The

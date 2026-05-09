@@ -1,4 +1,4 @@
-#include "Dataflow/APA/Analyses/LLVM/Intra/UninitializedVariables.h"
+#include "Dataflow/APA/Analyses/Intra/IntraUninitializedVariables.h"
 
 #include "llvm/Analysis/AssumptionCache.h"
 #include "llvm/Analysis/MemoryLocation.h"

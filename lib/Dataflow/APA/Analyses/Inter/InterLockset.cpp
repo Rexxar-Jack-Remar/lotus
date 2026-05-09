@@ -1,4 +1,4 @@
-#include "Dataflow/APA/Analyses/LLVM/Inter/Lockset.h"
+#include "Dataflow/APA/Analyses/Inter/InterLockset.h"
 
 #include "Dataflow/APA/Adapters/LLVM/InterFlowHelpers.h"
 #include "Dataflow/APA/Adapters/LLVM/InterProblem.h"

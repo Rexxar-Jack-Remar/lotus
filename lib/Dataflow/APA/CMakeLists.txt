@@ -5,6 +5,7 @@
 
 set(APA_SOURCES
   Elimination.cpp
+  Domains/AffineRelationDomain.cpp
   Passes/EliminationPasses.cpp
   Analyses/Intra/IntraReachable.cpp
   Analyses/Intra/IntraConstantPropagation.cpp
@@ -22,6 +23,7 @@ set(APA_SOURCES
   Analyses/Inter/InterLockset.cpp
   Analyses/Inter/InterReachingDefinitions.cpp
   Analyses/Inter/InterUninitVariables.cpp
+  Analyses/Inter/InterAffineEqualities.cpp
 )
 
 add_library(APADataFlow STATIC ${APA_SOURCES})

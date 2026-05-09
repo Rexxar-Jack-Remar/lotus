@@ -1,4 +1,4 @@
-#include "Dataflow/APA/Analyses/LLVM/Intra/ConstantPropagation.h"
+#include "Dataflow/APA/Analyses/Intra/IntraConstantPropagation.h"
 
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/Analysis/AssumptionCache.h"

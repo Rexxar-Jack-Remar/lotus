@@ -146,22 +146,29 @@ private:
     }
 
     transfer_t edgeTransfer(n_t Src, n_t Dst) const override {
-      return Problem.direction() == ::dataflow::controlflow::FlowDirection::Backward
-                 ? Dst
-                 : Src;
+      return Problem.edgeTransfer(Src, Dst);
     }
 
     fact_t applyTransfer(const transfer_t &T, const fact_t &In) const override {
-      fact_t Out = Problem.normalFlow(T, In);
-      if (!ICF.isCallSite(T)) {
+      fact_t Out = Problem.applyTransfer(T, In);
+      auto Anchor = Problem.transferNode(T);
+      if (!ICF.isCallSite(Anchor)) {
         return Out;
+      }
+
+      auto RetSite = Problem.transferSuccessor(T);
+      if (Problem.direction() ==
+              ::dataflow::controlflow::FlowDirection::Forward &&
+          RetSite != n_t{}) {
+        Out = Problem.callToRetFlow(Anchor, RetSite, ICF.getCalleesOfCallAt(Anchor),
+                                    Out);
       }
 
       if (Problem.direction() ==
           ::dataflow::controlflow::FlowDirection::Forward) {
         Context CalleeCtx = Ctx;
-        CalleeCtx.push_back(T);
-        for (auto Callee : ICF.getCalleesOfCallAt(T)) {
+        CalleeCtx.push_back(Anchor);
+        for (auto Callee : ICF.getCalleesOfCallAt(Anchor)) {
           auto Starts = ICF.getStartPointsOf(Callee);
           auto Exits = ICF.getExitPointsOf(Callee);
           if (Starts.empty() || Exits.empty()) {
@@ -175,12 +182,16 @@ private:
             if (ExitFacts == nullptr) {
               continue;
             }
-            for (auto RetSite : ICF.getReturnSitesOfCallAt(T)) {
-              if (RetSite == n_t{}) {
+            for (auto CandidateRetSite : ICF.getReturnSitesOfCallAt(Anchor)) {
+              if (CandidateRetSite == n_t{}) {
+                continue;
+              }
+              if (RetSite != n_t{} && CandidateRetSite != RetSite) {
                 continue;
               }
               Out = Problem.merge(
-                  Out, Problem.returnFlow(T, Callee, Exit, RetSite, *ExitFacts));
+                  Out, Problem.returnFlowWithCallerFact(
+                           Anchor, Callee, Exit, CandidateRetSite, *ExitFacts, In));
             }
           }
         }
@@ -241,7 +252,7 @@ private:
         Changed = true;
       }
 
-      auto Out = Problem.normalFlow(Inst, *In);
+      auto Out = Problem.applyTransfer(Problem.edgeTransfer(Inst, n_t{}), *In);
       auto &OutSlot = Result.OUT(Inst, Key.Ctx);
       if (!Problem.equal_to(OutSlot, Out)) {
         OutSlot = std::move(Out);

@@ -1,9 +1,9 @@
-#ifndef NPA_AFFINE_RELATION_DOMAIN_H
-#define NPA_AFFINE_RELATION_DOMAIN_H
+#ifndef DATAFLOW_APA_DOMAINS_AFFINERELATIONDOMAIN_H_
+#define DATAFLOW_APA_DOMAINS_AFFINERELATIONDOMAIN_H_
 
-#include "Dataflow/NPA/Core/Base/Runtime.h"
-
+#include <cstdint>
 #include <map>
+#include <unordered_map>
 #include <vector>
 
 #include <llvm/ADT/APInt.h>
@@ -12,7 +12,7 @@ namespace llvm {
 class Value;
 } // namespace llvm
 
-namespace npa {
+namespace elimination {
 
 using AffineRow = std::vector<llvm::APInt>;
 using AffineMatrix = std::vector<AffineRow>;
@@ -151,6 +151,6 @@ private:
   static bool HasVocabulary;
 };
 
-} // namespace npa
+} // namespace elimination
 
-#endif // NPA_AFFINE_RELATION_DOMAIN_H
+#endif // DATAFLOW_APA_DOMAINS_AFFINERELATIONDOMAIN_H_

@@ -1,4 +1,4 @@
-#include "Dataflow/APA/Analyses/LLVM/Inter/ConstantPropagation.h"
+#include "Dataflow/APA/Analyses/Inter/InterConstantPropagation.h"
 
 #include "Dataflow/APA/Adapters/LLVM/InterFlowHelpers.h"
 #include "Dataflow/APA/Adapters/LLVM/InterProblem.h"

@@ -2,9 +2,11 @@
  *
  * Author: rainoftime
  */
-#include "Dataflow/NPA/Analyses/Inter/InterAffineEqualities.h"
+#include "Dataflow/APA/Analyses/Inter/InterAffineEqualities.h"
 
-#include "Dataflow/NPA/Analyses/InterEngine.h"
+#include "Dataflow/APA/Adapters/LLVM/InterFlowHelpers.h"
+#include "Dataflow/APA/Adapters/LLVM/InterProblem.h"
+#include "Dataflow/APA/Solver/InterSolver.h"
 
 #include <algorithm>
 #include <optional>
@@ -16,15 +18,12 @@
 #include <llvm/IR/Constants.h>
 #include <llvm/IR/Instructions.h>
 
-namespace npa {
+namespace elimination {
 
 namespace {
 
 using D = AffineRelationDomain;
-using Exp = Exp0<D>;
-using E = E0<D>;
 using Relation = D::value_type;
-using Component = AffineRelationComponent;
 using Row = std::vector<llvm::APInt>;
 
 struct PartialConstant {
@@ -937,8 +936,9 @@ AffineState materializeAffineExpressionsImpl(const Relation &state) {
           if (postCol == col || row[postCol].isZero())
             continue;
           if (solved[postCol].top) {
-            ok = false;
-            break;
+            expr.terms[vocab->values[postCol]] +=
+                (-(row[postCol] * inv)).getSExtValue();
+            continue;
           }
           expr = addExpr(std::move(expr),
                          scaleExpr(solved[postCol],
@@ -1004,165 +1004,188 @@ AffineState materializeAffineExpressionsImpl(const Relation &state) {
     if (!equality.terms.empty() || equality.constant != 0)
       out.equalities.push_back(std::move(equality));
   }
+
+  for (const auto &equality : out.equalities) {
+    for (const auto &term : equality.terms) {
+      if (out.values.find(term.first) != out.values.end())
+        continue;
+
+      auto WidthIt = vocab->actualBitWidths.find(term.first);
+      if (WidthIt == vocab->actualBitWidths.end())
+        continue;
+      const unsigned width = WidthIt->second;
+      llvm::APInt coeff(width, static_cast<uint64_t>(term.second), true);
+      if (!coeff[0])
+        continue;
+
+      llvm::APInt inv = oddInverse(coeff);
+      AffineExpr expr = constExpr(
+          (llvm::APInt(width, static_cast<uint64_t>(equality.constant), true) * inv)
+              .getSExtValue());
+      for (const auto &other : equality.terms) {
+        if (other.first == term.first)
+          continue;
+        llvm::APInt otherCoeff(width, static_cast<uint64_t>(other.second), true);
+        expr.terms[other.first] += (-(otherCoeff * inv)).getSExtValue();
+      }
+      out.values[term.first] = normalizeExpr(std::move(expr), width);
+      break;
+    }
+  }
   return out;
 }
 
-class AffineRelationAnalysis {
-public:
-  using FactType = Relation;
-  using Engine = InterEngine<D, AffineRelationAnalysis>;
+struct AffineInterDomain {
+  using n_t = llvm::Instruction *;
+  using fact_t = Relation;
+  struct transfer_t {
+    llvm::Instruction *inst = nullptr;
+    llvm::Instruction *succ = nullptr;
+  };
+  using f_t = llvm::Function *;
+  using i_t = dataflow::controlflow::InterCFG;
+};
 
-  explicit AffineRelationAnalysis(llvm::Module &M) {
+constexpr unsigned kDefaultInterAffineEqualitiesCallStringLength = 2;
+
+class InterAffineEqualitiesProblem
+    : public LLVMInterEliminationProblem<AffineInterDomain> {
+public:
+  using transfer_t = typename AffineInterDomain::transfer_t;
+
+  explicit InterAffineEqualitiesProblem(
+      llvm::Module &M, const dataflow::controlflow::InterCFG *ICF = nullptr)
+      : LLVMInterEliminationProblem<AffineInterDomain>(findEntryPoints(M), ICF) {
     buildVocabulary(M);
     D::configure(&Vocabulary);
   }
 
-  FactType getEntryValue() const { return D::identity(); }
-
-  Relation getEdgeTransfer(const llvm::Instruction &term,
-                           const llvm::BasicBlock &succ) const {
-    if (auto *Branch = llvm::dyn_cast<llvm::BranchInst>(&term)) {
-      if (!Branch->isConditional())
-        return D::identity();
-      bool expectTrue = Branch->getSuccessor(0) == &succ;
-      if (auto constant = evaluateConditionConstant(Branch->getCondition()))
-        return *constant == expectTrue ? D::identity() : D::zero();
-      return conditionRefinement(Branch->getCondition(), expectTrue);
-    }
-    if (auto *Switch = llvm::dyn_cast<llvm::SwitchInst>(&term)) {
-      if (auto constant = evaluateSwitchConstant(Switch->getCondition())) {
-        for (const auto &Case : Switch->cases()) {
-          if (Case.getCaseValue()->getSExtValue() == *constant) {
-            return Case.getCaseSuccessor() == &succ ? D::identity() : D::zero();
-          }
-        }
-        return Switch->getDefaultDest() == &succ ? D::identity() : D::zero();
-      }
-      if (!D::isTrackedValue(Switch->getCondition()))
-        return D::identity();
-      for (const auto &Case : Switch->cases()) {
-        if (Case.getCaseSuccessor() == &succ) {
-          return switchCaseRefinement(
-              Switch->getCondition(),
-              static_cast<int64_t>(Case.getCaseValue()->getSExtValue()));
-        }
-      }
-      return D::identity();
-    }
-    return D::identity();
+  transfer_t edgeTransfer(n_t Src, n_t Dst) const override {
+    return transfer_t{Src, Dst};
   }
 
-  E buildBlockEntryExpr(llvm::BasicBlock &BB, E inExpr) {
-    auto *FirstPhi = llvm::dyn_cast<llvm::PHINode>(BB.begin());
-    if (!FirstPhi)
-      return inExpr;
+  fact_t applyTransfer(const transfer_t &T, const fact_t &In) const override {
+    if (T.inst == nullptr)
+      return In;
 
-    E result = nullptr;
-    for (auto *Pred : predecessors(&BB)) {
-      Relation phiTransfer = D::identity();
-      for (auto &Inst : BB) {
-        auto *Phi = llvm::dyn_cast<llvm::PHINode>(&Inst);
-        if (!Phi)
-          break;
-        if (!isTrackedScalar(Phi))
-          continue;
-        Relation assign =
-            relationForValue(Phi, Phi->getIncomingValueForBlock(Pred));
-        phiTransfer = D::extend(assign, phiTransfer);
-      }
-      E branch = Exp::hole(Engine::getBlockSymbol(Pred));
-      if (auto *PredTerm = Pred->getTerminator()) {
-        branch = Exp::seq(getEdgeTransfer(*PredTerm, BB), branch);
-      }
-      branch = Exp::seq(phiTransfer, branch);
-      result = result ? Exp::ndet(result, branch) : branch;
-    }
-    return result ? result : inExpr;
-  }
+    Relation out = In;
+    if (!llvm::isa<llvm::PHINode>(T.inst))
+      out = D::extend(instructionTransfer(*T.inst), out);
 
-  E getTransfer(llvm::Instruction &I, E currentPath) {
-    if (llvm::isa<llvm::PHINode>(&I))
-      return currentPath;
-    if (auto *Call = llvm::dyn_cast<llvm::CallBase>(&I)) {
-      if (isAssumeLikeCall(*Call) && Call->arg_size() >= 1)
-        return Exp::seq(conditionRefinement(Call->getArgOperand(0), true),
-                        currentPath);
-      return currentPath;
-    }
-    if (I.getType()->isVoidTy())
-      return currentPath;
-    if (!isTrackedScalar(&I))
-      return currentPath;
-    return Exp::seq(buildInstructionRelation(I), currentPath);
-  }
-
-  Relation getCallEntryTransfer(const llvm::CallBase &Call,
-                                const llvm::Function &Callee) {
-    Relation relation = D::identity();
-    const auto *ParamIt = Callee.arg_begin();
-    for (unsigned i = 0; i < Call.arg_size() && ParamIt != Callee.arg_end();
-         ++i, ++ParamIt) {
-      if (!isTrackedScalar(&*ParamIt))
-        continue;
-      relation = D::extend(relationForValue(&*ParamIt, Call.getArgOperand(i)),
-                           relation);
-    }
-    return relation;
-  }
-
-  Relation getCallReturnTransfer(const llvm::CallBase &Call,
-                                 const llvm::Function &Callee) {
-    if (Call.getType()->isVoidTy() || !isTrackedScalar(&Call))
-      return D::identity();
-
-    std::vector<Relation> branches;
-    for (const auto &BB : Callee) {
-      auto *Ret = llvm::dyn_cast<llvm::ReturnInst>(BB.getTerminator());
-      if (!Ret || !Ret->getReturnValue())
-        continue;
-      branches.push_back(relationForValue(&Call, Ret->getReturnValue()));
-    }
-    if (branches.empty())
-      return D::makeForget(&Call);
-
-    Relation out = branches.front();
-    for (size_t i = 1; i < branches.size(); ++i)
-      out = D::combine(out, branches[i]);
+    if (auto *Succ = T.succ)
+      out = D::extend(edgeTransferRelation(*T.inst, *Succ), out);
+    if (auto *Succ = T.succ)
+      out = D::extend(phiTransferForEdge(*T.inst, *Succ), out);
     return out;
   }
 
-  Relation getCallToReturnTransfer(const llvm::CallBase &Call) {
-    return (Call.getType()->isVoidTy() || !isTrackedScalar(&Call))
-               ? D::identity()
-               : D::makeForget(&Call);
+  n_t transferNode(const transfer_t &T) const override { return T.inst; }
+  n_t transferSuccessor(const transfer_t &T) const override { return T.succ; }
+
+  fact_t normalFlow(n_t Inst, const fact_t &In) override {
+    return applyTransfer(edgeTransfer(Inst, n_t{}), In);
   }
 
-  FactType applySummary(const Relation &summary, const FactType &fact) {
-    return D::extend(summary, fact);
+  fact_t merge(const fact_t &Lhs, const fact_t &Rhs) const override {
+    return D::combine(Lhs, Rhs);
   }
 
-  FactType joinFacts(const FactType &lhs, const FactType &rhs) const {
-    return D::combine(lhs, rhs);
+  bool equal_to(const fact_t &Lhs, const fact_t &Rhs) const override {
+    return D::equal(Lhs, Rhs);
   }
 
-  bool factsEqual(const FactType &lhs, const FactType &rhs) const {
-    return D::equal(lhs, rhs);
+  fact_t allTop() const override { return D::zero(); }
+
+  fact_t callFlow(n_t CallSite, f_t Callee, const fact_t &In) override {
+    auto *Call = llvm::dyn_cast_or_null<llvm::CallBase>(CallSite);
+    if (Call == nullptr || Callee == nullptr)
+      return D::zero();
+    return D::project(D::extend(callEntryTransfer(*Call, *Callee), In));
   }
 
-  InterAffineEqualities::Result
-  buildResult(const typename Engine::Result &engineResult) const {
-    InterAffineEqualities::Result result;
-    result.status = engineResult.status;
-    result.summaries.insert(engineResult.summaries.begin(),
-                            engineResult.summaries.end());
-    for (const auto &entry : engineResult.blockEntryFacts) {
-      result.blockRelations.emplace(entry.first, entry.second);
+  fact_t returnFlow(n_t CallSite, f_t Callee, n_t ExitStmt, n_t RetSite,
+                    const fact_t &In) override {
+    return returnFlowWithCallerFact(CallSite, Callee, ExitStmt, RetSite, In,
+                                    D::identity());
+  }
+
+  fact_t returnFlowWithCallerFact(n_t CallSite, f_t Callee, n_t ExitStmt,
+                                  n_t RetSite, const fact_t &CalleeExit,
+                                  const fact_t &CallerFact) override {
+    (void)RetSite;
+    auto *Call = llvm::dyn_cast_or_null<llvm::CallBase>(CallSite);
+    if (Call == nullptr || Callee == nullptr || ExitStmt == nullptr)
+      return CallerFact;
+
+    Relation returned =
+        D::extend(callReturnTransfer(*Call, *Callee, ExitStmt), CalleeExit);
+    auto LocalIt = FunctionLocals.find(Call->getFunction());
+    const std::vector<const llvm::Value *> &locals =
+        LocalIt != FunctionLocals.end() ? LocalIt->second : EmptyLocals;
+    return D::mergePreservingLocals(CallerFact, returned, locals);
+  }
+
+  fact_t callToRetFlow(n_t CallSite, n_t RetSite, const std::vector<f_t> &Callees,
+                       const fact_t &In) override {
+    (void)RetSite;
+    if (CallSite == nullptr)
+      return In;
+    auto *Call = llvm::dyn_cast<llvm::CallBase>(CallSite);
+    if (Call == nullptr || Call->getType()->isVoidTy() || !isTrackedScalar(Call))
+      return In;
+    if (Callees.empty())
+      return D::extend(D::makeForget(Call), In);
+    return D::extend(D::makeForget(Call), In);
+  }
+
+  std::unordered_map<n_t, fact_t> initialSeeds() override {
+    std::unordered_map<n_t, fact_t> Seeds;
+    for (auto *Entry : getEntryPoints()) {
+      if (Entry == nullptr || Entry->empty())
+        continue;
+      Seeds[&*Entry->getEntryBlock().begin()] = D::identity();
     }
-    return result;
+    return Seeds;
   }
 
 private:
   AffineRelationVocabulary Vocabulary;
+  std::unordered_map<const llvm::Function *, std::vector<const llvm::Value *>>
+      FunctionLocals;
+  std::vector<const llvm::Value *> EmptyLocals;
+
+  static std::vector<llvm::Function *> findEntryPoints(llvm::Module &M) {
+    std::vector<llvm::Function *> Entries;
+    if (auto *Main = M.getFunction("main"); Main != nullptr && !Main->empty())
+      Entries.push_back(Main);
+    if (Entries.empty()) {
+      std::unordered_set<const llvm::Function *> Called;
+      for (auto &F : M) {
+        if (F.isDeclaration())
+          continue;
+        for (auto &BB : F) {
+          for (auto &I : BB) {
+            auto *Call = llvm::dyn_cast<llvm::CallBase>(&I);
+            auto *Callee = Call != nullptr ? Call->getCalledFunction() : nullptr;
+            if (Callee != nullptr && !Callee->isDeclaration())
+              Called.insert(Callee);
+          }
+        }
+      }
+      for (auto &F : M) {
+        if (!F.isDeclaration() && !Called.count(&F)) {
+          Entries.push_back(&F);
+        }
+      }
+    }
+    if (Entries.empty()) {
+      for (auto &F : M) {
+        if (!F.isDeclaration())
+          Entries.push_back(&F);
+      }
+    }
+    return Entries;
+  }
 
   void buildVocabulary(llvm::Module &M) {
     std::unordered_set<const llvm::Value *> seen;
@@ -1182,6 +1205,7 @@ private:
           if (isTrackedScalar(&I)) {
             record(&I);
             Vocabulary.localValues.push_back(&I);
+            FunctionLocals[&F].push_back(&I);
           }
         }
       }
@@ -1193,14 +1217,20 @@ private:
     }
   }
 
-  Relation relationForValue(const llvm::Value *dest,
-                            const llvm::Value *src) const {
+  Relation relationForValue(const llvm::Value *dest, const llvm::Value *src) const {
     if (auto expr = affineExprForValue(src))
       return assignmentForExpr(dest, *expr);
     return D::makeForget(dest);
   }
 
-  Relation buildInstructionRelation(llvm::Instruction &I) const {
+  Relation instructionTransfer(llvm::Instruction &I) const {
+    if (auto *Call = llvm::dyn_cast<llvm::CallBase>(&I)) {
+      if (isAssumeLikeCall(*Call) && Call->arg_size() >= 1)
+        return conditionRefinement(Call->getArgOperand(0), true);
+      return D::identity();
+    }
+    if (I.getType()->isVoidTy() || !isTrackedScalar(&I))
+      return D::identity();
     if (auto *Cast = llvm::dyn_cast<llvm::CastInst>(&I))
       return buildCastRelation(*Cast);
     if (auto *Cmp = llvm::dyn_cast<llvm::ICmpInst>(&I))
@@ -1212,6 +1242,133 @@ private:
     if (auto *BinOp = llvm::dyn_cast<llvm::BinaryOperator>(&I))
       return buildBinaryRelation(*BinOp);
     return D::makeForget(&I);
+  }
+
+  Relation edgeTransferRelation(const llvm::Instruction &Term,
+                                const llvm::Instruction &SuccInst) const {
+    const auto *SuccBlock = SuccInst.getParent();
+    if (SuccBlock == nullptr)
+      return D::identity();
+    if (auto *Branch = llvm::dyn_cast<llvm::BranchInst>(&Term)) {
+      if (!Branch->isConditional())
+        return D::identity();
+      bool expectTrue = Branch->getSuccessor(0) == SuccBlock;
+      if (auto constant = evaluateConditionConstant(Branch->getCondition()))
+        return *constant == expectTrue ? D::identity() : D::zero();
+      return conditionRefinement(Branch->getCondition(), expectTrue);
+    }
+    if (auto *Switch = llvm::dyn_cast<llvm::SwitchInst>(&Term)) {
+      if (auto constant = evaluateSwitchConstant(Switch->getCondition())) {
+        for (const auto &Case : Switch->cases()) {
+          if (Case.getCaseValue()->getSExtValue() == *constant)
+            return Case.getCaseSuccessor() == SuccBlock ? D::identity() : D::zero();
+        }
+        return Switch->getDefaultDest() == SuccBlock ? D::identity() : D::zero();
+      }
+      if (!D::isTrackedValue(Switch->getCondition()))
+        return D::identity();
+      for (const auto &Case : Switch->cases()) {
+        if (Case.getCaseSuccessor() == SuccBlock) {
+          return switchCaseRefinement(
+              Switch->getCondition(),
+              static_cast<int64_t>(Case.getCaseValue()->getSExtValue()));
+        }
+      }
+    }
+    return D::identity();
+  }
+
+  Relation phiTransferForEdge(const llvm::Instruction &PredInst,
+                              const llvm::Instruction &SuccInst) const {
+    auto *PredBlock = PredInst.getParent();
+    auto *SuccBlock = SuccInst.getParent();
+    if (PredBlock == nullptr || SuccBlock == nullptr || PredBlock == SuccBlock)
+      return D::identity();
+    if (&SuccBlock->front() != &SuccInst)
+      return D::identity();
+
+    Relation relation = D::identity();
+    for (auto &Inst : *SuccBlock) {
+      auto *Phi = llvm::dyn_cast<llvm::PHINode>(&Inst);
+      if (!Phi)
+        break;
+      if (!isTrackedScalar(Phi))
+        continue;
+      if (auto modeled = booleanPhiRelation(*Phi)) {
+        relation = D::extend(*modeled, relation);
+        continue;
+      }
+      relation = D::extend(
+          relationForValue(Phi, Phi->getIncomingValueForBlock(PredBlock)), relation);
+    }
+    return relation;
+  }
+
+  std::optional<Relation> booleanPhiRelation(const llvm::PHINode &Phi) const {
+    if (Phi.getNumIncomingValues() != 2 || !isTrackedScalar(&Phi))
+      return std::nullopt;
+
+    auto *Pred0 = Phi.getIncomingBlock(0);
+    auto *Pred1 = Phi.getIncomingBlock(1);
+    auto *Const0 = llvm::dyn_cast<llvm::ConstantInt>(Phi.getIncomingValue(0));
+    auto *Const1 = llvm::dyn_cast<llvm::ConstantInt>(Phi.getIncomingValue(1));
+    if (Pred0 == nullptr || Pred1 == nullptr || Const0 == nullptr || Const1 == nullptr)
+      return std::nullopt;
+
+    auto *CommonPred0 = Pred0->getSinglePredecessor();
+    auto *CommonPred1 = Pred1->getSinglePredecessor();
+    if (CommonPred0 == nullptr || CommonPred0 != CommonPred1)
+      return std::nullopt;
+
+    auto *Branch =
+        llvm::dyn_cast_or_null<llvm::BranchInst>(CommonPred0->getTerminator());
+    if (Branch == nullptr || !Branch->isConditional())
+      return std::nullopt;
+    if (!isTrackedScalar(Branch->getCondition()))
+      return std::nullopt;
+
+    auto valueFor = [&](const llvm::BasicBlock *BB) -> const llvm::ConstantInt * {
+      for (unsigned i = 0; i < Phi.getNumIncomingValues(); ++i) {
+        if (Phi.getIncomingBlock(i) == BB)
+          return llvm::dyn_cast<llvm::ConstantInt>(Phi.getIncomingValue(i));
+      }
+      return nullptr;
+    };
+
+    auto *TrueConst = valueFor(Branch->getSuccessor(0));
+    auto *FalseConst = valueFor(Branch->getSuccessor(1));
+    if (TrueConst == nullptr || FalseConst == nullptr)
+      return std::nullopt;
+
+    unsigned width = D::bitWidthOf(&Phi);
+    int64_t falseValue = wrapToBitWidth(FalseConst->getSExtValue(), width);
+    int64_t delta =
+        wrapToBitWidth(TrueConst->getSExtValue() - FalseConst->getSExtValue(), width);
+    return D::makeAffineAssignment(&Phi, falseValue,
+                                   {{Branch->getCondition(), delta}});
+  }
+
+  Relation callEntryTransfer(const llvm::CallBase &Call,
+                             const llvm::Function &Callee) const {
+    Relation relation = D::identity();
+    llvm_inter::forEachActualFormalPair(
+        &Call, const_cast<llvm::Function *>(&Callee),
+        [&](llvm::Value *Actual, llvm::Argument *Formal, unsigned) {
+          if (!isTrackedScalar(Formal))
+            return;
+          relation = D::extend(relationForValue(Formal, Actual), relation);
+        });
+    return relation;
+  }
+
+  Relation callReturnTransfer(const llvm::CallBase &Call, const llvm::Function &Callee,
+                              llvm::Instruction *ExitStmt) const {
+    if (Call.getType()->isVoidTy() || !isTrackedScalar(&Call))
+      return D::identity();
+    auto *Ret = llvm::dyn_cast_or_null<llvm::ReturnInst>(ExitStmt);
+    if (Ret == nullptr || Ret->getFunction() != &Callee || Ret->getReturnValue() == nullptr)
+      return D::makeForget(&Call);
+    return relationForValue(&Call, Ret->getReturnValue());
   }
 
   Relation buildCastRelation(const llvm::CastInst &Cast) const {
@@ -1647,14 +1804,83 @@ materializeAffineExpressions(const AffineRelationDomain::value_type &relation) {
 }
 
 InterAffineEqualities::Result
-InterAffineEqualities::run(llvm::Module &M, bool verbose,
-                           LinearStrategy linearStrategy,
-                           IndirectCallResolutionMode callResolutionMode) {
-  AffineRelationAnalysis analysis(M);
-  auto engineResult =
-      InterEngine<AffineRelationDomain, AffineRelationAnalysis>::run(
-          M, analysis, verbose, linearStrategy, callResolutionMode);
-  return analysis.buildResult(engineResult);
+InterAffineEqualities::run(llvm::Module &M, bool verbose) {
+  (void)verbose;
+  using Solver =
+      InterEliminationSolver<AffineInterDomain,
+                             kDefaultInterAffineEqualitiesCallStringLength>;
+  using ResultT = Solver::result_t;
+  using ContextKey = typename ResultT::ContextKey;
+
+  std::unique_ptr<dataflow::controlflow::LLVMInterCFG> ICF =
+      std::make_unique<dataflow::controlflow::LLVMInterCFG>(&M);
+  InterAffineEqualitiesProblem Problem(M, ICF.get());
+  Solver SolverInstance(Problem);
+
+  Result Out;
+  auto Status = SolverInstance.solve();
+  Out.status = Status;
+
+  const ResultT *Result = SolverInstance.getResults();
+  if (Result == nullptr)
+    return Out;
+
+  for (auto &F : M) {
+    if (F.isDeclaration() || F.empty())
+      continue;
+    Relation Summary = D::zero();
+    bool HaveSummary = false;
+    for (auto *Exit : ICF->getExitPointsOf(&F)) {
+      if (Exit == nullptr)
+        continue;
+      for (const auto &Key : Result->contextsForInstruction(Exit)) {
+        const auto *Fact = Result->tryOUT(Key);
+        if (Fact == nullptr)
+          continue;
+        Summary = HaveSummary ? D::combine(Summary, *Fact) : *Fact;
+        HaveSummary = true;
+      }
+    }
+    if (HaveSummary)
+      Out.summaries.emplace(FunctionKey{&F}, std::move(Summary));
+
+    for (auto &BB : F) {
+      auto *EntryInst = BB.empty() ? nullptr : &*BB.begin();
+      if (EntryInst == nullptr)
+        continue;
+      Relation BlockRelation = D::zero();
+      bool HaveBlock = false;
+
+      for (auto *PredBB : llvm::predecessors(&BB)) {
+        auto *PredTerm = PredBB->getTerminator();
+        if (PredTerm == nullptr)
+          continue;
+        for (const auto &Key : Result->contextsForInstruction(PredTerm)) {
+          const auto *Fact = Result->tryOUT(Key);
+          if (Fact == nullptr)
+            continue;
+          Relation EdgeRelation =
+              Problem.applyTransfer(Problem.edgeTransfer(PredTerm, EntryInst), *Fact);
+          BlockRelation =
+              HaveBlock ? D::combine(BlockRelation, EdgeRelation) : EdgeRelation;
+          HaveBlock = true;
+        }
+      }
+
+      if (!HaveBlock) {
+        for (const auto &Key : Result->contextsForInstruction(EntryInst)) {
+          const auto *Fact = Result->tryIN(Key);
+          if (Fact == nullptr)
+            continue;
+          BlockRelation = HaveBlock ? D::combine(BlockRelation, *Fact) : *Fact;
+          HaveBlock = true;
+        }
+      }
+      if (HaveBlock)
+        Out.blockRelations.emplace(BlockKey{&BB}, std::move(BlockRelation));
+    }
+  }
+  return Out;
 }
 
-} // namespace npa
+} // namespace elimination

@@ -5,7 +5,7 @@
 #include "llvm/IR/Instruction.h"
 
 #include "Dataflow/APA/APA.h"
-#include "Dataflow/APA/Analyses/LLVM/Intra/Lockset.h"
+#include "Dataflow/APA/Analyses/Intra/IntraLockset.h"
 
 namespace elimination {
 

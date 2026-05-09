@@ -1,7 +1,6 @@
-#include "Dataflow/NPA/Domains/AffineRelationDomain.h"
+#include "Dataflow/APA/Domains/AffineRelationDomain.h"
 
-#include "Dataflow/NPA/Analyses/Inter/InterAffineEqualities.h"
-#include "Dataflow/NPA/Core/Base/Foundation.h"
+#include "Dataflow/APA/Analyses/Inter/InterAffineEqualities.h"
 #include "TestUtils/LLVMHelpers.h"
 
 #include <algorithm>
@@ -16,8 +15,8 @@ namespace {
 
 using lotus::unittest::parseModule;
 
-npa::AffineRelationVocabulary buildVocabulary(const llvm::Module &M) {
-  npa::AffineRelationVocabulary vocab;
+elimination::AffineRelationVocabulary buildVocabulary(const llvm::Module &M) {
+  elimination::AffineRelationVocabulary vocab;
   std::unordered_set<const llvm::Value *> seen;
   auto record = [&](const llvm::Value *value) {
     if (seen.insert(value).second)
@@ -110,11 +109,11 @@ TEST(AffineRelationDomain, IdentityEqualsItself) {
   ASSERT_NE(module, nullptr);
 
   auto vocab = buildVocabulary(*module);
-  npa::AffineRelationDomain::configure(&vocab);
+  elimination::AffineRelationDomain::configure(&vocab);
 
-  auto id1 = npa::AffineRelationDomain::identity();
-  auto id2 = npa::AffineRelationDomain::identity();
-  EXPECT_TRUE(npa::AffineRelationDomain::equal(id1, id2));
+  auto id1 = elimination::AffineRelationDomain::identity();
+  auto id2 = elimination::AffineRelationDomain::identity();
+  EXPECT_TRUE(elimination::AffineRelationDomain::equal(id1, id2));
 }
 
 TEST(AffineRelationDomain, ComposeWithIdentityPreservesAssignment) {
@@ -129,17 +128,17 @@ TEST(AffineRelationDomain, ComposeWithIdentityPreservesAssignment) {
   ASSERT_NE(module, nullptr);
 
   auto vocab = buildVocabulary(*module);
-  npa::AffineRelationDomain::configure(&vocab);
+  elimination::AffineRelationDomain::configure(&vocab);
 
   auto *F = module->getFunction("f");
   ASSERT_NE(F, nullptr);
   auto *X = &*F->arg_begin();
   auto *Y = &*F->getEntryBlock().begin();
 
-  auto assign = npa::AffineRelationDomain::makeAffineAssignment(Y, 4, {{X, 1}});
-  auto composed = npa::AffineRelationDomain::extend(
-      assign, npa::AffineRelationDomain::identity());
-  auto state = npa::materializeAffineExpressions(composed);
+  auto assign = elimination::AffineRelationDomain::makeAffineAssignment(Y, 4, {{X, 1}});
+  auto composed = elimination::AffineRelationDomain::extend(
+      assign, elimination::AffineRelationDomain::identity());
+  auto state = elimination::materializeAffineExpressions(composed);
 
   auto It = state.values.find(Y);
   ASSERT_NE(It, state.values.end());
@@ -160,12 +159,12 @@ TEST(AffineRelationDomain, GuardMaterializesConstant) {
   ASSERT_NE(module, nullptr);
 
   auto vocab = buildVocabulary(*module);
-  npa::AffineRelationDomain::configure(&vocab);
+  elimination::AffineRelationDomain::configure(&vocab);
 
   auto *Tag = &*module->getFunction("f")->arg_begin();
-  auto guarded = npa::AffineRelationDomain::addPrecondition(
-      npa::AffineRelationDomain::identity(), Tag, 7);
-  auto state = npa::materializeAffineExpressions(guarded);
+  auto guarded = elimination::AffineRelationDomain::addPrecondition(
+      elimination::AffineRelationDomain::identity(), Tag, 7);
+  auto state = elimination::materializeAffineExpressions(guarded);
 
   auto It = state.values.find(Tag);
   ASSERT_NE(It, state.values.end());
@@ -185,13 +184,13 @@ TEST(AffineRelationDomain, BottomIsDistinctFromIdentity) {
   ASSERT_NE(module, nullptr);
 
   auto vocab = buildVocabulary(*module);
-  npa::AffineRelationDomain::configure(&vocab);
+  elimination::AffineRelationDomain::configure(&vocab);
 
-  auto bottom = npa::AffineRelationDomain::zero();
-  auto id = npa::AffineRelationDomain::identity();
-  EXPECT_FALSE(npa::AffineRelationDomain::equal(bottom, id));
-  EXPECT_TRUE(npa::AffineRelationDomain::isBottom(bottom));
-  EXPECT_FALSE(npa::AffineRelationDomain::isBottom(id));
+  auto bottom = elimination::AffineRelationDomain::zero();
+  auto id = elimination::AffineRelationDomain::identity();
+  EXPECT_FALSE(elimination::AffineRelationDomain::equal(bottom, id));
+  EXPECT_TRUE(elimination::AffineRelationDomain::isBottom(bottom));
+  EXPECT_FALSE(elimination::AffineRelationDomain::isBottom(id));
 }
 
 TEST(AffineRelationDomain, TopContainsIdentityAndBottom) {
@@ -205,16 +204,16 @@ TEST(AffineRelationDomain, TopContainsIdentityAndBottom) {
   ASSERT_NE(module, nullptr);
 
   auto vocab = buildVocabulary(*module);
-  npa::AffineRelationDomain::configure(&vocab);
+  elimination::AffineRelationDomain::configure(&vocab);
 
-  auto top = npa::AffineRelationDomain::top();
-  auto id = npa::AffineRelationDomain::identity();
-  auto bottom = npa::AffineRelationDomain::zero();
+  auto top = elimination::AffineRelationDomain::top();
+  auto id = elimination::AffineRelationDomain::identity();
+  auto bottom = elimination::AffineRelationDomain::zero();
 
-  EXPECT_TRUE(npa::AffineRelationDomain::contains(top, id));
-  EXPECT_TRUE(npa::AffineRelationDomain::contains(top, bottom));
-  EXPECT_TRUE(npa::AffineRelationDomain::contains(id, bottom));
-  EXPECT_FALSE(npa::AffineRelationDomain::contains(id, top));
+  EXPECT_TRUE(elimination::AffineRelationDomain::contains(top, id));
+  EXPECT_TRUE(elimination::AffineRelationDomain::contains(top, bottom));
+  EXPECT_TRUE(elimination::AffineRelationDomain::contains(id, bottom));
+  EXPECT_FALSE(elimination::AffineRelationDomain::contains(id, top));
 }
 
 TEST(AffineRelationDomain, AffineGeneratorRoundTripPreservesKSRelation) {
@@ -229,7 +228,7 @@ TEST(AffineRelationDomain, AffineGeneratorRoundTripPreservesKSRelation) {
   ASSERT_NE(module, nullptr);
 
   auto vocab = buildVocabulary(*module);
-  npa::AffineRelationDomain::configure(&vocab);
+  elimination::AffineRelationDomain::configure(&vocab);
 
   auto *F = module->getFunction("f");
   ASSERT_NE(F, nullptr);
@@ -237,14 +236,14 @@ TEST(AffineRelationDomain, AffineGeneratorRoundTripPreservesKSRelation) {
   auto *Y = &*F->getEntryBlock().begin();
 
   auto relation =
-      npa::AffineRelationDomain::makeAffineAssignment(Y, 4, {{X, 1}});
-  auto ag = npa::AffineRelationDomain::toAffineGenerator(relation);
-  auto roundTrip = npa::AffineRelationDomain::fromAffineGenerator(ag);
+      elimination::AffineRelationDomain::makeAffineAssignment(Y, 4, {{X, 1}});
+  auto ag = elimination::AffineRelationDomain::toAffineGenerator(relation);
+  auto roundTrip = elimination::AffineRelationDomain::fromAffineGenerator(ag);
 
   EXPECT_TRUE(ag.exact);
   ASSERT_FALSE(ag.generators.empty());
   EXPECT_FALSE(ag.generators.begin()->second.empty());
-  EXPECT_TRUE(npa::AffineRelationDomain::equal(relation, roundTrip));
+  EXPECT_TRUE(elimination::AffineRelationDomain::equal(relation, roundTrip));
 }
 
 TEST(AffineRelationDomain, AffineGeneratorJoinUsesKSJoinSemantics) {
@@ -259,22 +258,22 @@ TEST(AffineRelationDomain, AffineGeneratorJoinUsesKSJoinSemantics) {
   ASSERT_NE(module, nullptr);
 
   auto vocab = buildVocabulary(*module);
-  npa::AffineRelationDomain::configure(&vocab);
+  elimination::AffineRelationDomain::configure(&vocab);
 
   auto *F = module->getFunction("f");
   ASSERT_NE(F, nullptr);
   auto *X = &*F->arg_begin();
   auto *Y = &*F->getEntryBlock().begin();
 
-  auto assign = npa::AffineRelationDomain::makeAffineAssignment(Y, 4, {{X, 1}});
-  auto id = npa::AffineRelationDomain::identity();
-  auto joined = npa::AffineRelationDomain::joinAffineGenerators(
-      npa::AffineRelationDomain::toAffineGenerator(assign),
-      npa::AffineRelationDomain::toAffineGenerator(id));
+  auto assign = elimination::AffineRelationDomain::makeAffineAssignment(Y, 4, {{X, 1}});
+  auto id = elimination::AffineRelationDomain::identity();
+  auto joined = elimination::AffineRelationDomain::joinAffineGenerators(
+      elimination::AffineRelationDomain::toAffineGenerator(assign),
+      elimination::AffineRelationDomain::toAffineGenerator(id));
 
-  EXPECT_TRUE(npa::AffineRelationDomain::equal(
-      npa::AffineRelationDomain::fromAffineGenerator(joined),
-      npa::AffineRelationDomain::combine(assign, id)));
+  EXPECT_TRUE(elimination::AffineRelationDomain::equal(
+      elimination::AffineRelationDomain::fromAffineGenerator(joined),
+      elimination::AffineRelationDomain::combine(assign, id)));
 }
 
 TEST(AffineRelationDomain, PublicDualizePerpComputesOrthogonalComplement) {
@@ -283,9 +282,9 @@ TEST(AffineRelationDomain, PublicDualizePerpComputesOrthogonalComplement) {
                                      });
 
   auto decomposition =
-      npa::AffineRelationDomain::diagonalDecompose(constraints, 4);
-  auto dual = npa::AffineRelationDomain::dualizePerp(constraints, 4, 3);
-  auto roundTrip = npa::AffineRelationDomain::dualizePerp(dual, 4, 3);
+      elimination::AffineRelationDomain::diagonalDecompose(constraints, 4);
+  auto dual = elimination::AffineRelationDomain::dualizePerp(constraints, 4, 3);
+  auto roundTrip = elimination::AffineRelationDomain::dualizePerp(dual, 4, 3);
 
   EXPECT_EQ(decomposition.bitWidth, 4u);
   EXPECT_EQ(decomposition.dual, dual);
@@ -308,8 +307,8 @@ TEST(AffineRelationDomain, DiagonalDecomposeTracksRectangularFactors) {
                                      });
 
   auto decomposition =
-      npa::AffineRelationDomain::diagonalDecompose(constraints, 4);
-  auto dual = npa::AffineRelationDomain::dualizePerp(constraints, 4, 3);
+      elimination::AffineRelationDomain::diagonalDecompose(constraints, 4);
+  auto dual = elimination::AffineRelationDomain::dualizePerp(constraints, 4, 3);
 
   EXPECT_EQ(multiply(multiply(decomposition.left, decomposition.diagonal, 4),
                      decomposition.right, 4),
@@ -333,22 +332,22 @@ TEST(AffineRelationDomain, AffineGeneratorKSRoundTripPreservesGeneratorSpace) {
   ASSERT_NE(module, nullptr);
 
   auto vocab = buildVocabulary(*module);
-  npa::AffineRelationDomain::configure(&vocab);
+  elimination::AffineRelationDomain::configure(&vocab);
 
-  npa::AffineGeneratorRelation ag;
+  elimination::AffineGeneratorRelation ag;
   ag.generators[4] = makeMatrix(4, {
                                        {1, 0, 0},
                                        {0, 1, 1},
                                    });
 
-  auto relation = npa::AffineRelationDomain::fromAffineGenerator(ag);
-  auto roundTripAG = npa::AffineRelationDomain::toAffineGenerator(relation);
+  auto relation = elimination::AffineRelationDomain::fromAffineGenerator(ag);
+  auto roundTripAG = elimination::AffineRelationDomain::toAffineGenerator(relation);
   auto roundTripKS =
-      npa::AffineRelationDomain::fromAffineGenerator(roundTripAG);
+      elimination::AffineRelationDomain::fromAffineGenerator(roundTripAG);
 
   ASSERT_FALSE(roundTripAG.generators.empty());
   EXPECT_FALSE(roundTripAG.generators.begin()->second.empty());
-  EXPECT_TRUE(npa::AffineRelationDomain::equal(relation, roundTripKS));
+  EXPECT_TRUE(elimination::AffineRelationDomain::equal(relation, roundTripKS));
 }
 
 TEST(AffineRelationDomain, MOSRoundTripPreservesKSRelation) {
@@ -363,7 +362,7 @@ TEST(AffineRelationDomain, MOSRoundTripPreservesKSRelation) {
   ASSERT_NE(module, nullptr);
 
   auto vocab = buildVocabulary(*module);
-  npa::AffineRelationDomain::configure(&vocab);
+  elimination::AffineRelationDomain::configure(&vocab);
 
   auto *F = module->getFunction("f");
   ASSERT_NE(F, nullptr);
@@ -371,15 +370,15 @@ TEST(AffineRelationDomain, MOSRoundTripPreservesKSRelation) {
   auto *Y = &*F->getEntryBlock().begin();
 
   auto relation =
-      npa::AffineRelationDomain::makeAffineAssignment(Y, 4, {{X, 1}});
-  auto mos = npa::AffineRelationDomain::toMOSWithMakeExplicit(relation);
-  auto roundTrip = npa::AffineRelationDomain::fromMOS(mos);
+      elimination::AffineRelationDomain::makeAffineAssignment(Y, 4, {{X, 1}});
+  auto mos = elimination::AffineRelationDomain::toMOSWithMakeExplicit(relation);
+  auto roundTrip = elimination::AffineRelationDomain::fromMOS(mos);
 
   EXPECT_TRUE(mos.exact);
-  EXPECT_EQ(mos.kind, npa::MOSRelation::ConversionKind::MakeExplicit);
+  EXPECT_EQ(mos.kind, elimination::MOSRelation::ConversionKind::MakeExplicit);
   ASSERT_FALSE(mos.transformers.empty());
   EXPECT_FALSE(mos.transformers.begin()->second.empty());
-  EXPECT_TRUE(npa::AffineRelationDomain::equal(relation, roundTrip));
+  EXPECT_TRUE(elimination::AffineRelationDomain::equal(relation, roundTrip));
 }
 
 TEST(AffineRelationDomain, MOSToKSConvertsExplicitAffineTransformer) {
@@ -393,16 +392,16 @@ TEST(AffineRelationDomain, MOSToKSConvertsExplicitAffineTransformer) {
   ASSERT_NE(module, nullptr);
 
   auto vocab = buildVocabulary(*module);
-  npa::AffineRelationDomain::configure(&vocab);
+  elimination::AffineRelationDomain::configure(&vocab);
 
   auto *X = &*module->getFunction("f")->arg_begin();
-  npa::MOSRelation mos;
+  elimination::MOSRelation mos;
   mos.transformers[4] = {
       makeMatrix(4, {{1, 3}, {0, 5}}),
   };
 
-  auto relation = npa::AffineRelationDomain::fromMOS(mos);
-  auto state = npa::materializeAffineExpressions(relation);
+  auto relation = elimination::AffineRelationDomain::fromMOS(mos);
+  auto state = elimination::materializeAffineExpressions(relation);
 
   auto It = state.values.find(X);
   ASSERT_NE(It, state.values.end());
@@ -423,19 +422,19 @@ TEST(AffineRelationDomain, GuardedKSToMOSVariantsProduceDistinctTransformers) {
   ASSERT_NE(module, nullptr);
 
   auto vocab = buildVocabulary(*module);
-  npa::AffineRelationDomain::configure(&vocab);
+  elimination::AffineRelationDomain::configure(&vocab);
 
-  npa::AffineGeneratorRelation ag;
+  elimination::AffineGeneratorRelation ag;
   ag.generators[4] = makeMatrix(4, {
                                        {1, 0, 0},
                                        {0, 4, 12},
                                    });
-  ag.relation = npa::AffineRelationDomain::fromAffineGenerator(ag);
+  ag.relation = elimination::AffineRelationDomain::fromAffineGenerator(ag);
 
   auto havoc =
-      npa::AffineRelationDomain::toMOSWithHavocedPreStateGuards(ag.relation);
+      elimination::AffineRelationDomain::toMOSWithHavocedPreStateGuards(ag.relation);
   auto explicitMOS =
-      npa::AffineRelationDomain::toMOSWithMakeExplicit(ag.relation);
+      elimination::AffineRelationDomain::toMOSWithMakeExplicit(ag.relation);
 
   ASSERT_EQ(havoc.transformers.count(4), 1u);
   ASSERT_EQ(explicitMOS.transformers.count(4), 1u);
@@ -461,22 +460,22 @@ TEST(AffineRelationDomain, MakeExplicitHandlesSkippedPreStateColumns) {
   ASSERT_NE(module, nullptr);
 
   auto vocab = buildVocabulary(*module);
-  npa::AffineRelationDomain::configure(&vocab);
+  elimination::AffineRelationDomain::configure(&vocab);
 
-  npa::AffineGeneratorRelation ag;
+  elimination::AffineGeneratorRelation ag;
   ag.generators[4] = makeMatrix(4, {
                                        {1, 0, 0, 0, 0},
                                        {0, 0, 1, 0, 7},
                                    });
-  ag.relation = npa::AffineRelationDomain::fromAffineGenerator(ag);
+  ag.relation = elimination::AffineRelationDomain::fromAffineGenerator(ag);
 
   auto explicitMOS =
-      npa::AffineRelationDomain::toMOSWithMakeExplicit(ag.relation);
+      elimination::AffineRelationDomain::toMOSWithMakeExplicit(ag.relation);
 
   ASSERT_EQ(explicitMOS.transformers.count(4), 1u);
   ASSERT_FALSE(explicitMOS.transformers.at(4).empty());
-  EXPECT_FALSE(npa::AffineRelationDomain::isBottom(
-      npa::AffineRelationDomain::fromMOS(explicitMOS)));
+  EXPECT_FALSE(elimination::AffineRelationDomain::isBottom(
+      elimination::AffineRelationDomain::fromMOS(explicitMOS)));
 }
 
 TEST(AffineRelationDomain, MakeExplicitSplitsEvenPreStateLeadingValues) {
@@ -490,17 +489,17 @@ TEST(AffineRelationDomain, MakeExplicitSplitsEvenPreStateLeadingValues) {
   ASSERT_NE(module, nullptr);
 
   auto vocab = buildVocabulary(*module);
-  npa::AffineRelationDomain::configure(&vocab);
+  elimination::AffineRelationDomain::configure(&vocab);
 
-  npa::AffineGeneratorRelation ag;
+  elimination::AffineGeneratorRelation ag;
   ag.generators[4] = makeMatrix(4, {
                                        {1, 0, 0},
                                        {0, 2, 6},
                                    });
-  ag.relation = npa::AffineRelationDomain::fromAffineGenerator(ag);
+  ag.relation = elimination::AffineRelationDomain::fromAffineGenerator(ag);
 
   auto explicitMOS =
-      npa::AffineRelationDomain::toMOSWithMakeExplicit(ag.relation);
+      elimination::AffineRelationDomain::toMOSWithMakeExplicit(ag.relation);
 
   ASSERT_EQ(explicitMOS.transformers.count(4), 1u);
   EXPECT_TRUE(hasMatrix(explicitMOS.transformers.at(4),
@@ -519,23 +518,23 @@ TEST(AffineRelationDomain, MOSJoinUsesKSJoinSemantics) {
   ASSERT_NE(module, nullptr);
 
   auto vocab = buildVocabulary(*module);
-  npa::AffineRelationDomain::configure(&vocab);
+  elimination::AffineRelationDomain::configure(&vocab);
 
   auto *F = module->getFunction("f");
   ASSERT_NE(F, nullptr);
   auto *X = &*F->arg_begin();
   auto *Y = &*F->getEntryBlock().begin();
 
-  auto assign = npa::AffineRelationDomain::makeAffineAssignment(Y, 4, {{X, 1}});
-  auto id = npa::AffineRelationDomain::identity();
-  auto joined = npa::AffineRelationDomain::joinMOS(
-      npa::AffineRelationDomain::toMOS(assign),
-      npa::AffineRelationDomain::toMOS(id));
+  auto assign = elimination::AffineRelationDomain::makeAffineAssignment(Y, 4, {{X, 1}});
+  auto id = elimination::AffineRelationDomain::identity();
+  auto joined = elimination::AffineRelationDomain::joinMOS(
+      elimination::AffineRelationDomain::toMOS(assign),
+      elimination::AffineRelationDomain::toMOS(id));
 
-  EXPECT_EQ(joined.kind, npa::MOSRelation::ConversionKind::Direct);
-  EXPECT_TRUE(npa::AffineRelationDomain::equal(
-      npa::AffineRelationDomain::fromMOS(joined),
-      npa::AffineRelationDomain::combine(assign, id)));
+  EXPECT_EQ(joined.kind, elimination::MOSRelation::ConversionKind::Direct);
+  EXPECT_TRUE(elimination::AffineRelationDomain::equal(
+      elimination::AffineRelationDomain::fromMOS(joined),
+      elimination::AffineRelationDomain::combine(assign, id)));
 }
 
 TEST(AffineRelationDomain, SubtractUsesAffineGeneratorResidual) {
@@ -550,23 +549,23 @@ TEST(AffineRelationDomain, SubtractUsesAffineGeneratorResidual) {
   ASSERT_NE(module, nullptr);
 
   auto vocab = buildVocabulary(*module);
-  npa::AffineRelationDomain::configure(&vocab);
+  elimination::AffineRelationDomain::configure(&vocab);
 
   auto *F = module->getFunction("f");
   ASSERT_NE(F, nullptr);
   auto *X = &*F->arg_begin();
   auto *Y = &*F->getEntryBlock().begin();
 
-  auto assign = npa::AffineRelationDomain::makeAffineAssignment(Y, 4, {{X, 1}});
-  auto id = npa::AffineRelationDomain::identity();
-  auto residual = npa::AffineRelationDomain::subtract(assign, id);
+  auto assign = elimination::AffineRelationDomain::makeAffineAssignment(Y, 4, {{X, 1}});
+  auto id = elimination::AffineRelationDomain::identity();
+  auto residual = elimination::AffineRelationDomain::subtract(assign, id);
 
-  EXPECT_TRUE(npa::AffineRelationDomain::equal(
-      npa::AffineRelationDomain::combine(residual, id),
-      npa::AffineRelationDomain::combine(assign, id)));
-  EXPECT_TRUE(npa::AffineRelationDomain::contains(assign, residual));
-  EXPECT_TRUE(npa::AffineRelationDomain::isBottom(
-      npa::AffineRelationDomain::subtract(assign, assign)));
+  EXPECT_TRUE(elimination::AffineRelationDomain::equal(
+      elimination::AffineRelationDomain::combine(residual, id),
+      elimination::AffineRelationDomain::combine(assign, id)));
+  EXPECT_TRUE(elimination::AffineRelationDomain::contains(assign, residual));
+  EXPECT_TRUE(elimination::AffineRelationDomain::isBottom(
+      elimination::AffineRelationDomain::subtract(assign, assign)));
 }
 
 TEST(AffineRelationDomain, CondCombineRespectsBooleanGuard) {
@@ -580,15 +579,15 @@ TEST(AffineRelationDomain, CondCombineRespectsBooleanGuard) {
   ASSERT_NE(module, nullptr);
 
   auto vocab = buildVocabulary(*module);
-  npa::AffineRelationDomain::configure(&vocab);
+  elimination::AffineRelationDomain::configure(&vocab);
 
-  auto id = npa::AffineRelationDomain::identity();
-  auto bottom = npa::AffineRelationDomain::zero();
+  auto id = elimination::AffineRelationDomain::identity();
+  auto bottom = elimination::AffineRelationDomain::zero();
 
-  EXPECT_TRUE(npa::AffineRelationDomain::equal(
-      npa::AffineRelationDomain::condCombine(true, id, bottom), id));
-  EXPECT_TRUE(npa::AffineRelationDomain::equal(
-      npa::AffineRelationDomain::condCombine(false, id, bottom), bottom));
+  EXPECT_TRUE(elimination::AffineRelationDomain::equal(
+      elimination::AffineRelationDomain::condCombine(true, id, bottom), id));
+  EXPECT_TRUE(elimination::AffineRelationDomain::equal(
+      elimination::AffineRelationDomain::condCombine(false, id, bottom), bottom));
 }
 
 TEST(AffineRelationDomain, MeetAddsConstraintsExactly) {
@@ -602,7 +601,7 @@ TEST(AffineRelationDomain, MeetAddsConstraintsExactly) {
   ASSERT_NE(module, nullptr);
 
   auto vocab = buildVocabulary(*module);
-  npa::AffineRelationDomain::configure(&vocab);
+  elimination::AffineRelationDomain::configure(&vocab);
 
   auto *F = module->getFunction("f");
   ASSERT_NE(F, nullptr);
@@ -611,12 +610,12 @@ TEST(AffineRelationDomain, MeetAddsConstraintsExactly) {
   ++ArgIt;
   auto *Y = &*ArgIt;
 
-  auto xIsThree = npa::AffineRelationDomain::addPrecondition(
-      npa::AffineRelationDomain::identity(), X, 3);
-  auto yIsFive = npa::AffineRelationDomain::addPrecondition(
-      npa::AffineRelationDomain::identity(), Y, 5);
-  auto both = npa::AffineRelationDomain::meet(xIsThree, yIsFive);
-  auto state = npa::materializeAffineExpressions(both);
+  auto xIsThree = elimination::AffineRelationDomain::addPrecondition(
+      elimination::AffineRelationDomain::identity(), X, 3);
+  auto yIsFive = elimination::AffineRelationDomain::addPrecondition(
+      elimination::AffineRelationDomain::identity(), Y, 5);
+  auto both = elimination::AffineRelationDomain::meet(xIsThree, yIsFive);
+  auto state = elimination::materializeAffineExpressions(both);
 
   ASSERT_NE(state.values.find(X), state.values.end());
   ASSERT_NE(state.values.find(Y), state.values.end());
@@ -635,7 +634,7 @@ TEST(AffineRelationDomain, ProjectAndHavocRemoveSelectedVocabulary) {
   ASSERT_NE(module, nullptr);
 
   auto vocab = buildVocabulary(*module);
-  npa::AffineRelationDomain::configure(&vocab);
+  elimination::AffineRelationDomain::configure(&vocab);
 
   auto *F = module->getFunction("f");
   ASSERT_NE(F, nullptr);
@@ -644,18 +643,18 @@ TEST(AffineRelationDomain, ProjectAndHavocRemoveSelectedVocabulary) {
   ++ArgIt;
   auto *Y = &*ArgIt;
 
-  auto relation = npa::AffineRelationDomain::addPrecondition(
-      npa::AffineRelationDomain::identity(), X, 7);
-  relation = npa::AffineRelationDomain::addPrecondition(relation, Y, 11);
+  auto relation = elimination::AffineRelationDomain::addPrecondition(
+      elimination::AffineRelationDomain::identity(), X, 7);
+  relation = elimination::AffineRelationDomain::addPrecondition(relation, Y, 11);
 
-  auto onlyX = npa::AffineRelationDomain::projectOnto(relation, {X});
-  auto onlyXState = npa::materializeAffineExpressions(onlyX);
+  auto onlyX = elimination::AffineRelationDomain::projectOnto(relation, {X});
+  auto onlyXState = elimination::materializeAffineExpressions(onlyX);
   ASSERT_NE(onlyXState.values.find(X), onlyXState.values.end());
   EXPECT_EQ(onlyXState.values.at(X).constant, 7);
   EXPECT_EQ(onlyXState.values.find(Y), onlyXState.values.end());
 
-  auto withoutY = npa::AffineRelationDomain::havoc(relation, Y);
-  auto withoutYState = npa::materializeAffineExpressions(withoutY);
+  auto withoutY = elimination::AffineRelationDomain::havoc(relation, Y);
+  auto withoutYState = elimination::materializeAffineExpressions(withoutY);
   ASSERT_NE(withoutYState.values.find(X), withoutYState.values.end());
   EXPECT_EQ(withoutYState.values.at(X).constant, 7);
   EXPECT_EQ(withoutYState.values.find(Y), withoutYState.values.end());
@@ -672,20 +671,20 @@ TEST(AffineRelationDomain, SizeCountsSatisfyingTwoVocabularySolutions) {
   ASSERT_NE(module, nullptr);
 
   auto vocab = buildVocabulary(*module);
-  npa::AffineRelationDomain::configure(&vocab);
+  elimination::AffineRelationDomain::configure(&vocab);
 
   auto *X = &*module->getFunction("f")->arg_begin();
   auto idSize =
-      npa::AffineRelationDomain::size(npa::AffineRelationDomain::identity());
+      elimination::AffineRelationDomain::size(elimination::AffineRelationDomain::identity());
   EXPECT_EQ(idSize.getZExtValue(), 256u);
 
-  auto fixed = npa::AffineRelationDomain::addPrecondition(
-      npa::AffineRelationDomain::identity(), X, 42);
-  auto fixedSize = npa::AffineRelationDomain::size(fixed);
+  auto fixed = elimination::AffineRelationDomain::addPrecondition(
+      elimination::AffineRelationDomain::identity(), X, 42);
+  auto fixedSize = elimination::AffineRelationDomain::size(fixed);
   EXPECT_EQ(fixedSize.getZExtValue(), 1u);
 
   auto bottomSize =
-      npa::AffineRelationDomain::size(npa::AffineRelationDomain::zero());
+      elimination::AffineRelationDomain::size(elimination::AffineRelationDomain::zero());
   EXPECT_EQ(bottomSize.getZExtValue(), 0u);
 }
 
@@ -700,7 +699,7 @@ TEST(AffineRelationDomain, MergePreservingLocalsKeepsCallerLocalValue) {
   ASSERT_NE(module, nullptr);
 
   auto vocab = buildVocabulary(*module);
-  npa::AffineRelationDomain::configure(&vocab);
+  elimination::AffineRelationDomain::configure(&vocab);
 
   auto *F = module->getFunction("f");
   ASSERT_NE(F, nullptr);
@@ -709,16 +708,16 @@ TEST(AffineRelationDomain, MergePreservingLocalsKeepsCallerLocalValue) {
   ++ArgIt;
   auto *L = &*ArgIt;
 
-  auto callSite = npa::AffineRelationDomain::extend(
-      npa::AffineRelationDomain::makeAffineAssignment(L, 2, {{L, 1}}),
-      npa::AffineRelationDomain::makeAffineAssignment(G, 1, {{G, 1}}));
-  auto calleeExit = npa::AffineRelationDomain::extend(
-      npa::AffineRelationDomain::makeAffineAssignment(L, 0, {{G, 1}}),
-      npa::AffineRelationDomain::makeAffineAssignment(G, 3, {{G, 1}}));
+  auto callSite = elimination::AffineRelationDomain::extend(
+      elimination::AffineRelationDomain::makeAffineAssignment(L, 2, {{L, 1}}),
+      elimination::AffineRelationDomain::makeAffineAssignment(G, 1, {{G, 1}}));
+  auto calleeExit = elimination::AffineRelationDomain::extend(
+      elimination::AffineRelationDomain::makeAffineAssignment(L, 0, {{G, 1}}),
+      elimination::AffineRelationDomain::makeAffineAssignment(G, 3, {{G, 1}}));
 
-  auto merged = npa::AffineRelationDomain::mergePreservingLocals(
+  auto merged = elimination::AffineRelationDomain::mergePreservingLocals(
       callSite, calleeExit, {L});
-  auto state = npa::materializeAffineExpressions(merged);
+  auto state = elimination::materializeAffineExpressions(merged);
 
   ASSERT_NE(state.values.find(G), state.values.end());
   EXPECT_EQ(state.values.at(G).constant, 4);
@@ -749,14 +748,14 @@ TEST(AffineRelationDomain, GenericProjectDropsConfiguredLocals) {
   ++ArgIt;
   auto *L = &*ArgIt;
   vocab.localValues = {L};
-  npa::AffineRelationDomain::configure(&vocab);
+  elimination::AffineRelationDomain::configure(&vocab);
 
-  auto relation = npa::AffineRelationDomain::addPrecondition(
-      npa::AffineRelationDomain::identity(), G, 7);
-  relation = npa::AffineRelationDomain::addPrecondition(relation, L, 11);
+  auto relation = elimination::AffineRelationDomain::addPrecondition(
+      elimination::AffineRelationDomain::identity(), G, 7);
+  relation = elimination::AffineRelationDomain::addPrecondition(relation, L, 11);
 
-  auto projected = npa::domain_project<npa::AffineRelationDomain>(relation);
-  auto state = npa::materializeAffineExpressions(projected);
+  auto projected = elimination::AffineRelationDomain::project(relation);
+  auto state = elimination::materializeAffineExpressions(projected);
 
   ASSERT_NE(state.values.find(G), state.values.end());
   EXPECT_EQ(state.values.at(G).constant, 7);
@@ -781,22 +780,22 @@ TEST(AffineRelationDomain, GenericProjectIsIdempotentAndOptional) {
   ++ArgIt;
   auto *L = &*ArgIt;
   vocab.localValues = {L};
-  npa::AffineRelationDomain::configure(&vocab);
+  elimination::AffineRelationDomain::configure(&vocab);
 
-  auto first = npa::AffineRelationDomain::addPrecondition(
-      npa::AffineRelationDomain::identity(), G, 3);
-  first = npa::AffineRelationDomain::addPrecondition(first, L, 5);
+  auto first = elimination::AffineRelationDomain::addPrecondition(
+      elimination::AffineRelationDomain::identity(), G, 3);
+  first = elimination::AffineRelationDomain::addPrecondition(first, L, 5);
 
-  auto second = npa::AffineRelationDomain::addPrecondition(
-      npa::AffineRelationDomain::identity(), G, 9);
-  second = npa::AffineRelationDomain::addPrecondition(second, L, 13);
+  auto second = elimination::AffineRelationDomain::addPrecondition(
+      elimination::AffineRelationDomain::identity(), G, 9);
+  second = elimination::AffineRelationDomain::addPrecondition(second, L, 13);
 
-  auto projectedFirst = npa::AffineRelationDomain::project(first);
-  EXPECT_TRUE(npa::AffineRelationDomain::equal(
-      npa::AffineRelationDomain::project(projectedFirst), projectedFirst));
+  auto projectedFirst = elimination::AffineRelationDomain::project(first);
+  EXPECT_TRUE(elimination::AffineRelationDomain::equal(
+      elimination::AffineRelationDomain::project(projectedFirst), projectedFirst));
 
   vocab.localValues.clear();
-  npa::AffineRelationDomain::configure(&vocab);
-  EXPECT_TRUE(npa::AffineRelationDomain::equal(
-      npa::AffineRelationDomain::project(second), second));
+  elimination::AffineRelationDomain::configure(&vocab);
+  EXPECT_TRUE(elimination::AffineRelationDomain::equal(
+      elimination::AffineRelationDomain::project(second), second));
 }
