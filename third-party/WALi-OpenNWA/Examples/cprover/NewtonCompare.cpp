@@ -8,21 +8,21 @@
 #include "wali/wpds/ewpds/ERule.hpp"
 #endif
 // ::wali::wfa
-#include "wali/wfa/WFA.hpp"
-#include "wali/wfa/TransFunctor.hpp"
 #include "wali/wfa/State.hpp"
+#include "wali/wfa/TransFunctor.hpp"
+#include "wali/wfa/WFA.hpp"
 // ::wali::wpds
-#include "wali/wpds/RuleFunctor.hpp"
 #include "wali/wpds/Rule.hpp"
+#include "wali/wpds/RuleFunctor.hpp"
 // ::std
-#include <iostream>
-#include <string>
-#include <sstream>
-#include <fstream>
 #include <ctime>
+#include <fstream>
+#include <iostream>
+#include <sstream>
+#include <string>
 // ::wali
-#include "wali/KeySpace.hpp"
 #include "wali/Key.hpp"
+#include "wali/KeySpace.hpp"
 #include "wali/ref_ptr.hpp"
 // ::wali::util
 #include "wali/util/Timer.hpp"
@@ -38,9 +38,9 @@ using namespace wali::wpds::fwpds;
 using namespace wali::cprover;
 using namespace wali::domains::binrel;
 
+#include <boost/cast.hpp>
 #include <pthread.h>
 #include <signal.h>
-#include <boost/cast.hpp>
 
 static pthread_t worker;
 

@@ -3,8 +3,8 @@
 
 #include "wali/SemElem.hpp"
 
-#include <set>
 #include "wali/util/unordered_set.hpp"
+#include <set>
 
 #include <boost/function.hpp>
 //#include <boost/container/flat_set.hpp>
@@ -83,8 +83,8 @@ namespace wali
       static SemElemSubsumptionComputer const KeepMinimalElements;
     };
 
-  }
-}
+  } // namespace domains
+} // namespace wali
 
 
 // Yo emacs!

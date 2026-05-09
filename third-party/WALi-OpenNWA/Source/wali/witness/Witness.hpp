@@ -7,8 +7,8 @@
 
 #include "wali/Common.hpp"
 #include "wali/Markable.hpp"
-#include "wali/ref_ptr.hpp"
 #include "wali/SemElem.hpp"
+#include "wali/ref_ptr.hpp"
 #include "wali/witness/Visitable.hpp"
 
 namespace wali

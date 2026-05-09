@@ -89,7 +89,7 @@ namespace wali
 
   }; // class SemElemPair
 
-} // namespace
+} // namespace wali
 
 #endif  // wali_SEMELEM_PAIR_GUARD
 

@@ -8,16 +8,16 @@
 #include "opennwa/NwaFwd.hpp"
 
 // ::wali
-#include "wali/Printable.hpp"
-#include "wali/Key.hpp"
-#include "wali/KeyContainer.hpp"
 #include "opennwa/details/StateStorage.hpp"
 #include "opennwa/details/TransitionInfo.hpp"
+#include "wali/Key.hpp"
+#include "wali/KeyContainer.hpp"
+#include "wali/Printable.hpp"
 
 // std::c++
+#include <assert.h>
 #include <iostream>
 #include <set>
-#include <assert.h>
 
 namespace opennwa
 {
@@ -1559,8 +1559,8 @@ namespace opennwa
     };
 
 
-  }
-}
+  } // namespace details
+} // namespace opennwa
 
 // Yo, Emacs!
 // Local Variables:

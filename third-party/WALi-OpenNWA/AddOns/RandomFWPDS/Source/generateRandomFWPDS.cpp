@@ -4,14 +4,14 @@
 // ::wali
 #include "wali/Key.hpp"
 #include "wali/KeySpace.hpp"
-#include "wali/SemElem.hpp"
 #include "wali/MergeFn.hpp"
+#include "wali/SemElem.hpp"
 
 // ::std
-#include <string>
-#include <vector>
 #include <cstdlib>
 #include <sstream>
+#include <string>
+#include <vector>
 
 #include "generateRandomFWPDS.hpp"
 

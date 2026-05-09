@@ -6,14 +6,14 @@
  * @author Nicholas Kidd
  */
 
-#include <iostream>
 #include "wali/Common.hpp"
-#include "wali/Printable.hpp"
 #include "wali/Countable.hpp"
-#include "wali/Markable.hpp"
-#include "wali/SemElem.hpp"
 #include "wali/KeyContainer.hpp"
+#include "wali/Markable.hpp"
+#include "wali/Printable.hpp"
+#include "wali/SemElem.hpp"
 #include "wali/wfa/ITrans.hpp"
+#include <iostream>
 
 
 // Disable
@@ -29,7 +29,7 @@ namespace wali
 {
   namespace wpds {
     class Config;
-  }
+  } // namespace wpds
 
   namespace wfa
   {

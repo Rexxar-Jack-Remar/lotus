@@ -6,8 +6,8 @@
  */
 
 #include "wali/Common.hpp"
-#include "wali/SemElemPair.hpp"
 #include "wali/IMergeFn.hpp"
+#include "wali/SemElemPair.hpp"
 #include "wali/wpds/WPDS.hpp"
 #include <set>
 

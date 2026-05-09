@@ -2,8 +2,8 @@
  * @author Nicholas Kidd
  */
 #include "wali/Common.hpp"
-#include "wali/witness/WitnessRule.hpp"
 #include "wali/witness/Visitor.hpp"
+#include "wali/witness/WitnessRule.hpp"
 
 namespace wali
 {
@@ -113,7 +113,7 @@ namespace wali
     {
       formatDepth(o,depth);
       o << "WitnessRule: ";
-      stub.print(o) << std::endl;
+      stub.print(o) << '\n';
       return o;
     }
 

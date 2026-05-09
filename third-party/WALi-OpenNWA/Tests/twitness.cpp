@@ -3,21 +3,21 @@
  *
  * Tests Witnesses
  */
-#include <iostream>
-#include <fstream>
 #include "wali/Common.hpp"
 #include "wali/wfa/WFA.hpp"
 #include "wali/wpds/Rule.hpp"
 #include "wali/wpds/WPDS.hpp"
 #include "wali/wpds/fwpds/FWPDS.hpp"
+#include <fstream>
+#include <iostream>
 
+#include "wali/witness/VisitorDot.hpp"
 #include "wali/witness/Witness.hpp"
 #include "wali/witness/WitnessWrapper.hpp"
-#include "wali/witness/VisitorDot.hpp"
 
 // For debug info in main()
-#include "wali/wfa/Trans.hpp"
 #include "wali/wfa/State.hpp"
+#include "wali/wfa/Trans.hpp"
 
 // Reachability Weight Domain
 #include "Reach.hpp"
@@ -75,7 +75,7 @@ void TestWpds(bool post)
     pds->add_rule(p,n4,p,R->one());
 
     if (post)
-      pds->print( std::cout << "---- WPDS ----\n" ) << std::endl;
+      pds->print( std::cout << "---- WPDS ----\n" ) << '\n';
 
     WFA fain;
     fain.setInitialState(p);
@@ -86,7 +86,7 @@ void TestWpds(bool post)
     else {
       fain.addTrans(p,getKey("n4"),acc,R->one());
     }
-    fain.print( cout << "----- WFA BEFORE -----\n" ) << std::endl;
+    fain.print( cout << "----- WFA BEFORE -----\n" ) << '\n';
 
     WFA faout;
     if (post)
@@ -94,7 +94,7 @@ void TestWpds(bool post)
     else
       pds->prestar(fain,faout);
 
-    faout.print( cout << "----- WFA AFTER -----\n" ) << std::endl;
+    faout.print( cout << "----- WFA AFTER -----\n" ) << '\n';
 
     wali::wfa::Trans t;
     if( faout.find(p,n3,acc,t) ) {
@@ -157,7 +157,7 @@ void TestFwpds(bool post)
     pds->add_rule(p,n4,p,R->one());
 
     if (post)
-      pds->print( std::cout << "---- WPDS ----\n" ) << std::endl;
+      pds->print( std::cout << "---- WPDS ----\n" ) << '\n';
     WFA fain;
     fain.setInitialState(p);
     fain.addFinalState(acc);
@@ -167,14 +167,14 @@ void TestFwpds(bool post)
     else {
       fain.addTrans(p,getKey("n4"),acc,R->one());
     }
-    fain.print( cout << "----- WFA BEFORE -----\n" ) << std::endl;
+    fain.print( cout << "----- WFA BEFORE -----\n" ) << '\n';
 
     WFA faout;
     if (post)
       pds->poststar(fain,faout);
     else
       pds->prestar(fain,faout);
-    faout.print( cout << "----- WFA AFTER -----\n" ) << std::endl;
+    faout.print( cout << "----- WFA AFTER -----\n" ) << '\n';
 
     wali::wfa::Trans t;
     if( faout.find(p,n3,acc,t) ) {
@@ -199,11 +199,11 @@ int main()
   TestWpds(false);
   TestFwpds(true);
   TestFwpds(false);
-  std::cerr << "# Trans     : " << wali::wfa::Trans::numTrans << std::endl;
-  std::cerr << "# States    : " << wali::wfa::State::numStates << std::endl;
-  std::cerr << "# Rules     : " << wali::wpds::Rule::numRules << std::endl;
+  std::cerr << "# Trans     : " << wali::wfa::Trans::numTrans << '\n';
+  std::cerr << "# States    : " << wali::wfa::State::numStates << '\n';
+  std::cerr << "# Rules     : " << wali::wpds::Rule::numRules << '\n';
   std::cerr << "# Reaches   : " << Reach::numReaches << std::endl;
-  std::cerr << "# Witnesses : " << wali::witness::Witness::COUNT << std::endl;
+  std::cerr << "# Witnesses : " << wali::witness::Witness::COUNT << '\n';
   return 0;
 }
 

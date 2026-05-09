@@ -6,8 +6,8 @@
  */
 
 #include "wali/Common.hpp"
-#include "wali/witness/Witness.hpp"
 #include "wali/PriorityWorklist.hpp"
+#include "wali/witness/Witness.hpp"
 
 namespace wali
 {

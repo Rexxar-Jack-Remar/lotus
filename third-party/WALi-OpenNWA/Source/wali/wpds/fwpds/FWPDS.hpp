@@ -21,11 +21,11 @@ namespace wali {
   namespace wfa {
     class WFA;
     class Trans;
-  }
+  } // namespace wfa
 
   namespace graph {
     class InterGraph;
-  }
+  } // namespace graph
 
   namespace wpds {
 

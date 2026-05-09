@@ -414,9 +414,9 @@ namespace wali {
         return that.print(os);
       }
 
-    }
-  }
-}
+    } // namespace details
+  } // namespace domains
+} // namespace wali
 
 #endif /* WALI_DOMAINS_DETAILS_SEM_ELEM_WRAPPER_HPP */
 

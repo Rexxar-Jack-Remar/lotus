@@ -3,8 +3,10 @@
 
 
 #include "opennwa/NwaFwd.hpp"
-#include "wali/wpds/WPDS.hpp"
 #include "opennwa/WeightGen.hpp"
+
+#include "wali/wpds/WPDS.hpp"
+
 
 #include "opennwa/deprecate.h"
 
@@ -193,7 +195,7 @@ namespace opennwa
     NwaRefPtr WpdsToNwa( const wali::wpds::WPDS & pds );
       
   } // namespace nwa_pds
-}
+} // namespace opennwa
 
 
 // Yo, Emacs!

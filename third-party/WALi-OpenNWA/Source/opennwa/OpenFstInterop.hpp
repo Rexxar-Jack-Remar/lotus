@@ -72,7 +72,7 @@ namespace opennwa {
   NwaRefPtr
   determinize_internal_nwa(NwaRefPtr internal_nwa, std::string node_prefix = "");
 
-}
+} // namespace opennwa
 
 
 // Yo, Emacs!

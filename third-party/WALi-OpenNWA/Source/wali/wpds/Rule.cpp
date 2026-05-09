@@ -2,10 +2,10 @@
  * @author Nicholas Kidd
  */
 
-#include <sstream>
-#include <cassert>
 #include "wali/wpds/Rule.hpp"
 #include "wali/wpds/Config.hpp"
+#include <cassert>
+#include <sstream>
 
 namespace wali
 {

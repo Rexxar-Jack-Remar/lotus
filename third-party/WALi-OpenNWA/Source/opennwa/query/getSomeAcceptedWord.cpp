@@ -1,22 +1,22 @@
 
-#include <vector>
 #include <set>
+#include <vector>
 
 #include "opennwa/query/returns.hpp"
-#include "opennwa/query/calls.hpp"
-#include "opennwa/query/internals.hpp"
-#include "wali/TotalOrderWorklist.hpp"
-#include "wali/wfa/WFA.hpp"
-#include "wali/wfa/State.hpp"
-#include "opennwa/Nwa.hpp"
-#include "opennwa/query/language.hpp"
-#include "opennwa/nwa_pds/conversions.hpp"
-#include "wali/wpds/WPDS.hpp"
 #include "opennwa/ClientInfo.hpp"
-#include "wali/witness/WitnessWrapper.hpp"
-#include "wali/witness/WitnessLengthWorklist.hpp"
+#include "opennwa/Nwa.hpp"
+#include "opennwa/nwa_pds/conversions.hpp"
 #include "opennwa/query/PathVisitor.hpp"
 #include "opennwa/query/ShortWitnessVisitor.hpp"
+#include "opennwa/query/calls.hpp"
+#include "opennwa/query/internals.hpp"
+#include "opennwa/query/language.hpp"
+#include "wali/TotalOrderWorklist.hpp"
+#include "wali/wfa/State.hpp"
+#include "wali/wfa/WFA.hpp"
+#include "wali/witness/WitnessLengthWorklist.hpp"
+#include "wali/witness/WitnessWrapper.hpp"
+#include "wali/wpds/WPDS.hpp"
 
 
 using namespace wali;
@@ -157,7 +157,7 @@ namespace opennwa {
     }
 
   } // namespace query
-}
+} // namespace opennwa
 
 
 

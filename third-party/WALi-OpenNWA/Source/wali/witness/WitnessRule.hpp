@@ -6,8 +6,8 @@
  */
 
 #include "wali/Common.hpp"
-#include "wali/Printable.hpp"
 #include "wali/Key.hpp"
+#include "wali/Printable.hpp"
 #include "wali/witness/Witness.hpp"
 #include "wali/wpds/Rule.hpp"
 

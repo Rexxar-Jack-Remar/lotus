@@ -7,15 +7,15 @@
 
 // ::wali
 #include "wali/Common.hpp"
-#include "wali/Printable.hpp"
 #include "wali/HashMap.hpp"
 #include "wali/KeyContainer.hpp"
+#include "wali/Printable.hpp"
 #include "wali/SemElem.hpp"
 #include "wali/Worklist.hpp"
 
 // ::wali::wfa
-#include "wali/wfa/WFA.hpp"
 #include "wali/wfa/TransFunctor.hpp"
+#include "wali/wfa/WFA.hpp"
 
 // ::wali::wpds
 #include "wali/wpds/Wrapper.hpp"
@@ -31,7 +31,7 @@ namespace wali
   namespace wfa
   {
     class ITrans;
-  }
+  } // namespace wfa
 
   namespace wpds
   {

@@ -180,8 +180,8 @@ namespace opennwa
      */
     extern const  StateSet getTargets(Nwa const & nwa);
 
-  }
-}
+  } // namespace query
+} // namespace opennwa
 
 
 // Yo, Emacs!

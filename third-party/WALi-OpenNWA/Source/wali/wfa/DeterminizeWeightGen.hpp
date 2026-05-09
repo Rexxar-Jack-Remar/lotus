@@ -4,8 +4,8 @@
 #include "wali/Key.hpp"
 #include "wali/SemElem.hpp"
 
-#include <set>
 #include <map>
+#include <set>
 
 namespace wali {
   namespace wfa {
@@ -144,8 +144,8 @@ namespace wali {
       }
     };
 
-  }
-}
+  } // namespace wfa
+} // namespace wali
 
 // Yo emacs!
 // Local Variables:

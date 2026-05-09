@@ -140,71 +140,71 @@ namespace wali
 
     if (z->equal(o) || o->equal(z) ) 
     {
-      *waliErr << "[ERROR - test_semelem_impl] zero == one" << std::endl;
+      *waliErr << "[ERROR - test_semelem_impl] zero == one" << '\n';
       good = false;
     }
     if (!z->equal(z))
     {
-      *waliErr << "[ERROR - test_semelem_impl] zero != zero" << std::endl;
+      *waliErr << "[ERROR - test_semelem_impl] zero != zero" << '\n';
       good = false;
     }
     if (!o->equal(o))
     {
-      *waliErr << "[ERROR - test_semelem_impl] one != one" << std::endl;
+      *waliErr << "[ERROR - test_semelem_impl] one != one" << '\n';
       good = false;
     }
     if (!x->equal(x))
     {
-      *waliErr << "[ERROR - test_semelem_impl] x != x" << std::endl;
+      *waliErr << "[ERROR - test_semelem_impl] x != x" << '\n';
       good = false;
     }
     if (!o->equal(o->combine(z)))
     {
-      *waliErr << "[ERROR - test_semelem_impl] one != (one + zero)" << std::endl;
+      *waliErr << "[ERROR - test_semelem_impl] one != (one + zero)" << '\n';
       good = false;
     }
     if (!z->equal(o->extend(z)))
     {
-      *waliErr << "[ERROR - test_semelem_impl] zero != (one * zero)" << std::endl;
+      *waliErr << "[ERROR - test_semelem_impl] zero != (one * zero)" << '\n';
       good = false;
     }
     if (!(z->extend(o)->equal( o->extend(z))))
     {
-      *waliErr << "[ERROR - test_semelem_impl] zero*one != one*zero" << std::endl;
+      *waliErr << "[ERROR - test_semelem_impl] zero*one != one*zero" << '\n';
       good = false;
     }
     if (!(x->equal(x->combine(x))) )
     {
-      *waliErr << "[ERROR - test_semelem_impl] x+x != x" << std::endl;
+      *waliErr << "[ERROR - test_semelem_impl] x+x != x" << '\n';
       good = false;
     }
     if (!x->equal( x->extend(o)) || !x->equal(o->extend(x)))
     {
-      *waliErr << "[ERROR - test_semelem_impl] x != 1*x" << std::endl;
+      *waliErr << "[ERROR - test_semelem_impl] x != 1*x" << '\n';
       good = false;
     }
     if (!z->underApproximates(z)) {
-      *waliErr << "[ERROR - test_semelem_impl] 0 does not underapproximate 0" << std::endl;
+      *waliErr << "[ERROR - test_semelem_impl] 0 does not underapproximate 0" << '\n';
       good = false;
     }
     if (!o->underApproximates(o)) {
-      *waliErr << "[ERROR - test_semelem_impl] 1 does not underapproximate 1" << std::endl;
+      *waliErr << "[ERROR - test_semelem_impl] 1 does not underapproximate 1" << '\n';
       good = false;
     }
     if (!z->underApproximates(o)) {
-      *waliErr << "[ERROR - test_semelem_impl] 0 does not underapproximate 1" << std::endl;
+      *waliErr << "[ERROR - test_semelem_impl] 0 does not underapproximate 1" << '\n';
       good = false;
     }
     if (!z->underApproximates(x)) {
-      *waliErr << "[ERROR - test_semelem_impl] 0 does not underapproximate x" << std::endl;
+      *waliErr << "[ERROR - test_semelem_impl] 0 does not underapproximate x" << '\n';
       good = false;
     }
     if (o->underApproximates(z)) {
-      *waliErr << "[ERROR - test_semelem_impl] 1 underapproximate 0" << std::endl;
+      *waliErr << "[ERROR - test_semelem_impl] 1 underapproximate 0" << '\n';
       good = false;
     }
     if (x->underApproximates(z) && !x->equal(z)) {
-      *waliErr << "[ERROR - test_semelem_impl] x underapproximates 0 (and x != 0)" << std::endl;
+      *waliErr << "[ERROR - test_semelem_impl] x underapproximates 0 (and x != 0)" << '\n';
       good = false;
     }
 

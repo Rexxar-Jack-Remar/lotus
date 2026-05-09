@@ -3,10 +3,10 @@
 
 #include "wali/SemElem.hpp"
 
-#include <boost/iterator/iterator_facade.hpp>
-#include <boost/optional.hpp>
 #include "wali/util/unordered_map.hpp"
 #include "wali/util/unordered_set.hpp"
+#include <boost/iterator/iterator_facade.hpp>
+#include <boost/optional.hpp>
 #include <limits>
 #include <typeinfo>
 
@@ -24,7 +24,7 @@ namespace {
       return str.substr(0, maxlen-3) + "...";
     }
   }
-}  
+} // namespace  
 
 namespace wali
 {
@@ -520,8 +520,8 @@ namespace wali
       }
     };
     
-  }
-}
+  } // namespace domains
+} // namespace wali
 
 
 // Yo emacs!

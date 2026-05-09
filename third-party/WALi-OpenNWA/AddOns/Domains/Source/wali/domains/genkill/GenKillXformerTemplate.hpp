@@ -3,9 +3,9 @@
 #ifndef GEN_KILL_TRANSFORMER_GUARD
 #define GEN_KILL_TRANSFORMER_GUARD 1
 
-#include <iostream>
-#include <climits>
 #include <cassert>
+#include <climits>
+#include <iostream>
 
 #include "wali/SemElem.hpp"
 
@@ -354,9 +354,9 @@ public: // methods
 
   static std::ostream& print_static_transformers( std::ostream& o )
   {
-      o << "ONE\t=\t";    one()->print(o);  o << std::endl;
-      o << "ZERO\t=\t";   zero()->print(o); o << std::endl;
-      o << "BOTTOM\t=\t"; bottom()->print(o); o << std::endl;
+      o << "ONE\t=\t";    one()->print(o);  o << '\n';
+      o << "ZERO\t=\t";   zero()->print(o); o << '\n';
+      o << "BOTTOM\t=\t"; bottom()->print(o); o << '\n';
       return o;
   }
 

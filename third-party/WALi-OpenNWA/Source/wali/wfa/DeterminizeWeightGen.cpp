@@ -1,7 +1,7 @@
 #include "wali/wfa/DeterminizeWeightGen.hpp"
-#include "wali/wfa/WFA.hpp"
-#include "wali/wfa/State.hpp"
 #include "wali/domains/KeyedSemElemSet.hpp"
+#include "wali/wfa/State.hpp"
+#include "wali/wfa/WFA.hpp"
 
 using wali::domains::KeyedSemElemSet;
 using wali::domains::PositionKey;
@@ -26,7 +26,7 @@ namespace
       m[key] = m[key]->combine(singleton);
     }
   }
-}
+} // namespace
 
 
 namespace wali
@@ -175,8 +175,8 @@ namespace wali
     
     
 
-  }
-}
+  } // namespace wfa
+} // namespace wali
 
 
 

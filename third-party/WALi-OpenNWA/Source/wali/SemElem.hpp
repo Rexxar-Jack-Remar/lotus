@@ -6,11 +6,11 @@
  */
 
 #include "wali/Common.hpp"
-#include "wali/ref_ptr.hpp"
 #include "wali/Countable.hpp"
 #include "wali/Printable.hpp"
-#include <sstream>
+#include "wali/ref_ptr.hpp"
 #include <cstdlib>
+#include <sstream>
 #include <string>
 #include <typeinfo>
 
@@ -314,6 +314,6 @@ namespace wali
       return left->equal(right);
     }
   };
-}
+} // namespace wali
 #endif  // wali_SEM_ELEM_GUARD
 

@@ -2,17 +2,17 @@
 #define wali_graph_INTER_GRAPH_GUARD 1
 
 #include "wali/Countable.hpp"
-#include "wali/ref_ptr.hpp"
 #include "wali/MergeFn.hpp"
+#include "wali/ref_ptr.hpp"
 
 #include "wali/graph/GraphCommon.hpp"
 
 
-#include <list>
-#include <vector>
 #include <iostream>
+#include <list>
 #include <map>
 #include <set>
+#include <vector>
 
 namespace wali {
 

@@ -168,10 +168,10 @@ namespace opennwa
 
         
 
-      }
-    }
-  }
-}
+      } // namespace selectors
+    } // namespace details
+  } // namespace query
+} // namespace opennwa
 
 // Yo, Emacs!
 // Local Variables:

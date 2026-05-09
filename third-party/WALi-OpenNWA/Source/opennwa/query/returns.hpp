@@ -508,8 +508,8 @@ namespace opennwa
      */
     extern const  StateSet getReturnSites(Nwa const & nwa, State callSite );
 
-  }
-}
+  } // namespace query
+} // namespace opennwa
 
 
 // Yo, Emacs!

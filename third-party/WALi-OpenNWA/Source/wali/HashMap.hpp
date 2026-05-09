@@ -378,10 +378,10 @@ namespace wali
             o << "Stats:\n";
             o << "\tNumber of Values   : " << numValues << std::endl;
             o << "\tNumber of Buckets  : " << numBuckets << std::endl;
-            o << "\tActive buckets     : " << activebuckets << std::endl;
+            o << "\tActive buckets     : " << activebuckets << '\n';
             o << "\tAverage bucket size: " << (numValues / activebuckets)  << std::endl;
-            o << "\tMax bucket count   : " << max_bucket_count << std::endl;
-            o << "\tMin bucket count   : " << min_bucket_count << std::endl;
+            o << "\tMax bucket count   : " << max_bucket_count << '\n';
+            o << "\tMin bucket count   : " << min_bucket_count << '\n';
           }
 
         public:        // methods

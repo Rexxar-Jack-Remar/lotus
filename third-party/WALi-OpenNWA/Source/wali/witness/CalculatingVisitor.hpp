@@ -4,15 +4,15 @@
 /*!
  * @author Evan Driscoll
  */
-#include <stack>
 #include <map>
+#include <stack>
 
 #include "wali/Common.hpp"
 #include "wali/witness/Visitor.hpp"
 
 #include "wali/witness/CalculatingVisitor.hpp"
-#include "wali/witness/WitnessExtend.hpp"
 #include "wali/witness/WitnessCombine.hpp"
+#include "wali/witness/WitnessExtend.hpp"
 #include "wali/witness/WitnessMerge.hpp"
 #include "wali/witness/WitnessRule.hpp"
 #include "wali/witness/WitnessTrans.hpp"

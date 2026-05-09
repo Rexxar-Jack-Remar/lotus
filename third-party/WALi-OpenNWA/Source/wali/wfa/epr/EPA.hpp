@@ -9,8 +9,8 @@
 #include "wali/wfa/WFA.hpp"
 #include "wali/wfa/epr/FunctionalWeight.hpp"
 #include "wali/wfa/epr/FunctionalWeightMaker.hpp"
-#include <map>
 #include <list>
+#include <map>
 
 namespace wali 
 {

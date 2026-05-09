@@ -5,12 +5,12 @@
  * @author Nicholas Kidd
  */
 
-#include <iostream>
 #include "wali/Common.hpp"
+#include "wali/KeyContainer.hpp"
 #include "wali/Markable.hpp"
 #include "wali/Printable.hpp"
 #include "wali/SemElem.hpp"
-#include "wali/KeyContainer.hpp"
+#include <iostream>
 
 #include "wali/TaggedWeight.hpp"
 #include "wali/util/WeightChanger.hpp"
@@ -19,7 +19,7 @@ namespace wali
 {
   namespace wpds {
     class Config;
-  }
+  } // namespace wpds
 
   namespace wfa
   {

@@ -1,9 +1,9 @@
 #include "wali/graph/RegExp.hpp"
 #include "wali/graph/GraphCommon.hpp"
-#include <math.h>
 #include <algorithm>
-#include <iterator>
 #include <cassert>
+#include <iterator>
+#include <math.h>
 #include <sstream>
 
 #if defined(PPP_DBG)

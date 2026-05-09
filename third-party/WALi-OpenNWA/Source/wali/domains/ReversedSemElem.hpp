@@ -1,9 +1,9 @@
 #ifndef WALI_DOMAINS_REVERSED_SEM_ELEM_HPP
 #define WALI_DOMAINS_REVERSED_SEM_ELEM_HPP
 
-#include <limits>
-#include <boost/function.hpp>
 #include "wali/SemElem.hpp"
+#include <boost/function.hpp>
+#include <limits>
 
 namespace wali
 {
@@ -160,8 +160,8 @@ namespace wali
       return new ReversedSemElem(se);
     }
 
-  }
-}
+  } // namespace domains
+} // namespace wali
 
 
 // Yo emacs!

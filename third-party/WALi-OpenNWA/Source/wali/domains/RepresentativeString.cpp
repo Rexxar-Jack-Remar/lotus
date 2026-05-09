@@ -1,7 +1,7 @@
 #include "wali/domains/RepresentativeString.hpp"
 
-#include <utility>
 #include <boost/functional/hash.hpp>
+#include <utility>
 
 namespace wali {
   namespace domains {
@@ -40,7 +40,7 @@ namespace wali {
         }
         return right;
       }
-    }
+    } // namespace
 
   
     sem_elem_t RepresentativeString::one() const
@@ -127,8 +127,8 @@ namespace wali {
       return out;
     }
 
-  }
-}
+  } // namespace domains
+} // namespace wali
 
 // Yo, Emacs!
 // Local Variables:

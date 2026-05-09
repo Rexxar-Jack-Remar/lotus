@@ -6,9 +6,9 @@
  */
 
 #include "wali/Common.hpp"
-#include "wali/Printable.hpp"
-#include "wali/Markable.hpp"
 #include "wali/Countable.hpp"
+#include "wali/Markable.hpp"
+#include "wali/Printable.hpp"
 #include "wali/SemElem.hpp"
 #include "wali/wfa/TransSet.hpp"
 #include <list>
@@ -22,8 +22,8 @@ namespace wali
     namespace ewpds 
     {
       class EWPDS;
-    }
-  }
+    } // namespace ewpds
+  } // namespace wpds
 
   namespace wfa
   {

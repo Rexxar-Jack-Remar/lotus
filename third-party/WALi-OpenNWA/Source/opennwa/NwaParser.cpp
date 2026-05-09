@@ -1,11 +1,11 @@
+#include <cassert>
+#include <cctype>
+#include <cstdlib>
+#include <ctime>
+#include <exception>
 #include <iostream>
 #include <sstream>
 #include <vector>
-#include <cassert>
-#include <exception>
-#include <cstdlib>
-#include <ctime>
-#include <cctype>
 
 #include <boost/shared_ptr.hpp>
 
@@ -559,7 +559,9 @@ namespace opennwa { namespace parser { namespace details {
       }
 
 
-    }}}
+    } // namespace details
+} // namespace parser
+} // namespace opennwa
 
 ////////////////////////////////////////////////////////////////////////////////
 /// READ_NWA

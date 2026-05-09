@@ -13,7 +13,7 @@ namespace wali {
     unsigned int min(unsigned int v1, unsigned int v2) {
       return (v1 < v2) ? v1 : v2;
     }
-  }
+  } // namespace
 
   
   sem_elem_t ShortestPathSemiring::one() const
@@ -88,4 +88,4 @@ namespace wali {
     return out;
   }
 
-}
+} // namespace wali

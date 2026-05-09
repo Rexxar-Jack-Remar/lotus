@@ -2,11 +2,11 @@
 #define RELATION_OPS_HPP
 
 #include <algorithm>
-#include <iterator>
 #include <deque>
-#include <vector>
+#include <iterator>
 #include <map>
 #include <set>
+#include <vector>
 
 //#include "wali/util/unordered_set.hpp"
 

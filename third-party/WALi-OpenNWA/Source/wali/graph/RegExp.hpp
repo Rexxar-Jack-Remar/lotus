@@ -1,16 +1,16 @@
 #ifndef wali_graph__REGEXP_H_
 #define wali_graph__REGEXP_H_
 
+#include "wali/util/unordered_set.hpp"
 #include <iostream>
 #include <list>
-#include <vector>
-#include <set>
-#include "wali/util/unordered_set.hpp"
 #include <map>
+#include <set>
+#include <vector>
 
+#include "wali/HashMap.hpp"
 #include "wali/SemElem.hpp"
 #include "wali/ref_ptr.hpp"
-#include "wali/HashMap.hpp"
 
 #include "wali/graph/GraphCommon.hpp"
 

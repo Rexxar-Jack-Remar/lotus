@@ -160,7 +160,7 @@ namespace
       add_element_if_not_subsumed(set, the_hash, add_this, keep_what);
     }
   }
-}
+} // namespace
 
 
 namespace wali
@@ -317,8 +317,8 @@ namespace wali
       return the_hash;
     }
 
-  }
-}
+  } // namespace domains
+} // namespace wali
 
 
 // Yo emacs!

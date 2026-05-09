@@ -1,8 +1,8 @@
 #ifndef wali_wpds_fwpds_SWPDS_GUARD
 #define wali_wpds_fwpds_SWPDS_GUARD 1
 
-#include <map>
 #include "wali/Common.hpp"
+#include <map>
 
 #include "wali/wpds/RuleFunctor.hpp"
 
@@ -10,9 +10,9 @@
 
 #include "wali/wpds/fwpds/FWPDS.hpp"
 
+#include "wali/graph/Graph.hpp"
 #include "wali/graph/GraphCommon.hpp"
 #include "wali/graph/InterGraph.hpp"
-#include "wali/graph/Graph.hpp"
 #include "wali/graph/SummaryGraph.hpp"
 
 namespace wali 
@@ -22,7 +22,7 @@ namespace wali
   {
     class WFA;
     class Trans;
-  }
+  } // namespace wfa
 
   namespace wpds 
   {

@@ -1,7 +1,7 @@
 #include "wali/wfa/State.hpp"
+#include "wali/graph/GraphCommon.hpp"
 #include "wali/wpds/ewpds/ETrans.hpp"
 #include "wali/wpds/fwpds/SWPDS.hpp"
-#include "wali/graph/GraphCommon.hpp"
 
 using namespace std;
 

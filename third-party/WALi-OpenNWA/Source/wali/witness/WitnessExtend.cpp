@@ -52,7 +52,7 @@ namespace wali
     {
       formatDepth(o,depth);
       o << "WitnessExtend: ";
-      user_se->print(o) << std::endl;
+      user_se->print(o) << '\n';
       // Dumps out to much information.
       // TODO. Make a compile or runtime flag.
 #if 1

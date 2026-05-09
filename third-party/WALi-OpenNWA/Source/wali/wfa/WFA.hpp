@@ -12,25 +12,25 @@
 
 // ::wali
 #include "wali/Common.hpp"
-#include "wali/Printable.hpp"
-#include "wali/SemElem.hpp"
 #include "wali/HashMap.hpp"
 #include "wali/KeyContainer.hpp"
+#include "wali/Printable.hpp"
 #include "wali/Progress.hpp"
+#include "wali/SemElem.hpp"
 #include "wali/domains/SemElemSet.hpp"
 
 // ::wali::wfa
-#include "wali/wfa/WeightMaker.hpp"
+#include "wali/wfa/DeterminizeWeightGen.hpp"
 #include "wali/wfa/Trans.hpp"
 #include "wali/wfa/TransSet.hpp"
-#include "wali/wfa/DeterminizeWeightGen.hpp"
+#include "wali/wfa/WeightMaker.hpp"
 
 // std::c++
 #include <iostream>
-#include <vector>
 #include <list>
-#include <set>
 #include <map>
+#include <set>
+#include <vector>
 
 namespace wali
 {
@@ -44,18 +44,18 @@ namespace wali
     namespace ewpds
     {
       class EWPDS;
-    }
+    } // namespace ewpds
     namespace fwpds
     {
       class FWPDS;
       class SWPDS;
-    }
-  }
+    } // namespace fwpds
+  } // namespace wpds
 
   namespace regex {
     class Regex;
     typedef wali::ref_ptr<Regex> regex_t;
-  }
+  } // namespace regex
 
   namespace wfa
   {
@@ -1011,7 +1011,7 @@ namespace wali
                boost::function<DeltaResult (WFA const &)> tester);
                
 
-    }
+    } // namespace delta
 
   } // namespace wfa
 

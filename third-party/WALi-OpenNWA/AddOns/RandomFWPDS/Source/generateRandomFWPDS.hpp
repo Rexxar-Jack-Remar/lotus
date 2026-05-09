@@ -5,15 +5,15 @@
 #include "wali/wpds/WPDS.hpp"
 
 // ::wali
+#include "wali/Countable.hpp"
 #include "wali/Key.hpp"
 #include "wali/SemElem.hpp"
 #include "wali/ref_ptr.hpp"
-#include "wali/Countable.hpp"
 
 // ::std
+#include <fstream>
 #include <string>
 #include <vector>
-#include <fstream>
 
 namespace wali 
 {

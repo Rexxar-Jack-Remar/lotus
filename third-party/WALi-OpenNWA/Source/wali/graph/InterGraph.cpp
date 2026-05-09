@@ -1,19 +1,19 @@
 #include "wali/graph/InterGraph.hpp"
+#include "wali/graph/Functional.hpp"
 #include "wali/graph/IntraGraph.hpp"
 #include "wali/graph/RegExp.hpp"
-#include "wali/graph/Functional.hpp"
 
 #include "wali/util/Timer.hpp"
 
+#include <boost/cast.hpp>
+#include <fstream>
+#include <iomanip>
+#include <iostream>
 #include <math.h>
+#include <sstream>
+#include <sstream>
 #include <stdlib.h>
 #include <time.h>
-#include <fstream>
-#include <iostream>
-#include <sstream>
-#include <iomanip>
-#include <sstream>
-#include <boost/cast.hpp>
 
 // ::wali
 #include "wali/SemElemTensor.hpp"
@@ -98,7 +98,7 @@ namespace wali {
               ++iter){
             if(iter->first > curset){
               if(curset != -1) 
-                o << ">>>>>>>>>" << std::endl;
+                o << ">>>>>>>>>" << '\n';
               curset = iter->first;
             }
             o << iter->second << " ";

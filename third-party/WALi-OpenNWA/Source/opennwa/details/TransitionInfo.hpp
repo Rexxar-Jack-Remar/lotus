@@ -10,9 +10,9 @@
 #include "opennwa/NwaFwd.hpp"
  
 // ::wali
-#include "wali/KeyContainer.hpp"
 #include "opennwa/details/SymbolStorage.hpp"
 #include "wali/Key.hpp" 
+#include "wali/KeyContainer.hpp"
  
 // std::c++
 #include <map> 
@@ -1128,8 +1128,8 @@ namespace opennwa
     };
 
 
-  }
-}
+  } // namespace details
+} // namespace opennwa
 
 // Yo, Emacs!
 // Local Variables:

@@ -6,10 +6,10 @@
  */
 
 #include "wali/Common.hpp"
+#include "Reach.hpp"
 #include "wali/wfa/Trans.hpp"
 #include "wali/wfa/TransSet.hpp"
 #include "wali/wfa/WFA.hpp"
-#include "Reach.hpp"
 
 int main()
 {
@@ -28,7 +28,7 @@ int main()
   sem_elem_t R = new Reach(true);
   s.insert( new Trans(a,b,c,R->one()) );
   s.insert( new Trans(a,getKey("b"),d,R->one()) );
-  s.print( std::cout << "TransSet " ) << std::endl;
+  s.print( std::cout << "TransSet " ) << '\n';
 
   return 0;
 

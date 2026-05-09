@@ -108,8 +108,8 @@ namespace opennwa
     }
 
       
-  }
-}
+  } // namespace construct
+} // namespace opennwa
 
 
 // Yo, Emacs!

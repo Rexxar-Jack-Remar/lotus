@@ -17,16 +17,16 @@
 
  */
 #include "wali/wpds/WPDS.hpp"
-#include "wali/wpds/Rule.hpp"
-#include "wali/wpds/Config.hpp"
-#include "wali/wpds/fwpds/FWPDS.hpp"
-#include "wali/wfa/Trans.hpp"
-#include "wali/wfa/State.hpp"
-#include "wali/witness/WitnessWrapper.hpp"
 #include "Reach.hpp"
-#include <string>
-#include <sstream>
+#include "wali/wfa/State.hpp"
+#include "wali/wfa/Trans.hpp"
+#include "wali/witness/WitnessWrapper.hpp"
+#include "wali/wpds/Config.hpp"
+#include "wali/wpds/Rule.hpp"
+#include "wali/wpds/fwpds/FWPDS.hpp"
 #include <fstream>
+#include <sstream>
+#include <string>
 
 void doReach()
 {
@@ -58,7 +58,7 @@ void doReach()
   myWpds.add_rule( p, n[10], p, n[11], reachOne);
   myWpds.add_rule( p, n[11], p, reachOne);
 
-  myWpds.print( std::cerr ) << std::endl;
+  myWpds.print( std::cerr ) << '\n';
   std::ofstream fxml( "myWpds.xml" );
   myWpds.marshall( fxml );
   fxml.close();
@@ -68,21 +68,21 @@ void doReach()
   query.addTrans( p, n[7], accept, reachOne );
   query.set_initial_state( p );
   query.add_final_state( accept );
-  query.print( std::cerr << "BEFORE poststar\n" ) << std::endl;
+  query.print( std::cerr << "BEFORE poststar\n" ) << '\n';
   WFA answer;
   myWpds.poststar(query,answer);
-  answer.print( std::cerr << "\nAFTER poststar\n" ) << std::endl;
+  answer.print( std::cerr << "\nAFTER poststar\n" ) << '\n';
 
 }
 
 int main()
 {
   doReach();
-  std::cerr << "# Trans : " << wali::wfa::Trans::numTrans << std::endl;
-  std::cerr << "# States : " << wali::wfa::State::numStates << std::endl;
-  std::cerr << "# Rules : " << wali::wpds::Rule::numRules << std::endl;
-  std::cerr << "# Configs : " << wali::wpds::Config::numConfigs << std::endl;
-  std::cerr << "# Reaches : " << Reach::numReaches << std::endl;
+  std::cerr << "# Trans : " << wali::wfa::Trans::numTrans << '\n';
+  std::cerr << "# States : " << wali::wfa::State::numStates << '\n';
+  std::cerr << "# Rules : " << wali::wpds::Rule::numRules << '\n';
+  std::cerr << "# Configs : " << wali::wpds::Config::numConfigs << '\n';
+  std::cerr << "# Reaches : " << Reach::numReaches << '\n';
   return 0;
 }
 

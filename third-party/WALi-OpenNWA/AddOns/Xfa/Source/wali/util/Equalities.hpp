@@ -3,9 +3,9 @@
 
 #include "wali/util/DisjointSets.hpp"
 #include "wali/domains/TraceSplitSemElem.hpp"
-#include <string>
 #include <map>
 #include <set>
+#include <string>
 
 namespace wali {
   namespace util {
@@ -142,8 +142,8 @@ namespace wali {
       
     };
 
-  }
-}
+  } // namespace util
+} // namespace wali
 
 
 // Yo emacs!

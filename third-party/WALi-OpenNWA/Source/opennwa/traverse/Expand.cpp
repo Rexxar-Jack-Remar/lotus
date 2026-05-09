@@ -82,8 +82,8 @@ namespace opennwa {
     }
       
 
-  }
-}
+  } // namespace experimental
+} // namespace opennwa
 
 
 // Yo, Emacs!

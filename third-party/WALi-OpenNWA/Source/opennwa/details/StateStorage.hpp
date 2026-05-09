@@ -8,16 +8,16 @@
 #include "opennwa/NwaFwd.hpp"
 
 // ::wali
-#include "wali/Printable.hpp"
+#include "opennwa/ClientInfo.hpp"
 #include "wali/Key.hpp"
 #include "wali/KeyContainer.hpp"
+#include "wali/Printable.hpp"
 #include "wali/ref_ptr.hpp"
-#include "opennwa/ClientInfo.hpp"
 
 // std::c++
 #include <iostream>
-#include <set>
 #include <map>
+#include <set>
 
 namespace opennwa
 {
@@ -506,8 +506,8 @@ namespace opennwa
     };
 
 
-  }
-}
+  } // namespace details
+} // namespace opennwa
 
 // Yo, Emacs!
 // Local Variables:

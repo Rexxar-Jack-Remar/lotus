@@ -7,8 +7,8 @@
 
 #include "wali/Common.hpp"
 #include "wali/ref_ptr.hpp"
-#include "wali/witness/Witness.hpp"
 #include "wali/witness/Visitor.hpp"
+#include "wali/witness/Witness.hpp"
 #include <iostream>
 #include <string>
 

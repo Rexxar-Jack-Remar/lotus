@@ -6,18 +6,18 @@
 
 #include "wali/Common.hpp"
 #include "wali/DefaultWorklist.hpp"
-#include "wali/wfa/WFA.hpp"
-#include "wali/wfa/State.hpp"
-#include "wali/wfa/TransFunctor.hpp"
-#include "wali/wfa/Trans.hpp"
-#include "wali/wfa/WeightMaker.hpp"
-#include "wali/regex/AllRegex.hpp"
-#include "wali/wpds/GenKeySource.hpp"
-#include "wali/wfa/DeterminizeWeightGen.hpp"
-#include "wali/wpds/WPDS.hpp"
 #include "wali/KeyPairSource.hpp"
-#include "wali/wpds/GenKeySource.hpp"
 #include "wali/domains/SemElemSet.hpp"
+#include "wali/regex/AllRegex.hpp"
+#include "wali/wfa/DeterminizeWeightGen.hpp"
+#include "wali/wfa/State.hpp"
+#include "wali/wfa/Trans.hpp"
+#include "wali/wfa/TransFunctor.hpp"
+#include "wali/wfa/WFA.hpp"
+#include "wali/wfa/WeightMaker.hpp"
+#include "wali/wpds/GenKeySource.hpp"
+#include "wali/wpds/GenKeySource.hpp"
+#include "wali/wpds/WPDS.hpp"
 
 #include "wali/wpds/fwpds/FWPDS.hpp"
 #undef COMBINE // grumble grumble swear swear
@@ -25,9 +25,9 @@
 
 #include <algorithm>
 #include <iostream>
-#include <vector>
-#include <stack>
 #include <iterator>
+#include <stack>
+#include <vector>
 
 using wali::WALI_EPSILON;
 using wali::wfa::WFA;
@@ -75,7 +75,7 @@ namespace
     }
   };
   
-}    
+} // namespace    
   
 
 

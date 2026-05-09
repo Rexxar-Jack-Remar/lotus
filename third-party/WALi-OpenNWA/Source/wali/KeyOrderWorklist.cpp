@@ -3,9 +3,9 @@
  */
 
 #include "wali/Common.hpp"
+#include "wali/KeyContainer.hpp"
 #include "wali/KeyOrderWorklist.hpp"
 #include "wali/wfa/Trans.hpp"
-#include "wali/KeyContainer.hpp"
 
 namespace wali
 {
@@ -16,5 +16,5 @@ namespace wali
   KeyOrderWorklist::~KeyOrderWorklist()
   {
   }
-}
+} // namespace wali
 

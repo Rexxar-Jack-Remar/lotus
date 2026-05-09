@@ -2,10 +2,10 @@
  * @author Nicholas Kidd
  */
 
-#include <memory>
 #include "wali/Key.hpp"
 #include "wali/KeySource.hpp"
 #include "wali/KeySpace.hpp"
+#include <memory>
 
 namespace wali
 {

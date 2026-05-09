@@ -387,7 +387,7 @@ namespace opennwa
         printKey(o,*it);
         o << " (=" << *it << ")";
       }
-      o << "}\n" << std::endl;
+      o << "}\n" << '\n';
       
       //Prints the initial states.
       o << "Q0: {\n  ";
@@ -400,7 +400,7 @@ namespace opennwa
         printKey(o,*it);
         o << " (=" << *it << ")";
       }
-      o << "}\n" << std::endl;
+      o << "}\n" << '\n';
       
       //Print the final states.
       o << "Qf: {\n  ";
@@ -413,7 +413,7 @@ namespace opennwa
         printKey(o,*it);
         o << " (=" << *it << ")";
       }
-      o << "}" << std::endl;
+      o << "}" << '\n';
       
       return o;
     }
@@ -617,8 +617,8 @@ namespace opennwa
     }
 
 
-  }
-}
+  } // namespace details
+} // namespace opennwa
 
 // Yo, Emacs!
 // Local Variables:

@@ -61,7 +61,7 @@ namespace wali
       else {
         // TODO: throw an error
         *waliErr << "[ERROR] Unwrap<merge_fn_t> called on non WitnessMergeFn weight.\n";
-        mf->print( *waliErr << "   mf: " ) << std::endl;
+        mf->print( *waliErr << "   mf: " ) << '\n';
         assert(0);
         return 0;
       }

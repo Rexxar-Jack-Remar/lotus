@@ -73,5 +73,5 @@ namespace wali {
       }
 
     } // namespace epr
-  } // namespace epr
+  } // namespace wfa
 } // namespace wali

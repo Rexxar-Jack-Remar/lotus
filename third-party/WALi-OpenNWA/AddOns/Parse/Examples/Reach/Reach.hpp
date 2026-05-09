@@ -7,8 +7,8 @@
 
 #include "wali/SemElem.hpp"
 #include "wali/MergeFn.hpp"
-#include "wali/WeightFactory.hpp"
 #include "wali/MergeFnFactory.hpp"
+#include "wali/WeightFactory.hpp"
 #include <string>
 
 using wali::SemElem;

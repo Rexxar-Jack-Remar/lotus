@@ -6,21 +6,21 @@
  */
 
 #include "wali/Common.hpp"
+#include "wali/DefaultWorklist.hpp"
+#include "wali/KeyPairSource.hpp"
 #include "wali/SemElem.hpp"
 #include "wali/Worklist.hpp"
-#include "wali/KeyPairSource.hpp"
 #include "wali/wfa/State.hpp"
 #include "wali/wfa/TransFunctor.hpp"
 #include "wali/wfa/TransSet.hpp"
-#include "wali/wpds/WPDS.hpp"
 #include "wali/wpds/Config.hpp"
+#include "wali/wpds/GenKeySource.hpp"
 #include "wali/wpds/Rule.hpp"
 #include "wali/wpds/RuleFunctor.hpp"
+#include "wali/wpds/WPDS.hpp"
 #include "wali/wpds/Wrapper.hpp"
-#include "wali/wpds/GenKeySource.hpp"
-#include "wali/DefaultWorklist.hpp"
-#include <iostream>
 #include <cassert>
+#include <iostream>
 
 //
 // TODO: 
@@ -1159,7 +1159,7 @@ namespace wali
     {
       if( wali::is_strict() && is_pds_state(orig->to())) {
         *waliErr << "[ERROR] WALi cannot have incoming transition to a PDS state\n";
-        orig->print( *waliErr << "    ") << std::endl;
+        orig->print( *waliErr << "    ") << '\n';
         //assert(0);
       }
 
@@ -1225,7 +1225,7 @@ namespace wali
         }
       };
       
-    }
+    } // namespace details
 
     void
     WPDS::toWfa(wfa::WFA & wfa) const

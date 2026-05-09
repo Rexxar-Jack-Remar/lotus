@@ -319,8 +319,8 @@ namespace opennwa
       return entries;
     }
 
-  }
-}
+  } // namespace query
+} // namespace opennwa
 
 
 // Yo, Emacs!

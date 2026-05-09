@@ -29,7 +29,7 @@ namespace opennwa
       return nwa._private_NwaToBackwardsPdsCalls_(wg);
     }
       
-  } // end of 'namespace nwa_pds' !!!
+  } // namespace nwa_pds
 
 
     // constructs the PDS equivalent to this NWA, stacking returns
@@ -448,7 +448,7 @@ namespace opennwa
   }
       
 
-}
+} // namespace opennwa
 
 
 // Yo, Emacs!

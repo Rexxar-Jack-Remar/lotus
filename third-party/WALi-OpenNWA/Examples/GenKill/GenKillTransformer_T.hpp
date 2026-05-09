@@ -1,12 +1,12 @@
 #ifndef GEN_KILL_TRANSFORMER_GUARD
 #define GEN_KILL_TRANSFORMER_GUARD 1
 
-#include <iostream>
-#include <climits>
-#include <cassert>
 #include "wali/Common.hpp"
-#include "wali/ref_ptr.hpp"
 #include "wali/SemElem.hpp"
+#include "wali/ref_ptr.hpp"
+#include <cassert>
+#include <climits>
+#include <iostream>
 
 /*!
  * @class GenKillTransformer_T

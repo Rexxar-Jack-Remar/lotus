@@ -6,11 +6,11 @@
 #include "wali/Common.hpp"
 #include "wali/witness/VisitorDot.hpp"
 #include "wali/witness/Witness.hpp"
-#include "wali/witness/WitnessExtend.hpp"
 #include "wali/witness/WitnessCombine.hpp"
+#include "wali/witness/WitnessExtend.hpp"
+#include "wali/witness/WitnessMerge.hpp"
 #include "wali/witness/WitnessRule.hpp"
 #include "wali/witness/WitnessTrans.hpp"
-#include "wali/witness/WitnessMerge.hpp"
 #include <fstream>
 
 namespace wali

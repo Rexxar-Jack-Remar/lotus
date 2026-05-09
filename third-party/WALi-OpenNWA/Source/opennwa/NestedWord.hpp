@@ -6,11 +6,11 @@
 ///
 
 #include "wali/Countable.hpp"
-#include "wali/Printable.hpp"
 #include "opennwa/NwaFwd.hpp"
+#include "wali/Printable.hpp"
+#include <algorithm>
 #include <sstream>
 #include <vector>
-#include <algorithm>
 
 namespace opennwa
 {
@@ -165,7 +165,7 @@ namespace opennwa
     os << ss.str();
     return os;
   }
-}
+} // namespace opennwa
 
 
 // Yo, Emacs!

@@ -8,8 +8,8 @@
 #include "wali/Common.hpp"
 #include "wali/Worklist.hpp"
 #include "wali/wfa/State.hpp"
-#include <set>
 #include <map>
+#include <set>
 
 namespace wali 
 {

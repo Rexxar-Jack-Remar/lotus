@@ -1,15 +1,15 @@
-#include <sstream>
 #include <cstring>
+#include <sstream>
 
 #include "opennwa/Nwa.hpp"
-#include "opennwa/details/Configuration.hpp"
 #include "opennwa/NestedWord.hpp"
-#include "opennwa/query/transitions.hpp"
+#include "opennwa/details/Configuration.hpp"
+#include "opennwa/nwa_pds/conversions.hpp"
 #include "opennwa/query/calls.hpp"
 #include "opennwa/query/internals.hpp"
-#include "opennwa/nwa_pds/conversions.hpp"
-#include "wali/wpds/fwpds/FWPDS.hpp"
+#include "opennwa/query/transitions.hpp"
 #include "wali/wfa/State.hpp"
+#include "wali/wpds/fwpds/FWPDS.hpp"
 
 namespace opennwa
 {
@@ -2563,7 +2563,7 @@ namespace opennwa
     return false;
   }
 
-}
+} // namespace opennwa
 
 
 // Yo, Emacs!

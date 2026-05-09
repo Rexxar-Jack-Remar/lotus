@@ -3,11 +3,11 @@
  */
 
 #include "wali/hm_hash.hpp"
+#include "wali/regex/Concat.hpp"
 #include "wali/regex/Regex.hpp"
 #include "wali/regex/Root.hpp"
-#include "wali/regex/Concat.hpp"
-#include "wali/regex/Union.hpp"
 #include "wali/regex/Star.hpp"
+#include "wali/regex/Union.hpp"
 
 namespace wali 
 {

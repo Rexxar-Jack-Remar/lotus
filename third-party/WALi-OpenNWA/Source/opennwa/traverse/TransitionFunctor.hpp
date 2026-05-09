@@ -37,8 +37,8 @@ namespace opennwa {
                             State source, State pred, Symbol symbol, State target) = 0;
     };
       
-  }
-}
+  } // namespace traverse
+} // namespace opennwa
 
 
 

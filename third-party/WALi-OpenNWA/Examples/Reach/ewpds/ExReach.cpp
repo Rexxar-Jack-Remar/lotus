@@ -19,14 +19,14 @@ fun g()
     n9: <$ g exit node $>
 
  */
-#include <wali/wpds/ewpds/EWPDS.hpp>
-#include <wali/wpds/ewpds/ERule.hpp>
-#include <wali/wpds/Config.hpp>
-#include <wali/wfa/Trans.hpp>
-#include <wali/wfa/State.hpp>
 #include "../Reach.hpp"
-#include <string>
 #include <sstream>
+#include <string>
+#include <wali/wfa/State.hpp>
+#include <wali/wfa/Trans.hpp>
+#include <wali/wpds/Config.hpp>
+#include <wali/wpds/ewpds/ERule.hpp>
+#include <wali/wpds/ewpds/EWPDS.hpp>
 
 void doReach()
 {
@@ -67,7 +67,7 @@ void doReach()
     myEwpds.add_rule( p, n[9] , p , reachOne);
 
     // Print the EWPDS
-    myEwpds.print( std::cerr ) << std::endl;
+    myEwpds.print( std::cerr ) << '\n';
 
     // Perform poststar query
     WFA query;
@@ -76,18 +76,18 @@ void doReach()
     std::cerr << "> done\n";
     //query.add_initial_state( p );
     //query.add_final_state( accept );
-    query.print( std::cerr << "BEFORE poststar\n" ) << std::endl;
+    query.print( std::cerr << "BEFORE poststar\n" ) << '\n';
     WFA answer = myEwpds.poststar(query);
-    answer.print( std::cerr << "\nAFTER poststar\n" ) << std::endl;
+    answer.print( std::cerr << "\nAFTER poststar\n" ) << '\n';
 
     // Perfor prestar query
     WFA prequery;
     prequery.addTrans( p, n[4], accept, reachOne );
     //query.add_initial_state( p );
     //query.add_final_state( accept );
-    prequery.print( std::cerr << "BEFORE prestar\n" ) << std::endl;
+    prequery.print( std::cerr << "BEFORE prestar\n" ) << '\n';
     answer = myEwpds.prestar(prequery);
-    answer.print( std::cerr << "\nAFTER prestar\n" ) << std::endl;
+    answer.print( std::cerr << "\nAFTER prestar\n" ) << '\n';
 
     /*
     // Perform path summary query
@@ -120,11 +120,11 @@ void doReach()
 int main()
 {
     doReach();
-    std::cerr << "# Trans : " << wali::wfa::Trans::numTrans << std::endl;
-    std::cerr << "# States : " << wali::wfa::State::numStates << std::endl;
-    std::cerr << "# Rules : " << wali::wpds::Rule::numRules << std::endl;
-    std::cerr << "# Configs : " << wali::wpds::Config::numConfigs << std::endl;
-    std::cerr << "# Reaches : " << Reach::numReaches << std::endl;
+    std::cerr << "# Trans : " << wali::wfa::Trans::numTrans << '\n';
+    std::cerr << "# States : " << wali::wfa::State::numStates << '\n';
+    std::cerr << "# Rules : " << wali::wpds::Rule::numRules << '\n';
+    std::cerr << "# Configs : " << wali::wpds::Config::numConfigs << '\n';
+    std::cerr << "# Reaches : " << Reach::numReaches << '\n';
     return 0;
 }
 /*

@@ -4,9 +4,9 @@
  */
 
 #include "wali/Common.hpp"
+#include "wali/witness/Visitor.hpp"
 #include "wali/witness/WitnessMerge.hpp"
 #include "wali/witness/WitnessMergeFn.hpp"
-#include "wali/witness/Visitor.hpp"
 
 namespace wali
 {
@@ -54,7 +54,7 @@ namespace wali
       formatDepth(o,depth);
       o << "WitnessMerge < ";
       witness_merge_fn->print(o) << " > : ";
-      user_se->print(o) << std::endl;
+      user_se->print(o) << '\n';
       // Dumps out to much information.
       // TODO. Make a compile or runtime flag.
 #if 1

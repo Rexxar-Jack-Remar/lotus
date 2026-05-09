@@ -1,5 +1,5 @@
-#include <sstream>
 #include <cstring>
+#include <sstream>
 
 #include "opennwa/Nwa.hpp"
 #include "opennwa/nwa_pds/plusWpds.hpp"
@@ -109,8 +109,8 @@ namespace opennwa
     }
 
 
-  }
-}
+  } // namespace nwa_pds
+} // namespace opennwa
 
 
 // Yo, Emacs!

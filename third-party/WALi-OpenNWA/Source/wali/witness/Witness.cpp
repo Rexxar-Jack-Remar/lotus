@@ -5,14 +5,14 @@
  */
 
 #include "wali/Common.hpp"
-#include "wali/witness/Witness.hpp"
-#include "wali/witness/WitnessExtend.hpp"
-#include "wali/witness/WitnessCombine.hpp"
 #include "wali/witness/Visitor.hpp"
 #include "wali/witness/VisitorPrinter.hpp"
+#include "wali/witness/Witness.hpp"
+#include "wali/witness/WitnessCombine.hpp"
+#include "wali/witness/WitnessExtend.hpp"
 
-#include <typeinfo>
 #include <map>
+#include <typeinfo>
 
 namespace wali
 {
@@ -49,9 +49,9 @@ namespace wali
       //se->print( std::cerr << "\n\t+++ " ) << std::endl;
       if( NULL == witness ) {
         *waliErr << "[WARNING] witness_t::getWitness - failed downcast.\n";
-        *waliErr << "          Param sem_elem_t is not a witness (line 53)." << std::endl;
+        *waliErr << "          Param sem_elem_t is not a witness (line 53)." << '\n';
         *waliErr << "          se == ";
-        se->print(*waliErr) << std::endl;
+        se->print(*waliErr) << '\n';
         assert(false);
       }
       return witness;
@@ -129,7 +129,7 @@ namespace wali
       if( 0 == that )
       {
         *waliErr << "SemElem is \"" << typeid(se).name() << "\"\n";
-        se->print( *waliErr << "   That : " ) << std::endl;
+        se->print( *waliErr << "   That : " ) << '\n';
         assert( 0 );
       }
       if( isEmpty && isOne() ) {
@@ -213,8 +213,8 @@ namespace wali
     std::ostream& Witness::prettyPrint( std::ostream& o, size_t depth ) const
     {
       formatDepth( o , depth );
-      o << "Witness: " << std::endl;
-      user_se->print(o) << std::endl;
+      o << "Witness: " << '\n';
+      user_se->print(o) << '\n';
       return o;
     }
 

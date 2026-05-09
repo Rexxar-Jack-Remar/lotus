@@ -6,8 +6,8 @@
  */
 
 #include "wali/MergeFn.hpp"
-#include "wali/wfa/ITrans.hpp"
 #include "wali/wfa/DecoratorTrans.hpp"
+#include "wali/wfa/ITrans.hpp"
 #include "wali/wpds/ewpds/ERule.hpp"
 
 namespace wali {

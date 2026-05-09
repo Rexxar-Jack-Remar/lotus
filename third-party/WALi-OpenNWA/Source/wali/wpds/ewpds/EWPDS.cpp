@@ -6,31 +6,31 @@
 
 // ::wali
 #include "wali/Common.hpp"
+#include "wali/KeyPairSource.hpp"
+#include "wali/KeySource.hpp"
 #include "wali/SemElem.hpp"
 #include "wali/Worklist.hpp"
-#include "wali/KeySource.hpp"
-#include "wali/KeyPairSource.hpp"
 
 // ::wali::wfa
 #include "wali/wfa/ITrans.hpp"
-#include "wali/wfa/Trans.hpp"
 #include "wali/wfa/State.hpp"
+#include "wali/wfa/Trans.hpp"
 #include "wali/wfa/TransFunctor.hpp"
 #include "wali/wfa/TransSet.hpp"
 
 // ::wali::wpds
 #include "wali/wpds/Config.hpp"
+#include "wali/wpds/GenKeySource.hpp"
 #include "wali/wpds/RuleFunctor.hpp"
 #include "wali/wpds/Wrapper.hpp"
-#include "wali/wpds/GenKeySource.hpp"
 
 // ::wali::wpds::ewpds
 #include "wali/wpds/ewpds/ERule.hpp"
-#include "wali/wpds/ewpds/EWPDS.hpp"
 #include "wali/wpds/ewpds/ETrans.hpp"
+#include "wali/wpds/ewpds/EWPDS.hpp"
 
-#include <iostream>
 #include <cassert>
+#include <iostream>
 
 namespace wali
 {
@@ -228,7 +228,7 @@ namespace wali
             }
             else {
               *waliErr << "[ERROR] EWPDS :: Cannot add again the same push rule.\n";
-              r->print( *waliErr << "    : " ) << std::endl;
+              r->print( *waliErr << "    : " ) << '\n';
               assert(false);
             }
           }
@@ -239,7 +239,7 @@ namespace wali
             assert(erule != NULL);
 	    if(!mf->equal(erule->merge_fn())) {
 	      *waliErr << "[ERROR] EWPDS :: Cannot add again the same push rule.\n";
-	      r->print( *waliErr << "    : " ) << std::endl;
+	      r->print( *waliErr << "    : " ) << '\n';
 	      assert(false);
 	    }
           }
@@ -279,7 +279,7 @@ namespace wali
 	    ERule *er = (ERule*)(r.get_ptr());
 	    if(!x->merge_fn()->equal(er->merge_fn())) {
 	      *waliErr << "[ERROR] EWPDS :: Cannot give two push rules with same r.h.s.\n";
-	      r->print( *waliErr << "    : " ) << std::endl;
+	      r->print( *waliErr << "    : " ) << '\n';
 	      assert(false);
 	    }
           }
@@ -512,7 +512,7 @@ namespace wali
         RuleMarshaller rm(o);
         o << "<EWPDS>\n";
         WPDS::for_each( rm );
-        o << "</EWPDS>" << std::endl;
+        o << "</EWPDS>" << '\n';
         return o;
       }
 

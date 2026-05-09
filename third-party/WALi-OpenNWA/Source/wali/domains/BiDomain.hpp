@@ -110,8 +110,8 @@ namespace wali {
       sem_elem_t _value;
     };
 
-  }
-}
+  } // namespace domains
+} // namespace wali
 
 // Yo emacs!
 // Local Variables:

@@ -8,17 +8,17 @@
  */
 
 // ::wali
-#include "wali/Printable.hpp"
 #include "wali/Countable.hpp"
 #include "wali/KeyContainer.hpp"
+#include "wali/Printable.hpp"
 
-#include "opennwa/details/SymbolStorage.hpp"
 #include "opennwa/details/StateStorage.hpp"
+#include "opennwa/details/SymbolStorage.hpp"
 #include "opennwa/details/TransitionStorage.hpp"
 
-#include "wali/wpds/WPDS.hpp"
-#include "wali/wpds/RuleFunctor.hpp"
 #include "wali/wpds/Rule.hpp"
+#include "wali/wpds/RuleFunctor.hpp"
+#include "wali/wpds/WPDS.hpp"
 #include <wali/util/DisjointSets.hpp>
 
 #include "wali/Worklist.hpp"
@@ -36,10 +36,10 @@
 #endif
 
 // std::c++
-#include <iostream>
-#include <sstream>
-#include <map>
 #include <deque>
+#include <iostream>
+#include <map>
+#include <sstream>
 
 namespace opennwa
 {
@@ -1512,7 +1512,7 @@ namespace opennwa
     void combineWith(Nwa const & rhs);
   };
 
-}
+} // namespace opennwa
 
 
 // Yo, Emacs!

@@ -2,10 +2,10 @@
 #include <sstream>
 
 #include "wali/wpds/DebugWPDS.hpp"
-#include "wali/wpds/Config.hpp"
-#include "wali/wfa/WFA.hpp"
 #include "wali/wfa/State.hpp"
 #include "wali/wfa/Trans.hpp"
+#include "wali/wfa/WFA.hpp"
+#include "wali/wpds/Config.hpp"
 
 namespace wali
 {
@@ -38,7 +38,7 @@ namespace wali
 
       while( get_from_worklist( t ) ) 
       {
-        t->print( *waliErr << "$$$ Popped t ==> " ) << std::endl;
+        t->print( *waliErr << "$$$ Popped t ==> " ) << '\n';
         // TODO insert debugger code
         pre( t , fa );
       }
@@ -63,7 +63,7 @@ namespace wali
           }
           iter_cnt++;
         }
-        t->print( *waliErr << "$$$ Popped t ==> " ) << std::endl;
+        t->print( *waliErr << "$$$ Popped t ==> " ) << '\n';
         // TODO insert debugger code
         post( t , fa );
       }
@@ -89,7 +89,7 @@ namespace wali
           rule_t & r = *fwit;
 
           { // BEGIN DEBUGGING
-            r->print( *waliErr << "\tMatched - " ) << std::endl;
+            r->print( *waliErr << "\tMatched - " ) << '\n';
           } // END DEBUGGING
 
           poststar_handle_trans( t,fa,r,dnew );
@@ -104,7 +104,7 @@ namespace wali
           wfa::ITrans* tprime = *it;
 
           { // BEGIN DEBUGGING
-            tprime->print( *waliErr << "\tMatched - " ) << std::endl;
+            tprime->print( *waliErr << "\tMatched - " ) << '\n';
           } // END DEBUGGING
 
           sem_elem_t wght = tprime->weight()->extend( dnew );
@@ -129,8 +129,8 @@ namespace wali
       Key rtstate = r->to_state();
       Key rtstack = r->to_stack1();
       sem_elem_t wrule_trans = delta->extend( r->weight() );
-      *waliErr << "  --- [DebugWPDS::poststar_handle_trans] delta \\extend r." << std::endl;
-      wrule_trans->print( *waliErr << "   " ) << "\n  ----" << std::endl; 
+      *waliErr << "  --- [DebugWPDS::poststar_handle_trans] delta \\extend r." << '\n';
+      wrule_trans->print( *waliErr << "   " ) << "\n  ----" << '\n'; 
 
       if( r->to_stack2() == WALI_EPSILON ) {
         update( rtstate, rtstack, t->to(), wrule_trans, r->to() );
@@ -190,7 +190,7 @@ namespace wali
         )
     {
       wfa::ITrans* tmp = new Trans(from,stack,to,se);
-      tmp->print( *waliErr << "  --- [DebugWPDS::update] t_gen ==" ) << std::endl;
+      tmp->print( *waliErr << "  --- [DebugWPDS::update] t_gen ==" ) << '\n';
 
       wfa::ITrans* t = currentOutputWFA->insert(tmp).first;
       t->setConfig(cfg);
@@ -208,7 +208,7 @@ namespace wali
         )
     {
       wfa::ITrans* tmp = new Trans(from,r->to_stack2(),call->to(),wWithRule);
-      tmp->print( *waliErr << "  --- [DebugWPDS::update_prime] t_gen ==" ) << std::endl;
+      tmp->print( *waliErr << "  --- [DebugWPDS::update_prime] t_gen ==" ) << '\n';
       wfa::ITrans* t = currentOutputWFA->insert(tmp).first;
       return t;
     }

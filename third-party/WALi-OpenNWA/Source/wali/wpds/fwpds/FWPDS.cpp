@@ -9,18 +9,18 @@
 #include "wali/Worklist.hpp"
 #include "wali/Common.hpp"
 #include "wali/HashMap.hpp"
-#include "wali/SemElem.hpp"
 #include "wali/KeyPairSource.hpp"
+#include "wali/SemElem.hpp"
 
 // ::wali::util
 #include "wali/util/Timer.hpp"
 
 // ::wali::wfa
-#include "wali/wfa/WFA.hpp"
 #include "wali/wfa/State.hpp"
 #include "wali/wfa/Trans.hpp"
-#include "wali/wfa/TransSet.hpp"
 #include "wali/wfa/TransFunctor.hpp"
+#include "wali/wfa/TransSet.hpp"
+#include "wali/wfa/WFA.hpp"
 
 // ::wali::wpds
 #include "wali/wpds/Config.hpp"
@@ -36,8 +36,8 @@
 #include "wali/wpds/fwpds/LazyTrans.hpp"
 
 // ::wali::graph
-#include "wali/graph/RegExp.hpp"
 #include "wali/graph/InterGraph.hpp"
+#include "wali/graph/RegExp.hpp"
 
 using namespace wali;
 using namespace wali::graph;
@@ -606,7 +606,7 @@ void FWPDS::operator()( wfa::ITrans const * orig ) {
 
   if( is_strict() && is_pds_state(orig->to())) {
     *waliErr << "WALi Error: cannot have incoming transition to a PDS state\n";
-    orig->print( *waliErr << "    " ) << std::endl;
+    orig->print( *waliErr << "    " ) << '\n';
     assert(0);
   }
 

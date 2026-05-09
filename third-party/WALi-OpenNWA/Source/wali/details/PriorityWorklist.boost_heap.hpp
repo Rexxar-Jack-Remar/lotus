@@ -8,12 +8,12 @@
 #include "wali/Common.hpp"
 #include "wali/Worklist.hpp"
 #include "wali/wfa/Trans.hpp"
+#include <functional>
 #include <map>
 #include <set>
-#include <functional>
 
-#include <boost/heap/fibonacci_heap.hpp>
 #include <boost/heap/d_ary_heap.hpp>
+#include <boost/heap/fibonacci_heap.hpp>
 
 namespace wali
 {

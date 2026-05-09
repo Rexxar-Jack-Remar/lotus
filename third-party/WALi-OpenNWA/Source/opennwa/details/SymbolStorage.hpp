@@ -9,9 +9,9 @@
 #include "opennwa/NwaFwd.hpp"
 
 // ::wali
-#include "wali/Printable.hpp"
 #include "wali/Common.hpp"
 #include "wali/Key.hpp"
+#include "wali/Printable.hpp"
 
 // ::std
 #include <assert.h>
@@ -600,8 +600,8 @@ namespace opennwa
     }
 
 
-  }
-}
+  } // namespace details
+} // namespace opennwa
 
 // Yo, Emacs!
 // Local Variables:

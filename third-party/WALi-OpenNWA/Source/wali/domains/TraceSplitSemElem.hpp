@@ -1,9 +1,9 @@
 #ifndef WALI_TRACESPLIT_SEMELEMSET_HPP
 #define WALI_TRACESPLIT_SEMELEMSET_HPP
 
-#include <limits>
-#include <boost/optional.hpp>
 #include <boost/function.hpp>
+#include <boost/optional.hpp>
+#include <limits>
 
 #include "wali/util/unordered_map.hpp"
 #include "wali/SemElem.hpp"
@@ -385,8 +385,8 @@ namespace wali
       size_t hash_;
     };
     
-  }
-}
+  } // namespace domains
+} // namespace wali
 
 
 // Yo emacs!

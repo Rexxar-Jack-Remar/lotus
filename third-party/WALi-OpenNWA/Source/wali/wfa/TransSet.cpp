@@ -4,8 +4,8 @@
 
 #include "wali/wfa/ITrans.hpp"
 #include "wali/wfa/Trans.hpp"
-#include "wali/wfa/TransSet.hpp"
 #include "wali/wfa/TransFunctor.hpp"
+#include "wali/wfa/TransSet.hpp"
 
 #if IMPL_LIST
 #   define IMPLFIND( impl,t ) std::find<wali::wfa::TransSet::iterator,wali::wfa::ITransEq>(impl.begin(),impl.end(),t)
@@ -62,7 +62,7 @@ namespace wali {
           tf(*it);
         }
       }
-    }
+    } // namespace details
         
     void TransSet::each( TransFunctor& tf )
     {
@@ -94,7 +94,7 @@ namespace wali {
       // BEGIN DEBUGGING
       // We should never insert the same transition twice
       if( !b ) {
-        t->print( *waliErr << "\tERROR" ) << std::endl;
+        t->print( *waliErr << "\tERROR" ) << '\n';
         assert(b);
       }
       // END DEBUGGING

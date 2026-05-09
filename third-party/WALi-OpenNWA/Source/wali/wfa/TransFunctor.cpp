@@ -3,8 +3,8 @@
  */
 
 #include "wali/Common.hpp"
-#include "wali/wfa/TransFunctor.hpp"
 #include "wali/wfa/Trans.hpp"
+#include "wali/wfa/TransFunctor.hpp"
 #include "wali/wfa/WFA.hpp"
 
 namespace wali
@@ -17,7 +17,7 @@ namespace wali
      ***********/
     void TransPrinter::operator()( const ITrans* t )
     {
-      t->print(o << "    ") << std::endl;
+      t->print(o << "    ") << '\n';
     }
 
     /***********

@@ -79,7 +79,7 @@ namespace wali
 
           graph::InterGraphPtr intergr;
       };
-    }
+    } // namespace fwpds
 
   } // namespace wpds
 

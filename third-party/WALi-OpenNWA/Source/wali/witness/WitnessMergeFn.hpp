@@ -6,8 +6,8 @@
  */
 
 #include "wali/Common.hpp"
-#include "wali/SemElem.hpp"
 #include "wali/MergeFn.hpp"
+#include "wali/SemElem.hpp"
 #include "wali/witness/Witness.hpp"
 
 namespace wali 

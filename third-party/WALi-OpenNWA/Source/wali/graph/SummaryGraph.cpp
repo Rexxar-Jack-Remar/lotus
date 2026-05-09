@@ -2,11 +2,11 @@
 
 #include "wali/util/Timer.hpp"
 
-#include "wali/graph/SummaryGraph.hpp"
 #include "wali/graph/Graph.hpp"
+#include "wali/graph/SummaryGraph.hpp"
 
-#include "wali/wfa/Trans.hpp"
 #include "wali/wfa/State.hpp"
+#include "wali/wfa/Trans.hpp"
 #include "wali/wfa/TransFunctor.hpp"
 
 #include "wali/wpds/fwpds/FWPDS.hpp"

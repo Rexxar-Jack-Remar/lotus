@@ -5,11 +5,11 @@
 
 #include "wali/witness/VisitorPrinter.hpp"
 #include "wali/witness/Witness.hpp"
-#include "wali/witness/WitnessExtend.hpp"
 #include "wali/witness/WitnessCombine.hpp"
-#include "wali/witness/WitnessTrans.hpp"
-#include "wali/witness/WitnessRule.hpp"
+#include "wali/witness/WitnessExtend.hpp"
 #include "wali/witness/WitnessMerge.hpp"
+#include "wali/witness/WitnessRule.hpp"
+#include "wali/witness/WitnessTrans.hpp"
 
 namespace wali {
 
@@ -39,7 +39,7 @@ namespace wali {
     {
       formatDepth();
       os << "WitnessExtend: ";
-      w->weight()->print(os) << std::endl;
+      w->weight()->print(os) << '\n';
       VisitorPrinter vp(os,depth+1);
       if( w->hasLeft() ) {
         w->left()->accept(vp,true);
@@ -55,7 +55,7 @@ namespace wali {
     {
       formatDepth();
       os << "WitnessCombine: ";
-      w->weight()->print(os) << std::endl;
+      w->weight()->print(os) << '\n';
 #if 1
       VisitorPrinter vp(os,depth+1);
       std::list< witness_t >::iterator it = w->children().begin();
@@ -75,7 +75,7 @@ namespace wali {
     {
       formatDepth();
       os << "WitnessMerge: ";
-      w->weight()->print(os) << std::endl;
+      w->weight()->print(os) << '\n';
       VisitorPrinter vp(os,depth+1);
       if (w->hasCaller()) {
         w->caller()->accept(vp,true);
@@ -94,7 +94,7 @@ namespace wali {
     {
       formatDepth();
       os << "WitnessRule: ";
-      w->getRuleStub().print(os) << std::endl;
+      w->getRuleStub().print(os) << '\n';
       return true;
     }
 
@@ -102,7 +102,7 @@ namespace wali {
     {
       formatDepth();
       os << "WitnessTrans: ";
-      w->getTrans().print(os) << std::endl;
+      w->getTrans().print(os) << '\n';
       return true;
     }
 

@@ -360,8 +360,8 @@ namespace opennwa
      */
     extern const  StateSet getCallSuccessors(Nwa const &, State state, Symbol symbol );
 
-  }
-}
+  } // namespace query
+} // namespace opennwa
 
 
 // Yo, Emacs!

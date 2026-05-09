@@ -3,14 +3,14 @@
  */
 
 #include "wali/Common.hpp"
-#include "wali/witness/WitnessCombine.hpp"
 #include "wali/witness/Visitor.hpp"
 #include "wali/witness/VisitorDot.hpp"
-#include <iostream>
-#include <fstream>
+#include "wali/witness/WitnessCombine.hpp"
 #include <algorithm>
-#include <typeinfo>
+#include <fstream>
+#include <iostream>
 #include <iterator>
+#include <typeinfo>
 
 namespace wali
 {
@@ -129,7 +129,7 @@ namespace wali
       // Dumps out to much information.
       // TODO. Make a compile or runtime flag.
 #if 1
-      o << std::endl;
+      o << '\n';
       std::list< witness_t >::const_iterator it = kids.begin();
       std::list< witness_t >::const_iterator itEND = kids.end();
       for( ; it != itEND ; it++ )

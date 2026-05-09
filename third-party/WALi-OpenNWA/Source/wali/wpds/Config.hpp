@@ -5,12 +5,12 @@
  * @author Nicholas Kidd
  */
 
+#include "wali/Common.hpp"
+#include "wali/KeyContainer.hpp"
+#include "wali/Printable.hpp"
+#include "wali/wpds/Rule.hpp"
 #include <list>
 #include <string>
-#include "wali/Common.hpp"
-#include "wali/Printable.hpp"
-#include "wali/KeyContainer.hpp"
-#include "wali/wpds/Rule.hpp"
 
 namespace wali
 {
@@ -22,7 +22,7 @@ namespace wali
     {
       class ERule;
       class EWPDS;
-    }
+    } // namespace ewpds
 
     class WPDS;
 

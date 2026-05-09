@@ -21,11 +21,11 @@ namespace wali
 
   namespace wfa {
     class WfaHandler;
-  }
+  } // namespace wfa
 
   namespace wpds {
     class WpdsHandler;
-  }
+  } // namespace wpds
 
   class QueryHandler : public IWaliHandler
   {

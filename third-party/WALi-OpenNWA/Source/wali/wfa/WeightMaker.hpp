@@ -94,7 +94,7 @@ namespace wali
 
   } // namespace wfa
 
-} // namespace wfa
+} // namespace wali
 
 #endif  // wali_wfa_WEIGHT_MAKER_GUARD
 

@@ -29,7 +29,7 @@ void dot()
   fa1.add_final_state( q );
   fa1.addTrans( p, getKey("n1"), q, R->one());
 
-  fa1.print( cout << "WFA 1\n" ) << std::endl;
+  fa1.print( cout << "WFA 1\n" ) << '\n';
 
   // m - n1 - q 
   WFA fa2;
@@ -37,18 +37,18 @@ void dot()
   fa2.set_initial_state( m );
   fa2.add_final_state( q );
   fa2.addTrans( m,getKey("n1"),q,R->one());
-  fa2.print( cout << "WFA 2\n" ) << std::endl;
+  fa2.print( cout << "WFA 2\n" ) << '\n';
 
 
-  fa1.intersect( fa2 ).print( cout << "1 \\cap 2\n" ) << std::endl;
+  fa1.intersect( fa2 ).print( cout << "1 \\cap 2\n" ) << '\n';
 
 }
 
 int main()
 {
   dot();
-  std::cerr << "# Trans : " << wali::wfa::Trans::numTrans << std::endl;
-  std::cerr << "# States : " << wali::wfa::State::numStates << std::endl;
+  std::cerr << "# Trans : " << wali::wfa::Trans::numTrans << '\n';
+  std::cerr << "# States : " << wali::wfa::State::numStates << '\n';
   std::cerr << "# Reaches : " << Reach::numReaches << std::endl;
   return 0;
 }

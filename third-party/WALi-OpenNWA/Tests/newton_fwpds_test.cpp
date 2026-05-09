@@ -6,25 +6,25 @@
 #include "wali/wpds/ewpds/ERule.hpp"
 #endif
 // ::wali::wfa
-#include "wali/wfa/WFA.hpp"
 #include "wali/wfa/TransFunctor.hpp"
+#include "wali/wfa/WFA.hpp"
 // ::wali::domains::binrel
 #include "wali/domains/binrel/ProgramBddContext.hpp"
 // ::wali::wpds
 #include "generateRandomFWPDS.hpp"
-#include "wali/wpds/RuleFunctor.hpp"
 #include "wali/wpds/Rule.hpp"
+#include "wali/wpds/RuleFunctor.hpp"
 // ::std
-#include <iostream>
-#include <string>
-#include <sstream>
-#include <fstream>
 #include <ctime>
+#include <fstream>
+#include <iostream>
+#include <sstream>
+#include <string>
 // ::wali
-#include "wali/KeySpace.hpp"
 #include "wali/Key.hpp"
-#include "wali/ref_ptr.hpp"
+#include "wali/KeySpace.hpp"
 #include "wali/MergeFn.hpp"
+#include "wali/ref_ptr.hpp"
 // ::wali::util
 #include "wali/util/Timer.hpp"
 using namespace std;
@@ -84,7 +84,7 @@ namespace{
         ostream& print(ostream& out) const
         {
           //out << "[" << wali::key2str(from) << " -- " << wali::key2str(stack) << " -> " << wali::key2str(to) << "]" << std::endl;
-          out << "[" << from << " -- " << stack << " -> " << to << "]" << std::endl;
+          out << "[" << from << " -- " << stack << " -> " << to << "]" << '\n';
           return out;
         }
       };
@@ -146,10 +146,10 @@ namespace{
             if(!(iter->second == NULL) && !(iter->second->equal(iter->second->zero()))){
               diffFound=true;
               if(out){
-                *out << "DIFF: Found in " << first << " but not in " << second << ":" << std::endl;
+                *out << "DIFF: Found in " << first << " but not in " << second << ":" << '\n';
                 (iter->first).print(*out);
                 iter->second->print(*out);
-                *out << std::endl;
+                *out << '\n';
               }
             }
           }else{
@@ -158,36 +158,36 @@ namespace{
                 !((iter->second)->equal(iter2->second))){
               diffFound=true;
               if(out){
-                *out << "DIFF: Found in both but weights differ: " << std::endl;
+                *out << "DIFF: Found in both but weights differ: " << '\n';
                 (iter->first).print(*out);
-                *out << std::endl << "[ " << first << " weight]" << std::endl;
+                *out << '\n' << "[ " << first << " weight]" << '\n';
                 if(iter->second != NULL)
                   iter->second->print(*out);
                 else
-                  *out << "NULL" << std::endl;
-                *out << std::endl << "[ " << second << " weight]" << std::endl;
+                  *out << "NULL" << '\n';
+                *out << '\n' << "[ " << second << " weight]" << '\n';
                 if(iter2->second != NULL)
                   iter2->second->print(*out);
                 else
-                  *out << "NULL" << std::endl;
-                *out << std::endl;
+                  *out << "NULL" << '\n';
+                *out << '\n';
               }
             }else{
               //DEBUGGING
               if(out && 0){
                 *out << "Printing anyway:\n";
                 (iter->first).print(*out);
-                *out << std::endl << "[ " << first << " weight]" << std::endl;
+                *out << '\n' << "[ " << first << " weight]" << '\n';
                 if(iter->second != NULL)
                   iter->second->print(*out);
                 else
-                  *out << "NULL" << std::endl;
-                *out << std::endl << "[ " << second << " weight]" << std::endl;
+                  *out << "NULL" << '\n';
+                *out << '\n' << "[ " << second << " weight]" << '\n';
                 if(iter2->second != NULL)
                   iter2->second->print(*out);
                 else
-                  *out << "NULL" << std::endl;
-                *out << std::endl;
+                  *out << "NULL" << '\n';
+                *out << '\n';
               }
               //DEBUGGING
             }
@@ -201,10 +201,10 @@ namespace{
             if(!(iter->second == NULL) && !(iter->second->equal(iter->second->zero()))){
               diffFound=true;
               if(out){
-                *out << "DIFF: Found in " << second << " but not in " << first << ":" << std::endl;
+                *out << "DIFF: Found in " << second << " but not in " << first << ":" << '\n';
                 (iter->first).print(*out);
                 iter->second->print(*out);
-                *out << std::endl;
+                *out << '\n';
               }
             }
           }
@@ -248,7 +248,7 @@ namespace{
           ostream& print(ostream& out) const
           {
             out << "[<" << wali::key2str(from_state) << " , " << wali::key2str(from_stack) <<
-              " > --> < " << wali::key2str(to_state) << " , " << wali::key2str(to_stack1) << " " << wali::key2str(to_stack2) << " >]" << std::endl;
+              " > --> < " << wali::key2str(to_state) << " , " << wali::key2str(to_stack1) << " " << wali::key2str(to_stack2) << " >]" << '\n';
             return out;
           }
       };
@@ -305,10 +305,10 @@ namespace{
             if(!(iter->second == NULL) && !(iter->second->equal(iter->second->zero()))){
               diffFound=true;
               if(out){
-                *out << "DIFF: Weight found in " << first << " but not in " << second << ":" << std::endl;
+                *out << "DIFF: Weight found in " << first << " but not in " << second << ":" << '\n';
                 (iter->first).print(*out);
                 iter->second->print(*out);
-                *out << std::endl;
+                *out << '\n';
               }
             }
           }else{
@@ -317,19 +317,19 @@ namespace{
                 !((iter->second)->equal(iter2->second))){
               diffFound=true;
               if(out){
-                *out << "DIFF: Found in both but weights differ: " << std::endl;
+                *out << "DIFF: Found in both but weights differ: " << '\n';
                 (iter->first).print(*out);
-                *out << std::endl << "[ " << first << " weight]" << std::endl;
+                *out << '\n' << "[ " << first << " weight]" << '\n';
                 if(iter->second != NULL)
                   iter->second->print(*out);
                 else
-                  *out << "NULL" << std::endl;
-                *out << std::endl << "[ " << second << " weight]" << std::endl;
+                  *out << "NULL" << '\n';
+                *out << '\n' << "[ " << second << " weight]" << '\n';
                 if(iter2->second != NULL)
                   iter2->second->print(*out);
                 else
-                  *out << "NULL" << std::endl;
-                *out << std::endl;
+                  *out << "NULL" << '\n';
+                *out << '\n';
               }
             }
           }
@@ -342,10 +342,10 @@ namespace{
             if(!(iter->second == NULL) && !(iter->second->equal(iter->second->zero()))){
               diffFound=true;
               if(out){
-                *out << "DIFF: Found in " << second << " but not in " << first << ":" << std::endl;
+                *out << "DIFF: Found in " << second << " but not in " << first << ":" << '\n';
                 (iter->first).print(*out);
                 iter->second->print(*out);
-                *out << std::endl;
+                *out << '\n';
               }
             }
           }
@@ -364,7 +364,7 @@ namespace{
 #endif
   };
 
-}
+} // namespace
 
 int main(int argc, char ** argv)
 {
@@ -401,10 +401,10 @@ int main(int argc, char ** argv)
   if(numVars <= 0)
     numVars = (unsigned)time(NULL) % 4 + 5;
 
-  cout << "dump: " << dump << std::endl;
-  cout << "numVars: " << numVars << " bools & " << numVars << " ints" << std::endl;
-  cout << "pdsSizeFactor: " << pdsSizeFactor << std::endl;
-  cout << "seed: " << seed << std::endl;
+  cout << "dump: " << dump << '\n';
+  cout << "numVars: " << numVars << " bools & " << numVars << " ints" << '\n';
+  cout << "pdsSizeFactor: " << pdsSizeFactor << '\n';
+  cout << "seed: " << seed << '\n';
 
   //unsigned seed = 111;
   program_bdd_context_t bmt = new ProgramBddContext();
@@ -454,16 +454,16 @@ int main(int argc, char ** argv)
     if(dump){
       fstream kleene_pds("kleene_pds.dot", fstream::out);
       RuleDotty rd(kleene_pds);
-      kleene_pds << "digraph{" << endl;
+      kleene_pds << "digraph{" << '\n';
       fpds.for_each(rd);
-      kleene_pds << "}" << endl;
+      kleene_pds << "}" << '\n';
     }
     if(dump){
       fstream innfa("kleene_in_fa.dot", fstream::out);
       TransDotty td(innfa,false, NULL);
-      innfa << "digraph{" << endl;
+      innfa << "digraph{" << '\n';
       fa.for_each(td);
-      innfa << "}" << endl;
+      innfa << "}" << '\n';
     }
     WFA outfa;
     {
@@ -476,9 +476,9 @@ int main(int argc, char ** argv)
     if(dump){
       fstream outfaf("kleene_out_fa.dot", fstream::out);
       TransDotty td(outfaf,false, NULL);
-      outfaf << "digraph{" << endl;
+      outfaf << "digraph{" << '\n';
       outfa.for_each(td);
-      outfaf << "}" << endl;
+      outfaf << "}" << '\n';
     }
     fac.advance_mode();
   }
@@ -511,16 +511,16 @@ int main(int argc, char ** argv)
     if(dump){
       fstream newton_pds("newton_pds.dot", fstream::out);
       RuleDotty rd(newton_pds);
-      newton_pds << "digraph{" << endl;
+      newton_pds << "digraph{" << '\n';
       npds.for_each(rd);
-      newton_pds << "}" << endl;
+      newton_pds << "}" << '\n';
     }
     if(dump){
       fstream innfa("newton_in_fa.dot", fstream::out);
       TransDotty td(innfa,false, NULL);
-      innfa << "digraph{" << endl;
+      innfa << "digraph{" << '\n';
       fa.for_each(td);
-      innfa << "}" << endl;
+      innfa << "}" << '\n';
     }
     WFA outfa;
     {
@@ -533,9 +533,9 @@ int main(int argc, char ** argv)
     if(dump){
       fstream outfaf("newton_out_fa.dot", fstream::out);
       TransDotty td(outfaf,false, NULL);
-      outfaf << "digraph{" << endl;
+      outfaf << "digraph{" << '\n';
       outfa.for_each(td);
-      outfaf << "}" << endl;
+      outfaf << "}" << '\n';
     }
     fac.advance_mode();
   }
@@ -550,9 +550,9 @@ int main(int argc, char ** argv)
       bool fadifffound = fac.diff();
       bool pdsdifffound = pac.diff();
       if(fadifffound)
-        fadiff << "FA DIFF FOUND!!!" << std::endl;
+        fadiff << "FA DIFF FOUND!!!" << '\n';
       if(pdsdifffound)
-        pdsdiff << "PA DIFF FOUND!!!" << std::endl;
+        pdsdiff << "PA DIFF FOUND!!!" << '\n';
     }
   }
   return 0;

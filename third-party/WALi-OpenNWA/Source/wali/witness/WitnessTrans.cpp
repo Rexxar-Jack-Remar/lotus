@@ -38,7 +38,7 @@ namespace wali
     {
       formatDepth(o,depth);
       o << "WitnessTrans: ";
-      t.print(o) << std::endl;
+      t.print(o) << '\n';
       return o;
     }
 

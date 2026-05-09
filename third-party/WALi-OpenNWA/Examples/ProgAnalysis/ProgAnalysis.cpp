@@ -4,17 +4,17 @@
 
 #include "ProgAnalysis.hpp"
 #include "Cfg.hpp"
-#include "wali/wpds/WPDS.hpp"
-#include "wali/wpds/Rule.hpp"
 #include "wali/wpds/Config.hpp"
+#include "wali/wpds/Rule.hpp"
+#include "wali/wpds/WPDS.hpp"
 #include "wali/wpds/fwpds/FWPDS.hpp"
 #include "wali/wpds/fwpds/SWPDS.hpp"
 
-#include "wali/wfa/Trans.hpp"
 #include "wali/wfa/State.hpp"
+#include "wali/wfa/Trans.hpp"
 
-#include "wali/wpds/Wrapper.hpp"
 #include "wali/witness/WitnessWrapper.hpp"
+#include "wali/wpds/Wrapper.hpp"
 
 #include <iostream>
 #include <sstream>
@@ -270,7 +270,7 @@ void ProgAnalysis::doBackwardSearch(std::vector<wali::Key> &node_stack, wali::wf
 }
 
 int main() {
-  std::cout << "Program Analysis Example" << std::endl;
+  std::cout << "Program Analysis Example" << '\n';
   return 0;
 }
 

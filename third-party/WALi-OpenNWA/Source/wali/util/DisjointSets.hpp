@@ -9,8 +9,8 @@
 #include <boost/shared_ptr.hpp>
 
 #include <map>
-#include <string>
 #include <sstream>
+#include <string>
 
 namespace wali
 {
@@ -461,8 +461,8 @@ namespace wali
       return os;
     }
 
-  }
-}
+  } // namespace util
+} // namespace wali
 
 // Yo, Emacs!
 // Local Variables:

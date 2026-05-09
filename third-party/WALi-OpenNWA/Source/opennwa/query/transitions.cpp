@@ -1,6 +1,6 @@
 #include "opennwa/Nwa.hpp"
-#include "opennwa/query/transitions.hpp"
 #include "opennwa/details/TransitionStorage.hpp"
+#include "opennwa/query/transitions.hpp"
 
 namespace opennwa
 {
@@ -629,8 +629,8 @@ namespace opennwa
     }
 
 
-  }
-}
+  } // namespace query
+} // namespace opennwa
 
 
 // Yo, Emacs!

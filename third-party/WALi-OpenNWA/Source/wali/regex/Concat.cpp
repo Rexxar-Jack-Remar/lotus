@@ -2,8 +2,8 @@
  * @author Nicholas Kidd
  */
 
-#include <cassert>
 #include "wali/regex/Concat.hpp"
+#include <cassert>
 
 namespace wali
 {

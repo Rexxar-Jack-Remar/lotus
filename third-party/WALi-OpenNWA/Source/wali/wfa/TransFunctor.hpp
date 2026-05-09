@@ -6,11 +6,11 @@
  * @author Nicholas Kidd
  */
 
+#include "wali/HashMap.hpp"
+#include "wali/wfa/TransSet.hpp"
 #include <iostream>
 #include <map>
 #include <set>
-#include "wali/HashMap.hpp"
-#include "wali/wfa/TransSet.hpp"
 
 namespace wali
 {

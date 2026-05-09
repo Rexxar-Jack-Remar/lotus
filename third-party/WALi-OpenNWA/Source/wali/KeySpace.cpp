@@ -3,16 +3,16 @@
  * @version $Id$
  */
 
-#include <sstream>
-#include <cassert>
-#include <cstring>
 #include "wali/Common.hpp"
-#include "wali/KeySpace.hpp"
-#include "wali/KeySource.hpp"
-#include "wali/StringSource.hpp"
 #include "wali/IntSource.hpp"
 #include "wali/KeyPairSource.hpp"
 #include "wali/KeySetSource.hpp"
+#include "wali/KeySource.hpp"
+#include "wali/KeySpace.hpp"
+#include "wali/StringSource.hpp"
+#include <cassert>
+#include <cstring>
+#include <sstream>
 
 namespace wali
 {
@@ -160,7 +160,7 @@ namespace wali
       }
     }
     else {
-      *waliErr << "[WARNING] Invalid wali::Key(" << key << ")" << std::endl;
+      *waliErr << "[WARNING] Invalid wali::Key(" << key << ")" << '\n';
       o << "??";
     }
     return o;

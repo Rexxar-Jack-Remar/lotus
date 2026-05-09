@@ -1,28 +1,28 @@
 #include "wali/Common.hpp"
 #include "wali/DefaultWorklist.hpp"
-#include "wali/wfa/WFA.hpp"
-#include "wali/wfa/State.hpp"
-#include "wali/wfa/TransFunctor.hpp"
-#include "wali/wfa/Trans.hpp"
-#include "wali/wfa/WeightMaker.hpp"
+#include "wali/domains/ReversedSemElem.hpp"
+#include "wali/graph/GraphCommon.hpp"
+#include "wali/graph/RegExp.hpp"
 #include "wali/regex/AllRegex.hpp"
-#include "wali/wpds/GenKeySource.hpp"
+#include "wali/util/ConfigurationVar.hpp"
 #include "wali/wfa/DeterminizeWeightGen.hpp"
+#include "wali/wfa/State.hpp"
+#include "wali/wfa/Trans.hpp"
+#include "wali/wfa/TransFunctor.hpp"
+#include "wali/wfa/WFA.hpp"
+#include "wali/wfa/WeightMaker.hpp"
+#include "wali/witness/Witness.hpp"
+#include "wali/wpds/GenKeySource.hpp"
 #include "wali/wpds/WPDS.hpp"
 #include "wali/wpds/fwpds/FWPDS.hpp"
 #include "wali/wpds/fwpds/LazyTrans.hpp"
-#include "wali/graph/RegExp.hpp"
-#include "wali/util/ConfigurationVar.hpp"
-#include "wali/graph/GraphCommon.hpp"
-#include "wali/witness/Witness.hpp"
-#include "wali/domains/ReversedSemElem.hpp"
 
 #include <algorithm>
-#include <iostream>
-#include <vector>
-#include <stack>
-#include <iterator>
 #include <fstream>
+#include <iostream>
+#include <iterator>
+#include <stack>
+#include <vector>
 
 using namespace wali::witness;
 using namespace wali::wpds;
@@ -207,7 +207,7 @@ namespace wali
           found_any |= (dynamic_cast<Witness*>(weight) != NULL);
         }
       };
-    }
+    } // namespace details
 
     void
     WFA::path_summary_tarjan_fwpds(PathSummaryComputeInitialState compute_initial_state)
@@ -519,8 +519,8 @@ namespace wali
       return values_map;
     }
 
-  }
-}
+  } // namespace wfa
+} // namespace wali
 
 // Yo emacs!
 // Local Variables:

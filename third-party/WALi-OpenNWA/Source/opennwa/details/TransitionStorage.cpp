@@ -1663,8 +1663,8 @@ namespace opennwa
     }
 
 
-  }
-}
+  } // namespace details
+} // namespace opennwa
 
 
 // Yo, Emacs!

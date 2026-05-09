@@ -25,7 +25,7 @@ namespace wali
   template<typename Compare>
   class PriorityWorklist : public wali::details::BoostHeapPriorityWorklist<Compare>
   {};
-}
+} // namespace wali
 
 #else
 #    if HAS_PRAGMA_MESSAGE
@@ -52,7 +52,7 @@ namespace wali
   template<typename Compare>
   class FixedPriorityWorklist : public wali::details::MultisetPriorityWorklist<Compare>
   {};
-}
+} // namespace wali
 
 // Yo, Emacs!
 // Local Variables:

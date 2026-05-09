@@ -1,16 +1,16 @@
 #include "wali/util/Timer.hpp"
 
+#include "wali/graph/GraphCommon.hpp"
 #include "wali/graph/IntraGraph.hpp"
 #include "wali/graph/LinkEval.hpp"
-#include "wali/graph/GraphCommon.hpp"
 
 //debugging
 //#include "wali/graph/NewtonLogger.hpp"
 
+#include <boost/cast.hpp>
+#include <fstream>
 #include <iostream>
 #include <sstream>
-#include <fstream>
-#include <boost/cast.hpp>
 using namespace std;
 
 namespace wali {

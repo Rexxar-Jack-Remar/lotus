@@ -8,23 +8,23 @@
 #include "ast.hpp"
 #include "RelationMaker.hpp"
 
-#include <wali/wfa/WFA.hpp>
-#include <wali/wfa/WeightMaker.hpp>
-#include <wali/wfa/TransFunctor.hpp>
-#include <wali/wfa/ITrans.hpp>
+#include <wali/Key.hpp>
 #include <wali/domains/binrel/BinRel.hpp>
 #include <wali/domains/binrel/ProgramBddContext.hpp>
-#include <wali/Key.hpp>
-#include <wali/util/read_file.hpp>
 #include <wali/util/base64.hpp>
 #include <wali/util/map_at.hpp>
+#include <wali/util/read_file.hpp>
+#include <wali/wfa/ITrans.hpp>
+#include <wali/wfa/TransFunctor.hpp>
+#include <wali/wfa/WFA.hpp>
+#include <wali/wfa/WeightMaker.hpp>
 
 #include <opennwa/Nwa.hpp>
 
+#include <cstdio>
+#include <fstream>
 #include <map>
 #include <sstream>
-#include <fstream>
-#include <cstdio>
 
 #define CPP11_OVERRIDE
 
@@ -38,7 +38,7 @@ namespace wali {
             {
                 virtual sem_elem_t make_weight( sem_elem_t lhs, sem_elem_t rhs ) CPP11_OVERRIDE;
             };
-        }
+        } // namespace details
         
 
         /// Represent an XFA state.
@@ -419,7 +419,7 @@ namespace wali {
         language_contains(Xfa const & left, Xfa const & right,
                           wali::domains::binrel::ProgramBddContext const & voc);
 
-    }
-}
+    } // namespace xfa
+} // namespace wali
 
 #endif

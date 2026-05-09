@@ -1,10 +1,10 @@
 #include "wali/wpds/WPDS.hpp"
-#include "wali/wpds/fwpds/FWPDS.hpp"
-#include "wali/wfa/WFA.hpp"
-#include "wali/wfa/State.hpp"
 #include "opennwa/Nwa.hpp"
-#include "opennwa/query/automaton.hpp"
 #include "opennwa/nwa_pds/conversions.hpp"
+#include "opennwa/query/automaton.hpp"
+#include "wali/wfa/State.hpp"
+#include "wali/wfa/WFA.hpp"
+#include "wali/wpds/fwpds/FWPDS.hpp"
 
 namespace opennwa {
   namespace query {
@@ -187,8 +187,8 @@ namespace opennwa {
     }
 
 
-  }
-}
+  } // namespace query
+} // namespace opennwa
 
 
 

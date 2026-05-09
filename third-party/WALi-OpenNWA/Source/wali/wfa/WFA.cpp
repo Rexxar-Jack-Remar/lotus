@@ -4,26 +4,26 @@
 
 #include "wali/Common.hpp"
 #include "wali/DefaultWorklist.hpp"
-#include "wali/wfa/WFA.hpp"
-#include "wali/wfa/State.hpp"
-#include "wali/wfa/TransFunctor.hpp"
-#include "wali/wfa/Trans.hpp"
-#include "wali/wfa/WeightMaker.hpp"
+#include "wali/graph/RegExp.hpp"
 #include "wali/regex/AllRegex.hpp"
-#include "wali/wpds/GenKeySource.hpp"
+#include "wali/util/ConfigurationVar.hpp"
 #include "wali/wfa/DeterminizeWeightGen.hpp"
+#include "wali/wfa/State.hpp"
+#include "wali/wfa/Trans.hpp"
+#include "wali/wfa/TransFunctor.hpp"
+#include "wali/wfa/WFA.hpp"
+#include "wali/wfa/WeightMaker.hpp"
+#include "wali/wpds/GenKeySource.hpp"
 #include "wali/wpds/WPDS.hpp"
 #include "wali/wpds/fwpds/FWPDS.hpp"
 #include "wali/wpds/fwpds/LazyTrans.hpp"
-#include "wali/graph/RegExp.hpp"
-#include "wali/util/ConfigurationVar.hpp"
 
 #include <algorithm>
-#include <iostream>
-#include <vector>
-#include <stack>
-#include <iterator>
 #include <fstream>
+#include <iostream>
+#include <iterator>
+#include <stack>
+#include <vector>
 
 
 #define FOR_EACH_STATE(name)                                \
@@ -383,7 +383,7 @@ namespace wali
           }
         }
       };
-    }
+    } // namespace details
 
     //
     // Removes State q from the WFA and any transitions leading
@@ -482,7 +482,7 @@ namespace wali
           transSet.each(func);
         }
       }
-    }
+    } // namespace details
 
     void WFA::for_each( ConstTransFunctor & tf ) const
     {
@@ -629,7 +629,7 @@ namespace wali
 
         dest.addTrans(source_key, symbol, target_key, final_weight);
       }
-    }
+    } // namespace details
     
     //
     // Intersect this and fa, storing the result in dest
@@ -1022,7 +1022,7 @@ namespace wali
     {
       o << "WFA -\n";
       o << "  Initial State : ";
-      o << key2str(init_state) << std::endl;
+      o << key2str(init_state) << '\n';
 
       // Q
       o << "  Q: {";
@@ -1210,7 +1210,7 @@ namespace wali
 
         { // BEGIN DEBUGGING
           if( from_stit == state_map.end() ) {
-            tnew->print( *waliErr << "\n\n+++ WTF +++\n" ) << std::endl;
+            tnew->print( *waliErr << "\n\n+++ WTF +++\n" ) << '\n';
             assert( Q.find(tnew->from()) != Q.end() );
             assert( from_stit != state_map.end() );
           }
@@ -1543,7 +1543,7 @@ namespace wali
       //assert(lkup != index_map.end());
       if (lkup == index_map.end())
       {
-        *waliErr << "[WARNING] No transitions from initial state." << std::endl;
+        *waliErr << "[WARNING] No transitions from initial state." << '\n';
         for( size_t i=0; i < n ; i++ ) {
           { // DEBUGGING
             //nodes[i]->print( *eout << "(" << i << ") " ) << std::endl;
@@ -2792,7 +2792,7 @@ namespace wali
           }
         }
       };
-    }
+    } // namespace details
 
     WFA
     WFA::invertStatesAndTransitions() const
@@ -2872,7 +2872,7 @@ namespace wali
 
         return minimal;
       }
-    }
+    } // namespace delta
 
 
   } // namespace wfa

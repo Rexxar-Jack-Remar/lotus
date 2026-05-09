@@ -92,9 +92,9 @@ namespace opennwa
       return out;
     }
 
-  } // end 'namespace construct'
+  } // namespace construct
 
-} // end 'namespace opennwa'
+} // namespace opennwa
 
 
 // Yo, Emacs!

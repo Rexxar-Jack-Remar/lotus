@@ -930,8 +930,8 @@ namespace opennwa
     }
 
 
-  }
-}
+  } // namespace query
+} // namespace opennwa
 
 
 // Yo, Emacs!

@@ -5,8 +5,8 @@
 
 #include "wali/wfa/WFA.hpp"
 
-#include "wali/graph/IntraGraph.hpp"
 #include "wali/graph/InterGraph.hpp"
+#include "wali/graph/IntraGraph.hpp"
 
 #include "wali/wpds/ewpds/ERule.hpp"
 

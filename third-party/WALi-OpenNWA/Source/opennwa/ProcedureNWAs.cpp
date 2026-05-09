@@ -1,8 +1,8 @@
 #include "opennwa/ProcedureNwas.hpp"
 #include "opennwa/OpenFstInterop.hpp"
 
-#include "query/internals.hpp"
 #include "query/calls.hpp"
+#include "query/internals.hpp"
 #include "query/returns.hpp"
 
 using wali::key2str;
@@ -166,7 +166,7 @@ namespace opennwa {
     return finalnwa;
   } // end assemble_nwa()
 
-}
+} // namespace opennwa
 
 
 // Yo, Emacs!

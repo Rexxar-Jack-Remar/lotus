@@ -5,13 +5,13 @@
  *
  * Tests path_summary
  */
-#include <iostream>
-#include <fstream>
 #include "wali/Common.hpp"
 #include "wali/wfa/WFA.hpp"
+#include <fstream>
+#include <iostream>
 // For debug info in main()
-#include "wali/wfa/Trans.hpp"
 #include "wali/wfa/State.hpp"
+#include "wali/wfa/Trans.hpp"
 
 // Reachability Weight Domain
 #include "Reach.hpp"
@@ -58,8 +58,8 @@ void dot()
 int main()
 {
   dot();
-  std::cerr << "# Trans   : " << wali::wfa::Trans::numTrans << std::endl;
-  std::cerr << "# States  : " << wali::wfa::State::numStates << std::endl;
+  std::cerr << "# Trans   : " << wali::wfa::Trans::numTrans << '\n';
+  std::cerr << "# States  : " << wali::wfa::State::numStates << '\n';
   std::cerr << "# Reaches : " << Reach::numReaches << std::endl;
   return 0;
 }

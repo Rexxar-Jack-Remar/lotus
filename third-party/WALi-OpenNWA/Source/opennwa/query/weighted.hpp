@@ -222,8 +222,8 @@ namespace opennwa {
                      wali::wfa::WFA const & input,
                      wali::wfa::WFA & output);
 
-  }
-}
+  } // namespace query
+} // namespace opennwa
 
 
 
