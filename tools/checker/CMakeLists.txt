@@ -1,28 +1,24 @@
-# Bug checking tools: kint, taint, concur, pulse, fitx, saber, and ae
+# Bug checking tools: kint, taint, concur, pulse, fitx, saber, ae, and symex
 
 llvm_map_components_to_libnames(LLVM_LINK_COMPONENTS
-  Coroutines
-  Target
-  #Passes
+  IRReader 
+  #Support
+  Passes
 )
 
 # Kint: A Bug-Finding Tool for C Programs
-set(LLVM_LINK_COMPONENTS_KINT
-        LLVMPasses)
-
 add_executable(lotus-kint lotus_kint.cpp)
 target_link_libraries(lotus-kint PRIVATE
-        CanaryKint
-        CanaryReport
-        CanaryFuzzing
-        ${LLVM_LINK_COMPONENTS_KINT}
-        ${Z3_LIBRARIES} 
+    CanaryKint
+    CanaryReport
+    CanaryFuzzing
+    ${LLVM_LINK_COMPONENTS}
+    ${Z3_LIBRARIES} 
 )
 
 # IFDS Taint Analysis Tool (formerly llvm-ai)
 add_executable(lotus-taint
   lotus_taint.cpp
-  lotus_taint_microbench.cpp
 )
 target_link_libraries(lotus-taint
   IFDS
@@ -62,9 +58,7 @@ target_link_libraries(lotus-fitx PRIVATE ${_fitx_components})
 
 # Saber: source-sink bug checker (leak, double-free, file descriptor)
 add_executable(lotus-saber lotus-saber.cpp)
-llvm_map_components_to_libnames(_saber_components IRReader Support)
 target_link_libraries(lotus-saber PRIVATE
-  ${_saber_components}
   ${LLVM_LINK_COMPONENTS}
   CanaryReport
   CanaryFuzzing
@@ -90,9 +84,7 @@ endif()
 
 # AE: Abstract Execution bug checker (buffer overflow, null pointer dereference)
 add_executable(lotus-ae lotus-ae.cpp)
-llvm_map_components_to_libnames(_ae_components IRReader Support)
 target_link_libraries(lotus-ae PRIVATE
-  ${_ae_components}
   ${LLVM_LINK_COMPONENTS}
   CanaryReport
   CanaryFuzzing
@@ -112,3 +104,13 @@ else()
     -Wl,--no-whole-archive
   )
 endif()
+
+# Symbolic execution bug checker (GVFG + LotusAA-backed)
+add_executable(lotus-symex lotus-symex.cpp)
+target_link_libraries(lotus-symex PRIVATE
+  ${LLVM_LINK_COMPONENTS}
+  CanarySymbolicExecution
+  CanaryReport
+  CanaryFuzzing
+  ${Z3_LIBRARIES}
+)

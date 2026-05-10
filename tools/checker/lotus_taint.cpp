@@ -6,7 +6,6 @@
  */
 
 #include "Utils/LLVM/Demangle.h"
-#include "lotus_taint_microbench.h"
 
 #include <chrono>
 #include <memory>
@@ -260,11 +259,6 @@ int main(int argc, char **argv) {
       if (ShowResults) {
         taintAnalysis.report_vulnerabilities(solver, outs(),
                                              MaxDetailedResults.getValue());
-      }
-
-      if (MicroBench) {
-        runMicroBenchEvaluation(taintAnalysis, solver, ExpectedFile, Verbose,
-                                outs());
       }
       break;
     }
