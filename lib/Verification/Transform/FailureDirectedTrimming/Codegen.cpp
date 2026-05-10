@@ -2,7 +2,7 @@
 // Paper §6 Eliminating quantifiers: existentials from negateForTrimming are
 // eliminated by QE or nondet witnesses; remaining quantifiers → "true" (no
 // pruning).
-#include "FailureDirectedTrimmingImpl.h"
+#include "Verification/Transform/FailureDirectedTrimming/FailureDirectedTrimmingImpl.h"
 
 #include <llvm/IR/Constants.h>
 #include <llvm/IR/DerivedTypes.h>

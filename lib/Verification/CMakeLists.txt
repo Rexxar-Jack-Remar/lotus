@@ -8,10 +8,10 @@ if(ENABLE_SMACK)
   add_subdirectory(smack)
 endif()
 
-add_subdirectory(FailureDirectedTrimming)
 add_subdirectory(SymAbsAI)
 add_subdirectory(Sifa)
 add_subdirectory(Backend)
+# Currently, the frontend is only for Boolean program (bpl) and and parsed problem is only sent to lib/Dataflow/NPA. 
 add_subdirectory(Frontend)
 add_subdirectory(Transform)
 add_subdirectory(Analysis)

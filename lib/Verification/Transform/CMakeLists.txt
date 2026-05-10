@@ -1,3 +1,4 @@
+add_subdirectory(FailureDirectedTrimming)
 add_library(VerificationTransform STATIC
   BreakCritLoops.cpp
   BreakInfiniteLoops.cpp

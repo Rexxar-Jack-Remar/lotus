@@ -10,7 +10,7 @@
 
 void TropicalSemiringTest::SetUp()
 {
-  std::cout << "Tropical-SR-Test :" << std::endl;
+  std::cout << "Tropical-SR-Test :" << '\n';
   first = new TropicalSemiring(2);
   second = new TropicalSemiring(5);
 }

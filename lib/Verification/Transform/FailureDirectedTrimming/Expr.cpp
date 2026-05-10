@@ -1,4 +1,4 @@
-#include "FailureDirectedTrimmingImpl.h"
+#include "Verification/Transform/FailureDirectedTrimming/FailureDirectedTrimmingImpl.h"
 
 #include <llvm/IR/DerivedTypes.h>
 

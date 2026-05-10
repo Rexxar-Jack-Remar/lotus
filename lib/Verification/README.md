@@ -60,7 +60,7 @@ Verification backends:
 
 ## Failure-Directed Trimming
 
-[FailureDirectedTrimming](FailureDirectedTrimming/) implements program trimming (Ferles et al., ESEC/FSE 2017):
+[FailureDirectedTrimming](Transform/FailureDirectedTrimming/) implements program trimming (Ferles et al., ESEC/FSE 2017):
 - Equi-safe program reduction
 - Safety condition inference
 - Instrumentation for path pruning

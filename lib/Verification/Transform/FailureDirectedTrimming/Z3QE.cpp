@@ -2,7 +2,7 @@
 // quantifiers). Negation of safety conditions yields ∃ from ∀ (havoc); Z3 QE
 // eliminates existentials to reduce nondeterminism in inserted assume
 // conditions.
-#include "FailureDirectedTrimmingImpl.h"
+#include "Verification/Transform/FailureDirectedTrimming/FailureDirectedTrimmingImpl.h"
 
 #include <stdexcept>
 

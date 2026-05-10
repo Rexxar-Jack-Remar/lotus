@@ -1,7 +1,7 @@
 // Command-line options for failure-directed trimming (paper §6 Implementation).
 // Instrumentation strategy, bound sizes, and QE/nondet for existentials.
 
-#include "FailureDirectedTrimmingImpl.h"
+#include "Verification/Transform/FailureDirectedTrimming/FailureDirectedTrimmingImpl.h"
 
 #include <llvm/IR/Attributes.h>
 #include <llvm/IR/Function.h>

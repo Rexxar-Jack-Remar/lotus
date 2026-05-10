@@ -4,9 +4,9 @@ Failure-Directed Trimming
 ``FailureDirectedTrimming`` contains verification support for reducing programs
 or paths around observed failure behavior.
 
-**Headers**: ``include/Verification/FailureDirectedTrimming/``
+**Headers**: ``include/Verification/Transform/FailureDirectedTrimming/``
 
-**Implementation**: ``lib/Verification/FailureDirectedTrimming/``
+**Implementation**: ``lib/Verification/Transform/FailureDirectedTrimming/``
 
 Overview
 --------

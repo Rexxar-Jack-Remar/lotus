@@ -13,7 +13,7 @@
  * where assert/assume violations terminate execution).
  *
  * The implementation is documented in:
- *   - lib/Verification/FailureDirectedTrimming/README.md
+ *   - lib/Verification/Transform/FailureDirectedTrimming/README.md
  */
 #ifndef VERIFICATION_FAILUREDIRECTEDTRIMMING_FAILUREDIRECTEDTRIMMING_H
 #define VERIFICATION_FAILUREDIRECTEDTRIMMING_FAILUREDIRECTEDTRIMMING_H

@@ -1,7 +1,7 @@
 #include <gtest/gtest.h>
 
 #include "TestUtils/LLVMHelpers.h"
-#include "Verification/FailureDirectedTrimming/FailureDirectedTrimming.h"
+#include "Verification/Transform/FailureDirectedTrimming/FailureDirectedTrimming.h"
 
 #include "llvm/IR/CFG.h"
 #include "llvm/IR/Instructions.h"

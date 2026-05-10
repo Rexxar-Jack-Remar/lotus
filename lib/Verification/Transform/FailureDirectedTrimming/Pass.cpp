@@ -15,8 +15,8 @@
 //   (paper §4 Fig. 3), negate, bound/simplify (paper §6), insert assumes.
 
 #include "Alias/Infrastructure/AliasAnalysisWrapper/AliasAnalysisWrapper.h"
-#include "FailureDirectedTrimmingImpl.h"
-#include "Verification/FailureDirectedTrimming/FailureDirectedTrimming.h"
+#include "Verification/Transform/FailureDirectedTrimming/FailureDirectedTrimming.h"
+#include "Verification/Transform/FailureDirectedTrimming/FailureDirectedTrimmingImpl.h"
 
 #include <iterator>
 

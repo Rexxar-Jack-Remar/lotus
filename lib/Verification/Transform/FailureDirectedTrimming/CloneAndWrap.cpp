@@ -8,7 +8,7 @@
 // This allows local trimming assumptions inside prc while preserving failing
 // executions.
 
-#include "FailureDirectedTrimmingImpl.h"
+#include "Verification/Transform/FailureDirectedTrimming/FailureDirectedTrimmingImpl.h"
 
 #include <llvm/ADT/STLExtras.h>
 #include <llvm/IR/Constants.h>
