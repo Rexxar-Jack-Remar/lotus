@@ -284,6 +284,15 @@ MemoryModel::classifyExternalCall(const llvm::CallBase *Call) const {
     return Summary;
   }
 
+  // Functions that return status codes but publish a fresh heap pointer
+  // through an output parameter.
+  if (Name == "posix_memalign" || Name == "getline" || Name == "getdelim" ||
+      Name == "asprintf" || Name == "vasprintf") {
+    Summary.Effect = ExternalCallEffect::AllocatesIntoArgument;
+    Summary.DestArgIndex = 0;
+    return Summary;
+  }
+
   // Functions known to return an opaque pointer that does not alias their
   // arguments.
   if (Name == "fopen" || Name == "fdopen" || Name == "freopen" ||

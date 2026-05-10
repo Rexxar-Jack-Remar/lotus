@@ -372,7 +372,13 @@ PointsToAnalysis::loadFromPointer(const llvm::Value *Pointer,
     if (!Stored.empty()) {
       Result.insert(Stored.begin(), Stored.end());
     } else {
-      Result.insert(MemoryLocation::summary(Location.Object, Location.Offset));
+      const auto &ObjectSummary = State.load(MemoryLocation::summary(Location.Object));
+      if (!ObjectSummary.empty()) {
+        Result.insert(ObjectSummary.begin(), ObjectSummary.end());
+      } else {
+        const auto UnknownTargets = summaryLocation();
+        Result.insert(UnknownTargets.begin(), UnknownTargets.end());
+      }
     }
   }
   return Result;
@@ -496,8 +502,10 @@ bool PointsToAnalysis::handleExternalCall(
     // same set of summary objects as the source string.
     const auto SrcTargets =
         pointsToSetOfValue(Call.getArgOperand(Summary.SrcArgIndex), InValue);
+    const auto DstBase = MemoryLocation::exact(NewObject);
+    const bool StrongUpdate = SrcTargets.size() <= 1;
     for (const auto &Src : SrcTargets) {
-      copyMemoryObject(NewObject, Src.Object, OutValue, InValue);
+      copyMemoryObject(DstBase, Src, OutValue, InValue, StrongUpdate);
     }
     return true;
   }
@@ -545,6 +553,36 @@ bool PointsToAnalysis::handleExternalCall(
     return true;
   }
 
+  case ExternalCallEffect::AllocatesIntoArgument: {
+    if (Summary.DestArgIndex >= Call.arg_size()) {
+      return true;
+    }
+    auto *DestArg = Call.getArgOperand(Summary.DestArgIndex);
+    if (!isPointerLike(DestArg)) {
+      return true;
+    }
+
+    const auto DestLocations = pointsToSetOfValue(DestArg, InValue);
+    if (DestLocations.empty()) {
+      return true;
+    }
+
+    const auto NewObject =
+        MemoryBlock::heap(&Call, Model.layoutForHeapCall(&Call), ContextId);
+    const auto NewTargets = singletonLocation(NewObject);
+    const bool StrongUpdate = DestLocations.size() == 1 &&
+                              !DestLocations.begin()->IsSummary &&
+                              !DestLocations.begin()->Object.isSummary();
+    for (const auto &Location : DestLocations) {
+      if (Location.IsSummary || Location.Object.isSummary()) {
+        OutValue.store(Location, summaryLocation(), false);
+        continue;
+      }
+      OutValue.store(Location, NewTargets, StrongUpdate);
+    }
+    return true;
+  }
+
   case ExternalCallEffect::OpaqueReturn: {
     if (!Call.getType()->isPointerTy()) {
       return true;
@@ -561,6 +599,71 @@ bool PointsToAnalysis::handleExternalCall(
   }
 
   return false;
+}
+
+bool PointsToAnalysis::shouldSummarizeUnknownArgument(
+    const llvm::CallBase &Call, unsigned ArgIndex) const {
+  if (ArgIndex >= Call.arg_size()) {
+    return false;
+  }
+
+  auto *Arg = Call.getArgOperand(ArgIndex);
+  if (!isPointerLike(Arg) || Call.paramHasAttr(ArgIndex, llvm::Attribute::ByVal)) {
+    return false;
+  }
+
+  if (Call.paramHasAttr(ArgIndex, llvm::Attribute::ReadOnly) ||
+      Call.paramHasAttr(ArgIndex, llvm::Attribute::ReadNone)) {
+    return false;
+  }
+
+  if (Call.onlyReadsMemory() || Call.doesNotAccessMemory()) {
+    return false;
+  }
+
+  return true;
+}
+
+void PointsToAnalysis::summarizeUnknownCallEffects(
+    const llvm::CallBase &Call, DomainType &OutValue,
+    const DomainType &InValue, std::size_t ContextId) const {
+  if (Call.getType()->isPointerTy()) {
+    bool ModeledReturn = false;
+    for (unsigned I = 0; I < Call.arg_size(); ++I) {
+      if (!Call.paramHasAttr(I, llvm::Attribute::Returned)) {
+        continue;
+      }
+      OutValue.assign(PointsToValue::forValue(&Call),
+                      pointsToSetOfValue(Call.getArgOperand(I), InValue));
+      ModeledReturn = true;
+      break;
+    }
+
+    if (!ModeledReturn) {
+      const auto *Callee = Call.getCalledFunction();
+      const bool FreshReturn =
+          Call.hasRetAttr(llvm::Attribute::NoAlias) ||
+          Call.hasFnAttr(llvm::Attribute::NoAlias) ||
+          (Callee != nullptr &&
+           Callee->hasFnAttribute(llvm::Attribute::AllocSize));
+      if (FreshReturn) {
+        OutValue.assign(PointsToValue::forValue(&Call),
+                        singletonLocation(classifyObject(&Call, ContextId)));
+      } else {
+        OutValue.assign(PointsToValue::forValue(&Call), summaryLocation());
+      }
+    }
+  }
+
+  for (unsigned I = 0; I < Call.arg_size(); ++I) {
+    if (!shouldSummarizeUnknownArgument(Call, I)) {
+      continue;
+    }
+    const auto Targets = pointsToSetOfValue(Call.getArgOperand(I), OutValue);
+    for (const auto &Target : Targets) {
+      OutValue.summarizeObject(Target.Object);
+    }
+  }
 }
 
 void PointsToAnalysis::copyThroughPointers(const llvm::Value *Dst,
@@ -581,9 +684,14 @@ void PointsToAnalysis::copyThroughPointers(const llvm::Value *Dst,
   if (DstTargets.empty() || SrcTargets.empty()) {
     return;
   }
+  const bool StrongUpdate = DstTargets.size() == 1 && SrcTargets.size() == 1 &&
+                            !DstTargets.begin()->IsSummary &&
+                            !DstTargets.begin()->Object.isSummary() &&
+                            !SrcTargets.begin()->IsSummary &&
+                            !SrcTargets.begin()->Object.isSummary();
   for (const auto &DstLoc : DstTargets) {
     for (const auto &SrcLoc : SrcTargets) {
-      copyMemoryObject(DstLoc.Object, SrcLoc.Object, OutValue, InValue);
+      copyMemoryObject(DstLoc, SrcLoc, OutValue, InValue, StrongUpdate);
     }
   }
 }
@@ -604,33 +712,59 @@ bool PointsToAnalysis::handleReallocCall(const llvm::CallBase &Call,
   }
 
   const auto OldTargets = pointsToSetOfValue(Call.getArgOperand(0), InValue);
-  const auto NewObject =
-      MemoryBlock::heap(&Call, Model.layoutForHeapCall(&Call), ContextId);
-  OutValue.assign(PointsToValue::forValue(&Call), singletonLocation(NewObject));
+  MemoryLocationSet ReturnTargets;
 
   for (const auto &Old : OldTargets) {
     const auto UpdatedLayout = Model.layoutForReallocCall(&Call, Old.Object);
     const auto NewBlock = MemoryBlock::heap(&Call, UpdatedLayout, ContextId);
-    copyMemoryObject(NewBlock, Old.Object, OutValue, InValue);
-    OutValue.assign(PointsToValue::forValue(&Call),
-                    singletonLocation(NewBlock));
+    copyMemoryObject(MemoryLocation::exact(NewBlock), Old, OutValue, InValue,
+                     OldTargets.size() <= 1 && !Old.IsSummary &&
+                         !Old.Object.isSummary());
+    ReturnTargets.insert(MemoryLocation::exact(NewBlock));
   }
+
+  if (ReturnTargets.empty()) {
+    ReturnTargets.insert(MemoryLocation::exact(
+        MemoryBlock::heap(&Call, Model.layoutForHeapCall(&Call), ContextId)));
+  }
+  OutValue.assign(PointsToValue::forValue(&Call), ReturnTargets);
 
   summarizePointerTargets(Call.getArgOperand(0), OutValue, InValue);
   return true;
 }
 
-void PointsToAnalysis::copyMemoryObject(const MemoryBlock &DstObject,
-                                        const MemoryBlock &SrcObject,
+void PointsToAnalysis::copyMemoryObject(const MemoryLocation &DstBase,
+                                        const MemoryLocation &SrcBase,
                                         DomainType &OutValue,
-                                        const DomainType &InValue) const {
+                                        const DomainType &InValue,
+                                        bool StrongUpdate) const {
+  if (DstBase.IsSummary || DstBase.Object.isSummary() || SrcBase.IsSummary ||
+      SrcBase.Object.isSummary()) {
+    OutValue.summarizeObject(DstBase.Object);
+    return;
+  }
+
+  bool CopiedAny = false;
   for (const auto &Entry : InValue.getMemory()) {
-    if (!(Entry.first.Object == SrcObject)) {
+    if (!(Entry.first.Object == SrcBase.Object) ||
+        Entry.first.Offset < SrcBase.Offset) {
       continue;
     }
     auto DstLocation = Entry.first;
-    DstLocation.Object = DstObject;
-    OutValue.store(DstLocation, Entry.second, true);
+    DstLocation.Object = DstBase.Object;
+    DstLocation.Offset = DstBase.Offset + (Entry.first.Offset - SrcBase.Offset);
+    OutValue.store(DstLocation, Entry.second, StrongUpdate);
+    CopiedAny = true;
+  }
+
+  const auto &SrcSummary = InValue.load(MemoryLocation::summary(SrcBase.Object));
+  if (!SrcSummary.empty()) {
+    OutValue.store(MemoryLocation::summary(DstBase.Object), SrcSummary, false);
+    CopiedAny = true;
+  }
+
+  if (!CopiedAny) {
+    OutValue.summarizeObject(DstBase.Object);
   }
 }
 
@@ -757,16 +891,7 @@ std::optional<PointsToAnalysis::DomainType> PointsToAnalysis::processCallTarget(
   Returned.unionMemoryFrom(*ExitValue);
 
   if (Program.isPhantomMethod(Method)) {
-    for (unsigned I = 0; I < CallBase->arg_size(); ++I) {
-      if (!isPointerLike(CallBase->getArgOperand(I))) {
-        continue;
-      }
-      const auto Targets =
-          pointsToSetOfValue(CallBase->getArgOperand(I), Returned);
-      for (const auto &Target : Targets) {
-        Returned.summarizeObject(Target.Object);
-      }
-    }
+    summarizeUnknownCallEffects(*CallBase, Returned, Returned, ContextId);
   }
 
   Accumulated = this->meet(Accumulated, Returned);
@@ -791,19 +916,8 @@ PointsToAnalysis::flowCall(ContextPtr Context, NodeType Call,
     this->ContextTransitions.addTransition(
         typename Base::CallSiteType(Context, Call), nullptr);
     DomainType Unknown = InValue;
-    if (CallBase->getType()->isPointerTy()) {
-      Unknown.assign(PointsToValue::forValue(Call), summaryLocation());
-    }
-    for (unsigned I = 0; I < CallBase->arg_size(); ++I) {
-      if (!isPointerLike(CallBase->getArgOperand(I))) {
-        continue;
-      }
-      const auto TargetsForArg =
-          pointsToSetOfValue(CallBase->getArgOperand(I), Unknown);
-      for (const auto &Target : TargetsForArg) {
-        Unknown.summarizeObject(Target.Object);
-      }
-    }
+    summarizeUnknownCallEffects(*CallBase, Unknown, InValue,
+                                Context->getId());
     return Unknown;
   }
 

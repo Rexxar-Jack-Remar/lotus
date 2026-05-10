@@ -41,6 +41,12 @@ enum class ExternalCallEffect {
   /// same objects as the source argument.
   ReturnsArgument,
 
+  /// Call stores a fresh pointer into an output parameter (e.g.
+  /// `posix_memalign`, `getline`, `getdelim`, `asprintf`). The destination
+  /// argument is expected to be a pointer to pointer storage that receives the
+  /// newly allocated object.
+  AllocatesIntoArgument,
+
   /// Call returns an opaque pointer (e.g. `fopen`, `getenv`, `dlopen`). The
   /// return value is summarized; arguments are not modified through the call.
   OpaqueReturn,

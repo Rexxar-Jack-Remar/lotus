@@ -24,6 +24,15 @@ bool containsLocation(const vasco::llvmir::MemoryLocationSet &Locations,
   return false;
 }
 
+bool containsSummaryLocation(const vasco::llvmir::MemoryLocationSet &Locations) {
+  for (const auto &Location : Locations) {
+    if (Location.IsSummary || Location.Object.isSummary()) {
+      return true;
+    }
+  }
+  return false;
+}
+
 class VASCOLLVMClientTest : public ::testing::Test {
 protected:
   llvm::LLVMContext Context;
@@ -721,6 +730,280 @@ TEST_F(VASCOLLVMClientTest, PointsToAnalysisModelsReallocAsHeapUpdate) {
   EXPECT_TRUE(containsLocation(
       RTargets,
       vasco::llvmir::MemoryLocation::exact(vasco::llvmir::PointsToObject::stack(A))));
+}
+
+TEST_F(VASCOLLVMClientTest, PointsToAnalysisModelsAllocatorOutParameters) {
+  auto Module = parse(R"(
+    declare i32 @posix_memalign(i8**, i64, i64)
+
+    define i8* @main() {
+    entry:
+      %slot = alloca i8*
+      store i8* null, i8** %slot
+      %rc = call i32 @posix_memalign(i8** %slot, i64 16, i64 32)
+      %buf = load i8*, i8** %slot
+      ret i8* %buf
+    }
+  )");
+
+  vasco::llvmir::DefaultLLVMProgramRepresentation Program(Module.get());
+  vasco::llvmir::PointsToAnalysis Analysis(Program);
+  Analysis.doAnalysis();
+
+  auto *Main = Module->getFunction("main");
+  auto *Call = lotus::unittest::findInstructionByName(Main, "rc");
+  auto *Buf = lotus::unittest::findInstructionByName(Main, "buf");
+  ASSERT_NE(Call, nullptr);
+  ASSERT_NE(Buf, nullptr);
+
+  const auto Solution = Analysis.getMeetOverValidPathsSolution();
+  const auto &Targets =
+      Solution.getValueAfter(Buf).pointsTo(vasco::llvmir::PointsToValue::forValue(Buf));
+
+  bool SawHeap = false;
+  for (const auto &Location : Targets) {
+    SawHeap |= Location.Object.kind() == vasco::llvmir::AllocationSiteKind::Heap &&
+               Location.Object.value() == Call;
+  }
+  EXPECT_TRUE(SawHeap);
+}
+
+TEST_F(VASCOLLVMClientTest, PointsToAnalysisUsesReturnedAttributeOnExternalCall) {
+  auto Module = parse(R"(
+    declare i8* @identity_ext(i8* returned)
+
+    define i8* @main() {
+    entry:
+      %obj = alloca i8
+      %ret = call i8* @identity_ext(i8* %obj)
+      ret i8* %ret
+    }
+  )");
+
+  vasco::llvmir::DefaultLLVMProgramRepresentation Program(Module.get());
+  vasco::llvmir::PointsToAnalysis Analysis(Program);
+  Analysis.doAnalysis();
+
+  auto *Main = Module->getFunction("main");
+  auto *Obj = lotus::unittest::findInstructionByName(Main, "obj");
+  auto *Ret = lotus::unittest::findInstructionByName(Main, "ret");
+  ASSERT_NE(Obj, nullptr);
+  ASSERT_NE(Ret, nullptr);
+
+  const auto Solution = Analysis.getMeetOverValidPathsSolution();
+  const auto &Targets =
+      Solution.getValueAfter(Ret).pointsTo(vasco::llvmir::PointsToValue::forValue(Ret));
+  EXPECT_TRUE(containsLocation(
+      Targets,
+      vasco::llvmir::MemoryLocation::exact(vasco::llvmir::PointsToObject::stack(Obj))));
+  EXPECT_FALSE(containsSummaryLocation(Targets));
+}
+
+TEST_F(VASCOLLVMClientTest, PointsToAnalysisPreservesReadonlyUnknownCallPrecision) {
+  auto Module = parse(R"(
+    %pair = type { i8*, i8* }
+    declare void @inspect(%pair* nocapture readonly)
+
+    define i8* @main() {
+    entry:
+      %s = alloca %pair
+      %lhs = getelementptr inbounds %pair, %pair* %s, i32 0, i32 0
+      %rhs = getelementptr inbounds %pair, %pair* %s, i32 0, i32 1
+      %a = alloca i8
+      %b = alloca i8
+      store i8* %a, i8** %lhs
+      store i8* %b, i8** %rhs
+      call void @inspect(%pair* %s)
+      %ra = load i8*, i8** %lhs
+      %rb = load i8*, i8** %rhs
+      ret i8* %ra
+    }
+  )");
+
+  vasco::llvmir::DefaultLLVMProgramRepresentation Program(Module.get());
+  vasco::llvmir::PointsToAnalysis Analysis(Program);
+  Analysis.doAnalysis();
+
+  auto *Main = Module->getFunction("main");
+  auto *A = lotus::unittest::findInstructionByName(Main, "a");
+  auto *B = lotus::unittest::findInstructionByName(Main, "b");
+  auto *RA = lotus::unittest::findInstructionByName(Main, "ra");
+  auto *RB = lotus::unittest::findInstructionByName(Main, "rb");
+  ASSERT_NE(A, nullptr);
+  ASSERT_NE(B, nullptr);
+  ASSERT_NE(RA, nullptr);
+  ASSERT_NE(RB, nullptr);
+
+  const auto Solution = Analysis.getMeetOverValidPathsSolution();
+  const auto &RATargets =
+      Solution.getValueAfter(RA).pointsTo(vasco::llvmir::PointsToValue::forValue(RA));
+  const auto &RBTargets =
+      Solution.getValueAfter(RB).pointsTo(vasco::llvmir::PointsToValue::forValue(RB));
+
+  EXPECT_TRUE(containsLocation(
+      RATargets,
+      vasco::llvmir::MemoryLocation::exact(vasco::llvmir::PointsToObject::stack(A))));
+  EXPECT_TRUE(containsLocation(
+      RBTargets,
+      vasco::llvmir::MemoryLocation::exact(vasco::llvmir::PointsToObject::stack(B))));
+  EXPECT_FALSE(containsSummaryLocation(RATargets));
+  EXPECT_FALSE(containsSummaryLocation(RBTargets));
+}
+
+TEST_F(VASCOLLVMClientTest, PointsToAnalysisJoinsMemcpyFromMultipleSources) {
+  auto Module = parse(R"(
+    %box = type { i8* }
+    declare void @llvm.memcpy.p0i8.p0i8.i64(i8*, i8*, i64, i1)
+
+    define i8* @main(i1 %cond) {
+    entry:
+      %src1 = alloca %box
+      %src2 = alloca %box
+      %dst = alloca %box
+      %src1.field = getelementptr inbounds %box, %box* %src1, i32 0, i32 0
+      %src2.field = getelementptr inbounds %box, %box* %src2, i32 0, i32 0
+      %dst.field = getelementptr inbounds %box, %box* %dst, i32 0, i32 0
+      %a = alloca i8
+      %b = alloca i8
+      store i8* %a, i8** %src1.field
+      store i8* %b, i8** %src2.field
+      %chosen = select i1 %cond, %box* %src1, %box* %src2
+      %chosen.i8 = bitcast %box* %chosen to i8*
+      %dst.i8 = bitcast %box* %dst to i8*
+      call void @llvm.memcpy.p0i8.p0i8.i64(i8* %dst.i8, i8* %chosen.i8, i64 8, i1 false)
+      %r = load i8*, i8** %dst.field
+      ret i8* %r
+    }
+  )");
+
+  vasco::llvmir::DefaultLLVMProgramRepresentation Program(Module.get());
+  vasco::llvmir::PointsToAnalysis Analysis(Program);
+  Analysis.doAnalysis();
+
+  auto *Main = Module->getFunction("main");
+  auto *A = lotus::unittest::findInstructionByName(Main, "a");
+  auto *B = lotus::unittest::findInstructionByName(Main, "b");
+  auto *R = lotus::unittest::findInstructionByName(Main, "r");
+  ASSERT_NE(A, nullptr);
+  ASSERT_NE(B, nullptr);
+  ASSERT_NE(R, nullptr);
+
+  const auto Solution = Analysis.getMeetOverValidPathsSolution();
+  const auto &Targets =
+      Solution.getValueAfter(R).pointsTo(vasco::llvmir::PointsToValue::forValue(R));
+  EXPECT_TRUE(containsLocation(
+      Targets,
+      vasco::llvmir::MemoryLocation::exact(vasco::llvmir::PointsToObject::stack(A))));
+  EXPECT_TRUE(containsLocation(
+      Targets,
+      vasco::llvmir::MemoryLocation::exact(vasco::llvmir::PointsToObject::stack(B))));
+}
+
+TEST_F(VASCOLLVMClientTest, PointsToAnalysisKeepsAllReallocOutcomes) {
+  auto Module = parse(R"(
+    %box = type { i8* }
+    declare i8* @malloc(i64)
+    declare i8* @realloc(i8*, i64)
+
+    define i8* @main(i1 %cond) {
+    entry:
+      %raw1 = call i8* @malloc(i64 8)
+      %raw2 = call i8* @malloc(i64 8)
+      %box1 = bitcast i8* %raw1 to %box*
+      %box2 = bitcast i8* %raw2 to %box*
+      %f1 = getelementptr inbounds %box, %box* %box1, i32 0, i32 0
+      %f2 = getelementptr inbounds %box, %box* %box2, i32 0, i32 0
+      %a = alloca i8
+      %b = alloca i8
+      store i8* %a, i8** %f1
+      store i8* %b, i8** %f2
+      %old = select i1 %cond, i8* %raw1, i8* %raw2
+      %grown = call i8* @realloc(i8* %old, i64 16)
+      %grown.box = bitcast i8* %grown to %box*
+      %grown.field = getelementptr inbounds %box, %box* %grown.box, i32 0, i32 0
+      %r = load i8*, i8** %grown.field
+      ret i8* %r
+    }
+  )");
+
+  vasco::llvmir::DefaultLLVMProgramRepresentation Program(Module.get());
+  vasco::llvmir::PointsToAnalysis Analysis(Program);
+  Analysis.doAnalysis();
+
+  auto *Main = Module->getFunction("main");
+  auto *A = lotus::unittest::findInstructionByName(Main, "a");
+  auto *B = lotus::unittest::findInstructionByName(Main, "b");
+  auto *R = lotus::unittest::findInstructionByName(Main, "r");
+  ASSERT_NE(A, nullptr);
+  ASSERT_NE(B, nullptr);
+  ASSERT_NE(R, nullptr);
+
+  const auto Solution = Analysis.getMeetOverValidPathsSolution();
+  const auto &RTargets =
+      Solution.getValueAfter(R).pointsTo(vasco::llvmir::PointsToValue::forValue(R));
+  EXPECT_TRUE(containsLocation(
+      RTargets,
+      vasco::llvmir::MemoryLocation::exact(vasco::llvmir::PointsToObject::stack(A))));
+  EXPECT_TRUE(containsLocation(
+      RTargets,
+      vasco::llvmir::MemoryLocation::exact(vasco::llvmir::PointsToObject::stack(B))));
+}
+
+TEST_F(VASCOLLVMClientTest, PointsToAnalysisRespectsMemcpySourceAndDestinationOffsets) {
+  auto Module = parse(R"(
+    %pair = type { i8*, i8* }
+    declare void @llvm.memcpy.p0i8.p0i8.i64(i8*, i8*, i64, i1)
+
+    define i8* @main() {
+    entry:
+      %src = alloca %pair
+      %dst = alloca %pair
+      %src0 = getelementptr inbounds %pair, %pair* %src, i32 0, i32 0
+      %src1 = getelementptr inbounds %pair, %pair* %src, i32 0, i32 1
+      %dst0 = getelementptr inbounds %pair, %pair* %dst, i32 0, i32 0
+      %dst1 = getelementptr inbounds %pair, %pair* %dst, i32 0, i32 1
+      %a = alloca i8
+      %b = alloca i8
+      store i8* %a, i8** %src0
+      store i8* %b, i8** %src1
+      %src1.i8 = bitcast i8** %src1 to i8*
+      %dst0.i8 = bitcast i8** %dst0 to i8*
+      call void @llvm.memcpy.p0i8.p0i8.i64(i8* %dst0.i8, i8* %src1.i8, i64 8, i1 false)
+      %r0 = load i8*, i8** %dst0
+      %r1 = load i8*, i8** %dst1
+      ret i8* %r0
+    }
+  )");
+
+  vasco::llvmir::DefaultLLVMProgramRepresentation Program(Module.get());
+  vasco::llvmir::PointsToAnalysis Analysis(Program);
+  Analysis.doAnalysis();
+
+  auto *Main = Module->getFunction("main");
+  auto *A = lotus::unittest::findInstructionByName(Main, "a");
+  auto *B = lotus::unittest::findInstructionByName(Main, "b");
+  auto *R0 = lotus::unittest::findInstructionByName(Main, "r0");
+  auto *R1 = lotus::unittest::findInstructionByName(Main, "r1");
+  ASSERT_NE(A, nullptr);
+  ASSERT_NE(B, nullptr);
+  ASSERT_NE(R0, nullptr);
+  ASSERT_NE(R1, nullptr);
+
+  const auto Solution = Analysis.getMeetOverValidPathsSolution();
+  const auto &R0Targets =
+      Solution.getValueAfter(R0).pointsTo(vasco::llvmir::PointsToValue::forValue(R0));
+  const auto &R1Targets =
+      Solution.getValueAfter(R1).pointsTo(vasco::llvmir::PointsToValue::forValue(R1));
+
+  EXPECT_TRUE(containsLocation(
+      R0Targets,
+      vasco::llvmir::MemoryLocation::exact(vasco::llvmir::PointsToObject::stack(B))));
+  EXPECT_FALSE(containsLocation(
+      R0Targets,
+      vasco::llvmir::MemoryLocation::exact(vasco::llvmir::PointsToObject::stack(A))));
+  EXPECT_FALSE(containsLocation(
+      R1Targets,
+      vasco::llvmir::MemoryLocation::exact(vasco::llvmir::PointsToObject::stack(B))));
 }
 
 } // namespace

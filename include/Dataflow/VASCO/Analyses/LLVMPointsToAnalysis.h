@@ -123,9 +123,15 @@ private:
                           const ExternalCallSummary &Summary,
                           DomainType &OutValue, const DomainType &InValue,
                           std::size_t ContextId) const;
-  void copyMemoryObject(const MemoryBlock &DstObject,
-                        const MemoryBlock &SrcObject, DomainType &OutValue,
-                        const DomainType &InValue) const;
+  bool shouldSummarizeUnknownArgument(const llvm::CallBase &Call,
+                                      unsigned ArgIndex) const;
+  void summarizeUnknownCallEffects(const llvm::CallBase &Call,
+                                   DomainType &OutValue,
+                                   const DomainType &InValue,
+                                   std::size_t ContextId) const;
+  void copyMemoryObject(const MemoryLocation &DstBase,
+                        const MemoryLocation &SrcBase, DomainType &OutValue,
+                        const DomainType &InValue, bool StrongUpdate) const;
   /// Weakly "memcpy" points-to information of every object reachable from
   /// `Src` into memory reachable from `Dst`. Unlike `copyMemoryObject`, this
   /// does not require Src/Dst to refer to a specific block - it operates on

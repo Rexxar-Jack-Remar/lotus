@@ -78,6 +78,10 @@ void PointsToGraph::summarizeObject(const PointsToObject &Object) {
     Targets.insert(MemoryLocation::summary(PointsToObject::summary()));
     Memory[Location] = std::move(Targets);
   }
+
+  auto SummaryTargets = load(MemoryLocation::summary(Object));
+  SummaryTargets.insert(MemoryLocation::summary(PointsToObject::summary()));
+  Memory[MemoryLocation::summary(Object)] = std::move(SummaryTargets);
 }
 
 void PointsToGraph::unionRootsFrom(const PointsToGraph &Other) {
