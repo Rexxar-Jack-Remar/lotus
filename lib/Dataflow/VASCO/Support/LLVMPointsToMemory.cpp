@@ -112,6 +112,22 @@ MemoryModel::getFieldLocation(const MemoryLocation &Base,
   return MemoryLocation::exact(Base.Object, Base.Offset + *Offset);
 }
 
+std::optional<MemoryLocation>
+MemoryModel::getFieldLocationFromOffset(const MemoryLocation &Base,
+                                        std::int64_t AdditionalOffset) const {
+  if (!Base.Object.Layout.FieldSensitive || Base.IsSummary) {
+    return MemoryLocation::summary(Base.Object, Base.Offset);
+  }
+
+  auto FinalOffset = Base.Offset + AdditionalOffset;
+  if (Base.Object.Layout.CollapsesArrayElements &&
+      Base.Object.Layout.HasKnownSize && Base.Object.Layout.Size != 0) {
+    FinalOffset %= static_cast<std::int64_t>(Base.Object.Layout.Size);
+  }
+
+  return MemoryLocation::exact(Base.Object, FinalOffset);
+}
+
 bool MemoryModel::isHeapAllocator(const llvm::CallBase *Call) const {
   if (Call == nullptr || !Call->getType()->isPointerTy()) {
     return false;
@@ -164,6 +180,183 @@ bool MemoryModel::isMemmoveLikeCall(const llvm::CallBase *Call) const {
 bool MemoryModel::isMemsetLikeCall(const llvm::CallBase *Call) const {
   auto *Callee = Call != nullptr ? Call->getCalledFunction() : nullptr;
   return Callee != nullptr && Callee->getName().startswith("llvm.memset");
+}
+
+ExternalCallSummary
+MemoryModel::classifyExternalCall(const llvm::CallBase *Call) const {
+  ExternalCallSummary Summary;
+  if (Call == nullptr) {
+    return Summary;
+  }
+
+  // Direct dispatch to the existing classifiers first so callers can rely on a
+  // single classify call.
+  if (isHeapAllocator(Call)) {
+    Summary.Effect = ExternalCallEffect::Alloc;
+    return Summary;
+  }
+  if (isMemcpyLikeCall(Call) || isMemmoveLikeCall(Call)) {
+    Summary.Effect = ExternalCallEffect::Memcopy;
+    Summary.DestArgIndex = 0;
+    Summary.SrcArgIndex = 1;
+    Summary.ReturnsDestArg =
+        Call->getType()->isPointerTy(); // memcpy returns dst in libc, void in
+                                        // intrinsic; safe either way.
+    return Summary;
+  }
+  if (isMemsetLikeCall(Call)) {
+    Summary.Effect = ExternalCallEffect::Memset;
+    Summary.DestArgIndex = 0;
+    Summary.ReturnsDestArg = Call->getType()->isPointerTy();
+    return Summary;
+  }
+
+  auto *Callee = Call->getCalledFunction();
+  if (Callee == nullptr || !Callee->isDeclaration()) {
+    Summary.Effect = ExternalCallEffect::Unknown;
+    return Summary;
+  }
+
+  // Skip LLVM intrinsics that have already been claimed by the dedicated
+  // helpers above; everything else (debug, lifetime, etc.) is a no-op.
+  if (Callee->isIntrinsic()) {
+    if (Callee->getName().startswith("llvm.va_") ||
+        Callee->getName().startswith("llvm.lifetime") ||
+        Callee->getName().startswith("llvm.dbg") ||
+        Callee->getName().startswith("llvm.assume") ||
+        Callee->getName().startswith("llvm.expect") ||
+        Callee->getName().startswith("llvm.invariant")) {
+      Summary.Effect = ExternalCallEffect::Noop;
+      return Summary;
+    }
+    // Treat unknown intrinsics conservatively.
+    Summary.Effect = ExternalCallEffect::Unknown;
+    return Summary;
+  }
+
+  const auto Name = Callee->getName();
+
+  // strdup-family: returns a fresh heap object whose contents summarize source.
+  if (Name == "strdup" || Name == "strndup" || Name == "wcsdup" ||
+      Name == "__strdup") {
+    Summary.Effect = ExternalCallEffect::StringDup;
+    Summary.SrcArgIndex = 0;
+    return Summary;
+  }
+
+  // Library-level memcpy/strcpy/strncpy/strcat/strncat all copy bytes from the
+  // second pointer argument into the first.
+  if (Name == "strcpy" || Name == "stpcpy" || Name == "strncpy" ||
+      Name == "stpncpy" || Name == "strcat" || Name == "strncat" ||
+      Name == "wcscpy" || Name == "wcsncpy" || Name == "wcscat" ||
+      Name == "wcsncat" || Name == "memcpy" || Name == "memmove" ||
+      Name == "mempcpy" || Name == "bcopy") {
+    Summary.Effect = ExternalCallEffect::Memcopy;
+    if (Name == "bcopy") {
+      // bcopy(src, dst, len)
+      Summary.SrcArgIndex = 0;
+      Summary.DestArgIndex = 1;
+    } else {
+      Summary.DestArgIndex = 0;
+      Summary.SrcArgIndex = 1;
+    }
+    Summary.ReturnsDestArg = Call->getType()->isPointerTy();
+    return Summary;
+  }
+
+  if (Name == "memset" || Name == "bzero" || Name == "explicit_bzero" ||
+      Name == "memset_s" || Name == "wmemset") {
+    Summary.Effect = ExternalCallEffect::Memset;
+    Summary.DestArgIndex = 0;
+    Summary.ReturnsDestArg = Call->getType()->isPointerTy();
+    return Summary;
+  }
+
+  // Functions that return a pointer aliasing one of their arguments.
+  if (Name == "strchr" || Name == "strrchr" || Name == "strstr" ||
+      Name == "strcasestr" || Name == "strpbrk" || Name == "strtok" ||
+      Name == "strtok_r" || Name == "memchr" || Name == "memrchr" ||
+      Name == "rawmemchr" || Name == "wcschr" || Name == "wcsrchr" ||
+      Name == "wcsstr" || Name == "index" || Name == "rindex" ||
+      Name == "wmemchr") {
+    Summary.Effect = ExternalCallEffect::ReturnsArgument;
+    Summary.SrcArgIndex = 0;
+    return Summary;
+  }
+
+  // Functions known to return an opaque pointer that does not alias their
+  // arguments.
+  if (Name == "fopen" || Name == "fdopen" || Name == "freopen" ||
+      Name == "tmpfile" || Name == "popen" || Name == "getenv" ||
+      Name == "secure_getenv" || Name == "dlopen" || Name == "dlsym" ||
+      Name == "opendir" || Name == "fdopendir" || Name == "ttyname" ||
+      Name == "ctime" || Name == "asctime" || Name == "gmtime" ||
+      Name == "localtime" || Name == "setlocale" || Name == "nl_langinfo") {
+    Summary.Effect = ExternalCallEffect::OpaqueReturn;
+    return Summary;
+  }
+
+  if (Name == "exit" || Name == "_exit" || Name == "_Exit" ||
+      Name == "abort" || Name == "__assert_fail" || Name == "__stack_chk_fail" ||
+      Name == "longjmp" || Name == "siglongjmp" || Name == "pthread_exit") {
+    Summary.Effect = ExternalCallEffect::Exit;
+    return Summary;
+  }
+
+  // I/O / pure functions that do not interact with pointer state in a
+  // meaningful way (no pointer return, arguments only consumed).
+  if (Name == "puts" || Name == "perror" || Name == "fputs" ||
+      Name == "fputc" || Name == "putc" || Name == "putchar" ||
+      Name == "fflush" || Name == "fclose" || Name == "fseek" ||
+      Name == "ftell" || Name == "rewind" || Name == "feof" ||
+      Name == "ferror" || Name == "clearerr" || Name == "setvbuf" ||
+      Name == "setbuf" || Name == "fileno" || Name == "isatty" ||
+      Name == "atoi" || Name == "atol" || Name == "atoll" ||
+      Name == "atof" || Name == "strtod" || Name == "strtof" ||
+      Name == "strtol" || Name == "strtoll" || Name == "strtoul" ||
+      Name == "strtoull" || Name == "strlen" || Name == "wcslen" ||
+      Name == "strcmp" || Name == "strncmp" || Name == "strcasecmp" ||
+      Name == "strncasecmp" || Name == "memcmp" || Name == "wcscmp" ||
+      Name == "wcsncmp" || Name == "abs" || Name == "labs" ||
+      Name == "llabs" || Name == "rand" || Name == "srand" ||
+      Name == "getpid" || Name == "getppid" || Name == "geteuid" ||
+      Name == "getuid" || Name == "getgid" || Name == "getegid" ||
+      Name == "time" || Name == "clock" || Name == "sleep" ||
+      Name == "usleep" || Name == "system") {
+    Summary.Effect = ExternalCallEffect::Noop;
+    return Summary;
+  }
+
+  // printf-family: reads (possibly through pointers) but does not write to the
+  // analyzed program's memory through them.
+  if (Name == "printf" || Name == "fprintf" || Name == "vprintf" ||
+      Name == "vfprintf" || Name == "dprintf" || Name == "vdprintf" ||
+      Name == "asprintf" || Name == "vasprintf" || Name == "sprintf" ||
+      Name == "snprintf" || Name == "vsprintf" || Name == "vsnprintf" ||
+      Name == "fwrite" || Name == "fread" || Name == "write" ||
+      Name == "read" || Name == "open" || Name == "close" ||
+      Name == "stat" || Name == "fstat" || Name == "lstat" ||
+      Name == "unlink" || Name == "rename" || Name == "remove" ||
+      Name == "mkdir" || Name == "rmdir" || Name == "access" ||
+      Name == "chmod" || Name == "chown" || Name == "fcntl" ||
+      Name == "ioctl" || Name == "kill" || Name == "raise" ||
+      Name == "signal" || Name == "sigaction" || Name == "sigprocmask") {
+    // Many of these write to user-supplied buffers via pointer arguments
+    // (sprintf, fread, read, stat, ...). Mark them as Unknown so the analyzer
+    // summarizes their pointer arguments.
+    if (Name == "sprintf" || Name == "snprintf" || Name == "vsprintf" ||
+        Name == "vsnprintf" || Name == "asprintf" || Name == "vasprintf" ||
+        Name == "fread" || Name == "read" || Name == "stat" ||
+        Name == "fstat" || Name == "lstat") {
+      Summary.Effect = ExternalCallEffect::Unknown;
+      return Summary;
+    }
+    Summary.Effect = ExternalCallEffect::Noop;
+    return Summary;
+  }
+
+  Summary.Effect = ExternalCallEffect::Unknown;
+  return Summary;
 }
 
 MemoryLayout MemoryModel::layoutForPointeeType(const llvm::Type *Type,

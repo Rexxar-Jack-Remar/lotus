@@ -69,16 +69,16 @@ PointsToAnalysis::flowFunction(ContextPtr Context, const NodeType &Node,
     const auto *DL = dataLayout();
     if (DL != nullptr) {
       MemoryModel Model(*DL);
-      if (handleMemoryIntrinsicCall(*Call, OutValue, InValue)) {
-        return OutValue;
-      }
+      // realloc has both alloc and copy semantics so it requires special
+      // handling separate from the generic alloc/copy classification.
       if (handleReallocCall(*Call, OutValue, InValue, ContextId)) {
         return OutValue;
       }
-      if (Model.isHeapAllocator(Call)) {
-        OutValue.assign(PointsToValue::forValue(Call),
-                        singletonLocation(classifyObject(Call, ContextId)));
-        return OutValue;
+      const auto Summary = Model.classifyExternalCall(Call);
+      if (Summary.Effect != ExternalCallEffect::Unknown) {
+        if (handleExternalCall(*Call, Summary, OutValue, InValue, ContextId)) {
+          return OutValue;
+        }
       }
     }
     return flowCall(Context, Node, InValue);
@@ -134,18 +134,122 @@ void PointsToAnalysis::seedGlobals(DomainType &State) const {
     return;
   }
 
-  MemoryModel Model(LLVMProgram->getModule()->getDataLayout());
-  for (auto &Global : LLVMProgram->getModule()->globals()) {
-    if (!Global.getValueType()->isPointerTy()) {
+  const auto &Module = *LLVMProgram->getModule();
+  const auto &DL = Module.getDataLayout();
+  MemoryModel Model(DL);
+
+  for (auto &Global : Module.globals()) {
+    auto *ValueType = Global.getValueType();
+
+    // Treat the global as an addressable object at offset 0 of its allocated
+    // type. We always seed the global symbol to point at its own object so
+    // later loads through &G evaluate correctly even when the global holds a
+    // non-pointer aggregate.
+    const auto Object = MemoryBlock::global(&Global, Model.layoutForGlobal(&Global));
+    if (Global.getType()->isPointerTy()) {
+      State.assign(PointsToValue::forValue(&Global), singletonLocation(Object));
+    }
+
+    if (!Global.hasInitializer()) {
       continue;
     }
 
-    const auto Object =
-        MemoryBlock::global(&Global, Model.layoutForGlobal(&Global));
-    State.assign(PointsToValue::forValue(&Global), singletonLocation(Object));
-    State.store(MemoryLocation::exact(Object),
-                initializerTargets(Global.getInitializer()), true);
+    // Top-level pointer globals: as before, store the initializer's points-to
+    // set in the cell at offset 0.
+    if (ValueType->isPointerTy()) {
+      State.store(MemoryLocation::exact(Object),
+                  initializerTargets(Global.getInitializer()), true);
+      continue;
+    }
+
+    // Aggregates: walk into ConstantStruct/Array/Vector to seed each pointer
+    // field at its layout offset. This recovers precision for global tables of
+    // pointers (vtables, function pointer arrays, etc.) that earlier folded
+    // into a single summary fact.
+    seedGlobalInitializer(&Global, Global.getInitializer(),
+                          MemoryLocation::exact(Object), State);
   }
+}
+
+void PointsToAnalysis::seedGlobalInitializer(
+    const llvm::GlobalVariable *Global, const llvm::Constant *Initializer,
+    const MemoryLocation &Base, DomainType &State) const {
+  if (Initializer == nullptr || Global == nullptr) {
+    return;
+  }
+
+  const auto *DL = dataLayout();
+  if (DL == nullptr) {
+    return;
+  }
+
+  if (llvm::isa<llvm::ConstantAggregateZero>(Initializer) ||
+      llvm::isa<llvm::UndefValue>(Initializer)) {
+    return;
+  }
+
+  auto *AggTy = Initializer->getType();
+  if (auto *Struct = llvm::dyn_cast<llvm::ConstantStruct>(Initializer)) {
+    auto *StructTy = llvm::cast<llvm::StructType>(AggTy);
+    if (!StructTy->isSized()) {
+      return;
+    }
+    const auto *SL = DL->getStructLayout(StructTy);
+    MemoryModel Model(*DL);
+    for (unsigned I = 0, E = Struct->getNumOperands(); I < E; ++I) {
+      auto *Element =
+          llvm::dyn_cast<llvm::Constant>(Struct->getOperand(I));
+      if (Element == nullptr) {
+        continue;
+      }
+      const auto FieldOffset =
+          static_cast<std::int64_t>(SL->getElementOffset(I));
+      auto Loc = Model.getFieldLocationFromOffset(Base, FieldOffset);
+      seedGlobalInitializer(Global, Element,
+                            Loc.value_or(MemoryLocation::summary(Base.Object)),
+                            State);
+    }
+    return;
+  }
+
+  if (auto *Array = llvm::dyn_cast<llvm::ConstantArray>(Initializer)) {
+    auto *ArrTy = llvm::cast<llvm::ArrayType>(AggTy);
+    auto *ElemTy = ArrTy->getElementType();
+    if (!ElemTy->isSized()) {
+      return;
+    }
+    const auto ElemSize = static_cast<std::int64_t>(DL->getTypeAllocSize(ElemTy));
+    MemoryModel Model(*DL);
+    for (unsigned I = 0, E = Array->getNumOperands(); I < E; ++I) {
+      auto *Element = llvm::dyn_cast<llvm::Constant>(Array->getOperand(I));
+      if (Element == nullptr) {
+        continue;
+      }
+      const auto Offset = static_cast<std::int64_t>(I) * ElemSize;
+      auto Loc = Model.getFieldLocationFromOffset(Base, Offset);
+      seedGlobalInitializer(Global, Element,
+                            Loc.value_or(MemoryLocation::summary(Base.Object)),
+                            State);
+    }
+    return;
+  }
+
+  if (llvm::isa<llvm::ConstantDataSequential>(Initializer)) {
+    // Data sequential constants only contain primitive (non-pointer) elements,
+    // so there is nothing to seed.
+    return;
+  }
+
+  if (Initializer->getType()->isPointerTy()) {
+    const auto Targets = initializerTargets(Initializer);
+    if (!Targets.empty()) {
+      State.store(Base, Targets, true);
+    }
+    return;
+  }
+
+  // Anything else (BlockAddress, plain constants of non-pointer type) does not
+  // affect the points-to graph.
 }
 
 PointsToObject PointsToAnalysis::classifyObject(const llvm::Value *Value,
@@ -334,13 +438,8 @@ bool PointsToAnalysis::handleMemoryIntrinsicCall(
 
   MemoryModel Model(*DL);
   if (Model.isMemcpyLikeCall(&Call) || Model.isMemmoveLikeCall(&Call)) {
-    const auto DstTargets = pointsToSetOfValue(Call.getArgOperand(0), InValue);
-    const auto SrcTargets = pointsToSetOfValue(Call.getArgOperand(1), InValue);
-    for (const auto &Dst : DstTargets) {
-      for (const auto &Src : SrcTargets) {
-        copyMemoryObject(Dst.Object, Src.Object, OutValue, InValue);
-      }
-    }
+    copyThroughPointers(Call.getArgOperand(0), Call.getArgOperand(1), OutValue,
+                        InValue);
     return true;
   }
 
@@ -350,6 +449,143 @@ bool PointsToAnalysis::handleMemoryIntrinsicCall(
   }
 
   return false;
+}
+
+bool PointsToAnalysis::handleExternalCall(
+    const llvm::CallBase &Call, const ExternalCallSummary &Summary,
+    DomainType &OutValue, const DomainType &InValue,
+    std::size_t ContextId) const {
+  const auto *DL = dataLayout();
+  if (DL == nullptr) {
+    return false;
+  }
+
+  MemoryModel Model(*DL);
+
+  switch (Summary.Effect) {
+  case ExternalCallEffect::Noop:
+    return true;
+
+  case ExternalCallEffect::Exit:
+    // Process exit effects identically to a no-op for pointer state - the CFG
+    // structure already prevents successors from running once we hit
+    // unreachable / no-return paths.
+    return true;
+
+  case ExternalCallEffect::Alloc: {
+    if (!Call.getType()->isPointerTy()) {
+      return true;
+    }
+    OutValue.assign(PointsToValue::forValue(&Call),
+                    singletonLocation(classifyObject(&Call, ContextId)));
+    return true;
+  }
+
+  case ExternalCallEffect::StringDup: {
+    if (Summary.SrcArgIndex >= Call.arg_size() ||
+        !Call.getType()->isPointerTy()) {
+      return true;
+    }
+    // Allocate a fresh heap object for the duplicate.
+    const auto NewObject = MemoryBlock::heap(
+        &Call, Model.layoutForHeapCall(&Call), ContextId);
+    OutValue.assign(PointsToValue::forValue(&Call),
+                    singletonLocation(NewObject));
+
+    // Conservatively summarize the bytes so loads from the duplicate yield the
+    // same set of summary objects as the source string.
+    const auto SrcTargets =
+        pointsToSetOfValue(Call.getArgOperand(Summary.SrcArgIndex), InValue);
+    for (const auto &Src : SrcTargets) {
+      copyMemoryObject(NewObject, Src.Object, OutValue, InValue);
+    }
+    return true;
+  }
+
+  case ExternalCallEffect::Memcopy: {
+    if (Summary.DestArgIndex >= Call.arg_size() ||
+        Summary.SrcArgIndex >= Call.arg_size()) {
+      return true;
+    }
+    copyThroughPointers(Call.getArgOperand(Summary.DestArgIndex),
+                        Call.getArgOperand(Summary.SrcArgIndex), OutValue,
+                        InValue);
+    if (Summary.ReturnsDestArg && Call.getType()->isPointerTy()) {
+      OutValue.assign(
+          PointsToValue::forValue(&Call),
+          pointsToSetOfValue(Call.getArgOperand(Summary.DestArgIndex),
+                             InValue));
+    }
+    return true;
+  }
+
+  case ExternalCallEffect::Memset: {
+    if (Summary.DestArgIndex >= Call.arg_size()) {
+      return true;
+    }
+    summarizePointerTargets(Call.getArgOperand(Summary.DestArgIndex), OutValue,
+                            InValue);
+    if (Summary.ReturnsDestArg && Call.getType()->isPointerTy()) {
+      OutValue.assign(
+          PointsToValue::forValue(&Call),
+          pointsToSetOfValue(Call.getArgOperand(Summary.DestArgIndex),
+                             InValue));
+    }
+    return true;
+  }
+
+  case ExternalCallEffect::ReturnsArgument: {
+    if (!Call.getType()->isPointerTy() ||
+        Summary.SrcArgIndex >= Call.arg_size()) {
+      return true;
+    }
+    OutValue.assign(
+        PointsToValue::forValue(&Call),
+        pointsToSetOfValue(Call.getArgOperand(Summary.SrcArgIndex), InValue));
+    return true;
+  }
+
+  case ExternalCallEffect::OpaqueReturn: {
+    if (!Call.getType()->isPointerTy()) {
+      return true;
+    }
+    // Model the return as a fresh heap allocation (e.g., FILE*, DIR*) so its
+    // identity is distinct from any of the arguments.
+    OutValue.assign(PointsToValue::forValue(&Call),
+                    singletonLocation(classifyObject(&Call, ContextId)));
+    return true;
+  }
+
+  case ExternalCallEffect::Unknown:
+    return false;
+  }
+
+  return false;
+}
+
+void PointsToAnalysis::copyThroughPointers(const llvm::Value *Dst,
+                                           const llvm::Value *Src,
+                                           DomainType &OutValue,
+                                           const DomainType &InValue) const {
+  if (!isPointerLike(Dst) || !isPointerLike(Src)) {
+    // Conservatively summarize the destination if either side is not a
+    // pointer-typed value (e.g. memset takes an integer pattern).
+    if (isPointerLike(Dst)) {
+      summarizePointerTargets(Dst, OutValue, InValue);
+    }
+    return;
+  }
+
+  const auto DstTargets = pointsToSetOfValue(Dst, InValue);
+  const auto SrcTargets = pointsToSetOfValue(Src, InValue);
+  if (DstTargets.empty() || SrcTargets.empty()) {
+    return;
+  }
+  for (const auto &DstLoc : DstTargets) {
+    for (const auto &SrcLoc : SrcTargets) {
+      copyMemoryObject(DstLoc.Object, SrcLoc.Object, OutValue, InValue);
+    }
+  }
 }
 
 bool PointsToAnalysis::handleReallocCall(const llvm::CallBase &Call,
@@ -468,8 +704,25 @@ std::optional<PointsToAnalysis::DomainType> PointsToAnalysis::processCallTarget(
     return std::nullopt;
   }
 
-  MemoryModel Model(*DL);
   const auto ContextId = CallerContext != nullptr ? CallerContext->getId() : 0;
+
+  // Phantom (declaration-only) callees go through the external library model
+  // so well-known libc functions get precise summaries instead of a blanket
+  // argument escape. This preserves call-graph transitions for callers that
+  // need a concrete callee identity.
+  if (Program.isPhantomMethod(Method)) {
+    MemoryModel Model(*DL);
+    const auto Summary = Model.classifyExternalCall(CallBase);
+    if (Summary.Effect != ExternalCallEffect::Unknown) {
+      DomainType Returned = InValue;
+      const bool Handled =
+          handleExternalCall(*CallBase, Summary, Returned, InValue, ContextId);
+      if (Handled) {
+        Accumulated = this->meet(Accumulated, Returned);
+        return Returned;
+      }
+    }
+  }
 
   DomainType EntryValue;
   for (unsigned I = 0; I < CallBase->arg_size() && I < Method->arg_size();
@@ -578,6 +831,209 @@ PointsToAnalysis::flowCall(ContextPtr Context, NodeType Call,
 
 const DefaultLLVMProgramRepresentation *PointsToAnalysis::llvmProgram() const {
   return dynamic_cast<const DefaultLLVMProgramRepresentation *>(&Program);
+}
+
+// ---------------------------------------------------------------------------
+// Convenience query API
+// ---------------------------------------------------------------------------
+
+MemoryLocationSet
+PointsToAnalysis::getPointsToSet(const llvm::Value *Value) const {
+  if (!isPointerLike(Value)) {
+    return {};
+  }
+
+  // Aggregate the points-to facts attached to `Value` over every context that
+  // reached the enclosing method. For globals/functions we still go through
+  // evaluateValue so they are resolved even before any analysis ran.
+  if (auto *Inst = llvm::dyn_cast<llvm::Instruction>(Value)) {
+    auto *F = Inst->getFunction();
+    if (F == nullptr) {
+      return {};
+    }
+    MemoryLocationSet Result;
+    for (const auto &Context : this->getContexts(const_cast<llvm::Function *>(F))) {
+      if (Context->isFreed()) {
+        continue;
+      }
+      const auto Found =
+          Context->getValueAfter(const_cast<llvm::Instruction *>(Inst)).pointsTo(PointsToValue::forValue(Inst));
+      Result.insert(Found.begin(), Found.end());
+    }
+    if (!Result.empty()) {
+      return Result;
+    }
+  }
+
+  if (auto *Arg = llvm::dyn_cast<llvm::Argument>(Value)) {
+    auto *F = Arg->getParent();
+    if (F == nullptr) {
+      return {};
+    }
+    MemoryLocationSet Result;
+    for (const auto &Context : this->getContexts(const_cast<llvm::Function *>(F))) {
+      if (Context->isFreed()) {
+        continue;
+      }
+      const auto Found =
+          Context->getEntryValue().pointsTo(PointsToValue::forValue(Arg));
+      Result.insert(Found.begin(), Found.end());
+    }
+    return Result;
+  }
+
+  // Fall back to a state-free evaluation for globals, functions, and other
+  // top-level constants whose points-to set is independent of program state.
+  PointsToGraph EmptyState;
+  return evaluateValue(Value, EmptyState);
+}
+
+MemoryLocationSet
+PointsToAnalysis::getPointsToSetBefore(const llvm::Value *Value,
+                                       const llvm::Instruction *AtNode) const {
+  if (!isPointerLike(Value) || AtNode == nullptr) {
+    return {};
+  }
+
+  auto *F = AtNode->getFunction();
+  if (F == nullptr) {
+    return {};
+  }
+
+  MemoryLocationSet Result;
+  for (const auto &Context : this->getContexts(const_cast<llvm::Function *>(F))) {
+    if (Context->isFreed()) {
+      continue;
+    }
+    const auto &State =
+        Context->getValueBefore(const_cast<llvm::Instruction *>(AtNode));
+    const auto Found = evaluateValue(Value, State);
+    Result.insert(Found.begin(), Found.end());
+  }
+  return Result;
+}
+
+MemoryLocationSet
+PointsToAnalysis::getPointsToSetAfter(const llvm::Value *Value,
+                                      const llvm::Instruction *AtNode) const {
+  if (!isPointerLike(Value) || AtNode == nullptr) {
+    return {};
+  }
+
+  auto *F = AtNode->getFunction();
+  if (F == nullptr) {
+    return {};
+  }
+
+  MemoryLocationSet Result;
+  for (const auto &Context : this->getContexts(const_cast<llvm::Function *>(F))) {
+    if (Context->isFreed()) {
+      continue;
+    }
+    const auto &State =
+        Context->getValueAfter(const_cast<llvm::Instruction *>(AtNode));
+    const auto Found = evaluateValue(Value, State);
+    Result.insert(Found.begin(), Found.end());
+  }
+  return Result;
+}
+
+std::set<llvm::Function *>
+PointsToAnalysis::getCallTargets(const llvm::CallBase *Call) const {
+  std::set<llvm::Function *> Targets;
+  if (Call == nullptr) {
+    return Targets;
+  }
+
+  if (auto *Direct = Call->getCalledFunction()) {
+    Targets.insert(Direct);
+  }
+
+  // Walk the context-transition table to recover all callees seen across
+  // every context that reached this call site.
+  for (const auto &Entry : this->getContextTransitionTable().getTransitions()) {
+    if (Entry.first.getCallNode() != Call) {
+      continue;
+    }
+    for (const auto &Target : Entry.second) {
+      if (Target.first != nullptr) {
+        Targets.insert(Target.first);
+      }
+    }
+  }
+
+  return Targets;
+}
+
+bool PointsToAnalysis::isDefaultCallSite(const llvm::CallBase *Call) const {
+  if (Call == nullptr) {
+    return false;
+  }
+  for (const auto &Site :
+       this->getContextTransitionTable().getDefaultCallSites()) {
+    if (Site.getCallNode() == Call) {
+      return true;
+    }
+  }
+  return false;
+}
+
+bool PointsToAnalysis::mayAlias(const llvm::Value *V1,
+                                const llvm::Value *V2) const {
+  if (!isPointerLike(V1) || !isPointerLike(V2)) {
+    return false;
+  }
+  if (V1 == V2) {
+    return true;
+  }
+  const auto Set1 = getPointsToSet(V1);
+  const auto Set2 = getPointsToSet(V2);
+  for (const auto &Loc1 : Set1) {
+    if (Loc1.Object.isSummary()) {
+      return true;
+    }
+    for (const auto &Loc2 : Set2) {
+      if (Loc2.Object.isSummary()) {
+        return true;
+      }
+      if (Loc1.Object == Loc2.Object) {
+        return true;
+      }
+    }
+  }
+  return false;
+}
+
+DefaultLLVMProgramRepresentation::ResolveTargetsFn
+PointsToAnalysis::callTargetResolver() const {
+  // Capture by value of `this` is safe because the analysis object outlives
+  // the resolver lambda for the duration of any client analysis - the lambda
+  // is only valid as long as `*this` is live.
+  const auto *Self = this;
+  return [Self](llvm::Function *,
+                llvm::Instruction *Node) -> std::optional<std::vector<llvm::Function *>> {
+    auto *Call = llvm::dyn_cast<llvm::CallBase>(Node);
+    if (Call == nullptr) {
+      return std::vector<llvm::Function *>{};
+    }
+
+    if (auto *Direct = Call->getCalledFunction()) {
+      if (Direct->isDeclaration()) {
+        return std::nullopt;
+      }
+      return std::vector<llvm::Function *>{Direct};
+    }
+
+    if (Self->isDefaultCallSite(Call)) {
+      return std::nullopt;
+    }
+
+    auto Found = Self->getCallTargets(Call);
+    if (Found.empty()) {
+      return std::nullopt;
+    }
+    return std::vector<llvm::Function *>(Found.begin(), Found.end());
+  };
 }
 
 } // namespace llvmir
