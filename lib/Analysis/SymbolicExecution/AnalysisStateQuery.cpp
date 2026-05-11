@@ -875,7 +875,7 @@ void AnalysisState::addQueryTrace(const NumericalQueryPtr &Q,
         MTDEBUG(errs() << "\n");
       }
 
-      MTDEBUG(SinkInst->dump());
+      MTDEBUG(SinkInst->print(llvm::dbgs(), true); llvm::dbgs() << "\n";);
       MTDEBUG(Q->dump());
     }
 

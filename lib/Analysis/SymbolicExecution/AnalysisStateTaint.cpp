@@ -94,7 +94,7 @@ void AnalysisState::processCallTaintSources(Instruction *Inst) {
 
   MTDEBUG(errs() << "[DEBUG-Numerical] Found Taint source in func "
                  << F->getName() << ":\n");
-  MTDEBUG(Inst->dump());
+  MTDEBUG(Inst->print(llvm::dbgs(), true); llvm::dbgs() << "\n";);
 
   Condition BBCond = getLocalCond(Inst->getParent());
   for (const auto &V : TaintedDsts) {
