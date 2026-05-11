@@ -27,6 +27,7 @@ set(Concurrency_SOURCES
   CUDA/CUDAKernelProtocolAnalysis.cpp
   CUDA/CUDAMemoryModel.cpp
   CUDA/CUDASymbolicModel.cpp
+  CUDA/PTXAnalyzer.cpp
   CUDA/CUDAAnalysisLaunch.cpp
   CUDA/CUDAAnalysisMemory.cpp
   CUDA/CUDAAnalysis.cpp
