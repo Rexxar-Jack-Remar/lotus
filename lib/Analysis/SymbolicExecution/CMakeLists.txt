@@ -25,6 +25,5 @@ target_link_libraries(CanarySymbolicExecution PUBLIC
   CanaryGuardedValueFlow
   CanaryFormats
   #CanarySMT
-  #LLVMCore
-  LLVMAnalysis
+  LLVMCore
 )

@@ -73,8 +73,10 @@ static void topsortCFG(std::vector<BasicBlock *> &sorted, Function *F) {
 
 } // namespace
 
-// External reference to enable-symex-bof flag from cb-check.cpp
-extern cl::opt<bool> enable_symex_bof_engine;
+cl::opt<bool> enable_symex_bof_engine(
+    "symex-bof-engine",
+    cl::desc("Enable buffer overflow checking under the symbolic execution engine"),
+    cl::init(false));
 
 static cl::opt<bool> SymexEnableCheckBof(
     "symex-bof",
