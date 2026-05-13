@@ -22,10 +22,11 @@ Pre-verification analysis passes:
 
 Verification backends:
 
-- **CLAM** – Abstract interpretation with numerical domains (intervals, octagons, polyhedra)
-- **Sifa** – Symbolic interpretation with fluid abstractions
-- **SymAbsAI** – Program-level abstract interpretation framework
-- **Seahorn** – Horn clause-based verification
+- **CLAM** – Abstract interpretation with numerical domains (third-party)
+- **Sifa** – Symbolic interpretation with fluid abstractions (rely on SymAbsAI for transfer functions)
+- **SymAbsAI** – Program-level abstract interpretation framework (using SMT-based symbolic abstraction)
+- **Seahorn** – Horn clause-based verification (third-party)
+- **smack** - Translate LLVM IR to Boogie (third-party)
 
 ### CLAM
 
@@ -58,6 +59,9 @@ Verification backends:
 - Horn clause generation and solving
 - Counterexample generation
 
+### smack 
+
+
 ## Failure-Directed Trimming
 
 [FailureDirectedTrimming](Transform/FailureDirectedTrimming/) implements program trimming (Ferles et al., ESEC/FSE 2017):
@@ -78,3 +82,4 @@ Verification backends:
 - CRAB: https://github.com/seahorn/crab
 - SeaDsa: https://github.com/seahorn/sea-dsa
 - Seahorn: https://github.com/seahorn/seahorn
+- smack: https://github.com/smackers/smack

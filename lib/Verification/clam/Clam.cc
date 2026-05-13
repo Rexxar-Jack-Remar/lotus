@@ -1,5 +1,4 @@
 #include "llvm/ADT/DenseMap.h"
-#include <optional>
 #include "llvm/ADT/iterator_range.h"
 #include "llvm/Analysis/CFG.h"
 #include "llvm/Analysis/CallGraph.h"
@@ -19,6 +18,7 @@
 #include "llvm/Support/ToolOutputFile.h"
 #include "llvm/Support/raw_ostream.h"
 #include "llvm/Transforms/Utils/UnifyFunctionExitNodes.h"
+#include <optional>
 
 #include "ClamQueryCache.hh"
 #include "clam/CfgBuilder.hh"
@@ -43,9 +43,9 @@
 #include "Alias/UnificationBased/seadsa/support/Debug.h"
 
 #include "crab/analysis/bwd_analyzer.hpp"
+#include "crab/analysis/concurrent_fwd_analyzer.hpp"
 #include "crab/analysis/dataflow/assertion_crawler.hpp"
 #include "crab/analysis/dataflow/assumptions.hpp"
-#include "crab/analysis/concurrent_fwd_analyzer.hpp"
 #include "crab/analysis/fwd_analyzer.hpp"
 #include "crab/analysis/inter/inter_params.hpp"
 #include "crab/analysis/inter/top_down_inter_analyzer.hpp"
