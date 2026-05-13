@@ -35,6 +35,7 @@ Use `build/bin/<checker> --help` to inspect the full option set.
 | `lotus-saber` | Source-sink bug checker | Runs memory leak, double-free, and file-descriptor leak checks; defaults to leak checking when no specific checker is selected. |
 | `lotus-ae` | Abstract-execution checker | Covers overflow, null dereference, use-after-free, invalid free, and memory leak detection. |
 | `lotus-symex` | Symbolic-execution checker | Runs the `lib/Analysis/SymbolicExecution` engine on GVFG/LotusAA and emits path-sensitive bug reports. |
+| `lotus-check` | Generic checker driver | Loads built-in YAML specs from `config/checkers/` and runs declarative checkers through the shared report manager. |
 
 ## Common workflows
 

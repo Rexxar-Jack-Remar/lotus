@@ -1,0 +1,88 @@
+#pragma once
+
+#include <string>
+#include <vector>
+
+namespace lotus::checker {
+
+enum class EngineKind {
+  Declarative,
+  AE,
+  Saber,
+  Pulse,
+  KINT,
+  FiTx,
+  Concurrency,
+  SymExec
+};
+
+enum class CheckerCapability {
+  DebugInfo,
+  DirectCalls,
+  UseDef,
+  SimpleMemory,
+  InterproceduralFlow,
+  ICFG,
+  SVFG,
+  PTA,
+  MHP,
+  SMT
+};
+
+enum class Severity { Low, Medium, High, Critical };
+
+enum class RuleKind { ForbiddenCall, SourceSink, ApiProtocol, Native };
+
+struct CheckerMetadata {
+  std::string id;
+  std::string title;
+  std::string category;
+  std::string summary;
+  Severity severity = Severity::Medium;
+  EngineKind engine = EngineKind::Declarative;
+  std::vector<std::string> languages;
+  std::vector<std::string> tags;
+  bool default_enabled = true;
+};
+
+struct ForbiddenCallRule {
+  std::vector<std::string> functions;
+};
+
+struct SourceSinkRule {
+  std::vector<std::string> sources;
+  std::vector<std::string> sinks;
+  std::vector<std::string> sanitizers;
+};
+
+struct ApiProtocolRule {
+  std::vector<std::string> acquire;
+  std::vector<std::string> use;
+  std::vector<std::string> release;
+  bool report_leak = true;
+  bool report_use_before_acquire = true;
+  bool report_use_after_release = true;
+  bool report_double_acquire = true;
+};
+
+struct CheckerSpec {
+  CheckerMetadata metadata;
+  RuleKind rule_kind = RuleKind::Native;
+  std::vector<CheckerCapability> capabilities;
+  std::string message;
+  std::string suggestion;
+  int confidence = 80;
+
+  ForbiddenCallRule forbidden_call;
+  SourceSinkRule source_sink;
+  ApiProtocolRule api_protocol;
+
+  bool isDeclarative() const { return metadata.engine == EngineKind::Declarative; }
+};
+
+const char *toString(EngineKind kind);
+const char *toString(CheckerCapability capability);
+const char *toString(Severity severity);
+const char *toString(RuleKind kind);
+
+} // namespace lotus::checker

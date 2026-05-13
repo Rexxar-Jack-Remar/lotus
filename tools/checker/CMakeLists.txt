@@ -114,3 +114,11 @@ target_link_libraries(lotus-symex PRIVATE
   CanaryFuzzing
   ${Z3_LIBRARIES}
 )
+
+# Generic YAML-backed declarative checker driver
+add_executable(lotus-check lotus_check.cpp)
+target_link_libraries(lotus-check PRIVATE
+  CheckerCore
+  CanaryReport
+  ${LLVM_LINK_COMPONENTS}
+)

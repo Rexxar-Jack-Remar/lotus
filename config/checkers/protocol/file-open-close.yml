@@ -1,0 +1,22 @@
+engine: declarative
+rule_kind: api_protocol
+metadata:
+  id: protocol.file-open-close
+  title: File open/close protocol
+  category: api-misuse
+  summary: Resources opened by fopen-like APIs must be used and released correctly
+  severity: medium
+  languages: [llvm-ir]
+  tags: [protocol, resources]
+  default_enabled: true
+capabilities: [direct-calls, use-def]
+message: File handle protocol violation
+suggestion: Ensure opened file handles are released exactly once and not used after close
+confidence: 75
+acquire: [fopen, open_resource]
+use: [fwrite, fread, use_resource]
+release: [fclose, close_resource]
+report_leak: true
+report_use_before_acquire: true
+report_use_after_release: true
+report_double_acquire: true

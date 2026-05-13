@@ -1,0 +1,16 @@
+engine: declarative
+rule_kind: forbidden_call
+metadata:
+  id: forbidden.system
+  title: Dangerous system-like call
+  category: security
+  summary: Direct calls to shell-spawning APIs
+  severity: high
+  languages: [llvm-ir]
+  tags: [forbidden-call, security]
+  default_enabled: true
+capabilities: [direct-calls]
+message: Dangerous shell-spawning function reached
+suggestion: Replace shell invocation with a safer API or strict argument validation
+confidence: 85
+functions: [system, popen]

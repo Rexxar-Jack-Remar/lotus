@@ -1,0 +1,18 @@
+engine: declarative
+rule_kind: source_sink
+metadata:
+  id: taint.getenv-system
+  title: getenv to system flow
+  category: taint
+  summary: Environment data should not flow into shell execution
+  severity: high
+  languages: [llvm-ir]
+  tags: [taint, source-sink]
+  default_enabled: true
+capabilities: [direct-calls, use-def, simple-memory]
+message: Tainted data from getenv reaches system
+suggestion: Sanitize or reject attacker-controlled input before invoking system
+confidence: 80
+sources: [getenv]
+sinks: [system]
+sanitizers: [sanitize_input]

@@ -20,3 +20,5 @@ target_sources(saber_condition_allocator_test PRIVATE
 target_link_libraries(saber_condition_allocator_test Saber)
 target_compile_definitions(saber_condition_allocator_test PRIVATE USE_Z3)
 add_lotus_checker_test(report_formatting_test ReportFormattingTest.cpp)
+add_lotus_checker_test(checker_core_test Core/CheckerCoreTest.cpp)
+target_link_libraries(checker_core_test CheckerCore)

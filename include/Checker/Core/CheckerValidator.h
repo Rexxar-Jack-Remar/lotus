@@ -1,0 +1,18 @@
+#pragma once
+
+#include "Checker/Core/CheckerTypes.h"
+
+#include <llvm/Support/Error.h>
+
+#include <string>
+#include <unordered_set>
+
+namespace lotus::checker {
+
+class CheckerValidator {
+public:
+  static llvm::Error validate(const CheckerSpec &spec,
+                              const std::unordered_set<std::string> &existing_ids = {});
+};
+
+} // namespace lotus::checker
