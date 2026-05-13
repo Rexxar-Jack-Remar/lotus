@@ -1,80 +1,58 @@
 # Program Verification
 
-Lotus provides multiple verification and analysis backends based on abstract interpretation and symbolic execution.
+Lotus provides verification infrastructure, preprocessing passes, frontends,
+and multiple verification backends based on abstract interpretation and
+symbolic reasoning.
+
+| Subdir | Purpose |
+|--------|---------|
+| **Analysis** | Pre-verification module analyses such as module checking, instruction and loop classification, instruction counting, and test-target extraction. |
+| **Backend** | Common backend interface and backend runners for invoking verification engines and normalizing results. |
+| **Frontend** | Predicate/Boolean-program parsing and lowering infrastructure used to build verification-oriented IR. |
+| **Sifa** | Symbolic Interpretation with Fluid Abstractions: interprocedural symbolic interpretation over ICFG-style procedure graphs and regex-DAG summaries. See `Sifa/README.md`. |
+| **SymAbsAI** | SMT-backed abstract interpretation framework with reusable transfer semantics, fixpoint engines, and abstract domains. See `SymAbsAI/README.md`. |
+| **Transform** | IR transformations for verification, including CFG normalization, loop/control-flow rewriting, memory instrumentation, and nondeterminism injection. |
+| **clam** | CLAM-based abstract interpretation backend and supporting SeaDsa/Crab integration code. See `clam/README.md`. |
+| **seahorn** | Seahorn integration and support code for Horn-clause-based verification. |
+| **smack** | SMACK integration for translating LLVM IR into Boogie-based verification workflows. |
 
 ## Analysis
 
 Pre-verification analysis passes:
 
-- [`Analysis/`](Analysis/) – Module analysis utilities
-  - `CheckModule.cpp` – Verify module integrity
-  - `ClassifyInstructions.cpp` – Instruction classification
-  - `ClassifyLoops.cpp` – Loop analysis
-  - `CountInstr.cpp` – Instruction counting
-  - `GetTestTargets.cpp` – Test target extraction
+- [`Analysis/`](Analysis/) contains module analysis utilities.
+- `CheckModule.cpp` verifies module integrity.
+- `ClassifyInstructions.cpp` classifies instructions for downstream verification workflows.
+- `ClassifyLoops.cpp` performs loop analysis.
+- `CountInstr.cpp` counts instructions.
+- `GetTestTargets.cpp` extracts candidate verification targets.
 
-- [`Transform/`](Transform/) – IR transformations for verification
-  - Loop/control-flow transformations
-  - Memory instrumentation
-  - Nondeterminism injection
+## Frontend And Backend
 
-## Backend
+- [`Frontend/`](Frontend/) contains Boolean/predicate-program parsing and lowering.
+- [`Backend/`](Backend/) provides shared backend execution logic and result parsing.
 
-Verification backends:
+## Verification Backends
 
-- **CLAM** – Abstract interpretation with numerical domains (third-party)
-- **Sifa** – Symbolic interpretation with fluid abstractions (rely on SymAbsAI for transfer functions)
-- **SymAbsAI** – Program-level abstract interpretation framework (using SMT-based symbolic abstraction)
-- **Seahorn** – Horn clause-based verification (third-party)
-- **smack** - Translate LLVM IR to Boogie (third-party)
-
-### CLAM
-
-[CLAM](clam/)  provides:
-- Numerical abstract domains (intervals, octagons, boxes, polyhedra)
-- Property checking (null pointer, bounds, use-after-free)
-- SeaDsa-based heap abstraction
-- Integration with Crab domains
-
-### Sifa
-
-[Sifa](Sifa/) (Symbolic Interpretation with Fluid Abstractions) implements:
-- ICFG interpretation with RegexDAG representation
-- Fluid abstraction (via SMT-based symbolic abstraction)
-- Multiple domains: Reachability, Interval, Octagon, Eq, ExplicitValue
-- Region-based memory model via alias analysis
-
-### SymAbsAI
-
-[SymAbsAI](SymAbsAI/) is a full abstract interpretation framework:
-- Fixpoint engine with fragment decomposition
-- Abstract domains: Intervals, Octagons, MemRange, Congruence, etc.
-- Instruction semantics to SMT conversion
-
-### Seahorn
-
-[Seahorn](seahorn/) provides Horn clause verification:
-- BvOpSem – Bit-precise operational semantics
-- ClpOpSem – Concrete memory model
-- Horn clause generation and solving
-- Counterexample generation
-
-### smack 
-
+- **CLAM**: abstract interpretation with numerical domains and SeaDsa-based heap abstraction.
+- **Sifa**: symbolic interpretation with fluid abstractions, using SymAbsAI-style transfer functions.
+- **SymAbsAI**: reusable abstract interpretation framework with SMT-based symbolic abstraction.
+- **Seahorn**: Horn-clause-based verification.
+- **smack**: translation from LLVM IR to Boogie-based verification workflows.
 
 ## Failure-Directed Trimming
 
-[FailureDirectedTrimming](Transform/FailureDirectedTrimming/) implements program trimming (Ferles et al., ESEC/FSE 2017):
-- Equi-safe program reduction
-- Safety condition inference
-- Instrumentation for path pruning
+[`Transform/FailureDirectedTrimming/`](Transform/FailureDirectedTrimming/)
+implements program trimming in the style of Ferles et al. (ESEC/FSE 2017),
+including equi-safe reduction, safety-condition inference, and instrumentation
+for path pruning.
 
 ## Dependencies
 
 - LLVM 14
-- Z3 (for SMT solving)
-- Boost (for CLAM/CRAB)
-- SeaDsa (included)
+- Z3
+- Boost (for CLAM/CRAB-related components)
+- SeaDsa
 
 ## References
 

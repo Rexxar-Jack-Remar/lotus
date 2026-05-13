@@ -7,6 +7,7 @@
 #include <llvm/Support/YAMLTraits.h>
 
 #include <filesystem>
+#include <optional>
 #include <unordered_set>
 
 using namespace llvm;
