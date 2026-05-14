@@ -1,4 +1,25 @@
-#include "DIBasedTypeHierarchyTestSupport.h"
+#include "Analysis/TypeHirarchy/DIBasedTypeHierarchy.h"
+#include "TestUtils/LLVMHelpers.h"
+
+#include <gtest/gtest.h>
+
+#include <string>
+
+#include "llvm/IR/LLVMContext.h"
+#include "llvm/IR/Module.h"
+
+using namespace llvm;
+using namespace lotus;
+
+namespace {
+
+using lotus::unittest::loadModule;
+
+std::string getTestFilePath(const std::string &FileName) {
+  return std::string(LOTUS_TYPE_HIERARCHY_LL_DIR) + "/" + FileName;
+}
+
+} // namespace
 
 TEST(DIBasedTypeHierarchyTest, TransitivelyReachableTypes_9) {
   LLVMContext Context;

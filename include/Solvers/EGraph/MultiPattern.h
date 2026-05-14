@@ -77,7 +77,10 @@ public:
   template <typename A>
   std::vector<SearchMatches<L>> searchWithLimit(const EGraph<L, A> &egraph,
                                                 size_t limit) const {
-    if (clauses_.empty() || limit == 0) {
+    if (clauses_.empty()) {
+      throw std::runtime_error("empty multipattern");
+    }
+    if (limit == 0) {
       return {};
     }
 
@@ -99,7 +102,10 @@ public:
   std::optional<SearchMatches<L>>
   searchEClassWithLimit(const EGraph<L, A> &egraph, Id eclass,
                         size_t limit) const {
-    if (clauses_.empty() || limit == 0) {
+    if (clauses_.empty()) {
+      throw std::runtime_error("empty multipattern");
+    }
+    if (limit == 0) {
       return std::nullopt;
     }
     if (clauses_.front().second.ast().size() == 1 &&

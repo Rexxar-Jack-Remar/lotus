@@ -202,9 +202,16 @@ public:
   }
 
   EGraph copyWithoutUnions(AnalysisT analysis) const {
+    if (!explanations_enabled_) {
+      throw std::runtime_error(
+          "Use withExplanationsEnabled before copying an e-graph without unions");
+    }
     EGraph copy(std::move(analysis));
+    std::vector<Id> ids;
+    ids.reserve(nodes_.size());
     for (const auto &node : nodes_) {
-      copy.add(node);
+      ids.push_back(copy.add(node.mapChildren(
+          [&](Id child) { return ids.at(child.index()); })));
     }
     return copy;
   }

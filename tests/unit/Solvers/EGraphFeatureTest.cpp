@@ -598,6 +598,20 @@ TEST(EGraphFeatureTest, MultiPatternAllowsBareVariableAfterFirstClause) {
   EXPECT_NO_THROW((void)rewrite.apply(egraph, matches));
 }
 
+TEST(EGraphFeatureTest, EmptyMultiPatternIsRejectedLikeEgg) {
+  EGraph<SymbolLang> egraph;
+  egraph.addExpr(RecExpr<SymbolLang>::parse("(f a)"));
+  egraph.rebuild();
+
+  MultiPattern<SymbolLang> empty(
+      std::vector<std::pair<Var, Pattern<SymbolLang>>>{});
+  EXPECT_THROW((void)empty.search(egraph), std::runtime_error);
+  EXPECT_THROW((void)empty.searchWithLimit(egraph, 1), std::runtime_error);
+  EXPECT_THROW((void)empty.nMatches(egraph), std::runtime_error);
+  EXPECT_THROW((void)empty.searchEClassWithLimit(egraph, egraph.classIds().front(), 1),
+               std::runtime_error);
+}
+
 TEST(EGraphFeatureTest, DotRunMatchesEggBehaviorWhenGraphvizIsAvailable) {
 #if !LOTUS_EGRAPH_ENABLE_DOT
   GTEST_SKIP() << "DOT support disabled at compile time";
@@ -1110,8 +1124,19 @@ TEST(EGraphFeatureTest, LanguageMapperDropsExplanationStateLikeEgg) {
   EXPECT_FALSE(explainEquivalence(mapped, a, b).has_value());
 }
 
-TEST(EGraphFeatureTest, CopyWithoutUnionsWorksWithoutExplanations) {
+TEST(EGraphFeatureTest, CopyWithoutUnionsRequiresExplanations) {
   EGraph<SymbolLang> egraph;
+  Id a = egraph.addExpr(RecExpr<SymbolLang>::parse("a"));
+  Id b = egraph.addExpr(RecExpr<SymbolLang>::parse("b"));
+  egraph.unite(a, b, "manual");
+  egraph.rebuild();
+
+  EXPECT_THROW((void)egraph.copyWithoutUnions(NoAnalysis<SymbolLang>{}),
+               std::runtime_error);
+}
+
+TEST(EGraphFeatureTest, CopyWithoutUnionsWorksWithExplanations) {
+  EGraph<SymbolLang> egraph = EGraph<SymbolLang>().withExplanationsEnabled();
   Id a = egraph.addExpr(RecExpr<SymbolLang>::parse("a"));
   Id b = egraph.addExpr(RecExpr<SymbolLang>::parse("b"));
   Id fa = egraph.addExpr(RecExpr<SymbolLang>::parse("(f a)"));
@@ -1130,9 +1155,10 @@ TEST(EGraphFeatureTest, CopyWithoutUnionsWorksWithoutExplanations) {
   EXPECT_NE(copy.find(*copy_a), copy.find(*copy_b));
   EXPECT_EQ(copy.idToExpr(*copy_fa).toString(), "(f a)");
   EXPECT_EQ(copy.numberOfClasses(), 3u);
-  EXPECT_EQ(copy.totalSize(), 3u);
   EXPECT_EQ(egraph.find(a), egraph.find(b));
-  EXPECT_EQ(egraph.find(fa), egraph.find(*copy_fa));
+  EXPECT_EQ(copy.originalExpr(*copy_fa).toString(), "(f a)");
+  EXPECT_NE(copy.find(*copy_fa), copy.find(*copy_a));
+  EXPECT_NE(copy.find(*copy_fa), copy.find(*copy_b));
 }
 
 TEST(EGraphFeatureTest, EGraphJsonRoundTripsCoreShape) {
