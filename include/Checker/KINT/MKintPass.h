@@ -2,19 +2,15 @@
 
 #include "Checker/KINT/BugDetection.h"
 #include "Checker/KINT/KINTTaintAnalysis.h"
-#include "Checker/KINT/RangeAnalysis.h"
+#include "Checker/KINT/SummaryEncoding.h"
 #include "Checker/KINT/SmtMemory.h"
 #include "Checker/Report/BugReport.h"
 #include "Checker/Report/BugReportMgr.h"
 
-// Forward declarations
-namespace kint {
-struct crange;
-using bbrange_t = DenseMap<const BasicBlock *, DenseMap<const Value *, crange>>;
-} // namespace kint
+#include <llvm/Analysis/AliasAnalysis.h>
+#include <llvm/Analysis/MemorySSA.h>
 
 #include <chrono>
-#include <map>
 #include <optional>
 #include <set>
 #include <unordered_set>
@@ -63,15 +59,31 @@ private:
   int m_arrayOOBTypeId;
   int m_deadBranchTypeId;
   void backedge_analysis(const Function &F);
-  void init_ranges(Module &M);
-  void print_all_ranges() const;
   void smt_solving(Module &M);
   void path_solving(BasicBlock *cur, BasicBlock *pred);
   static std::string get_bb_label(const BasicBlock *bb);
+  void buildSummaries(Module &M);
+  const FunctionSummary *buildSummary(Function &F);
+  SummaryAvailability applySummary(CallInst *call, BasicBlock *cur,
+                                   BasicBlock *pred);
+  bool recordSummaryCase(ReturnInst *ret, BasicBlock *cur, BasicBlock *pred);
+  bool canSummarizeFunction(const Function &F) const;
+  bool classifyPointerReturn(const Function &F, const Value *&root,
+                             std::string &reason) const;
+  bool isBoundaryVisiblePointerArg(const Argument &arg, const Function &F) const;
+  std::vector<const GlobalVariable *>
+  collectReferencedGlobals(const Function &F) const;
+  std::vector<const Value *> collectSummaryObjects(const Function &F) const;
+  bool collectModifiedBoundaryObjects(Function &F, FunctionSummary &summary);
+  bool isAllocatorLike(const Function *callee) const;
+  const Value *resolveAliasedObject(const Value *obj) const;
+  void finalizeSummaryContract(FunctionSummary &summary);
 
   // SMT helpers (memory + symbol management)
   void pushSymFrame();
   void popSymFrame();
+  void pushObjectFrame();
+  void popObjectFrame();
   void setSym(const Value *v, const z3::expr &e);
   void pushConstraintFrame();
   void popConstraintFrame();
@@ -104,19 +116,14 @@ private:
   void ensureObject(const Value *obj, const std::string &hintName,
                     const z3::expr &sizeBytes, bool sizeKnown);
   bool isLittleEndian() const;
+  z3::expr conjunctSummaryExprs(const std::vector<z3::expr> &exprs) const;
+  z3::expr disjunctSummaryExprs(const std::vector<z3::expr> &exprs) const;
 
   // Data members
   MapVector<Function *, std::vector<CallInst *>> m_func2tsrc;
   SetVector<Function *> m_taint_funcs;
   DenseMap<const BasicBlock *, SetVector<const BasicBlock *>> m_backedges;
   SetVector<StringRef> m_callback_tsrc_fn;
-
-  // Range analysis components
-  std::map<const Function *, bbrange_t> m_func2range_info;
-  std::map<const Function *, crange> m_func2ret_range;
-  SetVector<Function *> m_range_analysis_funcs;
-  std::map<const GlobalVariable *, crange> m_global2range;
-  std::map<const GlobalVariable *, SmallVector<crange, 4>> m_garr2ranges;
 
   // Error checking
   std::map<ICmpInst *, bool> m_impossible_branches;
@@ -160,6 +167,15 @@ private:
       m_obj_list; // stable iteration order for constraints
   DenseMap<const Value *, std::optional<z3::expr>>
       m_obj_mem; // per-object byte arrays
+  DenseMap<const Value *, const Value *> m_obj_alias;
+  struct ObjectStateFrame {
+    DenseMap<const Value *, std::optional<z3::expr>> obj_base;
+    DenseMap<const Value *, std::optional<z3::expr>> obj_size;
+    std::vector<const Value *> obj_list;
+    DenseMap<const Value *, std::optional<z3::expr>> obj_mem;
+    DenseMap<const Value *, const Value *> obj_alias;
+  };
+  std::vector<ObjectStateFrame> m_object_frames;
   struct SymChange {
     const Value *key = nullptr;
     bool hadOld = false;
@@ -167,9 +183,15 @@ private:
   };
   std::vector<SymChange> m_sym_change_log;
   std::vector<size_t> m_sym_change_frames;
+  DenseMap<const Function *, SummaryCacheEntry> m_summary_cache;
+  Module *m_module = nullptr;
+  FunctionSummary *m_building_summary = nullptr;
+  bool m_summary_failed = false;
+  std::string m_summary_failure_reason;
+  unsigned m_summary_timeout = 0;
+  unsigned m_summary_path_limit = 0;
 
   // Analysis components
-  std::unique_ptr<RangeAnalysis> m_range_analysis;
   std::unique_ptr<TaintAnalysis> m_taint_analysis;
   std::unique_ptr<BugDetection> m_bug_detection;
 };

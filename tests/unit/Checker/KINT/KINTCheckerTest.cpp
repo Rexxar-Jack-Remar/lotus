@@ -1,6 +1,7 @@
 #include "Checker/KINT/BugDetection.h"
 #include "Checker/KINT/KINTTaintAnalysis.h"
-#include "Checker/KINT/RangeAnalysis.h"
+#include "Checker/KINT/MKintPass.h"
+#include "Checker/KINT/Options.h"
 #include "Checker/KINT/SmtMemory.h"
 #include "TestUtils/LLVMHelpers.h"
 
@@ -11,6 +12,7 @@
 #include <llvm/IR/Instructions.h>
 #include <llvm/IR/LLVMContext.h>
 #include <llvm/IR/Module.h>
+#include <llvm/Passes/PassBuilder.h>
 #include <gtest/gtest.h>
 #include <optional>
 #include <z3++.h>
@@ -40,6 +42,33 @@ protected:
 
   std::unique_ptr<Module> parseModule(const char *source) {
     return lotus::unittest::parseModule(context, source, "KINTCheckerTest");
+  }
+
+  void runPass(Module &module) {
+    llvm::LoopAnalysisManager LAM;
+    llvm::FunctionAnalysisManager FAM;
+    llvm::CGSCCAnalysisManager CGAM;
+    llvm::ModuleAnalysisManager MAM;
+    llvm::PassBuilder PB;
+    PB.registerModuleAnalyses(MAM);
+    PB.registerFunctionAnalyses(FAM);
+    PB.registerCGSCCAnalyses(CGAM);
+    PB.registerLoopAnalyses(LAM);
+    PB.crossRegisterProxies(LAM, FAM, CGAM, MAM);
+
+    kint::MKintPass pass;
+    pass.run(module, MAM);
+  }
+
+  static bool hasKintErrorMetadata(const Function &F, llvm::Instruction::BinaryOps opcode) {
+    for (const Instruction &I : instructions(F)) {
+      const auto *bin = dyn_cast<BinaryOperator>(&I);
+      if (!bin || bin->getOpcode() != opcode)
+        continue;
+      if (bin->getMetadata("mkint.err"))
+        return true;
+    }
+    return false;
   }
 };
 
@@ -260,106 +289,383 @@ TEST_F(KINTCheckerTest, WideConstantPreservesHighBits) {
   EXPECT_EQ(solver.check(), z3::unsat);
 }
 
-TEST_F(KINTCheckerTest, CallbackRangeInitWalksToCallers) {
+TEST_F(KINTCheckerTest, InterprocSummarySuppressesFalseDivZeroThroughPointerArg) {
   const char *source = R"(
-    define i32 @cb(i32 %x) {
+    define void @set_one(i32* %p) {
     entry:
-      ret i32 %x
+      store i32 1, i32* %p
+      ret void
     }
 
-    define i32 @mid(i32 %y) {
+    define i32 @main() {
     entry:
-      %m = call i32 @cb(i32 %y)
-      ret i32 %m
-    }
-
-    define i32 @top(i32 %z) {
-    entry:
-      %t = call i32 @mid(i32 %z)
-      ret i32 %t
+      %x = alloca i32
+      store i32 0, i32* %x
+      call void @set_one(i32* %x)
+      %v = load i32, i32* %x
+      %q = sdiv i32 42, %v
+      ret i32 %q
     }
   )";
 
-  auto module = parseModule(source);
-  ASSERT_NE(module, nullptr);
+  const auto oldCheckDivByZero = kint::CheckDivByZero.getValue();
+  const auto oldAnalyzeAllFunctions = kint::AnalyzeAllFunctions.getValue();
+  const auto oldSummaryMode = kint::InterprocSummaryMode.getValue();
 
-  kint::RangeAnalysis range_analysis;
-  std::map<const Function *, kint::bbrange_t> func2range_info;
-  std::map<const Function *, kint::crange> func2ret_range;
-  SetVector<Function *> range_analysis_funcs;
-  std::map<const GlobalVariable *, kint::crange> global2range;
-  std::map<const GlobalVariable *, SmallVector<kint::crange, 4>> garr2ranges;
-  SetVector<Function *> taint_funcs;
-  SetVector<StringRef> callback_tsrc_fn;
+  kint::CheckDivByZero = true;
+  kint::AnalyzeAllFunctions = true;
 
-  callback_tsrc_fn.insert("cb");
-  range_analysis.init_ranges(*module, func2range_info, func2ret_range,
-                             range_analysis_funcs, global2range, garr2ranges,
-                             taint_funcs, callback_tsrc_fn);
+  auto withoutSummary = parseModule(source);
+  ASSERT_NE(withoutSummary, nullptr);
+  kint::InterprocSummaryMode = kint::SummaryMode::Off;
+  runPass(*withoutSummary);
+  Function *mainWithout = withoutSummary->getFunction("main");
+  ASSERT_NE(mainWithout, nullptr);
+  EXPECT_TRUE(hasKintErrorMetadata(*mainWithout, Instruction::SDiv));
 
-  Function *top = module->getFunction("top");
-  ASSERT_NE(top, nullptr);
-  Argument *arg = top->getArg(0);
-  ASSERT_NE(arg, nullptr);
-  const auto &rng = func2range_info[top][&(top->getEntryBlock())][arg];
-  EXPECT_TRUE(rng.isFullSet());
+  auto withSummary = parseModule(source);
+  ASSERT_NE(withSummary, nullptr);
+  kint::InterprocSummaryMode = kint::SummaryMode::On;
+  runPass(*withSummary);
+  Function *mainWith = withSummary->getFunction("main");
+  ASSERT_NE(mainWith, nullptr);
+  EXPECT_FALSE(hasKintErrorMetadata(*mainWith, Instruction::SDiv));
+
+  kint::CheckDivByZero = oldCheckDivByZero;
+  kint::AnalyzeAllFunctions = oldAnalyzeAllFunctions;
+  kint::InterprocSummaryMode = oldSummaryMode;
 }
 
-TEST_F(KINTCheckerTest, SwitchSuccessorRangeIsIntersected) {
+TEST_F(KINTCheckerTest, InterprocSummarySuppressesFalseDivZeroThroughGlobal) {
   const char *source = R"(
-    define i8 @__mkint_ann_switch(i8 %x) {
+    @g = global i32 0
+
+    define void @setg() {
     entry:
-      switch i8 %x, label %def [
-        i8 1, label %case12
-        i8 2, label %case12
-      ]
+      store i32 1, i32* @g
+      ret void
+    }
 
-    case12:
-      ret i8 %x
-
-    def:
-      ret i8 0
+    define i32 @main() {
+    entry:
+      call void @setg()
+      %v = load i32, i32* @g
+      %q = sdiv i32 42, %v
+      ret i32 %q
     }
   )";
 
+  const auto oldCheckDivByZero = kint::CheckDivByZero.getValue();
+  const auto oldAnalyzeAllFunctions = kint::AnalyzeAllFunctions.getValue();
+  const auto oldSummaryMode = kint::InterprocSummaryMode.getValue();
+
+  kint::CheckDivByZero = true;
+  kint::AnalyzeAllFunctions = true;
+
+  auto withoutSummary = parseModule(source);
+  ASSERT_NE(withoutSummary, nullptr);
+  kint::InterprocSummaryMode = kint::SummaryMode::Off;
+  runPass(*withoutSummary);
+  Function *mainWithout = withoutSummary->getFunction("main");
+  ASSERT_NE(mainWithout, nullptr);
+  EXPECT_TRUE(hasKintErrorMetadata(*mainWithout, Instruction::SDiv));
+
+  auto withSummary = parseModule(source);
+  ASSERT_NE(withSummary, nullptr);
+  kint::InterprocSummaryMode = kint::SummaryMode::On;
+  runPass(*withSummary);
+  Function *mainWith = withSummary->getFunction("main");
+  ASSERT_NE(mainWith, nullptr);
+  EXPECT_FALSE(hasKintErrorMetadata(*mainWith, Instruction::SDiv));
+
+  kint::CheckDivByZero = oldCheckDivByZero;
+  kint::AnalyzeAllFunctions = oldAnalyzeAllFunctions;
+  kint::InterprocSummaryMode = oldSummaryMode;
+}
+
+TEST_F(KINTCheckerTest, InterprocSummaryFramesUnmodifiedPointerArgument) {
+  const char *source = R"(
+    define void @touch_first(i32* %p, i32* %q) {
+    entry:
+      store i32 1, i32* %p
+      ret void
+    }
+
+    define i32 @main() {
+    entry:
+      %x = alloca i32
+      %y = alloca i32
+      store i32 0, i32* %x
+      store i32 1, i32* %y
+      call void @touch_first(i32* %x, i32* %y)
+      %v = load i32, i32* %y
+      %q = sdiv i32 42, %v
+      ret i32 %q
+    }
+  )";
+
+  const auto oldCheckDivByZero = kint::CheckDivByZero.getValue();
+  const auto oldAnalyzeAllFunctions = kint::AnalyzeAllFunctions.getValue();
+  const auto oldSummaryMode = kint::InterprocSummaryMode.getValue();
+
+  kint::CheckDivByZero = true;
+  kint::AnalyzeAllFunctions = true;
+  kint::InterprocSummaryMode = kint::SummaryMode::On;
+
   auto module = parseModule(source);
   ASSERT_NE(module, nullptr);
+  runPass(*module);
+  Function *main = module->getFunction("main");
+  ASSERT_NE(main, nullptr);
+  EXPECT_FALSE(hasKintErrorMetadata(*main, Instruction::SDiv));
 
-  kint::RangeAnalysis range_analysis;
-  std::map<const Function *, kint::bbrange_t> func2range_info;
-  std::map<const Function *, kint::crange> func2ret_range;
-  SetVector<Function *> range_analysis_funcs;
-  std::map<const GlobalVariable *, kint::crange> global2range;
-  std::map<const GlobalVariable *, SmallVector<kint::crange, 4>> garr2ranges;
-  SetVector<Function *> taint_funcs;
-  SetVector<StringRef> callback_tsrc_fn;
-  std::map<ICmpInst *, bool> impossible_branches;
-  std::set<GetElementPtrInst *> gep_oob;
-  DenseMap<const BasicBlock *, SetVector<const BasicBlock *>> backedges;
-  MapVector<Function *, std::vector<CallInst *>> func2tsrc;
+  kint::CheckDivByZero = oldCheckDivByZero;
+  kint::AnalyzeAllFunctions = oldAnalyzeAllFunctions;
+  kint::InterprocSummaryMode = oldSummaryMode;
+}
 
-  Function *F = module->getFunction("__mkint_ann_switch");
-  ASSERT_NE(F, nullptr);
-  taint_funcs.insert(F);
-  range_analysis.init_ranges(*module, func2range_info, func2ret_range,
-                             range_analysis_funcs, global2range, garr2ranges,
-                             taint_funcs, callback_tsrc_fn);
-  range_analysis.range_analysis(*F, func2range_info, backedges, global2range,
-                                garr2ranges, func2ret_range,
-                                impossible_branches, gep_oob, func2tsrc,
-                                callback_tsrc_fn, module->getDataLayout(),
-                                nullptr, nullptr);
+TEST_F(KINTCheckerTest, InterprocSummaryPropagatesNestedPointerModification) {
+  const char *source = R"(
+    define void @leaf(i32* %p) {
+    entry:
+      store i32 1, i32* %p
+      ret void
+    }
 
-  auto bb_it = F->begin();
-  ASSERT_NE(bb_it, F->end());
-  ++bb_it;
-  ASSERT_NE(bb_it, F->end());
-  BasicBlock *case_bb = &*bb_it;
-  ASSERT_NE(case_bb, nullptr);
-  Argument *arg = F->getArg(0);
-  ASSERT_NE(arg, nullptr);
-  const auto &rng = func2range_info[F][case_bb][arg];
-  EXPECT_FALSE(rng.isFullSet());
+    define void @mid(i32* %p) {
+    entry:
+      call void @leaf(i32* %p)
+      ret void
+    }
+
+    define i32 @main() {
+    entry:
+      %x = alloca i32
+      store i32 0, i32* %x
+      call void @mid(i32* %x)
+      %v = load i32, i32* %x
+      %q = sdiv i32 42, %v
+      ret i32 %q
+    }
+  )";
+
+  const auto oldCheckDivByZero = kint::CheckDivByZero.getValue();
+  const auto oldAnalyzeAllFunctions = kint::AnalyzeAllFunctions.getValue();
+  const auto oldSummaryMode = kint::InterprocSummaryMode.getValue();
+
+  kint::CheckDivByZero = true;
+  kint::AnalyzeAllFunctions = true;
+
+  auto withoutSummary = parseModule(source);
+  ASSERT_NE(withoutSummary, nullptr);
+  kint::InterprocSummaryMode = kint::SummaryMode::Off;
+  runPass(*withoutSummary);
+  Function *mainWithout = withoutSummary->getFunction("main");
+  ASSERT_NE(mainWithout, nullptr);
+  EXPECT_TRUE(hasKintErrorMetadata(*mainWithout, Instruction::SDiv));
+
+  auto withSummary = parseModule(source);
+  ASSERT_NE(withSummary, nullptr);
+  kint::InterprocSummaryMode = kint::SummaryMode::On;
+  runPass(*withSummary);
+  Function *mainWith = withSummary->getFunction("main");
+  ASSERT_NE(mainWith, nullptr);
+  EXPECT_FALSE(hasKintErrorMetadata(*mainWith, Instruction::SDiv));
+
+  kint::CheckDivByZero = oldCheckDivByZero;
+  kint::AnalyzeAllFunctions = oldAnalyzeAllFunctions;
+  kint::InterprocSummaryMode = oldSummaryMode;
+}
+
+TEST_F(KINTCheckerTest, InterprocSummarySupportsPointerReturnFromArgument) {
+  const char *source = R"(
+    define i32* @idptr(i32* %p) {
+    entry:
+      ret i32* %p
+    }
+
+    define i32 @main() {
+    entry:
+      %x = alloca i32
+      store i32 1, i32* %x
+      %p = call i32* @idptr(i32* %x)
+      %v = load i32, i32* %p
+      %q = sdiv i32 42, %v
+      ret i32 %q
+    }
+  )";
+
+  const auto oldCheckDivByZero = kint::CheckDivByZero.getValue();
+  const auto oldAnalyzeAllFunctions = kint::AnalyzeAllFunctions.getValue();
+  const auto oldSummaryMode = kint::InterprocSummaryMode.getValue();
+
+  kint::CheckDivByZero = true;
+  kint::AnalyzeAllFunctions = true;
+
+  auto withoutSummary = parseModule(source);
+  ASSERT_NE(withoutSummary, nullptr);
+  kint::InterprocSummaryMode = kint::SummaryMode::Off;
+  runPass(*withoutSummary);
+  Function *mainWithout = withoutSummary->getFunction("main");
+  ASSERT_NE(mainWithout, nullptr);
+  EXPECT_TRUE(hasKintErrorMetadata(*mainWithout, Instruction::SDiv));
+
+  auto withSummary = parseModule(source);
+  ASSERT_NE(withSummary, nullptr);
+  kint::InterprocSummaryMode = kint::SummaryMode::On;
+  runPass(*withSummary);
+  Function *mainWith = withSummary->getFunction("main");
+  ASSERT_NE(mainWith, nullptr);
+  EXPECT_FALSE(hasKintErrorMetadata(*mainWith, Instruction::SDiv));
+
+  kint::CheckDivByZero = oldCheckDivByZero;
+  kint::AnalyzeAllFunctions = oldAnalyzeAllFunctions;
+  kint::InterprocSummaryMode = oldSummaryMode;
+}
+
+TEST_F(KINTCheckerTest, InterprocSummarySupportsPointerReturnFromGlobal) {
+  const char *source = R"(
+    @g = global i32 0
+
+    define i32* @getg() {
+    entry:
+      ret i32* @g
+    }
+
+    define i32 @main() {
+    entry:
+      store i32 1, i32* @g
+      %p = call i32* @getg()
+      %v = load i32, i32* %p
+      %q = sdiv i32 42, %v
+      ret i32 %q
+    }
+  )";
+
+  const auto oldCheckDivByZero = kint::CheckDivByZero.getValue();
+  const auto oldAnalyzeAllFunctions = kint::AnalyzeAllFunctions.getValue();
+  const auto oldSummaryMode = kint::InterprocSummaryMode.getValue();
+
+  kint::CheckDivByZero = true;
+  kint::AnalyzeAllFunctions = true;
+
+  auto withoutSummary = parseModule(source);
+  ASSERT_NE(withoutSummary, nullptr);
+  kint::InterprocSummaryMode = kint::SummaryMode::Off;
+  runPass(*withoutSummary);
+  Function *mainWithout = withoutSummary->getFunction("main");
+  ASSERT_NE(mainWithout, nullptr);
+  EXPECT_TRUE(hasKintErrorMetadata(*mainWithout, Instruction::SDiv));
+
+  auto withSummary = parseModule(source);
+  ASSERT_NE(withSummary, nullptr);
+  kint::InterprocSummaryMode = kint::SummaryMode::On;
+  runPass(*withSummary);
+  Function *mainWith = withSummary->getFunction("main");
+  ASSERT_NE(mainWith, nullptr);
+  EXPECT_FALSE(hasKintErrorMetadata(*mainWith, Instruction::SDiv));
+
+  kint::CheckDivByZero = oldCheckDivByZero;
+  kint::AnalyzeAllFunctions = oldAnalyzeAllFunctions;
+  kint::InterprocSummaryMode = oldSummaryMode;
+}
+
+TEST_F(KINTCheckerTest, InterprocSummarySupportsEscapedAllocatorInitialization) {
+  const char *source = R"(
+    declare i32* @malloc(i64)
+
+    define i32* @alloc_init() {
+    entry:
+      %p = call i32* @malloc(i64 4)
+      store i32 1, i32* %p
+      ret i32* %p
+    }
+
+    define i32 @main() {
+    entry:
+      %p = call i32* @alloc_init()
+      %v = load i32, i32* %p
+      %q = sdiv i32 42, %v
+      ret i32 %q
+    }
+  )";
+
+  const auto oldCheckDivByZero = kint::CheckDivByZero.getValue();
+  const auto oldAnalyzeAllFunctions = kint::AnalyzeAllFunctions.getValue();
+  const auto oldSummaryMode = kint::InterprocSummaryMode.getValue();
+
+  kint::CheckDivByZero = true;
+  kint::AnalyzeAllFunctions = true;
+
+  auto withoutSummary = parseModule(source);
+  ASSERT_NE(withoutSummary, nullptr);
+  kint::InterprocSummaryMode = kint::SummaryMode::Off;
+  runPass(*withoutSummary);
+  Function *mainWithout = withoutSummary->getFunction("main");
+  ASSERT_NE(mainWithout, nullptr);
+  EXPECT_TRUE(hasKintErrorMetadata(*mainWithout, Instruction::SDiv));
+
+  auto withSummary = parseModule(source);
+  ASSERT_NE(withSummary, nullptr);
+  kint::InterprocSummaryMode = kint::SummaryMode::On;
+  runPass(*withSummary);
+  Function *mainWith = withSummary->getFunction("main");
+  ASSERT_NE(mainWith, nullptr);
+  EXPECT_FALSE(hasKintErrorMetadata(*mainWith, Instruction::SDiv));
+
+  kint::CheckDivByZero = oldCheckDivByZero;
+  kint::AnalyzeAllFunctions = oldAnalyzeAllFunctions;
+  kint::InterprocSummaryMode = oldSummaryMode;
+}
+
+TEST_F(KINTCheckerTest, InterprocSummaryFramesCallerHeapAcrossEscapedAllocator) {
+  const char *source = R"(
+    declare i32* @malloc(i64)
+
+    define i32* @alloc_init() {
+    entry:
+      %p = call i32* @malloc(i64 4)
+      store i32 1, i32* %p
+      ret i32* %p
+    }
+
+    define i32 @main() {
+    entry:
+      %q = call i32* @malloc(i64 4)
+      store i32 1, i32* %q
+      %p = call i32* @alloc_init()
+      %v = load i32, i32* %q
+      %d = sdiv i32 42, %v
+      ret i32 %d
+    }
+  )";
+
+  const auto oldCheckDivByZero = kint::CheckDivByZero.getValue();
+  const auto oldAnalyzeAllFunctions = kint::AnalyzeAllFunctions.getValue();
+  const auto oldSummaryMode = kint::InterprocSummaryMode.getValue();
+
+  kint::CheckDivByZero = true;
+  kint::AnalyzeAllFunctions = true;
+
+  auto withoutSummary = parseModule(source);
+  ASSERT_NE(withoutSummary, nullptr);
+  kint::InterprocSummaryMode = kint::SummaryMode::Off;
+  runPass(*withoutSummary);
+  Function *mainWithout = withoutSummary->getFunction("main");
+  ASSERT_NE(mainWithout, nullptr);
+  EXPECT_TRUE(hasKintErrorMetadata(*mainWithout, Instruction::SDiv));
+
+  auto withSummary = parseModule(source);
+  ASSERT_NE(withSummary, nullptr);
+  kint::InterprocSummaryMode = kint::SummaryMode::On;
+  runPass(*withSummary);
+  Function *mainWith = withSummary->getFunction("main");
+  ASSERT_NE(mainWith, nullptr);
+  EXPECT_FALSE(hasKintErrorMetadata(*mainWith, Instruction::SDiv));
+
+  kint::CheckDivByZero = oldCheckDivByZero;
+  kint::AnalyzeAllFunctions = oldAnalyzeAllFunctions;
+  kint::InterprocSummaryMode = oldSummaryMode;
 }
 
 } // namespace

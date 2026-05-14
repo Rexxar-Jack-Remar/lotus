@@ -11,9 +11,17 @@ extern llvm::cl::OptionCategory PerformanceCategory;
 extern llvm::cl::opt<unsigned> FunctionTimeout;
 // Limit on path exploration per function (0 = no limit)
 extern llvm::cl::opt<unsigned> MaxPathsPerFunction;
+extern llvm::cl::opt<unsigned> SummaryTimeout;
+extern llvm::cl::opt<unsigned> SummaryMaxPathsPerFunction;
 // Analyze every function initialized by range analysis instead of only entry
 // points selected by taint/main discovery.
 extern llvm::cl::opt<bool> AnalyzeAllFunctions;
+enum class SummaryMode {
+  Off,
+  On,
+  Required,
+};
+extern llvm::cl::opt<SummaryMode> InterprocSummaryMode;
 
 // Define a category for checker options
 extern llvm::cl::OptionCategory CheckerCategory;

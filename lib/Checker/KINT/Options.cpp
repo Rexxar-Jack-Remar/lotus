@@ -16,11 +16,33 @@ llvm::cl::opt<unsigned> MaxPathsPerFunction(
     llvm::cl::desc(
         "Maximum number of path expansions per function (0 = no limit)"),
     llvm::cl::init(20000), llvm::cl::cat(PerformanceCategory));
+llvm::cl::opt<unsigned> SummaryTimeout(
+    "kint-summary-timeout",
+    llvm::cl::desc("Maximum time in seconds to spend building a single "
+                   "interprocedural summary (0 = no limit)"),
+    llvm::cl::init(5), llvm::cl::cat(PerformanceCategory));
+llvm::cl::opt<unsigned> SummaryMaxPathsPerFunction(
+    "kint-summary-max-paths",
+    llvm::cl::desc("Maximum number of path expansions while building a single "
+                   "interprocedural summary (0 = no limit)"),
+    llvm::cl::init(64), llvm::cl::cat(PerformanceCategory));
 llvm::cl::opt<bool> AnalyzeAllFunctions(
     "analyze-all-functions",
     llvm::cl::desc("Run SMT bug checks for all functions initialized by range "
                    "analysis instead of only taint/main entry points"),
     llvm::cl::init(false), llvm::cl::cat(PerformanceCategory));
+llvm::cl::opt<SummaryMode> InterprocSummaryMode(
+    "kint-summary-mode",
+    llvm::cl::desc("Interprocedural summary application mode"),
+    llvm::cl::values(
+        clEnumValN(SummaryMode::Off, "off",
+                   "Disable KINT interprocedural summaries"),
+        clEnumValN(SummaryMode::On, "on",
+                   "Build and apply KINT interprocedural summaries when "
+                   "supported"),
+        clEnumValN(SummaryMode::Required, "required",
+                   "Attempt summaries aggressively and warn on fallback")),
+    llvm::cl::init(SummaryMode::On), llvm::cl::cat(PerformanceCategory));
 
 // Checker options
 llvm::cl::OptionCategory

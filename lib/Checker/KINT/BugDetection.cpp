@@ -2,11 +2,8 @@
 
 #include "Checker/KINT/Log.h"
 #include "Checker/KINT/Options.h"
-#include "Checker/KINT/RangeAnalysis.h"
 #include "Checker/Report/SARIF.h"
 #include "Utils/Types/range.h"
-
-#include <optional>
 
 #include <llvm/ADT/SmallString.h>
 #include <llvm/IR/Constants.h>
@@ -98,49 +95,6 @@ BugDetection::mark_err(I &inst) {
   mark_err<err_t>(&inst);
 }
 
-bool BugDetection::add_range_cons(
-    const crange &rng, const z3::expr &bv, z3::solver &solver,
-    const std::function<void(const z3::expr &)> &addConstraint) {
-  if (rng.isFullSet() || bv.is_numeral())
-    return true;
-
-  if (rng.isEmptySet()) {
-    return true; // Return true to allow bug detection to proceed
-  }
-
-  // Ensure bit-width match between the range and the symbolic value.
-  z3::expr v = bv;
-  const unsigned vbw = v.get_sort().bv_size();
-  const unsigned rbw = rng.getBitWidth();
-  if (vbw < rbw) {
-    v = z3::zext(v, rbw - vbw);
-  } else if (vbw > rbw) {
-    v = v.extract(rbw - 1, 0);
-  }
-
-  // Use signed comparisons when the range is a signed range (i.e. the signed
-  // min is negative), and unsigned comparisons otherwise.  Using unsigned
-  // bounds for a signed range causes the solver to accept values that are
-  // actually out of range (e.g. treating -1 as 2^32-1).
-  const bool isSigned = rng.getSignedMin().isNegative();
-  z3::expr upper(solver.ctx()), lower(solver.ctx());
-  if (isSigned) {
-    upper = z3::sle(v, bvValFromAPInt(solver.ctx(), rng.getSignedMax()));
-    lower = z3::sge(v, bvValFromAPInt(solver.ctx(), rng.getSignedMin()));
-  } else {
-    upper = z3::ule(v, bvValFromAPInt(solver.ctx(), rng.getUnsignedMax()));
-    lower = z3::uge(v, bvValFromAPInt(solver.ctx(), rng.getUnsignedMin()));
-  }
-  if (addConstraint) {
-    addConstraint(upper);
-    addConstraint(lower);
-  } else {
-    solver.add(upper);
-    solver.add(lower);
-  }
-  return true;
-}
-
 void BugDetection::binary_check(
     BinaryOperator *op, z3::solver &solver,
     const DenseMap<const Value *, std::optional<z3::expr>> &v2sym,
@@ -208,11 +162,6 @@ void BugDetection::binary_check(
         }
 
         if (sat) {
-          MKINT_WARN() << rang::fg::yellow << rang::style::bold << mkstr(et)
-                       << rang::style::reset << " at " << rang::bg::black
-                       << rang::fg::red
-                       << op->getParent()->getParent()->getName() << "::" << *op
-                       << rang::style::reset;
 
           if (!robust_mode) {
             // Evaluate the model captured under the bug condition.
@@ -220,14 +169,10 @@ void BugDetection::binary_check(
               if (model) {
                 auto lhs_bin = model->eval(lhs_bv, true);
                 auto rhs_bin = model->eval(rhs_bv, true);
-                MKINT_WARN()
-                    << "Counter example: " << rang::bg::black << rang::fg::red
-                    << op->getOpcodeName() << '(' << lhs_bin << ", " << rhs_bin
-                    << ") -> " << op->getOpcodeName() << '('
-                    << (is_signed ? lhs_bin.as_int64() : lhs_bin.as_uint64())
-                    << ", "
-                    << (is_signed ? rhs_bin.as_int64() : rhs_bin.as_uint64())
-                    << ')' << rang::style::reset;
+                // TODO: we can also evaluate the propagated expression to get the result under the counterexample, which can be helpful for debugging
+                MKINT_WARN() << "Counterexample for " << mkstr(et) << " ("
+                             << (is_signed ? "signed" : "unsigned") << "): "
+                             << "lhs = " << lhs_bin << ", rhs = " << rhs_bin;
               }
             } catch (const z3::exception &e) {
               MKINT_WARN() << "Could not retrieve counter example: " << e.msg();

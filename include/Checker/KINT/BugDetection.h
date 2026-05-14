@@ -12,11 +12,6 @@
 
 using namespace llvm;
 
-// Forward declaration
-namespace kint {
-struct crange;
-} // namespace kint
-
 namespace kint {
 
 enum class interr {
@@ -93,11 +88,6 @@ public:
   v2sym(const Value *v,
         const DenseMap<const Value *, std::optional<z3::expr>> &v2sym_map,
         z3::solver &solver);
-
-  // Range constraint generation
-  bool add_range_cons(
-      const crange &rng, const z3::expr &bv, z3::solver &solver,
-      const std::function<void(const z3::expr &)> &addConstraint = {});
 
   // Path tracking
   void setCurrentPath(const std::vector<PathPoint> &path) {
