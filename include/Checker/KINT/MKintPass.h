@@ -2,13 +2,10 @@
 
 #include "Checker/KINT/BugDetection.h"
 #include "Checker/KINT/KINTTaintAnalysis.h"
-#include "Checker/KINT/SummaryEncoding.h"
 #include "Checker/KINT/SmtMemory.h"
+#include "Checker/KINT/SummaryEncoding.h"
 #include "Checker/Report/BugReport.h"
 #include "Checker/Report/BugReportMgr.h"
-
-#include <llvm/Analysis/AliasAnalysis.h>
-#include <llvm/Analysis/MemorySSA.h>
 
 #include <chrono>
 #include <optional>
@@ -19,6 +16,8 @@
 #include <llvm/ADT/DenseMap.h>
 #include <llvm/ADT/MapVector.h>
 #include <llvm/ADT/SetVector.h>
+#include <llvm/Analysis/AliasAnalysis.h>
+#include <llvm/Analysis/MemorySSA.h>
 #include <llvm/IR/Module.h>
 #include <llvm/IR/PassManager.h>
 #include <llvm/Support/Casting.h>
@@ -70,7 +69,8 @@ private:
   bool canSummarizeFunction(const Function &F) const;
   bool classifyPointerReturn(const Function &F, const Value *&root,
                              std::string &reason) const;
-  bool isBoundaryVisiblePointerArg(const Argument &arg, const Function &F) const;
+  bool isBoundaryVisiblePointerArg(const Argument &arg,
+                                   const Function &F) const;
   std::vector<const GlobalVariable *>
   collectReferencedGlobals(const Function &F) const;
   std::vector<const Value *> collectSummaryObjects(const Function &F) const;
@@ -118,6 +118,8 @@ private:
   bool isLittleEndian() const;
   z3::expr conjunctSummaryExprs(const std::vector<z3::expr> &exprs) const;
   z3::expr disjunctSummaryExprs(const std::vector<z3::expr> &exprs) const;
+  z3::expr closeSummaryClause(const FunctionSummary &summary,
+                              const z3::expr &clause) const;
 
   // Data members
   MapVector<Function *, std::vector<CallInst *>> m_func2tsrc;
@@ -142,6 +144,8 @@ private:
   unsigned m_path_limit;
   uint64_t m_paths_explored = 0;
   bool m_path_limit_hit = false;
+  bool m_timeout_hit = false;
+  bool m_summary_backedge_hit = false;
   bool m_robust_reachability = false;
   std::string m_dump_ef_path;
   bool m_robust_universal_unknown_loads = false;
