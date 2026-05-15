@@ -45,7 +45,6 @@ These domains work directly on LLVM IR values (via `RepresentedValue`):
 - **MemRegions** – Memory region and pointer analysis
 - **Congruence** – Modular arithmetic constraints
 - **Zones** – Difference bound matrices (DBM)
-- **Octagon** – Octagonal constraints (±x ± y ≤ c)
 
 ## Typical Use Cases
 
@@ -61,7 +60,7 @@ These domains work directly on LLVM IR values (via `RepresentedValue`):
 ### As an LLVM Pass
 
 ```cpp
-#include "Verification/SymAbsAI/Core/SymAbsAIPass.h"
+#include "Verification/SymAbsAI/Core/Integration/SymAbsAIPass.h"
 
 // The pass can be registered and run in LLVM optimization pipelines
 ```
@@ -69,8 +68,8 @@ These domains work directly on LLVM IR values (via `RepresentedValue`):
 ### Programmatic Usage
 
 ```cpp
-#include "Verification/SymAbsAI/Analyzers/Analyzer.h"
-#include "Verification/SymAbsAI/Core/FunctionContext.h"
+#include "Verification/SymAbsAI/Core/Engine/Analyzer.h"
+#include "Verification/SymAbsAI/Core/Integration/FunctionContext.h"
 
 // Create function context
 auto fctx = mctx->createFunctionContext(&function);
@@ -95,4 +94,3 @@ Use `lib/Solvers/SMT/SymAbs` when:
 - You have SMT formulas (bit-vectors) that need abstraction
 - You need to approximate bit-vector constraints with linear integer constraints
 - You're working at the formula/solver level, not the program level
-

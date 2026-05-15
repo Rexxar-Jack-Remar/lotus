@@ -1,7 +1,7 @@
 #include "Verification/SymAbsAI/Domains/Intervals.h"
 
-#include "Verification/SymAbsAI/Core/DomainConstructor.h"
-#include "Verification/SymAbsAI/Core/ParamStrategy.h"
+#include "Verification/SymAbsAI/Core/Foundation/DomainConstructor.h"
+#include "Verification/SymAbsAI/Core/Foundation/ParamStrategy.h"
 // #include "Verification/SymAbsAI/Utils/Z3APIExtension.h"
 
 #include <algorithm>

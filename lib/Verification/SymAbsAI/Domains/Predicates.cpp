@@ -1,10 +1,10 @@
 #include "Verification/SymAbsAI/Domains/Predicates.h"
 
-#include "Verification/SymAbsAI/Core/DomainConstructor.h"
-#include "Verification/SymAbsAI/Core/Expression.h"
-// #include "Verification/SymAbsAI/Core/FloatingPointModel.h"
-// #include "Verification/SymAbsAI/Core/ParamStrategy.h"
-// #include "Verification/SymAbsAI/Core/repr.h"
+#include "Verification/SymAbsAI/Core/Foundation/DomainConstructor.h"
+#include "Verification/SymAbsAI/Core/Foundation/Expression.h"
+// #include "Verification/SymAbsAI/Core/Foundation/FloatingPointModel.h"
+// #include "Verification/SymAbsAI/Core/Foundation/ParamStrategy.h"
+// #include "Verification/SymAbsAI/Core/Foundation/Repr.h"
 // #include "Verification/SymAbsAI/Utils/Z3APIExtension.h"
 
 using namespace symabs_ai;

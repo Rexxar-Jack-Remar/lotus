@@ -32,10 +32,10 @@
  */
 #pragma once
 
-#include "Verification/SymAbsAI/Core/AbstractValue.h"
-#include "Verification/SymAbsAI/Core/ConcreteState.h"
-#include "Verification/SymAbsAI/Core/Expression.h"
-#include "Verification/SymAbsAI/Core/FunctionContext.h"
+#include "Verification/SymAbsAI/Core/Foundation/AbstractValue.h"
+#include "Verification/SymAbsAI/Core/Foundation/ConcreteState.h"
+#include "Verification/SymAbsAI/Core/Foundation/Expression.h"
+#include "Verification/SymAbsAI/Core/Integration/FunctionContext.h"
 #include "Verification/SymAbsAI/Domains/Product.h"
 #include "Verification/SymAbsAI/Utils/Utils.h"
 

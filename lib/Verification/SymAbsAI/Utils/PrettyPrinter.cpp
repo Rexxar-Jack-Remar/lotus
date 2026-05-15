@@ -1,7 +1,7 @@
 #include "Verification/SymAbsAI/Utils/PrettyPrinter.h"
 
-#include "Verification/SymAbsAI/Core/AbstractValue.h"
-#include "Verification/SymAbsAI/Core/repr.h"
+#include "Verification/SymAbsAI/Core/Foundation/AbstractValue.h"
+#include "Verification/SymAbsAI/Core/Foundation/Repr.h"
 
 #include <set>
 

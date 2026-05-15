@@ -1,9 +1,9 @@
 // TODO: by LLM; to be checked.
 #include "Verification/SymAbsAI/Domains/Congruence.h"
 
-#include "Verification/SymAbsAI/Core/DomainConstructor.h"
-#include "Verification/SymAbsAI/Core/FunctionContext.h"
-#include "Verification/SymAbsAI/Core/ParamStrategy.h"
+#include "Verification/SymAbsAI/Core/Foundation/DomainConstructor.h"
+#include "Verification/SymAbsAI/Core/Integration/FunctionContext.h"
+#include "Verification/SymAbsAI/Core/Foundation/ParamStrategy.h"
 #include "Verification/SymAbsAI/Utils/PrettyPrinter.h"
 
 #include <z3++.h>

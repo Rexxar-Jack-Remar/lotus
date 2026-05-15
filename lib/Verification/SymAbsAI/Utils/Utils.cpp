@@ -10,7 +10,7 @@
  */
 #include "Verification/SymAbsAI/Utils/Utils.h"
 
-#include "Verification/SymAbsAI/Core/repr.h"
+#include "Verification/SymAbsAI/Core/Foundation/Repr.h"
 
 #include <cstdio>
 #include <iomanip>

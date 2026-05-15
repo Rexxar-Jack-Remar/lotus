@@ -160,11 +160,15 @@ StateT analyzeInterproceduralTo(
     const llvm::Function &targetFunc, const llvm::BasicBlock &targetBlock,
     const StateT &initial, const AbstractDomain<Transition, StateT> &domain,
     const IFluid<StateT> &fluid, const SifaOptions &options = {}) {
-  llvm::ArrayRef<const llvm::Function *> entries =
-      entry ? llvm::ArrayRef<const llvm::Function *>{entry}
-            : llvm::ArrayRef<const llvm::Function *>{};
-  return analyzeInterproceduralTo(M, entries, targetFunc, targetBlock, initial,
-                                  domain, fluid, options);
+  if (!entry) {
+    return analyzeInterproceduralTo(
+        M, llvm::ArrayRef<const llvm::Function *>{}, targetFunc, targetBlock,
+        initial, domain, fluid, options);
+  }
+  const llvm::Function *entries[] = {entry};
+  return analyzeInterproceduralTo(M, llvm::ArrayRef<const llvm::Function *>(entries),
+                                  targetFunc, targetBlock, initial, domain,
+                                  fluid, options);
 }
 
 template <typename StateT>

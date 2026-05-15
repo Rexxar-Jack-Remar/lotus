@@ -1,9 +1,9 @@
 #pragma once
 
-#include "Verification/SymAbsAI/Core/AbstractValue.h"
-#include "Verification/SymAbsAI/Core/DomainConstructor.h"
-#include "Verification/SymAbsAI/Core/Expression.h"
-#include "Verification/SymAbsAI/Core/FunctionContext.h"
+#include "Verification/SymAbsAI/Core/Foundation/AbstractValue.h"
+#include "Verification/SymAbsAI/Core/Foundation/DomainConstructor.h"
+#include "Verification/SymAbsAI/Core/Foundation/Expression.h"
+#include "Verification/SymAbsAI/Core/Integration/FunctionContext.h"
 #include "Verification/SymAbsAI/Utils/Utils.h"
 
 #include <llvm/IR/Value.h>

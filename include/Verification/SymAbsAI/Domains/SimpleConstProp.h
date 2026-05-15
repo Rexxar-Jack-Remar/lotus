@@ -1,10 +1,10 @@
 #pragma once
 
-#include "Verification/SymAbsAI/Core/AbstractValue.h"
-#include "Verification/SymAbsAI/Core/DomainConstructor.h"
-#include "Verification/SymAbsAI/Core/Expression.h"
-#include "Verification/SymAbsAI/Core/ResultStore.h"
-#include "Verification/SymAbsAI/Core/repr.h"
+#include "Verification/SymAbsAI/Core/Foundation/AbstractValue.h"
+#include "Verification/SymAbsAI/Core/Foundation/DomainConstructor.h"
+#include "Verification/SymAbsAI/Core/Foundation/Expression.h"
+#include "Verification/SymAbsAI/Core/Integration/ResultStore.h"
+#include "Verification/SymAbsAI/Core/Foundation/Repr.h"
 #include "Verification/SymAbsAI/Utils/Utils.h"
 #include "Verification/SymAbsAI/Utils/Z3APIExtension.h"
 

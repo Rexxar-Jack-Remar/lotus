@@ -63,11 +63,15 @@ bool lotus::sifa::isReachableInterprocedural(
     const llvm::Module &M, const llvm::Function *entry,
     const llvm::Function &targetFunc, const llvm::BasicBlock &targetBlock,
     const IFluid<bool> &fluid, const SifaOptions &options) {
-  llvm::ArrayRef<const llvm::Function *> entries =
-      entry ? llvm::ArrayRef<const llvm::Function *>{entry}
-            : llvm::ArrayRef<const llvm::Function *>{};
-  return isReachableInterprocedural(M, entries, targetFunc, targetBlock, fluid,
-                                    options);
+  if (!entry) {
+    return isReachableInterprocedural(
+        M, llvm::ArrayRef<const llvm::Function *>{}, targetFunc, targetBlock,
+        fluid, options);
+  }
+  const llvm::Function *entries[] = {entry};
+  return isReachableInterprocedural(
+      M, llvm::ArrayRef<const llvm::Function *>(entries), targetFunc,
+      targetBlock, fluid, options);
 }
 
 bool lotus::sifa::isReachableInterprocedural(

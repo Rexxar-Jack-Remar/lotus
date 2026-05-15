@@ -2,7 +2,7 @@
 // rendering
 #include "Verification/SymAbsAI/Utils/Reporting.h"
 
-#include "Verification/SymAbsAI/Analyzers/Analyzer.h"
+#include "Verification/SymAbsAI/Core/Engine/Analyzer.h"
 #include "Verification/SymAbsAI/Utils/PrettyPrinter.h"
 
 #include <llvm/IR/Function.h>

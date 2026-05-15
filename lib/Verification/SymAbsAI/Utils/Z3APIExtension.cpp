@@ -52,31 +52,37 @@ expr srem(expr const &a, expr const &b) {
   return to_expr(a.ctx(), Z3_mk_bvsrem(a.ctx(), a, b));
 }
 
+// FIXME: it seems that newer versions of Z3 alreayy have these function in its C++ APIs, so maybe we can remove them at some point
 expr add_nof(expr const &a, expr const &b, bool isSigned) {
   check_context(a, b);
   return to_expr(a.ctx(), Z3_mk_bvadd_no_overflow(a.ctx(), a, b, isSigned));
 }
 
+// FIXME: it seems that newer versions of Z3 alreayy have these function in its C++ APIs, so maybe we can remove them at some point
 expr add_nuf(expr const &a, expr const &b) {
   check_context(a, b);
   return to_expr(a.ctx(), Z3_mk_bvadd_no_underflow(a.ctx(), a, b));
 }
 
+// FIXME: it seems that newer versions of Z3 alreayy have these function in its C++ APIs, so maybe we can remove them at some point
 expr sub_nuf(expr const &a, expr const &b, bool isSigned) {
   check_context(a, b);
   return to_expr(a.ctx(), Z3_mk_bvsub_no_underflow(a.ctx(), a, b, isSigned));
 }
 
+// FIXME: it seems that newer versions of Z3 alreayy have these function in its C++ APIs, so maybe we can remove them at some point
 expr sub_nof(expr const &a, expr const &b) {
   check_context(a, b);
   return to_expr(a.ctx(), Z3_mk_bvsub_no_overflow(a.ctx(), a, b));
 }
 
+// FIXME: it seems that newer versions of Z3 alreayy have these function in its C++ APIs, so maybe we can remove them at some point
 expr mul_nof(expr const &a, expr const &b, bool isSigned) {
   check_context(a, b);
   return to_expr(a.ctx(), Z3_mk_bvmul_no_overflow(a.ctx(), a, b, isSigned));
 }
 
+// FIXME: it seems that newer versions of Z3 alreayy have these function in its C++ APIs, so maybe we can remove them at some point
 expr mul_nuf(expr const &a, expr const &b) {
   check_context(a, b);
   return to_expr(a.ctx(), Z3_mk_bvmul_no_underflow(a.ctx(), a, b));

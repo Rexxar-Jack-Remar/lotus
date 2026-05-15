@@ -1,9 +1,9 @@
 #include "Verification/SymAbsAI/Domains/BitMask.h"
 
-#include "Verification/SymAbsAI/Core/DomainConstructor.h"
-#include "Verification/SymAbsAI/Core/FunctionContext.h"
-// #include "Verification/SymAbsAI/Core/ParamStrategy.h"
-// #include "Verification/SymAbsAI/Core/repr.h"
+#include "Verification/SymAbsAI/Core/Foundation/DomainConstructor.h"
+#include "Verification/SymAbsAI/Core/Integration/FunctionContext.h"
+// #include "Verification/SymAbsAI/Core/Foundation/ParamStrategy.h"
+// #include "Verification/SymAbsAI/Core/Foundation/Repr.h"
 // #include "Verification/SymAbsAI/Utils/Z3APIExtension.h"
 
 using namespace domains;

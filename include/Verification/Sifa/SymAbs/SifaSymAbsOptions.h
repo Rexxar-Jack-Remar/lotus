@@ -23,9 +23,9 @@ struct SifaSymAbsOptions {
   ///
   /// Examples (domain names come from SymAbsAI registrations):
   /// - "Interval"
-  /// - "Octagon"
-  /// - "Interval, Octagon"
-  std::string abstractDomain = "Interval, Octagon";
+  /// - "Zones"
+  /// - "Interval, Zones"
+  std::string abstractDomain = "Interval";
 
   /// SymAbsAI analyzer variant to use.
   /// Supported values include "UnilateralAnalyzer", "BilateralAnalyzer",

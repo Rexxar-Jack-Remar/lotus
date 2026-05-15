@@ -17,10 +17,10 @@
 #include "Verification/Sifa/Cfg/Transition.h"
 #include "Verification/Sifa/Domain/AbstractDomain.h"
 #include "Verification/Sifa/Log/SifaLogger.h"
-#include "Verification/SymAbsAI/Analyzers/Analyzer.h"
-#include "Verification/SymAbsAI/Core/DomainConstructor.h"
-#include "Verification/SymAbsAI/Core/Fragment.h"
-#include "Verification/SymAbsAI/Core/ValueMapping.h"
+#include "Verification/SymAbsAI/Core/Engine/Analyzer.h"
+#include "Verification/SymAbsAI/Core/Foundation/DomainConstructor.h"
+#include "Verification/SymAbsAI/Core/Foundation/Fragment.h"
+#include "Verification/SymAbsAI/Core/Foundation/ValueMapping.h"
 
 #include <cstdint>
 #include <memory>

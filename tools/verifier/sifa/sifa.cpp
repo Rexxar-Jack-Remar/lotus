@@ -6,7 +6,7 @@
 
 #include "Verification/Sifa/Log/SifaLogger.h"
 #include "Verification/Sifa/SifaSymAbs.h"
-#include "Verification/SymAbsAI/Core/AbstractValue.h"
+#include "Verification/SymAbsAI/Core/Foundation/AbstractValue.h"
 #include "Verification/SymAbsAI/Utils/PrettyPrinter.h"
 
 #include <memory>

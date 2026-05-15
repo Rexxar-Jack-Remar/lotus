@@ -1,9 +1,9 @@
 #include "Verification/SymAbsAI/Domains/MemRegions.h"
 
-#include "Verification/SymAbsAI/Core/DomainConstructor.h"
-#include "Verification/SymAbsAI/Core/Expression.h"
-#include "Verification/SymAbsAI/Core/MemoryModel.h"
-#include "Verification/SymAbsAI/Core/ParamStrategy.h"
+#include "Verification/SymAbsAI/Core/Foundation/DomainConstructor.h"
+#include "Verification/SymAbsAI/Core/Foundation/Expression.h"
+#include "Verification/SymAbsAI/Core/Foundation/MemoryModel.h"
+#include "Verification/SymAbsAI/Core/Foundation/ParamStrategy.h"
 
 #include <string>
 // #include "Verification/SymAbsAI/Domains/Combinators.h"

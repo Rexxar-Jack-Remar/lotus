@@ -6,9 +6,9 @@
 #include "Verification/Sifa/Statistics/SifaStats.h"
 #include "Verification/Sifa/Summarizers/FixpointLoopSummarizer.h"
 #include "Verification/Sifa/SymAbs/SifaSymAbsDomain.h"
-#include "Verification/SymAbsAI/Core/AbstractValue.h"
-#include "Verification/SymAbsAI/Core/FragmentDecomposition.h"
-#include "Verification/SymAbsAI/Core/ModuleContext.h"
+#include "Verification/SymAbsAI/Core/Foundation/AbstractValue.h"
+#include "Verification/SymAbsAI/Core/Foundation/FragmentDecomposition.h"
+#include "Verification/SymAbsAI/Core/Integration/ModuleContext.h"
 #include "Verification/SymAbsAI/Utils/Config.h"
 
 #include "TestUtils/LLVMHelpers.h"
@@ -34,7 +34,7 @@ static symabs_ai::configparser::Config makeSymAbsConfig() {
   return cfg;
 }
 
-TEST(SifaSymAbs, SmokeIntervalsOctagonAndCalls) {
+TEST(SifaSymAbs, SmokeIntervalsAndCalls) {
   const char *ir = R"IR(
     define i32 @g(i32 %x) {
     entry:
@@ -73,7 +73,7 @@ TEST(SifaSymAbs, SmokeIntervalsOctagonAndCalls) {
   BasicBlock *unreach = getBlockChecked(*F, "unreach");
 
   lotus::sifa::SifaSymAbsOptions opt;
-  opt.abstractDomain = "Interval, Octagon";
+  opt.abstractDomain = "Interval";
   opt.analyzerVariant = "UnilateralAnalyzer";
   opt.recursive = true;
 
@@ -145,7 +145,7 @@ TEST(SifaSymAbs, AnalyzeSymAbsToSpecificBlock) {
   BasicBlock *unreach = getBlockChecked(*F, "unreach");
 
   lotus::sifa::SifaSymAbsOptions opt;
-  opt.abstractDomain = "Interval, Octagon";
+  opt.abstractDomain = "Interval";
   opt.analyzerVariant = "UnilateralAnalyzer";
   opt.recursive = true;
 

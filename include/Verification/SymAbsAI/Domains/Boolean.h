@@ -27,8 +27,8 @@
  */
 #pragma once
 
-#include "Verification/SymAbsAI/Core/AbstractValue.h"
-#include "Verification/SymAbsAI/Core/DomainConstructor.h"
+#include "Verification/SymAbsAI/Core/Foundation/AbstractValue.h"
+#include "Verification/SymAbsAI/Core/Foundation/DomainConstructor.h"
 #include "Verification/SymAbsAI/Domains/Combinators.h"
 #include "Verification/SymAbsAI/Utils/Utils.h"
 

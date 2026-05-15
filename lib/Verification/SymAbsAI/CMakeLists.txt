@@ -12,27 +12,27 @@
 # SymAbsAI library sources
 set(SYMABS_AI_SOURCES
     # Analyzers
-    Analyzers/Analyzer.cpp
-    Analyzers/UnilateralAnalyzer.cpp
-    Analyzers/BilateralAnalyzer.cpp
-    Analyzers/OMTAnalyzer.cpp
+    Core/Engine/Analyzer.cpp
+    Core/Engine/UnilateralAnalyzer.cpp
+    Core/Engine/BilateralAnalyzer.cpp
+    Core/Engine/OMTAnalyzer.cpp
     # Core components
-    Core/Fragment.cpp
-    Core/FragmentDecomposition.cpp
-    Core/Expression.cpp
-    Core/ConcreteState.cpp
-    Core/InstructionSemantics.cpp
-    Core/MemoryModel.cpp
-    Core/FloatingPointModel.cpp
-    Core/FunctionContext.cpp
-    Core/ModuleContext.cpp
-    Core/RepresentedValue.cpp
-    Core/ValueMapping.cpp
-    Core/DomainConstructor.cpp
-    Core/SymAbsAIPass.cpp
-    Core/Checks.cpp
-    Core/ResultStore.cpp
-    Core/ParamStrategy.cpp
+    Core/Foundation/Fragment.cpp
+    Core/Foundation/FragmentDecomposition.cpp
+    Core/Foundation/Expression.cpp
+    Core/Foundation/ConcreteState.cpp
+    Core/Foundation/InstructionSemantics.cpp
+    Core/Foundation/MemoryModel.cpp
+    Core/Foundation/FloatingPointModel.cpp
+    Core/Integration/FunctionContext.cpp
+    Core/Integration/ModuleContext.cpp
+    Core/Foundation/RepresentedValue.cpp
+    Core/Foundation/ValueMapping.cpp
+    Core/Foundation/DomainConstructor.cpp
+    Core/Integration/SymAbsAIPass.cpp
+    Core/Integration/Checks.cpp
+    Core/Integration/ResultStore.cpp
+    Core/Foundation/ParamStrategy.cpp
     # Utilities
     Utils/Utils.cpp
     Utils/Config.cpp

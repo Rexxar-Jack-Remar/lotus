@@ -4,7 +4,7 @@
 #include <memory>
 
 #ifndef NDEBUG
-#include "Verification/SymAbsAI/Core/repr.h"
+#include "Verification/SymAbsAI/Core/Foundation/Repr.h"
 
 #include <csignal>
 #endif
