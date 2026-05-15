@@ -11,7 +11,7 @@ checks.
 
 **Tool Location**: ``tools/checker/lotus_concur.cpp``
 
-**Build Target**: ``lotus-concur``
+**Frontend**: ``lotus-check concur``
 
 Overview
 --------
@@ -75,42 +75,42 @@ Usage
 
 .. code-block:: bash
 
-   ./build/bin/lotus-concur input.bc
+   ./build/bin/lotus-check concur input.bc
 
 **Enable Specific Checks**:
 
 .. code-block:: bash
 
-   ./build/bin/lotus-concur --check-data-races input.bc
-   ./build/bin/lotus-concur --check-deadlocks input.bc
-   ./build/bin/lotus-concur --check-atomicity input.bc
-   ./build/bin/lotus-concur --check-openmp input.bc
-   ./build/bin/lotus-concur --check-mpi input.bc
+   ./build/bin/lotus-check concur input.bc --check-data-races
+   ./build/bin/lotus-check concur input.bc --check-deadlocks
+   ./build/bin/lotus-check concur input.bc --check-atomicity
+   ./build/bin/lotus-check concur input.bc --check-openmp
+   ./build/bin/lotus-check concur input.bc --check-mpi
 
 **Select Checks with a Comma-Separated List**:
 
 .. code-block:: bash
 
-   ./build/bin/lotus-concur --checks=race,deadlock,openmp input.bc
-   ./build/bin/lotus-concur --checks=mpi input.bc
+   ./build/bin/lotus-check concur input.bc --checks=race,deadlock,openmp
+   ./build/bin/lotus-check concur input.bc --checks=mpi
 
 **Enable Multiple Checks**:
 
 .. code-block:: bash
 
-   ./build/bin/lotus-concur --check-data-races --check-deadlocks --check-atomicity input.bc
+   ./build/bin/lotus-check concur input.bc --check-data-races --check-deadlocks --check-atomicity
 
 **Generate JSON Report**:
 
 .. code-block:: bash
 
-   ./build/bin/lotus-concur --report-json=report.json input.bc
+   ./build/bin/lotus-check concur input.bc --report-json=report.json
 
 **Generate SARIF Report**:
 
 .. code-block:: bash
 
-   ./build/bin/lotus-concur --report-sarif=report.sarif input.bc
+   ./build/bin/lotus-check concur input.bc --report-sarif=report.sarif
 
 Command-Line Options
 --------------------

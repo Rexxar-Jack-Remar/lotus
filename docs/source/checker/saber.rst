@@ -8,7 +8,7 @@ and value-flow graphs.
 
 **Implementation**: ``lib/Checker/Saber/``
 
-**Tool**: ``lotus-saber`` in ``tools/checker/lotus-saber.cpp``
+**Frontend**: ``lotus-check saber`` implemented by ``tools/checker/lotus_saber.cpp``
 
 Overview
 --------
@@ -31,14 +31,14 @@ Typical usage
 
 .. code-block:: bash
 
-   ./build/bin/lotus-saber input.bc
-   ./build/bin/lotus-saber --all input.bc
-   ./build/bin/lotus-saber --double-free --file input.bc
+   ./build/bin/lotus-check saber input.bc
+   ./build/bin/lotus-check saber input.bc --all
+   ./build/bin/lotus-check saber input.bc --double-free --file
 
 Behavior
 --------
 
-- With no explicit checker flags, ``lotus-saber`` defaults to leak checking.
+- With no explicit checker flags, ``lotus-check saber`` defaults to leak checking.
 - When multiple checks are enabled, the tool tries to build and reuse shared
   SVFG and ICFG state across checkers.
 

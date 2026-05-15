@@ -23,7 +23,7 @@ class ModuleContext;
 
 namespace configparser {
 class Config;
-}
+} // namespace configparser
 
 /**
  * Provides formulas for acyclic subgraphs of a function's control flow graph.

@@ -1,4 +1,4 @@
-//===- lotus-saber.cpp -- Source-sink bug checker (Saber) ------------------//
+//===- lotus_saber.cpp -- Source-sink bug checker (Saber) ------------------//
 //
 // Lotus tool for memory leak, double-free, and file descriptor checks.
 // Mirrors SVF's saber tool; uses Saber engine on Lotus SVFG.
@@ -12,14 +12,13 @@
 #include "Checker/Saber/FileChecker.h"
 #include "Checker/Saber/LeakChecker.h"
 #include "Checker/Saber/SaberOptions.h"
+#include "Checker/Tooling/CheckerSubcommands.h"
 #include "Fuzzing/TargetGeneration.h"
 #include "Utils/LLVM/RecursiveTimer.h"
 
 #include <llvm/IRReader/IRReader.h>
 #include <llvm/Support/CommandLine.h>
 #include <llvm/Support/FileSystem.h>
-#include <llvm/Support/PrettyStackTrace.h>
-#include <llvm/Support/Signals.h>
 #include <llvm/Support/SourceMgr.h>
 #include <llvm/Support/raw_ostream.h>
 
@@ -27,43 +26,38 @@ using namespace llvm;
 
 static cl::opt<std::string> InputFilename(cl::Positional,
                                           cl::desc("<input bitcode file>"),
-                                          cl::Required);
+                                          cl::Required,
+                                          cl::sub(lotus::checker::tooling::saberSubCommand()));
 
 static cl::opt<bool> MemoryLeakCheck(
     "leak",
     cl::desc("Check for memory leaks (alloc never freed or partial leak)"),
-    cl::init(false));
+    cl::init(false),
+    cl::sub(lotus::checker::tooling::saberSubCommand()));
 
 static cl::opt<bool>
     FileCheck("file",
               cl::desc("Check for file descriptor leaks (fopen never fclose)"),
-              cl::init(false));
+              cl::init(false),
+              cl::sub(lotus::checker::tooling::saberSubCommand()));
 
 static cl::opt<bool> DFreeCheck(
     "double-free",
     cl::desc("Check for double-free (same memory freed twice on same path)"),
-    cl::init(false));
+    cl::init(false),
+    cl::sub(lotus::checker::tooling::saberSubCommand()));
 
 static cl::opt<bool>
     AllChecks("all", cl::desc("Run all checkers (leak, double-free, file)"),
-              cl::init(false));
+              cl::init(false),
+              cl::sub(lotus::checker::tooling::saberSubCommand()));
 static cl::opt<bool>
     VerboseReports("v",
                    cl::desc("Print trace and IR details for reported bugs"),
-                   cl::init(false));
+                   cl::init(false),
+                   cl::sub(lotus::checker::tooling::saberSubCommand()));
 
-int main(int argc, char **argv) {
-  sys::PrintStackTraceOnErrorSignal(argv[0]);
-  PrettyStackTraceProgram X(argc, argv);
-  llvm_shutdown_obj Y;
-  report_options::initializeReportOptions();
-
-  cl::ParseCommandLineOptions(
-      argc, argv,
-      "Source-Sink Bug Detector (Saber)\n"
-      "  [options] <input-bitcode>\n"
-      "  By default, runs leak checker. Use --all to run all checkers.\n"
-      "  Use --report-json=<file> or --report-sarif=<file> for output.\n");
+int runSaberCheckerTool(const char *argv0) {
   RecursiveTimer::setEnabled(lotus::analysis::SaberOptions::verbose());
 
   // Force linkage of SaberOptions symbols from static library
@@ -80,7 +74,7 @@ int main(int argc, char **argv) {
   SMDiagnostic Err;
   std::unique_ptr<Module> M = parseIRFile(InputFilename, Err, Context);
   if (!M) {
-    Err.print(argv[0], errs());
+    Err.print(argv0, errs());
     return 1;
   }
 

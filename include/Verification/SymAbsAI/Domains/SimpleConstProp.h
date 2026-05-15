@@ -3,8 +3,8 @@
 #include "Verification/SymAbsAI/Core/Foundation/AbstractValue.h"
 #include "Verification/SymAbsAI/Core/Foundation/DomainConstructor.h"
 #include "Verification/SymAbsAI/Core/Foundation/Expression.h"
-#include "Verification/SymAbsAI/Core/Integration/ResultStore.h"
 #include "Verification/SymAbsAI/Core/Foundation/Repr.h"
+#include "Verification/SymAbsAI/Core/Integration/ResultStore.h"
 #include "Verification/SymAbsAI/Utils/Utils.h"
 #include "Verification/SymAbsAI/Utils/Z3APIExtension.h"
 

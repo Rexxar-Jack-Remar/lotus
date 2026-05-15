@@ -25,6 +25,7 @@
 #include "Checker/Report/BugReportMgr.h"
 #include "Checker/Report/ReportOptions.h"
 #include "Checker/Report/SuppressionManager.h"
+#include "Checker/Tooling/CheckerSubcommands.h"
 
 #include <chrono>
 #include <iostream>
@@ -49,16 +50,20 @@
 using namespace llvm;
 
 static cl::opt<std::string>
-    InputFile(cl::Positional, cl::desc("<input bitcode>"), cl::Required);
-static cl::opt<bool> Verbose("v", cl::desc("Verbose output"), cl::init(false));
+    InputFile(cl::Positional, cl::desc("<input bitcode>"), cl::Required,
+              cl::sub(lotus::checker::tooling::fitxSubCommand()));
+static cl::opt<bool> Verbose("v", cl::desc("Verbose output"), cl::init(false),
+                             cl::sub(lotus::checker::tooling::fitxSubCommand()));
 static cl::opt<bool> MeasureAnalysisTime("fitx-measure",
                                          cl::desc("Measure analysis time"),
-                                         cl::init(false));
+                                         cl::init(false),
+                                         cl::sub(lotus::checker::tooling::fitxSubCommand()));
 static cl::opt<std::string>
     DetectorType("detector",
                  cl::desc("Detector type: all, df, dl, dul, leak, nullptr, "
                           "uaf, ubi, ref_count, ref_uncount"),
-                 cl::init("all"));
+                 cl::init("all"),
+                 cl::sub(lotus::checker::tooling::fitxSubCommand()));
 
 namespace {
 std::string formatLocation(const BugDiagStep *step) {
@@ -259,23 +264,13 @@ void runFiTxAnalysis(Module &M) {
 
 } // namespace fitx
 
-int main(int argc, char **argv) {
-  sys::PrintStackTraceOnErrorSignal(argv[0]);
-  PrettyStackTraceProgram X(argc, argv);
-  report_options::initializeReportOptions();
-  cl::ParseCommandLineOptions(
-      argc, argv,
-      "FiTx Bug Finder\n"
-      "  Use -v to print the transition trace for each finding\n"
-      "  Use --report-json=<file> or --report-sarif=<file> for structured "
-      "output\n");
-
+int runFiTxCheckerTool(const char *argv0) {
   SMDiagnostic Err;
   LLVMContext Context;
   std::unique_ptr<Module> M = parseIRFile(InputFile, Err, Context);
 
   if (!M) {
-    Err.print(argv[0], errs());
+    Err.print(argv0, errs());
     return 1;
   }
 

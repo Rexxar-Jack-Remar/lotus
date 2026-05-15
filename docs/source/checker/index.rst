@@ -7,7 +7,7 @@ The Checker Framework provides a unified infrastructure for static bug detection
 
 **Headers**: ``include/Checker/``
 
-**Tools**: ``tools/checker/`` (command-line frontends)
+**Tool Frontend**: ``lotus-check`` with subcommand runners in ``tools/checker/``
 
 Overview
 --------
@@ -21,7 +21,7 @@ The Checker Framework consists of several checker categories, all unified throug
 * **Pulse Checker** – Memory safety and other bugs using biabductive analysis with path-sensitive interprocedural reasoning
 * **Saber Checkers** – Source-sink bug detection over sparse value-flow graphs
 
-All checkers report bugs through the centralized ``BugReportMgr`` system, enabling unified output formats (JSON, SARIF) and consistent bug reporting across all analysis tools.
+All checkers report bugs through the centralized ``BugReportMgr`` system, enabling unified output formats (JSON, SARIF) and consistent bug reporting across all analysis tools. The repository now builds a single checker binary, ``lotus-check``, with subcommands such as ``kint``, ``ae``, ``pulse``, ``saber``, and ``concur``.
 
 Components
 ----------
@@ -96,13 +96,15 @@ Build Targets
 
 * ``FiTxChecker`` – FiTx typestate-based bug checker library
 * ``PulseChecker`` – Pulse biabductive analysis checker library
-* ``lotus-ae`` – AE abstract-execution bug checker (``tools/checker/lotus-ae.cpp``)
-* ``lotus-fitx`` – FiTx daily development-friendly bug checker (``tools/checker/lotus_fitx.cpp``)
-* ``lotus-kint`` – KINT numerical bug detection tool (``tools/checker/lotus_kint.cpp``)
-* ``lotus-concur`` – Concurrency checker tool (``tools/checker/lotus_concur.cpp``)
-* ``lotus-pulse`` – Pulse biabductive analysis tool (``tools/checker/lotus_pulse.cpp``)
-* ``lotus-saber`` – Saber source-sink bug detector (``tools/checker/lotus-saber.cpp``)
-* ``lotus-taint`` – Taint analysis tool (``tools/checker/lotus_taint.cpp``)
+* ``lotus-check`` – Unified checker frontend
+* ``tools/checker/lotus_ae.cpp`` – AE subcommand runner
+* ``tools/checker/lotus_fitx.cpp`` – FiTx subcommand runner
+* ``tools/checker/lotus_kint.cpp`` – KINT subcommand runner
+* ``tools/checker/lotus_concur.cpp`` – Concurrency subcommand runner
+* ``tools/checker/lotus_pulse.cpp`` – Pulse subcommand runner
+* ``tools/checker/lotus_saber.cpp`` – Saber subcommand runner
+* ``tools/checker/lotus_symex.cpp`` – Symbolic-execution subcommand runner
+* ``tools/checker/lotus_taint.cpp`` – Taint-analysis subcommand runner
 
 Usage
 -----
@@ -111,26 +113,26 @@ Usage
 
 .. code-block:: bash
 
-   ./build/bin/lotus-kint --check-all=true input.bc
-   ./build/bin/lotus-kint --check-int-overflow=true --check-div-by-zero=true input.bc
-   ./build/bin/lotus-kint --report-json=report.json input.bc
+   ./build/bin/lotus-check kint input.bc --check-all=true
+   ./build/bin/lotus-check kint input.bc --check-int-overflow=true --check-div-by-zero=true
+   ./build/bin/lotus-check kint input.bc --report-json=report.json
 
 **Concurrency Tool**:
 
 .. code-block:: bash
 
-   ./build/bin/lotus-concur --check-data-races input.bc
-   ./build/bin/lotus-concur --check-deadlocks --check-atomicity input.bc
-   ./build/bin/lotus-concur --checks=openmp,mpi input.bc
-   ./build/bin/lotus-concur --report-json=report.json input.bc
+   ./build/bin/lotus-check concur input.bc --check-data-races
+   ./build/bin/lotus-check concur input.bc --check-deadlocks --check-atomicity
+   ./build/bin/lotus-check concur input.bc --checks=openmp,mpi
+   ./build/bin/lotus-check concur input.bc --report-json=report.json
 
 **Pulse Tool**:
 
 .. code-block:: bash
 
-   ./build/bin/lotus-pulse input.bc
-   ./build/bin/lotus-pulse -v input.bc
-   ./build/bin/lotus-pulse --log-level=debug input.bc
+   ./build/bin/lotus-check pulse input.bc
+   ./build/bin/lotus-check pulse input.bc -v
+   ./build/bin/lotus-check pulse input.bc --log-level=debug
 
 Programmatic Usage
 ------------------

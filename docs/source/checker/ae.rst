@@ -7,7 +7,7 @@ The ``AE`` subsystem provides abstract-execution-based bug detection.
 
 **Implementation**: ``lib/Checker/AE/``
 
-**Tool**: ``lotus-ae`` in ``tools/checker/lotus-ae.cpp``
+**Frontend**: ``lotus-check ae`` implemented by ``tools/checker/lotus_ae.cpp``
 
 Overview
 --------
@@ -40,9 +40,9 @@ Command-line usage
 
 .. code-block:: bash
 
-   ./build/bin/lotus-ae --all input.bc
-   ./build/bin/lotus-ae --overflow --null-deref input.bc
-   ./build/bin/lotus-ae --handle-recur=widen-narrow --widen-delay=5 input.bc
+   ./build/bin/lotus-check ae input.bc --all
+   ./build/bin/lotus-check ae input.bc --overflow --null-deref
+   ./build/bin/lotus-check ae input.bc --handle-recur=widen-narrow --widen-delay=5
 
 Important options
 -----------------

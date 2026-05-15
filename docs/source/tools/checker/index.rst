@@ -1,239 +1,99 @@
 Checker Tools
 =============
 
-This page summarizes the bug-finding tools under ``tools/checker/``. For a
-feature-oriented overview and examples, see :doc:`../../user_guide/bug_detection`.
+This page summarizes the unified checker frontend under ``tools/checker/``.
+For feature-oriented examples, see :doc:`../../user_guide/bug_detection`.
 
-lotus-kint – Integer and Array Bug Finder
------------------------------------------
+Unified Frontend
+----------------
 
-A static bug finder for integer-related and taint-style bugs (originally from
-OSDI 12).
+Lotus now builds a single checker binary:
 
-**Binary**: ``lotus-kint``  
-**Location**: ``tools/checker/lotus_kint.cpp``
+* **Binary**: ``lotus-check``
+* **Directory**: ``tools/checker/``
+* **Dispatch model**: one binary with subcommands such as ``generic``,
+  ``kint``, ``ae``, ``taint``, ``concur``, ``pulse``, ``fitx``, ``saber``,
+  and ``symex``
 
-**Usage**:
+The subcommand runners live in:
 
-.. code-block:: bash
+* ``tools/checker/lotus_check.cpp``
+* ``tools/checker/lotus_kint.cpp``
+* ``tools/checker/lotus_ae.cpp``
+* ``tools/checker/lotus_taint.cpp``
+* ``tools/checker/lotus_concur.cpp``
+* ``tools/checker/lotus_pulse.cpp``
+* ``tools/checker/lotus_fitx.cpp``
+* ``tools/checker/lotus_saber.cpp``
+* ``tools/checker/lotus_symex.cpp``
 
-   ./build/bin/lotus-kint [options] <input IR file>
-
-**Bug Checker Options**:
-
-* ``-check-all`` – Enable all checkers (overrides individual settings)
-* ``-check-int-overflow`` – Enable integer overflow checker
-* ``-check-div-by-zero`` – Enable division by zero checker
-* ``-check-bad-shift`` – Enable bad shift checker
-* ``-check-array-oob`` – Enable array index out of bounds checker
-* ``-check-dead-branch`` – Enable dead branch checker
-
-**Performance Options**:
-
-* ``-function-timeout=<seconds>`` – Maximum time to spend analyzing a single
-  function (0 = no limit, default: 10)
-
-**Logging Options**:
-
-* ``-log-level=<level>`` – Set logging level (debug, info, warning, error, none,
-  default: info)
-* ``-quiet`` – Suppress most log output
-* ``-log-to-stderr`` – Redirect logs to stderr instead of stdout
-* ``-log-to-file=<filename>`` – Redirect logs to the specified file
-
-**Detects**:
-
-The tool detects various integer-related bugs:
-
-1. **Integer overflow**: Detects potential integer overflow in arithmetic operations
-2. **Division by zero**: Detects potential division by zero errors
-3. **Bad shift**: Detects invalid shift amounts
-4. **Array out of bounds**: Detects potential array index out of bounds access
-5. **Dead branch**: Detects impossible branches in conditional statements
-
-**Examples**:
+Basic Usage
+-----------
 
 .. code-block:: bash
 
-   # Enable all checkers
-   ./build/bin/lotus-kint -check-all input.ll
+   ./build/bin/lotus-check --help
+   ./build/bin/lotus-check --list-checkers
+   ./build/bin/lotus-check generic input.bc --checker=forbidden.system
 
-   # Enable specific checkers
-   ./build/bin/lotus-kint -check-int-overflow -check-div-by-zero input.ll
+Subcommand Examples
+-------------------
 
-   # Set function timeout and log level
-   ./build/bin/lotus-kint -function-timeout=30 -log-level=debug input.ll
-
-   # Quiet mode with output to file
-   ./build/bin/lotus-kint -quiet -log-to-file=analysis.log input.ll
-
-lotus-ae – Abstract Execution Bug Checker
------------------------------------------
-
-Abstract-execution-based bug detection for memory-safety issues.
-
-**Binary**: ``lotus-ae``  
-**Location**: ``tools/checker/lotus-ae.cpp``
-
-**Usage**:
+KINT:
 
 .. code-block:: bash
 
-   ./build/bin/lotus-ae --all input.bc
-   ./build/bin/lotus-ae --overflow --null-deref input.bc
+   ./build/bin/lotus-check kint input.bc --check-all=true
+   ./build/bin/lotus-check kint input.bc --check-int-overflow=true
 
-Key options:
-
-- ``--all``
-- ``--overflow``, ``--null-deref``, ``--use-after-free``,
-  ``--invalid-free``, ``--mem-leak``
-- ``--handle-recur=top|widen-only|widen-narrow``
-- ``--widen-delay=<N>``
-
-lotus-taint – Taint Analysis
-----------------------------
-
-IFDS-based interprocedural taint analysis tool.
-
-**Binary**: ``lotus-taint``  
-**Location**: ``tools/checker/lotus_taint.cpp``
-
-**Detects**:
-
-- Flows from untrusted sources to sensitive sinks
-- Optional reaching-definitions analysis mode
-- Optional micro-benchmark evaluation mode
-
-**Usage**:
+AE:
 
 .. code-block:: bash
 
-   ./build/bin/lotus-taint [options] input.bc
+   ./build/bin/lotus-check ae input.bc --all
+   ./build/bin/lotus-check ae input.bc --overflow --null-deref
 
-Key options:
-
-- ``-analysis=0`` – Taint analysis (default)
-- ``-analysis=1`` – Reaching-definitions analysis
-- ``--aa=<kind>`` – Select the alias analysis used by the taint pipeline
-- ``-sources=<f1,f2,...>`` – Custom source functions
-- ``-sinks=<f1,f2,...>`` – Custom sink functions
-- ``-max-results=<N>`` – Limit number of detailed flows
-- ``-verbose`` – Detailed path information
-
-Typical workflow:
+Taint:
 
 .. code-block:: bash
 
-   ./build/bin/lotus-taint test.bc \
+   ./build/bin/lotus-check taint input.bc \
      --aa=dyck \
      --sources=recv,getenv \
      --sinks=system,execve
 
-For end-to-end examples (command injection, SQL injection, etc.), see
-:doc:`../../user_guide/bug_detection` and :doc:`../../dataflow/ifds_ide`.
-
-lotus-concur – Concurrency Bug Checker
----------------------------------------
-
-Static analysis for shared-memory concurrency bugs plus dedicated OpenMP and
-MPI checks.
-
-**Binary**: ``lotus-concur``  
-**Location**: ``tools/checker/lotus_concur.cpp``
-
-**Detects**:
-
-- Data races on shared variables
-- Locking discipline violations
-- Potential deadlocks (lock ordering issues)
-- OpenMP taskgroup/atomic-region mismatches and partial task synchronization
-- MPI request lifecycle bugs, collective mismatches, simple MPI deadlocks, and RMA issues
-
-**Usage**:
+Concurrency:
 
 .. code-block:: bash
 
-   ./build/bin/lotus-concur [options] input.bc
+   ./build/bin/lotus-check concur input.bc --checks=race,deadlock,openmp
 
-Key options:
-
-- ``--checks=race,deadlock,atomicity,condvar,lock-mismatch,openmp,mpi`` – enable only the listed checks
-- ``--check-openmp`` – run dedicated OpenMP checks
-- ``--check-mpi`` – run dedicated MPI checks
-- ``--analysis-only`` – dump analysis facts without bug emission
-
-Typical workflow:
-
-1. Compile multi-threaded C/C++ program to LLVM bitcode
-2. Run ``lotus-concur`` on the bitcode
-3. Inspect reported shared variables and threads involved in races
-
-Detailed concurrency examples and recommended patterns are in
-:doc:`../../user_guide/bug_detection`.
-
-lotus-pulse – Pulse-Inspired Bug Finder
----------------------------------------
-
-Biabductive bug finder for memory-safety style defects.
-
-**Binary**: ``lotus-pulse``  
-**Location**: ``tools/checker/lotus_pulse.cpp``
-
-**Usage**:
+Pulse:
 
 .. code-block:: bash
 
-   ./build/bin/lotus-pulse [options] input.bc
+   ./build/bin/lotus-check pulse input.bc --json-output pulse.json
 
-Key options:
-
-- ``--no-smt`` – Disable SMT solving during analysis
-- ``--json-output <file>`` – Write findings to a JSON file
-
-Typical workflow:
+FiTx:
 
 .. code-block:: bash
 
-   ./build/bin/lotus-pulse test.bc --json-output pulse.json
+   ./build/bin/lotus-check fitx input.bc --detector=uaf
 
-lotus-fitx – FiTx Multi-Checker Driver
---------------------------------------
-
-Driver for the FiTx checker suite.
-
-**Binary**: ``lotus-fitx``  
-**Location**: ``tools/checker/lotus_fitx.cpp``
-
-**Usage**:
+Saber:
 
 .. code-block:: bash
 
-   ./build/bin/lotus-fitx [options] input.bc
+   ./build/bin/lotus-check saber input.bc --all
 
-**Detects**:
-
-- FiTx detectors such as ``df``, ``dl``, ``dul``, ``leak``, ``nullptr``,
-  ``uaf``, and ``ubi``
-- Reference-count checkers
-
-Typical workflow:
+SymEx:
 
 .. code-block:: bash
 
-   ./build/bin/lotus-fitx test.bc --detector=uaf
+   ./build/bin/lotus-check symex input.bc
 
-lotus-saber – Source-Sink Resource Checker
-------------------------------------------
+See Also
+--------
 
-Saber-based bug detection over sparse value-flow graphs.
-
-**Binary**: ``lotus-saber``  
-**Location**: ``tools/checker/lotus-saber.cpp``
-
-**Usage**:
-
-.. code-block:: bash
-
-   ./build/bin/lotus-saber input.bc
-   ./build/bin/lotus-saber --all input.bc
-   ./build/bin/lotus-saber --double-free --file input.bc
+* :doc:`../../checker/index`
+* :doc:`../../user_guide/bug_detection`

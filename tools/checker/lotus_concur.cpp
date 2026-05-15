@@ -2,6 +2,7 @@
 #include "Checker/Report/BugReportMgr.h"
 #include "Checker/Report/ReportOptions.h"
 #include "Checker/Report/SuppressionManager.h"
+#include "Checker/Tooling/CheckerSubcommands.h"
 #include "Fuzzing/TargetGeneration.h"
 
 #include <cstddef>
@@ -19,67 +20,71 @@ using namespace llvm;
 using namespace concurrency;
 
 static cl::opt<std::string>
-    InputFilename(cl::Positional, cl::desc("<input file>"), cl::Required);
+    InputFilename(cl::Positional, cl::desc("<input file>"), cl::Required,
+                  cl::sub(lotus::checker::tooling::concurrencySubCommand()));
 static cl::opt<std::string> ChecksList(
     "checks",
     cl::desc("Comma-separated checks to run: "
              "race,deadlock,atomicity,condvar,lock-mismatch,openmp,mpi "
              "(overrides individual flags)"),
-    cl::value_desc("list"));
+    cl::value_desc("list"),
+    cl::sub(lotus::checker::tooling::concurrencySubCommand()));
 static cl::opt<bool> EnableDataRaces("check-data-races",
                                      cl::desc("Enable data race detection"),
-                                     cl::init(true));
+                                     cl::init(true),
+                                     cl::sub(lotus::checker::tooling::concurrencySubCommand()));
 static cl::opt<bool> EnableDeadlocks("check-deadlocks",
                                      cl::desc("Enable deadlock detection"),
-                                     cl::init(true));
+                                     cl::init(true),
+                                     cl::sub(lotus::checker::tooling::concurrencySubCommand()));
 static cl::opt<bool>
     EnableAtomicity("check-atomicity",
                     cl::desc("Enable atomicity violation detection"),
-                    cl::init(true));
+                    cl::init(true),
+                    cl::sub(lotus::checker::tooling::concurrencySubCommand()));
 static cl::opt<bool>
     EnableCondVar("check-condvar",
                   cl::desc("Enable condition variable misuse detection"),
-                  cl::init(true));
+                  cl::init(true),
+                  cl::sub(lotus::checker::tooling::concurrencySubCommand()));
 static cl::opt<bool> EnableLockMismatch(
     "check-lock-mismatch",
     cl::desc("Enable lock acquisition/release mismatch detection"),
-    cl::init(true));
+    cl::init(true),
+    cl::sub(lotus::checker::tooling::concurrencySubCommand()));
 static cl::opt<bool>
     EnableOpenMP("check-openmp", cl::desc("Enable dedicated OpenMP bug checks"),
-                 cl::init(true));
+                 cl::init(true),
+                 cl::sub(lotus::checker::tooling::concurrencySubCommand()));
 static cl::opt<bool> EnableMPI("check-mpi",
                                cl::desc("Enable dedicated MPI bug checks"),
-                               cl::init(true));
+                               cl::init(true),
+                               cl::sub(lotus::checker::tooling::concurrencySubCommand()));
 static cl::opt<bool> AnalysisOnly(
     "analysis-only",
     cl::desc("Run analysis only (no bug checking), dump analysis results"),
-    cl::init(false));
+    cl::init(false),
+    cl::sub(lotus::checker::tooling::concurrencySubCommand()));
 static cl::opt<bool>
     VerboseReports("v",
                    cl::desc("Print trace and IR details for reported bugs"),
-                   cl::init(false));
+                   cl::init(false),
+                   cl::sub(lotus::checker::tooling::concurrencySubCommand()));
 static cl::opt<std::string>
     AnalysisJsonOutput("analysis-json",
                        cl::desc("Output analysis results as JSON to specified "
                                 "file (requires --analysis-only)"),
-                       cl::value_desc("filename"));
+                       cl::value_desc("filename"),
+                       cl::sub(lotus::checker::tooling::concurrencySubCommand()));
 
-int main(int argc, char **argv) {
-  // Initialize centralized report options
-  report_options::initializeReportOptions();
-
-  cl::ParseCommandLineOptions(
-      argc, argv,
-      "Concurrency Checker Tool\n"
-      "  Use --report-json=<file> or --report-sarif=<file> for output\n");
-
+int runConcurrencyCheckerTool(const char *argv0) {
   // Parse the input LLVM IR file
   SMDiagnostic err;
   LLVMContext context;
   std::unique_ptr<Module> module = parseIRFile(InputFilename, err, context);
 
   if (!module) {
-    err.print(argv[0], errs());
+    err.print(argv0, errs());
     return 1;
   }
 

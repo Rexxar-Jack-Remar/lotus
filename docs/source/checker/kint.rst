@@ -9,7 +9,7 @@ Static analysis tool for detecting numerical bugs: integer overflow, division by
 
 **Tool Location**: ``tools/checker/lotus_kint.cpp``
 
-**Build Target**: ``lotus-kint``
+**Frontend**: ``lotus-check kint``
 
 Overview
 --------
@@ -74,53 +74,53 @@ Usage
 
 .. code-block:: bash
 
-   ./build/bin/lotus-kint --check-all=true input.bc
+   ./build/bin/lotus-check kint input.bc --check-all=true
 
 **Enable Specific Checkers**:
 
 .. code-block:: bash
 
-   ./build/bin/lotus-kint --check-int-overflow=true input.bc
-   ./build/bin/lotus-kint --check-div-by-zero=true input.bc
-   ./build/bin/lotus-kint --check-bad-shift=true input.bc
-   ./build/bin/lotus-kint --check-array-oob=true input.bc
-   ./build/bin/lotus-kint --check-dead-branch=true input.bc
+   ./build/bin/lotus-check kint input.bc --check-int-overflow=true
+   ./build/bin/lotus-check kint input.bc --check-div-by-zero=true
+   ./build/bin/lotus-check kint input.bc --check-bad-shift=true
+   ./build/bin/lotus-check kint input.bc --check-array-oob=true
+   ./build/bin/lotus-check kint input.bc --check-dead-branch=true
 
 **Enable Multiple Checkers**:
 
 .. code-block:: bash
 
-   ./build/bin/lotus-kint --check-int-overflow=true --check-div-by-zero=true input.bc
+   ./build/bin/lotus-check kint input.bc --check-int-overflow=true --check-div-by-zero=true
 
 **Generate JSON Report**:
 
 .. code-block:: bash
 
-   ./build/bin/lotus-kint --check-all=true --report-json=report.json input.bc
+   ./build/bin/lotus-check kint input.bc --check-all=true --report-json=report.json
 
 **Generate SARIF Report**:
 
 .. code-block:: bash
 
-   ./build/bin/lotus-kint --check-all=true --report-sarif=report.sarif input.bc
+   ./build/bin/lotus-check kint input.bc --check-all=true --report-sarif=report.sarif
 
 **Verbose Logging**:
 
 .. code-block:: bash
 
-   ./build/bin/lotus-kint --check-all=true --log-level=debug input.bc
+   ./build/bin/lotus-check kint input.bc --check-all=true --log-level=debug
 
 **Function Timeout**:
 
 .. code-block:: bash
 
-   ./build/bin/lotus-kint --check-all=true --function-timeout=60 input.bc
+   ./build/bin/lotus-check kint input.bc --check-all=true --function-timeout=60
 
 **Analyze All Functions**:
 
 .. code-block:: bash
 
-   ./build/bin/lotus-kint --check-int-overflow=true --analyze-all-functions=true input.bc
+   ./build/bin/lotus-check kint input.bc --check-int-overflow=true --analyze-all-functions=true
 
 Command-Line Options
 --------------------

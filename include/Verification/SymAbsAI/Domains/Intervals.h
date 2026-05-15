@@ -1,8 +1,8 @@
 #pragma once
 
 #include "Verification/SymAbsAI/Core/Foundation/AbstractValue.h"
-#include "Verification/SymAbsAI/Core/Integration/ResultStore.h"
 #include "Verification/SymAbsAI/Core/Foundation/Repr.h"
+#include "Verification/SymAbsAI/Core/Integration/ResultStore.h"
 #include "Verification/SymAbsAI/Utils/Utils.h"
 
 #include <memory>

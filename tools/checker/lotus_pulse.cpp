@@ -12,6 +12,7 @@
 #include "Checker/Report/BugReportMgr.h"
 #include "Checker/Report/ReportOptions.h"
 #include "Checker/Report/SuppressionManager.h"
+#include "Checker/Tooling/CheckerSubcommands.h"
 #include "Fuzzing/TargetGeneration.h"
 
 #include <memory>
@@ -21,8 +22,6 @@
 #include <llvm/IR/Module.h>
 #include <llvm/IRReader/IRReader.h>
 #include <llvm/Support/CommandLine.h>
-#include <llvm/Support/PrettyStackTrace.h>
-#include <llvm/Support/Signals.h>
 #include <llvm/Support/SourceMgr.h>
 #include <llvm/Support/raw_ostream.h>
 
@@ -30,33 +29,35 @@ using namespace llvm;
 using namespace pulse;
 
 static cl::opt<std::string>
-    InputFile(cl::Positional, cl::desc("<input bitcode>"), cl::Required);
-static cl::opt<bool> Verbose("v", cl::desc("Verbose output"), cl::init(false));
+    InputFile(cl::Positional, cl::desc("<input bitcode>"), cl::Required,
+              cl::sub(lotus::checker::tooling::pulseSubCommand()));
+static cl::opt<bool> Verbose("v", cl::desc("Verbose output"), cl::init(false),
+                             cl::sub(lotus::checker::tooling::pulseSubCommand()));
 static cl::opt<std::string>
     LogLevelOpt("log-level",
                 cl::desc("Log level: none, error, warning, info, debug, trace"),
-                cl::init("info"));
+                cl::init("info"),
+                cl::sub(lotus::checker::tooling::pulseSubCommand()));
 static cl::opt<bool> ShowPulseStats("pulse-stats",
                                     cl::desc("Show Pulse analysis statistics"),
-                                    cl::init(true));
+                                    cl::init(true),
+                                    cl::sub(lotus::checker::tooling::pulseSubCommand()));
 static cl::opt<std::string> JsonOutput("json-output",
                                        cl::desc("Output JSON report to file"),
-                                       cl::init(""));
+                                       cl::init(""),
+                                       cl::sub(lotus::checker::tooling::pulseSubCommand()));
 static cl::opt<int>
     MinScore("min-score",
              cl::desc("Minimum confidence score for reporting (0-100)"),
-             cl::init(0));
+             cl::init(0),
+             cl::sub(lotus::checker::tooling::pulseSubCommand()));
 static cl::opt<bool> NoSMT("no-smt",
                            cl::desc("Disable SMT solving (fast mode); do not "
                                     "query Z3 for path satisfiability"),
-                           cl::init(false));
+                           cl::init(false),
+                           cl::sub(lotus::checker::tooling::pulseSubCommand()));
 
-int main(int argc, char **argv) {
-  sys::PrintStackTraceOnErrorSignal(argv[0]);
-  PrettyStackTraceProgram X(argc, argv);
-  report_options::initializeReportOptions();
-  cl::ParseCommandLineOptions(argc, argv, "Pulse Bug Finder\n");
-
+int runPulseCheckerTool(const char *argv0) {
   // Configure logging
   pulse::LogLevel level = pulse::LogLevel::Info;
   if (LogLevelOpt == "none")
@@ -90,7 +91,7 @@ int main(int argc, char **argv) {
   std::unique_ptr<Module> M = parseIRFile(InputFile, Err, Context);
 
   if (!M) {
-    Err.print(argv[0], errs());
+    Err.print(argv0, errs());
     return 1;
   }
 

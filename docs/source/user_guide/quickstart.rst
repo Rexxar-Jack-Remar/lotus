@@ -33,19 +33,19 @@ Bug Detection
 .. code-block:: bash
 
    # Integer and array bugs
-   ./build/bin/lotus-kint -check-int-overflow example.ll  # Integer overflow
-   ./build/bin/lotus-kint -check-array-oob example.ll     # Array out of bounds
-   ./build/bin/lotus-kint -check-all example.ll           # All checks
+   ./build/bin/lotus-check kint example.ll -check-int-overflow  # Integer overflow
+   ./build/bin/lotus-check kint example.ll -check-array-oob     # Array out of bounds
+   ./build/bin/lotus-check kint example.ll -check-all           # All checks
    
    # Memory safety bugs
-   ./build/bin/lotus-pulse example.bc                        # Memory safety checks
+   ./build/bin/lotus-check pulse example.bc                # Memory safety checks
 
     # IFDS-based, taint-style bugs  
-   ./build/bin/lotus-taint example.bc                # Basic taint analysis
-   ./build/bin/lotus-taint -sources="read,scanf" -sinks="system,exec" example.bc
+   ./build/bin/lotus-check taint example.bc                    # Basic taint analysis
+   ./build/bin/lotus-check taint example.bc -sources="read,scanf" -sinks="system,exec"
 
    # Concurrency bugs
-   ./build/bin/lotus-concur example.bc            # Concurrency bug detection
+   ./build/bin/lotus-check concur example.bc            # Concurrency bug detection
 
 
 Abstract Interpretation
@@ -104,6 +104,6 @@ Analysis commands:
 
    clang -emit-llvm -c example.c -o example.bc
    clang -emit-llvm -S example.c -o example.ll
-   ./build/bin/lotus-taint example.bc                   # Detect taint flow
-   ./build/bin/lotus-kint -check-array-oob example.ll   # Check buffer overflow
-   ./build/bin/lotus-pulse example.bc                        # Memory safety checks
+   ./build/bin/lotus-check taint example.bc                 # Detect taint flow
+   ./build/bin/lotus-check kint example.ll -check-array-oob # Check buffer overflow
+   ./build/bin/lotus-check pulse example.bc                 # Memory safety checks

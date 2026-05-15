@@ -1,7 +1,13 @@
 # Checker tools
 
-This directory contains standalone bug-finding frontends built on top of
+This directory now builds a single checker frontend, `lotus-check`, on top of
 `lib/Checker/` and related Lotus analysis infrastructure.
+
+`lotus-check` supports:
+
+- top-level generic/declarative checking
+- native in-process checker subcommands such as `ae`, `kint`, `pulse`,
+  `saber`, `fitx`, `concur`, `symex`, and `taint`
 
 ## Build
 
@@ -21,34 +27,45 @@ clang -emit-llvm -c test.c -o test.bc
 build/bin/<checker> test.bc
 ```
 
-Use `build/bin/<checker> --help` to inspect the full option set.
+Use `build/bin/lotus-check --help` or
+`build/bin/lotus-check <subcommand> --help` to inspect the full option set.
 
-## Tools
+## Subcommands
 
-| Tool | Purpose | Notes |
+| Subcommand | Purpose | Notes |
 | --- | --- | --- |
-| `lotus-kint` | Integer bug detector | Checks integer overflow, division by zero, bad shifts, array bounds, and dead branches. Supports enabling all checks or individual `--check-*` options. |
-| `lotus-taint` | Interprocedural taint analysis | IFDS-based taint tracking with selectable alias analysis via `--aa` and optional micro-benchmark evaluation mode. |
-| `lotus-concur` | Concurrency checker | Detects races, deadlocks, atomicity issues, condvar misuse, lock mismatches, and OpenMP/MPI bugs. |
-| `lotus-pulse` | Pulse-inspired bug finder | Biabductive analysis with optional SMT disabling via `--no-smt`; can emit JSON findings. |
-| `lotus-fitx` | FiTx multi-checker driver | Runs FiTx detectors such as `df`, `dl`, `dul`, `leak`, `nullptr`, `uaf`, `ubi`, and reference-count checkers. |
-| `lotus-saber` | Source-sink bug checker | Runs memory leak, double-free, and file-descriptor leak checks; defaults to leak checking when no specific checker is selected. |
-| `lotus-ae` | Abstract-execution checker | Covers overflow, null dereference, use-after-free, invalid free, and memory leak detection. |
-| `lotus-symex` | Symbolic-execution checker | Runs the `lib/Analysis/SymbolicExecution` engine on GVFG/LotusAA and emits path-sensitive bug reports. |
-| `lotus-check` | Generic checker driver | Loads built-in YAML specs from `config/checkers/` and runs declarative checkers through the shared report manager. |
+| `generic` | Generic checker driver | Loads built-in YAML specs from `config/checkers/` and runs declarative checkers through the shared report manager. Top-level invocation without a subcommand also uses this mode. |
+| `kint` | Integer bug detector | Checks integer overflow, division by zero, bad shifts, array bounds, and dead branches. Supports enabling all checks or individual `--check-*` options. |
+| `taint` | Interprocedural taint analysis | IFDS-based taint tracking with selectable alias analysis via `--aa` and optional micro-benchmark evaluation mode. |
+| `concur` | Concurrency checker | Detects races, deadlocks, atomicity issues, condvar misuse, lock mismatches, and OpenMP/MPI bugs. |
+| `pulse` | Pulse-inspired bug finder | Biabductive analysis with optional SMT disabling via `--no-smt`; can emit JSON findings. |
+| `fitx` | FiTx multi-checker driver | Runs FiTx detectors such as `df`, `dl`, `dul`, `leak`, `nullptr`, `uaf`, `ubi`, and reference-count checkers. |
+| `saber` | Source-sink bug checker | Runs memory leak, double-free, and file-descriptor leak checks; defaults to leak checking when no specific checker is selected. Implemented by `tools/checker/lotus_saber.cpp`. |
+| `ae` | Abstract-execution checker | Covers overflow, null dereference, use-after-free, invalid free, and memory leak detection. Implemented by `tools/checker/lotus_ae.cpp`. |
+| `symex` | Symbolic-execution checker | Runs the `lib/Analysis/SymbolicExecution` engine on GVFG/LotusAA and emits path-sensitive bug reports. Implemented by `tools/checker/lotus_symex.cpp`. |
 
 ## Common workflows
+
+### Use the unified frontend
+
+```bash
+build/bin/lotus-check --list-checkers
+build/bin/lotus-check --checker=forbidden.system test.bc
+build/bin/lotus-check generic test.bc --checker=forbidden.system
+build/bin/lotus-check ae test.bc --all
+build/bin/lotus-check concur test.bc --checks=race,deadlock
+```
 
 ### Run Kint on integer-heavy code
 
 ```bash
-build/bin/lotus-kint test.bc --check-all=true
+build/bin/lotus-check kint test.bc --check-all=true
 ```
 
 ### Run taint analysis with explicit sources and sinks
 
 ```bash
-build/bin/lotus-taint test.bc \
+build/bin/lotus-check taint test.bc \
   --aa=dyck \
   --sources=recv,getenv \
   --sinks=system,execve \
@@ -58,12 +75,12 @@ build/bin/lotus-taint test.bc \
 ### Run targeted bug checkers
 
 ```bash
-build/bin/lotus-saber test.bc --all
-build/bin/lotus-ae test.bc --all
-build/bin/lotus-symex test.bc --symex-checkers=null-deref,uaf
-build/bin/lotus-fitx test.bc --detector=uaf
-build/bin/lotus-concur test.bc --checks=race,deadlock
-build/bin/lotus-pulse test.bc --json-output pulse.json
+build/bin/lotus-check saber test.bc --all
+build/bin/lotus-check ae test.bc --all
+build/bin/lotus-check symex test.bc --symex-checkers=null-deref,uaf
+build/bin/lotus-check fitx test.bc --detector=uaf
+build/bin/lotus-check concur test.bc --checks=race,deadlock
+build/bin/lotus-check pulse test.bc --json-output pulse.json
 ```
 
 ## Reporting

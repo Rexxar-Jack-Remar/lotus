@@ -38,6 +38,7 @@
 #include "Checker/FiTx/Frontend/State.h"
 #include "Checker/FiTx/Frontend/StateTransition.h"
 #include "Checker/FiTx/Frontend/Utils.h"
+#include "Checker/Tooling/CheckerSubcommands.h"
 
 #include <algorithm>
 #include <chrono>
@@ -56,10 +57,13 @@
 #include <unistd.h>
 
 static llvm::cl::opt<bool>
-    Async("async", llvm::cl::desc("Asynchronously conduct analysis"));
+    Async("async", llvm::cl::desc("Asynchronously conduct analysis"),
+          llvm::cl::sub(lotus::checker::tooling::fitxSubCommand()));
 
 static llvm::cl::opt<bool> MeasureTime("measure",
-                                       llvm::cl::desc("Measure analysis time"));
+                                       llvm::cl::desc("Measure analysis time"),
+                                       llvm::cl::sub(
+                                           lotus::checker::tooling::fitxSubCommand()));
 
 namespace fitx {
 

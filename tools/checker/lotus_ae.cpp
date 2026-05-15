@@ -1,4 +1,4 @@
-//===- lotus-ae.cpp -- Abstract Execution Bug Checker --------------//
+//===- lotus_ae.cpp -- Abstract Execution Bug Checker --------------//
 //
 // Lotus tool for buffer overflow and null pointer dereference detection
 // using Abstract Execution. Migrated from SVF's AE engine.
@@ -10,13 +10,12 @@
 #include "Checker/Report/BugReportMgr.h"
 #include "Checker/Report/ReportOptions.h"
 #include "Checker/Report/SuppressionManager.h"
+#include "Checker/Tooling/CheckerSubcommands.h"
 #include "Fuzzing/TargetGeneration.h"
 
 #include <llvm/IRReader/IRReader.h>
 #include <llvm/Support/CommandLine.h>
 #include <llvm/Support/FileSystem.h>
-#include <llvm/Support/PrettyStackTrace.h>
-#include <llvm/Support/Signals.h>
 #include <llvm/Support/SourceMgr.h>
 #include <llvm/Support/raw_ostream.h>
 
@@ -24,35 +23,42 @@ using namespace llvm;
 
 static cl::opt<std::string> InputFilename(cl::Positional,
                                           cl::desc("<input bitcode file>"),
-                                          cl::Required);
+                                          cl::Required,
+                                          cl::sub(lotus::checker::tooling::aeSubCommand()));
 
 static cl::opt<bool> BufferOverflowCheck("overflow",
                                          cl::desc("Check for buffer overflows"),
-                                         cl::init(false));
+                                         cl::init(false),
+                                         cl::sub(lotus::checker::tooling::aeSubCommand()));
 
 static cl::opt<bool>
     NullDerefCheck("null-deref",
                    cl::desc("Check for null pointer dereferences"),
-                   cl::init(false));
+                   cl::init(false),
+                   cl::sub(lotus::checker::tooling::aeSubCommand()));
 
 static cl::opt<bool>
     UseAfterFreeCheck("use-after-free",
                       cl::desc("Check for use-after-free bugs"),
-                      cl::init(false));
+                      cl::init(false),
+                      cl::sub(lotus::checker::tooling::aeSubCommand()));
 
 static cl::opt<bool> InvalidFreeCheck("invalid-free",
                                       cl::desc("Check for invalid free bugs"),
-                                      cl::init(false));
+                                      cl::init(false),
+                                      cl::sub(lotus::checker::tooling::aeSubCommand()));
 
 static cl::opt<bool> MemLeakCheck("mem-leak",
                                   cl::desc("Check for memory leaks"),
-                                  cl::init(false));
+                                  cl::init(false),
+                                  cl::sub(lotus::checker::tooling::aeSubCommand()));
 
 static cl::opt<bool>
     AllChecks("all",
               cl::desc("Run all checkers (overflow, null-deref, "
                        "use-after-free, invalid-free, mem-leak)"),
-              cl::init(false));
+              cl::init(false),
+              cl::sub(lotus::checker::tooling::aeSubCommand()));
 
 static cl::opt<lotus::analysis::AbstractInterpretation::HandleRecur>
     HandleRecurOpt(
@@ -64,39 +70,31 @@ static cl::opt<lotus::analysis::AbstractInterpretation::HandleRecur>
                        "widen-only", "Widening only on recursion"),
             clEnumValN(lotus::analysis::AbstractInterpretation::WIDEN_NARROW,
                        "widen-narrow", "Widening + narrowing on recursion")),
-        cl::init(lotus::analysis::AbstractInterpretation::WIDEN_NARROW));
+        cl::init(lotus::analysis::AbstractInterpretation::WIDEN_NARROW),
+        cl::sub(lotus::checker::tooling::aeSubCommand()));
 
 static cl::opt<unsigned>
     WidenDelayOpt("widen-delay", cl::desc("Delay widening for loop iterations"),
-                  cl::init(3));
+                  cl::init(3),
+                  cl::sub(lotus::checker::tooling::aeSubCommand()));
 
 static cl::opt<bool>
     StrictCheckpointOpt("strict-checkpoint",
                         cl::desc("Fail when checkpoints remain unchecked"),
-                        cl::init(true));
+                        cl::init(true),
+                        cl::sub(lotus::checker::tooling::aeSubCommand()));
 static cl::opt<bool>
     VerboseReports("v",
                    cl::desc("Print trace and IR details for reported bugs"),
-                   cl::init(false));
+                   cl::init(false),
+                   cl::sub(lotus::checker::tooling::aeSubCommand()));
 
-int main(int argc, char **argv) {
-  sys::PrintStackTraceOnErrorSignal(argv[0]);
-  PrettyStackTraceProgram X(argc, argv);
-  llvm_shutdown_obj Y;
-  report_options::initializeReportOptions();
-
-  cl::ParseCommandLineOptions(
-      argc, argv,
-      "Abstract Execution Bug Detector\n"
-      "  [options] <input-bitcode>\n"
-      "  Use --all to run all checkers.\n"
-      "  Use --report-json=<file> or --report-sarif=<file> for output.\n");
-
+int runAECheckerTool(const char *argv0) {
   LLVMContext Context;
   SMDiagnostic Err;
   std::unique_ptr<Module> M = parseIRFile(InputFilename, Err, Context);
   if (!M) {
-    Err.print(argv[0], errs());
+    Err.print(argv0, errs());
     return 1;
   }
 

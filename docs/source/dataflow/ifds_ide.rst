@@ -109,12 +109,12 @@ At a high level, an IFDS/IDE analysis is instantiated and solved as:
 Command-Line Tool: lotus-taint
 ==============================
 
-The ``lotus-taint`` tool provides an interprocedural taint analysis using the
+The ``lotus-check taint`` frontend provides an interprocedural taint analysis using the
 IFDS framework.
 
 .. code-block:: bash
 
-   ./build/bin/lotus-taint [options] <input bitcode file>
+   ./build/bin/lotus-check taint <input bitcode file> [options]
 
 Key Options
 -----------
@@ -136,14 +136,13 @@ Examples
 .. code-block:: bash
 
    # Basic taint analysis
-   ./build/bin/lotus-taint input.bc
+   ./build/bin/lotus-check taint input.bc
 
    # Custom sources and sinks
-   ./build/bin/lotus-taint -sources="read,scanf" -sinks="system,exec" input.bc
+   ./build/bin/lotus-check taint input.bc -sources="read,scanf" -sinks="system,exec"
 
    # Reaching definitions analysis
-   ./build/bin/lotus-taint -analysis=1 input.bc
+   ./build/bin/lotus-check taint input.bc -analysis=1
 
 For other command-line tools that build on IFDS/IDE, see
 :doc:`../tools/checker/index`.
-

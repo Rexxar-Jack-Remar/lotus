@@ -6,6 +6,7 @@
 #include "Checker/Report/BugReportMgr.h"
 #include "Checker/Report/ReportOptions.h"
 #include "Checker/Report/SuppressionManager.h"
+#include "Checker/Tooling/CheckerSubcommands.h"
 #include "Fuzzing/TargetGeneration.h"
 
 #include <llvm/IR/PassManager.h>
@@ -14,7 +15,6 @@
 #include <llvm/Passes/PassPlugin.h>
 #include <llvm/Support/CommandLine.h>
 #include <llvm/Support/FileSystem.h>
-#include <llvm/Support/InitLLVM.h>
 #include <llvm/Support/SourceMgr.h>
 #include <llvm/Transforms/Scalar/SROA.h>
 #include <llvm/Transforms/Utils/Mem2Reg.h>
@@ -23,11 +23,13 @@ using namespace llvm;
 
 // Command line options
 static cl::opt<std::string> InputFilename(cl::Positional, cl::desc("<IR file>"),
-                                          cl::Required);
+                                          cl::Required,
+                                          cl::sub(lotus::checker::tooling::kintSubCommand()));
 static cl::opt<bool>
     VerboseReports("v",
                    cl::desc("Print trace and IR details for reported bugs"),
-                   cl::init(false));
+                   cl::init(false),
+                   cl::sub(lotus::checker::tooling::kintSubCommand()));
 
 // registering pass (new pass manager).
 extern "C" ::llvm::PassPluginLibraryInfo LLVM_ATTRIBUTE_WEAK
@@ -49,21 +51,9 @@ llvmGetPassPluginInfo() {
           }};
 }
 
-int main(int argc, char **argv) {
-  // Initialize LLVM
-  llvm::InitLLVM X(argc, argv);
-
+int runKintCheckerTool(const char *argv0) {
   // Initialize command line options
   kint::initializeCommandLineOptions();
-  report_options::initializeReportOptions();
-
-  // Parse all command-line options
-  llvm::cl::ParseCommandLineOptions(
-      argc, argv,
-      "Kint: An Integer Bug Detector\n"
-      "  Use --check-all=true to enable all checkers at once\n"
-      "  Use --check-<checker-name>=true to enable specific checkers\n"
-      "  Use --report-json=<file> or --report-sarif=<file> for output\n");
 
   // Configure the logger
   mkint::LogConfig logConfig;
@@ -145,7 +135,7 @@ int main(int argc, char **argv) {
 
   M = llvm::parseIRFile(InputFilename, Err, Context);
   if (!M) {
-    Err.print(argv[0], llvm::errs());
+    Err.print(argv0, llvm::errs());
     return 1;
   }
 

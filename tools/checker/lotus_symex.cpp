@@ -1,4 +1,4 @@
-//===- lotus-symex.cpp -- Symbolic Execution Bug Checker ------------------===//
+//===- lotus_symex.cpp -- Symbolic Execution Bug Checker ------------------===//
 //
 // Lotus frontend for the SymbolicExecution engine. The tool parses LLVM IR,
 // runs the legacy SymbolicExecutionWrapper module pass, and emits findings via
@@ -11,6 +11,7 @@
 #include "Checker/Report/BugReportMgr.h"
 #include "Checker/Report/ReportOptions.h"
 #include "Checker/Report/SuppressionManager.h"
+#include "Checker/Tooling/CheckerSubcommands.h"
 #include "Fuzzing/TargetGeneration.h"
 #include "IR/GSA/GSA.h"
 #include "IR/GVFG/GuardedValueFlowBuilder.h"
@@ -22,8 +23,6 @@
 #include <llvm/PassRegistry.h>
 #include <llvm/Support/CommandLine.h>
 #include <llvm/Support/FileSystem.h>
-#include <llvm/Support/PrettyStackTrace.h>
-#include <llvm/Support/Signals.h>
 #include <llvm/Support/SourceMgr.h>
 #include <llvm/Support/raw_ostream.h>
 
@@ -31,33 +30,21 @@ using namespace llvm;
 
 static cl::opt<std::string> InputFilename(cl::Positional,
                                           cl::desc("<input bitcode file>"),
-                                          cl::Required);
+                                          cl::Required,
+                                          cl::sub(lotus::checker::tooling::symexSubCommand()));
 
 static cl::opt<bool>
     VerboseReports("v",
                    cl::desc("Print trace and IR details for reported bugs"),
-                   cl::init(false));
+                   cl::init(false),
+                   cl::sub(lotus::checker::tooling::symexSubCommand()));
 
-int main(int argc, char **argv) {
-  sys::PrintStackTraceOnErrorSignal(argv[0]);
-  PrettyStackTraceProgram X(argc, argv);
-  llvm_shutdown_obj Y;
-  report_options::initializeReportOptions();
-
-  cl::ParseCommandLineOptions(
-      argc, argv,
-      "Symbolic Execution Bug Detector\n"
-      "  [options] <input-bitcode>\n"
-      "  Select checks with --symex-checkers=<csv> or individual "
-      "--symex-check-*\n"
-      "  flags.\n"
-      "  Use --report-json=<file> or --report-sarif=<file> for output.\n");
-
+int runSymExCheckerTool(const char *argv0) {
   LLVMContext Context;
   SMDiagnostic Err;
   std::unique_ptr<Module> M = parseIRFile(InputFilename, Err, Context);
   if (!M) {
-    Err.print(argv[0], errs());
+    Err.print(argv0, errs());
     return 1;
   }
 

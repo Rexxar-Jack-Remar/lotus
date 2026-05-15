@@ -140,7 +140,7 @@ Compile and Analyze
 .. code-block:: bash
 
    clang -emit-llvm -S -g overflow.c -o overflow.ll
-   ./build/bin/lotus-kint -check-int-overflow -analyze-all-functions overflow.ll
+   ./build/bin/lotus-check kint overflow.ll -check-int-overflow -analyze-all-functions
 
 Expected Output
 ~~~~~~~~~~~~~~~
@@ -164,7 +164,7 @@ Advanced: All Checks
 
 .. code-block:: bash
 
-   ./build/bin/lotus-kint -check-all -analyze-all-functions overflow.ll
+   ./build/bin/lotus-check kint overflow.ll -check-all -analyze-all-functions
 
 This enables all checkers: integer overflow, division by zero, bad shift, array bounds, and dead branches.
 
@@ -226,7 +226,7 @@ Compile and Analyze
 .. code-block:: bash
 
    clang -emit-llvm -c -g nullpointer.c -o nullpointer.bc
-   ./build/bin/lotus-pulse -v nullpointer.bc
+   ./build/bin/lotus-check pulse nullpointer.bc -v
 
 Expected Output
 ~~~~~~~~~~~~~~~
@@ -295,17 +295,16 @@ Compile and Analyze
 .. code-block:: bash
 
    clang -emit-llvm -c -g taint.c -o taint.bc
-   ./build/bin/lotus-taint -verbose taint.bc
+   ./build/bin/lotus-check taint taint.bc -verbose
 
 Custom Sources and Sinks
 ~~~~~~~~~~~~~~~~~~~~~~~~~
 
 .. code-block:: bash
 
-   ./build/bin/lotus-taint \
+   ./build/bin/lotus-check taint taint.bc \
        -sources="scanf,gets,read" \
-       -sinks="system,exec,popen" \
-       taint.bc
+       -sinks="system,exec,popen"
 
 Expected Output
 ~~~~~~~~~~~~~~~
@@ -811,7 +810,7 @@ Compile and Analyze
 .. code-block:: bash
 
    clang -emit-llvm -c -g concurrent.c -o concurrent.bc
-   ./build/bin/lotus-concur -verbose concurrent.bc
+   ./build/bin/lotus-check concur concurrent.bc -verbose
 
 Expected Output
 ~~~~~~~~~~~~~~~

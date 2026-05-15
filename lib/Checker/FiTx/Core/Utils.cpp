@@ -26,6 +26,7 @@
 #include "llvm/Support/CommandLine.h"
 
 #include "Checker/FiTx/Core/Instruction.h"
+#include "Checker/Tooling/CheckerSubcommands.h"
 #include "Checker/FiTx/Core/Utils.h"
 #include "Checker/FiTx/Core/Value.h"
 
@@ -42,7 +43,9 @@
 #include <vector>
 
 static llvm::cl::opt<bool> Debug("fitx-debug",
-                                 llvm::cl::desc("Print FiTx debug warnings"));
+                                 llvm::cl::desc("Print FiTx debug warnings"),
+                                 llvm::cl::sub(
+                                     lotus::checker::tooling::fitxSubCommand()));
 
 namespace fitx {
 void generateWarning(llvm::Instruction *Inst, std::string warn) {

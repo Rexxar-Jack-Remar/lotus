@@ -6,6 +6,7 @@
  */
 
 #include "Utils/LLVM/Demangle.h"
+#include "Checker/Tooling/CheckerSubcommands.h"
 
 #include <chrono>
 #include <memory>
@@ -21,7 +22,6 @@
 #include <llvm/Support/CommandLine.h>
 #include <llvm/Support/ErrorOr.h>
 #include <llvm/Support/FileSystem.h>
-#include <llvm/Support/InitLLVM.h>
 #include <llvm/Support/MemoryBuffer.h>
 #include <llvm/Support/SourceMgr.h>
 #include <llvm/Support/raw_ostream.h>
@@ -38,54 +38,65 @@ using namespace ifds;
 
 static cl::opt<std::string> InputFilename(cl::Positional,
                                           cl::desc("<input bitcode file>"),
-                                          cl::Required);
+                                          cl::Required,
+                                          cl::sub(lotus::checker::tooling::taintSubCommand()));
 
 static cl::opt<bool> Verbose("verbose", cl::desc("Enable verbose output"),
-                             cl::init(false));
+                             cl::init(false),
+                             cl::sub(lotus::checker::tooling::taintSubCommand()));
 
 static cl::opt<int> AnalysisType("analysis",
                                  cl::desc("Type of analysis to run: 0=taint"),
-                                 cl::init(0));
+                                 cl::init(0),
+                                 cl::sub(lotus::checker::tooling::taintSubCommand()));
 
 static cl::opt<std::string> AliasAnalysisType(
     "aa",
     cl::desc(
         "Alias analysis type: andersen, dyck, cfl-anders, cfl-steens, seadsa, "
         "allocaa, basic, combined=Andersen(NoCtx)+DyckAA (default: dyck)"),
-    cl::init("dyck"));
+    cl::init("dyck"),
+    cl::sub(lotus::checker::tooling::taintSubCommand()));
 
 static cl::opt<bool> ShowResults("show-results",
                                  cl::desc("Show detailed analysis results"),
-                                 cl::init(true));
+                                 cl::init(true),
+                                 cl::sub(lotus::checker::tooling::taintSubCommand()));
 
 static cl::opt<int>
     MaxDetailedResults("max-results",
                        cl::desc("Maximum number of detailed results to show"),
-                       cl::init(10));
+                       cl::init(10),
+                       cl::sub(lotus::checker::tooling::taintSubCommand()));
 
 static cl::opt<std::string>
     SourceFunctions("sources",
                     cl::desc("Comma-separated list of source functions"),
-                    cl::init(""));
+                    cl::init(""),
+                    cl::sub(lotus::checker::tooling::taintSubCommand()));
 
 static cl::opt<std::string>
     SinkFunctions("sinks", cl::desc("Comma-separated list of sink functions"),
-                  cl::init(""));
+                  cl::init(""),
+                  cl::sub(lotus::checker::tooling::taintSubCommand()));
 
 static cl::opt<bool>
     MicroBench("micro-bench",
                cl::desc("Enable micro benchmark mode (use source/sink and "
                         "evaluate precision/recall)"),
-               cl::init(false));
+               cl::init(false),
+               cl::sub(lotus::checker::tooling::taintSubCommand()));
 
 static cl::opt<std::string> ExpectedFile(
     "expected",
     cl::desc("Path to .expected file for micro benchmark evaluation"),
-    cl::init(""));
+    cl::init(""),
+    cl::sub(lotus::checker::tooling::taintSubCommand()));
 
 static cl::opt<bool> PrintStats("print-stats",
                                 cl::desc("Print LLVM statistics"),
-                                cl::init(false));
+                                cl::init(false),
+                                cl::sub(lotus::checker::tooling::taintSubCommand()));
 
 // Helper function to parse comma-separated function names
 std::vector<std::string> parseFunctionList(const std::string &input) {
@@ -162,11 +173,7 @@ lotus::AAConfig parseAliasAnalysisConfig(const std::string &aaTypeStr) {
   return lotus::parseAAConfigFromString(aaTypeStr, lotus::AAConfig::DyckAA());
 }
 
-int main(int argc, char **argv) {
-  InitLLVM X(argc, argv);
-
-  cl::ParseCommandLineOptions(argc, argv, "LLVM IFDS/IDE Analysis Tool\n");
-
+int runTaintCheckerTool(const char *argv0) {
   // Enable statistics collection if requested
   if (PrintStats) {
     llvm::EnableStatistics();
@@ -179,7 +186,7 @@ int main(int argc, char **argv) {
   // Load the input module
   std::unique_ptr<Module> M = parseIRFile(InputFilename, Err, Context);
   if (!M) {
-    Err.print(argv[0], errs());
+    Err.print(argv0, errs());
     return 1;
   }
 

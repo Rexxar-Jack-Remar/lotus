@@ -12,7 +12,7 @@ feasible execution, rather than trying to prove all executions safe.
 
 **Tool Location**: ``tools/checker/lotus_pulse.cpp``
 
-**Build Target**: ``lotus-pulse``
+**Frontend**: ``lotus-check pulse``
 
 Overview
 --------
@@ -127,7 +127,7 @@ Basic usage:
 
 .. code-block:: bash
 
-   ./build/bin/lotus-pulse input.bc
+   ./build/bin/lotus-check pulse input.bc
 
 Common options:
 
@@ -143,7 +143,7 @@ Example:
 
 .. code-block:: bash
 
-   ./build/bin/lotus-pulse --log-level=debug --json-output=report.json input.bc
+   ./build/bin/lotus-check pulse input.bc --log-level=debug --json-output=report.json
 
 Programmatic Usage
 ------------------
