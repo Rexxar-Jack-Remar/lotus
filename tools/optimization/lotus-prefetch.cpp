@@ -4,7 +4,7 @@
  * lib/Optimization/Prefetch.
  */
 
-#include "Optimization/Prefetch/Internal.h"
+#include "Optimization/Prefetch/PrefetchHints.h"
 
 #include <memory>
 #include <string>

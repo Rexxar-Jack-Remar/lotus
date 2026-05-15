@@ -35,7 +35,7 @@ Main Components
 CTPass
 ~~~~~~
 
-**Files**: ``ctllvm.cpp``, ``ctllvm.h``
+**Files**: ``ConstantTimePass.cpp``, ``ConstantTimePass.h``
 
 ``CTPass`` is the public pass entry point for the subsystem.
 
@@ -49,7 +49,7 @@ CTPass
 Core Analysis
 ~~~~~~~~~~~~~
 
-**File**: ``ctllvm_analysis.cpp``
+**File**: ``ConstantTimeAnalysis.cpp``
 
 Implements taint propagation and leak detection inside analyzed code.
 
@@ -63,7 +63,7 @@ Implements taint propagation and leak detection inside analyzed code.
 Inlining and Soundness
 ~~~~~~~~~~~~~~~~~~~~~~
 
-**File**: ``ctllvm_inlining.cpp``
+**File**: ``ConstantTimeInlining.cpp``
 
 Provides recursive inlining support used by the more aggressive analysis mode.
 Inlining is used to expose interprocedural flows that would otherwise be hidden
@@ -74,9 +74,9 @@ Targets and Reporting
 
 **Files**:
 
-- ``ctllvm_targets.cpp``
-- ``ctllvm_debug_info.cpp``
-- ``ctllvm_reporting.cpp``
+- ``ConstantTimeTargets.cpp``
+- ``ConstantTimeDebugInfo.cpp``
+- ``ConstantTimeReporting.cpp``
 
 These files handle source/target selection, debug-info-based lookup, report
 generation, statistics, and source-location rendering.
@@ -126,7 +126,7 @@ The pass can be added to an LLVM pass pipeline:
 
 .. code-block:: cpp
 
-   #include <Security/ConstantTime/ctllvm.h>
+   #include <Security/ConstantTime/ConstantTimePass.h>
 
    llvm::ModulePassManager MPM;
    MPM.addPass(CTPass());

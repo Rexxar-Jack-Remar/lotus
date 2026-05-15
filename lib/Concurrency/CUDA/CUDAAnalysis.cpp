@@ -1,6 +1,6 @@
 #include "Concurrency/CUDA/CUDAAnalysis.h"
 
-#include "CUDAAnalysisInternal.h"
+#include "Concurrency/CUDA/CUDAAnalysisHelpers.h"
 
 #include <algorithm>
 #include <cmath>

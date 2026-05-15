@@ -1,8 +1,8 @@
 /*
- * Debug-info helpers for the ctllvm pass.
+ * Debug-info helpers for the constant-time analysis pass.
  */
 
-#include "Security/ConstantTime/CTInternal.h"
+#include "Security/ConstantTime/ConstantTimeAnalysisSupport.h"
 
 using namespace llvm;
 

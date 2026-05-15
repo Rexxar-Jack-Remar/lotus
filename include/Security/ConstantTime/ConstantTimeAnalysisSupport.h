@@ -6,7 +6,7 @@
 
 #define LLVM_ENABLE_DUMP
 
-#include "Security/ConstantTime/ctllvm.h"
+#include "Security/ConstantTime/ConstantTimePass.h"
 
 #include "llvm/ADT/ArrayRef.h"
 #include "llvm/ADT/SetVector.h"

@@ -1,9 +1,9 @@
 set(ConstantTimeVerify_SOURCES
-  ctllvm.cpp
-  ctllvm_analysis.cpp
-  ctllvm_debug_info.cpp
-  ctllvm_inlining.cpp
-  ctllvm_reporting.cpp
-  ctllvm_targets.cpp
+  ConstantTimePass.cpp
+  ConstantTimeAnalysis.cpp
+  ConstantTimeDebugInfo.cpp
+  ConstantTimeInlining.cpp
+  ConstantTimeReporting.cpp
+  ConstantTimeTargets.cpp
 )
 add_library(ConstantTimeVerify STATIC ${ConstantTimeVerify_SOURCES})

@@ -1,5 +1,5 @@
-#include "CUDAAnalysisInternal.h"
 #include "Concurrency/CUDA/CUDAAnalysis.h"
+#include "Concurrency/CUDA/CUDAAnalysisHelpers.h"
 #include "Concurrency/CUDA/CUDAFunctionSummary.h"
 #include "Concurrency/CUDA/CUDAKernelProtocolAnalysis.h"
 #include "Concurrency/CUDA/CUDAParticipantAnalysis.h"

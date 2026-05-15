@@ -1,5 +1,5 @@
 /**
- * @file ctllvm.h
+ * @file ConstantTimePass.h
  * @brief Public interface for the CT-LLVM constant-time analysis pass.
  */
 

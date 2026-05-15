@@ -1,10 +1,10 @@
 /*
- * Public pass entrypoints and plugin registration for the ctllvm pass.
+ * Public pass entrypoints and plugin registration for the constant-time analysis pass.
  */
 
-#include "Security/ConstantTime/ctllvm.h"
+#include "Security/ConstantTime/ConstantTimePass.h"
 
-#include "Security/ConstantTime/CTInternal.h"
+#include "Security/ConstantTime/ConstantTimeAnalysisSupport.h"
 
 #include "llvm/Passes/PassBuilder.h"
 #include "llvm/Transforms/Utils/Mem2Reg.h"

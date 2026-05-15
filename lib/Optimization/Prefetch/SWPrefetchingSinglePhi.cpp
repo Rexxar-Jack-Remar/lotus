@@ -1,7 +1,7 @@
 #include "llvm/IR/IRBuilder.h"
 #include "llvm/IR/Intrinsics.h"
 
-#include "Optimization/Prefetch/Internal.h"
+#include "Optimization/Prefetch/PrefetchHints.h"
 
 #include <algorithm>
 

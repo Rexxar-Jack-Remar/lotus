@@ -7,22 +7,22 @@ cache, branch, and variable-timing leaks.
 
 ## Public entrypoints
 
-- Header: `Security/ConstantTime/ctllvm.h`
+- Header: `Security/ConstantTime/ConstantTimePass.h`
 - Pass type: `CTPass`
 - Pipeline name: `ctllvm`
 - Plugin registration: `getPassPluginInfo()` and `llvmGetPassPluginInfo()`
 
 ## Internal layout
 
-- `ctllvm.cpp`: public pass facade and plugin registration
-- `ctllvm_analysis.cpp`: core taint propagation and leak detection
-- `ctllvm_inlining.cpp`: cloning and recursive inlining helpers
-- `ctllvm_targets.cpp`: target/declassification selection and debug-info-based
+- `ConstantTimePass.cpp`: public pass facade and plugin registration
+- `ConstantTimeAnalysis.cpp`: core taint propagation and leak detection
+- `ConstantTimeInlining.cpp`: cloning and recursive inlining helpers
+- `ConstantTimeTargets.cpp`: target/declassification selection and debug-info-based
   source matching
-- `ctllvm_debug_info.cpp`: internal debug metadata lookup helpers
-- `ctllvm_reporting.cpp`: JSON summaries, source printing, and statistics
-- `CTInternal.h`: private implementation declarations shared by the `.cpp`
-  files
+- `ConstantTimeDebugInfo.cpp`: internal debug metadata lookup helpers
+- `ConstantTimeReporting.cpp`: JSON summaries, source printing, and statistics
+- `ConstantTimeAnalysisSupport.h`: private analysis support declarations shared
+  by the `.cpp` files
 
 ## Default options
 

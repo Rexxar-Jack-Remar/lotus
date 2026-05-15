@@ -1,4 +1,4 @@
-#include "MKintInternal.h"
+#include "Checker/KINT/MKintAnalysisSupport.h"
 
 #include "Checker/KINT/Log.h"
 #include "Checker/KINT/Options.h"

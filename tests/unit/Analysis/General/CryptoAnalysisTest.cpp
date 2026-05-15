@@ -1,4 +1,4 @@
-#include "Security/ConstantTime/ctllvm.h"
+#include "Security/ConstantTime/ConstantTimePass.h"
 
 #include "TestUtils/LLVMHelpers.h"
 

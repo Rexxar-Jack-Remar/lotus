@@ -13,7 +13,7 @@
 #ifndef JOIN_TARGET_ANALYSIS_H
 #define JOIN_TARGET_ANALYSIS_H
 
-#include "Concurrency/JoinTarget/JoinTargetInternal.h"
+#include "Concurrency/JoinTarget/JoinTargetState.h"
 #include "Concurrency/Utils/ThreadAPI.h"
 #include "Concurrency/Utils/ThreadMultiplicity.h"
 

@@ -2,7 +2,7 @@
 #include "llvm/IR/Intrinsics.h"
 #include "llvm/Transforms/Utils/ValueMapper.h"
 
-#include "Optimization/Prefetch/Internal.h"
+#include "Optimization/Prefetch/PrefetchHints.h"
 
 #include <algorithm>
 #include <vector>

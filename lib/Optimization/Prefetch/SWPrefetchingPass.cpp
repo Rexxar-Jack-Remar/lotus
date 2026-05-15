@@ -7,7 +7,7 @@
 #include "llvm/Support/CommandLine.h"
 #include "llvm/Support/raw_ostream.h"
 
-#include "Optimization/Prefetch/Internal.h"
+#include "Optimization/Prefetch/PrefetchHints.h"
 
 namespace llvm {
 

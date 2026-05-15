@@ -1,7 +1,7 @@
 #include "Concurrency/LockSet/LockSetAnalysis.h"
 
 #include "Alias/Infrastructure/AliasAnalysisWrapper/AliasAnalysisWrapper.h"
-#include "Concurrency/LockSet/LockSetAnalysisInternal.h"
+#include "Concurrency/LockSet/LockSetAnalysisSupport.h"
 
 #include <queue>
 #include <set>

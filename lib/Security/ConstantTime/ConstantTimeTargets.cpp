@@ -1,8 +1,8 @@
 /*
- * Taint-source and declassification selection for the ctllvm pass.
+ * Taint-source and declassification selection for the constant-time analysis pass.
  */
 
-#include "Security/ConstantTime/CTInternal.h"
+#include "Security/ConstantTime/ConstantTimeAnalysisSupport.h"
 
 using namespace llvm;
 

@@ -1,4 +1,4 @@
-#include "Optimization/Prefetch/Internal.h"
+#include "Optimization/Prefetch/PrefetchHints.h"
 
 #include <algorithm>
 #include <cassert>

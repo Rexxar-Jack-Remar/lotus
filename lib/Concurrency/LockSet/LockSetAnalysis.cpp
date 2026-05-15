@@ -16,7 +16,7 @@
  */
 
 #include "Concurrency/LockSet/LockSetAnalysis.h"
-#include "Concurrency/LockSet/LockSetAnalysisInternal.h"
+#include "Concurrency/LockSet/LockSetAnalysisSupport.h"
 
 #include "Alias/Infrastructure/AliasAnalysisWrapper/AliasAnalysisWrapper.h"
 

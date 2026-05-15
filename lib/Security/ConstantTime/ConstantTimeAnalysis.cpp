@@ -1,8 +1,8 @@
 /*
- * Core taint and alias analysis for the ctllvm pass.
+ * Core taint and alias analysis for the constant-time analysis pass.
  */
 
-#include "Security/ConstantTime/CTInternal.h"
+#include "Security/ConstantTime/ConstantTimeAnalysisSupport.h"
 
 #include "llvm/IR/InstIterator.h"
 #include "llvm/IR/Instructions.h"

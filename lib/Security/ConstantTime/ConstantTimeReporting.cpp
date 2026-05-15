@@ -1,8 +1,8 @@
 /*
- * Reporting and statistics helpers for the ctllvm pass.
+ * Reporting and statistics helpers for the constant-time analysis pass.
  */
 
-#include "Security/ConstantTime/CTInternal.h"
+#include "Security/ConstantTime/ConstantTimeAnalysisSupport.h"
 
 #include "llvm/Support/raw_ostream.h"
 
