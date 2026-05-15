@@ -7,7 +7,7 @@ DFPA
 
 **Implementation**: ``lib/Alias/Specialized/DFPA/``
 
-**Tool**: ``dfpa`` in ``tools/alias/dfpa.cpp``
+**Tool**: ``dfpa`` frontend currently not present in ``tools/alias/`` in this tree
 
 Overview
 --------

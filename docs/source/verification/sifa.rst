@@ -7,7 +7,7 @@ Sifa stands for Symbolic Interpretation with Fluid Abstractions.
 
 **Implementation**: ``lib/Verification/Sifa/``
 
-**Tool**: ``sifa`` in ``tools/verifier/sifa/sifa.cpp``
+**Tool**: ``sifa`` in ``tools/verifier/sifa/lotus-verify-sifa.cpp``
 
 Overview
 --------

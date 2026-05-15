@@ -1,3 +1,3 @@
 # Run an IFDS Analysis
 
-Please refer to tools/checker/lotus_taint.cpp
+Please refer to tools/checker/lotus-check-taint.cpp

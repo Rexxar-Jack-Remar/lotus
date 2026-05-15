@@ -97,14 +97,14 @@ Build Targets
 * ``FiTxChecker`` – FiTx typestate-based bug checker library
 * ``PulseChecker`` – Pulse biabductive analysis checker library
 * ``lotus-check`` – Unified checker frontend
-* ``tools/checker/lotus_ae.cpp`` – AE subcommand runner
-* ``tools/checker/lotus_fitx.cpp`` – FiTx subcommand runner
-* ``tools/checker/lotus_kint.cpp`` – KINT subcommand runner
-* ``tools/checker/lotus_concur.cpp`` – Concurrency subcommand runner
-* ``tools/checker/lotus_pulse.cpp`` – Pulse subcommand runner
-* ``tools/checker/lotus_saber.cpp`` – Saber subcommand runner
-* ``tools/checker/lotus_symex.cpp`` – Symbolic-execution subcommand runner
-* ``tools/checker/lotus_taint.cpp`` – Taint-analysis subcommand runner
+* ``tools/checker/lotus-check-ae.cpp`` – AE subcommand runner
+* ``tools/checker/lotus-check-fitx.cpp`` – FiTx subcommand runner
+* ``tools/checker/lotus-check-kint.cpp`` – KINT subcommand runner
+* ``tools/checker/lotus-check-concur.cpp`` – Concurrency subcommand runner
+* ``tools/checker/lotus-check-pulse.cpp`` – Pulse subcommand runner
+* ``tools/checker/lotus-check-saber.cpp`` – Saber subcommand runner
+* ``tools/checker/lotus-check-symex.cpp`` – Symbolic-execution subcommand runner
+* ``tools/checker/lotus-check-taint.cpp`` – Taint-analysis subcommand runner
 
 Usage
 -----

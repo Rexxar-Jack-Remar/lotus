@@ -40,9 +40,9 @@ Use `build/bin/lotus-check --help` or
 | `concur` | Concurrency checker | Detects races, deadlocks, atomicity issues, condvar misuse, lock mismatches, and OpenMP/MPI bugs. |
 | `pulse` | Pulse-inspired bug finder | Biabductive analysis with optional SMT disabling via `--no-smt`; can emit JSON findings. |
 | `fitx` | FiTx multi-checker driver | Runs FiTx detectors such as `df`, `dl`, `dul`, `leak`, `nullptr`, `uaf`, `ubi`, and reference-count checkers. |
-| `saber` | Source-sink bug checker | Runs memory leak, double-free, and file-descriptor leak checks; defaults to leak checking when no specific checker is selected. Implemented by `tools/checker/lotus_saber.cpp`. |
-| `ae` | Abstract-execution checker | Covers overflow, null dereference, use-after-free, invalid free, and memory leak detection. Implemented by `tools/checker/lotus_ae.cpp`. |
-| `symex` | Symbolic-execution checker | Runs the `lib/Analysis/SymbolicExecution` engine on GVFG/LotusAA and emits path-sensitive bug reports. Implemented by `tools/checker/lotus_symex.cpp`. |
+| `saber` | Source-sink bug checker | Runs memory leak, double-free, and file-descriptor leak checks; defaults to leak checking when no specific checker is selected. Implemented by `tools/checker/lotus-check-saber.cpp`. |
+| `ae` | Abstract-execution checker | Covers overflow, null dereference, use-after-free, invalid free, and memory leak detection. Implemented by `tools/checker/lotus-check-ae.cpp`. |
+| `symex` | Symbolic-execution checker | Runs the `lib/Analysis/SymbolicExecution` engine on GVFG/LotusAA and emits path-sensitive bug reports. Implemented by `tools/checker/lotus-check-symex.cpp`. |
 
 ## Common workflows
 

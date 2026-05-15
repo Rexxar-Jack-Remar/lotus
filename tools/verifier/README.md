@@ -35,6 +35,8 @@ Several verifier families are optional:
 instruction-level transfer semantics or the SMT-backed SymbolicAbstraction
 backend.
 
+Implementation: `tools/verifier/sifa/lotus-verify-sifa.cpp`
+
 ```bash
 build/bin/sifa input.bc --function main --abstract-domain Interval
 build/bin/sifa input.bc --symabs --abstract-domain Octagon --reachability
@@ -46,6 +48,8 @@ See `tools/verifier/sifa/README.md` for detailed options.
 
 `symabs_ai` is a configurable abstract-interpretation frontend with pluggable
 domains and configuration files.
+
+Implementation: `tools/verifier/symabs-ai/lotus-verify-symabs-ai.cpp`
 
 ```bash
 build/bin/symabs_ai --list-domains

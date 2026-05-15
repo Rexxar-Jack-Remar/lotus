@@ -1,4 +1,4 @@
-//===- lotus_saber.cpp -- Source-sink bug checker (Saber) ------------------//
+//===- lotus-check-saber.cpp -- Source-sink bug checker (Saber) ------------//
 //
 // Lotus tool for memory leak, double-free, and file descriptor checks.
 // Mirrors SVF's saber tool; uses Saber engine on Lotus SVFG.

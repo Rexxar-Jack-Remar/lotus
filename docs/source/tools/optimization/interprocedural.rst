@@ -10,7 +10,7 @@ Tool
 ----
 
 - **Binary**: ``lotus-ipo``
-- **Source**: ``tools/optimization/lotus-ipo.cpp``
+- **Source**: ``tools/optimization/lotus-opt-ipo.cpp``
 - **Selection flags**: ``-ipdse``, ``-ip-rle``, ``-ip-sink``, ``-ip-forward``,
   or ``-ip-all`` to run all of them.
 

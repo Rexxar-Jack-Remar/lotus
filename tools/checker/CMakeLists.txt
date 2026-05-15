@@ -7,15 +7,15 @@ llvm_map_components_to_libnames(LLVM_LINK_COMPONENTS
 )
 
 add_executable(lotus-check
-  lotus_check.cpp
-  lotus_kint.cpp
-  lotus_taint.cpp
-  lotus_concur.cpp
-  lotus_pulse.cpp
-  lotus_fitx.cpp
-  lotus_saber.cpp
-  lotus_ae.cpp
-  lotus_symex.cpp
+  lotus-check-generic.cpp
+  lotus-check-kint.cpp
+  lotus-check-taint.cpp
+  lotus-check-concur.cpp
+  lotus-check-pulse.cpp
+  lotus-check-fitx.cpp
+  lotus-check-saber.cpp
+  lotus-check-ae.cpp
+  lotus-check-symex.cpp
 )
 
 target_link_libraries(lotus-check PRIVATE

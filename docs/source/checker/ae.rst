@@ -7,7 +7,7 @@ The ``AE`` subsystem provides abstract-execution-based bug detection.
 
 **Implementation**: ``lib/Checker/AE/``
 
-**Frontend**: ``lotus-check ae`` implemented by ``tools/checker/lotus_ae.cpp``
+**Frontend**: ``lotus-check ae`` implemented by ``tools/checker/lotus-check-ae.cpp``
 
 Overview
 --------

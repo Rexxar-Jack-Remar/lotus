@@ -7,7 +7,7 @@ Static analysis tool for detecting numerical bugs: integer overflow, division by
 
 **Headers**: ``include/Checker/KINT/``
 
-**Tool Location**: ``tools/checker/lotus_kint.cpp``
+**Tool Location**: ``tools/checker/lotus-check-kint.cpp``
 
 **Frontend**: ``lotus-check kint``
 

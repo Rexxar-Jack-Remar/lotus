@@ -5,7 +5,7 @@ This page documents the ``sifa`` verifier front-end in ``tools/verifier/sifa/``.
 
 **Binary**: ``sifa``
 
-**Source**: ``tools/verifier/sifa/sifa.cpp``
+**Source**: ``tools/verifier/sifa/lotus-verify-sifa.cpp``
 
 Overview
 --------

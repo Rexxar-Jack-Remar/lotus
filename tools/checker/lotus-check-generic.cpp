@@ -22,39 +22,91 @@
 
 using namespace llvm;
 
+static cl::OptionCategory GenericSelectionCategory(
+    "Generic Checker Selection Options",
+    "Options for selecting registry-backed declarative checkers");
+static cl::OptionCategory GenericExecutionCategory(
+    "Generic Checker Execution Options",
+    "Options for running the generic declarative checker driver");
+
 static cl::opt<std::string> InputFilename(
-    cl::Positional, cl::desc("<input bitcode file>"), cl::init(""),
+    cl::Positional, cl::desc("<input bitcode file>"), cl::value_desc("bitcode"),
+    cl::init(""), cl::cat(GenericExecutionCategory),
     cl::sub(*cl::TopLevelSubCommand),
     cl::sub(lotus::checker::tooling::genericSubCommand()));
 static cl::opt<bool>
     ListCheckers("list-checkers",
-                 cl::desc("List registered checker specs and exit"),
+                 cl::desc("List available checker ids and exit"),
+                 cl::cat(GenericSelectionCategory),
                  cl::init(false), cl::sub(*cl::TopLevelSubCommand),
                  cl::sub(lotus::checker::tooling::genericSubCommand()));
 static cl::opt<std::string>
-    CheckerIds("checker", cl::desc("Comma-separated checker ids to run"),
-               cl::init(""), cl::sub(*cl::TopLevelSubCommand),
+    CheckerIds("checker",
+               cl::desc("Run only the given comma-separated checker ids"),
+               cl::value_desc("id[,id...]"), cl::init(""),
+               cl::cat(GenericSelectionCategory), cl::sub(*cl::TopLevelSubCommand),
                cl::sub(lotus::checker::tooling::genericSubCommand()));
 static cl::opt<std::string>
-    CategoryFilter("category", cl::desc("Run only checkers in a category"),
-                   cl::init(""), cl::sub(*cl::TopLevelSubCommand),
+    CategoryFilter("category",
+                   cl::desc("Run only checkers in the given category"),
+                   cl::value_desc("category"), cl::init(""),
+                   cl::cat(GenericSelectionCategory),
+                   cl::sub(*cl::TopLevelSubCommand),
                    cl::sub(lotus::checker::tooling::genericSubCommand()));
 static cl::opt<std::string>
-    EngineFilter("engine", cl::desc("Filter by engine kind"), cl::init(""),
+    EngineFilter("engine",
+                 cl::desc("Filter registry checkers by engine kind"),
+                 cl::value_desc("engine"), cl::init(""),
+                 cl::cat(GenericSelectionCategory),
                  cl::sub(*cl::TopLevelSubCommand),
                  cl::sub(lotus::checker::tooling::genericSubCommand()));
 static cl::opt<std::string>
     BuiltinSpecDir("spec-dir",
-                   cl::desc("Directory containing YAML checker specs"),
-                   cl::init("config/checkers"),
+                   cl::desc("Load declarative checker specs from this directory"),
+                   cl::value_desc("dir"), cl::init("config/checkers"),
+                   cl::cat(GenericExecutionCategory),
                    cl::sub(*cl::TopLevelSubCommand),
                    cl::sub(lotus::checker::tooling::genericSubCommand()));
 static cl::opt<bool> VerboseReports(
-    "v", cl::desc("Print trace and IR details for reported bugs"), cl::init(false),
+    "v", cl::desc("Include trace and IR details in printed reports"),
+    cl::init(false), cl::cat(GenericExecutionCategory),
     cl::sub(*cl::TopLevelSubCommand),
     cl::sub(lotus::checker::tooling::genericSubCommand()));
 
 namespace {
+
+bool isHelpFlag(StringRef arg) {
+  return arg == "-h" || arg == "--help" || arg == "--help-hidden" ||
+         arg == "--help-list" || arg == "--help-list-hidden";
+}
+
+bool isKnownCheckerSubcommand(StringRef arg) {
+  return arg == "generic" || arg == "kint" || arg == "taint" ||
+         arg == "concur" || arg == "pulse" || arg == "fitx" ||
+         arg == "saber" || arg == "ae" || arg == "symex";
+}
+
+std::optional<std::string> requestedSubcommand(int argc, char **argv) {
+  for (int i = 1; i < argc; ++i) {
+    StringRef arg(argv[i]);
+    if (!arg.empty() && arg[0] != '-') {
+      if (isKnownCheckerSubcommand(arg)) {
+        return arg.str();
+      }
+      return std::nullopt;
+    }
+  }
+  return std::nullopt;
+}
+
+bool helpRequested(int argc, char **argv) {
+  for (int i = 1; i < argc; ++i) {
+    if (isHelpFlag(argv[i])) {
+      return true;
+    }
+  }
+  return false;
+}
 
 std::optional<lotus::checker::EngineKind> parseEngine(StringRef engine) {
   if (engine.empty()) {
@@ -244,10 +296,22 @@ int main(int argc, char **argv) {
   llvm_shutdown_obj shutdown;
   report_options::initializeReportOptions();
 
+  const bool wants_help = helpRequested(argc, argv);
+  const auto requested_subcommand = requestedSubcommand(argc, argv);
+  if (wants_help &&
+      (!requested_subcommand || *requested_subcommand == "generic")) {
+    cl::HideUnrelatedOptions({&GenericSelectionCategory,
+                              &GenericExecutionCategory,
+                              &report_options::OutputCategory});
+  }
+
   cl::ParseCommandLineOptions(
       argc, argv,
       "Lotus checker front-end\n"
-      "  Use a subcommand such as 'ae', 'pulse', 'kint', or 'generic'.\n");
+      "  Use 'lotus-check <subcommand> --help' for engine-specific options.\n"
+      "  Example: 'lotus-check symex --help' shows Symbolic Execution options.\n"
+      "  Use the top-level or 'generic' mode for registry-backed declarative "
+      "checks.\n");
 
   if (lotus::checker::tooling::kintSubCommand()) {
     return runKintCheckerTool(argv[0]);

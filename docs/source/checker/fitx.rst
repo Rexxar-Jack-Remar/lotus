@@ -12,7 +12,7 @@ FiTx is a framework for generating **daily development-friendly bug checkers** t
 
 **Headers**: ``include/Checker/FiTx/``
 
-**Tool Location**: ``tools/checker/lotus_fitx.cpp``
+**Tool Location**: ``tools/checker/lotus-check-fitx.cpp``
 
 Overview
 --------

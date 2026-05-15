@@ -9,7 +9,7 @@ checks.
 
 **Headers**: ``include/Checker/Concurrency/``
 
-**Tool Location**: ``tools/checker/lotus_concur.cpp``
+**Tool Location**: ``tools/checker/lotus-check-concur.cpp``
 
 **Frontend**: ``lotus-check concur``
 

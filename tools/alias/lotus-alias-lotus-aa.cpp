@@ -1,5 +1,5 @@
 /*
- * LotusAA Driver
+ * lotus-alias-lotus-aa.cpp - LotusAA Driver
  * This file implements the main driver for running LotusAA pointer analysis
  * on LLVM bitcode files. It parses command-line options, loads the input
  * module, runs the LotusAA analysis pass, and outputs the results.

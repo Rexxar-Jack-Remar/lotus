@@ -8,7 +8,7 @@ llvm_map_components_to_libnames(LLVM_LINK_COMPONENTS
 )
 
 # AserPTA Pointer Analysis Tool
-add_executable(aser-aa aser-aa.cpp)
+add_executable(aser-aa lotus-alias-aser-aa.cpp)
 target_link_libraries(aser-aa PRIVATE
   AserPTA
   CanaryAliasCLIUtils
@@ -16,21 +16,21 @@ target_link_libraries(aser-aa PRIVATE
 )
 
 # Sea-DSA Memory Graph Analysis Tool
-add_executable(sea-dsa-dg sea-dsa-dg.cpp)
+add_executable(sea-dsa-dg lotus-alias-sea-dsa-dg.cpp)
 target_link_libraries(sea-dsa-dg PRIVATE
   SeaDsaAnalysis
   CanaryAliasCLIUtils
 )
 
 # Sea-DSA Advanced Analysis Tool
-add_executable(seadsa-tool seadsa-tool.cpp)
+add_executable(seadsa-tool lotus-alias-seadsa-tool.cpp)
 target_link_libraries(seadsa-tool PRIVATE
   SeaDsaAnalysis
   CanaryAliasCLIUtils
 )
 
 # FPA (Function pointer analysis) Tool
-add_executable(fpa fpa.cpp)
+add_executable(fpa lotus-alias-fpa.cpp)
 target_link_libraries(fpa PRIVATE
   CanaryFPA
   CanaryAliasCLIUtils
@@ -38,7 +38,7 @@ target_link_libraries(fpa PRIVATE
 )
 
 # DFPA (Demand-refined function pointer analysis) Tool
-# add_executable(dfpa dfpa.cpp)
+# add_executable(dfpa lotus-alias-dfpa.cpp)
 #target_link_libraries(dfpa PRIVATE
 #  CanaryDFPA
 #  AserPTA
@@ -47,7 +47,7 @@ target_link_libraries(fpa PRIVATE
 #)
 
 # LotusAA Pointer Analysis Tool
-add_executable(lotus-aa lotus-aa.cpp)
+add_executable(lotus-aa lotus-alias-lotus-aa.cpp)
 target_link_libraries(lotus-aa PRIVATE
   LotusAA
   CanaryAliasCLIUtils
@@ -55,7 +55,7 @@ target_link_libraries(lotus-aa PRIVATE
 )
 
 # Andersen's Pointer Analysis Tool
-add_executable(sparrow-aa sparrow-aa.cpp)
+add_executable(sparrow-aa lotus-alias-sparrow-aa.cpp)
 target_link_libraries(sparrow-aa PRIVATE
   Andersen
   CanaryAliasCLIUtils
@@ -63,7 +63,7 @@ target_link_libraries(sparrow-aa PRIVATE
 )
 
 # DyckAA Pointer Analysis Tool
-add_executable(dyck-aa dyck-aa.cpp)
+add_executable(dyck-aa lotus-alias-dyck-aa.cpp)
 target_link_libraries(dyck-aa PRIVATE
   CanaryDyckAA
   CanaryAliasCLIUtils
@@ -71,7 +71,7 @@ target_link_libraries(dyck-aa PRIVATE
 )
 
 # TPA (semi-sparse pointer analysis) Tool
-add_executable(tpa tpa.cpp)
+add_executable(tpa lotus-alias-tpa.cpp)
 target_link_libraries(tpa PRIVATE
   FSCSPointerAnalysis
   TPATransforms
@@ -81,7 +81,7 @@ target_link_libraries(tpa PRIVATE
 )
 
 # Call Graph Construction Tool
-add_executable(call-graph call-graph.cpp)
+add_executable(call-graph lotus-alias-call-graph.cpp)
 target_link_libraries(call-graph PRIVATE
   CanaryDyckAA
   LotusAA

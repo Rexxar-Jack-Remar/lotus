@@ -10,7 +10,7 @@ Tool
 ----
 
 - **Binary**: ``lotus-prefetch``
-- **Source**: ``tools/optimization/lotus-prefetch.cpp``
+- **Source**: ``tools/optimization/lotus-opt-prefetch.cpp``
 - **Pass**: ``SWPrefetchingLLVMPass``
 
 Example:

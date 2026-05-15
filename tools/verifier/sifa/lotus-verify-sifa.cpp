@@ -1,4 +1,4 @@
-// Sifa (Symbolic Interpretation with Fluid Abstractions) verifier tool.
+// lotus-verify-sifa.cpp - Sifa (Symbolic Interpretation with Fluid Abstractions) verifier tool.
 // ./build/bin/sifa tmp/sifa-demo/loop.bc --log-level=progress --symabs
 //  Build bitcode without optnone so mem2reg can promote allocas to SSA
 

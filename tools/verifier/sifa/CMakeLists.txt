@@ -1,6 +1,6 @@
 # Sifa (Symbolic Interpretation with Fluid Abstractions) verifier tool
 
-add_executable(sifa sifa.cpp)
+add_executable(sifa lotus-verify-sifa.cpp)
 
 target_link_libraries(sifa PRIVATE
   SifaAnalysis

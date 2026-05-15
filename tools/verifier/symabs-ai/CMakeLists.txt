@@ -1,6 +1,6 @@
 # SymAbsAI analysis tool
 
-add_executable(symabs_ai spranalyze.cpp)
+add_executable(symabs_ai lotus-verify-symabs-ai.cpp)
 
 llvm_map_components_to_libnames(symabs_ai_tool_llvm_libs
     core irreader bitreader)

@@ -16,7 +16,7 @@ The current IR tool binary is emitted under `build/bin/`.
 
 | Tool | Purpose | Notes |
 | --- | --- | --- |
-| `pdg-query` | Query the Program Dependence Graph | Supports Cypher-style queries, slicing, chopping, shortest paths, summaries, resource-flow queries, and multiple output formats. |
+| `pdg-query` | Query the Program Dependence Graph | Implemented by `tools/ir/lotus-ir-pdg-query.cpp`; supports Cypher-style queries, slicing, chopping, shortest paths, summaries, resource-flow queries, and multiple output formats. |
 
 ## Typical usage
 

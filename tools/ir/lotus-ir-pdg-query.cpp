@@ -1,5 +1,5 @@
 /**
- * @file pdg-query.cpp
+ * @file lotus-ir-pdg-query.cpp
  * @brief Command-line tool for querying Program Dependence Graphs.
  */
 

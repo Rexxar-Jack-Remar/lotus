@@ -64,6 +64,9 @@ Program Dependence Graph
 
    ./build/bin/pdg-query example.bc               # Query PDG
 
+The PDG query frontend is implemented in
+``tools/ir/lotus-ir-pdg-query.cpp``.
+
 
 Dynamic Validation
 ------------------

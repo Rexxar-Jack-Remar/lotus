@@ -1,8 +1,8 @@
-// SymAbsAI static analysis tool
+// lotus-verify-symabs-ai.cpp - SymAbsAI static analysis tool
 #include "Verification/SymAbsAI/Core/Engine/Analyzer.h"
-#include "Verification/SymAbsAI/Core/Integration/Checks.h"
 #include "Verification/SymAbsAI/Core/Foundation/DomainConstructor.h"
 #include "Verification/SymAbsAI/Core/Foundation/FragmentDecomposition.h"
+#include "Verification/SymAbsAI/Core/Integration/Checks.h"
 #include "Verification/SymAbsAI/Core/Integration/FunctionContext.h"
 #include "Verification/SymAbsAI/Core/Integration/ModuleContext.h"
 #include "Verification/SymAbsAI/Utils/Config.h"

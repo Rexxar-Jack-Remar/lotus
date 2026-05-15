@@ -8,7 +8,7 @@ and value-flow graphs.
 
 **Implementation**: ``lib/Checker/Saber/``
 
-**Frontend**: ``lotus-check saber`` implemented by ``tools/checker/lotus_saber.cpp``
+**Frontend**: ``lotus-check saber`` implemented by ``tools/checker/lotus-check-saber.cpp``
 
 Overview
 --------

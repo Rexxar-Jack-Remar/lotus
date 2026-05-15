@@ -37,7 +37,7 @@ to provide a flexible interface for designing program analyses in a
 compositional way.
 
 **Binary**: ``symabs_ai``
-**Location**: ``tools/verifier/symabs-ai/``
+**Source**: ``tools/verifier/symabs-ai/lotus-verify-symabs-ai.cpp``
 
 **Quick Start**:
 
@@ -58,7 +58,7 @@ Sifa is a symbolic-interpretation verifier with configurable abstract domains
 and optional SymAbs-backed reasoning.
 
 **Binary**: ``sifa``
-**Location**: ``tools/verifier/sifa/``
+**Source**: ``tools/verifier/sifa/lotus-verify-sifa.cpp``
 
 **Quick Start**:
 

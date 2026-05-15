@@ -15,10 +15,10 @@ The binaries are written to `build/bin/`.
 
 | Tool | Purpose | Notes |
 | --- | --- | --- |
-| `lotus-ipo` | Driver for Lotus interprocedural IPO passes | Runs the MemorySSA/ShadowMem-backed passes in `lib/Optimization/IPO`. |
-| `lotus-lif` | Driver for the migrated LIF isochronous transform | Implemented under the unified `Security/LIF` subsystem and currently built against Lotus's LLVM 14 toolchain. |
-| `lotus-purity` | Purity inference and summary workflow driver | Automatically prepares SeaDsa/ShadowMem-backed MemorySSA unless `--disable-memoryssa-prep` is passed; defaults that prep to `--sea-dsa=ci` for robustness, but accepts an explicit `--sea-dsa=...` override. |
-| `lotus-prefetch` | Driver for Lotus software prefetch passes | Runs the software prefetching pass in `lib/Optimization/Prefetch`. |
+| `lotus-ipo` | Driver for Lotus interprocedural IPO passes | Implemented by `tools/optimization/lotus-opt-ipo.cpp`; runs the MemorySSA/ShadowMem-backed passes in `lib/Optimization/IPO`. |
+| `lotus-lif` | Driver for the migrated LIF isochronous transform | Implemented by `tools/optimization/lotus-opt-lif.cpp` under the unified `Security/LIF` subsystem and currently built against Lotus's LLVM 14 toolchain. |
+| `lotus-purity` | Purity inference and summary workflow driver | Implemented by `tools/optimization/lotus-opt-purity.cpp`; automatically prepares SeaDsa/ShadowMem-backed MemorySSA unless `--disable-memoryssa-prep` is passed; defaults that prep to `--sea-dsa=ci` for robustness, but accepts an explicit `--sea-dsa=...` override. |
+| `lotus-prefetch` | Driver for Lotus software prefetch passes | Implemented by `tools/optimization/lotus-opt-prefetch.cpp`; runs the software prefetching pass in `lib/Optimization/Prefetch`. |
 
 ## Input and output
 

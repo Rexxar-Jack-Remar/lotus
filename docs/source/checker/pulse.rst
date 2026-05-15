@@ -10,7 +10,7 @@ feasible execution, rather than trying to prove all executions safe.
 
 **Headers**: ``include/Checker/Pulse/``
 
-**Tool Location**: ``tools/checker/lotus_pulse.cpp``
+**Tool Location**: ``tools/checker/lotus-check-pulse.cpp``
 
 **Frontend**: ``lotus-check pulse``
 

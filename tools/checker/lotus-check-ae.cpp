@@ -1,4 +1,4 @@
-//===- lotus_ae.cpp -- Abstract Execution Bug Checker --------------//
+//===- lotus-check-ae.cpp -- Abstract Execution Bug Checker --------//
 //
 // Lotus tool for buffer overflow and null pointer dereference detection
 // using Abstract Execution. Migrated from SVF's AE engine.

@@ -5,8 +5,8 @@ SymAbsAI is a framework for static program analysis using symbolic abstraction
 to provide a flexible interface for designing program analyses in a
 compositional way.
 
-**Binary**: ``symabs_ai`` (also ``spranalyze``)  
-**Location**: ``tools/verifier/symabs-ai/``
+**Binary**: ``symabs_ai``  
+**Source**: ``tools/verifier/symabs-ai/lotus-verify-symabs-ai.cpp``
 
 For the underlying framework and API documentation, see :doc:`../../../verification/symabs-ai`.
 

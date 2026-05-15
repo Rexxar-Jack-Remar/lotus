@@ -10,7 +10,7 @@ SparrowAA (sparrow-aa)
 Inclusion-based points-to analysis (flow-insensitive, context-insensitive, context-sensitive).
 
 **Binary**: ``sparrow-aa``  
-**Location**: ``tools/alias/sparrow-aa.cpp``
+**Location**: ``tools/alias/lotus-alias-sparrow-aa.cpp``
 
 **Usage**:
 
@@ -32,7 +32,7 @@ Flow- and context-sensitive pointer analysis using semi-sparse representation
 with k-limiting support.
 
 **Binary**: ``tpa``  
-**Location**: ``tools/alias/tpa.cpp``
+**Location**: ``tools/alias/lotus-alias-tpa.cpp``
 
 **Usage**:
 
@@ -79,7 +79,7 @@ High-performance constraint-based pointer analysis with multiple context
 sensitivities and solver algorithms.
 
 **Binary**: ``aser-aa``  
-**Location**: ``tools/alias/aser-aa.cpp``
+**Location**: ``tools/alias/lotus-alias-aser-aa.cpp``
 
 **Usage**:
 
@@ -122,7 +122,7 @@ DFPA (dfpa)
 Demand-refined function-pointer analysis for indirect-call resolution.
 
 **Binary**: ``dfpa``
-**Location**: ``tools/alias/dfpa.cpp``
+**Location**: historical frontend removed from the current tree
 
 **Usage**:
 
@@ -146,7 +146,7 @@ Unified call-graph construction tool that can drive several underlying pointer
 or call-graph analyses.
 
 **Binary**: ``call-graph``
-**Location**: ``tools/alias/call-graph.cpp``
+**Location**: ``tools/alias/lotus-alias-call-graph.cpp``
 
 **Usage**:
 
@@ -168,7 +168,7 @@ DyckAA (dyck-aa)
 Unification-based alias analysis using Dyck-CFL reachability.
 
 **Binary**: ``dyck-aa``  
-**Location**: ``tools/alias/dyck-aa.cpp``
+**Location**: ``tools/alias/lotus-alias-dyck-aa.cpp``
 
 **Usage**:
 
@@ -197,7 +197,7 @@ Lotus-specific, flow-sensitive and field-sensitive pointer analysis with
 on-the-fly call graph construction.
 
 **Binary**: ``lotus-aa``  
-**Location**: ``tools/alias/lotus-aa.cpp``
+**Location**: ``tools/alias/lotus-alias-lotus-aa.cpp``
 
 **Usage**:
 
@@ -218,7 +218,7 @@ Function pointer analysis toolbox (FLTA, MLTA, MLTADF, KELP) for resolving
 indirect calls.
 
 **Binary**: ``fpa``  
-**Location**: ``tools/alias/fpa.cpp``
+**Location**: ``tools/alias/lotus-alias-fpa.cpp``
 
 **Usage**:
 
@@ -258,8 +258,8 @@ Sea-DSA-based memory graph construction and analysis.
 
 **Locations**:
 
-- ``tools/alias/sea-dsa-dg.cpp``
-- ``tools/alias/seadsa-tool.cpp``
+- ``tools/alias/lotus-alias-sea-dsa-dg.cpp``
+- ``tools/alias/lotus-alias-seadsa-tool.cpp``
 
 **Usage**:
 

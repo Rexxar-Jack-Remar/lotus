@@ -17,15 +17,15 @@ Lotus now builds a single checker binary:
 
 The subcommand runners live in:
 
-* ``tools/checker/lotus_check.cpp``
-* ``tools/checker/lotus_kint.cpp``
-* ``tools/checker/lotus_ae.cpp``
-* ``tools/checker/lotus_taint.cpp``
-* ``tools/checker/lotus_concur.cpp``
-* ``tools/checker/lotus_pulse.cpp``
-* ``tools/checker/lotus_fitx.cpp``
-* ``tools/checker/lotus_saber.cpp``
-* ``tools/checker/lotus_symex.cpp``
+* ``tools/checker/lotus-check-generic.cpp``
+* ``tools/checker/lotus-check-kint.cpp``
+* ``tools/checker/lotus-check-ae.cpp``
+* ``tools/checker/lotus-check-taint.cpp``
+* ``tools/checker/lotus-check-concur.cpp``
+* ``tools/checker/lotus-check-pulse.cpp``
+* ``tools/checker/lotus-check-fitx.cpp``
+* ``tools/checker/lotus-check-saber.cpp``
+* ``tools/checker/lotus-check-symex.cpp``
 
 Basic Usage
 -----------

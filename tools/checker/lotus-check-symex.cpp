@@ -1,4 +1,4 @@
-//===- lotus_symex.cpp -- Symbolic Execution Bug Checker ------------------===//
+//===- lotus-check-symex.cpp -- Symbolic Execution Bug Checker ------------===//
 //
 // Lotus frontend for the SymbolicExecution engine. The tool parses LLVM IR,
 // runs the legacy SymbolicExecutionWrapper module pass, and emits findings via

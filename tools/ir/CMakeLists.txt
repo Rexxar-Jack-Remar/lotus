@@ -1,5 +1,5 @@
 add_executable(pdg-query
-  pdg-query.cpp
+  lotus-ir-pdg-query.cpp
 )
 
 target_link_libraries(pdg-query

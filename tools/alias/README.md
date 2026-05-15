@@ -37,16 +37,15 @@ Use `build/bin/<tool> --help` to see the full option set for a specific tool.
 
 | Tool | Purpose | Notes |
 | --- | --- | --- |
-| `aser-aa` | Run AserPTA pointer analysis | Inclusion-based analysis with selectable context sensitivity (`ci`, `1-cfa`, `2-cfa`, `origin`) and solver (`basic`, `wave`, `deep`). |
-| `sparrow-aa` | Run SparrowAA / Andersen analysis | Flow-insensitive subset-based analysis with configurable call-site sensitivity via `--andersen-k-cs`. |
-| `lotus-aa` | Run LotusAA | Native Lotus interprocedural pointer analysis; use `-lotus-print-pts` or `-lotus-print-cg` for detailed output. |
-| `dyck-aa` | Run DyckAA | Unification-based analysis; can print call-graph statistics with `--print-cg`. |
-| `tpa` | Run TPA | Semi-sparse, flow- and context-sensitive pointer analysis with optional prepass dumping and CFG `.dot` output. |
-| `fpa` | Run function-pointer analysis | Indirect-call target analysis with FLTA, MLTA, MLTA+DF, and KELP modes. |
-| `dfpa` | Run demand-refined FPA | Refines indirect-call targets using demand-driven analysis on top of coarse candidates. |
-| `call-graph` | Build a call graph with a selected backend | Supports `dyck`, `lotus`, `dfpa`, several `fpa-*` modes, and `aserpta-*` modes. |
-| `sea-dsa-dg` | Dump Sea-DSA memory graphs | Useful for inspecting per-function memory graphs; enable graph emission with `--sea-dsa-dot`. |
-| `seadsa-tool` | Run extended Sea-DSA utilities | Includes memory-graph dumping and other Sea-DSA related driver options. |
+| `aser-aa` | Run AserPTA pointer analysis | Implemented by `tools/alias/lotus-alias-aser-aa.cpp`; inclusion-based analysis with selectable context sensitivity (`ci`, `1-cfa`, `2-cfa`, `origin`) and solver (`basic`, `wave`, `deep`). |
+| `sparrow-aa` | Run SparrowAA / Andersen analysis | Implemented by `tools/alias/lotus-alias-sparrow-aa.cpp`; flow-insensitive subset-based analysis with configurable call-site sensitivity via `--andersen-k-cs`. |
+| `lotus-aa` | Run LotusAA | Implemented by `tools/alias/lotus-alias-lotus-aa.cpp`; native Lotus interprocedural pointer analysis, with LotusAA-specific output flags such as `-lotus-print-pts` and `-lotus-print-cg`. |
+| `dyck-aa` | Run DyckAA | Implemented by `tools/alias/lotus-alias-dyck-aa.cpp`; unification-based analysis that can print call-graph statistics with `--print-cg`. |
+| `tpa` | Run TPA | Implemented by `tools/alias/lotus-alias-tpa.cpp`; semi-sparse, flow- and context-sensitive pointer analysis with optional prepass dumping and CFG `.dot` output. |
+| `fpa` | Run function-pointer analysis | Implemented by `tools/alias/lotus-alias-fpa.cpp`; indirect-call target analysis with FLTA, MLTA, MLTA+DF, and KELP modes. |
+| `call-graph` | Build a call graph with a selected backend | Implemented by `tools/alias/lotus-alias-call-graph.cpp`; supports `dyck`, `lotus`, several `fpa-*` modes, and `aserpta-*` modes. |
+| `sea-dsa-dg` | Dump Sea-DSA memory graphs | Implemented by `tools/alias/lotus-alias-sea-dsa-dg.cpp`; useful for inspecting per-function memory graphs and enabling graph emission with `--sea-dsa-dot`. |
+| `seadsa-tool` | Run extended Sea-DSA utilities | Implemented by `tools/alias/lotus-alias-seadsa-tool.cpp`; includes memory-graph dumping and other Sea-DSA related driver options. |
 | `dynaa-instrument` | Instrument a program for dynamic alias logging | Built only with `LOTUS_ENABLE_DYNAA=ON`. |
 | `dynaa-check` | Compare dynamic logs against a static AA | Built only with `LOTUS_ENABLE_DYNAA=ON`. |
 | `dynaa-log-dump` | Decode `pts.log` files | Built only with `LOTUS_ENABLE_DYNAA=ON`. |
@@ -66,7 +65,6 @@ build/bin/tpa test.bc --k-limit=1 --print-indirect-calls
 
 ```bash
 build/bin/fpa test.bc --analysis-type=2
-build/bin/dfpa test.bc --output-file=cout
 build/bin/call-graph test.bc --cg-type=lotus --emit-cg-as-json
 ```
 
