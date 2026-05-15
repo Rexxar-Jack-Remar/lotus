@@ -7,7 +7,6 @@
 
 #include <optional>
 
-#include <gtest/gtest.h>
 #include <llvm/ADT/MapVector.h>
 #include <llvm/ADT/SetVector.h>
 #include <llvm/ADT/SmallString.h>
@@ -16,6 +15,7 @@
 #include <llvm/IR/LLVMContext.h>
 #include <llvm/IR/Module.h>
 #include <llvm/Passes/PassBuilder.h>
+#include <gtest/gtest.h>
 #include <z3++.h>
 
 using namespace llvm;
@@ -99,7 +99,10 @@ TEST_F(KINTCheckerTest, SmtMemoryPointerWidthRoundTrip) {
   kint::SmtMemory memory(ctx, 64);
   const z3::expr addr = ctx.bv_val(8, 64);
 
-  memory.storeBytes(addr, ctx.bv_val(0x1122334455667788ULL, 64), 8, true);
+  memory.storeBytes(addr,
+                    ctx.bv_val(static_cast<uint64_t>(0x1122334455667788ULL),
+                               64),
+                    8, true);
 
   EXPECT_EQ(getNumeralU64(memory.loadBytes(addr, 8, true)),
             0x1122334455667788ULL);

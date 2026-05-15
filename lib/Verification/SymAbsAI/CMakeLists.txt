@@ -43,7 +43,6 @@ set(SYMABS_AI_SOURCES
     Domains/NumRels.cpp
     Domains/SimpleConstProp.cpp
     Domains/BitMask.cpp
-    Domains/Affine.cpp
     Domains/Predicates.cpp
     Domains/Intervals.cpp
     Domains/MemRange.cpp
@@ -51,7 +50,6 @@ set(SYMABS_AI_SOURCES
     Domains/Boolean.cpp
     Domains/Congruence.cpp
     Domains/Zones.cpp
-    Domains/Octagon.cpp
 )
 
 # Create SymAbsAI library

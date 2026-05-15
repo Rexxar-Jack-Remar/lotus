@@ -128,6 +128,8 @@ int64_t Interval::getUpperBound() const {
   return Upper_;
 }
 
+// TODO: this function is needed for the @BilateralAnalyzer.cpp, but it seems not all abstract domains
+// implement this function.
 void Interval::abstractConsequence(const AbstractValue &av_other) {
   auto other = dynamic_cast<const Interval &>(av_other);
   if (Bottom_)

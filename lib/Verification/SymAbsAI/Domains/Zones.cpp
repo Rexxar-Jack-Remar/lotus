@@ -1,4 +1,5 @@
-// TODO: by LLM; to be checked.
+// TODO: by LLM; to be checked. 
+// For example, what is the precise definition of "zone domain over bit-vector semantics"
 #include "Verification/SymAbsAI/Domains/Zones.h"
 
 #include "Verification/SymAbsAI/Core/DomainConstructor.h"
@@ -9,6 +10,9 @@
 // #include "Verification/SymAbsAI/Utils/Z3APIExtension.h"
 
 #include <algorithm>
+#include <cassert>
+#include <cstdint>
+#include <cstring>
 #include <limits>
 
 #include <z3++.h>
@@ -19,6 +23,32 @@ using std::unique_ptr;
 
 static const int64_t INF = std::numeric_limits<int64_t>::max();
 static const int64_t NINF = std::numeric_limits<int64_t>::min();
+
+namespace {
+uint64_t bitMask(unsigned bw) {
+  assert(bw > 0 && bw <= 64);
+  return bw == 64 ? ~uint64_t(0) : ((uint64_t(1) << bw) - 1);
+}
+
+int64_t signedFromBitPattern(uint64_t value) {
+  int64_t result;
+  static_assert(sizeof(result) == sizeof(value), "unexpected int64_t size");
+  std::memcpy(&result, &value, sizeof(result));
+  return result;
+}
+
+int64_t signedResidue(uint64_t value, unsigned bw) {
+  value &= bitMask(bw);
+
+  if (bw < 64) {
+    uint64_t sign_bit = uint64_t(1) << (bw - 1);
+    if (value & sign_bit)
+      value |= ~bitMask(bw);
+  }
+
+  return signedFromBitPattern(value);
+}
+} // namespace
 
 bool Zone::isJoinableWith(const AbstractValue &other) const {
   if (auto *o = dynamic_cast<const Zone *>(&other))
@@ -113,9 +143,10 @@ bool Zone::meetWith(const AbstractValue &av_other) {
 }
 
 bool Zone::updateWith(const ConcreteState &cstate) {
-  int64_t left = (int64_t)cstate[Left_];
-  int64_t right = (int64_t)cstate[Right_];
-  int64_t diff = left - right;
+  unsigned bw = Fctx_.sortForType(Left_->getType()).bv_size();
+  uint64_t left = (uint64_t)cstate[Left_];
+  uint64_t right = (uint64_t)cstate[Right_];
+  int64_t diff = signedResidue(left - right, bw);
 
   if (isBottom()) {
     Bottom_ = false;

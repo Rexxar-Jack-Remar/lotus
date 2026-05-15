@@ -43,21 +43,12 @@ void collectObjectives(const FunctionContext &fctx, const ValueMapping &vmap,
     if (objectives->size() >= max_objectives)
       return;
 
-    addObjectiveIfNew(z3::bv2int(x, false), objectives, &seen);
-    if (objectives->size() >= max_objectives)
-      return;
-
-    addObjectiveIfNew(z3::bv2int(x, true), objectives, &seen);
-    if (objectives->size() >= max_objectives)
-      return;
-
     // Bit-level objectives help bitmask/congruence-like domains by forcing
     // models that witness variability/fixity of individual bits.
     unsigned bw = x.get_sort().bv_size();
     unsigned bits_to_add = std::min(max_bit_objectives_per_var, bw);
     for (unsigned bit = 0; bit < bits_to_add; ++bit) {
-      addObjectiveIfNew(z3::bv2int(x.extract(bit, bit), false), objectives,
-                        &seen);
+      addObjectiveIfNew(x.extract(bit, bit), objectives, &seen);
       if (objectives->size() >= max_objectives)
         return;
     }
@@ -71,13 +62,13 @@ void collectObjectives(const FunctionContext &fctx, const ValueMapping &vmap,
       if (vars[i].get_sort().bv_size() != vars[j].get_sort().bv_size())
         continue;
 
-      z3::expr diff = z3::bv2int(vars[i], true) - z3::bv2int(vars[j], true);
+      z3::expr diff = vars[i] - vars[j];
       addObjectiveIfNew(diff, objectives, &seen);
       if (objectives->size() >= max_objectives)
         return;
 
-      // Octagon/zone-style template.
-      z3::expr sum = z3::bv2int(vars[i], true) + z3::bv2int(vars[j], true);
+      // Octagon/zone-style template, interpreted with bit-vector wrapping.
+      z3::expr sum = vars[i] + vars[j];
       addObjectiveIfNew(sum, objectives, &seen);
       if (objectives->size() >= max_objectives)
         return;

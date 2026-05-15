@@ -6,6 +6,8 @@
     Applications (Ph.D. dissertation). Computer Sciences Department, University
     of Wisconsin, Madison.
 
+    Conference version: Bilateral algorithms for symbolic abstraction, SAS 12. Aditya Thakur, Matt Elder, Thomas Reps
+      https://thakur.cs.ucdavis.edu/assets/pubs/thakur_etal_SAS12.pdf
  * Author: rainoftime
  */
 #include "Verification/SymAbsAI/Analyzers/Analyzer.h"
@@ -42,6 +44,10 @@ bool BilateralAnalyzer::strongestConsequence(AbstractValue *result,
     vout << "*** upper ***\n" << *result << "\n";
     vout << "loop iteration: " << ++loop_count << "\n";
 
+    // `abstractConsequence` is an optional accelerator. The base
+    // implementation is a sound no-op (`p == lower`), while domains with a
+    // cheap decomposition can pick one intermediate consequence between
+    // lower and the current upper bound.
     auto p = std::unique_ptr<AbstractValue>(lower->clone());
     p->abstractConsequence(*result);
 

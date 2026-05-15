@@ -158,13 +158,27 @@ public:
   }
 
   /**
-   * Performs an inplace abstract consequnce operation.
+   * Performs an in-place abstract-consequence operation for the bilateral
+   * symbolic-abstraction algorithm.
    *
-   * With initial value `a == c` and `c < b`, the following should hold after
-   * the call `a.abstractConsequence(b)`:
+   * This is the `AbstractConsequence` hook from Thakur, Elder, and Reps,
+   * "Bilateral algorithms for symbolic abstraction" (SAS 2012). It is used
+   * only as an acceleration heuristic by BilateralAnalyzer: given a lower
+   * bound `this` and an upper bound `other`, it should replace `this` with an
+   * abstract value `p` that keeps some information from the lower bound while
+   * not being weaker than the upper bound.
+   *
+   * With initial value `a == c` and `c < b`, a nontrivial implementation
+   * should ensure after `a.abstractConsequence(b)` that:
    *      `c <= a` and `! b <= a`
    *
-   * Doing nothing is a valid abstract consequence operation.
+   * The default no-op implementation is sound and intentionally valid. It
+   * returns `p == c`, which degenerates the bilateral step to a more RSY-like
+   * refinement. Domains should override this only when they have a cheap,
+   * domain-specific way to choose one conjunct/bound/bit/relation between the
+   * lower and upper bounds. Product domains can provide most of the generic
+   * benefit by selecting a subset of component consequences, so leaf domains
+   * are not required to implement this method.
    */
   virtual void abstractConsequence(const AbstractValue &other) {
     assert(isJoinableWith(other));

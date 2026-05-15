@@ -199,7 +199,10 @@ public:
 
     int to_keep = std::max<int>(1, (KeepPercent_ * Values_.size()) / 100);
 
-    // recursively call abstractConsequence for at most to_keep elements
+    // Recursively keep abstract consequences for at most to_keep components and
+    // havoc the rest. This implements the generic conjunctive-domain strategy:
+    // most leaf domains can rely on their no-op AbstractValue fallback while
+    // Product still presents a smaller formula to the bilateral solver.
     for (auto &current : av_pairs) {
       if ((*(current.second) <= *(current.first)) || !(to_keep > 0)) {
         // we're not keeping this one
