@@ -60,6 +60,28 @@ void MKintPass::path_solving(BasicBlock *cur, BasicBlock *pred) {
   PathPoint pathPoint(cur, nullptr, bbDesc);
   m_bug_detection->addPathPoint(pathPoint);
 
+  auto pointerAccessBytes = [&](const Value *ptr) -> uint64_t {
+    if (!ptr || !ptr->getType()->isPointerTy())
+      return 0;
+    Type *elemTy = ptr->getType()->getPointerElementType();
+    if (!elemTy || elemTy->isVoidTy() || elemTy->isFunctionTy())
+      return 0;
+    return m_dl->getTypeStoreSize(elemTy);
+  };
+
+  auto havocObjectAtPtr = [&](const Value *obj, const Value *ptr,
+                              uint64_t numBytes,
+                              const std::string &hint) -> bool {
+    if (!obj || !ptr || numBytes == 0)
+      return false;
+    if (!m_obj_base.count(obj) || !m_obj_base[obj].has_value())
+      return false;
+    const auto addr = getPtrExpr(ptr, cur, pred);
+    const auto base = m_obj_base[obj].value();
+    havocObjectRange(obj, addr - base, numBytes, hint);
+    return true;
+  };
+
   if (nullptr != pred) {
     auto *terminator = pred->getTerminator();
     auto *br = dyn_cast<BranchInst>(terminator);
@@ -378,19 +400,22 @@ void MKintPass::path_solving(BasicBlock *cur, BasicBlock *pred) {
             z3::expr srcOff = src - srcBase;
             z3::expr dstMem = m_obj_mem[dstObj].value();
             z3::expr srcMem = m_obj_mem[srcObj].value();
+            std::vector<z3::expr> snapshot;
+            snapshot.reserve(*len);
             for (uint64_t i = 0; i < *len; ++i) {
-              z3::expr b = z3::select(
-                  srcMem,
-                  srcOff + m_solver.value().ctx().bv_val(i, m_ptr_bits));
+              snapshot.push_back(z3::select(
+                  srcMem, srcOff + m_solver.value().ctx().bv_val(i, m_ptr_bits)));
+            }
+            for (uint64_t i = 0; i < *len; ++i) {
               dstMem = z3::store(
                   dstMem, dstOff + m_solver.value().ctx().bv_val(i, m_ptr_bits),
-                  b);
+                  snapshot[i]);
             }
             m_obj_mem[dstObj] = dstMem;
           } else if (dstObj) {
             havocObject(dstObj, "memmove_unknown_src");
           } else {
-            m_smt_mem->memcpyBytes(dst, src, *len);
+            m_smt_mem->memmoveBytes(dst, src, *len);
           }
         } else {
           const Value *obj = getObjectForPtr(memmoveI->getRawDest());
@@ -456,13 +481,17 @@ void MKintPass::path_solving(BasicBlock *cur, BasicBlock *pred) {
           static_cast<unsigned>(m_dl->getTypeStoreSize(load->getType()));
       if (!maybeCheckOOB(load, load->getPointerOperand(), bytes, cur, pred))
         return;
-      if (load->getType()->isIntegerTy()) {
+      if (load->getType()->isIntegerTy() || load->getType()->isPointerTy()) {
         const auto addr = getPtrExpr(load->getPointerOperand(), cur, pred);
-        const unsigned bw = load->getType()->getIntegerBitWidth();
+        const unsigned bw = load->getType()->isPointerTy()
+                                ? m_ptr_bits
+                                : load->getType()->getIntegerBitWidth();
         const Value *obj = getObjectForPtr(load->getPointerOperand());
         const bool hasPreciseObjectMem =
             (obj && m_obj_mem.count(obj) && m_obj_mem[obj].has_value());
-        z3::expr v = m_smt_mem->loadInt(addr, bw, bytes, isLittleEndian());
+        z3::expr v = load->getType()->isPointerTy()
+                         ? m_smt_mem->loadBytes(addr, bytes, isLittleEndian())
+                         : m_smt_mem->loadInt(addr, bw, bytes, isLittleEndian());
         if (hasPreciseObjectMem) {
           const auto base = m_obj_base[obj].value();
           const auto off = addr - base;
@@ -507,10 +536,14 @@ void MKintPass::path_solving(BasicBlock *cur, BasicBlock *pred) {
           static_cast<unsigned>(m_dl->getTypeStoreSize(val->getType()));
       if (!maybeCheckOOB(store, store->getPointerOperand(), bytes, cur, pred))
         return;
-      if (val && val->getType()->isIntegerTy()) {
+      if (val && (val->getType()->isIntegerTy() || val->getType()->isPointerTy())) {
         const auto addr = getPtrExpr(store->getPointerOperand(), cur, pred);
-        const unsigned bw = val->getType()->getIntegerBitWidth();
-        const auto v = getIntExpr(val, cur, pred);
+        const unsigned bw = val->getType()->isPointerTy()
+                                ? m_ptr_bits
+                                : val->getType()->getIntegerBitWidth();
+        const auto v = val->getType()->isPointerTy()
+                            ? getPtrExpr(val, cur, pred)
+                            : getIntExpr(val, cur, pred);
         const Value *obj = getObjectForPtr(store->getPointerOperand());
         if (obj && m_obj_mem.count(obj)) {
           const auto base = m_obj_base[obj].value();
@@ -527,10 +560,16 @@ void MKintPass::path_solving(BasicBlock *cur, BasicBlock *pred) {
 
     if (auto *rmw = dyn_cast<AtomicRMWInst>(&inst)) {
       const Value *obj = getObjectForPtr(rmw->getPointerOperand());
-      if (obj)
+      const uint64_t bytes =
+          static_cast<uint64_t>(m_dl->getTypeStoreSize(rmw->getValOperand()->getType()));
+      if (obj && bytes > 0 &&
+          havocObjectAtPtr(obj, rmw->getPointerOperand(), bytes, "atomicrmw")) {
+        // handled precisely
+      } else if (obj) {
         havocObject(obj, "atomicrmw");
-      else
+      } else {
         m_smt_mem->havoc("atomicrmw");
+      }
       if (rmw->getType()->isIntegerTy()) {
         (void)getIntExpr(rmw, cur, pred);
       }
@@ -539,10 +578,16 @@ void MKintPass::path_solving(BasicBlock *cur, BasicBlock *pred) {
 
     if (auto *cx = dyn_cast<AtomicCmpXchgInst>(&inst)) {
       const Value *obj = getObjectForPtr(cx->getPointerOperand());
-      if (obj)
+      const uint64_t bytes =
+          static_cast<uint64_t>(m_dl->getTypeStoreSize(cx->getCompareOperand()->getType()));
+      if (obj && bytes > 0 &&
+          havocObjectAtPtr(obj, cx->getPointerOperand(), bytes, "cmpxchg")) {
+        // handled precisely
+      } else if (obj) {
         havocObject(obj, "cmpxchg");
-      else
+      } else {
         m_smt_mem->havoc("cmpxchg");
+      }
       continue;
     }
 
@@ -579,10 +624,12 @@ void MKintPass::path_solving(BasicBlock *cur, BasicBlock *pred) {
               }
             } else {
               const Value *obj = getObjectForPtr(call->getArgOperand(0));
-              if (obj)
+              if (obj && !havocObjectAtPtr(obj, call->getArgOperand(0), *len,
+                                           "memset_large")) {
                 havocObject(obj, "memset_large");
-              else
+              } else if (!obj) {
                 m_smt_mem->havoc("memset_large");
+              }
             }
             if (!maybeCheckOOB(call, call->getArgOperand(0), *len, cur, pred))
               return;
@@ -624,16 +671,21 @@ void MKintPass::path_solving(BasicBlock *cur, BasicBlock *pred) {
                 }
                 m_obj_mem[dstObj] = dstMem;
               } else if (dstObj) {
-                havocObject(dstObj, "memcpy_unknown_src");
+                if (!havocObjectAtPtr(dstObj, call->getArgOperand(0), *len,
+                                      "memcpy_unknown_src")) {
+                  havocObject(dstObj, "memcpy_unknown_src");
+                }
               } else {
                 m_smt_mem->memcpyBytes(dst, src, *len);
               }
             } else {
               const Value *obj = getObjectForPtr(call->getArgOperand(0));
-              if (obj)
+              if (obj && !havocObjectAtPtr(obj, call->getArgOperand(0), *len,
+                                           "memcpy_large")) {
                 havocObject(obj, "memcpy_large");
-              else
+              } else if (!obj) {
                 m_smt_mem->havoc("memcpy_large");
+              }
             }
             if (!maybeCheckOOB(call, call->getArgOperand(0), *len, cur, pred))
               return;
@@ -675,16 +727,21 @@ void MKintPass::path_solving(BasicBlock *cur, BasicBlock *pred) {
                 }
                 m_obj_mem[dstObj] = dstMem;
               } else if (dstObj) {
-                havocObject(dstObj, "memmove_unknown_src");
+                if (!havocObjectAtPtr(dstObj, call->getArgOperand(0), *len,
+                                      "memmove_unknown_src")) {
+                  havocObject(dstObj, "memmove_unknown_src");
+                }
               } else {
-                m_smt_mem->memcpyBytes(dst, src, *len);
+                m_smt_mem->memmoveBytes(dst, src, *len);
               }
             } else {
               const Value *obj = getObjectForPtr(call->getArgOperand(0));
-              if (obj)
+              if (obj && !havocObjectAtPtr(obj, call->getArgOperand(0), *len,
+                                           "memmove_large")) {
                 havocObject(obj, "memmove_large");
-              else
+              } else if (!obj) {
                 m_smt_mem->havoc("memmove_large");
+              }
             }
             if (!maybeCheckOOB(call, call->getArgOperand(0), *len, cur, pred))
               return;
@@ -741,7 +798,35 @@ void MKintPass::path_solving(BasicBlock *cur, BasicBlock *pred) {
         if (!is_allocator && !call->doesNotAccessMemory() &&
             !call->onlyReadsMemory()) {
           bool any = false;
+          SmallPtrSet<const Value *, 8> touchedObjects;
+          SmallPtrSet<const Value *, 8> touchedRoots;
+          for (unsigned idx = 0; idx < call->arg_size(); ++idx) {
+            const Value *arg = call->getArgOperand(idx);
+            if (!arg || !arg->getType()->isPointerTy())
+              continue;
+            const Value *obj = getObjectForPtr(arg);
+            if (!obj || m_obj_freed.contains(obj) ||
+                !callMayModObject(call, obj)) {
+              continue;
+            }
+            const Value *resolved = resolveAliasedObject(obj);
+            if (resolved && touchedRoots.contains(resolved))
+              continue;
+            const uint64_t bytes = pointerAccessBytes(arg);
+            if (bytes > 0 &&
+                havocObjectAtPtr(obj, arg, bytes, "call_sidefx_field")) {
+              touchedObjects.insert(obj);
+              if (resolved)
+                touchedRoots.insert(resolved);
+              any = true;
+            }
+          }
           for (const auto *obj : m_obj_list) {
+            if (touchedObjects.contains(obj) || m_obj_freed.contains(obj))
+              continue;
+            const Value *resolved = resolveAliasedObject(obj);
+            if (resolved && touchedRoots.contains(resolved))
+              continue;
             if (callMayModObject(call, obj)) {
               havocObject(obj, "call_sidefx");
               any = true;
@@ -750,6 +835,15 @@ void MKintPass::path_solving(BasicBlock *cur, BasicBlock *pred) {
           if (!any) {
             m_smt_mem->havoc("call_sidefx");
           }
+        }
+
+        if (name == "free" && call->arg_size() >= 1) {
+          if (const Value *obj = getObjectForPtr(call->getArgOperand(0))) {
+            invalidateObject(obj, "free");
+          } else {
+            m_smt_mem->havoc("free_unknown");
+          }
+          continue;
         }
       }
 
@@ -806,6 +900,11 @@ void MKintPass::path_solving(BasicBlock *cur, BasicBlock *pred) {
 
           if (name == "malloc" || name == "kmalloc" || name == "kzalloc" ||
               name == "vmalloc" || name == "calloc" || name == "realloc") {
+            if (name == "realloc" && call->arg_size() >= 1) {
+              if (const Value *oldObj = getObjectForPtr(call->getArgOperand(0))) {
+                invalidateObject(oldObj, "realloc_old");
+              }
+            }
             ensureObject(call,
                          ("heap." + cur->getParent()->getName().str() + "." +
                           std::to_string((uintptr_t)call)),
@@ -852,10 +951,15 @@ void MKintPass::path_solving(BasicBlock *cur, BasicBlock *pred) {
             m_bug_detection->binary_op_propagate(op, m_v2sym, m_solver.value());
         setSym(op, r);
       } else if (auto *op = dyn_cast<CastInst>(&inst)) {
-        (void)getValueExpr(op->getOperand(0), cur, pred);
-        const auto r =
-            m_bug_detection->cast_op_propagate(op, m_v2sym, m_solver.value());
-        setSym(op, r);
+        if (isa<PtrToIntInst>(op)) {
+          const auto r = getIntExpr(op, cur, pred);
+          setSym(op, r);
+        } else {
+          (void)getValueExpr(op->getOperand(0), cur, pred);
+          const auto r = m_bug_detection->cast_op_propagate(op, m_v2sym,
+                                                            m_solver.value());
+          setSym(op, r);
+        }
       } else {
         (void)getIntExpr(&inst, cur, pred);
       }

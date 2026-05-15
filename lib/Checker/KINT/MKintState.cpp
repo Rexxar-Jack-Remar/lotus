@@ -13,7 +13,8 @@ void MKintPass::pushSymFrame() {
 
 void MKintPass::pushObjectFrame() {
   m_object_frames.push_back(
-      {m_obj_base, m_obj_size, m_obj_list, m_obj_mem, m_obj_alias});
+      {m_obj_base, m_obj_size, m_obj_list, m_obj_mem, m_obj_alias,
+       m_int_alias, m_ptr_offset, m_int_offset, m_obj_freed});
 }
 
 void MKintPass::popObjectFrame() {
@@ -26,6 +27,10 @@ void MKintPass::popObjectFrame() {
   m_obj_list = std::move(frame.obj_list);
   m_obj_mem = std::move(frame.obj_mem);
   m_obj_alias = std::move(frame.obj_alias);
+  m_int_alias = std::move(frame.int_alias);
+  m_ptr_offset = std::move(frame.ptr_offset);
+  m_int_offset = std::move(frame.int_offset);
+  m_obj_freed = std::move(frame.obj_freed);
 }
 
 void MKintPass::popSymFrame() {
@@ -93,12 +98,61 @@ const Value *MKintPass::resolveAliasedObject(const Value *obj) const {
   return cur;
 }
 
+const Value *MKintPass::commonPointerObject(const Value *a,
+                                            const Value *b) const {
+  const Value *ra = a ? resolveAliasedObject(a) : nullptr;
+  const Value *rb = b ? resolveAliasedObject(b) : nullptr;
+  if (!ra || !rb || ra != rb)
+    return nullptr;
+  return ra;
+}
+
+const Value *MKintPass::getPointerOrigin(const Value *v) const {
+  if (!v)
+    return nullptr;
+  if (v->getType()->isPointerTy())
+    return getObjectForPtr(v);
+  auto it = m_int_alias.find(v);
+  if (it == m_int_alias.end() || !it->second)
+    return nullptr;
+  return resolveAliasedObject(it->second);
+}
+
+std::optional<z3::expr> MKintPass::getPointerOffset(const Value *v) const {
+  if (!v)
+    return std::nullopt;
+  if (v->getType()->isPointerTy()) {
+    auto it = m_ptr_offset.find(v);
+    if (it != m_ptr_offset.end())
+      return it->second;
+    return std::nullopt;
+  }
+  auto it = m_int_offset.find(v);
+  if (it != m_int_offset.end())
+    return it->second;
+  return std::nullopt;
+}
+
 const Value *MKintPass::getObjectForPtr(const Value *ptr) const {
   if (!ptr)
     return nullptr;
+  if (m_obj_base.count(ptr)) {
+    return resolveAliasedObject(ptr);
+  }
+  if (auto it = m_obj_alias.find(ptr); it != m_obj_alias.end() && it->second) {
+    const Value *aliased = resolveAliasedObject(it->second);
+    if (aliased && m_obj_base.count(aliased))
+      return aliased;
+  }
   const Value *stripped = ptr->stripPointerCasts();
   const Value *obj = llvm::getUnderlyingObject(stripped);
   obj = resolveAliasedObject(obj);
+  if ((!obj || !m_obj_base.count(obj)) && stripped != ptr) {
+    if (auto it = m_obj_alias.find(stripped);
+        it != m_obj_alias.end() && it->second) {
+      obj = resolveAliasedObject(it->second);
+    }
+  }
   if (obj && m_obj_base.count(obj))
     return obj;
   return nullptr;
@@ -155,12 +209,52 @@ void MKintPass::havocObject(const Value *obj, const std::string &hint) {
       name.c_str(), ctx.array_sort(ctx.bv_sort(m_ptr_bits), ctx.bv_sort(8)));
 }
 
+void MKintPass::havocObjectRange(const Value *obj, const z3::expr &offset,
+                                 uint64_t numBytes,
+                                 const std::string &hint) {
+  if (!obj || numBytes == 0)
+    return;
+  if (!m_obj_mem.count(obj) || !m_obj_mem[obj].has_value()) {
+    havocObject(obj, hint);
+    return;
+  }
+
+  auto &ctx = m_solver.value().ctx();
+  z3::expr curMem = m_obj_mem[obj].value();
+  for (uint64_t i = 0; i < numBytes; ++i) {
+    const auto id = g_obj_mem_id.fetch_add(1, std::memory_order_relaxed);
+    const std::string name = "%objmem." + hint + "." + std::to_string(id) +
+                             ".b" + std::to_string(i);
+    z3::expr fresh = ctx.bv_const(name.c_str(), 8);
+    curMem = z3::store(curMem,
+                       offset + ctx.bv_val(i, m_ptr_bits),
+                       fresh);
+  }
+  m_obj_mem[obj] = curMem;
+}
+
+static bool sameExpr(const z3::expr &a, const z3::expr &b) {
+  if (&a.ctx() != &b.ctx())
+    return false;
+  return Z3_get_ast_id(a.ctx(), a) == Z3_get_ast_id(b.ctx(), b);
+}
+
+void MKintPass::invalidateObject(const Value *obj, const std::string &hint) {
+  if (!obj)
+    return;
+  m_obj_freed.insert(obj);
+  havocObject(obj, hint);
+}
+
 bool MKintPass::callMayModObject(llvm::CallBase *call, const Value *obj) const {
   if (!call || !obj || !m_aa)
     return true;
+  const Value *resolved = resolveAliasedObject(obj);
+  if (resolved && m_obj_freed.contains(resolved))
+    return false;
   llvm::LocationSize size = llvm::LocationSize::afterPointer();
-  if (m_obj_size.count(obj)) {
-    if (auto sizeExpr = m_obj_size.find(obj)->second) {
+  if (resolved && m_obj_size.count(resolved)) {
+    if (auto sizeExpr = m_obj_size.find(resolved)->second) {
       if (sizeExpr->is_numeral()) {
         uint64_t bytes = 0;
         if (Z3_get_numeral_uint64(sizeExpr->ctx(), *sizeExpr, &bytes)) {
@@ -169,7 +263,7 @@ bool MKintPass::callMayModObject(llvm::CallBase *call, const Value *obj) const {
       }
     }
   }
-  llvm::MemoryLocation loc(obj, size);
+  llvm::MemoryLocation loc(resolved ? resolved : obj, size);
   auto modref = m_aa->getModRefInfo(call, loc);
   return llvm::isModSet(modref);
 }
@@ -525,6 +619,10 @@ z3::expr MKintPass::getIntExpr(const Value *v, BasicBlock *cur,
       p = p.extract(bw - 1, 0);
     else if (bw > m_ptr_bits)
       p = z3::zext(p, bw - m_ptr_bits);
+    if (const Value *origin = getPointerOrigin(pti->getOperand(0)))
+      m_int_alias[v] = origin;
+    if (auto off = getPointerOffset(pti->getOperand(0)))
+      m_int_offset[v] = off;
     setSym(v, p);
     return p;
   }
@@ -554,6 +652,10 @@ z3::expr MKintPass::getIntExpr(const Value *v, BasicBlock *cur,
         else
           out = z3::zext(out, outBw - inBw);
       }
+      if (const Value *origin = getPointerOrigin(operand))
+        m_int_alias[v] = origin;
+      if (auto off = getPointerOffset(operand))
+        m_int_offset[v] = off;
       setSym(v, out);
       return out;
     }
@@ -566,6 +668,15 @@ z3::expr MKintPass::getIntExpr(const Value *v, BasicBlock *cur,
       auto f = getIntExpr(sel->getFalseValue(), cur, pred);
       z3::expr condBool = (c == ctx.bv_val(1, 1));
       z3::expr r = z3::ite(condBool, t, f);
+      const Value *tOrigin = getPointerOrigin(sel->getTrueValue());
+      const Value *fOrigin = getPointerOrigin(sel->getFalseValue());
+      auto tOff = getPointerOffset(sel->getTrueValue());
+      auto fOff = getPointerOffset(sel->getFalseValue());
+      if (tOrigin && tOrigin == fOrigin) {
+        m_int_alias[v] = tOrigin;
+        if (tOff && fOff && sameExpr(*tOff, *fOff))
+          m_int_offset[v] = tOff;
+      }
       setSym(v, r);
       return r;
     }
@@ -619,6 +730,17 @@ z3::expr MKintPass::getIntExpr(const Value *v, BasicBlock *cur,
       default:
         result = lhs;
         break;
+      }
+      const Value *lhsOrigin = getPointerOrigin(bin->getOperand(0));
+      const Value *rhsOrigin = getPointerOrigin(bin->getOperand(1));
+      if (lhsOrigin && (!rhsOrigin || lhsOrigin == rhsOrigin)) {
+        m_int_alias[v] = lhsOrigin;
+        if (auto off = getPointerOffset(bin->getOperand(0)))
+          m_int_offset[v] = off;
+      } else if (rhsOrigin && !lhsOrigin) {
+        m_int_alias[v] = rhsOrigin;
+        if (auto off = getPointerOffset(bin->getOperand(1)))
+          m_int_offset[v] = off;
       }
       setSym(v, result);
       return result;
@@ -686,6 +808,52 @@ z3::expr MKintPass::getIntExpr(const Value *v, BasicBlock *cur,
   }
 
   if (const auto *phi = dyn_cast<PHINode>(v)) {
+    const Value *commonOrigin = nullptr;
+    bool seenOrigin = false;
+    bool allHaveOrigin = true;
+    for (unsigned i = 0; i < phi->getNumIncomingValues(); ++i) {
+      const Value *incoming = phi->getIncomingValue(i);
+      if (!incoming) {
+        allHaveOrigin = false;
+        break;
+      }
+      const Value *origin = getPointerOrigin(incoming);
+      if (!origin) {
+        allHaveOrigin = false;
+        break;
+      }
+      if (!seenOrigin) {
+        commonOrigin = origin;
+        seenOrigin = true;
+      } else if (commonOrigin != origin) {
+        allHaveOrigin = false;
+        break;
+      }
+    }
+    if (allHaveOrigin && commonOrigin)
+      m_int_alias[v] = commonOrigin;
+    if (allHaveOrigin) {
+      std::optional<z3::expr> commonOffset;
+      bool sawOffset = false;
+      for (unsigned i = 0; i < phi->getNumIncomingValues(); ++i) {
+        auto off = getPointerOffset(phi->getIncomingValue(i));
+        if (!off) {
+          sawOffset = false;
+          break;
+        }
+        if (!sawOffset) {
+          commonOffset = off;
+          sawOffset = true;
+          continue;
+        }
+        if (!sameExpr(*commonOffset, *off)) {
+          sawOffset = false;
+          break;
+        }
+      }
+      if (sawOffset && commonOffset)
+        m_int_offset[v] = commonOffset;
+    }
     // Ideally resolved on block entry. If not, keep it symbolic.
     const std::string name = "%phi." + std::to_string((uintptr_t)phi);
     auto r = ctx.bv_const(name.c_str(), phi->getType()->getIntegerBitWidth());
@@ -798,6 +966,7 @@ z3::expr MKintPass::getPtrExpr(const Value *v, BasicBlock *cur,
       ensureObject(gv, ("global." + gv->getName()).str(),
                    ctx.bv_val(bytes, m_ptr_bits), true);
     }
+    m_ptr_offset[v] = ctx.bv_val(0, m_ptr_bits);
     setSym(v, m_obj_base[gv].value());
     return m_obj_base[gv].value();
   }
@@ -833,6 +1002,7 @@ z3::expr MKintPass::getPtrExpr(const Value *v, BasicBlock *cur,
                     std::to_string((uintptr_t)ai)),
                    sizeBytesExpr, known);
     }
+    m_ptr_offset[v] = ctx.bv_val(0, m_ptr_bits);
     setSym(v, m_obj_base[ai].value());
     return m_obj_base[ai].value();
   }
@@ -843,6 +1013,7 @@ z3::expr MKintPass::getPtrExpr(const Value *v, BasicBlock *cur,
                                 std::to_string(arg->getArgNo()))
                                    .str();
       auto r = ctx.bv_const(name.c_str(), m_ptr_bits);
+      m_ptr_offset[v] = ctx.bv_val(0, m_ptr_bits);
       setSym(v, r);
       return r;
     }
@@ -852,12 +1023,22 @@ z3::expr MKintPass::getPtrExpr(const Value *v, BasicBlock *cur,
     auto base = getPtrExpr(gep->getPointerOperand(), cur, pred);
     auto off = gepOffsetBytes(gep, cur, pred);
     auto r = base + off;
+    if (auto baseOff = getPointerOffset(gep->getPointerOperand()))
+      m_ptr_offset[v] = baseOff.value() + off;
+    else
+      m_ptr_offset[v] = off;
+    if (const Value *root = getPointerOrigin(gep->getPointerOperand()))
+      m_obj_alias[v] = root;
     setSym(v, r);
     return r;
   }
 
   if (const auto *bc = dyn_cast<BitCastInst>(v)) {
     auto r = getPtrExpr(bc->getOperand(0), cur, pred);
+    if (auto off = getPointerOffset(bc->getOperand(0)))
+      m_ptr_offset[v] = off;
+    if (const Value *root = getPointerOrigin(bc->getOperand(0)))
+      m_obj_alias[v] = root;
     setSym(v, r);
     return r;
   }
@@ -869,6 +1050,10 @@ z3::expr MKintPass::getPtrExpr(const Value *v, BasicBlock *cur,
       i = z3::zext(i, m_ptr_bits - ibw);
     else if (ibw > m_ptr_bits)
       i = i.extract(m_ptr_bits - 1, 0);
+    if (const Value *origin = getPointerOrigin(itp->getOperand(0)))
+      m_obj_alias[v] = origin;
+    if (auto off = getPointerOffset(itp->getOperand(0)))
+      m_ptr_offset[v] = off;
     setSym(v, i);
     return i;
   }
@@ -880,12 +1065,67 @@ z3::expr MKintPass::getPtrExpr(const Value *v, BasicBlock *cur,
       auto f = getPtrExpr(sel->getFalseValue(), cur, pred);
       z3::expr condBool = (c == ctx.bv_val(1, 1));
       auto r = z3::ite(condBool, t, f);
+      if (const Value *root =
+              commonPointerObject(sel->getTrueValue(), sel->getFalseValue())) {
+        m_obj_alias[v] = root;
+      }
+      auto tOff = getPointerOffset(sel->getTrueValue());
+      auto fOff = getPointerOffset(sel->getFalseValue());
+      if (tOff && fOff && sameExpr(*tOff, *fOff))
+        m_ptr_offset[v] = tOff;
       setSym(v, r);
       return r;
     }
   }
 
   if (const auto *phi = dyn_cast<PHINode>(v)) {
+    const Value *commonRoot = nullptr;
+    bool seenPtr = false;
+    for (unsigned i = 0; i < phi->getNumIncomingValues(); ++i) {
+      const Value *incoming = phi->getIncomingValue(i);
+      if (!incoming || !incoming->getType()->isPointerTy())
+        continue;
+      const Value *incomingRoot = getPointerOrigin(incoming);
+      if (!incomingRoot) {
+        commonRoot = nullptr;
+        seenPtr = false;
+        break;
+      }
+      if (!seenPtr) {
+        commonRoot = incomingRoot;
+        seenPtr = true;
+      } else if (commonRoot != incomingRoot) {
+        commonRoot = nullptr;
+        break;
+      }
+    }
+    if (commonRoot)
+      m_obj_alias[v] = commonRoot;
+    std::optional<z3::expr> commonOffset;
+    bool seenOffset = false;
+    for (unsigned i = 0; i < phi->getNumIncomingValues(); ++i) {
+      const Value *incoming = phi->getIncomingValue(i);
+      if (!incoming || !incoming->getType()->isPointerTy()) {
+        seenOffset = false;
+        break;
+      }
+      auto off = getPointerOffset(incoming);
+      if (!off) {
+        seenOffset = false;
+        break;
+      }
+      if (!seenOffset) {
+        commonOffset = off;
+        seenOffset = true;
+        continue;
+      }
+      if (!sameExpr(*commonOffset, *off)) {
+        seenOffset = false;
+        break;
+      }
+    }
+    if (seenOffset && commonOffset)
+      m_ptr_offset[v] = commonOffset;
     const std::string name = "%phi.ptr." + std::to_string((uintptr_t)phi);
     auto r = ctx.bv_const(name.c_str(), m_ptr_bits);
     setSym(v, r);
@@ -896,6 +1136,8 @@ z3::expr MKintPass::getPtrExpr(const Value *v, BasicBlock *cur,
     if (call->getType()->isPointerTy()) {
       const std::string name = "%call.ptr." + std::to_string((uintptr_t)call);
       auto r = ctx.bv_const(name.c_str(), m_ptr_bits);
+      if (!m_ptr_offset.count(v))
+        m_ptr_offset[v] = std::nullopt;
       setSym(v, r);
       return r;
     }

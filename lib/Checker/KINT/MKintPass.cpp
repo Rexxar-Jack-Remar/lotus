@@ -190,6 +190,10 @@ PreservedAnalyses MKintPass::run(Module &M, ModuleAnalysisManager &MAM) {
   m_obj_list.clear();
   m_obj_mem.clear();
   m_obj_alias.clear();
+  m_int_alias.clear();
+  m_ptr_offset.clear();
+  m_int_offset.clear();
+  m_obj_freed.clear();
   m_object_frames.clear();
   m_bbpaths.clear();
   m_v2sym.clear();
@@ -289,6 +293,10 @@ void MKintPass::smt_solving(Module &M) {
     m_obj_list.clear();
     m_obj_mem.clear();
     m_obj_alias.clear();
+    m_int_alias.clear();
+    m_ptr_offset.clear();
+    m_int_offset.clear();
+    m_obj_freed.clear();
     m_object_frames.clear();
     m_sym_change_log.clear();
     m_sym_change_frames.clear();

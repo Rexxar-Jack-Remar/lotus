@@ -42,7 +42,8 @@ bool MKintPass::isAllocatorLike(const Function *callee) const {
     return false;
   const auto name = callee->getName();
   return name == "malloc" || name == "calloc" || name == "realloc" ||
-         name == "kmalloc" || name == "kzalloc" || name == "vmalloc";
+         name == "kmalloc" || name == "kzalloc" || name == "vmalloc" ||
+         name == "free";
 }
 
 bool MKintPass::classifyPointerReturn(const Function &F, const Value *&root,
@@ -50,6 +51,54 @@ bool MKintPass::classifyPointerReturn(const Function &F, const Value *&root,
   root = nullptr;
   if (!F.getReturnType()->isPointerTy())
     return true;
+
+  auto resolveRoot = [&](const Value *value, const auto &self) -> const Value * {
+    if (!value)
+      return nullptr;
+    if (const auto *arg = dyn_cast<Argument>(value))
+      return arg;
+    if (const auto *gv = dyn_cast<GlobalVariable>(value))
+      return gv;
+    if (const auto *call = dyn_cast<CallInst>(value)) {
+      if (isAllocatorLike(call->getCalledFunction()))
+        return call;
+    }
+    if (const auto *fi = dyn_cast<FreezeInst>(value))
+      return self(fi->getOperand(0), self);
+    if (const auto *bc = dyn_cast<BitCastInst>(value))
+      return self(bc->getOperand(0), self);
+    if (const auto *gep = dyn_cast<GetElementPtrInst>(value))
+      return self(gep->getPointerOperand(), self);
+    if (const auto *sel = dyn_cast<SelectInst>(value)) {
+      const Value *t = self(sel->getTrueValue(), self);
+      const Value *f = self(sel->getFalseValue(), self);
+      if (t && t == f)
+        return t;
+      return nullptr;
+    }
+    if (const auto *phi = dyn_cast<PHINode>(value)) {
+      const Value *common = nullptr;
+      bool seen = false;
+      for (unsigned i = 0; i < phi->getNumIncomingValues(); ++i) {
+        const Value *incomingRoot = self(phi->getIncomingValue(i), self);
+        if (!incomingRoot)
+          return nullptr;
+        if (!seen) {
+          common = incomingRoot;
+          seen = true;
+        } else if (common != incomingRoot) {
+          return nullptr;
+        }
+      }
+      return common;
+    }
+    if (const auto *itp = dyn_cast<IntToPtrInst>(value)) {
+      if (const auto *pti = dyn_cast<PtrToIntInst>(itp->getOperand(0)))
+        return self(pti->getOperand(0), self);
+      return nullptr;
+    }
+    return nullptr;
+  };
 
   for (const auto &bb : F) {
     const auto *ret = dyn_cast<ReturnInst>(bb.getTerminator());
@@ -60,8 +109,7 @@ bool MKintPass::classifyPointerReturn(const Function &F, const Value *&root,
       reason = "missing pointer return value";
       return false;
     }
-    const Value *underlying =
-        llvm::getUnderlyingObject(retValue->stripPointerCasts());
+    const Value *underlying = resolveRoot(retValue, resolveRoot);
     if (!underlying) {
       reason = "unresolved pointer return root";
       return false;
@@ -227,6 +275,22 @@ bool MKintPass::collectModifiedBoundaryObjects(Function &F,
       const auto name = callee->getName();
       if (name == "memset" || name == "__memset" || name == "memcpy" ||
           name == "__memcpy" || name == "memmove" || name == "__memmove") {
+        continue;
+      }
+      if (name == "free") {
+        if (call->arg_size() < 1) {
+          m_summary_failure_reason = "unsupported free target";
+          return false;
+        }
+        (void)markPointer(call->getArgOperand(0));
+        continue;
+      }
+      if (name == "realloc") {
+        if (call->arg_size() < 1) {
+          m_summary_failure_reason = "unsupported realloc target";
+          return false;
+        }
+        (void)markPointer(call->getArgOperand(0));
         continue;
       }
       if (isAllocatorLike(callee))
@@ -428,6 +492,10 @@ const FunctionSummary *MKintPass::buildSummary(Function &F) {
   auto old_obj_list = std::move(m_obj_list);
   auto old_obj_mem = std::move(m_obj_mem);
   auto old_obj_alias = std::move(m_obj_alias);
+  auto old_int_alias = std::move(m_int_alias);
+  auto old_ptr_offset = std::move(m_ptr_offset);
+  auto old_int_offset = std::move(m_int_offset);
+  auto old_obj_freed = std::move(m_obj_freed);
   auto old_object_frames = std::move(m_object_frames);
   auto old_sym_change_log = std::move(m_sym_change_log);
   auto old_sym_change_frames = std::move(m_sym_change_frames);
@@ -455,6 +523,10 @@ const FunctionSummary *MKintPass::buildSummary(Function &F) {
   m_obj_list.clear();
   m_obj_mem.clear();
   m_obj_alias.clear();
+  m_int_alias.clear();
+  m_ptr_offset.clear();
+  m_int_offset.clear();
+  m_obj_freed.clear();
   m_object_frames.clear();
   m_sym_change_log.clear();
   m_sym_change_frames.clear();
@@ -558,8 +630,8 @@ const FunctionSummary *MKintPass::buildSummary(Function &F) {
         memIn = m_obj_mem[obj];
     }
     entry.summary.boundary_objects.emplace_back(
-        kind, obj, argIndex, /*include_in_frame=*/true, baseSym, sizeSym, memIn,
-        std::nullopt, std::nullopt, std::nullopt);
+        kind, obj, argIndex, /*include_in_frame=*/true, baseSym, sizeSym,
+        memIn, std::nullopt, std::nullopt, std::nullopt);
   }
 
   if (!collectModifiedBoundaryObjects(F, entry.summary)) {
@@ -577,6 +649,10 @@ const FunctionSummary *MKintPass::buildSummary(Function &F) {
     m_obj_list = std::move(old_obj_list);
     m_obj_mem = std::move(old_obj_mem);
     m_obj_alias = std::move(old_obj_alias);
+    m_int_alias = std::move(old_int_alias);
+    m_ptr_offset = std::move(old_ptr_offset);
+    m_int_offset = std::move(old_int_offset);
+    m_obj_freed = std::move(old_obj_freed);
     m_object_frames = std::move(old_object_frames);
     m_sym_change_log = std::move(old_sym_change_log);
     m_sym_change_frames = std::move(old_sym_change_frames);
@@ -687,6 +763,10 @@ const FunctionSummary *MKintPass::buildSummary(Function &F) {
   m_obj_list = std::move(old_obj_list);
   m_obj_mem = std::move(old_obj_mem);
   m_obj_alias = std::move(old_obj_alias);
+  m_int_alias = std::move(old_int_alias);
+  m_ptr_offset = std::move(old_ptr_offset);
+  m_int_offset = std::move(old_int_offset);
+  m_obj_freed = std::move(old_obj_freed);
   m_object_frames = std::move(old_object_frames);
   m_sym_change_log = std::move(old_sym_change_log);
   m_sym_change_frames = std::move(old_sym_change_frames);
@@ -740,7 +820,6 @@ SummaryAvailability MKintPass::applySummary(CallInst *call, BasicBlock *cur,
     from.push_back(it->second.value());
     to.push_back(getPtrExpr(call->getArgOperand(arg->getArgNo()), cur, pred));
   }
-
   auto mapBindingObject =
       [&](const SummaryObjectBinding &binding) -> const Value * {
     switch (binding.kind) {
@@ -776,6 +855,21 @@ SummaryAvailability MKintPass::applySummary(CallInst *call, BasicBlock *cur,
     const Value *mappedObject = mapBindingObject(objBinding);
     if (!mappedObject)
       return SummaryAvailability::Unsupported;
+    if (objBinding.kind == SummaryObjectKind::Argument) {
+      if (m_obj_base.count(mappedObject) &&
+          m_obj_base[mappedObject].has_value()) {
+        z3::expr actualPtr =
+            getPtrExpr(call->getArgOperand(objBinding.arg_index), cur, pred);
+        z3::expr offsetExpr = actualPtr - m_obj_base[mappedObject].value();
+        z3::expr simplified = offsetExpr.simplify();
+        uint64_t offValue = 0;
+        if (simplified.is_numeral() &&
+            Z3_get_numeral_uint64(simplified.ctx(), simplified, &offValue) &&
+            offValue != 0) {
+          return SummaryAvailability::Unsupported;
+        }
+      }
+    }
     auto mappedIt = mappedBoundaryRoots.find(mappedObject);
     if (mappedIt != mappedBoundaryRoots.end() &&
         mappedIt->second != objBinding.root) {
@@ -856,14 +950,18 @@ SummaryAvailability MKintPass::applySummary(CallInst *call, BasicBlock *cur,
         if (!m_obj_base.count(call) || !m_obj_base[call].has_value())
           return SummaryAvailability::Unsupported;
         retPtr = m_obj_base[call].value();
+        m_ptr_offset[call] = ctx.bv_val(0, m_ptr_bits);
       } else if (const auto *arg =
                      dyn_cast<Argument>(summary->pointer_return_root)) {
         const Value *mappedRoot =
             getObjectForPtr(call->getArgOperand(arg->getArgNo()));
         if (mappedRoot)
           m_obj_alias[call] = mappedRoot;
+        if (auto off = getPointerOffset(call->getArgOperand(arg->getArgNo())))
+          m_ptr_offset[call] = off;
       } else if (isa<GlobalVariable>(summary->pointer_return_root)) {
         m_obj_alias[call] = summary->pointer_return_root;
+        m_ptr_offset[call] = ctx.bv_val(0, m_ptr_bits);
       }
     }
     from.push_back(summary->pointer_return_symbol.value());

@@ -94,6 +94,28 @@ TEST_F(KINTCheckerTest, SmtMemoryBigEndianRoundTrip) {
   EXPECT_EQ(getNumeralU64(memory.loadBytes(addr, 2, false)), 0x1234u);
 }
 
+TEST_F(KINTCheckerTest, SmtMemoryPointerWidthRoundTrip) {
+  z3::context ctx;
+  kint::SmtMemory memory(ctx, 64);
+  const z3::expr addr = ctx.bv_val(8, 64);
+
+  memory.storeBytes(addr, ctx.bv_val(0x1122334455667788ULL, 64), 8, true);
+
+  EXPECT_EQ(getNumeralU64(memory.loadBytes(addr, 8, true)),
+            0x1122334455667788ULL);
+}
+
+TEST_F(KINTCheckerTest, SmtMemoryMemmoveHandlesOverlap) {
+  z3::context ctx;
+  kint::SmtMemory memory(ctx, 64);
+  const z3::expr addr = ctx.bv_val(0, 64);
+
+  memory.storeBytes(addr, ctx.bv_val(0x11223344, 32), 4, true);
+  memory.memmoveBytes(ctx.bv_val(1, 64), addr, 3);
+
+  EXPECT_EQ(getNumeralU64(memory.loadBytes(addr, 4, true)), 0x22334444u);
+}
+
 TEST_F(KINTCheckerTest, GetSinkFnsHandlesIndirectCalls) {
   const char *source = R"(
     define void @indirect(void (i32)* %fp, i32 %x) {
@@ -263,6 +285,169 @@ TEST_F(KINTCheckerTest, BugDetectionKeepsDistinctBugTypesPerInstruction) {
   EXPECT_EQ(bug_detection.getBugPaths().size(), 2u);
 }
 
+TEST_F(KINTCheckerTest,
+       InterprocSummaryPreservesPtrToIntIntToPtrRoundTrip) {
+  const char *source = R"(
+    define i32* @roundtrip(i32* %p) {
+    entry:
+      %i = ptrtoint i32* %p to i64
+      %q = inttoptr i64 %i to i32*
+      ret i32* %q
+    }
+
+    define i32 @main() {
+    entry:
+      %x = alloca i32
+      store i32 1, i32* %x
+      %p = call i32* @roundtrip(i32* %x)
+      %v = load i32, i32* %p
+      %q = sdiv i32 42, %v
+      ret i32 %q
+    }
+  )";
+
+  const auto oldCheckDivByZero = kint::CheckDivByZero.getValue();
+  const auto oldAnalyzeAllFunctions = kint::AnalyzeAllFunctions.getValue();
+  const auto oldSummaryMode = kint::InterprocSummaryMode.getValue();
+
+  kint::CheckDivByZero = true;
+  kint::AnalyzeAllFunctions = true;
+  kint::InterprocSummaryMode = kint::SummaryMode::On;
+
+  auto module = parseModule(source);
+  ASSERT_NE(module, nullptr);
+  runPass(*module);
+  Function *main = module->getFunction("main");
+  ASSERT_NE(main, nullptr);
+  EXPECT_FALSE(hasKintErrorMetadata(*main, Instruction::SDiv));
+
+  kint::CheckDivByZero = oldCheckDivByZero;
+  kint::AnalyzeAllFunctions = oldAnalyzeAllFunctions;
+  kint::InterprocSummaryMode = oldSummaryMode;
+}
+
+TEST_F(KINTCheckerTest, FieldSensitiveCallHavocPreservesSiblingStructField) {
+  const char *source = R"(
+    declare void @touch(i32*)
+
+    define i32 @main() {
+    entry:
+      %s = alloca { i32, i32 }
+      %f0 = getelementptr inbounds { i32, i32 }, { i32, i32 }* %s, i64 0,
+                                      i32 0
+      %f1 = getelementptr inbounds { i32, i32 }, { i32, i32 }* %s, i64 0,
+                                      i32 1
+      store i32 1, i32* %f0
+      store i32 1, i32* %f1
+      call void @touch(i32* %f0)
+      %v = load i32, i32* %f1
+      %q = sdiv i32 42, %v
+      ret i32 %q
+    }
+  )";
+
+  const auto oldCheckDivByZero = kint::CheckDivByZero.getValue();
+  const auto oldAnalyzeAllFunctions = kint::AnalyzeAllFunctions.getValue();
+  const auto oldSummaryMode = kint::InterprocSummaryMode.getValue();
+
+  kint::CheckDivByZero = true;
+  kint::AnalyzeAllFunctions = true;
+  kint::InterprocSummaryMode = kint::SummaryMode::Off;
+
+  auto module = parseModule(source);
+  ASSERT_NE(module, nullptr);
+  runPass(*module);
+  Function *main = module->getFunction("main");
+  ASSERT_NE(main, nullptr);
+  EXPECT_FALSE(hasKintErrorMetadata(*main, Instruction::SDiv));
+
+  kint::CheckDivByZero = oldCheckDivByZero;
+  kint::AnalyzeAllFunctions = oldAnalyzeAllFunctions;
+  kint::InterprocSummaryMode = oldSummaryMode;
+}
+
+TEST_F(KINTCheckerTest, AtomicRMWPreservesSiblingStructField) {
+  const char *source = R"(
+    define i32 @main() {
+    entry:
+      %s = alloca { i32, i32 }
+      %f0 = getelementptr inbounds { i32, i32 }, { i32, i32 }* %s, i64 0,
+                                      i32 0
+      %f1 = getelementptr inbounds { i32, i32 }, { i32, i32 }* %s, i64 0,
+                                      i32 1
+      store i32 1, i32* %f0
+      store i32 1, i32* %f1
+      %old = atomicrmw add i32* %f0, i32 1 seq_cst
+      %v = load i32, i32* %f1
+      %q = sdiv i32 42, %v
+      ret i32 %q
+    }
+  )";
+
+  const auto oldCheckDivByZero = kint::CheckDivByZero.getValue();
+  const auto oldAnalyzeAllFunctions = kint::AnalyzeAllFunctions.getValue();
+  const auto oldSummaryMode = kint::InterprocSummaryMode.getValue();
+
+  kint::CheckDivByZero = true;
+  kint::AnalyzeAllFunctions = true;
+  kint::InterprocSummaryMode = kint::SummaryMode::Off;
+
+  auto module = parseModule(source);
+  ASSERT_NE(module, nullptr);
+  runPass(*module);
+  Function *main = module->getFunction("main");
+  ASSERT_NE(main, nullptr);
+  EXPECT_FALSE(hasKintErrorMetadata(*main, Instruction::SDiv));
+
+  kint::CheckDivByZero = oldCheckDivByZero;
+  kint::AnalyzeAllFunctions = oldAnalyzeAllFunctions;
+  kint::InterprocSummaryMode = oldSummaryMode;
+}
+
+TEST_F(KINTCheckerTest,
+       InterprocSummaryPreservesReturnedPointerOffsetThroughIntCast) {
+  const char *source = R"(
+    define i32* @shift1(i32* %p) {
+    entry:
+      %q = getelementptr inbounds i32, i32* %p, i64 1
+      ret i32* %q
+    }
+
+    define i32 @main() {
+    entry:
+      %arr = alloca [2 x i32]
+      %p0 = getelementptr inbounds [2 x i32], [2 x i32]* %arr, i64 0, i64 0
+      store i32 1, i32* %p0
+      %q = call i32* @shift1(i32* %p0)
+      %i = ptrtoint i32* %q to i64
+      %r = inttoptr i64 %i to i32*
+      store i32 0, i32* %r
+      %v = load i32, i32* %p0
+      %d = sdiv i32 42, %v
+      ret i32 %d
+    }
+  )";
+
+  const auto oldCheckDivByZero = kint::CheckDivByZero.getValue();
+  const auto oldAnalyzeAllFunctions = kint::AnalyzeAllFunctions.getValue();
+  const auto oldSummaryMode = kint::InterprocSummaryMode.getValue();
+
+  kint::CheckDivByZero = true;
+  kint::AnalyzeAllFunctions = true;
+  kint::InterprocSummaryMode = kint::SummaryMode::On;
+
+  auto module = parseModule(source);
+  ASSERT_NE(module, nullptr);
+  runPass(*module);
+  Function *main = module->getFunction("main");
+  ASSERT_NE(main, nullptr);
+  EXPECT_FALSE(hasKintErrorMetadata(*main, Instruction::SDiv));
+
+  kint::CheckDivByZero = oldCheckDivByZero;
+  kint::AnalyzeAllFunctions = oldAnalyzeAllFunctions;
+  kint::InterprocSummaryMode = oldSummaryMode;
+}
+
 TEST_F(KINTCheckerTest, WideConstantPreservesHighBits) {
   const char *source = R"(
     define i128 @wide() {
@@ -421,6 +606,50 @@ TEST_F(KINTCheckerTest, InterprocSummaryFramesUnmodifiedPointerArgument) {
   Function *main = module->getFunction("main");
   ASSERT_NE(main, nullptr);
   EXPECT_FALSE(hasKintErrorMetadata(*main, Instruction::SDiv));
+
+  kint::CheckDivByZero = oldCheckDivByZero;
+  kint::AnalyzeAllFunctions = oldAnalyzeAllFunctions;
+  kint::InterprocSummaryMode = oldSummaryMode;
+}
+
+TEST_F(KINTCheckerTest, InterprocSummaryPreservesSiblingFieldThroughPointerArgOffset) {
+  const char *source = R"(
+    define void @touch(i32* %p) {
+    entry:
+      store i32 1, i32* %p
+      ret void
+    }
+
+    define i32 @main() {
+    entry:
+      %s = alloca { i32, i32 }
+      %f0 = getelementptr inbounds { i32, i32 }, { i32, i32 }* %s, i64 0,
+                                      i32 0
+      %f1 = getelementptr inbounds { i32, i32 }, { i32, i32 }* %s, i64 0,
+                                      i32 1
+      store i32 0, i32* %f0
+      store i32 1, i32* %f1
+      call void @touch(i32* %f1)
+      %v = load i32, i32* %f0
+      %q = sdiv i32 42, %v
+      ret i32 %q
+    }
+  )";
+
+  const auto oldCheckDivByZero = kint::CheckDivByZero.getValue();
+  const auto oldAnalyzeAllFunctions = kint::AnalyzeAllFunctions.getValue();
+  const auto oldSummaryMode = kint::InterprocSummaryMode.getValue();
+
+  kint::CheckDivByZero = true;
+  kint::AnalyzeAllFunctions = true;
+  kint::InterprocSummaryMode = kint::SummaryMode::On;
+
+  auto module = parseModule(source);
+  ASSERT_NE(module, nullptr);
+  runPass(*module);
+  Function *main = module->getFunction("main");
+  ASSERT_NE(main, nullptr);
+  EXPECT_TRUE(hasKintErrorMetadata(*main, Instruction::SDiv));
 
   kint::CheckDivByZero = oldCheckDivByZero;
   kint::AnalyzeAllFunctions = oldAnalyzeAllFunctions;

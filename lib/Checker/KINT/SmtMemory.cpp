@@ -113,6 +113,21 @@ void SmtMemory::memcpyBytes(const z3::expr &dst, const z3::expr &src,
   }
 }
 
+void SmtMemory::memmoveBytes(const z3::expr &dst, const z3::expr &src,
+                             uint64_t numBytes) {
+  if (numBytes == 0)
+    return;
+
+  std::vector<z3::expr> bytes;
+  bytes.reserve(numBytes);
+  for (uint64_t i = 0; i < numBytes; ++i) {
+    bytes.push_back(z3::select(m_mem, addrAdd(src, i)));
+  }
+  for (uint64_t i = 0; i < numBytes; ++i) {
+    m_mem = z3::store(m_mem, addrAdd(dst, i), bytes[i]);
+  }
+}
+
 z3::expr SmtMemory::loadInt(const z3::expr &addr, unsigned bitWidth,
                             unsigned storeBytes, bool littleEndian) const {
   // Load storeBytes bytes, then truncate to bitWidth (LLVM i1 uses 1 byte store

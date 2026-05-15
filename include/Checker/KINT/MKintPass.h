@@ -14,6 +14,7 @@
 #include <vector>
 
 #include <llvm/ADT/DenseMap.h>
+#include <llvm/ADT/DenseSet.h>
 #include <llvm/ADT/MapVector.h>
 #include <llvm/ADT/SetVector.h>
 #include <llvm/Analysis/AliasAnalysis.h>
@@ -77,6 +78,9 @@ private:
   bool collectModifiedBoundaryObjects(Function &F, FunctionSummary &summary);
   bool isAllocatorLike(const Function *callee) const;
   const Value *resolveAliasedObject(const Value *obj) const;
+  const Value *commonPointerObject(const Value *a, const Value *b) const;
+  const Value *getPointerOrigin(const Value *v) const;
+  std::optional<z3::expr> getPointerOffset(const Value *v) const;
   void finalizeSummaryContract(FunctionSummary &summary);
 
   // SMT helpers (memory + symbol management)
@@ -103,6 +107,9 @@ private:
                            const z3::expr &value, unsigned numBytes,
                            bool littleEndian) const;
   void havocObject(const Value *obj, const std::string &hint);
+  void havocObjectRange(const Value *obj, const z3::expr &offset,
+                        uint64_t numBytes, const std::string &hint);
+  void invalidateObject(const Value *obj, const std::string &hint);
   bool callMayModObject(llvm::CallBase *call, const Value *obj) const;
   z3::expr getValueExpr(const Value *v, BasicBlock *cur, BasicBlock *pred);
   z3::expr getIntExpr(const Value *v, BasicBlock *cur, BasicBlock *pred);
@@ -172,12 +179,20 @@ private:
   DenseMap<const Value *, std::optional<z3::expr>>
       m_obj_mem; // per-object byte arrays
   DenseMap<const Value *, const Value *> m_obj_alias;
+  DenseMap<const Value *, const Value *> m_int_alias;
+  DenseMap<const Value *, std::optional<z3::expr>> m_ptr_offset;
+  DenseMap<const Value *, std::optional<z3::expr>> m_int_offset;
+  DenseSet<const Value *> m_obj_freed;
   struct ObjectStateFrame {
     DenseMap<const Value *, std::optional<z3::expr>> obj_base;
     DenseMap<const Value *, std::optional<z3::expr>> obj_size;
     std::vector<const Value *> obj_list;
     DenseMap<const Value *, std::optional<z3::expr>> obj_mem;
     DenseMap<const Value *, const Value *> obj_alias;
+    DenseMap<const Value *, const Value *> int_alias;
+    DenseMap<const Value *, std::optional<z3::expr>> ptr_offset;
+    DenseMap<const Value *, std::optional<z3::expr>> int_offset;
+    DenseSet<const Value *> obj_freed;
   };
   std::vector<ObjectStateFrame> m_object_frames;
   struct SymChange {

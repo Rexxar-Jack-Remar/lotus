@@ -47,6 +47,8 @@ public:
   void memsetBytes(const z3::expr &dst, const z3::expr &byteVal,
                    uint64_t numBytes);
   void memcpyBytes(const z3::expr &dst, const z3::expr &src, uint64_t numBytes);
+  void memmoveBytes(const z3::expr &dst, const z3::expr &src,
+                    uint64_t numBytes);
 
 private:
   z3::expr freshMemory(const std::string &hint) const;
