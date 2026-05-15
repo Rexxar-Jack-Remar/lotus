@@ -20,8 +20,8 @@ pipelines.
 - ``tools/verifier/seahorn/seahorn``
 - ``tools/verifier/seahorn/seapp``
 - ``tools/verifier/seahorn/seainspect``
-- ``tools/verifier/horn-ice/chc_verifier``
-- ``tools/verifier/horn-ice/hice-dt``
+- ``third-party/horn-ice/chc_verifier``
+- ``third-party/horn-ice/hice-dt``
 
 Structure
 ---------
@@ -78,7 +78,7 @@ Components
 
 - **SeaHorn** – LLVM-based front-end, symbolic execution, and encoding of
   verification problems as CHCs.
-- **Horn-ICE** – CHC solving with invariant learning (in ``tools/verifier/horn-ice/``).
+- **Horn-ICE** – CHC solving with invariant learning (in ``third-party/horn-ice/``).
 - **Sea-rt** – Runtime components for executing counterexample harnesses (in ``tools/verifier/seahorn/sea-rt/``).
 
 SeaHorn Verification
@@ -116,4 +116,3 @@ Generate executable counterexamples:
 
    ./build/bin/seahorn --cex=harness.ll program.c
    clang -m64 -g program.c harness.ll -o counterexample
-

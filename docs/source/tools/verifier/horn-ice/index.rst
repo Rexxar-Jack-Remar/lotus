@@ -5,7 +5,7 @@ Horn-ICE provides CHC (Constrained Horn Clause) verification with invariant
 learning capabilities using decision trees.
 
 **Binaries**: ``chc_verifier``, ``hice-dt``  
-**Location**: ``tools/verifier/horn-ice/``
+**Location**: ``third-party/horn-ice/``
 
 Overview
 --------
@@ -102,7 +102,7 @@ Benchmarks
 
 The Horn-ICE distribution includes benchmarks from the HOLA benchmark suite
 (45 sequential programs without recursion from Dillig et al.) located in
-``tools/verifier/horn-ice/benchmarks/``.
+``third-party/horn-ice/benchmarks/``.
 
 **Related Work**:
 
@@ -115,5 +115,4 @@ The Horn-ICE distribution includes benchmarks from the HOLA benchmark suite
 - Ultimate Automizer
 - Z3 PDR (the Spacer engine)
 
-For more information, see the Horn-ICE README at ``tools/verifier/horn-ice/README.md``.
-
+For more information, see the Horn-ICE README at ``third-party/horn-ice/README.md``.

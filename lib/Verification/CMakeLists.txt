@@ -1,10 +1,10 @@
-if(ENABLE_CLAM)
+if(LOTUS_ENABLE_CLAM)
   add_subdirectory(clam)
 endif()
-if(ENABLE_SEAHORN)
+if(LOTUS_ENABLE_SEAHORN)
   add_subdirectory(seahorn)
 endif()
-if(ENABLE_SMACK)
+if(LOTUS_ENABLE_SMACK)
   add_subdirectory(smack)
 endif()
 

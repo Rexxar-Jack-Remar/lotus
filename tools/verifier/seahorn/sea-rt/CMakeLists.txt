@@ -13,8 +13,7 @@ install (TARGETS sea-mem-rt
   ARCHIVE DESTINATION lib)
 
 
-option(SEAHORN_BUILD_32_BIT_RT "Build 32bit sea-rt libraries" OFF)
-if(SEAHORN_BUILD_32_BIT_RT) 
+if(LOTUS_SEAHORN_BUILD_32_BIT_RT) 
   add_library(sea-rt-32 seahorn.cpp)
   set_target_properties(sea-rt-32 PROPERTIES
     COMPILE_FLAGS "-m32" LINK_FLAGS "-m32")
@@ -29,5 +28,3 @@ if(SEAHORN_BUILD_32_BIT_RT)
     LIBRARY DESTINATION lib
     ARCHIVE DESTINATION lib)
 endif()
-
-

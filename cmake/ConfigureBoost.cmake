@@ -1,5 +1,6 @@
 # Handle Boost dependencies for SeaHorn, CLAM, and CclyzerAA
-# This file is only included when ENABLE_CLAM, ENABLE_SEAHORN, or LOTUS_USE_CCLYZER is ON.
+# This file is only included when LOTUS_ENABLE_CLAM, LOTUS_ENABLE_SEAHORN,
+# LOTUS_ENABLE_SMACK, or LOTUS_USE_CCLYZER is ON.
 # If all three are disabled, Boost is not configured.
 #
 # Modules that require Boost:
@@ -8,11 +9,8 @@
 #   - CclyzerAA: flyweight
 # Sea-DSA no longer requires Boost.
 
-option(DOWNLOAD_BOOST "Download and build Boost if not found" ON)
-set(CUSTOM_BOOST_ROOT "" CACHE PATH "Path to custom boost installation.")
-
-if(CUSTOM_BOOST_ROOT)
-    set(BOOST_ROOT ${CUSTOM_BOOST_ROOT})
+if(LOTUS_CUSTOM_BOOST_ROOT)
+    set(BOOST_ROOT ${LOTUS_CUSTOM_BOOST_ROOT})
     set(Boost_NO_SYSTEM_PATHS "ON")
 endif()
 
@@ -37,7 +35,8 @@ if(Boost_FOUND)
     endif()
 endif()
 
-if((NOT Boost_FOUND OR NOT BOOST_SYSTEM_AVAILABLE OR NOT BOOST_THREAD_AVAILABLE) AND DOWNLOAD_BOOST)
+if((NOT Boost_FOUND OR NOT BOOST_SYSTEM_AVAILABLE OR NOT BOOST_THREAD_AVAILABLE)
+   AND LOTUS_DOWNLOAD_BOOST)
     include(ExternalProject)
     set(BOOST_INSTALL_DIR ${CMAKE_BINARY_DIR}/deps/boost)
     message(STATUS "Boost not found, will download and build it in ${BOOST_INSTALL_DIR}")
@@ -78,6 +77,5 @@ elseif(Boost_FOUND)
     endif()
 else()
     message(FATAL_ERROR "Boost is required for SeaHorn, CLAM, and/or CclyzerAA but was not found. "
-                        "Set DOWNLOAD_BOOST=ON to auto-download, or provide CUSTOM_BOOST_ROOT.")
+                        "Set LOTUS_DOWNLOAD_BOOST=ON to auto-download, or provide LOTUS_CUSTOM_BOOST_ROOT.")
 endif()
-

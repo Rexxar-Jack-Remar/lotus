@@ -5,11 +5,10 @@
 #
 # Available subprojects:
 #   - symbolic_abstraction
-#   - clam          (ENABLE_CLAM, defined at top-level)
-#   - crabber       (ENABLE_CLAM, defined at top-level, requires CRAB)
-#   - horn-ice      (BUILD_HORN_ICE)
-#   - seahorn       (ENABLE_SEAHORN, defined at top-level)
-#   - smack         (ENABLE_SMACK, defined at top-level)
+#   - clam          (LOTUS_ENABLE_CLAM, defined at top-level)
+#   - crabber       (LOTUS_ENABLE_CLAM, defined at top-level, requires CRAB)
+#   - seahorn       (LOTUS_ENABLE_SEAHORN, defined at top-level)
+#   - smack         (LOTUS_ENABLE_SMACK, defined at top-level)
 
 # SymAbsAI
 add_subdirectory(symabs-ai)
@@ -18,22 +17,16 @@ add_subdirectory(symabs-ai)
 add_subdirectory(sifa)
 
 # CLAM tools (clam, clam-diff, clam-pp) (optional)
-if(ENABLE_CLAM)
+if(LOTUS_ENABLE_CLAM)
     add_subdirectory(clam)
 endif()
 
 # Seahorn tools (optional)
-if(ENABLE_SEAHORN)
+if(LOTUS_ENABLE_SEAHORN)
     add_subdirectory(seahorn)
 endif()
 
 # SMACK tools (optional)
-if(ENABLE_SMACK)
+if(LOTUS_ENABLE_SMACK)
     add_subdirectory(smack)
-endif()
-
-# horn-ice
-option(BUILD_HORN_ICE "Build ICE learning for CHC and Boogie" OFF)
-if(BUILD_HORN_ICE)
-    add_subdirectory(horn-ice)
 endif()

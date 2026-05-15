@@ -13,9 +13,9 @@ cmake --build build -j
 Several verifier families are optional:
 
 - `sifa` and `symabs_ai` are configured by default.
-- CLAM tools are built only when `ENABLE_CLAM=ON`.
-- SeaHorn tools are built only when `ENABLE_SEAHORN=ON`.
-- `hice-dt` is built only when `BUILD_HORN_ICE=ON`.
+- CLAM tools are built only when `LOTUS_ENABLE_CLAM=ON`.
+- SeaHorn tools are built only when `LOTUS_ENABLE_SEAHORN=ON`.
+- `hice-dt` is built only when `LOTUS_ENABLE_HORN_ICE=ON`.
 
 ## Tool families
 
@@ -23,9 +23,9 @@ Several verifier families are optional:
 | --- | --- | --- |
 | `sifa` | default | Symbolic Interpretation with Fluid Abstractions for reachability and invariant inference. |
 | `symabs_ai` | default | Abstract-interpretation driver with configurable domains, fragmentation, and memory models. |
-| `clam`, `clam-diff`, `clam-pp` | `ENABLE_CLAM=ON` | CLAM-based abstract interpretation, preprocessing, and JSON differencing. |
-| `seahorn`, `seapp`, `seainspect` | `ENABLE_SEAHORN=ON` | SeaHorn verification, preprocessing, and inspection tools. |
-| `hice-dt` | `BUILD_HORN_ICE=ON` | ICE-style learning for Horn clauses / Boogie workflows. |
+| `clam`, `clam-diff`, `clam-pp` | `LOTUS_ENABLE_CLAM=ON` | CLAM-based abstract interpretation, preprocessing, and JSON differencing. |
+| `seahorn`, `seapp`, `seainspect` | `LOTUS_ENABLE_SEAHORN=ON` | SeaHorn verification, preprocessing, and inspection tools. |
+| `hice-dt` | `LOTUS_ENABLE_HORN_ICE=ON` | ICE-style learning for Horn clauses / Boogie workflows. |
 
 ## Default tools
 
@@ -60,7 +60,7 @@ Useful options include `--list-configs`, `--fragment-strategy`,
 
 - CLAM documentation is in `tools/verifier/clam/README.md`.
 - SeaHorn runtime notes are in `tools/verifier/seahorn/sea-rt/README.md`.
-- `hice-dt` is the executable built from `tools/verifier/horn-ice/hice-dt/`.
+- `hice-dt` is the executable built from `third-party/horn-ice/hice-dt/`.
 
 ## Related documentation
 

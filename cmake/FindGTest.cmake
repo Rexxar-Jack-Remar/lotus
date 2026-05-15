@@ -1,10 +1,10 @@
 # Find and configure Google Test
-# If BUILD_TESTS is ON and GTest is not found, download and build it in build/deps
+# If LOTUS_BUILD_TESTS is ON and GTest is not found, download and build it in build/deps
 
 # First, try to find GTest using CMake's built-in find_package
 find_package(GTest QUIET)
 
-if(NOT GTest_FOUND AND BUILD_TESTS)
+if(NOT GTest_FOUND AND LOTUS_BUILD_TESTS)
     # GTest not found, download it to build/deps at configure time
     set(GTEST_ROOT "${CMAKE_BINARY_DIR}/deps/googletest")
     
@@ -49,8 +49,8 @@ if(NOT GTest_FOUND AND BUILD_TESTS)
     
 elseif(NOT GTest_FOUND)
     message(WARNING 
-        "GTest not found and BUILD_TESTS is OFF. Tests will not be built.\n"
-        "To enable tests, set -DBUILD_TESTS=ON")
+        "GTest not found and LOTUS_BUILD_TESTS is OFF. Tests will not be built.\n"
+        "To enable tests, set -DLOTUS_BUILD_TESTS=ON")
 else()
     message(STATUS "Found Google Test: ${GTest_DIR}")
 endif()

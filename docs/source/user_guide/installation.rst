@@ -30,13 +30,41 @@ Configuration Options
 * ``-DLLVM_BUILD_PATH``: Path to the directory containing ``LLVMConfig.cmake`` (for example,
   ``/usr/lib/llvm-14/lib/cmake/llvm`` or a local LLVM build/install). Only needed if CMake
   cannot find an appropriate system LLVM automatically.
-* ``-DCUSTOM_BOOST_ROOT``: Path to custom Boost installation
-* ``-DBUILD_TESTS=ON``: Enable building tests
-* ``-DENABLE_SANITY_CHECKS=ON``: Enable sea-dsa sanity checks
-* ``-DENABLE_CLAM=ON``: Build CLAM abstract interpretation tools
-* ``-DBUILD_HORN_ICE=OFF``: Build ICE learning tools for CHC (default: OFF)
-* ``-DBUILD_DYNAA=OFF``: Build dynamic alias analysis tools (default: OFF)
-* ``-DBUILD_OWL=OFF``: Build OWL SMT solver (default: OFF)
+* ``-DLOTUS_CUSTOM_BOOST_ROOT=/path/to/boost``: Path to a custom Boost installation
+* ``-DLOTUS_CUSTOM_CRAB_ROOT=/path/to/crab``: Path to a custom CRAB checkout
+* ``-DLOTUS_BUILD_TESTS=OFF``: Disable building tests
+* ``-DLOTUS_BUILD_EXAMPLES=ON``: Build examples
+* ``-DLOTUS_ENABLE_CLAM=OFF``: Disable CLAM tools
+* ``-DLOTUS_ENABLE_SEAHORN=OFF``: Disable SeaHorn tools
+* ``-DLOTUS_ENABLE_SMACK=ON``: Enable SMACK tools
+* ``-DLOTUS_ENABLE_HORN_ICE=ON``: Build ICE learning tools for CHC
+* ``-DLOTUS_ENABLE_DYNAA=ON``: Build dynamic alias-analysis tools
+* ``-DLOTUS_ENABLE_CFL=ON``: Build CFL tool family
+* ``-DLOTUS_ENABLE_CSR=ON``: Build the CSR CFL solver
+* ``-DLOTUS_ENABLE_OWL=ON``: Build the Owl SMT solver
+* ``-DLOTUS_SEADSA_ENABLE_SANITY_CHECKS=ON``: Enable Sea-DSA sanity checks
+* ``-DLOTUS_DOWNLOAD_BOOST=OFF``: Disable Boost auto-download
+* ``-DLOTUS_DOWNLOAD_CRAB=ON``: Allow CRAB auto-download when needed
+
+Typical configurations:
+
+.. code-block:: bash
+
+   # Lean local build
+   cmake -S . -B build -DLOTUS_BUILD_TESTS=OFF
+
+   # Enable optional analysis families
+   cmake -S . -B build \
+     -DLOTUS_ENABLE_DYNAA=ON \
+     -DLOTUS_ENABLE_HORN_ICE=ON \
+     -DLOTUS_ENABLE_CFL=ON \
+     -DLOTUS_ENABLE_CSR=ON
+
+   # Disable heavyweight verifier integrations
+   cmake -S . -B build \
+     -DLOTUS_ENABLE_CLAM=OFF \
+     -DLOTUS_ENABLE_SEAHORN=OFF \
+     -DLOTUS_ENABLE_SMACK=OFF
 
 Z3 Installation
 ---------------
@@ -62,5 +90,5 @@ Troubleshooting
   If you use a non-standard installation location, set ``LLVM_BUILD_PATH`` to the directory
   that contains ``LLVMConfig.cmake`` and re-run CMake.
 * **Z3 not found**: Install Z3 or set ``Z3_DIR``
-* **Boost issues**: Use ``CUSTOM_BOOST_ROOT`` or let system auto-download
+* **Boost issues**: Use ``LOTUS_CUSTOM_BOOST_ROOT`` or let Lotus auto-download Boost
 * **Build errors**: Use supported LLVM version (14.x)

@@ -1,5 +1,5 @@
 add_subdirectory(clam)
 
-if(ENABLE_SEAHORN)
+if(LOTUS_ENABLE_SEAHORN)
   add_subdirectory(seahorn)
 endif()

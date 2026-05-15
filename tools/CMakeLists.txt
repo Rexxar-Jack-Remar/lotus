@@ -9,13 +9,11 @@ add_subdirectory(ir)
 #add_subdirectory(mcp)        # not used for now
 
 # not used for now
-option(BUILD_CFL "Build CFL Reachability Solvers" OFF)
-if(BUILD_CFL)
+if(LOTUS_ENABLE_CFL)
     add_subdirectory(cfl)
 endif()
 
 # Optional SMT tools
-option(BUILD_OWL "Build Owl SMT solver" OFF)
-if(BUILD_OWL)
+if(LOTUS_ENABLE_OWL)
     add_subdirectory(solver)
 endif()

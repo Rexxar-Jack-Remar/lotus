@@ -92,10 +92,7 @@ target_link_libraries(call-graph PRIVATE
   ${LLVM_LINK_COMPONENTS}
 )
 
-# Dynamic alias analysis
-option(BUILD_DYNAA "Build dynamic alias analyses" OFF)
-
-# Dynamic Alias Analysis tools (only built if BUILD_DYNAA is enabled)
-if(BUILD_DYNAA)
+# Dynamic Alias Analysis tools (only built if LOTUS_ENABLE_DYNAA is enabled)
+if(LOTUS_ENABLE_DYNAA)
   add_subdirectory(dynaa)
 endif()

@@ -98,7 +98,7 @@ Horn-ICE provides CHC (Constrained Horn Clause) verification with invariant
 learning capabilities.
 
 **Binaries**: ``chc_verifier``, ``hice-dt``  
-**Location**: ``tools/verifier/horn-ice/``
+**Location**: ``third-party/horn-ice/``
 
 **Usage**:
 

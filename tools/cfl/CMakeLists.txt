@@ -1,9 +1,5 @@
 # CFL tools umbrella
 
-
-option(BUILD_CSR "Build indexing context-sensitive reachability solver" OFF)
-if(BUILD_CSR)
+if(LOTUS_ENABLE_CSR)
     add_subdirectory(csr)
 endif()
-
-

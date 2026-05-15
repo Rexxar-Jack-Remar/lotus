@@ -65,6 +65,51 @@ cmake ..
 make -j$(nproc)
 ```
 
+### Build Configuration
+
+Lotus now exposes its project-owned CMake toggles through a single entrypoint in
+`cmake/LotusOptions.cmake`. Project options use a consistent `LOTUS_*` naming
+scheme, and CMake prints a build summary after configuration so the enabled
+surface is explicit.
+
+Common configuration examples:
+
+```bash
+# Minimal local build with tests disabled
+cmake -S . -B build -DLOTUS_BUILD_TESTS=OFF
+
+# Enable optional dynamic alias-analysis tools
+cmake -S . -B build -DLOTUS_ENABLE_DYNAA=ON
+
+# Enable Horn-ICE and CFL tools
+cmake -S . -B build -DLOTUS_ENABLE_HORN_ICE=ON -DLOTUS_ENABLE_CFL=ON \
+  -DLOTUS_ENABLE_CSR=ON
+
+# Disable heavyweight verifier integrations
+cmake -S . -B build -DLOTUS_ENABLE_CLAM=OFF -DLOTUS_ENABLE_SEAHORN=OFF \
+  -DLOTUS_ENABLE_SMACK=OFF
+
+# Use custom dependency roots
+cmake -S . -B build \
+  -DLOTUS_CUSTOM_BOOST_ROOT=/path/to/boost \
+  -DLOTUS_CUSTOM_CRAB_ROOT=/path/to/crab
+```
+
+Common Lotus build toggles:
+
+- `LOTUS_BUILD_TESTS`
+- `LOTUS_BUILD_EXAMPLES`
+- `LOTUS_ENABLE_CLAM`
+- `LOTUS_ENABLE_SEAHORN`
+- `LOTUS_ENABLE_SMACK`
+- `LOTUS_ENABLE_HORN_ICE`
+- `LOTUS_ENABLE_DYNAA`
+- `LOTUS_ENABLE_CFL`
+- `LOTUS_ENABLE_CSR`
+- `LOTUS_ENABLE_OWL`
+- `LOTUS_DOWNLOAD_BOOST`
+- `LOTUS_DOWNLOAD_CRAB`
+
 **Notes**:
 
 - The build system assumes that the system has a supported LLVM (14.x) and Z3 installed.
@@ -77,16 +122,16 @@ make -j$(nproc)
 
 **Boost dependencies** (optional): Boost is only required by certain modules. The build
 system configures Boost **only when** one of these is enabled:
-- **SeaHorn** (`ENABLE_SEAHORN`, default ON) — expression handling, Horn clause DB, graph traits
-- **CLAM** (`ENABLE_CLAM`, default ON) — abstract interpretation, JSON parsing (Boost 1.80+ for JSON)
+- **SeaHorn** (`LOTUS_ENABLE_SEAHORN`, default ON) — expression handling, Horn clause DB, graph traits
+- **CLAM** (`LOTUS_ENABLE_CLAM`, default ON) — abstract interpretation, JSON parsing (Boost 1.80+ for JSON)
 - **CclyzerAA** (`LOTUS_USE_CCLYZER`, default OFF) — alias analysis
-- **FPsolve** (`ENABLE_FPSOLVE`, default OFF) — vendored fixed-point solver library; also requires GMP
+- **FPsolve** (`LOTUS_ENABLE_FPSOLVE`, default OFF) — vendored fixed-point solver library; also requires GMP
 
-If all four are disabled (e.g. `-DENABLE_CLAM=OFF -DENABLE_SEAHORN=OFF -DENABLE_FPSOLVE=OFF`), Boost will **not** be
+If all four are disabled (e.g. `-DLOTUS_ENABLE_CLAM=OFF -DLOTUS_ENABLE_SEAHORN=OFF -DLOTUS_ENABLE_FPSOLVE=OFF`), Boost will **not** be
 configured. Sea-DSA no longer requires Boost.
 
 When Boost is needed, the build will download and build it if not found. You can specify a custom
-Boost path with `-DCUSTOM_BOOST_ROOT=/path/to/boost`.
+Boost path with `-DLOTUS_CUSTOM_BOOST_ROOT=/path/to/boost`.
 
 > **TODO**: Implement automatic download of LLVM and Z3 dependencies
 

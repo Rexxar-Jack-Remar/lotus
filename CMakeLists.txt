@@ -36,37 +36,28 @@ include(cmake/ConfigureLLVM.cmake)
 # Include dependency configuration modules
 include(cmake/FindZ3.cmake)
 
-# Configure module options
-option(ENABLE_CLAM "Enable CLAM abstract interpretation framework" ON)
-option(ENABLE_SEAHORN "Enable SeaHorn" ON)
-option(ENABLE_SMACK "Enable SMACK LLVM-to-Boogie verifier frontend" OFF)
-option(LOTUS_USE_CCLYZER "Enable optional cclyzer++ alias analysis backend" OFF)
-option(ENABLE_TYPE_QUALIFIER
-       "Enable the opt-in TypeQualifier uninitialized-data checker" OFF)
-option(ENABLE_FPSOLVE "Build the vendored FPsolve library under third-party/fpsolve" OFF)
-option(ENABLE_WALI_OPENNWA "Build the vendored WALi/OpenNWA library under third-party/WALi-OpenNWA" OFF)
+# Configure Lotus-owned options in one place.
+include(cmake/LotusOptions.cmake)
 
 # Configure Boost only if modules that require it are enabled
 # Sea-DSA no longer requires Boost, so Boost is only needed for:
-# - SeaHorn (ENABLE_SEAHORN)
-# - CLAM (ENABLE_CLAM)
+# - SeaHorn (LOTUS_ENABLE_SEAHORN)
+# - CLAM (LOTUS_ENABLE_CLAM)
 # - CclyzerAA (LOTUS_USE_CCLYZER)
-if(ENABLE_CLAM OR ENABLE_SEAHORN OR ENABLE_SMACK OR LOTUS_USE_CCLYZER)
+if(LOTUS_ENABLE_CLAM OR LOTUS_ENABLE_SEAHORN OR LOTUS_ENABLE_SMACK OR
+   LOTUS_USE_CCLYZER)
     include(cmake/ConfigureBoost.cmake)
 endif()
 
-option(DOWNLOAD_CRAB "Download and build CRAB if not found" OFF)
-set(CUSTOM_CRAB_ROOT "" CACHE PATH "Path to custom CRAB installation (optional)")
-if (ENABLE_CLAM)
+if(LOTUS_ENABLE_CLAM)
     include(cmake/ConfigureClamCrab.cmake)
 endif()
 
-option(ENABLE_SVF "Enable SVF" OFF)
-if (ENABLE_SVF)
+if(LOTUS_ENABLE_SVF)
     include(cmake/ConfigureSVF.cmake)
 endif()
 
-if (ENABLE_SEAHORN)
+if(LOTUS_ENABLE_SEAHORN)
     include(cmake/ConfigureSeaHorn.cmake)
 endif()
 
@@ -84,17 +75,12 @@ add_subdirectory(lib)
 add_subdirectory(tools)
 add_subdirectory(benchmarks)
 
-option(BUILD_EXAMPLES "Build examples" OFF)
-if(BUILD_EXAMPLES)
+if(LOTUS_BUILD_EXAMPLES)
     add_subdirectory(examples)
 endif()
 
-option(LOTUS_EGRAPH_ENABLE_DOT "Enable DOT/Graphviz helpers in Lotus EGraph" ON)
-option(LOTUS_EGRAPH_ENABLE_JSON "Enable JSON serialization helpers in Lotus EGraph" ON)
-
 # Add tests if enabled
-option(BUILD_TESTS "Build tests" ON)
-if(BUILD_TESTS)
+if(LOTUS_BUILD_TESTS)
     include(cmake/FindGTest.cmake)
     enable_testing()
     add_subdirectory(tests)
@@ -102,3 +88,5 @@ endif()
 
 # Add Python scripts and utilities
 add_subdirectory(scripts)
+
+lotus_print_build_summary()

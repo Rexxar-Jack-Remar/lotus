@@ -15,10 +15,10 @@ cmake --build build -j
 The resulting binaries are written under `build/bin/`.
 
 Dynamic alias-analysis tools are optional and are only built when
-`BUILD_DYNAA=ON`:
+`LOTUS_ENABLE_DYNAA=ON`:
 
 ```bash
-cmake -S . -B build -DCMAKE_BUILD_TYPE=Debug -DBUILD_DYNAA=ON
+cmake -S . -B build -DCMAKE_BUILD_TYPE=Debug -DLOTUS_ENABLE_DYNAA=ON
 cmake --build build -j
 ```
 
@@ -47,10 +47,10 @@ Use `build/bin/<tool> --help` to see the full option set for a specific tool.
 | `call-graph` | Build a call graph with a selected backend | Supports `dyck`, `lotus`, `dfpa`, several `fpa-*` modes, and `aserpta-*` modes. |
 | `sea-dsa-dg` | Dump Sea-DSA memory graphs | Useful for inspecting per-function memory graphs; enable graph emission with `--sea-dsa-dot`. |
 | `seadsa-tool` | Run extended Sea-DSA utilities | Includes memory-graph dumping and other Sea-DSA related driver options. |
-| `dynaa-instrument` | Instrument a program for dynamic alias logging | Built only with `BUILD_DYNAA=ON`. |
-| `dynaa-check` | Compare dynamic logs against a static AA | Built only with `BUILD_DYNAA=ON`. |
-| `dynaa-log-dump` | Decode `pts.log` files | Built only with `BUILD_DYNAA=ON`. |
-| `dynaa` | Dynamic alias-analysis runtime driver | Built only with `BUILD_DYNAA=ON`; see `tools/alias/dynaa/README.md`. |
+| `dynaa-instrument` | Instrument a program for dynamic alias logging | Built only with `LOTUS_ENABLE_DYNAA=ON`. |
+| `dynaa-check` | Compare dynamic logs against a static AA | Built only with `LOTUS_ENABLE_DYNAA=ON`. |
+| `dynaa-log-dump` | Decode `pts.log` files | Built only with `LOTUS_ENABLE_DYNAA=ON`. |
+| `dynaa` | Dynamic alias-analysis runtime driver | Built only with `LOTUS_ENABLE_DYNAA=ON`; see `tools/alias/dynaa/README.md`. |
 
 ## Common workflows
 
