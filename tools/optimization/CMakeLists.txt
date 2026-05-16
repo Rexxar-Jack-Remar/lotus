@@ -30,16 +30,16 @@ function(configure_force_load target library)
   endif()
 endfunction()
 
-add_executable(lotus-ipo lotus-opt-ipo.cpp)
-target_link_libraries(lotus-ipo PRIVATE ${LOTUS_OPT_COMMON_LIBS})
-configure_force_load(lotus-ipo CanaryOptimizationIPO)
+add_executable(lotus-opt-ipo lotus-opt-ipo.cpp)
+target_link_libraries(lotus-opt-ipo PRIVATE ${LOTUS_OPT_COMMON_LIBS})
+configure_force_load(lotus-opt-ipo CanaryOptimizationIPO)
 
-add_executable(lotus-prefetch lotus-opt-prefetch.cpp)
-target_link_libraries(lotus-prefetch PRIVATE ${LOTUS_PREFETCH_COMMON_LIBS})
-configure_force_load(lotus-prefetch CanarySWPrefetching)
+add_executable(lotus-opt-prefetch lotus-opt-prefetch.cpp)
+target_link_libraries(lotus-opt-prefetch PRIVATE ${LOTUS_PREFETCH_COMMON_LIBS})
+configure_force_load(lotus-opt-prefetch CanarySWPrefetching)
 
-add_executable(lotus-purity lotus-opt-purity.cpp)
-target_link_libraries(lotus-purity PRIVATE ${LOTUS_OPT_COMMON_LIBS})
+add_executable(lotus-opt-purity lotus-opt-purity.cpp)
+target_link_libraries(lotus-opt-purity PRIVATE ${LOTUS_OPT_COMMON_LIBS})
 
 #add_executable(lotus-lif lotus-opt-lif.cpp)
 #target_link_libraries(lotus-lif PRIVATE

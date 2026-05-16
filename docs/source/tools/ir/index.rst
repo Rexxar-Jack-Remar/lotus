@@ -3,7 +3,7 @@ PDG Query – Program Dependence Graph Queries
 
 Interactive and batch query engine for the Program Dependence Graph (PDG).
 
-**Binary**: ``pdg-query``  
+**Binary**: ``lotus-ir-pdg-query``  
 **Location**: ``tools/ir/lotus-ir-pdg-query.cpp``
 
 **Usage**:
@@ -11,13 +11,13 @@ Interactive and batch query engine for the Program Dependence Graph (PDG).
 .. code-block:: bash
 
    # Interactive mode
-   ./build/bin/pdg-query -i program.bc
+   ./build/bin/lotus-ir-pdg-query -i program.bc
 
    # Single query
-   ./build/bin/pdg-query -q "MATCH (n:FUNC_ENTRY) WHERE n.name = 'main' RETURN n" program.bc
+   ./build/bin/lotus-ir-pdg-query -q "MATCH (n:FUNC_ENTRY) WHERE n.name = 'main' RETURN n" program.bc
 
    # Batch queries from file
-   ./build/bin/pdg-query -f queries.txt program.bc
+   ./build/bin/lotus-ir-pdg-query -f queries.txt program.bc
 
 Key features:
 

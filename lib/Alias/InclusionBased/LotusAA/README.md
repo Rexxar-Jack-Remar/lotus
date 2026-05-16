@@ -56,7 +56,7 @@ LotusAA is typically not run as a standalone tool. Instead, it is selected via c
 ### Standalone Tool
 
 ```bash
-lotus-aa [options] <input bitcode file>
+lotus-alias-lotus-aa [options] <input bitcode file>
 ```
 
 ### Configuration Options

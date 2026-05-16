@@ -2,7 +2,7 @@
 //
 // RUN: clang -O3 -c -emit-llvm %s -o %t1.bc
 // RUN: opt -mem2reg -instnamer %t1.bc -o %t2.bc
-// RUN: %symabs_ai -check-assertions -config=13_const_function_little_endian -function=test %t2.bc > %t3
+// RUN: %lotus-verify-symabs-ai -check-assertions -config=13_const_function_little_endian -function=test %t2.bc > %t3
 
 #include <stdlib.h>
 #include <assert.h>

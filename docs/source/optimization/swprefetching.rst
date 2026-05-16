@@ -30,7 +30,7 @@ Command-line options
    -dist=<value>                  # LBR distances (lbr mode)
    -llm-dist=<value>              # LLM-provided distances (llm mode)
 
-The ``lotus-prefetch`` frontend also accepts ``--profile=<file>`` and forwards
+The ``lotus-opt-prefetch`` frontend also accepts ``--profile=<file>`` and forwards
 it to the underlying ``-input-file`` option when ``profile`` mode is selected.
 
 Distance providers

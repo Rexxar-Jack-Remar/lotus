@@ -66,7 +66,7 @@ via a standalone tool:
 
 .. code-block:: bash
 
-   ./build/bin/sparrow-aa example.bc
+   ./build/bin/lotus-alias-sparrow-aa example.bc
 
 In integrated settings (e.g., Clam or LotusAA), it can be selected through
 the corresponding configuration files or command-line switches.

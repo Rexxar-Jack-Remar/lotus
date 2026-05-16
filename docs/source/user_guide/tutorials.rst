@@ -57,17 +57,17 @@ Run Different Alias Analyses
 
 .. code-block:: bash
 
-   ./build/bin/sparrow-aa example1.bc
+   ./build/bin/lotus-alias-sparrow-aa example1.bc
 
 This performs context-insensitive, inclusion-based pointer analysis. Good for quick scans.
 
-Note: sparrow-aa also has context-sensitive variants.
+Note: lotus-alias-sparrow-aa also has context-sensitive variants.
 
 **2. AserPTA with 1-CFA (Balanced)**:
 
 .. code-block:: bash
 
-   ./build/bin/aser-aa -analysis-mode=1-cfa -solver=wave -dump-stats example1.bc
+   ./build/bin/lotus-alias-aser-aa -analysis-mode=1-cfa -solver=wave -dump-stats example1.bc
 
 This adds call-site sensitivity for better precision while maintaining good performance.
 
@@ -75,7 +75,7 @@ This adds call-site sensitivity for better precision while maintaining good perf
 
 .. code-block:: bash
 
-   ./build/bin/dyck-aa -print-alias-set-info example1.bc
+   ./build/bin/lotus-alias-dyck-aa -print-alias-set-info example1.bc
 
 Produces the most precise alias sets using Dyck-CFL reachability.
 
@@ -483,7 +483,7 @@ Build PDG and Query
 .. code-block:: bash
 
    clang -emit-llvm -c -g security.c -o security.bc
-   ./build/bin/pdg-query -i security.bc
+   ./build/bin/lotus-ir-pdg-query -i security.bc
 
 Interactive Queries
 ~~~~~~~~~~~~~~~~~~~
@@ -564,7 +564,7 @@ Run batch queries:
 
 .. code-block:: bash
 
-   ./build/bin/pdg-query -f security_policy.txt security.bc
+   ./build/bin/lotus-ir-pdg-query -f security_policy.txt security.bc
 
 Tutorial 7: Dynamic Validation with DynAA
 ------------------------------------------
@@ -741,7 +741,7 @@ Run Interprocedural Analysis
 .. code-block:: bash
 
    # Interprocedural alias analysis
-   ./build/bin/aser-aa -analysis-mode=1-cfa -dump-stats program.bc
+   ./build/bin/lotus-alias-aser-aa -analysis-mode=1-cfa -dump-stats program.bc
    
    # Interprocedural abstract interpretation
    ./build/bin/clam --crab-inter --crab-dom=zones \

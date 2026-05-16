@@ -4,19 +4,19 @@ Alias Analysis Tools
 This page documents the command-line tools under ``tools/alias/``. For the
 underlying algorithms and architecture, see :doc:`../../analysis/alias_analysis`.
 
-SparrowAA (sparrow-aa)
+SparrowAA (lotus-alias-sparrow-aa)
 -------------------
 
 Inclusion-based points-to analysis (flow-insensitive, context-insensitive, context-sensitive).
 
-**Binary**: ``sparrow-aa``  
+**Binary**: ``lotus-alias-sparrow-aa``  
 **Location**: ``tools/alias/lotus-alias-sparrow-aa.cpp``
 
 **Usage**:
 
 .. code-block:: bash
 
-   ./build/bin/sparrow-aa [options] input.bc
+   ./build/bin/lotus-alias-sparrow-aa [options] input.bc
 
 **Notes**:
 
@@ -25,20 +25,20 @@ Inclusion-based points-to analysis (flow-insensitive, context-insensitive, conte
 - Good default when you need quick alias information
 - Note: this tool have some redundancies with aserpta, and reuses some header files from it (from context abstraction).
 
-TPA (tpa)
+TPA (lotus-alias-tpa)
 ---------
 
 Flow- and context-sensitive pointer analysis using semi-sparse representation
 with k-limiting support.
 
-**Binary**: ``tpa``  
+**Binary**: ``lotus-alias-tpa``  
 **Location**: ``tools/alias/lotus-alias-tpa.cpp``
 
 **Usage**:
 
 .. code-block:: bash
 
-   ./build/bin/tpa [options] input.bc
+   ./build/bin/lotus-alias-tpa [options] input.bc
 
 **Key Options** (see also :doc:`../../alias/tpa`):
 
@@ -61,31 +61,31 @@ with k-limiting support.
 .. code-block:: bash
 
    # Basic analysis
-   ./build/bin/tpa input.bc
+   ./build/bin/lotus-alias-tpa input.bc
 
    # With external pointer table and output CFG graphs
-   ./build/bin/tpa -ext ext_table.txt -cfg-dot-dir cfgs/ input.bc
+   ./build/bin/lotus-alias-tpa -ext ext_table.txt -cfg-dot-dir cfgs/ input.bc
 
    # Print points-to sets and indirect call targets
-   ./build/bin/tpa -print-pts -print-indirect-calls input.bc
+   ./build/bin/lotus-alias-tpa -print-pts -print-indirect-calls input.bc
 
    # Skip prepass and save preprocessed IR
-   ./build/bin/tpa -no-prepass -prepass-out preprocessed.bc input.bc
+   ./build/bin/lotus-alias-tpa -no-prepass -prepass-out preprocessed.bc input.bc
 
-AserPTA (aser-aa)
+AserPTA (lotus-alias-aser-aa)
 -----------------
 
 High-performance constraint-based pointer analysis with multiple context
 sensitivities and solver algorithms.
 
-**Binary**: ``aser-aa``  
+**Binary**: ``lotus-alias-aser-aa``  
 **Location**: ``tools/alias/lotus-alias-aser-aa.cpp``
 
 **Usage**:
 
 .. code-block:: bash
 
-   ./build/bin/aser-aa [options] input.bc
+   ./build/bin/lotus-alias-aser-aa [options] input.bc
 
 **Key Options** (see also :doc:`../../analysis/alias_analysis` and ``TOOLS.md``):
 
@@ -114,7 +114,7 @@ sensitivities and solver algorithms.
 .. code-block:: bash
 
    # 1-CFA with deep solver
-   ./build/bin/aser-aa -analysis-mode=1-cfa -solver=deep input.bc
+   ./build/bin/lotus-alias-aser-aa -analysis-mode=1-cfa -solver=deep input.bc
 
 DFPA (dfpa)
 -----------
@@ -139,21 +139,21 @@ Key options:
 - ``-enable-signature-filter=<bool>`` – intersect candidates with signature matches
 - ``-output-file=<path|cout>`` – dump refined targets
 
-Call Graph Construction (call-graph)
+Call Graph Construction (lotus-alias-call-graph)
 ------------------------------------
 
 Unified call-graph construction tool that can drive several underlying pointer
 or call-graph analyses.
 
-**Binary**: ``call-graph``
+**Binary**: ``lotus-alias-call-graph``
 **Location**: ``tools/alias/lotus-alias-call-graph.cpp``
 
 **Usage**:
 
 .. code-block:: bash
 
-   ./build/bin/call-graph -cg-type=dyck input.bc
-   ./build/bin/call-graph -cg-type=dfpa -emit-cg-as-json input.bc
+   ./build/bin/lotus-alias-call-graph -cg-type=dyck input.bc
+   ./build/bin/lotus-alias-call-graph -cg-type=dfpa -emit-cg-as-json input.bc
 
 Key options:
 
@@ -162,19 +162,19 @@ Key options:
 - ``-o <file>`` – output destination
 - ``-S`` – compute graph statistics
 
-DyckAA (dyck-aa)
+DyckAA (lotus-alias-dyck-aa)
 ----------------
 
 Unification-based alias analysis using Dyck-CFL reachability.
 
-**Binary**: ``dyck-aa``  
+**Binary**: ``lotus-alias-dyck-aa``  
 **Location**: ``tools/alias/lotus-alias-dyck-aa.cpp``
 
 **Usage**:
 
 .. code-block:: bash
 
-   ./build/bin/dyck-aa [options] input.bc
+   ./build/bin/lotus-alias-dyck-aa [options] input.bc
 
 **Key Options**:
 
@@ -188,22 +188,22 @@ Unification-based alias analysis using Dyck-CFL reachability.
 .. code-block:: bash
 
    # Dump alias sets and Dyck-based call graph
-   ./build/bin/dyck-aa -print-alias-set-info -dot-dyck-callgraph input.bc
+   ./build/bin/lotus-alias-dyck-aa -print-alias-set-info -dot-dyck-callgraph input.bc
 
-LotusAA (lotus-aa)
+LotusAA (lotus-alias-lotus-aa)
 ------------------
 
 Lotus-specific, flow-sensitive and field-sensitive pointer analysis with
 on-the-fly call graph construction.
 
-**Binary**: ``lotus-aa``  
+**Binary**: ``lotus-alias-lotus-aa``  
 **Location**: ``tools/alias/lotus-alias-lotus-aa.cpp``
 
 **Usage**:
 
 .. code-block:: bash
 
-   ./build/bin/lotus-aa [options] input.bc
+   ./build/bin/lotus-alias-lotus-aa [options] input.bc
 
 **Characteristics**:
 
@@ -217,14 +217,14 @@ FPA (Function Pointer Analysis)
 Function pointer analysis toolbox (FLTA, MLTA, MLTADF, KELP) for resolving
 indirect calls.
 
-**Binary**: ``fpa``  
+**Binary**: ``lotus-alias-fpa``  
 **Location**: ``tools/alias/lotus-alias-fpa.cpp``
 
 **Usage**:
 
 .. code-block:: bash
 
-   ./build/bin/fpa [options] input.bc
+   ./build/bin/lotus-alias-fpa [options] input.bc
 
 **Key Options**:
 
@@ -244,7 +244,7 @@ indirect calls.
 .. code-block:: bash
 
    # KELP-based function pointer analysis
-   ./build/bin/fpa -analysis-type=4 -debug input.bc
+   ./build/bin/lotus-alias-fpa -analysis-type=4 -debug input.bc
 
 Sea-DSA Tools
 -------------
@@ -253,8 +253,8 @@ Sea-DSA-based memory graph construction and analysis.
 
 **Binaries**:
 
-- ``sea-dsa-dg`` – Simple Sea-DSA driver
-- ``seadsa-tool`` – Advanced Sea-DSA analysis tool
+- ``lotus-alias-sea-dsa-dg`` – Simple Sea-DSA driver
+- ``lotus-alias-seadsa-tool`` – Advanced Sea-DSA analysis tool
 
 **Locations**:
 
@@ -266,10 +266,10 @@ Sea-DSA-based memory graph construction and analysis.
 .. code-block:: bash
 
    # Basic memory graph generation
-   ./build/bin/sea-dsa-dg --sea-dsa-dot input.bc
+   ./build/bin/lotus-alias-sea-dsa-dg --sea-dsa-dot input.bc
 
    # Advanced analysis with DOT output directory
-   ./build/bin/seadsa-tool --sea-dsa-dot --outdir=results/ input.bc
+   ./build/bin/lotus-alias-seadsa-tool --sea-dsa-dot --outdir=results/ input.bc
 
 **Key Options**:
 

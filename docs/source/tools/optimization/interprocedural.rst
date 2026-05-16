@@ -2,14 +2,14 @@ Inter-Procedural Optimizations
 ==============================
 
 This page summarizes inter-procedural optimizations implemented in
-``lib/Optimization/IPO/`` and exposed via the ``lotus-ipo`` tool.
+``lib/Optimization/IPO/`` and exposed via the ``lotus-opt-ipo`` tool.
 
 **Implementation Location**: ``lib/Optimization/IPO/``
 
 Tool
 ----
 
-- **Binary**: ``lotus-ipo``
+- **Binary**: ``lotus-opt-ipo``
 - **Source**: ``tools/optimization/lotus-opt-ipo.cpp``
 - **Selection flags**: ``-ipdse``, ``-ip-rle``, ``-ip-sink``, ``-ip-forward``,
   or ``-ip-all`` to run all of them.
@@ -18,7 +18,7 @@ Example:
 
 .. code-block:: bash
 
-   build/bin/lotus-ipo -ip-all input.bc -o optimized.bc
+   build/bin/lotus-opt-ipo -ip-all input.bc -o optimized.bc
 
 Passes
 ------

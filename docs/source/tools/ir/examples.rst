@@ -1,7 +1,7 @@
 PDG Query Example Cookbook
 ==========================
 
-``tools/ir/examples/`` contains ready-to-run Cypher queries for ``pdg-query``.
+``tools/ir/examples/`` contains ready-to-run Cypher queries for ``lotus-ir-pdg-query``.
 
 **Location**: ``tools/ir/examples/``
 

@@ -4,9 +4,9 @@
  * RUN: %sprinstrument -config=memrange %t1.opt.bc %t2.db %t2.bc
  * RUN: clang %t2.bc %rt_flags -o %t2
  *
- * RUN: %symabs_ai -config=memrange -where=memory -function=test %t1.opt.bc > %t2.static
+ * RUN: %lotus-verify-symabs-ai -config=memrange -where=memory -function=test %t1.opt.bc > %t2.static
  * RUN: %t2
- * RUN: %symabs_ai -where=memory -function=test %t2.bc > %t2.hybrid
+ * RUN: %lotus-verify-symabs-ai -where=memory -function=test %t2.bc > %t2.hybrid
  * RUN: grep -F '[24:9] load *[buff, buff + n]' %t2.static
  * RUN: grep -F '[24:9] load *[buff, buff + n]' %t2.hybrid
  */

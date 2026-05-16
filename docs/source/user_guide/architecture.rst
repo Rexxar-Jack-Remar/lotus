@@ -12,7 +12,7 @@ Lotus is organized into several major subsystems that work together to provide a
 
    ┌──────────────────────────────────────────────────────────────┐
    │                      Command-Line Tools                       │
-   │  (aser-aa, dyck-aa, lotus-aa, lotus-kint, clam, etc.)       │
+   │  (lotus-alias-aser-aa, lotus-alias-dyck-aa, lotus-check, clam, etc.) │
    └────────────────┬─────────────────────────────────────────────┘
                     │
    ┌────────────────┴─────────────────────────────────────────────┐
@@ -307,10 +307,10 @@ Standalone Tools
 
 Each major component has standalone command-line tools:
 
-- ``aser-aa``, ``dyck-aa``, ``lotus-aa``: Alias analysis
+- ``lotus-alias-aser-aa``, ``lotus-alias-dyck-aa``, ``lotus-alias-lotus-aa``: Alias analysis
 - ``lotus-kint``, ``lotus-taint``, ``lotus-concur``, ``lotus-pulse``: Bug detection
 - ``clam``, ``clam-pp``, ``clam-diff``: Abstract interpretation
-- ``pdg-query``: PDG queries
+- ``lotus-ir-pdg-query``: PDG queries
 
 Python Integration
 ~~~~~~~~~~~~~~~~~~

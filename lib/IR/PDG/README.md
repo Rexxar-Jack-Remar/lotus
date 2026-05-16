@@ -100,16 +100,16 @@ Supported AA types: `andersen`, `andersen-1cfa`, `andersen-2cfa`, `dyck`, `cfl-a
 - `-ddg`: Generate the data dependence graph (intra-procedural)
 - `-dot-*`: Visualization passes (dot format)
 
-## `pdg-query`
+## `lotus-ir-pdg-query`
 
-``tools/ir/pdg-query.cpp`` supports both raw Cypher queries and analysis mode.
+``tools/ir/lotus-ir-pdg-query.cpp`` supports both raw Cypher queries and analysis mode.
 
 Examples:
 
-- ``pdg-query --analysis slice-backward --criteria-query "MATCH (n:INST_RET) RETURN n" foo.bc``
-- ``pdg-query --analysis chop --criteria-query "MATCH (a) WHERE a.func = 'main' RETURN a" --target-query "MATCH (b:INST_RET) RETURN b" --edge-preset value-flow foo.bc``
-- ``pdg-query --analysis diff --criteria-query "MATCH (n) WHERE n.func = 'old_f' RETURN n" --target-query "MATCH (n) WHERE n.func = 'new_f' RETURN n" --format json foo.bc``
-- ``pdg-query --property-file spec.prp --direction backward --context-sensitive foo.bc``
+- ``lotus-ir-pdg-query --analysis slice-backward --criteria-query "MATCH (n:INST_RET) RETURN n" foo.bc``
+- ``lotus-ir-pdg-query --analysis chop --criteria-query "MATCH (a) WHERE a.func = 'main' RETURN a" --target-query "MATCH (b:INST_RET) RETURN b" --edge-preset value-flow foo.bc``
+- ``lotus-ir-pdg-query --analysis diff --criteria-query "MATCH (n) WHERE n.func = 'old_f' RETURN n" --target-query "MATCH (n) WHERE n.func = 'new_f' RETURN n" --format json foo.bc``
+- ``lotus-ir-pdg-query --property-file spec.prp --direction backward --context-sensitive foo.bc``
 
 Analysis mode accepts ``--scope-function``, ``--scope-query``,
 ``--context-sensitive``, ``--thin``, and ``--format text|json|dot``.

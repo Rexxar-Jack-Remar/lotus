@@ -9,7 +9,7 @@ This page documents the software prefetching frontend backed by
 Tool
 ----
 
-- **Binary**: ``lotus-prefetch``
+- **Binary**: ``lotus-opt-prefetch``
 - **Source**: ``tools/optimization/lotus-opt-prefetch.cpp``
 - **Pass**: ``SWPrefetchingLLVMPass``
 
@@ -17,12 +17,12 @@ Example:
 
 .. code-block:: bash
 
-   build/bin/lotus-prefetch input.bc \
+   build/bin/lotus-opt-prefetch input.bc \
      --prefetch-distance-provider=profile \
      --profile=perf.prof \
      -o prefetched.bc
 
-   build/bin/lotus-prefetch input.bc \
+   build/bin/lotus-opt-prefetch input.bc \
      --prefetch-distance-provider=lbr \
      --dist=32 \
      -o prefetched-lbr.bc

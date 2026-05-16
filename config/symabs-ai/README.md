@@ -1,21 +1,21 @@
 # SymAbsAI Configuration Guide
 
-Everything you need to run SymAbsAI lives in this directory. Pick a config, point `spranalyze` or `symabs_ai` at it, and go.
+Everything you need to run SymAbsAI lives in this directory. Pick a config, point `spranalyze` or `lotus-verify-symabs-ai` at it, and go.
 
 ## TL;DR
-- `symabs_ai --list-configs` (or `spranalyze --list-configs`) shows the menu.
-- `symabs_ai --config config/symabs-ai/FILE.conf input.bc` is the common path.
+- `lotus-verify-symabs-ai --list-configs` (or `spranalyze --list-configs`) shows the menu.
+- `lotus-verify-symabs-ai --config config/symabs-ai/FILE.conf input.bc` is the common path.
 - `--abstract-domain NAME` and `--function main` override config values.
 - Set `SYMBOLIC_ABSTRACTION_CONFIG=config/symabs-ai/FILE.conf` to make a default.
 
 ## Quick Commands
 
 ```bash
-symabs_ai --list-domains
-symabs_ai --list-configs
-symabs_ai --config config/symabs-ai/03_const_edge.conf program.bc
-symabs_ai --abstract-domain SimpleConstProp --function main program.bc
-symabs_ai --verbose --config config/symabs-ai/17_const_function_verbose.conf debug.bc
+lotus-verify-symabs-ai --list-domains
+lotus-verify-symabs-ai --list-configs
+lotus-verify-symabs-ai --config config/symabs-ai/03_const_edge.conf program.bc
+lotus-verify-symabs-ai --abstract-domain SimpleConstProp --function main program.bc
+lotus-verify-symabs-ai --verbose --config config/symabs-ai/17_const_function_verbose.conf debug.bc
 ```
 
 ## Ready-Made Configs
@@ -46,7 +46,7 @@ SymAbsAIPass.Verbose = false
 - **First look at a module:** `spranalyze --list-functions module.bc`
 - **Find constants quickly:** `spranalyze --abstract-domain SimpleConstProp --function main module.bc`
 - **Check bounds:** `spranalyze --abstract-domain Interval --function compute module.bc`
-- **Audit memory:** `symabs_ai --config config/symabs-ai/memsafety_sv16_body.conf unsafe.bc`
+- **Audit memory:** `lotus-verify-symabs-ai --config config/symabs-ai/memsafety_sv16_body.conf unsafe.bc`
 - **Tune your own:** copy a `.conf`, adjust strategy, domains, widening delay.
 
 ## Migration Snapshot
@@ -56,7 +56,7 @@ SymAbsAIPass.Verbose = false
 - Documentation merged: this README now covers quick reference + migration status.
 
 **Sanity checks after changes**
-- Load a few configs: `symabs_ai --config config/symabs-ai/01_const_function.conf test.bc`
+- Load a few configs: `lotus-verify-symabs-ai --config config/symabs-ai/01_const_function.conf test.bc`
 - Confirm environment variable path works.
 - Run `spranalyze --list-configs` to ensure new files are picked up.
 
@@ -76,4 +76,3 @@ SymAbsAIPass.Verbose = false
 - `docs/source/verification/symabs-ai.rst` – framework documentation.
 
 Questions? Start with `spranalyze --help`, then skim the configs themselves for inline comments.
-

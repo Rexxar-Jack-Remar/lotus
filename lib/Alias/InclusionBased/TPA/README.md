@@ -89,7 +89,7 @@ without carrying store snapshots, while memory-level nodes join/propagate stores
 ### Command-Line Tool
 
 ```bash
-tpa [options] <input bitcode file>
+lotus-alias-tpa [options] <input bitcode file>
 ```
 
 **Key options:**

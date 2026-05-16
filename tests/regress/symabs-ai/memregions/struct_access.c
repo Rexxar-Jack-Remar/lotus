@@ -1,6 +1,6 @@
 // RUN: clang -c -g -emit-llvm %s -o %t1.bc
 // RUN: opt -mem2reg -instnamer %t1.bc -o %t2.bc
-// RUN: %symabs_ai -check-memsafety -config=memregion %t2.bc > %t3
+// RUN: %lotus-verify-symabs-ai -check-memsafety -config=memregion %t2.bc > %t3
 // RUN: grep -F "No possibly invalid memory accesses detected." %t3
 
 #include <stdint.h>

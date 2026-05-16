@@ -10,13 +10,13 @@ Command-line entrance for **Sifa** (Symbolic Interpretation with Fluid Abstracti
 From the repo root:
 
 ```bash
-cmake --build build --target sifa
+cmake --build build --target lotus-verify-sifa
 ```
 
 ## Usage
 
 ```bash
-sifa <bitcode.bc> [options]
+lotus-verify-sifa <bitcode.bc> [options]
 ```
 
 - **&lt;bitcode.bc&gt;** – LLVM bitcode file (e.g. from `clang -c -emit-llvm` then `opt -mem2reg -instnamer`).

@@ -1,5 +1,5 @@
 /*
- * lotus-prefetch
+ * lotus-opt-prefetch
  * A command-line driver for software prefetching passes in
  * lib/Optimization/Prefetch.
  */

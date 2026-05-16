@@ -52,57 +52,57 @@ while true; do
     echo "Output: Compilation successful"
     
     # Run analysis tools
-    # sparrow-aa with different --andersen-k-cs values
+    # lotus-alias-sparrow-aa with different --andersen-k-cs values
     for k_cs in 0 1 2; do
-        echo "=== Running sparrow-aa with --andersen-k-cs=$k_cs ==="
-        if ! "$BUILD_DIR/bin/sparrow-aa" --andersen-k-cs="$k_cs" "$BC_FILE" 2>&1; then
-            echo "CRASH: sparrow-aa (--andersen-k-cs=$k_cs) crashed on $C_FILE"
+        echo "=== Running lotus-alias-sparrow-aa with --andersen-k-cs=$k_cs ==="
+        if ! "$BUILD_DIR/bin/lotus-alias-sparrow-aa" --andersen-k-cs="$k_cs" "$BC_FILE" 2>&1; then
+            echo "CRASH: lotus-alias-sparrow-aa (--andersen-k-cs=$k_cs) crashed on $C_FILE"
             echo "Test files preserved: $C_FILE, $BC_FILE"
             exit 1
         fi
-        echo "✓ sparrow-aa (--andersen-k-cs=$k_cs) completed successfully"
+        echo "✓ lotus-alias-sparrow-aa (--andersen-k-cs=$k_cs) completed successfully"
     done
     
-    # aser-aa with different --analysis-mode values
+    # lotus-alias-aser-aa with different --analysis-mode values
     for mode in ci 1-cfa 2-cfa origin; do
-        echo "=== Running aser-aa with --analysis-mode=$mode ==="
-        if ! "$BUILD_DIR/bin/aser-aa" --analysis-mode="$mode" "$BC_FILE" 2>&1; then
-            echo "CRASH: aser-aa (--analysis-mode=$mode) crashed on $C_FILE"
+        echo "=== Running lotus-alias-aser-aa with --analysis-mode=$mode ==="
+        if ! "$BUILD_DIR/bin/lotus-alias-aser-aa" --analysis-mode="$mode" "$BC_FILE" 2>&1; then
+            echo "CRASH: lotus-alias-aser-aa (--analysis-mode=$mode) crashed on $C_FILE"
             echo "Test files preserved: $C_FILE, $BC_FILE"
             exit 1
         fi
-        echo "✓ aser-aa (--analysis-mode=$mode) completed successfully"
+        echo "✓ lotus-alias-aser-aa (--analysis-mode=$mode) completed successfully"
     done
     
-    # aser-aa with different --analysis-mode values and --pta-use-bdd-pts
+    # lotus-alias-aser-aa with different --analysis-mode values and --pta-use-bdd-pts
     for mode in ci 1-cfa 2-cfa origin; do
-        echo "=== Running aser-aa with --analysis-mode=$mode --pta-use-bdd-pts ==="
-        if ! "$BUILD_DIR/bin/aser-aa" --analysis-mode="$mode" --pta-use-bdd-pts "$BC_FILE" 2>&1; then
-            echo "CRASH: aser-aa (--analysis-mode=$mode --pta-use-bdd-pts) crashed on $C_FILE"
+        echo "=== Running lotus-alias-aser-aa with --analysis-mode=$mode --pta-use-bdd-pts ==="
+        if ! "$BUILD_DIR/bin/lotus-alias-aser-aa" --analysis-mode="$mode" --pta-use-bdd-pts "$BC_FILE" 2>&1; then
+            echo "CRASH: lotus-alias-aser-aa (--analysis-mode=$mode --pta-use-bdd-pts) crashed on $C_FILE"
             echo "Test files preserved: $C_FILE, $BC_FILE"
             exit 1
         fi
-        echo "✓ aser-aa (--analysis-mode=$mode --pta-use-bdd-pts) completed successfully"
+        echo "✓ lotus-alias-aser-aa (--analysis-mode=$mode --pta-use-bdd-pts) completed successfully"
     done
     
-    # lotus-aa (no variants)
-    echo "=== Running lotus-aa ==="
-    if ! "$BUILD_DIR/bin/lotus-aa" "$BC_FILE" 2>&1; then
-        echo "CRASH: lotus-aa crashed on $C_FILE"
+    # lotus-alias-lotus-aa (no variants)
+    echo "=== Running lotus-alias-lotus-aa ==="
+    if ! "$BUILD_DIR/bin/lotus-alias-lotus-aa" "$BC_FILE" 2>&1; then
+        echo "CRASH: lotus-alias-lotus-aa crashed on $C_FILE"
         echo "Test files preserved: $C_FILE, $BC_FILE"
         exit 1
     fi
-    echo "✓ lotus-aa completed successfully"
+    echo "✓ lotus-alias-lotus-aa completed successfully"
     
-    # tpa with different -k-limit values
+    # lotus-alias-tpa with different -k-limit values
     for k_limit in 0 1 2; do
-        echo "=== Running tpa with -k-limit=$k_limit ==="
-        if ! "$BUILD_DIR/bin/tpa" -k-limit "$k_limit" "$BC_FILE" 2>&1; then
-            echo "CRASH: tpa (-k-limit=$k_limit) crashed on $C_FILE"
+        echo "=== Running lotus-alias-tpa with -k-limit=$k_limit ==="
+        if ! "$BUILD_DIR/bin/lotus-alias-tpa" -k-limit "$k_limit" "$BC_FILE" 2>&1; then
+            echo "CRASH: lotus-alias-tpa (-k-limit=$k_limit) crashed on $C_FILE"
             echo "Test files preserved: $C_FILE, $BC_FILE"
             exit 1
         fi
-        echo "✓ tpa (-k-limit=$k_limit) completed successfully"
+        echo "✓ lotus-alias-tpa (-k-limit=$k_limit) completed successfully"
     done
     
     # Cleanup if no crash

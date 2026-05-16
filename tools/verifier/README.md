@@ -12,7 +12,7 @@ cmake --build build -j
 
 Several verifier families are optional:
 
-- `sifa` and `symabs_ai` are configured by default.
+- `lotus-verify-sifa` and `lotus-verify-symabs-ai` are configured by default.
 - CLAM tools are built only when `LOTUS_ENABLE_CLAM=ON`.
 - SeaHorn tools are built only when `LOTUS_ENABLE_SEAHORN=ON`.
 - `hice-dt` is built only when `LOTUS_ENABLE_HORN_ICE=ON`.
@@ -21,40 +21,40 @@ Several verifier families are optional:
 
 | Tool / family | Availability | Purpose |
 | --- | --- | --- |
-| `sifa` | default | Symbolic Interpretation with Fluid Abstractions for reachability and invariant inference. |
-| `symabs_ai` | default | Abstract-interpretation driver with configurable domains, fragmentation, and memory models. |
+| `lotus-verify-sifa` | default | Symbolic Interpretation with Fluid Abstractions for reachability and invariant inference. |
+| `lotus-verify-symabs-ai` | default | Abstract-interpretation driver with configurable domains, fragmentation, and memory models. |
 | `clam`, `clam-diff`, `clam-pp` | `LOTUS_ENABLE_CLAM=ON` | CLAM-based abstract interpretation, preprocessing, and JSON differencing. |
 | `seahorn`, `seapp`, `seainspect` | `LOTUS_ENABLE_SEAHORN=ON` | SeaHorn verification, preprocessing, and inspection tools. |
 | `hice-dt` | `LOTUS_ENABLE_HORN_ICE=ON` | ICE-style learning for Horn clauses / Boogie workflows. |
 
 ## Default tools
 
-### `sifa`
+### `lotus-verify-sifa`
 
-`sifa` analyzes a selected function in LLVM bitcode and can run either the fast
+`lotus-verify-sifa` analyzes a selected function in LLVM bitcode and can run either the fast
 instruction-level transfer semantics or the SMT-backed SymbolicAbstraction
 backend.
 
 Implementation: `tools/verifier/sifa/lotus-verify-sifa.cpp`
 
 ```bash
-build/bin/sifa input.bc --function main --abstract-domain Interval
-build/bin/sifa input.bc --symabs --abstract-domain Octagon --reachability
+build/bin/lotus-verify-sifa input.bc --function main --abstract-domain Interval
+build/bin/lotus-verify-sifa input.bc --symabs --abstract-domain Octagon --reachability
 ```
 
 See `tools/verifier/sifa/README.md` for detailed options.
 
-### `symabs_ai`
+### `lotus-verify-symabs-ai`
 
-`symabs_ai` is a configurable abstract-interpretation frontend with pluggable
+`lotus-verify-symabs-ai` is a configurable abstract-interpretation frontend with pluggable
 domains and configuration files.
 
 Implementation: `tools/verifier/symabs-ai/lotus-verify-symabs-ai.cpp`
 
 ```bash
-build/bin/symabs_ai --list-domains
-build/bin/symabs_ai input.bc --function main --abstract-domain Interval
-build/bin/symabs_ai input.bc --config config/symabs-ai/default.conf --check-assertions
+build/bin/lotus-verify-symabs-ai --list-domains
+build/bin/lotus-verify-symabs-ai input.bc --function main --abstract-domain Interval
+build/bin/lotus-verify-symabs-ai input.bc --config config/symabs-ai/default.conf --check-assertions
 ```
 
 Useful options include `--list-configs`, `--fragment-strategy`,

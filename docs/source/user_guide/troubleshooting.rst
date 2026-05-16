@@ -172,7 +172,7 @@ Analysis Takes Too Long
 .. code-block:: bash
 
    # For alias analysis, use context-insensitive
-   ./bin/aser-aa -analysis-mode=ci input.bc
+   ./bin/lotus-alias-aser-aa -analysis-mode=ci input.bc
    
    # For CLAM, use interval domain
    ./bin/clam --crab-dom=int input.bc
@@ -194,10 +194,10 @@ Analysis Takes Too Long
 .. code-block:: bash
 
    # Disable field sensitivity
-   ./bin/aser-aa -field-sensitive=false input.bc
+   ./bin/lotus-alias-aser-aa -field-sensitive=false input.bc
    
    # Limit context depth
-   ./bin/aser-aa -analysis-mode=1-cfa -max-context-depth=2 input.bc
+   ./bin/lotus-alias-aser-aa -analysis-mode=1-cfa -max-context-depth=2 input.bc
 
 Out of Memory
 ~~~~~~~~~~~~~
@@ -217,7 +217,7 @@ Out of Memory
 
 .. code-block:: bash
 
-   ./bin/dyck-aa input.bc
+   ./bin/lotus-alias-dyck-aa input.bc
 
 3. Analyze incrementally:
 
@@ -246,7 +246,7 @@ False Positives
 .. code-block:: bash
 
    # 1-CFA instead of CI
-   ./bin/aser-aa -analysis-mode=1-cfa input.bc
+   ./bin/lotus-alias-aser-aa -analysis-mode=1-cfa input.bc
    
    # Zones domain instead of intervals
    ./bin/clam --crab-dom=zones input.bc
@@ -367,7 +367,7 @@ DyckAA Issues
 .. code-block:: bash
 
    # Ensure indirect calls are analyzed
-   ./bin/dyck-aa -dot-dyck-callgraph input.bc
+   ./bin/lotus-alias-dyck-aa -dot-dyck-callgraph input.bc
 
 PDG Query Issues
 ~~~~~~~~~~~~~~~~
@@ -388,13 +388,13 @@ PDG Query Issues
 
 .. code-block:: bash
 
-   ./bin/pdg-query -q "MATCH (n) RETURN n" input.bc  # Should show nodes
+   ./bin/lotus-ir-pdg-query -q "MATCH (n) RETURN n" input.bc  # Should show nodes
 
 3. Use verbose mode:
 
 .. code-block:: bash
 
-   ./bin/pdg-query -v -q "MATCH (n) RETURN n" input.bc
+   ./bin/lotus-ir-pdg-query -v -q "MATCH (n) RETURN n" input.bc
 
 **Problem**: Query parser error.
 
@@ -414,7 +414,7 @@ PDG Query Issues
 
 .. code-block:: bash
 
-   ./bin/pdg-query -i input.bc
+   ./bin/lotus-ir-pdg-query -i input.bc
    > MATCH (n:FUNC_ENTRY) WHERE n.name = 'main' RETURN n
 
 Taint Analysis Issues
@@ -478,13 +478,13 @@ Reducing Memory Usage
 .. code-block:: bash
 
    # Field-insensitive uses less memory
-   ./bin/aser-aa -field-sensitive=false input.bc
+   ./bin/lotus-alias-aser-aa -field-sensitive=false input.bc
 
 2. **Limit analysis depth**:
 
 .. code-block:: bash
 
-   ./bin/aser-aa -analysis-mode=1-cfa input.bc  # Not 2-cfa
+   ./bin/lotus-alias-aser-aa -analysis-mode=1-cfa input.bc  # Not 2-cfa
 
 3. **Process in batches**:
 
@@ -519,7 +519,7 @@ A: Yes! Compile to LLVM IR:
 A: Yes, use:
 
 - ``lotus-concur`` for concurrency bugs
-- ``aser-aa -analysis-mode=origin`` for thread-aware analysis
+- ``lotus-alias-aser-aa -analysis-mode=origin`` for thread-aware analysis
 - MHP analysis in concurrency module
 
 **Q: How do I visualize results?**
@@ -529,13 +529,13 @@ A: Generate DOT files:
 .. code-block:: bash
 
    # Call graph
-   ./bin/dyck-aa -dot-dyck-callgraph input.bc
+   ./bin/lotus-alias-dyck-aa -dot-dyck-callgraph input.bc
    
    # PDG
-   ./bin/pdg-query -dump-dot input.bc
+   ./bin/lotus-ir-pdg-query -dump-dot input.bc
    
    # Sea-DSA memory graph
-   ./bin/seadsa-tool --sea-dsa-dot --outdir=output/ input.bc
+   ./bin/lotus-alias-seadsa-tool --sea-dsa-dot --outdir=output/ input.bc
    
    # Convert to PDF
    dot -Tpdf output.dot -o output.pdf
@@ -841,7 +841,7 @@ Example bug report:
    
    **To Reproduce**:
    1. Compile: clang -emit-llvm -c test.c -o test.bc
-   2. Run: ./bin/dyck-aa test.bc
+   2. Run: ./bin/lotus-alias-dyck-aa test.bc
    
    **Error**:
    Segmentation fault (core dumped)

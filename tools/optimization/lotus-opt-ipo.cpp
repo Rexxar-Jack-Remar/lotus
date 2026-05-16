@@ -1,5 +1,5 @@
 /*
- * lotus-ipo
+ * lotus-opt-ipo
  * A command-line driver for inter-procedural optimizations in
  * lib/Optimization/IPO.
  */

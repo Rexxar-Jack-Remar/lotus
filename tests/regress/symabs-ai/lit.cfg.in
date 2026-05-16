@@ -28,7 +28,7 @@ def find_tool(tool_name):
 
     assert False
 
-ALL_TOOLS = ["symabs_ai", "probe_filter"]
+ALL_TOOLS = ["lotus-verify-symabs-ai", "probe_filter"]
 
 if '@ENABLE_DYNAMIC@' == 'ON':
     ALL_TOOLS.append("sprinstrument")

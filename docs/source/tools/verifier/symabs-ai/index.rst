@@ -5,7 +5,7 @@ SymAbsAI is a framework for static program analysis using symbolic abstraction
 to provide a flexible interface for designing program analyses in a
 compositional way.
 
-**Binary**: ``symabs_ai``  
+**Binary**: ``lotus-verify-symabs-ai``  
 **Source**: ``tools/verifier/symabs-ai/lotus-verify-symabs-ai.cpp``
 
 For the underlying framework and API documentation, see :doc:`../../../verification/symabs-ai`.
@@ -32,26 +32,26 @@ Quick Start
 .. code-block:: bash
 
    # Analyze all functions
-   ./build/bin/symabs_ai example.bc
+   ./build/bin/lotus-verify-symabs-ai example.bc
 
    # Analyze specific function
-   ./build/bin/symabs_ai --function=foo example.bc
+   ./build/bin/lotus-verify-symabs-ai --function=foo example.bc
 
    # Use a configuration file
-   ./build/bin/symabs_ai --config config/symabs-ai/01_const_function.conf example.bc
+   ./build/bin/lotus-verify-symabs-ai --config config/symabs-ai/01_const_function.conf example.bc
 
 **List available options**:
 
 .. code-block:: bash
 
    # List available abstract domains
-   ./build/bin/symabs_ai --list-domains
+   ./build/bin/lotus-verify-symabs-ai --list-domains
 
    # List available configuration files
-   ./build/bin/symabs_ai --list-configs
+   ./build/bin/lotus-verify-symabs-ai --list-configs
 
    # List functions in a module
-   ./build/bin/symabs_ai --list-functions example.bc
+   ./build/bin/lotus-verify-symabs-ai --list-functions example.bc
 
 Configuration Files
 -------------------

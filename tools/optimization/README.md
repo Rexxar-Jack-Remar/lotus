@@ -15,10 +15,10 @@ The binaries are written to `build/bin/`.
 
 | Tool | Purpose | Notes |
 | --- | --- | --- |
-| `lotus-ipo` | Driver for Lotus interprocedural IPO passes | Implemented by `tools/optimization/lotus-opt-ipo.cpp`; runs the MemorySSA/ShadowMem-backed passes in `lib/Optimization/IPO`. |
+| `lotus-opt-ipo` | Driver for Lotus interprocedural IPO passes | Implemented by `tools/optimization/lotus-opt-ipo.cpp`; runs the MemorySSA/ShadowMem-backed passes in `lib/Optimization/IPO`. |
 | `lotus-lif` | Driver for the migrated LIF isochronous transform | Implemented by `tools/optimization/lotus-opt-lif.cpp` under the unified `Security/LIF` subsystem and currently built against Lotus's LLVM 14 toolchain. |
-| `lotus-purity` | Purity inference and summary workflow driver | Implemented by `tools/optimization/lotus-opt-purity.cpp`; automatically prepares SeaDsa/ShadowMem-backed MemorySSA unless `--disable-memoryssa-prep` is passed; defaults that prep to `--sea-dsa=ci` for robustness, but accepts an explicit `--sea-dsa=...` override. |
-| `lotus-prefetch` | Driver for Lotus software prefetch passes | Implemented by `tools/optimization/lotus-opt-prefetch.cpp`; runs the software prefetching pass in `lib/Optimization/Prefetch`. |
+| `lotus-opt-purity` | Purity inference and summary workflow driver | Implemented by `tools/optimization/lotus-opt-purity.cpp`; automatically prepares SeaDsa/ShadowMem-backed MemorySSA unless `--disable-memoryssa-prep` is passed; defaults that prep to `--sea-dsa=ci` for robustness, but accepts an explicit `--sea-dsa=...` override. |
+| `lotus-opt-prefetch` | Driver for Lotus software prefetch passes | Implemented by `tools/optimization/lotus-opt-prefetch.cpp`; runs the software prefetching pass in `lib/Optimization/Prefetch`. |
 
 ## Input and output
 
@@ -27,10 +27,10 @@ bitcode or LLVM assembly.
 
 ```bash
 clang -emit-llvm -c test.c -o test.bc
-build/bin/lotus-ipo test.bc -o out.bc
-build/bin/lotus-purity test.bc --purity-summary-file summaries.json
-build/bin/lotus-ipo test.bc -S -o out.ll
-build/bin/lotus-prefetch test.bc -S -o prefetch.ll
+build/bin/lotus-opt-ipo test.bc -o out.bc
+build/bin/lotus-opt-purity test.bc --purity-summary-file summaries.json
+build/bin/lotus-opt-ipo test.bc -S -o out.ll
+build/bin/lotus-opt-prefetch test.bc -S -o prefetch.ll
 ```
 
 ## LIF migration target
@@ -60,7 +60,7 @@ Current limitations:
 
 ## Prefetch pass
 
-- `lotus-prefetch` always runs `SWPrefetchingLLVMPass`.
+- `lotus-opt-prefetch` always runs `SWPrefetchingLLVMPass`.
 - Prefetch-distance selection is controlled by the pass-level flags already
   declared in `lib/Optimization/Prefetch`, such as `--prefetch-distance-provider`,
   `--profile`, `--dist`, and `--llm-dist`.
@@ -71,22 +71,22 @@ Current limitations:
 
 ```bash
 # Run the full interprocedural optimization bundle
-build/bin/lotus-ipo test.bc --ip-all -o opt.bc
+build/bin/lotus-opt-ipo test.bc --ip-all -o opt.bc
 
 # Run a selected subset of IPO passes
-build/bin/lotus-ipo test.bc \
+build/bin/lotus-opt-ipo test.bc \
   --ipdse \
   --ip-forward \
   -o opt-subset.bc
 
 # Run software prefetching with explicit LBR distances
-build/bin/lotus-prefetch test.bc \
+build/bin/lotus-opt-prefetch test.bc \
   --prefetch-distance-provider=lbr \
   --dist=32 \
   -o prefetch.bc
 
 # Run profile-guided software prefetching
-build/bin/lotus-prefetch test.bc \
+build/bin/lotus-opt-prefetch test.bc \
   --prefetch-distance-provider=profile \
   --profile=perf.prof \
   -o prefetch-profile.bc
@@ -95,6 +95,6 @@ build/bin/lotus-prefetch test.bc \
 ## Related documentation
 
 - `lib/Optimization/README.md` documents the optimization libraries.
-- `lib/Optimization/IPO/README.md` documents the passes exposed by `lotus-ipo`.
+- `lib/Optimization/IPO/README.md` documents the passes exposed by `lotus-opt-ipo`.
 - `lib/Optimization/Prefetch/` contains the software prefetching implementation
-  used by `lotus-prefetch`.
+  used by `lotus-opt-prefetch`.

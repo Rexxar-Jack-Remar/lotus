@@ -109,20 +109,19 @@ The standalone driver can be invoked as:
 
 .. code-block:: bash
 
-   ./build/bin/aser-aa -analysis-mode=1-cfa -solver=deep example.bc
+   ./build/bin/lotus-alias-aser-aa -analysis-mode=1-cfa -solver=deep example.bc
 
    # Context-insensitive with wave propagation
-   ./build/bin/aser-aa input.bc
+   ./build/bin/lotus-alias-aser-aa input.bc
 
    # 1-CFA with deep propagation
-   ./build/bin/aser-aa -analysis-mode=1-cfa -solver=deep input.bc
+   ./build/bin/lotus-alias-aser-aa -analysis-mode=1-cfa -solver=deep input.bc
 
    # Origin-sensitive (tracks pthread_create and spawns)
-   ./build/bin/aser-aa -analysis-mode=origin input.bc
+   ./build/bin/lotus-alias-aser-aa -analysis-mode=origin input.bc
 
    # Field-insensitive for faster analysis
-   ./build/bin/aser-aa -field-sensitive=false input.bc
+   ./build/bin/lotus-alias-aser-aa -field-sensitive=false input.bc
 
 In Lotus, AserPTA is also accessible through the AA wrapper and configuration
 files that select it as the primary alias analysis engine.
-

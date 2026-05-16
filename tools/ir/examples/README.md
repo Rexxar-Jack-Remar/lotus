@@ -1,16 +1,16 @@
 # PDG Cypher query examples
 
-These files are meant to be run with `pdg-query` (one query per line; `#` starts a comment).
+These files are meant to be run with `lotus-ir-pdg-query` (one query per line; `#` starts a comment).
 
 ## Run
 
-- Build: `cmake --build build --target pdg-query`
-- Execute a query file: `./build/bin/pdg-query -f tools/ir/examples/metrics.cypher <input.bc>`
-- New primitives demo: `./build/bin/pdg-query -f tools/ir/examples/primitives.cypher <input.bc>`
+- Build: `cmake --build build --target lotus-ir-pdg-query`
+- Execute a query file: `./build/bin/lotus-ir-pdg-query -f tools/ir/examples/metrics.cypher <input.bc>`
+- New primitives demo: `./build/bin/lotus-ir-pdg-query -f tools/ir/examples/primitives.cypher <input.bc>`
 
 For metric-style queries where you want the full count, run with `--limit 0` (otherwise `Result(N nodes)` reflects the limited result set).
 
-By default, `pdg-query` runs the `ProgramDependencyGraph` pass (`--build-pdg`) so edge queries (data/control/param/call) work.
+By default, `lotus-ir-pdg-query` runs the `ProgramDependencyGraph` pass (`--build-pdg`) so edge queries (data/control/param/call) work.
 
 ## Mini schema (Lotus PDG)
 

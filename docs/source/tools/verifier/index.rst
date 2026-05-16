@@ -36,7 +36,7 @@ SymAbsAI is a framework for static program analysis using symbolic abstraction
 to provide a flexible interface for designing program analyses in a
 compositional way.
 
-**Binary**: ``symabs_ai``
+**Binary**: ``lotus-verify-symabs-ai``
 **Source**: ``tools/verifier/symabs-ai/lotus-verify-symabs-ai.cpp``
 
 **Quick Start**:
@@ -44,10 +44,10 @@ compositional way.
 .. code-block:: bash
 
    # Analyze all functions
-   ./build/bin/symabs_ai example.bc
+   ./build/bin/lotus-verify-symabs-ai example.bc
 
    # Analyze specific function
-   ./build/bin/symabs_ai --function=foo example.bc
+   ./build/bin/lotus-verify-symabs-ai --function=foo example.bc
 
 For detailed documentation, see :doc:`symabs-ai/index`.
 
@@ -57,16 +57,16 @@ Sifa – Symbolic Interpretation with Fluid Abstractions
 Sifa is a symbolic-interpretation verifier with configurable abstract domains
 and optional SymAbs-backed reasoning.
 
-**Binary**: ``sifa``
+**Binary**: ``lotus-verify-sifa``
 **Source**: ``tools/verifier/sifa/lotus-verify-sifa.cpp``
 
 **Quick Start**:
 
 .. code-block:: bash
 
-   ./build/bin/sifa program.bc
-   ./build/bin/sifa program.bc --function=foo --block=loop.header
-   ./build/bin/sifa program.bc --symabs --abstract-domain=Octagon
+   ./build/bin/lotus-verify-sifa program.bc
+   ./build/bin/lotus-verify-sifa program.bc --function=foo --block=loop.header
+   ./build/bin/lotus-verify-sifa program.bc --symabs --abstract-domain=Octagon
 
 For detailed documentation, see :doc:`sifa/index`.
 

@@ -120,14 +120,15 @@ static void logModuleStats(StringRef label, const ModuleStats &stats) {
     return;
   }
 
-  errs() << "[lotus-purity] " << label << ": definitions=" << stats.definitions
+  errs() << "[lotus-opt-purity] " << label
+         << ": definitions=" << stats.definitions
          << " declarations=" << stats.declarations
          << " shadow_mem_calls=" << stats.shadowMemCalls << "\n";
 }
 
 static void logWorkflow(StringRef message) {
   if (PurityLog) {
-    errs() << "[lotus-purity] " << message << "\n";
+    errs() << "[lotus-opt-purity] " << message << "\n";
   }
 }
 
@@ -191,17 +192,17 @@ logReportSummary(const lotus::analysis::purity::PurityInferenceReport &report) {
     }
   }
 
-  errs() << "[lotus-purity] report: functions=" << report.functions.size()
+  errs() << "[lotus-opt-purity] report: functions=" << report.functions.size()
          << " const=" << constCount << " pure=" << pureCount
          << " impure=" << impureCount << " unknown=" << unknownCount << "\n";
-  errs() << "[lotus-purity] sources: memoryssa=" << memorySSASourceCount
+  errs() << "[lotus-opt-purity] sources: memoryssa=" << memorySSASourceCount
          << " propagated=" << propagatedSourceCount
          << " internal=" << internalSourceCount
          << " fallback=" << fallbackSourceCount
          << " local_attrs=" << localAttributeSourceCount
          << " builtin_spec=" << builtinSpecSourceCount
          << " external=" << externalSourceCount << "\n";
-  errs() << "[lotus-purity] unknown_summaries="
+  errs() << "[lotus-opt-purity] unknown_summaries="
          << report.unknownSummaries.size()
          << " invalidated_functions=" << report.invalidatedFunctions.size()
          << " attributes_applied=" << (report.attributesApplied ? "yes" : "no")

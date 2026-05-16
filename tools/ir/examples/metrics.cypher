@@ -1,5 +1,5 @@
 # Code metrics-style queries (use the "Result(N nodes)" count as the metric).
-# For full counts, run `pdg-query` with `--limit 0`.
+# For full counts, run `lotus-ir-pdg-query` with `--limit 0`.
 
 # Total instruction nodes in the whole module
 MATCH (i:INST) RETURN i

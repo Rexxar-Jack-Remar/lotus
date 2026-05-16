@@ -119,7 +119,7 @@ public:
 
   std::vector<std::string>
   buildCommand(const VerificationTask &task) const override {
-    std::vector<std::string> cmd = {"sifa", task.inputBitcode};
+    std::vector<std::string> cmd = {"lotus-verify-sifa", task.inputBitcode};
     cmd.insert(cmd.end(), task.extraArgs.begin(), task.extraArgs.end());
     return cmd;
   }
@@ -163,7 +163,8 @@ public:
 
   std::vector<std::string>
   buildCommand(const VerificationTask &task) const override {
-    std::vector<std::string> cmd = {"symabs_ai", task.inputBitcode};
+    std::vector<std::string> cmd = {"lotus-verify-symabs-ai",
+                                    task.inputBitcode};
     cmd.insert(cmd.end(), task.extraArgs.begin(), task.extraArgs.end());
     return cmd;
   }

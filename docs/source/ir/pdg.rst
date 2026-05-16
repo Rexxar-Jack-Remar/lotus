@@ -77,16 +77,16 @@ PDG is exposed as an LLVM ``ModulePass``. A typical usage pattern:
    auto result = slicer.forward(criteria, options, &module);
 
 For interactive querying and slicing, see the :doc:`../pdg_query_language`
-and the ``pdg-query`` tool described in :doc:`../tools/ir`.
+and the ``lotus-ir-pdg-query`` tool described in :doc:`../tools/ir`.
 
 The Cypher selector language implementation is separated from these concrete
 analysis services under ``include/IR/PDG/QueryLanguage/`` and
 ``lib/IR/PDG/QueryLanguage/``.
 
-`pdg-query` Analysis Mode
+`lotus-ir-pdg-query` Analysis Mode
 =========================
 
-``pdg-query`` still accepts raw Cypher queries, but it can now also run the
+``lotus-ir-pdg-query`` still accepts raw Cypher queries, but it can now also run the
 PDG analysis services directly:
 
 * ``--analysis slice-forward`` / ``slice-backward`` / ``chop``

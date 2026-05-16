@@ -30,12 +30,12 @@ All FPA variants share a common high-level structure:
 Usage
 =====
 
-The analyses are exposed through the ``fpa`` driver:
+The analyses are exposed through the ``lotus-alias-fpa`` driver:
 
 .. code-block:: bash
 
-   ./build/bin/fpa -analysis-type=1 example.bc  # FLTA
-   ./build/bin/fpa -analysis-type=2 -max-type-layer=10 example.bc  # MLTA
+   ./build/bin/lotus-alias-fpa -analysis-type=1 example.bc  # FLTA
+   ./build/bin/lotus-alias-fpa -analysis-type=2 -max-type-layer=10 example.bc  # MLTA
 
 Key Options
 -----------
@@ -51,15 +51,14 @@ Examples
 .. code-block:: bash
 
    # Using FLTA analysis
-   ./build/bin/fpa -analysis-type=1 input.bc
+   ./build/bin/lotus-alias-fpa -analysis-type=1 input.bc
 
    # Using MLTA analysis with output to file
-   ./build/bin/fpa -analysis-type=2 -output-file=results.txt input.bc
+   ./build/bin/lotus-alias-fpa -analysis-type=2 -output-file=results.txt input.bc
 
    # Using KELP analysis with debug info
-   ./build/bin/fpa -analysis-type=4 -debug input.bc
+   ./build/bin/lotus-alias-fpa -analysis-type=4 -debug input.bc
 
 FPA results can be consumed directly (for security analyses or refactoring)
 or fed into other components that benefit from precise indirect call
 resolution.
-

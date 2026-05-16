@@ -1,7 +1,7 @@
 // RUN: %extract_config %s > %t1.py
 // RUN: clang -c -emit-llvm %s -o %t1.bc
 // RUN: opt -mem2reg -instnamer %t1.bc -o %t2.bc
-// RUN: %symabs_ai -check-assertions -config=%t1.py -function=test %t2.bc > %t3
+// RUN: %lotus-verify-symabs-ai -check-assertions -config=%t1.py -function=test %t2.bc > %t3
 
 // CONFIG: config.MemoryModel = {'Variant': 'LittleEndian'}
 // CONFIG: config.FragmentDecomposition = {'Strategy': 'Function'}

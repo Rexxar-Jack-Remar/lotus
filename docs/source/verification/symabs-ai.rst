@@ -80,8 +80,7 @@ SymAbsAI can be used as:
 
 - An LLVM ``FunctionPass`` via ``SymAbsAIPass``
 - A standalone analysis library via ``Analyzer``
-- A tool via ``build/bin/symabs_ai`` (see :doc:`../tools/verifier/symabs-ai/index`)
+- A tool via ``build/bin/lotus-verify-symabs-ai`` (see :doc:`../tools/verifier/symabs-ai/index`)
 
 For more details on using SymAbsAI as a tool, see :doc:`../tools/verifier/symabs-ai/index`.
-
 

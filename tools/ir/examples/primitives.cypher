@@ -1,5 +1,5 @@
 # New/extended PDG Cypher primitives
-# Run with: ./build/bin/pdg-query -f tools/ir/examples/primitives.cypher <input.bc>
+# Run with: ./build/bin/lotus-ir-pdg-query -f tools/ir/examples/primitives.cypher <input.bc>
 
 # 1) Directional traversal
 # Outgoing-only def-use slice (forward)

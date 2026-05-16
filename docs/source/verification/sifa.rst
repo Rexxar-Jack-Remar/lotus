@@ -7,7 +7,7 @@ Sifa stands for Symbolic Interpretation with Fluid Abstractions.
 
 **Implementation**: ``lib/Verification/Sifa/``
 
-**Tool**: ``sifa`` in ``tools/verifier/sifa/lotus-verify-sifa.cpp``
+**Tool**: ``lotus-verify-sifa`` in ``tools/verifier/sifa/lotus-verify-sifa.cpp``
 
 Overview
 --------
@@ -40,10 +40,10 @@ Typical usage
 
 .. code-block:: bash
 
-   ./build/bin/sifa program.bc
-   ./build/bin/sifa program.bc --function=foo --block=loop.header
-   ./build/bin/sifa program.bc --symabs --abstract-domain=Octagon
-   ./build/bin/sifa program.bc --reachability
+   ./build/bin/lotus-verify-sifa program.bc
+   ./build/bin/lotus-verify-sifa program.bc --function=foo --block=loop.header
+   ./build/bin/lotus-verify-sifa program.bc --symabs --abstract-domain=Octagon
+   ./build/bin/lotus-verify-sifa program.bc --reachability
 
 See also
 --------

@@ -15,7 +15,7 @@ This subsystem contains the historical LLPE code used for aggressive
 specialization, symbolic execution style reasoning, and partial evaluation over
 LLVM IR. It is built as the ``CanaryPE`` static library and is separate from
 the scalar, IPO, and prefetch libraries. It is not currently surfaced through
-the ``lotus-ipo`` or ``lotus-prefetch`` frontends.
+the ``lotus-opt-ipo`` or ``lotus-opt-prefetch`` frontends.
 
 Main components
 ---------------

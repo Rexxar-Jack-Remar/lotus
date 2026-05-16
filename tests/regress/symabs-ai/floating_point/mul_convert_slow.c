@@ -1,7 +1,7 @@
 // RUN: %extract_config %s > %t1.py
 // RUN: clang -c -O0 -emit-llvm %s -o %t1-pre.bc
 // RUN: opt -mem2reg -instnamer %t1-pre.bc > %t1.bc
-// RUN: %symabs_ai -check-assertions -config=%t1.py %t1.bc > %t2
+// RUN: %lotus-verify-symabs-ai -check-assertions -config=%t1.py %t1.bc > %t2
 
 // CONFIG: config.FragmentDecomposition = {'Strategy': 'Function'}
 // CONFIG: config.FloatingPointModel = 'IEEE'

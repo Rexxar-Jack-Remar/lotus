@@ -1,16 +1,16 @@
 Sifa Tool
 =========
 
-This page documents the ``sifa`` verifier front-end in ``tools/verifier/sifa/``.
+This page documents the ``lotus-verify-sifa`` verifier front-end in ``tools/verifier/sifa/``.
 
-**Binary**: ``sifa``
+**Binary**: ``lotus-verify-sifa``
 
 **Source**: ``tools/verifier/sifa/lotus-verify-sifa.cpp``
 
 Overview
 --------
 
-``sifa`` analyzes a target function or block using the Sifa framework. It can
+``lotus-verify-sifa`` analyzes a target function or block using the Sifa framework. It can
 run in a lightweight reachability mode, a native abstract-domain mode, or a
 SymAbs-backed SMT mode.
 
@@ -19,10 +19,10 @@ Basic usage
 
 .. code-block:: bash
 
-   ./build/bin/sifa input.bc
-   ./build/bin/sifa input.bc --function=foo
-   ./build/bin/sifa input.bc --function=foo --block=loop.header
-   ./build/bin/sifa input.bc --symabs --abstract-domain=Octagon
+   ./build/bin/lotus-verify-sifa input.bc
+   ./build/bin/lotus-verify-sifa input.bc --function=foo
+   ./build/bin/lotus-verify-sifa input.bc --function=foo --block=loop.header
+   ./build/bin/lotus-verify-sifa input.bc --symabs --abstract-domain=Octagon
 
 Important options
 -----------------

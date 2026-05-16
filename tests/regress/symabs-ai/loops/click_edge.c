@@ -1,6 +1,6 @@
 // RUN: clang -c -emit-llvm %s -o %t1.bc
 // RUN: opt -instcombine -mem2reg -instnamer %t1.bc -o %t2.bc
-// RUN: %symabs_ai -check-assertions -config=05_const_rel_edge %t2.bc > %t3
+// RUN: %lotus-verify-symabs-ai -check-assertions -config=05_const_rel_edge %t2.bc > %t3
 
 #include <assert.h>
 

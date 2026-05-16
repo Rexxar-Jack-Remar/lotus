@@ -12,7 +12,7 @@ Prerequisites
 -------------
 
 These passes expect IR that has already been prepared with SeaDsa-based
-ShadowMem instrumentation. The ``lotus-ipo`` frontend inserts the required
+ShadowMem instrumentation. The ``lotus-opt-ipo`` frontend inserts the required
 setup passes before running any IPO optimization:
 
 - ``RemovePtrToInt``

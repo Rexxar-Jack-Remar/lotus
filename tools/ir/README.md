@@ -16,15 +16,15 @@ The current IR tool binary is emitted under `build/bin/`.
 
 | Tool | Purpose | Notes |
 | --- | --- | --- |
-| `pdg-query` | Query the Program Dependence Graph | Implemented by `tools/ir/lotus-ir-pdg-query.cpp`; supports Cypher-style queries, slicing, chopping, shortest paths, summaries, resource-flow queries, and multiple output formats. |
+| `lotus-ir-pdg-query` | Query the Program Dependence Graph | Implemented by `tools/ir/lotus-ir-pdg-query.cpp`; supports Cypher-style queries, slicing, chopping, shortest paths, summaries, resource-flow queries, and multiple output formats. |
 
 ## Typical usage
 
-`pdg-query` consumes LLVM bitcode or textual LLVM IR:
+`lotus-ir-pdg-query` consumes LLVM bitcode or textual LLVM IR:
 
 ```bash
 clang -emit-llvm -c test.c -o test.bc
-build/bin/pdg-query test.bc --query "MATCH (n) RETURN n LIMIT 5"
+build/bin/lotus-ir-pdg-query test.bc --query "MATCH (n) RETURN n LIMIT 5"
 ```
 
 Useful options include:
@@ -41,15 +41,15 @@ Useful options include:
 
 ```bash
 # Run a single query
-build/bin/pdg-query test.bc --query "MATCH (f:Function) RETURN f.name"
+build/bin/lotus-ir-pdg-query test.bc --query "MATCH (f:Function) RETURN f.name"
 
 # Compute a backward slice from criteria selected by a query
-build/bin/pdg-query test.bc \
+build/bin/lotus-ir-pdg-query test.bc \
   --analysis=slice-backward \
   --criteria-query "MATCH (n {name:'x'}) RETURN n"
 
 # Dump JSON output for scripting
-build/bin/pdg-query test.bc --query-file tools/ir/examples/dataflow.cypher --format=json
+build/bin/lotus-ir-pdg-query test.bc --query-file tools/ir/examples/dataflow.cypher --format=json
 ```
 
 ## Related documentation

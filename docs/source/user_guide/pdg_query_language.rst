@@ -37,7 +37,7 @@ First, compile your program and build the PDG:
    clang -emit-llvm -g -c program.c -o program.bc
    
    # Run PDG query tool
-   ./build/bin/pdg-query program.bc
+   ./build/bin/lotus-ir-pdg-query program.bc
 
 Interactive Mode
 ~~~~~~~~~~~~~~~~
@@ -46,7 +46,7 @@ Use ``-i`` flag for interactive queries:
 
 .. code-block:: bash
 
-   ./build/bin/pdg-query -i program.bc
+   ./build/bin/lotus-ir-pdg-query -i program.bc
    
    PDG> MATCH (n:FUNC_ENTRY) WHERE n.name = 'main' RETURN n
    [Results displayed]
@@ -65,7 +65,7 @@ Use ``-q`` flag for single query:
 
 .. code-block:: bash
 
-   ./build/bin/pdg-query -q "MATCH (n:FUNC_ENTRY) WHERE n.name = 'main' RETURN n" program.bc
+   ./build/bin/lotus-ir-pdg-query -q "MATCH (n:FUNC_ENTRY) WHERE n.name = 'main' RETURN n" program.bc
 
 Batch Query Mode
 ~~~~~~~~~~~~~~~~
@@ -74,7 +74,7 @@ Use ``-f`` flag to run queries from file:
 
 .. code-block:: bash
 
-   ./build/bin/pdg-query -f queries.txt program.bc
+   ./build/bin/lotus-ir-pdg-query -f queries.txt program.bc
 
 Language Reference
 ------------------
@@ -569,7 +569,7 @@ Run with:
 
 .. code-block:: bash
 
-   ./build/bin/pdg-query -f security_policy.txt program.bc
+   ./build/bin/lotus-ir-pdg-query -f security_policy.txt program.bc
 
 Best Practices
 --------------

@@ -10,7 +10,7 @@ based on **Data Structure Analysis (DSA)**. It builds **heap graphs** that
 summarize program memory and supports modular, interprocedural reasoning.
 
 * **Location**: ``lib/Alias/UnificationBased/seadsa``
-* **Tools**: ``sea-dsa-dg``, ``seadsa-tool``
+* **Tools**: ``lotus-alias-sea-dsa-dg``, ``lotus-alias-seadsa-tool``
 * **Use Cases**: Precise mod/ref information, call-graph construction,
   memory-shape reasoning
 
@@ -32,17 +32,17 @@ Usage
 
 .. code-block:: bash
 
-   ./build/bin/sea-dsa-dg --sea-dsa-dot example.bc
-   ./build/bin/seadsa-tool --sea-dsa-dot --outdir results/ example.bc
+   ./build/bin/lotus-alias-sea-dsa-dg --sea-dsa-dot example.bc
+   ./build/bin/lotus-alias-seadsa-tool --sea-dsa-dot --outdir results/ example.bc
 
-sea-dsa-dg
+lotus-alias-sea-dsa-dg
 ----------
 
 A simple tool for generating memory graphs using Sea-DSA analysis.
 
 .. code-block:: bash
 
-   ./build/bin/sea-dsa-dg [options] <input LLVM bitcode file>
+   ./build/bin/lotus-alias-sea-dsa-dg [options] <input LLVM bitcode file>
 
 Key options:
 
@@ -51,7 +51,7 @@ Key options:
 This tool provides a straightforward interface to the Sea-DSA analysis for
 generating memory graphs that can be visualized using Graphviz.
 
-seadsa-tool
+lotus-alias-seadsa-tool
 -----------
 
 Advanced Sea-DSA analysis tool with comprehensive memory graph analysis
@@ -59,7 +59,7 @@ capabilities.
 
 .. code-block:: bash
 
-   ./build/bin/seadsa-tool [options] <input LLVM bitcode file>
+   ./build/bin/lotus-alias-seadsa-tool [options] <input LLVM bitcode file>
 
 Key options:
 
@@ -72,7 +72,6 @@ patterns, pointer relationships, and potential memory-related issues in programs
 
 Sea-DSA results are consumed by other analyses (e.g., mod/ref, verification
 tools) to obtain a precise view of heap structure and aliasing.
-
 
 
 

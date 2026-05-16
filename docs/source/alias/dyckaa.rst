@@ -108,7 +108,7 @@ DyckAA is typically run via its dedicated tool:
 
 .. code-block:: bash
 
-   ./build/bin/dyck-aa -print-alias-set-info example.bc
+   ./build/bin/lotus-alias-dyck-aa -print-alias-set-info example.bc
 
 Available Options
 -----------------
@@ -150,4 +150,3 @@ Advanced Features
 - **DyckVFG**: Value Flow Graph construction for tracking value propagation
 - **ModRef Analysis**: Modified/Referenced analysis for optimization
 - **Call Graph**: Precise indirect call resolution
-

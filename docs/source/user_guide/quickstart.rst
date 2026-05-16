@@ -18,13 +18,13 @@ Alias Analysis
 
 .. code-block:: bash
 
-   ./build/bin/sparrow-aa example.bc           # SparrowAA (CI mode by default) analysis
-   ./build/bin/dyck-aa example.bc            # Unification-based analysis
-   ./build/bin/aser-aa example.bc            # AserPTA (CI mode by default) analysis
-   ./build/bin/fpa example.bc                # Function pointer analysis
-   ./build/bin/lotus-aa example.bc           # Inclusion-based, flow-sensitive context-sensitive
-   ./build/bin/sea-dsa-dg --sea-dsa-dot example.bc  # Unification-based, flow-insensitive, context-sensitive
-   ./build/bin/seadsa-tool --sea-dsa-dot --outdir results/ example.bc
+   ./build/bin/lotus-alias-sparrow-aa example.bc    # SparrowAA (CI mode by default) analysis
+   ./build/bin/lotus-alias-dyck-aa example.bc       # Unification-based analysis
+   ./build/bin/lotus-alias-aser-aa example.bc       # AserPTA (CI mode by default) analysis
+   ./build/bin/lotus-alias-fpa example.bc           # Function pointer analysis
+   ./build/bin/lotus-alias-lotus-aa example.bc      # Inclusion-based, flow-sensitive context-sensitive
+   ./build/bin/lotus-alias-sea-dsa-dg --sea-dsa-dot example.bc  # Unification-based, flow-insensitive, context-sensitive
+   ./build/bin/lotus-alias-seadsa-tool --sea-dsa-dot --outdir results/ example.bc
 
 
 Bug Detection
@@ -62,7 +62,7 @@ Program Dependence Graph
 
 .. code-block:: bash
 
-   ./build/bin/pdg-query example.bc               # Query PDG
+   ./build/bin/lotus-ir-pdg-query example.bc      # Query PDG
 
 The PDG query frontend is implemented in
 ``tools/ir/lotus-ir-pdg-query.cpp``.

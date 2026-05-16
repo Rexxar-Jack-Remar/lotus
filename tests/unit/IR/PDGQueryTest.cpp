@@ -955,7 +955,7 @@ TEST_F(PDGQueryTest, PdgQueryCliSmokeCoversNewAnalyses) {
   }
 
   const std::string binary =
-      "/Users/rainoftime/Work/analysis/lotus/build/bin/pdg-query";
+      "/Users/rainoftime/Work/analysis/lotus/build/bin/lotus-ir-pdg-query";
   {
     const std::string output = runCommand(
         binary + " " + benchmark +

@@ -6,9 +6,9 @@ This section documents the optimization-related command-line tools under
 
 The current front ends cover two focused parts of ``lib/Optimization/``:
 
-- ``lotus-ipo`` drives the passes in ``lib/Optimization/IPO/`` via
+- ``lotus-opt-ipo`` drives the passes in ``lib/Optimization/IPO/`` via
   ``tools/optimization/lotus-opt-ipo.cpp``
-- ``lotus-prefetch`` drives the software prefetching implementation in
+- ``lotus-opt-prefetch`` drives the software prefetching implementation in
   ``lib/Optimization/Prefetch/`` via
   ``tools/optimization/lotus-opt-prefetch.cpp``
 

@@ -39,7 +39,7 @@ lotus/
 
 - **CMake**: Root `CMakeLists.txt` configures LLVM, Z3, optional Boost
 - **Libraries**: Static libs prefixed `Canary*` (e.g., `CanaryDyckAA`, `CanaryPDG`) — legacy naming
-- **Tools**: Binaries go to `build/bin/` (e.g., `lotus-aa`, `lotus-kint`, `clam`)
+- **Tools**: Binaries go to `build/bin/` (e.g., `lotus-alias-lotus-aa`, `lotus-check`, `clam`)
 - **Tests**: Unit tests are organized under `tests/unit/`; shared unit-test CMake helpers live in `tests/unit/UnitTestHelpers.cmake`
 
 ```bash
@@ -69,7 +69,7 @@ Custom LLVM path: `cmake .. -DLLVM_BUILD_PATH=/path/to/llvm/lib/cmake/llvm`
 ## Architecture
 
 ```
-Tools (aser-aa, dyck-aa, lotus-kint, clam, etc.)
+Tools (lotus-alias-aser-aa, lotus-alias-dyck-aa, lotus-check, clam, etc.)
     ↓
 Analysis Applications (Checkers, Optimization, Verification, etc.)
     ↓

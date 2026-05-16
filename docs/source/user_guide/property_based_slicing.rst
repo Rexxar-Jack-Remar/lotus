@@ -54,18 +54,18 @@ Supported Property Types
 Usage
 -----
 
-Basic usage with ``pdg-query``:
+Basic usage with ``lotus-ir-pdg-query``:
 
 .. code-block:: bash
 
    # Backward slice (default)
-   pdg-query input.bc --property-file property.prp
+   lotus-ir-pdg-query input.bc --property-file property.prp
 
    # Forward slice
-   pdg-query input.bc --property-file property.prp --direction forward
+   lotus-ir-pdg-query input.bc --property-file property.prp --direction forward
 
    # Dump slice nodes
-   pdg-query input.bc --property-file property.prp --dump-slice
+   lotus-ir-pdg-query input.bc --property-file property.prp --dump-slice
 
 Example
 -------
@@ -95,7 +95,7 @@ Slice the program:
 .. code-block:: bash
 
    clang -emit-llvm -c test.c -o test.bc
-   pdg-query test.bc --property-file unreach-call.prp
+   lotus-ir-pdg-query test.bc --property-file unreach-call.prp
 
 The slicer will identify the ``reach_error()`` call and compute a backward slice containing all instructions that can affect whether that call is executed.
 
@@ -106,7 +106,7 @@ Property-based slicing is designed to work with Lotus's verification backends:
 
 .. code-block:: bash
 
-   pdg-query input.bc --property-file property.prp --dump-slice
+   lotus-ir-pdg-query input.bc --property-file property.prp --dump-slice
 
 This workflow identifies the PDG region relevant to the property so it can be
 fed into verification or reduction passes without requiring a separate

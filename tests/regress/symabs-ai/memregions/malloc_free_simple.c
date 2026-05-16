@@ -1,6 +1,6 @@
 // RUN: clang -O0 -c -emit-llvm %s -o %t1.bc
 // RUN: opt -mem2reg -instnamer %t1.bc -o %t2.bc
-// RUN: not %symabs_ai -check-memsafety -config=memregion %t2.bc > %t3
+// RUN: not %lotus-verify-symabs-ai -check-memsafety -config=memregion %t2.bc > %t3
 // RUN: grep -F "1 possibly invalid memory access detected." %t3
 // XFAIL: *
 // Does not work because the memory state is only considered after the free()

@@ -90,7 +90,7 @@ Only analyses that are **initialized by the wrapper** and expose points-to or ca
 | **CFLAnders / CFLSteens** | Yes | ❌ | ❌ | Alias queries only; no pts in wrapper. |
 | **Combined** | Yes | ✅ Via Andersen | ✅ Via Andersen | Uses SparrowAA + DyckAA; pts from Andersen. |
 | **SeaDsa, AllocAA, BasicAA, …** | No | — | — | “Not yet fully supported”; wrapper does not init them. |
-| **LotusAA, FPA** | No | — | — | Separate tools (`lotus-aa`, `fpa`); not backends in AliasAnalysisWrapper. |
+| **LotusAA, FPA** | No | — | — | Separate tools (`lotus-alias-lotus-aa`, `lotus-alias-fpa`); not backends in AliasAnalysisWrapper. |
 
 So today **points-to size** metrics are filled for **SparrowAA, AserPTA, TPA, Combined**. **Indirect-call** metrics are filled for **SparrowAA, AserPTA, TPA, Combined** via the wrapper’s `getIndirectCallTargets()` (SparrowAA/AserPTA use points-to; TPA uses its internal `getCallees()`).
 
