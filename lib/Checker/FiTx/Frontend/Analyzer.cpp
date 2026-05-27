@@ -449,7 +449,7 @@ void Analyzer::analyzePrevBlockBranch(
         currentFunctionInformation()->GetValueCollection().getRelatedValues(
             comp_value);
     related_values.insert(comp_value);
-    if (auto aliased = currentFunctionInformation()
+    if (const auto *aliased = currentFunctionInformation()
                            ->getBasicBlockInformation(preds)
                            ->getAliasValues()
                            .getAliasInfo(comp_value)) {

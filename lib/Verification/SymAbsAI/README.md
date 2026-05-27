@@ -1,5 +1,7 @@
 # SymAbsAI – Symbolic Abstraction + Abstract Interpretation
 
+Migrated from the thesis "Compiler Optimizations using Symbolic Abstraction" (https://compilers.cs.uni-saarland.de/publications/theses/ritter_bsc.pdf)
+
 ## Overview
 
 This is a complete **program analysis framework** for LLVM IR using abstract interpretation with symbolic abstraction. It provides a full analysis infrastructure including fixpoint engines, abstract domains, and LLVM pass integration.

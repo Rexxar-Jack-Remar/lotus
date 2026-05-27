@@ -10,6 +10,7 @@ endif()
 
 add_subdirectory(SymAbsAI)
 add_subdirectory(Sifa)
+add_subdirectory(PathProgram)
 add_subdirectory(Backend)
 # Currently, the frontend is only for Boolean program (bpl) and and parsed problem is only sent to lib/Dataflow/NPA. 
 add_subdirectory(Frontend)
