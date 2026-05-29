@@ -372,10 +372,10 @@ function(add_lotus_symabs_verification_test test_name source_file)
             ${Z3_LIBRARIES})
 endfunction()
 
-function(add_lotus_backend_verification_test test_name source_file)
+function(add_lotus_driver_verification_test test_name source_file)
     add_lotus_targeted_test(${test_name} ${source_file}
         LINK_LIBS
-            VerificationBackend)
+            VerificationDriver)
 endfunction()
 
 function(add_lotus_ifdside_test test_name source_file)

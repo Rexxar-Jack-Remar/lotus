@@ -16,4 +16,4 @@ add_lotus_targeted_test(boolean_program_frontend_test BooleanProgramFrontendTest
                         CanaryParallel)
 
 set_tests_properties(sifa_symabs_smoke_test PROPERTIES TIMEOUT 900)
-add_lotus_backend_verification_test(backend_test BackendTest.cpp)
+add_lotus_driver_verification_test(driver_test DriverTest.cpp)

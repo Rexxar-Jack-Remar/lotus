@@ -1,22 +1,22 @@
-#include "Verification/Backend/Backend.h"
+#include "Verification/Driver/Backend.h"
 
 #include <algorithm>
 
 #include <gtest/gtest.h>
 
-using namespace lotus::verification::backend;
+using namespace lotus::verification::driver;
 
-TEST(BackendRegistryTest, AvailableBackends) {
-  BackendRegistry &reg = BackendRegistry::instance();
-  auto backends = reg.availableBackends();
+TEST(DriverRegistryTest, AvailableDrivers) {
+  DriverRegistry &reg = DriverRegistry::instance();
+  auto drivers = reg.availableDrivers();
   
-  EXPECT_GT(backends.size(), 0u);
-  EXPECT_NE(std::find(backends.begin(), backends.end(), "seahorn"), backends.end());
-  EXPECT_NE(std::find(backends.begin(), backends.end(), "clam"), backends.end());
+  EXPECT_GT(drivers.size(), 0u);
+  EXPECT_NE(std::find(drivers.begin(), drivers.end(), "seahorn"), drivers.end());
+  EXPECT_NE(std::find(drivers.begin(), drivers.end(), "clam"), drivers.end());
 }
 
-TEST(BackendRegistryTest, CreateBackend) {
-  BackendRegistry &reg = BackendRegistry::instance();
+TEST(DriverRegistryTest, CreateDriver) {
+  DriverRegistry &reg = DriverRegistry::instance();
   
   auto seahorn = reg.create("seahorn");
   ASSERT_NE(seahorn, nullptr);
@@ -30,56 +30,56 @@ TEST(BackendRegistryTest, CreateBackend) {
   EXPECT_EQ(invalid, nullptr);
 }
 
-TEST(BackendRegistryTest, RecommendBackends) {
-  BackendRegistry &reg = BackendRegistry::instance();
+TEST(DriverRegistryTest, RecommendDrivers) {
+  DriverRegistry &reg = DriverRegistry::instance();
   
-  auto memSafetyBackends = reg.recommend(PropertyClass::MemSafety);
-  EXPECT_GT(memSafetyBackends.size(), 0u);
+  auto memSafetyDrivers = reg.recommend(PropertyClass::MemSafety);
+  EXPECT_GT(memSafetyDrivers.size(), 0u);
   
-  auto reachabilityBackends = reg.recommend(PropertyClass::Reachability);
-  EXPECT_GT(reachabilityBackends.size(), 0u);
+  auto reachabilityDrivers = reg.recommend(PropertyClass::Reachability);
+  EXPECT_GT(reachabilityDrivers.size(), 0u);
 }
 
-TEST(BackendTest, SeahornSupportsAllProperties) {
-  BackendRegistry &reg = BackendRegistry::instance();
-  auto backend = reg.create("seahorn");
-  ASSERT_NE(backend, nullptr);
+TEST(DriverTest, SeahornSupportsAllProperties) {
+  DriverRegistry &reg = DriverRegistry::instance();
+  auto driver = reg.create("seahorn");
+  ASSERT_NE(driver, nullptr);
   
-  EXPECT_TRUE(backend->supports(PropertyClass::Reachability));
-  EXPECT_TRUE(backend->supports(PropertyClass::MemSafety));
-  EXPECT_TRUE(backend->supports(PropertyClass::Overflow));
-  EXPECT_TRUE(backend->supports(PropertyClass::Termination));
+  EXPECT_TRUE(driver->supports(PropertyClass::Reachability));
+  EXPECT_TRUE(driver->supports(PropertyClass::MemSafety));
+  EXPECT_TRUE(driver->supports(PropertyClass::Overflow));
+  EXPECT_TRUE(driver->supports(PropertyClass::Termination));
 }
 
-TEST(BackendTest, ParseSeahornResult) {
-  BackendRegistry &reg = BackendRegistry::instance();
-  auto backend = reg.create("seahorn");
-  ASSERT_NE(backend, nullptr);
+TEST(DriverTest, ParseSeahornResult) {
+  DriverRegistry &reg = DriverRegistry::instance();
+  auto driver = reg.create("seahorn");
+  ASSERT_NE(driver, nullptr);
   
   // Test safe result
-  VerificationResultInfo safe = backend->parseResult("unsat\n", 0);
+  VerificationResultInfo safe = driver->parseResult("unsat\n", 0);
   EXPECT_EQ(safe.result, VerificationResult::True);
   EXPECT_TRUE(safe.isSafe());
   
   // Test unsafe result
-  VerificationResultInfo unsafe = backend->parseResult("sat\nError found\n", 0);
+  VerificationResultInfo unsafe = driver->parseResult("sat\nError found\n", 0);
   EXPECT_EQ(unsafe.result, VerificationResult::False);
   EXPECT_TRUE(unsafe.hasError());
   
   // Test timeout
-  VerificationResultInfo timeout = backend->parseResult("timeout\n", 124);
+  VerificationResultInfo timeout = driver->parseResult("timeout\n", 124);
   EXPECT_EQ(timeout.result, VerificationResult::Timeout);
 }
 
-TEST(BackendTest, ParseClamResult) {
-  BackendRegistry &reg = BackendRegistry::instance();
-  auto backend = reg.create("clam");
-  ASSERT_NE(backend, nullptr);
+TEST(DriverTest, ParseClamResult) {
+  DriverRegistry &reg = DriverRegistry::instance();
+  auto driver = reg.create("clam");
+  ASSERT_NE(driver, nullptr);
   
-  VerificationResultInfo safe = backend->parseResult("safe\n", 0);
+  VerificationResultInfo safe = driver->parseResult("safe\n", 0);
   EXPECT_EQ(safe.result, VerificationResult::True);
   
-  VerificationResultInfo unsafe = backend->parseResult("unsafe\n", 0);
+  VerificationResultInfo unsafe = driver->parseResult("unsafe\n", 0);
   EXPECT_EQ(unsafe.result, VerificationResult::False);
 }
 

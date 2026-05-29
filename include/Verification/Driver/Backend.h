@@ -6,7 +6,7 @@
 
 namespace lotus {
 namespace verification {
-namespace backend {
+namespace driver {
 
 enum class PropertyClass {
   Reachability,
@@ -42,29 +42,29 @@ struct VerificationResultInfo {
   bool isUnknown() const { return result == VerificationResult::Unknown; }
 };
 
-class IBackend {
+class IDriver {
 public:
-  virtual ~IBackend() = default;
+  virtual ~IDriver() = default;
   virtual const char *name() const = 0;
   virtual bool supports(PropertyClass property) const = 0;
   virtual std::vector<std::string>
   buildCommand(const VerificationTask &task) const = 0;
 
-  // Parse backend output and normalize to standard result format
+  // Parse driver output and normalize to standard result format.
   virtual VerificationResultInfo parseResult(const std::string &output,
                                              int exitCode) const = 0;
 };
 
-class BackendRegistry {
+class DriverRegistry {
 public:
-  static BackendRegistry &instance();
+  static DriverRegistry &instance();
 
-  std::vector<std::string> availableBackends() const;
-  std::unique_ptr<IBackend> create(const std::string &name) const;
+  std::vector<std::string> availableDrivers() const;
+  std::unique_ptr<IDriver> create(const std::string &name) const;
   std::vector<std::string> recommend(PropertyClass property) const;
 
 private:
-  BackendRegistry() = default;
+  DriverRegistry() = default;
 };
 
 PropertyClass parsePropertyClass(const std::string &name);
@@ -73,6 +73,6 @@ std::string toString(PropertyClass property);
 VerificationResult parseResultFromString(const std::string &str);
 std::string toString(VerificationResult result);
 
-} // namespace backend
+} // namespace driver
 } // namespace verification
 } // namespace lotus

@@ -1,4 +1,4 @@
-#include "Verification/Backend/Backend.h"
+#include "Verification/Driver/Backend.h"
 
 #include "llvm/ADT/StringRef.h"
 
@@ -10,7 +10,7 @@ using namespace llvm;
 
 namespace lotus {
 namespace verification {
-namespace backend {
+namespace driver {
 
 namespace {
 static std::string toLower(const std::string &s) {
@@ -42,7 +42,7 @@ static bool hasToken(const std::string &haystack, StringRef needle) {
   return hasToken(StringRef(haystack), needle);
 }
 
-class SeahornBackend final : public IBackend {
+class SeahornBackend final : public IDriver {
 public:
   const char *name() const override { return "seahorn"; }
 
@@ -108,7 +108,7 @@ public:
   }
 };
 
-class SifaBackend final : public IBackend {
+class SifaBackend final : public IDriver {
 public:
   const char *name() const override { return "sifa"; }
 
@@ -150,7 +150,7 @@ public:
   }
 };
 
-class SymAbsAIBackend final : public IBackend {
+class SymAbsAIBackend final : public IDriver {
 public:
   const char *name() const override { return "symabs_ai"; }
 
@@ -197,7 +197,7 @@ public:
   }
 };
 
-class ClamBackend final : public IBackend {
+class ClamBackend final : public IDriver {
 public:
   const char *name() const override { return "clam"; }
 
@@ -254,34 +254,33 @@ static bool eqLower(StringRef a, StringRef b) {
 
 } // namespace
 
-BackendRegistry &BackendRegistry::instance() {
-  static BackendRegistry R;
+DriverRegistry &DriverRegistry::instance() {
+  static DriverRegistry R;
   return R;
 }
 
-std::vector<std::string> BackendRegistry::availableBackends() const {
+std::vector<std::string> DriverRegistry::availableDrivers() const {
   return {"seahorn", "sifa", "symabs_ai", "clam"};
 }
 
-std::unique_ptr<IBackend>
-BackendRegistry::create(const std::string &name) const {
+std::unique_ptr<IDriver> DriverRegistry::create(const std::string &name) const {
   if (eqLower(name, "seahorn"))
-    return std::unique_ptr<IBackend>(new SeahornBackend());
+    return std::unique_ptr<IDriver>(new SeahornBackend());
   if (eqLower(name, "sifa"))
-    return std::unique_ptr<IBackend>(new SifaBackend());
+    return std::unique_ptr<IDriver>(new SifaBackend());
   if (eqLower(name, "symabs_ai") || eqLower(name, "symbolic_abstraction") ||
       eqLower(name, "symabs"))
-    return std::unique_ptr<IBackend>(new SymAbsAIBackend());
+    return std::unique_ptr<IDriver>(new SymAbsAIBackend());
   if (eqLower(name, "clam"))
-    return std::unique_ptr<IBackend>(new ClamBackend());
+    return std::unique_ptr<IDriver>(new ClamBackend());
   return nullptr;
 }
 
 std::vector<std::string>
-BackendRegistry::recommend(PropertyClass property) const {
+DriverRegistry::recommend(PropertyClass property) const {
   std::vector<std::string> out;
-  for (const std::string &name : availableBackends()) {
-    std::unique_ptr<IBackend> b = create(name);
+  for (const std::string &name : availableDrivers()) {
+    std::unique_ptr<IDriver> b = create(name);
     if (b && b->supports(property))
       out.push_back(name);
   }
@@ -353,6 +352,6 @@ std::string toString(VerificationResult result) {
   }
 }
 
-} // namespace backend
+} // namespace driver
 } // namespace verification
 } // namespace lotus

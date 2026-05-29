@@ -7,8 +7,8 @@ symbolic reasoning.
 | Subdir | Purpose |
 |--------|---------|
 | **Analysis** | Pre-verification module analyses such as module checking, instruction and loop classification, instruction counting, and test-target extraction. |
-| **Backend** | Common backend interface and backend runners for invoking verification engines and normalizing results. |
-| **Frontend** | Predicate/Boolean-program parsing and lowering infrastructure used to build verification-oriented IR. |
+| **Driver** | Common verification-driver interface and runner logic for invoking verification engines and normalizing results. |
+| **Frontend** | Frontend implementations for verification-oriented input languages; currently contains the Boolean/predicate-program frontend. |
 | **Sifa** | Symbolic Interpretation with Fluid Abstractions: interprocedural symbolic interpretation over ICFG-style procedure graphs and regex-DAG summaries. See `Sifa/README.md`. |
 | **SymAbsAI** | SMT-backed abstract interpretation framework with reusable transfer semantics, fixpoint engines, and abstract domains. See `SymAbsAI/README.md`. |
 | **Transform** | IR transformations for verification, including CFG normalization, loop/control-flow rewriting, memory instrumentation, and nondeterminism injection. |
@@ -29,8 +29,8 @@ Pre-verification analysis passes:
 
 ## Frontend And Backend
 
-- [`Frontend/`](Frontend/) contains Boolean/predicate-program parsing and lowering.
-- [`Backend/`](Backend/) provides shared backend execution logic and result parsing.
+- [`Frontend/`](Frontend/) hosts verification frontends; [`Frontend/BooleanProgram/`](Frontend/BooleanProgram/) contains the current Boolean/predicate-program parsing and lowering implementation.
+- [`Driver/`](Driver/) provides shared driver execution logic and result parsing.
 
 ## Verification Backends
 
