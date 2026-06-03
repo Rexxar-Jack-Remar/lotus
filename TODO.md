@@ -90,13 +90,25 @@ Some related publications
 
 ## 5. Numerical Analysis
 
-- Crab/Lotus concurrent fixpoint performance:
++ Crab/Lotus concurrent fixpoint performance:
   - Study speculative concurrency for Crab's `concurrenty_fwd_fixpoint_iterator`: allow bounded stale reads inside a WPO SCC, then repair deterministically at loop heads.
   - Use delta-based propagation for abstract states so workers transfer only changed facts, not full domains, across edges.
   - Add instability-aware scheduling for concurrent fixpoint: prioritize hot loop heads, high-fanout nodes, and large abstract-state deltas.
   - Explore a dual-lane design: conservative committed invariants plus speculative worker invariants, with commit only when speculation is safe.
   - Compare against Crab's sequential/interleaved fixpoint and measure speedup, extra rework, convergence iterations, and precision loss (if any).
-
++ Data structure optimization for abstract domains
+  - Better environment maps for abstract interpretation.
+    Crab still reflects the classic “Patricia tree as efficient mergeable map” design. A
+    serious study comparing Patricia trees, flat_map, B-tree variants, HAMTs, and chunked
+    persistent vectors under real analyzer workloads would be valuable. The key metric is
+    not only asymptotic merge cost but allocator pressure and cache locality during
+    fixpoint iteration.
+  - Graph representations for DBM domains.
+    Crab already exposes multiple graph backends, which is a sign the choice matters. A
+    good research problem is adaptive switching between graph representations based on
+    density, update pattern, or SCC phase. Another is incremental closure algorithms that
+    exploit workload structure instead of rerunning generic sparse shortest-path
+    machinery.
 
 ## 6. Dataflow Analysis
 
