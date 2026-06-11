@@ -1,3 +1,4 @@
+/** @file AddressValue.h @brief Address value sets for abstract interpretation. */
 //===- AddressValue.h ----Address Value Sets-------------------------//
 //
 // Migrated from SVF's AE engine to Lotus.

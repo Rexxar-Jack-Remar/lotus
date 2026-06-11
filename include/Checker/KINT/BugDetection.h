@@ -1,3 +1,4 @@
+/** @file BugDetection.h @brief Integer bug detection patterns for KINT analysis. */
 #pragma once
 
 #include <functional>

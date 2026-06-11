@@ -1,3 +1,4 @@
+/** @file DeclarationSummaryProvider.h @brief Declaration-based purity summary provider for external functions. */
 #pragma once
 
 #include "Analysis/Purity/PuritySummary.h"

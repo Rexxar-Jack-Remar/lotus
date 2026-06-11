@@ -1,3 +1,4 @@
+/** @file Casting.h @brief LLVM-style casting utilities for FiTx IR types. */
 #pragma once
 #include "llvm/Support/Casting.h"
 

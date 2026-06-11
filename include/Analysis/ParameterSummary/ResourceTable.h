@@ -1,3 +1,4 @@
+/** @file ResourceTable.h @brief Resource table for tracking parameter-related resources. */
 #pragma once
 
 #include "llvm/ADT/StringRef.h"

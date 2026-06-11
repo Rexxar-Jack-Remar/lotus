@@ -1,3 +1,4 @@
+/** @file PuritySummary.h @brief Purity summary data structures for function side-effect analysis. */
 #pragma once
 
 #include "llvm/ADT/StringRef.h"

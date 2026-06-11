@@ -1,3 +1,4 @@
+/** @file SCCDAGAttrs.h @brief Attributes and metadata for SCC DAG nodes in loop analysis. */
 /*
  * Copyright 2026 Lotus contributors
  */

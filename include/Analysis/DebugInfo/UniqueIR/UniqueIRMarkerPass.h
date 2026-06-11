@@ -1,3 +1,4 @@
+/** @file UniqueIRMarkerPass.h @brief LLVM pass for applying unique IR markers. */
 #pragma once
 
 #include <llvm/Pass.h>

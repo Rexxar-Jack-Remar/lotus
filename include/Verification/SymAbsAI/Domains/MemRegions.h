@@ -1,3 +1,12 @@
+/**
+ * @file MemRegions.h
+ * @brief Memory region abstract domains for pointer alias analysis.
+ *
+ * Defines abstract domains that track pointer relationships and memory region
+ * validity: NoAlias, ValidRegion, ConstantRegion, VariableRegion, MemoryRegion,
+ * and RestrictedVarRegion. Used within the SymAbsAI framework for memory-safety
+ * verification.
+ */
 #pragma once
 
 #include "Verification/SymAbsAI/Core/Foundation/AbstractValue.h"
@@ -12,6 +21,7 @@
 
 namespace symabs_ai {
 namespace domains {
+/** @brief Domain tracking whether two pointers are proven not to alias. */
 class NoAlias : public BooleanValue {
 private:
   const RepresentedValue Left_;
@@ -64,6 +74,7 @@ public:
 #endif
 };
 
+/** @brief Domain tracking whether a pointer points to a valid (allocated/accessible) region. */
 class ValidRegion : public BooleanValue {
 private:
   const RepresentedValue Ptr_;
@@ -117,6 +128,7 @@ public:
 #endif
 };
 
+/** @brief Domain tracking a pointer that points to a constant/invariant memory region. */
 class ConstantRegion : public SimpleConstProp {
 private:
   const memory::BlockModel *MM_;
@@ -158,6 +170,7 @@ public:
 #endif
 };
 
+/** @brief Domain tracking pointer relationships via a variable expression and factor. */
 class VariableRegion : public BooleanValue {
 private:
   const RepresentedValue Ptr_;
@@ -213,6 +226,7 @@ public:
 #endif
 };
 
+/** @brief Cartesian product of sub-domains tracking all aspects of a single memory region. */
 class MemoryRegion : public Product {
 private:
   RepresentedValue Ptr_;
@@ -265,6 +279,7 @@ public:
 #endif
 };
 
+/** @brief Restricted variable region: constrains VariableRegion to allowed states (top/true/non-null). */
 class RestrictedVarRegion : public Cut<RestrictedVarRegion, VariableRegion> {
 private:
   // These exist only for serialization
@@ -277,7 +292,7 @@ public:
   RestrictedVarRegion(const FunctionContext &fctx, RepresentedValue ptr,
                       const Expression &expr, const Expression &factor)
       : Cut<RestrictedVarRegion, VariableRegion>(
-            make_unique<VariableRegion>(fctx, ptr, expr, factor)),
+            std::make_unique<VariableRegion>(fctx, ptr, expr, factor)),
         Fctx_(fctx), Ptr_(ptr), Expr_(expr), Fact_(factor) {}
 
 public:

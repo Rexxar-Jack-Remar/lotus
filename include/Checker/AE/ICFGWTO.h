@@ -1,3 +1,4 @@
+/** @file ICFGWTO.h @brief ICFG weak topological ordering for abstract execution. */
 #pragma once
 
 #include <list>

@@ -1,3 +1,4 @@
+/** @file All_Detector.h @brief Aggregate detector combining all FiTx bug detectors. */
 #pragma once
 #include "Checker/FiTx/Detector/DF_Detector.h"
 #include "Checker/FiTx/Detector/DL_Detector.h"

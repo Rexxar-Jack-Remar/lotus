@@ -1,3 +1,4 @@
+/** @file Options.h @brief Configuration options for KINT integer analysis. */
 #pragma once
 
 #include <llvm/Support/CommandLine.h>

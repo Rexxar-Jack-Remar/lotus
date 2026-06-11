@@ -1,3 +1,4 @@
+/** @file SaberCheckerAPI.h @brief SABER checker API for abstract interpretation-based analysis. */
 //===- SaberCheckerAPI.h -- API for checkers in Saber-------------------------//
 //
 // Migrated from SVF's SABER engine to Lotus.

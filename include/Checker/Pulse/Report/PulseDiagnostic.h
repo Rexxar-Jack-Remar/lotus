@@ -1,3 +1,4 @@
+/** @file PulseDiagnostic.h @brief Diagnostic types for Pulse checker bug reports. */
 #ifndef CHECKER_PULSE_PULSEDIAGNOSTIC_H
 #define CHECKER_PULSE_PULSEDIAGNOSTIC_H
 

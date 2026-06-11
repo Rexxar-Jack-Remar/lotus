@@ -1,3 +1,4 @@
+/** @file LoopSCCDAG.h @brief SCC-based DAG representation of loop structure for dependence analysis. */
 /*
  * Copyright 2026 Lotus contributors
  *

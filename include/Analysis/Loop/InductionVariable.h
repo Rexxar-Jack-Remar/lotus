@@ -1,3 +1,4 @@
+/** @file InductionVariable.h @brief Individual induction variable descriptor for loop analysis. */
 /*
  * Copyright 2026 Lotus contributors
  *

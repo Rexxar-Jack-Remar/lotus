@@ -1,3 +1,4 @@
+/** @file PulseFormula.h @brief Symbolic formula representation for Pulse abstract values. */
 #ifndef CHECKER_PULSE_PULSEFORMULA_H
 #define CHECKER_PULSE_PULSEFORMULA_H
 

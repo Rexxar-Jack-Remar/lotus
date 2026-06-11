@@ -1,3 +1,4 @@
+/** @file PulseSummary.h @brief Procedure summary storage for Pulse interprocedural analysis. */
 #ifndef CHECKER_PULSE_PULSESUMMARY_H
 #define CHECKER_PULSE_PULSESUMMARY_H
 

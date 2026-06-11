@@ -1,3 +1,4 @@
+/** @file MemorySSAPuritySummary.h @brief Memory SSA-based purity summary computation. */
 #pragma once
 
 #include "llvm/IR/Function.h"

@@ -1,3 +1,10 @@
+/**
+ * @file Config.h
+ * @brief Configuration management for SymAbsAI analysis parameters.
+ *
+ * Reads configuration from files and environment variables, providing
+ * type-safe access to analysis parameters via get<T>() templates.
+ */
 #pragma once
 
 #include "Verification/SymAbsAI/Utils/Utils.h"

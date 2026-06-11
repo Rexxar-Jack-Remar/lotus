@@ -1,3 +1,4 @@
+/** @file Converter.h @brief SFG (State Flow Graph) converter for FiTx analysis. */
 #pragma once
 #include <memory>
 #include <vector>

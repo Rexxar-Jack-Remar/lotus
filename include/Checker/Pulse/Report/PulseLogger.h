@@ -1,3 +1,4 @@
+/** @file PulseLogger.h @brief Logging infrastructure for Pulse analysis. */
 #ifndef CHECKER_PULSE_PULSELOGGER_H
 #define CHECKER_PULSE_PULSELOGGER_H
 

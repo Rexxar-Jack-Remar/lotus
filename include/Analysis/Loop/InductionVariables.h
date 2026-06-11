@@ -1,3 +1,4 @@
+/** @file InductionVariables.h @brief Induction variable analysis for loop optimization. */
 /*
  * Copyright 2026 Lotus contributors
  *

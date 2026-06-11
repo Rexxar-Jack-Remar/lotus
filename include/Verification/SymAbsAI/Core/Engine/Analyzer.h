@@ -186,6 +186,7 @@ public:
   virtual ~Analyzer() {}
 };
 
+/** @brief Unilateral (top-down) fixpoint analyzer using SMT-driven strongest consequence. */
 class UnilateralAnalyzer : public Analyzer {
 private:
   struct TransfCacheData {
@@ -222,6 +223,7 @@ public:
   }
 };
 
+/** @brief Bilateral (top-down + bottom-up) fixpoint analyzer using abstract consequence acceleration. */
 class BilateralAnalyzer : public Analyzer {
 public:
   BilateralAnalyzer(const FunctionContext &s, const FragmentDecomposition &fd,
@@ -232,6 +234,7 @@ public:
                                     const ValueMapping &vmap) const;
 };
 
+/** @brief Optimization Modulo Theories (OMT) based analyzer using Z3 optimize solver for abstraction. */
 class OMTAnalyzer : public Analyzer {
 private:
   enum class OptimizeStatus { Sat, Unsat, Unknown };

@@ -1,3 +1,4 @@
+/** @file AbstractInterpretation.h @brief Abstract execution engine for sparse bug detection via abstract interpretation. */
 //===- AbstractInterpretation.h -- Abstract Execution---------------//
 //
 // Migrated from SVF's AE engine to Lotus.

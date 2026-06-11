@@ -1,3 +1,4 @@
+/** @file Lock.h @brief Lock state tracking utilities for FiTx detectors. */
 #pragma once
 #include "Checker/FiTx/Frontend/StateTransition.h"
 

@@ -1,3 +1,4 @@
+/** @file Utils.h @brief Utility functions for FiTx core analysis. */
 #pragma once
 #include "llvm/ADT/APFloat.h"
 #include "llvm/Analysis/LoopInfo.h"

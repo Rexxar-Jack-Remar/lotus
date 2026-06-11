@@ -1,3 +1,4 @@
+/** @file CUDAChecker.h @brief CUDA concurrency bug checker for GPU kernels. */
 #pragma once
 
 #include "Checker/Concurrency/ConcurrencyBugReport.h"

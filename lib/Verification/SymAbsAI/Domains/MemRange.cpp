@@ -228,7 +228,7 @@ public:
   RestrictedRelational(const FunctionContext &fctx, const Expression &left,
                        const Expression &right)
       : Cut<RestrictedRelational, NumRels>(
-            make_unique<NumRels>(fctx, left, right)) {}
+            std::make_unique<NumRels>(fctx, left, right)) {}
 
 public:
   bool isInAllowedState() {
@@ -250,7 +250,7 @@ private:
                                  RepresentedValue base, RepresentedValue addr,
                                  const Expression &candidate, unsigned bytes) {
     assert(bytes != 0);
-    auto product = make_unique<Product>(fctx);
+    auto product = std::make_unique<Product>(fctx);
 
     auto cv_bytes =
         ConcreteState::Value(fctx, bytes - 1, fctx.getPointerSize());
@@ -394,9 +394,9 @@ public:
 
         if (bound_bits < addr_bits) {
           auto ext = Expression(bound).signExtend(addr_bits);
-          add(make_unique<AddrVarOffset>(fctx, base, Addr_, ext, bytes));
+          add(std::make_unique<AddrVarOffset>(fctx, base, Addr_, ext, bytes));
         } else {
-          add(make_unique<AddrVarOffset>(fctx, base, Addr_, bound, bytes));
+          add(std::make_unique<AddrVarOffset>(fctx, base, Addr_, bound, bytes));
         }
       }
     }
@@ -507,7 +507,7 @@ public:
     }
 
     // init the product
-    auto product = make_unique<Product>(fctx);
+    auto product = std::make_unique<Product>(fctx);
     if (location != nullptr) {
       for (auto &instr : *location) {
         auto *addr_val = getMemInstAddress(&instr);
@@ -537,7 +537,7 @@ public:
       return CreateEverywhere(fctx, location, after);
 
     // accompanying domains in abstraction points
-    auto prod = make_unique<Product>(fctx);
+    auto prod = std::make_unique<Product>(fctx);
     prod->add(params::ForValuePairs<NumRels>(fctx, location, after, true));
 
     // TODO: use baseLengthPairs()
@@ -561,7 +561,7 @@ public:
               continue;
 
             // TODO: ignore small values?
-            prod->add(make_unique<NumRels>(fctx, left, bound));
+            prod->add(std::make_unique<NumRels>(fctx, left, bound));
           }
         }
       }
@@ -573,7 +573,7 @@ public:
       Expression base = pair.first;
       Expression len = pair.second;
       unsigned ptr_bits = fctx.getPointerSize();
-      result = make_unique<If>(base.ule(base + len.zeroExtend(ptr_bits)),
+      result = std::make_unique<If>(base.ule(base + len.zeroExtend(ptr_bits)),
                                std::move(result));
     }
 

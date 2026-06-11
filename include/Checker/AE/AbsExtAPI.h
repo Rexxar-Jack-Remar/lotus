@@ -1,8 +1,4 @@
-//===- AbsExtAPI.h -- Abstract Interpretation External API handler--//
-//
-// Migrated from SVF's AE engine to Lotus.
-//
-//===----------------------------------------------------------------------===//
+/** @file AbsExtAPI.h @brief Abstract interpretation external API handler for custom function modelling. */
 
 #pragma once
 

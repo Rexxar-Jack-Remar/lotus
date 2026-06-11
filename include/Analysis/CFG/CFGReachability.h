@@ -1,3 +1,4 @@
+/** @file CFGReachability.h @brief CFG reachability analysis utilities. */
 #ifndef ANALYSIS_CFG_CFGREACHABILITY_H
 #define ANALYSIS_CFG_CFGREACHABILITY_H
 

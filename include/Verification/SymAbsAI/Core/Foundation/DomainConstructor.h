@@ -1,3 +1,11 @@
+/**
+ * @file DomainConstructor.h
+ * @brief Factory for creating and composing abstract domains.
+ *
+ * The DomainConstructor provides a builder pattern for constructing abstract
+ * domains, supporting composition via Cartesian products and parameterization
+ * through ParamStrategy objects.
+ */
 #pragma once
 
 #include "Verification/SymAbsAI/Core/Foundation/AbstractValue.h"

@@ -1,3 +1,4 @@
+/** @file UniqueIRVerifier.h @brief Verifier for unique IR encoded data. */
 #pragma once
 
 #include <functional>

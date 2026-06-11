@@ -1,5 +1,6 @@
+/** @file LoopForest.h @brief Loop forest data structure representing the nesting hierarchy of loops. */
 /*
- * Copyright 2019 - 2025  Simone Campanoni, Lotus contributors
+ * Copyright 2026 Lotus contributors
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to

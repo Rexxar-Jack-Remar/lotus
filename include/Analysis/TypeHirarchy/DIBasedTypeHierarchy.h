@@ -1,3 +1,4 @@
+/** @file DIBasedTypeHierarchy.h @brief Debug-info-based type hierarchy analysis. */
 /******************************************************************************
  * Copyright (c) 2023 Fabian Schiebel.
  * All rights reserved. This program and the accompanying materials are made

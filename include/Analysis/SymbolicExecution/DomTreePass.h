@@ -1,3 +1,4 @@
+/** @file DomTreePass.h @brief LLVM dominator tree analysis pass wrapper for symbolic execution. */
 #pragma once
 
 #include <llvm/ADT/DenseMap.h>

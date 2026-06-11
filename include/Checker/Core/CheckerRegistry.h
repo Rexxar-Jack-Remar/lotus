@@ -1,3 +1,4 @@
+/** @file CheckerRegistry.h @brief Registry for registering and instantiating checker analyses. */
 #pragma once
 
 #include "Checker/Core/CheckerTypes.h"

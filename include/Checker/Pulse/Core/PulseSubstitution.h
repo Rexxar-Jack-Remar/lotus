@@ -1,3 +1,4 @@
+/** @file PulseSubstitution.h @brief Substitution utilities for Pulse symbolic formulas. */
 #ifndef CHECKER_PULSE_PULSESUBSTITUTION_H
 #define CHECKER_PULSE_PULSESUBSTITUTION_H
 

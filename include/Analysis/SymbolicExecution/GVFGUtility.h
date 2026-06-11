@@ -1,3 +1,4 @@
+/** @file GVFGUtility.h @brief Utility functions for guarded value-flow graph in symbolic execution. */
 #pragma once
 
 #include "IR/GVFG/GuardedValueFlowBuilder.h"

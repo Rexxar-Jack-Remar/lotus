@@ -1,3 +1,4 @@
+/** @file BigInteger.h @brief Arbitrary-precision integer support for symbolic execution. */
 #ifndef ANALYSIS_SYMBOLICEXECUTION_BIGINTEGER_H
 #define ANALYSIS_SYMBOLICEXECUTION_BIGINTEGER_H
 

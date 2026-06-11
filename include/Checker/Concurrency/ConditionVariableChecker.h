@@ -1,3 +1,4 @@
+/** @file ConditionVariableChecker.h @brief Condition variable misuse checker for concurrent programs. */
 #ifndef CONDITION_VARIABLE_CHECKER_H
 #define CONDITION_VARIABLE_CHECKER_H
 

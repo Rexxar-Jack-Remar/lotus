@@ -1,3 +1,4 @@
+/** @file Utils.h @brief Utility functions for KINT integer analysis. */
 #pragma once
 
 #include <llvm/ADT/StringRef.h>

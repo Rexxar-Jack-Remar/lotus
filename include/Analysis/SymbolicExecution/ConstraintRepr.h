@@ -1,3 +1,4 @@
+/** @file ConstraintRepr.h @brief Constraint representation for symbolic execution path conditions. */
 #ifndef ANALYSIS_SYMBOLICEXECUTION_CONSTRAINT_REPR_H
 #define ANALYSIS_SYMBOLICEXECUTION_CONSTRAINT_REPR_H
 

@@ -1,3 +1,4 @@
+/** @file NullPtr_Detector.h @brief Null pointer dereference detector for FiTx analysis. */
 #pragma once
 
 #include "Checker/FiTx/Frontend/State.h"

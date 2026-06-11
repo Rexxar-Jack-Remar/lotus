@@ -1,3 +1,4 @@
+/** @file Log.h @brief Logging utilities for KINT integer analysis. */
 #pragma once
 
 #include <cstddef>

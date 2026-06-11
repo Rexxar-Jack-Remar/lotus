@@ -1,3 +1,4 @@
+/** @file StoreInstruction.h @brief Store instruction representation for FiTx IR. */
 #pragma once
 #include "Checker/FiTx/Core/Instruction.h"
 #include "Checker/FiTx/Core/Value.h"

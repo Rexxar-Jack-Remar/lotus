@@ -1,5 +1,6 @@
+/** @file LoopCarriedDependencies.h @brief Analysis of loop-carried data dependencies for parallelization. */
 /*
- * Copyright 2026  Lotus contributors
+ * Copyright 2026 Lotus contributors
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to

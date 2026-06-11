@@ -1,3 +1,4 @@
+/** @file SuppressionManager.h @brief Bug report suppression manager for filtering known false positives. */
 #ifndef CHECKER_REPORT_SUPPRESSIONMANAGER_H
 #define CHECKER_REPORT_SUPPRESSIONMANAGER_H
 

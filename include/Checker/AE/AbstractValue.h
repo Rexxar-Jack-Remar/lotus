@@ -1,3 +1,4 @@
+/** @file AbstractValue.h @brief Abstract value base class for abstract interpretation bug detection. */
 //===- AbstractValue.h ----Abstract Value--------------------------//
 //
 // Migrated from SVF's AE engine to Lotus.

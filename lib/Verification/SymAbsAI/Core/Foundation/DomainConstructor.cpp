@@ -344,7 +344,7 @@ DomainConstructor::parameterize(const ParamStrategy &pstrategy) {
   factory_func_t factory_func = FactoryFunc_;
 
   auto f = [pstrategy, factory_func](const DomainConstructor::args &args) {
-    auto result = make_unique<domains::Product>(*args.fctx);
+    auto result = std::make_unique<domains::Product>(*args.fctx);
 
     for (auto &pvec : pstrategy.generateParams(args)) {
       DomainConstructor::args local_args = args;
@@ -395,7 +395,7 @@ DomainConstructor::product(std::vector<DomainConstructor> doms) {
   }
 
   auto f = [doms](const DomainConstructor::args &args) {
-    auto prod = make_unique<domains::Product>(*args.fctx);
+    auto prod = std::make_unique<domains::Product>(*args.fctx);
     for (auto &d : doms) {
       prod->add(d.FactoryFunc_(args));
     }

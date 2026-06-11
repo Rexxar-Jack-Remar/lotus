@@ -1,3 +1,4 @@
+/** @file ReportOptions.h @brief Reporting configuration options for checker output. */
 #ifndef CHECKER_REPORT_REPORTOPTIONS_H
 #define CHECKER_REPORT_REPORTOPTIONS_H
 

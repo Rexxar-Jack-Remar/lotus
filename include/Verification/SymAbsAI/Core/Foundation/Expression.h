@@ -50,6 +50,7 @@ public:
   virtual ~ExpressionBase() = default;
 };
 
+/** @brief Value-type wrapper around symbolic expressions with arithmetic and comparison support. */
 class Expression : public ExpressionBase {
 private:
   shared_ptr<ExpressionBase> Instance_;

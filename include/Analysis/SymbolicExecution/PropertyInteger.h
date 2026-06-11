@@ -1,3 +1,4 @@
+/** @file PropertyInteger.h @brief Integer-typed abstract property value for symbolic execution. */
 #ifndef ANALYSIS_SYMBOLICEXECUTION_PROPERTYINTEGER_H
 #define ANALYSIS_SYMBOLICEXECUTION_PROPERTYINTEGER_H
 

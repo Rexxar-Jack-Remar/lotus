@@ -1,3 +1,11 @@
+/**
+ * @file Product.h
+ * @brief Cartesian product abstract domain — composes multiple domains.
+ *
+ * Allows combining independent abstract domains into a product domain where
+ * each sub-domain tracks a different facet of program state. Supports
+ * randomized projection for scalability.
+ */
 #pragma once
 
 #include "Verification/SymAbsAI/Core/Foundation/AbstractValue.h"
@@ -14,6 +22,7 @@
 
 namespace symabs_ai {
 namespace domains {
+/** @brief Cartesian product of multiple abstract domains. */
 class Product : public AbstractValue {
 protected:
   using values_t = std::vector<unique_ptr<AbstractValue>>;

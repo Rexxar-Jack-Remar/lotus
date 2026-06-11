@@ -18,6 +18,7 @@
  * @ingroup NullPointer
  */
 
+/** @file NullFlowAnalysis.h @brief Null flow analysis for tracking null propagation through program paths. */
 #ifndef NULLPOINTER_NULLFLOWANALYSIS_H
 #define NULLPOINTER_NULLFLOWANALYSIS_H
 

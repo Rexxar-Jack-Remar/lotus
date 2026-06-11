@@ -34,13 +34,13 @@ unique_ptr<MemoryModel> MemoryModel::New(const FunctionContext &fctx) {
   int addr_bits = fctx.getConfig().get<int>("MemoryModel", "AddressBits", -1);
 
   if (variant == "NoMemory") {
-    return make_unique<memory::NoMemory>(fctx);
+    return std::make_unique<memory::NoMemory>(fctx);
   } else if (variant == "LittleEndian") {
-    return make_unique<memory::LittleEndian>(fctx, addr_bits);
+    return std::make_unique<memory::LittleEndian>(fctx, addr_bits);
   } else if (variant == "Aligned") {
-    return make_unique<memory::Aligned>(fctx);
+    return std::make_unique<memory::Aligned>(fctx);
   } else if (variant == "BlockModel") {
-    return make_unique<memory::BlockModel>(fctx);
+    return std::make_unique<memory::BlockModel>(fctx);
   }
 
   llvm_unreachable("unknown memory model");

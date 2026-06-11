@@ -1,3 +1,4 @@
+/** @file PulseTaintConfig.h @brief Taint configuration for Pulse taint analysis domain. */
 #ifndef CHECKER_PULSE_PULSETAINTCONFIG_H
 #define CHECKER_PULSE_PULSETAINTCONFIG_H
 

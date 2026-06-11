@@ -1,3 +1,10 @@
+/**
+ * @file PrettyPrinter.h
+ * @brief Pretty-printing utilities for abstract domain values and expressions.
+ *
+ * Provides the PrettyPrinter class for structured output of abstract values
+ * with indentation, compact modes, and LLVM-aware formatting.
+ */
 #pragma once
 
 #include "Verification/SymAbsAI/Utils/Utils.h"

@@ -1,3 +1,4 @@
+/** @file InstResolver.h @brief Instruction resolver for symbolic execution of LLVM IR. */
 #pragma once
 
 #include <string>

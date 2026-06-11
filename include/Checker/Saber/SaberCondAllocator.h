@@ -1,3 +1,4 @@
+/** @file SaberCondAllocator.h @brief Conditional allocation site analysis for SABER. */
 //===- SaberCondAllocator.h -- Path condition
 // manipulation---------------------//
 //

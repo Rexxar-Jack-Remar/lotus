@@ -1,3 +1,4 @@
+/** @file MemoryCloningAnalysis.h @brief Memory cloning analysis for loop optimization and privatization. */
 /*
  * Copyright 2026 Lotus contributors
  */

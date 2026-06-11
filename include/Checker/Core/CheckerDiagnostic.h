@@ -1,3 +1,4 @@
+/** @file CheckerDiagnostic.h @brief Diagnostic types and utilities for checker bug reports. */
 #pragma once
 
 #include "Checker/Core/CheckerTypes.h"

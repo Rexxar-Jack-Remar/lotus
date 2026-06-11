@@ -1,3 +1,4 @@
+/** @file ConcurrencyChecker.h @brief Aggregate concurrency checker driver orchestrating multiple analyses. */
 #ifndef CONCURRENCY_CHECKER_H
 #define CONCURRENCY_CHECKER_H
 

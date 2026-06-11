@@ -1,3 +1,11 @@
+/**
+ * @file FloatingPointModel.h
+ * @brief Factory and base class for floating-point SMT modeling in SymAbsAI.
+ *
+ * Defines the FloatingPointModel class hierarchy that creates Z3 floating-point
+ * sorts and operations for LLVM IR floating-point instructions. Supports
+ * multiple floating-point semantics via the static New() factory method.
+ */
 #pragma once
 
 #include "Verification/SymAbsAI/Core/Integration/FunctionContext.h"
@@ -11,6 +19,7 @@ class ConstantFP;
 } // namespace llvm
 
 namespace symabs_ai {
+/** @brief Abstract base for floating-point SMT modeling of LLVM IR. */
 class FloatingPointModel {
   mutable unsigned RoundingModeCounter_;
   static constexpr const char *RM_PREFIX = "__ROUNDING_MODE_";

@@ -1,3 +1,7 @@
+/**
+ * @file Utils.h
+ * @brief Core utilities and macros for SymAbsAI: output streams, LLVM version checks, and shared alias declarations.
+ */
 #pragma once
 
 #include <iostream>
@@ -56,6 +60,7 @@ class PrettyPrinter;
 extern std::ostream vout;
 extern bool VerboseEnable;
 
+/** @brief RAII helper that emits a named block delimiter to the verbose output stream. */
 struct VOutBlock {
   VOutBlock(const std::string &name) { vout << name << " {{{" << '\n'; }
 

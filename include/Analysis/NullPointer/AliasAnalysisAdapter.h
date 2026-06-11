@@ -1,3 +1,4 @@
+/** @file AliasAnalysisAdapter.h @brief Adapter interface for alias analysis used by NullPointer analyses. */
 /*
  *  Author: rainoftime
  *  Date: 2025-04

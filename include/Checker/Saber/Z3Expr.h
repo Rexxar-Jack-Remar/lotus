@@ -1,3 +1,4 @@
+/** @file Z3Expr.h @brief Z3 expression helpers for SABER constraint-based analysis. */
 //===- Z3Expr.h -- Z3 Expression wrapper for SABER ------------------===//
 //
 // Simplified Z3 expression interface for path condition tracking.

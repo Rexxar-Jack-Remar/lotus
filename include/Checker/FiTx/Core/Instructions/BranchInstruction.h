@@ -1,3 +1,4 @@
+/** @file BranchInstruction.h @brief Branch instruction representation for FiTx IR. */
 #pragma once
 #include <climits>
 #include <map>

@@ -1,3 +1,4 @@
+/** @file LLVMVFTableData.h @brief Data structures backing the LLVM vtable representation. */
 /******************************************************************************
  * Copyright (c) 2024 Fabian Schiebel.
  * All rights reserved. This program and the accompanying materials are made

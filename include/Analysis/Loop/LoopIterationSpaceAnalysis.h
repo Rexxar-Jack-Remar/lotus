@@ -1,3 +1,4 @@
+/** @file LoopIterationSpaceAnalysis.h @brief Analysis of loop iteration spaces for parallelization and optimization. */
 /*
  * Copyright 2026 Lotus contributors
  *

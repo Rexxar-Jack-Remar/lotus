@@ -1,8 +1,10 @@
 /**
- * A template-based, LLVM-enabled pretty-printer.
+ * @file Repr.h
+ * @brief Template-based pretty-printer for LLVM values and SymAbsAI objects.
  *
- * Full sources and license information available on the
- * <a href="http://github.com/tdudziak/repr">project website</a>.
+ * Vendored from the repr library (http://github.com/tdudziak/repr).
+ * Provides repr() template functions for pretty-printing LLVM IR values,
+ * types, instructions, and user-defined types.
  */
 
 #ifndef REPR_HPP

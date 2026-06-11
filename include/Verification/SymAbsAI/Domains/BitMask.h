@@ -1,3 +1,10 @@
+/**
+ * @file BitMask.h
+ * @brief Bit-level analysis abstract domain.
+ *
+ * Tracks individual bit values, bit masks, and alignment information for
+ * LLVM values using SMT-backed symbolic abstraction.
+ */
 #pragma once
 
 #include "Verification/SymAbsAI/Core/Foundation/AbstractValue.h"
@@ -15,6 +22,7 @@ using namespace symabs_ai;
 
 namespace symabs_ai {
 namespace domains {
+/** @brief Bit-level analysis domain tracking masks, alignment, and individual bit values. */
 class BitMask : public AbstractValue {
 private:
   /**
@@ -43,13 +51,13 @@ public:
   static unique_ptr<AbstractValue>
   NewSingle(const Expression &expr, const DomainConstructor::args &args) {
     return std::move(
-        make_unique<BitMask>(*args.fctx, expr.asRepresentedValue()));
+        std::make_unique<BitMask>(*args.fctx, expr.asRepresentedValue()));
   }
 
   static unique_ptr<AbstractValue>
   NewRelational(const Expression &left, const Expression &right,
                 const DomainConstructor::args &args) {
-    return std::move(make_unique<BitMask>(*args.fctx, left.asRepresentedValue(),
+    return std::move(std::make_unique<BitMask>(*args.fctx, left.asRepresentedValue(),
                                           right.asRepresentedValue()));
   }
 

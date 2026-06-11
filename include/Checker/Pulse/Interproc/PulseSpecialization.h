@@ -1,3 +1,4 @@
+/** @file PulseSpecialization.h @brief Function specialization for Pulse interprocedural analysis. */
 #ifndef CHECKER_PULSE_PULSESPECIALIZATION_H
 #define CHECKER_PULSE_PULSESPECIALIZATION_H
 

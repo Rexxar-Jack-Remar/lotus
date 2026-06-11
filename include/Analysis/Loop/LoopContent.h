@@ -1,5 +1,6 @@
+/** @file LoopContent.h @brief Loop content analysis for identifying instructions, blocks, and values inside loops. */
 /*
- * Copyright 2016 - 2025  Angelo Matni, Simone Campanoni, Lotus contributors
+ * Copyright 2026 Lotus contributors
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to

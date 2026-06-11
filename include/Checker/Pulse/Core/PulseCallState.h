@@ -1,3 +1,4 @@
+/** @file PulseCallState.h @brief Call state tracking for Pulse interprocedural analysis. */
 #ifndef CHECKER_PULSE_PULSECALLSTATE_H
 #define CHECKER_PULSE_PULSECALLSTATE_H
 

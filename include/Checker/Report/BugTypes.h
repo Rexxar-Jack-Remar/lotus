@@ -1,3 +1,4 @@
+/** @file BugTypes.h @brief Bug type enumerations for checker framework. */
 #ifndef INCLUDE_REPORT_BUGREPORT_BUGTYPES_H_
 #define INCLUDE_REPORT_BUGREPORT_BUGTYPES_H_
 

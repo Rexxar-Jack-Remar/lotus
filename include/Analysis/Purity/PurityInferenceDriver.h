@@ -1,3 +1,4 @@
+/** @file PurityInferenceDriver.h @brief Driver for purity inference across compilation units. */
 #pragma once
 
 #include "Analysis/Purity/FunctionPurityAnalysis.h"

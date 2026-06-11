@@ -1,3 +1,4 @@
+/** @file UniqueIRMarker.h @brief Unique IR marker for identifying LLVM instructions. */
 #pragma once
 
 #include "Analysis/DebugInfo/UniqueIR/UniqueIRConstants.h"

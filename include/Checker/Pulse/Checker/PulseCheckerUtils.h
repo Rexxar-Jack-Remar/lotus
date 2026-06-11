@@ -1,3 +1,4 @@
+/** @file PulseCheckerUtils.h @brief Utility functions for the Pulse checker framework. */
 #ifndef CHECKER_PULSE_PULSECHECKERUTILS_H
 #define CHECKER_PULSE_PULSECHECKERUTILS_H
 

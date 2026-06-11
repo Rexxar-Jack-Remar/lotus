@@ -1,3 +1,5 @@
+/** @file CommandlineArgs.h @brief Command-line argument definitions for FiTx analysis. */
+#pragma once
 #include "Checker/Tooling/CheckerSubcommands.h"
 #include "llvm/Support/CommandLine.h"
 

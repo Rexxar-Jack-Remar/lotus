@@ -1,3 +1,4 @@
+/** @file OpenMPChecker.h @brief OpenMP concurrency bug checker for shared-memory parallel programs. */
 #pragma once
 
 #include "Concurrency/OpenMP/OpenMPTaskGraph.h"

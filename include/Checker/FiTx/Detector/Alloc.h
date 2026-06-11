@@ -1,3 +1,4 @@
+/** @file Alloc.h @brief Allocation state tracking utilities for FiTx detectors. */
 #pragma once
 #include "Checker/FiTx/Frontend/StateTransition.h"
 

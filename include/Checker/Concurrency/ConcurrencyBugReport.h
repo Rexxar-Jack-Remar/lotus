@@ -1,3 +1,4 @@
+/** @file ConcurrencyBugReport.h @brief Bug report types for concurrency checkers. */
 #ifndef CONCURRENCY_BUG_REPORT_H
 #define CONCURRENCY_BUG_REPORT_H
 

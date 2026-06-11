@@ -1,3 +1,4 @@
+/** @file LoopLDGBuilder.h @brief Builder for constructing loop dependence graphs. */
 /*
  * Copyright 2026 Lotus contributors
  */

@@ -1,3 +1,4 @@
+/** @file SARIF.h @brief SARIF (Static Analysis Results Interchange Format) output for bug reports. */
 #ifndef SARIF_H
 #define SARIF_H
 

@@ -1,3 +1,4 @@
+/** @file AtomicityChecker.h @brief Atomicity violation checker for concurrent programs. */
 #ifndef ATOMICITY_CHECKER_H
 #define ATOMICITY_CHECKER_H
 

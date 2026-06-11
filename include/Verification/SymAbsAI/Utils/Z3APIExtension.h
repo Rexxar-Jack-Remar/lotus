@@ -1,12 +1,9 @@
-#pragma once
 /**
  * @file Z3APIExtension.h
- * @Brief This class is an extension of the z3 C++ API which omits in a
- * completely incomprehensive way important functions for handling bitvectors.
- * The functions here use low level functions to generate the expressions in
- * a way that is similar to how the other operations are implemented in the
- * C++ API.
+ * @brief Extensions to the Z3 C++ API for bitvector operations missing from the
+ * official API, implemented via low-level Z3 C functions.
  */
+#pragma once
 
 #include <vector>
 

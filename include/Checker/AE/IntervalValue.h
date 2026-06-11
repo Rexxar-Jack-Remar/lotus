@@ -1,3 +1,4 @@
+/** @file IntervalValue.h @brief Interval value domain for abstract interpretation. */
 //===- IntervalValue.h ----Interval Value for Abstract Domain-------------//
 //
 // Migrated from SVF's AE engine to Lotus.

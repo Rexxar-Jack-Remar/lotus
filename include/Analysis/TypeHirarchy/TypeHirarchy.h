@@ -1,3 +1,4 @@
+/** @file TypeHirarchy.h @brief Type hierarchy analysis interface (alternate spelling of TypeHierarchy.h). */
 /******************************************************************************
  * Copyright (c) 2023 Philipp Schubert.
  * All rights reserved. This program and the accompanying materials are made

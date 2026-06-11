@@ -1,3 +1,4 @@
+/** @file AnalysisState.h @brief Abstract state representation for symbolic execution. */
 #ifndef ANALYSIS_SYMBOLICEXECUTION_ANALYSISSTATE_H
 #define ANALYSIS_SYMBOLICEXECUTION_ANALYSISSTATE_H
 

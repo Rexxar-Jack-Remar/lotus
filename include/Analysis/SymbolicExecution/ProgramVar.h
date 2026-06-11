@@ -1,3 +1,4 @@
+/** @file ProgramVar.h @brief Program variable representation for symbolic execution analysis. */
 #ifndef ANALYSIS_SYMBOLICEXECUTION_PROGRAMVAR_H
 #define ANALYSIS_SYMBOLICEXECUTION_PROGRAMVAR_H
 

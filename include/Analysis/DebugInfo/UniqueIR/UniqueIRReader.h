@@ -1,3 +1,4 @@
+/** @file UniqueIRReader.h @brief Reader for unique IR encoded data. */
 #pragma once
 
 #include "Analysis/DebugInfo/UniqueIR/UniqueIRConstants.h"

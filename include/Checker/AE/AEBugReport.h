@@ -1,3 +1,4 @@
+/** @file AEBugReport.h @brief Bug report types for abstract execution checkers. */
 #pragma once
 
 #include <string>

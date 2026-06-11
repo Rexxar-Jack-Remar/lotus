@@ -1,3 +1,4 @@
+/** @file SummaryEncoding.h @brief Summary encoding for KINT interprocedural analysis. */
 #pragma once
 
 #include <optional>

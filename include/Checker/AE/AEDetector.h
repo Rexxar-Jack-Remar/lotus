@@ -1,3 +1,4 @@
+/** @file AEDetector.h @brief Vulnerability detectors using abstract execution. */
 //===- AEDetector.h -- Vulnerability Detectors-----------------------//
 //
 // Migrated from SVF's AE engine to Lotus.

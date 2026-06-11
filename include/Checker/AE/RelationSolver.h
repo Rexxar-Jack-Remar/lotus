@@ -1,3 +1,4 @@
+/** @file RelationSolver.h @brief Relation solver for interval domains in abstract execution. */
 //===- RelationSolver.h ----Relation Solver for Interval Domains-----------//
 //
 // Migrated from SVF's AE engine to Lotus.

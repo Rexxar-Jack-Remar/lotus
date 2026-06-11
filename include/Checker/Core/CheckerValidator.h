@@ -1,3 +1,4 @@
+/** @file CheckerValidator.h @brief Validation utilities for checker specifications and configurations. */
 #pragma once
 
 #include "Checker/Core/CheckerTypes.h"

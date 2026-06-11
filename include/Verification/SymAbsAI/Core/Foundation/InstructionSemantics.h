@@ -1,9 +1,9 @@
-#pragma once
 /**
  * @file InstructionSemantics.h
- * @Brief Class for generating SMT constraints capturing the semantics of
+ * @brief Class for generating SMT constraints capturing the semantics of
  * arbitrary LLVM instructions.
  */
+#pragma once
 
 #include "Verification/SymAbsAI/Utils/Utils.h"
 

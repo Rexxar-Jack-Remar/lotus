@@ -1,3 +1,4 @@
+/** @file SymbolicExecutionWrapper.h @brief LLVM pass wrapper for symbolic execution analysis. */
 #pragma once
 
 #include "llvm/Pass.h"

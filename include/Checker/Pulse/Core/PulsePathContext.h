@@ -1,3 +1,4 @@
+/** @file PulsePathContext.h @brief Path-sensitive context tracking for Pulse analysis. */
 #ifndef CHECKER_PULSE_PULSEPATHCONTEXT_H
 #define CHECKER_PULSE_PULSEPATHCONTEXT_H
 

@@ -1,3 +1,4 @@
+/** @file SaberOptions.h @brief Configuration options for SABER analysis. */
 //===- SaberOptions.h -- Saber checker options ----------------------------//
 //
 // Migrated from SVF's SABER engine to Lotus.

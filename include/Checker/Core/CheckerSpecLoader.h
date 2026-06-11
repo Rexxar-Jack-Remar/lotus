@@ -1,3 +1,4 @@
+/** @file CheckerSpecLoader.h @brief Loader for declarative checker specifications from YAML/JSON. */
 #pragma once
 
 #include "Checker/Core/CheckerTypes.h"

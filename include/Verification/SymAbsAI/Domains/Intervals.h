@@ -1,3 +1,10 @@
+/**
+ * @file Intervals.h
+ * @brief Integer interval (range) abstract domain.
+ *
+ * Tracks integer value ranges [lower, upper] for LLVM values. Supports
+ * widening with previous-iteration bounds for fixpoint convergence.
+ */
 #pragma once
 
 #include "Verification/SymAbsAI/Core/Foundation/AbstractValue.h"
@@ -14,6 +21,7 @@ class FunctionContext;
 
 namespace domains {
 
+/** @brief Integer interval domain tracking [lower, upper] ranges. */
 class Interval : public AbstractValue {
 protected:
   int64_t Max_ = 0;

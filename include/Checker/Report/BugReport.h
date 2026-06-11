@@ -1,3 +1,4 @@
+/** @file BugReport.h @brief Bug report data structures for checker framework. */
 #ifndef CHECKER_REPORT_BUGREPORT_H
 #define CHECKER_REPORT_BUGREPORT_H
 

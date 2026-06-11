@@ -1,3 +1,4 @@
+/** @file ExternalPuritySummaryStore.h @brief Storage and retrieval of external purity summaries. */
 #pragma once
 
 #include "Analysis/Purity/DeclarationSummaryProvider.h"

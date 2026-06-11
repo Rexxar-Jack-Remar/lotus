@@ -1,3 +1,4 @@
+/** @file NullCheckAnalysis.h @brief Null check analysis for detecting potential null-pointer dereferences. */
 /*
  *  Canary features a fast unification-based alias analysis for C programs
  *  Copyright (C) 2021 Qingkai Shi <qingkaishi@gmail.com>

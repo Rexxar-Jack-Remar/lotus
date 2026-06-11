@@ -1,3 +1,4 @@
+/** @file FunctionPurityAnalysis.h @brief Function-level purity analysis. */
 #pragma once
 
 #include "Analysis/Purity/PuritySummary.h"

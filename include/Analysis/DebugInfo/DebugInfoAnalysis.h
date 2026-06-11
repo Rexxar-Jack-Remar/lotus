@@ -1,3 +1,4 @@
+/** @file DebugInfoAnalysis.h @brief Debug info analysis for improving bug reports with source-location information. */
 // Use debug info to better report bugs, e.g., line number, function name, etc.
 // Adapted from a prior DebugInfoAnalysis implementation for LLVM 14+
 

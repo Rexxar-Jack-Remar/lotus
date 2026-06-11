@@ -1,3 +1,4 @@
+/** @file AbstractState.h @brief Abstract state representation for abstract execution bug detection. */
 //===- AbstractState.h ----Abstract State--------------------------//
 //
 // Migrated from SVF's AE engine to Lotus.

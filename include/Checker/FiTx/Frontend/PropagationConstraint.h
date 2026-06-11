@@ -1,3 +1,4 @@
+/** @file PropagationConstraint.h @brief Propagation constraints for FiTx state transitions. */
 #pragma once
 #include "llvm/ADT/APFloat.h"
 #include "llvm/Analysis/LoopInfo.h"

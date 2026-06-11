@@ -1,3 +1,4 @@
+/** @file Ref_count.h @brief Reference count function tables for FiTx analysis. */
 #pragma once
 #include <string>
 #include <vector>

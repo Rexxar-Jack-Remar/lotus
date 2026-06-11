@@ -1,3 +1,4 @@
+/** @file FunctionLoopAnalyses.h @brief Driver for running multiple loop analyses on functions. */
 /*
  * Copyright 2026 Lotus contributors
  *

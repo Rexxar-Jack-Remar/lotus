@@ -1,3 +1,4 @@
+/** @file LockMismatchChecker.h @brief Lock mismatch detection checker for concurrent programs. */
 #ifndef LOCK_MISMATCH_CHECKER_H
 #define LOCK_MISMATCH_CHECKER_H
 

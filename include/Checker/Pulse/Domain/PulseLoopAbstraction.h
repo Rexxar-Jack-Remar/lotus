@@ -1,3 +1,4 @@
+/** @file PulseLoopAbstraction.h @brief Loop abstraction utilities for Pulse analysis. */
 #ifndef CHECKER_PULSE_PULSELOOPABSTRACTION_H
 #define CHECKER_PULSE_PULSELOOPABSTRACTION_H
 

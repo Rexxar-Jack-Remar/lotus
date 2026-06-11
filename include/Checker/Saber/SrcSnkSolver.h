@@ -1,3 +1,4 @@
+/** @file SrcSnkSolver.h @brief Source-sink solver for SABER demand-driven analysis. */
 //===- SrcSnkSolver.h -- CFL reachability solver -------------------===//
 //
 // Migrated from SVF's SABER engine to Lotus.

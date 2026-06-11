@@ -1,3 +1,4 @@
+/** @file MemoryMLFeatures.h @brief Memory-related feature extraction for ML-based analysis. */
 #pragma once
 
 #include "llvm/ADT/StringRef.h"

@@ -1,3 +1,4 @@
+/** @file PulseLatentIssue.h @brief Latent issue tracking for deferred Pulse bug reporting. */
 #ifndef CHECKER_PULSE_PULSELATENTISSUE_H
 #define CHECKER_PULSE_PULSELATENTISSUE_H
 

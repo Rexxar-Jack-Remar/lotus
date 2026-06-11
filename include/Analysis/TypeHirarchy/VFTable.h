@@ -1,3 +1,4 @@
+/** @file VFTable.h @brief Abstract vtable base class for virtual function dispatch analysis. */
 /******************************************************************************
  * Copyright (c) 2019 Philipp Schubert.
  * All rights reserved. This program and the accompanying materials are made

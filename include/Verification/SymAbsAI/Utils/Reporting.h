@@ -1,5 +1,11 @@
-// SymAbsAI reporting helpers: configuration and analysis result
-// rendering
+/**
+ * @file Reporting.h
+ * @brief Helpers for printing SymAbsAI configuration and analysis results.
+ *
+ * Provides free functions for uniform pretty-printing of effective
+ * configuration settings, entry-point abstract states, per-block results,
+ * and exit-block results.
+ */
 #pragma once
 
 #include <string>
@@ -12,7 +18,7 @@ namespace symabs_ai {
 class Analyzer;
 } // namespace symabs_ai
 
-// Print a concise, uniform "Effective configuration" section.
+/** @brief Print a concise, uniform "Effective configuration" section. */
 void printEffectiveConfiguration(
     const std::string &configSource, const std::string &domainName,
     const std::string &domainSource, bool fallbackToFirst,
@@ -22,12 +28,12 @@ void printEffectiveConfiguration(
     const std::string &memoryVariant, int addressBits,
     const std::string &memoryOrigin);
 
-// Pretty-print analysis results at the function entry.
+/** @brief Pretty-print analysis results at the function entry. */
 void printEntryResult(symabs_ai::Analyzer *analyzer, llvm::Function *func);
 
-// Pretty-print analysis results for all basic blocks.
+/** @brief Pretty-print analysis results for all basic blocks. */
 void printAllBlocksResults(symabs_ai::Analyzer *analyzer, llvm::Function *func);
 
-// Pretty-print analysis results for exit blocks (with return).
+/** @brief Pretty-print analysis results for exit blocks (with return). */
 void printExitBlocksResults(symabs_ai::Analyzer *analyzer,
                             llvm::Function *func);

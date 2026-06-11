@@ -1,3 +1,4 @@
+/** @file PulseModels.h @brief Modeled function specifications for Pulse interprocedural analysis. */
 #ifndef CHECKER_PULSE_PULSEMODELS_H
 #define CHECKER_PULSE_PULSEMODELS_H
 

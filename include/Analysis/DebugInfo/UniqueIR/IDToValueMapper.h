@@ -1,3 +1,4 @@
+/** @file IDToValueMapper.h @brief Mapping from unique IR IDs to LLVM values. */
 #pragma once
 
 #include "Analysis/DebugInfo/UniqueIR/UniqueIRConstants.h"

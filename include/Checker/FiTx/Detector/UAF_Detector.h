@@ -1,3 +1,4 @@
+/** @file UAF_Detector.h @brief Use-after-free detector for FiTx analysis. */
 #pragma once
 #include "Checker/FiTx/Detector/Alloc.h"
 #include "Checker/FiTx/Frontend/State.h"

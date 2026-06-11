@@ -1,3 +1,4 @@
+/** @file API.h @brief API utilities for null-pointer analysis support. */
 #ifndef SUPPORT_API_H
 #define SUPPORT_API_H
 

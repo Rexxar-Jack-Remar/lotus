@@ -1,3 +1,4 @@
+/** @file PathCondSolver.h @brief Path condition solver using SMT or constraint propagation. */
 #ifndef ANALYSIS_SYMBOLICEXECUTION_PATHCONDSOLVER_H
 #define ANALYSIS_SYMBOLICEXECUTION_PATHCONDSOLVER_H
 

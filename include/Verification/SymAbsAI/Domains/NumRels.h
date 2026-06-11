@@ -1,3 +1,11 @@
+/**
+ * @file NumRels.h
+ * @brief Numerical relations abstract domain (e.g., x ≤ y + 5).
+ *
+ * Tracks binary numerical relations between two expressions: whether the left
+ * expression is LOWER, GREATER, EQUAL, or any combination (TOP) relative to
+ * the right expression.
+ */
 #pragma once
 
 #include "Verification/SymAbsAI/Core/Foundation/AbstractValue.h"
@@ -10,6 +18,7 @@
 
 namespace symabs_ai {
 namespace domains {
+/** @brief Numerical relations domain: tracks LOWER/GREATER/EQUAL between two expressions. */
 class NumRels : public AbstractValue {
 public:
   static const uint8_t BOTTOM = 0;
@@ -34,19 +43,19 @@ public:
   static unique_ptr<AbstractValue>
   NewSigned(const Expression &left, const Expression &right,
             const DomainConstructor::args &args) {
-    return std::move(make_unique<NumRels>(*args.fctx, left, right, true));
+    return std::move(std::make_unique<NumRels>(*args.fctx, left, right, true));
   }
 
   static unique_ptr<AbstractValue>
   NewUnsigned(const Expression &left, const Expression &right,
               const DomainConstructor::args &args) {
-    return std::move(make_unique<NumRels>(*args.fctx, left, right, false));
+    return std::move(std::make_unique<NumRels>(*args.fctx, left, right, false));
   }
 
   static unique_ptr<AbstractValue>
   NewZero(const Expression &expr, const DomainConstructor::args &args) {
     ConcreteState::Value zero(*args.fctx, 0, expr.bits(*args.fctx));
-    return std::move(make_unique<NumRels>(*args.fctx, expr, zero, true));
+    return std::move(std::make_unique<NumRels>(*args.fctx, expr, zero, true));
   }
 
   virtual bool joinWith(const AbstractValue &av_other) override;

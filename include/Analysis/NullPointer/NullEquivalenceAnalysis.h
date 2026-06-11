@@ -16,6 +16,7 @@
  *  along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
+/** @file NullEquivalenceAnalysis.h @brief Null equivalence analysis for determining when values are equal to null. */
 #ifndef NULLPOINTER_NULLEQUIVALENCEANALYSIS_H
 #define NULLPOINTER_NULLEQUIVALENCEANALYSIS_H
 

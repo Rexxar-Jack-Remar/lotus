@@ -1,3 +1,4 @@
+/** @file LeakChecker.h @brief Memory leak detector using SABER analysis. */
 //===- LeakChecker.h -- Detecting memory leaks--------------------------------//
 //
 // Migrated from SVF's SABER engine to Lotus.

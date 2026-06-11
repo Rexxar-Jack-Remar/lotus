@@ -1,3 +1,4 @@
+/** @file ScalarEvolutionReferencer.h @brief Adapter bridging LLVM ScalarEvolution with Lotus loop analysis. */
 /*
  * Copyright 2026 Lotus contributors
  */

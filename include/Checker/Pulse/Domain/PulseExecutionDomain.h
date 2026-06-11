@@ -1,3 +1,4 @@
+/** @file PulseExecutionDomain.h @brief Execution semantics domain for Pulse analysis. */
 #ifndef CHECKER_PULSE_PULSEEXECUTIONDOMAIN_H
 #define CHECKER_PULSE_PULSEEXECUTIONDOMAIN_H
 

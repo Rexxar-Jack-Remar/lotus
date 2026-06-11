@@ -1,3 +1,4 @@
+/** @file MultiplicityClassifier.h @brief Classifier for multiplicity properties of program values. */
 #pragma once
 
 #include <llvm/ADT/DenseMap.h>

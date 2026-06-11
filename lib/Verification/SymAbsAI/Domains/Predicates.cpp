@@ -20,7 +20,7 @@ Predicates::pred_t equality_pred =
 unique_ptr<AbstractValue> NewEquality(const Expression &left,
                                       const Expression &right,
                                       const DomainConstructor::args &args) {
-  return make_unique<PredicatesWrapper<&equality_pred>>(*args.fctx, left,
+  return std::make_unique<PredicatesWrapper<&equality_pred>>(*args.fctx, left,
                                                         right);
 }
 } // namespace

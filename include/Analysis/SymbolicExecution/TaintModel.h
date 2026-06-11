@@ -1,3 +1,4 @@
+/** @file TaintModel.h @brief Taint propagation model for symbolic-execution-based taint analysis. */
 #ifndef ANALYSIS_SYMBOLICEXECUTION_TAINTMODEL_H
 #define ANALYSIS_SYMBOLICEXECUTION_TAINTMODEL_H
 

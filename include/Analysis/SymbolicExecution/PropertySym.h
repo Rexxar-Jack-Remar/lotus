@@ -1,3 +1,4 @@
+/** @file PropertySym.h @brief Symbolic abstract property value for symbolic execution. */
 #ifndef ANALYSIS_SYMBOLICEXECUTION_PROPERTYSYM_H
 #define ANALYSIS_SYMBOLICEXECUTION_PROPERTYSYM_H
 

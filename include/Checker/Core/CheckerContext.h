@@ -1,3 +1,4 @@
+/** @file CheckerContext.h @brief Per-module checker context providing analysis-wide dependencies. */
 #pragma once
 
 #include "Alias/Infrastructure/AliasAnalysisWrapper/AliasAnalysisWrapper.h"

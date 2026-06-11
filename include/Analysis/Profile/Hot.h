@@ -1,3 +1,4 @@
+/** @file Hot.h @brief Hot code detection analysis based on profiling data. */
 #pragma once
 
 #include "Analysis/Loop/LoopStructure.h"

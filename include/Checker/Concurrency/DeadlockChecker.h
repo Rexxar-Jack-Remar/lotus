@@ -1,3 +1,4 @@
+/** @file DeadlockChecker.h @brief Deadlock detection checker for concurrent programs. */
 #ifndef DEADLOCK_CHECKER_H
 #define DEADLOCK_CHECKER_H
 

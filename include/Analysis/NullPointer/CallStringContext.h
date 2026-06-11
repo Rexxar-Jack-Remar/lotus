@@ -1,3 +1,4 @@
+/** @file CallStringContext.h @brief Call-string context representation for context-sensitive null analysis. */
 #pragma once
 
 #include <deque>

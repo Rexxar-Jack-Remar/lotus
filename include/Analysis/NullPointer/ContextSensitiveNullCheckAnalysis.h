@@ -1,3 +1,4 @@
+/** @file ContextSensitiveNullCheckAnalysis.h @brief Context-sensitive null check analysis extending intra-procedural null checking. */
 #pragma once
 
 #include <llvm/Pass.h>

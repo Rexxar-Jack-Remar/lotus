@@ -1,3 +1,4 @@
+/** @file PurityAttrInferencePass.h @brief LLVM pass for inferring function purity attributes. */
 #pragma once
 
 #include "Analysis/Purity/FunctionPurityAnalysis.h"

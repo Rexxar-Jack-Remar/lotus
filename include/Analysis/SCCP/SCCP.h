@@ -1,3 +1,4 @@
+/** @file SCCP.h @brief Sparse Conditional Constant Propagation analysis. */
 #pragma once
 
 #include <deque>

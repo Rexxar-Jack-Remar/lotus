@@ -1,3 +1,4 @@
+/** @file PropertyAllocator.h @brief Allocator for abstract property values in symbolic execution. */
 #ifndef ANALYSIS_SYMBOLICEXECUTION_PROPERTYALLOCATOR_H
 #define ANALYSIS_SYMBOLICEXECUTION_PROPERTYALLOCATOR_H
 

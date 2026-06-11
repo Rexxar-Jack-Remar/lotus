@@ -1,3 +1,4 @@
+/** @file UniqueIRConstants.h @brief Constants for unique IR encoding scheme. */
 #pragma once
 
 #include <cstdint>

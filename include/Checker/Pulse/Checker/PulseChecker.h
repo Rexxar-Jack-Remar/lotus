@@ -1,3 +1,4 @@
+/** @file PulseChecker.h @brief Main Pulse checker driver for abstract-interpretation-based bug detection. */
 #ifndef CHECKER_PULSE_PULSECHECKER_H
 #define CHECKER_PULSE_PULSECHECKER_H
 

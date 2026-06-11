@@ -1,3 +1,4 @@
+/** @file DataRaceChecker.h @brief Data race detection checker for concurrent programs. */
 #ifndef DATA_RACE_CHECKER_H
 #define DATA_RACE_CHECKER_H
 

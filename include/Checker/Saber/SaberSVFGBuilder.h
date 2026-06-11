@@ -1,3 +1,4 @@
+/** @file SaberSVFGBuilder.h @brief SVFG (Static Value-Flow Graph) builder for SABER analysis. */
 //===- SaberSVFGBuilder.h -- Building SVFG for Saber--------------------------//
 //
 // Migrated from SVF's SABER engine to Lotus.

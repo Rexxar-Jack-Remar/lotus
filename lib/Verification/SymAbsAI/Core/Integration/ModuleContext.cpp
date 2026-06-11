@@ -37,7 +37,7 @@ std::string ModuleContext::readGlobalString(llvm::Module *module,
 }
 
 ModuleContext::ModuleContext(llvm::Module *module, configparser::Config config)
-    : Module_(module), Config_(config), Z3Context_(make_unique<z3::context>()) {
+    : Module_(module), Config_(config), Z3Context_(std::make_unique<z3::context>()) {
   auto database_path =
       readGlobalString(Module_, "symbolic_abstraction_rt_database_path");
   // incorporate dynamic analysis results if available
@@ -103,7 +103,7 @@ z3::expr ModuleContext::substituteReturn(z3::expr formula, ValueMapping vmap,
 
 unique_ptr<FunctionContext>
 ModuleContext::createFunctionContext(llvm::Function *f) const {
-  return make_unique<FunctionContext>(f, this);
+  return std::make_unique<FunctionContext>(f, this);
 }
 
 std::set<z3::symbol>

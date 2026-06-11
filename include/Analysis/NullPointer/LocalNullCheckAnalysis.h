@@ -16,6 +16,7 @@
  *  along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
+/** @file LocalNullCheckAnalysis.h @brief Local (intra-procedural) null check analysis. */
 #ifndef NULLPOINTER_LOCALNULLCHECKANALYSIS_H
 #define NULLPOINTER_LOCALNULLCHECKANALYSIS_H
 

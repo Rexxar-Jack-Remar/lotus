@@ -1,3 +1,11 @@
+/**
+ * @file MemoryModel.h
+ * @brief Abstract memory models for SMT-based symbolic execution.
+ *
+ * Defines the MemoryModel base class and concrete implementations (NoMemory,
+ * LittleEndian, Aligned, BlockModel) that determine how memory operations are
+ * translated to Z3 SMT constraints.
+ */
 #pragma once
 
 #include "Verification/SymAbsAI/Core/Integration/FunctionContext.h"
@@ -5,6 +13,7 @@
 #include <z3++.h>
 
 namespace symabs_ai {
+/** @brief Abstract base class for memory models that translate LLVM memory ops to SMT. */
 class MemoryModel {
 protected:
   const FunctionContext &Fctx_;

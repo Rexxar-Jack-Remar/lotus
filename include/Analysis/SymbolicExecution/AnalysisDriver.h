@@ -1,3 +1,4 @@
+/** @file AnalysisDriver.h @brief Driver for orchestrating symbolic execution analyses. */
 #ifndef ANALYSIS_SYMBOLICEXECUTION_ANALYSISDRIVER_H
 #define ANALYSIS_SYMBOLICEXECUTION_ANALYSISDRIVER_H
 

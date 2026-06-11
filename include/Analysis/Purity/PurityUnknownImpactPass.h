@@ -1,3 +1,4 @@
+/** @file PurityUnknownImpactPass.h @brief Pass for tagging functions with unknown purity impact. */
 #pragma once
 
 #include "llvm/Pass.h"

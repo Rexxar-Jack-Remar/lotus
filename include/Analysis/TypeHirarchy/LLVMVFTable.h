@@ -1,3 +1,4 @@
+/** @file LLVMVFTable.h @brief LLVM vtable representation for virtual function call resolution. */
 /******************************************************************************
  * Copyright (c) 2017 Philipp Schubert.
  * All rights reserved. This program and the accompanying materials are made

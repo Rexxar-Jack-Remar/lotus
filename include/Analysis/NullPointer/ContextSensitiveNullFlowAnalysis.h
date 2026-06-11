@@ -1,3 +1,4 @@
+/** @file ContextSensitiveNullFlowAnalysis.h @brief Context-sensitive null flow analysis extending intra-procedural null flow. */
 #pragma once
 
 #include <map>

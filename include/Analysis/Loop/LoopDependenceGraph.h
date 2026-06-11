@@ -1,5 +1,6 @@
+/** @file LoopDependenceGraph.h @brief Loop dependence graph representation for analysis of loop-carried dependencies. */
 /*
- * Copyright 2026  Lotus contributors
+ * Copyright 2026 Lotus contributors
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to

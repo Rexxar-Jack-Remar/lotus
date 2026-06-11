@@ -1,3 +1,4 @@
+/** @file PropertyValue.h @brief Abstract property value representation for symbolic analysis. */
 #ifndef ANALYSIS_SYMBOLICEXECUTION_PROPERTYVALUE_H
 #define ANALYSIS_SYMBOLICEXECUTION_PROPERTYVALUE_H
 #include "llvm/IR/Instruction.h"

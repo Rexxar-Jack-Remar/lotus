@@ -1,3 +1,4 @@
+/** @file MemoryAPI.h @brief Memory API abstraction for symbolic execution of memory operations. */
 #ifndef ANALYSIS_SYMBOLICEXECUTION_MEMORYAPI_H
 #define ANALYSIS_SYMBOLICEXECUTION_MEMORYAPI_H
 

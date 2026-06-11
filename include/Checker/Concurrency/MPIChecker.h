@@ -1,3 +1,4 @@
+/** @file MPIChecker.h @brief MPI concurrency bug checker for message-passing programs. */
 #pragma once
 
 #include "Concurrency/MPI/MPIAnalysis.h"

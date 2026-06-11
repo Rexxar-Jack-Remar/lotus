@@ -1,3 +1,4 @@
+/** @file KINTTaintAnalysis.h @brief Taint analysis for KINT integer overflow checker. */
 #pragma once
 
 #include <string>

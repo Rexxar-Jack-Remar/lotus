@@ -1,3 +1,4 @@
+/** @file SVFIRWrapper.h @brief SVFIR-like interface using AserPTA for pointer analysis. */
 //===- SVFIRWrapper.h -- SVFIR-like interface using AserPTA ----------//
 //
 // Migrated from SVF's AE engine to Lotus.

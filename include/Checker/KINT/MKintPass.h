@@ -1,3 +1,4 @@
+/** @file MKintPass.h @brief LLVM pass wrapper for MKint integer analysis. */
 #pragma once
 
 #include "Checker/KINT/BugDetection.h"

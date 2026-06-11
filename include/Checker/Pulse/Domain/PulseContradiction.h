@@ -1,3 +1,4 @@
+/** @file PulseContradiction.h @brief Contradiction detection for Pulse abstract domains. */
 #ifndef CHECKER_PULSE_PULSECONTRADICTION_H
 #define CHECKER_PULSE_PULSECONTRADICTION_H
 

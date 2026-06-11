@@ -1,3 +1,4 @@
+/** @file ProgSlice.h @brief Program slice representation for SABER analysis. */
 //===- ProgSlice.h -- Program slicing based on SVF----------------------------//
 //
 // Migrated from SVF's SABER engine to Lotus.

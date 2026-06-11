@@ -1,3 +1,11 @@
+/**
+ * @file Fragment.h
+ * @brief Linear program fragment representation for scalable abstract interpretation.
+ *
+ * A Fragment represents a linear section of LLVM IR (a path/slice) used by the
+ * fragment decomposition engine to partition the CFG into manageable pieces
+ * for analysis.
+ */
 #pragma once
 
 #include "Verification/SymAbsAI/Core/Integration/FunctionContext.h"

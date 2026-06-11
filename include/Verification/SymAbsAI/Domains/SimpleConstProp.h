@@ -1,3 +1,10 @@
+/**
+ * @file SimpleConstProp.h
+ * @brief Simple constant propagation abstract domain.
+ *
+ * Tracks whether an LLVM value holds a known constant, supporting standard
+ * abstract domain operations (join, meet, widening) for constant propagation.
+ */
 #pragma once
 
 #include "Verification/SymAbsAI/Core/Foundation/AbstractValue.h"
@@ -18,6 +25,7 @@ namespace symabs_ai {
 class FunctionContext;
 
 namespace domains {
+/** @brief Constant propagation domain tracking known constant values. */
 class SimpleConstProp : public AbstractValue {
 protected:
   const FunctionContext *FunctionContext_;
@@ -34,7 +42,7 @@ public:
   static unique_ptr<AbstractValue> New(const Expression &expr,
                                        const DomainConstructor::args &args) {
     return std::move(
-        make_unique<SimpleConstProp>(*args.fctx, expr.asRepresentedValue()));
+        std::make_unique<SimpleConstProp>(*args.fctx, expr.asRepresentedValue()));
   }
 
   virtual bool joinWith(const AbstractValue &av_other) override;

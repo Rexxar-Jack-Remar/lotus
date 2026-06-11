@@ -1,3 +1,5 @@
+/** @file Utils.h @brief IR generation utilities for FiTx framework. */
+#pragma once
 #include "llvm/IR/Instruction.h"
 #include "llvm/IR/Instructions.h"
 

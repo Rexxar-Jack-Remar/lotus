@@ -1,3 +1,4 @@
+/** @file PulseAbductiveDomain.h @brief Abductive abstract domain for Pulse analysis. */
 #ifndef CHECKER_PULSE_PULSEABDUCTIVEDOMAIN_H
 #define CHECKER_PULSE_PULSEABDUCTIVEDOMAIN_H
 

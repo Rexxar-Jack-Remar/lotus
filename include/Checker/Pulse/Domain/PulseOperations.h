@@ -1,4 +1,5 @@
 
+/** @file PulseOperations.h @brief Abstract operations for Pulse domains (arithmetic, pointer, memory). */
 #ifndef CHECKER_PULSE_PULSEOPERATIONS_H
 #define CHECKER_PULSE_PULSEOPERATIONS_H
 

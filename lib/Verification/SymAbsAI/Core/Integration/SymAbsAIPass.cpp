@@ -414,7 +414,7 @@ bool SymAbsAIPass::runOnFunction(llvm::Function &function) {
 
   // Create a ModuleContext object to create FunctionContexts
   auto mctx =
-      make_unique<const ModuleContext>(function.getParent(), GlobalConfig_);
+      std::make_unique<const ModuleContext>(function.getParent(), GlobalConfig_);
 
   // Create the FunctionContext object that is used for the analysis
   auto fctx = mctx->createFunctionContext(&function);

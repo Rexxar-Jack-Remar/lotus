@@ -1,3 +1,16 @@
+/**
+ * @file Combinators.h
+ * @brief Abstract domain combinators: Wrapper, Cut, and If.
+ *
+ * Provides reusable domain combinator templates that compose, restrict, or
+ * extend existing abstract domains. These are the building blocks for creating
+ * complex domain hierarchies from simple components.
+ *
+ * - Wrapper<T>: Type-safe delegation to an inner domain of type T.
+ * - Cut<This, Base>: CRTP extension that restricts domain states via a
+ *   user-defined isInAllowedState() predicate.
+ * - If: Domain guarded by a boolean condition (implication).
+ */
 #pragma once
 
 #include "Verification/SymAbsAI/Core/Foundation/AbstractValue.h"
@@ -8,6 +21,7 @@
 
 namespace symabs_ai {
 namespace domains {
+/** @brief Type-safe wrapper that delegates all operations to an inner domain of type T. */
 template <typename T> class Wrapper : public AbstractValue {
 private:
   unique_ptr<AbstractValue> Value_;
@@ -87,6 +101,7 @@ public:
   }
 };
 
+/** @brief CRTP extension that constrains domain states via isInAllowedState(). */
 template <typename This, typename Base> class Cut : public Wrapper<Base> {
   // Implemented in This:
   //     bool isInAllowedState()
@@ -117,6 +132,7 @@ public:
   }
 };
 
+/** @brief Conditional domain — abstract value guarded by a boolean condition (implication). */
 class If : public AbstractValue {
 private:
   Expression Condition_;

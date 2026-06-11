@@ -1,3 +1,4 @@
+/** @file CallInstruction.h @brief Call instruction representation for FiTx IR. */
 #pragma once
 #include <vector>
 

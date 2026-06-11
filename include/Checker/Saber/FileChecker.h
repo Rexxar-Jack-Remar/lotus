@@ -1,3 +1,4 @@
+/** @file FileChecker.h @brief File descriptor misuse and double-close checker using SABER analysis. */
 //===- FileChecker.h -- Checking incorrect file-open close errors-------------//
 //
 // Migrated from SVF's SABER engine to Lotus.

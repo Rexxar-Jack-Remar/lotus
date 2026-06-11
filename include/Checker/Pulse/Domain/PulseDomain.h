@@ -1,3 +1,4 @@
+/** @file PulseDomain.h @brief Base abstract domain implementation for Pulse analysis. */
 #ifndef CHECKER_PULSE_PULSEDOMAIN_H
 #define CHECKER_PULSE_PULSEDOMAIN_H
 

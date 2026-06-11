@@ -1,3 +1,4 @@
+/** @file SmtMemory.h @brief SMT memory model for KINT integer analysis. */
 #pragma once
 
 #include <string>

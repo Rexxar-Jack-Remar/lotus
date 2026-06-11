@@ -1,3 +1,4 @@
+/** @file Variable.h @brief Loop variable representation for induction variable and invariant analysis. */
 /*
  * Copyright 2026 Lotus contributors
  *

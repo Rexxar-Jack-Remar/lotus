@@ -1,3 +1,4 @@
+/** @file ParameterEffectSummary.h @brief Summary of parameter side effects for inter-procedural analysis. */
 #pragma once
 
 #include <llvm/ADT/DenseMap.h>

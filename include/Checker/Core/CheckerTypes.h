@@ -1,3 +1,4 @@
+/** @file CheckerTypes.h @brief Core type definitions for the checker framework (engine kinds, options). */
 #pragma once
 
 #include <string>

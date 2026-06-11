@@ -1,3 +1,4 @@
+/** @file PulseTransitiveInfo.h @brief Transitive callee information for Pulse interprocedural analysis. */
 #ifndef CHECKER_PULSE_PULSETRANSITIVEINFO_H
 #define CHECKER_PULSE_PULSETRANSITIVEINFO_H
 

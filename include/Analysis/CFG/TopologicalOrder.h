@@ -1,3 +1,4 @@
+/** @file TopologicalOrder.h @brief Topological order computation for CFGs. */
 #ifndef __TOPOLOGICAL_ORDER__HH_
 #define __TOPOLOGICAL_ORDER__HH_
 

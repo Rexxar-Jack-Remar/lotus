@@ -1,3 +1,4 @@
+/** @file PulseNonDisjunctiveDomain.h @brief Non-disjunctive abstract domain for Pulse analysis. */
 #ifndef CHECKER_PULSE_PULSENONDISJUNCTIVEDOMAIN_H
 #define CHECKER_PULSE_PULSENONDISJUNCTIVEDOMAIN_H
 

@@ -1,3 +1,4 @@
+/** @file AnalysisLimit.h @brief Resource limits and bounds for symbolic execution analysis. */
 #pragma once
 
 namespace SymbolicExecution {

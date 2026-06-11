@@ -1,3 +1,4 @@
+/** @file PulseAbstractValue.h @brief Abstract value representation for Pulse abstract interpretation. */
 #ifndef CHECKER_PULSE_PULSEABSTRACTVVALUE_H
 #define CHECKER_PULSE_PULSEABSTRACTVVALUE_H
 

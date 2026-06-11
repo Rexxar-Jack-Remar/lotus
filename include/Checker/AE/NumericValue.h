@@ -1,3 +1,4 @@
+/** @file NumericValue.h @brief Numeric value type for abstract interpretation domains. */
 #pragma once
 
 #include <cassert>

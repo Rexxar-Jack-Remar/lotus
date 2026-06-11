@@ -1,3 +1,4 @@
+/** @file DoubleFreeChecker.h @brief Double-free bug detector using SABER analysis. */
 //===- DoubleFreeChecker.h -- Checking double-free errors---------------------//
 //
 // Migrated from SVF's SABER engine to Lotus.

@@ -1,3 +1,4 @@
+/** @file MKintAnalysisSupport.h @brief Analysis support utilities for MKint integer checker. */
 #pragma once
 
 #include "Checker/KINT/MKintPass.h"

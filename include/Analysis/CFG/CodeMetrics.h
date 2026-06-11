@@ -3,6 +3,7 @@
 // declarations and inline helpers, so it is safe to include from multiple
 // translation units without ODR violations or duplicate-pass-registration
 // crashes.
+/** @file CodeMetrics.h @brief Code metrics collection from CFG analysis. */
 #ifndef ANALYSIS_CFG_CODEMETRICS_H
 #define ANALYSIS_CFG_CODEMETRICS_H
 

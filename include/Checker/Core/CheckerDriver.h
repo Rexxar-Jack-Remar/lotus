@@ -1,3 +1,4 @@
+/** @file CheckerDriver.h @brief Checker driver that orchestrates analysis execution and reporting. */
 #pragma once
 
 #include "Checker/Core/CheckerContext.h"

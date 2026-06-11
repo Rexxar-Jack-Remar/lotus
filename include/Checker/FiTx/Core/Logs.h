@@ -1,3 +1,4 @@
+/** @file Logs.h @brief Logging utilities for FiTx analysis framework. */
 #pragma once
 #include "llvm/Support/raw_ostream.h"
 

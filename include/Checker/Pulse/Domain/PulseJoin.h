@@ -1,3 +1,4 @@
+/** @file PulseJoin.h @brief Join operations for Pulse abstract domains. */
 #ifndef CHECKER_PULSE_PULSEJOIN_H
 #define CHECKER_PULSE_PULSEJOIN_H
 
