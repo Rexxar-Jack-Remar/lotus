@@ -16,6 +16,7 @@
 #include "Alias/InclusionBased/SparrowAA/ResultUtils.h"
 #include "Alias/Infrastructure/AliasAnalysisWrapper/CLIUtils.h"
 
+#include <algorithm>
 #include <cstring>
 #include <memory>
 
@@ -27,6 +28,7 @@
 #include <llvm/IR/Module.h>
 #include <llvm/IR/Verifier.h>
 #include <llvm/Support/CommandLine.h>
+#include <llvm/Support/Format.h>
 #include <llvm/Support/InitLLVM.h>
 #include <llvm/Support/Signals.h>
 #include <llvm/Support/raw_ostream.h>
@@ -46,6 +48,9 @@ static cl::OptionCategory
 extern cl::OptionCategory AndersenCategory;
 extern cl::opt<unsigned> AndersenKContext;
 extern cl::opt<bool> AndersenUseBDDPointsTo;
+// Adaptive CS options (defined in ConstraintOptimize.cpp)
+extern cl::opt<bool> EnableAdaptiveCS;
+extern cl::opt<float> AdaptiveCSThreshold;
 
 static cl::opt<std::string> InputFilename(cl::Positional,
                                           cl::desc("<input bitcode file>"),
@@ -76,6 +81,11 @@ static cl::opt<bool> OnlyStatistics("s", cl::desc("Only output statistics"),
 static cl::opt<bool>
     VerifyInput("verify", cl::desc("Verify input module before analysis"),
                 cl::init(true), cl::cat(SparrowAACategory));
+static cl::opt<bool> PrintContextNeed(
+    "print-context-need",
+    cl::desc("Print per-function adaptive-CS context-need scores (requires "
+             "--andersen-adaptive-cs)"),
+    cl::init(false), cl::cat(SparrowAACategory));
 
 static cl::opt<LogLevel> LogLevelOpt(
     "log-level", cl::desc("Set the logging level"),
@@ -106,8 +116,12 @@ int main(int argc, char **argv) {
   InitLLVM X(argc, argv);
   volatile unsigned dummy_k = AndersenKContext;
   volatile bool dummy_bdd = AndersenUseBDDPointsTo;
+  volatile bool dummy_acs = EnableAdaptiveCS;
+  volatile float dummy_thr = AdaptiveCSThreshold;
   (void)dummy_k;
   (void)dummy_bdd;
+  (void)dummy_acs;
+  (void)dummy_thr;
 
   cl::HideUnrelatedOptions({&SparrowAACategory, &AndersenCategory});
   cl::ParseCommandLineOptions(
@@ -233,6 +247,29 @@ int main(int argc, char **argv) {
       sparrow_aa::performAliasQueries(*M, AAResult, outs());
     }
     outs() << "\nAnalysis completed.\n";
+  }
+
+  if (PrintContextNeed) {
+    const auto &scores = Anders.getContextNeedMap();
+    if (scores.empty()) {
+      outs() << "\n--- Context-Need Scores ---\n"
+             << "(none — run with --andersen-adaptive-cs and k>=1)\n";
+    } else {
+      // Collect and sort by score descending for easy reading
+      std::vector<std::pair<float, std::string>> rows;
+      rows.reserve(scores.size());
+      for (const auto &kv : scores)
+        rows.emplace_back(kv.second, kv.first->getName().str());
+      std::sort(rows.begin(), rows.end(),
+                [](const auto &a, const auto &b) { return a.first > b.first; });
+
+      outs() << "\n--- Context-Need Scores (threshold=" << AdaptiveCSThreshold
+             << ") ---\n";
+      for (const auto &[score, name] : rows)
+        outs() << llvm::format("  %-40s  %.3f  %s\n", name.c_str(), score,
+                               score >= AdaptiveCSThreshold ? "[deepened]"
+                                                            : "[skipped]");
+    }
   }
 
   if (OnlyStatistics || Verbose) {

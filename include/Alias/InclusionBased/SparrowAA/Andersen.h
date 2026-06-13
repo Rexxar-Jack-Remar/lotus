@@ -129,6 +129,11 @@ ContextPolicy makeContextPolicy(unsigned kCallSite);
  */
 ContextPolicy getSelectedAndersenContextPolicy();
 
+/// Forward declaration for the HVN helper used by adaptive CS scoring.
+void runHVNAndCapturePELabels(std::vector<AndersConstraint> &constraints,
+                              AndersNodeFactory &nodeFactory,
+                              llvm::DenseMap<NodeIndex, unsigned> &out);
+
 /**
  * @class Andersen
  * @brief Core Andersen points-to analysis engine.
@@ -164,6 +169,15 @@ private:
   ContextPolicy ctxPolicy;              ///< The active context policy.
   AndersNodeFactory::CtxKey initialCtx; ///< Context for the entry point.
   AndersNodeFactory::CtxKey globalCtx;  ///< Context for global initialisers.
+
+  /// peLabel map captured from HVN; populated by optimizeConstraints() when
+  /// adaptive CS or HVN is enabled. Maps node index → pointer-equivalence label.
+  llvm::DenseMap<NodeIndex, unsigned> hvnPELabels;
+
+  /// Per-function context-need score in [0,1]: fraction of pointer formal
+  /// parameters that receive pointer-inequivalent actuals from different callers.
+  /// Populated by computeContextNeed() after HVN.
+  llvm::DenseMap<const llvm::Function *, float> contextNeed;
 
   /// Key type for the visited-functions set: (function, context) pair.
   struct FunctionContextKey {
@@ -217,6 +231,7 @@ private:
   // Helper functions for constraint optimization
   NodeIndex getRefNodeIndex(NodeIndex n) const;
   NodeIndex getAdrNodeIndex(NodeIndex n) const;
+  void computeContextNeed();
 
   // For debugging
   void dumpConstraint(const AndersConstraint &) const;
@@ -255,13 +270,25 @@ public:
   AndersNodeFactory::CtxKey getInitialContext() const { return initialCtx; }
   AndersNodeFactory::CtxKey getGlobalContext() const { return globalCtx; }
   AndersNodeFactory::CtxKey evolveContext(AndersNodeFactory::CtxKey prev,
-                                          const llvm::Instruction *I) const {
-    return ctxPolicy.evolve(prev, I);
-  }
+                                          const llvm::Instruction *I) const;
   std::string contextToString(AndersNodeFactory::CtxKey ctx,
                               bool detailed = false) const {
     return ctxPolicy.toString(ctx, detailed);
   }
+
+  /// Return the context-need score for function F (0.0 if not computed or
+  /// function has no pointer params). Available after construction when
+  /// --andersen-adaptive-cs is set.
+  float getContextNeed(const llvm::Function *F) const {
+    auto it = contextNeed.find(F);
+    return it != contextNeed.end() ? it->second : 0.0f;
+  }
+  /// Expose the full contextNeed map for iteration (e.g. printing).
+  const llvm::DenseMap<const llvm::Function *, float> &
+  getContextNeedMap() const {
+    return contextNeed;
+  }
+
   // Put all allocation sites (i.e. all memory objects identified by the
   // analysis) into the first arugment
   void

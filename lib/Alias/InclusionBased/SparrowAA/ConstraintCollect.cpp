@@ -600,7 +600,7 @@ void Andersen::addConstraintForCall(const llvm::CallBase *cs,
       }
     } else // Non-external function call
     {
-      AndersNodeFactory::CtxKey calleeCtx = ctxPolicy.evolve(callerCtx, cs);
+      AndersNodeFactory::CtxKey calleeCtx = evolveContext(callerCtx, cs);
       collectConstraintsForFunction(f, calleeCtx);
 
       if (cs->getType()->isPointerTy()) {
@@ -696,7 +696,7 @@ void Andersen::addConstraintForCall(const llvm::CallBase *cs,
           }
         }
       } else {
-        AndersNodeFactory::CtxKey calleeCtx = ctxPolicy.evolve(callerCtx, cs);
+        AndersNodeFactory::CtxKey calleeCtx = evolveContext(callerCtx, cs);
         collectConstraintsForFunction(&f, calleeCtx);
 
         // Connect the callee's return node to the call-site value node.

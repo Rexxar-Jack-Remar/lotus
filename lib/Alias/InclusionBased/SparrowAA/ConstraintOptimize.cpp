@@ -52,6 +52,19 @@ cl::opt<bool> EnableHVN("enable-hvn",
 cl::opt<bool> EnableHU("enable-hu",
                        cl::desc("Enable the HU constraint optimization"),
                        cl::cat(AndersenCategory));
+// Adaptive context sensitivity via HVN feedback
+cl::opt<bool> EnableAdaptiveCS(
+    "andersen-adaptive-cs",
+    cl::desc("Enable adaptive context sensitivity: functions whose pointer "
+             "formals receive pointer-inequivalent actuals from different "
+             "callers are given full k-CFA depth; others are not deepened"),
+    cl::init(false), cl::cat(AndersenCategory));
+cl::opt<float> AdaptiveCSThreshold(
+    "andersen-adaptive-cs-threshold",
+    cl::desc("Context-need score threshold in [0,1] for adaptive CS "
+             "(default 0.5): functions scoring >= threshold get full context "
+             "depth; others are not deepened"),
+    cl::init(0.5f), cl::cat(AndersenCategory));
 
 namespace {
 
@@ -443,6 +456,9 @@ public:
     // We've done labelling. Now rewrite all constraints
     rewriteConstraint();
   }
+
+  // Return a snapshot of the peLabel map after run() completes.
+  const DenseMap<NodeIndex, unsigned> &getPELabels() const { return peLabel; }
 };
 
 // The technique used here is described in "Exploiting Pointer and Location
@@ -613,26 +629,30 @@ public:
 
 } // end of anonymous namespace
 
+// Run HVN, rewrite constraints, and copy the resulting peLabel map into `out`.
+// Used by the adaptive context-sensitivity heuristic (see computeContextNeed).
+void runHVNAndCapturePELabels(std::vector<AndersConstraint> &constraints,
+                              AndersNodeFactory &nodeFactory,
+                              llvm::DenseMap<NodeIndex, unsigned> &out) {
+  HVNOptimizer hvn(constraints, nodeFactory);
+  hvn.run();
+  out = hvn.getPELabels();
+}
+
 // Optimize the constraints by performing offline variable substitution
 void Andersen::optimizeConstraints() {
   // Track constraints before optimization
   NumConstraintsBeforeOpt = constraints.size();
 
-  // errs() << "\n#constraints = " << constraints.size() << "\n";
-  // dumpConstraints();
-
-  // First, let's do HVN
-  // There is an additional assumption here that before HVN, we have not merged
-  // any two nodes. Might fix that in the future
+  // First, let's do HVN.
+  // When adaptive CS is active (k>0), HVN was already run during the CI
+  // pre-pass in runOnModule and peLabel scores are already computed; skip the
+  // duplicate run here unless the user also explicitly requested HVN.
   if (EnableHVN) {
-    HVNOptimizer hvn(constraints, nodeFactory);
-    hvn.run();
+    runHVNAndCapturePELabels(constraints, nodeFactory, hvnPELabels);
+    // computeContextNeed() was already called in the pre-pass; no need to
+    // re-run it here.
   }
-
-  // nodeFactory.dumpRepInfo();
-  // dumpConstraints();
-
-  // errs() << "#constraints = " << constraints.size() << "\n";
 
   // Next, do HU
   // There is an additional assumption here that before HU, the predecessor
@@ -641,11 +661,6 @@ void Andersen::optimizeConstraints() {
     HUOptimizer hu(constraints, nodeFactory);
     hu.run();
   }
-
-  // nodeFactory.dumpRepInfo();
-  // dumpConstraints();
-
-  // errs() << "#constraints = " << constraints.size() << "\n";
 
   // Track constraints after optimization
   NumConstraintsAfterOpt = constraints.size();

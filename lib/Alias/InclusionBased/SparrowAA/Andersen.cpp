@@ -30,6 +30,7 @@
 #include <llvm/ADT/DenseSet.h>
 #include <llvm/ADT/SmallString.h>
 #include <llvm/ADT/Statistic.h>
+#include <llvm/IR/Argument.h>
 #include <llvm/IR/Module.h>
 #include <llvm/Support/CommandLine.h>
 #include <llvm/Support/FileSystem.h>
@@ -47,12 +48,20 @@ STATISTIC(NumAddrOfConstraints, "Number of addr-of constraints");
 STATISTIC(NumCopyConstraints, "Number of copy constraints");
 STATISTIC(NumLoadConstraints, "Number of load constraints");
 STATISTIC(NumStoreConstraints, "Number of store constraints");
+STATISTIC(NumAdaptiveCSFunctions,
+          "Functions scored for adaptive context sensitivity");
+STATISTIC(NumAdaptiveCSDeepened,
+          "Functions that will receive full context depth (adaptive CS)");
 
 // Define option category for Andersen analysis options (non-static so it can be
 // used across files)
 cl::OptionCategory
     AndersenCategory("Andersen Analysis Options",
                      "Options for configuring Andersen pointer analysis");
+
+// Forward declarations of cl::opts defined in ConstraintOptimize.cpp
+extern cl::opt<bool> EnableAdaptiveCS;
+extern cl::opt<float> AdaptiveCSThreshold;
 
 cl::opt<bool> DumpDebugInfo("dump-debug",
                             cl::desc("Dump debug info into stderr"),
@@ -368,6 +377,80 @@ Andersen::Andersen(const Module &module, ContextPolicy policy)
 
 Andersen::~Andersen() { ctxPolicy.release(); }
 
+AndersNodeFactory::CtxKey
+Andersen::evolveContext(AndersNodeFactory::CtxKey prev,
+                        const llvm::Instruction *I) const {
+  if (!EnableAdaptiveCS || contextNeed.empty())
+    return ctxPolicy.evolve(prev, I);
+
+  // If we know the callee and its context-need score is below the threshold,
+  // don't deepen — return the caller's context unchanged.
+  if (I) {
+    if (const auto *cb = llvm::dyn_cast<llvm::CallBase>(I)) {
+      if (const auto *callee = cb->getCalledFunction()) {
+        auto it = contextNeed.find(callee);
+        float score = (it != contextNeed.end()) ? it->second : 0.0f;
+        if (score < AdaptiveCSThreshold)
+          return prev;
+      }
+    }
+  }
+  return ctxPolicy.evolve(prev, I);
+}
+
+// Compute per-function context-need scores using the peLabel map captured from
+// HVN. For each pointer-typed formal parameter, we collect the peLabels of all
+// actual arguments (from COPY constraints dest=formal, src=actual). If any
+// formal receives actuals with more than one distinct peLabel, the callers pass
+// pointer-inequivalent values and context sensitivity would help that param.
+// The score is the fraction of pointer formals that are "diverse" in this sense.
+void Andersen::computeContextNeed() {
+  // Map: function → (formal node → set of peLabels from callers)
+  llvm::DenseMap<const llvm::Function *,
+                 llvm::DenseMap<NodeIndex, llvm::SmallVector<unsigned, 4>>>
+      paramLabels;
+
+  for (const auto &c : constraints) {
+    if (c.getType() != AndersConstraint::COPY)
+      continue;
+
+    NodeIndex dest = nodeFactory.getMergeTarget(c.getDest());
+    const llvm::Value *val = nodeFactory.getValueForNode(dest);
+    if (!val || !llvm::isa<llvm::Argument>(val))
+      continue;
+
+    const auto *arg = llvm::cast<llvm::Argument>(val);
+    const llvm::Function *F = arg->getParent();
+
+    NodeIndex src = nodeFactory.getMergeTarget(c.getSrc());
+    auto labelIt = hvnPELabels.find(src);
+    unsigned label = labelIt != hvnPELabels.end() ? labelIt->second : 0;
+    // label == 0 means non-pointer; skip
+    if (label == 0)
+      continue;
+    paramLabels[F][dest].push_back(label);
+  }
+
+  for (auto &[F, params] : paramLabels) {
+    int diverse = 0, total = 0;
+    for (auto &[param, labels] : params) {
+      ++total;
+      // Check if more than one distinct label appears
+      llvm::SmallVector<unsigned, 4> sorted = labels;
+      std::sort(sorted.begin(), sorted.end());
+      if (std::unique(sorted.begin(), sorted.end()) != sorted.begin() + 1)
+        ++diverse;
+    }
+    float score = total > 0 ? static_cast<float>(diverse) / total : 0.0f;
+    contextNeed[F] = score;
+    ++NumAdaptiveCSFunctions;
+    if (score >= AdaptiveCSThreshold)
+      ++NumAdaptiveCSDeepened;
+    LOG_DEBUG("adaptive-cs: {} score={:.2f} ({}/{} diverse params)",
+              F->getName().str(), score, diverse, total);
+  }
+}
+
 void Andersen::getAllAllocationSites(
     std::vector<const llvm::Value *> &allocSites) const {
   nodeFactory.getAllocSites(allocSites);
@@ -470,6 +553,41 @@ bool Andersen::getPointsToSetInContext(
 
 bool Andersen::runOnModule(const Module &M) {
   LOG_INFO("Starting Andersen analysis on module: {}", M.getName().str());
+
+  // When adaptive CS is requested with k>0, we do a lightweight two-phase
+  // collection:
+  //   Phase 0: collect CI constraints (k=0) → run HVN → score functions
+  //   Phase 1: reset, collect full CS constraints using the adaptive evolve
+  // When adaptive CS is off, or k=0, we do the single-phase flow as before.
+  if (EnableAdaptiveCS && ctxPolicy.k > 0) {
+    LOG_INFO("Adaptive CS: running CI pre-pass to compute context-need scores");
+
+    // Phase 0: collect with a temporary CI policy
+    ContextPolicy ciPolicy = makeContextPolicy(0);
+    ContextPolicy savedPolicy = ctxPolicy;
+    ctxPolicy = ciPolicy;
+    initialCtx = ctxPolicy.initialCtx();
+    globalCtx = ctxPolicy.globalCtx();
+    visitedFunctions.clear();
+    collectConstraints(M);
+
+    // Run HVN on CI constraints and score. We don't keep the rewritten CI
+    // constraints — they're discarded after scoring.
+    runHVNAndCapturePELabels(constraints, nodeFactory, hvnPELabels);
+    computeContextNeed();
+    LOG_INFO("Adaptive CS: scored {} functions", contextNeed.size());
+
+    // Phase 1: reset state and re-collect using the adaptive CS policy
+    constraints.clear();
+    nodeFactory = AndersNodeFactory();
+    ptsGraph.clear();
+    ctxPolicy = savedPolicy;
+    initialCtx = ctxPolicy.initialCtx();
+    globalCtx = ctxPolicy.globalCtx();
+    visitedFunctions.clear();
+    LOG_INFO("Adaptive CS: re-collecting constraints with adaptive context policy");
+  }
+
   visitedFunctions.clear();
   collectConstraints(M);
   if (!AndersenDumpConstraintsAfterCollect.empty())
