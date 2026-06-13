@@ -12,7 +12,7 @@ provide both standalone passes and reusable integration helpers.
 Subdirectories
 --------------
 
-- ``Pipeline/`` exposes a small API for running LLVM's default O0-O3 pipelines.
+- ``PassOrdering/`` exposes a small API for running LLVM's default O0-O3 pass ordering.
 - ``Scalar/`` contains LLVM-style scalar passes such as aggressive inlining,
   dead-store elimination, GVN, and LICM.
 - ``IPO/`` contains interprocedural optimizations built on SeaDsa ShadowMem and
@@ -24,15 +24,15 @@ Subdirectories
 ModuleOptimizer
 ---------------
 
-**Files**: ``include/Optimization/Pipeline/ModuleOptimizer.h``,
-``lib/Optimization/Pipeline/ModuleOptimizer.cpp``
+**Files**: ``include/Optimization/PassOrdering/ModuleOptimizer.h``,
+``lib/Optimization/PassOrdering/ModuleOptimizer.cpp``
 
 ``llvm_utils::optimiseModule`` runs LLVM's default per-module optimization
 pipeline using ``llvm::PassBuilder`` and an ``llvm::OptimizationLevel``.
 
 .. code-block:: cpp
 
-   #include <Optimization/Pipeline/ModuleOptimizer.h>
+   #include <Optimization/PassOrdering/ModuleOptimizer.h>
 
    llvm::Module *M = ...;
    llvm_utils::optimiseModule(M, llvm::OptimizationLevel::O2);

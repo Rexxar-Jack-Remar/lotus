@@ -7,7 +7,7 @@
  *     Fabian Schiebel and others
  *****************************************************************************/
 
-#include "Analysis/TypeHirarchy/DIBasedTypeHierarchy.h"
+#include "Analysis/TypeHierarchy/DIBasedTypeHierarchy.h"
 
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/SmallBitVector.h"
@@ -23,8 +23,8 @@
 #include "llvm/Support/ErrorHandling.h"
 #include "llvm/Support/raw_ostream.h"
 
-#include "Analysis/TypeHirarchy/DIBasedTypeHierarchyData.h"
-#include "Analysis/TypeHirarchy/LLVMVFTable.h"
+#include "Analysis/TypeHierarchy/DIBasedTypeHierarchyData.h"
+#include "Analysis/TypeHierarchy/LLVMVFTable.h"
 #include "Utils/LLVM/Demangle.h"
 
 #include <cassert>

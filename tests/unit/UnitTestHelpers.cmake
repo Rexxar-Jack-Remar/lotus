@@ -335,7 +335,7 @@ endfunction()
 function(add_lotus_typehierarchy_test test_name source_file)
     add_lotus_targeted_test(${test_name} ${source_file}
         LINK_LIBS
-            CanaryTypeHirarchy)
+            CanaryTypeHierarchy)
 endfunction()
 
 function(add_lotus_utils_test test_name source_file)

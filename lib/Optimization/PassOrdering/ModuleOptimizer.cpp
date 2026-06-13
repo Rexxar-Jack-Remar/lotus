@@ -18,7 +18,7 @@
 ///
 /// @par Usage Example:
 /// @code
-/// #include "Optimization/Pipeline/ModuleOptimizer.h"
+/// #include "Optimization/PassOrdering/ModuleOptimizer.h"
 /// using namespace llvm_utils;
 ///
 /// optimiseModule(M, OptimizationLevel::O3);
@@ -26,7 +26,7 @@
 ///
 ///===----------------------------------------------------------------------===//
 
-#include "Optimization/Pipeline/ModuleOptimizer.h"
+#include "Optimization/PassOrdering/ModuleOptimizer.h"
 
 #include <stdexcept>
 

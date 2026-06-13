@@ -7,7 +7,7 @@
  *     Maximilian Leo Huber and others
  *****************************************************************************/
 
-#include "Analysis/TypeHirarchy/DIBasedTypeHierarchyData.h"
+#include "Analysis/TypeHierarchy/DIBasedTypeHierarchyData.h"
 
 #include "llvm/ADT/StringRef.h"
 #include "llvm/ADT/Twine.h"

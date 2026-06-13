@@ -7,7 +7,7 @@
  *     Maximilian Leo Huber and others
  *****************************************************************************/
 
-#include "Analysis/TypeHirarchy/LLVMVFTableData.h"
+#include "Analysis/TypeHierarchy/LLVMVFTableData.h"
 
 #include "llvm/ADT/Twine.h"
 #include "llvm/Support/raw_ostream.h"

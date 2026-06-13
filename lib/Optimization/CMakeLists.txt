@@ -1,5 +1,5 @@
 add_subdirectory(Scalar)
 add_subdirectory(IPO)
-add_subdirectory(Pipeline)
+add_subdirectory(PassOrdering)
 add_subdirectory(PartialEvaluation)
 add_subdirectory(Prefetch)

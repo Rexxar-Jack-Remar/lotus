@@ -9,7 +9,7 @@ memory modeling.
 | **PartialEvaluation** | LLPE-based partial evaluation and specialization for LLVM IR, including inlining, loop peeling, load forwarding, and dead code elimination. |
 | **Prefetch** | Software prefetching passes for indirect memory accesses and loop-based prefetch insertion experiments. |
 | **Scalar** | Scalar optimization passes such as LICM and the aggressive inliner. |
-| **Pipeline** | Wrappers around LLVM's standard optimization pipelines. |
+| **PassOrdering** | Wrappers around LLVM's standard optimization pass ordering / pipeline. |
 
 ## Prefetch
 

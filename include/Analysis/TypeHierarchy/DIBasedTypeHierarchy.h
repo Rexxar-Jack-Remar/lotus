@@ -17,9 +17,9 @@
 #include "llvm/IR/DebugInfoMetadata.h"
 #include "llvm/Support/Casting.h"
 
-#include "Analysis/TypeHirarchy/DIBasedTypeHierarchyData.h"
-#include "Analysis/TypeHirarchy/LLVMVFTable.h"
-#include "Analysis/TypeHirarchy/TypeHierarchy.h"
+#include "Analysis/TypeHierarchy/DIBasedTypeHierarchyData.h"
+#include "Analysis/TypeHierarchy/LLVMVFTable.h"
+#include "Analysis/TypeHierarchy/TypeHierarchy.h"
 
 #include <deque>
 #include <optional>

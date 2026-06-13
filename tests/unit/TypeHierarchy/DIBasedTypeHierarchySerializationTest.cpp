@@ -8,8 +8,8 @@
  * Tests are migrated from PhasarLLVM TypeHierarchy tests.
  */
 
-#include "Analysis/TypeHirarchy/DIBasedTypeHierarchy.h"
-#include "Analysis/TypeHirarchy/DIBasedTypeHierarchyData.h"
+#include "Analysis/TypeHierarchy/DIBasedTypeHierarchy.h"
+#include "Analysis/TypeHierarchy/DIBasedTypeHierarchyData.h"
 #include "TestUtils/LLVMHelpers.h"
 
 #include <gtest/gtest.h>

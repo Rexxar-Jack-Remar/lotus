@@ -24,7 +24,7 @@ At a glance:
   transformation-oriented loop analyses. See :doc:`loop`.
 - **NullPointer** (``lib/Analysis/NullPointer``): A family of nullness and
   null-flow analyses. See :doc:`null_pointer`.
-- **TypeHirarchy** (``lib/Analysis/TypeHirarchy``): Type-hierarchy and vtable
+- **TypeHierarchy** (``lib/Analysis/TypeHierarchy``): Type-hierarchy and vtable
   recovery for object-oriented code. See :doc:`type_hierarchy`.
 
 

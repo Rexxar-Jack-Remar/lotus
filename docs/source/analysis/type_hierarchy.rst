@@ -1,11 +1,11 @@
 Type Hierarchy
 ==============
 
-``TypeHirarchy`` provides class-hierarchy recovery for C++-style programs.
+``TypeHierarchy`` provides class-hierarchy recovery for C++-style programs.
 
-**Headers**: ``include/Analysis/TypeHirarchy/``
+**Headers**: ``include/Analysis/TypeHierarchy/``
 
-**Implementation**: ``lib/Analysis/TypeHirarchy/``
+**Implementation**: ``lib/Analysis/TypeHierarchy/``
 
 Overview
 --------
@@ -30,8 +30,4 @@ Typical use cases
 - Recover subtype relationships for object-oriented analyses.
 - Provide a basis for vtable- and dynamic-dispatch reasoning.
 
-Notes
------
 
-The directory name in the current tree is spelled ``TypeHirarchy`` to match the
-existing code layout.

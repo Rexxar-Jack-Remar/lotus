@@ -7,13 +7,13 @@
  *     Philipp Schubert and others
  *****************************************************************************/
 
-#include "Analysis/TypeHirarchy/LLVMVFTable.h"
+#include "Analysis/TypeHierarchy/LLVMVFTable.h"
 
 #include "llvm/IR/Constants.h"
 #include "llvm/IR/Function.h"
 #include "llvm/Support/raw_ostream.h"
 
-#include "Analysis/TypeHirarchy/LLVMVFTableData.h"
+#include "Analysis/TypeHierarchy/LLVMVFTableData.h"
 
 #include <algorithm>
 

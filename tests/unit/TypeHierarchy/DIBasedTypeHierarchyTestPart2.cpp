@@ -1,4 +1,4 @@
-#include "Analysis/TypeHirarchy/DIBasedTypeHierarchy.h"
+#include "Analysis/TypeHierarchy/DIBasedTypeHierarchy.h"
 #include "TestUtils/LLVMHelpers.h"
 
 #include <gtest/gtest.h>

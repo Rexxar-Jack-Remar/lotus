@@ -1,4 +1,4 @@
-#include "Analysis/TypeHirarchy/TypeHierarchyAnalysis.h"
+#include "Analysis/TypeHierarchy/TypeHierarchyAnalysis.h"
 
 #include "llvm/ADT/DenseMap.h"
 #include "llvm/ADT/SmallSet.h"

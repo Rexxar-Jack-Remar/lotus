@@ -11,8 +11,8 @@
 #ifndef LOTUS_ANALYSIS_TYPEHIERARCHY_LLVMVFTABLE_H_
 #define LOTUS_ANALYSIS_TYPEHIERARCHY_LLVMVFTABLE_H_
 
-#include "Analysis/TypeHirarchy/LLVMVFTableData.h"
-#include "Analysis/TypeHirarchy/VFTable.h"
+#include "Analysis/TypeHierarchy/LLVMVFTableData.h"
+#include "Analysis/TypeHierarchy/VFTable.h"
 
 #include <vector>
 
