@@ -99,8 +99,8 @@ ExternalPointerTable::buildTableImpl(const StringRef &fileContent, bool &ok) {
         }
       });
 
-  auto nullsrc = rule(
-      str("NULL"), [](auto const &) { return CopySource::getNullPointer(); });
+  auto nullsrc = rule(str("NULL"),
+                      [](auto const &) { return CopySource::getNullPointer(); });
 
   auto unknowsrc = rule(str("UNKNOWN"), [](auto const &) {
     return CopySource::getUniversalPointer();
@@ -110,7 +110,15 @@ ExternalPointerTable::buildTableImpl(const StringRef &fileContent, bool &ok) {
     return CopySource::getStaticPointer();
   });
 
-  auto copysrc = alt(nullsrc, unknowsrc, staticsrc, argsrc);
+  // The shared ptr.spec format annotates pseudo-sources with the same V/D/R
+  // suffix used by argument sources, for example "STATIC V" and "NULL V".
+  // The suffix is redundant for these source kinds, so consume and ignore it.
+  auto pseudosrc = rule(
+      seq(alt(nullsrc, unknowsrc, staticsrc),
+          token(alt(ch('V'), ch('D'), ch('R')))),
+      [](auto const &pair) { return std::get<0>(pair); });
+
+  auto copysrc = alt(pseudosrc, nullsrc, unknowsrc, staticsrc, argsrc);
 
   auto copydest = rule(
       seq(ppos, token(alt(ch('V'), ch('D'), ch('R')))), [](auto const &pair) {
@@ -135,8 +143,8 @@ ExternalPointerTable::buildTableImpl(const StringRef &fileContent, bool &ok) {
       rule(token(regex("#[^\n]*")), [](auto const &) { return false; });
 
   auto ignoreEntry =
-      rule(seq(token(str("IGNORE")), token(id)), [&extTable](auto const &pair) {
-        const std::string name = std::get<1>(pair).str();
+      rule(seq(token(id), token(str("IGNORE"))), [&extTable](auto const &pair) {
+        const std::string name = std::get<0>(pair).str();
         if (extTable.lookup(name) != nullptr) {
           // Duplicate IGNORE: warn and skip rather than asserting.
           llvm::errs()
@@ -149,11 +157,11 @@ ExternalPointerTable::buildTableImpl(const StringRef &fileContent, bool &ok) {
       });
 
   auto deallocEntry =
-      rule(seq(token(str("DEALLOC")), token(id)),
+      rule(seq(token(id), token(str("DEALLOC"))),
            [&extTable](auto const &pair) {
              // TPA currently does not model deallocation effects; treat as
              // no-op.
-             const std::string name = std::get<1>(pair).str();
+             const std::string name = std::get<0>(pair).str();
              if (extTable.lookup(name) != nullptr) {
                // Duplicate DEALLOC: warn and skip rather than asserting.
                llvm::errs()
