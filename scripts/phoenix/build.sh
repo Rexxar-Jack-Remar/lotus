@@ -2,7 +2,7 @@
 set -e
 cd ../../
 pwd
-mkdir build
+mkdir -p build
 cd build
 
 # conda create -n py311 python=3.11
@@ -17,4 +17,6 @@ cmake ../ \
    -DLOTUS_ENABLE_SEAHORN=OFF \
    -DLOTUS_BUILD_TESTS=OFF
 
-make -j$(nproc)
+cmake --build . --target lotus-alias-aser-aa lotus-alias-sparrow-aa lotus-alias-tpa -j$(nproc)
+
+# make -j$(nproc)
