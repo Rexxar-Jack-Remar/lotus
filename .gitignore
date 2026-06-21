@@ -1,3 +1,4 @@
+.claude
 .omx
 *.dot
 telemetry-id
@@ -22,7 +23,6 @@ telemetry-id
 .opencode
 .codex
 .trae
-.claude
 .vscode
 .cursorrules
 .cursorignore
