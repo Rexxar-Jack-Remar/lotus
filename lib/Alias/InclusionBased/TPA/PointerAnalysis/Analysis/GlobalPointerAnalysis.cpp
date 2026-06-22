@@ -24,6 +24,8 @@
 #include <llvm/IR/Operator.h>
 #include <llvm/Support/raw_ostream.h>
 
+#include <limits>
+
 using namespace llvm;
 
 namespace tpa {
@@ -38,7 +40,6 @@ static bool isScalarNonPointerType(const Type *type) {
 
 // Calculates the byte offset for a sequence of GEP indices.
 //
-//
 // Parameters:
 //   dataLayout  - module data layout
 //   pointeeType - the type that the base pointer points TO (not the pointer
@@ -47,50 +48,23 @@ static bool isScalarNonPointerType(const Type *type) {
 static unsigned calculateIndexedOffset(const DataLayout &dataLayout,
                                        Type *pointeeType,
                                        ArrayRef<Value *> indexes) {
-  unsigned offset = 0;
-  Type *currentType = pointeeType;
+  const int64_t offset = dataLayout.getIndexedOffsetInType(pointeeType, indexes);
 
-  for (const auto *idxIt = indexes.begin(); idxIt != indexes.end(); ++idxIt) {
-    Value *idxVal = *idxIt;
-
-    if (auto *ci = dyn_cast<ConstantInt>(idxVal)) {
-      uint64_t fieldIdx = ci->getZExtValue();
-
-      if (auto *structTy = dyn_cast<StructType>(currentType)) {
-        // Handle struct member access
-        auto *structLayout = dataLayout.getStructLayout(structTy);
-        offset += structLayout->getElementOffset(fieldIdx);
-        currentType = structTy->getElementType(fieldIdx);
-      } else if (auto *arrayTy = dyn_cast<ArrayType>(currentType)) {
-        // Handle array element access
-        Type *elemType = arrayTy->getElementType();
-        uint64_t elemSize = dataLayout.getTypeAllocSize(elemType);
-        offset += fieldIdx * elemSize;
-        currentType = elemType;
-      } else if (auto *vecTy = dyn_cast<VectorType>(currentType)) {
-        // Handle vector element access
-        Type *elemType = vecTy->getElementType();
-        uint64_t elemSize = dataLayout.getTypeAllocSize(elemType);
-        offset += fieldIdx * elemSize;
-        currentType = elemType;
-      } else {
-        // Pointer arithmetic: the current type is a pointer; the index steps
-        // over elements of the pointee type.
-        LOG_WARN("calculateIndexedOffset: unexpected pointer type at index {}; "
-                 "treating remaining offset as 0",
-                 static_cast<unsigned>(idxIt - indexes.begin()));
-        break;
-      }
-    } else {
-      // Non-constant index in a constant GEP — should not happen for a
-      // ConstantExpr GEP, but handle gracefully instead of crashing.
-      LOG_WARN("calculateIndexedOffset: non-constant index in constant GEP; "
-               "treating remaining offset as 0");
-      break;
-    }
+  if (offset < 0) {
+    LOG_WARN("calculateIndexedOffset: negative constant GEP offset {}; "
+             "treating as 0",
+             offset);
+    return 0;
   }
 
-  return offset;
+  if (static_cast<uint64_t>(offset) > std::numeric_limits<unsigned>::max()) {
+    LOG_WARN("calculateIndexedOffset: constant GEP offset {} exceeds unsigned "
+             "range; clamping",
+             offset);
+    return std::numeric_limits<unsigned>::max();
+  }
+
+  return static_cast<unsigned>(offset);
 }
 
 GlobalPointerAnalysis::GlobalPointerAnalysis(PointerManager &p,
