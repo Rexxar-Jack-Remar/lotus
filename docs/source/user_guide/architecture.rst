@@ -17,7 +17,7 @@ Lotus is organized into several major subsystems that work together to provide a
                     │
    ┌────────────────┴─────────────────────────────────────────────┐
    │                    Analysis Applications                      │
-   │  - Bug Checkers (Kint, Taint, Concurrency, Pulse)           │
+   │  - Bug Checkers (Kint, Taint, Concurrency, Pulse, SymEx)    │
    │  - Abstract Interpreters (CLAM, SymAbsAI)                               │
    │  - Fuzzing Support (Titan)                                   │
    └────┬────────────┬────────────┬────────────┬─────────────────┘
@@ -79,7 +79,17 @@ Core Components
    - **CLAM**: Abstract interpretation with multiple domains (intervals, zones, octagons, polyhedra)
    - **SymAbsAI**: Configurable abstract interpretation with domain composition
 
-6. **Analysis Utilities** (``lib/Analysis/``, ``include/Analysis/``)
+6. **Symbolic Execution** (``lib/SymbolicExecution/``, ``include/SymbolicExecution/``)
+
+   Path-sensitive symbolic execution infrastructure used by the ``symex``
+   checker frontend:
+
+   - **AnalysisDriver**: Coordinates whole-module symbolic execution and summaries
+   - **AnalysisState**: Tracks symbolic memory, guarded facts, and path conditions
+   - **PathCondSolver**: Discharges symbolic path feasibility queries through SMT
+   - **SymbolicExecutionWrapper**: Connects the engine to the LLVM pass pipeline
+
+7. **Analysis Utilities** (``lib/Analysis/``, ``include/Analysis/``)
    
    Supporting analysis components:
    
@@ -88,15 +98,17 @@ Core Components
    - **Null Pointer Analysis**: Multiple null checking algorithms
    - **Range Analysis**: Value range analysis for integers
 
-7. **Bug Detection** (``lib/Checker/``)
+8. **Bug Detection** (``lib/Checker/``)
    
    Security and safety bug detection:
    
    - **Kint**: Integer overflow, division by zero, array bounds checking
    - **Taint**: Information flow and taint-style vulnerabilities
    - **Concurrency**: Race conditions and deadlock detection
+   - **SymEx**: Symbolic-execution checks through the top-level
+     ``SymbolicExecution`` engine
 
-8. **CFL Reachability** (``lib/CFL/``, ``include/CFL/``)
+9. **CFL Reachability** (``lib/CFL/``, ``include/CFL/``)
    
    Context-Free Language reachability engines:
    

@@ -92,6 +92,10 @@ SymEx:
 
    ./build/bin/lotus-check symex input.bc
 
+The ``symex`` subcommand is implemented in ``tools/checker/lotus-check-symex.cpp``
+and links the top-level ``CanarySymbolicExecution`` library from
+``lib/SymbolicExecution``.
+
 See Also
 --------
 

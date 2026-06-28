@@ -20,6 +20,7 @@ The Checker Framework consists of several checker categories, all unified throug
 * **Concurrency Checkers** – Thread safety and parallel-runtime issues (data races, deadlocks, atomicity violations, OpenMP bugs, MPI bugs) using MHP, lock set, OpenMP, and MPI analyses
 * **Pulse Checker** – Memory safety and other bugs using biabductive analysis with path-sensitive interprocedural reasoning
 * **Saber Checkers** – Source-sink bug detection over sparse value-flow graphs
+* **SymEx Checker** – Symbolic-execution bug checks backed by the top-level ``SymbolicExecution`` engine
 
 All checkers report bugs through the centralized ``BugReportMgr`` system, enabling unified output formats (JSON, SARIF) and consistent bug reporting across all analysis tools. The repository now builds a single checker binary, ``lotus-check``, with subcommands such as ``kint``, ``ae``, ``pulse``, ``saber``, and ``concur``.
 
@@ -79,6 +80,13 @@ Components
 * ``FileChecker.cpp`` – File-descriptor leak checking
 * ``SaberCheckerAPI.cpp`` – Reusable checker API surface
 
+**Symbolic Execution Checker** (``lib/SymbolicExecution/``):
+
+* ``AnalysisDriver.cpp`` – Whole-module symbolic execution driver
+* ``AnalysisState*.cpp`` – Symbolic state, summaries, taint updates, and bug queries
+* ``PathCondSolver.cpp`` – SMT-backed feasibility checking for path conditions
+* ``SymbolicExecutionWrapper.cpp`` – LLVM pass wrapper used by ``lotus-check symex``
+
 **Report System** (``lib/Checker/Report/``):
 
 * ``BugReport.cpp`` – Bug report data structures with source location information
@@ -96,6 +104,7 @@ Build Targets
 
 * ``FiTxChecker`` – FiTx typestate-based bug checker library
 * ``PulseChecker`` – Pulse biabductive analysis checker library
+* ``CanarySymbolicExecution`` – Symbolic-execution engine library used by ``symex``
 * ``lotus-check`` – Unified checker frontend
 * ``tools/checker/lotus-check-ae.cpp`` – AE subcommand runner
 * ``tools/checker/lotus-check-fitx.cpp`` – FiTx subcommand runner
@@ -182,3 +191,4 @@ See Also
    pulse
    report
    saber
+   symex

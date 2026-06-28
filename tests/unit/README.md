@@ -10,8 +10,7 @@ Top-level test buckets:
 
 - `Alias/` for alias-analysis and pointer-analysis tests
 - `Analysis/` for general analyses, with subdirectories such as `CFG/`,
-  `DebugInfo/`, `Loop/`, `NullPointer/`, `Profile/`, `Purity/`, and
-  `SymbolicExecution/`
+  `DebugInfo/`, `Loop/`, `NullPointer/`, `Profile/`, and `Purity/`
 - `CFL/`
 - `Checker/`
 - `Concurrency/` with subdirectories such as `Threads/`, `OpenMP/`, `MPI/`,
@@ -20,6 +19,7 @@ Top-level test buckets:
 - `Fuzzing/`
 - `IR/`
 - `Solvers/`
+- `SymbolicExecution/`
 - `TypeHierarchy/`
 - `Utils/`
 - `Verification/`

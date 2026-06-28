@@ -67,6 +67,7 @@ Directory Structure
    │   ├── Dataflow/   # Data flow frameworks
    │   ├── IR/         # Intermediate representations
    │   ├── Solvers/    # Constraint solvers
+   │   ├── SymbolicExecution/ # Symbolic execution
    │   ├── Transform/  # LLVM transformations
    │   └── Utils/      # Utilities
    ├── lib/            # Implementation files
@@ -77,6 +78,7 @@ Directory Structure
    │   ├── Dataflow/   # Data flow implementations
    │   ├── IR/         # IR implementations
    │   ├── Solvers/    # Solver implementations
+   │   ├── SymbolicExecution/ # Symbolic execution
    │   ├── Transform/  # Transformation passes
    │   └── Utils/      # Utility implementations
    ├── tools/          # Command-line tools
@@ -1080,4 +1082,3 @@ See Also
 - :doc:`../user_guide/architecture` - Framework architecture
 - :doc:`api_reference` - API documentation
 - :doc:`../user_guide/tutorials` - Usage examples
-

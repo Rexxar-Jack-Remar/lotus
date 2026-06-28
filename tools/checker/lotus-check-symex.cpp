@@ -6,7 +6,7 @@
 //
 //===----------------------------------------------------------------------===//
 
-#include "Analysis/SymbolicExecution/SymbolicExecutionWrapper.h"
+#include "SymbolicExecution/SymbolicExecutionWrapper.h"
 #include "Alias/InclusionBased/LotusAA/Engine/InterProceduralPass.h"
 #include "Checker/Report/BugReportMgr.h"
 #include "Checker/Report/ReportOptions.h"

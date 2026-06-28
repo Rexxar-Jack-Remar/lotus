@@ -14,7 +14,6 @@ Core analyses built on LLVM IR.
 | **Profile** | Profile-guided hotness analysis utilities. |
 | **Purity** | Function purity analysis, summary storage, attribute inference, and unknown-impact modeling. |
 | **SCCP** | Sparse conditional constant propagation analysis and related support. |
-| **SymbolicExecution** | Symbolic execution state, constraints, taint modeling, and analysis driver infrastructure. See `SymbolicExecution/README.md`. |
 | **TypeHierarchy** | C++ class hierarchy, vtable reconstruction, virtual-call resolution. |
 
 Security-oriented side-channel analyses and transformations now live under

@@ -59,6 +59,16 @@ for higher-level abstractions.
 * **SymAbsAI** – Configurable abstract interpretation framework with domain
   composition (``lib/Verification/SymAbsAI`` and ``include/Verification/SymAbsAI``).
 
+Symbolic Execution
+------------------
+
+The SymbolicExecution subsystem is a top-level engine under
+``lib/SymbolicExecution`` and ``include/SymbolicExecution``. It performs
+path-sensitive symbolic execution over the guarded value-flow graph, tracks
+symbolic scalar and memory facts, and uses SMT-backed path-condition checks for
+feasibility. The ``lotus-check symex`` frontend invokes this engine for
+symbolic-execution bug checks.
+
 Utilities and Reachability
 --------------------------
 

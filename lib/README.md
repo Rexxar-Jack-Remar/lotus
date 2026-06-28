@@ -20,6 +20,8 @@ Implementation sources for Lotus libraries.
 - `Security/`: Security-focused analyses and verification infrastructure.
 - `Solvers/`: SMT and other solver integrations used by analyses,
   verification, and checkers.
+- `SymbolicExecution/`: Path-sensitive symbolic execution engine used by the
+  `symex` checker frontend.
 - `Transform/`: LLVM IR transformation utilities.
 - `Utils/`: Shared utilities, support code, data structures, and common LLVM
   helpers.
