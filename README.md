@@ -20,7 +20,9 @@ If you use Lotus in your research or work, please cite the following:
 
 Papers that use Lotus:
 
-- **TOSEM 2026**: Compiler Optimizations-Based SMT Simplifications: An In-Depth Study. Hanyun Jiang, Peisen Yao*, Jiachen Lu, Yongwang Zhao, and Kui Ren
+- **CAV 2026**: Sound and Precise Symbolic Automata Model for Stateful Software Systems.
+Xinlong Wu, Ruiyu Zhou, Peisen Yao, and Qingkai Shi.
+- **TOSEM 2026**: Compiler Optimizations-Based SMT Simplifications: An In-Depth Study. Hanyun Jiang, Peisen Yao*, Jiachen Lu, Yongwang Zhao, and Kui Ren.
 - **ISSTA 2025**: Program Analysis Combining Generalized Bit-Level and Word-Level Abstractions. Guangsheng Fan, Liqian Chen, Banghu Yin, Wenyu Zhang, Peisen Yao, and Ji Wang.  
 - **S&P 2024**: Titan: Efficient Multi-target Directed Greybox Fuzzing.
 Heqing Huang, Peisen Yao, Hung-Chun Chiu, Yiyuan Guo, and Charles Zhang.

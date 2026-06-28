@@ -24,4 +24,8 @@ if(LOTUS_ENABLE_FPSOLVE)
   set(USE_LIBFA OFF CACHE BOOL "Use libfa and lossy finite automata support" FORCE)
   add_subdirectory(fpsolve EXCLUDE_FROM_ALL)
 endif()
+if(LOTUS_ENABLE_SEAL)
+  # Seal symbolic automata lifter for stateful systems.
+  add_subdirectory(seal EXCLUDE_FROM_ALL)
+endif()
 # add_subdirectory(mde)

@@ -26,6 +26,8 @@ option(LOTUS_ENABLE_OWL "Build Owl SMT solver" OFF)
 option(LOTUS_ENABLE_DYNAA "Build dynamic alias analyses" OFF)
 option(LOTUS_ENABLE_HORN_ICE
        "Build ICE learning for CHC and Boogie" OFF)
+option(LOTUS_ENABLE_SEAL
+       "Build the Seal symbolic automata lifter under third-party/seal" OFF)
 
 # Advanced toggles
 option(LOTUS_DOWNLOAD_BOOST "Download and build Boost if not found" ON)
@@ -74,6 +76,7 @@ function(lotus_print_build_summary)
   _lotus_summary_bool("SeaHorn" LOTUS_ENABLE_SEAHORN)
   _lotus_summary_bool("SMACK" LOTUS_ENABLE_SMACK)
   _lotus_summary_bool("Horn-ICE" LOTUS_ENABLE_HORN_ICE)
+  _lotus_summary_bool("Seal/Popeye" LOTUS_ENABLE_SEAL)
   _lotus_summary_bool("SVF" LOTUS_ENABLE_SVF)
   _lotus_summary_bool("Cclyzer++" LOTUS_USE_CCLYZER)
   message(STATUS "  Advanced toggles:")
