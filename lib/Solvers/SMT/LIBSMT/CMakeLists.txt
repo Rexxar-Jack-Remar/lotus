@@ -11,3 +11,7 @@ add_library(CanarySMT STATIC
         SMTLIB2Solver.cpp
         Z3Expr.cpp
 )
+
+target_link_libraries(CanarySMT PUBLIC
+        ${Z3_LIBRARIES}
+)
