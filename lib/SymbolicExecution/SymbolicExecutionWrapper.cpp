@@ -11,12 +11,12 @@
 
 #include "llvm/IR/Instructions.h"
 
-#include "SymbolicExecution/GVFGUtility.h"
 #include "Checker/Report/BugReport.h"
 #include "Checker/Report/BugReportMgr.h"
 #include "IR/GSA/GSA.h"
 #include "IR/GVFG/GuardedValueFlowGraph.h"
 #include "IR/GVFG/LotusAdapter.h"
+#include "SymbolicExecution/GVFGUtility.h"
 
 #include <string>
 #include <vector>

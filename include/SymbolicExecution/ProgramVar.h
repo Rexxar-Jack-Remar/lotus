@@ -7,8 +7,10 @@
 #include "llvm/IR/Value.h"
 #include "llvm/Support/raw_os_ostream.h"
 
-#include "SymbolicExecution/BigInteger.h"
 #include "IR/GVFG/GuardedValueFlowGraph.h"
+
+#include "SymbolicExecution/BigInteger.h"
+
 
 #include <list>
 #include <memory>

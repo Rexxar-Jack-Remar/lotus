@@ -6,10 +6,10 @@
 #include "llvm/IR/Function.h"
 #include "llvm/IR/Instruction.h"
 
-#include "SymbolicExecution/AnalysisLimit.h"
-#include "SymbolicExecution/PropertyAllocator.h"
 #include "IR/GVFG/GuardedValueFlowGraph.h"
 #include "Solvers/SMT/LIBSMT/SMTExpr.h"
+#include "SymbolicExecution/AnalysisLimit.h"
+#include "SymbolicExecution/PropertyAllocator.h"
 
 #include <map>
 #include <memory>
