@@ -2,9 +2,10 @@
 option(LOTUS_BUILD_EXAMPLES "Build examples" OFF)
 option(LOTUS_BUILD_TESTS "Build tests" ON)
 
-# Optional analysis and verification integrations
-option(LOTUS_ENABLE_CLAM "Enable CLAM abstract interpretation framework" ON)
-option(LOTUS_ENABLE_SEAHORN "Enable SeaHorn" ON)
+# Optional analysis and verification integrations. These are opt-in because
+# they pull in large verifier-specific targets and dependencies.
+option(LOTUS_ENABLE_CLAM "Enable CLAM abstract interpretation framework" OFF)
+option(LOTUS_ENABLE_SEAHORN "Enable SeaHorn" OFF)
 option(LOTUS_ENABLE_SMACK
        "Enable SMACK LLVM-to-Boogie verifier frontend" OFF)
 option(LOTUS_ENABLE_SVF "Enable SVF" OFF)
