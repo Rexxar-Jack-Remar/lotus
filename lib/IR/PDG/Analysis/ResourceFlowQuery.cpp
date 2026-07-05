@@ -58,28 +58,68 @@ static std::string calleeName(Node *node) {
 /// Built-in acquire API classification.
 static ResourceKind resourceKindForAcquireName(const std::string &api_name) {
   const std::string lower = toLower(api_name);
-  if (lower == "malloc" || lower == "calloc" || lower == "realloc")
+
+  if (lower == "malloc" || lower == "calloc" || lower == "realloc" ||
+      lower == "reallocf" || lower == "valloc" || lower == "aligned_alloc" ||
+      lower == "posix_memalign" || lower == "memalign" || lower == "pvalloc")
     return ResourceKind::Heap;
-  if (lower == "fopen")
+
+  if (lower == "mmap" || lower == "mmap64")
+    return ResourceKind::Heap;
+
+  if (lower == "fopen" || lower == "fopen64" || lower == "freopen" ||
+      lower == "freopen64" || lower == "tmpfile" || lower == "tmpfile64" ||
+      lower == "fdopen" || lower == "popen")
     return ResourceKind::File;
-  if (lower == "open" || lower == "socket")
+
+  if (lower == "open" || lower == "open64" || lower == "creat" ||
+      lower == "creat64" || lower == "socket" || lower == "socketpair" ||
+      lower == "accept" || lower == "accept4" || lower == "dup" ||
+      lower == "dup2" || lower == "dup3" || lower == "epoll_create" ||
+      lower == "eventfd" || lower == "signalfd" || lower == "timerfd_create" ||
+      lower == "inotify_init" || lower == "memfd_create" || lower == "shm_open")
     return ResourceKind::FileDescriptor;
-  if (lower == "opendir")
+
+  if (lower == "opendir" || lower == "fdopendir")
     return ResourceKind::Directory;
+
+  if (lower == "pthread_mutex_lock" ||
+      lower == "pthread_mutex_trylock" ||
+      lower == "pthread_spin_lock" ||
+      lower == "pthread_spin_trylock" ||
+      lower == "pthread_rwlock_rdlock" ||
+      lower == "pthread_rwlock_tryrdlock" ||
+      lower == "pthread_rwlock_wrlock" ||
+      lower == "pthread_rwlock_trywrlock" ||
+      lower == "mtx_lock" || lower == "mtx_trylock")
+    return ResourceKind::Lock;
+
   return ResourceKind::Unknown;
 }
 
 /// Built-in release API classification.
 static ResourceKind resourceKindForReleaseName(const std::string &api_name) {
   const std::string lower = toLower(api_name);
-  if (lower == "free")
+
+  if (lower == "free" || lower == "cfree" ||
+      lower == "munmap" || lower == "munmap64")
     return ResourceKind::Heap;
-  if (lower == "fclose")
+
+  if (lower == "fclose" || lower == "pclose")
     return ResourceKind::File;
-  if (lower == "close")
+
+  if (lower == "close" || lower == "closefrom" || lower == "shutdown")
     return ResourceKind::FileDescriptor;
+
   if (lower == "closedir")
     return ResourceKind::Directory;
+
+  if (lower == "pthread_mutex_unlock" ||
+      lower == "pthread_spin_unlock" ||
+      lower == "pthread_rwlock_unlock" ||
+      lower == "mtx_unlock")
+    return ResourceKind::Lock;
+
   return ResourceKind::Unknown;
 }
 

@@ -108,6 +108,8 @@ std::string resourceKindName(ResourceKind kind) {
     return "fd";
   case ResourceKind::Directory:
     return "dir";
+  case ResourceKind::Lock:
+    return "lock";
   case ResourceKind::Unknown:
   default:
     return "unknown";

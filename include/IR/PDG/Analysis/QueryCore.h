@@ -193,7 +193,8 @@ enum class ResourceKind {
   Heap,
   File,
   FileDescriptor,
-  Directory
+  Directory,
+  Lock
 };
 
 /// Resolves high-level criteria into concrete PDG seed nodes.

@@ -16,10 +16,12 @@
 
 #include "IR/PDG/Analysis/PropertySpec.h"
 #include "IR/PDG/Analysis/Query.h"
+#include "IR/PDG/Analysis/QueryCore.h"
 #include "IR/PDG/Core/ControlDependencyGraph.h"
 #include "IR/PDG/Core/DataDependencyGraph.h"
 #include "IR/PDG/Core/ProgramDependencyGraph.h"
 #include "IR/PDG/QueryLanguage/Cypher.h"
+#include "IR/PDG/Support/PDGUtils.h"
 
 #include <algorithm>
 #include <fstream>
@@ -149,11 +151,17 @@ static cl::opt<std::string>
 
 static cl::opt<std::string>
     ResourceKindFlag("resource-kind",
-                     cl::desc("Resource family: all, heap, file, fd, dir"),
+                     cl::desc("Resource family: all, heap, file, fd, dir, lock"),
                      cl::init("all"));
 
 static cl::opt<bool> ShowVersion("show-version",
                                  cl::desc("Show version information"));
+
+static cl::opt<bool>
+    Schema("schema",
+           cl::desc("Print PDG schema (node labels, edge types, properties, "
+                    "edge presets) as JSON and exit"),
+           cl::init(false));
 
 static std::string describeEdge(CypherQueryExecutor &executor, Edge *edge) {
   if (!edge)
@@ -245,6 +253,8 @@ static ResourceKind parseResourceKind() {
     return ResourceKind::FileDescriptor;
   if (kind == "dir")
     return ResourceKind::Directory;
+  if (kind == "lock")
+    return ResourceKind::Lock;
   return ResourceKind::Unknown;
 }
 
@@ -892,6 +902,182 @@ static bool executeAnalysis(ProgramGraph &pdg, const Module &module,
   return false;
 }
 
+// ============================================================================
+// Schema introspection
+// ============================================================================
+
+static void printSchema() {
+  // Complete node label list (matching CypherExecutor::matchNodes labelMap)
+  static const char *nodeLabels[] = {
+      "INST_FUNCALL", "INST_RET", "INST_BR", "INST_OTHER",
+      "FUNC_ENTRY",   "PARAM_FORMALIN", "PARAM_FORMALOUT",
+      "PARAM_ACTUALIN", "PARAM_ACTUALOUT",
+      "VAR_STATICALLOCGLOBALSCOPE", "VAR_STATICALLOCMODULESCOPE",
+      "VAR_STATICALLOCFUNCTIONSCOPE", "VAR_OTHER",
+      "FUNC", "CLASS",
+      "ANNO_VAR", "ANNO_GLOBAL", "ANNO_OTHER"};
+
+  // Complete edge type list (matching CypherExecutor)
+  static const char *edgeTypes[] = {
+      "IND_CALL",
+      "CONTROLDEP_CALLINV", "CONTROLDEP_CALLRET", "CONTROLDEP_ENTRY",
+      "CONTROLDEP_BR",      "CONTROLDEP_IND_BR",
+      "DATA_DEF_USE",       "DATA_RAW",  "DATA_READ",
+      "DATA_ALIAS",         "DATA_RET",
+      "PARAMETER_IN",       "PARAMETER_OUT", "PARAMETER_FIELD",
+      "GLOBAL_DEP",         "VAL_DEP",       "CLS_MTH",
+      "ANNO_VAR",           "ANNO_GLOBAL",   "ANNO_OTHER",
+      "TYPE_OTHEREDGE"};
+
+  // Edge type aliases accepted in Cypher queries
+  static const char *edgeAliases[] = {
+      "CALL_INV", "CALL_RET", "PARAM_IN", "PARAM_OUT"};
+
+  // Node properties (all node types share the same accessible properties)
+  static const char *nodeProperties[] = {
+      "type",    "type_id", "node_type",     "node_type_id",
+      "label",   "kind",    "func",          "function",
+      "name",    "opcode",  "callee",        "src_file",
+      "source_file",        "src_line",      "source_line",
+      "src_col", "source_col", "source_column",
+      "src",     "source",  "di_type",       "dtype",
+      "type_name",          "llvm",          "ir"};
+
+  // Edge properties
+  static const char *edgeProperties[] = {
+      "type",    "type_id",    "edge_type", "edge_type_id",
+      "label",   "kind",       "src",       "dst",
+      "src_<p>", "dst_<p>"};
+
+  outs() << "{\n";
+
+  // --- Node labels ---
+  outs() << "  \"node_labels\": [\n";
+  for (size_t i = 0; i < sizeof(nodeLabels) / sizeof(nodeLabels[0]); ++i) {
+    if (i)
+      outs() << ",\n";
+    outs() << "    \"" << nodeLabels[i] << "\"";
+  }
+  outs() << "\n  ],\n";
+
+  // --- Node group labels ---
+  outs() << "  \"node_group_labels\": {\n";
+  outs() << "    \"INST\": [\"INST_FUNCALL\",\"INST_RET\",\"INST_BR\","
+            "\"INST_OTHER\"],\n";
+  outs() << "    \"VAR\": [\"VAR_STATICALLOCGLOBALSCOPE\","
+            "\"VAR_STATICALLOCMODULESCOPE\","
+            "\"VAR_STATICALLOCFUNCTIONSCOPE\",\"VAR_OTHER\"],\n";
+  outs() << "    \"PARAM\": [\"PARAM_FORMALIN\",\"PARAM_FORMALOUT\","
+            "\"PARAM_ACTUALIN\",\"PARAM_ACTUALOUT\"],\n";
+  outs() << "    \"ANNO\": [\"ANNO_VAR\",\"ANNO_GLOBAL\",\"ANNO_OTHER\"]\n";
+  outs() << "  },\n";
+
+  // --- Node properties ---
+  outs() << "  \"node_properties\": [\n";
+  for (size_t i = 0; i < sizeof(nodeProperties) / sizeof(nodeProperties[0]);
+       ++i) {
+    if (i)
+      outs() << ",\n";
+    outs() << "    \"" << nodeProperties[i] << "\"";
+  }
+  outs() << "\n  ],\n";
+
+  // --- Edge types ---
+  outs() << "  \"edge_types\": [\n";
+  for (size_t i = 0; i < sizeof(edgeTypes) / sizeof(edgeTypes[0]); ++i) {
+    if (i)
+      outs() << ",\n";
+    outs() << "    \"" << edgeTypes[i] << "\"";
+  }
+  outs() << "\n  ],\n";
+
+  // --- Edge type aliases ---
+  outs() << "  \"edge_type_aliases\": [\n";
+  for (size_t i = 0; i < sizeof(edgeAliases) / sizeof(edgeAliases[0]); ++i) {
+    if (i)
+      outs() << ",\n";
+    outs() << "    \"" << edgeAliases[i] << "\"";
+  }
+  outs() << "\n  ],\n";
+
+  // --- Edge group labels ---
+  outs() << "  \"edge_group_labels\": {\n";
+  outs() << "    \"CONTROL_DEP\": [\"CONTROLDEP_ENTRY\",\"CONTROLDEP_BR\","
+            "\"CONTROLDEP_IND_BR\",\"CONTROLDEP_CALLINV\","
+            "\"CONTROLDEP_CALLRET\"],\n";
+  outs() << "    \"CALL\": [\"CONTROLDEP_CALLINV\",\"CONTROLDEP_CALLRET\","
+            "\"IND_CALL\"],\n";
+  outs() << "    \"DATA_DEP\": [\"DATA_DEF_USE\"]\n";
+  outs() << "  },\n";
+
+  // --- Edge properties ---
+  outs() << "  \"edge_properties\": [\n";
+  for (size_t i = 0; i < sizeof(edgeProperties) / sizeof(edgeProperties[0]);
+       ++i) {
+    if (i)
+      outs() << ",\n";
+    outs() << "    \"" << edgeProperties[i] << "\"";
+  }
+  outs() << "\n  ],\n";
+
+  // --- Edge presets ---
+  outs() << "  \"edge_presets\": {\n";
+  static const char *presetNames[] = {"all",        "data",   "control",
+                                      "parameter",  "interprocedural",
+                                      "value-flow", "transform-legality"};
+  static const PDGEdgePreset presetValues[] = {
+      PDGEdgePreset::All,       PDGEdgePreset::Data,
+      PDGEdgePreset::Control,   PDGEdgePreset::Parameter,
+      PDGEdgePreset::Interprocedural, PDGEdgePreset::ValueFlow,
+      PDGEdgePreset::TransformLegality};
+
+  // Local edge-type-to-name mapping (complete, unlike pdgutils::getEdgeTypeStr
+  // which is missing CONTROLDEP_CALLRET and CLS_MTH).
+  auto edgeTypeName = [](EdgeType et) -> const char * {
+    switch (et) {
+    case EdgeType::IND_CALL:           return "IND_CALL";
+    case EdgeType::CONTROLDEP_CALLINV: return "CONTROLDEP_CALLINV";
+    case EdgeType::CONTROLDEP_CALLRET: return "CONTROLDEP_CALLRET";
+    case EdgeType::CONTROLDEP_ENTRY:   return "CONTROLDEP_ENTRY";
+    case EdgeType::CONTROLDEP_BR:      return "CONTROLDEP_BR";
+    case EdgeType::CONTROLDEP_IND_BR:  return "CONTROLDEP_IND_BR";
+    case EdgeType::DATA_DEF_USE:       return "DATA_DEF_USE";
+    case EdgeType::DATA_RAW:           return "DATA_RAW";
+    case EdgeType::DATA_READ:          return "DATA_READ";
+    case EdgeType::DATA_ALIAS:         return "DATA_ALIAS";
+    case EdgeType::DATA_RET:           return "DATA_RET";
+    case EdgeType::PARAMETER_IN:       return "PARAMETER_IN";
+    case EdgeType::PARAMETER_OUT:      return "PARAMETER_OUT";
+    case EdgeType::PARAMETER_FIELD:    return "PARAMETER_FIELD";
+    case EdgeType::GLOBAL_DEP:         return "GLOBAL_DEP";
+    case EdgeType::VAL_DEP:            return "VAL_DEP";
+    case EdgeType::CLS_MTH:            return "CLS_MTH";
+    case EdgeType::ANNO_VAR:           return "ANNO_VAR";
+    case EdgeType::ANNO_GLOBAL:        return "ANNO_GLOBAL";
+    case EdgeType::ANNO_OTHER:         return "ANNO_OTHER";
+    case EdgeType::TYPE_OTHEREDGE:     return "TYPE_OTHEREDGE";
+    }
+    return "<unknown>";
+  };
+
+  for (size_t p = 0; p < sizeof(presetNames) / sizeof(presetNames[0]); ++p) {
+    if (p)
+      outs() << ",\n";
+    outs() << "    \"" << presetNames[p] << "\": [";
+    auto edgeSet = edgeTypesForPreset(presetValues[p]);
+    size_t ei = 0;
+    for (auto et : edgeSet) {
+      if (ei++)
+        outs() << ", ";
+      outs() << "\"" << jsonEscape(edgeTypeName(et)) << "\"";
+    }
+    outs() << "]";
+  }
+  outs() << "\n  }\n";
+
+  outs() << "}\n";
+}
+
 } // namespace
 
 int main(int argc, char **argv) {
@@ -900,6 +1086,11 @@ int main(int argc, char **argv) {
 
   if (ShowVersion) {
     printVersion();
+    return 0;
+  }
+
+  if (Schema) {
+    printSchema();
     return 0;
   }
 

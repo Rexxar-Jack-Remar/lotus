@@ -12,6 +12,16 @@ For metric-style queries where you want the full count, run with `--limit 0` (ot
 
 By default, `lotus-ir-pdg-query` runs the `ProgramDependencyGraph` pass (`--build-pdg`) so edge queries (data/control/param/call) work.
 
+## PDG schema introspection
+
+Instead of relying on this mini schema, get the complete up-to-date schema as JSON:
+
+```bash
+./build/bin/lotus-ir-pdg-query --schema
+```
+
+This prints all node labels, edge types, node/edge properties, group labels, and edge presets. LLM agents should call this before writing Cypher queries.
+
 ## Mini schema (Lotus PDG)
 
 **Labels**
@@ -44,3 +54,61 @@ By default, `lotus-ir-pdg-query` runs the `ProgramDependencyGraph` pass (`--buil
 
 **Common edge properties**
 - `label`, `src_*`, `dst_*` (e.g., `e.label`, `e.src_func`, `e.dst_src`)
+
+---
+
+## Security queries
+
+The `security/` directory contains categorized security analysis patterns.
+
+| File | Patterns | Analysis modes |
+|------|----------|----------------|
+| `security/injection.cypher` | Command injection: system/popen/exec sinks + input source tracing | Cypher API scan + `--analysis chop` |
+| `security/memory.cypher` | Use-after-free, double-free, memory leaks | `--analysis resource-flow`, `--analysis chop`, `--analysis shortest-path` |
+| `security/unsafe-libc.cypher` | strcpy/gets/sprintf, format string, buffer overflow | Cypher API scan + `--analysis chop` + backward slice |
+| `security/resource.cypher` | File handle leaks, lock/unlock, mmap/munmap | `--analysis resource-flow`, `--analysis summary` |
+| `security/double-free.cypher` | Double-free, use-after-free, new/delete mismatch | `--analysis resource-flow`, `--analysis chop`, `--analysis shortest-path` |
+| `security/taint.cypher` | Input-to-sink taint tracking, format string, argument tracing | Cypher API scan + `--analysis chop` + `--analysis slice-backward` |
+
+Each file documents the prerequisites and CLI invocation for each pattern.
+
+### Quick-start security triage
+
+```bash
+# 1. Find all shell execution call sites
+./build/bin/lotus-ir-pdg-query input.bc -f tools/ir/examples/security/injection.cypher
+
+# 2. Detect heap memory leaks (malloc without free)
+./build/bin/lotus-ir-pdg-query input.bc \
+  --analysis resource-flow \
+  --criteria-query "MATCH (c:INST_FUNCALL) WHERE c.callee IN ['malloc','calloc','realloc'] RETURN c" \
+  --resource-kind heap \
+  --format json
+
+# 3. Detect file handle leaks (fopen without fclose)
+./build/bin/lotus-ir-pdg-query input.bc \
+  --analysis resource-flow \
+  --criteria-query "MATCH (c:INST_FUNCALL) WHERE c.callee = 'fopen' RETURN c" \
+  --resource-kind file \
+  --format json
+
+# 4. Find strcpy/gets call sites
+./build/bin/lotus-ir-pdg-query input.bc -f tools/ir/examples/security/unsafe-libc.cypher
+```
+
+### Source-sink data flow (chop analysis)
+
+For tracing data flow from input sources to security-sensitive sinks:
+
+```bash
+./build/bin/lotus-ir-pdg-query input.bc \
+  --analysis chop \
+  --criteria-query "MATCH (s:INST_FUNCALL) WHERE s.callee IN ['fgets','read','scanf','getenv','recv'] RETURN s" \
+  --target-query "MATCH (t:INST_FUNCALL) WHERE t.callee IN ['system','popen','execve'] RETURN t" \
+  --edge-preset value-flow \
+  --context-sensitive \
+  --format json
+```
+
+The `witness_paths` field in the JSON output shows the instruction chain
+connecting source to sink.
