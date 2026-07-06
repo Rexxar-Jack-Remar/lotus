@@ -11,6 +11,15 @@ PDG Query Example Cookbook
 - ``dataflow.cypher`` and ``security.cypher`` for flow-oriented triage.
 - ``metrics.cypher`` and ``debug-info.cypher`` for inspection and reporting.
 - ``static-analysis.cypher`` for analysis-oriented query patterns.
+- ``agent-guidance.cypher`` for LLM-agent-guided PDG exploration primitives.
+- ``security/`` — categorized security analysis patterns:
+
+  + ``injection.cypher`` — Command injection: system/popen/exec sinks + input source tracing
+  + ``memory.cypher`` — Use-after-free, double-free, memory leaks
+  + ``unsafe-libc.cypher`` — strcpy/gets/sprintf, format string, buffer overflow
+  + ``resource.cypher`` — File handle leaks, lock/unlock, mmap/munmap
+  + ``double-free.cypher`` — Double-free, use-after-free, new/delete mismatch
+  + ``taint.cypher`` — Input-to-sink taint tracking, format string, argument tracing
 
 The directory acts as a practical cookbook for users learning the PDG query
 language.

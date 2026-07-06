@@ -10,7 +10,8 @@ Prerequisites
 * Z3 4.11
 * CMake 3.10+
 * C++17 compatible compiler
-* Boost 1.65+ (auto-downloaded if not found)
+* Boost 1.65+ (optional — only needed when CLAM, SeaHorn, Cclyzer++, or FPsolve are enabled;
+  auto-downloaded if not found)
 
 Building Lotus
 --------------
@@ -23,28 +24,52 @@ Building Lotus
    cmake ..
    make -j$(nproc)
 
+.. note::
+
+   After configuration, CMake prints a **build summary** showing all enabled
+   features. Run ``cmake -S . -B build`` (no flags) for a quick overview.
+
 Configuration Options
 ---------------------
 
-**Optional:**
-* ``-DLLVM_BUILD_PATH``: Path to the directory containing ``LLVMConfig.cmake`` (for example,
-  ``/usr/lib/llvm-14/lib/cmake/llvm`` or a local LLVM build/install). Only needed if CMake
-  cannot find an appropriate system LLVM automatically.
+Lotus exposes its project-owned CMake toggles through ``cmake/LotusOptions.cmake``.
+Options use a consistent ``LOTUS_*`` naming scheme.
+
+**Core toggles:**
+
+* ``-DLLVM_BUILD_PATH=/path/to/llvm/lib/cmake/llvm``: Only needed if CMake cannot
+  find a supported LLVM automatically.
+* ``-DLOTUS_BUILD_TESTS=OFF``: Disable building tests (default: ON)
+* ``-DLOTUS_BUILD_EXAMPLES=ON``: Build examples (default: OFF)
+
+**Optional verifier integrations** (all OFF by default — opt-in due to heavyweight dependencies):
+
+* ``-DLOTUS_ENABLE_CLAM=ON``: Enable CLAM abstract interpretation framework
+* ``-DLOTUS_ENABLE_SEAHORN=ON``: Enable SeaHorn
+* ``-DLOTUS_ENABLE_SMACK=ON``: Enable SMACK LLVM-to-Boogie verifier frontend
+* ``-DLOTUS_ENABLE_SVF=ON``: Enable SVF
+* ``-DLOTUS_ENABLE_HORN_ICE=ON``: Build ICE learning tools for CHC
+* ``-DLOTUS_ENABLE_SEAL=ON``: Build the Seal symbolic automata lifter (CAV 2026)
+
+**Optional in-tree tool families** (all OFF by default):
+
+* ``-DLOTUS_ENABLE_CFL=ON``: Build CFL reachability solvers
+* ``-DLOTUS_ENABLE_CSR=ON``: Build the indexing context-sensitive reachability solver
+* ``-DLOTUS_ENABLE_OWL=ON``: Build the Owl SMT solver
+* ``-DLOTUS_ENABLE_DYNAA=ON``: Build dynamic alias-analysis tools
+* ``-DLOTUS_USE_CCLYZER=ON``: Enable optional cclyzer++ alias analysis backend
+* ``-DLOTUS_ENABLE_TYPE_QUALIFIER=ON``: Enable the TypeQualifier uninitialized-data checker
+* ``-DLOTUS_ENABLE_FPSOLVE=ON``: Build vendored FPsolve fixed-point solver
+* ``-DLOTUS_ENABLE_WALI_OPENNWA=ON``: Build vendored WALi/OpenNWA weighted automata
+
+**Advanced toggles:**
+
+* ``-DLOTUS_DOWNLOAD_BOOST=OFF``: Disable Boost auto-download (default: ON)
+* ``-DLOTUS_DOWNLOAD_CRAB=ON``: Allow CRAB auto-download (default: OFF)
 * ``-DLOTUS_CUSTOM_BOOST_ROOT=/path/to/boost``: Path to a custom Boost installation
 * ``-DLOTUS_CUSTOM_CRAB_ROOT=/path/to/crab``: Path to a custom CRAB checkout
-* ``-DLOTUS_BUILD_TESTS=OFF``: Disable building tests
-* ``-DLOTUS_BUILD_EXAMPLES=ON``: Build examples
-* ``-DLOTUS_ENABLE_CLAM=OFF``: Disable CLAM tools
-* ``-DLOTUS_ENABLE_SEAHORN=OFF``: Disable SeaHorn tools
-* ``-DLOTUS_ENABLE_SMACK=ON``: Enable SMACK tools
-* ``-DLOTUS_ENABLE_HORN_ICE=ON``: Build ICE learning tools for CHC
-* ``-DLOTUS_ENABLE_DYNAA=ON``: Build dynamic alias-analysis tools
-* ``-DLOTUS_ENABLE_CFL=ON``: Build CFL tool family
-* ``-DLOTUS_ENABLE_CSR=ON``: Build the CSR CFL solver
-* ``-DLOTUS_ENABLE_OWL=ON``: Build the Owl SMT solver
-* ``-DLOTUS_SEADSA_ENABLE_SANITY_CHECKS=ON``: Enable Sea-DSA sanity checks
-* ``-DLOTUS_DOWNLOAD_BOOST=OFF``: Disable Boost auto-download
-* ``-DLOTUS_DOWNLOAD_CRAB=ON``: Allow CRAB auto-download when needed
+* ``-DLOTUS_SEADSA_ENABLE_SANITY_CHECKS=ON``: Enable Sea-DSA sanity checks (default: OFF)
+* ``-DLOTUS_WPDS_WITNESS_TRACE=ON``: Enable WPDS witness tracing (default: OFF)
 
 Typical configurations:
 
@@ -53,18 +78,15 @@ Typical configurations:
    # Lean local build
    cmake -S . -B build -DLOTUS_BUILD_TESTS=OFF
 
-   # Enable optional analysis families
+   # Enable optional tool families
    cmake -S . -B build \
      -DLOTUS_ENABLE_DYNAA=ON \
      -DLOTUS_ENABLE_HORN_ICE=ON \
      -DLOTUS_ENABLE_CFL=ON \
      -DLOTUS_ENABLE_CSR=ON
 
-   # Disable heavyweight verifier integrations
-   cmake -S . -B build \
-     -DLOTUS_ENABLE_CLAM=OFF \
-     -DLOTUS_ENABLE_SEAHORN=OFF \
-     -DLOTUS_ENABLE_SMACK=OFF
+   # Enable Seal symbolic automata lifter
+   cmake -S . -B build -DLOTUS_ENABLE_SEAL=ON
 
 Z3 Installation
 ---------------

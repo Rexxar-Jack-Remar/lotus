@@ -14,4 +14,5 @@ SMT-based model checking components used throughout Lotus.
    symabs
    slot
    staub
+   stingx
    egraphs_simp

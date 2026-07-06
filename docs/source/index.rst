@@ -52,12 +52,14 @@ Lotus is a comprehensive program analysis, verification, and optimization framew
 Features
 --------
 
-* **Multiple Alias Analysis Algorithms**: DyckAA, Sea-DSA, SparrowAA, AserPTA, FPA, OriginAA (CFL via LLVM)
+* **Multiple Alias Analysis Algorithms**: DyckAA, Sea-DSA, SparrowAA, AserPTA, TPA, FPA, OriginAA (CFL via LLVM)
 * **Dynamic Analysis Validation**: DynAA for validating static analysis results
-* **Intermediate Representations**: PDG, SVFG, DyckVFG
-* **Constraint Solving**: SMT (Z3), BDD (CUDD), WPDS
+* **Intermediate Representations**: PDG, SVFG, GVFG, ICFG, MemorySSA, path programs
+* **Constraint Solving**: SMT (Z3), BDD (CUDD), WPDS, string constraints (Stingx)
 * **Data Flow Analysis**: IFDS/IDE framework, taint analysis
-* **Bug Detection**: Integer overflow, null pointer, buffer overflow detection
+* **Bug Detection**: Integer overflow, null pointer, buffer overflow, concurrency bugs, symbolic execution
+* **Symbolic Execution**: Path-sensitive engine for bug checking
+* **Symbolic Automata**: Seal — FSM model lifting for stateful systems (CAV 2026)
 * **LLVM Integration**: Built on LLVM 14 with comprehensive IR support
 
 Supported Platforms
@@ -69,7 +71,11 @@ Supported Platforms
 * Z3 4.11
 
 Publications
-------------
+-----------
+
+* **CAV 2026**: *Sound and Precise Symbolic Automata Model for Stateful Software Systems*.  
+  Xinlong Wu, Ruiyu Zhou, Peisen Yao, and Qingkai Shi.  
+  *International Conference on Computer Aided Verification*.
 
 * **ISSTA 2025**: *Program Analysis Combining Generalized Bit-Level and Word-Level Abstractions*  
   Guangsheng Fan, Liqian Chen, Banghu Yin, Wenyu Zhang, Peisen Yao, and Ji Wang.  

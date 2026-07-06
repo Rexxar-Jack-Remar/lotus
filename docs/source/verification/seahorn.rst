@@ -48,6 +48,19 @@ The SeaHorn framework is organized into the following subdirectories:
   * ``StaticTaint.cc`` – Static taint analysis
   * ``TopologicalOrder.cc``, ``WeakTopologicalOrder.cc`` – Ordering analyses
 
+* **Transforms/Kernel/** – Linux kernel driver transformation passes (DrvHorn)
+  * ``Device.cc`` — Device-model and bus matching modeling for driver verification
+  * ``FileOperations.cc`` — File operations structure modeling
+  * ``KernelSetup.cc`` — Kernel initialization sequence modeling
+  * ``Slicer.cc`` — Driver-specific slicer for reducing kernel IR to relevant paths
+  * ``ListOps.cc`` — Linked-list operation modeling
+  * ``NondetMalloc.cc`` — Non-deterministic allocation for kernel allocations
+  * ``HandleInlineAsm.cc`` — Inline assembly handling for kernel code
+  * ``InitGlobalKrefs.cc`` / ``AssertKrefs.cc`` — Kernel reference-count modeling
+  * ``I2CDriver.cc``, ``Platform.cc`` — Bus-specific driver modeling
+  * ``Acpi.cc`` — ACPI interface modeling
+  * And more — See ``lib/Verification/seahorn/Transforms/Kernel/``
+
 * **Transforms/** – LLVM IR transformations for verification
   * **Instrumentation/** – Property instrumentation
     * ``BufferBoundsCheck.cc``, ``FatBufferBoundsCheck.cc`` – Buffer bounds checking

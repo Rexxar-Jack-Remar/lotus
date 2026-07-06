@@ -9,6 +9,7 @@ for timing, progress reporting, and platform queries.
 - ``Timer`` for timeout checks and elapsed-time measurement.
 - ``ProgressBar`` for terminal progress reporting.
 - ``System`` for environment and system-level helpers.
+- ``subprocess`` for running external processes and capturing their output.
 
 These headers are shared by tools that need lightweight CLI-facing utilities.
 

@@ -14,3 +14,4 @@ This section covers the intermediate representations used in Lotus.
    gvfg
    gsa
    memoryssa
+   path_program

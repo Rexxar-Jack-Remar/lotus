@@ -124,13 +124,13 @@ Common Lotus build toggles:
 
 **Boost dependencies** (optional): Boost is only required by certain modules. The build
 system configures Boost **only when** one of these is enabled:
-- **SeaHorn** (`LOTUS_ENABLE_SEAHORN`, default ON) — expression handling, Horn clause DB, graph traits
-- **CLAM** (`LOTUS_ENABLE_CLAM`, default ON) — abstract interpretation, JSON parsing (Boost 1.80+ for JSON)
+- **SeaHorn** (`LOTUS_ENABLE_SEAHORN`, default OFF) — expression handling, Horn clause DB, graph traits
+- **CLAM** (`LOTUS_ENABLE_CLAM`, default OFF) — abstract interpretation, JSON parsing (Boost 1.80+ for JSON)
 - **CclyzerAA** (`LOTUS_USE_CCLYZER`, default OFF) — alias analysis
 - **FPsolve** (`LOTUS_ENABLE_FPSOLVE`, default OFF) — vendored fixed-point solver library; also requires GMP
 
 If all four are disabled (e.g. `-DLOTUS_ENABLE_CLAM=OFF -DLOTUS_ENABLE_SEAHORN=OFF -DLOTUS_ENABLE_FPSOLVE=OFF`), Boost will **not** be
-configured. Sea-DSA no longer requires Boost.
+configured. 
 
 When Boost is needed, the build will download and build it if not found. You can specify a custom
 Boost path with `-DLOTUS_CUSTOM_BOOST_ROOT=/path/to/boost`.

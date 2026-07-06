@@ -28,3 +28,11 @@ The documentation is organized to match the ``tools/`` directory structure:
    optimization/index
    solver/index
    verifier/index
+
+Scripting Tools
+---------------
+
+.. toctree::
+   :maxdepth: 1
+
+   phoenix

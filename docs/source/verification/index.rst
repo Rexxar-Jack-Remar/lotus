@@ -12,6 +12,7 @@ This section documents the verification tools and frameworks used throughout Lot
    clam
    smack
    sifa
+   seal
    symabs-ai
    seahorn
    failure_directed_trimming

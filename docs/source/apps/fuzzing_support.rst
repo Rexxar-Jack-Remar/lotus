@@ -13,10 +13,10 @@ Hawkeye, and DAFL in a modular form. The analysis layer is active under
 the source tree as integration pieces that are not wired into the top-level
 ``lib/Fuzzing/CMakeLists.txt``.
 
-**Location**: ``lib/Fuzzing/``
+**Location**: ``lib/Fuzzing/``, ``include/Fuzzing/``
 
-**Components**: distance analyses, target detection, target generation, and
-source-present AFLGo compiler or linker plugin code.
+**Components**: distance analyses, target detection, target generation,
+path profiling, and source-present AFLGo compiler or linker plugin code.
 
 Detailed module pages:
 
@@ -75,6 +75,12 @@ Compiler and Linker Plugins
 ``AFLGoCompiler/`` and ``AFLGoLinker/`` are still worth reading as source-level
 pipeline components, but they are not part of the default ``lib/Fuzzing`` build
 today.
+
+**PathProfiling/** (``lib/Fuzzing/PathProfiling/``, ``include/Fuzzing/PathProfiling/``):
+
+Ball-Larus path numbering for path-aware fuzzing. Assigns unique path numbers
+to paths through a CFG DAG (after backedge removal) so that individual
+execution paths can be identified, counted, and targeted during fuzzing.
 
 **AFLGoCompiler/**: LLVM compiler plugin sources for compile-time target injection:
 

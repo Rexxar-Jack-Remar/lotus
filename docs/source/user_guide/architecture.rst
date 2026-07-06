@@ -317,12 +317,28 @@ Program Dependence Graphs
 Standalone Tools
 ~~~~~~~~~~~~~~~~
 
-Each major component has standalone command-line tools:
+Each major component has standalone command-line tools. The bug-detection
+frontends have been unified under a single ``lotus-check`` binary with
+subcommands:
 
-- ``lotus-alias-aser-aa``, ``lotus-alias-dyck-aa``, ``lotus-alias-lotus-aa``: Alias analysis
-- ``lotus-kint``, ``lotus-taint``, ``lotus-concur``, ``lotus-pulse``: Bug detection
-- ``clam``, ``clam-pp``, ``clam-diff``: Abstract interpretation
-- ``lotus-ir-pdg-query``: PDG queries
+**Alias analysis:**
+- ``lotus-alias-aser-aa``, ``lotus-alias-dyck-aa``, ``lotus-alias-lotus-aa``
+
+**Unified checker frontend (``lotus-check``):**
+- ``lotus-check kint`` — Integer overflow, division by zero, array bounds
+- ``lotus-check taint`` — Interprocedural taint analysis
+- ``lotus-check concur`` — Concurrency bug detection (races, deadlocks, OpenMP, MPI)
+- ``lotus-check pulse`` — Biabductive memory-safety analysis
+- ``lotus-check fitx`` — Typestate-based bug detection
+- ``lotus-check saber`` — Source-sink bug detection (leaks, double-free)
+- ``lotus-check ae`` — Abstract-execution-based checking
+- ``lotus-check symex`` — Symbolic-execution bug checking
+
+**PDG query:**
+- ``lotus-ir-pdg-query`` — PDG Cypher queries, slicing, chopping, resource-flow analysis
+
+**Abstract interpretation:**
+- ``clam``, ``clam-pp``, ``clam-diff``
 
 Python Integration
 ~~~~~~~~~~~~~~~~~~

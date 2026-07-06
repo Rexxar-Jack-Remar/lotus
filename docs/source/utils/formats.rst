@@ -8,6 +8,7 @@ format support for configuration, interchange, and debugging output.
 
 - ``SExpr`` for S-expression parsing.
 - ``cJSON`` and ``json11`` for JSON handling.
+- ``toml`` for TOML configuration file parsing.
 - ``pcomb/`` for parser-combinator based parsers.
 
 These helpers show up throughout Lotus in spec loaders, report generation, and

@@ -59,6 +59,16 @@ for higher-level abstractions.
 * **SymAbsAI** – Configurable abstract interpretation framework with domain
   composition (``lib/Verification/SymAbsAI`` and ``include/Verification/SymAbsAI``).
 
+Symbolic Automata
+-----------------
+
+See :doc:`../verification/seal` for details.
+
+* **Seal** (vendored, opt-in) — Symbolic automata lifter for stateful software
+  systems. Builds finite-state-machine models from LLVM IR by combining loop
+  summary analysis, symbolic execution, and abstract interpretation.
+  Published at CAV 2026.
+
 Symbolic Execution
 ------------------
 
