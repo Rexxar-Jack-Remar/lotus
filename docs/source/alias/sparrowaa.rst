@@ -58,6 +58,38 @@ Features
 * Supports multiple context sensitivities
 * Optional optimizations for improved performance
 
+Adaptive Context Sensitivity via HVN
+====================================
+
+Hash-based Value Numbering (HVN) in SparrowAA computes pointer-equivalence
+labels (``peLabel``) for every node in the constraint graph as a side
+effect of its offline variable-substitution pass. These labels encode
+whether different callers pass pointer-equivalent or pointer-distinct
+arguments to the same formal parameter.
+
+**Key insight**: If two actual arguments at different call sites for the
+same formal parameter have *different* ``peLabel``\ s, the function would
+benefit from context sensitivity (cloning per caller keeps the pointer
+facts separate). If they share the same ``peLabel``, context sensitivity
+would produce redundant clones without improving precision.
+
+This enables a lightweight *adaptive* context-sensitivity strategy:
+
+1. Run HVN (already part of SparrowAA's constraint optimization phase).
+2. For each function, inspect the ``peLabel``\ s of its incoming arguments
+   across all call sites.
+3. If arguments from different callers are pointer-distinct, enable context
+   sensitivity for that function; otherwise, keep it context-insensitive.
+
+The approach avoids the uniform k-CFA overhead by targeting context
+sensitivity only where it measurably improves precision.
+
+See ``lib/Alias/InclusionBased/SparrowAA/IDEA-ADAPTIVE-CS-VIA-HVN.md``
+for the full research proposal with examples and analysis.
+
+**Build/run**: Use ``--enable-hvn`` with the SparrowAA frontend to enable
+the HVN optimization pass.
+
 Usage
 =====
 

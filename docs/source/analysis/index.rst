@@ -26,6 +26,15 @@ At a glance:
   null-flow analyses. See :doc:`null_pointer`.
 - **TypeHierarchy** (``lib/Analysis/TypeHierarchy``): Type-hierarchy and vtable
   recovery for object-oriented code. See :doc:`type_hierarchy`.
+- **SCCP** (``lib/Analysis/SCCP``): Sparse conditional constant propagation
+  using a three-valued lattice (Top/Constant/Bottom) to discover constants
+  and dead code. See :doc:`sccp`.
+- **ParameterSummary** (``lib/Analysis/ParameterSummary``): Per-function
+  parameter effect summaries tracking freed, dereferenced, and allocated
+  parameters, with transitive call-graph composition. See :doc:`parameter_summary`.
+- **Multiplicity** (``lib/Analysis/Multiplicity``): Allocation multiplicity
+  classification — classifies global, stack, and heap allocations as
+  *Unique* or *Summary*. See :doc:`multiplicity`.
 
 
 Higher-level analyzers such as CLAM and SymAbsAI build on these components;
@@ -41,3 +50,6 @@ details.
    loop
    null_pointer
    type_hierarchy
+   sccp
+   parameter_summary
+   multiplicity

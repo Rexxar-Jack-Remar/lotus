@@ -24,6 +24,76 @@ The Checker Framework consists of several checker categories, all unified throug
 
 All checkers report bugs through the centralized ``BugReportMgr`` system, enabling unified output formats (JSON, SARIF) and consistent bug reporting across all analysis tools. The repository now builds a single checker binary, ``lotus-check``, with subcommands such as ``kint``, ``ae``, ``pulse``, ``saber``, and ``concur``.
 
+Declarative Checker Core
+------------------------
+
+The Declarative Checker Core (``lib/Checker/Core/``) provides a framework for
+defining bug checkers through specification files rather than hardcoded C++
+logic. This enables adding new checks without modifying the checker engine.
+
+**Components**:
+
+* **CheckerSpec** — A declarative rule specification with metadata (id, title,
+  severity, category), a rule kind (ForbiddenCall, SourceSink, ApiProtocol),
+  and associated capabilities.
+* **CheckerSpecLoader** — Loads ``CheckerSpec`` instances from YAML/JSON files
+  or directories. Enables packaging reusable check rule sets.
+* **CheckerRegistry** — Central registry that manages both declarative specs
+  (loaded at runtime from spec files) and native checkers (compiled in).
+  Supports id-based lookup, category filtering, and engine-kind selection.
+* **CheckerDriver** — Orchestrates checker execution: selects and runs
+  checkers from the registry over a ``CheckerContext``, collects diagnostics,
+  and emits results to the ``BugReportMgr``.
+* **CheckerDiagnostic** — Structured diagnostic with bug type, severity,
+  source location, message, suggestion, confidence, and optional trace steps.
+  Convertible to the ``BugReport`` format for unified reporting.
+* **CheckerContext** — Per-module execution context providing the LLVM module
+  and an optional alias-analysis wrapper.
+* **CheckerValidator** — Validates checker specifications for consistency
+  (e.g., missing required fields, unknown rule kinds).
+
+**Rule Kinds**:
+
+* **ForbiddenCall** — Flags calls to specified functions (e.g.,
+  ``system``, ``gets``). Pattern: a simple function-name allow/block list.
+* **SourceSink** — Tracks data flow from *sources* to *sinks* with optional
+  sanitizers. Generalizes taint-style vulnerability detection.
+* **ApiProtocol** — Checks acquire/use/release protocols for resources
+  (locks, file handles, reference counts). Tracks state transitions and
+  reports leaks, use-after-release, and double-acquire.
+* **Native** — A hardcoded C++ checker that registers via the registry API.
+
+**Usage**:
+
+.. code-block:: bash
+
+   # Run a declarative checker from a spec file
+   ./build/bin/lotus-check generic input.bc --checker=forbidden.system
+
+   # Load all specs from a directory
+   ./build/bin/lotus-check generic input.bc --spec-dir=./checker-specs/
+
+   # List all registered checkers
+   ./build/bin/lotus-check --list-checkers
+
+.. code-block:: cpp
+
+   #include "Checker/Core/CheckerRegistry.h"
+   #include "Checker/Core/CheckerSpecLoader.h"
+
+   lotus::checker::CheckerRegistry registry;
+   lotus::checker::CheckerSpecLoader loader;
+
+   // Load specs from a directory
+   auto specs = loader.loadFromDirectory("./checker-specs/");
+   for (const auto &spec : specs.get()) {
+     registry.registerDeclarative(spec);
+   }
+
+   // Look up and run a checker
+   auto *descriptor = registry.findById("forbidden.system");
+   // ... execute via CheckerDriver
+
 Components
 ----------
 

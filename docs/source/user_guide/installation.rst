@@ -70,6 +70,9 @@ Options use a consistent ``LOTUS_*`` naming scheme.
 * ``-DLOTUS_CUSTOM_CRAB_ROOT=/path/to/crab``: Path to a custom CRAB checkout
 * ``-DLOTUS_SEADSA_ENABLE_SANITY_CHECKS=ON``: Enable Sea-DSA sanity checks (default: OFF)
 * ``-DLOTUS_WPDS_WITNESS_TRACE=ON``: Enable WPDS witness tracing (default: OFF)
+* ``-DLOTUS_SEAHORN_BUILD_32_BIT_RT=ON``: Build 32-bit SeaHorn runtime libraries (default: OFF)
+* ``-DLOTUS_EGRAPH_ENABLE_DOT=ON``: Enable DOT/Graphviz helpers in the EGraph library (default: ON)
+* ``-DLOTUS_EGRAPH_ENABLE_JSON=ON``: Enable JSON serialization helpers in the EGraph library (default: ON)
 
 Typical configurations:
 
