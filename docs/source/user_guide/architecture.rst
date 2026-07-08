@@ -41,13 +41,12 @@ Core Components
    Multiple pointer analysis algorithms with different precision-performance trade-offs:
    
    - **DyckAA**: Unification-based, exhaustive alias analysis with Dyck-CFL reachability
-   - **AserPTA**: Constraint-based pointer analysis with multiple context sensitivities
+   - **AserPTA**: Constraint-based pointer analysis with multiple context sensitivities (including k-callsite and k-origin/thread-creation sensitivity)
    - **LotusAA**: Flow-sensitive, field-sensitive interprocedural analysis
    - **Sea-DSA**: Context-sensitive DSA-based memory analysis
    - **SparrowAA**: Inclusion-based pointer analysis
    - **FPA**: Function pointer analysis (FLTA, MLTA, MLTADF, KELP)
    - **SRAA**: Strict Relation Alias Analysis using range analysis
-   - **OriginAA**: Origin-sensitive analysis for thread creation tracking
    - **DynAA**: Dynamic validation of static alias analysis results
 
 2. **Intermediate Representations** (``lib/IR/``, ``include/IR/``)
@@ -82,7 +81,8 @@ Core Components
 6. **Symbolic Execution** (``lib/SymbolicExecution/``, ``include/SymbolicExecution/``)
 
    Path-sensitive symbolic execution infrastructure used by the ``symex``
-   checker frontend:
+   checker frontend. See :doc:`../symbolic_execution/index` for the engine
+   documentation.
 
    - **AnalysisDriver**: Coordinates whole-module symbolic execution and summaries
    - **AnalysisState**: Tracks symbolic memory, guarded facts, and path conditions

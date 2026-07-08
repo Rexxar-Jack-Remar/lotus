@@ -17,7 +17,8 @@ At a glance:
 - **CFG** (``lib/Analysis/CFG``): Control Flow Graph utilities for reachability,
   dominance, and structural reasoning. See :doc:`cfg`.
 - **Concurrency** (``lib/Concurrency``): Thread-aware analyses for
-  multi-threaded code (MHP, lock sets, thread modeling). See :doc:`concurrency`.
+  multi-threaded code (MHP, lock sets, thread modeling). Now documented in its
+  own section: see :doc:`../concurrency/index`.
 - **DebugInfo** (``lib/Analysis/DebugInfo``): Source-location and metadata
   extraction support. See :doc:`debug_info`.
 - **Loop** (``lib/Analysis/Loop``): Loop-dependence, iteration-space, and
@@ -45,7 +46,6 @@ details.
    :maxdepth: 2
 
    cfg
-   concurrency
    debug_info
    loop
    null_pointer

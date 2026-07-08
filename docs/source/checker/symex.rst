@@ -58,5 +58,6 @@ against ``CanarySymbolicExecution``.
 See Also
 --------
 
+* :doc:`../symbolic_execution/index` – Symbolic execution engine documentation
 * :doc:`index` – Checker framework overview
 * :doc:`../tools/checker/index` – ``lotus-check`` command-line frontend

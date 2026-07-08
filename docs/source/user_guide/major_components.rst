@@ -23,8 +23,9 @@ See :doc:`../alias/alias_analysis` for detailed instructions and command example
   ``lib/Alias/Specialized/FPA`` for resolving indirect calls.
 * **DynAA** – Dynamic checker living in ``tools/alias/dynaa`` that validates static
   alias analyses against runtime traces.
-* **OriginAA** – K-callsite-sensitive, origin-sensitive analysis targeting
-  thread-creation semantics.
+* **AserPTA** – Constraint-based pointer analysis with multiple context
+  sensitivities, including k-callsite and k-origin (thread-creation)
+  sensitivity (``lib/Alias/InclusionBased/AserPTA``).
 
 Intermediate Representations
 ----------------------------
@@ -77,7 +78,8 @@ The SymbolicExecution subsystem is a top-level engine under
 path-sensitive symbolic execution over the guarded value-flow graph, tracks
 symbolic scalar and memory facts, and uses SMT-backed path-condition checks for
 feasibility. The ``lotus-check symex`` frontend invokes this engine for
-symbolic-execution bug checks.
+symbolic-execution bug checks. See :doc:`../symbolic_execution/index` for the
+engine documentation.
 
 Utilities and Reachability
 --------------------------

@@ -31,12 +31,14 @@ Lotus is a comprehensive program analysis, verification, and optimization framew
    annotation/index
    apps/index
    cfl/index
+   concurrency/index
    dataflow/index
    ir/index
    ml/index
    optimization/index
    security/index
    solvers/index
+   symbolic_execution/index
    transform/index
    utils/index
    verification/index
@@ -52,7 +54,7 @@ Lotus is a comprehensive program analysis, verification, and optimization framew
 Features
 --------
 
-* **Multiple Alias Analysis Algorithms**: DyckAA, Sea-DSA, SparrowAA, AserPTA, TPA, FPA, OriginAA (CFL via LLVM)
+* **Multiple Alias Analysis Algorithms**: DyckAA, Sea-DSA, SparrowAA, AserPTA, TPA, FPA, CFL (via LLVM)
 * **Dynamic Analysis Validation**: DynAA for validating static analysis results
 * **Intermediate Representations**: PDG, SVFG, GVFG, ICFG, MemorySSA, path programs
 * **Constraint Solving**: SMT (Z3), BDD (CUDD), WPDS, string constraints (Stingx)
