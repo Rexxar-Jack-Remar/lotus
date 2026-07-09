@@ -21,18 +21,22 @@ constexpr unsigned kDefaultInterElimConstantPropagationCallStringLength = 2;
 using ConstantPropagationValue = llvm::ValueLatticeElement;
 using ConstantPropagationMap =
     std::unordered_map<const llvm::Value *, ConstantPropagationValue>;
-using InterConstantPropagationResult = InterDataFlowResultT<
-    kDefaultInterElimConstantPropagationCallStringLength,
-    ConstantPropagationMap, llvm::Instruction *>;
+using InterConstantPropagationResult =
+    InterDataFlowResultT<kDefaultInterElimConstantPropagationCallStringLength,
+                         ConstantPropagationMap, llvm::Instruction *>;
 
-InterConstantPropagationResult
-runInterElimConstantPropagation(llvm::Function *Entry,
-                                llvm::AAResults *AA = nullptr,
-                                llvm::AssumptionCache *AC = nullptr,
-                                llvm::DominatorTree *DT = nullptr,
-                                llvm::TargetLibraryInfo *TLI = nullptr,
-                                const dataflow::controlflow::InterCFG *ICF =
-                                    nullptr);
+InterConstantPropagationResult runInterElimConstantPropagation(
+    llvm::Function *Entry, llvm::AAResults *AA = nullptr,
+    llvm::AssumptionCache *AC = nullptr, llvm::DominatorTree *DT = nullptr,
+    llvm::TargetLibraryInfo *TLI = nullptr,
+    const dataflow::controlflow::InterCFG *ICF = nullptr);
+
+InterConstantPropagationResult runInterSummaryElimConstantPropagation(
+    llvm::Function *Entry, llvm::AAResults *AA = nullptr,
+    llvm::AssumptionCache *AC = nullptr, llvm::DominatorTree *DT = nullptr,
+    llvm::TargetLibraryInfo *TLI = nullptr,
+    const dataflow::controlflow::InterCFG *ICF = nullptr,
+    PathSummaryEquationOptions Options = {});
 
 } // namespace elimination
 

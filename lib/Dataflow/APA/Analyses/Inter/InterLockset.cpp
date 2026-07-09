@@ -1,10 +1,11 @@
 #include "Dataflow/APA/Analyses/Inter/InterLockset.h"
 
-#include "Dataflow/APA/Adapters/LLVM/InterFlowHelpers.h"
-#include "Dataflow/APA/Adapters/LLVM/InterProblem.h"
-
 #include "llvm/Analysis/ValueTracking.h"
 #include "llvm/IR/Instructions.h"
+
+#include "Dataflow/APA/Adapters/LLVM/InterFlowHelpers.h"
+#include "Dataflow/APA/Adapters/LLVM/InterProblem.h"
+#include "Dataflow/APA/Solver/ForwardInterSummarySolver.h"
 
 namespace elimination {
 namespace {
@@ -66,8 +67,8 @@ const llvm::Value *lockOperand(const llvm::CallBase *Call) {
 class InterElimLocksetProblem
     : public LLVMInterEliminationProblem<InterLocksetDomain> {
 public:
-  explicit InterElimLocksetProblem(
-      llvm::Function *Entry, const dataflow::controlflow::InterCFG *ICF)
+  explicit InterElimLocksetProblem(llvm::Function *Entry,
+                                   const dataflow::controlflow::InterCFG *ICF)
       : LLVMInterEliminationProblem<InterLocksetDomain>(
             std::vector<llvm::Function *>{Entry}, ICF) {}
 
@@ -162,8 +163,9 @@ public:
 
 } // namespace
 
-InterLocksetResult runInterElimLockset(
-    llvm::Function *Entry, const dataflow::controlflow::InterCFG *ICF) {
+InterLocksetResult
+runInterElimLockset(llvm::Function *Entry,
+                    const dataflow::controlflow::InterCFG *ICF) {
   InterLocksetResult Out;
   if (Entry == nullptr || Entry->isDeclaration()) {
     return Out;
@@ -185,6 +187,35 @@ InterLocksetResult runInterElimLockset(
     Out = *Res;
   }
   Out.setSolveStatus(Status);
+  return Out;
+}
+
+InterLocksetResult
+runInterSummaryElimLockset(llvm::Function *Entry,
+                           const dataflow::controlflow::InterCFG *ICF,
+                           PathSummaryEquationOptions Options) {
+  InterLocksetResult Out;
+  if (Entry == nullptr || Entry->isDeclaration()) {
+    return Out;
+  }
+
+  std::unique_ptr<dataflow::controlflow::LLVMInterCFG> OwnedICF;
+  if (ICF == nullptr) {
+    OwnedICF = std::make_unique<dataflow::controlflow::LLVMInterCFG>(
+        Entry != nullptr ? Entry->getParent() : nullptr);
+    ICF = OwnedICF.get();
+  }
+
+  InterElimLocksetProblem Problem(Entry, ICF);
+  ForwardInterSummarySolver<InterLocksetDomain,
+                            kDefaultInterElimLocksetCallStringLength>
+      Solver(Problem, Options);
+  auto Status = Solver.solve();
+  if (const auto *Res = Solver.getResults()) {
+    Out = *Res;
+  }
+  Out.setSolveStatus(Status);
+  Out.setSummarySolveDiagnostics(Solver.resultDiagnostics());
   return Out;
 }
 

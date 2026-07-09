@@ -1,11 +1,12 @@
 #include "Dataflow/APA/Analyses/Inter/InterReachingDefinitions.h"
 
-#include "Dataflow/APA/Adapters/LLVM/InterFlowHelpers.h"
-#include "Dataflow/APA/Adapters/LLVM/InterProblem.h"
-
 #include "llvm/Analysis/MemoryLocation.h"
 #include "llvm/Analysis/MemorySSA.h"
 #include "llvm/IR/Instructions.h"
+
+#include "Dataflow/APA/Adapters/LLVM/InterFlowHelpers.h"
+#include "Dataflow/APA/Adapters/LLVM/InterProblem.h"
+#include "Dataflow/APA/Solver/ForwardInterSummarySolver.h"
 
 #include <memory>
 
@@ -94,8 +95,8 @@ public:
     return Out;
   }
 
-  fact_t returnFlow(n_t CallSite, f_t Callee, n_t ExitStmt,
-                    n_t /*RetSite*/, const fact_t &In) override {
+  fact_t returnFlow(n_t CallSite, f_t Callee, n_t ExitStmt, n_t /*RetSite*/,
+                    const fact_t &In) override {
     fact_t Out;
     llvm_inter::copyGlobalValueFacts(In, Out);
     llvm_inter::copyStoreFacts(In, Out);
@@ -122,11 +123,12 @@ public:
               }
               if (AA == nullptr) {
                 Out.insert(Store);
-              } else if (AA->alias(llvm::MemoryLocation::get(Store),
-                                   llvm::MemoryLocation(
-                                       Actual,
-                                       llvm::LocationSize::beforeOrAfterPointer(),
-                                       llvm::AAMDNodes())) !=
+              } else if (AA->alias(
+                             llvm::MemoryLocation::get(Store),
+                             llvm::MemoryLocation(
+                                 Actual,
+                                 llvm::LocationSize::beforeOrAfterPointer(),
+                                 llvm::AAMDNodes())) !=
                          llvm::AliasResult::NoAlias) {
                 Out.insert(Store);
               }
@@ -212,7 +214,8 @@ private:
     }
   }
 
-  void killStoresWithMemorySSA(const llvm::Instruction *Inst, fact_t &Out) const {
+  void killStoresWithMemorySSA(const llvm::Instruction *Inst,
+                               fact_t &Out) const {
     if (MSSA == nullptr || Inst == nullptr) {
       killAllStores(Out);
       return;
@@ -267,6 +270,36 @@ runInterElimReachingDefinitions(llvm::Function *Entry, llvm::AAResults *AA,
     Out = *Res;
   }
   Out.setSolveStatus(Status);
+  return Out;
+}
+
+InterReachingDefinitionsResult runInterSummaryElimReachingDefinitions(
+    llvm::Function *Entry, llvm::AAResults *AA, llvm::MemorySSA *MSSA,
+    const dataflow::controlflow::InterCFG *ICF,
+    PathSummaryEquationOptions Options) {
+  InterReachingDefinitionsResult Out;
+  if (Entry == nullptr || Entry->isDeclaration()) {
+    return Out;
+  }
+
+  std::unique_ptr<dataflow::controlflow::LLVMInterCFG> OwnedICF;
+  if (ICF == nullptr) {
+    OwnedICF = std::make_unique<dataflow::controlflow::LLVMInterCFG>(
+        Entry != nullptr ? Entry->getParent() : nullptr);
+    ICF = OwnedICF.get();
+  }
+
+  InterElimReachingDefinitionsProblem Problem(Entry, AA, MSSA, ICF);
+  ForwardInterSummarySolver<
+      InterReachingDefinitionsDomain,
+      kDefaultInterElimReachingDefinitionsCallStringLength>
+      Solver(Problem, Options);
+  auto Status = Solver.solve();
+  if (const auto *Res = Solver.getResults()) {
+    Out = *Res;
+  }
+  Out.setSolveStatus(Status);
+  Out.setSummarySolveDiagnostics(Solver.resultDiagnostics());
   return Out;
 }
 

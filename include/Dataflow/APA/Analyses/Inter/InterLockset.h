@@ -19,6 +19,11 @@ InterLocksetResult
 runInterElimLockset(llvm::Function *Entry,
                     const dataflow::controlflow::InterCFG *ICF = nullptr);
 
+InterLocksetResult
+runInterSummaryElimLockset(llvm::Function *Entry,
+                           const dataflow::controlflow::InterCFG *ICF = nullptr,
+                           PathSummaryEquationOptions Options = {});
+
 } // namespace elimination
 
 #endif // DATAFLOW_APA_CLIENTS_LLVM_INTER_LOCKSET_H_

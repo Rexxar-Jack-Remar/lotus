@@ -3,3 +3,5 @@
 add_lotus_apa_test(apa_test EliminationTest.cpp)
 add_lotus_apa_test(apa_affine_relation_domain_test AffineRelationDomainTest.cpp)
 add_lotus_apa_test(apa_inter_affine_equalities_test InterAffineEqualitiesTest.cpp)
+add_lotus_apa_test(apa_inter_summary_transfer_test InterSummaryTransferTest.cpp)
+add_lotus_apa_test(apa_path_summary_equation_solver_test PathSummaryEquationSolverTest.cpp)

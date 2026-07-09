@@ -1,14 +1,14 @@
-#include "Dataflow/APA/Analyses/Inter/InterUninitializedVariables.h"
-
-#include "Dataflow/APA/Adapters/LLVM/InterFlowHelpers.h"
-#include "Dataflow/APA/Adapters/LLVM/InterProblem.h"
-
 #include "llvm/Analysis/MemoryLocation.h"
 #include "llvm/Analysis/ValueTracking.h"
 #include "llvm/IR/Constants.h"
 #include "llvm/IR/DataLayout.h"
 #include "llvm/IR/Instructions.h"
 #include "llvm/IR/IntrinsicInst.h"
+
+#include "Dataflow/APA/Adapters/LLVM/InterFlowHelpers.h"
+#include "Dataflow/APA/Adapters/LLVM/InterProblem.h"
+#include "Dataflow/APA/Analyses/Inter/InterUninitializedVariables.h"
+#include "Dataflow/APA/Solver/ForwardInterSummarySolver.h"
 
 #include <algorithm>
 #include <iterator>
@@ -54,7 +54,8 @@ public:
       if (Ptr == nullptr) {
         return Out;
       }
-      if (llvm::isa<llvm::UndefValue>(Val) || llvm::isa<llvm::PoisonValue>(Val)) {
+      if (llvm::isa<llvm::UndefValue>(Val) ||
+          llvm::isa<llvm::PoisonValue>(Val)) {
         markAliasUninit(Out, Ptr);
         return Out;
       }
@@ -155,25 +156,22 @@ public:
       return Out;
     }
 
-    llvm_inter::forEachActualFormalPair(Call, Callee,
-                                        [&](llvm::Value *Actual,
-                                            llvm::Argument *Formal,
-                                            unsigned /*Index*/) {
-                                          if (In.count(Actual) ||
-                                              (Actual != nullptr &&
-                                               Actual->getType()->isPointerTy() &&
-                                               In.count(normalizeMaybePointer(
-                                                   Actual)))) {
-                                            Out.insert(Formal);
-                                          }
-                                        });
+    llvm_inter::forEachActualFormalPair(
+        Call, Callee,
+        [&](llvm::Value *Actual, llvm::Argument *Formal, unsigned /*Index*/) {
+          if (In.count(Actual) ||
+              (Actual != nullptr && Actual->getType()->isPointerTy() &&
+               In.count(normalizeMaybePointer(Actual)))) {
+            Out.insert(Formal);
+          }
+        });
 
     llvm_inter::copyGlobalValueFacts(In, Out);
     return Out;
   }
 
-  fact_t returnFlow(n_t CallSite, f_t Callee, n_t ExitStmt,
-                    n_t /*RetSite*/, const fact_t &In) override {
+  fact_t returnFlow(n_t CallSite, f_t Callee, n_t ExitStmt, n_t /*RetSite*/,
+                    const fact_t &In) override {
     fact_t Out;
     auto *Call = llvm::dyn_cast_or_null<llvm::CallBase>(CallSite);
     auto *Ret = llvm::dyn_cast_or_null<llvm::ReturnInst>(ExitStmt);
@@ -249,7 +247,8 @@ private:
         It = Out.erase(It);
         continue;
       }
-      if (Candidate->getType()->isPointerTy() && getBaseObject(Candidate) == Base) {
+      if (Candidate->getType()->isPointerTy() &&
+          getBaseObject(Candidate) == Base) {
         It = Out.erase(It);
         continue;
       }
@@ -344,6 +343,35 @@ runInterElimUninitVariables(llvm::Function *Entry, llvm::AAResults *AA,
     Out = *Res;
   }
   Out.setSolveStatus(Status);
+  return Out;
+}
+
+InterUninitVariablesResult runInterSummaryElimUninitVariables(
+    llvm::Function *Entry, llvm::AAResults *AA, llvm::AssumptionCache *AC,
+    llvm::DominatorTree *DT, const dataflow::controlflow::InterCFG *ICF,
+    PathSummaryEquationOptions Options) {
+  InterUninitVariablesResult Out;
+  if (Entry == nullptr || Entry->isDeclaration()) {
+    return Out;
+  }
+
+  std::unique_ptr<dataflow::controlflow::LLVMInterCFG> OwnedICF;
+  if (ICF == nullptr) {
+    OwnedICF = std::make_unique<dataflow::controlflow::LLVMInterCFG>(
+        Entry != nullptr ? Entry->getParent() : nullptr);
+    ICF = OwnedICF.get();
+  }
+
+  InterElimUninitVariablesProblem Problem(Entry, AA, AC, DT, ICF);
+  ForwardInterSummarySolver<InterUninitVariablesDomain,
+                            kDefaultInterElimUninitVariablesCallStringLength>
+      Solver(Problem, Options);
+  auto Status = Solver.solve();
+  if (const auto *Res = Solver.getResults()) {
+    Out = *Res;
+  }
+  Out.setSolveStatus(Status);
+  Out.setSummarySolveDiagnostics(Solver.resultDiagnostics());
   return Out;
 }
 

@@ -8,6 +8,17 @@
 
 namespace elimination {
 
+struct InterSummarySolveDiagnostics final {
+  std::size_t discovered_context_node_count = 0;
+  std::size_t seed_count = 0;
+  std::size_t equation_node_count = 0;
+  std::size_t equation_edge_count = 0;
+  std::size_t scc_count = 0;
+  std::size_t cyclic_scc_count = 0;
+  std::size_t parallel_layer_count = 0;
+  std::size_t max_parallel_layer_width = 0;
+};
+
 template <unsigned K, typename FactT, typename TransferT,
           typename NodeT = llvm::Instruction *>
 class InterDataFlowResultT
@@ -74,9 +85,21 @@ public:
   bool hasSolveMetadata() const { return HasSolveMetadata; }
   SolveStatus solveStatus() const { return Status; }
 
+  void setSummarySolveDiagnostics(const InterSummarySolveDiagnostics &D) {
+    HasSummaryDiagnostics = true;
+    SummaryDiagnostics = D;
+  }
+
+  bool hasSummarySolveDiagnostics() const { return HasSummaryDiagnostics; }
+  const InterSummarySolveDiagnostics &summarySolveDiagnostics() const {
+    return SummaryDiagnostics;
+  }
+
 private:
   bool HasSolveMetadata = false;
   SolveStatus Status = SolveStatus::Ok;
+  bool HasSummaryDiagnostics = false;
+  InterSummarySolveDiagnostics SummaryDiagnostics;
 };
 
 } // namespace elimination

@@ -1,6 +1,6 @@
-#include "Dataflow/APA/Analyses/Inter/InterReachability.h"
-
 #include "Dataflow/APA/Adapters/LLVM/InterProblem.h"
+#include "Dataflow/APA/Analyses/Inter/InterReachability.h"
+#include "Dataflow/APA/Solver/ForwardInterSummarySolver.h"
 
 namespace elimination {
 namespace {
@@ -16,8 +16,8 @@ struct InterReachableDomain {
 class InterElimReachableProblem
     : public LLVMInterEliminationProblem<InterReachableDomain> {
 public:
-  explicit InterElimReachableProblem(
-      llvm::Function *Entry, const dataflow::controlflow::InterCFG *ICF)
+  explicit InterElimReachableProblem(llvm::Function *Entry,
+                                     const dataflow::controlflow::InterCFG *ICF)
       : LLVMInterEliminationProblem<InterReachableDomain>(
             std::vector<llvm::Function *>{Entry}, ICF) {}
 
@@ -61,8 +61,9 @@ public:
 
 } // namespace
 
-InterReachableResult runInterElimReachable(
-    llvm::Function *Entry, const dataflow::controlflow::InterCFG *ICF) {
+InterReachableResult
+runInterElimReachable(llvm::Function *Entry,
+                      const dataflow::controlflow::InterCFG *ICF) {
   InterReachableResult Out;
   if (Entry == nullptr || Entry->isDeclaration()) {
     return Out;
@@ -76,14 +77,43 @@ InterReachableResult runInterElimReachable(
   }
 
   InterElimReachableProblem Problem(Entry, ICF);
-  InterEliminationSolver<
-      InterReachableDomain, kDefaultInterElimReachabilityCallStringLength>
+  InterEliminationSolver<InterReachableDomain,
+                         kDefaultInterElimReachabilityCallStringLength>
       Solver(Problem);
   auto Status = Solver.solve();
   if (const auto *Res = Solver.getResults()) {
     Out = *Res;
   }
   Out.setSolveStatus(Status);
+  return Out;
+}
+
+InterReachableResult
+runInterSummaryElimReachable(llvm::Function *Entry,
+                             const dataflow::controlflow::InterCFG *ICF,
+                             PathSummaryEquationOptions Options) {
+  InterReachableResult Out;
+  if (Entry == nullptr || Entry->isDeclaration()) {
+    return Out;
+  }
+
+  std::unique_ptr<dataflow::controlflow::LLVMInterCFG> OwnedICF;
+  if (ICF == nullptr) {
+    OwnedICF = std::make_unique<dataflow::controlflow::LLVMInterCFG>(
+        Entry != nullptr ? Entry->getParent() : nullptr);
+    ICF = OwnedICF.get();
+  }
+
+  InterElimReachableProblem Problem(Entry, ICF);
+  ForwardInterSummarySolver<InterReachableDomain,
+                            kDefaultInterElimReachabilityCallStringLength>
+      Solver(Problem, Options);
+  auto Status = Solver.solve();
+  if (const auto *Res = Solver.getResults()) {
+    Out = *Res;
+  }
+  Out.setSolveStatus(Status);
+  Out.setSummarySolveDiagnostics(Solver.resultDiagnostics());
   return Out;
 }
 

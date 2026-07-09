@@ -15,16 +15,20 @@ namespace elimination {
 constexpr unsigned kDefaultInterElimReachingDefinitionsCallStringLength = 2;
 
 using ReachingDefinitionsFact = std::set<const llvm::Value *>;
-using InterReachingDefinitionsResult = InterDataFlowResultT<
-    kDefaultInterElimReachingDefinitionsCallStringLength,
-    ReachingDefinitionsFact, llvm::Instruction *>;
+using InterReachingDefinitionsResult =
+    InterDataFlowResultT<kDefaultInterElimReachingDefinitionsCallStringLength,
+                         ReachingDefinitionsFact, llvm::Instruction *>;
 
-InterReachingDefinitionsResult
-runInterElimReachingDefinitions(llvm::Function *Entry,
-                                llvm::AAResults *AA = nullptr,
-                                llvm::MemorySSA *MSSA = nullptr,
-                                const dataflow::controlflow::InterCFG *ICF =
-                                    nullptr);
+InterReachingDefinitionsResult runInterElimReachingDefinitions(
+    llvm::Function *Entry, llvm::AAResults *AA = nullptr,
+    llvm::MemorySSA *MSSA = nullptr,
+    const dataflow::controlflow::InterCFG *ICF = nullptr);
+
+InterReachingDefinitionsResult runInterSummaryElimReachingDefinitions(
+    llvm::Function *Entry, llvm::AAResults *AA = nullptr,
+    llvm::MemorySSA *MSSA = nullptr,
+    const dataflow::controlflow::InterCFG *ICF = nullptr,
+    PathSummaryEquationOptions Options = {});
 
 } // namespace elimination
 

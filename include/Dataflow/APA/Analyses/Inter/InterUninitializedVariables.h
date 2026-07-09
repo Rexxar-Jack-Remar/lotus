@@ -17,16 +17,20 @@ namespace elimination {
 constexpr unsigned kDefaultInterElimUninitVariablesCallStringLength = 2;
 
 using UninitVariablesFact = std::set<llvm::Value *>;
-using InterUninitVariablesResult = InterDataFlowResultT<
-    kDefaultInterElimUninitVariablesCallStringLength, UninitVariablesFact,
-    llvm::Instruction *>;
+using InterUninitVariablesResult =
+    InterDataFlowResultT<kDefaultInterElimUninitVariablesCallStringLength,
+                         UninitVariablesFact, llvm::Instruction *>;
 
-InterUninitVariablesResult
-runInterElimUninitVariables(llvm::Function *Entry, llvm::AAResults *AA = nullptr,
-                            llvm::AssumptionCache *AC = nullptr,
-                            llvm::DominatorTree *DT = nullptr,
-                            const dataflow::controlflow::InterCFG *ICF =
-                                nullptr);
+InterUninitVariablesResult runInterElimUninitVariables(
+    llvm::Function *Entry, llvm::AAResults *AA = nullptr,
+    llvm::AssumptionCache *AC = nullptr, llvm::DominatorTree *DT = nullptr,
+    const dataflow::controlflow::InterCFG *ICF = nullptr);
+
+InterUninitVariablesResult runInterSummaryElimUninitVariables(
+    llvm::Function *Entry, llvm::AAResults *AA = nullptr,
+    llvm::AssumptionCache *AC = nullptr, llvm::DominatorTree *DT = nullptr,
+    const dataflow::controlflow::InterCFG *ICF = nullptr,
+    PathSummaryEquationOptions Options = {});
 
 } // namespace elimination
 

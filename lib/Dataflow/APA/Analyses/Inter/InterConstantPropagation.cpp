@@ -1,8 +1,5 @@
 #include "Dataflow/APA/Analyses/Inter/InterConstantPropagation.h"
 
-#include "Dataflow/APA/Adapters/LLVM/InterFlowHelpers.h"
-#include "Dataflow/APA/Adapters/LLVM/InterProblem.h"
-
 #include "llvm/Analysis/ConstantFolding.h"
 #include "llvm/Analysis/InstructionSimplify.h"
 #include "llvm/Analysis/MemoryLocation.h"
@@ -11,6 +8,10 @@
 #include "llvm/IR/DataLayout.h"
 #include "llvm/IR/GlobalVariable.h"
 #include "llvm/IR/Instructions.h"
+
+#include "Dataflow/APA/Adapters/LLVM/InterFlowHelpers.h"
+#include "Dataflow/APA/Adapters/LLVM/InterProblem.h"
+#include "Dataflow/APA/Solver/ForwardInterSummarySolver.h"
 
 namespace elimination {
 namespace {
@@ -199,8 +200,8 @@ public:
       }
       auto Val = resolveValue(In, Store->getValueOperand());
       auto *Key = getMemKey(Ptr);
-      Out[Key] = (Val.isConstant() || Val.isConstantRange()) ? Val
-                                                             : makeOverdefined();
+      Out[Key] =
+          (Val.isConstant() || Val.isConstantRange()) ? Val : makeOverdefined();
       return Out;
     }
 
@@ -440,15 +441,45 @@ InterConstantPropagationResult runInterElimConstantPropagation(
   }
 
   InterElimConstantPropagationProblem Problem(Entry, AA, AC, DT, TLI, ICF);
-  InterEliminationSolver<
-      InterConstantPropagationDomain,
-      kDefaultInterElimConstantPropagationCallStringLength>
+  InterEliminationSolver<InterConstantPropagationDomain,
+                         kDefaultInterElimConstantPropagationCallStringLength>
       Solver(Problem);
   auto Status = Solver.solve();
   if (const auto *Res = Solver.getResults()) {
     Out = *Res;
   }
   Out.setSolveStatus(Status);
+  return Out;
+}
+
+InterConstantPropagationResult runInterSummaryElimConstantPropagation(
+    llvm::Function *Entry, llvm::AAResults *AA, llvm::AssumptionCache *AC,
+    llvm::DominatorTree *DT, llvm::TargetLibraryInfo *TLI,
+    const dataflow::controlflow::InterCFG *ICF,
+    PathSummaryEquationOptions Options) {
+  InterConstantPropagationResult Out;
+  if (Entry == nullptr || Entry->isDeclaration()) {
+    return Out;
+  }
+
+  std::unique_ptr<dataflow::controlflow::LLVMInterCFG> OwnedICF;
+  if (ICF == nullptr) {
+    OwnedICF = std::make_unique<dataflow::controlflow::LLVMInterCFG>(
+        Entry != nullptr ? Entry->getParent() : nullptr);
+    ICF = OwnedICF.get();
+  }
+
+  InterElimConstantPropagationProblem Problem(Entry, AA, AC, DT, TLI, ICF);
+  ForwardInterSummarySolver<
+      InterConstantPropagationDomain,
+      kDefaultInterElimConstantPropagationCallStringLength>
+      Solver(Problem, Options);
+  auto Status = Solver.solve();
+  if (const auto *Res = Solver.getResults()) {
+    Out = *Res;
+  }
+  Out.setSolveStatus(Status);
+  Out.setSummarySolveDiagnostics(Solver.resultDiagnostics());
   return Out;
 }
 

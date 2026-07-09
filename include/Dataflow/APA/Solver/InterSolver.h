@@ -4,6 +4,7 @@
 #include "Dataflow/APA/Core/InterProblem.h"
 #include "Dataflow/APA/Core/InterResult.h"
 #include "Dataflow/APA/Core/Problem.h"
+#include "Dataflow/APA/Solver/InterSummaryTransfer.h"
 #include "Dataflow/APA/Solver/Solver.h"
 #include "Dataflow/Mono/Core/CallStringContext.h"
 
@@ -115,9 +116,9 @@ private:
   class ProcedureProblemAdapter final
       : public IntraEliminationProblem<AnalysisDomainTy> {
   public:
-    ProcedureProblemAdapter(ProblemTy &Problem, f_t Function, const Context &Ctx,
-                            const result_t &Result, const i_t &ICF,
-                            const fact_t &EntryFact)
+    ProcedureProblemAdapter(ProblemTy &Problem, f_t Function,
+                            const Context &Ctx, const result_t &Result,
+                            const i_t &ICF, const fact_t &EntryFact)
         : Problem(Problem), Function(Function), Ctx(Ctx), Result(Result),
           ICF(ICF), EntryFact(EntryFact) {}
 
@@ -150,54 +151,9 @@ private:
     }
 
     fact_t applyTransfer(const transfer_t &T, const fact_t &In) const override {
-      fact_t Out = Problem.applyTransfer(T, In);
-      auto Anchor = Problem.transferNode(T);
-      if (!ICF.isCallSite(Anchor)) {
-        return Out;
-      }
-
-      auto RetSite = Problem.transferSuccessor(T);
-      if (Problem.direction() ==
-              ::dataflow::controlflow::FlowDirection::Forward &&
-          RetSite != n_t{}) {
-        Out = Problem.callToRetFlow(Anchor, RetSite, ICF.getCalleesOfCallAt(Anchor),
-                                    Out);
-      }
-
-      if (Problem.direction() ==
-          ::dataflow::controlflow::FlowDirection::Forward) {
-        Context CalleeCtx = Ctx;
-        CalleeCtx.push_back(Anchor);
-        for (auto Callee : ICF.getCalleesOfCallAt(Anchor)) {
-          auto Starts = ICF.getStartPointsOf(Callee);
-          auto Exits = ICF.getExitPointsOf(Callee);
-          if (Starts.empty() || Exits.empty()) {
-            continue;
-          }
-          for (auto Exit : Exits) {
-            if (Exit == n_t{}) {
-              continue;
-            }
-            auto *ExitFacts = Result.tryOUT(Exit, CalleeCtx);
-            if (ExitFacts == nullptr) {
-              continue;
-            }
-            for (auto CandidateRetSite : ICF.getReturnSitesOfCallAt(Anchor)) {
-              if (CandidateRetSite == n_t{}) {
-                continue;
-              }
-              if (RetSite != n_t{} && CandidateRetSite != RetSite) {
-                continue;
-              }
-              Out = Problem.merge(
-                  Out, Problem.returnFlowWithCallerFact(
-                           Anchor, Callee, Exit, CandidateRetSite, *ExitFacts, In));
-            }
-          }
-        }
-      }
-
-      return Out;
+      InterSummaryTransferEvaluator<AnalysisDomainTy, K> Evaluator(Problem, ICF,
+                                                                   Result, Ctx);
+      return Evaluator.applyNormalEdge(T, In);
     }
 
     fact_t meet(const fact_t &Lhs, const fact_t &Rhs) const override {
@@ -252,7 +208,11 @@ private:
         Changed = true;
       }
 
-      auto Out = Problem.applyTransfer(Problem.edgeTransfer(Inst, n_t{}), *In);
+      auto OutTransfer =
+          Problem.direction() == dataflow::controlflow::FlowDirection::Backward
+              ? Problem.edgeTransfer(n_t{}, Inst)
+              : Problem.edgeTransfer(Inst, n_t{});
+      auto Out = Problem.applyTransfer(OutTransfer, *In);
       auto &OutSlot = Result.OUT(Inst, Key.Ctx);
       if (!Problem.equal_to(OutSlot, Out)) {
         OutSlot = std::move(Out);
@@ -283,7 +243,8 @@ private:
     }
 
     auto EntryInst = Starts.empty() ? n_t{} : Starts.front();
-    if (Problem.direction() == ::dataflow::controlflow::FlowDirection::Backward) {
+    if (Problem.direction() ==
+        ::dataflow::controlflow::FlowDirection::Backward) {
       fact_t Boundary = Problem.allTop();
       bool First = true;
 
@@ -347,7 +308,9 @@ private:
     if (CallerFacts == nullptr) {
       return Problem.allTop();
     }
-    return Problem.callFlow(CallSite, Function, *CallerFacts);
+    InterSummaryTransferEvaluator<AnalysisDomainTy, K> Evaluator(
+        Problem, ICF, Result, CallerCtx);
+    return Evaluator.applyCallEntry(CallSite, Function, *CallerFacts);
   }
 
   std::vector<ContextKey> successors(const ContextKey &Key, const i_t &ICF) {
@@ -357,16 +320,17 @@ private:
       return Next;
     }
 
-    if (Problem.direction() == ::dataflow::controlflow::FlowDirection::Backward) {
-      for (auto Pred :
-           ICF.getSuccsOf(Inst, dataflow::controlflow::FlowDirection::Forward)) {
+    if (Problem.direction() ==
+        ::dataflow::controlflow::FlowDirection::Backward) {
+      for (auto Pred : ICF.getSuccsOf(
+               Inst, dataflow::controlflow::FlowDirection::Forward)) {
         if (Pred != n_t{}) {
           Next.push_back({Pred, Key.Ctx});
         }
       }
 
-      for (auto Pred :
-           ICF.getPredsOf(Inst, dataflow::controlflow::FlowDirection::Forward)) {
+      for (auto Pred : ICF.getPredsOf(
+               Inst, dataflow::controlflow::FlowDirection::Forward)) {
         if (Pred == n_t{} || !ICF.isCallSite(Pred)) {
           continue;
         }
@@ -401,6 +365,9 @@ private:
       if (!Key.Ctx.empty()) {
         auto CallerCtx = Key.Ctx;
         auto CallSite = CallerCtx.pop_back();
+        if (CallSite != n_t{}) {
+          Next.push_back({CallSite, CallerCtx});
+        }
         for (auto RetSite : ICF.getReturnSitesOfCallAt(CallSite)) {
           if (RetSite != n_t{}) {
             Next.push_back({RetSite, CallerCtx});

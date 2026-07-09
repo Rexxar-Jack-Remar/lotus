@@ -168,6 +168,53 @@ The synthesized reducible view accepts ADT only when all nodes are entry-reachab
 immediate dominators are computable, and the non-back-edge subgraph is acyclic
 with entry first in topological order.
 
+## Parallel summary-equation graph solver
+
+`include/Dataflow/APA/Solver/PathSummaryEquationSolver.h` provides a generic
+solver for left-linear path-summary equations:
+
+```text
+X_u = base_u U (W_u,v . X_v)
+```
+
+Here `X_u` is a summary instance, such as a future `(function, context)` node,
+and `W_u,v` is an APA `PathExprFactory` expression. The solver computes SCCs in
+the summary-dependency graph, solves independent SCC layers with the shared
+`ThreadPool`, and uses a state-elimination closure inside cyclic SCCs so
+recursive summary dependencies are represented with `Star` expressions rather
+than unbounded worklist growth.
+
+This component is intentionally APA-specific: the scheduled objects are
+path-expression equations and the output is a closed-form path-expression
+summary for each key. It can be used as the algebraic core for a future
+interprocedural summary-substitution solver, instead of merely scheduling calls
+to an arbitrary intraprocedural analysis.
+
+`PathSummaryEquationSolver` also supports a forward-path mode for equations
+where a node summary is extended by outgoing transfer expressions. The forward
+interprocedural prototype in
+`include/Dataflow/APA/Solver/ForwardInterSummarySolver.h` uses that mode over
+instruction/context nodes and labels interprocedural edges with
+`InterSummaryTransferAtom` values (`RawNormal`, `CallEntry`, `ReturnExit`, and
+`CallToRet`). This gives a real summary-substitution path for forward analyses:
+call-entry, return, and bypass effects are represented as path-expression atoms
+and recursive context dependencies are closed by SCC-local `Star` expressions.
+
+LLVM client entry points currently include:
+
+- `runInterSummaryElimReachable`
+- `runInterSummaryElimConstantPropagation`
+- `runInterSummaryElimReachingDefinitions`
+- `runInterSummaryElimUninitVariables`
+- `runInterSummaryElimLockset`
+
+These are tested for parity with the existing worklist-style interprocedural
+solver on focused forward-analysis cases. Lockset wrapper propagation is also
+tested directly because the summary graph can preserve a callee-return fact that
+the legacy worklist path currently drops. The generic solver is intentionally
+forward-only at this stage; backward analyses and affine equalities remain out
+of scope for this backend.
+
 ## Interprocedural call-string solver
 
 Interprocedural APA clients are modeled by

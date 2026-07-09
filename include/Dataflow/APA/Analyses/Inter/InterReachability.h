@@ -11,13 +11,17 @@ namespace elimination {
 constexpr unsigned kDefaultInterElimReachabilityCallStringLength = 2;
 
 using ReachableFact = bool;
-using InterReachableResult = InterDataFlowResultT<
-    kDefaultInterElimReachabilityCallStringLength, ReachableFact,
-    llvm::Instruction *>;
+using InterReachableResult =
+    InterDataFlowResultT<kDefaultInterElimReachabilityCallStringLength,
+                         ReachableFact, llvm::Instruction *>;
 
 InterReachableResult
 runInterElimReachable(llvm::Function *Entry,
                       const dataflow::controlflow::InterCFG *ICF = nullptr);
+
+InterReachableResult runInterSummaryElimReachable(
+    llvm::Function *Entry, const dataflow::controlflow::InterCFG *ICF = nullptr,
+    PathSummaryEquationOptions Options = {});
 
 } // namespace elimination
 
