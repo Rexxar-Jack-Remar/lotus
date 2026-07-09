@@ -1,8 +1,12 @@
 #pragma once
 
 #include "Dataflow/VASCO/Core/InterProceduralAnalysis.h"
+#include "Utils/Parallel/ThreadPool.h"
 
+#include <algorithm>
 #include <optional>
+#include <set>
+#include <thread>
 
 namespace vasco {
 
@@ -21,111 +25,185 @@ public:
       initContext(Method, this->boundaryValue(Method));
     }
 
-    while (!this->WorkList.empty()) {
-      auto CurrentContext = this->newestContext();
-
-      if (CurrentContext->getWorkList().empty()) {
-        this->removeContextFromWorklist(CurrentContext);
-        continue;
-      }
-
-      auto ItemIt = CurrentContext->getWorkList().begin();
-      const auto Item = *ItemIt;
-      CurrentContext->getWorkList().erase(ItemIt);
-
-      if (Item.has_value()) {
-        const auto &Node = *Item;
-        const auto Graph = CurrentContext->getControlFlowGraph();
-
-        const auto Successors = Graph->succsOf(Node);
-        if (!Successors.empty()) {
-          A Out = this->topValue();
-          for (const auto &Successor : Successors) {
-            Out = this->meet(Out, CurrentContext->getValueBefore(Successor));
-          }
-          CurrentContext->setValueAfter(Node, Out);
-        }
-
-        const A PrevIn = CurrentContext->getValueBefore(Node);
-        const A Out = CurrentContext->getValueAfter(Node);
-
-        A In = this->topValue();
-        if (this->programRepresentation().isCall(Node)) {
-          bool Hit = false;
-          const auto MaybeTargets =
-              this->programRepresentation().resolveTargets(
-                  CurrentContext->getMethod(), Node);
-          if (!MaybeTargets.has_value()) {
-            this->ContextTransitions.addTransition(
-                CallSiteType(CurrentContext, Node), nullptr);
-            In = unknownCallFlowFunction(CurrentContext, Node, Out);
-          } else if (MaybeTargets->empty()) {
-            In = callLocalFlowFunction(CurrentContext, Node, Out);
-          } else {
-            for (const auto &TargetMethod : *MaybeTargets) {
-              const A ExitValue =
-                  callExitFlowFunction(CurrentContext, TargetMethod, Node, Out);
-              CallSiteType CallSite(CurrentContext, Node);
-
-              auto TargetContext = this->getContext(TargetMethod, ExitValue);
-              if (!TargetContext) {
-                TargetContext = initContext(TargetMethod, ExitValue);
-              }
-
-              this->ContextTransitions.addTransition(CallSite, TargetContext);
-
-              if (TargetContext->isAnalysed()) {
-                Hit = true;
-                const A EntryValue = TargetContext->getEntryValue();
-                const A CallValue = callEntryFlowFunction(
-                    CurrentContext, TargetMethod, Node, EntryValue);
-                In = this->meet(In, CallValue);
-              }
-            }
-          }
-
-          if (Hit) {
-            In = this->meet(In,
-                            callLocalFlowFunction(CurrentContext, Node, Out));
-          }
-        } else {
-          In = normalFlowFunction(CurrentContext, Node, Out);
-        }
-
-        In = this->meet(In, PrevIn);
-        CurrentContext->setValueBefore(Node, In);
-
-        if (!(In == PrevIn)) {
-          for (const auto &Predecessor : Graph->predsOf(Node)) {
-            CurrentContext->getWorkList().insert(Predecessor);
-          }
-        }
-
-        for (const auto &Head : Graph->heads()) {
-          if (Head == Node) {
-            CurrentContext->getWorkList().insert(std::nullopt);
-            break;
-          }
-        }
-      } else {
-        const auto Graph = CurrentContext->getControlFlowGraph();
-        A EntryValue = this->topValue();
-        for (const auto &HeadNode : Graph->heads()) {
-          EntryValue =
-              this->meet(EntryValue, CurrentContext->getValueBefore(HeadNode));
-        }
-
-        CurrentContext->setEntryValue(EntryValue);
-        CurrentContext->markAnalysed();
-        this->wakeCallers(CurrentContext);
-        this->freeReachableContextsIfDead(CurrentContext);
-      }
+    if (this->SchedulingOptions.EnableParallelContextScheduling &&
+        !this->FreeResultsOnTheFly && ThreadPool::get()->hasWorkers()) {
+      runParallelAnalysis();
+    } else {
+      runSequentialAnalysis();
     }
 
     this->sanityCheckAnalysedContexts();
   }
 
 protected:
+  void runSequentialAnalysis() {
+    while (this->hasPendingContexts()) {
+      auto CurrentContext = this->newestContext();
+      processContextStep(CurrentContext);
+    }
+  }
+
+  void runParallelAnalysis() {
+    ThreadPool *Pool = ThreadPool::get();
+    ThreadPool::TaskGroup Group = Pool->makeTaskGroup();
+    std::set<ContextPtr, ContextPtrComparator<M, N, A>> RunningContexts;
+    const unsigned Workers = std::max<unsigned>(1, Pool->workerCount());
+
+    for (unsigned I = 0; I < Workers; ++I) {
+      Group.async([this, &RunningContexts] {
+        this->recordParallelWorkerTask();
+        while (true) {
+          auto CurrentContext = this->takeRunnableContext(RunningContexts);
+          if (!CurrentContext) {
+            if (this->parallelWorkComplete(RunningContexts)) {
+              break;
+            }
+            std::this_thread::yield();
+            continue;
+          }
+
+          bool HasMoreLocalWork = false;
+          {
+            std::lock_guard<std::recursive_mutex> Lock(CurrentContext->mutex());
+            HasMoreLocalWork = processContextBatch(CurrentContext);
+          }
+          this->finishRunnableContext(CurrentContext, HasMoreLocalWork,
+                                      RunningContexts);
+        }
+      });
+    }
+
+    Group.wait();
+  }
+
+  bool processContextBatch(ContextPtr CurrentContext) {
+    const std::size_t Budget = this->SchedulingOptions.ContextStepBudget == 0
+                                   ? 1
+                                   : this->SchedulingOptions.ContextStepBudget;
+    std::size_t Steps = 0;
+    do {
+      processContextStep(CurrentContext);
+      ++Steps;
+    } while (Steps < Budget && !CurrentContext->getWorkList().empty());
+    this->recordContextBatch();
+    return !CurrentContext->getWorkList().empty();
+  }
+
+  void processContextStep(ContextPtr CurrentContext) {
+    if (CurrentContext->getWorkList().empty()) {
+      this->removeContextFromWorklist(CurrentContext);
+      return;
+    }
+
+    auto ItemIt = CurrentContext->getWorkList().begin();
+    const auto Item = *ItemIt;
+    CurrentContext->getWorkList().erase(ItemIt);
+    this->recordContextStep();
+
+    if (Item.has_value()) {
+      const auto &Node = *Item;
+      const auto Graph = CurrentContext->getControlFlowGraph();
+
+      const auto Successors = Graph->succsOf(Node);
+      if (!Successors.empty()) {
+        A Out = this->topValue();
+        for (const auto &Successor : Successors) {
+          Out = this->meet(Out, CurrentContext->getValueBefore(Successor));
+        }
+        CurrentContext->setValueAfter(Node, Out);
+      }
+
+      const A PrevIn = CurrentContext->getValueBefore(Node);
+      const A Out = CurrentContext->getValueAfter(Node);
+
+      A In = this->topValue();
+      if (this->programRepresentation().isCall(Node)) {
+        bool Hit = false;
+        const auto MaybeTargets = this->programRepresentation().resolveTargets(
+            CurrentContext->getMethod(), Node);
+        if (!MaybeTargets.has_value()) {
+          this->addTransition(CallSiteType(CurrentContext, Node), nullptr);
+          In = unknownCallFlowFunction(CurrentContext, Node, Out);
+        } else if (MaybeTargets->empty()) {
+          In = callLocalFlowFunction(CurrentContext, Node, Out);
+        } else {
+          for (const auto &TargetMethod : *MaybeTargets) {
+            const A ExitValue =
+                callExitFlowFunction(CurrentContext, TargetMethod, Node, Out);
+            CallSiteType CallSite(CurrentContext, Node);
+
+            auto TargetContext =
+                getOrInitTargetContext(TargetMethod, ExitValue);
+
+            this->addTransition(CallSite, TargetContext);
+
+            if (TargetContext->isAnalysed()) {
+              Hit = true;
+              this->observeSummaryVersion(CallSite, TargetContext);
+              const A EntryValue = TargetContext->getEntryValue();
+              const A CallValue = callEntryFlowFunction(
+                  CurrentContext, TargetMethod, Node, EntryValue);
+              In = this->meet(In, CallValue);
+            }
+          }
+        }
+
+        if (Hit) {
+          In = this->meet(In, callLocalFlowFunction(CurrentContext, Node, Out));
+        }
+      } else {
+        In = normalFlowFunction(CurrentContext, Node, Out);
+      }
+
+      In = this->meet(In, PrevIn);
+      CurrentContext->setValueBefore(Node, In);
+
+      if (!(In == PrevIn)) {
+        for (const auto &Predecessor : Graph->predsOf(Node)) {
+          CurrentContext->getWorkList().insert(Predecessor);
+        }
+      }
+
+      for (const auto &Head : Graph->heads()) {
+        if (Head == Node) {
+          CurrentContext->getWorkList().insert(std::nullopt);
+          break;
+        }
+      }
+    } else {
+      const auto Graph = CurrentContext->getControlFlowGraph();
+      A EntryValue = this->topValue();
+      for (const auto &HeadNode : Graph->heads()) {
+        EntryValue =
+            this->meet(EntryValue, CurrentContext->getValueBefore(HeadNode));
+      }
+
+      const bool WasAnalysed = CurrentContext->isAnalysed();
+      const A PreviousEntryValue = CurrentContext->getEntryValue();
+      const bool SummaryChanged = !(EntryValue == PreviousEntryValue);
+      CurrentContext->setEntryValue(EntryValue);
+      CurrentContext->markAnalysed();
+      if (!WasAnalysed || SummaryChanged) {
+        CurrentContext->publishSummaryVersion();
+        this->recordSummaryPublication();
+        this->wakeStaleCallers(CurrentContext);
+      } else {
+        this->recordSuppressedUnchangedWakeup();
+      }
+      this->freeReachableContextsIfDead(CurrentContext);
+    }
+  }
+
+  ContextPtr getOrInitTargetContext(const M &Method, const A &ExitValue) {
+    std::lock_guard<std::recursive_mutex> Lock(this->StateMutex);
+    auto TargetContext = this->getContextUnlocked(Method, ExitValue);
+    if (TargetContext) {
+      this->recordContextReuse();
+      return TargetContext;
+    }
+    return initContext(Method, ExitValue);
+  }
+
   ContextPtr initContext(const M &Method, const A &ExitValue) {
     auto NewContext = std::make_shared<vasco::Context<M, N, A>>(
         Method, this->programRepresentation().getControlFlowGraph(Method),

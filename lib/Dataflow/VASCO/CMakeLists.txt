@@ -11,4 +11,5 @@ target_include_directories(VASCODataFlow
 
 target_link_libraries(VASCODataFlow
   PUBLIC
-    LLVMCore)
+    LLVMCore
+    CanaryParallel)

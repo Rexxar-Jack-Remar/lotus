@@ -65,6 +65,11 @@ When a callee context finishes and its entry/exit summary changes,
 `wakeCallers(...)` re-enqueues the corresponding call sites so the updated
 summary is propagated to all valid callers.
 
+The opt-in parallel scheduler keeps the same value-context semantics but treats
+contexts as schedulable tasks. It uses per-callsite summary-version observations
+to replay only stale caller call sites when a callee summary changes. See
+`ParallelContextScheduler.md` for the algorithm and invariants.
+
 ## Result forms
 
 The framework exposes two useful result views:

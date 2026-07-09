@@ -3,12 +3,14 @@
 #include "Dataflow/VASCO/Core/DirectedGraph.h"
 #include "Dataflow/VASCO/Support/PseudoTopologicalOrder.h"
 
+#include <atomic>
 #include <cassert>
 #include <cstddef>
 #include <deque>
 #include <limits>
 #include <map>
 #include <memory>
+#include <mutex>
 #include <optional>
 #include <set>
 #include <utility>
@@ -19,8 +21,7 @@ namespace vasco {
 template <typename N> struct WorkItemComparator {
   using OrderMap = std::map<N, std::size_t>;
 
-  std::shared_ptr<const OrderMap> Numbers =
-      std::make_shared<const OrderMap>();
+  std::shared_ptr<const OrderMap> Numbers = std::make_shared<const OrderMap>();
 
   bool operator()(const std::optional<N> &LHS,
                   const std::optional<N> &RHS) const {
@@ -64,12 +65,10 @@ public:
 
   Context(M Method, GraphPtr Graph, bool Reverse)
       : Analysed(false), Graph(std::move(Graph)), Method(std::move(Method)),
-        Id(++Count),
-        OrderNumbers(std::make_shared<std::map<N, std::size_t>>()),
+        Id(++Count), OrderNumbers(std::make_shared<std::map<N, std::size_t>>()),
         WorkList(WorkItemComparator<N>{OrderNumbers}) {
     if (this->Graph) {
-      const auto Ordered =
-          computePseudoTopologicalOrder(*this->Graph, Reverse);
+      const auto Ordered = computePseudoTopologicalOrder(*this->Graph, Reverse);
       std::size_t Number = 1;
       for (const auto &Node : Ordered) {
         (*OrderNumbers)[Node] = Number++;
@@ -82,7 +81,7 @@ public:
   bool operator<(const Context &Other) const { return Id < Other.Id; }
 
   void freeMemory() {
-    if (Freed) {
+    if (Freed.load()) {
       return;
     }
     if (Graph) {
@@ -94,7 +93,7 @@ public:
     Graph.reset();
     WorkList.clear();
     WorkListOfEdges.clear();
-    Freed = true;
+    Freed.store(true);
   }
 
   GraphPtr getControlFlowGraph() const { return Graph; }
@@ -105,6 +104,8 @@ public:
   const A &getExitValue() const { return ExitValue; }
   std::size_t getId() const { return Id; }
   const M &getMethod() const { return Method; }
+
+  std::recursive_mutex &mutex() const { return Mutex; }
 
   std::optional<A> getEdgeValue(const N &From, const N &To) const {
     auto It = EdgeValues.find(std::make_pair(From, To));
@@ -129,11 +130,13 @@ public:
     return WorkListOfEdges;
   }
 
-  bool isAnalysed() const { return Analysed; }
-  bool isFreed() const { return Freed; }
+  bool isAnalysed() const { return Analysed.load(); }
+  bool isFreed() const { return Freed.load(); }
+  std::size_t getSummaryVersion() const { return SummaryVersion.load(); }
 
-  void markAnalysed() { Analysed = true; }
-  void unmarkAnalysed() { Analysed = false; }
+  void markAnalysed() { Analysed.store(true); }
+  void unmarkAnalysed() { Analysed.store(false); }
+  void publishSummaryVersion() { ++SummaryVersion; }
 
   void setEntryValue(const A &Value) { EntryValue = Value; }
   void setExitValue(const A &Value) { ExitValue = Value; }
@@ -141,8 +144,10 @@ public:
   void setValueBefore(const N &Node, const A &Value) { InValues[Node] = Value; }
 
 private:
-  bool Analysed = false;
-  bool Freed = false;
+  std::atomic<bool> Analysed{false};
+  std::atomic<bool> Freed{false};
+  std::atomic<std::size_t> SummaryVersion{0};
+  mutable std::recursive_mutex Mutex;
   GraphPtr Graph;
   A EntryValue{};
   A ExitValue{};
