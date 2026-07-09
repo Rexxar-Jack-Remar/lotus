@@ -261,12 +261,16 @@ swrapped_interval<Number> swrapped_interval<Number>::trim_zero() const {
   swrapped_interval<Number> res(m_start_0, m_end_0, m_is_bottom_0, m_start_1,
                                 m_end_1, m_is_bottom_1);
   wrapint zero(0, get_bitwidth(__LINE__));
-  if (!is_bottom() && (!(*this == zero))) {
-    if (start_0() == zero) {
-      // this->m_start_0 = wrapint(1, get_bitwidth(__LINE__));
-      return swrapped_interval<Number>(wrapint(1, get_bitwidth(__LINE__)),
-                                       m_end_0, m_is_bottom_0, m_start_1,
-                                       m_end_1, m_is_bottom_1);
+  if (!is_bottom() && !is_bottom_0() && at(zero)) {
+    if (m_start_0 == zero && m_end_0 == zero) {
+      res.set_circle0(wrapint::get_signed_max(zero.get_bitwidth()),
+                      wrapint::get_unsigned_min(zero.get_bitwidth()), true);
+    } else if (m_start_0 == zero) {
+      res.set_start_0(wrapint(1, zero.get_bitwidth()));
+    } else {
+      // The zero hemisphere is represented by one convex interval, so if zero
+      // is inside but not at the start, keeping the original interval is sound.
+      return res;
     }
   }
   return res;
@@ -326,6 +330,7 @@ swrapped_interval<Number> swrapped_interval<Number>::LShr(uint64_t k) const {
                                      wrapint::get_unsigned_max(width),
                                      wrapint::get_signed_min(width), true);
   }
+  return swrapped_interval<Number>::bottom(width);
 }
 
 template <typename Number>
@@ -354,6 +359,7 @@ swrapped_interval<Number> swrapped_interval<Number>::AShr(uint64_t k) const {
         wrapint::get_signed_max(width), wrapint::get_unsigned_min(width), true,
         m_start_1.ashr(kw), m_end_1.ashr(kw), false);
   }
+  return swrapped_interval<Number>::bottom(width);
 }
 
 template <typename Number>
@@ -477,8 +483,8 @@ swrapped_interval<Number>::mk_swinterval(Number n, wrapint::bitwidth_t width) {
     CRAB_WARN(n, " does not fit into a wrapint. Returned top wrapped interval");
     CRAB_LOG("swrapped-imply-mk_swinterval",
              crab::outs() << "mk_swinterval of " << n << "="
-                          << swrapped_interval<Number>::top() << "\n";);
-    return swrapped_interval<Number>::top();
+                          << swrapped_interval<Number>::top(width) << "\n";);
+    return swrapped_interval<Number>::top(width);
   }
 }
 
@@ -490,11 +496,11 @@ swrapped_interval<Number>::mk_swinterval(Number lb, Number ub,
   if (!wrapint::fits_wrapint(lb, width)) {
     CRAB_WARN(lb,
               " does not fit into a wrapint. Returned top wrapped interval");
-    return swrapped_interval<Number>::top();
+    return swrapped_interval<Number>::top(width);
   } else if (!wrapint::fits_wrapint(ub, width)) {
     CRAB_WARN(ub,
               " does not fit into a wrapint. Returned top wrapped interval");
-    return swrapped_interval<Number>::top();
+    return swrapped_interval<Number>::top(width);
   } else {
     wrapint lbw(lb, width);
     wrapint ubw(ub, width);
@@ -926,7 +932,7 @@ template <typename Number> bool swrapped_interval<Number>::at(wrapint x) const {
     } else if (is_top_1()) {
       return true;
     } else {
-      return (m_start_1 < x) && (x < m_end_1);
+      return (m_start_1 <= x) && (x <= m_end_1);
     }
   } else {
     if (is_bottom_0()) {
@@ -934,7 +940,7 @@ template <typename Number> bool swrapped_interval<Number>::at(wrapint x) const {
     } else if (is_top_0()) {
       return true;
     } else {
-      return (m_start_0 < x) && (x < m_end_0);
+      return (m_start_0 <= x) && (x <= m_end_0);
     }
   }
 }

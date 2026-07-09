@@ -128,10 +128,10 @@ stnum<Number> stnum<Number>::mk_stnum(Number lb, Number ub,
            crab::outs() << "mk_stnum of " << lb << " and " << ub << " : \n";);
   if (!wrapint::fits_wrapint(lb, width)) {
     CRAB_WARN(lb, " does not fit into a wrapint. Returned top stnum");
-    return stnum<Number>::top();
+    return stnum<Number>::top(width);
   } else if (!wrapint::fits_wrapint(ub, width)) {
     CRAB_WARN(ub, " does not fit into a wrapint. Returned top stnum");
-    return stnum<Number>::top();
+    return stnum<Number>::top(width);
   } else {
     wrapint lbwrap(lb, width);
     wrapint ubwrap(ub, width);
@@ -1132,7 +1132,7 @@ stnum<Number> stnum<Number>::URem(const stnum<Number> &x) const {
     return stnum<Number>::top();
   }
   if (x.get_tnum_0().value().is_zero()) {
-    return stnum<Number>::top();
+    return stnum<Number>::top(get_bitwidth(__LINE__));
   }
 
   tnum_t t01 = tnum_0.URem(x.tnum_1);

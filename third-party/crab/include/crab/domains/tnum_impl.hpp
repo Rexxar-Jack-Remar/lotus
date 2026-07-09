@@ -133,8 +133,11 @@ tnum<Number>::tnum(wrapint min, wrapint max, bitwidth_t width)
     : m_value(wrapint(0, width)), m_mask(wrapint::get_unsigned_max(width)), m_is_bottom(false) {
   wrapint chi = min ^ max;
   uint64_t bits = chi.fls();
-  if(bits <= 63){
-    wrapint delta = wrapint(1, width) << wrapint(bits -1, width);
+  if(bits <= width){
+    wrapint delta = bits == 0
+                        ? wrapint(0, width)
+                        : ((wrapint(1, width) << wrapint(bits, width)) -
+                           wrapint(1, width));
     this->m_value = min & (~delta);
     this->m_mask = delta;
     if(max < min){
@@ -174,11 +177,11 @@ tnum<Number>::mk_tnum(Number lb, Number ub,
   if (!wrapint::fits_wrapint(lb, width)) {
     CRAB_WARN(lb,
               " does not fit into a wrapint. Returned top tnum");
-    return tnum<Number>::top();
+    return tnum<Number>::top(width);
   } else if (!wrapint::fits_wrapint(ub, width)) {
     CRAB_WARN(ub,
               " does not fit into a wrapint. Returned top tnum");
-    return tnum<Number>::top();
+    return tnum<Number>::top(width);
   } else {
   /*  auto tnum_from_range = [&] (const wrapint &min, const wrapint &max){
       wrapint chi = min ^ max;
@@ -491,7 +494,7 @@ tnum<Number>::tnum_from_range(wrapint min, wrapint max) {
   uint64_t bits = chi.fls();
   CRAB_LOG("tnum-imply-tnum_from_range", crab::outs() << "chi = "<< chi << ", bits = " << bits << "\n";);
   if(bits > w-1){
-    return tnum<Number>::top();
+    return tnum<Number>::top(w);
   }
   wrapint delta =(wrapint(1, w) << wrapint(bits, w)) - wrapint(1, w);
   tnum<Number> unsign_tnum(min & (~delta), delta);
@@ -997,7 +1000,7 @@ tnum<Number>::SDiv(const tnum<Number> &x) const {
 
   wrapint::bitwidth_t w =  tnum<Number>::get_bitwidth(__LINE__);
   if(x.m_value.is_zero()){
-    return tnum<Number>::top();
+    return tnum<Number>::top(w);
   }else if(m_mask.is_zero() && x.m_mask.is_zero()){ // certain sdiv certain
     return tnum<Number>(m_value.sdiv(x.m_value), wrapint::get_unsigned_min(w));
   } 
@@ -1039,7 +1042,7 @@ tnum<Number>::UDiv(const tnum<Number> &x) const {
 
   if(flag){
     CRAB_LOG("tnum-udiv, 0 at", crab::outs() << x << "\n";);
-    return tnum<Number>::top();
+    return tnum<Number>::top(w);
   } else {
     tnum<Number> Res = tnum<Number>::top(w);
     wrapint MaxRes = flag?(m_value + m_mask) : (m_value + m_mask).udiv(x.m_value);
@@ -1130,7 +1133,7 @@ tnum<Number>::URem(const tnum<Number> &x) const {
     return tnum<Number>::top();
   } else if(x.m_value.is_zero()) {
     CRAB_LOG("tnum-urem, 0 at", crab::outs() << x << "\n";);
-    return tnum<Number>::top();
+    return tnum<Number>::top(get_bitwidth(__LINE__));
   }
   else {
     // determine low bits
@@ -1200,7 +1203,7 @@ tnum<Number>::Shl(const tnum_t &x) const {//
     return Shl(x.value().get_uint64_t());
   } else {
     wrapint::bitwidth_t w = get_bitwidth(__LINE__);
-    tnum<Number> Res = tnum<Number>::top();
+    tnum<Number> Res = tnum<Number>::top(w);
     // Fast path for a common case when LHS is completely unknown
     uint64_t MinShiftAmount = x.m_value.get_uint64_t();
     if(m_mask.is_unsigned_max()) {
@@ -1230,7 +1233,7 @@ tnum<Number>::Shl(const tnum_t &x) const {//
     Res.m_is_bottom = true;
     uint64_t JoinCount = 0;
     for(uint64_t i = MinShiftAmount; i <= MaxShiftAmount; i++) {
-      if(x.m_value == ((~x.m_mask) & wrapint(i, xw))) {
+      if(x.m_value != ((~x.m_mask) & wrapint(i, xw))) {
         continue;
       }
       JoinCount ++;
@@ -1259,7 +1262,7 @@ tnum<Number>::LShr(const tnum_t &x) const {//
     return LShr(x.value().get_uint64_t());
   } else {
    wrapint::bitwidth_t w = get_bitwidth(__LINE__);
-    tnum<Number> Res = tnum<Number>::top();
+    tnum<Number> Res = tnum<Number>::top(w);
 
     // Fast path for a common case when LHS is completely unknown
     uint64_t MinShiftAmount = x.m_value.get_uint64_t();
@@ -1315,7 +1318,7 @@ tnum<Number>::AShr(const tnum_t &x) const {//
     return AShr(x.value().get_uint64_t());
   } else {
     wrapint::bitwidth_t w = get_bitwidth(__LINE__);
-    tnum<Number> Res = tnum<Number>::top();
+    tnum<Number> Res = tnum<Number>::top(w);
     // Fast path for a common case when LHS is completely unknown
     uint64_t MinShiftAmount = x.m_value.get_uint64_t();
  

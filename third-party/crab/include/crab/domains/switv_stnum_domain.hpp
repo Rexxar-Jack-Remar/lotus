@@ -167,30 +167,32 @@ tnum_t tnum_from_range_st(wrapint min, wrapint max){
         st_reduce0 = true;
       }
       if(st0.is_bottom()){
-        CRAB_ERROR("reduce product meet bottom of tnum and tnum_from_range");
-      }
-      
-      if(st_reduce0){
-        CRAB_LOG("switv-stnum", crab::outs() << "for 0-circle, update st to st0 = "
-                  << st0 << "\n";);
-      }
-      
-      /* Intersecting with the old var_off might have improved our bounds
-       * slightly, e.g. if umax was 0x7f...f and var_off was (0; 0xf...fc),
-       * then new var_off is (0; 0x7f...fc) which improves our umax.
-       */
-      st0_min = st0.value();
-      st0_max = st0.value() | st0.mask();
-      if(st0_min > start0){
-        start0 = st0_min;
+        start0 = wrapint::get_signed_max(width);
+        end0 = wrapint::get_unsigned_min(width);
         sw_reduce0 = true;
+      } else {
+        if(st_reduce0){
+          CRAB_LOG("switv-stnum", crab::outs() << "for 0-circle, update st to st0 = "
+                    << st0 << "\n";);
+        }
+        
+        /* Intersecting with the old var_off might have improved our bounds
+         * slightly, e.g. if umax was 0x7f...f and var_off was (0; 0xf...fc),
+         * then new var_off is (0; 0x7f...fc) which improves our umax.
+         */
+        st0_min = st0.value();
+        st0_max = st0.value() | st0.mask();
+        if(st0_min > start0){
+          start0 = st0_min;
+          sw_reduce0 = true;
+        }
+        if(st0_max < end0){
+          end0 = st0_max;
+          sw_reduce0 = true;
+        }    
+        CRAB_LOG("switv-stnum", crab::outs() << "for 0-circle, update sw snd to start0 = "
+                    << start0 << ", end0 = "<< end0 << "\n";);
       }
-      if(st0_max < end0){
-        end0 = st0_max;
-        sw_reduce0 = true;
-      }    
-      CRAB_LOG("switv-stnum", crab::outs() << "for 0-circle, update sw snd to start0 = "
-                  << start0 << ", end0 = "<< end0 << "\n";);
        
     }else{
       st0 = tnum<Number>(wrapint::get_signed_max(width), wrapint::get_signed_max(width), true);
@@ -229,10 +231,12 @@ tnum_t tnum_from_range_st(wrapint min, wrapint max){
           st_reduce1 = true;
         }
         if(st1.is_bottom()){
-          CRAB_ERROR("reduce product meet bottom of tnum and tnum_from_range");
+          start1 = wrapint::get_unsigned_max(width);
+          end1 = wrapint::get_signed_min(width);
+          sw_reduce1 = true;
         }
       }
-      if(st_reduce1){
+      if(!st1.is_bottom() && st_reduce1){
         CRAB_LOG("switv-stnum", crab::outs() << "for 1-circle, update st to st1 = "
                   << st1 <<  "\n";);
       }
@@ -241,7 +245,7 @@ tnum_t tnum_from_range_st(wrapint min, wrapint max){
        * slightly, e.g. if umax was 0x7f...f and var_off was (0; 0xf...fc),
        * then new var_off is (0; 0x7f...fc) which improves our umax.
        */
-      {
+      if(!st1.is_bottom()){
         st1_min = st1.value();
         st1_max = st1.value() | st1.mask();
         if(st1_min > start1){
@@ -266,6 +270,11 @@ tnum_t tnum_from_range_st(wrapint min, wrapint max){
       st_reduce1 = true;
     }
     
+    if (st0.is_bottom() && st1.is_bottom()) {
+      m_product.set_to_bottom();
+      return;
+    }
+
     if (st_reduce0 || st_reduce1) {
       CRAB_LOG("switv-stnum", crab::outs() << "reduce "<< v << ", update st to " 
               <<  stnum_t(st0, st1) << "\n";);

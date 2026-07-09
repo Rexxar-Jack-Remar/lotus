@@ -5,6 +5,11 @@ add_lotus_utils_test(graph_slicer_test GraphSlicerTest.cpp)
 # Other Tests
 add_lotus_utils_test(string_utils_test StringUtilsTest.cpp)
 add_lotus_utils_test(path_expressions_test PathExpressionsTest.cpp)
+add_lotus_targeted_test(crab_machine_int_domain_test CrabMachineIntDomainTest.cpp
+    LINK_LIBS
+        Crab
+    INCLUDE_DIRS
+        ${CMAKE_SOURCE_DIR}/third-party/crab/include)
 add_lotus_utils_test(pipeline_scheduler_test PipelineSchedulerTest.cpp)
 add_lotus_utils_test(pipeline_scheduler_timeout_test PipelineSchedulerTimeoutTest.cpp)
 add_lotus_utils_test(parallel_scheduler_pass_test ParallelSchedulerPassTest.cpp)
