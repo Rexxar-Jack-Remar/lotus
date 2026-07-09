@@ -41,6 +41,53 @@ endif()
 
 message(STATUS "Found LLVM ${LLVM_PACKAGE_VERSION}")
 
+function(lotus_prune_stale_llvm_sdk_includes)
+  if(NOT APPLE)
+    return()
+  endif()
+
+  get_property(_lotus_imported_targets DIRECTORY PROPERTY IMPORTED_TARGETS)
+  foreach(_lotus_target IN LISTS _lotus_imported_targets)
+    if(NOT _lotus_target MATCHES "^LLVM")
+      continue()
+    endif()
+
+    get_target_property(_lotus_include_dirs "${_lotus_target}"
+      INTERFACE_INCLUDE_DIRECTORIES)
+    if(NOT _lotus_include_dirs OR
+       _lotus_include_dirs STREQUAL "_lotus_include_dirs-NOTFOUND")
+      continue()
+    endif()
+
+    set(_lotus_kept_include_dirs "")
+    set(_lotus_removed_include_dirs "")
+    foreach(_lotus_include_dir IN LISTS _lotus_include_dirs)
+      if(_lotus_include_dir MATCHES "^\\$<" OR EXISTS "${_lotus_include_dir}")
+        list(APPEND _lotus_kept_include_dirs "${_lotus_include_dir}")
+      elseif(_lotus_include_dir MATCHES "/MacOSX\\.sdk/usr/include$")
+        list(APPEND _lotus_removed_include_dirs "${_lotus_include_dir}")
+      else()
+        list(APPEND _lotus_kept_include_dirs "${_lotus_include_dir}")
+      endif()
+    endforeach()
+
+    if(_lotus_removed_include_dirs)
+      list(REMOVE_DUPLICATES _lotus_removed_include_dirs)
+      message(STATUS
+        "Pruning stale LLVM SDK include dirs from ${_lotus_target}: "
+        "${_lotus_removed_include_dirs}")
+      set_target_properties("${_lotus_target}" PROPERTIES
+        INTERFACE_INCLUDE_DIRECTORIES "${_lotus_kept_include_dirs}")
+    endif()
+  endforeach()
+endfunction()
+
+# Homebrew's LLVM 14 CMake exports can retain an Xcode SDK usr/include path
+# that no longer exists on newer GitHub macOS runners. CMake validates imported
+# target include directories during generation, so remove only that stale SDK
+# path before Lotus targets link against LLVM imported targets.
+lotus_prune_stale_llvm_sdk_includes()
+
 # Derive a stable LLVM tools directory for tests and helper commands. Prefer
 # the path exported by LLVMConfig.cmake; fall back to common layouts relative
 # to llvm-config or LLVM_DIR when needed.
@@ -84,4 +131,3 @@ include_directories(${LLVM_INCLUDE_DIRS}
   )
 add_definitions(${LLVM_DEFINITIONS})
 link_directories(${LLVM_LIBRARY_DIRS})
-
