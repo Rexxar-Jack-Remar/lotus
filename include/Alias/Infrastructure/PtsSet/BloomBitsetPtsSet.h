@@ -47,8 +47,9 @@ public:
     }
 
     bool operator==(const iterator &other) const {
-      return words_ == other.words_ && word_pos_ == other.word_pos_ &&
-             bit_pos_ == other.bit_pos_ && end_ == other.end_;
+      return end_ == other.end_ &&
+             (end_ || (words_ == other.words_ && word_pos_ == other.word_pos_ &&
+                       bit_pos_ == other.bit_pos_));
     }
 
     bool operator!=(const iterator &other) const { return !(*this == other); }
@@ -68,7 +69,6 @@ public:
     void advance() {
       if (end_)
         return;
-      ++bit_pos_;
       findNext();
     }
 
@@ -79,6 +79,11 @@ public:
       }
 
       while (word_pos_ < words_->size()) {
+        if (bit_pos_ >= kWordBits) {
+          bit_pos_ = 0;
+          ++word_pos_;
+          continue;
+        }
         const std::uint64_t word = (*words_)[word_pos_];
         const std::uint64_t word_masked =
             (word & (~std::uint64_t{0} << bit_pos_));
@@ -87,8 +92,8 @@ public:
           bit_pos_ = 0;
           continue;
         }
-        const int tz = countTrailingZeros(word_masked);
-        const std::size_t next_bit = bit_pos_ + static_cast<std::size_t>(tz);
+        const std::size_t next_bit =
+            static_cast<std::size_t>(countTrailingZeros(word_masked));
         current_ = static_cast<Index>(word_pos_ * kWordBits + next_bit);
         bit_pos_ = next_bit + 1;
         if (bit_pos_ >= kWordBits) {
@@ -164,11 +169,7 @@ public:
     const std::size_t limit = words_.size() < other.words_.size()
                                   ? words_.size()
                                   : other.words_.size();
-    for (std::size_t i = 0; i < limit; ++i) {
-      if ((words_[i] & other.words_[i]) != other.words_[i])
-        return false;
-    }
-    return true;
+    return wordsContain(words_.data(), other.words_.data(), limit);
   }
 
   bool intersectWith(const BloomBitsetPtsSet &other) const {
@@ -177,11 +178,7 @@ public:
     const std::size_t limit = words_.size() < other.words_.size()
                                   ? words_.size()
                                   : other.words_.size();
-    for (std::size_t i = 0; i < limit; ++i) {
-      if ((words_[i] & other.words_[i]) != 0)
-        return true;
-    }
-    return false;
+    return wordsIntersect(words_.data(), other.words_.data(), limit);
   }
 
   bool unionWith(const BloomBitsetPtsSet &other) {
@@ -190,12 +187,8 @@ public:
     if (other.words_.size() > words_.size())
       words_.resize(other.words_.size(), 0);
 
-    bool changed = false;
-    for (std::size_t i = 0; i < other.words_.size(); ++i) {
-      const std::uint64_t merged = words_[i] | other.words_[i];
-      changed |= (merged != words_[i]);
-      words_[i] = merged;
-    }
+    const bool changed =
+        unionWords(words_.data(), other.words_.data(), other.words_.size());
     for (std::size_t i = 0; i < kBloomWords; ++i)
       bloom_[i] |= other.bloom_[i];
     return changed;
@@ -295,6 +288,35 @@ private:
     }
     return count;
 #endif
+  }
+
+  static bool wordsContain(const std::uint64_t *lhs, const std::uint64_t *rhs,
+                           std::size_t words) {
+    for (std::size_t i = 0; i < words; ++i) {
+      if ((lhs[i] & rhs[i]) != rhs[i])
+        return false;
+    }
+    return true;
+  }
+
+  static bool wordsIntersect(const std::uint64_t *lhs, const std::uint64_t *rhs,
+                             std::size_t words) {
+    for (std::size_t i = 0; i < words; ++i) {
+      if ((lhs[i] & rhs[i]) != 0)
+        return true;
+    }
+    return false;
+  }
+
+  static bool unionWords(std::uint64_t *lhs, const std::uint64_t *rhs,
+                         std::size_t words) {
+    bool changed = false;
+    for (std::size_t i = 0; i < words; ++i) {
+      const std::uint64_t merged = lhs[i] | rhs[i];
+      changed |= (merged != lhs[i]);
+      lhs[i] = merged;
+    }
+    return changed;
   }
 
   std::vector<std::uint64_t> words_;

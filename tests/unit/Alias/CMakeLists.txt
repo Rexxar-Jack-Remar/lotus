@@ -15,3 +15,4 @@ target_sources(lotus_aa_test PRIVATE
   LotusAATestPart3.cpp)
 add_lotus_gvfg_test(gvfg_lotus_adapter_test GVFGAdapterTest.cpp)
 target_sources(gvfg_lotus_adapter_test PRIVATE GVFGAdapterTestPart2.cpp)
+add_lotus_targeted_test(pts_set_backend_test PtsSetBackendTest.cpp)

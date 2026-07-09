@@ -132,7 +132,7 @@ public:
           CRAB_LOG("interval-solver",
              crab::outs() << "c>0:" << interval_traits::lower_half_line(old_pivot, rhs, true) << "\n";);
           if (refine(pivot,
-                     interval_traits::lower_half_line(old_pivot, rhs, true /*cst is always signed*),
+                     interval_traits::lower_half_line(old_pivot, rhs, true),
                      env)) {
             return true;
           }
@@ -140,7 +140,7 @@ public:
           CRAB_LOG("interval-solver",
              crab::outs() << "c<=0:" << interval_traits::upper_half_line(old_pivot, rhs, true) << "\n";);
           if (refine(pivot,
-                     interval_traits::upper_half_line(old_pivot, rhs, true /*cst is always signed*),
+                     interval_traits::upper_half_line(old_pivot, rhs, true),
                      env)) {
             return true;
           }
@@ -468,4 +468,3 @@ public:
 }; // class linear_tnum_solver
 
 } // namespace ikos
-

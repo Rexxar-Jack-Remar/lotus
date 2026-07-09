@@ -223,10 +223,8 @@ public:
         return false;
       const auto &lhs = chunks_[i];
       const auto &rhs = other.chunks_[j];
-      for (std::size_t w = 0; w < kWords; ++w) {
-        if ((lhs.words[w] & rhs.words[w]) != rhs.words[w])
-          return false;
-      }
+      if (!chunkContains(lhs, rhs))
+        return false;
       ++i;
       ++j;
     }
@@ -250,10 +248,8 @@ public:
       }
       const auto &lhs = chunks_[i];
       const auto &rhs = other.chunks_[j];
-      for (std::size_t w = 0; w < kWords; ++w) {
-        if ((lhs.words[w] & rhs.words[w]) != 0)
-          return true;
-      }
+      if (chunksIntersect(lhs, rhs))
+        return true;
       ++i;
       ++j;
     }
@@ -282,13 +278,7 @@ public:
             break;
           continue;
         }
-        for (std::size_t w = 0; w < kWords; ++w) {
-          if ((chunks_[i].words[w] | other.chunks_[j].words[w]) !=
-              chunks_[i].words[w]) {
-            changed = true;
-            break;
-          }
-        }
+        changed = !chunkContains(chunks_[i], other.chunks_[j]);
         if (changed)
           break;
         ++i;
@@ -334,8 +324,7 @@ public:
         continue;
       }
       Chunk out = chunks_[i];
-      for (std::size_t w = 0; w < kWords; ++w)
-        out.words[w] |= other.chunks_[j].words[w];
+      unionChunk(out, other.chunks_[j]);
       if (!chunkAllZero(out)) {
         merged_ids.push_back(ids_[i]);
         merged.push_back(out);
@@ -407,6 +396,27 @@ private:
       if (w)
         return false;
     return true;
+  }
+
+  static bool chunkContains(const Chunk &lhs, const Chunk &rhs) {
+    for (std::size_t w = 0; w < kWords; ++w) {
+      if ((lhs.words[w] & rhs.words[w]) != rhs.words[w])
+        return false;
+    }
+    return true;
+  }
+
+  static bool chunksIntersect(const Chunk &lhs, const Chunk &rhs) {
+    for (std::size_t w = 0; w < kWords; ++w) {
+      if ((lhs.words[w] & rhs.words[w]) != 0)
+        return true;
+    }
+    return false;
+  }
+
+  static void unionChunk(Chunk &lhs, const Chunk &rhs) {
+    for (std::size_t w = 0; w < kWords; ++w)
+      lhs.words[w] |= rhs.words[w];
   }
 
   static inline unsigned popcount(std::uint64_t value) {
