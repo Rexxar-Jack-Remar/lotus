@@ -48,18 +48,118 @@ The SeaHorn framework is organized into the following subdirectories:
   * ``StaticTaint.cc`` – Static taint analysis
   * ``TopologicalOrder.cc``, ``WeakTopologicalOrder.cc`` – Ordering analyses
 
-* **Transforms/Kernel/** – Linux kernel driver transformation passes (DrvHorn)
-  * ``Device.cc`` — Device-model and bus matching modeling for driver verification
-  * ``FileOperations.cc`` — File operations structure modeling
-  * ``KernelSetup.cc`` — Kernel initialization sequence modeling
-  * ``Slicer.cc`` — Driver-specific slicer for reducing kernel IR to relevant paths
-  * ``ListOps.cc`` — Linked-list operation modeling
-  * ``NondetMalloc.cc`` — Non-deterministic allocation for kernel allocations
-  * ``HandleInlineAsm.cc`` — Inline assembly handling for kernel code
-  * ``InitGlobalKrefs.cc`` / ``AssertKrefs.cc`` — Kernel reference-count modeling
-  * ``I2CDriver.cc``, ``Platform.cc`` — Bus-specific driver modeling
-  * ``Acpi.cc`` — ACPI interface modeling
-  * And more — See ``lib/Verification/seahorn/Transforms/Kernel/``
+* **Transforms/Kernel/** – DrvHorn: Kernel Driver Verification
+
+  DrvHorn is a set of LLVM IR transformation passes enabling SeaHorn to verify
+  reference-count correctness (kref/kobject) in Linux kernel drivers. The passes
+  run as preprocessing before Horn clause generation, transforming kernel driver
+  LLVM IR into a verification-friendly form.
+
+  **Pipeline order**: KernelSetup → InitGlobalKrefs → Device/Devm/Platform/
+  I2CDriver/FileOperations/DsaSwitchOps (modeling) → HandleInlineAsm →
+  AssumeNonNull → NondetMalloc → Slicer → IntoBinary → AssertKrefs
+
+  **KernelSetup** (*KernelSetup.cc*)
+    Foundational kernel environment setup. Stubs ~13 allocation functions
+    (kmalloc, vmalloc, etc.) through drvhorn.alloc. Builds replacements for
+    kref_init/get/put and kobject_get/put. Handles kmem_cache, IS_ERR/ERR_PTR
+    patterns, and stubs __cpu_possible_mask.
+
+  **InitGlobalKrefs** (*InitGlobalKrefs.cc*)
+    Initializes all global kref instances. Scans global variables, creates
+    drvhorn.kref.* snapshot globals, and inserts a drvhorn.prelude function for
+    initialization.
+
+  **Device** (*Device.cc*)
+    Central kernel device lifecycle modeling (~1741 lines). Models device finding
+    (class_find_device, bus_find_device), storage-backed allocation,
+    container_of pattern handling, device initialization (kref, release
+    functions), OF/fwnode management (~40 functions), device links, wakeup, devm
+    functions, CPU freq, regulator, and LED registration.
+
+  **Devm** (*Devm.cc*)
+    Managed device resource modeling. Replaces devres_add by immediately calling
+    the release function with a nondeterministically allocated resource.
+
+  **Acpi** (*Acpi.cc*)
+    ACPI driver modeling. Replaces the placeholder acpi_driver.add with the
+    actual driver callback from the acpi_driver global initializer.
+
+  **Platform** (*Platform.cc*)
+    Platform driver entry point generation. Creates main() that allocates a
+    platform_device, initializes embedded device (kref, wakeup, driver_data,
+    of_node), and calls probe.
+
+  **I2CDriver** (*I2CDriver.cc*)
+    I2C driver entry point generation. Creates main() that allocates an
+    i2c_client and calls the I2C probe function.
+
+  **FileOperations** (*FileOperations.cc*)
+    File operations driver entry point generation. Creates main() that allocates
+    inode + file structs, initializes krefs in private data, and calls .open
+    callback.
+
+  **DsaSwitchOps** (*DsaSwitchOps.cc*)
+    DSA switch driver entry point generation. Creates main() that allocates a
+    DSA switch struct and calls the setup callback.
+
+  **SpecificFunction** (*SpecificFunction.cc*)
+    Generic fallback entry point generation. Creates main() that calls any named
+    function with nondeterministically-initialized arguments.
+
+  **HandleInlineAsm** (*HandleInlineAsm.cc*)
+    Inline assembly replacement (~1533 lines). Replaces ~50 categories of Linux
+    kernel inline assembly with equivalent LLVM IR: bitops, atomics, barriers,
+    MSR, CPUID, TSC, serialization, string ops, control registers, I/O ports,
+    get_user, static branches, and more.
+
+  **AssumeNonNull** (*AssumeNonNull.cc*)
+    Assumes container_of results are non-null. Detects negative-index GEPs
+    (container_of pattern) and inserts verifier assumptions that the pointer is
+    not null.
+
+  **NondetMalloc** (*NondetMalloc.cc*)
+    Nondeterministic allocation handling. Routes nondet.malloc to either
+    drvhorn.malloc (nullable) or plain malloc depending on downstream null
+    checks.
+
+  **Slicer** (*Slicer.cc*)
+    Driver-specific program slicer. Identifies instructions influencing
+    kref/kobject reference counting and removes everything else, replacing
+    removed instructions with nondeterministic values.
+
+  **IntoBinary** (*IntoBinary.cc*)
+    Boolean simplification. Replaces nondet calls used only in branches with
+    booleans. Converts nonzero returns used as conditions to 0/1.
+
+  **AssertKrefs** (*AssertKrefs.cc*)
+    Final verification assertion generation. Builds drvhorn.assert_kref (asserts
+    refcount==1), drvhorn.assert_wakeup (asserts wakeup==0), storage checker
+    functions, and injects assertions at driver fail blocks.
+
+  **Debug** (*Debug.cc*)
+    Debugging utilities. Stubs OF functions, prints inline asm statistics, dumps
+    IR to file, runs LLVM verifier.
+
+  **ListOps** (*ListOps.cc*)
+    Operation discovery. Scans globals matching a struct type and prints their
+    names.
+
+  **SetupEntrypoint** (*SetupEntrypoint.hh* / *SetupEntrypoint.cc*)
+    Shared entry-point helpers: device pointer setup (kref init, wakeup disable,
+    driver_data, of_node), fail block construction, return block construction.
+
+  **Util** (*Util.hh* / *Util.cc*)
+    Shared utilities: type equivalence, call extraction, nondet/allocation
+    function creation, GEP index computation, struct embedding detection.
+
+  **SlimDown** (*SlimDown.hh*)
+    Declared but unimplemented. Intended for module-level pruning by root
+    reachability.
+
+  .. note::
+
+     Added in commit 909d6e9c.
 
 * **Transforms/** – LLVM IR transformations for verification
   * **Instrumentation/** – Property instrumentation

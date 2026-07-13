@@ -98,7 +98,7 @@ Horn-ICE provides CHC (Constrained Horn Clause) verification with invariant
 learning capabilities.
 
 **Binaries**: ``chc_verifier``, ``hice-dt``  
-**Location**: ``third-party/horn-ice/``
+**Location**: ``third-party/horn-ice/`` (moved from previous standalone location)
 
 **Usage**:
 
@@ -109,6 +109,8 @@ learning capabilities.
 
    # CHC verification with learning
    ./build/bin/hice-dt input.smt2
+
+**Build status**: built by default when ``LOTUS_ENABLE_HORN_ICE=ON``.
 
 For detailed documentation, see :doc:`horn-ice/index`.
 

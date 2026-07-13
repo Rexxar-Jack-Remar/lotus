@@ -83,8 +83,58 @@ Supported analyses:
 - ``reaching_defs``
 - ``uninitialized``
 
+lotus-dfa-npa
+--------------
+
+Standalone front-end for the NPA (Newton Program Analysis) engine supporting
+both intraprocedural and interprocedural analyses.
+
+**Binary**: ``lotus-dfa-npa``
+
+**Source**: ``tools/dataflow/lotus-dfa-npa.cpp``
+
+**Usage**:
+
+.. code-block:: bash
+
+   lotus-dfa-npa [options] <bitcode file>
+
+**Options**:
+
+- ``<bitcode>``: positional, required, path to LLVM .bc or .ll file
+- ``--out-dir <dir>``: string, default "", output directory (writes npa.txt)
+- ``--stdout``: bool, default false, force output to terminal
+- ``--analysis <name>``: string, default "liveness", one of: liveness, reaching_defs, reachable, inter_liveness, inter_reaching_defs, inter_uninitialized, inter_constant_prop, inter_interval, inter_nullability
+- ``--solver <name>``: string, default "newton", newton or kleene (inter analyses require newton)
+- ``--linear-solver <name>``: string, default "scc", scc, adaptive_scc, or tensor
+- ``-nworkers=<N>``: unsigned, parallel workers for function scheduling
+
+Intraprocedural analyses:
+
+- ``liveness``
+- ``reaching_defs``
+- ``reachable``
+
+Interprocedural analyses:
+
+- ``inter_liveness``
+- ``inter_reaching_defs``
+- ``inter_uninitialized``
+- ``inter_constant_prop``
+- ``inter_interval`` (range analysis)
+- ``inter_nullability`` (null-pointer analysis)
+
+Output format:
+
+.. code-block:: none
+
+   [npa:<analysis>:<scope>:linear=<linear-solver>:workers=<N>:parallel=<on|off>]
+   FUNC <name>
+     bb<N> IN: <comma-separated value ids>
+
 See also
 --------
 
-- See :doc:`../../dataflow/apa`, :doc:`../../dataflow/mono`, and
-  :doc:`../../dataflow/ifds_ide` for the underlying engines.
+- See :doc:`../../dataflow/apa`, :doc:`../../dataflow/mono`,
+  :doc:`../../dataflow/ifds_ide`, and :doc:`../../dataflow/npa` for the
+  underlying engines.

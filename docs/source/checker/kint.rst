@@ -14,11 +14,14 @@ Static analysis tool for detecting numerical bugs: integer overflow, division by
 Overview
 --------
 
-KINT (Kint Is Not Taint) uses range analysis and SMT solving to detect numerical bugs in LLVM bitcode. It combines:
+KINT (Kint Is Not Taint) uses SMT solving and summary encoding to detect numerical bugs in LLVM bitcode. It combines:
 
-* **Range Analysis**: Abstract interpretation to compute value ranges for variables
 * **SMT Solving**: Z3-based path-sensitive verification for precise bug detection
+* **Summary Encoding**: Inter-procedural constraint encoding via function summaries
 * **Taint Analysis**: Tracking of untrusted data sources
+
+.. note::
+   Range analysis was removed (commit 88adc045) and replaced with a pure SMT-based approach using per-object memory arrays and inter-procedural function summaries.
 
 All detected bugs are reported through the centralized ``BugReportMgr`` system, enabling unified JSON and SARIF output.
 
@@ -28,14 +31,17 @@ Components
 **MKintPass** (``MKintPass.cpp``, ``MKintPass.h``):
 
 * Main LLVM pass that orchestrates all KINT analyses
-* Integrates range analysis, taint analysis, and bug detection
+* Integrates SMT solving, summary encoding, taint analysis, and bug detection
 * Reports bugs through ``BugReportMgr``
 
-**RangeAnalysis** (``RangeAnalysis.cpp``, ``RangeAnalysis.h``):
+**SummaryEncoding** (``SummaryEncoding.cpp``, ``SummaryEncoding.h``):
 
-* Computes value ranges for variables using abstract interpretation
-* Performs intraprocedural and interprocedural range propagation
-* Handles loops, branches, and function calls
+* Defines ``FunctionSummary``, ``SummaryObjectBinding``, ``SummaryCacheEntry``
+* Built by ``MKintSummary.cpp`` (1032 lines) — the summary building pipeline
+* Supports ``--kint-summary-mode off|on|required`` (default: on)
+* Building workflow: ``canSummarizeFunction()`` → ``collectSummaryObjects()`` → ``buildSummary()`` (symbolic execution of callee) → ``applySummary()`` (instantiation at call site)
+* Per-summary timeout via ``--kint-summary-timeout <seconds>`` (default: 5)
+* Path budget via ``--kint-summary-max-paths <N>`` (default: 64)
 
 **KINTTaintAnalysis** (``KINTTaintAnalysis.cpp``, ``KINTTaintAnalysis.h``):
 
@@ -51,6 +57,12 @@ Components
   * Bad shift operations
   * Array out-of-bounds access
   * Dead branches (unreachable code)
+
+**MKintSummary** (``MKintSummary.cpp``, ``MKintSummary.h``):
+
+* Builds and applies inter-procedural function summaries as Z3 contracts
+* Captures integer/pointer parameters, return values, memory side effects, and path constraints
+* Handles summary caching with ``building`` flag for recursive call cycle detection
 
 **Options** (``Options.cpp``, ``Options.h``):
 
@@ -122,6 +134,14 @@ Usage
 
    ./build/bin/lotus-check kint input.bc --check-int-overflow=true --analyze-all-functions=true
 
+**Summary Encoding Options**:
+
+.. code-block:: bash
+
+   ./build/bin/lotus-check kint input.bc --check-all=true --kint-summary-mode=on
+   ./build/bin/lotus-check kint input.bc --check-all=true --kint-summary-timeout=10
+   ./build/bin/lotus-check kint input.bc --check-all=true --kint-summary-max-paths=128
+
 Command-Line Options
 --------------------
 
@@ -129,7 +149,7 @@ Command-Line Options
 
 * ``--check-all=<true|false>`` – Enable all checkers at once (default: false)
 * ``--check-int-overflow=<true|false>`` – Enable integer overflow detection (default: false)
-* ``--analyze-all-functions=<true|false>`` – Run SMT checks for all functions covered by range analysis instead of only taint/main entry points (default: false)
+* ``--analyze-all-functions=<true|false>`` – Run SMT checks for all functions instead of only taint/main entry points (default: false)
 * ``--check-div-by-zero=<true|false>`` – Enable division by zero detection (default: false)
 * ``--check-bad-shift=<true|false>`` – Enable bad shift detection (default: false)
 * ``--check-array-oob=<true|false>`` – Enable array out-of-bounds detection (default: false)
@@ -138,6 +158,9 @@ Command-Line Options
 **Performance Options**:
 
 * ``--function-timeout=<seconds>`` – Timeout per function for SMT solving (0 = no limit, default: varies)
+* ``--kint-summary-mode=<off|on|required>`` – Control inter-procedural summary building (default: on)
+* ``--kint-summary-timeout=<seconds>`` – Per-summary timeout (default: 5)
+* ``--kint-summary-max-paths=<N>`` – Path budget for summary construction (default: 64)
 
 **Logging Options**:
 
@@ -191,13 +214,11 @@ Bug Types
 Analysis Process
 ----------------
 
-1. **Range Initialization**: Initialize value ranges for global variables and function parameters
-2. **Taint Source Identification**: Mark taint sources (untrusted inputs)
-3. **Range Propagation**: Propagate ranges through the program using abstract interpretation
-4. **Backedge Analysis**: Identify loop backedges for range widening
-5. **SMT Solving**: Use Z3 to verify bug conditions path-sensitively
-6. **Bug Detection**: Identify specific bug patterns based on ranges and SMT results
-7. **Report Generation**: Generate reports through centralized ``BugReportMgr``
+1. **Taint Source Identification**: Mark taint sources (untrusted inputs)
+2. **Summary Building**: Build inter-procedural function summaries for all functions
+3. **SMT Solving**: Use Z3 with per-object memory model and summary application at call sites
+4. **Bug Detection**: Identify specific bug patterns based on SMT results
+5. **Report Generation**: Generate reports through centralized ``BugReportMgr``
 
 Programmatic Usage
 ------------------
@@ -244,6 +265,8 @@ For path-sensitive verification, KINT uses Z3:
 * **Symbolic Execution**: Creates symbolic expressions for variables
 * **Satisfiability Checking**: Verifies if bug conditions are satisfiable
 * **Timeout Handling**: Limits analysis time per function
+
+Memory modeling was improved (commit b4cef8a1) with per-object SMT arrays: each allocation site gets its own byte array (``obj_base``, ``obj_size``, ``obj_mem``), with ``ObjectStateFrame`` snapshots for path branching, alias tracking (``m_obj_alias``, ``m_int_alias``), and selective havoc for unknown calls.
 
 Taint Analysis
 --------------

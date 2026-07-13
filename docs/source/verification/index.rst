@@ -16,4 +16,5 @@ This section documents the verification tools and frameworks used throughout Lot
    symabs-ai
    seahorn
    failure_directed_trimming
+   frontend
    transforms

@@ -185,6 +185,138 @@ The LLVM points-to client models:
 * field-sensitive constant-offset memory accesses,
 * direct calls and indirect calls through function-pointer values.
 
+Parallel Context Scheduling
+===========================
+
+Lotus extends the sequential VASCO solver with an opt-in parallel mode that
+preserves the original value-context semantics while changing only the order in
+which contexts are processed.
+
+Core Idea
+---------
+
+Each value context is an independent schedulable task. At most one worker thread
+owns a given context at a time, but different contexts can run concurrently on
+different threads. The solver's worklist is shared across workers: a thread
+acquires a ready context not owned by any other worker, processes up to a
+configurable number of local work items under the context's mutex, and then
+releases the context back to the shared pool.
+
+Versioned Summary Replay
+------------------------
+
+Every context carries an atomic ``SummaryVersion`` that starts at zero and
+increments each time the context publishes a changed summary (exit value for
+forward analyses, entry value for backward analyses). When a caller context
+consumes a summary at a call site, it records the callee's current version in
+an ``ObservedSummaryVersions`` table. When the callee publishes an updated
+summary, ``wakeStaleCallers()`` iterates the caller list and re-enqueues only
+those call sites whose observed version is older than the current callee
+version (or that have no observation yet). This avoids waking callers that have
+already seen the latest summary.
+
+Public API
+----------
+
+The following methods on ``InterProceduralAnalysis`` control parallel
+scheduling:
+
+* ``setParallelContextScheduling(bool Enable)``
+  enables or disables parallel context scheduling (default: ``false``).
+
+* ``setContextStepBudget(size_t Budget)``
+  sets the maximum number of work items processed per context batch (default:
+  ``64``; a value of ``0`` is clamped to ``1``).
+
+* ``getSchedulerOptions()``
+  returns a ``SchedulerOptions`` struct describing the current configuration.
+
+* ``getSchedulerStats()``
+  returns a ``SchedulerStats`` struct holding cumulative counter values.
+
+SchedulerOptions
+^^^^^^^^^^^^^^^^
+
+.. code-block:: cpp
+
+   struct SchedulerOptions {
+     bool EnableParallelContextScheduling = false;
+     std::size_t ContextStepBudget = 64;
+   };
+
+SchedulerStats
+^^^^^^^^^^^^^^
+
+The ``SchedulerStats`` struct exposes 11 counters:
+
+* ``contexts_created`` — number of new value contexts interned
+* ``contexts_reused`` — number of existing contexts reused by a caller
+* ``context_steps`` — total work items processed across all contexts
+* ``context_batches`` — total context-batch invocations
+* ``caller_wakeups`` — times a caller's call node was re-enqueued
+* ``summary_publications`` — times a changed summary triggered publication
+* ``suppressed_unchanged_wakeups`` — times caller wakeup was suppressed because
+  the summary did not change
+* ``stale_callsite_replays`` — times a stale caller call site triggered replay
+* ``current_callsite_replays_skipped`` — times a current-version call site
+  skipped replay
+* ``parallel_worker_tasks`` — worker tasks launched in the thread pool
+* ``max_ready_contexts`` — peak size of the ready-context worklist
+
+Configuration
+-------------
+
+Parallel scheduling uses the ``ThreadPool`` singleton configured with the
+``-nworkers=N`` command-line flag. The solver checks three conditions before
+entering parallel mode:
+
+1. ``EnableParallelContextScheduling`` is ``true``,
+2. ``FreeResultsOnTheFly`` is ``false``, and
+3. ``ThreadPool::get()->hasWorkers()`` returns ``true``.
+
+If any condition fails, the solver falls back to the original sequential loop.
+Setting ``-nworkers=0`` effectively disables parallelism even when the option
+is enabled.
+
+Usage Example
+-------------
+
+.. code-block:: cpp
+
+   analysis.setParallelContextScheduling(true);
+   analysis.setContextStepBudget(128);
+   analysis.doAnalysis();
+
+   auto Stats = analysis.getSchedulerStats();
+   llvm::outs() << "Parallel batches: " << Stats.context_batches << "\n";
+
+Correctness Invariants
+----------------------
+
+The parallel scheduler relies on these invariants to guarantee that the final
+solution matches the sequential solver:
+
+1. Only one worker mutates a context at a time (per-context
+   ``recursive_mutex``).
+2. Context interning by ``(method, value)`` is atomic (shared ``StateMutex``).
+3. Data-flow values evolve through the existing monotone ``meet`` logic.
+4. A changed summary atomically increments its context version.
+5. Any caller that consumed an older summary is eventually replayed.
+6. A call site that already consumed the current summary does not need replay.
+7. The final meet-over-valid-paths solution matches the sequential solver.
+
+Design Document
+---------------
+
+A standalone design document describing the scheduling algorithm, state
+organization, and implementation details can be found at:
+
+   ``lib/Dataflow/VASCO/ParallelContextScheduler.md``
+
+The test harness in ``tests/unit/Dataflow/VASCO/VASCOParallelHarnessTest.cpp``
+exercises both sequential (``-nworkers=0``) and parallel (``-nworkers=2``)
+modes and verifies that they produce identical results.
+
 Current Scope and Caveats
 =========================
 

@@ -83,6 +83,12 @@ The Cypher selector language implementation is separated from these concrete
 analysis services under ``include/IR/PDG/QueryLanguage/`` and
 ``lib/IR/PDG/QueryLanguage/``.
 
+The Cypher query rule set was recently expanded (commit 3217fac4) with
+additional rules for pattern matching over the PDG IR, including new
+security-focused query templates. See ``tools/ir/examples/`` for the full
+collection of example queries, including the
+:doc:`../tools/ir/examples` cookbook.
+
 `lotus-ir-pdg-query` Analysis Mode
 =========================
 

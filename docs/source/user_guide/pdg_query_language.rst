@@ -6,6 +6,13 @@ The Program Dependence Graph (PDG) Query Language uses Cypher, a declarative gra
 Overview
 --------
 
+.. note::
+
+   The Cypher query rule set was expanded in a recent update
+   (commit 3217fac4) with additional rules for pattern matching over
+   the PDG IR. New security-focused query templates are available in
+   ``tools/ir/examples/security/``.
+
 Cypher provides a declarative way to:
 
 - Query program dependencies (data and control)

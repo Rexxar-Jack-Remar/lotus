@@ -81,3 +81,13 @@ Compared to IFDS/IDE, the explicit pushdown-system encoding makes the
 call stack and recursion behavior more visible and can be advantageous
 for certain classes of interprocedural problems.
 
+.. note::
+
+   **WALi-OpenNWA** (``third-party/WALi-OpenNWA/``) is a modern C++
+   reimplementation of the WPDS library. It provides an alternative WPDS
+   backend with modern C++ features. The existing
+   ``lib/Dataflow/WPDS/`` implementation (backed by
+   ``third-party/WPDS/``) continues to be the default. Build with
+   ``-DLOTUS_ENABLE_WALI_OPENNWA=ON`` to enable the WALi-OpenNWA
+   backend.
+
