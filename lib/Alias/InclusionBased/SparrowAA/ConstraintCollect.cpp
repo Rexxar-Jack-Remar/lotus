@@ -85,12 +85,21 @@ void Andersen::collectConstraints(const Module &M) {
       "collectConstraints: After globals, have {} constraints and {} nodes",
       constraints.size(), nodeFactory.getNumNodes());
 
-  // Process every defined function with the initial context; calls will spawn
-  // more contexts as needed.
+  // Schedule every defined function with the initial context, then process
+  // all scheduled functions iteratively via a worklist.  The worklist avoids
+  // depth-first recursion through addConstraintForCall -> scheduleFunction,
+  // which could overflow the native call stack on programs with dense
+  // indirect-call graphs.
+  pendingFunctions.clear();
   for (auto const &f : M) {
     if (f.isDeclaration() || f.isIntrinsic())
       continue;
-    collectConstraintsForFunction(&f, initialCtx);
+    scheduleFunction(&f, initialCtx);
+  }
+  while (!pendingFunctions.empty()) {
+    auto [f, ctx] = pendingFunctions.front();
+    pendingFunctions.pop_front();
+    collectConstraintsForFunction(f, ctx);
   }
 }
 
@@ -104,15 +113,17 @@ void Andersen::collectConstraints(const Module &M) {
  * @param f The function to process
  * @param ctx The context key for this function instance
  */
-void Andersen::collectConstraintsForFunction(const Function *f,
-                                             AndersNodeFactory::CtxKey ctx) {
+
+void Andersen::scheduleFunction(const llvm::Function *f,
+                                AndersNodeFactory::CtxKey ctx) {
   FunctionContextKey key{f, ctx};
   if (!visitedFunctions.insert(key).second)
     return;
 
   ++NumFunctions;
 
-  // Per-context function-scoped nodes
+  // Per-context function-scoped nodes (needed by addConstraintForCall for
+  // argument/return constraints).
   if (f->getFunctionType()->getReturnType()->isPointerTy()) {
     nodeFactory.createReturnNode(f, ctx);
     ++NumReturnNodes;
@@ -127,9 +138,7 @@ void Andersen::collectConstraintsForFunction(const Function *f,
       nodeFactory.createValueNode(&*itr, ctx);
   }
 
-  // First, create a value node for each instruction with pointer type. It is
-  // necessary to do the job here rather than on-the-fly because an instruction
-  // may refer to the value node defined before it (e.g. phi nodes)
+  // Create a value node for each pointer-typed instruction (first pass).
   for (const_inst_iterator itr = inst_begin(*f), ite = inst_end(*f); itr != ite;
        ++itr) {
     const auto *inst = &*itr.getInstructionIterator();
@@ -139,7 +148,16 @@ void Andersen::collectConstraintsForFunction(const Function *f,
     }
   }
 
-  // Now, collect constraint for each relevant instruction
+  // Defer instruction processing to the worklist so that we never recurse
+  // through addConstraintForCall -> collectConstraintsForFunction -> ...
+  pendingFunctions.emplace_back(f, ctx);
+}
+
+
+void Andersen::collectConstraintsForFunction(const llvm::Function *f,
+                                             AndersNodeFactory::CtxKey ctx) {
+  // Process each instruction (second pass).  Value and function-scoped nodes
+  // have already been created by a prior call to scheduleFunction().
   for (const_inst_iterator itr = inst_begin(*f), ite = inst_end(*f); itr != ite;
        ++itr) {
     const auto *inst = &*itr.getInstructionIterator();
@@ -601,7 +619,7 @@ void Andersen::addConstraintForCall(const llvm::CallBase *cs,
     } else // Non-external function call
     {
       AndersNodeFactory::CtxKey calleeCtx = evolveContext(callerCtx, cs);
-      collectConstraintsForFunction(f, calleeCtx);
+      scheduleFunction(f, calleeCtx);
 
       if (cs->getType()->isPointerTy()) {
         NodeIndex retIndex = nodeFactory.getValueNodeFor(cs, callerCtx);
@@ -697,7 +715,7 @@ void Andersen::addConstraintForCall(const llvm::CallBase *cs,
         }
       } else {
         AndersNodeFactory::CtxKey calleeCtx = evolveContext(callerCtx, cs);
-        collectConstraintsForFunction(&f, calleeCtx);
+        scheduleFunction(&f, calleeCtx);
 
         // Connect the callee's return node to the call-site value node.
         if (cs->getType()->isPointerTy()) {
