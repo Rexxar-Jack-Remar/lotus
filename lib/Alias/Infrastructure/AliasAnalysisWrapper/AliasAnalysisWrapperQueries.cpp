@@ -209,14 +209,17 @@ bool AliasAnalysisWrapper::getPointsToSet(const Value *ptr, std::vector<const Va
       const auto &alloc = memObj->getAllocSite();
       switch (alloc.getAllocType()) {
       case tpa::AllocSiteTag::Global:
-        ptsSet.push_back(alloc.getGlobalValue());
+        if (const Value *val = alloc.getGlobalValue())
+          ptsSet.push_back(val);
         break;
       case tpa::AllocSiteTag::Function:
-        ptsSet.push_back(alloc.getFunction());
+        if (const Value *val = alloc.getFunction())
+          ptsSet.push_back(val);
         break;
       case tpa::AllocSiteTag::Stack:
       case tpa::AllocSiteTag::Heap:
-        ptsSet.push_back(alloc.getLocalValue());
+        if (const Value *val = alloc.getLocalValue())
+          ptsSet.push_back(val);
         break;
       default:
         break;

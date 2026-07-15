@@ -386,7 +386,7 @@ private:
   std::unique_ptr<UnderApprox::UnderApproxAA> _underapprox_aa;
   std::unique_ptr<llvm::CFLAndersAAResult> _cflanders_result;
   std::unique_ptr<llvm::CFLSteensAAResult> _cflsteens_result;
-  llvm::TargetLibraryInfoWrapperPass _tli;
+  std::unique_ptr<llvm::TargetLibraryInfoWrapperPass> _tli;
   std::unique_ptr<AllocAA> _alloc_aa;
   std::unique_ptr<lotus::analysis::DemandDrivenAA> _dda_aa;
   std::unique_ptr<tpa::SemiSparsePointerAnalysis> _tpa_aa;

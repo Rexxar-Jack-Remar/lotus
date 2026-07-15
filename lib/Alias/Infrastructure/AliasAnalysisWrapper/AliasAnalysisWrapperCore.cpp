@@ -227,7 +227,7 @@ void AliasAnalysisWrapper::initialize() {
   case AAConfig::Implementation::CFLSteens:
     _initialized = initAA([this]{
       auto getTLI = [this](Function &F) -> const TargetLibraryInfo & {
-        return _tli.getTLI(F);
+        return _tli->getTLI(F);
       };
       _cflsteens_result = std::make_unique<CFLSteensAAResult>(getTLI);
       for (auto &F : *_module)

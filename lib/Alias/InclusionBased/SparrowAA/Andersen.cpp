@@ -190,29 +190,19 @@ public:
 
   void reset() {
     pool.clear();
-    index.clear();
     initialCtx = intern(Context::makeInitial(false));
     globalCtx = intern(Context::makeInitial(true));
   }
 
 private:
-  /// Deque of all interned contexts. deque::push_back does not invalidate
-  /// pointers to existing elements, so context pointers remain stable.
-  std::deque<Context> pool;
-  /// Hash index for O(1) deduplication. Maps from context value to a const
-  /// pointer in pool, which deque::push_back does not invalidate.
-  std::unordered_map<Context, const Context*, CallStringContextHash<K>,
-                     CallStringContextEq<K>> index;
+  std::unordered_set<Context, CallStringContextHash<K>,
+                     CallStringContextEq<K>> pool;
   const Context *initialCtx = nullptr;
   const Context *globalCtx = nullptr;
 
   const Context *intern(Context ctx) {
-    auto [it, inserted] = index.try_emplace(ctx, nullptr);
-    if (inserted) {
-      pool.push_back(std::move(ctx));
-      it->second = &pool.back();
-    }
-    return it->second;
+    auto [it, inserted] = pool.insert(std::move(ctx));
+    return &*it;
   }
 };
 
