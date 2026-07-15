@@ -216,8 +216,9 @@ void AliasAnalysisWrapper::initialize() {
   
   case AAConfig::Implementation::CFLAnders:
     _initialized = initAA([this]{
+      _tli = std::make_unique<llvm::TargetLibraryInfoWrapperPass>(Triple(_module->getTargetTriple()));
       auto getTLI = [this](Function &F) -> const TargetLibraryInfo & {
-        return _tli.getTLI(F);
+        return _tli->getTLI(F);
       };
       _cflanders_result = std::make_unique<CFLAndersAAResult>(getTLI);
     }, "CFLAnders");
