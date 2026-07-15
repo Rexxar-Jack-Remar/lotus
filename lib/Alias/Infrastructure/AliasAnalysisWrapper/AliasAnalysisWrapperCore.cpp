@@ -216,19 +216,22 @@ void AliasAnalysisWrapper::initialize() {
   
   case AAConfig::Implementation::CFLAnders:
     _initialized = initAA([this]{
-      _cflanders_pass.reset(static_cast<CFLAndersAAWrapperPass *>(createCFLAndersAAWrapperPass()));
-      legacy::PassManager PM;
-      PM.add(_cflanders_pass.get());
-      PM.run(*_module);
+      auto getTLI = [this](Function &F) -> const TargetLibraryInfo & {
+        return _tli.getTLI(F);
+      };
+      _cflanders_result = std::make_unique<CFLAndersAAResult>(getTLI);
     }, "CFLAnders");
     break;
   
   case AAConfig::Implementation::CFLSteens:
     _initialized = initAA([this]{
-      _cflsteens_pass.reset(static_cast<CFLSteensAAWrapperPass *>(createCFLSteensAAWrapperPass()));
-      legacy::PassManager PM;
-      PM.add(_cflsteens_pass.get());
-      PM.run(*_module);
+      auto getTLI = [this](Function &F) -> const TargetLibraryInfo & {
+        return _tli.getTLI(F);
+      };
+      _cflsteens_result = std::make_unique<CFLSteensAAResult>(getTLI);
+      for (auto &F : *_module)
+        if (!F.isDeclaration())
+          _cflsteens_result->scan(&F);
     }, "CFLSteens");
     break;
   

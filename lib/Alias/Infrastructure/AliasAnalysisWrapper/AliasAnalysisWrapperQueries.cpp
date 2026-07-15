@@ -189,7 +189,7 @@ bool AliasAnalysisWrapper::mayNull(const Value *v) {
  * @return true if the points-to set was successfully retrieved, false otherwise
  * 
  * @note The ptsSet vector is cleared before being filled
- * @note Currently only supported by SparrowAA (Andersen) backend
+ * @note Supported by: SparrowAA, TPA, DDA
  * @note Returns false if ptr is null, not a pointer type, or the backend
  *       is not available/initialized
  */
@@ -198,10 +198,37 @@ bool AliasAnalysisWrapper::getPointsToSet(const Value *ptr, std::vector<const Va
   ptsSet.clear();
   if (_andersen_aa && _initialized && _andersen_aa->getPointsToSet(ptr, ptsSet))
     return true;
+  if (_tpa_aa && _initialized) {
+    const Value *stripped = ptr->stripPointerCasts();
+    if (!stripped) return false;
+    tpa::PtsSet pts = _tpa_aa->getPtsSet(stripped);
+    ptsSet.reserve(pts.size());
+    for (const auto *memObj : pts) {
+      if (memObj->isSpecialObject())
+        continue;
+      const auto &alloc = memObj->getAllocSite();
+      switch (alloc.getAllocType()) {
+      case tpa::AllocSiteTag::Global:
+        ptsSet.push_back(alloc.getGlobalValue());
+        break;
+      case tpa::AllocSiteTag::Function:
+        ptsSet.push_back(alloc.getFunction());
+        break;
+      case tpa::AllocSiteTag::Stack:
+      case tpa::AllocSiteTag::Heap:
+        ptsSet.push_back(alloc.getLocalValue());
+        break;
+      default:
+        break;
+      }
+    }
+    return true;
+  }
   if (_dda_aa && _initialized && _dda_aa->getPointsToSet(ptr, ptsSet))
     return true;
   return false;
 }
+
 
 bool AliasAnalysisWrapper::getPointsToSetSize(const Value *ptr, size_t &outSize) {
   if (!ptr || !ptr->getType()->isPointerTy()) return false;

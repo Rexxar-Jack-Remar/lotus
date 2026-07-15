@@ -5,6 +5,7 @@
 #include <string>
 
 #include <llvm/Analysis/AliasAnalysis.h>
+#include <llvm/Analysis/TargetLibraryInfo.h>
 #include <llvm/IR/Module.h>
 #include <llvm/IR/Value.h>
 
@@ -13,8 +14,8 @@ class DyckAliasAnalysis;
 class AllocAA;
 
 namespace llvm {
-class CFLAndersAAWrapperPass;
-class CFLSteensAAWrapperPass;
+class CFLAndersAAResult;
+class CFLSteensAAResult;
 } // namespace llvm
 
 namespace seadsa {
@@ -383,8 +384,9 @@ private:
   std::unique_ptr<AndersenAAResult> _andersen_aa;
   std::unique_ptr<DyckAliasAnalysis> _dyck_aa;
   std::unique_ptr<UnderApprox::UnderApproxAA> _underapprox_aa;
-  std::unique_ptr<llvm::CFLAndersAAWrapperPass> _cflanders_pass;
-  std::unique_ptr<llvm::CFLSteensAAWrapperPass> _cflsteens_pass;
+  std::unique_ptr<llvm::CFLAndersAAResult> _cflanders_result;
+  std::unique_ptr<llvm::CFLSteensAAResult> _cflsteens_result;
+  llvm::TargetLibraryInfoWrapperPass _tli;
   std::unique_ptr<AllocAA> _alloc_aa;
   std::unique_ptr<lotus::analysis::DemandDrivenAA> _dda_aa;
   std::unique_ptr<tpa::SemiSparsePointerAnalysis> _tpa_aa;
