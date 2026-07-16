@@ -77,6 +77,7 @@
 #include <map>
 #include <string>
 #include <vector>
+#include <deque>
 
 #include <llvm/ADT/DenseMap.h>
 #include <llvm/ADT/DenseSet.h>
@@ -203,9 +204,14 @@ private:
     }
   };
   llvm::DenseSet<FunctionContextKey, FunctionContextInfo> visitedFunctions;
+  /// Worklist of (function, context) pairs whose instructions still need
+  /// processing.  Used instead of recursion to avoid stack overflow on
+  /// programs with dense indirect-call graphs.
+  std::deque<std::pair<const llvm::Function *, AndersNodeFactory::CtxKey>> pendingFunctions;
 
   // Three main phases
   void collectConstraints(const llvm::Module &);
+  void scheduleFunction(const llvm::Function *, AndersNodeFactory::CtxKey);
   void collectConstraintsForFunction(const llvm::Function *,
                                      AndersNodeFactory::CtxKey);
   void optimizeConstraints();

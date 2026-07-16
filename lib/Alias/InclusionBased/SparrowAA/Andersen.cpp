@@ -24,6 +24,8 @@
 #include <map>
 #include <sstream>
 #include <unordered_set>
+#include <deque>
+#include <unordered_map>
 #include <utility>
 #include <vector>
 
@@ -193,15 +195,14 @@ public:
   }
 
 private:
-  using PoolTy = std::unordered_set<Context, CallStringContextHash<K>,
-                                    CallStringContextEq<K>>;
-  PoolTy pool;
+  std::unordered_set<Context, CallStringContextHash<K>,
+                     CallStringContextEq<K>> pool;
   const Context *initialCtx = nullptr;
   const Context *globalCtx = nullptr;
 
   const Context *intern(Context ctx) {
-    auto inserted = pool.insert(std::move(ctx));
-    return &*inserted.first;
+    auto [it, inserted] = pool.insert(std::move(ctx));
+    return &*it;
   }
 };
 
