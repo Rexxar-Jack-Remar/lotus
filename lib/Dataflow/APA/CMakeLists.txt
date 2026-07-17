@@ -27,4 +27,3 @@ set(APA_SOURCES
 )
 
 add_library(APADataFlow STATIC ${APA_SOURCES})
-target_link_libraries(APADataFlow PUBLIC CanaryParallel)

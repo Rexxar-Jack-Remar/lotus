@@ -168,7 +168,7 @@ The synthesized reducible view accepts ADT only when all nodes are entry-reachab
 immediate dominators are computable, and the non-back-edge subgraph is acyclic
 with entry first in topological order.
 
-## Parallel summary-equation graph solver
+## Summary-equation graph solver
 
 `include/Dataflow/APA/Solver/PathSummaryEquationSolver.h` provides a generic
 solver for left-linear path-summary equations:
@@ -179,8 +179,8 @@ X_u = base_u U (W_u,v . X_v)
 
 Here `X_u` is a summary instance, such as a future `(function, context)` node,
 and `W_u,v` is an APA `PathExprFactory` expression. The solver computes SCCs in
-the summary-dependency graph, solves independent SCC layers with the shared
-`ThreadPool`, and uses a state-elimination closure inside cyclic SCCs so
+the summary-dependency graph, solves SCCs in dependency order, and uses a
+state-elimination closure inside cyclic SCCs so
 recursive summary dependencies are represented with `Star` expressions rather
 than unbounded worklist growth.
 

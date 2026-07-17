@@ -26,8 +26,8 @@ namespace elimination {
 //   callee exit --RawNormal.ReturnExit--> return site
 //
 // The resulting equation graph is solved with PathSummaryEquationSolver, which
-// closes recursive SCCs with Star expressions and evaluates independent SCC
-// layers in parallel.
+// closes recursive SCCs with Star expressions and evaluates SCCs in dependency
+// order.
 template <typename AnalysisDomainTy, unsigned K>
 class ForwardInterSummarySolver final {
 public:
@@ -109,10 +109,6 @@ public:
     Out.equation_edge_count = DiagnosticsValue.equation_graph.edge_count;
     Out.scc_count = DiagnosticsValue.equation_graph.scc_count;
     Out.cyclic_scc_count = DiagnosticsValue.equation_graph.cyclic_scc_count;
-    Out.parallel_layer_count =
-        DiagnosticsValue.equation_graph.parallel_layer_count;
-    Out.max_parallel_layer_width =
-        DiagnosticsValue.equation_graph.max_parallel_layer_width;
     return Out;
   }
 

@@ -87,8 +87,7 @@ approach:
 | Converges by iterating the        | Closes recursive SCCs with a       |
 | worklist until facts stabilize    | ``Star`` expression operator       |
 +-----------------------------------+------------------------------------+
-| Sequential per-procedure solving  | Solves independent SCC layers in   |
-|                                   | parallel via ``ThreadPool``        |
+| Sequential per-procedure solving  | Solves SCCs in dependency order    |
 +-----------------------------------+------------------------------------+
 | No SCC decomposition              | Tarjan SCC decomposition followed  |
 |                                   | by topological layer ordering      |
@@ -141,10 +140,9 @@ Key classes
 
 ``PathSummaryEquationSolver<KeyT, TransferT>``
   Generic engine that computes Tarjan SCCs on the equation graph, orders
-  them into dependency layers, and solves each layer (optionally in
-  parallel). Cyclic SCCs are solved with a Floyd-Warshall-style closure
-  over path expressions using ``Star``, ``Concat``, and ``Union``
-  operators. Lives in
+  them by dependency, and solves them sequentially. Cyclic SCCs are solved
+  with a Floyd-Warshall-style closure over path expressions using ``Star``,
+  ``Concat``, and ``Union`` operators. Lives in
   ``include/Dataflow/APA/Solver/PathSummaryEquationSolver.h``.
 
 ``InterSummaryTransferAtom<AnalysisDomainTy>``
@@ -173,9 +171,7 @@ Usage example
   auto ICF = dataflow::controlflow::InterCFG::build(*Module);
 
   // Run the summary-based reachability analysis.
-  auto Result = runInterSummaryElimReachable(
-      Main, ICF.get(),
-      PathSummaryEquationOptions{.EnableParallel = true});
+  auto Result = runInterSummaryElimReachable(Main, ICF.get());
 
   // Inspect the result at a program point.
   for (auto &Inst : instructions(*Main)) {

@@ -15,8 +15,6 @@ struct InterSummarySolveDiagnostics final {
   std::size_t equation_edge_count = 0;
   std::size_t scc_count = 0;
   std::size_t cyclic_scc_count = 0;
-  std::size_t parallel_layer_count = 0;
-  std::size_t max_parallel_layer_width = 0;
 };
 
 template <unsigned K, typename FactT, typename TransferT,

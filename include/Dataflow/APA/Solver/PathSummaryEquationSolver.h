@@ -2,13 +2,11 @@
 #define DATAFLOW_APA_SOLVER_PATHSUMMARYEQUATIONSOLVER_H_
 
 #include "Dataflow/APA/Core/PathExpr.h"
-#include "Utils/Parallel/ThreadPool.h"
 
 #include <algorithm>
 #include <cassert>
 #include <cstddef>
 #include <map>
-#include <mutex>
 #include <set>
 #include <unordered_map>
 #include <utility>
@@ -89,8 +87,6 @@ enum class PathSummaryEquationDirection {
 };
 
 struct PathSummaryEquationOptions final {
-  bool EnableParallel = true;
-  std::size_t GrainSize = 1;
   PathSummaryEquationDirection Direction =
       PathSummaryEquationDirection::DependencyPrefix;
 };
@@ -100,8 +96,6 @@ struct PathSummaryEquationDiagnostics final {
   std::size_t edge_count = 0;
   std::size_t scc_count = 0;
   std::size_t cyclic_scc_count = 0;
-  std::size_t parallel_layer_count = 0;
-  std::size_t max_parallel_layer_width = 0;
 };
 
 template <typename KeyT, typename TransferT>
@@ -146,9 +140,9 @@ public:
     buildAdjacency();
     computeSCCs();
     if (Options.Direction == PathSummaryEquationDirection::ForwardPath) {
-      solveForwardComponentsByDependencyLayers();
+      solveForwardComponentsInDependencyOrder();
     } else {
-      solveComponentsByDependencyLayers();
+      solveComponentsInDependencyOrder();
     }
     for (std::size_t I = 0; I < Graph.nodes().size(); ++I) {
       if (SummaryByNode[I]) {
@@ -163,30 +157,19 @@ private:
     std::vector<std::size_t> Nodes;
   };
 
-  expr_ref_t zero() const {
-    std::lock_guard<std::mutex> Lock(ExprMutex);
-    return Graph.exprs().zero();
-  }
+  expr_ref_t zero() const { return Graph.exprs().zero(); }
 
-  expr_ref_t one() const {
-    std::lock_guard<std::mutex> Lock(ExprMutex);
-    return Graph.exprs().one();
-  }
+  expr_ref_t one() const { return Graph.exprs().one(); }
 
   expr_ref_t unite(const expr_ref_t &A, const expr_ref_t &B) const {
-    std::lock_guard<std::mutex> Lock(ExprMutex);
     return Graph.exprs().unite(A, B);
   }
 
   expr_ref_t concat(const expr_ref_t &A, const expr_ref_t &B) const {
-    std::lock_guard<std::mutex> Lock(ExprMutex);
     return Graph.exprs().concat(A, B);
   }
 
-  expr_ref_t star(const expr_ref_t &A) const {
-    std::lock_guard<std::mutex> Lock(ExprMutex);
-    return Graph.exprs().star(A);
-  }
+  expr_ref_t star(const expr_ref_t &A) const { return Graph.exprs().star(A); }
 
   void buildAdjacency() {
     const std::size_t N = Graph.nodes().size();
@@ -272,7 +255,7 @@ private:
     return false;
   }
 
-  void solveComponentsByDependencyLayers() {
+  void solveComponentsInDependencyOrder() {
     const std::size_t CCount = Components.size();
     std::vector<std::set<std::size_t>> DependsOn(CCount);
     std::vector<std::set<std::size_t>> Users(CCount);
@@ -295,27 +278,10 @@ private:
       }
     }
 
-    ThreadPool *Pool = ThreadPool::get();
     while (!Ready.empty()) {
       std::sort(Ready.begin(), Ready.end());
-      Result.Diagnostics.max_parallel_layer_width =
-          std::max(Result.Diagnostics.max_parallel_layer_width, Ready.size());
-      if (Ready.size() > 1) {
-        ++Result.Diagnostics.parallel_layer_count;
-      }
-
-      const bool DoParallel =
-          Options.EnableParallel && Ready.size() > 1 && Pool->hasWorkers();
-      if (DoParallel) {
-        const std::size_t Grain =
-            Options.GrainSize == 0 ? 1 : Options.GrainSize;
-        Pool->parallelFor<std::size_t>(
-            0, Ready.size(), Grain,
-            [&](std::size_t I) { solveComponent(Components[Ready[I]]); });
-      } else {
-        for (std::size_t C : Ready) {
-          solveComponent(Components[C]);
-        }
+      for (std::size_t C : Ready) {
+        solveComponent(Components[C]);
       }
 
       std::vector<std::size_t> NextReady;
@@ -341,7 +307,7 @@ private:
     solveCyclicComponent(C);
   }
 
-  void solveForwardComponentsByDependencyLayers() {
+  void solveForwardComponentsInDependencyOrder() {
     const std::size_t CCount = Components.size();
     std::vector<std::set<std::size_t>> Preds(CCount);
     std::vector<std::set<std::size_t>> Users(CCount);
@@ -364,28 +330,10 @@ private:
       }
     }
 
-    ThreadPool *Pool = ThreadPool::get();
     while (!Ready.empty()) {
       std::sort(Ready.begin(), Ready.end());
-      Result.Diagnostics.max_parallel_layer_width =
-          std::max(Result.Diagnostics.max_parallel_layer_width, Ready.size());
-      if (Ready.size() > 1) {
-        ++Result.Diagnostics.parallel_layer_count;
-      }
-
-      const bool DoParallel =
-          Options.EnableParallel && Ready.size() > 1 && Pool->hasWorkers();
-      if (DoParallel) {
-        const std::size_t Grain =
-            Options.GrainSize == 0 ? 1 : Options.GrainSize;
-        Pool->parallelFor<std::size_t>(
-            0, Ready.size(), Grain, [&](std::size_t I) {
-              solveForwardComponent(Components[Ready[I]]);
-            });
-      } else {
-        for (std::size_t C : Ready) {
-          solveForwardComponent(Components[C]);
-        }
+      for (std::size_t C : Ready) {
+        solveForwardComponent(Components[C]);
       }
 
       std::vector<std::size_t> NextReady;
@@ -601,7 +549,6 @@ private:
   std::vector<std::size_t> ComponentOf;
   std::vector<expr_ref_t> SummaryByNode;
   result_t Result;
-  mutable std::mutex ExprMutex;
 };
 
 } // namespace elimination

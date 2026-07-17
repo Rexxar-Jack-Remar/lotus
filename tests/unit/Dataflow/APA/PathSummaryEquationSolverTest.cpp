@@ -86,8 +86,7 @@ TEST(PathSummaryEquationSolver, SolvesAcyclicSummaryDependencies) {
   G.addEdge("main", "helper", E.atom("p"));
   G.addEdge("helper", "leaf", E.atom("q"));
 
-  elimination::PathSummaryEquationSolver<std::string, std::string> Solver(
-      G, elimination::PathSummaryEquationOptions{/*EnableParallel=*/false});
+  elimination::PathSummaryEquationSolver<std::string, std::string> Solver(G);
   auto Result = Solver.solve();
 
   EXPECT_TRUE(containsWord(Result, "main", "m"));
@@ -107,8 +106,7 @@ TEST(PathSummaryEquationSolver, ClosesRecursiveSummarySCCWithStar) {
   G.addEdge("A", "B", E.atom("x"));
   G.addEdge("B", "A", E.atom("y"));
 
-  elimination::PathSummaryEquationSolver<std::string, std::string> Solver(
-      G, elimination::PathSummaryEquationOptions{/*EnableParallel=*/false});
+  elimination::PathSummaryEquationSolver<std::string, std::string> Solver(G);
   auto Result = Solver.solve();
 
   EXPECT_TRUE(containsWord(Result, "A", "a"));
@@ -122,7 +120,7 @@ TEST(PathSummaryEquationSolver, ClosesRecursiveSummarySCCWithStar) {
   EXPECT_EQ(Result.diagnostics().cyclic_scc_count, 1u);
 }
 
-TEST(PathSummaryEquationSolver, ParallelAndSerialLayerSolvesMatch) {
+TEST(PathSummaryEquationSolver, SolvesIndependentDependencyBranches) {
   Graph G;
   auto &E = G.exprs();
   G.addNode("root", E.atom("r"));
@@ -135,33 +133,14 @@ TEST(PathSummaryEquationSolver, ParallelAndSerialLayerSolvesMatch) {
   G.addEdge("left", "left_leaf", E.atom("x"));
   G.addEdge("right", "right_leaf", E.atom("y"));
 
-  elimination::PathSummaryEquationSolver<std::string, std::string> SerialSolver(
-      G, elimination::PathSummaryEquationOptions{/*EnableParallel=*/false});
-  auto Serial = SerialSolver.solve();
+  elimination::PathSummaryEquationSolver<std::string, std::string> Solver(G);
+  auto Result = Solver.solve();
 
-  elimination::PathSummaryEquationSolver<std::string, std::string>
-      ParallelSolver(
-          G, elimination::PathSummaryEquationOptions{/*EnableParallel=*/true,
-                                                     /*GrainSize=*/1});
-  auto Parallel = ParallelSolver.solve();
-
-  for (const std::string &Key :
-       {"root", "left", "right", "left_leaf", "right_leaf"}) {
-    const auto *SerialExpr = Serial.lookup(Key);
-    const auto *ParallelExpr = Parallel.lookup(Key);
-    ASSERT_NE(SerialExpr, nullptr);
-    ASSERT_NE(ParallelExpr, nullptr);
-    EXPECT_EQ(evalLanguage(*SerialExpr, 4, 8),
-              evalLanguage(*ParallelExpr, 4, 8))
-        << Key;
-  }
-
-  EXPECT_TRUE(containsWord(Parallel, "root", "r"));
-  EXPECT_TRUE(containsWord(Parallel, "root", "Ll"));
-  EXPECT_TRUE(containsWord(Parallel, "root", "Lxa"));
-  EXPECT_TRUE(containsWord(Parallel, "root", "Rg"));
-  EXPECT_TRUE(containsWord(Parallel, "root", "Ryb"));
-  EXPECT_GE(Parallel.diagnostics().max_parallel_layer_width, 2u);
+  EXPECT_TRUE(containsWord(Result, "root", "r"));
+  EXPECT_TRUE(containsWord(Result, "root", "Ll"));
+  EXPECT_TRUE(containsWord(Result, "root", "Lxa"));
+  EXPECT_TRUE(containsWord(Result, "root", "Rg"));
+  EXPECT_TRUE(containsWord(Result, "root", "Ryb"));
 }
 
 TEST(PathSummaryEquationSolver, ForwardPathDirectionComposesAfterSource) {
@@ -174,7 +153,6 @@ TEST(PathSummaryEquationSolver, ForwardPathDirectionComposesAfterSource) {
   G.addEdge("mid", "exit", E.atom("b"));
 
   elimination::PathSummaryEquationOptions Options;
-  Options.EnableParallel = false;
   Options.Direction = elimination::PathSummaryEquationDirection::ForwardPath;
   elimination::PathSummaryEquationSolver<std::string, std::string> Solver(
       G, Options);
