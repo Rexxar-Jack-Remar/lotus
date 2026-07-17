@@ -672,7 +672,9 @@ TEST_F(PulseCheckerTest, ReallocAssignmentReportsUseAfterFree) {
   EXPECT_EQ(bugStep->inst, sink);
 }
 
+#ifndef LOTUS_GTEST_NO_MAIN
 int main(int argc, char **argv) {
   ::testing::InitGoogleTest(&argc, argv);
   return RUN_ALL_TESTS();
 }
+#endif

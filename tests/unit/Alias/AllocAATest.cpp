@@ -766,7 +766,9 @@ TEST_F(AllocAATest, CanPointToTheSameObject_SameValue_True) {
   EXPECT_TRUE(allocAA->canPointToTheSameObject(x, x));
 }
 
+#ifndef LOTUS_GTEST_NO_MAIN
 int main(int argc, char **argv) {
   ::testing::InitGoogleTest(&argc, argv);
   return RUN_ALL_TESTS();
 }
+#endif

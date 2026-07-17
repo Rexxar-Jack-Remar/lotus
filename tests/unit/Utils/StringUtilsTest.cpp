@@ -85,7 +85,9 @@ TEST(StringUtilsTest, HtmlEscapeString) {
   EXPECT_EQ(html_escape_string(input), expected);
 }
 
+#ifndef LOTUS_GTEST_NO_MAIN
 int main(int argc, char **argv) {
   ::testing::InitGoogleTest(&argc, argv);
   return RUN_ALL_TESTS();
 }
+#endif

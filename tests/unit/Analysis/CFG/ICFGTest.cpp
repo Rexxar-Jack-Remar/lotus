@@ -1145,7 +1145,9 @@ TEST_F(ICFGTest, EmptyFunction) {
   EXPECT_NE(emptyEntry, nullptr);
 }
 
+#ifndef LOTUS_GTEST_NO_MAIN
 int main(int argc, char **argv) {
   ::testing::InitGoogleTest(&argc, argv);
   return RUN_ALL_TESTS();
 }
+#endif

@@ -28,6 +28,64 @@ target_include_directories(lotus_test_harness_utils INTERFACE
 target_link_libraries(lotus_test_harness_utils INTERFACE
     ${LOTUS_TEST_HARNESS_BASE_LIBS})
 
+include(GoogleTest)
+
+function(add_lotus_test_suite test_name)
+    set(options DISCOVER_TESTS)
+    set(oneValueArgs TIMEOUT)
+    set(multiValueArgs
+        SOURCES
+        LINK_LIBS
+        INCLUDE_DIRS
+        COMPILE_DEFINITIONS
+        DEPENDS)
+    cmake_parse_arguments(LOTUS_SUITE "${options}" "${oneValueArgs}"
+        "${multiValueArgs}" ${ARGN})
+
+    if(NOT LOTUS_SUITE_SOURCES)
+        message(FATAL_ERROR
+            "add_lotus_test_suite(${test_name}) requires at least one source")
+    endif()
+
+    add_executable(${test_name} ${LOTUS_SUITE_SOURCES})
+    set_target_properties(${test_name} PROPERTIES
+        RUNTIME_OUTPUT_DIRECTORY ${LOTUS_TEST_BIN_DIR}
+        CXX_STANDARD 17
+        CXX_STANDARD_REQUIRED ON
+        CXX_EXTENSIONS OFF
+    )
+    target_include_directories(${test_name} PRIVATE
+        ${LOTUS_UNIT_TEST_COMMON_INCLUDES}
+        ${LOTUS_SUITE_INCLUDE_DIRS})
+    target_compile_definitions(${test_name} PRIVATE
+        LOTUS_GTEST_NO_MAIN
+        ${LOTUS_SUITE_COMPILE_DEFINITIONS})
+    target_link_libraries(${test_name}
+        lotus_test_utils
+        ${LOTUS_SUITE_LINK_LIBS})
+
+    if(LOTUS_SUITE_DEPENDS)
+        add_dependencies(${test_name} ${LOTUS_SUITE_DEPENDS})
+    endif()
+
+    if(LOTUS_SUITE_TIMEOUT)
+        set(test_timeout ${LOTUS_SUITE_TIMEOUT})
+    else()
+        set(test_timeout ${LOTUS_UNIT_TEST_TIMEOUT})
+    endif()
+
+    if(LOTUS_SUITE_DISCOVER_TESTS)
+        gtest_discover_tests(${test_name}
+            TEST_PREFIX "${test_name}."
+            WORKING_DIRECTORY ${CMAKE_BINARY_DIR})
+    else()
+        add_test(NAME ${test_name} COMMAND ${LOTUS_TEST_BIN_DIR}/${test_name})
+        set_tests_properties(${test_name} PROPERTIES
+            TIMEOUT ${test_timeout}
+            WORKING_DIRECTORY ${CMAKE_BINARY_DIR})
+    endif()
+endfunction()
+
 function(add_lotus_targeted_test test_name source_file)
     set(options)
     set(oneValueArgs)
@@ -41,25 +99,10 @@ function(add_lotus_targeted_test test_name source_file)
         set(source ${CMAKE_CURRENT_SOURCE_DIR}/${source_file})
     endif()
 
-    add_executable(${test_name} ${source})
-    set_target_properties(${test_name} PROPERTIES
-        RUNTIME_OUTPUT_DIRECTORY ${LOTUS_TEST_BIN_DIR}
-        CXX_STANDARD 17
-        CXX_STANDARD_REQUIRED ON
-        CXX_EXTENSIONS OFF
-    )
-    target_include_directories(${test_name} PRIVATE
-        ${LOTUS_UNIT_TEST_COMMON_INCLUDES}
-        ${LOTUS_TEST_INCLUDE_DIRS})
-    target_link_libraries(${test_name}
-        lotus_test_utils
-        ${LOTUS_TEST_LINK_LIBS})
-
-    add_test(NAME ${test_name} COMMAND ${LOTUS_TEST_BIN_DIR}/${test_name})
-    set_tests_properties(${test_name} PROPERTIES
-        TIMEOUT ${LOTUS_UNIT_TEST_TIMEOUT}
-        WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
-    )
+    add_lotus_test_suite(${test_name}
+        SOURCES ${source}
+        LINK_LIBS ${LOTUS_TEST_LINK_LIBS}
+        INCLUDE_DIRS ${LOTUS_TEST_INCLUDE_DIRS})
 endfunction()
 
 function(add_lotus_concurrency_test test_name source_file)
@@ -70,27 +113,11 @@ function(add_lotus_concurrency_test test_name source_file)
 endfunction()
 
 function(add_lotus_concurrency_test_suite test_name)
-    add_executable(${test_name} ${ARGN})
-    set_target_properties(${test_name} PROPERTIES
-        RUNTIME_OUTPUT_DIRECTORY ${LOTUS_TEST_BIN_DIR}
-        CXX_STANDARD 17
-        CXX_STANDARD_REQUIRED ON
-        CXX_EXTENSIONS OFF
-    )
-    target_include_directories(${test_name} PRIVATE
-        ${LOTUS_UNIT_TEST_COMMON_INCLUDES})
-    target_compile_definitions(${test_name} PRIVATE
-        LOTUS_GTEST_NO_MAIN)
-    target_link_libraries(${test_name}
-        lotus_test_utils
-        Concurrency
-        CanaryParallel)
-
-    add_test(NAME ${test_name} COMMAND ${LOTUS_TEST_BIN_DIR}/${test_name})
-    set_tests_properties(${test_name} PROPERTIES
-        TIMEOUT ${LOTUS_UNIT_TEST_TIMEOUT}
-        WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
-    )
+    add_lotus_test_suite(${test_name}
+        SOURCES ${ARGN}
+        LINK_LIBS
+            Concurrency
+            CanaryParallel)
 endfunction()
 
 function(add_lotus_analysis_test test_name source_file)
@@ -151,28 +178,12 @@ function(add_lotus_ir_test test_name source_file)
 endfunction()
 
 function(add_lotus_ir_test_suite test_name)
-    add_executable(${test_name} ${ARGN})
-    set_target_properties(${test_name} PROPERTIES
-        RUNTIME_OUTPUT_DIRECTORY ${LOTUS_TEST_BIN_DIR}
-        CXX_STANDARD 17
-        CXX_STANDARD_REQUIRED ON
-        CXX_EXTENSIONS OFF
-    )
-    target_include_directories(${test_name} PRIVATE
-        ${LOTUS_UNIT_TEST_COMMON_INCLUDES})
-    target_compile_definitions(${test_name} PRIVATE
-        LOTUS_GTEST_NO_MAIN)
-    target_link_libraries(${test_name}
-        lotus_test_utils
-        CanaryPDG
-        CanaryICFG
-        CanaryAliasAnalysisWrapper)
-
-    add_test(NAME ${test_name} COMMAND ${LOTUS_TEST_BIN_DIR}/${test_name})
-    set_tests_properties(${test_name} PROPERTIES
-        TIMEOUT ${LOTUS_UNIT_TEST_TIMEOUT}
-        WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
-    )
+    add_lotus_test_suite(${test_name}
+        SOURCES ${ARGN}
+        LINK_LIBS
+            CanaryPDG
+            CanaryICFG
+            CanaryAliasAnalysisWrapper)
 endfunction()
 
 function(add_lotus_svfg_test test_name source_file)
@@ -184,26 +195,12 @@ function(add_lotus_svfg_test test_name source_file)
 endfunction()
 
 function(add_lotus_svfg_test_suite test_name)
-    add_executable(${test_name} ${ARGN})
-    set_target_properties(${test_name} PROPERTIES
-        RUNTIME_OUTPUT_DIRECTORY ${LOTUS_TEST_BIN_DIR}
-        CXX_STANDARD 17
-        CXX_STANDARD_REQUIRED ON
-        CXX_EXTENSIONS OFF
-    )
-    target_include_directories(${test_name} PRIVATE
-        ${LOTUS_UNIT_TEST_COMMON_INCLUDES})
-    target_link_libraries(${test_name}
-        lotus_test_utils
-        CanaryICFG
-        SVFG
-        CanaryAliasAnalysisWrapper)
-
-    add_test(NAME ${test_name} COMMAND ${LOTUS_TEST_BIN_DIR}/${test_name})
-    set_tests_properties(${test_name} PROPERTIES
-        TIMEOUT ${LOTUS_UNIT_TEST_TIMEOUT}
-        WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
-    )
+    add_lotus_test_suite(${test_name}
+        SOURCES ${ARGN}
+        LINK_LIBS
+            CanaryICFG
+            SVFG
+            CanaryAliasAnalysisWrapper)
 endfunction()
 
 function(add_lotus_gsa_test test_name source_file)
@@ -213,24 +210,9 @@ function(add_lotus_gsa_test test_name source_file)
 endfunction()
 
 function(add_lotus_gsa_test_suite test_name)
-    add_executable(${test_name} ${ARGN})
-    set_target_properties(${test_name} PROPERTIES
-        RUNTIME_OUTPUT_DIRECTORY ${LOTUS_TEST_BIN_DIR}
-        CXX_STANDARD 17
-        CXX_STANDARD_REQUIRED ON
-        CXX_EXTENSIONS OFF
-    )
-    target_include_directories(${test_name} PRIVATE
-        ${LOTUS_UNIT_TEST_COMMON_INCLUDES})
-    target_link_libraries(${test_name}
-        lotus_test_utils
-        CanaryGSA)
-
-    add_test(NAME ${test_name} COMMAND ${LOTUS_TEST_BIN_DIR}/${test_name})
-    set_tests_properties(${test_name} PROPERTIES
-        TIMEOUT ${LOTUS_UNIT_TEST_TIMEOUT}
-        WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
-    )
+    add_lotus_test_suite(${test_name}
+        SOURCES ${ARGN}
+        LINK_LIBS CanaryGSA)
 endfunction()
 
 function(add_lotus_gvfg_test test_name source_file)
@@ -241,25 +223,11 @@ function(add_lotus_gvfg_test test_name source_file)
 endfunction()
 
 function(add_lotus_gvfg_test_suite test_name)
-    add_executable(${test_name} ${ARGN})
-    set_target_properties(${test_name} PROPERTIES
-        RUNTIME_OUTPUT_DIRECTORY ${LOTUS_TEST_BIN_DIR}
-        CXX_STANDARD 17
-        CXX_STANDARD_REQUIRED ON
-        CXX_EXTENSIONS OFF
-    )
-    target_include_directories(${test_name} PRIVATE
-        ${LOTUS_UNIT_TEST_COMMON_INCLUDES})
-    target_link_libraries(${test_name}
-        lotus_test_utils
-        CanaryGuardedValueFlow
-        ${Z3_LIBRARIES})
-
-    add_test(NAME ${test_name} COMMAND ${LOTUS_TEST_BIN_DIR}/${test_name})
-    set_tests_properties(${test_name} PROPERTIES
-        TIMEOUT ${LOTUS_UNIT_TEST_TIMEOUT}
-        WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
-    )
+    add_lotus_test_suite(${test_name}
+        SOURCES ${ARGN}
+        LINK_LIBS
+            CanaryGuardedValueFlow
+            ${Z3_LIBRARIES})
 endfunction()
 
 function(add_lotus_pointer_test test_name source_file)
@@ -386,27 +354,11 @@ function(add_lotus_ifdside_test test_name source_file)
 endfunction()
 
 function(add_lotus_ifdside_test_suite test_name)
-    add_executable(${test_name} ${ARGN})
-    set_target_properties(${test_name} PROPERTIES
-        RUNTIME_OUTPUT_DIRECTORY ${LOTUS_TEST_BIN_DIR}
-        CXX_STANDARD 17
-        CXX_STANDARD_REQUIRED ON
-        CXX_EXTENSIONS OFF
-    )
-    target_include_directories(${test_name} PRIVATE
-        ${LOTUS_UNIT_TEST_COMMON_INCLUDES})
-    target_compile_definitions(${test_name} PRIVATE
-        LOTUS_GTEST_NO_MAIN)
-    target_link_libraries(${test_name}
-        lotus_test_utils
-        IFDS
-        CanaryAliasAnalysisWrapper)
-
-    add_test(NAME ${test_name} COMMAND ${LOTUS_TEST_BIN_DIR}/${test_name})
-    set_tests_properties(${test_name} PROPERTIES
-        TIMEOUT ${LOTUS_UNIT_TEST_TIMEOUT}
-        WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
-    )
+    add_lotus_test_suite(${test_name}
+        SOURCES ${ARGN}
+        LINK_LIBS
+            IFDS
+            CanaryAliasAnalysisWrapper)
 endfunction()
 
 function(add_lotus_mono_test test_name source_file)

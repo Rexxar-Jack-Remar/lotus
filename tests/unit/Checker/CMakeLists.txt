@@ -1,24 +1,25 @@
 # Checker Unit Tests
 
-add_lotus_checker_test(pulse_checker_test Pulse/PulseCheckerTest.cpp)
-target_link_libraries(pulse_checker_test PulseChecker)
-add_lotus_checker_test(pulse_formula_test Pulse/PulseFormulaTest.cpp)
-target_link_libraries(pulse_formula_test PulseChecker)
-set_target_properties(pulse_formula_test PROPERTIES CXX_STANDARD 17)
-add_lotus_checker_test(concurrency_checker_test Concurrency/ConcurrencyCheckerTest.cpp)
-target_sources(concurrency_checker_test PRIVATE
-  Concurrency/ConcurrencyCheckerTestPart2.cpp
-  Concurrency/ConcurrencyCheckerTestPart3.cpp)
-target_link_libraries(concurrency_checker_test ConcurrencyChecker)
-add_lotus_checker_test(ae_checker_test AE/AECheckerTest.cpp)
-target_sources(ae_checker_test PRIVATE AE/AECheckerTestPart2.cpp)
-add_lotus_checker_test(kint_checker_test KINT/KINTCheckerTest.cpp)
-target_link_libraries(kint_checker_test CanaryKint)
-add_lotus_checker_test(saber_condition_allocator_test Saber/SaberConditionAllocatorTest.cpp)
-target_sources(saber_condition_allocator_test PRIVATE
-  Saber/SaberConditionAllocatorTestPart2.cpp)
-target_link_libraries(saber_condition_allocator_test Saber)
-target_compile_definitions(saber_condition_allocator_test PRIVATE USE_Z3)
-add_lotus_checker_test(report_formatting_test ReportFormattingTest.cpp)
-add_lotus_checker_test(checker_core_test Core/CheckerCoreTest.cpp)
-target_link_libraries(checker_core_test CheckerCore)
+add_lotus_test_suite(checker_tests
+  SOURCES
+    Pulse/PulseCheckerTest.cpp
+    Pulse/PulseFormulaTest.cpp
+    Concurrency/ConcurrencyCheckerTest.cpp
+    Concurrency/ConcurrencyCheckerTestPart2.cpp
+    Concurrency/ConcurrencyCheckerTestPart3.cpp
+    AE/AECheckerTest.cpp
+    AE/AECheckerTestPart2.cpp
+    KINT/KINTCheckerTest.cpp
+    Saber/SaberConditionAllocatorTest.cpp
+    Saber/SaberConditionAllocatorTestPart2.cpp
+    ReportFormattingTest.cpp
+    Core/CheckerCoreTest.cpp
+  LINK_LIBS
+    AE
+    CanaryAliasAnalysisWrapper
+    PulseChecker
+    ConcurrencyChecker
+    CanaryKint
+    Saber
+    CheckerCore
+  COMPILE_DEFINITIONS USE_Z3)

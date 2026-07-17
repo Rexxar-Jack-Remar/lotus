@@ -77,20 +77,12 @@ endforeach()
 
 add_custom_target(type_hierarchy_ll_fixtures DEPENDS ${TYPE_HIERARCHY_LL_OUTPUTS})
 
-# Add DIBasedTypeHierarchy tests
-add_lotus_typehierarchy_test(dibased_type_hierarchy_test
-  DIBasedTypeHierarchyTest.cpp
-)
-target_sources(dibased_type_hierarchy_test PRIVATE
-  DIBasedTypeHierarchyTestPart2.cpp)
-add_dependencies(dibased_type_hierarchy_test type_hierarchy_ll_fixtures)
-target_compile_definitions(dibased_type_hierarchy_test PRIVATE
-  LOTUS_TYPE_HIERARCHY_LL_DIR="${TYPE_HIERARCHY_LL_DIR}")
-
-# Add DIBasedTypeHierarchy serialization tests
-add_lotus_typehierarchy_test(dibased_type_hierarchy_serialization_test
-  DIBasedTypeHierarchySerializationTest.cpp
-)
-add_dependencies(dibased_type_hierarchy_serialization_test type_hierarchy_ll_fixtures)
-target_compile_definitions(dibased_type_hierarchy_serialization_test PRIVATE
-  LOTUS_TYPE_HIERARCHY_LL_DIR="${TYPE_HIERARCHY_LL_DIR}")
+add_lotus_test_suite(type_hierarchy_tests
+  SOURCES
+    DIBasedTypeHierarchyTest.cpp
+    DIBasedTypeHierarchyTestPart2.cpp
+    DIBasedTypeHierarchySerializationTest.cpp
+  LINK_LIBS CanaryTypeHierarchy
+  COMPILE_DEFINITIONS
+    LOTUS_TYPE_HIERARCHY_LL_DIR="${TYPE_HIERARCHY_LL_DIR}"
+  DEPENDS type_hierarchy_ll_fixtures)

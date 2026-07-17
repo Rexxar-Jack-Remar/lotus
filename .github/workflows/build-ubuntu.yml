@@ -42,12 +42,22 @@ jobs:
         uses: actions/cache@v4
         with:
           path: build
-          key: ${{ runner.os }}-${{ matrix.ubuntu-version }}-${{ matrix.compiler }}-${{ matrix.build-type }}-cmake-${{ hashFiles('**/CMakeLists.txt', '**/*.cmake') }}
+          key: ${{ runner.os }}-${{ matrix.ubuntu-version }}-${{ matrix.compiler }}-${{ matrix.build-type }}-cmake-v2-${{ hashFiles('**/CMakeLists.txt', '**/*.cmake') }}
           restore-keys: |
-            ${{ runner.os }}-${{ matrix.ubuntu-version }}-${{ matrix.compiler }}-${{ matrix.build-type }}-cmake-
+            ${{ runner.os }}-${{ matrix.ubuntu-version }}-${{ matrix.compiler }}-${{ matrix.build-type }}-cmake-v2-
 
       - name: Build and install
         run: |
+          debug_flags=()
+          if [[ "${{ matrix.build-type }}" == "Debug" ]]; then
+            # Keep assertions and unoptimized Debug behavior, but avoid duplicating
+            # full debug information into every statically linked tool and test.
+            debug_flags+=(
+              "-DCMAKE_C_FLAGS_DEBUG=-O0 -g0"
+              "-DCMAKE_CXX_FLAGS_DEBUG=-O0 -g0"
+            )
+          fi
+
           mkdir -p build && cd build
           cmake -DCMAKE_INSTALL_PREFIX="$HOME/lotus" \
                 -DCMAKE_BUILD_TYPE="${{ matrix.build-type }}" \
@@ -55,7 +65,8 @@ jobs:
                 -DLLVM_CONFIG_PATH="/usr/bin/llvm-config-14" \
                 -DLLVM_DIR="/usr/lib/llvm-14/lib/cmake/llvm" \
                 -DZ3_DIR="/usr" \
-                -DENABLE_SEAHORN=OFF ..
+                -DENABLE_SEAHORN=OFF \
+                "${debug_flags[@]}" ..
           make -j$(nproc) && make install
       - name: Add Lotus to the path
         run: |

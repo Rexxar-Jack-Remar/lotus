@@ -1,10 +1,20 @@
 # Utility Unit Tests
 
-add_lotus_utils_test(graph_slicer_test GraphSlicerTest.cpp)
+add_lotus_test_suite(utils_tests
+  SOURCES
+    GraphSlicerTest.cpp
+    StringUtilsTest.cpp
+    PathExpressionsTest.cpp
+    PipelineSchedulerTest.cpp
+    PipelineSchedulerTimeoutTest.cpp
+    ParallelSchedulerPassTest.cpp
+    ThreadSafeTest.cpp
+  LINK_LIBS
+    CanaryADT
+    CanaryLLVMUtils
+    CanaryFormats
+    CanaryParallel)
 
-# Other Tests
-add_lotus_utils_test(string_utils_test StringUtilsTest.cpp)
-add_lotus_utils_test(path_expressions_test PathExpressionsTest.cpp)
 if(TARGET Crab)
     add_lotus_targeted_test(crab_machine_int_domain_test CrabMachineIntDomainTest.cpp
         LINK_LIBS
@@ -14,10 +24,6 @@ if(TARGET Crab)
 else()
     message(STATUS "Skipping crab_machine_int_domain_test: Crab target is not available")
 endif()
-add_lotus_utils_test(pipeline_scheduler_test PipelineSchedulerTest.cpp)
-add_lotus_utils_test(pipeline_scheduler_timeout_test PipelineSchedulerTimeoutTest.cpp)
-add_lotus_utils_test(parallel_scheduler_pass_test ParallelSchedulerPassTest.cpp)
-add_lotus_utils_test(thread_safe_test ThreadSafeTest.cpp)
 
 add_executable(thread_pool_harness_test ThreadPoolHarnessTest.cpp)
 set_target_properties(thread_pool_harness_test PROPERTIES

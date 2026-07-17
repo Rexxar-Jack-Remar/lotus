@@ -1,33 +1,31 @@
-add_lotus_ir_test_suite(ir_pdg_tests
-  PDGQueryTest.cpp
-  PDGSupportUtilsTest.cpp
-  CypherQueryTest.cpp
-  PropertyBasedSlicingTest.cpp)
-
-add_lotus_svfg_test_suite(ir_svfg_tests
-  SVFGSerializerTest.cpp
-  SVFGMemorySSATest.cpp
-  SVFGMemorySSATestPart2.cpp)
-
-add_lotus_gsa_test_suite(ir_gsa_tests
-  GSATest.cpp)
-
-add_lotus_gvfg_test_suite(ir_gvfg_tests
-  GuardedValueFlowTest.cpp
-  GuardedValueFlowSerializerTest.cpp
-  GuardedValueFlowAdapterShapeTest.cpp
-  GuardedValueFlowParityTest.cpp
-  GuardedValueFlowSolverTest.cpp)
-
-add_lotus_targeted_test(ipo_memoryssa_test IPOMemorySSATest.cpp
+add_lotus_test_suite(ir_tests
+  SOURCES
+    PDGQueryTest.cpp
+    PDGSupportUtilsTest.cpp
+    CypherQueryTest.cpp
+    PropertyBasedSlicingTest.cpp
+    SVFGSerializerTest.cpp
+    SVFGMemorySSATest.cpp
+    SVFGMemorySSATestPart2.cpp
+    GSATest.cpp
+    GuardedValueFlowTest.cpp
+    GuardedValueFlowSerializerTest.cpp
+    GuardedValueFlowAdapterShapeTest.cpp
+    GuardedValueFlowParityTest.cpp
+    GuardedValueFlowSolverTest.cpp
+    IPOMemorySSATest.cpp
+    SeaDsaFieldTypeTest.cpp
   LINK_LIBS
+    CanaryPDG
+    CanaryICFG
+    CanaryAliasAnalysisWrapper
+    SVFG
+    CanaryGSA
+    CanaryGuardedValueFlow
     CanaryMemorySSA
     CanaryOptimizationIPO
     SeaDsaAnalysis
     LLVMAsmParser
     LLVMIRReader
-    LLVMPasses)
-
-add_lotus_targeted_test(seadsa_field_type_test SeaDsaFieldTypeTest.cpp
-  LINK_LIBS
-    SeaDsaAnalysis)
+    LLVMPasses
+    ${Z3_LIBRARIES})

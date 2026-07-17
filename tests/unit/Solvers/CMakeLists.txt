@@ -1,6 +1,11 @@
-add_lotus_solver_test(sym_abs_test SymAbsTest.cpp)
-
-add_lotus_egraph_test(egraph_core_test EGraphCoreTest.cpp)
-add_lotus_egraph_test(egraph_simple_test EGraphSimpleTest.cpp)
-add_lotus_egraph_test(egraph_math_test EGraphMathTest.cpp)
-add_lotus_egraph_test(egraph_feature_test EGraphFeatureTest.cpp)
+add_lotus_test_suite(solver_tests
+  SOURCES
+    SymAbsTest.cpp
+    EGraphCoreTest.cpp
+    EGraphSimpleTest.cpp
+    EGraphMathTest.cpp
+    EGraphFeatureTest.cpp
+  LINK_LIBS
+    SymAbs
+    LotusEGraph
+    ${Z3_LIBRARIES})

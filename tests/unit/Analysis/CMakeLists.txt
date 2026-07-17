@@ -86,3 +86,18 @@ add_subdirectory(ParameterSummary)
 add_subdirectory(Profile)
 add_subdirectory(Purity)
 add_subdirectory(SCCP)
+
+add_lotus_test_suite(analysis_misc_tests
+  SOURCES
+    CFG/ICFGTest.cpp
+    Multiplicity/MultiplicityClassifierTest.cpp
+    ParameterSummary/ParameterEffectSummaryTest.cpp
+    Profile/HotProfileTest.cpp
+    SCCP/SCCPTest.cpp
+  LINK_LIBS
+    CanaryICFG
+    CanaryMultiplicity
+    CanaryParameterSummary
+    CanaryProfile
+    CanarySCCP
+    LLVMAnalysis)

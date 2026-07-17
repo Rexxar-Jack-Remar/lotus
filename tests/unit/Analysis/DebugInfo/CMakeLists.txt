@@ -1,4 +1,7 @@
 # Analysis DebugInfo Unit Tests
 
-add_lotus_debug_info_test(debug_info_analysis_test DebugInfoAnalysisTest.cpp)
-add_lotus_debug_info_test(unique_ir_marker_test UniqueIRMarkerTest.cpp)
+add_lotus_test_suite(debug_info_analysis_tests
+  SOURCES
+    DebugInfoAnalysisTest.cpp
+    UniqueIRMarkerTest.cpp
+  LINK_LIBS CanaryDebugInfo)
