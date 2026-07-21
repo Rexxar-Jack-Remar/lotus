@@ -6,11 +6,19 @@ Lotus provides comprehensive bug detection capabilities for finding security vul
 Overview
 --------
 
-Lotus includes multiple bug detection tools:
+Lotus provides a unified checker frontend (``lotus-check``) with multiple subcommands:
 
-1. **Kint**: Integer-related bugs (overflow, division by zero, bad shift, array bounds)
-2. **Taint Analysis**: Information flow and injection vulnerabilities
-3. **Concurrency Checker**: Race conditions, deadlocks, OpenMP misuse, and MPI protocol bugs
+1. **kint**: Integer-related bugs (overflow, division by zero, bad shift, array bounds)
+2. **taint**: Information flow and injection vulnerabilities
+3. **concur**: Race conditions, deadlocks, OpenMP misuse, and MPI protocol bugs
+4. **pulse**: Pulse analysis for memory safety
+5. **fitx**: Fix-based checker for use-after-free etc.
+6. **saber**: Value-flow-guided bug detection
+7. **ae**: Abstract execution checker
+8. **generic**: Custom checkers via declarative rules
+9. **symex**: Symbolic execution engine
+
+Run ``./build/bin/lotus-check --list-checkers`` to see all available subcommands.
 
 Bug Categories
 --------------
@@ -613,9 +621,9 @@ CI/CD Pipeline
    # Build program
    clang -emit-llvm -c -g source.c -o source.bc
    
-   # Run checkers
-   ./lotus-kint -check-all source.ll > kint_results.txt
-   ./lotus-taint source.bc > taint_results.txt
+   # Run checkers via the unified lotus-check frontend
+   ./build/bin/lotus-check kint source.ll --check-all > kint_results.txt
+   ./build/bin/lotus-check taint source.bc > taint_results.txt
    
    # Check for bugs
    if grep -q "Bug" *.txt; then

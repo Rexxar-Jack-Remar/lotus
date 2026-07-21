@@ -994,7 +994,7 @@ When adding new features:
 1. Update relevant ``.rst`` files in ``docs/source/``
 2. Add API documentation in ``api_reference.rst``
 3. Add tutorial in ``tutorials.rst`` if applicable
-4. Update ``TOOLS.md`` for new command-line tools
+4. Add new tool documentation in ``docs/source/tools/``
 
 Build documentation:
 

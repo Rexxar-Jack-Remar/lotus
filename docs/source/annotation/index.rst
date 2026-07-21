@@ -10,3 +10,4 @@ This section covers the annotation system for specifying analysis properties.
    modref
    pointer_effects
    taint_config
+   api_spec

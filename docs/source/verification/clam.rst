@@ -5,7 +5,7 @@ CLAM is a static analysis framework based on abstract interpretation over numeri
 
 **Location**: ``lib/Verification/clam/``
 
-**Headers**: ``include/Apps/clam/``
+**Headers**: ``include/Verification/clam/``
 
 **Tools**: ``tools/verifier/clam/`` (command-line frontends)
 
@@ -112,8 +112,8 @@ Programmatic Usage
 
 .. code-block:: cpp
 
-   #include "Apps/clam/Clam.hh"
-   #include "Apps/clam/CfgBuilder.hh"
+   #include "Verification/clam/Clam.hh"
+   #include "Verification/clam/CfgBuilder.hh"
    
    // Create CFG builder
    CrabBuilderManager builder(module);

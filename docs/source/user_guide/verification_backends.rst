@@ -1,19 +1,19 @@
-Verification Backend Abstraction
-=================================
+Verification Driver Abstraction
+================================
 
-Lotus provides a unified interface to multiple verification backends, allowing you to switch between different tools seamlessly.
+Lotus provides a unified driver interface to multiple verification backends, allowing you to switch between different tools seamlessly.
 
 Overview
 --------
 
-The verification backend abstraction layer provides:
+The verification driver abstraction layer provides:
 
 * **Unified interface**: Same API for all verification tools
 * **Automatic backend selection**: Choose backend based on property type
 * **Result normalization**: Consistent result format across backends
 * **Easy integration**: Add new backends without changing client code
 
-Supported Backends
+Supported Drivers
 ------------------
 
 * **seahorn**: SeaHorn CHC-based verification (supports all properties)
@@ -32,27 +32,27 @@ Property Classes
 Usage
 -----
 
-Basic usage with ``lotus-verify``:
+Lotus builds per-backend verification frontends. The drivers are split across
+separate executables:
 
 .. code-block:: bash
 
-   # Auto-select backend
-   lotus-verify input.bc --property unreach-call --backend auto --run
+   # SymAbsAI
+   ./build/bin/lotus-verify-symabs-ai input.bc --property unreach-call
 
-   # Specify backend explicitly
-   lotus-verify input.bc --property memsafety --backend seahorn --run
+   # Sifa
+   ./build/bin/lotus-verify-sifa input.bc --function main
 
-   # With timeout
-   lotus-verify input.bc --property overflow --backend clam --timeout 60 --run
+   # CLAM (requires -DLOTUS_ENABLE_CLAM=ON)
+   ./build/bin/clam input.bc --crab-check=assert
 
-   # Pass extra arguments to backend
-   lotus-verify input.bc --property unreach-call --backend seahorn \
-     --backend-arg --horn-cex --run
+   # SeaHorn (requires -DLOTUS_ENABLE_SEAHORN=ON)
+   ./build/bin/seahorn input.bc
 
 Result Format
 -------------
 
-All backends normalize results to a standard format:
+All drivers normalize results to a standard format:
 
 * **true**: Property holds (no error found)
 * **false**: Property violated (error found)
@@ -65,9 +65,8 @@ Example Output
 
 .. code-block:: text
 
-   backend: seahorn
+   driver: seahorn
    property: unreach-call
-   command: seahorn input.bc
    result: true
    message: Property holds (no error found)
    exit-code: 0
@@ -77,21 +76,21 @@ Programmatic Usage
 
 .. code-block:: cpp
 
-   #include "Verification/Backend/Backend.h"
+   #include "Verification/Driver/Backend.h"
    
-   using namespace lotus::verification::backend;
+   using namespace lotus::verification::driver;
    
-   BackendRegistry &reg = BackendRegistry::instance();
-   auto backend = reg.create("seahorn");
+   DriverRegistry &reg = DriverRegistry::instance();
+   auto driver = reg.create("seahorn");
    
    VerificationTask task;
    task.inputBitcode = "input.bc";
    task.property = PropertyClass::Reachability;
    task.timeoutSeconds = 60;
    
-   auto cmd = backend->buildCommand(task);
+   auto cmd = driver->buildCommand(task);
    // Execute command...
-   VerificationResultInfo result = backend->parseResult(output, exitCode);
+   VerificationResultInfo result = driver->parseResult(output, exitCode);
    
    if (result.isSafe()) {
      // Property holds
@@ -99,16 +98,16 @@ Programmatic Usage
      // Property violated
    }
 
-Adding New Backends
+Adding New Drivers
 -------------------
 
-To add a new backend, implement the ``IBackend`` interface:
+To add a new driver, implement the ``IDriver`` interface:
 
 .. code-block:: cpp
 
-   class MyBackend final : public IBackend {
+   class MyDriver final : public IDriver {
    public:
-     const char *name() const override { return "mybackend"; }
+     const char *name() const override { return "mydriver"; }
      
      bool supports(PropertyClass property) const override {
        return property == PropertyClass::Reachability;
@@ -116,7 +115,7 @@ To add a new backend, implement the ``IBackend`` interface:
      
      std::vector<std::string>
      buildCommand(const VerificationTask &task) const override {
-       return {"mybackend", task.inputBitcode};
+       return {"mydriver", task.inputBitcode};
      }
      
      VerificationResultInfo parseResult(const std::string &output,
@@ -127,4 +126,4 @@ To add a new backend, implement the ``IBackend`` interface:
      }
    };
 
-Then register it in ``BackendRegistry::create()``.
+Then register it in ``DriverRegistry::create()``.

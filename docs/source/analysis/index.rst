@@ -36,6 +36,13 @@ At a glance:
 - **Multiplicity** (``lib/Analysis/Multiplicity``): Allocation multiplicity
   classification — classifies global, stack, and heap allocations as
   *Unique* or *Summary*. See :doc:`multiplicity`.
+- **Purity** (``lib/Analysis/Purity``): Function-level purity and side-effect
+  analysis — classifies functions as *Const*, *Pure*, *Impure*, or *Unknown*
+  using attribute inference, MemorySSA summaries, and external summary stores.
+  See :doc:`purity`.
+- **Profile** (``lib/Analysis/Profile``): Profile-guided hot-code detection
+  using LLVM's ``BlockFrequencyInfo`` and ``BranchProbabilityInfo`` for
+  instruction, basic-block, and loop frequency queries. See :doc:`profile`.
 
 
 Higher-level analyzers such as CLAM and SymAbsAI build on these components;
@@ -53,3 +60,5 @@ details.
    sccp
    parameter_summary
    multiplicity
+   purity
+   profile

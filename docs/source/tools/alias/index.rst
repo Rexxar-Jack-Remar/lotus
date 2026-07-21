@@ -87,7 +87,7 @@ sensitivities and solver algorithms.
 
    ./build/bin/lotus-alias-aser-aa [options] input.bc
 
-**Key Options** (see also :doc:`../../analysis/alias_analysis` and ``TOOLS.md``):
+**Key Options** (see also :doc:`../../analysis/alias_analysis`):
 
 - **Analysis mode**:
 
@@ -120,24 +120,10 @@ DFPA (dfpa)
 -----------
 
 Demand-refined function-pointer analysis for indirect-call resolution.
-
-**Binary**: ``dfpa``
-**Location**: historical frontend removed from the current tree
-
-**Usage**:
-
-.. code-block:: bash
-
-   ./build/bin/dfpa [options] input.bc
-
-Key options:
-
-- ``-indirect-ctx-k=<N>`` – selective context depth on indirect edges
-- ``-refine-ambiguous-only=<bool>`` – refine only unresolved indirect calls
-- ``-max-offset-depth=<N>`` – bound offset-path depth
-- ``-max-demand-states=<N>`` – demand refinement state budget
-- ``-enable-signature-filter=<bool>`` – intersect candidates with signature matches
-- ``-output-file=<path|cout>`` – dump refined targets
+The DFPA library is still available (``lib/Alias/Specialized/DFPA/``) but
+the standalone ``dfpa`` CLI frontend has been removed from the current tree.
+Use ``lotus-alias-call-graph`` with ``-cg-type=dfpa`` to invoke DFPA
+indirect-call resolution programmatically.
 
 Call Graph Construction (lotus-alias-call-graph)
 ------------------------------------

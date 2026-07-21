@@ -22,6 +22,7 @@ SMTSampler).
    stingx
    egraphs_simp
    fpsolve
+   libsmt
 
 Third-Party Libraries
 ---------------------

@@ -86,7 +86,7 @@ Utilities and Reachability
 
 See :doc:`../utils/index` and :doc:`../cfl/index` for extended guides.
 
-* **cJSON** – Lightweight JSON parser (``include/Support/cJSON.h``).
+* **cJSON** – Lightweight JSON parser (``include/Utils/Formats/cJSON.h``).
 * **Transform** – LLVM bitcode transformation passes housed in ``lib/Transform``.
 * **CFL Reachability** – General-purpose CFL reachability utilities and
   tooling (``tools/cfl``)

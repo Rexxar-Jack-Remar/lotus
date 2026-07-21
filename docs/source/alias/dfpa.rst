@@ -7,7 +7,7 @@ DFPA
 
 **Implementation**: ``lib/Alias/Specialized/DFPA/``
 
-**Tool**: ``dfpa`` frontend currently not present in ``tools/alias/`` in this tree
+**Tool**: the standalone ``dfpa`` frontend is no longer present in this tree; invoke DFPA via ``lotus-alias-call-graph -cg-type=dfpa``
 
 Overview
 --------
@@ -28,7 +28,7 @@ Key pieces
 Configuration knobs
 -------------------
 
-The pass and the ``dfpa`` tool expose several important tuning parameters:
+The pass exposes several important tuning parameters (also configurable via ``lotus-alias-call-graph -cg-type=dfpa``):
 
 - ``indirect_ctx_k``: selective context depth on indirect edges.
 - ``refine_ambiguous_only``: focus demand refinement on unresolved calls.

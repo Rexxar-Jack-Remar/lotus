@@ -48,6 +48,10 @@ The source tree is grouped by subdirectory under ``include/Concurrency/`` and
 - ``Memory/``: ``EscapeAnalysis`` and ``StaticThreadSharingAnalysis``
 - ``JoinTarget/``: ``JoinTargetAnalysis``
 - ``MPI/``: ``MPIAnalysis`` and its process, collective, rank, and RMA analyses
+- ``CUDA/``: ``CUDAAnalysis``, ``CUDAFunctionSummary``, ``CUDASemantics``, and
+  ``PTXAnalyzer`` for GPU thread/block hierarchy reasoning
+- ``LinuxKernel/``: ``LinuxKernelAnalysis``, ``LinuxKernelLockAnalysis``, and
+  ``LinuxKernelRCUAnalysis`` for kernel concurrency primitives
 
 ``Concurrency/MPI/`` models MPI communication in the SPMD setting. It complements
 the shared-memory analyses above, but it is not another thread library layered on

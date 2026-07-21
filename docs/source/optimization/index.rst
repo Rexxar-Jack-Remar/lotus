@@ -105,3 +105,4 @@ Typical consumers of this subtree use one of these patterns:
    ip
    pe
    swprefetching
+   pass_ordering

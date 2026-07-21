@@ -2,8 +2,8 @@ Solver Tools
 ============
 
 This page documents the small command-line front-ends under ``tools/solver/``.
-At present, only ``owl`` is built by ``tools/solver/CMakeLists.txt``. ``slot``
-and ``staub`` remain source-present experimental tools.
+At present, only ``owl`` is wired into the build (requires ``-DLOTUS_ENABLE_OWL=ON``).
+``slot`` and ``staub`` remain source-present experimental tools.
 
 OWL – SMT/Model Checking Front-End
 ----------------------------------
@@ -14,7 +14,7 @@ It feeds SAT or SMT problems to the configured solver stack.
 **Binary**: ``owl``  
 **Location**: ``tools/solver/owl.cpp``
 
-**Build status**: built by default from ``tools/solver/CMakeLists.txt``.
+**Build status**: built only when ``-DLOTUS_ENABLE_OWL=ON``.
 
 **Usage**:
 

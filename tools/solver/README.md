@@ -10,7 +10,7 @@ cmake -S . -B build -DCMAKE_BUILD_TYPE=Debug
 cmake --build build -j
 ```
 
-At the moment, `tools/solver/CMakeLists.txt` builds `owl` by default. The
+At the moment, `tools/solver/CMakeLists.txt` builds `owl` only when `-DLOTUS_ENABLE_OWL=ON`. The
 `slot.cpp` and `staub.cpp` sources remain in the tree as experimental tools and
 are not wired into the default build yet.
 
@@ -18,7 +18,7 @@ are not wired into the default build yet.
 
 | Tool | Status | Purpose |
 | --- | --- | --- |
-| `owl` | built by default | Solves CNF and SMT-LIB2 inputs via the LIBSMT-based frontend. |
+| `owl` | built only when `LOTUS_ENABLE_OWL=ON` | Solves CNF and SMT-LIB2 inputs via the LIBSMT-based frontend. |
 | `slot` | source present, not built by default | Translates SMT-LIB2 formulas to LLVM IR and optionally runs optimization passes. |
 | `staub` | source present, not built by default | Rewrites SMT formulas with abstract-interpretation-guided integer or floating-point widths. |
 
