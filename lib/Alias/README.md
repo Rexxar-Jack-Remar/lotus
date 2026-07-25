@@ -7,15 +7,15 @@ This directory contains various alias analysis implementations and toolkits used
 | Analysis | Tool/Command | Analysis Type | Flow-Sensitive | Context-Sensitive | Field-Sensitive | Third-Party | Notes |
 |----------|--------------|---------------|----------------|-------------------|-----------------|-------------|-------|
 | **SparrowAA** | `lotus-alias-sparrow-aa` | Inclusion-based | ❌ No | ✅ Yes (CI, 1-CFA, 2-CFA, etc.) | ❌ No | ❌ No | More graph simplification algorithms; no on-the-fly callgraph construction |
-| **AserPTA** | `lotus-alias-aser-aa` | Inclusion-based | ❌ No | ✅ Yes (CI, 1-CFA, 2-CFA, Origin) | ✅ Yes | ✅ Yes (AserPTA) | On-the-fly callgraph construction; supports both field-insensitive and field-sensitive modes |
+| **AserPTA** | `lotus-alias-aser-aa` | Inclusion-based | ❌ No | ✅ Yes (CI, 1-CFA, 2-CFA, Origin) | ✅ Yes | ✅ Adapted from AserPTA | On-the-fly callgraph construction; supports both field-insensitive and field-sensitive modes; adapted and upgraded to LLVM 14.x |
 | **CFL (LLVM)** | - | CFL-reachability | ❌ No | ❌ No | - | ✅ Yes (LLVM) | Via alias wrapper (libLLVMAnalysis) |
 | **DDA** | `dda` | Demand-driven value-flow | ✅ Yes | Optional (`FlowDDA` / `ContextDDA`) | ✅ Yes | ❌ No | Migrated from SVF concepts, but reimplemented natively in Lotus |
 | **DyckAA** | - | Unification-based | ❌ No | ❌ No | - | ❌ No | - |
 | **Dynamic** | - | Dynamic | - | - | - | ❌ No | Runtime analysis |
 | **FPA** | `lotus-alias-fpa` | Type-based | - | - | - | ❌ No | Function pointer analysis |
 | **LotusAA** | `lotus-alias-lotus-aa` | Inclusion-based | ✅ Yes | ✅ Yes | - | ❌ No | Native Lotus analysis; flow- and context-sensitive |
-| **seadsa** | `lotus-alias-sea-dsa-dg`, `lotus-alias-seadsa-tool` | Unification-based | ❌ No | ✅ Yes | - | ✅ Yes (SeaDsa) | Context-sensitive heap (heap cloning) |
-| **SRAA** | - | Range-based | ❌ No | ❌ No | - | ✅ Yes (CGO'17 SRAA) | Flow- and context-insensitive |
+| **seadsa** | `lotus-alias-sea-dsa-dg`, `lotus-alias-seadsa-tool` | Unification-based | ❌ No | ✅ Yes | - | ✅ Yes (SeaDsa) | Context-sensitive heap (heap cloning); Boost dependency removed |
+| **SRAA** | - | Range-based | ❌ No | ❌ No | - | ❌ No (based on CGO'17 paper) | Flow- and context-insensitive; upgraded to LLVM 14.x |
 | **UnderApproxAA** | - | Pattern-based | - | - | - | ❌ No | Must-alias analysis |
 | **AllocAA** | - | - | - | - | - | ❌ No | - |
 | **TPA** | `lotus-alias-tpa` | Inclusion-based | ✅ Yes | ✅ Yes (k-limiting) | - | ❌ No | Flow- and context-sensitive with k-limiting |
