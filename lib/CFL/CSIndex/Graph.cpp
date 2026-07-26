@@ -464,13 +464,34 @@ vector<string> Graph::split(const string &s, char delim) {
  * Algorithm: Worklist-based propagation that matches positive labels with
  * corresponding negative labels to build inter-procedural summary edges.
  */
-void Graph::build_summary_edges() {
+void Graph::build_summary_edges(bool record_witnesses) {
   std::set<std::pair<int, int>> WorkList;
   std::map<int, std::set<int>> PathEdge;
-  auto propagate = [&PathEdge, &WorkList](int s, int t) {
+  std::map<std::pair<int, int>, std::vector<int>> path_witnesses;
+
+  summary_witnesses.clear();
+
+  auto append_path = [](const std::vector<int> &prefix,
+                        const std::vector<int> &suffix) {
+    std::vector<int> result = prefix;
+    if (suffix.empty())
+      return result;
+
+    size_t begin = 0;
+    if (!result.empty() && result.back() == suffix.front())
+      begin = 1;
+    result.insert(result.end(), suffix.begin() + begin, suffix.end());
+    return result;
+  };
+
+  auto propagate = [&PathEdge, &WorkList, &path_witnesses,
+                    record_witnesses](int s, int t,
+                                      const std::vector<int> &witness) {
     if (!PathEdge[s].count(t)) {
       PathEdge[s].insert(t);
       WorkList.emplace(s, t);
+      if (record_witnesses)
+        path_witnesses[{s, t}] = witness;
     }
   };
 
@@ -479,6 +500,8 @@ void Graph::build_summary_edges() {
     auto &e = it.first;
     PathEdge[e.first].insert(e.first);
     WorkList.emplace(e.first, e.first);
+    if (record_witnesses)
+      path_witnesses[{e.first, e.first}] = {e.first};
     actualOut.insert(e.second);
     formalout.insert(e.first);
   }
@@ -496,12 +519,29 @@ void Graph::build_summary_edges() {
 
     if (actualOut.count(v)) {
       for (auto x : summary_edges[v]) {
-        propagate(x, w);
+        if (record_witnesses) {
+          const auto summary_it = summary_witnesses.find({x, v});
+          const auto path_it = path_witnesses.find({v, w});
+          assert(summary_it != summary_witnesses.end());
+          assert(path_it != path_witnesses.end());
+          propagate(x, w,
+                    append_path(summary_it->second, path_it->second));
+        } else {
+          propagate(x, w, {});
+        }
       }
 
       for (auto x : graph[v].inList) {
         if (!pos_label_map.count({x, v}) && !neg_label_map.count({x, v})) {
-          propagate(x, w);
+          if (record_witnesses) {
+            const auto path_it = path_witnesses.find({v, w});
+            assert(path_it != path_witnesses.end());
+            std::vector<int> witness = {x};
+            witness = append_path(witness, path_it->second);
+            propagate(x, w, witness);
+          } else {
+            propagate(x, w, {});
+          }
         }
       }
     } else if (formalin.count(v)) {
@@ -519,11 +559,30 @@ void Graph::build_summary_edges() {
             int y = yit->first.second;
             int label2 = yit->second;
             if (label > 0 && label + label2 == 0) {
+              std::vector<int> summary_witness;
+              if (record_witnesses) {
+                const auto path_it = path_witnesses.find({v, w});
+                assert(path_it != path_witnesses.end());
+                summary_witness = {x};
+                summary_witness =
+                    append_path(summary_witness, path_it->second);
+                summary_witness.push_back(y);
+              }
+
               if (!hasEdge(x, y)) {
-                summary_edges[y].insert(x);
+                const bool inserted = summary_edges[y].insert(x).second;
+                if (record_witnesses && inserted)
+                  summary_witnesses[{x, y}] = summary_witness;
               }
               for (auto a : PathEdge[y]) {
-                propagate(x, a);
+                if (record_witnesses) {
+                  const auto path_it = path_witnesses.find({y, a});
+                  assert(path_it != path_witnesses.end());
+                  propagate(x, a,
+                            append_path(summary_witness, path_it->second));
+                } else {
+                  propagate(x, a, {});
+                }
               }
             }
           }
@@ -533,7 +592,15 @@ void Graph::build_summary_edges() {
       // default
       for (auto x : graph[v].inList) {
         if (!pos_label_map.count({x, v}) && !neg_label_map.count({x, v})) {
-          propagate(x, w);
+          if (record_witnesses) {
+            const auto path_it = path_witnesses.find({v, w});
+            assert(path_it != path_witnesses.end());
+            std::vector<int> witness = {x};
+            witness = append_path(witness, path_it->second);
+            propagate(x, w, witness);
+          } else {
+            propagate(x, w, {});
+          }
         }
       }
     }
@@ -690,6 +757,18 @@ size_t Graph::summary_edge_size() {
     ret += it.second.size();
   }
   return ret;
+}
+
+bool Graph::has_summary_edge(int src, int dst) const {
+  const auto it = summary_edges.find(dst);
+  return it != summary_edges.end() && it->second.count(src);
+}
+
+const vector<int> *Graph::summary_witness(int src, int dst) const {
+  const auto it = summary_witnesses.find({src, dst});
+  if (it == summary_witnesses.end())
+    return nullptr;
+  return &it->second;
 }
 
 int Graph::label(int s, int t) {

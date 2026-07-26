@@ -10,8 +10,11 @@ add_library(CanaryCSIndex STATIC
         ParallelTabulation.cpp
         PathTree.cpp
         PathtreeQuery.cpp
+        PolicyAutomaton.cpp
         Query.cpp
         ReachBackbone.cpp
+        SCSGraph.cpp
+        SCSIndex.cpp
         Tabulation.cpp
         TCSEstimator.cpp
 )

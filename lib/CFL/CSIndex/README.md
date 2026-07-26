@@ -68,6 +68,30 @@ Input Graph (with labeled edges)
 4. **Query Processing**: Use `Query::reach()` for fast reachability queries
 5. **Validation**: Use `Tabulation::reach()` to verify correctness
 
+## Sanitizer-Aware Context-Sensitive Reachability
+
+`SCSIndex` composes a finite-state security policy with FLARE. Each input edge
+has two independent projections:
+
+- a structural label (`0`, positive call, or negative return), and
+- a security-event label (`0` means no event).
+
+The implementation builds the automaton product first, preserving structural
+labels, and then applies the existing summary-edge and two-layer FLARE
+transformation. This ensures that sanitizer semantics and call/return matching
+refer to the same witness path.
+
+The public entry points are:
+
+- `SCSGraph`: edge-identity graph supporting dual-role and parallel edges;
+- `PolicyAutomaton`: total DFA or epsilon-free NFA policy;
+- `SCSIndex`: explicit or source-rooted lazy products, point queries, fixed
+  batch endpoints, GRAIL queries, metrics, and optional witness replay;
+- `FactorizedSCSIndex`: disjunctive composition for independent categories.
+
+Existing `Graph`, `csr`, and FLARE query behavior is unchanged. Summary-path
+provenance is recorded only when `SCSIndexOptions::retain_witnesses` is enabled.
+
 ## File Structure
 
 - **Graph.cpp**: Core graph data structure and CFL operations

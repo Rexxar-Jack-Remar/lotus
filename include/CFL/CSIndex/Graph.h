@@ -138,6 +138,8 @@ protected:
       neg_label_map; ///< Negative label mapping
   std::unordered_map<int, std::set<int>>
       summary_edges; ///< Summary edges (out <- in, reversed map)
+  std::map<std::pair<int, int>, std::vector<int>>
+      summary_witnesses; ///< Optional expansion path for each summary edge
 
 public:
   /**
@@ -367,13 +369,24 @@ public:
   /**
    * @brief Build summary edges for reachability analysis.
    */
-  void build_summary_edges();
+  void build_summary_edges(bool record_witnesses = false);
 
   /**
    * @brief Get the number of summary edges.
    * @return Number of summary edges
    */
   size_t summary_edge_size();
+
+  /**
+   * @brief Check whether an edge was derived as a summary edge.
+   */
+  bool has_summary_edge(int src, int dst) const;
+
+  /**
+   * @brief Get one recorded expansion path for a summary edge.
+   * @return Pointer to a vertex path, or nullptr if provenance was not recorded.
+   */
+  const vector<int> *summary_witness(int src, int dst) const;
 
   /**
    * @brief Convert graph to indexing format.
