@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="docs/source/_static/logo.svg" alt="Lotus — LLVM Static Analysis Framework Logo" width="150"/>
+  <img src="docs/source/_static/logo.svg" alt="Lotus — LLVM Static Analysis Framework Logo" width="80"/>
 </p>
 
 # Lotus: LLVM-based Static Analysis Framework
