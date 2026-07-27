@@ -33,7 +33,8 @@ exclude_patterns = []
 
 # HTML output options
 html_theme = 'sphinx_rtd_theme'  # ReadTheDocs theme
-# html_static_path = ['_static']
+html_static_path = ['_static']
+html_logo = '_static/logo.svg'
 html_title = 'Lotus Documentation'
 
 # LaTeX output options
