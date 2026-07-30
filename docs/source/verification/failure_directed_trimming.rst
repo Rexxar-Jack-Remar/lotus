@@ -27,3 +27,12 @@ Notes
 
 The current documentation is intentionally high level because this subsystem is
 not yet exposed through a dedicated stable front-end.
+
+Integration considerations
+--------------------------
+
+Apply trimming only after a pipeline has identified the failure information it
+wants to preserve.  The reduced IR is useful for focused exploration and
+debugging, but it should not be assumed equivalent to the original module for
+unrelated properties.  Experimental clients should retain the original module
+and validate any witness against it.

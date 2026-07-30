@@ -52,3 +52,12 @@ Usage
      if (mult == lotus::analysis::multiplicity::AllocationMultiplicity::Unique)
        errs() << "Unique allocation: " << *value << "\n";
    }
+
+Conservative interpretation
+---------------------------
+
+``Summary`` means the analysis cannot establish that an allocation executes
+only once; it is not evidence that the allocation necessarily repeats at
+runtime.  In particular, loops, multiple call sites, indirect calls, and
+incomplete external-call modeling should be treated conservatively by clients
+that use multiplicity to select heap abstractions or optimization strategies.

@@ -14,4 +14,14 @@ thread-pool and scheduling utilities used by parallel analyses.
 Use this layer when an analysis needs bounded parallelism without embedding its
 own scheduler.
 
+Concurrency guidance
+--------------------
+
+Tasks should communicate cancellation through the provided token rather than
+abandoning shared work abruptly.  Make ownership and mutation boundaries
+explicit: LLVM IR objects and analysis caches are not automatically safe for
+concurrent writes.  Use reducer helpers for accumulations, then merge results
+after parallel work completes to preserve deterministic reporting where it
+matters.
+
 See also :doc:`utilities`.

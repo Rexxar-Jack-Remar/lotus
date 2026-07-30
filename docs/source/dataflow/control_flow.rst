@@ -25,6 +25,16 @@ Why it exists
 - Engines can operate over a small stable interface instead of directly on LLVM.
 - The same framework supports forward and backward analyses.
 
+Choosing a graph view
+---------------------
+
+Use ``LLVMIntraCFG`` when facts remain within one function and an LLVM basic
+block view is sufficient.  Use ``LLVMInterCFG`` only when transfers must cross
+call and return boundaries; its added edges require the solver to define how
+context and external calls are handled.  A client selects ``FlowDirection``
+once so predecessor and successor traversal remains consistent throughout the
+analysis.
+
 See also
 --------
 

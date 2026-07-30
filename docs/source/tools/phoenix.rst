@@ -36,3 +36,13 @@ Usage
 
 The script will prompt for a directory path containing ``.bc`` files, then ask
 which tool to run.
+
+Operational notes
+-----------------
+
+Use a directory containing bitcode built with a compatible LLVM version and
+ensure the selected analyzer is available in the expected build location.
+Phoenix is a batch runner: it records each input's outcome, but does not make
+results from different analyzers directly comparable unless they were run with
+the same bitcode, library model, and options.  Keep generated output outside
+the input corpus when repeatability matters.

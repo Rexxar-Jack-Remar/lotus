@@ -15,4 +15,14 @@ bug-reporting layer used by all Lotus checkers.
 Every major checker family routes its output through this layer so tools can
 share JSON, SARIF, and summary reporting.
 
+Reporting workflow
+------------------
+
+A checker creates a ``BugReport`` with a stable category and attaches
+``BugDiagStep`` entries as it reconstructs the relevant path.  It submits the
+report to ``BugReportMgr``, which applies suppressions and selects the output
+format.  Keep report construction separate from detection logic so a checker
+can emit the same finding to a human-readable summary and a SARIF consumer
+without maintaining two output paths.
+
 See also :doc:`index` and :doc:`../user_guide/bug_detection`.

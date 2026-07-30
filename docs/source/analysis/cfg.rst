@@ -34,4 +34,13 @@ Control Flow Graph (CFG) analysis utilities for reachability and structural anal
 
    bool reachable = reach.reachable(From, To);
 
+Interpretation
+--------------
+
+Reachability is a structural property of the current CFG: it does not account
+for path conditions, alias facts, or infeasible branches.  Combine it with
+dataflow or symbolic reasoning when a client needs semantic feasibility.
+Dominator and topological-order helpers are similarly reusable building
+blocks; choose the one that matches the property being computed rather than
+reconstructing CFG traversal in each pass.
 

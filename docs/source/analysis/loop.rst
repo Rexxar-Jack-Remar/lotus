@@ -15,4 +15,14 @@ analysis stack used by several optimization and verification workflows.
 This subsystem builds on LLVM loop information but adds Lotus-specific program
 analysis structures.
 
+Using loop facts
+----------------
+
+Start from the LLVM loop structure associated with a function, then use the
+coordinating analysis to obtain the Lotus summaries needed by a client.
+Iteration-space and dependence information describe what is known about a
+loop; transformations must still check their own legality conditions before
+rewriting the IR.  Analyses should handle loops without a recoverable bound
+conservatively rather than treating the absence of a bound as a small loop.
+
 See also :doc:`cfg` and :doc:`../optimization/index`.

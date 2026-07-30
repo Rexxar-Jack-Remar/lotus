@@ -23,4 +23,13 @@ allocation, copy, and exit effects of external APIs.
 These summaries are the main bridge between external API specifications and the
 pointer-analysis pipeline.
 
+Modeling guidance
+-----------------
+
+Represent effects at the level visible to callers: an allocation creates a
+fresh abstract object, while a copy records the source-to-destination flow and
+its memory indirection.  Use the special source kinds only when no ordinary
+argument represents the flow.  A concise external summary is preferable to
+duplicating library-specific handling in each analysis.
+
 See also :doc:`annotation`, :doc:`../alias/spec`, and :doc:`../alias/allocaa`.

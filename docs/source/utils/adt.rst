@@ -15,4 +15,13 @@ across analyses.
 
 These headers are used heavily by the dataflow, alias, and solver subsystems.
 
+Choosing a worklist
+-------------------
+
+Use a priority worklist when an analysis has a meaningful ordering that can
+accelerate convergence, and use a two-level worklist when it needs separate
+queues for coarse and fine-grained work.  Persistent containers are useful for
+sharing immutable facts across states; avoid them in a hot mutation loop unless
+their structural sharing outweighs the update cost.
+
 See also :doc:`utilities`.

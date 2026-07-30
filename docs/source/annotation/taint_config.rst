@@ -21,4 +21,14 @@ propagation rules.
 - Define sanitizer-like propagation behavior.
 - Reuse the same taint model across IFDS analyses and security checkers.
 
+Configuration workflow
+----------------------
+
+Keep specifications close to the API boundary they model: identify the
+function, then describe source, sink, or propagation positions using the
+configuration types.  Parse the file once with ``TaintConfigParser`` and pass
+the resulting configuration through ``TaintConfigManager`` so all analysis
+components apply the same model.  Treat a missing external summary
+conservatively when the checker requires sound reporting.
+
 See also :doc:`annotation`, :doc:`../checker/index`, and :doc:`../dataflow/ifds_ide`.

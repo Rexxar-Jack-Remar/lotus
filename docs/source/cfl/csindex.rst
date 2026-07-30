@@ -19,4 +19,13 @@ context-sensitive reachability engine used by the ``csr`` tool.
 - Comparing indexing strategies such as GRAIL and PathTree.
 - Backing the ``tools/cfl/csr`` command-line front-end.
 
+Query workflow
+--------------
+
+Build the indexed graph and reachability backbone once, then issue ``Query``
+or ``PathtreeQuery`` requests against that index.  This up-front work is what
+makes the subsystem useful when many context-sensitive questions target the
+same graph.  ``Grail`` is a pruning aid, so clients should retain an exact
+tabulation engine for answers that must not rely on an approximation.
+
 See also :doc:`cfl_components` and :doc:`../tools/cfl/index`.

@@ -45,6 +45,16 @@ Typical usage
    ./build/bin/lotus-verify-sifa program.bc --symabs --abstract-domain=Octagon
    ./build/bin/lotus-verify-sifa program.bc --reachability
 
+Selecting an abstraction
+------------------------
+
+Intervals are a lightweight choice for single-variable bounds, while octagons
+can retain relations expressible as sums and differences of two variables.
+More expressive domains can improve a proof but also enlarge summaries and
+increase solving time.  Start with a small domain and a specific function or
+block when investigating a result, then broaden the scope once the modeled
+transitions and abstraction policy have been checked.
+
 See also
 --------
 

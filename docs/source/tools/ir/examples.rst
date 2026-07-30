@@ -24,4 +24,13 @@ PDG Query Example Cookbook
 The directory acts as a practical cookbook for users learning the PDG query
 language.
 
+How to use the examples
+-----------------------
+
+Start with ``primitives.cypher`` to inspect the graph schema and verify that a
+PDG was imported as expected.  Then adapt a focused query such as a dataflow or
+security pattern to the node labels and properties in the target graph.  Treat
+the security examples as triage starting points: inspect their matches and
+refine sources, sinks, and path constraints before reporting a finding.
+
 See also :doc:`index` and :doc:`../../user_guide/pdg_query_language`.

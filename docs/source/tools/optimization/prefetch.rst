@@ -48,3 +48,13 @@ Notes
   ``lib/Optimization/Prefetch/SWPrefetchingPass.cpp``.
 - The implementation uses loop analysis and inserts LLVM prefetch intrinsics for
   supported access patterns.
+
+Choosing a provider
+-------------------
+
+Use the profile provider when a representative sample profile is available;
+use LBR or LLM providers only when their supplied distance data matches the
+compiled program.  Prefetching is a performance optimization, not a semantic
+transformation, and its benefit depends on access patterns and target hardware.
+Benchmark the emitted program against the original one and inspect the output
+IR when tuning distances or enabling a new provider.

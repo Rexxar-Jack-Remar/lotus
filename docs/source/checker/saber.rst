@@ -42,6 +42,15 @@ Behavior
 - When multiple checks are enabled, the tool tries to build and reuse shared
   SVFG and ICFG state across checkers.
 
+Interpreting findings
+---------------------
+
+Saber reports source-to-sink relationships that satisfy its value-flow model.
+Review the diagnostic trace together with the modeled allocation and library
+semantics before treating a report as confirmed.  Calls without available
+bodies or summaries can affect precision, so use the shared annotation and
+alias configuration consistently when comparing runs or triaging results.
+
 See also
 --------
 

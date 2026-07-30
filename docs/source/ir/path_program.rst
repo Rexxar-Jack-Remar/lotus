@@ -41,6 +41,16 @@ Components
 This subsystem is used by verification analyses that need path-specific
 reasoning, such as invariant inference and path-sensitive property checking.
 
+Using path programs
+-------------------
+
+The input trace selects the control-flow decisions represented by a path
+program, so the result is intentionally narrower than the source function's
+full CFG.  Build the trace from a feasible execution candidate or witness,
+then use the resulting view for path-local reasoning.  A conclusion about one
+path program does not automatically establish a property for paths omitted
+from the trace; clients must combine it with coverage or refinement logic.
+
 See Also
 --------
 

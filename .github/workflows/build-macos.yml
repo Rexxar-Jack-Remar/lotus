@@ -24,13 +24,6 @@ jobs:
           export CPPFLAGS="-I/opt/homebrew/opt/llvm@14/include"
           echo "LDFLAGS=$LDFLAGS" >> $GITHUB_ENV
           echo "CPPFLAGS=$CPPFLAGS" >> $GITHUB_ENV
-      - name: Cache CMake build
-        uses: actions/cache@v4
-        with:
-          path: build
-          key: ${{ runner.os }}-${{ matrix.build-type }}-cmake-${{ hashFiles('**/CMakeLists.txt', '**/*.cmake') }}
-          restore-keys: |
-            ${{ runner.os }}-${{ matrix.build-type }}-cmake-
       - name: Compile Lotus
         run: |
           mkdir -p build
@@ -38,6 +31,7 @@ jobs:
           cmake \
             -DCMAKE_INSTALL_PREFIX="$HOME/lotus" \
             -DCMAKE_BUILD_TYPE="${{ matrix.build-type }}" \
+            -DCMAKE_OSX_SYSROOT="$(xcrun --sdk macosx --show-sdk-path)" \
             -DLLVM_BUILD_PATH="/opt/homebrew/opt/llvm@14/lib/cmake/llvm" \
             -DZ3_DIR="/usr/local" \
             -DLOTUS_ENABLE_SEAHORN=OFF \

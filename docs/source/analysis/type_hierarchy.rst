@@ -30,4 +30,12 @@ Typical use cases
 - Recover subtype relationships for object-oriented analyses.
 - Provide a basis for vtable- and dynamic-dispatch reasoning.
 
+Limitations
+-----------
+
+Recovery depends on the type and debug metadata present in the module.  A
+hierarchy query is therefore evidence for resolving a dynamic dispatch, not a
+guarantee that every runtime type has been recovered.  Clients should preserve
+an unknown or conservative target case when metadata is missing, incomplete,
+or inconsistent across linked modules.
 

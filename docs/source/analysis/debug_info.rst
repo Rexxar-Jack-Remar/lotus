@@ -30,6 +30,15 @@ Typical use cases
 - Recover loop structure or source annotations from LLVM metadata.
 - Support source-aware post-processing of analysis results.
 
+Reliability considerations
+--------------------------
+
+Debug metadata may be incomplete or absent in optimized or stripped bitcode.
+Clients should therefore retain an IR-level fallback identity and treat a
+missing file or line as unavailable information, not as an analysis failure.
+When emitting a report, use the normalized locations from this layer so
+different checkers present source positions consistently.
+
 See also
 --------
 
