@@ -3,8 +3,8 @@
 #define LOCK_MISMATCH_CHECKER_H
 
 #include "Concurrency/LockSet/LockSetAnalysis.h"
-#include "Concurrency/Utils/ThreadAPI.h"
 #include "Checker/Concurrency/ConcurrencyBugReport.h"
+#include "Concurrency/Utils/ThreadAPI.h"
 
 #include <string>
 #include <vector>

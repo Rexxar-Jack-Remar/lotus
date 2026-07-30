@@ -3,12 +3,12 @@
 #define DATA_RACE_CHECKER_H
 
 #include "Concurrency/LockSet/LockSetAnalysis.h"
+#include "Checker/Concurrency/ConcurrencyBugReport.h"
 #include "Concurrency/MHP/IMHPAnalysis.h"
 #include "Concurrency/Memory/EscapeAnalysis.h"
 #include "Concurrency/Memory/StaticThreadSharingAnalysis.h"
 #include "Concurrency/Utils/ThreadAPI.h"
 #include "Concurrency/Utils/ThreadLocalAnalysis.h"
-#include "Checker/Concurrency/ConcurrencyBugReport.h"
 
 #include <string>
 #include <unordered_map>

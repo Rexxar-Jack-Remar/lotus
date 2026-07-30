@@ -31,7 +31,9 @@ If you use Lotus in your research or work, please cite the following:
 
 Papers that use Lotus:
 
-- **SPLASH/ISSTA'26 Demo**: Phoenix: A Modular and Versatile Framework for C/C++ Pointer Analysis. Peisen Yao, Zinan Gu, and Qingkai Shi. ([lib/Alias](https://github.com/ZJU-PL/lotus/tree/main/lib/Alias))
+- **SPLASH/ISSTA 2026 Demo**: Phoenix: A Modular and Versatile Framework for C/C++ Pointer Analysis. Peisen Yao, Zinan Gu, and Qingkai Shi. ([lib/Alias](https://github.com/ZJU-PL/lotus/tree/main/lib/Alias))
+- **ASE 2026**: SIMD-Accelerated Sparse Bit-Vectors for Pointer Analysis. Zhaoyang Tan, Peisen Yao, and Kui Ren. ([lib/Alias](https://github.com/ZJU-PL/lotus/tree/main/lib/Alias))
+- **FM 2026**: EUF-based Solving Dyck-Reachability with Applications to Static Analysis. Yide Du, Zhenbang Chen, Kunlin Liu, Guofeng Zhang, Xudong Wang, Ke Ma, Wei Dong and Ji Wang.
 - **CAV 2026**: Sound and Precise Symbolic Automata Model for Stateful Software Systems. Xinlong Wu, Ruiyu Zhou, Peisen Yao, and Qingkai Shi. ([third-party/seal](https://github.com/ZJU-PL/lotus/tree/main/third-party/seal))
 - **TOSEM 2026**: Compiler Optimizations-Based SMT Simplifications: An In-Depth Study. Hanyun Jiang, Peisen Yao*, Jiachen Lu, Yongwang Zhao, and Kui Ren.
 - **ISSTA 2025**: Program Analysis Combining Generalized Bit-Level and Word-Level Abstractions. Guangsheng Fan, Liqian Chen, Banghu Yin, Wenyu Zhang, Peisen Yao, and Ji Wang. ([third-party/crab](https://github.com/ZJU-PL/lotus/tree/main/third-party/crab))
