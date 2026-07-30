@@ -1,10 +1,14 @@
 #include "Dataflow/VASCO/VASCO.h"
 
+#include <atomic>
+#include <condition_variable>
 #include <map>
 #include <memory>
+#include <mutex>
 #include <optional>
 #include <set>
 #include <string>
+#include <thread>
 #include <utility>
 #include <vector>
 
@@ -160,6 +164,61 @@ private:
   const ToyProgramRepresentation &Program;
 };
 
+class MutualRecursiveAnalysis final
+    : public vasco::ForwardInterProceduralAnalysis<Method, Node, Sign> {
+public:
+  explicit MutualRecursiveAnalysis(const ToyProgramRepresentation &Program)
+      : Program(Program) {}
+
+  Sign boundaryValue(const Method &) override { return Sign::Top; }
+  Sign copy(const Sign &Src) override { return Src; }
+  Sign meet(const Sign &LHS, const Sign &RHS) override {
+    return meetSign(LHS, RHS);
+  }
+  const vasco::ProgramRepresentation<Method, Node> &
+  programRepresentation() const override {
+    return Program;
+  }
+  Sign topValue() override { return Sign::Top; }
+
+protected:
+  Sign normalFlowFunction(ContextPtr, const Node &,
+                          const Sign &InValue) override {
+    return InValue;
+  }
+
+  Sign callEntryFlowFunction(ContextPtr, const Method &, const Node &,
+                             const Sign &InValue) override {
+    return InValue;
+  }
+
+  Sign callExitFlowFunction(ContextPtr, const Method &, const Node &,
+                            const Sign &ExitValue) override {
+    return ExitValue;
+  }
+
+  Sign callLocalFlowFunction(ContextPtr, const Node &,
+                             const Sign &InValue) override {
+    const unsigned Arrival = BarrierArrivals.fetch_add(1) + 1;
+    if (Arrival <= 2) {
+      std::unique_lock<std::mutex> Lock(BarrierMutex);
+      if (Arrival == 2) {
+        BarrierCondition.notify_all();
+      } else {
+        BarrierCondition.wait(Lock,
+                              [this] { return BarrierArrivals.load() >= 2; });
+      }
+    }
+    return InValue;
+  }
+
+private:
+  const ToyProgramRepresentation &Program;
+  std::atomic<unsigned> BarrierArrivals{0};
+  std::mutex BarrierMutex;
+  std::condition_variable BarrierCondition;
+};
+
 using FactSet = std::set<std::string>;
 
 class BackwardIdentityAnalysis final
@@ -247,6 +306,23 @@ ToyProgramRepresentation buildBackwardProgram() {
   return Program;
 }
 
+ToyProgramRepresentation buildMutuallyRecursiveProgram() {
+  ToyProgramRepresentation Program;
+  for (const Method &MethodName : {"x", "y"}) {
+    const Node CallNode = MethodName + ".call";
+    Program.addMethod(
+        MethodName,
+        std::make_shared<ToyGraph>(
+            std::vector<Node>{CallNode}, std::vector<Node>{CallNode},
+            std::vector<Node>{CallNode},
+            std::vector<std::pair<Node, Node>>{}));
+    Program.addEntryPoint(MethodName);
+  }
+  Program.addCall("x.call", {"y"});
+  Program.addCall("y.call", {"x"});
+  return Program;
+}
+
 TEST(VASCOParallelHarnessTest, ParallelForwardMatchesSequentialAndInterns) {
   ToyProgramRepresentation Program = buildTwoEntryForwardProgram();
 
@@ -301,6 +377,72 @@ TEST(VASCOParallelHarnessTest, ParallelBackwardMatchesSequential) {
   if (ThreadPool::get()->hasWorkers()) {
     EXPECT_GT(Parallel.getSchedulerStats().stale_callsite_replays, 0U);
   }
+}
+
+TEST(VASCOParallelHarnessTest, MutualRecursionPublishesWithoutContextLockCycle) {
+  if (!ThreadPool::get()->hasWorkers()) {
+    GTEST_SKIP() << "requires parallel VASCO workers";
+  }
+
+  ToyProgramRepresentation Program = buildMutuallyRecursiveProgram();
+  MutualRecursiveAnalysis Analysis(Program);
+  Analysis.setParallelContextScheduling(true);
+  Analysis.setContextStepBudget(2);
+  Analysis.doAnalysis();
+
+  ASSERT_EQ(Analysis.getContexts("x").size(), 1U);
+  ASSERT_EQ(Analysis.getContexts("y").size(), 1U);
+  EXPECT_GT(Analysis.getContexts("x").front()->getSummaryVersion(), 0U);
+  EXPECT_GT(Analysis.getContexts("y").front()->getSummaryVersion(), 0U);
+  EXPECT_GT(Analysis.getSchedulerStats().stale_callsite_replays, 0U);
+}
+
+TEST(VASCOParallelHarnessTest, SummarySnapshotKeepsValueAndVersionCoherent) {
+  struct CheckedValue {
+    std::size_t Sequence = 0;
+    std::string Checksum;
+  };
+
+  using CheckedContext = vasco::Context<Method, Node, CheckedValue>;
+  auto Context = std::make_shared<CheckedContext>("summary-owner");
+  std::atomic<bool> WriterDone{false};
+  std::atomic<bool> Coherent{true};
+
+  std::thread Writer([&] {
+    for (std::size_t Sequence = 1; Sequence <= 2000; ++Sequence) {
+      const CheckedValue Value{Sequence, std::to_string(Sequence)};
+      std::lock_guard<std::recursive_mutex> Lock(Context->mutex());
+      Context->setExitValue(Value);
+      Context->publishSummary(Value);
+    }
+    WriterDone.store(true);
+  });
+
+  std::vector<std::thread> Readers;
+  for (unsigned I = 0; I < 4; ++I) {
+    Readers.emplace_back([&] {
+      while (!WriterDone.load()) {
+        const auto Snapshot = Context->getSummarySnapshot();
+        if (Snapshot &&
+            Snapshot->Value.Checksum !=
+                std::to_string(Snapshot->Value.Sequence)) {
+          Coherent.store(false);
+        }
+      }
+    });
+  }
+
+  Writer.join();
+  for (auto &Reader : Readers) {
+    Reader.join();
+  }
+
+  const auto Snapshot = Context->getSummarySnapshot();
+  ASSERT_TRUE(Snapshot);
+  EXPECT_TRUE(Coherent.load());
+  EXPECT_EQ(Snapshot->Value.Sequence, 2000U);
+  EXPECT_EQ(Snapshot->Value.Checksum, "2000");
+  EXPECT_EQ(Snapshot->Version, 2000U);
 }
 
 } // namespace

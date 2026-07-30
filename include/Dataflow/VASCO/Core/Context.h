@@ -54,6 +54,14 @@ public:
   using WorkItem = std::optional<N>;
   using WorkListType = std::set<WorkItem, WorkItemComparator<N>>;
 
+  struct SummarySnapshot {
+    A Value;
+    std::size_t Version = 0;
+  };
+  // Published summaries are immutable. C++17 atomic shared_ptr operations make
+  // the generic value and its version visible as one coherent observation.
+  using SummarySnapshotPtr = std::shared_ptr<const SummarySnapshot>;
+
   inline static std::size_t Count = 0;
   inline static std::size_t TotalNodes = 0;
   inline static std::size_t LiveNodes = 0;
@@ -132,11 +140,26 @@ public:
 
   bool isAnalysed() const { return Analysed.load(); }
   bool isFreed() const { return Freed.load(); }
-  std::size_t getSummaryVersion() const { return SummaryVersion.load(); }
+  SummarySnapshotPtr getSummarySnapshot() const {
+    return std::atomic_load_explicit(&PublishedSummary,
+                                     std::memory_order_acquire);
+  }
+  std::size_t getSummaryVersion() const {
+    const auto Snapshot = getSummarySnapshot();
+    return Snapshot ? Snapshot->Version : 0;
+  }
 
   void markAnalysed() { Analysed.store(true); }
   void unmarkAnalysed() { Analysed.store(false); }
-  void publishSummaryVersion() { ++SummaryVersion; }
+  std::size_t publishSummary(const A &Value) {
+    const std::size_t Version = NextSummaryVersion.fetch_add(1) + 1;
+    SummarySnapshotPtr Snapshot =
+        std::make_shared<const SummarySnapshot>(SummarySnapshot{Value, Version});
+    std::atomic_store_explicit(&PublishedSummary, std::move(Snapshot),
+                               std::memory_order_release);
+    markAnalysed();
+    return Version;
+  }
 
   void setEntryValue(const A &Value) { EntryValue = Value; }
   void setExitValue(const A &Value) { ExitValue = Value; }
@@ -146,7 +169,8 @@ public:
 private:
   std::atomic<bool> Analysed{false};
   std::atomic<bool> Freed{false};
-  std::atomic<std::size_t> SummaryVersion{0};
+  std::atomic<std::size_t> NextSummaryVersion{0};
+  mutable SummarySnapshotPtr PublishedSummary;
   mutable std::recursive_mutex Mutex;
   GraphPtr Graph;
   A EntryValue{};

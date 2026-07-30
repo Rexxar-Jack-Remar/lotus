@@ -235,9 +235,9 @@ protected:
     }
   }
 
-  void wakeStaleCallers(ContextPtr CurrentContext) {
+  void wakeStaleCallers(ContextPtr CurrentContext,
+                        std::size_t PublishedVersion) {
     std::vector<CallSiteType> CallersSnapshot;
-    const std::size_t CurrentVersion = CurrentContext->getSummaryVersion();
     {
       std::lock_guard<std::recursive_mutex> Lock(StateMutex);
       const auto *Callers = ContextTransitions.getCallers(CurrentContext);
@@ -248,7 +248,7 @@ protected:
     }
 
     for (const auto &CallSite : CallersSnapshot) {
-      if (!isCallSiteStale(CallSite, CurrentContext, CurrentVersion)) {
+      if (!isCallSiteStale(CallSite, CurrentContext, PublishedVersion)) {
         recordCurrentCallsiteReplaySkipped();
         continue;
       }
@@ -343,10 +343,11 @@ protected:
   }
 
   void observeSummaryVersion(const CallSiteType &CallSite,
-                             ContextPtr TargetContext) {
+                             ContextPtr TargetContext,
+                             std::size_t ObservedVersion) {
     std::lock_guard<std::recursive_mutex> Lock(StateMutex);
     ObservedSummaryVersions[ObservedSummaryKey{CallSite, TargetContext}] =
-        TargetContext->getSummaryVersion();
+        ObservedVersion;
   }
 
   void recordContextStep() {

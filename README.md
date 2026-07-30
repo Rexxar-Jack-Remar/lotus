@@ -9,8 +9,8 @@ Lotus is an LLVM-based program analysis & verification framework. It provides a 
 ## Features
 
 - **Alias Analysis** — Pointer analysis with flow-sensitive, context-sensitive, and insensitive variants
-- **Dataflow Analysis** — IFDS/IDE frameworks, Newtonian program analysis, weighted pushdown systems (WPDS), etc.
-- **Intermediate Representations** — ICFG, PDG, SVFG, SSA variants, and MemorySSA
+- **Dataflow Analysis** — IFDS/IDE framework, Newtonian program analysis, weighted pushdown systems (WPDS), etc.
+- **Intermediate Representations** — ICFG, PDG, SVFG, SSA variants, etc.
 - **Bug Detection** — Null-pointer, memory safety, concurrency bugs, type errors, and more
 - **Formal Verification** — CLAM (abstract interpretation), SeaHorn, SMACK, and more
 - **Program Optimization** — Interprocedural optimization, partial evaluation, pass ordering, scalar and prefetch optimization

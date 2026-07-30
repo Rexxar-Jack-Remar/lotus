@@ -7,6 +7,7 @@
 #include <optional>
 #include <set>
 #include <thread>
+#include <vector>
 
 namespace vasco {
 
@@ -42,7 +43,10 @@ protected:
   void runSequentialAnalysis() {
     while (this->hasPendingContexts()) {
       auto CurrentContext = this->newestContext();
-      processContextStep(CurrentContext);
+      const auto PublishedVersion = processContextStep(CurrentContext);
+      if (PublishedVersion.has_value()) {
+        this->wakeStaleCallers(CurrentContext, *PublishedVersion);
+      }
     }
   }
 
@@ -65,12 +69,17 @@ protected:
             continue;
           }
 
-          bool HasMoreLocalWork = false;
+          BatchResult Result;
           {
             std::lock_guard<std::recursive_mutex> Lock(CurrentContext->mutex());
-            HasMoreLocalWork = processContextBatch(CurrentContext);
+            Result = processContextBatch(CurrentContext);
           }
-          this->finishRunnableContext(CurrentContext, HasMoreLocalWork,
+          // Caller replay may lock other contexts, so it must happen after the
+          // publishing context lock has been released.
+          for (const std::size_t Version : Result.PublishedVersions) {
+            this->wakeStaleCallers(CurrentContext, Version);
+          }
+          this->finishRunnableContext(CurrentContext, Result.HasMoreLocalWork,
                                       RunningContexts);
         }
       });
@@ -79,24 +88,40 @@ protected:
     Group.wait();
   }
 
-  bool processContextBatch(ContextPtr CurrentContext) {
+  struct BatchResult {
+    bool HasMoreLocalWork = false;
+    std::vector<std::size_t> PublishedVersions;
+  };
+
+  BatchResult processContextBatch(ContextPtr CurrentContext) {
     const std::size_t Budget = this->SchedulingOptions.ContextStepBudget == 0
                                    ? 1
                                    : this->SchedulingOptions.ContextStepBudget;
     std::size_t Steps = 0;
+    BatchResult Result;
     do {
-      processContextStep(CurrentContext);
+      const auto PublishedVersion = processContextStep(CurrentContext);
+      if (PublishedVersion.has_value()) {
+        Result.PublishedVersions.push_back(*PublishedVersion);
+      }
       ++Steps;
     } while (Steps < Budget && !CurrentContext->getWorkList().empty());
     this->recordContextBatch();
-    return !CurrentContext->getWorkList().empty();
+    Result.HasMoreLocalWork = !CurrentContext->getWorkList().empty();
+    return Result;
   }
 
-  void processContextStep(ContextPtr CurrentContext) {
+  std::optional<std::size_t> processContextStep(ContextPtr CurrentContext) {
     if (CurrentContext->getWorkList().empty()) {
-      CurrentContext->markAnalysed();
       this->removeContextFromWorklist(CurrentContext);
-      return;
+      if (CurrentContext->getSummarySnapshot()) {
+        CurrentContext->markAnalysed();
+        return std::nullopt;
+      }
+      const std::size_t PublishedVersion =
+          CurrentContext->publishSummary(CurrentContext->getExitValue());
+      this->recordSummaryPublication();
+      return PublishedVersion;
     }
 
     auto ItemIt = CurrentContext->getWorkList().begin();
@@ -139,12 +164,13 @@ protected:
 
             this->addTransition(CallSite, TargetContext);
 
-            if (TargetContext->isAnalysed()) {
+            const auto Summary = TargetContext->getSummarySnapshot();
+            if (Summary) {
               Hit = true;
-              this->observeSummaryVersion(CallSite, TargetContext);
-              const A ExitValue = TargetContext->getExitValue();
+              this->observeSummaryVersion(CallSite, TargetContext,
+                                          Summary->Version);
               const A ReturnedValue = callExitFlowFunction(
-                  CurrentContext, TargetMethod, Node, ExitValue);
+                  CurrentContext, TargetMethod, Node, Summary->Value);
               Out = this->meet(Out, ReturnedValue);
             }
           }
@@ -185,20 +211,23 @@ protected:
             this->meet(ExitValue, CurrentContext->getValueAfter(TailNode));
       }
 
-      const bool WasAnalysed = CurrentContext->isAnalysed();
+      const auto PreviousSummary = CurrentContext->getSummarySnapshot();
       const A PreviousExitValue = CurrentContext->getExitValue();
       const bool SummaryChanged = !(ExitValue == PreviousExitValue);
       CurrentContext->setExitValue(ExitValue);
-      CurrentContext->markAnalysed();
-      if (!WasAnalysed || SummaryChanged) {
-        CurrentContext->publishSummaryVersion();
+      if (!PreviousSummary || SummaryChanged) {
+        const std::size_t PublishedVersion =
+            CurrentContext->publishSummary(ExitValue);
         this->recordSummaryPublication();
-        this->wakeStaleCallers(CurrentContext);
+        this->freeReachableContextsIfDead(CurrentContext);
+        return PublishedVersion;
       } else {
+        CurrentContext->markAnalysed();
         this->recordSuppressedUnchangedWakeup();
       }
       this->freeReachableContextsIfDead(CurrentContext);
     }
+    return std::nullopt;
   }
 
   ContextPtr getOrInitTargetContext(const M &Method, const A &EntryValue) {
@@ -218,7 +247,7 @@ protected:
     auto NewContext = std::make_shared<vasco::Context<M, N, A>>(Method);
     NewContext->setEntryValue(this->copy(EntryValue));
     NewContext->setExitValue(this->copy(EntryValue));
-    NewContext->markAnalysed();
+    NewContext->publishSummary(NewContext->getExitValue());
     this->registerContext(NewContext);
     return NewContext;
   }

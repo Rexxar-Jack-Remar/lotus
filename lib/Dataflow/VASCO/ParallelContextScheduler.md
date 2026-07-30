@@ -26,7 +26,7 @@ Each context stores:
 - local node worklist
 - per-node IN and OUT values
 - entry and exit values
-- summary version
+- an atomically published immutable `(summary value, version)` snapshot
 - analysed/freed flags
 - a per-context mutex
 
@@ -78,8 +78,9 @@ getOrCreate(method, context value)
 This lookup and insertion is protected by the analysis mutex, so parallel
 workers cannot create duplicate equivalent contexts.
 
-If the target context has already published a summary, the caller applies that
-summary and records the version it consumed:
+If the target context has already published a summary, the caller atomically
+loads one immutable snapshot and applies the value while recording the version
+from that same snapshot:
 
 ```text
 observed[(callsite, target_context)] = target_context.summary_version
@@ -96,7 +97,9 @@ When a context reaches its synthetic final work item, it recomputes its summary:
 - backward: meet over head IN values
 
 If this is the first summary or the summary value changed, the context increments
-its summary version and publishes it.
+its summary version and publishes a new immutable snapshot with release
+semantics. Readers acquire-load the snapshot, so a summary value is never read
+concurrently with an in-place update.
 
 ```text
 if first_summary or summary_changed:
@@ -105,6 +108,11 @@ if first_summary or summary_changed:
 else:
   suppress caller wakeup
 ```
+
+Caller replay is performed only after the publishing worker releases its own
+context mutex. Consequently a worker never waits for a caller context mutex
+while holding a different context mutex; mutually recursive contexts cannot
+form a cross-thread lock-order cycle.
 
 ## Versioned Replay
 
@@ -136,6 +144,9 @@ The scheduler relies on these invariants:
 5. Any caller that consumed an older summary is eventually replayed.
 6. A call site that already consumed the current summary does not need replay.
 7. The final meet-over-valid-paths solution matches the sequential solver.
+8. Published summary values and versions are consumed from one immutable atomic
+   snapshot.
+9. No operation acquires one context mutex while holding another context mutex.
 
 The implementation preserves the existing sequential solver as the default
 execution mode. Parallel scheduling is opt-in via
