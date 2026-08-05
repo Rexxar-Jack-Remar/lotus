@@ -4,16 +4,16 @@
 
 # Lotus: LLVM-based Static Analysis Framework
 
-Lotus is an LLVM-based program analysis & verification framework. It provides a comprehensive set of toolkits for alias analysis, bug detection, dataflow analysis, concurrency analysis, abstract interpretation, and formal verification — usable individually or in combination.
+Lotus is an LLVM-based program analysis & verification framework. It provides a comprehensive set of toolkits for alias analysis, bug detection, dataflow analysis, concurrency analysis, abstract interpretation, and model checking— usable individually or in combination.
 
 ## Features
 
 - **Alias Analysis** — Pointer analysis with flow-sensitive, context-sensitive, and insensitive variants
 - **Dataflow Analysis** — IFDS/IDE framework, Newtonian program analysis, weighted pushdown systems (WPDS), etc.
 - **Intermediate Representations** — ICFG, PDG, SVFG, SSA variants, etc.
-- **Bug Detection** — Null-pointer, memory safety, concurrency bugs, type errors, and more
+- **Bug Detection** — Memory safety, concurrency bugs, type errors, and more
 - **Formal Verification** — CLAM (abstract interpretation), SeaHorn, SMACK, and more
-- **Program Optimization** — Interprocedural optimization, partial evaluation, pass ordering, scalar and prefetch optimization
+- **Program Optimization** — Partial evaluation, pass ordering, scalar and prefetch optimization, etc.
 
 ## Publications
 
@@ -33,7 +33,7 @@ Papers that use Lotus:
 
 - **SPLASH/ISSTA 2026 Demo**: Phoenix: A Modular and Versatile Framework for C/C++ Pointer Analysis. Peisen Yao, Zinan Gu, and Qingkai Shi. ([lib/Alias](https://github.com/ZJU-PL/lotus/tree/main/lib/Alias))
 - **ASE 2026**: SIMD-Accelerated Sparse Bit-Vectors for Pointer Analysis. Zhaoyang Tan, Peisen Yao, and Kui Ren. ([lib/Alias](https://github.com/ZJU-PL/lotus/tree/main/lib/Alias))
-- **FM 2026**: EUF-based Solving Dyck-Reachability with Applications to Static Analysis. Yide Du, Zhenbang Chen, Kunlin Liu, Guofeng Zhang, Xudong Wang, Ke Ma, Wei Dong and Ji Wang.
+- **FM 2026**: EUF-based Solving Dyck-Reachability with Applications to Static Analysis. Yide Du, Zhenbang Chen, Kunlin Liu, Guofeng Zhang, Xudong Wang, Ke Ma, Wei Dong, and Ji Wang.
 - **CAV 2026**: Sound and Precise Symbolic Automata Model for Stateful Software Systems. Xinlong Wu, Ruiyu Zhou, Peisen Yao, and Qingkai Shi. ([third-party/seal](https://github.com/ZJU-PL/lotus/tree/main/third-party/seal))
 - **TOSEM 2026**: Compiler Optimizations-Based SMT Simplifications: An In-Depth Study. Hanyun Jiang, Peisen Yao*, Jiachen Lu, Yongwang Zhao, and Kui Ren.
 - **ISSTA 2025**: Program Analysis Combining Generalized Bit-Level and Word-Level Abstractions. Guangsheng Fan, Liqian Chen, Banghu Yin, Wenyu Zhang, Peisen Yao, and Ji Wang. ([third-party/crab](https://github.com/ZJU-PL/lotus/tree/main/third-party/crab))
