@@ -4,7 +4,7 @@
  */
 #include "Dataflow/NPA/Analyses/Inter/InterMaybeUninitialized.h"
 
-#include "Dataflow/NPA/Analyses/InterEngine.h"
+#include "Dataflow/NPA/Adapters/LLVM/Inter/ForwardEngine.h"
 
 #include <llvm/Analysis/ValueTracking.h>
 #include <llvm/IR/Argument.h>

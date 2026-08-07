@@ -4,7 +4,7 @@
  */
 #include "Dataflow/NPA/Analyses/Inter/InterLiveVariables.h"
 
-#include "Dataflow/NPA/Analyses/BackwardInterEngine.h"
+#include "Dataflow/NPA/Adapters/LLVM/Inter/BackwardEngine.h"
 
 #include <llvm/IR/Argument.h>
 #include <llvm/IR/Constants.h>

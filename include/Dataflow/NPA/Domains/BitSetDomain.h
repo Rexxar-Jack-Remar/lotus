@@ -1,7 +1,8 @@
 #ifndef NPA_BIT_SET_DOMAIN_H
 #define NPA_BIT_SET_DOMAIN_H
 
-#include "Dataflow/NPA/Core/Base/Runtime.h"
+#include "Dataflow/NPA/Core/Domain.h"
+#include "Dataflow/NPA/Core/DomainExecution.h"
 #include "Utils/LLVM/SystemHeaders.h"
 
 #include <llvm/ADT/APInt.h>

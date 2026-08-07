@@ -1,10 +1,10 @@
-#include "Dataflow/NPA/Analyses/BackwardInterEngine.h"
+#include "Dataflow/NPA/Adapters/LLVM/Inter/BackwardEngine.h"
 #include "Dataflow/NPA/Analyses/Inter/InterConstantPropagation.h"
 #include "Dataflow/NPA/Analyses/Inter/InterIntervalAnalysis.h"
 #include "Dataflow/NPA/Analyses/Inter/InterLiveVariables.h"
 #include "Dataflow/NPA/Analyses/Inter/InterMaybeUninitialized.h"
 #include "Dataflow/NPA/Domains/PredicateRelationDomain.h"
-#include "Dataflow/NPA/Transfers/PathTransferSummary.h"
+#include "Dataflow/NPA/Domains/Transformers/PathTransferSummary.h"
 #include "TestUtils/LLVMHelpers.h"
 
 #include <cctype>

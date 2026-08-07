@@ -23,7 +23,8 @@
  *   (a_{i,j,k} ⊗ Y_i ⊗ b_{i,j,k}); Concat encodes a·Y·b.
  */
 
-#include "Dataflow/NPA/Core/Base/Foundation.h"
+#include "Dataflow/NPA/Core/Domain.h"
+#include "Dataflow/NPA/Core/Symbol.h"
 
 #include <memory>
 #include <unordered_set>
@@ -37,7 +38,7 @@ template <class D> using E0 = std::shared_ptr<Exp0<D>>;
 /// Kinds: Term (constant), Seq (c·t), Mul (t1·t2), Call (procedure call),
 /// Cond, Ndet, Project, Hole/Bound (variable), Concat (t1·X·t2, LCFL form),
 /// Star (Kleene star), Mu (generic least fixpoint).
-template <class D> struct Exp0 : Dirty, std::enable_shared_from_this<Exp0<D>> {
+template <class D> struct Exp0 : std::enable_shared_from_this<Exp0<D>> {
   using V = DomVal<D>;
   using T = DomTest<D>;
   enum K {
@@ -60,7 +61,6 @@ template <class D> struct Exp0 : Dirty, std::enable_shared_from_this<Exp0<D>> {
   Symbol sym;
   T phi;
   E0<D> t1, t2;
-  mutable Optional<V> val;
   static E0<D> term(V v) {
     auto e = std::make_shared<Exp0>();
     e->k = Term;
@@ -154,7 +154,7 @@ template <class D> using E1 = std::shared_ptr<Exp1<D>>;
 
 /// Linearized expression (right-hand side of Df|ν(X) + δ = X). Adds Add/Sub
 /// for combine and differential; Concat/Star/Mu preserved from Exp0.
-template <class D> struct Exp1 : Dirty {
+template <class D> struct Exp1 {
   using V = DomVal<D>;
   using T = DomTest<D>;
   enum K {
@@ -178,7 +178,6 @@ template <class D> struct Exp1 : Dirty {
   Symbol sym;
   T phi;
   E1<D> t, t1, t2;
-  mutable Optional<V> val;
   static E1<D> term(V v) {
     auto e = std::make_shared<Exp1>();
     e->k = Term;

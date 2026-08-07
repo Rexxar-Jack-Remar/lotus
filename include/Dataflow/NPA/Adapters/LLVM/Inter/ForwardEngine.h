@@ -2,8 +2,10 @@
 #define NPA_INTER_ENGINE_H
 
 #include "Dataflow/ControlFlow/IntraCFG.h"
+#include "Dataflow/NPA/Adapters/LLVM/AnalysisStatus.h"
 #include "Dataflow/NPA/NPA.h"
 #include "Utils/Algorithms/PathExpressions/PathExpressions.h"
+#include "Utils/Parallel/ThreadPool.h"
 
 #include <chrono>
 #include <deque>

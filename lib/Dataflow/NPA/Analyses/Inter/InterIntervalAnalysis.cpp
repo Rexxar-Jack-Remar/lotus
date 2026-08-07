@@ -4,7 +4,7 @@
  */
 #include "Dataflow/NPA/Analyses/Inter/InterIntervalAnalysis.h"
 
-#include "Dataflow/NPA/Analyses/InterEngine.h"
+#include "Dataflow/NPA/Adapters/LLVM/Inter/ForwardEngine.h"
 
 #include <algorithm>
 #include <array>

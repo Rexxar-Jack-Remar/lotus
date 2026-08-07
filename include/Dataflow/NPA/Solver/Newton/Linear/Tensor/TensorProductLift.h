@@ -1,7 +1,7 @@
 #ifndef NPA_CORE_TENSOR_PRODUCT_LIFT_H
 #define NPA_CORE_TENSOR_PRODUCT_LIFT_H
 
-#include "Dataflow/NPA/Core/Base/Runtime.h"
+#include "Dataflow/NPA/Core/Domain.h"
 
 #include <utility>
 

@@ -291,6 +291,30 @@ TEST(NPAParallelRhsHarness, NewtonRunMatchesAcrossSetupModes) {
   EXPECT_EQ(toMap<D>(serial), toMap<D>(parallel));
 }
 
+TEST(NPAParallelRhsHarness, SharedPolynomialNodesRemainParallelSafe) {
+  using D = BoolSemiring;
+  using E0 = npa::E0<D>;
+  using Exp0 = npa::Exp0<D>;
+
+  E0 shared = Exp0::term(D::one());
+  std::vector<std::pair<npa::Symbol, E0>> eqns;
+  for (unsigned i = 0; i < safeCoreChainDepth(); ++i) {
+    const std::string symbol = "X" + std::to_string(i);
+    eqns.emplace_back(symbol, Exp0::ndet(shared, Exp0::hole(symbol)));
+  }
+
+  auto binds = npa::detail::build_newton_initial_values<D>(
+      eqns, npa::detail::NewtonSetupExecutionMode::ForceSerial);
+  auto serial = npa::detail::run_newton_iteration<D>(
+      false, eqns, binds, npa::LinearStrategy::SCC,
+      npa::detail::NewtonSetupExecutionMode::ForceSerial);
+  auto parallel = npa::detail::run_newton_iteration<D>(
+      false, eqns, binds, npa::LinearStrategy::SCC,
+      npa::detail::NewtonSetupExecutionMode::ForceParallel);
+
+  EXPECT_EQ(toMap<D>(serial), toMap<D>(parallel));
+}
+
 TEST(NPAParallelRhsHarness, NewtonSolverPropagatesFixpointLimitFromSetupTasks) {
   using D = LimitedFixpointBoolSemiring;
   using E0 = npa::E0<D>;
@@ -784,13 +808,15 @@ TEST(NPAParallelRhsHarness, AdaptiveSccPlanChoosesDirectForAcyclicSingletons) {
   std::vector<std::pair<npa::Symbol, npa::E1<TD>>> rhs_tensor;
   auto plan = npa::detail::build_linear_scc_plan<D>(rhs);
   npa::detail::NewtonRoundSetup<D> setup;
-  npa::detail::annotate_adaptive_scc_plan<D>(plan, rhs, rhs_tensor, setup);
+  auto execution =
+      npa::detail::choose_adaptive_scc_backends<D>(plan, rhs_tensor, setup);
 
   ASSERT_EQ(plan.infos.size(), 2u);
-  for (const auto &info : plan.infos) {
-    EXPECT_EQ(info.strategy, npa::detail::SccStrategy::Direct);
-    EXPECT_FALSE(info.is_cyclic);
-    EXPECT_FALSE(info.tensor_fallback);
+  ASSERT_EQ(execution.sccs.size(), plan.infos.size());
+  for (std::size_t sid = 0; sid < plan.infos.size(); ++sid) {
+    EXPECT_EQ(execution.sccs[sid].backend, npa::detail::SccBackend::Direct);
+    EXPECT_FALSE(plan.infos[sid].is_cyclic);
+    EXPECT_FALSE(execution.sccs[sid].tensor_fallback);
   }
 }
 
@@ -807,13 +833,16 @@ TEST(NPAParallelRhsHarness, AdaptiveSccPlanChoosesWorklistForNonLcflCycle) {
   std::vector<std::pair<npa::Symbol, npa::E1<TD>>> rhs_tensor;
   auto plan = npa::detail::build_linear_scc_plan<D>(rhs);
   npa::detail::NewtonRoundSetup<D> setup;
-  npa::detail::annotate_adaptive_scc_plan<D>(plan, rhs, rhs_tensor, setup);
+  auto execution =
+      npa::detail::choose_adaptive_scc_backends<D>(plan, rhs_tensor, setup);
 
   ASSERT_EQ(plan.infos.size(), 1u);
-  EXPECT_EQ(plan.infos.front().strategy, npa::detail::SccStrategy::Worklist);
+  ASSERT_EQ(execution.sccs.size(), 1u);
+  EXPECT_EQ(execution.sccs.front().backend,
+            npa::detail::SccBackend::Worklist);
   EXPECT_TRUE(plan.infos.front().is_cyclic);
   EXPECT_FALSE(plan.infos.front().has_lcfl_structure);
-  EXPECT_FALSE(plan.infos.front().tensor_fallback);
+  EXPECT_FALSE(execution.sccs.front().tensor_fallback);
 }
 
 TEST(NPAParallelRhsHarness, AdaptiveSccPlanChoosesTensorForLcflCycle) {
@@ -834,14 +863,15 @@ TEST(NPAParallelRhsHarness, AdaptiveSccPlanChoosesTensorForLcflCycle) {
   auto setup = npa::detail::build_newton_round_setup<D>(
       false, eqns, binds, npa::LinearStrategy::AdaptiveScc);
   auto plan = npa::detail::build_linear_scc_plan<D>(setup.rhs);
-  npa::detail::annotate_adaptive_scc_plan<D>(plan, setup.rhs, setup.rhs_tensor,
-                                             setup);
+  auto execution = npa::detail::choose_adaptive_scc_backends<D>(
+      plan, setup.rhs_tensor, setup);
 
   ASSERT_EQ(plan.infos.size(), 1u);
-  EXPECT_EQ(plan.infos.front().strategy, npa::detail::SccStrategy::Tensor);
+  ASSERT_EQ(execution.sccs.size(), 1u);
+  EXPECT_EQ(execution.sccs.front().backend, npa::detail::SccBackend::Tensor);
   EXPECT_TRUE(plan.infos.front().is_cyclic);
   EXPECT_TRUE(plan.infos.front().has_lcfl_structure);
-  EXPECT_TRUE(plan.infos.front().tensor_eligible);
+  EXPECT_TRUE(execution.sccs.front().tensor_eligible);
 }
 
 TEST(NPAParallelRhsHarness,
@@ -859,13 +889,16 @@ TEST(NPAParallelRhsHarness,
   std::vector<std::pair<npa::Symbol, npa::E1<TD>>> rhs_tensor;
   auto plan = npa::detail::build_linear_scc_plan<D>(rhs);
   npa::detail::NewtonRoundSetup<D> setup;
-  npa::detail::annotate_adaptive_scc_plan<D>(plan, rhs, rhs_tensor, setup);
+  auto execution =
+      npa::detail::choose_adaptive_scc_backends<D>(plan, rhs_tensor, setup);
 
   ASSERT_EQ(plan.infos.size(), 1u);
-  EXPECT_EQ(plan.infos.front().strategy, npa::detail::SccStrategy::Worklist);
+  ASSERT_EQ(execution.sccs.size(), 1u);
+  EXPECT_EQ(execution.sccs.front().backend,
+            npa::detail::SccBackend::Worklist);
   EXPECT_TRUE(plan.infos.front().has_lcfl_structure);
-  EXPECT_TRUE(plan.infos.front().tensor_fallback);
-  EXPECT_EQ(plan.infos.front().tensor_fallback_reason,
+  EXPECT_TRUE(execution.sccs.front().tensor_fallback);
+  EXPECT_EQ(execution.sccs.front().tensor_fallback_reason,
             npa::detail::TensorFallbackReason::TensorUnavailable);
 }
 

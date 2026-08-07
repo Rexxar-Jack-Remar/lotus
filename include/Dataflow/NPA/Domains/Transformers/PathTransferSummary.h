@@ -1,7 +1,7 @@
 #ifndef NPA_PATH_TRANSFER_SUMMARY_H
 #define NPA_PATH_TRANSFER_SUMMARY_H
 
-#include "Dataflow/NPA/Core/Base/Runtime.h"
+#include "Dataflow/NPA/Core/Domain.h"
 
 #include <set>
 #include <type_traits>

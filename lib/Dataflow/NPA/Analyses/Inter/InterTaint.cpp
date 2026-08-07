@@ -6,7 +6,7 @@
 
 #include "Alias/Infrastructure/AliasAnalysisWrapper/AliasAnalysisWrapper.h"
 #include "Annotation/Taint/TaintConfigManager.h"
-#include "Dataflow/NPA/Analyses/InterEngine.h"
+#include "Dataflow/NPA/Adapters/LLVM/Inter/ForwardEngine.h"
 
 #include <algorithm>
 #include <functional>

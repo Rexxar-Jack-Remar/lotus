@@ -73,28 +73,43 @@ The public API lives under `include/Dataflow/NPA/`:
 
 ```text
 include/Dataflow/NPA/
-├── NPA.h                      # Umbrella header; Kleene/NPA entry points
+├── NPA.h
 ├── Core/
-│   ├── Base/                  # Public types, domain helpers, runtime bookkeeping
-│   ├── IR/                    # Expressions, evaluation, differentiation
-│   └── Solve/                 # Fixpoint, linear solvers, tensor support
-├── Domains/                   # Semiring/domain implementations
-└── Analyses/                  # Intraprocedural and interprocedural clients
+│   ├── Domain.h
+│   ├── DomainExecution.h
+│   ├── Symbol.h
+│   └── Expr/                  # Immutable equation AST and evaluation
+├── Solver/
+│   ├── Options.h
+│   ├── Statistics.h
+│   ├── SolveContext.h
+│   ├── Fixpoint.h
+│   ├── KleeneSolver.h
+│   ├── NPASolver.h
+│   └── Newton/
+│       ├── Differential.h
+│       └── Linear/
+│           ├── SccSolver.h
+│           ├── AdaptivePlan.h
+│           └── Tensor/        # Optional inner Newton backend
+├── Adapters/LLVM/Inter/       # Forward/backward LLVM engines
+├── Domains/
+│   └── Transformers/          # Domains representing transfer functions
+└── Analyses/                  # Concrete intra/inter analyses
 ```
 
 Notable entry points:
 
 - `Solver/KleeneSolver.h` contains the public Kleene solver.
 - `Solver/NPASolver.h` contains the public Newton/NPA solver.
-- `Core/Base/Fixpoint.h` contains low-level fixpoint utilities reused
+- `Solver/Fixpoint.h` contains low-level fixpoint utilities reused
   internally.
-- `Core/Expr/Diff.h` implements both ordinary and tensor-side differentials.
-- `Solver/NewtonLinear.h` implements the ordinary inner
+- `Solver/Newton/Differential.h` implements ordinary and tensor-side
+  differentials.
+- `Solver/Newton/Linear/SccSolver.h` implements the ordinary inner
   linearized-system machinery used by Newton/NPA.
-- `Core/Tensor/TensorSemiring.h` and `Core/Tensor/TensorProductLift.h`
-  contain tensor-side infrastructure.
-- `Solver/TensorProduct.h` implements the optional TOPLAS tensor
-  backend for suitable Newton/NPA sub-problems.
+- `Solver/Newton/Linear/Tensor/` contains the optional TOPLAS tensor backend.
+- `Adapters/LLVM/Inter/` contains interprocedural LLVM infrastructure.
 - `Analyses/Inter/` contains the public analysis wrappers used by
   the in-tree constant-propagation, interval, taint, nullability, and related
   clients.
@@ -106,7 +121,9 @@ Notable entry points:
 - Inter backward clients use `BackwardInterEngine<Domain, Analysis>`.
 - `TransformerSummary` is the current bounded abstract-summary path used
   by in-tree subdistributive clients such as interprocedural constant
-  propagation and interval analysis.
+  propagation and interval analysis. Transformer carriers live under
+  `Domains/Transformers` because they satisfy the same domain interface as
+  ordinary solver domains.
 
 ## Current parallel algorithm
 
@@ -152,10 +169,10 @@ The parallel setup path is used only when:
 - verbose mode is off
 - the equation count is large enough
 - the thread pool has workers
-- equations do not share cached polynomial AST nodes
 
-If equations share AST nodes, the solver falls back to the serial path to avoid
-unsynchronized mutation of expression-local caches.
+Expression nodes are immutable. Each evaluation owns an external cache, so
+shared AST nodes do not force a serial fallback and do not create cross-solve
+data races.
 
 ### 3. Parallelism when solving the current linearized system
 

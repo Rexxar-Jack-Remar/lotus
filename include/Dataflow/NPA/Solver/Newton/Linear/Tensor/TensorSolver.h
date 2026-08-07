@@ -30,9 +30,10 @@
  * the cost of potentially larger intermediate values.
  */
 
-#include "Dataflow/NPA/Core/Expr/Diff.h"
-#include "Dataflow/NPA/Solver/NewtonLinear.h"
-#include "Dataflow/NPA/Core/Tensor/TensorSemiring.h"
+#include "Dataflow/NPA/Solver/Newton/Differential.h"
+#include "Dataflow/NPA/Solver/Newton/Linear/Tensor/TensorDifferential.h"
+#include "Dataflow/NPA/Solver/Newton/Linear/SccSolver.h"
+#include "Dataflow/NPA/Solver/Newton/Linear/Tensor/TensorSemiring.h"
 #include "Utils/Algorithms/PathExpressions/PathExpressions.h"
 
 #include <mutex>

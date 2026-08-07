@@ -24,10 +24,9 @@
  *   in `TensorProduct.h`.
  */
 
-#include "Dataflow/NPA/Core/Base/Runtime.h"
-#include "Dataflow/NPA/Core/Expr/Diff.h"
 #include "Dataflow/NPA/Core/Expr/Eval.h"
-#include "Dataflow/NPA/Core/Expr/LCFLDetector.h"
+#include "Dataflow/NPA/Solver/Newton/Linear/ExpressionAnalysis.h"
+#include "Dataflow/NPA/Solver/SolveContext.h"
 #include "Utils/Parallel/ThreadPool.h"
 
 #include <algorithm>
@@ -40,20 +39,6 @@ namespace npa {
 
 namespace detail {
 
-enum class SccStrategy {
-  Direct,
-  Worklist,
-  Tensor,
-};
-
-enum class TensorFallbackReason {
-  None,
-  TensorUnavailable,
-  TensorNotPaperAdmissible,
-  TensorLawsNotValidated,
-  ProjectionFragmentUnsupported,
-};
-
 struct LinearSccInfo {
   std::vector<int> members;
   bool has_self_loop = false;
@@ -61,15 +46,6 @@ struct LinearSccInfo {
   std::size_t edge_count = 0;
   double density = 0.0;
   bool has_lcfl_structure = false;
-  bool tensor_available = false;
-  bool tensor_admissible = false;
-  bool tensor_laws_validated = false;
-  bool tensor_projection_sensitive = false;
-  bool tensor_projection_fragment_supported = false;
-  bool tensor_eligible = false;
-  bool tensor_fallback = false;
-  TensorFallbackReason tensor_fallback_reason = TensorFallbackReason::None;
-  SccStrategy strategy = SccStrategy::Worklist;
 };
 
 template <class D> struct LinearSccPlan {
@@ -181,6 +157,10 @@ build_linear_scc_plan(const std::vector<std::pair<Symbol, E1<D>>> &rhs) {
   for (int sid = 0; sid < scc_count; ++sid) {
     auto &info = plan.infos[static_cast<std::size_t>(sid)];
     for (int idx : info.members) {
+      info.has_lcfl_structure =
+          info.has_lcfl_structure || LCFLDetector<D>::has_lcfl_structure(
+                                         rhs[static_cast<std::size_t>(idx)]
+                                             .second);
       for (int dep : plan.out_edges[static_cast<std::size_t>(idx)]) {
         if (plan.scc_id[static_cast<std::size_t>(dep)] != sid)
           continue;

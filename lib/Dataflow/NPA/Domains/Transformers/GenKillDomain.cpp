@@ -2,7 +2,7 @@
  *
  * Author: rainoftime
  */
-#include "Dataflow/NPA/Transfers/GenKillTransformer.h"
+#include "Dataflow/NPA/Domains/Transformers/GenKillDomain.h"
 
 namespace npa {
 

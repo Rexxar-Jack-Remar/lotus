@@ -1,8 +1,8 @@
 #ifndef NPA_INTERPROC_CONSTANT_PROPAGATION_H
 #define NPA_INTERPROC_CONSTANT_PROPAGATION_H
 
-#include "Dataflow/NPA/Analyses/InterEngine.h"
-#include "Dataflow/NPA/Transfers/TransformerSummary.h"
+#include "Dataflow/NPA/Adapters/LLVM/Inter/ForwardEngine.h"
+#include "Dataflow/NPA/Domains/Transformers/TransformerSummary.h"
 
 #include <cstdint>
 #include <map>

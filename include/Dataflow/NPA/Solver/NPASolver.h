@@ -42,7 +42,11 @@
  */
 
 #include "Dataflow/NPA/Solver/EquationSystem.h"
-#include "Dataflow/NPA/Solver/TensorProduct.h"
+#include "Dataflow/NPA/Solver/DomainValidation.h"
+#include "Dataflow/NPA/Solver/SolveContext.h"
+#include "Dataflow/NPA/Solver/Statistics.h"
+#include "Dataflow/NPA/Solver/Newton/Linear/Tensor/TensorSolver.h"
+#include "Dataflow/NPA/Solver/Newton/Linear/AdaptivePlan.h"
 #include "Utils/Parallel/ThreadPool.h"
 
 #include <exception>
@@ -83,51 +87,6 @@ inline bool should_parallelize_newton_setup(
   if (equation_count < newton_parallel_setup_min_equations(worker_count))
     return false;
   return true;
-}
-
-template <class D>
-void collect_polynomial_expr_nodes(const E0<D> &expr,
-                                   std::unordered_set<const void *> &nodes) {
-  if (!expr)
-    return;
-  if (!nodes.insert(expr.get()).second)
-    return;
-  using K = typename Exp0<D>::K;
-  switch (expr->k) {
-  case K::Seq:
-  case K::Call:
-  case K::Project:
-  case K::Star:
-  case K::Mu:
-    collect_polynomial_expr_nodes<D>(expr->t, nodes);
-    break;
-  case K::Mul:
-  case K::Cond:
-  case K::Ndet:
-  case K::Concat:
-    collect_polynomial_expr_nodes<D>(expr->t1, nodes);
-    collect_polynomial_expr_nodes<D>(expr->t2, nodes);
-    break;
-  default:
-    break;
-  }
-}
-
-template <class D>
-bool equations_share_polynomial_nodes(
-    const std::vector<std::pair<Symbol, E0<D>>> &eqns) {
-  std::unordered_set<const void *> global_nodes;
-  global_nodes.reserve(eqns.size() * 4U);
-  for (const auto &eqn : eqns) {
-    std::unordered_set<const void *> local_nodes;
-    collect_polynomial_expr_nodes<D>(eqn.second, local_nodes);
-    for (const void *node : local_nodes) {
-      if (global_nodes.count(node))
-        return true;
-    }
-    global_nodes.insert(local_nodes.begin(), local_nodes.end());
-  }
-  return false;
 }
 
 /// C++14-friendly dispatch for delta: avoid if constexpr (DomainHasChooseDelta,
@@ -196,11 +155,6 @@ std::vector<std::pair<Symbol, DomVal<D>>> build_newton_initial_values(
     nu0[e.first] = D::zero();
 
   bool parallelize = should_parallelize_newton_setup(false, eqns.size(), mode);
-  // I0 evaluation caches into expression nodes. If equations share AST nodes,
-  // stay on the serial path to preserve correctness without synchronization.
-  if (parallelize && equations_share_polynomial_nodes<D>(eqns))
-    parallelize = false;
-
   std::vector<std::pair<Symbol, V>> cur;
   cur.reserve(eqns.size());
   if (!parallelize) {
@@ -260,31 +214,29 @@ NewtonRoundSetup<D> build_newton_round_setup(
 
   bool parallelize =
       should_parallelize_newton_setup(verbose, eqns.size(), mode);
-  // The Newton setup path assumes per-equation AST ownership during cached
-  // evaluation. Shared polynomial nodes force a conservative serial fallback.
-  if (parallelize && equations_share_polynomial_nodes<D>(eqns))
-    parallelize = false;
-
   setup.rhs.reserve(eqns.size());
   if (setup.tensor_laws_validated)
     setup.rhs_tensor.reserve(eqns.size());
 
   auto build_eqn_rhs = [&](std::size_t index, bool eval_verbose,
                            NewtonRhsTaskRecord<D> &record) {
+    (void)eval_verbose;
     const auto &eqn = eqns[index];
     require_newton_compatible_expr<D>(eqn.second);
-    V v = I0<D>::eval(eval_verbose, nu, eqn.second);
+    typename I0<D>::EvaluationContext evaluation_context;
+    V v = I0<D>::evalWithContext(nu, {}, eqn.second, evaluation_context);
     V delta0 = compute_delta<D>(
         v, nu[eqn.first],
         std::integral_constant<bool, DomainHasChooseDelta<D>::value>{},
         std::integral_constant<bool, D::idempotent>{});
     if (!D::idempotent)
       require_valid_newton_delta<D>(v, nu[eqn.first], delta0);
-    auto d = Diff<D>::build(nu, eqn.second);
+    auto d = Diff<D>::build(nu, eqn.second, evaluation_context);
     record.has_lcfl_structure = LCFLDetector<D>::has_lcfl_structure(d);
     record.rhs = Exp1<D>::add(Exp1<D>::term(delta0), d);
     if (setup.tensor_laws_validated) {
-      auto tensor_d = TensorDiff<D>::build(nu, eqn.second);
+      auto tensor_d =
+          TensorDiff<D>::build(nu, eqn.second, evaluation_context);
       E1<TD> tensor_rhs = Exp1<TD>::add(
           Exp1<TD>::term(TensorTraits::right_constant(delta0)), tensor_d);
       if (tensor_supports_projection_equations<D>() && eqn.second &&
@@ -346,28 +298,28 @@ bool tensor_expr_is_projection_sensitive(
 }
 
 template <class D>
-void annotate_adaptive_scc_plan(
-    detail::LinearSccPlan<D> &plan,
-    const std::vector<std::pair<Symbol, E1<D>>> &rhs,
+detail::LinearExecutionPlan choose_adaptive_scc_backends(
+    const detail::LinearSccPlan<D> &structure,
     const std::vector<
         std::pair<Symbol, E1<typename TensorSemiringTraits<D>::tensor_domain>>>
         &rhs_tensor,
     const NewtonRoundSetup<D> &setup) {
+  detail::LinearExecutionPlan execution;
+  execution.sccs.resize(structure.infos.size());
   const bool projection_fragment_supported =
       tensor_supports_projection_equations<D>();
-  for (std::size_t sid = 0; sid < plan.infos.size(); ++sid) {
-    auto &info = plan.infos[sid];
-    info.tensor_available = setup.tensor_available;
-    info.tensor_admissible = setup.tensor_admissible;
-    info.tensor_laws_validated = setup.tensor_laws_validated;
-    info.tensor_projection_fragment_supported = projection_fragment_supported;
+  for (std::size_t sid = 0; sid < structure.infos.size(); ++sid) {
+    const auto &info = structure.infos[sid];
+    auto &decision = execution.sccs[sid];
+    decision.tensor_available = setup.tensor_available;
+    decision.tensor_admissible = setup.tensor_admissible;
+    decision.tensor_laws_validated = setup.tensor_laws_validated;
+    decision.tensor_projection_fragment_supported =
+        projection_fragment_supported;
     for (int idx : info.members) {
-      info.has_lcfl_structure = info.has_lcfl_structure ||
-                                LCFLDetector<D>::has_lcfl_structure(
-                                    rhs[static_cast<std::size_t>(idx)].second);
       if (setup.tensor_laws_validated) {
-        info.tensor_projection_sensitive =
-            info.tensor_projection_sensitive ||
+        decision.tensor_projection_sensitive =
+            decision.tensor_projection_sensitive ||
             tensor_expr_is_projection_sensitive<D>(
                 rhs_tensor[static_cast<std::size_t>(idx)].second);
       }
@@ -376,35 +328,36 @@ void annotate_adaptive_scc_plan(
     const bool tensor_candidate = info.is_cyclic && info.has_lcfl_structure;
     if (tensor_candidate) {
       if (!setup.tensor_available) {
-        info.tensor_fallback = true;
-        info.tensor_fallback_reason =
+        decision.tensor_fallback = true;
+        decision.tensor_fallback_reason =
             detail::TensorFallbackReason::TensorUnavailable;
       } else if (!setup.tensor_admissible) {
-        info.tensor_fallback = true;
-        info.tensor_fallback_reason =
+        decision.tensor_fallback = true;
+        decision.tensor_fallback_reason =
             detail::TensorFallbackReason::TensorNotPaperAdmissible;
       } else if (!setup.tensor_laws_validated) {
-        info.tensor_fallback = true;
-        info.tensor_fallback_reason =
+        decision.tensor_fallback = true;
+        decision.tensor_fallback_reason =
             detail::TensorFallbackReason::TensorLawsNotValidated;
-      } else if (info.tensor_projection_sensitive &&
+      } else if (decision.tensor_projection_sensitive &&
                  !projection_fragment_supported) {
-        info.tensor_fallback = true;
-        info.tensor_fallback_reason =
+        decision.tensor_fallback = true;
+        decision.tensor_fallback_reason =
             detail::TensorFallbackReason::ProjectionFragmentUnsupported;
       } else {
-        info.tensor_eligible = true;
+        decision.tensor_eligible = true;
       }
     }
 
     if (info.members.size() == 1 && !info.has_self_loop) {
-      info.strategy = detail::SccStrategy::Direct;
-    } else if (info.tensor_eligible) {
-      info.strategy = detail::SccStrategy::Tensor;
+      decision.backend = detail::SccBackend::Direct;
+    } else if (decision.tensor_eligible) {
+      decision.backend = detail::SccBackend::Tensor;
     } else {
-      info.strategy = detail::SccStrategy::Worklist;
+      decision.backend = detail::SccBackend::Worklist;
     }
   }
+  return execution;
 }
 
 template <class D>
@@ -462,7 +415,8 @@ std::vector<DomVal<D>> solve_linear_adaptive_scc_from_plan(
     const std::vector<
         std::pair<Symbol, E1<typename TensorSemiringTraits<D>::tensor_domain>>>
         &rhs_tensor,
-    std::vector<DomVal<D>> init, const detail::LinearSccPlan<D> &plan) {
+    std::vector<DomVal<D>> init, const detail::LinearSccPlan<D> &plan,
+    const detail::LinearExecutionPlan &execution) {
   std::deque<DomVal<D>> values = detail::make_dense_value_buffer<D>(init);
 
   std::atomic<long> shared_steps(0);
@@ -482,19 +436,20 @@ std::vector<DomVal<D>> solve_linear_adaptive_scc_from_plan(
         0, layer.size(), 1, AdaptiveSccStats(),
         [&](std::size_t pos) {
           AdaptiveSccStats local;
-          const auto &info = plan.infos[static_cast<std::size_t>(layer[pos])];
-          switch (info.strategy) {
-          case detail::SccStrategy::Direct:
+          const auto &decision =
+              execution.sccs[static_cast<std::size_t>(layer[pos])];
+          switch (decision.backend) {
+          case detail::SccBackend::Direct:
             ++local.direct_count;
             break;
-          case detail::SccStrategy::Worklist:
+          case detail::SccBackend::Worklist:
             ++local.worklist_count;
             break;
-          case detail::SccStrategy::Tensor:
+          case detail::SccBackend::Tensor:
             ++local.tensor_count;
             break;
           }
-          if (info.tensor_fallback)
+          if (decision.tensor_fallback)
             ++local.tensor_fallback_count;
           return local;
         },
@@ -514,18 +469,18 @@ std::vector<DomVal<D>> solve_linear_adaptive_scc_from_plan(
   };
 
   auto solve_component = [&](int sid, detail::LinearSccTaskResult<D> &result) {
-    const auto &info = plan.infos[static_cast<std::size_t>(sid)];
+    const auto &decision = execution.sccs[static_cast<std::size_t>(sid)];
     const auto &scc = plan.sccs[static_cast<std::size_t>(sid)];
-    switch (info.strategy) {
-    case detail::SccStrategy::Direct:
+    switch (decision.backend) {
+    case detail::SccBackend::Direct:
       solve_linear_direct_component<D>(rhs, scc.front(), plan, values,
                                        shared_steps, result);
       break;
-    case detail::SccStrategy::Tensor:
+    case detail::SccBackend::Tensor:
       solve_linear_tensor_component<D>(verbose, rhs, rhs_tensor, plan, scc,
                                        values, result);
       break;
-    case detail::SccStrategy::Worklist:
+    case detail::SccBackend::Worklist:
       detail::solve_linear_scc_parallel_component<D>(plan, rhs, scc, values,
                                                      shared_steps, result);
       break;
@@ -588,9 +543,11 @@ std::vector<DomVal<D>> solve_linear_adaptive_scc_impl(
         &rhs_tensor,
     std::vector<DomVal<D>> init, const NewtonRoundSetup<D> &setup) {
   auto plan = detail::build_linear_scc_plan<D>(rhs);
-  annotate_adaptive_scc_plan<D>(plan, rhs, rhs_tensor, setup);
+  auto execution =
+      choose_adaptive_scc_backends<D>(plan, rhs_tensor, setup);
   return solve_linear_adaptive_scc_from_plan<D>(verbose, rhs, rhs_tensor,
-                                                std::move(init), plan);
+                                                std::move(init), plan,
+                                                execution);
 }
 
 template <class D>
@@ -683,10 +640,73 @@ template <class D> struct NewtonIter {
 template <class D> struct NPASolver {
   using V = DomVal<D>;
   using Eqn = std::pair<Symbol, E0<D>>;
+
+private:
+  static std::pair<std::vector<std::pair<Symbol, V>>, Stat>
+  solveOnce(const std::vector<Eqn> &eqns, bool verbose, int max,
+            LinearStrategy linear_strategy,
+            DomainContractMode contract_mode) {
+    SolveContext<D> context;
+    context.options.verbose = verbose;
+    context.options.max_iterations = max;
+    context.options.linear_strategy = linear_strategy;
+    context.options.contract_mode = contract_mode;
+    const bool checks_run =
+        contract_mode == DomainContractMode::BasicChecks;
+    const bool contract_ok =
+        !checks_run || run_basic_domain_contract_checks<D>(verbose);
+    auto result = iterate_until_stable(
+        NewtonIter<D>::init(eqns),
+        [&](const std::vector<std::pair<Symbol, V>> &current) {
+          return NewtonIter<D>::run(verbose, eqns, current, linear_strategy);
+        },
+        [](const std::vector<std::pair<Symbol, V>> &lhs,
+           const std::vector<std::pair<Symbol, V>> &rhs) {
+          for (std::size_t i = 0; i < lhs.size(); ++i)
+            if (!domain_equal<D>(lhs[i].second, rhs[i].second))
+              return false;
+          return true;
+        },
+        max, verbose);
+
+    if (!result.stabilized && max >= 0) {
+      npa_note_outer_limit_hit();
+      if (verbose)
+        std::cerr << "[conv] hit outer iteration cap=" << max << "\n";
+    }
+
+    Stat &stats = context.stats;
+    stats.iters = result.iterations;
+    stats.time = result.seconds;
+    stats.hit_limit = npa_limit_hit();
+    stats.hit_outer_limit = npa_hit_outer_limit();
+    stats.hit_linear_limit = npa_hit_linear_limit();
+    stats.hit_fixpoint_limit = npa_hit_fixpoint_limit();
+    stats.equation_count = static_cast<int>(eqns.size());
+    stats.requested_max_iters = max;
+    stats.effective_max_iters = max;
+    stats.linear_strategy = linear_strategy;
+    stats.used_approx_equal = DomainHasApproxEqual<D>::value;
+    const auto adaptive_stats = npa_adaptive_scc_solve_stats();
+    stats.adaptive_scc_used = adaptive_stats.used;
+    stats.adaptive_scc_direct_count = adaptive_stats.direct_count;
+    stats.adaptive_scc_worklist_count = adaptive_stats.worklist_count;
+    stats.adaptive_scc_tensor_count = adaptive_stats.tensor_count;
+    stats.adaptive_scc_tensor_fallback_count =
+        adaptive_stats.tensor_fallback_count;
+    stats.converged =
+        result.stabilized && !stats.hit_limit && !stats.used_approx_equal;
+    stats.domain_contract_checks_run = checks_run;
+    stats.domain_contract_checks_failed = checks_run && !contract_ok;
+    return {std::move(result.value), std::move(stats)};
+  }
+
+public:
   static std::pair<std::vector<std::pair<Symbol, V>>, Stat>
   solve(const std::vector<Eqn> &eqns, bool verbose = false, int max = -1,
         LinearStrategy linStrat = LinearStrategy::SCC,
         DomainContractMode contractMode = DomainContractMode::Off) {
+    NPA_REQUIRE_DOMAIN(D);
     // JACM (Esparza et al.) shows: for idempotent + commutative semirings,
     // Newton terminates after at most n iterations for a system of n equations.
     // We only apply this bound when the domain explicitly declares
@@ -698,16 +718,15 @@ template <class D> struct NPASolver {
     if (auto_cap) {
       effective_max = static_cast<int>(eqns.size());
     }
-    auto res = EquationSystemSolver<D, NewtonIter<D>>::solve(
-        eqns, verbose, effective_max, linStrat, contractMode);
+    auto res =
+        solveOnce(eqns, verbose, effective_max, linStrat, contractMode);
     res.second.used_auto_n_cap = auto_cap;
     res.second.effective_max_iters = effective_max;
     if (auto_cap && !res.second.converged) {
       if (verbose)
         std::cerr << "[conv] automatic n-iteration bound was insufficient; "
                      "continuing without the cap\n";
-      res = EquationSystemSolver<D, NewtonIter<D>>::solve(
-          eqns, verbose, -1, linStrat, contractMode);
+      res = solveOnce(eqns, verbose, -1, linStrat, contractMode);
       res.second.used_auto_n_cap = true;
       res.second.retried_without_auto_n_cap = true;
     }

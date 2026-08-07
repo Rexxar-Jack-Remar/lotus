@@ -1,7 +1,7 @@
 #ifndef NPA_REACHING_DEFINITIONS_H
 #define NPA_REACHING_DEFINITIONS_H
 
-#include "Dataflow/NPA/Analyses/BitVectorSolver.h"
+#include "Dataflow/NPA/Adapters/LLVM/BitVectorEngine.h"
 
 #include <llvm/IR/Function.h>
 

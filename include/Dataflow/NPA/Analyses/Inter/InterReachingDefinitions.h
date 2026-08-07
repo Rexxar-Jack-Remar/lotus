@@ -1,8 +1,8 @@
 #ifndef NPA_INTERPROC_RD_H
 #define NPA_INTERPROC_RD_H
 
-#include "Dataflow/NPA/Analyses/InterEngine.h"
-#include "Dataflow/NPA/Transfers/GenKillTransformer.h"
+#include "Dataflow/NPA/Adapters/LLVM/Inter/ForwardEngine.h"
+#include "Dataflow/NPA/Domains/Transformers/GenKillDomain.h"
 
 #include <map>
 

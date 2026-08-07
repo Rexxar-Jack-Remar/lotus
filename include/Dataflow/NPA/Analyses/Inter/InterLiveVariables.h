@@ -1,8 +1,8 @@
 #ifndef NPA_INTERPROC_LIVE_VARIABLES_H
 #define NPA_INTERPROC_LIVE_VARIABLES_H
 
-#include "Dataflow/NPA/Analyses/InterEngine.h"
-#include "Dataflow/NPA/Transfers/TaintTransformer.h"
+#include "Dataflow/NPA/Adapters/LLVM/Inter/BackwardEngine.h"
+#include "Dataflow/NPA/Domains/Transformers/TaintDomain.h"
 
 #include <map>
 #include <unordered_map>

@@ -1,7 +1,7 @@
 #ifndef NPA_BIT_VECTOR_SOLVER_H
 #define NPA_BIT_VECTOR_SOLVER_H
 
-#include "Dataflow/NPA/Analyses/Support/BitVectorProblem.h"
+#include "Dataflow/NPA/Adapters/LLVM/BitVectorProblem.h"
 #include "Dataflow/NPA/Domains/BitSetDomain.h"
 #include "Dataflow/NPA/NPA.h"
 

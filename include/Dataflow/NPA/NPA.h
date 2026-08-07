@@ -1,5 +1,5 @@
 /**********************************************************************
- * Newtonian Program Analysis (NPA) – generic C++14 header
+ * Newtonian Program Analysis (NPA) – generic C++17 interface
  *
  * Implements three related layers over ω-continuous semirings:
  * - Kleene solving: solve `X = f(X)` directly by repeated evaluation.
@@ -26,20 +26,16 @@
  * Based on OCaml NPA-PMA by Di Wang.
  *
  * Implementation split:
- *   - Core/Base/Foundation.h       : public NPA types + domain helpers
- *   - Core/Base/Runtime.h          : runtime bookkeeping and errors
- *   - Core/Expr/Expressions.h      : Exp0 (polynomial) / Exp1 (linearized) AST
- *   - Core/Expr/Eval.h             : I0 (Exp0) / I1 (Exp1) evaluators
- *   - Core/Expr/Diff.h             : ordinary and tensor differentials
- *   - Core/Expr/LCFLDetector.h     : detect LCFL structure (Concat/Star)
- *   - Core/Base/Fixpoint.h         : low-level least-fixpoint utilities
- *   - Core/Tensor/TensorProductLift.h
- *                                  : tensor-product lift utilities
- *   - Core/Tensor/TensorSemiring.h : tensor traits and tensor-side laws
+ *   - Core/Domain.h                : domain concept and generic operations
+ *   - Core/Symbol.h                : equation symbols
+ *   - Core/Expr/Expressions.h      : immutable polynomial/linearized ASTs
+ *   - Core/Expr/Eval.h             : evaluation with per-run external caches
  *   - Solver/KleeneSolver.h        : public Kleene solver
- *   - Solver/NewtonLinear.h        : ordinary inner Newton linear solvers
- *   - Solver/TensorProduct.h       : optional TOPLAS tensor-product backend
- *   - Solver/NPASolver.h           : public Newton/NPA solver
+ *   - Solver/NPASolver.h           : public Newton/NPA façade
+ *   - Solver/Newton/               : differentiation and Newton machinery
+ *   - Solver/Newton/Linear/        : SCC structure and ordinary backends
+ *   - Solver/Newton/Linear/Tensor/ : optional tensor backend
+ *   - Adapters/LLVM/               : LLVM-specific analysis infrastructure
  *********************************************************************/
 #ifndef NPA_HPP
 #define NPA_HPP

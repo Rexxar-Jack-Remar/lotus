@@ -1,7 +1,7 @@
 #ifndef NPA_BACKWARD_INTER_ENGINE_H
 #define NPA_BACKWARD_INTER_ENGINE_H
 
-#include "Dataflow/NPA/Analyses/InterEngine.h"
+#include "Dataflow/NPA/Adapters/LLVM/Inter/ForwardEngine.h"
 #include "Dataflow/NPA/NPA.h"
 #include "Utils/Algorithms/PathExpressions/PathExpressions.h"
 #include "Utils/Parallel/ThreadPool.h"

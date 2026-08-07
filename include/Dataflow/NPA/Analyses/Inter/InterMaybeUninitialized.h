@@ -1,8 +1,8 @@
 #ifndef NPA_INTERPROC_MAYBE_UNINITIALIZED_H
 #define NPA_INTERPROC_MAYBE_UNINITIALIZED_H
 
-#include "Dataflow/NPA/Analyses/InterEngine.h"
-#include "Dataflow/NPA/Transfers/TaintTransformer.h"
+#include "Dataflow/NPA/Adapters/LLVM/Inter/ForwardEngine.h"
+#include "Dataflow/NPA/Domains/Transformers/TaintDomain.h"
 
 #include <map>
 

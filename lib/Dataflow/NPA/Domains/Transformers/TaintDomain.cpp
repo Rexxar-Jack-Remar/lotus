@@ -2,7 +2,7 @@
  *
  * Author: rainoftime
  */
-#include "Dataflow/NPA/Transfers/TaintTransformer.h"
+#include "Dataflow/NPA/Domains/Transformers/TaintDomain.h"
 
 namespace npa {
 

@@ -2,7 +2,7 @@
  *
  * Author: rainoftime
  */
-#include "Dataflow/NPA/Analyses/BitVectorSolver.h"
+#include "Dataflow/NPA/Adapters/LLVM/BitVectorEngine.h"
 
 #include "Dataflow/ControlFlow/IntraCFG.h"
 

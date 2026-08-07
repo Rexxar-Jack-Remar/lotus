@@ -2,10 +2,10 @@
 set(NPA_SOURCES
   Domains/BitSetDomain.cpp
   Domains/PredicateRelationDomain.cpp
-  Transfers/GenKillTransformer.cpp
-  Transfers/TaintTransformer.cpp
+  Domains/Transformers/GenKillDomain.cpp
+  Domains/Transformers/TaintDomain.cpp
 
-  Analyses/BitVectorSolver.cpp
+  Adapters/LLVM/BitVectorEngine.cpp
   Analyses/Intra/LiveVariables.cpp
   Analyses/Inter/InterConstantPropagation.cpp
   Analyses/Inter/InterIntervalAnalysis.cpp

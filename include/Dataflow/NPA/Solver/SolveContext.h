@@ -1,122 +1,19 @@
-#ifndef NPA_RUNTIME_H
-#define NPA_RUNTIME_H
+#ifndef NPA_SOLVE_CONTEXT_H
+#define NPA_SOLVE_CONTEXT_H
 
 /**
  * \file
- * \brief Runtime bookkeeping, execution context, and NPA-specific errors.
+ * \brief Per-solve bookkeeping and worker execution-context propagation.
  */
 
-#include "Dataflow/NPA/Core/Base/Foundation.h"
+#include "Dataflow/NPA/Core/DomainExecution.h"
+#include "Dataflow/NPA/Solver/Options.h"
+#include "Dataflow/NPA/Solver/Statistics.h"
 
 #include <atomic>
-#include <cassert>
-#include <iostream>
-#include <stdexcept>
+#include <utility>
 
 namespace npa {
-
-struct NoopDomainRunState {};
-
-struct NoopDomainRunStateScope {
-  explicit NoopDomainRunStateScope(const NoopDomainRunState &) {}
-};
-
-template <class D> struct DomainExecutionStateTraits {
-  using state_type = NoopDomainRunState;
-  using scope_type = NoopDomainRunStateScope;
-
-  static state_type capture() { return {}; }
-};
-
-template <class Tag> class DomainWidthContext {
-public:
-  struct state_type {
-    bool active = false;
-    unsigned bit_width = 1;
-  };
-
-  class scope_type {
-  public:
-    scope_type() = default;
-
-    explicit scope_type(unsigned bit_width)
-        : scope_type(state_type{true, bit_width}) {}
-
-    explicit scope_type(const state_type &state) { reset(state); }
-
-    scope_type(const scope_type &) = delete;
-    scope_type &operator=(const scope_type &) = delete;
-
-    scope_type(scope_type &&other) noexcept
-        : previous_width_(other.previous_width_),
-          previous_active_(other.previous_active_),
-          installed_(other.installed_) {
-      other.installed_ = false;
-    }
-
-    scope_type &operator=(scope_type &&other) noexcept {
-      if (this == &other)
-        return *this;
-      restore();
-      previous_width_ = other.previous_width_;
-      previous_active_ = other.previous_active_;
-      installed_ = other.installed_;
-      other.installed_ = false;
-      return *this;
-    }
-
-    ~scope_type() { restore(); }
-
-    void reset(unsigned bit_width) { reset(state_type{true, bit_width}); }
-
-    void reset(const state_type &state) {
-      restore();
-      previous_width_ = current_bit_width_slot();
-      previous_active_ = has_current_bit_width_slot();
-      installed_ = true;
-      if (state.active) {
-        current_bit_width_slot() = state.bit_width;
-        has_current_bit_width_slot() = true;
-      } else {
-        current_bit_width_slot() = 1;
-        has_current_bit_width_slot() = false;
-      }
-    }
-
-  private:
-    void restore() {
-      if (!installed_)
-        return;
-      current_bit_width_slot() = previous_width_;
-      has_current_bit_width_slot() = previous_active_;
-      installed_ = false;
-    }
-
-    unsigned previous_width_;
-    bool previous_active_;
-    bool installed_ = false;
-  };
-
-  static state_type capture() {
-    return state_type{has_current_bit_width_slot(), current_bit_width_slot()};
-  }
-
-  static unsigned require(const char *message) {
-    assert(has_current_bit_width_slot() && message);
-    return current_bit_width_slot();
-  }
-
-private:
-  static unsigned &current_bit_width_slot() {
-    static thread_local unsigned width = 1;
-    return width;
-  }
-
-  static bool &has_current_bit_width_slot() {
-    static thread_local bool active = false;
-    return active;
-  }
-};
 
 struct ApproximationSourceFlags {
   bool hit_outer_limit = false;
@@ -281,6 +178,31 @@ private:
   AdaptiveSccSolveCollector *previous_;
 };
 
+/// Owns options, results, domain state, and mutable bookkeeping for one solve.
+template <class D> class SolveContext {
+public:
+  using domain_state_type = typename DomainExecutionStateTraits<D>::state_type;
+
+  explicit SolveContext(SolveOptions solve_options = {})
+      : options(std::move(solve_options)),
+        domain_state(DomainExecutionStateTraits<D>::capture()),
+        approximation_scope_(approximation_collector_),
+        adaptive_scope_(adaptive_collector_) {
+    approximation_collector_.reset();
+    adaptive_collector_.reset();
+  }
+
+  SolveOptions options;
+  Stat stats;
+  domain_state_type domain_state;
+
+private:
+  ApproximationSourceCollector approximation_collector_;
+  AdaptiveSccSolveCollector adaptive_collector_;
+  ScopedApproximationSourceCollector approximation_scope_;
+  ScopedAdaptiveSccSolveCollector adaptive_scope_;
+};
+
 template <class D> struct ExecutionContext {
   using domain_state_type = typename DomainExecutionStateTraits<D>::state_type;
 
@@ -373,75 +295,6 @@ inline void npa_note_adaptive_scc_tensor_fallback(int count = 1) {
   npa_active_adaptive_scc_collector().note_tensor_fallback(count);
 }
 
-template <class D>
-inline bool valid_newton_delta(const DomVal<D> &f_nu, const DomVal<D> &nu,
-                               const DomVal<D> &delta) {
-  return domain_exact_equal<D>(D::combine(nu, delta), f_nu);
-}
-
-template <class D>
-inline bool run_basic_domain_contract_checks(bool verbose = false) {
-  bool ok = true;
-  if (!D::equal(D::zero(), D::zero())) {
-    ok = false;
-    if (verbose)
-      std::cerr << "[npa-contract] zero() must equal itself\n";
-  }
-  if (!D::equal(D::one(), D::one())) {
-    ok = false;
-    if (verbose)
-      std::cerr << "[npa-contract] one() must equal itself\n";
-  }
-  if (D::idempotent) {
-    if (!D::equal(D::combine(D::zero(), D::zero()), D::zero())) {
-      ok = false;
-      if (verbose)
-        std::cerr << "[npa-contract] idempotent domain: zero⊕zero != zero\n";
-    }
-    if (!D::equal(D::combine(D::one(), D::one()), D::one())) {
-      ok = false;
-      if (verbose)
-        std::cerr << "[npa-contract] idempotent domain: one⊕one != one\n";
-    }
-  }
-  return ok;
-}
-
-class InvalidNewtonDeltaError : public std::logic_error {
-public:
-  InvalidNewtonDeltaError()
-      : std::logic_error("invalid Newton delta: non-idempotent domains must "
-                         "provide subtract()/choose_delta() such that "
-                         "combine(nu, delta) == f(nu)") {}
-};
-
-class UnsupportedNewtonMuError : public std::logic_error {
-public:
-  UnsupportedNewtonMuError()
-      : std::logic_error("unsupported Newton expression: Mu is evaluable but "
-                         "outside the paper-faithful Newton/tensor fragment") {}
-};
-
-class UnsafeNewtonProjectError : public std::logic_error {
-public:
-  UnsafeNewtonProjectError()
-      : std::logic_error(
-            "unsafe Newton projection: domains must opt in with "
-            "project_newton_safe for Project on Newton/tensor paths") {}
-};
-
-template <class D>
-inline void require_valid_newton_delta(const DomVal<D> &f_nu,
-                                       const DomVal<D> &nu,
-                                       const DomVal<D> &delta) {
-  // This check keeps the non-idempotent Newton hook honest: choose_delta() /
-  // subtract() may be domain-specific, but they must still produce a residual
-  // that exactly reconstructs f(nu) under combine().
-  if (valid_newton_delta<D>(f_nu, nu, delta))
-    return;
-  throw InvalidNewtonDeltaError{};
-}
-
 } // namespace npa
 
-#endif // NPA_RUNTIME_H
+#endif // NPA_SOLVE_CONTEXT_H

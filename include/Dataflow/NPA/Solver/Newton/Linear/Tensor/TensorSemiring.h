@@ -1,7 +1,7 @@
 #ifndef NPA_CORE_TENSOR_SEMIRING_H
 #define NPA_CORE_TENSOR_SEMIRING_H
 
-#include "Dataflow/NPA/Core/Tensor/TensorProductLift.h"
+#include "Dataflow/NPA/Solver/Newton/Linear/Tensor/TensorProductLift.h"
 
 namespace npa {
 

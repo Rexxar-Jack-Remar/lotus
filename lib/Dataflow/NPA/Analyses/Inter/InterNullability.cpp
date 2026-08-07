@@ -5,7 +5,7 @@
 #include "Dataflow/NPA/Analyses/Inter/InterNullability.h"
 
 #include "Alias/Infrastructure/AliasAnalysisWrapper/AliasAnalysisWrapper.h"
-#include "Dataflow/NPA/Analyses/InterEngine.h"
+#include "Dataflow/NPA/Adapters/LLVM/Inter/ForwardEngine.h"
 
 #include <algorithm>
 #include <functional>

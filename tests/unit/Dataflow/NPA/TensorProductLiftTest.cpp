@@ -1,4 +1,4 @@
-#include "Dataflow/NPA/Core/Tensor/TensorProductLift.h"
+#include "Dataflow/NPA/Solver/Newton/Linear/Tensor/TensorProductLift.h"
 
 #include <gtest/gtest.h>
 

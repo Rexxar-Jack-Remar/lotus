@@ -1,7 +1,7 @@
-#include "Dataflow/NPA/Solver/NewtonLinear.h"
+#include "Dataflow/NPA/Solver/Newton/Linear/SccSolver.h"
 #include "Dataflow/NPA/Domains/PredicateRelationDomain.h"
 #include "Dataflow/NPA/NPA.h"
-#include "Dataflow/NPA/Solver/TensorProduct.h"
+#include "Dataflow/NPA/Solver/Newton/Linear/Tensor/TensorSolver.h"
 
 #include <set>
 #include <string>

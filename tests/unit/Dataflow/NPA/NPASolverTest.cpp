@@ -1,6 +1,6 @@
-#include "Dataflow/NPA/Core/Tensor/TensorProductLift.h"
-#include "Dataflow/NPA/Transfers/PathTransferSummary.h"
-#include "Dataflow/NPA/Transfers/TransformerSummary.h"
+#include "Dataflow/NPA/Solver/Newton/Linear/Tensor/TensorProductLift.h"
+#include "Dataflow/NPA/Domains/Transformers/PathTransferSummary.h"
+#include "Dataflow/NPA/Domains/Transformers/TransformerSummary.h"
 #include "Dataflow/NPA/NPA.h"
 
 #include <unordered_map>

@@ -13,7 +13,8 @@
  * - synchronized iteration over already-linearized systems
  */
 
-#include "Dataflow/NPA/Core/Base/Runtime.h"
+#include "Dataflow/NPA/Core/Domain.h"
+#include "Dataflow/NPA/Solver/SolveContext.h"
 
 #include <iostream>
 
