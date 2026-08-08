@@ -4,6 +4,7 @@
 #include "Dataflow/NPA/Core/Domain.h"
 
 #include <utility>
+#include <vector>
 
 namespace npa {
 
