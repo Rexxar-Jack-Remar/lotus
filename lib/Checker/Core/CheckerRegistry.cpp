@@ -120,6 +120,12 @@ Error registerBuiltinNativeCheckers(CheckerRegistry &registry) {
                                {CheckerCapability::SMT, CheckerCapability::ICFG})) {
     return error;
   }
+  if (Error error = add_native("taint", "IFDS Taint Analysis", "security",
+                               Severity::High, EngineKind::Taint,
+                               {CheckerCapability::InterproceduralFlow,
+                                CheckerCapability::PTA})) {
+    return error;
+  }
   if (Error error = add_native("fitx", "FiTx", "api-misuse",
                                Severity::Medium, EngineKind::FiTx,
                                {CheckerCapability::DirectCalls})) {

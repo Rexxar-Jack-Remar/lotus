@@ -12,6 +12,7 @@ enum class EngineKind {
   Saber,
   Pulse,
   KINT,
+  Taint,
   FiTx,
   Concurrency,
   SymExec

@@ -25,3 +25,7 @@ if(DEFINED EXPECTED_OUTPUT AND NOT output MATCHES "${EXPECTED_OUTPUT}")
   message(FATAL_ERROR
           "output did not match '${EXPECTED_OUTPUT}'\n${output}")
 endif()
+if(DEFINED UNEXPECTED_OUTPUT AND output MATCHES "${UNEXPECTED_OUTPUT}")
+  message(FATAL_ERROR
+          "output unexpectedly matched '${UNEXPECTED_OUTPUT}'\n${output}")
+endif()

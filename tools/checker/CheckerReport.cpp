@@ -15,6 +15,51 @@ using namespace llvm;
 
 namespace lotus::checker::tooling {
 
+namespace {
+
+template <typename Writer>
+bool writeReportAtomically(StringRef path, StringRef format, Writer write) {
+  SmallString<256> temporaryPath;
+  int temporaryFd = -1;
+  if (std::error_code error = sys::fs::createUniqueFile(
+          Twine(path) + ".tmp-%%%%%%", temporaryFd, temporaryPath)) {
+    errs() << "Error writing " << format << " report: " << error.message()
+           << "\n";
+    return false;
+  }
+
+  raw_fd_ostream output(temporaryFd, true);
+  write(output);
+  output.close();
+  if (output.has_error()) {
+    const std::error_code error = output.error();
+    output.clear_error();
+    sys::fs::remove(temporaryPath);
+    errs() << "Error writing " << format << " report: " << error.message()
+           << "\n";
+    return false;
+  }
+
+  if (std::error_code error = sys::fs::rename(temporaryPath, path)) {
+    sys::fs::remove(temporaryPath);
+    errs() << "Error writing " << format << " report: " << error.message()
+           << "\n";
+    return false;
+  }
+  return true;
+}
+
+} // namespace
+
+bool validateReportOptions() {
+  if (report_options::MinConfidenceScore < 0 ||
+      report_options::MinConfidenceScore > 100) {
+    errs() << "error: --report-min-score must be in [0,100]\n";
+    return false;
+  }
+  return true;
+}
+
 int emitCheckerReports(BugReportMgr &manager,
                        const CheckerReportOptions &options) {
   if (!report_options::SuppressionFile.empty()) {
@@ -32,7 +77,9 @@ int emitCheckerReports(BugReportMgr &manager,
       std::max(options.minScore, report_options::MinConfidenceScore.getValue()),
       report_options::ShowInvalidReports.getValue()};
 
-  manager.print_detailed_reports(outs(), options.verbose, filter);
+  if (options.printText) {
+    manager.print_detailed_reports(outs(), options.verbose, filter);
+  }
 
   if (!report_options::TargetsOutputFile.empty()) {
     lotus::fuzzing::TargetGenerationOptions targetOptions;
@@ -51,27 +98,23 @@ int emitCheckerReports(BugReportMgr &manager,
   }
 
   if (!report_options::JsonOutputFile.empty()) {
-    std::error_code error;
-    raw_fd_ostream output(report_options::JsonOutputFile, error,
-                          sys::fs::OF_None);
-    if (error) {
-      errs() << "Error writing JSON report: " << error.message() << "\n";
+    if (!writeReportAtomically(report_options::JsonOutputFile, "JSON",
+                               [&](raw_ostream &output) {
+                                 manager.generate_json_report(output, filter);
+                               })) {
       return EXIT_ERROR;
     }
-    manager.generate_json_report(output, filter);
     outs() << "\nJSON report written to: " << report_options::JsonOutputFile
            << "\n";
   }
 
   if (!report_options::SarifOutputFile.empty()) {
-    std::error_code error;
-    raw_fd_ostream output(report_options::SarifOutputFile, error,
-                          sys::fs::OF_None);
-    if (error) {
-      errs() << "Error writing SARIF report: " << error.message() << "\n";
+    if (!writeReportAtomically(report_options::SarifOutputFile, "SARIF",
+                               [&](raw_ostream &output) {
+                                 manager.generate_sarif_report(output, filter);
+                               })) {
       return EXIT_ERROR;
     }
-    manager.generate_sarif_report(output, filter);
     outs() << "\nSARIF report written to: " << report_options::SarifOutputFile
            << "\n";
   }

@@ -11,7 +11,11 @@ constexpr int EXIT_ERROR = 2;
 struct CheckerReportOptions {
   bool verbose = false;
   int minScore = 0;
+  bool printText = true;
 };
+
+/// Validate command-line options shared by every checker engine.
+bool validateReportOptions();
 
 int emitCheckerReports(BugReportMgr &manager,
                        const CheckerReportOptions &options = {});

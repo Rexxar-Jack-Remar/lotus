@@ -551,7 +551,7 @@ bool TaintAnalysis::is_sink(const llvm::Instruction *inst) const {
 
 bool TaintAnalysis::matches_function_name(const llvm::Instruction *inst,
                                           llvm::StringRef configured_name) {
-  auto *call = llvm::dyn_cast<llvm::CallInst>(inst);
+  auto *call = llvm::dyn_cast<llvm::CallBase>(inst);
   if (!call || !call->getCalledFunction())
     return false;
 
@@ -584,7 +584,7 @@ bool TaintAnalysis::is_sanitizer(const llvm::Instruction *inst) const {
   if (!m_config.use_sanitizers)
     return false;
 
-  auto *call = llvm::dyn_cast<llvm::CallInst>(inst);
+  auto *call = llvm::dyn_cast<llvm::CallBase>(inst);
   if (!call || !call->getCalledFunction())
     return false;
 
@@ -612,8 +612,8 @@ bool TaintAnalysis::kills_fact(const llvm::CallBase *call,
 
   // For strict sanitization, only kill facts that directly match operands
   if (fact.is_tainted_var()) {
-    for (unsigned i = 0; i < call->getNumOperands() - 1; ++i) {
-      if (call->getOperand(i) == fact.get_value()) {
+    for (unsigned i = 0; i < call->arg_size(); ++i) {
+      if (call->getArgOperand(i) == fact.get_value()) {
         return true;
       }
     }
@@ -621,8 +621,8 @@ bool TaintAnalysis::kills_fact(const llvm::CallBase *call,
 
   // Memory taint can be sanitized if the pointer is passed to sanitizer
   if (fact.is_tainted_memory()) {
-    for (unsigned i = 0; i < call->getNumOperands() - 1; ++i) {
-      const llvm::Value *arg = call->getOperand(i);
+    for (unsigned i = 0; i < call->arg_size(); ++i) {
+      const llvm::Value *arg = call->getArgOperand(i);
       if (arg && arg->getType()->isPointerTy() &&
           taint_may_alias(arg, fact.get_memory_location())) {
         return true;
@@ -650,8 +650,8 @@ void TaintAnalysis::handle_source_function_specs(const llvm::CallBase *call,
                  (spec.access_mode == TaintSpec::DIRECT_DEREF ||
                   spec.access_mode == TaintSpec::REACHABLE_DEREF)) {
         if (spec.arg_index >= 0 &&
-            spec.arg_index < (int)(call->getNumOperands() - 1)) {
-          const llvm::Value *arg = call->getOperand(spec.arg_index);
+            spec.arg_index < static_cast<int>(call->arg_size())) {
+          const llvm::Value *arg = call->getArgOperand(spec.arg_index);
           if (arg->getType()->isPointerTy()) {
             result.insert(TaintFact::tainted_memory(arg));
           }
@@ -660,8 +660,8 @@ void TaintAnalysis::handle_source_function_specs(const llvm::CallBase *call,
                  (spec.access_mode == TaintSpec::DIRECT_DEREF ||
                   spec.access_mode == TaintSpec::REACHABLE_DEREF)) {
         unsigned start_arg = spec.arg_index + 1;
-        for (unsigned i = start_arg; i < call->getNumOperands() - 1; ++i) {
-          const llvm::Value *arg = call->getOperand(i);
+        for (unsigned i = start_arg; i < call->arg_size(); ++i) {
+          const llvm::Value *arg = call->getArgOperand(i);
           if (arg->getType()->isPointerTy()) {
             result.insert(TaintFact::tainted_memory(arg));
           }
@@ -688,8 +688,8 @@ void TaintAnalysis::handle_pipe_specifications(const llvm::CallBase *call,
       if (pipe_spec.from.location == TaintSpec::ARG) {
         int from_arg_idx = pipe_spec.from.arg_index;
         if (from_arg_idx >= 0 &&
-            from_arg_idx < (int)(call->getNumOperands() - 1)) {
-          const llvm::Value *from_arg = call->getOperand(from_arg_idx);
+            from_arg_idx < static_cast<int>(call->arg_size())) {
+          const llvm::Value *from_arg = call->getArgOperand(from_arg_idx);
 
           if (pipe_spec.from.access_mode == TaintSpec::VALUE) {
             if (fact.is_tainted_var() && fact.get_value() == from_arg) {
@@ -719,8 +719,8 @@ void TaintAnalysis::handle_pipe_specifications(const llvm::CallBase *call,
         } else if (pipe_spec.to.location == TaintSpec::ARG) {
           int to_arg_idx = pipe_spec.to.arg_index;
           if (to_arg_idx >= 0 &&
-              to_arg_idx < (int)(call->getNumOperands() - 1)) {
-            const llvm::Value *to_arg = call->getOperand(to_arg_idx);
+              to_arg_idx < static_cast<int>(call->arg_size())) {
+            const llvm::Value *to_arg = call->getArgOperand(to_arg_idx);
 
             if (pipe_spec.to.access_mode == TaintSpec::VALUE) {
               result.insert(TaintFact::tainted_var(to_arg));
@@ -752,7 +752,7 @@ TaintAnalysis::format_tainted_arg(unsigned arg_index, const TaintFact &fact,
   if (fact.is_tainted_var()) {
     return "arg" + std::to_string(arg_index);
   } else if (fact.is_tainted_memory()) {
-    return (fact.get_memory_location() == call->getOperand(arg_index))
+    return (fact.get_memory_location() == call->getArgOperand(arg_index))
                ? "arg" + std::to_string(arg_index) + "(mem)"
                : "arg" + std::to_string(arg_index) + "(alias)";
   }
@@ -765,8 +765,8 @@ void TaintAnalysis::analyze_tainted_arguments(
     std::string &tainted_args) const {
   std::set<std::string> unique_tainted_args;
 
-  for (unsigned i = 0; i < call->getNumOperands() - 1; ++i) {
-    const llvm::Value *arg = call->getOperand(i);
+  for (unsigned i = 0; i < call->arg_size(); ++i) {
+    const llvm::Value *arg = call->getArgOperand(i);
 
     for (const auto &fact : facts) {
       if (is_argument_tainted(arg, fact)) {

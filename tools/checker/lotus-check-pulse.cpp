@@ -87,6 +87,12 @@ int runPulseCheckerTool(const char *argv0) {
 
   auto AA = std::make_unique<lotus::AliasAnalysisWrapper>(
       *M, lotus::AAConfig::UnderApprox());
+  if (!AA->isInitialized()) {
+    errs() << "error: alias analysis failed to initialize\n";
+    PulseLogger::endTimer("total_analysis");
+    return lotus::checker::tooling::EXIT_ERROR;
+  }
+
   PulseChecker checker(M.get(), AA.get());
 
   PulseLogger::startTimer("analysis");

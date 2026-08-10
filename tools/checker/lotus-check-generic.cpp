@@ -8,6 +8,7 @@
 #include "CheckerReport.h"
 #include "CheckerToolEntrypoints.h"
 
+#include <array>
 #include <optional>
 #include <set>
 #include <string>
@@ -16,6 +17,7 @@
 #include <llvm/IRReader/IRReader.h>
 #include <llvm/Support/CommandLine.h>
 #include <llvm/Support/FileSystem.h>
+#include <llvm/Support/FormatVariadic.h>
 #include <llvm/Support/InitLLVM.h>
 #include <llvm/Support/Path.h>
 #include <llvm/Support/PrettyStackTrace.h>
@@ -68,20 +70,63 @@ static cl::opt<bool>
 
 namespace {
 
+struct EngineDescriptor {
+  StringRef name;
+  StringRef summary;
+  lotus::checker::EngineKind kind;
+  cl::SubCommand &(*subcommand)();
+  int (*run)(const char *);
+};
+
+const std::array<EngineDescriptor, 9> &engineDescriptors() {
+  static const std::array<EngineDescriptor, 9> descriptors = {{
+      {"generic", "Registry-backed declarative checkers",
+       lotus::checker::EngineKind::Declarative,
+       lotus::checker::tooling::genericSubCommand, runGenericCheckerTool},
+      {"ae", "Abstract execution", lotus::checker::EngineKind::AE,
+       lotus::checker::tooling::aeSubCommand, runAECheckerTool},
+      {"kint", "Integer bug detection", lotus::checker::EngineKind::KINT,
+       lotus::checker::tooling::kintSubCommand, runKintCheckerTool},
+      {"taint", "IFDS taint analysis", lotus::checker::EngineKind::Taint,
+       lotus::checker::tooling::taintSubCommand, runTaintCheckerTool},
+      {"concur", "Concurrency checking", lotus::checker::EngineKind::Concurrency,
+       lotus::checker::tooling::concurrencySubCommand, runConcurrencyCheckerTool},
+      {"pulse", "Pulse memory-safety analysis", lotus::checker::EngineKind::Pulse,
+       lotus::checker::tooling::pulseSubCommand, runPulseCheckerTool},
+      {"fitx", "FiTx typestate analysis", lotus::checker::EngineKind::FiTx,
+       lotus::checker::tooling::fitxSubCommand, runFiTxCheckerTool},
+      {"saber", "Sparse value-flow checking", lotus::checker::EngineKind::Saber,
+       lotus::checker::tooling::saberSubCommand, runSaberCheckerTool},
+      {"symex", "Symbolic execution", lotus::checker::EngineKind::SymExec,
+       lotus::checker::tooling::symexSubCommand, runSymExCheckerTool},
+  }};
+  return descriptors;
+}
+
+const EngineDescriptor *findEngineDescriptor(StringRef name) {
+  for (const EngineDescriptor &descriptor : engineDescriptors()) {
+    if (descriptor.name == name) {
+      return &descriptor;
+    }
+  }
+  return nullptr;
+}
+
 bool isHelpFlag(StringRef arg) {
   return arg == "-h" || arg == "--help" || arg == "--help-hidden" ||
          arg == "--help-list" || arg == "--help-list-hidden";
 }
 
 bool isKnownCheckerSubcommand(StringRef arg) {
-  return arg == "generic" || arg == "kint" || arg == "taint" ||
-         arg == "concur" || arg == "pulse" || arg == "fitx" || arg == "saber" ||
-         arg == "ae" || arg == "symex";
+  return findEngineDescriptor(arg) != nullptr;
 }
 
 std::optional<std::string> requestedSubcommand(int argc, char **argv) {
   for (int i = 1; i < argc; ++i) {
     StringRef arg(argv[i]);
+    if (arg == "--") {
+      return std::nullopt;
+    }
     if (!arg.empty() && arg[0] != '-') {
       if (isKnownCheckerSubcommand(arg)) {
         return arg.str();
@@ -94,6 +139,9 @@ std::optional<std::string> requestedSubcommand(int argc, char **argv) {
 
 bool helpRequested(int argc, char **argv) {
   for (int i = 1; i < argc; ++i) {
+    if (StringRef(argv[i]) == "--") {
+      break;
+    }
     if (isHelpFlag(argv[i])) {
       return true;
     }
@@ -104,6 +152,9 @@ bool helpRequested(int argc, char **argv) {
 bool hiddenHelpRequested(int argc, char **argv) {
   for (int index = 1; index < argc; ++index) {
     StringRef argument(argv[index]);
+    if (argument == "--") {
+      break;
+    }
     if (argument == "--help-hidden" || argument == "--help-list-hidden") {
       return true;
     }
@@ -112,25 +163,8 @@ bool hiddenHelpRequested(int argc, char **argv) {
 }
 
 cl::SubCommand *checkerSubcommand(StringRef engine) {
-  if (engine == "generic")
-    return &lotus::checker::tooling::genericSubCommand();
-  if (engine == "kint")
-    return &lotus::checker::tooling::kintSubCommand();
-  if (engine == "taint")
-    return &lotus::checker::tooling::taintSubCommand();
-  if (engine == "concur")
-    return &lotus::checker::tooling::concurrencySubCommand();
-  if (engine == "pulse")
-    return &lotus::checker::tooling::pulseSubCommand();
-  if (engine == "fitx")
-    return &lotus::checker::tooling::fitxSubCommand();
-  if (engine == "saber")
-    return &lotus::checker::tooling::saberSubCommand();
-  if (engine == "ae")
-    return &lotus::checker::tooling::aeSubCommand();
-  if (engine == "symex")
-    return &lotus::checker::tooling::symexSubCommand();
-  return nullptr;
+  const EngineDescriptor *descriptor = findEngineDescriptor(engine);
+  return descriptor ? &descriptor->subcommand() : nullptr;
 }
 
 void printTopLevelHelp() {
@@ -138,17 +172,12 @@ void printTopLevelHelp() {
          << "USAGE:\n"
          << "  lotus-check --engine=<name> [engine options] <input bitcode>\n"
          << "  lotus-check --list-checkers\n\n"
-         << "ENGINES:\n"
-         << "  generic  Registry-backed declarative checkers\n"
-         << "  ae       Abstract execution\n"
-         << "  kint     Integer bug detection\n"
-         << "  taint    IFDS taint analysis\n"
-         << "  concur   Concurrency checking\n"
-         << "  pulse    Pulse memory-safety analysis\n"
-         << "  fitx     FiTx typestate analysis\n"
-         << "  saber    Sparse value-flow checking\n"
-         << "  symex    Symbolic execution\n\n"
-         << "Use --engine=<name> --help for engine-specific options.\n";
+         << "ENGINES:\n";
+  for (const EngineDescriptor &descriptor : engineDescriptors()) {
+    outs() << "  " << formatv("{0,-8}", descriptor.name) << descriptor.summary
+           << "\n";
+  }
+  outs() << "\nUse --engine=<name> --help for engine-specific options.\n";
 }
 
 void printEngineHelp(StringRef engine, cl::SubCommand &subcommand,
@@ -192,23 +221,10 @@ std::vector<std::string> splitCsv(StringRef csv) {
 }
 
 StringRef cliEngineName(lotus::checker::EngineKind engine) {
-  switch (engine) {
-  case lotus::checker::EngineKind::Declarative:
-    return "generic";
-  case lotus::checker::EngineKind::AE:
-    return "ae";
-  case lotus::checker::EngineKind::Saber:
-    return "saber";
-  case lotus::checker::EngineKind::Pulse:
-    return "pulse";
-  case lotus::checker::EngineKind::KINT:
-    return "kint";
-  case lotus::checker::EngineKind::FiTx:
-    return "fitx";
-  case lotus::checker::EngineKind::Concurrency:
-    return "concur";
-  case lotus::checker::EngineKind::SymExec:
-    return "symex";
+  for (const EngineDescriptor &descriptor : engineDescriptors()) {
+    if (descriptor.kind == engine) {
+      return descriptor.name;
+    }
   }
   llvm_unreachable("unhandled checker engine");
 }
@@ -229,6 +245,13 @@ Expected<std::vector<std::string>> normalizeEngineSelectionArgs(int argc,
 
   for (int index = 1; index < argc; ++index) {
     StringRef argument(argv[index]);
+    if (argument == "--") {
+      normalized.push_back(argv[index]);
+      for (++index; index < argc; ++index) {
+        normalized.push_back(argv[index]);
+      }
+      break;
+    }
     StringRef engineName;
     if (argument.consume_front("--engine=")) {
       engineName = argument;
@@ -248,11 +271,17 @@ Expected<std::vector<std::string>> normalizeEngineSelectionArgs(int argc,
                                "--engine may only be specified once");
     }
     if (!isKnownCheckerSubcommand(engineName)) {
+      std::string expected;
+      for (const EngineDescriptor &descriptor : engineDescriptors()) {
+        if (!expected.empty()) {
+          expected += ", ";
+        }
+        expected += descriptor.name.str();
+      }
       return createStringError(
-          inconvertibleErrorCode(),
-          "invalid engine '%s'; expected generic, ae, kint, taint, concur, "
-          "pulse, fitx, saber, or symex",
-          engineName.str().c_str());
+        inconvertibleErrorCode(),
+          "invalid engine '%s'; expected %s", engineName.str().c_str(),
+          expected.c_str());
     }
     selectedEngine = engineName.str();
   }
@@ -264,7 +293,7 @@ Expected<std::vector<std::string>> normalizeEngineSelectionArgs(int argc,
 }
 
 Expected<lotus::checker::CheckerRegistry>
-buildRegistry(bool tolerateSpecLoadFailure) {
+buildRegistry() {
   lotus::checker::CheckerRegistry registry;
   if (auto error = lotus::checker::registerBuiltinNativeCheckers(registry)) {
     return std::move(error);
@@ -285,12 +314,6 @@ buildRegistry(bool tolerateSpecLoadFailure) {
   lotus::checker::CheckerSpecLoader loader;
   auto specs_or = loader.loadFromDirectory(specDir);
   if (!specs_or) {
-    if (tolerateSpecLoadFailure) {
-      logAllUnhandledErrors(
-          specs_or.takeError(), errs(),
-          "warning: could not load declarative checker specs: ");
-      return registry;
-    }
     return specs_or.takeError();
   }
   for (const auto &spec : *specs_or) {
@@ -305,7 +328,7 @@ buildRegistry(bool tolerateSpecLoadFailure) {
 } // namespace
 
 int runGenericCheckerTool(const char *argv0) {
-  auto registry_or = buildRegistry(ListCheckers);
+  auto registry_or = buildRegistry();
   if (!registry_or) {
     logAllUnhandledErrors(registry_or.takeError(), errs(), "");
     return lotus::checker::tooling::EXIT_ERROR;
@@ -438,38 +461,26 @@ int main(int argc, char **argv) {
     return lotus::checker::tooling::EXIT_SUCCESS_CODE;
   }
 
-  cl::ParseCommandLineOptions(
-      normalizedArgc, argumentVector,
-      "Lotus checker front-end\n"
-      "  Select one engine with --engine=<name>.\n"
-      "  Example: 'lotus-check --engine=symex --help' shows Symbolic "
-      "Execution options.\n");
+  if (!cl::ParseCommandLineOptions(
+          normalizedArgc, argumentVector,
+          "Lotus checker front-end\n"
+          "  Select one engine with --engine=<name>.\n"
+          "  Example: 'lotus-check --engine=symex --help' shows Symbolic "
+          "Execution options.\n",
+          &errs())) {
+    return lotus::checker::tooling::EXIT_ERROR;
+  }
 
-  if (lotus::checker::tooling::kintSubCommand()) {
-    return runKintCheckerTool(argumentVector[0]);
+  if (!lotus::checker::tooling::validateReportOptions()) {
+    return lotus::checker::tooling::EXIT_ERROR;
   }
-  if (lotus::checker::tooling::taintSubCommand()) {
-    return runTaintCheckerTool(argumentVector[0]);
+
+  for (const EngineDescriptor &descriptor : engineDescriptors()) {
+    if (descriptor.subcommand()) {
+      return descriptor.run(argumentVector[0]);
+    }
   }
-  if (lotus::checker::tooling::concurrencySubCommand()) {
-    return runConcurrencyCheckerTool(argumentVector[0]);
-  }
-  if (lotus::checker::tooling::pulseSubCommand()) {
-    return runPulseCheckerTool(argumentVector[0]);
-  }
-  if (lotus::checker::tooling::fitxSubCommand()) {
-    return runFiTxCheckerTool(argumentVector[0]);
-  }
-  if (lotus::checker::tooling::saberSubCommand()) {
-    return runSaberCheckerTool(argumentVector[0]);
-  }
-  if (lotus::checker::tooling::aeSubCommand()) {
-    return runAECheckerTool(argumentVector[0]);
-  }
-  if (lotus::checker::tooling::symexSubCommand()) {
-    return runSymExCheckerTool(argumentVector[0]);
-  }
-  if (lotus::checker::tooling::genericSubCommand() || ListCheckers) {
+  if (ListCheckers) {
     return runGenericCheckerTool(argumentVector[0]);
   }
 

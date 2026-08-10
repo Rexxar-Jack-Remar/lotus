@@ -7,10 +7,12 @@
 
 #include "Checker/Tooling/CheckerSubcommands.h"
 #include "CheckerReport.h"
+#include "Checker/Report/BugReportMgr.h"
 #include "Utils/LLVM/Demangle.h"
 
 #include <chrono>
 #include <memory>
+#include <optional>
 #include <set>
 #include <sstream>
 #include <string>
@@ -20,6 +22,7 @@
 #include <Dataflow/IFDS/Core/IFDSFramework.h>
 #include <Dataflow/IFDS/Solver/IFDSSolver.h>
 #include <llvm/ADT/Statistic.h>
+#include <llvm/ADT/SmallPtrSet.h>
 #include <llvm/IR/InstIterator.h>
 #include <llvm/IR/LLVMContext.h>
 #include <llvm/IR/LegacyPassManager.h>
@@ -133,6 +136,8 @@ std::vector<std::string> parseFunctionList(const std::string &input) {
 
 using TaintFlow = std::pair<std::string, std::string>;
 
+static std::optional<std::string> resolveCalleeName(const CallBase &call);
+
 static ErrorOr<std::set<TaintFlow>> loadExpectedFlows(StringRef filename) {
   auto bufferOr = MemoryBuffer::getFile(filename);
   if (!bufferOr) {
@@ -177,8 +182,12 @@ collectDetectedFlows(const TaintAnalysis &analysis,
     const auto &node = entry.first;
     const auto &facts = entry.second;
     const auto *sinkCall = dyn_cast_or_null<CallBase>(node.instruction);
-    if (!sinkCall || !analysis.is_sink(sinkCall) ||
-        !sinkCall->getCalledFunction()) {
+    if (!sinkCall || !analysis.is_sink(sinkCall)) {
+      continue;
+    }
+
+    auto sinkName = resolveCalleeName(*sinkCall);
+    if (!sinkName) {
       continue;
     }
 
@@ -195,24 +204,123 @@ collectDetectedFlows(const TaintAnalysis &analysis,
       }
 
       const auto *directSource = dyn_cast_or_null<CallBase>(fact.get_source());
-      if (directSource && directSource->getCalledFunction()) {
-        flows.emplace(directSource->getCalledFunction()->getName().str(),
-                      sinkCall->getCalledFunction()->getName().str());
-        continue;
+      if (directSource) {
+        auto sourceName = resolveCalleeName(*directSource);
+        if (sourceName) {
+          flows.emplace(*sourceName, *sinkName);
+          continue;
+        }
       }
 
       auto path =
           analysis.trace_taint_sources_summary_based(solver, sinkCall, fact);
       for (const Instruction *sourceInst : path.sources) {
         const auto *sourceCall = dyn_cast_or_null<CallBase>(sourceInst);
-        if (sourceCall && sourceCall->getCalledFunction()) {
-          flows.emplace(sourceCall->getCalledFunction()->getName().str(),
-                        sinkCall->getCalledFunction()->getName().str());
+        if (!sourceCall) {
+          continue;
+        }
+        auto sourceName = resolveCalleeName(*sourceCall);
+        if (sourceName) {
+          flows.emplace(*sourceName, *sinkName);
         }
       }
     }
   }
   return flows;
+}
+
+static std::optional<std::string> resolveCalleeName(const CallBase &call) {
+  if (const Function *callee = call.getCalledFunction()) {
+    return callee->getName().str();
+  }
+
+  const Value *called = call.getCalledOperand()->stripPointerCasts();
+  if (const auto *callee = dyn_cast<Function>(called)) {
+    return callee->getName().str();
+  }
+  return std::nullopt;
+}
+
+static std::string describeCallee(const CallBase &call) {
+  if (auto callee = resolveCalleeName(call)) {
+    return *callee;
+  }
+
+  std::string called;
+  raw_string_ostream os(called);
+  call.getCalledOperand()->print(os);
+  return "indirect call through " + os.str();
+}
+
+static int emitTaintReports(const TaintAnalysis &analysis,
+                            const IFDSSolver<TaintAnalysis> &solver) {
+  BugReportMgr &manager = BugReportMgr::get_instance();
+  const int bugTypeId = manager.register_bug_type(
+      "Taint-Style Vulnerability", BugDescription::BI_HIGH,
+      BugDescription::BC_SECURITY,
+      "CWE-15, CWE-23, CWE-78, CWE-90, CWE-123, CWE-256, CWE-319, CWE-426, "
+      "CWE-427, CWE-591");
+
+  for (const auto &entry : solver.get_all_results()) {
+    const auto *sinkCall = dyn_cast_or_null<CallBase>(entry.first.instruction);
+    if (!sinkCall || !analysis.is_sink(sinkCall) || entry.second.empty()) {
+      continue;
+    }
+
+    std::string taintedArgs;
+    analysis.analyze_tainted_arguments(sinkCall, entry.second, taintedArgs);
+    if (taintedArgs.empty()) {
+      continue;
+    }
+
+    auto *report = new BugReport(bugTypeId);
+    SmallPtrSet<const Instruction *, 8> seenSources;
+    unsigned traceLevel = 0;
+    for (const TaintFact &fact : entry.second) {
+      bool reachesArgument = false;
+      for (const Use &argument : sinkCall->args()) {
+        if (analysis.is_argument_tainted(argument.get(), fact)) {
+          reachesArgument = true;
+          break;
+        }
+      }
+      if (!reachesArgument) {
+        continue;
+      }
+
+      const Instruction *source = fact.get_source();
+      if (source && seenSources.insert(source).second) {
+        report->append_step(const_cast<Instruction *>(source),
+                            "Taint originates here", traceLevel++, {},
+                            "source");
+      }
+
+      auto path =
+          analysis.trace_taint_sources_summary_based(solver, sinkCall, fact);
+      for (const Instruction *pathSource : path.sources) {
+        if (pathSource && seenSources.insert(pathSource).second) {
+          report->append_step(const_cast<Instruction *>(pathSource),
+                              "Taint originates here", traceLevel++, {},
+                              "source");
+        }
+      }
+    }
+
+    report->append_step(
+        const_cast<CallBase *>(sinkCall),
+        "Tainted data reaches sink '" + describeCallee(*sinkCall) +
+            "' via " + taintedArgs,
+        traceLevel, {NodeTag::CALL_SITE}, "sink");
+    report->set_conf_score(80);
+    report->set_suggestion(
+        "Validate or sanitize untrusted input before passing it to this sink");
+    manager.insert_report(bugTypeId, report, true);
+  }
+
+  lotus::checker::tooling::CheckerReportOptions reportOptions;
+  reportOptions.verbose = Verbose;
+  reportOptions.printText = ShowResults;
+  return lotus::checker::tooling::emitCheckerReports(manager, reportOptions);
 }
 
 static void evaluateMicroBenchmark(const std::set<TaintFlow> &expected,
@@ -258,8 +366,8 @@ static void dumpSourceSinkMatches(const llvm::Module &module,
 
   for (const auto &function : module) {
     for (const auto &inst : instructions(function)) {
-      const auto *call = llvm::dyn_cast<llvm::CallInst>(&inst);
-      if (!call || !call->getCalledFunction())
+      const auto *call = llvm::dyn_cast<llvm::CallBase>(&inst);
+      if (!call)
         continue;
 
       ++total_calls;
@@ -270,7 +378,7 @@ static void dumpSourceSinkMatches(const llvm::Module &module,
       if (is_sink)
         ++sink_calls;
 
-      auto raw_name = call->getCalledFunction()->getName().str();
+      auto raw_name = describeCallee(*call);
       auto demangled_name = demangle_name(raw_name);
       const DebugLoc debugLocation = call->getDebugLoc();
       const unsigned line = debugLocation ? debugLocation.getLine() : 0;
@@ -447,10 +555,6 @@ int runTaintCheckerTool(const char *argv0) {
       outs() << "Sequential analysis completed in " << duration.count()
              << " ms\n";
 
-      if (ShowResults) {
-        taintAnalysis.report_vulnerabilities(solver, outs(),
-                                             MaxDetailedResults.getValue());
-      }
       if (MicroBench) {
         SmallString<256> expectedPath;
         if (!ExpectedFile.empty()) {
@@ -467,6 +571,10 @@ int runTaintCheckerTool(const char *argv0) {
         }
         evaluateMicroBenchmark(
             *expectedOr, collectDetectedFlows(taintAnalysis, solver), outs());
+      }
+      const int reportStatus = emitTaintReports(taintAnalysis, solver);
+      if (reportStatus != lotus::checker::tooling::EXIT_SUCCESS_CODE) {
+        return reportStatus;
       }
       break;
     }

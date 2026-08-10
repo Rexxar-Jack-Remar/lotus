@@ -66,6 +66,9 @@ EngineKind parseEngineKind(StringRef value) {
   if (value == "kint") {
     return EngineKind::KINT;
   }
+  if (value == "taint") {
+    return EngineKind::Taint;
+  }
   if (value == "fitx") {
     return EngineKind::FiTx;
   }

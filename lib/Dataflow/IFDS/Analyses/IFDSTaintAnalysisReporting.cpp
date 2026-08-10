@@ -196,7 +196,7 @@ void TaintAnalysis::output_vulnerability_report(
         all_sources.begin(), all_sources.end());
     int source_num = 1;
     for (const auto *source : unique_sources) {
-      if (auto *source_call = llvm::dyn_cast<llvm::CallInst>(source)) {
+      if (auto *source_call = llvm::dyn_cast<llvm::CallBase>(source)) {
         if (source_call->getCalledFunction()) {
           std::string source_func = taint_config::normalize_name(
               source_call->getCalledFunction()->getName().str());
@@ -261,14 +261,14 @@ void report_vulnerabilities_impl(const TaintAnalysis &self,
     if (facts.empty() || !node.instruction)
       continue;
 
-    auto *call = llvm::dyn_cast<llvm::CallInst>(node.instruction);
+    auto *call = llvm::dyn_cast<llvm::CallBase>(node.instruction);
     if (!call || !self.is_sink(call))
       continue;
 
     // Check if any argument is tainted
     bool found_tainted = false;
-    for (unsigned i = 0; i < call->getNumOperands() - 1; ++i) {
-      const llvm::Value *arg = call->getOperand(i);
+    for (const llvm::Use &argument : call->args()) {
+      const llvm::Value *arg = argument.get();
       for (const auto &fact : facts) {
         if (self.is_argument_tainted(arg, fact)) {
           reachable_sinks++;
