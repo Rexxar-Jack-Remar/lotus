@@ -18,7 +18,6 @@
 #include "llvm/Pass.h"
 #include "llvm/Support/Debug.h"
 #include "llvm/Support/raw_ostream.h"
-#include "llvm/Transforms/IPO/PassManagerBuilder.h"
 
 #include "Checker/FiTx/Frontend/State.h"
 
@@ -34,8 +33,6 @@ namespace fitx {
 class FrameworkPass : public llvm::ModulePass {
 public:
   static char ID;
-  static std::vector<fitx::FrameworkPass *> passes;
-
   FrameworkPass();
   virtual void getAnalysisUsage(llvm::AnalysisUsage &AU) const override;
 
@@ -45,7 +42,7 @@ public:
 
   /// Override to define states and transitions for a bug pattern (paper §4.1,
   /// Table 5).
-  virtual void defineStates() {};
+  virtual void defineStates() = 0;
   void createTransitions(fitx::StateManager &manager);
 
   void addStateManager(fitx::StateManager manager) {

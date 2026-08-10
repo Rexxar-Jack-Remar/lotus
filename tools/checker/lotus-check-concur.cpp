@@ -3,12 +3,13 @@
 #include "Checker/Report/ReportOptions.h"
 #include "Checker/Report/SuppressionManager.h"
 #include "Checker/Tooling/CheckerSubcommands.h"
-#include "Fuzzing/TargetGeneration.h"
+#include "CheckerReport.h"
 
 #include <cstddef>
 #include <string>
 
 #include <llvm/IR/LLVMContext.h>
+#include <llvm/ADT/StringSet.h>
 #include <llvm/IR/Module.h>
 #include <llvm/IRReader/IRReader.h>
 #include <llvm/Support/CommandLine.h>
@@ -85,7 +86,7 @@ int runConcurrencyCheckerTool(const char *argv0) {
 
   if (!module) {
     err.print(argv0, errs());
-    return 1;
+    return lotus::checker::tooling::EXIT_ERROR;
   }
 
   outs() << "Analyzing module: " << module->getModuleIdentifier() << "\n";
@@ -95,15 +96,30 @@ int runConcurrencyCheckerTool(const char *argv0) {
   // Config-driven activation: --checks=race,deadlock,... overrides individual
   // flags (Goblint-style)
   if (!ChecksList.empty()) {
-    const std::string &list = ChecksList.getValue();
-    checker.enableDataRaceCheck(list.find("race") != std::string::npos);
-    checker.enableDeadlockCheck(list.find("deadlock") != std::string::npos);
-    checker.enableAtomicityCheck(list.find("atomicity") != std::string::npos);
-    checker.enableCondVarCheck(list.find("condvar") != std::string::npos);
-    checker.enableLockMismatchCheck(list.find("lock-mismatch") !=
-                                    std::string::npos);
-    checker.enableOpenMPCheck(list.find("openmp") != std::string::npos);
-    checker.enableMPICheck(list.find("mpi") != std::string::npos);
+    StringSet<> requested;
+    SmallVector<StringRef, 8> pieces;
+    StringRef(ChecksList.getValue()).split(pieces, ',', -1, false);
+    StringSet<> valid;
+    for (StringRef name : {"race", "deadlock", "atomicity", "condvar",
+                           "lock-mismatch", "openmp", "mpi"}) {
+      valid.insert(name);
+    }
+    for (StringRef piece : pieces) {
+      StringRef name = piece.trim();
+      if (name.empty() || valid.find(name) == valid.end()) {
+        errs() << "error: unknown concurrency check: "
+               << (name.empty() ? "<empty>" : name) << "\n";
+        return lotus::checker::tooling::EXIT_ERROR;
+      }
+      requested.insert(name);
+    }
+    checker.enableDataRaceCheck(requested.count("race"));
+    checker.enableDeadlockCheck(requested.count("deadlock"));
+    checker.enableAtomicityCheck(requested.count("atomicity"));
+    checker.enableCondVarCheck(requested.count("condvar"));
+    checker.enableLockMismatchCheck(requested.count("lock-mismatch"));
+    checker.enableOpenMPCheck(requested.count("openmp"));
+    checker.enableMPICheck(requested.count("mpi"));
   } else {
     checker.enableDataRaceCheck(EnableDataRaces);
     checker.enableDeadlockCheck(EnableDeadlocks);
@@ -138,13 +154,13 @@ int runConcurrencyCheckerTool(const char *argv0) {
                << "\n";
       } else {
         errs() << "Error writing analysis JSON: " << EC.message() << "\n";
-        return 1;
+        return lotus::checker::tooling::EXIT_ERROR;
       }
     } else {
       // Output to stdout in human-readable format
       checker.dumpAnalysisResults(outs(), false);
     }
-    return 0;
+    return lotus::checker::tooling::EXIT_SUCCESS_CODE;
   }
 
   outs() << "Running concurrency checks...\n";
@@ -215,80 +231,6 @@ int runConcurrencyCheckerTool(const char *argv0) {
   outs() << "  MPI Collective Slots Tracked: "
          << stats.mpiSummary.collective_slot_count << "\n";
 
-  // Post-processing: Suppression and Deduplication
   BugReportMgr &mgr = BugReportMgr::get_instance();
-
-  // 1. Load and apply suppressions
-  if (!report_options::SuppressionFile.empty()) {
-    SuppressionManager suppMgr;
-    if (suppMgr.loadFromFile(report_options::SuppressionFile)) {
-      mgr.setSuppressionManager(&suppMgr);
-      mgr.filterSuppressed();
-      auto stats = suppMgr.getStats();
-      outs() << "\nApplied suppressions: " << stats.totalSuppressions
-             << " across " << stats.totalFiles << " files\n";
-    } else {
-      errs() << "Warning: Could not load suppressions from: "
-             << report_options::SuppressionFile << "\n";
-    }
-  }
-
-  // 2. Final deduplication (enhanced algorithm)
-  mgr.deduplicate_reports(true);
-
-  // 3. Print detailed bug reports
-  mgr.print_detailed_reports(outs(), VerboseReports,
-                             report_options::MinConfidenceScore,
-                             report_options::ShowInvalidReports);
-
-  // 4. Handle centralized output formats (applies to all checkers)
-  if (!report_options::TargetsOutputFile.empty()) {
-    lotus::fuzzing::TargetGenerationOptions options;
-    options.min_confidence_score = report_options::MinConfidenceScore;
-    options.include_invalid_reports = report_options::ShowInvalidReports;
-    auto findings = lotus::fuzzing::collectFindings(mgr, options);
-    auto targets = lotus::fuzzing::collectTargets(findings);
-
-    std::string errorMessage;
-    if (!lotus::fuzzing::writeTargetsToFile(
-            targets, report_options::TargetsOutputFile, &errorMessage)) {
-      errs() << "Error writing fuzz targets: " << errorMessage << "\n";
-      return 1;
-    }
-    outs() << "\nFuzz targets written to: " << report_options::TargetsOutputFile
-           << " (" << targets.size() << " targets)\n";
-  }
-
-  if (!report_options::JsonOutputFile.empty()) {
-    std::error_code EC;
-    raw_fd_ostream json_out(report_options::JsonOutputFile, EC,
-                            sys::fs::OF_None);
-    if (!EC) {
-      mgr.generate_json_report(json_out, report_options::MinConfidenceScore);
-      outs() << "\nJSON report written to: " << report_options::JsonOutputFile
-             << "\n";
-    } else {
-      errs() << "Error writing JSON report: " << EC.message() << "\n";
-    }
-  }
-
-  // 5. Generate SARIF report if requested
-  if (!report_options::SarifOutputFile.empty()) {
-    std::error_code EC;
-    raw_fd_ostream sarif_out(report_options::SarifOutputFile, EC,
-                             sys::fs::OF_None);
-    if (!EC) {
-      mgr.generate_sarif_report(sarif_out, report_options::MinConfidenceScore);
-      outs() << "\nSARIF report written to: " << report_options::SarifOutputFile
-             << "\n";
-    } else {
-      errs() << "Error writing SARIF report: " << EC.message() << "\n";
-    }
-  }
-
-  size_t total_bugs = stats.dataRacesFound + stats.deadlocksFound +
-                      stats.atomicityViolationsFound + stats.condVarBugsFound +
-                      stats.lockMismatchesFound + stats.openMPBugsFound +
-                      stats.mpiBugsFound;
-  return total_bugs > 0 ? 1 : 0;
+  return lotus::checker::tooling::emitCheckerReports(mgr, {VerboseReports});
 }

@@ -28,22 +28,13 @@ set(FiTx_Framework_SOURCES
 )
 
 set(FiTx_Detector_SOURCES
-  ${FiTx_DIR}/Detector/All_detector/All_Detector.cpp
-  ${FiTx_DIR}/Detector/DF_detector/DF_Detector.cpp
   ${FiTx_DIR}/Detector/DF_detector/DFUtils.cpp
-  ${FiTx_DIR}/Detector/Double_lock_detector/DL_Detector.cpp
   ${FiTx_DIR}/Detector/Double_lock_detector/DLUtils.cpp
-  ${FiTx_DIR}/Detector/Double_unlock_detector/DUL_Detector.cpp
   ${FiTx_DIR}/Detector/Double_unlock_detector/DULUtils.cpp
-  ${FiTx_DIR}/Detector/Leak_detector/Leak_Detector.cpp
   ${FiTx_DIR}/Detector/Leak_detector/LeakUtils.cpp
   ${FiTx_DIR}/Detector/NullPtr_detector/NullPtr_Detector.cpp
-  ${FiTx_DIR}/Detector/Ref_count_detector/Ref_Detector.cpp
   ${FiTx_DIR}/Detector/Ref_count_detector/RefUtils.cpp
-  ${FiTx_DIR}/Detector/Ref_uncount_detector/Unref_Detector.cpp
   ${FiTx_DIR}/Detector/Ref_uncount_detector/UnrefUtils.cpp
-  ${FiTx_DIR}/Detector/Two_detector/Two_Detector.cpp
-  ${FiTx_DIR}/Detector/UAF_detector/UAF_Detector.cpp
   ${FiTx_DIR}/Detector/UAF_detector/UAFUtils.cpp
   ${FiTx_DIR}/Detector/UBI_detector/UBI_Detector.cpp
 )

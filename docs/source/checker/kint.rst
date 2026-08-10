@@ -248,7 +248,7 @@ Programmatic Usage
    // Access centralized reports
    BugReportMgr& mgr = BugReportMgr::get_instance();
    mgr.print_summary(outs());
-   mgr.generate_json_report(jsonFile, 0);
+   mgr.generate_json_report(jsonFile, BugReportMgr::ReportFilter{});
 
 SMT-based numerical reasoning
 -----------------------------

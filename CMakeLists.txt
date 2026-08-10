@@ -67,6 +67,10 @@ if (LOTUS_USE_CCLYZER)
     include(cmake/ConfigureCclyzerpp.cmake)
 endif()
 
+if(LOTUS_BUILD_TESTS)
+    enable_testing()
+endif()
+
 # Third-party libraries (CUDD, WPDS, spdlog)
 add_subdirectory(third-party)
 
@@ -82,7 +86,6 @@ endif()
 # Add tests if enabled
 if(LOTUS_BUILD_TESTS)
     include(cmake/FindGTest.cmake)
-    enable_testing()
     add_subdirectory(tests)
 endif()
 

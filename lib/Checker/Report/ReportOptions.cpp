@@ -49,6 +49,12 @@ llvm::cl::opt<bool> ShowInvalidReports(
     llvm::cl::init(false), llvm::cl::cat(OutputCategory),
     llvm::cl::sub(*llvm::cl::AllSubCommands));
 
+llvm::cl::opt<bool> FailOnFindings(
+    "fail-on-findings",
+    llvm::cl::desc("Return exit code 1 when filtered findings are present"),
+    llvm::cl::init(false), llvm::cl::cat(OutputCategory),
+    llvm::cl::sub(*llvm::cl::AllSubCommands));
+
 void initializeReportOptions() {
   // Currently nothing to initialize, but this function
   // is here for future extensibility

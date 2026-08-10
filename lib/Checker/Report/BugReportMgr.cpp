@@ -193,18 +193,13 @@ bool BugReportMgr::insert_report(int ty_id, BugReport *report,
   return true;
 }
 
-void BugReportMgr::insert_report(int ty_id, BugReport *report) {
-  // Default to deduplication enabled (trace-based)
-  insert_report(ty_id, report, true);
-}
-
 bool BugReportMgr::is_duplicate(int ty_id, const BugReport *report,
                                 bool use_trace) const {
   size_t hash = report->compute_hash(use_trace);
 
   // Check if we've seen this hash before
   auto it = report_hashes.find(hash);
-  if (it != report_hashes.end() &&
+  if (it != report_hashes.end() && it->second->get_bug_type_id() == ty_id &&
       reportsEquivalent(it->second, report, use_trace)) {
     return true;
   }
@@ -233,22 +228,6 @@ BugReportMgr::getPrimaryLocation(const BugReport *report) const {
     loc.column = primary->src_column;
   }
   return loc;
-}
-
-std::vector<BugReportMgr::Location>
-BugReportMgr::getTraceEndLocations(const BugReport *report) const {
-  std::vector<Location> endLocs;
-
-  const BugDiagStep *last = findPreferredStep(report, true);
-  if (last != nullptr) {
-    Location loc;
-    loc.file = last->src_file;
-    loc.line = last->src_line;
-    loc.column = last->src_column;
-    endLocs.push_back(loc);
-  }
-
-  return endLocs;
 }
 
 void BugReportMgr::sortByDecreasingPreference(
@@ -298,13 +277,13 @@ void BugReportMgr::sortByLocation(std::vector<BugReport *> &reports) const {
             });
 }
 
-void BugReportMgr::deduplicate_reports(bool use_trace) {
+void BugReportMgr::deduplicate_reports(DedupMode mode) {
   // Clear existing hash map
   report_hashes.clear();
 
   // Enhanced deduplication inspired by Infer's dedup function
   for (auto &pair : reports) {
-    int ty_id = pair.first;
+    report_hashes.clear();
     std::vector<BugReport *> &report_list = pair.second;
 
     if (report_list.empty()) {
@@ -314,43 +293,37 @@ void BugReportMgr::deduplicate_reports(bool use_trace) {
     // Step 1: Sort by decreasing preference (shorter traces first)
     sortByDecreasingPreference(report_list);
 
-    // Step 2: Deduplicate using location-based tracking
-    std::set<std::vector<Location>> reportedEnds; // Set of location lists
+    // Step 2: Deduplicate according to the explicitly requested semantics.
+    std::set<Location> reportedLocations;
     std::vector<BugReport *> deduplicated;
 
     for (BugReport *report : report_list) {
       bool isDuplicate = false;
 
-      if (use_trace) {
-        // Check trace end locations
-        std::vector<Location> endLocs = getTraceEndLocations(report);
-        if (!endLocs.empty()) {
-          // Sort locations for consistent comparison
-          std::sort(endLocs.begin(), endLocs.end());
-
-          if (reportedEnds.find(endLocs) != reportedEnds.end()) {
-            isDuplicate = true;
-          } else {
-            reportedEnds.insert(endLocs);
+      if (mode != DedupMode::ExactTrace) {
+        Location location = getPrimaryLocation(report);
+        if (mode == DedupMode::Endpoint) {
+          const auto &steps = report->get_steps();
+          const BugDiagStep *endpoint = steps.empty() ? nullptr : steps.back();
+          if (endpoint != nullptr) {
+            location.file = endpoint->src_file;
+            location.line = endpoint->src_line;
+            location.column = endpoint->src_column;
           }
         }
-      } else {
-        // Check primary location
-        Location primary = getPrimaryLocation(report);
-        std::vector<Location> singleLoc = {primary};
-        if (reportedEnds.find(singleLoc) != reportedEnds.end()) {
+        if (reportedLocations.find(location) != reportedLocations.end()) {
           isDuplicate = true;
         } else {
-          reportedEnds.insert(singleLoc);
+          reportedLocations.insert(location);
         }
       }
 
       if (!isDuplicate) {
-        // Also check hash-based deduplication
-        size_t hash = report->compute_hash(use_trace);
+        const bool useTrace = mode == DedupMode::ExactTrace;
+        size_t hash = report->compute_hash(useTrace);
         auto existing = report_hashes.find(hash);
         if (existing == report_hashes.end() ||
-            !reportsEquivalent(existing->second, report, use_trace)) {
+            !reportsEquivalent(existing->second, report, useTrace)) {
           deduplicated.push_back(report);
           report_hashes[hash] = report;
         } else {
@@ -370,11 +343,7 @@ void BugReportMgr::deduplicate_reports(bool use_trace) {
   }
 }
 
-void BugReportMgr::filterSuppressed() {
-  if (!suppressionMgr) {
-    return;
-  }
-
+void BugReportMgr::filterSuppressed(const SuppressionManager &manager) {
   for (auto &pair : reports) {
     int ty_id = pair.first;
     std::vector<BugReport *> &report_list = pair.second;
@@ -392,8 +361,7 @@ void BugReportMgr::filterSuppressed() {
     for (BugReport *report : report_list) {
       Location primary = getPrimaryLocation(report);
 
-      if (!suppressionMgr->isSuppressed(issueType, primary.file,
-                                        primary.line)) {
+      if (!manager.isSuppressed(issueType, primary.file, primary.line)) {
         filtered.push_back(report);
       } else {
         // Suppressed, delete it
@@ -427,9 +395,9 @@ int BugReportMgr::get_src_file_id(llvm::StringRef src_file) {
 }
 
 void BugReportMgr::generate_json_report(llvm::raw_ostream &OS,
-                                        int min_score) const {
+                                        const ReportFilter &filter) const {
   OS << "{\n";
-  OS << "  \"TotalBugs\": " << get_total_reports() << ",\n";
+  OS << "  \"TotalBugs\": " << get_filtered_report_count(filter) << ",\n";
 
   // Source files array
   OS << "  \"SrcFiles\": [\n";
@@ -456,7 +424,8 @@ void BugReportMgr::generate_json_report(llvm::raw_ostream &OS,
     // Filter by score
     std::vector<const BugReport *> filtered;
     for (const BugReport *report : *bt_reports) {
-      if (report->get_conf_score() >= min_score) {
+      if (shouldIncludeReport(report, filter.minScore,
+                              filter.includeInvalid)) {
         filtered.push_back(report);
       }
     }
@@ -522,8 +491,7 @@ void BugReportMgr::print_summary(llvm::raw_ostream &OS) const {
 }
 
 void BugReportMgr::print_detailed_reports(llvm::raw_ostream &OS, bool verbose,
-                                          int min_score,
-                                          bool show_invalid) const {
+                                          const ReportFilter &filter) const {
   int total = 0;
   for (size_t ty_id = 0; ty_id < bug_types.size(); ++ty_id) {
     const auto *reportList = get_reports_for_type(ty_id);
@@ -531,7 +499,8 @@ void BugReportMgr::print_detailed_reports(llvm::raw_ostream &OS, bool verbose,
       continue;
     }
     for (const BugReport *report : *reportList) {
-      if (shouldIncludeReport(report, min_score, show_invalid)) {
+      if (shouldIncludeReport(report, filter.minScore,
+                              filter.includeInvalid)) {
         ++total;
       }
     }
@@ -554,7 +523,8 @@ void BugReportMgr::print_detailed_reports(llvm::raw_ostream &OS, bool verbose,
 
     const BugType &bugType = get_bug_type_info(ty_id);
     for (const BugReport *report : *reportList) {
-      if (!shouldIncludeReport(report, min_score, show_invalid)) {
+      if (!shouldIncludeReport(report, filter.minScore,
+                               filter.includeInvalid)) {
         continue;
       }
 
@@ -622,8 +592,21 @@ int BugReportMgr::get_total_reports() const {
   return total;
 }
 
+int BugReportMgr::get_filtered_report_count(const ReportFilter &filter) const {
+  int total = 0;
+  for (const auto &pair : reports) {
+    for (const BugReport *report : pair.second) {
+      if (shouldIncludeReport(report, filter.minScore,
+                              filter.includeInvalid)) {
+        ++total;
+      }
+    }
+  }
+  return total;
+}
+
 void BugReportMgr::generate_sarif_report(llvm::raw_ostream &OS,
-                                         int min_score) const {
+                                         const ReportFilter &filter) const {
   sarif::SarifLog sarifLog("Lotus", "1.0.0");
   sarifLog.setToolInformationUri("https://github.com/ZJU-PL/lotus");
 
@@ -649,7 +632,8 @@ void BugReportMgr::generate_sarif_report(llvm::raw_ostream &OS,
     std::string category = BugDescription::to_string(bugType.classification);
 
     for (const BugReport *report : *reportList) {
-      if (report->get_conf_score() < min_score)
+      if (!shouldIncludeReport(report, filter.minScore,
+                               filter.includeInvalid))
         continue;
 
       const auto &steps = report->get_steps();
@@ -677,11 +661,12 @@ void BugReportMgr::generate_sarif_report(llvm::raw_ostream &OS,
       result.level = level;
 
       // Add primary location
-      if (!steps[0]->src_file.empty()) {
-        sarif::Location primaryLoc(steps[0]->src_file, steps[0]->src_line,
-                                   steps[0]->src_column);
-        if (!steps[0]->func_name.empty()) {
-          primaryLoc.function = steps[0]->func_name;
+      const BugDiagStep *primary = findPreferredStep(report, true);
+      if (primary != nullptr && !primary->src_file.empty()) {
+        sarif::Location primaryLoc(primary->src_file, primary->src_line,
+                                   primary->src_column);
+        if (!primary->func_name.empty()) {
+          primaryLoc.function = primary->func_name;
         }
         result.locations.push_back(primaryLoc);
       }

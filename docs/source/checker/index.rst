@@ -314,7 +314,7 @@ All checkers integrate with the centralized ``BugReportMgr``:
    // Access centralized reports emitted by checker frontends
    BugReportMgr& mgr = BugReportMgr::get_instance();
    mgr.print_summary(outs());
-   mgr.generate_json_report(jsonFile, 0);
+   mgr.generate_json_report(jsonFile, BugReportMgr::ReportFilter{});
 
 Bug Types
 ---------

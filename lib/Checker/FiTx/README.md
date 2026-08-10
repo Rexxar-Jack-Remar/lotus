@@ -31,7 +31,8 @@ Bug reports
 
 1. Create a detector under `Detector/YourDetector/` (e.g. `Your_Detector.cpp`, `YourUtils.cpp`).
 2. In `defineStates()`: create StateManager, define states (init, normal, bug), add transitions (FunctionArgTransitionRule, StoreValueTransitionRule, UseValueTransitionRule, AliasValueTransitionRule as needed).
-3. Register the detector in `FrameworkPass::passes` (see e.g. `UAF_Detector.cpp`).
+3. Add the detector's `defineStates` function to the explicit registry in
+   `tools/checker/lotus-check-fitx.cpp`.
 
 ## Build and Tests
 

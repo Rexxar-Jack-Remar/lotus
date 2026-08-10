@@ -18,6 +18,15 @@
  */
 
 #include "Checker/FiTx/Core/Logs.h"
+#include "Checker/FiTx/Detector/DF_Detector.h"
+#include "Checker/FiTx/Detector/DL_Detector.h"
+#include "Checker/FiTx/Detector/DUL_Detector.h"
+#include "Checker/FiTx/Detector/Leak_Detector.h"
+#include "Checker/FiTx/Detector/NullPtr_Detector.h"
+#include "Checker/FiTx/Detector/Ref_Detector.h"
+#include "Checker/FiTx/Detector/UAF_Detector.h"
+#include "Checker/FiTx/Detector/Unref_Detector.h"
+#include "Checker/FiTx/Detector/UseBeforeInit_Detector.h"
 #include "Checker/FiTx/Framework_IR/IRGenerator.h"
 #include "Checker/FiTx/Frontend/Analyzer.h"
 #include "Checker/FiTx/Frontend/Framework.h"
@@ -26,6 +35,7 @@
 #include "Checker/Report/ReportOptions.h"
 #include "Checker/Report/SuppressionManager.h"
 #include "Checker/Tooling/CheckerSubcommands.h"
+#include "CheckerReport.h"
 
 #include <chrono>
 #include <iostream>
@@ -34,6 +44,7 @@
 #include <vector>
 
 #include <llvm/Analysis/LoopInfo.h>
+#include <llvm/ADT/StringMap.h>
 #include <llvm/IR/LLVMContext.h>
 #include <llvm/IR/LegacyPassManager.h>
 #include <llvm/IR/Module.h>
@@ -66,171 +77,77 @@ static cl::opt<std::string>
                  cl::sub(lotus::checker::tooling::fitxSubCommand()));
 
 namespace {
-std::string formatLocation(const BugDiagStep *step) {
-  if (!step || step->src_file.empty()) {
-    return "unknown location";
+using DetectorDefinition = void (*)(fitx::StateManager &);
+using DetectorDefinitions = std::vector<DetectorDefinition>;
+
+class SelectedDetector final : public fitx::FrameworkPass {
+public:
+  explicit SelectedDetector(DetectorDefinitions definitions)
+      : definitions_(std::move(definitions)) {}
+
+  void defineStates() override {
+    for (DetectorDefinition define : definitions_) {
+      fitx::StateManager manager;
+      define(manager);
+      addStateManager(std::move(manager));
+    }
   }
 
-  std::string location = step->src_file + ":" + std::to_string(step->src_line);
-  if (step->src_column > 0) {
-    location += ":" + std::to_string(step->src_column);
-  }
-  return location;
+private:
+  DetectorDefinitions definitions_;
+};
+
+const StringMap<DetectorDefinitions> &detectorRegistry() {
+  static const StringMap<DetectorDefinitions> registry = [] {
+    StringMap<DetectorDefinitions> result;
+    result["df"] = {DoubleFree::define_states};
+    result["dl"] = {DoubleLock::define_states};
+    result["dul"] = {DoubleUnlock::defineStates};
+    result["leak"] = {MemoryLeak::defineStates};
+    result["nullptr"] = {NullPointer::defineStates};
+    result["uaf"] = {UseAfterFree::defineStates};
+    result["ubi"] = {UseBeforeInitialization::defineStates};
+    result["ref_count"] = {ReferenceCounter::defineStates};
+    result["ref_uncount"] = {UnreferenceCounter::defineStates};
+    result["all"] = {DoubleFree::define_states,
+                     DoubleLock::define_states,
+                     DoubleUnlock::defineStates,
+                     MemoryLeak::defineStates,
+                     NullPointer::defineStates,
+                     UnreferenceCounter::defineStates,
+                     ReferenceCounter::defineStates,
+                     UseAfterFree::defineStates,
+                     UseBeforeInitialization::defineStates};
+    return result;
+  }();
+  return registry;
 }
 
-const BugDiagStep *getPrimaryStep(const BugReport *report) {
-  if (!report) {
+std::unique_ptr<fitx::FrameworkPass> createDetector(StringRef name) {
+  auto detector = detectorRegistry().find(name);
+  if (detector == detectorRegistry().end()) {
     return nullptr;
   }
-
-  const auto &steps = report->get_steps();
-  for (auto it = steps.rbegin(); it != steps.rend(); ++it) {
-    if (*it && !(*it)->src_file.empty()) {
-      return *it;
-    }
-  }
-  return steps.empty() ? nullptr : steps.back();
+  return std::make_unique<SelectedDetector>(detector->second);
 }
 
-void printDetailedReports(raw_ostream &OS, const BugReportMgr &mgr,
-                          bool verbose) {
-  int total = 0;
-  for (size_t type_id = 0; type_id < mgr.get_num_bug_types(); ++type_id) {
-    const auto *reports = mgr.get_reports_for_type(type_id);
-    if (!reports) {
-      continue;
-    }
-    for (const BugReport *report : *reports) {
-      if (report->get_conf_score() < report_options::MinConfidenceScore) {
-        continue;
-      }
-      if (!report_options::ShowInvalidReports && !report->is_valid()) {
-        continue;
-      }
-      ++total;
-    }
-  }
-
-  if (total == 0) {
-    OS << "\nNo FiTx findings.\n";
-    return;
-  }
-
-  OS << "\nFindings (" << total << ")\n";
-  OS << "================\n";
-
-  int index = 1;
-  for (size_t type_id = 0; type_id < mgr.get_num_bug_types(); ++type_id) {
-    const auto *reports = mgr.get_reports_for_type(type_id);
-    if (!reports || reports->empty()) {
-      continue;
-    }
-
-    const BugReportMgr::BugType &bug_type = mgr.get_bug_type_info(type_id);
-    for (const BugReport *report : *reports) {
-      if (report->get_conf_score() < report_options::MinConfidenceScore) {
-        continue;
-      }
-      if (!report_options::ShowInvalidReports && !report->is_valid()) {
-        continue;
-      }
-
-      const BugDiagStep *primary = getPrimaryStep(report);
-
-      OS << "\n" << index++ << ". " << bug_type.bug_name;
-      if (primary) {
-        OS << "\n   Location: " << formatLocation(primary);
-        if (!primary->func_name.empty()) {
-          OS << " in " << primary->func_name;
-        }
-      }
-
-      std::string message = report->render_primary_message();
-      if (!message.empty()) {
-        OS << "\n   Message: " << message;
-      }
-
-      if (primary && !primary->source_code.empty()) {
-        OS << "\n   Source: " << primary->source_code;
-      }
-
-      if (verbose && primary && !primary->llvm_ir.empty()) {
-        OS << "\n   LLVM IR: " << primary->llvm_ir;
-      }
-
-      const BugReportExtras *extras = report->get_extras();
-      if (extras && !extras->suggestion.empty()) {
-        OS << "\n   Suggestion: " << extras->suggestion;
-      }
-
-      if (verbose && extras) {
-        auto it = extras->metadata.find("fitx_value");
-        if (it != extras->metadata.end()) {
-          OS << "\n   Analysis Value: " << it->second;
-        }
-      }
-
-      if (verbose) {
-        const auto &steps = report->get_steps();
-        if (steps.size() > 1) {
-          OS << "\n   Trace:";
-          for (const BugDiagStep *step : steps) {
-            if (!step) {
-              continue;
-            }
-            OS << "\n     - ";
-            if (!step->src_file.empty()) {
-              OS << formatLocation(step) << ": ";
-            }
-            std::string step_message = report->render_step_message(*step);
-            OS << (step_message.empty() ? step->tip : step_message);
-          }
-        }
-      }
-
-      OS << "\n";
-    }
-  }
-}
-
-void writeOptionalReports(const BugReportMgr &mgr) {
-  if (!report_options::JsonOutputFile.empty()) {
-    std::error_code EC;
-    raw_fd_ostream json_out(report_options::JsonOutputFile, EC,
-                            sys::fs::OF_None);
-    if (!EC) {
-      mgr.generate_json_report(json_out, report_options::MinConfidenceScore);
-      outs() << "\nJSON report written to: " << report_options::JsonOutputFile
-             << "\n";
-    } else {
-      errs() << "Error writing JSON report: " << EC.message() << "\n";
-    }
-  }
-
-  if (!report_options::SarifOutputFile.empty()) {
-    std::error_code EC;
-    raw_fd_ostream sarif_out(report_options::SarifOutputFile, EC,
-                             sys::fs::OF_None);
-    if (!EC) {
-      mgr.generate_sarif_report(sarif_out, report_options::MinConfidenceScore);
-      outs() << "SARIF report written to: " << report_options::SarifOutputFile
-             << "\n";
-    } else {
-      errs() << "Error writing SARIF report: " << EC.message() << "\n";
-    }
-  }
-}
 } // namespace
 
 namespace fitx {
 
 // Run all registered FiTx checkers via the legacy pass manager.
-void runFiTxAnalysis(Module &M) {
+bool runFiTxAnalysis(Module &M, StringRef detectorName) {
+  std::unique_ptr<FrameworkPass> detector = createDetector(detectorName);
+  if (!detector) {
+    errs() << "error: unknown FiTx detector '" << detectorName << "'\n";
+    return false;
+  }
+
   outs() << "FiTx Bug Finder\n";
   outs() << "================\n\n";
   outs() << "Module: " << M.getName() << "\n";
   outs() << "Functions: " << M.size() << "\n";
-  outs() << "Checkers: " << FrameworkPass::passes.size() << "\n";
+  outs() << "Detector: " << detectorName << "\n";
 
   auto start = std::chrono::system_clock::now();
 
@@ -244,11 +161,8 @@ void runFiTxAnalysis(Module &M) {
   PM.add(new LoopInfoWrapperPass());
   PM.add(new ir_generator::IRGenerator());
 
-  // 2. Run all registered FiTx checkers (e.g. AllDetector runs df, dl, dul,
-  //    leak, ref_count, uaf).
-  for (fitx::FrameworkPass *P : fitx::FrameworkPass::passes) {
-    PM.add(P);
-  }
+  // 2. Run only the detector selected by the CLI.
+  PM.add(detector.release());
 
   PM.run(M);
 
@@ -260,6 +174,7 @@ void runFiTxAnalysis(Module &M) {
   if (MeasureAnalysisTime) {
     outs() << "Time: " << duration.count() << " ms\n";
   }
+  return true;
 }
 
 } // namespace fitx
@@ -271,27 +186,14 @@ int runFiTxCheckerTool(const char *argv0) {
 
   if (!M) {
     Err.print(argv0, errs());
-    return 1;
+    return lotus::checker::tooling::EXIT_ERROR;
   }
 
-  fitx::runFiTxAnalysis(*M);
+  if (!fitx::runFiTxAnalysis(*M, DetectorType)) {
+    return lotus::checker::tooling::EXIT_ERROR;
+  }
 
   BugReportMgr &mgr = BugReportMgr::get_instance();
 
-  if (!report_options::SuppressionFile.empty()) {
-    SuppressionManager supp_mgr;
-    if (supp_mgr.loadFromFile(report_options::SuppressionFile)) {
-      mgr.setSuppressionManager(&supp_mgr);
-      mgr.filterSuppressed();
-    } else {
-      errs() << "Warning: Could not load suppressions from: "
-             << report_options::SuppressionFile << "\n";
-    }
-  }
-
-  mgr.deduplicate_reports(true);
-  printDetailedReports(outs(), mgr, Verbose);
-  writeOptionalReports(mgr);
-
-  return 0;
+  return lotus::checker::tooling::emitCheckerReports(mgr, {Verbose});
 }

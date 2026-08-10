@@ -1,5 +1,4 @@
 #include "Checker/FiTx/Detector/UseBeforeInit_Detector.h"
-#include "Checker/FiTx/Frontend/Framework.h"
 #include "Checker/FiTx/Frontend/State.h"
 
 namespace UseBeforeInitialization {
@@ -23,16 +22,3 @@ void defineStates(fitx::StateManager& manager) {
   manager.addTransition(init, stored, store_any_rule);
 }
 }  // namespace UseBeforeInitialization
-
-namespace {
-class UseBeforeInitializationDetector : public fitx::FrameworkPass {
-  virtual void defineStates() override {
-    fitx::StateManager manager;
-    UseBeforeInitialization::defineStates(manager);
-    addStateManager(manager);
-  }
-};
-
-}  // namespace
-
-// passes defined in All_Detector.cpp when building with All_Detector

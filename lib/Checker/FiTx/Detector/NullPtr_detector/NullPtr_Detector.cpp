@@ -1,5 +1,4 @@
 #include "Checker/FiTx/Detector/NullPtr_Detector.h"
-#include "Checker/FiTx/Frontend/Framework.h"
 #include "Checker/FiTx/Frontend/State.h"
 
 namespace NullPointer {
@@ -27,16 +26,3 @@ void defineStates(fitx::StateManager& manager) {
   manager.addTransition(init, null, store_null_rule);
 }
 }  // namespace NullPointer
-
-namespace {
-class NullPtrDereferenceDetector : public fitx::FrameworkPass {
-  virtual void defineStates() override {
-    fitx::StateManager manager;
-    NullPointer::defineStates(manager);
-    addStateManager(manager);
-  }
-};
-
-}  // namespace
-
-// passes defined in All_Detector.cpp when building with All_Detector

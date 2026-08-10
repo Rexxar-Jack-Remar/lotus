@@ -7,7 +7,7 @@
 #include "Checker/Report/ReportOptions.h"
 #include "Checker/Report/SuppressionManager.h"
 #include "Checker/Tooling/CheckerSubcommands.h"
-#include "Fuzzing/TargetGeneration.h"
+#include "CheckerReport.h"
 
 #include <llvm/IR/PassManager.h>
 #include <llvm/IRReader/IRReader.h>
@@ -31,6 +31,12 @@ static cl::opt<bool>
                    cl::init(false),
                    cl::sub(lotus::checker::tooling::kintSubCommand()));
 
+static void buildKintPipeline(ModulePassManager &MPM) {
+  MPM.addPass(createModuleToFunctionPassAdaptor(PromotePass()));
+  MPM.addPass(createModuleToFunctionPassAdaptor(SROAPass()));
+  MPM.addPass(kint::MKintPass());
+}
+
 // registering pass (new pass manager).
 extern "C" ::llvm::PassPluginLibraryInfo LLVM_ATTRIBUTE_WEAK
 llvmGetPassPluginInfo() {
@@ -39,11 +45,7 @@ llvmGetPassPluginInfo() {
                 [](StringRef Name, ModulePassManager &MPM,
                    ArrayRef<PassBuilder::PipelineElement>) {
                   if (Name == "mkint-pass") {
-                    // do mem2reg.
-                    MPM.addPass(
-                        createModuleToFunctionPassAdaptor(PromotePass()));
-                    MPM.addPass(createModuleToFunctionPassAdaptor(SROAPass()));
-                    MPM.addPass(kint::MKintPass());
+                    buildKintPipeline(MPM);
                     return true;
                   }
                   return false;
@@ -136,7 +138,7 @@ int runKintCheckerTool(const char *argv0) {
   M = llvm::parseIRFile(InputFilename, Err, Context);
   if (!M) {
     Err.print(argv0, llvm::errs());
-    return 1;
+    return lotus::checker::tooling::EXIT_ERROR;
   }
 
   // Create and run the pass (new pass manager with cross-registered proxies)
@@ -153,82 +155,11 @@ int runKintCheckerTool(const char *argv0) {
   PB.crossRegisterProxies(LAM, FAM, CGAM, MAM);
 
   llvm::ModulePassManager MPM;
-  MPM.addPass(kint::MKintPass());
+  buildKintPipeline(MPM);
 
   // Run analysis pipeline (bugs are automatically reported to BugReportMgr)
   MPM.run(*M, MAM);
 
-  // Post-processing: Suppression and Deduplication
   BugReportMgr &mgr = BugReportMgr::get_instance();
-
-  // 1. Load and apply suppressions
-  if (!report_options::SuppressionFile.empty()) {
-    SuppressionManager suppMgr;
-    if (suppMgr.loadFromFile(report_options::SuppressionFile)) {
-      mgr.setSuppressionManager(&suppMgr);
-      mgr.filterSuppressed();
-      auto stats = suppMgr.getStats();
-      llvm::outs() << "\nApplied suppressions: " << stats.totalSuppressions
-                   << " across " << stats.totalFiles << " files\n";
-    } else {
-      llvm::errs() << "Warning: Could not load suppressions from: "
-                   << report_options::SuppressionFile << "\n";
-    }
-  }
-
-  // 2. Final deduplication (enhanced algorithm)
-  mgr.deduplicate_reports(true);
-
-  // 3. Print human-readable bug reports
-  mgr.print_detailed_reports(llvm::outs(), VerboseReports,
-                             report_options::MinConfidenceScore,
-                             report_options::ShowInvalidReports);
-
-  // 4. Handle centralized output formats (applies to all checkers)
-  if (!report_options::TargetsOutputFile.empty()) {
-    lotus::fuzzing::TargetGenerationOptions options;
-    options.min_confidence_score = report_options::MinConfidenceScore;
-    options.include_invalid_reports = report_options::ShowInvalidReports;
-    auto findings = lotus::fuzzing::collectFindings(mgr, options);
-    auto targets = lotus::fuzzing::collectTargets(findings);
-
-    std::string errorMessage;
-    if (!lotus::fuzzing::writeTargetsToFile(
-            targets, report_options::TargetsOutputFile, &errorMessage)) {
-      llvm::errs() << "Error writing fuzz targets: " << errorMessage << "\n";
-      return 1;
-    }
-    llvm::outs() << "\nFuzz targets written to: "
-                 << report_options::TargetsOutputFile << " (" << targets.size()
-                 << " targets)\n";
-  }
-
-  if (!report_options::JsonOutputFile.empty()) {
-    std::error_code EC;
-    llvm::raw_fd_ostream json_out(report_options::JsonOutputFile, EC,
-                                  llvm::sys::fs::OF_None);
-    if (!EC) {
-      mgr.generate_json_report(json_out, report_options::MinConfidenceScore);
-      llvm::outs() << "\nJSON report written to: "
-                   << report_options::JsonOutputFile << "\n";
-    } else {
-      llvm::errs() << "Error writing JSON report: " << EC.message() << "\n";
-    }
-  }
-
-  // 5. Generate SARIF report if requested
-  if (!report_options::SarifOutputFile.empty()) {
-    std::error_code EC;
-    llvm::raw_fd_ostream sarif_out(report_options::SarifOutputFile, EC,
-                                   llvm::sys::fs::OF_None);
-    if (!EC) {
-      mgr.generate_sarif_report(sarif_out, report_options::MinConfidenceScore);
-      llvm::outs() << "\nSARIF report written to: "
-                   << report_options::SarifOutputFile << "\n";
-    } else {
-      llvm::errs() << "Error writing SARIF report: " << EC.message() << "\n";
-    }
-  }
-
-  return 0;
+  return lotus::checker::tooling::emitCheckerReports(mgr, {VerboseReports});
 }

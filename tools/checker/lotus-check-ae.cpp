@@ -11,7 +11,7 @@
 #include "Checker/Report/ReportOptions.h"
 #include "Checker/Report/SuppressionManager.h"
 #include "Checker/Tooling/CheckerSubcommands.h"
-#include "Fuzzing/TargetGeneration.h"
+#include "CheckerReport.h"
 
 #include <llvm/IRReader/IRReader.h>
 #include <llvm/Support/CommandLine.h>
@@ -95,24 +95,18 @@ int runAECheckerTool(const char *argv0) {
   std::unique_ptr<Module> M = parseIRFile(InputFilename, Err, Context);
   if (!M) {
     Err.print(argv0, errs());
-    return 1;
+    return lotus::checker::tooling::EXIT_ERROR;
   }
 
   // Determine which checkers to run
-  bool runOverflow = BufferOverflowCheck || AllChecks;
-  bool runNullDeref = NullDerefCheck || AllChecks;
-  bool runUseAfterFree = UseAfterFreeCheck || AllChecks;
-  bool runInvalidFree = InvalidFreeCheck || AllChecks;
-  bool runMemLeak = MemLeakCheck || AllChecks;
-
-  // If no specific checkers are enabled, default to all
-  if (!runOverflow && !runNullDeref && !runUseAfterFree && !runInvalidFree &&
-      !runMemLeak) {
-    runOverflow = true;
-    runNullDeref = true;
-    runUseAfterFree = true;
-    runInvalidFree = true;
-  }
+  const bool useDefaults =
+      !BufferOverflowCheck && !NullDerefCheck && !UseAfterFreeCheck &&
+      !InvalidFreeCheck && !MemLeakCheck && !AllChecks;
+  const bool runOverflow = BufferOverflowCheck || AllChecks || useDefaults;
+  const bool runNullDeref = NullDerefCheck || AllChecks || useDefaults;
+  const bool runUseAfterFree = UseAfterFreeCheck || AllChecks || useDefaults;
+  const bool runInvalidFree = InvalidFreeCheck || AllChecks || useDefaults;
+  const bool runMemLeak = MemLeakCheck || AllChecks || useDefaults;
 
   // Run AE analysis
   lotus::analysis::AbstractInterpretation &ae =
@@ -155,60 +149,13 @@ int runAECheckerTool(const char *argv0) {
 
   BugReportMgr &mgr = BugReportMgr::get_instance();
 
-  if (!report_options::SuppressionFile.empty()) {
-    SuppressionManager suppMgr;
-    if (suppMgr.loadFromFile(report_options::SuppressionFile)) {
-      mgr.setSuppressionManager(&suppMgr);
-      mgr.filterSuppressed();
-    } else {
-      errs() << "Warning: Could not load suppressions from: "
-             << report_options::SuppressionFile << "\n";
-    }
-  }
-
-  mgr.deduplicate_reports(true);
-  mgr.print_detailed_reports(outs(), VerboseReports,
-                             report_options::MinConfidenceScore,
-                             report_options::ShowInvalidReports);
-
-  if (!report_options::TargetsOutputFile.empty()) {
-    lotus::fuzzing::TargetGenerationOptions options;
-    options.min_confidence_score = report_options::MinConfidenceScore;
-    options.include_invalid_reports = report_options::ShowInvalidReports;
-    auto findings = lotus::fuzzing::collectFindings(mgr, options);
-    auto targets = lotus::fuzzing::collectTargets(findings);
-
-    std::string errorMessage;
-    if (!lotus::fuzzing::writeTargetsToFile(
-            targets, report_options::TargetsOutputFile, &errorMessage)) {
-      errs() << "Error writing fuzz targets: " << errorMessage << "\n";
-      return 1;
-    }
-  }
-
-  if (!report_options::JsonOutputFile.empty()) {
-    std::error_code EC;
-    raw_fd_ostream json_out(report_options::JsonOutputFile, EC,
-                            sys::fs::OF_None);
-    if (!EC) {
-      mgr.generate_json_report(json_out, report_options::MinConfidenceScore);
-    } else {
-      errs() << "Error writing JSON report: " << EC.message() << "\n";
-    }
-  }
-
-  if (!report_options::SarifOutputFile.empty()) {
-    std::error_code EC;
-    raw_fd_ostream sarif_out(report_options::SarifOutputFile, EC,
-                             sys::fs::OF_None);
-    if (!EC) {
-      mgr.generate_sarif_report(sarif_out, report_options::MinConfidenceScore);
-    } else {
-      errs() << "Error writing SARIF report: " << EC.message() << "\n";
-    }
+  const int reportStatus = lotus::checker::tooling::emitCheckerReports(
+      mgr, {VerboseReports});
+  if (reportStatus != lotus::checker::tooling::EXIT_SUCCESS_CODE) {
+    return reportStatus;
   }
 
   outs() << "\n=== Analysis Complete ===\n";
 
-  return 0;
+  return lotus::checker::tooling::EXIT_SUCCESS_CODE;
 }

@@ -24,7 +24,6 @@
 #include "llvm/Support/CommandLine.h"
 #include "llvm/Support/Debug.h"
 #include "llvm/Support/raw_ostream.h"
-#include "llvm/Transforms/IPO/PassManagerBuilder.h"
 
 // include STL
 #include "Checker/FiTx/Core/BasicBlock.h"
@@ -137,21 +136,3 @@ bool FrameworkPass::runOnModule(llvm::Module &M) {
 } // namespace fitx
 
 char fitx::FrameworkPass::ID = 0;
-
-static llvm::RegisterPass<fitx::FrameworkPass>
-    X("framework", "framework", false /* Only looks at CFG */,
-      false /* Analysis Pass */);
-
-static void registerFrameworkPass(const llvm::PassManagerBuilder &,
-                                  llvm::legacy::PassManagerBase &PM) {
-  for (auto &analysis_pass : fitx::FrameworkPass::passes)
-    PM.add(analysis_pass);
-}
-
-static llvm::RegisterStandardPasses
-    RegisterMyPass(llvm::PassManagerBuilder::EP_OptimizerLast,
-                   registerFrameworkPass);
-
-static llvm::RegisterStandardPasses
-    RegisterMyPass1(llvm::PassManagerBuilder::EP_EnabledOnOptLevel0,
-                    registerFrameworkPass);

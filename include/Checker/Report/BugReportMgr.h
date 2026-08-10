@@ -27,6 +27,17 @@
  */
 class BugReportMgr {
 public:
+  struct ReportFilter {
+    int minScore = 0;
+    bool includeInvalid = false;
+  };
+
+  enum class DedupMode {
+    ExactTrace,
+    PrimaryLocation,
+    Endpoint,
+  };
+
   /**
    * Describes a type of bug (e.g., NPD, Data Race, Taint)
    */
@@ -79,13 +90,7 @@ public:
    * Returns true if the report was added, false if it was a duplicate
    */
   bool insert_report(int ty_id, BugReport *report,
-                     bool deduplicate_by_trace = false);
-
-  /**
-   * Insert a bug report (legacy method, calls insert_report with deduplication
-   * disabled)
-   */
-  void insert_report(int ty_id, BugReport *report);
+                     bool deduplicate_by_trace);
 
   /**
    * Get all reports for a specific bug type
@@ -106,35 +111,31 @@ public:
    * Deduplicate reports based on location or trace
    * Enhanced with Infer-inspired location-based sorting and preference
    */
-  void deduplicate_reports(bool use_trace = false);
-
-  /**
-   * Set suppression manager for filtering suppressed issues
-   */
-  void setSuppressionManager(SuppressionManager *mgr) { suppressionMgr = mgr; }
+  void deduplicate_reports(DedupMode mode);
 
   /**
    * Filter out suppressed reports
    */
-  void filterSuppressed();
+  void filterSuppressed(const SuppressionManager &manager);
 
   /**
    * Generate JSON report file
    */
-  void generate_json_report(llvm::raw_ostream &OS, int min_score = 0) const;
+  void generate_json_report(llvm::raw_ostream &OS,
+                            const ReportFilter &filter) const;
 
   /**
    * Print summary statistics to console
    */
   void print_summary(llvm::raw_ostream &OS) const;
-  void print_detailed_reports(llvm::raw_ostream &OS, bool verbose = false,
-                              int min_score = 0,
-                              bool show_invalid = false) const;
+  void print_detailed_reports(llvm::raw_ostream &OS, bool verbose,
+                              const ReportFilter &filter) const;
 
   /**
    * Get total number of reports across all types
    */
   int get_total_reports() const;
+  int get_filtered_report_count(const ReportFilter &filter) const;
 
   /**
    * Get number of registered bug types
@@ -144,7 +145,8 @@ public:
   /**
    * Generate SARIF report file
    */
-  void generate_sarif_report(llvm::raw_ostream &OS, int min_score = 0) const;
+  void generate_sarif_report(llvm::raw_ostream &OS,
+                             const ReportFilter &filter) const;
 
   /**
    * Get singleton instance
@@ -168,9 +170,6 @@ private:
   // Deduplication tracking (maps hash to report)
   std::unordered_map<size_t, BugReport *> report_hashes;
 
-  // Suppression manager (optional)
-  SuppressionManager *suppressionMgr = nullptr;
-
   int get_src_file_id(llvm::StringRef src_file);
 
   // Helper to check if a report is a duplicate
@@ -190,9 +189,6 @@ private:
     }
   };
   Location getPrimaryLocation(const BugReport *report) const;
-
-  // Helper to get trace end locations (for Infer-style deduplication)
-  std::vector<Location> getTraceEndLocations(const BugReport *report) const;
 
   // Sort reports by decreasing preference (shorter traces preferred)
   void sortByDecreasingPreference(std::vector<BugReport *> &reports) const;

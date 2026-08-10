@@ -7,9 +7,11 @@
 
 #include "Utils/LLVM/Demangle.h"
 #include "Checker/Tooling/CheckerSubcommands.h"
+#include "CheckerReport.h"
 
 #include <chrono>
 #include <memory>
+#include <set>
 #include <sstream>
 #include <string>
 
@@ -23,6 +25,7 @@
 #include <llvm/Support/ErrorOr.h>
 #include <llvm/Support/FileSystem.h>
 #include <llvm/Support/MemoryBuffer.h>
+#include <llvm/Support/Path.h>
 #include <llvm/Support/SourceMgr.h>
 #include <llvm/Support/raw_ostream.h>
 #include <Alias/Infrastructure/AliasAnalysisWrapper/AliasAnalysisWrapper.h>
@@ -107,11 +110,126 @@ std::vector<std::string> parseFunctionList(const std::string &input) {
   std::stringstream ss(input);
   std::string item;
   while (std::getline(ss, item, ',')) {
-    if (!item.empty()) {
-      functions.push_back(item);
+    StringRef trimmed = StringRef(item).trim();
+    if (!trimmed.empty()) {
+      functions.push_back(trimmed.str());
     }
   }
   return functions;
+}
+
+using TaintFlow = std::pair<std::string, std::string>;
+
+static ErrorOr<std::set<TaintFlow>> loadExpectedFlows(StringRef filename) {
+  auto bufferOr = MemoryBuffer::getFile(filename);
+  if (!bufferOr) {
+    return bufferOr.getError();
+  }
+
+  std::set<TaintFlow> flows;
+  SmallVector<StringRef, 32> lines;
+  bufferOr.get()->getBuffer().split(lines, '\n');
+  for (size_t index = 0; index < lines.size(); ++index) {
+    StringRef line = lines[index].split('#').first.trim();
+    if (line.empty()) {
+      continue;
+    }
+
+    StringRef source;
+    StringRef sink;
+    size_t arrow = line.find("->");
+    if (arrow != StringRef::npos) {
+      source = line.take_front(arrow).trim();
+      sink = line.drop_front(arrow + 2).trim();
+    } else {
+      auto parts = line.split(',');
+      source = parts.first.trim();
+      sink = parts.second.trim();
+    }
+    if (source.empty() || sink.empty() || sink.contains(',')) {
+      errs() << "error: invalid expected flow at " << filename << ":"
+             << (index + 1) << " (expected source->sink)\n";
+      return std::make_error_code(std::errc::invalid_argument);
+    }
+    flows.emplace(source.str(), sink.str());
+  }
+  return flows;
+}
+
+static std::set<TaintFlow>
+collectDetectedFlows(const TaintAnalysis &analysis,
+                     const IFDSSolver<TaintAnalysis> &solver) {
+  std::set<TaintFlow> flows;
+  for (const auto &entry : solver.get_all_results()) {
+    const auto &node = entry.first;
+    const auto &facts = entry.second;
+    const auto *sinkCall = dyn_cast_or_null<CallBase>(node.instruction);
+    if (!sinkCall || !analysis.is_sink(sinkCall) ||
+        !sinkCall->getCalledFunction()) {
+      continue;
+    }
+
+    for (const TaintFact &fact : facts) {
+      bool reachesArgument = false;
+      for (const Use &argument : sinkCall->args()) {
+        if (analysis.is_argument_tainted(argument.get(), fact)) {
+          reachesArgument = true;
+          break;
+        }
+      }
+      if (!reachesArgument) {
+        continue;
+      }
+
+      const auto *directSource =
+          dyn_cast_or_null<CallBase>(fact.get_source());
+      if (directSource && directSource->getCalledFunction()) {
+        flows.emplace(directSource->getCalledFunction()->getName().str(),
+                      sinkCall->getCalledFunction()->getName().str());
+        continue;
+      }
+
+      auto path = analysis.trace_taint_sources_summary_based(
+          solver, sinkCall, fact);
+      for (const Instruction *sourceInst : path.sources) {
+        const auto *sourceCall = dyn_cast_or_null<CallBase>(sourceInst);
+        if (sourceCall && sourceCall->getCalledFunction()) {
+          flows.emplace(sourceCall->getCalledFunction()->getName().str(),
+                        sinkCall->getCalledFunction()->getName().str());
+        }
+      }
+    }
+  }
+  return flows;
+}
+
+static void evaluateMicroBenchmark(const std::set<TaintFlow> &expected,
+                                   const std::set<TaintFlow> &detected,
+                                   raw_ostream &OS) {
+  size_t truePositives = 0;
+  for (const TaintFlow &flow : detected) {
+    truePositives += expected.count(flow);
+  }
+  const size_t falsePositives = detected.size() - truePositives;
+  const size_t falseNegatives = expected.size() - truePositives;
+  const double precision = detected.empty()
+                               ? (expected.empty() ? 1.0 : 0.0)
+                               : static_cast<double>(truePositives) /
+                                     detected.size();
+  const double recall = expected.empty()
+                            ? 1.0
+                            : static_cast<double>(truePositives) /
+                                  expected.size();
+  const double f1 = precision + recall == 0.0
+                        ? 0.0
+                        : 2.0 * precision * recall / (precision + recall);
+
+  OS << "\nMicro-benchmark evaluation:\n"
+     << "  TP: " << truePositives << "  FP: " << falsePositives
+     << "  FN: " << falseNegatives << "\n"
+     << "  Precision: " << precision << "\n"
+     << "  Recall: " << recall << "\n"
+     << "  F1: " << f1 << "\n";
 }
 
 static void dumpSourceSinkMatches(const llvm::Module &module,
@@ -144,7 +262,8 @@ static void dumpSourceSinkMatches(const llvm::Module &module,
 
       auto raw_name = call->getCalledFunction()->getName().str();
       auto demangled_name = demangle_name(raw_name);
-      auto line = call->getDebugLoc().getLine();
+      const DebugLoc debugLocation = call->getDebugLoc();
+      const unsigned line = debugLocation ? debugLocation.getLine() : 0;
 
       OS << "  ";
       if (is_source)
@@ -187,7 +306,7 @@ int runTaintCheckerTool(const char *argv0) {
   std::unique_ptr<Module> M = parseIRFile(InputFilename, Err, Context);
   if (!M) {
     Err.print(argv0, errs());
-    return 1;
+    return lotus::checker::tooling::EXIT_ERROR;
   }
 
   if (Verbose) {
@@ -267,21 +386,40 @@ int runTaintCheckerTool(const char *argv0) {
         taintAnalysis.report_vulnerabilities(solver, outs(),
                                              MaxDetailedResults.getValue());
       }
+      if (MicroBench) {
+        SmallString<256> expectedPath;
+        if (!ExpectedFile.empty()) {
+          expectedPath = ExpectedFile;
+        } else {
+          expectedPath = InputFilename;
+          sys::path::replace_extension(expectedPath, "expected");
+        }
+        auto expectedOr = loadExpectedFlows(expectedPath);
+        if (!expectedOr) {
+          errs() << "error: could not read expected flows from "
+                 << expectedPath << ": " << expectedOr.getError().message()
+                 << "\n";
+          return lotus::checker::tooling::EXIT_ERROR;
+        }
+        evaluateMicroBenchmark(*expectedOr,
+                               collectDetectedFlows(taintAnalysis, solver),
+                               outs());
+      }
       break;
     }
     default:
       errs() << "Unknown analysis type\n";
-      return 1;
+      return lotus::checker::tooling::EXIT_ERROR;
     }
 
     outs() << "Analysis completed successfully.\n";
 
   } catch (const std::exception &e) {
     errs() << "Error running analysis: " << e.what() << "\n";
-    return 1;
+    return lotus::checker::tooling::EXIT_ERROR;
   }
 
   // Statistics will be printed automatically at program exit if enabled
 
-  return 0;
+  return lotus::checker::tooling::EXIT_SUCCESS_CODE;
 }

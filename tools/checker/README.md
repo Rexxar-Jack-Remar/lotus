@@ -34,7 +34,7 @@ Use `build/bin/lotus-check --help` or
 
 | Subcommand | Purpose | Notes |
 | --- | --- | --- |
-| `generic` | Generic checker driver | Loads built-in YAML specs from `config/checkers/` and runs declarative checkers through the shared report manager. Top-level invocation without a subcommand also uses this mode. |
+| `generic` | Generic checker driver | Resolves specs from `--spec-dir`, `LOTUS_CHECKER_SPEC_DIR`, the installed data directory, or the source tree (in that order). Top-level invocation without a subcommand also uses this mode. |
 | `kint` | Integer bug detector | Checks integer overflow, division by zero, bad shifts, array bounds, and dead branches. Supports enabling all checks or individual `--check-*` options. |
 | `taint` | Interprocedural taint analysis | IFDS-based taint tracking with selectable alias analysis via `--aa` and optional micro-benchmark evaluation mode. |
 | `concur` | Concurrency checker | Detects races, deadlocks, atomicity issues, condvar misuse, lock mismatches, and OpenMP/MPI bugs. |
@@ -89,6 +89,8 @@ build/bin/lotus-check pulse test.bc --json-output pulse.json
   `--report-sarif` through the common report manager.
 - Several tools also support suppression files and confidence filtering through
   the same reporting layer.
+- Successful analysis returns 0, `--fail-on-findings` returns 1 when filtered
+  findings remain, and handled parameter/report I/O failures return 2.
 - `lotus-pulse` accepts `--json-output` directly in addition to the common
   reporting options.
 

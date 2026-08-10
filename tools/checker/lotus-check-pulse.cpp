@@ -13,7 +13,7 @@
 #include "Checker/Report/ReportOptions.h"
 #include "Checker/Report/SuppressionManager.h"
 #include "Checker/Tooling/CheckerSubcommands.h"
-#include "Fuzzing/TargetGeneration.h"
+#include "CheckerReport.h"
 
 #include <memory>
 #include <string>
@@ -92,7 +92,7 @@ int runPulseCheckerTool(const char *argv0) {
 
   if (!M) {
     Err.print(argv0, errs());
-    return 1;
+    return lotus::checker::tooling::EXIT_ERROR;
   }
 
   PulseLogger::info("Starting Pulse analysis");
@@ -113,84 +113,13 @@ int runPulseCheckerTool(const char *argv0) {
     PulseLogger::printStats();
   }
 
-  // Post-processing: Suppression and Deduplication
   BugReportMgr &mgr = BugReportMgr::get_instance();
-
-  // 1. Load and apply suppressions
-  if (!report_options::SuppressionFile.empty()) {
-    SuppressionManager suppMgr;
-    if (suppMgr.loadFromFile(report_options::SuppressionFile)) {
-      mgr.setSuppressionManager(&suppMgr);
-      mgr.filterSuppressed();
-      auto stats = suppMgr.getStats();
-      outs() << "\nApplied suppressions: " << stats.totalSuppressions
-             << " across " << stats.totalFiles << " files\n";
-    } else {
-      errs() << "Warning: Could not load suppressions from: "
-             << report_options::SuppressionFile << "\n";
-    }
-  }
-
-  // 2. Final deduplication (enhanced algorithm)
-  mgr.deduplicate_reports(true);
-
-  // 3. Print detailed bug reports
-  if (mgr.get_total_reports() > 0) {
-    mgr.print_detailed_reports(
-        outs(), Verbose, std::max(MinScore, report_options::MinConfidenceScore),
-        report_options::ShowInvalidReports);
-  }
-
-  // 4. Generate JSON report if requested
-  if (!report_options::TargetsOutputFile.empty()) {
-    lotus::fuzzing::TargetGenerationOptions options;
-    options.min_confidence_score =
-        std::max(MinScore, report_options::MinConfidenceScore);
-    options.include_invalid_reports = report_options::ShowInvalidReports;
-    auto findings = lotus::fuzzing::collectFindings(mgr, options);
-    auto targets = lotus::fuzzing::collectTargets(findings);
-
-    std::string errorMessage;
-    if (!lotus::fuzzing::writeTargetsToFile(
-            targets, report_options::TargetsOutputFile, &errorMessage)) {
-      errs() << "Error writing fuzz targets: " << errorMessage << "\n";
-      return 1;
-    }
-    outs() << "\nFuzz targets written to: " << report_options::TargetsOutputFile
-           << " (" << targets.size() << " targets)\n";
-  }
-
-  const std::string &jsonOutputFile =
-      !report_options::JsonOutputFile.empty()
-          ? report_options::JsonOutputFile.getValue()
-          : JsonOutput.getValue();
-  if (!jsonOutputFile.empty()) {
-    std::error_code EC;
-    raw_fd_ostream json_out(jsonOutputFile, EC);
-    if (EC) {
-      errs() << "Error opening JSON output file: " << EC.message() << "\n";
-      return 1;
-    }
-    mgr.generate_json_report(json_out, MinScore);
-    json_out.close();
-    outs() << "\nJSON report written to: " << jsonOutputFile << "\n";
-  }
-
-  // 5. Generate SARIF report if requested
-  if (!report_options::SarifOutputFile.empty()) {
-    std::error_code EC;
-    raw_fd_ostream sarif_out(report_options::SarifOutputFile, EC);
-    if (EC) {
-      errs() << "Error opening SARIF output file: " << EC.message() << "\n";
-      return 1;
-    }
-    mgr.generate_sarif_report(
-        sarif_out, std::max(MinScore, report_options::MinConfidenceScore));
-    sarif_out.close();
-    outs() << "\nSARIF report written to: " << report_options::SarifOutputFile
-           << "\n";
-  }
-
+  lotus::checker::tooling::CheckerReportOptions reportOptions;
+  reportOptions.verbose = Verbose;
+  reportOptions.minScore = MinScore;
+  reportOptions.jsonOutputOverride = JsonOutput;
+  const int reportStatus =
+      lotus::checker::tooling::emitCheckerReports(mgr, reportOptions);
   PulseLogger::info("Analysis complete");
-  return 0;
+  return reportStatus;
 }

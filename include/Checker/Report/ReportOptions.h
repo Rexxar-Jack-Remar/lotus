@@ -26,6 +26,7 @@ extern llvm::cl::opt<std::string> TargetsOutputFile;
 extern llvm::cl::opt<std::string> SuppressionFile;
 extern llvm::cl::opt<int> MinConfidenceScore;
 extern llvm::cl::opt<bool> ShowInvalidReports;
+extern llvm::cl::opt<bool> FailOnFindings;
 
 // Initialize options (call once at program startup)
 void initializeReportOptions();

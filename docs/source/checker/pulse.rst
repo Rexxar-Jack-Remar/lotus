@@ -161,7 +161,7 @@ Programmatic Usage
    checker.analyze();
 
    BugReportMgr &mgr = BugReportMgr::get_instance();
-   mgr.deduplicate_reports(true);
+   mgr.deduplicate_reports(BugReportMgr::DedupMode::ExactTrace);
    mgr.print_summary(llvm::outs());
 
 Testing
