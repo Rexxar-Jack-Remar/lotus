@@ -7,6 +7,48 @@ collections of LLVM bitcode files.
 
 **Location**: ``scripts/phoenix/``
 
+Declarative usage
+-----------------
+
+Phoenix supports reproducible YAML experiment specifications.  Install its
+small Python dependency, then run an experiment:
+
+.. code-block:: bash
+
+   python -m pip install -r scripts/phoenix/requirements.txt
+   python scripts/phoenix/src/main.py run scripts/phoenix/experiments/example.yaml
+
+The run writes ``results.jsonl`` as its source of truth, keeps stdout and
+stderr logs in the result directory, and records every repetition separately.
+This means timeouts, out-of-memory failures, and crashes remain visible rather
+than being omitted from a summary average.  Use ``--output results/my-run`` to
+choose the result directory.
+
+YAML specs support ``configs`` for explicit analyzer options and ``matrix``
+for a Cartesian product of option values.  They can also declare a
+``preprocessing`` list; every command is a string list containing ``{input}``
+and ``{output}`` placeholders.  The optional ``execution.executor`` mapping
+selects ``local`` (default), ``docker`` (requires ``image`` and optional
+mounts), or an interactive ``slurm``/``srun`` backend.
+
+Result operations
+-----------------
+
+Raw JSONL data can be summarized or exported without losing individual run
+outcomes:
+
+.. code-block:: bash
+
+   python scripts/phoenix/src/main.py report results/my-run
+   python scripts/phoenix/src/main.py export results/my-run --format csv
+   python scripts/phoenix/src/main.py compare results/baseline results/new
+
+Each run writes ``manifest.json`` with the Lotus commit, platform details,
+experiment and benchmark hashes, preprocessing fingerprint, and executable
+hashes.  Add optional ``fingerprint_files`` paths (for example, external
+library-model specifications) to record their SHA-256 values too.  ``compare``
+warns if benchmark or preprocessing fingerprints differ.
+
 Overview
 --------
 
@@ -35,7 +77,8 @@ Usage
    python scripts/phoenix/src/main.py
 
 The script will prompt for a directory path containing ``.bc`` files, then ask
-which tool to run.
+which tool to run.  This legacy workflow is retained while users migrate to
+YAML experiments.
 
 Operational notes
 -----------------

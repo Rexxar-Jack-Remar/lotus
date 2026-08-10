@@ -1,0 +1,18 @@
+name: sparrow-example
+
+benchmarks:
+  # Paths are relative to this YAML file.
+  root: ../../../benchmarks
+  include:
+    - "**/*.bc"
+
+analyzers:
+  - name: sparrow
+    matrix:
+      andersen-k-cs: [0, 1, 2]
+      enable-hcd: [true, false]
+
+execution:
+  repetitions: 3
+  timeout: 3600
+  memory_limit_gb: 128

@@ -5,6 +5,11 @@ from operation.svf_analyzer import *
 from operation.tpa_analyzer import *
 from operation.aser_analyzer import *
 from operation.sparrow_analyzer import *
+from result.export import export_csv, markdown_report
+
+# ``Writer`` remains the legacy interactive CSV compatibility layer.  New
+# experiments should use these JSONL-derived exports instead.
+__all__ = ["Writer", "export_csv", "markdown_report"]
 
 
 class Writer:
