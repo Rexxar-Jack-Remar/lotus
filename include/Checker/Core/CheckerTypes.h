@@ -57,14 +57,23 @@ struct SourceSinkRule {
   std::vector<std::string> sanitizers;
 };
 
+enum class ResourceSelectorKind { Return, Argument };
+
+struct ProtocolOperation {
+  std::string function;
+  ResourceSelectorKind resource_kind = ResourceSelectorKind::Argument;
+  unsigned resource_arg = 0;
+};
+
 struct ApiProtocolRule {
-  std::vector<std::string> acquire;
-  std::vector<std::string> use;
-  std::vector<std::string> release;
+  std::vector<ProtocolOperation> acquire;
+  std::vector<ProtocolOperation> use;
+  std::vector<ProtocolOperation> release;
   bool report_leak = true;
   bool report_use_before_acquire = true;
   bool report_use_after_release = true;
   bool report_double_acquire = true;
+  bool report_double_release = true;
 };
 
 struct CheckerSpec {

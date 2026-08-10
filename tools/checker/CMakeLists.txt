@@ -69,6 +69,8 @@ if(LOTUS_BUILD_TESTS)
       list(APPEND command -DCLI_ARG${index}=${arg})
       math(EXPR index "${index} + 1")
     endforeach()
+    math(EXPR arg_count "${index} - 1")
+    list(APPEND command -DCLI_ARG_COUNT=${arg_count})
     list(APPEND command -P ${CHECKER_CLI_TEST_SCRIPT})
     add_test(NAME ${test_name} COMMAND ${command})
   endfunction()
@@ -88,6 +90,8 @@ if(LOTUS_BUILD_TESTS)
       list(APPEND command -DCLI_ARG${index}=${arg})
       math(EXPR index "${index} + 1")
     endforeach()
+    math(EXPR arg_count "${index} - 1")
+    list(APPEND command -DCLI_ARG_COUNT=${arg_count})
     list(APPEND command -P ${CHECKER_CLI_TEST_SCRIPT})
     add_test(NAME ${test_name} COMMAND ${command})
   endfunction()
@@ -148,6 +152,11 @@ if(LOTUS_BUILD_TESTS)
                        --engine=taint --sources=source --sinks=sink
                        --suppressions=${CMAKE_CURRENT_BINARY_DIR}/missing-suppressions.json
                        ${CHECKER_CLI_TAINT})
+  add_checker_cli_test(checker_cli_forwards_more_than_eight_arguments 0
+                       "Analysis completed successfully"
+                       --engine=taint --sources=source --sinks=sink
+                       --analysis=0 --aa=dyck --show-results=false
+                       --max-results=0 --print-stats=false ${CHECKER_CLI_TAINT})
   add_checker_cli_test(checker_cli_fail_on_findings 1
                        "Memory Leak"
                        --engine=ae --mem-leak --fail-on-findings

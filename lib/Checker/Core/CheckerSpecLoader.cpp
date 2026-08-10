@@ -6,6 +6,7 @@
 #include <llvm/Support/MemoryBuffer.h>
 #include <llvm/Support/YAMLTraits.h>
 
+#include <algorithm>
 #include <filesystem>
 #include <optional>
 #include <unordered_set>
@@ -27,6 +28,12 @@ struct YamlMetadata {
   bool default_enabled = true;
 };
 
+struct YamlProtocolOperation {
+  std::string function;
+  std::string resource;
+  int resource_arg = -1;
+};
+
 struct YamlSpec {
   std::string engine;
   std::string rule_kind;
@@ -39,18 +46,19 @@ struct YamlSpec {
   std::vector<std::string> sources;
   std::vector<std::string> sinks;
   std::vector<std::string> sanitizers;
-  std::vector<std::string> acquire;
-  std::vector<std::string> use;
-  std::vector<std::string> release;
+  std::vector<YamlProtocolOperation> acquire;
+  std::vector<YamlProtocolOperation> use;
+  std::vector<YamlProtocolOperation> release;
   bool report_leak = true;
   bool report_use_before_acquire = true;
   bool report_use_after_release = true;
   bool report_double_acquire = true;
+  bool report_double_release = true;
 };
 
 namespace {
 
-EngineKind parseEngineKind(StringRef value) {
+Expected<EngineKind> parseEngineKind(StringRef value) {
   if (value == "declarative") {
     return EngineKind::Declarative;
   }
@@ -75,10 +83,14 @@ EngineKind parseEngineKind(StringRef value) {
   if (value == "concurrency") {
     return EngineKind::Concurrency;
   }
-  return EngineKind::SymExec;
+  if (value == "symex") {
+    return EngineKind::SymExec;
+  }
+  return createStringError(inconvertibleErrorCode(),
+                           "unknown engine '%s'", value.str().c_str());
 }
 
-Severity parseSeverity(StringRef value) {
+Expected<Severity> parseSeverity(StringRef value) {
   if (value == "low") {
     return Severity::Low;
   }
@@ -88,10 +100,14 @@ Severity parseSeverity(StringRef value) {
   if (value == "critical") {
     return Severity::Critical;
   }
-  return Severity::Medium;
+  if (value == "medium") {
+    return Severity::Medium;
+  }
+  return createStringError(inconvertibleErrorCode(),
+                           "unknown severity '%s'", value.str().c_str());
 }
 
-RuleKind parseRuleKind(StringRef value) {
+Expected<RuleKind> parseRuleKind(StringRef value) {
   if (value == "forbidden_call") {
     return RuleKind::ForbiddenCall;
   }
@@ -101,7 +117,43 @@ RuleKind parseRuleKind(StringRef value) {
   if (value == "api_protocol") {
     return RuleKind::ApiProtocol;
   }
-  return RuleKind::Native;
+  return createStringError(inconvertibleErrorCode(),
+                           "unknown rule kind '%s'", value.str().c_str());
+}
+
+Expected<std::vector<ProtocolOperation>>
+parseProtocolOperations(const std::vector<YamlProtocolOperation> &operations,
+                        StringRef operationKind, StringRef sourceName) {
+  std::vector<ProtocolOperation> result;
+  result.reserve(operations.size());
+  for (const YamlProtocolOperation &operation : operations) {
+    if (operation.function.empty()) {
+      return createStringError(inconvertibleErrorCode(),
+                               "%s: %s operation requires function",
+                               sourceName.str().c_str(),
+                               operationKind.str().c_str());
+    }
+    const bool selectsReturn = operation.resource == "return";
+    const bool selectsArgument = operation.resource_arg >= 0;
+    if (selectsReturn == selectsArgument) {
+      return createStringError(
+          inconvertibleErrorCode(),
+          "%s: %s operation '%s' must specify exactly one of resource: return "
+          "or resource_arg",
+          sourceName.str().c_str(), operationKind.str().c_str(),
+          operation.function.c_str());
+    }
+
+    ProtocolOperation parsed;
+    parsed.function = operation.function;
+    parsed.resource_kind = selectsReturn ? ResourceSelectorKind::Return
+                                         : ResourceSelectorKind::Argument;
+    parsed.resource_arg = selectsArgument
+                              ? static_cast<unsigned>(operation.resource_arg)
+                              : 0;
+    result.push_back(std::move(parsed));
+  }
+  return result;
 }
 
 std::optional<CheckerCapability> parseCapability(StringRef value) {
@@ -141,7 +193,18 @@ std::optional<CheckerCapability> parseCapability(StringRef value) {
 } // namespace
 } // namespace lotus::checker
 
+LLVM_YAML_IS_SEQUENCE_VECTOR(lotus::checker::YamlProtocolOperation)
+
 namespace llvm::yaml {
+
+template <> struct MappingTraits<lotus::checker::YamlProtocolOperation> {
+  static void mapping(IO &io,
+                      lotus::checker::YamlProtocolOperation &operation) {
+    io.mapRequired("function", operation.function);
+    io.mapOptional("resource", operation.resource, std::string());
+    io.mapOptional("resource_arg", operation.resource_arg, -1);
+  }
+};
 
 template <> struct MappingTraits<lotus::checker::YamlMetadata> {
   static void mapping(IO &io, lotus::checker::YamlMetadata &metadata) {
@@ -178,6 +241,7 @@ template <> struct MappingTraits<lotus::checker::YamlSpec> {
     io.mapOptional("report_use_after_release",
                    spec.report_use_after_release, true);
     io.mapOptional("report_double_acquire", spec.report_double_acquire, true);
+    io.mapOptional("report_double_release", spec.report_double_release, true);
   }
 };
 
@@ -200,12 +264,24 @@ Expected<CheckerSpec> CheckerSpecLoader::loadFromBuffer(StringRef yaml,
   spec.metadata.title = parsed.metadata.title;
   spec.metadata.category = parsed.metadata.category;
   spec.metadata.summary = parsed.metadata.summary;
-  spec.metadata.severity = parseSeverity(parsed.metadata.severity);
-  spec.metadata.engine = parseEngineKind(parsed.engine);
+  auto severity = parseSeverity(parsed.metadata.severity);
+  if (!severity) {
+    return severity.takeError();
+  }
+  spec.metadata.severity = *severity;
+  auto engine = parseEngineKind(parsed.engine);
+  if (!engine) {
+    return engine.takeError();
+  }
+  spec.metadata.engine = *engine;
   spec.metadata.languages = parsed.metadata.languages;
   spec.metadata.tags = parsed.metadata.tags;
   spec.metadata.default_enabled = parsed.metadata.default_enabled;
-  spec.rule_kind = parseRuleKind(parsed.rule_kind);
+  auto rule_kind = parseRuleKind(parsed.rule_kind);
+  if (!rule_kind) {
+    return rule_kind.takeError();
+  }
+  spec.rule_kind = *rule_kind;
   spec.message = parsed.message;
   spec.suggestion = parsed.suggestion;
   spec.confidence = parsed.confidence;
@@ -213,15 +289,28 @@ Expected<CheckerSpec> CheckerSpecLoader::loadFromBuffer(StringRef yaml,
   spec.source_sink.sources = parsed.sources;
   spec.source_sink.sinks = parsed.sinks;
   spec.source_sink.sanitizers = parsed.sanitizers;
-  spec.api_protocol.acquire = parsed.acquire;
-  spec.api_protocol.use = parsed.use;
-  spec.api_protocol.release = parsed.release;
+  auto acquire = parseProtocolOperations(parsed.acquire, "acquire", source_name);
+  if (!acquire) {
+    return acquire.takeError();
+  }
+  spec.api_protocol.acquire = std::move(*acquire);
+  auto use = parseProtocolOperations(parsed.use, "use", source_name);
+  if (!use) {
+    return use.takeError();
+  }
+  spec.api_protocol.use = std::move(*use);
+  auto release = parseProtocolOperations(parsed.release, "release", source_name);
+  if (!release) {
+    return release.takeError();
+  }
+  spec.api_protocol.release = std::move(*release);
   spec.api_protocol.report_leak = parsed.report_leak;
   spec.api_protocol.report_use_before_acquire =
       parsed.report_use_before_acquire;
   spec.api_protocol.report_use_after_release =
       parsed.report_use_after_release;
   spec.api_protocol.report_double_acquire = parsed.report_double_acquire;
+  spec.api_protocol.report_double_release = parsed.report_double_release;
 
   for (const auto &capability_name : parsed.capabilities) {
     auto capability = parseCapability(capability_name);
@@ -253,6 +342,7 @@ CheckerSpecLoader::loadFromDirectory(StringRef directory) const {
                              directory.data());
   }
 
+  std::vector<fs::path> paths;
   for (const auto &entry : fs::recursive_directory_iterator(root, fs_error)) {
     if (fs_error) {
       return createStringError(fs_error, "failed while walking spec directory");
@@ -261,13 +351,21 @@ CheckerSpecLoader::loadFromDirectory(StringRef directory) const {
       continue;
     }
 
-    auto buffer = MemoryBuffer::getFile(entry.path().string());
+    paths.push_back(entry.path());
+  }
+
+  std::sort(paths.begin(), paths.end(), [](const fs::path &left,
+                                           const fs::path &right) {
+    return left.generic_string() < right.generic_string();
+  });
+
+  for (const fs::path &path : paths) {
+    auto buffer = MemoryBuffer::getFile(path.string());
     if (!buffer) {
       return createStringError(buffer.getError(), "failed to open spec file");
     }
 
-    auto spec_or = loadFromBuffer(buffer.get()->getBuffer(),
-                                  entry.path().string());
+    auto spec_or = loadFromBuffer(buffer.get()->getBuffer(), path.string());
     if (!spec_or) {
       return spec_or.takeError();
     }

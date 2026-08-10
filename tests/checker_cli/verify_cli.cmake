@@ -3,11 +3,16 @@ if(NOT DEFINED TOOL OR NOT DEFINED EXPECTED_RESULT)
 endif()
 
 set(command "${TOOL}")
-foreach(index RANGE 1 8)
-  if(DEFINED CLI_ARG${index})
-    list(APPEND command "${CLI_ARG${index}}")
-  endif()
-endforeach()
+if(NOT DEFINED CLI_ARG_COUNT)
+  set(CLI_ARG_COUNT 8)
+endif()
+if(CLI_ARG_COUNT GREATER 0)
+  foreach(index RANGE 1 ${CLI_ARG_COUNT})
+    if(DEFINED CLI_ARG${index})
+      list(APPEND command "${CLI_ARG${index}}")
+    endif()
+  endforeach()
+endif()
 
 execute_process(
   COMMAND ${command}

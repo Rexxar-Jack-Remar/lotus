@@ -13,10 +13,25 @@ capabilities: [direct-calls, use-def]
 message: File handle protocol violation
 suggestion: Ensure opened file handles are released exactly once and not used after close
 confidence: 75
-acquire: [fopen, open_resource]
-use: [fwrite, fread, use_resource]
-release: [fclose, close_resource]
+acquire:
+  - function: fopen
+    resource: return
+  - function: open_resource
+    resource: return
+use:
+  - function: fwrite
+    resource_arg: 3
+  - function: fread
+    resource_arg: 3
+  - function: use_resource
+    resource_arg: 0
+release:
+  - function: fclose
+    resource_arg: 0
+  - function: close_resource
+    resource_arg: 0
 report_leak: true
 report_use_before_acquire: true
 report_use_after_release: true
 report_double_acquire: true
+report_double_release: true

@@ -43,8 +43,8 @@
 #include <string>
 #include <vector>
 
-#include <llvm/Analysis/LoopInfo.h>
 #include <llvm/ADT/StringMap.h>
+#include <llvm/Analysis/LoopInfo.h>
 #include <llvm/IR/LLVMContext.h>
 #include <llvm/IR/LegacyPassManager.h>
 #include <llvm/IR/Module.h>

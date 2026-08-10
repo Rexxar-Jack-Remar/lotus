@@ -31,6 +31,9 @@ Error CheckerValidator::validate(const CheckerSpec &spec,
   if (spec.message.empty()) {
     return validationError(spec, "missing message");
   }
+  if (spec.confidence < 0 || spec.confidence > 100) {
+    return validationError(spec, "confidence must be in [0,100]");
+  }
 
   switch (spec.rule_kind) {
   case RuleKind::ForbiddenCall:

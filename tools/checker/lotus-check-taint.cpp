@@ -6,8 +6,8 @@
  */
 
 #include "Checker/Tooling/CheckerSubcommands.h"
-#include "CheckerReport.h"
 #include "Checker/Report/BugReportMgr.h"
+#include "CheckerReport.h"
 #include "Utils/LLVM/Demangle.h"
 
 #include <chrono>
@@ -17,12 +17,8 @@
 #include <sstream>
 #include <string>
 
-#include <Alias/Infrastructure/AliasAnalysisWrapper/AliasAnalysisWrapper.h>
-#include <Dataflow/IFDS/Analyses/IFDSTaintAnalysis.h>
-#include <Dataflow/IFDS/Core/IFDSFramework.h>
-#include <Dataflow/IFDS/Solver/IFDSSolver.h>
-#include <llvm/ADT/Statistic.h>
 #include <llvm/ADT/SmallPtrSet.h>
+#include <llvm/ADT/Statistic.h>
 #include <llvm/IR/InstIterator.h>
 #include <llvm/IR/LLVMContext.h>
 #include <llvm/IR/LegacyPassManager.h>
@@ -35,6 +31,10 @@
 #include <llvm/Support/Path.h>
 #include <llvm/Support/SourceMgr.h>
 #include <llvm/Support/raw_ostream.h>
+#include <Alias/Infrastructure/AliasAnalysisWrapper/AliasAnalysisWrapper.h>
+#include <Dataflow/IFDS/Analyses/IFDSTaintAnalysis.h>
+#include <Dataflow/IFDS/Core/IFDSFramework.h>
+#include <Dataflow/IFDS/Solver/IFDSSolver.h>
 
 // #include <iostream>
 // #include <thread>
