@@ -135,13 +135,13 @@ Basic Usage
 .. code-block:: bash
 
    # Enable all checkers
-   ./build/bin/lotus-check kint program.ll --check-all
+   ./build/bin/lotus-check --engine=kint program.ll --check-all
    
    # Enable specific checkers
-   ./build/bin/lotus-check kint program.ll --check-int-overflow --check-div-by-zero
+   ./build/bin/lotus-check --engine=kint program.ll --check-int-overflow --check-div-by-zero
    
    # Set timeout for slow functions
-   ./build/bin/lotus-check kint program.ll --check-all --function-timeout=60
+   ./build/bin/lotus-check --engine=kint program.ll --check-all --function-timeout=60
 
 Example 1: Integer Overflow
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -168,7 +168,7 @@ Example 1: Integer Overflow
 .. code-block:: bash
 
    clang -emit-llvm -S -g overflow.c -o overflow.ll
-   ./build/bin/lotus-check kint overflow.ll --check-int-overflow
+   ./build/bin/lotus-check --engine=kint overflow.ll --check-int-overflow
 
 **Expected Output**:
 
@@ -218,7 +218,7 @@ Example 2: Array Out of Bounds
 .. code-block:: bash
 
    clang -emit-llvm -S -g buffer.c -o buffer.ll
-   ./build/bin/lotus-check kint buffer.ll --check-array-oob
+   ./build/bin/lotus-check --engine=kint buffer.ll --check-array-oob
 
 **Expected Output**:
 
@@ -262,7 +262,7 @@ Example 3: Division by Zero
 .. code-block:: bash
 
    clang -emit-llvm -S -g division.c -o division.ll
-   ./build/bin/lotus-check kint division.ll --check-div-by-zero
+   ./build/bin/lotus-check --engine=kint division.ll --check-div-by-zero
 
 **Fix**:
 
@@ -294,14 +294,14 @@ Basic Usage
 .. code-block:: bash
 
    # Basic taint analysis
-   ./build/bin/lotus-check taint program.bc
+   ./build/bin/lotus-check --engine=taint program.bc
    
    # Custom sources and sinks
-   ./build/bin/lotus-check taint program.bc --sources=read,scanf,recv \
+   ./build/bin/lotus-check --engine=taint program.bc --sources=read,scanf,recv \
                             --sinks=system,exec,printf
    
    # Verbose output
-   ./build/bin/lotus-check taint program.bc --verbose --max-results=20
+   ./build/bin/lotus-check --engine=taint program.bc --verbose --max-results=20
 
 Example 1: Command Injection
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -352,7 +352,7 @@ Example 1: Command Injection
 .. code-block:: bash
 
    clang -emit-llvm -c -g cmd_injection.c -o cmd_injection.bc
-   ./build/bin/lotus-check taint cmd_injection.bc --verbose
+   ./build/bin/lotus-check --engine=taint cmd_injection.bc --verbose
 
 **Expected Output**:
 
@@ -410,7 +410,7 @@ Example 2: SQL Injection
 
 .. code-block:: bash
 
-   ./build/bin/lotus-check taint sql_injection.bc --sources=scanf --sinks=sqlite3_exec
+   ./build/bin/lotus-check --engine=taint sql_injection.bc --sources=scanf --sinks=sqlite3_exec
 
 **Fix**: Use parameterized queries:
 
@@ -445,9 +445,9 @@ Basic Usage
 
 .. code-block:: bash
 
-   ./build/bin/lotus-check concur program.bc
-   ./build/bin/lotus-check concur program.bc -v
-   ./build/bin/lotus-check concur program.bc --checks=openmp,mpi
+   ./build/bin/lotus-check --engine=concur program.bc
+   ./build/bin/lotus-check --engine=concur program.bc -v
+   ./build/bin/lotus-check --engine=concur program.bc --checks=openmp,mpi
 
 OpenMP and MPI Examples
 ~~~~~~~~~~~~~~~~~~~~~~~
@@ -472,7 +472,7 @@ For MPI/OpenMP-heavy codebases, a useful first pass is:
 
 .. code-block:: bash
 
-   ./build/bin/lotus-check concur program.bc --checks=openmp,mpi --report-json=parallel.json
+   ./build/bin/lotus-check --engine=concur program.bc --checks=openmp,mpi --report-json=parallel.json
 
 Example: Data Race
 ~~~~~~~~~~~~~~~~~~
@@ -517,7 +517,7 @@ Example: Data Race
 .. code-block:: bash
 
    clang -emit-llvm -c -g -pthread race.c -o race.bc
-   ./build/bin/lotus-check concur race.bc -v
+   ./build/bin/lotus-check --engine=concur race.bc -v
 
 **Expected Output**:
 
@@ -559,7 +559,7 @@ Best Practices
    .. code-block:: bash
 
       # Quick scan with Kint
-      ./build/bin/lotus-check kint program.ll --check-all
+      ./build/bin/lotus-check --engine=kint program.ll --check-all
 
 2. **Use Appropriate Checkers**:
 
@@ -599,7 +599,7 @@ Default human-readable output:
 
 .. code-block:: bash
 
-   ./build/bin/lotus-check kint program.ll --check-all
+   ./build/bin/lotus-check --engine=kint program.ll --check-all
 
 JSON Output
 ~~~~~~~~~~~
@@ -608,7 +608,7 @@ Machine-readable JSON for integration:
 
 .. code-block:: bash
 
-   ./build/bin/lotus-check kint program.ll --check-all --report-json=results.json
+   ./build/bin/lotus-check --engine=kint program.ll --check-all --report-json=results.json
 
 SARIF Output
 ~~~~~~~~~~~~
@@ -617,7 +617,7 @@ Standard format for security tools:
 
 .. code-block:: bash
 
-   ./build/bin/lotus-check kint program.ll --check-all --report-sarif=results.sarif
+   ./build/bin/lotus-check --engine=kint program.ll --check-all --report-sarif=results.sarif
 
 Integration Examples
 --------------------
@@ -632,8 +632,8 @@ CI/CD Pipeline
    clang -emit-llvm -c -g source.c -o source.bc
    
    # Run checkers via the unified lotus-check frontend
-   ./build/bin/lotus-check kint source.ll --check-all > kint_results.txt
-   ./build/bin/lotus-check taint source.bc > taint_results.txt
+   ./build/bin/lotus-check --engine=kint source.ll --check-all > kint_results.txt
+   ./build/bin/lotus-check --engine=taint source.bc > taint_results.txt
    
    # Check for bugs
    if grep -q "Bug" *.txt; then

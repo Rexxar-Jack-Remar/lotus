@@ -70,7 +70,7 @@ Clients
 The concurrency analyses feed two main consumers:
 
 - The **concurrency bug checkers** (data races, deadlocks, atomicity violations,
-  OpenMP and MPI bugs) exposed through ``lotus-check concur``. See
+  OpenMP and MPI bugs) exposed through ``lotus-check --engine=concur``. See
   :doc:`../checker/concurrency` for the checker side.
 - Any analysis client that needs MHP, lock-set, or happens-before queries via
   ``ConcurrencyFacade``.
@@ -83,5 +83,5 @@ The concurrency analyses feed two main consumers:
 See Also
 --------
 
-* :doc:`../checker/concurrency` – Concurrency bug checkers (``lotus-check concur``)
+* :doc:`../checker/concurrency` – Concurrency bug checkers (``lotus-check --engine=concur``)
 * :doc:`../analysis/index` – Other analysis utilities

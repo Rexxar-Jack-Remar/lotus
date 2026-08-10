@@ -77,7 +77,7 @@ The SymbolicExecution subsystem is a top-level engine under
 ``lib/SymbolicExecution`` and ``include/SymbolicExecution``. It performs
 path-sensitive symbolic execution over the guarded value-flow graph, tracks
 symbolic scalar and memory facts, and uses SMT-backed path-condition checks for
-feasibility. The ``lotus-check symex`` frontend invokes this engine for
+feasibility. The ``lotus-check --engine=symex`` frontend invokes this engine for
 symbolic-execution bug checks. See :doc:`../symbolic_execution/index` for the
 engine documentation.
 

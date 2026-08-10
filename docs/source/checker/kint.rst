@@ -10,7 +10,7 @@ by zero, array bounds violations, and related issues.
 
 **Tool Location**: ``tools/checker/lotus-check-kint.cpp``
 
-**Frontend**: ``lotus-check kint``
+**Frontend**: ``lotus-check --engine=kint``
 
 Overview
 --------
@@ -90,68 +90,69 @@ Usage
 
 .. code-block:: bash
 
-   ./build/bin/lotus-check kint input.bc --check-all=true
+   ./build/bin/lotus-check --engine=kint input.bc
 
 **Enable Specific Checkers**:
 
 .. code-block:: bash
 
-   ./build/bin/lotus-check kint input.bc --check-int-overflow=true
-   ./build/bin/lotus-check kint input.bc --check-div-by-zero=true
-   ./build/bin/lotus-check kint input.bc --check-bad-shift=true
-   ./build/bin/lotus-check kint input.bc --check-array-oob=true
-   ./build/bin/lotus-check kint input.bc --check-dead-branch=true
+   ./build/bin/lotus-check --engine=kint input.bc --check-int-overflow=true
+   ./build/bin/lotus-check --engine=kint input.bc --check-div-by-zero=true
+   ./build/bin/lotus-check --engine=kint input.bc --check-bad-shift=true
+   ./build/bin/lotus-check --engine=kint input.bc --check-array-oob=true
+   ./build/bin/lotus-check --engine=kint input.bc --check-dead-branch=true
 
 **Enable Multiple Checkers**:
 
 .. code-block:: bash
 
-   ./build/bin/lotus-check kint input.bc --check-int-overflow=true --check-div-by-zero=true
+   ./build/bin/lotus-check --engine=kint input.bc --check-int-overflow=true --check-div-by-zero=true
 
 **Generate JSON Report**:
 
 .. code-block:: bash
 
-   ./build/bin/lotus-check kint input.bc --check-all=true --report-json=report.json
+   ./build/bin/lotus-check --engine=kint input.bc --check-all=true --report-json=report.json
 
 **Generate SARIF Report**:
 
 .. code-block:: bash
 
-   ./build/bin/lotus-check kint input.bc --check-all=true --report-sarif=report.sarif
+   ./build/bin/lotus-check --engine=kint input.bc --check-all=true --report-sarif=report.sarif
 
 **Verbose Logging**:
 
 .. code-block:: bash
 
-   ./build/bin/lotus-check kint input.bc --check-all=true --log-level=debug
+   ./build/bin/lotus-check --engine=kint input.bc --check-all=true --log-level=debug
 
 **Function Timeout**:
 
 .. code-block:: bash
 
-   ./build/bin/lotus-check kint input.bc --check-all=true --function-timeout=60
+   ./build/bin/lotus-check --engine=kint input.bc --check-all=true --function-timeout=60
 
 **Analyze All Functions**:
 
 .. code-block:: bash
 
-   ./build/bin/lotus-check kint input.bc --check-int-overflow=true --analyze-all-functions=true
+   ./build/bin/lotus-check --engine=kint input.bc --check-int-overflow=true --analyze-all-functions=true
 
 **Summary Encoding Options**:
 
 .. code-block:: bash
 
-   ./build/bin/lotus-check kint input.bc --check-all=true --kint-summary-mode=on
-   ./build/bin/lotus-check kint input.bc --check-all=true --kint-summary-timeout=10
-   ./build/bin/lotus-check kint input.bc --check-all=true --kint-summary-max-paths=128
+   ./build/bin/lotus-check --engine=kint input.bc --check-all=true --kint-summary-mode=on
+   ./build/bin/lotus-check --engine=kint input.bc --check-all=true --kint-summary-timeout=10
+   ./build/bin/lotus-check --engine=kint input.bc --check-all=true --kint-summary-max-paths=128
 
 Command-Line Options
 --------------------
 
 **Checker Options**:
 
-* ``--check-all=<true|false>`` – Enable all checkers at once (default: false)
+* ``--check-all=<true|false>`` – Enable all checkers explicitly. With no
+  checker-selection options, all KINT checks run by default.
 * ``--check-int-overflow=<true|false>`` – Enable integer overflow detection (default: false)
 * ``--analyze-all-functions=<true|false>`` – Run SMT checks for all functions instead of only taint/main entry points (default: false)
 * ``--check-div-by-zero=<true|false>`` – Enable division by zero detection (default: false)
@@ -168,16 +169,16 @@ Command-Line Options
 
 **Logging Options**:
 
-* ``--log-level=<debug|info|warning|error|none>`` – Set logging level (default: info)
+* ``--log-level=<debug|info|warning|error|none>`` – Set logging level (default: warning)
 * ``--quiet`` – Suppress all output (default: false)
-* ``--stderr-logging`` – Log to stderr instead of stdout (default: false)
-* ``--log-file=<file>`` – Log to file (default: stdout/stderr)
+* ``--log-to-stderr`` – Log to stderr instead of stdout (default: false)
+* ``--log-to-file=<file>`` – Log to file (default: stdout/stderr)
 
 **Report Options**:
 
 * ``--report-json=<file>`` – Output JSON report to file
 * ``--report-sarif=<file>`` – Output SARIF report to file
-* ``--min-score=<n>`` – Minimum confidence score for reporting (0-100)
+* ``--report-min-score=<n>`` – Minimum confidence score for reporting (0-100)
 
 Bug Types
 ---------

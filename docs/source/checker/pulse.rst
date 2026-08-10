@@ -12,7 +12,7 @@ feasible execution, rather than trying to prove all executions safe.
 
 **Tool Location**: ``tools/checker/lotus-check-pulse.cpp``
 
-**Frontend**: ``lotus-check pulse``
+**Frontend**: ``lotus-check --engine=pulse``
 
 Overview
 --------
@@ -127,7 +127,7 @@ Basic usage:
 
 .. code-block:: bash
 
-   ./build/bin/lotus-check pulse input.bc
+   ./build/bin/lotus-check --engine=pulse input.bc
 
 Common options:
 
@@ -135,15 +135,15 @@ Common options:
 * ``--log-level=<level>``: ``none``, ``error``, ``warning``, ``info``,
   ``debug``, or ``trace``
 * ``--pulse-stats[=true|false]``: print Pulse statistics
-* ``--json-output=<path>``: emit the shared JSON report format
-* ``--min-score=<0-100>``: filter exported reports by confidence
+* ``--report-json=<path>``: emit the shared JSON report format
+* ``--report-min-score=<0-100>``: filter exported reports by confidence
 * ``--no-smt``: disable SMT solving when checking path feasibility
 
 Example:
 
 .. code-block:: bash
 
-   ./build/bin/lotus-check pulse input.bc --log-level=debug --json-output=report.json
+   ./build/bin/lotus-check --engine=pulse input.bc --log-level=debug --report-json=report.json
 
 Programmatic Usage
 ------------------

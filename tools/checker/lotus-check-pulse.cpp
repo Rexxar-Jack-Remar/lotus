@@ -31,26 +31,24 @@ using namespace pulse;
 static cl::opt<std::string>
     InputFile(cl::Positional, cl::desc("<input bitcode>"), cl::Required,
               cl::sub(lotus::checker::tooling::pulseSubCommand()));
-static cl::opt<bool> Verbose("v", cl::desc("Verbose output"), cl::init(false),
-                             cl::sub(lotus::checker::tooling::pulseSubCommand()));
-static cl::opt<std::string>
-    LogLevelOpt("log-level",
-                cl::desc("Log level: none, error, warning, info, debug, trace"),
-                cl::init("info"),
-                cl::sub(lotus::checker::tooling::pulseSubCommand()));
-static cl::opt<bool> ShowPulseStats("pulse-stats",
-                                    cl::desc("Show Pulse analysis statistics"),
-                                    cl::init(true),
-                                    cl::sub(lotus::checker::tooling::pulseSubCommand()));
-static cl::opt<std::string> JsonOutput("json-output",
-                                       cl::desc("Output JSON report to file"),
-                                       cl::init(""),
-                                       cl::sub(lotus::checker::tooling::pulseSubCommand()));
-static cl::opt<int>
-    MinScore("min-score",
-             cl::desc("Minimum confidence score for reporting (0-100)"),
-             cl::init(0),
-             cl::sub(lotus::checker::tooling::pulseSubCommand()));
+static cl::opt<bool>
+    Verbose("v", cl::desc("Verbose output"), cl::init(false),
+            cl::sub(lotus::checker::tooling::pulseSubCommand()));
+static cl::opt<pulse::LogLevel> LogLevelOpt(
+    "log-level", cl::desc("Log level"),
+    cl::values(clEnumValN(pulse::LogLevel::None, "none", "Disable logging"),
+               clEnumValN(pulse::LogLevel::Error, "error", "Errors only"),
+               clEnumValN(pulse::LogLevel::Warning, "warning",
+                          "Warnings and errors"),
+               clEnumValN(pulse::LogLevel::Info, "info", "Informational"),
+               clEnumValN(pulse::LogLevel::Debug, "debug", "Debug output"),
+               clEnumValN(pulse::LogLevel::Trace, "trace", "Trace output")),
+    cl::init(pulse::LogLevel::Info),
+    cl::sub(lotus::checker::tooling::pulseSubCommand()));
+static cl::opt<bool>
+    ShowPulseStats("pulse-stats", cl::desc("Show Pulse analysis statistics"),
+                   cl::init(true),
+                   cl::sub(lotus::checker::tooling::pulseSubCommand()));
 static cl::opt<bool> NoSMT("no-smt",
                            cl::desc("Disable SMT solving (fast mode); do not "
                                     "query Z3 for path satisfiability"),
@@ -59,19 +57,7 @@ static cl::opt<bool> NoSMT("no-smt",
 
 int runPulseCheckerTool(const char *argv0) {
   // Configure logging
-  pulse::LogLevel level = pulse::LogLevel::Info;
-  if (LogLevelOpt == "none")
-    level = pulse::LogLevel::None;
-  else if (LogLevelOpt == "error")
-    level = pulse::LogLevel::Error;
-  else if (LogLevelOpt == "warning")
-    level = pulse::LogLevel::Warning;
-  else if (LogLevelOpt == "info")
-    level = pulse::LogLevel::Info;
-  else if (LogLevelOpt == "debug")
-    level = pulse::LogLevel::Debug;
-  else if (LogLevelOpt == "trace")
-    level = pulse::LogLevel::Trace;
+  pulse::LogLevel level = LogLevelOpt.getValue();
 
   if (Verbose && level < pulse::LogLevel::Debug) {
     level = pulse::LogLevel::Debug;
@@ -116,8 +102,6 @@ int runPulseCheckerTool(const char *argv0) {
   BugReportMgr &mgr = BugReportMgr::get_instance();
   lotus::checker::tooling::CheckerReportOptions reportOptions;
   reportOptions.verbose = Verbose;
-  reportOptions.minScore = MinScore;
-  reportOptions.jsonOutputOverride = JsonOutput;
   const int reportStatus =
       lotus::checker::tooling::emitCheckerReports(mgr, reportOptions);
   PulseLogger::info("Analysis complete");

@@ -70,8 +70,8 @@ Usage
 
 .. code-block:: bash
 
-   ./build/bin/lotus-check kint input.bc --check-all=true
-   ./build/bin/lotus-check concur input.bc --check-data-races
+   ./build/bin/lotus-check --engine=kint input.bc --check-all=true
+   ./build/bin/lotus-check --engine=concur input.bc --check-data-races
 
 See Also
 --------

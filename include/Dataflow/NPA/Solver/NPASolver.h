@@ -43,10 +43,10 @@
 
 #include "Dataflow/NPA/Solver/EquationSystem.h"
 #include "Dataflow/NPA/Solver/DomainValidation.h"
+#include "Dataflow/NPA/Solver/Newton/Linear/AdaptivePlan.h"
+#include "Dataflow/NPA/Solver/Newton/Linear/Tensor/TensorSolver.h"
 #include "Dataflow/NPA/Solver/SolveContext.h"
 #include "Dataflow/NPA/Solver/Statistics.h"
-#include "Dataflow/NPA/Solver/Newton/Linear/Tensor/TensorSolver.h"
-#include "Dataflow/NPA/Solver/Newton/Linear/AdaptivePlan.h"
 #include "Utils/Parallel/ThreadPool.h"
 
 #include <exception>

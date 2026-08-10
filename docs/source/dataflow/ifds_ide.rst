@@ -106,15 +106,15 @@ At a high level, an IFDS/IDE analysis is instantiated and solved as:
    IFDSSolver<Analysis> solver(problem);
    solver.solve();
 
-Command-Line Tool: lotus-check taint
+Command-Line Tool: lotus-check --engine=taint
 =====================================
 
-The ``lotus-check taint`` frontend provides an interprocedural taint analysis using the
+The ``lotus-check --engine=taint`` frontend provides an interprocedural taint analysis using the
 IFDS framework.
 
 .. code-block:: bash
 
-   ./build/bin/lotus-check taint <input bitcode file> [options]
+   ./build/bin/lotus-check --engine=taint <input bitcode file> [options]
 
 Key Options
 -----------
@@ -140,13 +140,13 @@ Examples
 .. code-block:: bash
 
    # Basic taint analysis
-   ./build/bin/lotus-check taint input.bc
+   ./build/bin/lotus-check --engine=taint input.bc
 
    # Custom sources and sinks
-   ./build/bin/lotus-check taint input.bc -sources="read,scanf" -sinks="system,exec"
+   ./build/bin/lotus-check --engine=taint input.bc -sources="read,scanf" -sinks="system,exec"
 
    # Reaching definitions analysis
-   ./build/bin/lotus-check taint input.bc -analysis=1
+   ./build/bin/lotus-check --engine=taint input.bc -analysis=1
 
 For other command-line tools that build on IFDS/IDE, see
 :doc:`../tools/checker/index`.

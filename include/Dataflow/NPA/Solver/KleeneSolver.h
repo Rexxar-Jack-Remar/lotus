@@ -11,8 +11,8 @@
  */
 
 #include "Dataflow/NPA/Core/Expr/Eval.h"
-#include "Dataflow/NPA/Solver/EquationSystem.h"
 #include "Dataflow/NPA/Solver/DomainValidation.h"
+#include "Dataflow/NPA/Solver/EquationSystem.h"
 #include "Dataflow/NPA/Solver/SolveContext.h"
 #include "Dataflow/NPA/Solver/Statistics.h"
 

@@ -530,25 +530,8 @@ TaintAnalysis::initial_facts(const llvm::Function *main) {
 }
 
 bool TaintAnalysis::is_source(const llvm::Instruction *inst) const {
-  auto *call = llvm::dyn_cast<llvm::CallInst>(inst);
-  if (!call || !call->getCalledFunction())
-    return false;
-
-  auto raw_name = call->getCalledFunction()->getName().str();
-  std::string func_name = taint_config::normalize_name(raw_name);
-  if (m_source_functions.count(func_name) > 0) {
-    return true;
-  }
-
-  // Fallback: demangle C++ names and match by suffix (e.g., "::source").
-  std::string demangled_name = DemangleUtils::demangle(raw_name);
-  std::string normalized_demangled =
-      taint_config::normalize_name(strip_signature(demangled_name));
   for (const auto &source : m_source_functions) {
-    if (normalized_demangled.size() >= source.size() &&
-        normalized_demangled.compare(normalized_demangled.size() -
-                                         source.size(),
-                                     source.size(), source) == 0) {
+    if (matches_function_name(inst, source)) {
       return true;
     }
   }
@@ -557,29 +540,32 @@ bool TaintAnalysis::is_source(const llvm::Instruction *inst) const {
 }
 
 bool TaintAnalysis::is_sink(const llvm::Instruction *inst) const {
+  for (const auto &sink : m_sink_functions) {
+    if (matches_function_name(inst, sink)) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
+bool TaintAnalysis::matches_function_name(const llvm::Instruction *inst,
+                                          llvm::StringRef configured_name) {
   auto *call = llvm::dyn_cast<llvm::CallInst>(inst);
   if (!call || !call->getCalledFunction())
     return false;
 
   auto raw_name = call->getCalledFunction()->getName().str();
   std::string func_name = taint_config::normalize_name(raw_name);
-  if (m_sink_functions.count(func_name) > 0) {
+  if (llvm::StringRef(func_name) == configured_name) {
     return true;
   }
 
-  // Fallback: demangle C++ names and match by suffix (e.g., "::sink").
+  // Demangle C++ names and match by suffix (e.g., "::source").
   std::string demangled_name = DemangleUtils::demangle(raw_name);
   std::string normalized_demangled =
       taint_config::normalize_name(strip_signature(demangled_name));
-  for (const auto &sink : m_sink_functions) {
-    if (normalized_demangled.size() >= sink.size() &&
-        normalized_demangled.compare(normalized_demangled.size() - sink.size(),
-                                     sink.size(), sink) == 0) {
-      return true;
-    }
-  }
-
-  return false;
+  return llvm::StringRef(normalized_demangled).endswith(configured_name);
 }
 
 void TaintAnalysis::add_source_function(const std::string &func_name) {

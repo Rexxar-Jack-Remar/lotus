@@ -1,4 +1,5 @@
-/** @file BugReportMgr.h @brief Bug report manager for aggregating and deduplicating checker results. */
+/** @file BugReportMgr.h @brief Bug report manager for aggregating and
+ * deduplicating checker results. */
 #ifndef CHECKER_REPORT_BUGREPORTMGR_H
 #define CHECKER_REPORT_BUGREPORTMGR_H
 
@@ -89,8 +90,7 @@ public:
    * Insert a bug report with deduplication
    * Returns true if the report was added, false if it was a duplicate
    */
-  bool insert_report(int ty_id, BugReport *report,
-                     bool deduplicate_by_trace);
+  bool insert_report(int ty_id, BugReport *report, bool deduplicate_by_trace);
 
   /**
    * Get all reports for a specific bug type
@@ -119,7 +119,12 @@ public:
   void filterSuppressed(const SuppressionManager &manager);
 
   /**
-   * Generate JSON report file
+   * Build a JSON report. The caller owns the result and must use cJSON_Delete.
+   */
+  cJSON *toJson(const ReportFilter &filter) const;
+
+  /**
+   * Generate a formatted JSON report
    */
   void generate_json_report(llvm::raw_ostream &OS,
                             const ReportFilter &filter) const;

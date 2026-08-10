@@ -22,14 +22,12 @@
 using namespace llvm;
 
 // Command line options
-static cl::opt<std::string> InputFilename(cl::Positional, cl::desc("<IR file>"),
-                                          cl::Required,
-                                          cl::sub(lotus::checker::tooling::kintSubCommand()));
-static cl::opt<bool>
-    VerboseReports("v",
-                   cl::desc("Print trace and IR details for reported bugs"),
-                   cl::init(false),
-                   cl::sub(lotus::checker::tooling::kintSubCommand()));
+static cl::opt<std::string>
+    InputFilename(cl::Positional, cl::desc("<IR file>"), cl::Required,
+                  cl::sub(lotus::checker::tooling::kintSubCommand()));
+static cl::opt<bool> VerboseReports(
+    "v", cl::desc("Print trace and IR details for reported bugs"),
+    cl::init(false), cl::sub(lotus::checker::tooling::kintSubCommand()));
 
 static void buildKintPipeline(ModulePassManager &MPM) {
   MPM.addPass(createModuleToFunctionPassAdaptor(PromotePass()));
@@ -93,8 +91,16 @@ int runKintCheckerTool(const char *argv0) {
 
   mkint::Logger::getInstance().configure(logConfig);
 
-  // Apply the CheckAll flag if set to true
-  if (kint::CheckAll) {
+  const bool noExplicitCheckerSelection =
+      kint::CheckAll.getNumOccurrences() == 0 &&
+      kint::CheckIntOverflow.getNumOccurrences() == 0 &&
+      kint::CheckDivByZero.getNumOccurrences() == 0 &&
+      kint::CheckBadShift.getNumOccurrences() == 0 &&
+      kint::CheckArrayOOB.getNumOccurrences() == 0 &&
+      kint::CheckDeadBranch.getNumOccurrences() == 0;
+
+  // Match the other checker frontends: no checker flags means run all checks.
+  if (kint::CheckAll || noExplicitCheckerSelection) {
     kint::CheckIntOverflow = true;
     kint::CheckDivByZero = true;
     kint::CheckBadShift = true;
@@ -122,12 +128,13 @@ int runKintCheckerTool(const char *argv0) {
                       ? "No limit"
                       : std::to_string(kint::FunctionTimeout) + " seconds");
 
-  // Warn if no checkers are enabled
+  // Explicitly selecting an empty checker set is a configuration error.
   if (!kint::CheckIntOverflow && !kint::CheckDivByZero &&
       !kint::CheckBadShift && !kint::CheckArrayOOB && !kint::CheckDeadBranch) {
-    MKINT_WARN() << "No bug checkers are enabled. No bugs will be detected.";
-    MKINT_WARN() << "Use --check-all=true or enable individual checkers with "
-                    "--check-<checker-name>=true";
+    errs()
+        << "error: no KINT checks selected\n"
+        << "hint: use --check-all or enable an individual --check-* option\n";
+    return lotus::checker::tooling::EXIT_ERROR;
   }
 
   // Load the module to analyze

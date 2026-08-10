@@ -1,8 +1,10 @@
-/** @file BugReport.h @brief Bug report data structures for checker framework. */
+/** @file BugReport.h @brief Bug report data structures for checker framework.
+ */
 #ifndef CHECKER_REPORT_BUGREPORT_H
 #define CHECKER_REPORT_BUGREPORT_H
 
 #include "Checker/Report/BugTypes.h"
+#include "Utils/Formats/cJSON.h"
 
 #include <map>
 #include <string>
@@ -160,8 +162,8 @@ public:
   // Helper to add metadata
   void add_metadata(const std::string &key, const std::string &value);
 
-  // Export to JSON format
-  void export_json(llvm::raw_ostream &OS) const;
+  // Build a JSON object. The caller owns the result and must use cJSON_Delete.
+  cJSON *toJson() const;
 
   // Render a human-readable message for a single diagnostic step.
   std::string render_step_message(const BugDiagStep &step) const;

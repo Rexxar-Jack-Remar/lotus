@@ -1,10 +1,10 @@
 IFDS Taint Checker
 ==================
 
-The ``taint`` subcommand runs Lotus's interprocedural IFDS taint analysis.
+The ``--engine=taint`` mode runs Lotus's interprocedural IFDS taint analysis.
 It follows user-configured data from source functions to sink functions.
 
-**Frontend**: ``lotus-check taint``
+**Frontend**: ``lotus-check --engine=taint``
 
 **Implementation**: ``tools/checker/lotus-check-taint.cpp`` and
 ``include/Dataflow/IFDS/Analyses/IFDSTaintAnalysis.h``
@@ -27,14 +27,14 @@ Usage
 .. code-block:: bash
 
    # Run with the default source and sink configuration.
-   ./build/bin/lotus-check taint input.bc
+   ./build/bin/lotus-check --engine=taint input.bc
 
    # Add project-specific source and sink functions.
-   ./build/bin/lotus-check taint input.bc \
+   ./build/bin/lotus-check --engine=taint input.bc \
      --sources=recv,getenv --sinks=system,execve
 
    # Select an alias-analysis backend and show source/sink tagging details.
-   ./build/bin/lotus-check taint input.bc --aa=dyck --verbose --max-results=20
+   ./build/bin/lotus-check --engine=taint input.bc --aa=dyck --verbose --max-results=20
 
 Important options
 -----------------
@@ -53,7 +53,7 @@ Reporting
 The IFDS frontend prints flow results directly.  Unlike the native checker
 frontends, it does not currently export findings through ``BugReportMgr``;
 therefore the shared ``--report-json`` and ``--report-sarif`` report pipeline
-does not produce taint-flow reports from this subcommand.
+does not produce taint-flow reports from this engine.
 
 See also
 --------

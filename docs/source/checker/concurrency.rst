@@ -11,7 +11,7 @@ checks.
 
 **Tool Location**: ``tools/checker/lotus-check-concur.cpp``
 
-**Frontend**: ``lotus-check concur``
+**Frontend**: ``lotus-check --engine=concur``
 
 Overview
 --------
@@ -75,42 +75,42 @@ Usage
 
 .. code-block:: bash
 
-   ./build/bin/lotus-check concur input.bc
+   ./build/bin/lotus-check --engine=concur input.bc
 
 **Enable Specific Checks**:
 
 .. code-block:: bash
 
-   ./build/bin/lotus-check concur input.bc --check-data-races
-   ./build/bin/lotus-check concur input.bc --check-deadlocks
-   ./build/bin/lotus-check concur input.bc --check-atomicity
-   ./build/bin/lotus-check concur input.bc --check-openmp
-   ./build/bin/lotus-check concur input.bc --check-mpi
+   ./build/bin/lotus-check --engine=concur input.bc --check-data-races
+   ./build/bin/lotus-check --engine=concur input.bc --check-deadlocks
+   ./build/bin/lotus-check --engine=concur input.bc --check-atomicity
+   ./build/bin/lotus-check --engine=concur input.bc --check-openmp
+   ./build/bin/lotus-check --engine=concur input.bc --check-mpi
 
 **Select Checks with a Comma-Separated List**:
 
 .. code-block:: bash
 
-   ./build/bin/lotus-check concur input.bc --checks=race,deadlock,openmp
-   ./build/bin/lotus-check concur input.bc --checks=mpi
+   ./build/bin/lotus-check --engine=concur input.bc --checks=race,deadlock,openmp
+   ./build/bin/lotus-check --engine=concur input.bc --checks=mpi
 
 **Enable Multiple Checks**:
 
 .. code-block:: bash
 
-   ./build/bin/lotus-check concur input.bc --check-data-races --check-deadlocks --check-atomicity
+   ./build/bin/lotus-check --engine=concur input.bc --check-data-races --check-deadlocks --check-atomicity
 
 **Generate JSON Report**:
 
 .. code-block:: bash
 
-   ./build/bin/lotus-check concur input.bc --report-json=report.json
+   ./build/bin/lotus-check --engine=concur input.bc --report-json=report.json
 
 **Generate SARIF Report**:
 
 .. code-block:: bash
 
-   ./build/bin/lotus-check concur input.bc --report-sarif=report.sarif
+   ./build/bin/lotus-check --engine=concur input.bc --report-sarif=report.sarif
 
 Command-Line Options
 --------------------
@@ -126,7 +126,7 @@ Command-Line Options
 * ``--analysis-only`` – Run analyses and dump facts without emitting bug reports
 * ``--report-json=<file>`` – Output JSON report to file
 * ``--report-sarif=<file>`` – Output SARIF report to file
-* ``--min-score=<n>`` – Minimum confidence score for reporting (0-100)
+* ``--report-min-score=<n>`` – Minimum confidence score for reporting (0-100)
 
 Scope
 -----

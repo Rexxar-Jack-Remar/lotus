@@ -7,7 +7,7 @@ The Checker Framework provides a unified infrastructure for static bug detection
 
 **Headers**: ``include/Checker/``
 
-**Tool Frontend**: ``lotus-check`` with subcommand runners in ``tools/checker/``
+**Tool Frontend**: ``lotus-check`` with engine runners in ``tools/checker/``
 
 Overview
 --------
@@ -23,12 +23,12 @@ The Checker Framework consists of several checker categories, all unified throug
 * **Saber Checkers** – Source-sink bug detection over sparse value-flow graphs
 * **SymEx Checker** – Symbolic-execution bug checks backed by the top-level ``SymbolicExecution`` engine
 
-All checkers report bugs through the centralized ``BugReportMgr`` system, enabling unified output formats (JSON, SARIF) and consistent bug reporting across all analysis tools. The repository now builds a single checker binary, ``lotus-check``, with subcommands such as ``kint``, ``ae``, ``pulse``, ``saber``, and ``concur``.
+All checkers report bugs through the centralized ``BugReportMgr`` system, enabling unified output formats (JSON, SARIF) and consistent bug reporting across all analysis tools. The repository builds a single checker binary, ``lotus-check``; each invocation selects one engine with ``--engine=<name>``.
 
 Choosing a Checker
 ------------------
 
-The ``lotus-check`` subcommands name *analysis engines*, not mutually exclusive
+The ``lotus-check --engine`` values name *analysis engines*, not mutually exclusive
 vulnerability categories.  Several engines intentionally cover the same bug
 class while making different precision, scalability, and reporting trade-offs.
 Choose the engine according to the workflow and evidence needed; do not infer
@@ -108,7 +108,7 @@ Running multiple engines
 There is currently no aggregate command that runs multiple native engines or
 deduplicates their output across separate ``lotus-check`` invocations.  Each
 frontend may deduplicate reports produced in its own run, but findings from two
-engines should be triaged as independent evidence.  Record the subcommand and
+engines should be triaged as independent evidence. Record the engine value and
 its options with exported JSON or SARIF reports so that overlapping findings
 remain distinguishable.
 
@@ -156,12 +156,12 @@ logic. This enables adding new checks without modifying the checker engine.
 .. code-block:: bash
 
    # Run a declarative checker from a spec file
-   ./build/bin/lotus-check generic input.bc --checker=forbidden.system
+   ./build/bin/lotus-check --engine=generic input.bc --checker=forbidden.system
 
    # Load all specs from a directory
-   ./build/bin/lotus-check generic input.bc --spec-dir=./checker-specs/
+   ./build/bin/lotus-check --engine=generic input.bc --spec-dir=./checker-specs/
 
-   # List generic-registry checker ids (not every native subcommand capability)
+   # List generic checker ids and native engine entries
    ./build/bin/lotus-check --list-checkers
 
 .. code-block:: cpp
@@ -244,7 +244,7 @@ Components
 * ``AnalysisDriver.cpp`` – Whole-module symbolic execution driver
 * ``AnalysisState*.cpp`` – Symbolic state, summaries, taint updates, and bug queries
 * ``PathCondSolver.cpp`` – SMT-backed feasibility checking for path conditions
-* ``SymbolicExecutionWrapper.cpp`` – LLVM pass wrapper used by ``lotus-check symex``
+* ``SymbolicExecutionWrapper.cpp`` – LLVM pass wrapper used by ``lotus-check --engine=symex``
 
 **Report System** (``lib/Checker/Report/``):
 
@@ -265,14 +265,14 @@ Build Targets
 * ``PulseChecker`` – Pulse biabductive analysis checker library
 * ``CanarySymbolicExecution`` – Symbolic-execution engine library used by ``symex``
 * ``lotus-check`` – Unified checker frontend
-* ``tools/checker/lotus-check-ae.cpp`` – AE subcommand runner
-* ``tools/checker/lotus-check-fitx.cpp`` – FiTx subcommand runner
-* ``tools/checker/lotus-check-kint.cpp`` – KINT subcommand runner
-* ``tools/checker/lotus-check-concur.cpp`` – Concurrency subcommand runner
-* ``tools/checker/lotus-check-pulse.cpp`` – Pulse subcommand runner
-* ``tools/checker/lotus-check-saber.cpp`` – Saber subcommand runner
-* ``tools/checker/lotus-check-symex.cpp`` – Symbolic-execution subcommand runner
-* ``tools/checker/lotus-check-taint.cpp`` – Taint-analysis subcommand runner
+* ``tools/checker/lotus-check-ae.cpp`` – AE engine runner
+* ``tools/checker/lotus-check-fitx.cpp`` – FiTx engine runner
+* ``tools/checker/lotus-check-kint.cpp`` – KINT engine runner
+* ``tools/checker/lotus-check-concur.cpp`` – Concurrency engine runner
+* ``tools/checker/lotus-check-pulse.cpp`` – Pulse engine runner
+* ``tools/checker/lotus-check-saber.cpp`` – Saber engine runner
+* ``tools/checker/lotus-check-symex.cpp`` – Symbolic-execution engine runner
+* ``tools/checker/lotus-check-taint.cpp`` – Taint-analysis engine runner
 
 Usage
 -----
@@ -281,26 +281,26 @@ Usage
 
 .. code-block:: bash
 
-   ./build/bin/lotus-check kint input.bc --check-all=true
-   ./build/bin/lotus-check kint input.bc --check-int-overflow=true --check-div-by-zero=true
-   ./build/bin/lotus-check kint input.bc --report-json=report.json
+   ./build/bin/lotus-check --engine=kint input.bc --check-all=true
+   ./build/bin/lotus-check --engine=kint input.bc --check-int-overflow=true --check-div-by-zero=true
+   ./build/bin/lotus-check --engine=kint input.bc --report-json=report.json
 
 **Concurrency Tool**:
 
 .. code-block:: bash
 
-   ./build/bin/lotus-check concur input.bc --check-data-races
-   ./build/bin/lotus-check concur input.bc --check-deadlocks --check-atomicity
-   ./build/bin/lotus-check concur input.bc --checks=openmp,mpi
-   ./build/bin/lotus-check concur input.bc --report-json=report.json
+   ./build/bin/lotus-check --engine=concur input.bc --check-data-races
+   ./build/bin/lotus-check --engine=concur input.bc --check-deadlocks --check-atomicity
+   ./build/bin/lotus-check --engine=concur input.bc --checks=openmp,mpi
+   ./build/bin/lotus-check --engine=concur input.bc --report-json=report.json
 
 **Pulse Tool**:
 
 .. code-block:: bash
 
-   ./build/bin/lotus-check pulse input.bc
-   ./build/bin/lotus-check pulse input.bc -v
-   ./build/bin/lotus-check pulse input.bc --log-level=debug
+   ./build/bin/lotus-check --engine=pulse input.bc
+   ./build/bin/lotus-check --engine=pulse input.bc -v
+   ./build/bin/lotus-check --engine=pulse input.bc --log-level=debug
 
 Programmatic Usage
 ------------------

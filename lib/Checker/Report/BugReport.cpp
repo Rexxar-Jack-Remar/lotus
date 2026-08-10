@@ -175,45 +175,6 @@ void BugReport::append_step(Value *inst, const std::string &tip,
   trigger_steps.push_back(step);
 }
 
-// Helper to escape JSON strings
-static std::string escapeJSON(const std::string &str) {
-  std::string escaped;
-  for (char c : str) {
-    switch (c) {
-    case '"':
-      escaped += "\\\"";
-      break;
-    case '\\':
-      escaped += "\\\\";
-      break;
-    case '\b':
-      escaped += "\\b";
-      break;
-    case '\f':
-      escaped += "\\f";
-      break;
-    case '\n':
-      escaped += "\\n";
-      break;
-    case '\r':
-      escaped += "\\r";
-      break;
-    case '\t':
-      escaped += "\\t";
-      break;
-    default:
-      if (c < 32) {
-        char buf[8];
-        snprintf(buf, sizeof(buf), "\\u%04x", (unsigned char)c);
-        escaped += buf;
-      } else {
-        escaped += c;
-      }
-    }
-  }
-  return escaped;
-}
-
 void BugReport::set_suggestion(const std::string &suggestion) {
   if (!extras) {
     extras = new BugReportExtras();
@@ -350,110 +311,96 @@ size_t BugReport::compute_hash(bool use_trace) const {
   return hash;
 }
 
-void BugReport::export_json(raw_ostream &OS) const {
-  OS << "    {\n";
-  OS << "      \"Dominated\": " << (dominated ? "true" : "false") << ",\n";
-  OS << "      \"Valid\": " << (valid ? "true" : "false") << ",\n";
-  OS << "      \"Score\": " << conf_score << ",\n";
-  OS << "      \"Session\": " << session << ",\n";
+cJSON *BugReport::toJson() const {
+  cJSON *report = cJSON_CreateObject();
+  if (!report) {
+    return nullptr;
+  }
 
-  // Export extras if available
+  cJSON_AddBoolToObject(report, "Dominated", dominated);
+  cJSON_AddBoolToObject(report, "Valid", valid);
+  cJSON_AddNumberToObject(report, "Score", conf_score);
+  cJSON_AddNumberToObject(report, "Session", session);
+
   if (extras) {
     if (!extras->suggestion.empty()) {
-      OS << "      \"Suggestion\": \"" << escapeJSON(extras->suggestion)
-         << "\",\n";
+      cJSON_AddStringToObject(report, "Suggestion", extras->suggestion.c_str());
     }
     if (!extras->metadata.empty()) {
-      OS << "      \"Metadata\": {\n";
-      bool first = true;
+      cJSON *metadata = cJSON_AddObjectToObject(report, "Metadata");
       for (const auto &pair : extras->metadata) {
-        if (!first)
-          OS << ",\n";
-        first = false;
-        OS << "        \"" << escapeJSON(pair.first) << "\": \""
-           << escapeJSON(pair.second) << "\"";
+        cJSON_AddStringToObject(metadata, pair.first.c_str(),
+                                pair.second.c_str());
       }
-      OS << "\n      },\n";
     }
   }
 
-  OS << "      \"DiagSteps\": [\n";
-
-  for (size_t i = 0; i < trigger_steps.size(); ++i) {
-    const BugDiagStep *step = trigger_steps[i];
-    OS << "        {\n";
+  cJSON *diagSteps = cJSON_AddArrayToObject(report, "DiagSteps");
+  for (const BugDiagStep *step : trigger_steps) {
+    if (!step) {
+      continue;
+    }
+    cJSON *diagStep = cJSON_CreateObject();
+    cJSON_AddItemToArray(diagSteps, diagStep);
 
     if (!step->src_file.empty()) {
-      OS << "          \"File\": \"" << step->src_file << "\",\n";
-      OS << "          \"Line\": " << step->src_line << ",\n";
+      cJSON_AddStringToObject(diagStep, "File", step->src_file.c_str());
+      cJSON_AddNumberToObject(diagStep, "Line", step->src_line);
       if (step->src_column > 0) {
-        OS << "          \"Column\": " << step->src_column << ",\n";
+        cJSON_AddNumberToObject(diagStep, "Column", step->src_column);
       }
     }
 
     if (!step->func_name.empty()) {
-      OS << "          \"Function\": \"" << escapeJSON(step->func_name)
-         << "\",\n";
+      cJSON_AddStringToObject(diagStep, "Function", step->func_name.c_str());
     }
 
     if (!step->var_name.empty()) {
-      OS << "          \"Variable\": \"" << escapeJSON(step->var_name)
-         << "\",\n";
+      cJSON_AddStringToObject(diagStep, "Variable", step->var_name.c_str());
     }
 
     if (!step->type_name.empty()) {
-      OS << "          \"Type\": \"" << escapeJSON(step->type_name) << "\",\n";
+      cJSON_AddStringToObject(diagStep, "Type", step->type_name.c_str());
     }
 
     if (!step->source_code.empty()) {
-      OS << "          \"SourceCode\": \"" << escapeJSON(step->source_code)
-         << "\",\n";
+      cJSON_AddStringToObject(diagStep, "SourceCode",
+                              step->source_code.c_str());
     }
 
     if (!step->llvm_ir.empty()) {
-      OS << "          \"LLVM_IR\": \"" << escapeJSON(step->llvm_ir) << "\",\n";
+      cJSON_AddStringToObject(diagStep, "LLVM_IR", step->llvm_ir.c_str());
     }
 
-    // Export new fields
     if (step->trace_level > 0) {
-      OS << "          \"TraceLevel\": " << step->trace_level << ",\n";
+      cJSON_AddNumberToObject(diagStep, "TraceLevel", step->trace_level);
     }
 
     if (!step->node_tags.empty()) {
-      OS << "          \"NodeTags\": [";
-      for (size_t j = 0; j < step->node_tags.size(); ++j) {
-        if (j > 0)
-          OS << ", ";
-        OS << "\"" << nodeTagToString(step->node_tags[j]) << "\"";
+      cJSON *nodeTags = cJSON_AddArrayToObject(diagStep, "NodeTags");
+      for (NodeTag tag : step->node_tags) {
+        std::string tagName = nodeTagToString(tag);
+        cJSON_AddItemToArray(nodeTags, cJSON_CreateString(tagName.c_str()));
       }
-      OS << "],\n";
     }
 
     if (!step->access.empty()) {
-      OS << "          \"Access\": \"" << escapeJSON(step->access) << "\",\n";
+      cJSON_AddStringToObject(diagStep, "Access", step->access.c_str());
     }
 
     if (step->node_id >= 0) {
-      OS << "          \"NodeID\": " << step->node_id << ",\n";
+      cJSON_AddNumberToObject(diagStep, "NodeID", step->node_id);
     }
 
     std::string renderedMessage = render_step_message(*step);
     if (!renderedMessage.empty()) {
-      OS << "          \"Narrative\": \"" << escapeJSON(renderedMessage)
-         << "\",\n";
+      cJSON_AddStringToObject(diagStep, "Narrative", renderedMessage.c_str());
     }
 
-    OS << "          \"Tip\": \"" << escapeJSON(step->tip) << "\"\n";
-    OS << "        }";
-
-    if (i < trigger_steps.size() - 1) {
-      OS << ",";
-    }
-    OS << "\n";
+    cJSON_AddStringToObject(diagStep, "Tip", step->tip.c_str());
   }
 
-  OS << "      ]\n";
-  OS << "    }";
+  return report;
 }
 
 // Print a formatted bug report with debug information

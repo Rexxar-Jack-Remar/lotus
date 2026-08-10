@@ -13,6 +13,7 @@
 #include <string>
 #include <unordered_set>
 
+#include <llvm/ADT/StringRef.h>
 #include <llvm/IR/Constants.h>
 #include <llvm/IR/GlobalVariable.h>
 #include <llvm/IR/Instructions.h>
@@ -157,6 +158,11 @@ public:
   // Override source/sink detection
   bool is_source(const llvm::Instruction *inst) const override;
   bool is_sink(const llvm::Instruction *inst) const override;
+
+  // Match one configured function name using the same normalization and
+  // demangling rules as source/sink detection.
+  static bool matches_function_name(const llvm::Instruction *inst,
+                                    llvm::StringRef configured_name);
 
   // Add custom source/sink/sanitizer functions
   void add_source_function(const std::string &func_name);

@@ -2,7 +2,7 @@ Symbolic Execution
 ==================
 
 This section documents the top-level symbolic execution engine that backs the
-``lotus-check symex`` checker and other path-sensitive analyses.
+``lotus-check --engine=symex`` checker and other path-sensitive analyses.
 
 **Headers**: ``include/SymbolicExecution/``
 
@@ -10,7 +10,7 @@ This section documents the top-level symbolic execution engine that backs the
 
 **Build target**: ``CanarySymbolicExecution``
 
-**Tool frontend**: ``lotus-check symex`` (see :doc:`../checker/symex`)
+**Tool frontend**: ``lotus-check --engine=symex`` (see :doc:`../checker/symex`)
 
 Overview
 --------
@@ -104,8 +104,8 @@ The engine is invoked through the unified checker frontend:
 
 .. code-block:: bash
 
-   ./build/bin/lotus-check symex input.bc
-   ./build/bin/lotus-check symex input.bc --symex-checkers=null-deref,uaf
+   ./build/bin/lotus-check --engine=symex input.bc
+   ./build/bin/lotus-check --engine=symex input.bc --symex-checkers=null-deref,uaf
 
 For the full list of subcommand options, see :doc:`../checker/symex`.
 
@@ -132,7 +132,7 @@ Focused unit tests live under ``tests/unit/SymbolicExecution`` and build against
 See Also
 --------
 
-* :doc:`../checker/symex` – ``lotus-check symex`` checker frontend
+* :doc:`../checker/symex` – ``lotus-check --engine=symex`` checker frontend
 * :doc:`../ir/gvfg` – Guarded Value-Flow Graph (GVFG) IR
 * :doc:`../solvers/smt` – SMT (Z3) solver backend
 * :doc:`../user_guide/architecture` – Architecture overview

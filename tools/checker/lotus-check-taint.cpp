@@ -5,9 +5,9 @@
  * A command-line tool for running IFDS/IDE interprocedural dataflow analysis
  */
 
-#include "Utils/LLVM/Demangle.h"
 #include "Checker/Tooling/CheckerSubcommands.h"
 #include "CheckerReport.h"
+#include "Utils/LLVM/Demangle.h"
 
 #include <chrono>
 #include <memory>
@@ -15,6 +15,10 @@
 #include <sstream>
 #include <string>
 
+#include <Alias/Infrastructure/AliasAnalysisWrapper/AliasAnalysisWrapper.h>
+#include <Dataflow/IFDS/Analyses/IFDSTaintAnalysis.h>
+#include <Dataflow/IFDS/Core/IFDSFramework.h>
+#include <Dataflow/IFDS/Solver/IFDSSolver.h>
 #include <llvm/ADT/Statistic.h>
 #include <llvm/IR/InstIterator.h>
 #include <llvm/IR/LLVMContext.h>
@@ -28,10 +32,6 @@
 #include <llvm/Support/Path.h>
 #include <llvm/Support/SourceMgr.h>
 #include <llvm/Support/raw_ostream.h>
-#include <Alias/Infrastructure/AliasAnalysisWrapper/AliasAnalysisWrapper.h>
-#include <Dataflow/IFDS/Analyses/IFDSTaintAnalysis.h>
-#include <Dataflow/IFDS/Core/IFDSFramework.h>
-#include <Dataflow/IFDS/Solver/IFDSSolver.h>
 
 // #include <iostream>
 // #include <thread>
@@ -39,44 +39,58 @@
 using namespace llvm;
 using namespace ifds;
 
-static cl::opt<std::string> InputFilename(cl::Positional,
-                                          cl::desc("<input bitcode file>"),
-                                          cl::Required,
-                                          cl::sub(lotus::checker::tooling::taintSubCommand()));
-
-static cl::opt<bool> Verbose("verbose", cl::desc("Enable verbose output"),
-                             cl::init(false),
-                             cl::sub(lotus::checker::tooling::taintSubCommand()));
-
-static cl::opt<int> AnalysisType("analysis",
-                                 cl::desc("Type of analysis to run: 0=taint"),
-                                 cl::init(0),
-                                 cl::sub(lotus::checker::tooling::taintSubCommand()));
-
-static cl::opt<std::string> AliasAnalysisType(
-    "aa",
-    cl::desc(
-        "Alias analysis type: andersen, dyck, cfl-anders, cfl-steens, seadsa, "
-        "allocaa, basic, combined=Andersen(NoCtx)+DyckAA (default: dyck)"),
-    cl::init("dyck"),
-    cl::sub(lotus::checker::tooling::taintSubCommand()));
-
-static cl::opt<bool> ShowResults("show-results",
-                                 cl::desc("Show detailed analysis results"),
-                                 cl::init(true),
-                                 cl::sub(lotus::checker::tooling::taintSubCommand()));
-
-static cl::opt<int>
-    MaxDetailedResults("max-results",
-                       cl::desc("Maximum number of detailed results to show"),
-                       cl::init(10),
-                       cl::sub(lotus::checker::tooling::taintSubCommand()));
+enum class TaintAASelection {
+  Andersen,
+  Dyck,
+  CFLAnders,
+  CFLSteens,
+  SeaDsa,
+  AllocAA,
+  BasicAA,
+  Combined,
+};
 
 static cl::opt<std::string>
-    SourceFunctions("sources",
-                    cl::desc("Comma-separated list of source functions"),
-                    cl::init(""),
-                    cl::sub(lotus::checker::tooling::taintSubCommand()));
+    InputFilename(cl::Positional, cl::desc("<input bitcode file>"),
+                  cl::Required,
+                  cl::sub(lotus::checker::tooling::taintSubCommand()));
+
+static cl::opt<bool>
+    Verbose("verbose", cl::desc("Enable verbose output"), cl::init(false),
+            cl::sub(lotus::checker::tooling::taintSubCommand()));
+
+static cl::opt<int>
+    AnalysisType("analysis", cl::desc("Type of analysis to run: 0=taint"),
+                 cl::init(0),
+                 cl::sub(lotus::checker::tooling::taintSubCommand()));
+
+static cl::opt<TaintAASelection> AliasAnalysisType(
+    "aa", cl::desc("Alias analysis type"),
+    cl::values(
+        clEnumValN(TaintAASelection::Andersen, "andersen", "Andersen analysis"),
+        clEnumValN(TaintAASelection::Dyck, "dyck", "DyckAA (default)"),
+        clEnumValN(TaintAASelection::CFLAnders, "cfl-anders", "CFL-Anders"),
+        clEnumValN(TaintAASelection::CFLSteens, "cfl-steens", "CFL-Steens"),
+        clEnumValN(TaintAASelection::SeaDsa, "seadsa", "SeaDsa"),
+        clEnumValN(TaintAASelection::AllocAA, "allocaa", "Allocation-site AA"),
+        clEnumValN(TaintAASelection::BasicAA, "basic", "LLVM BasicAA"),
+        clEnumValN(TaintAASelection::Combined, "combined",
+                   "Andersen (context-insensitive) and DyckAA")),
+    cl::init(TaintAASelection::Dyck),
+    cl::sub(lotus::checker::tooling::taintSubCommand()));
+
+static cl::opt<bool>
+    ShowResults("show-results", cl::desc("Show detailed analysis results"),
+                cl::init(true),
+                cl::sub(lotus::checker::tooling::taintSubCommand()));
+
+static cl::opt<int> MaxDetailedResults(
+    "max-results", cl::desc("Maximum number of detailed results to show"),
+    cl::init(10), cl::sub(lotus::checker::tooling::taintSubCommand()));
+
+static cl::opt<std::string> SourceFunctions(
+    "sources", cl::desc("Comma-separated list of source functions"),
+    cl::init(""), cl::sub(lotus::checker::tooling::taintSubCommand()));
 
 static cl::opt<std::string>
     SinkFunctions("sinks", cl::desc("Comma-separated list of sink functions"),
@@ -93,13 +107,12 @@ static cl::opt<bool>
 static cl::opt<std::string> ExpectedFile(
     "expected",
     cl::desc("Path to .expected file for micro benchmark evaluation"),
-    cl::init(""),
-    cl::sub(lotus::checker::tooling::taintSubCommand()));
+    cl::init(""), cl::sub(lotus::checker::tooling::taintSubCommand()));
 
-static cl::opt<bool> PrintStats("print-stats",
-                                cl::desc("Print LLVM statistics"),
-                                cl::init(false),
-                                cl::sub(lotus::checker::tooling::taintSubCommand()));
+static cl::opt<bool>
+    PrintStats("print-stats", cl::desc("Print LLVM statistics"),
+               cl::init(false),
+               cl::sub(lotus::checker::tooling::taintSubCommand()));
 
 // Helper function to parse comma-separated function names
 std::vector<std::string> parseFunctionList(const std::string &input) {
@@ -181,16 +194,15 @@ collectDetectedFlows(const TaintAnalysis &analysis,
         continue;
       }
 
-      const auto *directSource =
-          dyn_cast_or_null<CallBase>(fact.get_source());
+      const auto *directSource = dyn_cast_or_null<CallBase>(fact.get_source());
       if (directSource && directSource->getCalledFunction()) {
         flows.emplace(directSource->getCalledFunction()->getName().str(),
                       sinkCall->getCalledFunction()->getName().str());
         continue;
       }
 
-      auto path = analysis.trace_taint_sources_summary_based(
-          solver, sinkCall, fact);
+      auto path =
+          analysis.trace_taint_sources_summary_based(solver, sinkCall, fact);
       for (const Instruction *sourceInst : path.sources) {
         const auto *sourceCall = dyn_cast_or_null<CallBase>(sourceInst);
         if (sourceCall && sourceCall->getCalledFunction()) {
@@ -212,14 +224,12 @@ static void evaluateMicroBenchmark(const std::set<TaintFlow> &expected,
   }
   const size_t falsePositives = detected.size() - truePositives;
   const size_t falseNegatives = expected.size() - truePositives;
-  const double precision = detected.empty()
-                               ? (expected.empty() ? 1.0 : 0.0)
-                               : static_cast<double>(truePositives) /
-                                     detected.size();
-  const double recall = expected.empty()
-                            ? 1.0
-                            : static_cast<double>(truePositives) /
-                                  expected.size();
+  const double precision =
+      detected.empty() ? (expected.empty() ? 1.0 : 0.0)
+                       : static_cast<double>(truePositives) / detected.size();
+  const double recall =
+      expected.empty() ? 1.0
+                       : static_cast<double>(truePositives) / expected.size();
   const double f1 = precision + recall == 0.0
                         ? 0.0
                         : 2.0 * precision * recall / (precision + recall);
@@ -287,12 +297,56 @@ static void dumpSourceSinkMatches(const llvm::Module &module,
      << sink_calls << " sinks\n";
 }
 
-// Helper function to parse alias analysis configuration from string
-lotus::AAConfig parseAliasAnalysisConfig(const std::string &aaTypeStr) {
-  return lotus::parseAAConfigFromString(aaTypeStr, lotus::AAConfig::DyckAA());
+static bool validateConfiguredFunctions(const llvm::Module &module,
+                                        ArrayRef<std::string> names,
+                                        StringRef kind) {
+  bool valid = true;
+  for (const std::string &name : names) {
+    size_t matches = 0;
+    for (const Function &function : module) {
+      for (const Instruction &inst : instructions(function)) {
+        if (TaintAnalysis::matches_function_name(&inst, name)) {
+          ++matches;
+        }
+      }
+    }
+    if (matches == 0) {
+      errs() << "error: " << kind << " function '" << name
+             << "' matched 0 call sites\n";
+      valid = false;
+    }
+  }
+  return valid;
+}
+
+static lotus::AAConfig getAliasAnalysisConfig(TaintAASelection selection) {
+  switch (selection) {
+  case TaintAASelection::Andersen:
+    return lotus::AAConfig::SparrowAA_NoCtx();
+  case TaintAASelection::Dyck:
+    return lotus::AAConfig::DyckAA();
+  case TaintAASelection::CFLAnders:
+    return lotus::AAConfig::CFLAnders();
+  case TaintAASelection::CFLSteens:
+    return lotus::AAConfig::CFLSteens();
+  case TaintAASelection::SeaDsa:
+    return lotus::AAConfig::SeaDsa();
+  case TaintAASelection::AllocAA:
+    return lotus::AAConfig::AllocAA();
+  case TaintAASelection::BasicAA:
+    return lotus::AAConfig::BasicAA();
+  case TaintAASelection::Combined:
+    return lotus::AAConfig::Combined();
+  }
+  llvm_unreachable("invalid taint alias analysis selection");
 }
 
 int runTaintCheckerTool(const char *argv0) {
+  if (MaxDetailedResults < 0) {
+    errs() << "error: --max-results must be non-negative\n";
+    return lotus::checker::tooling::EXIT_ERROR;
+  }
+
   // Enable statistics collection if requested
   if (PrintStats) {
     llvm::EnableStatistics();
@@ -314,9 +368,28 @@ int runTaintCheckerTool(const char *argv0) {
     outs() << "Functions in module: " << M->size() << "\n";
   }
 
+  if (AnalysisType != 0) {
+    errs() << "error: unsupported taint analysis type: " << AnalysisType
+           << "\n";
+    return lotus::checker::tooling::EXIT_ERROR;
+  }
+
+  auto sources = parseFunctionList(SourceFunctions);
+  auto sinks = parseFunctionList(SinkFunctions);
+  if (MicroBench) {
+    sources.push_back("source");
+    sinks.push_back("sink");
+  }
+
+  const bool sourcesValid = validateConfiguredFunctions(*M, sources, "source");
+  const bool sinksValid = validateConfiguredFunctions(*M, sinks, "sink");
+  if (!sourcesValid || !sinksValid) {
+    return lotus::checker::tooling::EXIT_ERROR;
+  }
+
   // Set up alias analysis wrapper
   lotus::AAConfig aaConfig =
-      parseAliasAnalysisConfig(AliasAnalysisType.getValue());
+      getAliasAnalysisConfig(AliasAnalysisType.getValue());
   auto aliasWrapper =
       std::make_unique<lotus::AliasAnalysisWrapper>(*M, aaConfig);
 
@@ -326,7 +399,8 @@ int runTaintCheckerTool(const char *argv0) {
   }
 
   if (!aliasWrapper->isInitialized()) {
-    errs() << "Warning: Alias analysis failed to initialize properly\n";
+    errs() << "error: alias analysis failed to initialize\n";
+    return lotus::checker::tooling::EXIT_ERROR;
   }
 
   // Run the selected analysis
@@ -336,15 +410,6 @@ int runTaintCheckerTool(const char *argv0) {
       outs() << "Running interprocedural taint analysis...\n";
 
       TaintAnalysis taintAnalysis;
-
-      // Set up custom sources and sinks if provided
-      auto sources = parseFunctionList(SourceFunctions);
-      auto sinks = parseFunctionList(SinkFunctions);
-
-      if (MicroBench) {
-        sources.push_back("source");
-        sinks.push_back("sink");
-      }
 
       for (const auto &source : sources) {
         taintAnalysis.add_source_function(source);
@@ -396,20 +461,17 @@ int runTaintCheckerTool(const char *argv0) {
         }
         auto expectedOr = loadExpectedFlows(expectedPath);
         if (!expectedOr) {
-          errs() << "error: could not read expected flows from "
-                 << expectedPath << ": " << expectedOr.getError().message()
-                 << "\n";
+          errs() << "error: could not read expected flows from " << expectedPath
+                 << ": " << expectedOr.getError().message() << "\n";
           return lotus::checker::tooling::EXIT_ERROR;
         }
-        evaluateMicroBenchmark(*expectedOr,
-                               collectDetectedFlows(taintAnalysis, solver),
-                               outs());
+        evaluateMicroBenchmark(
+            *expectedOr, collectDetectedFlows(taintAnalysis, solver), outs());
       }
       break;
     }
     default:
-      errs() << "Unknown analysis type\n";
-      return lotus::checker::tooling::EXIT_ERROR;
+      llvm_unreachable("analysis type validated before dispatch");
     }
 
     outs() << "Analysis completed successfully.\n";

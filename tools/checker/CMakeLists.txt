@@ -71,33 +71,35 @@ if(LOTUS_BUILD_TESTS)
 
   add_checker_cli_test(checker_cli_ae_defaults_include_mem_leak 0
                        "Running memory leak checker"
-                       ae ${CHECKER_CLI_MINIMAL})
+                       --engine=ae ${CHECKER_CLI_MINIMAL})
   foreach(detector IN ITEMS df leak uaf)
     add_checker_cli_test(checker_cli_fitx_${detector}_selection 0
                          "Detector: ${detector}"
-                         fitx --detector=${detector} ${CHECKER_CLI_MINIMAL})
+                         --engine=fitx --detector=${detector}
+                         ${CHECKER_CLI_MINIMAL})
   endforeach()
   add_checker_cli_test(checker_cli_fitx_rejects_unknown_detector 2
                        "unknown FiTx detector"
-                       fitx --detector=foobar ${CHECKER_CLI_MINIMAL})
+                       --engine=fitx --detector=foobar ${CHECKER_CLI_MINIMAL})
   add_checker_cli_test(checker_cli_concur_rejects_substring_check 2
                        "unknown concurrency check: raceXYZ"
-                       concur --checks=raceXYZ ${CHECKER_CLI_MINIMAL})
+                       --engine=concur --checks=raceXYZ ${CHECKER_CLI_MINIMAL})
   add_checker_cli_test(checker_cli_taint_micro_bench_evaluates 0
                        "TP: 1  FP: 0  FN: 0"
-                       taint --micro-bench
+                       --engine=taint --micro-bench
                        --expected=${PROJECT_SOURCE_DIR}/tests/checker_cli/taint.expected
                        ${CHECKER_CLI_TAINT})
   add_checker_cli_test(checker_cli_taint_trims_function_lists 0
                        "\\[source\\] source"
-                       taint --verbose "--sources=unused, source"
+                       --engine=taint --verbose "--sources=source, source"
                        --sinks=sink ${CHECKER_CLI_TAINT})
   add_checker_cli_test(checker_cli_fail_on_findings 1
                        "Memory Leak"
-                       ae --mem-leak --fail-on-findings ${CHECKER_CLI_AE_LEAK})
+                       --engine=ae --mem-leak --fail-on-findings
+                       ${CHECKER_CLI_AE_LEAK})
   add_checker_cli_test(checker_cli_report_io_error 2
                        "Error writing JSON report"
-                       fitx --detector=uaf
+                       --engine=fitx --detector=uaf
                        --report-json=${CMAKE_CURRENT_BINARY_DIR}/missing/report.json
                        ${CHECKER_CLI_MINIMAL})
   add_test(
@@ -105,9 +107,9 @@ if(LOTUS_BUILD_TESTS)
     COMMAND ${CMAKE_COMMAND}
             -DTOOL=$<TARGET_FILE:lotus-check>
             -DEXPECTED_RESULT=0
-            -DEXPECTED_OUTPUT=declarative
+            -DEXPECTED_OUTPUT=taint.getenv-system
             -DWORKING_DIRECTORY=/tmp
-            -DCLI_ARG1=generic
+            -DCLI_ARG1=--engine=generic
             -DCLI_ARG2=--list-checkers
             -P ${CHECKER_CLI_TEST_SCRIPT})
 endif()

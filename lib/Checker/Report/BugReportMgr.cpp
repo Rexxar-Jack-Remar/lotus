@@ -63,7 +63,8 @@ bool reportsEquivalent(const BugReport *a, const BugReport *b, bool useTrace) {
     return true;
   }
 
-  return sameStepIdentity(findPreferredStep(a, true), findPreferredStep(b, true));
+  return sameStepIdentity(findPreferredStep(a, true),
+                          findPreferredStep(b, true));
 }
 
 bool shouldIncludeReport(const BugReport *report, int minScore,
@@ -394,24 +395,20 @@ int BugReportMgr::get_src_file_id(llvm::StringRef src_file) {
   return id;
 }
 
-void BugReportMgr::generate_json_report(llvm::raw_ostream &OS,
-                                        const ReportFilter &filter) const {
-  OS << "{\n";
-  OS << "  \"TotalBugs\": " << get_filtered_report_count(filter) << ",\n";
-
-  // Source files array
-  OS << "  \"SrcFiles\": [\n";
-  for (size_t i = 0; i < src_files.size(); ++i) {
-    OS << "    \"" << src_files[i] << "\"";
-    if (i < src_files.size() - 1)
-      OS << ",";
-    OS << "\n";
+cJSON *BugReportMgr::toJson(const ReportFilter &filter) const {
+  cJSON *root = cJSON_CreateObject();
+  if (!root) {
+    return nullptr;
   }
-  OS << "  ],\n";
 
-  // Bug types and reports
-  OS << "  \"BugTypes\": [\n";
-  bool first_type = true;
+  cJSON_AddNumberToObject(root, "TotalBugs", get_filtered_report_count(filter));
+
+  cJSON *srcFiles = cJSON_AddArrayToObject(root, "SrcFiles");
+  for (const std::string &srcFile : src_files) {
+    cJSON_AddItemToArray(srcFiles, cJSON_CreateString(srcFile.c_str()));
+  }
+
+  cJSON *bugTypes = cJSON_AddArrayToObject(root, "BugTypes");
 
   for (size_t ty_id = 0; ty_id < bug_types.size(); ++ty_id) {
     const BugType &bt = bug_types[ty_id];
@@ -424,8 +421,7 @@ void BugReportMgr::generate_json_report(llvm::raw_ostream &OS,
     // Filter by score
     std::vector<const BugReport *> filtered;
     for (const BugReport *report : *bt_reports) {
-      if (shouldIncludeReport(report, filter.minScore,
-                              filter.includeInvalid)) {
+      if (shouldIncludeReport(report, filter.minScore, filter.includeInvalid)) {
         filtered.push_back(report);
       }
     }
@@ -434,34 +430,42 @@ void BugReportMgr::generate_json_report(llvm::raw_ostream &OS,
       continue;
     }
 
-    if (!first_type)
-      OS << ",\n";
-    first_type = false;
+    cJSON *bugType = cJSON_CreateObject();
+    cJSON_AddItemToArray(bugTypes, bugType);
+    cJSON_AddStringToObject(bugType, "Name", bt.bug_name.str().c_str());
+    cJSON_AddStringToObject(bugType, "Description", bt.desc.str().c_str());
+    cJSON_AddStringToObject(bugType, "Importance",
+                            BugDescription::to_string(bt.importance).c_str());
+    cJSON_AddStringToObject(
+        bugType, "Classification",
+        BugDescription::to_string(bt.classification).c_str());
+    cJSON_AddNumberToObject(bugType, "TotalReports", filtered.size());
 
-    OS << "    {\n";
-    OS << "      \"Name\": \"" << bt.bug_name << "\",\n";
-    OS << "      \"Description\": \"" << bt.desc << "\",\n";
-    OS << "      \"Importance\": \"" << BugDescription::to_string(bt.importance)
-       << "\",\n";
-    OS << "      \"Classification\": \""
-       << BugDescription::to_string(bt.classification) << "\",\n";
-    OS << "      \"TotalReports\": " << filtered.size() << ",\n";
-    OS << "      \"Reports\": [\n";
-
-    for (size_t i = 0; i < filtered.size(); ++i) {
-      filtered[i]->export_json(OS);
-      if (i < filtered.size() - 1) {
-        OS << ",";
+    cJSON *jsonReports = cJSON_AddArrayToObject(bugType, "Reports");
+    for (const BugReport *report : filtered) {
+      cJSON *jsonReport = report->toJson();
+      if (jsonReport) {
+        cJSON_AddItemToArray(jsonReports, jsonReport);
       }
-      OS << "\n";
     }
-
-    OS << "      ]\n";
-    OS << "    }";
   }
 
-  OS << "\n  ]\n";
-  OS << "}\n";
+  return root;
+}
+
+void BugReportMgr::generate_json_report(llvm::raw_ostream &OS,
+                                        const ReportFilter &filter) const {
+  cJSON *root = toJson(filter);
+  if (!root) {
+    return;
+  }
+
+  char *json = cJSON_Print(root);
+  if (json) {
+    OS << json << "\n";
+    cJSON_free(json);
+  }
+  cJSON_Delete(root);
 }
 
 void BugReportMgr::print_summary(llvm::raw_ostream &OS) const {
@@ -499,8 +503,7 @@ void BugReportMgr::print_detailed_reports(llvm::raw_ostream &OS, bool verbose,
       continue;
     }
     for (const BugReport *report : *reportList) {
-      if (shouldIncludeReport(report, filter.minScore,
-                              filter.includeInvalid)) {
+      if (shouldIncludeReport(report, filter.minScore, filter.includeInvalid)) {
         ++total;
       }
     }
@@ -596,8 +599,7 @@ int BugReportMgr::get_filtered_report_count(const ReportFilter &filter) const {
   int total = 0;
   for (const auto &pair : reports) {
     for (const BugReport *report : pair.second) {
-      if (shouldIncludeReport(report, filter.minScore,
-                              filter.includeInvalid)) {
+      if (shouldIncludeReport(report, filter.minScore, filter.includeInvalid)) {
         ++total;
       }
     }
@@ -632,8 +634,7 @@ void BugReportMgr::generate_sarif_report(llvm::raw_ostream &OS,
     std::string category = BugDescription::to_string(bugType.classification);
 
     for (const BugReport *report : *reportList) {
-      if (!shouldIncludeReport(report, filter.minScore,
-                               filter.includeInvalid))
+      if (!shouldIncludeReport(report, filter.minScore, filter.includeInvalid))
         continue;
 
       const auto &steps = report->get_steps();

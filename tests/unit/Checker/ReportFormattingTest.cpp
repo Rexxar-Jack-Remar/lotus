@@ -4,8 +4,8 @@
 #include <string>
 #include <vector>
 
-#include <llvm/Support/raw_ostream.h>
 #include <gtest/gtest.h>
+#include <llvm/Support/raw_ostream.h>
 
 namespace {
 
@@ -41,18 +41,89 @@ TEST(ReportFormattingTest, JsonExportIncludesNarrativeField) {
   mgr.generate_json_report(os, {});
   os.flush();
 
-  EXPECT_NE(json.find("\"Narrative\": \"Enter function foo. Access path. "
-                      "Pointer escapes into callee\""),
-            std::string::npos);
-  EXPECT_NE(json.find("\"Narrative\": \"Access memory. Dereference after free\""),
-            std::string::npos);
+  cJSON *root = cJSON_Parse(json.c_str());
+  ASSERT_NE(root, nullptr) << json;
+  cJSON *bugTypes = cJSON_GetObjectItem(root, "BugTypes");
+  cJSON *reports =
+      cJSON_GetObjectItem(cJSON_GetArrayItem(bugTypes, 0), "Reports");
+  cJSON *steps =
+      cJSON_GetObjectItem(cJSON_GetArrayItem(reports, 0), "DiagSteps");
+  EXPECT_STREQ(cJSON_GetObjectItem(cJSON_GetArrayItem(steps, 0), "Narrative")
+                   ->valuestring,
+               "Enter function foo. Access path. Pointer escapes into callee");
+  EXPECT_STREQ(cJSON_GetObjectItem(cJSON_GetArrayItem(steps, 1), "Narrative")
+                   ->valuestring,
+               "Access memory. Dereference after free");
+  cJSON_Delete(root);
+}
+
+TEST(ReportFormattingTest, JsonExportUsesCJsonForAllEscapingAndStructure) {
+  BugReportMgr mgr;
+  int bugType = mgr.register_bug_type("Quoted \"Bug\"", BugDescription::BI_HIGH,
+                                      BugDescription::BC_SECURITY,
+                                      "line one\nline two\\tail");
+
+  auto *report = new BugReport(bugType);
+  report->set_suggestion("replace \"value\"\nnext");
+  report->add_metadata("key\"with\ncontrol", "value\\with\ttab");
+  auto *step = makeStep("dir/quoted\"file.c", 12, "tip\nwith \"quotes\"");
+  step->source_code = "char *s = \"text\";";
+  report->append_step(step);
+  ASSERT_TRUE(mgr.insert_report(bugType, report, false));
+
+  std::string json;
+  llvm::raw_string_ostream os(json);
+  mgr.generate_json_report(os, {});
+  os.flush();
+
+  cJSON *root = cJSON_Parse(json.c_str());
+  ASSERT_NE(root, nullptr) << json;
+  EXPECT_TRUE(cJSON_IsObject(root));
+  EXPECT_EQ(cJSON_GetObjectItem(root, "TotalBugs")->valueint, 1);
+
+  cJSON *srcFiles = cJSON_GetObjectItem(root, "SrcFiles");
+  ASSERT_TRUE(cJSON_IsArray(srcFiles));
+  ASSERT_EQ(cJSON_GetArraySize(srcFiles), 1);
+  EXPECT_STREQ(cJSON_GetArrayItem(srcFiles, 0)->valuestring,
+               "dir/quoted\"file.c");
+
+  cJSON *bugTypes = cJSON_GetObjectItem(root, "BugTypes");
+  ASSERT_TRUE(cJSON_IsArray(bugTypes));
+  cJSON *jsonBugType = cJSON_GetArrayItem(bugTypes, 0);
+  EXPECT_STREQ(cJSON_GetObjectItem(jsonBugType, "Name")->valuestring,
+               "Quoted \"Bug\"");
+  EXPECT_STREQ(cJSON_GetObjectItem(jsonBugType, "Description")->valuestring,
+               "line one\nline two\\tail");
+
+  cJSON *reports = cJSON_GetObjectItem(jsonBugType, "Reports");
+  cJSON *jsonReport = cJSON_GetArrayItem(reports, 0);
+  EXPECT_TRUE(cJSON_IsBool(cJSON_GetObjectItem(jsonReport, "Dominated")));
+  EXPECT_TRUE(cJSON_IsBool(cJSON_GetObjectItem(jsonReport, "Valid")));
+  EXPECT_STREQ(cJSON_GetObjectItem(jsonReport, "Suggestion")->valuestring,
+               "replace \"value\"\nnext");
+
+  cJSON *metadata = cJSON_GetObjectItem(jsonReport, "Metadata");
+  EXPECT_STREQ(cJSON_GetObjectItemCaseSensitive(metadata, "key\"with\ncontrol")
+                   ->valuestring,
+               "value\\with\ttab");
+
+  cJSON *steps = cJSON_GetObjectItem(jsonReport, "DiagSteps");
+  cJSON *jsonStep = cJSON_GetArrayItem(steps, 0);
+  EXPECT_STREQ(cJSON_GetObjectItem(jsonStep, "File")->valuestring,
+               "dir/quoted\"file.c");
+  EXPECT_STREQ(cJSON_GetObjectItem(jsonStep, "Tip")->valuestring,
+               "tip\nwith \"quotes\"");
+  EXPECT_STREQ(cJSON_GetObjectItem(jsonStep, "SourceCode")->valuestring,
+               "char *s = \"text\";");
+
+  cJSON_Delete(root);
 }
 
 TEST(ReportFormattingTest, SarifUsesRenderedNarrativeMessages) {
   BugReportMgr mgr;
-  int bugType = mgr.register_bug_type(
-      "Null Pointer Dereference", BugDescription::BI_HIGH,
-      BugDescription::BC_SECURITY, "CWE-476");
+  int bugType =
+      mgr.register_bug_type("Null Pointer Dereference", BugDescription::BI_HIGH,
+                            BugDescription::BC_SECURITY, "CWE-476");
 
   auto *report = new BugReport(bugType);
   report->append_step(makeStep("sample.c", 4, "Pointer may be null", "callee",
@@ -104,10 +175,21 @@ TEST(ReportFormattingTest, JsonTotalsUseTheSameFilterAsReports) {
   mgr.generate_json_report(os, BugReportMgr::ReportFilter{80, false});
   os.flush();
 
-  EXPECT_NE(json.find("\"TotalBugs\": 1"), std::string::npos);
-  EXPECT_NE(json.find("\"TotalReports\": 1"), std::string::npos);
-  EXPECT_EQ(json.find("low score"), std::string::npos);
-  EXPECT_EQ(json.find("invalid"), std::string::npos);
+  cJSON *root = cJSON_Parse(json.c_str());
+  ASSERT_NE(root, nullptr) << json;
+  EXPECT_EQ(cJSON_GetObjectItem(root, "TotalBugs")->valueint, 1);
+  cJSON *bugTypes = cJSON_GetObjectItem(root, "BugTypes");
+  ASSERT_EQ(cJSON_GetArraySize(bugTypes), 1);
+  cJSON *jsonBugType = cJSON_GetArrayItem(bugTypes, 0);
+  EXPECT_EQ(cJSON_GetObjectItem(jsonBugType, "TotalReports")->valueint, 1);
+  cJSON *reports = cJSON_GetObjectItem(jsonBugType, "Reports");
+  ASSERT_EQ(cJSON_GetArraySize(reports), 1);
+  cJSON *steps =
+      cJSON_GetObjectItem(cJSON_GetArrayItem(reports, 0), "DiagSteps");
+  EXPECT_STREQ(
+      cJSON_GetObjectItem(cJSON_GetArrayItem(steps, 0), "Tip")->valuestring,
+      "included");
+  cJSON_Delete(root);
 }
 
 TEST(ReportFormattingTest, ExactTraceDedupKeepsDistinctPathsToSameEndpoint) {

@@ -1,7 +1,5 @@
 #pragma once
 
-#include <string>
-
 class BugReportMgr;
 
 namespace lotus::checker::tooling {
@@ -13,7 +11,6 @@ constexpr int EXIT_ERROR = 2;
 struct CheckerReportOptions {
   bool verbose = false;
   int minScore = 0;
-  std::string jsonOutputOverride;
 };
 
 int emitCheckerReports(BugReportMgr &manager,

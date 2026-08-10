@@ -29,8 +29,7 @@ int emitCheckerReports(BugReportMgr &manager,
 
   manager.deduplicate_reports(BugReportMgr::DedupMode::ExactTrace);
   const BugReportMgr::ReportFilter filter{
-      std::max(options.minScore,
-               report_options::MinConfidenceScore.getValue()),
+      std::max(options.minScore, report_options::MinConfidenceScore.getValue()),
       report_options::ShowInvalidReports.getValue()};
 
   manager.print_detailed_reports(outs(), options.verbose, filter);
@@ -47,24 +46,21 @@ int emitCheckerReports(BugReportMgr &manager,
       errs() << "Error writing fuzz targets: " << errorMessage << "\n";
       return EXIT_ERROR;
     }
-    outs() << "\nFuzz targets written to: "
-           << report_options::TargetsOutputFile << " (" << targets.size()
-           << " targets)\n";
+    outs() << "\nFuzz targets written to: " << report_options::TargetsOutputFile
+           << " (" << targets.size() << " targets)\n";
   }
 
-  const std::string jsonOutput =
-      !report_options::JsonOutputFile.empty()
-          ? report_options::JsonOutputFile.getValue()
-          : options.jsonOutputOverride;
-  if (!jsonOutput.empty()) {
+  if (!report_options::JsonOutputFile.empty()) {
     std::error_code error;
-    raw_fd_ostream output(jsonOutput, error, sys::fs::OF_None);
+    raw_fd_ostream output(report_options::JsonOutputFile, error,
+                          sys::fs::OF_None);
     if (error) {
       errs() << "Error writing JSON report: " << error.message() << "\n";
       return EXIT_ERROR;
     }
     manager.generate_json_report(output, filter);
-    outs() << "\nJSON report written to: " << jsonOutput << "\n";
+    outs() << "\nJSON report written to: " << report_options::JsonOutputFile
+           << "\n";
   }
 
   if (!report_options::SarifOutputFile.empty()) {
@@ -76,8 +72,8 @@ int emitCheckerReports(BugReportMgr &manager,
       return EXIT_ERROR;
     }
     manager.generate_sarif_report(output, filter);
-    outs() << "\nSARIF report written to: "
-           << report_options::SarifOutputFile << "\n";
+    outs() << "\nSARIF report written to: " << report_options::SarifOutputFile
+           << "\n";
   }
 
   if (report_options::FailOnFindings &&

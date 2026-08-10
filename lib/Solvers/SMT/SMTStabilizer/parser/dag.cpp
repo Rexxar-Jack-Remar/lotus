@@ -210,9 +210,9 @@ void dumpSMTLIB2_streaming(const std::shared_ptr<DAGNode> &root,
             case NODE_KIND::NT_CONST:
                 if (node->getName() == "(fp_bit_representation)" &&
                     node->getChildrenSize() == 3) {
-                    auto sign = node->getChild(0).get();
-                    auto exp = node->getChild(1).get();
-                    auto mant = node->getChild(2).get();
+                    auto *sign = node->getChild(0).get();
+                    auto *exp = node->getChild(1).get();
+                    auto *mant = node->getChild(2).get();
                     out << "(fp ";
                     work_stack.emplace_back(nullptr, 2);  // )
                     work_stack.emplace_back(mant, 0);     // mant
@@ -250,8 +250,8 @@ void dumpSMTLIB2_streaming(const std::shared_ptr<DAGNode> &root,
             case NODE_KIND::NT_SUB:
             case NODE_KIND::NT_DIV_REAL: {
                 if (node->getChildrenSize() == 2) {
-                    auto child0 = node->getChild(0).get();
-                    auto child1 = node->getChild(1).get();
+                    auto *child0 = node->getChild(0).get();
+                    auto *child1 = node->getChild(1).get();
 
                     const char *op = kind_cache[kind];
                     out << "(" << op << " ";
@@ -282,7 +282,7 @@ void dumpSMTLIB2_streaming(const std::shared_ptr<DAGNode> &root,
 
                 // Push children in reverse order, each preceded by a space
                 for (int i = children.size() - 1; i >= 0; i--) {
-                    auto child = children[i].get();
+                    auto *child = children[i].get();
                     work_stack.emplace_back(child, 0);
                     work_stack.emplace_back(nullptr, 1);  // space before child
                 }
@@ -290,9 +290,9 @@ void dumpSMTLIB2_streaming(const std::shared_ptr<DAGNode> &root,
             }
 
             case NODE_KIND::NT_REG_LOOP: {
-                auto child0 = node->getChild(0).get();
-                auto child1 = node->getChild(1).get();
-                auto child2 = node->getChild(2).get();
+                auto *child0 = node->getChild(0).get();
+                auto *child1 = node->getChild(1).get();
+                auto *child2 = node->getChild(2).get();
 
                 out << "((_ re.loop ";
 
@@ -308,7 +308,7 @@ void dumpSMTLIB2_streaming(const std::shared_ptr<DAGNode> &root,
             // Unary operations
             case NODE_KIND::NT_NOT:
             case NODE_KIND::NT_NEG: {
-                auto child = node->getChild(0).get();
+                auto *child = node->getChild(0).get();
                 const char *op = kind_cache[kind];
 
                 out << "(" << op << " ";
@@ -319,9 +319,9 @@ void dumpSMTLIB2_streaming(const std::shared_ptr<DAGNode> &root,
 
             // Ternary operations
             case NODE_KIND::NT_ITE: {
-                auto child0 = node->getChild(0).get();
-                auto child1 = node->getChild(1).get();
-                auto child2 = node->getChild(2).get();
+                auto *child0 = node->getChild(0).get();
+                auto *child1 = node->getChild(1).get();
+                auto *child2 = node->getChild(2).get();
 
                 out << "(ite ";
                 work_stack.emplace_back(nullptr, 2);  // )
@@ -335,9 +335,9 @@ void dumpSMTLIB2_streaming(const std::shared_ptr<DAGNode> &root,
 
             // Special processing operations
             case NODE_KIND::NT_BV_EXTRACT: {
-                auto child0 = node->getChild(0).get();
-                auto child1 = node->getChild(1).get();
-                auto child2 = node->getChild(2).get();
+                auto *child0 = node->getChild(0).get();
+                auto *child1 = node->getChild(1).get();
+                auto *child2 = node->getChild(2).get();
 
                 out << "((_ extract ";
                 work_stack.emplace_back(nullptr, 2);  // )
@@ -354,8 +354,8 @@ void dumpSMTLIB2_streaming(const std::shared_ptr<DAGNode> &root,
             case NODE_KIND::NT_BV_ROTATE_LEFT:
             case NODE_KIND::NT_BV_ROTATE_RIGHT:
             case NODE_KIND::NT_INT_TO_BV: {
-                auto child0 = node->getChild(0).get();
-                auto child1 = node->getChild(1).get();
+                auto *child0 = node->getChild(0).get();
+                auto *child1 = node->getChild(1).get();
 
                 out << "((_ " << kindToString(kind) << " ";
                 work_stack.emplace_back(nullptr, 2);  // )
@@ -366,7 +366,7 @@ void dumpSMTLIB2_streaming(const std::shared_ptr<DAGNode> &root,
             }
             // Datatype tester: ((_ is C) t)
             case NODE_KIND::NT_DT_TESTER: {
-                auto child0 = node->getChild(0).get();
+                auto *child0 = node->getChild(0).get();
                 // node->getName() stores constructor symbol C
                 out << "((_ is " << node->getName() << ") ";
                 work_stack.emplace_back(nullptr, 2);  // )
@@ -380,8 +380,8 @@ void dumpSMTLIB2_streaming(const std::shared_ptr<DAGNode> &root,
             }
             // Datatype updater: ((_ update S) t u)
             case NODE_KIND::NT_DT_UPDATER: {
-                auto child0 = node->getChild(0).get();
-                auto child1 = node->getChild(1).get();
+                auto *child0 = node->getChild(0).get();
+                auto *child1 = node->getChild(1).get();
                 // node->getName() stores selector symbol S
                 out << "((_ update " << node->getName() << ") ";
                 work_stack.emplace_back(nullptr, 2);  // )
@@ -392,8 +392,8 @@ void dumpSMTLIB2_streaming(const std::shared_ptr<DAGNode> &root,
             }
             // Tuple select/update/project parameterized forms
             case NODE_KIND::NT_TUPLE_SELECT: {
-                auto t = node->getChild(0).get();
-                auto idx = node->getChild(1).get();
+                auto *t = node->getChild(0).get();
+                auto *idx = node->getChild(1).get();
                 out << "((_ tuple.select ";
                 work_stack.emplace_back(nullptr, 2);  // )
                 work_stack.emplace_back(t, 0);
@@ -402,9 +402,9 @@ void dumpSMTLIB2_streaming(const std::shared_ptr<DAGNode> &root,
                 break;
             }
             case NODE_KIND::NT_TUPLE_UPDATE: {
-                auto t = node->getChild(0).get();
-                auto idx = node->getChild(1).get();
-                auto val = node->getChild(2).get();
+                auto *t = node->getChild(0).get();
+                auto *idx = node->getChild(1).get();
+                auto *val = node->getChild(2).get();
                 out << "((_ tuple.update ";
                 work_stack.emplace_back(nullptr, 2);  // )
                 work_stack.emplace_back(val, 0);
@@ -419,12 +419,12 @@ void dumpSMTLIB2_streaming(const std::shared_ptr<DAGNode> &root,
                 out << "((_ tuple.project ";
                 work_stack.emplace_back(nullptr, 2);  // )
                 // print t then close, but we need to print indices first then node
-                auto t = node->getChild(0).get();
+                auto *t = node->getChild(0).get();
                 work_stack.emplace_back(t, 0);
                 work_stack.emplace_back(nullptr, 3);  // ") "
                 // push indices in reverse with spaces
                 for (int i = static_cast<int>(node->getChildrenSize()) - 1; i >= 1; --i) {
-                    auto idx = node->getChild(i).get();
+                    auto *idx = node->getChild(i).get();
                     work_stack.emplace_back(idx, 0);
                     if (i != 1)
                         work_stack.emplace_back(nullptr, 1);
@@ -517,7 +517,7 @@ void dumpSMTLIB2_streaming(const std::shared_ptr<DAGNode> &root,
             case NODE_KIND::NT_EXISTS: {
                 out << "(" << kindToString(kind) << " (";
                 for (size_t i = 1; i < node->getChildrenSize(); i++) {
-                    auto current_child = node->getChild(i).get();
+                    auto *current_child = node->getChild(i).get();
                     if (i == 1) {
                         out << "(" << current_child->getName() << " "
                             << current_child->getSort()->toString() << ")";
@@ -557,7 +557,7 @@ void dumpSMTLIB2_streaming(const std::shared_ptr<DAGNode> &root,
                     out << "(" << node->getName();
                     work_stack.emplace_back(nullptr, 2);  // )
                     for (int i = node->getChildrenSize() - 1; i >= 1; i--) {
-                        auto current_child = node->getChild(i).get();
+                        auto *current_child = node->getChild(i).get();
                         work_stack.emplace_back(current_child, 0);
                         work_stack.emplace_back(nullptr, 1);  // space
                     }
@@ -575,7 +575,7 @@ void dumpSMTLIB2_streaming(const std::shared_ptr<DAGNode> &root,
                     out << node->getName();
                     work_stack.emplace_back(nullptr, 2);              // )
                     for (int i = children.size() - 1; i >= 0; --i) {  // Start from 0
-                        auto current_child = children[i].get();
+                        auto *current_child = children[i].get();
                         if (current_child->isLetBindVar()) {
                             work_stack.emplace_back(")", 4);  // )
                         }
@@ -615,7 +615,7 @@ void dumpSMTLIB2_streaming(const std::shared_ptr<DAGNode> &root,
                     if (i && children[i]->isLetBindVar()) {
                         work_stack.emplace_back(")", 4);  // )
                     }
-                    auto current_child = children[i].get();
+                    auto *current_child = children[i].get();
                     work_stack.emplace_back(current_child, 0);
                     if (i && current_child->isLetBindVar()) {
                         work_stack.emplace_back("(", 4);  // (
@@ -738,7 +738,7 @@ void dumpSMTLIB2_streaming(const std::shared_ptr<DAGNode> &root,
                     out << "(" << node->getName();
                     work_stack.emplace_back(nullptr, 2);              // )
                     for (int i = children.size() - 1; i >= 0; i--) {  // Start from 0
-                        auto current_child = children[i].get();
+                        auto *current_child = children[i].get();
                         work_stack.emplace_back(current_child, 0);
                         work_stack.emplace_back(nullptr, 1);  // space
                     }
@@ -759,7 +759,7 @@ void dumpSMTLIB2_streaming(const std::shared_ptr<DAGNode> &root,
                     out << "(" << node->getName();
                     work_stack.emplace_back(nullptr, 2);              // )
                     for (int i = children.size() - 1; i >= 1; i--) {  // Start from 1, not 0
-                        auto current_child = children[i].get();
+                        auto *current_child = children[i].get();
                         work_stack.emplace_back(current_child, 0);
                         work_stack.emplace_back(nullptr, 1);  // space
                     }
@@ -780,7 +780,7 @@ void dumpSMTLIB2_streaming(const std::shared_ptr<DAGNode> &root,
                 work_stack.emplace_back(nullptr, 2);  // )
                 const auto &children = node->getChildren();
                 for (int i = children.size() - 1; i >= 0; i--) {
-                    auto current_child = children[i].get();
+                    auto *current_child = children[i].get();
                     work_stack.emplace_back(current_child, 0);
                     work_stack.emplace_back(nullptr, 1);  // space
                 }
@@ -796,7 +796,7 @@ void dumpSMTLIB2_streaming(const std::shared_ptr<DAGNode> &root,
                 work_stack.emplace_back(nullptr, 2);  // )
                 const auto &children = node->getChildren();
                 for (int i = children.size() - 1; i >= 0; i--) {
-                    auto current_child = children[i].get();
+                    auto *current_child = children[i].get();
                     work_stack.emplace_back(current_child, 0);
                     work_stack.emplace_back(nullptr, 1);  // space
                 }
@@ -814,7 +814,7 @@ void dumpSMTLIB2_streaming(const std::shared_ptr<DAGNode> &root,
             case NODE_KIND::NT_FP_IS_POS:
             case NODE_KIND::NT_FP_TO_REAL: {
                 std::string kind_str = kindToString(kind);
-                auto child = node->getChild(0).get();
+                auto *child = node->getChild(0).get();
                 out << "(" << kind_str << " ";
                 work_stack.emplace_back(nullptr, 2);  // )
                 work_stack.emplace_back(child, 0);    // child
@@ -822,8 +822,8 @@ void dumpSMTLIB2_streaming(const std::shared_ptr<DAGNode> &root,
             }
 
             case NODE_KIND::NT_FP_REM: {
-                auto child0 = node->getChild(0).get();
-                auto child1 = node->getChild(1).get();
+                auto *child0 = node->getChild(0).get();
+                auto *child1 = node->getChild(1).get();
                 out << "(fp.rem ";
                 work_stack.emplace_back(nullptr, 2);  // )
                 work_stack.emplace_back(child1, 0);   // child1
@@ -849,7 +849,7 @@ void dumpSMTLIB2_streaming(const std::shared_ptr<DAGNode> &root,
                 work_stack.emplace_back(nullptr, 2);  // )
                 const auto &children = node->getChildren();
                 for (int i = children.size() - 1; i >= 0; i--) {
-                    auto current_child = children[i].get();
+                    auto *current_child = children[i].get();
                     work_stack.emplace_back(current_child, 0);
                     work_stack.emplace_back(nullptr, 1);  // space
                 }
@@ -860,9 +860,9 @@ void dumpSMTLIB2_streaming(const std::shared_ptr<DAGNode> &root,
             case NODE_KIND::NT_FP_TO_SBV: {
                 // Format: ((_ fp.to_ubv size) rm fp) or ((_ fp.to_sbv size) rm fp)
                 std::string kind_str = kindToString(kind);
-                auto rm = node->getChild(0).get();
-                auto fp = node->getChild(1).get();
-                auto size = node->getChild(2).get();
+                auto *rm = node->getChild(0).get();
+                auto *fp = node->getChild(1).get();
+                auto *size = node->getChild(2).get();
                 out << "((_ " << kind_str << " ";
                 work_stack.emplace_back(nullptr, 2);  // )
                 work_stack.emplace_back(fp, 0);       // fp
@@ -874,13 +874,13 @@ void dumpSMTLIB2_streaming(const std::shared_ptr<DAGNode> &root,
             }
 
             case NODE_KIND::NT_FP_TO_FP: {
-                auto eb = node->getChild(0).get();
-                auto sb = node->getChild(1).get();
+                auto *eb = node->getChild(0).get();
+                auto *sb = node->getChild(1).get();
 
                 if (node->getChildrenSize() == 4) {
                     // 4-parameter version: ((_ to_fp eb sb) rm param)
-                    auto rm = node->getChild(2).get();
-                    auto param = node->getChild(3).get();
+                    auto *rm = node->getChild(2).get();
+                    auto *param = node->getChild(3).get();
                     out << "((_ to_fp ";
                     work_stack.emplace_back(nullptr, 2);  // )
                     work_stack.emplace_back(param, 0);    // param
@@ -893,7 +893,7 @@ void dumpSMTLIB2_streaming(const std::shared_ptr<DAGNode> &root,
                 }
                 else if (node->getChildrenSize() == 3) {
                     // 3-parameter version: ((_ to_fp eb sb) param)
-                    auto param = node->getChild(2).get();
+                    auto *param = node->getChild(2).get();
                     out << "((_ to_fp ";
                     work_stack.emplace_back(nullptr, 2);  // )
                     work_stack.emplace_back(param, 0);    // param
@@ -910,10 +910,10 @@ void dumpSMTLIB2_streaming(const std::shared_ptr<DAGNode> &root,
             }
 
             case NODE_KIND::NT_FP_TO_FP_UNSIGNED: {
-                auto eb = node->getChild(0).get();
-                auto sb = node->getChild(1).get();
-                auto rm = node->getChild(2).get();
-                auto param = node->getChild(3).get();
+                auto *eb = node->getChild(0).get();
+                auto *sb = node->getChild(1).get();
+                auto *rm = node->getChild(2).get();
+                auto *param = node->getChild(3).get();
                 out << "((_ to_fp_unsigned ";
                 work_stack.emplace_back(nullptr, 2);  // )
                 work_stack.emplace_back(param, 0);    // param
@@ -927,8 +927,8 @@ void dumpSMTLIB2_streaming(const std::shared_ptr<DAGNode> &root,
             }
 
             case NODE_KIND::NT_ROOT_OBJ: {
-                auto expr = node->getChild(0).get();
-                auto index = node->getChild(1).get();
+                auto *expr = node->getChild(0).get();
+                auto *index = node->getChild(1).get();
                 out << "(root-obj ";
                 work_stack.emplace_back(nullptr, 2);  // )
                 work_stack.emplace_back(index, 0);    // index
@@ -979,7 +979,7 @@ void dumpSMTLIB2_streaming(const std::shared_ptr<DAGNode> &root,
                     out << kind_str;
                 }
                 else if (children.size() == 1) {
-                    auto child = children[0].get();
+                    auto *child = children[0].get();
                     out << "(" << kind_str << " ";
                     work_stack.emplace_back(nullptr, 2);  // )
                     work_stack.emplace_back(child, 0);    // child
@@ -988,7 +988,7 @@ void dumpSMTLIB2_streaming(const std::shared_ptr<DAGNode> &root,
                     out << "(" << kind_str;
                     work_stack.emplace_back(nullptr, 2);  // )
                     for (int i = children.size() - 1; i >= 0; i--) {
-                        auto child = children[i].get();
+                        auto *child = children[i].get();
                         work_stack.emplace_back(child, 0);
                         work_stack.emplace_back(nullptr, 1);  // space
                     }

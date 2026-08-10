@@ -31,8 +31,8 @@
  */
 
 #include "Dataflow/NPA/Solver/Newton/Differential.h"
-#include "Dataflow/NPA/Solver/Newton/Linear/Tensor/TensorDifferential.h"
 #include "Dataflow/NPA/Solver/Newton/Linear/SccSolver.h"
+#include "Dataflow/NPA/Solver/Newton/Linear/Tensor/TensorDifferential.h"
 #include "Dataflow/NPA/Solver/Newton/Linear/Tensor/TensorSemiring.h"
 #include "Utils/Algorithms/PathExpressions/PathExpressions.h"
 

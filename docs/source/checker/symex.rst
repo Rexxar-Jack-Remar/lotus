@@ -1,8 +1,8 @@
 Symbolic Execution Checker
 ==========================
 
-The symbolic-execution checker is exposed through the ``lotus-check symex``
-subcommand and is backed by the top-level ``SymbolicExecution`` subsystem.
+The symbolic-execution checker is exposed through the ``lotus-check --engine=symex``
+engine mode and is backed by the top-level ``SymbolicExecution`` subsystem.
 
 **Engine Location**: ``lib/SymbolicExecution/``
 
@@ -56,8 +56,8 @@ Usage
 
 .. code-block:: bash
 
-   ./build/bin/lotus-check symex input.bc
-   ./build/bin/lotus-check symex input.bc --symex-checkers=null-deref,uaf
+   ./build/bin/lotus-check --engine=symex input.bc
+   ./build/bin/lotus-check --engine=symex input.bc --symex-checkers=null-deref,uaf
 
 Scope and alternatives
 ----------------------

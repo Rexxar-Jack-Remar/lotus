@@ -187,7 +187,7 @@ Analysis Takes Too Long
 
 .. code-block:: bash
 
-   ./build/bin/lotus-check kint input.ll --function-timeout=30
+   ./build/bin/lotus-check --engine=kint input.ll --function-timeout=30
 
 4. Reduce precision:
 
@@ -280,7 +280,7 @@ Missing Bugs (False Negatives)
 
 .. code-block:: bash
 
-   ./build/bin/lotus-check kint input.ll --check-all
+   ./build/bin/lotus-check --engine=kint input.ll --check-all
 
 2. Use more comprehensive analysis:
 
@@ -290,13 +290,13 @@ Missing Bugs (False Negatives)
    ./bin/clam --crab-inter --crab-check=all input.bc
    
    # Context-sensitive taint
-   ./build/bin/lotus-check taint input.bc --analysis=0 --verbose
+   ./build/bin/lotus-check --engine=taint input.bc --analysis=0 --verbose
 
 3. Check if bug type is supported:
 
 .. code-block:: bash
 
-   ./build/bin/lotus-check kint --help  # See supported checks
+   ./build/bin/lotus-check --engine=kint --help  # See supported checks
 
 Tool-Specific Issues
 --------------------
@@ -428,16 +428,16 @@ Taint Analysis Issues
 
 .. code-block:: bash
 
-   ./build/bin/lotus-check taint input.bc --sources=my_input_func \
+   ./build/bin/lotus-check --engine=taint input.bc --sources=my_input_func \
                       --sinks=my_output_func
 
 2. Check that source and sink functions are actually called
 
-3. Use ``lotus-check taint`` for interprocedural flow:
+3. Use ``lotus-check --engine=taint`` for interprocedural flow:
 
 .. code-block:: bash
 
-   ./build/bin/lotus-check taint input.bc
+   ./build/bin/lotus-check --engine=taint input.bc
 
 Performance Tuning
 ------------------
@@ -592,7 +592,7 @@ A: Yes:
 
 .. code-block:: bash
 
-   ./build/bin/lotus-check taint input.bc --sources=my_source1,my_source2 \
+   ./build/bin/lotus-check --engine=taint input.bc --sources=my_source1,my_source2 \
                       --sinks=my_sink1,my_sink2
 
 Or create custom analysis (see :doc:`../developer/developer_guide`).
@@ -682,7 +682,7 @@ A: Yes:
    ./bin/clam -ojson=results.json input.bc
    
    # Kint with SARIF (via BugReportMgr)
-   ./build/bin/lotus-check kint input.ll --check-all --report-sarif=results.sarif
+   ./build/bin/lotus-check --engine=kint input.ll --check-all --report-sarif=results.sarif
 
 Compilation Questions
 ~~~~~~~~~~~~~~~~~~~~~

@@ -324,21 +324,21 @@ Standalone Tools
 ~~~~~~~~~~~~~~~~
 
 Each major component has standalone command-line tools. The bug-detection
-frontends have been unified under a single ``lotus-check`` binary with
-subcommands:
+frontends have been unified under a single ``lotus-check`` binary with an
+explicit ``--engine=<name>`` selector:
 
 **Alias analysis:**
 - ``lotus-alias-aser-aa``, ``lotus-alias-dyck-aa``, ``lotus-alias-lotus-aa``
 
 **Unified checker frontend (``lotus-check``):**
-- ``lotus-check kint`` — Integer overflow, division by zero, array bounds
-- ``lotus-check taint`` — Interprocedural taint analysis
-- ``lotus-check concur`` — Concurrency bug detection (races, deadlocks, OpenMP, MPI)
-- ``lotus-check pulse`` — Biabductive memory-safety analysis
-- ``lotus-check fitx`` — Typestate-based bug detection
-- ``lotus-check saber`` — Source-sink bug detection (leaks, double-free)
-- ``lotus-check ae`` — Abstract-execution-based checking
-- ``lotus-check symex`` — Symbolic-execution bug checking
+- ``lotus-check --engine=kint`` — Integer overflow, division by zero, array bounds
+- ``lotus-check --engine=taint`` — Interprocedural taint analysis
+- ``lotus-check --engine=concur`` — Concurrency bug detection (races, deadlocks, OpenMP, MPI)
+- ``lotus-check --engine=pulse`` — Biabductive memory-safety analysis
+- ``lotus-check --engine=fitx`` — Typestate-based bug detection
+- ``lotus-check --engine=saber`` — Source-sink bug detection (leaks, double-free)
+- ``lotus-check --engine=ae`` — Abstract-execution-based checking
+- ``lotus-check --engine=symex`` — Symbolic-execution bug checking
 
 **PDG query:**
 - ``lotus-ir-pdg-query`` — PDG Cypher queries, slicing, chopping, resource-flow analysis
@@ -384,7 +384,7 @@ Adding New Checkers
 1. Extend ``BugDetectorPass`` base class
 2. Implement checker logic
 3. Report bugs via ``BugReportMgr``
-4. Add a ``lotus-check`` subcommand or create a new tool
+4. Add a ``lotus-check`` engine runner or create a new tool
 
 Adding New Abstract Domains
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~
