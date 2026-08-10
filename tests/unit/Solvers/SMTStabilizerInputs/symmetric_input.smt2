@@ -1,0 +1,7 @@
+(set-logic ALL)
+(declare-fun a () Bool)
+(declare-fun b () Bool)
+(assert (and a b))
+(assert (and b a))
+(check-sat)
+(exit)

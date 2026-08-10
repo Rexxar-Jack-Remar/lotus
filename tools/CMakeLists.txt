@@ -13,6 +13,6 @@ if(LOTUS_ENABLE_CFL)
 endif()
 
 # Optional SMT tools
-if(LOTUS_ENABLE_OWL)
+if(LOTUS_ENABLE_OWL OR LOTUS_ENABLE_SMT_STABILIZER)
     add_subdirectory(solver)
 endif()

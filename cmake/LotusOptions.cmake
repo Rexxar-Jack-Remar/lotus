@@ -23,6 +23,8 @@ option(LOTUS_ENABLE_CFL "Build CFL reachability solvers" OFF)
 option(LOTUS_ENABLE_CSR
        "Build the indexing context-sensitive reachability solver" OFF)
 option(LOTUS_ENABLE_OWL "Build Owl SMT solver" OFF)
+option(LOTUS_ENABLE_SMT_STABILIZER
+       "Build the SMTStabilizer SMT-LIB normalization library and tool" OFF)
 option(LOTUS_ENABLE_DYNAA "Build dynamic alias analyses" OFF)
 option(LOTUS_ENABLE_HORN_ICE
        "Build ICE learning for CHC and Boogie" OFF)
@@ -70,6 +72,7 @@ function(lotus_print_build_summary)
   _lotus_summary_bool("CFL tools" LOTUS_ENABLE_CFL)
   _lotus_summary_bool("CSR tool" LOTUS_ENABLE_CSR)
   _lotus_summary_bool("Owl SMT tool" LOTUS_ENABLE_OWL)
+  _lotus_summary_bool("SMTStabilizer" LOTUS_ENABLE_SMT_STABILIZER)
   _lotus_summary_bool("DynAA tools" LOTUS_ENABLE_DYNAA)
   message(STATUS "  Optional integrations:")
   _lotus_summary_bool("CLAM" LOTUS_ENABLE_CLAM)
