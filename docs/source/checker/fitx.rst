@@ -89,8 +89,25 @@ FiTx targets well-known patterns that are FiT-analysis findable (paper Table 2, 
 * **Memory Leak (ML)** – Allocated memory not freed.
 * **Reference counting errors (Ref)** – Missing get/put or unbalanced refcount.
 * **Double Lock / Double Unlock (DL / DUL)** – Lock/unlock API misuse.
+* **Null Pointer Dereference** – Use of a value tracked as null.
+* **Use Before Initialization (UBI)** – Use of an uninitialized value.
 
-The paper also discusses UBI (use before initialization), null pointer dereference, and out-of-bounds as FiT-findable patterns; the framework is extensible with new typestate definitions.
+The bundled aggregate detector includes the null-pointer and UBI typestate
+definitions in addition to the resource and locking checks above.  The
+framework is extensible with new typestate definitions; this does not imply
+that every FiT-findable pattern described by the paper is enabled today.
+
+Scope and alternatives
+----------------------
+
+FiTx is intended for fast, translation-unit-oriented development feedback.  It
+overlaps with other engines by design: use ``pulse`` for bounded,
+witness-oriented memory-safety diagnosis, ``ae`` for a broad
+abstract-execution pass, and ``saber`` for sparse value-flow leak and
+double-free checks.  See :ref:`Choosing a Checker <choosing-a-checker>` for the
+bug-class guide.  ``--detector`` is accepted by the command-line frontend, but
+the current frontend runs the bundled aggregate FiTx pass; use the reported
+bug type to filter results.
 
 Understanding the code
 ----------------------
@@ -131,3 +148,4 @@ See Also
 --------
 
 * :doc:`index` – Checker framework overview
+* :doc:`taint` – configurable IFDS source-to-sink analysis

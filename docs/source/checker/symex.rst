@@ -41,6 +41,16 @@ Core Components
 * ``SymbolicExecutionWrapper`` – Integrates the engine with the LLVM pass
   pipeline and checker report infrastructure.
 
+Supported checks
+----------------
+
+``symex`` can select checks with ``--symex-checkers``.  The available names
+are ``bof``, ``dbz``, ``int-overflow``, ``int-underflow``, ``null-deref``,
+``signed-int-overflow``, ``signed-int-underflow``, ``shift-overflow``,
+``array-index-oob``, ``uninit-read``, ``uaf``, ``double-free``,
+``negative-array-index``, and ``int-truncation``.  Multiple names are supplied
+as a comma-separated list.
+
 Usage
 -----
 
@@ -48,6 +58,16 @@ Usage
 
    ./build/bin/lotus-check symex input.bc
    ./build/bin/lotus-check symex input.bc --symex-checkers=null-deref,uaf
+
+Scope and alternatives
+----------------------
+
+SymEx overlaps with several specialized engines, but provides a different
+trade-off: it uses symbolic path conditions and SMT feasibility checks at a
+potentially higher cost.  Prefer ``kint`` for routine numerical-bug analysis,
+``pulse`` for bounded witness-oriented memory-safety diagnosis, and ``saber``
+for leak or double-free value-flow checks.  See
+:ref:`Choosing a Checker <choosing-a-checker>` for the complete guide.
 
 Tests
 -----

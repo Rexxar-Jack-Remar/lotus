@@ -37,6 +37,7 @@ Defines inline accessor functions for each subcommand:
    auto &sub = lotus::checker::tooling::fitxSubCommand();
    auto &sub = lotus::checker::tooling::saberSubCommand();
    auto &sub = lotus::checker::tooling::aeSubCommand();
+   auto &sub = lotus::checker::tooling::symexSubCommand();
 
 Available Subcommands
 ---------------------
@@ -61,6 +62,8 @@ Available Subcommands
 +-------------------+-------------------------------------------+
 | ``ae``            | Run the abstract-execution checker        |
 +-------------------+-------------------------------------------+
+| ``symex``         | Run the symbolic-execution checker        |
++-------------------+-------------------------------------------+
 
 Usage
 -----
@@ -77,3 +80,5 @@ See Also
 - :doc:`./kint` — KINT integer checker
 - :doc:`./pulse` — Pulse biabductive checker
 - :doc:`./saber` — Saber source-sink checker
+- :doc:`./symex` — symbolic-execution checker
+- :doc:`./taint` — IFDS taint checker

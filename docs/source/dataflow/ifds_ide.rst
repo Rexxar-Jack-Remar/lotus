@@ -106,8 +106,8 @@ At a high level, an IFDS/IDE analysis is instantiated and solved as:
    IFDSSolver<Analysis> solver(problem);
    solver.solve();
 
-Command-Line Tool: lotus-taint
-==============================
+Command-Line Tool: lotus-check taint
+=====================================
 
 The ``lotus-check taint`` frontend provides an interprocedural taint analysis using the
 IFDS framework.
@@ -119,10 +119,14 @@ IFDS framework.
 Key Options
 -----------
 
-* ``-analysis=<N>`` – Select analysis type (0=taint, 1=reaching-defs, default: 0)
-* ``-sources=<functions>`` – Comma-separated list of custom source functions
-* ``-sinks=<functions>`` – Comma-separated list of custom sink functions
-* ``-show-results`` – Show detailed analysis results (default: true)
+* ``--analysis=0`` – Run the taint analysis (the only currently supported
+  analysis type).
+* ``--sources=<functions>`` – Comma-separated list of custom source functions.
+* ``--sinks=<functions>`` – Comma-separated list of custom sink functions.
+* ``--show-results`` – Show detailed analysis results (default: true).
+
+For the checker-facing usage, reporting behavior, and distinctions from the
+taint tracking embedded in other engines, see :doc:`../checker/taint`.
 * ``-max-results=<N>`` – Maximum number of detailed results to show (default: 10)
 * ``-verbose`` – Enable verbose output
 

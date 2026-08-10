@@ -54,6 +54,16 @@ Important options
 - ``--widen-delay`` delays widening in loops.
 - ``-v`` prints more detailed traces for findings.
 
+Scope and alternatives
+----------------------
+
+``ae`` is a broad abstract-execution memory-safety pass.  Its ``--all`` option
+enables only the five AE detectors listed above; it does not run Pulse, FiTx,
+Saber, or SymEx.  Use ``fitx`` for faster translation-unit feedback, ``pulse``
+for bounded witness-oriented diagnosis, ``saber`` for leaks and double frees
+over sparse value flow, and ``symex`` for SMT-backed path-sensitive checks.
+See :ref:`Choosing a Checker <choosing-a-checker>` for the bug-class guide.
+
 See also
 --------
 

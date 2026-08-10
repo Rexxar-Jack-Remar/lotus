@@ -16,13 +16,101 @@ The Checker Framework consists of several checker categories, all unified throug
 
 * **AE Checkers** – Abstract-execution-based memory-safety bug detection
 * **FiTx Checkers** – Daily development-friendly bug detection using typestate analysis (path-insensitive, return-code aware; see Suzuki et al., USENIX ATC 2024)
-* **KINT Checkers** – Numerical bugs (overflow, division by zero, array bounds) using range analysis and SMT solving
+* **KINT Checkers** – Numerical bugs (overflow, division by zero, array bounds) using SMT solving and function summaries
+* **IFDS Taint Checker** – Configurable source-to-sink information-flow analysis
 * **Concurrency Checkers** – Thread safety and parallel-runtime issues (data races, deadlocks, atomicity violations, OpenMP bugs, MPI bugs) using MHP, lock set, OpenMP, and MPI analyses
 * **Pulse Checker** – Memory safety and other bugs using biabductive analysis with path-sensitive interprocedural reasoning
 * **Saber Checkers** – Source-sink bug detection over sparse value-flow graphs
 * **SymEx Checker** – Symbolic-execution bug checks backed by the top-level ``SymbolicExecution`` engine
 
 All checkers report bugs through the centralized ``BugReportMgr`` system, enabling unified output formats (JSON, SARIF) and consistent bug reporting across all analysis tools. The repository now builds a single checker binary, ``lotus-check``, with subcommands such as ``kint``, ``ae``, ``pulse``, ``saber``, and ``concur``.
+
+Choosing a Checker
+------------------
+
+The ``lotus-check`` subcommands name *analysis engines*, not mutually exclusive
+vulnerability categories.  Several engines intentionally cover the same bug
+class while making different precision, scalability, and reporting trade-offs.
+Choose the engine according to the workflow and evidence needed; do not infer
+that two engines with the same bug class have identical semantics or coverage.
+
+The following table is a navigation aid for the currently exposed checks.  A
+listed engine supports the corresponding class, but an ``--all`` option only
+enables that engine's own checks.
+
+.. list-table:: Bug-class to engine guide
+   :header-rows: 1
+   :widths: 24 25 34 17
+
+   * - Bug class
+     - Start with
+     - Other applicable engines
+     - Typical use
+   * - Use-after-free
+     - ``pulse``
+     - ``ae``, ``fitx``, ``symex``
+     - Witness-oriented investigation
+   * - Null-pointer dereference
+     - ``pulse`` or ``ae``
+     - ``fitx``, ``symex``
+     - Memory-safety review
+   * - Buffer or array bounds error
+     - ``ae`` or ``kint``
+     - ``pulse``, ``symex``
+     - Buffer accesses or index arithmetic
+   * - Integer overflow, division by zero, bad shift
+     - ``kint``
+     - ``symex``
+     - Numerical-error analysis
+   * - Memory leak
+     - ``saber``
+     - ``ae``, ``fitx``
+     - Value-flow or typestate resource checking
+   * - Double free
+     - ``saber`` or ``fitx``
+     - ``symex``
+     - Allocation/free protocol checking
+   * - Uninitialized read or use
+     - ``pulse`` or ``fitx``
+     - ``symex``
+     - Initialization-state checking
+   * - Tainted data reaches a sink
+     - ``taint``
+     - ``pulse``, ``symex``
+     - Configurable source-to-sink analysis
+   * - Data race, deadlock, or parallel-runtime error
+     - ``concur``
+     - —
+     - Thread, OpenMP, or MPI analysis
+   * - API protocol or project-specific policy
+     - ``generic``
+     - ``fitx`` for its built-in typestate checks
+     - Declarative checks or fast development feedback
+
+Quick selection
+~~~~~~~~~~~~~~~
+
+* Use ``fitx`` for fast, translation-unit-oriented feedback during routine
+  development.
+* Use ``ae`` for a broad abstract-execution memory-safety pass.
+* Use ``pulse`` when a path-sensitive, witness-oriented diagnosis is most
+  useful; its bounded analysis can miss bugs outside retained paths.
+* Use ``symex`` when SMT-backed path feasibility and symbolic numeric reasoning
+  are needed, accepting a potentially higher analysis cost.
+* Use ``saber`` for sparse value-flow source/sink checks: memory leaks,
+  double frees, and file-descriptor leaks.
+* Use ``kint`` for numerical bugs.  Its taint analysis supports this purpose;
+  it is not a replacement for the configurable ``taint`` source-to-sink tool.
+
+Running multiple engines
+~~~~~~~~~~~~~~~~~~~~~~~~
+
+There is currently no aggregate command that runs multiple native engines or
+deduplicates their output across separate ``lotus-check`` invocations.  Each
+frontend may deduplicate reports produced in its own run, but findings from two
+engines should be triaged as independent evidence.  Record the subcommand and
+its options with exported JSON or SARIF reports so that overlapping findings
+remain distinguishable.
 
 Declarative Checker Core
 ------------------------
@@ -73,7 +161,7 @@ logic. This enables adding new checks without modifying the checker engine.
    # Load all specs from a directory
    ./build/bin/lotus-check generic input.bc --spec-dir=./checker-specs/
 
-   # List all registered checkers
+   # List generic-registry checker ids (not every native subcommand capability)
    ./build/bin/lotus-check --list-checkers
 
 .. code-block:: cpp
@@ -123,7 +211,8 @@ Components
 
 * ``MKintPass.cpp`` – Main KINT pass for integer overflow, division by zero, array bounds checking
 * ``MKintPass_bugreport.cpp`` – Bug report generation for KINT
-* ``RangeAnalysis.cpp`` – Range analysis for variables using abstract interpretation
+* ``MKintSummary.cpp`` – Interprocedural SMT function-summary construction
+* ``SummaryEncoding.cpp`` – SMT summary representation and instantiation
 * ``KINTTaintAnalysis.cpp`` – Taint analysis integration for tracking untrusted data
 * ``BugDetection.cpp`` – Bug detection and reporting logic
 * ``Options.cpp`` – Command-line option parsing
@@ -262,4 +351,5 @@ See Also
    report
    saber
    symex
+   taint
    tooling

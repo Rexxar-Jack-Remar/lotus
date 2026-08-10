@@ -17,7 +17,8 @@ Lotus is organized into several major subsystems that work together to provide a
                     │
    ┌────────────────┴─────────────────────────────────────────────┐
    │                    Analysis Applications                      │
-   │  - Bug Checkers (Kint, Taint, Concurrency, Pulse, SymEx)    │
+   │  - Bug Checkers (AE, FiTx, Kint, Taint, Concurrency,        │
+   │                  Pulse, Saber, SymEx, Generic)               │
    │  - Abstract Interpreters (CLAM, SymAbsAI)                               │
    │  - Fuzzing Support (Titan)                                   │
    └────┬────────────┬────────────┬────────────┬─────────────────┘
@@ -105,6 +106,11 @@ Core Components
    - **Kint**: Integer overflow, division by zero, array bounds checking
    - **Taint**: Information flow and taint-style vulnerabilities
    - **Concurrency**: Race conditions and deadlock detection
+   - **AE**: Abstract-execution memory-safety checks
+   - **FiTx**: Fast typestate-based development feedback
+   - **Pulse**: Witness-oriented memory-safety checks
+   - **Saber**: Sparse value-flow resource checks
+   - **Generic**: Declarative project-specific checks
    - **SymEx**: Symbolic-execution checks through the top-level
      ``SymbolicExecution`` engine
 
@@ -378,7 +384,7 @@ Adding New Checkers
 1. Extend ``BugDetectorPass`` base class
 2. Implement checker logic
 3. Report bugs via ``BugReportMgr``
-4. Add to ``lotus-kint`` or create new tool
+4. Add a ``lotus-check`` subcommand or create a new tool
 
 Adding New Abstract Domains
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~

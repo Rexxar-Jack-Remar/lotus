@@ -193,6 +193,16 @@ Current practical limitations include:
 * summary rejection when caller facts do not satisfy a callee witness
 * loss of precision in complex loops and merged control flow
 
+Scope and alternatives
+----------------------
+
+Pulse is the witness-oriented choice for the memory-safety classes listed
+above.  It is bounded and therefore is not a replacement for every memory
+checker: use ``ae`` for a broad abstract-execution pass, ``fitx`` for fast
+translation-unit feedback, ``saber`` for leak and double-free value-flow
+checks, and ``symex`` when SMT-backed symbolic reasoning is required.  See
+:ref:`Choosing a Checker <choosing-a-checker>` for the full mapping.
+
 See Also
 --------
 

@@ -128,6 +128,14 @@ Command-Line Options
 * ``--report-sarif=<file>`` – Output SARIF report to file
 * ``--min-score=<n>`` – Minimum confidence score for reporting (0-100)
 
+Scope
+-----
+
+``concur`` is the dedicated engine for shared-memory, OpenMP, and MPI
+concurrency errors.  Its ``--checks`` option selects only concurrency checker
+families; it does not enable memory-safety, numerical, or taint engines.  See
+:ref:`Choosing a Checker <choosing-a-checker>` for the complete checker guide.
+
 Bug Types
 ---------
 

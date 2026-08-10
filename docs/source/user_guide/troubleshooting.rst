@@ -187,7 +187,7 @@ Analysis Takes Too Long
 
 .. code-block:: bash
 
-   ./bin/lotus-kint -function-timeout=30 input.ll
+   ./build/bin/lotus-check kint input.ll --function-timeout=30
 
 4. Reduce precision:
 
@@ -280,7 +280,7 @@ Missing Bugs (False Negatives)
 
 .. code-block:: bash
 
-   ./bin/lotus-kint -check-all input.ll
+   ./build/bin/lotus-check kint input.ll --check-all
 
 2. Use more comprehensive analysis:
 
@@ -290,13 +290,13 @@ Missing Bugs (False Negatives)
    ./bin/clam --crab-inter --crab-check=all input.bc
    
    # Context-sensitive taint
-   ./bin/lotus-taint -analysis=0 -verbose input.bc
+   ./build/bin/lotus-check taint input.bc --analysis=0 --verbose
 
 3. Check if bug type is supported:
 
 .. code-block:: bash
 
-   ./bin/lotus-kint --help  # See supported checks
+   ./build/bin/lotus-check kint --help  # See supported checks
 
 Tool-Specific Issues
 --------------------
@@ -428,17 +428,16 @@ Taint Analysis Issues
 
 .. code-block:: bash
 
-   ./bin/lotus-taint -sources="my_input_func" \
-                      -sinks="my_output_func" \
-                      input.bc
+   ./build/bin/lotus-check taint input.bc --sources=my_input_func \
+                      --sinks=my_output_func
 
 2. Check that source and sink functions are actually called
 
-3. Use ``lotus-taint`` for interprocedural flow:
+3. Use ``lotus-check taint`` for interprocedural flow:
 
 .. code-block:: bash
 
-   ./bin/lotus-taint input.bc
+   ./build/bin/lotus-check taint input.bc
 
 Performance Tuning
 ------------------
@@ -593,9 +592,8 @@ A: Yes:
 
 .. code-block:: bash
 
-   ./bin/lotus-taint -sources="my_source1,my_source2" \
-                      -sinks="my_sink1,my_sink2" \
-                      input.bc
+   ./build/bin/lotus-check taint input.bc --sources=my_source1,my_source2 \
+                      --sinks=my_sink1,my_sink2
 
 Or create custom analysis (see :doc:`../developer/developer_guide`).
 
@@ -648,7 +646,9 @@ Bug Detection Questions
 
 **Q: Why does Kint report false positives?**
 
-A: Kint uses range analysis which may be imprecise. Use more precise domain or add assertions to help analysis:
+A: Kint uses bounded SMT-based reasoning and library/function summaries.  A
+timeout, incomplete model, or unconstrained input can leave a possible bug
+path.  Add assertions or improve models to constrain the relevant behavior:
 
 .. code-block:: c
 
@@ -682,7 +682,7 @@ A: Yes:
    ./bin/clam -ojson=results.json input.bc
    
    # Kint with SARIF (via BugReportMgr)
-   ./bin/lotus-kint -check-all -output-sarif=results.sarif input.ll
+   ./build/bin/lotus-check kint input.ll --check-all --report-sarif=results.sarif
 
 Compilation Questions
 ~~~~~~~~~~~~~~~~~~~~~

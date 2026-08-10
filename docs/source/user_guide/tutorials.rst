@@ -140,7 +140,7 @@ Compile and Analyze
 .. code-block:: bash
 
    clang -emit-llvm -S -g overflow.c -o overflow.ll
-   ./build/bin/lotus-check kint overflow.ll -check-int-overflow -analyze-all-functions
+   ./build/bin/lotus-check kint overflow.ll --check-int-overflow --analyze-all-functions
 
 Expected Output
 ~~~~~~~~~~~~~~~
@@ -164,7 +164,7 @@ Advanced: All Checks
 
 .. code-block:: bash
 
-   ./build/bin/lotus-check kint overflow.ll -check-all -analyze-all-functions
+   ./build/bin/lotus-check kint overflow.ll --check-all --analyze-all-functions
 
 This enables all checkers: integer overflow, division by zero, bad shift, array bounds, and dead branches.
 
@@ -172,6 +172,10 @@ Tutorial 3: Null Pointer Detection
 -----------------------------------
 
 Let's detect null pointer dereferences.
+This tutorial uses Pulse because it produces witness-oriented diagnostics;
+``ae``, ``fitx``, and ``symex`` also support null-pointer checks with different
+trade-offs.  See :ref:`Choosing a Checker <choosing-a-checker>` before choosing
+an engine for a production workflow.
 
 Example Program
 ~~~~~~~~~~~~~~~
@@ -295,7 +299,7 @@ Compile and Analyze
 .. code-block:: bash
 
    clang -emit-llvm -c -g taint.c -o taint.bc
-   ./build/bin/lotus-check taint taint.bc -verbose
+   ./build/bin/lotus-check taint taint.bc --verbose
 
 Custom Sources and Sinks
 ~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -303,8 +307,8 @@ Custom Sources and Sinks
 .. code-block:: bash
 
    ./build/bin/lotus-check taint taint.bc \
-       -sources="scanf,gets,read" \
-       -sinks="system,exec,popen"
+       --sources=scanf,gets,read \
+       --sinks=system,exec,popen
 
 Expected Output
 ~~~~~~~~~~~~~~~
@@ -810,7 +814,7 @@ Compile and Analyze
 .. code-block:: bash
 
    clang -emit-llvm -c -g concurrent.c -o concurrent.bc
-   ./build/bin/lotus-check concur concurrent.bc -verbose
+   ./build/bin/lotus-check concur concurrent.bc -v
 
 Expected Output
 ~~~~~~~~~~~~~~~

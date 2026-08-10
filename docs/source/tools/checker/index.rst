@@ -36,6 +36,11 @@ Basic Usage
    ./build/bin/lotus-check --list-checkers
    ./build/bin/lotus-check generic input.bc --checker=forbidden.system
 
+``--list-checkers`` lists checker ids registered with the ``generic`` driver.
+It is not a complete inventory of checks implemented by native subcommands
+such as ``ae``, ``pulse``, or ``symex``.  For a bug-class-to-engine guide and
+the handling of overlapping findings, see :ref:`Choosing a Checker <choosing-a-checker>`.
+
 Subcommand Examples
 -------------------
 
@@ -78,7 +83,7 @@ FiTx:
 
 .. code-block:: bash
 
-   ./build/bin/lotus-check fitx input.bc --detector=uaf
+   ./build/bin/lotus-check fitx input.bc
 
 Saber:
 

@@ -1,7 +1,8 @@
 KINT Numerical Bug Checker
 ===========================
 
-Static analysis tool for detecting numerical bugs: integer overflow, division by zero, array bounds violations, and related issues.
+Static analysis tool for detecting numerical bugs: integer overflow, division
+by zero, array bounds violations, and related issues.
 
 **Library Location**: ``lib/Checker/KINT/``
 
@@ -14,14 +15,17 @@ Static analysis tool for detecting numerical bugs: integer overflow, division by
 Overview
 --------
 
-KINT (Kint Is Not Taint) uses SMT solving and summary encoding to detect numerical bugs in LLVM bitcode. It combines:
+KINT (Kint Is Not Taint) uses SMT solving and summary encoding to detect
+numerical bugs in LLVM bitcode. It combines:
 
 * **SMT Solving**: Z3-based path-sensitive verification for precise bug detection
 * **Summary Encoding**: Inter-procedural constraint encoding via function summaries
 * **Taint Analysis**: Tracking of untrusted data sources
 
 .. note::
-   Range analysis was removed (commit 88adc045) and replaced with a pure SMT-based approach using per-object memory arrays and inter-procedural function summaries.
+   Range analysis was removed (commit 88adc045) and replaced with a pure
+   SMT-based approach using per-object memory arrays and inter-procedural
+   function summaries.
 
 All detected bugs are reported through the centralized ``BugReportMgr`` system, enabling unified JSON and SARIF output.
 
@@ -246,18 +250,8 @@ Programmatic Usage
    mgr.print_summary(outs());
    mgr.generate_json_report(jsonFile, 0);
 
-Range Analysis
---------------
-
-KINT uses abstract interpretation to compute value ranges:
-
-* **Interval Domain**: Tracks lower and upper bounds for integer values
-* **Widening**: Handles loops using widening operators
-* **Narrowing**: Improves precision after widening
-* **Function Summaries**: Interprocedural range propagation
-
-SMT Solving
------------
+SMT-based numerical reasoning
+-----------------------------
 
 For path-sensitive verification, KINT uses Z3:
 
@@ -271,17 +265,20 @@ Memory modeling was improved (commit b4cef8a1) with per-object SMT arrays: each 
 Taint Analysis
 --------------
 
-KINT tracks taint sources and propagation:
+KINT tracks taint sources and propagation to focus its numerical-bug analysis:
 
 * **Taint Sources**: Functions that read untrusted input (e.g., ``read()``, ``recv()``)
 * **Taint Propagation**: Tracks how tainted values flow through the program
 * **Taint Sinks**: Security-critical operations that use tainted data
 
+This auxiliary tracking is not a general-purpose taint-reporting frontend.  To
+ask whether configured data sources reach configured sinks, use
+:doc:`taint` instead.
+
 Limitations
 -----------
 
 * **SMT Solver Timeout**: Complex functions may timeout, leading to incomplete analysis
-* **Range Precision**: Abstract interpretation may over-approximate, causing false positives
 * **Loop Handling**: Complex loops may require manual widening hints
 * **Floating Point**: Limited support for floating-point operations
 * **Context Sensitivity**: Intraprocedural analysis may miss interprocedural bugs
@@ -289,7 +286,6 @@ Limitations
 Performance
 -----------
 
-* Range analysis is fast and scales well with program size
 * SMT solving can be slow for complex functions (use timeouts)
 * Function timeout helps prevent analysis from getting stuck
 * Statistics can help identify performance bottlenecks
@@ -302,7 +298,7 @@ KINT integrates with:
 * **Z3 SMT Solver**: Path-sensitive verification
 * **LLVM Pass Infrastructure**: Standard pass registration
 * **BugReportMgr**: Centralized bug reporting system
-* **Taint Analysis**: Security-focused taint tracking
+* **Auxiliary Taint Analysis**: Focuses numerical analysis on untrusted data
 
 See Also
 --------
@@ -310,3 +306,4 @@ See Also
 - :doc:`index` – Checker Framework overview
 - :doc:`../solvers/index` – SMT solver integration
 - :doc:`../analysis/index` – Analysis infrastructure
+- :doc:`taint` – configurable IFDS source-to-sink analysis

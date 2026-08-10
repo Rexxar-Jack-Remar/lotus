@@ -15,6 +15,11 @@ bug-reporting layer used by all Lotus checkers.
 Every major checker family routes its output through this layer so tools can
 share JSON, SARIF, and summary reporting.
 
+``BugReportMgr`` aggregates reports within one checker invocation.  It does
+not combine reports emitted by separate ``lotus-check`` subcommands; when
+multiple engines are run, preserve the subcommand and options with each export
+and triage overlapping findings as separate evidence.
+
 Reporting workflow
 ------------------
 

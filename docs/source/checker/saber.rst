@@ -51,8 +51,18 @@ semantics before treating a report as confirmed.  Calls without available
 bodies or summaries can affect precision, so use the shared annotation and
 alias configuration consistently when comparing runs or triaging results.
 
+Scope and alternatives
+----------------------
+
+Saber currently implements resource-management checks only: memory leaks,
+double frees, and file-descriptor leaks.  In particular, it is not a general
+use-after-free or null-dereference checker.  Use ``ae``, ``pulse``, ``fitx``,
+or ``symex`` for the latter memory-safety classes.  See
+:ref:`Choosing a Checker <choosing-a-checker>` for engine selection.
+
 See also
 --------
 
 - See :doc:`../tools/checker/index` for the tool overview.
-- See :doc:`pulse` for a different memory-safety checker family.
+- See :doc:`ae`, :doc:`pulse`, and :doc:`fitx` for other memory-safety checker
+  families.
