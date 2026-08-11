@@ -66,6 +66,8 @@
 #include "Alias/InclusionBased/LotusAA/Engine/IntraProceduralAnalysis.h"
 #include "Alias/InclusionBased/LotusAA/Support/Config.h"
 
+#include <llvm/Support/ErrorHandling.h>
+
 #include <functional>
 #include <set>
 #include <tuple>
@@ -323,8 +325,8 @@ MemObject *PTGraph::newObject(Value *alloc_site, MemObject::ObjKind obj_type) {
 
 PTResult *PTGraph::addPointsTo(Value *ptr, MemObject *obj, int64_t offset,
                                path_cond_t cond) {
-  assert(pt_results.find(ptr) == pt_results.end() &&
-         "Re-assigning value -- violating SSA");
+  if (pt_results.find(ptr) != pt_results.end())
+    llvm::report_fatal_error("Re-assigning value -- violating SSA");
   PTResult *pts = findPTResult(ptr, true);
   pts->add_target(cond, obj, offset);
   return pts;
@@ -332,8 +334,8 @@ PTResult *PTGraph::addPointsTo(Value *ptr, MemObject *obj, int64_t offset,
 
 PTResult *PTGraph::derivePtsFrom(Value *ptr, PTResult *other_pts,
                                  int64_t offset, path_cond_t cond) {
-  assert(pt_results.find(ptr) == pt_results.end() &&
-         "Re-assigning value -- violating SSA");
+  if (pt_results.find(ptr) != pt_results.end())
+    llvm::report_fatal_error("Re-assigning value -- violating SSA");
   PTResult *pts = findPTResult(ptr, true);
   pts->add_derived_target(cond, other_pts, offset);
   return pts;

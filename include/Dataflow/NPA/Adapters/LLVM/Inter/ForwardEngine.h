@@ -790,8 +790,8 @@ public:
         auto *Succ = Term->getSuccessor(i);
         if (!Succ)
           continue;
-        E edgeExpr =
-            Exp::seq(getEdgeTransfer(analysis, *Term, *Succ, 0), currentPath);
+        E edgeExpr = Exp::seq(
+            getBlockEntryTransfer(analysis, *Succ, &BB), currentPath);
         graph.addEdge(fromId, addLabel(edgeExpr), blockIds.at(Succ));
       }
     }
