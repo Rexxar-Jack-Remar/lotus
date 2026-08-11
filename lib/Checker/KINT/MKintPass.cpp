@@ -31,7 +31,6 @@ using namespace llvm;
 
 namespace kint {
 
-
 MKintPass::MKintPass()
     : m_solver(std::nullopt), m_function_timeout(FunctionTimeout),
       m_path_limit(MaxPathsPerFunction) {
@@ -109,15 +108,6 @@ void MKintPass::backedge_analysis(const Function &F) {
 PreservedAnalyses MKintPass::run(Module &M, ModuleAnalysisManager &MAM) {
   MKINT_LOG() << "Running MKint pass on module " << M.getName();
 
-  // Apply the CheckAll flag if set to true
-  if (CheckAll) {
-    CheckIntOverflow = true;
-    CheckDivByZero = true;
-    CheckBadShift = true;
-    CheckArrayOOB = true;
-    CheckDeadBranch = true;
-  }
-
   // Refresh performance options (they may change across runs).
   m_function_timeout = FunctionTimeout;
   m_path_limit = MaxPathsPerFunction;
@@ -128,7 +118,7 @@ PreservedAnalyses MKintPass::run(Module &M, ModuleAnalysisManager &MAM) {
   m_robust_universal_inline_asm = RobustUniversalInlineAsm;
   m_summary_timeout = SummaryTimeout;
   m_summary_path_limit = SummaryMaxPathsPerFunction;
-  parseRobustBugFilter(RobustOnlyBugs);
+  parseRobustBugFilter(RobustChecks);
 
   // Print checker configuration
   MKINT_LOG() << "Checker Configuration:";
@@ -162,8 +152,7 @@ PreservedAnalyses MKintPass::run(Module &M, ModuleAnalysisManager &MAM) {
   if (!CheckIntOverflow && !CheckDivByZero && !CheckBadShift &&
       !CheckArrayOOB && !CheckDeadBranch) {
     MKINT_WARN() << "No bug checkers are enabled. No bugs will be detected.";
-    MKINT_WARN() << "Use --check-all=true or enable individual checkers with "
-                    "--check-<checker-name>=true";
+    MKINT_WARN() << "Select one or more checkers with --checks=<id[,id...]>";
   }
 
   // FIXME: This is a hack.
@@ -425,7 +414,6 @@ void MKintPass::smt_solving(Module &M) {
   }
 }
 
-
 void MKintPass::generateSarifReport(const std::string &filename) {
   if (m_bug_detection) {
     m_bug_detection->generateSarifReport(filename, m_impossible_branches,
@@ -433,6 +421,5 @@ void MKintPass::generateSarifReport(const std::string &filename) {
                                          m_bad_shift_insts, m_div_zero_insts);
   }
 }
-
 
 } // namespace kint

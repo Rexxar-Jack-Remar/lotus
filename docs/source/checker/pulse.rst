@@ -115,7 +115,7 @@ Pulse is intentionally bounded:
 * ``kMaxDisjuncts = 10`` limits how many disjunctive states are retained
 * ``kMaxCallDepth = 5`` limits recursive interprocedural exploration
 * ``LoopAbstraction`` applies widening and path-stamp based convergence checks
-* ``--no-smt`` disables SMT-backed path pruning for a faster, less precise mode
+* ``--pulse.smt=off`` disables SMT-backed path pruning for a faster, less precise mode
 
 These limits trade recall for scalability. In practice, they can introduce
 false negatives by pruning or merging feasible witnesses too aggressively.
@@ -131,13 +131,13 @@ Basic usage:
 
 Common options:
 
-* ``-v``: enable verbose logging
+* ``--verbose``: print detailed finding traces
 * ``--log-level=<level>``: ``none``, ``error``, ``warning``, ``info``,
   ``debug``, or ``trace``
-* ``--pulse-stats[=true|false]``: print Pulse statistics
+* ``--analysis-stats``: print the shared checker analysis summary
 * ``--report-json=<path>``: emit the shared JSON report format
 * ``--report-min-score=<0-100>``: filter exported reports by confidence
-* ``--no-smt``: disable SMT solving when checking path feasibility
+* ``--pulse.smt=off``: disable SMT solving when checking path feasibility
 
 Example:
 

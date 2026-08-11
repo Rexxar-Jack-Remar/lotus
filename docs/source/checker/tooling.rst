@@ -70,8 +70,21 @@ Usage
 
 .. code-block:: bash
 
-   ./build/bin/lotus-check --engine=kint input.bc --check-all=true
-   ./build/bin/lotus-check --engine=concur input.bc --check-data-races
+   ./build/bin/lotus-check --engine=kint input.bc --checks=all
+   ./build/bin/lotus-check --engine=concur input.bc --checks=data-race
+
+Parameter namespaces
+--------------------
+
+Options with one cross-engine contract remain global, for example
+``--checks``, ``--log-level``, ``--analysis-stats``, and the shared reporting
+options. Parameters whose semantics belong to an engine use the qualified form
+``--<engine>.<parameter>``. For example, KINT summary behavior is configured by
+``--kint.summary-mode``, while Pulse path solving is configured by
+``--pulse.smt``. No unqualified compatibility aliases are provided.
+
+Use ``lotus-check --list-parameters`` to print all global and engine groups,
+or ``lotus-check --engine=<name> --help`` for one engine.
 
 See Also
 --------

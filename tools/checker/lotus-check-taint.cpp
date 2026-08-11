@@ -5,20 +5,23 @@
  * A command-line tool for running IFDS/IDE interprocedural dataflow analysis
  */
 
-#include "Checker/Tooling/CheckerSubcommands.h"
 #include "Checker/Report/BugReportMgr.h"
+#include "Checker/Tooling/CheckerSubcommands.h"
+#include "CheckerOptions.h"
 #include "CheckerReport.h"
 #include "Utils/LLVM/Demangle.h"
 
-#include <chrono>
 #include <memory>
 #include <optional>
 #include <set>
 #include <sstream>
 #include <string>
 
+#include <Alias/Infrastructure/AliasAnalysisWrapper/AliasAnalysisWrapper.h>
+#include <Dataflow/IFDS/Analyses/IFDSTaintAnalysis.h>
+#include <Dataflow/IFDS/Core/IFDSFramework.h>
+#include <Dataflow/IFDS/Solver/IFDSSolver.h>
 #include <llvm/ADT/SmallPtrSet.h>
-#include <llvm/ADT/Statistic.h>
 #include <llvm/IR/InstIterator.h>
 #include <llvm/IR/LLVMContext.h>
 #include <llvm/IR/LegacyPassManager.h>
@@ -31,10 +34,6 @@
 #include <llvm/Support/Path.h>
 #include <llvm/Support/SourceMgr.h>
 #include <llvm/Support/raw_ostream.h>
-#include <Alias/Infrastructure/AliasAnalysisWrapper/AliasAnalysisWrapper.h>
-#include <Dataflow/IFDS/Analyses/IFDSTaintAnalysis.h>
-#include <Dataflow/IFDS/Core/IFDSFramework.h>
-#include <Dataflow/IFDS/Solver/IFDSSolver.h>
 
 // #include <iostream>
 // #include <thread>
@@ -58,64 +57,40 @@ static cl::opt<std::string>
                   cl::Required,
                   cl::sub(lotus::checker::tooling::taintSubCommand()));
 
-static cl::opt<bool>
-    Verbose("verbose", cl::desc("Enable verbose output"), cl::init(false),
-            cl::sub(lotus::checker::tooling::taintSubCommand()));
-
-static cl::opt<int>
-    AnalysisType("analysis", cl::desc("Type of analysis to run: 0=taint"),
-                 cl::init(0),
-                 cl::sub(lotus::checker::tooling::taintSubCommand()));
-
 static cl::opt<TaintAASelection> AliasAnalysisType(
-    "aa", cl::desc("Alias analysis type"),
+    "taint.alias-analysis", cl::desc("Alias analysis type"),
     cl::values(
         clEnumValN(TaintAASelection::Andersen, "andersen", "Andersen analysis"),
         clEnumValN(TaintAASelection::Dyck, "dyck", "DyckAA (default)"),
         clEnumValN(TaintAASelection::CFLAnders, "cfl-anders", "CFL-Anders"),
         clEnumValN(TaintAASelection::CFLSteens, "cfl-steens", "CFL-Steens"),
-        clEnumValN(TaintAASelection::SeaDsa, "seadsa", "SeaDsa"),
-        clEnumValN(TaintAASelection::AllocAA, "allocaa", "Allocation-site AA"),
-        clEnumValN(TaintAASelection::BasicAA, "basic", "LLVM BasicAA"),
+        clEnumValN(TaintAASelection::SeaDsa, "sea-dsa", "SeaDsa"),
+        clEnumValN(TaintAASelection::AllocAA, "alloc-aa", "Allocation-site AA"),
+        clEnumValN(TaintAASelection::BasicAA, "basic-aa", "LLVM BasicAA"),
         clEnumValN(TaintAASelection::Combined, "combined",
                    "Andersen (context-insensitive) and DyckAA")),
     cl::init(TaintAASelection::Dyck),
     cl::sub(lotus::checker::tooling::taintSubCommand()));
 
-static cl::opt<bool>
-    ShowResults("show-results", cl::desc("Show detailed analysis results"),
-                cl::init(true),
-                cl::sub(lotus::checker::tooling::taintSubCommand()));
-
-static cl::opt<int> MaxDetailedResults(
-    "max-results", cl::desc("Maximum number of detailed results to show"),
-    cl::init(10), cl::sub(lotus::checker::tooling::taintSubCommand()));
-
 static cl::opt<std::string> SourceFunctions(
-    "sources", cl::desc("Comma-separated list of source functions"),
+    "taint.sources", cl::desc("Comma-separated list of source functions"),
     cl::init(""), cl::sub(lotus::checker::tooling::taintSubCommand()));
 
-static cl::opt<std::string>
-    SinkFunctions("sinks", cl::desc("Comma-separated list of sink functions"),
-                  cl::init(""),
-                  cl::sub(lotus::checker::tooling::taintSubCommand()));
+static cl::opt<std::string> SinkFunctions(
+    "taint.sinks", cl::desc("Comma-separated list of sink functions"),
+    cl::init(""), cl::sub(lotus::checker::tooling::taintSubCommand()));
 
 static cl::opt<bool>
-    MicroBench("micro-bench",
+    MicroBench("taint.micro-bench",
                cl::desc("Enable micro benchmark mode (use source/sink and "
                         "evaluate precision/recall)"),
                cl::init(false),
                cl::sub(lotus::checker::tooling::taintSubCommand()));
 
 static cl::opt<std::string> ExpectedFile(
-    "expected",
+    "taint.expected-flows",
     cl::desc("Path to .expected file for micro benchmark evaluation"),
     cl::init(""), cl::sub(lotus::checker::tooling::taintSubCommand()));
-
-static cl::opt<bool>
-    PrintStats("print-stats", cl::desc("Print LLVM statistics"),
-               cl::init(false),
-               cl::sub(lotus::checker::tooling::taintSubCommand()));
 
 // Helper function to parse comma-separated function names
 std::vector<std::string> parseFunctionList(const std::string &input) {
@@ -306,11 +281,10 @@ static int emitTaintReports(const TaintAnalysis &analysis,
       }
     }
 
-    report->append_step(
-        const_cast<CallBase *>(sinkCall),
-        "Tainted data reaches sink '" + describeCallee(*sinkCall) +
-            "' via " + taintedArgs,
-        traceLevel, {NodeTag::CALL_SITE}, "sink");
+    report->append_step(const_cast<CallBase *>(sinkCall),
+                        "Tainted data reaches sink '" +
+                            describeCallee(*sinkCall) + "' via " + taintedArgs,
+                        traceLevel, {NodeTag::CALL_SITE}, "sink");
     report->set_conf_score(80);
     report->set_suggestion(
         "Validate or sanitize untrusted input before passing it to this sink");
@@ -318,8 +292,8 @@ static int emitTaintReports(const TaintAnalysis &analysis,
   }
 
   lotus::checker::tooling::CheckerReportOptions reportOptions;
-  reportOptions.verbose = Verbose;
-  reportOptions.printText = ShowResults;
+  reportOptions.verbose = lotus::checker::tooling::Verbose;
+  reportOptions.printText = true;
   return lotus::checker::tooling::emitCheckerReports(manager, reportOptions);
 }
 
@@ -450,14 +424,12 @@ static lotus::AAConfig getAliasAnalysisConfig(TaintAASelection selection) {
 }
 
 int runTaintCheckerTool(const char *argv0) {
-  if (MaxDetailedResults < 0) {
-    errs() << "error: --max-results must be non-negative\n";
+  (void)lotus::checker::tooling::statsEnabled();
+  auto selectedOr =
+      lotus::checker::tooling::resolveChecks(lotus::checker::EngineKind::Taint);
+  if (!selectedOr) {
+    logAllUnhandledErrors(selectedOr.takeError(), errs(), "error: ");
     return lotus::checker::tooling::EXIT_ERROR;
-  }
-
-  // Enable statistics collection if requested
-  if (PrintStats) {
-    llvm::EnableStatistics();
   }
 
   // Set up LLVM context and source manager
@@ -470,16 +442,13 @@ int runTaintCheckerTool(const char *argv0) {
     Err.print(argv0, errs());
     return lotus::checker::tooling::EXIT_ERROR;
   }
+  BugReportMgr &mgr = BugReportMgr::get_instance();
+  lotus::checker::tooling::AnalysisStatsRecorder stats("taint", *M, mgr);
 
-  if (Verbose) {
+  if (lotus::checker::tooling::logAtLeast(
+          lotus::checker::tooling::LogLevel::Debug)) {
     outs() << "Loaded module: " << M->getName() << "\n";
     outs() << "Functions in module: " << M->size() << "\n";
-  }
-
-  if (AnalysisType != 0) {
-    errs() << "error: unsupported taint analysis type: " << AnalysisType
-           << "\n";
-    return lotus::checker::tooling::EXIT_ERROR;
   }
 
   auto sources = parseFunctionList(SourceFunctions);
@@ -501,7 +470,8 @@ int runTaintCheckerTool(const char *argv0) {
   auto aliasWrapper =
       std::make_unique<lotus::AliasAnalysisWrapper>(*M, aaConfig);
 
-  if (Verbose) {
+  if (lotus::checker::tooling::logAtLeast(
+          lotus::checker::tooling::LogLevel::Debug)) {
     outs() << "Using alias analysis: "
            << lotus::AliasAnalysisFactory::getTypeName(aaConfig) << "\n";
   }
@@ -511,11 +481,12 @@ int runTaintCheckerTool(const char *argv0) {
     return lotus::checker::tooling::EXIT_ERROR;
   }
 
-  // Run the selected analysis
+  // Run the taint analysis
   try {
-    switch (AnalysisType.getValue()) {
-    case 0: { // Taint analysis
-      outs() << "Running interprocedural taint analysis...\n";
+    {
+      if (lotus::checker::tooling::logAtLeast(
+              lotus::checker::tooling::LogLevel::Info))
+        outs() << "Running interprocedural taint analysis...\n";
 
       TaintAnalysis taintAnalysis;
 
@@ -529,31 +500,26 @@ int runTaintCheckerTool(const char *argv0) {
       // Set up alias analysis
       taintAnalysis.set_alias_analysis(aliasWrapper.get());
 
-      if (Verbose) {
+      if (lotus::checker::tooling::logAtLeast(
+              lotus::checker::tooling::LogLevel::Debug)) {
         dumpSourceSinkMatches(*M, taintAnalysis, outs());
       }
 
-      auto analysisStart = std::chrono::high_resolution_clock::now();
-
-      outs() << "Using sequential IFDS solver\n";
+      if (lotus::checker::tooling::logAtLeast(
+              lotus::checker::tooling::LogLevel::Info))
+        outs() << "Using sequential IFDS solver\n";
 
       ifds::IFDSSolver<ifds::TaintAnalysis> solver(taintAnalysis);
 
       // Enable progress bar when running in verbose mode
-      if (Verbose) {
+      if (lotus::checker::tooling::logAtLeast(
+              lotus::checker::tooling::LogLevel::Debug)) {
         auto config = solver.get_solver_config();
         config.set_enable_progress_reporting(true);
         solver.set_solver_config(config);
       }
 
       solver.solve(*M);
-
-      auto analysisEnd = std::chrono::high_resolution_clock::now();
-      auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(
-          analysisEnd - analysisStart);
-
-      outs() << "Sequential analysis completed in " << duration.count()
-             << " ms\n";
 
       if (MicroBench) {
         SmallString<256> expectedPath;
@@ -573,16 +539,15 @@ int runTaintCheckerTool(const char *argv0) {
             *expectedOr, collectDetectedFlows(taintAnalysis, solver), outs());
       }
       const int reportStatus = emitTaintReports(taintAnalysis, solver);
+      stats.emit();
       if (reportStatus != lotus::checker::tooling::EXIT_SUCCESS_CODE) {
         return reportStatus;
       }
-      break;
-    }
-    default:
-      llvm_unreachable("analysis type validated before dispatch");
     }
 
-    outs() << "Analysis completed successfully.\n";
+    if (lotus::checker::tooling::logAtLeast(
+            lotus::checker::tooling::LogLevel::Info))
+      outs() << "Analysis completed successfully.\n";
 
   } catch (const std::exception &e) {
     errs() << "Error running analysis: " << e.what() << "\n";

@@ -44,10 +44,10 @@ Core Components
 Supported checks
 ----------------
 
-``symex`` can select checks with ``--symex-checkers``.  The available names
-are ``bof``, ``dbz``, ``int-overflow``, ``int-underflow``, ``null-deref``,
+``symex`` can select checks with ``--checks``.  The available names
+are ``buffer-overflow``, ``div-by-zero``, ``int-overflow``, ``int-underflow``, ``null-deref``,
 ``signed-int-overflow``, ``signed-int-underflow``, ``shift-overflow``,
-``array-index-oob``, ``uninit-read``, ``uaf``, ``double-free``,
+``array-oob``, ``uninitialized-read``, ``use-after-free``, ``double-free``,
 ``negative-array-index``, and ``int-truncation``.  Multiple names are supplied
 as a comma-separated list.
 
@@ -57,7 +57,7 @@ Usage
 .. code-block:: bash
 
    ./build/bin/lotus-check --engine=symex input.bc
-   ./build/bin/lotus-check --engine=symex input.bc --symex-checkers=null-deref,uaf
+   ./build/bin/lotus-check --engine=symex input.bc --checks=null-deref,use-after-free
 
 Scope and alternatives
 ----------------------

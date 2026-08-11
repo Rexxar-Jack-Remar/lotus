@@ -355,7 +355,7 @@ void BugReportMgr::filterSuppressed(const SuppressionManager &manager) {
 
     // Get bug type name
     const BugType &bugType = get_bug_type_info(ty_id);
-    std::string issueType = bugType.bug_name.str();
+    const std::string &issueType = bugType.bug_name;
 
     std::vector<BugReport *> filtered;
 
@@ -371,6 +371,18 @@ void BugReportMgr::filterSuppressed(const SuppressionManager &manager) {
     }
 
     report_list = std::move(filtered);
+  }
+
+  // Suppression deletes reports, so any raw pointers cached by the
+  // deduplication index must be discarded and rebuilt before the manager is
+  // used again through its public API.
+  report_hashes.clear();
+  for (const auto &pair : reports) {
+    for (BugReport *report : pair.second) {
+      if (report) {
+        report_hashes[report->compute_hash(true)] = report;
+      }
+    }
   }
 }
 
@@ -432,8 +444,8 @@ cJSON *BugReportMgr::toJson(const ReportFilter &filter) const {
 
     cJSON *bugType = cJSON_CreateObject();
     cJSON_AddItemToArray(bugTypes, bugType);
-    cJSON_AddStringToObject(bugType, "Name", bt.bug_name.str().c_str());
-    cJSON_AddStringToObject(bugType, "Description", bt.desc.str().c_str());
+    cJSON_AddStringToObject(bugType, "Name", bt.bug_name.c_str());
+    cJSON_AddStringToObject(bugType, "Description", bt.desc.c_str());
     cJSON_AddStringToObject(bugType, "Importance",
                             BugDescription::to_string(bt.importance).c_str());
     cJSON_AddStringToObject(
@@ -616,11 +628,11 @@ void BugReportMgr::generate_sarif_report(llvm::raw_ostream &OS,
   for (size_t i = 0; i < bug_types.size(); ++i) {
     const BugType &bugType = bug_types[i];
     std::string helpUri =
-        "https://zju-pl.github.io/lotus/docs/bugs/" + bugType.bug_name.str();
+        "https://zju-pl.github.io/lotus/docs/bugs/" + bugType.bug_name;
     std::string category = BugDescription::to_string(bugType.classification);
 
-    sarif::Rule rule(bugType.bug_name.str(), bugType.bug_name.str(),
-                     bugType.desc.str(), helpUri, category);
+    sarif::Rule rule(bugType.bug_name, bugType.bug_name, bugType.desc, helpUri,
+                     category);
     sarifLog.addRule(rule);
   }
 
@@ -644,13 +656,13 @@ void BugReportMgr::generate_sarif_report(llvm::raw_ostream &OS,
       // Create SARIF result
       std::string message = report->render_primary_message();
       if (message.empty()) {
-        message = bugType.bug_name.str();
+        message = bugType.bug_name;
       }
       if (report->get_extras() && !report->get_extras()->suggestion.empty()) {
         message += ". Suggestion: " + report->get_extras()->suggestion;
       }
 
-      sarif::Result result(bugType.bug_name.str(), message);
+      sarif::Result result(bugType.bug_name, message);
 
       // Determine severity based on importance
       sarif::Level level = sarif::Level::Warning;

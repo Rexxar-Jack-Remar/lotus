@@ -42,10 +42,10 @@ Components
 
 * Defines ``FunctionSummary``, ``SummaryObjectBinding``, ``SummaryCacheEntry``
 * Built by ``MKintSummary.cpp`` (1032 lines) — the summary building pipeline
-* Supports ``--kint-summary-mode off|on|required`` (default: on)
+* Supports ``--kint.summary-mode off|on|required`` (default: on)
 * Building workflow: ``canSummarizeFunction()`` → ``collectSummaryObjects()`` → ``buildSummary()`` (symbolic execution of callee) → ``applySummary()`` (instantiation at call site)
-* Per-summary timeout via ``--kint-summary-timeout <seconds>`` (default: 5)
-* Path budget via ``--kint-summary-max-paths <N>`` (default: 64)
+* Per-summary timeout via ``--kint.summary-timeout-seconds <seconds>`` (default: 5)
+* Path budget via ``--kint.summary-max-paths <N>`` (default: 64)
 
 **KINTTaintAnalysis** (``KINTTaintAnalysis.cpp``, ``KINTTaintAnalysis.h``):
 
@@ -77,7 +77,7 @@ Components
 **Log** (``Log.cpp``, ``Log.h``):
 
 * Logging infrastructure with configurable levels
-* Supports file and stderr output
+* Uses the shared checker ``--log-level`` policy and writes diagnostics to stderr
 
 **Utils** (``Utils.cpp``, ``Utils.h``):
 
@@ -96,83 +96,81 @@ Usage
 
 .. code-block:: bash
 
-   ./build/bin/lotus-check --engine=kint input.bc --check-int-overflow=true
-   ./build/bin/lotus-check --engine=kint input.bc --check-div-by-zero=true
-   ./build/bin/lotus-check --engine=kint input.bc --check-bad-shift=true
-   ./build/bin/lotus-check --engine=kint input.bc --check-array-oob=true
-   ./build/bin/lotus-check --engine=kint input.bc --check-dead-branch=true
+   ./build/bin/lotus-check --engine=kint input.bc --checks=int-overflow
+   ./build/bin/lotus-check --engine=kint input.bc --checks=div-by-zero
+   ./build/bin/lotus-check --engine=kint input.bc --checks=bad-shift
+   ./build/bin/lotus-check --engine=kint input.bc --checks=array-oob
+   ./build/bin/lotus-check --engine=kint input.bc --checks=dead-branch
 
 **Enable Multiple Checkers**:
 
 .. code-block:: bash
 
-   ./build/bin/lotus-check --engine=kint input.bc --check-int-overflow=true --check-div-by-zero=true
+   ./build/bin/lotus-check --engine=kint input.bc --checks=int-overflow,div-by-zero
 
 **Generate JSON Report**:
 
 .. code-block:: bash
 
-   ./build/bin/lotus-check --engine=kint input.bc --check-all=true --report-json=report.json
+   ./build/bin/lotus-check --engine=kint input.bc --checks=all --report-json=report.json
 
 **Generate SARIF Report**:
 
 .. code-block:: bash
 
-   ./build/bin/lotus-check --engine=kint input.bc --check-all=true --report-sarif=report.sarif
+   ./build/bin/lotus-check --engine=kint input.bc --checks=all --report-sarif=report.sarif
 
 **Verbose Logging**:
 
 .. code-block:: bash
 
-   ./build/bin/lotus-check --engine=kint input.bc --check-all=true --log-level=debug
+   ./build/bin/lotus-check --engine=kint input.bc --checks=all --log-level=debug
 
 **Function Timeout**:
 
 .. code-block:: bash
 
-   ./build/bin/lotus-check --engine=kint input.bc --check-all=true --function-timeout=60
+   ./build/bin/lotus-check --engine=kint input.bc --checks=all --kint.function-timeout-seconds=60
 
 **Analyze All Functions**:
 
 .. code-block:: bash
 
-   ./build/bin/lotus-check --engine=kint input.bc --check-int-overflow=true --analyze-all-functions=true
+   ./build/bin/lotus-check --engine=kint input.bc --checks=int-overflow --kint.analyze-all-functions=true
 
 **Summary Encoding Options**:
 
 .. code-block:: bash
 
-   ./build/bin/lotus-check --engine=kint input.bc --check-all=true --kint-summary-mode=on
-   ./build/bin/lotus-check --engine=kint input.bc --check-all=true --kint-summary-timeout=10
-   ./build/bin/lotus-check --engine=kint input.bc --check-all=true --kint-summary-max-paths=128
+   ./build/bin/lotus-check --engine=kint input.bc --checks=all --kint.summary-mode=on
+   ./build/bin/lotus-check --engine=kint input.bc --checks=all --kint.summary-timeout-seconds=10
+   ./build/bin/lotus-check --engine=kint input.bc --checks=all --kint.summary-max-paths=128
 
 Command-Line Options
 --------------------
 
 **Checker Options**:
 
-* ``--check-all=<true|false>`` – Enable all checkers explicitly. With no
-  checker-selection options, all KINT checks run by default.
-* ``--check-int-overflow=<true|false>`` – Enable integer overflow detection (default: false)
-* ``--analyze-all-functions=<true|false>`` – Run SMT checks for all functions instead of only taint/main entry points (default: false)
-* ``--check-div-by-zero=<true|false>`` – Enable division by zero detection (default: false)
-* ``--check-bad-shift=<true|false>`` – Enable bad shift detection (default: false)
-* ``--check-array-oob=<true|false>`` – Enable array out-of-bounds detection (default: false)
-* ``--check-dead-branch=<true|false>`` – Enable dead branch detection (default: false)
+* ``--checks=<id[,id...]>`` – Select ``int-overflow``, ``div-by-zero``,
+  ``bad-shift``, ``array-oob``, or ``dead-branch``. Omitting this option, or
+  passing ``--checks=all``, enables all KINT checks.
+* ``--kint.analyze-all-functions=<true|false>`` – Run SMT checks for all functions instead of only taint/main entry points (default: false)
 
 **Performance Options**:
 
-* ``--function-timeout=<seconds>`` – Timeout per function for SMT solving (0 = no limit, default: varies)
-* ``--kint-summary-mode=<off|on|required>`` – Control inter-procedural summary building (default: on)
-* ``--kint-summary-timeout=<seconds>`` – Per-summary timeout (default: 5)
-* ``--kint-summary-max-paths=<N>`` – Path budget for summary construction (default: 64)
+* ``--kint.function-timeout-seconds=<seconds>`` – Timeout per function for SMT solving (0 = no limit, default: varies)
+* ``--kint.summary-mode=<off|on|required>`` – Control inter-procedural summary building (default: on)
+* ``--kint.summary-timeout-seconds=<seconds>`` – Per-summary timeout (default: 5)
+* ``--kint.summary-max-paths=<N>`` – Path budget for summary construction (default: 64)
 
 **Logging Options**:
 
 * ``--log-level=<debug|info|warning|error|none>`` – Set logging level (default: warning)
-* ``--quiet`` – Suppress all output (default: false)
-* ``--log-to-stderr`` – Log to stderr instead of stdout (default: false)
-* ``--log-to-file=<file>`` – Log to file (default: stdout/stderr)
+
+**Robust reachability options**:
+
+* ``--kint.robust-checks=<id[,id...]>`` – Restrict robust reachability to a subset
+  of the canonical IDs selected by ``--checks``.
 
 **Report Options**:
 

@@ -32,15 +32,18 @@ Typical usage
 .. code-block:: bash
 
    ./build/bin/lotus-check --engine=saber input.bc
-   ./build/bin/lotus-check --engine=saber input.bc --all
-   ./build/bin/lotus-check --engine=saber input.bc --double-free --file
+   ./build/bin/lotus-check --engine=saber input.bc --checks=all
+   ./build/bin/lotus-check --engine=saber input.bc --checks=double-free,file-leak
 
 Behavior
 --------
 
-- With no explicit checker flags, ``lotus-check --engine=saber`` defaults to leak checking.
+- With no ``--checks`` option, all Saber checks run.
 - When multiple checks are enabled, the tool tries to build and reuse shared
   SVFG and ICFG state across checkers.
+- Saber tuning parameters are explicitly namespaced, for example
+  ``--saber.context-limit``, ``--saber.max-forward-items``, and
+  ``--saber.solver-timeout-ms``.
 
 Interpreting findings
 ---------------------

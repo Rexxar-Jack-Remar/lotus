@@ -1,4 +1,5 @@
-/** @file AnalysisDriver.h @brief Driver for orchestrating symbolic execution analyses. */
+/** @file AnalysisDriver.h @brief Driver for orchestrating symbolic execution
+ * analyses. */
 #ifndef ANALYSIS_SYMBOLICEXECUTION_ANALYSISDRIVER_H
 #define ANALYSIS_SYMBOLICEXECUTION_ANALYSISDRIVER_H
 
@@ -20,6 +21,7 @@ namespace SymbolicExecution {
 class AnalysisDriver {
 public:
   AnalysisDriver();
+  static void setEnabledBugTypes(unsigned bug_types);
   void runOnFunction(GuardedValueFlowGraph *Graph);
   void runOnModuleParallel(Module *M);
   void runOnModule(Module *M);

@@ -59,7 +59,8 @@ static const Function *getDirectCallee(const CallBase *call) {
   return dyn_cast<Function>(called->stripPointerCasts());
 }
 
-static const ICFGNode *getCallSiteICFGNode(const SVFG *g, const CallBase *call) {
+static const ICFGNode *getCallSiteICFGNode(const SVFG *g,
+                                           const CallBase *call) {
   if (!g || !call)
     return nullptr;
   if (const ICFG *icfg = g->getICFG()) {
@@ -411,8 +412,8 @@ void SaberSVFGBuilder::AddExtActualParmSVFGNodes() {
             g->addActualParm(cs, actualParmNode);
           }
 
-          if (SVFGEdge *copyEdge =
-                  g->getIntraVFGEdge(defNode, actualParmNode, SVFGEdgeK::IntraCopy)) {
+          if (SVFGEdge *copyEdge = g->getIntraVFGEdge(defNode, actualParmNode,
+                                                      SVFGEdgeK::IntraCopy)) {
             g->removeEdge(copyEdge);
           }
           if (!g->getIntraVFGEdge(defNode, actualParmNode,
@@ -474,7 +475,7 @@ SVFGNodeBS SaberSVFGBuilder::getPointsToOfObject(uint32_t objId) {
   // When collectExtRetGlobals is false, do not follow points-to from
   // external-return objects (SVF saber-collect-extret-globals: avoids pulling
   // in all malloc-return objects as globals).
-  if (!SaberOptions::collectExtRetGlobals()) {
+  if (!SaberCollectExtRetGlobals) {
     if (currentSVFG_->isFieldInsensitiveObject(objId) &&
         isExternalRetObject(currentSVFG_, objId))
       return result;
@@ -491,7 +492,7 @@ SaberSVFGBuilder::CollectPtsChain(uint32_t id, NodeToPTSSMap &cachedPtsMap) {
     return it->second;
 
   std::set<uint32_t> &pts = cachedPtsMap[baseId];
-  if (!SaberOptions::collectExtRetGlobals()) {
+  if (!SaberCollectExtRetGlobals) {
     if (currentSVFG_ && currentSVFG_->isFieldInsensitiveObject(baseId) &&
         isExternalRetObject(currentSVFG_, baseId))
       return pts;
@@ -643,24 +644,21 @@ bool SaberSVFGBuilder::isStrongUpdate(const SVFGNode *node,
           recursiveFunctionsCache_.clear();
           FuncGraph callGraph;
           if (module_) {
-            buildResolvedCallGraph(module_, callGraph,
-                                   [this](const CallBase *call) {
-                                     std::vector<const Function *> targets;
-                                     if (currentSVFG_) {
-                                       for (const Function *callee :
-                                            currentSVFG_->getConnectedCallees(
-                                                call)) {
-                                         appendUniqueDefinedCallee(targets,
-                                                                   callee);
-                                       }
-                                     }
-                                     for (const Function *callee :
-                                          this->getIndirectCallTargets(call)) {
-                                       appendUniqueDefinedCallee(targets,
-                                                                 callee);
-                                     }
-                                     return targets;
-                                   });
+            buildResolvedCallGraph(
+                module_, callGraph, [this](const CallBase *call) {
+                  std::vector<const Function *> targets;
+                  if (currentSVFG_) {
+                    for (const Function *callee :
+                         currentSVFG_->getConnectedCallees(call)) {
+                      appendUniqueDefinedCallee(targets, callee);
+                    }
+                  }
+                  for (const Function *callee :
+                       this->getIndirectCallTargets(call)) {
+                    appendUniqueDefinedCallee(targets, callee);
+                  }
+                  return targets;
+                });
           } else if (currentSVFG_ && currentSVFG_->getRefinedCallGraph()) {
             buildResolvedCallGraph(currentSVFG_->getRefinedCallGraph(),
                                    callGraph);

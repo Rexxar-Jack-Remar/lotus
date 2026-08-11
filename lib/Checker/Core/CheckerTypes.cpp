@@ -19,7 +19,7 @@ const char *toString(EngineKind kind) {
   case EngineKind::FiTx:
     return "fitx";
   case EngineKind::Concurrency:
-    return "concurrency";
+    return "concur";
   case EngineKind::SymExec:
     return "symex";
   }

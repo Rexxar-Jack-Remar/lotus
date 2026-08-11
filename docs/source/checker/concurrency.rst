@@ -81,24 +81,24 @@ Usage
 
 .. code-block:: bash
 
-   ./build/bin/lotus-check --engine=concur input.bc --check-data-races
-   ./build/bin/lotus-check --engine=concur input.bc --check-deadlocks
-   ./build/bin/lotus-check --engine=concur input.bc --check-atomicity
-   ./build/bin/lotus-check --engine=concur input.bc --check-openmp
-   ./build/bin/lotus-check --engine=concur input.bc --check-mpi
+   ./build/bin/lotus-check --engine=concur input.bc --checks=data-race
+   ./build/bin/lotus-check --engine=concur input.bc --checks=deadlock
+   ./build/bin/lotus-check --engine=concur input.bc --checks=atomicity
+   ./build/bin/lotus-check --engine=concur input.bc --checks=openmp
+   ./build/bin/lotus-check --engine=concur input.bc --checks=mpi
 
 **Select Checks with a Comma-Separated List**:
 
 .. code-block:: bash
 
-   ./build/bin/lotus-check --engine=concur input.bc --checks=race,deadlock,openmp
+   ./build/bin/lotus-check --engine=concur input.bc --checks=data-race,deadlock,openmp
    ./build/bin/lotus-check --engine=concur input.bc --checks=mpi
 
 **Enable Multiple Checks**:
 
 .. code-block:: bash
 
-   ./build/bin/lotus-check --engine=concur input.bc --check-data-races --check-deadlocks --check-atomicity
+   ./build/bin/lotus-check --engine=concur input.bc --checks=data-race,deadlock,atomicity
 
 **Generate JSON Report**:
 
@@ -115,15 +115,12 @@ Usage
 Command-Line Options
 --------------------
 
-* ``--check-data-races`` – Enable data race detection (default: true)
-* ``--check-deadlocks`` – Enable deadlock detection (default: true)
-* ``--check-atomicity`` – Enable atomicity violation detection (default: true)
-* ``--check-condvar`` – Enable condition variable misuse detection (default: true)
-* ``--check-lock-mismatch`` – Enable lock/unlock mismatch detection (default: true)
-* ``--check-openmp`` – Enable dedicated OpenMP checks (default: true)
-* ``--check-mpi`` – Enable dedicated MPI checks (default: true)
-* ``--checks=<list>`` – Override individual flags with a comma-separated list such as ``race,deadlock,openmp,mpi``
-* ``--analysis-only`` – Run analyses and dump facts without emitting bug reports
+* ``--checks=<id[,id...]>`` – Select ``data-race``, ``deadlock``, ``atomicity``,
+  ``condvar``, ``lock-mismatch``, ``openmp``, ``mpi``, or ``cuda``. Omitting
+  this option, or passing ``--checks=all``, enables all checks.
+* ``--concur.mode=analysis`` – Run analyses and dump facts without emitting bug reports
+* ``--concur.output=<file>`` – Write analysis facts to a file in analysis mode
+* ``--concur.output-format=<text|json>`` – Select the analysis-fact format
 * ``--report-json=<file>`` – Output JSON report to file
 * ``--report-sarif=<file>`` – Output SARIF report to file
 * ``--report-min-score=<n>`` – Minimum confidence score for reporting (0-100)

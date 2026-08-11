@@ -14,10 +14,11 @@
  * - Use Before Initialization (ubi)
  * - Reference Count Issues (ref_count, ref_uncount)
  *
- * Usage: lotus-fitx [options] <input bitcode>
+ * Usage: lotus-check --engine=fitx [options] <input bitcode>
  */
 
 #include "Checker/FiTx/Core/Logs.h"
+#include "Checker/FiTx/Core/Utils.h"
 #include "Checker/FiTx/Detector/DF_Detector.h"
 #include "Checker/FiTx/Detector/DL_Detector.h"
 #include "Checker/FiTx/Detector/DUL_Detector.h"
@@ -35,11 +36,12 @@
 #include "Checker/Report/ReportOptions.h"
 #include "Checker/Report/SuppressionManager.h"
 #include "Checker/Tooling/CheckerSubcommands.h"
+#include "CheckerOptions.h"
 #include "CheckerReport.h"
 
-#include <chrono>
 #include <iostream>
 #include <memory>
+#include <set>
 #include <string>
 #include <vector>
 
@@ -63,19 +65,6 @@ using namespace llvm;
 static cl::opt<std::string>
     InputFile(cl::Positional, cl::desc("<input bitcode>"), cl::Required,
               cl::sub(lotus::checker::tooling::fitxSubCommand()));
-static cl::opt<bool> Verbose("v", cl::desc("Verbose output"), cl::init(false),
-                             cl::sub(lotus::checker::tooling::fitxSubCommand()));
-static cl::opt<bool> MeasureAnalysisTime("fitx-measure",
-                                         cl::desc("Measure analysis time"),
-                                         cl::init(false),
-                                         cl::sub(lotus::checker::tooling::fitxSubCommand()));
-static cl::opt<std::string>
-    DetectorType("detector",
-                 cl::desc("Detector type: all, df, dl, dul, leak, nullptr, "
-                          "uaf, ubi, ref_count, ref_uncount"),
-                 cl::init("all"),
-                 cl::sub(lotus::checker::tooling::fitxSubCommand()));
-
 namespace {
 using DetectorDefinition = void (*)(fitx::StateManager &);
 using DetectorDefinitions = std::vector<DetectorDefinition>;
@@ -100,35 +89,32 @@ private:
 const StringMap<DetectorDefinitions> &detectorRegistry() {
   static const StringMap<DetectorDefinitions> registry = [] {
     StringMap<DetectorDefinitions> result;
-    result["df"] = {DoubleFree::define_states};
-    result["dl"] = {DoubleLock::define_states};
-    result["dul"] = {DoubleUnlock::defineStates};
-    result["leak"] = {MemoryLeak::defineStates};
-    result["nullptr"] = {NullPointer::defineStates};
-    result["uaf"] = {UseAfterFree::defineStates};
-    result["ubi"] = {UseBeforeInitialization::defineStates};
-    result["ref_count"] = {ReferenceCounter::defineStates};
-    result["ref_uncount"] = {UnreferenceCounter::defineStates};
-    result["all"] = {DoubleFree::define_states,
-                     DoubleLock::define_states,
-                     DoubleUnlock::defineStates,
-                     MemoryLeak::defineStates,
-                     NullPointer::defineStates,
-                     UnreferenceCounter::defineStates,
-                     ReferenceCounter::defineStates,
-                     UseAfterFree::defineStates,
-                     UseBeforeInitialization::defineStates};
+    result["double-free"] = {DoubleFree::define_states};
+    result["double-lock"] = {DoubleLock::define_states};
+    result["double-unlock"] = {DoubleUnlock::defineStates};
+    result["memory-leak"] = {MemoryLeak::defineStates};
+    result["null-deref"] = {NullPointer::defineStates};
+    result["use-after-free"] = {UseAfterFree::defineStates};
+    result["use-before-init"] = {UseBeforeInitialization::defineStates};
+    result["ref-count"] = {ReferenceCounter::defineStates};
+    result["ref-uncount"] = {UnreferenceCounter::defineStates};
     return result;
   }();
   return registry;
 }
 
-std::unique_ptr<fitx::FrameworkPass> createDetector(StringRef name) {
-  auto detector = detectorRegistry().find(name);
-  if (detector == detectorRegistry().end()) {
-    return nullptr;
+std::unique_ptr<fitx::FrameworkPass>
+createDetector(const std::set<std::string> &checks) {
+  DetectorDefinitions definitions;
+  for (const std::string &check : checks) {
+    auto detector = detectorRegistry().find(check);
+    if (detector == detectorRegistry().end()) {
+      return nullptr;
+    }
+    definitions.insert(definitions.end(), detector->second.begin(),
+                       detector->second.end());
   }
-  return std::make_unique<SelectedDetector>(detector->second);
+  return std::make_unique<SelectedDetector>(std::move(definitions));
 }
 
 } // namespace
@@ -136,20 +122,25 @@ std::unique_ptr<fitx::FrameworkPass> createDetector(StringRef name) {
 namespace fitx {
 
 // Run all registered FiTx checkers via the legacy pass manager.
-bool runFiTxAnalysis(Module &M, StringRef detectorName) {
-  std::unique_ptr<FrameworkPass> detector = createDetector(detectorName);
+bool runFiTxAnalysis(Module &M, const std::set<std::string> &checks) {
+  std::unique_ptr<FrameworkPass> detector = createDetector(checks);
   if (!detector) {
-    errs() << "error: unknown FiTx detector '" << detectorName << "'\n";
+    errs() << "error: invalid FiTx checker selection\n";
     return false;
   }
 
-  outs() << "FiTx Bug Finder\n";
-  outs() << "================\n\n";
-  outs() << "Module: " << M.getName() << "\n";
-  outs() << "Functions: " << M.size() << "\n";
-  outs() << "Detector: " << detectorName << "\n";
-
-  auto start = std::chrono::system_clock::now();
+  if (lotus::checker::tooling::logAtLeast(
+          lotus::checker::tooling::LogLevel::Info)) {
+    outs() << "FiTx Bug Finder\n";
+    outs() << "================\n\n";
+    outs() << "Module: " << M.getName() << "\n";
+    outs() << "Functions: " << M.size() << "\n";
+    outs() << "Checks:";
+    for (const std::string &check : checks) {
+      outs() << " " << check;
+    }
+    outs() << "\n";
+  }
 
   // Ensure LoopInfoWrapperPass is initialized (required by IRGenerator).
   PassRegistry &Registry = *PassRegistry::getPassRegistry();
@@ -166,20 +157,25 @@ bool runFiTxAnalysis(Module &M, StringRef detectorName) {
 
   PM.run(M);
 
-  auto end = std::chrono::system_clock::now();
-  auto duration =
-      std::chrono::duration_cast<std::chrono::milliseconds>(end - start);
-
-  outs() << "Analysis complete.\n";
-  if (MeasureAnalysisTime) {
-    outs() << "Time: " << duration.count() << " ms\n";
-  }
+  if (lotus::checker::tooling::logAtLeast(
+          lotus::checker::tooling::LogLevel::Info))
+    outs() << "Analysis complete.\n";
   return true;
 }
 
 } // namespace fitx
 
 int runFiTxCheckerTool(const char *argv0) {
+  (void)lotus::checker::tooling::statsEnabled();
+  auto selectedOr =
+      lotus::checker::tooling::resolveChecks(lotus::checker::EngineKind::FiTx);
+  if (!selectedOr) {
+    logAllUnhandledErrors(selectedOr.takeError(), errs(), "error: ");
+    return lotus::checker::tooling::EXIT_ERROR;
+  }
+  fitx::setDebugLogging(lotus::checker::tooling::logAtLeast(
+      lotus::checker::tooling::LogLevel::Debug));
+
   SMDiagnostic Err;
   LLVMContext Context;
   std::unique_ptr<Module> M = parseIRFile(InputFile, Err, Context);
@@ -188,12 +184,14 @@ int runFiTxCheckerTool(const char *argv0) {
     Err.print(argv0, errs());
     return lotus::checker::tooling::EXIT_ERROR;
   }
+  BugReportMgr &mgr = BugReportMgr::get_instance();
+  lotus::checker::tooling::AnalysisStatsRecorder stats("fitx", *M, mgr);
 
-  if (!fitx::runFiTxAnalysis(*M, DetectorType)) {
+  if (!fitx::runFiTxAnalysis(*M, *selectedOr)) {
     return lotus::checker::tooling::EXIT_ERROR;
   }
+  stats.emit();
 
-  BugReportMgr &mgr = BugReportMgr::get_instance();
-
-  return lotus::checker::tooling::emitCheckerReports(mgr, {Verbose});
+  return lotus::checker::tooling::emitCheckerReports(
+      mgr, {lotus::checker::tooling::Verbose});
 }

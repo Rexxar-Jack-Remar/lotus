@@ -1,3 +1,5 @@
+#include "Checker/FiTx/Core/Utils.h"
+
 #include "llvm/ADT/APFloat.h"
 #include "llvm/Analysis/LoopInfo.h"
 #include "llvm/IR/Argument.h"
@@ -22,12 +24,7 @@
 #include "llvm/Support/raw_ostream.h"
 #include "llvm/Transforms/IPO/PassManagerBuilder.h"
 
-// include STL
-#include "llvm/Support/CommandLine.h"
-
 #include "Checker/FiTx/Core/Instruction.h"
-#include "Checker/Tooling/CheckerSubcommands.h"
-#include "Checker/FiTx/Core/Utils.h"
 #include "Checker/FiTx/Core/Value.h"
 
 #include <algorithm>
@@ -42,12 +39,11 @@
 #include <string>
 #include <vector>
 
-static llvm::cl::opt<bool> Debug("fitx-debug",
-                                 llvm::cl::desc("Print FiTx debug warnings"),
-                                 llvm::cl::sub(
-                                     lotus::checker::tooling::fitxSubCommand()));
+static bool Debug = false;
 
 namespace fitx {
+void setDebugLogging(bool enabled) { Debug = enabled; }
+
 void generateWarning(llvm::Instruction *Inst, std::string warn) {
   if (!Debug)
     return;

@@ -6,16 +6,17 @@
 //
 //===----------------------------------------------------------------------===//
 
-#include "SymbolicExecution/SymbolicExecutionWrapper.h"
 #include "Alias/InclusionBased/LotusAA/Engine/InterProceduralPass.h"
 #include "Checker/Report/BugReportMgr.h"
 #include "Checker/Report/ReportOptions.h"
 #include "Checker/Report/SuppressionManager.h"
 #include "Checker/Tooling/CheckerSubcommands.h"
+#include "CheckerOptions.h"
 #include "CheckerReport.h"
 #include "IR/GSA/GSA.h"
 #include "IR/GVFG/GuardedValueFlowBuilder.h"
 #include "IR/GVFG/LotusAdapter.h"
+#include "SymbolicExecution/SymbolicExecutionWrapper.h"
 
 #include <llvm/IR/LegacyPassManager.h>
 #include <llvm/IRReader/IRReader.h>
@@ -28,18 +29,55 @@
 
 using namespace llvm;
 
-static cl::opt<std::string> InputFilename(cl::Positional,
-                                          cl::desc("<input bitcode file>"),
-                                          cl::Required,
-                                          cl::sub(lotus::checker::tooling::symexSubCommand()));
-
-static cl::opt<bool>
-    VerboseReports("v",
-                   cl::desc("Print trace and IR details for reported bugs"),
-                   cl::init(false),
-                   cl::sub(lotus::checker::tooling::symexSubCommand()));
+static cl::opt<std::string>
+    InputFilename(cl::Positional, cl::desc("<input bitcode file>"),
+                  cl::Required,
+                  cl::sub(lotus::checker::tooling::symexSubCommand()));
 
 int runSymExCheckerTool(const char *argv0) {
+  (void)lotus::checker::tooling::statsEnabled();
+  auto selectedOr = lotus::checker::tooling::resolveChecks(
+      lotus::checker::EngineKind::SymExec);
+  if (!selectedOr) {
+    logAllUnhandledErrors(selectedOr.takeError(), errs(), "error: ");
+    return lotus::checker::tooling::EXIT_ERROR;
+  }
+  const auto &selected = *selectedOr;
+
+  unsigned bugTypes = SymbolicExecution::AnalysisState::BUG_TY_UNDEF;
+  const std::pair<StringRef, SymbolicExecution::AnalysisState::SymexBugType>
+      checkTypes[] = {
+          {"buffer-overflow", SymbolicExecution::AnalysisState::BUG_TY_BOF},
+          {"div-by-zero", SymbolicExecution::AnalysisState::BUG_TY_DBZ},
+          {"int-overflow",
+           SymbolicExecution::AnalysisState::BUG_TY_INT_OVERFLOW},
+          {"int-underflow",
+           SymbolicExecution::AnalysisState::BUG_TY_INT_UNDERFLOW},
+          {"null-deref", SymbolicExecution::AnalysisState::BUG_TY_NULL_DEREF},
+          {"signed-int-overflow",
+           SymbolicExecution::AnalysisState::BUG_TY_SIGNED_INT_OVERFLOW},
+          {"signed-int-underflow",
+           SymbolicExecution::AnalysisState::BUG_TY_SIGNED_INT_UNDERFLOW},
+          {"shift-overflow",
+           SymbolicExecution::AnalysisState::BUG_TY_SHIFT_OVERFLOW},
+          {"array-oob",
+           SymbolicExecution::AnalysisState::BUG_TY_ARRAY_INDEX_OOB},
+          {"uninitialized-read",
+           SymbolicExecution::AnalysisState::BUG_TY_UNINIT_READ},
+          {"use-after-free", SymbolicExecution::AnalysisState::BUG_TY_UAF},
+          {"double-free", SymbolicExecution::AnalysisState::BUG_TY_DOUBLE_FREE},
+          {"negative-array-index",
+           SymbolicExecution::AnalysisState::BUG_TY_NEGATIVE_ARRAY_INDEX},
+          {"int-truncation",
+           SymbolicExecution::AnalysisState::BUG_TY_INT_TRUNCATION},
+      };
+  for (const auto &[id, type] : checkTypes) {
+    if (selected.count(id.str())) {
+      bugTypes |= type;
+    }
+  }
+  SymbolicExecution::AnalysisDriver::setEnabledBugTypes(bugTypes);
+
   LLVMContext Context;
   SMDiagnostic Err;
   std::unique_ptr<Module> M = parseIRFile(InputFilename, Err, Context);
@@ -47,6 +85,8 @@ int runSymExCheckerTool(const char *argv0) {
     Err.print(argv0, errs());
     return lotus::checker::tooling::EXIT_ERROR;
   }
+  BugReportMgr &mgr = BugReportMgr::get_instance();
+  lotus::checker::tooling::AnalysisStatsRecorder stats("symex", *M, mgr);
 
   PassRegistry &Registry = *PassRegistry::getPassRegistry();
   initializeCore(Registry);
@@ -65,12 +105,13 @@ int runSymExCheckerTool(const char *argv0) {
   PM.add(new lotus::gvfg::LotusGuardedValueFlowAdapterPass());
   PM.add(new SymbolicExecutionWrapper());
   PM.run(*M);
-
-  BugReportMgr &mgr = BugReportMgr::get_instance();
+  stats.emit();
 
   const int reportStatus = lotus::checker::tooling::emitCheckerReports(
-      mgr, {VerboseReports});
+      mgr, {lotus::checker::tooling::Verbose});
 
-  outs() << "\n=== Analysis Complete ===\n";
+  if (lotus::checker::tooling::logAtLeast(
+          lotus::checker::tooling::LogLevel::Info))
+    outs() << "\n=== Analysis Complete ===\n";
   return reportStatus;
 }

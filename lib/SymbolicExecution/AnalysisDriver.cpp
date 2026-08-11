@@ -10,7 +10,6 @@
 
 #include "llvm/IR/CFG.h"
 #include "llvm/IR/Module.h"
-#include "llvm/Support/CommandLine.h"
 
 #include "SymbolicExecution/GVFGUtility.h"
 #include "SymbolicExecution/MemoryAPI.h"
@@ -20,8 +19,6 @@
 #include <atomic>
 #include <mutex>
 #include <numeric>
-#include <sstream>
-#include <string>
 
 using namespace SymbolicExecution;
 
@@ -73,217 +70,16 @@ static void topsortCFG(std::vector<BasicBlock *> &sorted, Function *F) {
 
 } // namespace
 
-cl::opt<bool> enable_symex_bof_engine(
-    "symex-bof-engine",
-    cl::desc("Enable buffer overflow checking under the symbolic execution engine"),
-    cl::init(false));
-
-static cl::opt<bool> SymexEnableCheckBof(
-    "symex-bof",
-    cl::desc("Check buffer overflow under the symbolic execution engine"),
-    cl::init(false));
-
-static cl::opt<bool> SymexEnableCheckDbz(
-    "symex-dbz",
-    cl::desc("Check divide-by-zero under the symbolic execution engine"),
-    cl::init(false));
-
-static cl::opt<bool> SymexEnableCheckIntOverflow(
-    "symex-int-overflow",
-    cl::desc("Check integer overflow under the symbolic execution engine"),
-    cl::init(false));
-
-static cl::opt<bool> SymexEnableCheckIntUnderflow(
-    "symex-int-underflow",
-    cl::desc("Check integer underflow under the symbolic execution engine"),
-    cl::init(false));
-
-static cl::opt<bool> SymexEnableCheckNullDeref(
-    "symex-null-deref",
-    cl::desc(
-        "Check null pointer dereference under the symbolic execution engine"),
-    cl::init(false));
-
-static cl::opt<bool> SymexEnableCheckSignedIntOverflow(
-    "symex-signed-int-overflow",
-    cl::desc(
-        "Check signed integer overflow under the symbolic execution engine"),
-    cl::init(false));
-
-static cl::opt<bool> SymexEnableCheckSignedIntUnderflow(
-    "symex-signed-int-underflow",
-    cl::desc(
-        "Check signed integer underflow under the symbolic execution engine"),
-    cl::init(false));
-
-static cl::opt<bool> SymexEnableCheckShiftOverflow(
-    "symex-shift-overflow",
-    cl::desc(
-        "Check shift overflow/underflow under the symbolic execution engine"),
-    cl::init(false));
-
-static cl::opt<bool> SymexEnableCheckArrayIndexOOB(
-    "symex-array-index-oob",
-    cl::desc(
-        "Check array index out of bounds under the symbolic execution engine"),
-    cl::init(false));
-
-static cl::opt<bool> SymexEnableCheckUninitRead(
-    "symex-uninit-read",
-    cl::desc(
-        "Check uninitialized memory read under the symbolic execution engine"),
-    cl::init(false));
-
-static cl::opt<bool> SymexEnableCheckUaf(
-    "symex-uaf",
-    cl::desc("Check use-after-free under the symbolic execution engine"),
-    cl::init(false));
-
-static cl::opt<bool> SymexEnableCheckDoubleFree(
-    "symex-double-free",
-    cl::desc("Check double-free under the symbolic execution engine"),
-    cl::init(false));
-
-static cl::opt<bool> SymexEnableCheckNegativeArrayIndex(
-    "symex-negative-array-index",
-    cl::desc(
-        "Check negative array indexing under the symbolic execution engine"),
-    cl::init(false));
-
-static cl::opt<bool> SymexEnableCheckIntTruncation(
-    "symex-int-truncation",
-    cl::desc("Check integer truncation/conversion issues under the symbolic "
-             "execution engine"),
-    cl::init(false));
-
-static cl::opt<std::string> SymexCheckers(
-    "symex-checkers",
-    cl::desc("Comma-separated list of checkers to enable. Available checkers: "
-             "bof, dbz, int-overflow, int-underflow, null-deref, "
-             "signed-int-overflow, signed-int-underflow, shift-overflow, "
-             "array-index-oob, uninit-read, uaf, double-free, "
-             "negative-array-index, int-truncation"),
-    cl::init(""));
+static unsigned ConfiguredBugTypes = AnalysisState::BUG_TY_BOF;
 
 AnalysisDriver::AnalysisDriver() { initBugType(); }
 
+void AnalysisDriver::setEnabledBugTypes(unsigned bug_types) {
+  ConfiguredBugTypes = bug_types;
+}
+
 void AnalysisDriver::initBugType() {
-  // Checker selection is normalized into one bitmask here so the per-function
-  // executor can stay focused on state transfer and bug queries.
-  // Parse comma-separated list of checkers if provided
-  if (!SymexCheckers.empty()) {
-    std::string checkers = SymexCheckers.getValue();
-    // Remove whitespace
-    checkers.erase(std::remove_if(checkers.begin(), checkers.end(), ::isspace),
-                   checkers.end());
-
-    std::stringstream ss(checkers);
-    std::string checker;
-    while (std::getline(ss, checker, ',')) {
-      if (checker == "bof") {
-        BugTy |= AnalysisState::BUG_TY_BOF;
-      } else if (checker == "dbz") {
-        BugTy |= AnalysisState::BUG_TY_DBZ;
-      } else if (checker == "int-overflow") {
-        BugTy |= AnalysisState::BUG_TY_INT_OVERFLOW;
-      } else if (checker == "int-underflow") {
-        BugTy |= AnalysisState::BUG_TY_INT_UNDERFLOW;
-      } else if (checker == "null-deref") {
-        BugTy |= AnalysisState::BUG_TY_NULL_DEREF;
-      } else if (checker == "signed-int-overflow") {
-        BugTy |= AnalysisState::BUG_TY_SIGNED_INT_OVERFLOW;
-      } else if (checker == "signed-int-underflow") {
-        BugTy |= AnalysisState::BUG_TY_SIGNED_INT_UNDERFLOW;
-      } else if (checker == "shift-overflow") {
-        BugTy |= AnalysisState::BUG_TY_SHIFT_OVERFLOW;
-      } else if (checker == "array-index-oob") {
-        BugTy |= AnalysisState::BUG_TY_ARRAY_INDEX_OOB;
-      } else if (checker == "uninit-read") {
-        BugTy |= AnalysisState::BUG_TY_UNINIT_READ;
-      } else if (checker == "uaf") {
-        BugTy |= AnalysisState::BUG_TY_UAF;
-      } else if (checker == "double-free") {
-        BugTy |= AnalysisState::BUG_TY_DOUBLE_FREE;
-      } else if (checker == "negative-array-index") {
-        BugTy |= AnalysisState::BUG_TY_NEGATIVE_ARRAY_INDEX;
-      } else if (checker == "int-truncation") {
-        BugTy |= AnalysisState::BUG_TY_INT_TRUNCATION;
-      } else {
-        llvm::errs() << "Warning: Unknown checker '" << checker
-                     << "' in --symex-checkers. Ignoring.\n";
-      }
-    }
-  }
-
-  // Also check individual flags (these can be used together with
-  // --symex-checkers)
-  if (SymexEnableCheckBof) {
-    BugTy |= AnalysisState::BUG_TY_BOF;
-  }
-
-  if (SymexEnableCheckDbz) {
-    BugTy |= AnalysisState::BUG_TY_DBZ;
-  }
-
-  if (SymexEnableCheckIntOverflow) {
-    BugTy |= AnalysisState::BUG_TY_INT_OVERFLOW;
-  }
-
-  if (SymexEnableCheckIntUnderflow) {
-    BugTy |= AnalysisState::BUG_TY_INT_UNDERFLOW;
-  }
-
-  if (SymexEnableCheckNullDeref) {
-    BugTy |= AnalysisState::BUG_TY_NULL_DEREF;
-  }
-
-  if (SymexEnableCheckSignedIntOverflow) {
-    BugTy |= AnalysisState::BUG_TY_SIGNED_INT_OVERFLOW;
-  }
-
-  if (SymexEnableCheckSignedIntUnderflow) {
-    BugTy |= AnalysisState::BUG_TY_SIGNED_INT_UNDERFLOW;
-  }
-
-  if (SymexEnableCheckShiftOverflow) {
-    BugTy |= AnalysisState::BUG_TY_SHIFT_OVERFLOW;
-  }
-
-  if (SymexEnableCheckArrayIndexOOB) {
-    BugTy |= AnalysisState::BUG_TY_ARRAY_INDEX_OOB;
-  }
-
-  if (SymexEnableCheckUninitRead) {
-    BugTy |= AnalysisState::BUG_TY_UNINIT_READ;
-  }
-
-  if (SymexEnableCheckUaf) {
-    BugTy |= AnalysisState::BUG_TY_UAF;
-  }
-
-  if (SymexEnableCheckDoubleFree) {
-    BugTy |= AnalysisState::BUG_TY_DOUBLE_FREE;
-  }
-
-  if (SymexEnableCheckNegativeArrayIndex) {
-    BugTy |= AnalysisState::BUG_TY_NEGATIVE_ARRAY_INDEX;
-  }
-
-  if (SymexEnableCheckIntTruncation) {
-    BugTy |= AnalysisState::BUG_TY_INT_TRUNCATION;
-  }
-
-  // If enable-symex-bof is used and no checkers are specified, default to BOF
-  // This provides backward compatibility
-  if (BugTy == AnalysisState::BUG_TY_UNDEF) {
-    if (enable_symex_bof_engine.getValue()) {
-      BugTy = AnalysisState::BUG_TY_BOF;
-    } else {
-      // If enable-symex-bof is not used, still default to BOF for backward
-      // compatibility
-      BugTy = AnalysisState::BUG_TY_BOF;
-    }
-  }
+  BugTy = static_cast<AnalysisState::SymexBugType>(ConfiguredBugTypes);
 }
 
 void AnalysisDriver::runOnModuleParallel(Module *M) {

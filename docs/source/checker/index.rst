@@ -35,7 +35,7 @@ Choose the engine according to the workflow and evidence needed; do not infer
 that two engines with the same bug class have identical semantics or coverage.
 
 The following table is a navigation aid for the currently exposed checks.  A
-listed engine supports the corresponding class, but an ``--all`` option only
+listed engine supports the corresponding class, but ``--checks=all`` only
 enables that engine's own checks.
 
 .. list-table:: Bug-class to engine guide
@@ -156,10 +156,10 @@ logic. This enables adding new checks without modifying the checker engine.
 .. code-block:: bash
 
    # Run a declarative checker from a spec file
-   ./build/bin/lotus-check --engine=generic input.bc --checker=forbidden.system
+   ./build/bin/lotus-check --engine=generic input.bc --checks=forbidden.system
 
    # Load all specs from a directory
-   ./build/bin/lotus-check --engine=generic input.bc --spec-dir=./checker-specs/
+   ./build/bin/lotus-check --engine=generic input.bc --generic.spec-dir=./checker-specs/
 
    # List generic checker ids and native engine entries
    ./build/bin/lotus-check --list-checkers
@@ -281,16 +281,16 @@ Usage
 
 .. code-block:: bash
 
-   ./build/bin/lotus-check --engine=kint input.bc --check-all=true
-   ./build/bin/lotus-check --engine=kint input.bc --check-int-overflow=true --check-div-by-zero=true
+   ./build/bin/lotus-check --engine=kint input.bc --checks=all
+   ./build/bin/lotus-check --engine=kint input.bc --checks=int-overflow,div-by-zero
    ./build/bin/lotus-check --engine=kint input.bc --report-json=report.json
 
 **Concurrency Tool**:
 
 .. code-block:: bash
 
-   ./build/bin/lotus-check --engine=concur input.bc --check-data-races
-   ./build/bin/lotus-check --engine=concur input.bc --check-deadlocks --check-atomicity
+   ./build/bin/lotus-check --engine=concur input.bc --checks=data-race
+   ./build/bin/lotus-check --engine=concur input.bc --checks=deadlock,atomicity
    ./build/bin/lotus-check --engine=concur input.bc --checks=openmp,mpi
    ./build/bin/lotus-check --engine=concur input.bc --report-json=report.json
 
@@ -299,7 +299,7 @@ Usage
 .. code-block:: bash
 
    ./build/bin/lotus-check --engine=pulse input.bc
-   ./build/bin/lotus-check --engine=pulse input.bc -v
+   ./build/bin/lotus-check --engine=pulse input.bc --verbose
    ./build/bin/lotus-check --engine=pulse input.bc --log-level=debug
 
 Programmatic Usage

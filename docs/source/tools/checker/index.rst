@@ -34,12 +34,17 @@ Basic Usage
 
    ./build/bin/lotus-check --help
    ./build/bin/lotus-check --list-checkers
-   ./build/bin/lotus-check --engine=generic input.bc --checker=forbidden.system
+   ./build/bin/lotus-check --list-parameters
+   ./build/bin/lotus-check --engine=generic input.bc --checks=forbidden.system
 
 ``--list-checkers`` lists both generic checker ids and native engines, with a
-``MODE`` column showing which entries are accepted by ``--checker`` and which
+``MODE`` column showing which entries are accepted by ``--checks`` and which
 must be selected through ``--engine``. For a bug-class-to-engine guide, see
 :ref:`Choosing a Checker <choosing-a-checker>`.
+
+Shared parameters are unqualified. Engine-specific parameters use
+``--<engine>.<parameter>`` so the same leaf name can have different semantics
+in different engines without becoming one ambiguous global option.
 
 Engine Examples
 ---------------
@@ -48,30 +53,30 @@ KINT:
 
 .. code-block:: bash
 
-   ./build/bin/lotus-check --engine=kint input.bc --check-all=true
-   ./build/bin/lotus-check --engine=kint input.bc --check-int-overflow=true
+   ./build/bin/lotus-check --engine=kint input.bc --checks=all
+   ./build/bin/lotus-check --engine=kint input.bc --checks=int-overflow
 
 AE:
 
 .. code-block:: bash
 
-   ./build/bin/lotus-check --engine=ae input.bc --all
-   ./build/bin/lotus-check --engine=ae input.bc --overflow --null-deref
+   ./build/bin/lotus-check --engine=ae input.bc --checks=all
+   ./build/bin/lotus-check --engine=ae input.bc --checks=buffer-overflow,null-deref
 
 Taint:
 
 .. code-block:: bash
 
    ./build/bin/lotus-check --engine=taint input.bc \
-     --aa=dyck \
-     --sources=recv,getenv \
-     --sinks=system,execve
+     --taint.alias-analysis=dyck \
+     --taint.sources=recv,getenv \
+     --taint.sinks=system,execve
 
 Concurrency:
 
 .. code-block:: bash
 
-   ./build/bin/lotus-check --engine=concur input.bc --checks=race,deadlock,openmp
+   ./build/bin/lotus-check --engine=concur input.bc --checks=data-race,deadlock,openmp
 
 Pulse:
 
@@ -89,7 +94,7 @@ Saber:
 
 .. code-block:: bash
 
-   ./build/bin/lotus-check --engine=saber input.bc --all
+   ./build/bin/lotus-check --engine=saber input.bc --checks=all
 
 SymEx:
 

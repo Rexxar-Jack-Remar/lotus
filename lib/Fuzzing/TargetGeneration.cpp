@@ -54,7 +54,8 @@ static std::string canonicalizePath(StringRef path) {
   return real_path.str().str();
 }
 
-static SourceLocation canonicalizeLocation(StringRef file, int line, int column) {
+static SourceLocation canonicalizeLocation(StringRef file, int line,
+                                           int column) {
   SourceLocation location;
   if (file.empty() || line <= 0) {
     return location;
@@ -78,7 +79,7 @@ static std::string getCheckerId(const BugReport &report,
       return it->second;
     }
   }
-  return bug_type.bug_name.str();
+  return bug_type.bug_name;
 }
 
 static SourceLocation chooseTargetLocation(const NormalizedFinding &finding) {
@@ -98,7 +99,8 @@ static int severityRank(BugDescription::BugImportance severity) {
 } // namespace
 
 std::vector<NormalizedFinding>
-collectFindings(const BugReportMgr &mgr, const TargetGenerationOptions &options) {
+collectFindings(const BugReportMgr &mgr,
+                const TargetGenerationOptions &options) {
   std::vector<NormalizedFinding> findings;
 
   for (size_t type_id = 0; type_id < mgr.get_bug_type_count(); ++type_id) {
@@ -121,7 +123,7 @@ collectFindings(const BugReportMgr &mgr, const TargetGenerationOptions &options)
 
       NormalizedFinding finding;
       finding.checker_id = getCheckerId(*report, bug_type);
-      finding.bug_class = bug_type.bug_name.str();
+      finding.bug_class = bug_type.bug_name;
       finding.severity = bug_type.importance;
       finding.confidence_score = report->get_conf_score();
       finding.trace_length = static_cast<unsigned>(report->get_steps().size());
@@ -133,8 +135,8 @@ collectFindings(const BugReportMgr &mgr, const TargetGenerationOptions &options)
           continue;
         }
 
-        SourceLocation location =
-            canonicalizeLocation(step->src_file, step->src_line, step->src_column);
+        SourceLocation location = canonicalizeLocation(
+            step->src_file, step->src_line, step->src_column);
         if (!location.isValid()) {
           continue;
         }
@@ -164,8 +166,7 @@ collectFindings(const BugReportMgr &mgr, const TargetGenerationOptions &options)
   return findings;
 }
 
-std::vector<RankedTarget>
-collectTargets(ArrayRef<NormalizedFinding> findings) {
+std::vector<RankedTarget> collectTargets(ArrayRef<NormalizedFinding> findings) {
   struct Accumulator {
     RankedTarget target;
     ReachabilityKey reachability;
@@ -180,10 +181,11 @@ collectTargets(ArrayRef<NormalizedFinding> findings) {
 
     auto key = std::make_pair(target_location.file, target_location.line);
     ReachabilityKey reachability{finding.trace_length, finding.max_trace_level,
-                                 -finding.confidence_score, finding.function_name};
+                                 -finding.confidence_score,
+                                 finding.function_name};
 
-    auto insert_result = merged_targets.insert(
-        std::make_pair(key, Accumulator()));
+    auto insert_result =
+        merged_targets.insert(std::make_pair(key, Accumulator()));
     auto it = insert_result.first;
     bool inserted = insert_result.second;
     auto &entry = it->second;
@@ -197,7 +199,8 @@ collectTargets(ArrayRef<NormalizedFinding> findings) {
       entry.target.max_trace_level = finding.max_trace_level;
       entry.reachability = reachability;
     } else {
-      if (severityRank(finding.severity) > severityRank(entry.target.severity)) {
+      if (severityRank(finding.severity) >
+          severityRank(entry.target.severity)) {
         entry.target.severity = finding.severity;
       }
       if (reachability < entry.reachability) {

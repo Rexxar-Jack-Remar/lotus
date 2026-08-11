@@ -21,7 +21,6 @@
 #include "llvm/IR/Value.h"
 #include "llvm/IR/ValueSymbolTable.h"
 #include "llvm/Pass.h"
-#include "llvm/Support/CommandLine.h"
 #include "llvm/Support/Debug.h"
 #include "llvm/Support/raw_ostream.h"
 
@@ -37,7 +36,6 @@
 #include "Checker/FiTx/Frontend/State.h"
 #include "Checker/FiTx/Frontend/StateTransition.h"
 #include "Checker/FiTx/Frontend/Utils.h"
-#include "Checker/Tooling/CheckerSubcommands.h"
 
 #include <algorithm>
 #include <chrono>
@@ -54,15 +52,6 @@
 
 #include <sys/wait.h>
 #include <unistd.h>
-
-static llvm::cl::opt<bool>
-    Async("async", llvm::cl::desc("Asynchronously conduct analysis"),
-          llvm::cl::sub(lotus::checker::tooling::fitxSubCommand()));
-
-static llvm::cl::opt<bool> MeasureTime("measure",
-                                       llvm::cl::desc("Measure analysis time"),
-                                       llvm::cl::sub(
-                                           lotus::checker::tooling::fitxSubCommand()));
 
 namespace fitx {
 
@@ -105,15 +94,9 @@ bool FrameworkPass::runOnModule(llvm::Module &M) {
   std::vector<AnalyzerInfo> analyzers;
   for (fitx::StateManager &manager : manager_) {
     LoggingClient *client = new LoggingClient();
-    AnalyzerInfo info =
-        AnalyzerInfo(new fitx::Analyzer(M, manager, *client));
+    AnalyzerInfo info = AnalyzerInfo(new fitx::Analyzer(M, manager, *client));
     analyzers.push_back(info);
     server.addClient(client);
-  }
-
-  if (Async) {
-    llvm::errs() << "FiTx warning: --async is ignored while structured "
-                    "reporting is enabled.\n";
   }
 
   for (AnalyzerInfo &analyzer : analyzers) {
@@ -122,14 +105,6 @@ bool FrameworkPass::runOnModule(llvm::Module &M) {
 
   end = std::chrono::system_clock::now();
   server.printClientLogs();
-
-  if (MeasureTime) {
-    llvm::errs() << "[Elapsed Calculated] (" << M.getName() << ") "
-                 << std::chrono::duration_cast<std::chrono::milliseconds>(end -
-                                                                          start)
-                        .count()
-                 << "\n";
-  }
 
   return false;
 }

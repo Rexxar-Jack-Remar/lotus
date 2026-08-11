@@ -40,24 +40,24 @@ Command-line usage
 
 .. code-block:: bash
 
-   ./build/bin/lotus-check --engine=ae input.bc --all
-   ./build/bin/lotus-check --engine=ae input.bc --overflow --null-deref
-   ./build/bin/lotus-check --engine=ae input.bc --handle-recur=widen-narrow --widen-delay=5
+   ./build/bin/lotus-check --engine=ae input.bc --checks=all
+   ./build/bin/lotus-check --engine=ae input.bc --checks=buffer-overflow,null-deref
+   ./build/bin/lotus-check --engine=ae input.bc --ae.recursion-mode=widen-narrow --ae.widen-delay-iterations=5
 
 Important options
 -----------------
 
-- ``--all`` enables all AE bug detectors.
-- ``--overflow``, ``--null-deref``, ``--use-after-free``, ``--invalid-free``,
-  and ``--mem-leak`` enable individual checks.
-- ``--handle-recur`` chooses the recursion strategy.
-- ``--widen-delay`` delays widening in loops.
-- ``-v`` prints more detailed traces for findings.
+- ``--checks=<id[,id...]>`` selects ``buffer-overflow``, ``null-deref``,
+  ``use-after-free``, ``invalid-free``, or ``memory-leak``. Omitting it, or
+  passing ``--checks=all``, enables all AE checks.
+- ``--ae.recursion-mode`` chooses the recursion strategy.
+- ``--ae.widen-delay-iterations`` delays widening in loops.
+- ``--verbose`` prints more detailed traces for findings.
 
 Scope and alternatives
 ----------------------
 
-``ae`` is a broad abstract-execution memory-safety pass.  Its ``--all`` option
+``ae`` is a broad abstract-execution memory-safety pass. Its ``--checks`` option
 enables only the five AE detectors listed above; it does not run Pulse, FiTx,
 Saber, or SymEx.  Use ``fitx`` for faster translation-unit feedback, ``pulse``
 for bounded witness-oriented diagnosis, ``saber`` for leaks and double frees

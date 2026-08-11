@@ -7,6 +7,7 @@
 #include "Checker/Report/ReportOptions.h"
 #include "Checker/Report/SuppressionManager.h"
 #include "Checker/Tooling/CheckerSubcommands.h"
+#include "CheckerOptions.h"
 #include "CheckerReport.h"
 
 #include <llvm/IR/PassManager.h>
@@ -25,10 +26,6 @@ using namespace llvm;
 static cl::opt<std::string>
     InputFilename(cl::Positional, cl::desc("<IR file>"), cl::Required,
                   cl::sub(lotus::checker::tooling::kintSubCommand()));
-static cl::opt<bool> VerboseReports(
-    "v", cl::desc("Print trace and IR details for reported bugs"),
-    cl::init(false), cl::sub(lotus::checker::tooling::kintSubCommand()));
-
 static void buildKintPipeline(ModulePassManager &MPM) {
   MPM.addPass(createModuleToFunctionPassAdaptor(PromotePass()));
   MPM.addPass(createModuleToFunctionPassAdaptor(SROAPass()));
@@ -52,60 +49,72 @@ llvmGetPassPluginInfo() {
 }
 
 int runKintCheckerTool(const char *argv0) {
+  (void)lotus::checker::tooling::statsEnabled();
   // Initialize command line options
   kint::initializeCommandLineOptions();
 
   // Configure the logger
   mkint::LogConfig logConfig;
-  logConfig.quiet = kint::QuietLogging;
-  logConfig.useStderr = kint::StderrLogging;
-  logConfig.logFile = kint::LogFile;
+  logConfig.useStderr = true;
 
-  // Convert from command-line LogLevel to mkint::LogLevel
-  switch (kint::CurrentLogLevel) {
-  case kint::LogLevel::DEBUG:
+  switch (lotus::checker::tooling::logLevel()) {
+  case lotus::checker::tooling::LogLevel::Trace:
+  case lotus::checker::tooling::LogLevel::Debug:
     logConfig.logLevel = mkint::LogLevel::DEBUG;
     break;
-  case kint::LogLevel::INFO:
+  case lotus::checker::tooling::LogLevel::Info:
     logConfig.logLevel = mkint::LogLevel::INFO;
     break;
-  case kint::LogLevel::WARNING:
+  case lotus::checker::tooling::LogLevel::Warning:
     logConfig.logLevel = mkint::LogLevel::WARNING;
     break;
-  case kint::LogLevel::ERROR:
+  case lotus::checker::tooling::LogLevel::Error:
     logConfig.logLevel = mkint::LogLevel::ERROR;
     break;
-  case kint::LogLevel::NONE:
+  case lotus::checker::tooling::LogLevel::None:
     logConfig.logLevel = mkint::LogLevel::NONE;
-    logConfig.quiet = true; // Also set quiet mode for backward compatibility
+    logConfig.quiet = true;
     break;
-  default:
-    logConfig.logLevel = mkint::LogLevel::WARNING;
-    break;
-  }
-
-  // If quiet is set manually, override the log level
-  if (kint::QuietLogging) {
-    logConfig.logLevel = mkint::LogLevel::NONE;
   }
 
   mkint::Logger::getInstance().configure(logConfig);
 
-  const bool noExplicitCheckerSelection =
-      kint::CheckAll.getNumOccurrences() == 0 &&
-      kint::CheckIntOverflow.getNumOccurrences() == 0 &&
-      kint::CheckDivByZero.getNumOccurrences() == 0 &&
-      kint::CheckBadShift.getNumOccurrences() == 0 &&
-      kint::CheckArrayOOB.getNumOccurrences() == 0 &&
-      kint::CheckDeadBranch.getNumOccurrences() == 0;
+  auto selectedOr =
+      lotus::checker::tooling::resolveChecks(lotus::checker::EngineKind::KINT);
+  if (!selectedOr) {
+    logAllUnhandledErrors(selectedOr.takeError(), errs(), "error: ");
+    return lotus::checker::tooling::EXIT_ERROR;
+  }
+  const auto &selected = *selectedOr;
+  kint::CheckIntOverflow = selected.count("int-overflow");
+  kint::CheckDivByZero = selected.count("div-by-zero");
+  kint::CheckBadShift = selected.count("bad-shift");
+  kint::CheckArrayOOB = selected.count("array-oob");
+  kint::CheckDeadBranch = selected.count("dead-branch");
 
-  // Match the other checker frontends: no checker flags means run all checks.
-  if (kint::CheckAll || noExplicitCheckerSelection) {
-    kint::CheckIntOverflow = true;
-    kint::CheckDivByZero = true;
-    kint::CheckBadShift = true;
-    kint::CheckArrayOOB = true;
-    kint::CheckDeadBranch = true;
+  if (kint::RobustChecks.empty()) {
+    std::string robustChecks;
+    for (const std::string &id : selected) {
+      if (!robustChecks.empty()) {
+        robustChecks += ',';
+      }
+      robustChecks += id;
+    }
+    kint::RobustChecks = robustChecks;
+  } else {
+    auto robustOr = lotus::checker::tooling::parseCheckIdList(
+        "KINT robust", kint::RobustChecks, false);
+    if (!robustOr) {
+      logAllUnhandledErrors(robustOr.takeError(), errs(), "error: ");
+      return lotus::checker::tooling::EXIT_ERROR;
+    }
+    for (const std::string &id : *robustOr) {
+      if (!selected.count(id)) {
+        errs() << "error: KINT robust check '" << id
+               << "' is not enabled by --checks\n";
+        return lotus::checker::tooling::EXIT_ERROR;
+      }
+    }
   }
 
   // Print checker configuration
@@ -131,9 +140,8 @@ int runKintCheckerTool(const char *argv0) {
   // Explicitly selecting an empty checker set is a configuration error.
   if (!kint::CheckIntOverflow && !kint::CheckDivByZero &&
       !kint::CheckBadShift && !kint::CheckArrayOOB && !kint::CheckDeadBranch) {
-    errs()
-        << "error: no KINT checks selected\n"
-        << "hint: use --check-all or enable an individual --check-* option\n";
+    errs() << "error: no KINT checks selected\n"
+           << "hint: select at least one checker with --checks=<id>\n";
     return lotus::checker::tooling::EXIT_ERROR;
   }
 
@@ -147,6 +155,8 @@ int runKintCheckerTool(const char *argv0) {
     Err.print(argv0, llvm::errs());
     return lotus::checker::tooling::EXIT_ERROR;
   }
+  BugReportMgr &mgr = BugReportMgr::get_instance();
+  lotus::checker::tooling::AnalysisStatsRecorder stats("kint", *M, mgr);
 
   // Create and run the pass (new pass manager with cross-registered proxies)
   llvm::LoopAnalysisManager LAM;
@@ -166,7 +176,7 @@ int runKintCheckerTool(const char *argv0) {
 
   // Run analysis pipeline (bugs are automatically reported to BugReportMgr)
   MPM.run(*M, MAM);
-
-  BugReportMgr &mgr = BugReportMgr::get_instance();
-  return lotus::checker::tooling::emitCheckerReports(mgr, {VerboseReports});
+  stats.emit();
+  return lotus::checker::tooling::emitCheckerReports(
+      mgr, {lotus::checker::tooling::Verbose});
 }

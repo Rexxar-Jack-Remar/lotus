@@ -1,16 +1,24 @@
-/** @file CheckerRegistry.h @brief Registry for registering and instantiating checker analyses. */
+/** @file CheckerRegistry.h @brief Registry for registering and instantiating
+ * checker analyses. */
 #pragma once
 
 #include "Checker/Core/CheckerTypes.h"
-
-#include <llvm/ADT/StringRef.h>
-#include <llvm/Support/Error.h>
 
 #include <optional>
 #include <string>
 #include <vector>
 
+#include <llvm/ADT/ArrayRef.h>
+#include <llvm/ADT/StringRef.h>
+#include <llvm/Support/Error.h>
+
 namespace lotus::checker {
+
+struct NativeCheckDescriptor {
+  llvm::StringRef id;
+  llvm::StringRef title;
+  bool default_enabled = true;
+};
 
 struct CheckerDescriptor {
   CheckerMetadata metadata;
@@ -32,8 +40,7 @@ public:
                              std::vector<CheckerCapability> capabilities,
                              bool executable = false);
 
-  llvm::Expected<const CheckerDescriptor *>
-  findById(llvm::StringRef id) const;
+  llvm::Expected<const CheckerDescriptor *> findById(llvm::StringRef id) const;
   std::vector<const CheckerDescriptor *> list() const;
   std::vector<const CheckerDescriptor *>
   select(llvm::StringRef category, std::optional<EngineKind> engine) const;
@@ -43,5 +50,6 @@ private:
 };
 
 llvm::Error registerBuiltinNativeCheckers(CheckerRegistry &registry);
+llvm::ArrayRef<NativeCheckDescriptor> getBuiltinNativeChecks(EngineKind engine);
 
 } // namespace lotus::checker

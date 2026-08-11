@@ -44,21 +44,19 @@ public:
    */
   struct BugType {
     int id;
-    llvm::StringRef bug_name;
+    std::string bug_name;
     BugDescription::BugImportance importance;
     BugDescription::BugClassification classification;
-    llvm::StringRef desc;
+    std::string desc;
 
     BugType()
         : id(-1), bug_name(""), importance(BugDescription::BI_NA),
           classification(BugDescription::BC_NA), desc("") {}
 
-    BugType(int id, const llvm::StringRef &name,
-            BugDescription::BugImportance imp,
-            BugDescription::BugClassification cls,
-            const llvm::StringRef &description)
-        : id(id), bug_name(name), importance(imp), classification(cls),
-          desc(description) {}
+    BugType(int id, llvm::StringRef name, BugDescription::BugImportance imp,
+            BugDescription::BugClassification cls, llvm::StringRef description)
+        : id(id), bug_name(name.str()), importance(imp), classification(cls),
+          desc(description.str()) {}
   };
 
 public:

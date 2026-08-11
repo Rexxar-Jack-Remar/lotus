@@ -1,6 +1,5 @@
-#include "Checker/KINT/MKintAnalysisSupport.h"
-
 #include "Checker/KINT/Log.h"
+#include "Checker/KINT/MKintAnalysisSupport.h"
 #include "Checker/KINT/Options.h"
 
 using namespace llvm;
@@ -12,9 +11,9 @@ void MKintPass::pushSymFrame() {
 }
 
 void MKintPass::pushObjectFrame() {
-  m_object_frames.push_back(
-      {m_obj_base, m_obj_size, m_obj_list, m_obj_mem, m_obj_alias,
-       m_int_alias, m_ptr_offset, m_int_offset, m_obj_freed});
+  m_object_frames.push_back({m_obj_base, m_obj_size, m_obj_list, m_obj_mem,
+                             m_obj_alias, m_int_alias, m_ptr_offset,
+                             m_int_offset, m_obj_freed});
 }
 
 void MKintPass::popObjectFrame() {
@@ -210,8 +209,7 @@ void MKintPass::havocObject(const Value *obj, const std::string &hint) {
 }
 
 void MKintPass::havocObjectRange(const Value *obj, const z3::expr &offset,
-                                 uint64_t numBytes,
-                                 const std::string &hint) {
+                                 uint64_t numBytes, const std::string &hint) {
   if (!obj || numBytes == 0)
     return;
   if (!m_obj_mem.count(obj) || !m_obj_mem[obj].has_value()) {
@@ -223,12 +221,10 @@ void MKintPass::havocObjectRange(const Value *obj, const z3::expr &offset,
   z3::expr curMem = m_obj_mem[obj].value();
   for (uint64_t i = 0; i < numBytes; ++i) {
     const auto id = g_obj_mem_id.fetch_add(1, std::memory_order_relaxed);
-    const std::string name = "%objmem." + hint + "." + std::to_string(id) +
-                             ".b" + std::to_string(i);
+    const std::string name =
+        "%objmem." + hint + "." + std::to_string(id) + ".b" + std::to_string(i);
     z3::expr fresh = ctx.bv_const(name.c_str(), 8);
-    curMem = z3::store(curMem,
-                       offset + ctx.bv_val(i, m_ptr_bits),
-                       fresh);
+    curMem = z3::store(curMem, offset + ctx.bv_val(i, m_ptr_bits), fresh);
   }
   m_obj_mem[obj] = curMem;
 }
@@ -368,15 +364,15 @@ void MKintPass::parseRobustBugFilter(const std::string &csv) {
       return s.substr(b, e - b + 1);
     };
     token = trim(token);
-    if (token == "overflow") {
+    if (token == "int-overflow") {
       m_robust_bug_filter.insert(interr::INT_OVERFLOW);
-    } else if (token == "div0" || token == "div") {
+    } else if (token == "div-by-zero") {
       m_robust_bug_filter.insert(interr::DIV_BY_ZERO);
-    } else if (token == "shift") {
+    } else if (token == "bad-shift") {
       m_robust_bug_filter.insert(interr::BAD_SHIFT);
-    } else if (token == "oob" || token == "array-oob") {
+    } else if (token == "array-oob") {
       m_robust_bug_filter.insert(interr::ARRAY_OOB);
-    } else if (token == "dead") {
+    } else if (token == "dead-branch") {
       m_robust_bug_filter.insert(interr::DEAD_TRUE_BR);
       m_robust_bug_filter.insert(interr::DEAD_FALSE_BR);
     }

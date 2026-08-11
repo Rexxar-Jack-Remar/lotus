@@ -1,4 +1,5 @@
-/** @file AbstractInterpretation.h @brief Abstract execution engine for sparse bug detection via abstract interpretation. */
+/** @file AbstractInterpretation.h @brief Abstract execution engine for sparse
+ * bug detection via abstract interpretation. */
 //===- AbstractInterpretation.h -- Abstract Execution---------------//
 //
 // Migrated from SVF's AE engine to Lotus.
@@ -200,6 +201,7 @@ public:
   void setEnableOverflowCheck(bool enable) { enableOverflowCheck_ = enable; }
   void setEnableMemLeakCheck(bool enable) { enableMemLeakCheck_ = enable; }
   void setAnalyzeAllFunctions(bool enable) { analyzeAllFunctions_ = enable; }
+  void setPrintStats(bool enable) { printStats_ = enable; }
 
   std::set<const llvm::CallBase *> checkpoints;
 
@@ -274,6 +276,7 @@ private:
   bool enableOverflowCheck_{false};
   bool enableMemLeakCheck_{false}; // Disabled by default
   bool analyzeAllFunctions_{false};
+  bool printStats_{false};
 
   // Track which checkpoints have been checked
   std::set<const llvm::CallBase *> checkedCheckpoints_;

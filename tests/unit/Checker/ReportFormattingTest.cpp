@@ -1,5 +1,6 @@
 #include "Checker/Report/BugReport.h"
 #include "Checker/Report/BugReportMgr.h"
+#include "Checker/Report/SuppressionManager.h"
 
 #include <string>
 #include <vector>
@@ -243,6 +244,40 @@ TEST(ReportFormattingTest, DedupNeverMergesDifferentBugTypes) {
 
   mgr.deduplicate_reports(BugReportMgr::DedupMode::ExactTrace);
   EXPECT_EQ(mgr.get_total_reports(), 2);
+}
+
+TEST(ReportFormattingTest, BugTypeRegistryOwnsDynamicStrings) {
+  BugReportMgr mgr;
+  std::string name = "Dynamically Registered Bug";
+  std::string description = "dynamic description";
+  int bugType = mgr.register_bug_type(name, BugDescription::BI_MEDIUM,
+                                      BugDescription::BC_SECURITY, description);
+
+  name.assign(256, 'x');
+  description.assign(256, 'y');
+
+  const auto &registered = mgr.get_bug_type_info(bugType);
+  EXPECT_EQ(registered.bug_name, "Dynamically Registered Bug");
+  EXPECT_EQ(registered.desc, "dynamic description");
+}
+
+TEST(ReportFormattingTest, SuppressionRebuildsDeduplicationIndex) {
+  BugReportMgr mgr;
+  int bugType = mgr.register_bug_type("Suppressible Bug");
+
+  auto *suppressed = new BugReport(bugType);
+  suppressed->append_step(makeStep("suppressed.c", 10, "same finding"));
+  ASSERT_TRUE(mgr.insert_report(bugType, suppressed, true));
+
+  SuppressionManager suppressions;
+  suppressions.addFileSuppression("Suppressible Bug", "suppressed.c");
+  mgr.filterSuppressed(suppressions);
+  EXPECT_EQ(mgr.get_total_reports(), 0);
+
+  auto *replacement = new BugReport(bugType);
+  replacement->append_step(makeStep("suppressed.c", 10, "same finding"));
+  EXPECT_TRUE(mgr.insert_report(bugType, replacement, true));
+  EXPECT_EQ(mgr.get_total_reports(), 1);
 }
 
 } // namespace

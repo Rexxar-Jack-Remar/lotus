@@ -1,5 +1,13 @@
 #pragma once
 
+#include <functional>
+
+#include <llvm/ADT/StringRef.h>
+
+namespace llvm {
+class raw_ostream;
+}
+
 class BugReportMgr;
 
 namespace lotus::checker::tooling {
@@ -16,6 +24,12 @@ struct CheckerReportOptions {
 
 /// Validate command-line options shared by every checker engine.
 bool validateReportOptions();
+
+/// Write checker output through a temporary file and atomically replace the
+/// destination after the stream has closed successfully.
+bool writeCheckerOutputAtomically(
+    llvm::StringRef path, llvm::StringRef format,
+    const std::function<void(llvm::raw_ostream &)> &write);
 
 int emitCheckerReports(BugReportMgr &manager,
                        const CheckerReportOptions &options = {});

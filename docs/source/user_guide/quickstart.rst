@@ -33,19 +33,19 @@ Bug Detection
 .. code-block:: bash
 
    # Integer and array bugs
-   ./build/bin/lotus-check --engine=kint example.ll --check-int-overflow  # Integer overflow
-   ./build/bin/lotus-check --engine=kint example.ll --check-array-oob     # Array out of bounds
-   ./build/bin/lotus-check --engine=kint example.ll --check-all           # All KINT checks
+   ./build/bin/lotus-check --engine=kint example.ll --checks=int-overflow  # Integer overflow
+   ./build/bin/lotus-check --engine=kint example.ll --checks=array-oob     # Array out of bounds
+   ./build/bin/lotus-check --engine=kint example.ll --checks=all           # All KINT checks
    
    # Memory safety: choose the engine for the workflow.
    ./build/bin/lotus-check --engine=fitx example.bc                  # Fast feedback
-   ./build/bin/lotus-check --engine=ae example.bc --all              # Broad AE pass
+   ./build/bin/lotus-check --engine=ae example.bc --checks=all       # Broad AE pass
    ./build/bin/lotus-check --engine=pulse example.bc                 # Witness-oriented checks
-   ./build/bin/lotus-check --engine=saber example.bc --all           # Leaks and double frees
+   ./build/bin/lotus-check --engine=saber example.bc --checks=all    # Leaks and double frees
 
     # IFDS-based, taint-style bugs  
    ./build/bin/lotus-check --engine=taint example.bc                    # Basic taint analysis
-   ./build/bin/lotus-check --engine=taint example.bc --sources=read,scanf --sinks=system,exec
+   ./build/bin/lotus-check --engine=taint example.bc --taint.sources=read,scanf --taint.sinks=system,exec
 
    # Concurrency bugs
    ./build/bin/lotus-check --engine=concur example.bc            # Concurrency bug detection
@@ -113,5 +113,5 @@ Analysis commands:
    clang -emit-llvm -c example.c -o example.bc
    clang -emit-llvm -S example.c -o example.ll
    ./build/bin/lotus-check --engine=taint example.bc                 # Detect taint flow
-   ./build/bin/lotus-check --engine=kint example.ll --check-array-oob # Check array bounds
+   ./build/bin/lotus-check --engine=kint example.ll --checks=array-oob # Check array bounds
    ./build/bin/lotus-check --engine=pulse example.bc                 # Memory safety checks

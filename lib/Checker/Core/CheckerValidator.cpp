@@ -7,12 +7,14 @@ using namespace llvm;
 namespace lotus::checker {
 
 static Error validationError(const CheckerSpec &spec, const char *message) {
-  return createStringError(inconvertibleErrorCode(), "invalid checker spec '%s': %s",
+  return createStringError(inconvertibleErrorCode(),
+                           "invalid checker spec '%s': %s",
                            spec.metadata.id.c_str(), message);
 }
 
-Error CheckerValidator::validate(const CheckerSpec &spec,
-                                 const std::unordered_set<std::string> &existing_ids) {
+Error CheckerValidator::validate(
+    const CheckerSpec &spec,
+    const std::unordered_set<std::string> &existing_ids) {
   if (spec.metadata.id.empty()) {
     return createStringError(inconvertibleErrorCode(),
                              "invalid checker spec: missing metadata.id");
@@ -26,7 +28,8 @@ Error CheckerValidator::validate(const CheckerSpec &spec,
     return validationError(spec, "missing metadata.title");
   }
   if (!spec.isDeclarative()) {
-    return validationError(spec, "declarative specs must use declarative engine");
+    return validationError(spec,
+                           "declarative specs must use declarative engine");
   }
   if (spec.message.empty()) {
     return validationError(spec, "missing message");
@@ -42,7 +45,10 @@ Error CheckerValidator::validate(const CheckerSpec &spec,
     }
     break;
   case RuleKind::SourceSink:
-    if (spec.source_sink.sources.empty() || spec.source_sink.sinks.empty()) {
+    if ((spec.source_sink.sources.empty() &&
+         spec.source_sink.source_models.empty()) ||
+        (spec.source_sink.sinks.empty() &&
+         spec.source_sink.sink_models.empty())) {
       return validationError(spec, "source_sink requires sources and sinks");
     }
     break;
@@ -53,7 +59,8 @@ Error CheckerValidator::validate(const CheckerSpec &spec,
     }
     break;
   case RuleKind::Native:
-    return validationError(spec, "native rule kind is not allowed in YAML specs");
+    return validationError(spec,
+                           "native rule kind is not allowed in YAML specs");
   }
 
   return Error::success();

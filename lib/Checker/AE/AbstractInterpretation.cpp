@@ -126,7 +126,8 @@ AbstractValue evaluateConstantInitializer(AbstractState &state,
           AddressValue(AddressValue::getVirtualMemAddress(baseId)));
     }
 
-    AddressValue fieldAddrs = state.getGepObjAddrs(baseId, IntervalValue(byteOffset));
+    AddressValue fieldAddrs =
+        state.getGepObjAddrs(baseId, IntervalValue(byteOffset));
     if (!fieldAddrs.isBottom()) {
       uint32_t baseSize = state.getObjSize(baseId);
       if (baseSize > static_cast<uint32_t>(byteOffset)) {
@@ -171,8 +172,7 @@ void materializeGlobalInitializer(AbstractState &state, uint32_t baseValueId,
       if (const auto *structTyConst =
               llvm::dyn_cast<llvm::StructType>(init->getType())) {
         auto *structTy = const_cast<llvm::StructType *>(structTyConst);
-        const llvm::StructLayout *layout =
-            dl.getStructLayout(structTy);
+        const llvm::StructLayout *layout = dl.getStructLayout(structTy);
         for (unsigned i = 0; i < structTy->getNumElements(); ++i) {
           llvm::Constant *fieldInit =
               llvm::Constant::getNullValue(structTy->getElementType(i));
@@ -188,10 +188,10 @@ void materializeGlobalInitializer(AbstractState &state, uint32_t baseValueId,
         uint64_t elemSize = elemTy->isSized() ? dl.getTypeAllocSize(elemTy) : 1;
         for (uint64_t i = 0; i < arrayTy->getNumElements(); ++i) {
           llvm::Constant *elemInit = llvm::Constant::getNullValue(elemTy);
-          materializeGlobalInitializer(
-              state, baseValueId,
-              byteOffset + static_cast<uint32_t>(i * elemSize), true, elemInit,
-              dl);
+          materializeGlobalInitializer(state, baseValueId,
+                                       byteOffset +
+                                           static_cast<uint32_t>(i * elemSize),
+                                       true, elemInit, dl);
         }
         return;
       }
@@ -201,10 +201,10 @@ void materializeGlobalInitializer(AbstractState &state, uint32_t baseValueId,
         uint64_t elemSize = elemTy->isSized() ? dl.getTypeAllocSize(elemTy) : 1;
         for (unsigned i = 0; i < vecTy->getNumElements(); ++i) {
           llvm::Constant *elemInit = llvm::Constant::getNullValue(elemTy);
-          materializeGlobalInitializer(
-              state, baseValueId,
-              byteOffset + static_cast<uint32_t>(i * elemSize), true, elemInit,
-              dl);
+          materializeGlobalInitializer(state, baseValueId,
+                                       byteOffset +
+                                           static_cast<uint32_t>(i * elemSize),
+                                       true, elemInit, dl);
         }
         return;
       }
@@ -233,10 +233,9 @@ void materializeGlobalInitializer(AbstractState &state, uint32_t baseValueId,
     for (unsigned i = 0; i < arrayInit->getNumOperands(); ++i) {
       const llvm::Constant *elemInit =
           llvm::cast<llvm::Constant>(arrayInit->getOperand(i));
-      materializeGlobalInitializer(state, baseValueId,
-                                   byteOffset +
-                                       static_cast<uint32_t>(i * elemSize),
-                                   true, elemInit, dl);
+      materializeGlobalInitializer(
+          state, baseValueId, byteOffset + static_cast<uint32_t>(i * elemSize),
+          true, elemInit, dl);
     }
     return;
   }
@@ -247,10 +246,9 @@ void materializeGlobalInitializer(AbstractState &state, uint32_t baseValueId,
     for (unsigned i = 0; i < vecInit->getNumOperands(); ++i) {
       const llvm::Constant *elemInit =
           llvm::cast<llvm::Constant>(vecInit->getOperand(i));
-      materializeGlobalInitializer(state, baseValueId,
-                                   byteOffset +
-                                       static_cast<uint32_t>(i * elemSize),
-                                   true, elemInit, dl);
+      materializeGlobalInitializer(
+          state, baseValueId, byteOffset + static_cast<uint32_t>(i * elemSize),
+          true, elemInit, dl);
     }
     return;
   }
@@ -285,8 +283,8 @@ void materializeConstantValue(AbstractState &as, const llvm::Value *val,
 
 void clearAEBugReports() {
   static constexpr const char *AEBugTypeNames[] = {
-      "AE Buffer Overflow", "AE Null Dereference", "AE Divide By Zero",
-      "AE Integer Overflow", "AE Use After Free", "AE Invalid Free",
+      "AE Buffer Overflow",  "AE Null Dereference", "AE Divide By Zero",
+      "AE Integer Overflow", "AE Use After Free",   "AE Invalid Free",
       "AE Memory Leak"};
 
   BugReportMgr &mgr = BugReportMgr::get_instance();
@@ -410,6 +408,7 @@ void AbstractInterpretation::reset() {
   enableOverflowCheck_ = false;
   enableMemLeakCheck_ = false;
   analyzeAllFunctions_ = false;
+  printStats_ = false;
   detectors.clear();
 }
 
@@ -457,11 +456,10 @@ void AbstractInterpretation::runOnModule(llvm::Module *module) {
   utils = new AEExtAPI(abstractTrace);
 
   auto hasDetectorKind = [&](AEDetector::DetectorKind kind) {
-    return std::any_of(
-        detectors.begin(), detectors.end(),
-        [&](const std::unique_ptr<AEDetector> &detector) {
-          return detector && detector->getKind() == kind;
-        });
+    return std::any_of(detectors.begin(), detectors.end(),
+                       [&](const std::unique_ptr<AEDetector> &detector) {
+                         return detector && detector->getKind() == kind;
+                       });
   };
 
   if (enableDivZeroCheck_ && !hasDetectorKind(AEDetector::DIV_ZERO)) {
@@ -487,11 +485,13 @@ void AbstractInterpretation::runOnModule(llvm::Module *module) {
   stat->endClk();
 
   stat->finializeStat();
-  if (!isAEQuietMode()) {
+  if (!isAEQuietMode() && printStats_)
     stat->performStat();
 
-    for (auto &detector : detectors)
-      detector->reportBug();
+  for (auto &detector : detectors)
+    detector->reportBug();
+
+  if (!isAEQuietMode()) {
     llvm::outs().flush();
     llvm::errs().flush();
   }
@@ -563,7 +563,8 @@ void AbstractInterpretation::handleGlobalNode() {
     // In LLVM IR a global variable is used as its address.
     globalState[globalId] = AbstractValue(AddressValue(globalAddr));
     if (global.getValueType()->isSized()) {
-      globalState.setObjSize(globalId, dl.getTypeAllocSize(global.getValueType()));
+      globalState.setObjSize(globalId,
+                             dl.getTypeAllocSize(global.getValueType()));
     }
 
     if (global.hasInitializer() && !global.isDeclaration()) {
@@ -2991,12 +2992,15 @@ void AbstractInterpretation::setTopToObjInRecursion(
         continue;
 
       const llvm::Value *storedVal = store->getValueOperand();
-      if (storedVal->getType()->isPointerTy() || storedVal->getType()->isVoidTy())
+      if (storedVal->getType()->isPointerTy() ||
+          storedVal->getType()->isVoidTy())
         continue;
 
-      const llvm::Value *base = stripPointerProjections(store->getPointerOperand());
+      const llvm::Value *base =
+          stripPointerProjections(store->getPointerOperand());
       if (const auto *arg = llvm::dyn_cast<llvm::Argument>(base)) {
-        if (arg->getParent() == callee && arg->getArgNo() < callNode->arg_size()) {
+        if (arg->getParent() == callee &&
+            arg->getArgNo() < callNode->arg_size()) {
           topifyReachableMemory(callNode->getArgOperand(arg->getArgNo()));
         }
         continue;

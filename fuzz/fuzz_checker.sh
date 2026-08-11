@@ -1,5 +1,5 @@
 #!/bin/bash
-# Fuzz the checkers in tools/checker (lotus-kint, lotus-taint, lotus-concur, lotus-pulse, lotus-fitx).
+# Fuzz the engines exposed by the unified tools/checker frontend.
 # Uses CSmith to generate random C, compiles to LLVM IR, then runs each checker.
 # export CLANG="/path/to/your/clang"
 CLANG="${CLANG:-clang}"
@@ -52,61 +52,65 @@ while true; do
     fi
     echo "Output: Compilation successful"
 
-    # lotus-kint
-    echo "=== Running lotus-kint ==="
-    if ! "$BUILD_DIR/bin/lotus-kint" "$BC_FILE" 2>&1; then
-        echo "CRASH: lotus-kint crashed on $C_FILE"
+    # KINT
+    echo "=== Running lotus-check --engine=kint ==="
+    if ! "$BUILD_DIR/bin/lotus-check" --engine=kint "$BC_FILE" 2>&1; then
+        echo "CRASH: lotus-check kint crashed on $C_FILE"
         echo "Test files preserved: $C_FILE, $BC_FILE"
         exit 1
     fi
-    echo "✓ lotus-kint completed successfully"
+    echo "✓ lotus-check kint completed successfully"
 
     # lotus-taint (with default and a couple of aa types)
     for aa in dyck andersen; do
-        echo "=== Running lotus-taint --aa=$aa ==="
-        if ! "$BUILD_DIR/bin/lotus-taint" --aa="$aa" "$BC_FILE" 2>&1; then
-            echo "CRASH: lotus-taint (--aa=$aa) crashed on $C_FILE"
+        echo "=== Running lotus-check --engine=taint --taint.alias-analysis=$aa ==="
+        if ! "$BUILD_DIR/bin/lotus-check" --engine=taint --taint.alias-analysis="$aa" "$BC_FILE" 2>&1; then
+            echo "CRASH: lotus-check taint (--taint.alias-analysis=$aa) crashed on $C_FILE"
             echo "Test files preserved: $C_FILE, $BC_FILE"
             exit 1
         fi
-        echo "✓ lotus-taint (--aa=$aa) completed successfully"
+        echo "✓ lotus-check taint (--taint.alias-analysis=$aa) completed successfully"
     done
 
-    # lotus-concur (all checks enabled by default; also run analysis-only)
-    echo "=== Running lotus-concur ==="
-    if ! "$BUILD_DIR/bin/lotus-concur" "$BC_FILE" 2>&1; then
-        echo "CRASH: lotus-concur crashed on $C_FILE"
+    # Concurrency (all checks enabled by default; also run analysis mode)
+    echo "=== Running lotus-check --engine=concur ==="
+    if ! "$BUILD_DIR/bin/lotus-check" --engine=concur "$BC_FILE" 2>&1; then
+        echo "CRASH: lotus-check concur crashed on $C_FILE"
         echo "Test files preserved: $C_FILE, $BC_FILE"
         exit 1
     fi
-    echo "✓ lotus-concur completed successfully"
-    echo "=== Running lotus-concur --analysis-only ==="
-    if ! "$BUILD_DIR/bin/lotus-concur" --analysis-only "$BC_FILE" 2>&1; then
-        echo "CRASH: lotus-concur (--analysis-only) crashed on $C_FILE"
+    echo "✓ lotus-check concur completed successfully"
+    echo "=== Running lotus-check --engine=concur --concur.mode=analysis ==="
+    if ! "$BUILD_DIR/bin/lotus-check" --engine=concur --concur.mode=analysis "$BC_FILE" 2>&1; then
+        echo "CRASH: lotus-check concur (--concur.mode=analysis) crashed on $C_FILE"
         echo "Test files preserved: $C_FILE, $BC_FILE"
         exit 1
     fi
-    echo "✓ lotus-concur (--analysis-only) completed successfully"
+    echo "✓ lotus-check concur (--concur.mode=analysis) completed successfully"
 
     # lotus-pulse (with and without SMT for coverage)
     for no_smt in false true; do
-        echo "=== Running lotus-pulse --no-smt=$no_smt ==="
-        if ! "$BUILD_DIR/bin/lotus-pulse" --no-smt="$no_smt" "$BC_FILE" 2>&1; then
-            echo "CRASH: lotus-pulse (--no-smt=$no_smt) crashed on $C_FILE"
+        smt_mode=on
+        if [ "$no_smt" = true ]; then
+            smt_mode=off
+        fi
+        echo "=== Running lotus-check --engine=pulse --pulse.smt=$smt_mode ==="
+        if ! "$BUILD_DIR/bin/lotus-check" --engine=pulse --pulse.smt="$smt_mode" "$BC_FILE" 2>&1; then
+            echo "CRASH: lotus-check pulse (--pulse.smt=$smt_mode) crashed on $C_FILE"
             echo "Test files preserved: $C_FILE, $BC_FILE"
             exit 1
         fi
-        echo "✓ lotus-pulse (--no-smt=$no_smt) completed successfully"
+        echo "✓ lotus-check pulse (--pulse.smt=$smt_mode) completed successfully"
     done
 
-    # lotus-fitx
-    echo "=== Running lotus-fitx ==="
-    if ! "$BUILD_DIR/bin/lotus-fitx" "$BC_FILE" 2>&1; then
-        echo "CRASH: lotus-fitx crashed on $C_FILE"
+    # FiTx
+    echo "=== Running lotus-check --engine=fitx ==="
+    if ! "$BUILD_DIR/bin/lotus-check" --engine=fitx "$BC_FILE" 2>&1; then
+        echo "CRASH: lotus-check fitx crashed on $C_FILE"
         echo "Test files preserved: $C_FILE, $BC_FILE"
         exit 1
     fi
-    echo "✓ lotus-fitx completed successfully"
+    echo "✓ lotus-check fitx completed successfully"
 
     # Cleanup if no crash
     rm -f "$C_FILE" "$BC_FILE"

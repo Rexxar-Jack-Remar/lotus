@@ -102,7 +102,7 @@ void SrcSnkDDA::initialize() {
       RecursiveTimer timer("SVFG build");
       memSSA.setModule(module_);
       memSSA.setSaberCondAllocator(getSaberCondAllocator());
-      svfg_ = memSSA.buildForSaber(icfg_.get(), SaberOptions::fullSVFG());
+      svfg_ = memSSA.buildForSaber(icfg_.get(), SaberFullSVFG);
       if (!svfg_) {
         icfg_.reset();
         icfgBuilder_.reset();
@@ -116,7 +116,7 @@ void SrcSnkDDA::initialize() {
       memSSA.rmIncomingEdgeForSUStore();
       memSSA.AddExtActualParmSVFGNodes();
       memSSA.recomputeGlobalSVFGNodes();
-      if (SaberOptions::verbose()) {
+      if (SaberVerbose) {
         outs() << "SVFG nodes: " << this->svfg->getNumNodes() << "\n";
       }
     }
@@ -129,13 +129,13 @@ void SrcSnkDDA::initialize() {
     memSSA.setCurrentSVFG(this->svfg);
     memSSA.collectGlobals();
     memSSA.recomputeGlobalSVFGNodes();
-    if (SaberOptions::verbose()) {
+    if (SaberVerbose) {
       outs() << "Using shared SVFG (nodes: " << this->svfg->getNumNodes()
              << ")\n";
     }
   }
 
-  if (SaberOptions::dumpSlice())
+  if (SaberDumpSlice)
     sliceStats_ = std::make_unique<SVFGStats>(svfg);
 
   {
@@ -155,7 +155,7 @@ void SrcSnkDDA::initialize() {
     {
       RecursiveTimer timer("Source initialization");
       initSrcs();
-      if (SaberOptions::verbose()) {
+      if (SaberVerbose) {
         outs() << "Found " << sources.size() << " source(s)\n";
       }
     }
@@ -163,11 +163,11 @@ void SrcSnkDDA::initialize() {
     {
       RecursiveTimer timer("Sink initialization");
       initSnks();
-      if (SaberOptions::verbose()) {
+      if (SaberVerbose) {
         outs() << "Found " << sinks.size() << " sink(s)\n";
       }
     }
-  } else if (SaberOptions::verbose()) {
+  } else if (SaberVerbose) {
     outs() << "Using precomputed sources/sinks (" << sources.size()
            << " source(s), " << sinks.size() << " sink(s))\n";
   }
@@ -179,18 +179,18 @@ void SrcSnkDDA::analyze() {
   initialize();
 
   if (sources.empty()) {
-    if (SaberOptions::verbose()) {
+    if (SaberVerbose) {
       outs() << "No sources found, skipping analysis\n";
     }
     finalize();
     return;
   }
 
-  ContextCond::setMaxCxtLen(SaberOptions::cxtLimit());
+  ContextCond::setMaxCxtLen(SaberCxtLimit);
 
-  if (SaberOptions::verbose()) {
+  if (SaberVerbose) {
     outs() << "Analyzing " << sources.size() << " source(s) with context limit "
-           << SaberOptions::cxtLimit() << "\n";
+           << SaberCxtLimit << "\n";
   }
 
   unsigned sourceIdx = 0;
@@ -209,14 +209,14 @@ void SrcSnkDDA::analyze() {
       CxtVar var(cxt, srcNode->getId());
       DPIm item(var, srcNode);
       forwardTraverse(item);
-      if (SaberOptions::verbose()) {
+      if (SaberVerbose) {
         outs() << "Forward slice size: " << getCurSlice()->getForwardSliceSize()
                << "\n";
       }
     }
 
     if (getCurSlice()->isReachGlobal()) {
-      if (SaberOptions::verbose()) {
+      if (SaberVerbose) {
         outs() << "Source reaches global, skipping path analysis\n";
       }
     } else {
@@ -232,13 +232,13 @@ void SrcSnkDDA::analyze() {
         backwardTraverse(item);
       }
 
-      if (SaberOptions::verbose()) {
+      if (SaberVerbose) {
         outs() << "Backward slice size: "
                << getCurSlice()->getBackwardSliceSize() << " (" << sinkCount
                << " sinks)\n";
       }
 
-      if (SaberOptions::dumpSlice())
+      if (SaberDumpSlice)
         annotateSlice(getCurSlice());
 
       {
@@ -269,7 +269,7 @@ bool SrcSnkDDA::isInAWrapper(const SVFGNode *src, CallSiteSet &csIdSet) {
       continue;
     visited.insert(node->getId());
 
-    if (step++ > SaberOptions::maxStepInWrapper())
+    if (step++ > SaberMaxStepInWrapper)
       return false;
 
     for (SVFGEdge *e : node->getOutEdges()) {
@@ -327,7 +327,7 @@ void SrcSnkDDA::forwardTraverse(DPIm &it) {
   unsigned long long processed = 0;
   unsigned long long lastReport = 0;
   bool hitForwardItemLimit = false;
-  const unsigned maxForwardItems = SaberOptions::maxForwardItems();
+  const unsigned maxForwardItems = SaberMaxForwardItems;
   const unsigned long long verboseReportInterval =
       10000; // Report every 10k nodes in verbose mode
   const unsigned long long normalReportInterval =
@@ -349,12 +349,12 @@ void SrcSnkDDA::forwardTraverse(DPIm &it) {
 
     // Periodic progress reporting
     unsigned long long reportInterval =
-        SaberOptions::verbose() ? verboseReportInterval : normalReportInterval;
-    if (SaberOptions::verbose() && processed - lastReport >= reportInterval) {
+        SaberVerbose ? verboseReportInterval : normalReportInterval;
+    if (SaberVerbose && processed - lastReport >= reportInterval) {
       outs() << "  Forward traverse progress: processed " << processed
              << " items, forward slice size: "
              << getCurSlice()->getForwardSliceSize();
-      if (SaberOptions::verbose()) {
+      if (SaberVerbose) {
         outs() << ", unique nodes with contexts: " << nodeToDPItemsMap.size();
       }
       outs() << "\n";
@@ -370,14 +370,14 @@ void SrcSnkDDA::forwardTraverse(DPIm &it) {
   if (hitForwardItemLimit) {
     while (!isWorklistEmpty())
       (void)popFromWorklist();
-    if (SaberOptions::verbose()) {
+    if (SaberVerbose) {
       outs() << "  Forward traverse stopped after " << processed
-             << " items (hit --saber-max-forward-items=" << maxForwardItems
+             << " items (hit --saber.max-forward-items=" << maxForwardItems
              << ")\n";
     }
   }
 
-  if (SaberOptions::verbose() && processed > 0) {
+  if (SaberVerbose && processed > 0) {
     outs() << "  Forward traverse completed: processed " << processed
            << " items total, forward slice size: "
            << getCurSlice()->getForwardSliceSize();
@@ -439,7 +439,7 @@ void SrcSnkDDA::BWProcessIncomingEdge(const DPIm &item, SVFGEdge *edge) {
 }
 
 void SrcSnkDDA::annotateSlice(ProgSlice *slice) {
-  if (!slice || !SaberOptions::dumpSlice() || !sliceStats_)
+  if (!slice || !SaberDumpSlice || !sliceStats_)
     return;
   sliceStats_->addSource(slice->getSource());
   for (auto it = slice->sinksBegin(), et = slice->sinksEnd(); it != et; ++it)
@@ -453,7 +453,7 @@ void SrcSnkDDA::annotateSlice(ProgSlice *slice) {
 }
 
 void SrcSnkDDA::dumpSlices() {
-  if (!SaberOptions::dumpSlice() || !svfg)
+  if (!SaberDumpSlice || !svfg)
     return;
   svfg->dump("saber_slice.dot");
 }

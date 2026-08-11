@@ -2,14 +2,14 @@
 
 #include "Checker/Core/CheckerValidator.h"
 
-#include <llvm/Support/Error.h>
-#include <llvm/Support/MemoryBuffer.h>
-#include <llvm/Support/YAMLTraits.h>
-
 #include <algorithm>
 #include <filesystem>
 #include <optional>
 #include <unordered_set>
+
+#include <llvm/Support/Error.h>
+#include <llvm/Support/MemoryBuffer.h>
+#include <llvm/Support/YAMLTraits.h>
 
 using namespace llvm;
 
@@ -34,6 +34,12 @@ struct YamlProtocolOperation {
   int resource_arg = -1;
 };
 
+struct YamlDataEndpoint {
+  std::string function;
+  std::string selector;
+  int arg = -1;
+};
+
 struct YamlSpec {
   std::string engine;
   std::string rule_kind;
@@ -46,6 +52,9 @@ struct YamlSpec {
   std::vector<std::string> sources;
   std::vector<std::string> sinks;
   std::vector<std::string> sanitizers;
+  std::vector<YamlDataEndpoint> source_models;
+  std::vector<YamlDataEndpoint> sink_models;
+  std::vector<YamlDataEndpoint> sanitizer_models;
   std::vector<YamlProtocolOperation> acquire;
   std::vector<YamlProtocolOperation> use;
   std::vector<YamlProtocolOperation> release;
@@ -86,8 +95,8 @@ Expected<EngineKind> parseEngineKind(StringRef value) {
   if (value == "symex") {
     return EngineKind::SymExec;
   }
-  return createStringError(inconvertibleErrorCode(),
-                           "unknown engine '%s'", value.str().c_str());
+  return createStringError(inconvertibleErrorCode(), "unknown engine '%s'",
+                           value.str().c_str());
 }
 
 Expected<Severity> parseSeverity(StringRef value) {
@@ -103,8 +112,8 @@ Expected<Severity> parseSeverity(StringRef value) {
   if (value == "medium") {
     return Severity::Medium;
   }
-  return createStringError(inconvertibleErrorCode(),
-                           "unknown severity '%s'", value.str().c_str());
+  return createStringError(inconvertibleErrorCode(), "unknown severity '%s'",
+                           value.str().c_str());
 }
 
 Expected<RuleKind> parseRuleKind(StringRef value) {
@@ -117,8 +126,8 @@ Expected<RuleKind> parseRuleKind(StringRef value) {
   if (value == "api_protocol") {
     return RuleKind::ApiProtocol;
   }
-  return createStringError(inconvertibleErrorCode(),
-                           "unknown rule kind '%s'", value.str().c_str());
+  return createStringError(inconvertibleErrorCode(), "unknown rule kind '%s'",
+                           value.str().c_str());
 }
 
 Expected<std::vector<ProtocolOperation>>
@@ -128,10 +137,9 @@ parseProtocolOperations(const std::vector<YamlProtocolOperation> &operations,
   result.reserve(operations.size());
   for (const YamlProtocolOperation &operation : operations) {
     if (operation.function.empty()) {
-      return createStringError(inconvertibleErrorCode(),
-                               "%s: %s operation requires function",
-                               sourceName.str().c_str(),
-                               operationKind.str().c_str());
+      return createStringError(
+          inconvertibleErrorCode(), "%s: %s operation requires function",
+          sourceName.str().c_str(), operationKind.str().c_str());
     }
     const bool selectsReturn = operation.resource == "return";
     const bool selectsArgument = operation.resource_arg >= 0;
@@ -148,9 +156,64 @@ parseProtocolOperations(const std::vector<YamlProtocolOperation> &operations,
     parsed.function = operation.function;
     parsed.resource_kind = selectsReturn ? ResourceSelectorKind::Return
                                          : ResourceSelectorKind::Argument;
-    parsed.resource_arg = selectsArgument
-                              ? static_cast<unsigned>(operation.resource_arg)
-                              : 0;
+    parsed.resource_arg =
+        selectsArgument ? static_cast<unsigned>(operation.resource_arg) : 0;
+    result.push_back(std::move(parsed));
+  }
+  return result;
+}
+
+Expected<std::vector<DataEndpoint>>
+parseDataEndpoints(const std::vector<YamlDataEndpoint> &endpoints,
+                   StringRef endpointKind, StringRef sourceName) {
+  std::vector<DataEndpoint> result;
+  result.reserve(endpoints.size());
+  for (const YamlDataEndpoint &endpoint : endpoints) {
+    if (endpoint.function.empty()) {
+      return createStringError(
+          inconvertibleErrorCode(), "%s: %s model requires function",
+          sourceName.str().c_str(), endpointKind.str().c_str());
+    }
+
+    DataEndpoint parsed;
+    parsed.function = endpoint.function;
+    if (endpoint.selector == "return") {
+      if (endpoint.arg >= 0) {
+        return createStringError(inconvertibleErrorCode(),
+                                 "%s: return selector must not specify arg",
+                                 sourceName.str().c_str());
+      }
+      parsed.selector_kind = DataSelectorKind::Return;
+    } else if (endpoint.selector == "argument" || endpoint.selector == "arg") {
+      if (endpoint.arg < 0) {
+        return createStringError(inconvertibleErrorCode(),
+                                 "%s: argument selector requires arg",
+                                 sourceName.str().c_str());
+      }
+      parsed.selector_kind = DataSelectorKind::Argument;
+      parsed.selector_arg = static_cast<unsigned>(endpoint.arg);
+    } else if (endpoint.selector == "memory") {
+      if (endpoint.arg < 0) {
+        return createStringError(inconvertibleErrorCode(),
+                                 "%s: memory selector requires arg",
+                                 sourceName.str().c_str());
+      }
+      parsed.selector_kind = DataSelectorKind::ArgumentMemory;
+      parsed.selector_arg = static_cast<unsigned>(endpoint.arg);
+    } else if (endpoint.selector == "any-argument" && endpointKind == "sink") {
+      if (endpoint.arg >= 0) {
+        return createStringError(
+            inconvertibleErrorCode(),
+            "%s: any-argument selector must not specify arg",
+            sourceName.str().c_str());
+      }
+      parsed.selector_kind = DataSelectorKind::AnyArgument;
+    } else {
+      return createStringError(
+          inconvertibleErrorCode(), "%s: unknown %s selector '%s'",
+          sourceName.str().c_str(), endpointKind.str().c_str(),
+          endpoint.selector.c_str());
+    }
     result.push_back(std::move(parsed));
   }
   return result;
@@ -194,8 +257,17 @@ std::optional<CheckerCapability> parseCapability(StringRef value) {
 } // namespace lotus::checker
 
 LLVM_YAML_IS_SEQUENCE_VECTOR(lotus::checker::YamlProtocolOperation)
+LLVM_YAML_IS_SEQUENCE_VECTOR(lotus::checker::YamlDataEndpoint)
 
 namespace llvm::yaml {
+
+template <> struct MappingTraits<lotus::checker::YamlDataEndpoint> {
+  static void mapping(IO &io, lotus::checker::YamlDataEndpoint &endpoint) {
+    io.mapRequired("function", endpoint.function);
+    io.mapRequired("selector", endpoint.selector);
+    io.mapOptional("arg", endpoint.arg, -1);
+  }
+};
 
 template <> struct MappingTraits<lotus::checker::YamlProtocolOperation> {
   static void mapping(IO &io,
@@ -232,14 +304,17 @@ template <> struct MappingTraits<lotus::checker::YamlSpec> {
     io.mapOptional("sources", spec.sources);
     io.mapOptional("sinks", spec.sinks);
     io.mapOptional("sanitizers", spec.sanitizers);
+    io.mapOptional("source_models", spec.source_models);
+    io.mapOptional("sink_models", spec.sink_models);
+    io.mapOptional("sanitizer_models", spec.sanitizer_models);
     io.mapOptional("acquire", spec.acquire);
     io.mapOptional("use", spec.use);
     io.mapOptional("release", spec.release);
     io.mapOptional("report_leak", spec.report_leak, true);
-    io.mapOptional("report_use_before_acquire",
-                   spec.report_use_before_acquire, true);
-    io.mapOptional("report_use_after_release",
-                   spec.report_use_after_release, true);
+    io.mapOptional("report_use_before_acquire", spec.report_use_before_acquire,
+                   true);
+    io.mapOptional("report_use_after_release", spec.report_use_after_release,
+                   true);
     io.mapOptional("report_double_acquire", spec.report_double_acquire, true);
     io.mapOptional("report_double_release", spec.report_double_release, true);
   }
@@ -249,8 +324,8 @@ template <> struct MappingTraits<lotus::checker::YamlSpec> {
 
 namespace lotus::checker {
 
-Expected<CheckerSpec> CheckerSpecLoader::loadFromBuffer(StringRef yaml,
-                                                        StringRef source_name) const {
+Expected<CheckerSpec>
+CheckerSpecLoader::loadFromBuffer(StringRef yaml, StringRef source_name) const {
   yaml::Input input(yaml);
   YamlSpec parsed;
   input >> parsed;
@@ -289,7 +364,26 @@ Expected<CheckerSpec> CheckerSpecLoader::loadFromBuffer(StringRef yaml,
   spec.source_sink.sources = parsed.sources;
   spec.source_sink.sinks = parsed.sinks;
   spec.source_sink.sanitizers = parsed.sanitizers;
-  auto acquire = parseProtocolOperations(parsed.acquire, "acquire", source_name);
+  auto source_models =
+      parseDataEndpoints(parsed.source_models, "source", source_name);
+  if (!source_models) {
+    return source_models.takeError();
+  }
+  spec.source_sink.source_models = std::move(*source_models);
+  auto sink_models =
+      parseDataEndpoints(parsed.sink_models, "sink", source_name);
+  if (!sink_models) {
+    return sink_models.takeError();
+  }
+  spec.source_sink.sink_models = std::move(*sink_models);
+  auto sanitizer_models =
+      parseDataEndpoints(parsed.sanitizer_models, "sanitizer", source_name);
+  if (!sanitizer_models) {
+    return sanitizer_models.takeError();
+  }
+  spec.source_sink.sanitizer_models = std::move(*sanitizer_models);
+  auto acquire =
+      parseProtocolOperations(parsed.acquire, "acquire", source_name);
   if (!acquire) {
     return acquire.takeError();
   }
@@ -299,7 +393,8 @@ Expected<CheckerSpec> CheckerSpecLoader::loadFromBuffer(StringRef yaml,
     return use.takeError();
   }
   spec.api_protocol.use = std::move(*use);
-  auto release = parseProtocolOperations(parsed.release, "release", source_name);
+  auto release =
+      parseProtocolOperations(parsed.release, "release", source_name);
   if (!release) {
     return release.takeError();
   }
@@ -307,8 +402,7 @@ Expected<CheckerSpec> CheckerSpecLoader::loadFromBuffer(StringRef yaml,
   spec.api_protocol.report_leak = parsed.report_leak;
   spec.api_protocol.report_use_before_acquire =
       parsed.report_use_before_acquire;
-  spec.api_protocol.report_use_after_release =
-      parsed.report_use_after_release;
+  spec.api_protocol.report_use_after_release = parsed.report_use_after_release;
   spec.api_protocol.report_double_acquire = parsed.report_double_acquire;
   spec.api_protocol.report_double_release = parsed.report_double_release;
 
@@ -354,10 +448,10 @@ CheckerSpecLoader::loadFromDirectory(StringRef directory) const {
     paths.push_back(entry.path());
   }
 
-  std::sort(paths.begin(), paths.end(), [](const fs::path &left,
-                                           const fs::path &right) {
-    return left.generic_string() < right.generic_string();
-  });
+  std::sort(paths.begin(), paths.end(),
+            [](const fs::path &left, const fs::path &right) {
+              return left.generic_string() < right.generic_string();
+            });
 
   for (const fs::path &path : paths) {
     auto buffer = MemoryBuffer::getFile(path.string());

@@ -41,6 +41,7 @@
 #include <vector>
 
 namespace fitx {
+void setDebugLogging(bool enabled);
 void generateWarning(llvm::Instruction *Inst, std::string war);
 void generateWarning(llvm::Instruction *Inst, llvm::Value *val);
 void generateWarning(llvm::Instruction *Inst, llvm::Type *type);

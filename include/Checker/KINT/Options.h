@@ -27,37 +27,18 @@ extern llvm::cl::opt<SummaryMode> InterprocSummaryMode;
 // Define a category for checker options
 extern llvm::cl::OptionCategory CheckerCategory;
 
-// Add command line options for enabling/disabling specific checkers
-extern llvm::cl::opt<bool> CheckAll;
-extern llvm::cl::opt<bool> CheckIntOverflow;
-extern llvm::cl::opt<bool> CheckDivByZero;
-extern llvm::cl::opt<bool> CheckBadShift;
-extern llvm::cl::opt<bool> CheckArrayOOB;
-extern llvm::cl::opt<bool> CheckDeadBranch;
+// Check selection is configured by the unified checker frontend.
+extern bool CheckIntOverflow;
+extern bool CheckDivByZero;
+extern bool CheckBadShift;
+extern bool CheckArrayOOB;
+extern bool CheckDeadBranch;
 extern llvm::cl::opt<bool> RobustReachability;
 extern llvm::cl::opt<std::string> DumpEFConstraints;
 extern llvm::cl::opt<bool> RobustUniversalUnknownLoads;
 extern llvm::cl::opt<bool> RobustUniversalExternalGlobals;
 extern llvm::cl::opt<bool> RobustUniversalInlineAsm;
-extern llvm::cl::opt<std::string> RobustOnlyBugs;
-
-// Define a category for logging options
-extern llvm::cl::OptionCategory LoggingCategory;
-
-// Define log levels
-enum class LogLevel {
-  DEBUG,   // Most verbose
-  INFO,    // Normal informational messages
-  WARNING, // Warnings
-  ERROR,   // Errors
-  NONE     // No logging
-};
-
-// Add logging control options
-extern llvm::cl::opt<LogLevel> CurrentLogLevel;
-extern llvm::cl::opt<bool> QuietLogging;
-extern llvm::cl::opt<bool> StderrLogging;
-extern llvm::cl::opt<std::string> LogFile;
+extern llvm::cl::opt<std::string> RobustChecks;
 
 // Initialize command line options
 void initializeCommandLineOptions();

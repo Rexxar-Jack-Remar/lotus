@@ -105,7 +105,7 @@ The engine is invoked through the unified checker frontend:
 .. code-block:: bash
 
    ./build/bin/lotus-check --engine=symex input.bc
-   ./build/bin/lotus-check --engine=symex input.bc --symex-checkers=null-deref,uaf
+   ./build/bin/lotus-check --engine=symex input.bc --checks=null-deref,use-after-free
 
 For the full list of subcommand options, see :doc:`../checker/symex`.
 

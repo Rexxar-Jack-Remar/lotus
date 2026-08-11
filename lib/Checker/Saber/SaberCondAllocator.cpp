@@ -32,8 +32,7 @@ static bool isProgExitCall(const llvm::CallBase *cs) {
     return false;
   if (const llvm::Function *callee = getDirectCallee(cs)) {
     llvm::StringRef name = callee->getName();
-    return name == "exit" || name == "__assert_rtn" ||
-           name == "__assert_fail";
+    return name == "exit" || name == "__assert_rtn" || name == "__assert_fail";
   }
   return false;
 }
@@ -540,9 +539,9 @@ bool SaberCondAllocator::isSatisfiable(const Condition &condition) {
 
   z3::solver solver(Z3Expr::context());
   // Set timeout if configured
-  if (SaberOptions::z3Timeout() > 0) {
+  if (SaberZ3Timeout > 0) {
     z3::params params(Z3Expr::context());
-    params.set("timeout", SaberOptions::z3Timeout());
+    params.set("timeout", SaberZ3Timeout);
     solver.set(params);
   }
   solver.add(condition.getExpr());
@@ -561,9 +560,9 @@ bool SaberCondAllocator::isEquivalentBranchCond(const Condition &lhs,
 
   z3::solver solver(Z3Expr::context());
   // Set timeout if configured
-  if (SaberOptions::z3Timeout() > 0) {
+  if (SaberZ3Timeout > 0) {
     z3::params params(Z3Expr::context());
-    params.set("timeout", SaberOptions::z3Timeout());
+    params.set("timeout", SaberZ3Timeout);
     solver.set(params);
   }
   solver.add(lhs.getExpr() != rhs.getExpr());

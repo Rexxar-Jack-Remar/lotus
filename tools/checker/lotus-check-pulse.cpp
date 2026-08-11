@@ -7,16 +7,20 @@
 
 #include "Alias/Infrastructure/AliasAnalysisWrapper/AliasAnalysisWrapper.h"
 #include "Checker/Pulse/Checker/PulseChecker.h"
+#include "Checker/Pulse/Report/PulseDiagnostic.h"
 #include "Checker/Pulse/Report/PulseLogger.h"
 #include "Checker/Pulse/Report/PulseOptions.h"
 #include "Checker/Report/BugReportMgr.h"
 #include "Checker/Report/ReportOptions.h"
 #include "Checker/Report/SuppressionManager.h"
 #include "Checker/Tooling/CheckerSubcommands.h"
+#include "CheckerOptions.h"
 #include "CheckerReport.h"
 
 #include <memory>
+#include <set>
 #include <string>
+#include <vector>
 
 #include <llvm/IR/LLVMContext.h>
 #include <llvm/IR/Module.h>
@@ -31,44 +35,35 @@ using namespace pulse;
 static cl::opt<std::string>
     InputFile(cl::Positional, cl::desc("<input bitcode>"), cl::Required,
               cl::sub(lotus::checker::tooling::pulseSubCommand()));
-static cl::opt<bool>
-    Verbose("v", cl::desc("Verbose output"), cl::init(false),
-            cl::sub(lotus::checker::tooling::pulseSubCommand()));
-static cl::opt<pulse::LogLevel> LogLevelOpt(
-    "log-level", cl::desc("Log level"),
-    cl::values(clEnumValN(pulse::LogLevel::None, "none", "Disable logging"),
-               clEnumValN(pulse::LogLevel::Error, "error", "Errors only"),
-               clEnumValN(pulse::LogLevel::Warning, "warning",
-                          "Warnings and errors"),
-               clEnumValN(pulse::LogLevel::Info, "info", "Informational"),
-               clEnumValN(pulse::LogLevel::Debug, "debug", "Debug output"),
-               clEnumValN(pulse::LogLevel::Trace, "trace", "Trace output")),
-    cl::init(pulse::LogLevel::Info),
-    cl::sub(lotus::checker::tooling::pulseSubCommand()));
-static cl::opt<bool>
-    ShowPulseStats("pulse-stats", cl::desc("Show Pulse analysis statistics"),
-                   cl::init(true),
-                   cl::sub(lotus::checker::tooling::pulseSubCommand()));
-static cl::opt<bool> NoSMT("no-smt",
-                           cl::desc("Disable SMT solving (fast mode); do not "
-                                    "query Z3 for path satisfiability"),
-                           cl::init(false),
-                           cl::sub(lotus::checker::tooling::pulseSubCommand()));
+enum class SMTMode { Off, On };
+static cl::opt<SMTMode>
+    SMT("pulse.smt", cl::desc("SMT path-feasibility solving"),
+        cl::values(clEnumValN(SMTMode::Off, "off", "Disable SMT solving"),
+                   clEnumValN(SMTMode::On, "on", "Enable SMT solving")),
+        cl::init(SMTMode::On),
+        cl::sub(lotus::checker::tooling::pulseSubCommand()));
 
 int runPulseCheckerTool(const char *argv0) {
-  // Configure logging
-  pulse::LogLevel level = LogLevelOpt.getValue();
-
-  if (Verbose && level < pulse::LogLevel::Debug) {
-    level = pulse::LogLevel::Debug;
+  (void)lotus::checker::tooling::statsEnabled();
+  auto selectedOr =
+      lotus::checker::tooling::resolveChecks(lotus::checker::EngineKind::Pulse);
+  if (!selectedOr) {
+    logAllUnhandledErrors(selectedOr.takeError(), errs(), "error: ");
+    return lotus::checker::tooling::EXIT_ERROR;
   }
+  const auto &selected = *selectedOr;
+
+  // Configure logging
+  pulse::LogLevel level =
+      static_cast<pulse::LogLevel>(lotus::checker::tooling::logLevel());
 
   PulseLogger::setLevel(level);
   PulseLogger::setOutputStream(&errs());
   PulseLogger::resetStats();
 
-  pulse::options::setDisableSMT(NoSMT);
-  if (NoSMT) {
+  const bool disableSMT = SMT == SMTMode::Off;
+  pulse::options::setDisableSMT(disableSMT);
+  if (disableSMT) {
     PulseLogger::info("Fast mode: SMT solving disabled");
   }
 
@@ -80,6 +75,8 @@ int runPulseCheckerTool(const char *argv0) {
     Err.print(argv0, errs());
     return lotus::checker::tooling::EXIT_ERROR;
   }
+  BugReportMgr &mgr = BugReportMgr::get_instance();
+  lotus::checker::tooling::AnalysisStatsRecorder stats("pulse", *M, mgr);
 
   PulseLogger::info("Starting Pulse analysis");
   PulseLogger::info("Module: " + M->getName().str());
@@ -101,13 +98,34 @@ int runPulseCheckerTool(const char *argv0) {
 
   PulseLogger::endTimer("total_analysis");
 
-  if (ShowPulseStats) {
-    PulseLogger::printStats();
+  const std::pair<StringRef, StringRef> checkBugTypes[] = {
+      {"null-deref", IssueType::NullDereference},
+      {"use-after-free", IssueType::UseAfterFree},
+      {"out-of-bounds", IssueType::OutOfBounds},
+      {"invalid-free", IssueType::InvalidFree},
+      {"uninitialized-read", IssueType::UninitializedRead},
+      {"taint-flow", IssueType::TaintError},
+      {"unnecessary-copy", IssueType::UnnecessaryCopy},
+      {"stack-address-escape", IssueType::StackVariableAddressEscape},
+      {"const-refable-parameter", "Const-Refable Parameter"},
+  };
+  std::set<std::string> disabledBugTypes;
+  for (const auto &[id, bugType] : checkBugTypes) {
+    if (!selected.count(id.str())) {
+      disabledBugTypes.insert(bugType.str());
+    }
   }
+  std::vector<int> disabledTypeIds;
+  for (size_t id = 0; id < mgr.get_num_bug_types(); ++id) {
+    if (disabledBugTypes.count(mgr.get_bug_type_info(id).bug_name)) {
+      disabledTypeIds.push_back(static_cast<int>(id));
+    }
+  }
+  mgr.clear_reports_for_types(disabledTypeIds);
+  stats.emit();
 
-  BugReportMgr &mgr = BugReportMgr::get_instance();
   lotus::checker::tooling::CheckerReportOptions reportOptions;
-  reportOptions.verbose = Verbose;
+  reportOptions.verbose = lotus::checker::tooling::Verbose;
   const int reportStatus =
       lotus::checker::tooling::emitCheckerReports(mgr, reportOptions);
   PulseLogger::info("Analysis complete");

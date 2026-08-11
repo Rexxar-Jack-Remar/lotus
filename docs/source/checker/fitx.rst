@@ -19,6 +19,10 @@ Overview
 
 FiTx balances the trade-off between **analysis time** and **bug detection**: it uses computationally lightweight analyses and limits scope to a single compilation unit (translation unit), so that checkers can run quickly during daily development while still finding many real bugs.
 
+The engine-specific ``--fitx.report-all-candidates`` parameter disables the
+normal candidate filtering. Shared selection and report controls remain under
+``--checks`` and the common report options.
+
 Design principles from the paper:
 
 * **Short analysis time**: Path-insensitive, inter-procedural analysis on the CFG; bottom-up summary-based interprocedural analysis; no indirect function calls; static field offsets only (struct fields or constant array indices).
@@ -105,9 +109,10 @@ overlaps with other engines by design: use ``pulse`` for bounded,
 witness-oriented memory-safety diagnosis, ``ae`` for a broad
 abstract-execution pass, and ``saber`` for sparse value-flow leak and
 double-free checks.  See :ref:`Choosing a Checker <choosing-a-checker>` for the
-bug-class guide.  ``--detector`` is accepted by the command-line frontend, but
-the current frontend runs the bundled aggregate FiTx pass; use the reported
-bug type to filter results.
+bug-class guide. Use ``--checks=<id[,id...]>`` to select ``double-free``,
+``double-lock``, ``double-unlock``, ``memory-leak``, ``null-deref``,
+``use-after-free``, ``use-before-init``, ``ref-count``, or ``ref-uncount``.
+Omitting the option, or passing ``--checks=all``, enables the full set.
 
 Understanding the code
 ----------------------

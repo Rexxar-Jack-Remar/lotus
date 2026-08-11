@@ -9,7 +9,7 @@ metadata:
   languages: [llvm-ir]
   tags: [taint, source-sink]
   default_enabled: true
-capabilities: [direct-calls, use-def, simple-memory]
+capabilities: [direct-calls, use-def, simple-memory, interprocedural-flow]
 message: Tainted data from getenv reaches system
 suggestion: Sanitize or reject attacker-controlled input before invoking system
 confidence: 80

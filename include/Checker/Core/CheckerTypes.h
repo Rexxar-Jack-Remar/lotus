@@ -1,4 +1,5 @@
-/** @file CheckerTypes.h @brief Core type definitions for the checker framework (engine kinds, options). */
+/** @file CheckerTypes.h @brief Core type definitions for the checker framework
+ * (engine kinds, options). */
 #pragma once
 
 #include <string>
@@ -51,10 +52,27 @@ struct ForbiddenCallRule {
   std::vector<std::string> functions;
 };
 
+enum class DataSelectorKind {
+  Return,
+  Argument,
+  ArgumentMemory,
+  AnyArgument,
+};
+
+struct DataEndpoint {
+  std::string function;
+  DataSelectorKind selector_kind = DataSelectorKind::Return;
+  unsigned selector_arg = 0;
+};
+
 struct SourceSinkRule {
+  // Legacy name-only models remain supported for existing checker specs.
   std::vector<std::string> sources;
   std::vector<std::string> sinks;
   std::vector<std::string> sanitizers;
+  std::vector<DataEndpoint> source_models;
+  std::vector<DataEndpoint> sink_models;
+  std::vector<DataEndpoint> sanitizer_models;
 };
 
 enum class ResourceSelectorKind { Return, Argument };
@@ -88,7 +106,9 @@ struct CheckerSpec {
   SourceSinkRule source_sink;
   ApiProtocolRule api_protocol;
 
-  bool isDeclarative() const { return metadata.engine == EngineKind::Declarative; }
+  bool isDeclarative() const {
+    return metadata.engine == EngineKind::Declarative;
+  }
 };
 
 const char *toString(EngineKind kind);

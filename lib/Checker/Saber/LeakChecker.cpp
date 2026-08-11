@@ -337,7 +337,7 @@ void LeakChecker::reportBug(ProgSlice *slice) {
 
   mgr.insert_report(bugTypeId, report, false);
 
-  if (SaberOptions::validateTests())
+  if (SaberValidateTests)
     testsValidation(slice);
 
   outs() << "Memory Leak detected at ";

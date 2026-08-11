@@ -81,7 +81,7 @@ void DoubleFreeChecker::reportBug(ProgSlice *slice) {
 
   mgr.insert_report(bugTypeId, report, false);
 
-  if (SaberOptions::validateTests())
+  if (SaberValidateTests)
     testsValidation(slice);
 
   outs() << "Double Free detected at ";

@@ -119,16 +119,15 @@ IFDS framework.
 Key Options
 -----------
 
-* ``--analysis=0`` – Run the taint analysis (the only currently supported
-  analysis type).
-* ``--sources=<functions>`` – Comma-separated list of custom source functions.
-* ``--sinks=<functions>`` – Comma-separated list of custom sink functions.
-* ``--show-results`` – Show detailed analysis results (default: true).
+* ``--checks=taint-flow`` – Select the taint-flow checker. It is also the
+  default because this engine currently exposes one checker.
+* ``--taint.sources=<functions>`` – Comma-separated list of custom source functions.
+* ``--taint.sinks=<functions>`` – Comma-separated list of custom sink functions.
+* ``--verbose`` – Show module and source/sink tagging details.
 
 For the checker-facing usage, reporting behavior, and distinctions from the
 taint tracking embedded in other engines, see :doc:`../checker/taint`.
-* ``-max-results=<N>`` – Maximum number of detailed results to show (default: 10)
-* ``-verbose`` – Enable verbose output
+* ``--analysis-stats`` – Print analysis statistics.
 
 The tool performs interprocedural taint analysis to detect potential security
 vulnerabilities where tainted data (from sources like user input) flows to

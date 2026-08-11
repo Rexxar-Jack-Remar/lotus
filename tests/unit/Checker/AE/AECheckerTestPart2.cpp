@@ -328,6 +328,38 @@ TEST_F(AECheckerTest, AEBugReportsAreClearedBetweenRuns) {
   leakReports = mgr.get_reports_for_type(leakType);
   EXPECT_TRUE(leakReports == nullptr || leakReports->empty());
 }
+TEST_F(AECheckerTest, QuietModePreservesReportedFindings) {
+  const char *source = R"(
+    declare i8* @malloc(i64)
+
+    define void @test_leak() {
+    entry:
+      %p = call i8* @malloc(i64 32)
+      ret void
+    }
+  )";
+
+  auto normalModule = parseModule(source);
+  auto quietModule = parseModule(source);
+  ASSERT_NE(normalModule, nullptr);
+  ASSERT_NE(quietModule, nullptr);
+
+  setenv("LOTUS_AE_QUIET", "0", 1);
+  runAE(normalModule.get(), true, true);
+  setenv("LOTUS_AE_QUIET", "1", 1);
+  BugReportMgr &mgr = BugReportMgr::get_instance();
+  int leakType = mgr.find_bug_type("AE Memory Leak");
+  ASSERT_GE(leakType, 0);
+  const auto *normalReports = mgr.get_reports_for_type(leakType);
+  const size_t normalCount = normalReports ? normalReports->size() : 0;
+
+  runAE(quietModule.get(), true, true);
+  const auto *quietReports = mgr.get_reports_for_type(leakType);
+  const size_t quietCount = quietReports ? quietReports->size() : 0;
+
+  EXPECT_GT(normalCount, 0u);
+  EXPECT_EQ(quietCount, normalCount);
+}
 TEST_F(AECheckerTest, EnabledChecksAutoInstallLibraryDetectors) {
   const char *source = R"(
     define void @test_auto_install(i32 %idx) {

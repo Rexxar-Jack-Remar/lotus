@@ -15,10 +15,9 @@ using namespace llvm;
 
 namespace lotus::checker::tooling {
 
-namespace {
-
-template <typename Writer>
-bool writeReportAtomically(StringRef path, StringRef format, Writer write) {
+bool writeCheckerOutputAtomically(
+    StringRef path, StringRef format,
+    const std::function<void(raw_ostream &)> &write) {
   SmallString<256> temporaryPath;
   int temporaryFd = -1;
   if (std::error_code error = sys::fs::createUniqueFile(
@@ -48,8 +47,6 @@ bool writeReportAtomically(StringRef path, StringRef format, Writer write) {
   }
   return true;
 }
-
-} // namespace
 
 bool validateReportOptions() {
   if (report_options::MinConfidenceScore < 0 ||
@@ -98,10 +95,10 @@ int emitCheckerReports(BugReportMgr &manager,
   }
 
   if (!report_options::JsonOutputFile.empty()) {
-    if (!writeReportAtomically(report_options::JsonOutputFile, "JSON",
-                               [&](raw_ostream &output) {
-                                 manager.generate_json_report(output, filter);
-                               })) {
+    if (!writeCheckerOutputAtomically(
+            report_options::JsonOutputFile, "JSON", [&](raw_ostream &output) {
+              manager.generate_json_report(output, filter);
+            })) {
       return EXIT_ERROR;
     }
     outs() << "\nJSON report written to: " << report_options::JsonOutputFile
@@ -109,10 +106,10 @@ int emitCheckerReports(BugReportMgr &manager,
   }
 
   if (!report_options::SarifOutputFile.empty()) {
-    if (!writeReportAtomically(report_options::SarifOutputFile, "SARIF",
-                               [&](raw_ostream &output) {
-                                 manager.generate_sarif_report(output, filter);
-                               })) {
+    if (!writeCheckerOutputAtomically(
+            report_options::SarifOutputFile, "SARIF", [&](raw_ostream &output) {
+              manager.generate_sarif_report(output, filter);
+            })) {
       return EXIT_ERROR;
     }
     outs() << "\nSARIF report written to: " << report_options::SarifOutputFile

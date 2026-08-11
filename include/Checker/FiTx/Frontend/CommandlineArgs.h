@@ -1,12 +1,14 @@
-/** @file CommandlineArgs.h @brief Command-line argument definitions for FiTx analysis. */
+/** @file CommandlineArgs.h @brief Command-line argument definitions for FiTx
+ * analysis. */
 #pragma once
-#include "Checker/Tooling/CheckerSubcommands.h"
 #include "llvm/Support/CommandLine.h"
+
+#include "Checker/Tooling/CheckerSubcommands.h"
 
 namespace fitx {
 namespace CommandLineArgs {
-llvm::cl::opt<bool> Flex(
-    "flex", llvm::cl::desc("Print all possible errors"),
+llvm::cl::opt<bool> ReportAllCandidates(
+    "fitx.report-all-candidates", llvm::cl::desc("Report all possible errors"),
     llvm::cl::sub(lotus::checker::tooling::fitxSubCommand()));
 } // namespace CommandLineArgs
 } // namespace fitx

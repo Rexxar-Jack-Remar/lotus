@@ -31,29 +31,28 @@ Usage
 
    # Add project-specific source and sink functions.
    ./build/bin/lotus-check --engine=taint input.bc \
-     --sources=recv,getenv --sinks=system,execve
+     --taint.sources=recv,getenv --taint.sinks=system,execve
 
    # Select an alias-analysis backend and show source/sink tagging details.
-   ./build/bin/lotus-check --engine=taint input.bc --aa=dyck --verbose --max-results=20
+   ./build/bin/lotus-check --engine=taint input.bc --taint.alias-analysis=dyck --log-level=debug
 
 Important options
 -----------------
 
-* ``--sources=<name[,name...]>`` adds source functions.
-* ``--sinks=<name[,name...]>`` adds sink functions.
-* ``--aa=<kind>`` selects the alias-analysis backend; the default is ``dyck``.
-* ``--max-results=<n>`` limits detailed results printed by the checker.
-* ``--verbose`` prints module details and source/sink tagging at call sites.
-* ``--micro-bench`` adds the conventional ``source`` and ``sink`` functions
+* ``--taint.sources=<name[,name...]>`` adds source functions.
+* ``--taint.sinks=<name[,name...]>`` adds sink functions.
+* ``--taint.alias-analysis=<kind>`` selects the alias-analysis backend; the default is ``dyck``.
+* ``--log-level=debug`` prints module details and source/sink tagging at call sites.
+* ``--verbose`` prints detailed finding traces.
+* ``--analysis-stats`` prints analysis statistics.
+* ``--taint.micro-bench`` adds the conventional ``source`` and ``sink`` functions
   for benchmark evaluation.
 
 Reporting
 ---------
 
-The IFDS frontend prints flow results directly.  Unlike the native checker
-frontends, it does not currently export findings through ``BugReportMgr``;
-therefore the shared ``--report-json`` and ``--report-sarif`` report pipeline
-does not produce taint-flow reports from this engine.
+The IFDS frontend exports findings through ``BugReportMgr`` and supports the
+shared text, JSON, SARIF, suppression, confidence, and exit-status options.
 
 See also
 --------

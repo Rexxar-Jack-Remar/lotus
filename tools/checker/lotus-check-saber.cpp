@@ -13,6 +13,7 @@
 #include "Checker/Saber/LeakChecker.h"
 #include "Checker/Saber/SaberOptions.h"
 #include "Checker/Tooling/CheckerSubcommands.h"
+#include "CheckerOptions.h"
 #include "CheckerReport.h"
 #include "Utils/LLVM/RecursiveTimer.h"
 
@@ -24,45 +25,26 @@
 
 using namespace llvm;
 
-static cl::opt<std::string> InputFilename(cl::Positional,
-                                          cl::desc("<input bitcode file>"),
-                                          cl::Required,
-                                          cl::sub(lotus::checker::tooling::saberSubCommand()));
-
-static cl::opt<bool> MemoryLeakCheck(
-    "leak",
-    cl::desc("Check for memory leaks (alloc never freed or partial leak)"),
-    cl::init(false),
-    cl::sub(lotus::checker::tooling::saberSubCommand()));
-
-static cl::opt<bool>
-    FileCheck("file",
-              cl::desc("Check for file descriptor leaks (fopen never fclose)"),
-              cl::init(false),
-              cl::sub(lotus::checker::tooling::saberSubCommand()));
-
-static cl::opt<bool> DFreeCheck(
-    "double-free",
-    cl::desc("Check for double-free (same memory freed twice on same path)"),
-    cl::init(false),
-    cl::sub(lotus::checker::tooling::saberSubCommand()));
-
-static cl::opt<bool>
-    AllChecks("all", cl::desc("Run all checkers (leak, double-free, file)"),
-              cl::init(false),
-              cl::sub(lotus::checker::tooling::saberSubCommand()));
-static cl::opt<bool>
-    VerboseReports("v",
-                   cl::desc("Print trace and IR details for reported bugs"),
-                   cl::init(false),
-                   cl::sub(lotus::checker::tooling::saberSubCommand()));
+static cl::opt<std::string>
+    InputFilename(cl::Positional, cl::desc("<input bitcode file>"),
+                  cl::Required,
+                  cl::sub(lotus::checker::tooling::saberSubCommand()));
 
 int runSaberCheckerTool(const char *argv0) {
-  RecursiveTimer::setEnabled(lotus::analysis::SaberOptions::verbose());
+  (void)lotus::checker::tooling::statsEnabled();
+  auto selectedOr =
+      lotus::checker::tooling::resolveChecks(lotus::checker::EngineKind::Saber);
+  if (!selectedOr) {
+    logAllUnhandledErrors(selectedOr.takeError(), errs(), "error: ");
+    return lotus::checker::tooling::EXIT_ERROR;
+  }
+  const auto &selected = *selectedOr;
+  lotus::analysis::SaberVerbose = lotus::checker::tooling::logAtLeast(
+      lotus::checker::tooling::LogLevel::Debug);
+  RecursiveTimer::setEnabled(false);
 
   // Force linkage of SaberOptions symbols from static library
   // Reference the extern variables to ensure they're linked
-  (void)&lotus::analysis::SaberVerbose;
   (void)&lotus::analysis::SaberFullSVFG;
   (void)&lotus::analysis::SaberCxtLimit;
   (void)&lotus::analysis::SaberMaxStepInWrapper;
@@ -77,25 +59,12 @@ int runSaberCheckerTool(const char *argv0) {
     Err.print(argv0, errs());
     return lotus::checker::tooling::EXIT_ERROR;
   }
+  BugReportMgr &mgr = BugReportMgr::get_instance();
+  lotus::checker::tooling::AnalysisStatsRecorder stats("saber", *M, mgr);
 
-  // Determine which checkers to run
-  const bool anyExplicitChecker = MemoryLeakCheck.getNumOccurrences() != 0 ||
-                                  DFreeCheck.getNumOccurrences() != 0 ||
-                                  FileCheck.getNumOccurrences() != 0;
-  bool runLeak = false;
-  bool runDoubleFree = false;
-  bool runFile = false;
-  if (AllChecks) {
-    runLeak = true;
-    runDoubleFree = true;
-    runFile = true;
-  } else if (anyExplicitChecker) {
-    runLeak = MemoryLeakCheck;
-    runDoubleFree = DFreeCheck;
-    runFile = FileCheck;
-  } else {
-    runLeak = true;
-  }
+  const bool runLeak = selected.count("memory-leak");
+  const bool runDoubleFree = selected.count("double-free");
+  const bool runFile = selected.count("file-leak");
 
   // Count how many checkers will run
   int checkerCount = 0;
@@ -191,10 +160,10 @@ int runSaberCheckerTool(const char *argv0) {
   }
 
   // Print bug report summary
-  BugReportMgr &mgr = BugReportMgr::get_instance();
+  stats.emit();
 
   const int reportStatus = lotus::checker::tooling::emitCheckerReports(
-      mgr, {VerboseReports});
+      mgr, {lotus::checker::tooling::Verbose});
 
   if (checkerCount > 1) {
     outs() << "\n=== Analysis Complete ===\n";
