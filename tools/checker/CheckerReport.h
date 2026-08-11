@@ -6,7 +6,7 @@
 
 namespace llvm {
 class raw_ostream;
-}
+} // namespace llvm
 
 class BugReportMgr;
 

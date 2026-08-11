@@ -166,7 +166,7 @@ llvm::Expected<std::set<std::string>> resolveChecks(EngineKind engine) {
   }
 
   for (const std::string &id : *requested_or) {
-    auto match =
+    const auto *match =
         llvm::find_if(supported, [&](const NativeCheckDescriptor &item) {
           return item.id == id;
         });

@@ -19,8 +19,8 @@
 #include <string>
 #include <vector>
 
-#include <llvm/Analysis/MemoryLocation.h>
 #include <llvm/ADT/SmallString.h>
+#include <llvm/Analysis/MemoryLocation.h>
 #include <llvm/IR/Instructions.h>
 #include <llvm/Support/CommandLine.h>
 #include <llvm/Support/FileSystem.h>

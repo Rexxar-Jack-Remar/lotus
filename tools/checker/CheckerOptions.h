@@ -14,7 +14,7 @@
 class BugReportMgr;
 namespace llvm {
 class Module;
-}
+} // namespace llvm
 
 namespace lotus::checker::tooling {
 
