@@ -5,11 +5,15 @@
 #include <cstdint>
 #include <limits>
 #include <ostream>
+#include <stdexcept>
 #include <string>
+#include <type_traits>
 #include <unordered_set>
 #include <vector>
 
 #include <llvm/Support/raw_ostream.h>
+
+class BVClock;
 
 /// A live dependency clock over one-shot boolean dimensions.
 ///
@@ -47,8 +51,28 @@ public:
   FBVClock(FBVClock &&other) noexcept;
   FBVClock &operator=(FBVClock &&other) noexcept;
 
-  bool operator[](int i) const;
-  bool operator[](std::size_t i) const;
+  template <typename Integer,
+            std::enable_if_t<
+                std::is_integral_v<Integer> &&
+                    !std::is_same_v<std::remove_cv_t<Integer>, bool>,
+                int> = 0>
+  bool operator[](Integer dimension) const {
+    if constexpr (std::is_signed_v<Integer>) {
+      if (dimension < 0)
+        throw std::out_of_range("FBVClock dimension must be non-negative");
+    }
+
+    using UnsignedInteger = std::make_unsigned_t<Integer>;
+    const UnsignedInteger unsigned_dimension =
+        static_cast<UnsignedInteger>(dimension);
+    if constexpr (sizeof(UnsignedInteger) > sizeof(std::size_t)) {
+      if (unsigned_dimension >
+          static_cast<UnsignedInteger>(
+              std::numeric_limits<std::size_t>::max()))
+        throw std::out_of_range("FBVClock dimension is too large");
+    }
+    return test(static_cast<std::size_t>(unsigned_dimension));
+  }
   FBVClock &operator+=(const FBVClock &c);
   std::string to_string() const;
   void invalidate() noexcept;
@@ -66,10 +90,16 @@ private:
       std::numeric_limits<std::size_t>::max();
 
   struct ClockSystem {
+    struct Node {
+      explicit Node(std::size_t dimension) : dimension(dimension) {}
+
+      std::size_t dimension;
+      std::unordered_set<std::size_t> dependencies;
+    };
+
     bool allocated = false;
     std::uint64_t generation = 0;
-    std::vector<std::size_t> clock_indices;
-    std::vector<std::unordered_set<std::size_t>> dependencies;
+    std::vector<Node> nodes;
     std::vector<std::size_t> idx_to_id;
   };
 
@@ -82,7 +112,10 @@ private:
   static ClockSystem &getSystem(ClockSystemID cid);
   const ClockSystem &getSystem() const;
   ClockSystem &getSystem();
+  bool test(std::size_t dimension) const;
   std::vector<bool> snapshot() const;
+
+  friend class BVClock;
 };
 
 inline std::ostream &operator<<(std::ostream &os, const FBVClock &c) {

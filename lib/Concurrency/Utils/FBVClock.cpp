@@ -16,7 +16,7 @@ FBVClock::ClockSystemID FBVClock::new_clock_system() {
     if (system.allocated)
       continue;
     if (system.generation == std::numeric_limits<std::uint64_t>::max())
-      throw std::overflow_error("FBVClock system generation exhausted");
+      continue;
     ++system.generation;
     system.allocated = true;
     return ClockSystemID(slot, system.generation);
@@ -31,10 +31,9 @@ FBVClock::ClockSystemID FBVClock::new_clock_system() {
 
 void FBVClock::delete_clock_system(ClockSystemID cid) {
   ClockSystem &system = getSystem(cid);
-  system.clock_indices.clear();
-  system.dependencies.clear();
-  system.idx_to_id.clear();
-  system.allocated = false;
+  const std::uint64_t generation = system.generation;
+  system = ClockSystem();
+  system.generation = generation;
 }
 
 FBVClock::FBVClock(ClockSystemID system_id, int dimension) : cid(system_id) {
@@ -48,9 +47,8 @@ FBVClock::FBVClock(ClockSystemID system_id, int dimension) : cid(system_id) {
   if (system.idx_to_id[idx] != INVALID_ID)
     throw std::invalid_argument("FBVClock dimension already has an owner");
 
-  id = system.clock_indices.size();
-  system.clock_indices.push_back(idx);
-  system.dependencies.emplace_back();
+  id = system.nodes.size();
+  system.nodes.emplace_back(idx);
   system.idx_to_id[idx] = id;
 }
 
@@ -69,13 +67,7 @@ FBVClock &FBVClock::operator=(FBVClock &&other) noexcept {
   return *this;
 }
 
-bool FBVClock::operator[](int dimension) const {
-  if (dimension < 0)
-    throw std::out_of_range("FBVClock dimension must be non-negative");
-  return (*this)[static_cast<std::size_t>(dimension)];
-}
-
-bool FBVClock::operator[](std::size_t dimension) const {
+bool FBVClock::test(std::size_t dimension) const {
   const std::vector<bool> clock = snapshot();
   return dimension < clock.size() && clock[dimension];
 }
@@ -85,7 +77,7 @@ FBVClock &FBVClock::operator+=(const FBVClock &c) {
   c.getSystem();
   if (cid != c.cid)
     throw std::invalid_argument("cannot join FBVClocks from different systems");
-  system.dependencies[id].insert(c.id);
+  system.nodes[id].dependencies.insert(c.id);
   return *this;
 }
 
@@ -108,8 +100,7 @@ FBVClock::ClockSystem &FBVClock::getSystem(ClockSystemID system_id) {
 
 const FBVClock::ClockSystem &FBVClock::getSystem() const {
   const ClockSystem &system = getSystem(cid);
-  if (id >= system.clock_indices.size() || id >= system.dependencies.size() ||
-      system.clock_indices[id] != idx)
+  if (id >= system.nodes.size() || system.nodes[id].dimension != idx)
     throw std::logic_error("invalid FBVClock handle");
   return system;
 }
@@ -123,18 +114,18 @@ std::vector<bool> FBVClock::snapshot() const {
   const ClockSystem &system = getSystem();
   std::vector<bool> clock(system.idx_to_id.size(), false);
   std::vector<std::size_t> worklist{id};
-  std::vector<bool> visited(system.clock_indices.size(), false);
+  std::vector<bool> visited(system.nodes.size(), false);
 
   while (!worklist.empty()) {
     const std::size_t current = worklist.back();
     worklist.pop_back();
-    if (current >= system.clock_indices.size())
+    if (current >= system.nodes.size())
       throw std::logic_error("corrupt FBVClock dependency");
     if (visited[current])
       continue;
     visited[current] = true;
-    clock[system.clock_indices[current]] = true;
-    for (std::size_t dependency : system.dependencies[current])
+    clock[system.nodes[current].dimension] = true;
+    for (std::size_t dependency : system.nodes[current].dependencies)
       worklist.push_back(dependency);
   }
   return clock;

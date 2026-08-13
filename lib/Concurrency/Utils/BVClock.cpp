@@ -92,21 +92,17 @@ BVClock &BVClock::operator+=(BVClock &&vc) {
 }
 
 BVClock &BVClock::operator=(const FBVClock &vc){
-  const std::size_t sz = vc.size();
-  vec.resize(sz,false);
-  for(std::size_t i = 0; i < sz; ++i){
-    vec[i] = vc[i];
-  }
+  vec = vc.snapshot();
   return *this;
 }
 
 BVClock &BVClock::operator+=(const FBVClock &vc){
-  const std::size_t sz = vc.size();
-  if(vec.size() < sz){
-    vec.resize(sz,false);
+  const std::vector<bool> snapshot = vc.snapshot();
+  if(vec.size() < snapshot.size()){
+    vec.resize(snapshot.size(),false);
   }
-  for(std::size_t i = 0; i < sz; ++i){
-    vec[i] = vec[i] || vc[i];
+  for(std::size_t i = 0; i < snapshot.size(); ++i){
+    vec[i] = vec[i] || snapshot[i];
   }
   return *this;
 }

@@ -2,10 +2,9 @@
  * @file BVClock.h
  * @brief Bit-vector clock implementation for concurrency analysis
  *
- * A BVClock is a vector clock (similar to VClock<int>) where each
- * clock element is just a single bit. This provides a space-efficient
- * representation for tracking causal relationships in concurrent
- * programs.
+ * A BVClock is a causal-history set where each clock element is a single bit.
+ * Each logical event must therefore have a unique dimension; setting the same
+ * dimension twice does not represent two distinct events.
  *
  * @author rainoftime
  */
@@ -25,7 +24,7 @@ class FBVClock;
 
 /// @brief Bit-vector clock for tracking causal relationships
 ///
-/// A vector clock implementation where each clock element is a single bit.
+/// A causal-history set where each one-shot event dimension is a single bit.
 /// Used for efficient partial order comparisons in concurrent program analysis.
 class BVClock {
 public:

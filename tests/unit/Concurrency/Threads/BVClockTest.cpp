@@ -69,3 +69,28 @@ TEST(BVClockTest, ContainerOrderCanonicalizesTrailingZeroDimensions) {
 
   FBVClock::delete_clock_system(system);
 }
+
+TEST(BVClockTest, FBVClockConversionCapturesCompleteClosure) {
+  auto system = FBVClock::new_clock_system();
+  FBVClock a(system, 0);
+  FBVClock b(system, 1);
+  FBVClock c(system, 2);
+  a += b;
+  b += c;
+
+  BVClock assigned;
+  assigned = a;
+  EXPECT_TRUE(assigned[0]);
+  EXPECT_TRUE(assigned[1]);
+  EXPECT_TRUE(assigned[2]);
+
+  BVClock joined;
+  joined.set(3);
+  joined += a;
+  EXPECT_TRUE(joined[0]);
+  EXPECT_TRUE(joined[1]);
+  EXPECT_TRUE(joined[2]);
+  EXPECT_TRUE(joined[3]);
+
+  FBVClock::delete_clock_system(system);
+}

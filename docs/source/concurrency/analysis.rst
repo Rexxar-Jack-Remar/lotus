@@ -210,7 +210,7 @@ reasoning about memory ordering and data races.
 
 **Features**:
 
-- Vector clock-based implementation (``FBVClock``, ``BVClock``)
+- Graph reachability over thread-flow and explicit synchronizes-with edges
 - Efficient query interface
 - Integration with MHP analysis
 
@@ -273,7 +273,7 @@ clocks to efficiently track happens-before relationships and compute MHP pairs.
 
 **Features**:
 
-- Fast bit-vector clock implementation (FBVClock)
+- Map-based static vector clocks over abstract logic-clock elements
 - Efficient MHP computation
 - Scalable to large programs
 

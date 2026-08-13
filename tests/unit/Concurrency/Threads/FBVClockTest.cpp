@@ -1,6 +1,7 @@
 #include "Concurrency/Utils/BVClock.h"
 #include "Concurrency/Utils/FBVClock.h"
 
+#include <cstdint>
 #include <stdexcept>
 #include <type_traits>
 
@@ -105,6 +106,26 @@ TEST(FBVClockTest, LiveDependencyAndBVClockSnapshotAreExplicitlyDifferent) {
 
   EXPECT_TRUE(a[2]);
   EXPECT_FALSE(snapshot[2]);
+
+  FBVClock::delete_clock_system(system);
+}
+
+TEST(FBVClockTest, IntegralDimensionTypesUseOneUnambiguousAccessor) {
+  auto system = FBVClock::new_clock_system();
+  FBVClock clock(system, 4);
+
+  unsigned int unsigned_dimension = 4;
+  std::uint32_t uint32_dimension = 4;
+  std::size_t size_dimension = 4;
+  long long_dimension = 4;
+  std::uint64_t uint64_dimension = 4;
+
+  EXPECT_TRUE(clock[unsigned_dimension]);
+  EXPECT_TRUE(clock[uint32_dimension]);
+  EXPECT_TRUE(clock[size_dimension]);
+  EXPECT_TRUE(clock[long_dimension]);
+  EXPECT_TRUE(clock[uint64_dimension]);
+  EXPECT_THROW(static_cast<void>(clock[long{-1}]), std::out_of_range);
 
   FBVClock::delete_clock_system(system);
 }
