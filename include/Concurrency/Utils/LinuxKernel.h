@@ -53,8 +53,14 @@ inline bool isMutexInit(const llvm::StringRef& funcName) {
 }
 
 inline bool isMutexLock(const llvm::StringRef& funcName) {
-  return funcName.equals("mutex_lock") || funcName.equals("mutex_lock_interruptible") ||
-         funcName.equals("mutex_lock_killable") || funcName.equals("mutex_lock_nested");
+  return funcName.equals("mutex_lock") || funcName.equals("mutex_lock_nested");
+}
+
+inline bool isMutexConditionalLock(const llvm::StringRef &funcName) {
+  return funcName.equals("mutex_lock_interruptible") ||
+         funcName.equals("mutex_lock_killable") ||
+         funcName.equals("mutex_lock_interruptible_nested") ||
+         funcName.equals("mutex_lock_killable_nested");
 }
 
 inline bool isMutexUnlock(const llvm::StringRef& funcName) {
@@ -79,7 +85,11 @@ inline bool isSemaInit(const llvm::StringRef& funcName) {
 }
 
 inline bool isDown(const llvm::StringRef& funcName) {
-  return funcName.equals("down") || funcName.equals("down_interruptible") ||
+  return funcName.equals("down");
+}
+
+inline bool isDownConditional(const llvm::StringRef &funcName) {
+  return funcName.equals("down_interruptible") ||
          funcName.equals("down_killable");
 }
 
@@ -120,6 +130,11 @@ inline bool isDownRead(const llvm::StringRef& funcName) {
   return funcName.equals("down_read");
 }
 
+inline bool isDownReadConditional(const llvm::StringRef &funcName) {
+  return funcName.equals("down_read_interruptible") ||
+         funcName.equals("down_read_killable");
+}
+
 inline bool isDownReadTryLock(const llvm::StringRef &funcName) {
   return funcName.equals("down_read_trylock");
 }
@@ -130,6 +145,12 @@ inline bool isUpRead(const llvm::StringRef& funcName) {
 
 inline bool isDownWrite(const llvm::StringRef& funcName) {
   return funcName.equals("down_write");
+}
+
+inline bool isDownWriteConditional(const llvm::StringRef &funcName) {
+  return funcName.equals("down_write_interruptible") ||
+         funcName.equals("down_write_killable") ||
+         funcName.equals("down_write_killable_nested");
 }
 
 inline bool isDownWriteTryLock(const llvm::StringRef &funcName) {

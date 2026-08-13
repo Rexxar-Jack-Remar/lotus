@@ -17,12 +17,14 @@
 #include "Concurrency/Utils/ThreadAPI.h"
 
 #include "Concurrency/MPI/MPISymbol.h"
+#include "Concurrency/Utils/CallTarget.h"
 #include "Concurrency/Utils/CUDA.h"
 #include "Concurrency/Utils/CppThreading.h"
 #include "Concurrency/Utils/LinuxKernel.h"
 #include "Concurrency/Utils/RAIILockTracker.h"
 
 #include <cctype>
+#include <cstdlib>
 #include <fstream>
 #include <iomanip>
 #include <iostream>
@@ -30,15 +32,13 @@
 #include <sstream>
 
 #include <llvm/ADT/STLExtras.h>
-#include <llvm/ADT/SmallPtrSet.h>
 #include <llvm/ADT/SmallVector.h>
 #include <llvm/ADT/StringMap.h> // for StringMap
 #include <llvm/IR/Function.h>
-#include <llvm/IR/GlobalAlias.h>
-#include <llvm/IR/GlobalIFunc.h>
 #include <llvm/IR/InstIterator.h>
 #include <llvm/IR/Instructions.h>
 #include <llvm/IR/Module.h>
+#include <llvm/Support/raw_ostream.h>
 #include <stdio.h>
 
 using namespace std;
@@ -247,16 +247,41 @@ void ThreadAPI::init() {
     }
     tdAPIMap[p->n] = p->t;
   }
-  // Load optional thread.spec so custom APIs (e.g. kernel mutex_lock) are
-  // recognized
-  loadConfig("config/thread.spec");
-  loadConfig("../config/thread.spec");
-  loadSemanticConfig("config/concurrency_api.spec");
-  loadSemanticConfig("../config/concurrency_api.spec");
-  loadSemanticConfig("config/openmp_api.spec");
-  loadSemanticConfig("../config/openmp_api.spec");
-  loadSemanticConfig("config/mpi_api.spec");
-  loadSemanticConfig("../config/mpi_api.spec");
+  std::vector<std::string> config_dirs;
+  if (const char *override_dir = std::getenv("LOTUS_CONFIG_DIR")) {
+    if (*override_dir)
+      config_dirs.emplace_back(override_dir);
+  }
+#ifdef LOTUS_SOURCE_CONFIG_DIR
+  config_dirs.emplace_back(LOTUS_SOURCE_CONFIG_DIR);
+#endif
+#ifdef LOTUS_INSTALL_CONFIG_DIR
+  config_dirs.emplace_back(LOTUS_INSTALL_CONFIG_DIR);
+#endif
+  config_dirs.emplace_back("config");
+  config_dirs.emplace_back("../config");
+
+  auto loadFirst = [&](StringRef basename, bool semantic) {
+    for (const std::string &dir : config_dirs) {
+      const std::string path = dir + "/" + basename.str();
+      std::ifstream file(path);
+      if (!file.is_open())
+        continue;
+      file.close();
+      if (semantic)
+        loadSemanticConfig(path);
+      else
+        loadConfig(path);
+      return;
+    }
+    llvm::errs() << "Lotus concurrency configuration not found: " << basename
+                 << "\n";
+  };
+
+  loadFirst("thread.spec", false);
+  loadFirst("concurrency_api.spec", true);
+  loadFirst("openmp_api.spec", true);
+  loadFirst("mpi_api.spec", true);
 
   // OpenMP fork_call has no thread-handle operand and carries a variadic list
   // of captured values after the outlined function.
@@ -369,6 +394,15 @@ const Value *ThreadAPI::getCallArg(const Instruction *inst,
   if (!cb || idx >= cb->arg_size())
     return nullptr;
   return cb->getArgOperand(idx);
+}
+
+const Value *ThreadAPI::getCallField(const Instruction *inst,
+                                     unsigned field) const {
+  if (field == ForkArgIndices::NoArgument)
+    return nullptr;
+  if (field == ForkArgIndices::ReturnValue)
+    return llvm::isa<llvm::CallBase>(inst) ? inst : nullptr;
+  return getCallArg(inst, field);
 }
 
 const Value *ThreadAPI::getCppThreadCallable(const Instruction *inst) const {
@@ -494,6 +528,8 @@ ThreadAPI::getCppWrapperUnderlyingLocks(const Instruction *inst) const {
     return result;
 
   for (const Instruction &cursor : instructions(*parent)) {
+    if (&cursor == inst)
+      break;
     const auto *candidate = dyn_cast<CallBase>(&cursor);
     if (!candidate)
       continue;
@@ -578,6 +614,8 @@ ThreadAPI::getCppWrapperUnderlyingLock(const Instruction *inst) const {
   case TD_UNIQUE_LOCK_LOCK:
   case TD_UNIQUE_LOCK_UNLOCK:
   case TD_CPP_LOCK_TRY:
+  case TD_SHARED_RDLOCK:
+  case TD_SHARED_UNLOCK:
   case TD_SCOPED_LOCK_DTOR:
   case TD_SHARED_LOCK_DTOR:
     break;
@@ -605,6 +643,8 @@ ThreadAPI::getCppWrapperUnderlyingLock(const Instruction *inst) const {
   };
 
   for (const Instruction &cursor : instructions(*parent)) {
+    if (&cursor == inst)
+      break;
     const auto *candidate_call = dyn_cast<CallBase>(&cursor);
     if (!candidate_call) {
       continue;
@@ -695,13 +735,38 @@ void ThreadAPI::loadConfig(const std::string &filename) {
         addEntry(name, type);
         const std::string normalized_name = normalizeConfiguredAPIName(name);
         if (type == TD_FORK) {
-          unsigned t = 0, s = 2, a = 3;
+          auto parseField = [](const std::string &token,
+                               unsigned fallback) {
+            if (token == "return")
+              return ForkArgIndices::ReturnValue;
+            if (token == "none" || token == "-")
+              return ForkArgIndices::NoArgument;
+            unsigned value = fallback;
+            std::stringstream token_stream(token);
+            token_stream >> value;
+            return token_stream.fail() ? fallback : value;
+          };
+          std::string t, s, a;
           if (ss >> t >> s >> a)
-            m_fork_args[normalized_name] = ForkArgIndices{t, s, a};
+            m_fork_args[normalized_name] =
+                ForkArgIndices{parseField(t, 0), parseField(s, 2),
+                               parseField(a, 3)};
         } else if (type == TD_JOIN) {
-          unsigned t = 0, r = 1;
+          auto parseField = [](const std::string &token,
+                               unsigned fallback) {
+            if (token == "return")
+              return JoinArgIndices::ReturnValue;
+            if (token == "none" || token == "-")
+              return JoinArgIndices::NoArgument;
+            unsigned value = fallback;
+            std::stringstream token_stream(token);
+            token_stream >> value;
+            return token_stream.fail() ? fallback : value;
+          };
+          std::string t, r;
           if (ss >> t >> r)
-            m_join_args[normalized_name] = JoinArgIndices{t, r};
+            m_join_args[normalized_name] =
+                JoinArgIndices{parseField(t, 0), parseField(r, 1)};
         }
       }
     }
@@ -761,6 +826,15 @@ void ThreadAPI::loadSemanticConfig(const std::string &filename) {
             description.traits.push_back(entry.trim().str());
           }
         }
+      } else if (key.equals("success")) {
+        if (value.equals_insensitive("zero"))
+          description.success = TryLockSuccess::Zero;
+        else if (value.equals_insensitive("nonzero"))
+          description.success = TryLockSuccess::NonZero;
+      } else if (key.equals("conditional")) {
+        description.conditional_acquire =
+            value.equals_insensitive("true") || value.equals("1") ||
+            value.equals_insensitive("yes");
       }
     }
 
@@ -1568,6 +1642,15 @@ ThreadAPI::TD_TYPE ThreadAPI::getType(const Function *F) const {
     if (CppThreadingModel::isCondBroadcast(name))
       return TD_COND_BROADCAST;
 
+    // Wrapper member operations must precede raw shared_mutex matching: the
+    // wrapper's template argument also contains the shared_mutex spelling.
+    if (CppThreadingModel::isSharedLockTryLock(name))
+      return TD_CPP_LOCK_TRY;
+    if (CppThreadingModel::isSharedLockLock(name))
+      return TD_SHARED_RDLOCK;
+    if (CppThreadingModel::isSharedLockUnlock(name))
+      return TD_SHARED_UNLOCK;
+
     // C++17 shared_mutex
     if (CppThreadingModel::isSharedLockTryAcquire(name) ||
         CppThreadingModel::isSharedTimedLockTryAcquire(name))
@@ -1610,7 +1693,6 @@ ThreadAPI::TD_TYPE ThreadAPI::getType(const Function *F) const {
       return TD_SHARED_LOCK_CTOR;
     if (CppThreadingModel::isSharedLockDestructor(name))
       return TD_SHARED_LOCK_DTOR;
-
     // std::call_once
     if (CppThreadingModel::isCallOnce(name))
       return TD_CALL_ONCE;
@@ -1725,6 +1807,8 @@ ThreadAPI::TD_TYPE ThreadAPI::getType(const Function *F) const {
     // Mutexes
     if (LinuxKernelModel::isMutexInit(name))
       return TD_KERNEL_MUTEX_INIT;
+    if (LinuxKernelModel::isMutexConditionalLock(name))
+      return TD_KERNEL_MUTEX_LOCK;
     if (LinuxKernelModel::isMutexLock(name))
       return TD_KERNEL_MUTEX_LOCK;
     if (LinuxKernelModel::isMutexUnlock(name))
@@ -1736,6 +1820,8 @@ ThreadAPI::TD_TYPE ThreadAPI::getType(const Function *F) const {
     if (LinuxKernelModel::isSemaInit(name))
       return TD_KERNEL_SEMA_INIT;
     if (LinuxKernelModel::isDownTryLock(name))
+      return TD_KERNEL_DOWN;
+    if (LinuxKernelModel::isDownConditional(name))
       return TD_KERNEL_DOWN;
     if (LinuxKernelModel::isDown(name))
       return TD_KERNEL_DOWN;
@@ -1755,11 +1841,15 @@ ThreadAPI::TD_TYPE ThreadAPI::getType(const Function *F) const {
     // Read-Write Semaphores
     if (LinuxKernelModel::isDownReadTryLock(name))
       return TD_KERNEL_DOWN_READ;
+    if (LinuxKernelModel::isDownReadConditional(name))
+      return TD_KERNEL_DOWN_READ;
     if (LinuxKernelModel::isDownRead(name))
       return TD_KERNEL_DOWN_READ;
     if (LinuxKernelModel::isUpRead(name))
       return TD_KERNEL_UP_READ;
     if (LinuxKernelModel::isDownWriteTryLock(name))
+      return TD_KERNEL_DOWN_WRITE;
+    if (LinuxKernelModel::isDownWriteConditional(name))
       return TD_KERNEL_DOWN_WRITE;
     if (LinuxKernelModel::isDownWrite(name))
       return TD_KERNEL_DOWN_WRITE;
@@ -1845,40 +1935,7 @@ const Function *ThreadAPI::getCallee(const Instruction *inst) const {
  * Get the callee function from a CallBase
  */
 const Function *ThreadAPI::getCallee(const CallBase *cb) const {
-  if (!cb)
-    return nullptr;
-
-  const Value *current = cb->getCalledOperand();
-  SmallPtrSet<const Value *, 8> visited;
-  while (current && visited.insert(current).second) {
-    current = current->stripPointerCasts();
-    if (const auto *function = dyn_cast<Function>(current))
-      return function;
-    if (const auto *alias = dyn_cast<GlobalAlias>(current)) {
-      current = alias->getAliaseeObject();
-      continue;
-    }
-    if (const auto *ifunc = dyn_cast<GlobalIFunc>(current)) {
-      const Function *resolver = ifunc->getResolverFunction();
-      const Value *resolved_target = nullptr;
-      if (!resolver || resolver->isDeclaration())
-        return nullptr;
-      for (const BasicBlock &block : *resolver) {
-        const auto *ret = dyn_cast<ReturnInst>(block.getTerminator());
-        if (!ret || !ret->getReturnValue())
-          continue;
-        const Value *candidate = ret->getReturnValue()->stripPointerCasts();
-        if (!resolved_target)
-          resolved_target = candidate;
-        else if (resolved_target != candidate)
-          return nullptr;
-      }
-      current = resolved_target;
-      continue;
-    }
-    break;
-  }
-  return nullptr;
+  return lotus::concurrency::resolveCallTarget(cb);
 }
 
 /*!

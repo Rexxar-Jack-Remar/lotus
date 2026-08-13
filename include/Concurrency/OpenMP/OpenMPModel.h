@@ -1,5 +1,7 @@
 #pragma once
 
+#include "Concurrency/Utils/CallTarget.h"
+
 #include <llvm/ADT/StringRef.h>
 #include <llvm/IR/Function.h>
 
@@ -23,7 +25,7 @@ inline bool isFork(const llvm::StringRef &funcName) {
 inline bool isFork(const llvm::CallBase *callInst) {
   if (!callInst)
     return false;
-  auto const func = callInst->getCalledFunction();
+  auto const func = lotus::concurrency::resolveCallTarget(callInst);
   // Guard against null callee (indirect call) and unnamed functions.
   if (!func || !func->hasName())
     return false;
@@ -153,7 +155,7 @@ inline bool isTask(const llvm::StringRef &funcName) {
 inline bool isTask(const llvm::CallBase *callInst) {
   if (!callInst)
     return false;
-  auto const func = callInst->getCalledFunction();
+  auto const func = lotus::concurrency::resolveCallTarget(callInst);
   if (!func || !func->hasName())
     return false;
   return isTask(func->getName());
@@ -202,15 +204,18 @@ inline bool isTargetInit(const llvm::StringRef &funcName) {
 }
 
 inline bool isTargetDataBegin(const llvm::StringRef &funcName) {
-  return funcName.equals("__tgt_target_data_begin");
+  return funcName.startswith("__tgt_target_data_begin") ||
+         funcName.startswith("__tgt_target_enter_data");
 }
 
 inline bool isTargetDataEnd(const llvm::StringRef &funcName) {
-  return funcName.equals("__tgt_target_data_end");
+  return funcName.startswith("__tgt_target_data_end") ||
+         funcName.startswith("__tgt_target_exit_data");
 }
 
 inline bool isTargetDataUpdate(const llvm::StringRef &funcName) {
-  return funcName.equals("__tgt_target_data_update");
+  return funcName.startswith("__tgt_target_data_update") ||
+         funcName.startswith("__tgt_target_update");
 }
 
 // OpenMP 5.0+ Task Detach

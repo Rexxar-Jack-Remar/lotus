@@ -29,10 +29,7 @@
 
 #include "Concurrency/ConcurrencyConfig.h"
 #include "Concurrency/Utils/CUDA.h"
-#include "Concurrency/Utils/CUDA.h"
 #include "Concurrency/Utils/CppThreading.h"
-#include "Concurrency/Utils/CppThreading.h"
-#include "Concurrency/Utils/LinuxKernel.h"
 #include "Concurrency/Utils/LinuxKernel.h"
 
 #include <cstdint>
@@ -519,6 +516,8 @@ public:
     RuntimeLibrary library = RuntimeLibrary::Unknown;
     std::string semantic_tag;
     std::vector<std::string> traits;
+    TryLockSuccess success = TryLockSuccess::Unknown;
+    bool conditional_acquire = false;
     bool from_config = false;
   };
 
@@ -561,6 +560,7 @@ public:
   /// 0,2,3)
   struct ForkArgIndices {
     static constexpr unsigned NoArgument = ~0u;
+    static constexpr unsigned ReturnValue = ~1u;
     unsigned thread_arg = 0;
     unsigned start_routine_arg = 2;
     unsigned arg_arg = 3;
@@ -569,6 +569,8 @@ public:
   };
   /// Argument indices for TD_JOIN (default pthread_join: 0,1)
   struct JoinArgIndices {
+    static constexpr unsigned NoArgument = ~0u;
+    static constexpr unsigned ReturnValue = ~1u;
     unsigned thread_arg = 0;
     unsigned ret_arg = 1;
   };
@@ -597,6 +599,9 @@ private:
   /// absent.
   const llvm::Value *getCallArg(const llvm::Instruction *inst,
                                 unsigned idx) const;
+
+  const llvm::Value *getCallField(const llvm::Instruction *inst,
+                                  unsigned field) const;
 
   /// Best-effort extraction of a direct callable passed to std::thread.
   const llvm::Value *getCppThreadCallable(const llvm::Instruction *inst) const;
@@ -784,7 +789,9 @@ public:
     if (getType(callee) != TD_CUDA_KERNEL_LAUNCH) {
       return nullptr;
     }
-    const llvm::Value *kernel = getCallArg(inst, 0);
+    const CUDAModel::KernelLaunchLayout layout =
+        CUDAModel::getKernelLaunchLayout(callee->getName());
+    const llvm::Value *kernel = getCallArg(inst, layout.kernel_arg);
     return llvm::dyn_cast_or_null<llvm::Function>(
         kernel ? kernel->stripPointerCasts() : nullptr);
   }
@@ -812,8 +819,8 @@ public:
   /// Return true if this call create a new thread
   //@{
   inline bool isForkLike(const llvm::Instruction *inst) const {
-    TD_TYPE t = getType(getCallee(inst));
     const llvm::Function *callee = getCallee(inst);
+    TD_TYPE t = getType(callee);
     return t == TD_FORK || t == TD_JTHREAD_FORK ||
            t == TD_CUDA_KERNEL_LAUNCH ||
            (callee && CUDAModel::isLegacyKernelConfiguration(callee->getName())) ||
@@ -858,9 +865,7 @@ public:
     if (!hasMappedAPIEntry(callee))
       return nullptr;
     unsigned idx = getForkArgIndices(callee).thread_arg;
-    if (idx == ForkArgIndices::NoArgument)
-      return nullptr;
-    return getCallArg(inst, idx);
+    return getCallField(inst, idx);
   }
   inline const llvm::Value *getForkedThread(const llvm::CallBase *cb) const {
     return getForkedThread(llvm::dyn_cast<llvm::Instruction>(cb));
@@ -951,9 +956,9 @@ public:
     }
 
     if (getType(callee) == TD_CUDA_KERNEL_LAUNCH) {
-      const llvm::StringRef name = callee->getName();
-      unsigned args_index = name.startswith("cuLaunch") ? 9 : 3;
-      if (const llvm::Value *args = getCallArg(inst, args_index))
+      const CUDAModel::KernelLaunchLayout layout =
+          CUDAModel::getKernelLaunchLayout(callee->getName());
+      if (const llvm::Value *args = getCallArg(inst, layout.payload_arg))
         payload_args.push_back(args);
       return payload_args;
     }
@@ -1040,7 +1045,8 @@ public:
   /// Return true if this call wait for a worker thread
   //@{
   inline bool isJoinLike(const llvm::Instruction *inst) const {
-    TD_TYPE t = getType(getCallee(inst));
+    const llvm::Function *callee = getCallee(inst);
+    TD_TYPE t = getType(callee);
     return t == TD_JOIN || t == TD_JTHREAD_JOIN || t == TD_CUDA_DEVICE_SYNC;
   }
   inline bool isJoinLike(const llvm::CallBase *cb) const {
@@ -1065,7 +1071,7 @@ public:
       return nullptr;
     }
     unsigned idx = getJoinArgIndices(getCallee(inst)).thread_arg;
-    const llvm::Value *join = getCallArg(inst, idx);
+    const llvm::Value *join = getCallField(inst, idx);
     if (!join)
       return nullptr;
     const llvm::Value *stripped = join->stripPointerCasts();
@@ -1093,7 +1099,7 @@ public:
                    CppThreadingModel::isJthreadJoin(callee->getName())))
       return nullptr;
     unsigned idx = getJoinArgIndices(getCallee(inst)).ret_arg;
-    return getCallArg(inst, idx);
+    return getCallField(inst, idx);
   }
   inline const llvm::Value *
   getRetParmAtJoinedSite(const llvm::CallBase *cb) const {
@@ -1154,6 +1160,34 @@ public:
   inline bool isTryLock(const llvm::CallBase *cb) const {
     return isTryLock(llvm::dyn_cast<llvm::Instruction>(cb));
   }
+
+  inline bool isConditionalLockAcquire(const llvm::Instruction *inst) const {
+    if (!inst)
+      return false;
+    if (isTryLock(inst))
+      return true;
+    const llvm::Function *callee = getCallee(inst);
+    if (!callee)
+      return false;
+    const APIDescription description = describe(callee);
+    if (description.conditional_acquire)
+      return true;
+    const llvm::StringRef name = callee->getName();
+    return LinuxKernelModel::isMutexConditionalLock(name) ||
+           LinuxKernelModel::isDownConditional(name) ||
+           LinuxKernelModel::isDownReadConditional(name) ||
+           LinuxKernelModel::isDownWriteConditional(name) ||
+           name == "pthread_mutex_timedlock" ||
+           name == "pthread_mutex_clocklock" ||
+           name == "pthread_rwlock_timedrdlock" ||
+           name == "pthread_rwlock_clockrdlock" ||
+           name == "pthread_rwlock_timedwrlock" ||
+           name == "pthread_rwlock_clockwrlock";
+  }
+
+  inline bool isConditionalLockAcquire(const llvm::CallBase *cb) const {
+    return isConditionalLockAcquire(llvm::dyn_cast<llvm::Instruction>(cb));
+  }
   //@}
 
   /// Return true if this call acquires a read lock (rwlock_rdlock)
@@ -1165,6 +1199,8 @@ public:
             (CppThreadingModel::isSharedLockTryAcquire(
                  getCallee(inst)->getName()) ||
              CppThreadingModel::isSharedTimedLockTryAcquire(
+                 getCallee(inst)->getName()) ||
+             CppThreadingModel::isSharedLockTryLock(
                  getCallee(inst)->getName()))) ||
            // Linux kernel read locks
            t == TD_KERNEL_READ_LOCK || t == TD_KERNEL_DOWN_READ;
@@ -1202,7 +1238,8 @@ public:
     if (!cb || cb->arg_size() == 0)
       return nullptr;
 
-    TD_TYPE t = getType(getCallee(inst));
+    const llvm::Function *callee = getCallee(inst);
+    TD_TYPE t = getType(callee);
     switch (t) {
     case TD_LOCK_GUARD_CTOR:
     case TD_UNIQUE_LOCK_CTOR:
@@ -1210,8 +1247,11 @@ public:
     case TD_SHARED_LOCK_CTOR:
       return cb->arg_size() > 1 ? cb->getArgOperand(1) : nullptr;
     case TD_CPP_LOCK_TRY:
-      if (getCallee(inst) && CppThreadingModel::isUniqueLockTryLock(
-                                 getCallee(inst)->getName()))
+      if (getCallee(inst) &&
+          (CppThreadingModel::isUniqueLockTryLock(
+               getCallee(inst)->getName()) ||
+           CppThreadingModel::isSharedLockTryLock(
+               getCallee(inst)->getName())))
         return getCppWrapperUnderlyingLock(inst);
       return cb->getArgOperand(0);
     case TD_SEMAPHORE_ACQUIRE:
@@ -1220,6 +1260,11 @@ public:
     case TD_SHARED_RDLOCK:
     case TD_SHARED_WRLOCK:
     case TD_SHARED_UNLOCK:
+      if (getCallee(inst) &&
+          (CppThreadingModel::isSharedLockLock(getCallee(inst)->getName()) ||
+           CppThreadingModel::isSharedLockUnlock(getCallee(inst)->getName())))
+        return getCppWrapperUnderlyingLock(inst);
+      return cb->getArgOperand(0);
     case TD_OMP_ORDERED_START:
     case TD_OMP_ORDERED_END:
     case TD_ACQUIRE:
@@ -1274,7 +1319,8 @@ public:
       return nullptr;
     }
 
-    TD_TYPE t = getType(getCallee(inst));
+    const llvm::Function *callee = getCallee(inst);
+    TD_TYPE t = getType(callee);
     switch (t) {
     case TD_LOCK_GUARD_CTOR:
     case TD_LOCK_GUARD_DTOR:
@@ -1292,9 +1338,19 @@ public:
       if (t == TD_SCOPED_LOCK_CTOR || t == TD_SCOPED_LOCK_DTOR)
         return nullptr;
       return cb->getArgOperand(0)->stripPointerCasts();
+    case TD_SHARED_RDLOCK:
+    case TD_SHARED_UNLOCK:
+      if (callee &&
+          (CppThreadingModel::isSharedLockLock(callee->getName()) ||
+           CppThreadingModel::isSharedLockUnlock(callee->getName())))
+        return getCppWrapperUnderlyingLock(inst);
+      return getLockVal(inst);
     case TD_CPP_LOCK_TRY:
-      if (getCallee(inst) && CppThreadingModel::isUniqueLockTryLock(
-                                 getCallee(inst)->getName()))
+      if (getCallee(inst) &&
+          (CppThreadingModel::isUniqueLockTryLock(
+               getCallee(inst)->getName()) ||
+           CppThreadingModel::isSharedLockTryLock(
+               getCallee(inst)->getName())))
         return getCppWrapperUnderlyingLock(inst);
       return cb->getArgOperand(0)->stripPointerCasts();
     case TD_ACQUIRE:
@@ -1385,21 +1441,29 @@ public:
     }
 
     info.is_try = isTryLock(inst);
-    info.conditional = info.is_try;
-    if (info.is_try) {
+    info.conditional = isConditionalLockAcquire(inst);
+    if (info.conditional) {
       const TD_TYPE type = getType(callee);
-      if (type == TD_TRY_ACQUIRE || type == TD_SEMAPHORE_TRY_ACQUIRE ||
-          (callee &&
-           (callee->getName() == "pthread_rwlock_tryrdlock" ||
-            callee->getName() == "pthread_rwlock_trywrlock" ||
-            LinuxKernelModel::isDownTryLock(callee->getName()) ||
-            LinuxKernelModel::isDownReadTryLock(callee->getName()) ||
-            LinuxKernelModel::isDownWriteTryLock(callee->getName())))) {
+      const APIDescription description = describe(callee);
+      if (description.success != TryLockSuccess::Unknown) {
+        info.try_success = description.success;
+      } else if (callee &&
+                 (callee->getName().startswith("pthread_") ||
+                  LinuxKernelModel::isDownTryLock(callee->getName()) ||
+                  LinuxKernelModel::isMutexConditionalLock(callee->getName()) ||
+                  LinuxKernelModel::isDownConditional(callee->getName()) ||
+                  LinuxKernelModel::isDownReadConditional(callee->getName()) ||
+                  LinuxKernelModel::isDownWriteConditional(callee->getName()))) {
         info.try_success = TryLockSuccess::Zero;
-      } else if (type == TD_CPP_LOCK_TRY || type == TD_KERNEL_SPIN_TRYLOCK ||
+      } else if (type == TD_TRY_ACQUIRE ||
+                 type == TD_SEMAPHORE_TRY_ACQUIRE ||
+                 type == TD_CPP_LOCK_TRY || type == TD_KERNEL_SPIN_TRYLOCK ||
                  type == TD_KERNEL_MUTEX_TRYLOCK ||
-                 (callee && CppThreadingModel::isTryToLockConstructor(
-                                callee->getName()))) {
+                 (callee &&
+                  (CppThreadingModel::isTryToLockConstructor(
+                       callee->getName()) ||
+                   LinuxKernelModel::isDownReadTryLock(callee->getName()) ||
+                   LinuxKernelModel::isDownWriteTryLock(callee->getName())))) {
         info.try_success = TryLockSuccess::NonZero;
       }
     }
@@ -1603,7 +1667,13 @@ public:
     TD_TYPE t = getType(callee);
     const bool binary_semaphore =
         callee && hasTrait(callee, "binary-semaphore") && isSemaphoreOp(inst);
+    const bool shared_mutex_exclusive_unlock =
+        t == TD_SHARED_UNLOCK && callee &&
+        (CppThreadingModel::isSharedLockExclusiveRelease(callee->getName()) ||
+         CppThreadingModel::isSharedTimedLockExclusiveRelease(
+             callee->getName()));
     return (t == TD_RELEASE && !(callee && hasTrait(callee, "semaphore"))) ||
+           shared_mutex_exclusive_unlock ||
            t == TD_OMP_ORDERED_END || t == TD_LOCK_GUARD_DTOR ||
            (t == TD_UNIQUE_LOCK_DTOR &&
             cppWrapperDestructorDefinitelyReleases(inst)) ||
@@ -1638,8 +1708,14 @@ public:
   }
 
   inline bool isSharedLockRelease(const llvm::Instruction *inst) const {
-    TD_TYPE t = getType(getCallee(inst));
-    return t == TD_SHARED_UNLOCK ||
+    const llvm::Function *callee = getCallee(inst);
+    TD_TYPE t = getType(callee);
+    const bool exclusive_unlock =
+        callee &&
+        (CppThreadingModel::isSharedLockExclusiveRelease(callee->getName()) ||
+         CppThreadingModel::isSharedTimedLockExclusiveRelease(
+             callee->getName()));
+    return (t == TD_SHARED_UNLOCK && !exclusive_unlock) ||
            (t == TD_SHARED_LOCK_DTOR &&
             cppWrapperDestructorDefinitelyReleases(inst)) ||
            t == TD_KERNEL_READ_UNLOCK || t == TD_KERNEL_UP_READ;

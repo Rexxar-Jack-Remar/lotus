@@ -8,12 +8,12 @@ __kmpc_critical TD_ACQUIRE library=openmp semantic=critical-enter
 __kmpc_end_critical TD_RELEASE library=openmp semantic=critical-exit
 omp_set_lock TD_ACQUIRE library=openmp semantic=lock
 omp_unset_lock TD_RELEASE library=openmp semantic=unlock
-omp_test_lock TD_TRY_ACQUIRE library=openmp semantic=try-lock
+omp_test_lock TD_TRY_ACQUIRE library=openmp semantic=try-lock success=nonzero
 omp_init_lock TD_MUTEX_INI library=openmp semantic=init-lock
 omp_destroy_lock TD_MUTEX_DESTROY library=openmp semantic=destroy-lock
 omp_set_nest_lock TD_ACQUIRE library=openmp semantic=nest-lock
 omp_unset_nest_lock TD_RELEASE library=openmp semantic=nest-unlock
-omp_test_nest_lock TD_TRY_ACQUIRE library=openmp semantic=nest-try-lock
+omp_test_nest_lock TD_TRY_ACQUIRE library=openmp semantic=nest-try-lock success=nonzero
 omp_init_nest_lock TD_MUTEX_INI library=openmp semantic=init-nest-lock
 omp_destroy_nest_lock TD_MUTEX_DESTROY library=openmp semantic=destroy-nest-lock
 __kmpc_omp_task TD_OMP_TASK library=openmp semantic=task traits=omp-task-op
@@ -69,6 +69,12 @@ GOMP_taskyield TD_OMP_TASKYIELD library=openmp semantic=taskyield traits=omp-tas
 GOMP_taskloop TD_OMP_TASKLOOP library=openmp semantic=taskloop traits=omp-task-op match=prefix
 
 # OpenMP prefix matches
+__tgt_target_data_begin TD_OMP_TARGET_DATA_BEGIN library=openmp semantic=target-data-begin traits=omp-target-op,omp-target-data-op match=prefix
+__tgt_target_data_end TD_OMP_TARGET_DATA_END library=openmp semantic=target-data-end traits=omp-target-op,omp-target-data-op match=prefix
+__tgt_target_data_update TD_OMP_TARGET_DATA_UPDATE library=openmp semantic=target-data-update traits=omp-target-op,omp-target-data-op match=prefix
+__tgt_target_enter_data TD_OMP_TARGET_DATA_BEGIN library=openmp semantic=target-enter-data traits=omp-target-op,omp-target-data-op match=prefix
+__tgt_target_exit_data TD_OMP_TARGET_DATA_END library=openmp semantic=target-exit-data traits=omp-target-op,omp-target-data-op match=prefix
+__tgt_target_update TD_OMP_TARGET_DATA_UPDATE library=openmp semantic=target-update traits=omp-target-op,omp-target-data-op match=prefix
 __kmpc_omp_task_with_deps TD_OMP_TASK_WITH_DEPS library=openmp semantic=task-with-deps traits=omp-task-op match=prefix
 __kmpc_for_static_init TD_OMP_FOR_STATIC_INIT library=openmp semantic=for-static-init traits=omp-task-op match=prefix
 __kmpc_dispatch_init TD_OMP_FOR_DISPATCH_INIT library=openmp semantic=dispatch-init traits=omp-task-op match=prefix

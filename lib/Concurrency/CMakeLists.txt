@@ -50,3 +50,6 @@ set(Concurrency_SOURCES
 )
 add_library(Concurrency STATIC ${Concurrency_SOURCES})
 target_link_libraries(Concurrency CanaryLLVMUtils CanaryAliasAnalysisWrapper)
+target_compile_definitions(Concurrency PRIVATE
+  LOTUS_SOURCE_CONFIG_DIR="${PROJECT_SOURCE_DIR}/config"
+  LOTUS_INSTALL_CONFIG_DIR="${CMAKE_INSTALL_PREFIX}/share/lotus/config")

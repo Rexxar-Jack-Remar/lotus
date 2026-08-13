@@ -92,4 +92,11 @@ endif()
 # Add Python scripts and utilities
 add_subdirectory(scripts)
 
+install(FILES
+  config/thread.spec
+  config/concurrency_api.spec
+  config/openmp_api.spec
+  config/mpi_api.spec
+  DESTINATION share/lotus/config)
+
 lotus_print_build_summary()

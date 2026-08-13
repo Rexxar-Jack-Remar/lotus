@@ -6,6 +6,37 @@
 
 namespace CUDAModel {
 
+struct KernelLaunchLayout {
+  static constexpr unsigned NoArgument = ~0u;
+  unsigned kernel_arg = NoArgument;
+  unsigned payload_arg = NoArgument;
+
+  bool isValid() const { return kernel_arg != NoArgument; }
+};
+
+inline llvm::StringRef normalizeLaunchName(llvm::StringRef funcName) {
+  if (funcName.endswith("_v2"))
+    return funcName.drop_back(3);
+  return funcName;
+}
+
+inline KernelLaunchLayout
+getKernelLaunchLayout(const llvm::StringRef &rawName) {
+  const llvm::StringRef funcName = normalizeLaunchName(rawName);
+  if (funcName.equals("cudaLaunchKernelExC"))
+    return {1, 2};
+  if (funcName.equals("cuLaunchKernelEx"))
+    return {1, 2};
+  if (funcName.equals("cudaLaunchKernel") ||
+      funcName.equals("cudaLaunchCooperativeKernel"))
+    return {0, 3};
+  if (funcName.equals("cuLaunchKernel") ||
+      funcName.equals("cuLaunchCooperativeKernel") ||
+      funcName.equals("cuLaunchCooperativeKernelMultiDevice"))
+    return {0, 9};
+  return {};
+}
+
 inline bool hasAnySubstring(const llvm::StringRef &funcName,
                             std::initializer_list<llvm::StringRef> needles) {
   for (const llvm::StringRef needle : needles) {
@@ -27,10 +58,7 @@ inline bool startsWithAny(const llvm::StringRef &funcName,
 }
 
 inline bool isKernelLaunch(const llvm::StringRef &funcName) {
-  return funcName.startswith("cudaLaunchKernel") ||
-         funcName.startswith("cudaLaunchCooperativeKernel") ||
-         funcName.startswith("cuLaunchKernel") ||
-         funcName.startswith("cuLaunchCooperativeKernel");
+  return getKernelLaunchLayout(funcName).isValid();
 }
 
 inline bool isLegacyKernelConfiguration(const llvm::StringRef &funcName) {

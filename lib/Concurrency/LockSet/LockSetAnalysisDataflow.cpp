@@ -61,7 +61,8 @@ void LockSetAnalysis::detectTryLockSuccessBranches(Function *func) {
       continue;
 
     const auto *trylock_call = dyn_cast<CallBase>(trylock_ret);
-    if (!trylock_call || !m_thread_api->isTryLock(trylock_call))
+    if (!trylock_call ||
+        !m_thread_api->isConditionalLockAcquire(trylock_call))
       continue;
 
     const ThreadAPI::LockSemanticInfo semantics =
@@ -723,7 +724,7 @@ LockSet LockSetAnalysis::transfer(const Instruction *inst,
                             call_type == ThreadAPI::TD_KERNEL_UP_WRITE;
 
   if (m_thread_api->isTDAcquire(inst) && raw_lock_api) {
-    if (!m_thread_api->isTryLock(inst) || !is_must) {
+    if (!m_thread_api->isConditionalLockAcquire(inst) || !is_must) {
       if (LockID lock = getLockValue(inst)) {
         out_set.insert(lock);
       }
@@ -1035,12 +1036,12 @@ void LockSetAnalysis::transferReadWrite(const Instruction *inst,
                             call_type == ThreadAPI::TD_KERNEL_UP_WRITE;
 
   if (m_thread_api->isReadLockAcquire(inst)) {
-    if (!m_thread_api->isTryLock(inst) || !is_must) {
+    if (!m_thread_api->isConditionalLockAcquire(inst) || !is_must) {
       if (LockID lock = getLockValue(inst))
         out_read.insert(lock);
     }
   } else if (m_thread_api->isWriteLockAcquire(inst)) {
-    if (!m_thread_api->isTryLock(inst) || !is_must) {
+    if (!m_thread_api->isConditionalLockAcquire(inst) || !is_must) {
       if (LockID lock = getLockValue(inst)) {
         out_write.insert(lock);
         for (const auto *l : in_read) {
@@ -1052,7 +1053,7 @@ void LockSetAnalysis::transferReadWrite(const Instruction *inst,
       }
     }
   } else if (m_thread_api->isTDAcquire(inst) && raw_lock_api) {
-    if (!m_thread_api->isTryLock(inst) || !is_must) {
+    if (!m_thread_api->isConditionalLockAcquire(inst) || !is_must) {
       if (LockID lock = getLockValue(inst))
         out_write.insert(lock);
     }

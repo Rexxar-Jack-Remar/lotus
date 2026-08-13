@@ -1207,3 +1207,270 @@ TEST_F(ThreadAPITest, OpenMPInitPredicatesAreOperationSpecific) {
   EXPECT_FALSE(OpenMPModel::isDoacrossInit("__kmpc_doacross_wait"));
   EXPECT_FALSE(OpenMPModel::isDoacrossInit("__kmpc_doacross_post"));
 }
+
+TEST_F(ThreadAPITest, KernelThreadLayoutsCanUseCallResults) {
+  const char *source = R"(
+    declare i8* @kthread_run(i8* (i8*)*, i8*, i8*)
+    declare i32 @kthread_stop(i8*)
+    define i8* @worker(i8* %arg) { ret i8* %arg }
+    define void @main(i8* %data, i8* %name) {
+      %task = call i8* @kthread_run(i8* (i8*)* @worker, i8* %data,
+                                    i8* %name)
+      %result = call i32 @kthread_stop(i8* %task)
+      ret void
+    }
+  )";
+  auto module = parseModule(source);
+  ASSERT_NE(module, nullptr);
+  ThreadAPI::resetThreadAPI();
+  ThreadAPI *api = ThreadAPI::getThreadAPI();
+  auto it = module->getFunction("main")->front().begin();
+  const Instruction *fork = &*it++;
+  const Instruction *join = &*it;
+
+  EXPECT_EQ(api->getForkedThread(fork), fork);
+  EXPECT_EQ(api->getForkedFun(fork), module->getFunction("worker"));
+  EXPECT_EQ(api->getActualParmAtForkSite(fork),
+            module->getFunction("main")->getArg(0));
+  EXPECT_EQ(api->getJoinedThread(join), fork);
+  EXPECT_EQ(api->getRetParmAtJoinedSite(join), join);
+}
+
+TEST_F(ThreadAPITest, CUDALaunchLayoutsDistinguishExAndLegacyForms) {
+  const char *source = R"(
+    declare i32 @cudaLaunchKernel(i8*, i8*, i8*, i8**, i64, i8*)
+    declare i32 @cudaLaunchKernelExC(i8*, i8*, i8**)
+    declare i32 @cuLaunchKernel(i8*, i32, i32, i32, i32, i32, i32, i32,
+                                i8*, i8**)
+    declare i32 @cuLaunchKernelEx_v2(i8*, i8*, i8**)
+    define void @kernel() { ret void }
+    define void @main(i8** %args) {
+      call i32 @cudaLaunchKernel(i8* bitcast (void ()* @kernel to i8*),
+                                 i8* null, i8* null, i8** %args, i64 0,
+                                 i8* null)
+      call i32 @cudaLaunchKernelExC(i8* null,
+                                    i8* bitcast (void ()* @kernel to i8*),
+                                    i8** %args)
+      call i32 @cuLaunchKernel(i8* bitcast (void ()* @kernel to i8*),
+                               i32 1, i32 1, i32 1, i32 1, i32 1, i32 1,
+                               i32 0, i8* null, i8** %args)
+      call i32 @cuLaunchKernelEx_v2(i8* null,
+                                    i8* bitcast (void ()* @kernel to i8*),
+                                    i8** %args)
+      ret void
+    }
+  )";
+  auto module = parseModule(source);
+  ASSERT_NE(module, nullptr);
+  ThreadAPI::resetThreadAPI();
+  ThreadAPI *api = ThreadAPI::getThreadAPI();
+  auto it = module->getFunction("main")->front().begin();
+  for (unsigned i = 0; i < 4; ++i) {
+    const Instruction *launch = &*it++;
+    EXPECT_EQ(api->getCUDALaunchedKernel(launch),
+              module->getFunction("kernel"));
+    auto payload = api->getForkPayloadArgs(launch);
+    ASSERT_EQ(payload.size(), 1u);
+    EXPECT_EQ(payload.front(), module->getFunction("main")->getArg(0));
+  }
+}
+
+TEST_F(ThreadAPITest, WrapperMembersUseUnderlyingMutexAndCorrectMode) {
+  const char *source = R"(
+    declare void @_ZNSt11unique_lockISt5mutexEC1ERS0_(i8*, i8*)
+    declare void @_ZNSt11unique_lockISt5mutexE4lockEv(i8*)
+    declare i1 @_ZNSt11unique_lockISt5mutexE8try_lockEv(i8*)
+    declare void @_ZNSt11unique_lockISt5mutexE6unlockEv(i8*)
+    declare void @_ZNSt11shared_lockISt12shared_mutexEC1ERS0_(i8*, i8*)
+    declare void @_ZNSt11shared_lockISt12shared_mutexE4lockEv(i8*)
+    declare i1 @_ZNSt11shared_lockISt12shared_mutexE8try_lockEv(i8*)
+    declare void @_ZNSt11shared_lockISt12shared_mutexE6unlockEv(i8*)
+    @mutex = global i8 0
+    @shared = global i8 0
+    define void @main() {
+      %u = alloca i8
+      %s = alloca i8
+      call void @_ZNSt11unique_lockISt5mutexEC1ERS0_(i8* %u, i8* @mutex)
+      call void @_ZNSt11unique_lockISt5mutexE4lockEv(i8* %u)
+      call i1 @_ZNSt11unique_lockISt5mutexE8try_lockEv(i8* %u)
+      call void @_ZNSt11unique_lockISt5mutexE6unlockEv(i8* %u)
+      call void @_ZNSt11shared_lockISt12shared_mutexEC1ERS0_(i8* %s,
+                                                             i8* @shared)
+      call void @_ZNSt11shared_lockISt12shared_mutexE4lockEv(i8* %s)
+      call i1 @_ZNSt11shared_lockISt12shared_mutexE8try_lockEv(i8* %s)
+      call void @_ZNSt11shared_lockISt12shared_mutexE6unlockEv(i8* %s)
+      ret void
+    }
+  )";
+  auto module = parseModule(source);
+  ASSERT_NE(module, nullptr);
+  ThreadAPI::resetThreadAPI();
+  ThreadAPI *api = ThreadAPI::getThreadAPI();
+  std::vector<const Instruction *> calls;
+  for (const Instruction &inst : instructions(*module->getFunction("main")))
+    if (isa<CallBase>(inst))
+      calls.push_back(&inst);
+  ASSERT_EQ(calls.size(), 8u);
+
+  for (unsigned i : {1u, 2u, 3u})
+    EXPECT_EQ(api->getAnalysisLockIdentity(calls[i]),
+              module->getNamedGlobal("mutex"));
+  for (unsigned i : {5u, 6u, 7u})
+    EXPECT_EQ(api->getAnalysisLockIdentity(calls[i]),
+              module->getNamedGlobal("shared"));
+  EXPECT_EQ(api->getType(api->getCallee(calls[1])),
+            ThreadAPI::TD_UNIQUE_LOCK_LOCK);
+  EXPECT_EQ(api->getType(api->getCallee(calls[5])),
+            ThreadAPI::TD_SHARED_RDLOCK);
+  EXPECT_EQ(api->describeLockSemantics(calls[5]).mode,
+            ThreadAPI::LockMode::Shared);
+  EXPECT_EQ(api->getLockSemanticInfo(calls[2]).try_success,
+            ThreadAPI::TryLockSuccess::NonZero);
+  EXPECT_EQ(api->getLockSemanticInfo(calls[6]).try_success,
+            ThreadAPI::TryLockSuccess::NonZero);
+}
+
+TEST_F(ThreadAPITest, SharedMutexUnlockModeMatchesTheMemberOperation) {
+  const char *source = R"(
+    declare void @_ZNSt12shared_mutex6unlockEv(i8*)
+    declare void @_ZNSt12shared_mutex13unlock_sharedEv(i8*)
+    define void @main(i8* %lock) {
+      call void @_ZNSt12shared_mutex6unlockEv(i8* %lock)
+      call void @_ZNSt12shared_mutex13unlock_sharedEv(i8* %lock)
+      ret void
+    }
+  )";
+  auto module = parseModule(source);
+  ASSERT_NE(module, nullptr);
+  ThreadAPI::resetThreadAPI();
+  ThreadAPI *api = ThreadAPI::getThreadAPI();
+  auto it = module->getFunction("main")->front().begin();
+  EXPECT_EQ(api->describeLockSemantics(&*it++).mode,
+            ThreadAPI::LockMode::Exclusive);
+  EXPECT_EQ(api->describeLockSemantics(&*it).mode,
+            ThreadAPI::LockMode::Shared);
+}
+
+TEST_F(ThreadAPITest, WrapperLookupDoesNotUseLaterReconstruction) {
+  const char *source = R"(
+    declare void @fake_unique_lock_C1E(i8*, i8*)
+    declare void @fake_unique_lock_unlockEv(i8*)
+    @first = global i8 0
+    @second = global i8 0
+    define void @main() {
+      %wrapper = alloca i8
+      call void @fake_unique_lock_C1E(i8* %wrapper, i8* @first)
+      call void @fake_unique_lock_unlockEv(i8* %wrapper)
+      call void @fake_unique_lock_C1E(i8* %wrapper, i8* @second)
+      ret void
+    }
+  )";
+  auto module = parseModule(source);
+  ASSERT_NE(module, nullptr);
+  ThreadAPI::resetThreadAPI();
+  ThreadAPI *api = ThreadAPI::getThreadAPI();
+  auto it = module->getFunction("main")->front().begin();
+  ++it;
+  ++it;
+  EXPECT_EQ(api->getAnalysisLockIdentity(&*it),
+            module->getNamedGlobal("first"));
+}
+
+TEST_F(ThreadAPITest, TryAndConditionalAcquirePolarityIsPerAPI) {
+  const char *source = R"(
+    declare i32 @pthread_mutex_trylock(i8*)
+    declare i1 @_ZNSt5mutex8try_lockEv(i8*)
+    declare i32 @omp_test_lock(i8*)
+    declare i32 @down_trylock(i8*)
+    declare i32 @down_read_trylock(i8*)
+    declare i32 @mutex_lock_interruptible(i8*)
+    declare i32 @pthread_mutex_timedlock(i8*, i8*)
+    define void @main(i8* %lock) {
+      call i32 @pthread_mutex_trylock(i8* %lock)
+      call i1 @_ZNSt5mutex8try_lockEv(i8* %lock)
+      call i32 @omp_test_lock(i8* %lock)
+      call i32 @down_trylock(i8* %lock)
+      call i32 @down_read_trylock(i8* %lock)
+      call i32 @mutex_lock_interruptible(i8* %lock)
+      call i32 @pthread_mutex_timedlock(i8* %lock, i8* null)
+      ret void
+    }
+  )";
+  auto module = parseModule(source);
+  ASSERT_NE(module, nullptr);
+  ThreadAPI::resetThreadAPI();
+  ThreadAPI *api = ThreadAPI::getThreadAPI();
+  const std::vector<ThreadAPI::TryLockSuccess> expected = {
+      ThreadAPI::TryLockSuccess::Zero, ThreadAPI::TryLockSuccess::NonZero,
+      ThreadAPI::TryLockSuccess::NonZero, ThreadAPI::TryLockSuccess::Zero,
+      ThreadAPI::TryLockSuccess::NonZero, ThreadAPI::TryLockSuccess::Zero,
+      ThreadAPI::TryLockSuccess::Zero};
+  auto it = module->getFunction("main")->front().begin();
+  for (ThreadAPI::TryLockSuccess success : expected) {
+    const Instruction *call = &*it++;
+    const auto info = api->getLockSemanticInfo(call);
+    EXPECT_TRUE(info.conditional);
+    EXPECT_EQ(info.try_success, success);
+  }
+}
+
+TEST_F(ThreadAPITest, OpenMPTargetDataPrefixesAndAliasCallsAreRecognized) {
+  const char *source = R"(
+    declare void @__tgt_target_data_begin_mapper(i8*)
+    declare void @__tgt_target_data_end_nowait_mapper(i8*)
+    declare void @__tgt_target_data_update_mapper(i8*)
+    declare void @__tgt_target_mapper(i8*)
+    declare void @__kmpc_fork_call(i8*, i32, i8*, ...)
+    @fork_alias = alias void (i8*, i32, i8*, ...),
+        void (i8*, i32, i8*, ...)* @__kmpc_fork_call
+    define void @main() {
+      call void (i8*, i32, i8*, ...) @fork_alias(i8* null, i32 0,
+                                                  i8* null)
+      ret void
+    }
+  )";
+  auto module = parseModule(source);
+  ASSERT_NE(module, nullptr);
+  ThreadAPI::resetThreadAPI();
+  ThreadAPI *api = ThreadAPI::getThreadAPI();
+  EXPECT_EQ(api->getType(module->getFunction("__tgt_target_data_begin_mapper")),
+            ThreadAPI::TD_OMP_TARGET_DATA_BEGIN);
+  EXPECT_EQ(
+      api->getType(module->getFunction("__tgt_target_data_end_nowait_mapper")),
+      ThreadAPI::TD_OMP_TARGET_DATA_END);
+  EXPECT_EQ(api->getType(module->getFunction("__tgt_target_data_update_mapper")),
+            ThreadAPI::TD_OMP_TARGET_DATA_UPDATE);
+  EXPECT_EQ(api->getType(module->getFunction("__tgt_target_mapper")),
+            ThreadAPI::TD_OMP_TARGET);
+  const auto *call = dyn_cast<CallBase>(&module->getFunction("main")->front().front());
+  ASSERT_NE(call, nullptr);
+  EXPECT_TRUE(OpenMPModel::isFork(call));
+  EXPECT_TRUE(api->isForkLike(call));
+}
+
+TEST_F(ThreadAPITest, CppRecognitionCoversFreeFunctionsWithoutSubstrings) {
+  const char *source = R"(
+    declare void @_ZSt5asyncIiEvv()
+    declare void @_ZSt11atomic_waitIiEvPKSt6atomicIT_ES1_()
+    declare void @_ZNKSt6atomicIiE4waitEi(i8*, i32)
+    declare void @debug_latch_count_down()
+    declare void @my_barrier_waitE()
+    declare void @app_semaphore_releaseE()
+    declare void @_ZNSt13__future_base12_State_baseV217_M_complete_asyncEv()
+  )";
+  auto module = parseModule(source);
+  ASSERT_NE(module, nullptr);
+  ThreadAPI::resetThreadAPI();
+  ThreadAPI *api = ThreadAPI::getThreadAPI();
+  EXPECT_EQ(api->getType(module->getFunction("_ZSt5asyncIiEvv")),
+            ThreadAPI::TD_ASYNC);
+  EXPECT_EQ(api->getType(module->getFunction(
+                "_ZSt11atomic_waitIiEvPKSt6atomicIT_ES1_")),
+            ThreadAPI::TD_ATOMIC_WAIT);
+  EXPECT_EQ(api->getType(module->getFunction("_ZNKSt6atomicIiE4waitEi")),
+            ThreadAPI::TD_ATOMIC_WAIT);
+  for (const char *name : {"debug_latch_count_down", "my_barrier_waitE",
+                           "app_semaphore_releaseE",
+                           "_ZNSt13__future_base12_State_baseV217_M_complete_asyncEv"})
+    EXPECT_EQ(api->getType(module->getFunction(name)), ThreadAPI::TD_DUMMY);
+}

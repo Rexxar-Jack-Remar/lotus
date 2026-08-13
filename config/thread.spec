@@ -10,17 +10,17 @@
 #   TD_KERNEL_MUTEX_LOCK, TD_KERNEL_MUTEX_UNLOCK
 #
 # Optional argument indices (0-based) override defaults for custom APIs:
-#   TD_FORK: thread_arg start_routine_arg user_arg   (default: 0 2 3, pthread_create)
-#   TD_JOIN: thread_arg ret_arg                     (default: 0 1, pthread_join)
-# Example: kthread_run has (thread, fn, arg) at 0,1,2 so use "kthread_run TD_FORK 0 1 2"
+#   TD_FORK: thread_field start_routine_field user_field
+#   TD_JOIN: thread_field result_field
+# Fields are 0-based argument indices, "return", or "none".
 
 # Linux Kernel
 mutex_lock TD_KERNEL_MUTEX_LOCK
 mutex_unlock TD_KERNEL_MUTEX_UNLOCK
 spin_lock TD_KERNEL_SPIN_LOCK
 spin_unlock TD_KERNEL_SPIN_UNLOCK
-kthread_run TD_FORK 0 1 2
-kthread_stop TD_JOIN 0 1
+kthread_run TD_FORK return 0 1
+kthread_stop TD_JOIN 0 return
 schedule TD_DUMMY
 
 # GNU OpenMP runtime
