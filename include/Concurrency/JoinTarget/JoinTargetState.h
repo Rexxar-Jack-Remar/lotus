@@ -112,6 +112,9 @@ struct HandleState {
 struct FunctionSummary {
   std::unordered_map<SummaryLocation, HandleState, SummaryLocationHash>
       location_exit_states;
+  std::unordered_map<HandleLocation, HandleState, HandleLocationHash>
+      global_exit_states;
+  HandleState return_state;
 };
 
 using JoinTargetStateMap =

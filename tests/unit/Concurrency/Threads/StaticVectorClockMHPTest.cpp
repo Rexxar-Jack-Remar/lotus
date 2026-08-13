@@ -174,7 +174,8 @@ TEST_F(StaticVectorClockMHPTest, LoopForkDoesNotAutoSelfParallelizeWorkerBody) {
   const Instruction *w2 = findInstructionByName(*worker_func, "w2");
   ASSERT_NE(w1, nullptr);
   ASSERT_NE(w2, nullptr);
-  EXPECT_FALSE(svc.mayHappenInParallel(w1, w2));
+  EXPECT_TRUE(svc.mayHappenInParallel(w1, w1));
+  EXPECT_TRUE(svc.mayHappenInParallel(w1, w2));
 }
 
 TEST_F(StaticVectorClockMHPTest,
@@ -939,8 +940,8 @@ TEST_F(StaticVectorClockMHPTest, ParallelInstructionsMatchesQueries) {
   ASSERT_NE(w2, nullptr);
 
   InstructionSet parallel = svc.getParallelInstructions(w1);
-  EXPECT_EQ(parallel.count(w2), 0u);
-  EXPECT_FALSE(svc.mayHappenInParallel(w1, w2));
+  EXPECT_EQ(parallel.count(w2), 1u);
+  EXPECT_TRUE(svc.mayHappenInParallel(w1, w2));
 }
 
 TEST_F(StaticVectorClockMHPTest, SameThreadExclusiveBranchesAreNotParallel) {

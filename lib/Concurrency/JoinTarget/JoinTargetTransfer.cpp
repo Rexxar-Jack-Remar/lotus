@@ -5,6 +5,9 @@
 
 #include "Concurrency/JoinTarget/JoinTargetAnalysis.h"
 
+#include "Alias/Infrastructure/AliasAnalysisWrapper/AliasAnalysisWrapper.h"
+#include "Concurrency/Utils/CppThreading.h"
+
 #include <algorithm>
 
 #include <llvm/IR/CFG.h>
@@ -92,6 +95,9 @@ bool transitionLocationFamily(JoinTargetStateMap &state,
                               bool keepJoinable = false) {
   bool changed = false;
   auto transitionEntry = [&](HandleState &handleState) {
+    if (keepJoinable) {
+      handleState.path_sensitivity_lost = true;
+    }
     changed |= transitionHandleState(handleState, terminal, keepJoinable);
   };
 
@@ -164,6 +170,33 @@ bool sameInstances(const std::vector<ThreadInstance> &lhs,
     }
   }
   return true;
+}
+
+bool isMayLocationSet(
+    const std::unordered_set<HandleLocation, HandleLocationHash> &locations) {
+  return locations.size() != 1 ||
+         (!locations.empty() && locations.begin()->is_base_wildcard);
+}
+
+int64_t getCanonicalOffset(const std::vector<int64_t> &offsets) {
+  return offsets.empty() ? 0 : offsets.front();
+}
+
+void setCanonicalOffset(std::vector<int64_t> &offsets, int64_t offset) {
+  offsets.clear();
+  if (offset != 0) {
+    offsets.push_back(offset);
+  }
+}
+
+bool isCppThreadMove(const Function *callee) {
+  if (!callee) {
+    return false;
+  }
+  const StringRef name = callee->getName();
+  return CppThreadingModel::isStdThreadEntity(name) &&
+         (name.contains("C1EOS_") || name.contains("C2EOS_") ||
+          name.contains("aSEOS_"));
 }
 
 } // namespace
@@ -240,22 +273,33 @@ void JoinTargetAnalysis::buildFunctionSummaries() {
 
         for (const auto &entry : outIt->second) {
           const auto *arg = dyn_cast<Argument>(entry.first.base);
-          if (!arg || arg->getParent() != &func) {
-            continue;
+          if (arg && arg->getParent() == &func) {
+            SummaryLocation summaryLocation;
+            summaryLocation.arg_no = arg->getArgNo();
+            summaryLocation.offsets = entry.first.offsets;
+            summaryLocation.is_base_wildcard = entry.first.is_base_wildcard;
+            mergeHandleState(summary.location_exit_states[summaryLocation],
+                             entry.second);
+          } else if (isa<GlobalValue>(entry.first.base)) {
+            mergeHandleState(summary.global_exit_states[entry.first],
+                             entry.second);
           }
-          SummaryLocation summaryLocation;
-          summaryLocation.arg_no = arg->getArgNo();
-          summaryLocation.offsets = entry.first.offsets;
-          summaryLocation.is_base_wildcard = entry.first.is_base_wildcard;
-          mergeHandleState(summary.location_exit_states[summaryLocation],
-                           entry.second);
+        }
+
+        if (const auto *ret = dyn_cast<ReturnInst>(term)) {
+          if (const Value *returnValue = ret->getReturnValue()) {
+            mergeHandleState(summary.return_state,
+                             getStateForValue(returnValue, outIt->second));
+          }
         }
       }
 
       auto summaryIt = m_functionSummaries.find(&func);
       if (summaryIt == m_functionSummaries.end() ||
           summaryIt->second.location_exit_states !=
-              summary.location_exit_states) {
+              summary.location_exit_states ||
+          summaryIt->second.global_exit_states != summary.global_exit_states ||
+          !(summaryIt->second.return_state == summary.return_state)) {
         m_functionSummaries[&func] = std::move(summary);
         changed = true;
       }
@@ -335,14 +379,43 @@ bool JoinTargetAnalysis::transferInstruction(const Instruction &inst,
   if (const auto *store = dyn_cast<StoreInst>(&inst)) {
     HandleState storedState = getStateForValue(store->getValueOperand(), state);
     bool changed = false;
-    for (const HandleLocation &location :
-         resolveWriteLocations(store->getPointerOperand())) {
+    const auto locations = resolveWriteLocations(store->getPointerOperand());
+    const bool mayWrite = isMayLocationSet(locations);
+    for (const HandleLocation &location : locations) {
       HandleState newState = storedState;
-      if (location.is_base_wildcard) {
+      if (mayWrite) {
         newState.path_sensitivity_lost = true;
-        changed |= killLocationFamily(state, location);
+        changed |= weakUpdateLocation(state, location, newState);
+      } else {
+        changed |= overwriteLocation(state, location, newState);
       }
-      changed |= overwriteLocation(state, location, newState);
+      changed |= weakenMayAliasLocations(state, location, newState);
+    }
+    return changed;
+  }
+
+  if (const auto *rmw = dyn_cast<AtomicRMWInst>(&inst)) {
+    HandleState unknown;
+    unknown.has_unknown_live_fork = true;
+    unknown.path_sensitivity_lost = true;
+    bool changed = false;
+    for (const HandleLocation &location :
+         resolveWriteLocations(rmw->getPointerOperand())) {
+      changed |= weakUpdateLocation(state, location, unknown);
+      changed |= weakenMayAliasLocations(state, location, unknown);
+    }
+    return changed;
+  }
+
+  if (const auto *cmpxchg = dyn_cast<AtomicCmpXchgInst>(&inst)) {
+    HandleState unknown;
+    unknown.has_unknown_live_fork = true;
+    unknown.path_sensitivity_lost = true;
+    bool changed = false;
+    for (const HandleLocation &location :
+         resolveWriteLocations(cmpxchg->getPointerOperand())) {
+      changed |= weakUpdateLocation(state, location, unknown);
+      changed |= weakenMayAliasLocations(state, location, unknown);
     }
     return changed;
   }
@@ -384,27 +457,36 @@ bool JoinTargetAnalysis::applyCallEffect(const Instruction &inst,
         traceThreadHandleRoot(m_threadAPI->getForkedThread(&inst), &m_module));
 
     bool changed = false;
-    for (const HandleLocation &location :
-         resolveWriteLocations(m_threadAPI->getForkedThread(&inst))) {
+    const auto locations =
+        resolveWriteLocations(m_threadAPI->getForkedThread(&inst));
+    const bool mayWrite = isMayLocationSet(locations);
+    for (const HandleLocation &location : locations) {
       if (location.base) {
         forkState.provenance_roots.insert(location.base);
       }
-      if (location.is_base_wildcard) {
+      if (mayWrite) {
         forkState.path_sensitivity_lost = true;
-        changed |= killLocationFamily(state, location);
+        changed |= weakUpdateLocation(state, location, forkState);
+      } else {
+        changed |= overwriteLocation(state, location, forkState);
       }
-      changed |= overwriteLocation(state, location, forkState);
+      changed |= weakenMayAliasLocations(state, location, forkState);
     }
     return changed;
   }
 
   if (m_threadAPI->isTDJoin(&inst)) {
     bool changed = false;
-    for (const HandleLocation &location :
-         resolveWriteLocations(m_threadAPI->getJoinedThread(&inst))) {
+    const auto locations =
+        resolveWriteLocations(m_threadAPI->getJoinedThread(&inst));
+    const bool mayTransition = isMayLocationSet(locations);
+    for (const HandleLocation &location : locations) {
       changed |= transitionLocationFamily(state, location,
-                                          ThreadLifecycle::Joined, false);
+                                          ThreadLifecycle::Joined,
+                                          mayTransition);
     }
+    changed |= transitionMayAliasLocations(
+        state, m_threadAPI->getJoinedThread(&inst), ThreadLifecycle::Joined);
     return changed;
   }
 
@@ -413,10 +495,39 @@ bool JoinTargetAnalysis::applyCallEffect(const Instruction &inst,
       return false;
     }
     bool changed = false;
-    for (const HandleLocation &location :
-         resolveWriteLocations(call->getArgOperand(0))) {
+    const auto locations = resolveWriteLocations(call->getArgOperand(0));
+    const bool mayTransition = isMayLocationSet(locations);
+    for (const HandleLocation &location : locations) {
       changed |= transitionLocationFamily(state, location,
-                                          ThreadLifecycle::Detached, false);
+                                          ThreadLifecycle::Detached,
+                                          mayTransition);
+    }
+    changed |= transitionMayAliasLocations(state, call->getArgOperand(0),
+                                           ThreadLifecycle::Detached);
+    return changed;
+  }
+
+  if (callee && isCppThreadMove(callee) && call->arg_size() >= 2) {
+    HandleState sourceState = getStateForValue(call->getArgOperand(1), state);
+    bool changed = false;
+    const auto destinations = resolveWriteLocations(call->getArgOperand(0));
+    const bool mayWrite = isMayLocationSet(destinations);
+    for (const HandleLocation &destination : destinations) {
+      if (mayWrite) {
+        sourceState.path_sensitivity_lost = true;
+        changed |= weakUpdateLocation(state, destination, sourceState);
+      } else {
+        changed |= overwriteLocation(state, destination, sourceState);
+      }
+      changed |= weakenMayAliasLocations(state, destination, sourceState);
+    }
+
+    const auto sources = resolveWriteLocations(call->getArgOperand(1));
+    const bool mayTransition = isMayLocationSet(sources);
+    for (const HandleLocation &source : sources) {
+      changed |= transitionLocationFamily(state, source,
+                                          ThreadLifecycle::Overwritten,
+                                          mayTransition);
     }
     return changed;
   }
@@ -425,21 +536,54 @@ bool JoinTargetAnalysis::applyCallEffect(const Instruction &inst,
     return applyDirectCallSummary(*call, *callee, state);
   }
 
+  if (call->doesNotAccessMemory() || call->onlyReadsMemory()) {
+    return false;
+  }
+
   bool changed = false;
   for (unsigned i = 0; i < call->arg_size(); ++i) {
     const Value *arg = call->getArgOperand(i);
     if (!arg || !arg->getType()->isPointerTy()) {
       continue;
     }
-    for (const HandleLocation &location : resolveWriteLocations(arg)) {
-      auto it = state.find(location);
-      if (it == state.end()) {
+    if (call->paramHasAttr(i, Attribute::ReadNone) ||
+        call->paramHasAttr(i, Attribute::ReadOnly)) {
+      continue;
+    }
+
+    const auto argumentLocations = resolveWriteLocations(arg);
+    for (auto &entry : state) {
+      bool mayAffect = false;
+      for (const HandleLocation &argumentLocation : argumentLocations) {
+        if (argumentLocation.base == entry.first.base) {
+          mayAffect = true;
+          break;
+        }
+      }
+      if (!mayAffect && m_aliasAnalysis && entry.first.base &&
+          entry.first.base->getType()->isPointerTy()) {
+        mayAffect = m_aliasAnalysis->mayAlias(arg, entry.first.base);
+      }
+      if (!mayAffect) {
         continue;
       }
-      const HandleState before = it->second;
-      it->second.has_unknown_live_fork = true;
-      transitionHandleState(it->second, ThreadLifecycle::Escaped, true);
-      changed |= !(before == it->second);
+      const HandleState before = entry.second;
+      entry.second.has_unknown_live_fork = true;
+      entry.second.path_sensitivity_lost = true;
+      transitionHandleState(entry.second, ThreadLifecycle::Escaped, true);
+      changed |= !(before == entry.second);
+    }
+  }
+  if (!call->onlyAccessesArgMemory()) {
+    for (auto &entry : state) {
+      if (!isa<GlobalValue>(entry.first.base)) {
+        continue;
+      }
+      const HandleState before = entry.second;
+      entry.second.has_unknown_live_fork = true;
+      entry.second.path_sensitivity_lost = true;
+      transitionHandleState(entry.second, ThreadLifecycle::Escaped, true);
+      changed |= !(before == entry.second);
     }
   }
   return changed;
@@ -453,7 +597,12 @@ bool JoinTargetAnalysis::applyDirectCallSummary(const CallBase &call,
     return false;
   }
 
-  bool changed = false;
+  struct MappedEffect {
+    HandleLocation location;
+    HandleState state;
+  };
+  std::vector<MappedEffect> effects;
+
   for (const auto &entry : summaryIt->second.location_exit_states) {
     unsigned argNo = entry.first.arg_no;
     if (argNo >= call.arg_size()) {
@@ -461,14 +610,12 @@ bool JoinTargetAnalysis::applyDirectCallSummary(const CallBase &call,
     }
 
     HandleState resolved;
-    if (entry.second.instances.empty()) {
-      for (unsigned preservedArg : entry.second.preserved_arg_inputs) {
-        if (preservedArg >= call.arg_size()) {
-          continue;
-        }
-        mergeHandleState(
-            resolved, getStateForValue(call.getArgOperand(preservedArg), state));
+    for (unsigned preservedArg : entry.second.preserved_arg_inputs) {
+      if (preservedArg >= call.arg_size()) {
+        continue;
       }
+      mergeHandleState(
+          resolved, getStateForValue(call.getArgOperand(preservedArg), state));
     }
 
     mergeHandleState(resolved, entry.second);
@@ -481,15 +628,69 @@ bool JoinTargetAnalysis::applyDirectCallSummary(const CallBase &call,
         mappedLocation.is_base_wildcard = true;
         resolved.path_sensitivity_lost = true;
       } else {
-        mappedLocation.offsets.insert(mappedLocation.offsets.end(),
-                                      entry.first.offsets.begin(),
-                                      entry.first.offsets.end());
+        setCanonicalOffset(
+            mappedLocation.offsets,
+            getCanonicalOffset(mappedLocation.offsets) +
+                getCanonicalOffset(entry.first.offsets));
       }
+      effects.push_back({std::move(mappedLocation), resolved});
+    }
+  }
 
-      if (mappedLocation.is_base_wildcard) {
-        changed |= killLocationFamily(state, mappedLocation);
+  for (const auto &entry : summaryIt->second.global_exit_states) {
+    effects.push_back({entry.first, entry.second});
+  }
+
+  std::vector<bool> aliasUncertain(effects.size(), false);
+  for (size_t i = 0; i < effects.size(); ++i) {
+    for (size_t j = i + 1; j < effects.size(); ++j) {
+      if (locationsMayAlias(effects[i].location, effects[j].location) &&
+          !(effects[i].location == effects[j].location)) {
+        aliasUncertain[i] = true;
+        aliasUncertain[j] = true;
       }
-      changed |= overwriteLocation(state, mappedLocation, resolved);
+    }
+  }
+
+  std::unordered_map<HandleLocation, HandleState, HandleLocationHash>
+      mergedEffects;
+  std::unordered_map<HandleLocation, unsigned, HandleLocationHash> effectCounts;
+  for (size_t i = 0; i < effects.size(); ++i) {
+    HandleState effectState = effects[i].state;
+    effectState.path_sensitivity_lost |= aliasUncertain[i];
+    mergeHandleState(mergedEffects[effects[i].location], effectState);
+    ++effectCounts[effects[i].location];
+  }
+
+  bool changed = false;
+  for (auto &entry : mergedEffects) {
+    const bool uncertainEffect = entry.first.is_base_wildcard ||
+                                 effectCounts[entry.first] > 1;
+    if (uncertainEffect) {
+      entry.second.path_sensitivity_lost = true;
+      changed |= weakUpdateLocation(state, entry.first, entry.second);
+    } else {
+      changed |= overwriteLocation(state, entry.first, entry.second);
+    }
+    changed |= weakenMayAliasLocations(state, entry.first, entry.second);
+  }
+
+  if (!call.getType()->isVoidTy()) {
+    HandleState resolvedReturn;
+    for (unsigned preservedArg :
+         summaryIt->second.return_state.preserved_arg_inputs) {
+      if (preservedArg < call.arg_size()) {
+        mergeHandleState(
+            resolvedReturn,
+            getStateForValue(call.getArgOperand(preservedArg), state));
+      }
+    }
+    mergeHandleState(resolvedReturn, summaryIt->second.return_state);
+    if (!resolvedReturn.instances.empty() ||
+        resolvedReturn.has_unknown_live_fork ||
+        !resolvedReturn.preserved_arg_inputs.empty()) {
+      changed |= overwriteLocation(
+          state, HandleLocation{&call, {}, false}, resolvedReturn);
     }
   }
   return changed;
@@ -504,6 +705,10 @@ JoinTargetAnalysis::buildResolutionFromState(const HandleState &state) const {
   resolution.feasible_forks = collectForks(resolution.feasible_instances);
   resolution.related_handle_roots = collectRoots(state);
   resolution.has_unknown_live_instance = state.has_unknown_live_fork;
+  if (state.path_sensitivity_lost) {
+    addAmbiguityReason(resolution,
+                       JoinAmbiguityReason::PathMergedAlternatives);
+  }
   return resolution;
 }
 
@@ -537,6 +742,9 @@ JoinResolution JoinTargetAnalysis::buildJoinResolution(const Instruction *joinIn
       JoinResolution altResolution =
           buildResolutionFromState(getStateForValue(phi->getIncomingValue(i),
                                                     *incomingState));
+      for (JoinAmbiguityReason reason : altResolution.ambiguity_reasons) {
+        addAmbiguityReason(resolution, reason);
+      }
       JoinPathAlternative alternative;
       alternative.incoming_block = incomingBlock;
       alternative.possible_instances = std::move(altResolution.possible_instances);
@@ -553,6 +761,9 @@ JoinResolution JoinTargetAnalysis::buildJoinResolution(const Instruction *joinIn
     for (const Value *arm : {select->getTrueValue(), select->getFalseValue()}) {
       JoinResolution altResolution =
           buildResolutionFromState(getStateForValue(arm, state));
+      for (JoinAmbiguityReason reason : altResolution.ambiguity_reasons) {
+        addAmbiguityReason(resolution, reason);
+      }
       JoinPathAlternative alternative;
       alternative.possible_instances = std::move(altResolution.possible_instances);
       alternative.feasible_instances = std::move(altResolution.feasible_instances);
@@ -645,7 +856,8 @@ void JoinTargetAnalysis::finalizeJoinResolution(
   }
 
   resolution.unambiguous = resolution.feasible_instances.size() == 1 &&
-                           !resolution.has_unknown_live_instance;
+                           !resolution.has_unknown_live_instance &&
+                           resolution.ambiguity_reasons.empty();
   if (resolution.unambiguous) {
     const ThreadInstance &instance = resolution.feasible_instances.front();
     if (instance.execution_class == ThreadExecutionClass::RepeatedExecution) {
@@ -688,6 +900,9 @@ bool JoinTargetAnalysis::overwriteLocation(StateMap &state,
   auto existingIt = state.find(location);
   if (existingIt != state.end()) {
     HandleState preserved = existingIt->second;
+    preserved.preserved_arg_inputs.clear();
+    preserved.has_unknown_live_fork = false;
+    preserved.path_sensitivity_lost = false;
     for (auto &entry : preserved.instances) {
       auto newIt = new_state.instances.find(entry.first);
       if (newIt == new_state.instances.end() || !newIt->second.mayBeJoinable()) {
@@ -708,23 +923,94 @@ bool JoinTargetAnalysis::overwriteLocation(StateMap &state,
   return true;
 }
 
-bool JoinTargetAnalysis::killLocationFamily(StateMap &state,
-                                            const HandleLocation &location) const {
+bool JoinTargetAnalysis::weakUpdateLocation(
+    StateMap &state, const HandleLocation &location,
+    const HandleState &new_state) const {
   if (!location.base) {
     return false;
   }
 
   bool changed = false;
-  std::vector<HandleLocation> toErase;
-  for (const auto &entry : state) {
-    if (entry.first.base != location.base || entry.first.is_base_wildcard) {
+  HandleState uncertainState = new_state;
+  uncertainState.path_sensitivity_lost = true;
+
+  if (location.is_base_wildcard) {
+    bool foundFamily = false;
+    for (auto &entry : state) {
+      if (entry.first.base != location.base) {
+        continue;
+      }
+      foundFamily = true;
+      changed |= mergeHandleState(entry.second, uncertainState);
+    }
+    HandleLocation wildcard{location.base, {}, true};
+    changed |= mergeHandleState(state[wildcard], uncertainState);
+    return changed || !foundFamily;
+  }
+
+  changed |= mergeHandleState(state[location], uncertainState);
+  return changed;
+}
+
+bool JoinTargetAnalysis::locationsMayAlias(const HandleLocation &lhs,
+                                           const HandleLocation &rhs) const {
+  if (!lhs.base || !rhs.base) {
+    return true;
+  }
+  if (lhs.base == rhs.base) {
+    return lhs.is_base_wildcard || rhs.is_base_wildcard ||
+           lhs.offsets == rhs.offsets;
+  }
+  if (!m_aliasAnalysis || !lhs.base->getType()->isPointerTy() ||
+      !rhs.base->getType()->isPointerTy()) {
+    return false;
+  }
+  return m_aliasAnalysis->mayAlias(lhs.base, rhs.base);
+}
+
+bool JoinTargetAnalysis::weakenMayAliasLocations(
+    StateMap &state, const HandleLocation &written_location,
+    const HandleState &written_state) const {
+  bool changed = false;
+  HandleState uncertain = written_state;
+  uncertain.path_sensitivity_lost = true;
+  for (auto &entry : state) {
+    if (entry.first == written_location ||
+        !locationsMayAlias(entry.first, written_location)) {
       continue;
     }
-    toErase.push_back(entry.first);
+    changed |= mergeHandleState(entry.second, uncertain);
   }
-  for (const HandleLocation &child : toErase) {
-    changed = true;
-    state.erase(child);
+  return changed;
+}
+
+bool JoinTargetAnalysis::transitionMayAliasLocations(
+    StateMap &state, const Value *pointer, ThreadLifecycle terminal) const {
+  if (!pointer) {
+    return false;
+  }
+  const auto locations = resolveWriteLocations(pointer);
+  bool changed = false;
+  for (auto &entry : state) {
+    bool mayAlias = false;
+    for (const HandleLocation &location : locations) {
+      if (locationsMayAlias(entry.first, location)) {
+        mayAlias = true;
+        break;
+      }
+    }
+    if (!mayAlias && locations.empty() && m_aliasAnalysis && entry.first.base &&
+        entry.first.base->getType()->isPointerTy() &&
+        pointer->getType()->isPointerTy()) {
+      mayAlias = m_aliasAnalysis->mayAlias(pointer, entry.first.base);
+    }
+    if (!mayAlias) {
+      continue;
+    }
+    const HandleState before = entry.second;
+    entry.second.path_sensitivity_lost = true;
+    transitionHandleState(entry.second, terminal, true);
+    changed |= !(before == entry.second);
   }
   return changed;
 }
@@ -734,6 +1020,11 @@ HandleState JoinTargetAnalysis::getStateForValue(const Value *value,
   HandleState result;
   if (!value) {
     return result;
+  }
+
+  auto directIt = state.find(HandleLocation{value, {}, false});
+  if (directIt != state.end()) {
+    return directIt->second;
   }
 
   auto locations = resolveReadLocations(value);

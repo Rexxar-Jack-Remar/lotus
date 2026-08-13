@@ -17,6 +17,7 @@ add_lotus_concurrency_test_suite(concurrency_core_tests
   AtomicTestPart2.cpp
   LockSetAnalysisTest.cpp
   LockSetAnalysisTestPart2.cpp
+  RAIIMultiLifetimeTest.cpp
   EscapeAnalysisTest.cpp
   StaticThreadSharingAnalysisTest.cpp
   ThreadLocalAnalysisTest.cpp

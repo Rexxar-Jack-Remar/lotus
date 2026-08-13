@@ -158,7 +158,15 @@ private:
   resolveWriteLocations(const llvm::Value *value) const;
   bool overwriteLocation(StateMap &state, const HandleLocation &location,
                          const HandleState &new_state) const;
-  bool killLocationFamily(StateMap &state, const HandleLocation &location) const;
+  bool weakUpdateLocation(StateMap &state, const HandleLocation &location,
+                          const HandleState &new_state) const;
+  bool locationsMayAlias(const HandleLocation &lhs,
+                         const HandleLocation &rhs) const;
+  bool weakenMayAliasLocations(StateMap &state,
+                               const HandleLocation &written_location,
+                               const HandleState &written_state) const;
+  bool transitionMayAliasLocations(StateMap &state, const llvm::Value *pointer,
+                                   ThreadLifecycle terminal) const;
   HandleState getStateForValue(const llvm::Value *value,
                                const StateMap &state) const;
   bool mergeStateInto(StateMap &dst, const StateMap &src) const;

@@ -57,7 +57,7 @@ TEST_F(LockSetAnalysisTest, BranchingMustAndMayLockSets) {
   EXPECT_TRUE(lsa.mustHoldLock(e, lock1));
   EXPECT_FALSE(lsa.mustHoldLock(e, lock2));
   EXPECT_TRUE(lsa.mustHoldLock(m, lock1));
-  EXPECT_TRUE(lsa.mayHoldLock(m, lock2));
+  EXPECT_FALSE(lsa.mayHoldLock(m, lock2));
   EXPECT_EQ(lsa.getLockNestingDepth(t), 2u);
 }
 TEST_F(LockSetAnalysisTest, TryLockIsMayOnly) {

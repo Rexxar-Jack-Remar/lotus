@@ -61,6 +61,7 @@ namespace mhp {
 
 using LockID = const llvm::Value *;
 using LockSet = std::set<LockID>;
+using RecursiveDepthMap = std::map<LockID, unsigned>;
 
 enum class MemoryAccessKind { Read, Write };
 
@@ -121,7 +122,10 @@ public:
    * @brief Set call graph for interprocedural analysis
    * @param cg LLVM CallGraph instance
    */
-  void setCallGraph(llvm::CallGraph *cg) { m_call_graph = cg; }
+  void setCallGraph(llvm::CallGraph *cg) {
+    m_call_graph = cg;
+    m_uses_external_call_graph = cg != nullptr;
+  }
 
   // ========================================================================
   // Query Interface
@@ -322,19 +326,20 @@ public:
   // ========================================================================
 
   struct Statistics {
-    size_t num_locks;               ///< Total number of distinct locks
-    size_t num_acquires;            ///< Total lock acquire operations
-    size_t num_releases;            ///< Total lock release operations
-    size_t num_try_acquires;        ///< Total try-lock operations
-    size_t max_nesting_depth;       ///< Maximum observed lock nesting
-    size_t num_reentrant_locks;     ///< Number of reentrant locks
-    size_t num_potential_deadlocks; ///< Number of potential deadlocks (pairwise)
-    size_t num_functions_with_locks;      ///< Functions containing lock ops
-    size_t num_critical_sections;         ///< Total critical section count
-    double avg_critical_section_size;     ///< Average instructions per CS
-    size_t max_critical_section_size;     ///< Largest critical section
-    size_t num_rwlocks;                   ///< Distinct read-write locks
-    size_t num_condvar_waits;             ///< Condition variable wait operations
+    size_t num_locks;           ///< Total number of distinct locks
+    size_t num_acquires;        ///< Total lock acquire operations
+    size_t num_releases;        ///< Total lock release operations
+    size_t num_try_acquires;    ///< Total try-lock operations
+    size_t max_nesting_depth;   ///< Maximum observed lock nesting
+    size_t num_reentrant_locks; ///< Number of reentrant locks
+    size_t
+        num_potential_deadlocks; ///< Number of potential deadlocks (pairwise)
+    size_t num_functions_with_locks;  ///< Functions containing lock ops
+    size_t num_critical_sections;     ///< Total critical section count
+    double avg_critical_section_size; ///< Average instructions per CS
+    size_t max_critical_section_size; ///< Largest critical section
+    size_t num_rwlocks;               ///< Distinct read-write locks
+    size_t num_condvar_waits;         ///< Condition variable wait operations
     size_t num_unprotected_condvar_waits; ///< cond_waits without mutex held
     size_t num_deadlock_cycles;           ///< Cycles in lock ordering graph
 
@@ -374,6 +379,7 @@ private:
   lotus::AliasAnalysisWrapper *m_alias_analysis;
   llvm::CallGraph *m_call_graph; // For interprocedural analysis
   std::unique_ptr<llvm::CallGraph> m_owned_call_graph;
+  bool m_uses_external_call_graph = false;
 
   // Lockset results (combined for backward compat; read/write for rwlock)
   std::unordered_map<const llvm::Instruction *, LockSet> m_may_locksets_entry;
@@ -392,6 +398,14 @@ private:
       m_must_write_locks_entry;
   std::unordered_map<const llvm::Instruction *, LockSet>
       m_must_write_locks_exit;
+  std::unordered_map<const llvm::Instruction *, RecursiveDepthMap>
+      m_may_recursive_depth_entry;
+  std::unordered_map<const llvm::Instruction *, RecursiveDepthMap>
+      m_may_recursive_depth_exit;
+  std::unordered_map<const llvm::Instruction *, RecursiveDepthMap>
+      m_must_recursive_depth_entry;
+  std::unordered_map<const llvm::Instruction *, RecursiveDepthMap>
+      m_must_recursive_depth_exit;
 
   // Lock tracking
   std::unordered_set<LockID> m_all_locks;
@@ -419,10 +433,13 @@ private:
   };
 
   std::unordered_set<LockPair, LockPair::Hash> m_observed_lock_orders;
+  // Blocking, mode-incompatible order edges used for deadlock reporting.
+  std::unordered_set<LockPair, LockPair::Hash> m_deadlock_wait_orders;
   std::unordered_set<LockID> m_reentrant_locks;
 
   // RAII lock tracking per function (type alias avoids C++11 >> parse issue)
-  using RAIILockMap = std::multimap<const llvm::Value *, RAIILock::LockLifetime>;
+  using RAIILockMap =
+      std::multimap<const llvm::Value *, RAIILock::LockLifetime>;
   std::unordered_map<const llvm::Function *, RAIILockMap> m_raii_locks;
 
   // Interprocedural analysis data structures
@@ -437,7 +454,16 @@ private:
     LockSet may_release_delta;  ///< Locks maybe released on some returning path
     LockSet must_release_delta; ///< Locks definitely released on all returning
                                 ///< paths
-    bool is_analyzed;           ///< Whether function has been analyzed
+    LockSet exceptional_may_acquire_delta;
+    LockSet exceptional_may_read_acquire_delta;
+    LockSet exceptional_may_write_acquire_delta;
+    LockSet exceptional_must_acquire_delta;
+    LockSet exceptional_must_read_acquire_delta;
+    LockSet exceptional_must_write_acquire_delta;
+    LockSet exceptional_may_release_delta;
+    LockSet exceptional_must_release_delta;
+    bool has_exceptional_exit = false;
+    bool is_analyzed; ///< Whether function has been analyzed
 
     FunctionSummary() : is_analyzed(false) {}
   };
@@ -445,19 +471,28 @@ private:
   std::unordered_map<const llvm::Function *, FunctionSummary>
       m_function_summaries;
 
-  // Invoke normal-path must-lockset (before clearing for exceptions)
-  struct InvokeNormalMustFacts {
+  struct InvokeEdgeFacts {
+    LockSet may_lockset;
     LockSet must_lockset;
+    LockSet may_read_lockset;
+    LockSet may_write_lockset;
     LockSet must_read_lockset;
     LockSet must_write_lockset;
   };
-  std::unordered_map<const llvm::Instruction *, InvokeNormalMustFacts>
-      m_invoke_normal_must_exit;
+  std::unordered_map<const llvm::Instruction *, InvokeEdgeFacts>
+      m_invoke_normal_exit;
+  std::unordered_map<const llvm::Instruction *, InvokeEdgeFacts>
+      m_invoke_unwind_exit;
 
-  // Try-lock success branch must-set overrides: maps the first instruction
-  // of the success branch to the lock that is definitely held there.
-  std::unordered_map<const llvm::Instruction *, LockSet>
-      m_trylock_success_must_inject;
+  struct TryLockEdgeRefinement {
+    const llvm::CallBase *call = nullptr;
+    LockID lock = nullptr;
+    ThreadAPI::LockSemanticKind mode = ThreadAPI::LockSemanticKind::None;
+    bool success = false;
+  };
+  using CFGEdge = std::pair<const llvm::BasicBlock *, const llvm::BasicBlock *>;
+  std::map<CFGEdge, std::vector<TryLockEdgeRefinement>>
+      m_trylock_edge_refinements;
 
   // ========================================================================
   // Analysis Implementation
@@ -562,6 +597,13 @@ private:
   void applyFunctionSummary(const llvm::CallBase *call,
                             const llvm::Function *callee, LockSet &may_locks,
                             LockSet &must_locks) const;
+  bool applyExceptionalFunctionSummary(const llvm::CallBase *call,
+                                       const llvm::Function *callee,
+                                       LockSet &may_locks,
+                                       LockSet &must_locks) const;
+  LockID instantiateSummaryLock(const llvm::CallBase *call,
+                                const llvm::Function *callee,
+                                LockID lock) const;
 
   /**
    * @brief Get callees at a call site using CallGraph
@@ -576,8 +618,7 @@ private:
   void bottomUpTraversal();
 
   /**
-   * @brief Detect try-lock success branches and populate
-   * m_trylock_success_must_inject
+   * @brief Detect try-lock result tests and record edge-specific refinements
    */
   void detectTryLockSuccessBranches(llvm::Function *func);
 };

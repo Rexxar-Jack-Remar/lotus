@@ -275,7 +275,7 @@ namespace {
 uint32_t edgeKindBit(EdgeKind kind) {
   return uint32_t{1} << static_cast<unsigned>(kind);
 }
-}
+} // namespace
 
 void ThreadFlowGraph::addEdge(SyncNode *from, SyncNode *to, EdgeKind kind) {
   if (!from || !to) {
@@ -294,8 +294,9 @@ ThreadFlowGraph::getEdgeKind(const SyncNode *from, const SyncNode *to) const {
     return std::nullopt;
   }
   for (EdgeKind kind : {EdgeKind::Join, EdgeKind::Create, EdgeKind::Barrier,
-                        EdgeKind::Signal, EdgeKind::Call, EdgeKind::Ret,
-                        EdgeKind::Control}) {
+                        EdgeKind::TaskDepend, EdgeKind::TaskWait,
+                        EdgeKind::TaskCompletion, EdgeKind::Signal,
+                        EdgeKind::Call, EdgeKind::Ret, EdgeKind::Control}) {
     if (it->second & edgeKindBit(kind)) {
       return kind;
     }

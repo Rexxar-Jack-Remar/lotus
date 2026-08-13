@@ -1,9 +1,9 @@
-#include "Concurrency/LockSet/LockSetAnalysis.h"
-
 #include "Alias/Infrastructure/AliasAnalysisWrapper/AliasAnalysisWrapper.h"
+#include "Concurrency/LockSet/LockSetAnalysis.h"
 #include "Concurrency/LockSet/LockSetAnalysisSupport.h"
 
 #include <algorithm>
+#include <queue>
 #include <set>
 
 #include <llvm/Analysis/ValueTracking.h>
@@ -97,6 +97,26 @@ void LockSetAnalysis::trackLockOrdering() {
                         locks_held.begin(), locks_held.end(),
                         std::inserter(newly_acquired, newly_acquired.begin()));
 
+    const LockSet held_read = getMayReadLockSetAt(inst);
+    const LockSet held_write = getMayWriteLockSetAt(inst);
+    LockSet newly_acquired_read;
+    LockSet newly_acquired_write;
+    auto read_exit_it = m_may_read_locks_exit.find(inst);
+    if (read_exit_it != m_may_read_locks_exit.end()) {
+      std::set_difference(
+          read_exit_it->second.begin(), read_exit_it->second.end(),
+          held_read.begin(), held_read.end(),
+          std::inserter(newly_acquired_read, newly_acquired_read.begin()));
+    }
+    auto write_exit_it = m_may_write_locks_exit.find(inst);
+    if (write_exit_it != m_may_write_locks_exit.end()) {
+      std::set_difference(
+          write_exit_it->second.begin(), write_exit_it->second.end(),
+          held_write.begin(), held_write.end(),
+          std::inserter(newly_acquired_write, newly_acquired_write.begin()));
+    }
+    const bool nonblocking = m_thread_api->isTryLock(inst);
+
     auto markIfReentrantAcquire = [&](LockID acquired_lock) {
       if (!acquired_lock) {
         return;
@@ -129,6 +149,14 @@ void LockSetAnalysis::trackLockOrdering() {
       for (const auto *held_lock : locks_held) {
         if (held_lock != new_lock) {
           m_observed_lock_orders.insert({held_lock, new_lock});
+          const bool held_only_shared = held_read.count(held_lock) != 0 &&
+                                        held_write.count(held_lock) == 0;
+          const bool request_only_shared =
+              newly_acquired_read.count(new_lock) != 0 &&
+              newly_acquired_write.count(new_lock) == 0;
+          if (!nonblocking && !(held_only_shared && request_only_shared)) {
+            m_deadlock_wait_orders.insert({held_lock, new_lock});
+          }
         }
       }
     }
@@ -140,6 +168,22 @@ bool LockSetAnalysis::mayAlias(LockID lock1, LockID lock2) const {
       m_module ? m_module
                : (m_single_function ? m_single_function->getParent() : nullptr);
   if (detail::areDisjointConstantOffsetPointers(lock1, lock2, module)) {
+    return false;
+  }
+
+  auto getKnownDistinctObject = [](LockID lock) -> const Value * {
+    if (!lock) {
+      return nullptr;
+    }
+    lock = lock->stripPointerCasts();
+    const Value *object = getUnderlyingObject(lock, 32);
+    object = object ? object->stripPointerCasts() : lock;
+    return isa<GlobalVariable>(object) || isa<AllocaInst>(object) ? object
+                                                                  : nullptr;
+  };
+  const Value *object1 = getKnownDistinctObject(lock1);
+  const Value *object2 = getKnownDistinctObject(lock2);
+  if (object1 && object2 && object1 != object2) {
     return false;
   }
 
@@ -225,40 +269,36 @@ LockSetAnalysis::getUnderlyingRAIILocks(const Instruction *inst,
     return locks;
   }
 
-  const RAIILock::LockLifetime *selected_lifetime = nullptr;
-  for (auto lifetime_it = lifetime_range.first; lifetime_it != lifetime_range.second;
-       ++lifetime_it) {
+  std::vector<const RAIILock::LockLifetime *> selected_lifetimes;
+  for (auto lifetime_it = lifetime_range.first;
+       lifetime_it != lifetime_range.second; ++lifetime_it) {
     const RAIILock::LockLifetime &lifetime = lifetime_it->second;
     if (std::find(lifetime.destructors.begin(), lifetime.destructors.end(),
                   inst) != lifetime.destructors.end()) {
-      selected_lifetime = &lifetime;
-      break;
+      selected_lifetimes.push_back(&lifetime);
+      continue;
     }
 
     if (!lifetime.constructor ||
         lifetime.constructor->getFunction() != inst->getFunction()) {
       continue;
     }
-    if (!detail::instructionPrecedesOrEquals(lifetime.constructor, inst,
-                                             inst->getFunction())) {
-      continue;
-    }
-    if (!selected_lifetime ||
-        detail::instructionPrecedesOrEquals(selected_lifetime->constructor,
-                                            lifetime.constructor,
-                                            inst->getFunction())) {
-      selected_lifetime = &lifetime;
+    if (RAIILock::RAIILockTracker::constructorCanReachWithoutReconstruction(
+            lifetime.constructor, inst, lifetime.lockObject)) {
+      selected_lifetimes.push_back(&lifetime);
     }
   }
 
-  if (!selected_lifetime) {
+  if (selected_lifetimes.empty()) {
     return locks;
   }
 
-  for (const Value *lock : selected_lifetime->underlyingLocks) {
-    if (LockID canonical = getCanonicalLock(lock)) {
-      if (std::find(locks.begin(), locks.end(), canonical) == locks.end()) {
-        locks.push_back(canonical);
+  for (const RAIILock::LockLifetime *lifetime : selected_lifetimes) {
+    for (const Value *lock : lifetime->underlyingLocks) {
+      if (LockID canonical = getCanonicalLock(lock)) {
+        if (std::find(locks.begin(), locks.end(), canonical) == locks.end()) {
+          locks.push_back(canonical);
+        }
       }
     }
   }

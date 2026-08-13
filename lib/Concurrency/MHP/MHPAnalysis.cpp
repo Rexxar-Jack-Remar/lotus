@@ -358,38 +358,6 @@ MHPAnalysis::MHPAnalysis(Module &module)
 }
 
 namespace {
-bool instructionCanonicalLess(const Instruction *lhs, const Instruction *rhs) {
-  if (lhs == rhs) {
-    return false;
-  }
-  if (!lhs || !rhs) {
-    return lhs < rhs;
-  }
-
-  const Function *lf = lhs->getFunction();
-  const Function *rf = rhs->getFunction();
-  if (lf != rf) {
-    StringRef ln = lf ? lf->getName() : StringRef();
-    StringRef rn = rf ? rf->getName() : StringRef();
-    if (ln != rn) {
-      return ln < rn;
-    }
-  }
-
-  if (lf && rf && lf == rf) {
-    for (const Instruction &inst : instructions(lf)) {
-      if (&inst == lhs) {
-        return true;
-      }
-      if (&inst == rhs) {
-        return false;
-      }
-    }
-  }
-
-  return lhs < rhs;
-}
-
 bool isLikelyThreadEntryCandidate(const Function &func) {
   if (func.isDeclaration() || func.arg_size() > 1) {
     return false;
@@ -412,6 +380,13 @@ void MHPAnalysis::analyze() {
   m_mhp_cache.clear();
   m_mhp_pairs.clear();
   m_inst_to_thread.clear();
+  m_instruction_ordinals.clear();
+  size_t next_ordinal = 0;
+  for (const Function &func : m_module) {
+    for (const Instruction &inst : instructions(func)) {
+      m_instruction_ordinals.emplace(&inst, next_ordinal++);
+    }
+  }
   m_thread_fork_sites.clear();
   m_thread_parents.clear();
   m_thread_children.clear();
@@ -426,6 +401,8 @@ void MHPAnalysis::analyze() {
   m_barrier_phase_by_thread.clear();
   m_pending_split_barrier_phase_by_thread.clear();
   m_barrier_expected_counts.clear();
+  m_barrier_init_sites.clear();
+  m_uncertain_barrier_counts.clear();
   m_visited_functions_by_thread.clear();
   m_active_call_stack_by_thread.clear();
   m_pre_fork_main_nodes.clear();
@@ -462,6 +439,20 @@ void MHPAnalysis::analyze() {
   }
 
   errs() << "MHP Analysis Complete!\n";
+}
+
+bool MHPAnalysis::instructionCanonicalLess(const Instruction *lhs,
+                                           const Instruction *rhs) const {
+  if (lhs == rhs) {
+    return false;
+  }
+  auto lhs_it = m_instruction_ordinals.find(lhs);
+  auto rhs_it = m_instruction_ordinals.find(rhs);
+  if (lhs_it != m_instruction_ordinals.end() &&
+      rhs_it != m_instruction_ordinals.end()) {
+    return lhs_it->second < rhs_it->second;
+  }
+  return lhs < rhs;
 }
 
 void MHPAnalysis::enableLockSetAnalysis() { m_enable_lockset_analysis = true; }
@@ -582,7 +573,7 @@ void MHPAnalysis::lowerOpenMPTasks(const OpenMP::OpenMPSemantics &semantics) {
 
       create_node->setForkedThread(task_tid);
       if (SyncNode *task_entry = m_tfg->getThreadEntryNode(task_tid)) {
-        m_tfg->addInterThreadEdge(create_node, task_entry);
+        m_tfg->addInterThreadEdge(create_node, task_entry, EdgeKind::Create);
       }
     }
   }
@@ -617,7 +608,8 @@ void MHPAnalysis::lowerOpenMPTasks(const OpenMP::OpenMPSemantics &semantics) {
         for (ThreadID pred_tid : getTaskThreads(pred)) {
           for (SyncNode *pred_exit : m_tfg->getThreadExitNodes(pred_tid)) {
             if (pred_exit && task_entry) {
-              m_tfg->addInterThreadEdge(pred_exit, task_entry);
+              m_tfg->addInterThreadEdge(pred_exit, task_entry,
+                                        EdgeKind::TaskDepend);
             }
           }
         }
@@ -679,7 +671,8 @@ void MHPAnalysis::lowerOpenMPTasks(const OpenMP::OpenMPSemantics &semantics) {
         for (ThreadID task_tid : getTaskThreads(task)) {
           for (SyncNode *task_exit : m_tfg->getThreadExitNodes(task_tid)) {
             if (task_exit) {
-              m_tfg->addInterThreadEdge(task_exit, wait_node);
+              m_tfg->addInterThreadEdge(task_exit, wait_node,
+                                        EdgeKind::TaskWait);
             }
           }
         }
@@ -706,7 +699,8 @@ void MHPAnalysis::lowerOpenMPTasks(const OpenMP::OpenMPSemantics &semantics) {
       for (ThreadID task_tid : task_tids) {
         for (SyncNode *task_exit : m_tfg->getThreadExitNodes(task_tid)) {
           if (task_exit) {
-            m_tfg->addInterThreadEdge(task_exit, completion_node);
+            m_tfg->addInterThreadEdge(task_exit, completion_node,
+                                      EdgeKind::TaskCompletion);
           }
         }
       }
@@ -744,8 +738,19 @@ void MHPAnalysis::processFunction(const Function *func, ThreadID tid,
           if (const Value *barrier = m_thread_api->getBarrierVal(&inst)) {
             if (const auto *count =
                     dyn_cast<ConstantInt>(cb->getArgOperand(2))) {
-              m_barrier_expected_counts[barrier->stripPointerCasts()] =
-                  static_cast<size_t>(count->getZExtValue());
+              const Value *key = barrier->stripPointerCasts();
+              const size_t value = static_cast<size_t>(count->getZExtValue());
+              size_t &init_sites = m_barrier_init_sites[key];
+              ++init_sites;
+              auto expected = m_barrier_expected_counts.find(key);
+              if (init_sites > 1 ||
+                  (expected != m_barrier_expected_counts.end() &&
+                   expected->second != value)) {
+                m_uncertain_barrier_counts.insert(key);
+                m_barrier_expected_counts.erase(key);
+              } else {
+                m_barrier_expected_counts[key] = value;
+              }
             }
           }
         }
@@ -874,25 +879,37 @@ void MHPAnalysis::processFunction(const Function *func, ThreadID tid,
             if (callee_exits.empty()) {
               return;
             }
+            auto wireExitsTo = [&](const Instruction *return_inst,
+                                   bool exceptional) {
+              if (!return_inst) {
+                return;
+              }
+              SyncNode *return_site = m_tfg->getNode(return_inst, tid, ctx);
+              if (!return_site) {
+                return;
+              }
+              for (SyncNode *callee_exit : callee_exits) {
+                const Instruction *exit_inst = callee_exit->getInstruction();
+                if (!exit_inst ||
+                    (exceptional != isa<ResumeInst>(exit_inst))) {
+                  continue;
+                }
+                m_tfg->addRetEdge(callee_exit, return_site);
+              }
+            };
+
             const Instruction *next_inst = inst.getNextNode();
             if (next_inst) {
               if (SyncNode *return_site = m_tfg->getNode(next_inst, tid, ctx)) {
                 for (SyncNode *callee_exit : callee_exits) {
-                  m_tfg->addRetEdge(callee_exit, return_site);
-                }
-              }
-            } else if (inst.isTerminator()) {
-              for (const BasicBlock *succ : successors(inst.getParent())) {
-                if (succ->empty()) {
-                  continue;
-                }
-                if (SyncNode *return_site =
-                        m_tfg->getNode(&succ->front(), tid, ctx)) {
-                  for (SyncNode *callee_exit : callee_exits) {
+                  if (!isa<ResumeInst>(callee_exit->getInstruction())) {
                     m_tfg->addRetEdge(callee_exit, return_site);
                   }
                 }
               }
+            } else if (const auto *invoke = dyn_cast<InvokeInst>(&inst)) {
+              wireExitsTo(&invoke->getNormalDest()->front(), false);
+              wireExitsTo(&invoke->getUnwindDest()->front(), true);
             }
           };
 
@@ -954,22 +971,33 @@ void MHPAnalysis::processFunction(const Function *func, ThreadID tid,
                         if (SyncNode *return_site =
                                 m_tfg->getNode(next_inst, tid, ctx)) {
                           for (SyncNode *callee_exit : callee_exits) {
-                            m_tfg->addRetEdge(callee_exit, return_site);
-                          }
-                        }
-                      } else if (inst.isTerminator()) {
-                        for (const BasicBlock *succ :
-                             successors(inst.getParent())) {
-                          if (succ->empty()) {
-                            continue;
-                          }
-                          if (SyncNode *return_site =
-                                  m_tfg->getNode(&succ->front(), tid, ctx)) {
-                            for (SyncNode *callee_exit : callee_exits) {
+                            if (!isa<ResumeInst>(
+                                    callee_exit->getInstruction())) {
                               m_tfg->addRetEdge(callee_exit, return_site);
                             }
                           }
                         }
+                      } else if (const auto *invoke =
+                                     dyn_cast<InvokeInst>(&inst)) {
+                        auto wireInvokeDestination =
+                            [&](const BasicBlock *dest, bool exceptional) {
+                              SyncNode *return_site =
+                                  dest && !dest->empty()
+                                      ? m_tfg->getNode(&dest->front(), tid, ctx)
+                                      : nullptr;
+                              if (!return_site) {
+                                return;
+                              }
+                              for (SyncNode *callee_exit : callee_exits) {
+                                if (exceptional == isa<ResumeInst>(
+                                                       callee_exit
+                                                           ->getInstruction())) {
+                                  m_tfg->addRetEdge(callee_exit, return_site);
+                                }
+                              }
+                            };
+                        wireInvokeDestination(invoke->getNormalDest(), false);
+                        wireInvokeDestination(invoke->getUnwindDest(), true);
                       }
                     }
                   }
@@ -989,7 +1017,8 @@ void MHPAnalysis::processFunction(const Function *func, ThreadID tid,
         }
       }
 
-      if (isa<ReturnInst>(inst) || m_thread_api->isTDExit(&inst)) {
+      if (isa<ReturnInst>(inst) || isa<ResumeInst>(inst) ||
+          m_thread_api->isTDExit(&inst)) {
         m_tfg->setFunctionExitNode(tid, func, node, ctx);
         if (ctx == 0 && m_tfg->getThreadEntry(tid) == func) {
           m_tfg->setThreadExitNode(tid, node);
@@ -1117,30 +1146,13 @@ void MHPAnalysis::handleThreadJoin(const Instruction *join_inst, SyncNode *node,
     return;
   }
 
-  // Track which thread is being joined using value analysis
-  // pthread_join takes the pthread_t value (not pointer) as first argument
-
-  const Value *joined_thread_val = m_thread_api->getJoinedThread(join_inst);
   ThreadID joined_tid = 0;
   bool found_thread = false;
 
-  if (joined_thread_val) {
-    // Use the improved tracing function to find the origin of the pthread_t
-    // value.
-    const Value *pthread_t_origin = tracePthreadT(joined_thread_val);
-
-    if (pthread_t_origin) {
-      auto it = m_pthread_value_to_threads.find(pthread_t_origin);
-      if (it != m_pthread_value_to_threads.end() && it->second.size() == 1 &&
-          !isMultiInstanceThread(*it->second.begin()) &&
-          !m_detached_threads.count(*it->second.begin())) {
-        joined_tid = *it->second.begin();
-        found_thread = true;
-      }
-    }
-  }
-
-  if (!found_thread && m_join_target_analysis) {
+  // JoinTargetAnalysis is the single authority for definite joins. Its result
+  // includes path, alias, lifetime, detach, overwrite, and multiplicity
+  // uncertainty; syntactic handle tracing must not bypass those checks.
+  if (m_join_target_analysis) {
     const Instruction *definite_fork =
         m_join_target_analysis->getDefiniteFeasibleJoinedFork(join_inst);
     if (definite_fork) {
@@ -1305,7 +1317,8 @@ void MHPAnalysis::finalizeBarrierPhases() {
       }
     }
     const size_t expected_count =
-        barrier_key && m_barrier_expected_counts.count(barrier_key)
+        barrier_key && !m_uncertain_barrier_counts.count(barrier_key) &&
+                m_barrier_expected_counts.count(barrier_key)
             ? m_barrier_expected_counts.at(barrier_key)
             : 0;
     for (const auto &phase_entry : barrier_entry.second) {
@@ -1330,6 +1343,7 @@ void MHPAnalysis::finalizeBarrierPhases() {
       }
 
       const bool phase_complete =
+          !m_uncertain_barrier_counts.count(barrier_key) &&
           !phase_has_multi_instance_thread && !distinct_threads.empty() &&
           (expected_count != 0
                ? distinct_threads.size() == expected_count
@@ -1380,117 +1394,8 @@ void MHPAnalysis::analyzeThreadRegions() {
 }
 
 void MHPAnalysis::computeMHPPairs() {
-  errs()
-      << "Computing MHP Pairs (Region-Based with Bitvector Optimization)...\n";
-
-  if (!m_region_analysis) {
-    errs() << "Warning: Region analysis not available, using instruction-level "
-              "computation\n";
-    computeMHPPairsInstructionLevel();
-    return;
-  }
-
-  const auto &regions = m_region_analysis->getAllRegions();
-  size_t num_regions = regions.size();
-  std::vector<bool> region_prefork_main(num_regions, false);
-  for (size_t i = 0; i < num_regions; ++i) {
-    const auto &region = regions[i];
-    if (region->thread_id != 0 || region->instructions.empty()) {
-      continue;
-    }
-    bool all_prefork = true;
-    for (const Instruction *inst : region->instructions) {
-      if (!isAlwaysPreForkMain(inst)) {
-        all_prefork = false;
-        break;
-      }
-    }
-    region_prefork_main[i] = all_prefork;
-  }
-
-  // Phase 1: Compute MHP region pairs using bitvector operations
-  std::vector<std::pair<size_t, size_t>> mhp_region_pairs;
-  mhp_region_pairs.reserve(num_regions * num_regions / 4);
-
-  for (size_t i = 0; i < num_regions; ++i) {
-    const auto &region_i = regions[i];
-    ThreadID tid_i = region_i->thread_id;
-
-    for (size_t j = i + 1; j < num_regions; ++j) {
-      const auto &region_j = regions[j];
-      ThreadID tid_j = region_j->thread_id;
-
-      // Same thread (non-multi-instance) cannot be MHP
-      if (tid_i == tid_j && !m_multi_instance_threads.count(tid_i)) {
-        continue;
-      }
-
-      if (m_openmp_task_exclusions.count(normalizeThreadPair(tid_i, tid_j))) {
-        continue;
-      }
-
-      if ((region_prefork_main[i] && tid_j != 0) ||
-          (region_prefork_main[j] && tid_i != 0)) {
-        continue;
-      }
-
-      // Use bitvector test for O(1) check
-      if (region_i->may_be_parallel_bits.test(j)) {
-        mhp_region_pairs.push_back({i, j});
-      }
-    }
-  }
-
-  errs() << "Found " << mhp_region_pairs.size() << " MHP region pairs\n";
-
-  // Phase 3: Expand region-level MHP to instruction-level MHP using only
-  // structural overlap constraints. Mutual exclusion and memory ordering are
-  // checker/HB concerns, not part of pure MHP.
-  size_t num_pairs = 0;
-  size_t ordered_filtered = 0;
-
-  for (const auto &pair : mhp_region_pairs) {
-    size_t ri = pair.first, rj = pair.second;
-    const auto &region_i = regions[ri];
-    const auto &region_j = regions[rj];
-    const Instruction *region_i_end =
-        region_i->end_node ? region_i->end_node->getInstruction() : nullptr;
-    const Instruction *region_i_start =
-        region_i->start_node ? region_i->start_node->getInstruction() : nullptr;
-    const Instruction *region_j_end =
-        region_j->end_node ? region_j->end_node->getInstruction() : nullptr;
-    const Instruction *region_j_start =
-        region_j->start_node ? region_j->start_node->getInstruction() : nullptr;
-
-    if ((region_i_end && region_j_start &&
-         hasStructuralOrderRelation(region_i_end, region_j_start)) ||
-        (region_j_end && region_i_start &&
-         hasStructuralOrderRelation(region_j_end, region_i_start))) {
-      ordered_filtered +=
-          region_i->instructions.size() * region_j->instructions.size();
-      continue;
-    }
-
-    for (const Instruction *inst_i : region_i->instructions) {
-      for (const Instruction *inst_j : region_j->instructions) {
-        if (hasStructuralOrderRelation(inst_i, inst_j) ||
-            hasStructuralOrderRelation(inst_j, inst_i)) {
-          ordered_filtered++;
-          continue;
-        }
-
-        // Store in canonical (pointer-sorted) order for O(1) symmetric lookup.
-        const Instruction *ca =
-            instructionCanonicalLess(inst_i, inst_j) ? inst_i : inst_j;
-        const Instruction *cb = ca == inst_i ? inst_j : inst_i;
-        m_mhp_pairs.insert({ca, cb});
-        num_pairs++;
-      }
-    }
-  }
-
-  errs() << "Expanded to " << num_pairs << " MHP instruction pairs "
-         << "(filtered " << ordered_filtered << " by structural ordering)\n";
+  errs() << "Computing authoritative instruction-level MHP pairs...\n";
+  computeMHPPairsInstructionLevel();
 }
 
 void MHPAnalysis::computeMHPPairsInstructionLevel() {
@@ -1505,17 +1410,10 @@ void MHPAnalysis::computeMHPPairsInstructionLevel() {
 
   size_t num_pairs = 0;
   for (size_t i = 0; i < all_insts.size(); ++i) {
-    for (size_t j = i + 1; j < all_insts.size(); ++j) {
+    for (size_t j = i; j < all_insts.size(); ++j) {
       const Instruction *i1 = all_insts[i];
       const Instruction *i2 = all_insts[j];
-
-      // Skip if in same thread and ordered
-      if (isInSameThread(i1, i2)) {
-        continue;
-      }
-
-      if (!hasStructuralOrderRelation(i1, i2) &&
-          !hasStructuralOrderRelation(i2, i1)) {
+      if (mayHappenInParallel(i1, i2)) {
         // Store in canonical (pointer-sorted) order for O(1) symmetric lookup.
         const Instruction *ca = instructionCanonicalLess(i1, i2) ? i1 : i2;
         const Instruction *cb = ca == i1 ? i2 : i1;
@@ -1530,6 +1428,9 @@ void MHPAnalysis::computeMHPPairsInstructionLevel() {
 
 bool MHPAnalysis::mayHappenInParallel(const Instruction *i1,
                                       const Instruction *i2) const {
+  if (!i1 || !i2) {
+    return false;
+  }
   // Symmetric memoization (keyed by pointer identity, order-independent).
   const Instruction *a = instructionCanonicalLess(i1, i2) ? i1 : i2;
   const Instruction *b = a == i1 ? i2 : i1;
@@ -1541,8 +1442,8 @@ bool MHPAnalysis::mayHappenInParallel(const Instruction *i1,
 
   if (i1 == i2) {
     ThreadID tid = getThreadID(i1);
-    bool parallel_self =
-        tid != kUnknownThread && multiInstanceThreadMayOverlap(tid);
+    bool parallel_self = tid == kUnknownThread ||
+                         multiInstanceThreadMayOverlap(tid);
     return (a && b) ? (m_mhp_cache[{a, b}] = parallel_self) : parallel_self;
   }
 
@@ -1555,12 +1456,17 @@ bool MHPAnalysis::mayHappenInParallel(const Instruction *i1,
   // with child-thread nodes.
   ThreadID t1 = getThreadID(i1);
   ThreadID t2 = getThreadID(i2);
+  if (t1 == t2 && t1 != kUnknownThread &&
+      multiInstanceThreadMayOverlap(t1)) {
+    return (a && b) ? (m_mhp_cache[{a, b}] = true) : true;
+  }
   if (m_openmp_task_exclusions.count(normalizeThreadPair(t1, t2))) {
     return (a && b) ? (m_mhp_cache[{a, b}] = false) : false;
   }
   const bool i1PreForkMain = isAlwaysPreForkMain(i1);
   const bool i2PreForkMain = isAlwaysPreForkMain(i2);
-  if ((i1PreForkMain && t2 != 0) || (i2PreForkMain && t1 != 0))
+  if ((i1PreForkMain && t2 != 0 && t2 != kUnknownThread) ||
+      (i2PreForkMain && t1 != 0 && t1 != kUnknownThread))
     return (a && b) ? (m_mhp_cache[{a, b}] = false) : false;
 
   // Fast path: check precomputed MHP pairs
@@ -1584,12 +1490,19 @@ bool MHPAnalysis::isPrecomputedMHP(const Instruction *i1,
 InstructionSet
 MHPAnalysis::getParallelInstructions(const Instruction *inst) const {
   InstructionSet result;
-
-  for (const auto &pair : m_mhp_pairs) {
-    if (pair.a == inst) {
-      result.insert(pair.b);
-    } else if (pair.b == inst) {
-      result.insert(pair.a);
+  if (m_precompute_mhp_pairs) {
+    for (const auto &pair : m_mhp_pairs) {
+      if (pair.a == inst) {
+        result.insert(pair.b);
+      } else if (pair.b == inst) {
+        result.insert(pair.a);
+      }
+    }
+  } else {
+    for (const auto &entry : m_inst_to_thread) {
+      if (mayHappenInParallel(inst, entry.first)) {
+        result.insert(entry.first);
+      }
     }
   }
 
@@ -1683,7 +1596,7 @@ bool MHPAnalysis::isMainThreadSpawnNode(const SyncNode *node) const {
 
 void MHPAnalysis::recomputePreForkMainNodes() {
   m_pre_fork_main_nodes.clear();
-  if (!m_tfg) {
+  if (!m_tfg || m_has_unresolved_fork) {
     return;
   }
 
@@ -1799,8 +1712,17 @@ bool MHPAnalysis::hasStructuralOrderRelation(const Instruction *i1,
         return true;
       }
       for (SyncNode *succ : current->getSuccessors()) {
-        if (m_tfg->hasEdgeKind(current, succ, EdgeKind::Join) &&
-            !joinEdgeMustOrderTarget(succ, end)) {
+        bool usable_edge = true;
+        for (EdgeKind kind : {EdgeKind::Join, EdgeKind::Barrier,
+                              EdgeKind::TaskDepend, EdgeKind::TaskWait,
+                              EdgeKind::TaskCompletion}) {
+          if (m_tfg->hasEdgeKind(current, succ, kind) &&
+              !synchronizationEdgeMustOrderTarget(current, succ, end, kind)) {
+            usable_edge = false;
+            break;
+          }
+        }
+        if (!usable_edge) {
           continue;
         }
         const Instruction *succ_inst = succ->getInstruction();
@@ -1816,15 +1738,10 @@ bool MHPAnalysis::hasStructuralOrderRelation(const Instruction *i1,
   };
 
   for (SyncNode *start_node : start_nodes) {
-    bool reached = false;
     for (SyncNode *end_node : end_nodes) {
-      if (can_reach(start_node, end_node)) {
-        reached = true;
-        break;
+      if (!can_reach(start_node, end_node)) {
+        return (m_order_cache[{i1, i2}] = false);
       }
-    }
-    if (!reached) {
-      return (m_order_cache[{i1, i2}] = false);
     }
   }
   return (m_order_cache[{i1, i2}] = true);
@@ -1855,7 +1772,7 @@ bool MHPAnalysis::joinEdgeMustOrderTarget(const SyncNode *join_node,
     bool dominates_all_exits = false;
     for (const BasicBlock &bb : *current_func) {
       const Instruction *terminator = bb.getTerminator();
-      if (!isa<ReturnInst>(terminator)) {
+      if (!isa<ReturnInst>(terminator) && !isa<ResumeInst>(terminator)) {
         continue;
       }
       if (!DT.dominates(current_inst, terminator)) {
@@ -1884,6 +1801,33 @@ bool MHPAnalysis::joinEdgeMustOrderTarget(const SyncNode *join_node,
   return false;
 }
 
+bool MHPAnalysis::synchronizationEdgeMustOrderTarget(
+    const SyncNode *from, const SyncNode *to, const SyncNode *target_node,
+    EdgeKind kind) const {
+  if (kind == EdgeKind::Join || kind == EdgeKind::TaskWait ||
+      kind == EdgeKind::TaskCompletion) {
+    return joinEdgeMustOrderTarget(to, target_node);
+  }
+  if (kind == EdgeKind::Barrier) {
+    for (const auto &barrier : m_barrier_waits) {
+      for (const auto &phase : barrier.second) {
+        for (const BarrierParticipant &participant : phase.second) {
+          if (std::find(participant.continuations.begin(),
+                        participant.continuations.end(), to) !=
+              participant.continuations.end()) {
+            return joinEdgeMustOrderTarget(participant.arrival, target_node);
+          }
+        }
+      }
+    }
+    return false;
+  }
+  if (kind == EdgeKind::TaskDepend) {
+    return from && to;
+  }
+  return false;
+}
+
 bool MHPAnalysis::isInSameThread(const Instruction *i1,
                                  const Instruction *i2) const {
   ThreadID t1 = getThreadID(i1);
@@ -1901,7 +1845,7 @@ bool MHPAnalysis::isInSameThread(const Instruction *i1,
   // can have multiple active instances (e.g., created in a loop).
   // If so, two instructions from the "same" static thread can run in parallel.
   if (m_multi_instance_threads.count(t1)) {
-    return false; // Treat as potentially parallel
+    return !multiInstanceThreadMayOverlap(t1);
   }
 
   return true;
@@ -1960,9 +1904,6 @@ bool MHPAnalysis::multiInstanceThreadMayOverlap(ThreadID tid) const {
     return true;
   }
 
-  const Value *fork_handle = m_thread_api->getForkedThread(fork_inst);
-  fork_handle = fork_handle ? fork_handle->stripPointerCasts() : nullptr;
-
   const Function *parent = fork_inst->getFunction();
   const DominatorTree &DT = getDomTree(parent);
   LoopInfo loops(const_cast<DominatorTree &>(DT));
@@ -1982,11 +1923,21 @@ bool MHPAnalysis::multiInstanceThreadMayOverlap(ThreadID tid) const {
         m_join_target_analysis
             ? m_join_target_analysis->getDefiniteFeasibleJoinedFork(&inst)
             : nullptr;
-    const Value *join_handle = m_thread_api->getJoinedThread(&inst);
-    join_handle = join_handle ? tracePthreadT(join_handle) : nullptr;
-    join_handle = join_handle ? join_handle->stripPointerCasts() : nullptr;
-    if (joined_fork != fork_inst &&
-        (!fork_handle || !join_handle || fork_handle != join_handle)) {
+    bool only_repeated_site_ambiguity = false;
+    if (!joined_fork && m_join_target_analysis) {
+      const JoinResolution resolution =
+          m_join_target_analysis->getJoinResolution(&inst);
+      only_repeated_site_ambiguity =
+          !resolution.has_unknown_live_instance &&
+          resolution.feasible_forks.size() == 1 &&
+          resolution.feasible_forks.front() == fork_inst &&
+          std::all_of(resolution.ambiguity_reasons.begin(),
+                      resolution.ambiguity_reasons.end(),
+                      [](JoinAmbiguityReason reason) {
+                        return reason == JoinAmbiguityReason::RepeatedForkSite;
+                      });
+    }
+    if (joined_fork != fork_inst && !only_repeated_site_ambiguity) {
       continue;
     }
 

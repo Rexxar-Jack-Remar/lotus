@@ -14,6 +14,7 @@
 
 #include "Concurrency/JoinTarget/JoinTargetAnalysis.h"
 #include "Concurrency/MHP/IMHPAnalysis.h"
+#include "Concurrency/MHP/MHPAnalysis.h"
 #include "Concurrency/Utils/ThreadAPI.h"
 #include "Concurrency/Utils/ThreadFlowGraph.h"
 #include "Concurrency/Utils/ThreadMultiplicity.h"
@@ -74,7 +75,10 @@ public:
 
   InstructionSet getInstructionsInThread(ThreadID tid) const override;
 
-  size_t getMhpPairCount() const override { return m_mhp_pairs.size(); }
+  size_t getMhpPairCount() const override {
+    return m_conservative_mhp ? m_conservative_mhp->getMhpPairCount()
+                              : m_mhp_pairs.size();
+  }
 
   /// Query happens-before using static vector clocks.
   bool happensBefore(const llvm::Instruction *i1,
@@ -209,6 +213,7 @@ private:
   // Thread-flow graph owned by this analysis
   ThreadAPI *m_thread_api = nullptr;
   std::unique_ptr<ThreadFlowGraph> m_tfg;
+  std::unique_ptr<MHPAnalysis> m_conservative_mhp;
   std::unique_ptr<llvm::CallGraph> m_call_graph;
   std::unique_ptr<JoinTargetAnalysis> m_join_target_analysis;
   std::unique_ptr<concurrency::ThreadMultiplicityAnalysis>

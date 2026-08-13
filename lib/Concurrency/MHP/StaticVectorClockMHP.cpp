@@ -76,6 +76,9 @@ void StaticVectorClockMHP::analyze() {
   m_has_unresolved_fork = false;
   m_next_thread_id = 1;
   m_post_dom_cache.clear();
+  m_conservative_mhp = std::make_unique<MHPAnalysis>(m_module);
+  m_conservative_mhp->enableMHPPrecomputation(true);
+  m_conservative_mhp->analyze();
   m_tfg = std::make_unique<ThreadFlowGraph>();
   m_call_graph = std::make_unique<CallGraph>(m_module);
   m_join_target_analysis = std::make_unique<JoinTargetAnalysis>(m_module);
@@ -317,7 +320,9 @@ void StaticVectorClockMHP::buildStaticEdges() {
         continue;
       }
 
-      if (kind == EdgeKind::Signal || kind == EdgeKind::Barrier) {
+      if (kind == EdgeKind::Signal || kind == EdgeKind::Barrier ||
+          kind == EdgeKind::TaskDepend || kind == EdgeKind::TaskWait ||
+          kind == EdgeKind::TaskCompletion) {
         const auto succ_it = m_sync_node_to_static_nodes.find(succ);
         if (succ_it == m_sync_node_to_static_nodes.end()) {
           continue;
@@ -611,7 +616,8 @@ StaticVectorClockMHP::mergePredecessorClocksWithRules(
     EdgeKind kind = m_tfg->getEdgeKind(pred_key.node, key.node)
                         .value_or(EdgeKind::Control);
     if (kind == EdgeKind::Join || kind == EdgeKind::Signal ||
-        kind == EdgeKind::Barrier)
+        kind == EdgeKind::Barrier || kind == EdgeKind::TaskDepend ||
+        kind == EdgeKind::TaskWait || kind == EdgeKind::TaskCompletion)
       continue;
     merged.mergeFrom(it->second);
   }
@@ -622,7 +628,8 @@ StaticVectorClockMHP::mergePredecessorClocksWithRules(
     EdgeKind kind = m_tfg->getEdgeKind(pred_key.node, key.node)
                         .value_or(EdgeKind::Control);
     if (kind != EdgeKind::Join && kind != EdgeKind::Signal &&
-        kind != EdgeKind::Barrier)
+        kind != EdgeKind::Barrier && kind != EdgeKind::TaskDepend &&
+        kind != EdgeKind::TaskWait && kind != EdgeKind::TaskCompletion)
       continue;
     StaticVectorClock maxClock;
     computeSVMax(merged, it->second, maxClock);
@@ -646,7 +653,9 @@ bool StaticVectorClockMHP::shouldAddEventAtNode(
     EdgeKind kind = m_tfg->getEdgeKind(pred_key.node, key.node)
                         .value_or(EdgeKind::Control);
     if (kind == EdgeKind::Control || kind == EdgeKind::Join ||
-        kind == EdgeKind::Signal || kind == EdgeKind::Barrier)
+        kind == EdgeKind::Signal || kind == EdgeKind::Barrier ||
+        kind == EdgeKind::TaskDepend || kind == EdgeKind::TaskWait ||
+        kind == EdgeKind::TaskCompletion)
       return true;
   }
   return false;
@@ -782,6 +791,9 @@ void StaticVectorClockMHP::computeMHPPairs() {
 
 bool StaticVectorClockMHP::mayHappenInParallel(const Instruction *i1,
                                                const Instruction *i2) const {
+  if (m_conservative_mhp) {
+    return m_conservative_mhp->mayHappenInParallel(i1, i2);
+  }
   if (!i1 || !i2 || i1 == i2)
     return false;
 
@@ -802,6 +814,9 @@ bool StaticVectorClockMHP::mayHappenInParallel(const Instruction *i1,
 
 bool StaticVectorClockMHP::isPrecomputedMHP(const Instruction *i1,
                                             const Instruction *i2) const {
+  if (m_conservative_mhp) {
+    return m_conservative_mhp->isPrecomputedMHP(i1, i2);
+  }
   if (!i1 || !i2) {
     return false;
   }
@@ -812,6 +827,9 @@ bool StaticVectorClockMHP::isPrecomputedMHP(const Instruction *i1,
 
 InstructionSet
 StaticVectorClockMHP::getParallelInstructions(const Instruction *inst) const {
+  if (m_conservative_mhp) {
+    return m_conservative_mhp->getParallelInstructions(inst);
+  }
   auto cache_it = m_parallel_instruction_cache.find(inst);
   if (cache_it != m_parallel_instruction_cache.end()) {
     return cache_it->second;
@@ -832,6 +850,9 @@ StaticVectorClockMHP::getParallelInstructions(const Instruction *inst) const {
 }
 
 ThreadID StaticVectorClockMHP::getThreadID(const Instruction *inst) const {
+  if (m_conservative_mhp) {
+    return m_conservative_mhp->getThreadID(inst);
+  }
   auto it = m_inst_to_thread.find(inst);
   return it != m_inst_to_thread.end() ? it->second : kUnknownThread;
 }
@@ -842,6 +863,9 @@ bool StaticVectorClockMHP::isMultiInstanceThread(ThreadID tid) const {
 
 InstructionSet
 StaticVectorClockMHP::getInstructionsInThread(ThreadID tid) const {
+  if (m_conservative_mhp) {
+    return m_conservative_mhp->getInstructionsInThread(tid);
+  }
   auto cache_it = m_thread_instruction_cache.find(tid);
   if (cache_it != m_thread_instruction_cache.end()) {
     return cache_it->second;

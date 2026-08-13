@@ -230,6 +230,154 @@ TEST_F(MHPAnalysisTest, ConditionalJoinDoesNotOrderPostMergeContinuation) {
   EXPECT_TRUE(mhp.mayHappenInParallel(worker_inst, post));
   EXPECT_FALSE(hb.mustPrecede(worker_inst, post));
 }
+
+TEST_F(MHPAnalysisTest, RepeatedHelperCallAroundJoinRemainsMHP) {
+  const char *source = R"(
+    @shared = global i32 0
+    declare i32 @pthread_create(i8*, i8*, i8* (i8*)*, i8*)
+    declare i32 @pthread_join(i8*, i8*)
+
+    define void @helper() {
+    entry:
+      %h = load i32, i32* @shared
+      ret void
+    }
+
+    define i8* @worker(i8* %arg) {
+    entry:
+      %w = load i32, i32* @shared
+      ret i8* null
+    }
+
+    define i32 @main() {
+    entry:
+      %tid = alloca i8
+      call i32 @pthread_create(i8* %tid, i8* null,
+                               i8* (i8*)* @worker, i8* null)
+      call void @helper()
+      call i32 @pthread_join(i8* %tid, i8* null)
+      call void @helper()
+      ret i32 0
+    }
+  )";
+
+  auto module = parseModule(source);
+  ASSERT_NE(module, nullptr);
+  const Instruction *helper =
+      findInstructionByName(*module->getFunction("helper"), "h");
+  const Instruction *worker =
+      findInstructionByName(*module->getFunction("worker"), "w");
+  ASSERT_NE(helper, nullptr);
+  ASSERT_NE(worker, nullptr);
+
+  MHPAnalysis on_demand(*module);
+  on_demand.analyze();
+  EXPECT_TRUE(on_demand.mayHappenInParallel(helper, worker));
+  EXPECT_EQ(on_demand.getParallelInstructions(helper).count(worker), 1u);
+
+  MHPAnalysis precomputed(*module);
+  precomputed.enableMHPPrecomputation(true);
+  precomputed.analyze();
+  EXPECT_TRUE(precomputed.mayHappenInParallel(helper, worker));
+  EXPECT_EQ(precomputed.getParallelInstructions(helper).count(worker), 1u);
+}
+
+TEST_F(MHPAnalysisTest, UnresolvedIndirectForkContinuationIsNotPrefork) {
+  const char *source = R"(
+    @worker_ptr = global i8* (i8*)* @worker
+    declare i32 @pthread_create(i8*, i8*, i8* (i8*)*, i8*)
+
+    define i8* @worker(i8* %arg) {
+    entry:
+      %w = add i32 1, 2
+      ret i8* null
+    }
+
+    define i32 @main() {
+    entry:
+      %tid = alloca i8
+      %fn = load i8* (i8*)*, i8* (i8*)** @worker_ptr
+      call i32 @pthread_create(i8* %tid, i8* null,
+                               i8* (i8*)* %fn, i8* null)
+      %post = add i32 3, 4
+      ret i32 %post
+    }
+  )";
+
+  auto module = parseModule(source);
+  ASSERT_NE(module, nullptr);
+  MHPAnalysis mhp(*module);
+  mhp.analyze();
+
+  const Instruction *worker =
+      findInstructionByName(*module->getFunction("worker"), "w");
+  const Instruction *post =
+      findInstructionByName(*module->getFunction("main"), "post");
+  ASSERT_NE(worker, nullptr);
+  ASSERT_NE(post, nullptr);
+  EXPECT_TRUE(mhp.mayHappenInParallel(worker, post));
+}
+
+TEST_F(MHPAnalysisTest, ConflictingBarrierCountsDoNotCreateMustOrdering) {
+  const char *source = R"(
+    @bar = global i8 0
+    @shared = global i32 0
+    declare i32 @pthread_create(i8*, i8*, i8* (i8*)*, i8*)
+    declare i32 @pthread_barrier_init(i8*, i8*, i32)
+    declare i32 @pthread_barrier_wait(i8*)
+
+    define i8* @first(i8* %arg) {
+    entry:
+      call i32 @pthread_barrier_wait(i8* @bar)
+      %after = load i32, i32* @shared
+      ret i8* null
+    }
+
+    define i8* @second(i8* %arg) {
+    entry:
+      call i32 @pthread_barrier_wait(i8* @bar)
+      ret i8* null
+    }
+
+    define i8* @third(i8* %arg) {
+    entry:
+      %before = load i32, i32* @shared
+      call i32 @pthread_barrier_wait(i8* @bar)
+      ret i8* null
+    }
+
+    define i32 @main(i1 %cond) {
+    entry:
+      %t1 = alloca i8
+      %t2 = alloca i8
+      %t3 = alloca i8
+      br i1 %cond, label %two, label %three
+    two:
+      call i32 @pthread_barrier_init(i8* @bar, i8* null, i32 2)
+      br label %start
+    three:
+      call i32 @pthread_barrier_init(i8* @bar, i8* null, i32 3)
+      br label %start
+    start:
+      call i32 @pthread_create(i8* %t1, i8* null, i8* (i8*)* @first, i8* null)
+      call i32 @pthread_create(i8* %t2, i8* null, i8* (i8*)* @second, i8* null)
+      call i32 @pthread_create(i8* %t3, i8* null, i8* (i8*)* @third, i8* null)
+      ret i32 0
+    }
+  )";
+
+  auto module = parseModule(source);
+  ASSERT_NE(module, nullptr);
+  MHPAnalysis mhp(*module);
+  mhp.analyze();
+  const Instruction *after =
+      findInstructionByName(*module->getFunction("first"), "after");
+  const Instruction *before =
+      findInstructionByName(*module->getFunction("third"), "before");
+  ASSERT_NE(after, nullptr);
+  ASSERT_NE(before, nullptr);
+  EXPECT_TRUE(mhp.mayHappenInParallel(after, before));
+}
 TEST_F(MHPAnalysisTest, AmbiguousJoinDoesNotCreateDefiniteHB) {
   const char *source = R"(
     declare i32 @pthread_create(i8*, i8*, i8* (i8*)*, i8*)

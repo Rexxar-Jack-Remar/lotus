@@ -16,12 +16,13 @@
  */
 
 #include "Concurrency/LockSet/LockSetAnalysis.h"
-#include "Concurrency/LockSet/LockSetAnalysisSupport.h"
 
 #include "Alias/Infrastructure/AliasAnalysisWrapper/AliasAnalysisWrapper.h"
+#include "Concurrency/LockSet/LockSetAnalysisSupport.h"
 
 #include <algorithm>
 #include <iterator>
+#include <limits>
 #include <set>
 
 #include <llvm/ADT/APInt.h>
@@ -140,8 +141,7 @@ bool areDisjointConstantOffsetPointers(const Value *lhs, const Value *rhs,
   return lhs_end <= rhs_offset || rhs_end <= lhs_offset;
 }
 
-bool instructionPrecedesOrEquals(const Instruction *lhs,
-                                 const Instruction *rhs,
+bool instructionPrecedesOrEquals(const Instruction *lhs, const Instruction *rhs,
                                  const Function *func) {
   if (!lhs || !rhs || !func) {
     return false;
@@ -193,19 +193,25 @@ void LockSetAnalysis::analyze() {
   m_must_read_locks_exit.clear();
   m_must_write_locks_entry.clear();
   m_must_write_locks_exit.clear();
+  m_may_recursive_depth_entry.clear();
+  m_may_recursive_depth_exit.clear();
+  m_must_recursive_depth_entry.clear();
+  m_must_recursive_depth_exit.clear();
   m_all_locks.clear();
   m_lock_acquires.clear();
   m_lock_releases.clear();
   m_lock_try_acquires.clear();
   m_observed_lock_orders.clear();
+  m_deadlock_wait_orders.clear();
   m_reentrant_locks.clear();
   m_raii_locks.clear();
   m_function_summaries.clear();
-  m_invoke_normal_must_exit.clear();
-  m_trylock_success_must_inject.clear();
+  m_invoke_normal_exit.clear();
+  m_invoke_unwind_exit.clear();
+  m_trylock_edge_refinements.clear();
 
   if (m_module) {
-    if (!m_call_graph) {
+    if (!m_uses_external_call_graph) {
       m_owned_call_graph = std::make_unique<CallGraph>(*m_module);
       m_call_graph = m_owned_call_graph.get();
     }
@@ -242,9 +248,10 @@ LockSet LockSetAnalysis::getMayLockSetAt(const Instruction *inst) const {
       return it_exit->second;
     }
   }
-  // Entry map is authoritative when present and non-empty.
+  // The computed entry fact is authoritative, including an empty set. This is
+  // important for edge refinements such as a proven try-lock failure.
   auto it = m_may_locksets_entry.find(inst);
-  if (it != m_may_locksets_entry.end() && !it->second.empty())
+  if (it != m_may_locksets_entry.end())
     return it->second;
   // Fallback: on a linear path, entry at inst = exit of prev (fixes worklist
   // order)
@@ -301,7 +308,7 @@ LockSet LockSetAnalysis::getMayReadLockSetAt(const Instruction *inst) const {
 
 LockSet LockSetAnalysis::getMayWriteLockSetAt(const Instruction *inst) const {
   auto it = m_may_write_locks_entry.find(inst);
-  if (it != m_may_write_locks_entry.end() && !it->second.empty())
+  if (it != m_may_write_locks_entry.end())
     return it->second;
   // Fallback: entry at inst = exit of prev on linear path (fixes worklist
   // order)
@@ -627,15 +634,28 @@ bool LockSetAnalysis::isReentrantLock(LockID lock) const {
 }
 
 size_t LockSetAnalysis::getLockNestingDepth(const Instruction *inst) const {
-  return getMayLockSetAt(inst).size();
+  LockSet may_locks = getMayLockSetAt(inst);
+  size_t depth = may_locks.size();
+  auto depth_it = m_may_recursive_depth_entry.find(inst);
+  if (depth_it == m_may_recursive_depth_entry.end()) {
+    return depth;
+  }
+  for (const auto &[lock, recursive_depth] : depth_it->second) {
+    if (may_locks.count(lock) != 0 && recursive_depth > 1) {
+      const bool unbounded =
+          recursive_depth == std::numeric_limits<unsigned>::max();
+      depth += unbounded ? 1 : recursive_depth - 1;
+    }
+  }
+  return depth;
 }
 
 bool LockSetAnalysis::areLocksOrderedConsistently(LockID lock1,
                                                   LockID lock2) const {
-  bool found_12 = m_observed_lock_orders.find({lock1, lock2}) !=
-                  m_observed_lock_orders.end();
-  bool found_21 = m_observed_lock_orders.find({lock2, lock1}) !=
-                  m_observed_lock_orders.end();
+  bool found_12 = m_deadlock_wait_orders.find({lock1, lock2}) !=
+                  m_deadlock_wait_orders.end();
+  bool found_21 = m_deadlock_wait_orders.find({lock2, lock1}) !=
+                  m_deadlock_wait_orders.end();
 
   // Consistent if only one order is observed
   return !(found_12 && found_21);
@@ -647,12 +667,12 @@ LockSetAnalysis::detectLockOrderInversions() const {
   std::unordered_set<LockPair, LockPair::Hash> emitted;
 
   // Check all pairs of locks for order inversions
-  for (const auto &pair1 : m_observed_lock_orders) {
+  for (const auto &pair1 : m_deadlock_wait_orders) {
     LockPair reverse{pair1.second, pair1.first};
     LockPair canonical = std::less<LockID>{}(pair1.first, pair1.second)
                              ? pair1
                              : LockPair{pair1.second, pair1.first};
-    if (m_observed_lock_orders.find(reverse) != m_observed_lock_orders.end() &&
+    if (m_deadlock_wait_orders.find(reverse) != m_deadlock_wait_orders.end() &&
         emitted.insert(canonical).second) {
       // Found an inversion - both lock1->lock2 and lock2->lock1 exist
       inversions.push_back({canonical.first, canonical.second});
@@ -687,12 +707,11 @@ LockSetAnalysis::getLockOrderPredecessors(LockID lock) const {
   return predecessors;
 }
 
-std::vector<std::vector<LockID>>
-LockSetAnalysis::detectDeadlockCycles() const {
+std::vector<std::vector<LockID>> LockSetAnalysis::detectDeadlockCycles() const {
   // Build adjacency list from observed lock orders
   std::unordered_map<LockID, std::vector<LockID>> adj;
   std::unordered_set<LockID> all_nodes;
-  for (const auto &pair : m_observed_lock_orders) {
+  for (const auto &pair : m_deadlock_wait_orders) {
     adj[pair.first].push_back(pair.second);
     all_nodes.insert(pair.first);
     all_nodes.insert(pair.second);
@@ -718,8 +737,7 @@ LockSetAnalysis::detectDeadlockCycles() const {
             if (color[v] == GRAY) {
               // Found a cycle - extract it from path
               std::vector<LockID> cycle;
-              auto cycle_start =
-                  std::find(path.begin(), path.end(), v);
+              auto cycle_start = std::find(path.begin(), path.end(), v);
               if (cycle_start != path.end()) {
                 cycle.assign(cycle_start, path.end());
                 cycle.push_back(v); // close the cycle
@@ -759,8 +777,8 @@ LockSetAnalysis::getProtectedInstructions(LockID lock) const {
   for (const auto &entry : m_must_locksets_entry) {
     for (LockID held : entry.second) {
       if (getCanonicalLock(held) == lock ||
-          (m_alias_analysis && m_alias_analysis->mustAlias(
-                                   getCanonicalLock(held), lock))) {
+          (m_alias_analysis &&
+           m_alias_analysis->mustAlias(getCanonicalLock(held), lock))) {
         result.push_back(entry.first);
         break;
       }
@@ -782,9 +800,8 @@ LockSetAnalysis::getCriticalSections(LockID lock) const {
       if (rel->getFunction() != acq->getFunction())
         continue;
       if (detail::instructionPrecedesOrEquals(acq, rel, acq->getFunction())) {
-        if (!best_release ||
-            detail::instructionPrecedesOrEquals(rel, best_release,
-                                                acq->getFunction())) {
+        if (!best_release || detail::instructionPrecedesOrEquals(
+                                 rel, best_release, acq->getFunction())) {
           best_release = rel;
         }
       }
@@ -890,7 +907,8 @@ void LockSetAnalysis::Statistics::print(raw_ostream &os) const {
   os << "Max Critical Section Size:   " << max_critical_section_size << "\n";
   os << "Read-Write Locks:            " << num_rwlocks << "\n";
   os << "CondVar Waits:               " << num_condvar_waits << "\n";
-  os << "Unprotected CondVar Waits:   " << num_unprotected_condvar_waits << "\n";
+  os << "Unprotected CondVar Waits:   " << num_unprotected_condvar_waits
+     << "\n";
   os << "Deadlock Cycles:             " << num_deadlock_cycles << "\n";
 }
 

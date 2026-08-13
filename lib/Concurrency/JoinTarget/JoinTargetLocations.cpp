@@ -8,9 +8,12 @@
 #include <deque>
 #include <set>
 
+#include <llvm/ADT/APInt.h>
 #include <llvm/ADT/SmallVector.h>
 #include <llvm/IR/Constants.h>
+#include <llvm/IR/DataLayout.h>
 #include <llvm/IR/Instructions.h>
+#include <llvm/IR/Operator.h>
 
 using namespace llvm;
 
@@ -306,7 +309,7 @@ JoinTargetAnalysis::resolveReadLocations(const Value *value) const {
     return resolveWriteLocations(load->getPointerOperand());
   }
 
-  if (const auto *gep = dyn_cast<GetElementPtrInst>(stripped)) {
+  if (const auto *gep = dyn_cast<GEPOperator>(stripped)) {
     return resolveWriteLocations(gep);
   }
 
@@ -343,7 +346,7 @@ JoinTargetAnalysis::resolveWriteLocations(const Value *value) const {
     return locations;
   }
 
-  if (const auto *gep = dyn_cast<GetElementPtrInst>(stripped)) {
+  if (const auto *gep = dyn_cast<GEPOperator>(stripped)) {
     auto baseLocations = resolveWriteLocations(gep->getPointerOperand());
     if (baseLocations.empty()) {
       if (const Value *baseRoot =
@@ -353,25 +356,26 @@ JoinTargetAnalysis::resolveWriteLocations(const Value *value) const {
       return locations;
     }
 
-    bool allConstant = true;
-    std::vector<int64_t> offsets;
-    for (const auto *it = gep->idx_begin(); it != gep->idx_end(); ++it) {
-      const auto *ci = dyn_cast<ConstantInt>(it->get());
-      if (!ci) {
-        allConstant = false;
-        break;
-      }
-      offsets.push_back(ci->getSExtValue());
-    }
+    const DataLayout &layout = m_module.getDataLayout();
+    APInt byteOffset(layout.getIndexTypeSizeInBits(gep->getType()), 0, true);
+    const bool hasConstantOffset =
+        gep->accumulateConstantOffset(layout, byteOffset) &&
+        byteOffset.isSignedIntN(64);
 
     for (const HandleLocation &baseLocation : baseLocations) {
       HandleLocation location = baseLocation;
-      if (!allConstant || location.is_base_wildcard) {
+      if (!hasConstantOffset || location.is_base_wildcard) {
         location.offsets.clear();
         location.is_base_wildcard = true;
       } else {
-        location.offsets.insert(location.offsets.end(), offsets.begin(),
-                                offsets.end());
+        int64_t totalOffset = byteOffset.getSExtValue();
+        if (!location.offsets.empty()) {
+          totalOffset += location.offsets.front();
+        }
+        location.offsets.clear();
+        if (totalOffset != 0) {
+          location.offsets.push_back(totalOffset);
+        }
       }
       locations.insert(std::move(location));
     }

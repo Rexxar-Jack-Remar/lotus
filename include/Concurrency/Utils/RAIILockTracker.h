@@ -65,7 +65,7 @@ private:
   /// Multiple entries are allowed when the same wrapper storage is reused for
   /// distinct constructor/destructor pairs.
   std::multimap<const llvm::Value *, LockLifetime> lockLifetimes;
-  
+
   /// Set of destructor calls we've already processed
   std::set<const llvm::Instruction *> processedDestructors;
 
@@ -114,6 +114,14 @@ public:
    * @return The canonical lock-object identity, or nullptr
    */
   static const llvm::Value *findLockObjectForConstructor(const llvm::CallBase *ctor);
+
+  /**
+   * @brief Check whether a constructor can reach an instruction without the
+   * same wrapper storage being reconstructed along that path.
+   */
+  static bool constructorCanReachWithoutReconstruction(
+      const llvm::CallBase *ctor, const llvm::Instruction *target,
+      const llvm::Value *lockObject);
 
   /**
    * @brief Extract the underlying mutex/lock from a constructor call

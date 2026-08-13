@@ -1,5 +1,6 @@
 #include "Concurrency/LockSet/LockSetAnalysis.h"
 #include "TestUtils/LLVMHelpers.h"
+
 #include <gtest/gtest.h>
 
 using namespace llvm;
@@ -14,26 +15,21 @@ protected:
 
 TEST_F(RAIIMultiLifetimeTest, LoopRAII) {
   const char *source = R"(
-    %struct.mutex = type { i32 }
-    %struct.lock_guard = type { %struct.mutex* }
+    declare void @fake_lock_guard_C1E(i8*, i8*)
+    declare void @fake_lock_guard_D1Ev(i8*)
 
-    declare void @mutex_lock(%struct.mutex*)
-    declare void @mutex_unlock(%struct.mutex*)
-    declare void @guard_ctor(%struct.lock_guard*, %struct.mutex*)
-    declare void @guard_dtor(%struct.lock_guard*)
-
-    @m = global %struct.mutex zeroinitializer, align 4
+    @m = global i8 0
 
     define void @test_loop(i32 %n) {
     entry:
       br label %loop
     loop:
       %i = phi i32 [ 0, %entry ], [ %i.next, %loop ]
-      %guard = alloca %struct.lock_guard
-      call void @guard_ctor(%struct.lock_guard* %guard, %struct.mutex* @m)
+      %guard = alloca i8
+      call void @fake_lock_guard_C1E(i8* %guard, i8* @m)
       ; critical section
-      %val = load i32, i32* @m
-      call void @guard_dtor(%struct.lock_guard* %guard)
+      %val = load i8, i8* @m
+      call void @fake_lock_guard_D1Ev(i8* %guard)
       %i.next = add i32 %i, 1
       %cmp = icmp slt i32 %i.next, %n
       br i1 %cmp, label %loop, label %exit
@@ -49,7 +45,7 @@ TEST_F(RAIIMultiLifetimeTest, LoopRAII) {
   lsa.analyze();
 
   const Function *func = module->getFunction("test_loop");
-  Instruction *loadM = nullptr;
+  const Instruction *loadM = nullptr;
   for (auto &BB : *func) {
     for (auto &I : BB) {
       if (isa<LoadInst>(I)) {

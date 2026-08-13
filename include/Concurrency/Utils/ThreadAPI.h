@@ -29,10 +29,10 @@
 
 #include "Concurrency/ConcurrencyConfig.h"
 #include "Concurrency/Utils/CUDA.h"
-#include "Concurrency/Utils/CppThreading.h"
-#include "Concurrency/Utils/LinuxKernel.h"
 #include "Concurrency/Utils/CUDA.h"
 #include "Concurrency/Utils/CppThreading.h"
+#include "Concurrency/Utils/CppThreading.h"
+#include "Concurrency/Utils/LinuxKernel.h"
 #include "Concurrency/Utils/LinuxKernel.h"
 
 #include <cstdint>
@@ -77,12 +77,14 @@ public:
 
   enum class LockSemanticKind { None, Shared, Exclusive, Release };
   enum class LockOwnershipEffect { Acquire, Deferred, Try, Adopt, Release };
+  enum class TryLockSuccess { Unknown, Zero, NonZero };
 
   struct LockSemanticInfo {
     const llvm::Value *identity = nullptr;
     llvm::SmallVector<const llvm::Value *, 4> identities;
     LockSemanticKind kind = LockSemanticKind::None;
     LockOwnershipEffect ownership = LockOwnershipEffect::Acquire;
+    TryLockSuccess try_success = TryLockSuccess::Unknown;
     bool is_try = false;
     bool conditional = false;
 
@@ -1384,6 +1386,23 @@ public:
 
     info.is_try = isTryLock(inst);
     info.conditional = info.is_try;
+    if (info.is_try) {
+      const TD_TYPE type = getType(callee);
+      if (type == TD_TRY_ACQUIRE || type == TD_SEMAPHORE_TRY_ACQUIRE ||
+          (callee &&
+           (callee->getName() == "pthread_rwlock_tryrdlock" ||
+            callee->getName() == "pthread_rwlock_trywrlock" ||
+            LinuxKernelModel::isDownTryLock(callee->getName()) ||
+            LinuxKernelModel::isDownReadTryLock(callee->getName()) ||
+            LinuxKernelModel::isDownWriteTryLock(callee->getName())))) {
+        info.try_success = TryLockSuccess::Zero;
+      } else if (type == TD_CPP_LOCK_TRY || type == TD_KERNEL_SPIN_TRYLOCK ||
+                 type == TD_KERNEL_MUTEX_TRYLOCK ||
+                 (callee && CppThreadingModel::isTryToLockConstructor(
+                                callee->getName()))) {
+        info.try_success = TryLockSuccess::NonZero;
+      }
+    }
     if (isReadLockAcquire(inst)) {
       info.kind = LockSemanticKind::Shared;
     } else if (isWriteLockAcquire(inst) || isTDAcquire(inst)) {

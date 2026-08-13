@@ -274,6 +274,10 @@ public:
   const ThreadFlowGraph &getThreadFlowGraph() const { return *m_tfg; }
   bool joinEdgeMustOrderTarget(const SyncNode *join_node,
                                const SyncNode *target_node) const;
+  bool synchronizationEdgeMustOrderTarget(const SyncNode *from,
+                                          const SyncNode *to,
+                                          const SyncNode *target_node,
+                                          EdgeKind kind) const;
   const ThreadRegionAnalysis &getThreadRegionAnalysis() const {
     return *m_region_analysis;
   }
@@ -313,6 +317,9 @@ private:
     }
   };
 
+  bool instructionCanonicalLess(const llvm::Instruction *lhs,
+                                const llvm::Instruction *rhs) const;
+
   llvm::Module &m_module;
   ThreadAPI *m_thread_api;
 
@@ -332,6 +339,7 @@ private:
 
   // Instruction to thread mapping
   std::unordered_map<const llvm::Instruction *, ThreadID> m_inst_to_thread;
+  std::unordered_map<const llvm::Instruction *, size_t> m_instruction_ordinals;
 
   // Alias Analysis
   std::unique_ptr<lotus::AliasAnalysisWrapper> m_alias_analysis;
@@ -389,6 +397,8 @@ private:
   std::unordered_map<const llvm::Value *, std::unordered_map<ThreadID, size_t>>
       m_pending_split_barrier_phase_by_thread;
   std::unordered_map<const llvm::Value *, size_t> m_barrier_expected_counts;
+  std::unordered_map<const llvm::Value *, size_t> m_barrier_init_sites;
+  std::unordered_set<const llvm::Value *> m_uncertain_barrier_counts;
 
   // Per-thread set of functions already processed to avoid reprocessing
   std::unordered_map<

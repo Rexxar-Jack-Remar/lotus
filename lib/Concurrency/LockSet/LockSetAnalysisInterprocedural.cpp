@@ -1,6 +1,5 @@
-#include "Concurrency/LockSet/LockSetAnalysis.h"
-
 #include "Alias/Infrastructure/AliasAnalysisWrapper/AliasAnalysisWrapper.h"
+#include "Concurrency/LockSet/LockSetAnalysis.h"
 #include "Concurrency/LockSet/LockSetAnalysisSupport.h"
 
 #include <queue>
@@ -30,11 +29,6 @@ void LockSetAnalysis::computeInterproceduralLockSets() {
       analyzeFunction(&func);
     }
   }
-
-  for (auto &entry : m_function_summaries) {
-    entry.second.is_analyzed = false;
-  }
-  bottomUpTraversal();
 
   errs() << "Interprocedural lock set analysis complete.\n";
 }
@@ -154,10 +148,6 @@ void LockSetAnalysis::computeFunctionSummary(Function *func) {
   }
 
   auto &summary = m_function_summaries[func];
-  if (summary.is_analyzed) {
-    return;
-  }
-
   errs() << "Computing summary for function: " << func->getName() << "\n";
 
   computeIntraproceduralLockSets(func);
@@ -170,6 +160,15 @@ void LockSetAnalysis::computeFunctionSummary(Function *func) {
   summary.must_write_acquire_delta.clear();
   summary.may_release_delta.clear();
   summary.must_release_delta.clear();
+  summary.exceptional_may_acquire_delta.clear();
+  summary.exceptional_may_read_acquire_delta.clear();
+  summary.exceptional_may_write_acquire_delta.clear();
+  summary.exceptional_must_acquire_delta.clear();
+  summary.exceptional_must_read_acquire_delta.clear();
+  summary.exceptional_must_write_acquire_delta.clear();
+  summary.exceptional_may_release_delta.clear();
+  summary.exceptional_must_release_delta.clear();
+  summary.has_exceptional_exit = false;
 
   auto matchesLock = [this](LockID lhs, LockID rhs) {
     const LockID clhs = getCanonicalLock(lhs);
@@ -219,16 +218,25 @@ void LockSetAnalysis::computeFunctionSummary(Function *func) {
   };
 
   std::vector<const ReturnInst *> returns;
+  std::vector<const Instruction *> exceptional_exits;
   for (const BasicBlock &bb : *func) {
     if (const ReturnInst *ret = dyn_cast<ReturnInst>(bb.getTerminator())) {
       returns.push_back(ret);
+    } else if (const auto *resume = dyn_cast<ResumeInst>(bb.getTerminator())) {
+      exceptional_exits.push_back(resume);
+    } else if (const auto *cleanup =
+                   dyn_cast<CleanupReturnInst>(bb.getTerminator())) {
+      if (cleanup->unwindsToCaller()) {
+        exceptional_exits.push_back(cleanup);
+      }
     }
   }
+  summary.has_exceptional_exit = !exceptional_exits.empty();
 
-  auto returnMayObserveUnmatchedRelease =
-      [&](const ReturnInst *ret,
+  auto exitMayObserveUnmatchedRelease =
+      [&](const Instruction *exit,
           const std::vector<const Instruction *> &release_sites) {
-        if (!ret) {
+        if (!exit) {
           return false;
         }
         auto blockCanReach = [](const BasicBlock *from, const BasicBlock *to) {
@@ -261,36 +269,36 @@ void LockSetAnalysis::computeFunctionSummary(Function *func) {
           if (!release_inst || release_inst->getFunction() != func) {
             continue;
           }
-          if (release_inst->getParent() == ret->getParent()) {
-            if (release_inst->comesBefore(ret)) {
+          if (release_inst->getParent() == exit->getParent()) {
+            if (release_inst->comesBefore(exit)) {
               return true;
             }
             continue;
           }
-          if (blockCanReach(release_inst->getParent(), ret->getParent())) {
+          if (blockCanReach(release_inst->getParent(), exit->getParent())) {
             return true;
           }
         }
         return false;
       };
 
-  auto returnMustObserveUnmatchedRelease =
-      [&](const ReturnInst *ret,
+  auto exitMustObserveUnmatchedRelease =
+      [&](const Instruction *exit,
           const std::vector<const Instruction *> &release_sites) {
-        if (!ret) {
+        if (!exit) {
           return false;
         }
         for (const Instruction *release_inst : release_sites) {
           if (!release_inst || release_inst->getFunction() != func) {
             continue;
           }
-          if (release_inst->getParent() == ret->getParent()) {
-            if (release_inst->comesBefore(ret)) {
+          if (release_inst->getParent() == exit->getParent()) {
+            if (release_inst->comesBefore(exit)) {
               return true;
             }
             continue;
           }
-          if (dom.dominates(release_inst->getParent(), ret->getParent())) {
+          if (dom.dominates(release_inst->getParent(), exit->getParent())) {
             return true;
           }
         }
@@ -374,6 +382,80 @@ void LockSetAnalysis::computeFunctionSummary(Function *func) {
                                       summary.must_write_acquire_delta.end());
   }
 
+  if (!exceptional_exits.empty()) {
+    bool seeded_must_read = false;
+    bool seeded_must_write = false;
+    LockSet must_read_intersection;
+    LockSet must_write_intersection;
+    for (const Instruction *exit : exceptional_exits) {
+      auto it_read = m_may_read_locks_exit.find(exit);
+      if (it_read != m_may_read_locks_exit.end()) {
+        for (LockID lock : it_read->second) {
+          if (!isBinarySemaphoreOnlyLockInFunction(lock)) {
+            summary.exceptional_may_read_acquire_delta.insert(lock);
+          }
+        }
+      }
+      auto it_write = m_may_write_locks_exit.find(exit);
+      if (it_write != m_may_write_locks_exit.end()) {
+        for (LockID lock : it_write->second) {
+          if (!isBinarySemaphoreOnlyLockInFunction(lock)) {
+            summary.exceptional_may_write_acquire_delta.insert(lock);
+          }
+        }
+      }
+
+      auto it_must_read = m_must_read_locks_exit.find(exit);
+      if (it_must_read != m_must_read_locks_exit.end()) {
+        must_read_intersection = seeded_must_read
+                                     ? intersectMustSets(must_read_intersection,
+                                                         it_must_read->second)
+                                     : it_must_read->second;
+        seeded_must_read = true;
+      } else {
+        must_read_intersection.clear();
+        seeded_must_read = true;
+      }
+
+      auto it_must_write = m_must_write_locks_exit.find(exit);
+      if (it_must_write != m_must_write_locks_exit.end()) {
+        must_write_intersection =
+            seeded_must_write ? intersectMustSets(must_write_intersection,
+                                                  it_must_write->second)
+                              : it_must_write->second;
+        seeded_must_write = true;
+      } else {
+        must_write_intersection.clear();
+        seeded_must_write = true;
+      }
+    }
+
+    summary.exceptional_may_acquire_delta =
+        summary.exceptional_may_read_acquire_delta;
+    summary.exceptional_may_acquire_delta.insert(
+        summary.exceptional_may_write_acquire_delta.begin(),
+        summary.exceptional_may_write_acquire_delta.end());
+    if (seeded_must_read) {
+      for (LockID lock : must_read_intersection) {
+        if (!isBinarySemaphoreOnlyLockInFunction(lock)) {
+          summary.exceptional_must_read_acquire_delta.insert(lock);
+        }
+      }
+    }
+    if (seeded_must_write) {
+      for (LockID lock : must_write_intersection) {
+        if (!isBinarySemaphoreOnlyLockInFunction(lock)) {
+          summary.exceptional_must_write_acquire_delta.insert(lock);
+        }
+      }
+    }
+    summary.exceptional_must_acquire_delta =
+        summary.exceptional_must_read_acquire_delta;
+    summary.exceptional_must_acquire_delta.insert(
+        summary.exceptional_must_write_acquire_delta.begin(),
+        summary.exceptional_must_write_acquire_delta.end());
+  }
+
   std::unordered_map<LockID, std::vector<const Instruction *>>
       maybe_unmatched_releases;
   std::unordered_map<LockID, std::vector<const Instruction *>>
@@ -410,7 +492,7 @@ void LockSetAnalysis::computeFunctionSummary(Function *func) {
   for (const auto &entry : maybe_unmatched_releases) {
     bool reaches_any_return = false;
     for (const ReturnInst *ret : returns) {
-      reaches_any_return |= returnMayObserveUnmatchedRelease(ret, entry.second);
+      reaches_any_return |= exitMayObserveUnmatchedRelease(ret, entry.second);
     }
     if (reaches_any_return) {
       summary.may_release_delta.insert(entry.first);
@@ -420,11 +502,29 @@ void LockSetAnalysis::computeFunctionSummary(Function *func) {
   for (const auto &entry : must_unmatched_releases) {
     bool covers_all_returns = !returns.empty();
     for (const ReturnInst *ret : returns) {
-      covers_all_returns &=
-          returnMustObserveUnmatchedRelease(ret, entry.second);
+      covers_all_returns &= exitMustObserveUnmatchedRelease(ret, entry.second);
     }
     if (covers_all_returns) {
       summary.must_release_delta.insert(entry.first);
+    }
+  }
+
+  for (const auto &entry : maybe_unmatched_releases) {
+    bool reaches_any_exit = false;
+    for (const Instruction *exit : exceptional_exits) {
+      reaches_any_exit |= exitMayObserveUnmatchedRelease(exit, entry.second);
+    }
+    if (reaches_any_exit) {
+      summary.exceptional_may_release_delta.insert(entry.first);
+    }
+  }
+  for (const auto &entry : must_unmatched_releases) {
+    bool covers_all_exits = !exceptional_exits.empty();
+    for (const Instruction *exit : exceptional_exits) {
+      covers_all_exits &= exitMustObserveUnmatchedRelease(exit, entry.second);
+    }
+    if (covers_all_exits) {
+      summary.exceptional_must_release_delta.insert(entry.first);
     }
   }
 
@@ -435,6 +535,12 @@ void LockSetAnalysis::computeFunctionSummary(Function *func) {
     summary.must_acquire_delta.erase(lock);
     summary.must_read_acquire_delta.erase(lock);
     summary.must_write_acquire_delta.erase(lock);
+    summary.exceptional_may_acquire_delta.erase(lock);
+    summary.exceptional_may_read_acquire_delta.erase(lock);
+    summary.exceptional_may_write_acquire_delta.erase(lock);
+    summary.exceptional_must_acquire_delta.erase(lock);
+    summary.exceptional_must_read_acquire_delta.erase(lock);
+    summary.exceptional_must_write_acquire_delta.erase(lock);
   }
 
   summary.is_analyzed = true;
@@ -447,6 +553,63 @@ void LockSetAnalysis::computeFunctionSummary(Function *func) {
          << " locks\n";
   errs() << "  Must release delta: " << summary.must_release_delta.size()
          << " locks\n";
+}
+
+bool LockSetAnalysis::applyExceptionalFunctionSummary(
+    const CallBase *call, const Function *callee, LockSet &may_locks,
+    LockSet &must_locks) const {
+  if (!call || !callee) {
+    return false;
+  }
+  auto it = m_function_summaries.find(callee);
+  if (it == m_function_summaries.end() || !it->second.is_analyzed ||
+      !it->second.has_exceptional_exit) {
+    return false;
+  }
+
+  const FunctionSummary &summary = it->second;
+  for (LockID lock : summary.exceptional_may_acquire_delta) {
+    if (LockID instantiated = instantiateSummaryLock(call, callee, lock)) {
+      may_locks.insert(instantiated);
+    }
+  }
+  for (LockID lock : summary.exceptional_must_acquire_delta) {
+    if (LockID instantiated = instantiateSummaryLock(call, callee, lock)) {
+      must_locks.insert(instantiated);
+    }
+  }
+  for (LockID summary_lock : summary.exceptional_may_release_delta) {
+    LockID lock = instantiateSummaryLock(call, callee, summary_lock);
+    if (!lock) {
+      continue;
+    }
+    LockSet to_remove;
+    for (LockID held : must_locks) {
+      if (mayAlias(held, lock)) {
+        to_remove.insert(held);
+      }
+    }
+    for (LockID held : to_remove) {
+      must_locks.erase(held);
+    }
+  }
+  for (LockID summary_lock : summary.exceptional_must_release_delta) {
+    LockID lock = instantiateSummaryLock(call, callee, summary_lock);
+    if (!lock) {
+      continue;
+    }
+    may_locks.erase(lock);
+    LockSet to_remove;
+    for (LockID held : must_locks) {
+      if (mayAlias(held, lock)) {
+        to_remove.insert(held);
+      }
+    }
+    for (LockID held : to_remove) {
+      must_locks.erase(held);
+    }
+  }
+  return true;
 }
 
 void LockSetAnalysis::applyFunctionSummary(const CallBase *call,
@@ -464,41 +627,103 @@ void LockSetAnalysis::applyFunctionSummary(const CallBase *call,
 
   const FunctionSummary &summary = it->second;
 
-  may_locks.insert(summary.may_acquire_delta.begin(),
-                   summary.may_acquire_delta.end());
-  must_locks.insert(summary.must_acquire_delta.begin(),
-                    summary.must_acquire_delta.end());
-
-  for (LockID lock : summary.may_release_delta) {
-    must_locks.erase(lock);
-    if (m_alias_analysis) {
-      LockSet to_remove;
-      for (const auto *l : must_locks) {
-        if (mayAlias(l, lock)) {
-          to_remove.insert(l);
-        }
-      }
-      for (const auto *l : to_remove) {
-        must_locks.erase(l);
-      }
+  for (LockID lock : summary.may_acquire_delta) {
+    if (LockID instantiated = instantiateSummaryLock(call, callee, lock)) {
+      may_locks.insert(instantiated);
+    }
+  }
+  for (LockID lock : summary.must_acquire_delta) {
+    if (LockID instantiated = instantiateSummaryLock(call, callee, lock)) {
+      must_locks.insert(instantiated);
     }
   }
 
-  for (LockID lock : summary.must_release_delta) {
+  for (LockID summary_lock : summary.may_release_delta) {
+    LockID lock = instantiateSummaryLock(call, callee, summary_lock);
+    if (!lock) {
+      continue;
+    }
+    must_locks.erase(lock);
+    LockSet to_remove;
+    for (const auto *l : must_locks) {
+      if (mayAlias(l, lock)) {
+        to_remove.insert(l);
+      }
+    }
+    for (const auto *l : to_remove) {
+      must_locks.erase(l);
+    }
+  }
+
+  for (LockID summary_lock : summary.must_release_delta) {
+    LockID lock = instantiateSummaryLock(call, callee, summary_lock);
+    if (!lock) {
+      continue;
+    }
     may_locks.erase(lock);
     must_locks.erase(lock);
-    if (m_alias_analysis) {
-      LockSet to_remove;
-      for (const auto *l : must_locks) {
-        if (mayAlias(l, lock)) {
-          to_remove.insert(l);
-        }
+    LockSet to_remove;
+    for (const auto *l : must_locks) {
+      if (mayAlias(l, lock)) {
+        to_remove.insert(l);
       }
-      for (const auto *l : to_remove) {
-        must_locks.erase(l);
+    }
+    for (const auto *l : to_remove) {
+      must_locks.erase(l);
+    }
+  }
+}
+
+LockID LockSetAnalysis::instantiateSummaryLock(const CallBase *call,
+                                               const Function *callee,
+                                               LockID lock) const {
+  if (!call || !callee || !lock) {
+    return nullptr;
+  }
+
+  lock = lock->stripPointerCasts();
+  if (const auto *argument = dyn_cast<Argument>(lock)) {
+    if (argument->getParent() == callee &&
+        argument->getArgNo() < call->arg_size()) {
+      return getCanonicalLock(call->getArgOperand(argument->getArgNo()));
+    }
+  }
+
+  if (const auto *gep = dyn_cast<GetElementPtrInst>(lock)) {
+    const Value *base = gep->getPointerOperand()->stripPointerCasts();
+    if (const auto *argument = dyn_cast<Argument>(base)) {
+      if (argument->getParent() == callee &&
+          argument->getArgNo() < call->arg_size()) {
+        const Value *actual =
+            call->getArgOperand(argument->getArgNo())->stripPointerCasts();
+        if (const auto *actual_gep = dyn_cast<GetElementPtrInst>(actual)) {
+          return getCanonicalLock(actual_gep);
+        }
+        if (const auto *constant_actual = dyn_cast<Constant>(actual)) {
+          SmallVector<Constant *, 4> indices;
+          bool constant_indices = true;
+          for (const Value *index : gep->indices()) {
+            const auto *constant_index = dyn_cast<Constant>(index);
+            if (!constant_index) {
+              constant_indices = false;
+              break;
+            }
+            indices.push_back(const_cast<Constant *>(constant_index));
+          }
+          if (constant_indices) {
+            Constant *projected = ConstantExpr::getGetElementPtr(
+                gep->getSourceElementType(),
+                const_cast<Constant *>(constant_actual), indices,
+                gep->isInBounds());
+            return getCanonicalLock(projected);
+          }
+        }
+        return getCanonicalLock(actual);
       }
     }
   }
+
+  return getCanonicalLock(lock);
 }
 
 void LockSetAnalysis::bottomUpTraversal() {
@@ -550,9 +775,48 @@ void LockSetAnalysis::bottomUpTraversal() {
   errs() << "Processing " << post_order.size()
          << " functions in bottom-up order\n";
 
-  for (Function *func : post_order) {
-    computeFunctionSummary(func);
-  }
+  auto summariesEqual = [](const FunctionSummary &lhs,
+                           const FunctionSummary &rhs) {
+    return lhs.is_analyzed == rhs.is_analyzed &&
+           lhs.may_acquire_delta == rhs.may_acquire_delta &&
+           lhs.may_read_acquire_delta == rhs.may_read_acquire_delta &&
+           lhs.may_write_acquire_delta == rhs.may_write_acquire_delta &&
+           lhs.must_acquire_delta == rhs.must_acquire_delta &&
+           lhs.must_read_acquire_delta == rhs.must_read_acquire_delta &&
+           lhs.must_write_acquire_delta == rhs.must_write_acquire_delta &&
+           lhs.may_release_delta == rhs.may_release_delta &&
+           lhs.must_release_delta == rhs.must_release_delta &&
+           lhs.exceptional_may_acquire_delta ==
+               rhs.exceptional_may_acquire_delta &&
+           lhs.exceptional_may_read_acquire_delta ==
+               rhs.exceptional_may_read_acquire_delta &&
+           lhs.exceptional_may_write_acquire_delta ==
+               rhs.exceptional_may_write_acquire_delta &&
+           lhs.exceptional_must_acquire_delta ==
+               rhs.exceptional_must_acquire_delta &&
+           lhs.exceptional_must_read_acquire_delta ==
+               rhs.exceptional_must_read_acquire_delta &&
+           lhs.exceptional_must_write_acquire_delta ==
+               rhs.exceptional_must_write_acquire_delta &&
+           lhs.exceptional_may_release_delta ==
+               rhs.exceptional_may_release_delta &&
+           lhs.exceptional_must_release_delta ==
+               rhs.exceptional_must_release_delta &&
+           lhs.has_exceptional_exit == rhs.has_exceptional_exit;
+  };
 
-  errs() << "Bottom-up traversal complete\n";
+  bool changed = false;
+  size_t iteration = 0;
+  do {
+    changed = false;
+    ++iteration;
+    for (Function *func : post_order) {
+      const FunctionSummary previous = m_function_summaries[func];
+      computeFunctionSummary(func);
+      changed |= !summariesEqual(previous, m_function_summaries[func]);
+    }
+  } while (changed);
+
+  errs() << "Bottom-up traversal reached summary fixpoint in " << iteration
+         << " iterations\n";
 }

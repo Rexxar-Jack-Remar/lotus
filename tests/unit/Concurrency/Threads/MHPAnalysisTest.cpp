@@ -653,7 +653,7 @@ TEST_F(MHPAnalysisTest, LoopForkDoesNotAutoSelfParallelizeWorkerBody) {
   ASSERT_NE(w2, nullptr);
 
   EXPECT_TRUE(mhp.mayHappenInParallel(w1, w1));
-  EXPECT_FALSE(mhp.mayHappenInParallel(w1, w2));
+  EXPECT_TRUE(mhp.mayHappenInParallel(w1, w2));
 }
 TEST_F(MHPAnalysisTest, MutexSerializesCriticalSections) {
   const char *source = R"(

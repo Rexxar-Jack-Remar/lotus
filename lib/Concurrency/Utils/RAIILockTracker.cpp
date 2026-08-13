@@ -13,9 +13,11 @@
 
 #include <algorithm>
 #include <deque>
+#include <iterator>
 #include <unordered_set>
 
 #include <llvm/Analysis/ValueTracking.h>
+#include <llvm/IR/CFG.h>
 #include <llvm/IR/InstIterator.h>
 #include <llvm/IR/Instructions.h>
 #include <llvm/IR/IntrinsicInst.h>
@@ -23,59 +25,6 @@
 namespace RAIILock {
 
 namespace {
-
-bool comesBeforeInFunction(const llvm::Instruction *lhs,
-                           const llvm::Instruction *rhs,
-                           const llvm::Function *F) {
-  if (!lhs || !rhs || !F || lhs == rhs) {
-    return false;
-  }
-
-  for (llvm::const_inst_iterator I = llvm::inst_begin(F), E = llvm::inst_end(F);
-       I != E; ++I) {
-    if (&*I == lhs) {
-      return true;
-    }
-    if (&*I == rhs) {
-      return false;
-    }
-  }
-
-  return false;
-}
-
-const llvm::CallBase *
-findNextConstructorForLockObject(const llvm::Value *lockObject,
-                                 const llvm::CallBase *ctor,
-                                 const llvm::Function *F) {
-  if (!lockObject || !ctor || !F) {
-    return nullptr;
-  }
-
-  bool seen_ctor = false;
-  for (llvm::const_inst_iterator I = llvm::inst_begin(F), E = llvm::inst_end(F);
-       I != E; ++I) {
-    const auto *inst = &*I;
-    if (inst == ctor) {
-      seen_ctor = true;
-      continue;
-    }
-    if (!seen_ctor || !RAIILockTracker::isRAIILockConstructor(inst)) {
-      continue;
-    }
-
-    const auto *next_ctor = llvm::dyn_cast<llvm::CallBase>(inst);
-    if (!next_ctor) {
-      continue;
-    }
-
-    if (RAIILockTracker::findLockObjectForConstructor(next_ctor) == lockObject) {
-      return next_ctor;
-    }
-  }
-
-  return nullptr;
-}
 
 const llvm::Instruction *
 findImpreciseLifetimeBoundary(const llvm::Value *lockObject,
@@ -222,6 +171,60 @@ RAIILockTracker::findLockObjectForConstructor(const llvm::CallBase *ctor) {
   return thisPtr;
 }
 
+bool RAIILockTracker::constructorCanReachWithoutReconstruction(
+    const llvm::CallBase *ctor, const llvm::Instruction *target,
+    const llvm::Value *lockObject) {
+  if (!ctor || !target || !lockObject ||
+      ctor->getFunction() != target->getFunction()) {
+    return false;
+  }
+
+  struct WorkItem {
+    const llvm::BasicBlock *block;
+    bool initial_visit;
+  };
+  std::deque<WorkItem> worklist;
+  std::unordered_set<const llvm::BasicBlock *> visited_from_entry;
+  worklist.push_back({ctor->getParent(), true});
+
+  while (!worklist.empty()) {
+    WorkItem item = worklist.front();
+    worklist.pop_front();
+
+    auto it = item.block->begin();
+    if (item.initial_visit) {
+      it = std::next(ctor->getIterator());
+    }
+
+    bool reconstructed = false;
+    for (; it != item.block->end(); ++it) {
+      const llvm::Instruction *inst = &*it;
+      if (inst == target) {
+        return true;
+      }
+      if (!isRAIILockConstructor(inst)) {
+        continue;
+      }
+      const auto *other_ctor = llvm::dyn_cast<llvm::CallBase>(inst);
+      if (other_ctor && other_ctor != ctor &&
+          findLockObjectForConstructor(other_ctor) == lockObject) {
+        reconstructed = true;
+        break;
+      }
+    }
+    if (reconstructed) {
+      continue;
+    }
+
+    for (const llvm::BasicBlock *succ : llvm::successors(item.block)) {
+      if (visited_from_entry.insert(succ).second) {
+        worklist.push_back({succ, false});
+      }
+    }
+  }
+  return false;
+}
+
 std::vector<const llvm::Value *>
 RAIILockTracker::extractUnderlyingLocks(const llvm::CallBase *ctor) {
   std::vector<const llvm::Value *> locks;
@@ -347,16 +350,12 @@ void RAIILockTracker::processConstructor(const llvm::CallBase *ctor,
   lifetime.sharedModes.assign(lifetime.underlyingLocks.size(),
                               isSharedLock(ctor));
 
-  const llvm::CallBase *next_ctor =
-      findNextConstructorForLockObject(lockObj, ctor, F);
-
   // Keep only destructor/lifetime-end sites that belong to this constructor
   // instance. Reused wrapper storage can carry multiple disjoint lifetimes.
-  for (const llvm::Instruction *inst : findDestructorsForLockObject(lockObj, F)) {
-    if (!inst || !comesBeforeInFunction(ctor, inst, F)) {
-      continue;
-    }
-    if (next_ctor && !comesBeforeInFunction(inst, next_ctor, F)) {
+  for (const llvm::Instruction *inst :
+       findDestructorsForLockObject(lockObj, F)) {
+    if (!inst ||
+        !constructorCanReachWithoutReconstruction(ctor, inst, lockObj)) {
       continue;
     }
     lifetime.destructors.push_back(inst);
@@ -365,7 +364,7 @@ void RAIILockTracker::processConstructor(const llvm::CallBase *ctor,
   if (!lifetime.hasPreciseLifetimeEnd) {
     if (ctor->getParent() != &F->getEntryBlock()) {
       lifetime.impreciseLifetimeBoundary =
-          findImpreciseLifetimeBoundary(lockObj, F, next_ctor);
+          findImpreciseLifetimeBoundary(lockObj, F, nullptr);
     }
   }
 

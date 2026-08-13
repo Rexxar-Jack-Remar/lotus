@@ -68,7 +68,10 @@ enum class EdgeKind {
   Create,  ///< Fork -> thread entry
   Join,    ///< Thread exit -> join site
   Signal,  ///< signal(c) -> wait(c)
-  Barrier  ///< Barrier synchronization between threads
+  Barrier, ///< Barrier synchronization between threads
+  TaskDepend,     ///< OpenMP task-dependence ordering
+  TaskWait,       ///< OpenMP taskwait/taskgroup ordering
+  TaskCompletion ///< OpenMP task-completion ordering
 };
 
 /**

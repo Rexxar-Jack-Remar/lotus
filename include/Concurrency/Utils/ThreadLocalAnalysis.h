@@ -2,8 +2,8 @@
  * @file ThreadLocalAnalysis.h
  * @brief Thread-Local Storage (TLS) Detection
  *
- * This file provides utilities for detecting thread-local variables and allocations
- * that cannot participate in data races by definition.
+ * This file provides utilities for detecting thread-local variables and
+ * allocations that cannot participate in data races by definition.
  *
  * @author Lotus Analysis Framework
  * @date 2026
@@ -34,78 +34,89 @@ namespace ThreadLocal {
 class ThreadLocalAnalysis {
 public:
   explicit ThreadLocalAnalysis(llvm::Module &module);
-  
+
   /**
    * @brief Run the analysis to identify all thread-local storage
+   *
+   * The module must not be mutated between this call and subsequent queries.
+   * Call analyze() again after an IR mutation.
    */
   void analyze();
-  
+
+  /**
+   * @brief Discard all cached analysis results
+   */
+  void invalidate();
+
   /**
    * @brief Check if a value is thread-local
    * @param val The value to check
    * @return true if the value is definitely thread-local
    */
   bool isThreadLocal(const llvm::Value *val) const;
-  
+
   /**
    * @brief Check if an instruction accesses thread-local storage
    * @param inst The instruction to check
    * @return true if the instruction accesses only thread-local storage
    */
   bool accessesThreadLocalStorage(const llvm::Instruction *inst) const;
-  
+
   /**
    * @brief Get all thread-local global variables
    * @return Set of thread-local globals
    */
-  const std::unordered_set<const llvm::GlobalVariable *> &getThreadLocalGlobals() const {
+  const std::unordered_set<const llvm::GlobalVariable *> &
+  getThreadLocalGlobals() const {
     return m_tls_globals;
   }
-  
+
   /**
    * @brief Get all thread-local allocations
    * @return Set of thread-local alloca instructions
    */
-  const std::unordered_set<const llvm::AllocaInst *> &getThreadLocalAllocas() const {
+  const std::unordered_set<const llvm::AllocaInst *> &
+  getThreadLocalAllocas() const {
     return m_tls_allocas;
   }
 
 private:
   llvm::Module &m_module;
-  
+
   // Identified thread-local storage
   std::unordered_set<const llvm::GlobalVariable *> m_tls_globals;
   std::unordered_set<const llvm::AllocaInst *> m_tls_allocas;
   std::unordered_set<const llvm::Value *> m_tls_values;
-  
+
   // pthread_key_t thread-specific data keys
   std::unordered_set<const llvm::Value *> m_pthread_keys;
-  
+  bool m_analyzed = false;
+
   /**
    * @brief Identify thread-local global variables
    */
   void identifyThreadLocalGlobals();
-  
+
   /**
    * @brief Identify thread-local stack allocations
    */
   void identifyThreadLocalAllocas();
-  
+
   /**
    * @brief Identify pthread thread-specific data
    */
   void identifyPthreadSpecificData();
-  
+
   /**
    * @brief Check if a global variable has TLS linkage
    */
   static bool hasThreadLocalStorageLinkage(const llvm::GlobalVariable *gv);
-  
+
   /**
    * @brief Check if an alloca is thread-local (doesn't escape)
    */
   bool isAllocaThreadLocal(const llvm::AllocaInst *alloca) const;
-  
+
   /**
    * @brief Check if a value escapes its thread
    */
@@ -115,7 +126,11 @@ private:
 /**
  * @brief Check if a value is thread-local without full analysis
  * @param val The value to check
- * @return true if the value is definitely thread-local (fast check)
+ * @return true only when locality can be established without module context
+ *
+ * @note An alloca or TLS global is not sufficient by itself: either address
+ * may have escaped to another thread. Use ThreadLocalAnalysis for useful
+ * positive answers.
  */
 bool isObviouslyThreadLocal(const llvm::Value *val);
 
