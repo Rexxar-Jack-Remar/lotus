@@ -179,9 +179,7 @@ public:
                        const llvm::CallInst *CI, const llvm::BasicBlock *pred,
                        const PulseSummary *summary_override = nullptr);
 
-  /**
-   * Handle comparison instructions (ICmp, FCmp) to update path conditions
-   */
+  /** Handle comparison instructions without assuming their Boolean result. */
   ExecutionDomain handleComparison(const llvm::Instruction *I,
                                    ExecutionDomain exec_state,
                                    const llvm::BasicBlock *pred);

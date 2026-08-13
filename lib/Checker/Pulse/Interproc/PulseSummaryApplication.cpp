@@ -226,6 +226,14 @@ applyPostCondition(const AbductiveDomain *callee_post,
       // Add or update edge
       caller_astate.getPostHeap().addEdge(caller_from, access,
                                           caller_target_addr);
+
+      // A post edge absent from the abducted pre-heap is a write effect, not a
+      // read-only materialized edge. Applying that write initializes the
+      // caller's memory location.
+      if (pre_edges.count({formal_from_canon, access}) == 0) {
+        caller_astate.getPostAttrs().remove(caller_from,
+                                            Attribute::Uninitialized);
+      }
     }
   }
 
@@ -300,6 +308,17 @@ applyPostCondition(const AbductiveDomain *callee_post,
     }
     AbstractValue caller_av = caller_astate.getCanonical(*caller_av_opt);
     caller_astate.setAllocationSize(caller_av, kv.second);
+  }
+
+  for (const auto &kv : callee_post->getAllocationRoots()) {
+    AbstractValue formal_addr = callee_post->getCanonical(kv.first);
+    AbstractValue formal_root = callee_post->getCanonical(kv.second);
+    auto caller_addr = substitution.substitute(formal_addr);
+    auto caller_root = substitution.substitute(formal_root);
+    if (caller_addr && caller_root) {
+      caller_astate.setAllocationRoot(caller_astate.getCanonical(*caller_addr),
+                                      caller_astate.getCanonical(*caller_root));
+    }
   }
 }
 
@@ -471,7 +490,9 @@ std::vector<ExecutionDomain> PulseChecker::applySummaryImproved(
       }
 
       if (pre->getPreAttrs().has(kv.first, Attribute::Allocated)) {
-        if (new_astate->getPostAttrs().has(actual_av, Attribute::Invalid)) {
+        if (new_astate->getPostAttrs().has(actual_av, Attribute::Invalid) ||
+            new_astate->getPostAttrs().has(actual_av, Attribute::Null) ||
+            caller_formula.isNull(actual_av)) {
           entry_failed = true;
           break;
         }

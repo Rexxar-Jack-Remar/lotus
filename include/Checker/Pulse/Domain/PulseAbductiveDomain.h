@@ -68,6 +68,9 @@ private:
   // Allocation sizes (in bytes) for base addresses when known.
   std::map<AbstractValue, uint64_t> allocation_sizes_;
 
+  // Stable allocation identity for base and derived pointer values.
+  std::map<AbstractValue, AbstractValue> allocation_roots_;
+
   // Skipped calls (for unknown functions)
   std::set<std::string> skipped_calls_;
 
@@ -167,6 +170,22 @@ public:
   }
   std::map<AbstractValue, uint64_t> &getAllocationSizes() {
     return allocation_sizes_;
+  }
+
+  void setAllocationRoot(AbstractValue addr, AbstractValue root) {
+    allocation_roots_[addr] = root;
+  }
+  AbstractValue getAllocationRoot(AbstractValue addr) const {
+    AbstractValue canon_addr = getCanonical(addr);
+    auto it = allocation_roots_.find(canon_addr);
+    return it == allocation_roots_.end() ? canon_addr
+                                         : getCanonical(it->second);
+  }
+  const std::map<AbstractValue, AbstractValue> &getAllocationRoots() const {
+    return allocation_roots_;
+  }
+  std::map<AbstractValue, AbstractValue> &getAllocationRoots() {
+    return allocation_roots_;
   }
 
   // Skipped calls

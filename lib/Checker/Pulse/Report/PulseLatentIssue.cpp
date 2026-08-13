@@ -44,9 +44,8 @@ bool LatentIssue::isManifest(const AbductiveDomain &astate) {
 bool LatentIssue::isManifest(OperationResult diagnostic,
                              const AbductiveDomain &astate,
                              AbstractValue address) {
-  // Null dereferences are only reported when we can trace the nullness to a
-  // null pointer constant (see PulseOperations::isNullConstantSource), so they
-  // are manifest by construction.
+  // Null dereferences are reported only from a concrete null attribute or a
+  // path-formula null assumption, so they are witnessable by construction.
   if (diagnostic == OperationResult::NullDereference) {
     return true;
   }

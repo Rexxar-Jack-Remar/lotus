@@ -179,6 +179,7 @@ AbductiveDomain AbductiveDomain::clone() const {
 
   cloned.invalidation_info_ = invalidation_info_;
   cloned.allocation_sizes_ = allocation_sizes_;
+  cloned.allocation_roots_ = allocation_roots_;
   cloned.taint_domain_.join(taint_domain_);
 
   // Clone new fields
@@ -326,6 +327,15 @@ void AbductiveDomain::canonicalize() {
     allocation_sizes_ = std::move(new_sizes);
   }
 
+  // Allocation roots
+  {
+    std::map<AbstractValue, AbstractValue> new_roots;
+    for (const auto &kv : allocation_roots_) {
+      new_roots[getCanonical(kv.first)] = getCanonical(kv.second);
+    }
+    allocation_roots_ = std::move(new_roots);
+  }
+
   // Dynamic type specialization set
   {
     std::set<AbstractValue> canon_set;
@@ -447,6 +457,11 @@ AbductiveDomain::merge(const AbductiveDomain &d1, const AbductiveDomain &d2) {
     } else {
       it->second = std::min(it->second, kv.second);
     }
+  }
+
+  merged.allocation_roots_ = d1.allocation_roots_;
+  for (const auto &kv : d2.allocation_roots_) {
+    merged.allocation_roots_.emplace(kv.first, kv.second);
   }
 
   // Merge skipped calls (union)

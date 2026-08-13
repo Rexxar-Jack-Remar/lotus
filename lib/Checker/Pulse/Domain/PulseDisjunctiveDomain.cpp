@@ -48,22 +48,27 @@ static void reduceDisjuncts(std::vector<DisjunctiveDomain::Disjunct> &disjuncts,
   std::set<const llvm::BasicBlock *> seen_ctx;
 
   auto pick = [&](std::vector<DisjunctiveDomain::Disjunct> &pool) {
-    for (auto &d : pool) {
+    std::vector<bool> chosen(pool.size(), false);
+    for (size_t i = 0; i < pool.size(); ++i) {
       if (selected.size() >= max) {
         break;
       }
+      auto &d = pool[i];
       if (!d.path_context) {
         continue;
       }
       if (seen_ctx.insert(d.path_context).second) {
         selected.push_back(std::move(d));
+        chosen[i] = true;
       }
     }
-    for (auto &d : pool) {
+    for (size_t i = 0; i < pool.size(); ++i) {
       if (selected.size() >= max) {
         break;
       }
-      selected.push_back(std::move(d));
+      if (!chosen[i]) {
+        selected.push_back(std::move(pool[i]));
+      }
     }
   };
 

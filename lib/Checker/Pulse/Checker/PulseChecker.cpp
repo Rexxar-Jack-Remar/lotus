@@ -476,11 +476,9 @@ void PulseChecker::analyzeFunction(const llvm::Function *F) {
       // After widening, join all disjuncts at this block
       ExecutionDomain joined = disj_domain.joinAtBlock(BB);
       if (!joined.isStopped()) {
-        // Preserve the original predecessor context for PHI handling.
-        // The joined state may have a stale entry pred from a previous
-        // iteration. We must keep the current edge's pred_bb to ensure sound
-        // PHI evaluation.
-        joined.setEntryPred(pred_bb);
+        // The representative and its predecessor form one witness. Never
+        // relabel a representative with the predecessor of another work item.
+        pred_bb = joined.getEntryPred();
         current_state = std::move(joined);
       } else {
         continue;
@@ -575,8 +573,7 @@ void PulseChecker::analyzeFunction(const llvm::Function *F) {
     if (!term)
       continue;
 
-    auto *BI =
-        llvm::dyn_cast<llvm::BranchInst>(const_cast<llvm::Instruction *>(term));
+    auto *BI = llvm::dyn_cast<llvm::BranchInst>(term);
     if (BI && BI->isConditional() && BI->getNumSuccessors() == 2) {
       for (auto &st : states) {
         if (st.isStopped())
@@ -591,6 +588,67 @@ void PulseChecker::analyzeFunction(const llvm::Function *F) {
             continue;
           fork_opt->setEntryPred(BB);
           worklist.push(std::make_tuple(succ, std::move(*fork_opt), BB));
+        }
+      }
+    } else if (auto *SI = llvm::dyn_cast<llvm::SwitchInst>(term)) {
+      for (auto &st : states) {
+        if (st.isStopped())
+          continue;
+
+        // A switch case is an equality-constrained witness. Keep separate
+        // states when several case values target the same successor instead
+        // of merging them into a non-witness disjunction.
+        for (const auto &case_handle : SI->cases()) {
+          ExecutionDomain case_state = st.clone();
+          AbductiveDomain *case_astate = case_state.getAstate();
+          if (!case_astate)
+            continue;
+
+          auto cond = ops_.eval(*case_astate, SI->getCondition(), SI, pred_bb);
+          auto case_value =
+              ops_.eval(*case_astate, case_handle.getCaseValue(), SI, pred_bb);
+          if (!cond || !case_value)
+            continue;
+          if (!case_astate->getPathFormula().addEquality(
+                  case_astate->getCanonical(cond->addr),
+                  case_astate->getCanonical(case_value->addr))) {
+            continue;
+          }
+
+          const llvm::BasicBlock *succ = case_handle.getCaseSuccessor();
+          if (succ->empty())
+            continue;
+          case_state.setEntryPred(BB);
+          worklist.push(std::make_tuple(succ, std::move(case_state), BB));
+        }
+
+        // The default edge requires the condition to differ from every case.
+        ExecutionDomain default_state = st.clone();
+        AbductiveDomain *default_astate = default_state.getAstate();
+        if (!default_astate)
+          continue;
+        auto cond =
+            ops_.eval(*default_astate, SI->getCondition(), SI, pred_bb);
+        if (!cond)
+          continue;
+
+        bool feasible = true;
+        for (const auto &case_handle : SI->cases()) {
+          auto case_value = ops_.eval(*default_astate,
+                                      case_handle.getCaseValue(), SI, pred_bb);
+          if (!case_value ||
+              !default_astate->getPathFormula().addDisequality(
+                  default_astate->getCanonical(cond->addr),
+                  default_astate->getCanonical(case_value->addr))) {
+            feasible = false;
+            break;
+          }
+        }
+        const llvm::BasicBlock *default_succ = SI->getDefaultDest();
+        if (feasible && !default_succ->empty()) {
+          default_state.setEntryPred(BB);
+          worklist.push(
+              std::make_tuple(default_succ, std::move(default_state), BB));
         }
       }
     } else {
@@ -626,7 +684,6 @@ ExecutionDomain PulseChecker::initializeFunction(const llvm::Function *F) {
       AbstractValue av = factory_.getOrCreate(&Arg);
       Address addr(av);
       astate->getPostStack().add(&Arg, addr);
-      astate->getPostAttrs().add(av, Attribute::Uninitialized);
     }
   }
   return exec_state;
@@ -685,16 +742,12 @@ PulseChecker::runCallee(const llvm::Function *callee,
       AbstractValue formal_canon = init_astate->getCanonical(formal_av);
       init_astate->getPostAttrs().remove(formal_av, Attribute::Uninitialized);
 
-      // Track null arguments: if the actual argument is a null constant or has
-      // Null attribute, mark the formal parameter as potentially null
+      // Preserve proven nullness on the actual when binding the formal.
       AbstractValue actual_canon = init_astate->getCanonical(opt->addr);
       if (init_astate->getPostAttrs().has(actual_canon, Attribute::Null) ||
           init_astate->getPathFormula().isNull(actual_canon)) {
-        // Check if this is a null constant source
-        if (PulseOperations::isNullConstantSource(*opt)) {
-          init_astate->getPostAttrs().add(formal_canon, Attribute::Null);
-          init_astate->getPathFormula().addNull(formal_canon);
-        }
+        init_astate->getPostAttrs().add(formal_canon, Attribute::Null);
+        init_astate->getPathFormula().addNull(formal_canon);
       }
     }
   }

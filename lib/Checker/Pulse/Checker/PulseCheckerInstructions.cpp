@@ -404,80 +404,6 @@ ExecutionDomain PulseChecker::handleLoad(const llvm::LoadInst *LI,
     return exec_state;
   }
 
-  // Check if pointer operand is in stack map (indirect stack variable)
-  if (auto *stack_addr = astate->getPostStack().find(ptr_operand)) {
-    // Load from stack variable - check if uninitialized
-    AbstractValue canon_ptr = astate->getCanonical(stack_addr->addr);
-    AbstractValue loaded_ptr = canon_ptr;
-
-    // PRIORITY ORDER: Invalid > Null > Uninitialized
-    // Check Invalid FIRST (UseAfterFree is most severe)
-    if (astate->getPostAttrs().has(loaded_ptr, Attribute::Invalid)) {
-      Trace trace = Trace::fromValueHistory(stack_addr->history);
-      trace.addEvent(LI, "Load of invalid pointer");
-      if (LatentIssue::isManifest(OperationResult::UseAfterFree, *astate,
-                                  loaded_ptr)) {
-        reportBug(OperationResult::UseAfterFree, LI, loaded_ptr, trace, astate);
-        return ExecutionDomain::abortProgram(
-            std::make_unique<AbductiveDomain>(astate->clone()),
-            OperationResult::UseAfterFree, std::move(trace));
-      } else {
-        latent_issues_.emplace_back(
-            OperationResult::UseAfterFree,
-            LatentIssue::issueKindFromResult(OperationResult::UseAfterFree),
-            loaded_ptr, LI, std::move(trace));
-        return ExecutionDomain::latentAbortProgram(
-            std::make_unique<AbductiveDomain>(astate->clone()),
-            &latent_issues_.back());
-      }
-    }
-
-    // Do NOT report NullDereference here: loading a pointer value is not a
-    // dereference. The actual dereference (store/load through the pointer) is
-    // checked in writeDeref/readDeref.
-
-    // HEAP POINTER CHECK: If loaded value is a heap pointer (Allocated),
-    // and we're loading from it, we need to read from heap
-    // This handles: int *q = *pp; where pp points to heap
-    if (astate->getPostAttrs().has(loaded_ptr, Attribute::Allocated) &&
-        !astate->getPostAttrs().has(loaded_ptr, Attribute::Stack)) {
-      Address heap_ptr_addr(loaded_ptr);
-      heap_ptr_addr.history = stack_addr->history;
-      auto read_result = ops_.readDeref(*astate, heap_ptr_addr, LI);
-      if (read_result.first == OperationResult::Success && read_result.second) {
-        // Check if the value loaded from heap is Invalid
-        AbstractValue heap_loaded_canon =
-            astate->getCanonical(read_result.second->addr);
-        if (astate->getPostAttrs().has(heap_loaded_canon, Attribute::Invalid)) {
-          Trace trace = Trace::fromValueHistory(read_result.second->history);
-          trace.addEvent(LI, "Load of invalid pointer from heap");
-          if (LatentIssue::isManifest(OperationResult::UseAfterFree, *astate,
-                                      heap_loaded_canon)) {
-            reportBug(OperationResult::UseAfterFree, LI, heap_loaded_canon,
-                      trace, astate);
-            return ExecutionDomain::abortProgram(
-                std::make_unique<AbductiveDomain>(astate->clone()),
-                OperationResult::UseAfterFree, std::move(trace));
-          } else {
-            latent_issues_.emplace_back(
-                OperationResult::UseAfterFree,
-                LatentIssue::issueKindFromResult(OperationResult::UseAfterFree),
-                heap_loaded_canon, LI, std::move(trace));
-            return ExecutionDomain::latentAbortProgram(
-                std::make_unique<AbductiveDomain>(astate->clone()),
-                &latent_issues_.back());
-          }
-        }
-        astate->getPostStack().add(LI, *read_result.second);
-        return exec_state;
-      }
-    }
-
-    // Variable is initialized - use value from stack
-    astate->getPostStack().add(LI, *stack_addr);
-    return exec_state;
-  }
-
   // Heap load (pointer dereference) - use readDeref
   auto ptr_opt = ops_.eval(*astate, ptr_operand, LI, pred);
   if (!ptr_opt) {
@@ -497,23 +423,20 @@ ExecutionDomain PulseChecker::handleLoad(const llvm::LoadInst *LI,
               std::make_unique<AbductiveDomain>(astate->clone()),
               OperationResult::UseAfterFree, std::move(trace));
         }
-        // Check if base is null (only if not invalid)
-        // DON'T report NullDereference if Invalid is present (UseAfterFree
-        // takes priority) NPD checker: only report if source is a null constant
+        // Check if base is null (only if not invalid). A path-formula null fact
+        // is already a concrete branch witness; it need not originate as a
+        // literal null constant.
         if (!astate->getPostAttrs().has(base_canon, Attribute::Invalid)) {
           if (astate->getPathFormula().isNull(base_canon) ||
               (astate->getPostAttrs().has(base_canon, Attribute::Null) &&
                !astate->getPathFormula().isNonNull(base_canon))) {
-            // Check if this pointer originated from a null constant
-            if (PulseOperations::isNullConstantSource(*base_opt)) {
-              Trace trace = Trace::fromValueHistory(base_opt->history);
-              trace.addEvent(LI, "Array access through null pointer");
-              reportBug(OperationResult::NullDereference, LI, base_canon, trace,
-                        astate);
-              return ExecutionDomain::abortProgram(
-                  std::make_unique<AbductiveDomain>(astate->clone()),
-                  OperationResult::NullDereference, std::move(trace));
-            }
+            Trace trace = Trace::fromValueHistory(base_opt->history);
+            trace.addEvent(LI, "Array access through null pointer");
+            reportBug(OperationResult::NullDereference, LI, base_canon, trace,
+                      astate);
+            return ExecutionDomain::abortProgram(
+                std::make_unique<AbductiveDomain>(astate->clone()),
+                OperationResult::NullDereference, std::move(trace));
           }
         }
       }
@@ -719,70 +642,10 @@ ExecutionDomain PulseChecker::handleStore(const llvm::StoreInst *SI,
     return exec_state;
   }
 
-  // Check if pointer operand is in stack map (indirect stack variable)
-  if (astate->getPostStack().find(ptr_operand)) {
-    // Store to stack variable - clear Uninitialized and update
-    auto ptr_opt = ops_.eval(*astate, ptr_operand, SI, pred);
-    if (ptr_opt) {
-      AbstractValue canon_ptr = astate->getCanonical(ptr_opt->addr);
-      astate->getPostAttrs().remove(canon_ptr, Attribute::Uninitialized);
-
-      // Fix for realloc pattern: when storing a realloc result back to the
-      // original variable, invalidate the old value (since realloc succeeded
-      // and old memory is now invalid). This handles: int *new_p = realloc(p,
-      // size); p = new_p;
-      AbstractValue canon_value = astate->getCanonical(value_opt->addr);
-      if (astate->getPostAttrs().has(canon_value, Attribute::Allocated) &&
-          !astate->getPostAttrs().has(canon_value, Attribute::Invalid) &&
-          isReallocResult(*value_opt)) {
-        // This is a valid allocation (likely from realloc). Since we're storing
-        // it back to the original variable, the old value is now invalid
-        // (realloc succeeded). Invalidate the old value, then update the stack
-        // map with the new value.
-        ops_.invalidate(*astate, *ptr_opt, SI, InvalidationKind::Realloc);
-      }
-
-      // Update stack map with new value
-      astate->getPostStack().add(ptr_operand, *value_opt);
-    }
-    // Only record copy if it's not a pointer type
-    if (!SI->getValueOperand()->getType()->isPointerTy()) {
-      analysis_non_disj_.recordCopy(SI);
-    }
-    return exec_state;
-  }
-
   // Heap store (pointer dereference) - use writeDeref
   auto ptr_opt = ops_.eval(*astate, ptr_operand, SI, pred);
   if (!ptr_opt)
     return exec_state;
-
-  // Fix for false positives: when storing to a GEP of a stack array,
-  // also clear Uninitialized from the GEP address and the base alloca.
-  // This prevents false positives when the array is initialized
-  // element-by-element.
-  if (auto *GEP = llvm::dyn_cast<llvm::GetElementPtrInst>(ptr_operand)) {
-    const llvm::Value *base = GEP->getPointerOperand();
-    // Walk through any bitcasts to find the underlying alloca
-    while (base) {
-      if (auto *AI = llvm::dyn_cast<llvm::AllocaInst>(base)) {
-        // Found the base alloca - clear Uninitialized attribute
-        AbstractValue base_av = factory_.getOrCreate(AI);
-        AbstractValue base_canon = astate->getCanonical(base_av);
-        astate->getPostAttrs().remove(base_canon, Attribute::Uninitialized);
-        break;
-      }
-      if (auto *BC = llvm::dyn_cast<llvm::BitCastInst>(base)) {
-        base = BC->getOperand(0);
-      } else {
-        break;
-      }
-    }
-    // Also clear Uninitialized from the GEP address itself
-    // (the GEP result may have inherited Uninitialized from the base)
-    AbstractValue gep_canon = astate->getCanonical(ptr_opt->addr);
-    astate->getPostAttrs().remove(gep_canon, Attribute::Uninitialized);
-  }
 
   maybeReportStackEscape(*value_opt, *ptr_opt);
 
@@ -937,15 +800,16 @@ PulseChecker::handleCall(const llvm::CallInst *CI, ExecutionDomain exec_state,
   }
 
   llvm::Function *F = CI->getCalledFunction();
-  if (!F)
+  if (!F) {
+    astate->addSkippedCall("<indirect>");
+    astate->declareUnknownValues();
+    modelUnknownCallEffects(ops_, *astate, CI, pred, factory_);
     return {exec_state};
+  }
 
   // Check for taint sources/sinks/sanitizers in function calls
   std::string func_name = F->getName().str();
   if (models_->isTaintSource(func_name)) {
-    // Mark return value as tainted (use procedure-name overload to avoid
-    // dereferencing CI, which can cause EXC_BAD_ACCESS on some bitcode).
-    AbstractValue ret_val = factory_.createFresh(CI);
     TaintKind kind = TaintKind::UserInput();
     if (func_name == "recv" || func_name == "recvfrom" ||
         func_name == "recvmsg") {
@@ -955,9 +819,32 @@ PulseChecker::handleCall(const llvm::CallInst *CI, ExecutionDomain exec_state,
     } else if (func_name == "getcwd") {
       kind = TaintKind::FileSystem();
     }
-    TaintOperations::taint(*astate, ret_val, kind, func_name);
-    astate->getPostStack().add(CI, Address(ret_val));
-    return {exec_state};
+
+    std::optional<unsigned> output_arg;
+    if (func_name == "read" || func_name == "recv" ||
+        func_name == "recvfrom" || func_name == "recvmsg") {
+      output_arg = 1;
+    } else if (func_name == "gets" || func_name == "fgets" ||
+               func_name == "getcwd") {
+      output_arg = 0;
+    }
+
+    if (output_arg && *output_arg < CI->arg_size()) {
+      auto output_opt =
+          ops_.eval(*astate, CI->getArgOperand(*output_arg), CI, pred);
+      if (output_opt) {
+        TaintOperations::taint(*astate,
+                               astate->getCanonical(output_opt->addr), kind,
+                               func_name);
+      }
+      // Continue into the ordinary model so buffer writes and return values are
+      // still represented.
+    } else {
+      AbstractValue ret_val = factory_.createFresh(CI);
+      TaintOperations::taint(*astate, ret_val, kind, func_name);
+      astate->getPostStack().add(CI, Address(ret_val));
+      return {exec_state};
+    }
   }
 
   if (models_->isTaintSink(func_name)) {
@@ -1140,94 +1027,11 @@ ExecutionDomain
 PulseChecker::handleComparison(const llvm::Instruction *I,
                                ExecutionDomain exec_state,
                                const llvm::BasicBlock *pred_bb) {
-  auto *astate = exec_state.getAstate();
-  if (!astate)
-    return exec_state;
-
-  if (auto *ICmp = llvm::dyn_cast<llvm::ICmpInst>(I)) {
-    llvm::ICmpInst::Predicate cmp_pred = ICmp->getPredicate();
-    llvm::Value *op0 = ICmp->getOperand(0);
-    llvm::Value *op1 = ICmp->getOperand(1);
-
-    // Handle null pointer comparisons
-    bool op0_is_null = detail::isNullPointerConstantValue(op0);
-    bool op1_is_null = detail::isNullPointerConstantValue(op1);
-
-    if (op0_is_null || op1_is_null) {
-      llvm::Value *ptr = op0_is_null ? op1 : op0;
-      auto ptr_opt = ops_.eval(*astate, ptr, I, pred_bb);
-      if (ptr_opt) {
-        AbstractValue ptr_av = astate->getCanonical(ptr_opt->addr);
-
-        // Keep the ordering consistent with the rest of the engine:
-        // Invalid (UAF) takes priority over null facts.
-        bool is_invalid =
-            astate->getPostAttrs().has(ptr_av, Attribute::Invalid);
-        if (!is_invalid && cmp_pred == llvm::ICmpInst::ICMP_EQ) {
-          // ptr == null: mark as null in path formula only (for path-sensitive
-          // analysis) Don't set Null attribute here - only null constants set
-          // the Null attribute This ensures NPD checker only tracks null
-          // constants as sources
-          astate->getPathFormula().addNull(ptr_av);
-        } else if (!is_invalid && cmp_pred == llvm::ICmpInst::ICMP_NE) {
-          // ptr != null: mark as non-null in formula
-          astate->getPathFormula().addNonNull(ptr_av);
-          // Don't remove Null attribute here - it should only be set by null
-          // constants
-        }
-      }
-    }
-
-    // Also handle comparisons where we check if a pointer is null indirectly
-    // e.g., if (ptr) or if (!ptr)
-    if (op0->getType()->isPointerTy() && op1->getType()->isPointerTy()) {
-      auto ptr0_opt = ops_.eval(*astate, op0, I, pred_bb);
-      auto ptr1_opt = ops_.eval(*astate, op1, I, pred_bb);
-
-      if (ptr0_opt && ptr1_opt) {
-        AbstractValue av0 = astate->getCanonical(ptr0_opt->addr);
-        AbstractValue av1 = astate->getCanonical(ptr1_opt->addr);
-
-        // If comparing with zero constant (null check)
-        if (op0_is_null || op1_is_null) {
-          AbstractValue ptr_av = op0_is_null ? av1 : av0;
-          bool is_invalid =
-              astate->getPostAttrs().has(ptr_av, Attribute::Invalid);
-          if (!is_invalid && cmp_pred == llvm::ICmpInst::ICMP_EQ) {
-            // ptr == null: mark as null in path formula only
-            // Don't set Null attribute here - only null constants set the Null
-            // attribute
-            astate->getPathFormula().addNull(ptr_av);
-          } else if (!is_invalid && cmp_pred == llvm::ICmpInst::ICMP_NE) {
-            // ptr != null: mark as non-null in formula
-            astate->getPathFormula().addNonNull(ptr_av);
-            // Don't remove Null attribute here - it should only be set by null
-            // constants
-          }
-        }
-      }
-    }
-
-    // Handle equality comparisons between pointers
-    if (cmp_pred == llvm::ICmpInst::ICMP_EQ && op0->getType()->isPointerTy() &&
-        op1->getType()->isPointerTy()) {
-      auto av0_opt = ops_.eval(*astate, op0, I, pred_bb);
-      auto av1_opt = ops_.eval(*astate, op1, I, pred_bb);
-      if (av0_opt && av1_opt) {
-        astate->addEquality(av0_opt->addr, av1_opt->addr);
-      }
-    }
-
-    if (cmp_pred == llvm::ICmpInst::ICMP_NE && op0->getType()->isPointerTy() &&
-        op1->getType()->isPointerTy()) {
-      auto av0_opt = ops_.eval(*astate, op0, I, pred_bb);
-      auto av1_opt = ops_.eval(*astate, op1, I, pred_bb);
-      if (av0_opt && av1_opt) {
-        astate->getPathFormula().addDisequality(av0_opt->addr, av1_opt->addr);
-      }
-    }
-  }
-
+  // An LLVM comparison computes an i1 value; it does not assume the predicate.
+  // Branch/select transfer functions interpret that value when a control-flow
+  // or value choice is actually made.
+  (void)I;
+  (void)pred_bb;
   return exec_state;
 }
 

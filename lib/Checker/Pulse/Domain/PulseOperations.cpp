@@ -370,7 +370,10 @@ std::optional<Address> PulseOperations::eval(AbductiveDomain &astate,
               total_offset += static_cast<int64_t>(off);
             }
           } else {
-            // If we have allocation size and a symbolic index, add bounds.
+            // Never assume a symbolic index is in bounds merely because the
+            // allocation size is known. Use existing path constraints to prove
+            // either safety or an OOB witness; otherwise keep the offset
+            // unknown.
             if (alloc_size_opt && offset_known) {
               uint64_t alloc_size = *alloc_size_opt;
               if (total_offset >= 0 &&
@@ -379,11 +382,16 @@ std::optional<Address> PulseOperations::eval(AbductiveDomain &astate,
                     alloc_size - static_cast<uint64_t>(total_offset);
                 if (remaining > 0) {
                   uint64_t max_index = (remaining - 1) / stride_bytes;
-                  (void)astate.getPathFormula().addBounds(
-                      idxAv, 0, static_cast<int64_t>(max_index));
+                  auto lower = astate.getPathFormula().getLowerBound(idxAv);
+                  auto upper = astate.getPathFormula().getUpperBound(idxAv);
+                  if ((lower && *lower > static_cast<int64_t>(max_index)) ||
+                      (upper && *upper < 0)) {
+                    oob_proven = true;
+                  }
                 }
               }
             }
+            offset_known = false;
           }
         } else {
           offset_known = false;
@@ -446,6 +454,7 @@ std::optional<Address> PulseOperations::eval(AbductiveDomain &astate,
         }
       }
     }
+    astate.setAllocationRoot(gepAv, astate.getAllocationRoot(base_canon));
     if (base_is_stack) {
       astate.getPostAttrs().add(gepAv, Attribute::Stack);
     }
@@ -509,29 +518,17 @@ PulseOperations::evalDeref(AbductiveDomain &astate, Address ptr,
     return {OperationResult::UseAfterFree, std::nullopt};
   }
 
-  // Check if pointer is null (using formula and attributes)
-  // Only check null if Invalid is NOT present (already checked above)
-  // NPD checker: only report if source is a null constant
-  // Check path formula first (more precise)
+  // Check path-sensitive nullness first. A branch-established null pointer is
+  // a concrete witness even when the original value was a formal parameter.
   if (astate.getPathFormula().isNull(canon_ptr)) {
-    // Check if this pointer originated from a null constant
-    Address canon_ptr_addr(canon_ptr);
-    canon_ptr_addr.history = ptr.history; // Preserve history for source check
-    if (isNullConstantSource(canon_ptr_addr)) {
-      return {OperationResult::NullDereference, std::nullopt};
-    }
+    return {OperationResult::NullDereference, std::nullopt};
   }
 
-  // Also check attributes (may be set by comparisons)
+  // Null attributes originate from concrete null values. A contradictory
+  // non-null path condition takes precedence over a stale attribute.
   if (astate.getPostAttrs().has(canon_ptr, Attribute::Null)) {
-    // Double-check with formula - if formula says non-null, trust formula
     if (!astate.getPathFormula().isNonNull(canon_ptr)) {
-      // Check if this pointer originated from a null constant
-      Address canon_ptr_addr(canon_ptr);
-      canon_ptr_addr.history = ptr.history; // Preserve history for source check
-      if (isNullConstantSource(canon_ptr_addr)) {
-        return {OperationResult::NullDereference, std::nullopt};
-      }
+      return {OperationResult::NullDereference, std::nullopt};
     }
   }
 
@@ -603,22 +600,17 @@ OperationResult PulseOperations::checkAddrAccess(AbductiveDomain &astate,
   // Check null (using formula first, then attributes)
   // Path formula is more precise (path-sensitive)
   // Only check null if Invalid is NOT present (already checked above)
-  // NPD checker: only report if source is a null constant
   // Skip null check for free() calls - free(NULL) is safe
   if (!is_free_call) {
     if (astate.getPathFormula().isNull(canon_addr)) {
-      if (isNullConstantSource(addr)) {
-        return OperationResult::NullDereference;
-      }
+      return OperationResult::NullDereference;
     }
 
-    // Check attributes (may be set by comparisons)
+    // Null attributes originate from concrete null values. A contradictory
+    // non-null path condition takes precedence over a stale attribute.
     if (astate.getPostAttrs().has(canon_addr, Attribute::Null)) {
-      // If formula says non-null, trust formula over attribute
       if (!astate.getPathFormula().isNonNull(canon_addr)) {
-        if (isNullConstantSource(addr)) {
-          return OperationResult::NullDereference;
-        }
+        return OperationResult::NullDereference;
       }
     }
   }
@@ -638,12 +630,14 @@ void PulseOperations::allocate(AbductiveDomain &astate, AbstractValue addr,
   astate.getPostAttrs().add(addr, Attribute::Allocated);
   astate.getPostAttrs().remove(addr, Attribute::Invalid);
   astate.getPostAttrs().remove(addr, Attribute::Uninitialized);
+  astate.setAllocationRoot(addr, addr);
 }
 
 void PulseOperations::invalidate(AbductiveDomain &astate, Address addr,
                                  const llvm::Instruction *loc,
                                  InvalidationKind kind) {
   AbstractValue canon = astate.getCanonical(addr.addr);
+  AbstractValue allocation_root = astate.getAllocationRoot(canon);
 
   // Invalidate the canonical address
   astate.getPostAttrs().add(canon, Attribute::Invalid);
@@ -655,6 +649,20 @@ void PulseOperations::invalidate(AbductiveDomain &astate, Address addr,
   astate.setInvalidationInfo(canon, kind, loc);
   // Heap edges are keyed by canonical abstract values.
   astate.getPostHeap().removeEdges(canon);
+
+  std::set<AbstractValue> same_allocation;
+  for (const auto &kv : astate.getAllocationRoots()) {
+    if (astate.getAllocationRoot(kv.first) == allocation_root) {
+      same_allocation.insert(astate.getCanonical(kv.first));
+    }
+  }
+  for (AbstractValue derived : same_allocation) {
+    astate.getPostAttrs().add(derived, Attribute::Invalid);
+    astate.getPostAttrs().remove(derived, Attribute::Allocated);
+    astate.setAllocationSize(derived, 0);
+    astate.setInvalidationInfo(derived, kind, loc);
+    astate.getPostHeap().removeEdges(derived);
+  }
 
   // Also invalidate aliases - find all values that canonicalize to the same
   // value This handles cases where q = p; delete p; *q (aliased_uaf) Since
@@ -704,8 +712,21 @@ OperationResult PulseOperations::writeDeref(AbductiveDomain &astate,
 
   // Check access (will check Null, Uninitialized, etc.)
   auto result = checkAddrAccess(astate, ptr, loc);
+  if (result == OperationResult::UninitializedRead) {
+    // A store initializes its destination; the previous contents are not read.
+    result = OperationResult::Success;
+  }
   if (result != OperationResult::Success) {
     return result;
+  }
+
+  // A successful write through an otherwise unknown pointer requires valid
+  // storage in the caller. Record that requirement without inventing a heap
+  // read of the previous contents.
+  if (!astate.getPostAttrs().has(canon_ptr, Attribute::Allocated) &&
+      !astate.getPostAttrs().has(canon_ptr, Attribute::Stack) &&
+      !astate.getPostAttrs().has(canon_ptr, Attribute::Global)) {
+    astate.abduceAttrToPre(canon_ptr, Attribute::Allocated);
   }
 
   // Canonicalize values (canon_ptr already defined above)
@@ -757,6 +778,13 @@ PulseOperations::readDeref(AbductiveDomain &astate, Address ptr,
 
   // Evaluate dereference
   auto deref_result = evalDeref(astate, ptr, loc);
+
+  if (deref_result.first == OperationResult::Success && deref_result.second) {
+    AbstractValue canon_value = astate.getCanonical(deref_result.second->addr);
+    if (astate.getPostAttrs().has(canon_value, Attribute::Uninitialized)) {
+      return {OperationResult::UninitializedRead, std::nullopt};
+    }
+  }
 
   // Propagate taint: if memory location is tainted, propagate to loaded value
   if (deref_result.first == OperationResult::Success && deref_result.second) {

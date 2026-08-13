@@ -153,6 +153,18 @@ static AbductiveDomain pruneForSummary(const llvm::Function *F,
     pruned.getAllocationSizes() = std::move(sizes);
   }
 
+  {
+    std::map<AbstractValue, AbstractValue> roots;
+    for (const auto &kv : astate.getAllocationRoots()) {
+      AbstractValue addr = pruned.getCanonical(kv.first);
+      AbstractValue root = pruned.getCanonical(kv.second);
+      if (reachable_post.count(addr) > 0 || reachable_pre.count(addr) > 0) {
+        roots.emplace(addr, root);
+      }
+    }
+    pruned.getAllocationRoots() = std::move(roots);
+  }
+
   pruned.canonicalize();
   return pruned;
 }
