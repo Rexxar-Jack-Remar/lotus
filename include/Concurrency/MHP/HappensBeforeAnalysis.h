@@ -82,24 +82,12 @@ private:
   bool canReach(const mhp::SyncNode *start, const mhp::SyncNode *end) const;
   bool canReachWithHB(const mhp::SyncNode *start,
                       const mhp::SyncNode *end) const;
-  bool canReachExplicitHB(const llvm::Instruction *from,
-                          const llvm::Instruction *to) const;
   bool isInstructionThreadAmbiguous(const llvm::Instruction *inst) const;
   void addExtraHBEdge(const llvm::Instruction *from,
                       const llvm::Instruction *to);
   void addExtraHBEdge(const mhp::SyncNode *from, const mhp::SyncNode *to);
-  void addExplicitHBClosure(const llvm::Instruction *from,
-                            const llvm::Instruction *to);
-  void addExplicitHBPair(const llvm::Instruction *from,
-                         const llvm::Instruction *to);
-  std::vector<const llvm::Instruction *>
-  collectThreadPrefixInstructions(const llvm::Instruction *inst) const;
   std::vector<const llvm::Instruction *>
   collectThreadSuffixInstructions(const llvm::Instruction *inst) const;
-  std::vector<const llvm::Instruction *>
-  collectHBRelevantSuffixInstructions(const llvm::Instruction *inst) const;
-  bool isPostSyncInstruction(const llvm::Instruction *sync_inst,
-                             const llvm::Instruction *candidate) const;
   const llvm::Instruction *
   findNearestAtomicInBlock(const llvm::Instruction *inst, bool search_backward,
                            bool require_load_like,
@@ -162,17 +150,11 @@ private:
   /// Synchronizes-with pairs proven by non-atomic witness mechanisms.
   std::vector<std::pair<const llvm::Instruction *, const llvm::Instruction *>>
       m_sync_with;
-  std::unordered_set<
-      std::pair<const llvm::Instruction *, const llvm::Instruction *>,
-      InstPairHash>
-      m_explicit_hb_pairs;
-  std::unordered_map<const llvm::Instruction *,
-                     std::vector<const llvm::Instruction *>>
-      m_explicit_hb_successors;
   mutable std::unordered_map<
       std::pair<const llvm::Instruction *, const llvm::Instruction *>, bool,
       InstPairHash>
       m_hb_cache;
+  size_t m_analyzed_generation = 0;
 };
 
 } // namespace lotus

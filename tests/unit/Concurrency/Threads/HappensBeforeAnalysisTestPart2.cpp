@@ -415,6 +415,116 @@ TEST_F(HappensBeforeAnalysisTest,
 
   EXPECT_FALSE(hb.happensBefore(store_shared, load_shared));
 }
+
+TEST_F(HappensBeforeAnalysisTest,
+       BarrierGenerationsIgnoreBasicBlockStorageOrder) {
+  const char *source = R"(
+    @barrier = global i8 0
+    declare i32 @pthread_create(i8*, i8*, i8* (i8*)*, i8*)
+    declare void @fake_barrier_arrive_and_wait(i8*)
+    define i8* @worker_a(i8* %arg) {
+    entry:
+      br label %first
+    second:
+      call void @fake_barrier_arrive_and_wait(i8* @barrier)
+      ret i8* null
+    first:
+      call void @fake_barrier_arrive_and_wait(i8* @barrier)
+      br label %second
+    }
+    define i8* @worker_b(i8* %arg) {
+    entry:
+      call void @fake_barrier_arrive_and_wait(i8* @barrier)
+      %after_first = add i32 1, 2
+      call void @fake_barrier_arrive_and_wait(i8* @barrier)
+      ret i8* null
+    }
+    define i32 @main() {
+    entry:
+      %ta = alloca i8
+      %tb = alloca i8
+      call i32 @pthread_create(i8* %ta, i8* null,
+                               i8* (i8*)* @worker_a, i8* null)
+      call i32 @pthread_create(i8* %tb, i8* null,
+                               i8* (i8*)* @worker_b, i8* null)
+      ret i32 0
+    }
+  )";
+  auto module = parseModule(source);
+  ASSERT_NE(module, nullptr);
+  MHPAnalysis mhp(*module);
+  mhp.analyze();
+  const Function *worker_a = module->getFunction("worker_a");
+  const Function *worker_b = module->getFunction("worker_b");
+  ASSERT_NE(worker_a, nullptr);
+  ASSERT_NE(worker_b, nullptr);
+  const BasicBlock *second_block =
+      worker_a->getBasicBlockList().getNextNode(worker_a->getEntryBlock());
+  ASSERT_NE(second_block, nullptr);
+  const Instruction *a_second = &second_block->front();
+  const Instruction *b_after_first =
+      findInstructionByName(*worker_b, "after_first");
+  ASSERT_NE(a_second, nullptr);
+  ASSERT_NE(b_after_first, nullptr);
+  const ThreadFlowGraph &tfg = mhp.getThreadFlowGraph();
+  SyncNode *a_second_node = tfg.getNode(a_second);
+  SyncNode *b_after_first_node = tfg.getNode(b_after_first);
+  ASSERT_NE(a_second_node, nullptr);
+  ASSERT_NE(b_after_first_node, nullptr);
+  EXPECT_FALSE(
+      tfg.hasEdgeKind(a_second_node, b_after_first_node, EdgeKind::Barrier));
+}
+
+TEST_F(HappensBeforeAnalysisTest, SplitBarrierPhaseFlowsAcrossBasicBlocks) {
+  const char *source = R"(
+    @shared = global i32 0
+    @barrier = global i8 0
+    declare i32 @pthread_create(i8*, i8*, i8* (i8*)*, i8*)
+    declare void @std_barrier_arriveEv(i8*)
+    declare void @std_barrier_waitEv(i8*)
+    define i8* @writer(i8* %arg) {
+    entry:
+      store i32 1, i32* @shared
+      call void @std_barrier_arriveEv(i8* @barrier)
+      br label %wait
+    wait:
+      call void @std_barrier_waitEv(i8* @barrier)
+      ret i8* null
+    }
+    define i8* @reader(i8* %arg) {
+    entry:
+      call void @std_barrier_arriveEv(i8* @barrier)
+      br label %wait
+    wait:
+      call void @std_barrier_waitEv(i8* @barrier)
+      %value = load i32, i32* @shared
+      ret i8* null
+    }
+    define i32 @main() {
+    entry:
+      %tw = alloca i8
+      %tr = alloca i8
+      call i32 @pthread_create(i8* %tw, i8* null,
+                               i8* (i8*)* @writer, i8* null)
+      call i32 @pthread_create(i8* %tr, i8* null,
+                               i8* (i8*)* @reader, i8* null)
+      ret i32 0
+    }
+  )";
+  auto module = parseModule(source);
+  ASSERT_NE(module, nullptr);
+  MHPAnalysis mhp(*module);
+  mhp.analyze();
+  HappensBeforeAnalysis hb(*module, mhp);
+  hb.analyze();
+  const Instruction *store =
+      &module->getFunction("writer")->getEntryBlock().front();
+  const Instruction *load =
+      findInstructionByName(*module->getFunction("reader"), "value");
+  ASSERT_NE(store, nullptr);
+  ASSERT_NE(load, nullptr);
+  EXPECT_TRUE(hb.happensBefore(store, load));
+}
 TEST_F(HappensBeforeAnalysisTest,
        BarrierArriveAndWaitSynchronizesPostBarrierContinuation) {
   const char *source = R"(

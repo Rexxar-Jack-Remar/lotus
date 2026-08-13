@@ -55,6 +55,67 @@ TEST_F(HappensBeforeAnalysisTest, TwoThreadsNoSync_NeitherHappensBefore) {
   EXPECT_FALSE(hb.happensBefore(store_b, store_a));
   EXPECT_FALSE(hb.happensBefore(store_a, store_a));
 }
+
+TEST_F(HappensBeforeAnalysisTest,
+       StaticMustPrecedeRequiresEveryCallContextPair) {
+  const char *source = R"(
+    define void @fa() {
+    entry:
+      %a = add i32 1, 2
+      ret void
+    }
+    define void @fb() {
+    entry:
+      %b = add i32 3, 4
+      ret void
+    }
+    define i32 @main() {
+    entry:
+      call void @fa()
+      call void @fb()
+      call void @fb()
+      call void @fa()
+      ret i32 0
+    }
+  )";
+  auto module = parseModule(source);
+  ASSERT_NE(module, nullptr);
+  MHPAnalysis mhp(*module);
+  mhp.analyze();
+  HappensBeforeAnalysis hb(*module, mhp);
+  hb.analyze();
+  const Instruction *a = findInstructionByName(*module->getFunction("fa"), "a");
+  const Instruction *b = findInstructionByName(*module->getFunction("fb"), "b");
+  ASSERT_NE(a, nullptr);
+  ASSERT_NE(b, nullptr);
+  EXPECT_FALSE(hb.mustPrecede(b, a));
+  EXPECT_FALSE(hb.mustPrecede(a, b));
+}
+
+TEST_F(HappensBeforeAnalysisTest, StaleAnalysisGenerationFailsClosed) {
+  const char *source = R"(
+    define i32 @main() {
+    entry:
+      %a = add i32 1, 2
+      %b = add i32 %a, 3
+      ret i32 %b
+    }
+  )";
+  auto module = parseModule(source);
+  ASSERT_NE(module, nullptr);
+  MHPAnalysis mhp(*module);
+  mhp.analyze();
+  HappensBeforeAnalysis hb(*module, mhp);
+  hb.analyze();
+  const Function *main_func = module->getFunction("main");
+  const Instruction *a = findInstructionByName(*main_func, "a");
+  const Instruction *b = findInstructionByName(*main_func, "b");
+  ASSERT_NE(a, nullptr);
+  ASSERT_NE(b, nullptr);
+  EXPECT_TRUE(hb.mustPrecede(a, b));
+  mhp.analyze();
+  EXPECT_FALSE(hb.mustPrecede(a, b));
+}
 TEST_F(HappensBeforeAnalysisTest, MultiExitWorkerStillHappensBeforePostJoin) {
   const char *source = R"(
     declare i32 @pthread_create(i8*, i8*, i8* (i8*)*, i8*)
@@ -213,7 +274,8 @@ TEST_F(HappensBeforeAnalysisTest,
   hb.analyze();
 
   const Instruction *store_shared = nullptr;
-  for (const Instruction &inst : instructions(*module->getFunction("worker1"))) {
+  for (const Instruction &inst :
+       instructions(*module->getFunction("worker1"))) {
     if (isa<StoreInst>(&inst)) {
       store_shared = &inst;
       break;

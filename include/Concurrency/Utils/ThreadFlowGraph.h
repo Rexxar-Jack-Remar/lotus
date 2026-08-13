@@ -62,15 +62,15 @@ enum class SyncNodeType {
  * @brief Edge kind in the thread-flow graph (call, ret, create, join, signal)
  */
 enum class EdgeKind {
-  Control, ///< Intra-thread control flow
-  Call,    ///< Call site -> callee entry
-  Ret,     ///< Callee exit -> return site
-  Create,  ///< Fork -> thread entry
-  Join,    ///< Thread exit -> join site
-  Signal,  ///< signal(c) -> wait(c)
-  Barrier, ///< Barrier synchronization between threads
-  TaskDepend,     ///< OpenMP task-dependence ordering
-  TaskWait,       ///< OpenMP taskwait/taskgroup ordering
+  Control,       ///< Intra-thread control flow
+  Call,          ///< Call site -> callee entry
+  Ret,           ///< Callee exit -> return site
+  Create,        ///< Fork -> thread entry
+  Join,          ///< Thread exit -> join site
+  Signal,        ///< signal(c) -> wait(c)
+  Barrier,       ///< Barrier synchronization between threads
+  TaskDepend,    ///< OpenMP task-dependence ordering
+  TaskWait,      ///< OpenMP taskwait/taskgroup ordering
   TaskCompletion ///< OpenMP task-completion ordering
 };
 
@@ -81,8 +81,8 @@ class SyncNode {
 public:
   SyncNode(const llvm::Instruction *inst, SyncNodeType type, ThreadID tid,
            CallContextID ctx, size_t node_id)
-      : m_instruction(inst), m_type(type), m_thread_id(tid), m_call_context_id(ctx),
-        m_node_id(node_id) {}
+      : m_instruction(inst), m_type(type), m_thread_id(tid),
+        m_call_context_id(ctx), m_node_id(node_id) {}
 
   const llvm::Instruction *getInstruction() const { return m_instruction; }
   SyncNodeType getType() const { return m_type; }
@@ -132,7 +132,6 @@ private:
   // Graph structure
   std::vector<SyncNode *> m_predecessors;
   std::vector<SyncNode *> m_successors;
-
 };
 
 // ============================================================================
@@ -153,6 +152,10 @@ class ThreadFlowGraph {
 public:
   ThreadFlowGraph() = default;
   ~ThreadFlowGraph();
+  ThreadFlowGraph(const ThreadFlowGraph &) = delete;
+  ThreadFlowGraph &operator=(const ThreadFlowGraph &) = delete;
+  ThreadFlowGraph(ThreadFlowGraph &&) = delete;
+  ThreadFlowGraph &operator=(ThreadFlowGraph &&) = delete;
 
   // Node management
   SyncNode *createNode(const llvm::Instruction *inst, SyncNodeType type,
@@ -203,7 +206,7 @@ public:
   std::vector<SyncNode *> getNodesInThread(ThreadID tid) const;
 
   // ========================================================================
-  // Reachability Index (for O(1) HB queries)
+  // Reachability index (SCC/topological pruning plus graph search)
   // ========================================================================
 
   void buildReachabilityIndex();
@@ -259,7 +262,9 @@ private:
   std::unordered_map<ThreadID, std::vector<SyncNode *>> m_topo_nodes;
   std::unordered_map<const SyncNode *, std::vector<SyncNode *>> m_reverse_edges;
   std::unordered_map<const SyncNode *, const SyncNode *> m_scc_representative;
-  size_t m_next_node_id = 0;
+  // Call-context zero denotes a root thread. Reserve node ID zero so a real
+  // call site can never be mistaken for the root context.
+  size_t m_next_node_id = 1;
 
   void addEdge(SyncNode *from, SyncNode *to, EdgeKind kind);
   void invalidateReachabilityIndex();

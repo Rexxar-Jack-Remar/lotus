@@ -1,5 +1,10 @@
 #include "MHPAnalysisTestSupport.h"
 
+#include <type_traits>
+
+static_assert(!std::is_copy_constructible_v<ThreadFlowGraph>);
+static_assert(!std::is_copy_assignable_v<ThreadFlowGraph>);
+
 TEST_F(MHPAnalysisTest, SimpleMain) {
   const char *source = R"(
     define i32 @main() {
@@ -370,6 +375,108 @@ TEST_F(MHPAnalysisTest, RecursiveCallGraphDoesNotExplodeContexts) {
   MHPAnalysis mhp(*module);
   EXPECT_NO_THROW(mhp.analyze());
 }
+
+TEST_F(MHPAnalysisTest, RecursiveCallDoesNotWireOuterInvocationContext) {
+  const char *source = R"(
+    define void @recur(i32 %n) {
+    entry:
+      %a = add i32 %n, 1
+      %stop = icmp eq i32 %n, 0
+      br i1 %stop, label %exit, label %step
+    step:
+      %next = sub i32 %n, 1
+      call void @recur(i32 %next)
+      br label %exit
+    exit:
+      ret void
+    }
+    define i32 @main() {
+    entry:
+      %dummy = add i32 1, 2
+      call void @recur(i32 1)
+      ret i32 0
+    }
+  )";
+  auto module = parseModule(source);
+  ASSERT_NE(module, nullptr);
+  MHPAnalysis mhp(*module);
+  mhp.analyze();
+  const Function *recur = module->getFunction("recur");
+  ASSERT_NE(recur, nullptr);
+  const Instruction *entry = findInstructionByName(*recur, "a");
+  const Instruction *recursive = nullptr;
+  for (const Instruction &inst : instructions(recur)) {
+    const auto *call = dyn_cast<CallBase>(&inst);
+    if (call && call->getCalledFunction() == recur) {
+      recursive = &inst;
+      break;
+    }
+  }
+  ASSERT_NE(entry, nullptr);
+  ASSERT_NE(recursive, nullptr);
+  const ThreadFlowGraph &tfg = mhp.getThreadFlowGraph();
+  SyncNode *recursive_node = tfg.getNode(recursive);
+  SyncNode *outer_entry = tfg.getNode(entry);
+  ASSERT_NE(recursive_node, nullptr);
+  ASSERT_NE(outer_entry, nullptr);
+  EXPECT_FALSE(tfg.hasEdgeKind(recursive_node, outer_entry, EdgeKind::Call));
+}
+
+TEST_F(MHPAnalysisTest, FirstInstructionCallDoesNotReuseRootContext) {
+  const char *source = R"(
+    define void @helper() {
+    entry:
+      %h = add i32 1, 2
+      ret void
+    }
+    define i32 @main() {
+    entry:
+      call void @helper()
+      %post = add i32 3, 4
+      ret i32 %post
+    }
+  )";
+  auto module = parseModule(source);
+  ASSERT_NE(module, nullptr);
+  MHPAnalysis mhp(*module);
+  mhp.analyze();
+  const Function *main_func = module->getFunction("main");
+  const Function *helper = module->getFunction("helper");
+  ASSERT_NE(main_func, nullptr);
+  ASSERT_NE(helper, nullptr);
+  const Instruction *call = &main_func->getEntryBlock().front();
+  const Instruction *helper_inst = findInstructionByName(*helper, "h");
+  ASSERT_NE(helper_inst, nullptr);
+  const ThreadFlowGraph &tfg = mhp.getThreadFlowGraph();
+  SyncNode *call_node = tfg.getNode(call, 0, 0);
+  ASSERT_NE(call_node, nullptr);
+  EXPECT_EQ(tfg.getThreadEntryNode(0), call_node);
+  std::vector<SyncNode *> helper_nodes = tfg.getNodes(helper_inst, 0);
+  ASSERT_EQ(helper_nodes.size(), 1u);
+  EXPECT_NE(helper_nodes.front()->getCallContextID(), 0u);
+  EXPECT_EQ(helper_nodes.front()->getCallContextID(), call_node->getNodeID());
+}
+
+TEST_F(MHPAnalysisTest, NullQueriesDoNotProduceMustSequentialFacts) {
+  const char *source = R"(
+    define i32 @main() {
+    entry:
+      %x = add i32 1, 2
+      ret i32 %x
+    }
+  )";
+  auto module = parseModule(source);
+  ASSERT_NE(module, nullptr);
+  MHPAnalysis mhp(*module);
+  mhp.analyze();
+  const Instruction *x =
+      findInstructionByName(*module->getFunction("main"), "x");
+  ASSERT_NE(x, nullptr);
+  EXPECT_TRUE(mhp.mayHappenInParallel(nullptr, x));
+  EXPECT_TRUE(mhp.mayHappenInParallel(x, nullptr));
+  EXPECT_FALSE(mhp.mustBeSequential(nullptr, x));
+  EXPECT_FALSE(mhp.mustBeSequential(x, nullptr));
+}
 TEST_F(MHPAnalysisTest, DeepCallChainPreservesNestedForkJoin) {
   const char *source = R"(
     @shared = global i32 0, align 4
@@ -461,12 +568,9 @@ TEST_F(MHPAnalysisTest, ThreadFlowGraphIndexesSCCCondensation) {
   ThreadFlowGraph tfg;
   tfg.addThread(0, nullptr);
 
-  SyncNode *a =
-      tfg.createNode(nullptr, SyncNodeType::REGULAR_INST, 0);
-  SyncNode *c =
-      tfg.createNode(nullptr, SyncNodeType::REGULAR_INST, 0);
-  SyncNode *b =
-      tfg.createNode(nullptr, SyncNodeType::REGULAR_INST, 0);
+  SyncNode *a = tfg.createNode(nullptr, SyncNodeType::REGULAR_INST, 0);
+  SyncNode *c = tfg.createNode(nullptr, SyncNodeType::REGULAR_INST, 0);
+  SyncNode *b = tfg.createNode(nullptr, SyncNodeType::REGULAR_INST, 0);
   tfg.addIntraThreadEdge(a, b);
   tfg.addIntraThreadEdge(b, b);
   tfg.addIntraThreadEdge(b, c);
@@ -479,12 +583,9 @@ TEST_F(MHPAnalysisTest, ThreadFlowGraphIndexesSCCCondensation) {
 TEST_F(MHPAnalysisTest, ThreadFlowGraphMutationIsCanonical) {
   ThreadFlowGraph first;
   first.addThread(0, nullptr);
-  SyncNode *a =
-      first.createNode(nullptr, SyncNodeType::REGULAR_INST, 0);
-  SyncNode *b =
-      first.createNode(nullptr, SyncNodeType::REGULAR_INST, 0);
-  SyncNode *c =
-      first.createNode(nullptr, SyncNodeType::REGULAR_INST, 0);
+  SyncNode *a = first.createNode(nullptr, SyncNodeType::REGULAR_INST, 0);
+  SyncNode *b = first.createNode(nullptr, SyncNodeType::REGULAR_INST, 0);
+  SyncNode *c = first.createNode(nullptr, SyncNodeType::REGULAR_INST, 0);
 
   first.addIntraThreadEdge(a, b);
   first.addIntraThreadEdge(a, b);

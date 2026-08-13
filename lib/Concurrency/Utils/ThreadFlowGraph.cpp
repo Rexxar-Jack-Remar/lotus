@@ -11,6 +11,7 @@
 
 #include "Concurrency/Utils/ThreadFlowGraph.h"
 
+#include <cassert>
 #include <functional>
 #include <queue>
 #include <unordered_set>
@@ -127,6 +128,8 @@ SyncNode *ThreadFlowGraph::createNode(const Instruction *inst,
     InstThreadKey key{inst, tid, ctx};
     auto it = m_inst_thread_to_node.find(key);
     if (it != m_inst_thread_to_node.end()) {
+      assert(it->second->getType() == type &&
+             "conflicting node type for an existing TFG identity");
       return it->second;
     }
   }
@@ -144,8 +147,7 @@ SyncNode *ThreadFlowGraph::createNode(const Instruction *inst,
   return node;
 }
 
-SyncNode *ThreadFlowGraph::getNode(const Instruction *inst,
-                                   ThreadID tid,
+SyncNode *ThreadFlowGraph::getNode(const Instruction *inst, ThreadID tid,
                                    CallContextID ctx) const {
   if (!inst) {
     return nullptr;
@@ -177,7 +179,8 @@ SyncNode *ThreadFlowGraph::getNode(const Instruction *inst) const {
   return nullptr;
 }
 
-std::vector<SyncNode *> ThreadFlowGraph::getNodes(const Instruction *inst) const {
+std::vector<SyncNode *>
+ThreadFlowGraph::getNodes(const Instruction *inst) const {
   auto it = m_inst_to_nodes.find(inst);
   if (it == m_inst_to_nodes.end()) {
     return {};
@@ -215,6 +218,7 @@ std::vector<ThreadID> ThreadFlowGraph::getAllThreads() const {
   for (const auto &pair : m_thread_entries) {
     threads.push_back(pair.first);
   }
+  std::sort(threads.begin(), threads.end());
   return threads;
 }
 
@@ -245,9 +249,11 @@ SyncNode *ThreadFlowGraph::getThreadExitNode(ThreadID tid) const {
   return it->second.front();
 }
 
-std::vector<SyncNode *> ThreadFlowGraph::getThreadExitNodes(ThreadID tid) const {
+std::vector<SyncNode *>
+ThreadFlowGraph::getThreadExitNodes(ThreadID tid) const {
   auto it = m_thread_exit_nodes.find(tid);
-  return it != m_thread_exit_nodes.end() ? it->second : std::vector<SyncNode *>();
+  return it != m_thread_exit_nodes.end() ? it->second
+                                         : std::vector<SyncNode *>();
 }
 
 void ThreadFlowGraph::addIntraThreadEdge(SyncNode *from, SyncNode *to) {
@@ -287,16 +293,16 @@ void ThreadFlowGraph::addEdge(SyncNode *from, SyncNode *to, EdgeKind kind) {
   invalidateReachabilityIndex();
 }
 
-std::optional<EdgeKind>
-ThreadFlowGraph::getEdgeKind(const SyncNode *from, const SyncNode *to) const {
+std::optional<EdgeKind> ThreadFlowGraph::getEdgeKind(const SyncNode *from,
+                                                     const SyncNode *to) const {
   auto it = m_edge_kinds.find({from, to});
   if (it == m_edge_kinds.end()) {
     return std::nullopt;
   }
-  for (EdgeKind kind : {EdgeKind::Join, EdgeKind::Create, EdgeKind::Barrier,
-                        EdgeKind::TaskDepend, EdgeKind::TaskWait,
-                        EdgeKind::TaskCompletion, EdgeKind::Signal,
-                        EdgeKind::Call, EdgeKind::Ret, EdgeKind::Control}) {
+  for (EdgeKind kind :
+       {EdgeKind::Join, EdgeKind::Create, EdgeKind::Barrier,
+        EdgeKind::TaskDepend, EdgeKind::TaskWait, EdgeKind::TaskCompletion,
+        EdgeKind::Signal, EdgeKind::Call, EdgeKind::Ret, EdgeKind::Control}) {
     if (it->second & edgeKindBit(kind)) {
       return kind;
     }
@@ -323,10 +329,9 @@ void ThreadFlowGraph::setFunctionExitNode(ThreadID tid,
   }
 }
 
-SyncNode *
-ThreadFlowGraph::getFunctionExitNode(ThreadID tid,
-                                     const llvm::Function *func,
-                                     CallContextID ctx) const {
+SyncNode *ThreadFlowGraph::getFunctionExitNode(ThreadID tid,
+                                               const llvm::Function *func,
+                                               CallContextID ctx) const {
   auto it = m_func_exit_nodes.find({tid, func, ctx});
   if (it == m_func_exit_nodes.end() || it->second.size() != 1) {
     return nullptr;
@@ -335,8 +340,7 @@ ThreadFlowGraph::getFunctionExitNode(ThreadID tid,
 }
 
 std::vector<SyncNode *>
-ThreadFlowGraph::getFunctionExitNodes(ThreadID tid,
-                                      const llvm::Function *func,
+ThreadFlowGraph::getFunctionExitNodes(ThreadID tid, const llvm::Function *func,
                                       CallContextID ctx) const {
   auto it = m_func_exit_nodes.find({tid, func, ctx});
   return it != m_func_exit_nodes.end() ? it->second : std::vector<SyncNode *>();
@@ -437,8 +441,7 @@ void ThreadFlowGraph::buildReachabilityIndex() {
 
   errs() << "Building TFG reachability index...\n";
 
-  for (const auto &entry : m_thread_entries) {
-    ThreadID tid = entry.first;
+  for (ThreadID tid : getAllThreads()) {
     buildSCCs(tid);
     buildTopologicalOrder(tid);
   }

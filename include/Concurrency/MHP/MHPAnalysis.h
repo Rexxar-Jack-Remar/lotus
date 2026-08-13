@@ -272,6 +272,7 @@ public:
 
   // Component access for advanced users
   const ThreadFlowGraph &getThreadFlowGraph() const { return *m_tfg; }
+  size_t getAnalysisGeneration() const { return m_analysis_generation; }
   bool joinEdgeMustOrderTarget(const SyncNode *join_node,
                                const SyncNode *target_node) const;
   bool synchronizationEdgeMustOrderTarget(const SyncNode *from,
@@ -364,11 +365,13 @@ private:
       m_thread_children; // Parent -> Children
   std::unordered_map<const llvm::Instruction *, std::unordered_set<ThreadID>>
       m_fork_to_thread; // Fork inst -> context-specific created threads
+  std::unordered_map<const SyncNode *, ThreadID> m_fork_node_to_thread;
   std::unordered_map<const llvm::Instruction *, ThreadID>
       m_join_to_thread; // Join inst -> joined thread
   std::unordered_set<ThreadID> m_detached_threads;
 
-  // Value tracking for pthread_t variables
+  // Value tracking for pthread_t variables. Exact fork-node lookup is used
+  // first so repeated helper invocations do not share child identities.
   std::unordered_map<const llvm::Value *, std::unordered_set<ThreadID>>
       m_pthread_value_to_threads; // pthread_t value -> possible thread IDs
   std::unordered_map<ThreadID, const llvm::Value *>
@@ -392,10 +395,6 @@ private:
       const llvm::Value *,
       std::unordered_map<size_t, std::vector<BarrierParticipant>>>
       m_barrier_waits;
-  std::unordered_map<const llvm::Value *, std::unordered_map<ThreadID, size_t>>
-      m_barrier_phase_by_thread;
-  std::unordered_map<const llvm::Value *, std::unordered_map<ThreadID, size_t>>
-      m_pending_split_barrier_phase_by_thread;
   std::unordered_map<const llvm::Value *, size_t> m_barrier_expected_counts;
   std::unordered_map<const llvm::Value *, size_t> m_barrier_init_sites;
   std::unordered_set<const llvm::Value *> m_uncertain_barrier_counts;
@@ -425,6 +424,14 @@ private:
   mutable std::unordered_map<InstPair, bool, InstPairHash> m_order_cache;
   mutable std::unordered_map<InstPair, bool, InstPairHash> m_mhp_cache;
   bool m_has_multi_context_nodes = false;
+  size_t m_analysis_generation = 0;
+
+  struct PendingJoin {
+    const llvm::Instruction *inst = nullptr;
+    SyncNode *node = nullptr;
+    ThreadID parent_tid = 0;
+  };
+  std::vector<PendingJoin> m_pending_joins;
 
   // ========================================================================
   // Analysis Phases
@@ -468,9 +475,13 @@ private:
   void computeMHPPairsInstructionLevel();
 
   std::vector<SyncNode *>
-  getBarrierContinuations(const llvm::Instruction *barrier_inst) const;
+  getBarrierContinuations(const SyncNode *arrival) const;
+  std::optional<size_t>
+  getBarrierPhaseOrdinal(const llvm::Instruction *barrier_inst,
+                         const llvm::Value *barrier) const;
   void finalizeBarrierPhases();
   void lowerOpenMPTasks(const OpenMP::OpenMPSemantics &semantics);
+  void finalizePendingJoins();
   void recomputePreForkMainNodes();
   bool isMainThreadSpawnNode(const SyncNode *node) const;
   bool isAlwaysPreForkMain(const llvm::Instruction *inst) const;

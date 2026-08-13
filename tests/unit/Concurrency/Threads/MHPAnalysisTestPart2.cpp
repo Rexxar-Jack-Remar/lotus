@@ -231,6 +231,43 @@ TEST_F(MHPAnalysisTest, ConditionalJoinDoesNotOrderPostMergeContinuation) {
   EXPECT_FALSE(hb.mustPrecede(worker_inst, post));
 }
 
+TEST_F(MHPAnalysisTest, JoinResolutionIsIndependentOfBasicBlockStorageOrder) {
+  const char *source = R"(
+    @shared = global i32 0
+    declare i32 @pthread_create(i8*, i8*, i8* (i8*)*, i8*)
+    declare i32 @pthread_join(i8*, i8*)
+    define i8* @worker(i8* %arg) {
+    entry:
+      store i32 1, i32* @shared
+      ret i8* null
+    }
+    define i32 @main() {
+    entry:
+      %tid = alloca i8
+      br label %create
+    join:
+      call i32 @pthread_join(i8* %tid, i8* null)
+      %after = load i32, i32* @shared
+      ret i32 %after
+    create:
+      call i32 @pthread_create(i8* %tid, i8* null,
+                               i8* (i8*)* @worker, i8* null)
+      br label %join
+    }
+  )";
+  auto module = parseModule(source);
+  ASSERT_NE(module, nullptr);
+  MHPAnalysis mhp(*module);
+  mhp.analyze();
+  const Instruction *worker_store =
+      &module->getFunction("worker")->getEntryBlock().front();
+  const Instruction *after =
+      findInstructionByName(*module->getFunction("main"), "after");
+  ASSERT_NE(worker_store, nullptr);
+  ASSERT_NE(after, nullptr);
+  EXPECT_FALSE(mhp.mayHappenInParallel(worker_store, after));
+}
+
 TEST_F(MHPAnalysisTest, RepeatedHelperCallAroundJoinRemainsMHP) {
   const char *source = R"(
     @shared = global i32 0
