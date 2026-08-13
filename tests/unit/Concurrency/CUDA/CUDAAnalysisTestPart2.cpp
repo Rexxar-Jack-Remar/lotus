@@ -123,10 +123,10 @@ TEST_F(CUDAAnalysisTest,
     entry:
       %producer = inttoptr i64 1 to %stream_t*
       %consumer = inttoptr i64 2 to %stream_t*
-      %l0 = call i64 @cudaLaunchKernel(i8* %producer_kernel, i64 1, i64 32, i64 1, i64 1, i64 1, i8** %args, i64 0, %stream_t* %producer)
+      %l0 = call i64 @cudaLaunchKernel(i8* bitcast (void ()* @kernel_producer to i8*), i64 1, i64 32, i64 1, i64 1, i64 1, i8** %args, i64 0, %stream_t* %producer)
       call void @kernel_producer()
       %sync = call i32 @cudaStreamSynchronize(%stream_t* %producer)
-      %l1 = call i64 @cudaLaunchKernel(i8* %consumer_kernel, i64 1, i64 32, i64 1, i64 1, i64 1, i8** %args, i64 0, %stream_t* %consumer)
+      %l1 = call i64 @cudaLaunchKernel(i8* bitcast (void ()* @kernel_consumer to i8*), i64 1, i64 32, i64 1, i64 1, i64 1, i8** %args, i64 0, %stream_t* %consumer)
       call void @kernel_consumer()
       ret i64 %l1
     }
@@ -234,11 +234,11 @@ TEST_F(CUDAAnalysisTest,
     entry:
       %producer = inttoptr i64 1 to %stream_t*
       %consumer = inttoptr i64 2 to %stream_t*
-      %l0 = call i64 @cudaLaunchKernel(i8* %producer_kernel, i64 1, i64 32, i64 1, i64 1, i64 1, i8** %args, i64 0, %stream_t* %producer)
+      %l0 = call i64 @cudaLaunchKernel(i8* bitcast (void ()* @kernel_producer to i8*), i64 1, i64 32, i64 1, i64 1, i64 1, i8** %args, i64 0, %stream_t* %producer)
       call void @kernel_producer()
       %record = call i32 @cudaEventRecord(%event_t* %event, %stream_t* %producer)
       %wait = call i32 @cudaStreamWaitEvent(%stream_t* %consumer, %event_t* %event, i32 0)
-      %l1 = call i64 @cudaLaunchKernel(i8* %consumer_kernel, i64 1, i64 32, i64 1, i64 1, i64 1, i8** %args, i64 0, %stream_t* %consumer)
+      %l1 = call i64 @cudaLaunchKernel(i8* bitcast (void ()* @kernel_consumer to i8*), i64 1, i64 32, i64 1, i64 1, i64 1, i8** %args, i64 0, %stream_t* %consumer)
       call void @kernel_consumer()
       ret i64 %l1
     }
@@ -411,10 +411,10 @@ TEST_F(CUDAAnalysisTest,
 
     define i32 @main() {
     entry:
-      %launch0 = call i32 @cudaLaunchKernel(i8* null, i32 1, i32 1, i32 32,
+      %launch0 = call i32 @cudaLaunchKernel(i8* bitcast (void ()* @kernel_producer to i8*), i32 1, i32 1, i32 32,
                                             i32 1, i64 0, i8* null)
       call void @kernel_producer()
-      %launch1 = call i32 @cudaLaunchKernel(i8* null, i32 1, i32 1, i32 32,
+      %launch1 = call i32 @cudaLaunchKernel(i8* bitcast (void ()* @kernel_consumer to i8*), i32 1, i32 1, i32 32,
                                             i32 1, i64 0, i8* null)
       call void @kernel_consumer()
       %sum = add i32 %launch0, %launch1

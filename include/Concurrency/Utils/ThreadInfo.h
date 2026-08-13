@@ -33,6 +33,8 @@ TFG_To_underlying(E e) noexcept {
 
 class ThreadInfo {
 public:
+  // Legacy process-global registry. Callers must not retain this state across
+  // LLVM Module lifetimes; the current MHP/TFG pipeline does not use it.
   static size_t generateTID(const llvm::CallBase *cb);
   static const llvm::CallBase *queryCSByTID(size_t TID);
   static size_t queryTIDByCS(const llvm::CallBase *CB);

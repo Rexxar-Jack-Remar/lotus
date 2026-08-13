@@ -27,17 +27,28 @@ inline bool startsWithAny(const llvm::StringRef &funcName,
 }
 
 inline bool isKernelLaunch(const llvm::StringRef &funcName) {
+  return funcName.startswith("cudaLaunchKernel") ||
+         funcName.startswith("cudaLaunchCooperativeKernel") ||
+         funcName.startswith("cuLaunchKernel") ||
+         funcName.startswith("cuLaunchCooperativeKernel");
+}
+
+inline bool isLegacyKernelConfiguration(const llvm::StringRef &funcName) {
   return funcName.equals("__set_CUDAConfig") ||
          funcName.equals("__cudaPushCallConfiguration") ||
          funcName.equals("__cudaPopCallConfiguration") ||
-         funcName.contains("cudaLaunchKernelEx") ||
-         funcName.contains("cudaLaunchKernel") ||
-         funcName.contains("cudaLaunchCooperativeKernel") ||
-         funcName.contains("cudaGraphLaunch") ||
-         funcName.contains("cudaGraphAddKernelNode") ||
-         funcName.contains("cudaGraphExecKernelNodeSetParams") ||
-         funcName.contains("cudaConfigureCall") ||
-         startsWithAny(funcName, {"cuLaunch", "cuGraphLaunch"});
+         funcName.equals("cudaConfigureCall");
+}
+
+inline bool isKernelGraphOperation(const llvm::StringRef &funcName) {
+  return funcName.startswith("cudaGraphAddKernelNode") ||
+         funcName.startswith("cudaGraphKernelNodeSetParams") ||
+         funcName.startswith("cudaGraphExecKernelNodeSetParams") ||
+         funcName.equals("cudaGraphLaunch") ||
+         funcName.startswith("cuGraphAddKernelNode") ||
+         funcName.startswith("cuGraphKernelNodeSetParams") ||
+         funcName.startswith("cuGraphExecKernelNodeSetParams") ||
+         funcName.equals("cuGraphLaunch");
 }
 
 inline bool isDeviceSynchronize(const llvm::StringRef &funcName) {
@@ -67,9 +78,15 @@ inline bool isMemoryBarrier(const llvm::StringRef &funcName) {
 }
 
 inline bool isAtomic(const llvm::StringRef &funcName) {
-  return funcName.contains("atomic") ||
-         funcName.startswith("llvm.nvvm.atomic.") ||
-         funcName.startswith("llvm.nvvm.red.");
+  return funcName.startswith("llvm.nvvm.atomic.") ||
+         funcName.startswith("llvm.nvvm.red.") ||
+         funcName.startswith("__nv_atomic") ||
+         funcName.startswith("atomicAdd") || funcName.startswith("atomicSub") ||
+         funcName.startswith("atomicExch") || funcName.startswith("atomicMin") ||
+         funcName.startswith("atomicMax") || funcName.startswith("atomicInc") ||
+         funcName.startswith("atomicDec") || funcName.startswith("atomicCAS") ||
+         funcName.startswith("atomicAnd") || funcName.startswith("atomicOr") ||
+         funcName.startswith("atomicXor");
 }
 
 inline bool isMemcpy(const llvm::StringRef &funcName) {
@@ -80,7 +97,7 @@ inline bool isMemcpy(const llvm::StringRef &funcName) {
                           "cudaGraphExecMemcpyNodeSetParams"}) ||
          startsWithAny(funcName, {"cuMemcpy", "cuGraphMemcpyNode"}) ||
          funcName.contains("cudaMemPrefetchAsync") ||
-         funcName.contains("memcpy");
+         funcName.startswith("llvm.memcpy");
 }
 
 inline bool isMemset(const llvm::StringRef &funcName) {
@@ -150,11 +167,17 @@ inline bool isEventOperation(const llvm::StringRef &funcName) {
 }
 
 inline bool isTexture(const llvm::StringRef &funcName) {
-  return funcName.contains("tex") || funcName.startswith("llvm.nvvm.tex");
+  return funcName.startswith("llvm.nvvm.tex") ||
+         funcName.startswith("tex1D") || funcName.startswith("tex2D") ||
+         funcName.startswith("tex3D") || funcName.startswith("cudaBindTexture") ||
+         funcName.startswith("cudaCreateTextureObject");
 }
 
 inline bool isSurface(const llvm::StringRef &funcName) {
-  return funcName.contains("surf") || funcName.startswith("llvm.nvvm.surf");
+  return funcName.startswith("llvm.nvvm.surf") ||
+         funcName.startswith("surf1D") || funcName.startswith("surf2D") ||
+         funcName.startswith("surf3D") ||
+         funcName.startswith("cudaBindSurface");
 }
 
 inline bool isUnifiedMemory(const llvm::StringRef &funcName) {

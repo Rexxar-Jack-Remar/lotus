@@ -924,6 +924,7 @@ void OpenMPSemantics::buildTaskRelations() {
 
       if (!saw_conflict) {
         if (saw_unknown_conflict) {
+          ++m_deferred_reason_counts["omp_depend_may_conflict"];
           recordRelation(
               task_i, task_j, concurrency::RelationKind::UnknownDueToModelGap,
               concurrency::ProofStrength::May, "omp_depend_may_conflict");
@@ -1354,14 +1355,14 @@ void OpenMPSemantics::scanSchedulingContext(
         std::vector<Dependency> dependencies =
             extractRuntimeDependencies(call, 2, 3);
         WaitBoundaryInfo boundary = recordBoundary(
-            call, WaitBoundaryInfo::Kind::TaskwaitDeps, dependencies.empty());
+            call, WaitBoundaryInfo::Kind::TaskwaitDeps, true);
         addTaskEvent(
             OpenMPTaskEvent::Kind::TaskwaitDeps, call,
             state.scheduling_context_id, state.sequence_index,
             boundary.event_order, currentPhaseToken(),
             state.taskgroup_stack.empty() ? 0 : state.taskgroup_stack.back(),
             currentRegionId(), boundary.semantic_entity_id, nullptr,
-            WaitBoundaryInfo::Kind::TaskwaitDeps, dependencies.empty(), false,
+            WaitBoundaryInfo::Kind::TaskwaitDeps, true, false,
             std::move(dependencies));
         continue;
       }

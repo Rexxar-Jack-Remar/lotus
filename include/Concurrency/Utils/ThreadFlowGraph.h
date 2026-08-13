@@ -14,6 +14,7 @@
 
 #include <map>
 #include <memory>
+#include <optional>
 #include <tuple>
 #include <unordered_map>
 #include <vector>
@@ -76,9 +77,9 @@ enum class EdgeKind {
 class SyncNode {
 public:
   SyncNode(const llvm::Instruction *inst, SyncNodeType type, ThreadID tid,
-           CallContextID ctx = 0)
+           CallContextID ctx, size_t node_id)
       : m_instruction(inst), m_type(type), m_thread_id(tid), m_call_context_id(ctx),
-        m_node_id(next_id++) {}
+        m_node_id(node_id) {}
 
   const llvm::Instruction *getInstruction() const { return m_instruction; }
   SyncNodeType getType() const { return m_type; }
@@ -100,8 +101,8 @@ public:
   ThreadID getJoinedThread() const { return m_joined_thread; }
 
   // Predecessors and successors
-  void addPredecessor(SyncNode *pred) { m_predecessors.push_back(pred); }
-  void addSuccessor(SyncNode *succ) { m_successors.push_back(succ); }
+  void addPredecessor(SyncNode *pred);
+  void addSuccessor(SyncNode *succ);
 
   const std::vector<SyncNode *> &getPredecessors() const {
     return m_predecessors;
@@ -129,7 +130,6 @@ private:
   std::vector<SyncNode *> m_predecessors;
   std::vector<SyncNode *> m_successors;
 
-  static size_t next_id;
 };
 
 // ============================================================================
@@ -142,6 +142,9 @@ private:
  * Represents the control flow and synchronization structure of a multithreaded
  * program. Each thread has its own flow graph, and synchronization edges
  * connect different threads.
+ *
+ * The graph is a non-owning view of LLVM IR. Its Module, Instructions, and
+ * Values must remain alive and structurally unchanged for the graph lifetime.
  */
 class ThreadFlowGraph {
 public:
@@ -178,7 +181,10 @@ public:
   void addCallEdge(SyncNode *call_site, SyncNode *callee_entry);
   void addRetEdge(SyncNode *callee_exit, SyncNode *return_site);
   void addInterThreadEdge(SyncNode *from, SyncNode *to, EdgeKind kind);
-  EdgeKind getEdgeKind(const SyncNode *from, const SyncNode *to) const;
+  std::optional<EdgeKind> getEdgeKind(const SyncNode *from,
+                                      const SyncNode *to) const;
+  bool hasEdgeKind(const SyncNode *from, const SyncNode *to,
+                   EdgeKind kind) const;
 
   // Per-function exit node (for ret edges); key is (ThreadID, Function*)
   void setFunctionExitNode(ThreadID tid, const llvm::Function *func,
@@ -234,10 +240,11 @@ private:
       m_inst_thread_to_node;
   std::unordered_map<const llvm::Instruction *, std::vector<SyncNode *>>
       m_inst_to_nodes;
+  std::unordered_map<ThreadID, std::vector<SyncNode *>> m_thread_nodes;
   std::unordered_map<ThreadID, const llvm::Function *> m_thread_entries;
   std::unordered_map<ThreadID, SyncNode *> m_thread_entry_nodes;
   std::unordered_map<ThreadID, std::vector<SyncNode *>> m_thread_exit_nodes;
-  std::map<std::pair<const SyncNode *, const SyncNode *>, EdgeKind>
+  std::map<std::pair<const SyncNode *, const SyncNode *>, uint32_t>
       m_edge_kinds;
   std::map<std::tuple<ThreadID, const llvm::Function *, CallContextID>,
            std::vector<SyncNode *>>
@@ -249,7 +256,10 @@ private:
   std::unordered_map<ThreadID, std::vector<SyncNode *>> m_topo_nodes;
   std::unordered_map<const SyncNode *, std::vector<SyncNode *>> m_reverse_edges;
   std::unordered_map<const SyncNode *, const SyncNode *> m_scc_representative;
+  size_t m_next_node_id = 0;
 
+  void addEdge(SyncNode *from, SyncNode *to, EdgeKind kind);
+  void invalidateReachabilityIndex();
   void buildTopologicalOrder(ThreadID tid);
   void buildReverseEdges();
   void buildSCCs(ThreadID tid);

@@ -196,7 +196,9 @@ inline bool isTaskloopNoWait(const llvm::StringRef &funcName) {
 
 // OpenMP 4.0+ Target Offloading
 inline bool isTargetInit(const llvm::StringRef &funcName) {
-  return funcName.startswith("__tgt_target");
+  return funcName.equals("__tgt_target") ||
+         funcName.startswith("__tgt_target_nowait") ||
+         funcName.startswith("__tgt_target_teams");
 }
 
 inline bool isTargetDataBegin(const llvm::StringRef &funcName) {
@@ -351,7 +353,8 @@ inline bool isCancelBarrier(const llvm::StringRef &funcName) {
 
 // OpenMP 5.0+ Interop Construct
 inline bool isInteropInit(const llvm::StringRef &funcName) {
-  return funcName.startswith("__kmpc_interop");
+  return funcName.equals("__kmpc_interop") ||
+         funcName.startswith("__kmpc_interop_init");
 }
 
 inline bool isInteropFini(const llvm::StringRef &funcName) {
@@ -360,7 +363,8 @@ inline bool isInteropFini(const llvm::StringRef &funcName) {
 
 // OpenMP 5.1+ Doacross support
 inline bool isDoacrossInit(const llvm::StringRef &funcName) {
-  return funcName.startswith("__kmpc_doacross");
+  return funcName.equals("__kmpc_doacross") ||
+         funcName.startswith("__kmpc_doacross_init");
 }
 
 inline bool isDoacrossWait(const llvm::StringRef &funcName) {

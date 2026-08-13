@@ -1,4 +1,5 @@
 #include "Concurrency/ConcurrencyFacade.h"
+#include "Concurrency/CUDA/CUDAAnalysis.h"
 
 #include "TestUtils/LLVMHelpers.h"
 
@@ -78,6 +79,62 @@ TEST_F(ConcurrencyFacadeTest, SummarizesOpenMPTaskGraph) {
   EXPECT_EQ(summary.detach_completion_count, 0u);
   EXPECT_EQ(summary.unknown_relation_count, 2u);
   EXPECT_GE(summary.unknown_reason_bucket_count, 1u);
+  EXPECT_GE(summary.getRelationCount(
+                concurrency::RelationKind::UnknownDueToModelGap,
+                concurrency::ProofStrength::Unknown),
+            1u);
+  EXPECT_GE(summary.unknown_reason_counts["omp_taskwait_deps_partial"], 1u);
+}
+
+TEST_F(ConcurrencyFacadeTest, PreservesOpenMPMayGapReasonAndProof) {
+  const char *source = R"(
+    %kmp_depend_info = type { i8*, i64, i8 }
+
+    declare i32 @__kmpc_omp_task_with_deps(i8*, i32, i8*, i32,
+                                           %kmp_depend_info*, i32,
+                                           %kmp_depend_info*)
+
+    define i32 @main(i8* %lhs_addr, i8* %rhs_addr) {
+    entry:
+      %lhsdeps = alloca [1 x %kmp_depend_info], align 8
+      %rhsdeps = alloca [1 x %kmp_depend_info], align 8
+      %l0 = getelementptr [1 x %kmp_depend_info], [1 x %kmp_depend_info]* %lhsdeps, i64 0, i64 0, i32 0
+      %l1 = getelementptr [1 x %kmp_depend_info], [1 x %kmp_depend_info]* %lhsdeps, i64 0, i64 0, i32 1
+      %l2 = getelementptr [1 x %kmp_depend_info], [1 x %kmp_depend_info]* %lhsdeps, i64 0, i64 0, i32 2
+      %r0 = getelementptr [1 x %kmp_depend_info], [1 x %kmp_depend_info]* %rhsdeps, i64 0, i64 0, i32 0
+      %r1 = getelementptr [1 x %kmp_depend_info], [1 x %kmp_depend_info]* %rhsdeps, i64 0, i64 0, i32 1
+      %r2 = getelementptr [1 x %kmp_depend_info], [1 x %kmp_depend_info]* %rhsdeps, i64 0, i64 0, i32 2
+      store i8* %lhs_addr, i8** %l0
+      store i64 4, i64* %l1
+      store i8 2, i8* %l2
+      store i8* %rhs_addr, i8** %r0
+      store i64 4, i64* %r1
+      store i8 2, i8* %r2
+      %lhs = getelementptr [1 x %kmp_depend_info], [1 x %kmp_depend_info]* %lhsdeps, i64 0, i64 0
+      %rhs = getelementptr [1 x %kmp_depend_info], [1 x %kmp_depend_info]* %rhsdeps, i64 0, i64 0
+      call i32 @__kmpc_omp_task_with_deps(i8* null, i32 0, i8* null, i32 1,
+                                          %kmp_depend_info* %lhs, i32 0,
+                                          %kmp_depend_info* null)
+      call i32 @__kmpc_omp_task_with_deps(i8* null, i32 0, i8* null, i32 1,
+                                          %kmp_depend_info* %rhs, i32 0,
+                                          %kmp_depend_info* null)
+      ret i32 0
+    }
+  )";
+
+  auto module = parseModule(source);
+  ASSERT_NE(module, nullptr);
+
+  auto summary = concurrency::ConcurrencyFacade::analyzeOpenMP(*module);
+  EXPECT_EQ(summary.getRelationCount(
+                concurrency::RelationKind::UnknownDueToModelGap,
+                concurrency::ProofStrength::May),
+            1u);
+  EXPECT_EQ(summary.getRelationCount(
+                concurrency::RelationKind::UnknownDueToModelGap,
+                concurrency::ProofStrength::Unknown),
+            0u);
+  EXPECT_GE(summary.unknown_reason_counts["omp_depend_may_conflict"], 1u);
 }
 
 TEST_F(ConcurrencyFacadeTest, SummarizesOutlinedOpenMPAndExtendedSyncCounters) {
@@ -132,9 +189,17 @@ TEST_F(ConcurrencyFacadeTest, SummarizesOutlinedOpenMPAndExtendedSyncCounters) {
 TEST_F(ConcurrencyFacadeTest, CountsSelectiveOpenMPWaitDepsAsHB) {
   const char *source = R"(
     %kmp_depend_info = type { i8*, i64, i8 }
-    @shared = global i32 0, align 4
-    @deps = global [1 x %kmp_depend_info] [
-      %kmp_depend_info { i8* bitcast (i32* @shared to i8*), i64 4, i8 2 }
+    @lhs_shared = global i32 0, align 4
+    @rhs_shared = global i32 0, align 4
+    @lhsdeps = constant [1 x %kmp_depend_info] [
+      %kmp_depend_info { i8* bitcast (i32* @lhs_shared to i8*), i64 4, i8 2 }
+    ]
+    @rhsdeps = constant [1 x %kmp_depend_info] [
+      %kmp_depend_info { i8* bitcast (i32* @rhs_shared to i8*), i64 4, i8 2 }
+    ]
+    @waitdeps = constant [2 x %kmp_depend_info] [
+      %kmp_depend_info { i8* bitcast (i32* @lhs_shared to i8*), i64 4, i8 2 },
+      %kmp_depend_info { i8* bitcast (i32* @rhs_shared to i8*), i64 4, i8 2 }
     ]
 
     declare i32 @__kmpc_omp_task_with_deps(i8*, i32, i8*, i32,
@@ -146,14 +211,12 @@ TEST_F(ConcurrencyFacadeTest, CountsSelectiveOpenMPWaitDepsAsHB) {
 
     define i32 @main() {
     entry:
-      %dep = getelementptr inbounds [1 x %kmp_depend_info],
-              [1 x %kmp_depend_info]* @deps, i64 0, i64 0
       call i32 @__kmpc_omp_task_with_deps(i8* null, i32 0, i8* null, i32 1,
-                                          %kmp_depend_info* %dep, i32 0, %kmp_depend_info* null)
-      call i32 @__kmpc_omp_wait_deps(i8* null, i32 0, i32 1,
-                                     %kmp_depend_info* %dep, i32 0, %kmp_depend_info* null)
+                                          %kmp_depend_info* getelementptr ([1 x %kmp_depend_info], [1 x %kmp_depend_info]* @lhsdeps, i64 0, i64 0), i32 0, %kmp_depend_info* null)
+      call i32 @__kmpc_omp_wait_deps(i8* null, i32 0, i32 2,
+                                     %kmp_depend_info* getelementptr ([2 x %kmp_depend_info], [2 x %kmp_depend_info]* @waitdeps, i64 0, i64 0), i32 0, %kmp_depend_info* null)
       call i32 @__kmpc_omp_task_with_deps(i8* null, i32 0, i8* null, i32 1,
-                                          %kmp_depend_info* %dep, i32 0, %kmp_depend_info* null)
+                                          %kmp_depend_info* getelementptr ([1 x %kmp_depend_info], [1 x %kmp_depend_info]* @rhsdeps, i64 0, i64 0), i32 0, %kmp_depend_info* null)
       ret i32 0
     }
   )";
@@ -162,7 +225,14 @@ TEST_F(ConcurrencyFacadeTest, CountsSelectiveOpenMPWaitDepsAsHB) {
   ASSERT_NE(module, nullptr);
 
   auto summary = concurrency::ConcurrencyFacade::analyzeOpenMP(*module);
-  EXPECT_EQ(summary.happens_before_relation_count, 1u);
+  EXPECT_EQ(summary.getRelationCount(
+                concurrency::RelationKind::SelectiveHappenBefore,
+                concurrency::ProofStrength::Must),
+            1u);
+  EXPECT_EQ(summary.getRelationCount(
+                concurrency::RelationKind::MustHappenBefore,
+                concurrency::ProofStrength::Must),
+            0u);
   EXPECT_EQ(summary.unknown_relation_count, 0u);
   EXPECT_EQ(summary.deferred_wait_dep_count, 0u);
 }
@@ -281,6 +351,53 @@ TEST_F(ConcurrencyFacadeTest, SummarizesValidatedMPIStateCounters) {
   EXPECT_GE(summary.rank_restricted_operation_count, 1u);
 }
 
+TEST_F(ConcurrencyFacadeTest, PreservesMPIDiagnosticAndModelGapMetadata) {
+  const char *source = R"(
+    declare i32 @MPI_Init(i32*, i8***)
+    declare i32 @MPI_Send(i8*, i32, i32, i32, i32, i8*)
+    declare i32 @MPI_Testany(i32, i8**, i32*, i32*, i8*)
+
+    define i32 @main(i8* %comm, i32 %flag_value) {
+    entry:
+      %reqs = alloca [1 x i8*], align 8
+      %slot = getelementptr inbounds [1 x i8*], [1 x i8*]* %reqs, i64 0, i64 0
+      %index = alloca i32, align 4
+      %flag = alloca i32, align 4
+      store i8* null, i8** %slot, align 8
+      store i32 %flag_value, i32* %flag, align 4
+      call i32 @MPI_Init(i32* null, i8*** null)
+      call i32 @MPI_Send(i8* null, i32 1, i32 0, i32 -3, i32 -2, i8* %comm)
+      call i32 @MPI_Testany(i32 1, i8** %slot, i32* %index,
+                            i32* %flag, i8* null)
+      ret i32 0
+    }
+  )";
+
+  auto module = parseModule(source);
+  ASSERT_NE(module, nullptr);
+
+  auto summary = concurrency::ConcurrencyFacade::analyzeMPI(*module);
+  EXPECT_TRUE(summary.missing_finalize);
+  EXPECT_EQ(summary.invalid_tag_count, 1u);
+  EXPECT_EQ(summary.invalid_rank_count, 1u);
+  EXPECT_GE(summary.model_gap_count, 1u);
+  EXPECT_EQ(summary.diagnostic_code_counts["missing_finalize"], 1u);
+  EXPECT_EQ(summary.diagnostic_code_counts["invalid_tag"], 1u);
+  EXPECT_EQ(summary.diagnostic_code_counts["invalid_rank"], 1u);
+
+  bool saw_model_gap_relation = false;
+  for (const auto &diagnostic : summary.diagnostics) {
+    if (diagnostic.has_relation &&
+        diagnostic.relation.kind ==
+            concurrency::RelationKind::UnknownDueToModelGap &&
+        diagnostic.relation.proof == concurrency::ProofStrength::Unknown &&
+        !diagnostic.model_gap_domain.empty()) {
+      saw_model_gap_relation = true;
+    }
+  }
+  EXPECT_TRUE(saw_model_gap_relation);
+}
+
 TEST_F(ConcurrencyFacadeTest, SummarizesExtendedMPIProtocolCounters) {
   const char *source = R"(
     declare i32 @MPI_Comm_rank(i8*, i32*)
@@ -376,12 +493,88 @@ TEST_F(ConcurrencyFacadeTest, SummarizesCUDAUnifiedMemoryAndHazards) {
   ASSERT_NE(module, nullptr);
 
   auto summary = concurrency::ConcurrencyFacade::analyzeCUDA(*module);
+  EXPECT_TRUE(summary.isComplete());
   EXPECT_EQ(summary.kernel_launch_count, 2u);
   EXPECT_EQ(summary.inter_kernel_hazard_count, 1u);
   EXPECT_EQ(summary.unified_memory_count, 3u);
   EXPECT_EQ(summary.managed_allocation_count, 1u);
   EXPECT_EQ(summary.unified_prefetch_count, 1u);
   EXPECT_EQ(summary.unified_host_allocation_count, 1u);
+}
+
+TEST_F(ConcurrencyFacadeTest, CUDALegacyLaunchContributesOnce) {
+  const char *source = R"(
+    declare void @__set_CUDAConfig(i32, i32)
+
+    define void @kernel() {
+    entry:
+      ret void
+    }
+
+    define i32 @main() {
+    entry:
+      call void @__set_CUDAConfig(i32 1, i32 32)
+      call void @kernel()
+      ret i32 0
+    }
+  )";
+
+  auto module = parseModule(source);
+  ASSERT_NE(module, nullptr);
+
+  auto summary = concurrency::ConcurrencyFacade::analyzeCUDA(*module);
+  EXPECT_TRUE(summary.isComplete());
+  EXPECT_EQ(summary.kernel_launch_count, 1u);
+  EXPECT_EQ(summary.operation_count, 1u);
+}
+
+TEST_F(ConcurrencyFacadeTest, CUDARejectsUnrunAndMismatchedSnapshots) {
+  auto module_a = parseModule("define void @a() { ret void }");
+  auto module_b = parseModule("define void @b() { ret void }");
+  ASSERT_NE(module_a, nullptr);
+  ASSERT_NE(module_b, nullptr);
+
+  concurrency::cuda::CUDAAnalysis analysis(*module_a);
+  auto unrun = concurrency::ConcurrencyFacade::summarizeCUDA(analysis);
+  EXPECT_EQ(unrun.status,
+            concurrency::ConcurrencyFacade::CUDAAnalysisStatus::NotRun);
+  EXPECT_EQ(unrun.operation_count, 0u);
+
+  analysis.runAnalysis();
+  auto mismatched =
+      concurrency::ConcurrencyFacade::summarizeCUDA(analysis, *module_b);
+  EXPECT_EQ(mismatched.status,
+            concurrency::ConcurrencyFacade::CUDAAnalysisStatus::ModuleMismatch);
+  EXPECT_EQ(mismatched.kernel_count, 0u);
+}
+
+TEST_F(ConcurrencyFacadeTest, PreservesCUDAModelGapConfidence) {
+  const char *source = R"(
+    define ptx_kernel void @kernel() !nvvm.annotations !0 {
+    entry:
+      ret void
+    }
+
+    !0 = !{void ()* @kernel, !"kernel", i32 1}
+  )";
+
+  auto module = parseModule(source);
+  ASSERT_NE(module, nullptr);
+
+  auto summary = concurrency::ConcurrencyFacade::analyzeCUDA(*module);
+  EXPECT_TRUE(summary.isComplete());
+  EXPECT_EQ(summary.kernel_count, 1u);
+  EXPECT_GE(summary.model_gap_count, 1u);
+  EXPECT_GE(summary.model_gap_reason_counts["launch_context_missing"], 1u);
+
+  bool saw_confidence = false;
+  for (const auto &gap : summary.model_gaps) {
+    if (gap.reason_bucket == "launch_context_missing" &&
+        gap.confidence == 0.55 && !gap.explanation.empty()) {
+      saw_confidence = true;
+    }
+  }
+  EXPECT_TRUE(saw_confidence);
 }
 
 TEST_F(ConcurrencyFacadeTest, PrintsOpenMPSummaryReport) {

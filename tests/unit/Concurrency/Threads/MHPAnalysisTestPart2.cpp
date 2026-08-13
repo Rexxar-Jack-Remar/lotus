@@ -182,6 +182,54 @@ TEST_F(MHPAnalysisTest, MultiExitWorkerStillOrdersPostJoinContinuation) {
   EXPECT_TRUE(mhp.mustBeSequential(left_work, post));
   EXPECT_TRUE(mhp.mustBeSequential(right_work, post));
 }
+TEST_F(MHPAnalysisTest, ConditionalJoinDoesNotOrderPostMergeContinuation) {
+  const char *source = R"(
+    @shared = global i32 0, align 4
+
+    declare i32 @pthread_create(i8*, i8*, i8* (i8*)*, i8*)
+    declare i32 @pthread_join(i8*, i8*)
+
+    define i8* @worker(i8* %arg) {
+    entry:
+      %worker_value = load i32, i32* @shared, align 4
+      ret i8* null
+    }
+
+    define i32 @main(i1 %cond) {
+    entry:
+      %tid = alloca i8
+      call i32 @pthread_create(i8* %tid, i8* null,
+                               i8* (i8*)* @worker, i8* null)
+      br i1 %cond, label %joined, label %merge
+
+    joined:
+      call i32 @pthread_join(i8* %tid, i8* null)
+      br label %merge
+
+    merge:
+      %post = load i32, i32* @shared, align 4
+      ret i32 %post
+    }
+  )";
+
+  auto module = parseModule(source);
+  ASSERT_NE(module, nullptr);
+
+  MHPAnalysis mhp(*module);
+  mhp.analyze();
+  HappensBeforeAnalysis hb(*module, mhp);
+  hb.analyze();
+
+  const Instruction *worker_inst =
+      findInstructionByName(*module->getFunction("worker"), "worker_value");
+  const Instruction *post =
+      findInstructionByName(*module->getFunction("main"), "post");
+  ASSERT_NE(worker_inst, nullptr);
+  ASSERT_NE(post, nullptr);
+
+  EXPECT_TRUE(mhp.mayHappenInParallel(worker_inst, post));
+  EXPECT_FALSE(hb.mustPrecede(worker_inst, post));
+}
 TEST_F(MHPAnalysisTest, AmbiguousJoinDoesNotCreateDefiniteHB) {
   const char *source = R"(
     declare i32 @pthread_create(i8*, i8*, i8* (i8*)*, i8*)
@@ -471,6 +519,62 @@ TEST_F(MHPAnalysisTest,
 
   EXPECT_TRUE(mhp.mayHappenInParallel(worker_store, after));
 }
+TEST_F(MHPAnalysisTest, ContextSpecificHelperForksKeepDistinctCreateEdges) {
+  const char *source = R"(
+    declare i32 @pthread_create(i8*, i8*, i8* (i8*)*, i8*)
+
+    define i8* @worker(i8* %arg) {
+    entry:
+      %work = add i32 1, 2
+      ret i8* null
+    }
+
+    define void @spawn_helper(i8* %tid) {
+    entry:
+      %fork = call i32 @pthread_create(i8* %tid, i8* null,
+                                       i8* (i8*)* @worker, i8* null)
+      ret void
+    }
+
+    define i32 @main() {
+    entry:
+      %first = alloca i8
+      %second = alloca i8
+      call void @spawn_helper(i8* %first)
+      call void @spawn_helper(i8* %second)
+      ret i32 0
+    }
+  )";
+
+  auto module = parseModule(source);
+  ASSERT_NE(module, nullptr);
+
+  MHPAnalysis mhp(*module);
+  mhp.analyze();
+
+  const Instruction *fork =
+      findInstructionByName(*module->getFunction("spawn_helper"), "fork");
+  ASSERT_NE(fork, nullptr);
+  const ThreadFlowGraph &tfg = mhp.getThreadFlowGraph();
+  std::vector<SyncNode *> fork_nodes = tfg.getNodes(fork, 0);
+  ASSERT_EQ(fork_nodes.size(), 2u);
+
+  std::unordered_set<ThreadID> child_threads;
+  for (SyncNode *fork_node : fork_nodes) {
+    EXPECT_NE(fork_node->getCallContextID(), 0u);
+    EXPECT_NE(fork_node->getForkedThread(), 0u);
+    child_threads.insert(fork_node->getForkedThread());
+    size_t create_edges = 0;
+    for (SyncNode *succ : fork_node->getSuccessors()) {
+      if (tfg.hasEdgeKind(fork_node, succ, EdgeKind::Create)) {
+        ++create_edges;
+        EXPECT_EQ(succ->getThreadID(), fork_node->getForkedThread());
+      }
+    }
+    EXPECT_EQ(create_edges, 1u);
+  }
+  EXPECT_EQ(child_threads.size(), 2u);
+}
 TEST_F(MHPAnalysisTest, HelperHiddenForkStillHonorsJoinOrderingAtCaller) {
   const char *source = R"(
     @shared = global i32 0, align 4
@@ -612,6 +716,7 @@ TEST_F(MHPAnalysisTest, LoopCreateJoinDoesNotAutoSelfParallelizeWorkerBody) {
   ASSERT_NE(inst_a, nullptr);
   ASSERT_NE(inst_b, nullptr);
 
+  EXPECT_FALSE(mhp.mayHappenInParallel(inst_a, inst_a));
   EXPECT_FALSE(mhp.mayHappenInParallel(inst_a, inst_b));
 }
 TEST_F(MHPAnalysisTest, OpenMPTargetDataBoundaryOrdersTaskContinuation) {

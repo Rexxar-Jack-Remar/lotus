@@ -19,6 +19,13 @@
 
 namespace CppThreadingModel {
 
+inline bool isStdABIName(const llvm::StringRef &funcName) {
+  // Itanium ABI spellings for libstdc++ and libc++ both carry the St
+  // namespace component. The fake_ prefix is reserved for repository tests.
+  return funcName.startswith("_ZNSt") || funcName.startswith("_ZSt") ||
+         funcName.startswith("fake_");
+}
+
 inline bool isStdThreadEntity(const llvm::StringRef &funcName) {
   return funcName.contains("St6thread") || funcName.contains("St3__16thread");
 }
@@ -69,146 +76,209 @@ inline bool isAcquire(const llvm::StringRef& funcName) {
   // std::mutex::lock -> _ZNSt5mutex4lockEv
   // std::recursive_mutex::lock -> _ZNSt15recursive_mutex4lockEv
   // Exclude shared_mutex variants so they are not double-counted.
-  return funcName.contains("mutex") && funcName.contains("lockEv") &&
+  return isStdABIName(funcName) && funcName.contains("mutex") &&
+         funcName.contains("lockEv") && !funcName.contains("try_lock") &&
          !funcName.contains("unlock") && !funcName.contains("shared");
 }
 
 // Check if the function is std::mutex::try_lock (excludes shared_mutex).
 inline bool isTryAcquire(const llvm::StringRef& funcName) {
-  return funcName.contains("mutex") && funcName.contains("try_lockEv") &&
+  return isStdABIName(funcName) && funcName.contains("mutex") &&
+         funcName.contains("try_lock") &&
          !funcName.contains("shared");
 }
 
 // Check if the function is std::mutex::unlock (excludes shared_mutex).
 inline bool isRelease(const llvm::StringRef& funcName) {
-  return funcName.contains("mutex") && funcName.contains("unlockEv") &&
+  return isStdABIName(funcName) && funcName.contains("mutex") &&
+         funcName.contains("unlockEv") &&
          !funcName.contains("shared");
 }
 
 // Check if the function is std::condition_variable::wait
 inline bool isCondWait(const llvm::StringRef& funcName) {
-  return funcName.contains("condition_variable") && funcName.contains("wait");
+  return isStdABIName(funcName) && funcName.contains("condition_variable") &&
+         funcName.contains("wait");
 }
 
 // Check if the function is std::condition_variable::notify_one
 inline bool isCondSignal(const llvm::StringRef& funcName) {
-  return funcName.contains("condition_variable") && funcName.contains("notify_one");
+  return isStdABIName(funcName) && funcName.contains("condition_variable") &&
+         funcName.contains("notify_one");
 }
 
 // Check if the function is std::condition_variable::notify_all
 inline bool isCondBroadcast(const llvm::StringRef& funcName) {
-  return funcName.contains("condition_variable") && funcName.contains("notify_all");
+  return isStdABIName(funcName) && funcName.contains("condition_variable") &&
+         funcName.contains("notify_all");
 }
 
 // C++17 std::shared_mutex support
 // Check for std::shared_mutex::lock_shared (read lock)
 inline bool isSharedLockAcquire(const llvm::StringRef& funcName) {
-  return funcName.contains("shared_mutex") &&
+  return isStdABIName(funcName) && funcName.contains("shared_mutex") &&
          funcName.contains("lock_sharedEv") &&
+         !funcName.contains("try_lock_shared") &&
          !funcName.contains("unlock");
 }
 
 // Check for std::shared_mutex::lock (write/exclusive lock)
 inline bool isSharedLockExclusiveAcquire(const llvm::StringRef& funcName) {
-  return funcName.contains("shared_mutex") && funcName.contains("lockEv") && !funcName.contains("unlock");
+  return isStdABIName(funcName) && funcName.contains("shared_mutex") &&
+         funcName.contains("lockEv") && !funcName.contains("try_lock") &&
+         !funcName.contains("unlock");
+}
+
+inline bool isSharedLockTryAcquire(const llvm::StringRef &funcName) {
+  return isStdABIName(funcName) && funcName.contains("shared_mutex") &&
+         funcName.contains("try_lock_shared");
+}
+
+inline bool isSharedLockExclusiveTryAcquire(const llvm::StringRef &funcName) {
+  return isStdABIName(funcName) && funcName.contains("shared_mutex") &&
+         funcName.contains("try_lock") &&
+         !funcName.contains("try_lock_shared");
 }
 
 // Check for std::shared_mutex::unlock_shared
 inline bool isSharedLockRelease(const llvm::StringRef& funcName) {
-  return funcName.contains("shared_mutex") && funcName.contains("unlock_sharedEv");
+  return isStdABIName(funcName) && funcName.contains("shared_mutex") &&
+         funcName.contains("unlock_sharedEv");
 }
 
 // Check for std::shared_mutex::unlock
 inline bool isSharedLockExclusiveRelease(const llvm::StringRef& funcName) {
-  return funcName.contains("shared_mutex") && funcName.contains("unlockEv") && !funcName.contains("unlock_shared");
+  return isStdABIName(funcName) && funcName.contains("shared_mutex") &&
+         funcName.contains("unlockEv") &&
+         !funcName.contains("unlock_shared");
 }
 
 // Check for std::shared_timed_mutex operations
 inline bool isSharedTimedLockAcquire(const llvm::StringRef& funcName) {
-  return funcName.contains("shared_timed_mutex") &&
+  return isStdABIName(funcName) && funcName.contains("shared_timed_mutex") &&
          funcName.contains("lock_sharedEv") &&
+         !funcName.contains("try_lock_shared") &&
          !funcName.contains("unlock");
 }
 
 inline bool isSharedTimedLockExclusiveAcquire(const llvm::StringRef& funcName) {
-  return funcName.contains("shared_timed_mutex") && funcName.contains("lockEv") && !funcName.contains("unlock");
+  return isStdABIName(funcName) && funcName.contains("shared_timed_mutex") &&
+         funcName.contains("lockEv") && !funcName.contains("try_lock") &&
+         !funcName.contains("unlock");
+}
+
+inline bool isSharedTimedLockTryAcquire(const llvm::StringRef &funcName) {
+  return isStdABIName(funcName) && funcName.contains("shared_timed_mutex") &&
+         (funcName.contains("try_lock_shared") ||
+          funcName.contains("try_lock_shared_for") ||
+          funcName.contains("try_lock_shared_until"));
+}
+
+inline bool
+isSharedTimedLockExclusiveTryAcquire(const llvm::StringRef &funcName) {
+  return isStdABIName(funcName) && funcName.contains("shared_timed_mutex") &&
+         (funcName.contains("try_lock_for") ||
+          funcName.contains("try_lock_until") ||
+          (funcName.contains("try_lock") &&
+           !funcName.contains("try_lock_shared")));
 }
 
 inline bool isSharedTimedLockRelease(const llvm::StringRef& funcName) {
-  return funcName.contains("shared_timed_mutex") &&
+  return isStdABIName(funcName) && funcName.contains("shared_timed_mutex") &&
          funcName.contains("unlock_sharedEv");
 }
 
 inline bool isSharedTimedLockExclusiveRelease(const llvm::StringRef& funcName) {
-  return funcName.contains("shared_timed_mutex") &&
+  return isStdABIName(funcName) && funcName.contains("shared_timed_mutex") &&
          funcName.contains("unlockEv") &&
          !funcName.contains("unlock_shared");
 }
 
 // RAII lock wrappers - constructors act as acquire
 inline bool isLockGuardConstructor(const llvm::StringRef& funcName) {
-  return funcName.contains("lock_guard") && containsCtorCode(funcName);
+  return isStdABIName(funcName) && funcName.contains("lock_guard") &&
+         containsCtorCode(funcName);
 }
 
 inline bool isUniqueLockConstructor(const llvm::StringRef& funcName) {
-  return funcName.contains("unique_lock") && containsCtorCode(funcName);
+  return isStdABIName(funcName) && funcName.contains("unique_lock") &&
+         containsCtorCode(funcName);
 }
 
 inline bool isScopedLockConstructor(const llvm::StringRef& funcName) {
-  return funcName.contains("scoped_lock") && containsCtorCode(funcName);
+  return isStdABIName(funcName) && funcName.contains("scoped_lock") &&
+         containsCtorCode(funcName);
 }
 
 inline bool isSharedLockConstructor(const llvm::StringRef& funcName) {
-  return funcName.contains("shared_lock") && containsCtorCode(funcName);
+  return isStdABIName(funcName) && funcName.contains("shared_lock") &&
+         containsCtorCode(funcName);
 }
 
 // RAII lock wrappers - destructors act as release
 inline bool isLockGuardDestructor(const llvm::StringRef& funcName) {
-  return funcName.contains("lock_guard") && containsDtorCode(funcName);
+  return isStdABIName(funcName) && funcName.contains("lock_guard") &&
+         containsDtorCode(funcName);
 }
 
 inline bool isUniqueLockDestructor(const llvm::StringRef& funcName) {
-  return funcName.contains("unique_lock") && containsDtorCode(funcName);
+  return isStdABIName(funcName) && funcName.contains("unique_lock") &&
+         containsDtorCode(funcName);
 }
 
 inline bool isScopedLockDestructor(const llvm::StringRef& funcName) {
-  return funcName.contains("scoped_lock") && containsDtorCode(funcName);
+  return isStdABIName(funcName) && funcName.contains("scoped_lock") &&
+         containsDtorCode(funcName);
 }
 
 inline bool isSharedLockDestructor(const llvm::StringRef& funcName) {
-  return funcName.contains("shared_lock") && containsDtorCode(funcName);
+  return isStdABIName(funcName) && funcName.contains("shared_lock") &&
+         containsDtorCode(funcName);
 }
 
 // std::unique_lock manual lock/unlock
 inline bool isUniqueLockLock(const llvm::StringRef& funcName) {
-  return funcName.contains("unique_lock") && funcName.contains("lockEv") &&
-         !funcName.contains("unlock");
+  return isStdABIName(funcName) && funcName.contains("unique_lock") &&
+         funcName.contains("lockEv") &&
+         !funcName.contains("try_lock") && !funcName.contains("unlock");
+}
+
+inline bool isUniqueLockTryLock(const llvm::StringRef &funcName) {
+  return isStdABIName(funcName) && funcName.contains("unique_lock") &&
+         (funcName.contains("try_lock") || funcName.contains("try_lock_for") ||
+          funcName.contains("try_lock_until"));
 }
 
 inline bool isUniqueLockUnlock(const llvm::StringRef& funcName) {
-  return funcName.contains("unique_lock") && funcName.contains("unlockEv");
+  return isStdABIName(funcName) && funcName.contains("unique_lock") &&
+         funcName.contains("unlockEv");
 }
 
 // C++11 std::call_once
 inline bool isCallOnce(const llvm::StringRef& funcName) {
-  return funcName.contains("call_once");
+  return (isStdABIName(funcName) || funcName == "std_call_once") &&
+         funcName.contains("call_once");
 }
 
 // C++11 std::future/promise synchronization
 inline bool isFutureGet(const llvm::StringRef& funcName) {
-  return funcName.contains("future") && (funcName.contains("getEv") || funcName.contains("3getEv"));
+  return isStdABIName(funcName) && funcName.contains("future") &&
+         (funcName.contains("getEv") || funcName.contains("3getEv"));
 }
 
 inline bool isFutureWait(const llvm::StringRef& funcName) {
-  return funcName.contains("future") && funcName.contains("waitEv");
+  return isStdABIName(funcName) && funcName.contains("future") &&
+         funcName.contains("waitEv");
 }
 
 inline bool isPromiseSetValue(const llvm::StringRef& funcName) {
-  return funcName.contains("promise") && funcName.contains("set_value");
+  return isStdABIName(funcName) && funcName.contains("promise") &&
+         funcName.contains("set_value");
 }
 
 inline bool isPromiseSetException(const llvm::StringRef& funcName) {
-  return funcName.contains("promise") && funcName.contains("set_exception");
+  return isStdABIName(funcName) && funcName.contains("promise") &&
+         funcName.contains("set_exception");
 }
 
 // C++11 std::async - task creation
@@ -218,7 +288,8 @@ inline bool isAsync(const llvm::StringRef& funcName) {
 
 // C++20 std::jthread
 inline bool isJthreadConstructor(const llvm::StringRef& funcName) {
-  if (!funcName.contains("jthread") || !containsCtorCode(funcName)) {
+  if (!isStdABIName(funcName) || !funcName.contains("jthread") ||
+      !containsCtorCode(funcName)) {
     return false;
   }
   if (funcName.contains("EOS_") || funcName.contains("ERKS_") ||
@@ -229,15 +300,18 @@ inline bool isJthreadConstructor(const llvm::StringRef& funcName) {
 }
 
 inline bool isJthreadJoin(const llvm::StringRef& funcName) {
-  return funcName.contains("jthread") && funcName.contains("joinEv");
+  return isStdABIName(funcName) && funcName.contains("jthread") &&
+         funcName.contains("joinEv");
 }
 
 inline bool isJthreadDetach(const llvm::StringRef& funcName) {
-  return funcName.contains("jthread") && funcName.contains("detachEv");
+  return isStdABIName(funcName) && funcName.contains("jthread") &&
+         funcName.contains("detachEv");
 }
 
 inline bool isJthreadDestructor(const llvm::StringRef& funcName) {
-  return funcName.contains("jthread") && containsDtorCode(funcName);
+  return isStdABIName(funcName) && funcName.contains("jthread") &&
+         containsDtorCode(funcName);
 }
 
 inline bool isAtomicWait(const llvm::StringRef& funcName) {
@@ -283,7 +357,8 @@ inline bool isBarrierWait(const llvm::StringRef& funcName) {
 
 // C++20 std::counting_semaphore / std::binary_semaphore
 inline bool isSemaphoreAcquire(const llvm::StringRef& funcName) {
-  return funcName.contains("semaphore") && funcName.contains("acquireEv");
+  return isStdABIName(funcName) && funcName.contains("semaphore") &&
+         funcName.contains("acquireEv") && !funcName.contains("try_acquire");
 }
 
 inline bool isSemaphoreRelease(const llvm::StringRef& funcName) {
@@ -291,7 +366,8 @@ inline bool isSemaphoreRelease(const llvm::StringRef& funcName) {
 }
 
 inline bool isSemaphoreTryAcquire(const llvm::StringRef& funcName) {
-  return funcName.contains("semaphore") && funcName.contains("try_acquire");
+  return isStdABIName(funcName) && funcName.contains("semaphore") &&
+         funcName.contains("try_acquire");
 }
 
 inline bool isDeferLockConstructor(const llvm::StringRef &funcName) {

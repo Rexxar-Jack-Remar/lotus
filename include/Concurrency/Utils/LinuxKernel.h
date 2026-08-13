@@ -80,7 +80,11 @@ inline bool isSemaInit(const llvm::StringRef& funcName) {
 
 inline bool isDown(const llvm::StringRef& funcName) {
   return funcName.equals("down") || funcName.equals("down_interruptible") ||
-         funcName.equals("down_killable") || funcName.equals("down_trylock");
+         funcName.equals("down_killable");
+}
+
+inline bool isDownTryLock(const llvm::StringRef &funcName) {
+  return funcName.equals("down_trylock");
 }
 
 inline bool isUp(const llvm::StringRef& funcName) {
@@ -113,7 +117,11 @@ inline bool isWriteUnlock(const llvm::StringRef& funcName) {
 
 // Read-Write Semaphores
 inline bool isDownRead(const llvm::StringRef& funcName) {
-  return funcName.equals("down_read") || funcName.equals("down_read_trylock");
+  return funcName.equals("down_read");
+}
+
+inline bool isDownReadTryLock(const llvm::StringRef &funcName) {
+  return funcName.equals("down_read_trylock");
 }
 
 inline bool isUpRead(const llvm::StringRef& funcName) {
@@ -121,7 +129,11 @@ inline bool isUpRead(const llvm::StringRef& funcName) {
 }
 
 inline bool isDownWrite(const llvm::StringRef& funcName) {
-  return funcName.equals("down_write") || funcName.equals("down_write_trylock");
+  return funcName.equals("down_write");
+}
+
+inline bool isDownWriteTryLock(const llvm::StringRef &funcName) {
+  return funcName.equals("down_write_trylock");
 }
 
 inline bool isUpWrite(const llvm::StringRef& funcName) {
@@ -304,8 +316,11 @@ inline bool isGetCpuVar(const llvm::StringRef& funcName) {
 // Check if this is any lock acquire operation
 inline bool isAnyLockAcquire(const llvm::StringRef& funcName) {
   return isSpinLock(funcName) || isMutexLock(funcName) || isDown(funcName) ||
+         isDownTryLock(funcName) ||
          isReadLock(funcName) || isWriteLock(funcName) || isDownRead(funcName) ||
-         isDownWrite(funcName) || isRcuReadLock(funcName) || isWriteSeqlock(funcName);
+         isDownReadTryLock(funcName) || isDownWrite(funcName) ||
+         isDownWriteTryLock(funcName) || isRcuReadLock(funcName) ||
+         isWriteSeqlock(funcName);
 }
 
 // Check if this is any lock release operation

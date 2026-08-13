@@ -306,8 +306,7 @@ void ConcurrencyChecker::runAnalyses() {
   if (needCUDA) {
     m_cudaAnalysis = std::make_unique<cuda::CUDAAnalysis>(m_module);
     m_cudaAnalysis->runAnalysis();
-    m_stats.cudaSummary =
-        ConcurrencyFacade::summarizeCUDA(*m_cudaAnalysis, m_module);
+    m_stats.cudaSummary = ConcurrencyFacade::summarizeCUDA(*m_cudaAnalysis);
   }
 
   lotus::AliasAnalysisWrapper *aa = m_aliasAnalysis;

@@ -40,6 +40,7 @@ size_t MPIAnalysis::getTrackedWindowCount() const {
 }
 
 void MPIAnalysis::runAnalysis() {
+  results_ = AnalysisResults{};
   process_model_.analyzeModule();
   collective_analysis_.analyzeCollectives();
   rma_analysis_.analyzeRMA();

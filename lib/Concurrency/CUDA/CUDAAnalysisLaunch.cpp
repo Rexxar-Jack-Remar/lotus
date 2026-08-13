@@ -378,6 +378,7 @@ CUDAAnalysis::CUDAAnalysis(Module &module, DeviceConfig config)
     : CUDAAnalysis(module, nullptr, config) {}
 
 void CUDAAnalysis::runAnalysis() {
+  m_has_completed_analysis = false;
   m_launches.clear();
   m_kernel_summaries.clear();
   m_launch_context_index.clear();
@@ -764,6 +765,7 @@ void CUDAAnalysis::runAnalysis() {
     m_abstract_state.kernel_facts.push_back(fact);
     m_abstract_state.kernel_fact_by_class[fact.kernel_class_id] = fact;
   }
+  m_has_completed_analysis = true;
 }
 
 void CUDAAnalysis::analyzeInterKernelRaces() {

@@ -1,5 +1,12 @@
 #pragma once
 
+#include "Concurrency/ConcurrencyRelation.h"
+
+#include <map>
+#include <string>
+#include <utility>
+#include <vector>
+
 #include <llvm/IR/Module.h>
 #include <llvm/Support/raw_ostream.h>
 
@@ -11,6 +18,9 @@ class CUDAAnalysis;
 
 class ConcurrencyFacade {
 public:
+  using RelationCountKey =
+      std::pair<concurrency::RelationKind, concurrency::ProofStrength>;
+
   struct OpenMPSummary {
     size_t task_count = 0;
     size_t task_with_dependencies_count = 0;
@@ -47,6 +57,23 @@ public:
     size_t unknown_reason_bucket_count = 0;
     size_t deferred_wait_dep_count = 0;
     size_t deferred_conflict_count = 0;
+    std::map<RelationCountKey, size_t> relation_counts;
+    std::map<std::string, size_t> unknown_reason_counts;
+
+    size_t getRelationCount(concurrency::RelationKind kind,
+                            concurrency::ProofStrength proof) const;
+  };
+
+  struct MPIDiagnosticSummary {
+    const llvm::Instruction *inst = nullptr;
+    bool has_relation = false;
+    concurrency::Relation relation;
+    std::string model_gap_domain;
+    std::string subsystem;
+    std::string normalization_confidence;
+    std::string reason_bucket;
+    std::string code;
+    std::string detail;
   };
 
   struct MPISummary {
@@ -90,9 +117,48 @@ public:
     size_t normalization_pmpi_wrapper_count = 0;
     size_t normalization_openmpi_forwarder_count = 0;
     size_t normalization_unknown_internal_count = 0;
+    bool missing_finalize = false;
+    size_t double_finalize_count = 0;
+    size_t tag_mismatch_count = 0;
+    size_t count_datatype_mismatch_count = 0;
+    size_t rank_out_of_bounds_count = 0;
+    size_t persistent_request_leak_count = 0;
+    size_t wrong_root_rank_count = 0;
+    size_t cancel_without_wait_count = 0;
+    size_t buffer_overlap_count = 0;
+    size_t wildcard_in_collective_count = 0;
+    size_t in_place_conflict_count = 0;
+    size_t null_handle_count = 0;
+    size_t negative_root_count = 0;
+    size_t invalid_tag_count = 0;
+    size_t invalid_rank_count = 0;
+    size_t type_size_mismatch_count = 0;
+    size_t destroy_null_communicator_count = 0;
+    size_t request_free_after_wait_count = 0;
+    size_t in_place_wrong_operation_count = 0;
+    size_t invalid_rma_transition_count = 0;
+    size_t use_after_free_window_count = 0;
+    size_t double_window_free_count = 0;
+    size_t model_gap_count = 0;
+    size_t diagnostic_count = 0;
+    std::map<std::string, size_t> diagnostic_code_counts;
+    std::map<std::string, size_t> model_gap_domain_counts;
+    std::map<RelationCountKey, size_t> relation_counts;
+    std::vector<MPIDiagnosticSummary> diagnostics;
+  };
+
+  enum class CUDAAnalysisStatus { Complete, NotRun, ModuleMismatch };
+
+  struct CUDAModelGapSummary {
+    const llvm::Instruction *inst = nullptr;
+    std::string reason_bucket;
+    std::string explanation;
+    double confidence = 0.0;
+    size_t related_instruction_count = 0;
   };
 
   struct CUDASummary {
+    CUDAAnalysisStatus status = CUDAAnalysisStatus::NotRun;
     size_t operation_count = 0;
     size_t kernel_launch_count = 0;
     size_t device_sync_count = 0;
@@ -121,13 +187,19 @@ public:
     size_t global_access_count = 0;
     size_t constant_access_count = 0;
     size_t local_access_count = 0;
+    size_t model_gap_count = 0;
+    std::map<std::string, size_t> model_gap_reason_counts;
+    std::vector<CUDAModelGapSummary> model_gaps;
+
+    bool isComplete() const { return status == CUDAAnalysisStatus::Complete; }
   };
 
   static OpenMPSummary analyzeOpenMP(llvm::Module &module);
   static MPISummary analyzeMPI(llvm::Module &module);
   static CUDASummary analyzeCUDA(llvm::Module &module);
+  static CUDASummary summarizeCUDA(const cuda::CUDAAnalysis &analysis);
   static CUDASummary summarizeCUDA(const cuda::CUDAAnalysis &analysis,
-                                   llvm::Module &module);
+                                   const llvm::Module &module);
   static void printOpenMPResults(llvm::Module &module, llvm::raw_ostream &os);
 };
 

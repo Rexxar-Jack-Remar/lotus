@@ -92,6 +92,7 @@ public:
       2; // k-limiting for call strings
 
 private:
+  friend struct StaticVectorClockMHPTestAccess;
   using CallString = std::vector<size_t>;
 
   struct CallStringHash {
@@ -176,8 +177,8 @@ private:
 
   using StaticNodeList = std::vector<StaticNodeKey>;
 
-  // Paper partial order: ⊥ ≤ S ≤ n@c ≤ T. leq(LC_a, LC_b) and Max(LC, LC') for
-  // sets.
+  // Paper order as represented here: Top ≤ Start ≤ n@c ≤ Terminated.
+  // leq(LC_a, LC_b) and Max(LC, LC') operate on antichains.
   bool logicClockLeq(const LogicClockElem &a, const LogicClockElem &b,
                      StaticThreadID stid) const;
   void logicClockMax(const LogicClockSet &la, const LogicClockSet &lb,

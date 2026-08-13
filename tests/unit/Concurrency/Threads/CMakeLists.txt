@@ -7,6 +7,8 @@ add_lotus_concurrency_test_suite(concurrency_core_tests
   MHPAnalysisTest.cpp
   MHPAnalysisTestPart2.cpp
   StaticVectorClockMHPTest.cpp
+  BVClockTest.cpp
+  FBVClockTest.cpp
   HappensBeforeAnalysisTest.cpp
   HappensBeforeAnalysisTestPart2.cpp
   HappensBeforeAnalysisTestPart3.cpp

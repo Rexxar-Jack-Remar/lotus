@@ -154,9 +154,9 @@ TEST_F(CUDAAnalysisTest, OrdersLegacyDefaultStreamBeforeExplicitStreamLaunch) {
     define i64 @main(i8* %k0, i8* %k1, i8** %args) {
     entry:
       %stream = inttoptr i64 1 to %stream_t*
-      %l0 = call i64 @cudaLaunchKernel(i8* %k0, i64 1, i64 32, i64 1, i64 1, i64 1, i8** %args, i64 0, %stream_t* null)
+      %l0 = call i64 @cudaLaunchKernel(i8* bitcast (void ()* @kernel_default to i8*), i64 1, i64 32, i64 1, i64 1, i64 1, i8** %args, i64 0, %stream_t* null)
       call void @kernel_default()
-      %l1 = call i64 @cudaLaunchKernel(i8* %k1, i64 1, i64 32, i64 1, i64 1, i64 1, i8** %args, i64 0, %stream_t* %stream)
+      %l1 = call i64 @cudaLaunchKernel(i8* bitcast (void ()* @kernel_explicit to i8*), i64 1, i64 32, i64 1, i64 1, i64 1, i8** %args, i64 0, %stream_t* %stream)
       call void @kernel_explicit()
       ret i64 %l1
     }
@@ -246,13 +246,13 @@ TEST_F(CUDAAnalysisTest, PrefetchOrderingRequiresMatchingConcreteStream) {
     entry:
       %s1 = inttoptr i64 1 to %stream_t*
       %s2 = inttoptr i64 2 to %stream_t*
-      %l0 = call i64 @cudaLaunchKernel(i8* %ka, i64 1, i64 32, i64 1, i64 1, i64 1, i8** %args, i64 0, %stream_t* %s1)
+      %l0 = call i64 @cudaLaunchKernel(i8* bitcast (void ()* @kernel_a to i8*), i64 1, i64 32, i64 1, i64 1, i64 1, i8** %args, i64 0, %stream_t* %s1)
       call void @kernel_a()
       %p0 = call i32 @cudaMemPrefetchAsync(i8* %ptr, i64 64, i32 0, %stream_t* %s1)
-      %l1 = call i64 @cudaLaunchKernel(i8* %kb, i64 1, i64 32, i64 1, i64 1, i64 1, i8** %args, i64 0, %stream_t* %s1)
+      %l1 = call i64 @cudaLaunchKernel(i8* bitcast (void ()* @kernel_b to i8*), i64 1, i64 32, i64 1, i64 1, i64 1, i8** %args, i64 0, %stream_t* %s1)
       call void @kernel_b()
       %p1 = call i32 @cudaMemPrefetchAsync(i8* %ptr, i64 64, i32 0, %stream_t* %s2)
-      %l2 = call i64 @cudaLaunchKernel(i8* %kc, i64 1, i64 32, i64 1, i64 1, i64 1, i8** %args, i64 0, %stream_t* %s1)
+      %l2 = call i64 @cudaLaunchKernel(i8* bitcast (void ()* @kernel_c to i8*), i64 1, i64 32, i64 1, i64 1, i64 1, i8** %args, i64 0, %stream_t* %s1)
       call void @kernel_c()
       ret i64 %l2
     }
@@ -308,13 +308,13 @@ TEST_F(CUDAAnalysisTest, EventWaitNeedsMatchingRecordedEventToOrderLaunch) {
       %producer = inttoptr i64 1 to %stream_t*
       %consumer = inttoptr i64 2 to %stream_t*
       %w0 = call i32 @cudaStreamWaitEvent(%stream_t* %consumer, %event_t* %missing, i32 0)
-      %l0 = call i64 @cudaLaunchKernel(i8* %ka, i64 1, i64 32, i64 1, i64 1, i64 1, i8** %args, i64 0, %stream_t* %consumer)
+      %l0 = call i64 @cudaLaunchKernel(i8* bitcast (void ()* @kernel_a to i8*), i64 1, i64 32, i64 1, i64 1, i64 1, i8** %args, i64 0, %stream_t* %consumer)
       call void @kernel_a()
-      %l1 = call i64 @cudaLaunchKernel(i8* %kb, i64 1, i64 32, i64 1, i64 1, i64 1, i8** %args, i64 0, %stream_t* %producer)
+      %l1 = call i64 @cudaLaunchKernel(i8* bitcast (void ()* @kernel_b to i8*), i64 1, i64 32, i64 1, i64 1, i64 1, i8** %args, i64 0, %stream_t* %producer)
       call void @kernel_b()
       %r = call i32 @cudaEventRecord(%event_t* %recorded, %stream_t* %producer)
       %w1 = call i32 @cudaStreamWaitEvent(%stream_t* %consumer, %event_t* %recorded, i32 0)
-      %l2 = call i64 @cudaLaunchKernel(i8* %kc, i64 1, i64 32, i64 1, i64 1, i64 1, i8** %args, i64 0, %stream_t* %consumer)
+      %l2 = call i64 @cudaLaunchKernel(i8* bitcast (void ()* @kernel_c to i8*), i64 1, i64 32, i64 1, i64 1, i64 1, i8** %args, i64 0, %stream_t* %consumer)
       call void @kernel_c()
       ret i64 %l2
     }

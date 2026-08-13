@@ -166,6 +166,9 @@ private:
       std::pair<const llvm::Instruction *, const llvm::Instruction *>,
       InstPairHash>
       m_explicit_hb_pairs;
+  std::unordered_map<const llvm::Instruction *,
+                     std::vector<const llvm::Instruction *>>
+      m_explicit_hb_successors;
   mutable std::unordered_map<
       std::pair<const llvm::Instruction *, const llvm::Instruction *>, bool,
       InstPairHash>

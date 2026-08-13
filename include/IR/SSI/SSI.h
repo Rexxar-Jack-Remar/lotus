@@ -24,9 +24,9 @@ Static Single Information (SSI) form = SSA + σ-functions
 #define SSIFY_H_
 
 #include "llvm/ADT/DenseSet.h"
-#include "llvm/ADT/Statistic.h"
 #include "llvm/ADT/SmallPtrSet.h"
 #include "llvm/ADT/SmallVector.h"
+#include "llvm/ADT/Statistic.h"
 #include "llvm/Analysis/DominanceFrontier.h"
 #include "llvm/Analysis/PostDominators.h"
 #include "llvm/IR/CFG.h"

@@ -272,6 +272,8 @@ public:
 
   // Component access for advanced users
   const ThreadFlowGraph &getThreadFlowGraph() const { return *m_tfg; }
+  bool joinEdgeMustOrderTarget(const SyncNode *join_node,
+                               const SyncNode *target_node) const;
   const ThreadRegionAnalysis &getThreadRegionAnalysis() const {
     return *m_region_analysis;
   }
@@ -352,8 +354,8 @@ private:
   std::unordered_map<ThreadID, ThreadID> m_thread_parents; // Child -> Parent
   std::unordered_map<ThreadID, std::vector<ThreadID>>
       m_thread_children; // Parent -> Children
-  std::unordered_map<const llvm::Instruction *, ThreadID>
-      m_fork_to_thread; // Fork inst -> created thread
+  std::unordered_map<const llvm::Instruction *, std::unordered_set<ThreadID>>
+      m_fork_to_thread; // Fork inst -> context-specific created threads
   std::unordered_map<const llvm::Instruction *, ThreadID>
       m_join_to_thread; // Join inst -> joined thread
   std::unordered_set<ThreadID> m_detached_threads;
@@ -508,6 +510,7 @@ private:
   ThreadID getForkedThreadID(const llvm::Instruction *fork_inst) const;
   ThreadID getJoinedThreadID(const llvm::Instruction *join_inst) const;
   bool isMultiInstanceThread(ThreadID tid) const;
+  bool multiInstanceThreadMayOverlap(ThreadID tid) const;
 
   // Dominator helpers (intra-function)
   const llvm::DominatorTree &getDomTree(const llvm::Function *func) const;
@@ -519,8 +522,9 @@ private:
 
   static constexpr ThreadID kUnknownThread =
       std::numeric_limits<ThreadID>::max();
-  static constexpr unsigned kCallContextLimit = 2;
-  std::unordered_map<const llvm::Instruction *, ThreadID> m_openmp_task_threads;
+  std::unordered_map<const llvm::Instruction *,
+                     std::vector<std::pair<ThreadID, CallContextID>>>
+      m_openmp_task_threads;
   std::unordered_set<std::pair<ThreadID, ThreadID>, ThreadPairHash>
       m_openmp_task_exclusions;
   std::unique_ptr<OpenMP::OpenMPSemantics> m_openmp_semantics;

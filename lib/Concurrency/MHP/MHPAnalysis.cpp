@@ -173,6 +173,33 @@ void ThreadRegionAnalysis::computeOrderingConstraints() {
     region->may_be_parallel_bits.resize(m_regions.size());
   }
 
+  // Region ordering asks many reachability questions with the same source.
+  // Traverse each source once instead of starting a graph search for every
+  // region pair.
+  std::unordered_map<const SyncNode *,
+                     std::unordered_set<const SyncNode *>>
+      same_thread_reachable;
+  for (const auto &region : m_regions) {
+    const SyncNode *source = region->end_node;
+    if (!source || same_thread_reachable.count(source)) {
+      continue;
+    }
+    auto &reachable = same_thread_reachable[source];
+    std::deque<const SyncNode *> worklist;
+    worklist.push_back(source);
+    reachable.insert(source);
+    while (!worklist.empty()) {
+      const SyncNode *current = worklist.front();
+      worklist.pop_front();
+      for (SyncNode *succ : current->getSuccessors()) {
+        if (succ->getThreadID() == source->getThreadID() &&
+            reachable.insert(succ).second) {
+          worklist.push_back(succ);
+        }
+      }
+    }
+  }
+
   for (size_t i = 0; i < m_regions.size(); ++i) {
     Region &region_i = *m_regions[i];
 
@@ -187,7 +214,10 @@ void ThreadRegionAnalysis::computeOrderingConstraints() {
         // Check if region_i must precede region_j via sync node ordering
         if (region_i.end_node && region_j.start_node) {
           // Use TFG reachability to check if end_i reaches start_j
-          if (isReachableInTFG(region_i.end_node, region_j.start_node)) {
+          const auto reachable_it =
+              same_thread_reachable.find(region_i.end_node);
+          if (reachable_it != same_thread_reachable.end() &&
+              reachable_it->second.count(region_j.start_node)) {
             region_i.must_precede.insert(j);
             region_j.must_follow.insert(i);
           }
@@ -241,33 +271,8 @@ bool ThreadRegionAnalysis::isReachableInTFG(const SyncNode *from,
     return false;
   }
 
-  // Simple BFS reachability check in the TFG
-  std::deque<const SyncNode *> worklist;
-  std::unordered_set<const SyncNode *> visited;
-
-  worklist.push_back(from);
-  visited.insert(from);
-
-  while (!worklist.empty()) {
-    const SyncNode *current = worklist.front();
-    worklist.pop_front();
-
-    if (current == to) {
-      return true;
-    }
-
-    // Only follow intra-thread edges for same-thread reachability
-    if (current->getThreadID() == from->getThreadID()) {
-      for (SyncNode *succ : current->getSuccessors()) {
-        if (succ->getThreadID() == from->getThreadID() &&
-            visited.insert(succ).second) {
-          worklist.push_back(succ);
-        }
-      }
-    }
-  }
-
-  return false;
+  return from->getThreadID() == to->getThreadID() &&
+         m_tfg.canReach(from, to);
 }
 
 void ThreadRegionAnalysis::computeParallelism() {
@@ -498,45 +503,47 @@ MHPAnalysis::normalizeThreadPair(ThreadID lhs, ThreadID rhs) const {
 
 void MHPAnalysis::lowerOpenMPTasks(const OpenMP::OpenMPSemantics &semantics) {
   auto wireInlineTask = [&](const OpenMP::Task *task, ThreadID parent_tid) {
-    SyncNode *create_node = m_tfg->getNode(task->task_create, parent_tid);
-    if (!create_node) {
-      return;
-    }
+    for (SyncNode *create_node :
+         m_tfg->getNodes(task->task_create, parent_tid)) {
+      CallContextID parent_ctx = create_node->getCallContextID();
+      CallContextID callee_ctx = create_node->getNodeID();
+      m_has_multi_context_nodes = true;
+      processFunction(task->task_function, parent_tid, callee_ctx);
 
-    CallContextID callee_ctx = create_node->getNodeID();
-    m_has_multi_context_nodes = true;
-    processFunction(task->task_function, parent_tid, callee_ctx);
-
-    if (SyncNode *task_entry = m_tfg->getNode(
-            &task->task_function->front().front(), parent_tid, callee_ctx)) {
-      m_tfg->addCallEdge(create_node, task_entry);
-    }
-
-    std::vector<SyncNode *> task_exits = m_tfg->getFunctionExitNodes(
-        parent_tid, task->task_function, callee_ctx);
-    if (task_exits.empty()) {
-      return;
-    }
-
-    if (const Instruction *next_inst = task->task_create->getNextNode()) {
-      if (SyncNode *return_site = m_tfg->getNode(next_inst, parent_tid)) {
-        for (SyncNode *task_exit : task_exits) {
-          m_tfg->addRetEdge(task_exit, return_site);
-        }
+      if (SyncNode *task_entry = m_tfg->getNode(
+              &task->task_function->front().front(), parent_tid, callee_ctx)) {
+        m_tfg->addCallEdge(create_node, task_entry);
       }
-      return;
-    }
 
-    if (task->task_create->isTerminator()) {
-      for (const BasicBlock *succ :
-           successors(task->task_create->getParent())) {
-        if (succ->empty()) {
-          continue;
-        }
-        if (SyncNode *return_site =
-                m_tfg->getNode(&succ->front(), parent_tid)) {
-          for (SyncNode *task_exit : task_exits) {
+      std::vector<SyncNode *> task_exits = m_tfg->getFunctionExitNodes(
+          parent_tid, task->task_function, callee_ctx);
+      if (task_exits.empty()) {
+        continue;
+      }
+
+      if (const Instruction *next_inst = task->task_create->getNextNode()) {
+        SyncNode *return_site =
+            m_tfg->getNode(next_inst, parent_tid, parent_ctx);
+        for (SyncNode *task_exit : task_exits) {
+          if (return_site) {
             m_tfg->addRetEdge(task_exit, return_site);
+          }
+        }
+        continue;
+      }
+
+      if (task->task_create->isTerminator()) {
+        for (const BasicBlock *succ :
+             successors(task->task_create->getParent())) {
+          if (succ->empty()) {
+            continue;
+          }
+          SyncNode *return_site =
+              m_tfg->getNode(&succ->front(), parent_tid, parent_ctx);
+          for (SyncNode *task_exit : task_exits) {
+            if (return_site) {
+              m_tfg->addRetEdge(task_exit, return_site);
+            }
           }
         }
       }
@@ -560,17 +567,19 @@ void MHPAnalysis::lowerOpenMPTasks(const OpenMP::OpenMPSemantics &semantics) {
       continue;
     }
 
-    ThreadID task_tid = allocateThreadID();
-    m_openmp_task_threads[task->task_create] = task_tid;
-    m_thread_fork_sites[task_tid] = task->task_create;
-    m_thread_parents[task_tid] = parent_tid;
-    m_thread_children[parent_tid].push_back(task_tid);
-    m_fork_to_thread[task->task_create] = task_tid;
+    for (SyncNode *create_node :
+         m_tfg->getNodes(task->task_create, parent_tid)) {
+      ThreadID task_tid = allocateThreadID();
+      m_openmp_task_threads[task->task_create].push_back(
+          {task_tid, create_node->getCallContextID()});
+      m_thread_fork_sites[task_tid] = task->task_create;
+      m_thread_parents[task_tid] = parent_tid;
+      m_thread_children[parent_tid].push_back(task_tid);
+      m_fork_to_thread[task->task_create].insert(task_tid);
 
-    m_tfg->addThread(task_tid, task->task_function);
-    processFunction(task->task_function, task_tid, 0);
+      m_tfg->addThread(task_tid, task->task_function);
+      processFunction(task->task_function, task_tid, 0);
 
-    if (SyncNode *create_node = m_tfg->getNode(task->task_create, parent_tid)) {
       create_node->setForkedThread(task_tid);
       if (SyncNode *task_entry = m_tfg->getThreadEntryNode(task_tid)) {
         m_tfg->addInterThreadEdge(create_node, task_entry);
@@ -578,56 +587,62 @@ void MHPAnalysis::lowerOpenMPTasks(const OpenMP::OpenMPSemantics &semantics) {
     }
   }
 
-  auto getTaskThread = [&](const OpenMP::Task *task) -> ThreadID {
+  auto getTaskThreads = [&](const OpenMP::Task *task) -> std::vector<ThreadID> {
     if (!task || !task->task_create) {
-      return 0;
+      return {};
     }
     auto it = m_openmp_task_threads.find(task->task_create);
-    return it != m_openmp_task_threads.end() ? it->second : 0;
+    if (it == m_openmp_task_threads.end()) {
+      return {};
+    }
+    std::vector<ThreadID> tids;
+    tids.reserve(it->second.size());
+    for (const auto &[tid, unused_ctx] : it->second) {
+      (void)unused_ctx;
+      tids.push_back(tid);
+    }
+    return tids;
   };
 
   for (const auto &task_uptr : semantics.getTasks()) {
     const OpenMP::Task *task = task_uptr.get();
-    ThreadID task_tid = getTaskThread(task);
-    if (!task_tid) {
+    std::vector<ThreadID> task_tids = getTaskThreads(task);
+    if (task_tids.empty()) {
       continue;
     }
 
-    SyncNode *task_entry = m_tfg->getThreadEntryNode(task_tid);
-    for (const OpenMP::Task *pred : task->predecessors) {
-      ThreadID pred_tid = getTaskThread(pred);
-      std::vector<SyncNode *> pred_exits =
-          pred_tid ? m_tfg->getThreadExitNodes(pred_tid)
-                   : std::vector<SyncNode *>();
-      for (SyncNode *pred_exit : pred_exits) {
-        if (pred_exit && task_entry) {
-          m_tfg->addInterThreadEdge(pred_exit, task_entry);
+    for (ThreadID task_tid : task_tids) {
+      SyncNode *task_entry = m_tfg->getThreadEntryNode(task_tid);
+      for (const OpenMP::Task *pred : task->predecessors) {
+        for (ThreadID pred_tid : getTaskThreads(pred)) {
+          for (SyncNode *pred_exit : m_tfg->getThreadExitNodes(pred_tid)) {
+            if (pred_exit && task_entry) {
+              m_tfg->addInterThreadEdge(pred_exit, task_entry);
+            }
+          }
         }
       }
-    }
 
-    for (const OpenMP::Task *excluded : task->exclusions) {
-      ThreadID excluded_tid = getTaskThread(excluded);
-      if (excluded_tid) {
-        m_openmp_task_exclusions.insert(
-            normalizeThreadPair(task_tid, excluded_tid));
+      for (const OpenMP::Task *excluded : task->exclusions) {
+        for (ThreadID excluded_tid : getTaskThreads(excluded)) {
+          m_openmp_task_exclusions.insert(
+              normalizeThreadPair(task_tid, excluded_tid));
+        }
       }
     }
   }
 
   for (const auto &task_uptr : semantics.getTasks()) {
     const OpenMP::Task *task = task_uptr.get();
-    ThreadID task_tid = getTaskThread(task);
-    if (!task_tid) {
-      continue;
-    }
-    for (const OpenMP::Task *excluded : task->exclusions) {
-      ThreadID excluded_tid = getTaskThread(excluded);
-      if (!excluded_tid || task_tid == excluded_tid) {
-        continue;
+    for (ThreadID task_tid : getTaskThreads(task)) {
+      for (const OpenMP::Task *excluded : task->exclusions) {
+        for (ThreadID excluded_tid : getTaskThreads(excluded)) {
+          if (task_tid != excluded_tid) {
+            m_openmp_task_exclusions.insert(
+                normalizeThreadPair(task_tid, excluded_tid));
+          }
+        }
       }
-      m_openmp_task_exclusions.insert(
-          normalizeThreadPair(task_tid, excluded_tid));
     }
   }
 
@@ -644,34 +659,29 @@ void MHPAnalysis::lowerOpenMPTasks(const OpenMP::OpenMPSemantics &semantics) {
       continue;
     }
 
-    SyncNode *wait_node = m_tfg->getNode(boundary.inst, parent_tid);
-    if (!wait_node) {
-      continue;
-    }
-
-    for (const auto &task_uptr : semantics.getTasks()) {
-      const OpenMP::Task *task = task_uptr.get();
-      if (!task ||
-          task->scheduling_context_id != boundary.scheduling_context_id ||
-          task->event_order >= boundary.event_order) {
-        continue;
-      }
-      if (boundary.is_taskgroup_end) {
-        if (boundary.taskgroup_id == 0 ||
-            task->taskgroup_id != boundary.taskgroup_id) {
+    for (SyncNode *wait_node : m_tfg->getNodes(boundary.inst, parent_tid)) {
+      for (const auto &task_uptr : semantics.getTasks()) {
+        const OpenMP::Task *task = task_uptr.get();
+        if (!task ||
+            task->scheduling_context_id != boundary.scheduling_context_id ||
+            task->event_order >= boundary.event_order) {
           continue;
         }
-      } else if (task->phase_id != boundary.phase_id) {
-        continue;
-      }
+        if (boundary.is_taskgroup_end) {
+          if (boundary.taskgroup_id == 0 ||
+              task->taskgroup_id != boundary.taskgroup_id) {
+            continue;
+          }
+        } else if (task->phase_id != boundary.phase_id) {
+          continue;
+        }
 
-      ThreadID task_tid = getTaskThread(task);
-      std::vector<SyncNode *> task_exits =
-          task_tid ? m_tfg->getThreadExitNodes(task_tid)
-                   : std::vector<SyncNode *>();
-      for (SyncNode *task_exit : task_exits) {
-        if (task_exit) {
-          m_tfg->addInterThreadEdge(task_exit, wait_node);
+        for (ThreadID task_tid : getTaskThreads(task)) {
+          for (SyncNode *task_exit : m_tfg->getThreadExitNodes(task_tid)) {
+            if (task_exit) {
+              m_tfg->addInterThreadEdge(task_exit, wait_node);
+            }
+          }
         }
       }
     }
@@ -683,18 +693,22 @@ void MHPAnalysis::lowerOpenMPTasks(const OpenMP::OpenMPSemantics &semantics) {
       continue;
     }
 
-    ThreadID task_tid = getTaskThread(event.task);
-    if (!task_tid) {
+    std::vector<ThreadID> task_tids = getTaskThreads(event.task);
+    if (task_tids.empty()) {
       continue;
     }
 
     ThreadID parent_tid = getThreadID(event.inst);
-    SyncNode *completion_node = parent_tid == kUnknownThread
-                                    ? nullptr
-                                    : m_tfg->getNode(event.inst, parent_tid);
-    for (SyncNode *task_exit : m_tfg->getThreadExitNodes(task_tid)) {
-      if (task_exit && completion_node) {
-        m_tfg->addInterThreadEdge(task_exit, completion_node);
+    if (parent_tid == kUnknownThread) {
+      continue;
+    }
+    for (SyncNode *completion_node : m_tfg->getNodes(event.inst, parent_tid)) {
+      for (ThreadID task_tid : task_tids) {
+        for (SyncNode *task_exit : m_tfg->getThreadExitNodes(task_tid)) {
+          if (task_exit) {
+            m_tfg->addInterThreadEdge(task_exit, completion_node);
+          }
+        }
       }
     }
   }
@@ -706,8 +720,7 @@ void MHPAnalysis::processFunction(const Function *func, ThreadID tid,
     return;
 
   auto &active_stack = m_active_call_stack_by_thread[tid];
-  if (active_stack.size() >= kCallContextLimit ||
-      std::find(active_stack.begin(), active_stack.end(), func) !=
+  if (std::find(active_stack.begin(), active_stack.end(), func) !=
           active_stack.end()) {
     return;
   }
@@ -834,13 +847,30 @@ void MHPAnalysis::processFunction(const Function *func, ThreadID tid,
             CallContextID callee_ctx = node->getNodeID();
             m_has_multi_context_nodes = true;
             processFunction(target, tid, callee_ctx);
-            SyncNode *callee_entry =
-                m_tfg->getNode(&target->front().front(), tid, callee_ctx);
-            if (callee_entry) {
+            std::vector<SyncNode *> callee_entries;
+            if (SyncNode *callee_entry =
+                    m_tfg->getNode(&target->front().front(), tid, callee_ctx)) {
+              callee_entries.push_back(callee_entry);
+            } else {
+              // A recursive call reuses the already-expanded recursive
+              // context instead of silently dropping the call boundary.
+              callee_entries =
+                  m_tfg->getNodes(&target->front().front(), tid);
+            }
+            for (SyncNode *callee_entry : callee_entries) {
               m_tfg->addCallEdge(node, callee_entry);
             }
             std::vector<SyncNode *> callee_exits =
                 m_tfg->getFunctionExitNodes(tid, target, callee_ctx);
+            if (callee_exits.empty()) {
+              for (SyncNode *callee_entry : callee_entries) {
+                std::vector<SyncNode *> context_exits =
+                    m_tfg->getFunctionExitNodes(
+                        tid, target, callee_entry->getCallContextID());
+                callee_exits.insert(callee_exits.end(), context_exits.begin(),
+                                    context_exits.end());
+              }
+            }
             if (callee_exits.empty()) {
               return;
             }
@@ -997,7 +1027,7 @@ void MHPAnalysis::handleThreadFork(const Instruction *fork_inst, SyncNode *node,
   m_thread_fork_sites[new_tid] = fork_inst;
   m_thread_parents[new_tid] = parent_tid;
   m_thread_children[parent_tid].push_back(new_tid);
-  m_fork_to_thread[fork_inst] = new_tid;
+  m_fork_to_thread[fork_inst].insert(new_tid);
 
   // Track pthread_t value for this thread
   // The first argument to pthread_create is the pthread_t* where the thread ID
@@ -1115,10 +1145,13 @@ void MHPAnalysis::handleThreadJoin(const Instruction *join_inst, SyncNode *node,
         m_join_target_analysis->getDefiniteFeasibleJoinedFork(join_inst);
     if (definite_fork) {
       auto it = m_fork_to_thread.find(definite_fork);
-      if (it != m_fork_to_thread.end() && !isMultiInstanceThread(it->second) &&
-          !m_detached_threads.count(it->second)) {
-        joined_tid = it->second;
-        found_thread = true;
+      if (it != m_fork_to_thread.end() && it->second.size() == 1) {
+        ThreadID candidate = *it->second.begin();
+        if (!isMultiInstanceThread(candidate) &&
+            !m_detached_threads.count(candidate)) {
+          joined_tid = candidate;
+          found_thread = true;
+        }
       }
     }
   }
@@ -1506,9 +1539,15 @@ bool MHPAnalysis::mayHappenInParallel(const Instruction *i1,
       return it->second;
   }
 
-  // Basic checks: same instruction or same thread (accounting for
-  // multi-instance threads)
-  if (i1 == i2 || isInSameThread(i1, i2))
+  if (i1 == i2) {
+    ThreadID tid = getThreadID(i1);
+    bool parallel_self =
+        tid != kUnknownThread && multiInstanceThreadMayOverlap(tid);
+    return (a && b) ? (m_mhp_cache[{a, b}] = parallel_self) : parallel_self;
+  }
+
+  // Same single-instance thread cannot overlap itself.
+  if (isInSameThread(i1, i2))
     return (a && b) ? (m_mhp_cache[{a, b}] = false) : false;
 
   // Initialization phase in main is single-threaded: instructions observed
@@ -1634,7 +1673,7 @@ bool MHPAnalysis::isMainThreadSpawnNode(const SyncNode *node) const {
     if (succ->getThreadID() == 0) {
       continue;
     }
-    if (m_tfg->getEdgeKind(node, succ) == EdgeKind::Create) {
+    if (m_tfg->hasEdgeKind(node, succ, EdgeKind::Create)) {
       return true;
     }
   }
@@ -1749,10 +1788,6 @@ bool MHPAnalysis::hasStructuralOrderRelation(const Instruction *i1,
     if (!start || !end) {
       return false;
     }
-    if (m_tfg->hasReachabilityIndex()) {
-      return m_tfg->canReach(start, end);
-    }
-
     std::deque<SyncNode *> worklist;
     std::unordered_set<SyncNode *> visited;
     worklist.push_back(start);
@@ -1764,6 +1799,10 @@ bool MHPAnalysis::hasStructuralOrderRelation(const Instruction *i1,
         return true;
       }
       for (SyncNode *succ : current->getSuccessors()) {
+        if (m_tfg->hasEdgeKind(current, succ, EdgeKind::Join) &&
+            !joinEdgeMustOrderTarget(succ, end)) {
+          continue;
+        }
         const Instruction *succ_inst = succ->getInstruction();
         if (succ_inst && isInstructionThreadAmbiguous(succ_inst)) {
           continue;
@@ -1789,6 +1828,60 @@ bool MHPAnalysis::hasStructuralOrderRelation(const Instruction *i1,
     }
   }
   return (m_order_cache[{i1, i2}] = true);
+}
+
+bool MHPAnalysis::joinEdgeMustOrderTarget(const SyncNode *join_node,
+                                          const SyncNode *target_node) const {
+  if (!join_node || !target_node ||
+      join_node->getThreadID() != target_node->getThreadID()) {
+    return false;
+  }
+  const Instruction *join_inst = join_node->getInstruction();
+  const Instruction *target_inst = target_node->getInstruction();
+  if (!join_inst || !target_inst) {
+    return false;
+  }
+
+  const Instruction *current_inst = join_inst;
+  CallContextID current_ctx = join_node->getCallContextID();
+  while (current_inst) {
+    const Function *current_func = current_inst->getFunction();
+    const DominatorTree &DT = getDomTree(current_func);
+    if (current_func == target_inst->getFunction() &&
+        current_ctx == target_node->getCallContextID()) {
+      return DT.dominates(current_inst, target_inst);
+    }
+
+    bool dominates_all_exits = false;
+    for (const BasicBlock &bb : *current_func) {
+      const Instruction *terminator = bb.getTerminator();
+      if (!isa<ReturnInst>(terminator)) {
+        continue;
+      }
+      if (!DT.dominates(current_inst, terminator)) {
+        return false;
+      }
+      dominates_all_exits = true;
+    }
+    if (!dominates_all_exits || current_ctx == 0) {
+      return false;
+    }
+
+    const SyncNode *caller = nullptr;
+    for (SyncNode *node : m_tfg->getAllNodes()) {
+      if (node->getThreadID() == join_node->getThreadID() &&
+          node->getNodeID() == current_ctx) {
+        caller = node;
+        break;
+      }
+    }
+    if (!caller || !caller->getInstruction()) {
+      return false;
+    }
+    current_inst = caller->getInstruction();
+    current_ctx = caller->getCallContextID();
+  }
+  return false;
 }
 
 bool MHPAnalysis::isInSameThread(const Instruction *i1,
@@ -1841,7 +1934,9 @@ bool MHPAnalysis::isJoinSite(const Instruction *inst) const {
 
 ThreadID MHPAnalysis::getForkedThreadID(const Instruction *fork_inst) const {
   auto it = m_fork_to_thread.find(fork_inst);
-  return it != m_fork_to_thread.end() ? it->second : 0;
+  return it != m_fork_to_thread.end() && it->second.size() == 1
+             ? *it->second.begin()
+             : 0;
 }
 
 ThreadID MHPAnalysis::getJoinedThreadID(const Instruction *join_inst) const {
@@ -1851,6 +1946,65 @@ ThreadID MHPAnalysis::getJoinedThreadID(const Instruction *join_inst) const {
 
 bool MHPAnalysis::isMultiInstanceThread(ThreadID tid) const {
   return m_multi_instance_threads.count(tid) != 0;
+}
+
+bool MHPAnalysis::multiInstanceThreadMayOverlap(ThreadID tid) const {
+  if (!isMultiInstanceThread(tid)) {
+    return false;
+  }
+
+  auto fork_it = m_thread_fork_sites.find(tid);
+  const Instruction *fork_inst =
+      fork_it != m_thread_fork_sites.end() ? fork_it->second : nullptr;
+  if (!fork_inst) {
+    return true;
+  }
+
+  const Value *fork_handle = m_thread_api->getForkedThread(fork_inst);
+  fork_handle = fork_handle ? fork_handle->stripPointerCasts() : nullptr;
+
+  const Function *parent = fork_inst->getFunction();
+  const DominatorTree &DT = getDomTree(parent);
+  LoopInfo loops(const_cast<DominatorTree &>(DT));
+  Loop *fork_loop = loops.getLoopFor(fork_inst->getParent());
+  if (!fork_loop) {
+    return true;
+  }
+
+  for (const Instruction &inst : instructions(parent)) {
+    if (!m_thread_api->isTDJoin(&inst) ||
+        !fork_loop->contains(inst.getParent()) ||
+        !DT.dominates(fork_inst, &inst)) {
+      continue;
+    }
+
+    const Instruction *joined_fork =
+        m_join_target_analysis
+            ? m_join_target_analysis->getDefiniteFeasibleJoinedFork(&inst)
+            : nullptr;
+    const Value *join_handle = m_thread_api->getJoinedThread(&inst);
+    join_handle = join_handle ? tracePthreadT(join_handle) : nullptr;
+    join_handle = join_handle ? join_handle->stripPointerCasts() : nullptr;
+    if (joined_fork != fork_inst &&
+        (!fork_handle || !join_handle || fork_handle != join_handle)) {
+      continue;
+    }
+
+    bool orders_every_backedge = true;
+    SmallVector<BasicBlock *, 4> latches;
+    fork_loop->getLoopLatches(latches);
+    for (BasicBlock *latch : latches) {
+      if (!DT.dominates(&inst, latch->getTerminator())) {
+        orders_every_backedge = false;
+        break;
+      }
+    }
+    if (orders_every_backedge) {
+      return false;
+    }
+  }
+
+  return true;
 }
 
 // ============================================================================

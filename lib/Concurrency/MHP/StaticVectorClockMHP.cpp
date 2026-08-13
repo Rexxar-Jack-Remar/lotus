@@ -206,7 +206,7 @@ void StaticVectorClockMHP::buildStaticThreads() {
     }
 
     for (SyncNode *succ : node->getSuccessors()) {
-      EdgeKind kind = m_tfg->getEdgeKind(node, succ);
+      EdgeKind kind = m_tfg->getEdgeKind(node, succ).value_or(EdgeKind::Control);
       std::vector<size_t> new_call_sites = call_sites;
       if (kind == EdgeKind::Call) {
         if (new_call_sites.size() >= kCallContextLimit)
@@ -252,7 +252,8 @@ void StaticVectorClockMHP::buildStaticEdges() {
     const StaticThread &st = m_static_threads[current.stid];
 
     for (SyncNode *succ : current.node->getSuccessors()) {
-      const EdgeKind kind = m_tfg->getEdgeKind(current.node, succ);
+      const EdgeKind kind =
+          m_tfg->getEdgeKind(current.node, succ).value_or(EdgeKind::Control);
 
       if (succ->getThreadID() == st.base_tid) {
         CallString new_call_sites = current.call_sites;
@@ -396,27 +397,33 @@ void StaticVectorClockMHP::logicClockMax(const LogicClockSet &la,
                                          const LogicClockSet &lb,
                                          StaticThreadID stid,
                                          LogicClockSet &out) const {
-  for (const auto &a : la) {
+  LogicClockSet candidates = la;
+  candidates.insert(lb.begin(), lb.end());
+  out.clear();
+  if (la.empty() || lb.empty())
+    candidates.insert({LogicClockElem::Kind::Top, 0});
+
+  auto canonicalLess = [](const LogicClockElem &lhs,
+                          const LogicClockElem &rhs) {
+    if (lhs.kind != rhs.kind)
+      return lhs.kind < rhs.kind;
+    return lhs.node_id < rhs.node_id;
+  };
+
+  for (const auto &candidate : candidates) {
     bool dominated = false;
-    for (const auto &b : lb) {
-      if (logicClockLeq(a, b, stid)) {
+    for (const auto &other : candidates) {
+      if (candidate == other ||
+          !logicClockLeq(candidate, other, stid))
+        continue;
+      const bool equivalent = logicClockLeq(other, candidate, stid);
+      if (!equivalent || canonicalLess(other, candidate)) {
         dominated = true;
         break;
       }
     }
     if (!dominated)
-      out.insert(a);
-  }
-  for (const auto &b : lb) {
-    bool dominated = false;
-    for (const auto &a : la) {
-      if (logicClockLeq(b, a, stid)) {
-        dominated = true;
-        break;
-      }
-    }
-    if (!dominated)
-      out.insert(b);
+      out.insert(candidate);
   }
 }
 
@@ -483,11 +490,12 @@ void StaticVectorClockMHP::computeReachabilityPerStaticThread() {
 
 bool StaticVectorClockMHP::svcLeq(const StaticVectorClock &lhs,
                                   const StaticVectorClock &rhs) const {
+  const LogicClockSet top_set{{LogicClockElem::Kind::Top, 0}};
   for (const auto &kv : lhs.entries) {
     StaticThreadID stid = kv.first;
     auto it = rhs.entries.find(stid);
     const LogicClockSet &rhs_set =
-        (it != rhs.entries.end()) ? it->second : LogicClockSet();
+        (it != rhs.entries.end() && !it->second.empty()) ? it->second : top_set;
     for (const auto &l1 : kv.second) {
       bool found = false;
       for (const auto &l2 : rhs_set) {
@@ -496,10 +504,7 @@ bool StaticVectorClockMHP::svcLeq(const StaticVectorClock &lhs,
           break;
         }
       }
-      if (!found && !rhs_set.empty())
-        return false;
-      if (!found && rhs_set.empty() &&
-          l1.kind != LogicClockElem::Kind::Terminated)
+      if (!found)
         return false;
     }
   }
@@ -603,7 +608,8 @@ StaticVectorClockMHP::mergePredecessorClocksWithRules(
     auto it = m_static_node_clocks.find(pred_key);
     if (it == m_static_node_clocks.end())
       continue;
-    EdgeKind kind = m_tfg->getEdgeKind(pred_key.node, key.node);
+    EdgeKind kind = m_tfg->getEdgeKind(pred_key.node, key.node)
+                        .value_or(EdgeKind::Control);
     if (kind == EdgeKind::Join || kind == EdgeKind::Signal ||
         kind == EdgeKind::Barrier)
       continue;
@@ -613,7 +619,8 @@ StaticVectorClockMHP::mergePredecessorClocksWithRules(
     auto it = m_static_node_clocks.find(pred_key);
     if (it == m_static_node_clocks.end())
       continue;
-    EdgeKind kind = m_tfg->getEdgeKind(pred_key.node, key.node);
+    EdgeKind kind = m_tfg->getEdgeKind(pred_key.node, key.node)
+                        .value_or(EdgeKind::Control);
     if (kind != EdgeKind::Join && kind != EdgeKind::Signal &&
         kind != EdgeKind::Barrier)
       continue;
@@ -636,7 +643,8 @@ bool StaticVectorClockMHP::shouldAddEventAtNode(
     return true;
   }
   for (const StaticNodeKey &pred_key : pred_it->second) {
-    EdgeKind kind = m_tfg->getEdgeKind(pred_key.node, key.node);
+    EdgeKind kind = m_tfg->getEdgeKind(pred_key.node, key.node)
+                        .value_or(EdgeKind::Control);
     if (kind == EdgeKind::Control || kind == EdgeKind::Join ||
         kind == EdgeKind::Signal || kind == EdgeKind::Barrier)
       return true;

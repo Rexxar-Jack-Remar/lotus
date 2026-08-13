@@ -14,6 +14,7 @@
 #define __BVCLOCK_H__
 
 #include <ostream>
+#include <cstddef>
 #include <string>
 #include <utility>
 #include <vector>
@@ -29,18 +30,12 @@ class FBVClock;
 class BVClock {
 public:
   /// @brief Default constructor - creates a vector clock initialized to 0
-  BVClock() {}
-  BVClock(const BVClock &vc) : vec(vc.vec) {}
-  BVClock(BVClock &&vc) : vec(std::move(vc.vec)) {}
-  BVClock &operator=(const BVClock &vc) {
-    vec = vc.vec;
-    return *this;
-  }
-  BVClock &operator=(BVClock &&vc) {
-    vec = std::move(vc.vec);
-    return *this;
-  }
-  BVClock &operator=(FBVClock &vc);
+  BVClock() = default;
+  BVClock(const BVClock &vc) = default;
+  BVClock(BVClock &&vc) = default;
+  BVClock &operator=(const BVClock &vc) = default;
+  BVClock &operator=(BVClock &&vc) = default;
+  BVClock &operator=(const FBVClock &vc);
   /// @brief Vector clock union (happens-before composition)
   /// @param vc The vector clock to union with
   /// @return A new vector clock where each clock element d takes the value
@@ -53,7 +48,7 @@ public:
     if (vec.size() < vc.vec.size()) {
       vec.resize(vc.vec.size(), false);
     }
-    for (unsigned i = 0; i < vc.vec.size(); ++i) {
+    for (std::size_t i = 0; i < vc.vec.size(); ++i) {
       vec[i] = vec[i] || vc.vec[i];
     }
     return *this;
@@ -61,22 +56,25 @@ public:
   /// @brief Assign-union with rvalue reference
   BVClock &operator+=(BVClock &&vc);
   /// @brief Assign-union with FBVClock
-  BVClock &operator+=(FBVClock &vc);
+  BVClock &operator+=(const FBVClock &vc);
   /// @brief Access the value of clock element d
   /// @param d The clock element index
   /// @return The value of clock element d, or false if d is out of range
   bool operator[](int d) const {
-    if (d < int(vec.size()))
-      return vec[d];
+    validateIndex(d);
+    if (static_cast<std::size_t>(d) < vec.size())
+      return vec[static_cast<std::size_t>(d)];
     return false;
   }
   /// @brief Set clock element d to true
   /// @param d The clock element index
   void set(int d) {
-    if (d >= int(vec.size())) {
-      vec.resize(d + 1, false);
+    validateIndex(d);
+    const std::size_t index = static_cast<std::size_t>(d);
+    if (index >= vec.size()) {
+      vec.resize(index + 1, false);
     }
-    vec[d] = true;
+    vec[index] = true;
   }
   /// @brief Clear all clock elements
   void clear() { vec.clear(); }
@@ -97,6 +95,9 @@ public:
 
   //@{
   /// @name Total Order Comparisons
+  ///
+  /// These operators use a canonical lexicographic ordering suitable for
+  /// ordered containers. Use lt/leq/gt/geq for the causal partial order.
   bool operator==(const BVClock &vc) const;
   bool operator!=(const BVClock &vc) const;
   bool operator<(const BVClock &vc) const;
@@ -110,6 +111,9 @@ public:
   std::string to_string() const;
 
 private:
+  static void validateIndex(int d);
+  std::size_t effectiveSize() const;
+
   std::vector<bool> vec; ///< Internal bit vector storage
 };
 

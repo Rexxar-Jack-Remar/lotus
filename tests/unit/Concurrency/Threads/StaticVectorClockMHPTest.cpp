@@ -6,7 +6,133 @@ using namespace llvm;
 using namespace mhp;
 using namespace lotus::unittest;
 
+namespace mhp {
+
+struct StaticVectorClockMHPTestAccess {
+  using Clock = StaticVectorClockMHP::StaticVectorClock;
+  using Elem = StaticVectorClockMHP::LogicClockElem;
+  using ElemSet = StaticVectorClockMHP::LogicClockSet;
+
+  static Elem top() { return {Elem::Kind::Top, 0}; }
+  static Elem start() { return {Elem::Kind::Start, 0}; }
+  static Elem terminated() { return {Elem::Kind::Terminated, 0}; }
+  static Elem node(size_t id) { return {Elem::Kind::Node, id}; }
+
+  static ElemSet maximum(const StaticVectorClockMHP &analysis,
+                         const ElemSet &lhs, const ElemSet &rhs,
+                         StaticThreadID stid = 0) {
+    ElemSet result;
+    analysis.logicClockMax(lhs, rhs, stid, result);
+    return result;
+  }
+
+  static bool lessEqual(const StaticVectorClockMHP &analysis,
+                        const Clock &lhs, const Clock &rhs) {
+    return analysis.svcLeq(lhs, rhs);
+  }
+
+  static Clock maximum(const StaticVectorClockMHP &analysis, const Clock &lhs,
+                       const Clock &rhs) {
+    Clock result;
+    analysis.computeSVMax(lhs, rhs, result);
+    return result;
+  }
+
+  static void makeEquivalentNodes(StaticVectorClockMHP &analysis,
+                                  StaticThreadID stid, size_t lhs,
+                                  size_t rhs) {
+    analysis.m_reachable_node_ids[stid][lhs].insert(rhs);
+    analysis.m_reachable_node_ids[stid][rhs].insert(lhs);
+  }
+};
+
+} // namespace mhp
+
 class StaticVectorClockMHPTest : public lotus::unittest::LlvmModuleTest {};
+
+TEST_F(StaticVectorClockMHPTest, LogicClockMaximumSatisfiesLatticeLaws) {
+  auto module = parseModule("define i32 @main() { ret i32 0 }");
+  ASSERT_NE(module, nullptr);
+  StaticVectorClockMHP analysis(*module);
+  using Access = StaticVectorClockMHPTestAccess;
+
+  const std::vector<Access::ElemSet> values = {
+      {Access::top()}, {Access::start()}, {Access::terminated()},
+      {Access::node(10)}};
+  for (const auto &value : values) {
+    EXPECT_EQ(Access::maximum(analysis, value, value), value);
+  }
+
+  for (const auto &lhs : values) {
+    for (const auto &rhs : values) {
+      const Access::ElemSet lhs_rhs = Access::maximum(analysis, lhs, rhs);
+      EXPECT_EQ(lhs_rhs, Access::maximum(analysis, rhs, lhs));
+
+      Access::Clock lhs_clock;
+      lhs_clock.entries[0] = lhs;
+      Access::Clock rhs_clock;
+      rhs_clock.entries[0] = rhs;
+      Access::Clock maximum;
+      maximum.entries[0] = lhs_rhs;
+      EXPECT_TRUE(Access::lessEqual(analysis, lhs_clock, maximum));
+      EXPECT_TRUE(Access::lessEqual(analysis, rhs_clock, maximum));
+    }
+  }
+}
+
+TEST_F(StaticVectorClockMHPTest,
+       SynchronizationMaximumPreservesEqualThirdThreadDimension) {
+  auto module = parseModule("define i32 @main() { ret i32 0 }");
+  ASSERT_NE(module, nullptr);
+  StaticVectorClockMHP analysis(*module);
+  using Access = StaticVectorClockMHPTestAccess;
+
+  Access::Clock lhs;
+  lhs.entries[0] = {Access::node(10)};
+  lhs.entries[2] = {Access::start()};
+  Access::Clock rhs;
+  rhs.entries[1] = {Access::node(20)};
+  rhs.entries[2] = {Access::start()};
+
+  const Access::Clock maximum = Access::maximum(analysis, lhs, rhs);
+  ASSERT_EQ(maximum.entries.count(2), 1u);
+  EXPECT_EQ(maximum.entries.at(2), Access::ElemSet({Access::start()}));
+}
+
+TEST_F(StaticVectorClockMHPTest,
+       LogicClockMaximumKeepsOneRepresentativeForEquivalentLoopNodes) {
+  auto module = parseModule("define i32 @main() { ret i32 0 }");
+  ASSERT_NE(module, nullptr);
+  StaticVectorClockMHP analysis(*module);
+  using Access = StaticVectorClockMHPTestAccess;
+  Access::makeEquivalentNodes(analysis, 0, 10, 11);
+
+  const Access::ElemSet result =
+      Access::maximum(analysis, {Access::node(10)}, {Access::node(11)});
+  ASSERT_EQ(result.size(), 1u);
+  EXPECT_EQ(result.count(Access::node(10)), 1u);
+}
+
+TEST_F(StaticVectorClockMHPTest,
+       MissingAndEmptyDimensionsHaveTheCanonicalTopMeaning) {
+  auto module = parseModule("define i32 @main() { ret i32 0 }");
+  ASSERT_NE(module, nullptr);
+  StaticVectorClockMHP analysis(*module);
+  using Access = StaticVectorClockMHPTestAccess;
+
+  Access::Clock missing;
+  Access::Clock empty;
+  empty.entries[0] = {};
+  Access::Clock top;
+  top.entries[0] = {Access::top()};
+  Access::Clock terminated;
+  terminated.entries[0] = {Access::terminated()};
+
+  EXPECT_TRUE(Access::lessEqual(analysis, top, missing));
+  EXPECT_TRUE(Access::lessEqual(analysis, top, empty));
+  EXPECT_FALSE(Access::lessEqual(analysis, terminated, missing));
+  EXPECT_FALSE(Access::lessEqual(analysis, terminated, empty));
+}
 
 TEST_F(StaticVectorClockMHPTest, LoopForkDoesNotAutoSelfParallelizeWorkerBody) {
   const char *source = R"(

@@ -320,6 +320,9 @@ public:
 
   void runAnalysis();
 
+  const llvm::Module &getModule() const { return m_module; }
+  bool hasCompletedAnalysis() const { return m_has_completed_analysis; }
+
   const std::vector<KernelLaunchInfo> &getLaunches() const {
     return m_launches;
   }
@@ -426,6 +429,7 @@ private:
 
   std::unordered_map<LaunchContextKey, size_t, LaunchContextKeyHash> m_launch_context_index;
   CUDAAbstractState m_abstract_state;
+  bool m_has_completed_analysis = false;
 
   void analyzeKernel(const llvm::Function *kernel,
                      const KernelLaunchInfo *launch);

@@ -512,6 +512,7 @@ void HappensBeforeAnalysis::analyze() {
   m_atomic_instructions.clear();
   m_sync_with.clear();
   m_explicit_hb_pairs.clear();
+  m_explicit_hb_successors.clear();
   m_extra_hb_successors.clear();
   m_post_dom_cache.clear();
 
@@ -563,7 +564,9 @@ void HappensBeforeAnalysis::addExplicitHBPair(const Instruction *from,
   if (!from || !to || from == to) {
     return;
   }
-  m_explicit_hb_pairs.insert({from, to});
+  if (m_explicit_hb_pairs.insert({from, to}).second) {
+    m_explicit_hb_successors[from].push_back(to);
+  }
 }
 
 std::vector<const Instruction *>
@@ -2036,6 +2039,11 @@ bool HappensBeforeAnalysis::canReach(const mhp::SyncNode *start,
       return true;
     }
     for (mhp::SyncNode *succ : current->getSuccessors()) {
+      if (m_mhp.getThreadFlowGraph().hasEdgeKind(
+              current, succ, mhp::EdgeKind::Join) &&
+          !m_mhp.joinEdgeMustOrderTarget(succ, end)) {
+        continue;
+      }
       if (visited.insert(succ).second) {
         worklist.push_back(succ);
       }
@@ -2064,6 +2072,11 @@ bool HappensBeforeAnalysis::canReachWithHB(const mhp::SyncNode *start,
     }
 
     for (mhp::SyncNode *succ : current->getSuccessors()) {
+      if (m_mhp.getThreadFlowGraph().hasEdgeKind(
+              current, succ, mhp::EdgeKind::Join) &&
+          !m_mhp.joinEdgeMustOrderTarget(succ, end)) {
+        continue;
+      }
       if (visited.insert(succ).second) {
         worklist.push_back(succ);
       }
@@ -2101,12 +2114,13 @@ bool HappensBeforeAnalysis::canReachExplicitHB(const Instruction *from,
       return true;
     }
 
-    for (const auto &pair : m_explicit_hb_pairs) {
-      if (pair.first != current) {
-        continue;
-      }
-      if (visited.insert(pair.second).second) {
-        worklist.push_back(pair.second);
+    auto succ_it = m_explicit_hb_successors.find(current);
+    if (succ_it == m_explicit_hb_successors.end()) {
+      continue;
+    }
+    for (const Instruction *succ : succ_it->second) {
+      if (visited.insert(succ).second) {
+        worklist.push_back(succ);
       }
     }
   }

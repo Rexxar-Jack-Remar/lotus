@@ -30,9 +30,12 @@
 #include <sstream>
 
 #include <llvm/ADT/STLExtras.h>
+#include <llvm/ADT/SmallPtrSet.h>
 #include <llvm/ADT/SmallVector.h>
 #include <llvm/ADT/StringMap.h> // for StringMap
 #include <llvm/IR/Function.h>
+#include <llvm/IR/GlobalAlias.h>
+#include <llvm/IR/GlobalIFunc.h>
 #include <llvm/IR/InstIterator.h>
 #include <llvm/IR/Instructions.h>
 #include <llvm/IR/Module.h>
@@ -102,13 +105,22 @@ static bool appendLookupName(SmallVectorImpl<std::string> &names,
   return true;
 }
 
-static SmallVector<std::string, 4> getConfiguredLookupNames(StringRef name) {
-  SmallVector<std::string, 4> names;
+static std::string normalizeAPIName(StringRef name);
+
+static SmallVector<std::string, 8> getConfiguredLookupNames(StringRef name) {
+  SmallVector<std::string, 8> names;
   const std::string generic = normalizeGenericAPIName(name);
   appendLookupName(names, generic);
 
   const std::string legacy_alias = normalizeLegacyUnderscoreAlias(name);
   appendLookupName(names, legacy_alias);
+
+  StringRef unprefixed = stripAPIGlobalPrefix(name);
+  if (unprefixed.startswith("__wrap_")) {
+    appendLookupName(names, unprefixed.drop_front(7).str());
+  }
+
+  appendLookupName(names, normalizeAPIName(name));
 
   if (looksLikeMPISymbol(name)) {
     appendLookupName(names,
@@ -125,7 +137,9 @@ static std::string normalizeAPIName(StringRef name) {
   if (name.startswith("__stub__")) {
     name = name.drop_front(sizeof("__stub__") - 1);
   }
-  if (name.endswith("_v2")) {
+  if (name.endswith("_v2") &&
+      (name.startswith("cuda") || name.startswith("cu") ||
+       name.startswith("__cuda"))) {
     name = name.drop_back(3);
   }
   return name.str();
@@ -170,7 +184,9 @@ static const ei_pair ei_pairs[] = {
     {"_spin_lock", ThreadAPI::TD_ACQUIRE},
     {"SRE_SplSpecLockEx", ThreadAPI::TD_ACQUIRE},
     {"pthread_rwlock_rdlock", ThreadAPI::TD_RWLOCK_RDLOCK},
+    {"pthread_rwlock_tryrdlock", ThreadAPI::TD_RWLOCK_RDLOCK},
     {"pthread_rwlock_wrlock", ThreadAPI::TD_RWLOCK_WRLOCK},
+    {"pthread_rwlock_trywrlock", ThreadAPI::TD_RWLOCK_WRLOCK},
     {"pthread_mutex_trylock", ThreadAPI::TD_TRY_ACQUIRE},
     {"pthread_mutex_unlock", ThreadAPI::TD_RELEASE},
     {"pthread_rwlock_unlock", ThreadAPI::TD_RELEASE},
@@ -241,6 +257,11 @@ void ThreadAPI::init() {
   loadSemanticConfig("../config/openmp_api.spec");
   loadSemanticConfig("config/mpi_api.spec");
   loadSemanticConfig("../config/mpi_api.spec");
+
+  // OpenMP fork_call has no thread-handle operand and carries a variadic list
+  // of captured values after the outlined function.
+  m_fork_args["__kmpc_fork_call"] =
+      ForkArgIndices{ForkArgIndices::NoArgument, 2, 3, 3, true};
 }
 
 void ThreadAPI::addEntry(const std::string &name, TD_TYPE type) {
@@ -387,7 +408,7 @@ ThreadAPI::getConditionVariableWaitMutex(const Instruction *inst) const {
 
   const Function *callee = getCallee(inst);
   const Value *lock_or_mutex = cb->getArgOperand(1);
-  if (!lock_or_mutex || !isConditionVariableAny(callee)) {
+  if (!lock_or_mutex) {
     return lock_or_mutex;
   }
 
@@ -449,6 +470,89 @@ ThreadAPI::getConditionVariableWaitMutex(const Instruction *inst) const {
   return resolved_mutex ? resolved_mutex : lock_or_mutex;
 }
 
+SmallVector<const Value *, 4>
+ThreadAPI::getCppWrapperUnderlyingLocks(const Instruction *inst) const {
+  SmallVector<const Value *, 4> result;
+  const auto *cb = getLLVMCallSite(inst);
+  if (!cb || cb->arg_size() == 0)
+    return result;
+
+  TD_TYPE type = getType(getCallee(inst));
+  if (type == TD_LOCK_GUARD_CTOR || type == TD_UNIQUE_LOCK_CTOR ||
+      type == TD_SCOPED_LOCK_CTOR || type == TD_SHARED_LOCK_CTOR) {
+    for (const Value *lock :
+         RAIILock::RAIILockTracker::extractUnderlyingLocks(cb)) {
+      if (lock)
+        result.push_back(lock->stripPointerCasts());
+    }
+    return result;
+  }
+
+  const Value *wrapper = cb->getArgOperand(0)->stripPointerCasts();
+  const Function *parent = inst->getFunction();
+  if (!wrapper || !parent || parent->isDeclaration())
+    return result;
+
+  for (const Instruction &cursor : instructions(*parent)) {
+    const auto *candidate = dyn_cast<CallBase>(&cursor);
+    if (!candidate)
+      continue;
+    TD_TYPE candidate_type = getType(getCallee(candidate));
+    if (candidate_type != TD_LOCK_GUARD_CTOR &&
+        candidate_type != TD_UNIQUE_LOCK_CTOR &&
+        candidate_type != TD_SCOPED_LOCK_CTOR &&
+        candidate_type != TD_SHARED_LOCK_CTOR)
+      continue;
+    if (RAIILock::RAIILockTracker::findLockObjectForConstructor(candidate) !=
+        wrapper)
+      continue;
+    result.clear();
+    for (const Value *lock :
+         RAIILock::RAIILockTracker::extractUnderlyingLocks(candidate)) {
+      if (lock)
+        result.push_back(lock->stripPointerCasts());
+    }
+  }
+  return result;
+}
+
+bool ThreadAPI::cppWrapperDestructorDefinitelyReleases(
+    const Instruction *inst) const {
+  const auto *dtor = getLLVMCallSite(inst);
+  if (!dtor || dtor->arg_size() == 0 || !inst->getFunction())
+    return false;
+  const Value *wrapper = dtor->getArgOperand(0)->stripPointerCasts();
+  enum class State { No, Yes, Maybe } state = State::No;
+
+  for (const Instruction &cursor : instructions(*inst->getFunction())) {
+    if (&cursor == inst)
+      break;
+    const auto *call = dyn_cast<CallBase>(&cursor);
+    if (!call || call->arg_size() == 0 ||
+        call->getArgOperand(0)->stripPointerCasts() != wrapper)
+      continue;
+    const Function *callee = getCallee(call);
+    if (!callee)
+      continue;
+    TD_TYPE type = getType(callee);
+    if (type == TD_UNIQUE_LOCK_CTOR || type == TD_SHARED_LOCK_CTOR) {
+      if (CppThreadingModel::isDeferLockConstructor(callee->getName()))
+        state = State::No;
+      else if (CppThreadingModel::isTryToLockConstructor(callee->getName()))
+        state = State::Maybe;
+      else
+        state = State::Yes; // immediate and adopt both own on return
+    } else if (type == TD_UNIQUE_LOCK_LOCK) {
+      state = State::Yes;
+    } else if (type == TD_CPP_LOCK_TRY) {
+      state = State::Maybe;
+    } else if (type == TD_UNIQUE_LOCK_UNLOCK) {
+      state = State::No;
+    }
+  }
+  return state == State::Yes;
+}
+
 const llvm::Value *
 ThreadAPI::getCppWrapperUnderlyingLock(const Instruction *inst) const {
   const auto *cb = getLLVMCallSite(inst);
@@ -473,6 +577,7 @@ ThreadAPI::getCppWrapperUnderlyingLock(const Instruction *inst) const {
   case TD_UNIQUE_LOCK_DTOR:
   case TD_UNIQUE_LOCK_LOCK:
   case TD_UNIQUE_LOCK_UNLOCK:
+  case TD_CPP_LOCK_TRY:
   case TD_SCOPED_LOCK_DTOR:
   case TD_SHARED_LOCK_DTOR:
     break;
@@ -552,9 +657,11 @@ ThreadAPI::ForkArgIndices
 ThreadAPI::getForkArgIndices(const Function *F) const {
   if (!F)
     return ForkArgIndices{};
-  auto it = m_fork_args.find(normalizeAPIName(F->getName()));
-  if (it != m_fork_args.end())
-    return it->second;
+  for (const std::string &name : getConfiguredLookupNames(F->getName())) {
+    auto it = m_fork_args.find(name);
+    if (it != m_fork_args.end())
+      return it->second;
+  }
   return ForkArgIndices{};
 }
 
@@ -562,9 +669,11 @@ ThreadAPI::JoinArgIndices
 ThreadAPI::getJoinArgIndices(const Function *F) const {
   if (!F)
     return JoinArgIndices{};
-  auto it = m_join_args.find(normalizeAPIName(F->getName()));
-  if (it != m_join_args.end())
-    return it->second;
+  for (const std::string &name : getConfiguredLookupNames(F->getName())) {
+    auto it = m_join_args.find(name);
+    if (it != m_join_args.end())
+      return it->second;
+  }
   return JoinArgIndices{};
 }
 
@@ -705,6 +814,7 @@ ThreadAPI::RuntimeLibrary ThreadAPI::inferLibrary(TD_TYPE type) const {
   case TD_SCOPED_LOCK_DTOR:
   case TD_SHARED_LOCK_CTOR:
   case TD_SHARED_LOCK_DTOR:
+  case TD_CPP_LOCK_TRY:
   case TD_JTHREAD_FORK:
   case TD_JTHREAD_JOIN:
   case TD_JTHREAD_DTOR:
@@ -739,6 +849,10 @@ ThreadAPI::RuntimeLibrary ThreadAPI::inferLibrary(TD_TYPE type) const {
   case TD_CUDA_DEVICE_MGMT:
   case TD_CUDA_ERROR:
     return RuntimeLibrary::CUDA;
+  case TD_KERNEL_ATOMIC_READ:
+  case TD_KERNEL_ATOMIC_WRITE:
+  case TD_KERNEL_ATOMIC_RMW:
+    return RuntimeLibrary::LinuxKernel;
   case TD_OMP_TASK:
   case TD_OMP_TASKWAIT:
   case TD_OMP_TASKWAIT_DEPS:
@@ -1026,6 +1140,7 @@ bool isLockLikeType(TD type) {
   case TD::TD_SCOPED_LOCK_DTOR:
   case TD::TD_SHARED_LOCK_CTOR:
   case TD::TD_SHARED_LOCK_DTOR:
+  case TD::TD_CPP_LOCK_TRY:
   case TD::TD_OMP_ORDERED_START:
   case TD::TD_OMP_ORDERED_END:
   case TD::TD_KERNEL_SPIN_LOCK:
@@ -1184,6 +1299,13 @@ LoweringInfo makeLoweringInfo(TD type, ThreadAPI::RuntimeLibrary library,
             "counting-semaphore-runtime-unmodeled",
             ownerMask(Owner::ExplicitFallback)};
   }
+  if (type == TD::TD_KERNEL_ATOMIC_READ ||
+      type == TD::TD_KERNEL_ATOMIC_WRITE ||
+      type == TD::TD_KERNEL_ATOMIC_RMW) {
+    return {LoweringKind::RecognizedButUnmodeled,
+            "linux-call-atomic-metadata-only",
+            ownerMask(Owner::ExplicitFallback, Owner::HB)};
+  }
   if (type == TD::TD_OMP_ATOMIC_START || type == TD::TD_OMP_ATOMIC_END) {
     return {LoweringKind::RecognizedButUnmodeled,
             "openmp-atomic-runtime-unmodeled",
@@ -1263,6 +1385,7 @@ bool ThreadAPI::isLibraryEnabled(RuntimeLibrary library) const {
   case RuntimeLibrary::LinuxKernel:
     return m_config.enable_linux_kernel();
   case RuntimeLibrary::PThread:
+    return m_config.enable_pthread();
   case RuntimeLibrary::Hare:
   case RuntimeLibrary::Custom:
   case RuntimeLibrary::Unknown:
@@ -1312,8 +1435,10 @@ ThreadAPI::getConfiguredType(StringRef normalized_name) const {
     TDAPIMap::const_iterator it = tdAPIMap.find(lookup_name);
     if (it != tdAPIMap.end()) {
       auto desc_it = m_api_descriptions.find(lookup_name);
-      if (desc_it == m_api_descriptions.end() ||
-          isLibraryEnabled(desc_it->second.library)) {
+      const RuntimeLibrary library =
+          desc_it == m_api_descriptions.end() ? inferLibrary(it->second)
+                                              : desc_it->second.library;
+      if (isLibraryEnabled(library)) {
         return it->second;
       }
       return TD_DUMMY;
@@ -1405,13 +1530,16 @@ ThreadAPI::TD_TYPE ThreadAPI::getType(const Function *F) const {
   if (!F)
     return TD_DUMMY;
 
-  // 1. Exact match (including loaded config)
-  std::string nameStr = normalizeAPIName(F->getName());
-  TD_TYPE configured_type = getConfiguredType(nameStr);
-  if (configured_type != TD_DUMMY) {
-    return configured_type;
+  // 1. Configured match using the same canonical aliases as descriptions and
+  // operand layouts.
+  for (const std::string &candidate : getConfiguredLookupNames(F->getName())) {
+    TD_TYPE configured_type = getConfiguredType(candidate);
+    if (configured_type != TD_DUMMY) {
+      return configured_type;
+    }
   }
 
+  std::string nameStr = normalizeAPIName(F->getName());
   StringRef name = nameStr;
 
   // 2. C++11/17/20 Support (if enabled)
@@ -1425,10 +1553,10 @@ ThreadAPI::TD_TYPE ThreadAPI::getType(const Function *F) const {
       return TD_DETACH;
 
     // Basic mutex operations
-    if (CppThreadingModel::isAcquire(name))
-      return TD_ACQUIRE;
     if (CppThreadingModel::isTryAcquire(name))
       return TD_TRY_ACQUIRE;
+    if (CppThreadingModel::isAcquire(name))
+      return TD_ACQUIRE;
     if (CppThreadingModel::isRelease(name))
       return TD_RELEASE;
 
@@ -1441,6 +1569,12 @@ ThreadAPI::TD_TYPE ThreadAPI::getType(const Function *F) const {
       return TD_COND_BROADCAST;
 
     // C++17 shared_mutex
+    if (CppThreadingModel::isSharedLockTryAcquire(name) ||
+        CppThreadingModel::isSharedTimedLockTryAcquire(name))
+      return TD_CPP_LOCK_TRY;
+    if (CppThreadingModel::isSharedLockExclusiveTryAcquire(name) ||
+        CppThreadingModel::isSharedTimedLockExclusiveTryAcquire(name))
+      return TD_CPP_LOCK_TRY;
     if (CppThreadingModel::isSharedLockAcquire(name) ||
         CppThreadingModel::isSharedTimedLockAcquire(name))
       return TD_SHARED_RDLOCK;
@@ -1462,6 +1596,8 @@ ThreadAPI::TD_TYPE ThreadAPI::getType(const Function *F) const {
       return TD_UNIQUE_LOCK_CTOR;
     if (CppThreadingModel::isUniqueLockDestructor(name))
       return TD_UNIQUE_LOCK_DTOR;
+    if (CppThreadingModel::isUniqueLockTryLock(name))
+      return TD_CPP_LOCK_TRY;
     if (CppThreadingModel::isUniqueLockLock(name))
       return TD_UNIQUE_LOCK_LOCK;
     if (CppThreadingModel::isUniqueLockUnlock(name))
@@ -1525,17 +1661,21 @@ ThreadAPI::TD_TYPE ThreadAPI::getType(const Function *F) const {
       return TD_BARRIER_WAIT_CPP20;
 
     // C++20 semaphore
+    if (CppThreadingModel::isSemaphoreTryAcquire(name))
+      return TD_SEMAPHORE_TRY_ACQUIRE;
     if (CppThreadingModel::isSemaphoreAcquire(name))
       return TD_SEMAPHORE_ACQUIRE;
     if (CppThreadingModel::isSemaphoreRelease(name))
       return TD_SEMAPHORE_RELEASE;
-    if (CppThreadingModel::isSemaphoreTryAcquire(name))
-      return TD_SEMAPHORE_TRY_ACQUIRE;
   }
 
   if (m_config.enable_cuda()) {
+    if (CUDAModel::isLegacyKernelConfiguration(name))
+      return TD_CUDA_KERNEL_LAUNCH;
     if (CUDAModel::isKernelLaunch(name))
       return TD_CUDA_KERNEL_LAUNCH;
+    if (CUDAModel::isKernelGraphOperation(name))
+      return TD_CUDA_STREAM;
     if (CUDAModel::isDeviceSynchronize(name))
       return TD_CUDA_DEVICE_SYNC;
     if (CUDAModel::isBarrier(name))
@@ -1595,6 +1735,8 @@ ThreadAPI::TD_TYPE ThreadAPI::getType(const Function *F) const {
     // Semaphores
     if (LinuxKernelModel::isSemaInit(name))
       return TD_KERNEL_SEMA_INIT;
+    if (LinuxKernelModel::isDownTryLock(name))
+      return TD_KERNEL_DOWN;
     if (LinuxKernelModel::isDown(name))
       return TD_KERNEL_DOWN;
     if (LinuxKernelModel::isUp(name))
@@ -1611,10 +1753,14 @@ ThreadAPI::TD_TYPE ThreadAPI::getType(const Function *F) const {
       return TD_KERNEL_WRITE_UNLOCK;
 
     // Read-Write Semaphores
+    if (LinuxKernelModel::isDownReadTryLock(name))
+      return TD_KERNEL_DOWN_READ;
     if (LinuxKernelModel::isDownRead(name))
       return TD_KERNEL_DOWN_READ;
     if (LinuxKernelModel::isUpRead(name))
       return TD_KERNEL_UP_READ;
+    if (LinuxKernelModel::isDownWriteTryLock(name))
+      return TD_KERNEL_DOWN_WRITE;
     if (LinuxKernelModel::isDownWrite(name))
       return TD_KERNEL_DOWN_WRITE;
     if (LinuxKernelModel::isUpWrite(name))
@@ -1673,6 +1819,16 @@ ThreadAPI::TD_TYPE ThreadAPI::getType(const Function *F) const {
     // Memory Barriers
     if (LinuxKernelModel::isMemoryBarrier(name))
       return TD_KERNEL_MEMORY_BARRIER;
+
+    if (LinuxKernelModel::isAtomicRead(name))
+      return TD_KERNEL_ATOMIC_READ;
+    if (LinuxKernelModel::isAtomicSet(name))
+      return TD_KERNEL_ATOMIC_WRITE;
+    if (LinuxKernelModel::isAtomicAdd(name) ||
+        LinuxKernelModel::isAtomicSub(name) ||
+        LinuxKernelModel::isAtomicCmpxchg(name) ||
+        LinuxKernelModel::isSetBit(name))
+      return TD_KERNEL_ATOMIC_RMW;
   }
 
   return TD_DUMMY;
@@ -1682,24 +1838,45 @@ ThreadAPI::TD_TYPE ThreadAPI::getType(const Function *F) const {
  * Get the callee function from an instruction
  */
 const Function *ThreadAPI::getCallee(const Instruction *inst) const {
-  if (const CallBase *cb = dyn_cast<CallBase>(inst)) {
-    if (const Function *direct = cb->getCalledFunction())
-      return direct;
-    if (const Value *called = cb->getCalledOperand())
-      return dyn_cast<Function>(called->stripPointerCasts());
-  }
-  return nullptr;
+  return getCallee(dyn_cast_or_null<CallBase>(inst));
 }
 
 /*!
  * Get the callee function from a CallBase
  */
 const Function *ThreadAPI::getCallee(const CallBase *cb) const {
-  if (cb) {
-    if (const Function *direct = cb->getCalledFunction())
-      return direct;
-    if (const Value *called = cb->getCalledOperand())
-      return dyn_cast<Function>(called->stripPointerCasts());
+  if (!cb)
+    return nullptr;
+
+  const Value *current = cb->getCalledOperand();
+  SmallPtrSet<const Value *, 8> visited;
+  while (current && visited.insert(current).second) {
+    current = current->stripPointerCasts();
+    if (const auto *function = dyn_cast<Function>(current))
+      return function;
+    if (const auto *alias = dyn_cast<GlobalAlias>(current)) {
+      current = alias->getAliaseeObject();
+      continue;
+    }
+    if (const auto *ifunc = dyn_cast<GlobalIFunc>(current)) {
+      const Function *resolver = ifunc->getResolverFunction();
+      const Value *resolved_target = nullptr;
+      if (!resolver || resolver->isDeclaration())
+        return nullptr;
+      for (const BasicBlock &block : *resolver) {
+        const auto *ret = dyn_cast<ReturnInst>(block.getTerminator());
+        if (!ret || !ret->getReturnValue())
+          continue;
+        const Value *candidate = ret->getReturnValue()->stripPointerCasts();
+        if (!resolved_target)
+          resolved_target = candidate;
+        else if (resolved_target != candidate)
+          return nullptr;
+      }
+      current = resolved_target;
+      continue;
+    }
+    break;
   }
   return nullptr;
 }
@@ -1959,6 +2136,8 @@ const char *ThreadAPI::tdTypeToString(TD_TYPE t) {
     return "TD_SHARED_LOCK_CTOR";
   case TD_SHARED_LOCK_DTOR:
     return "TD_SHARED_LOCK_DTOR";
+  case TD_CPP_LOCK_TRY:
+    return "TD_CPP_LOCK_TRY";
   case TD_JTHREAD_FORK:
     return "TD_JTHREAD_FORK";
   case TD_JTHREAD_JOIN:
@@ -2133,6 +2312,12 @@ const char *ThreadAPI::tdTypeToString(TD_TYPE t) {
     return "TD_CUDA_DEVICE_MGMT";
   case TD_CUDA_ERROR:
     return "TD_CUDA_ERROR";
+  case TD_KERNEL_ATOMIC_READ:
+    return "TD_KERNEL_ATOMIC_READ";
+  case TD_KERNEL_ATOMIC_WRITE:
+    return "TD_KERNEL_ATOMIC_WRITE";
+  case TD_KERNEL_ATOMIC_RMW:
+    return "TD_KERNEL_ATOMIC_RMW";
   case TD_MPI_SESSION_INIT:
     return "TD_MPI_SESSION_INIT";
   case TD_MPI_SESSION_FINALIZE:

@@ -11,6 +11,70 @@
 
 namespace concurrency {
 
+namespace {
+
+std::string modelGapDomainName(mpi::MPIModelGapDomain domain) {
+  switch (domain) {
+  case mpi::MPIModelGapDomain::None:
+    return "none";
+  case mpi::MPIModelGapDomain::Rank:
+    return "rank";
+  case mpi::MPIModelGapDomain::ParticipantSet:
+    return "participant_set";
+  case mpi::MPIModelGapDomain::Communicator:
+    return "communicator";
+  case mpi::MPIModelGapDomain::CollectiveProtocol:
+    return "collective_protocol";
+  case mpi::MPIModelGapDomain::PointToPoint:
+    return "point_to_point";
+  case mpi::MPIModelGapDomain::RequestLifecycle:
+    return "request_lifecycle";
+  case mpi::MPIModelGapDomain::RMAEpoch:
+    return "rma_epoch";
+  case mpi::MPIModelGapDomain::Completion:
+    return "completion";
+  case mpi::MPIModelGapDomain::Unknown:
+    return "unknown";
+  }
+  return "unknown";
+}
+
+std::string cudaModelGapReasonBucket(llvm::StringRef explanation) {
+  if (explanation.contains("launch site could not be matched")) {
+    return "launch_target_unresolved";
+  }
+  if (explanation.contains("launch dimensions remain symbolic")) {
+    return "launch_dimensions_symbolic";
+  }
+  if (explanation.contains("without an explicit host-side launch context")) {
+    return "launch_context_missing";
+  }
+  if (explanation.contains("Inter-kernel race analysis")) {
+    return "inter_kernel_context_imprecise";
+  }
+  if (explanation.contains("memcpy-like operation")) {
+    return "memory_transfer_unresolved";
+  }
+  if (explanation.contains("Managed allocation")) {
+    return "managed_allocation_conservative";
+  }
+  if (explanation.contains("Unified-memory operation")) {
+    return "unified_memory_pointer_unresolved";
+  }
+  if (explanation.contains("alias") || explanation.contains("Alias")) {
+    return "alias_imprecise";
+  }
+  return "other";
+}
+
+} // namespace
+
+size_t ConcurrencyFacade::OpenMPSummary::getRelationCount(
+    concurrency::RelationKind kind, concurrency::ProofStrength proof) const {
+  auto it = relation_counts.find({kind, proof});
+  return it == relation_counts.end() ? 0 : it->second;
+}
+
 ConcurrencyFacade::OpenMPSummary
 ConcurrencyFacade::analyzeOpenMP(llvm::Module &module) {
   OpenMP::OpenMPTaskGraph graph(module);
@@ -61,6 +125,11 @@ ConcurrencyFacade::analyzeOpenMP(llvm::Module &module) {
   summary.unknown_relation_count =
       graph.getRelationCount(concurrency::RelationKind::UnknownDueToModelGap);
   summary.unknown_reason_bucket_count = graph.getUnknownReasonCounts().size();
+  summary.unknown_reason_counts.insert(graph.getUnknownReasonCounts().begin(),
+                                       graph.getUnknownReasonCounts().end());
+  for (const auto &entry : graph.getRelations()) {
+    ++summary.relation_counts[{entry.second.kind, entry.second.proof}];
+  }
   summary.deferred_wait_dep_count = graph.getDeferredWaitDepsCount();
   summary.deferred_conflict_count = graph.getDeferredImpreciseConflictCount();
   return summary;
@@ -241,6 +310,154 @@ ConcurrencyFacade::analyzeMPI(llvm::Module &module) {
       normalizationCount(mpi::NormalizationConfidence::KnownOpenMPIForwarder);
   summary.normalization_unknown_internal_count =
       normalizationCount(mpi::NormalizationConfidence::UnknownVendorInternal);
+
+  summary.missing_finalize = results.missing_finalize;
+  summary.double_finalize_count = results.double_finalize.size();
+  summary.tag_mismatch_count = results.tag_mismatches.size();
+  summary.count_datatype_mismatch_count =
+      results.count_datatype_mismatches.size();
+  summary.rank_out_of_bounds_count = results.rank_out_of_bounds.size();
+  summary.persistent_request_leak_count =
+      results.persistent_request_leaks.size();
+  summary.wrong_root_rank_count = results.wrong_root_ranks.size();
+  summary.cancel_without_wait_count = results.cancel_without_wait.size();
+  summary.buffer_overlap_count = results.buffer_overlaps.size();
+  summary.wildcard_in_collective_count =
+      results.wildcard_in_collective.size();
+  summary.in_place_conflict_count = results.in_place_conflicts.size();
+  summary.null_handle_count = results.null_handles.size();
+  summary.negative_root_count = results.negative_root.size();
+  summary.invalid_tag_count = results.invalid_tags.size();
+  summary.invalid_rank_count = results.invalid_ranks.size();
+  summary.type_size_mismatch_count = results.type_size_mismatches.size();
+  summary.destroy_null_communicator_count = results.destroy_null_comm.size();
+  summary.request_free_after_wait_count =
+      results.request_free_after_wait.size();
+  summary.in_place_wrong_operation_count = results.in_place_wrong_op.size();
+  summary.invalid_rma_transition_count =
+      results.invalid_rma_transitions.size();
+  summary.use_after_free_window_count = results.use_after_free_windows.size();
+  summary.double_window_free_count = results.double_window_free.size();
+  summary.model_gap_count = results.model_gaps.size();
+
+  auto addDiagnostic = [&](const llvm::Instruction *inst, llvm::StringRef code,
+                           llvm::StringRef detail = {}) {
+    MPIDiagnosticSummary diagnostic;
+    diagnostic.inst = inst;
+    diagnostic.code = code.str();
+    diagnostic.detail = detail.str();
+    diagnostic.reason_bucket = diagnostic.code;
+    ++summary.diagnostic_code_counts[diagnostic.code];
+    summary.diagnostics.push_back(std::move(diagnostic));
+  };
+  if (results.missing_finalize) {
+    addDiagnostic(nullptr, "missing_finalize");
+  }
+  for (const llvm::Instruction *inst : results.double_finalize) {
+    addDiagnostic(inst, "double_finalize");
+  }
+  for (const llvm::Instruction *inst : results.invalid_tags) {
+    addDiagnostic(inst, "invalid_tag");
+  }
+  for (const llvm::Instruction *inst : results.invalid_ranks) {
+    addDiagnostic(inst, "invalid_rank");
+  }
+  for (const auto &pair : results.tag_mismatches) {
+    addDiagnostic(pair.first, "tag_mismatch");
+  }
+  for (const auto &pair : results.count_datatype_mismatches) {
+    addDiagnostic(pair.first, "count_datatype_mismatch");
+  }
+  for (const llvm::Instruction *inst : results.rank_out_of_bounds) {
+    addDiagnostic(inst, "rank_out_of_bounds");
+  }
+  for (mpi::RequestID request : results.persistent_request_leaks) {
+    addDiagnostic(llvm::dyn_cast_or_null<llvm::Instruction>(request),
+                  "persistent_request_leak");
+  }
+  for (const auto &pair : results.wrong_root_ranks) {
+    addDiagnostic(pair.first.inst, "wrong_root_rank");
+  }
+  for (const llvm::Instruction *inst : results.cancel_without_wait) {
+    addDiagnostic(inst, "cancel_without_wait");
+  }
+  for (const auto &pair : results.buffer_overlaps) {
+    addDiagnostic(pair.first, "buffer_overlap");
+  }
+  for (const llvm::Instruction *inst : results.wildcard_in_collective) {
+    addDiagnostic(inst, "wildcard_in_collective");
+  }
+  for (const llvm::Instruction *inst : results.in_place_conflicts) {
+    addDiagnostic(inst, "in_place_conflict");
+  }
+  for (const llvm::Instruction *inst : results.null_handles) {
+    addDiagnostic(inst, "null_handle");
+  }
+  for (const llvm::Instruction *inst : results.negative_root) {
+    addDiagnostic(inst, "negative_root");
+  }
+  for (const auto &pair : results.type_size_mismatches) {
+    addDiagnostic(pair.first, "type_size_mismatch");
+  }
+  for (const llvm::Instruction *inst : results.destroy_null_comm) {
+    addDiagnostic(inst, "destroy_null_communicator");
+  }
+  for (const llvm::Instruction *inst : results.request_free_after_wait) {
+    addDiagnostic(inst, "request_free_after_wait");
+  }
+  for (const llvm::Instruction *inst : results.in_place_wrong_op) {
+    addDiagnostic(inst, "in_place_wrong_operation");
+  }
+  for (const llvm::Instruction *inst : results.invalid_rma_transitions) {
+    addDiagnostic(inst, "invalid_rma_transition");
+  }
+  for (const llvm::Instruction *inst : results.use_after_free_windows) {
+    addDiagnostic(inst, "use_after_free_window");
+  }
+  for (const llvm::Instruction *inst : results.double_window_free) {
+    addDiagnostic(inst, "double_window_free");
+  }
+  for (const auto &request : results.orphaned_requests) {
+    addDiagnostic(request.issue_inst, "orphaned_request");
+  }
+  for (const auto &pair : results.potential_deadlocks) {
+    addDiagnostic(pair.first, "potential_deadlock");
+  }
+  for (const auto &pair : results.mismatched_collectives) {
+    addDiagnostic(pair.first.inst, "mismatched_collective");
+  }
+  for (const llvm::Instruction *inst : results.conditional_collectives) {
+    addDiagnostic(inst, "conditional_collective");
+  }
+  for (const auto &operation : results.unsynchronized_rma) {
+    addDiagnostic(operation.inst, "unsynchronized_rma");
+  }
+  for (const auto &pair : results.rma_races) {
+    addDiagnostic(pair.first.inst, "rma_race");
+  }
+  for (const auto &diagnostic : results.diagnostics) {
+    MPIDiagnosticSummary projected;
+    projected.inst = diagnostic.inst;
+    projected.has_relation = true;
+    projected.relation = diagnostic.relation;
+    projected.model_gap_domain =
+        modelGapDomainName(diagnostic.model_gap_domain);
+    projected.subsystem = diagnostic.subsystem;
+    projected.normalization_confidence = mpi::toString(diagnostic.confidence);
+    projected.reason_bucket = diagnostic.reason_bucket.empty()
+                                  ? diagnostic.relation.reason
+                                  : diagnostic.reason_bucket;
+    projected.code = diagnostic.code;
+    projected.detail = diagnostic.detail;
+    ++summary.diagnostic_code_counts[projected.code];
+    ++summary.relation_counts[
+        {projected.relation.kind, projected.relation.proof}];
+    if (diagnostic.model_gap_domain != mpi::MPIModelGapDomain::None) {
+      ++summary.model_gap_domain_counts[projected.model_gap_domain];
+    }
+    summary.diagnostics.push_back(std::move(projected));
+  }
+  summary.diagnostic_count = summary.diagnostics.size();
   return summary;
 }
 
@@ -248,13 +465,27 @@ ConcurrencyFacade::CUDASummary
 ConcurrencyFacade::analyzeCUDA(llvm::Module &module) {
   cuda::CUDAAnalysis analysis(module);
   analysis.runAnalysis();
-  return summarizeCUDA(analysis, module);
+  return summarizeCUDA(analysis);
+}
+
+ConcurrencyFacade::CUDASummary
+ConcurrencyFacade::summarizeCUDA(const cuda::CUDAAnalysis &analysis) {
+  return summarizeCUDA(analysis, analysis.getModule());
 }
 
 ConcurrencyFacade::CUDASummary
 ConcurrencyFacade::summarizeCUDA(const cuda::CUDAAnalysis &analysis,
-                                 llvm::Module &module) {
+                                 const llvm::Module &module) {
   CUDASummary summary;
+  if (&analysis.getModule() != &module) {
+    summary.status = CUDAAnalysisStatus::ModuleMismatch;
+    return summary;
+  }
+  if (!analysis.hasCompletedAnalysis()) {
+    summary.status = CUDAAnalysisStatus::NotRun;
+    return summary;
+  }
+  summary.status = CUDAAnalysisStatus::Complete;
 
   summary.kernel_count = analysis.getKernelSummaries().size();
   summary.kernel_launch_count = analysis.getLaunches().size();
@@ -276,7 +507,6 @@ ConcurrencyFacade::summarizeCUDA(const cuda::CUDAAnalysis &analysis,
     }
   }
   for (const auto &launch : analysis.getLaunches()) {
-    ++summary.operation_count;
     if (launch.dimensions.hasSymbolicGrid() ||
         launch.dimensions.hasSymbolicBlock()) {
       ++summary.symbolic_launch_count;
@@ -312,13 +542,27 @@ ConcurrencyFacade::summarizeCUDA(const cuda::CUDAAnalysis &analysis,
     }
   }
 
+  for (const auto &gap : analysis.getAbstractState().getModelGaps()) {
+    CUDAModelGapSummary projected;
+    projected.inst = gap.related_instructions.empty()
+                         ? nullptr
+                         : gap.related_instructions.front();
+    projected.reason_bucket = cudaModelGapReasonBucket(gap.explanation);
+    projected.explanation = gap.explanation;
+    projected.confidence = gap.confidence;
+    projected.related_instruction_count = gap.related_instructions.size();
+    ++summary.model_gap_reason_counts[projected.reason_bucket];
+    summary.model_gaps.push_back(std::move(projected));
+  }
+  summary.model_gap_count = summary.model_gaps.size();
+
   ThreadAPI *api = ThreadAPI::getThreadAPI();
-  for (llvm::Function &function : module) {
+  for (const llvm::Function &function : module) {
     if (function.isDeclaration()) {
       continue;
     }
-    for (llvm::inst_iterator it = llvm::inst_begin(function),
-                             end = llvm::inst_end(function);
+    for (llvm::const_inst_iterator it = llvm::inst_begin(function),
+                                   end = llvm::inst_end(function);
          it != end; ++it) {
       const auto *call = llvm::dyn_cast<llvm::CallBase>(&*it);
       if (!call) {

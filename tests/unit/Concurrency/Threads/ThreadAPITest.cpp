@@ -46,6 +46,44 @@ TEST_F(ThreadAPITest, PthreadCancelIsNotClassifiedAsJoin) {
   const Instruction *cancel_call = &main_func->getEntryBlock().front();
   EXPECT_FALSE(api->isTDJoin(cancel_call));
 }
+
+TEST_F(ThreadAPITest, PthreadRecognitionHonorsConcurrencyConfig) {
+  const char *source = R"(
+    declare i32 @pthread_create(i8*, i8*, i8* (i8*)*, i8*)
+    declare i32 @pthread_join(i8*, i8**)
+    declare i32 @pthread_mutex_lock(i8*)
+    declare void @__kmpc_barrier(i8*, i32)
+  )";
+
+  auto module = parseModule(source);
+  ASSERT_NE(module, nullptr);
+
+  ThreadAPI::resetThreadAPI();
+  ThreadAPI *api = ThreadAPI::getThreadAPI();
+  concurrency::ConcurrencyConfig none(
+      concurrency::ThreadingModelOptions::None);
+  api->setConfig(none);
+  EXPECT_EQ(api->getType(module->getFunction("pthread_create")),
+            ThreadAPI::TD_DUMMY);
+  EXPECT_EQ(api->getType(module->getFunction("pthread_join")),
+            ThreadAPI::TD_DUMMY);
+  EXPECT_EQ(api->getType(module->getFunction("pthread_mutex_lock")),
+            ThreadAPI::TD_DUMMY);
+
+  concurrency::ConcurrencyConfig pthread_only(
+      concurrency::ThreadingModelOptions::EnablePthread);
+  api->setConfig(pthread_only);
+  EXPECT_EQ(api->getType(module->getFunction("pthread_create")),
+            ThreadAPI::TD_FORK);
+  EXPECT_EQ(api->getType(module->getFunction("pthread_join")),
+            ThreadAPI::TD_JOIN);
+  EXPECT_EQ(api->getType(module->getFunction("pthread_mutex_lock")),
+            ThreadAPI::TD_ACQUIRE);
+  EXPECT_EQ(api->getType(module->getFunction("__kmpc_barrier")),
+            ThreadAPI::TD_DUMMY);
+
+  ThreadAPI::resetThreadAPI();
+}
 TEST_F(ThreadAPITest, DistinguishesBlockingAndNonBlockingMPICollectives) {
   const char *source = R"(
     declare i32 @MPI_Barrier(i8*)

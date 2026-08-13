@@ -370,6 +370,52 @@ TEST_F(MHPAnalysisTest, RecursiveCallGraphDoesNotExplodeContexts) {
   MHPAnalysis mhp(*module);
   EXPECT_NO_THROW(mhp.analyze());
 }
+TEST_F(MHPAnalysisTest, DeepCallChainPreservesNestedForkJoin) {
+  const char *source = R"(
+    @shared = global i32 0, align 4
+
+    declare i32 @pthread_create(i8*, i8*, i8* (i8*)*, i8*)
+    declare i32 @pthread_join(i8*, i8*)
+
+    define i8* @worker(i8* %arg) {
+    entry:
+      %work = load i32, i32* @shared, align 4
+      ret i8* null
+    }
+
+    define void @level4() {
+    entry:
+      %tid = alloca i8
+      call i32 @pthread_create(i8* %tid, i8* null,
+                               i8* (i8*)* @worker, i8* null)
+      call i32 @pthread_join(i8* %tid, i8* null)
+      %after = load i32, i32* @shared, align 4
+      ret void
+    }
+
+    define void @level3() { entry: call void @level4() ret void }
+    define void @level2() { entry: call void @level3() ret void }
+    define void @level1() { entry: call void @level2() ret void }
+    define i32 @main() { entry: call void @level1() ret i32 0 }
+  )";
+
+  auto module = parseModule(source);
+  ASSERT_NE(module, nullptr);
+
+  MHPAnalysis mhp(*module);
+  mhp.analyze();
+  HappensBeforeAnalysis hb(*module, mhp);
+  hb.analyze();
+
+  const Instruction *work =
+      findInstructionByName(*module->getFunction("worker"), "work");
+  const Instruction *after =
+      findInstructionByName(*module->getFunction("level4"), "after");
+  ASSERT_NE(work, nullptr);
+  ASSERT_NE(after, nullptr);
+  EXPECT_FALSE(mhp.mayHappenInParallel(work, after));
+  EXPECT_TRUE(hb.mustPrecede(work, after));
+}
 TEST_F(MHPAnalysisTest, ThreadFlowGraphNodes) {
   const char *source = R"(
     declare i32 @pthread_create(i8*, i8*, i8* (i8*)*, i8*)
@@ -410,6 +456,56 @@ TEST_F(MHPAnalysisTest, ThreadFlowGraphNodes) {
   EXPECT_GE(joinNodes.size(), 1u);
   EXPECT_GE(lockNodes.size(), 1u);
   EXPECT_GE(unlockNodes.size(), 1u);
+}
+TEST_F(MHPAnalysisTest, ThreadFlowGraphIndexesSCCCondensation) {
+  ThreadFlowGraph tfg;
+  tfg.addThread(0, nullptr);
+
+  SyncNode *a =
+      tfg.createNode(nullptr, SyncNodeType::REGULAR_INST, 0);
+  SyncNode *c =
+      tfg.createNode(nullptr, SyncNodeType::REGULAR_INST, 0);
+  SyncNode *b =
+      tfg.createNode(nullptr, SyncNodeType::REGULAR_INST, 0);
+  tfg.addIntraThreadEdge(a, b);
+  tfg.addIntraThreadEdge(b, b);
+  tfg.addIntraThreadEdge(b, c);
+
+  EXPECT_TRUE(tfg.canReach(b, c));
+  tfg.buildReachabilityIndex();
+  EXPECT_TRUE(tfg.canReach(b, c));
+  EXPECT_LE(tfg.getTopologicalOrder(b), tfg.getTopologicalOrder(c));
+}
+TEST_F(MHPAnalysisTest, ThreadFlowGraphMutationIsCanonical) {
+  ThreadFlowGraph first;
+  first.addThread(0, nullptr);
+  SyncNode *a =
+      first.createNode(nullptr, SyncNodeType::REGULAR_INST, 0);
+  SyncNode *b =
+      first.createNode(nullptr, SyncNodeType::REGULAR_INST, 0);
+  SyncNode *c =
+      first.createNode(nullptr, SyncNodeType::REGULAR_INST, 0);
+
+  first.addIntraThreadEdge(a, b);
+  first.addIntraThreadEdge(a, b);
+  EXPECT_EQ(a->getSuccessors().size(), 1u);
+  EXPECT_EQ(b->getPredecessors().size(), 1u);
+  EXPECT_FALSE(first.getEdgeKind(b, c).has_value());
+
+  first.buildReachabilityIndex();
+  EXPECT_TRUE(first.hasReachabilityIndex());
+  first.addIntraThreadEdge(c, a);
+  EXPECT_FALSE(first.hasReachabilityIndex());
+  EXPECT_TRUE(first.canReach(c, b));
+
+  ThreadFlowGraph second;
+  second.addThread(0, nullptr);
+  SyncNode *second_a =
+      second.createNode(nullptr, SyncNodeType::REGULAR_INST, 0);
+  SyncNode *second_b =
+      second.createNode(nullptr, SyncNodeType::REGULAR_INST, 0);
+  EXPECT_EQ(a->getNodeID(), second_a->getNodeID());
+  EXPECT_EQ(b->getNodeID(), second_b->getNodeID());
 }
 TEST_F(MHPAnalysisTest, ForkJoinOrdering) {
   const char *source = R"(
@@ -556,6 +652,7 @@ TEST_F(MHPAnalysisTest, LoopForkDoesNotAutoSelfParallelizeWorkerBody) {
   ASSERT_NE(w1, nullptr);
   ASSERT_NE(w2, nullptr);
 
+  EXPECT_TRUE(mhp.mayHappenInParallel(w1, w1));
   EXPECT_FALSE(mhp.mayHappenInParallel(w1, w2));
 }
 TEST_F(MHPAnalysisTest, MutexSerializesCriticalSections) {

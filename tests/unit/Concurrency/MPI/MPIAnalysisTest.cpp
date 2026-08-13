@@ -1,5 +1,64 @@
 #include "MPIAnalysisTestCommon.h"
 
+TEST_F(MPIAnalysisTest, RepeatedRunDoesNotRetainFinalizeDiagnostics) {
+  const char *source = R"(
+    declare i32 @MPI_Init(i32*, i8***)
+    declare i32 @MPI_Finalize()
+
+    define i32 @main() {
+    entry:
+      call i32 @MPI_Init(i32* null, i8*** null)
+      call i32 @MPI_Finalize()
+      call i32 @MPI_Finalize()
+      ret i32 0
+    }
+  )";
+
+  auto module = parseModule(source);
+  ASSERT_NE(module, nullptr);
+
+  MPIAnalysis analysis(*module);
+  analysis.runAnalysis();
+  ASSERT_EQ(analysis.getResults().double_finalize.size(), 1u);
+  EXPECT_FALSE(analysis.getResults().missing_finalize);
+
+  analysis.runAnalysis();
+  EXPECT_EQ(analysis.getResults().double_finalize.size(), 1u);
+  EXPECT_FALSE(analysis.getResults().missing_finalize);
+}
+
+TEST_F(MPIAnalysisTest, RepeatedRunClearsMissingFinalizeAfterIRChange) {
+  const char *source = R"(
+    declare i32 @MPI_Init(i32*, i8***)
+    declare i32 @MPI_Finalize()
+
+    define i32 @main() {
+    entry:
+      call i32 @MPI_Init(i32* null, i8*** null)
+      ret i32 0
+    }
+  )";
+
+  auto module = parseModule(source);
+  ASSERT_NE(module, nullptr);
+
+  MPIAnalysis analysis(*module);
+  analysis.runAnalysis();
+  ASSERT_TRUE(analysis.getResults().missing_finalize);
+
+  Function *main = module->getFunction("main");
+  Function *finalize = module->getFunction("MPI_Finalize");
+  ASSERT_NE(main, nullptr);
+  ASSERT_NE(finalize, nullptr);
+  ReturnInst *ret = dyn_cast<ReturnInst>(main->getEntryBlock().getTerminator());
+  ASSERT_NE(ret, nullptr);
+  CallInst::Create(finalize->getFunctionType(), finalize, {}, "", ret);
+
+  analysis.runAnalysis();
+  EXPECT_FALSE(analysis.getResults().missing_finalize);
+  EXPECT_TRUE(analysis.getResults().double_finalize.empty());
+}
+
 TEST_F(MPIAnalysisTest, SendRecvCreatesSendAndReceiveOperations) {
   const char *source = R"(
     declare i32 @MPI_Sendrecv(i8*, i32, i32, i32, i32,
