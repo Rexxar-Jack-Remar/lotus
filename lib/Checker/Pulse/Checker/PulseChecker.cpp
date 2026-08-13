@@ -533,14 +533,8 @@ void PulseChecker::analyzeFunction(const llvm::Function *F) {
           continue;
         }
 
-        const llvm::BasicBlock *phi_pred = pred_bb;
-        if (llvm::isa<llvm::PHINode>(&I) && !phi_pred) {
-          auto it = pred_begin(BB);
-          if (it != pred_end(BB))
-            phi_pred = *it;
-        }
-
-        auto new_states = executeInstruction(&I, std::move(st), phi_pred, 0u);
+        auto new_states =
+            executeInstruction(&I, std::move(st), pred_bb, 0u);
         if (!new_states.empty()) {
           for (auto &ns : new_states) {
             next_states.push_back(std::move(ns));

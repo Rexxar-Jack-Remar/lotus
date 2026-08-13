@@ -154,6 +154,78 @@ TEST_F(PulseCheckerTest, ReportsNullDereferenceWithConcreteWitness) {
   EXPECT_EQ(bugStep->inst, sink);
 }
 
+TEST_F(PulseCheckerTest, ConstantFalseBranchDoesNotReportUnreachableFault) {
+  auto module = parseModule(context, R"(
+    define i32 @unreachable_null_dereference() {
+    entry:
+      br i1 false, label %bad, label %ok
+
+    bad:
+      %x = load i32, i32* null
+      ret i32 %x
+
+    ok:
+      ret i32 0
+    }
+  )");
+  ASSERT_NE(module, nullptr);
+
+  BugReportMgr &mgr = BugReportMgr::get_instance();
+  const size_t before =
+      getReportCountForType(mgr, IssueType::NullDereference);
+  PulseChecker checker(module.get());
+  checker.analyze();
+  EXPECT_EQ(getReportCountForType(mgr, IssueType::NullDereference), before);
+}
+
+TEST_F(PulseCheckerTest, LoadedFalseBranchDoesNotReportUnreachableFault) {
+  auto module = parseModule(context, R"(
+    define i32 @loaded_false_branch() {
+    entry:
+      %condition = alloca i1
+      store i1 false, i1* %condition
+      %loaded = load i1, i1* %condition
+      br i1 %loaded, label %bad, label %ok
+
+    bad:
+      %x = load i32, i32* null
+      ret i32 %x
+
+    ok:
+      ret i32 0
+    }
+  )");
+  ASSERT_NE(module, nullptr);
+
+  BugReportMgr &mgr = BugReportMgr::get_instance();
+  const size_t before =
+      getReportCountForType(mgr, IssueType::NullDereference);
+  PulseChecker checker(module.get());
+  checker.analyze();
+  EXPECT_EQ(getReportCountForType(mgr, IssueType::NullDereference), before);
+}
+
+TEST_F(PulseCheckerTest, ConstantFalsePointerSelectUsesValidOperandOnly) {
+  auto module = parseModule(context, R"(
+    define i8 @constant_false_select() {
+    entry:
+      %valid = alloca i8
+      store i8 7, i8* %valid
+      %selected = select i1 false, i8* null, i8* %valid
+      %value = load i8, i8* %selected
+      ret i8 %value
+    }
+  )");
+  ASSERT_NE(module, nullptr);
+
+  BugReportMgr &mgr = BugReportMgr::get_instance();
+  const size_t before =
+      getReportCountForType(mgr, IssueType::NullDereference);
+  PulseChecker checker(module.get());
+  checker.analyze();
+  EXPECT_EQ(getReportCountForType(mgr, IssueType::NullDereference), before);
+}
+
 TEST_F(PulseCheckerTest, ReportsUninitializedReadAtLoadSite) {
   auto module = parseModule(context, R"(
     define i32 @uninit_read() {
@@ -840,6 +912,85 @@ TEST_F(PulseCheckerTest, SummaryStoreInitializesCallerPointee) {
             nullptr);
 }
 
+TEST_F(PulseCheckerTest, SummaryPreservesNestedMaterializedObjectMapping) {
+  auto module = parseModule(context, R"(
+    define void @free_nested(i8*** %root) {
+    entry:
+      ret void
+    }
+
+    define void @caller(i8*** %root) {
+    entry:
+      call void @free_nested(i8*** %root)
+      ret void
+    }
+  )");
+  ASSERT_NE(module, nullptr);
+
+  Function *freeNext = module->getFunction("free_nested");
+  Function *caller = module->getFunction("caller");
+  ASSERT_NE(freeNext, nullptr);
+  ASSERT_NE(caller, nullptr);
+  auto *freeNextCall = dyn_cast<CallInst>(findCallTo(caller, "free_nested"));
+  ASSERT_NE(freeNextCall, nullptr);
+
+  PulseChecker checker(module.get());
+  ExecutionDomain state = checker.initializeFunction(caller);
+  auto *astate = state.getAstate();
+  ASSERT_NE(astate, nullptr);
+
+  AbstractValue root = checker.getFactory().getOrCreate(caller->getArg(0));
+  AbstractValue child = checker.getFactory().createFresh();
+  AbstractValue next = checker.getFactory().createFresh();
+  astate->getPostHeap().addEdge(root, Access(AccessKind::Dereference),
+                                Address(child));
+  astate->getPostHeap().addEdge(child, Access(AccessKind::Dereference),
+                                Address(next));
+  checker.getOperations().allocate(*astate, root, nullptr);
+  checker.getOperations().allocate(*astate, child, nullptr);
+  checker.getOperations().allocate(*astate, next, nullptr);
+
+  AbstractValue formalRoot =
+      checker.getFactory().getOrCreate(freeNext->getArg(0));
+  AbstractValue formalChild = checker.getFactory().createFresh();
+  AbstractValue formalNext = checker.getFactory().createFresh();
+
+  auto summaryPre = std::make_unique<AbductiveDomain>();
+  summaryPre->getPreStack().add(freeNext->getArg(0), Address(formalRoot));
+  summaryPre->getPreHeap().addEdge(formalRoot,
+                                   Access(AccessKind::Dereference),
+                                   Address(formalChild));
+  summaryPre->getPreHeap().addEdge(formalChild,
+                                   Access(AccessKind::Dereference),
+                                   Address(formalNext));
+  summaryPre->getPreAttrs().add(formalRoot, pulse::Attribute::Allocated);
+  summaryPre->getPreAttrs().add(formalChild, pulse::Attribute::Allocated);
+
+  auto summaryPost = std::make_unique<AbductiveDomain>();
+  summaryPost->getPostStack().add(freeNext->getArg(0), Address(formalRoot));
+  summaryPost->getPostHeap().addEdge(formalRoot,
+                                     Access(AccessKind::Dereference),
+                                     Address(formalChild));
+  summaryPost->getPostHeap().addEdge(formalChild,
+                                     Access(AccessKind::Dereference),
+                                     Address(formalNext));
+  summaryPost->getPostAttrs().add(formalNext, pulse::Attribute::Invalid);
+
+  PulseSummary summary(freeNext);
+  summary.setFormalAV(freeNext->getArg(0), formalRoot);
+  summary.addPrePost(SummaryEntry(
+      std::move(summaryPre), PulseFormula(), std::move(summaryPost),
+      PulseFormula(), std::nullopt));
+
+  auto states = checker.applySummaryImproved(
+      freeNext, state, freeNextCall, nullptr, &summary);
+  ASSERT_FALSE(states.empty());
+  astate = states.front().getAstate();
+  ASSERT_NE(astate, nullptr);
+  EXPECT_TRUE(astate->getPostAttrs().has(astate->getCanonical(next),
+                                         pulse::Attribute::Invalid));
+}
+
 TEST_F(PulseCheckerTest, NullFormalBranchDereferenceIsReported) {
   auto module = parseModule(context, R"(
     define i8 @null_formal(i8* %p) {
@@ -904,6 +1055,45 @@ TEST_F(PulseCheckerTest, SwitchDropsInfeasibleCaseWitness) {
   PulseChecker checker(module.get());
   checker.analyze();
   EXPECT_EQ(getReportCountForType(mgr, IssueType::NullDereference), before);
+}
+
+TEST_F(PulseCheckerTest, WideningKeepsPhiPredecessorWithRepresentativeState) {
+  auto module = parseModule(context, R"(
+    declare i8* @malloc(i64)
+    declare void @free(i8*)
+
+    define i8 @safe_three_way_merge(i32 %choice) {
+    entry:
+      %q = call i8* @malloc(i64 1)
+      %r = call i8* @malloc(i64 1)
+      switch i32 %choice, label %third [
+        i32 0, label %first
+        i32 1, label %second
+      ]
+
+    first:
+      call void @free(i8* %q)
+      br label %merge
+
+    second:
+      br label %merge
+
+    third:
+      br label %merge
+
+    merge:
+      %selected = phi i8* [ %r, %first ], [ %r, %second ], [ %q, %third ]
+      %value = load i8, i8* %selected
+      ret i8 %value
+    }
+  )");
+  ASSERT_NE(module, nullptr);
+
+  BugReportMgr &mgr = BugReportMgr::get_instance();
+  const size_t before = getReportCountForType(mgr, IssueType::UseAfterFree);
+  PulseChecker checker(module.get());
+  checker.analyze();
+  EXPECT_EQ(getReportCountForType(mgr, IssueType::UseAfterFree), before);
 }
 
 TEST_F(PulseCheckerTest, SymbolicOutOfBoundsBranchIsReported) {

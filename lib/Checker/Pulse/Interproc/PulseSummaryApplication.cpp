@@ -463,7 +463,11 @@ std::vector<ExecutionDomain> PulseChecker::applySummaryImproved(
     }
 
     Substitution normalized_substitution;
-    for (const auto &kv : formal_to_actual_map) {
+    // Materialization recursively discovers mappings for nested heap objects,
+    // not just top-level formals. Preserve and canonicalize the complete map;
+    // rebuilding it from formal_to_actual_map disconnects callee post-effects
+    // such as p->next writes/frees from the caller's corresponding object.
+    for (const auto &kv : substitution.getMap()) {
       AbstractValue formal_canon = pre->getCanonical(kv.first);
       AbstractValue actual_canon = new_astate->getCanonical(kv.second);
       normalized_substitution.add(formal_canon, actual_canon);

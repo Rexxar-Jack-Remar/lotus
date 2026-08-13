@@ -205,6 +205,16 @@ public:
   void reportConstRefableParams(const llvm::Function *F);
 
 private:
+  /**
+   * Refine a state with the assumption that an i1 condition has the requested
+   * truth value. Returns no state when the selected outcome is infeasible or
+   * cannot be represented without inventing a witness.
+   */
+  std::optional<ExecutionDomain>
+  assumeCondition(ExecutionDomain state, const llvm::Value *condition,
+                  bool assumed_true, const llvm::Instruction *location,
+                  const llvm::BasicBlock *pred_bb);
+
   const PulseSummary *resolveSummaryForCall(const llvm::Function *callee,
                                             const ExecutionDomain &caller_state,
                                             const llvm::CallInst *CI,

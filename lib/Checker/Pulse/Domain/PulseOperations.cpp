@@ -485,12 +485,9 @@ std::optional<Address> PulseOperations::eval(AbductiveDomain &astate,
       }
     }
     if (!is_predecessor) {
-      // pred is not a predecessor, try to find a valid predecessor
-      if (Phi->getNumIncomingValues() > 0) {
-        pred = Phi->getIncomingBlock(0);
-      } else {
-        return std::nullopt;
-      }
+      // The incoming edge is part of the witness. Guessing another edge would
+      // combine a value from one execution with the state of another.
+      return std::nullopt;
     }
     const llvm::Value *incoming = Phi->getIncomingValueForBlock(pred);
     return eval(astate, incoming, loc, nullptr);
