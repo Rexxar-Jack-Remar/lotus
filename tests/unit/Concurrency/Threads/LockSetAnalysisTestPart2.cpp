@@ -1688,3 +1688,398 @@ TEST_F(LockSetAnalysisTest, RecursiveMutexTracksSaturatingDepth) {
   EXPECT_EQ(lsa.getLockNestingDepth(once), 1u);
   EXPECT_FALSE(lsa.mayHoldLock(released, recursive));
 }
+
+TEST_F(LockSetAnalysisTest, LoadedPointerSlotsDoNotPreserveMustAfterUnlock) {
+  const char *source = R"(
+    declare i32 @pthread_mutex_lock(i8*)
+    declare i32 @pthread_mutex_unlock(i8*)
+    @mutex = global i8 0
+    @p = global i8* @mutex
+    @q = global i8* @mutex
+    define void @test() {
+    entry:
+      %a = load i8*, i8** @p
+      call i32 @pthread_mutex_lock(i8* %a)
+      %b = load i8*, i8** @q
+      call i32 @pthread_mutex_unlock(i8* %b)
+      %after = add i32 1, 2
+      ret void
+    }
+  )";
+  auto module = parseModule(source);
+  ASSERT_NE(module, nullptr);
+  LockSetAnalysis lsa(*module);
+  lsa.analyze();
+  const Instruction *after =
+      findInstructionByName(*module->getFunction("test"), "after");
+  EXPECT_TRUE(lsa.getMustLockSetAt(after).empty());
+}
+
+TEST_F(LockSetAnalysisTest, LossyTryLockPredicatesDoNotRefineMust) {
+  const char *source = R"(
+    declare i32 @pthread_mutex_trylock(i8*)
+    @trunc_lock = global i8 0
+    @xor_lock = global i8 0
+    define void @truncated() {
+    entry:
+      %r = call i32 @pthread_mutex_trylock(i8* @trunc_lock)
+      %b = trunc i32 %r to i1
+      br i1 %b, label %failure, label %success
+    success:
+      %trunc_success = add i32 1, 2
+      ret void
+    failure:
+      ret void
+    }
+    define void @wide_xor() {
+    entry:
+      %r = call i32 @pthread_mutex_trylock(i8* @xor_lock)
+      %x = xor i32 %r, 1
+      %b = icmp eq i32 %x, 0
+      br i1 %b, label %success, label %failure
+    success:
+      %xor_success = add i32 3, 4
+      ret void
+    failure:
+      ret void
+    }
+  )";
+  auto module = parseModule(source);
+  ASSERT_NE(module, nullptr);
+  LockSetAnalysis lsa(*module);
+  lsa.analyze();
+  const Instruction *trunc_success = findInstructionByName(
+      *module->getFunction("truncated"), "trunc_success");
+  const Instruction *xor_success =
+      findInstructionByName(*module->getFunction("wide_xor"), "xor_success");
+  EXPECT_TRUE(lsa.getMustLockSetAt(trunc_success).empty());
+  EXPECT_TRUE(lsa.getMustLockSetAt(xor_success).empty());
+}
+
+TEST_F(LockSetAnalysisTest, DuplicateTryLockEdgesRemainMayOnly) {
+  const char *source = R"(
+    declare i32 @pthread_mutex_trylock(i8*)
+    @branch_lock = global i8 0
+    @switch_lock = global i8 0
+    define void @branch_case() {
+    entry:
+      %r = call i32 @pthread_mutex_trylock(i8* @branch_lock)
+      %ok = icmp eq i32 %r, 0
+      br i1 %ok, label %join, label %join
+    join:
+      %branch_join = add i32 1, 2
+      ret void
+    }
+    define void @switch_case() {
+    entry:
+      %r = call i32 @pthread_mutex_trylock(i8* @switch_lock)
+      switch i32 %r, label %join [ i32 0, label %join ]
+    join:
+      %switch_join = add i32 3, 4
+      ret void
+    }
+  )";
+  auto module = parseModule(source);
+  ASSERT_NE(module, nullptr);
+  LockSetAnalysis lsa(*module);
+  lsa.analyze();
+  const Instruction *branch_join = findInstructionByName(
+      *module->getFunction("branch_case"), "branch_join");
+  const Instruction *switch_join = findInstructionByName(
+      *module->getFunction("switch_case"), "switch_join");
+  const GlobalVariable *branch_lock = module->getNamedGlobal("branch_lock");
+  const GlobalVariable *switch_lock = module->getNamedGlobal("switch_lock");
+  EXPECT_TRUE(lsa.mayHoldLock(branch_join, branch_lock));
+  EXPECT_FALSE(lsa.mustHoldLock(branch_join, branch_lock));
+  EXPECT_TRUE(lsa.mayHoldLock(switch_join, switch_lock));
+  EXPECT_FALSE(lsa.mustHoldLock(switch_join, switch_lock));
+}
+
+TEST_F(LockSetAnalysisTest, BranchSensitiveUniqueLockReleaseAtDestructor) {
+  const char *source = R"(
+    declare i32 @pthread_mutex_lock(i8*)
+    declare void @fake_unique_lock_C1E_adopt_lock(i8*, i8*, i8*)
+    declare i8* @fake_unique_lock_7releaseEv(i8*)
+    declare void @fake_unique_lock_D1Ev(i8*)
+    @mutex = global i8 0
+    define void @test(i1 %detach) {
+    entry:
+      %wrapper = alloca i8
+      call i32 @pthread_mutex_lock(i8* @mutex)
+      call void @fake_unique_lock_C1E_adopt_lock(i8* %wrapper, i8* @mutex,
+                                                 i8* null)
+      br i1 %detach, label %release, label %join
+    release:
+      call i8* @fake_unique_lock_7releaseEv(i8* %wrapper)
+      br label %join
+    join:
+      call void @fake_unique_lock_D1Ev(i8* %wrapper)
+      %after = add i32 1, 2
+      ret void
+    }
+    define void @test_permuted(i1 %detach) {
+    entry:
+      %wrapper = alloca i8
+      call i32 @pthread_mutex_lock(i8* @mutex)
+      call void @fake_unique_lock_C1E_adopt_lock(i8* %wrapper, i8* @mutex,
+                                                 i8* null)
+      br i1 %detach, label %release, label %join
+    join:
+      call void @fake_unique_lock_D1Ev(i8* %wrapper)
+      %after_permuted = add i32 3, 4
+      ret void
+    release:
+      call i8* @fake_unique_lock_7releaseEv(i8* %wrapper)
+      br label %join
+    }
+  )";
+  auto module = parseModule(source);
+  ASSERT_NE(module, nullptr);
+  LockSetAnalysis lsa(*module);
+  lsa.analyze();
+  const Instruction *after =
+      findInstructionByName(*module->getFunction("test"), "after");
+  const GlobalVariable *mutex = module->getNamedGlobal("mutex");
+  const Instruction *after_permuted = findInstructionByName(
+      *module->getFunction("test_permuted"), "after_permuted");
+  EXPECT_TRUE(lsa.mayHoldLock(after, mutex));
+  EXPECT_FALSE(lsa.mustHoldLock(after, mutex));
+  EXPECT_TRUE(lsa.mayHoldLock(after_permuted, mutex));
+  EXPECT_FALSE(lsa.mustHoldLock(after_permuted, mutex));
+}
+
+TEST_F(LockSetAnalysisTest, SummaryComposesInstructionGEPProjection) {
+  const char *source = R"(
+    %pair = type { i8, i8 }
+    %outer = type { i8, %pair }
+    declare i32 @pthread_mutex_lock(i8*)
+    @actual = global %outer zeroinitializer
+    define void @acquire_second(%pair* %base) {
+    entry:
+      %field = getelementptr %pair, %pair* %base, i32 0, i32 1
+      call i32 @pthread_mutex_lock(i8* %field)
+      ret void
+    }
+    define void @main() {
+    entry:
+      %inner = getelementptr %outer, %outer* @actual, i32 0, i32 1
+      call void @acquire_second(%pair* %inner)
+      %after = add i32 1, 2
+      ret void
+    }
+    define void @forward(%pair* %base) {
+    entry:
+      call void @acquire_second(%pair* %base)
+      %after_forward = add i32 3, 4
+      ret void
+    }
+  )";
+  auto module = parseModule(source);
+  ASSERT_NE(module, nullptr);
+  LockSetAnalysis lsa(*module);
+  lsa.analyze();
+  Function *main = module->getFunction("main");
+  const Instruction *after = findInstructionByName(*main, "after");
+  const Instruction *inner = findInstructionByName(*main, "inner");
+  EXPECT_FALSE(lsa.mustHoldLock(after, inner));
+  const LockSet held = lsa.getMustLockSetAt(after);
+  ASSERT_EQ(held.size(), 1u);
+  const auto *projected = dyn_cast<GetElementPtrInst>(*held.begin());
+  ASSERT_NE(projected, nullptr);
+  EXPECT_EQ(projected->getPointerOperand(), inner);
+  EXPECT_TRUE(projected->hasAllConstantIndices());
+  Function *forward = module->getFunction("forward");
+  const Instruction *after_forward =
+      findInstructionByName(*forward, "after_forward");
+  const LockSet forward_held = lsa.getMustLockSetAt(after_forward);
+  ASSERT_EQ(forward_held.size(), 1u);
+  const auto *forward_projected =
+      dyn_cast<GetElementPtrInst>(*forward_held.begin());
+  ASSERT_NE(forward_projected, nullptr);
+  EXPECT_EQ(forward_projected->getPointerOperand(), forward->getArg(0));
+}
+
+TEST_F(LockSetAnalysisTest, RecursiveDepthComposesAcrossSummary) {
+  const char *source = R"(
+    declare void @_ZNSt15recursive_mutex4lockEv(i8*)
+    declare void @_ZNSt15recursive_mutex6unlockEv(i8*)
+    @recursive = global i8 0
+    define void @helper(i8* %m) {
+    entry:
+      call void @_ZNSt15recursive_mutex4lockEv(i8* %m)
+      ret void
+    }
+    define void @main() {
+    entry:
+      call void @_ZNSt15recursive_mutex4lockEv(i8* @recursive)
+      call void @helper(i8* @recursive)
+      call void @_ZNSt15recursive_mutex6unlockEv(i8* @recursive)
+      %after = add i32 1, 2
+      ret void
+    }
+  )";
+  auto module = parseModule(source);
+  ASSERT_NE(module, nullptr);
+  LockSetAnalysis lsa(*module);
+  lsa.analyze();
+  const Instruction *after =
+      findInstructionByName(*module->getFunction("main"), "after");
+  const GlobalVariable *recursive = module->getNamedGlobal("recursive");
+  EXPECT_TRUE(lsa.mayHoldLock(after, recursive));
+  EXPECT_TRUE(lsa.mustHoldLock(after, recursive));
+}
+
+TEST_F(LockSetAnalysisTest, RecursiveReleaseDepthComposesAcrossSummary) {
+  const char *source = R"(
+    declare void @_ZNSt15recursive_mutex4lockEv(i8*)
+    declare void @_ZNSt15recursive_mutex6unlockEv(i8*)
+    @recursive = global i8 0
+    define void @helper(i8* %m) {
+    entry:
+      call void @_ZNSt15recursive_mutex6unlockEv(i8* %m)
+      ret void
+    }
+    define void @main() {
+    entry:
+      call void @_ZNSt15recursive_mutex4lockEv(i8* @recursive)
+      call void @_ZNSt15recursive_mutex4lockEv(i8* @recursive)
+      call void @helper(i8* @recursive)
+      %after = add i32 1, 2
+      ret void
+    }
+  )";
+  auto module = parseModule(source);
+  ASSERT_NE(module, nullptr);
+  LockSetAnalysis lsa(*module);
+  lsa.analyze();
+  const Instruction *after =
+      findInstructionByName(*module->getFunction("main"), "after");
+  const GlobalVariable *recursive = module->getNamedGlobal("recursive");
+  EXPECT_TRUE(lsa.mayHoldLock(after, recursive));
+  EXPECT_TRUE(lsa.mustHoldLock(after, recursive));
+  EXPECT_EQ(lsa.getLockNestingDepth(after), 1u);
+}
+
+TEST_F(LockSetAnalysisTest, RecursiveDepthComposesAcrossSummarySCC) {
+  const char *source = R"(
+    declare void @_ZNSt15recursive_mutex4lockEv(i8*)
+    declare void @_ZNSt15recursive_mutex6unlockEv(i8*)
+    @recursive = global i8 0
+    define void @a(i8* %m, i1 %recurse) {
+    entry:
+      call void @_ZNSt15recursive_mutex4lockEv(i8* %m)
+      br i1 %recurse, label %call, label %done
+    call:
+      call void @b(i8* %m, i1 false)
+      br label %done
+    done:
+      ret void
+    }
+    define void @b(i8* %m, i1 %recurse) {
+    entry:
+      br i1 %recurse, label %call, label %done
+    call:
+      call void @a(i8* %m, i1 false)
+      br label %done
+    done:
+      ret void
+    }
+    define void @main() {
+    entry:
+      call void @_ZNSt15recursive_mutex4lockEv(i8* @recursive)
+      call void @a(i8* @recursive, i1 true)
+      call void @_ZNSt15recursive_mutex6unlockEv(i8* @recursive)
+      %after = add i32 1, 2
+      ret void
+    }
+  )";
+  auto module = parseModule(source);
+  ASSERT_NE(module, nullptr);
+  LockSetAnalysis lsa(*module);
+  lsa.analyze();
+  const Instruction *after =
+      findInstructionByName(*module->getFunction("main"), "after");
+  const GlobalVariable *recursive = module->getNamedGlobal("recursive");
+  EXPECT_TRUE(lsa.mayHoldLock(after, recursive));
+  EXPECT_TRUE(lsa.mustHoldLock(after, recursive));
+}
+
+TEST_F(LockSetAnalysisTest, CatchSwitchUnwindRetainsCallerMayLocks) {
+  const char *source = R"(
+    declare i32 @pthread_mutex_lock(i8*)
+    declare void @may_throw()
+    declare i32 @__CxxFrameHandler3(...)
+    @lock = global i8 0
+    define void @callee() personality i32 (...)* @__CxxFrameHandler3 {
+    entry:
+      invoke void @may_throw() to label %done unwind label %dispatch
+    done:
+      ret void
+    dispatch:
+      %cs = catchswitch within none [label %handler] unwind to caller
+    handler:
+      %pad = catchpad within %cs [i8* null]
+      catchret from %pad to label %done
+    }
+    define void @caller() personality i32 (...)* @__CxxFrameHandler3 {
+    entry:
+      call i32 @pthread_mutex_lock(i8* @lock)
+      invoke void @callee() to label %done unwind label %catch
+    done:
+      ret void
+    catch:
+      %cs = catchswitch within none [label %handler] unwind to caller
+    handler:
+      %pad = catchpad within %cs [i8* null]
+      %unwind_marker = add i32 1, 2
+      catchret from %pad to label %done
+    }
+  )";
+  auto module = parseModule(source);
+  ASSERT_NE(module, nullptr);
+  LockSetAnalysis lsa(*module);
+  lsa.analyze();
+  const Instruction *unwind_marker = findInstructionByName(
+      *module->getFunction("caller"), "unwind_marker");
+  const GlobalVariable *lock = module->getNamedGlobal("lock");
+  EXPECT_TRUE(lsa.mayHoldLock(unwind_marker, lock));
+}
+
+TEST_F(LockSetAnalysisTest, SummaryOrderUsesCallerMustHeldLocks) {
+  const char *source = R"(
+    declare i32 @pthread_mutex_lock(i8*)
+    @a = global i8 0
+    @b = global i8 0
+    define void @helper(i1 %flag) {
+    entry:
+      br i1 %flag, label %done, label %lock_b
+    lock_b:
+      call i32 @pthread_mutex_lock(i8* @b)
+      br label %done
+    done:
+      ret void
+    }
+    define void @f(i1 %flag) {
+    entry:
+      br i1 %flag, label %lock_a, label %call
+    lock_a:
+      call i32 @pthread_mutex_lock(i8* @a)
+      br label %call
+    call:
+      call void @helper(i1 %flag)
+      ret void
+    }
+    define void @g() {
+    entry:
+      call i32 @pthread_mutex_lock(i8* @b)
+      call i32 @pthread_mutex_lock(i8* @a)
+      ret void
+    }
+  )";
+  auto module = parseModule(source);
+  ASSERT_NE(module, nullptr);
+  LockSetAnalysis lsa(*module);
+  lsa.analyze();
+  EXPECT_TRUE(lsa.detectLockOrderInversions().empty());
+  EXPECT_TRUE(lsa.detectDeadlockCycles().empty());
+}

@@ -615,6 +615,8 @@ TEST_F(ThreadAPITest, ConfigTaggedBinarySemaphoresRemainExclusionCapable) {
   EXPECT_TRUE(api->isBinarySemaphoreOp(binary_post));
   EXPECT_TRUE(api->isTDAcquire(binary_wait));
   EXPECT_TRUE(api->isTDRelease(binary_post));
+  EXPECT_FALSE(api->isTDRelease(binary_wait));
+  EXPECT_FALSE(api->isTDAcquire(binary_post));
 }
 TEST_F(ThreadAPITest, RecognizesAdditionalMPICommunicatorManagementAPIs) {
   const char *source = R"(

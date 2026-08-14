@@ -116,6 +116,72 @@ TEST_F(HappensBeforeAnalysisTest, StaleAnalysisGenerationFailsClosed) {
   mhp.analyze();
   EXPECT_FALSE(hb.mustPrecede(a, b));
 }
+TEST_F(HappensBeforeAnalysisTest, LoopSitesDoNotProduceContradictoryMustHB) {
+  const char *source = R"(
+    define i32 @main(i1 %again) {
+    entry:
+      br label %loop
+
+    loop:
+      %a = add i32 1, 2
+      %b = add i32 %a, 3
+      br i1 %again, label %loop, label %exit
+
+    exit:
+      ret i32 %b
+    }
+  )";
+  auto module = parseModule(source);
+  ASSERT_NE(module, nullptr);
+  MHPAnalysis mhp(*module);
+  mhp.analyze();
+  HappensBeforeAnalysis hb(*module, mhp);
+  hb.analyze();
+  const Function *main_func = module->getFunction("main");
+  const Instruction *a = findInstructionByName(*main_func, "a");
+  const Instruction *b = findInstructionByName(*main_func, "b");
+  ASSERT_NE(a, nullptr);
+  ASSERT_NE(b, nullptr);
+  EXPECT_FALSE(hb.mustPrecede(a, b));
+  EXPECT_FALSE(hb.mustPrecede(b, a));
+}
+TEST_F(HappensBeforeAnalysisTest,
+       RecursiveSitesDoNotProduceStaticMustHB) {
+  const char *source = R"(
+    define void @recur(i1 %again) {
+    entry:
+      %a = add i32 1, 2
+      br i1 %again, label %call, label %exit
+
+    call:
+      call void @recur(i1 false)
+      br label %exit
+
+    exit:
+      %b = add i32 %a, 3
+      ret void
+    }
+
+    define i32 @main() {
+    entry:
+      call void @recur(i1 true)
+      ret i32 0
+    }
+  )";
+  auto module = parseModule(source);
+  ASSERT_NE(module, nullptr);
+  MHPAnalysis mhp(*module);
+  mhp.analyze();
+  HappensBeforeAnalysis hb(*module, mhp);
+  hb.analyze();
+  const Function *recur = module->getFunction("recur");
+  const Instruction *a = findInstructionByName(*recur, "a");
+  const Instruction *b = findInstructionByName(*recur, "b");
+  ASSERT_NE(a, nullptr);
+  ASSERT_NE(b, nullptr);
+  EXPECT_FALSE(hb.mustPrecede(a, b));
+  EXPECT_FALSE(hb.mustPrecede(b, a));
+}
 TEST_F(HappensBeforeAnalysisTest, MultiExitWorkerStillHappensBeforePostJoin) {
   const char *source = R"(
     declare i32 @pthread_create(i8*, i8*, i8* (i8*)*, i8*)

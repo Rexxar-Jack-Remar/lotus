@@ -40,7 +40,7 @@ TEST_F(DataSharingAnalysisTest, OutlinedCapturesInferSharedAndFirstprivate) {
   EXPECT_EQ(entries.size(), 2u);
 }
 
-TEST_F(DataSharingAnalysisTest, ReadOnlyPointerCaptureBecomesSharedNoModify) {
+TEST_F(DataSharingAnalysisTest, ReadOnlyPointerCaptureRemainsUnresolved) {
   const char *source = R"(
     define internal void @.omp_outlined.(i32* %.omp.read_ptr) {
     entry:
@@ -59,10 +59,10 @@ TEST_F(DataSharingAnalysisTest, ReadOnlyPointerCaptureBecomesSharedNoModify) {
   const Function *outlined = module->getFunction(".omp_outlined.");
   ASSERT_NE(outlined, nullptr);
   const Argument *arg0 = outlined->arg_begin();
-  EXPECT_EQ(analysis.getAttribute(arg0), DataSharingAttribute::SharedNoModify);
+  EXPECT_EQ(analysis.getAttribute(arg0), DataSharingAttribute::None);
 }
 
-TEST_F(DataSharingAnalysisTest, EscapingPointerCaptureStaysConservativeShared) {
+TEST_F(DataSharingAnalysisTest, EscapingPointerCaptureRemainsUnresolved) {
   const char *source = R"(
     declare void @sink(i32*)
 
@@ -82,7 +82,29 @@ TEST_F(DataSharingAnalysisTest, EscapingPointerCaptureStaysConservativeShared) {
   const Function *outlined = module->getFunction(".omp_outlined.");
   ASSERT_NE(outlined, nullptr);
   const Argument *arg0 = outlined->arg_begin();
-  EXPECT_EQ(analysis.getAttribute(arg0), DataSharingAttribute::Shared);
+  EXPECT_EQ(analysis.getAttribute(arg0), DataSharingAttribute::None);
+}
+
+TEST_F(DataSharingAnalysisTest,
+       FirstprivatePointerHintIsIndependentOfPointeeWrites) {
+  const char *source = R"(
+    define internal void @.omp_outlined.(i32* %.omp.firstprivate_ptr) {
+    entry:
+      store i32 7, i32* %.omp.firstprivate_ptr, align 4
+      ret void
+    }
+  )";
+
+  auto module = parseModule(source);
+  ASSERT_NE(module, nullptr);
+
+  DataSharingAnalysis analysis(*module);
+  analysis.analyze();
+
+  const Function *outlined = module->getFunction(".omp_outlined.");
+  ASSERT_NE(outlined, nullptr);
+  const Argument *arg0 = outlined->arg_begin();
+  EXPECT_EQ(analysis.getAttribute(arg0), DataSharingAttribute::Firstprivate);
 }
 
 TEST_F(DataSharingAnalysisTest, EntriesCarryCanonicalRegionKeys) {

@@ -30,6 +30,7 @@
 #include "Concurrency/Utils/ThreadAPI.h"
 
 #include <map>
+#include <memory>
 #include <set>
 #include <unordered_map>
 #include <unordered_set>
@@ -62,6 +63,7 @@ namespace mhp {
 using LockID = const llvm::Value *;
 using LockSet = std::set<LockID>;
 using RecursiveDepthMap = std::map<LockID, unsigned>;
+using RAIIWrapperSet = std::set<const llvm::Value *>;
 
 enum class MemoryAccessKind { Read, Write };
 
@@ -406,6 +408,14 @@ private:
       m_must_recursive_depth_entry;
   std::unordered_map<const llvm::Instruction *, RecursiveDepthMap>
       m_must_recursive_depth_exit;
+  std::unordered_map<const llvm::Instruction *, RAIIWrapperSet>
+      m_may_raii_ownership_entry;
+  std::unordered_map<const llvm::Instruction *, RAIIWrapperSet>
+      m_may_raii_ownership_exit;
+  std::unordered_map<const llvm::Instruction *, RAIIWrapperSet>
+      m_must_raii_ownership_entry;
+  std::unordered_map<const llvm::Instruction *, RAIIWrapperSet>
+      m_must_raii_ownership_exit;
 
   // Lock tracking
   std::unordered_set<LockID> m_all_locks;
@@ -462,6 +472,14 @@ private:
     LockSet exceptional_must_write_acquire_delta;
     LockSet exceptional_may_release_delta;
     LockSet exceptional_must_release_delta;
+    RecursiveDepthMap may_recursive_acquire_delta;
+    RecursiveDepthMap must_recursive_acquire_delta;
+    RecursiveDepthMap may_recursive_release_delta;
+    RecursiveDepthMap must_recursive_release_delta;
+    RecursiveDepthMap exceptional_may_recursive_acquire_delta;
+    RecursiveDepthMap exceptional_must_recursive_acquire_delta;
+    RecursiveDepthMap exceptional_may_recursive_release_delta;
+    RecursiveDepthMap exceptional_must_recursive_release_delta;
     bool has_exceptional_exit = false;
     bool is_analyzed; ///< Whether function has been analyzed
 
@@ -478,6 +496,8 @@ private:
     LockSet may_write_lockset;
     LockSet must_read_lockset;
     LockSet must_write_lockset;
+    RecursiveDepthMap may_recursive_depth;
+    RecursiveDepthMap must_recursive_depth;
   };
   std::unordered_map<const llvm::Instruction *, InvokeEdgeFacts>
       m_invoke_normal_exit;
@@ -490,9 +510,12 @@ private:
     ThreadAPI::LockSemanticKind mode = ThreadAPI::LockSemanticKind::None;
     bool success = false;
   };
-  using CFGEdge = std::pair<const llvm::BasicBlock *, const llvm::BasicBlock *>;
+  using CFGEdge = std::pair<const llvm::Instruction *, unsigned>;
   std::map<CFGEdge, std::vector<TryLockEdgeRefinement>>
       m_trylock_edge_refinements;
+  mutable std::map<std::pair<const llvm::CallBase *, LockID>,
+                   std::unique_ptr<llvm::GetElementPtrInst>>
+      m_summary_lock_projections;
 
   // ========================================================================
   // Analysis Implementation
@@ -565,7 +588,8 @@ private:
   std::vector<LockID> getUnderlyingRAIILocks(const llvm::Instruction *inst,
                                              const llvm::Value *lock_obj) const;
   std::vector<LockID>
-  getRAIILocksReleasedAt(const llvm::Instruction *inst) const;
+  getRAIILocksReleasedAt(const llvm::Instruction *inst,
+                         bool include_maybe_owned = false) const;
   std::vector<LockID>
   getImpreciseRAIILocksEndingAt(const llvm::Instruction *inst) const;
   std::vector<LockID>
@@ -604,6 +628,9 @@ private:
   LockID instantiateSummaryLock(const llvm::CallBase *call,
                                 const llvm::Function *callee,
                                 LockID lock) const;
+  RAIIWrapperSet transferRAIIOwnership(const llvm::Instruction *inst,
+                                       const RAIIWrapperSet &in,
+                                       bool is_must) const;
 
   /**
    * @brief Get callees at a call site using CallGraph

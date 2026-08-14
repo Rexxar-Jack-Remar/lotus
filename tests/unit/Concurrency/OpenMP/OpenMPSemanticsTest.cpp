@@ -219,7 +219,7 @@ TEST_F(OpenMPSemanticsTest,
   EXPECT_GT(it->second, 0u);
 }
 
-TEST_F(OpenMPSemanticsTest, NormalizesPartialBoundaryEventsAcrossKinds) {
+TEST_F(OpenMPSemanticsTest, NormalizesOnlyActualPartialBoundaryEvents) {
   const char *source = R"(
     declare i32 @__kmpc_omp_task(i8*, i32, i8*)
     declare i32 @__kmpc_omp_wait_deps(i8*, i32, i32, i8*, i32, i8*)
@@ -273,12 +273,15 @@ TEST_F(OpenMPSemanticsTest, NormalizesPartialBoundaryEventsAcrossKinds) {
                  event.kind == OpenMPTaskEvent::Kind::ReductionNowaitBoundary;
   }
 
-  EXPECT_EQ(partial_count, 5u);
+  EXPECT_EQ(partial_count, 4u);
   EXPECT_TRUE(saw_wait_deps);
   EXPECT_TRUE(saw_flush);
   EXPECT_TRUE(saw_doacross);
   EXPECT_TRUE(saw_target);
-  EXPECT_TRUE(saw_reduce);
+  EXPECT_FALSE(saw_reduce);
+  EXPECT_EQ(semantics.getDeferredReasonCounts().count(
+                "omp_reduction_protocol_unmodeled"),
+            1u);
 }
 
 TEST_F(OpenMPSemanticsTest, MasterAndOrderedEndsDoNotBecomeWaitBoundaries) {
@@ -506,9 +509,12 @@ TEST_F(OpenMPSemanticsTest,
   OpenMPSemantics semantics(*module);
   semantics.analyze();
 
-  EXPECT_EQ(semantics.getSummary().detach_completion_count, 1u);
+  EXPECT_EQ(semantics.getSummary().detach_completion_count, 0u);
   EXPECT_EQ(semantics.getSummary().wait_boundary_count, 0u);
   EXPECT_TRUE(semantics.getWaitBoundaryInfos().empty());
+  EXPECT_EQ(semantics.getDeferredReasonCounts().count(
+                "omp_detached_fulfillment_event_unresolved"),
+            1u);
 }
 
 TEST_F(OpenMPSemanticsTest,
@@ -610,6 +616,32 @@ TEST_F(OpenMPSemanticsTest, AtomicRuntimeFallbackIsReportedExplicitly) {
   EXPECT_EQ(it->second, 1u);
 }
 
+TEST_F(OpenMPSemanticsTest,
+       SpecializedAtomicRuntimeFamilyIsReportedExplicitly) {
+  const char *source = R"(
+    declare i32 @__kmpc_atomic_fixed4_add(i8*, i32, i32*, i32)
+
+    define i32 @main(i32* %address) {
+    entry:
+      %result = call i32 @__kmpc_atomic_fixed4_add(
+          i8* null, i32 0, i32* %address, i32 1)
+      ret i32 %result
+    }
+  )";
+
+  auto module = parseModule(source);
+  ASSERT_NE(module, nullptr);
+
+  OpenMPSemantics semantics(*module);
+  semantics.analyze();
+
+  EXPECT_EQ(semantics.getSummary().atomic_region_count, 1u);
+  auto it = semantics.getDeferredReasonCounts().find(
+      "omp_atomic_runtime_unmodeled");
+  ASSERT_NE(it, semantics.getDeferredReasonCounts().end());
+  EXPECT_EQ(it->second, 1u);
+}
+
 TEST_F(OpenMPSemanticsTest, CancellationRuntimeRemainsExplicitModelGap) {
   const char *source = R"(
     declare i32 @__kmpc_cancel(i8*, i32, i32)
@@ -641,7 +673,7 @@ TEST_F(OpenMPSemanticsTest, CancellationRuntimeRemainsExplicitModelGap) {
 }
 
 TEST_F(OpenMPSemanticsTest,
-       DoacrossSubmitWitnessesSelectiveWaitRelationsAndTaskCompletionResolves) {
+       DoacrossSubmitWitnessesWaitButIf0CompletionDoesNotFulfillDetach) {
   const char *source = R"(
     declare i8* @__kmpc_omp_task_alloc(i8*, i32, i32, i64, i64, void ()*)
     declare i32 @__kmpc_omp_task(i8*, i32, i8*)
@@ -686,7 +718,7 @@ TEST_F(OpenMPSemanticsTest,
     }
   }
   EXPECT_TRUE(saw_doacross_submit);
-  EXPECT_TRUE(saw_task_complete);
+  EXPECT_FALSE(saw_task_complete);
 
   bool saw_detached_completion_relation = false;
   for (const auto &entry : semantics.getRelations()) {
@@ -694,7 +726,10 @@ TEST_F(OpenMPSemanticsTest,
       saw_detached_completion_relation = true;
     }
   }
-  EXPECT_TRUE(saw_detached_completion_relation);
+  EXPECT_FALSE(saw_detached_completion_relation);
+  EXPECT_EQ(semantics.getDeferredReasonCounts().count(
+                "omp_detached_fulfillment_event_unresolved"),
+            1u);
 }
 
 TEST_F(OpenMPSemanticsTest,
@@ -937,7 +972,7 @@ TEST_F(OpenMPSemanticsTest, TaskAllocFlagsPopulateExecutionModeSummary) {
   EXPECT_EQ(summary.final_task_count, 1u);
   EXPECT_EQ(summary.untied_task_count, 1u);
   EXPECT_EQ(summary.detached_task_count, 1u);
-  EXPECT_EQ(summary.detach_completion_count, 1u);
+  EXPECT_EQ(summary.detach_completion_count, 0u);
 
   ASSERT_EQ(semantics.getTasks().size(), 3u);
   bool saw_untied = false;
@@ -1028,6 +1063,282 @@ TEST_F(OpenMPSemanticsTest,
   }
   EXPECT_TRUE(semantics.getTaskCompletionEvents().empty() ||
               semantics.getTaskCompletionEvents().front().task == nullptr);
+}
+
+TEST_F(OpenMPSemanticsTest, If0AndDeferredSubmissionShareOneLogicalTask) {
+  const char *source = R"(
+    declare i8* @__kmpc_omp_task_alloc(i8*, i32, i32, i64, i64, void ()*)
+    declare i32 @__kmpc_omp_task(i8*, i32, i8*)
+    declare i32 @__kmpc_omp_task_begin_if0(i8*, i32, i8*)
+    declare void @__kmpc_omp_task_complete_if0(i8*, i32, i8*)
+
+    define internal void @task_body() {
+    entry:
+      ret void
+    }
+
+    define i32 @main(i1 %defer) {
+    entry:
+      %task = call i8* @__kmpc_omp_task_alloc(
+          i8* null, i32 0, i32 1, i64 32, i64 0, void ()* @task_body)
+      br i1 %defer, label %deferred, label %included
+    deferred:
+      call i32 @__kmpc_omp_task(i8* null, i32 0, i8* %task)
+      br label %exit
+    included:
+      call i32 @__kmpc_omp_task_begin_if0(i8* null, i32 0, i8* %task)
+      call void @task_body()
+      call void @__kmpc_omp_task_complete_if0(
+          i8* null, i32 0, i8* %task)
+      br label %exit
+    exit:
+      ret i32 0
+    }
+  )";
+
+  auto module = parseModule(source);
+  ASSERT_NE(module, nullptr);
+
+  const CallBase *deferred_call = nullptr;
+  const CallBase *included_call = nullptr;
+  for (BasicBlock &bb : *module->getFunction("main")) {
+    for (Instruction &inst : bb) {
+      const auto *call = dyn_cast<CallBase>(&inst);
+      if (!call || !call->getCalledFunction()) {
+        continue;
+      }
+      if (call->getCalledFunction()->getName() == "__kmpc_omp_task") {
+        deferred_call = call;
+      } else if (call->getCalledFunction()->getName() ==
+                 "__kmpc_omp_task_begin_if0") {
+        included_call = call;
+      }
+    }
+  }
+  ASSERT_NE(deferred_call, nullptr);
+  ASSERT_NE(included_call, nullptr);
+
+  OpenMPSemantics semantics(*module);
+  semantics.analyze();
+
+  ASSERT_EQ(semantics.getTasks().size(), 1u);
+  const Task *task = semantics.getTasks().front().get();
+  EXPECT_EQ(semantics.getTaskForCreate(deferred_call), task);
+  EXPECT_EQ(semantics.getTaskForCreate(included_call), task);
+  EXPECT_TRUE(task->has_deferred_submission);
+  EXPECT_TRUE(task->has_included_submission);
+  EXPECT_EQ(task->execution_mode, TaskExecutionMode::Deferred);
+  EXPECT_EQ(semantics.getSummary().detach_completion_count, 0u);
+}
+
+TEST_F(OpenMPSemanticsTest,
+       UnmappedPointerCaptureDoesNotBecomeSharedFromPointeeAccess) {
+  const char *source = R"(
+    declare i32 @__kmpc_omp_task(i8*, i32, i8*)
+
+    define internal void @.omp_outlined.(i32* %.omp.ptr) {
+    entry:
+      store i32 1, i32* %.omp.ptr, align 4
+      ret void
+    }
+
+    define i32 @main() {
+    entry:
+      call i32 @__kmpc_omp_task(
+          i8* null, i32 0,
+          i8* bitcast (void (i32*)* @.omp_outlined. to i8*))
+      ret i32 0
+    }
+  )";
+
+  auto module = parseModule(source);
+  ASSERT_NE(module, nullptr);
+
+  OpenMPSemantics semantics(*module);
+  semantics.analyze();
+
+  ASSERT_EQ(semantics.getTasks().size(), 1u);
+  EXPECT_TRUE(semantics.getTasks().front()->data_sharing_entries.empty());
+  EXPECT_EQ(semantics.getDeferredReasonCounts().count(
+                "omp_data_sharing_capture_unresolved"),
+            1u);
+}
+
+TEST_F(OpenMPSemanticsTest, TaskwaitDeps51DecodesNowaitAsDependencyTask) {
+  const char *source = R"(
+    %kmp_depend_info = type { i8*, i64, i8 }
+    @shared = global i32 0
+    @deps = constant [1 x %kmp_depend_info] [
+      %kmp_depend_info { i8* bitcast (i32* @shared to i8*), i64 4, i8 2 }
+    ]
+
+    declare void @__kmpc_omp_taskwait_deps_51(
+        i8*, i32, i32, %kmp_depend_info*, i32, %kmp_depend_info*, i32)
+
+    define i32 @main() {
+    entry:
+      %dep = getelementptr inbounds [1 x %kmp_depend_info],
+          [1 x %kmp_depend_info]* @deps, i64 0, i64 0
+      call void @__kmpc_omp_taskwait_deps_51(
+          i8* null, i32 0, i32 1, %kmp_depend_info* %dep,
+          i32 0, %kmp_depend_info* null, i32 0)
+      call void @__kmpc_omp_taskwait_deps_51(
+          i8* null, i32 0, i32 1, %kmp_depend_info* %dep,
+          i32 0, %kmp_depend_info* null, i32 1)
+      ret i32 0
+    }
+  )";
+
+  auto module = parseModule(source);
+  ASSERT_NE(module, nullptr);
+
+  OpenMPSemantics semantics(*module);
+  semantics.analyze();
+
+  ASSERT_EQ(semantics.getWaitBoundaryInfos().size(), 1u);
+  ASSERT_EQ(semantics.getTasks().size(), 1u);
+  EXPECT_EQ(semantics.getSummary().task_count, 1u);
+  EXPECT_EQ(semantics.getSummary().task_with_dependencies_count, 1u);
+  const Task *dependency_task = semantics.getTasks().front().get();
+  EXPECT_TRUE(dependency_task->has_deferred_submission);
+  EXPECT_TRUE(dependency_task->has_dependency_submission);
+  ASSERT_EQ(dependency_task->dependencies.size(), 1u);
+  EXPECT_EQ(dependency_task->dependencies[0].proof,
+            DependencyProof::Definite);
+}
+
+TEST_F(OpenMPSemanticsTest, MalformedRecognizedTaskCallIsDeferredSafely) {
+  const char *source = R"(
+    declare i32 @__kmpc_omp_task(i8*)
+
+    define i32 @main() {
+    entry:
+      call i32 @__kmpc_omp_task(i8* null)
+      ret i32 0
+    }
+  )";
+
+  auto module = parseModule(source);
+  ASSERT_NE(module, nullptr);
+
+  OpenMPSemantics semantics(*module);
+  semantics.analyze();
+
+  EXPECT_TRUE(semantics.getTasks().empty());
+  auto it = semantics.getDeferredReasonCounts().find(
+      "omp_task_abi_arity_invalid");
+  ASSERT_NE(it, semantics.getDeferredReasonCounts().end());
+  EXPECT_EQ(it->second, 1u);
+}
+
+TEST_F(OpenMPSemanticsTest,
+       TruncatedTaskWithDepsCallIsDeferredSafely) {
+  const char *source = R"(
+    declare i32 @__kmpc_omp_task_with_deps(i8*, i32, i8*, i32, i8*)
+
+    define i32 @main() {
+    entry:
+      call i32 @__kmpc_omp_task_with_deps(
+          i8* null, i32 0, i8* null, i32 0, i8* null)
+      ret i32 0
+    }
+  )";
+
+  auto module = parseModule(source);
+  ASSERT_NE(module, nullptr);
+
+  OpenMPSemantics semantics(*module);
+  semantics.analyze();
+
+  EXPECT_TRUE(semantics.getTasks().empty());
+  auto it = semantics.getDeferredReasonCounts().find(
+      "omp_task_abi_arity_invalid");
+  ASSERT_NE(it, semantics.getDeferredReasonCounts().end());
+  EXPECT_EQ(it->second, 1u);
+}
+
+TEST_F(OpenMPSemanticsTest,
+       TaskFlagsRemainOrthogonalAndFinalStatePropagatesToChildren) {
+  const char *source = R"(
+    declare i8* @__kmpc_omp_task_alloc(i8*, i32, i32, i64, i64, void ()*)
+    declare i32 @__kmpc_omp_task(i8*, i32, i8*)
+
+    define internal void @proxy_body() {
+    entry:
+      ret void
+    }
+
+    define internal void @detachable_body() {
+    entry:
+      ret void
+    }
+
+    define internal void @final_child_body() {
+    entry:
+      ret void
+    }
+
+    define internal void @final_body() {
+    entry:
+      call i32 @__kmpc_omp_task(
+          i8* null, i32 0,
+          i8* bitcast (void ()* @final_child_body to i8*))
+      ret void
+    }
+
+    define i32 @main() {
+    entry:
+      %proxy = call i8* @__kmpc_omp_task_alloc(
+          i8* null, i32 0, i32 17, i64 32, i64 0, void ()* @proxy_body)
+      call i32 @__kmpc_omp_task(i8* null, i32 0, i8* %proxy)
+      %detachable = call i8* @__kmpc_omp_task_alloc(
+          i8* null, i32 0, i32 65, i64 32, i64 0,
+          void ()* @detachable_body)
+      call i32 @__kmpc_omp_task(i8* null, i32 0, i8* %detachable)
+      %final = call i8* @__kmpc_omp_task_alloc(
+          i8* null, i32 0, i32 2, i64 32, i64 0, void ()* @final_body)
+      call i32 @__kmpc_omp_task(i8* null, i32 0, i8* %final)
+      ret i32 0
+    }
+  )";
+
+  auto module = parseModule(source);
+  ASSERT_NE(module, nullptr);
+
+  OpenMPSemantics semantics(*module);
+  semantics.analyze();
+
+  const Task *proxy = nullptr;
+  const Task *detachable = nullptr;
+  const Task *final_task = nullptr;
+  const Task *final_child = nullptr;
+  for (const auto &task : semantics.getTasks()) {
+    ASSERT_NE(task->task_function, nullptr);
+    StringRef name = task->task_function->getName();
+    if (name == "proxy_body") {
+      proxy = task.get();
+    } else if (name == "detachable_body") {
+      detachable = task.get();
+    } else if (name == "final_body") {
+      final_task = task.get();
+    } else if (name == "final_child_body") {
+      final_child = task.get();
+    }
+  }
+
+  ASSERT_NE(proxy, nullptr);
+  ASSERT_NE(detachable, nullptr);
+  ASSERT_NE(final_task, nullptr);
+  ASSERT_NE(final_child, nullptr);
+  EXPECT_TRUE(proxy->is_proxy);
+  EXPECT_FALSE(proxy->is_detached);
+  EXPECT_FALSE(detachable->is_proxy);
+  EXPECT_TRUE(detachable->is_detached);
+  EXPECT_TRUE(final_task->is_final);
+  EXPECT_FALSE(final_task->is_untied);
+  EXPECT_TRUE(final_child->is_final);
+  EXPECT_FALSE(final_child->is_untied);
+  EXPECT_EQ(final_child->execution_mode, TaskExecutionMode::Included);
 }
 
 #ifndef LOTUS_GTEST_NO_MAIN

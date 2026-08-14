@@ -1413,6 +1413,35 @@ void HappensBeforeAnalysis::buildSynchronizesWith() {
             getAtomicInitialConstant(release_candidates.front().second);
         const ConstantInt *sequence_value =
             getAtomicStoredConstant(release_candidates.front().second);
+        bool ambiguous_sequence_order = false;
+        for (const AtomicEvent *event : release_sequence_events) {
+          if (site_multiplicity.instructionMayExecuteMultipleTimes(event->inst)) {
+            ambiguous_sequence_order = true;
+            break;
+          }
+        }
+        for (size_t i = 0; !ambiguous_sequence_order &&
+                           i < release_sequence_events.size();
+             ++i) {
+          for (size_t j = i + 1; j < release_sequence_events.size(); ++j) {
+            const bool i_before_j =
+                hasProgramOrder(release_sequence_events[i]->inst,
+                                release_sequence_events[j]->inst);
+            const bool j_before_i =
+                hasProgramOrder(release_sequence_events[j]->inst,
+                                release_sequence_events[i]->inst);
+            if (i_before_j == j_before_i) {
+              ambiguous_sequence_order = true;
+              break;
+            }
+          }
+        }
+        if (ambiguous_sequence_order) {
+          ++deferred_release_sequence_relations;
+          ++m_deferred_sync_counts
+              ["atomic_release_sequence_tail_order_ambiguous"];
+          continue;
+        }
         std::sort(release_sequence_events.begin(),
                   release_sequence_events.end(),
                   [&](const AtomicEvent *lhs, const AtomicEvent *rhs) {
@@ -2418,6 +2447,16 @@ bool HappensBeforeAnalysis::happensBefore(const Instruction *A,
 
   mhp::ThreadID a_tid = m_mhp.getThreadID(A);
   mhp::ThreadID b_tid = m_mhp.getThreadID(B);
+  // Static sites in the same repeatedly executed thread cannot establish a
+  // must-order merely from cyclic reachability. Cross-thread synchronization
+  // may still prove an order from a repeated worker/kernel site to a definite
+  // join continuation, so do not reject those pairs here.
+  if (a_tid == b_tid &&
+      (m_mhp.instructionMayExecuteMultipleTimes(A) ||
+       m_mhp.instructionMayExecuteMultipleTimes(B))) {
+    m_hb_cache[key] = false;
+    return false;
+  }
   const mhp::ThreadFlowGraph &tfg = m_mhp.getThreadFlowGraph();
   std::vector<mhp::SyncNode *> start_nodes =
       a_tid == std::numeric_limits<mhp::ThreadID>::max()

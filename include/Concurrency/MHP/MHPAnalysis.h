@@ -275,6 +275,14 @@ public:
   size_t getAnalysisGeneration() const { return m_analysis_generation; }
   bool joinEdgeMustOrderTarget(const SyncNode *join_node,
                                const SyncNode *target_node) const;
+  bool instructionMayExecuteMultipleTimes(
+      const llvm::Instruction *inst) const {
+    return !m_thread_multiplicity ||
+           m_thread_multiplicity->instructionMayExecuteMultipleTimes(inst);
+  }
+  bool isDetachedThread(ThreadID tid) const {
+    return m_detached_threads.count(tid) != 0;
+  }
   bool synchronizationEdgeMustOrderTarget(const SyncNode *from,
                                           const SyncNode *to,
                                           const SyncNode *target_node,
@@ -432,6 +440,7 @@ private:
     ThreadID parent_tid = 0;
   };
   std::vector<PendingJoin> m_pending_joins;
+  std::vector<const llvm::Instruction *> m_pending_detaches;
 
   // ========================================================================
   // Analysis Phases
@@ -504,6 +513,8 @@ private:
   void handleThreadJoin(const llvm::Instruction *join_inst, SyncNode *node,
                         ThreadID parent_tid);
   void handleThreadDetach(const llvm::Instruction *detach_inst);
+  bool resolveThreadDetach(const llvm::Instruction *detach_inst);
+  void finalizePendingDetaches();
 
   // Value-tracing helper for pthread_t
   const llvm::Value *tracePthreadT(const llvm::Value *val) const;

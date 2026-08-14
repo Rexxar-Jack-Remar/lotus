@@ -17,8 +17,8 @@
 #include "Concurrency/Utils/ThreadAPI.h"
 
 #include "Concurrency/MPI/MPISymbol.h"
-#include "Concurrency/Utils/CallTarget.h"
 #include "Concurrency/Utils/CUDA.h"
+#include "Concurrency/Utils/CallTarget.h"
 #include "Concurrency/Utils/CppThreading.h"
 #include "Concurrency/Utils/LinuxKernel.h"
 #include "Concurrency/Utils/RAIILockTracker.h"
@@ -31,8 +31,8 @@
 #include <set>
 #include <sstream>
 
-#include <llvm/ADT/STLExtras.h>
 #include <llvm/ADT/DenseMap.h>
+#include <llvm/ADT/STLExtras.h>
 #include <llvm/ADT/SmallVector.h>
 #include <llvm/ADT/StringMap.h> // for StringMap
 #include <llvm/IR/Function.h>

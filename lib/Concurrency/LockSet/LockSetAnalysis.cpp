@@ -197,6 +197,10 @@ void LockSetAnalysis::analyze() {
   m_may_recursive_depth_exit.clear();
   m_must_recursive_depth_entry.clear();
   m_must_recursive_depth_exit.clear();
+  m_may_raii_ownership_entry.clear();
+  m_may_raii_ownership_exit.clear();
+  m_must_raii_ownership_entry.clear();
+  m_must_raii_ownership_exit.clear();
   m_all_locks.clear();
   m_lock_acquires.clear();
   m_lock_releases.clear();
@@ -209,6 +213,7 @@ void LockSetAnalysis::analyze() {
   m_invoke_normal_exit.clear();
   m_invoke_unwind_exit.clear();
   m_trylock_edge_refinements.clear();
+  m_summary_lock_projections.clear();
 
   if (m_module) {
     if (!m_uses_external_call_graph) {

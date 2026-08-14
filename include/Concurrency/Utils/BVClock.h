@@ -12,8 +12,8 @@
 #ifndef __BVCLOCK_H__
 #define __BVCLOCK_H__
 
-#include <ostream>
 #include <cstddef>
+#include <ostream>
 #include <string>
 #include <utility>
 #include <vector>

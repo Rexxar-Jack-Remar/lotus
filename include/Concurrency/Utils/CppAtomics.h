@@ -18,7 +18,7 @@
 
 namespace llvm {
 class AtomicCmpXchgInst;
-}
+} // namespace llvm
 
 namespace CppAtomics {
 

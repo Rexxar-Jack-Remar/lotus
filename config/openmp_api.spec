@@ -25,6 +25,7 @@ __kmpc_omp_taskyield TD_OMP_TASKYIELD library=openmp semantic=taskyield traits=o
 __kmpc_taskgroup TD_OMP_TASKGROUP_START library=openmp semantic=taskgroup-start traits=omp-task-op
 __kmpc_end_taskgroup TD_OMP_TASKGROUP_END library=openmp semantic=taskgroup-end traits=omp-task-op
 __kmpc_taskloop TD_OMP_TASKLOOP library=openmp semantic=taskloop traits=omp-task-op
+__kmpc_taskloop_5 TD_OMP_TASKLOOP library=openmp semantic=taskloop traits=omp-task-op
 __kmpc_taskloop_nowait TD_OMP_TASKLOOP library=openmp semantic=taskloop-nowait traits=omp-task-op
 __kmpc_omp_task_complete TD_OMP_TASK_COMPLETE library=openmp semantic=task-complete traits=omp-task-op
 __kmpc_omp_task_complete_if0 TD_OMP_TASK_COMPLETE library=openmp semantic=task-complete-inline traits=omp-task-op
@@ -35,7 +36,7 @@ __kmpc_master TD_OMP_MASTER_START library=openmp semantic=master-start traits=om
 __kmpc_end_master TD_OMP_MASTER_END library=openmp semantic=master-end traits=omp-task-op
 __kmpc_ordered TD_OMP_ORDERED_START library=openmp semantic=ordered-start traits=omp-task-op
 __kmpc_end_ordered TD_OMP_ORDERED_END library=openmp semantic=ordered-end traits=omp-task-op
-__kmpc_reduce TD_OMP_REDUCE_START library=openmp semantic=reduce-start traits=omp-task-op,barrier-wait-like
+__kmpc_reduce TD_OMP_REDUCE_START library=openmp semantic=reduce-start traits=omp-task-op
 __kmpc_end_reduce TD_OMP_REDUCE_END library=openmp semantic=reduce-end traits=omp-task-op
 __kmpc_reduce_nowait TD_OMP_REDUCE_NOWAIT_START library=openmp semantic=reduce-nowait-start traits=omp-task-op
 __kmpc_end_reduce_nowait TD_OMP_REDUCE_NOWAIT_END library=openmp semantic=reduce-nowait-end traits=omp-task-op

@@ -17,6 +17,7 @@
 #include <optional>
 #include <tuple>
 #include <unordered_map>
+#include <unordered_set>
 #include <vector>
 
 #include <llvm/ADT/SmallVector.h>
@@ -132,6 +133,8 @@ private:
   // Graph structure
   std::vector<SyncNode *> m_predecessors;
   std::vector<SyncNode *> m_successors;
+  std::unordered_set<SyncNode *> m_predecessor_set;
+  std::unordered_set<SyncNode *> m_successor_set;
 };
 
 // ============================================================================
@@ -164,6 +167,7 @@ public:
                     CallContextID ctx) const;
   SyncNode *getNode(const llvm::Instruction *inst, ThreadID tid) const;
   SyncNode *getNode(const llvm::Instruction *inst) const;
+  SyncNode *getNodeByID(size_t node_id) const;
   std::vector<SyncNode *> getNodes(const llvm::Instruction *inst) const;
   std::vector<SyncNode *> getNodes(const llvm::Instruction *inst,
                                    ThreadID tid) const;
@@ -242,6 +246,7 @@ private:
   };
 
   std::vector<SyncNode *> m_all_nodes;
+  std::unordered_map<size_t, SyncNode *> m_node_id_to_node;
   std::unordered_map<InstThreadKey, SyncNode *, InstThreadKeyHash>
       m_inst_thread_to_node;
   std::unordered_map<const llvm::Instruction *, std::vector<SyncNode *>>
@@ -258,6 +263,7 @@ private:
 
   // Reachability index structures
   bool m_index_built = false;
+  bool m_has_inter_thread_edges = false;
   std::unordered_map<size_t, int> m_topo_order;
   std::unordered_map<ThreadID, std::vector<SyncNode *>> m_topo_nodes;
   std::unordered_map<const SyncNode *, std::vector<SyncNode *>> m_reverse_edges;

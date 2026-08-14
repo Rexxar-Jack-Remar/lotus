@@ -24,7 +24,7 @@ void LockSetAnalysis::identifyLocks() {
         continue;
       }
 
-      std::vector<LockID> raii_releases = getRAIILocksReleasedAt(inst);
+      std::vector<LockID> raii_releases = getRAIILocksReleasedAt(inst, true);
       for (LockID lock : raii_releases) {
         if (!lock) {
           continue;
@@ -116,12 +116,17 @@ void LockSetAnalysis::trackLockOrdering() {
           std::inserter(newly_acquired_write, newly_acquired_write.begin()));
     }
     const bool nonblocking = m_thread_api->isTryLock(inst);
+    const bool summary_induced =
+        isa<CallBase>(inst) && !m_thread_api->isTDAcquire(inst) &&
+        !m_thread_api->isTDRelease(inst);
+    const LockSet must_held = getMustLockSetAt(inst);
+    const LockSet &order_sources = summary_induced ? must_held : locks_held;
 
     auto markIfReentrantAcquire = [&](LockID acquired_lock) {
       if (!acquired_lock) {
         return;
       }
-      for (const auto *held_lock : locks_held) {
+      for (const auto *held_lock : order_sources) {
         if (held_lock == acquired_lock || mayAlias(held_lock, acquired_lock)) {
           m_reentrant_locks.insert(getCanonicalLock(acquired_lock));
           return;
@@ -146,7 +151,7 @@ void LockSetAnalysis::trackLockOrdering() {
     for (LockID new_lock : newly_acquired) {
       markIfReentrantAcquire(new_lock);
 
-      for (const auto *held_lock : locks_held) {
+      for (const auto *held_lock : order_sources) {
         if (held_lock != new_lock) {
           m_observed_lock_orders.insert({held_lock, new_lock});
           const bool held_only_shared = held_read.count(held_lock) != 0 &&
@@ -176,6 +181,9 @@ bool LockSetAnalysis::mayAlias(LockID lock1, LockID lock2) const {
       return nullptr;
     }
     lock = lock->stripPointerCasts();
+    if (isa<LoadInst>(lock)) {
+      return nullptr;
+    }
     const Value *object = getUnderlyingObject(lock, 32);
     object = object ? object->stripPointerCasts() : lock;
     return isa<GlobalVariable>(object) || isa<AllocaInst>(object) ? object
@@ -206,17 +214,14 @@ LockID LockSetAnalysis::getCanonicalLock(LockID lock) const {
   lock = lock->stripPointerCasts();
 
   if (const auto *LI = dyn_cast<LoadInst>(lock)) {
-    const Value *addr = LI->getPointerOperand()->stripPointerCasts();
-    if (const auto *GEP = dyn_cast<GetElementPtrInst>(addr)) {
-      if (GEP->hasAllConstantIndices()) {
-        return addr;
+    if (m_alias_analysis) {
+      std::vector<const Value *> pts;
+      if (m_alias_analysis->getPointsToSet(lock, pts) && pts.size() == 1 &&
+          pts.front()) {
+        return pts.front()->stripPointerCasts();
       }
-      lock = GEP->getPointerOperand()->stripPointerCasts();
-    } else if (const Value *base = getUnderlyingObject(addr, 32)) {
-      lock = base->stripPointerCasts();
-    } else {
-      lock = addr;
     }
+    return LI;
   }
 
   if (const auto *GEP = dyn_cast<GetElementPtrInst>(lock)) {
@@ -306,7 +311,8 @@ LockSetAnalysis::getUnderlyingRAIILocks(const Instruction *inst,
 }
 
 std::vector<LockID>
-LockSetAnalysis::getRAIILocksReleasedAt(const Instruction *inst) const {
+LockSetAnalysis::getRAIILocksReleasedAt(const Instruction *inst,
+                                        bool include_maybe_owned) const {
   std::vector<LockID> locks;
   if (!inst) {
     return locks;
@@ -329,36 +335,13 @@ LockSetAnalysis::getRAIILocksReleasedAt(const Instruction *inst) const {
     const Value *wrapper =
         dtor && dtor->arg_size() ? dtor->getArgOperand(0)->stripPointerCasts()
                                  : nullptr;
-    bool owns_at_destruction =
-        lifetime.ownership == RAIILock::OwnershipKind::Immediate ||
-        lifetime.ownership == RAIILock::OwnershipKind::Adopt;
-    for (const Instruction &cursor : instructions(*parent_func)) {
-      if (&cursor == inst)
-        break;
-      const auto *call = dyn_cast<CallBase>(&cursor);
-      if (!call || call->arg_size() == 0)
-        continue;
-      const ThreadAPI::TD_TYPE type = m_thread_api->getType(call);
-      const Value *first = call->getArgOperand(0)->stripPointerCasts();
-      if (first == wrapper && type == ThreadAPI::TD_UNIQUE_LOCK_LOCK)
-        owns_at_destruction = true;
-      else if (first == wrapper &&
-               (type == ThreadAPI::TD_UNIQUE_LOCK_UNLOCK ||
-                type == ThreadAPI::TD_CPP_LOCK_RELEASE))
-        owns_at_destruction = false;
-      else if (type == ThreadAPI::TD_CPP_LOCK_MOVE_CTOR ||
-               type == ThreadAPI::TD_CPP_LOCK_MOVE_ASSIGN) {
-        if (call->arg_size() >= 2 &&
-            call->getArgOperand(1)->stripPointerCasts() == wrapper)
-          owns_at_destruction = false;
-        if (type == ThreadAPI::TD_CPP_LOCK_MOVE_ASSIGN && first == wrapper)
-          owns_at_destruction = false;
-      } else if (type == ThreadAPI::TD_CPP_LOCK_SWAP && call->arg_size() >= 2 &&
-                 (first == wrapper ||
-                  call->getArgOperand(1)->stripPointerCasts() == wrapper)) {
-        owns_at_destruction = false;
-      }
-    }
+    const auto &ownership_facts = include_maybe_owned
+                                      ? m_may_raii_ownership_entry
+                                      : m_must_raii_ownership_entry;
+    auto ownership_it = ownership_facts.find(inst);
+    const bool owns_at_destruction =
+        wrapper && ownership_it != ownership_facts.end() &&
+        ownership_it->second.count(wrapper) != 0;
     if (!owns_at_destruction)
       continue;
 
@@ -388,6 +371,96 @@ LockSetAnalysis::getRAIILocksReleasedAt(const Instruction *inst) const {
   }
 
   return locks;
+}
+
+RAIIWrapperSet
+LockSetAnalysis::transferRAIIOwnership(const Instruction *inst,
+                                       const RAIIWrapperSet &in,
+                                       bool is_must) const {
+  RAIIWrapperSet out = in;
+  const auto *call = dyn_cast_or_null<CallBase>(inst);
+  if (!call || call->arg_size() == 0) {
+    return out;
+  }
+
+  auto wrapperAt = [&](unsigned index) -> const Value * {
+    return index < call->arg_size()
+               ? call->getArgOperand(index)->stripPointerCasts()
+               : nullptr;
+  };
+  const Value *first = wrapperAt(0);
+  const ThreadAPI::TD_TYPE type = m_thread_api->getType(call);
+
+  switch (type) {
+  case ThreadAPI::TD_LOCK_GUARD_CTOR:
+  case ThreadAPI::TD_SCOPED_LOCK_CTOR:
+    out.insert(first);
+    break;
+  case ThreadAPI::TD_UNIQUE_LOCK_CTOR:
+  case ThreadAPI::TD_SHARED_LOCK_CTOR: {
+    const RAIILock::OwnershipKind ownership =
+        RAIILock::RAIILockTracker::getOwnershipKind(call);
+    const bool owns = ownership == RAIILock::OwnershipKind::Immediate ||
+                      ownership == RAIILock::OwnershipKind::Adopt ||
+                      (!is_must &&
+                       (ownership == RAIILock::OwnershipKind::Try ||
+                        ownership == RAIILock::OwnershipKind::Unknown));
+    if (owns) {
+      out.insert(first);
+    } else {
+      out.erase(first);
+    }
+    break;
+  }
+  case ThreadAPI::TD_UNIQUE_LOCK_LOCK:
+    out.insert(first);
+    break;
+  case ThreadAPI::TD_CPP_LOCK_TRY:
+    if (!is_must) {
+      out.insert(first);
+    } else {
+      out.erase(first);
+    }
+    break;
+  case ThreadAPI::TD_UNIQUE_LOCK_UNLOCK:
+  case ThreadAPI::TD_CPP_LOCK_RELEASE:
+  case ThreadAPI::TD_LOCK_GUARD_DTOR:
+  case ThreadAPI::TD_SCOPED_LOCK_DTOR:
+  case ThreadAPI::TD_UNIQUE_LOCK_DTOR:
+  case ThreadAPI::TD_SHARED_LOCK_DTOR:
+    out.erase(first);
+    break;
+  case ThreadAPI::TD_CPP_LOCK_MOVE_CTOR:
+  case ThreadAPI::TD_CPP_LOCK_MOVE_ASSIGN: {
+    const Value *second = wrapperAt(1);
+    const bool source_owns = second && in.count(second) != 0;
+    out.erase(first);
+    if (source_owns) {
+      out.insert(first);
+    }
+    if (second) {
+      out.erase(second);
+    }
+    break;
+  }
+  case ThreadAPI::TD_CPP_LOCK_SWAP: {
+    const Value *second = wrapperAt(1);
+    const bool first_owns = first && in.count(first) != 0;
+    const bool second_owns = second && in.count(second) != 0;
+    out.erase(first);
+    out.erase(second);
+    if (second_owns) {
+      out.insert(first);
+    }
+    if (first_owns) {
+      out.insert(second);
+    }
+    break;
+  }
+  default:
+    break;
+  }
+  return out;
 }
 
 std::vector<LockID>

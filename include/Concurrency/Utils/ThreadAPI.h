@@ -1757,7 +1757,10 @@ public:
            t == TD_UNIQUE_LOCK_LOCK ||
            t == TD_SCOPED_LOCK_CTOR ||
            (t == TD_CPP_LOCK_TRY && !isReadLockAcquire(inst)) ||
-           ((isSemaphoreType(t) || (cb && hasTrait(cb, "semaphore"))) &&
+           ((t == TD_SEMAPHORE_ACQUIRE ||
+             t == TD_SEMAPHORE_TRY_ACQUIRE ||
+             ((t == TD_ACQUIRE || t == TD_TRY_ACQUIRE) && cb &&
+              hasTrait(cb, "semaphore"))) &&
             binary_semaphore) ||
            t == TD_KERNEL_SPIN_LOCK || t == TD_KERNEL_SPIN_TRYLOCK ||
            t == TD_KERNEL_MUTEX_LOCK || t == TD_KERNEL_MUTEX_TRYLOCK ||
@@ -1787,7 +1790,8 @@ public:
             cppWrapperDestructorDefinitelyReleases(inst)) ||
            t == TD_UNIQUE_LOCK_UNLOCK ||
            t == TD_SCOPED_LOCK_DTOR ||
-           ((isSemaphoreType(t) || (cb && hasTrait(cb, "semaphore"))) &&
+           ((t == TD_SEMAPHORE_RELEASE ||
+             (t == TD_RELEASE && cb && hasTrait(cb, "semaphore"))) &&
             binary_semaphore) ||
            t == TD_KERNEL_SPIN_UNLOCK || t == TD_KERNEL_MUTEX_UNLOCK ||
            t == TD_KERNEL_UP || t == TD_KERNEL_WRITE_UNLOCK ||

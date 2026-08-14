@@ -290,6 +290,7 @@ TEST_F(LockSetAnalysisTest,
   const char *source = R"(
     declare i32 @sem_wait(i8*)
     declare i32 @binary_sem_wait(i8*)
+    declare i32 @binary_sem_post(i8*)
 
     @sem = global i8 0
     @binary = global i8 0
@@ -312,7 +313,9 @@ TEST_F(LockSetAnalysisTest,
       %after_counting = add i32 1, 2
       call void @binary_helper()
       %after_binary = add i32 3, 4
-      ret i32 %after_binary
+      call i32 @binary_sem_post(i8* @binary)
+      %after_binary_post = add i32 5, 6
+      ret i32 %after_binary_post
     }
   )";
 
@@ -328,17 +331,26 @@ TEST_F(LockSetAnalysisTest,
       findInstructionByName(*main_func, "after_counting");
   const Instruction *after_binary =
       findInstructionByName(*main_func, "after_binary");
+  const Instruction *after_binary_post =
+      findInstructionByName(*main_func, "after_binary_post");
+  const Instruction *binary_post = after_binary_post->getPrevNode();
   const GlobalVariable *sem = module->getNamedGlobal("sem");
   const GlobalVariable *binary = module->getNamedGlobal("binary");
   ASSERT_NE(after_counting, nullptr);
   ASSERT_NE(after_binary, nullptr);
+  ASSERT_NE(after_binary_post, nullptr);
+  ASSERT_NE(binary_post, nullptr);
   ASSERT_NE(sem, nullptr);
   ASSERT_NE(binary, nullptr);
+  EXPECT_TRUE(ThreadAPI::getThreadAPI()->isBinarySemaphoreOp(binary_post));
+  EXPECT_TRUE(ThreadAPI::getThreadAPI()->isTDRelease(binary_post));
 
   EXPECT_FALSE(lsa.mayHoldLock(after_counting, sem));
   EXPECT_FALSE(lsa.mustHoldLock(after_counting, sem));
-  EXPECT_FALSE(lsa.mayHoldLock(after_binary, binary));
-  EXPECT_FALSE(lsa.mustHoldLock(after_binary, binary));
+  EXPECT_TRUE(lsa.mayHoldLock(after_binary, binary));
+  EXPECT_TRUE(lsa.mustHoldLock(after_binary, binary));
+  EXPECT_FALSE(lsa.mayHoldLock(after_binary_post, binary));
+  EXPECT_FALSE(lsa.mustHoldLock(after_binary_post, binary));
 }
 TEST_F(LockSetAnalysisTest, ScopedLockTracksAllUnderlyingMutexes) {
   const char *source = R"(

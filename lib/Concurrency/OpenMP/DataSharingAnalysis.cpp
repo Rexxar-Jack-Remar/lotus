@@ -232,70 +232,10 @@ void DataSharingAnalysis::inferOutlinedFunctionCaptures(Function &func) {
       continue;
     }
 
-    bool has_write = false;
-    bool has_read = false;
-    bool escapes_or_unknown = false;
-
-    std::deque<const Value *> worklist;
-    std::set<const Value *> visited;
-    worklist.push_back(&arg);
-    while (!worklist.empty()) {
-      const Value *value = worklist.front();
-      worklist.pop_front();
-      if (!value || !visited.insert(value).second) {
-        continue;
-      }
-
-      for (const User *user : value->users()) {
-        if (const auto *load = dyn_cast<LoadInst>(user)) {
-          if (load->getPointerOperand() == value) {
-            has_read = true;
-            continue;
-          }
-        }
-
-        if (const auto *store = dyn_cast<StoreInst>(user)) {
-          if (store->getPointerOperand() == value) {
-            has_write = true;
-            continue;
-          }
-          if (store->getValueOperand() == value) {
-            escapes_or_unknown = true;
-            continue;
-          }
-        }
-
-        if (const auto *cb = dyn_cast<CallBase>(user)) {
-          for (const Use &arg_use : cb->args()) {
-            if (arg_use.get() == value) {
-              escapes_or_unknown = true;
-              break;
-            }
-          }
-          continue;
-        }
-
-        if (isa<GetElementPtrInst>(user) || isa<BitCastInst>(user) ||
-            isa<AddrSpaceCastInst>(user) || isa<PHINode>(user) ||
-            isa<SelectInst>(user)) {
-          worklist.push_back(user);
-          continue;
-        }
-
-        escapes_or_unknown = true;
-      }
-    }
-
-    if (has_write || escapes_or_unknown) {
-      addEntry(&arg, DataSharingAttribute::Shared,
-               "outlined-pointer-capture-write", &func);
-    } else if (has_read) {
-      addEntry(&arg, DataSharingAttribute::SharedNoModify,
-               "outlined-pointer-capture-read", &func);
-    } else {
-      addEntry(&arg, DataSharingAttribute::Shared,
-               "outlined-pointer-capture-opaque", &func);
-    }
+    // Dereferencing a captured pointer describes the pointee, not the
+    // data-sharing attribute of the pointer variable itself.  Without a
+    // creator-side capture mapping or an explicit clause hint, leave the
+    // source variable unresolved instead of guessing Shared/SharedNoModify.
   }
 }
 

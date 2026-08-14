@@ -1,5 +1,48 @@
 #include "MHPAnalysisTestSupport.h"
 
+TEST_F(MHPAnalysisTest, DetachResolutionIsIndependentOfBlockStorageOrder) {
+  const char *source = R"(
+    declare i32 @pthread_create(i8*, i8*, i8* (i8*)*, i8*)
+    declare i32 @pthread_detach(i8*)
+
+    define i8* @worker(i8* %arg) {
+    entry:
+      ret i8* null
+    }
+
+    define i32 @main() {
+    entry:
+      %tid = alloca i8
+      br label %create
+
+    detach:
+      call i32 @pthread_detach(i8* %tid)
+      br label %exit
+
+    create:
+      %fork = call i32 @pthread_create(i8* %tid, i8* null,
+                                       i8* (i8*)* @worker, i8* null)
+      br label %detach
+
+    exit:
+      ret i32 0
+    }
+  )";
+
+  auto module = parseModule(source);
+  ASSERT_NE(module, nullptr);
+  MHPAnalysis mhp(*module);
+  mhp.analyze();
+
+  const Instruction *fork =
+      findInstructionByName(*module->getFunction("main"), "fork");
+  ASSERT_NE(fork, nullptr);
+  const SyncNode *fork_node = mhp.getThreadFlowGraph().getNode(fork, 0, 0);
+  ASSERT_NE(fork_node, nullptr);
+  ASSERT_NE(fork_node->getForkedThread(), 0u);
+  EXPECT_TRUE(mhp.isDetachedThread(fork_node->getForkedThread()));
+}
+
 TEST_F(MHPAnalysisTest, IncludedOpenMPTaskRunsInlineWithParentContinuation) {
   const char *source = R"(
     @shared = global i32 0, align 4

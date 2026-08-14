@@ -8,7 +8,10 @@
 
 #include <llvm/Analysis/PostDominators.h>
 #include <llvm/IR/CFG.h>
+#include <llvm/IR/Constants.h>
+#include <llvm/IR/DerivedTypes.h>
 #include <llvm/IR/InstIterator.h>
+#include <llvm/IR/Instructions.h>
 
 using namespace llvm;
 using namespace mhp;
@@ -168,6 +171,14 @@ void LockSetAnalysis::computeFunctionSummary(Function *func) {
   summary.exceptional_must_write_acquire_delta.clear();
   summary.exceptional_may_release_delta.clear();
   summary.exceptional_must_release_delta.clear();
+  summary.may_recursive_acquire_delta.clear();
+  summary.must_recursive_acquire_delta.clear();
+  summary.may_recursive_release_delta.clear();
+  summary.must_recursive_release_delta.clear();
+  summary.exceptional_may_recursive_acquire_delta.clear();
+  summary.exceptional_must_recursive_acquire_delta.clear();
+  summary.exceptional_may_recursive_release_delta.clear();
+  summary.exceptional_must_recursive_release_delta.clear();
   summary.has_exceptional_exit = false;
 
   auto matchesLock = [this](LockID lhs, LockID rhs) {
@@ -194,24 +205,6 @@ void LockSetAnalysis::computeFunctionSummary(Function *func) {
                         [&](LockID held) { return matchesLock(held, lock); });
   };
 
-  auto isBinarySemaphoreOnlyLockInFunction = [&](LockID lock) {
-    bool saw_binary_semaphore = false;
-    for (const Instruction &inst : instructions(*func)) {
-      if (!m_thread_api->isTDAcquire(&inst)) {
-        continue;
-      }
-      LockID inst_lock = getLockValue(&inst);
-      if (!inst_lock || !matchesLock(inst_lock, lock)) {
-        continue;
-      }
-      if (!m_thread_api->isBinarySemaphoreOp(&inst)) {
-        return false;
-      }
-      saw_binary_semaphore = true;
-    }
-    return saw_binary_semaphore;
-  };
-
   DominatorTree dom(*func);
   auto intersectMustSets = [&](const LockSet &lhs, const LockSet &rhs) {
     return merge({lhs, rhs}, true);
@@ -228,6 +221,11 @@ void LockSetAnalysis::computeFunctionSummary(Function *func) {
                    dyn_cast<CleanupReturnInst>(bb.getTerminator())) {
       if (cleanup->unwindsToCaller()) {
         exceptional_exits.push_back(cleanup);
+      }
+    } else if (const auto *catch_switch =
+                   dyn_cast<CatchSwitchInst>(bb.getTerminator())) {
+      if (catch_switch->unwindsToCaller()) {
+        exceptional_exits.push_back(catch_switch);
       }
     }
   }
@@ -314,18 +312,14 @@ void LockSetAnalysis::computeFunctionSummary(Function *func) {
       auto it_read = m_may_read_locks_exit.find(ret);
       if (it_read != m_may_read_locks_exit.end()) {
         for (LockID lock : it_read->second) {
-          if (!isBinarySemaphoreOnlyLockInFunction(lock)) {
-            summary.may_read_acquire_delta.insert(lock);
-          }
+          summary.may_read_acquire_delta.insert(lock);
         }
       }
 
       auto it_write = m_may_write_locks_exit.find(ret);
       if (it_write != m_may_write_locks_exit.end()) {
         for (LockID lock : it_write->second) {
-          if (!isBinarySemaphoreOnlyLockInFunction(lock)) {
-            summary.may_write_acquire_delta.insert(lock);
-          }
+          summary.may_write_acquire_delta.insert(lock);
         }
       }
 
@@ -364,22 +358,49 @@ void LockSetAnalysis::computeFunctionSummary(Function *func) {
 
     if (seeded_must_read) {
       for (LockID lock : must_read_intersection) {
-        if (!isBinarySemaphoreOnlyLockInFunction(lock)) {
-          summary.must_read_acquire_delta.insert(lock);
-        }
+        summary.must_read_acquire_delta.insert(lock);
       }
     }
     if (seeded_must_write) {
       for (LockID lock : must_write_intersection) {
-        if (!isBinarySemaphoreOnlyLockInFunction(lock)) {
-          summary.must_write_acquire_delta.insert(lock);
-        }
+        summary.must_write_acquire_delta.insert(lock);
       }
     }
 
     summary.must_acquire_delta = summary.must_read_acquire_delta;
     summary.must_acquire_delta.insert(summary.must_write_acquire_delta.begin(),
                                       summary.must_write_acquire_delta.end());
+
+    bool seeded_must_depth = false;
+    for (const ReturnInst *ret : returns) {
+      auto may_depth_it = m_may_recursive_depth_exit.find(ret);
+      if (may_depth_it != m_may_recursive_depth_exit.end()) {
+        for (const auto &[lock, depth] : may_depth_it->second) {
+          summary.may_recursive_acquire_delta[lock] =
+              std::max(summary.may_recursive_acquire_delta[lock], depth);
+        }
+      }
+      auto must_depth_it = m_must_recursive_depth_exit.find(ret);
+      if (!seeded_must_depth) {
+        if (must_depth_it != m_must_recursive_depth_exit.end()) {
+          summary.must_recursive_acquire_delta = must_depth_it->second;
+        }
+        seeded_must_depth = true;
+      } else if (must_depth_it == m_must_recursive_depth_exit.end()) {
+        summary.must_recursive_acquire_delta.clear();
+      } else {
+        for (auto it = summary.must_recursive_acquire_delta.begin();
+             it != summary.must_recursive_acquire_delta.end();) {
+          auto other = must_depth_it->second.find(it->first);
+          if (other == must_depth_it->second.end()) {
+            it = summary.must_recursive_acquire_delta.erase(it);
+          } else {
+            it->second = std::min(it->second, other->second);
+            ++it;
+          }
+        }
+      }
+    }
   }
 
   if (!exceptional_exits.empty()) {
@@ -391,17 +412,13 @@ void LockSetAnalysis::computeFunctionSummary(Function *func) {
       auto it_read = m_may_read_locks_exit.find(exit);
       if (it_read != m_may_read_locks_exit.end()) {
         for (LockID lock : it_read->second) {
-          if (!isBinarySemaphoreOnlyLockInFunction(lock)) {
-            summary.exceptional_may_read_acquire_delta.insert(lock);
-          }
+          summary.exceptional_may_read_acquire_delta.insert(lock);
         }
       }
       auto it_write = m_may_write_locks_exit.find(exit);
       if (it_write != m_may_write_locks_exit.end()) {
         for (LockID lock : it_write->second) {
-          if (!isBinarySemaphoreOnlyLockInFunction(lock)) {
-            summary.exceptional_may_write_acquire_delta.insert(lock);
-          }
+          summary.exceptional_may_write_acquire_delta.insert(lock);
         }
       }
 
@@ -437,16 +454,12 @@ void LockSetAnalysis::computeFunctionSummary(Function *func) {
         summary.exceptional_may_write_acquire_delta.end());
     if (seeded_must_read) {
       for (LockID lock : must_read_intersection) {
-        if (!isBinarySemaphoreOnlyLockInFunction(lock)) {
-          summary.exceptional_must_read_acquire_delta.insert(lock);
-        }
+        summary.exceptional_must_read_acquire_delta.insert(lock);
       }
     }
     if (seeded_must_write) {
       for (LockID lock : must_write_intersection) {
-        if (!isBinarySemaphoreOnlyLockInFunction(lock)) {
-          summary.exceptional_must_write_acquire_delta.insert(lock);
-        }
+        summary.exceptional_must_write_acquire_delta.insert(lock);
       }
     }
     summary.exceptional_must_acquire_delta =
@@ -454,20 +467,68 @@ void LockSetAnalysis::computeFunctionSummary(Function *func) {
     summary.exceptional_must_acquire_delta.insert(
         summary.exceptional_must_write_acquire_delta.begin(),
         summary.exceptional_must_write_acquire_delta.end());
+
+    bool seeded_must_depth = false;
+    for (const Instruction *exit : exceptional_exits) {
+      auto may_depth_it = m_may_recursive_depth_exit.find(exit);
+      if (may_depth_it != m_may_recursive_depth_exit.end()) {
+        for (const auto &[lock, depth] : may_depth_it->second) {
+          summary.exceptional_may_recursive_acquire_delta[lock] = std::max(
+              summary.exceptional_may_recursive_acquire_delta[lock], depth);
+        }
+      }
+      auto must_depth_it = m_must_recursive_depth_exit.find(exit);
+      if (!seeded_must_depth) {
+        if (must_depth_it != m_must_recursive_depth_exit.end()) {
+          summary.exceptional_must_recursive_acquire_delta =
+              must_depth_it->second;
+        }
+        seeded_must_depth = true;
+      } else if (must_depth_it == m_must_recursive_depth_exit.end()) {
+        summary.exceptional_must_recursive_acquire_delta.clear();
+      } else {
+        for (auto it =
+                 summary.exceptional_must_recursive_acquire_delta.begin();
+             it != summary.exceptional_must_recursive_acquire_delta.end();) {
+          auto other = must_depth_it->second.find(it->first);
+          if (other == must_depth_it->second.end()) {
+            it = summary.exceptional_must_recursive_acquire_delta.erase(it);
+          } else {
+            it->second = std::min(it->second, other->second);
+            ++it;
+          }
+        }
+      }
+    }
   }
 
   std::unordered_map<LockID, std::vector<const Instruction *>>
       maybe_unmatched_releases;
   std::unordered_map<LockID, std::vector<const Instruction *>>
       must_unmatched_releases;
+  LockSet recursive_release_locks;
   for (inst_iterator I = inst_begin(func), E = inst_end(func); I != E; ++I) {
     Instruction *inst = &*I;
-    std::vector<LockID> released = getRAIILocksReleasedAt(inst);
-    if (!released.empty()) {
-      for (LockID lock : released) {
+    if (const auto *call = dyn_cast<CallBase>(inst)) {
+      const Function *callee = m_thread_api->getCallee(call);
+      if (callee && callee->getName().contains("recursive_mutex") &&
+          m_thread_api->isTDRelease(inst)) {
+        if (LockID lock = getLockValue(inst)) {
+          recursive_release_locks.insert(lock);
+        }
+      }
+    }
+    std::vector<LockID> maybe_released =
+        getRAIILocksReleasedAt(inst, true);
+    std::vector<LockID> definitely_released =
+        getRAIILocksReleasedAt(inst, false);
+    if (!maybe_released.empty() || !definitely_released.empty()) {
+      for (LockID lock : maybe_released) {
         if (!isDefinitelyHeldAt(inst, lock)) {
           maybe_unmatched_releases[getCanonicalLock(lock)].push_back(inst);
         }
+      }
+      for (LockID lock : definitely_released) {
         if (!isPossiblyHeldAt(inst, lock)) {
           must_unmatched_releases[getCanonicalLock(lock)].push_back(inst);
         }
@@ -509,6 +570,21 @@ void LockSetAnalysis::computeFunctionSummary(Function *func) {
     }
   }
 
+  auto isRecursiveReleaseLock = [&](LockID lock) {
+    return llvm::any_of(recursive_release_locks, [&](LockID candidate) {
+      return matchesLock(lock, candidate);
+    });
+  };
+  for (LockID lock : summary.may_release_delta) {
+    if (isRecursiveReleaseLock(lock)) {
+      summary.may_recursive_release_delta[lock] = 1;
+    }
+  }
+  for (LockID lock : summary.must_release_delta) {
+    if (isRecursiveReleaseLock(lock)) {
+      summary.must_recursive_release_delta[lock] = 1;
+    }
+  }
   for (const auto &entry : maybe_unmatched_releases) {
     bool reaches_any_exit = false;
     for (const Instruction *exit : exceptional_exits) {
@@ -525,6 +601,16 @@ void LockSetAnalysis::computeFunctionSummary(Function *func) {
     }
     if (covers_all_exits) {
       summary.exceptional_must_release_delta.insert(entry.first);
+    }
+  }
+  for (LockID lock : summary.exceptional_may_release_delta) {
+    if (isRecursiveReleaseLock(lock)) {
+      summary.exceptional_may_recursive_release_delta[lock] = 1;
+    }
+  }
+  for (LockID lock : summary.exceptional_must_release_delta) {
+    if (isRecursiveReleaseLock(lock)) {
+      summary.exceptional_must_recursive_release_delta[lock] = 1;
     }
   }
 
@@ -696,9 +782,6 @@ LockID LockSetAnalysis::instantiateSummaryLock(const CallBase *call,
           argument->getArgNo() < call->arg_size()) {
         const Value *actual =
             call->getArgOperand(argument->getArgNo())->stripPointerCasts();
-        if (const auto *actual_gep = dyn_cast<GetElementPtrInst>(actual)) {
-          return getCanonicalLock(actual_gep);
-        }
         if (const auto *constant_actual = dyn_cast<Constant>(actual)) {
           SmallVector<Constant *, 4> indices;
           bool constant_indices = true;
@@ -717,6 +800,24 @@ LockID LockSetAnalysis::instantiateSummaryLock(const CallBase *call,
                 gep->isInBounds());
             return getCanonicalLock(projected);
           }
+        }
+        auto cached_projection = m_summary_lock_projections.find({call, lock});
+        if (cached_projection != m_summary_lock_projections.end()) {
+          return cached_projection->second.get();
+        }
+        SmallVector<Value *, 4> indices;
+        for (const Value *index : gep->indices()) {
+          indices.push_back(const_cast<Value *>(index));
+        }
+        if (!indices.empty()) {
+          auto projected = std::unique_ptr<GetElementPtrInst>(
+              GetElementPtrInst::Create(
+                  gep->getSourceElementType(), const_cast<Value *>(actual),
+                  indices, "lock.summary.projection"));
+          projected->setIsInBounds(gep->isInBounds());
+          LockID result = projected.get();
+          m_summary_lock_projections[{call, lock}] = std::move(projected);
+          return result;
         }
         return getCanonicalLock(actual);
       }
@@ -802,6 +903,22 @@ void LockSetAnalysis::bottomUpTraversal() {
                rhs.exceptional_may_release_delta &&
            lhs.exceptional_must_release_delta ==
                rhs.exceptional_must_release_delta &&
+           lhs.may_recursive_acquire_delta ==
+               rhs.may_recursive_acquire_delta &&
+           lhs.must_recursive_acquire_delta ==
+               rhs.must_recursive_acquire_delta &&
+           lhs.may_recursive_release_delta ==
+               rhs.may_recursive_release_delta &&
+           lhs.must_recursive_release_delta ==
+               rhs.must_recursive_release_delta &&
+           lhs.exceptional_may_recursive_acquire_delta ==
+               rhs.exceptional_may_recursive_acquire_delta &&
+           lhs.exceptional_must_recursive_acquire_delta ==
+               rhs.exceptional_must_recursive_acquire_delta &&
+           lhs.exceptional_may_recursive_release_delta ==
+               rhs.exceptional_may_recursive_release_delta &&
+           lhs.exceptional_must_recursive_release_delta ==
+               rhs.exceptional_must_recursive_release_delta &&
            lhs.has_exceptional_exit == rhs.has_exceptional_exit;
   };
 

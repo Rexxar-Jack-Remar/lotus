@@ -1,6 +1,76 @@
 #include "HappensBeforeAnalysisTestSupport.h"
 
 TEST_F(HappensBeforeAnalysisTest,
+       LoopReleaseSequenceTailsStayDeferred) {
+  const char *source = R"(
+    @data = global i32 0, align 4
+    @flag = global i32 0, align 4
+
+    declare i32 @pthread_create(i8*, i8*, i8* (i8*)*, i8*)
+
+    define i8* @publisher(i8* %arg) {
+    entry:
+      store i32 77, i32* @data, align 4
+      store atomic i32 1, i32* @flag release, align 4
+      br label %loop
+
+    loop:
+      %old1 = atomicrmw add i32* @flag, i32 1 monotonic
+      %old2 = atomicrmw add i32* @flag, i32 1 monotonic
+      %again = icmp eq i32 %old2, -1
+      br i1 %again, label %loop, label %exit
+
+    exit:
+      ret i8* null
+    }
+
+    define i8* @reader(i8* %arg) {
+    entry:
+      %seen = load atomic i32, i32* @flag acquire, align 4
+      %ready = icmp eq i32 %seen, 3
+      br i1 %ready, label %read, label %exit
+
+    read:
+      %value = load i32, i32* @data, align 4
+      br label %exit
+
+    exit:
+      ret i8* null
+    }
+
+    define i32 @main() {
+    entry:
+      %publisher_tid = alloca i8
+      %reader_tid = alloca i8
+      call i32 @pthread_create(i8* %publisher_tid, i8* null,
+                               i8* (i8*)* @publisher, i8* null)
+      call i32 @pthread_create(i8* %reader_tid, i8* null,
+                               i8* (i8*)* @reader, i8* null)
+      ret i32 0
+    }
+  )";
+
+  auto module = parseModule(source);
+  ASSERT_NE(module, nullptr);
+  MHPAnalysis mhp(*module);
+  mhp.analyze();
+  HappensBeforeAnalysis hb(*module, mhp);
+  hb.analyze();
+
+  const Instruction *store_data =
+      &module->getFunction("publisher")->getEntryBlock().front();
+  const Instruction *load_data =
+      findInstructionByName(*module->getFunction("reader"), "value");
+  ASSERT_NE(store_data, nullptr);
+  ASSERT_NE(load_data, nullptr);
+  EXPECT_FALSE(hb.happensBefore(store_data, load_data));
+  const auto &deferred = hb.getDeferredSyncCounts();
+  auto it = deferred.find("atomic_release_sequence_tail_order_ambiguous");
+  ASSERT_NE(it, deferred.end());
+  EXPECT_GE(it->second, 1u);
+}
+
+TEST_F(HappensBeforeAnalysisTest,
        MultiStepReleaseSequenceCreatesHB) {
   const char *source = R"(
     @data = global i32 0, align 4

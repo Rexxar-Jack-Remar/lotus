@@ -407,6 +407,7 @@ void MHPAnalysis::analyze() {
   m_has_unresolved_fork = false;
   m_has_multi_context_nodes = false;
   m_pending_joins.clear();
+  m_pending_detaches.clear();
   m_multi_instance_threads.clear();
   m_dom_cache.clear();
   m_openmp_task_threads.clear();
@@ -476,6 +477,7 @@ void MHPAnalysis::buildThreadFlowGraph() {
   if (m_openmp_semantics) {
     lowerOpenMPTasks(*m_openmp_semantics);
   }
+  finalizePendingDetaches();
   finalizePendingJoins();
   finalizeBarrierPhases();
 
@@ -567,6 +569,10 @@ void MHPAnalysis::lowerOpenMPTasks(const OpenMP::OpenMPSemantics &semantics) {
       m_thread_parents[task_tid] = parent_tid;
       m_thread_children[parent_tid].push_back(task_tid);
       m_fork_to_thread[task->task_create].insert(task_tid);
+      if (task->is_recurrent && !task->recurrent_instances_serialized &&
+          !task->recurrent_instances_excluded) {
+        m_multi_instance_threads.insert(task_tid);
+      }
 
       m_tfg->addThread(task_tid, task->task_function);
       processFunction(task->task_function, task_tid, 0);
@@ -654,17 +660,18 @@ void MHPAnalysis::lowerOpenMPTasks(const OpenMP::OpenMPSemantics &semantics) {
     for (SyncNode *wait_node : m_tfg->getNodes(boundary.inst, parent_tid)) {
       for (const auto &task_uptr : semantics.getTasks()) {
         const OpenMP::Task *task = task_uptr.get();
-        if (!task ||
-            task->scheduling_context_id != boundary.scheduling_context_id ||
-            task->event_order >= boundary.event_order) {
+        if (!task) {
           continue;
         }
         if (boundary.is_taskgroup_end) {
           if (boundary.taskgroup_id == 0 ||
-              task->taskgroup_id != boundary.taskgroup_id) {
+              task->taskgroup_ids.count(boundary.taskgroup_id) == 0) {
             continue;
           }
-        } else if (task->phase_id != boundary.phase_id) {
+        } else if (task->scheduling_context_id !=
+                       boundary.scheduling_context_id ||
+                   task->event_order >= boundary.event_order ||
+                   task->phase_id != boundary.phase_id) {
           continue;
         }
 
@@ -1227,13 +1234,23 @@ void MHPAnalysis::finalizePendingJoins() {
 }
 
 void MHPAnalysis::handleThreadDetach(const Instruction *detach_inst) {
+  if (resolveThreadDetach(detach_inst)) {
+    return;
+  }
+  if (std::find(m_pending_detaches.begin(), m_pending_detaches.end(),
+                detach_inst) == m_pending_detaches.end()) {
+    m_pending_detaches.push_back(detach_inst);
+  }
+}
+
+bool MHPAnalysis::resolveThreadDetach(const Instruction *detach_inst) {
   const auto *call = dyn_cast<CallBase>(detach_inst);
   if (!call || call->arg_size() < 1) {
-    return;
+    return false;
   }
   const Value *detached_thread_val = call->getArgOperand(0);
   if (!detached_thread_val) {
-    return;
+    return false;
   }
 
   std::unordered_set<const Value *> detached_roots;
@@ -1247,12 +1264,23 @@ void MHPAnalysis::handleThreadDetach(const Instruction *detach_inst) {
     }
   }
 
+  bool resolved = false;
   for (const Value *root : detached_roots) {
     auto it = m_pthread_value_to_threads.find(root);
     if (it == m_pthread_value_to_threads.end()) {
       continue;
     }
     m_detached_threads.insert(it->second.begin(), it->second.end());
+    resolved = true;
+  }
+  return resolved;
+}
+
+void MHPAnalysis::finalizePendingDetaches() {
+  std::vector<const Instruction *> pending = std::move(m_pending_detaches);
+  m_pending_detaches.clear();
+  for (const Instruction *detach : pending) {
+    resolveThreadDetach(detach);
   }
 }
 
@@ -1796,13 +1824,9 @@ bool MHPAnalysis::joinEdgeMustOrderTarget(const SyncNode *join_node,
       return false;
     }
 
-    const SyncNode *caller = nullptr;
-    for (SyncNode *node : m_tfg->getAllNodes()) {
-      if (node->getThreadID() == join_node->getThreadID() &&
-          node->getNodeID() == current_ctx) {
-        caller = node;
-        break;
-      }
+    const SyncNode *caller = m_tfg->getNodeByID(current_ctx);
+    if (caller && caller->getThreadID() != join_node->getThreadID()) {
+      caller = nullptr;
     }
     if (!caller || !caller->getInstruction()) {
       return false;
@@ -2035,8 +2059,16 @@ void MHPAnalysis::printResults(raw_ostream &os) const {
   }
 
   os << "\n=== MHP Pairs (sample) ===\n";
+  std::vector<InstPair> ordered_pairs(m_mhp_pairs.begin(), m_mhp_pairs.end());
+  std::sort(ordered_pairs.begin(), ordered_pairs.end(),
+            [this](const InstPair &lhs, const InstPair &rhs) {
+              if (lhs.a != rhs.a) {
+                return instructionCanonicalLess(lhs.a, rhs.a);
+              }
+              return instructionCanonicalLess(lhs.b, rhs.b);
+            });
   size_t count = 0;
-  for (const auto &pair : m_mhp_pairs) {
+  for (const auto &pair : ordered_pairs) {
     os << "MHP: ";
     pair.a->print(os);
     os << " ||| ";
@@ -2044,7 +2076,9 @@ void MHPAnalysis::printResults(raw_ostream &os) const {
     os << "\n";
 
     if (++count >= 20) {
-      os << "... (" << (m_mhp_pairs.size() - 20) << " more pairs)\n";
+      if (ordered_pairs.size() > count) {
+        os << "... (" << (ordered_pairs.size() - count) << " more pairs)\n";
+      }
       break;
     }
   }

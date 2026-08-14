@@ -140,7 +140,8 @@ inline bool isDebugOutlined(const llvm::StringRef &funcName) {
 }
 
 inline bool isTaskAlloc(const llvm::StringRef &funcName) {
-  return funcName.equals("__kmpc_omp_task_alloc");
+  return funcName.equals("__kmpc_omp_task_alloc") ||
+         funcName.equals("__kmpc_omp_target_task_alloc");
 }
 
 inline bool isGetThreadNum(const llvm::StringRef &funcName) {
@@ -189,7 +190,8 @@ inline bool isTaskwaitWithDeps(const llvm::StringRef &funcName) {
 
 // OpenMP 4.5+ Taskloop Support
 inline bool isTaskloop(const llvm::StringRef &funcName) {
-  return funcName.equals("__kmpc_taskloop");
+  return funcName.equals("__kmpc_taskloop") ||
+         funcName.equals("__kmpc_taskloop_5");
 }
 
 inline bool isTaskloopNoWait(const llvm::StringRef &funcName) {
@@ -218,8 +220,9 @@ inline bool isTargetDataUpdate(const llvm::StringRef &funcName) {
          funcName.startswith("__tgt_target_update");
 }
 
-// OpenMP 5.0+ Task Detach
-inline bool isTaskDetach(const llvm::StringRef &funcName) {
+// Task lifecycle completion calls.  Detachable-task fulfillment uses an
+// event-handle API and must not be inferred from these calls.
+inline bool isTaskCompletion(const llvm::StringRef &funcName) {
   return funcName.equals("__kmpc_omp_task_complete") ||
          funcName.equals("__kmpc_omp_task_complete_if0");
 }
@@ -275,7 +278,7 @@ inline bool isTaskRelated(const llvm::StringRef &funcName) {
          isTaskwaitWithDeps(funcName) || isTaskyield(funcName) ||
          isTaskgroupStart(funcName) || isTaskgroupEnd(funcName) ||
          isTaskWithDeps(funcName) || isTaskloop(funcName) ||
-         isTaskloopNoWait(funcName) || isTaskDetach(funcName);
+         isTaskloopNoWait(funcName) || isTaskCompletion(funcName);
 }
 
 // Update isNoEffect to include new constructs that don't need modeling

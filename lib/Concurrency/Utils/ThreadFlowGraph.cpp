@@ -64,15 +64,13 @@ bool bfsReachableSameThread(const SyncNode *from, const SyncNode *to) {
 // ============================================================================
 
 void SyncNode::addPredecessor(SyncNode *pred) {
-  if (pred && std::find(m_predecessors.begin(), m_predecessors.end(), pred) ==
-                  m_predecessors.end()) {
+  if (pred && m_predecessor_set.insert(pred).second) {
     m_predecessors.push_back(pred);
   }
 }
 
 void SyncNode::addSuccessor(SyncNode *succ) {
-  if (succ && std::find(m_successors.begin(), m_successors.end(), succ) ==
-                  m_successors.end()) {
+  if (succ && m_successor_set.insert(succ).second) {
     m_successors.push_back(succ);
   }
 }
@@ -135,6 +133,7 @@ SyncNode *ThreadFlowGraph::createNode(const Instruction *inst,
   }
   auto *node = new SyncNode(inst, type, tid, ctx, m_next_node_id++);
   m_all_nodes.push_back(node);
+  m_node_id_to_node[node->getNodeID()] = node;
   m_thread_nodes[tid].push_back(node);
   invalidateReachabilityIndex();
 
@@ -177,6 +176,11 @@ SyncNode *ThreadFlowGraph::getNode(const Instruction *inst) const {
     return it->second.front();
   }
   return nullptr;
+}
+
+SyncNode *ThreadFlowGraph::getNodeByID(size_t node_id) const {
+  auto it = m_node_id_to_node.find(node_id);
+  return it != m_node_id_to_node.end() ? it->second : nullptr;
 }
 
 std::vector<SyncNode *>
@@ -290,6 +294,9 @@ void ThreadFlowGraph::addEdge(SyncNode *from, SyncNode *to, EdgeKind kind) {
   from->addSuccessor(to);
   to->addPredecessor(from);
   m_edge_kinds[{from, to}] |= edgeKindBit(kind);
+  if (from->getThreadID() != to->getThreadID()) {
+    m_has_inter_thread_edges = true;
+  }
   invalidateReachabilityIndex();
 }
 
@@ -611,8 +618,16 @@ bool ThreadFlowGraph::canReach(const SyncNode *from, const SyncNode *to) const {
     return false;
   }
 
+  // The index is intentionally per-thread. It can prove a same-thread path,
+  // but a negative answer may miss a path that leaves through a create,
+  // barrier, or task edge and later returns through a join-like edge.
   if (m_index_built && from->getThreadID() == to->getThreadID()) {
-    return canReachViaIndex(from, to);
+    if (canReachViaIndex(from, to)) {
+      return true;
+    }
+    if (!m_has_inter_thread_edges) {
+      return false;
+    }
   }
 
   std::deque<const SyncNode *> worklist;

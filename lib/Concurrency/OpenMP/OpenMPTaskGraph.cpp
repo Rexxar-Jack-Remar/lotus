@@ -108,7 +108,7 @@ OpenMPTaskGraph::classifyDependencyConflict(const Dependency &d1,
 
 bool OpenMPTaskGraph::isMutexLikeExclusion(const Dependency &d1,
                                            const Dependency &d2) const {
-  return d1.type == DependType::MUTEXINOUTSET ||
+  return d1.type == DependType::MUTEXINOUTSET &&
          d2.type == DependType::MUTEXINOUTSET;
 }
 
@@ -160,10 +160,26 @@ size_t OpenMPTaskGraph::getRegionNestingDepth(size_t region_id) const {
 
 OpenMPTaskGraph::TaskRelation
 OpenMPTaskGraph::classifyTaskRelation(const Task *t1, const Task *t2) const {
-  if (!t1 || !t2 || t1 == t2) {
+  if (!t1 || !t2) {
     return TaskRelation::Unknown;
   }
-  if (happensBefore(t1, t2) || happensBefore(t2, t1)) {
+  if (t1 == t2) {
+    if (!t1->is_recurrent) {
+      return TaskRelation::Unknown;
+    }
+    if (t1->recurrent_instances_serialized) {
+      return TaskRelation::HappensBefore;
+    }
+    return t1->recurrent_instances_excluded ? TaskRelation::Excluded
+                                            : TaskRelation::Parallel;
+  }
+  const bool forward_hb = happensBefore(t1, t2);
+  const bool reverse_hb = happensBefore(t2, t1);
+  if (forward_hb && reverse_hb) {
+    ++m_deferred_reason_counts["omp_hb_cycle"];
+    return TaskRelation::Unknown;
+  }
+  if (forward_hb || reverse_hb) {
     return TaskRelation::HappensBefore;
   }
   if (t1->exclusions.count(const_cast<Task *>(t2)) ||
@@ -177,8 +193,13 @@ OpenMPTaskGraph::classifyTaskRelation(const Task *t1, const Task *t2) const {
 }
 
 bool OpenMPTaskGraph::mayBeParallel(const Task *t1, const Task *t2) const {
-  if (!t1 || !t2 || t1 == t2) {
+  if (!t1 || !t2) {
     return false;
   }
-  return classifyTaskRelation(t1, t2) == TaskRelation::Parallel;
+  if (t1 == t2) {
+    return t1->is_recurrent && !t1->recurrent_instances_serialized &&
+           !t1->recurrent_instances_excluded;
+  }
+  TaskRelation relation = classifyTaskRelation(t1, t2);
+  return relation == TaskRelation::Parallel || relation == TaskRelation::Unknown;
 }

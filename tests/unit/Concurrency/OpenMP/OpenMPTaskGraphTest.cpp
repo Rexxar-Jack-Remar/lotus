@@ -130,7 +130,7 @@ TEST_F(OpenMPTaskGraphTest, LoadedNdepsStillDecodesDependencyList) {
     %kmp_depend_info = type { i8*, i64, i8 }
 
     @shared = global i32 0, align 4
-    @deps = global [1 x %kmp_depend_info] [
+    @deps = constant [1 x %kmp_depend_info] [
       %kmp_depend_info {
         i8* bitcast (i32* @shared to i8*),
         i64 4,
@@ -220,14 +220,14 @@ TEST_F(OpenMPTaskGraphTest, DisjointOffsetsDoNotConflict) {
     %kmp_depend_info = type { i8*, i64, i8 }
 
     @buffer = global [2 x i32] zeroinitializer, align 4
-    @deps1 = global [1 x %kmp_depend_info] [
+    @deps1 = constant [1 x %kmp_depend_info] [
       %kmp_depend_info {
         i8* bitcast (i32* getelementptr inbounds ([2 x i32], [2 x i32]* @buffer, i64 0, i64 0) to i8*),
         i64 4,
         i8 2
       }
     ]
-    @deps2 = global [1 x %kmp_depend_info] [
+    @deps2 = constant [1 x %kmp_depend_info] [
       %kmp_depend_info {
         i8* bitcast (i32* getelementptr inbounds ([2 x i32], [2 x i32]* @buffer, i64 0, i64 1) to i8*),
         i64 4,
@@ -271,7 +271,7 @@ TEST_F(OpenMPTaskGraphTest, ConflictingHelperTasksShareSchedulingContext) {
     %kmp_depend_info = type { i8*, i64, i8 }
 
     @shared = global i32 0, align 4
-    @deps = global [1 x %kmp_depend_info] [
+    @deps = constant [1 x %kmp_depend_info] [
       %kmp_depend_info {
         i8* bitcast (i32* @shared to i8*),
         i64 4,
@@ -358,14 +358,14 @@ TEST_F(OpenMPTaskGraphTest, MutexInoutsetCreatesExclusionWithoutHB) {
     %kmp_depend_info = type { i8*, i64, i8 }
 
     @shared = global i32 0, align 4
-    @deps1 = global [1 x %kmp_depend_info] [
+    @deps1 = constant [1 x %kmp_depend_info] [
       %kmp_depend_info {
         i8* bitcast (i32* @shared to i8*),
         i64 4,
         i8 4
       }
     ]
-    @deps2 = global [1 x %kmp_depend_info] [
+    @deps2 = constant [1 x %kmp_depend_info] [
       %kmp_depend_info {
         i8* bitcast (i32* @shared to i8*),
         i64 4,
@@ -414,7 +414,7 @@ TEST_F(OpenMPTaskGraphTest, TaskwaitOrdersLaterTasksInSameContext) {
     %kmp_depend_info = type { i8*, i64, i8 }
 
     @shared = global i32 0, align 4
-    @deps = global [1 x %kmp_depend_info] [
+    @deps = constant [1 x %kmp_depend_info] [
       %kmp_depend_info {
         i8* bitcast (i32* @shared to i8*),
         i64 4,
@@ -459,7 +459,7 @@ TEST_F(OpenMPTaskGraphTest, SingleEndActsAsSchedulingBoundaryForTasks) {
   const char *source = R"(
     %kmp_depend_info = type { i8*, i64, i8 }
     @shared = global i32 0, align 4
-    @deps = global [1 x %kmp_depend_info] [
+    @deps = constant [1 x %kmp_depend_info] [
       %kmp_depend_info {
         i8* bitcast (i32* @shared to i8*),
         i64 4,
@@ -547,7 +547,7 @@ TEST_F(OpenMPTaskGraphTest, WaitDepsSelectivelyOrdersMatchingDependencies) {
     %kmp_depend_info = type { i8*, i64, i8 }
 
     @shared = global i32 0, align 4
-    @deps = global [1 x %kmp_depend_info] [
+    @deps = constant [1 x %kmp_depend_info] [
       %kmp_depend_info {
         i8* bitcast (i32* @shared to i8*),
         i64 4,
@@ -632,12 +632,12 @@ TEST_F(OpenMPTaskGraphTest, IndirectDependencyPointerIsLowered) {
   ASSERT_EQ(tasks.front()->dependencies.size(), 1u);
   EXPECT_NE(tasks.front()->dependencies.front().canonical_base, nullptr);
 }
-TEST_F(OpenMPTaskGraphTest, FlushSelectivelyOrdersMatchingTaskDependencies) {
+TEST_F(OpenMPTaskGraphTest, FlushIdentDoesNotBecomeSyntheticDependency) {
   const char *source = R"(
     %kmp_depend_info = type { i8*, i64, i8 }
 
     @shared = global i32 0, align 4
-    @deps = global [1 x %kmp_depend_info] [
+    @deps = constant [1 x %kmp_depend_info] [
       %kmp_depend_info {
         i8* bitcast (i32* @shared to i8*),
         i64 4,
@@ -648,7 +648,9 @@ TEST_F(OpenMPTaskGraphTest, FlushSelectivelyOrdersMatchingTaskDependencies) {
     declare i32 @__kmpc_omp_task_with_deps(i8*, i32, i8*, i32,
                                            %kmp_depend_info*, i32,
                                            %kmp_depend_info*)
-    declare i32 @__kmpc_flush(i8*)
+    @ident = global i8 0
+
+    declare void @__kmpc_flush(i8*)
 
     define i32 @main() {
     entry:
@@ -657,7 +659,7 @@ TEST_F(OpenMPTaskGraphTest, FlushSelectivelyOrdersMatchingTaskDependencies) {
       call i32 @__kmpc_omp_task_with_deps(
           i8* null, i32 0, i8* null, i32 1,
           %kmp_depend_info* %dep, i32 0, %kmp_depend_info* null)
-      call i32 @__kmpc_flush(i8* bitcast (i32* @shared to i8*))
+      call void @__kmpc_flush(i8* @ident)
       call i32 @__kmpc_omp_task_with_deps(
           i8* null, i32 0, i8* null, i32 1,
           %kmp_depend_info* %dep, i32 0, %kmp_depend_info* null)
@@ -673,14 +675,17 @@ TEST_F(OpenMPTaskGraphTest, FlushSelectivelyOrdersMatchingTaskDependencies) {
 
   const auto &tasks = graph.getAllTasks();
   ASSERT_EQ(tasks.size(), 2u);
-  EXPECT_TRUE(graph.happensBefore(tasks[0].get(), tasks[1].get()));
+  EXPECT_FALSE(graph.happensBefore(tasks[0].get(), tasks[1].get()));
+  EXPECT_EQ(graph.classifyTaskRelation(tasks[0].get(), tasks[1].get()),
+            OpenMPTaskGraph::TaskRelation::Unknown);
+  EXPECT_TRUE(graph.mayBeParallel(tasks[0].get(), tasks[1].get()));
 }
 TEST_F(OpenMPTaskGraphTest, NestedTaskgroupDoesNotSuppressSiblingDependencies) {
   const char *source = R"(
     %kmp_depend_info = type { i8*, i64, i8 }
 
     @shared = global i32 0, align 4
-    @deps = global [1 x %kmp_depend_info] [
+    @deps = constant [1 x %kmp_depend_info] [
       %kmp_depend_info {
         i8* bitcast (i32* @shared to i8*),
         i64 4,
@@ -846,7 +851,7 @@ TEST_F(OpenMPTaskGraphTest,
   const auto &tasks = graph.getAllTasks();
   ASSERT_EQ(tasks.size(), 2u);
   EXPECT_FALSE(graph.happensBefore(tasks[0].get(), tasks[1].get()));
-  EXPECT_FALSE(graph.mayBeParallel(tasks[0].get(), tasks[1].get()));
+  EXPECT_TRUE(graph.mayBeParallel(tasks[0].get(), tasks[1].get()));
   EXPECT_EQ(graph.classifyTaskRelation(tasks[0].get(), tasks[1].get()),
             OpenMPTaskGraph::TaskRelation::Unknown);
   EXPECT_GT(graph.getDeferredImpreciseConflictCount(), 0u);

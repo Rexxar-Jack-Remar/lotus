@@ -580,6 +580,21 @@ TEST_F(MHPAnalysisTest, ThreadFlowGraphIndexesSCCCondensation) {
   EXPECT_TRUE(tfg.canReach(b, c));
   EXPECT_LE(tfg.getTopologicalOrder(b), tfg.getTopologicalOrder(c));
 }
+TEST_F(MHPAnalysisTest, ReachabilityIndexPreservesInterThreadDetours) {
+  ThreadFlowGraph tfg;
+  tfg.addThread(0, nullptr);
+  tfg.addThread(1, nullptr);
+
+  SyncNode *a = tfg.createNode(nullptr, SyncNodeType::REGULAR_INST, 0);
+  SyncNode *x = tfg.createNode(nullptr, SyncNodeType::REGULAR_INST, 1);
+  SyncNode *b = tfg.createNode(nullptr, SyncNodeType::REGULAR_INST, 0);
+  tfg.addInterThreadEdge(a, x, EdgeKind::Create);
+  tfg.addInterThreadEdge(x, b, EdgeKind::Join);
+
+  EXPECT_TRUE(tfg.canReach(a, b));
+  tfg.buildReachabilityIndex();
+  EXPECT_TRUE(tfg.canReach(a, b));
+}
 TEST_F(MHPAnalysisTest, ThreadFlowGraphMutationIsCanonical) {
   ThreadFlowGraph first;
   first.addThread(0, nullptr);
@@ -607,6 +622,9 @@ TEST_F(MHPAnalysisTest, ThreadFlowGraphMutationIsCanonical) {
       second.createNode(nullptr, SyncNodeType::REGULAR_INST, 0);
   EXPECT_EQ(a->getNodeID(), second_a->getNodeID());
   EXPECT_EQ(b->getNodeID(), second_b->getNodeID());
+  EXPECT_EQ(first.getNodeByID(a->getNodeID()), a);
+  EXPECT_EQ(first.getNodeByID(b->getNodeID()), b);
+  EXPECT_EQ(first.getNodeByID(0), nullptr);
 }
 TEST_F(MHPAnalysisTest, ForkJoinOrdering) {
   const char *source = R"(

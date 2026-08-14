@@ -22,16 +22,21 @@ namespace OpenMP {
 namespace {
 
 DependType decodeDependType(uint64_t flags) {
-  if ((flags & 0x4ULL) != 0) {
-    return DependType::MUTEXINOUTSET;
-  }
-  switch (flags & 0x3ULL) {
+  switch (flags) {
   case 0x1ULL:
     return DependType::IN;
   case 0x2ULL:
     return DependType::OUT;
-  default:
+  case 0x3ULL:
     return DependType::INOUT;
+  case 0x4ULL:
+    return DependType::MUTEXINOUTSET;
+  case 0x8ULL:
+    return DependType::INOUTSET;
+  case 0x80ULL:
+    return DependType::ALL_MEMORY;
+  default:
+    return DependType::UNKNOWN;
   }
 }
 
@@ -108,7 +113,16 @@ bool decodeConstantDependency(const Constant *elt, Dependency &dep) {
     return false;
   }
 
-  dep.address = stripValue(cs->getOperand(0));
+  bool all_memory_sentinel = false;
+  if (const auto *address_expr = dyn_cast<ConstantExpr>(cs->getOperand(0))) {
+    if (address_expr->getOpcode() == Instruction::IntToPtr) {
+      if (const auto *address_int =
+              dyn_cast<ConstantInt>(address_expr->getOperand(0))) {
+        all_memory_sentinel = address_int->isMinusOne();
+      }
+    }
+  }
+  dep.address = all_memory_sentinel ? nullptr : stripValue(cs->getOperand(0));
   dep.size = 0;
   dep.type = DependType::INOUT;
 
@@ -118,7 +132,10 @@ bool decodeConstantDependency(const Constant *elt, Dependency &dep) {
   if (const auto *flags = dyn_cast<ConstantInt>(cs->getOperand(2))) {
     dep.type = decodeDependType(flags->getZExtValue());
   }
-  return dep.address != nullptr;
+  if (all_memory_sentinel) {
+    dep.type = DependType::ALL_MEMORY;
+  }
+  return dep.address != nullptr || dep.type == DependType::ALL_MEMORY;
 }
 
 const Value *resolveDependencyListValue(const Value *value) {
@@ -240,6 +257,69 @@ const Instruction *taskOrderingSite(const Task *task) {
   }
   return task->generating_context ? task->generating_context
                                   : task->task_create;
+}
+
+bool isTaskSiteInLoop(const Instruction *inst) {
+  if (!inst || !inst->getFunction() || inst->getFunction()->isDeclaration()) {
+    return false;
+  }
+  DominatorTree DT(*const_cast<Function *>(inst->getFunction()));
+  LoopInfo LI(DT);
+  return LI.getLoopFor(inst->getParent()) != nullptr;
+}
+
+bool canReachFunction(const Function *current, const Function *target,
+                      std::set<const Function *> &visited) {
+  if (!current || current->isDeclaration() || !visited.insert(current).second) {
+    return false;
+  }
+  for (const Instruction &inst : instructions(current)) {
+    const auto *call = dyn_cast<CallBase>(&inst);
+    if (!call) {
+      continue;
+    }
+    const Function *callee = call->getCalledFunction();
+    if (!callee) {
+      callee = dyn_cast<Function>(call->getCalledOperand()->stripPointerCasts());
+    }
+    if (!callee || callee->isDeclaration()) {
+      continue;
+    }
+    if (callee == target || canReachFunction(callee, target, visited)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+bool isRecursiveFunction(const Function *func) {
+  if (!func || func->isDeclaration()) {
+    return false;
+  }
+  std::set<const Function *> visited;
+  visited.insert(func);
+  for (const Instruction &inst : instructions(func)) {
+    const auto *call = dyn_cast<CallBase>(&inst);
+    if (!call) {
+      continue;
+    }
+    const Function *callee = call->getCalledFunction();
+    if (!callee) {
+      callee = dyn_cast<Function>(call->getCalledOperand()->stripPointerCasts());
+    }
+    if (!callee || callee->isDeclaration()) {
+      continue;
+    }
+    if (callee == func || canReachFunction(callee, func, visited)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+bool taskBelongsToGroup(const Task *task, size_t taskgroup_id) {
+  return task && taskgroup_id != 0 &&
+         task->taskgroup_ids.count(taskgroup_id) != 0;
 }
 
 constexpr uint64_t kLibompTaskTiednessMask = 0x1ULL;
@@ -444,7 +524,10 @@ void seedPartialDependencies(std::map<uint64_t, PartialDependency> &partials,
     partial.flags = deps[i].type == DependType::IN              ? 0x1
                     : deps[i].type == DependType::OUT           ? 0x2
                     : deps[i].type == DependType::MUTEXINOUTSET ? 0x4
-                                                                : 0x3;
+                    : deps[i].type == DependType::INOUTSET      ? 0x8
+                    : deps[i].type == DependType::ALL_MEMORY    ? 0x80
+                    : deps[i].type == DependType::INOUT         ? 0x3
+                                                                : 0;
     partial.source_kind = deps[i].source_kind;
     partial.proof = deps[i].proof;
     partial.has_address = deps[i].address != nullptr;
@@ -460,6 +543,7 @@ OpenMPSemantics::OpenMPSemantics(Module &module) : m_module(module) {}
 void OpenMPSemantics::analyze() {
   m_tasks.clear();
   m_inst_to_task.clear();
+  m_handle_to_task.clear();
   m_wait_boundaries.clear();
   m_wait_boundary_infos.clear();
   m_entities.clear();
@@ -471,10 +555,27 @@ void OpenMPSemantics::analyze() {
   m_nested_depth = 0;
   m_next_scheduling_context_id = 1;
   m_next_entity_id = 1;
+  m_next_taskgroup_id = 1;
   m_region_nesting_depth.clear();
   m_deferred_imprecise_conflict_count = 0;
   m_deferred_reason_counts.clear();
   identifySemanticStructure();
+  m_summary.task_count = m_tasks.size();
+  m_summary.task_with_dependencies_count = 0;
+  m_summary.included_task_count = 0;
+  m_summary.final_task_count = 0;
+  m_summary.untied_task_count = 0;
+  m_summary.detached_task_count = 0;
+  m_summary.taskloop_count = 0;
+  for (const auto &task : m_tasks) {
+    m_summary.task_with_dependencies_count += task->has_dependency_submission;
+    m_summary.included_task_count +=
+        task->has_included_submission && !task->has_deferred_submission;
+    m_summary.final_task_count += task->is_final;
+    m_summary.untied_task_count += task->is_untied;
+    m_summary.detached_task_count += task->is_detached;
+    m_summary.taskloop_count += task->is_taskloop;
+  }
   rebuildWaitBoundaryViews();
   attachDataSharingFacts();
   buildTaskRelations();
@@ -505,13 +606,8 @@ const Task *OpenMPSemantics::getTaskForHandle(const Value *value) const {
   if (!handle) {
     return nullptr;
   }
-  for (const auto &task_uptr : m_tasks) {
-    const Task *task = task_uptr.get();
-    if (task && task->task_handle == handle) {
-      return task;
-    }
-  }
-  return nullptr;
+  auto it = m_handle_to_task.find(handle);
+  return it == m_handle_to_task.end() ? nullptr : it->second;
 }
 
 bool OpenMPSemantics::isNestedRegion(size_t region_id) const {
@@ -775,8 +871,9 @@ void OpenMPSemantics::attachDataSharingFacts() {
       continue;
     }
     task->data_sharing_entries = entriesForFunction(task->task_function);
-    if (task->data_sharing_entries.empty()) {
-      task->data_sharing_entries = entriesForFunction(task->parent_context);
+    if (task->task_function &&
+        task->data_sharing_entries.size() < task->task_function->arg_size()) {
+      ++m_deferred_reason_counts["omp_data_sharing_capture_unresolved"];
     }
     for (SemanticEntity &entity : m_entities) {
       if (entity.id == task->semantic_entity_id &&
@@ -1005,13 +1102,13 @@ void OpenMPSemantics::buildTaskRelations() {
     }
 
     for (const auto &lhs : m_tasks) {
-      if (lhs->scheduling_context_id != boundary.scheduling_context_id ||
-          lhs->event_order >= boundary.event_order) {
-        continue;
-      }
-      if (boundary.is_taskgroup_end &&
-          (boundary.taskgroup_id == 0 ||
-           lhs->taskgroup_id != boundary.taskgroup_id)) {
+      if (boundary.is_taskgroup_end) {
+        if (!taskBelongsToGroup(lhs.get(), boundary.taskgroup_id) ||
+            !mustHappenBefore(taskOrderingSite(lhs.get()), boundary.inst)) {
+          continue;
+        }
+      } else if (lhs->scheduling_context_id != boundary.scheduling_context_id ||
+                 lhs->event_order >= boundary.event_order) {
         continue;
       }
       if (!boundary.is_taskgroup_end && !boundary.is_partial_wait &&
@@ -1078,7 +1175,10 @@ void OpenMPSemantics::buildTaskRelations() {
           }
           continue;
         }
-        if (mustHappenBefore(taskOrderingSite(lhs.get()), boundary.inst) &&
+        const bool lhs_before_boundary =
+            boundary.is_taskgroup_end ||
+            mustHappenBefore(taskOrderingSite(lhs.get()), boundary.inst);
+        if (lhs_before_boundary &&
             mustHappenBefore(boundary.inst, taskOrderingSite(rhs.get()))) {
           lhs->successors.insert(rhs.get());
           rhs->predecessors.insert(lhs.get());
@@ -1277,6 +1377,13 @@ void OpenMPSemantics::scanSchedulingContext(
       }
       bool is_nowait_variant = callee && callee->getName().contains("nowait");
 
+      if (type == ThreadAPI::TD_DUMMY && callee && callee->hasName() &&
+          callee->getName().startswith("__kmpc_atomic_")) {
+        ++m_summary.atomic_region_count;
+        ++m_deferred_reason_counts["omp_atomic_runtime_unmodeled"];
+        continue;
+      }
+
       if (library == ThreadAPI::RuntimeLibrary::OpenMP) {
         if (type == ThreadAPI::TD_FORK) {
           ++m_summary.parallel_region_count;
@@ -1364,8 +1471,73 @@ void OpenMPSemantics::scanSchedulingContext(
       }
 
       if (type == ThreadAPI::TD_OMP_TASKWAIT_DEPS) {
+        const bool is_taskwait_deps_51 =
+            callee &&
+            callee->getName().equals("__kmpc_omp_taskwait_deps_51");
+        const unsigned minimum_arity = is_taskwait_deps_51 ? 7 : 6;
+        if (call->arg_size() < minimum_arity) {
+          ++m_deferred_reason_counts[
+              is_taskwait_deps_51
+                  ? "omp_taskwait_deps_51_arity_invalid"
+                  : "omp_taskwait_deps_abi_arity_invalid"];
+          continue;
+        }
         std::vector<Dependency> dependencies =
             extractRuntimeDependencies(call, 2, 3);
+        std::vector<Dependency> noalias_dependencies =
+            extractRuntimeDependencies(call, 4, 5);
+        dependencies.insert(dependencies.end(), noalias_dependencies.begin(),
+                            noalias_dependencies.end());
+        bool deferred_dependency_task = false;
+        bool unresolved_nowait = false;
+        if (is_taskwait_deps_51) {
+          if (const auto *nowait =
+                  dyn_cast<ConstantInt>(call->getArgOperand(6))) {
+            deferred_dependency_task = !nowait->isZero();
+          } else {
+            unresolved_nowait = true;
+            ++m_deferred_reason_counts["omp_taskwait_deps_nowait_unknown"];
+          }
+        }
+
+        if (deferred_dependency_task) {
+          auto task = std::make_unique<Task>();
+          task->task_create = call;
+          task->task_function = nullptr;
+          task->has_deferred_submission = true;
+          task->has_dependency_submission = true;
+          task->parent_context = func;
+          task->generating_context = state.anchor_inst ? state.anchor_inst : call;
+          task->scheduling_context_id = state.scheduling_context_id;
+          task->taskgroup_id = state.taskgroup_stack.empty()
+                                   ? 0
+                                   : state.taskgroup_stack.back();
+          task->taskgroup_ids.insert(state.taskgroup_stack.begin(),
+                                     state.taskgroup_stack.end());
+          task->phase_id = currentPhaseToken();
+          task->sibling_group = currentPhaseToken();
+          task->sequence_index = state.sequence_index++;
+          task->event_order = nextEventOrder();
+          task->region_id = currentRegionId();
+          task->dependencies = std::move(dependencies);
+          task->semantic_entity_id = addEntity(
+              SemanticEntityKind::ExplicitTask, call, func,
+              state.scheduling_context_id, currentRegionEntityId(),
+              currentRegionId(), currentPhaseToken(), task->taskgroup_id);
+          addEvent(SemanticEventKind::TaskCreate, call,
+                   task->semantic_entity_id, state.scheduling_context_id,
+                   task->sequence_index, task->event_order, currentRegionId(),
+                   currentPhaseToken());
+          addTaskEvent(OpenMPTaskEvent::Kind::TaskCreate, call,
+                       state.scheduling_context_id, task->sequence_index,
+                       task->event_order, currentPhaseToken(),
+                       task->taskgroup_id, currentRegionId(),
+                       task->semantic_entity_id, task.get());
+          m_inst_to_task[call] = task.get();
+          m_tasks.push_back(std::move(task));
+          continue;
+        }
+
         WaitBoundaryInfo boundary = recordBoundary(
             call, WaitBoundaryInfo::Kind::TaskwaitDeps, true);
         addTaskEvent(
@@ -1376,6 +1548,9 @@ void OpenMPSemantics::scanSchedulingContext(
             currentRegionId(), boundary.semantic_entity_id, nullptr,
             WaitBoundaryInfo::Kind::TaskwaitDeps, true, false,
             std::move(dependencies));
+        if (unresolved_nowait) {
+          m_task_events.back().is_partial_wait = true;
+        }
         continue;
       }
 
@@ -1395,7 +1570,7 @@ void OpenMPSemantics::scanSchedulingContext(
       if (type == ThreadAPI::TD_OMP_TASKGROUP_START) {
         size_t taskgroup_id = 0;
         if (precise_phase_tracking) {
-          taskgroup_id = state.next_taskgroup_id++;
+          taskgroup_id = m_next_taskgroup_id++;
           state.taskgroup_stack.push_back(taskgroup_id);
           state.phase_stack.push_back(state.next_phase_token++);
         }
@@ -1464,10 +1639,12 @@ void OpenMPSemantics::scanSchedulingContext(
         ++m_summary.worksharing_loop_count;
         continue;
       }
-      if (type == ThreadAPI::TD_OMP_REDUCE_NOWAIT_START) {
+      if (type == ThreadAPI::TD_OMP_REDUCE_START ||
+          type == ThreadAPI::TD_OMP_REDUCE_NOWAIT_START) {
         pushRegion(WaitBoundaryInfo::Kind::Unknown,
                    SemanticEntityKind::ReductionRegion, call);
         ++m_summary.reduction_region_count;
+        ++m_deferred_reason_counts["omp_reduction_protocol_unmodeled"];
         continue;
       }
       if (type == ThreadAPI::TD_OMP_SECTIONS_INIT) {
@@ -1486,8 +1663,7 @@ void OpenMPSemantics::scanSchedulingContext(
         WaitBoundaryInfo::Kind kind = is_nowait_variant
                                           ? WaitBoundaryInfo::Kind::TargetNowait
                                           : WaitBoundaryInfo::Kind::Target;
-        WaitBoundaryInfo boundary =
-            recordBoundary(call, kind, is_nowait_variant);
+        WaitBoundaryInfo boundary = recordBoundary(call, kind, true);
         addTaskEvent(
             OpenMPTaskEvent::Kind::TargetBoundary, call,
             state.scheduling_context_id, state.sequence_index,
@@ -1498,9 +1674,7 @@ void OpenMPSemantics::scanSchedulingContext(
         if (is_nowait_variant) {
           ++m_summary.target_nowait_boundary_count;
         }
-        if (!is_nowait_variant) {
-          advanceCurrentPhase();
-        }
+        ++m_deferred_reason_counts["omp_target_task_unmodeled"];
         continue;
       }
       if (type == ThreadAPI::TD_OMP_TARGET_DATA_BEGIN ||
@@ -1511,8 +1685,7 @@ void OpenMPSemantics::scanSchedulingContext(
           WaitBoundaryInfo::Kind kind =
               is_nowait_variant ? WaitBoundaryInfo::Kind::TargetDataNowait
                                 : WaitBoundaryInfo::Kind::TargetData;
-          WaitBoundaryInfo boundary =
-              recordBoundary(call, kind, is_nowait_variant);
+          WaitBoundaryInfo boundary = recordBoundary(call, kind, true);
           addTaskEvent(
               OpenMPTaskEvent::Kind::TargetBoundary, call,
               state.scheduling_context_id, state.sequence_index,
@@ -1523,9 +1696,7 @@ void OpenMPSemantics::scanSchedulingContext(
           if (is_nowait_variant) {
             ++m_summary.target_nowait_boundary_count;
           }
-          if (!is_nowait_variant) {
-            advanceCurrentPhase();
-          }
+          ++m_deferred_reason_counts["omp_target_data_task_unmodeled"];
         }
         continue;
       }
@@ -1602,15 +1773,16 @@ void OpenMPSemantics::scanSchedulingContext(
         const Task *completed_task =
             call->arg_size() >= 3 ? getTaskForHandle(call->getArgOperand(2))
                                   : nullptr;
-        const bool detached_completion =
-            completed_task && completed_task->is_detached;
-        if (detached_completion) {
-          ++m_summary.detach_completion_count;
+        if (completed_task && completed_task->is_detached) {
+          ++m_deferred_reason_counts[
+              "omp_detached_fulfillment_event_unresolved"];
         }
         const size_t event_order = nextEventOrder();
         TaskCompletionEvent completion_event;
         completion_event.inst = call;
-        completion_event.task = detached_completion ? completed_task : nullptr;
+        // __kmpc_omp_task_complete_if0 closes the inline task lifecycle.  It
+        // does not fulfill a detachable task's allow-completion event.
+        completion_event.task = nullptr;
         completion_event.scheduling_context_id = state.scheduling_context_id;
         completion_event.sequence_index = state.sequence_index;
         completion_event.event_order = event_order;
@@ -1685,44 +1857,11 @@ void OpenMPSemantics::scanSchedulingContext(
         continue;
       }
 
-      if (type == ThreadAPI::TD_OMP_REDUCE_START) {
-        WaitBoundaryInfo info =
-            recordBoundary(call, WaitBoundaryInfo::Kind::Reduce);
-        addTaskEvent(
-            OpenMPTaskEvent::Kind::Taskwait,
-            call, state.scheduling_context_id, state.sequence_index,
-            info.event_order, currentPhaseToken(),
-            state.taskgroup_stack.empty() ? 0 : state.taskgroup_stack.back(),
-            currentRegionId(), info.semantic_entity_id, nullptr,
-            WaitBoundaryInfo::Kind::Reduce);
-        advanceCurrentPhase();
-        continue;
-      }
-
       if (type == ThreadAPI::TD_OMP_REDUCE_END ||
           type == ThreadAPI::TD_OMP_REDUCE_NOWAIT_END ||
           type == ThreadAPI::TD_OMP_FLUSH) {
         if (type == ThreadAPI::TD_OMP_FLUSH) {
           ++m_summary.flush_count;
-          std::vector<Dependency> dependencies;
-          if (call->arg_size() >= 1) {
-            const Value *flush_obj = stripValue(call->getArgOperand(0));
-            if (flush_obj) {
-              Dependency dep;
-              dep.address = flush_obj;
-              dep.type = DependType::INOUT;
-              dep.size = 0;
-              dep.source_kind = DependencySourceKind::DirectAddress;
-              dep.proof = DependencyProof::Possible;
-              int64_t offset = 0;
-              bool precise = false;
-              dep.canonical_base = canonicalizeDependencyAddress(
-                  flush_obj, m_module.getDataLayout(), offset, precise);
-              dep.offset = offset;
-              dep.has_precise_offset = precise;
-              dependencies.push_back(dep);
-            }
-          }
           WaitBoundaryInfo boundary =
               recordBoundary(call, WaitBoundaryInfo::Kind::Flush, true);
           addTaskEvent(
@@ -1730,20 +1869,9 @@ void OpenMPSemantics::scanSchedulingContext(
               state.sequence_index, boundary.event_order, currentPhaseToken(),
               state.taskgroup_stack.empty() ? 0 : state.taskgroup_stack.back(),
               currentRegionId(), boundary.semantic_entity_id, nullptr,
-              WaitBoundaryInfo::Kind::Flush, true, false,
-              std::move(dependencies));
-        } else if (type == ThreadAPI::TD_OMP_REDUCE_NOWAIT_END) {
+              WaitBoundaryInfo::Kind::Flush, true);
+        } else {
           popRegion(WaitBoundaryInfo::Kind::Unknown, call);
-          WaitBoundaryInfo boundary =
-              recordBoundary(call, WaitBoundaryInfo::Kind::ReduceNowait, true);
-          addTaskEvent(
-              OpenMPTaskEvent::Kind::ReductionNowaitBoundary, call,
-              state.scheduling_context_id, state.sequence_index,
-              boundary.event_order, currentPhaseToken(),
-              state.taskgroup_stack.empty() ? 0 : state.taskgroup_stack.back(),
-              currentRegionId(), boundary.semantic_entity_id, nullptr,
-              WaitBoundaryInfo::Kind::ReduceNowait, true);
-          ++m_summary.reduction_nowait_boundary_count;
         }
         continue;
       }
@@ -1751,16 +1879,101 @@ void OpenMPSemantics::scanSchedulingContext(
       if (type == ThreadAPI::TD_OMP_TASK_WITH_DEPS ||
           type == ThreadAPI::TD_OMP_TASK ||
           type == ThreadAPI::TD_OMP_TASKLOOP) {
+        const unsigned minimum_arity =
+            type == ThreadAPI::TD_OMP_TASK_WITH_DEPS ? 7 : 3;
+        if (call->arg_size() < minimum_arity) {
+          ++m_deferred_reason_counts["omp_task_abi_arity_invalid"];
+          continue;
+        }
+
+        const bool is_included_submission =
+            callee && callee->getName().equals("__kmpc_omp_task_begin_if0");
+        const CallBase *task_alloc = findTaskAllocCall(call->getArgOperand(2));
+        const Value *task_handle = canonicalizeTaskHandle(call->getArgOperand(2));
+        Task *existing_task = nullptr;
+        if (task_alloc && task_handle) {
+          auto existing_it = m_handle_to_task.find(task_handle);
+          if (existing_it != m_handle_to_task.end()) {
+            existing_task = existing_it->second;
+          }
+        }
+
+        if (existing_task) {
+          existing_task->has_included_submission |= is_included_submission;
+          existing_task->has_deferred_submission |= !is_included_submission;
+          if (!is_included_submission) {
+            existing_task->task_create = call;
+          }
+          if (state.executing_final_task) {
+            existing_task->is_final = true;
+            existing_task->is_untied = false;
+            existing_task->has_deferred_submission = false;
+            existing_task->execution_mode = TaskExecutionMode::Included;
+          } else if (existing_task->has_deferred_submission) {
+            existing_task->execution_mode = TaskExecutionMode::Deferred;
+          } else if (existing_task->has_included_submission) {
+            existing_task->execution_mode = TaskExecutionMode::Included;
+          }
+          const bool site_may_repeat =
+              isTaskSiteInLoop(call) || isRecursiveFunction(func);
+          existing_task->is_recurrent = state.executing_recurrent_task ||
+                                        (site_may_repeat &&
+                                         existing_task->has_deferred_submission);
+          if (type == ThreadAPI::TD_OMP_TASK_WITH_DEPS) {
+            existing_task->has_dependency_submission = true;
+            if (existing_task->dependencies.empty()) {
+              existing_task->dependencies = extractDependencies(call);
+            }
+            for (const Dependency &dep : existing_task->dependencies) {
+              if (dep.canonical_base) {
+                existing_task->synchronization_objects.insert(
+                    dep.canonical_base);
+              }
+              if (existing_task->is_recurrent &&
+                  classifyDependencyConflict(dep, dep) ==
+                      DependencyConflict::MustConflict) {
+                if (dep.type == DependType::MUTEXINOUTSET) {
+                  existing_task->recurrent_instances_excluded = true;
+                } else {
+                  existing_task->recurrent_instances_serialized = true;
+                }
+              }
+            }
+          }
+          existing_task->is_taskloop |= type == ThreadAPI::TD_OMP_TASKLOOP;
+          m_inst_to_task[call] = existing_task;
+          continue;
+        }
+
         auto task = std::make_unique<Task>();
         task->task_create = call;
         task->task_function = extractTaskFunction(call);
-        task->task_handle = canonicalizeTaskHandle(call->getArgOperand(2));
+        task->task_handle = task_handle;
+        task->has_included_submission = is_included_submission;
+        task->has_deferred_submission = !is_included_submission;
+        task->has_dependency_submission =
+            type == ThreadAPI::TD_OMP_TASK_WITH_DEPS;
+        task->is_taskloop = type == ThreadAPI::TD_OMP_TASKLOOP;
         applyTaskExecutionHints(*task, call);
+        const bool site_may_repeat =
+            isTaskSiteInLoop(call) || isRecursiveFunction(func);
+        task->is_recurrent = state.executing_recurrent_task ||
+                             (site_may_repeat &&
+                              task->has_deferred_submission);
+        if (state.executing_final_task) {
+          task->is_final = true;
+          task->is_untied = false;
+          task->execution_mode = TaskExecutionMode::Included;
+          task->has_included_submission = true;
+          task->has_deferred_submission = false;
+        }
         task->parent_context = func;
         task->generating_context = state.anchor_inst ? state.anchor_inst : call;
         task->scheduling_context_id = state.scheduling_context_id;
         task->taskgroup_id =
             state.taskgroup_stack.empty() ? 0 : state.taskgroup_stack.back();
+        task->taskgroup_ids.insert(state.taskgroup_stack.begin(),
+                                   state.taskgroup_stack.end());
         task->phase_id = currentPhaseToken();
         task->sibling_group = currentPhaseToken();
         task->sequence_index = state.sequence_index++;
@@ -1788,6 +2001,18 @@ void OpenMPSemantics::scanSchedulingContext(
             }
           }
         }
+        if (task->is_recurrent) {
+          for (const Dependency &dep : task->dependencies) {
+            if (classifyDependencyConflict(dep, dep) ==
+                DependencyConflict::MustConflict) {
+              if (dep.type == DependType::MUTEXINOUTSET) {
+                task->recurrent_instances_excluded = true;
+              } else {
+                task->recurrent_instances_serialized = true;
+              }
+            }
+          }
+        }
         if (type == ThreadAPI::TD_OMP_TASKLOOP) {
           ++m_summary.taskloop_count;
         }
@@ -1805,20 +2030,29 @@ void OpenMPSemantics::scanSchedulingContext(
         }
 
         m_inst_to_task[call] = task.get();
-        if (task->task_function && !task->task_function->isDeclaration()) {
+        if (task_alloc && task->task_handle) {
+          m_handle_to_task[task->task_handle] = task.get();
+        }
+        Task *tracked_task = task.get();
+        m_tasks.push_back(std::move(task));
+        if (tracked_task->task_function &&
+            !tracked_task->task_function->isDeclaration()) {
           TraversalState task_state;
           task_state.scheduling_context_id = m_next_scheduling_context_id++;
           task_state.scheduling_context_entity_id = addEntity(
-              SemanticEntityKind::SchedulingContext, call, task->task_function,
-              task_state.scheduling_context_id, task->semantic_entity_id,
-              currentRegionId(), currentPhaseToken(), task->taskgroup_id);
+              SemanticEntityKind::SchedulingContext, call,
+              tracked_task->task_function, task_state.scheduling_context_id,
+              tracked_task->semantic_entity_id, currentRegionId(),
+              currentPhaseToken(), tracked_task->taskgroup_id);
           task_state.phase_stack.push_back(0);
           task_state.anchor_inst = call;
+          task_state.taskgroup_stack = state.taskgroup_stack;
+          task_state.executing_final_task = tracked_task->is_final;
+          task_state.executing_recurrent_task = tracked_task->is_recurrent;
           std::set<const Function *> nested_call_stack = call_stack;
-          scanSchedulingContext(task->task_function, task_state,
+          scanSchedulingContext(tracked_task->task_function, task_state,
                                 nested_call_stack);
         }
-        m_tasks.push_back(std::move(task));
         continue;
       }
 
@@ -1837,7 +2071,12 @@ void OpenMPSemantics::scanSchedulingContext(
 
 std::vector<Dependency>
 OpenMPSemantics::extractDependencies(const CallBase *task_call) {
-  return extractRuntimeDependencies(task_call, 3, 4);
+  std::vector<Dependency> deps =
+      extractRuntimeDependencies(task_call, 3, 4);
+  std::vector<Dependency> noalias_deps =
+      extractRuntimeDependencies(task_call, 5, 6);
+  deps.insert(deps.end(), noalias_deps.begin(), noalias_deps.end());
+  return deps;
 }
 
 std::vector<Dependency> OpenMPSemantics::extractRuntimeDependencies(
@@ -2149,57 +2388,10 @@ OpenMPSemantics::extractTaskFunction(const CallBase *task_call) {
     }
   }
 
-  const Value *task_base = getUnderlyingObject(task_arg);
-  if (!task_base) {
-    task_base = task_arg;
-  }
-
-  auto tryStoredFunction = [&](const Value *value) -> const Function * {
-    if (!value) {
-      return nullptr;
-    }
-    value = value->stripPointerCasts();
-    if (const auto *func = dyn_cast<Function>(value)) {
-      return func;
-    }
-    if (const auto *ce = dyn_cast<ConstantExpr>(value)) {
-      if (ce->isCast()) {
-        return dyn_cast<Function>(ce->getOperand(0)->stripPointerCasts());
-      }
-    }
-    return nullptr;
-  };
-
-  auto pointerTargetsTask = [&](const Value *ptr) {
-    if (!ptr) {
-      return false;
-    }
-    ptr = ptr->stripPointerCasts();
-    if (ptr == task_arg || ptr == task_base) {
-      return true;
-    }
-    if (const Value *underlying = getUnderlyingObject(ptr)) {
-      return underlying->stripPointerCasts() == task_base;
-    }
-    if (const auto *gep = dyn_cast<GEPOperator>(ptr)) {
-      return getUnderlyingObject(gep->getPointerOperand()) == task_base;
-    }
-    return false;
-  };
-
-  const Function *parent = task_call->getFunction();
-  if (!parent) {
-    return nullptr;
-  }
-  for (const Instruction &inst : instructions(parent)) {
-    const auto *store = dyn_cast<StoreInst>(&inst);
-    if (!store || !pointerTargetsTask(store->getPointerOperand())) {
-      continue;
-    }
-    if (const Function *stored = tryStoredFunction(store->getValueOperand())) {
-      return stored;
-    }
-  }
+  // Without allocation provenance, field-sensitive reaching-definition
+  // information is required to identify the task entry safely.  Guessing from
+  // arbitrary function-valued stores can select unrelated or later fields.
+  ++m_deferred_reason_counts["omp_task_entry_unresolved"];
   return nullptr;
 }
 
@@ -2229,11 +2421,20 @@ void OpenMPSemantics::applyTaskExecutionHints(Task &task,
   const uint64_t value = flags->getZExtValue();
   const bool is_merged_if0 = (value & kLibompTaskMergedIf0Mask) != 0;
   task.is_final = (value & kLibompTaskFinalMask) != 0;
-  task.is_detached = (value & kLibompTaskDetachableMask) != 0 ||
-                     (value & kLibompTaskProxyMask) != 0;
+  task.is_proxy = (value & kLibompTaskProxyMask) != 0;
+  task.is_detached = (value & kLibompTaskDetachableMask) != 0;
   task.is_untied = (value & kLibompTaskTiednessMask) == 0;
 
+  if (task.is_final || task.execution_mode == TaskExecutionMode::Included) {
+    task.is_untied = false;
+  }
+
   if (is_merged_if0) {
+    task.has_included_submission = true;
+    task.has_deferred_submission = false;
+  }
+
+  if (task.execution_mode == TaskExecutionMode::Included || is_merged_if0) {
     task.execution_mode = TaskExecutionMode::Included;
   } else if (task.is_detached) {
     task.execution_mode = TaskExecutionMode::Detached;
@@ -2252,6 +2453,36 @@ bool OpenMPSemantics::dependenciesConflict(const Dependency &d1,
 DependencyConflict
 OpenMPSemantics::classifyDependencyConflict(const Dependency &d1,
                                             const Dependency &d2) const {
+  auto impreciseConflict = [&]() {
+    ++m_deferred_imprecise_conflict_count;
+    ++m_deferred_reason_counts["omp_depend_may_conflict"];
+    if (d1.proof == DependencyProof::Unknown ||
+        d2.proof == DependencyProof::Unknown) {
+      return DependencyConflict::Unknown;
+    }
+    return DependencyConflict::MayConflict;
+  };
+  auto hasDefiniteEvidence = [](const Dependency &dep) {
+    return dep.proof == DependencyProof::Definite &&
+           dep.source_kind == DependencySourceKind::DirectAddress;
+  };
+
+  if (d1.type == DependType::UNKNOWN || d2.type == DependType::UNKNOWN) {
+    return impreciseConflict();
+  }
+
+  if (d1.type == DependType::ALL_MEMORY ||
+      d2.type == DependType::ALL_MEMORY) {
+    return hasDefiniteEvidence(d1) && hasDefiniteEvidence(d2)
+               ? DependencyConflict::MustConflict
+               : impreciseConflict();
+  }
+
+  if (d1.type == DependType::INOUTSET &&
+      d2.type == DependType::INOUTSET) {
+    return DependencyConflict::NoConflict;
+  }
+
   const DataLayout &DL = m_module.getDataLayout();
   int64_t offset1 = d1.offset;
   int64_t offset2 = d2.offset;
@@ -2272,10 +2503,12 @@ OpenMPSemantics::classifyDependencyConflict(const Dependency &d1,
 
   bool is_write1 =
       (d1.type == DependType::OUT || d1.type == DependType::INOUT ||
-       d1.type == DependType::MUTEXINOUTSET);
+       d1.type == DependType::MUTEXINOUTSET ||
+       d1.type == DependType::INOUTSET);
   bool is_write2 =
       (d2.type == DependType::OUT || d2.type == DependType::INOUT ||
-       d2.type == DependType::MUTEXINOUTSET);
+       d2.type == DependType::MUTEXINOUTSET ||
+       d2.type == DependType::INOUTSET);
 
   if (base1 != base2) {
     if ((is_write1 || is_write2) &&
@@ -2294,6 +2527,10 @@ OpenMPSemantics::classifyDependencyConflict(const Dependency &d1,
     return DependencyConflict::NoConflict;
   }
 
+  if (!hasDefiniteEvidence(d1) || !hasDefiniteEvidence(d2)) {
+    return impreciseConflict();
+  }
+
   if (precise1 && precise2 && d1.size != 0 && d2.size != 0) {
     uint64_t begin1 = static_cast<uint64_t>(offset1);
     uint64_t begin2 = static_cast<uint64_t>(offset2);
@@ -2308,14 +2545,12 @@ OpenMPSemantics::classifyDependencyConflict(const Dependency &d1,
     return DependencyConflict::MustConflict;
   }
 
-  ++m_deferred_imprecise_conflict_count;
-  ++m_deferred_reason_counts["omp_depend_may_conflict"];
-  return DependencyConflict::MayConflict;
+  return impreciseConflict();
 }
 
 bool OpenMPSemantics::isMutexLikeExclusion(const Dependency &d1,
                                            const Dependency &d2) const {
-  return d1.type == DependType::MUTEXINOUTSET ||
+  return d1.type == DependType::MUTEXINOUTSET &&
          d2.type == DependType::MUTEXINOUTSET;
 }
 

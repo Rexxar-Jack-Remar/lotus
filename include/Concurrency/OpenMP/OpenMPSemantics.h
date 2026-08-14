@@ -16,7 +16,15 @@
 
 namespace OpenMP {
 
-enum class DependType { IN, OUT, INOUT, MUTEXINOUTSET };
+enum class DependType {
+  IN,
+  OUT,
+  INOUT,
+  MUTEXINOUTSET,
+  INOUTSET,
+  ALL_MEMORY,
+  UNKNOWN
+};
 
 enum class DependencySourceKind {
   DirectAddress,
@@ -38,9 +46,9 @@ enum class DependencyConflict {
 };
 
 struct Dependency {
-  DependType type;
-  const llvm::Value *address;
-  size_t size;
+  DependType type = DependType::UNKNOWN;
+  const llvm::Value *address = nullptr;
+  size_t size = 0;
   const llvm::Value *canonical_base = nullptr;
   int64_t offset = 0;
   bool has_precise_offset = false;
@@ -56,10 +64,19 @@ struct Task {
   bool is_final = false;
   bool is_untied = false;
   bool is_detached = false;
+  bool is_proxy = false;
+  bool has_deferred_submission = false;
+  bool has_included_submission = false;
+  bool has_dependency_submission = false;
+  bool is_taskloop = false;
+  bool is_recurrent = false;
+  bool recurrent_instances_serialized = false;
+  bool recurrent_instances_excluded = false;
   const llvm::Function *parent_context = nullptr;
   const llvm::Instruction *generating_context = nullptr;
   size_t scheduling_context_id = 0;
   size_t taskgroup_id = 0;
+  std::set<size_t> taskgroup_ids;
   size_t phase_id = 0;
   size_t sibling_group = 0;
   size_t sequence_index = 0;
@@ -334,12 +351,13 @@ private:
 
     size_t scheduling_context_id = 0;
     size_t scheduling_context_entity_id = 0;
-    size_t next_taskgroup_id = 1;
     size_t next_phase_token = 1;
     size_t next_region_id = 1;
     size_t sequence_index = 0;
     size_t next_event_order = 1;
     const llvm::Instruction *anchor_inst = nullptr;
+    bool executing_final_task = false;
+    bool executing_recurrent_task = false;
     std::vector<size_t> taskgroup_stack;
     std::vector<size_t> phase_stack;
     std::vector<RegionFrame> region_stack;
@@ -348,6 +366,7 @@ private:
   llvm::Module &m_module;
   std::vector<std::unique_ptr<Task>> m_tasks;
   std::map<const llvm::Instruction *, Task *> m_inst_to_task;
+  std::unordered_map<const llvm::Value *, Task *> m_handle_to_task;
   std::unordered_map<size_t, std::vector<WaitBoundaryRecord>> m_wait_boundaries;
   std::vector<WaitBoundaryInfo> m_wait_boundary_infos;
   std::vector<SemanticEntity> m_entities;
@@ -360,6 +379,7 @@ private:
   size_t m_nested_depth = 0;
   size_t m_next_scheduling_context_id = 1;
   size_t m_next_entity_id = 1;
+  size_t m_next_taskgroup_id = 1;
   std::unordered_map<size_t, size_t> m_region_nesting_depth;
   mutable size_t m_deferred_imprecise_conflict_count = 0;
   mutable std::unordered_map<std::string, size_t> m_deferred_reason_counts;

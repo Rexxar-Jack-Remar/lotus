@@ -2,8 +2,8 @@
 #include "Concurrency/LockSet/LockSetAnalysis.h"
 #include "Concurrency/LockSet/LockSetAnalysisSupport.h"
 
-#include <limits>
 #include <functional>
+#include <limits>
 #include <queue>
 #include <set>
 
@@ -31,8 +31,8 @@ void LockSetAnalysis::detectTryLockSuccessBranches(Function *func) {
 
   for (auto it = m_trylock_edge_refinements.begin();
        it != m_trylock_edge_refinements.end();) {
-    const BasicBlock *source = it->first.first;
-    if (source && source->getParent() == func) {
+    const Instruction *source = it->first.first;
+    if (source && source->getFunction() == func) {
       it = m_trylock_edge_refinements.erase(it);
     } else {
       ++it;
@@ -58,8 +58,12 @@ void LockSetAnalysis::detectTryLockSuccessBranches(Function *func) {
                    : BooleanTryCondition{};
       if (const auto *freeze = dyn_cast<FreezeInst>(value))
         return trace(freeze->getOperand(0), truth, visited);
-      if (const auto *cast = dyn_cast<CastInst>(value))
-        return trace(cast->getOperand(0), truth, visited);
+      if (const auto *cast = dyn_cast<CastInst>(value)) {
+        if (isa<ZExtInst>(cast) || isa<SExtInst>(cast)) {
+          return trace(cast->getOperand(0), truth, visited);
+        }
+        return {};
+      }
       if (const auto *binary = dyn_cast<BinaryOperator>(value)) {
         if (binary->getOpcode() == Instruction::Xor) {
           const ConstantInt *constant = dyn_cast<ConstantInt>(binary->getOperand(1));
@@ -68,7 +72,8 @@ void LockSetAnalysis::detectTryLockSuccessBranches(Function *func) {
             constant = dyn_cast<ConstantInt>(binary->getOperand(0));
             forwarded = binary->getOperand(1);
           }
-          if (constant && constant->isOne())
+          if (binary->getType()->isIntegerTy(1) && constant &&
+              constant->isOne())
             return trace(forwarded, !truth, visited);
         }
       }
@@ -154,14 +159,11 @@ void LockSetAnalysis::detectTryLockSuccessBranches(Function *func) {
     bool true_branch_is_success =
         zero_means_success ? !true_branch_is_nonzero : true_branch_is_nonzero;
 
-    BasicBlock *success_bb =
-        true_branch_is_success ? br->getSuccessor(0) : br->getSuccessor(1);
-    BasicBlock *failure_bb =
-        true_branch_is_success ? br->getSuccessor(1) : br->getSuccessor(0);
-    const BasicBlock *source_bb = br->getParent();
-    m_trylock_edge_refinements[{source_bb, success_bb}].push_back(
+    const unsigned success_index = true_branch_is_success ? 0 : 1;
+    const unsigned failure_index = true_branch_is_success ? 1 : 0;
+    m_trylock_edge_refinements[{br, success_index}].push_back(
         {trylock_call, lock, semantics.kind, true});
-    m_trylock_edge_refinements[{source_bb, failure_bb}].push_back(
+    m_trylock_edge_refinements[{br, failure_index}].push_back(
         {trylock_call, lock, semantics.kind, false});
   }
 
@@ -185,16 +187,11 @@ void LockSetAnalysis::detectTryLockSuccessBranches(Function *func) {
         semantics.try_success == ThreadAPI::TryLockSuccess::Zero;
     const bool condition_zero_means_success =
         zero_means_success == traced.true_means_nonzero;
-    const BasicBlock *zero_bb = switch_case.getCaseSuccessor();
-    const BasicBlock *nonzero_bb = switch_inst->getDefaultDest();
-    const BasicBlock *success_bb =
-        condition_zero_means_success ? zero_bb : nonzero_bb;
-    const BasicBlock *failure_bb =
-        condition_zero_means_success ? nonzero_bb : zero_bb;
-    const BasicBlock *source_bb = switch_inst->getParent();
-    m_trylock_edge_refinements[{source_bb, success_bb}].push_back(
+    const unsigned success_index = condition_zero_means_success ? 1 : 0;
+    const unsigned failure_index = condition_zero_means_success ? 0 : 1;
+    m_trylock_edge_refinements[{switch_inst, success_index}].push_back(
         {traced.call, lock, semantics.kind, true});
-    m_trylock_edge_refinements[{source_bb, failure_bb}].push_back(
+    m_trylock_edge_refinements[{switch_inst, failure_index}].push_back(
         {traced.call, lock, semantics.kind, false});
   }
 }
@@ -222,6 +219,10 @@ void LockSetAnalysis::computeIntraproceduralLockSets(Function *func) {
       m_may_recursive_depth_exit.erase(key);
       m_must_recursive_depth_entry.erase(key);
       m_must_recursive_depth_exit.erase(key);
+      m_may_raii_ownership_entry.erase(key);
+      m_may_raii_ownership_exit.erase(key);
+      m_must_raii_ownership_entry.erase(key);
+      m_must_raii_ownership_exit.erase(key);
       m_invoke_normal_exit.erase(key);
       m_invoke_unwind_exit.erase(key);
     }
@@ -233,7 +234,22 @@ void LockSetAnalysis::computeIntraproceduralLockSets(Function *func) {
       [&](const BasicBlock *pred, const BasicBlock *succ, LockSet &may,
           LockSet &must, LockSet &may_read, LockSet &may_write,
           LockSet &must_read, LockSet &must_write) {
-        auto refinement_it = m_trylock_edge_refinements.find({pred, succ});
+        const Instruction *term = pred ? pred->getTerminator() : nullptr;
+        unsigned matching_index = 0;
+        unsigned matches = 0;
+        if (term) {
+          for (unsigned index = 0; index < term->getNumSuccessors(); ++index) {
+            if (term->getSuccessor(index) == succ) {
+              matching_index = index;
+              ++matches;
+            }
+          }
+        }
+        if (matches != 1) {
+          return;
+        }
+        auto refinement_it =
+            m_trylock_edge_refinements.find({term, matching_index});
         if (refinement_it == m_trylock_edge_refinements.end()) {
           return;
         }
@@ -292,17 +308,29 @@ void LockSetAnalysis::computeIntraproceduralLockSets(Function *func) {
   std::set<const Instruction *> in_worklist;
 
   unsigned recursive_acquire_limit = 0;
-  for (const Instruction &candidate : instructions(func)) {
-    const auto *candidate_call = dyn_cast<CallBase>(&candidate);
-    const Function *candidate_callee =
-        candidate_call ? m_thread_api->getCallee(candidate_call) : nullptr;
-    if (candidate_callee &&
-        candidate_callee->getName().contains("recursive_mutex") &&
-        m_thread_api->isTDAcquire(&candidate) &&
-        !m_thread_api->isTryLock(&candidate)) {
-      ++recursive_acquire_limit;
+  auto countRecursiveAcquires = [&](const Function &candidate_func) {
+    for (const Instruction &candidate : instructions(candidate_func)) {
+      const auto *candidate_call = dyn_cast<CallBase>(&candidate);
+      const Function *candidate_callee =
+          candidate_call ? m_thread_api->getCallee(candidate_call) : nullptr;
+      if (candidate_callee &&
+          candidate_callee->getName().contains("recursive_mutex") &&
+          m_thread_api->isTDAcquire(&candidate) &&
+          !m_thread_api->isTryLock(&candidate)) {
+        ++recursive_acquire_limit;
+      }
     }
+  };
+  if (m_module) {
+    for (const Function &candidate_func : *m_module) {
+      if (!candidate_func.isDeclaration()) {
+        countRecursiveAcquires(candidate_func);
+      }
+    }
+  } else {
+    countRecursiveAcquires(*func);
   }
+  recursive_acquire_limit = std::max(1u, recursive_acquire_limit);
 
   const Instruction *entry = &func->getEntryBlock().front();
   worklist.push(entry);
@@ -317,6 +345,7 @@ void LockSetAnalysis::computeIntraproceduralLockSets(Function *func) {
     std::vector<LockSet> may_read_inputs, may_write_inputs;
     std::vector<LockSet> must_read_inputs, must_write_inputs;
     std::vector<RecursiveDepthMap> may_depth_inputs, must_depth_inputs;
+    std::vector<RAIIWrapperSet> may_ownership_inputs, must_ownership_inputs;
 
     if (inst == entry) {
       may_inputs.push_back(LockSet());
@@ -327,6 +356,8 @@ void LockSetAnalysis::computeIntraproceduralLockSets(Function *func) {
       must_write_inputs.push_back(LockSet());
       may_depth_inputs.emplace_back();
       must_depth_inputs.emplace_back();
+      may_ownership_inputs.emplace_back();
+      must_ownership_inputs.emplace_back();
     } else {
       const BasicBlock *bb = inst->getParent();
       if (inst == &bb->front()) {
@@ -377,6 +408,8 @@ void LockSetAnalysis::computeIntraproceduralLockSets(Function *func) {
             pred_may_write = edge_it->second.may_write_lockset;
             pred_must_read = edge_it->second.must_read_lockset;
             pred_must_write = edge_it->second.must_write_lockset;
+            may_depth_inputs.push_back(edge_it->second.may_recursive_depth);
+            must_depth_inputs.push_back(edge_it->second.must_recursive_depth);
           }
 
           applyTryLockEdgeRefinement(pred, bb, pred_may, pred_must,
@@ -388,16 +421,28 @@ void LockSetAnalysis::computeIntraproceduralLockSets(Function *func) {
           may_write_inputs.push_back(std::move(pred_may_write));
           must_read_inputs.push_back(std::move(pred_must_read));
           must_write_inputs.push_back(std::move(pred_must_write));
-          auto may_depth_it = m_may_recursive_depth_exit.find(pred_term);
-          auto must_depth_it = m_must_recursive_depth_exit.find(pred_term);
-          may_depth_inputs.push_back(may_depth_it !=
-                                             m_may_recursive_depth_exit.end()
-                                         ? may_depth_it->second
-                                         : RecursiveDepthMap());
-          must_depth_inputs.push_back(must_depth_it !=
-                                              m_must_recursive_depth_exit.end()
-                                          ? must_depth_it->second
-                                          : RecursiveDepthMap());
+          if (!isa<InvokeInst>(pred_term)) {
+            auto may_depth_it = m_may_recursive_depth_exit.find(pred_term);
+            auto must_depth_it = m_must_recursive_depth_exit.find(pred_term);
+            may_depth_inputs.push_back(
+                may_depth_it != m_may_recursive_depth_exit.end()
+                    ? may_depth_it->second
+                    : RecursiveDepthMap());
+            must_depth_inputs.push_back(
+                must_depth_it != m_must_recursive_depth_exit.end()
+                    ? must_depth_it->second
+                    : RecursiveDepthMap());
+          }
+          auto may_ownership_it = m_may_raii_ownership_exit.find(pred_term);
+          auto must_ownership_it = m_must_raii_ownership_exit.find(pred_term);
+          may_ownership_inputs.push_back(
+              may_ownership_it != m_may_raii_ownership_exit.end()
+                  ? may_ownership_it->second
+                  : RAIIWrapperSet());
+          must_ownership_inputs.push_back(
+              must_ownership_it != m_must_raii_ownership_exit.end()
+                  ? must_ownership_it->second
+                  : RAIIWrapperSet());
         }
       } else if (const Instruction *prev = inst->getPrevNode()) {
         auto it_may = m_may_locksets_exit.find(prev);
@@ -432,6 +477,16 @@ void LockSetAnalysis::computeIntraproceduralLockSets(Function *func) {
                                               m_must_recursive_depth_exit.end()
                                           ? must_depth_it->second
                                           : RecursiveDepthMap());
+          auto may_ownership_it = m_may_raii_ownership_exit.find(prev);
+          auto must_ownership_it = m_must_raii_ownership_exit.find(prev);
+          may_ownership_inputs.push_back(
+              may_ownership_it != m_may_raii_ownership_exit.end()
+                  ? may_ownership_it->second
+                  : RAIIWrapperSet());
+          must_ownership_inputs.push_back(
+              must_ownership_it != m_must_raii_ownership_exit.end()
+                  ? must_ownership_it->second
+                  : RAIIWrapperSet());
         }
       }
     }
@@ -468,6 +523,43 @@ void LockSetAnalysis::computeIntraproceduralLockSets(Function *func) {
 
     RecursiveDepthMap may_depth_in = mergeDepths(may_depth_inputs, false);
     RecursiveDepthMap must_depth_in = mergeDepths(must_depth_inputs, true);
+    auto mergeOwnership = [](const std::vector<RAIIWrapperSet> &inputs,
+                             bool is_must) {
+      RAIIWrapperSet result;
+      if (inputs.empty()) {
+        return result;
+      }
+      if (!is_must) {
+        for (const RAIIWrapperSet &input : inputs) {
+          result.insert(input.begin(), input.end());
+        }
+        return result;
+      }
+      result = inputs.front();
+      for (size_t index = 1; index < inputs.size(); ++index) {
+        RAIIWrapperSet intersection;
+        std::set_intersection(result.begin(), result.end(),
+                              inputs[index].begin(), inputs[index].end(),
+                              std::inserter(intersection,
+                                            intersection.begin()));
+        result = std::move(intersection);
+      }
+      return result;
+    };
+    RAIIWrapperSet may_ownership_in =
+        mergeOwnership(may_ownership_inputs, false);
+    RAIIWrapperSet must_ownership_in =
+        mergeOwnership(must_ownership_inputs, true);
+    const bool may_ownership_entry_changed =
+        m_may_raii_ownership_entry[inst] != may_ownership_in;
+    const bool must_ownership_entry_changed =
+        m_must_raii_ownership_entry[inst] != must_ownership_in;
+    m_may_raii_ownership_entry[inst] = may_ownership_in;
+    m_must_raii_ownership_entry[inst] = must_ownership_in;
+    RAIIWrapperSet may_ownership_out =
+        transferRAIIOwnership(inst, may_ownership_in, false);
+    RAIIWrapperSet must_ownership_out =
+        transferRAIIOwnership(inst, must_ownership_in, true);
 
     LockSet may_read_in =
         may_read_inputs.empty() ? LockSet() : merge(may_read_inputs, false);
@@ -534,6 +626,73 @@ void LockSetAnalysis::computeIntraproceduralLockSets(Function *func) {
         applyReleaseDepth(must_depth_out, must_out, must_write_out);
       }
     }
+    if (depth_call && !m_thread_api->isTDAcquire(inst) &&
+        !m_thread_api->isTDRelease(inst)) {
+      for (Function *callee : getCallees(depth_call)) {
+        auto summary_it = m_function_summaries.find(callee);
+        if (summary_it == m_function_summaries.end() ||
+            !summary_it->second.is_analyzed) {
+          continue;
+        }
+        const FunctionSummary &summary = summary_it->second;
+        for (const auto &[summary_lock, delta] :
+             summary.may_recursive_acquire_delta) {
+          if (LockID instantiated =
+                  instantiateSummaryLock(depth_call, callee, summary_lock)) {
+            unsigned &depth = may_depth_out[instantiated];
+            if (depth == UNBOUNDED_RECURSIVE_DEPTH ||
+                delta == UNBOUNDED_RECURSIVE_DEPTH ||
+                depth > UNBOUNDED_RECURSIVE_DEPTH - delta ||
+                depth + delta > recursive_acquire_limit) {
+              depth = UNBOUNDED_RECURSIVE_DEPTH;
+            } else {
+              depth += delta;
+            }
+          }
+        }
+        for (const auto &[summary_lock, delta] :
+             summary.must_recursive_acquire_delta) {
+          if (LockID instantiated =
+                  instantiateSummaryLock(depth_call, callee, summary_lock)) {
+            unsigned &depth = must_depth_out[instantiated];
+            if (depth == UNBOUNDED_RECURSIVE_DEPTH ||
+                delta == UNBOUNDED_RECURSIVE_DEPTH ||
+                depth > UNBOUNDED_RECURSIVE_DEPTH - delta ||
+                depth + delta > recursive_acquire_limit) {
+              depth = UNBOUNDED_RECURSIVE_DEPTH;
+            } else {
+              depth += delta;
+            }
+          }
+        }
+        auto applyRecursiveRelease =
+            [&](RecursiveDepthMap &depths, LockSet &locks,
+                LockSet &write_locks, const RecursiveDepthMap &effects) {
+              for (const auto &[summary_lock, delta] : effects) {
+                LockID lock =
+                    instantiateSummaryLock(depth_call, callee, summary_lock);
+                auto depth_it = depths.find(lock);
+                if (!lock || depth_it == depths.end()) {
+                  continue;
+                }
+                if (depth_it->second == UNBOUNDED_RECURSIVE_DEPTH ||
+                    depth_it->second > delta) {
+                  if (depth_it->second != UNBOUNDED_RECURSIVE_DEPTH) {
+                    depth_it->second -= delta;
+                  }
+                  locks.insert(lock);
+                  write_locks.insert(lock);
+                } else {
+                  depths.erase(depth_it);
+                }
+              }
+            };
+        applyRecursiveRelease(may_depth_out, may_out, may_write_out,
+                              summary.must_recursive_release_delta);
+        applyRecursiveRelease(must_depth_out, must_out, must_write_out,
+                              summary.may_recursive_release_delta);
+      }
+    }
 
     if (const auto *invoke = dyn_cast<InvokeInst>(inst)) {
       if (!invoke->doesNotThrow()) {
@@ -544,6 +703,8 @@ void LockSetAnalysis::computeIntraproceduralLockSets(Function *func) {
         normal_facts.may_write_lockset = may_write_out;
         normal_facts.must_read_lockset = must_read_out;
         normal_facts.must_write_lockset = must_write_out;
+        normal_facts.may_recursive_depth = may_depth_out;
+        normal_facts.must_recursive_depth = must_depth_out;
         m_invoke_normal_exit[inst] = normal_facts;
 
         std::vector<LockSet> unwind_may_results;
@@ -552,6 +713,8 @@ void LockSetAnalysis::computeIntraproceduralLockSets(Function *func) {
         std::vector<LockSet> unwind_may_write_results;
         std::vector<LockSet> unwind_must_read_results;
         std::vector<LockSet> unwind_must_write_results;
+        std::vector<RecursiveDepthMap> unwind_may_depth_results;
+        std::vector<RecursiveDepthMap> unwind_must_depth_results;
 
         for (Function *callee : getCallees(invoke)) {
           auto summary_it = m_function_summaries.find(callee);
@@ -563,6 +726,8 @@ void LockSetAnalysis::computeIntraproceduralLockSets(Function *func) {
 
           LockSet candidate_may = may_in;
           LockSet candidate_must = must_in;
+          RecursiveDepthMap candidate_may_depth = may_depth_in;
+          RecursiveDepthMap candidate_must_depth = must_depth_in;
           if (!applyExceptionalFunctionSummary(invoke, callee, candidate_may,
                                                candidate_must)) {
             continue;
@@ -573,6 +738,50 @@ void LockSetAnalysis::computeIntraproceduralLockSets(Function *func) {
           LockSet candidate_must_read = must_read_in;
           LockSet candidate_must_write = must_write_in;
           const FunctionSummary &summary = summary_it->second;
+          for (const auto &[lock, delta] :
+               summary.exceptional_may_recursive_acquire_delta) {
+            if (LockID instantiated =
+                    instantiateSummaryLock(invoke, callee, lock)) {
+              candidate_may_depth[instantiated] += delta;
+            }
+          }
+          for (const auto &[lock, delta] :
+               summary.exceptional_must_recursive_acquire_delta) {
+            if (LockID instantiated =
+                    instantiateSummaryLock(invoke, callee, lock)) {
+              candidate_must_depth[instantiated] += delta;
+            }
+          }
+          auto applyExceptionalRecursiveRelease =
+              [&](RecursiveDepthMap &depths, LockSet &locks,
+                  LockSet &write_locks, const RecursiveDepthMap &effects) {
+                for (const auto &[lock, delta] : effects) {
+                  LockID instantiated =
+                      instantiateSummaryLock(invoke, callee, lock);
+                  auto depth_it = depths.find(instantiated);
+                  if (!instantiated || depth_it == depths.end()) {
+                    continue;
+                  }
+                  if (depth_it->second ==
+                          std::numeric_limits<unsigned>::max() ||
+                      depth_it->second > delta) {
+                    if (depth_it->second !=
+                        std::numeric_limits<unsigned>::max()) {
+                      depth_it->second -= delta;
+                    }
+                    locks.insert(instantiated);
+                    write_locks.insert(instantiated);
+                  } else {
+                    depths.erase(depth_it);
+                  }
+                }
+              };
+          applyExceptionalRecursiveRelease(
+              candidate_may_depth, candidate_may, candidate_may_write,
+              summary.exceptional_must_recursive_release_delta);
+          applyExceptionalRecursiveRelease(
+              candidate_must_depth, candidate_must, candidate_must_write,
+              summary.exceptional_may_recursive_release_delta);
 
           auto eraseMustReleased = [&](LockID lock, LockSet &read,
                                        LockSet &write) {
@@ -643,6 +852,8 @@ void LockSetAnalysis::computeIntraproceduralLockSets(Function *func) {
           unwind_may_write_results.push_back(std::move(candidate_may_write));
           unwind_must_read_results.push_back(std::move(candidate_must_read));
           unwind_must_write_results.push_back(std::move(candidate_must_write));
+          unwind_may_depth_results.push_back(std::move(candidate_may_depth));
+          unwind_must_depth_results.push_back(std::move(candidate_must_depth));
         }
 
         if (hasUnresolvedCalleeTarget(invoke)) {
@@ -652,6 +863,19 @@ void LockSetAnalysis::computeIntraproceduralLockSets(Function *func) {
           unwind_may_write_results.push_back(may_write_in);
           unwind_must_read_results.emplace_back();
           unwind_must_write_results.emplace_back();
+          unwind_may_depth_results.push_back(may_depth_in);
+          unwind_must_depth_results.emplace_back();
+        }
+
+        if (unwind_may_results.empty() && !getCallees(invoke).empty()) {
+          unwind_may_results.push_back(may_in);
+          unwind_must_results.emplace_back();
+          unwind_may_read_results.push_back(may_read_in);
+          unwind_may_write_results.push_back(may_write_in);
+          unwind_must_read_results.emplace_back();
+          unwind_must_write_results.emplace_back();
+          unwind_may_depth_results.push_back(may_depth_in);
+          unwind_must_depth_results.emplace_back();
         }
 
         InvokeEdgeFacts unwind_facts;
@@ -665,6 +889,10 @@ void LockSetAnalysis::computeIntraproceduralLockSets(Function *func) {
               merge(unwind_must_read_results, true);
           unwind_facts.must_write_lockset =
               merge(unwind_must_write_results, true);
+          unwind_facts.may_recursive_depth =
+              mergeDepths(unwind_may_depth_results, false);
+          unwind_facts.must_recursive_depth =
+              mergeDepths(unwind_must_depth_results, true);
           may_out.insert(unwind_facts.may_lockset.begin(),
                          unwind_facts.may_lockset.end());
           may_read_out.insert(unwind_facts.may_read_lockset.begin(),
@@ -676,13 +904,18 @@ void LockSetAnalysis::computeIntraproceduralLockSets(Function *func) {
               merge({must_read_out, unwind_facts.must_read_lockset}, true);
           must_write_out =
               merge({must_write_out, unwind_facts.must_write_lockset}, true);
+          may_depth_out = mergeDepths(
+              {may_depth_out, unwind_facts.may_recursive_depth}, false);
+          must_depth_out = mergeDepths(
+              {must_depth_out, unwind_facts.must_recursive_depth}, true);
         }
         m_invoke_unwind_exit[inst] = std::move(unwind_facts);
       }
     }
 
     bool had_entry = m_may_locksets_entry.count(inst);
-    bool changed = !had_entry;
+    bool changed = !had_entry || may_ownership_entry_changed ||
+                   must_ownership_entry_changed;
     if (m_may_recursive_depth_entry[inst] != may_depth_in) {
       m_may_recursive_depth_entry[inst] = may_depth_in;
       changed = true;
@@ -697,6 +930,14 @@ void LockSetAnalysis::computeIntraproceduralLockSets(Function *func) {
     }
     if (m_must_recursive_depth_exit[inst] != must_depth_out) {
       m_must_recursive_depth_exit[inst] = must_depth_out;
+      changed = true;
+    }
+    if (m_may_raii_ownership_exit[inst] != may_ownership_out) {
+      m_may_raii_ownership_exit[inst] = may_ownership_out;
+      changed = true;
+    }
+    if (m_must_raii_ownership_exit[inst] != must_ownership_out) {
+      m_must_raii_ownership_exit[inst] = must_ownership_out;
       changed = true;
     }
     if (m_may_read_locks_entry[inst] != may_read_in) {
@@ -791,7 +1032,8 @@ LockSet LockSetAnalysis::transfer(const Instruction *inst,
     }
   };
 
-  std::vector<LockID> raii_releases = getRAIILocksReleasedAt(inst);
+  std::vector<LockID> raii_releases =
+      getRAIILocksReleasedAt(inst, is_must);
   if (!raii_releases.empty()) {
     eraseReleasedLocks(raii_releases);
     return out_set;
@@ -1090,7 +1332,8 @@ void LockSetAnalysis::transferReadWrite(const Instruction *inst,
     }
   };
 
-  std::vector<LockID> raii_releases = getRAIILocksReleasedAt(inst);
+  std::vector<LockID> raii_releases =
+      getRAIILocksReleasedAt(inst, is_must);
   if (!raii_releases.empty()) {
     eraseReleasedLocks(raii_releases);
     return;
@@ -1291,7 +1534,7 @@ void LockSetAnalysis::transferReadWrite(const Instruction *inst,
     case ThreadAPI::TD_SCOPED_LOCK_DTOR:
     case ThreadAPI::TD_UNIQUE_LOCK_UNLOCK: {
       if (call_type != ThreadAPI::TD_UNIQUE_LOCK_UNLOCK &&
-          getRAIILocksReleasedAt(inst).empty()) {
+          getRAIILocksReleasedAt(inst, is_must).empty()) {
         return;
       }
       std::vector<LockID> locks =
