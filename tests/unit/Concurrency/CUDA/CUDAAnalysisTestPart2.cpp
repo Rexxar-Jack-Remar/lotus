@@ -252,8 +252,7 @@ TEST_F(CUDAAnalysisTest,
             concurrency::cuda::LaunchOrderingSource::StreamSynchronize);
   EXPECT_TRUE(analysis.getInterKernelRaces().empty());
 }
-TEST_F(CUDAAnalysisTest,
-       OrdersDefaultStreamMemcpyPrefetchAndFollowingLaunch) {
+TEST_F(CUDAAnalysisTest, OrdersDefaultStreamMemcpyPrefetchAndFollowingLaunch) {
   const char *source = R"(
     @global_arr = addrspace(1) global [64 x i32] zeroinitializer
 
@@ -426,8 +425,7 @@ TEST_F(CUDAAnalysisTest, OrdersLaunchesOnLegacyDefaultStream) {
   ASSERT_EQ(analysis.getLaunches().size(), 2u);
   EXPECT_TRUE(analysis.getLaunches()[0].stream_known);
   EXPECT_TRUE(analysis.getLaunches()[1].stream_known);
-  EXPECT_EQ(analysis.getLaunches()[0].stream,
-            analysis.getLaunches()[1].stream);
+  EXPECT_EQ(analysis.getLaunches()[0].stream, analysis.getLaunches()[1].stream);
   EXPECT_EQ(analysis.getLaunches()[0].stream_kind,
             concurrency::cuda::HostStreamKind::LegacyDefault);
   EXPECT_TRUE(analysis.getLaunches()[1].ordered_after_previous);
@@ -809,7 +807,7 @@ TEST_F(CUDAAnalysisTest, ExtractsAffinePatternThroughCastsShiftsAndDivides) {
   const auto &summary = analysis.getKernelSummaries().front();
   ASSERT_FALSE(summary.accesses.empty());
   EXPECT_TRUE(summary.accesses.front().address_pattern.valid);
-  EXPECT_NE(summary.accesses.front().alias_precision,
+  EXPECT_EQ(summary.accesses.front().alias_precision,
             concurrency::cuda::AliasPrecision::NonAffine);
 }
 TEST_F(CUDAAnalysisTest, CanonicalizesMultidimensionalAffinePattern) {
@@ -853,7 +851,7 @@ TEST_F(CUDAAnalysisTest, CanonicalizesMultidimensionalAffinePattern) {
   EXPECT_TRUE(canonical.valid);
   EXPECT_EQ(canonical.linear_thread, 4100);
   EXPECT_EQ(canonical.thread_stride_bytes, 4100);
-  EXPECT_TRUE(canonical.exact);
+  EXPECT_FALSE(canonical.exact);
 }
 TEST_F(CUDAAnalysisTest, CanonicalizesThreeDimensionalThreadLinearization) {
   concurrency::cuda::AffineAccessPattern pattern;

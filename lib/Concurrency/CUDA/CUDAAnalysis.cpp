@@ -45,14 +45,17 @@ struct RaceDecision {
 };
 
 static bool isSharedRaceRelevant(const AccessInfo &access) {
-  return access.space == MemorySpace::Shared && access.base &&
-         !access.is_atomic;
+  return access.space == MemorySpace::Shared;
 }
 
 static bool isGlobalRaceRelevant(const AccessInfo &access) {
   return (access.space == MemorySpace::Global ||
-          access.space == MemorySpace::Device) &&
-         access.base;
+          access.space == MemorySpace::Device);
+}
+
+static bool isUnknownRaceRelevant(const AccessInfo &access) {
+  return access.space == MemorySpace::Unknown || access.has_unresolved_base ||
+         !access.base;
 }
 
 static bool mightBeManagedMemory(const AccessInfo &access) {
@@ -138,6 +141,9 @@ static bool isConstantAddressAccess(const AccessInfo &access) {
 static AliasPrecision getAliasPrecision(const AccessInfo &access) {
   if (access.has_ambiguous_base) {
     return AliasPrecision::Ambiguous;
+  }
+  if (access.address_pattern.non_affine) {
+    return AliasPrecision::NonAffine;
   }
   if (access.address_pattern.valid) {
     return access.address_pattern.exact ? AliasPrecision::Exact
@@ -310,6 +316,74 @@ static const Instruction *getFirstBarrierInBlock(const BasicBlock *bb,
   return nullptr;
 }
 
+static std::optional<uint32_t> getBranchLaneMask(const BranchInst *branch,
+                                                 bool take_true,
+                                                 uint32_t warp_size) {
+  const auto *compare = branch && branch->isConditional()
+                            ? dyn_cast<ICmpInst>(branch->getCondition())
+                            : nullptr;
+  if (!compare || warp_size == 0 || warp_size > 32) {
+    return std::nullopt;
+  }
+  const Value *builtin = compare->getOperand(0);
+  const auto *constant = dyn_cast<ConstantInt>(compare->getOperand(1));
+  ICmpInst::Predicate predicate = compare->getPredicate();
+  if (!constant) {
+    builtin = compare->getOperand(1);
+    constant = dyn_cast<ConstantInt>(compare->getOperand(0));
+    predicate = ICmpInst::getSwappedPredicate(predicate);
+  }
+  const BuiltinKind kind = CUDASymbolicModel::classifyBuiltin(builtin);
+  if (!constant ||
+      (kind != BuiltinKind::ThreadIdxX && kind != BuiltinKind::LaneId)) {
+    return std::nullopt;
+  }
+  uint32_t mask = 0;
+  const APInt rhs = constant->getValue();
+  for (uint32_t lane = 0; lane < warp_size; ++lane) {
+    const APInt lhs(rhs.getBitWidth(), lane);
+    bool result = false;
+    switch (predicate) {
+    case ICmpInst::ICMP_EQ:
+      result = lhs == rhs;
+      break;
+    case ICmpInst::ICMP_NE:
+      result = lhs != rhs;
+      break;
+    case ICmpInst::ICMP_ULT:
+      result = lhs.ult(rhs);
+      break;
+    case ICmpInst::ICMP_ULE:
+      result = lhs.ule(rhs);
+      break;
+    case ICmpInst::ICMP_UGT:
+      result = lhs.ugt(rhs);
+      break;
+    case ICmpInst::ICMP_UGE:
+      result = lhs.uge(rhs);
+      break;
+    case ICmpInst::ICMP_SLT:
+      result = lhs.slt(rhs);
+      break;
+    case ICmpInst::ICMP_SLE:
+      result = lhs.sle(rhs);
+      break;
+    case ICmpInst::ICMP_SGT:
+      result = lhs.sgt(rhs);
+      break;
+    case ICmpInst::ICMP_SGE:
+      result = lhs.sge(rhs);
+      break;
+    default:
+      return std::nullopt;
+    }
+    if (result == take_true) {
+      mask |= uint32_t{1} << lane;
+    }
+  }
+  return mask;
+}
+
 [[maybe_unused]] static bool isFenceInstruction(const Instruction *inst,
                                                 ThreadAPI *thread_api) {
   const auto *call = dyn_cast<CallBase>(inst);
@@ -453,8 +527,10 @@ getConcreteBlockCount(const LaunchDimensions &dims) {
 }
 
 static bool isWarpUniformValue(const Value *value) {
-  return CUDASymbolicModel::classifyUniformity(value) <=
-         UniformityClass::WarpUniform;
+  const UniformityClass uniformity =
+      CUDASymbolicModel::classifyUniformity(value);
+  return uniformity == UniformityClass::WarpUniform ||
+         uniformity == UniformityClass::BlockUniform;
 }
 
 static bool isReachable(const BasicBlock *from, const BasicBlock *to) {
@@ -531,10 +607,19 @@ evaluateAddressForThread(const AffineAccessPattern &pattern,
   int64_t dim_z = getConcreteExtent(dims.block[2], 1);
   int64_t linear_tid =
       AffineAccessPattern::linearize(tid_x, tid_y, tid_z, dim_x, dim_y, dim_z);
-  return pattern.constant + pattern.thread_idx_x * tid_x +
-         pattern.thread_idx_y * tid_y + pattern.thread_idx_z * tid_z +
-         pattern.block_idx_x * block_x + pattern.block_idx_y * block_y +
-         pattern.block_idx_z * block_z + pattern.lane_id * (linear_tid % 32);
+  __int128 address = pattern.constant;
+  address += static_cast<__int128>(pattern.thread_idx_x) * tid_x;
+  address += static_cast<__int128>(pattern.thread_idx_y) * tid_y;
+  address += static_cast<__int128>(pattern.thread_idx_z) * tid_z;
+  address += static_cast<__int128>(pattern.block_idx_x) * block_x;
+  address += static_cast<__int128>(pattern.block_idx_y) * block_y;
+  address += static_cast<__int128>(pattern.block_idx_z) * block_z;
+  address += static_cast<__int128>(pattern.lane_id) * (linear_tid % 32);
+  if (address < std::numeric_limits<int64_t>::min() ||
+      address > std::numeric_limits<int64_t>::max()) {
+    return std::nullopt;
+  }
+  return static_cast<int64_t>(address);
 }
 
 [[maybe_unused]] static std::optional<int64_t>
@@ -551,38 +636,25 @@ static bool hasDistinctThreadAlias(const AccessInfo &lhs, const AccessInfo &rhs,
                                    const LaunchDimensions &dims,
                                    const DeviceConfig &config,
                                    bool allow_cross_block) {
-  if (lhs.address_pattern.valid && rhs.address_pattern.valid) {
-    const AffineAccessPattern &lhs_pattern = lhs.address_pattern;
-    const AffineAccessPattern &rhs_pattern = rhs.address_pattern;
-    const bool lhs_thread_private =
-        lhs_pattern.thread_idx_x == 1 && lhs_pattern.thread_idx_y == 0 &&
-        lhs_pattern.thread_idx_z == 0 && lhs_pattern.block_idx_x == 0 &&
-        lhs_pattern.block_idx_y == 0 && lhs_pattern.block_idx_z == 0 &&
-        lhs_pattern.lane_id == 0;
-    const bool rhs_thread_private =
-        rhs_pattern.thread_idx_x == 1 && rhs_pattern.thread_idx_y == 0 &&
-        rhs_pattern.thread_idx_z == 0 && rhs_pattern.block_idx_x == 0 &&
-        rhs_pattern.block_idx_y == 0 && rhs_pattern.block_idx_z == 0 &&
-        rhs_pattern.lane_id == 0;
-    if (!allow_cross_block && lhs_thread_private && rhs_thread_private) {
-      return false;
-    }
-  }
-  if (!lhs.address_pattern.valid || !rhs.address_pattern.valid) {
-    return lhs.depends_on_thread_idx || rhs.depends_on_thread_idx ||
-           lhs.depends_on_block_idx || rhs.depends_on_block_idx;
+  (void)config;
+  if (!lhs.address_pattern.valid || !rhs.address_pattern.valid ||
+      !lhs.address_pattern.exact || !rhs.address_pattern.exact) {
+    return true;
   }
 
-  const uint32_t lanes = getActiveLaneCount(dims, config);
-  const uint64_t concrete_blocks =
-      static_cast<uint64_t>(getConcreteExtent(dims.grid[0], 4)) *
-      getConcreteExtent(dims.grid[1], 1) *
-      getConcreteExtent(dims.grid[2], 1);
+  if (dims.hasSymbolicBlock() ||
+      (allow_cross_block && dims.hasSymbolicGrid())) {
+    return true;
+  }
+
+  const uint32_t threads = getThreadsPerBlock(dims);
+  const std::optional<uint64_t> concrete_blocks = getConcreteBlockCount(dims);
+  if (!concrete_blocks || threads > 4096 || *concrete_blocks > 256) {
+    return true;
+  }
   const uint32_t block_count =
-      allow_cross_block
-          ? static_cast<uint32_t>(std::min<uint64_t>(concrete_blocks, 16))
-          : 1;
-  const uint32_t grid_x = getConcreteExtent(dims.grid[0], 4);
+      allow_cross_block ? static_cast<uint32_t>(*concrete_blocks) : 1;
+  const uint32_t grid_x = getConcreteExtent(dims.grid[0], 1);
   const uint32_t grid_y = getConcreteExtent(dims.grid[1], 1);
 
   for (uint32_t block_l = 0; block_l < block_count; ++block_l) {
@@ -590,8 +662,8 @@ static bool hasDistinctThreadAlias(const AccessInfo &lhs, const AccessInfo &rhs,
       if (!allow_cross_block && block_l != block_r) {
         continue;
       }
-      for (uint32_t tid_l = 0; tid_l < lanes; ++tid_l) {
-        for (uint32_t tid_r = 0; tid_r < lanes; ++tid_r) {
+      for (uint32_t tid_l = 0; tid_l < threads; ++tid_l) {
+        for (uint32_t tid_r = 0; tid_r < threads; ++tid_r) {
           if (tid_l == tid_r && block_l == block_r) {
             continue;
           }
@@ -609,7 +681,16 @@ static bool hasDistinctThreadAlias(const AccessInfo &lhs, const AccessInfo &rhs,
           const auto rhs_addr = evaluateAddressForThread(
               rhs.address_pattern, dims, lane_r.tid_x, lane_r.tid_y,
               lane_r.tid_z, block_r_x, block_r_y, block_r_z);
-          if (lhs_addr && rhs_addr && lhs_addr == rhs_addr) {
+          if (!lhs_addr || !rhs_addr) {
+            return true;
+          }
+          const __int128 lhs_begin = *lhs_addr;
+          const __int128 rhs_begin = *rhs_addr;
+          const __int128 lhs_end =
+              lhs_begin + std::max<uint32_t>(1, lhs.access_size);
+          const __int128 rhs_end =
+              rhs_begin + std::max<uint32_t>(1, rhs.access_size);
+          if (lhs_begin < rhs_end && rhs_begin < lhs_end) {
             return true;
           }
         }
@@ -831,8 +912,19 @@ detail::AliasQueryResult detail::queryAlias(const AccessInfo &lhs,
                              : AliasSource::Local);
 
   if (!aa || !aa->isInitialized() || !lhs.pointer || !rhs.pointer) {
-    result.relation = sharesBaseObject(lhs, rhs) ? AliasResult::MayAlias
-                                                 : AliasResult::NoAlias;
+    const bool unresolved = lhs.has_unresolved_base ||
+                            rhs.has_unresolved_base || lhs.has_ambiguous_base ||
+                            rhs.has_ambiguous_base || !lhs.base || !rhs.base ||
+                            isa<Argument>(lhs.base) || isa<Argument>(rhs.base);
+    if (sharesBaseObject(lhs, rhs) || unresolved) {
+      result.relation = AliasResult::MayAlias;
+    } else {
+      const bool distinct_allocations =
+          (isa<AllocaInst>(lhs.base) || isa<GlobalValue>(lhs.base)) &&
+          (isa<AllocaInst>(rhs.base) || isa<GlobalValue>(rhs.base));
+      result.relation =
+          distinct_allocations ? AliasResult::NoAlias : AliasResult::MayAlias;
+    }
     return result;
   }
 
@@ -841,7 +933,13 @@ detail::AliasQueryResult detail::queryAlias(const AccessInfo &lhs,
       aa->getConfig().impl == lotus::AAConfig::Implementation::AserPTA
           ? AliasSource::AserPTA
           : AliasSource::Wrapper;
-  if (result.relation == AliasResult::NoAlias && sharesBaseObject(lhs, rhs)) {
+  const bool cannot_trust_disjoint_bases =
+      lhs.has_unresolved_base || rhs.has_unresolved_base ||
+      lhs.has_ambiguous_base || rhs.has_ambiguous_base ||
+      isa_and_nonnull<Argument>(lhs.base) ||
+      isa_and_nonnull<Argument>(rhs.base);
+  if (result.relation == AliasResult::NoAlias &&
+      (sharesBaseObject(lhs, rhs) || cannot_trust_disjoint_bases)) {
     result.relation = AliasResult::MayAlias;
     result.precision = AliasPrecision::SymbolicAffine;
     return result;
@@ -862,32 +960,25 @@ void CUDAAnalysis::analyzeKernel(const Function *kernel,
   if (launch) {
     summary.dimensions = launch->dimensions;
   }
-  bool grid_known = true;
-  bool block_known = true;
-  for (unsigned i = 0; i < 3; ++i) {
-    if (summary.dimensions.grid[i].kind == SymbolicValueKind::Unknown) {
-      grid_known = false;
-    }
-    if (summary.dimensions.block[i].kind == SymbolicValueKind::Unknown) {
-      block_known = false;
-    }
-  }
-  summary.has_symbolic_grid = !grid_known;
-  summary.has_symbolic_block = !block_known;
+  summary.has_symbolic_grid = summary.dimensions.hasSymbolicGrid();
+  summary.has_symbolic_block = summary.dimensions.hasSymbolicBlock();
 
   using ArgumentMap = DenseMap<const Value *, const Value *>;
   SmallPtrSet<const Function *, 8> active_functions;
+  SetVector<const Function *> reachable_functions;
   std::function<void(const Function *, const ArgumentMap &)> scan_function;
   scan_function = [&](const Function *function, const ArgumentMap &arguments) {
     if (!function || function->isDeclaration() ||
         !active_functions.insert(function).second) {
       if (function && active_functions.count(function)) {
-        recordModelGap(function, "Recursive device call memory effects were "
-                                 "conservatively truncated",
+        recordModelGap(function,
+                       "Recursive device call memory effects were "
+                       "conservatively truncated",
                        0.4);
       }
       return;
     }
+    reachable_functions.insert(function);
 
     auto resolve_actual = [&](const Value *value) -> const Value * {
       const BaseObjectInfo info = CUDAMemoryModel::getBaseObjectInfo(value);
@@ -916,14 +1007,22 @@ void CUDAAnalysis::analyzeKernel(const Function *kernel,
           CUDAMemoryModel::getBaseObjectInfo(actual);
       access.base_objects = actual_info.objects;
       access.has_ambiguous_base = actual_info.ambiguous;
+      access.has_unresolved_base = actual_info.unresolved;
       access.base = actual_info.primary();
-      if (pointer == formal_info.primary()) {
-        access.pointer = actual;
-      }
+      access.pointer = actual;
+      const MemorySpaceInfo actual_space = CUDAMemoryModel::classify(actual);
+      access.space = actual_space.space;
+      access.exact_space = actual_space.exact;
+      access.address_space = actual_space.address_space;
+      access.alias_precision = actual_info.ambiguous || actual_info.unresolved
+                                   ? AliasPrecision::Ambiguous
+                                   : std::max(access.alias_precision,
+                                              AliasPrecision::SymbolicAffine);
       if (!m_abstract_state.access_facts.empty()) {
         CUDAAccessFact &fact = m_abstract_state.access_facts.back();
         fact.pointer = access.pointer;
         fact.base = access.base;
+        fact.space = static_cast<int>(access.space);
         m_abstract_state.access_fact_by_class[fact.access_class_id] = fact;
       }
     };
@@ -939,10 +1038,34 @@ void CUDAAnalysis::analyzeKernel(const Function *kernel,
       } else if (const auto *cas = dyn_cast<AtomicCmpXchgInst>(&inst)) {
         record_mapped_access(&inst, cas->getPointerOperand(), true);
         ++summary.atomic_count;
+      } else if (const auto *transfer = dyn_cast<MemTransferInst>(&inst)) {
+        record_mapped_access(&inst, transfer->getSource(), false);
+        record_mapped_access(&inst, transfer->getDest(), true);
+      } else if (const auto *set = dyn_cast<MemSetInst>(&inst)) {
+        record_mapped_access(&inst, set->getDest(), true);
       } else if (const auto *call = dyn_cast<CallBase>(&inst)) {
         ThreadAPI::TD_TYPE type = m_thread_api->getType(call);
         if (type == ThreadAPI::TD_CUDA_ATOMIC) {
           ++summary.atomic_count;
+          for (const Value *argument : call->args()) {
+            if (!argument->getType()->isPointerTy()) {
+              continue;
+            }
+            const size_t old_size = summary.accesses.size();
+            record_mapped_access(&inst, argument, true);
+            if (summary.accesses.size() != old_size) {
+              summary.accesses.back().is_atomic = true;
+              summary.accesses.back().atomic_ordering =
+                  AtomicOrdering::SequentiallyConsistent;
+              if (!m_abstract_state.access_facts.empty()) {
+                CUDAAccessFact &fact = m_abstract_state.access_facts.back();
+                fact.is_atomic = true;
+                m_abstract_state.access_fact_by_class[fact.access_class_id] =
+                    fact;
+              }
+            }
+            break;
+          }
           continue;
         }
         const Function *callee = call->getCalledFunction();
@@ -966,7 +1089,20 @@ void CUDAAnalysis::analyzeKernel(const Function *kernel,
 
   scan_function(kernel, ArgumentMap{});
 
-  analyzeDivergence(summary, kernel);
+  for (const Function *function : reachable_functions) {
+    analyzeDivergence(summary, function);
+    analyzeWarpUniformity(summary, function);
+    const size_t sync_begin = summary.synchronizations.size();
+    analyzeSynchronization(summary, function);
+    if (function != kernel) {
+      for (size_t index = sync_begin; index < summary.synchronizations.size();
+           ++index) {
+        summary.synchronizations[index].participation =
+            ParticipationKind::Conditional;
+        summary.synchronizations[index].exact = false;
+      }
+    }
+  }
   auto is_divergently_executed = [&](const Instruction *inst) {
     if (!inst) {
       return false;
@@ -981,21 +1117,21 @@ void CUDAAnalysis::analyzeKernel(const Function *kernel,
   for (BankConflictInfo &conflict : summary.bank_conflicts) {
     if (is_divergently_executed(conflict.inst)) {
       conflict.exact = false;
-      recordModelGap(conflict.inst, "Bank-conflict estimate has a "
-                                    "path-dependent active-lane mask",
+      recordModelGap(conflict.inst,
+                     "Bank-conflict estimate has a "
+                     "path-dependent active-lane mask",
                      0.5);
     }
   }
   for (CoalescingInfo &coalescing : summary.coalescing_issues) {
     if (is_divergently_executed(coalescing.inst)) {
       coalescing.exact = false;
-      recordModelGap(coalescing.inst, "Coalescing estimate has a "
-                                      "path-dependent active-lane mask",
+      recordModelGap(coalescing.inst,
+                     "Coalescing estimate has a "
+                     "path-dependent active-lane mask",
                      0.5);
     }
   }
-  analyzeWarpUniformity(summary, kernel);
-  analyzeSynchronization(summary, kernel);
   analyzeRaces(summary);
   analyzeVolatile(summary);
   analyzeConstantAccesses(summary);
@@ -1012,6 +1148,7 @@ void CUDAAnalysis::recordAccess(KernelSummary &summary, const Instruction *inst,
   const BaseObjectInfo base_info = CUDAMemoryModel::getBaseObjectInfo(pointer);
   access.base_objects = base_info.objects;
   access.has_ambiguous_base = base_info.ambiguous;
+  access.has_unresolved_base = base_info.unresolved;
   access.base = base_info.primary();
   const MemorySpaceInfo space_info = CUDAMemoryModel::classify(pointer);
   access.space = space_info.space;
@@ -1061,7 +1198,7 @@ void CUDAAnalysis::recordAccess(KernelSummary &summary, const Instruction *inst,
                                 : AliasSource::Wrapper;
     }
   }
-  if (!access.address_pattern.valid) {
+  if (!access.address_pattern.valid || access.address_pattern.non_affine) {
     access.alias_precision = AliasPrecision::NonAffine;
   }
   if (!access.base || access.space == MemorySpace::Unknown ||
@@ -1098,6 +1235,23 @@ void CUDAAnalysis::recordAccess(KernelSummary &summary, const Instruction *inst,
   } else if (const auto *cas = dyn_cast<AtomicCmpXchgInst>(inst)) {
     access.access_size = static_cast<uint32_t>(
         dl.getTypeStoreSize(cas->getCompareOperand()->getType()));
+  } else if (const auto *memory = dyn_cast<MemIntrinsic>(inst)) {
+    if (const auto length = evaluateConstantInt(memory->getLength())) {
+      access.access_size = static_cast<uint32_t>(std::max<int64_t>(0, *length));
+    }
+  } else if (const auto *call = dyn_cast<CallBase>(inst)) {
+    for (const Value *argument : call->args()) {
+      if (argument->getType()->isPointerTy() ||
+          !argument->getType()->isSized()) {
+        continue;
+      }
+      access.access_size =
+          static_cast<uint32_t>(dl.getTypeStoreSize(argument->getType()));
+      break;
+    }
+    if (access.access_size == 0) {
+      access.access_size = 1;
+    }
   }
 
   summary.accesses.push_back(access);
@@ -1127,8 +1281,9 @@ void CUDAAnalysis::recordAccess(KernelSummary &summary, const Instruction *inst,
     break;
   }
   case MemorySpace::ClusterShared:
-    recordModelGap(inst, "Cluster-shared access requires cluster-scope "
-                         "synchronization modeling",
+    recordModelGap(inst,
+                   "Cluster-shared access requires cluster-scope "
+                   "synchronization modeling",
                    0.45);
     break;
   case MemorySpace::Device:
@@ -1207,6 +1362,39 @@ void CUDAAnalysis::analyzeDivergence(KernelSummary &summary,
         if (const Instruction *barrier =
                 getFirstBarrierInBlock(reachable, m_thread_api)) {
           region.nested_barriers.push_back(barrier);
+          const auto *call = dyn_cast<CallBase>(barrier);
+          const bool is_warp_barrier =
+              call &&
+              m_thread_api->getType(call) == ThreadAPI::TD_CUDA_WARP_BARRIER;
+          std::optional<uint32_t> barrier_mask;
+          if (is_warp_barrier && !call->arg_empty()) {
+            if (const auto *mask =
+                    dyn_cast<ConstantInt>(call->getArgOperand(0))) {
+              const APInt full = APInt::getLowBitsSet(
+                  mask->getBitWidth(),
+                  std::min<unsigned>(m_device_config.warp_size,
+                                     mask->getBitWidth()));
+              if (!mask->isZero() && mask->getValue() != full) {
+                barrier_mask = static_cast<uint32_t>(
+                    mask->getValue().zextOrTrunc(32).getZExtValue());
+              }
+            }
+          }
+          if (is_warp_barrier && m_device_config.sm_major >= 7 &&
+              barrier_mask) {
+            const auto branch_mask = getBranchLaneMask(
+                branch, succ_index == 0, m_device_config.warp_size);
+            if (branch_mask && *branch_mask == *barrier_mask) {
+              continue;
+            }
+            if (!branch_mask) {
+              recordModelGap(
+                  barrier,
+                  "Masked warp barrier requires path-predicate/mask validation",
+                  0.55);
+              continue;
+            }
+          }
           summary.has_barrier_mismatch = true;
           summary.barrier_mismatches.push_back({branch, barrier});
         }
@@ -1306,6 +1494,52 @@ static bool isUniformControlled(const AccessInfo &lhs, const AccessInfo &rhs,
   return false;
 }
 
+static bool isSingleThreadGuarded(const AccessInfo &access,
+                                  const LaunchDimensions &dimensions) {
+  if (!access.inst || !access.inst->getFunction() ||
+      dimensions.hasSymbolicBlock() ||
+      getConcreteExtent(dimensions.block[1], 1) != 1 ||
+      getConcreteExtent(dimensions.block[2], 1) != 1) {
+    return false;
+  }
+  DominatorTree dom_tree(*const_cast<Function *>(access.inst->getFunction()));
+  for (const BasicBlock &block : *access.inst->getFunction()) {
+    const auto *branch = dyn_cast<BranchInst>(block.getTerminator());
+    const auto *compare = branch && branch->isConditional()
+                              ? dyn_cast<ICmpInst>(branch->getCondition())
+                              : nullptr;
+    if (!compare || !dom_tree.dominates(branch, access.inst)) {
+      continue;
+    }
+    const Value *builtin = compare->getOperand(0);
+    const auto *constant = dyn_cast<ConstantInt>(compare->getOperand(1));
+    if (!constant) {
+      builtin = compare->getOperand(1);
+      constant = dyn_cast<ConstantInt>(compare->getOperand(0));
+    }
+    if (!constant || CUDASymbolicModel::classifyBuiltin(builtin) !=
+                         BuiltinKind::ThreadIdxX) {
+      continue;
+    }
+    const bool in_true =
+        dom_tree.dominates(branch->getSuccessor(0), access.inst->getParent());
+    const bool in_false =
+        dom_tree.dominates(branch->getSuccessor(1), access.inst->getParent());
+    if (in_true == in_false) {
+      continue;
+    }
+    const ICmpInst::Predicate predicate = compare->getPredicate();
+    if ((in_true && predicate == ICmpInst::ICMP_EQ) ||
+        (in_false && predicate == ICmpInst::ICMP_NE) ||
+        (in_true && predicate == ICmpInst::ICMP_ULT &&
+         constant->equalsInt(1)) ||
+        (in_true && predicate == ICmpInst::ICMP_ULE && constant->isZero())) {
+      return true;
+    }
+  }
+  return false;
+}
+
 void CUDAAnalysis::recordModelGap(const Instruction *inst, StringRef message,
                                   double confidence) {
   CUDAModelGap gap;
@@ -1342,9 +1576,48 @@ void CUDAAnalysis::analyzeRaces(KernelSummary &summary) {
   const bool can_have_multiple_blocks =
       summary.has_symbolic_grid || known_multi_block;
 
+  const bool can_have_multiple_threads =
+      summary.has_symbolic_block || getThreadsPerBlock(summary.dimensions) > 1;
   for (const AccessInfo &access : summary.accesses) {
-    if (!isGlobalRaceRelevant(access) || !access.is_write ||
-        !can_have_multiple_blocks || access.is_atomic ||
+    if (!access.is_write || access.is_atomic ||
+        (!isSharedRaceRelevant(access) && !isGlobalRaceRelevant(access) &&
+         !isUnknownRaceRelevant(access))) {
+      continue;
+    }
+
+    const bool report_cross_block_only =
+        can_have_multiple_blocks &&
+        (isGlobalRaceRelevant(access) || isUnknownRaceRelevant(access));
+    if (can_have_multiple_threads && !report_cross_block_only &&
+        !isSingleThreadGuarded(access, summary.dimensions) &&
+        hasDistinctThreadAlias(access, access, summary.dimensions,
+                               m_device_config, false)) {
+      RaceInfo race;
+      race.first = access.inst;
+      race.second = access.inst;
+      race.base = access.base;
+      race.bases = access.base_objects;
+      race.space = access.space;
+      race.same_block_only = true;
+      race.symbolic = summary.has_symbolic_block || !access.exact_address;
+      race.scope = SynchronizationScope::Block;
+      race.ordering_reason =
+          "distinct threads may execute the same static write access";
+      race.alias_precision = access.alias_precision;
+      race.alias_source = access.alias_source;
+      race.confidence = access.exact_address ? 0.9 : 0.45;
+      race.exact = access.exact_address && !summary.has_symbolic_block;
+      if (isSharedRaceRelevant(access)) {
+        summary.has_shared_race = true;
+        summary.shared_races.push_back(std::move(race));
+      } else {
+        summary.has_global_race = true;
+        summary.global_races.push_back(std::move(race));
+      }
+    }
+
+    if ((!isGlobalRaceRelevant(access) && !isUnknownRaceRelevant(access)) ||
+        !can_have_multiple_blocks ||
         !hasDistinctThreadAlias(access, access, summary.dimensions,
                                 m_device_config, true)) {
       continue;
@@ -1356,19 +1629,18 @@ void CUDAAnalysis::analyzeRaces(KernelSummary &summary) {
     race.base = access.base;
     race.bases = access.base_objects;
     race.space = access.space;
-    race.same_block_only = false;
     race.cross_block = true;
     race.symbolic = summary.has_symbolic_grid;
-    race.kind = RaceKind::DataRace;
     race.scope = SynchronizationScope::Device;
     race.ordering_reason =
-        "distinct block instances may execute the same static write address";
+        "distinct blocks may execute overlapping instances of this access";
     race.required_fence_scope = SynchronizationScope::Device;
     race.alias_precision = access.alias_precision;
     race.alias_source = access.alias_source;
     race.missing_ordering = SynchronizationPrimitive::DeviceFence;
-    race.confidence = access.exact_address ? 0.9 : 0.7;
-    race.exact = known_multi_block && !summary.has_symbolic_grid;
+    race.confidence = access.exact_address ? 0.9 : 0.4;
+    race.exact =
+        known_multi_block && !summary.has_symbolic_grid && access.exact_address;
     summary.global_races.push_back(std::move(race));
   }
 
@@ -1425,7 +1697,34 @@ void CUDAAnalysis::analyzeRaces(KernelSummary &summary) {
         }
       }
 
-      if (isSharedRaceRelevant(lhs) && isSharedRaceRelevant(rhs)) {
+      if (isUnknownRaceRelevant(lhs) || isUnknownRaceRelevant(rhs)) {
+        RaceDecision decision =
+            evaluateRaceDecision(lhs, rhs, summary.dimensions, m_device_config,
+                                 can_have_multiple_blocks, alias);
+        if (!decision.aliases) {
+          continue;
+        }
+        summary.has_global_race = true;
+        RaceInfo race;
+        race.first = lhs.inst;
+        race.second = rhs.inst;
+        race.base = lhs.base ? lhs.base : rhs.base;
+        race.bases = mergeBaseObjects(lhs, rhs);
+        race.space = MemorySpace::Unknown;
+        race.same_block_only = !can_have_multiple_blocks;
+        race.cross_block = can_have_multiple_blocks;
+        race.symbolic = true;
+        race.kind = lhs.is_atomic || rhs.is_atomic
+                        ? RaceKind::AtomicOrderingRisk
+                        : RaceKind::DataRace;
+        race.scope = can_have_multiple_blocks ? SynchronizationScope::Device
+                                              : SynchronizationScope::Block;
+        race.ordering_reason = "unknown CUDA memory effect may overlap";
+        race.alias_precision = AliasPrecision::Ambiguous;
+        race.alias_source = decision.source;
+        race.confidence = 0.3;
+        summary.global_races.push_back(std::move(race));
+      } else if (isSharedRaceRelevant(lhs) && isSharedRaceRelevant(rhs)) {
         RaceDecision decision = evaluateRaceDecision(
             lhs, rhs, summary.dimensions, m_device_config, false, alias);
         if (decision.aliases) {
@@ -1482,7 +1781,8 @@ void CUDAAnalysis::analyzeRaces(KernelSummary &summary) {
             lhs.depends_on_block_idx || rhs.depends_on_block_idx;
         const bool constant_address =
             isConstantAddressAccess(lhs) && isConstantAddressAccess(rhs);
-        const bool cross_block = syntactic_block_dep || can_have_multiple_blocks;
+        const bool cross_block =
+            syntactic_block_dep || can_have_multiple_blocks;
         if (cross_block && constant_address &&
             (can_have_multiple_blocks || syntactic_block_dep)) {
           summary.has_global_race = true;
@@ -1498,7 +1798,8 @@ void CUDAAnalysis::analyzeRaces(KernelSummary &summary) {
           race.scope = SynchronizationScope::Device;
           race.confidence = 0.7;
           race.exact = known_multi_block && !summary.has_symbolic_grid;
-          race.ordering_reason = "multiple blocks may execute, constant address";
+          race.ordering_reason =
+              "multiple blocks may execute, constant address";
           summary.global_races.push_back(std::move(race));
           continue;
         }
@@ -1583,9 +1884,9 @@ void CUDAAnalysis::analyzeWarpUniformity(KernelSummary &summary,
 
     const UniformityClass uniformity =
         classifyUniformity(branch->getCondition());
-    bool uniform_within_warp = uniformity == UniformityClass::WarpUniform;
-    bool uniform_within_block =
-        uniform_within_warp || uniformity == UniformityClass::BlockUniform;
+    bool uniform_within_warp = uniformity == UniformityClass::WarpUniform ||
+                               uniformity == UniformityClass::BlockUniform;
+    bool uniform_within_block = uniformity == UniformityClass::BlockUniform;
 
     if (uniform_within_warp || uniform_within_block) {
       WarpUniformInfo info;
@@ -1619,7 +1920,7 @@ void CUDAAnalysis::analyzeSynchronization(KernelSummary &summary,
   control.post_dom_tree.recalculate(const_cast<Function &>(*kernel));
   control.valid = true;
   CUDAParticipantAnalysis participant_analysis(*kernel,
-                                                m_device_config.warp_size);
+                                               m_device_config.warp_size);
 
   for (const BasicBlock &bb : *kernel) {
     for (const Instruction &inst : bb) {
@@ -1665,8 +1966,7 @@ void CUDAAnalysis::analyzeSynchronization(KernelSummary &summary,
           info.participation = ParticipationKind::Conditional;
           break;
         }
-        info.exact =
-            participants.certainty == ParticipantCertainty::Exact;
+        info.exact = participants.certainty == ParticipantCertainty::Exact;
       }
 
       for (const BasicBlock &candidate : *kernel) {

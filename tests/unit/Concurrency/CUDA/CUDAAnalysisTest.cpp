@@ -271,11 +271,11 @@ TEST_F(CUDAAnalysisTest, ClassifiesNVVMMemorySpacesPrecisely) {
   EXPECT_TRUE(saw_shared);
   EXPECT_TRUE(saw_cluster_shared);
   EXPECT_TRUE(saw_constant);
-  EXPECT_FALSE(saw_device);
+  EXPECT_TRUE(saw_device);
   EXPECT_TRUE(saw_global);
   EXPECT_TRUE(saw_local);
   EXPECT_TRUE(saw_host);
-  EXPECT_TRUE(saw_unknown);
+  EXPECT_FALSE(saw_unknown);
 }
 TEST_F(CUDAAnalysisTest, BuildsStreamAndEventAutomataForAsyncRuntimeOps) {
   const char *source = R"(
@@ -653,7 +653,7 @@ TEST_F(CUDAAnalysisTest, DetectsCrossKernelGlobalRaces) {
   EXPECT_EQ(race.second_kernel->getName(), "kernel_consumer");
   EXPECT_FALSE(race.ordered);
 }
-TEST_F(CUDAAnalysisTest, AvoidsFalseRaceForUniformBranchControlledAccesses) {
+TEST_F(CUDAAnalysisTest, UniformBranchDoesNotHideSameAddressThreadRace) {
   const char *source = R"(
     @global_arr = addrspace(1) global [32 x i32] zeroinitializer
 
@@ -699,7 +699,7 @@ TEST_F(CUDAAnalysisTest, AvoidsFalseRaceForUniformBranchControlledAccesses) {
 
   const auto &summary = analysis.getKernelSummaries().front();
 
-  EXPECT_FALSE(summary.has_global_race);
+  EXPECT_TRUE(summary.has_global_race);
 }
 TEST_F(CUDAAnalysisTest, AvoidsFalseRaceForBarrierProtectedSharedAccess) {
   const char *source = R"(

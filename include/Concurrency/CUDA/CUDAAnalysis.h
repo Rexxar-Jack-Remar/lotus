@@ -83,6 +83,7 @@ struct DeviceConfig {
   uint32_t shared_bank_count = 32;
   uint32_t shared_bank_width = 4;
   uint32_t global_transaction_bytes = 128;
+  uint32_t sm_major = 7;
 };
 
 struct KernelLaunchInfo {
@@ -91,6 +92,7 @@ struct KernelLaunchInfo {
   const llvm::Function *kernel = nullptr;
   LaunchDimensions dimensions;
   const llvm::Value *argument_array = nullptr;
+  llvm::SmallVector<const llvm::Value *, 8> argument_values;
   const llvm::Value *dynamic_shared_memory = nullptr;
   SymbolicDimension dynamic_shared_memory_size;
   size_t sequence = 0;
@@ -103,6 +105,8 @@ struct KernelLaunchInfo {
   bool stream_known = false;
   HostStreamKind stream_kind = HostStreamKind::Unknown;
   bool host_happens_before = false;
+  bool is_opaque = false;
+  bool has_unknown_memory_effect = false;
 };
 
 struct AccessInfo {
@@ -116,6 +120,7 @@ struct AccessInfo {
   bool is_volatile = false;
   llvm::AtomicOrdering atomic_ordering = llvm::AtomicOrdering::NotAtomic;
   bool has_ambiguous_base = false;
+  bool has_unresolved_base = false;
   bool depends_on_thread_idx = false;
   bool depends_on_block_idx = false;
   bool depends_on_lane_id = false;
@@ -178,6 +183,12 @@ struct MemoryTransferInfo {
   bool is_async = false;
   bool stream_known = false;
   uint64_t size = 0;
+  uint64_t width = 0;
+  uint64_t height = 1;
+  uint64_t depth = 1;
+  uint64_t src_pitch = 0;
+  uint64_t dst_pitch = 0;
+  bool region_unknown = false;
 };
 
 struct ConstantAccessInfo {
@@ -419,21 +430,26 @@ private:
 
   struct LaunchContextKey {
     const llvm::Function *kernel = nullptr;
+    const llvm::Instruction *launch_site = nullptr;
     LaunchDimensions dimensions;
     const llvm::Value *argument_array = nullptr;
     const llvm::Value *dynamic_shared_memory = nullptr;
     bool operator==(const LaunchContextKey &other) const {
-      if (kernel != other.kernel || argument_array != other.argument_array ||
+      if (kernel != other.kernel || launch_site != other.launch_site ||
+          argument_array != other.argument_array ||
           dynamic_shared_memory != other.dynamic_shared_memory) {
         return false;
       }
       for (int i = 0; i < 3; ++i) {
         if (dimensions.grid[i].kind != other.dimensions.grid[i].kind ||
-            dimensions.grid[i].constant != other.dimensions.grid[i].constant) {
+            dimensions.grid[i].constant != other.dimensions.grid[i].constant ||
+            dimensions.grid[i].value != other.dimensions.grid[i].value) {
           return false;
         }
         if (dimensions.block[i].kind != other.dimensions.block[i].kind ||
-            dimensions.block[i].constant != other.dimensions.block[i].constant) {
+            dimensions.block[i].constant !=
+                other.dimensions.block[i].constant ||
+            dimensions.block[i].value != other.dimensions.block[i].value) {
           return false;
         }
       }
@@ -444,19 +460,23 @@ private:
   struct LaunchContextKeyHash {
     size_t operator()(const LaunchContextKey &key) const {
       size_t h = reinterpret_cast<size_t>(key.kernel);
-      h ^= reinterpret_cast<size_t>(key.argument_array) << 1;
-      h ^= reinterpret_cast<size_t>(key.dynamic_shared_memory) << 2;
+      h ^= reinterpret_cast<size_t>(key.launch_site) << 1;
+      h ^= reinterpret_cast<size_t>(key.argument_array) << 2;
+      h ^= reinterpret_cast<size_t>(key.dynamic_shared_memory) << 3;
       for (int i = 0; i < 3; ++i) {
         h ^= std::hash<int>{}(static_cast<int>(key.dimensions.grid[i].kind));
         h ^= std::hash<int64_t>{}(key.dimensions.grid[i].constant);
+        h ^= reinterpret_cast<size_t>(key.dimensions.grid[i].value) << 3;
         h ^= std::hash<int>{}(static_cast<int>(key.dimensions.block[i].kind));
         h ^= std::hash<int64_t>{}(key.dimensions.block[i].constant);
+        h ^= reinterpret_cast<size_t>(key.dimensions.block[i].value) << 4;
       }
       return h;
     }
   };
 
-  std::unordered_map<LaunchContextKey, size_t, LaunchContextKeyHash> m_launch_context_index;
+  std::unordered_map<LaunchContextKey, size_t, LaunchContextKeyHash>
+      m_launch_context_index;
   CUDAAbstractState m_abstract_state;
   bool m_has_completed_analysis = false;
   bool m_cuda_enabled = true;

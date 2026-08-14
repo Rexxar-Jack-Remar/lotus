@@ -153,25 +153,11 @@ static MemorySpaceInfo classifyAddressSpace(unsigned addrspace) {
     return {MemorySpace::Local, true, addrspace};
   case 7:
     return {MemorySpace::ClusterShared, true, addrspace};
+  case 101:
+    return {MemorySpace::Device, true, addrspace};
   default:
     return {MemorySpace::Unknown, false, addrspace};
   }
-}
-
-static MemorySpaceInfo classifyByName(StringRef name, unsigned addrspace) {
-  if (name.contains("shared")) {
-    return {MemorySpace::Shared, false, addrspace};
-  }
-  if (name.contains("constant")) {
-    return {MemorySpace::Constant, false, addrspace};
-  }
-  if (name.contains("device")) {
-    return {MemorySpace::Device, false, addrspace};
-  }
-  if (name.contains("global")) {
-    return {MemorySpace::Global, false, addrspace};
-  }
-  return {MemorySpace::Unknown, false, addrspace};
 }
 
 static MemorySpaceInfo classifyKernelGenericPointer(const Value *value) {
@@ -196,11 +182,6 @@ static MemorySpaceInfo classifyKernelGenericPointer(const Value *value) {
       space = MemorySpace::Global;
     } else if (const auto *gv = dyn_cast<GlobalValue>(object)) {
       space = classifyAddressSpace(gv->getAddressSpace()).space;
-      if (space == MemorySpace::Unknown) {
-        MemorySpaceInfo by_name =
-            classifyByName(gv->getName(), gv->getAddressSpace());
-        space = by_name.space;
-      }
       if (space == MemorySpace::Unknown) {
         space = MemorySpace::Host;
       }
@@ -256,11 +237,6 @@ MemorySpaceInfo CUDAMemoryModel::classify(const Value *value) {
       }
     }
 
-    MemorySpaceInfo by_name =
-        classifyByName(gv->getName(), gv->getAddressSpace());
-    if (by_name.space != MemorySpace::Unknown) {
-      return by_name;
-    }
     return gv->getAddressSpace() == 0
                ? MemorySpaceInfo{MemorySpace::Host, false, 0}
                : MemorySpaceInfo{MemorySpace::Unknown, false,
@@ -275,12 +251,6 @@ MemorySpaceInfo CUDAMemoryModel::classify(const Value *value) {
     }
     if (arg->hasByValAttr()) {
       return {MemorySpace::Host, false, addrspace};
-    }
-    if (arg->hasName() && !isNVVMKernel(arg->getParent())) {
-      MemorySpaceInfo by_name = classifyByName(arg->getName(), addrspace);
-      if (by_name.space != MemorySpace::Unknown) {
-        return by_name;
-      }
     }
     if (arg->getParent() && isNVVMKernel(arg->getParent())) {
       if (addrspace == 0) {
@@ -309,9 +279,6 @@ MemorySpaceInfo CUDAMemoryModel::classify(const Value *value) {
           return {};
         }
       }
-    }
-    if (inst->hasName() && !getEnclosingKernel(inst)) {
-      return classifyByName(inst->getName(), 0);
     }
   }
 

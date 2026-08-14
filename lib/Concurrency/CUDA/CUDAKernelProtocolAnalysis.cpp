@@ -2,6 +2,7 @@
 
 #include "Concurrency/Utils/ThreadAPI.h"
 
+#include <llvm/ADT/SmallPtrSet.h>
 #include <llvm/Analysis/CFG.h>
 #include <llvm/Analysis/PostDominators.h>
 #include <llvm/IR/CFG.h>
@@ -57,12 +58,63 @@ void CUDAKernelProtocolAnalysis::runAnalysis() {
       unique_exit = bb.getTerminator();
     }
   }
-  auto epoch_exit = [&](const llvm::CallBase *boundary) {
-    auto *it = llvm::find(boundaries, boundary);
-    if (it != boundaries.end() && std::next(it) != boundaries.end()) {
-      return static_cast<const llvm::Instruction *>(*std::next(it));
+  llvm::SmallPtrSet<const llvm::Instruction *, 16> boundary_set;
+  boundary_set.insert(boundaries.begin(), boundaries.end());
+  auto epoch_exits = [&](const llvm::CallBase *boundary) {
+    llvm::SmallVector<const llvm::Instruction *, 4> exits;
+    llvm::SmallVector<const llvm::BasicBlock *, 8> worklist;
+    llvm::SmallPtrSet<const llvm::BasicBlock *, 16> visited;
+
+    for (const llvm::Instruction *next = boundary->getNextNode(); next;
+         next = next->getNextNode()) {
+      if (boundary_set.count(next)) {
+        exits.push_back(next);
+        return exits;
+      }
     }
-    return unique_exit;
+    for (const llvm::BasicBlock *successor :
+         llvm::successors(boundary->getParent())) {
+      worklist.push_back(successor);
+    }
+    while (!worklist.empty()) {
+      const llvm::BasicBlock *block = worklist.pop_back_val();
+      if (!visited.insert(block).second) {
+        continue;
+      }
+      const llvm::Instruction *first_boundary = nullptr;
+      for (const llvm::Instruction &inst : *block) {
+        if (boundary_set.count(&inst)) {
+          first_boundary = &inst;
+          break;
+        }
+      }
+      if (first_boundary) {
+        if (!llvm::is_contained(exits, first_boundary)) {
+          exits.push_back(first_boundary);
+        }
+        continue;
+      }
+      if (llvm::isa<llvm::ReturnInst>(block->getTerminator())) {
+        if (!llvm::is_contained(exits, block->getTerminator())) {
+          exits.push_back(block->getTerminator());
+        }
+        continue;
+      }
+      for (const llvm::BasicBlock *successor : llvm::successors(block)) {
+        worklist.push_back(successor);
+      }
+    }
+    if (exits.empty() && unique_exit) {
+      exits.push_back(unique_exit);
+    }
+    return exits;
+  };
+
+  auto set_epoch_exits = [&](CUDAProtocolEpoch &epoch,
+                             const llvm::CallBase *boundary) {
+    auto exits = epoch_exits(boundary);
+    epoch.possible_exits.assign(exits.begin(), exits.end());
+    epoch.exit = exits.size() == 1 ? exits.front() : nullptr;
   };
 
   for (size_t i = 0; i < barriers.size(); ++i) {
@@ -73,7 +125,7 @@ void CUDAKernelProtocolAnalysis::runAnalysis() {
     epoch.kernel = &m_kernel;
     epoch.state = ProtocolState::BarrierActive;
     epoch.entry = barrier;
-    epoch.exit = epoch_exit(barrier);
+    set_epoch_exits(epoch, barrier);
     epoch.scope = static_cast<int>(2);
     m_barrier_epochs.push_back(epoch);
     m_state.barrier_epochs.push_back(epoch);
@@ -88,7 +140,7 @@ void CUDAKernelProtocolAnalysis::runAnalysis() {
     epoch.kernel = &m_kernel;
     epoch.state = ProtocolState::WarpSyncRequired;
     epoch.entry = warp_barrier;
-    epoch.exit = epoch_exit(warp_barrier);
+    set_epoch_exits(epoch, warp_barrier);
     epoch.scope = static_cast<int>(1);
     m_barrier_epochs.push_back(epoch);
     m_state.barrier_epochs.push_back(epoch);
@@ -114,7 +166,7 @@ void CUDAKernelProtocolAnalysis::runAnalysis() {
     epoch.kernel = &m_kernel;
     epoch.state = ProtocolState::FenceRequired;
     epoch.entry = fence;
-    epoch.exit = epoch_exit(fence);
+    set_epoch_exits(epoch, fence);
     epoch.scope = fence_scope;
     m_fence_epochs.push_back(epoch);
     m_state.fence_epochs.push_back(epoch);
@@ -139,8 +191,8 @@ void CUDAKernelProtocolAnalysis::runAnalysis() {
       const llvm::BasicBlock *entry =
           m_kernel.empty() ? nullptr : &m_kernel.getEntryBlock();
       const bool post_dominates_entry =
-          barrier_bb && entry && pdt.getNode(barrier_bb) && pdt.getNode(entry) &&
-          pdt.dominates(barrier_bb, entry);
+          barrier_bb && entry && pdt.getNode(barrier_bb) &&
+          pdt.getNode(entry) && pdt.dominates(barrier_bb, entry);
       if (!post_dominates_entry) {
         has_proper_sync = false;
         break;

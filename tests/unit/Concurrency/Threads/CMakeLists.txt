@@ -29,4 +29,5 @@ add_lotus_concurrency_test_suite(concurrency_core_tests
   ../CUDA/CUDAAnalysisTest.cpp
   ../CUDA/CUDAAnalysisTestPart2.cpp
   ../CUDA/CUDAAnalysisTestPart3.cpp
+  ../CUDA/CUDAAnalysisTestPart4.cpp
   ../CUDA/PTXAnalyzerTest.cpp)

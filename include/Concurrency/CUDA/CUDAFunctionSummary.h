@@ -32,6 +32,14 @@ struct CUDAFunctionCallsite {
   bool must_execute = false;
 };
 
+struct CUDAInstantiatedEffect {
+  CUDAEffectClass effect_class = CUDAEffectClass::Synchronization;
+  const llvm::CallBase *origin = nullptr;
+  const llvm::CallBase *callsite = nullptr;
+  std::vector<std::pair<const llvm::Argument *, const llvm::Value *>> bindings;
+  bool must_execute = false;
+};
+
 struct CUDAFunctionSummary {
   const llvm::Function *function = nullptr;
   std::vector<const llvm::Function *> callees;
@@ -45,6 +53,7 @@ struct CUDAFunctionSummary {
   std::vector<const llvm::CallBase *> surface_ops;
   std::map<CUDAEffectClass, CUDAEffectSummary> effects;
   std::vector<CUDAFunctionCallsite> callsites;
+  std::vector<CUDAInstantiatedEffect> instantiated_effects;
   bool is_device_function = false;
   bool is_host_wrapper = false;
   bool recursive = false;

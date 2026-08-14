@@ -19,12 +19,10 @@ public:
                           const llvm::Value *stream);
   void addEventCreate(const llvm::Instruction *create_inst,
                       const llvm::Value *output_slot);
-  void addEvent(const llvm::Instruction *record_inst,
-                const llvm::Value *event,
+  void addEvent(const llvm::Instruction *record_inst, const llvm::Value *event,
                 const llvm::Value *stream);
   void addEventWait(const llvm::Instruction *wait_inst,
-                    const llvm::Value *event,
-                    const llvm::Value *stream);
+                    const llvm::Value *event, const llvm::Value *stream);
   void addEventSync(const llvm::Instruction *sync_inst,
                     const llvm::Value *event);
   void addEventDestroy(const llvm::Instruction *destroy_inst,
@@ -47,8 +45,9 @@ public:
 private:
   const llvm::Value *canonicalizeStream(const llvm::Value *stream) const;
   const llvm::Value *canonicalizeEvent(const llvm::Value *event) const;
-  void recordOutputAliases(const llvm::Value *output_slot,
-                           std::map<const llvm::Value *, const llvm::Value *> &aliases);
+  void recordOutputAliases(
+      const llvm::Value *output_slot, const llvm::Value *identity,
+      std::map<const llvm::Value *, const llvm::Value *> &aliases);
   void addEventObject(const llvm::Value *event);
 
   CUDAAbstractState &m_state;

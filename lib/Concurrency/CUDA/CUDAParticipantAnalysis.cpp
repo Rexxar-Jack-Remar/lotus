@@ -4,6 +4,7 @@
 
 #include <llvm/Analysis/PostDominators.h>
 #include <llvm/IR/Constants.h>
+#include <llvm/IR/Dominators.h>
 
 namespace concurrency::cuda {
 
@@ -57,6 +58,64 @@ bool mustReachInstruction(const llvm::Function &kernel,
          post_dom_tree.dominates(inst->getParent(), &kernel.getEntryBlock());
 }
 
+std::optional<uint32_t> getSimplePredicateMask(const llvm::BranchInst *branch,
+                                               bool take_true,
+                                               uint32_t warp_size) {
+  const auto *compare =
+      branch && branch->isConditional()
+          ? llvm::dyn_cast<llvm::ICmpInst>(branch->getCondition())
+          : nullptr;
+  if (!compare || warp_size == 0 || warp_size > 32) {
+    return std::nullopt;
+  }
+  const llvm::Value *builtin = compare->getOperand(0);
+  const auto *constant =
+      llvm::dyn_cast<llvm::ConstantInt>(compare->getOperand(1));
+  llvm::ICmpInst::Predicate predicate = compare->getPredicate();
+  if (!constant) {
+    builtin = compare->getOperand(1);
+    constant = llvm::dyn_cast<llvm::ConstantInt>(compare->getOperand(0));
+    predicate = llvm::ICmpInst::getSwappedPredicate(predicate);
+  }
+  const BuiltinKind kind = CUDASymbolicModel::classifyBuiltin(builtin);
+  if (!constant ||
+      (kind != BuiltinKind::ThreadIdxX && kind != BuiltinKind::LaneId)) {
+    return std::nullopt;
+  }
+  uint32_t mask = 0;
+  const llvm::APInt rhs = constant->getValue();
+  for (uint32_t lane = 0; lane < warp_size; ++lane) {
+    const llvm::APInt lhs(rhs.getBitWidth(), lane);
+    bool value = false;
+    switch (predicate) {
+    case llvm::ICmpInst::ICMP_EQ:
+      value = lhs == rhs;
+      break;
+    case llvm::ICmpInst::ICMP_NE:
+      value = lhs != rhs;
+      break;
+    case llvm::ICmpInst::ICMP_ULT:
+      value = lhs.ult(rhs);
+      break;
+    case llvm::ICmpInst::ICMP_ULE:
+      value = lhs.ule(rhs);
+      break;
+    case llvm::ICmpInst::ICMP_UGT:
+      value = lhs.ugt(rhs);
+      break;
+    case llvm::ICmpInst::ICMP_UGE:
+      value = lhs.uge(rhs);
+      break;
+    default:
+      return std::nullopt;
+    }
+    if (value == take_true) {
+      mask |= uint32_t{1} << lane;
+    }
+  }
+  return mask;
+}
+
 } // anonymous namespace
 
 CUDAParticipantAnalysis::CUDAParticipantAnalysis(const llvm::Function &kernel,
@@ -81,11 +140,11 @@ CUDAParticipantSet CUDAParticipantAnalysis::getActiveParticipants(
         if (type == ThreadAPI::TD_CUDA_WARP_BARRIER) {
           result.scopes.push_back(static_cast<int>(ParticipationScope::Warp));
           const bool must_reach = mustReachInstruction(m_kernel, inst);
-          const auto *mask = call->arg_empty()
-                                 ? nullptr
-                                 : llvm::dyn_cast<llvm::ConstantInt>(
-                                       call->getArgOperand(0));
-          if (!mask || mask->isZero()) {
+          const auto *mask =
+              call->arg_empty()
+                  ? nullptr
+                  : llvm::dyn_cast<llvm::ConstantInt>(call->getArgOperand(0));
+          if (!mask) {
             result.min_lane = 0;
             result.max_lane = m_warp_size - 1;
             result.is_symbolic = true;
@@ -93,14 +152,26 @@ CUDAParticipantSet CUDAParticipantAnalysis::getActiveParticipants(
             return result;
           }
           const llvm::APInt &value = mask->getValue();
-          result.min_lane = std::min<uint32_t>(value.countTrailingZeros(),
-                                               m_warp_size - 1);
-          result.max_lane = std::min<uint32_t>(value.getActiveBits() - 1,
-                                               m_warp_size - 1);
-          const bool full_mask =
-              value.getBitWidth() >= m_warp_size &&
-              value == llvm::APInt::getLowBitsSet(value.getBitWidth(),
-                                                  m_warp_size);
+          const uint32_t effective_width = std::min<uint32_t>(m_warp_size, 32);
+          const uint32_t width_mask =
+              effective_width == 32 ? 0xffffffffu
+                                    : ((uint32_t{1} << effective_width) - 1);
+          result.has_lane_mask = true;
+          result.lane_mask =
+              static_cast<uint32_t>(value.zextOrTrunc(32).getZExtValue()) &
+              width_mask;
+          if (result.lane_mask == 0) {
+            result.min_lane = 0;
+            result.max_lane = 0;
+          } else {
+            result.min_lane =
+                static_cast<uint32_t>(__builtin_ctz(result.lane_mask));
+            result.max_lane =
+                31u - static_cast<uint32_t>(__builtin_clz(result.lane_mask));
+          }
+          const bool full_mask = value.getBitWidth() >= m_warp_size &&
+                                 value == llvm::APInt::getLowBitsSet(
+                                              value.getBitWidth(), m_warp_size);
           result.is_exact = must_reach;
           result.certainty = !must_reach
                                  ? ParticipantCertainty::Conditional
@@ -149,14 +220,45 @@ CUDAParticipantSet CUDAParticipantAnalysis::getActiveParticipants(
     result.scopes.push_back(static_cast<int>(ParticipationScope::Grid));
   }
 
-  result.is_symbolic = true;
-  if (result.scopes.size() == 1 &&
-      result.scopes[0] != static_cast<int>(ParticipationScope::Grid)) {
-    result.is_exact = true;
-    result.certainty = ParticipantCertainty::Exact;
-  } else {
-    result.certainty = ParticipantCertainty::Conditional;
+  llvm::DominatorTree dom_tree(const_cast<llvm::Function &>(m_kernel));
+  uint32_t predicate_mask =
+      m_warp_size >= 32 ? 0xffffffffu : ((uint32_t{1} << m_warp_size) - 1);
+  bool found_predicate = false;
+  for (const llvm::BasicBlock &block : m_kernel) {
+    const auto *branch =
+        llvm::dyn_cast<llvm::BranchInst>(block.getTerminator());
+    if (!branch || !branch->isConditional() ||
+        !dom_tree.dominates(branch, inst)) {
+      continue;
+    }
+    const bool in_true =
+        dom_tree.dominates(branch->getSuccessor(0), inst->getParent());
+    const bool in_false =
+        dom_tree.dominates(branch->getSuccessor(1), inst->getParent());
+    if (in_true == in_false) {
+      continue;
+    }
+    if (auto mask = getSimplePredicateMask(branch, in_true, m_warp_size)) {
+      predicate_mask &= *mask;
+      found_predicate = true;
+    }
   }
+  if (found_predicate) {
+    result.has_lane_mask = true;
+    result.lane_mask = predicate_mask;
+    if (predicate_mask != 0) {
+      result.min_lane = static_cast<uint32_t>(__builtin_ctz(predicate_mask));
+      result.max_lane =
+          31u - static_cast<uint32_t>(__builtin_clz(predicate_mask));
+    }
+  }
+
+  // Operand uniformity does not describe the enclosing control predicate.
+  // Ordinary instructions therefore remain conditional unless a future path
+  // predicate analysis proves their active participant set.
+  result.is_symbolic = true;
+  result.is_exact = false;
+  result.certainty = ParticipantCertainty::Conditional;
 
   return result;
 }
@@ -211,6 +313,17 @@ bool CUDAParticipantAnalysis::variesPerLane(const llvm::Value *value) const {
 
 ParticipantRelation computeOverlap(const CUDAParticipantSet &a,
                                    const CUDAParticipantSet &b) {
+  if (a.has_lane_mask && b.has_lane_mask) {
+    const uint32_t overlap = a.lane_mask & b.lane_mask;
+    if (overlap == 0) {
+      return ParticipantRelation::Disjoint;
+    }
+    if (a.is_exact && b.is_exact && a.lane_mask == b.lane_mask &&
+        a.min_block == b.min_block && a.max_block == b.max_block) {
+      return ParticipantRelation::Equal;
+    }
+    return ParticipantRelation::Overlaps;
+  }
   if (a.is_exact && b.is_exact) {
     if (a.min_lane == b.min_lane && a.max_lane == b.max_lane &&
         a.min_block == b.min_block && a.max_block == b.max_block) {

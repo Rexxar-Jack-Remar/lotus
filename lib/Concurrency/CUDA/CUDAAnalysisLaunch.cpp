@@ -132,6 +132,139 @@ static const Value *getAggregateElement(const Value *value,
   return current;
 }
 
+static SmallVector<unsigned, 4> getConstantGEPPath(const Value *pointer,
+                                                   const Value *&base) {
+  SmallVector<unsigned, 4> path;
+  const Value *current = pointer;
+  while (const auto *cast = dyn_cast_or_null<Operator>(current)) {
+    if (!Instruction::isCast(cast->getOpcode())) {
+      break;
+    }
+    current = cast->getOperand(0);
+  }
+  if (const auto *gep = dyn_cast_or_null<GEPOperator>(current)) {
+    base = gep->getPointerOperand()->stripPointerCasts();
+    for (const Value *index : gep->indices()) {
+      const auto *constant = dyn_cast<ConstantInt>(index);
+      if (!constant || constant->getValue().getActiveBits() > 32) {
+        path.clear();
+        base = nullptr;
+        return path;
+      }
+      path.push_back(static_cast<unsigned>(constant->getZExtValue()));
+    }
+    while (path.size() > 1 && path.front() == 0) {
+      path.erase(path.begin());
+    }
+    return path;
+  }
+  base = current;
+  return path;
+}
+
+static const Value *recoverStoredValue(const Value *pointer,
+                                       ArrayRef<unsigned> requested_path,
+                                       const Instruction *before) {
+  if (!pointer || !before || !before->getFunction()) {
+    return nullptr;
+  }
+  const Value *requested_base = nullptr;
+  SmallVector<unsigned, 4> prefix = getConstantGEPPath(pointer, requested_base);
+  if (!requested_base) {
+    return nullptr;
+  }
+  prefix.append(requested_path.begin(), requested_path.end());
+  while (prefix.size() > 1 && prefix.front() == 0) {
+    prefix.erase(prefix.begin());
+  }
+  DominatorTree dom_tree(*const_cast<Function *>(before->getFunction()));
+  const StoreInst *best = nullptr;
+  for (const Instruction &inst : instructions(*before->getFunction())) {
+    const auto *store = dyn_cast<StoreInst>(&inst);
+    if (!store || !dom_tree.dominates(store, before)) {
+      continue;
+    }
+    if (store->getParent() == before->getParent() &&
+        !store->comesBefore(before)) {
+      continue;
+    }
+    const Value *store_base = nullptr;
+    SmallVector<unsigned, 4> store_path =
+        getConstantGEPPath(store->getPointerOperand(), store_base);
+    if (store_base != requested_base || store_path != prefix) {
+      continue;
+    }
+    if (!best || dom_tree.dominates(best, store)) {
+      best = store;
+    }
+  }
+  return best ? best->getValueOperand() : nullptr;
+}
+
+static const Value *getAggregateElementAt(const Value *value,
+                                          ArrayRef<unsigned> path,
+                                          const Instruction *before) {
+  if (const Value *element = getAggregateElement(value, path)) {
+    return element;
+  }
+  return recoverStoredValue(value, path, before);
+}
+
+static const Value *recoverLaunchArgument(const Value *argument_array,
+                                          unsigned index,
+                                          const Instruction *launch) {
+  if (!argument_array || !launch) {
+    return nullptr;
+  }
+  const Value *array = argument_array;
+  while (const auto *cast = dyn_cast<Operator>(array)) {
+    if (!Instruction::isCast(cast->getOpcode())) {
+      break;
+    }
+    array = cast->getOperand(0);
+  }
+  const Value *aggregate = array;
+  if (const auto *gep = dyn_cast<GEPOperator>(array)) {
+    if (const auto *global = dyn_cast<GlobalVariable>(
+            gep->getPointerOperand()->stripPointerCasts())) {
+      if (global->hasInitializer()) {
+        aggregate = global->getInitializer();
+      }
+    }
+  }
+  if (const auto *global = dyn_cast<GlobalVariable>(array)) {
+    if (!global->hasInitializer()) {
+      return nullptr;
+    }
+    aggregate = global->getInitializer();
+  }
+  const Value *actual = nullptr;
+  if (isa<GlobalVariable>(aggregate) ||
+      aggregate->getType()->isAggregateType()) {
+    actual = getAggregateElementAt(aggregate, {index}, launch);
+  } else if (index == 0) {
+    actual = recoverStoredValue(argument_array, {}, launch);
+  } else {
+    actual = recoverStoredValue(argument_array, {index}, launch);
+  }
+  if (!actual) {
+    return nullptr;
+  }
+  actual = actual->stripPointerCasts();
+  if (const auto *slot = dyn_cast<GlobalVariable>(actual)) {
+    if (slot->hasInitializer() &&
+        slot->getInitializer()->getType()->isPointerTy()) {
+      actual = slot->getInitializer()->stripPointerCasts();
+    }
+  }
+  if (isa<AllocaInst>(actual) || isa<GEPOperator>(actual)) {
+    if (const Value *stored = recoverStoredValue(actual, {}, launch)) {
+      actual = stored->stripPointerCasts();
+    }
+  }
+  return actual;
+}
+
 static void setUnitDimensions(std::array<SymbolicDimension, 3> &dimensions) {
   for (SymbolicDimension &dimension : dimensions) {
     dimension.kind = SymbolicValueKind::Constant;
@@ -141,7 +274,8 @@ static void setUnitDimensions(std::array<SymbolicDimension, 3> &dimensions) {
 }
 
 static bool decodeDim3(const Value *value,
-                       std::array<SymbolicDimension, 3> &dimensions) {
+                       std::array<SymbolicDimension, 3> &dimensions,
+                       const Instruction *before = nullptr) {
   if (!value) {
     return false;
   }
@@ -150,7 +284,9 @@ static bool decodeDim3(const Value *value,
   }
   bool decoded_any = false;
   for (unsigned index = 0; index < 3; ++index) {
-    const Value *component = getAggregateElement(value, index);
+    const Value *component = before
+                                 ? getAggregateElementAt(value, {index}, before)
+                                 : getAggregateElement(value, index);
     if (!component) {
       continue;
     }
@@ -189,14 +325,13 @@ static DecodedLaunch decodeLaunch(const CallBase *call) {
     }
   };
 
-  if (name == "cudaLaunchKernel" ||
-      name == "cudaLaunchCooperativeKernel") {
+  if (name == "cudaLaunchKernel" || name == "cudaLaunchCooperativeKernel") {
     setKernel(0);
     if (call->arg_size() >= 6 &&
         call->getArgOperand(1)->getType()->isAggregateType() &&
         call->getArgOperand(2)->getType()->isAggregateType()) {
-      decodeDim3(call->getArgOperand(1), decoded.dimensions.grid);
-      decodeDim3(call->getArgOperand(2), decoded.dimensions.block);
+      decodeDim3(call->getArgOperand(1), decoded.dimensions.grid, call);
+      decodeDim3(call->getArgOperand(2), decoded.dimensions.block, call);
       decoded.argument_array = call->getArgOperand(3);
       decoded.dynamic_shared_memory = call->getArgOperand(4);
       decoded.stream = call->getArgOperand(5);
@@ -229,9 +364,10 @@ static DecodedLaunch decodeLaunch(const CallBase *call) {
 
   if (name == "cudaLaunchKernelExC" || name == "cuLaunchKernelEx") {
     setKernel(1);
-    decoded.argument_array = call->arg_size() > 2 ? call->getArgOperand(2)
-                                                   : nullptr;
+    decoded.argument_array =
+        call->arg_size() > 2 ? call->getArgOperand(2) : nullptr;
     const Value *config = call->getArgOperand(0)->stripPointerCasts();
+    bool decoded_config = false;
     if (const auto *global = dyn_cast<GlobalVariable>(config)) {
       if (global->hasInitializer()) {
         const Value *initializer = global->getInitializer();
@@ -247,11 +383,30 @@ static DecodedLaunch decodeLaunch(const CallBase *call) {
                 CUDASymbolicModel::classifyDimension(block);
           }
         }
-        decoded.dynamic_shared_memory =
-            getAggregateElement(initializer, 2u);
+        decoded.dynamic_shared_memory = getAggregateElement(initializer, 2u);
         decoded.stream = getAggregateElement(initializer, 3u);
         decoded.recognized_layout = true;
+        decoded_config = true;
       }
+    }
+    if (!decoded_config) {
+      for (unsigned index = 0; index < 3; ++index) {
+        if (const Value *grid =
+                getAggregateElementAt(config, {0u, index}, call)) {
+          decoded.dimensions.grid[index] =
+              CUDASymbolicModel::classifyDimension(grid);
+          decoded_config = true;
+        }
+        if (const Value *block =
+                getAggregateElementAt(config, {1u, index}, call)) {
+          decoded.dimensions.block[index] =
+              CUDASymbolicModel::classifyDimension(block);
+          decoded_config = true;
+        }
+      }
+      decoded.dynamic_shared_memory = getAggregateElementAt(config, {2u}, call);
+      decoded.stream = getAggregateElementAt(config, {3u}, call);
+      decoded.recognized_layout = decoded_config;
     }
     return decoded;
   }
@@ -284,24 +439,28 @@ const Value *getStreamOperand(const CallBase *call) {
     return nullptr;
   }
   StringRef name = callee->getName();
-  if (name.contains("cudaMemcpyAsync") || name.contains("cudaMemsetAsync")) {
+  if ((name.contains("Memcpy") || name.contains("Memset")) &&
+      name.contains("Async")) {
     return call->arg_size() >= 4 ? call->getArgOperand(call->arg_size() - 1)
                                  : nullptr;
   }
   if (name.contains("cudaMemPrefetchAsync")) {
     return call->arg_size() >= 4 ? call->getArgOperand(3) : nullptr;
   }
-  if (name.contains("cudaStreamCreate") || name.startswith("cuStreamCreate")) {
+  if (name.contains("StreamCreate")) {
     return nullptr;
   }
-  if (name.contains("cudaStream")) {
+  if (name.contains("StreamWaitEvent")) {
     return call->getArgOperand(0);
   }
-  if (name.contains("cudaEventRecord")) {
+  if (name.contains("Stream")) {
+    return call->getArgOperand(0);
+  }
+  if (name.contains("EventRecord")) {
     return call->arg_size() >= 2 ? call->getArgOperand(1) : nullptr;
   }
-  if (name.contains("cudaStreamWaitEvent")) {
-    return call->arg_size() >= 1 ? call->getArgOperand(0) : nullptr;
+  if (name.contains("GraphLaunch")) {
+    return call->arg_size() >= 2 ? call->getArgOperand(1) : nullptr;
   }
   if (CUDAModel::isKernelLaunch(normalizeLaunchEntryName(name))) {
     return decodeLaunch(call).stream;
@@ -318,11 +477,11 @@ const Value *getEventOperand(const CallBase *call) {
     return nullptr;
   }
   StringRef name = callee->getName();
-  if (name.contains("cudaEvent")) {
-    return call->getArgOperand(0);
-  }
-  if (name.contains("cudaStreamWaitEvent")) {
+  if (name.contains("StreamWaitEvent")) {
     return call->arg_size() >= 2 ? call->getArgOperand(1) : nullptr;
+  }
+  if (name.contains("Event")) {
+    return call->getArgOperand(0);
   }
   return nullptr;
 }
@@ -339,6 +498,20 @@ const Value *getPotentialStream(const CallBase *call) {
 
 static std::optional<HostStreamKind>
 classifyCreatedStreamHandle(const Value *stream) {
+  if (const auto *create = dyn_cast_or_null<CallBase>(stream)) {
+    const Function *callee = create->getCalledFunction();
+    if (callee && callee->getName().contains("StreamCreate")) {
+      if (create->arg_size() > 1) {
+        if (auto flags = CUDASymbolicModel::evaluateConstantInt(
+                create->getArgOperand(1))) {
+          return (*flags & 1) != 0 ? HostStreamKind::NonBlockingExplicit
+                                   : HostStreamKind::BlockingExplicit;
+        }
+        return HostStreamKind::Unknown;
+      }
+      return HostStreamKind::BlockingExplicit;
+    }
+  }
   const auto *load = dyn_cast_or_null<LoadInst>(stream);
   if (!load) {
     return std::nullopt;
@@ -359,14 +532,14 @@ classifyCreatedStreamHandle(const Value *stream) {
       continue;
     }
     if (call->arg_size() > 1) {
-      if (auto flags = CUDASymbolicModel::evaluateConstantInt(
-              call->getArgOperand(1))) {
+      if (auto flags =
+              CUDASymbolicModel::evaluateConstantInt(call->getArgOperand(1))) {
         return (*flags & 1) != 0 ? HostStreamKind::NonBlockingExplicit
                                  : HostStreamKind::BlockingExplicit;
       }
       return HostStreamKind::Unknown;
     }
-    return HostStreamKind::BlockingExplicit;
+    return HostStreamKind::Unknown;
   }
   return std::nullopt;
 }
@@ -422,12 +595,10 @@ HostStreamKind classifyHostStream(const CallBase *call, const Value *stream) {
       if (ci->equalsInt(2)) {
         return HostStreamKind::PerThreadDefault;
       }
-      return HostStreamKind::BlockingExplicit;
+      return HostStreamKind::Unknown;
     }
   }
-  return isa<Argument>(base) || isa<GlobalValue>(base)
-             ? HostStreamKind::BlockingExplicit
-             : HostStreamKind::Unknown;
+  return HostStreamKind::Unknown;
 }
 
 LaunchOrderingSource getOrderingSource(ThreadAPI::TD_TYPE type) {
@@ -515,6 +686,9 @@ static bool isExplicitStreamKind(HostStreamKind kind) {
 
 static bool sameStreamQueue(HostStreamKind lhs_kind, const Value *lhs_stream,
                             HostStreamKind rhs_kind, const Value *rhs_stream) {
+  if (lhs_stream && rhs_stream && lhs_stream == rhs_stream) {
+    return true;
+  }
   if (lhs_kind != rhs_kind) {
     return false;
   }
@@ -526,13 +700,15 @@ static bool sameStreamQueue(HostStreamKind lhs_kind, const Value *lhs_stream,
          lhs_stream == rhs_stream;
 }
 
-static bool hasLegacyImplicitOrdering(HostStreamKind lhs,
-                                      HostStreamKind rhs) {
+static bool hasLegacyImplicitOrdering(HostStreamKind lhs, HostStreamKind rhs) {
   const bool lhs_legacy = lhs == HostStreamKind::LegacyDefault;
   const bool rhs_legacy = rhs == HostStreamKind::LegacyDefault;
   const bool lhs_blocking = lhs == HostStreamKind::BlockingExplicit;
   const bool rhs_blocking = rhs == HostStreamKind::BlockingExplicit;
-  return (lhs_legacy && rhs_blocking) || (lhs_blocking && rhs_legacy);
+  const bool lhs_ptds = lhs == HostStreamKind::PerThreadDefault;
+  const bool rhs_ptds = rhs == HostStreamKind::PerThreadDefault;
+  return (lhs_legacy && (rhs_blocking || rhs_ptds)) ||
+         (rhs_legacy && (lhs_blocking || lhs_ptds));
 }
 
 static bool mustExecuteBefore(const Instruction *from, const Instruction *to,
@@ -551,6 +727,42 @@ static bool mustExecuteBefore(const Instruction *from, const Instruction *to,
   return !llvm::isPotentiallyReachable(to->getParent(), from->getParent());
 }
 
+static const Value *canonicalizeHandle(const Value *handle,
+                                       const Instruction *use,
+                                       StringRef create_name) {
+  const auto *load = dyn_cast_or_null<LoadInst>(handle);
+  if (!load || !use || load->getFunction() != use->getFunction()) {
+    return handle;
+  }
+  const Value *slot = load->getPointerOperand()->stripPointerCasts();
+  DominatorTree dom_tree(*const_cast<Function *>(use->getFunction()));
+  const CallBase *best = nullptr;
+  for (const User *user : slot->users()) {
+    const auto *create = dyn_cast<CallBase>(user);
+    const Function *callee = create ? create->getCalledFunction() : nullptr;
+    if (!create || !callee || create->arg_empty() ||
+        !callee->getName().contains(create_name) ||
+        create->getArgOperand(0)->stripPointerCasts() != slot ||
+        !mustExecuteBefore(create, load, dom_tree)) {
+      continue;
+    }
+    if (!best || mustExecuteBefore(best, create, dom_tree)) {
+      best = create;
+    }
+  }
+  return best ? static_cast<const Value *>(best) : slot;
+}
+
+static const Value *canonicalizeStreamHandle(const Value *stream,
+                                             const Instruction *use) {
+  return canonicalizeHandle(stream, use, "StreamCreate");
+}
+
+static const Value *canonicalizeEventHandle(const Value *event,
+                                            const Instruction *use) {
+  return canonicalizeHandle(event, use, "EventCreate");
+}
+
 static bool boundaryApplies(const LaunchOrderingState::StreamState *state,
                             const Instruction *launch,
                             const DominatorTree &dom_tree) {
@@ -561,7 +773,8 @@ static bool boundaryApplies(const LaunchOrderingState::StreamState *state,
 detail::LaunchOrderingState::StreamState *
 getMutableStreamState(detail::LaunchOrderingState &ordering_state,
                       HostStreamKind stream_kind, const Value *stream) {
-  if (isExplicitStreamKind(stream_kind) && stream) {
+  if (stream && (isExplicitStreamKind(stream_kind) ||
+                 stream_kind == HostStreamKind::Unknown)) {
     return &ordering_state.stream_states[stream];
   }
   if (stream_kind == HostStreamKind::LegacyDefault) {
@@ -586,7 +799,8 @@ getHostState(detail::LaunchOrderingState &ordering_state,
 const detail::LaunchOrderingState::StreamState *
 getStreamState(const detail::LaunchOrderingState &ordering_state,
                HostStreamKind stream_kind, const Value *stream) {
-  if (isExplicitStreamKind(stream_kind) && stream) {
+  if (stream && (isExplicitStreamKind(stream_kind) ||
+                 stream_kind == HostStreamKind::Unknown)) {
     auto it = ordering_state.stream_states.find(stream);
     return it == ordering_state.stream_states.end() ? nullptr : &it->second;
   }
@@ -601,8 +815,7 @@ getStreamState(const detail::LaunchOrderingState &ordering_state,
 
 void markStreamOrdered(detail::LaunchOrderingState &ordering_state,
                        HostStreamKind stream_kind, const Value *stream,
-                       SynchronizationScope scope,
-                       LaunchOrderingSource source,
+                       SynchronizationScope scope, LaunchOrderingSource source,
                        SynchronizationPrimitive primitive,
                        const Instruction *boundary_inst) {
   auto &stream_state = getHostState(ordering_state, stream_kind, stream);
@@ -698,6 +911,12 @@ void CUDAAnalysis::runAnalysis() {
       }
       const Function *callee = m_thread_api->getCallee(call);
       ThreadAPI::TD_TYPE type = m_thread_api->getType(call);
+      const Function *direct_callee = call->getCalledFunction();
+      const StringRef direct_name =
+          direct_callee ? direct_callee->getName() : StringRef{};
+      const bool is_graph_launch = direct_name.contains("GraphLaunch");
+      const bool is_multi_device_launch =
+          type == ThreadAPI::TD_CUDA_MULTI_DEVICE_LAUNCH;
       if (type != ThreadAPI::TD_DUMMY &&
           m_thread_api->getRuntimeLibrary(call) ==
               ThreadAPI::RuntimeLibrary::CUDA) {
@@ -731,21 +950,23 @@ void CUDAAnalysis::runAnalysis() {
             detail::addOrderedDependency(host_state.ordered_dependencies, dep);
           }
         }
-        detail::markStreamOrdered(
-            ordering_state, HostStreamKind::Unknown, nullptr,
-            SynchronizationScope::Device,
-            LaunchOrderingSource::DeviceSynchronize,
-            SynchronizationPrimitive::DeviceSynchronize, &inst);
+        detail::markStreamOrdered(ordering_state, HostStreamKind::Unknown,
+                                  nullptr, SynchronizationScope::Device,
+                                  LaunchOrderingSource::DeviceSynchronize,
+                                  SynchronizationPrimitive::DeviceSynchronize,
+                                  &inst);
         ordering_state.host_state.usable_for_unknown_launch = true;
         automaton_builder.addDeviceSync(&inst);
         continue;
       }
 
-      if (type == ThreadAPI::TD_CUDA_STREAM) {
-        const Value *stream = detail::getStreamOperand(call);
+      if (type == ThreadAPI::TD_CUDA_STREAM && !is_graph_launch) {
+        const Value *stream = detail::canonicalizeStreamHandle(
+            detail::getStreamOperand(call), &inst);
         const HostStreamKind stream_kind =
             detail::classifyHostStream(call, stream);
-        const Value *event = detail::getEventOperand(call);
+        const Value *event = detail::canonicalizeEventHandle(
+            detail::getEventOperand(call), &inst);
         const Function *called_fn = call->getCalledFunction();
         StringRef name = called_fn ? called_fn->getName() : StringRef{};
         if (name.contains("Create")) {
@@ -756,10 +977,11 @@ void CUDAAnalysis::runAnalysis() {
           automaton_builder.addStreamDestroy(&inst, stream);
         } else if (name.contains("Synchronize")) {
           if (stream_kind == HostStreamKind::Unknown) {
-            recordModelGap(&inst, "CUDA stream synchronization references an "
-                                  "unknown stream handle",
+            recordModelGap(&inst,
+                           "CUDA stream synchronization references an "
+                           "unknown stream kind; ordering is limited "
+                           "to the canonical handle identity",
                            0.35);
-            continue;
           }
           auto &host_state =
               detail::getHostState(ordering_state, stream_kind, stream);
@@ -774,25 +996,23 @@ void CUDAAnalysis::runAnalysis() {
                                            dep);
             }
           }
-          detail::markStreamOrdered(ordering_state, stream_kind, stream,
-                                    SynchronizationScope::Device,
-                                    LaunchOrderingSource::StreamSynchronize,
-                                    SynchronizationPrimitive::StreamProgramOrder,
-                                    &inst);
+          detail::markStreamOrdered(
+              ordering_state, stream_kind, stream, SynchronizationScope::Device,
+              LaunchOrderingSource::StreamSynchronize,
+              SynchronizationPrimitive::StreamProgramOrder, &inst);
           ordering_state.host_state = host_state;
           ordering_state.host_state.usable_for_unknown_launch = true;
-          if (stream_kind != HostStreamKind::Unknown) {
+          if (stream) {
             automaton_builder.addStreamSync(&inst, stream);
           }
         } else if (name.contains("WaitEvent")) {
           automaton_builder.addEventWait(&inst, event, stream);
           auto event_it = ordering_state.event_states.find(event);
           if (event_it != ordering_state.event_states.end() &&
-              event_it->second.has_record &&
-              event_it->second.record_inst &&
+              event_it->second.has_record && event_it->second.record_inst &&
               detail::mustExecuteBefore(event_it->second.record_inst, &inst,
                                         dom_tree) &&
-              stream_kind != HostStreamKind::Unknown) {
+              stream) {
             auto &host_state =
                 detail::getHostState(ordering_state, stream_kind, stream);
             host_state.ordered_dependencies.clear();
@@ -800,7 +1020,8 @@ void CUDAAnalysis::runAnalysis() {
                 host_state.ordered_dependencies,
                 event_it->second.recorded_dependencies);
             detail::markStreamOrdered(
-                ordering_state, stream_kind, stream, SynchronizationScope::Device,
+                ordering_state, stream_kind, stream,
+                SynchronizationScope::Device,
                 LaunchOrderingSource::StreamSynchronize,
                 SynchronizationPrimitive::StreamProgramOrder, &inst);
           }
@@ -809,8 +1030,10 @@ void CUDAAnalysis::runAnalysis() {
       }
 
       if (type == ThreadAPI::TD_CUDA_EVENT) {
-        const Value *event = detail::getEventOperand(call);
-        const Value *stream = detail::getStreamOperand(call);
+        const Value *event = detail::canonicalizeEventHandle(
+            detail::getEventOperand(call), &inst);
+        const Value *stream = detail::canonicalizeStreamHandle(
+            detail::getStreamOperand(call), &inst);
         const HostStreamKind stream_kind =
             detail::classifyHostStream(call, stream);
         const Function *called_fn = call->getCalledFunction();
@@ -835,8 +1058,8 @@ void CUDAAnalysis::runAnalysis() {
                   detail::sameStreamQueue(prior.stream_kind, prior.stream,
                                           stream_kind, stream) &&
                   detail::mustExecuteBefore(prior.launch, &inst, dom_tree)) {
-                detail::addOrderedDependency(
-                    event_state.recorded_dependencies, dep);
+                detail::addOrderedDependency(event_state.recorded_dependencies,
+                                             dep);
               }
             }
           }
@@ -845,11 +1068,10 @@ void CUDAAnalysis::runAnalysis() {
           automaton_builder.addEventWait(&inst, event, stream);
           auto event_it = ordering_state.event_states.find(event);
           if (event_it != ordering_state.event_states.end() &&
-              event_it->second.has_record &&
-              event_it->second.record_inst &&
+              event_it->second.has_record && event_it->second.record_inst &&
               detail::mustExecuteBefore(event_it->second.record_inst, &inst,
                                         dom_tree) &&
-              stream_kind != HostStreamKind::Unknown) {
+              stream) {
             auto &host_state =
                 detail::getHostState(ordering_state, stream_kind, stream);
             host_state.ordered_dependencies.clear();
@@ -857,7 +1079,8 @@ void CUDAAnalysis::runAnalysis() {
                 host_state.ordered_dependencies,
                 event_it->second.recorded_dependencies);
             detail::markStreamOrdered(
-                ordering_state, stream_kind, stream, SynchronizationScope::Device,
+                ordering_state, stream_kind, stream,
+                SynchronizationScope::Device,
                 LaunchOrderingSource::StreamSynchronize,
                 SynchronizationPrimitive::StreamProgramOrder, &inst);
           }
@@ -885,11 +1108,13 @@ void CUDAAnalysis::runAnalysis() {
         continue;
       }
 
-      if (type == ThreadAPI::TD_CUDA_MEMCPY || type == ThreadAPI::TD_CUDA_MEMSET ||
+      if (type == ThreadAPI::TD_CUDA_MEMCPY ||
+          type == ThreadAPI::TD_CUDA_MEMSET ||
           type == ThreadAPI::TD_CUDA_UNIFIED_MEMORY) {
         const Function *called_fn = call->getCalledFunction();
         if (called_fn && called_fn->getName().contains("Async")) {
-          const Value *stream = detail::getStreamOperand(call);
+          const Value *stream = detail::canonicalizeStreamHandle(
+              detail::getStreamOperand(call), &inst);
           if (stream) {
             automaton_builder.addStreamOperation(&inst, stream);
           } else {
@@ -907,7 +1132,8 @@ void CUDAAnalysis::runAnalysis() {
         }
       }
 
-      if (type != ThreadAPI::TD_CUDA_KERNEL_LAUNCH) {
+      if (type != ThreadAPI::TD_CUDA_KERNEL_LAUNCH && !is_graph_launch &&
+          !is_multi_device_launch) {
         continue;
       }
 
@@ -920,30 +1146,38 @@ void CUDAAnalysis::runAnalysis() {
       if (!kernel) {
         kernel = m_thread_api->getCUDALaunchedKernel(&inst);
       }
-      if (!detail::isCUDAKernelCandidate(kernel)) {
-        recordModelGap(&inst, "CUDA launch site could not be matched to a "
-                              "concrete kernel function",
+      const bool opaque_launch = !detail::isCUDAKernelCandidate(kernel);
+      if (opaque_launch) {
+        recordModelGap(&inst,
+                       "CUDA launch site could not be matched to a "
+                       "concrete kernel function; retaining an opaque "
+                       "launch with unknown device-memory effects",
                        0.35);
-        continue;
       }
 
       if (!decoded.recognized_layout && call->getCalledFunction() &&
           CUDAModel::isKernelLaunch(detail::normalizeLaunchEntryName(
               call->getCalledFunction()->getName()))) {
-        recordModelGap(&inst, "CUDA launch API layout is unsupported; launch "
-                              "dimensions, stream, arguments, and dynamic "
-                              "shared memory remain unknown",
+        recordModelGap(&inst,
+                       "CUDA launch API layout is unsupported; launch "
+                       "dimensions, stream, arguments, and dynamic "
+                       "shared memory remain unknown",
                        0.25);
       }
 
-      const Value *stream = decoded.stream;
+      const Value *stream = detail::canonicalizeStreamHandle(
+          decoded.stream ? decoded.stream : detail::getStreamOperand(call),
+          &inst);
       const HostStreamKind stream_kind =
           detail::classifyHostStream(call, stream);
-      const bool stream_known = stream_kind != HostStreamKind::Unknown;
+      const bool stream_known = stream != nullptr ||
+                                stream_kind == HostStreamKind::LegacyDefault ||
+                                stream_kind == HostStreamKind::PerThreadDefault;
       const auto *stream_state =
           detail::getStreamState(ordering_state, stream_kind, stream);
       const detail::LaunchOrderingState::StreamState *selected_state = nullptr;
-      if (stream_known && detail::boundaryApplies(stream_state, &inst, dom_tree)) {
+      if (stream_known &&
+          detail::boundaryApplies(stream_state, &inst, dom_tree)) {
         selected_state = stream_state;
       } else if (ordering_state.host_state.usable_for_unknown_launch &&
                  detail::boundaryApplies(&ordering_state.host_state, &inst,
@@ -967,6 +1201,14 @@ void CUDAAnalysis::runAnalysis() {
       launch.stream_kind = stream_kind;
       launch.predecessor = SynchronizationPrimitive::None;
       launch.host_happens_before = false;
+      launch.is_opaque = opaque_launch;
+      launch.has_unknown_memory_effect = opaque_launch;
+      if (launch.kernel) {
+        for (const Argument &argument : launch.kernel->args()) {
+          launch.argument_values.push_back(detail::recoverLaunchArgument(
+              launch.argument_array, argument.getArgNo(), launch.launch));
+        }
+      }
 
       if (selected_state &&
           (!selected_state->ordered_dependencies.empty() ||
@@ -998,7 +1240,8 @@ void CUDAAnalysis::runAnalysis() {
           detail::addOrderedDependency(launch.ordered_dependencies, dep);
         }
       }
-      if (!launch.ordered_dependencies.empty() && !launch.ordered_after_previous) {
+      if (!launch.ordered_dependencies.empty() &&
+          !launch.ordered_after_previous) {
         launch.ordered_after_previous = true;
         launch.ordering_scope = SynchronizationScope::Device;
         launch.ordering_source = LaunchOrderingSource::ProgramOrder;
@@ -1007,19 +1250,23 @@ void CUDAAnalysis::runAnalysis() {
       }
 
       m_launches.push_back(launch);
+      automaton_builder.addStreamOperation(&inst, stream);
       LaunchContextKey key;
       key.kernel = launch.kernel;
+      key.launch_site = launch.launch;
       key.dimensions = launch.dimensions;
       key.argument_array = launch.argument_array;
       key.dynamic_shared_memory = launch.dynamic_shared_memory;
-      if (!m_launch_context_index.count(key)) {
+      if (launch.kernel && !m_launch_context_index.count(key)) {
         analyzeKernel(launch.kernel, &m_launches.back());
         m_launch_context_index[key] = m_kernel_summaries.size() - 1;
       }
-      if (launch.dimensions.hasSymbolicGrid() || launch.dimensions.hasSymbolicBlock()) {
-        recordModelGap(&inst, "CUDA launch dimensions remain symbolic, "
-                              "reducing precision for race and performance "
-                              "diagnostics",
+      if (launch.dimensions.hasSymbolicGrid() ||
+          launch.dimensions.hasSymbolicBlock()) {
+        recordModelGap(&inst,
+                       "CUDA launch dimensions remain symbolic, "
+                       "reducing precision for race and performance "
+                       "diagnostics",
                        0.5);
       }
       detail::clearStreamOrdered(ordering_state, stream_kind, stream);
@@ -1039,9 +1286,10 @@ void CUDAAnalysis::runAnalysis() {
     if (m_launch_context_index.count(key)) {
       continue;
     }
-    recordModelGap(&function, "Kernel analyzed without an explicit host-side "
-                              "launch context; launch dimensions defaulted "
-                              "conservatively",
+    recordModelGap(&function,
+                   "Kernel analyzed without an explicit host-side "
+                   "launch context; launch dimensions defaulted "
+                   "conservatively",
                    0.55);
     analyzeKernel(&function, nullptr);
   }
@@ -1109,8 +1357,6 @@ void CUDAAnalysis::runAnalysis() {
   }
 
   for (const auto &launch : m_launches) {
-    if (!launch.kernel)
-      continue;
     CUDAKernelFact fact;
     fact.kernel_class_id = kernel_class_counter++;
     fact.kernel = launch.kernel;
@@ -1148,6 +1394,7 @@ void CUDAAnalysis::analyzeInterKernelRaces() {
     AccessInfo access;
   };
   SmallVector<TransferRegion, 16> transfer_regions;
+  SmallVector<const MemoryTransferInfo *, 8> opaque_transfers;
   auto add_transfer_region = [&](const MemoryTransferInfo &transfer,
                                  const Value *pointer, MemorySpace space,
                                  bool is_write) {
@@ -1169,14 +1416,17 @@ void CUDAAnalysis::analyzeInterKernelRaces() {
     region.access.is_write = is_write;
     region.access.access_size = static_cast<uint32_t>(std::min<uint64_t>(
         transfer.size, std::numeric_limits<uint32_t>::max()));
-    region.access.alias_precision = base_info.ambiguous
-                                        ? AliasPrecision::Ambiguous
-                                        : AliasPrecision::Exact;
+    region.access.alias_precision =
+        base_info.ambiguous ? AliasPrecision::Ambiguous : AliasPrecision::Exact;
     if (region.access.base) {
       transfer_regions.push_back(std::move(region));
     }
   };
   for (const MemoryTransferInfo &transfer : m_memory_transfers) {
+    if (transfer.is_async &&
+        (transfer.region_unknown || (!transfer.src && !transfer.dst))) {
+      opaque_transfers.push_back(&transfer);
+    }
     add_transfer_region(transfer, transfer.src, transfer.src_space, false);
     add_transfer_region(transfer, transfer.dst, transfer.dst_space, true);
   }
@@ -1191,44 +1441,91 @@ void CUDAAnalysis::analyzeInterKernelRaces() {
       return false;
     }
     DominatorTree dom_tree(*const_cast<Function *>(first->getFunction()));
-    const bool program_order =
-        detail::mustExecuteBefore(first, second, dom_tree) ||
-        detail::mustExecuteBefore(second, first, dom_tree);
-    return program_order &&
-           (detail::sameStreamQueue(first_kind, first_stream, second_kind,
-                                    second_stream) ||
-            detail::hasLegacyImplicitOrdering(first_kind, second_kind));
+    if (detail::mustExecuteBefore(second, first, dom_tree)) {
+      std::swap(first, second);
+      std::swap(first_kind, second_kind);
+      std::swap(first_stream, second_stream);
+    }
+    if (!detail::mustExecuteBefore(first, second, dom_tree)) {
+      return false;
+    }
+    first_stream = detail::canonicalizeStreamHandle(first_stream, first);
+    second_stream = detail::canonicalizeStreamHandle(second_stream, second);
+    if (auto kind = detail::classifyCreatedStreamHandle(first_stream)) {
+      first_kind = *kind;
+    }
+    if (auto kind = detail::classifyCreatedStreamHandle(second_stream)) {
+      second_kind = *kind;
+    }
+    if (detail::sameStreamQueue(first_kind, first_stream, second_kind,
+                                second_stream) ||
+        detail::hasLegacyImplicitOrdering(first_kind, second_kind)) {
+      return true;
+    }
+
+    DenseMap<const Value *, const CallBase *> records;
+    for (const Instruction &candidate : instructions(*first->getFunction())) {
+      const auto *call = dyn_cast<CallBase>(&candidate);
+      if (!call || !detail::mustExecuteBefore(first, call, dom_tree) ||
+          !detail::mustExecuteBefore(call, second, dom_tree)) {
+        continue;
+      }
+      const ThreadAPI::TD_TYPE type = m_thread_api->getType(call);
+      const Function *callee = call->getCalledFunction();
+      const StringRef name = callee ? callee->getName() : StringRef{};
+      if (type == ThreadAPI::TD_CUDA_DEVICE_SYNC) {
+        return true;
+      }
+      if (name.contains("StreamSynchronize")) {
+        const Value *synced = detail::canonicalizeStreamHandle(
+            detail::getStreamOperand(call), call);
+        if (detail::sameStreamQueue(first_kind, first_stream,
+                                    detail::classifyHostStream(call, synced),
+                                    synced)) {
+          return true;
+        }
+      }
+      if (name.contains("EventRecord")) {
+        const Value *event = detail::canonicalizeEventHandle(
+            detail::getEventOperand(call), call);
+        const Value *record_stream = detail::canonicalizeStreamHandle(
+            detail::getStreamOperand(call), call);
+        if (detail::sameStreamQueue(
+                first_kind, first_stream,
+                detail::classifyHostStream(call, record_stream),
+                record_stream)) {
+          records[event] = call;
+        }
+      } else if (name.contains("StreamWaitEvent")) {
+        const Value *event = detail::canonicalizeEventHandle(
+            detail::getEventOperand(call), call);
+        const Value *wait_stream = detail::canonicalizeStreamHandle(
+            detail::getStreamOperand(call), call);
+        if (records.count(event) &&
+            detail::sameStreamQueue(
+                second_kind, second_stream,
+                detail::classifyHostStream(call, wait_stream), wait_stream)) {
+          return true;
+        }
+      } else if (name.contains("EventSynchronize")) {
+        const Value *event = detail::canonicalizeEventHandle(
+            detail::getEventOperand(call), call);
+        if (records.count(event)) {
+          return true;
+        }
+      }
+    }
+    return false;
   };
 
   auto get_launch_argument = [&](const KernelLaunchInfo &launch,
                                  unsigned index) -> const Value * {
-    const Value *array = launch.argument_array;
-    if (!array) {
-      return nullptr;
+    if (index < launch.argument_values.size() &&
+        launch.argument_values[index]) {
+      return launch.argument_values[index];
     }
-    array = array->stripPointerCasts();
-    if (const auto *gep = dyn_cast<GEPOperator>(array)) {
-      array = gep->getPointerOperand()->stripPointerCasts();
-    }
-    const Value *aggregate = array;
-    if (const auto *global = dyn_cast<GlobalVariable>(array)) {
-      if (!global->hasInitializer()) {
-        return nullptr;
-      }
-      aggregate = global->getInitializer();
-    }
-    const Value *actual = detail::getAggregateElement(aggregate, index);
-    if (!actual) {
-      return nullptr;
-    }
-    actual = actual->stripPointerCasts();
-    if (const auto *slot = dyn_cast<GlobalVariable>(actual)) {
-      if (slot->hasInitializer() &&
-          slot->getInitializer()->getType()->isPointerTy()) {
-        actual = slot->getInitializer()->stripPointerCasts();
-      }
-    }
-    return actual;
+    return detail::recoverLaunchArgument(launch.argument_array, index,
+                                         launch.launch);
   };
 
   auto instantiate_access = [&](const AccessInfo &access,
@@ -1253,14 +1550,12 @@ void CUDAAnalysis::analyzeInterKernelRaces() {
     if (space_info.space != MemorySpace::Unknown) {
       instantiated.space = space_info.space;
     }
-    instantiated.alias_precision = base_info.ambiguous
-                                       ? AliasPrecision::Ambiguous
-                                       : AliasPrecision::Exact;
+    instantiated.alias_precision =
+        base_info.ambiguous ? AliasPrecision::Ambiguous : AliasPrecision::Exact;
     return instantiated;
   };
 
-  auto query_region_alias = [&](const AccessInfo &lhs,
-                                const AccessInfo &rhs) {
+  auto query_region_alias = [&](const AccessInfo &lhs, const AccessInfo &rhs) {
     detail::AliasQueryResult alias =
         detail::queryAlias(lhs, rhs, m_alias_analysis);
     if (alias.relation == AliasResult::NoAlias &&
@@ -1274,10 +1569,12 @@ void CUDAAnalysis::analyzeInterKernelRaces() {
 
   for (const auto &func : m_module) {
     if (!func.isDeclaration() && detail::isNVVMKernel(&func)) {
-      recordModelGap(&func, "Inter-kernel race analysis requires "
-                    "launch-context indexing for accurate summary lookup; "
-                    "conservative over-approximation may report false positives",
-                   0.3);
+      recordModelGap(
+          &func,
+          "Inter-kernel race analysis requires "
+          "launch-context indexing for accurate summary lookup; "
+          "conservative over-approximation may report false positives",
+          0.3);
       break;
     }
   }
@@ -1287,21 +1584,40 @@ void CUDAAnalysis::analyzeInterKernelRaces() {
       const KernelLaunchInfo &launch_b = m_launches[j];
 
       if (!launch_a.kernel || !launch_b.kernel) {
+        if (!detail::launchesOrdered(m_launches, i, j)) {
+          InterKernelRaceInfo race;
+          race.first_launch = launch_a.launch;
+          race.second_launch = launch_b.launch;
+          race.first_kernel = launch_a.kernel;
+          race.second_kernel = launch_b.kernel;
+          race.ordered = false;
+          race.ordering_reason =
+              "unordered opaque launch has unknown device-memory effects";
+          race.symbolic = true;
+          race.kind = RaceKind::InterKernelHazard;
+          race.alias_precision = AliasPrecision::Ambiguous;
+          race.required_fence_scope = SynchronizationScope::Device;
+          race.confidence = 0.3;
+          m_inter_kernel_races.push_back(std::move(race));
+        }
         continue;
       }
 
       LaunchContextKey key_a;
       key_a.kernel = launch_a.kernel;
+      key_a.launch_site = launch_a.launch;
       key_a.dimensions = launch_a.dimensions;
       key_a.argument_array = launch_a.argument_array;
       key_a.dynamic_shared_memory = launch_a.dynamic_shared_memory;
       LaunchContextKey key_b;
       key_b.kernel = launch_b.kernel;
+      key_b.launch_site = launch_b.launch;
       key_b.dimensions = launch_b.dimensions;
       key_b.argument_array = launch_b.argument_array;
       key_b.dynamic_shared_memory = launch_b.dynamic_shared_memory;
 
-      if (!m_launch_context_index.count(key_a) || !m_launch_context_index.count(key_b)) {
+      if (!m_launch_context_index.count(key_a) ||
+          !m_launch_context_index.count(key_b)) {
         continue;
       }
 
@@ -1388,11 +1704,37 @@ void CUDAAnalysis::analyzeInterKernelRaces() {
   for (const KernelLaunchInfo &launch : m_launches) {
     LaunchContextKey key;
     key.kernel = launch.kernel;
+    key.launch_site = launch.launch;
     key.dimensions = launch.dimensions;
     key.argument_array = launch.argument_array;
     key.dynamic_shared_memory = launch.dynamic_shared_memory;
     auto summary_it = m_launch_context_index.find(key);
     if (!launch.kernel || summary_it == m_launch_context_index.end()) {
+      if (launch.has_unknown_memory_effect) {
+        for (const TransferRegion &region : transfer_regions) {
+          const auto *transfer_call =
+              dyn_cast_or_null<CallBase>(region.transfer->inst);
+          const HostStreamKind transfer_kind = detail::classifyHostStream(
+              transfer_call, region.transfer->stream);
+          if (operations_ordered(launch.launch, launch.stream_kind,
+                                 launch.stream, region.transfer->inst,
+                                 transfer_kind, region.transfer->stream)) {
+            continue;
+          }
+          InterKernelRaceInfo race;
+          race.first_launch = launch.launch;
+          race.second_transfer = region.transfer->inst;
+          race.ordered = false;
+          race.ordering_reason =
+              "opaque launch may conflict with asynchronous transfer";
+          race.symbolic = true;
+          race.kind = RaceKind::InterKernelHazard;
+          race.alias_precision = AliasPrecision::Ambiguous;
+          race.required_fence_scope = SynchronizationScope::Device;
+          race.confidence = 0.25;
+          m_inter_kernel_races.push_back(std::move(race));
+        }
+      }
       continue;
     }
     const KernelSummary &summary = m_kernel_summaries[summary_it->second];
@@ -1415,11 +1757,11 @@ void CUDAAnalysis::analyzeInterKernelRaces() {
         }
         const auto *transfer_call =
             dyn_cast_or_null<CallBase>(region.transfer->inst);
-        const HostStreamKind transfer_kind = detail::classifyHostStream(
-            transfer_call, region.transfer->stream);
-        if (operations_ordered(launch.launch, launch.stream_kind,
-                               launch.stream, region.transfer->inst,
-                               transfer_kind, region.transfer->stream)) {
+        const HostStreamKind transfer_kind =
+            detail::classifyHostStream(transfer_call, region.transfer->stream);
+        if (operations_ordered(launch.launch, launch.stream_kind, launch.stream,
+                               region.transfer->inst, transfer_kind,
+                               region.transfer->stream)) {
           continue;
         }
         InterKernelRaceInfo race;
@@ -1435,9 +1777,35 @@ void CUDAAnalysis::analyzeInterKernelRaces() {
         race.alias_precision = alias.precision;
         race.alias_source = alias.source;
         race.required_fence_scope = SynchronizationScope::Device;
-        race.confidence = alias.precision == AliasPrecision::Exact ? 0.85 : 0.55;
+        race.confidence =
+            alias.precision == AliasPrecision::Exact ? 0.85 : 0.55;
         m_inter_kernel_races.push_back(std::move(race));
       }
+    }
+  }
+
+  for (const KernelLaunchInfo &launch : m_launches) {
+    for (const MemoryTransferInfo *transfer : opaque_transfers) {
+      const auto *transfer_call = dyn_cast_or_null<CallBase>(transfer->inst);
+      const HostStreamKind transfer_kind =
+          detail::classifyHostStream(transfer_call, transfer->stream);
+      if (operations_ordered(launch.launch, launch.stream_kind, launch.stream,
+                             transfer->inst, transfer_kind, transfer->stream)) {
+        continue;
+      }
+      InterKernelRaceInfo race;
+      race.first_launch = launch.launch;
+      race.first_kernel = launch.kernel;
+      race.second_transfer = transfer->inst;
+      race.ordered = false;
+      race.ordering_reason =
+          "opaque asynchronous transfer may overlap device memory";
+      race.symbolic = true;
+      race.kind = RaceKind::InterKernelHazard;
+      race.alias_precision = AliasPrecision::Ambiguous;
+      race.required_fence_scope = SynchronizationScope::Device;
+      race.confidence = 0.25;
+      m_inter_kernel_races.push_back(std::move(race));
     }
   }
 
@@ -1460,9 +1828,9 @@ void CUDAAnalysis::analyzeInterKernelRaces() {
           detail::classifyHostStream(lhs_call, lhs.transfer->stream);
       const HostStreamKind rhs_kind =
           detail::classifyHostStream(rhs_call, rhs.transfer->stream);
-      if (operations_ordered(lhs.transfer->inst, lhs_kind,
-                             lhs.transfer->stream, rhs.transfer->inst,
-                             rhs_kind, rhs.transfer->stream)) {
+      if (operations_ordered(lhs.transfer->inst, lhs_kind, lhs.transfer->stream,
+                             rhs.transfer->inst, rhs_kind,
+                             rhs.transfer->stream)) {
         continue;
       }
       InterKernelRaceInfo race;
@@ -1478,6 +1846,33 @@ void CUDAAnalysis::analyzeInterKernelRaces() {
       race.alias_source = alias.source;
       race.required_fence_scope = SynchronizationScope::Device;
       race.confidence = alias.precision == AliasPrecision::Exact ? 0.85 : 0.55;
+      m_inter_kernel_races.push_back(std::move(race));
+    }
+  }
+
+  for (size_t i = 0; i < opaque_transfers.size(); ++i) {
+    for (size_t j = i + 1; j < opaque_transfers.size(); ++j) {
+      const MemoryTransferInfo *lhs = opaque_transfers[i];
+      const MemoryTransferInfo *rhs = opaque_transfers[j];
+      const auto *lhs_call = dyn_cast_or_null<CallBase>(lhs->inst);
+      const auto *rhs_call = dyn_cast_or_null<CallBase>(rhs->inst);
+      const HostStreamKind lhs_kind =
+          detail::classifyHostStream(lhs_call, lhs->stream);
+      const HostStreamKind rhs_kind =
+          detail::classifyHostStream(rhs_call, rhs->stream);
+      if (operations_ordered(lhs->inst, lhs_kind, lhs->stream, rhs->inst,
+                             rhs_kind, rhs->stream)) {
+        continue;
+      }
+      InterKernelRaceInfo race;
+      race.first_transfer = lhs->inst;
+      race.second_transfer = rhs->inst;
+      race.ordering_reason = "unordered opaque asynchronous transfers";
+      race.symbolic = true;
+      race.kind = RaceKind::InterKernelHazard;
+      race.alias_precision = AliasPrecision::Ambiguous;
+      race.required_fence_scope = SynchronizationScope::Device;
+      race.confidence = 0.2;
       m_inter_kernel_races.push_back(std::move(race));
     }
   }

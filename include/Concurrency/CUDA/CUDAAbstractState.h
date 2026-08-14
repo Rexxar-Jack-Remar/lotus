@@ -134,6 +134,7 @@ struct CUDAProtocolEpoch {
   ProtocolState state = ProtocolState::Unknown;
   const llvm::Instruction *entry = nullptr;
   const llvm::Instruction *exit = nullptr;
+  std::vector<const llvm::Instruction *> possible_exits;
   int scope = 0;
 };
 
@@ -149,6 +150,8 @@ struct CUDAParticipantSet {
   uint32_t max_block = 0;
   uint32_t min_grid = 0;
   uint32_t max_grid = 0;
+  uint32_t lane_mask = 0xffffffffu;
+  bool has_lane_mask = false;
   bool is_exact = false;
   bool is_symbolic = false;
   ParticipantCertainty certainty = ParticipantCertainty::Unknown;

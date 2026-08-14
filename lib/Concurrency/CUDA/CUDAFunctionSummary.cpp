@@ -2,6 +2,8 @@
 
 #include "Concurrency/Utils/ThreadAPI.h"
 
+#include <optional>
+
 #include <llvm/ADT/STLExtras.h>
 #include <llvm/Analysis/PostDominators.h>
 
@@ -11,7 +13,14 @@ namespace {
 
 bool isCUDACall(ThreadAPI::TD_TYPE type) { return type != ThreadAPI::TD_DUMMY; }
 
-std::optional<CUDAEffectClass> getEffectClass(ThreadAPI::TD_TYPE type) {
+std::optional<CUDAEffectClass> getEffectClass(ThreadAPI::TD_TYPE type,
+                                              const llvm::CallBase *call) {
+  const llvm::Function *callee = call ? call->getCalledFunction() : nullptr;
+  const llvm::StringRef name = callee ? callee->getName() : llvm::StringRef{};
+  if ((type == ThreadAPI::TD_CUDA_STREAM || type == ThreadAPI::TD_CUDA_EVENT) &&
+      (name.contains("Synchronize") || name.contains("WaitEvent"))) {
+    return CUDAEffectClass::Synchronization;
+  }
   switch (type) {
   case ThreadAPI::TD_CUDA_KERNEL_LAUNCH:
     return CUDAEffectClass::KernelLaunch;
@@ -46,6 +55,38 @@ void appendUnique(std::vector<const llvm::CallBase *> &calls,
   if (call && !llvm::is_contained(calls, call)) {
     calls.push_back(call);
   }
+}
+
+bool sameInstantiatedEffect(const CUDAInstantiatedEffect &lhs,
+                            const CUDAInstantiatedEffect &rhs) {
+  return lhs.effect_class == rhs.effect_class && lhs.origin == rhs.origin &&
+         lhs.callsite == rhs.callsite && lhs.bindings == rhs.bindings &&
+         lhs.must_execute == rhs.must_execute;
+}
+
+void appendUnique(std::vector<CUDAInstantiatedEffect> &effects,
+                  CUDAInstantiatedEffect effect) {
+  if (!llvm::any_of(effects, [&](const CUDAInstantiatedEffect &existing) {
+        return sameInstantiatedEffect(existing, effect);
+      })) {
+    effects.push_back(std::move(effect));
+  }
+}
+
+const llvm::Value *substituteValue(
+    const llvm::Value *value,
+    const std::vector<std::pair<const llvm::Argument *, const llvm::Value *>>
+        &arguments) {
+  const auto *argument = llvm::dyn_cast_or_null<llvm::Argument>(value);
+  if (!argument) {
+    return value;
+  }
+  for (const auto &mapping : arguments) {
+    if (mapping.first == argument) {
+      return mapping.second;
+    }
+  }
+  return value;
 }
 
 } // anonymous namespace
@@ -113,7 +154,7 @@ void CUDAFunctionSummaryAnalysis::runAnalysis() {
           default:
             break;
           }
-          if (auto effect_class = getEffectClass(td_type)) {
+          if (auto effect_class = getEffectClass(td_type, call)) {
             CUDAEffectSummary &effect = summary.effects[*effect_class];
             appendUnique(effect.may, call);
             const llvm::BasicBlock *entry = &fn.getEntryBlock();
@@ -123,6 +164,14 @@ void CUDAFunctionSummaryAnalysis::runAnalysis() {
                 post_dom_tree.dominates(call_block, entry)) {
               appendUnique(effect.must, call);
             }
+            CUDAInstantiatedEffect instantiated;
+            instantiated.effect_class = *effect_class;
+            instantiated.origin = call;
+            instantiated.must_execute = llvm::is_contained(effect.must, call);
+            for (const llvm::Argument &argument : fn.args()) {
+              instantiated.bindings.push_back({&argument, &argument});
+            }
+            appendUnique(summary.instantiated_effects, std::move(instantiated));
           }
         }
 
@@ -144,8 +193,7 @@ void CUDAFunctionSummaryAnalysis::runAnalysis() {
           callsite.must_execute =
               post_dom_tree.getNode(call->getParent()) &&
               post_dom_tree.getNode(&fn.getEntryBlock()) &&
-              post_dom_tree.dominates(call->getParent(),
-                                      &fn.getEntryBlock());
+              post_dom_tree.dominates(call->getParent(), &fn.getEntryBlock());
           unsigned index = 0;
           for (const llvm::Argument &formal : callee->args()) {
             if (index >= call->arg_size()) {
@@ -181,6 +229,8 @@ void CUDAFunctionSummaryAnalysis::runAnalysis() {
         orig_effect_count += effect.second.may.size();
         orig_effect_count += effect.second.must.size();
       }
+      const size_t orig_instantiated_count =
+          summary.instantiated_effects.size();
 
       for (const llvm::Function *callee : summary.callees) {
         auto it = m_summaries.find(callee);
@@ -286,6 +336,18 @@ void CUDAFunctionSummaryAnalysis::runAnalysis() {
             }
           }
         }
+        for (const CUDAInstantiatedEffect &callee_effect :
+             callee_it->second.instantiated_effects) {
+          CUDAInstantiatedEffect instantiated = callee_effect;
+          instantiated.callsite = callsite.callsite;
+          instantiated.must_execute =
+              callsite.must_execute && callee_effect.must_execute;
+          for (auto &binding : instantiated.bindings) {
+            binding.second =
+                substituteValue(binding.second, callsite.arguments);
+          }
+          appendUnique(summary.instantiated_effects, std::move(instantiated));
+        }
       }
 
       size_t new_effect_count = 0;
@@ -302,7 +364,8 @@ void CUDAFunctionSummaryAnalysis::runAnalysis() {
           summary.event_ops.size() != orig_event_count ||
           summary.texture_ops.size() != orig_texture_count ||
           summary.surface_ops.size() != orig_surface_count ||
-          new_effect_count != orig_effect_count) {
+          new_effect_count != orig_effect_count ||
+          summary.instantiated_effects.size() != orig_instantiated_count) {
         changed = true;
       }
     }

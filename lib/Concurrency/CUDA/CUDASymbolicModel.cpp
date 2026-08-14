@@ -24,7 +24,20 @@ static std::optional<int64_t> addIfKnown(const std::optional<int64_t> &lhs,
   if (!lhs || !rhs) {
     return std::nullopt;
   }
-  return subtract ? (*lhs - *rhs) : (*lhs + *rhs);
+  int64_t result = 0;
+  const bool overflow = subtract ? __builtin_sub_overflow(*lhs, *rhs, &result)
+                                 : __builtin_add_overflow(*lhs, *rhs, &result);
+  return overflow ? std::nullopt : std::optional<int64_t>(result);
+}
+
+static bool combineCoefficient(int64_t lhs, int64_t rhs, bool subtract,
+                               int64_t &result) {
+  return !(subtract ? __builtin_sub_overflow(lhs, rhs, &result)
+                    : __builtin_add_overflow(lhs, rhs, &result));
+}
+
+static bool scaleCoefficient(int64_t value, int64_t scale, int64_t &result) {
+  return !__builtin_mul_overflow(value, scale, &result);
 }
 
 static BuiltinKind classifyName(StringRef name) {
@@ -153,37 +166,44 @@ static void mergePatterns(AffineAccessPattern &dst,
     dst.non_affine = lhs.non_affine || rhs.non_affine;
     return;
   }
-  dst.constant =
-      subtract ? lhs.constant - rhs.constant : lhs.constant + rhs.constant;
-  dst.thread_idx_x = subtract ? lhs.thread_idx_x - rhs.thread_idx_x
-                              : lhs.thread_idx_x + rhs.thread_idx_x;
-  dst.thread_idx_y = subtract ? lhs.thread_idx_y - rhs.thread_idx_y
-                              : lhs.thread_idx_y + rhs.thread_idx_y;
-  dst.thread_idx_z = subtract ? lhs.thread_idx_z - rhs.thread_idx_z
-                              : lhs.thread_idx_z + rhs.thread_idx_z;
-  dst.block_idx_x = subtract ? lhs.block_idx_x - rhs.block_idx_x
-                             : lhs.block_idx_x + rhs.block_idx_x;
-  dst.block_idx_y = subtract ? lhs.block_idx_y - rhs.block_idx_y
-                             : lhs.block_idx_y + rhs.block_idx_y;
-  dst.block_idx_z = subtract ? lhs.block_idx_z - rhs.block_idx_z
-                             : lhs.block_idx_z + rhs.block_idx_z;
-  dst.lane_id =
-      subtract ? lhs.lane_id - rhs.lane_id : lhs.lane_id + rhs.lane_id;
+  if (!combineCoefficient(lhs.constant, rhs.constant, subtract, dst.constant) ||
+      !combineCoefficient(lhs.thread_idx_x, rhs.thread_idx_x, subtract,
+                          dst.thread_idx_x) ||
+      !combineCoefficient(lhs.thread_idx_y, rhs.thread_idx_y, subtract,
+                          dst.thread_idx_y) ||
+      !combineCoefficient(lhs.thread_idx_z, rhs.thread_idx_z, subtract,
+                          dst.thread_idx_z) ||
+      !combineCoefficient(lhs.block_idx_x, rhs.block_idx_x, subtract,
+                          dst.block_idx_x) ||
+      !combineCoefficient(lhs.block_idx_y, rhs.block_idx_y, subtract,
+                          dst.block_idx_y) ||
+      !combineCoefficient(lhs.block_idx_z, rhs.block_idx_z, subtract,
+                          dst.block_idx_z) ||
+      !combineCoefficient(lhs.lane_id, rhs.lane_id, subtract, dst.lane_id)) {
+    dst = {};
+    dst.non_affine = true;
+    return;
+  }
   dst.valid = true;
   dst.exact = lhs.exact && rhs.exact;
   dst.non_affine = lhs.non_affine || rhs.non_affine;
   dst.participation = std::max(lhs.participation, rhs.participation);
 }
 
-static void scalePattern(AffineAccessPattern &pattern, int64_t scale) {
-  pattern.constant *= scale;
-  pattern.thread_idx_x *= scale;
-  pattern.thread_idx_y *= scale;
-  pattern.thread_idx_z *= scale;
-  pattern.block_idx_x *= scale;
-  pattern.block_idx_y *= scale;
-  pattern.block_idx_z *= scale;
-  pattern.lane_id *= scale;
+static bool scalePattern(AffineAccessPattern &pattern, int64_t scale) {
+  AffineAccessPattern scaled = pattern;
+  if (!scaleCoefficient(pattern.constant, scale, scaled.constant) ||
+      !scaleCoefficient(pattern.thread_idx_x, scale, scaled.thread_idx_x) ||
+      !scaleCoefficient(pattern.thread_idx_y, scale, scaled.thread_idx_y) ||
+      !scaleCoefficient(pattern.thread_idx_z, scale, scaled.thread_idx_z) ||
+      !scaleCoefficient(pattern.block_idx_x, scale, scaled.block_idx_x) ||
+      !scaleCoefficient(pattern.block_idx_y, scale, scaled.block_idx_y) ||
+      !scaleCoefficient(pattern.block_idx_z, scale, scaled.block_idx_z) ||
+      !scaleCoefficient(pattern.lane_id, scale, scaled.lane_id)) {
+    return false;
+  }
+  pattern = scaled;
+  return true;
 }
 
 static void markNonAffine(AffineAccessPattern &pattern) {
@@ -221,7 +241,10 @@ static bool tryScalePattern(AffineAccessPattern &pattern, int64_t scale) {
   if (!pattern.valid) {
     return false;
   }
-  scalePattern(pattern, scale);
+  if (!scalePattern(pattern, scale)) {
+    markNonAffine(pattern);
+    return false;
+  }
   pattern = normalizePattern(pattern);
   return true;
 }
@@ -287,7 +310,18 @@ canonicalizePattern(const AffineAccessPattern &pattern,
 
 static UniformityClass mergeUniformity(UniformityClass lhs,
                                        UniformityClass rhs) {
-  return std::max(lhs, rhs);
+  if (lhs == UniformityClass::ThreadVarying ||
+      rhs == UniformityClass::ThreadVarying) {
+    return UniformityClass::ThreadVarying;
+  }
+  if (lhs == UniformityClass::Unknown || rhs == UniformityClass::Unknown) {
+    return UniformityClass::Unknown;
+  }
+  if (lhs == UniformityClass::WarpUniform ||
+      rhs == UniformityClass::WarpUniform) {
+    return UniformityClass::WarpUniform;
+  }
+  return UniformityClass::BlockUniform;
 }
 
 } // namespace
@@ -317,7 +351,11 @@ BuiltinKind CUDASymbolicModel::classifyBuiltin(const Value *value) {
 bool CUDASymbolicModel::dependsOnThreadBuiltin(const Value *value) {
   return dependsOnBuiltins(value,
                            {BuiltinKind::ThreadIdxX, BuiltinKind::ThreadIdxY,
-                            BuiltinKind::ThreadIdxZ, BuiltinKind::LaneId});
+                            BuiltinKind::ThreadIdxZ, BuiltinKind::LaneId,
+                            BuiltinKind::Shuffle, BuiltinKind::ShuffleDown,
+                            BuiltinKind::ShuffleUp, BuiltinKind::ShuffleXor,
+                            BuiltinKind::LaneMaskLt, BuiltinKind::LaneMaskLe,
+                            BuiltinKind::LaneMaskGt, BuiltinKind::LaneMaskGe});
 }
 
 bool CUDASymbolicModel::dependsOnBlockBuiltin(const Value *value) {
@@ -351,7 +389,10 @@ CUDASymbolicModel::evaluateConstantInt(const Value *value) {
       auto lhs = evaluateConstantInt(ce->getOperand(0));
       auto rhs = evaluateConstantInt(ce->getOperand(1));
       if (lhs && rhs) {
-        return (*lhs) * (*rhs);
+        int64_t result = 0;
+        return __builtin_mul_overflow(*lhs, *rhs, &result)
+                   ? std::nullopt
+                   : std::optional<int64_t>(result);
       }
     }
     return std::nullopt;
@@ -371,7 +412,10 @@ CUDASymbolicModel::evaluateConstantInt(const Value *value) {
       auto rhs = evaluateConstantInt(inst->getOperand(1));
       if (lhs && rhs) {
         if (inst->getOpcode() == Instruction::Mul) {
-          return (*lhs) * (*rhs);
+          int64_t result = 0;
+          return __builtin_mul_overflow(*lhs, *rhs, &result)
+                     ? std::nullopt
+                     : std::optional<int64_t>(result);
         }
         const auto *type = dyn_cast<IntegerType>(inst->getType());
         if (!type || *rhs < 0 ||
@@ -493,15 +537,22 @@ CUDASymbolicModel::extractAffineAccessPattern(const Value *value) {
   }
 
   if (const auto *op = dyn_cast<Operator>(value)) {
-    if (op->getOpcode() == Instruction::ZExt ||
-        op->getOpcode() == Instruction::SExt ||
-        op->getOpcode() == Instruction::BitCast) {
+    if (op->getOpcode() == Instruction::BitCast) {
       return normalizePattern(extractAffineAccessPattern(op->getOperand(0)));
     }
+    if (op->getOpcode() == Instruction::ZExt ||
+        op->getOpcode() == Instruction::SExt) {
+      pattern = extractAffineAccessPattern(op->getOperand(0));
+      if (pattern.valid) {
+        pattern.exact = false;
+        pattern.non_affine = true;
+      }
+      return pattern;
+    }
     if (op->getOpcode() == Instruction::Trunc) {
-      // Truncation is modular arithmetic. Without a range proof that no high
-      // bits are discarded, preserving an affine integer expression is
-      // unsound (for example, trunc i32 threadIdx.x to i8).
+      // Width-changing integer operations are only affine when their input
+      // range proves that extension/truncation preserves the mathematical
+      // value. No such range proof is available in this local model.
       markNonAffine(pattern);
       return pattern;
     }
@@ -518,56 +569,48 @@ CUDASymbolicModel::extractAffineAccessPattern(const Value *value) {
         markNonAffine(pattern);
         return pattern;
       }
-      pattern = lhs;
-      pattern.exact = lhs.exact && rhs.exact && lhs.constant == rhs.constant &&
-                      lhs.thread_idx_x == rhs.thread_idx_x &&
-                      lhs.thread_idx_y == rhs.thread_idx_y &&
-                      lhs.thread_idx_z == rhs.thread_idx_z &&
-                      lhs.block_idx_x == rhs.block_idx_x &&
-                      lhs.block_idx_y == rhs.block_idx_y &&
-                      lhs.block_idx_z == rhs.block_idx_z &&
-                      lhs.lane_id == rhs.lane_id;
-      pattern.non_affine = lhs.non_affine || rhs.non_affine;
-      pattern.participation = std::max(lhs.participation, rhs.participation);
-      return normalizePattern(pattern);
+      const bool identical =
+          lhs.exact && rhs.exact && lhs.constant == rhs.constant &&
+          lhs.thread_idx_x == rhs.thread_idx_x &&
+          lhs.thread_idx_y == rhs.thread_idx_y &&
+          lhs.thread_idx_z == rhs.thread_idx_z &&
+          lhs.block_idx_x == rhs.block_idx_x &&
+          lhs.block_idx_y == rhs.block_idx_y &&
+          lhs.block_idx_z == rhs.block_idx_z && lhs.lane_id == rhs.lane_id;
+      if (identical) {
+        return lhs;
+      }
+      markNonAffine(pattern);
+      return pattern;
     }
+    const auto *overflowing = dyn_cast<OverflowingBinaryOperator>(op);
+    const bool no_wrap = overflowing && overflowing->hasNoUnsignedWrap() &&
+                         overflowing->hasNoSignedWrap();
     if (op->getOpcode() == Instruction::Add) {
-      return mergeNormalizedPatterns(
+      pattern = mergeNormalizedPatterns(
           extractAffineAccessPattern(op->getOperand(0)),
           extractAffineAccessPattern(op->getOperand(1)));
+      if (pattern.valid && !no_wrap) {
+        pattern.exact = false;
+        pattern.non_affine = true;
+      }
+      return pattern;
     }
     if (op->getOpcode() == Instruction::Sub) {
-      return mergeNormalizedPatterns(
+      pattern = mergeNormalizedPatterns(
           extractAffineAccessPattern(op->getOperand(0)),
           extractAffineAccessPattern(op->getOperand(1)), true);
+      if (pattern.valid && !no_wrap) {
+        pattern.exact = false;
+        pattern.non_affine = true;
+      }
+      return pattern;
     }
-    if (op->getOpcode() == Instruction::And) {
-      if (auto mask = evaluateConstantInt(op->getOperand(1))) {
-        AffineAccessPattern lhs = extractAffineAccessPattern(op->getOperand(0));
-        if (lhs.valid && lhs.thread_idx_x == 0 && lhs.block_idx_x == 1 &&
-            lhs.lane_id == 0) {
-          lhs.constant &= *mask;
-          return normalizePattern(lhs);
-        }
-      }
-    }
-    if (op->getOpcode() == Instruction::Or) {
-      auto lhs_const = evaluateConstantInt(op->getOperand(0));
-      auto rhs_const = evaluateConstantInt(op->getOperand(1));
-      if (lhs_const && !rhs_const) {
-        pattern = extractAffineAccessPattern(op->getOperand(1));
-        if (pattern.valid) {
-          pattern.constant |= *lhs_const;
-        }
-        return normalizePattern(pattern);
-      }
-      if (!lhs_const && rhs_const) {
-        pattern = extractAffineAccessPattern(op->getOperand(0));
-        if (pattern.valid) {
-          pattern.constant |= *rhs_const;
-        }
-        return normalizePattern(pattern);
-      }
+    if (op->getOpcode() == Instruction::And ||
+        op->getOpcode() == Instruction::Or ||
+        op->getOpcode() == Instruction::Xor) {
+      markNonAffine(pattern);
+      return pattern;
     }
     if (op->getOpcode() == Instruction::Mul) {
       auto lhs_const = evaluateConstantInt(op->getOperand(0));
@@ -579,6 +622,10 @@ CUDASymbolicModel::extractAffineAccessPattern(const Value *value) {
         }
         const int64_t scale = *lhs_const;
         if (tryScalePattern(rhs, scale)) {
+          if (!no_wrap) {
+            rhs.exact = false;
+            rhs.non_affine = true;
+          }
           return rhs;
         }
         markNonAffine(pattern);
@@ -591,6 +638,10 @@ CUDASymbolicModel::extractAffineAccessPattern(const Value *value) {
         }
         const int64_t scale = *rhs_const;
         if (tryScalePattern(lhs, scale)) {
+          if (!no_wrap) {
+            lhs.exact = false;
+            lhs.non_affine = true;
+          }
           return lhs;
         }
         markNonAffine(pattern);
@@ -603,9 +654,7 @@ CUDASymbolicModel::extractAffineAccessPattern(const Value *value) {
       const auto *overflowing = dyn_cast<OverflowingBinaryOperator>(op);
       if (!shift || !integer_type || *shift < 0 ||
           static_cast<uint64_t>(*shift) >= integer_type->getBitWidth() ||
-          (!overflowing ||
-           (!overflowing->hasNoUnsignedWrap() &&
-            !overflowing->hasNoSignedWrap()))) {
+          !overflowing) {
         markNonAffine(pattern);
         return pattern;
       }
@@ -620,6 +669,11 @@ CUDASymbolicModel::extractAffineAccessPattern(const Value *value) {
         markNonAffine(pattern);
         return pattern;
       }
+      if (!overflowing->hasNoUnsignedWrap() ||
+          !overflowing->hasNoSignedWrap()) {
+        lhs.exact = false;
+        lhs.non_affine = true;
+      }
       return lhs;
     }
     if (op->getOpcode() == Instruction::SDiv ||
@@ -628,17 +682,29 @@ CUDASymbolicModel::extractAffineAccessPattern(const Value *value) {
         op->getOpcode() == Instruction::LShr) {
       auto divisor = evaluateConstantInt(op->getOperand(1));
       AffineAccessPattern lhs = extractAffineAccessPattern(op->getOperand(0));
-      if (divisor && lhs.valid && *divisor != 0) {
-        const int64_t scale = (op->getOpcode() == Instruction::AShr ||
-                               op->getOpcode() == Instruction::LShr)
-                                  ? (int64_t{1} << *divisor)
-                                  : *divisor;
-        if (tryDividePattern(lhs, scale)) {
-          return lhs;
-        }
-        markNonAffine(lhs);
-        return lhs;
+      if (!divisor || !lhs.valid || *divisor < 0) {
+        markNonAffine(pattern);
+        return pattern;
       }
+      int64_t scale = *divisor;
+      if (op->getOpcode() == Instruction::AShr ||
+          op->getOpcode() == Instruction::LShr) {
+        const auto *integer_type = dyn_cast<IntegerType>(op->getType());
+        if (!integer_type ||
+            static_cast<uint64_t>(*divisor) >= integer_type->getBitWidth() ||
+            *divisor >= 63) {
+          markNonAffine(pattern);
+          return pattern;
+        }
+        scale = int64_t{1} << *divisor;
+      }
+      if (scale == 0 || !tryDividePattern(lhs, scale)) {
+        markNonAffine(pattern);
+        return pattern;
+      }
+      lhs.exact = false;
+      lhs.non_affine = true;
+      return lhs;
     }
   }
 
@@ -716,44 +782,44 @@ UniformityClass CUDASymbolicModel::classifyUniformity(const Value *value) {
   case BuiltinKind::ThreadIdxY:
   case BuiltinKind::ThreadIdxZ:
   case BuiltinKind::LaneId:
+  case BuiltinKind::LaneMaskLt:
+  case BuiltinKind::LaneMaskLe:
+  case BuiltinKind::LaneMaskGt:
+  case BuiltinKind::LaneMaskGe:
+  case BuiltinKind::Shuffle:
+  case BuiltinKind::ShuffleDown:
+  case BuiltinKind::ShuffleUp:
+  case BuiltinKind::ShuffleXor:
     return UniformityClass::ThreadVarying;
   case BuiltinKind::BlockIdxX:
   case BuiltinKind::BlockIdxY:
   case BuiltinKind::BlockIdxZ:
+  case BuiltinKind::BlockDimX:
+  case BuiltinKind::BlockDimY:
+  case BuiltinKind::BlockDimZ:
+  case BuiltinKind::GridDimX:
+  case BuiltinKind::GridDimY:
+  case BuiltinKind::GridDimZ:
+  case BuiltinKind::WarpSize:
     return UniformityClass::BlockUniform;
   default:
     break;
   }
 
-  if (builtin == BuiltinKind::Shuffle || builtin == BuiltinKind::ShuffleDown ||
-      builtin == BuiltinKind::ShuffleUp || builtin == BuiltinKind::ShuffleXor ||
-      builtin == BuiltinKind::VoteAny || builtin == BuiltinKind::VoteAll ||
-      builtin == BuiltinKind::VoteBallot ||
-      builtin == BuiltinKind::LaneMaskLt ||
-      builtin == BuiltinKind::LaneMaskLe ||
-      builtin == BuiltinKind::LaneMaskGt ||
-      builtin == BuiltinKind::LaneMaskGe || builtin == BuiltinKind::WarpSize ||
-      builtin == BuiltinKind::BlockDimX || builtin == BuiltinKind::BlockDimY ||
-      builtin == BuiltinKind::BlockDimZ || builtin == BuiltinKind::GridDimX ||
-      builtin == BuiltinKind::GridDimY || builtin == BuiltinKind::GridDimZ) {
+  if (builtin == BuiltinKind::VoteAny || builtin == BuiltinKind::VoteAll ||
+      builtin == BuiltinKind::VoteBallot) {
     return UniformityClass::WarpUniform;
   }
 
   if (isa<Constant>(value)) {
-    return UniformityClass::WarpUniform;
+    return UniformityClass::BlockUniform;
   }
 
   if (const auto *inst = dyn_cast<Instruction>(value)) {
-    BuiltinKind kind = classifyBuiltin(inst);
-    if (kind == BuiltinKind::Shuffle || kind == BuiltinKind::ShuffleDown ||
-        kind == BuiltinKind::ShuffleUp || kind == BuiltinKind::ShuffleXor) {
-      return UniformityClass::WarpUniform;
+    if (isa<LoadInst>(inst) || isa<CallBase>(inst)) {
+      return UniformityClass::ThreadVarying;
     }
-    if (kind == BuiltinKind::VoteAny || kind == BuiltinKind::VoteAll ||
-        kind == BuiltinKind::VoteBallot) {
-      return UniformityClass::WarpUniform;
-    }
-    UniformityClass result = UniformityClass::WarpUniform;
+    UniformityClass result = UniformityClass::BlockUniform;
     for (const Value *operand : inst->operands()) {
       result = mergeUniformity(result, classifyUniformity(operand));
     }
@@ -761,7 +827,7 @@ UniformityClass CUDASymbolicModel::classifyUniformity(const Value *value) {
   }
 
   if (const auto *ce = dyn_cast<ConstantExpr>(value)) {
-    UniformityClass result = UniformityClass::WarpUniform;
+    UniformityClass result = UniformityClass::BlockUniform;
     for (const Value *operand : ce->operands()) {
       result = mergeUniformity(result, classifyUniformity(operand));
     }

@@ -25,8 +25,8 @@ constexpr CUDASemanticDescriptor kDescriptors[] = {
      CUDASemanticFamily::MemoryTransfer, -1, -1, 2, 0, -1},
     {TD::TD_CUDA_MALLOC, CUDAEffectKind::Malloc,
      CUDASemanticFamily::MemoryManagement, -1, -1, 1, 0, -1},
-    {TD::TD_CUDA_FREE, CUDAEffectKind::Free, CUDASemanticFamily::MemoryManagement,
-     -1, -1, -1, 0, -1},
+    {TD::TD_CUDA_FREE, CUDAEffectKind::Free,
+     CUDASemanticFamily::MemoryManagement, -1, -1, -1, 0, -1},
     {TD::TD_CUDA_UNIFIED_MEMORY, CUDAEffectKind::Unknown,
      CUDASemanticFamily::MemoryManagement, -1, -1, -1, -1, -1},
     {TD::TD_CUDA_STREAM, CUDAEffectKind::Unknown,
@@ -36,35 +36,95 @@ constexpr CUDASemanticDescriptor kDescriptors[] = {
 };
 
 constexpr CUDASemanticDescriptor kStreamCreate = {
-    TD::TD_CUDA_STREAM, CUDAEffectKind::StreamCreate,
-    CUDASemanticFamily::StreamOperation, -1, -1, -1, 0, -1};
+    TD::TD_CUDA_STREAM,
+    CUDAEffectKind::StreamCreate,
+    CUDASemanticFamily::StreamOperation,
+    -1,
+    -1,
+    -1,
+    0,
+    -1};
 constexpr CUDASemanticDescriptor kStreamDestroy = {
-    TD::TD_CUDA_STREAM, CUDAEffectKind::StreamDestroy,
-    CUDASemanticFamily::StreamOperation, 0, -1, -1, -1, -1};
+    TD::TD_CUDA_STREAM,
+    CUDAEffectKind::StreamDestroy,
+    CUDASemanticFamily::StreamOperation,
+    0,
+    -1,
+    -1,
+    -1,
+    -1};
 constexpr CUDASemanticDescriptor kStreamSync = {
-    TD::TD_CUDA_STREAM, CUDAEffectKind::StreamSync,
-    CUDASemanticFamily::StreamOperation, 0, -1, -1, -1, -1};
+    TD::TD_CUDA_STREAM,
+    CUDAEffectKind::StreamSync,
+    CUDASemanticFamily::StreamOperation,
+    0,
+    -1,
+    -1,
+    -1,
+    -1};
 constexpr CUDASemanticDescriptor kEventCreate = {
-    TD::TD_CUDA_EVENT, CUDAEffectKind::EventCreate,
-    CUDASemanticFamily::EventOperation, -1, -1, -1, 0, -1};
+    TD::TD_CUDA_EVENT,
+    CUDAEffectKind::EventCreate,
+    CUDASemanticFamily::EventOperation,
+    -1,
+    -1,
+    -1,
+    0,
+    -1};
 constexpr CUDASemanticDescriptor kEventRecord = {
-    TD::TD_CUDA_EVENT, CUDAEffectKind::EventRecord,
-    CUDASemanticFamily::EventOperation, 1, -1, -1, -1, 0};
+    TD::TD_CUDA_EVENT,
+    CUDAEffectKind::EventRecord,
+    CUDASemanticFamily::EventOperation,
+    1,
+    -1,
+    -1,
+    -1,
+    0};
 constexpr CUDASemanticDescriptor kEventWait = {
-    TD::TD_CUDA_EVENT, CUDAEffectKind::EventWait,
-    CUDASemanticFamily::EventOperation, 0, -1, -1, -1, 1};
+    TD::TD_CUDA_EVENT,
+    CUDAEffectKind::EventWait,
+    CUDASemanticFamily::EventOperation,
+    0,
+    -1,
+    -1,
+    -1,
+    1};
 constexpr CUDASemanticDescriptor kEventSync = {
-    TD::TD_CUDA_EVENT, CUDAEffectKind::EventSynchronize,
-    CUDASemanticFamily::EventOperation, -1, -1, -1, -1, 0};
+    TD::TD_CUDA_EVENT,
+    CUDAEffectKind::EventSynchronize,
+    CUDASemanticFamily::EventOperation,
+    -1,
+    -1,
+    -1,
+    -1,
+    0};
 constexpr CUDASemanticDescriptor kEventDestroy = {
-    TD::TD_CUDA_EVENT, CUDAEffectKind::EventDestroy,
-    CUDASemanticFamily::EventOperation, -1, -1, -1, -1, 0};
+    TD::TD_CUDA_EVENT,
+    CUDAEffectKind::EventDestroy,
+    CUDASemanticFamily::EventOperation,
+    -1,
+    -1,
+    -1,
+    -1,
+    0};
 constexpr CUDASemanticDescriptor kPrefetch = {
-    TD::TD_CUDA_UNIFIED_MEMORY, CUDAEffectKind::PrefetchAsync,
-    CUDASemanticFamily::MemoryTransfer, 3, 2, 1, -1, 0};
+    TD::TD_CUDA_UNIFIED_MEMORY,
+    CUDAEffectKind::PrefetchAsync,
+    CUDASemanticFamily::MemoryTransfer,
+    3,
+    2,
+    1,
+    -1,
+    0};
 constexpr CUDASemanticDescriptor kUnifiedMalloc = {
-    TD::TD_CUDA_UNIFIED_MEMORY, CUDAEffectKind::UnifiedMalloc,
-    CUDASemanticFamily::MemoryManagement, -1, -1, 1, 0, -1};
+    TD::TD_CUDA_UNIFIED_MEMORY,
+    CUDAEffectKind::UnifiedMalloc,
+    CUDASemanticFamily::MemoryManagement,
+    -1,
+    -1,
+    1,
+    0,
+    -1};
 
 } // anonymous namespace
 
@@ -82,8 +142,10 @@ const CUDASemanticDescriptor *lookupCUDASemantic(const llvm::CallBase *call) {
     return nullptr;
   }
   ThreadAPI *api = ThreadAPI::getThreadAPI();
-  const CUDASemanticDescriptor *family =
-      api ? lookupCUDASemantic(api->getType(call)) : nullptr;
+  if (!api || api->getRuntimeLibrary(call) != ThreadAPI::RuntimeLibrary::CUDA) {
+    return nullptr;
+  }
+  const CUDASemanticDescriptor *family = lookupCUDASemantic(api->getType(call));
   const llvm::Function *callee = call->getCalledFunction();
   if (!callee) {
     return family;
@@ -207,8 +269,7 @@ bool isEventOperation(ThreadAPI::TD_TYPE type) {
 bool isMemoryTransferOperation(ThreadAPI::TD_TYPE type) {
   return type == ThreadAPI::TD_CUDA_MEMCPY ||
          type == ThreadAPI::TD_CUDA_MEMSET ||
-         type == ThreadAPI::TD_CUDA_MALLOC ||
-         type == ThreadAPI::TD_CUDA_FREE ||
+         type == ThreadAPI::TD_CUDA_MALLOC || type == ThreadAPI::TD_CUDA_FREE ||
          type == ThreadAPI::TD_CUDA_UNIFIED_MEMORY;
 }
 
