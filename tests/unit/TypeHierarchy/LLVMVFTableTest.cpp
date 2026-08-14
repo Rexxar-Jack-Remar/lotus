@@ -1,13 +1,14 @@
-#include "Analysis/TypeHierarchy/DIBasedTypeHierarchyData.h"
 #include "Analysis/TypeHierarchy/LLVMVFTable.h"
-#include "Analysis/TypeHierarchy/LLVMVFTableData.h"
-#include "Analysis/TypeHierarchy/TypeHierarchyAnalysis.h"
 
 #include "llvm/IR/Function.h"
 #include "llvm/IR/LLVMContext.h"
 #include "llvm/IR/Module.h"
 #include "llvm/Support/JSON.h"
 #include "llvm/Support/raw_ostream.h"
+
+#include "Analysis/TypeHierarchy/DIBasedTypeHierarchyData.h"
+#include "Analysis/TypeHierarchy/LLVMVFTableData.h"
+#include "Analysis/TypeHierarchy/TypeHierarchyAnalysis.h"
 
 #include <gtest/gtest.h>
 
@@ -50,7 +51,7 @@ TEST(DIBasedTypeHierarchyDataTest, EscapedNamesProduceValidJson) {
   DIBasedTypeHierarchyData Data;
   Data.VertexTypes = {"type\"name"};
   Data.TransitiveDerivedIndex = {{0, 1}};
-  Data.Hierarchy = {"scope\\type"};
+  Data.Hierarchy = {0};
   Data.VTables = {{"line\nfunction"}};
 
   std::string Serialized;
@@ -62,10 +63,59 @@ TEST(DIBasedTypeHierarchyDataTest, EscapedNamesProduceValidJson) {
   if (!Parsed)
     FAIL() << toString(Parsed.takeError());
   auto RoundTrip = DIBasedTypeHierarchyData::loadJsonString(Serialized);
-  EXPECT_EQ(RoundTrip.VertexTypes, Data.VertexTypes);
-  EXPECT_EQ(RoundTrip.TransitiveDerivedIndex, Data.TransitiveDerivedIndex);
-  EXPECT_EQ(RoundTrip.Hierarchy, Data.Hierarchy);
-  EXPECT_EQ(RoundTrip.VTables, Data.VTables);
+  ASSERT_TRUE(static_cast<bool>(RoundTrip))
+      << llvm::toString(RoundTrip.takeError());
+  EXPECT_EQ(RoundTrip->VertexTypes, Data.VertexTypes);
+  EXPECT_EQ(RoundTrip->TransitiveDerivedIndex, Data.TransitiveDerivedIndex);
+  EXPECT_EQ(RoundTrip->Hierarchy, Data.Hierarchy);
+  EXPECT_EQ(RoundTrip->VTables, Data.VTables);
+}
+
+TEST(DIBasedTypeHierarchyDataTest, RejectsMalformedAndOutOfRangeData) {
+  auto Negative = DIBasedTypeHierarchyData::loadJsonString(R"({
+    "VertexTypes": ["A"],
+    "TransitiveDerivedIndex": [[0, 1]],
+    "Hierarchy": [-1],
+    "VTables": [[]]
+  })");
+  EXPECT_FALSE(static_cast<bool>(Negative));
+  llvm::consumeError(Negative.takeError());
+
+  auto Overflow = DIBasedTypeHierarchyData::loadJsonString(R"({
+    "VertexTypes": ["A"],
+    "TransitiveDerivedIndex": [[0, 1]],
+    "Hierarchy": [4294967296],
+    "VTables": [[]]
+  })");
+  EXPECT_FALSE(static_cast<bool>(Overflow));
+  llvm::consumeError(Overflow.takeError());
+
+  auto InvalidRange = DIBasedTypeHierarchyData::loadJsonString(R"({
+    "VertexTypes": ["A"],
+    "TransitiveDerivedIndex": [[0, 2]],
+    "Hierarchy": [0],
+    "VTables": [[]]
+  })");
+  EXPECT_FALSE(static_cast<bool>(InvalidRange));
+  llvm::consumeError(InvalidRange.takeError());
+
+  auto InvalidVertex = DIBasedTypeHierarchyData::loadJsonString(R"({
+    "VertexTypes": ["A"],
+    "TransitiveDerivedIndex": [[0, 1]],
+    "Hierarchy": [1],
+    "VTables": [[]]
+  })");
+  EXPECT_FALSE(static_cast<bool>(InvalidVertex));
+  llvm::consumeError(InvalidVertex.takeError());
+
+  auto MismatchedSizes = DIBasedTypeHierarchyData::loadJsonString(R"({
+    "VertexTypes": ["A"],
+    "TransitiveDerivedIndex": [],
+    "Hierarchy": [],
+    "VTables": [[]]
+  })");
+  EXPECT_FALSE(static_cast<bool>(MismatchedSizes));
+  llvm::consumeError(MismatchedSizes.takeError());
 }
 
 TEST(TypeHierarchyAnalysisTest, CalculateIsIdempotent) {

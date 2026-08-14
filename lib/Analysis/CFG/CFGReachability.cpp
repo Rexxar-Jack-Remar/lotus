@@ -4,24 +4,21 @@
 
 using namespace llvm;
 
-CFGReachability::CFGReachability(Function *F)
-    : AnalyzedFunction(F), AnalyzedVec(F->size(), false) {
+CFGReachability::CFGReachability(Function &F) : ReachableRows(F.size()) {
   unsigned Idx = 0;
-  for (auto &B : *F) {
+  for (auto &B : F) {
     ID2BB.push_back(&B);
     BB2ID[&B] = Idx;
     ++Idx;
   }
-  // Allocate one bit-vector row per block, all initialised to false.
-  ReachableMatrix.assign(F->size(), BitVector(F->size(), false));
 }
 
 // Returns true if there is a path from From to To in the CFG.
 bool CFGReachability::reachable(BasicBlock *From, BasicBlock *To) {
   assert(From && To);
-  assert(isValid(From) &&
+  assert(containsBlock(From) &&
          "CFGReachability: 'From' block not found — object may be stale");
-  assert(isValid(To) &&
+  assert(containsBlock(To) &&
          "CFGReachability: 'To' block not found — object may be stale");
 
   if (From == To)
@@ -31,13 +28,13 @@ bool CFGReachability::reachable(BasicBlock *From, BasicBlock *To) {
 
   std::unique_lock<std::mutex> lock(CacheMutex);
 
-  // Demand-driven: run the backward BFS only the first time To is queried.
-  if (!AnalyzedVec[DstBlockID]) {
+  auto &Row = ReachableRows[DstBlockID];
+  if (!Row) {
+    Row.emplace(static_cast<unsigned>(ID2BB.size()), false);
     analyze(To); // analyze() must be called with the lock held
-    AnalyzedVec[DstBlockID] = true;
   }
 
-  return ReachableMatrix[DstBlockID][BB2ID.at(From)];
+  return (*Row)[BB2ID.at(From)];
 }
 
 // Returns true if there is a path from instruction From to instruction To.
@@ -57,9 +54,9 @@ bool CFGReachability::reachable(Instruction *From, Instruction *To) {
   BasicBlock *ToB = To->getParent();
   assert(FromB && ToB);
   assert(
-      isValid(FromB) &&
+      containsBlock(FromB) &&
       "CFGReachability: 'From' instruction is outside the analyzed function");
-  assert(isValid(ToB) &&
+  assert(containsBlock(ToB) &&
          "CFGReachability: 'To' instruction is outside the analyzed function");
 
   if (From == To)
@@ -80,7 +77,7 @@ bool CFGReachability::reachable(Instruction *From, Instruction *To) {
 }
 
 bool CFGReachability::isOnCycle(BasicBlock *BB) {
-  assert(BB && isValid(BB));
+  assert(containsBlock(BB));
   for (BasicBlock *Succ : successors(BB)) {
     if (Succ == BB || reachable(Succ, BB))
       return true;
@@ -91,7 +88,8 @@ bool CFGReachability::isOnCycle(BasicBlock *BB) {
 void CFGReachability::analyze(BasicBlock *ToBB) {
   const unsigned ToBBID = BB2ID[ToBB];
   BitVector VisitedVec(static_cast<unsigned>(ID2BB.size()));
-  ReachableVec &ToReachability = ReachableMatrix[ToBBID];
+  assert(ReachableRows[ToBBID]);
+  ReachableVec &ToReachability = *ReachableRows[ToBBID];
 
   std::vector<BasicBlock *> Worklist;
   Worklist.push_back(ToBB);

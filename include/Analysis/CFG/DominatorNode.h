@@ -40,7 +40,7 @@ public:
 
   BasicBlock *getBlock(void) const;
   DominatorNode *getParent(void) const;
-  std::vector<DominatorNode *> getChildren(void) const;
+  const std::vector<DominatorNode *> &getChildren(void) const;
   uint32_t getLevel(void) const;
 
   raw_ostream &print(raw_ostream &stream, std::string prefixToUse = "");

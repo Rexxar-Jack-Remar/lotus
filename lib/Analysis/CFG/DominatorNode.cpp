@@ -62,7 +62,7 @@ BasicBlock *DominatorNode::getBlock(void) const { return B; }
 
 DominatorNode *DominatorNode::getParent(void) const { return parent; }
 
-std::vector<DominatorNode *> DominatorNode::getChildren(void) const {
+const std::vector<DominatorNode *> &DominatorNode::getChildren(void) const {
   return children;
 }
 

@@ -6,6 +6,8 @@
 
 #include <algorithm>
 
+using namespace llvm;
+
 char TopologicalOrder::ID = 0;
 
 void TopologicalOrder::getAnalysisUsage(AnalysisUsage &AU) const {
@@ -15,6 +17,9 @@ void TopologicalOrder::getAnalysisUsage(AnalysisUsage &AU) const {
 bool TopologicalOrder::runOnFunction(Function &F) {
   m_backEdges.clear();
   m_order.clear();
+
+  if (F.isDeclaration() || F.empty())
+    return false;
 
   FindFunctionBackedges(F, m_backEdges);
   std::sort(m_backEdges.begin(), m_backEdges.end());

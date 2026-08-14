@@ -7,6 +7,7 @@
 #include "llvm/IR/InstIterator.h"
 #include "llvm/IR/Instructions.h"
 #include "llvm/IR/Module.h"
+#include "llvm/IR/Operator.h"
 #include "llvm/IR/Value.h"
 #include "llvm/Pass.h"
 #include "llvm/Support/raw_ostream.h"
@@ -342,8 +343,10 @@ int TypeHierarchyAnalysis_Impl::getVtableIndex(const CallBase &CB) {
    */
   if (const LoadInst *LI =
           dyn_cast<LoadInst>(CB.getCalledOperand()->stripPointerCasts())) {
-    if (const GetElementPtrInst *GEP =
-            dyn_cast<GetElementPtrInst>(LI->getPointerOperand())) {
+    if (const GEPOperator *GEP = dyn_cast<GEPOperator>(
+            LI->getPointerOperand()->stripPointerCasts())) {
+      if (GEP->getNumIndices() != 1)
+        return -1;
       if (ConstantInt *CI = dyn_cast<ConstantInt>(GEP->getOperand(1))) {
         return CI->getZExtValue();
       }
@@ -520,6 +523,10 @@ void TypeHierarchyAnalysis_Impl::buildVtables(void) {
                         m_module.getContext(), "class." + class_name);
                     if (!class_typeinfo) {
                       class_typeinfo = StructType::getTypeByName(
+                          m_module.getContext(), "struct." + class_name);
+                    }
+                    if (!class_typeinfo) {
+                      class_typeinfo = StructType::getTypeByName(
                           m_module.getContext(), class_name);
                     }
 
@@ -660,7 +667,9 @@ bool mayBeVirtualCall(const CallBase &CB) {
     return false;
   }
   // Assume the first argument of CB is this, otherwise we bail out ...
-  const Value *this_ = CB.getOperand(0);
+  if (CB.arg_empty())
+    return false;
+  const Value *this_ = CB.getArgOperand(0);
   if (this_->getType()->isPointerTy()) {
     if (const StructType *this_type =
             dyn_cast<StructType>(this_->getType()->getPointerElementType())) {
@@ -689,7 +698,9 @@ bool TypeHierarchyAnalysis_Impl::resolveVirtualCall(const CallBase &CB,
     return false;
   }
   // Assume the first argument of CS is this, otherwise we bail out ...
-  const Value *this_ = CB.getOperand(0);
+  if (CB.arg_empty())
+    return false;
+  const Value *this_ = CB.getArgOperand(0);
   if (this_->getType()->isPointerTy()) {
     if (const StructType *this_type =
             dyn_cast<StructType>(this_->getType()->getPointerElementType())) {

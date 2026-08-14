@@ -1,12 +1,12 @@
+#include "llvm/IR/LLVMContext.h"
+#include "llvm/IR/Module.h"
+
 #include "Analysis/TypeHierarchy/DIBasedTypeHierarchy.h"
 #include "TestUtils/LLVMHelpers.h"
 
-#include <gtest/gtest.h>
-
 #include <string>
 
-#include "llvm/IR/LLVMContext.h"
-#include "llvm/IR/Module.h"
+#include <gtest/gtest.h>
 
 using namespace llvm;
 using namespace lotus;
@@ -14,12 +14,51 @@ using namespace lotus;
 namespace {
 
 using lotus::unittest::loadModule;
+using lotus::unittest::parseModuleChecked;
 
 std::string getTestFilePath(const std::string &FileName) {
   return std::string(LOTUS_TYPE_HIERARCHY_LL_DIR) + "/" + FileName;
 }
 
 } // namespace
+
+TEST(DIBasedTypeHierarchyTest, ResolvesInheritanceThroughODRIdentifier) {
+  LLVMContext Context;
+  auto M = parseModuleChecked(Context, R"(
+    source_filename = "canonical-di-type.ll"
+
+    !llvm.module.flags = !{!0}
+    !llvm.dbg.cu = !{!1}
+
+    !0 = !{i32 2, !"Debug Info Version", i32 3}
+    !1 = distinct !DICompileUnit(language: DW_LANG_C_plus_plus_14, file: !2,
+      producer: "test", isOptimized: false, runtimeVersion: 0,
+      emissionKind: FullDebug, retainedTypes: !3)
+    !2 = !DIFile(filename: "canonical.cpp", directory: ".")
+    !3 = !{!4, !5, !7}
+    !4 = distinct !DICompositeType(tag: DW_TAG_structure_type, name: "Base",
+      flags: DIFlagFwdDecl, identifier: "_ZTS4Base")
+    !5 = distinct !DICompositeType(tag: DW_TAG_structure_type, name: "Base",
+      file: !2, line: 1, size: 8, elements: !6, identifier: "_ZTS4Base")
+    !6 = !{}
+    !7 = distinct !DICompositeType(tag: DW_TAG_structure_type, name: "Derived",
+      file: !2, line: 2, size: 8, elements: !8, identifier: "_ZTS7Derived")
+    !8 = !{!9}
+    !9 = !DIDerivedType(tag: DW_TAG_inheritance, scope: !7, baseType: !4,
+      extraData: i32 0)
+  )");
+  ASSERT_NE(M, nullptr);
+
+  DIBasedTypeHierarchy Hierarchy(*M);
+  EXPECT_EQ(Hierarchy.size(), 2u);
+
+  auto Base = Hierarchy.getType("_ZTS4Base");
+  auto Derived = Hierarchy.getType("_ZTS7Derived");
+  ASSERT_TRUE(Base.has_value());
+  ASSERT_TRUE(Derived.has_value());
+  EXPECT_FALSE(cast<DICompositeType>(*Base)->isForwardDecl());
+  EXPECT_TRUE(Hierarchy.isSubType(*Base, *Derived));
+}
 
 TEST(DIBasedTypeHierarchyTest, TransitivelyReachableTypes_9) {
   LLVMContext Context;
@@ -136,7 +175,8 @@ TEST(DIBasedTypeHierarchyTest, TransitivelyReachableTypes_12) {
 }
 TEST(DIBasedTypeHierarchyTest, TransitivelyReachableTypes_12_b) {
   LLVMContext Context;
-  auto M = loadModule(getTestFilePath("type_hierarchy_12_b_cpp_dbg.ll"), Context);
+  auto M =
+      loadModule(getTestFilePath("type_hierarchy_12_b_cpp_dbg.ll"), Context);
   ASSERT_NE(nullptr, M);
   DIBasedTypeHierarchy DBTH(*M);
 
@@ -164,7 +204,8 @@ TEST(DIBasedTypeHierarchyTest, TransitivelyReachableTypes_12_b) {
 }
 TEST(DIBasedTypeHierarchyTest, TransitivelyReachableTypes_12_c) {
   LLVMContext Context;
-  auto M = loadModule(getTestFilePath("type_hierarchy_12_c_cpp_dbg.ll"), Context);
+  auto M =
+      loadModule(getTestFilePath("type_hierarchy_12_c_cpp_dbg.ll"), Context);
   ASSERT_NE(nullptr, M);
   DIBasedTypeHierarchy DBTH(*M);
 

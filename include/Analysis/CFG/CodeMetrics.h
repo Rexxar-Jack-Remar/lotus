@@ -52,7 +52,8 @@ unsigned calcCyclomaticComplexity(llvm::Function &F);
 /// Collect loop count and maximum nesting depth using LoopInfo.
 LoopMetrics collectLoopMetrics(llvm::Function &F, llvm::LoopInfo &LI);
 
-/// Compute NPath complexity (acyclic path count, back-edges skipped).
+/// Compute NPath complexity as the number of acyclic paths to actual CFG
+/// terminals, with back-edges skipped. Cycles with no exit contribute zero.
 /// Returns UINT64_MAX when the value saturates.
 uint64_t nPath(llvm::Function &F);
 

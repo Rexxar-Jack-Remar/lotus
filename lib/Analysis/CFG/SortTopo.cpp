@@ -4,7 +4,10 @@
 #include "llvm/Analysis/CFG.h"
 #include "llvm/IR/CFG.h"
 #include "llvm/Support/raw_ostream.h"
+
 #include <optional>
+
+using namespace llvm;
 
 namespace llvm {
 class BlockedEdges {
@@ -35,7 +38,8 @@ public:
   explicit po_iterator_storage(BlockedEdges &VSet) : Visited(VSet) {}
   po_iterator_storage(const po_iterator_storage &S) = default;
 
-  bool insertEdge(llvm::Optional<const BasicBlock *> src, const BasicBlock *dst) {
+  bool insertEdge(llvm::Optional<const BasicBlock *> src,
+                  const BasicBlock *dst) {
     if (!src)
       return Visited.insert(dst);
 
@@ -59,6 +63,6 @@ void RevTopoSort(const llvm::Function &F,
   FindFunctionBackedges(F, backEdges);
 
   const llvm::Function *f = &F;
-  BlockedEdges ble(backEdges);
+  llvm::BlockedEdges ble(backEdges);
   std::copy(po_ext_begin(f, ble), po_ext_end(f, ble), std::back_inserter(out));
 }

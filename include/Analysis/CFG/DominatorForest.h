@@ -20,7 +20,8 @@
  OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE
  OR OTHER DEALINGS IN THE SOFTWARE.
  */
-/** @file DominatorForest.h @brief Dominator forest data structure for CFG analysis. */
+/** @file DominatorForest.h @brief Dominator forest data structure for CFG
+ * analysis. */
 #ifndef NOELLE_SRC_CORE_DOMINATORS_DOMINATORFOREST_H_
 #define NOELLE_SRC_CORE_DOMINATORS_DOMINATORFOREST_H_
 
@@ -34,6 +35,8 @@ public:
 
   DominatorForest(llvm::PostDominatorTree &PDT);
 
+  /// Build a relation-preserving projection over \p bbSubset. Each retained
+  /// node is linked to its nearest retained ancestor in \p DTS.
   DominatorForest(DominatorForest &DTS, std::set<BasicBlock *> &bbSubset);
 
   // declare explicit deep-copy constructor and copy-assignment
@@ -97,6 +100,7 @@ private:
   template <typename NodeType> void cloneNodes(std::set<NodeType *> &nodes);
 
   void cloneLLVMNodes(std::set<DTAliases::Node *> &nodesToClone);
+  void recomputeLevels();
 
   void addDescendants(DominatorNode *n, std::set<BasicBlock *> &ds) const;
 

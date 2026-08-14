@@ -98,17 +98,16 @@ uint64_t nPath(Function &F) {
   for (auto it = order.rbegin(); it != order.rend(); ++it) {
     const BasicBlock *BB = *it;
     uint64_t sum = 0;
-    bool hasNonBackSucc = false;
     for (const BasicBlock *Succ : successors(BB)) {
       if (isBackEdge(BB, Succ))
         continue;
-      hasNonBackSucc = true;
       auto it2 = paths.find(Succ);
       uint64_t succPaths = (it2 != paths.end()) ? it2->second : 0;
       sum = sat_add(sum, succPaths);
     }
-    // A block with no non-back-edge successors is an exit: counts as 1 path.
-    paths[BB] = hasNonBackSucc ? sum : 1;
+    // Only original CFG terminals complete a path. A block whose successors
+    // are all suppressed back-edges is not a synthetic exit.
+    paths[BB] = succ_empty(BB) ? 1 : sum;
   }
 
   return paths[&F.getEntryBlock()];

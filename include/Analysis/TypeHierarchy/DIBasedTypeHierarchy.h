@@ -1,4 +1,5 @@
-/** @file DIBasedTypeHierarchy.h @brief Debug-info-based type hierarchy analysis. */
+/** @file DIBasedTypeHierarchy.h @brief Debug-info-based type hierarchy
+ * analysis. */
 /******************************************************************************
  * Copyright (c) 2023 Fabian Schiebel.
  * All rights reserved. This program and the accompanying materials are made
@@ -11,6 +12,7 @@
 #ifndef LOTUS_ANALYSIS_TYPEHIERARCHY_DIBASEDTYPEHIERARCHY_H
 #define LOTUS_ANALYSIS_TYPEHIERARCHY_DIBASEDTYPEHIERARCHY_H
 
+#include "llvm/ADT/BitVector.h"
 #include "llvm/ADT/DenseMap.h"
 #include "llvm/ADT/StringMap.h"
 #include "llvm/ADT/StringRef.h"
@@ -22,6 +24,7 @@
 #include "Analysis/TypeHierarchy/TypeHierarchy.h"
 
 #include <deque>
+#include <mutex>
 #include <optional>
 
 namespace llvm {
@@ -61,23 +64,23 @@ public:
                                 const DIBasedTypeHierarchyData &SerializedData);
   ~DIBasedTypeHierarchy() override = default;
 
-  __attribute__((warn_unused_result)) bool hasType(ClassType Type) const override {
+  __attribute__((warn_unused_result)) bool
+  hasType(ClassType Type) const override {
     return TypeToVertex.count(Type);
   }
 
   __attribute__((warn_unused_result)) bool
-  isSubType(ClassType BaseType, ClassType CandidateSubtype) const override {
-    return llvm::is_contained(subTypesOf(BaseType), CandidateSubtype);
-  }
+  isSubType(ClassType BaseType, ClassType CandidateSubtype) const override;
 
-  __attribute__((warn_unused_result)) std::set<ClassType> getSubTypes(ClassType Type) const override {
+  __attribute__((warn_unused_result)) std::set<ClassType>
+  getSubTypes(ClassType Type) const override {
     const auto &Range = subTypesOf(Type);
     return {Range.begin(), Range.end()};
   }
 
   /// A more efficient version of getSubTypes()
   __attribute__((warn_unused_result)) llvm::iterator_range<const ClassType *>
-  subTypesOf(ClassType Ty) const noexcept;
+  subTypesOf(ClassType Ty) const;
 
   __attribute__((warn_unused_result)) std::optional<ClassType>
   getType(llvm::StringRef TypeName) const noexcept override {
@@ -88,13 +91,18 @@ public:
     return std::nullopt;
   }
 
-  __attribute__((warn_unused_result)) std::vector<ClassType> getAllTypes() const override {
+  __attribute__((warn_unused_result)) std::vector<ClassType>
+  getAllTypes() const override {
     return {VertexTypes.begin(), VertexTypes.end()};
   }
 
-  __attribute__((warn_unused_result)) const auto &getAllVTables() const noexcept { return VTables; }
+  __attribute__((warn_unused_result)) const auto &
+  getAllVTables() const noexcept {
+    return VTables;
+  }
 
-  __attribute__((warn_unused_result)) static llvm::StringRef typeName(ClassType Type) {
+  __attribute__((warn_unused_result)) static llvm::StringRef
+  typeName(ClassType Type) {
     if (const auto *CompTy = llvm::dyn_cast<llvm::DICompositeType>(Type)) {
       auto Ident = CompTy->getIdentifier();
       return Ident.empty() ? CompTy->getName() : Ident;
@@ -102,7 +110,8 @@ public:
     return Type->getName();
   }
 
-  __attribute__((warn_unused_result)) llvm::StringRef getTypeName(ClassType Type) const override {
+  __attribute__((warn_unused_result)) llvm::StringRef
+  getTypeName(ClassType Type) const override {
     return typeName(Type);
   }
 
@@ -124,23 +133,26 @@ public:
   void printAsJson(llvm::raw_ostream &OS = llvm::outs()) const override;
 
 private:
-  __attribute__((warn_unused_result)) DIBasedTypeHierarchyData getTypeHierarchyData() const;
+  __attribute__((warn_unused_result)) DIBasedTypeHierarchyData
+  getTypeHierarchyData() const;
   __attribute__((warn_unused_result)) llvm::iterator_range<const ClassType *>
-  subTypesOf(size_t TypeIdx) const noexcept;
+  subTypesOf(size_t TypeIdx) const;
+  const std::vector<ClassType> &ensureReachability(size_t TypeIdx) const;
 
   // ---
 
   llvm::StringMap<ClassType> NameToType;
-  // Map each type to an integer index that is used by VertexTypes and the
-  // cached reachability ranges below.
+  // Multiple declaration/definition metadata nodes may map to one canonical
+  // vertex when they share a non-empty ODR identifier.
   llvm::DenseMap<ClassType, size_t> TypeToVertex;
   // The class types we care about ("VertexProperties")
   std::vector<const llvm::DICompositeType *> VertexTypes;
-  std::vector<std::pair<uint32_t, uint32_t>> TransitiveDerivedIndex;
-  // Concatenated, duplicate-free descendant ranges. Each type has its own
-  // [begin, end) range in this vector, so multiple-inheritance DAGs do not rely
-  // on invalid tree-style preorder intervals.
-  std::vector<ClassType> Hierarchy;
+  // Direct inheritance graph. Transitive descendants are computed and cached
+  // only for roots that are actually queried.
+  std::vector<std::vector<uint32_t>> DirectDerivedTypes;
+  mutable std::vector<std::vector<ClassType>> ReachabilityCache;
+  mutable std::vector<std::optional<llvm::BitVector>> ReachabilityBits;
+  mutable std::mutex ReachabilityMutex;
 
   // The VTables of the polymorphic types in the TH. default-constructed if not
   // exists

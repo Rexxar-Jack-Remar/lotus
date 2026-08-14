@@ -18,7 +18,7 @@ Provides reachability analysis for basic blocks and instructions within a functi
 ```cpp
 #include "Analysis/CFG/CFGReachability.h"
 
-CFGReachability reach(&F);
+CFGReachability reach(F);
 bool reachable = reach.reachable(FromBB, ToBB);
 bool reachable = reach.reachable(FromInst, ToInst);
 ```
@@ -27,7 +27,9 @@ bool reachable = reach.reachable(FromInst, ToInst);
 Unified interface for accessing both dominator and post-dominator information. Wraps LLVM's DominatorTree and PostDominatorTree.
 
 ### `TopologicalOrder.cpp`
-Constructs topological order of a CFG and identifies back edges. Provides iterators for forward and reverse topological traversal.
+Constructs an entry-reachable topological order after removing back edges.
+Unreachable blocks are not included. Provides iterators for forward and reverse
+topological traversal.
 
 **Usage:**
 ```cpp
@@ -38,9 +40,6 @@ for (auto *BB : topo) {
 }
 bool isBackEdge = topo.isBackEdge(srcBB, dstBB);
 ```
-
-### `WeakTopologicalOrder.cpp` / `WeakTopologicalOrder2.cpp`
-Weak topological ordering algorithms for CFG traversal.
 
 ### `CodeMetrics.h`
 Computes code complexity metrics:

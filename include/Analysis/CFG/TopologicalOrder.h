@@ -7,15 +7,15 @@
 
 #include <vector>
 
-using namespace llvm;
+/// Constructs an entry-reachable topological order after removing back-edges.
+/// Declarations produce an empty order; unreachable blocks are not included.
+class TopologicalOrder : public llvm::FunctionPass {
 
-/// Constructs topological order of a CFG of a function
-class TopologicalOrder : public FunctionPass {
-
-  SmallVector<std::pair<const BasicBlock *, const BasicBlock *>, 16>
+  llvm::SmallVector<
+      std::pair<const llvm::BasicBlock *, const llvm::BasicBlock *>, 16>
       m_backEdges;
 
-  using BlockVector = std::vector<const BasicBlock *>;
+  using BlockVector = std::vector<const llvm::BasicBlock *>;
   BlockVector m_order;
 
 public:
@@ -23,14 +23,15 @@ public:
 
   TopologicalOrder() : FunctionPass(ID) {}
 
-  virtual void getAnalysisUsage(AnalysisUsage &AU) const override;
-  virtual bool runOnFunction(Function &F) override;
+  void getAnalysisUsage(llvm::AnalysisUsage &AU) const override;
+  bool runOnFunction(llvm::Function &F) override;
   virtual void releaseMemory() override {
     m_order.clear();
     m_backEdges.clear();
   }
 
-  bool isBackEdge(const BasicBlock &src, const BasicBlock &dst) const;
+  bool isBackEdge(const llvm::BasicBlock &src,
+                  const llvm::BasicBlock &dst) const;
 
   using iterator = BlockVector::iterator;
   using const_iterator = BlockVector::const_iterator;
@@ -58,8 +59,8 @@ public:
     return llvm::make_range(rbegin(), rend());
   }
 
-  void print(raw_ostream &out, const Module *m) const override;
-  StringRef getPassName() const override { return "TopologicalOrder"; }
+  void print(llvm::raw_ostream &out, const llvm::Module *m) const override;
+  llvm::StringRef getPassName() const override { return "TopologicalOrder"; }
 };
 
 #endif

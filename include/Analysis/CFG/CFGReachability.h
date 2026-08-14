@@ -5,6 +5,7 @@
 #include <map>
 #include <memory>
 #include <mutex>
+#include <optional>
 #include <vector>
 
 #include <llvm/ADT/BitVector.h>
@@ -21,14 +22,14 @@
 /// a backward BFS from that block marks all predecessor blocks that can reach
 /// it. Results are cached in a per-destination bit-vector.
 ///
-/// Validity: the object is tied to the function's block layout at construction
-/// time. If blocks are added, removed, or the function is otherwise modified
-/// after construction, the object must be discarded and rebuilt — calling
-/// reachable() on a stale object is undefined behaviour. Use isValid() to
-/// check whether a block still belongs to the analysed function.
+/// Invalidation: any CFG mutation invalidates the object, including successor
+/// rewrites that retain the same blocks. Discard and rebuild it after a
+/// transform that does not preserve the CFG. containsBlock() only checks
+/// membership in the block set captured at construction time; it cannot detect
+/// edge mutations.
 ///
-/// Memory: O(N^2) in the number of basic blocks (one bit-vector row per
-/// destination that is actually queried).
+/// Memory: O(N + QN), where N is the number of blocks and Q is the number of
+/// distinct destination blocks queried. Each row is allocated on first use.
 ///
 /// Thread safety: reachable() is safe to call concurrently from multiple
 /// threads. Internal state is protected by a mutex.
@@ -36,25 +37,19 @@ class CFGReachability {
 private:
   using ReachableVec = llvm::BitVector;
 
-  /// The function this object was built for. Used by isValid().
-  llvm::Function *AnalyzedFunction;
-
-  /// One bit per block: has analyze() been run for this destination?
-  ReachableVec AnalyzedVec;
-
-  /// ReachableMatrix[dstID][srcID] == true  iff  src can reach dst.
-  /// Stored as a vector of bit-vectors to avoid raw new[]/delete[].
-  std::vector<ReachableVec> ReachableMatrix;
+  /// ReachableRows[dstID][srcID] == true iff src can reach dst. A missing row
+  /// has not been queried yet.
+  std::vector<std::optional<ReachableVec>> ReachableRows;
 
   /// ID mapping
   std::vector<llvm::BasicBlock *> ID2BB;
   std::map<llvm::BasicBlock *, unsigned> BB2ID;
 
-  /// Protects AnalyzedVec and ReachableMatrix for concurrent reachable() calls.
+  /// Protects lazy row creation and cached reachability results.
   mutable std::mutex CacheMutex;
 
 public:
-  explicit CFGReachability(llvm::Function *F);
+  explicit CFGReachability(llvm::Function &F);
 
   // Non-copyable: the mutex member is not copyable, and copying a large
   // reachability cache is almost never intentional.
@@ -70,14 +65,15 @@ public:
 
   ~CFGReachability() = default;
 
-  /// Returns true if \p BB belongs to the function this object was built for.
-  /// Use this to detect stale objects after IR modifications.
-  bool isValid(llvm::BasicBlock *BB) const { return BB2ID.count(BB) != 0; }
+  /// Returns true if \p BB was present when this object was constructed.
+  /// This does not establish that the cached CFG is still current.
+  bool containsBlock(llvm::BasicBlock *BB) const {
+    return BB && BB2ID.count(BB) != 0;
+  }
 
   /// Returns true if there is a path from \p From to \p To in the CFG.
-  /// Both blocks must belong to the function passed at construction;
-  /// passing a block from a different (or modified) function is undefined
-  /// behaviour — use isValid() to guard against this.
+  /// Both blocks must belong to the function passed at construction. Any CFG
+  /// mutation after construction invalidates the object.
   bool reachable(llvm::BasicBlock *From, llvm::BasicBlock *To);
 
   /// Returns true if there is a path from instruction \p From to instruction

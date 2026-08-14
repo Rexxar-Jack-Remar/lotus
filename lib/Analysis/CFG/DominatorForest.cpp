@@ -202,22 +202,21 @@ void DominatorForest::cloneLLVMNodes(
     this->bbNodeMap[summary->B] = summary;
   }
 
-  /*
-   * Populate parent, child relations between cloned nodes.
-   * Note the optional nature of these connections. It is possible
-   * that only a subset of the tree is being cloned
-   */
+  // Preserve dominance between retained nodes by linking each clone to its
+  // nearest retained ancestor, even when intermediate nodes were omitted.
   for (auto *node : nodesToClone) {
     auto *summary = nodeMap[node];
-    for (auto *child : node->children()) {
-      if (nodeMap.find(child) == nodeMap.end())
-        continue;
-      auto *childSummary = nodeMap[child];
-      childSummary->parent = summary;
-      summary->children.push_back(childSummary);
+    auto *parent = node->getIDom();
+    while (parent && nodeMap.find(parent) == nodeMap.end())
+      parent = parent->getIDom();
+    if (parent) {
+      auto *parentSummary = nodeMap[parent];
+      summary->parent = parentSummary;
+      parentSummary->children.push_back(summary);
     }
   }
 
+  recomputeLevels();
   return;
 }
 
@@ -235,21 +234,29 @@ void DominatorForest::cloneNodes(std::set<NodeType *> &nodesToClone) {
     this->bbNodeMap[summary->B] = summary;
   }
 
-  /*
-   * Populate parent, child relations between cloned nodes.
-   * Note the optional nature of these connections. It is possible
-   * that only a subset of the tree is being cloned
-   */
+  // Preserve dominance between retained nodes by linking each clone to its
+  // nearest retained ancestor, even when intermediate nodes were omitted.
   for (auto *node : nodesToClone) {
     auto *summary = nodeMap[node];
-    auto children = node->getChildren();
-    for (auto *child : children) {
-      if (nodeMap.find(child) == nodeMap.end())
-        continue;
-      auto *childSummary = nodeMap[child];
-      childSummary->parent = summary;
-      summary->children.push_back(childSummary);
+    auto *parent = node->getParent();
+    while (parent && nodeMap.find(parent) == nodeMap.end())
+      parent = parent->getParent();
+    if (parent) {
+      auto *parentSummary = nodeMap[parent];
+      summary->parent = parentSummary;
+      parentSummary->children.push_back(summary);
     }
+  }
+
+  recomputeLevels();
+}
+
+void DominatorForest::recomputeLevels() {
+  for (auto *node : nodes) {
+    uint32_t level = 0;
+    for (auto *parent = node->parent; parent; parent = parent->parent)
+      ++level;
+    node->level = level;
   }
 }
 
@@ -326,20 +333,12 @@ bool DominatorForest::strictlyDominates(BasicBlock *B1, BasicBlock *B2) const {
 
 bool DominatorForest::dominates(DominatorNode *node1,
                                 DominatorNode *node2) const {
-  std::queue<DominatorNode *> worklist;
-  worklist.push(node1);
-  while (!worklist.empty()) {
-    auto *node = worklist.front();
-    worklist.pop();
+  if (!node1 || !node2 || node1->level > node2->level)
+    return false;
 
-    if (node == node2) {
-      return true;
-    }
-    for (auto *child : node->children)
-      worklist.push(child);
-  }
-
-  return false;
+  while (node2 && node2->level > node1->level)
+    node2 = node2->parent;
+  return node1 == node2;
 }
 
 std::set<DominatorNode *>

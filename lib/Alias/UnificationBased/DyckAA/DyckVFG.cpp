@@ -47,7 +47,7 @@ DyckVFG::DyckVFG(DyckAliasAnalysis *DAA, DyckModRefAnalysis *DMRA, Module *M) {
   ThreadPool::get()->parallelForEach(
       NonEmptyFunctions, 1,
       [this, DAA, &LocalCFGMap, &LocalCFGMapMutex](Function *F) {
-        auto LocalCFG = std::make_shared<CFGReachability>(F);
+        auto LocalCFG = std::make_shared<CFGReachability>(*F);
         {
           std::lock_guard<std::mutex> lock(LocalCFGMapMutex);
           LocalCFGMap.at(F) = LocalCFG;
