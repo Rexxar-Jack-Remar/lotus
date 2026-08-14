@@ -6,7 +6,7 @@ add_lotus_test_suite(ir_tests
     PropertyBasedSlicingTest.cpp
     SVFGSerializerTest.cpp
     SVFGMemorySSATest.cpp
-    SVFGMemorySSATestPart2.cpp
+    SVFGMemorySSAInterproceduralTest.cpp
     GSATest.cpp
     GuardedValueFlowTest.cpp
     GuardedValueFlowSerializerTest.cpp

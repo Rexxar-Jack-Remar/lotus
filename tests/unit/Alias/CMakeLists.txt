@@ -5,7 +5,7 @@ add_lotus_test_suite(alias_analysis_tests
     AllocAATest.cpp
     AserPTATest.cpp
     DDAATest.cpp
-    DDAATestPart2.cpp
+    DDAAContextAndCanonicalizationTest.cpp
     DyckAATest.cpp
     SparrowAATest.cpp
     TPATest.cpp
@@ -13,10 +13,10 @@ add_lotus_test_suite(alias_analysis_tests
     AliasGraphTest.cpp
     DFPATest.cpp
     LotusAATest.cpp
-    LotusAATestPart2.cpp
-    LotusAATestPart3.cpp
+    LotusAAInterproceduralSummaryTest.cpp
+    LotusAAConfigurationAndOptimizationTest.cpp
     GVFGAdapterTest.cpp
-    GVFGAdapterTestPart2.cpp
+    GVFGAdapterSummaryInterfaceTest.cpp
     PtsSetBackendTest.cpp
   LINK_LIBS
     CanaryAllocAA

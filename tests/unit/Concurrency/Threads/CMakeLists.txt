@@ -5,32 +5,41 @@
 
 add_lotus_concurrency_test_suite(concurrency_core_tests
   MHPAnalysisTest.cpp
-  MHPAnalysisTestPart2.cpp
+  MHPInterproceduralAndJoinTest.cpp
   StaticVectorClockMHPTest.cpp
   BVClockTest.cpp
   FBVClockTest.cpp
   HappensBeforeAnalysisTest.cpp
-  HappensBeforeAnalysisTestPart2.cpp
-  HappensBeforeAnalysisTestPart3.cpp
-  HappensBeforeAnalysisTestPart4.cpp
+  HappensBeforeBarrierAndOpenMPTest.cpp
+  HappensBeforeAtomicWitnessTest.cpp
+  HappensBeforeAtomicEdgeCasesTest.cpp
   AtomicTest.cpp
-  AtomicTestPart2.cpp
+  AtomicFenceAndReleaseSequenceTest.cpp
   LockSetAnalysisTest.cpp
-  LockSetAnalysisTestPart2.cpp
+  LockSetCoreDataflowTest.cpp
+  LockSetDeadlockTest.cpp
+  LockSetInterproceduralTest.cpp
+  LockSetRAIITest.cpp
+  LockSetTryLockTest.cpp
   RAIIMultiLifetimeTest.cpp
   EscapeAnalysisTest.cpp
   StaticThreadSharingAnalysisTest.cpp
   ThreadLocalAnalysisTest.cpp
   ThreadAPITest.cpp
-  ThreadAPITestPart2.cpp
+  ThreadAPICppTest.cpp
+  ThreadAPICUDATest.cpp
+  ThreadAPIKernelTest.cpp
+  ThreadAPILockSemanticsTest.cpp
+  ThreadAPIOpenMPTest.cpp
+  ThreadAPIRuntimeConfigTest.cpp
   JoinTargetAnalysisTest.cpp
-  JoinTargetAnalysisTestPart2.cpp
+  JoinTargetInterproceduralTest.cpp
   ../Kernel/LinuxKernelAnalysisTest.cpp
   ../Kernel/LinuxKernelSynchronizationTest.cpp
   ../Kernel/LinuxKernelExecutionModelTest.cpp
   ../Kernel/LinuxKernelLifecycleTest.cpp
   ../CUDA/CUDAAnalysisTest.cpp
-  ../CUDA/CUDAAnalysisTestPart2.cpp
-  ../CUDA/CUDAAnalysisTestPart3.cpp
-  ../CUDA/CUDAAnalysisTestPart4.cpp
+  ../CUDA/CUDAOrderingAndMemoryTest.cpp
+  ../CUDA/CUDARuntimeAndUnifiedMemoryTest.cpp
+  ../CUDA/CUDAAdvancedSemanticsTest.cpp
   ../CUDA/PTXAnalyzerTest.cpp)

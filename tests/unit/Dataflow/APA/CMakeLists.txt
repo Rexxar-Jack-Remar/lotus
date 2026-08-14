@@ -2,9 +2,15 @@
 
 add_lotus_test_suite(apa_tests
   SOURCES
-    EliminationTest.cpp
+    EliminationGraphSolverTest.cpp
+    EliminationADTTest.cpp
+    EliminationLLVMIntraTest.cpp
+    EliminationInterproceduralTest.cpp
     AffineRelationDomainTest.cpp
-    InterAffineEqualitiesTest.cpp
+    InterAffineCallAndControlFlowTest.cpp
+    InterAffinePredicateTest.cpp
+    InterAffineCastAndArithmeticTest.cpp
+    InterAffineBitwiseCongruenceTest.cpp
     InterSummaryTransferTest.cpp
     PathSummaryEquationSolverTest.cpp
   LINK_LIBS APADataFlow)

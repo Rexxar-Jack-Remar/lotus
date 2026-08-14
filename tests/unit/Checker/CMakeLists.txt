@@ -5,13 +5,13 @@ add_lotus_test_suite(checker_tests
     Pulse/PulseCheckerTest.cpp
     Pulse/PulseFormulaTest.cpp
     Concurrency/ConcurrencyCheckerTest.cpp
-    Concurrency/ConcurrencyCheckerTestPart2.cpp
-    Concurrency/ConcurrencyCheckerTestPart3.cpp
+    Concurrency/ConcurrencyCheckerCUDAAndSynchronizationTest.cpp
+    Concurrency/ConcurrencyCheckerOpenMPAndMPITest.cpp
     AE/AECheckerTest.cpp
-    AE/AECheckerTestPart2.cpp
+    AE/AECheckerInterproceduralAndBugDetectionTest.cpp
     KINT/KINTCheckerTest.cpp
     Saber/SaberConditionAllocatorTest.cpp
-    Saber/SaberConditionAllocatorTestPart2.cpp
+    Saber/SaberConditionAllocatorReportingTest.cpp
     ReportFormattingTest.cpp
     Core/CheckerCoreTest.cpp
   LINK_LIBS

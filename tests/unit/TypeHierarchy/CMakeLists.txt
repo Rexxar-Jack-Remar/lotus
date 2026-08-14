@@ -80,7 +80,7 @@ add_custom_target(type_hierarchy_ll_fixtures DEPENDS ${TYPE_HIERARCHY_LL_OUTPUTS
 add_lotus_test_suite(type_hierarchy_tests
   SOURCES
     DIBasedTypeHierarchyTest.cpp
-    DIBasedTypeHierarchyTestPart2.cpp
+    DIBasedTypeHierarchyTransitiveReachabilityTest.cpp
     DIBasedTypeHierarchySerializationTest.cpp
   LINK_LIBS CanaryTypeHierarchy
   COMPILE_DEFINITIONS

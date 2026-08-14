@@ -3,7 +3,10 @@ set(LOTUS_SOLVER_TEST_SOURCES
     EGraphCoreTest.cpp
     EGraphSimpleTest.cpp
     EGraphMathTest.cpp
-    EGraphFeatureTest.cpp)
+    EGraphPatternAndRewriteTest.cpp
+    EGraphExplanationTest.cpp
+    EGraphExtractorAndAnalysisTest.cpp
+    EGraphSerializationAndSetOpsTest.cpp)
 set(LOTUS_SOLVER_TEST_LIBS
     SymAbs
     LotusEGraph
