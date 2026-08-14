@@ -234,7 +234,7 @@ TEST_F(OpenMPTaskGraphTest, TargetDataEndNowaitProducesPartialBoundary) {
             OpenMPTaskGraph::TaskRelation::Unknown);
   EXPECT_GT(graph.getSummary().target_nowait_boundary_count, 0u);
 }
-TEST_F(OpenMPTaskGraphTest, TargetDataEndRemainsPartialWithoutTargetTaskModel) {
+TEST_F(OpenMPTaskGraphTest, TargetDataEndOrdersTaskContinuation) {
   const char *source = R"(
     declare i32 @__kmpc_omp_task(i8*, i32, i8*)
     declare i32 @__tgt_target_data_end(i8*, i32)
@@ -256,10 +256,10 @@ TEST_F(OpenMPTaskGraphTest, TargetDataEndRemainsPartialWithoutTargetTaskModel) {
 
   const auto &tasks = graph.getAllTasks();
   ASSERT_EQ(tasks.size(), 2u);
-  EXPECT_FALSE(graph.happensBefore(tasks[0].get(), tasks[1].get()));
+  EXPECT_TRUE(graph.happensBefore(tasks[0].get(), tasks[1].get()));
   EXPECT_EQ(graph.classifyTaskRelation(tasks[0].get(), tasks[1].get()),
-            OpenMPTaskGraph::TaskRelation::Unknown);
-  EXPECT_TRUE(graph.mayBeParallel(tasks[0].get(), tasks[1].get()));
+            OpenMPTaskGraph::TaskRelation::HappensBefore);
+  EXPECT_FALSE(graph.mayBeParallel(tasks[0].get(), tasks[1].get()));
 }
 TEST_F(OpenMPTaskGraphTest, ReductionProtocolDoesNotInventTaskWait) {
   const char *source = R"(

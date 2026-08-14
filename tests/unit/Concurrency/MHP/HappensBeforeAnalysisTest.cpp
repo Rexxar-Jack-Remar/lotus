@@ -820,7 +820,7 @@ TEST_F(HappensBeforeAnalysisTest, AsyncFutureGetOrdersAsyncTaskCompletion) {
   EXPECT_TRUE(hb.happensBefore(store_shared, load_shared));
 }
 TEST_F(HappensBeforeAnalysisTest,
-       DetachedTaskCompletionOrdersDetachedTaskBeforeFollowerTask) {
+       DetachedTaskCompletionIf0DoesNotOrderFollowerTask) {
   const char *source = R"(
     declare i8* @__kmpc_omp_task_alloc(i8*, i32, i32, i64, i64, void ()*)
     declare i32 @__kmpc_omp_task(i8*, i32, i8*)
@@ -868,7 +868,7 @@ TEST_F(HappensBeforeAnalysisTest,
   ASSERT_NE(store_shared, nullptr);
   ASSERT_NE(load_shared, nullptr);
 
-  EXPECT_TRUE(hb.happensBefore(store_shared, load_shared));
+  EXPECT_FALSE(hb.happensBefore(store_shared, load_shared));
 }
 TEST_F(HappensBeforeAnalysisTest, PromiseFutureRepeatedQueriesRemainStable) {
   const char *source = R"(

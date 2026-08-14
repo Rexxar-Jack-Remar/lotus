@@ -5,10 +5,10 @@ add_lotus_test_suite(npa_tests
     NPASolverTest.cpp
     TensorProductLiftTest.cpp
     NPATensorRegularizationTest.cpp
-    NPAInterproceduralClientTest.cpp
+    Interprocedural/Client/NPAInterproceduralClientTest.cpp
     PredicateRelationDomainTest.cpp
-    NPAInterproceduralTaintTest.cpp
-    NPAInterproceduralNullabilityTest.cpp
+    Interprocedural/Taint/NPAInterproceduralTaintTest.cpp
+    Interprocedural/NPAInterproceduralNullabilityTest.cpp
     NPAThreadSafetyHardeningTest.cpp
   LINK_LIBS
     NPADataFlow

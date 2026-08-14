@@ -1,0 +1,2 @@
+#include "NPAInterproceduralTaintPropagationAndMemoryTest.inc"
+#include "NPAInterproceduralTaintCallsAndSinksTest.inc"

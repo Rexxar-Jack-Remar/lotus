@@ -581,14 +581,14 @@ TEST_F(HappensBeforeAnalysisTest, OpenMPTaskDependenciesContributeToHB) {
     %kmp_depend_info = type { i8*, i64, i8 }
 
     @shared = global i32 0, align 4
-    @deps_out = global [1 x %kmp_depend_info] [
+    @deps_out = constant [1 x %kmp_depend_info] [
       %kmp_depend_info {
         i8* bitcast (i32* @shared to i8*),
         i64 4,
         i8 2
       }
     ]
-    @deps_in = global [1 x %kmp_depend_info] [
+    @deps_in = constant [1 x %kmp_depend_info] [
       %kmp_depend_info {
         i8* bitcast (i32* @shared to i8*),
         i64 4,
@@ -639,14 +639,14 @@ TEST_F(HappensBeforeAnalysisTest, OpenMPTaskBodyDependenciesContributeToHB) {
     %kmp_depend_info = type { i8*, i64, i8 }
 
     @shared = global i32 0, align 4
-    @deps_out = global [1 x %kmp_depend_info] [
+    @deps_out = constant [1 x %kmp_depend_info] [
       %kmp_depend_info {
         i8* bitcast (i32* @shared to i8*),
         i64 4,
         i8 2
       }
     ]
-    @deps_in = global [1 x %kmp_depend_info] [
+    @deps_in = constant [1 x %kmp_depend_info] [
       %kmp_depend_info {
         i8* bitcast (i32* @shared to i8*),
         i64 4,
@@ -766,7 +766,7 @@ TEST_F(HappensBeforeAnalysisTest, OpenMPFlushRelationFeedsHBAnalysis) {
     %kmp_depend_info = type { i8*, i64, i8 }
 
     @shared = global i32 0, align 4
-    @deps = global [1 x %kmp_depend_info] [
+    @deps = constant [1 x %kmp_depend_info] [
       %kmp_depend_info {
         i8* bitcast (i32* @shared to i8*),
         i64 4,

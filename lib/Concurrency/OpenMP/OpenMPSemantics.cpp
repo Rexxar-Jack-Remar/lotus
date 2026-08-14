@@ -5,6 +5,7 @@
 
 #include <deque>
 #include <optional>
+#include <set>
 
 #include <llvm/Analysis/CFG.h>
 #include <llvm/Analysis/LoopInfo.h>
@@ -222,6 +223,43 @@ bool isBeforeInBlock(const Instruction *lhs, const Instruction *rhs) {
     }
   }
   return false;
+}
+
+bool mustHappenBefore(const Instruction *lhs, const Instruction *rhs);
+
+// OpenMP task entry points are occasionally kept in a local, function-pointer
+// slot before being passed to the runtime as an opaque i8*.  Resolve only the
+// simple case where every reaching store is a direct function and all stores
+// agree; more complex task objects still require field-sensitive analysis.
+const Function *resolveTaskEntryFromLocalSlot(const Value *task_arg,
+                                              const Instruction *task_call) {
+  if (!task_arg || !task_call || !task_call->getFunction()) {
+    return nullptr;
+  }
+
+  const Value *storage = getUnderlyingObject(task_arg);
+  if (!isa_and_nonnull<AllocaInst>(storage)) {
+    return nullptr;
+  }
+
+  const Function *entry = nullptr;
+  for (const Instruction &inst : instructions(task_call->getFunction())) {
+    const auto *store = dyn_cast<StoreInst>(&inst);
+    if (!store || getUnderlyingObject(store->getPointerOperand()) != storage) {
+      continue;
+    }
+    if (!mustHappenBefore(store, task_call)) {
+      return nullptr;
+    }
+
+    const auto *candidate =
+        dyn_cast<Function>(store->getValueOperand()->stripPointerCasts());
+    if (!candidate || (entry && entry != candidate)) {
+      return nullptr;
+    }
+    entry = candidate;
+  }
+  return entry;
 }
 
 bool mustHappenBefore(const Instruction *lhs, const Instruction *rhs) {
@@ -995,15 +1033,6 @@ void OpenMPSemantics::buildTaskRelations() {
       if (task_i->scheduling_context_id != task_j->scheduling_context_id) {
         continue;
       }
-      StringRef deferred_reason = deferredPartialWaitReason(task_i, task_j);
-      if (!deferred_reason.empty()) {
-        ++m_deferred_reason_counts[deferred_reason.str()];
-        recordRelation(task_i, task_j,
-                       concurrency::RelationKind::UnknownDueToModelGap,
-                       concurrency::ProofStrength::Unknown, deferred_reason);
-        continue;
-      }
-
       bool saw_conflict = false;
       bool saw_mutex_exclusion = false;
       bool saw_unknown_conflict = false;
@@ -1028,6 +1057,14 @@ void OpenMPSemantics::buildTaskRelations() {
           recordRelation(
               task_i, task_j, concurrency::RelationKind::UnknownDueToModelGap,
               concurrency::ProofStrength::May, "omp_depend_may_conflict");
+        } else if (StringRef deferred_reason =
+                       deferredPartialWaitReason(task_i, task_j);
+                   !deferred_reason.empty()) {
+          ++m_deferred_reason_counts[deferred_reason.str()];
+          recordRelation(task_i, task_j,
+                         concurrency::RelationKind::UnknownDueToModelGap,
+                         concurrency::ProofStrength::Unknown,
+                         deferred_reason);
         }
         continue;
       }
@@ -1685,7 +1722,8 @@ void OpenMPSemantics::scanSchedulingContext(
           WaitBoundaryInfo::Kind kind =
               is_nowait_variant ? WaitBoundaryInfo::Kind::TargetDataNowait
                                 : WaitBoundaryInfo::Kind::TargetData;
-          WaitBoundaryInfo boundary = recordBoundary(call, kind, true);
+          WaitBoundaryInfo boundary =
+              recordBoundary(call, kind, is_nowait_variant);
           addTaskEvent(
               OpenMPTaskEvent::Kind::TargetBoundary, call,
               state.scheduling_context_id, state.sequence_index,
@@ -1695,6 +1733,8 @@ void OpenMPSemantics::scanSchedulingContext(
               boundary.is_partial_wait);
           if (is_nowait_variant) {
             ++m_summary.target_nowait_boundary_count;
+          } else {
+            advanceCurrentPhase();
           }
           ++m_deferred_reason_counts["omp_target_data_task_unmodeled"];
         }
@@ -2388,9 +2428,13 @@ OpenMPSemantics::extractTaskFunction(const CallBase *task_call) {
     }
   }
 
-  // Without allocation provenance, field-sensitive reaching-definition
-  // information is required to identify the task entry safely.  Guessing from
-  // arbitrary function-valued stores can select unrelated or later fields.
+  if (const Function *entry =
+          resolveTaskEntryFromLocalSlot(task_arg, task_call)) {
+    return entry;
+  }
+
+  // More complex task objects require field-sensitive reaching-definition
+  // information to identify the entry safely.
   ++m_deferred_reason_counts["omp_task_entry_unresolved"];
   return nullptr;
 }

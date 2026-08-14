@@ -78,7 +78,7 @@ TEST_F(ConcurrencyFacadeTest, SummarizesOpenMPTaskGraph) {
   EXPECT_EQ(summary.detached_task_count, 0u);
   EXPECT_EQ(summary.deferred_wait_dep_count, 1u);
   EXPECT_EQ(summary.wait_boundary_count, 3u);
-  EXPECT_EQ(summary.partial_wait_boundary_count, 3u);
+  EXPECT_EQ(summary.partial_wait_boundary_count, 2u);
   EXPECT_EQ(summary.taskgroup_region_count, 1u);
   EXPECT_EQ(summary.single_region_count, 0u);
   EXPECT_EQ(summary.master_region_count, 0u);

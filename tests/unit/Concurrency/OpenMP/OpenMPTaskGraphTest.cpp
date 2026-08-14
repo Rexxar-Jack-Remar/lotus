@@ -632,7 +632,7 @@ TEST_F(OpenMPTaskGraphTest, IndirectDependencyPointerIsLowered) {
   ASSERT_EQ(tasks.front()->dependencies.size(), 1u);
   EXPECT_NE(tasks.front()->dependencies.front().canonical_base, nullptr);
 }
-TEST_F(OpenMPTaskGraphTest, FlushIdentDoesNotBecomeSyntheticDependency) {
+TEST_F(OpenMPTaskGraphTest, FlushDoesNotSuppressExplicitTaskDependency) {
   const char *source = R"(
     %kmp_depend_info = type { i8*, i64, i8 }
 
@@ -675,10 +675,10 @@ TEST_F(OpenMPTaskGraphTest, FlushIdentDoesNotBecomeSyntheticDependency) {
 
   const auto &tasks = graph.getAllTasks();
   ASSERT_EQ(tasks.size(), 2u);
-  EXPECT_FALSE(graph.happensBefore(tasks[0].get(), tasks[1].get()));
+  EXPECT_TRUE(graph.happensBefore(tasks[0].get(), tasks[1].get()));
   EXPECT_EQ(graph.classifyTaskRelation(tasks[0].get(), tasks[1].get()),
-            OpenMPTaskGraph::TaskRelation::Unknown);
-  EXPECT_TRUE(graph.mayBeParallel(tasks[0].get(), tasks[1].get()));
+            OpenMPTaskGraph::TaskRelation::HappensBefore);
+  EXPECT_FALSE(graph.mayBeParallel(tasks[0].get(), tasks[1].get()));
 }
 TEST_F(OpenMPTaskGraphTest, NestedTaskgroupDoesNotSuppressSiblingDependencies) {
   const char *source = R"(
