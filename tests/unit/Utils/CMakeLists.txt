@@ -5,6 +5,8 @@ add_subdirectory(Parallel)
 add_lotus_test_suite(utils_general_tests
   SOURCES
     GraphSlicerTest.cpp
+    LLVMCallUtilsTest.cpp
+    LLVMFunctionUtilsTest.cpp
     StringUtilsTest.cpp
     PathExpressionsTest.cpp
   LINK_LIBS

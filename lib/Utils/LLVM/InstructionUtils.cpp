@@ -337,15 +337,6 @@ bool InstructionUtils::staysDead(IntrinsicInst *II) {
   return true;
 }
 
-// Get called function (handles statepoints)
-Function *InstructionUtils::getCalledFunction(const CallBase *CB) {
-  if (!CB)
-    return nullptr;
-  if (auto *GCSP = dyn_cast<GCStatepointInst>(CB))
-    return GCSP->getActualCalledFunction() ?: CB->getCalledFunction();
-  return CB->getCalledFunction();
-}
-
 // Check if call is possibly unsafe
 bool InstructionUtils::isPossiblyUnsafe(const CallBase *CB) {
   return !CB || CB->hasRetAttr(Attribute::NoAlias) ||

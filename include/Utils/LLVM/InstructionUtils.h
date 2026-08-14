@@ -161,14 +161,6 @@ public:
   static std::set<AllocaInst *> getAllocas(const IntrinsicInst *II);
 
   /***
-   * Get underlying called function even if function is some sort of statepoint
-   * instruction.
-   * @param CB CallBase instruction.
-   * @return Called function, or nullptr.
-   */
-  static Function *getCalledFunction(const CallBase *CB);
-
-  /***
    * Determine if call instruction is possibly unsafe (unsafe if uncertain).
    * @param CB CallBase instruction to check.
    * @return true if possibly unsafe, false if definitely safe.

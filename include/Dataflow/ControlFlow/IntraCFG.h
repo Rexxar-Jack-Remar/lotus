@@ -5,6 +5,7 @@
 #include "llvm/IR/Instructions.h"
 
 #include "Dataflow/ControlFlow/FlowDirection.h"
+#include "Utils/LLVM/FunctionUtils.h"
 
 #include <algorithm>
 #include <utility>
@@ -171,10 +172,9 @@ inline LLVMIntraCFG::f_t LLVMIntraCFG::getFunctionOf(n_t Inst) const {
 inline std::vector<LLVMIntraCFG::n_t>
 LLVMIntraCFG::getForwardStartPoints(f_t Function) {
   std::vector<n_t> Start;
-  if (Function == nullptr || Function->isDeclaration() || Function->empty()) {
-    return Start;
+  if (auto *Entry = lotus::llvm_utils::getFunctionEntryInstruction(Function)) {
+    Start.push_back(Entry);
   }
-  Start.push_back(&*Function->getEntryBlock().begin());
   return Start;
 }
 

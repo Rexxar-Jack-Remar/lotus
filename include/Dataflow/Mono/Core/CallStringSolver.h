@@ -288,6 +288,7 @@
 #include "Dataflow/ControlFlow/FlowDirection.h"
 #include "Dataflow/ControlFlow/InterCFG.h"
 #include "Dataflow/Mono/Core/CallStringContext.h"
+#include "Utils/LLVM/FunctionUtils.h"
 
 #include <deque>
 #include <functional>
@@ -628,15 +629,6 @@ private:
 
   static bool isCallToDefinedFunction(llvm::Instruction *Inst, const ICFG *ICF);
 
-  static llvm::Instruction *getFirstInstruction(llvm::BasicBlock *BB) {
-    return &*BB->begin();
-  }
-
-  static bool isFunctionEntry(llvm::Instruction *Inst) {
-    auto *BB = Inst->getParent();
-    return &BB->getParent()->getEntryBlock() == BB && Inst == &*BB->begin();
-  }
-
   void computeGenKill(
       llvm::Module *M,
       std::function<void(llvm::Instruction *, ResultTy *)> computeGEN,
@@ -957,7 +949,7 @@ CallStringInterProceduralDataFlowEngine<K, ContainerT>::predecessors(
     return Result;
   }
 
-  if (isFunctionEntry(Inst)) {
+  if (lotus::llvm_utils::isFunctionEntryInstruction(Inst)) {
     if (!Ctx.empty()) {
       auto CallerCtx = Ctx;
       auto *CallInst = CallerCtx.pop_back();

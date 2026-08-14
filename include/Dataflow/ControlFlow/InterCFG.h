@@ -4,6 +4,7 @@
 #include "llvm/IR/Module.h"
 
 #include "Dataflow/ControlFlow/IntraCFG.h"
+#include "Utils/LLVM/CallUtils.h"
 
 #include <functional>
 #include <map>
@@ -82,8 +83,6 @@ public:
   m_t getModule() const override { return Mod; }
 
 private:
-  static std::vector<n_t> continuationInstructions(n_t CallInst);
-
   /// Build the caller index: Callee → list of call-site instructions.
   /// Called once in the constructor so getCallersOf() is O(1).
   void buildCallerIndex();
@@ -199,10 +198,9 @@ inline bool LLVMInterCFG::isExitInst(n_t Inst, FlowDirection Dir) const {
 inline std::vector<LLVMInterCFG::n_t>
 LLVMInterCFG::getStartPointsOf(f_t Callee) const {
   std::vector<n_t> Starts;
-  if (Callee == nullptr || Callee->isDeclaration() || Callee->empty()) {
-    return Starts;
+  if (auto *Entry = lotus::llvm_utils::getFunctionEntryInstruction(Callee)) {
+    Starts.push_back(Entry);
   }
-  Starts.push_back(&*Callee->getEntryBlock().begin());
   return Starts;
 }
 
@@ -221,31 +219,9 @@ LLVMInterCFG::getExitPointsOf(f_t Callee) const {
 }
 
 inline std::vector<LLVMInterCFG::n_t>
-LLVMInterCFG::continuationInstructions(n_t CallInst) {
-  std::vector<n_t> Continuations;
-  auto *Call = llvm::dyn_cast_or_null<llvm::CallBase>(CallInst);
-  if (Call == nullptr) {
-    return Continuations;
-  }
-  if (auto *Invoke = llvm::dyn_cast<llvm::InvokeInst>(CallInst)) {
-    Continuations.push_back(&*Invoke->getNormalDest()->begin());
-    return Continuations;
-  }
-  if (auto *CallBr = llvm::dyn_cast<llvm::CallBrInst>(CallInst)) {
-    for (unsigned I = 0, E = CallBr->getNumSuccessors(); I < E; ++I) {
-      Continuations.push_back(&*CallBr->getSuccessor(I)->begin());
-    }
-    return Continuations;
-  }
-  if (auto *Next = CallInst->getNextNode()) {
-    Continuations.push_back(Next);
-  }
-  return Continuations;
-}
-
-inline std::vector<LLVMInterCFG::n_t>
 LLVMInterCFG::getReturnSitesOfCallAt(n_t CallSite) const {
-  return continuationInstructions(CallSite);
+  return lotus::llvm_utils::getNormalCallContinuations(
+      llvm::dyn_cast_or_null<llvm::CallBase>(CallSite));
 }
 
 inline std::vector<LLVMInterCFG::f_t>

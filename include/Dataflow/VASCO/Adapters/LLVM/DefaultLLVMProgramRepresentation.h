@@ -3,6 +3,7 @@
 #include "Dataflow/ControlFlow/IntraCFG.h"
 #include "Dataflow/VASCO/Core/DirectedGraph.h"
 #include "Dataflow/VASCO/Core/ProgramRepresentation.h"
+#include "Utils/LLVM/CallUtils.h"
 
 #include <functional>
 #include <map>
@@ -108,7 +109,7 @@ public:
       return std::vector<MethodType>{};
     }
 
-    if (auto *Callee = resolveDirectCallee(Call)) {
+    if (auto *Callee = lotus::llvm_utils::getDirectCallee(Call)) {
       if (isPhantomMethod(Callee)) {
         return std::nullopt;
       }
@@ -123,24 +124,6 @@ public:
   }
 
 private:
-  static MethodType resolveDirectCallee(const llvm::CallBase *Call) {
-    if (Call == nullptr) {
-      return nullptr;
-    }
-
-    if (auto *Direct = Call->getCalledFunction()) {
-      return Direct;
-    }
-
-    llvm::Value *CalledOperand = Call->getCalledOperand();
-    if (CalledOperand == nullptr) {
-      return nullptr;
-    }
-
-    CalledOperand = CalledOperand->stripPointerCastsAndAliases();
-    return llvm::dyn_cast<llvm::Function>(CalledOperand);
-  }
-
   llvm::Module *Module = nullptr;
   std::vector<MethodType> EntryPoints;
   ResolveTargetsFn Resolver;

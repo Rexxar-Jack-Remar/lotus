@@ -8,6 +8,8 @@
 #include "Dataflow/ControlFlow/InterCFG.h"
 #include "Dataflow/Mono/Core/CallStringSolver.h"
 #include "Dataflow/Mono/Core/Problem.h"
+#include "Utils/LLVM/CallUtils.h"
+#include "Utils/LLVM/FunctionUtils.h"
 
 #include <algorithm>
 #include <map>
@@ -214,34 +216,10 @@ public:
   void emitGraphicalReport(llvm::raw_ostream & /*OS*/ = llvm::outs()) const {}
 
 private:
-  static bool isFunctionEntry(llvm::Instruction *Inst) {
-    auto *BB = Inst->getParent();
-    return &BB->getParent()->getEntryBlock() == BB && Inst == &*BB->begin();
-  }
-
-  static std::vector<llvm::Instruction *>
-  continuationInstructions(llvm::Instruction *CallInst) {
-    std::vector<llvm::Instruction *> Continuations;
-    if (auto *Invoke = llvm::dyn_cast<llvm::InvokeInst>(CallInst)) {
-      auto *NormalDest = Invoke->getNormalDest();
-      Continuations.push_back(&*NormalDest->begin());
-      return Continuations;
-    }
-    if (auto *CallBr = llvm::dyn_cast<llvm::CallBrInst>(CallInst)) {
-      for (unsigned I = 0, E = CallBr->getNumSuccessors(); I < E; ++I) {
-        Continuations.push_back(&*CallBr->getSuccessor(I)->begin());
-      }
-      return Continuations;
-    }
-    if (auto *Next = CallInst->getNextNode()) {
-      Continuations.push_back(Next);
-    }
-    return Continuations;
-  }
-
   static bool isContinuationOfCall(llvm::Instruction *Inst,
                                    llvm::Instruction *CallInst) {
-    for (auto *Cont : continuationInstructions(CallInst)) {
+    auto *Call = llvm::dyn_cast_or_null<llvm::CallBase>(CallInst);
+    for (auto *Cont : lotus::llvm_utils::getNormalCallContinuations(Call)) {
       if (Cont == Inst) {
         return true;
       }
@@ -269,7 +247,8 @@ private:
 
     if (Problem.direction() ==
         ::dataflow::controlflow::FlowDirection::Backward) {
-      if (llvm::isa<llvm::CallBase>(Inst) && isFunctionEntry(PredInst)) {
+      if (llvm::isa<llvm::CallBase>(Inst) &&
+          lotus::llvm_utils::isFunctionEntryInstruction(PredInst)) {
         const auto Callees = getCalleesForCall(Inst);
         bool Matches = false;
         for (auto *Callee : Callees) {
@@ -319,7 +298,8 @@ private:
       } else {
         Incoming = PredOut;
       }
-    } else if (isFunctionEntry(Inst) && llvm::isa<llvm::CallBase>(PredInst)) {
+    } else if (lotus::llvm_utils::isFunctionEntryInstruction(Inst) &&
+               llvm::isa<llvm::CallBase>(PredInst)) {
       // Call edge: PredInst is the call site, Inst is the callee entry.
       // Use callFlow to map caller facts to callee entry facts.
       const auto Callees = getCalleesForCall(PredInst);
