@@ -26,11 +26,14 @@
 namespace kernel {
 
 class LinuxKernelProcessModel;
+class LinuxKernelExecutionGraph;
 
 class LinuxKernelLockAnalysis {
 public:
-  explicit LinuxKernelLockAnalysis(const LinuxKernelProcessModel &model)
-      : process_model_(model) {}
+  explicit LinuxKernelLockAnalysis(
+      const LinuxKernelProcessModel &model,
+      const LinuxKernelExecutionGraph *execution_graph = nullptr)
+      : process_model_(model), execution_graph_(execution_graph) {}
 
   void analyzeLocks();
 
@@ -40,6 +43,13 @@ public:
     LockID lock;
     LockKind kind;
     bool is_critical;
+  };
+
+  enum class DependencyKind { ER, EN, SR, SN };
+
+  struct LockDependencyCycle {
+    std::vector<LockClassID> classes;
+    std::vector<const llvm::Instruction *> evidence;
   };
 
   std::vector<std::pair<const llvm::Instruction *, const llvm::Instruction *>>
@@ -61,6 +71,9 @@ public:
   std::vector<const llvm::Instruction *> findIrqSaveRestoreIssues() const;
 
   std::vector<LockRegion> getLockRegions() const { return lock_regions_; }
+  const std::vector<LockDependencyCycle> &getDependencyCycles() const {
+    return lock_dependency_cycles_;
+  }
 
   const std::unordered_map<std::string, size_t> &getLockDiagnostics() const {
     return lock_diagnostics_;
@@ -72,11 +85,15 @@ private:
     std::set<LockID> must_held;
     std::set<LockID> may_exclusive;
     std::set<LockID> must_exclusive;
+    std::set<LockID> may_nonrecursive_reader;
+    std::set<LockID> must_nonrecursive_reader;
 
     bool operator==(const LockFlowState &other) const {
       return may_held == other.may_held && must_held == other.must_held &&
              may_exclusive == other.may_exclusive &&
-             must_exclusive == other.must_exclusive;
+             must_exclusive == other.must_exclusive &&
+             may_nonrecursive_reader == other.may_nonrecursive_reader &&
+             must_nonrecursive_reader == other.must_nonrecursive_reader;
     }
     bool operator!=(const LockFlowState &other) const {
       return !(*this == other);
@@ -84,6 +101,7 @@ private:
   };
 
   const LinuxKernelProcessModel &process_model_;
+  const LinuxKernelExecutionGraph *execution_graph_ = nullptr;
   std::vector<LockRegion> lock_regions_;
   mutable std::unordered_map<std::string, size_t> lock_diagnostics_;
   std::vector<std::pair<const llvm::Instruction *, const llvm::Instruction *>>
@@ -92,6 +110,7 @@ private:
   std::vector<const llvm::Instruction *> unlock_without_lock_;
   std::vector<const llvm::Instruction *> lock_without_unlock_;
   std::vector<const llvm::Instruction *> sleep_in_spinlock_;
+  std::vector<LockDependencyCycle> lock_dependency_cycles_;
 
   bool isLockAcquire(OperationKind kind) const;
   bool isLockRelease(OperationKind kind) const;

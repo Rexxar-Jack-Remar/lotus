@@ -26,11 +26,14 @@
 namespace kernel {
 
 class LinuxKernelProcessModel;
+class LinuxKernelExecutionGraph;
 
 class LinuxKernelWaitAnalysis {
 public:
-  explicit LinuxKernelWaitAnalysis(const LinuxKernelProcessModel &model)
-      : process_model_(model) {}
+  explicit LinuxKernelWaitAnalysis(
+      const LinuxKernelProcessModel &model,
+      const LinuxKernelExecutionGraph *execution_graph = nullptr)
+      : process_model_(model), execution_graph_(execution_graph) {}
 
   void analyzeWaits();
 
@@ -87,6 +90,7 @@ public:
 
 private:
   const LinuxKernelProcessModel &process_model_;
+  const LinuxKernelExecutionGraph *execution_graph_ = nullptr;
   std::vector<WaitContext> wait_contexts_;
   std::map<WaitQueueID, CompletionContext> completion_map_;
   std::map<const llvm::Value *, TimerContext> timer_map_;

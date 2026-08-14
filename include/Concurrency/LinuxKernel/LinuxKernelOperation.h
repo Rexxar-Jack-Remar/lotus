@@ -13,12 +13,12 @@
 #ifndef LINUX_KERNEL_OPERATION_H
 #define LINUX_KERNEL_OPERATION_H
 
-#include "Concurrency/Utils/LinuxKernel.h"
-
+#include <cstdint>
 #include <map>
 #include <memory>
 #include <set>
 #include <string>
+#include <tuple>
 #include <unordered_map>
 #include <unordered_set>
 #include <vector>
@@ -59,9 +59,40 @@ enum class LockKind {
   UNKNOWN
 };
 
+struct LockClassID {
+  const llvm::Value *static_key = nullptr;
+  const llvm::Type *aggregate_type = nullptr;
+  std::int64_t byte_offset = 0;
+  unsigned subclass = 0;
+  LockKind kind = LockKind::UNKNOWN;
+  bool precise = false;
+
+  bool isValid() const {
+    return static_key != nullptr || aggregate_type != nullptr;
+  }
+
+  bool operator==(const LockClassID &other) const {
+    return std::tie(static_key, aggregate_type, byte_offset, subclass, kind,
+                    precise) == std::tie(other.static_key, other.aggregate_type,
+                                         other.byte_offset, other.subclass,
+                                         other.kind, other.precise);
+  }
+
+  bool operator!=(const LockClassID &other) const { return !(*this == other); }
+
+  bool operator<(const LockClassID &other) const {
+    return std::tie(static_key, aggregate_type, byte_offset, subclass, kind,
+                    precise) < std::tie(other.static_key, other.aggregate_type,
+                                        other.byte_offset, other.subclass,
+                                        other.kind, other.precise);
+  }
+};
+
 enum class LockState { UNLOCKED, LOCKED, INTERRUPTIBLE, UNKNOWN };
 
 enum class LockMode { SHARED, EXCLUSIVE, UNKNOWN };
+
+enum class LockReaderKind { NONE, NON_RECURSIVE, RECURSIVE };
 
 enum class ConditionalSuccess {
   UNCONDITIONAL,
@@ -70,6 +101,17 @@ enum class ConditionalSuccess {
 };
 
 enum class CompletionSignalKind { ONE, ALL, UNKNOWN };
+
+enum class KernelMemoryOrder {
+  NONE,
+  RELAXED,
+  ACQUIRE,
+  RELEASE,
+  ACQ_REL,
+  FULL,
+  COMPILER,
+  UNKNOWN,
+};
 
 enum class RCUFlavor {
   CLASSIC,
@@ -83,12 +125,25 @@ enum class RCUFlavor {
 
 enum class AsyncContextKind {
   NONE,
+  TASK,
   KTHREAD,
   WORKQUEUE,
   TIMER_SOFTIRQ,
   HARDIRQ,
   THREADED_IRQ,
   RCU_CALLBACK,
+  SOFTIRQ,
+  TASKLET,
+  NAPI,
+  NMI,
+};
+
+struct AsyncCallbackRegistration {
+  const llvm::Value *callback = nullptr;
+  AsyncContextKind context = AsyncContextKind::NONE;
+  const llvm::Value *object = nullptr;
+  const llvm::Value *serialization_domain = nullptr;
+  bool serializes_domain = false;
 };
 
 enum class OperationKind {
@@ -106,6 +161,14 @@ enum class OperationKind {
   RCU_ASSIGN,
   RCU_DEREFERENCE,
   RCU_RECLAIM,
+  RCU_BARRIER,
+
+  // Sequence lock operations
+  SEQLOCK_INIT,
+  SEQ_READ_BEGIN,
+  SEQ_READ_RETRY,
+  SEQ_WRITE_LOCK,
+  SEQ_WRITE_UNLOCK,
 
   // Completion operations
   COMPLETION_WAIT,
@@ -136,14 +199,28 @@ enum class OperationKind {
 
   // Kthread operations
   KTHREAD_CREATE,
+  KTHREAD_START,
   KTHREAD_RUN,
   KTHREAD_STOP,
   KTHREAD_SHOULD_STOP,
 
   // Workqueue operations
   WORKqueue,
+  WORKqueue_CREATE,
   WORKqueue_SUBMIT,
   WORKqueue_FLUSH,
+  WORKqueue_CANCEL,
+  WORKqueue_DESTROY,
+
+  // Other asynchronous kernel execution mechanisms.
+  SOFTIRQ_REGISTER,
+  SOFTIRQ_RAISE,
+  TASKLET_SETUP,
+  TASKLET_SCHEDULE,
+  TASKLET_KILL,
+  NAPI_REGISTER,
+  NAPI_SCHEDULE,
+  NAPI_DISABLE,
 
   // IRQ operations
   IRQ_REQUEST,
@@ -161,11 +238,15 @@ enum class OperationKind {
   KMALLOC,
   VMALLOC,
   ALLOC_PAGES,
+  MEMORY_FREE,
 
   // Container/List operations
   LIST_ADD,
   LIST_DEL,
   CONTAINER_OF,
+
+  // Calls whose kernel effects could not be summarized.
+  UNKNOWN_CALL,
 
   UNKNOWN
 };
@@ -184,14 +265,31 @@ struct KernelOperation {
 
   // Lock-related info
   LockID lock = nullptr;
+  LockClassID lock_class;
   LockState lock_state = LockState::UNKNOWN;
   LockMode lock_mode = LockMode::UNKNOWN;
+  LockReaderKind reader_kind = LockReaderKind::NONE;
   ConditionalSuccess conditional_success = ConditionalSuccess::UNCONDITIONAL;
   bool is_recursive = false;
   bool is_nested = false;
+  unsigned lock_subclass = 0;
   bool is_interruptible = false;
   bool is_raw = false;
   bool has_timeout = false;
+  bool is_synchronous = false;
+  bool serializes_domain = false;
+  bool has_unknown_effects = false;
+  bool may_sleep = false;
+  bool may_spawn = false;
+  bool may_access_shared_memory = false;
+  bool saves_irq_state = false;
+  bool restores_irq_state = false;
+  bool disables_local_irq = false;
+  bool enables_local_irq = false;
+  bool disables_bh = false;
+  bool enables_bh = false;
+  bool disables_preemption = false;
+  bool enables_preemption = false;
   const llvm::Value *irq_flags = nullptr;
 
   // For wait queues
@@ -207,9 +305,17 @@ struct KernelOperation {
   const llvm::Value *rcu_target = nullptr;
   const llvm::Value *callback = nullptr;
   std::vector<const llvm::Value *> callbacks;
+  std::vector<AsyncCallbackRegistration> async_callbacks;
   AsyncContextKind async_context = AsyncContextKind::NONE;
+  const llvm::Value *async_object = nullptr;
+  const llvm::Value *serialization_domain = nullptr;
   RCUFlavor rcu_flavor = RCUFlavor::UNKNOWN;
   bool requires_rcu_section = true;
+  bool deferred_reclamation = false;
+  bool returns_retired_pointer = false;
+
+  // For configured kernel memory operations.
+  KernelMemoryOrder memory_order = KernelMemoryOrder::UNKNOWN;
 
   // For timers
   const llvm::Value *timer_expires = nullptr;
@@ -217,6 +323,11 @@ struct KernelOperation {
   // For atomic operations
   const llvm::Value *atomic_var = nullptr;
   int atomic_value = 0;
+
+  // Allocation and owner-lifetime information.
+  const llvm::Value *memory_object = nullptr;
+  const llvm::Value *allocation_size = nullptr;
+  bool managed_allocation = false;
 
   KernelOperation() = default;
   KernelOperation(const llvm::Instruction *i, OperationKind k,
@@ -234,6 +345,7 @@ struct KernelOperation {
 
 struct LockInfo {
   LockID id;
+  LockClassID lock_class;
   LockKind kind;
   LockState state = LockState::UNKNOWN;
 

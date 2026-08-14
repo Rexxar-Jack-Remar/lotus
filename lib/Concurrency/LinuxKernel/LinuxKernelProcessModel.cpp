@@ -8,12 +8,13 @@
 
 #include "Concurrency/LinuxKernel/LinuxKernelProcessModel.h"
 
-#include "Concurrency/Utils/LinuxKernel.h"
+#include "Alias/Infrastructure/AliasAnalysisWrapper/AliasAnalysisWrapper.h"
 
 #include <algorithm>
 #include <deque>
 #include <functional>
 #include <limits>
+#include <optional>
 #include <set>
 #include <string>
 #include <unordered_map>
@@ -33,91 +34,7 @@ namespace kernel {
 
 namespace {
 
-bool isTimerSetupCall(StringRef func_name) {
-  return func_name.equals("timer_setup") || func_name.equals("setup_timer") ||
-         func_name.equals("init_timer_key") || func_name.equals("init_timer") ||
-         func_name.equals("__timer_init") ||
-         func_name.equals("timer_setup_key");
-}
-
-bool isTimerModCall(StringRef func_name) {
-  return func_name.equals("mod_timer") || func_name.equals("add_timer") ||
-         func_name.equals("add_timer_on");
-}
-
-bool isTimerDeleteCall(StringRef func_name) {
-  return func_name.equals("del_timer") || func_name.equals("del_timer_sync") ||
-         func_name.equals("timer_delete") ||
-         func_name.equals("timer_delete_sync");
-}
-
-bool isTimerShutdownCall(StringRef func_name) {
-  return func_name.equals("timer_shutdown") ||
-         func_name.equals("timer_shutdown_sync");
-}
-
-bool isLocalIrqDisableCall(StringRef func_name) {
-  return func_name.equals("local_irq_disable") ||
-         func_name.equals("local_irq_save") ||
-         func_name.equals("arch_local_irq_disable") ||
-         func_name.equals("arch_local_irq_save");
-}
-
-bool isLocalIrqEnableCall(StringRef func_name) {
-  return func_name.equals("local_irq_enable") ||
-         func_name.equals("local_irq_restore") ||
-         func_name.equals("arch_local_irq_enable") ||
-         func_name.equals("arch_local_irq_restore");
-}
-
-bool isLineIrqDisableCall(StringRef func_name) {
-  return func_name.equals("disable_irq") ||
-         func_name.equals("disable_irq_nosync");
-}
-
-bool isLineIrqEnableCall(StringRef func_name) {
-  return func_name.equals("enable_irq");
-}
-
-bool isIrqRequestCall(StringRef func_name) {
-  return func_name.equals("request_irq") ||
-         func_name.equals("request_threaded_irq");
-}
-
-bool isIrqFreeCall(StringRef func_name) { return func_name.equals("free_irq"); }
-
-bool isBhDisableCall(StringRef func_name) {
-  return func_name.equals("local_bh_disable") ||
-         func_name.equals("__local_bh_disable_ip");
-}
-
-bool isBhEnableCall(StringRef func_name) {
-  return func_name.equals("local_bh_enable") ||
-         func_name.equals("__local_bh_enable_ip");
-}
-
-bool isPreemptDisableCall(StringRef func_name) {
-  return func_name.equals("preempt_disable") ||
-         func_name.equals("preempt_disable_notrace");
-}
-
-bool isPreemptEnableCall(StringRef func_name) {
-  return func_name.equals("preempt_enable") ||
-         func_name.equals("preempt_enable_notrace");
-}
-
-bool isWorkqueueSubmitCall(StringRef func_name) {
-  return func_name.equals("queue_work") || func_name.equals("queue_work_on") ||
-         func_name.equals("schedule_work") ||
-         func_name.equals("schedule_work_on");
-}
-
-bool isWorkqueueInitCall(StringRef func_name) {
-  return func_name.equals("INIT_WORK") || func_name.equals("__init_work") ||
-         func_name.equals("init_work");
-}
-
-const Function *resolveKnownCallee(const CallBase *call) {
+const Function *resolveDirectCallee(const CallBase *call) {
   if (call == nullptr) {
     return nullptr;
   }
@@ -141,436 +58,263 @@ const Function *resolveKnownCallee(const CallBase *call) {
 
 } // namespace
 
+std::vector<const Function *>
+LinuxKernelProcessModel::getPossibleCallees(const CallBase *call) const {
+  std::vector<const Function *> result;
+  if (const Function *direct = resolveDirectCallee(call)) {
+    result.push_back(direct);
+    return result;
+  }
+  if (alias_analysis_ == nullptr || !alias_analysis_->isInitialized() ||
+      call == nullptr) {
+    return result;
+  }
+  alias_analysis_->getIndirectCallTargets(const_cast<CallBase *>(call), result);
+  llvm::sort(result);
+  result.erase(std::unique(result.begin(), result.end()), result.end());
+  return result;
+}
+
 OperationKind
 LinuxKernelProcessModel::classifyOperation(const Instruction *inst,
                                            const StringRef &func_name) const {
-  if (LinuxKernelModel::isSpinLock(func_name)) {
-    return OperationKind::LOCK_ACQUIRE;
+  (void)inst;
+  if (const LinuxKernelAPISemantics *semantics =
+          semantic_registry_.lookup(func_name)) {
+    return semantics->operation;
   }
-  if (LinuxKernelModel::isSpinUnlock(func_name)) {
-    return OperationKind::LOCK_RELEASE;
-  }
-  if (LinuxKernelModel::isSpinTryLock(func_name)) {
-    return OperationKind::LOCK_TRY;
-  }
-  if (LinuxKernelModel::isSpinLockInit(func_name)) {
-    return OperationKind::LOCK_INIT;
-  }
-
-  if (LinuxKernelModel::isMutexLock(func_name)) {
-    return OperationKind::LOCK_ACQUIRE;
-  }
-  if (LinuxKernelModel::isMutexTryLock(func_name) ||
-      LinuxKernelModel::isMutexConditionalLock(func_name)) {
-    return OperationKind::LOCK_TRY;
-  }
-
-  if (LinuxKernelModel::isMutexUnlock(func_name)) {
-    return OperationKind::LOCK_RELEASE;
-  }
-
-  if (LinuxKernelModel::isMutexInit(func_name)) {
-    return OperationKind::LOCK_INIT;
-  }
-
-  if (LinuxKernelModel::isDown(func_name)) {
-    return OperationKind::LOCK_ACQUIRE;
-  }
-  if (LinuxKernelModel::isDownConditional(func_name) ||
-      LinuxKernelModel::isDownTryLock(func_name)) {
-    return OperationKind::LOCK_TRY;
-  }
-
-  if (LinuxKernelModel::isUp(func_name)) {
-    return OperationKind::LOCK_RELEASE;
-  }
-
-  if (LinuxKernelModel::isSemaInit(func_name)) {
-    return OperationKind::LOCK_INIT;
-  }
-
-  if (LinuxKernelModel::isReadLock(func_name) ||
-      LinuxKernelModel::isWriteLock(func_name)) {
-    return OperationKind::LOCK_ACQUIRE;
-  }
-
-  if (LinuxKernelModel::isReadUnlock(func_name) ||
-      LinuxKernelModel::isWriteUnlock(func_name)) {
-    return OperationKind::LOCK_RELEASE;
-  }
-  if (LinuxKernelModel::isDownRead(func_name) ||
-      LinuxKernelModel::isDownWrite(func_name)) {
-    return OperationKind::LOCK_ACQUIRE;
-  }
-  if (LinuxKernelModel::isDownReadConditional(func_name) ||
-      LinuxKernelModel::isDownWriteConditional(func_name) ||
-      LinuxKernelModel::isDownReadTryLock(func_name) ||
-      LinuxKernelModel::isDownWriteTryLock(func_name)) {
-    return OperationKind::LOCK_TRY;
-  }
-  if (LinuxKernelModel::isUpRead(func_name) ||
-      LinuxKernelModel::isUpWrite(func_name)) {
-    return OperationKind::LOCK_RELEASE;
-  }
-  if (LinuxKernelModel::isInitRwsem(func_name)) {
-    return OperationKind::LOCK_INIT;
-  }
-
-  if (LinuxKernelModel::isRcuReadLock(func_name)) {
-    return OperationKind::RCU_READ_LOCK;
-  }
-
-  if (LinuxKernelModel::isRcuReadUnlock(func_name)) {
-    return OperationKind::RCU_READ_UNLOCK;
-  }
-
-  if (LinuxKernelModel::isSynchronizeRcu(func_name)) {
-    return OperationKind::RCU_SYNC;
-  }
-
-  if (LinuxKernelModel::isCallRcu(func_name)) {
-    return OperationKind::RCU_CALL;
-  }
-
-  if (LinuxKernelModel::isRcuAssignPointer(func_name)) {
-    return OperationKind::RCU_ASSIGN;
-  }
-  if (LinuxKernelModel::isRcuDereference(func_name)) {
-    return OperationKind::RCU_DEREFERENCE;
-  }
-  if (func_name.equals("kfree") || func_name.equals("kvfree")) {
-    return OperationKind::RCU_RECLAIM;
-  }
-
-  if (LinuxKernelModel::isWaitForCompletion(func_name)) {
-    return OperationKind::COMPLETION_WAIT;
-  }
-
-  if (LinuxKernelModel::isComplete(func_name)) {
-    return OperationKind::COMPLETION_SIGNAL;
-  }
-
-  if (LinuxKernelModel::isInitCompletion(func_name)) {
-    return OperationKind::COMPLETION_INIT;
-  }
-  if (LinuxKernelModel::isReinitCompletion(func_name)) {
-    return OperationKind::COMPLETION_REINIT;
-  }
-
-  if (LinuxKernelModel::isWaitEvent(func_name)) {
-    return OperationKind::WAIT_EVENT;
-  }
-  if (LinuxKernelModel::isWakeUp(func_name)) {
-    return OperationKind::WAKE_UP;
-  }
-  if (LinuxKernelModel::isInitWaitqueueHead(func_name)) {
-    return OperationKind::WAITQUEUE_INIT;
-  }
-  if (LinuxKernelModel::isPrepareToWait(func_name)) {
-    return OperationKind::PREPARE_WAIT;
-  }
-  if (LinuxKernelModel::isFinishWait(func_name)) {
-    return OperationKind::FINISH_WAIT;
-  }
-
-  if (LinuxKernelModel::isMemoryBarrier(func_name)) {
-    return OperationKind::MEMORY_BARRIER;
-  }
-
-  if (isTimerSetupCall(func_name)) {
-    return OperationKind::TIMER_SETUP;
-  }
-  if (isTimerModCall(func_name)) {
-    return OperationKind::TIMER_MOD;
-  }
-  if (isTimerDeleteCall(func_name)) {
-    return OperationKind::TIMER_DELETE;
-  }
-  if (isTimerShutdownCall(func_name)) {
-    return OperationKind::TIMER_SHUTDOWN;
-  }
-
-  if (LinuxKernelModel::isAtomicRead(func_name)) {
-    return OperationKind::ATOMIC_READ;
-  }
-  if (LinuxKernelModel::isAtomicSet(func_name)) {
-    return OperationKind::ATOMIC_WRITE;
-  }
-  if (LinuxKernelModel::isAtomicAdd(func_name) ||
-      LinuxKernelModel::isAtomicSub(func_name) ||
-      LinuxKernelModel::isAtomicCmpxchg(func_name) ||
-      LinuxKernelModel::isSetBit(func_name)) {
-    return OperationKind::ATOMIC_RMW;
-  }
-  if (LinuxKernelModel::isTestBit(func_name)) {
-    return OperationKind::ATOMIC_READ;
-  }
-
-  if (LinuxKernelModel::isKthreadCreate(func_name)) {
-    return OperationKind::KTHREAD_CREATE;
-  }
-  if (func_name.equals("kthread_run")) {
-    return OperationKind::KTHREAD_RUN;
-  }
-  if (isWorkqueueInitCall(func_name)) {
-    return OperationKind::WORKqueue;
-  }
-  if (isWorkqueueSubmitCall(func_name)) {
-    return OperationKind::WORKqueue_SUBMIT;
-  }
-
-  if (isIrqRequestCall(func_name)) {
-    return OperationKind::IRQ_REQUEST;
-  }
-  if (isIrqFreeCall(func_name)) {
-    return OperationKind::IRQ_FREE;
-  }
-  if (isLocalIrqEnableCall(func_name)) {
-    return OperationKind::IRQ_ENABLE;
-  }
-  if (isLocalIrqDisableCall(func_name)) {
-    return OperationKind::IRQ_DISABLE;
-  }
-  if (isLineIrqEnableCall(func_name)) {
-    return OperationKind::IRQ_LINE_ENABLE;
-  }
-  if (isLineIrqDisableCall(func_name)) {
-    return OperationKind::IRQ_LINE_DISABLE;
-  }
-  if (isBhDisableCall(func_name)) {
-    return OperationKind::BH_DISABLE;
-  }
-  if (isBhEnableCall(func_name)) {
-    return OperationKind::BH_ENABLE;
-  }
-  if (isPreemptDisableCall(func_name)) {
-    return OperationKind::PREEMPT_DISABLE;
-  }
-  if (isPreemptEnableCall(func_name)) {
-    return OperationKind::PREEMPT_ENABLE;
-  }
-
   return OperationKind::UNKNOWN;
 }
 
 LockKind
 LinuxKernelProcessModel::classifyLockKind(const StringRef &func_name) const {
-  if (LinuxKernelModel::isSpinLock(func_name) ||
-      LinuxKernelModel::isSpinUnlock(func_name) ||
-      LinuxKernelModel::isSpinLockInit(func_name)) {
-    return LockKind::SPINLOCK;
+  if (const LinuxKernelAPISemantics *semantics =
+          semantic_registry_.lookup(func_name)) {
+    return semantics->lock_kind;
   }
-  if (LinuxKernelModel::isMutexLock(func_name) ||
-      LinuxKernelModel::isMutexUnlock(func_name) ||
-      LinuxKernelModel::isMutexInit(func_name) ||
-      LinuxKernelModel::isMutexTryLock(func_name) ||
-      LinuxKernelModel::isMutexConditionalLock(func_name)) {
-    return LockKind::MUTEX;
-  }
-  if (LinuxKernelModel::isDown(func_name) ||
-      LinuxKernelModel::isDownConditional(func_name) ||
-      LinuxKernelModel::isDownTryLock(func_name) ||
-      LinuxKernelModel::isUp(func_name) ||
-      LinuxKernelModel::isSemaInit(func_name)) {
-    return LockKind::SEMAPHORE;
-  }
-  if (LinuxKernelModel::isReadLock(func_name) ||
-      LinuxKernelModel::isWriteLock(func_name)) {
-    return LockKind::RWLOCK;
-  }
-  if (LinuxKernelModel::isDownRead(func_name) ||
-      LinuxKernelModel::isUpRead(func_name) ||
-      LinuxKernelModel::isDownWrite(func_name) ||
-      LinuxKernelModel::isDownReadConditional(func_name) ||
-      LinuxKernelModel::isDownWriteConditional(func_name) ||
-      LinuxKernelModel::isDownReadTryLock(func_name) ||
-      LinuxKernelModel::isDownWriteTryLock(func_name) ||
-      LinuxKernelModel::isUpWrite(func_name) ||
-      LinuxKernelModel::isInitRwsem(func_name)) {
-    return LockKind::RW_SEMAPHORE;
-  }
-  if (LinuxKernelModel::isRcuReadLock(func_name) ||
-      LinuxKernelModel::isRcuReadUnlock(func_name)) {
-    return LockKind::RCU;
-  }
-  if (LinuxKernelModel::isInitCompletion(func_name) ||
-      LinuxKernelModel::isComplete(func_name) ||
-      LinuxKernelModel::isWaitForCompletion(func_name)) {
-    return LockKind::COMPLETION;
-  }
-  if (LinuxKernelModel::isInitWaitqueueHead(func_name) ||
-      LinuxKernelModel::isWakeUp(func_name) ||
-      LinuxKernelModel::isWaitEvent(func_name)) {
-    return LockKind::WAITQUEUE;
-  }
-
   return LockKind::UNKNOWN;
 }
 
-void LinuxKernelProcessModel::extractLockDetails(KernelOperation &op,
-                                                 unsigned object_arg_index) {
-  const CallBase *cb = dyn_cast<CallBase>(op.inst);
-  if (!cb || cb->arg_size() <= object_arg_index) {
+void LinuxKernelProcessModel::applyConfiguredSemantics(
+    KernelOperation &op, const LinuxKernelAPISemantics &semantics) {
+  const auto *call = dyn_cast<CallBase>(op.inst);
+  if (call == nullptr) {
     return;
   }
+  auto operand = [&](int index) -> const Value * {
+    if (index == LinuxKernelAPISemantics::ReturnValue) {
+      return call->getType()->isVoidTy() ? nullptr : call;
+    }
+    if (index < 0 || static_cast<unsigned>(index) >= call->arg_size()) {
+      return nullptr;
+    }
+    return call->getArgOperand(static_cast<unsigned>(index));
+  };
 
-  op.lock = canonicalizeValue(cb->getArgOperand(object_arg_index));
-
-  StringRef func_name(op.function_name);
-  op.is_raw = func_name.contains("raw_");
-  op.is_nested =
-      func_name.contains("nested") || func_name.contains("nest_lock");
-  op.is_interruptible =
-      func_name.contains("interruptible") || func_name.contains("killable");
-
-  if (func_name.contains("read") && !func_name.contains("write")) {
-    op.lock_mode = LockMode::SHARED;
-  } else {
-    op.lock_mode = LockMode::EXCLUSIVE;
+  if (const auto *subclass =
+          dyn_cast_or_null<ConstantInt>(operand(semantics.subclass_arg))) {
+    op.lock_subclass = static_cast<unsigned>(subclass->getZExtValue());
   }
 
-  if (op.kind == OperationKind::LOCK_TRY) {
-    if (LinuxKernelModel::isMutexTryLock(func_name) ||
-        LinuxKernelModel::isDownReadTryLock(func_name) ||
-        LinuxKernelModel::isDownWriteTryLock(func_name) ||
-        LinuxKernelModel::isSpinTryLock(func_name)) {
-      op.conditional_success = ConditionalSuccess::NONZERO;
-    } else {
-      // Interruptible/killable locks and down_trylock() acquire on zero.
-      op.conditional_success = ConditionalSuccess::ZERO;
+  const Value *object = operand(semantics.object_arg);
+  if (object != nullptr) {
+    const Value *canonical_object = canonicalizeValue(object);
+    switch (op.kind) {
+    case OperationKind::LOCK_ACQUIRE:
+    case OperationKind::LOCK_RELEASE:
+    case OperationKind::LOCK_TRY:
+    case OperationKind::LOCK_INIT:
+      op.lock = canonical_object;
+      op.lock_class = canonicalizeLockClass(
+          object,
+          semantics.lock_kind != LockKind::UNKNOWN ? semantics.lock_kind
+                                                   : op.lock_kind,
+          op.lock_subclass);
+      break;
+    case OperationKind::WAITQUEUE_INIT:
+    case OperationKind::WAIT_EVENT:
+    case OperationKind::WAKE_UP:
+    case OperationKind::PREPARE_WAIT:
+    case OperationKind::FINISH_WAIT:
+    case OperationKind::COMPLETION_WAIT:
+    case OperationKind::COMPLETION_SIGNAL:
+    case OperationKind::COMPLETION_INIT:
+    case OperationKind::COMPLETION_REINIT:
+      op.wait_queue = canonical_object;
+      op.async_object = canonical_object;
+      break;
+    case OperationKind::RCU_ASSIGN:
+    case OperationKind::RCU_DEREFERENCE:
+    case OperationKind::RCU_CALL:
+    case OperationKind::RCU_RECLAIM:
+      op.rcu_target = canonical_object;
+      op.rcu_sync = canonical_object;
+      if (op.kind == OperationKind::RCU_CALL) {
+        op.async_object = canonical_object;
+      }
+      if (op.kind == OperationKind::RCU_RECLAIM) {
+        op.memory_object = canonical_object;
+      }
+      break;
+    case OperationKind::KMALLOC:
+    case OperationKind::VMALLOC:
+    case OperationKind::ALLOC_PAGES:
+    case OperationKind::MEMORY_FREE:
+      op.memory_object = canonical_object;
+      break;
+    case OperationKind::ATOMIC_READ:
+    case OperationKind::ATOMIC_WRITE:
+    case OperationKind::ATOMIC_RMW:
+      op.atomic_var = canonical_object;
+      break;
+    case OperationKind::TIMER_SETUP:
+    case OperationKind::TIMER_MOD:
+    case OperationKind::TIMER_DELETE:
+    case OperationKind::TIMER_SHUTDOWN:
+    case OperationKind::KTHREAD_CREATE:
+    case OperationKind::KTHREAD_RUN:
+    case OperationKind::KTHREAD_START:
+    case OperationKind::KTHREAD_STOP:
+    case OperationKind::WORKqueue:
+    case OperationKind::WORKqueue_CREATE:
+    case OperationKind::WORKqueue_SUBMIT:
+    case OperationKind::WORKqueue_FLUSH:
+    case OperationKind::WORKqueue_CANCEL:
+    case OperationKind::WORKqueue_DESTROY:
+    case OperationKind::IRQ_REQUEST:
+    case OperationKind::IRQ_FREE:
+    case OperationKind::IRQ_LINE_ENABLE:
+    case OperationKind::IRQ_LINE_DISABLE:
+    case OperationKind::TASKLET_SETUP:
+    case OperationKind::TASKLET_SCHEDULE:
+    case OperationKind::TASKLET_KILL:
+    case OperationKind::NAPI_REGISTER:
+    case OperationKind::NAPI_SCHEDULE:
+    case OperationKind::NAPI_DISABLE:
+    case OperationKind::SOFTIRQ_REGISTER:
+    case OperationKind::SOFTIRQ_RAISE:
+      op.async_object = canonical_object;
+      if (op.kind == OperationKind::WORKqueue ||
+          op.kind == OperationKind::WORKqueue_SUBMIT ||
+          op.kind == OperationKind::TIMER_SETUP ||
+          op.kind == OperationKind::TIMER_MOD ||
+          op.kind == OperationKind::TIMER_DELETE ||
+          op.kind == OperationKind::TIMER_SHUTDOWN) {
+        op.wait_queue = canonical_object;
+      }
+      break;
+    default:
+      break;
     }
   }
 
-  if (func_name.contains("irqsave") || func_name.contains("irqrestore")) {
-    op.irq_flags = canonicalizeValue(cb->getArgOperand(cb->arg_size() - 1));
-  }
-}
-
-void LinuxKernelProcessModel::extractRCUDetails(KernelOperation &op) {
-  const CallBase *cb = dyn_cast<CallBase>(op.inst);
-  if (!cb) {
-    return;
-  }
-
-  StringRef func_name(op.function_name);
-  if (func_name.contains("srcu")) {
-    op.rcu_flavor = RCUFlavor::SRCU;
-    if (cb->arg_size() > 0) {
-      op.rcu_domain = canonicalizeValue(cb->getArgOperand(0));
+  if (const Value *domain = operand(semantics.domain_arg)) {
+    op.serialization_domain = canonicalizeValue(domain);
+    if (op.kind == OperationKind::RCU_READ_LOCK ||
+        op.kind == OperationKind::RCU_READ_UNLOCK ||
+        op.kind == OperationKind::RCU_SYNC ||
+        op.kind == OperationKind::RCU_CALL ||
+        op.kind == OperationKind::RCU_BARRIER) {
+      op.rcu_domain = op.serialization_domain;
     }
-  } else if (func_name.contains("tasks_trace") ||
-             func_name.contains("read_lock_trace") ||
-             func_name.contains("read_unlock_trace")) {
-    op.rcu_flavor = RCUFlavor::TASKS_TRACE;
-  } else if (func_name.contains("tasks")) {
-    op.rcu_flavor = RCUFlavor::TASKS;
-  } else if (func_name.contains("_bh")) {
-    op.rcu_flavor = RCUFlavor::BH;
-  } else if (func_name.contains("sched")) {
-    op.rcu_flavor = RCUFlavor::SCHED;
-  } else {
-    op.rcu_flavor = RCUFlavor::CLASSIC;
+  }
+  if (const Value *condition = operand(semantics.condition_arg)) {
+    op.wait_condition = condition;
+  }
+  if (const Value *flags = operand(semantics.flags_arg)) {
+    op.irq_flags = canonicalizeValue(flags);
+  }
+  if (const Value *expires = operand(semantics.expires_arg)) {
+    op.timer_expires = expires;
+  }
+  if (const Value *size = operand(semantics.size_arg)) {
+    op.allocation_size = size;
+  }
+  if (const auto *value =
+          dyn_cast_or_null<ConstantInt>(operand(semantics.value_arg))) {
+    if (value->getSExtValue() <= std::numeric_limits<int>::max() &&
+        value->getSExtValue() >= std::numeric_limits<int>::min()) {
+      op.atomic_value = static_cast<int>(value->getSExtValue());
+    }
   }
 
-  unsigned target_index = 0;
-  if (op.rcu_flavor == RCUFlavor::SRCU && op.kind == OperationKind::RCU_CALL) {
-    target_index = 1;
-  }
-  if (cb->arg_size() > target_index &&
-      op.kind != OperationKind::RCU_READ_LOCK &&
-      op.kind != OperationKind::RCU_READ_UNLOCK &&
-      op.kind != OperationKind::RCU_SYNC) {
-    op.rcu_target = canonicalizeValue(cb->getArgOperand(target_index));
-    op.rcu_sync = op.rcu_target;
-  }
-  if (op.kind == OperationKind::RCU_CALL && cb->arg_size() > target_index + 1) {
-    op.callback = cb->getArgOperand(target_index + 1)->stripPointerCasts();
-    op.callbacks.push_back(op.callback);
-    op.async_context = AsyncContextKind::RCU_CALLBACK;
-  }
-  op.requires_rcu_section = !func_name.contains("dereference_protected");
-}
-
-void LinuxKernelProcessModel::extractWaitQueueDetails(KernelOperation &op) {
-  const CallBase *cb = dyn_cast<CallBase>(op.inst);
-  if (!cb || cb->arg_size() == 0) {
-    return;
-  }
-
-  op.wait_queue = canonicalizeValue(cb->getArgOperand(0));
-
-  if (op.kind == OperationKind::WAIT_EVENT && cb->arg_size() > 1) {
-    op.wait_condition = cb->getArgOperand(1);
-  }
-
-  StringRef func_name(op.function_name);
-  op.is_interruptible =
-      func_name.contains("interruptible") || func_name.contains("killable");
-  op.has_timeout = func_name.contains("_timeout");
-  op.wake_all = func_name.contains("wake_up_all");
-  op.wake_exclusive =
-      func_name.contains("wake_up_one") || func_name.contains("wake_up_nr");
-  if (op.kind == OperationKind::COMPLETION_SIGNAL) {
-    op.completion_signal = LinuxKernelModel::isCompleteAll(func_name)
-                               ? CompletionSignalKind::ALL
-                               : CompletionSignalKind::ONE;
-  }
-}
-
-void LinuxKernelProcessModel::extractTimerDetails(KernelOperation &op) {
-  const CallBase *cb = dyn_cast<CallBase>(op.inst);
-  if (!cb || cb->arg_size() == 0) {
-    return;
-  }
-
-  op.wait_queue = canonicalizeValue(cb->getArgOperand(0));
-
-  if (op.kind == OperationKind::TIMER_MOD && cb->arg_size() > 1) {
-    op.timer_expires = cb->getArgOperand(1);
-  }
-  if (op.kind == OperationKind::TIMER_SETUP && cb->arg_size() > 1) {
-    op.callback = cb->getArgOperand(1)->stripPointerCasts();
-    op.callbacks.push_back(op.callback);
-    op.async_context = AsyncContextKind::TIMER_SOFTIRQ;
-  }
-}
-
-void LinuxKernelProcessModel::extractAtomicDetails(KernelOperation &op) {
-  const CallBase *cb = dyn_cast<CallBase>(op.inst);
-  if (!cb || cb->arg_size() == 0) {
-    return;
-  }
-
-  StringRef func_name(op.function_name);
-  unsigned object_index = 0;
-  int value_index = -1;
-
-  if (LinuxKernelModel::isSetBit(func_name) ||
-      LinuxKernelModel::isTestBit(func_name)) {
-    object_index = 1;
-    value_index = 0;
-  } else if ((LinuxKernelModel::isAtomicAdd(func_name) ||
-              LinuxKernelModel::isAtomicSub(func_name)) &&
-             !func_name.contains("inc") && !func_name.contains("dec")) {
-    object_index = 1;
-    value_index = 0;
-  } else if (LinuxKernelModel::isAtomicSet(func_name)) {
-    value_index = 1;
-  } else if (LinuxKernelModel::isAtomicCmpxchg(func_name)) {
-    value_index = 1;
-  }
-
-  if (object_index >= cb->arg_size()) {
-    return;
-  }
-  op.atomic_var = canonicalizeValue(cb->getArgOperand(object_index));
-  if (value_index >= 0 && static_cast<unsigned>(value_index) < cb->arg_size()) {
-    if (const auto *const_int =
-            dyn_cast<ConstantInt>(cb->getArgOperand(value_index))) {
-      if (const_int->getSExtValue() <= std::numeric_limits<int>::max()) {
-        op.atomic_value = static_cast<int>(const_int->getSExtValue());
+  auto registerCallback = [&](const Value *callback,
+                              AsyncContextKind context) {
+    if (callback == nullptr) {
+      return;
+    }
+    callback = callback->stripPointerCasts();
+    if (!isa<ConstantPointerNull>(callback)) {
+      if (op.callback == nullptr) {
+        op.callback = callback;
+      }
+      if (!llvm::is_contained(op.callbacks, callback)) {
+        op.callbacks.push_back(callback);
+      }
+      if (op.async_context == AsyncContextKind::NONE) {
+        op.async_context = context;
+      }
+      const bool already_registered =
+          llvm::any_of(op.async_callbacks,
+                       [&](const AsyncCallbackRegistration &registration) {
+                         return registration.callback == callback &&
+                                registration.context == context;
+                       });
+      if (!already_registered && context != AsyncContextKind::NONE) {
+        op.async_callbacks.push_back({callback, context, op.async_object,
+                                      op.serialization_domain,
+                                      semantics.serializes_domain});
       }
     }
+  };
+  registerCallback(operand(semantics.callback_arg), semantics.async_context);
+  registerCallback(operand(semantics.secondary_callback_arg),
+                   semantics.secondary_async_context);
+  if (op.callback == nullptr &&
+      semantics.async_context != AsyncContextKind::NONE) {
+    op.async_context = semantics.async_context;
+  }
+
+  if (semantics.lock_kind != LockKind::UNKNOWN) {
+    op.lock_kind = semantics.lock_kind;
+  }
+  if (semantics.lock_mode != LockMode::UNKNOWN) {
+    op.lock_mode = semantics.lock_mode;
+    op.reader_kind =
+        semantics.lock_mode == LockMode::SHARED
+            ? (op.lock_kind == LockKind::RWLOCK ? LockReaderKind::RECURSIVE
+                                                : LockReaderKind::NON_RECURSIVE)
+            : LockReaderKind::NONE;
+    op.is_recursive = op.reader_kind == LockReaderKind::RECURSIVE;
+  }
+  op.conditional_success = semantics.success;
+  op.rcu_flavor = semantics.rcu_flavor;
+  op.completion_signal = semantics.completion_signal;
+  op.memory_order = semantics.memory_order;
+  op.is_synchronous |= semantics.synchronous;
+  op.serializes_domain |= semantics.serializes_domain;
+  op.is_raw |= semantics.raw_lock;
+  op.is_nested |= semantics.nested_lock;
+  op.is_interruptible |= semantics.interruptible;
+  op.has_timeout |= semantics.timeout;
+  op.wake_all |= semantics.wake_all;
+  op.wake_exclusive |= semantics.wake_exclusive;
+  op.deferred_reclamation |= semantics.deferred_reclamation;
+  op.returns_retired_pointer |= semantics.returns_retired_pointer;
+  op.requires_rcu_section = semantics.requires_rcu_section;
+  op.managed_allocation |= semantics.managed_allocation;
+  op.may_sleep |= semantics.may_sleep;
+  op.may_spawn |= semantics.may_spawn;
+  op.may_access_shared_memory |= semantics.may_access_shared_memory;
+  op.saves_irq_state |= semantics.saves_irq_state;
+  op.restores_irq_state |= semantics.restores_irq_state;
+  op.disables_local_irq |= semantics.disables_local_irq;
+  op.enables_local_irq |= semantics.enables_local_irq;
+  op.disables_bh |= semantics.disables_bh;
+  op.enables_bh |= semantics.enables_bh;
+  if (!semantics.preemption_effect_non_rt || !config_.isPreemptRT()) {
+    op.disables_preemption |= semantics.disables_preemption;
+    op.enables_preemption |= semantics.enables_preemption;
   }
 }
 
@@ -580,6 +324,7 @@ void LinuxKernelProcessModel::trackLockState(KernelOperation &op) {
       op.lock != nullptr) {
     auto &lock_info = lock_info_map_[op.lock];
     lock_info.id = op.lock;
+    lock_info.lock_class = op.lock_class;
     lock_info.kind = op.lock_kind;
     lock_info.acquire_inst = op.inst;
     lock_info.acquire_history.push_back(op.inst);
@@ -606,6 +351,9 @@ void LinuxKernelProcessModel::trackLockState(KernelOperation &op) {
   if (op.kind == OperationKind::LOCK_RELEASE && op.lock != nullptr) {
     auto &lock_info = lock_info_map_[op.lock];
     lock_info.id = op.lock;
+    if (!lock_info.lock_class.isValid()) {
+      lock_info.lock_class = op.lock_class;
+    }
     if (lock_info.kind == LockKind::UNKNOWN) {
       lock_info.kind = op.lock_kind;
     }
@@ -621,6 +369,7 @@ void LinuxKernelProcessModel::trackLockState(KernelOperation &op) {
   if (op.kind == OperationKind::LOCK_INIT && op.lock != nullptr) {
     auto &lock_info = lock_info_map_[op.lock];
     lock_info.id = op.lock;
+    lock_info.lock_class = op.lock_class;
     lock_info.kind = op.lock_kind;
     lock_info.init_inst = op.inst;
   }
@@ -629,6 +378,7 @@ void LinuxKernelProcessModel::trackLockState(KernelOperation &op) {
 void LinuxKernelProcessModel::analyzeLockUsage() {}
 
 void LinuxKernelProcessModel::analyzeModule() {
+  semantic_registry_.load(config_);
   all_operations_.clear();
   operation_kind_counts_.clear();
   lock_info_map_.clear();
@@ -636,80 +386,147 @@ void LinuxKernelProcessModel::analyzeModule() {
   wait_queue_entries_.clear();
   lock_depth_.clear();
   operations_by_function_.clear();
-  operation_index_by_inst_.clear();
+  operation_indices_by_inst_.clear();
   instruction_order_.clear();
   canonical_pointer_ids_.clear();
 
-  struct ThinLockWrapper {
+  struct LockEffectSummary {
     OperationKind kind = OperationKind::UNKNOWN;
     LockKind lock_kind = LockKind::UNKNOWN;
     std::string semantic_name;
     unsigned object_arg_index = 0;
+    LinuxKernelAPISemantics semantics;
   };
-  std::map<const Function *, ThinLockWrapper> thin_lock_wrappers;
+  using LockWrapperSummary = std::vector<LockEffectSummary>;
+  std::map<const Function *, LockWrapperSummary> lock_wrapper_summaries;
   std::map<const Value *, const Value *> registered_work_callbacks;
+  std::map<const Value *, const Value *> registered_timer_callbacks;
+  std::map<const Value *, const Value *> registered_kthread_callbacks;
+  std::map<const Value *, const Value *> registered_tasklet_callbacks;
+  std::map<const Value *, const Value *> registered_napi_callbacks;
+  std::map<const Value *, const Value *> registered_softirq_callbacks;
+  std::set<const Value *> ordered_workqueue_domains;
 
-  for (const Function &function : module_) {
-    if (function.isDeclaration()) {
-      continue;
+  auto traceArgument = [&](const Function &function,
+                           const Value *value) -> std::optional<unsigned> {
+    if (value == nullptr) {
+      return std::nullopt;
+    }
+    value = value->stripPointerCasts();
+    if (const auto *argument = dyn_cast<Argument>(value)) {
+      if (argument->getParent() == &function) {
+        return argument->getArgNo();
+      }
+      return std::nullopt;
     }
 
-    const CallBase *semantic_call = nullptr;
-    const Function *semantic_callee = nullptr;
-    OperationKind semantic_kind = OperationKind::UNKNOWN;
-    bool saw_other_call = false;
-    for (const Instruction &instruction : instructions(function)) {
-      const auto *call = dyn_cast<CallBase>(&instruction);
-      if (call == nullptr) {
+    // Zero-offset projections are representational casts and can be safely
+    // instantiated with the caller's argument.  Non-zero field projections
+    // require the richer memory-object path representation and are therefore
+    // intentionally not summarized here.
+    const DataLayout &layout = module_.getDataLayout();
+    APInt offset(layout.getIndexTypeSizeInBits(value->getType()), 0, true);
+    const Value *base = value->stripAndAccumulateConstantOffsets(
+        layout, offset, /*AllowNonInbounds=*/true);
+    const auto *argument = dyn_cast_or_null<Argument>(base);
+    if (argument != nullptr && argument->getParent() == &function &&
+        offset.isZero()) {
+      return argument->getArgNo();
+    }
+    return std::nullopt;
+  };
+
+  // Compute compositional lock summaries to a fixed point.  A wrapper may
+  // contain multiple lock operations and may call another summarized wrapper;
+  // effects remain ordered and are instantiated at each callsite.
+  bool summary_progress = true;
+  while (summary_progress) {
+    summary_progress = false;
+    for (const Function &function : module_) {
+      if (function.isDeclaration() ||
+          lock_wrapper_summaries.count(&function) > 0) {
         continue;
       }
-      const Function *callee = resolveKnownCallee(call);
-      if (callee == nullptr) {
-        saw_other_call = true;
-        break;
-      }
-      if (callee->isIntrinsic()) {
-        continue;
-      }
-      OperationKind kind = classifyOperation(&instruction, callee->getName());
-      if (kind != OperationKind::LOCK_ACQUIRE &&
-          kind != OperationKind::LOCK_RELEASE &&
-          kind != OperationKind::LOCK_TRY) {
-        saw_other_call = true;
-        break;
-      }
-      if (semantic_call != nullptr) {
-        saw_other_call = true;
-        break;
-      }
-      semantic_call = call;
-      semantic_callee = callee;
-      semantic_kind = kind;
-    }
-    if (saw_other_call || semantic_call == nullptr ||
-        semantic_call->arg_size() == 0) {
-      continue;
-    }
 
-    const Value *inner_object =
-        semantic_call->getArgOperand(0)->stripPointerCasts();
-    const auto *argument = dyn_cast<Argument>(inner_object);
-    if (argument == nullptr || argument->getParent() != &function) {
-      continue;
-    }
+      LockWrapperSummary summary;
+      bool valid = true;
+      for (const Instruction &instruction : instructions(function)) {
+        const auto *call = dyn_cast<CallBase>(&instruction);
+        if (call == nullptr) {
+          continue;
+        }
+        const std::vector<const Function *> callees = getPossibleCallees(call);
+        if (callees.size() != 1) {
+          valid = false;
+          break;
+        }
+        const Function *callee = callees.front();
+        if (callee->isIntrinsic()) {
+          continue;
+        }
 
-    ThinLockWrapper summary;
-    summary.kind = semantic_kind;
-    summary.lock_kind = classifyLockKind(semantic_callee->getName());
-    summary.semantic_name = semantic_callee->getName().str();
-    summary.object_arg_index = argument->getArgNo();
-    thin_lock_wrappers[&function] = std::move(summary);
+        OperationKind kind = classifyOperation(&instruction, callee->getName());
+        if (kind == OperationKind::LOCK_ACQUIRE ||
+            kind == OperationKind::LOCK_RELEASE ||
+            kind == OperationKind::LOCK_TRY) {
+          const LinuxKernelAPISemantics *semantics =
+              semantic_registry_.lookup(callee->getName());
+          if (semantics == nullptr || semantics->object_arg < 0) {
+            valid = false;
+            break;
+          }
+          const unsigned object_index =
+              static_cast<unsigned>(semantics->object_arg);
+          if (call->arg_size() <= object_index) {
+            valid = false;
+            break;
+          }
+          std::optional<unsigned> argument =
+              traceArgument(function, call->getArgOperand(object_index));
+          if (!argument.has_value()) {
+            valid = false;
+            break;
+          }
+          summary.push_back({kind, classifyLockKind(callee->getName()),
+                             callee->getName().str(), *argument, *semantics});
+          continue;
+        }
+
+        auto nested = lock_wrapper_summaries.find(callee);
+        if (nested == lock_wrapper_summaries.end()) {
+          valid = false;
+          break;
+        }
+        for (const LockEffectSummary &effect : nested->second) {
+          if (call->arg_size() <= effect.object_arg_index) {
+            valid = false;
+            break;
+          }
+          std::optional<unsigned> argument = traceArgument(
+              function, call->getArgOperand(effect.object_arg_index));
+          if (!argument.has_value()) {
+            valid = false;
+            break;
+          }
+          LockEffectSummary instantiated = effect;
+          instantiated.object_arg_index = *argument;
+          summary.push_back(std::move(instantiated));
+        }
+        if (!valid) {
+          break;
+        }
+      }
+      if (valid && !summary.empty()) {
+        lock_wrapper_summaries[&function] = std::move(summary);
+        summary_progress = true;
+      }
+    }
   }
 
   size_t instruction_order = 0;
 
   for (Function &F : module_) {
-    if (thin_lock_wrappers.count(&F) > 0) {
+    if (lock_wrapper_summaries.count(&F) > 0) {
       continue;
     }
     for (inst_iterator II = inst_begin(F), E = inst_end(F); II != E; ++II) {
@@ -721,143 +538,186 @@ void LinuxKernelProcessModel::analyzeModule() {
         continue;
       }
 
-      const Function *callee = resolveKnownCallee(cb);
-      if (!callee) {
+      const std::vector<const Function *> callees = getPossibleCallees(cb);
+      if (callees.size() != 1) {
+        KernelOperation op(I, OperationKind::UNKNOWN_CALL);
+        op.function_name = "<unresolved-indirect-call>";
+        op.has_unknown_effects = true;
+        op.may_sleep = true;
+        op.may_spawn = true;
+        op.may_access_shared_memory = true;
+        const size_t index = all_operations_.size();
+        all_operations_.push_back(op);
+        operation_indices_by_inst_[I].push_back(index);
+        operations_by_function_[I->getFunction()].push_back(index);
+        operation_kind_counts_[op.kind]++;
+        continue;
+      }
+      const Function *callee = callees.front();
+      if (callee->isIntrinsic()) {
+        continue;
+      }
+
+      auto wrapper = lock_wrapper_summaries.find(callee);
+      if (wrapper != lock_wrapper_summaries.end()) {
+        for (const LockEffectSummary &effect : wrapper->second) {
+          if (cb->arg_size() <= effect.object_arg_index) {
+            continue;
+          }
+          KernelOperation op(I, effect.kind, effect.lock_kind);
+          op.function_name = effect.semantic_name;
+          LinuxKernelAPISemantics semantics = effect.semantics;
+          semantics.object_arg = effect.object_arg_index;
+          applyConfiguredSemantics(op, semantics);
+          trackLockState(op);
+
+          const size_t index = all_operations_.size();
+          all_operations_.push_back(op);
+          operation_indices_by_inst_[I].push_back(index);
+          operations_by_function_[I->getFunction()].push_back(index);
+          operation_kind_counts_[effect.kind]++;
+        }
         continue;
       }
 
       StringRef func_name = callee->getName();
-      unsigned lock_object_arg_index = 0;
+      const LinuxKernelAPISemantics *configured_semantics =
+          semantic_registry_.lookup(func_name);
       OperationKind kind = OperationKind::UNKNOWN;
       LockKind lock_kind = LockKind::UNKNOWN;
-      auto wrapper = thin_lock_wrappers.find(callee);
-      if (wrapper != thin_lock_wrappers.end()) {
-        kind = wrapper->second.kind;
-        lock_kind = wrapper->second.lock_kind;
-        func_name = wrapper->second.semantic_name;
-        lock_object_arg_index = wrapper->second.object_arg_index;
-      } else {
-        kind = classifyOperation(I, func_name);
-        lock_kind = classifyLockKind(func_name);
-      }
+      kind = classifyOperation(I, func_name);
+      lock_kind = classifyLockKind(func_name);
       if (kind == OperationKind::UNKNOWN) {
-        continue;
+        kind = OperationKind::UNKNOWN_CALL;
       }
 
       KernelOperation op(I, kind, lock_kind);
       op.function_name = func_name.str();
 
+      if (kind == OperationKind::UNKNOWN_CALL) {
+        op.has_unknown_effects = true;
+        op.may_sleep = true;
+        op.may_spawn = true;
+        op.may_access_shared_memory = true;
+      }
+
+      if (configured_semantics != nullptr) {
+        applyConfiguredSemantics(op, *configured_semantics);
+      }
       if (kind == OperationKind::LOCK_ACQUIRE ||
           kind == OperationKind::LOCK_RELEASE ||
           kind == OperationKind::LOCK_TRY || kind == OperationKind::LOCK_INIT) {
-        extractLockDetails(op, lock_object_arg_index);
         trackLockState(op);
-      } else if (kind == OperationKind::RCU_READ_LOCK ||
-                 kind == OperationKind::RCU_READ_UNLOCK ||
-                 kind == OperationKind::RCU_SYNC ||
-                 kind == OperationKind::RCU_CALL ||
-                 kind == OperationKind::RCU_ASSIGN ||
-                 kind == OperationKind::RCU_DEREFERENCE ||
-                 kind == OperationKind::RCU_RECLAIM) {
-        extractRCUDetails(op);
-      } else if (kind == OperationKind::WAIT_EVENT ||
-                 kind == OperationKind::WAKE_UP ||
-                 kind == OperationKind::WAITQUEUE_INIT ||
-                 kind == OperationKind::PREPARE_WAIT ||
-                 kind == OperationKind::FINISH_WAIT ||
-                 kind == OperationKind::COMPLETION_WAIT ||
-                 kind == OperationKind::COMPLETION_SIGNAL ||
-                 kind == OperationKind::COMPLETION_INIT ||
-                 kind == OperationKind::COMPLETION_REINIT) {
-        extractWaitQueueDetails(op);
-      } else if (kind == OperationKind::TIMER_SETUP ||
-                 kind == OperationKind::TIMER_MOD ||
-                 kind == OperationKind::TIMER_DELETE ||
-                 kind == OperationKind::TIMER_SHUTDOWN) {
-        extractTimerDetails(op);
-      } else if (kind == OperationKind::ATOMIC_READ ||
-                 kind == OperationKind::ATOMIC_WRITE ||
-                 kind == OperationKind::ATOMIC_RMW) {
-        extractAtomicDetails(op);
-      } else if (kind == OperationKind::IRQ_REQUEST) {
-        if (cb->arg_size() > 1) {
-          op.callback = cb->getArgOperand(1)->stripPointerCasts();
-          if (!isa<ConstantPointerNull>(op.callback)) {
-            op.callbacks.push_back(op.callback);
-            op.async_context = AsyncContextKind::HARDIRQ;
-          }
-        }
-        if (func_name.equals("request_threaded_irq") && cb->arg_size() > 2) {
-          const Value *threaded = cb->getArgOperand(2)->stripPointerCasts();
-          if (!isa<ConstantPointerNull>(threaded)) {
-            op.callbacks.push_back(threaded);
-            if (op.async_context == AsyncContextKind::NONE) {
-              op.callback = threaded;
-              op.async_context = AsyncContextKind::THREADED_IRQ;
-            }
-          }
-        }
-      } else if (kind == OperationKind::IRQ_DISABLE ||
-                 kind == OperationKind::IRQ_ENABLE) {
-        if (func_name.contains("save") || func_name.contains("restore")) {
-          if (cb->arg_size() > 0) {
-            op.irq_flags =
-                canonicalizeValue(cb->getArgOperand(cb->arg_size() - 1));
-          } else if (!cb->getType()->isVoidTy()) {
-            op.irq_flags = cb;
-          }
-        }
-      } else if (kind == OperationKind::KTHREAD_CREATE ||
-                 kind == OperationKind::KTHREAD_RUN) {
-        if (cb->arg_size() > 0) {
-          op.callback = cb->getArgOperand(0)->stripPointerCasts();
-          op.callbacks.push_back(op.callback);
-          op.async_context = AsyncContextKind::KTHREAD;
-        }
-      } else if (kind == OperationKind::WORKqueue) {
-        if (cb->arg_size() > 1) {
-          op.wait_queue = canonicalizeValue(cb->getArgOperand(0));
-          op.callback = cb->getArgOperand(1)->stripPointerCasts();
-          op.callbacks.push_back(op.callback);
-          op.async_context = AsyncContextKind::WORKQUEUE;
-          registered_work_callbacks[op.wait_queue] = op.callback;
-        }
-      } else if (kind == OperationKind::WORKqueue_SUBMIT) {
-        unsigned work_index = func_name.startswith("queue_work") ? 1 : 0;
-        if (cb->arg_size() > work_index) {
-          op.wait_queue = canonicalizeValue(cb->getArgOperand(work_index));
-          auto callback = registered_work_callbacks.find(op.wait_queue);
-          if (callback != registered_work_callbacks.end()) {
-            op.callback = callback->second;
-            op.callbacks.push_back(op.callback);
-          }
-          op.async_context = AsyncContextKind::WORKQUEUE;
-        }
       }
 
       const size_t index = all_operations_.size();
       all_operations_.push_back(op);
-      operation_index_by_inst_[I] = index;
+      operation_indices_by_inst_[I].push_back(index);
       operations_by_function_[I->getFunction()].push_back(index);
       operation_kind_counts_[kind]++;
     }
   }
 
   registered_work_callbacks.clear();
+  registered_timer_callbacks.clear();
+  registered_kthread_callbacks.clear();
+  registered_tasklet_callbacks.clear();
+  registered_napi_callbacks.clear();
+  registered_softirq_callbacks.clear();
+  ordered_workqueue_domains.clear();
   for (const KernelOperation &op : all_operations_) {
     if (op.kind == OperationKind::WORKqueue && op.wait_queue != nullptr &&
         op.callback != nullptr) {
       registered_work_callbacks[op.wait_queue] = op.callback;
     }
+    if (op.kind == OperationKind::TIMER_SETUP && op.async_object != nullptr &&
+        op.callback != nullptr) {
+      registered_timer_callbacks[op.async_object] = op.callback;
+    }
+    if (op.kind == OperationKind::KTHREAD_CREATE &&
+        op.async_object != nullptr && op.callback != nullptr) {
+      registered_kthread_callbacks[op.async_object] = op.callback;
+    }
+    if (op.kind == OperationKind::TASKLET_SETUP && op.async_object != nullptr &&
+        op.callback != nullptr) {
+      registered_tasklet_callbacks[op.async_object] = op.callback;
+    }
+    if (op.kind == OperationKind::NAPI_REGISTER && op.async_object != nullptr &&
+        op.callback != nullptr) {
+      registered_napi_callbacks[op.async_object] = op.callback;
+    }
+    if (op.kind == OperationKind::SOFTIRQ_REGISTER &&
+        op.async_object != nullptr && op.callback != nullptr) {
+      registered_softirq_callbacks[op.async_object] = op.callback;
+    }
+    if (op.kind == OperationKind::WORKqueue_CREATE && op.serializes_domain &&
+        op.serialization_domain != nullptr) {
+      ordered_workqueue_domains.insert(op.serialization_domain);
+    }
   }
   for (KernelOperation &op : all_operations_) {
-    if (op.kind != OperationKind::WORKqueue_SUBMIT || op.callback != nullptr) {
-      continue;
+    if (op.kind == OperationKind::WORKqueue_SUBMIT &&
+        ordered_workqueue_domains.count(op.serialization_domain) > 0) {
+      op.serializes_domain = true;
+      for (AsyncCallbackRegistration &registration : op.async_callbacks) {
+        registration.serializes_domain = true;
+      }
     }
-    auto callback = registered_work_callbacks.find(op.wait_queue);
-    if (callback != registered_work_callbacks.end()) {
+    if (op.kind == OperationKind::WORKqueue_SUBMIT && op.callback == nullptr) {
+      auto callback = registered_work_callbacks.find(op.wait_queue);
+      if (callback != registered_work_callbacks.end()) {
+        op.callback = callback->second;
+        op.callbacks.push_back(op.callback);
+        op.async_callbacks.push_back({op.callback, AsyncContextKind::WORKQUEUE,
+                                      op.async_object,
+                                      op.serialization_domain});
+      }
+    }
+    if (op.kind == OperationKind::TIMER_MOD && op.callback == nullptr) {
+      auto callback = registered_timer_callbacks.find(op.async_object);
+      if (callback != registered_timer_callbacks.end()) {
+        op.callback = callback->second;
+        op.callbacks.push_back(op.callback);
+        op.async_context = AsyncContextKind::TIMER_SOFTIRQ;
+        op.serialization_domain = op.async_object;
+        op.async_callbacks.push_back({op.callback, op.async_context,
+                                      op.async_object,
+                                      op.serialization_domain});
+      }
+    }
+    if (op.kind == OperationKind::KTHREAD_START && op.callback == nullptr) {
+      auto callback = registered_kthread_callbacks.find(op.async_object);
+      if (callback != registered_kthread_callbacks.end()) {
+        op.callback = callback->second;
+        op.callbacks.push_back(op.callback);
+        op.async_context = AsyncContextKind::KTHREAD;
+        op.async_callbacks.push_back(
+            {op.callback, op.async_context, op.async_object, nullptr});
+      }
+    }
+    auto attachCallback = [&](const std::map<const Value *, const Value *> &map,
+                              AsyncContextKind context, bool serializes) {
+      auto callback = map.find(op.async_object);
+      if (callback == map.end()) {
+        return;
+      }
       op.callback = callback->second;
       op.callbacks.push_back(op.callback);
+      op.async_context = context;
+      op.serializes_domain = serializes;
+      op.async_callbacks.push_back({op.callback, context, op.async_object,
+                                    op.serialization_domain, serializes});
+    };
+    if (op.kind == OperationKind::TASKLET_SCHEDULE && op.callback == nullptr) {
+      attachCallback(registered_tasklet_callbacks, AsyncContextKind::TASKLET,
+                     true);
+    }
+    if (op.kind == OperationKind::NAPI_SCHEDULE && op.callback == nullptr) {
+      attachCallback(registered_napi_callbacks, AsyncContextKind::NAPI, true);
+    }
+    if (op.kind == OperationKind::SOFTIRQ_RAISE && op.callback == nullptr) {
+      attachCallback(registered_softirq_callbacks, AsyncContextKind::SOFTIRQ,
+                     false);
     }
   }
 
@@ -905,12 +765,27 @@ LinuxKernelProcessModel::getOperationsInFunction(
 
 const KernelOperation *LinuxKernelProcessModel::getOperationForInstruction(
     const Instruction *inst) const {
-  auto it = operation_index_by_inst_.find(inst);
-  if (it == operation_index_by_inst_.end()) {
+  auto it = operation_indices_by_inst_.find(inst);
+  if (it == operation_indices_by_inst_.end() || it->second.empty()) {
     return nullptr;
   }
 
-  return &all_operations_[it->second];
+  return &all_operations_[it->second.front()];
+}
+
+std::vector<const KernelOperation *>
+LinuxKernelProcessModel::getOperationsForInstruction(
+    const Instruction *inst) const {
+  std::vector<const KernelOperation *> result;
+  auto found = operation_indices_by_inst_.find(inst);
+  if (found == operation_indices_by_inst_.end()) {
+    return result;
+  }
+  result.reserve(found->second.size());
+  for (size_t index : found->second) {
+    result.push_back(&all_operations_[index]);
+  }
+  return result;
 }
 
 bool LinuxKernelProcessModel::isBeforeInFunction(const Instruction *lhs,
@@ -952,6 +827,88 @@ LinuxKernelProcessModel::canonicalizeValue(const Value *value) const {
   auto key = std::make_pair(base, offset.getSExtValue());
   auto [identity, inserted] = canonical_pointer_ids_.emplace(key, stripped);
   return identity->second;
+}
+
+LockClassID LinuxKernelProcessModel::canonicalizeLockClass(
+    const Value *value, LockKind kind, unsigned subclass) const {
+  LockClassID result;
+  result.kind = kind;
+  result.subclass = subclass;
+  if (value == nullptr) {
+    return result;
+  }
+
+  const Value *stripped = value->stripPointerCasts();
+  if (!stripped->getType()->isPointerTy()) {
+    return result;
+  }
+
+  // Preserve the aggregate type used by the GEP.  For argument-based object
+  // instances this lets the same struct field share a lock class even though
+  // the concrete SSA bases differ between callers.
+  for (const Value *cursor = stripped;;) {
+    const auto *gep = dyn_cast<GEPOperator>(cursor);
+    if (gep == nullptr) {
+      break;
+    }
+    result.aggregate_type = gep->getSourceElementType();
+    cursor = gep->getPointerOperand()->stripPointerCasts();
+  }
+
+  const DataLayout &layout = module_.getDataLayout();
+  APInt offset(layout.getIndexTypeSizeInBits(stripped->getType()), 0, true);
+  const Value *base = stripped->stripAndAccumulateConstantOffsets(
+      layout, offset, /*AllowNonInbounds=*/true);
+  if (base == nullptr) {
+    return result;
+  }
+  result.byte_offset = offset.getSExtValue();
+  result.precise = !isa<GEPOperator>(base);
+
+  if (isa<GlobalVariable>(base) || isa<AllocaInst>(base) ||
+      isa<CallBase>(base)) {
+    result.static_key = base;
+  }
+  if (result.aggregate_type == nullptr && base->getType()->isPointerTy()) {
+    result.aggregate_type = base->getType()->getPointerElementType();
+  }
+  return result;
+}
+
+bool LinuxKernelProcessModel::mayAlias(const Value *lhs,
+                                       const Value *rhs) const {
+  if (lhs == nullptr || rhs == nullptr) {
+    return false;
+  }
+  if (canonicalizeValue(lhs) == canonicalizeValue(rhs)) {
+    return true;
+  }
+  if (alias_analysis_ != nullptr && alias_analysis_->isInitialized()) {
+    return alias_analysis_->mayAlias(lhs, rhs);
+  }
+  return false;
+}
+
+bool LinuxKernelProcessModel::mustAlias(const Value *lhs,
+                                        const Value *rhs) const {
+  if (lhs == nullptr || rhs == nullptr) {
+    return false;
+  }
+  if (canonicalizeValue(lhs) == canonicalizeValue(rhs)) {
+    return true;
+  }
+  return alias_analysis_ != nullptr && alias_analysis_->isInitialized() &&
+         alias_analysis_->mustAlias(lhs, rhs);
+}
+
+bool LinuxKernelProcessModel::getAliasSet(
+    const Value *value, std::vector<const Value *> &aliases) const {
+  aliases.clear();
+  if (value == nullptr || alias_analysis_ == nullptr ||
+      !alias_analysis_->isInitialized()) {
+    return false;
+  }
+  return alias_analysis_->getAliasSet(value, aliases);
 }
 
 std::vector<KernelOperation>
@@ -1059,12 +1016,10 @@ std::vector<const Instruction *>
 LinuxKernelProcessModel::findIrqSaveRestoreMismatch() const {
   std::vector<const Instruction *> result;
   auto isSave = [](const KernelOperation &op) {
-    StringRef name(op.function_name);
-    return name.contains("irqsave") || name.contains("irq_save");
+    return op.saves_irq_state;
   };
   auto isRestore = [](const KernelOperation &op) {
-    StringRef name(op.function_name);
-    return name.contains("irqrestore") || name.contains("irq_restore");
+    return op.restores_irq_state;
   };
   auto flagsMatch = [](const KernelOperation &save,
                        const KernelOperation &restore) {
@@ -1113,9 +1068,10 @@ LinuxKernelProcessModel::findIrqSaveRestoreMismatch() const {
   return result;
 }
 
-bool LinuxKernelProcessModel::isInAtomicContext(const Instruction *inst) const {
+LinuxKernelProcessModel::ExecutionState
+LinuxKernelProcessModel::getExecutionState(const Instruction *inst) const {
   if (inst == nullptr) {
-    return false;
+    return {};
   }
 
   struct AtomicState {
@@ -1134,22 +1090,23 @@ bool LinuxKernelProcessModel::isInAtomicContext(const Instruction *inst) const {
     if (op == nullptr) {
       return;
     }
-    StringRef name(op->function_name);
-    if (name.contains("irqsave") || name.contains("irq_save") ||
+    if (op->disables_local_irq || op->saves_irq_state ||
         op->kind == OperationKind::IRQ_DISABLE) {
       state.irq_disabled = true;
-    } else if (name.contains("irqrestore") || name.contains("irq_restore") ||
+    } else if (op->enables_local_irq || op->restores_irq_state ||
                op->kind == OperationKind::IRQ_ENABLE) {
       state.irq_disabled = false;
     }
-    if (op->kind == OperationKind::BH_DISABLE) {
+    if (op->disables_bh || op->kind == OperationKind::BH_DISABLE) {
       state.bh_disabled = true;
-    } else if (op->kind == OperationKind::BH_ENABLE) {
+    } else if (op->enables_bh || op->kind == OperationKind::BH_ENABLE) {
       state.bh_disabled = false;
     }
-    if (op->kind == OperationKind::PREEMPT_DISABLE) {
+    if (op->disables_preemption ||
+        op->kind == OperationKind::PREEMPT_DISABLE) {
       state.preempt_disabled = true;
-    } else if (op->kind == OperationKind::PREEMPT_ENABLE) {
+    } else if (op->enables_preemption ||
+               op->kind == OperationKind::PREEMPT_ENABLE) {
       state.preempt_disabled = false;
     }
   };
@@ -1167,7 +1124,10 @@ bool LinuxKernelProcessModel::isInAtomicContext(const Instruction *inst) const {
     worklist.pop_front();
     AtomicState state = in_states[block];
     for (const Instruction &instruction : *block) {
-      transfer(state, getOperationForInstruction(&instruction));
+      for (const KernelOperation *op :
+           getOperationsForInstruction(&instruction)) {
+        transfer(state, op);
+      }
     }
     for (const BasicBlock *successor : successors(block)) {
       if (initialized.insert(successor).second) {
@@ -1191,9 +1151,18 @@ bool LinuxKernelProcessModel::isInAtomicContext(const Instruction *inst) const {
     if (&instruction == inst) {
       break;
     }
-    transfer(state, getOperationForInstruction(&instruction));
+    for (const KernelOperation *op :
+         getOperationsForInstruction(&instruction)) {
+      transfer(state, op);
+    }
   }
-  return state.irq_disabled || state.bh_disabled || state.preempt_disabled;
+  return {state.irq_disabled, state.bh_disabled, state.preempt_disabled};
+}
+
+bool LinuxKernelProcessModel::isInAtomicContext(const Instruction *inst) const {
+  const ExecutionState state = getExecutionState(inst);
+  return state.local_irq_disabled || state.bh_disabled ||
+         state.preempt_disabled;
 }
 
 bool LinuxKernelProcessModel::maySleep(const Instruction *inst) const {
@@ -1202,19 +1171,14 @@ bool LinuxKernelProcessModel::maySleep(const Instruction *inst) const {
     return false;
   }
 
-  const Function *callee = resolveKnownCallee(cb);
-  if (!callee) {
+  const std::vector<const Function *> callees = getPossibleCallees(cb);
+  if (callees.size() != 1) {
     return false;
   }
-
-  StringRef func_name = callee->getName();
-
-  return LinuxKernelModel::isMutexLock(func_name) ||
-         LinuxKernelModel::isMutexConditionalLock(func_name) ||
-         LinuxKernelModel::isDown(func_name) ||
-         LinuxKernelModel::isDownConditional(func_name) ||
-         LinuxKernelModel::isWaitForCompletion(func_name) ||
-         LinuxKernelModel::isWaitEvent(func_name);
+  const Function *callee = callees.front();
+  const LinuxKernelAPISemantics *semantics =
+      semantic_registry_.lookup(callee->getName());
+  return semantics != nullptr && semantics->may_sleep;
 }
 
 } // namespace kernel

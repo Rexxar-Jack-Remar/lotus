@@ -8,6 +8,7 @@
 
 #include "Concurrency/LinuxKernel/LinuxKernelWaitAnalysis.h"
 
+#include "Concurrency/LinuxKernel/LinuxKernelExecutionGraph.h"
 #include "Concurrency/LinuxKernel/LinuxKernelProcessModel.h"
 
 #include <algorithm>
@@ -20,10 +21,74 @@
 #include <vector>
 
 #include <llvm/IR/Dominators.h>
+#include <llvm/IR/Instructions.h>
 
 using namespace llvm;
 
 namespace kernel {
+
+namespace {
+
+void collectConditionLocations(const LinuxKernelProcessModel &model,
+                               const Value *value,
+                               std::set<const Value *> &locations,
+                               std::set<const Value *> &visited) {
+  if (value == nullptr || !visited.insert(value).second ||
+      isa<Constant>(value)) {
+    return;
+  }
+  if (const auto *load = dyn_cast<LoadInst>(value)) {
+    locations.insert(model.canonicalizeValue(load->getPointerOperand()));
+    return;
+  }
+  if (const auto *atomic = dyn_cast<AtomicRMWInst>(value)) {
+    locations.insert(model.canonicalizeValue(atomic->getPointerOperand()));
+    return;
+  }
+  if (const auto *cmpxchg = dyn_cast<AtomicCmpXchgInst>(value)) {
+    locations.insert(model.canonicalizeValue(cmpxchg->getPointerOperand()));
+    return;
+  }
+  if (const auto *instruction = dyn_cast<Instruction>(value)) {
+    if (const KernelOperation *op =
+            model.getOperationForInstruction(instruction)) {
+      if ((op->kind == OperationKind::ATOMIC_READ ||
+           op->kind == OperationKind::ATOMIC_RMW) &&
+          op->atomic_var != nullptr) {
+        locations.insert(op->atomic_var);
+      }
+    }
+  }
+  if (const auto *user = dyn_cast<User>(value)) {
+    for (const Use &operand : user->operands()) {
+      collectConditionLocations(model, operand.get(), locations, visited);
+    }
+  }
+}
+
+const Value *writtenLocation(const LinuxKernelProcessModel &model,
+                             const Instruction &instruction) {
+  if (const auto *store = dyn_cast<StoreInst>(&instruction)) {
+    return model.canonicalizeValue(store->getPointerOperand());
+  }
+  if (const auto *atomic = dyn_cast<AtomicRMWInst>(&instruction)) {
+    return model.canonicalizeValue(atomic->getPointerOperand());
+  }
+  if (const auto *cmpxchg = dyn_cast<AtomicCmpXchgInst>(&instruction)) {
+    return model.canonicalizeValue(cmpxchg->getPointerOperand());
+  }
+  for (const KernelOperation *op :
+       model.getOperationsForInstruction(&instruction)) {
+    if ((op->kind == OperationKind::ATOMIC_WRITE ||
+         op->kind == OperationKind::ATOMIC_RMW) &&
+        op->atomic_var != nullptr) {
+      return op->atomic_var;
+    }
+  }
+  return nullptr;
+}
+
+} // namespace
 
 void LinuxKernelWaitAnalysis::analyzeWaits() {
   wait_contexts_.clear();
@@ -62,7 +127,7 @@ void LinuxKernelWaitAnalysis::identifyWaitContexts() {
     }
 
     for (auto &ctx : wait_contexts_) {
-      if (ctx.wait_queue == op.wait_queue) {
+      if (process_model_.mayAlias(ctx.wait_queue, op.wait_queue)) {
         ctx.wake_insts.push_back(op.inst);
       }
     }
@@ -116,9 +181,66 @@ void LinuxKernelWaitAnalysis::identifyTimers() {
 
 std::vector<std::pair<const Instruction *, const Instruction *>>
 LinuxKernelWaitAnalysis::findMissingWakeUps() const {
-  // A missing call in this module is not a lost wakeup.  Diagnosing one needs
-  // the condition's memory accesses, enqueue/check ordering and MHP/HB data.
-  return {};
+  std::vector<std::pair<const Instruction *, const Instruction *>> result;
+  if (execution_graph_ == nullptr) {
+    return result;
+  }
+
+  for (const WaitContext &wait : wait_contexts_) {
+    if (wait.wait_inst == nullptr || wait.condition == nullptr ||
+        wait.has_timeout || isa<ConstantInt>(wait.condition)) {
+      continue;
+    }
+
+    std::set<const Value *> condition_locations;
+    std::set<const Value *> visited;
+    collectConditionLocations(process_model_, wait.condition,
+                              condition_locations, visited);
+    if (condition_locations.empty()) {
+      continue;
+    }
+
+    for (const Function &function : process_model_.getModule()) {
+      const auto contexts = execution_graph_->getContextsForFunction(&function);
+      if (contexts.empty()) {
+        continue;
+      }
+      for (const BasicBlock &block : function) {
+        for (const Instruction &writer : block) {
+          const Value *written = writtenLocation(process_model_, writer);
+          if (written == nullptr ||
+              !llvm::any_of(condition_locations,
+                            [&](const Value *location) {
+                              return process_model_.mayAlias(location, written);
+                            }) ||
+              !execution_graph_->mayHappenInParallel(wait.wait_inst, &writer)) {
+            continue;
+          }
+
+          bool producer_wakes_queue = false;
+          for (const KernelOperation &wake :
+               process_model_.getAllOperations()) {
+            if (wake.kind != OperationKind::WAKE_UP ||
+                wake.inst->getFunction() != &function ||
+                !process_model_.mayAlias(wait.wait_queue, wake.wait_queue)) {
+              continue;
+            }
+            if (execution_graph_->happensBefore(&writer, wake.inst)) {
+              producer_wakes_queue = true;
+              break;
+            }
+          }
+          if (!producer_wakes_queue) {
+            result.emplace_back(wait.wait_inst, &writer);
+          }
+        }
+      }
+    }
+  }
+
+  llvm::sort(result);
+  result.erase(std::unique(result.begin(), result.end()), result.end());
+  return result;
 }
 
 std::vector<std::pair<const Instruction *, const Instruction *>>
@@ -220,9 +342,66 @@ LinuxKernelWaitAnalysis::findTimerUseAfterDelete() const {
 std::vector<std::pair<const Instruction *, const Instruction *>>
 LinuxKernelWaitAnalysis::findRaceBetweenWaitAndWake() const {
   std::vector<std::pair<const Instruction *, const Instruction *>> result;
-  // Program order between calls is insufficient to prove a lost wakeup.  The
-  // condition access, enqueue state and inter-thread happens-before relation
-  // must all participate in this diagnostic.
+  if (execution_graph_ == nullptr) {
+    return result;
+  }
+
+  std::map<const Function *, std::unique_ptr<DominatorTree>> dominators;
+  for (const KernelOperation &prepare : process_model_.getAllOperations()) {
+    if (prepare.kind != OperationKind::PREPARE_WAIT ||
+        prepare.wait_queue == nullptr) {
+      continue;
+    }
+    const Function *consumer = prepare.inst->getFunction();
+    auto &consumer_dt = dominators[consumer];
+    if (!consumer_dt) {
+      consumer_dt =
+          std::make_unique<DominatorTree>(*const_cast<Function *>(consumer));
+    }
+
+    std::set<const Value *> checked_locations;
+    for (const BasicBlock &block : *consumer) {
+      const auto *branch = dyn_cast<BranchInst>(block.getTerminator());
+      if (branch == nullptr || !branch->isConditional() ||
+          !consumer_dt->dominates(branch, prepare.inst)) {
+        continue;
+      }
+      std::set<const Value *> visited;
+      collectConditionLocations(process_model_, branch->getCondition(),
+                                checked_locations, visited);
+    }
+    if (checked_locations.empty()) {
+      continue;
+    }
+
+    for (const Function &producer : process_model_.getModule()) {
+      for (const BasicBlock &block : producer) {
+        for (const Instruction &writer : block) {
+          const Value *written = writtenLocation(process_model_, writer);
+          if (written == nullptr ||
+              !llvm::any_of(checked_locations,
+                            [&](const Value *location) {
+                              return process_model_.mayAlias(location, written);
+                            }) ||
+              !execution_graph_->mayHappenInParallel(prepare.inst, &writer)) {
+            continue;
+          }
+          for (const KernelOperation &wake :
+               process_model_.getAllOperations()) {
+            if (wake.kind == OperationKind::WAKE_UP &&
+                wake.inst->getFunction() == &producer &&
+                process_model_.mayAlias(prepare.wait_queue, wake.wait_queue) &&
+                execution_graph_->happensBefore(&writer, wake.inst)) {
+              result.emplace_back(prepare.inst, wake.inst);
+            }
+          }
+        }
+      }
+    }
+  }
+
+  llvm::sort(result);
+  result.erase(std::unique(result.begin(), result.end()), result.end());
   return result;
 }
 

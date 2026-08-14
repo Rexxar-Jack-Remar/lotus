@@ -28,9 +28,9 @@
 #include "llvm/IR/Module.h"
 
 #include "Concurrency/ConcurrencyConfig.h"
+#include "Concurrency/LinuxKernel/LinuxKernelSemanticRegistry.h"
 #include "Concurrency/Utils/CUDA.h"
 #include "Concurrency/Utils/CppThreading.h"
-#include "Concurrency/Utils/LinuxKernel.h"
 
 #include <cstdint>
 #include <string>
@@ -643,6 +643,12 @@ private:
   const llvm::CallBase *
   getKernelThreadCreateCall(const llvm::Instruction *inst) const;
 
+  const kernel::LinuxKernelAPISemantics *
+  lookupKernelSemantics(llvm::StringRef name) const;
+  bool isKernelOperation(const llvm::CallBase *call,
+                         kernel::OperationKind kind) const;
+  TD_TYPE getKernelType(llvm::StringRef name) const;
+
   bool cppWrapperDestructorDefinitelyReleases(
       const llvm::Instruction *inst) const;
 
@@ -660,6 +666,7 @@ private:
 
   /// Configuration for threading models
   concurrency::ConcurrencyConfig m_config;
+  kernel::LinuxKernelSemanticRegistry m_kernel_api_registry;
 
   /// Constructor
   ThreadAPI() { init(); }
@@ -867,7 +874,7 @@ public:
     const llvm::Function *callee = getCallee(inst);
     const llvm::CallBase *cb = getLLVMCallSite(inst);
     TD_TYPE t = cb ? getType(cb) : getType(callee);
-    if (cb && LinuxKernelModel::isWakeUpProcess(getCalledAPIName(cb)))
+    if (cb && isKernelOperation(cb, kernel::OperationKind::KTHREAD_START))
       return getKernelThreadCreateCall(inst) != nullptr;
     return t == TD_FORK || t == TD_JTHREAD_FORK ||
            t == TD_CUDA_KERNEL_LAUNCH || t == TD_CUDA_MULTI_DEVICE_LAUNCH ||
@@ -907,7 +914,7 @@ public:
     const llvm::Function *callee = getCallee(inst);
     const llvm::CallBase *cb = getLLVMCallSite(inst);
     TD_TYPE type = cb ? getType(cb) : getType(callee);
-    if (cb && LinuxKernelModel::isWakeUpProcess(getCalledAPIName(cb)))
+    if (cb && isKernelOperation(cb, kernel::OperationKind::KTHREAD_START))
       return getCallArg(inst, 0);
     if (type == TD_ASYNC || type == TD_CUDA_KERNEL_LAUNCH ||
         type == TD_CUDA_MULTI_DEVICE_LAUNCH ||
@@ -932,7 +939,7 @@ public:
     const llvm::Function *callee = getCallee(inst);
     const llvm::CallBase *cb = getLLVMCallSite(inst);
     const TD_TYPE type = cb ? getType(cb) : getType(callee);
-    if (cb && LinuxKernelModel::isWakeUpProcess(getCalledAPIName(cb))) {
+    if (cb && isKernelOperation(cb, kernel::OperationKind::KTHREAD_START)) {
       const llvm::CallBase *create = getKernelThreadCreateCall(inst);
       if (!create || create->arg_size() < 1)
         return nullptr;
@@ -982,7 +989,7 @@ public:
       return nullptr;
     const llvm::Function *callee = getCallee(inst);
     const llvm::CallBase *cb = getLLVMCallSite(inst);
-    if (cb && LinuxKernelModel::isWakeUpProcess(getCalledAPIName(cb))) {
+    if (cb && isKernelOperation(cb, kernel::OperationKind::KTHREAD_START)) {
       const llvm::CallBase *create = getKernelThreadCreateCall(inst);
       return create && create->arg_size() > 1 ? create->getArgOperand(1)
                                                : nullptr;
@@ -1228,16 +1235,17 @@ public:
     const llvm::Function *callee = getCallee(inst);
     TD_TYPE t = cb ? getType(cb) : getType(callee);
     const APIDescription description = cb ? describe(cb) : describe(callee);
+    const kernel::LinuxKernelAPISemantics *kernel_semantics =
+        cb ? lookupKernelSemantics(getCalledAPIName(cb)) : nullptr;
     return t == TD_TRY_ACQUIRE || t == TD_SEMAPHORE_TRY_ACQUIRE ||
            t == TD_CPP_LOCK_TRY ||
            llvm::is_contained(description.traits, std::string("try-lock")) ||
+           (kernel_semantics != nullptr &&
+            kernel_semantics->operation == kernel::OperationKind::LOCK_TRY) ||
            (callee &&
             CppThreadingModel::isTryToLockConstructor(callee->getName())) ||
            (callee && (callee->getName() == "pthread_rwlock_tryrdlock" ||
-                       callee->getName() == "pthread_rwlock_trywrlock" ||
-                       LinuxKernelModel::isDownTryLock(callee->getName()) ||
-                       LinuxKernelModel::isDownReadTryLock(callee->getName()) ||
-                       LinuxKernelModel::isDownWriteTryLock(callee->getName()))) ||
+                       callee->getName() == "pthread_rwlock_trywrlock")) ||
            // Linux kernel try-locks
            t == TD_KERNEL_SPIN_TRYLOCK || t == TD_KERNEL_MUTEX_TRYLOCK;
   }
@@ -1257,12 +1265,14 @@ public:
     const APIDescription description = cb ? describe(cb) : describe(callee);
     if (description.conditional_acquire)
       return true;
+    const kernel::LinuxKernelAPISemantics *kernel_semantics =
+        lookupKernelSemantics(getCalledAPIName(cb));
+    if (kernel_semantics != nullptr &&
+        kernel_semantics->operation == kernel::OperationKind::LOCK_TRY) {
+      return true;
+    }
     const llvm::StringRef name = callee->getName();
-    return LinuxKernelModel::isMutexConditionalLock(name) ||
-           LinuxKernelModel::isDownConditional(name) ||
-           LinuxKernelModel::isDownReadConditional(name) ||
-           LinuxKernelModel::isDownWriteConditional(name) ||
-           name == "pthread_mutex_timedlock" ||
+    return name == "pthread_mutex_timedlock" ||
            name == "pthread_mutex_clocklock" ||
            name == "pthread_rwlock_timedrdlock" ||
            name == "pthread_rwlock_clockrdlock" ||
@@ -1549,25 +1559,27 @@ public:
       const TD_TYPE type = getType(callee);
       const llvm::CallBase *cb = getLLVMCallSite(inst);
       const APIDescription description = cb ? describe(cb) : describe(callee);
+      const kernel::LinuxKernelAPISemantics *kernel_semantics =
+          cb ? lookupKernelSemantics(getCalledAPIName(cb)) : nullptr;
       if (description.success != TryLockSuccess::Unknown) {
         info.try_success = description.success;
-      } else if (callee &&
-                 (callee->getName().startswith("pthread_") ||
-                  LinuxKernelModel::isDownTryLock(callee->getName()) ||
-                  LinuxKernelModel::isMutexConditionalLock(callee->getName()) ||
-                  LinuxKernelModel::isDownConditional(callee->getName()) ||
-                  LinuxKernelModel::isDownReadConditional(callee->getName()) ||
-                  LinuxKernelModel::isDownWriteConditional(callee->getName()))) {
+      } else if (kernel_semantics != nullptr &&
+                 kernel_semantics->success ==
+                     kernel::ConditionalSuccess::ZERO) {
+        info.try_success = TryLockSuccess::Zero;
+      } else if (kernel_semantics != nullptr &&
+                 kernel_semantics->success ==
+                     kernel::ConditionalSuccess::NONZERO) {
+        info.try_success = TryLockSuccess::NonZero;
+      } else if (callee && callee->getName().startswith("pthread_")) {
         info.try_success = TryLockSuccess::Zero;
       } else if (type == TD_TRY_ACQUIRE ||
                  type == TD_SEMAPHORE_TRY_ACQUIRE ||
                  type == TD_CPP_LOCK_TRY || type == TD_KERNEL_SPIN_TRYLOCK ||
                  type == TD_KERNEL_MUTEX_TRYLOCK ||
                  (callee &&
-                  (CppThreadingModel::isTryToLockConstructor(
-                       callee->getName()) ||
-                   LinuxKernelModel::isDownReadTryLock(callee->getName()) ||
-                   LinuxKernelModel::isDownWriteTryLock(callee->getName())))) {
+                  CppThreadingModel::isTryToLockConstructor(
+                      callee->getName()))) {
         info.try_success = TryLockSuccess::NonZero;
       }
     }

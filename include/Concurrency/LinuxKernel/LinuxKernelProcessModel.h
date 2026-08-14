@@ -13,7 +13,9 @@
 #ifndef LINUX_KERNEL_PROCESS_MODEL_H
 #define LINUX_KERNEL_PROCESS_MODEL_H
 
+#include "Concurrency/LinuxKernel/LinuxKernelConfig.h"
 #include "Concurrency/LinuxKernel/LinuxKernelOperation.h"
+#include "Concurrency/LinuxKernel/LinuxKernelSemanticRegistry.h"
 
 #include <cstdint>
 #include <map>
@@ -21,6 +23,7 @@
 #include <set>
 #include <string>
 #include <unordered_map>
+#include <utility>
 #include <vector>
 
 #include <llvm/IR/Module.h>
@@ -31,10 +34,27 @@ class LinuxKernelLockAnalysis;
 class LinuxKernelRCUAnalysis;
 class LinuxKernelWaitAnalysis;
 
+} // namespace kernel
+
+namespace lotus {
+class AliasAnalysisWrapper;
+} // namespace lotus
+
+namespace kernel {
+
 class LinuxKernelProcessModel {
 public:
+  struct ExecutionState {
+    bool local_irq_disabled = false;
+    bool bh_disabled = false;
+    bool preempt_disabled = false;
+  };
+
   explicit LinuxKernelProcessModel(llvm::Module &M, bool preempt_rt = false)
-      : module_(M), preempt_rt_(preempt_rt) {}
+      : LinuxKernelProcessModel(M,
+                                LinuxKernelConfig::withPreemptRT(preempt_rt)) {}
+  LinuxKernelProcessModel(llvm::Module &M, LinuxKernelConfig config)
+      : module_(M), config_(std::move(config)) {}
 
   void analyzeModule();
 
@@ -48,7 +68,15 @@ public:
   }
 
   const llvm::Module &getModule() const { return module_; }
-  bool isPreemptRT() const { return preempt_rt_; }
+  bool isPreemptRT() const { return config_.isPreemptRT(); }
+  const LinuxKernelConfig &getConfig() const { return config_; }
+  const LinuxKernelSemanticRegistry &getSemanticRegistry() const {
+    return semantic_registry_;
+  }
+
+  void setAliasAnalysis(lotus::AliasAnalysisWrapper *alias_analysis) {
+    alias_analysis_ = alias_analysis;
+  }
 
   std::vector<KernelOperation> getOperationsByKind(OperationKind kind) const;
 
@@ -59,11 +87,23 @@ public:
 
   const KernelOperation *
   getOperationForInstruction(const llvm::Instruction *inst) const;
+  std::vector<const KernelOperation *>
+  getOperationsForInstruction(const llvm::Instruction *inst) const;
+  std::vector<const llvm::Function *>
+  getPossibleCallees(const llvm::CallBase *call) const;
 
   bool isBeforeInFunction(const llvm::Instruction *lhs,
                           const llvm::Instruction *rhs) const;
 
   const llvm::Value *canonicalizeValue(const llvm::Value *value) const;
+  LockClassID canonicalizeLockClass(const llvm::Value *value, LockKind kind,
+                                    unsigned subclass = 0) const;
+  bool mayAlias(const llvm::Value *lhs, const llvm::Value *rhs) const;
+  bool mustAlias(const llvm::Value *lhs, const llvm::Value *rhs) const;
+  bool getAliasSet(const llvm::Value *value,
+                   std::vector<const llvm::Value *> &aliases) const;
+  ExecutionState getExecutionState(const llvm::Instruction *instruction) const;
+  bool isInAtomicContext(const llvm::Instruction *instruction) const;
 
   const std::map<LockID, LockInfo> &getLockInfoMap() const {
     return lock_info_map_;
@@ -96,7 +136,9 @@ public:
 
 private:
   llvm::Module &module_;
-  bool preempt_rt_ = false;
+  LinuxKernelConfig config_;
+  LinuxKernelSemanticRegistry semantic_registry_;
+  lotus::AliasAnalysisWrapper *alias_analysis_ = nullptr;
 
   std::vector<KernelOperation> all_operations_;
   std::unordered_map<OperationKind, size_t> operation_kind_counts_;
@@ -108,8 +150,8 @@ private:
   std::map<std::pair<const llvm::Function *, LockID>, int> lock_depth_;
   std::unordered_map<const llvm::Function *, std::vector<size_t>>
       operations_by_function_;
-  std::unordered_map<const llvm::Instruction *, size_t>
-      operation_index_by_inst_;
+  std::unordered_map<const llvm::Instruction *, std::vector<size_t>>
+      operation_indices_by_inst_;
   std::unordered_map<const llvm::Instruction *, size_t> instruction_order_;
   mutable std::map<std::pair<const llvm::Value *, int64_t>, const llvm::Value *>
       canonical_pointer_ids_;
@@ -118,16 +160,12 @@ private:
                                   const llvm::StringRef &func_name) const;
   LockKind classifyLockKind(const llvm::StringRef &func_name) const;
 
-  void extractLockDetails(KernelOperation &op, unsigned object_arg_index = 0);
-  void extractRCUDetails(KernelOperation &op);
-  void extractWaitQueueDetails(KernelOperation &op);
-  void extractTimerDetails(KernelOperation &op);
-  void extractAtomicDetails(KernelOperation &op);
+  void applyConfiguredSemantics(KernelOperation &op,
+                                const LinuxKernelAPISemantics &semantics);
 
   void trackLockState(KernelOperation &op);
   void analyzeLockUsage();
 
-  bool isInAtomicContext(const llvm::Instruction *inst) const;
   bool maySleep(const llvm::Instruction *inst) const;
 };
 

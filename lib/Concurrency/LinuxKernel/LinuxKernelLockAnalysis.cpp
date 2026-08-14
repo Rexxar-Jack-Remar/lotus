@@ -8,6 +8,7 @@
 
 #include "Concurrency/LinuxKernel/LinuxKernelLockAnalysis.h"
 
+#include "Concurrency/LinuxKernel/LinuxKernelExecutionGraph.h"
 #include "Concurrency/LinuxKernel/LinuxKernelProcessModel.h"
 
 #include <algorithm>
@@ -16,6 +17,7 @@
 #include <optional>
 #include <set>
 #include <string>
+#include <tuple>
 #include <unordered_map>
 #include <utility>
 #include <vector>
@@ -83,6 +85,21 @@ void appendUnique(std::vector<T> &values, const T &value) {
   }
 }
 
+bool sourceIsShared(LinuxKernelLockAnalysis::DependencyKind kind) {
+  return kind == LinuxKernelLockAnalysis::DependencyKind::SR ||
+         kind == LinuxKernelLockAnalysis::DependencyKind::SN;
+}
+
+bool targetIsRecursive(LinuxKernelLockAnalysis::DependencyKind kind) {
+  return kind == LinuxKernelLockAnalysis::DependencyKind::ER ||
+         kind == LinuxKernelLockAnalysis::DependencyKind::SR;
+}
+
+bool strongAdjacency(LinuxKernelLockAnalysis::DependencyKind incoming,
+                     LinuxKernelLockAnalysis::DependencyKind outgoing) {
+  return !(targetIsRecursive(incoming) && sourceIsShared(outgoing));
+}
+
 } // namespace
 
 void LinuxKernelLockAnalysis::analyzeLocks() {
@@ -93,8 +110,9 @@ void LinuxKernelLockAnalysis::analyzeLocks() {
   unlock_without_lock_.clear();
   lock_without_unlock_.clear();
   sleep_in_spinlock_.clear();
+  lock_dependency_cycles_.clear();
 
-  using OrderKey = std::pair<LockID, LockID>;
+  using OrderKey = std::tuple<LockClassID, LockClassID, DependencyKind>;
   std::map<OrderKey, const Instruction *> order_evidence;
   std::map<std::pair<const Function *, LockID>, const Instruction *>
       acquire_evidence;
@@ -111,13 +129,40 @@ void LinuxKernelLockAnalysis::analyzeLocks() {
         state.must_exclusive.insert(op.lock);
       }
     }
+    if (op.reader_kind == LockReaderKind::NON_RECURSIVE) {
+      state.may_nonrecursive_reader.insert(op.lock);
+      if (definite) {
+        state.must_nonrecursive_reader.insert(op.lock);
+      }
+    }
   };
 
-  auto applyRelease = [](LockFlowState &state, LockID lock) {
-    state.may_held.erase(lock);
-    state.must_held.erase(lock);
-    state.may_exclusive.erase(lock);
-    state.must_exclusive.erase(lock);
+  auto applyRelease = [&](LockFlowState &state, LockID lock) {
+    for (auto it = state.may_held.begin(); it != state.may_held.end();) {
+      if (process_model_.mustAlias(*it, lock)) {
+        state.must_held.erase(*it);
+        state.may_exclusive.erase(*it);
+        state.must_exclusive.erase(*it);
+        state.may_nonrecursive_reader.erase(*it);
+        state.must_nonrecursive_reader.erase(*it);
+        it = state.may_held.erase(it);
+      } else {
+        if (process_model_.mayAlias(*it, lock)) {
+          state.must_held.erase(*it);
+          state.must_exclusive.erase(*it);
+          state.must_nonrecursive_reader.erase(*it);
+        }
+        ++it;
+      }
+    }
+  };
+
+  auto classForLock = [&](LockID lock) {
+    auto found = process_model_.getLockInfoMap().find(lock);
+    if (found != process_model_.getLockInfoMap().end()) {
+      return found->second.lock_class;
+    }
+    return LockClassID();
   };
 
   auto mergeState = [](LockFlowState &destination,
@@ -126,6 +171,9 @@ void LinuxKernelLockAnalysis::analyzeLocks() {
     merged.may_held.insert(incoming.may_held.begin(), incoming.may_held.end());
     merged.may_exclusive.insert(incoming.may_exclusive.begin(),
                                 incoming.may_exclusive.end());
+    merged.may_nonrecursive_reader.insert(
+        incoming.may_nonrecursive_reader.begin(),
+        incoming.may_nonrecursive_reader.end());
 
     std::set<LockID> must_held;
     std::set_intersection(destination.must_held.begin(),
@@ -140,6 +188,15 @@ void LinuxKernelLockAnalysis::analyzeLocks() {
         incoming.must_exclusive.begin(), incoming.must_exclusive.end(),
         std::inserter(must_exclusive, must_exclusive.end()));
     merged.must_exclusive = std::move(must_exclusive);
+
+    std::set<LockID> must_nonrecursive_reader;
+    std::set_intersection(destination.must_nonrecursive_reader.begin(),
+                          destination.must_nonrecursive_reader.end(),
+                          incoming.must_nonrecursive_reader.begin(),
+                          incoming.must_nonrecursive_reader.end(),
+                          std::inserter(must_nonrecursive_reader,
+                                        must_nonrecursive_reader.end()));
+    merged.must_nonrecursive_reader = std::move(must_nonrecursive_reader);
     return merged;
   };
 
@@ -179,27 +236,33 @@ void LinuxKernelLockAnalysis::analyzeLocks() {
         bool was_must_held = false;
         bool was_may_exclusive = false;
         bool was_must_exclusive = false;
+        bool was_may_nonrecursive_reader = false;
+        bool was_must_nonrecursive_reader = false;
       };
       std::vector<PendingConditional> pending;
 
       for (const Instruction &instruction : *block) {
-        const KernelOperation *op =
-            process_model_.getOperationForInstruction(&instruction);
-        if (op == nullptr || op->lock == nullptr) {
-          continue;
-        }
-        if (isLockAcquire(op->kind)) {
-          if (op->conditional_success == ConditionalSuccess::UNCONDITIONAL) {
-            applyAcquire(state, *op, true);
-          } else {
-            pending.push_back({op, state.may_held.count(op->lock) > 0,
-                               state.must_held.count(op->lock) > 0,
-                               state.may_exclusive.count(op->lock) > 0,
-                               state.must_exclusive.count(op->lock) > 0});
-            applyAcquire(state, *op, false);
+        for (const KernelOperation *op :
+             process_model_.getOperationsForInstruction(&instruction)) {
+          if (op->lock == nullptr) {
+            continue;
           }
-        } else if (isLockRelease(op->kind)) {
-          applyRelease(state, op->lock);
+          if (isLockAcquire(op->kind)) {
+            if (op->conditional_success == ConditionalSuccess::UNCONDITIONAL) {
+              applyAcquire(state, *op, true);
+            } else {
+              pending.push_back(
+                  {op, state.may_held.count(op->lock) > 0,
+                   state.must_held.count(op->lock) > 0,
+                   state.may_exclusive.count(op->lock) > 0,
+                   state.must_exclusive.count(op->lock) > 0,
+                   state.may_nonrecursive_reader.count(op->lock) > 0,
+                   state.must_nonrecursive_reader.count(op->lock) > 0});
+              applyAcquire(state, *op, false);
+            }
+          } else if (isLockRelease(op->kind)) {
+            applyRelease(state, op->lock);
+          }
         }
       }
 
@@ -231,6 +294,12 @@ void LinuxKernelLockAnalysis::analyzeLocks() {
             if (!conditional.was_must_exclusive) {
               edge_state.must_exclusive.erase(conditional.op->lock);
             }
+            if (!conditional.was_may_nonrecursive_reader) {
+              edge_state.may_nonrecursive_reader.erase(conditional.op->lock);
+            }
+            if (!conditional.was_must_nonrecursive_reader) {
+              edge_state.must_nonrecursive_reader.erase(conditional.op->lock);
+            }
           }
         }
 
@@ -259,7 +328,8 @@ void LinuxKernelLockAnalysis::analyzeLocks() {
       const KernelOperation *best_release = nullptr;
       for (const KernelOperation *release :
            process_model_.getOperationsInFunction(&function)) {
-        if (!isLockRelease(release->kind) || release->lock != acquire->lock ||
+        if (!isLockRelease(release->kind) ||
+            !process_model_.mustAlias(release->lock, acquire->lock) ||
             !dominators.dominates(acquire->inst, release->inst) ||
             !post_dominators.dominates(release->inst, acquire->inst)) {
           continue;
@@ -283,73 +353,98 @@ void LinuxKernelLockAnalysis::analyzeLocks() {
       }
       LockFlowState state = in_states[&block];
       for (const Instruction &instruction : block) {
-        const KernelOperation *op =
-            process_model_.getOperationForInstruction(&instruction);
-        if (op == nullptr) {
-          continue;
-        }
+        for (const KernelOperation *op :
+             process_model_.getOperationsForInstruction(&instruction)) {
 
-        if (op->lock != nullptr && isLockAcquire(op->kind)) {
-          const bool sleeping_acquire =
-              op->kind == OperationKind::LOCK_ACQUIRE &&
-              (op->lock_kind == LockKind::MUTEX ||
-               op->lock_kind == LockKind::SEMAPHORE ||
-               op->lock_kind == LockKind::RW_SEMAPHORE);
-          if (sleeping_acquire) {
-            for (LockID held : state.may_held) {
-              if (isAtomicLock(held)) {
-                appendUnique(sleep_in_spinlock_, op->inst);
-                break;
+          if (op->lock != nullptr && isLockAcquire(op->kind)) {
+            const bool sleeping_acquire =
+                op->kind == OperationKind::LOCK_ACQUIRE &&
+                (op->lock_kind == LockKind::MUTEX ||
+                 op->lock_kind == LockKind::SEMAPHORE ||
+                 op->lock_kind == LockKind::RW_SEMAPHORE);
+            if (sleeping_acquire) {
+              for (LockID held : state.may_held) {
+                if (isAtomicLock(held)) {
+                  appendUnique(sleep_in_spinlock_, op->inst);
+                  break;
+                }
               }
             }
+
+            const bool current_exclusive = op->lock_mode != LockMode::SHARED;
+            bool incompatible_self = false;
+            for (LockID held : state.may_held) {
+              if (!process_model_.mayAlias(held, op->lock)) {
+                continue;
+              }
+              const bool held_exclusive = state.may_exclusive.count(held) > 0;
+              const bool held_nonrecursive =
+                  state.may_nonrecursive_reader.count(held) > 0;
+              incompatible_self |=
+                  current_exclusive || held_exclusive || held_nonrecursive ||
+                  op->reader_kind == LockReaderKind::NON_RECURSIVE;
+            }
+            if (incompatible_self) {
+              appendUnique(double_locks_, op->inst);
+            }
+
+            for (LockID held : state.may_held) {
+              if (process_model_.mustAlias(held, op->lock)) {
+                continue;
+              }
+              const bool held_exclusive = state.may_exclusive.count(held) > 0;
+              LockClassID held_class = classForLock(held);
+              if (!held_class.isValid() || !op->lock_class.isValid() ||
+                  held_class == op->lock_class) {
+                continue;
+              }
+              DependencyKind dependency;
+              const bool target_recursive =
+                  op->reader_kind == LockReaderKind::RECURSIVE;
+              if (held_exclusive) {
+                dependency =
+                    target_recursive ? DependencyKind::ER : DependencyKind::EN;
+              } else {
+                dependency =
+                    target_recursive ? DependencyKind::SR : DependencyKind::SN;
+              }
+              order_evidence.emplace(
+                  std::make_tuple(held_class, op->lock_class, dependency),
+                  op->inst);
+            }
+            acquire_evidence[{&function, op->lock}] = op->inst;
+            applyAcquire(state, *op,
+                         op->conditional_success ==
+                             ConditionalSuccess::UNCONDITIONAL);
+            continue;
           }
 
-          const bool current_exclusive = op->lock_mode != LockMode::SHARED;
-          const bool incompatible_self =
-              state.may_held.count(op->lock) > 0 &&
-              (current_exclusive || state.may_exclusive.count(op->lock) > 0);
-          if (incompatible_self) {
-            appendUnique(double_locks_, op->inst);
+          if (op->lock != nullptr && isLockRelease(op->kind)) {
+            bool may_be_held = false;
+            for (LockID held : state.may_held) {
+              may_be_held |= process_model_.mayAlias(held, op->lock);
+            }
+            if (!may_be_held) {
+              appendUnique(unlock_without_lock_, op->inst);
+            }
+            applyRelease(state, op->lock);
+            continue;
           }
 
+          const bool may_sleep = op->kind == OperationKind::WAIT_EVENT ||
+                                 op->kind == OperationKind::COMPLETION_WAIT ||
+                                 (op->kind == OperationKind::LOCK_ACQUIRE &&
+                                  (op->lock_kind == LockKind::MUTEX ||
+                                   op->lock_kind == LockKind::SEMAPHORE ||
+                                   op->lock_kind == LockKind::RW_SEMAPHORE));
+          if (!may_sleep) {
+            continue;
+          }
           for (LockID held : state.may_held) {
-            if (held == op->lock) {
-              continue;
+            if (isAtomicLock(held)) {
+              appendUnique(sleep_in_spinlock_, op->inst);
+              break;
             }
-            const bool held_exclusive = state.may_exclusive.count(held) > 0;
-            if (!current_exclusive && !held_exclusive) {
-              continue;
-            }
-            order_evidence.emplace(std::make_pair(held, op->lock), op->inst);
-          }
-          acquire_evidence[{&function, op->lock}] = op->inst;
-          applyAcquire(state, *op,
-                       op->conditional_success ==
-                           ConditionalSuccess::UNCONDITIONAL);
-          continue;
-        }
-
-        if (op->lock != nullptr && isLockRelease(op->kind)) {
-          if (state.may_held.count(op->lock) == 0) {
-            appendUnique(unlock_without_lock_, op->inst);
-          }
-          applyRelease(state, op->lock);
-          continue;
-        }
-
-        const bool may_sleep = op->kind == OperationKind::WAIT_EVENT ||
-                               op->kind == OperationKind::COMPLETION_WAIT ||
-                               (op->kind == OperationKind::LOCK_ACQUIRE &&
-                                (op->lock_kind == LockKind::MUTEX ||
-                                 op->lock_kind == LockKind::SEMAPHORE ||
-                                 op->lock_kind == LockKind::RW_SEMAPHORE));
-        if (!may_sleep) {
-          continue;
-        }
-        for (LockID held : state.may_held) {
-          if (isAtomicLock(held)) {
-            appendUnique(sleep_in_spinlock_, op->inst);
-            break;
           }
         }
       }
@@ -365,11 +460,75 @@ void LinuxKernelLockAnalysis::analyzeLocks() {
     }
   }
 
+  struct DependencyEdge {
+    LockClassID from;
+    LockClassID to;
+    DependencyKind kind;
+    const Instruction *evidence = nullptr;
+  };
+  std::vector<DependencyEdge> edges;
+  std::map<LockClassID, std::vector<const DependencyEdge *>> adjacency;
+  edges.reserve(order_evidence.size());
   for (const auto &entry : order_evidence) {
-    OrderKey reverse{entry.first.second, entry.first.first};
-    auto reverse_it = order_evidence.find(reverse);
-    if (reverse_it != order_evidence.end() && entry.first < reverse) {
-      lock_order_inversions_.emplace_back(entry.second, reverse_it->second);
+    edges.push_back({std::get<0>(entry.first), std::get<1>(entry.first),
+                     std::get<2>(entry.first), entry.second});
+  }
+  for (const DependencyEdge &edge : edges) {
+    adjacency[edge.from].push_back(&edge);
+  }
+
+  std::set<std::vector<LockClassID>> seen_cycles;
+  for (const auto &start_entry : adjacency) {
+    const LockClassID start = start_entry.first;
+    std::vector<LockClassID> class_path{start};
+    std::vector<const DependencyEdge *> edge_path;
+
+    std::function<void(const LockClassID &)> visit =
+        [&](const LockClassID &current) {
+          auto outgoing = adjacency.find(current);
+          if (outgoing == adjacency.end()) {
+            return;
+          }
+          for (const DependencyEdge *edge : outgoing->second) {
+            if (!edge_path.empty() &&
+                !strongAdjacency(edge_path.back()->kind, edge->kind)) {
+              continue;
+            }
+            if (edge->to == start) {
+              if (edge_path.empty() ||
+                  !strongAdjacency(edge->kind, edge_path.front()->kind)) {
+                continue;
+              }
+              std::vector<LockClassID> signature = class_path;
+              if (!seen_cycles.insert(signature).second) {
+                continue;
+              }
+              LockDependencyCycle cycle;
+              cycle.classes = std::move(signature);
+              for (const DependencyEdge *path_edge : edge_path) {
+                cycle.evidence.push_back(path_edge->evidence);
+              }
+              cycle.evidence.push_back(edge->evidence);
+              lock_dependency_cycles_.push_back(std::move(cycle));
+              continue;
+            }
+            if (edge->to < start || class_path.size() >= 16 ||
+                llvm::is_contained(class_path, edge->to)) {
+              continue;
+            }
+            class_path.push_back(edge->to);
+            edge_path.push_back(edge);
+            visit(edge->to);
+            edge_path.pop_back();
+            class_path.pop_back();
+          }
+        };
+    visit(start);
+  }
+
+  for (const LockDependencyCycle &cycle : lock_dependency_cycles_) {
+    if (cycle.evidence.size() == 2) {
+      lock_order_inversions_.emplace_back(cycle.evidence[0], cycle.evidence[1]);
     }
   }
 
@@ -390,7 +549,10 @@ void LinuxKernelLockAnalysis::analyzeLocks() {
     }
   }
   lock_diagnostics_["lock_order_checks"] = order_evidence.size();
-  lock_diagnostics_["deadlock_checks"] = 0;
+  lock_diagnostics_["strong_dependency_cycles"] =
+      lock_dependency_cycles_.size();
+  lock_diagnostics_["deadlock_checks"] = lock_order_inversions_.size();
+  lock_diagnostics_["feasible_deadlocks"] = findPotentialDeadlocks().size();
 }
 
 bool LinuxKernelLockAnalysis::isLockAcquire(OperationKind kind) const {
@@ -449,10 +611,27 @@ LinuxKernelLockAnalysis::getLockChain(const Instruction *inst) const {
 
 std::vector<std::pair<const Instruction *, const Instruction *>>
 LinuxKernelLockAnalysis::findPotentialDeadlocks() const {
-  // A lock-order inversion is not by itself a feasible deadlock.  Promotion
-  // requires execution-context reachability/MHP information that this pass
-  // does not yet have.
-  return {};
+  std::vector<std::pair<const Instruction *, const Instruction *>> result;
+  if (execution_graph_ == nullptr) {
+    return result;
+  }
+  for (const LockDependencyCycle &cycle : lock_dependency_cycles_) {
+    if (cycle.evidence.size() < 2) {
+      continue;
+    }
+    bool pairwise_parallel = true;
+    for (size_t first = 0; first < cycle.evidence.size(); ++first) {
+      for (size_t second = first + 1; second < cycle.evidence.size();
+           ++second) {
+        pairwise_parallel &= execution_graph_->mayHappenInParallel(
+            cycle.evidence[first], cycle.evidence[second]);
+      }
+    }
+    if (pairwise_parallel) {
+      result.emplace_back(cycle.evidence[0], cycle.evidence[1]);
+    }
+  }
+  return result;
 }
 
 std::vector<const Instruction *>

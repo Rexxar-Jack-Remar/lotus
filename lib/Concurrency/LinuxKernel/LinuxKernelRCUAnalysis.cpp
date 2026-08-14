@@ -212,7 +212,7 @@ LinuxKernelRCUAnalysis::findUnsafeReclamation() const {
     const KernelOperation *unpublish =
         process_model_.getOperationForInstruction(unpublish_inst);
     if (unpublish == nullptr || unpublish->kind != OperationKind::RCU_ASSIGN ||
-        unpublish->function_name != "rcu_replace_pointer") {
+        !unpublish->returns_retired_pointer) {
       continue;
     }
 

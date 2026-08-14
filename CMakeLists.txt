@@ -97,6 +97,7 @@ install(FILES
   config/concurrency_api.spec
   config/openmp_api.spec
   config/mpi_api.spec
+  config/linux_kernel_api.spec
   DESTINATION share/lotus/config)
 
 lotus_print_build_summary()

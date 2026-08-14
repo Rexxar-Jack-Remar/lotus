@@ -43,9 +43,13 @@ set(Concurrency_SOURCES
   MPI/MPIRMAAnalysis.cpp
   MPI/MPIRankAnalysis.cpp
   LinuxKernel/LinuxKernelAnalysis.cpp
+  LinuxKernel/LinuxKernelExecutionGraph.cpp
+  LinuxKernel/LinuxKernelLifetimeAnalysis.cpp
+  LinuxKernel/LinuxKernelMemoryModel.cpp
   LinuxKernel/LinuxKernelProcessModel.cpp
   LinuxKernel/LinuxKernelLockAnalysis.cpp
   LinuxKernel/LinuxKernelRCUAnalysis.cpp
+  LinuxKernel/LinuxKernelSemanticRegistry.cpp
   LinuxKernel/LinuxKernelWaitAnalysis.cpp
 )
 add_library(Concurrency STATIC ${Concurrency_SOURCES})

@@ -26,6 +26,9 @@ add_lotus_concurrency_test_suite(concurrency_core_tests
   JoinTargetAnalysisTest.cpp
   JoinTargetAnalysisTestPart2.cpp
   ../Kernel/LinuxKernelAnalysisTest.cpp
+  ../Kernel/LinuxKernelSynchronizationTest.cpp
+  ../Kernel/LinuxKernelExecutionModelTest.cpp
+  ../Kernel/LinuxKernelLifecycleTest.cpp
   ../CUDA/CUDAAnalysisTest.cpp
   ../CUDA/CUDAAnalysisTestPart2.cpp
   ../CUDA/CUDAAnalysisTestPart3.cpp

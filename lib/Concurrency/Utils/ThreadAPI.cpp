@@ -16,11 +16,11 @@
  */
 #include "Concurrency/Utils/ThreadAPI.h"
 
+#include "Concurrency/LinuxKernel/LinuxKernelConfig.h"
 #include "Concurrency/MPI/MPISymbol.h"
 #include "Concurrency/Utils/CUDA.h"
 #include "Concurrency/Utils/CallTarget.h"
 #include "Concurrency/Utils/CppThreading.h"
-#include "Concurrency/Utils/LinuxKernel.h"
 #include "Concurrency/Utils/RAIILockTracker.h"
 
 #include <cctype>
@@ -226,6 +226,7 @@ static const ei_pair ei_pairs[] = {
  * C++/OpenMP/MPI/kernel name checks.
  */
 void ThreadAPI::init() {
+  m_kernel_api_registry.load(kernel::LinuxKernelConfig{});
   set<TD_TYPE> t_seen;
   TD_TYPE prev_t = TD_DUMMY;
   t_seen.insert(TD_DUMMY);
@@ -455,6 +456,144 @@ bool ThreadAPI::isConditionVariableAny(const Function *F) const {
          std::string::npos;
 }
 
+const kernel::LinuxKernelAPISemantics *
+ThreadAPI::lookupKernelSemantics(StringRef name) const {
+  if (name.empty()) {
+    return nullptr;
+  }
+  return m_kernel_api_registry.lookup(normalizeAPIName(name));
+}
+
+bool ThreadAPI::isKernelOperation(const CallBase *call,
+                                  kernel::OperationKind kind) const {
+  if (call == nullptr) {
+    return false;
+  }
+  const kernel::LinuxKernelAPISemantics *semantics =
+      lookupKernelSemantics(getCalledAPIName(call));
+  return semantics != nullptr && semantics->operation == kind;
+}
+
+ThreadAPI::TD_TYPE ThreadAPI::getKernelType(StringRef name) const {
+  const kernel::LinuxKernelAPISemantics *semantics =
+      lookupKernelSemantics(name);
+  if (semantics == nullptr) {
+    return TD_DUMMY;
+  }
+
+  using kernel::LockKind;
+  using kernel::LockMode;
+  using kernel::OperationKind;
+  switch (semantics->operation) {
+  case OperationKind::LOCK_INIT:
+    switch (semantics->lock_kind) {
+    case LockKind::SPINLOCK:
+      return TD_KERNEL_SPIN_LOCK_INIT;
+    case LockKind::MUTEX:
+      return TD_KERNEL_MUTEX_INIT;
+    case LockKind::SEMAPHORE:
+      return TD_KERNEL_SEMA_INIT;
+    case LockKind::RW_SEMAPHORE:
+      return TD_KERNEL_INIT_RWSEM;
+    default:
+      return TD_DUMMY;
+    }
+  case OperationKind::LOCK_ACQUIRE:
+  case OperationKind::LOCK_TRY:
+    switch (semantics->lock_kind) {
+    case LockKind::SPINLOCK:
+      return semantics->operation == OperationKind::LOCK_TRY
+                 ? TD_KERNEL_SPIN_TRYLOCK
+                 : TD_KERNEL_SPIN_LOCK;
+    case LockKind::MUTEX:
+      return semantics->operation == OperationKind::LOCK_TRY
+                 ? TD_KERNEL_MUTEX_TRYLOCK
+                 : TD_KERNEL_MUTEX_LOCK;
+    case LockKind::SEMAPHORE:
+      return TD_KERNEL_DOWN;
+    case LockKind::RWLOCK:
+      return semantics->lock_mode == LockMode::SHARED ? TD_KERNEL_READ_LOCK
+                                                       : TD_KERNEL_WRITE_LOCK;
+    case LockKind::RW_SEMAPHORE:
+      return semantics->lock_mode == LockMode::SHARED ? TD_KERNEL_DOWN_READ
+                                                       : TD_KERNEL_DOWN_WRITE;
+    default:
+      return TD_DUMMY;
+    }
+  case OperationKind::LOCK_RELEASE:
+    switch (semantics->lock_kind) {
+    case LockKind::SPINLOCK:
+      return TD_KERNEL_SPIN_UNLOCK;
+    case LockKind::MUTEX:
+      return TD_KERNEL_MUTEX_UNLOCK;
+    case LockKind::SEMAPHORE:
+      return TD_KERNEL_UP;
+    case LockKind::RWLOCK:
+      return semantics->lock_mode == LockMode::SHARED
+                 ? TD_KERNEL_READ_UNLOCK
+                 : TD_KERNEL_WRITE_UNLOCK;
+    case LockKind::RW_SEMAPHORE:
+      return semantics->lock_mode == LockMode::SHARED ? TD_KERNEL_UP_READ
+                                                       : TD_KERNEL_UP_WRITE;
+    default:
+      return TD_DUMMY;
+    }
+  case OperationKind::RCU_READ_LOCK:
+    return TD_KERNEL_RCU_READ_LOCK;
+  case OperationKind::RCU_READ_UNLOCK:
+    return TD_KERNEL_RCU_READ_UNLOCK;
+  case OperationKind::RCU_SYNC:
+    return TD_KERNEL_SYNCHRONIZE_RCU;
+  case OperationKind::RCU_CALL:
+    return TD_KERNEL_CALL_RCU;
+  case OperationKind::RCU_DEREFERENCE:
+    return TD_KERNEL_RCU_DEREFERENCE;
+  case OperationKind::RCU_ASSIGN:
+    return TD_KERNEL_RCU_ASSIGN_POINTER;
+  case OperationKind::SEQLOCK_INIT:
+    return TD_KERNEL_SEQLOCK_INIT;
+  case OperationKind::SEQ_READ_BEGIN:
+    return TD_KERNEL_READ_SEQBEGIN;
+  case OperationKind::SEQ_READ_RETRY:
+    return TD_KERNEL_READ_SEQRETRY;
+  case OperationKind::SEQ_WRITE_LOCK:
+    return TD_KERNEL_WRITE_SEQLOCK;
+  case OperationKind::SEQ_WRITE_UNLOCK:
+    return TD_KERNEL_WRITE_SEQUNLOCK;
+  case OperationKind::COMPLETION_INIT:
+  case OperationKind::COMPLETION_REINIT:
+    return TD_KERNEL_INIT_COMPLETION;
+  case OperationKind::COMPLETION_WAIT:
+    return TD_KERNEL_WAIT_FOR_COMPLETION;
+  case OperationKind::COMPLETION_SIGNAL:
+    return semantics->completion_signal == kernel::CompletionSignalKind::ALL
+               ? TD_KERNEL_COMPLETE_ALL
+               : TD_KERNEL_COMPLETE;
+  case OperationKind::WAITQUEUE_INIT:
+    return TD_KERNEL_INIT_WAITQUEUE_HEAD;
+  case OperationKind::WAIT_EVENT:
+    return TD_KERNEL_WAIT_EVENT;
+  case OperationKind::WAKE_UP:
+    return TD_KERNEL_WAKE_UP;
+  case OperationKind::PREPARE_WAIT:
+    return TD_KERNEL_PREPARE_TO_WAIT;
+  case OperationKind::FINISH_WAIT:
+    return TD_KERNEL_FINISH_WAIT;
+  case OperationKind::MEMORY_BARRIER:
+    return TD_KERNEL_MEMORY_BARRIER;
+  case OperationKind::ATOMIC_READ:
+    return TD_KERNEL_ATOMIC_READ;
+  case OperationKind::ATOMIC_WRITE:
+    return TD_KERNEL_ATOMIC_WRITE;
+  case OperationKind::ATOMIC_RMW:
+    return TD_KERNEL_ATOMIC_RMW;
+  case OperationKind::KTHREAD_START:
+    return TD_FORK;
+  default:
+    return TD_DUMMY;
+  }
+}
+
 const CallBase *
 ThreadAPI::getKernelThreadCreateCall(const Instruction *inst) const {
   const CallBase *wake = getLLVMCallSite(inst);
@@ -465,7 +604,10 @@ ThreadAPI::getKernelThreadCreateCall(const Instruction *inst) const {
   if (!create)
     return nullptr;
   const Function *callee = getCallee(create);
-  return callee && LinuxKernelModel::isKthreadCreate(callee->getName())
+  const kernel::LinuxKernelAPISemantics *semantics =
+      callee ? lookupKernelSemantics(callee->getName()) : nullptr;
+  return semantics != nullptr &&
+                 semantics->operation == kernel::OperationKind::KTHREAD_CREATE
              ? create
              : nullptr;
 }
@@ -1051,6 +1193,47 @@ ThreadAPI::RuntimeLibrary ThreadAPI::inferLibrary(TD_TYPE type) const {
   case TD_KERNEL_ATOMIC_READ:
   case TD_KERNEL_ATOMIC_WRITE:
   case TD_KERNEL_ATOMIC_RMW:
+  case TD_KERNEL_SPIN_LOCK_INIT:
+  case TD_KERNEL_SPIN_LOCK:
+  case TD_KERNEL_SPIN_UNLOCK:
+  case TD_KERNEL_SPIN_TRYLOCK:
+  case TD_KERNEL_MUTEX_INIT:
+  case TD_KERNEL_MUTEX_LOCK:
+  case TD_KERNEL_MUTEX_UNLOCK:
+  case TD_KERNEL_MUTEX_TRYLOCK:
+  case TD_KERNEL_SEMA_INIT:
+  case TD_KERNEL_DOWN:
+  case TD_KERNEL_UP:
+  case TD_KERNEL_READ_LOCK:
+  case TD_KERNEL_READ_UNLOCK:
+  case TD_KERNEL_WRITE_LOCK:
+  case TD_KERNEL_WRITE_UNLOCK:
+  case TD_KERNEL_DOWN_READ:
+  case TD_KERNEL_UP_READ:
+  case TD_KERNEL_DOWN_WRITE:
+  case TD_KERNEL_UP_WRITE:
+  case TD_KERNEL_INIT_RWSEM:
+  case TD_KERNEL_RCU_READ_LOCK:
+  case TD_KERNEL_RCU_READ_UNLOCK:
+  case TD_KERNEL_SYNCHRONIZE_RCU:
+  case TD_KERNEL_CALL_RCU:
+  case TD_KERNEL_RCU_DEREFERENCE:
+  case TD_KERNEL_RCU_ASSIGN_POINTER:
+  case TD_KERNEL_SEQLOCK_INIT:
+  case TD_KERNEL_READ_SEQBEGIN:
+  case TD_KERNEL_READ_SEQRETRY:
+  case TD_KERNEL_WRITE_SEQLOCK:
+  case TD_KERNEL_WRITE_SEQUNLOCK:
+  case TD_KERNEL_INIT_COMPLETION:
+  case TD_KERNEL_WAIT_FOR_COMPLETION:
+  case TD_KERNEL_COMPLETE:
+  case TD_KERNEL_COMPLETE_ALL:
+  case TD_KERNEL_INIT_WAITQUEUE_HEAD:
+  case TD_KERNEL_WAIT_EVENT:
+  case TD_KERNEL_WAKE_UP:
+  case TD_KERNEL_PREPARE_TO_WAIT:
+  case TD_KERNEL_FINISH_WAIT:
+  case TD_KERNEL_MEMORY_BARRIER:
     return RuntimeLibrary::LinuxKernel;
   case TD_OMP_TASK:
   case TD_OMP_TASKWAIT:
@@ -1981,132 +2164,7 @@ ThreadAPI::TD_TYPE ThreadAPI::getType(const Function *F) const {
 
   // 4. Linux Kernel Support (if enabled)
   if (m_config.enable_linux_kernel()) {
-    // Spinlocks
-    if (LinuxKernelModel::isSpinLockInit(name))
-      return TD_KERNEL_SPIN_LOCK_INIT;
-    if (LinuxKernelModel::isSpinLock(name))
-      return TD_KERNEL_SPIN_LOCK;
-    if (LinuxKernelModel::isSpinUnlock(name))
-      return TD_KERNEL_SPIN_UNLOCK;
-    if (LinuxKernelModel::isSpinTryLock(name))
-      return TD_KERNEL_SPIN_TRYLOCK;
-
-    // Mutexes
-    if (LinuxKernelModel::isMutexInit(name))
-      return TD_KERNEL_MUTEX_INIT;
-    if (LinuxKernelModel::isMutexConditionalLock(name))
-      return TD_KERNEL_MUTEX_LOCK;
-    if (LinuxKernelModel::isMutexLock(name))
-      return TD_KERNEL_MUTEX_LOCK;
-    if (LinuxKernelModel::isMutexUnlock(name))
-      return TD_KERNEL_MUTEX_UNLOCK;
-    if (LinuxKernelModel::isMutexTryLock(name))
-      return TD_KERNEL_MUTEX_TRYLOCK;
-
-    // Semaphores
-    if (LinuxKernelModel::isSemaInit(name))
-      return TD_KERNEL_SEMA_INIT;
-    if (LinuxKernelModel::isDownTryLock(name))
-      return TD_KERNEL_DOWN;
-    if (LinuxKernelModel::isDownConditional(name))
-      return TD_KERNEL_DOWN;
-    if (LinuxKernelModel::isDown(name))
-      return TD_KERNEL_DOWN;
-    if (LinuxKernelModel::isUp(name))
-      return TD_KERNEL_UP;
-
-    // Read-Write Locks
-    if (LinuxKernelModel::isReadLock(name))
-      return TD_KERNEL_READ_LOCK;
-    if (LinuxKernelModel::isReadUnlock(name))
-      return TD_KERNEL_READ_UNLOCK;
-    if (LinuxKernelModel::isWriteLock(name))
-      return TD_KERNEL_WRITE_LOCK;
-    if (LinuxKernelModel::isWriteUnlock(name))
-      return TD_KERNEL_WRITE_UNLOCK;
-
-    // Read-Write Semaphores
-    if (LinuxKernelModel::isDownReadTryLock(name))
-      return TD_KERNEL_DOWN_READ;
-    if (LinuxKernelModel::isDownReadConditional(name))
-      return TD_KERNEL_DOWN_READ;
-    if (LinuxKernelModel::isDownRead(name))
-      return TD_KERNEL_DOWN_READ;
-    if (LinuxKernelModel::isUpRead(name))
-      return TD_KERNEL_UP_READ;
-    if (LinuxKernelModel::isDownWriteTryLock(name))
-      return TD_KERNEL_DOWN_WRITE;
-    if (LinuxKernelModel::isDownWriteConditional(name))
-      return TD_KERNEL_DOWN_WRITE;
-    if (LinuxKernelModel::isDownWrite(name))
-      return TD_KERNEL_DOWN_WRITE;
-    if (LinuxKernelModel::isUpWrite(name))
-      return TD_KERNEL_UP_WRITE;
-    if (LinuxKernelModel::isInitRwsem(name))
-      return TD_KERNEL_INIT_RWSEM;
-
-    // RCU
-    if (LinuxKernelModel::isRcuReadLock(name))
-      return TD_KERNEL_RCU_READ_LOCK;
-    if (LinuxKernelModel::isRcuReadUnlock(name))
-      return TD_KERNEL_RCU_READ_UNLOCK;
-    if (LinuxKernelModel::isSynchronizeRcu(name))
-      return TD_KERNEL_SYNCHRONIZE_RCU;
-    if (LinuxKernelModel::isCallRcu(name))
-      return TD_KERNEL_CALL_RCU;
-    if (LinuxKernelModel::isRcuDereference(name))
-      return TD_KERNEL_RCU_DEREFERENCE;
-    if (LinuxKernelModel::isRcuAssignPointer(name))
-      return TD_KERNEL_RCU_ASSIGN_POINTER;
-
-    // Seq Locks
-    if (LinuxKernelModel::isSeqlockInit(name))
-      return TD_KERNEL_SEQLOCK_INIT;
-    if (LinuxKernelModel::isReadSeqbegin(name))
-      return TD_KERNEL_READ_SEQBEGIN;
-    if (LinuxKernelModel::isReadSeqretry(name))
-      return TD_KERNEL_READ_SEQRETRY;
-    if (LinuxKernelModel::isWriteSeqlock(name))
-      return TD_KERNEL_WRITE_SEQLOCK;
-    if (LinuxKernelModel::isWriteSequnlock(name))
-      return TD_KERNEL_WRITE_SEQUNLOCK;
-
-    // Completion Variables
-    if (LinuxKernelModel::isInitCompletion(name))
-      return TD_KERNEL_INIT_COMPLETION;
-    if (LinuxKernelModel::isWaitForCompletion(name))
-      return TD_KERNEL_WAIT_FOR_COMPLETION;
-    if (LinuxKernelModel::isCompleteAll(name))
-      return TD_KERNEL_COMPLETE_ALL;
-    if (LinuxKernelModel::isCompleteOne(name))
-      return TD_KERNEL_COMPLETE;
-
-    // Wait Queues
-    if (LinuxKernelModel::isInitWaitqueueHead(name))
-      return TD_KERNEL_INIT_WAITQUEUE_HEAD;
-    if (LinuxKernelModel::isWaitEvent(name))
-      return TD_KERNEL_WAIT_EVENT;
-    if (LinuxKernelModel::isWakeUp(name))
-      return TD_KERNEL_WAKE_UP;
-    if (LinuxKernelModel::isPrepareToWait(name))
-      return TD_KERNEL_PREPARE_TO_WAIT;
-    if (LinuxKernelModel::isFinishWait(name))
-      return TD_KERNEL_FINISH_WAIT;
-
-    // Memory Barriers
-    if (LinuxKernelModel::isMemoryBarrier(name))
-      return TD_KERNEL_MEMORY_BARRIER;
-
-    if (LinuxKernelModel::isAtomicRead(name) ||
-        LinuxKernelModel::isTestBit(name))
-      return TD_KERNEL_ATOMIC_READ;
-    if (LinuxKernelModel::isAtomicSet(name))
-      return TD_KERNEL_ATOMIC_WRITE;
-    if (LinuxKernelModel::isAtomicAdd(name) ||
-        LinuxKernelModel::isAtomicSub(name) ||
-        LinuxKernelModel::isAtomicCmpxchg(name) ||
-        LinuxKernelModel::isSetBit(name))
-      return TD_KERNEL_ATOMIC_RMW;
+    return getKernelType(name);
   }
 
   return TD_DUMMY;
@@ -2151,7 +2209,7 @@ ThreadAPI::TD_TYPE ThreadAPI::getTypeForName(StringRef raw_name) const {
       return TD_CUDA_KERNEL_LAUNCH;
   }
   if (m_config.enable_linux_kernel()) {
-    if (LinuxKernelModel::isTestBit(name)) return TD_KERNEL_ATOMIC_READ;
+    return getKernelType(name);
   }
   return TD_DUMMY;
 }
