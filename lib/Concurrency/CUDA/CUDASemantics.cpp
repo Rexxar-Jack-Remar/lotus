@@ -27,13 +27,44 @@ constexpr CUDASemanticDescriptor kDescriptors[] = {
      CUDASemanticFamily::MemoryManagement, -1, -1, 1, 0, -1},
     {TD::TD_CUDA_FREE, CUDAEffectKind::Free, CUDASemanticFamily::MemoryManagement,
      -1, -1, -1, 0, -1},
-    {TD::TD_CUDA_UNIFIED_MEMORY, CUDAEffectKind::UnifiedMalloc,
+    {TD::TD_CUDA_UNIFIED_MEMORY, CUDAEffectKind::Unknown,
      CUDASemanticFamily::MemoryManagement, -1, -1, -1, -1, -1},
-    {TD::TD_CUDA_STREAM, CUDAEffectKind::StreamSync,
-     CUDASemanticFamily::StreamOperation, 0, -1, -1, -1, -1},
-    {TD::TD_CUDA_EVENT, CUDAEffectKind::EventRecord,
-     CUDASemanticFamily::EventOperation, 1, -1, -1, -1, -1},
+    {TD::TD_CUDA_STREAM, CUDAEffectKind::Unknown,
+     CUDASemanticFamily::StreamOperation, -1, -1, -1, -1, -1},
+    {TD::TD_CUDA_EVENT, CUDAEffectKind::Unknown,
+     CUDASemanticFamily::EventOperation, -1, -1, -1, -1, -1},
 };
+
+constexpr CUDASemanticDescriptor kStreamCreate = {
+    TD::TD_CUDA_STREAM, CUDAEffectKind::StreamCreate,
+    CUDASemanticFamily::StreamOperation, -1, -1, -1, 0, -1};
+constexpr CUDASemanticDescriptor kStreamDestroy = {
+    TD::TD_CUDA_STREAM, CUDAEffectKind::StreamDestroy,
+    CUDASemanticFamily::StreamOperation, 0, -1, -1, -1, -1};
+constexpr CUDASemanticDescriptor kStreamSync = {
+    TD::TD_CUDA_STREAM, CUDAEffectKind::StreamSync,
+    CUDASemanticFamily::StreamOperation, 0, -1, -1, -1, -1};
+constexpr CUDASemanticDescriptor kEventCreate = {
+    TD::TD_CUDA_EVENT, CUDAEffectKind::EventCreate,
+    CUDASemanticFamily::EventOperation, -1, -1, -1, 0, -1};
+constexpr CUDASemanticDescriptor kEventRecord = {
+    TD::TD_CUDA_EVENT, CUDAEffectKind::EventRecord,
+    CUDASemanticFamily::EventOperation, 1, -1, -1, -1, 0};
+constexpr CUDASemanticDescriptor kEventWait = {
+    TD::TD_CUDA_EVENT, CUDAEffectKind::EventWait,
+    CUDASemanticFamily::EventOperation, 0, -1, -1, -1, 1};
+constexpr CUDASemanticDescriptor kEventSync = {
+    TD::TD_CUDA_EVENT, CUDAEffectKind::EventSynchronize,
+    CUDASemanticFamily::EventOperation, -1, -1, -1, -1, 0};
+constexpr CUDASemanticDescriptor kEventDestroy = {
+    TD::TD_CUDA_EVENT, CUDAEffectKind::EventDestroy,
+    CUDASemanticFamily::EventOperation, -1, -1, -1, -1, 0};
+constexpr CUDASemanticDescriptor kPrefetch = {
+    TD::TD_CUDA_UNIFIED_MEMORY, CUDAEffectKind::PrefetchAsync,
+    CUDASemanticFamily::MemoryTransfer, 3, 2, 1, -1, 0};
+constexpr CUDASemanticDescriptor kUnifiedMalloc = {
+    TD::TD_CUDA_UNIFIED_MEMORY, CUDAEffectKind::UnifiedMalloc,
+    CUDASemanticFamily::MemoryManagement, -1, -1, 1, 0, -1};
 
 } // anonymous namespace
 
@@ -44,6 +75,51 @@ const CUDASemanticDescriptor *lookupCUDASemantic(ThreadAPI::TD_TYPE type) {
     }
   }
   return nullptr;
+}
+
+const CUDASemanticDescriptor *lookupCUDASemantic(const llvm::CallBase *call) {
+  if (!call) {
+    return nullptr;
+  }
+  ThreadAPI *api = ThreadAPI::getThreadAPI();
+  const CUDASemanticDescriptor *family =
+      api ? lookupCUDASemantic(api->getType(call)) : nullptr;
+  const llvm::Function *callee = call->getCalledFunction();
+  if (!callee) {
+    return family;
+  }
+  llvm::StringRef name = callee->getName();
+  if (name.contains("StreamCreate")) {
+    return &kStreamCreate;
+  }
+  if (name.contains("StreamDestroy")) {
+    return &kStreamDestroy;
+  }
+  if (name.contains("StreamSynchronize")) {
+    return &kStreamSync;
+  }
+  if (name.contains("StreamWaitEvent")) {
+    return &kEventWait;
+  }
+  if (name.contains("EventCreate")) {
+    return &kEventCreate;
+  }
+  if (name.contains("EventDestroy")) {
+    return &kEventDestroy;
+  }
+  if (name.contains("EventRecord")) {
+    return &kEventRecord;
+  }
+  if (name.contains("EventSynchronize")) {
+    return &kEventSync;
+  }
+  if (name.contains("MemPrefetchAsync")) {
+    return &kPrefetch;
+  }
+  if (name.contains("MallocManaged")) {
+    return &kUnifiedMalloc;
+  }
+  return family;
 }
 
 const char *toString(CUDAEffectKind kind) {
@@ -90,6 +166,8 @@ const char *toString(CUDAEffectKind kind) {
     return "EventWait";
   case CUDAEffectKind::EventSynchronize:
     return "EventSynchronize";
+  case CUDAEffectKind::EventDestroy:
+    return "EventDestroy";
   }
   return "Unknown";
 }

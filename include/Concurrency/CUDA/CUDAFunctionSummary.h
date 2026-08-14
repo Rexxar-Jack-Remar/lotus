@@ -9,6 +9,29 @@
 
 namespace concurrency::cuda {
 
+enum class CUDAEffectClass {
+  KernelLaunch,
+  MemoryTransfer,
+  Synchronization,
+  Atomic,
+  Stream,
+  Event,
+  Texture,
+  Surface
+};
+
+struct CUDAEffectSummary {
+  std::vector<const llvm::CallBase *> may;
+  std::vector<const llvm::CallBase *> must;
+};
+
+struct CUDAFunctionCallsite {
+  const llvm::CallBase *callsite = nullptr;
+  const llvm::Function *callee = nullptr;
+  std::vector<std::pair<const llvm::Argument *, const llvm::Value *>> arguments;
+  bool must_execute = false;
+};
+
 struct CUDAFunctionSummary {
   const llvm::Function *function = nullptr;
   std::vector<const llvm::Function *> callees;
@@ -20,6 +43,8 @@ struct CUDAFunctionSummary {
   std::vector<const llvm::CallBase *> event_ops;
   std::vector<const llvm::CallBase *> texture_ops;
   std::vector<const llvm::CallBase *> surface_ops;
+  std::map<CUDAEffectClass, CUDAEffectSummary> effects;
+  std::vector<CUDAFunctionCallsite> callsites;
   bool is_device_function = false;
   bool is_host_wrapper = false;
   bool recursive = false;

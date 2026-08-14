@@ -3,12 +3,50 @@
 #include "Concurrency/Utils/ThreadAPI.h"
 
 #include <llvm/ADT/STLExtras.h>
+#include <llvm/Analysis/PostDominators.h>
 
 namespace concurrency::cuda {
 
 namespace {
 
 bool isCUDACall(ThreadAPI::TD_TYPE type) { return type != ThreadAPI::TD_DUMMY; }
+
+std::optional<CUDAEffectClass> getEffectClass(ThreadAPI::TD_TYPE type) {
+  switch (type) {
+  case ThreadAPI::TD_CUDA_KERNEL_LAUNCH:
+    return CUDAEffectClass::KernelLaunch;
+  case ThreadAPI::TD_CUDA_MEMCPY:
+  case ThreadAPI::TD_CUDA_MEMSET:
+  case ThreadAPI::TD_CUDA_MALLOC:
+  case ThreadAPI::TD_CUDA_FREE:
+  case ThreadAPI::TD_CUDA_UNIFIED_MEMORY:
+    return CUDAEffectClass::MemoryTransfer;
+  case ThreadAPI::TD_CUDA_DEVICE_SYNC:
+  case ThreadAPI::TD_CUDA_BARRIER:
+  case ThreadAPI::TD_CUDA_WARP_BARRIER:
+  case ThreadAPI::TD_CUDA_MEMORY_BARRIER:
+    return CUDAEffectClass::Synchronization;
+  case ThreadAPI::TD_CUDA_ATOMIC:
+    return CUDAEffectClass::Atomic;
+  case ThreadAPI::TD_CUDA_STREAM:
+    return CUDAEffectClass::Stream;
+  case ThreadAPI::TD_CUDA_EVENT:
+    return CUDAEffectClass::Event;
+  case ThreadAPI::TD_CUDA_TEXTURE:
+    return CUDAEffectClass::Texture;
+  case ThreadAPI::TD_CUDA_SURFACE:
+    return CUDAEffectClass::Surface;
+  default:
+    return std::nullopt;
+  }
+}
+
+void appendUnique(std::vector<const llvm::CallBase *> &calls,
+                  const llvm::CallBase *call) {
+  if (call && !llvm::is_contained(calls, call)) {
+    calls.push_back(call);
+  }
+}
 
 } // anonymous namespace
 
@@ -28,6 +66,8 @@ void CUDAFunctionSummaryAnalysis::runAnalysis() {
     }
     CUDAFunctionSummary summary;
     summary.function = &fn;
+    llvm::PostDominatorTree post_dom_tree;
+    post_dom_tree.recalculate(const_cast<llvm::Function &>(fn));
 
     for (const auto &bb : fn) {
       for (const auto &inst : bb) {
@@ -73,6 +113,17 @@ void CUDAFunctionSummaryAnalysis::runAnalysis() {
           default:
             break;
           }
+          if (auto effect_class = getEffectClass(td_type)) {
+            CUDAEffectSummary &effect = summary.effects[*effect_class];
+            appendUnique(effect.may, call);
+            const llvm::BasicBlock *entry = &fn.getEntryBlock();
+            const llvm::BasicBlock *call_block = call->getParent();
+            if (post_dom_tree.getNode(call_block) &&
+                post_dom_tree.getNode(entry) &&
+                post_dom_tree.dominates(call_block, entry)) {
+              appendUnique(effect.must, call);
+            }
+          }
         }
 
         const llvm::Function *callee = api->getCallee(call);
@@ -87,6 +138,23 @@ void CUDAFunctionSummaryAnalysis::runAnalysis() {
           if (!already_added) {
             summary.callees.push_back(callee);
           }
+          CUDAFunctionCallsite callsite;
+          callsite.callsite = call;
+          callsite.callee = callee;
+          callsite.must_execute =
+              post_dom_tree.getNode(call->getParent()) &&
+              post_dom_tree.getNode(&fn.getEntryBlock()) &&
+              post_dom_tree.dominates(call->getParent(),
+                                      &fn.getEntryBlock());
+          unsigned index = 0;
+          for (const llvm::Argument &formal : callee->args()) {
+            if (index >= call->arg_size()) {
+              break;
+            }
+            callsite.arguments.push_back(
+                {&formal, call->getArgOperand(index++)});
+          }
+          summary.callsites.push_back(std::move(callsite));
         }
       }
     }
@@ -95,12 +163,8 @@ void CUDAFunctionSummaryAnalysis::runAnalysis() {
   }
 
   bool changed = true;
-  int max_iterations = 10;
-  int iteration = 0;
-
-  while (changed && iteration < max_iterations) {
+  while (changed) {
     changed = false;
-    ++iteration;
 
     for (auto &pair : m_summaries) {
       CUDAFunctionSummary &summary = pair.second;
@@ -112,6 +176,11 @@ void CUDAFunctionSummaryAnalysis::runAnalysis() {
       size_t orig_event_count = summary.event_ops.size();
       size_t orig_texture_count = summary.texture_ops.size();
       size_t orig_surface_count = summary.surface_ops.size();
+      size_t orig_effect_count = 0;
+      for (const auto &effect : summary.effects) {
+        orig_effect_count += effect.second.may.size();
+        orig_effect_count += effect.second.must.size();
+      }
 
       for (const llvm::Function *callee : summary.callees) {
         auto it = m_summaries.find(callee);
@@ -201,6 +270,30 @@ void CUDAFunctionSummaryAnalysis::runAnalysis() {
         }
       }
 
+      for (const CUDAFunctionCallsite &callsite : summary.callsites) {
+        auto callee_it = m_summaries.find(callsite.callee);
+        if (callee_it == m_summaries.end()) {
+          continue;
+        }
+        for (const auto &effect_pair : callee_it->second.effects) {
+          CUDAEffectSummary &effect = summary.effects[effect_pair.first];
+          for (const llvm::CallBase *call : effect_pair.second.may) {
+            appendUnique(effect.may, call);
+          }
+          if (callsite.must_execute) {
+            for (const llvm::CallBase *call : effect_pair.second.must) {
+              appendUnique(effect.must, call);
+            }
+          }
+        }
+      }
+
+      size_t new_effect_count = 0;
+      for (const auto &effect : summary.effects) {
+        new_effect_count += effect.second.may.size();
+        new_effect_count += effect.second.must.size();
+      }
+
       if (summary.kernel_launches.size() != orig_kernel_count ||
           summary.memory_transfers.size() != orig_transfer_count ||
           summary.synchronizations.size() != orig_sync_count ||
@@ -208,7 +301,8 @@ void CUDAFunctionSummaryAnalysis::runAnalysis() {
           summary.stream_ops.size() != orig_stream_count ||
           summary.event_ops.size() != orig_event_count ||
           summary.texture_ops.size() != orig_texture_count ||
-          summary.surface_ops.size() != orig_surface_count) {
+          summary.surface_ops.size() != orig_surface_count ||
+          new_effect_count != orig_effect_count) {
         changed = true;
       }
     }
@@ -254,7 +348,7 @@ void CUDAFunctionSummaryAnalysis::runAnalysis() {
   }
 
   for (auto &pair : m_summaries) {
-    pair.second.reaches_fixed_point = (iteration < max_iterations);
+    pair.second.reaches_fixed_point = true;
   }
 }
 

@@ -2,11 +2,14 @@
 
 #include <algorithm>
 
+#include <llvm/ADT/MapVector.h>
 #include <llvm/ADT/SmallPtrSet.h>
 #include <llvm/ADT/SmallVector.h>
 #include <llvm/IR/Argument.h>
 #include <llvm/IR/Constants.h>
+#include <llvm/IR/DataLayout.h>
 #include <llvm/IR/Instructions.h>
+#include <llvm/IR/Module.h>
 #include <llvm/IR/Operator.h>
 
 using namespace llvm;
@@ -232,6 +235,26 @@ static bool tryDividePattern(AffineAccessPattern &pattern, int64_t divisor) {
   return true;
 }
 
+static const Module *getEnclosingModule(const Value *value) {
+  if (const auto *inst = dyn_cast_or_null<Instruction>(value)) {
+    return inst->getModule();
+  }
+  if (const auto *argument = dyn_cast_or_null<Argument>(value)) {
+    return argument->getParent() ? argument->getParent()->getParent() : nullptr;
+  }
+  if (const auto *global = dyn_cast_or_null<GlobalValue>(value)) {
+    return global->getParent();
+  }
+  if (const auto *op = dyn_cast_or_null<Operator>(value)) {
+    for (const Value *operand : op->operands()) {
+      if (const Module *module = getEnclosingModule(operand)) {
+        return module;
+      }
+    }
+  }
+  return nullptr;
+}
+
 static int64_t normalizeDimension(int64_t dim) { return dim > 0 ? dim : 1; }
 
 static CanonicalAffineAccessPattern
@@ -347,8 +370,19 @@ CUDASymbolicModel::evaluateConstantInt(const Value *value) {
       auto lhs = evaluateConstantInt(inst->getOperand(0));
       auto rhs = evaluateConstantInt(inst->getOperand(1));
       if (lhs && rhs) {
-        return inst->getOpcode() == Instruction::Mul ? (*lhs) * (*rhs)
-                                                     : (*lhs) << (*rhs);
+        if (inst->getOpcode() == Instruction::Mul) {
+          return (*lhs) * (*rhs);
+        }
+        const auto *type = dyn_cast<IntegerType>(inst->getType());
+        if (!type || *rhs < 0 ||
+            static_cast<uint64_t>(*rhs) >= type->getBitWidth()) {
+          return std::nullopt;
+        }
+        APInt value(type->getBitWidth(), static_cast<uint64_t>(*lhs), true);
+        value <<= static_cast<unsigned>(*rhs);
+        return value.isSignedIntN(64)
+                   ? std::optional<int64_t>(value.getSExtValue())
+                   : std::nullopt;
       }
     }
     if (inst->getOpcode() == Instruction::And) {
@@ -424,42 +458,36 @@ CUDASymbolicModel::extractAffineAccessPattern(const Value *value) {
     if (gep->getNumIndices() == 0) {
       return extractAffineAccessPattern(gep->getPointerOperand());
     }
-
-    Type *element_type = gep->getSourceElementType();
-    const auto *idx_it = gep->idx_begin();
-    for (; idx_it != gep->idx_end(); ++idx_it) {
-      AffineAccessPattern index_pattern = extractAffineAccessPattern(*idx_it);
-      if (!index_pattern.valid) {
-        pattern.non_affine = true;
-        return normalizePattern(pattern);
+    const Module *module = getEnclosingModule(value);
+    if (!module) {
+      markNonAffine(pattern);
+      return pattern;
+    }
+    const DataLayout &layout = module->getDataLayout();
+    const unsigned bit_width =
+        layout.getIndexSizeInBits(gep->getPointerAddressSpace());
+    MapVector<Value *, APInt> variable_offsets;
+    APInt constant_offset(bit_width, 0, true);
+    if (!gep->collectOffset(layout, bit_width, variable_offsets,
+                            constant_offset) ||
+        !constant_offset.isSignedIntN(64)) {
+      markNonAffine(pattern);
+      return pattern;
+    }
+    pattern = makeConstantPattern(constant_offset.getSExtValue());
+    for (const auto &entry : variable_offsets) {
+      if (!entry.second.isSignedIntN(64)) {
+        markNonAffine(pattern);
+        return pattern;
       }
-
-      int64_t elem_size = 1;
-      if (element_type->isSized()) {
-        if (const auto *arr = dyn_cast<ArrayType>(element_type)) {
-          element_type = arr->getElementType();
-        } else if (const auto *vec = dyn_cast<VectorType>(element_type)) {
-          element_type = vec->getElementType();
-        } else if (const auto *ptr = dyn_cast<PointerType>(element_type)) {
-          element_type = ptr->getPointerElementType();
-        }
-        if (element_type->isIntegerTy()) {
-          elem_size =
-              std::max<int64_t>(1, element_type->getIntegerBitWidth() / 8);
-        } else if (element_type->isDoubleTy() || element_type->isPointerTy()) {
-          elem_size = 8;
-        } else if (const auto *arr = dyn_cast<ArrayType>(element_type)) {
-          elem_size = static_cast<int64_t>(arr->getNumElements());
-          element_type = arr->getElementType();
-        }
+      AffineAccessPattern index_pattern =
+          extractAffineAccessPattern(entry.first);
+      if (!index_pattern.valid ||
+          !tryScalePattern(index_pattern, entry.second.getSExtValue())) {
+        markNonAffine(pattern);
+        return pattern;
       }
-
-      scalePattern(index_pattern, elem_size);
-      if (!pattern.valid) {
-        pattern = index_pattern;
-      } else {
-        pattern = mergeNormalizedPatterns(pattern, index_pattern);
-      }
+      pattern = mergeNormalizedPatterns(pattern, index_pattern);
     }
     return normalizePattern(pattern);
   }
@@ -467,9 +495,15 @@ CUDASymbolicModel::extractAffineAccessPattern(const Value *value) {
   if (const auto *op = dyn_cast<Operator>(value)) {
     if (op->getOpcode() == Instruction::ZExt ||
         op->getOpcode() == Instruction::SExt ||
-        op->getOpcode() == Instruction::Trunc ||
         op->getOpcode() == Instruction::BitCast) {
       return normalizePattern(extractAffineAccessPattern(op->getOperand(0)));
+    }
+    if (op->getOpcode() == Instruction::Trunc) {
+      // Truncation is modular arithmetic. Without a range proof that no high
+      // bits are discarded, preserving an affine integer expression is
+      // unsound (for example, trunc i32 threadIdx.x to i8).
+      markNonAffine(pattern);
+      return pattern;
     }
     if (op->getOpcode() == Instruction::IntToPtr) {
       return normalizePattern(extractAffineAccessPattern(op->getOperand(0)));
@@ -535,8 +569,7 @@ CUDASymbolicModel::extractAffineAccessPattern(const Value *value) {
         return normalizePattern(pattern);
       }
     }
-    if (op->getOpcode() == Instruction::Mul ||
-        op->getOpcode() == Instruction::Shl) {
+    if (op->getOpcode() == Instruction::Mul) {
       auto lhs_const = evaluateConstantInt(op->getOperand(0));
       auto rhs_const = evaluateConstantInt(op->getOperand(1));
       if (lhs_const && !rhs_const) {
@@ -556,15 +589,38 @@ CUDASymbolicModel::extractAffineAccessPattern(const Value *value) {
         if (!lhs.valid) {
           return pattern;
         }
-        const int64_t scale = op->getOpcode() == Instruction::Shl
-                                  ? (int64_t{1} << *rhs_const)
-                                  : *rhs_const;
+        const int64_t scale = *rhs_const;
         if (tryScalePattern(lhs, scale)) {
           return lhs;
         }
         markNonAffine(pattern);
         return pattern;
       }
+    }
+    if (op->getOpcode() == Instruction::Shl) {
+      auto shift = evaluateConstantInt(op->getOperand(1));
+      const auto *integer_type = dyn_cast<IntegerType>(op->getType());
+      const auto *overflowing = dyn_cast<OverflowingBinaryOperator>(op);
+      if (!shift || !integer_type || *shift < 0 ||
+          static_cast<uint64_t>(*shift) >= integer_type->getBitWidth() ||
+          (!overflowing ||
+           (!overflowing->hasNoUnsignedWrap() &&
+            !overflowing->hasNoSignedWrap()))) {
+        markNonAffine(pattern);
+        return pattern;
+      }
+      APInt scale(integer_type->getBitWidth(), 1);
+      scale <<= static_cast<unsigned>(*shift);
+      if (!scale.isSignedIntN(64)) {
+        markNonAffine(pattern);
+        return pattern;
+      }
+      AffineAccessPattern lhs = extractAffineAccessPattern(op->getOperand(0));
+      if (!lhs.valid || !tryScalePattern(lhs, scale.getSExtValue())) {
+        markNonAffine(pattern);
+        return pattern;
+      }
+      return lhs;
     }
     if (op->getOpcode() == Instruction::SDiv ||
         op->getOpcode() == Instruction::UDiv ||

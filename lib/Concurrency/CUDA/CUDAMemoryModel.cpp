@@ -151,8 +151,8 @@ static MemorySpaceInfo classifyAddressSpace(unsigned addrspace) {
     return {MemorySpace::Constant, true, addrspace};
   case 5:
     return {MemorySpace::Local, true, addrspace};
-  case 101:
-    return {MemorySpace::Device, true, addrspace};
+  case 7:
+    return {MemorySpace::ClusterShared, true, addrspace};
   default:
     return {MemorySpace::Unknown, false, addrspace};
   }
@@ -261,7 +261,10 @@ MemorySpaceInfo CUDAMemoryModel::classify(const Value *value) {
     if (by_name.space != MemorySpace::Unknown) {
       return by_name;
     }
-    return {MemorySpace::Host, false, gv->getAddressSpace()};
+    return gv->getAddressSpace() == 0
+               ? MemorySpaceInfo{MemorySpace::Host, false, 0}
+               : MemorySpaceInfo{MemorySpace::Unknown, false,
+                                 gv->getAddressSpace()};
   }
 
   if (const auto *arg = dyn_cast<Argument>(base)) {
@@ -373,12 +376,6 @@ bool CUDAMemoryModel::isPotentiallyManaged(const Value *value) {
           return true;
         }
       }
-    }
-  }
-  if (const auto *ptr_ty = dyn_cast<PointerType>(base->getType())) {
-    unsigned addrspace = ptr_ty->getAddressSpace();
-    if (addrspace == 4) {
-      return true;
     }
   }
   return false;

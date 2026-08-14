@@ -11,6 +11,7 @@ enum class MemorySpace {
   Device,
   Local,
   Shared,
+  ClusterShared,
   Global,
   Constant
 };

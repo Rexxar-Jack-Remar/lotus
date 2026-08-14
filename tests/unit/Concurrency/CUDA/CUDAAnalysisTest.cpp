@@ -72,7 +72,7 @@ TEST_F(CUDAAnalysisTest, SummarizesMemorySpacesAndRisks) {
   EXPECT_TRUE(summary.has_global_race);
   EXPECT_TRUE(summary.has_bank_conflict);
   EXPECT_TRUE(summary.has_uncoalesced_access);
-  EXPECT_TRUE(summary.has_volatile_missing);
+  EXPECT_FALSE(summary.has_volatile_missing);
   ASSERT_FALSE(summary.bank_conflicts.empty());
   EXPECT_GE(summary.bank_conflicts.front().conflict_degree, 2u);
   EXPECT_GE(summary.bank_conflicts.front().unique_banks, 1u);
@@ -212,22 +212,25 @@ TEST_F(CUDAAnalysisTest, DetectsCrossBlockGlobalRacesWhenBlockIdxCollides) {
 TEST_F(CUDAAnalysisTest, ClassifiesNVVMMemorySpacesPrecisely) {
   const char *source = R"(
     @shared_arr = addrspace(3) global [8 x i32] zeroinitializer
+    @cluster_arr = addrspace(7) global [8 x i32] zeroinitializer
     @constant_arr = addrspace(4) global [8 x i32] zeroinitializer
-    @device_arr = addrspace(101) global [8 x i32] zeroinitializer
+    @legacy_arr = addrspace(101) global [8 x i32] zeroinitializer
     @host_arr = global [8 x i32] zeroinitializer
 
     define ptx_kernel void @kernel(i32 addrspace(1)* %param) !nvvm.annotations !0 {
     entry:
       %local = alloca i32
       %shared_idx = getelementptr [8 x i32], [8 x i32] addrspace(3)* @shared_arr, i32 0, i32 0
+      %cluster_idx = getelementptr [8 x i32], [8 x i32] addrspace(7)* @cluster_arr, i32 0, i32 0
       %constant_idx = getelementptr [8 x i32], [8 x i32] addrspace(4)* @constant_arr, i32 0, i32 0
-      %device_idx = getelementptr [8 x i32], [8 x i32] addrspace(101)* @device_arr, i32 0, i32 0
+      %legacy_idx = getelementptr [8 x i32], [8 x i32] addrspace(101)* @legacy_arr, i32 0, i32 0
       %host_idx = getelementptr [8 x i32], [8 x i32]* @host_arr, i32 0, i32 0
       store i32 1, i32* %local
       %local_val = load i32, i32* %local
       store i32 2, i32 addrspace(3)* %shared_idx
+      store i32 3, i32 addrspace(7)* %cluster_idx
       %c = load i32, i32 addrspace(4)* %constant_idx
-      store i32 %c, i32 addrspace(101)* %device_idx
+      store i32 %c, i32 addrspace(101)* %legacy_idx
       store i32 %local_val, i32 addrspace(1)* %param
       store i32 5, i32* %host_idx
       ret void
@@ -246,26 +249,33 @@ TEST_F(CUDAAnalysisTest, ClassifiesNVVMMemorySpacesPrecisely) {
   const auto &summary = analysis.getKernelSummaries().front();
 
   bool saw_shared = false;
+  bool saw_cluster_shared = false;
   bool saw_constant = false;
   bool saw_device = false;
   bool saw_global = false;
   bool saw_local = false;
   bool saw_host = false;
+  bool saw_unknown = false;
   for (const auto &access : summary.accesses) {
     saw_shared |= access.space == concurrency::cuda::MemorySpace::Shared;
+    saw_cluster_shared |=
+        access.space == concurrency::cuda::MemorySpace::ClusterShared;
     saw_constant |= access.space == concurrency::cuda::MemorySpace::Constant;
     saw_device |= access.space == concurrency::cuda::MemorySpace::Device;
     saw_global |= access.space == concurrency::cuda::MemorySpace::Global;
     saw_local |= access.space == concurrency::cuda::MemorySpace::Local;
     saw_host |= access.space == concurrency::cuda::MemorySpace::Host;
+    saw_unknown |= access.space == concurrency::cuda::MemorySpace::Unknown;
   }
 
   EXPECT_TRUE(saw_shared);
+  EXPECT_TRUE(saw_cluster_shared);
   EXPECT_TRUE(saw_constant);
-  EXPECT_TRUE(saw_device);
+  EXPECT_FALSE(saw_device);
   EXPECT_TRUE(saw_global);
   EXPECT_TRUE(saw_local);
   EXPECT_TRUE(saw_host);
+  EXPECT_TRUE(saw_unknown);
 }
 TEST_F(CUDAAnalysisTest, BuildsStreamAndEventAutomataForAsyncRuntimeOps) {
   const char *source = R"(
@@ -591,8 +601,10 @@ TEST_F(CUDAAnalysisTest, ExtractsMultidimensionalLaunchParameters) {
 TEST_F(CUDAAnalysisTest, DetectsCrossKernelGlobalRaces) {
   const char *source = R"(
     @global_arr = addrspace(1) global [64 x i32] zeroinitializer
+    %stream_t = type opaque
 
-    declare void @__set_CUDAConfig(i32, i32)
+    declare i64 @cudaLaunchKernel(i8*, i64, i64, i64, i64, i64,
+                                  i8**, i64, %stream_t*)
     declare i32 @llvm.nvvm.read.ptx.sreg.tid.x()
     declare i32 @llvm.nvvm.read.ptx.sreg.ctaid.x()
 
@@ -614,9 +626,15 @@ TEST_F(CUDAAnalysisTest, DetectsCrossKernelGlobalRaces) {
 
     define void @main(i32* %ptr) {
     entry:
-      call void @__set_CUDAConfig(i32 1, i32 32)
+      %s1 = inttoptr i64 10 to %stream_t*
+      %s2 = inttoptr i64 20 to %stream_t*
+      %l0 = call i64 @cudaLaunchKernel(
+          i8* bitcast (void ()* @kernel_producer to i8*), i64 1, i64 32,
+          i64 1, i64 1, i64 1, i8** null, i64 0, %stream_t* %s1)
       call void @kernel_producer()
-      call void @__set_CUDAConfig(i32 1, i32 32)
+      %l1 = call i64 @cudaLaunchKernel(
+          i8* bitcast (void ()* @kernel_consumer to i8*), i64 1, i64 32,
+          i64 1, i64 1, i64 1, i8** null, i64 0, %stream_t* %s2)
       call void @kernel_consumer()
       ret void
     }
@@ -890,6 +908,6 @@ TEST_F(CUDAAnalysisTest, DoesNotTreatPartialWarpMaskAsExactWarpOrdering) {
   EXPECT_EQ(summary.synchronizations.front().primitive,
             concurrency::cuda::SynchronizationPrimitive::WarpBarrier);
   EXPECT_EQ(summary.synchronizations.front().participation,
-            concurrency::cuda::ParticipationKind::Conditional);
+            concurrency::cuda::ParticipationKind::Partial);
   EXPECT_FALSE(summary.synchronizations.front().exact);
 }

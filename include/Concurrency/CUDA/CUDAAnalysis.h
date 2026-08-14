@@ -44,7 +44,14 @@ enum class LaunchOrderingSource {
   Unknown
 };
 
-enum class HostStreamKind { Unknown, LegacyDefault, Explicit };
+enum class HostStreamKind {
+  Unknown,
+  LegacyDefault,
+  PerThreadDefault,
+  BlockingExplicit,
+  NonBlockingExplicit,
+  Explicit = BlockingExplicit
+};
 
 enum class AliasPrecision { Exact, SymbolicAffine, Ambiguous, NonAffine };
 
@@ -80,8 +87,12 @@ struct DeviceConfig {
 
 struct KernelLaunchInfo {
   const llvm::Instruction *launch = nullptr;
+  const llvm::Function *host_function = nullptr;
   const llvm::Function *kernel = nullptr;
   LaunchDimensions dimensions;
+  const llvm::Value *argument_array = nullptr;
+  const llvm::Value *dynamic_shared_memory = nullptr;
+  SymbolicDimension dynamic_shared_memory_size;
   size_t sequence = 0;
   llvm::SmallVector<size_t, 4> ordered_dependencies;
   SynchronizationPrimitive predecessor = SynchronizationPrimitive::None;
@@ -152,16 +163,20 @@ struct CoalescingInfo {
   uint32_t covered_bytes = 0;
   uint32_t participating_lanes = 0;
   uint32_t unique_segments = 0;
+  bool exact = false;
 };
 
 struct MemoryTransferInfo {
   const llvm::Instruction *inst = nullptr;
+  const llvm::Function *host_function = nullptr;
   const llvm::Value *src = nullptr;
   const llvm::Value *dst = nullptr;
+  const llvm::Value *stream = nullptr;
   MemorySpace src_space = MemorySpace::Unknown;
   MemorySpace dst_space = MemorySpace::Unknown;
   TransferKind kind = TransferKind::Unknown;
   bool is_async = false;
+  bool stream_known = false;
   uint64_t size = 0;
 };
 
@@ -249,6 +264,8 @@ struct SynchronizationRecord {
 struct InterKernelRaceInfo {
   const llvm::Instruction *first_launch = nullptr;
   const llvm::Instruction *second_launch = nullptr;
+  const llvm::Instruction *first_transfer = nullptr;
+  const llvm::Instruction *second_transfer = nullptr;
   const llvm::Function *first_kernel = nullptr;
   const llvm::Function *second_kernel = nullptr;
   const llvm::Value *shared_base = nullptr;
@@ -403,8 +420,11 @@ private:
   struct LaunchContextKey {
     const llvm::Function *kernel = nullptr;
     LaunchDimensions dimensions;
+    const llvm::Value *argument_array = nullptr;
+    const llvm::Value *dynamic_shared_memory = nullptr;
     bool operator==(const LaunchContextKey &other) const {
-      if (kernel != other.kernel) {
+      if (kernel != other.kernel || argument_array != other.argument_array ||
+          dynamic_shared_memory != other.dynamic_shared_memory) {
         return false;
       }
       for (int i = 0; i < 3; ++i) {
@@ -424,6 +444,8 @@ private:
   struct LaunchContextKeyHash {
     size_t operator()(const LaunchContextKey &key) const {
       size_t h = reinterpret_cast<size_t>(key.kernel);
+      h ^= reinterpret_cast<size_t>(key.argument_array) << 1;
+      h ^= reinterpret_cast<size_t>(key.dynamic_shared_memory) << 2;
       for (int i = 0; i < 3; ++i) {
         h ^= std::hash<int>{}(static_cast<int>(key.dimensions.grid[i].kind));
         h ^= std::hash<int64_t>{}(key.dimensions.grid[i].constant);

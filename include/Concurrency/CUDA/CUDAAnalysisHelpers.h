@@ -20,6 +20,7 @@ struct LaunchOrderingState {
     LaunchOrderingSource source = LaunchOrderingSource::None;
     SynchronizationPrimitive primitive = SynchronizationPrimitive::None;
     const llvm::Value *stream = nullptr;
+    const llvm::Instruction *boundary_inst = nullptr;
     HostStreamKind stream_kind = HostStreamKind::Unknown;
     llvm::SmallVector<size_t, 4> ordered_dependencies;
   };
@@ -27,6 +28,7 @@ struct LaunchOrderingState {
   struct EventState {
     bool has_record = false;
     const llvm::Value *recorded_stream = nullptr;
+    const llvm::Instruction *record_inst = nullptr;
     HostStreamKind recorded_stream_kind = HostStreamKind::Unknown;
     llvm::SmallVector<size_t, 4> recorded_dependencies;
   };
@@ -35,6 +37,7 @@ struct LaunchOrderingState {
   StreamState host_state;
   llvm::DenseMap<const llvm::Value *, StreamState> stream_states;
   StreamState default_stream;
+  StreamState per_thread_default_stream;
   llvm::DenseMap<const llvm::Value *, EventState> event_states;
 };
 

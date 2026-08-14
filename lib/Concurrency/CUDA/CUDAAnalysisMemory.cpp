@@ -34,8 +34,8 @@ static bool isHostLikeSpace(MemorySpace space) {
 
 static bool isDeviceLikeSpace(MemorySpace space) {
   return space == MemorySpace::Device || space == MemorySpace::Global ||
-         space == MemorySpace::Shared || space == MemorySpace::Constant ||
-         space == MemorySpace::Local;
+         space == MemorySpace::Shared || space == MemorySpace::ClusterShared ||
+         space == MemorySpace::Constant || space == MemorySpace::Local;
 }
 
 static TransferKind classifyTransferKind(MemorySpace src, MemorySpace dst) {
@@ -52,6 +52,39 @@ static TransferKind classifyTransferKind(MemorySpace src, MemorySpace dst) {
     return TransferKind::HostToHost;
   }
   return TransferKind::Unknown;
+}
+
+static std::optional<TransferKind> getExplicitMemcpyKind(const CallBase *call) {
+  if (!call || !call->getCalledFunction()) {
+    return std::nullopt;
+  }
+  const StringRef name = call->getCalledFunction()->getName();
+  unsigned kind_index = 3;
+  if (name.contains("MemcpyToSymbol") || name.contains("MemcpyFromSymbol")) {
+    kind_index = 4;
+  } else if (name.contains("Memcpy2D") || name.contains("Memcpy3D") ||
+             name.contains("MemcpyPeer")) {
+    return std::nullopt;
+  }
+  if (kind_index >= call->arg_size()) {
+    return std::nullopt;
+  }
+  const auto *kind = dyn_cast<ConstantInt>(call->getArgOperand(kind_index));
+  if (!kind) {
+    return std::nullopt;
+  }
+  switch (kind->getZExtValue()) {
+  case 0:
+    return TransferKind::HostToHost;
+  case 1:
+    return TransferKind::HostToDevice;
+  case 2:
+    return TransferKind::DeviceToHost;
+  case 3:
+    return TransferKind::DeviceToDevice;
+  default:
+    return std::nullopt;
+  }
 }
 
 } // namespace
@@ -78,6 +111,7 @@ void CUDAAnalysis::analyzeMemoryTransfers() {
       if (type == ThreadAPI::TD_CUDA_MEMCPY && call->arg_size() >= 3) {
         MemoryTransferInfo transfer;
         transfer.inst = &inst;
+        transfer.host_function = &function;
         transfer.dst = call->getArgOperand(0);
         transfer.src = call->getArgOperand(1);
         if (call->arg_size() >= 3) {
@@ -89,6 +123,8 @@ void CUDAAnalysis::analyzeMemoryTransfers() {
             call->getCalledFunction() &&
             call->getCalledFunction()->getName().contains("Async");
         const Value *stream = getTransferStream(call);
+        transfer.stream = stream;
+        transfer.stream_known = stream != nullptr;
 
         const MemorySpaceInfo src_info =
             CUDAMemoryModel::classify(transfer.src);
@@ -97,6 +133,30 @@ void CUDAAnalysis::analyzeMemoryTransfers() {
         transfer.src_space = src_info.space;
         transfer.dst_space = dst_info.space;
         transfer.kind = classifyTransferKind(src_info.space, dst_info.space);
+
+        if (auto explicit_kind = getExplicitMemcpyKind(call)) {
+          transfer.kind = *explicit_kind;
+          switch (*explicit_kind) {
+          case TransferKind::HostToHost:
+            transfer.src_space = MemorySpace::Host;
+            transfer.dst_space = MemorySpace::Host;
+            break;
+          case TransferKind::HostToDevice:
+            transfer.src_space = MemorySpace::Host;
+            transfer.dst_space = MemorySpace::Device;
+            break;
+          case TransferKind::DeviceToHost:
+            transfer.src_space = MemorySpace::Device;
+            transfer.dst_space = MemorySpace::Host;
+            break;
+          case TransferKind::DeviceToDevice:
+            transfer.src_space = MemorySpace::Device;
+            transfer.dst_space = MemorySpace::Device;
+            break;
+          case TransferKind::Unknown:
+            break;
+          }
+        }
 
         if (transfer.kind == TransferKind::Unknown) {
           const Function *callee = call->getCalledFunction();
@@ -144,6 +204,7 @@ void CUDAAnalysis::analyzeMemoryTransfers() {
       if (type == ThreadAPI::TD_CUDA_MEMSET && call->arg_size() >= 3) {
         MemoryTransferInfo transfer;
         transfer.inst = &inst;
+        transfer.host_function = &function;
         transfer.dst = call->getArgOperand(0);
         transfer.src = nullptr;
         if (call->arg_size() >= 3) {
@@ -158,6 +219,8 @@ void CUDAAnalysis::analyzeMemoryTransfers() {
             call->getCalledFunction() &&
             call->getCalledFunction()->getName().contains("Async");
         const Value *stream = getTransferStream(call);
+        transfer.stream = stream;
+        transfer.stream_known = stream != nullptr;
 
         m_memory_transfers.push_back(transfer);
 
@@ -182,6 +245,7 @@ void CUDAAnalysis::analyzeMemoryTransfers() {
       if (type == ThreadAPI::TD_CUDA_MALLOC && call->arg_size() >= 1) {
         MemoryTransferInfo transfer;
         transfer.inst = &inst;
+        transfer.host_function = &function;
         transfer.dst = call->getArgOperand(0);
         if (call->arg_size() >= 2) {
           if (auto size = evaluateConstantInt(call->getArgOperand(1))) {
@@ -221,6 +285,7 @@ void CUDAAnalysis::analyzeMemoryTransfers() {
       if (type == ThreadAPI::TD_CUDA_FREE && call->arg_size() >= 1) {
         MemoryTransferInfo transfer;
         transfer.inst = &inst;
+        transfer.host_function = &function;
         transfer.src = call->getArgOperand(0);
         transfer.src_space = CUDAMemoryModel::classify(transfer.src).space;
         transfer.kind = TransferKind::DeviceToHost;
@@ -367,14 +432,29 @@ void CUDAAnalysis::analyzeTextureAndSurfaceAccesses(KernelSummary &summary) {
       info.dimensions = std::min<unsigned>(call->arg_size(), 3);
       summary.has_texture_access = true;
       summary.texture_accesses.push_back(info);
+      recordModelGap(&inst, "Texture resource binding and coordinates are not "
+                            "yet normalized into byte-addressed race regions",
+                     0.45);
     } else if (type == ThreadAPI::TD_CUDA_SURFACE) {
       SurfaceAccessInfo info;
       info.inst = &inst;
       info.surfref = call->arg_size() > 0 ? call->getArgOperand(0) : nullptr;
       info.dimensions = std::min<unsigned>(call->arg_size(), 3);
-      info.is_write = true;
+      const Function *callee = call->getCalledFunction();
+      const StringRef name = callee ? callee->getName() : StringRef{};
+      const bool is_read = name.contains_insensitive("read");
+      const bool is_write = name.contains_insensitive("write");
+      info.is_write = is_write;
       summary.has_surface_access = true;
       summary.surface_accesses.push_back(info);
+      recordModelGap(&inst,
+                     is_read || is_write
+                         ? "Surface access direction is known, but resource "
+                           "binding and coordinates are not normalized into "
+                           "byte-addressed race regions"
+                         : "Surface access direction and resource region are "
+                           "not modeled precisely",
+                     is_read || is_write ? 0.45 : 0.3);
     }
   }
 }

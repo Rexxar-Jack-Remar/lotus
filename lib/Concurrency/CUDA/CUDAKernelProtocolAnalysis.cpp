@@ -24,6 +24,7 @@ void CUDAKernelProtocolAnalysis::runAnalysis() {
   llvm::SmallVector<const llvm::CallBase *, 8> barriers;
   llvm::SmallVector<const llvm::CallBase *, 8> warp_barriers;
   llvm::SmallVector<const llvm::CallBase *, 8> fences;
+  llvm::SmallVector<const llvm::CallBase *, 16> boundaries;
 
   for (const auto &bb : m_kernel) {
     for (const auto &inst : bb) {
@@ -35,13 +36,34 @@ void CUDAKernelProtocolAnalysis::runAnalysis() {
 
       if (td_type == ThreadAPI::TD_CUDA_BARRIER) {
         barriers.push_back(call);
+        boundaries.push_back(call);
       } else if (td_type == ThreadAPI::TD_CUDA_WARP_BARRIER) {
         warp_barriers.push_back(call);
+        boundaries.push_back(call);
       } else if (td_type == ThreadAPI::TD_CUDA_MEMORY_BARRIER) {
         fences.push_back(call);
+        boundaries.push_back(call);
       }
     }
   }
+
+  const llvm::Instruction *unique_exit = nullptr;
+  for (const llvm::BasicBlock &bb : m_kernel) {
+    if (llvm::isa<llvm::ReturnInst>(bb.getTerminator())) {
+      if (unique_exit) {
+        unique_exit = nullptr;
+        break;
+      }
+      unique_exit = bb.getTerminator();
+    }
+  }
+  auto epoch_exit = [&](const llvm::CallBase *boundary) {
+    auto *it = llvm::find(boundaries, boundary);
+    if (it != boundaries.end() && std::next(it) != boundaries.end()) {
+      return static_cast<const llvm::Instruction *>(*std::next(it));
+    }
+    return unique_exit;
+  };
 
   for (size_t i = 0; i < barriers.size(); ++i) {
     const llvm::CallBase *barrier = barriers[i];
@@ -51,7 +73,7 @@ void CUDAKernelProtocolAnalysis::runAnalysis() {
     epoch.kernel = &m_kernel;
     epoch.state = ProtocolState::BarrierActive;
     epoch.entry = barrier;
-    epoch.exit = barrier;
+    epoch.exit = epoch_exit(barrier);
     epoch.scope = static_cast<int>(2);
     m_barrier_epochs.push_back(epoch);
     m_state.barrier_epochs.push_back(epoch);
@@ -66,7 +88,7 @@ void CUDAKernelProtocolAnalysis::runAnalysis() {
     epoch.kernel = &m_kernel;
     epoch.state = ProtocolState::WarpSyncRequired;
     epoch.entry = warp_barrier;
-    epoch.exit = warp_barrier;
+    epoch.exit = epoch_exit(warp_barrier);
     epoch.scope = static_cast<int>(1);
     m_barrier_epochs.push_back(epoch);
     m_state.barrier_epochs.push_back(epoch);
@@ -92,7 +114,7 @@ void CUDAKernelProtocolAnalysis::runAnalysis() {
     epoch.kernel = &m_kernel;
     epoch.state = ProtocolState::FenceRequired;
     epoch.entry = fence;
-    epoch.exit = fence;
+    epoch.exit = epoch_exit(fence);
     epoch.scope = fence_scope;
     m_fence_epochs.push_back(epoch);
     m_state.fence_epochs.push_back(epoch);
@@ -101,9 +123,6 @@ void CUDAKernelProtocolAnalysis::runAnalysis() {
 
   bool has_proper_sync = true;
 
-  if (barriers.empty() && !warp_barriers.empty()) {
-    has_proper_sync = false;
-  }
   for (const auto *barrier : barriers) {
     if (!barrier || llvm::succ_empty(barrier->getParent())) {
       has_proper_sync = false;

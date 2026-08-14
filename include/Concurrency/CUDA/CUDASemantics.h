@@ -2,6 +2,8 @@
 
 #include "Concurrency/Utils/ThreadAPI.h"
 
+#include <llvm/IR/Instructions.h>
+
 namespace concurrency::cuda {
 
 /// Semantic effect kinds for CUDA operations
@@ -26,7 +28,8 @@ enum class CUDAEffectKind {
   EventCreate,
   EventRecord,
   EventWait,
-  EventSynchronize
+  EventSynchronize,
+  EventDestroy
 };
 
 /// Semantic family grouping
@@ -56,6 +59,9 @@ struct CUDASemanticDescriptor {
 /// Lookup semantic descriptor by ThreadAPI type
 /// Returns nullptr if type is not a recognized CUDA operation
 const CUDASemanticDescriptor *lookupCUDASemantic(ThreadAPI::TD_TYPE type);
+
+/// Resolve an operation variant from the concrete CUDA API identity.
+const CUDASemanticDescriptor *lookupCUDASemantic(const llvm::CallBase *call);
 
 /// Convert effect kind to string
 const char *toString(CUDAEffectKind kind);

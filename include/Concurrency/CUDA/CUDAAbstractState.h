@@ -41,6 +41,8 @@ enum class ProtocolState {
   Converged
 };
 
+enum class ParticipantCertainty { Unknown, Exact, Conditional, Partial };
+
 struct CUDAStreamTransition {
   const llvm::Instruction *inst = nullptr;
   StreamState from_state = StreamState::Unknown;
@@ -149,6 +151,7 @@ struct CUDAParticipantSet {
   uint32_t max_grid = 0;
   bool is_exact = false;
   bool is_symbolic = false;
+  ParticipantCertainty certainty = ParticipantCertainty::Unknown;
 };
 
 class CUDAAbstractState {

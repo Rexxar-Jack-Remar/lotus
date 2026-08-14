@@ -2,6 +2,9 @@
 
 #include "Concurrency/Utils/ThreadAPI.h"
 
+#include <llvm/Analysis/PostDominators.h>
+#include <llvm/IR/Constants.h>
+
 namespace concurrency::cuda {
 
 namespace {
@@ -42,6 +45,18 @@ void fillInstructionMetadata(CUDAParticipantSet &result,
   result.instruction = inst;
 }
 
+bool mustReachInstruction(const llvm::Function &kernel,
+                          const llvm::Instruction *inst) {
+  if (!inst || kernel.empty()) {
+    return false;
+  }
+  llvm::PostDominatorTree post_dom_tree;
+  post_dom_tree.recalculate(const_cast<llvm::Function &>(kernel));
+  return post_dom_tree.getNode(inst->getParent()) &&
+         post_dom_tree.getNode(&kernel.getEntryBlock()) &&
+         post_dom_tree.dominates(inst->getParent(), &kernel.getEntryBlock());
+}
+
 } // anonymous namespace
 
 CUDAParticipantAnalysis::CUDAParticipantAnalysis(const llvm::Function &kernel,
@@ -65,22 +80,49 @@ CUDAParticipantSet CUDAParticipantAnalysis::getActiveParticipants(
         auto type = api->getType(call);
         if (type == ThreadAPI::TD_CUDA_WARP_BARRIER) {
           result.scopes.push_back(static_cast<int>(ParticipationScope::Warp));
-          result.min_lane = 0;
-          result.max_lane = m_warp_size - 1;
-          result.is_exact = true;
+          const bool must_reach = mustReachInstruction(m_kernel, inst);
+          const auto *mask = call->arg_empty()
+                                 ? nullptr
+                                 : llvm::dyn_cast<llvm::ConstantInt>(
+                                       call->getArgOperand(0));
+          if (!mask || mask->isZero()) {
+            result.min_lane = 0;
+            result.max_lane = m_warp_size - 1;
+            result.is_symbolic = true;
+            result.certainty = ParticipantCertainty::Conditional;
+            return result;
+          }
+          const llvm::APInt &value = mask->getValue();
+          result.min_lane = std::min<uint32_t>(value.countTrailingZeros(),
+                                               m_warp_size - 1);
+          result.max_lane = std::min<uint32_t>(value.getActiveBits() - 1,
+                                               m_warp_size - 1);
+          const bool full_mask =
+              value.getBitWidth() >= m_warp_size &&
+              value == llvm::APInt::getLowBitsSet(value.getBitWidth(),
+                                                  m_warp_size);
+          result.is_exact = must_reach;
+          result.certainty = !must_reach
+                                 ? ParticipantCertainty::Conditional
+                                 : (full_mask ? ParticipantCertainty::Exact
+                                              : ParticipantCertainty::Partial);
           return result;
         }
         if (type == ThreadAPI::TD_CUDA_BARRIER) {
           result.scopes.push_back(static_cast<int>(ParticipationScope::Block));
           result.min_lane = 0;
           result.max_lane = m_warp_size - 1;
-          result.is_exact = true;
+          result.is_exact = mustReachInstruction(m_kernel, inst);
+          result.certainty = result.is_exact
+                                 ? ParticipantCertainty::Exact
+                                 : ParticipantCertainty::Conditional;
           return result;
         }
       }
     }
     result.scopes.push_back(static_cast<int>(ParticipationScope::Grid));
     result.is_exact = false;
+    result.certainty = ParticipantCertainty::Conditional;
     return result;
   }
 
@@ -111,6 +153,9 @@ CUDAParticipantSet CUDAParticipantAnalysis::getActiveParticipants(
   if (result.scopes.size() == 1 &&
       result.scopes[0] != static_cast<int>(ParticipationScope::Grid)) {
     result.is_exact = true;
+    result.certainty = ParticipantCertainty::Exact;
+  } else {
+    result.certainty = ParticipantCertainty::Conditional;
   }
 
   return result;

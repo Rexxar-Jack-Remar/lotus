@@ -71,22 +71,63 @@ CUDAAbstractStateBuilder::CUDAAbstractStateBuilder(
 CUDAAbstractState CUDAAbstractStateBuilder::build() const {
   CUDAAbstractState state;
 
-  for (const auto &pair : m_kernel_facts.kernel_fact_by_class) {
+  auto merge = [&](const CUDAAbstractState &source) {
+    state.kernel_fact_by_class.insert(source.kernel_fact_by_class.begin(),
+                                      source.kernel_fact_by_class.end());
+    state.transfer_fact_by_class.insert(source.transfer_fact_by_class.begin(),
+                                        source.transfer_fact_by_class.end());
+    state.synchronization_fact_by_class.insert(
+        source.synchronization_fact_by_class.begin(),
+        source.synchronization_fact_by_class.end());
+    state.access_fact_by_class.insert(source.access_fact_by_class.begin(),
+                                      source.access_fact_by_class.end());
+    state.model_gap_by_class.insert(source.model_gap_by_class.begin(),
+                                    source.model_gap_by_class.end());
+    state.stream_automaton_by_class.insert(
+        source.stream_automaton_by_class.begin(),
+        source.stream_automaton_by_class.end());
+    state.event_automaton_by_class.insert(
+        source.event_automaton_by_class.begin(),
+        source.event_automaton_by_class.end());
+    state.protocol_epoch_by_class.insert(
+        source.protocol_epoch_by_class.begin(),
+        source.protocol_epoch_by_class.end());
+    state.function_summaries.insert(source.function_summaries.begin(),
+                                    source.function_summaries.end());
+    state.barrier_epochs.insert(state.barrier_epochs.end(),
+                                source.barrier_epochs.begin(),
+                                source.barrier_epochs.end());
+    state.fence_epochs.insert(state.fence_epochs.end(),
+                              source.fence_epochs.begin(),
+                              source.fence_epochs.end());
+    state.participant_sets.insert(state.participant_sets.end(),
+                                  source.participant_sets.begin(),
+                                  source.participant_sets.end());
+  };
+  merge(m_kernel_facts);
+  merge(m_transfer_facts);
+  merge(m_sync_facts);
+  merge(m_access_facts);
+
+  for (const auto &pair : state.kernel_fact_by_class) {
     state.kernel_facts.push_back(pair.second);
   }
-  for (const auto &pair : m_transfer_facts.transfer_fact_by_class) {
+  for (const auto &pair : state.transfer_fact_by_class) {
     state.memory_transfer_facts.push_back(pair.second);
   }
-  for (const auto &pair : m_sync_facts.synchronization_fact_by_class) {
+  for (const auto &pair : state.synchronization_fact_by_class) {
     state.synchronization_facts.push_back(pair.second);
   }
-  for (const auto &pair : m_access_facts.access_fact_by_class) {
+  for (const auto &pair : state.access_fact_by_class) {
     state.access_facts.push_back(pair.second);
   }
-  for (const auto &pair : m_kernel_facts.stream_automaton_by_class) {
+  for (const auto &pair : state.model_gap_by_class) {
+    state.model_gaps.push_back(pair.second);
+  }
+  for (const auto &pair : state.stream_automaton_by_class) {
     state.stream_automata.push_back(pair.second);
   }
-  for (const auto &pair : m_kernel_facts.event_automaton_by_class) {
+  for (const auto &pair : state.event_automaton_by_class) {
     state.event_automata.push_back(pair.second);
   }
 

@@ -44,7 +44,7 @@ TEST_F(CUDAAnalysisTest, DoesNotUseReachabilityOnlyForBarrierOrdering) {
   analysis.runAnalysis();
 
   const auto &summary = analysis.getKernelSummaries().front();
-  EXPECT_TRUE(summary.has_shared_race);
+  EXPECT_FALSE(summary.has_shared_race);
 }
 TEST_F(CUDAAnalysisTest, SuppressesOrderedInterKernelRaceAfterDeviceSync) {
   const char *source = R"(
@@ -146,7 +146,7 @@ TEST_F(CUDAAnalysisTest,
   EXPECT_TRUE(analysis.getInterKernelRaces().empty());
 }
 TEST_F(CUDAAnalysisTest,
-       AvoidsClaimingOrderedAfterForUnknownStreamEventSynchronization) {
+       UnrecordedEventSyncDoesNotOverrideDefaultStreamProgramOrder) {
   const char *source = R"(
     @global_arr = addrspace(1) global [64 x i32] zeroinitializer
 
@@ -190,16 +190,11 @@ TEST_F(CUDAAnalysisTest,
   analysis.runAnalysis();
 
   ASSERT_EQ(analysis.getLaunches().size(), 2u);
-  EXPECT_FALSE(analysis.getLaunches()[1].ordered_after_previous);
+  EXPECT_TRUE(analysis.getLaunches()[1].ordered_after_previous);
   EXPECT_EQ(analysis.getLaunches()[1].ordering_source,
-            concurrency::cuda::LaunchOrderingSource::None);
+            concurrency::cuda::LaunchOrderingSource::ProgramOrder);
 
-  ASSERT_EQ(analysis.getInterKernelRaces().size(), 1u);
-  const auto &race = analysis.getInterKernelRaces().front();
-  EXPECT_EQ(race.first_kernel->getName(), "kernel_producer");
-  EXPECT_EQ(race.second_kernel->getName(), "kernel_consumer");
-  EXPECT_FALSE(race.ordered);
-  EXPECT_FALSE(race.stream_known);
+  EXPECT_TRUE(analysis.getInterKernelRaces().empty());
 }
 TEST_F(CUDAAnalysisTest,
        SuppressesInterKernelHazardAfterRecordedEventSynchronization) {
@@ -258,7 +253,7 @@ TEST_F(CUDAAnalysisTest,
   EXPECT_TRUE(analysis.getInterKernelRaces().empty());
 }
 TEST_F(CUDAAnalysisTest,
-       AvoidsClaimingOrderedAfterForUnknownStreamMemcpyPrefetchSequence) {
+       OrdersDefaultStreamMemcpyPrefetchAndFollowingLaunch) {
   const char *source = R"(
     @global_arr = addrspace(1) global [64 x i32] zeroinitializer
 
@@ -307,9 +302,9 @@ TEST_F(CUDAAnalysisTest,
   analysis.runAnalysis();
 
   ASSERT_EQ(analysis.getLaunches().size(), 2u);
-  EXPECT_FALSE(analysis.getLaunches()[1].ordered_after_previous);
+  EXPECT_TRUE(analysis.getLaunches()[1].ordered_after_previous);
   EXPECT_EQ(analysis.getLaunches()[1].ordering_source,
-            concurrency::cuda::LaunchOrderingSource::None);
+            concurrency::cuda::LaunchOrderingSource::ProgramOrder);
 
   ASSERT_EQ(analysis.getMemoryTransfers().size(), 1u);
   EXPECT_TRUE(analysis.getMemoryTransfers().front().is_async);
@@ -319,11 +314,10 @@ TEST_F(CUDAAnalysisTest,
   EXPECT_TRUE(analysis.getUnifiedMemory().front().is_prefetch);
   EXPECT_EQ(analysis.getUnifiedMemory().front().size, 64u);
 
-  ASSERT_EQ(analysis.getInterKernelRaces().size(), 1u);
-  EXPECT_FALSE(analysis.getInterKernelRaces().front().ordered);
+  EXPECT_TRUE(analysis.getInterKernelRaces().empty());
 }
 TEST_F(CUDAAnalysisTest,
-       AvoidsClaimingOrderedAfterForUnknownLaunchAfterStreamWaitEvent) {
+       DefaultStreamProgramOrderRemainsAfterUnrelatedEventWait) {
   const char *source = R"(
     @global_arr = addrspace(1) global [64 x i32] zeroinitializer
     %stream_t = type opaque
@@ -374,21 +368,18 @@ TEST_F(CUDAAnalysisTest,
   analysis.runAnalysis();
 
   ASSERT_EQ(analysis.getLaunches().size(), 2u);
-  EXPECT_FALSE(analysis.getLaunches()[1].ordered_after_previous);
+  EXPECT_TRUE(analysis.getLaunches()[1].ordered_after_previous);
   EXPECT_EQ(analysis.getLaunches()[1].ordering_source,
-            concurrency::cuda::LaunchOrderingSource::None);
+            concurrency::cuda::LaunchOrderingSource::ProgramOrder);
 
-  ASSERT_EQ(analysis.getInterKernelRaces().size(), 1u);
-  const auto &race = analysis.getInterKernelRaces().front();
-  EXPECT_FALSE(race.ordered);
-  EXPECT_FALSE(race.stream_known);
+  EXPECT_TRUE(analysis.getInterKernelRaces().empty());
 }
-TEST_F(CUDAAnalysisTest,
-       AvoidsClaimingOrderedAfterForExplicitDefaultStreamLaunches) {
+TEST_F(CUDAAnalysisTest, OrdersLaunchesOnLegacyDefaultStream) {
   const char *source = R"(
     @global_arr = addrspace(1) global [64 x i32] zeroinitializer
+    %dim3 = type { i32, i32, i32 }
 
-    declare i32 @cudaLaunchKernel(i8*, i32, i32, i32, i32, i64, i8*)
+    declare i32 @cudaLaunchKernel(i8*, %dim3, %dim3, i8**, i64, i8*)
     declare i32 @llvm.nvvm.read.ptx.sreg.tid.x()
 
     define void @kernel_producer() {
@@ -411,11 +402,15 @@ TEST_F(CUDAAnalysisTest,
 
     define i32 @main() {
     entry:
-      %launch0 = call i32 @cudaLaunchKernel(i8* bitcast (void ()* @kernel_producer to i8*), i32 1, i32 1, i32 32,
-                                            i32 1, i64 0, i8* null)
+      %launch0 = call i32 @cudaLaunchKernel(
+          i8* bitcast (void ()* @kernel_producer to i8*),
+          %dim3 { i32 1, i32 1, i32 1 },
+          %dim3 { i32 32, i32 1, i32 1 }, i8** null, i64 0, i8* null)
       call void @kernel_producer()
-      %launch1 = call i32 @cudaLaunchKernel(i8* bitcast (void ()* @kernel_consumer to i8*), i32 1, i32 1, i32 32,
-                                            i32 1, i64 0, i8* null)
+      %launch1 = call i32 @cudaLaunchKernel(
+          i8* bitcast (void ()* @kernel_consumer to i8*),
+          %dim3 { i32 1, i32 1, i32 1 },
+          %dim3 { i32 32, i32 1, i32 1 }, i8** null, i64 0, i8* null)
       call void @kernel_consumer()
       %sum = add i32 %launch0, %launch1
       ret i32 %sum
@@ -433,20 +428,21 @@ TEST_F(CUDAAnalysisTest,
   EXPECT_TRUE(analysis.getLaunches()[1].stream_known);
   EXPECT_EQ(analysis.getLaunches()[0].stream,
             analysis.getLaunches()[1].stream);
-  EXPECT_FALSE(analysis.getLaunches()[1].ordered_after_previous);
+  EXPECT_EQ(analysis.getLaunches()[0].stream_kind,
+            concurrency::cuda::HostStreamKind::LegacyDefault);
+  EXPECT_TRUE(analysis.getLaunches()[1].ordered_after_previous);
   EXPECT_EQ(analysis.getLaunches()[1].ordering_source,
-            concurrency::cuda::LaunchOrderingSource::None);
+            concurrency::cuda::LaunchOrderingSource::ProgramOrder);
 
-  ASSERT_EQ(analysis.getInterKernelRaces().size(), 1u);
-  const auto &race = analysis.getInterKernelRaces().front();
-  EXPECT_FALSE(race.ordered);
-  EXPECT_TRUE(race.stream_known);
+  EXPECT_TRUE(analysis.getInterKernelRaces().empty());
 }
 TEST_F(CUDAAnalysisTest, DetectsNonAdjacentUnorderedInterKernelHazard) {
   const char *source = R"(
     @global_arr = addrspace(1) global [64 x i32] zeroinitializer
+    %stream_t = type opaque
 
-    declare void @__set_CUDAConfig(i32, i32)
+    declare i64 @cudaLaunchKernel(i8*, i64, i64, i64, i64, i64,
+                                  i8**, i64, %stream_t*)
     declare i32 @llvm.nvvm.read.ptx.sreg.tid.x()
 
     define void @kernel_a() {
@@ -472,11 +468,20 @@ TEST_F(CUDAAnalysisTest, DetectsNonAdjacentUnorderedInterKernelHazard) {
 
     define void @main() {
     entry:
-      call void @__set_CUDAConfig(i32 1, i32 32)
+      %s1 = inttoptr i64 10 to %stream_t*
+      %s2 = inttoptr i64 20 to %stream_t*
+      %s3 = inttoptr i64 30 to %stream_t*
+      %l0 = call i64 @cudaLaunchKernel(
+          i8* bitcast (void ()* @kernel_a to i8*), i64 1, i64 32,
+          i64 1, i64 1, i64 1, i8** null, i64 0, %stream_t* %s1)
       call void @kernel_a()
-      call void @__set_CUDAConfig(i32 1, i32 32)
+      %l1 = call i64 @cudaLaunchKernel(
+          i8* bitcast (void ()* @kernel_mid to i8*), i64 1, i64 32,
+          i64 1, i64 1, i64 1, i8** null, i64 0, %stream_t* %s2)
       call void @kernel_mid()
-      call void @__set_CUDAConfig(i32 1, i32 32)
+      %l2 = call i64 @cudaLaunchKernel(
+          i8* bitcast (void ()* @kernel_b to i8*), i64 1, i64 32,
+          i64 1, i64 1, i64 1, i8** null, i64 0, %stream_t* %s3)
       call void @kernel_b()
       ret void
     }
@@ -779,7 +784,7 @@ TEST_F(CUDAAnalysisTest, ExtractsAffinePatternThroughCastsShiftsAndDivides) {
     entry:
       %tid = call i32 @llvm.nvvm.read.ptx.sreg.tid.x()
       %wide = zext i32 %tid to i64
-      %shift = shl i64 %wide, 2
+      %shift = shl nuw i64 %wide, 2
       %half = lshr i64 %shift, 1
       %idx = udiv i64 %half, 2
       %ptr = getelementptr [256 x i32], [256 x i32] addrspace(1)* @global_arr, i64 0, i64 %idx
@@ -819,7 +824,7 @@ TEST_F(CUDAAnalysisTest, CanonicalizesMultidimensionalAffinePattern) {
     entry:
       %tx = call i32 @llvm.nvvm.read.ptx.sreg.tid.x()
       %ty = call i32 @llvm.nvvm.read.ptx.sreg.tid.y()
-      %row = shl i32 %ty, 5
+      %row = shl nuw i32 %ty, 5
       %idx = add i32 %row, %tx
       %ptr = getelementptr [1024 x i32], [1024 x i32] addrspace(1)* @global_arr, i32 0, i32 %idx
       store i32 %idx, i32 addrspace(1)* %ptr

@@ -90,7 +90,7 @@ TEST_F(CUDAAnalysisTest, ReportsAccurateBankConflictWithActiveLanes) {
     EXPECT_LE(summary.bank_conflicts.front().conflict_degree, 16u);
   }
 }
-TEST_F(CUDAAnalysisTest, DoesNotOrderUnknownStreamLaunchAfterUnknownStreamSync) {
+TEST_F(CUDAAnalysisTest, UnknownStreamSyncDoesNotOrderFollowingDefaultLaunch) {
   const char *source = R"(
     %stream_t = type opaque
 
@@ -122,7 +122,9 @@ TEST_F(CUDAAnalysisTest, DoesNotOrderUnknownStreamLaunchAfterUnknownStreamSync) 
 
   ASSERT_EQ(analysis.getLaunches().size(), 1u);
   const auto &launch = analysis.getLaunches().front();
-  EXPECT_FALSE(launch.stream_known);
+  EXPECT_TRUE(launch.stream_known);
+  EXPECT_EQ(launch.stream_kind,
+            concurrency::cuda::HostStreamKind::LegacyDefault);
   EXPECT_FALSE(launch.ordered_after_previous);
   EXPECT_FALSE(launch.host_happens_before);
   EXPECT_EQ(launch.ordering_source, concurrency::cuda::LaunchOrderingSource::None);
@@ -694,4 +696,390 @@ TEST_F(CUDAAnalysisTest, DoesNotConfuseConstantMemoryWithManaged) {
     }
   }
   EXPECT_GE(managed_count, 1u) << "Should have at least one managed allocation";
+}
+
+TEST_F(CUDAAnalysisTest, DecodesCurrentCudaLaunchKernelABI) {
+  const char *source = R"(
+    %dim3 = type { i32, i32, i32 }
+    %stream_t = type opaque
+    declare i32 @cudaLaunchKernel(i8*, %dim3, %dim3, i8**, i64, %stream_t*)
+    define void @kernel() { entry: ret void }
+    define i32 @main() {
+    entry:
+      %stream = inttoptr i64 10 to %stream_t*
+      %launch = call i32 @cudaLaunchKernel(
+          i8* bitcast (void ()* @kernel to i8*),
+          %dim3 { i32 8, i32 4, i32 1 },
+          %dim3 { i32 32, i32 2, i32 1 }, i8** null, i64 96,
+          %stream_t* %stream)
+      ret i32 %launch
+    }
+  )";
+  auto module = parseModule(source);
+  ASSERT_NE(module, nullptr);
+  concurrency::cuda::CUDAAnalysis analysis(*module);
+  analysis.runAnalysis();
+  ASSERT_EQ(analysis.getLaunches().size(), 1u);
+  const auto &launch = analysis.getLaunches().front();
+  EXPECT_EQ(launch.dimensions.grid[0].constant, 8u);
+  EXPECT_EQ(launch.dimensions.grid[1].constant, 4u);
+  EXPECT_EQ(launch.dimensions.grid[2].constant, 1u);
+  EXPECT_EQ(launch.dimensions.block[0].constant, 32u);
+  EXPECT_EQ(launch.dimensions.block[1].constant, 2u);
+  EXPECT_EQ(launch.dimensions.block[2].constant, 1u);
+  EXPECT_EQ(launch.dynamic_shared_memory_size.constant, 96u);
+  EXPECT_NE(launch.argument_array, nullptr);
+  EXPECT_TRUE(launch.stream_known);
+}
+
+TEST_F(CUDAAnalysisTest, IncludesOrdinaryDeviceCalleeAccesses) {
+  const char *source = R"(
+    @global_arr = addrspace(1) global [64 x i32] zeroinitializer
+    declare void @__set_CUDAConfig(i32, i32)
+    declare i32 @llvm.nvvm.read.ptx.sreg.tid.x()
+    define void @device_write() {
+    entry:
+      %tid = call i32 @llvm.nvvm.read.ptx.sreg.tid.x()
+      %ptr = getelementptr [64 x i32], [64 x i32] addrspace(1)* @global_arr,
+                           i32 0, i32 %tid
+      store i32 %tid, i32 addrspace(1)* %ptr
+      ret void
+    }
+    define void @kernel() { entry: call void @device_write() ret void }
+    define void @main() {
+    entry:
+      call void @__set_CUDAConfig(i32 1, i32 32)
+      call void @kernel()
+      ret void
+    }
+  )";
+  auto module = parseModule(source);
+  ASSERT_NE(module, nullptr);
+  concurrency::cuda::CUDAAnalysis analysis(*module);
+  analysis.runAnalysis();
+  ASSERT_EQ(analysis.getKernelSummaries().size(), 1u);
+  const auto &summary = analysis.getKernelSummaries().front();
+  ASSERT_EQ(summary.accesses.size(), 1u);
+  EXPECT_TRUE(summary.accesses.front().is_write);
+  EXPECT_EQ(summary.accesses.front().space,
+            concurrency::cuda::MemorySpace::Global);
+}
+
+TEST_F(CUDAAnalysisTest, DetectsSelfInstanceRaceAcrossBlocks) {
+  const char *source = R"(
+    @global_arr = addrspace(1) global [64 x i32] zeroinitializer
+    declare void @__set_CUDAConfig(i32, i32)
+    declare i32 @llvm.nvvm.read.ptx.sreg.tid.x()
+    define void @kernel() {
+    entry:
+      %tid = call i32 @llvm.nvvm.read.ptx.sreg.tid.x()
+      %ptr = getelementptr [64 x i32], [64 x i32] addrspace(1)* @global_arr,
+                           i32 0, i32 %tid
+      store i32 %tid, i32 addrspace(1)* %ptr
+      ret void
+    }
+    define void @main() {
+    entry:
+      call void @__set_CUDAConfig(i32 2, i32 32)
+      call void @kernel()
+      ret void
+    }
+  )";
+  auto module = parseModule(source);
+  ASSERT_NE(module, nullptr);
+  concurrency::cuda::CUDAAnalysis analysis(*module);
+  analysis.runAnalysis();
+  const auto &summary = analysis.getKernelSummaries().front();
+  ASSERT_TRUE(summary.has_global_race);
+  ASSERT_FALSE(summary.global_races.empty());
+  EXPECT_EQ(summary.global_races.front().first,
+            summary.global_races.front().second);
+  EXPECT_TRUE(summary.global_races.front().cross_block);
+}
+
+TEST_F(CUDAAnalysisTest, RejectsTruncatedThreadIndexAsAffine) {
+  const char *source = R"(
+    @global_arr = addrspace(1) global [256 x i32] zeroinitializer
+    declare void @__set_CUDAConfig(i32, i32)
+    declare i32 @llvm.nvvm.read.ptx.sreg.tid.x()
+    define void @kernel() {
+    entry:
+      %tid = call i32 @llvm.nvvm.read.ptx.sreg.tid.x()
+      %narrow = trunc i32 %tid to i8
+      %idx = zext i8 %narrow to i32
+      %ptr = getelementptr [256 x i32], [256 x i32] addrspace(1)* @global_arr,
+                           i32 0, i32 %idx
+      store i32 %tid, i32 addrspace(1)* %ptr
+      ret void
+    }
+    define void @main() {
+    entry:
+      call void @__set_CUDAConfig(i32 1, i32 512)
+      call void @kernel()
+      ret void
+    }
+  )";
+  auto module = parseModule(source);
+  ASSERT_NE(module, nullptr);
+  concurrency::cuda::CUDAAnalysis analysis(*module);
+  analysis.runAnalysis();
+  const auto &access = analysis.getKernelSummaries().front().accesses.front();
+  EXPECT_FALSE(access.address_pattern.valid);
+  EXPECT_EQ(access.alias_precision,
+            concurrency::cuda::AliasPrecision::NonAffine);
+}
+
+TEST_F(CUDAAnalysisTest, ConditionalDeviceSyncDoesNotSuppressKernelHazard) {
+  const char *source = R"(
+    @global_arr = addrspace(1) global [64 x i32] zeroinitializer
+    %stream_t = type opaque
+    declare i64 @cudaLaunchKernel(i8*, i64, i64, i64, i64, i64,
+                                  i8**, i64, %stream_t*)
+    declare i32 @cudaDeviceSynchronize()
+    declare i32 @llvm.nvvm.read.ptx.sreg.tid.x()
+    define void @writer() {
+    entry:
+      %tid = call i32 @llvm.nvvm.read.ptx.sreg.tid.x()
+      %ptr = getelementptr [64 x i32], [64 x i32] addrspace(1)* @global_arr,
+                           i32 0, i32 %tid
+      store i32 %tid, i32 addrspace(1)* %ptr
+      ret void
+    }
+    define void @reader() {
+    entry:
+      %tid = call i32 @llvm.nvvm.read.ptx.sreg.tid.x()
+      %ptr = getelementptr [64 x i32], [64 x i32] addrspace(1)* @global_arr,
+                           i32 0, i32 %tid
+      %value = load i32, i32 addrspace(1)* %ptr
+      ret void
+    }
+    define void @main(i1 %condition) {
+    entry:
+      %s1 = inttoptr i64 10 to %stream_t*
+      %s2 = inttoptr i64 20 to %stream_t*
+      %l0 = call i64 @cudaLaunchKernel(
+          i8* bitcast (void ()* @writer to i8*), i64 1, i64 32,
+          i64 1, i64 1, i64 1, i8** null, i64 0, %stream_t* %s1)
+      br i1 %condition, label %sync, label %join
+    sync:
+      %status = call i32 @cudaDeviceSynchronize()
+      br label %join
+    join:
+      %l1 = call i64 @cudaLaunchKernel(
+          i8* bitcast (void ()* @reader to i8*), i64 1, i64 32,
+          i64 1, i64 1, i64 1, i8** null, i64 0, %stream_t* %s2)
+      ret void
+    }
+  )";
+  auto module = parseModule(source);
+  ASSERT_NE(module, nullptr);
+  concurrency::cuda::CUDAAnalysis analysis(*module);
+  analysis.runAnalysis();
+  ASSERT_EQ(analysis.getLaunches().size(), 2u);
+  EXPECT_FALSE(analysis.getLaunches()[1].ordered_after_previous);
+  ASSERT_EQ(analysis.getInterKernelRaces().size(), 1u);
+  EXPECT_FALSE(analysis.getInterKernelRaces().front().ordered);
+}
+
+TEST_F(CUDAAnalysisTest, DoesNotReportConcurrentReadReadAsHazard) {
+  const char *source = R"(
+    @global_arr = addrspace(1) global [64 x i32] zeroinitializer
+    %stream_t = type opaque
+    declare i64 @cudaLaunchKernel(i8*, i64, i64, i64, i64, i64,
+                                  i8**, i64, %stream_t*)
+    declare i32 @llvm.nvvm.read.ptx.sreg.tid.x()
+    define void @reader_a() {
+    entry:
+      %tid = call i32 @llvm.nvvm.read.ptx.sreg.tid.x()
+      %ptr = getelementptr [64 x i32], [64 x i32] addrspace(1)* @global_arr,
+                           i32 0, i32 %tid
+      %value = load i32, i32 addrspace(1)* %ptr
+      ret void
+    }
+    define void @reader_b() {
+    entry:
+      %tid = call i32 @llvm.nvvm.read.ptx.sreg.tid.x()
+      %ptr = getelementptr [64 x i32], [64 x i32] addrspace(1)* @global_arr,
+                           i32 0, i32 %tid
+      %value = load i32, i32 addrspace(1)* %ptr
+      ret void
+    }
+    define void @main() {
+    entry:
+      %s1 = inttoptr i64 10 to %stream_t*
+      %s2 = inttoptr i64 20 to %stream_t*
+      %l0 = call i64 @cudaLaunchKernel(
+          i8* bitcast (void ()* @reader_a to i8*), i64 1, i64 32,
+          i64 1, i64 1, i64 1, i8** null, i64 0, %stream_t* %s1)
+      %l1 = call i64 @cudaLaunchKernel(
+          i8* bitcast (void ()* @reader_b to i8*), i64 1, i64 32,
+          i64 1, i64 1, i64 1, i8** null, i64 0, %stream_t* %s2)
+      ret void
+    }
+  )";
+  auto module = parseModule(source);
+  ASSERT_NE(module, nullptr);
+  concurrency::cuda::CUDAAnalysis analysis(*module);
+  analysis.runAnalysis();
+  EXPECT_TRUE(analysis.getInterKernelRaces().empty());
+}
+
+TEST_F(CUDAAnalysisTest, ConnectsCreatedStreamHandleLifecycle) {
+  const char *source = R"(
+    %stream_t = type opaque
+    declare i32 @cudaStreamCreate(%stream_t**)
+    declare i32 @cudaMemcpyAsync(i8*, i8*, i64, i32, %stream_t*)
+    declare i32 @cudaStreamSynchronize(%stream_t*)
+    declare i32 @cudaStreamDestroy(%stream_t*)
+    define i32 @main(i8* %dst, i8* %src) {
+    entry:
+      %slot = alloca %stream_t*
+      %create = call i32 @cudaStreamCreate(%stream_t** %slot)
+      %stream = load %stream_t*, %stream_t** %slot
+      %copy = call i32 @cudaMemcpyAsync(i8* %dst, i8* %src, i64 64,
+                                        i32 1, %stream_t* %stream)
+      %sync = call i32 @cudaStreamSynchronize(%stream_t* %stream)
+      %destroy = call i32 @cudaStreamDestroy(%stream_t* %stream)
+      ret i32 %destroy
+    }
+  )";
+  auto module = parseModule(source);
+  ASSERT_NE(module, nullptr);
+  concurrency::cuda::CUDAAnalysis analysis(*module);
+  analysis.runAnalysis();
+  const auto &automata = analysis.getAbstractState().stream_automata;
+  ASSERT_EQ(automata.size(), 1u);
+  EXPECT_EQ(automata.front().current_state,
+            concurrency::cuda::StreamState::Destroyed);
+  ASSERT_EQ(automata.front().transitions.size(), 4u);
+  EXPECT_EQ(automata.front().transitions[0].to_state,
+            concurrency::cuda::StreamState::Created);
+  EXPECT_EQ(automata.front().transitions[1].to_state,
+            concurrency::cuda::StreamState::Active);
+  EXPECT_EQ(automata.front().transitions[2].to_state,
+            concurrency::cuda::StreamState::Synchronized);
+  EXPECT_FALSE(automata.front().transitions[3].is_ordering_boundary);
+}
+
+TEST_F(CUDAAnalysisTest, AsyncCopyDoesNotRerecordExistingEvent) {
+  const char *source = R"(
+    %stream_t = type opaque
+    %event_t = type opaque
+    declare i32 @cudaEventRecord(%event_t*, %stream_t*)
+    declare i32 @cudaMemcpyAsync(i8*, i8*, i64, i32, %stream_t*)
+    define i32 @main(%event_t* %event, %stream_t* %record_stream,
+                     %stream_t* %copy_stream, i8* %dst, i8* %src) {
+    entry:
+      %record = call i32 @cudaEventRecord(%event_t* %event,
+                                          %stream_t* %record_stream)
+      %copy = call i32 @cudaMemcpyAsync(i8* %dst, i8* %src, i64 64,
+                                        i32 1, %stream_t* %copy_stream)
+      ret i32 %copy
+    }
+  )";
+  auto module = parseModule(source);
+  ASSERT_NE(module, nullptr);
+  concurrency::cuda::CUDAAnalysis analysis(*module);
+  analysis.runAnalysis();
+  const auto &events = analysis.getAbstractState().event_automata;
+  ASSERT_EQ(events.size(), 1u);
+  EXPECT_TRUE(events.front().has_record);
+  EXPECT_EQ(events.front().recorded_stream,
+            module->getFunction("main")->getArg(1));
+  ASSERT_EQ(events.front().transitions.size(), 1u);
+  EXPECT_EQ(events.front().current_state,
+            concurrency::cuda::EventState::Recorded);
+}
+
+TEST_F(CUDAAnalysisTest, InstantiatesKernelArgumentsPerLaunch) {
+  const char *source = R"(
+    %dim3 = type { i32, i32, i32 }
+    %stream_t = type opaque
+    @buffer_a = addrspace(1) global [32 x i32] zeroinitializer
+    @buffer_b = addrspace(1) global [32 x i32] zeroinitializer
+    @arg_a = global i32 addrspace(1)* getelementptr (
+        [32 x i32], [32 x i32] addrspace(1)* @buffer_a, i32 0, i32 0)
+    @arg_b = global i32 addrspace(1)* getelementptr (
+        [32 x i32], [32 x i32] addrspace(1)* @buffer_b, i32 0, i32 0)
+    @args_a = global [1 x i8*] [i8* bitcast (i32 addrspace(1)** @arg_a to i8*)]
+    @args_b = global [1 x i8*] [i8* bitcast (i32 addrspace(1)** @arg_b to i8*)]
+    declare i32 @cudaLaunchKernel(i8*, %dim3, %dim3, i8**, i64, %stream_t*)
+    declare i32 @llvm.nvvm.read.ptx.sreg.tid.x()
+    define void @kernel(i32 addrspace(1)* %buffer) {
+    entry:
+      %tid = call i32 @llvm.nvvm.read.ptx.sreg.tid.x()
+      %ptr = getelementptr i32, i32 addrspace(1)* %buffer, i32 %tid
+      store i32 %tid, i32 addrspace(1)* %ptr
+      ret void
+    }
+    define void @main() {
+    entry:
+      %s1 = inttoptr i64 10 to %stream_t*
+      %s2 = inttoptr i64 20 to %stream_t*
+      %l0 = call i32 @cudaLaunchKernel(
+          i8* bitcast (void (i32 addrspace(1)*)* @kernel to i8*),
+          %dim3 { i32 1, i32 1, i32 1 },
+          %dim3 { i32 32, i32 1, i32 1 },
+          i8** getelementptr ([1 x i8*], [1 x i8*]* @args_a, i32 0, i32 0),
+          i64 0, %stream_t* %s1)
+      %l1 = call i32 @cudaLaunchKernel(
+          i8* bitcast (void (i32 addrspace(1)*)* @kernel to i8*),
+          %dim3 { i32 1, i32 1, i32 1 },
+          %dim3 { i32 32, i32 1, i32 1 },
+          i8** getelementptr ([1 x i8*], [1 x i8*]* @args_b, i32 0, i32 0),
+          i64 0, %stream_t* %s2)
+      ret void
+    }
+  )";
+  auto module = parseModule(source);
+  ASSERT_NE(module, nullptr);
+  concurrency::cuda::CUDAAnalysis analysis(*module);
+  analysis.runAnalysis();
+  ASSERT_EQ(analysis.getLaunches().size(), 2u);
+  EXPECT_TRUE(analysis.getInterKernelRaces().empty());
+}
+
+TEST_F(CUDAAnalysisTest, DetectsSameInstantiatedKernelArgumentHazard) {
+  const char *source = R"(
+    %dim3 = type { i32, i32, i32 }
+    %stream_t = type opaque
+    @buffer = addrspace(1) global [32 x i32] zeroinitializer
+    @arg = global i32 addrspace(1)* getelementptr (
+        [32 x i32], [32 x i32] addrspace(1)* @buffer, i32 0, i32 0)
+    @args = global [1 x i8*] [i8* bitcast (i32 addrspace(1)** @arg to i8*)]
+    declare i32 @cudaLaunchKernel(i8*, %dim3, %dim3, i8**, i64, %stream_t*)
+    declare i32 @llvm.nvvm.read.ptx.sreg.tid.x()
+    define void @kernel(i32 addrspace(1)* %buffer_arg) {
+    entry:
+      %tid = call i32 @llvm.nvvm.read.ptx.sreg.tid.x()
+      %ptr = getelementptr i32, i32 addrspace(1)* %buffer_arg, i32 %tid
+      store i32 %tid, i32 addrspace(1)* %ptr
+      ret void
+    }
+    define void @main() {
+    entry:
+      %s1 = inttoptr i64 10 to %stream_t*
+      %s2 = inttoptr i64 20 to %stream_t*
+      %l0 = call i32 @cudaLaunchKernel(
+          i8* bitcast (void (i32 addrspace(1)*)* @kernel to i8*),
+          %dim3 { i32 1, i32 1, i32 1 },
+          %dim3 { i32 32, i32 1, i32 1 },
+          i8** getelementptr ([1 x i8*], [1 x i8*]* @args, i32 0, i32 0),
+          i64 0, %stream_t* %s1)
+      %l1 = call i32 @cudaLaunchKernel(
+          i8* bitcast (void (i32 addrspace(1)*)* @kernel to i8*),
+          %dim3 { i32 1, i32 1, i32 1 },
+          %dim3 { i32 32, i32 1, i32 1 },
+          i8** getelementptr ([1 x i8*], [1 x i8*]* @args, i32 0, i32 0),
+          i64 0, %stream_t* %s2)
+      ret void
+    }
+  )";
+  auto module = parseModule(source);
+  ASSERT_NE(module, nullptr);
+  concurrency::cuda::CUDAAnalysis analysis(*module);
+  analysis.runAnalysis();
+  ASSERT_EQ(analysis.getLaunches().size(), 2u);
+  ASSERT_FALSE(analysis.getInterKernelRaces().empty());
+  EXPECT_FALSE(analysis.getInterKernelRaces().front().ordered);
 }
