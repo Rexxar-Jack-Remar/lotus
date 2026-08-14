@@ -2079,19 +2079,6 @@ void MPIProcessModel::analyzeModule() {
         }
         all_operations_.push_back(send_op);
         ++operation_kind_counts_[send_op.kind];
-        if (communicator_identity_ambiguous) {
-          MPIModelGap gap;
-          gap.domain = MPIModelGapDomain::Communicator;
-          gap.inst = send_op.inst;
-          gap.relation.kind = concurrency::RelationKind::UnknownDueToModelGap;
-          gap.relation.proof = concurrency::ProofStrength::Unknown;
-          gap.relation.reason = "mpi_communicator_identity_ambiguous";
-          gap.code = gap.relation.reason;
-          gap.detail =
-              send_op.function ? send_op.function->getName().str() : "";
-          model_gaps_.push_back(gap);
-        }
-
         MPIOperation recv_op(I, MPIOpKind::RECV_BLOCKING, type);
         recv_op.normalization_confidence = effect.confidence;
         recv_op.send_mode = effect.send_mode;
@@ -4443,9 +4430,11 @@ MPIProcessModel::findCancelWithoutWait() const {
 std::vector<std::pair<const Instruction *, const Instruction *>>
 MPIProcessModel::findBufferOverlaps() const {
   std::vector<std::pair<const Instruction *, const Instruction *>> overlaps;
+  std::set<const Instruction *> seen_calls;
 
   for (const MPIOperation &op : all_operations_) {
-    if (op.td_type != ThreadAPI::TD_MPI_SENDRECV) {
+    if (op.td_type != ThreadAPI::TD_MPI_SENDRECV ||
+        !seen_calls.insert(op.inst).second) {
       continue;
     }
 

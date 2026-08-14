@@ -490,7 +490,7 @@ bool JoinTargetAnalysis::applyCallEffect(const Instruction &inst,
     return changed;
   }
 
-  if (callee && m_threadAPI->getType(callee) == ThreadAPI::TD_DETACH) {
+  if (m_threadAPI->getType(call) == ThreadAPI::TD_DETACH) {
     if (call->arg_size() < 1) {
       return false;
     }

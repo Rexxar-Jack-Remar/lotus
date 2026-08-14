@@ -7,6 +7,14 @@
 
 namespace lotus::concurrency {
 
+inline const llvm::GlobalValue *getCalledGlobal(const llvm::CallBase *call) {
+  if (!call)
+    return nullptr;
+  const llvm::Value *called = call->getCalledOperand();
+  called = called ? called->stripPointerCasts() : nullptr;
+  return llvm::dyn_cast_or_null<llvm::GlobalValue>(called);
+}
+
 inline const llvm::Function *resolveCallTarget(const llvm::CallBase *call) {
   if (!call)
     return nullptr;

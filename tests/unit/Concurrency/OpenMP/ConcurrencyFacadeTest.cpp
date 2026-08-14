@@ -1,11 +1,25 @@
 #include "Concurrency/ConcurrencyFacade.h"
 #include "Concurrency/CUDA/CUDAAnalysis.h"
+#include "Concurrency/MPI/MPIAnalysis.h"
+#include "Concurrency/Utils/ThreadAPI.h"
 
 #include "TestUtils/LLVMHelpers.h"
+
+#include <llvm/IR/IRBuilder.h>
 
 using namespace llvm;
 
 class ConcurrencyFacadeTest : public lotus::unittest::LlvmModuleTest {};
+
+class ThreadAPIConfigGuard {
+public:
+  ThreadAPIConfigGuard()
+      : m_config(ThreadAPI::getThreadAPI()->getConfig()) {}
+  ~ThreadAPIConfigGuard() { ThreadAPI::getThreadAPI()->setConfig(m_config); }
+
+private:
+  concurrency::ConcurrencyConfig m_config;
+};
 
 TEST_F(ConcurrencyFacadeTest, SummarizesOpenMPTaskGraph) {
   const char *source = R"(
@@ -84,6 +98,52 @@ TEST_F(ConcurrencyFacadeTest, SummarizesOpenMPTaskGraph) {
                 concurrency::ProofStrength::Unknown),
             1u);
   EXPECT_GE(summary.unknown_reason_counts["omp_taskwait_deps_partial"], 1u);
+}
+
+TEST_F(ConcurrencyFacadeTest, GenericAndDisabledOpenMPAreNotApplicable) {
+  ThreadAPIConfigGuard config_guard;
+  auto module = parseModule(R"(
+    define i32 @main(i1 %cond) {
+    entry:
+      br i1 %cond, label %left, label %right
+    left:
+      ret i32 1
+    right:
+      ret i32 0
+    }
+  )");
+  ASSERT_NE(module, nullptr);
+
+  auto generic = concurrency::ConcurrencyFacade::analyzeOpenMP(*module);
+  EXPECT_EQ(generic.status,
+            concurrency::ConcurrencyFacade::OpenMPAnalysisStatus::NotApplicable);
+  EXPECT_TRUE(generic.unknown_reason_counts.empty());
+
+  concurrency::ConcurrencyConfig config = ThreadAPI::getThreadAPI()->getConfig();
+  config.set_enable_openmp(false);
+  ThreadAPI::getThreadAPI()->setConfig(config);
+  auto disabled = concurrency::ConcurrencyFacade::analyzeOpenMP(*module);
+  EXPECT_EQ(disabled.status,
+            concurrency::ConcurrencyFacade::OpenMPAnalysisStatus::Disabled);
+  EXPECT_TRUE(disabled.unknown_reason_counts.empty());
+}
+
+TEST_F(ConcurrencyFacadeTest, RelationMergeKeepsAllReasonsAndWeakestProof) {
+  concurrency::Relation relation;
+  relation.kind = concurrency::RelationKind::UnknownDueToModelGap;
+  relation.proof = concurrency::ProofStrength::May;
+  relation.reason = "may_alias";
+  concurrency::addRelationEvidence(relation, relation.reason);
+
+  concurrency::Relation later;
+  later.kind = concurrency::RelationKind::UnknownDueToModelGap;
+  later.proof = concurrency::ProofStrength::Unknown;
+  later.reason = "partial_wait";
+  concurrency::mergeSameKindRelation(relation, later);
+
+  EXPECT_EQ(relation.proof, concurrency::ProofStrength::Unknown);
+  EXPECT_EQ(relation.reason, "partial_wait");
+  EXPECT_EQ(relation.evidence_reasons.size(), 2u);
 }
 
 TEST_F(ConcurrencyFacadeTest, PreservesOpenMPMayGapReasonAndProof) {
@@ -386,6 +446,7 @@ TEST_F(ConcurrencyFacadeTest, PreservesMPIDiagnosticAndModelGapMetadata) {
   EXPECT_EQ(summary.diagnostic_code_counts["invalid_rank"], 1u);
 
   bool saw_model_gap_relation = false;
+  bool saw_scope_metadata = false;
   for (const auto &diagnostic : summary.diagnostics) {
     if (diagnostic.has_relation &&
         diagnostic.relation.kind ==
@@ -394,8 +455,16 @@ TEST_F(ConcurrencyFacadeTest, PreservesMPIDiagnosticAndModelGapMetadata) {
         !diagnostic.model_gap_domain.empty()) {
       saw_model_gap_relation = true;
     }
+    if (diagnostic.has_relation &&
+        (diagnostic.communicator_class_id != 0 ||
+         diagnostic.participant_class_id != 0 ||
+         diagnostic.channel_class_id != 0 ||
+         diagnostic.request_set_id != 0)) {
+      saw_scope_metadata = true;
+    }
   }
   EXPECT_TRUE(saw_model_gap_relation);
+  EXPECT_TRUE(saw_scope_metadata);
 }
 
 TEST_F(ConcurrencyFacadeTest, SummarizesExtendedMPIProtocolCounters) {
@@ -443,6 +512,41 @@ TEST_F(ConcurrencyFacadeTest, SummarizesExtendedMPIProtocolCounters) {
   EXPECT_EQ(summary.request_start_count, 1u);
   EXPECT_EQ(summary.rank_restricted_operation_count, 1u);
   EXPECT_EQ(summary.wildcard_endpoint_operation_count, 1u);
+}
+
+TEST_F(ConcurrencyFacadeTest, CountsCanonicalMPIRelationsAndDeduplicatesSendrecv) {
+  const char *source = R"(
+    declare i32 @MPI_Send(i8*, i32, i32, i32, i32, i8*)
+    declare i32 @MPI_Recv(i8*, i32, i32, i32, i32, i8*, i8*)
+    declare i32 @MPI_Sendrecv(i8*, i32, i32, i32, i32,
+                              i8*, i32, i32, i32, i32, i8*, i8*)
+
+    define i32 @main(i8* %comm, i8* %buf) {
+    entry:
+      call i32 @MPI_Send(i8* null, i32 1, i32 0, i32 1, i32 7, i8* %comm)
+      call i32 @MPI_Recv(i8* null, i32 1, i32 0, i32 1, i32 7,
+                         i8* %comm, i8* null)
+      call i32 @MPI_Sendrecv(i8* %buf, i32 1, i32 0, i32 1, i32 8,
+                             i8* %buf, i32 1, i32 0, i32 2, i32 8,
+                             i8* %comm, i8* null)
+      ret i32 0
+    }
+  )";
+
+  auto module = parseModule(source);
+  ASSERT_NE(module, nullptr);
+  auto summary = concurrency::ConcurrencyFacade::analyzeMPI(*module);
+
+  EXPECT_GE(summary.getRelationCount(
+                concurrency::RelationKind::MatchedCommunication,
+                concurrency::ProofStrength::Must) +
+                summary.getRelationCount(
+                    concurrency::RelationKind::MatchedCommunication,
+                    concurrency::ProofStrength::May),
+            1u);
+  EXPECT_EQ(summary.sendrecv_operation_count, 1u);
+  EXPECT_EQ(summary.buffer_overlap_count, 1u);
+  EXPECT_EQ(summary.diagnostic_code_counts["buffer_overlap"], 1u);
 }
 
 TEST_F(ConcurrencyFacadeTest, SummarizesCUDAUnifiedMemoryAndHazards) {
@@ -528,6 +632,33 @@ TEST_F(ConcurrencyFacadeTest, CUDALegacyLaunchContributesOnce) {
   EXPECT_EQ(summary.operation_count, 1u);
 }
 
+TEST_F(ConcurrencyFacadeTest, CUDASummaryUsesRunConfigurationSnapshot) {
+  ThreadAPIConfigGuard config_guard;
+  auto module = parseModule(R"(
+    declare void @__set_CUDAConfig(i32, i32)
+    define void @kernel() { ret void }
+    define i32 @main() {
+    entry:
+      call void @__set_CUDAConfig(i32 1, i32 32)
+      call void @kernel()
+      ret i32 0
+    }
+  )");
+  ASSERT_NE(module, nullptr);
+
+  concurrency::cuda::CUDAAnalysis analysis(*module);
+  analysis.runAnalysis();
+  concurrency::ConcurrencyConfig config = ThreadAPI::getThreadAPI()->getConfig();
+  config.set_enable_cuda(false);
+  ThreadAPI::getThreadAPI()->setConfig(config);
+
+  auto summary = concurrency::ConcurrencyFacade::summarizeCUDA(analysis);
+  EXPECT_EQ(summary.status,
+            concurrency::ConcurrencyFacade::CUDAAnalysisStatus::Complete);
+  EXPECT_EQ(summary.operation_count, 1u);
+  EXPECT_EQ(summary.kernel_launch_count, 1u);
+}
+
 TEST_F(ConcurrencyFacadeTest, CUDARejectsUnrunAndMismatchedSnapshots) {
   auto module_a = parseModule("define void @a() { ret void }");
   auto module_b = parseModule("define void @b() { ret void }");
@@ -546,6 +677,64 @@ TEST_F(ConcurrencyFacadeTest, CUDARejectsUnrunAndMismatchedSnapshots) {
   EXPECT_EQ(mismatched.status,
             concurrency::ConcurrencyFacade::CUDAAnalysisStatus::ModuleMismatch);
   EXPECT_EQ(mismatched.kernel_count, 0u);
+
+  auto *main_function = module_a->getFunction("a");
+  ASSERT_NE(main_function, nullptr);
+  auto *return_inst = main_function->getEntryBlock().getTerminator();
+  ASSERT_NE(return_inst, nullptr);
+  llvm::IRBuilder<> builder(return_inst);
+  builder.CreateAlloca(builder.getInt32Ty());
+  auto stale = concurrency::ConcurrencyFacade::summarizeCUDA(analysis);
+  EXPECT_EQ(stale.status,
+            concurrency::ConcurrencyFacade::CUDAAnalysisStatus::StaleAnalysis);
+}
+
+TEST_F(ConcurrencyFacadeTest, CUDAHonorsDisabledSnapshotAcrossThreadAPIReset) {
+  ThreadAPIConfigGuard config_guard;
+  auto module = parseModule(R"(
+    define ptx_kernel void @kernel() !nvvm.annotations !0 {
+    entry:
+      ret void
+    }
+    !0 = !{void ()* @kernel, !"kernel", i32 1}
+  )");
+  ASSERT_NE(module, nullptr);
+
+  ThreadAPI *api = ThreadAPI::getThreadAPI();
+  concurrency::ConcurrencyConfig config = api->getConfig();
+  config.set_enable_cuda(false);
+  api->setConfig(config);
+
+  concurrency::cuda::CUDAAnalysis analysis(*module);
+  analysis.runAnalysis();
+  auto disabled = concurrency::ConcurrencyFacade::summarizeCUDA(analysis);
+  EXPECT_EQ(disabled.status,
+            concurrency::ConcurrencyFacade::CUDAAnalysisStatus::Disabled);
+  EXPECT_EQ(disabled.kernel_count, 0u);
+
+  ThreadAPI::resetThreadAPI();
+  EXPECT_EQ(ThreadAPI::getThreadAPI(), api);
+  analysis.runAnalysis();
+  EXPECT_TRUE(analysis.hasCompletedAnalysis());
+}
+
+TEST_F(ConcurrencyFacadeTest, MPIAnalysisSurvivesThreadAPIReset) {
+  auto module = parseModule(R"(
+    declare i32 @MPI_Barrier(i8*)
+    define i32 @main(i8* %comm) {
+    entry:
+      call i32 @MPI_Barrier(i8* %comm)
+      ret i32 0
+    }
+  )");
+  ASSERT_NE(module, nullptr);
+
+  ThreadAPI *api = ThreadAPI::getThreadAPI();
+  mpi::MPIAnalysis analysis(*module);
+  ThreadAPI::resetThreadAPI();
+  EXPECT_EQ(ThreadAPI::getThreadAPI(), api);
+  analysis.runAnalysis();
+  EXPECT_EQ(analysis.getOperationCount(mpi::MPIOpKind::BARRIER_BLOCKING), 1u);
 }
 
 TEST_F(ConcurrencyFacadeTest, PreservesCUDAModelGapConfidence) {

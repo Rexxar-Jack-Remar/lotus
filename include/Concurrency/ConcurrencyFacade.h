@@ -21,7 +21,10 @@ public:
   using RelationCountKey =
       std::pair<concurrency::RelationKind, concurrency::ProofStrength>;
 
+  enum class OpenMPAnalysisStatus { Complete, Disabled, NotApplicable };
+
   struct OpenMPSummary {
+    OpenMPAnalysisStatus status = OpenMPAnalysisStatus::NotApplicable;
     size_t task_count = 0;
     size_t task_with_dependencies_count = 0;
     size_t included_task_count = 0;
@@ -68,6 +71,11 @@ public:
     const llvm::Instruction *inst = nullptr;
     bool has_relation = false;
     concurrency::Relation relation;
+    // Zero denotes that the diagnostic is not scoped by that fact class.
+    size_t communicator_class_id = 0;
+    size_t participant_class_id = 0;
+    size_t channel_class_id = 0;
+    size_t request_set_id = 0;
     std::string model_gap_domain;
     std::string subsystem;
     std::string normalization_confidence;
@@ -145,9 +153,18 @@ public:
     std::map<std::string, size_t> model_gap_domain_counts;
     std::map<RelationCountKey, size_t> relation_counts;
     std::vector<MPIDiagnosticSummary> diagnostics;
+
+    size_t getRelationCount(concurrency::RelationKind kind,
+                            concurrency::ProofStrength proof) const;
   };
 
-  enum class CUDAAnalysisStatus { Complete, NotRun, ModuleMismatch };
+  enum class CUDAAnalysisStatus {
+    Complete,
+    Disabled,
+    NotRun,
+    ModuleMismatch,
+    StaleAnalysis
+  };
 
   struct CUDAModelGapSummary {
     const llvm::Instruction *inst = nullptr;

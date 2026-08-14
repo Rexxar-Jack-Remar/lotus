@@ -416,6 +416,7 @@ TEST_F(ThreadAPITest, SpecialSemanticLoweringStatesStayExplicitlyEnumerated) {
   std::set<ThreadAPI::TD_TYPE> expected_non_modeled = {
       ThreadAPI::TD_DUMMY,
       ThreadAPI::TD_ASYNC,
+      ThreadAPI::TD_CUDA_MULTI_DEVICE_LAUNCH,
       ThreadAPI::TD_OMP_ATOMIC_START,
       ThreadAPI::TD_OMP_ATOMIC_END,
       ThreadAPI::TD_OMP_CANCEL,
@@ -1473,4 +1474,223 @@ TEST_F(ThreadAPITest, CppRecognitionCoversFreeFunctionsWithoutSubstrings) {
                            "app_semaphore_releaseE",
                            "_ZNSt13__future_base12_State_baseV217_M_complete_asyncEv"})
     EXPECT_EQ(api->getType(module->getFunction(name)), ThreadAPI::TD_DUMMY);
+}
+
+TEST_F(ThreadAPITest, OpenMPBookkeepingIsNotBarrierButCancelBarrierIs) {
+  const char *source = R"(
+    declare void @__kmpc_end_single(i8*, i32)
+    declare void @__kmpc_for_static_fini(i8*, i32)
+    declare void @__kmpc_end_sections(i8*, i32)
+    declare void @__kmpc_dispatch_fini_4(i8*, i32)
+    declare i32 @__kmpc_cancel_barrier(i8*, i32)
+    define void @main() {
+      call void @__kmpc_end_single(i8* null, i32 0)
+      call void @__kmpc_for_static_fini(i8* null, i32 0)
+      call void @__kmpc_end_sections(i8* null, i32 0)
+      call void @__kmpc_dispatch_fini_4(i8* null, i32 0)
+      call i32 @__kmpc_cancel_barrier(i8* null, i32 0)
+      ret void
+    }
+  )";
+  auto module = parseModule(source);
+  ASSERT_NE(module, nullptr);
+  ThreadAPI::resetThreadAPI();
+  ThreadAPI *api = ThreadAPI::getThreadAPI();
+  auto it = module->getFunction("main")->front().begin();
+  for (unsigned i = 0; i < 4; ++i)
+    EXPECT_FALSE(api->isTDBarWait(&*it++));
+  const Instruction *cancel_barrier = &*it;
+  EXPECT_EQ(api->getType(api->getLLVMCallSite(cancel_barrier)),
+            ThreadAPI::TD_BAR_WAIT);
+  EXPECT_TRUE(api->isTDBarWait(cancel_barrier));
+  EXPECT_EQ(api->getBarrierVal(cancel_barrier), cancel_barrier);
+}
+
+TEST_F(ThreadAPITest, PublicAliasSpellingPrecedesPrivateImplementation) {
+  const char *source = R"(
+    define i32 @__libc_internal_lock(i8* %lock) { ret i32 0 }
+    @pthread_mutex_lock = alias i32 (i8*),
+        i32 (i8*)* @__libc_internal_lock
+    define void @main(i8* %lock) {
+      call i32 @pthread_mutex_lock(i8* %lock)
+      ret void
+    }
+  )";
+  auto module = parseModule(source);
+  ASSERT_NE(module, nullptr);
+  ThreadAPI::resetThreadAPI();
+  ThreadAPI *api = ThreadAPI::getThreadAPI();
+  const auto *call = dyn_cast<CallBase>(
+      &module->getFunction("main")->front().front());
+  ASSERT_NE(call, nullptr);
+  EXPECT_EQ(api->getCallee(call), module->getFunction("__libc_internal_lock"));
+  EXPECT_EQ(api->getType(call), ThreadAPI::TD_ACQUIRE);
+  EXPECT_TRUE(api->isTDAcquire(call));
+  EXPECT_EQ(api->getAnalysisLockIdentity(call),
+            module->getFunction("main")->getArg(0));
+}
+
+TEST_F(ThreadAPITest, PublicForkAndJoinAliasesKeepConfiguredLayouts) {
+  const char *source = R"(
+    define i32 @private_create(i8** %thread, i8* %attr,
+                               i8* (i8*)* %start, i8* %arg) {
+      ret i32 0
+    }
+    define i32 @private_join(i8* %thread, i8** %result) { ret i32 0 }
+    @pthread_create = alias i32 (i8**, i8*, i8* (i8*)*, i8*),
+        i32 (i8**, i8*, i8* (i8*)*, i8*)* @private_create
+    @pthread_join = alias i32 (i8*, i8**),
+        i32 (i8*, i8**)* @private_join
+    define i8* @worker(i8* %arg) { ret i8* %arg }
+    define void @main(i8** %thread, i8* %arg, i8** %result) {
+      call i32 @pthread_create(i8** %thread, i8* null,
+                               i8* (i8*)* @worker, i8* %arg)
+      %handle = load i8*, i8** %thread
+      call i32 @pthread_join(i8* %handle, i8** %result)
+      ret void
+    }
+  )";
+  auto module = parseModule(source);
+  ASSERT_NE(module, nullptr);
+  ThreadAPI::resetThreadAPI();
+  ThreadAPI *api = ThreadAPI::getThreadAPI();
+  auto it = module->getFunction("main")->front().begin();
+  const Instruction *fork = &*it++;
+  ++it;
+  const Instruction *join = &*it;
+  EXPECT_TRUE(api->isForkLike(fork));
+  EXPECT_EQ(api->getForkedThread(fork),
+            module->getFunction("main")->getArg(0));
+  EXPECT_EQ(api->getForkedFun(fork), module->getFunction("worker"));
+  EXPECT_EQ(api->getActualParmAtForkSite(fork),
+            module->getFunction("main")->getArg(1));
+  EXPECT_TRUE(api->isJoinLike(join));
+  EXPECT_EQ(api->getRetParmAtJoinedSite(join),
+            module->getFunction("main")->getArg(2));
+}
+
+TEST_F(ThreadAPITest, WrappedRwTryLockUsesCanonicalConditionalDescriptor) {
+  const char *source = R"(
+    declare i32 @__wrap_pthread_rwlock_tryrdlock(i8*)
+    define void @main(i8* %lock) {
+      call i32 @__wrap_pthread_rwlock_tryrdlock(i8* %lock)
+      ret void
+    }
+  )";
+  auto module = parseModule(source);
+  ASSERT_NE(module, nullptr);
+  ThreadAPI::resetThreadAPI();
+  ThreadAPI *api = ThreadAPI::getThreadAPI();
+  const Instruction *call = &module->getFunction("main")->front().front();
+  const auto semantics = api->getLockSemanticInfo(call);
+  EXPECT_TRUE(api->isTryLock(call));
+  EXPECT_TRUE(semantics.conditional);
+  EXPECT_TRUE(semantics.isShared());
+  EXPECT_EQ(semantics.try_success, ThreadAPI::TryLockSuccess::Zero);
+}
+
+TEST_F(ThreadAPITest, AggregateCUDALaunchIsRecognizedWithoutFakeOperands) {
+  const char *source = R"(
+    declare i32 @cuLaunchCooperativeKernelMultiDevice(i8*, i32, i32)
+    define void @main(i8* %records) {
+      call i32 @cuLaunchCooperativeKernelMultiDevice(i8* %records, i32 1,
+                                                      i32 0)
+      ret void
+    }
+  )";
+  auto module = parseModule(source);
+  ASSERT_NE(module, nullptr);
+  ThreadAPI::resetThreadAPI();
+  ThreadAPI *api = ThreadAPI::getThreadAPI();
+  const Instruction *launch = &module->getFunction("main")->front().front();
+  EXPECT_TRUE(api->isForkLike(launch));
+  EXPECT_EQ(api->getType(api->getLLVMCallSite(launch)),
+            ThreadAPI::TD_CUDA_MULTI_DEVICE_LAUNCH);
+  EXPECT_EQ(api->getCUDALaunchedKernel(launch), nullptr);
+  EXPECT_EQ(api->getForkedFun(launch), nullptr);
+  EXPECT_TRUE(api->getForkPayloadArgs(launch).empty());
+  EXPECT_EQ(api->getSemanticLoweringInfo(api->getCallee(launch)).kind,
+            ThreadAPI::SemanticLoweringKind::RecognizedButUnmodeled);
+}
+
+TEST_F(ThreadAPITest, RecognizesParameterizedBarrierArriveMangling) {
+  const char *source = R"(
+    declare void @_ZNSt7barrierISt18__empty_completionE6arriveEl(i8*, i64)
+  )";
+  auto module = parseModule(source);
+  ASSERT_NE(module, nullptr);
+  ThreadAPI::resetThreadAPI();
+  ThreadAPI *api = ThreadAPI::getThreadAPI();
+  EXPECT_EQ(api->getType(module->getFunction(
+                "_ZNSt7barrierISt18__empty_completionE6arriveEl")),
+            ThreadAPI::TD_BARRIER_ARRIVE);
+}
+
+TEST_F(ThreadAPITest, KernelBitOperationsSeparateReadFromRmw) {
+  const char *source = R"(
+    declare i1 @test_bit(i64, i8*)
+    declare void @set_bit(i64, i8*)
+    declare void @clear_bit(i64, i8*)
+    declare void @change_bit(i64, i8*)
+    declare i1 @test_and_set_bit(i64, i8*)
+    declare i1 @test_and_clear_bit(i64, i8*)
+  )";
+  auto module = parseModule(source);
+  ASSERT_NE(module, nullptr);
+  ThreadAPI::resetThreadAPI();
+  ThreadAPI *api = ThreadAPI::getThreadAPI();
+  EXPECT_EQ(api->getType(module->getFunction("test_bit")),
+            ThreadAPI::TD_KERNEL_ATOMIC_READ);
+  for (const char *name : {"set_bit", "clear_bit", "change_bit",
+                           "test_and_set_bit", "test_and_clear_bit"})
+    EXPECT_EQ(api->getType(module->getFunction(name)),
+              ThreadAPI::TD_KERNEL_ATOMIC_RMW);
+}
+
+TEST_F(ThreadAPITest, ExpandedKthreadCreateWakeSequenceLowersAsFork) {
+  const char *source = R"(
+    declare i8* @kthread_create_on_node(i8* (i8*)*, i8*, i32, i8*, ...)
+    declare i32 @wake_up_process(i8*)
+    define i8* @worker(i8* %data) { ret i8* %data }
+    define void @main(i8* %data, i8* %name) {
+      %task = call i8* (i8* (i8*)*, i8*, i32, i8*, ...)
+          @kthread_create_on_node(i8* (i8*)* @worker, i8* %data, i32 -1,
+                                  i8* %name)
+      call i32 @wake_up_process(i8* %task)
+      ret void
+    }
+  )";
+  auto module = parseModule(source);
+  ASSERT_NE(module, nullptr);
+  ThreadAPI::resetThreadAPI();
+  ThreadAPI *api = ThreadAPI::getThreadAPI();
+  auto it = module->getFunction("main")->front().begin();
+  const Instruction *create = &*it++;
+  const Instruction *wake = &*it;
+  EXPECT_FALSE(api->isForkLike(create));
+  EXPECT_TRUE(api->isForkLike(wake));
+  EXPECT_EQ(api->getForkedThread(wake), create);
+  EXPECT_EQ(api->getForkedFun(wake), module->getFunction("worker"));
+  EXPECT_EQ(api->getActualParmAtForkSite(wake),
+            module->getFunction("main")->getArg(0));
+  auto payload = api->getForkPayloadArgs(wake);
+  ASSERT_EQ(payload.size(), 1u);
+  EXPECT_EQ(payload.front(), module->getFunction("main")->getArg(0));
+}
+
+TEST_F(ThreadAPITest, UnrelatedWakeUpProcessIsNotInventedAsFork) {
+  const char *source = R"(
+    declare i32 @wake_up_process(i8*)
+    define void @main(i8* %existing_task) {
+      call i32 @wake_up_process(i8* %existing_task)
+      ret void
+    }
+  )";
+  auto module = parseModule(source);
+  ASSERT_NE(module, nullptr);
+  ThreadAPI::resetThreadAPI();
+  ThreadAPI *api = ThreadAPI::getThreadAPI();
+  const Instruction *wake = &module->getFunction("main")->front().front();
+  EXPECT_FALSE(api->isForkLike(wake));
+  EXPECT_EQ(api->getForkedFun(wake), nullptr);
 }

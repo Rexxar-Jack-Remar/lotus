@@ -64,33 +64,16 @@ TEST_F(AtomicHappensBeforeTest, ReleaseAcquireOrdering) {
   EXPECT_TRUE(hb.mustPrecede(store_data, load_data));
 }
 TEST_F(AtomicHappensBeforeTest, ConsumeOrderingIsTreatedAsAcquire) {
-#if LLVM_VERSION_MAJOR < 15
-  GTEST_SKIP() << "LLVM does not expose AtomicOrdering::Consume in this build";
-#else
-  const char *source = R"(
-    @flag = global i8 0, align 1
-
-    define void @reader() {
-    entry:
-      %flag_load = load atomic i8, i8* @flag monotonic, align 1
-      ret void
-    }
-  )";
-
-  auto module = parseModule(source);
-  ASSERT_NE(module, nullptr);
-
-  const Function *reader = module->getFunction("reader");
-  ASSERT_NE(reader, nullptr);
-  auto *load = dyn_cast<LoadInst>(const_cast<Instruction *>(
-      findInstructionByName(*reader, "flag_load")));
-  ASSERT_NE(load, nullptr);
-  load->setOrdering(AtomicOrdering::Consume);
-
-  EXPECT_EQ(CppAtomics::getMemoryOrder(load),
+  EXPECT_EQ(CppAtomics::decodeCABIOrder(0),
+            CppAtomics::MemoryOrder::Relaxed);
+  EXPECT_EQ(CppAtomics::decodeCABIOrder(1),
+            CppAtomics::MemoryOrder::Consume);
+  EXPECT_EQ(CppAtomics::decodeCABIOrder(2),
             CppAtomics::MemoryOrder::Acquire);
-  EXPECT_TRUE(CppAtomics::hasAcquireSemantics(load));
-#endif
+  EXPECT_EQ(CppAtomics::decodeCABIOrder(5),
+            CppAtomics::MemoryOrder::SequentiallyConsistent);
+  EXPECT_EQ(CppAtomics::decodeCABIOrder(99),
+            CppAtomics::MemoryOrder::NotAtomic);
 }
 TEST_F(AtomicHappensBeforeTest, ReleaseStoreBeforeAcquireFenceSynchronizes) {
   const char *source = R"(

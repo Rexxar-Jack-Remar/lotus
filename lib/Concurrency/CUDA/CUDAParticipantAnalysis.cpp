@@ -24,15 +24,11 @@ bool isSynchronizationInstruction(const llvm::Instruction *inst) {
   if (!call) {
     return false;
   }
-  auto *callee = call->getCalledFunction();
-  if (!callee) {
-    return false;
-  }
   ThreadAPI *api = ThreadAPI::getThreadAPI();
   if (!api) {
     return false;
   }
-  auto type = api->getType(callee);
+  auto type = api->getType(call);
   return type == ThreadAPI::TD_CUDA_BARRIER ||
          type == ThreadAPI::TD_CUDA_WARP_BARRIER ||
          type == ThreadAPI::TD_CUDA_MEMORY_BARRIER ||
@@ -64,26 +60,22 @@ CUDAParticipantSet CUDAParticipantAnalysis::getActiveParticipants(
   if (isSynchronizationInstruction(inst)) {
     auto *call = llvm::dyn_cast<llvm::CallBase>(inst);
     if (call) {
-      auto *callee = call->getCalledFunction();
-      if (callee) {
-        ThreadAPI *api = ThreadAPI::getThreadAPI();
-        if (api) {
-          auto type = api->getType(callee);
-          if (type == ThreadAPI::TD_CUDA_WARP_BARRIER) {
-            result.scopes.push_back(static_cast<int>(ParticipationScope::Warp));
-            result.min_lane = 0;
-            result.max_lane = m_warp_size - 1;
-            result.is_exact = true;
-            return result;
-          }
-          if (type == ThreadAPI::TD_CUDA_BARRIER) {
-            result.scopes.push_back(
-                static_cast<int>(ParticipationScope::Block));
-            result.min_lane = 0;
-            result.max_lane = m_warp_size - 1;
-            result.is_exact = true;
-            return result;
-          }
+      ThreadAPI *api = ThreadAPI::getThreadAPI();
+      if (api) {
+        auto type = api->getType(call);
+        if (type == ThreadAPI::TD_CUDA_WARP_BARRIER) {
+          result.scopes.push_back(static_cast<int>(ParticipationScope::Warp));
+          result.min_lane = 0;
+          result.max_lane = m_warp_size - 1;
+          result.is_exact = true;
+          return result;
+        }
+        if (type == ThreadAPI::TD_CUDA_BARRIER) {
+          result.scopes.push_back(static_cast<int>(ParticipationScope::Block));
+          result.min_lane = 0;
+          result.max_lane = m_warp_size - 1;
+          result.is_exact = true;
+          return result;
         }
       }
     }

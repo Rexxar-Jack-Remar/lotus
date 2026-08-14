@@ -35,13 +35,9 @@ void CUDAFunctionSummaryAnalysis::runAnalysis() {
         if (!call) {
           continue;
         }
-        auto *callee = call->getCalledFunction();
-        if (!callee) {
-          continue;
-        }
-
-        auto td_type = api->getType(callee);
-        if (isCUDACall(td_type)) {
+        auto td_type = api->getType(call);
+        if (api->getRuntimeLibrary(call) == ThreadAPI::RuntimeLibrary::CUDA &&
+            isCUDACall(td_type)) {
           switch (td_type) {
           case ThreadAPI::TD_CUDA_KERNEL_LAUNCH:
             summary.kernel_launches.push_back(call);
@@ -79,7 +75,8 @@ void CUDAFunctionSummaryAnalysis::runAnalysis() {
           }
         }
 
-        if (!callee->isDeclaration()) {
+        const llvm::Function *callee = api->getCallee(call);
+        if (callee && !callee->isDeclaration()) {
           bool already_added = false;
           for (const llvm::Function *existing : summary.callees) {
             if (existing == callee) {

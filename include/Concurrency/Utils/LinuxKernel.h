@@ -75,6 +75,16 @@ inline bool isMutexIsLocked(const llvm::StringRef& funcName) {
   return funcName.equals("mutex_is_locked");
 }
 
+inline bool isKthreadCreate(const llvm::StringRef &funcName) {
+  return funcName.equals("kthread_create") ||
+         funcName.equals("kthread_create_on_node") ||
+         funcName.equals("kthread_create_worker");
+}
+
+inline bool isWakeUpProcess(const llvm::StringRef &funcName) {
+  return funcName.equals("wake_up_process");
+}
+
 // ============================================================================
 // Semaphores
 // ============================================================================
@@ -316,8 +326,14 @@ inline bool isAtomicCmpxchg(const llvm::StringRef& funcName) {
 
 inline bool isSetBit(const llvm::StringRef& funcName) {
   return funcName.startswith("set_bit") || funcName.startswith("clear_bit") ||
-         funcName.startswith("test_bit") || funcName.startswith("test_and_set_bit") ||
-         funcName.startswith("test_and_clear_bit");
+         funcName.startswith("change_bit") ||
+         funcName.startswith("test_and_set_bit") ||
+         funcName.startswith("test_and_clear_bit") ||
+         funcName.startswith("test_and_change_bit");
+}
+
+inline bool isTestBit(const llvm::StringRef &funcName) {
+  return funcName.startswith("test_bit");
 }
 
 // ============================================================================

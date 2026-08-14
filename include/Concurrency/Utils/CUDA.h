@@ -31,10 +31,15 @@ getKernelLaunchLayout(const llvm::StringRef &rawName) {
       funcName.equals("cudaLaunchCooperativeKernel"))
     return {0, 3};
   if (funcName.equals("cuLaunchKernel") ||
-      funcName.equals("cuLaunchCooperativeKernel") ||
-      funcName.equals("cuLaunchCooperativeKernelMultiDevice"))
+      funcName.equals("cuLaunchCooperativeKernel"))
     return {0, 9};
   return {};
+}
+
+inline bool isAggregateKernelLaunch(const llvm::StringRef &rawName) {
+  const llvm::StringRef funcName = normalizeLaunchName(rawName);
+  return funcName.equals("cudaLaunchCooperativeKernelMultiDevice") ||
+         funcName.equals("cuLaunchCooperativeKernelMultiDevice");
 }
 
 inline bool hasAnySubstring(const llvm::StringRef &funcName,

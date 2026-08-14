@@ -41,6 +41,118 @@ TEST_F(LockSetAnalysisTest, SharedLockSummaryPreservesReadModeAcrossCalls) {
   EXPECT_TRUE(lsa.getMustReadLockSetAt(after).count(lock) > 0);
   EXPECT_TRUE(lsa.getMustWriteLockSetAt(after).count(lock) == 0);
 }
+TEST_F(LockSetAnalysisTest, DirectBooleanUniqueLockTryRefinesSuccessEdge) {
+  const char *source = R"(
+    declare void @fake_unique_lock_defer_lock_C1E(i8*, i8*, i8*)
+    declare i1 @_ZNSt11unique_lockISt5mutexE8try_lockEv(i8*)
+    @lock = global i8 0
+    @tag = global i8 0
+    define void @test() {
+    entry:
+      %u = alloca i8
+      call void @fake_unique_lock_defer_lock_C1E(i8* %u, i8* @lock, i8* @tag)
+      %ok = call i1 @_ZNSt11unique_lockISt5mutexE8try_lockEv(i8* %u)
+      br i1 %ok, label %success, label %failure
+    success:
+      %held = add i32 1, 2
+      ret void
+    failure:
+      %not_held = add i32 3, 4
+      ret void
+    }
+  )";
+  auto module = parseModule(source);
+  ASSERT_NE(module, nullptr);
+  LockSetAnalysis lsa(*module);
+  lsa.analyze();
+  const Function *test = module->getFunction("test");
+  const Value *lock = module->getNamedGlobal("lock");
+  const Value *tag = module->getNamedGlobal("tag");
+  const Instruction *held = findInstructionByName(*test, "held");
+  const Instruction *not_held = findInstructionByName(*test, "not_held");
+  EXPECT_TRUE(lsa.mustHoldLock(held, lock));
+  EXPECT_FALSE(lsa.mayHoldLock(not_held, lock));
+  EXPECT_FALSE(lsa.mayHoldLock(held, tag));
+}
+
+TEST_F(LockSetAnalysisTest, DeferredDestructorPreservesIndependentRawLock) {
+  const char *source = R"(
+    declare i32 @pthread_mutex_lock(i8*)
+    declare void @fake_unique_lock_defer_lock_C1E(i8*, i8*, i8*)
+    declare void @fake_unique_lock_D1Ev(i8*)
+    @lock = global i8 0
+    @tag = global i8 0
+    define void @test() {
+      %u = alloca i8
+      call i32 @pthread_mutex_lock(i8* @lock)
+      call void @fake_unique_lock_defer_lock_C1E(i8* %u, i8* @lock, i8* @tag)
+      call void @fake_unique_lock_D1Ev(i8* %u)
+      %after = add i32 1, 2
+      ret void
+    }
+  )";
+  auto module = parseModule(source);
+  ASSERT_NE(module, nullptr);
+  LockSetAnalysis lsa(*module);
+  lsa.analyze();
+  EXPECT_TRUE(lsa.mustHoldLock(
+      findInstructionByName(*module->getFunction("test"), "after"),
+      module->getNamedGlobal("lock")));
+}
+
+TEST_F(LockSetAnalysisTest, UniqueLockReleaseKeepsMutexHeldPastDestructor) {
+  const char *source = R"(
+    declare void @fake_unique_lock_C1E(i8*, i8*)
+    declare i8* @_ZNSt11unique_lockISt5mutexE7releaseEv(i8*)
+    declare void @fake_unique_lock_D1Ev(i8*)
+    @lock = global i8 0
+    define void @test() {
+      %u = alloca i8
+      call void @fake_unique_lock_C1E(i8* %u, i8* @lock)
+      call i8* @_ZNSt11unique_lockISt5mutexE7releaseEv(i8* %u)
+      call void @fake_unique_lock_D1Ev(i8* %u)
+      %after = add i32 1, 2
+      ret void
+    }
+  )";
+  auto module = parseModule(source);
+  ASSERT_NE(module, nullptr);
+  LockSetAnalysis lsa(*module);
+  lsa.analyze();
+  EXPECT_TRUE(lsa.mustHoldLock(
+      findInstructionByName(*module->getFunction("test"), "after"),
+      module->getNamedGlobal("lock")));
+}
+
+TEST_F(LockSetAnalysisTest,
+       UniqueLockMoveTransfersOwnershipToDestinationDestructor) {
+  const char *source = R"(
+    declare void @fake_unique_lock_C1E(i8*, i8*)
+    declare void @_ZNSt11unique_lockISt5mutexEC1EOS2_(i8*, i8*)
+    declare void @fake_unique_lock_D1Ev(i8*)
+    @lock = global i8 0
+    define void @test() {
+      %source = alloca i8
+      %destination = alloca i8
+      call void @fake_unique_lock_C1E(i8* %source, i8* @lock)
+      call void @_ZNSt11unique_lockISt5mutexEC1EOS2_(
+          i8* %destination, i8* %source)
+      call void @fake_unique_lock_D1Ev(i8* %destination)
+      %after_destination = add i32 1, 2
+      call void @fake_unique_lock_D1Ev(i8* %source)
+      ret void
+    }
+  )";
+  auto module = parseModule(source);
+  ASSERT_NE(module, nullptr);
+  LockSetAnalysis lsa(*module);
+  lsa.analyze();
+  EXPECT_FALSE(lsa.mayHoldLock(
+      findInstructionByName(*module->getFunction("test"),
+                            "after_destination"),
+      module->getNamedGlobal("lock")));
+}
+
 TEST_F(LockSetAnalysisTest, BlockHeadMustReadLockSetUsesPredecessorMeet) {
   const char *source = R"(
     declare i32 @pthread_rwlock_rdlock(i8*)
@@ -925,6 +1037,113 @@ TEST_F(LockSetAnalysisTest, TryLockSuccessFactIsEdgeSpecific) {
   ASSERT_NE(failure, nullptr);
   EXPECT_EQ(lsa.getMustLockSetAt(success).count(lock), 0u);
   EXPECT_EQ(lsa.getMayLockSetAt(success).count(lock), 1u);
+  EXPECT_EQ(lsa.getMayLockSetAt(failure).count(lock), 0u);
+}
+
+TEST_F(LockSetAnalysisTest, BooleanTryLockPredicatesRefineAllCommonForms) {
+  const char *source = R"(
+    declare i1 @_ZNSt5mutex8try_lockEv(i8*)
+    @direct_lock = global i8 0
+    @negated_lock = global i8 0
+    @one_lock = global i8 0
+
+    define void @direct() {
+    entry:
+      %ok = call i1 @_ZNSt5mutex8try_lockEv(i8* @direct_lock)
+      br i1 %ok, label %success, label %failure
+    success:
+      %direct_success = add i32 1, 2
+      ret void
+    failure:
+      %direct_failure = add i32 3, 4
+      ret void
+    }
+
+    define void @negated() {
+    entry:
+      %ok = call i1 @_ZNSt5mutex8try_lockEv(i8* @negated_lock)
+      %failed = xor i1 %ok, true
+      br i1 %failed, label %failure, label %success
+    success:
+      %negated_success = add i32 5, 6
+      ret void
+    failure:
+      %negated_failure = add i32 7, 8
+      ret void
+    }
+
+    define void @compared_with_one() {
+    entry:
+      %ok = call i1 @_ZNSt5mutex8try_lockEv(i8* @one_lock)
+      %cmp = icmp eq i1 %ok, true
+      br i1 %cmp, label %success, label %failure
+    success:
+      %one_success = add i32 9, 10
+      ret void
+    failure:
+      %one_failure = add i32 11, 12
+      ret void
+    }
+  )";
+  auto module = parseModule(source);
+  ASSERT_NE(module, nullptr);
+  LockSetAnalysis lsa(*module);
+  lsa.analyze();
+
+  struct Expected {
+    const char *function;
+    const char *success;
+    const char *failure;
+    const char *lock;
+  };
+  for (const Expected expected : {
+           Expected{"direct", "direct_success", "direct_failure",
+                    "direct_lock"},
+           Expected{"negated", "negated_success", "negated_failure",
+                    "negated_lock"},
+           Expected{"compared_with_one", "one_success", "one_failure",
+                    "one_lock"}}) {
+    const Function *function = module->getFunction(expected.function);
+    const Instruction *success =
+        findInstructionByName(*function, expected.success);
+    const Instruction *failure =
+        findInstructionByName(*function, expected.failure);
+    const GlobalVariable *lock = module->getNamedGlobal(expected.lock);
+    ASSERT_NE(success, nullptr);
+    ASSERT_NE(failure, nullptr);
+    ASSERT_NE(lock, nullptr);
+    EXPECT_EQ(lsa.getMustLockSetAt(success).count(lock), 1u);
+    EXPECT_EQ(lsa.getMayLockSetAt(failure).count(lock), 0u);
+  }
+}
+
+TEST_F(LockSetAnalysisTest, WrappedRwTryLockRefinesZeroSuccessEdge) {
+  const char *source = R"(
+    declare i32 @__wrap_pthread_rwlock_tryrdlock(i8*)
+    @lock = global i8 0
+    define void @test() {
+    entry:
+      %result = call i32 @__wrap_pthread_rwlock_tryrdlock(i8* @lock)
+      switch i32 %result, label %failure [ i32 0, label %success ]
+    success:
+      %at_success = add i32 1, 2
+      ret void
+    failure:
+      %at_failure = add i32 3, 4
+      ret void
+    }
+  )";
+  auto module = parseModule(source);
+  ASSERT_NE(module, nullptr);
+  LockSetAnalysis lsa(*module);
+  lsa.analyze();
+  const Function *test = module->getFunction("test");
+  const Instruction *success = findInstructionByName(*test, "at_success");
+  const Instruction *failure = findInstructionByName(*test, "at_failure");
+  const GlobalVariable *lock = module->getNamedGlobal("lock");
+  ASSERT_NE(success, nullptr);
+  ASSERT_NE(failure, nullptr);
+  EXPECT_EQ(lsa.getMustReadLockSetAt(success).count(lock), 1u);
   EXPECT_EQ(lsa.getMayLockSetAt(failure).count(lock), 0u);
 }
 

@@ -25,6 +25,8 @@ pthread_rwlock_timedrdlock TD_RWLOCK_RDLOCK library=pthread semantic=timed-read-
 pthread_rwlock_clockrdlock TD_RWLOCK_RDLOCK library=pthread semantic=clock-read-lock conditional=true success=zero
 pthread_rwlock_timedwrlock TD_RWLOCK_WRLOCK library=pthread semantic=timed-write-lock conditional=true success=zero
 pthread_rwlock_clockwrlock TD_RWLOCK_WRLOCK library=pthread semantic=clock-write-lock conditional=true success=zero
+pthread_rwlock_tryrdlock TD_RWLOCK_RDLOCK library=pthread semantic=try-read-lock traits=try-lock conditional=true success=zero
+pthread_rwlock_trywrlock TD_RWLOCK_WRLOCK library=pthread semantic=try-write-lock traits=try-lock conditional=true success=zero
 
 # C++20 Semaphores
 __pthread_sem_init TD_BAR_INIT library=cpp semantic=sem-init

@@ -75,13 +75,46 @@ size_t ConcurrencyFacade::OpenMPSummary::getRelationCount(
   return it == relation_counts.end() ? 0 : it->second;
 }
 
+size_t ConcurrencyFacade::MPISummary::getRelationCount(
+    concurrency::RelationKind kind, concurrency::ProofStrength proof) const {
+  auto it = relation_counts.find({kind, proof});
+  return it == relation_counts.end() ? 0 : it->second;
+}
+
 ConcurrencyFacade::OpenMPSummary
 ConcurrencyFacade::analyzeOpenMP(llvm::Module &module) {
+  OpenMPSummary summary;
+  ThreadAPI *api = ThreadAPI::getThreadAPI();
+  if (!api->getConfig().enable_openmp()) {
+    summary.status = OpenMPAnalysisStatus::Disabled;
+    return summary;
+  }
+  bool has_openmp_event = false;
+  for (const llvm::Function &function : module) {
+    for (llvm::const_inst_iterator it = llvm::inst_begin(function),
+                                   end = llvm::inst_end(function);
+         it != end; ++it) {
+      const auto *call = llvm::dyn_cast<llvm::CallBase>(&*it);
+      if (call && api->getType(call) != ThreadAPI::TD_DUMMY &&
+          api->getRuntimeLibrary(call) ==
+              ThreadAPI::RuntimeLibrary::OpenMP) {
+        has_openmp_event = true;
+        break;
+      }
+    }
+    if (has_openmp_event) {
+      break;
+    }
+  }
+  if (!has_openmp_event) {
+    return summary;
+  }
+
   OpenMP::OpenMPTaskGraph graph(module);
   graph.analyze();
 
   const auto &graph_summary = graph.getSummary();
-  OpenMPSummary summary;
+  summary.status = OpenMPAnalysisStatus::Complete;
   summary.task_count = graph_summary.task_count;
   summary.task_with_dependencies_count =
       graph_summary.task_with_dependencies_count;
@@ -440,6 +473,10 @@ ConcurrencyFacade::analyzeMPI(llvm::Module &module) {
     projected.inst = diagnostic.inst;
     projected.has_relation = true;
     projected.relation = diagnostic.relation;
+    projected.communicator_class_id = diagnostic.communicator_class_id;
+    projected.participant_class_id = diagnostic.participant_class_id;
+    projected.channel_class_id = diagnostic.channel_class_id;
+    projected.request_set_id = diagnostic.request_set_id;
     projected.model_gap_domain =
         modelGapDomainName(diagnostic.model_gap_domain);
     projected.subsystem = diagnostic.subsystem;
@@ -450,12 +487,25 @@ ConcurrencyFacade::analyzeMPI(llvm::Module &module) {
     projected.code = diagnostic.code;
     projected.detail = diagnostic.detail;
     ++summary.diagnostic_code_counts[projected.code];
-    ++summary.relation_counts[
-        {projected.relation.kind, projected.relation.proof}];
     if (diagnostic.model_gap_domain != mpi::MPIModelGapDomain::None) {
       ++summary.model_gap_domain_counts[projected.model_gap_domain];
     }
     summary.diagnostics.push_back(std::move(projected));
+  }
+  auto countRelation = [&](const concurrency::Relation &relation) {
+    ++summary.relation_counts[{relation.kind, relation.proof}];
+  };
+  for (const auto &fact : results.request_set_facts) {
+    countRelation(fact.relation);
+  }
+  for (const auto &fact : results.channel_obligations) {
+    countRelation(fact.relation);
+  }
+  for (const auto &fact : results.protocol_frontiers) {
+    countRelation(fact.relation);
+  }
+  for (const auto &fact : results.rma_synchronization_facts) {
+    countRelation(fact.relation);
   }
   summary.diagnostic_count = summary.diagnostics.size();
   return summary;
@@ -463,6 +513,11 @@ ConcurrencyFacade::analyzeMPI(llvm::Module &module) {
 
 ConcurrencyFacade::CUDASummary
 ConcurrencyFacade::analyzeCUDA(llvm::Module &module) {
+  if (!ThreadAPI::getThreadAPI()->getConfig().enable_cuda()) {
+    CUDASummary summary;
+    summary.status = CUDAAnalysisStatus::Disabled;
+    return summary;
+  }
   cuda::CUDAAnalysis analysis(module);
   analysis.runAnalysis();
   return summarizeCUDA(analysis);
@@ -485,7 +540,21 @@ ConcurrencyFacade::summarizeCUDA(const cuda::CUDAAnalysis &analysis,
     summary.status = CUDAAnalysisStatus::NotRun;
     return summary;
   }
+  if (!analysis.hasCurrentModuleSnapshot()) {
+    summary.status = CUDAAnalysisStatus::StaleAnalysis;
+    return summary;
+  }
+  if (!analysis.isCUDAEnabled()) {
+    summary.status = CUDAAnalysisStatus::Disabled;
+    return summary;
+  }
   summary.status = CUDAAnalysisStatus::Complete;
+
+  summary.operation_count = analysis.getOperationCount();
+  summary.device_sync_count = analysis.getDeviceSyncCount();
+  summary.barrier_count = analysis.getBarrierCount();
+  summary.warp_barrier_count = analysis.getWarpBarrierCount();
+  summary.memory_barrier_count = analysis.getMemoryBarrierCount();
 
   summary.kernel_count = analysis.getKernelSummaries().size();
   summary.kernel_launch_count = analysis.getLaunches().size();
@@ -519,27 +588,13 @@ ConcurrencyFacade::summarizeCUDA(const cuda::CUDAAnalysis &analysis,
     summary.constant_access_count += kernel.constant_access_count;
     summary.local_access_count += kernel.local_access_count;
     summary.atomic_count += kernel.atomic_count;
-    if (kernel.has_warp_divergence) {
-      ++summary.warp_divergence_count;
-    }
-    if (kernel.has_shared_race) {
-      ++summary.shared_race_count;
-    }
-    if (kernel.has_global_race) {
-      ++summary.global_race_count;
-    }
-    if (kernel.has_barrier_mismatch) {
-      ++summary.barrier_mismatch_count;
-    }
-    if (kernel.has_bank_conflict) {
-      ++summary.bank_conflict_count;
-    }
-    if (kernel.has_uncoalesced_access) {
-      ++summary.uncoalesced_access_count;
-    }
-    if (kernel.has_volatile_missing) {
-      ++summary.volatile_missing_count;
-    }
+    summary.warp_divergence_count += kernel.divergence_regions.size();
+    summary.shared_race_count += kernel.shared_races.size();
+    summary.global_race_count += kernel.global_races.size();
+    summary.barrier_mismatch_count += kernel.barrier_mismatches.size();
+    summary.bank_conflict_count += kernel.bank_conflicts.size();
+    summary.uncoalesced_access_count += kernel.coalescing_issues.size();
+    summary.volatile_missing_count += kernel.volatile_missing.size();
   }
 
   for (const auto &gap : analysis.getAbstractState().getModelGaps()) {
@@ -555,43 +610,6 @@ ConcurrencyFacade::summarizeCUDA(const cuda::CUDAAnalysis &analysis,
     summary.model_gaps.push_back(std::move(projected));
   }
   summary.model_gap_count = summary.model_gaps.size();
-
-  ThreadAPI *api = ThreadAPI::getThreadAPI();
-  for (const llvm::Function &function : module) {
-    if (function.isDeclaration()) {
-      continue;
-    }
-    for (llvm::const_inst_iterator it = llvm::inst_begin(function),
-                                   end = llvm::inst_end(function);
-         it != end; ++it) {
-      const auto *call = llvm::dyn_cast<llvm::CallBase>(&*it);
-      if (!call) {
-        continue;
-      }
-      const llvm::Function *callee = api->getCallee(call);
-      if (!callee ||
-          api->getRuntimeLibrary(callee) != ThreadAPI::RuntimeLibrary::CUDA) {
-        continue;
-      }
-      ++summary.operation_count;
-      switch (api->getType(callee)) {
-      case ThreadAPI::TD_CUDA_DEVICE_SYNC:
-        ++summary.device_sync_count;
-        break;
-      case ThreadAPI::TD_CUDA_BARRIER:
-        ++summary.barrier_count;
-        break;
-      case ThreadAPI::TD_CUDA_WARP_BARRIER:
-        ++summary.warp_barrier_count;
-        break;
-      case ThreadAPI::TD_CUDA_MEMORY_BARRIER:
-        ++summary.memory_barrier_count;
-        break;
-      default:
-        break;
-      }
-    }
-  }
 
   return summary;
 }

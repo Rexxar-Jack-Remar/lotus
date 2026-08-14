@@ -16,6 +16,10 @@
 #include <llvm/IR/Instruction.h>
 #include <llvm/IR/Value.h>
 
+namespace llvm {
+class AtomicCmpXchgInst;
+}
+
 namespace CppAtomics {
 
 // Enum to represent C++11 memory orderings
@@ -29,9 +33,17 @@ enum class MemoryOrder {
   SequentiallyConsistent
 };
 
+/// Source-language rule used for release-sequence membership. LLVM IR does
+/// not retain this distinction, so clients must choose it explicitly when
+/// analyzing pre-C++20 input.
+enum class CppMemoryModel { Cpp11To17, Cpp20AndLater };
+
 // Functions to identify atomic operations
 bool isAtomic(const llvm::Instruction *inst);
 MemoryOrder getMemoryOrder(const llvm::Instruction *inst);
+MemoryOrder getCmpXchgSuccessMemoryOrder(const llvm::AtomicCmpXchgInst *inst);
+MemoryOrder getCmpXchgFailureMemoryOrder(const llvm::AtomicCmpXchgInst *inst);
+MemoryOrder decodeCABIOrder(unsigned order);
 const llvm::Value *getAtomicPointer(const llvm::Instruction *inst);
 
 // Functions to check for specific properties
@@ -45,6 +57,9 @@ bool isFence(const llvm::Instruction *inst);
 // Memory ordering property checks for synchronization analysis
 bool hasAcquireSemantics(const llvm::Instruction *inst);
 bool hasReleaseSemantics(const llvm::Instruction *inst);
+bool cmpXchgSuccessHasAcquireSemantics(const llvm::AtomicCmpXchgInst *inst);
+bool cmpXchgSuccessHasReleaseSemantics(const llvm::AtomicCmpXchgInst *inst);
+bool cmpXchgFailureHasAcquireSemantics(const llvm::AtomicCmpXchgInst *inst);
 bool hasSequentialConsistency(const llvm::Instruction *inst);
 bool isRelaxed(const llvm::Instruction *inst);
 
@@ -53,7 +68,10 @@ bool isRelaxed(const llvm::Instruction *inst);
 // alias-aware matching should perform that separately before relying on the
 // result. Fence-based synchronization remains witness-driven.
 bool canSynchronizeWith(const llvm::Instruction *release, const llvm::Instruction *acquire);
-bool participatesInReleaseSequence(const llvm::Instruction *inst);
+bool participatesInReleaseSequence(
+    const llvm::Instruction *inst,
+    CppMemoryModel model = CppMemoryModel::Cpp20AndLater,
+    bool same_thread_as_head = false);
 
 // Fence analysis
 bool isFenceAcquire(const llvm::Instruction *inst);

@@ -1298,7 +1298,7 @@ void StaticVectorClockMHP::handleThreadFork(const Instruction *fork_inst,
 void StaticVectorClockMHP::handleThreadJoin(const Instruction *join_inst,
                                             SyncNode *node,
                                             ThreadID parent_tid) {
-  if (m_thread_api->getType(m_thread_api->getCallee(join_inst)) ==
+  if (m_thread_api->getType(dyn_cast<CallBase>(join_inst)) ==
       ThreadAPI::TD_CUDA_DEVICE_SYNC) {
     for (const auto &fork_entry : m_thread_parents) {
       ThreadID child_tid = fork_entry.first;

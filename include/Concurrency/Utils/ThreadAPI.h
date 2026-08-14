@@ -73,7 +73,16 @@ public:
   };
 
   enum class LockSemanticKind { None, Shared, Exclusive, Release };
-  enum class LockOwnershipEffect { Acquire, Deferred, Try, Adopt, Release };
+  enum class LockOwnershipEffect {
+    Acquire,
+    Deferred,
+    Try,
+    Adopt,
+    Release,
+    Transfer,
+    Detach,
+    Swap
+  };
   enum class TryLockSuccess { Unknown, Zero, NonZero };
 
   struct LockSemanticInfo {
@@ -245,6 +254,7 @@ public:
 
     // CUDA / NVVM
     TD_CUDA_KERNEL_LAUNCH,  ///< CUDA kernel launch configuration or launch
+    TD_CUDA_MULTI_DEVICE_LAUNCH, ///< Aggregate multi-device launch records
     TD_CUDA_DEVICE_SYNC,    ///< cudaDeviceSynchronize/cudaThreadSynchronize
     TD_CUDA_BARRIER,        ///< __syncthreads / llvm.nvvm.barrier0
     TD_CUDA_WARP_BARRIER,   ///< __syncwarp / llvm.nvvm.bar.warp.sync
@@ -507,8 +517,15 @@ public:
     TD_KERNEL_FINISH_WAIT,     ///< finish_wait
 
     // Linux Kernel Memory Barriers
-    TD_KERNEL_MEMORY_BARRIER ///< mb, rmb, wmb, smp_mb, smp_rmb, smp_wmb,
-                             ///< barrier
+    TD_KERNEL_MEMORY_BARRIER, ///< mb, rmb, wmb, smp_mb, smp_rmb, smp_wmb,
+                              ///< barrier
+
+    // Wrapper-state operations live at the end to keep legacy TD_TYPE values
+    // stable for clients that persist or iterate the historical enum range.
+    TD_CPP_LOCK_MOVE_CTOR,   ///< unique_lock/shared_lock ownership transfer
+    TD_CPP_LOCK_MOVE_ASSIGN, ///< wrapper move assignment
+    TD_CPP_LOCK_SWAP,        ///< wrapper state exchange
+    TD_CPP_LOCK_RELEASE      ///< unique_lock::release ownership detach
   };
 
   struct APIDescription {
@@ -575,11 +592,14 @@ public:
     unsigned ret_arg = 1;
   };
   ForkArgIndices getForkArgIndices(const llvm::Function *F) const;
+  ForkArgIndices getForkArgIndices(const llvm::CallBase *cb) const;
   JoinArgIndices getJoinArgIndices(const llvm::Function *F) const;
+  JoinArgIndices getJoinArgIndices(const llvm::CallBase *cb) const;
 
 private:
   /// Return true if the callee is registered in the explicit API map/config.
   bool hasMappedAPIEntry(const llvm::Function *F) const;
+  bool hasMappedAPIEntry(const llvm::CallBase *cb) const;
 
   /// Return true for std::thread-like constructors whose operand layout is not
   /// pthread-compatible.
@@ -620,6 +640,9 @@ private:
   llvm::SmallVector<const llvm::Value *, 4>
   getCppWrapperUnderlyingLocks(const llvm::Instruction *inst) const;
 
+  const llvm::CallBase *
+  getKernelThreadCreateCall(const llvm::Instruction *inst) const;
+
   bool cppWrapperDestructorDefinitelyReleases(
       const llvm::Instruction *inst) const;
 
@@ -643,6 +666,7 @@ private:
 
   /// Initialize the map
   void init();
+  void reinitialize();
 
   /// Static reference
   static ThreadAPI *tdAPI;
@@ -660,8 +684,10 @@ private:
   RuntimeLibrary inferLibrary(TD_TYPE type) const;
   bool isLibraryEnabled(RuntimeLibrary library) const;
   const APIDescription *lookupDescription(const llvm::Function *F) const;
+  const APIDescription *lookupDescription(llvm::StringRef name) const;
   const MatchRule *lookupMatchRule(llvm::StringRef normalized_name) const;
   TD_TYPE getConfiguredType(llvm::StringRef normalized_name) const;
+  TD_TYPE getTypeForName(llvm::StringRef name) const;
 
 public:
   inline bool isSemaphoreType(TD_TYPE type) const {
@@ -671,9 +697,7 @@ public:
 
   /// Get the function type if it is a threadAPI function
   TD_TYPE getType(const llvm::Function *F) const;
-  TD_TYPE getType(const llvm::CallBase *cb) const {
-    return getType(getCallee(cb));
-  }
+  TD_TYPE getType(const llvm::CallBase *cb) const;
 
   /// Get the concurrency configuration
   const concurrency::ConcurrencyConfig &getConfig() const { return m_config; }
@@ -684,6 +708,13 @@ public:
   }
 
   APIDescription describe(const llvm::Function *F) const;
+  APIDescription describe(const llvm::CallBase *cb) const;
+  RuntimeLibrary getRuntimeLibrary(const llvm::CallBase *cb) const {
+    return describe(cb).library;
+  }
+  std::string getSemanticTag(const llvm::CallBase *cb) const {
+    return describe(cb).semantic_tag;
+  }
   RuntimeLibrary getRuntimeLibrary(const llvm::Function *F) const {
     return describe(F).library;
   }
@@ -722,6 +753,9 @@ public:
   bool hasSemanticTag(const llvm::Function *F, llvm::StringRef tag) const {
     return describe(F).semantic_tag == tag;
   }
+  bool hasSemanticTag(const llvm::CallBase *cb, llvm::StringRef tag) const {
+    return describe(cb).semantic_tag == tag;
+  }
   bool semanticTagStartsWith(const llvm::Function *F,
                              llvm::StringRef prefix) const {
     return llvm::StringRef(describe(F).semantic_tag).startswith(prefix);
@@ -735,6 +769,10 @@ public:
     }
     return false;
   }
+  bool hasTrait(const llvm::CallBase *cb, llvm::StringRef trait) const {
+    const APIDescription description = describe(cb);
+    return llvm::is_contained(description.traits, trait.str());
+  }
 
   /// Return a static reference to the singleton instance.
   static ThreadAPI *getThreadAPI() {
@@ -744,10 +782,13 @@ public:
     return tdAPI;
   }
 
-  /// Reset the singleton (useful for testing or re-initialization).
+  /// Reset singleton state in place so retained ThreadAPI pointers stay valid.
   static void resetThreadAPI() {
-    delete tdAPI;
-    tdAPI = nullptr;
+    if (tdAPI == nullptr) {
+      tdAPI = new ThreadAPI();
+      return;
+    }
+    tdAPI->reinitialize();
   }
 
   /// Return the callee/callsite/func
@@ -755,6 +796,10 @@ public:
   const llvm::Function *getCallee(const llvm::Instruction *inst) const;
 
   const llvm::Function *getCallee(const llvm::CallBase *cb) const;
+
+  const llvm::GlobalValue *getCalledGlobal(const llvm::CallBase *cb) const;
+
+  llvm::StringRef getCalledAPIName(const llvm::CallBase *cb) const;
 
   const llvm::CallBase *getLLVMCallSite(const llvm::Instruction *inst) const;
   //@}
@@ -820,9 +865,12 @@ public:
   //@{
   inline bool isForkLike(const llvm::Instruction *inst) const {
     const llvm::Function *callee = getCallee(inst);
-    TD_TYPE t = getType(callee);
+    const llvm::CallBase *cb = getLLVMCallSite(inst);
+    TD_TYPE t = cb ? getType(cb) : getType(callee);
+    if (cb && LinuxKernelModel::isWakeUpProcess(getCalledAPIName(cb)))
+      return getKernelThreadCreateCall(inst) != nullptr;
     return t == TD_FORK || t == TD_JTHREAD_FORK ||
-           t == TD_CUDA_KERNEL_LAUNCH ||
+           t == TD_CUDA_KERNEL_LAUNCH || t == TD_CUDA_MULTI_DEVICE_LAUNCH ||
            (callee && CUDAModel::isLegacyKernelConfiguration(callee->getName())) ||
            (t == TD_ASYNC && !isProvablyDeferredAsyncLaunch(inst));
   }
@@ -840,7 +888,8 @@ public:
   /// Return true if this call proceeds a hare_parallel_for
   //@{
   inline bool isHareParFor(const llvm::Instruction *inst) const {
-    return getType(getCallee(inst)) == HARE_PAR_FOR;
+    const llvm::CallBase *cb = getLLVMCallSite(inst);
+    return cb && getType(cb) == HARE_PAR_FOR;
   }
   inline bool isHareParFor(const llvm::CallBase *cb) const {
     return isHareParFor(llvm::dyn_cast<llvm::Instruction>(cb));
@@ -856,15 +905,20 @@ public:
     if (!isForkLike(inst))
       return nullptr;
     const llvm::Function *callee = getCallee(inst);
-    if (getType(callee) == TD_ASYNC || getType(callee) == TD_CUDA_KERNEL_LAUNCH ||
+    const llvm::CallBase *cb = getLLVMCallSite(inst);
+    TD_TYPE type = cb ? getType(cb) : getType(callee);
+    if (cb && LinuxKernelModel::isWakeUpProcess(getCalledAPIName(cb)))
+      return getCallArg(inst, 0);
+    if (type == TD_ASYNC || type == TD_CUDA_KERNEL_LAUNCH ||
+        type == TD_CUDA_MULTI_DEVICE_LAUNCH ||
         (callee && CUDAModel::isLegacyKernelConfiguration(callee->getName())) ||
-        (callee && getRuntimeLibrary(callee) == RuntimeLibrary::OpenMP))
+        (cb && getRuntimeLibrary(cb) == RuntimeLibrary::OpenMP))
       return nullptr;
     if (isCppThreadLikeFork(callee))
       return getCallArg(inst, 0);
-    if (!hasMappedAPIEntry(callee))
+    if (!hasMappedAPIEntry(cb))
       return nullptr;
-    unsigned idx = getForkArgIndices(callee).thread_arg;
+    unsigned idx = getForkArgIndices(cb).thread_arg;
     return getCallField(inst, idx);
   }
   inline const llvm::Value *getForkedThread(const llvm::CallBase *cb) const {
@@ -876,17 +930,27 @@ public:
     if (!isForkLike(inst))
       return nullptr;
     const llvm::Function *callee = getCallee(inst);
+    const llvm::CallBase *cb = getLLVMCallSite(inst);
+    const TD_TYPE type = cb ? getType(cb) : getType(callee);
+    if (cb && LinuxKernelModel::isWakeUpProcess(getCalledAPIName(cb))) {
+      const llvm::CallBase *create = getKernelThreadCreateCall(inst);
+      if (!create || create->arg_size() < 1)
+        return nullptr;
+      return create->getArgOperand(0)->stripPointerCasts();
+    }
     if (isCppThreadLikeFork(callee))
       return getCppThreadCallable(inst);
 
-    if (getType(callee) == TD_CUDA_KERNEL_LAUNCH ||
+    if (type == TD_CUDA_MULTI_DEVICE_LAUNCH)
+      return nullptr;
+    if (type == TD_CUDA_KERNEL_LAUNCH ||
         CUDAModel::isLegacyKernelConfiguration(callee->getName())) {
       return getCUDALaunchedKernel(inst);
     }
 
-    if (hasSemanticTag(callee, "fork")) {
-      unsigned idx = hasMappedAPIEntry(callee)
-                         ? getForkArgIndices(callee).start_routine_arg
+    if (cb && hasSemanticTag(cb, "fork")) {
+      unsigned idx = hasMappedAPIEntry(cb)
+                         ? getForkArgIndices(cb).start_routine_arg
                          : 2;
       if (const llvm::Value *arg = getCallArg(inst, idx)) {
         arg = arg->stripPointerCasts();
@@ -899,9 +963,9 @@ public:
       return nullptr;
     }
 
-    if (!hasMappedAPIEntry(callee))
+    if (!hasMappedAPIEntry(cb))
       return nullptr;
-    unsigned idx = getForkArgIndices(callee).start_routine_arg;
+    unsigned idx = getForkArgIndices(cb).start_routine_arg;
     if (const llvm::Value *arg = getCallArg(inst, idx))
       return arg->stripPointerCasts();
     return nullptr;
@@ -916,13 +980,20 @@ public:
   getActualParmAtForkSite(const llvm::Instruction *inst) const {
     if (!isForkLike(inst))
       return nullptr;
-    if (getType(getCallee(inst)) == TD_CUDA_KERNEL_LAUNCH ||
+    const llvm::Function *callee = getCallee(inst);
+    const llvm::CallBase *cb = getLLVMCallSite(inst);
+    if (cb && LinuxKernelModel::isWakeUpProcess(getCalledAPIName(cb))) {
+      const llvm::CallBase *create = getKernelThreadCreateCall(inst);
+      return create && create->arg_size() > 1 ? create->getArgOperand(1)
+                                               : nullptr;
+    }
+    if ((cb && getType(cb) == TD_CUDA_KERNEL_LAUNCH) ||
         (getCallee(inst) && CUDAModel::isLegacyKernelConfiguration(
                                 getCallee(inst)->getName())) ||
         isCppThreadLikeFork(getCallee(inst)) ||
-        !hasMappedAPIEntry(getCallee(inst)))
+        !hasMappedAPIEntry(cb))
       return nullptr;
-    unsigned idx = getForkArgIndices(getCallee(inst)).arg_arg;
+    unsigned idx = getForkArgIndices(cb).arg_arg;
     return getCallArg(inst, idx);
   }
   inline const llvm::Value *
@@ -955,17 +1026,23 @@ public:
       return payload_args;
     }
 
-    if (getType(callee) == TD_CUDA_KERNEL_LAUNCH) {
+    if (getType(cb) == TD_CUDA_KERNEL_LAUNCH) {
       const CUDAModel::KernelLaunchLayout layout =
-          CUDAModel::getKernelLaunchLayout(callee->getName());
+          CUDAModel::getKernelLaunchLayout(getCalledAPIName(cb));
       if (const llvm::Value *args = getCallArg(inst, layout.payload_arg))
         payload_args.push_back(args);
       return payload_args;
     }
 
-    if (getRuntimeLibrary(callee) == RuntimeLibrary::OpenMP &&
-        hasSemanticTag(callee, "fork")) {
-      const ForkArgIndices layout = getForkArgIndices(callee);
+    if (getType(cb) == TD_CUDA_MULTI_DEVICE_LAUNCH) {
+      // Kernels and parameter arrays are nested in an array of launch records.
+      // Keep the operation fork-like but do not invent direct operand layouts.
+      return payload_args;
+    }
+
+    if (getRuntimeLibrary(cb) == RuntimeLibrary::OpenMP &&
+        hasSemanticTag(cb, "fork")) {
+      const ForkArgIndices layout = getForkArgIndices(cb);
       const unsigned begin = layout.variadic_payload
                                  ? layout.payload_begin
                                  : layout.arg_arg;
@@ -1046,7 +1123,8 @@ public:
   //@{
   inline bool isJoinLike(const llvm::Instruction *inst) const {
     const llvm::Function *callee = getCallee(inst);
-    TD_TYPE t = getType(callee);
+    const llvm::CallBase *cb = getLLVMCallSite(inst);
+    TD_TYPE t = cb ? getType(cb) : getType(callee);
     return t == TD_JOIN || t == TD_JTHREAD_JOIN || t == TD_CUDA_DEVICE_SYNC;
   }
   inline bool isJoinLike(const llvm::CallBase *cb) const {
@@ -1067,10 +1145,11 @@ public:
   inline const llvm::Value *
   getJoinedThread(const llvm::Instruction *inst) const {
     assert(isTDJoin(inst) && "not a thread join function!");
-    if (getType(getCallee(inst)) == TD_CUDA_DEVICE_SYNC) {
+    const llvm::CallBase *cb = getLLVMCallSite(inst);
+    if (cb && getType(cb) == TD_CUDA_DEVICE_SYNC) {
       return nullptr;
     }
-    unsigned idx = getJoinArgIndices(getCallee(inst)).thread_arg;
+    unsigned idx = getJoinArgIndices(cb).thread_arg;
     const llvm::Value *join = getCallField(inst, idx);
     if (!join)
       return nullptr;
@@ -1091,14 +1170,15 @@ public:
   inline const llvm::Value *
   getRetParmAtJoinedSite(const llvm::Instruction *inst) const {
     assert(isTDJoin(inst) && "not a thread join function!");
-    if (getType(getCallee(inst)) == TD_CUDA_DEVICE_SYNC) {
+    const llvm::CallBase *cb = getLLVMCallSite(inst);
+    if (cb && getType(cb) == TD_CUDA_DEVICE_SYNC) {
       return nullptr;
     }
     const llvm::Function *callee = getCallee(inst);
     if (callee && (CppThreadingModel::isJoin(callee->getName()) ||
                    CppThreadingModel::isJthreadJoin(callee->getName())))
       return nullptr;
-    unsigned idx = getJoinArgIndices(getCallee(inst)).ret_arg;
+    unsigned idx = getJoinArgIndices(cb).ret_arg;
     return getCallField(inst, idx);
   }
   inline const llvm::Value *
@@ -1110,11 +1190,12 @@ public:
   /// Return true if this call exits/terminate a thread
   //@{
   inline bool isTDExit(const llvm::Instruction *inst) const {
-    return getType(getCallee(inst)) == TD_EXIT;
+    const llvm::CallBase *cb = getLLVMCallSite(inst);
+    return cb && getType(cb) == TD_EXIT;
   }
 
   inline bool isTDExit(const llvm::CallBase *cb) const {
-    return getType(getCallee(cb)) == TD_EXIT;
+    return getType(cb) == TD_EXIT;
   }
   //@}
 
@@ -1143,10 +1224,13 @@ public:
   /// Return true if this call is a try-lock (e.g., pthread_mutex_trylock)
   //@{
   inline bool isTryLock(const llvm::Instruction *inst) const {
+    const llvm::CallBase *cb = getLLVMCallSite(inst);
     const llvm::Function *callee = getCallee(inst);
-    TD_TYPE t = getType(callee);
+    TD_TYPE t = cb ? getType(cb) : getType(callee);
+    const APIDescription description = cb ? describe(cb) : describe(callee);
     return t == TD_TRY_ACQUIRE || t == TD_SEMAPHORE_TRY_ACQUIRE ||
            t == TD_CPP_LOCK_TRY ||
+           llvm::is_contained(description.traits, std::string("try-lock")) ||
            (callee &&
             CppThreadingModel::isTryToLockConstructor(callee->getName())) ||
            (callee && (callee->getName() == "pthread_rwlock_tryrdlock" ||
@@ -1167,9 +1251,10 @@ public:
     if (isTryLock(inst))
       return true;
     const llvm::Function *callee = getCallee(inst);
-    if (!callee)
+    const llvm::CallBase *cb = getLLVMCallSite(inst);
+    if (!cb)
       return false;
-    const APIDescription description = describe(callee);
+    const APIDescription description = cb ? describe(cb) : describe(callee);
     if (description.conditional_acquire)
       return true;
     const llvm::StringRef name = callee->getName();
@@ -1193,7 +1278,8 @@ public:
   /// Return true if this call acquires a read lock (rwlock_rdlock)
   //@{
   inline bool isReadLockAcquire(const llvm::Instruction *inst) const {
-    TD_TYPE t = getType(getCallee(inst));
+    const llvm::CallBase *cb = getLLVMCallSite(inst);
+    TD_TYPE t = cb ? getType(cb) : getType(getCallee(inst));
     return t == TD_RWLOCK_RDLOCK || t == TD_SHARED_RDLOCK ||
            (t == TD_CPP_LOCK_TRY && getCallee(inst) &&
             (CppThreadingModel::isSharedLockTryAcquire(
@@ -1213,7 +1299,8 @@ public:
   /// Return true if this call acquires a write lock (rwlock_wrlock)
   //@{
   inline bool isWriteLockAcquire(const llvm::Instruction *inst) const {
-    TD_TYPE t = getType(getCallee(inst));
+    const llvm::CallBase *cb = getLLVMCallSite(inst);
+    TD_TYPE t = cb ? getType(cb) : getType(getCallee(inst));
     return t == TD_RWLOCK_WRLOCK || t == TD_SHARED_WRLOCK ||
            (t == TD_CPP_LOCK_TRY && getCallee(inst) &&
             !CppThreadingModel::isSharedLockTryAcquire(
@@ -1239,7 +1326,7 @@ public:
       return nullptr;
 
     const llvm::Function *callee = getCallee(inst);
-    TD_TYPE t = getType(callee);
+    TD_TYPE t = getType(cb);
     switch (t) {
     case TD_LOCK_GUARD_CTOR:
     case TD_UNIQUE_LOCK_CTOR:
@@ -1320,7 +1407,7 @@ public:
     }
 
     const llvm::Function *callee = getCallee(inst);
-    TD_TYPE t = getType(callee);
+    TD_TYPE t = getType(cb);
     switch (t) {
     case TD_LOCK_GUARD_CTOR:
     case TD_LOCK_GUARD_DTOR:
@@ -1332,10 +1419,16 @@ public:
     case TD_SCOPED_LOCK_DTOR:
     case TD_SHARED_LOCK_CTOR:
     case TD_SHARED_LOCK_DTOR:
+    case TD_CPP_LOCK_MOVE_CTOR:
+    case TD_CPP_LOCK_MOVE_ASSIGN:
+    case TD_CPP_LOCK_SWAP:
+    case TD_CPP_LOCK_RELEASE:
       if (const llvm::Value *underlying = getCppWrapperUnderlyingLock(inst)) {
         return underlying;
       }
-      if (t == TD_SCOPED_LOCK_CTOR || t == TD_SCOPED_LOCK_DTOR)
+      if (t == TD_SCOPED_LOCK_CTOR || t == TD_SCOPED_LOCK_DTOR ||
+          t == TD_CPP_LOCK_MOVE_CTOR || t == TD_CPP_LOCK_MOVE_ASSIGN ||
+          t == TD_CPP_LOCK_SWAP || t == TD_CPP_LOCK_RELEASE)
         return nullptr;
       return cb->getArgOperand(0)->stripPointerCasts();
     case TD_SHARED_RDLOCK:
@@ -1378,8 +1471,12 @@ public:
     llvm::SmallVector<const llvm::Value *, 4> identities;
     if (!inst)
       return identities;
-    TD_TYPE type = getType(getCallee(inst));
-    if (type == TD_SCOPED_LOCK_CTOR || type == TD_SCOPED_LOCK_DTOR) {
+    const llvm::CallBase *cb = getLLVMCallSite(inst);
+    TD_TYPE type = cb ? getType(cb) : getType(getCallee(inst));
+    if (type == TD_SCOPED_LOCK_CTOR || type == TD_SCOPED_LOCK_DTOR ||
+        type == TD_CPP_LOCK_MOVE_CTOR ||
+        type == TD_CPP_LOCK_MOVE_ASSIGN || type == TD_CPP_LOCK_SWAP ||
+        type == TD_CPP_LOCK_RELEASE) {
       identities = getCppWrapperUnderlyingLocks(inst);
       return identities;
     }
@@ -1391,6 +1488,11 @@ public:
   inline llvm::SmallVector<const llvm::Value *, 4>
   getAnalysisLockIdentities(const llvm::CallBase *cb) const {
     return getAnalysisLockIdentities(llvm::dyn_cast<llvm::Instruction>(cb));
+  }
+
+  inline bool
+  cppWrapperDestructorReleases(const llvm::Instruction *inst) const {
+    return cppWrapperDestructorDefinitelyReleases(inst);
   }
 
   inline const llvm::Value *
@@ -1431,7 +1533,8 @@ public:
       return info;
     }
 
-    TD_TYPE type = getType(callee);
+    const llvm::CallBase *cb = getLLVMCallSite(inst);
+    TD_TYPE type = cb ? getType(cb) : getType(callee);
     if ((type == TD_UNIQUE_LOCK_DTOR || type == TD_SHARED_LOCK_DTOR) &&
         !cppWrapperDestructorDefinitelyReleases(inst)) {
       info.kind = LockSemanticKind::Release;
@@ -1444,7 +1547,8 @@ public:
     info.conditional = isConditionalLockAcquire(inst);
     if (info.conditional) {
       const TD_TYPE type = getType(callee);
-      const APIDescription description = describe(callee);
+      const llvm::CallBase *cb = getLLVMCallSite(inst);
+      const APIDescription description = cb ? describe(cb) : describe(callee);
       if (description.success != TryLockSuccess::Unknown) {
         info.try_success = description.success;
       } else if (callee &&
@@ -1498,10 +1602,8 @@ public:
     const llvm::CallBase *cb = getLLVMCallSite(inst);
     if (!cb)
       return nullptr;
-    TD_TYPE t = getType(getCallee(inst));
-    if (t == TD_OMP_SINGLE_END || t == TD_OMP_SECTIONS_END ||
-        t == TD_OMP_FOR_STATIC_FINI || t == TD_OMP_FOR_DISPATCH_FINI ||
-        t == TD_OMP_REDUCE_START) {
+    TD_TYPE t = getType(cb);
+    if (t == TD_OMP_REDUCE_START) {
       return inst;
     }
     const llvm::Function *callee = getCallee(inst);
@@ -1524,12 +1626,13 @@ public:
   /// Return true if this call waits on a condition variable
   //@{
   inline bool isTDCondWait(const llvm::Instruction *inst) const {
-    TD_TYPE t = getType(getCallee(inst));
+    const llvm::CallBase *cb = getLLVMCallSite(inst);
+    TD_TYPE t = cb ? getType(cb) : TD_DUMMY;
     return t == TD_COND_WAIT;
   }
 
   inline bool isTDCondWait(const llvm::CallBase *cb) const {
-    TD_TYPE t = getType(getCallee(cb));
+    TD_TYPE t = getType(cb);
     return t == TD_COND_WAIT;
   }
   //@}
@@ -1537,12 +1640,13 @@ public:
   /// Return true if this call signals a condition variable
   //@{
   inline bool isTDCondSignal(const llvm::Instruction *inst) const {
-    TD_TYPE t = getType(getCallee(inst));
+    const llvm::CallBase *cb = getLLVMCallSite(inst);
+    TD_TYPE t = cb ? getType(cb) : TD_DUMMY;
     return t == TD_COND_SIGNAL;
   }
 
   inline bool isTDCondSignal(const llvm::CallBase *cb) const {
-    TD_TYPE t = getType(getCallee(cb));
+    TD_TYPE t = getType(cb);
     return t == TD_COND_SIGNAL;
   }
   //@}
@@ -1550,12 +1654,13 @@ public:
   /// Return true if this call broadcasts a condition variable
   //@{
   inline bool isTDCondBroadcast(const llvm::Instruction *inst) const {
-    TD_TYPE t = getType(getCallee(inst));
+    const llvm::CallBase *cb = getLLVMCallSite(inst);
+    TD_TYPE t = cb ? getType(cb) : TD_DUMMY;
     return t == TD_COND_BROADCAST;
   }
 
   inline bool isTDCondBroadcast(const llvm::CallBase *cb) const {
-    TD_TYPE t = getType(getCallee(cb));
+    TD_TYPE t = getType(cb);
     return t == TD_COND_BROADCAST;
   }
   //@}
@@ -1604,7 +1709,8 @@ public:
       return semantics;
     }
 
-    const TD_TYPE t = getType(getCallee(inst));
+    const llvm::CallBase *cb = getLLVMCallSite(inst);
+    const TD_TYPE t = cb ? getType(cb) : getType(getCallee(inst));
     const bool shared_acquire = isReadLockAcquire(inst);
     const bool shared_release = isSharedLockRelease(inst);
     const bool exclusive_acquire = isExclusiveLockAcquire(inst);
@@ -1631,12 +1737,13 @@ public:
   }
 
   inline bool isExclusiveLockAcquire(const llvm::Instruction *inst) const {
+    const llvm::CallBase *cb = getLLVMCallSite(inst);
     const llvm::Function *callee = getCallee(inst);
-    TD_TYPE t = getType(callee);
+    TD_TYPE t = cb ? getType(cb) : getType(callee);
     const bool binary_semaphore =
-        callee && hasTrait(callee, "binary-semaphore") && isSemaphoreOp(inst);
+        cb && hasTrait(cb, "binary-semaphore") && isSemaphoreOp(inst);
     return ((t == TD_ACQUIRE || t == TD_TRY_ACQUIRE) &&
-            !(callee && hasTrait(callee, "semaphore"))) ||
+            !(cb && hasTrait(cb, "semaphore"))) ||
            t == TD_RWLOCK_WRLOCK || t == TD_SHARED_WRLOCK ||
            t == TD_OMP_ORDERED_START ||
            (t == TD_LOCK_GUARD_CTOR &&
@@ -1650,7 +1757,7 @@ public:
            t == TD_UNIQUE_LOCK_LOCK ||
            t == TD_SCOPED_LOCK_CTOR ||
            (t == TD_CPP_LOCK_TRY && !isReadLockAcquire(inst)) ||
-           ((isSemaphoreType(t) || (callee && hasTrait(callee, "semaphore"))) &&
+           ((isSemaphoreType(t) || (cb && hasTrait(cb, "semaphore"))) &&
             binary_semaphore) ||
            t == TD_KERNEL_SPIN_LOCK || t == TD_KERNEL_SPIN_TRYLOCK ||
            t == TD_KERNEL_MUTEX_LOCK || t == TD_KERNEL_MUTEX_TRYLOCK ||
@@ -1663,23 +1770,24 @@ public:
   }
 
   inline bool isExclusiveLockRelease(const llvm::Instruction *inst) const {
+    const llvm::CallBase *cb = getLLVMCallSite(inst);
     const llvm::Function *callee = getCallee(inst);
-    TD_TYPE t = getType(callee);
+    TD_TYPE t = cb ? getType(cb) : getType(callee);
     const bool binary_semaphore =
-        callee && hasTrait(callee, "binary-semaphore") && isSemaphoreOp(inst);
+        cb && hasTrait(cb, "binary-semaphore") && isSemaphoreOp(inst);
     const bool shared_mutex_exclusive_unlock =
         t == TD_SHARED_UNLOCK && callee &&
         (CppThreadingModel::isSharedLockExclusiveRelease(callee->getName()) ||
          CppThreadingModel::isSharedTimedLockExclusiveRelease(
              callee->getName()));
-    return (t == TD_RELEASE && !(callee && hasTrait(callee, "semaphore"))) ||
+    return (t == TD_RELEASE && !(cb && hasTrait(cb, "semaphore"))) ||
            shared_mutex_exclusive_unlock ||
            t == TD_OMP_ORDERED_END || t == TD_LOCK_GUARD_DTOR ||
            (t == TD_UNIQUE_LOCK_DTOR &&
             cppWrapperDestructorDefinitelyReleases(inst)) ||
            t == TD_UNIQUE_LOCK_UNLOCK ||
            t == TD_SCOPED_LOCK_DTOR ||
-           ((isSemaphoreType(t) || (callee && hasTrait(callee, "semaphore"))) &&
+           ((isSemaphoreType(t) || (cb && hasTrait(cb, "semaphore"))) &&
             binary_semaphore) ||
            t == TD_KERNEL_SPIN_UNLOCK || t == TD_KERNEL_MUTEX_UNLOCK ||
            t == TD_KERNEL_UP || t == TD_KERNEL_WRITE_UNLOCK ||
@@ -1691,8 +1799,9 @@ public:
   }
 
   inline bool isSharedLockAcquire(const llvm::Instruction *inst) const {
+    const llvm::CallBase *cb = getLLVMCallSite(inst);
     const llvm::Function *callee = getCallee(inst);
-    TD_TYPE t = getType(callee);
+    TD_TYPE t = cb ? getType(cb) : getType(callee);
     return t == TD_RWLOCK_RDLOCK || t == TD_SHARED_RDLOCK ||
            (t == TD_SHARED_LOCK_CTOR &&
             !(callee && (CppThreadingModel::isDeferLockConstructor(
@@ -1708,8 +1817,9 @@ public:
   }
 
   inline bool isSharedLockRelease(const llvm::Instruction *inst) const {
+    const llvm::CallBase *cb = getLLVMCallSite(inst);
     const llvm::Function *callee = getCallee(inst);
-    TD_TYPE t = getType(callee);
+    TD_TYPE t = cb ? getType(cb) : getType(callee);
     const bool exclusive_unlock =
         callee &&
         (CppThreadingModel::isSharedLockExclusiveRelease(callee->getName()) ||
@@ -1727,7 +1837,8 @@ public:
 
   /// True for any C++20 barrier/latch/semaphore synchronization operation.
   inline bool isBarrierOp(const llvm::Instruction *inst) const {
-    TD_TYPE t = getType(getCallee(inst));
+    const llvm::CallBase *cb = getLLVMCallSite(inst);
+    TD_TYPE t = cb ? getType(cb) : getType(getCallee(inst));
     return t == TD_BAR_WAIT || t == TD_BAR_INIT || t == TD_LATCH_COUNT_DOWN ||
            t == TD_LATCH_WAIT || t == TD_LATCH_ARRIVE_WAIT ||
            t == TD_BARRIER_ARRIVE_WAIT || t == TD_BARRIER_ARRIVE ||
@@ -1738,14 +1849,15 @@ public:
   /// True for any semaphore acquire/release operation.
   inline bool isSemaphoreOp(const llvm::Instruction *inst) const {
     const llvm::Function *callee = getCallee(inst);
-    if (!callee) {
+    const llvm::CallBase *cb = getLLVMCallSite(inst);
+    if (!cb) {
       return false;
     }
-    TD_TYPE t = getType(callee);
+    TD_TYPE t = getType(cb);
     if (isSemaphoreType(t)) {
       return true;
     }
-    return hasTrait(callee, "semaphore") &&
+    return hasTrait(cb, "semaphore") &&
            (t == TD_ACQUIRE || t == TD_TRY_ACQUIRE || t == TD_RELEASE);
   }
 
@@ -1755,10 +1867,11 @@ public:
 
   inline bool isBinarySemaphoreOp(const llvm::Instruction *inst) const {
     const llvm::Function *callee = getCallee(inst);
-    if (!callee || !isSemaphoreOp(inst)) {
+    const llvm::CallBase *cb = getLLVMCallSite(inst);
+    if (!cb || !isSemaphoreOp(inst)) {
       return false;
     }
-    if (hasTrait(callee, "binary-semaphore")) {
+    if (hasTrait(cb, "binary-semaphore")) {
       return true;
     }
     return callee->getName().contains("binary_semaphore");
@@ -1769,17 +1882,19 @@ public:
   }
 
   inline bool isLatchLike(const llvm::Instruction *inst) const {
-    TD_TYPE t = getType(getCallee(inst));
+    const llvm::CallBase *cb = getLLVMCallSite(inst);
+    TD_TYPE t = cb ? getType(cb) : TD_DUMMY;
     return t == TD_LATCH_COUNT_DOWN || t == TD_LATCH_WAIT ||
            t == TD_LATCH_ARRIVE_WAIT;
   }
 
   inline bool isBarrierWaitLike(const llvm::Instruction *inst) const {
     const llvm::Function *callee = getCallee(inst);
-    if (callee && hasTrait(callee, "barrier-wait-like")) {
+    const llvm::CallBase *cb = getLLVMCallSite(inst);
+    if (cb && hasTrait(cb, "barrier-wait-like")) {
       return true;
     }
-    TD_TYPE t = getType(callee);
+    TD_TYPE t = cb ? getType(cb) : getType(callee);
     return t == TD_BAR_WAIT || t == TD_LATCH_ARRIVE_WAIT ||
            t == TD_BARRIER_ARRIVE_WAIT || t == TD_BARRIER_WAIT_CPP20 ||
            t == TD_CUDA_BARRIER || t == TD_CUDA_WARP_BARRIER;
@@ -1823,7 +1938,8 @@ public:
 
   /// True for any atomic synchronization operation (future/promise/call_once).
   inline bool isAtomicSyncOp(const llvm::Instruction *inst) const {
-    TD_TYPE t = getType(getCallee(inst));
+    const llvm::CallBase *cb = getLLVMCallSite(inst);
+    TD_TYPE t = cb ? getType(cb) : TD_DUMMY;
     return t == TD_CALL_ONCE || t == TD_FUTURE_GET || t == TD_FUTURE_WAIT ||
            t == TD_PROMISE_SET || t == TD_ASYNC || t == TD_ATOMIC_WAIT ||
            t == TD_ATOMIC_NOTIFY_ONE || t == TD_ATOMIC_NOTIFY_ALL;

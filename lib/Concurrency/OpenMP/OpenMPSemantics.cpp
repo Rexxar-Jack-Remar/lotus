@@ -800,12 +800,15 @@ void OpenMPSemantics::buildTaskRelations() {
         relation.kind = kind;
         relation.proof = proof;
         relation.reason = reason.str();
+        concurrency::addRelationEvidence(relation, relation.reason);
 
         auto it = m_relations.find(key);
         if (it == m_relations.end() ||
             concurrency::relationPriority(kind) >
                 concurrency::relationPriority(it->second.kind)) {
           m_relations[key] = std::move(relation);
+        } else if (it->second.kind == kind) {
+          concurrency::mergeSameKindRelation(it->second, relation);
         }
       };
 
@@ -1127,10 +1130,12 @@ void OpenMPSemantics::scanSchedulingContext(
   }
 
   ThreadAPI *api = ThreadAPI::getThreadAPI();
-  const bool precise_phase_tracking = hasLinearControlFlow(func);
-  if (!precise_phase_tracking) {
-    ++m_deferred_reason_counts["omp_cfg_path_sensitive_semantics_deferred"];
+  if (!api->getConfig().enable_openmp()) {
+    call_stack.erase(func);
+    return;
   }
+  const bool precise_phase_tracking = hasLinearControlFlow(func);
+  bool recorded_cfg_model_gap = false;
   auto currentPhaseToken = [&state]() -> size_t {
     return state.phase_stack.empty() ? 0 : state.phase_stack.back();
   };
@@ -1261,8 +1266,15 @@ void OpenMPSemantics::scanSchedulingContext(
       }
 
       const Function *callee = api->getCallee(call);
-      ThreadAPI::TD_TYPE type = api->getType(callee);
-      ThreadAPI::RuntimeLibrary library = api->getRuntimeLibrary(callee);
+      ThreadAPI::TD_TYPE type = api->getType(call);
+      ThreadAPI::RuntimeLibrary library = api->getRuntimeLibrary(call);
+      if (!precise_phase_tracking && !recorded_cfg_model_gap &&
+          type != ThreadAPI::TD_DUMMY &&
+          library == ThreadAPI::RuntimeLibrary::OpenMP) {
+        ++m_deferred_reason_counts[
+            "omp_cfg_path_sensitive_semantics_deferred"];
+        recorded_cfg_model_gap = true;
+      }
       bool is_nowait_variant = callee && callee->getName().contains("nowait");
 
       if (library == ThreadAPI::RuntimeLibrary::OpenMP) {
@@ -1278,7 +1290,7 @@ void OpenMPSemantics::scanSchedulingContext(
             ++m_summary.nested_parallelism_flat_regions;
           }
           const bool explicit_parallel_end =
-              callee && api->hasTrait(callee, "parallel-explicit-end");
+              api->hasTrait(call, "parallel-explicit-end");
           TraversalState::RegionFrame frame =
               pushRegion(WaitBoundaryInfo::Kind::Unknown,
                          SemanticEntityKind::ParallelRegion, call);
@@ -1312,7 +1324,7 @@ void OpenMPSemantics::scanSchedulingContext(
               state.taskgroup_stack.empty() ? 0 : state.taskgroup_stack.back(),
               currentRegionId(), boundary.semantic_entity_id, nullptr,
               WaitBoundaryInfo::Kind::Barrier, boundary.is_partial_wait);
-          if (callee && api->hasTrait(callee, "parallel-end")) {
+          if (api->hasTrait(call, "parallel-end")) {
             popRegion(WaitBoundaryInfo::Kind::Unknown, call);
           }
           advanceCurrentPhase();
@@ -1658,8 +1670,7 @@ void OpenMPSemantics::scanSchedulingContext(
       if (type == ThreadAPI::TD_OMP_SINGLE_END ||
           type == ThreadAPI::TD_OMP_SECTIONS_END ||
           type == ThreadAPI::TD_OMP_FOR_STATIC_FINI ||
-          type == ThreadAPI::TD_OMP_FOR_DISPATCH_FINI ||
-          type == ThreadAPI::TD_OMP_REDUCE_START) {
+          type == ThreadAPI::TD_OMP_FOR_DISPATCH_FINI) {
         WaitBoundaryInfo::Kind kind = WaitBoundaryInfo::Kind::Unknown;
         if (type == ThreadAPI::TD_OMP_SINGLE_END) {
           kind = WaitBoundaryInfo::Kind::SingleEnd;
@@ -1669,30 +1680,21 @@ void OpenMPSemantics::scanSchedulingContext(
           kind = WaitBoundaryInfo::Kind::ForFini;
         } else if (type == ThreadAPI::TD_OMP_FOR_DISPATCH_FINI) {
           kind = WaitBoundaryInfo::Kind::DispatchFini;
-        } else if (type == ThreadAPI::TD_OMP_REDUCE_START) {
-          kind = WaitBoundaryInfo::Kind::Reduce;
         }
-        WaitBoundaryInfo info = recordBoundary(call, kind);
-        TraversalState::RegionFrame frame;
-        const bool should_pop_region =
-            type == ThreadAPI::TD_OMP_SINGLE_END ||
-            type == ThreadAPI::TD_OMP_SECTIONS_END ||
-            type == ThreadAPI::TD_OMP_FOR_STATIC_FINI ||
-            type == ThreadAPI::TD_OMP_FOR_DISPATCH_FINI;
-        if (should_pop_region) {
-          frame = popRegion(kind, call);
-        } else {
-          frame.id = currentRegionId();
-          frame.entity_id = currentRegionEntityId();
-        }
+        popRegion(kind, call);
+        continue;
+      }
+
+      if (type == ThreadAPI::TD_OMP_REDUCE_START) {
+        WaitBoundaryInfo info =
+            recordBoundary(call, WaitBoundaryInfo::Kind::Reduce);
         addTaskEvent(
-            kind == WaitBoundaryInfo::Kind::Barrier
-                ? OpenMPTaskEvent::Kind::Barrier
-                : OpenMPTaskEvent::Kind::Taskwait,
+            OpenMPTaskEvent::Kind::Taskwait,
             call, state.scheduling_context_id, state.sequence_index,
             info.event_order, currentPhaseToken(),
             state.taskgroup_stack.empty() ? 0 : state.taskgroup_stack.back(),
-            frame.id, info.semantic_entity_id, nullptr, kind);
+            currentRegionId(), info.semantic_entity_id, nullptr,
+            WaitBoundaryInfo::Kind::Reduce);
         advanceCurrentPhase();
         continue;
       }

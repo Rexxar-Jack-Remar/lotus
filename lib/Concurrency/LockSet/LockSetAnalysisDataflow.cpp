@@ -3,6 +3,7 @@
 #include "Concurrency/LockSet/LockSetAnalysisSupport.h"
 
 #include <limits>
+#include <functional>
 #include <queue>
 #include <set>
 
@@ -38,31 +39,107 @@ void LockSetAnalysis::detectTryLockSuccessBranches(Function *func) {
     }
   }
 
+  struct BooleanTryCondition {
+    const CallBase *call = nullptr;
+    bool true_means_nonzero = true;
+  };
+  auto traceBooleanTryCondition = [&](const Value *root) {
+    std::function<BooleanTryCondition(const Value *, bool,
+                                      std::unordered_set<const Value *> &)>
+        trace;
+    trace = [&](const Value *value, bool truth,
+                std::unordered_set<const Value *> &visited)
+        -> BooleanTryCondition {
+      if (!value || !visited.insert(value).second)
+        return {};
+      if (const auto *call = dyn_cast<CallBase>(value))
+        return m_thread_api->isConditionalLockAcquire(call)
+                   ? BooleanTryCondition{call, truth}
+                   : BooleanTryCondition{};
+      if (const auto *freeze = dyn_cast<FreezeInst>(value))
+        return trace(freeze->getOperand(0), truth, visited);
+      if (const auto *cast = dyn_cast<CastInst>(value))
+        return trace(cast->getOperand(0), truth, visited);
+      if (const auto *binary = dyn_cast<BinaryOperator>(value)) {
+        if (binary->getOpcode() == Instruction::Xor) {
+          const ConstantInt *constant = dyn_cast<ConstantInt>(binary->getOperand(1));
+          const Value *forwarded = binary->getOperand(0);
+          if (!constant) {
+            constant = dyn_cast<ConstantInt>(binary->getOperand(0));
+            forwarded = binary->getOperand(1);
+          }
+          if (constant && constant->isOne())
+            return trace(forwarded, !truth, visited);
+        }
+      }
+      if (const auto *phi = dyn_cast<PHINode>(value)) {
+        BooleanTryCondition result;
+        for (const Value *incoming : phi->incoming_values()) {
+          std::unordered_set<const Value *> branch_visited = visited;
+          BooleanTryCondition candidate = trace(incoming, truth, branch_visited);
+          if (!candidate.call)
+            return {};
+          if (!result.call)
+            result = candidate;
+          else if (result.call != candidate.call ||
+                   result.true_means_nonzero != candidate.true_means_nonzero)
+            return {};
+        }
+        return result;
+      }
+      if (const auto *select = dyn_cast<SelectInst>(value)) {
+        const auto *true_const = dyn_cast<ConstantInt>(select->getTrueValue());
+        const auto *false_const = dyn_cast<ConstantInt>(select->getFalseValue());
+        if (true_const && false_const && true_const->getType()->isIntegerTy(1) &&
+            false_const->getType()->isIntegerTy(1) &&
+            true_const->getValue() != false_const->getValue()) {
+          const bool condition_truth = truth == true_const->isOne();
+          return trace(select->getCondition(), condition_truth, visited);
+        }
+      }
+      return {};
+    };
+    std::unordered_set<const Value *> visited;
+    return trace(root, true, visited);
+  };
+
   for (BasicBlock &bb : *func) {
     auto *br = dyn_cast<BranchInst>(bb.getTerminator());
     if (!br || !br->isConditional())
       continue;
 
-    // Match: %cmp = icmp eq/ne %trylock_ret, 0
-    auto *cmp = dyn_cast<ICmpInst>(br->getCondition());
-    if (!cmp)
-      continue;
-
-    const Value *lhs = cmp->getOperand(0);
-    const Value *rhs = cmp->getOperand(1);
-
-    const ConstantInt *zero_const = dyn_cast<ConstantInt>(rhs);
-    const Value *trylock_ret = lhs;
-    if (!zero_const) {
-      zero_const = dyn_cast<ConstantInt>(lhs);
-      trylock_ret = rhs;
+    const CallBase *trylock_call = nullptr;
+    bool true_branch_is_nonzero = true;
+    if (const auto *cmp = dyn_cast<ICmpInst>(br->getCondition())) {
+      if (cmp->getPredicate() != ICmpInst::ICMP_EQ &&
+          cmp->getPredicate() != ICmpInst::ICMP_NE)
+        continue;
+      const ConstantInt *compared_const =
+          dyn_cast<ConstantInt>(cmp->getOperand(1));
+      const Value *trylock_ret = cmp->getOperand(0);
+      if (!compared_const) {
+        compared_const = dyn_cast<ConstantInt>(cmp->getOperand(0));
+        trylock_ret = cmp->getOperand(1);
+      }
+      if (!compared_const ||
+          (!compared_const->isZero() &&
+           !(compared_const->isOne() &&
+             trylock_ret->getType()->isIntegerTy(1))))
+        continue;
+      BooleanTryCondition traced = traceBooleanTryCondition(trylock_ret);
+      trylock_call = traced.call;
+      const bool comparison_true_means_nonzero =
+          (cmp->getPredicate() == ICmpInst::ICMP_NE) ==
+          compared_const->isZero();
+      true_branch_is_nonzero = traced.true_means_nonzero ==
+                               comparison_true_means_nonzero;
+    } else {
+      BooleanTryCondition traced =
+          traceBooleanTryCondition(br->getCondition());
+      trylock_call = traced.call;
+      true_branch_is_nonzero = traced.true_means_nonzero;
     }
-    if (!zero_const || !zero_const->isZero())
-      continue;
-
-    const auto *trylock_call = dyn_cast<CallBase>(trylock_ret);
-    if (!trylock_call ||
-        !m_thread_api->isConditionalLockAcquire(trylock_call))
+    if (!trylock_call)
       continue;
 
     const ThreadAPI::LockSemanticInfo semantics =
@@ -74,10 +151,8 @@ void LockSetAnalysis::detectTryLockSuccessBranches(Function *func) {
     const bool zero_means_success =
         semantics.try_success == ThreadAPI::TryLockSuccess::Zero;
 
-    // For "icmp eq ret, 0": true-branch means ret==0
-    // For "icmp ne ret, 0": true-branch means ret!=0
-    bool true_branch_is_zero = (cmp->getPredicate() == ICmpInst::ICMP_EQ);
-    bool true_branch_is_success = (true_branch_is_zero == zero_means_success);
+    bool true_branch_is_success =
+        zero_means_success ? !true_branch_is_nonzero : true_branch_is_nonzero;
 
     BasicBlock *success_bb =
         true_branch_is_success ? br->getSuccessor(0) : br->getSuccessor(1);
@@ -88,6 +163,39 @@ void LockSetAnalysis::detectTryLockSuccessBranches(Function *func) {
         {trylock_call, lock, semantics.kind, true});
     m_trylock_edge_refinements[{source_bb, failure_bb}].push_back(
         {trylock_call, lock, semantics.kind, false});
+  }
+
+  for (BasicBlock &bb : *func) {
+    const auto *switch_inst = dyn_cast<SwitchInst>(bb.getTerminator());
+    if (!switch_inst || switch_inst->getNumCases() != 1)
+      continue;
+    const auto switch_case = *switch_inst->case_begin();
+    if (!switch_case.getCaseValue()->isZero())
+      continue;
+    BooleanTryCondition traced =
+        traceBooleanTryCondition(switch_inst->getCondition());
+    if (!traced.call)
+      continue;
+    const ThreadAPI::LockSemanticInfo semantics =
+        m_thread_api->getLockSemanticInfo(traced.call);
+    LockID lock = getLockValue(traced.call);
+    if (!lock || semantics.try_success == ThreadAPI::TryLockSuccess::Unknown)
+      continue;
+    const bool zero_means_success =
+        semantics.try_success == ThreadAPI::TryLockSuccess::Zero;
+    const bool condition_zero_means_success =
+        zero_means_success == traced.true_means_nonzero;
+    const BasicBlock *zero_bb = switch_case.getCaseSuccessor();
+    const BasicBlock *nonzero_bb = switch_inst->getDefaultDest();
+    const BasicBlock *success_bb =
+        condition_zero_means_success ? zero_bb : nonzero_bb;
+    const BasicBlock *failure_bb =
+        condition_zero_means_success ? nonzero_bb : zero_bb;
+    const BasicBlock *source_bb = switch_inst->getParent();
+    m_trylock_edge_refinements[{source_bb, success_bb}].push_back(
+        {traced.call, lock, semantics.kind, true});
+    m_trylock_edge_refinements[{source_bb, failure_bb}].push_back(
+        {traced.call, lock, semantics.kind, false});
   }
 }
 
@@ -702,6 +810,7 @@ LockSet LockSetAnalysis::transfer(const Instruction *inst,
                             call_type == ThreadAPI::TD_TRY_ACQUIRE ||
                             call_type == ThreadAPI::TD_RWLOCK_RDLOCK ||
                             call_type == ThreadAPI::TD_RWLOCK_WRLOCK ||
+                            call_type == ThreadAPI::TD_CPP_LOCK_TRY ||
                             call_type == ThreadAPI::TD_RELEASE ||
                             call_type == ThreadAPI::TD_SEMAPHORE_ACQUIRE ||
                             call_type == ThreadAPI::TD_SEMAPHORE_RELEASE ||
@@ -722,6 +831,17 @@ LockSet LockSetAnalysis::transfer(const Instruction *inst,
                             call_type == ThreadAPI::TD_KERNEL_WRITE_UNLOCK ||
                             call_type == ThreadAPI::TD_KERNEL_UP_READ ||
                             call_type == ThreadAPI::TD_KERNEL_UP_WRITE;
+
+  if (call_type == ThreadAPI::TD_CPP_LOCK_RELEASE ||
+      call_type == ThreadAPI::TD_CPP_LOCK_MOVE_CTOR ||
+      call_type == ThreadAPI::TD_CPP_LOCK_SWAP) {
+    return out_set;
+  }
+  if (call_type == ThreadAPI::TD_CPP_LOCK_MOVE_ASSIGN) {
+    if (LockID lock = getCppWrapperLockValue(inst))
+      out_set.erase(lock);
+    return out_set;
+  }
 
   if (m_thread_api->isTDAcquire(inst) && raw_lock_api) {
     if (!m_thread_api->isConditionalLockAcquire(inst) || !is_must) {
@@ -816,8 +936,9 @@ LockSet LockSetAnalysis::transfer(const Instruction *inst,
 
       RAIILock::OwnershipKind fallback_ownership =
           RAIILock::RAIILockTracker::getOwnershipKind(call);
-      for (unsigned idx = 1; idx < call->arg_size(); ++idx) {
-        if (LockID lock = getCanonicalLock(call->getArgOperand(idx))) {
+      for (const Value *underlying :
+           RAIILock::RAIILockTracker::extractUnderlyingLocks(call)) {
+        if (LockID lock = getCanonicalLock(underlying)) {
           if (shouldAddAtCtor(lock, fallback_ownership)) {
             out_set.insert(lock);
           }
@@ -830,55 +951,10 @@ LockSet LockSetAnalysis::transfer(const Instruction *inst,
     case ThreadAPI::TD_UNIQUE_LOCK_DTOR:
     case ThreadAPI::TD_SCOPED_LOCK_DTOR:
     case ThreadAPI::TD_SHARED_LOCK_DTOR: {
-      const Function *parent_func = inst->getFunction();
-      auto raii_it = m_raii_locks.find(parent_func);
-      if (raii_it != m_raii_locks.end()) {
-        for (const auto &raii_entry : raii_it->second) {
-          const RAIILock::LockLifetime &lifetime = raii_entry.second;
-          for (const Instruction *dtor : lifetime.destructors) {
-            if (dtor != inst || lifetime.underlyingLocks.empty()) {
-              continue;
-            }
-            for (const Value *underlying : lifetime.underlyingLocks) {
-              LockID lock = getCanonicalLock(underlying);
-              if (!lock) {
-                continue;
-              }
-              out_set.erase(lock);
-              if (is_must) {
-                LockSet to_remove;
-                for (const auto *l : out_set) {
-                  if (mayAlias(l, lock)) {
-                    to_remove.insert(l);
-                  }
-                }
-                for (const auto *l : to_remove) {
-                  out_set.erase(l);
-                }
-              }
-            }
-            return out_set;
-          }
-        }
-      }
-      if (LockID lock = getCppWrapperLockValue(inst)) {
-        out_set.erase(lock);
-        if (is_must) {
-          LockSet to_remove;
-          for (const auto *l : out_set) {
-            if (mayAlias(l, lock)) {
-              to_remove.insert(l);
-            }
-          }
-          for (const auto *l : to_remove) {
-            out_set.erase(l);
-          }
-        }
-        return out_set;
-      }
-      if (is_must) {
-        out_set.clear();
-      }
+      // Precise wrapper-owned releases were handled by
+      // getRAIILocksReleasedAt() above. An empty result means this destructor
+      // is a no-op for the modeled wrapper state (deferred, released,
+      // moved-from, or otherwise not definitely owning).
       return out_set;
     }
 
@@ -899,6 +975,25 @@ LockSet LockSetAnalysis::transfer(const Instruction *inst,
           for (const auto *l : to_remove)
             out_set.erase(l);
         }
+      }
+      return out_set;
+
+    case ThreadAPI::TD_CPP_LOCK_RELEASE:
+      // release() detaches ownership without unlocking; the mutex remains
+      // held, so the program lock fact is unchanged.
+      return out_set;
+
+    case ThreadAPI::TD_CPP_LOCK_MOVE_CTOR:
+    case ThreadAPI::TD_CPP_LOCK_SWAP:
+      // Wrapper state changes do not acquire or release the underlying mutex.
+      // Destructor filtering consults the wrapper transition history.
+      return out_set;
+
+    case ThreadAPI::TD_CPP_LOCK_MOVE_ASSIGN:
+      // Move assignment releases any mutex previously owned by the
+      // destination before transferring the source wrapper state.
+      if (LockID lock = getCppWrapperLockValue(inst)) {
+        out_set.erase(lock);
       }
       return out_set;
 
@@ -1131,10 +1226,11 @@ void LockSetAnalysis::transferReadWrite(const Instruction *inst,
           (!is_must && (ownership == RAIILock::OwnershipKind::Try ||
                         ownership == RAIILock::OwnershipKind::Unknown));
       if (!should_add && ownership != RAIILock::OwnershipKind::Adopt) {
-        break;
+        return;
       }
-      for (unsigned idx = 1; idx < call->arg_size(); ++idx) {
-        if (LockID lock = getCanonicalLock(call->getArgOperand(idx))) {
+      for (const Value *underlying :
+           RAIILock::RAIILockTracker::extractUnderlyingLocks(call)) {
+        if (LockID lock = getCanonicalLock(underlying)) {
           if (ownership == RAIILock::OwnershipKind::Adopt) {
             bool held = false;
             for (const auto *candidate : in_read) {
@@ -1166,10 +1262,11 @@ void LockSetAnalysis::transferReadWrite(const Instruction *inst,
         should_add = false;
       }
       if (!should_add && ownership != RAIILock::OwnershipKind::Adopt) {
-        break;
+        return;
       }
-      for (unsigned idx = 1; idx < call->arg_size(); ++idx) {
-        if (LockID lock = getCanonicalLock(call->getArgOperand(idx))) {
+      for (const Value *underlying :
+           RAIILock::RAIILockTracker::extractUnderlyingLocks(call)) {
+        if (LockID lock = getCanonicalLock(underlying)) {
           if (ownership == RAIILock::OwnershipKind::Adopt) {
             bool held = false;
             for (const auto *candidate : in_write) {
@@ -1193,6 +1290,10 @@ void LockSetAnalysis::transferReadWrite(const Instruction *inst,
     case ThreadAPI::TD_UNIQUE_LOCK_DTOR:
     case ThreadAPI::TD_SCOPED_LOCK_DTOR:
     case ThreadAPI::TD_UNIQUE_LOCK_UNLOCK: {
+      if (call_type != ThreadAPI::TD_UNIQUE_LOCK_UNLOCK &&
+          getRAIILocksReleasedAt(inst).empty()) {
+        return;
+      }
       std::vector<LockID> locks =
           getUnderlyingRAIILocks(inst, call->getArgOperand(0));
       if (locks.empty()) {
@@ -1238,6 +1339,18 @@ void LockSetAnalysis::transferReadWrite(const Instruction *inst,
       }
       return;
     }
+
+    case ThreadAPI::TD_CPP_LOCK_RELEASE:
+    case ThreadAPI::TD_CPP_LOCK_MOVE_CTOR:
+    case ThreadAPI::TD_CPP_LOCK_SWAP:
+      return;
+
+    case ThreadAPI::TD_CPP_LOCK_MOVE_ASSIGN:
+      if (LockID lock = getCppWrapperLockValue(inst)) {
+        out_read.erase(lock);
+        out_write.erase(lock);
+      }
+      return;
 
     default:
       break;

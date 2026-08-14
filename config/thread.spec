@@ -20,6 +20,7 @@ mutex_unlock TD_KERNEL_MUTEX_UNLOCK
 spin_lock TD_KERNEL_SPIN_LOCK
 spin_unlock TD_KERNEL_SPIN_UNLOCK
 kthread_run TD_FORK return 0 1
+wake_up_process TD_FORK 0 none none
 kthread_stop TD_JOIN 0 return
 schedule TD_DUMMY
 

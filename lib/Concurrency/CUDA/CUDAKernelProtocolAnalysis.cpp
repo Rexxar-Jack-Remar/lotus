@@ -31,12 +31,7 @@ void CUDAKernelProtocolAnalysis::runAnalysis() {
       if (!call) {
         continue;
       }
-      auto *callee = call->getCalledFunction();
-      if (!callee) {
-        continue;
-      }
-
-      auto td_type = api->getType(callee);
+      auto td_type = api->getType(call);
 
       if (td_type == ThreadAPI::TD_CUDA_BARRIER) {
         barriers.push_back(call);

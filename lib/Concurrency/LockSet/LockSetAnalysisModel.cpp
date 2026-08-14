@@ -325,10 +325,65 @@ LockSetAnalysis::getRAIILocksReleasedAt(const Instruction *inst) const {
       continue;
     }
 
+    const CallBase *dtor = dyn_cast<CallBase>(inst);
+    const Value *wrapper =
+        dtor && dtor->arg_size() ? dtor->getArgOperand(0)->stripPointerCasts()
+                                 : nullptr;
+    bool owns_at_destruction =
+        lifetime.ownership == RAIILock::OwnershipKind::Immediate ||
+        lifetime.ownership == RAIILock::OwnershipKind::Adopt;
+    for (const Instruction &cursor : instructions(*parent_func)) {
+      if (&cursor == inst)
+        break;
+      const auto *call = dyn_cast<CallBase>(&cursor);
+      if (!call || call->arg_size() == 0)
+        continue;
+      const ThreadAPI::TD_TYPE type = m_thread_api->getType(call);
+      const Value *first = call->getArgOperand(0)->stripPointerCasts();
+      if (first == wrapper && type == ThreadAPI::TD_UNIQUE_LOCK_LOCK)
+        owns_at_destruction = true;
+      else if (first == wrapper &&
+               (type == ThreadAPI::TD_UNIQUE_LOCK_UNLOCK ||
+                type == ThreadAPI::TD_CPP_LOCK_RELEASE))
+        owns_at_destruction = false;
+      else if (type == ThreadAPI::TD_CPP_LOCK_MOVE_CTOR ||
+               type == ThreadAPI::TD_CPP_LOCK_MOVE_ASSIGN) {
+        if (call->arg_size() >= 2 &&
+            call->getArgOperand(1)->stripPointerCasts() == wrapper)
+          owns_at_destruction = false;
+        if (type == ThreadAPI::TD_CPP_LOCK_MOVE_ASSIGN && first == wrapper)
+          owns_at_destruction = false;
+      } else if (type == ThreadAPI::TD_CPP_LOCK_SWAP && call->arg_size() >= 2 &&
+                 (first == wrapper ||
+                  call->getArgOperand(1)->stripPointerCasts() == wrapper)) {
+        owns_at_destruction = false;
+      }
+    }
+    if (!owns_at_destruction)
+      continue;
+
     for (const Value *lock : lifetime.underlyingLocks) {
       if (LockID canonical = getCanonicalLock(lock)) {
         locks.push_back(canonical);
       }
+    }
+  }
+
+  const CallBase *dtor = dyn_cast<CallBase>(inst);
+  const Value *wrapper =
+      dtor && dtor->arg_size() ? dtor->getArgOperand(0)->stripPointerCasts()
+                               : nullptr;
+  if (wrapper) {
+    if (const Value *underlying = getUnderlyingObject(wrapper, 32))
+      wrapper = underlying->stripPointerCasts();
+  }
+  const bool has_tracked_lifetime =
+      wrapper && raii_it->second.find(wrapper) != raii_it->second.end();
+  if (locks.empty() && !has_tracked_lifetime &&
+      m_thread_api->cppWrapperDestructorReleases(inst)) {
+    for (const Value *lock : m_thread_api->getAnalysisLockIdentities(inst)) {
+      if (LockID canonical = getCanonicalLock(lock))
+        locks.push_back(canonical);
     }
   }
 

@@ -6,6 +6,7 @@
 #include "Concurrency/CUDA/CUDAStreamAutomaton.h"
 
 #include <llvm/IR/InstIterator.h>
+#include <llvm/Support/raw_ostream.h>
 
 using namespace llvm;
 
@@ -368,11 +369,8 @@ CUDAAnalysis::CUDAAnalysis(Module &module,
                            lotus::AliasAnalysisWrapper *alias_analysis,
                            DeviceConfig config)
     : m_module(module), m_thread_api(ThreadAPI::getThreadAPI()),
-      m_alias_analysis(alias_analysis), m_device_config(config) {
-  if (!m_alias_analysis) {
-    initializeDefaultAliasAnalysis();
-  }
-}
+      m_alias_analysis(alias_analysis), m_device_config(config),
+      m_cuda_enabled(m_thread_api->getConfig().enable_cuda()) {}
 
 CUDAAnalysis::CUDAAnalysis(Module &module, DeviceConfig config)
     : CUDAAnalysis(module, nullptr, config) {}
@@ -386,6 +384,23 @@ void CUDAAnalysis::runAnalysis() {
   m_memory_transfers.clear();
   m_unified_memory.clear();
   m_abstract_state.clear();
+  m_operation_count = 0;
+  m_device_sync_count = 0;
+  m_barrier_count = 0;
+  m_warp_barrier_count = 0;
+  m_memory_barrier_count = 0;
+  m_module_snapshot.clear();
+  m_cuda_enabled = m_thread_api->getConfig().enable_cuda();
+  if (!m_cuda_enabled) {
+    llvm::raw_string_ostream snapshot_stream(m_module_snapshot);
+    snapshot_stream << m_module;
+    snapshot_stream.flush();
+    m_has_completed_analysis = true;
+    return;
+  }
+  if (!m_alias_analysis) {
+    initializeDefaultAliasAnalysis();
+  }
   size_t launch_sequence = 0;
   CUDASteamAutomatonBuilder automaton_builder(m_abstract_state);
 
@@ -401,8 +416,28 @@ void CUDAAnalysis::runAnalysis() {
         continue;
       }
       const Function *callee = m_thread_api->getCallee(call);
-      ThreadAPI::TD_TYPE type =
-          callee ? m_thread_api->getType(callee) : ThreadAPI::TD_DUMMY;
+      ThreadAPI::TD_TYPE type = m_thread_api->getType(call);
+      if (type != ThreadAPI::TD_DUMMY &&
+          m_thread_api->getRuntimeLibrary(call) ==
+              ThreadAPI::RuntimeLibrary::CUDA) {
+        ++m_operation_count;
+        switch (type) {
+        case ThreadAPI::TD_CUDA_DEVICE_SYNC:
+          ++m_device_sync_count;
+          break;
+        case ThreadAPI::TD_CUDA_BARRIER:
+          ++m_barrier_count;
+          break;
+        case ThreadAPI::TD_CUDA_WARP_BARRIER:
+          ++m_warp_barrier_count;
+          break;
+        case ThreadAPI::TD_CUDA_MEMORY_BARRIER:
+          ++m_memory_barrier_count;
+          break;
+        default:
+          break;
+        }
+      }
 
       if (type == ThreadAPI::TD_CUDA_DEVICE_SYNC ||
           type == ThreadAPI::TD_CUDA_MEMORY_BARRIER) {
@@ -765,7 +800,21 @@ void CUDAAnalysis::runAnalysis() {
     m_abstract_state.kernel_facts.push_back(fact);
     m_abstract_state.kernel_fact_by_class[fact.kernel_class_id] = fact;
   }
+  llvm::raw_string_ostream snapshot_stream(m_module_snapshot);
+  snapshot_stream << m_module;
+  snapshot_stream.flush();
   m_has_completed_analysis = true;
+}
+
+bool CUDAAnalysis::hasCurrentModuleSnapshot() const {
+  if (!m_has_completed_analysis) {
+    return false;
+  }
+  std::string current_snapshot;
+  llvm::raw_string_ostream snapshot_stream(current_snapshot);
+  snapshot_stream << m_module;
+  snapshot_stream.flush();
+  return current_snapshot == m_module_snapshot;
 }
 
 void CUDAAnalysis::analyzeInterKernelRaces() {

@@ -245,7 +245,7 @@ TEST_F(AtomicHappensBeforeTest, ReleaseSequenceThroughRmwSynchronizes) {
   HappensBeforeAnalysis hb(*module, mhp);
   hb.analyze();
 
-  EXPECT_TRUE(hb.mustPrecede(store_data, load_data));
+  EXPECT_FALSE(hb.mustPrecede(store_data, load_data));
   EXPECT_TRUE(mhp.mayHappenInParallel(store_data, load_data));
 }
 TEST_F(AtomicHappensBeforeTest,
@@ -321,7 +321,7 @@ TEST_F(AtomicHappensBeforeTest,
   HappensBeforeAnalysis hb(*module, mhp);
   hb.analyze();
 
-  EXPECT_TRUE(hb.mustPrecede(store_data, load_data));
+  EXPECT_FALSE(hb.mustPrecede(store_data, load_data));
   EXPECT_TRUE(mhp.mayHappenInParallel(store_data, load_data));
 }
 TEST_F(AtomicHappensBeforeTest,

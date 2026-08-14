@@ -94,6 +94,9 @@ bool RAIILockTracker::isRAIILockConstructor(const llvm::Instruction *inst) {
     return false;
 
   llvm::StringRef name = func->getName();
+  if (CppThreadingModel::isLockWrapperMoveConstructor(name)) {
+    return false;
+  }
   return CppThreadingModel::isLockGuardConstructor(name) ||
          CppThreadingModel::isUniqueLockConstructor(name) ||
          CppThreadingModel::isScopedLockConstructor(name) ||

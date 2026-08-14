@@ -42,6 +42,10 @@ public:
     m_alias_analysis = aa;
   }
 
+  void setCppMemoryModel(CppAtomics::CppMemoryModel model) {
+    m_cpp_memory_model = model;
+  }
+
   const std::unordered_map<std::string, size_t> &getDeferredSyncCounts() const {
     return m_deferred_sync_counts;
   }
@@ -135,6 +139,8 @@ private:
   llvm::Module &m_module;
   mhp::MHPAnalysis &m_mhp;
   lotus::AliasAnalysisWrapper *m_alias_analysis = nullptr;
+  CppAtomics::CppMemoryModel m_cpp_memory_model =
+      CppAtomics::CppMemoryModel::Cpp20AndLater;
   std::unordered_map<const llvm::Value *, const llvm::Value *>
       m_future_shared_state;
   mutable std::unordered_map<const llvm::Value *, const llvm::Value *>

@@ -511,7 +511,8 @@ TEST_F(OpenMPSemanticsTest,
   EXPECT_TRUE(semantics.getWaitBoundaryInfos().empty());
 }
 
-TEST_F(OpenMPSemanticsTest, SectionsInitCreatesDedicatedSemanticRegion) {
+TEST_F(OpenMPSemanticsTest,
+       SectionsInitCreatesRegionWithoutSyntheticWaitBoundary) {
   const char *source = R"(
     declare i32 @__kmpc_sections_init(i8*, i32)
     declare void @__kmpc_end_sections(i8*, i32)
@@ -539,10 +540,7 @@ TEST_F(OpenMPSemanticsTest, SectionsInitCreatesDedicatedSemanticRegion) {
 
   EXPECT_EQ(semantics.getSummary().sections_region_count, 1u);
   EXPECT_EQ(sections_entities, 1u);
-  ASSERT_EQ(semantics.getWaitBoundaryInfos().size(), 1u);
-  EXPECT_EQ(semantics.getWaitBoundaryInfos().front().kind,
-            WaitBoundaryInfo::Kind::SectionsEnd);
-  EXPECT_NE(semantics.getWaitBoundaryInfos().front().region_id, 0u);
+  EXPECT_TRUE(semantics.getWaitBoundaryInfos().empty());
 }
 
 TEST_F(OpenMPSemanticsTest, CriticalRegionsCreateSemanticEntitiesAndEvents) {

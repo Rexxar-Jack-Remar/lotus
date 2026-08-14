@@ -71,7 +71,132 @@ TEST_F(HappensBeforeAnalysisTest,
   ASSERT_NE(store_data, nullptr);
   ASSERT_NE(load_data, nullptr);
 
-  EXPECT_TRUE(hb.happensBefore(store_data, load_data));
+  EXPECT_FALSE(hb.happensBefore(store_data, load_data));
+}
+TEST_F(HappensBeforeAnalysisTest, UnknownAtomicInitialValueCannotProveReadsFrom) {
+  const char *source = R"(
+    @flag = external global i32
+    @shared = global i32 0
+    declare i32 @pthread_create(i8*, i8*, i8* (i8*)*, i8*)
+    define i8* @writer(i8* %arg) {
+      store i32 1, i32* @shared
+      store atomic i32 1, i32* @flag release, align 4
+      ret i8* null
+    }
+    define i8* @reader(i8* %arg) {
+      %seen = load atomic i32, i32* @flag acquire, align 4
+      %ok = icmp eq i32 %seen, 1
+      br i1 %ok, label %yes, label %no
+    yes:
+      %value = load i32, i32* @shared
+      ret i8* null
+    no:
+      ret i8* null
+    }
+    define i32 @main() {
+      %a = alloca i8
+      %b = alloca i8
+      call i32 @pthread_create(i8* %a, i8* null, i8* (i8*)* @writer, i8* null)
+      call i32 @pthread_create(i8* %b, i8* null, i8* (i8*)* @reader, i8* null)
+      ret i32 0
+    }
+  )";
+  auto module = parseModule(source);
+  ASSERT_NE(module, nullptr);
+  MHPAnalysis mhp(*module);
+  mhp.analyze();
+  HappensBeforeAnalysis hb(*module, mhp);
+  hb.analyze();
+  EXPECT_FALSE(hb.happensBefore(
+      &module->getFunction("writer")->front().front(),
+      findInstructionByName(*module->getFunction("reader"), "value")));
+}
+
+TEST_F(HappensBeforeAnalysisTest,
+       AcquireFenceRequiresAnchorLoadValueToMatchRelease) {
+  const char *source = R"(
+    @flag = global i32 0
+    @shared = global i32 0
+    declare i32 @pthread_create(i8*, i8*, i8* (i8*)*, i8*)
+    define i8* @writer(i8* %arg) {
+      store i32 1, i32* @shared
+      store atomic i32 1, i32* @flag release, align 4
+      ret i8* null
+    }
+    define i8* @reader(i8* %arg) {
+      %seen = load atomic i32, i32* @flag monotonic, align 4
+      fence acquire
+      %old = icmp eq i32 %seen, 0
+      br i1 %old, label %yes, label %no
+    yes:
+      %value = load i32, i32* @shared
+      ret i8* null
+    no:
+      ret i8* null
+    }
+    define i32 @main() {
+      %a = alloca i8
+      %b = alloca i8
+      call i32 @pthread_create(i8* %a, i8* null, i8* (i8*)* @writer, i8* null)
+      call i32 @pthread_create(i8* %b, i8* null, i8* (i8*)* @reader, i8* null)
+      ret i32 0
+    }
+  )";
+  auto module = parseModule(source);
+  ASSERT_NE(module, nullptr);
+  MHPAnalysis mhp(*module);
+  mhp.analyze();
+  HappensBeforeAnalysis hb(*module, mhp);
+  hb.analyze();
+  EXPECT_FALSE(hb.happensBefore(
+      &module->getFunction("writer")->front().front(),
+      findInstructionByName(*module->getFunction("reader"), "value")));
+}
+
+TEST_F(HappensBeforeAnalysisTest,
+       CrossThreadRmwIsNotAssumedToFollowReleaseHead) {
+  const char *source = R"(
+    @flag = global i32 0
+    @shared = global i32 0
+    declare i32 @pthread_create(i8*, i8*, i8* (i8*)*, i8*)
+    define i8* @writer(i8* %arg) {
+      store i32 1, i32* @shared
+      store atomic i32 1, i32* @flag release, align 4
+      ret i8* null
+    }
+    define i8* @tail(i8* %arg) {
+      atomicrmw xchg i32* @flag, i32 2 monotonic
+      ret i8* null
+    }
+    define i8* @reader(i8* %arg) {
+      %seen = load atomic i32, i32* @flag acquire, align 4
+      %ok = icmp eq i32 %seen, 2
+      br i1 %ok, label %yes, label %no
+    yes:
+      %value = load i32, i32* @shared
+      ret i8* null
+    no:
+      ret i8* null
+    }
+    define i32 @main() {
+      %a = alloca i8
+      %b = alloca i8
+      %c = alloca i8
+      call i32 @pthread_create(i8* %a, i8* null, i8* (i8*)* @writer, i8* null)
+      call i32 @pthread_create(i8* %b, i8* null, i8* (i8*)* @tail, i8* null)
+      call i32 @pthread_create(i8* %c, i8* null, i8* (i8*)* @reader, i8* null)
+      ret i32 0
+    }
+  )";
+  auto module = parseModule(source);
+  ASSERT_NE(module, nullptr);
+  MHPAnalysis mhp(*module);
+  mhp.analyze();
+  HappensBeforeAnalysis hb(*module, mhp);
+  hb.analyze();
+  EXPECT_FALSE(hb.happensBefore(
+      &module->getFunction("writer")->front().front(),
+      findInstructionByName(*module->getFunction("reader"), "value")));
 }
 TEST_F(HappensBeforeAnalysisTest,
        NonAdjacentFenceAtomicPatternInSameBlockCreatesHB) {
@@ -132,7 +257,7 @@ TEST_F(HappensBeforeAnalysisTest,
   ASSERT_NE(store_data, nullptr);
   ASSERT_NE(load_data, nullptr);
 
-  EXPECT_TRUE(hb.happensBefore(store_data, load_data));
+  EXPECT_FALSE(hb.happensBefore(store_data, load_data));
 }
 TEST_F(HappensBeforeAnalysisTest, CompetingReleaseStoresDoNotInventAtomicHB) {
   const char *source = R"(
@@ -600,7 +725,8 @@ TEST_F(HappensBeforeAnalysisTest, FailedCmpXchgDoesNotInventDefiniteAtomicHB) {
 
   EXPECT_FALSE(hb.happensBefore(store_shared, load_shared));
 }
-TEST_F(HappensBeforeAnalysisTest, SuccessfulSeqCstCmpXchgWithWitnessCreatesHB) {
+TEST_F(HappensBeforeAnalysisTest,
+       SuccessfulCmpXchgRemainsConditionalForMustHB) {
   const char *source = R"(
     @flag = global i32 0, align 4
     @shared = global i32 0, align 4
@@ -664,7 +790,11 @@ TEST_F(HappensBeforeAnalysisTest, SuccessfulSeqCstCmpXchgWithWitnessCreatesHB) {
   ASSERT_NE(store_shared, nullptr);
   ASSERT_NE(load_shared, nullptr);
 
-  EXPECT_TRUE(hb.happensBefore(store_shared, load_shared));
+  EXPECT_FALSE(hb.happensBefore(store_shared, load_shared));
+  const auto &deferred = hb.getDeferredSyncCounts();
+  auto it = deferred.find("atomic_cmpxchg_outcome_conditional");
+  ASSERT_NE(it, deferred.end());
+  EXPECT_GT(it->second, 0u);
 }
 TEST_F(HappensBeforeAnalysisTest,
        ReleaseSequenceWithSingleRmwTailCreatesHBWhenWitnessExcludesInitial) {
@@ -729,11 +859,63 @@ TEST_F(HappensBeforeAnalysisTest,
   ASSERT_NE(store_shared, nullptr);
   ASSERT_NE(load_shared, nullptr);
 
-  EXPECT_TRUE(hb.happensBefore(store_shared, load_shared));
+  EXPECT_FALSE(hb.happensBefore(store_shared, load_shared));
   const auto &deferred = hb.getDeferredSyncCounts();
-  auto it = deferred.find("atomic_release_sequence_edges_modeled");
+  auto it = deferred.find("atomic_release_candidate_unresolved");
   ASSERT_NE(it, deferred.end());
   EXPECT_GT(it->second, 0u);
+}
+TEST_F(HappensBeforeAnalysisTest,
+       SameThreadPlainStoreTailDependsOnCppMemoryModel) {
+  const char *source = R"(
+    @flag = global i32 0, align 4
+    @shared = global i32 0, align 4
+    declare i32 @pthread_create(i8*, i8*, i8* (i8*)*, i8*)
+    define i8* @writer(i8* %arg) {
+      store i32 7, i32* @shared, align 4
+      store atomic i32 1, i32* @flag release, align 4
+      store atomic i32 2, i32* @flag monotonic, align 4
+      ret i8* null
+    }
+    define i8* @reader(i8* %arg) {
+      %seen = load atomic i32, i32* @flag acquire, align 4
+      %ready = icmp eq i32 %seen, 2
+      br i1 %ready, label %sync, label %exit
+    sync:
+      %val = load i32, i32* @shared, align 4
+      ret i8* null
+    exit:
+      ret i8* null
+    }
+    define i32 @main() {
+      %tid1 = alloca i8
+      %tid2 = alloca i8
+      call i32 @pthread_create(i8* %tid1, i8* null,
+                               i8* (i8*)* @writer, i8* null)
+      call i32 @pthread_create(i8* %tid2, i8* null,
+                               i8* (i8*)* @reader, i8* null)
+      ret i32 0
+    }
+  )";
+
+  auto module = parseModule(source);
+  ASSERT_NE(module, nullptr);
+  MHPAnalysis mhp(*module);
+  mhp.analyze();
+  const Instruction *store_shared =
+      &module->getFunction("writer")->getEntryBlock().front();
+  const Instruction *load_shared =
+      findInstructionByName(*module->getFunction("reader"), "val");
+
+  HappensBeforeAnalysis cpp17(*module, mhp);
+  cpp17.setCppMemoryModel(CppAtomics::CppMemoryModel::Cpp11To17);
+  cpp17.analyze();
+  EXPECT_TRUE(cpp17.happensBefore(store_shared, load_shared));
+
+  HappensBeforeAnalysis cpp20(*module, mhp);
+  cpp20.setCppMemoryModel(CppAtomics::CppMemoryModel::Cpp20AndLater);
+  cpp20.analyze();
+  EXPECT_FALSE(cpp20.happensBefore(store_shared, load_shared));
 }
 TEST_F(HappensBeforeAnalysisTest,
        ReleaseSequenceCompetingStoreRemainsDeferred) {

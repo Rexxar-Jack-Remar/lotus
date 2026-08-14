@@ -322,6 +322,13 @@ public:
 
   const llvm::Module &getModule() const { return m_module; }
   bool hasCompletedAnalysis() const { return m_has_completed_analysis; }
+  bool hasCurrentModuleSnapshot() const;
+  bool isCUDAEnabled() const { return m_cuda_enabled; }
+  size_t getOperationCount() const { return m_operation_count; }
+  size_t getDeviceSyncCount() const { return m_device_sync_count; }
+  size_t getBarrierCount() const { return m_barrier_count; }
+  size_t getWarpBarrierCount() const { return m_warp_barrier_count; }
+  size_t getMemoryBarrierCount() const { return m_memory_barrier_count; }
 
   const std::vector<KernelLaunchInfo> &getLaunches() const {
     return m_launches;
@@ -430,6 +437,13 @@ private:
   std::unordered_map<LaunchContextKey, size_t, LaunchContextKeyHash> m_launch_context_index;
   CUDAAbstractState m_abstract_state;
   bool m_has_completed_analysis = false;
+  bool m_cuda_enabled = true;
+  size_t m_operation_count = 0;
+  size_t m_device_sync_count = 0;
+  size_t m_barrier_count = 0;
+  size_t m_warp_barrier_count = 0;
+  size_t m_memory_barrier_count = 0;
+  std::string m_module_snapshot;
 
   void analyzeKernel(const llvm::Function *kernel,
                      const KernelLaunchInfo *launch);

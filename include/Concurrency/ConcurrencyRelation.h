@@ -1,6 +1,8 @@
 #pragma once
 
+#include <algorithm>
 #include <string>
+#include <vector>
 
 namespace concurrency {
 
@@ -33,7 +35,44 @@ struct Relation {
   RelationKind kind = RelationKind::UnknownDueToModelGap;
   ProofStrength proof = ProofStrength::Unknown;
   std::string reason;
+  std::vector<std::string> evidence_reasons;
 };
+
+inline int proofUncertaintyPriority(ProofStrength proof) {
+  switch (proof) {
+  case ProofStrength::Must:
+    return 0;
+  case ProofStrength::May:
+    return 1;
+  case ProofStrength::Unknown:
+    return 2;
+  }
+  return 2;
+}
+
+inline void addRelationEvidence(Relation &relation, const std::string &reason) {
+  if (reason.empty() ||
+      std::find(relation.evidence_reasons.begin(),
+                relation.evidence_reasons.end(), reason) !=
+          relation.evidence_reasons.end()) {
+    return;
+  }
+  relation.evidence_reasons.push_back(reason);
+}
+
+inline void mergeSameKindRelation(Relation &retained,
+                                  const Relation &incoming) {
+  addRelationEvidence(retained, retained.reason);
+  addRelationEvidence(retained, incoming.reason);
+  for (const std::string &reason : incoming.evidence_reasons) {
+    addRelationEvidence(retained, reason);
+  }
+  if (proofUncertaintyPriority(incoming.proof) >
+      proofUncertaintyPriority(retained.proof)) {
+    retained.proof = incoming.proof;
+    retained.reason = incoming.reason;
+  }
+}
 
 inline int relationPriority(RelationKind kind) {
   switch (kind) {

@@ -250,6 +250,48 @@ inline bool isSharedLockConstructor(const llvm::StringRef& funcName) {
          containsCtorCode(funcName);
 }
 
+inline bool isUniqueLockMoveConstructor(const llvm::StringRef &funcName) {
+  return isUniqueLockConstructor(funcName) &&
+         (funcName.contains("EOS") || funcName.contains("move"));
+}
+
+inline bool isSharedLockMoveConstructor(const llvm::StringRef &funcName) {
+  return isSharedLockConstructor(funcName) &&
+         (funcName.contains("EOS") || funcName.contains("move"));
+}
+
+inline bool isLockWrapperMoveConstructor(const llvm::StringRef &funcName) {
+  return isUniqueLockMoveConstructor(funcName) ||
+         isSharedLockMoveConstructor(funcName);
+}
+
+inline bool isUniqueLockMoveAssignment(const llvm::StringRef &funcName) {
+  return isStdABIName(funcName) && funcName.contains("unique_lock") &&
+         funcName.contains("aSEOS");
+}
+
+inline bool isSharedLockMoveAssignment(const llvm::StringRef &funcName) {
+  return isStdABIName(funcName) && funcName.contains("shared_lock") &&
+         funcName.contains("aSEOS");
+}
+
+inline bool isLockWrapperMoveAssignment(const llvm::StringRef &funcName) {
+  return isUniqueLockMoveAssignment(funcName) ||
+         isSharedLockMoveAssignment(funcName);
+}
+
+inline bool isLockWrapperSwap(const llvm::StringRef &funcName) {
+  return isStdABIName(funcName) &&
+         (funcName.contains("unique_lock") ||
+          funcName.contains("shared_lock")) &&
+         funcName.contains("4swapERS");
+}
+
+inline bool isUniqueLockReleaseOwnership(const llvm::StringRef &funcName) {
+  return isStdABIName(funcName) && funcName.contains("unique_lock") &&
+         funcName.contains("7releaseEv");
+}
+
 // RAII lock wrappers - destructors act as release
 inline bool isLockGuardDestructor(const llvm::StringRef& funcName) {
   return isStdABIName(funcName) && funcName.contains("lock_guard") &&
@@ -413,7 +455,7 @@ inline bool isBarrierArriveAndWait(const llvm::StringRef& funcName) {
 inline bool isBarrierArrive(const llvm::StringRef& funcName) {
   return (isStdABIName(funcName) || isCppModelFixtureName(funcName)) &&
          funcName.contains("barrier") &&
-         funcName.contains("arriveEv") && !funcName.contains("arrive_and_wait");
+         funcName.contains("arriveE") && !funcName.contains("arrive_and_wait");
 }
 
 inline bool isBarrierWait(const llvm::StringRef& funcName) {

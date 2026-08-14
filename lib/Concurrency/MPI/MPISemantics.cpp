@@ -770,14 +770,16 @@ MPIEffect buildMPIEffect(const llvm::Instruction *inst, ThreadAPI *api) {
     return effect;
   }
 
-  MPISymbolNormalization normalization = normalizeMPISymbol(callee->getName());
+  const llvm::StringRef called_name = api->getCalledAPIName(cb);
+  MPISymbolNormalization normalization =
+      normalizeMPISymbol(called_name.empty() ? callee->getName() : called_name);
   effect.confidence = normalization.confidence;
-  effect.semantic_tag = api->getSemanticTag(callee);
+  effect.semantic_tag = api->getSemanticTag(cb);
   const llvm::StringRef canonical_name = normalization.canonical_name;
   if (effect.semantic_tag.empty()) {
     effect.semantic_tag = inferSemanticTagFromCanonicalName(canonical_name).str();
   }
-  effect.type = api->getType(callee);
+  effect.type = api->getType(cb);
   const MPISemanticDescriptor *base_descriptor = lookupMPISemantic(effect.type);
   if (!base_descriptor) {
     return effect;

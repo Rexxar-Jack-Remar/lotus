@@ -713,7 +713,7 @@ TEST_F(HappensBeforeAnalysisTest, OpenMPTaskBodyDependenciesContributeToHB) {
 
   EXPECT_TRUE(hb.happensBefore(store_shared, load_shared));
 }
-TEST_F(HappensBeforeAnalysisTest, OpenMPSingleBoundaryOrdersTaskContinuation) {
+TEST_F(HappensBeforeAnalysisTest, OpenMPSingleEndDoesNotInventTaskwait) {
   const char *source = R"(
     @shared = global i32 0, align 4
 
@@ -759,7 +759,7 @@ TEST_F(HappensBeforeAnalysisTest, OpenMPSingleBoundaryOrdersTaskContinuation) {
   ASSERT_NE(task_store, nullptr);
   ASSERT_NE(after, nullptr);
 
-  EXPECT_TRUE(hb.happensBefore(task_store, after));
+  EXPECT_FALSE(hb.happensBefore(task_store, after));
 }
 TEST_F(HappensBeforeAnalysisTest, OpenMPFlushRelationFeedsHBAnalysis) {
   const char *source = R"(

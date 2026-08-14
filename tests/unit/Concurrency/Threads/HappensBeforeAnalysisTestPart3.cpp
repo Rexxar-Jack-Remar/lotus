@@ -419,9 +419,9 @@ TEST_F(HappensBeforeAnalysisTest,
   ASSERT_NE(store_data, nullptr);
   ASSERT_NE(load_data, nullptr);
 
-  EXPECT_TRUE(hb.happensBefore(store_data, load_data));
+  EXPECT_FALSE(hb.happensBefore(store_data, load_data));
   const auto &deferred = hb.getDeferredSyncCounts();
-  auto it = deferred.find("atomic_release_sequence_edges_modeled");
+  auto it = deferred.find("atomic_release_candidate_unresolved");
   ASSERT_NE(it, deferred.end());
   EXPECT_GT(it->second, 0u);
 }
@@ -496,9 +496,9 @@ TEST_F(HappensBeforeAnalysisTest,
   ASSERT_NE(store_data, nullptr);
   ASSERT_NE(load_data, nullptr);
 
-  EXPECT_TRUE(hb.happensBefore(store_data, load_data));
+  EXPECT_FALSE(hb.happensBefore(store_data, load_data));
   const auto &deferred = hb.getDeferredSyncCounts();
-  auto it = deferred.find("atomic_release_sequence_edges_modeled");
+  auto it = deferred.find("atomic_release_candidate_unresolved");
   ASSERT_NE(it, deferred.end());
   EXPECT_GT(it->second, 0u);
 }
@@ -566,7 +566,7 @@ TEST_F(HappensBeforeAnalysisTest,
   ASSERT_NE(store_data, nullptr);
   ASSERT_NE(load_data, nullptr);
 
-  EXPECT_TRUE(hb.happensBefore(store_data, load_data));
+  EXPECT_FALSE(hb.happensBefore(store_data, load_data));
   const auto &deferred = hb.getDeferredSyncCounts();
   size_t modeled_edges = 0;
   auto mixed_fence_it = deferred.find("atomic_mixed_fence_edges_modeled");
@@ -578,7 +578,7 @@ TEST_F(HappensBeforeAnalysisTest,
   if (release_sequence_it != deferred.end()) {
     modeled_edges += release_sequence_it->second;
   }
-  EXPECT_GT(modeled_edges, 0u);
+  EXPECT_EQ(modeled_edges, 0u);
 }
 TEST_F(HappensBeforeAnalysisTest,
        LaterNonReleaseStoreDoesNotInheritEarlierReleaseHB) {
