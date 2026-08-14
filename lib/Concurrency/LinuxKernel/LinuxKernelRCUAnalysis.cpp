@@ -12,10 +12,15 @@
 
 #include <algorithm>
 #include <map>
+#include <memory>
 #include <set>
 #include <string>
+#include <tuple>
 #include <unordered_map>
 #include <vector>
+
+#include <llvm/Analysis/PostDominators.h>
+#include <llvm/IR/Dominators.h>
 
 using namespace llvm;
 
@@ -35,31 +40,46 @@ void LinuxKernelRCUAnalysis::analyzeRCU() {
 }
 
 void LinuxKernelRCUAnalysis::identifyReadSections() {
-  std::map<const Function *, std::vector<const KernelOperation *>> open_sections;
+  struct OpenSection {
+    const KernelOperation *outer = nullptr;
+    unsigned depth = 0;
+  };
+  std::map<std::tuple<const Function *, RCUFlavor, const Value *>, OpenSection>
+      open_sections;
 
   for (const auto &op : process_model_.getAllOperations()) {
-    auto &stack = open_sections[op.inst->getFunction()];
+    auto key =
+        std::make_tuple(op.inst->getFunction(), op.rcu_flavor, op.rcu_domain);
+    auto &open = open_sections[key];
     if (op.kind == OperationKind::RCU_READ_LOCK) {
-      stack.push_back(&op);
+      if (open.depth++ == 0) {
+        open.outer = &op;
+      }
       continue;
     }
 
-    if (op.kind != OperationKind::RCU_READ_UNLOCK || stack.empty()) {
+    if (op.kind != OperationKind::RCU_READ_UNLOCK || open.depth == 0) {
       continue;
     }
-
-    const KernelOperation *read_lock = stack.back();
-    stack.pop_back();
+    if (--open.depth != 0) {
+      continue;
+    }
 
     RCUCriticalSection section;
-    section.read_lock = read_lock->inst;
+    section.read_lock = open.outer->inst;
     section.read_unlock = op.inst;
     section.function = op.inst->getFunction();
+    section.domain = op.rcu_domain;
+    section.flavor = op.rcu_flavor;
+
+    DominatorTree dominators(*const_cast<Function *>(section.function));
+    PostDominatorTree post_dominators;
+    post_dominators.recalculate(*const_cast<Function *>(section.function));
 
     for (const KernelOperation *candidate :
          process_model_.getOperationsInFunction(section.function)) {
-      if (!process_model_.isBeforeInFunction(section.read_lock, candidate->inst) ||
-          !process_model_.isBeforeInFunction(candidate->inst, section.read_unlock)) {
+      if (!dominators.dominates(section.read_lock, candidate->inst) ||
+          !post_dominators.dominates(section.read_unlock, candidate->inst)) {
         continue;
       }
       if (candidate->kind == OperationKind::RCU_DEREFERENCE ||
@@ -71,18 +91,25 @@ void LinuxKernelRCUAnalysis::identifyReadSections() {
     }
 
     read_sections_.push_back(section);
+    open.outer = nullptr;
   }
 }
 
 void LinuxKernelRCUAnalysis::identifyGracePeriods() {
   for (const auto &op : process_model_.getAllOperations()) {
-    if (op.kind != OperationKind::RCU_SYNC) {
+    if (op.kind != OperationKind::RCU_SYNC &&
+        op.kind != OperationKind::RCU_CALL) {
       continue;
     }
 
     RCUGracePeriod grace_period;
     grace_period.sync_inst = op.inst;
     grace_period.function = op.inst->getFunction();
+    grace_period.domain = op.rcu_domain;
+    grace_period.flavor = op.rcu_flavor;
+    if (op.kind == OperationKind::RCU_CALL) {
+      grace_period.callbacks.push_back(op.inst);
+    }
     grace_periods_.push_back(grace_period);
   }
 }
@@ -90,28 +117,25 @@ void LinuxKernelRCUAnalysis::identifyGracePeriods() {
 void LinuxKernelRCUAnalysis::matchCallbacksToGracePeriods() {
   for (auto &section : read_sections_) {
     for (const auto &grace_period : grace_periods_) {
+      const KernelOperation *grace_op =
+          process_model_.getOperationForInstruction(grace_period.sync_inst);
+      if (grace_op == nullptr || grace_op->kind != OperationKind::RCU_SYNC) {
+        continue;
+      }
       if (grace_period.function != section.function) {
         continue;
       }
-      if (!process_model_.isBeforeInFunction(section.read_unlock,
-                                             grace_period.sync_inst)) {
+      if (grace_period.flavor != section.flavor ||
+          grace_period.domain != section.domain) {
+        continue;
+      }
+      DominatorTree dominators(*const_cast<Function *>(section.function));
+      if (!dominators.dominates(section.read_unlock, grace_period.sync_inst)) {
         continue;
       }
       section.has_sync = true;
       section.sync_point = grace_period.sync_inst;
       break;
-    }
-  }
-
-  for (auto &grace_period : grace_periods_) {
-    for (const auto &op : process_model_.getAllOperations()) {
-      if (op.kind != OperationKind::RCU_CALL ||
-          op.inst->getFunction() != grace_period.function) {
-        continue;
-      }
-      if (process_model_.isBeforeInFunction(grace_period.sync_inst, op.inst)) {
-        grace_period.callbacks.push_back(op.inst);
-      }
     }
   }
 }
@@ -130,11 +154,12 @@ LinuxKernelRCUAnalysis::getEnclosingSection(const Instruction *inst) const {
     if (section.function != inst->getFunction()) {
       continue;
     }
-    if (!process_model_.isBeforeInFunction(section.read_lock, inst)) {
-      continue;
-    }
-    if (section.read_unlock != nullptr &&
-        !process_model_.isBeforeInFunction(inst, section.read_unlock)) {
+    DominatorTree dominators(*const_cast<Function *>(section.function));
+    PostDominatorTree post_dominators;
+    post_dominators.recalculate(*const_cast<Function *>(section.function));
+    if (!dominators.dominates(section.read_lock, inst) ||
+        (section.read_unlock != nullptr &&
+         !post_dominators.dominates(section.read_unlock, inst))) {
       continue;
     }
     return &section;
@@ -145,87 +170,77 @@ LinuxKernelRCUAnalysis::getEnclosingSection(const Instruction *inst) const {
 
 std::vector<const Instruction *>
 LinuxKernelRCUAnalysis::findReadSideWithoutGracePeriod() const {
-  std::vector<const Instruction *> result;
-
-  for (const auto &section : read_sections_) {
-    if (!section.has_sync) {
-      result.push_back(section.read_lock);
-    }
-  }
-
-  return result;
+  // Readers do not owe a grace period.  Reclamation is an updater-side
+  // obligation after unpublishing an object.
+  return {};
 }
 
 std::vector<std::pair<const Instruction *, const Instruction *>>
 LinuxKernelRCUAnalysis::findRCUConflicts() const {
-  std::vector<std::pair<const Instruction *, const Instruction *>> conflicts;
-  std::vector<const KernelOperation *> writers;
-
-  for (const auto &op : process_model_.getAllOperations()) {
-    if (op.kind == OperationKind::RCU_ASSIGN) {
-      writers.push_back(&op);
-    }
-  }
-
-  for (const auto &section : read_sections_) {
-    if (section.has_sync) {
-      continue;
-    }
-    for (const KernelOperation *writer : writers) {
-      if (writer->inst->getFunction() != section.function) {
-        continue;
-      }
-      if (process_model_.isBeforeInFunction(section.read_lock, writer->inst) &&
-          (section.read_unlock == nullptr ||
-           process_model_.isBeforeInFunction(writer->inst, section.read_unlock))) {
-        conflicts.emplace_back(section.read_lock, writer->inst);
-      }
-    }
-  }
-
-  rcu_diagnostics_["rcu_conflict_checks"] += writers.size();
-  return conflicts;
+  // Reader/updater overlap is a normal property of RCU.  A conflict requires
+  // an explicit unsafe reclamation relation, not merely an assignment during
+  // a lexically scanned reader section.
+  return {};
 }
 
 std::vector<const Instruction *>
 LinuxKernelRCUAnalysis::findRCUDoubleFree() const {
-  std::vector<const Instruction *> result;
-  std::map<const Value *, const Instruction *> callbacks_by_target;
-
-  for (const auto &op : process_model_.getAllOperations()) {
-    if (op.kind != OperationKind::RCU_CALL || op.rcu_sync == nullptr) {
-      continue;
-    }
-    auto [it, inserted] = callbacks_by_target.emplace(op.rcu_sync, op.inst);
-    if (!inserted) {
-      result.push_back(op.inst);
-    }
-  }
-  return result;
+  // Multiple callback submissions involving the same domain are not a double
+  // free.  Proving duplicate reclamation requires callback/lifetime state.
+  return {};
 }
 
 std::vector<const Instruction *>
 LinuxKernelRCUAnalysis::findDerefAfterFree() const {
+  // synchronize_rcu() waits for pre-existing readers; it does not free an
+  // object.  Do not invent a release point from a grace-period call.
+  return {};
+}
+
+std::vector<const Instruction *>
+LinuxKernelRCUAnalysis::findUnsafeReclamation() const {
   std::vector<const Instruction *> result;
-  std::map<const Value *, const Instruction *> release_points;
+  std::map<const Function *, std::unique_ptr<DominatorTree>> dominators;
 
-  for (const auto &op : process_model_.getAllOperations()) {
-    if (op.kind == OperationKind::RCU_SYNC && op.rcu_sync != nullptr) {
-      release_points[op.rcu_sync] = op.inst;
+  for (const auto &reclaim : process_model_.getAllOperations()) {
+    if (reclaim.kind != OperationKind::RCU_RECLAIM ||
+        reclaim.rcu_target == nullptr) {
       continue;
     }
 
-    if (op.kind != OperationKind::RCU_DEREFERENCE || op.rcu_sync == nullptr) {
+    const auto *unpublish_inst = dyn_cast<Instruction>(reclaim.rcu_target);
+    const KernelOperation *unpublish =
+        process_model_.getOperationForInstruction(unpublish_inst);
+    if (unpublish == nullptr || unpublish->kind != OperationKind::RCU_ASSIGN ||
+        unpublish->function_name != "rcu_replace_pointer") {
       continue;
     }
 
-    auto it = release_points.find(op.rcu_sync);
-    if (it != release_points.end() &&
-        it->second->getFunction() == op.inst->getFunction() &&
-        process_model_.isBeforeInFunction(it->second, op.inst)) {
-      result.push_back(op.inst);
+    const Function *function = reclaim.inst->getFunction();
+    auto &dt = dominators[function];
+    if (!dt) {
+      dt = std::make_unique<DominatorTree>(*const_cast<Function *>(function));
+    }
+
+    bool safe = false;
+    for (const auto &sync : process_model_.getAllOperations()) {
+      if (sync.kind != OperationKind::RCU_SYNC ||
+          sync.inst->getFunction() != function ||
+          sync.rcu_flavor != unpublish->rcu_flavor ||
+          sync.rcu_domain != unpublish->rcu_domain) {
+        continue;
+      }
+      if (dt->dominates(unpublish->inst, sync.inst) &&
+          dt->dominates(sync.inst, reclaim.inst)) {
+        safe = true;
+        break;
+      }
+    }
+    if (!safe) {
+      result.push_back(reclaim.inst);
     }
   }
+
   return result;
 }
 
@@ -233,7 +248,7 @@ std::vector<const Instruction *>
 LinuxKernelRCUAnalysis::findDerefInWrongSection() const {
   std::vector<const Instruction *> result;
   for (const auto &op : process_model_.getAllOperations()) {
-    if (op.kind == OperationKind::RCU_DEREFERENCE &&
+    if (op.kind == OperationKind::RCU_DEREFERENCE && op.requires_rcu_section &&
         !isWithinRCUSection(op.inst)) {
       result.push_back(op.inst);
     }

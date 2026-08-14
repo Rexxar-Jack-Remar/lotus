@@ -11,6 +11,7 @@
 #include <unordered_map>
 #include <vector>
 
+#include <llvm/ADT/STLExtras.h>
 #include <llvm/IR/Instruction.h>
 #include <llvm/Support/raw_ostream.h>
 
@@ -30,7 +31,12 @@ void LinuxKernelAnalysis::runAnalysis() {
   results_.lock_without_unlock = lock_analysis_.findLockWithoutUnlock();
   results_.lock_order_inversions = lock_analysis_.findLockOrderInversions();
   results_.mix_raw_and_cooked = lock_analysis_.findMixRawAndCookedLocks();
-  results_.sleep_in_atomic = lock_analysis_.findSleepInSpinlock();
+  results_.sleep_in_atomic = process_model_.findSleepInAtomic();
+  for (const Instruction *inst : lock_analysis_.findSleepInSpinlock()) {
+    if (!llvm::is_contained(results_.sleep_in_atomic, inst)) {
+      results_.sleep_in_atomic.push_back(inst);
+    }
+  }
   results_.irq_save_restore_issues = lock_analysis_.findIrqSaveRestoreIssues();
 
   results_.rcu_without_grace_period =
@@ -38,6 +44,7 @@ void LinuxKernelAnalysis::runAnalysis() {
   results_.rcu_conflicts = rcu_analysis_.findRCUConflicts();
   results_.rcu_double_free = rcu_analysis_.findRCUDoubleFree();
   results_.deref_after_free = rcu_analysis_.findDerefAfterFree();
+  results_.rcu_unsafe_reclamation = rcu_analysis_.findUnsafeReclamation();
 
   results_.missing_wake_ups = wait_analysis_.findMissingWakeUps();
   results_.spurious_wake_ups = wait_analysis_.findSpuriousWakeUps();
@@ -45,7 +52,7 @@ void LinuxKernelAnalysis::runAnalysis() {
   results_.double_completion = wait_analysis_.findDoubleCompletion();
   results_.timer_not_deleted = wait_analysis_.findTimerNotDeleted();
   results_.timer_use_after_delete = wait_analysis_.findTimerUseAfterDelete();
-  results_.timer_issues = process_model_.findTimerIssues();
+  results_.timer_issues = results_.timer_use_after_delete;
 }
 
 void LinuxKernelAnalysis::printResults(raw_ostream &OS) const {
@@ -68,7 +75,7 @@ void LinuxKernelAnalysis::printResults(raw_ostream &OS) const {
      << "/" << getOperationCount(OperationKind::WAKE_UP) << "\n\n";
 
   OS << "--- Lock Issues ---\n";
-  OS << "Potential deadlocks: " << results_.lock_deadlocks.size() << "\n";
+  OS << "Feasible deadlocks: " << results_.lock_deadlocks.size() << "\n";
   OS << "Double locks: " << results_.double_locks.size() << "\n";
   OS << "Unlock without lock: " << results_.unlock_without_lock.size() << "\n";
   OS << "Lock without unlock: " << results_.lock_without_unlock.size() << "\n";
@@ -76,19 +83,14 @@ void LinuxKernelAnalysis::printResults(raw_ostream &OS) const {
      << "\n\n";
 
   OS << "--- RCU Issues ---\n";
-  OS << "Read without grace period: "
-     << results_.rcu_without_grace_period.size() << "\n";
-  OS << "RCU conflicts: " << results_.rcu_conflicts.size() << "\n";
-  OS << "RCU double free: " << results_.rcu_double_free.size() << "\n\n";
+  OS << "Unsafe RCU reclamation: " << results_.rcu_unsafe_reclamation.size()
+     << "\n\n";
 
   OS << "--- Wait/Completion Issues ---\n";
-  OS << "Missing wake-ups: " << results_.missing_wake_ups.size() << "\n";
-  OS << "Missing completions: " << results_.missing_completion.size() << "\n";
-  OS << "Double completions: " << results_.double_completion.size() << "\n";
-  OS << "Timers not deleted: " << results_.timer_not_deleted.size() << "\n";
-  OS << "Timer reuse after delete: " << results_.timer_use_after_delete.size()
-     << "\n";
-  OS << "Timer lifecycle issues: " << results_.timer_issues.size() << "\n\n";
+  OS << "Repeated complete_all without reinit: "
+     << results_.double_completion.size() << "\n";
+  OS << "Timer rearm after shutdown: " << results_.timer_use_after_delete.size()
+     << "\n\n";
 
   OS << "========================================\n";
 }

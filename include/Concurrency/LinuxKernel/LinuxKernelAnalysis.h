@@ -33,9 +33,10 @@ namespace kernel {
 
 class LinuxKernelAnalysis {
 public:
-  explicit LinuxKernelAnalysis(llvm::Module &M)
-      : module_(M), process_model_(M), lock_analysis_(process_model_),
-        rcu_analysis_(process_model_), wait_analysis_(process_model_) {}
+  explicit LinuxKernelAnalysis(llvm::Module &M, bool preempt_rt = false)
+      : module_(M), process_model_(M, preempt_rt),
+        lock_analysis_(process_model_), rcu_analysis_(process_model_),
+        wait_analysis_(process_model_) {}
 
   void runAnalysis();
 
@@ -58,6 +59,7 @@ public:
         rcu_conflicts;
     std::vector<const llvm::Instruction *> rcu_double_free;
     std::vector<const llvm::Instruction *> deref_after_free;
+    std::vector<const llvm::Instruction *> rcu_unsafe_reclamation;
 
     std::vector<std::pair<const llvm::Instruction *, const llvm::Instruction *>>
         missing_wake_ups;

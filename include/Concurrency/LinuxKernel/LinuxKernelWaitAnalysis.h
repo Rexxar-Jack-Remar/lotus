@@ -35,25 +35,27 @@ public:
   void analyzeWaits();
 
   struct WaitContext {
-    const llvm::Instruction *wait_inst;
-    const llvm::Value *wait_queue;
-    bool interruptible;
-    bool has_timeout;
-    const llvm::Instruction *wake_inst;
+    const llvm::Instruction *wait_inst = nullptr;
+    const llvm::Value *wait_queue = nullptr;
+    const llvm::Value *condition = nullptr;
+    bool interruptible = false;
+    bool has_timeout = false;
+    std::vector<const llvm::Instruction *> wake_insts;
   };
 
   struct CompletionContext {
-    const llvm::Instruction *init_inst;
+    const llvm::Instruction *init_inst = nullptr;
     std::vector<const llvm::Instruction *> waiters;
     std::vector<const llvm::Instruction *> completers;
-    bool is_done;
+    bool is_done = false;
   };
 
   struct TimerContext {
-    const llvm::Instruction *setup_inst;
-    const llvm::Instruction *mod_inst;
-    const llvm::Instruction *delete_inst;
-    int delay_ms;
+    const llvm::Instruction *setup_inst = nullptr;
+    const llvm::Instruction *mod_inst = nullptr;
+    const llvm::Instruction *delete_inst = nullptr;
+    const llvm::Instruction *shutdown_inst = nullptr;
+    const llvm::Value *expires = nullptr;
   };
 
   std::vector<WaitContext> getWaitContexts() const { return wait_contexts_; }

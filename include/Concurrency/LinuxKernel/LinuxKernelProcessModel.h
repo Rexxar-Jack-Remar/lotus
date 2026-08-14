@@ -15,6 +15,7 @@
 
 #include "Concurrency/LinuxKernel/LinuxKernelOperation.h"
 
+#include <cstdint>
 #include <map>
 #include <memory>
 #include <set>
@@ -32,7 +33,8 @@ class LinuxKernelWaitAnalysis;
 
 class LinuxKernelProcessModel {
 public:
-  LinuxKernelProcessModel(llvm::Module &M) : module_(M) {}
+  explicit LinuxKernelProcessModel(llvm::Module &M, bool preempt_rt = false)
+      : module_(M), preempt_rt_(preempt_rt) {}
 
   void analyzeModule();
 
@@ -46,6 +48,7 @@ public:
   }
 
   const llvm::Module &getModule() const { return module_; }
+  bool isPreemptRT() const { return preempt_rt_; }
 
   std::vector<KernelOperation> getOperationsByKind(OperationKind kind) const;
 
@@ -93,6 +96,7 @@ public:
 
 private:
   llvm::Module &module_;
+  bool preempt_rt_ = false;
 
   std::vector<KernelOperation> all_operations_;
   std::unordered_map<OperationKind, size_t> operation_kind_counts_;
@@ -104,14 +108,17 @@ private:
   std::map<std::pair<const llvm::Function *, LockID>, int> lock_depth_;
   std::unordered_map<const llvm::Function *, std::vector<size_t>>
       operations_by_function_;
-  std::unordered_map<const llvm::Instruction *, size_t> operation_index_by_inst_;
+  std::unordered_map<const llvm::Instruction *, size_t>
+      operation_index_by_inst_;
   std::unordered_map<const llvm::Instruction *, size_t> instruction_order_;
+  mutable std::map<std::pair<const llvm::Value *, int64_t>, const llvm::Value *>
+      canonical_pointer_ids_;
 
   OperationKind classifyOperation(const llvm::Instruction *inst,
                                   const llvm::StringRef &func_name) const;
   LockKind classifyLockKind(const llvm::StringRef &func_name) const;
 
-  void extractLockDetails(KernelOperation &op);
+  void extractLockDetails(KernelOperation &op, unsigned object_arg_index = 0);
   void extractRCUDetails(KernelOperation &op);
   void extractWaitQueueDetails(KernelOperation &op);
   void extractTimerDetails(KernelOperation &op);

@@ -12,11 +12,14 @@
 
 #include <algorithm>
 #include <map>
+#include <memory>
 #include <set>
 #include <string>
 #include <unordered_map>
 #include <utility>
 #include <vector>
+
+#include <llvm/IR/Dominators.h>
 
 using namespace llvm;
 
@@ -38,8 +41,6 @@ void LinuxKernelWaitAnalysis::analyzeWaits() {
 }
 
 void LinuxKernelWaitAnalysis::identifyWaitContexts() {
-  std::map<WaitQueueID, size_t> last_wait_context_by_queue;
-
   for (const auto &op : process_model_.getAllOperations()) {
     if (op.kind != OperationKind::WAIT_EVENT &&
         op.kind != OperationKind::PREPARE_WAIT) {
@@ -49,13 +50,10 @@ void LinuxKernelWaitAnalysis::identifyWaitContexts() {
     WaitContext ctx;
     ctx.wait_inst = op.inst;
     ctx.wait_queue = op.wait_queue;
+    ctx.condition = op.wait_condition;
     ctx.interruptible = op.is_interruptible;
     ctx.has_timeout = op.has_timeout;
-    ctx.wake_inst = nullptr;
-
-    const size_t context_index = wait_contexts_.size();
     wait_contexts_.push_back(ctx);
-    last_wait_context_by_queue[op.wait_queue] = context_index;
   }
 
   for (const auto &op : process_model_.getAllOperations()) {
@@ -63,12 +61,9 @@ void LinuxKernelWaitAnalysis::identifyWaitContexts() {
       continue;
     }
 
-    auto it = last_wait_context_by_queue.find(op.wait_queue);
-    if (it != last_wait_context_by_queue.end()) {
-      auto &ctx = wait_contexts_[it->second];
-      if (ctx.wake_inst == nullptr ||
-          process_model_.isBeforeInFunction(ctx.wake_inst, op.inst)) {
-        ctx.wake_inst = op.inst;
+    for (auto &ctx : wait_contexts_) {
+      if (ctx.wait_queue == op.wait_queue) {
+        ctx.wake_insts.push_back(op.inst);
       }
     }
   }
@@ -84,6 +79,11 @@ void LinuxKernelWaitAnalysis::identifyCompletions() {
       auto &ctx = completion_map_[op.wait_queue];
       ctx.init_inst = op.inst;
       ctx.is_done = false;
+      ctx.completers.clear();
+    } else if (op.kind == OperationKind::COMPLETION_REINIT) {
+      auto &ctx = completion_map_[op.wait_queue];
+      ctx.is_done = false;
+      ctx.completers.clear();
     } else if (op.kind == OperationKind::COMPLETION_WAIT) {
       completion_map_[op.wait_queue].waiters.push_back(op.inst);
     } else if (op.kind == OperationKind::COMPLETION_SIGNAL) {
@@ -105,101 +105,113 @@ void LinuxKernelWaitAnalysis::identifyTimers() {
       ctx.setup_inst = op.inst;
     } else if (op.kind == OperationKind::TIMER_MOD) {
       ctx.mod_inst = op.inst;
-      ctx.delay_ms = op.timer_delay_ms;
+      ctx.expires = op.timer_expires;
     } else if (op.kind == OperationKind::TIMER_DELETE) {
       ctx.delete_inst = op.inst;
+    } else if (op.kind == OperationKind::TIMER_SHUTDOWN) {
+      ctx.shutdown_inst = op.inst;
     }
   }
 }
 
 std::vector<std::pair<const Instruction *, const Instruction *>>
 LinuxKernelWaitAnalysis::findMissingWakeUps() const {
-  std::vector<std::pair<const Instruction *, const Instruction *>> result;
-  for (const auto &ctx : wait_contexts_) {
-    if (!ctx.has_timeout && ctx.wake_inst == nullptr) {
-      result.emplace_back(ctx.wait_inst, nullptr);
-    }
-  }
-  return result;
+  // A missing call in this module is not a lost wakeup.  Diagnosing one needs
+  // the condition's memory accesses, enqueue/check ordering and MHP/HB data.
+  return {};
 }
 
 std::vector<std::pair<const Instruction *, const Instruction *>>
 LinuxKernelWaitAnalysis::findSpuriousWakeUps() const {
-  std::vector<std::pair<const Instruction *, const Instruction *>> result;
-  for (const auto &op : process_model_.getAllOperations()) {
-    if (op.kind != OperationKind::WAKE_UP) {
-      continue;
-    }
-
-    bool matched_wait = false;
-    for (const auto &ctx : wait_contexts_) {
-      if (ctx.wait_queue == op.wait_queue) {
-        matched_wait = true;
-        break;
-      }
-    }
-
-    if (!matched_wait) {
-      result.emplace_back(nullptr, op.inst);
-    }
-  }
-  return result;
+  // A wake with no statically visible waiter is legal: waiters may be in
+  // another translation unit, may arrive later, or the wake may race with
+  // condition evaluation.  Reporting it requires whole-program MHP/HB data.
+  return {};
 }
 
 std::vector<const Instruction *>
 LinuxKernelWaitAnalysis::findMissingCompletion() const {
-  std::vector<const Instruction *> result;
-
-  for (const auto &pair : completion_map_) {
-    const CompletionContext &ctx = pair.second;
-    if (ctx.waiters.size() > 0 && ctx.completers.empty()) {
-      for (const auto *wait : ctx.waiters) {
-        result.push_back(wait);
-      }
-    }
-  }
-
-  return result;
+  // Absence of a completer in the current module is not proof that a wait can
+  // never complete.  Keep this query conservative until callback/MHP modeling
+  // can establish a closed set of producers.
+  return {};
 }
 
 std::vector<const Instruction *>
 LinuxKernelWaitAnalysis::findDoubleCompletion() const {
   std::vector<const Instruction *> result;
-  for (const auto &pair : completion_map_) {
-    const CompletionContext &ctx = pair.second;
-    if (ctx.completers.size() <= 1) {
+  std::map<const Function *, std::unique_ptr<DominatorTree>> dominators;
+
+  for (const auto &second : process_model_.getAllOperations()) {
+    if (second.kind != OperationKind::COMPLETION_SIGNAL ||
+        second.completion_signal != CompletionSignalKind::ALL ||
+        second.wait_queue == nullptr) {
       continue;
     }
-    result.insert(result.end(), ctx.completers.begin() + 1, ctx.completers.end());
+    const Function *function = second.inst->getFunction();
+    auto &dt = dominators[function];
+    if (!dt) {
+      dt = std::make_unique<DominatorTree>(*const_cast<Function *>(function));
+    }
+
+    for (const auto &first : process_model_.getAllOperations()) {
+      if (&first == &second || first.kind != OperationKind::COMPLETION_SIGNAL ||
+          first.completion_signal != CompletionSignalKind::ALL ||
+          first.wait_queue != second.wait_queue ||
+          first.inst->getFunction() != function ||
+          !dt->dominates(first.inst, second.inst)) {
+        continue;
+      }
+
+      bool reinitialized = false;
+      for (const auto &reset : process_model_.getAllOperations()) {
+        if ((reset.kind == OperationKind::COMPLETION_INIT ||
+             reset.kind == OperationKind::COMPLETION_REINIT) &&
+            reset.wait_queue == second.wait_queue &&
+            reset.inst->getFunction() == function &&
+            dt->dominates(first.inst, reset.inst) &&
+            dt->dominates(reset.inst, second.inst)) {
+          reinitialized = true;
+          break;
+        }
+      }
+      if (!reinitialized) {
+        result.push_back(second.inst);
+        break;
+      }
+    }
   }
   return result;
 }
 
 std::vector<const Instruction *>
 LinuxKernelWaitAnalysis::findTimerNotDeleted() const {
-  std::vector<const Instruction *> result;
-
-  for (const auto &pair : timer_map_) {
-    const TimerContext &ctx = pair.second;
-    if (ctx.delete_inst == nullptr && ctx.mod_inst != nullptr) {
-      result.push_back(ctx.mod_inst);
-    }
-  }
-
-  return result;
+  // A pending timer is not intrinsically a leak; its owner may remain live for
+  // the rest of the module or system lifetime.
+  return {};
 }
 
 std::vector<const Instruction *>
 LinuxKernelWaitAnalysis::findTimerUseAfterDelete() const {
   std::vector<const Instruction *> result;
-  for (const auto &pair : timer_map_) {
-    const TimerContext &ctx = pair.second;
-    if (ctx.delete_inst == nullptr) {
+  std::map<const Function *, std::unique_ptr<DominatorTree>> dominators;
+  for (const auto &mod : process_model_.getAllOperations()) {
+    if (mod.kind != OperationKind::TIMER_MOD || mod.wait_queue == nullptr) {
       continue;
     }
-    if (ctx.mod_inst != nullptr &&
-        process_model_.isBeforeInFunction(ctx.delete_inst, ctx.mod_inst)) {
-      result.push_back(ctx.mod_inst);
+    const Function *function = mod.inst->getFunction();
+    auto &dt = dominators[function];
+    if (!dt) {
+      dt = std::make_unique<DominatorTree>(*const_cast<Function *>(function));
+    }
+    for (const auto &shutdown : process_model_.getAllOperations()) {
+      if (shutdown.kind == OperationKind::TIMER_SHUTDOWN &&
+          shutdown.wait_queue == mod.wait_queue &&
+          shutdown.inst->getFunction() == function &&
+          dt->dominates(shutdown.inst, mod.inst)) {
+        result.push_back(mod.inst);
+        break;
+      }
     }
   }
   return result;
@@ -208,15 +220,9 @@ LinuxKernelWaitAnalysis::findTimerUseAfterDelete() const {
 std::vector<std::pair<const Instruction *, const Instruction *>>
 LinuxKernelWaitAnalysis::findRaceBetweenWaitAndWake() const {
   std::vector<std::pair<const Instruction *, const Instruction *>> result;
-  for (const auto &ctx : wait_contexts_) {
-    if (ctx.wake_inst == nullptr || ctx.wait_queue == nullptr) {
-      continue;
-    }
-    if (ctx.wait_inst->getFunction() == ctx.wake_inst->getFunction() &&
-        process_model_.isBeforeInFunction(ctx.wake_inst, ctx.wait_inst)) {
-      result.emplace_back(ctx.wait_inst, ctx.wake_inst);
-    }
-  }
+  // Program order between calls is insufficient to prove a lost wakeup.  The
+  // condition access, enqueue state and inter-thread happens-before relation
+  // must all participate in this diagnostic.
   return result;
 }
 

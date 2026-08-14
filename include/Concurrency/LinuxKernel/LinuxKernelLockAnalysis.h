@@ -67,9 +67,31 @@ public:
   }
 
 private:
+  struct LockFlowState {
+    std::set<LockID> may_held;
+    std::set<LockID> must_held;
+    std::set<LockID> may_exclusive;
+    std::set<LockID> must_exclusive;
+
+    bool operator==(const LockFlowState &other) const {
+      return may_held == other.may_held && must_held == other.must_held &&
+             may_exclusive == other.may_exclusive &&
+             must_exclusive == other.must_exclusive;
+    }
+    bool operator!=(const LockFlowState &other) const {
+      return !(*this == other);
+    }
+  };
+
   const LinuxKernelProcessModel &process_model_;
   std::vector<LockRegion> lock_regions_;
   mutable std::unordered_map<std::string, size_t> lock_diagnostics_;
+  std::vector<std::pair<const llvm::Instruction *, const llvm::Instruction *>>
+      lock_order_inversions_;
+  std::vector<const llvm::Instruction *> double_locks_;
+  std::vector<const llvm::Instruction *> unlock_without_lock_;
+  std::vector<const llvm::Instruction *> lock_without_unlock_;
+  std::vector<const llvm::Instruction *> sleep_in_spinlock_;
 
   bool isLockAcquire(OperationKind kind) const;
   bool isLockRelease(OperationKind kind) const;

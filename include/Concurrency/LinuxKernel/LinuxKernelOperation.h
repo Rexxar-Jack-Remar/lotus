@@ -61,6 +61,36 @@ enum class LockKind {
 
 enum class LockState { UNLOCKED, LOCKED, INTERRUPTIBLE, UNKNOWN };
 
+enum class LockMode { SHARED, EXCLUSIVE, UNKNOWN };
+
+enum class ConditionalSuccess {
+  UNCONDITIONAL,
+  ZERO,
+  NONZERO,
+};
+
+enum class CompletionSignalKind { ONE, ALL, UNKNOWN };
+
+enum class RCUFlavor {
+  CLASSIC,
+  BH,
+  SCHED,
+  SRCU,
+  TASKS,
+  TASKS_TRACE,
+  UNKNOWN,
+};
+
+enum class AsyncContextKind {
+  NONE,
+  KTHREAD,
+  WORKQUEUE,
+  TIMER_SOFTIRQ,
+  HARDIRQ,
+  THREADED_IRQ,
+  RCU_CALLBACK,
+};
+
 enum class OperationKind {
   // Lock operations
   LOCK_ACQUIRE,
@@ -75,11 +105,13 @@ enum class OperationKind {
   RCU_CALL,
   RCU_ASSIGN,
   RCU_DEREFERENCE,
+  RCU_RECLAIM,
 
   // Completion operations
   COMPLETION_WAIT,
   COMPLETION_SIGNAL,
   COMPLETION_INIT,
+  COMPLETION_REINIT,
 
   // Wait queue operations
   WAITQUEUE_INIT,
@@ -92,6 +124,7 @@ enum class OperationKind {
   TIMER_SETUP,
   TIMER_MOD,
   TIMER_DELETE,
+  TIMER_SHUTDOWN,
 
   // Memory barriers
   MEMORY_BARRIER,
@@ -117,6 +150,12 @@ enum class OperationKind {
   IRQ_FREE,
   IRQ_ENABLE,
   IRQ_DISABLE,
+  IRQ_LINE_ENABLE,
+  IRQ_LINE_DISABLE,
+  BH_ENABLE,
+  BH_DISABLE,
+  PREEMPT_ENABLE,
+  PREEMPT_DISABLE,
 
   // Memory allocation
   KMALLOC,
@@ -146,19 +185,34 @@ struct KernelOperation {
   // Lock-related info
   LockID lock = nullptr;
   LockState lock_state = LockState::UNKNOWN;
+  LockMode lock_mode = LockMode::UNKNOWN;
+  ConditionalSuccess conditional_success = ConditionalSuccess::UNCONDITIONAL;
   bool is_recursive = false;
+  bool is_nested = false;
   bool is_interruptible = false;
   bool is_raw = false;
   bool has_timeout = false;
+  const llvm::Value *irq_flags = nullptr;
 
   // For wait queues
   WaitQueueID wait_queue = nullptr;
+  const llvm::Value *wait_condition = nullptr;
+  bool wake_all = false;
+  bool wake_exclusive = false;
+  CompletionSignalKind completion_signal = CompletionSignalKind::UNKNOWN;
 
   // For RCU
   RCUSyncPointID rcu_sync = nullptr;
+  const llvm::Value *rcu_domain = nullptr;
+  const llvm::Value *rcu_target = nullptr;
+  const llvm::Value *callback = nullptr;
+  std::vector<const llvm::Value *> callbacks;
+  AsyncContextKind async_context = AsyncContextKind::NONE;
+  RCUFlavor rcu_flavor = RCUFlavor::UNKNOWN;
+  bool requires_rcu_section = true;
 
   // For timers
-  int timer_delay_ms = -1;
+  const llvm::Value *timer_expires = nullptr;
 
   // For atomic operations
   const llvm::Value *atomic_var = nullptr;
@@ -191,6 +245,7 @@ struct LockInfo {
   std::vector<const llvm::Instruction *> release_history;
 
   bool is_recursive = false;
+  bool is_nested = false;
   bool is_interruptible = false;
   bool is_raw = false;
 

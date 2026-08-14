@@ -34,9 +34,11 @@ public:
   void analyzeRCU();
 
   struct RCUCriticalSection {
-    const llvm::Instruction *read_lock;
-    const llvm::Instruction *read_unlock;
-    const llvm::Function *function;
+    const llvm::Instruction *read_lock = nullptr;
+    const llvm::Instruction *read_unlock = nullptr;
+    const llvm::Function *function = nullptr;
+    const llvm::Value *domain = nullptr;
+    RCUFlavor flavor = RCUFlavor::UNKNOWN;
 
     std::vector<const llvm::Instruction *> protected_accesses;
 
@@ -45,8 +47,10 @@ public:
   };
 
   struct RCUGracePeriod {
-    const llvm::Instruction *sync_inst;
-    const llvm::Function *function;
+    const llvm::Instruction *sync_inst = nullptr;
+    const llvm::Function *function = nullptr;
+    const llvm::Value *domain = nullptr;
+    RCUFlavor flavor = RCUFlavor::UNKNOWN;
     std::vector<const llvm::Instruction *> callbacks;
   };
 
@@ -64,6 +68,8 @@ public:
   std::vector<const llvm::Instruction *> findRCUDoubleFree() const;
 
   std::vector<const llvm::Instruction *> findDerefAfterFree() const;
+
+  std::vector<const llvm::Instruction *> findUnsafeReclamation() const;
 
   std::vector<const llvm::Instruction *> findDerefInWrongSection() const;
 
