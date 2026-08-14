@@ -43,6 +43,31 @@ TEST(DIBasedTypeHierarchyTest, TransitivelyReachableTypes_9) {
   EXPECT_FALSE(ReachableTypesChild.count(*BaseType));
   EXPECT_TRUE(ReachableTypesChild.count(*ChildType));
 }
+
+TEST(DIBasedTypeHierarchyTest, DiamondReachabilityHasNoDuplicates) {
+  LLVMContext Context;
+  auto M = loadModule(getTestFilePath("type_hierarchy_22_cpp_dbg.ll"), Context);
+  ASSERT_NE(nullptr, M);
+  DIBasedTypeHierarchy DBTH(*M);
+
+  auto TopType = DBTH.getType("_ZTS3Top");
+  auto LeftType = DBTH.getType("_ZTS4Left");
+  auto RightType = DBTH.getType("_ZTS5Right");
+  auto BottomType = DBTH.getType("_ZTS6Bottom");
+  ASSERT_TRUE(TopType.has_value());
+  ASSERT_TRUE(LeftType.has_value());
+  ASSERT_TRUE(RightType.has_value());
+  ASSERT_TRUE(BottomType.has_value());
+
+  auto ReachableTypes = DBTH.subTypesOf(*TopType);
+  EXPECT_EQ(std::distance(ReachableTypes.begin(), ReachableTypes.end()), 4);
+  EXPECT_EQ(std::set<DIBasedTypeHierarchy::ClassType>(ReachableTypes.begin(),
+                                                      ReachableTypes.end())
+                .size(),
+            4U);
+  EXPECT_TRUE(DBTH.isSubType(*TopType, *BottomType));
+  EXPECT_FALSE(DBTH.isSubType(*BottomType, *TopType));
+}
 TEST(DIBasedTypeHierarchyTest, TransitivelyReachableTypes_10) {
   LLVMContext Context;
   auto M = loadModule(getTestFilePath("type_hierarchy_10_cpp_dbg.ll"), Context);

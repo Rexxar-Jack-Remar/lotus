@@ -65,12 +65,13 @@ public:
   __attribute__((warn_unused_result)) virtual bool hasType(T Type) const = 0;
 
   /**
-   * @brief Check if Type is a subtype of SubType
-   * @param Type The potential subtype
-   * @param SubType The potential supertype
-   * @return true if Type <= SubType in the type hierarchy
+   * @brief Check whether CandidateSubtype is BaseType or derives from it
+   * @param BaseType The potential base type
+   * @param CandidateSubtype The potential derived type
+   * @return true if CandidateSubtype is in BaseType's descendant closure
    */
-  __attribute__((warn_unused_result)) virtual bool isSubType(T Type, T SubType) const = 0;
+  __attribute__((warn_unused_result)) virtual bool
+  isSubType(T BaseType, T CandidateSubtype) const = 0;
 
   /**
    * @brief Get all direct and indirect subtypes of a type

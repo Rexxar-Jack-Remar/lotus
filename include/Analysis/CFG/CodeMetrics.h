@@ -44,8 +44,9 @@ struct LoopMetrics {
 // Free-function declarations (defined in CodeMetrics.cpp)
 // ---------------------------------------------------------------------------
 
-/// Compute McCabe cyclomatic complexity on the entry-reachable CFG:
-/// V(G) = E - N + 2. Returns 0 for declarations and empty functions.
+/// Compute McCabe cyclomatic complexity on the entry-reachable CFG as one
+/// plus the surplus outgoing edges at each decision point. Returns 0 for
+/// declarations and empty functions.
 unsigned calcCyclomaticComplexity(llvm::Function &F);
 
 /// Collect loop count and maximum nesting depth using LoopInfo.

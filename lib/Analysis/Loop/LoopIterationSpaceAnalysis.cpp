@@ -205,25 +205,61 @@ void LoopIterationSpaceAnalysis::computeMemoryAccessSpace(
         SE.getSCEV(memAccessSpace->memoryAccessor);
 
     for (auto *user : memoryAccessor->users()) {
-      if (isa<StoreInst>(user) || isa<LoadInst>(user) ||
-          isa<GetElementPtrInst>(user)) {
-        auto *accessor = cast<Instruction>(user);
-        this->accessSpaceByInstruction[accessor] = memAccessSpace;
-        memAccessSpace->accessInstructions.insert(accessor);
+      auto *accessor = dyn_cast<Instruction>(user);
+      if (accessor == nullptr) {
+        continue;
+      }
+      if (auto *store = dyn_cast<StoreInst>(accessor)) {
+        if (store->getPointerOperand() != memoryAccessor) {
+          continue;
+        }
+        this->accessSpaceByInstruction[store] = memAccessSpace;
+        memAccessSpace->accessInstructions.insert(store);
+      } else if (auto *load = dyn_cast<LoadInst>(accessor)) {
+        if (load->getPointerOperand() != memoryAccessor) {
+          continue;
+        }
+        this->accessSpaceByInstruction[load] = memAccessSpace;
+        memAccessSpace->accessInstructions.insert(load);
+      } else if (auto *gep = dyn_cast<GetElementPtrInst>(accessor)) {
+        if (gep->getPointerOperand() == memoryAccessor) {
+          this->accessSpaceByInstruction[gep] = memAccessSpace;
+        }
       }
     }
 
-    Type *accessedType = nullptr;
+    auto &DL = memoryAccessor->getModule()->getDataLayout();
     for (auto *accessor : memAccessSpace->accessInstructions) {
+      Type *accessedType = nullptr;
       if (auto *store = dyn_cast<StoreInst>(accessor)) {
         accessedType = store->getValueOperand()->getType();
       } else if (auto *load = dyn_cast<LoadInst>(accessor)) {
         accessedType = load->getType();
-      } else if (auto *gep = dyn_cast<GetElementPtrInst>(accessor)) {
-        accessedType = gep->getResultElementType();
       }
-      if (accessedType != nullptr) {
+      if (accessedType == nullptr || !accessedType->isSized()) {
+        continue;
+      }
+      auto accessSize = DL.getTypeStoreSize(accessedType);
+      if (accessSize.isScalable()) {
+        memAccessSpace->maxAccessSizeBytes = 0;
         break;
+      }
+      memAccessSpace->maxAccessSizeBytes = std::max(
+          memAccessSpace->maxAccessSizeBytes, accessSize.getFixedSize());
+    }
+    if (memAccessSpace->maxAccessSizeBytes == 0) {
+      continue;
+    }
+
+    Type *accessedType = nullptr;
+    if (auto *gep = dyn_cast<GetElementPtrInst>(memoryAccessor)) {
+      accessedType = gep->getResultElementType();
+    } else if (!memAccessSpace->accessInstructions.empty()) {
+      auto *accessor = *memAccessSpace->accessInstructions.begin();
+      if (auto *store = dyn_cast<StoreInst>(accessor)) {
+        accessedType = store->getValueOperand()->getType();
+      } else if (auto *load = dyn_cast<LoadInst>(accessor)) {
+        accessedType = load->getType();
       }
     }
     if (accessedType == nullptr) {
@@ -296,6 +332,69 @@ void LoopIterationSpaceAnalysis::computeMemoryAccessSpace(
 void LoopIterationSpaceAnalysis::
     identifyNonOverlappingAccessesBetweenIterationsAcrossOneLoopInvocation(
         llvm::ScalarEvolution &SE) {
+  auto hasAccessDistanceAtLeastWidth = [&](MemoryAccessSpace *space) {
+    if (isa<GetElementPtrInst>(space->memoryAccessor)) {
+      if (auto *elementSize =
+              dyn_cast<llvm::SCEVConstant>(space->elementSize)) {
+        auto size = elementSize->getValue()->getValue();
+        unsigned compareWidth = std::max(64u, size.getBitWidth());
+        llvm::APInt accessWidth(compareWidth, space->maxAccessSizeBytes);
+        if (size.zextOrTrunc(compareWidth).uge(accessWidth)) {
+          return true;
+        }
+      }
+    }
+
+    auto *rootHeader = this->loops->getLoop()->getHeader();
+    const llvm::SCEVAddRecExpr *rootRecurrence = nullptr;
+    std::function<bool(const llvm::SCEV *)> findRootRecurrence =
+        [&](const llvm::SCEV *scev) {
+          if (auto *addRec = dyn_cast<llvm::SCEVAddRecExpr>(scev)) {
+            if (addRec->getLoop()->getHeader() == rootHeader) {
+              if (rootRecurrence != nullptr && rootRecurrence != addRec) {
+                return false;
+              }
+              rootRecurrence = addRec;
+              return true;
+            }
+            return findRootRecurrence(addRec->getStart()) &&
+                   findRootRecurrence(addRec->getStepRecurrence(SE));
+          }
+          if (auto *nary = dyn_cast<llvm::SCEVNAryExpr>(scev)) {
+            for (unsigned i = 0; i < nary->getNumOperands(); ++i) {
+              if (!findRootRecurrence(nary->getOperand(i))) {
+                return false;
+              }
+            }
+          } else if (auto *cast = dyn_cast<llvm::SCEVCastExpr>(scev)) {
+            return findRootRecurrence(cast->getOperand());
+          } else if (auto *udiv = dyn_cast<llvm::SCEVUDivExpr>(scev)) {
+            return findRootRecurrence(udiv->getLHS()) &&
+                   findRootRecurrence(udiv->getRHS());
+          }
+          return true;
+        };
+
+    if (!findRootRecurrence(space->memoryAccessorSCEV) ||
+        rootRecurrence == nullptr ||
+        (!rootRecurrence->hasNoSelfWrap() &&
+         !(rootRecurrence->hasNoSignedWrap() &&
+           rootRecurrence->hasNoUnsignedWrap()))) {
+      return false;
+    }
+
+    auto *step = dyn_cast<llvm::SCEVConstant>(
+        rootRecurrence->getStepRecurrence(SE));
+    if (step == nullptr || step->getValue()->isZero()) {
+      return false;
+    }
+    auto magnitude = step->getValue()->getValue().abs();
+    unsigned compareWidth = std::max(64u, magnitude.getBitWidth());
+    auto widenedMagnitude = magnitude.zextOrTrunc(compareWidth);
+    llvm::APInt accessWidth(compareWidth, space->maxAccessSizeBytes);
+    return widenedMagnitude.uge(accessWidth);
+  };
+
   for (auto &memAccessSpaceOwner : this->accessSpaces) {
     auto *memAccessSpace = memAccessSpaceOwner.get();
     if (memAccessSpace->subscriptIVs.empty() ||
@@ -386,7 +485,9 @@ void LoopIterationSpaceAnalysis::
       }
     }
 
-    this->nonOverlappingAccessesBetweenIterations.insert(memAccessSpace);
+    if (hasAccessDistanceAtLeastWidth(memAccessSpace)) {
+      this->nonOverlappingAccessesBetweenIterations.insert(memAccessSpace);
+    }
   }
 
   for (auto &accessSpacePair0 : this->accessSpaceByInstruction) {
@@ -420,9 +521,12 @@ void LoopIterationSpaceAnalysis::identifyIVForMemoryAccessSubscripts(
       }
       auto *scevConstant1 = dyn_cast<llvm::SCEVConstant>(scev1);
       auto *scevConstant2 = dyn_cast<llvm::SCEVConstant>(scev2);
-      return scevConstant1 != nullptr && scevConstant2 != nullptr &&
-             scevConstant1->getValue()->getSExtValue() ==
-                 scevConstant2->getValue()->getSExtValue();
+      if (scevConstant1 == nullptr || scevConstant2 == nullptr) {
+        return false;
+      }
+      auto &value1 = scevConstant1->getValue()->getValue();
+      auto &value2 = scevConstant2->getValue()->getValue();
+      return value1.getBitWidth() == value2.getBitWidth() && value1 == value2;
     };
 
     auto findInstructionInLoopForSCEV =
@@ -510,6 +614,7 @@ LoopIterationSpaceAnalysis::MemoryAccessSpace::MemoryAccessSpace(
       memoryAccessorBasePointerSCEV{nullptr}, memoryMinusSCEV{nullptr},
       recurrence{nullptr}, elementSize{nullptr}, subscripts{}, sizes{},
       subscriptIVs{}, accessInstructions{}, constantStep{0}, isAnalyzed{false} {
+  this->maxAccessSizeBytes = 0;
 }
 
 bool LoopIterationSpaceAnalysis::isOneToOneFunctionOnIV(
@@ -576,6 +681,10 @@ bool LoopIterationSpaceAnalysis::isOneToOneFunctionOnIV(
       }
       auto *operandInst = dyn_cast<Instruction>(operand);
       if (operandInst != nullptr && loopStructure->isIncluded(operandInst)) {
+        return false;
+      }
+      if (!SE.isSCEVable(operand->getType()) ||
+          !SE.isKnownNonZero(SE.getSCEV(operand))) {
         return false;
       }
     }
@@ -677,8 +786,9 @@ bool LoopIterationSpaceAnalysis::isInnerDimensionSubscriptsBounded(
     if (!constant1 || !constant2) {
       return false;
     }
-    return constant1->getValue()->getSExtValue() ==
-           constant2->getValue()->getSExtValue();
+    auto &value1 = constant1->getValue()->getValue();
+    auto &value2 = constant2->getValue()->getValue();
+    return value1.getBitWidth() == value2.getBitWidth() && value1 == value2;
   };
 
   for (auto i = 1u; i < space->sizes.size(); ++i) {

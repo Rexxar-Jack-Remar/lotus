@@ -54,6 +54,7 @@ private:
     std::vector<const llvm::SCEV *> sizes;
     std::vector<std::pair<Instruction *, InductionVariable *>> subscriptIVs;
     std::set<Instruction *> accessInstructions;
+    uint64_t maxAccessSizeBytes;
     int64_t constantStep;
     bool isAnalyzed;
   };

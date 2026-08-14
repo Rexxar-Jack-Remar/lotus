@@ -88,14 +88,13 @@ buildVTables(const llvm::DebugInfoFinder &DIF,
 }
 
 struct TypeGraph {
-  llvm::SmallBitVector Roots;
   llvm::SmallVector<llvm::SmallVector<uint32_t>> DerivedTypesOf;
 };
 
 static TypeGraph
 buildTypeGraph(llvm::ArrayRef<const llvm::DICompositeType *> VertexTypes,
                const llvm::DenseMap<ClassType, size_t> &TypeToVertex) {
-  TypeGraph TG{llvm::SmallBitVector(VertexTypes.size(), true), {}};
+  TypeGraph TG;
   TG.DerivedTypesOf.resize(VertexTypes.size());
 
   for (const auto *Composite : VertexTypes) {
@@ -121,7 +120,6 @@ buildTypeGraph(llvm::ArrayRef<const llvm::DICompositeType *> VertexTypes,
         auto BaseIdx = BaseIt->second;
 
         TG.DerivedTypesOf[BaseIdx].push_back(DerivedIdx);
-        TG.Roots.reset(DerivedIdx);
       }
     }
   }
@@ -135,35 +133,27 @@ static void buildTypeHierarchy(
     std::vector<std::pair<uint32_t, uint32_t>> &TransitiveDerivedIndex,
     std::vector<ClassType> &Hierarchy) {
   TransitiveDerivedIndex.resize(VertexTypes.size());
+  llvm::SmallVector<uint32_t> WorkList;
 
-  llvm::SmallBitVector Seen(VertexTypes.size());
-
-  llvm::SmallVector<int32_t> WorkList;
-
-  for (uint32_t Rt : TG.Roots.set_bits()) {
-    WorkList.emplace_back(Rt);
-
+  // Materialize one duplicate-free reachability range per type. A single
+  // preorder interval only represents trees correctly: in an inheritance DAG,
+  // a multiply inherited class may be reachable through several paths.
+  for (uint32_t Root = 0; Root < VertexTypes.size(); ++Root) {
+    llvm::SmallBitVector Seen(VertexTypes.size());
+    TransitiveDerivedIndex[Root].first = Hierarchy.size();
+    WorkList.push_back(Root);
     while (!WorkList.empty()) {
-      auto Curr = WorkList.pop_back_val();
-
-      if (Curr < 0) {
-        // Pop N elements
-        auto TypeIdx = ~Curr;
-        TransitiveDerivedIndex[TypeIdx].second = Hierarchy.size();
+      uint32_t Curr = WorkList.pop_back_val();
+      if (Seen.test(Curr)) {
         continue;
       }
 
-      if (!Seen.test(Curr)) {
-        TransitiveDerivedIndex[Curr].first = Hierarchy.size();
-      } else {
-        Seen.set(Curr);
-      }
+      Seen.set(Curr);
       Hierarchy.push_back(VertexTypes[Curr]);
-      // llvm::errs() << " -- push " << VertexTypes[Curr]->getName() << '\n';
-      WorkList.push_back(~Curr);
       WorkList.append(TG.DerivedTypesOf[Curr].begin(),
                       TG.DerivedTypesOf[Curr].end());
     }
+    TransitiveDerivedIndex[Root].second = Hierarchy.size();
   }
 }
 

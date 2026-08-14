@@ -134,6 +134,20 @@ TEST(CodeMetricsTest, CyclomaticComplexityUsesEntryReachableCFG) {
       ret void
     }
 
+    define i32 @two_returns(i1 %cond) {
+    entry:
+      br i1 %cond, label %left, label %right
+    left:
+      ret i32 1
+    right:
+      ret i32 2
+    }
+
+    define void @spin_forever() {
+    entry:
+      br label %entry
+    }
+
     define void @with_unreachable() {
     entry:
       ret void
@@ -151,6 +165,8 @@ TEST(CodeMetricsTest, CyclomaticComplexityUsesEntryReachableCFG) {
   EXPECT_EQ(calcCyclomaticComplexity(*module->getFunction("single")), 1u);
   EXPECT_EQ(calcCyclomaticComplexity(*module->getFunction("linear")), 1u);
   EXPECT_EQ(calcCyclomaticComplexity(*module->getFunction("conditional")), 2u);
+  EXPECT_EQ(calcCyclomaticComplexity(*module->getFunction("two_returns")), 2u);
+  EXPECT_EQ(calcCyclomaticComplexity(*module->getFunction("spin_forever")), 1u);
   EXPECT_EQ(calcCyclomaticComplexity(*module->getFunction("with_unreachable")),
             1u);
 }

@@ -288,6 +288,260 @@ TEST_F(LoopIterationSpaceTest, StaysConservativeForNonInjectiveStride) {
           ld, store));
 }
 
+TEST_F(LoopIterationSpaceTest, RejectsUnprovedInjectiveIVExpressions) {
+  llvm::LLVMContext context;
+  auto module = parseModuleChecked(context, R"(
+    define void @truncated_iv(i8* %base, i64 %n) {
+    entry:
+      br label %header
+    header:
+      %i = phi i64 [ 0, %entry ], [ %i.next, %latch ]
+      %cmp = icmp ult i64 %i, %n
+      br i1 %cmp, label %body, label %exit
+    body:
+      %narrow = trunc i64 %i to i32
+      %idx = zext i32 %narrow to i64
+      %ptr = getelementptr i8, i8* %base, i64 %idx
+      %ld = load i8, i8* %ptr, align 1
+      store i8 %ld, i8* %ptr, align 1
+      br label %latch
+    latch:
+      %i.next = add nuw i64 %i, 1
+      br label %header
+    exit:
+      ret void
+    }
+
+    define void @duplicated_iv(i8* %base, i64 %n) {
+    entry:
+      br label %header
+    header:
+      %i = phi i64 [ 0, %entry ], [ %i.next, %latch ]
+      %cmp = icmp ult i64 %i, %n
+      br i1 %cmp, label %body, label %exit
+    body:
+      %idx = add nuw i64 %i, %i
+      %ptr = getelementptr i8, i8* %base, i64 %idx
+      %ld = load i8, i8* %ptr, align 1
+      store i8 %ld, i8* %ptr, align 1
+      br label %latch
+    latch:
+      %i.next = add nuw i64 %i, 1
+      br label %header
+    exit:
+      ret void
+    }
+
+    define void @cancelled_iv(i8* %base, i64 %n) {
+    entry:
+      br label %header
+    header:
+      %i = phi i64 [ 0, %entry ], [ %i.next, %latch ]
+      %cmp = icmp ult i64 %i, %n
+      br i1 %cmp, label %body, label %exit
+    body:
+      %idx = sub i64 %i, %i
+      %ptr = getelementptr i8, i8* %base, i64 %idx
+      %ld = load i8, i8* %ptr, align 1
+      store i8 %ld, i8* %ptr, align 1
+      br label %latch
+    latch:
+      %i.next = add nuw i64 %i, 1
+      br label %header
+    exit:
+      ret void
+    }
+
+    define void @wrapping_iv(i8* %base) {
+    entry:
+      br label %header
+    header:
+      %i = phi i8 [ 0, %entry ], [ %i.next, %latch ]
+      %count = phi i16 [ 0, %entry ], [ %count.next, %latch ]
+      %cmp = icmp ult i16 %count, 300
+      br i1 %cmp, label %body, label %exit
+    body:
+      %idx = zext i8 %i to i64
+      %ptr = getelementptr i8, i8* %base, i64 %idx
+      %ld = load i8, i8* %ptr, align 1
+      store i8 %ld, i8* %ptr, align 1
+      br label %latch
+    latch:
+      %i.next = add i8 %i, 1
+      %count.next = add nuw nsw i16 %count, 1
+      br label %header
+    exit:
+      ret void
+    }
+  )");
+
+  buildPDG(*module);
+  auto expectConservative = [&](llvm::StringRef functionName) {
+    SCOPED_TRACE(functionName.str());
+    auto *function = module->getFunction(functionName);
+    ASSERT_NE(function, nullptr);
+
+    llvm::PassBuilder PB;
+    llvm::FunctionAnalysisManager FAM;
+    PB.registerFunctionAnalyses(FAM);
+    auto &DT = FAM.getResult<llvm::DominatorTreeAnalysis>(*function);
+    auto &PDT = FAM.getResult<llvm::PostDominatorTreeAnalysis>(*function);
+    auto &LI = FAM.getResult<llvm::LoopAnalysis>(*function);
+    auto &SE = FAM.getResult<llvm::ScalarEvolutionAnalysis>(*function);
+
+    FunctionLoopAnalyses analyses(*function, LI, DT, PDT);
+    analyses.materializeDependenceGraphs(graph);
+    analyses.materializeScalarAnalyses(SE, LI);
+    analyses.materializeLoopCarriedDependencies(DT, PDT);
+    analyses.materializeIterationSpaceAnalyses(SE);
+
+    auto *content = analyses.getLoopContent(**LI.begin());
+    ASSERT_NE(content, nullptr);
+    auto *iterationSpace = content->getLoopIterationSpaceAnalysis();
+    auto *ld = findInstructionByName(function, "ld");
+    auto *store = lotus::unittest::findInstruction<llvm::StoreInst>(*function);
+    ASSERT_NE(iterationSpace, nullptr);
+    ASSERT_NE(ld, nullptr);
+    ASSERT_NE(store, nullptr);
+    EXPECT_FALSE(iterationSpace
+                     ->areInstructionsAccessingDisjointMemoryLocationsBetweenIterations(
+                         ld, store));
+  };
+
+  expectConservative("truncated_iv");
+  expectConservative("duplicated_iv");
+  expectConservative("cancelled_iv");
+  expectConservative("wrapping_iv");
+}
+
+TEST_F(LoopIterationSpaceTest,
+       RejectsNonDereferencesOverlappingWidthsAndRuntimeZeroStride) {
+  llvm::LLVMContext context;
+  auto module = parseModuleChecked(context, R"(
+    @shared = global i8* null
+
+    define void @pointer_stored_as_value(i8* %base, i64 %n) {
+    entry:
+      br label %header
+    header:
+      %i = phi i64 [ 0, %entry ], [ %i.next, %latch ]
+      %cmp = icmp ult i64 %i, %n
+      br i1 %cmp, label %body, label %exit
+    body:
+      %p = getelementptr i8, i8* %base, i64 %i
+      %ld = load i8, i8* %p, align 1
+      store i8* %p, i8** @shared, align 8
+      br label %latch
+    latch:
+      %i.next = add nuw i64 %i, 1
+      br label %header
+    exit:
+      ret void
+    }
+
+    define void @wide_unit_stride(i8* %base, i64 %n) {
+    entry:
+      br label %header
+    header:
+      %i = phi i64 [ 0, %entry ], [ %i.next, %latch ]
+      %cmp = icmp ult i64 %i, %n
+      br i1 %cmp, label %body, label %exit
+    body:
+      %p = getelementptr i8, i8* %base, i64 %i
+      %wide = bitcast i8* %p to i64*
+      %ld = load i64, i64* %wide, align 1
+      store i64 %ld, i64* %wide, align 1
+      br label %latch
+    latch:
+      %i.next = add nuw i64 %i, 1
+      br label %header
+    exit:
+      ret void
+    }
+
+    define void @runtime_stride(i8* %base, i64 %n, i64 %stride) {
+    entry:
+      br label %header
+    header:
+      %i = phi i64 [ 0, %entry ], [ %i.next, %latch ]
+      %cmp = icmp ult i64 %i, %n
+      br i1 %cmp, label %body, label %exit
+    body:
+      %idx = mul nuw i64 %i, %stride
+      %p = getelementptr i8, i8* %base, i64 %idx
+      %ld = load i8, i8* %p, align 1
+      store i8 %ld, i8* %p, align 1
+      br label %latch
+    latch:
+      %i.next = add nuw i64 %i, 1
+      br label %header
+    exit:
+      ret void
+    }
+
+    define void @wide_constants(i8* %base) {
+    entry:
+      br label %header
+    header:
+      %i = phi i128 [ 170141183460469231731687303715884105700, %entry ],
+                    [ %i.next, %latch ]
+      %cmp = icmp ult i128 %i, 170141183460469231731687303715884105704
+      br i1 %cmp, label %body, label %exit
+    body:
+      %p = getelementptr i8, i8* %base, i128 %i
+      %ld = load i8, i8* %p, align 1
+      store i8 %ld, i8* %p, align 1
+      br label %latch
+    latch:
+      %i.next = add nuw i128 %i, 1
+      br label %header
+    exit:
+      ret void
+    }
+  )");
+
+  buildPDG(*module);
+  auto analyze = [&](llvm::StringRef functionName, bool checkResult = true) {
+    SCOPED_TRACE(functionName.str());
+    auto *function = module->getFunction(functionName);
+    ASSERT_NE(function, nullptr);
+
+    llvm::PassBuilder PB;
+    llvm::FunctionAnalysisManager FAM;
+    PB.registerFunctionAnalyses(FAM);
+    auto &DT = FAM.getResult<llvm::DominatorTreeAnalysis>(*function);
+    auto &PDT = FAM.getResult<llvm::PostDominatorTreeAnalysis>(*function);
+    auto &LI = FAM.getResult<llvm::LoopAnalysis>(*function);
+    auto &SE = FAM.getResult<llvm::ScalarEvolutionAnalysis>(*function);
+
+    FunctionLoopAnalyses analyses(*function, LI, DT, PDT);
+    analyses.materializeDependenceGraphs(graph);
+    analyses.materializeScalarAnalyses(SE, LI);
+    analyses.materializeLoopCarriedDependencies(DT, PDT);
+    analyses.materializeIterationSpaceAnalyses(SE);
+
+    auto *content = analyses.getLoopContent(**LI.begin());
+    ASSERT_NE(content, nullptr);
+    auto *iterationSpace = content->getLoopIterationSpaceAnalysis();
+    auto *ld = findInstructionByName(function, "ld");
+    auto *store = lotus::unittest::findInstruction<llvm::StoreInst>(*function);
+    ASSERT_NE(iterationSpace, nullptr);
+    ASSERT_NE(ld, nullptr);
+    ASSERT_NE(store, nullptr);
+    bool disjoint = iterationSpace
+                        ->areInstructionsAccessingDisjointMemoryLocationsBetweenIterations(
+                            ld, store);
+    if (checkResult) {
+      EXPECT_FALSE(disjoint);
+    }
+  };
+
+  analyze("pointer_stored_as_value");
+  analyze("wide_unit_stride");
+  analyze("runtime_stride");
+  analyze("wide_constants", false);
+}
+
 TEST_F(LoopIterationSpaceTest, KeepsMultiBlockSameIterationDependencesConservative) {
   llvm::LLVMContext context;
   auto module = parseModuleChecked(context, R"(

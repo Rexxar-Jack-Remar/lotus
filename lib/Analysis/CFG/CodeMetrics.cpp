@@ -25,23 +25,19 @@ unsigned calcCyclomaticComplexity(Function &F) {
   if (F.isDeclaration() || F.empty())
     return 0;
 
-  uint64_t Blocks = 0;
-  uint64_t Edges = 0;
+  uint64_t Complexity = 1;
 
-  // McCabe's P == 1 formula applies to the connected flow graph reachable
-  // from the function entry. Ignore detached, unreachable IR blocks.
+  // Count the surplus outgoing edges at each decision point. This is
+  // equivalent to E - N + NumExits + 1 for an entry-reachable CFG, but also
+  // handles multiple exits and CFGs with no exit without special cases.
   ReversePostOrderTraversal<Function *> RPOT(&F);
   for (BasicBlock *BB : RPOT) {
-    ++Blocks;
-    Edges += succ_size(BB);
+    const uint64_t NumSuccessors = succ_size(BB);
+    if (NumSuccessors > 1)
+      Complexity += NumSuccessors - 1;
   }
 
-  // Standard McCabe formula: V(G) = E - N + 2  (P == 1 for a single function).
-  // Note: call sites are NOT decision points in the standard definition and
-  // are therefore not counted here (the old header-only version incorrectly
-  // added them).
-  assert(Edges + 2 >= Blocks && "entry-reachable CFG must be connected");
-  return static_cast<unsigned>(Edges + 2 - Blocks);
+  return static_cast<unsigned>(Complexity);
 }
 
 // ---------------------------------------------------------------------------

@@ -57,7 +57,8 @@ set(TYPE_HIERARCHY_CASES
     type_hierarchy_18
     type_hierarchy_19
     type_hierarchy_20
-    type_hierarchy_21)
+    type_hierarchy_21
+    type_hierarchy_22)
 
 set(TYPE_HIERARCHY_LL_OUTPUTS)
 foreach(case_name ${TYPE_HIERARCHY_CASES})

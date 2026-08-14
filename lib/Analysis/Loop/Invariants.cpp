@@ -35,7 +35,8 @@ bool isMemoryIndependentCall(CallBase *call) {
   if (call == nullptr) {
     return false;
   }
-  return call->doesNotAccessMemory() && !call->mayHaveSideEffects();
+  return call->doesNotAccessMemory() && call->doesNotThrow() &&
+         !call->isConvergent();
 }
 
 } // namespace

@@ -136,10 +136,11 @@ TEST_F(LoopScalarAnalysisTest, MaterializesInvariantsAndInductionVariables) {
   EXPECT_EQ(governing->getExitConditionValue(), limit);
 }
 
-TEST_F(LoopScalarAnalysisTest, KeepsEquivalentPhiInvariantAndRecognizesPureCalls) {
+TEST_F(LoopScalarAnalysisTest,
+       KeepsEquivalentPhiInvariantAndRecognizesReadNoneCalls) {
   llvm::LLVMContext context;
   auto module = parseModuleChecked(context, R"(
-    declare i64 @strlen(i8*)
+    declare i64 @hash_ptr(i8*) readnone nounwind
 
     define i64 @loop_scalar_pure(i8* %s, i32 %n) {
     entry:
@@ -153,7 +154,7 @@ TEST_F(LoopScalarAnalysisTest, KeepsEquivalentPhiInvariantAndRecognizesPureCalls
       br i1 %cmp, label %body, label %exit
 
     body:
-      %len = call i64 @strlen(i8* %s)
+      %len = call i64 @hash_ptr(i8* %s)
       %mix = add i64 %stable, %len
       br label %latch
 
@@ -200,6 +201,59 @@ TEST_F(LoopScalarAnalysisTest, KeepsEquivalentPhiInvariantAndRecognizesPureCalls
   EXPECT_TRUE(invariants->isLoopInvariant(stablePhi));
   EXPECT_TRUE(invariants->isLoopInvariant(len));
   EXPECT_TRUE(invariants->isLoopInvariant(mix));
+}
+
+TEST_F(LoopScalarAnalysisTest, KeepsReadonlyCallVariantWhenLoopMutatesMemory) {
+  llvm::LLVMContext context;
+  auto module = parseModuleChecked(context, R"(
+    declare i64 @strlen(i8*) readonly nounwind
+
+    define i64 @loop_scalar_readonly(i8* %s, i32 %n) {
+    entry:
+      br label %header
+
+    header:
+      %i = phi i32 [ 0, %entry ], [ %i.next, %latch ]
+      %cmp = icmp slt i32 %i, %n
+      br i1 %cmp, label %body, label %exit
+
+    body:
+      store i8 0, i8* %s, align 1
+      %len = call i64 @strlen(i8* %s)
+      br label %latch
+
+    latch:
+      %i.next = add nuw nsw i32 %i, 1
+      br label %header
+
+    exit:
+      ret i64 0
+    }
+  )");
+  auto *function = module->getFunction("loop_scalar_readonly");
+  ASSERT_NE(function, nullptr);
+
+  buildPDG(*module);
+
+  llvm::PassBuilder PB;
+  llvm::FunctionAnalysisManager FAM;
+  PB.registerFunctionAnalyses(FAM);
+  auto &DT = FAM.getResult<llvm::DominatorTreeAnalysis>(*function);
+  auto &PDT = FAM.getResult<llvm::PostDominatorTreeAnalysis>(*function);
+  auto &LI = FAM.getResult<llvm::LoopAnalysis>(*function);
+  auto &SE = FAM.getResult<llvm::ScalarEvolutionAnalysis>(*function);
+
+  FunctionLoopAnalyses analyses(*function, LI, DT, PDT);
+  analyses.materializeDependenceGraphs(graph);
+  analyses.materializeScalarAnalyses(SE, LI);
+
+  auto *content = analyses.getLoopContent(**LI.begin());
+  ASSERT_NE(content, nullptr);
+  auto *invariants = content->getInvariantManager();
+  auto *len = findInstructionByName(function, "len");
+  ASSERT_NE(invariants, nullptr);
+  ASSERT_NE(len, nullptr);
+  EXPECT_FALSE(invariants->isLoopInvariant(len));
 }
 
 TEST_F(LoopScalarAnalysisTest, KeepsObservedImpureLibraryCallsVariant) {

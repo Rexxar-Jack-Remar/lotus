@@ -22,6 +22,7 @@ using lotus::analysis::loop::FunctionLoopAnalyses;
 using lotus::analysis::loop::BinaryReductionSCC;
 using lotus::analysis::loop::GenericSCC;
 using lotus::analysis::loop::LoopDependenceEdgeKind;
+using lotus::analysis::loop::MemoryCloningAnalysis;
 using lotus::analysis::loop::StackObjectClonableSCC;
 using lotus::unittest::findInstructionByName;
 using lotus::unittest::findPhi;
@@ -362,6 +363,75 @@ TEST_F(LoopClassificationTest,
       EXPECT_NE(location->getAllocation(), nullptr);
     }
   }
+}
+
+TEST_F(LoopClassificationTest,
+       RejectsEscapedPointersAndPartialStoresWithUnmatchedLifetime) {
+  llvm::LLVMContext context;
+  auto module = parseModuleChecked(context, R"(
+    @escaped = global i32* null
+
+    declare void @llvm.lifetime.start.p0i8(i64 immarg, i8* nocapture) nounwind
+
+    define void @pointer_escape(i32 %n) {
+    entry:
+      %slot = alloca i32, align 4
+      br label %header
+    header:
+      %i = phi i32 [ 0, %entry ], [ %i.next, %latch ]
+      %cmp = icmp slt i32 %i, %n
+      br i1 %cmp, label %body, label %exit
+    body:
+      store i32* %slot, i32** @escaped, align 8
+      br label %latch
+    latch:
+      %i.next = add nuw nsw i32 %i, 1
+      br label %header
+    exit:
+      ret void
+    }
+
+    define i64 @partial_lifetime_store(i32 %n) {
+    entry:
+      %slot = alloca i64, align 8
+      br label %header
+    header:
+      %i = phi i32 [ 0, %entry ], [ %i.next, %header ]
+      %slot.i8 = bitcast i64* %slot to i8*
+      call void @llvm.lifetime.start.p0i8(i64 8, i8* %slot.i8)
+      store i8 1, i8* %slot.i8, align 1
+      %i.next = add nuw nsw i32 %i, 1
+      %cmp = icmp slt i32 %i.next, %n
+      br i1 %cmp, label %header, label %exit
+    exit:
+      %result = load i64, i64* %slot, align 8
+      ret i64 %result
+    }
+  )");
+
+  buildPDG(*module);
+  auto expectNoClonableObject = [&](llvm::StringRef functionName) {
+    auto *function = module->getFunction(functionName);
+    ASSERT_NE(function, nullptr);
+
+    llvm::DominatorTree DT(*function);
+    llvm::PostDominatorTree PDT;
+    PDT.recalculate(*function);
+    llvm::LoopInfo LI(DT);
+    FunctionLoopAnalyses analyses(*function, LI, DT, PDT);
+    analyses.materializeDependenceGraphs(graph);
+    analyses.materializeLoopCarriedDependencies(DT, PDT);
+
+    auto *content = analyses.getLoopContent(**LI.begin());
+    ASSERT_NE(content, nullptr);
+    noelle::DominatorSummary summary(DT, PDT);
+    MemoryCloningAnalysis cloning(content->getLoopStructure(), summary,
+                                   content->getLoopDependenceGraph());
+    EXPECT_TRUE(cloning.getClonableMemoryObjects().empty());
+  };
+
+  expectNoClonableObject("pointer_escape");
+  expectNoClonableObject("partial_lifetime_store");
 }
 
 TEST_F(LoopClassificationTest,

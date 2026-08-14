@@ -65,9 +65,9 @@ public:
     return TypeToVertex.count(Type);
   }
 
-  __attribute__((warn_unused_result)) bool isSubType(ClassType Type,
-                               ClassType SubType) const override {
-    return llvm::is_contained(subTypesOf(Type), SubType);
+  __attribute__((warn_unused_result)) bool
+  isSubType(ClassType BaseType, ClassType CandidateSubtype) const override {
+    return llvm::is_contained(subTypesOf(BaseType), CandidateSubtype);
   }
 
   __attribute__((warn_unused_result)) std::set<ClassType> getSubTypes(ClassType Type) const override {
@@ -131,18 +131,15 @@ private:
   // ---
 
   llvm::StringMap<ClassType> NameToType;
-  // Map each type to an integer index that is used by VertexTypes and
-  // DerivedTypesOf.
-  // Note: all the below arrays should always have the same size (except for
-  // Hierarchy)!
+  // Map each type to an integer index that is used by VertexTypes and the
+  // cached reachability ranges below.
   llvm::DenseMap<ClassType, size_t> TypeToVertex;
   // The class types we care about ("VertexProperties")
   std::vector<const llvm::DICompositeType *> VertexTypes;
   std::vector<std::pair<uint32_t, uint32_t>> TransitiveDerivedIndex;
-  // The inheritance graph linearized as-if constructed by L2R pre-order
-  // traversal from the roots. Allows efficient access to the transitive closure
-  // without ever storing it explicitly. This only works, because the type-graph
-  // is known to never contain loops
+  // Concatenated, duplicate-free descendant ranges. Each type has its own
+  // [begin, end) range in this vector, so multiple-inheritance DAGs do not rely
+  // on invalid tree-style preorder intervals.
   std::vector<ClassType> Hierarchy;
 
   // The VTables of the polymorphic types in the TH. default-constructed if not
