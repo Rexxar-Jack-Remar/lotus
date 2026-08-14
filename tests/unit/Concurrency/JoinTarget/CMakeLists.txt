@@ -1,0 +1,3 @@
+add_lotus_concurrency_test_suite(concurrency_join_target_tests
+  JoinTargetAnalysisTest.cpp
+  JoinTargetInterproceduralTest.cpp)

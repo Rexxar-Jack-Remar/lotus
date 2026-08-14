@@ -1,34 +1,15 @@
 # Alias Analysis Unit Tests
 
-add_lotus_test_suite(alias_analysis_tests
-  SOURCES
-    AllocAATest.cpp
-    AserPTATest.cpp
-    DDAATest.cpp
-    DDAAContextAndCanonicalizationTest.cpp
-    DyckAATest.cpp
-    SparrowAATest.cpp
-    TPATest.cpp
-    UnderApproxAATest.cpp
-    AliasGraphTest.cpp
-    DFPATest.cpp
-    LotusAATest.cpp
-    LotusAAInterproceduralSummaryTest.cpp
-    LotusAAConfigurationAndOptimizationTest.cpp
-    GVFGAdapterTest.cpp
-    GVFGAdapterSummaryInterfaceTest.cpp
-    PtsSetBackendTest.cpp
-  LINK_LIBS
-    CanaryAllocAA
-    AserPTA
-    DDA
-    CanaryDyckAA
-    Andersen
-    TPATransforms
-    FSCSPointerAnalysis
-    CanaryUnderApproxAA
-    CanaryDFPA
-    CanaryAliasAnalysisWrapper
-    LotusAA
-    CanaryGuardedValueFlow
-    ${Z3_LIBRARIES})
+add_subdirectory(DemandDriven/DDA)
+add_subdirectory(InclusionBased/AserPTA)
+add_subdirectory(InclusionBased/LotusAA)
+add_subdirectory(InclusionBased/SparrowAA)
+add_subdirectory(InclusionBased/TPA)
+add_subdirectory(UnificationBased/DyckAA)
+add_subdirectory(Specialized/AllocAA)
+add_subdirectory(Specialized/DFPA)
+if(LOTUS_ENABLE_TYPE_QUALIFIER)
+  add_subdirectory(Specialized/TypeQualifier)
+endif()
+add_subdirectory(Specialized/UnderApproxAA)
+add_subdirectory(Infrastructure/PtsSet)

@@ -158,8 +158,8 @@ TEST_F(SparrowAATest, SerializesCollectedConstraints) {
   extern llvm::cl::opt<std::string> AndersenDumpConstraintsAfterCollect;
   extern llvm::cl::opt<std::string> AndersenDumpConstraintsAfterOptimize;
 
-  const std::string oldCollect = AndersenDumpConstraintsAfterCollect;
-  const std::string oldOptimize = AndersenDumpConstraintsAfterOptimize;
+  const std::string oldCollect = AndersenDumpConstraintsAfterCollect.getValue();
+  const std::string oldOptimize = AndersenDumpConstraintsAfterOptimize.getValue();
   AndersenDumpConstraintsAfterCollect = std::string(collectPath.str());
   AndersenDumpConstraintsAfterOptimize = "";
 

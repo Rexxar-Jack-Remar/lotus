@@ -1,0 +1,12 @@
+add_lotus_test_suite(ir_gvfg_tests
+  SOURCES
+    GuardedValueFlowTest.cpp
+    GuardedValueFlowSerializerTest.cpp
+    GuardedValueFlowAdapterShapeTest.cpp
+    GuardedValueFlowParityTest.cpp
+    GuardedValueFlowSolverTest.cpp
+  LINK_LIBS
+    CanaryGSA
+    CanaryGuardedValueFlow
+    CanaryAliasAnalysisWrapper
+    ${Z3_LIBRARIES})

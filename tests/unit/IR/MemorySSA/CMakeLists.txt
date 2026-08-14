@@ -1,0 +1,9 @@
+add_lotus_test_suite(ir_memoryssa_tests
+  SOURCES
+    IPOMemorySSATest.cpp
+    SVFGMemorySSATest.cpp
+    SVFGMemorySSAInterproceduralTest.cpp
+  LINK_LIBS
+    SVFG
+    CanaryMemorySSA
+    CanaryOptimizationIPO)

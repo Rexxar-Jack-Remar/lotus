@@ -1,31 +1,22 @@
-add_lotus_test_suite(ir_tests
+add_subdirectory(PDG)
+add_subdirectory(GVFG)
+add_subdirectory(MemorySSA)
+
+add_lotus_test_suite(ir_misc_tests
   SOURCES
-    PDGQueryTest.cpp
-    PDGSupportUtilsTest.cpp
-    CypherQueryTest.cpp
-    PropertyBasedSlicingTest.cpp
-    SVFGSerializerTest.cpp
-    SVFGMemorySSATest.cpp
-    SVFGMemorySSAInterproceduralTest.cpp
     GSATest.cpp
-    GuardedValueFlowTest.cpp
-    GuardedValueFlowSerializerTest.cpp
-    GuardedValueFlowAdapterShapeTest.cpp
-    GuardedValueFlowParityTest.cpp
-    GuardedValueFlowSolverTest.cpp
-    IPOMemorySSATest.cpp
+    SVFGSerializerTest.cpp
     SeaDsaFieldTypeTest.cpp
   LINK_LIBS
-    CanaryPDG
-    CanaryICFG
-    CanaryAliasAnalysisWrapper
-    SVFG
     CanaryGSA
-    CanaryGuardedValueFlow
+    CanaryICFG
+    SVFG
     CanaryMemorySSA
-    CanaryOptimizationIPO
-    SeaDsaAnalysis
-    LLVMAsmParser
-    LLVMIRReader
-    LLVMPasses
-    ${Z3_LIBRARIES})
+    SeaDsaAnalysis)
+
+add_custom_target(ir_tests
+  DEPENDS
+    ir_pdg_tests
+    ir_gvfg_tests
+    ir_memoryssa_tests
+    ir_misc_tests)

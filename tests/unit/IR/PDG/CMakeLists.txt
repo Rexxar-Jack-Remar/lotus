@@ -1,0 +1,10 @@
+add_lotus_test_suite(ir_pdg_tests
+  SOURCES
+    PDGQueryTest.cpp
+    PDGSupportUtilsTest.cpp
+    CypherQueryTest.cpp
+    PropertyBasedSlicingTest.cpp
+  LINK_LIBS
+    CanaryPDG
+    CanaryICFG
+    CanaryAliasAnalysisWrapper)
