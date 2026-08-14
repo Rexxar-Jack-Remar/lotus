@@ -1,8 +1,9 @@
 Verification Backend API
 ========================
 
-``include/Verification/Backend/`` and ``lib/Verification/Backend/`` define the
-shared abstraction used to invoke different verification engines through one API.
+``include/Verification/Driver/Backend.h`` and ``lib/Verification/Driver/Backend.cpp``
+define the shared abstraction used to invoke different verification engines
+through one API.
 
 **Main components**:
 

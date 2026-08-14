@@ -22,13 +22,14 @@ A framework for static program analysis using symbolic abstraction on LLVM IR.
 
 - **NumRels** – Numerical relations (e.g., ``x <= y + 5``)
 - **Intervals** – Value range analysis (e.g., ``x ∈ [0, 100]``)
-- **Affine** – Affine relationships (e.g., ``y = 2*x + 3``)
+- **Congruence** – Modular arithmetic constraints (e.g., ``x ≡ r (mod m)``)
 - **BitMask** – Bit-level tracking and alignment
 - **SimpleConstProp** – Constant propagation
 - **Boolean** – Boolean truth values and invariants
 - **Predicates** – Path predicates and assertions
 - **MemRange** – Memory access bounds in terms of function arguments
 - **MemRegions** – Memory region and pointer analysis
+- **Zones** – Difference bound matrices (DBM)
 
 **Typical use cases**:
 

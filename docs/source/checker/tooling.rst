@@ -18,6 +18,12 @@ unified ``lotus-check`` binary. Each checker category registers an
 ``llvm::cl::SubCommand`` with a descriptive name and help text, enabling
 dispatch from a single entry point.
 
+.. note::
+   These subcommands are an internal C++ option-registration mechanism. The
+   public command-line interface selects an engine with ``--engine=<name>``
+   (e.g. ``lotus-check --engine=kint input.bc``); the old ``lotus-check kint
+   input.bc`` subcommand form is rejected.
+
 Checker Subcommands
 -------------------
 
@@ -39,11 +45,11 @@ Defines inline accessor functions for each subcommand:
    auto &sub = lotus::checker::tooling::aeSubCommand();
    auto &sub = lotus::checker::tooling::symexSubCommand();
 
-Available Subcommands
----------------------
+Registered Subcommands
+----------------------
 
 +-------------------+-------------------------------------------+
-| Subcommand        | Description                               |
+| Subcommand        | Engine selected via ``--engine=<name>``   |
 +===================+===========================================+
 | ``generic``       | Run declarative and registry-backed       |
 |                   | checks                                    |

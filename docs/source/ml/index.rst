@@ -84,8 +84,6 @@ Memory Allocation:
 Pointers and Accesses:
 - ``getCalleeNumPointers()`` / ``getTdCalleeNumPointers()``
 - ``getCalleePointersPerNode()`` / ``getTdCalleePointersPerNode()``
-- ``getCalleeNumMemAccesses()`` / ``getTdCalleeNumMemAccesses()``
-- ``getCalleeNumSafeAllocSites()`` / ``getTdCalleeNumSafeAllocSites()``
 
 Feature Output
 --------------

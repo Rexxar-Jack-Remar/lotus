@@ -119,7 +119,7 @@ Understanding the code
 
 **Analysis flow**
 
-1. **Framework IR** (``framework_ir/Analyzer.cpp``): For each LLVM function, build a framework CFG (basic blocks, instructions as Call/Store/Load/Return). Collect possible return values per block (constants, call results) for building function summaries.
+1. **Framework IR** (``Framework_IR/Analyzer.cpp``): For each LLVM function, build a framework CFG (basic blocks, instructions as Call/Store/Load/Return). Collect possible return values per block (constants, call results) for building function summaries.
 
 2. **Main pass** (``frontend/Framework.cpp``): For each typestate checker (StateManager), create an Analyzer and run ``analyze()``. The analyzer iterates over all framework functions in the module.
 

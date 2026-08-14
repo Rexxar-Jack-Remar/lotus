@@ -142,10 +142,7 @@ Examples
    ./build/bin/lotus-check --engine=taint input.bc
 
    # Custom sources and sinks
-   ./build/bin/lotus-check --engine=taint input.bc -sources="read,scanf" -sinks="system,exec"
-
-   # Reaching definitions analysis
-   ./build/bin/lotus-check --engine=taint input.bc -analysis=1
+   ./build/bin/lotus-check --engine=taint input.bc --taint.sources=read,scanf --taint.sinks=system,exec
 
 For other command-line tools that build on IFDS/IDE, see
 :doc:`../tools/checker/index`.

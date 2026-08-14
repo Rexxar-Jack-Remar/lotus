@@ -30,7 +30,7 @@ Copied Documentation
 Build Targets
 -------------
 
-* ``CanarySmack`` - migrated SMACK library target
+* ``SmackUtils`` / ``SmackTranslator`` - migrated SMACK library targets
 * ``llvm2bpl`` - LLVM-to-Boogie translator
 * ``smack`` - frontend script installed with the verifier tools
 

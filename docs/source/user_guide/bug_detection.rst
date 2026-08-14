@@ -6,10 +6,10 @@ Lotus provides comprehensive bug detection capabilities for finding security vul
 Overview
 --------
 
-Lotus provides a unified checker frontend (``lotus-check``) with multiple
-subcommands.  The subcommands select analysis engines rather than mutually
-exclusive bug categories: several memory-safety and taint-related classes are
-intentionally supported by more than one engine.
+Lotus provides a unified checker frontend (``lotus-check``) that selects an
+analysis engine with ``--engine=<name>``.  The engines select analysis
+categories rather than mutually exclusive bug categories: several memory-safety
+and taint-related classes are intentionally supported by more than one engine.
 
 1. **kint**: Integer-related bugs (overflow, division by zero, bad shift, array bounds)
 2. **taint**: Information flow and injection vulnerabilities
@@ -22,9 +22,9 @@ intentionally supported by more than one engine.
 9. **symex**: Symbolic execution engine
 
 See :ref:`Choosing a Checker <choosing-a-checker>` for the bug-class-to-engine
-guide.  ``./build/bin/lotus-check --list-checkers`` lists checker ids in the
-``generic`` registry; use ``./build/bin/lotus-check --help`` to see the
-available subcommands.
+guide.  ``./build/bin/lotus-check --list-checkers`` lists checker ids for both
+the ``generic`` registry and native engines; use ``./build/bin/lotus-check
+--help`` to see the available engines.
 
 Bug Categories
 --------------

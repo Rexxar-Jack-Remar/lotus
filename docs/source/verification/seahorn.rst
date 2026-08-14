@@ -16,7 +16,6 @@ pipelines.
 
 **Build Targets**:
 
-- ``tools/seahorn``
 - ``tools/verifier/seahorn/seahorn``
 - ``tools/verifier/seahorn/seapp``
 - ``tools/verifier/seahorn/seainspect``

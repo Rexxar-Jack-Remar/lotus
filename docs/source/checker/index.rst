@@ -204,13 +204,13 @@ Components
 
 * ``frontend/Framework.cpp`` – Main FiTx pass; typestate-based daily development-friendly checkers (Suzuki et al., USENIX ATC 2024)
 * ``frontend/Analyzer.cpp`` – CFG-based typestate analysis with return-code aware state propagation
-* ``framework_ir/Analyzer.cpp`` – IR builder; collects return values for function summaries
-* ``detector/df_detector/``, ``uaf_detector/``, ``leak_detector/``, etc. – Typestate definitions per bug pattern
+* ``Framework_IR/Analyzer.cpp`` – IR builder; collects return values for function summaries
+* ``Detector/DF_detector/``, ``UAF_detector/``, ``Leak_detector/``, etc. – Typestate definitions per bug pattern
 
 **KINT Numerical Checkers** (``lib/Checker/KINT/``):
 
 * ``MKintPass.cpp`` – Main KINT pass for integer overflow, division by zero, array bounds checking
-* ``MKintPass_bugreport.cpp`` – Bug report generation for KINT
+* ``MKintBugreport.cpp`` – Bug report generation for KINT
 * ``MKintSummary.cpp`` – Interprocedural SMT function-summary construction
 * ``SummaryEncoding.cpp`` – SMT summary representation and instantiation
 * ``KINTTaintAnalysis.cpp`` – Taint analysis integration for tracking untrusted data
