@@ -86,13 +86,18 @@ public:
   /// Same-block case:
   ///   • If From comes before or at To in the block  → true (straight-line).
   ///   • If To comes before From in the block        → true iff the block can
-  ///     reach itself (i.e., it is in a cycle / has a back-edge to itself).
+  ///     reach itself through a non-empty path (i.e., it is in a cycle).
   bool reachable(llvm::Instruction *From, llvm::Instruction *To);
 
 private:
   /// Backward BFS from \p ToBB: marks every block that has a path to ToBB.
   /// Must be called with CacheMutex held.
   void analyze(llvm::BasicBlock *ToBB);
+
+  /// Returns true iff \p BB can reach itself through at least one CFG edge.
+  /// Unlike reachable(BB, BB), this query is non-reflexive and therefore
+  /// distinguishes a real cycle from the zero-length path.
+  bool isOnCycle(llvm::BasicBlock *BB);
 };
 
 using CFGReachabilityRef = std::shared_ptr<CFGReachability>;

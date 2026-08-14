@@ -95,120 +95,17 @@ InductionVariableManager::InductionVariableManager(
             goto allocate_iv;
           }
 
-          if (auto *subloopExitBr =
-                  dyn_cast<BranchInst>(subloopHeader->getTerminator())) {
-            auto *subloopExitBrCondition = subloopExitBr->getCondition();
-            if (!isa<CmpInst>(subloopExitBrCondition)) {
-              goto allocate_iv;
-            }
-            auto *subloopExitCond = cast<CmpInst>(subloopExitBrCondition);
-            auto *subloopExitCondL = subloopExitCond->getOperand(0);
-            auto *subloopExitCondR = subloopExitCond->getOperand(1);
-
-            const llvm::SCEV *subloopIV = nullptr;
-            const llvm::SCEV *subloopExitSCEV = nullptr;
-            if (SE.getSCEV(subloopExitCondL)->getSCEVType() ==
-                    llvm::SCEVTypes::scAddRecExpr &&
-                SE.getSCEV(subloopExitCondR)->getSCEVType() ==
-                    llvm::SCEVTypes::scConstant) {
-              subloopIV = SE.getSCEV(subloopExitCondL);
-              subloopExitSCEV = SE.getSCEV(subloopExitCondR);
-            } else if (SE.getSCEV(subloopExitCondR)->getSCEVType() ==
-                           llvm::SCEVTypes::scAddRecExpr &&
-                       SE.getSCEV(subloopExitCondL)->getSCEVType() ==
-                           llvm::SCEVTypes::scConstant) {
-              subloopIV = SE.getSCEV(subloopExitCondR);
-              subloopExitSCEV = SE.getSCEV(subloopExitCondL);
-            }
-
-            if (subloopExitSCEV == nullptr || subloopIV == nullptr) {
-              goto allocate_iv;
-            }
-
-            auto subloopExitConstant = cast<llvm::SCEVConstant>(subloopExitSCEV)
-                                           ->getValue()
-                                           ->getSExtValue();
-            auto *subloopIVSCEV = cast<llvm::SCEVAddRecExpr>(subloopIV);
-
-            auto subloopExitBBs = subloop->getLoopExitBasicBlocks();
-            bool exitsOnTrue =
-                std::find(subloopExitBBs.begin(), subloopExitBBs.end(),
-                          subloopExitBr->getSuccessor(0)) !=
-                subloopExitBBs.end();
-
-            if (auto *startSCEVConstant =
-                    dyn_cast<llvm::SCEVConstant>(subloopIVSCEV->getStart())) {
-              auto subloopStartValue =
-                  startSCEVConstant->getValue()->getSExtValue();
-              if (auto *stepSCEVConstant = dyn_cast<llvm::SCEVConstant>(
-                      subloopIVSCEV->getStepRecurrence(SE))) {
-                auto subloopStepSize =
-                    stepSCEVConstant->getValue()->getSExtValue();
-                auto negativeStep = stepSCEVConstant->getValue()->isNegative();
-                bool unhandledCmp = false;
-                switch (subloopExitCond->getPredicate()) {
-                case CmpInst::Predicate::ICMP_EQ:
-                  if (!exitsOnTrue) {
-                    unhandledCmp = true;
-                  }
-                  break;
-                case CmpInst::Predicate::ICMP_NE:
-                  if (exitsOnTrue) {
-                    unhandledCmp = true;
-                  }
-                  break;
-                case CmpInst::Predicate::ICMP_UGT:
-                case CmpInst::Predicate::ICMP_SGT:
-                  if (negativeStep == exitsOnTrue) {
-                    unhandledCmp = true;
-                  }
-                  if (!negativeStep) {
-                    subloopExitConstant += 1;
-                  }
-                  break;
-                case CmpInst::Predicate::ICMP_SGE:
-                case CmpInst::Predicate::ICMP_UGE:
-                  if (negativeStep == exitsOnTrue) {
-                    unhandledCmp = true;
-                  }
-                  if (negativeStep) {
-                    subloopExitConstant += 1;
-                  }
-                  break;
-                case CmpInst::Predicate::ICMP_SLT:
-                case CmpInst::Predicate::ICMP_ULT:
-                  if (negativeStep != exitsOnTrue) {
-                    unhandledCmp = true;
-                  }
-                  if (negativeStep) {
-                    subloopExitConstant += 1;
-                  }
-                  break;
-                case CmpInst::Predicate::ICMP_SLE:
-                case CmpInst::Predicate::ICMP_ULE:
-                  if (negativeStep != exitsOnTrue) {
-                    unhandledCmp = true;
-                  }
-                  if (!negativeStep) {
-                    subloopExitConstant += 1;
-                  }
-                  break;
-                default:
-                  unhandledCmp = true;
-                  break;
-                }
-
-                if (!unhandledCmp) {
-                  auto d = std::div(subloopExitConstant - subloopStartValue,
-                                    subloopStepSize);
-                  stepMultiplier = d.quot + (d.rem ? 1 : 0);
-                  IV.reset(new InductionVariable(
-                      loop, IVM, SE, stepMultiplier, &phi,
-                      std::unordered_set<PHINode *>({internalPHI}),
-                      sccContainingIV, loopEnvironment, referentialExpander));
-                }
-              }
-            }
+          auto *llvmSubloop = LI.getLoopFor(subloopHeader);
+          if (llvmSubloop == nullptr) {
+            goto allocate_iv;
+          }
+          auto exactTripCount = SE.getSmallConstantTripCount(llvmSubloop);
+          if (exactTripCount != 0) {
+            stepMultiplier = exactTripCount;
+            IV.reset(new InductionVariable(
+                loop, IVM, SE, stepMultiplier, &phi,
+                std::unordered_set<PHINode *>({internalPHI}), sccContainingIV,
+                loopEnvironment, referentialExpander));
           }
         }
       }

@@ -89,12 +89,14 @@ add_subdirectory(SCCP)
 
 add_lotus_test_suite(analysis_misc_tests
   SOURCES
+    CFG/CFGUtilitiesTest.cpp
     CFG/ICFGTest.cpp
     Multiplicity/MultiplicityClassifierTest.cpp
     ParameterSummary/ParameterEffectSummaryTest.cpp
     Profile/HotProfileTest.cpp
     SCCP/SCCPTest.cpp
   LINK_LIBS
+    CanaryCFG
     CanaryICFG
     CanaryMultiplicity
     CanaryParameterSummary

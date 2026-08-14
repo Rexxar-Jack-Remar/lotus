@@ -31,44 +31,11 @@ bool isAllocatorLike(CallBase *call) {
              lotus::alias::FunctionCategory::Reallocator;
 }
 
-bool isPureLibraryCall(CallBase *call) {
+bool isMemoryIndependentCall(CallBase *call) {
   if (call == nullptr) {
     return false;
   }
-  auto *callee = call->getCalledFunction();
-  if (callee == nullptr || !callee->empty()) {
-    return false;
-  }
-
-  auto &specManager = getLoopAnalysisSpecManager();
-  if (specManager.isNoEffect(callee) && !call->mayHaveSideEffects()) {
-    return true;
-  }
-
-  static const std::set<std::string> noellePureFallback{
-      // ctype.h
-      "isalnum", "isalpha", "isblank", "iscntrl", "isdigit", "isgraph",
-      "islower", "isprint", "ispunct", "isspace", "isupper", "isxdigit",
-      "tolower", "toupper",
-      // math.h
-      "cos", "sin", "tan", "acos", "asin", "atan", "atan2", "cosh", "sinh",
-      "tanh", "acosh", "asinh", "atanh", "exp", "expf", "ldexp", "log", "logf",
-      "log10", "exp2", "expm1", "ilogb", "log1p", "log2", "logb", "scalbn",
-      "scalbln", "pow", "sqrt", "cbrt", "hypot", "erf", "erfc", "tgamma",
-      "lgamma", "ceil", "floor", "fmod", "trunc", "round", "lround", "llround",
-      "nearbyint", "remainder", "copysign", "nextafter", "nexttoward", "fdim",
-      "fmax", "fmin", "fabs", "abs", "fma", "fpclassify", "isfinite", "isinf",
-      "isnan", "isnormal", "signbit", "isgreater", "isgreaterequal", "isless",
-      "islessequal", "islessgreater", "isunordered",
-      // time.h
-      "difftime",
-      // wctype.h
-      "iswalnum", "iswalpha", "iswblank", "iswcntrl", "iswdigit", "iswgraph",
-      "iswlower", "iswprint", "iswpunct", "iswspace", "iswupper", "iswxdigit",
-      "towlower", "towupper", "iswctype", "towctrans",
-      // stdlib.h / string.h
-      "atoi", "atoll", "strcmp", "strncmp", "strlen"};
-  return noellePureFallback.count(callee->getName().str()) != 0;
+  return call->doesNotAccessMemory() && !call->mayHaveSideEffects();
 }
 
 } // namespace
@@ -116,7 +83,8 @@ public:
 
       if (auto *call = dyn_cast<CallInst>(inst)) {
         auto *callee = call->getCalledFunction();
-        if (callee != nullptr && callee->empty() && !isPureLibraryCall(call)) {
+        if (callee != nullptr && callee->empty() &&
+            !isMemoryIndependentCall(call)) {
           canEvolve = true;
         }
       }
@@ -148,7 +116,7 @@ private:
       if (isAllocatorLike(call)) {
         return true;
       }
-      if (isPureLibraryCall(call)) {
+      if (isMemoryIndependentCall(call)) {
         return false;
       }
       auto *callee = call->getCalledFunction();

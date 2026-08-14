@@ -48,7 +48,7 @@ public:
   /// @brief Get all possible callees for a C++ virtual call
   /// @param CS The virtual callsite
   /// @return Vector of possible callee functions, empty if not a virtual call
-  const function_vector_t &getVCallCallees(const llvm::CallBase &CS);
+  const function_vector_t &getVCallCallees(const llvm::CallBase &CS) const;
 
   /// @brief Print the class hierarchy graph
   /// @param o Output stream for printing

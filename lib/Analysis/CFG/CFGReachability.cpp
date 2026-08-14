@@ -19,13 +19,13 @@ CFGReachability::CFGReachability(Function *F)
 // Returns true if there is a path from From to To in the CFG.
 bool CFGReachability::reachable(BasicBlock *From, BasicBlock *To) {
   assert(From && To);
-  if (From == To)
-    return true;
-
   assert(isValid(From) &&
          "CFGReachability: 'From' block not found — object may be stale");
   assert(isValid(To) &&
          "CFGReachability: 'To' block not found — object may be stale");
+
+  if (From == To)
+    return true;
 
   const unsigned DstBlockID = BB2ID.at(To);
 
@@ -53,26 +53,39 @@ bool CFGReachability::reachable(BasicBlock *From, BasicBlock *To) {
 //      iff the block can reach itself (i.e., it lies on a cycle).
 bool CFGReachability::reachable(Instruction *From, Instruction *To) {
   assert(From && To);
+  BasicBlock *FromB = From->getParent();
+  BasicBlock *ToB = To->getParent();
+  assert(FromB && ToB);
+  assert(
+      isValid(FromB) &&
+      "CFGReachability: 'From' instruction is outside the analyzed function");
+  assert(isValid(ToB) &&
+         "CFGReachability: 'To' instruction is outside the analyzed function");
+
   if (From == To)
     return true;
 
-  BasicBlock *FromB = From->getParent();
-  BasicBlock *ToB = To->getParent();
-
   if (FromB == ToB) {
-    // Walk forward from From to see if To appears later in the same block.
-    for (Instruction *I = From->getNextNode(); I != nullptr;
-         I = I->getNextNode()) {
-      if (I == To)
-        return true; // To is textually after From — directly reachable.
-    }
+    if (From->comesBefore(To))
+      return true;
+
     // To is before From in the block.  Reachable only if the block is on a
-    // cycle (i.e., the block can reach itself via some back-edge path).
-    return reachable(FromB, FromB);
+    // non-empty cycle. Block reachability itself is reflexive, so it cannot be
+    // used to answer this question directly.
+    return isOnCycle(FromB);
   }
 
   // Different blocks: delegate to block-level reachability.
   return reachable(FromB, ToB);
+}
+
+bool CFGReachability::isOnCycle(BasicBlock *BB) {
+  assert(BB && isValid(BB));
+  for (BasicBlock *Succ : successors(BB)) {
+    if (Succ == BB || reachable(Succ, BB))
+      return true;
+  }
+  return false;
 }
 
 void CFGReachability::analyze(BasicBlock *ToBB) {

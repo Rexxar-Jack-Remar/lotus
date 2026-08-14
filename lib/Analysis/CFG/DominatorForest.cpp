@@ -138,9 +138,17 @@ DominatorForest &DominatorForest::operator=(DominatorForest &&other) noexcept {
 
 void DominatorForest::transferToClones(
     std::unordered_map<BasicBlock *, BasicBlock *> &bbCloneMap) {
+  bbNodeMap.clear();
+
   for (auto *node : nodes) {
-    assert(bbCloneMap.find(node->B) != bbCloneMap.end());
-    node->B = bbCloneMap[node->B];
+    // A post-dominator tree may contain a virtual root with no basic block.
+    if (!node->B)
+      continue;
+
+    auto cloneIt = bbCloneMap.find(node->B);
+    assert(cloneIt != bbCloneMap.end());
+    node->B = cloneIt->second;
+    bbNodeMap[node->B] = node;
   }
 }
 
@@ -251,6 +259,9 @@ DominatorNode *DominatorForest::getNode(BasicBlock *B) const {
 }
 
 bool DominatorForest::dominates(Instruction *I, Instruction *J) const {
+  if (I == J)
+    return true;
+
   auto *B1 = I->getParent();
   auto *B2 = J->getParent();
 
@@ -259,10 +270,7 @@ bool DominatorForest::dominates(Instruction *I, Instruction *J) const {
    */
   if (B1 == B2) {
 
-    // dominates(I, I) must return true (reflexivity).
-    // The old code advanced firstOne before checking, so it never matched
-    // when I == J, returning false — violating the standard dominance
-    // convention.  Start the scan at I itself (not I->getNextNode()).
+    // I and J are distinct here. Scan forward to determine textual order.
     for (auto *cur = I; cur != nullptr; cur = cur->getNextNode()) {
       if (cur == J) {
         // J is found at or after I in the block.

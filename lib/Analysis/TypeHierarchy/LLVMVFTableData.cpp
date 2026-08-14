@@ -10,6 +10,8 @@
 #include "Analysis/TypeHierarchy/LLVMVFTableData.h"
 
 #include "llvm/ADT/Twine.h"
+#include "llvm/Support/FormatVariadic.h"
+#include "llvm/Support/JSON.h"
 #include "llvm/Support/raw_ostream.h"
 
 #include <fstream>
@@ -22,29 +24,22 @@ namespace lotus {
 static LLVMVFTableData getDataFromJson(const std::string &JsonStr) {
   LLVMVFTableData Data;
 
-  // Simple JSON parsing for VFT array
-  // This is a simplified version - for full JSON support, consider using a
-  // library
-  std::istringstream iss(JsonStr);
-  std::string line;
-  bool inVFT = false;
-
-  while (std::getline(iss, line)) {
-    if (line.find("\"VFT\"") != std::string::npos) {
-      inVFT = true;
-      continue;
-    }
-    if (inVFT && line.find(']') != std::string::npos) {
-      break;
-    }
-    if (inVFT) {
-      size_t start = line.find('"');
-      if (start != std::string::npos) {
-        size_t end = line.find('"', start + 1);
-        if (end != std::string::npos) {
-          Data.VFT.push_back(line.substr(start + 1, end - start - 1));
-        }
-      }
+  auto Parsed = llvm::json::parse(JsonStr);
+  if (!Parsed) {
+    SPDLOG_ERROR("Failed to parse vtable JSON: {}",
+                 llvm::toString(Parsed.takeError()));
+    return Data;
+  }
+  auto *Root = Parsed->getAsObject();
+  auto *VFT = Root ? Root->getArray("VFT") : nullptr;
+  if (!VFT) {
+    SPDLOG_ERROR("Vtable JSON is missing the VFT array");
+    return Data;
+  }
+  Data.VFT.reserve(VFT->size());
+  for (const auto &Entry : *VFT) {
+    if (auto Value = Entry.getAsString()) {
+      Data.VFT.emplace_back(*Value);
     }
   }
 
@@ -52,15 +47,11 @@ static LLVMVFTableData getDataFromJson(const std::string &JsonStr) {
 }
 
 void LLVMVFTableData::printAsJson(llvm::raw_ostream &OS) const {
-  OS << "{\n  \"VFT\": [\n";
-  for (size_t i = 0; i < VFT.size(); ++i) {
-    OS << "    \"" << VFT[i] << "\"";
-    if (i < VFT.size() - 1) {
-      OS << ",";
-    }
-    OS << "\n";
-  }
-  OS << "  ]\n}\n";
+  llvm::json::Array VFTJson;
+  for (const auto &Function : VFT)
+    VFTJson.emplace_back(Function);
+  llvm::json::Object Root{{"VFT", std::move(VFTJson)}};
+  OS << llvm::formatv("{0:2}\n", llvm::json::Value(std::move(Root)));
 }
 
 LLVMVFTableData LLVMVFTableData::deserializeJson(const llvm::Twine &Path) {

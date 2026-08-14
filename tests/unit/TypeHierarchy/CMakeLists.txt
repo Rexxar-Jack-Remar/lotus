@@ -82,6 +82,7 @@ add_lotus_test_suite(type_hierarchy_tests
     DIBasedTypeHierarchyTest.cpp
     DIBasedTypeHierarchyTransitiveReachabilityTest.cpp
     DIBasedTypeHierarchySerializationTest.cpp
+    LLVMVFTableTest.cpp
   LINK_LIBS CanaryTypeHierarchy
   COMPILE_DEFINITIONS
     LOTUS_TYPE_HIERARCHY_LL_DIR="${TYPE_HIERARCHY_LL_DIR}"

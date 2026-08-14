@@ -98,7 +98,7 @@ public:
   ~LoopForest();
 
 private:
-  std::unordered_map<LoopStructure *, LoopTree *> nodes;
+  std::unordered_map<LoopStructure *, std::unique_ptr<LoopTree>> nodes;
   std::unordered_set<LoopTree *> trees;
   std::unordered_map<Function *, std::unordered_set<LoopStructure *>>
       functionLoops;

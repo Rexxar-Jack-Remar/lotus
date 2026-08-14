@@ -22,21 +22,26 @@ using namespace llvm;
 // ---------------------------------------------------------------------------
 
 unsigned calcCyclomaticComplexity(Function &F) {
-  unsigned Blocks = 0, Edges = 0;
+  if (F.isDeclaration() || F.empty())
+    return 0;
 
-  for (auto &BB : F) {
+  uint64_t Blocks = 0;
+  uint64_t Edges = 0;
+
+  // McCabe's P == 1 formula applies to the connected flow graph reachable
+  // from the function entry. Ignore detached, unreachable IR blocks.
+  ReversePostOrderTraversal<Function *> RPOT(&F);
+  for (BasicBlock *BB : RPOT) {
     ++Blocks;
-    for (auto *Succ : successors(&BB)) {
-      (void)Succ;
-      ++Edges;
-    }
+    Edges += succ_size(BB);
   }
 
   // Standard McCabe formula: V(G) = E - N + 2  (P == 1 for a single function).
   // Note: call sites are NOT decision points in the standard definition and
   // are therefore not counted here (the old header-only version incorrectly
   // added them).
-  return (Edges >= Blocks) ? (2 + Edges - Blocks) : 2;
+  assert(Edges + 2 >= Blocks && "entry-reachable CFG must be connected");
+  return static_cast<unsigned>(Edges + 2 - Blocks);
 }
 
 // ---------------------------------------------------------------------------

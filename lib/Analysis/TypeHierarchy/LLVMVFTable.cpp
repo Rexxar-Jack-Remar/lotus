@@ -38,9 +38,10 @@ int LLVMVFTable::getIndex(const llvm::Function *F) const {
 }
 
 void LLVMVFTable::print(llvm::raw_ostream &OS) const {
-  for (const auto *F : VFT) {
-    OS << F->getName();
-    if (F != VFT.back()) {
+  for (size_t I = 0; I < VFT.size(); ++I) {
+    const auto *F = VFT[I];
+    OS << (F ? F->getName() : NullFunName);
+    if (I + 1 < VFT.size()) {
       OS << '\n';
     }
   }

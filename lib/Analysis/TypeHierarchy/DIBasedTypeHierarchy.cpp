@@ -99,8 +99,11 @@ buildTypeGraph(llvm::ArrayRef<const llvm::DICompositeType *> VertexTypes,
   TG.DerivedTypesOf.resize(VertexTypes.size());
 
   for (const auto *Composite : VertexTypes) {
-    auto DerivedIdx = TypeToVertex.lookup(Composite);
-    assert(DerivedIdx != 0 || VertexTypes[0] == Composite);
+    auto DerivedIt = TypeToVertex.find(Composite);
+    if (DerivedIt == TypeToVertex.end()) {
+      continue;
+    }
+    auto DerivedIdx = DerivedIt->second;
 
     for (const auto *Fld : Composite->getElements()) {
       const auto *Inheritenace = llvm::dyn_cast<llvm::DIDerivedType>(Fld);
@@ -111,8 +114,11 @@ buildTypeGraph(llvm::ArrayRef<const llvm::DICompositeType *> VertexTypes,
           Base = llvm::cast<llvm::DIDerivedType>(Base)->getBaseType();
         }
 
-        auto BaseIdx = TypeToVertex.lookup(Base);
-        assert(BaseIdx != 0 || VertexTypes[0] == Base);
+        auto BaseIt = TypeToVertex.find(Base);
+        if (BaseIt == TypeToVertex.end()) {
+          continue;
+        }
+        auto BaseIdx = BaseIt->second;
 
         TG.DerivedTypesOf[BaseIdx].push_back(DerivedIdx);
         TG.Roots.reset(DerivedIdx);

@@ -189,18 +189,7 @@ bool LoopTree::visitPostOrder(
   return funcToInvoke(this, treeLevel);
 }
 
-LoopTree::~LoopTree() {
-  if (this->parent != nullptr) {
-    this->parent->children.erase(this);
-    for (auto *child : this->children) {
-      child->parent = this->parent;
-      this->parent->children.insert(child);
-    }
-    return;
-  }
-
-  this->forest->removeTree(this);
-}
+LoopTree::~LoopTree() = default;
 
 LoopForest::LoopForest(
     std::vector<LoopStructure *> const &loops,
@@ -209,8 +198,9 @@ LoopForest::LoopForest(
   for (auto *l : loops) {
     auto *func = l->getFunction();
     auto *header = l->getHeader();
-    auto *n = new LoopTree(this, l);
-    this->nodes[l] = n;
+    auto ownedNode = std::make_unique<LoopTree>(this, l);
+    auto *n = ownedNode.get();
+    this->nodes[l] = std::move(ownedNode);
     this->functionLoops[func].insert(l);
     this->headerLoops[header] = n;
 
@@ -281,7 +271,7 @@ void LoopForest::addChildrenToTree(
       continue;
     }
 
-    auto *child = this->nodes[functionLoop];
+    auto *child = this->nodes[functionLoop].get();
     assert(child != nullptr);
     root->children.insert(child);
     child->parent = root;
@@ -298,11 +288,7 @@ void LoopForest::removeTree(LoopTree *tree) { this->trees.erase(tree); }
 
 void LoopForest::addTree(LoopTree *tree) { this->trees.insert(tree); }
 
-LoopForest::~LoopForest() {
-  for (auto &pair : this->nodes) {
-    delete pair.second;
-  }
-}
+LoopForest::~LoopForest() = default;
 
 LoopTree *LoopForest::getNode(LoopStructure *loop) const {
   auto it = this->headerLoops.find(loop->getHeader());

@@ -11,6 +11,7 @@
 
 #include "llvm/ADT/StringRef.h"
 #include "llvm/ADT/Twine.h"
+#include "llvm/Support/FormatVariadic.h"
 #include "llvm/Support/JSON.h"
 #include "llvm/Support/raw_ostream.h"
 
@@ -93,51 +94,33 @@ static DIBasedTypeHierarchyData getDataFromJson(const std::string &JsonStr) {
 }
 
 void DIBasedTypeHierarchyData::printAsJson(llvm::raw_ostream &OS) {
-  OS << "{\n";
-  OS << "  \"VertexTypes\": [\n";
-  for (size_t i = 0; i < VertexTypes.size(); ++i) {
-    OS << "    \"" << VertexTypes[i] << "\"";
-    if (i < VertexTypes.size() - 1)
-      OS << ",";
-    OS << "\n";
-  }
-  OS << "  ],\n";
+  llvm::json::Array VertexTypesJson;
+  for (const auto &Type : VertexTypes)
+    VertexTypesJson.emplace_back(Type);
 
-  OS << "  \"TransitiveDerivedIndex\": [\n";
-  for (size_t i = 0; i < TransitiveDerivedIndex.size(); ++i) {
-    OS << "    [" << TransitiveDerivedIndex[i].first << ", "
-       << TransitiveDerivedIndex[i].second << "]";
-    if (i < TransitiveDerivedIndex.size() - 1)
-      OS << ",";
-    OS << "\n";
-  }
-  OS << "  ],\n";
+  llvm::json::Array IndexJson;
+  for (const auto &[Begin, End] : TransitiveDerivedIndex)
+    IndexJson.push_back(llvm::json::Array{Begin, End});
 
-  OS << "  \"Hierarchy\": [\n";
-  for (size_t i = 0; i < Hierarchy.size(); ++i) {
-    OS << "    \"" << Hierarchy[i] << "\"";
-    if (i < Hierarchy.size() - 1)
-      OS << ",";
-    OS << "\n";
-  }
-  OS << "  ],\n";
+  llvm::json::Array HierarchyJson;
+  for (const auto &Type : Hierarchy)
+    HierarchyJson.emplace_back(Type);
 
-  OS << "  \"VTables\": [\n";
-  for (size_t i = 0; i < VTables.size(); ++i) {
-    OS << "    [\n";
-    for (size_t j = 0; j < VTables[i].size(); ++j) {
-      OS << "      \"" << VTables[i][j] << "\"";
-      if (j < VTables[i].size() - 1)
-        OS << ",";
-      OS << "\n";
-    }
-    OS << "    ]";
-    if (i < VTables.size() - 1)
-      OS << ",";
-    OS << "\n";
+  llvm::json::Array VTablesJson;
+  for (const auto &VTable : VTables) {
+    llvm::json::Array VTableJson;
+    for (const auto &Function : VTable)
+      VTableJson.emplace_back(Function);
+    VTablesJson.push_back(std::move(VTableJson));
   }
-  OS << "  ]\n";
-  OS << "}\n";
+
+  llvm::json::Object Root{
+      {"VertexTypes", std::move(VertexTypesJson)},
+      {"TransitiveDerivedIndex", std::move(IndexJson)},
+      {"Hierarchy", std::move(HierarchyJson)},
+      {"VTables", std::move(VTablesJson)},
+  };
+  OS << llvm::formatv("{0:2}\n", llvm::json::Value(std::move(Root)));
 }
 
 DIBasedTypeHierarchyData

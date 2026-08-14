@@ -223,7 +223,7 @@ public:
 
   bool isVCallResolved(const llvm::CallBase &CS) const;
 
-  const function_vector_t &getVCallCallees(const llvm::CallBase &CS);
+  const function_vector_t &getVCallCallees(const llvm::CallBase &CS) const;
 
   void printVtables(raw_ostream &o) const;
 
@@ -451,8 +451,8 @@ void TypeHierarchyAnalysis_Impl::buildCHG(void) {
 
 void TypeHierarchyAnalysis_Impl::buildVtables(void) {
 
-  const static std::string vtable_for_str = "vtable for";
-  const static std::string typeinfo_for_str = "typeinfo for";
+  const static StringRef vtable_for_str = "vtable for ";
+  const static StringRef typeinfo_for_str = "typeinfo for ";
   const static std::string pure_virtual_str = "__cxa_pure_virtual";
 
   for (auto &gv : m_module.globals()) {
@@ -469,7 +469,7 @@ void TypeHierarchyAnalysis_Impl::buildVtables(void) {
     }
 
     // The demangled name of vtables start with "vtable for"
-    if (demangled_gv_name.find(vtable_for_str) == std::string::npos) {
+    if (!StringRef(demangled_gv_name).startswith(vtable_for_str)) {
       continue;
     }
 
@@ -507,15 +507,15 @@ void TypeHierarchyAnalysis_Impl::buildVtables(void) {
                  *      typeinfo is a named struct type.
                  */
                 if (Cast->getOperand(0)->hasName()) {
-                  std::string demangled_name(DemangleUtils::demangle(
-                      Cast->getOperand(0)->getName().str()));
-                  size_t pos = demangled_name.find_last_of(typeinfo_for_str);
-                  if (pos != std::string::npos) {
+                  std::string demangled_typeinfo = DemangleUtils::demangle(
+                      Cast->getOperand(0)->getName().str());
+                  StringRef demangled_name(demangled_typeinfo);
+                  if (demangled_name.consume_front(typeinfo_for_str)) {
                     /* here we know that the cast contains the typeinfo_ptr */
                     StructType *old_class_typeinfo = class_typeinfo;
                     // XXX: sometimes the compiler add the prefix
                     // "class." to the class name but not always.
-                    std::string class_name = demangled_name.substr(pos + 1);
+                    std::string class_name = demangled_name.str();
                     class_typeinfo = StructType::getTypeByName(
                         m_module.getContext(), "class." + class_name);
                     if (!class_typeinfo) {
@@ -566,6 +566,18 @@ void TypeHierarchyAnalysis_Impl::buildVtables(void) {
 }
 
 void TypeHierarchyAnalysis_Impl::calculate(void) {
+  m_graph.clear();
+  m_vtables.clear();
+  m_resolved_virtual_calls.clear();
+  m_resolution_table.clear();
+  m_num_graph_nodes = 0;
+  m_num_graph_edges = 0;
+  m_num_graph_closed_edges = 0;
+  m_num_potential_vtables = 0;
+  m_num_vtables = 0;
+  m_num_potential_virtual_calls = 0;
+  m_num_resolved_virtual_calls = 0;
+
   buildCHG();
   buildVtables();
   closureCHG();
@@ -576,7 +588,7 @@ void TypeHierarchyAnalysis_Impl::calculate(void) {
         continue;
       auto &CB = cast<CallBase>(I);
       function_vector_t callees;
-      if (resolveVirtualCall(CB, callees)) {
+      if (resolveVirtualCall(CB, callees) && !callees.empty()) {
         m_resolved_virtual_calls.insert(&CB);
         m_resolution_table.insert({&CB, callees});
       }
@@ -622,8 +634,8 @@ void TypeHierarchyAnalysis_Impl::addCandidateFunction(
         }
       }
     } else {
-      SPDLOG_ERROR("Out-of-bounds access to vtable {}", type->getName().str());
-      llvm_unreachable(nullptr);
+      SPDLOG_DEBUG("Skipping vtable candidate {}: slot {} is out of bounds",
+                   type->getName().str(), vtable_index);
     }
   }
 }
@@ -711,11 +723,10 @@ bool TypeHierarchyAnalysis_Impl::resolveVirtualCall(const CallBase &CB,
 
       std::copy(out_set.begin(), out_set.end(), std::back_inserter(out));
 
-      // true means that the callsite looks like a virtual call
       if (!out.empty()) {
         m_num_resolved_virtual_calls++;
       }
-      return true;
+      return !out.empty();
     }
   }
 
@@ -766,8 +777,10 @@ bool TypeHierarchyAnalysis_Impl::isVCallResolved(
 }
 
 const TypeHierarchyAnalysis_Impl::function_vector_t &
-TypeHierarchyAnalysis_Impl::getVCallCallees(const llvm::CallBase &CB) {
-  return m_resolution_table[&CB];
+TypeHierarchyAnalysis_Impl::getVCallCallees(const llvm::CallBase &CB) const {
+  static const function_vector_t Empty;
+  auto It = m_resolution_table.find(&CB);
+  return It == m_resolution_table.end() ? Empty : It->second;
 }
 
 void TypeHierarchyAnalysis_Impl::printStats(raw_ostream &o) const {
@@ -797,7 +810,7 @@ bool TypeHierarchyAnalysis::isVCallResolved(const llvm::CallBase &CS) const {
 }
 
 const TypeHierarchyAnalysis::function_vector_t &
-TypeHierarchyAnalysis::getVCallCallees(const llvm::CallBase &CS) {
+TypeHierarchyAnalysis::getVCallCallees(const llvm::CallBase &CS) const {
   return m_cha_impl->getVCallCallees(CS);
 }
 
