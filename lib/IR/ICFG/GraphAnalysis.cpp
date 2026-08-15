@@ -292,7 +292,6 @@ void calculateDistanceMapInterICFGWithDistanceMap(
     ICFG *icfg, ICFGNode *sourceBB,
     std::map<ICFGNode *, uint64_t> &distanceMap) {
   using DisBBPair = std::pair<uint64_t, ICFGNode *>;
-  using Edge = ICFGEdge;
 
   // initialize INF distance from source to other blocks
   std::for_each(std::begin(distanceMap), std::end(distanceMap),
@@ -311,6 +310,11 @@ void calculateDistanceMapInterICFGWithDistanceMap(
     distanceBlockSet.erase(distanceBlockSet.begin());
 
     auto *currentSourceBB = top.second;
+    uint64_t currentDist = top.first;
+
+    auto currentIt = distanceMap.find(currentSourceBB);
+    if (currentIt == distanceMap.end() || currentIt->second < currentDist)
+      continue;
 
     for (auto I = currentSourceBB->OutEdgeBegin();
          I != currentSourceBB->OutEdgeEnd(); I++) {
@@ -321,20 +325,21 @@ void calculateDistanceMapInterICFGWithDistanceMap(
       if (edge->isInterRetCFGEdge())
         continue;
 
-      uint64_t distanceToAdj = 1;
+      uint64_t newDist = currentDist + 1;
+      auto adjIt = distanceMap.find(adjBB);
+      uint64_t adjCurDist = adjIt == distanceMap.end() ? INF : adjIt->second;
 
-      // Edge relaxation
-      if (distanceMap[adjBB] > distanceToAdj + distanceMap[currentSourceBB]) {
+      // Edge relaxation. Do not use operator[] for the read: a caller may
+      // supply a partial or empty map, and a missing entry must mean INF.
+      if (adjCurDist > newDist) {
 
         // If the distance to the adjacent node is not INF,
         // means the pair <dist, block> is in the set
         // Remove the pair before updating it in the set.
-        if (distanceMap[adjBB] != INF) {
-          distanceBlockSet.erase(
-              distanceBlockSet.find(DisBBPair(distanceMap[adjBB], adjBB)));
-        }
-        distanceMap[adjBB] = distanceToAdj + distanceMap[currentSourceBB];
-        distanceBlockSet.insert(DisBBPair(distanceMap[adjBB], adjBB));
+        if (adjCurDist != INF)
+          distanceBlockSet.erase(DisBBPair(adjCurDist, adjBB));
+        distanceMap[adjBB] = newDist;
+        distanceBlockSet.insert(DisBBPair(newDist, adjBB));
       }
     }
   }
@@ -413,6 +418,11 @@ bool calculateShortestPathIntra(llvm::BasicBlock *sourceBB,
   Function *func = sourceBB->getParent();
   path.clear();
 
+  if (sourceBB == destBB) {
+    path.push_back(sourceBB);
+    return true;
+  }
+
   // predecessor[i] array stores predecessor of
   // i and distance array stores distance of i
   // from s
@@ -457,8 +467,6 @@ bool calculateShortestPathIntra(llvm::BasicBlock *sourceBB,
          succIt != e; ++succIt) {
 
       auto *adjBB = *succIt;
-      uint64_t distanceToAdj = 1;
-
       if (!visited[adjBB]) {
 
         visited[adjBB] = true;
@@ -528,6 +536,7 @@ bool isReachableFrom(llvm::BasicBlock *from, llvm::BasicBlock *to,
 
   // Limit the number of blocks we visit.
   unsigned Limit = 64;
+  bool budgetExhausted = false;
 
   // number of iterations
   iterCount = 0;
@@ -546,8 +555,10 @@ bool isReachableFrom(llvm::BasicBlock *from, llvm::BasicBlock *to,
     if (LI && loopContainsBoth(LI, BB, to))
       return true;
 
-    if (!--Limit)
+    if (!--Limit) {
+      budgetExhausted = true;
       break;
+    }
 
     if (const Loop *Outer = LI ? getOutermostLoop(LI, BB) : nullptr) {
       getLoopExitBlocks(Outer, Worklist);
@@ -557,6 +568,7 @@ bool isReachableFrom(llvm::BasicBlock *from, llvm::BasicBlock *to,
 
   } while (!Worklist.empty());
 
-  // We haven't been able to prove it one way or the other, answer false
-  return false;
+  // Preserve the conservative contract used by LLVM's bounded potential
+  // reachability: false means proven unreachable, not merely "budget spent".
+  return budgetExhausted;
 }

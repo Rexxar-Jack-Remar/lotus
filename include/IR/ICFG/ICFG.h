@@ -7,13 +7,13 @@
 
 #pragma once
 
+#include <unordered_set>
+
 #include <llvm/Analysis/CFG.h>
 #include <llvm/IR/Function.h>
 #include <llvm/IR/IRBuilder.h>
 #include <llvm/IR/Module.h>
 #include <llvm/Support/raw_ostream.h>
-
-#include <unordered_set>
 
 // #include <iostream>
 
@@ -29,8 +29,7 @@ using GenericICFGTy = GenericGraph<ICFGNode, ICFGEdge>;
 class ICFG : public GenericICFGTy {
 
 public:
-  using ICFGNodeIDToNodeMapTy =
-      std::unordered_map<NodeID, ICFGNode *>;
+  using ICFGNodeIDToNodeMapTy = std::unordered_map<NodeID, ICFGNode *>;
   using iterator = ICFGNodeIDToNodeMapTy::iterator;
   using const_iterator = ICFGNodeIDToNodeMapTy::const_iterator;
 
@@ -52,6 +51,7 @@ public:
   NodeID totalICFGNode;
 
 private:
+  std::unordered_set<ICFGEdge *> ownedEdges;
   blockToIntraNodeMapTy blockToIntraNodeMap;
   functionToEntryIntraNodeMapTy functionToEntryIntraNodeMap;
   functionToEntryNodeMapTy functionToEntryNodeMap;
@@ -66,7 +66,7 @@ public:
   ICFG();
 
   /// @brief Destructor.
-  virtual ~ICFG() {}
+  ~ICFG() override;
 
   /// @brief Retrieves an ICFG node by its ID.
   /// @param id Node identifier.
@@ -116,8 +116,14 @@ public:
   /// @brief Removes an ICFG edge from the graph.
   /// @param edge Edge to remove.
   inline void removeICFGEdge(ICFGEdge *edge) {
+    if (!edge)
+      return;
     edge->getDstNode()->removeIncomingEdge(edge);
     edge->getSrcNode()->removeOutgoingEdge(edge);
+    size_t erased = ownedEdges.erase(edge);
+    assert(erased == 1 && "removing an edge not owned by this ICFG");
+    assert(edgeNum > 0 && "ICFG edge count underflow");
+    --edgeNum;
     delete edge;
   }
 
@@ -190,6 +196,11 @@ public:
   ICFGEdge *addExcRetEdge(ICFGNode *srcNode, ICFGNode *dstNode,
                           const llvm::Instruction *cs);
 
+  /// @brief Adds a same-procedure summary edge across a call site.
+  ICFGEdge *addCallToRetEdge(ICFGNode *srcNode, ICFGNode *dstNode,
+                             const llvm::Instruction *cs,
+                             bool hasUnresolvedCallee = false);
+
   /// @brief Verifies that both nodes of an intra edge belong to the same
   /// function.
   /// @param srcNode Source node.
@@ -222,6 +233,9 @@ public:
     }
     assert(added1 && added2 &&
            "edge partially inserted: graph in/out edge sets are inconsistent!");
+    bool owned = ownedEdges.insert(edge).second;
+    assert(owned && "new ICFG edge is already owned by the graph");
+    ++edgeNum;
     return true;
   }
 
@@ -292,8 +306,7 @@ private:
     return it == functionToExitNodeMap.end() ? nullptr : it->second;
   }
 
-  inline FunUnwindExitBlockNode *getFunUnwindExitNode(
-      const llvm::Function *F) {
+  inline FunUnwindExitBlockNode *getFunUnwindExitNode(const llvm::Function *F) {
     auto it = functionToUnwindExitNodeMap.find(F);
     return it == functionToUnwindExitNodeMap.end() ? nullptr : it->second;
   }
@@ -303,8 +316,7 @@ private:
     return it == callToRetNodeMap.end() ? nullptr : it->second;
   }
 
-  inline CallUnwindBlockNode *getUnwindNode(
-      const llvm::Instruction *callInst) {
+  inline CallUnwindBlockNode *getUnwindNode(const llvm::Instruction *callInst) {
     auto it = callToUnwindNodeMap.find(callInst);
     return it == callToUnwindNodeMap.end() ? nullptr : it->second;
   }

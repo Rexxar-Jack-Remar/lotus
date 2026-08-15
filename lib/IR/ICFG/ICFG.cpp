@@ -3,25 +3,13 @@
 
 #include "IR/ICFG/ICFG.h"
 
+#include "IR/ICFG/ICFGUtils.h"
+
 #include <iostream>
 
 #include <llvm/IR/Instructions.h>
 
 using namespace llvm;
-
-namespace {
-
-bool isExceptionalFunctionExitInst(const Instruction &inst) {
-  if (isa<ResumeInst>(inst))
-    return true;
-
-  if (const auto *cleanupRet = dyn_cast<CleanupReturnInst>(&inst))
-    return cleanupRet->unwindsToCaller();
-
-  return false;
-}
-
-} // namespace
 
 //
 //=============================================================================
@@ -163,8 +151,17 @@ std::string ExcRetCFGEdge::toString() const {
   std::string str;
   raw_string_ostream rawstr(str);
   rawstr << "ExcRetCFGEdge "
-         << "[" << getDstID() << "<--" << getSrcID() << "]\t CallSite: "
-         << *cs << "\t";
+         << "[" << getDstID() << "<--" << getSrcID() << "]\t CallSite: " << *cs
+         << "\t";
+  return rawstr.str();
+}
+
+std::string CallToRetCFGEdge::toString() const {
+  std::string str;
+  raw_string_ostream rawstr(str);
+  rawstr << "CallToRetCFGEdge "
+         << "[" << getDstID() << "<--" << getSrcID() << "]\t CallSite: " << *cs
+         << "\t";
   return rawstr.str();
 }
 
@@ -176,6 +173,11 @@ std::string ExcRetCFGEdge::toString() const {
 
 /// @brief Constructs an empty ICFG.
 ICFG::ICFG() : totalICFGNode(0) {}
+
+ICFG::~ICFG() {
+  while (!ownedEdges.empty())
+    removeICFGEdge(*ownedEdges.begin());
+}
 
 /// @brief Checks if an intraprocedural edge exists between two nodes.
 ICFGEdge *ICFG::hasIntraICFGEdge(ICFGNode *src, ICFGNode *dst,
@@ -208,8 +210,9 @@ ICFGEdge *ICFG::getICFGEdge(const ICFGNode *src, const ICFGNode *dst,
       continue;
     if (cs && (*iter)->getCallSite() != cs)
       continue;
-    if (!cs && (kind == ICFGEdge::CallCF || kind == ICFGEdge::RetCF ||
-                kind == ICFGEdge::ExcRetCF) &&
+    if (!cs &&
+        (kind == ICFGEdge::CallCF || kind == ICFGEdge::RetCF ||
+         kind == ICFGEdge::ExcRetCF || kind == ICFGEdge::CallToRetCF) &&
         edge != nullptr && edge->getCallSite() != (*iter)->getCallSite()) {
       return nullptr;
     }
@@ -256,6 +259,16 @@ ICFGEdge *ICFG::addExcRetEdge(ICFGNode *srcNode, ICFGNode *dstNode,
     return nullptr;
   auto *retEdge = new ExcRetCFGEdge(srcNode, dstNode, cs);
   return addICFGEdge(retEdge) ? retEdge : nullptr;
+}
+
+ICFGEdge *ICFG::addCallToRetEdge(ICFGNode *srcNode, ICFGNode *dstNode,
+                                 const llvm::Instruction *cs,
+                                 bool hasUnresolvedCallee) {
+  if (hasInterICFGEdge(srcNode, dstNode, ICFGEdge::CallToRetCF, cs))
+    return nullptr;
+  auto *summaryEdge =
+      new CallToRetCFGEdge(srcNode, dstNode, cs, hasUnresolvedCallee);
+  return addICFGEdge(summaryEdge) ? summaryEdge : nullptr;
 }
 
 bool ICFG::hasIntraBlockNode(const llvm::BasicBlock *bb) {
@@ -307,14 +320,15 @@ FunExitBlockNode *ICFG::addFunExitICFGNode(const llvm::Function *F) {
   return node;
 }
 
-FunUnwindExitBlockNode *ICFG::addFunUnwindExitICFGNode(const llvm::Function *F) {
+FunUnwindExitBlockNode *
+ICFG::addFunUnwindExitICFGNode(const llvm::Function *F) {
   if (!F || F->isDeclaration())
     return nullptr;
 
   const BasicBlock *anchor = &F->getEntryBlock();
   for (const BasicBlock &bb : *F) {
     const Instruction *terminator = bb.getTerminator();
-    if (terminator && isExceptionalFunctionExitInst(*terminator)) {
+    if (terminator && lotus::icfg::isExceptionalFunctionExitInst(*terminator)) {
       anchor = &bb;
       break;
     }
@@ -338,8 +352,8 @@ CallRetBlockNode *ICFG::addRetICFGNode(const llvm::Instruction *callInst) {
   return node;
 }
 
-CallUnwindBlockNode *ICFG::addUnwindICFGNode(
-    const llvm::Instruction *callInst) {
+CallUnwindBlockNode *
+ICFG::addUnwindICFGNode(const llvm::Instruction *callInst) {
   if (!callInst)
     return nullptr;
   const BasicBlock *unwindBB = callInst->getParent();
@@ -369,8 +383,8 @@ FunExitBlockNode *ICFG::getFunExitICFGNode(const llvm::Function *F) {
   return addFunExitICFGNode(F);
 }
 
-FunUnwindExitBlockNode *ICFG::getFunUnwindExitICFGNode(
-    const llvm::Function *F) {
+FunUnwindExitBlockNode *
+ICFG::getFunUnwindExitICFGNode(const llvm::Function *F) {
   if (auto *node = getFunUnwindExitNode(F))
     return node;
   return addFunUnwindExitICFGNode(F);
@@ -382,8 +396,8 @@ CallRetBlockNode *ICFG::getRetICFGNode(const llvm::Instruction *callInst) {
   return addRetICFGNode(callInst);
 }
 
-CallUnwindBlockNode *ICFG::getUnwindICFGNode(
-    const llvm::Instruction *callInst) {
+CallUnwindBlockNode *
+ICFG::getUnwindICFGNode(const llvm::Instruction *callInst) {
   if (auto *node = getUnwindNode(callInst))
     return node;
   return addUnwindICFGNode(callInst);

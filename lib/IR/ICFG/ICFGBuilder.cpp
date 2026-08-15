@@ -4,6 +4,7 @@
 #include "IR/ICFG/ICFGBuilder.h"
 
 #include "IR/ICFG/GraphAnalysis.h"
+#include "IR/ICFG/ICFGUtils.h"
 
 #include <queue>
 #include <set>
@@ -12,29 +13,11 @@
 #include <llvm/IR/InstIterator.h>
 #include <llvm/IR/InstrTypes.h>
 #include <llvm/IR/Instructions.h>
+#include <llvm/IR/Operator.h>
 
 using namespace llvm;
 
 namespace {
-
-bool isExceptionalFunctionExitInst(const Instruction &inst) {
-  if (isa<ResumeInst>(inst))
-    return true;
-
-  if (const auto *cleanupRet = dyn_cast<CleanupReturnInst>(&inst))
-    return cleanupRet->unwindsToCaller();
-
-  return false;
-}
-
-bool blockHasReturningCall(const BasicBlock &bb) {
-  for (const Instruction &inst : bb) {
-    const auto *call = dyn_cast<CallBase>(&inst);
-    if (call && !call->doesNotReturn())
-      return true;
-  }
-  return false;
-}
 
 SmallVector<const Function *, 8> collectRootFunctions(Module *module) {
   SmallVector<const Function *, 8> roots;
@@ -64,7 +47,8 @@ SmallVector<const Function *, 8> collectRootFunctions(Module *module) {
         const auto *call = dyn_cast<CallBase>(&I);
         if (!call)
           continue;
-        const Function *callee = call->getCalledFunction();
+        const Function *callee =
+            dyn_cast<Function>(call->getCalledOperand()->stripPointerCasts());
         if (!callee || callee->isDeclaration() || callee->isIntrinsic())
           continue;
         calledFuncs.insert(callee);
@@ -84,74 +68,30 @@ SmallVector<const Function *, 8> collectRootFunctions(Module *module) {
   return roots;
 }
 
-void connectNormalContinuation(ICFG *icfg, const CallBase *call,
-                               ICFGNode *returnSiteNode) {
-  if (!icfg || !call || !returnSiteNode)
-    return;
+ICFGCalleeTargets getDefaultCalleeTargets(const CallBase &call) {
+  ICFGCalleeTargets result;
 
-  if (const auto *invokeInst = dyn_cast<InvokeInst>(call)) {
-    ICFGNode *continuationNode =
-        icfg->getIntraBlockNode(invokeInst->getNormalDest());
-    if (continuationNode)
-      icfg->addIntraEdge(returnSiteNode, continuationNode);
-    return;
+  if (const auto *callee =
+          dyn_cast<Function>(call.getCalledOperand()->stripPointerCasts())) {
+    result.targets.push_back(callee);
+    result.complete = true;
+    return result;
   }
 
-  const BasicBlock *callBB = call->getParent();
-  for (auto succIt = succ_begin(callBB), succEnd = succ_end(callBB);
-       succIt != succEnd; ++succIt) {
-    ICFGNode *continuationNode = icfg->getIntraBlockNode(*succIt);
-    if (continuationNode)
-      icfg->addIntraEdge(returnSiteNode, continuationNode);
-  }
-}
+  // A cheap conservative fallback for unresolved function pointers. Exact
+  // function-type matches are useful immediately, while `complete = false`
+  // retains the unknown/external summary path for casts or external targets.
+  const Module *module = call.getModule();
+  if (!module)
+    return result;
 
-void connectUnwindContinuation(ICFG *icfg, const InvokeInst *invokeInst,
-                               ICFGNode *unwindSiteNode) {
-  if (!icfg || !invokeInst || !unwindSiteNode)
-    return;
-
-  ICFGNode *continuationNode =
-      icfg->getIntraBlockNode(invokeInst->getUnwindDest());
-  if (continuationNode)
-    icfg->addIntraEdge(unwindSiteNode, continuationNode);
-}
-
-void connectFunctionReturnExits(ICFG *icfg, const Function *callee) {
-  if (!icfg || !callee || callee->isDeclaration())
-    return;
-
-  ICFGNode *exitNode = icfg->getFunExitICFGNode(callee);
-  if (!exitNode)
-    return;
-
-  for (const BasicBlock &bb : *callee) {
-    if (!isa<ReturnInst>(bb.getTerminator()))
+  for (const Function &candidate : *module) {
+    if (candidate.isIntrinsic() ||
+        candidate.getFunctionType() != call.getFunctionType())
       continue;
-
-    ICFGNode *retBlockNode = icfg->getIntraBlockNode(&bb);
-    if (retBlockNode)
-      icfg->addIntraEdge(retBlockNode, exitNode);
+    result.targets.push_back(&candidate);
   }
-}
-
-void connectFunctionExceptionalExits(ICFG *icfg, const Function *callee) {
-  if (!icfg || !callee || callee->isDeclaration())
-    return;
-
-  ICFGNode *unwindExitNode = icfg->getFunUnwindExitICFGNode(callee);
-  if (!unwindExitNode)
-    return;
-
-  for (const BasicBlock &bb : *callee) {
-    const Instruction *terminator = bb.getTerminator();
-    if (!terminator || !isExceptionalFunctionExitInst(*terminator))
-      continue;
-
-    ICFGNode *exitBlockNode = icfg->getIntraBlockNode(&bb);
-    if (exitBlockNode)
-      icfg->addIntraEdge(exitBlockNode, unwindExitNode);
-  }
+  return result;
 }
 
 } // namespace
@@ -186,10 +126,12 @@ void ICFGBuilder::processFunction(const llvm::Function *func) {
   ICFGNode *entryBlockNode = getOrAddIntraBlockICFGNode(&func->getEntryBlock());
   if (funEntryNode && entryBlockNode)
     icfg->addIntraEdge(funEntryNode, entryBlockNode);
-  (void)icfg->getFunExitICFGNode(func);
+  ICFGNode *funExitNode = icfg->getFunExitICFGNode(func);
+  ICFGNode *funUnwindExitNode = nullptr;
 
   std::queue<const llvm::BasicBlock *> worklist;
-  worklist.push(&func->getEntryBlock());
+  for (const BasicBlock &bb : *func)
+    worklist.push(&bb);
 
   std::set<const llvm::BasicBlock *> visited;
   while (!worklist.empty()) {
@@ -201,57 +143,116 @@ void ICFGBuilder::processFunction(const llvm::Function *func) {
 
     visited.insert(bb);
     ICFGNode *srcNode = getOrAddIntraBlockICFGNode(bb);
-    bool suppressRawSuccEdges = blockHasReturningCall(*bb);
 
-    for (auto succIt = succ_begin(bb), e = succ_end(bb); succIt != e; ++succIt) {
+    for (auto succIt = succ_begin(bb), e = succ_end(bb); succIt != e;
+         ++succIt) {
       const auto *succBB = *succIt;
-      ICFGNode *dstNode = getOrAddIntraBlockICFGNode(succBB);
-      if (!suppressRawSuccEdges)
-        icfg->addIntraEdge(srcNode, dstNode);
+      (void)getOrAddIntraBlockICFGNode(succBB);
       worklist.push(succBB);
     }
 
+    // The basic-block node represents the instruction range before the first
+    // call. Each normal return-site node represents the range after that call,
+    // so calls in one LLVM block are sequenced without mutating the IR.
+    ICFGNode *currentFragmentNode = srcNode;
     for (const Instruction &inst : *bb) {
       const auto *call = dyn_cast<CallBase>(&inst);
       if (!call)
         continue;
 
+      // Instructions following a noreturn call are unreachable on the normal
+      // path. They must not acquire edges from the block's entry fragment.
+      if (!currentFragmentNode)
+        break;
+
       ICFGNode *returnSiteNode = nullptr;
       ICFGNode *unwindSiteNode = nullptr;
-      if (!call->doesNotReturn()) {
-        returnSiteNode = icfg->getRetICFGNode(call);
-        connectNormalContinuation(icfg, call, returnSiteNode);
+      bool canReturnNormally = !call->doesNotReturn();
+      const auto *invokeInst = dyn_cast<InvokeInst>(call);
+      bool canUnwind = invokeInst && !call->doesNotThrow();
 
-        if (const auto *invokeInst = dyn_cast<InvokeInst>(call)) {
-          unwindSiteNode = icfg->getUnwindICFGNode(call);
-          connectUnwindContinuation(icfg, invokeInst, unwindSiteNode);
+      if (canReturnNormally)
+        returnSiteNode = icfg->getRetICFGNode(call);
+      if (canUnwind)
+        unwindSiteNode = icfg->getUnwindICFGNode(call);
+
+      ICFGCalleeTargets callees;
+      if (const auto *directCallee = dyn_cast<Function>(
+              call->getCalledOperand()->stripPointerCasts())) {
+        callees.targets.push_back(directCallee);
+        callees.complete = true;
+      } else {
+        callees = calleeProvider ? calleeProvider->getTargets(*call)
+                                 : getDefaultCalleeTargets(*call);
+      }
+
+      bool hasUnresolvedCallee = !callees.complete;
+      for (const Function *calledFunc : callees.targets) {
+        if (!calledFunc || calledFunc->isDeclaration()) {
+          hasUnresolvedCallee = true;
+          break;
         }
       }
 
-      Function *calledFunc = call->getCalledFunction();
-      if (!calledFunc || calledFunc->isDeclaration()) {
+      // Summary edges serve intraprocedural clients and also preserve the
+      // unknown/external remainder when the target set is incomplete.
+      if (returnSiteNode)
+        icfg->addCallToRetEdge(currentFragmentNode, returnSiteNode, call,
+                               hasUnresolvedCallee);
+      if (unwindSiteNode)
+        icfg->addCallToRetEdge(currentFragmentNode, unwindSiteNode, call,
+                               hasUnresolvedCallee);
+
+      SmallPtrSet<const Function *, 8> seenCallees;
+      for (const Function *calledFunc : callees.targets) {
+        if (!calledFunc || calledFunc->isDeclaration() ||
+            calledFunc->isIntrinsic() || !seenCallees.insert(calledFunc).second)
+          continue;
+
+        ICFGNode *calleeEntryNode = icfg->getFunEntryICFGNode(calledFunc);
+        if (calleeEntryNode)
+          icfg->addCallEdge(currentFragmentNode, calleeEntryNode, call);
+
         if (returnSiteNode)
-          icfg->addIntraEdge(srcNode, returnSiteNode);
+          icfg->addRetEdge(icfg->getFunExitICFGNode(calledFunc), returnSiteNode,
+                           call);
+
         if (unwindSiteNode)
-          icfg->addIntraEdge(srcNode, unwindSiteNode);
-        continue;
+          icfg->addExcRetEdge(icfg->getFunUnwindExitICFGNode(calledFunc),
+                              unwindSiteNode, call);
       }
 
-      ICFGNode *calleeEntryNode = icfg->getFunEntryICFGNode(calledFunc);
-      if (calleeEntryNode)
-        icfg->addCallEdge(srcNode, calleeEntryNode, call);
-
-      if (returnSiteNode) {
-        connectFunctionReturnExits(icfg, calledFunc);
-        icfg->addRetEdge(icfg->getFunExitICFGNode(calledFunc), returnSiteNode,
-                         call);
+      if (invokeInst) {
+        if (returnSiteNode)
+          icfg->addIntraEdge(returnSiteNode, icfg->getIntraBlockNode(
+                                                 invokeInst->getNormalDest()));
+        if (unwindSiteNode)
+          icfg->addIntraEdge(unwindSiteNode, icfg->getIntraBlockNode(
+                                                 invokeInst->getUnwindDest()));
       }
 
-      if (unwindSiteNode) {
-        connectFunctionExceptionalExits(icfg, calledFunc);
-        icfg->addExcRetEdge(icfg->getFunUnwindExitICFGNode(calledFunc),
-                            unwindSiteNode, call);
-      }
+      currentFragmentNode = returnSiteNode;
+    }
+
+    const Instruction *terminator = bb->getTerminator();
+    if (!currentFragmentNode || isa<InvokeInst>(terminator))
+      continue;
+
+    if (isa<ReturnInst>(terminator)) {
+      icfg->addIntraEdge(currentFragmentNode, funExitNode);
+      continue;
+    }
+
+    if (terminator && lotus::icfg::isExceptionalFunctionExitInst(*terminator)) {
+      if (!funUnwindExitNode)
+        funUnwindExitNode = icfg->getFunUnwindExitICFGNode(func);
+      icfg->addIntraEdge(currentFragmentNode, funUnwindExitNode);
+    }
+
+    for (auto succIt = succ_begin(bb), e = succ_end(bb); succIt != e;
+         ++succIt) {
+      ICFGNode *dstNode = icfg->getIntraBlockNode(*succIt);
+      icfg->addIntraEdge(currentFragmentNode, dstNode);
     }
   }
 }

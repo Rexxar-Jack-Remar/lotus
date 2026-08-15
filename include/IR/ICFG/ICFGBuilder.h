@@ -5,6 +5,24 @@
 
 #include "IR/ICFG/ICFG.h"
 
+#include <llvm/ADT/SmallVector.h>
+#include <llvm/IR/InstrTypes.h>
+
+/// @brief Possible callees supplied for an indirect call site.
+struct ICFGCalleeTargets {
+  llvm::SmallVector<const llvm::Function *, 8> targets;
+  bool complete = false;
+};
+
+/// @brief Pluggable indirect-call target provider for ICFG construction.
+class ICFGCalleeProvider {
+public:
+  virtual ~ICFGCalleeProvider() = default;
+
+  /// Returns possible targets and whether the set is known to be complete.
+  virtual ICFGCalleeTargets getTargets(const llvm::CallBase &call) const = 0;
+};
+
 /// @brief Constructs an ICFG from an LLVM module.
 ///
 /// Processes all functions in a module to build intraprocedural and
@@ -12,11 +30,15 @@
 class ICFGBuilder {
 private:
   ICFG *icfg;
+  const ICFGCalleeProvider *calleeProvider;
 
 public:
   /// @brief Constructs an ICFG builder.
   /// @param i ICFG to populate.
-  ICFGBuilder(ICFG *i) : icfg(i) {}
+  /// @param provider Optional indirect-call target provider. When omitted, a
+  /// conservative signature-based resolver supplies defined candidates.
+  explicit ICFGBuilder(ICFG *i, const ICFGCalleeProvider *provider = nullptr)
+      : icfg(i), calleeProvider(provider) {}
 
   /// @brief Builds the ICFG for all functions in the module.
   /// @param module LLVM module to process.

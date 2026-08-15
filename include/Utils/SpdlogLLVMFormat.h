@@ -34,6 +34,7 @@ template <typename T>
 struct formatter<
     T, char,
     std::enable_if_t<
+        !std::is_convertible<const T &, string_view>::value &&
         detail::type_constant<T, char>::value == detail::type::custom_type &&
         lotus::logging::detail::IsRawOstreamWritable<T>::value>>
     : formatter<string_view> {

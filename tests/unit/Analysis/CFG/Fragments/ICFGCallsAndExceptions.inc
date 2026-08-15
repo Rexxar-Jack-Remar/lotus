@@ -33,7 +33,8 @@ TEST_F(ICFGTest, FunctionCall) {
   ASSERT_NE(calleeEntryNode, nullptr);
 
   // Should have interprocedural call edge
-  ICFGEdge *callEdge = icfg.getICFGEdge(callerNode, calleeEntryNode, ICFGEdge::CallCF);
+  ICFGEdge *callEdge =
+      icfg.getICFGEdge(callerNode, calleeEntryNode, ICFGEdge::CallCF);
   EXPECT_NE(callEdge, nullptr);
 }
 
@@ -79,11 +80,13 @@ TEST_F(ICFGTest, ReturnEdgeFromCallee) {
   ASSERT_NE(retSiteNode, nullptr);
 
   // Call edge
-  ICFGEdge *callEdge = icfg.getICFGEdge(callerNode, calleeEntryNode, ICFGEdge::CallCF);
+  ICFGEdge *callEdge =
+      icfg.getICFGEdge(callerNode, calleeEntryNode, ICFGEdge::CallCF);
   EXPECT_NE(callEdge, nullptr);
 
   // Return edge
-  ICFGEdge *retEdge = icfg.getICFGEdge(calleeExitNode, retSiteNode, ICFGEdge::RetCF);
+  ICFGEdge *retEdge =
+      icfg.getICFGEdge(calleeExitNode, retSiteNode, ICFGEdge::RetCF);
   EXPECT_NE(retEdge, nullptr);
 }
 
@@ -121,16 +124,20 @@ TEST_F(ICFGTest, MultipleCallers) {
   ASSERT_NE(caller2, nullptr);
 
   FunEntryBlockNode *sharedEntry = icfg.getFunEntryICFGNode(shared);
-  IntraBlockNode *caller1Node = icfg.getIntraBlockNode(&caller1->getEntryBlock());
-  IntraBlockNode *caller2Node = icfg.getIntraBlockNode(&caller2->getEntryBlock());
+  IntraBlockNode *caller1Node =
+      icfg.getIntraBlockNode(&caller1->getEntryBlock());
+  IntraBlockNode *caller2Node =
+      icfg.getIntraBlockNode(&caller2->getEntryBlock());
 
   ASSERT_NE(sharedEntry, nullptr);
   ASSERT_NE(caller1Node, nullptr);
   ASSERT_NE(caller2Node, nullptr);
 
   // Both callers should have call edges to shared
-  EXPECT_NE(icfg.getICFGEdge(caller1Node, sharedEntry, ICFGEdge::CallCF), nullptr);
-  EXPECT_NE(icfg.getICFGEdge(caller2Node, sharedEntry, ICFGEdge::CallCF), nullptr);
+  EXPECT_NE(icfg.getICFGEdge(caller1Node, sharedEntry, ICFGEdge::CallCF),
+            nullptr);
+  EXPECT_NE(icfg.getICFGEdge(caller2Node, sharedEntry, ICFGEdge::CallCF),
+            nullptr);
 }
 
 // Test 6: Nested function calls
@@ -167,7 +174,8 @@ TEST_F(ICFGTest, NestedFunctionCalls) {
   ASSERT_NE(inner, nullptr);
 
   IntraBlockNode *outerNode = icfg.getIntraBlockNode(&outer->getEntryBlock());
-  IntraBlockNode *middleCallerNode = icfg.getIntraBlockNode(&middle->getEntryBlock());
+  IntraBlockNode *middleCallerNode =
+      icfg.getIntraBlockNode(&middle->getEntryBlock());
   FunEntryBlockNode *middleEntryNode = icfg.getFunEntryICFGNode(middle);
   FunEntryBlockNode *innerNode = icfg.getFunEntryICFGNode(inner);
 
@@ -177,8 +185,10 @@ TEST_F(ICFGTest, NestedFunctionCalls) {
   ASSERT_NE(innerNode, nullptr);
 
   // Call chain: outer -> middle -> inner
-  EXPECT_NE(icfg.getICFGEdge(outerNode, middleEntryNode, ICFGEdge::CallCF), nullptr);
-  EXPECT_NE(icfg.getICFGEdge(middleCallerNode, innerNode, ICFGEdge::CallCF), nullptr);
+  EXPECT_NE(icfg.getICFGEdge(outerNode, middleEntryNode, ICFGEdge::CallCF),
+            nullptr);
+  EXPECT_NE(icfg.getICFGEdge(middleCallerNode, innerNode, ICFGEdge::CallCF),
+            nullptr);
 }
 
 // Test 7: Recursive function call
@@ -251,7 +261,7 @@ TEST_F(ICFGTest, MultipleCallSites) {
   EXPECT_TRUE(true);
 }
 
-TEST_F(ICFGTest, MultipleCallSitesToSameCalleeKeepDistinctCallEdges) {
+TEST_F(ICFGTest, MultipleCallSitesInOneBlockAreSequenced) {
   const char *source = R"(
     define i32 @helper() {
       ret i32 42
@@ -278,7 +288,8 @@ TEST_F(ICFGTest, MultipleCallSitesToSameCalleeKeepDistinctCallEdges) {
   ASSERT_NE(helper, nullptr);
   ASSERT_NE(multiCall, nullptr);
 
-  IntraBlockNode *callerNode = icfg.getIntraBlockNode(&multiCall->getEntryBlock());
+  IntraBlockNode *callerNode =
+      icfg.getIntraBlockNode(&multiCall->getEntryBlock());
   FunEntryBlockNode *calleeEntry = icfg.getFunEntryICFGNode(helper);
   ASSERT_NE(callerNode, nullptr);
   ASSERT_NE(calleeEntry, nullptr);
@@ -286,19 +297,27 @@ TEST_F(ICFGTest, MultipleCallSitesToSameCalleeKeepDistinctCallEdges) {
   auto calls = findCallsTo(multiCall, "helper");
   ASSERT_EQ(calls.size(), 3u);
 
-  size_t callEdgeCount = 0;
-  for (ICFGEdge *edge : callerNode->getOutEdges()) {
-    auto *callEdge = dyn_cast<CallCFGEdge>(edge);
-    if (!callEdge || callEdge->getDstNode() != calleeEntry)
-      continue;
-    ++callEdgeCount;
-  }
-  EXPECT_EQ(callEdgeCount, 3u);
+  CallRetBlockNode *firstRet = icfg.getRetICFGNode(calls[0]);
+  CallRetBlockNode *secondRet = icfg.getRetICFGNode(calls[1]);
+  CallRetBlockNode *thirdRet = icfg.getRetICFGNode(calls[2]);
+  ASSERT_NE(firstRet, nullptr);
+  ASSERT_NE(secondRet, nullptr);
+  ASSERT_NE(thirdRet, nullptr);
 
-  for (const CallBase *call : calls) {
-    EXPECT_NE(icfg.getICFGEdge(callerNode, calleeEntry, ICFGEdge::CallCF, call),
-              nullptr);
-  }
+  EXPECT_NE(
+      icfg.getICFGEdge(callerNode, calleeEntry, ICFGEdge::CallCF, calls[0]),
+      nullptr);
+  EXPECT_NE(icfg.getICFGEdge(firstRet, calleeEntry, ICFGEdge::CallCF, calls[1]),
+            nullptr);
+  EXPECT_NE(
+      icfg.getICFGEdge(secondRet, calleeEntry, ICFGEdge::CallCF, calls[2]),
+      nullptr);
+  EXPECT_EQ(
+      icfg.getICFGEdge(callerNode, calleeEntry, ICFGEdge::CallCF, calls[1]),
+      nullptr);
+
+  FunExitBlockNode *callerExit = icfg.getFunExitICFGNode(multiCall);
+  EXPECT_NE(icfg.getICFGEdge(thirdRet, callerExit, ICFGEdge::IntraCF), nullptr);
 }
 
 TEST_F(ICFGTest, ReturnSiteBranchesToAllSuccessorsAfterDirectCall) {
@@ -383,7 +402,8 @@ TEST_F(ICFGTest, ExternalCallStillBuildsReturnSiteContinuation) {
 
   EXPECT_EQ(icfg.getICFGEdge(callerNode, thenNode, ICFGEdge::IntraCF), nullptr);
   EXPECT_EQ(icfg.getICFGEdge(callerNode, elseNode, ICFGEdge::IntraCF), nullptr);
-  EXPECT_NE(icfg.getICFGEdge(callerNode, retSite, ICFGEdge::IntraCF), nullptr);
+  EXPECT_NE(icfg.getICFGEdge(callerNode, retSite, ICFGEdge::CallToRetCF, call),
+            nullptr);
   EXPECT_NE(icfg.getICFGEdge(retSite, thenNode, ICFGEdge::IntraCF), nullptr);
   EXPECT_NE(icfg.getICFGEdge(retSite, elseNode, ICFGEdge::IntraCF), nullptr);
 }
@@ -425,7 +445,8 @@ TEST_F(ICFGTest, InternalInvokeUsesDedicatedNormalAndUnwindContinuations) {
   ASSERT_NE(invoke, nullptr);
 
   IntraBlockNode *callerNode = icfg.getIntraBlockNode(&caller->getEntryBlock());
-  IntraBlockNode *normalNode = icfg.getIntraBlockNode(findBlock(caller, "normal"));
+  IntraBlockNode *normalNode =
+      icfg.getIntraBlockNode(findBlock(caller, "normal"));
   IntraBlockNode *lpadNode = icfg.getIntraBlockNode(findBlock(caller, "lpad"));
   FunEntryBlockNode *calleeEntry = icfg.getFunEntryICFGNode(callee);
   FunExitBlockNode *calleeExit = icfg.getFunExitICFGNode(callee);
@@ -440,13 +461,16 @@ TEST_F(ICFGTest, InternalInvokeUsesDedicatedNormalAndUnwindContinuations) {
   ASSERT_NE(retSite, nullptr);
   ASSERT_NE(unwindSite, nullptr);
 
-  EXPECT_NE(icfg.getICFGEdge(callerNode, calleeEntry, ICFGEdge::CallCF), nullptr);
-  EXPECT_EQ(icfg.getICFGEdge(callerNode, normalNode, ICFGEdge::IntraCF), nullptr);
+  EXPECT_NE(icfg.getICFGEdge(callerNode, calleeEntry, ICFGEdge::CallCF),
+            nullptr);
+  EXPECT_EQ(icfg.getICFGEdge(callerNode, normalNode, ICFGEdge::IntraCF),
+            nullptr);
   EXPECT_EQ(icfg.getICFGEdge(callerNode, lpadNode, ICFGEdge::IntraCF), nullptr);
   EXPECT_NE(icfg.getICFGEdge(calleeExit, retSite, ICFGEdge::RetCF), nullptr);
   EXPECT_NE(icfg.getICFGEdge(retSite, normalNode, ICFGEdge::IntraCF), nullptr);
   EXPECT_NE(icfg.getICFGEdge(unwindSite, lpadNode, ICFGEdge::IntraCF), nullptr);
-  EXPECT_EQ(icfg.getICFGEdge(callerNode, unwindSite, ICFGEdge::IntraCF), nullptr);
+  EXPECT_EQ(icfg.getICFGEdge(callerNode, unwindSite, ICFGEdge::IntraCF),
+            nullptr);
 }
 
 TEST_F(ICFGTest, InternalInvokeExceptionalResumeUsesExceptionalReturnEdge) {
@@ -507,12 +531,12 @@ TEST_F(ICFGTest, InternalInvokeExceptionalResumeUsesExceptionalReturnEdge) {
   ASSERT_NE(calleeUnwindExit, nullptr);
   ASSERT_NE(unwindSite, nullptr);
 
-  EXPECT_EQ(icfg.getICFGEdge(callerNode, normalNode, ICFGEdge::IntraCF), nullptr);
+  EXPECT_EQ(icfg.getICFGEdge(callerNode, normalNode, ICFGEdge::IntraCF),
+            nullptr);
   EXPECT_EQ(icfg.getICFGEdge(callerNode, outerLpadNode, ICFGEdge::IntraCF),
             nullptr);
-  EXPECT_NE(
-      icfg.getICFGEdge(calleeUnwindExit, unwindSite, ICFGEdge::ExcRetCF),
-      nullptr);
+  EXPECT_NE(icfg.getICFGEdge(calleeUnwindExit, unwindSite, ICFGEdge::ExcRetCF),
+            nullptr);
   EXPECT_NE(icfg.getICFGEdge(unwindSite, outerLpadNode, ICFGEdge::IntraCF),
             nullptr);
 }
@@ -548,7 +572,8 @@ TEST_F(ICFGTest, ExternalInvokeUsesSummaryEdgesToContinuationNodes) {
   ASSERT_NE(invoke, nullptr);
 
   IntraBlockNode *callerNode = icfg.getIntraBlockNode(&caller->getEntryBlock());
-  IntraBlockNode *normalNode = icfg.getIntraBlockNode(findBlock(caller, "normal"));
+  IntraBlockNode *normalNode =
+      icfg.getIntraBlockNode(findBlock(caller, "normal"));
   IntraBlockNode *lpadNode = icfg.getIntraBlockNode(findBlock(caller, "lpad"));
   CallRetBlockNode *retSite = icfg.getRetICFGNode(invoke);
   CallUnwindBlockNode *unwindSite = icfg.getUnwindICFGNode(invoke);
@@ -559,17 +584,20 @@ TEST_F(ICFGTest, ExternalInvokeUsesSummaryEdgesToContinuationNodes) {
   ASSERT_NE(retSite, nullptr);
   ASSERT_NE(unwindSite, nullptr);
 
-  EXPECT_EQ(icfg.getICFGEdge(callerNode, normalNode, ICFGEdge::IntraCF), nullptr);
+  EXPECT_EQ(icfg.getICFGEdge(callerNode, normalNode, ICFGEdge::IntraCF),
+            nullptr);
   EXPECT_EQ(icfg.getICFGEdge(callerNode, lpadNode, ICFGEdge::IntraCF), nullptr);
-  EXPECT_NE(icfg.getICFGEdge(callerNode, retSite, ICFGEdge::IntraCF), nullptr);
-  EXPECT_NE(icfg.getICFGEdge(callerNode, unwindSite, ICFGEdge::IntraCF),
-            nullptr);
+  EXPECT_NE(
+      icfg.getICFGEdge(callerNode, retSite, ICFGEdge::CallToRetCF, invoke),
+      nullptr);
+  EXPECT_NE(
+      icfg.getICFGEdge(callerNode, unwindSite, ICFGEdge::CallToRetCF, invoke),
+      nullptr);
   EXPECT_NE(icfg.getICFGEdge(retSite, normalNode, ICFGEdge::IntraCF), nullptr);
-  EXPECT_NE(icfg.getICFGEdge(unwindSite, lpadNode, ICFGEdge::IntraCF),
-            nullptr);
+  EXPECT_NE(icfg.getICFGEdge(unwindSite, lpadNode, ICFGEdge::IntraCF), nullptr);
 }
 
-TEST_F(ICFGTest, InterproceduralDistanceSkipsExceptionalReturnEdges) {
+TEST_F(ICFGTest, InterproceduralDistanceUsesExceptionalSummaryPath) {
   const char *source = R"(
     declare i32 @__gxx_personality_v0(...)
     declare i32 @may_throw()
@@ -614,7 +642,7 @@ TEST_F(ICFGTest, InterproceduralDistanceSkipsExceptionalReturnEdges) {
   ASSERT_NE(outerLpadNode, nullptr);
 
   auto distanceMap = calculateDistanceMapInterICFG(&icfg, callerNode);
-  EXPECT_EQ(distanceMap[outerLpadNode], 999999999999ULL);
+  EXPECT_EQ(distanceMap[outerLpadNode], 2u);
 }
 
 // Test 9: Loop in control flow

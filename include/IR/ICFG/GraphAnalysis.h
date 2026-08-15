@@ -80,13 +80,14 @@ bool calculateShortestPathIntra(llvm::BasicBlock *sourceBB,
                                 llvm::BasicBlock *destBB,
                                 std::vector<llvm::BasicBlock *> &path);
 
-/// @brief Checks if one basic block can reach another.
+/// @brief Conservatively checks if one basic block can potentially reach
+/// another. Returns true if the search budget is exhausted.
 /// @param from Source basic block.
 /// @param to Destination basic block.
 /// @param DT Dominator tree (optional).
 /// @param LI Loop info (optional).
 /// @param iterCount Output iteration count.
-/// @return True if reachable.
+/// @return False only when the destination is proven unreachable.
 bool isReachableFrom(llvm::BasicBlock *from, llvm::BasicBlock *to,
                      const llvm::DominatorTree *DT, const llvm::LoopInfo *LI,
                      int &iterCount);

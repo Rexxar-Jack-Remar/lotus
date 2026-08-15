@@ -37,10 +37,11 @@ public:
 
   /// @brief Edge kinds for different control flow types.
   enum ICFGEdgeK {
-    IntraCF, ///< Intraprocedural control flow
-    CallCF,  ///< Call edge (caller -> callee entry)
-    RetCF,   ///< Return edge (callee exit -> caller)
-    ExcRetCF ///< Exceptional return edge (callee unwind -> caller unwind site)
+    IntraCF,  ///< Intraprocedural control flow
+    CallCF,   ///< Call edge (caller -> callee entry)
+    RetCF,    ///< Return edge (callee exit -> caller)
+    ExcRetCF, ///< Exceptional return edge (callee unwind -> caller unwind site)
+    CallToRetCF ///< Same-procedure summary edge across a call site
   };
 
 public:
@@ -58,7 +59,8 @@ public:
   /// @return True for all ICFG edges.
   inline bool isCFGEdge() const {
     return getEdgeKind() == IntraCF || getEdgeKind() == CallCF ||
-           getEdgeKind() == RetCF || getEdgeKind() == ExcRetCF;
+           getEdgeKind() == RetCF || getEdgeKind() == ExcRetCF ||
+           getEdgeKind() == CallToRetCF;
   }
 
   /// @brief Checks if this is a call edge.
@@ -78,9 +80,16 @@ public:
     return isRetCFGEdge() || isExcRetCFGEdge();
   }
 
+  /// @brief Checks if this edge summarizes a call within the caller.
+  inline bool isCallToRetCFGEdge() const {
+    return getEdgeKind() == CallToRetCF;
+  }
+
   /// @brief Checks if this is an intraprocedural edge.
   /// @return True if this edge is within a single function.
-  inline bool isIntraCFGEdge() const { return getEdgeKind() == IntraCF; }
+  inline bool isIntraCFGEdge() const {
+    return getEdgeKind() == IntraCF || isCallToRetCFGEdge();
+  }
 
   /// @brief Returns the callsite associated with this edge, if any.
   virtual const llvm::Instruction *getCallSite() const { return nullptr; }
@@ -191,7 +200,8 @@ public:
   std::string toString() const override;
 };
 
-/// @brief Exceptional return edge from callee unwind exit to caller unwind site.
+/// @brief Exceptional return edge from callee unwind exit to caller unwind
+/// site.
 class ExcRetCFGEdge : public ICFGEdge {
 
 private:
@@ -210,6 +220,31 @@ public:
   }
   static inline bool classof(const GenericICFGEdgeTy *edge) {
     return edge->getEdgeKind() == ExcRetCF;
+  }
+
+  std::string toString() const override;
+};
+
+/// @brief Intraprocedural summary edge from a call site to a continuation.
+class CallToRetCFGEdge : public ICFGEdge {
+private:
+  const llvm::Instruction *cs;
+  bool unresolvedCallee;
+
+public:
+  CallToRetCFGEdge(ICFGNode *s, ICFGNode *d, const llvm::Instruction *c,
+                   bool unresolved)
+      : ICFGEdge(s, d, CallToRetCF), cs(c), unresolvedCallee(unresolved) {}
+
+  inline const llvm::Instruction *getCallSite() const override { return cs; }
+  inline bool hasUnresolvedCallee() const { return unresolvedCallee; }
+
+  static inline bool classof(const CallToRetCFGEdge *) { return true; }
+  static inline bool classof(const ICFGEdge *edge) {
+    return edge->getEdgeKind() == CallToRetCF;
+  }
+  static inline bool classof(const GenericICFGEdgeTy *edge) {
+    return edge->getEdgeKind() == CallToRetCF;
   }
 
   std::string toString() const override;
