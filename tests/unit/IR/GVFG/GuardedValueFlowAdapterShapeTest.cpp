@@ -308,7 +308,7 @@ TEST(GuardedValueFlowAdapterShape,
 }
 
 TEST(GuardedValueFlowAdapterShape,
-     LeavesFreeVariableLoadsWithoutSyntheticProducerChain) {
+     RepresentsFreeVariableLoadsWithUnknownProducerChain) {
   const char *IR = R"(
     define i32 @test() {
     entry:
@@ -338,8 +338,13 @@ TEST(GuardedValueFlowAdapterShape,
 
   auto *load_mem = graph.findLoadMemoryNode(load);
   ASSERT_NE(load_mem, nullptr);
-  EXPECT_TRUE(load_mem->children().empty());
-  EXPECT_TRUE(load_mem->getMatchingRegions().empty());
+  ASSERT_EQ(load_mem->children().size(), 1u);
+  ASSERT_EQ(load_mem->getMatchingRegions().size(), 1u);
+  auto producers = graph.getMemoryProducers(load_mem);
+  ASSERT_EQ(producers.size(), 1u);
+  EXPECT_TRUE(producers.front().is_unknown);
+  EXPECT_NE(producers.front().region, nullptr);
+  EXPECT_TRUE(graph.isDegraded());
 }
 
 TEST(GuardedValueFlowAdapterShape,

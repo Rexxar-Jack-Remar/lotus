@@ -3,8 +3,8 @@
 ///        LLVM IR
 ///
 /// **Construction phases** (in `buildGraph`):
-///   1. Reject functions containing unsupported instructions (invoke, landingpad,
-///      indirectbr, extractvalue, etc.).
+///   1. Create a graph for every defined function; unsupported instructions
+///      are retained as conservative Unknown dependencies with diagnostics.
 ///   2. Create CommonArgument nodes for each formal parameter.
 ///   3. Create a CommonReturn node (if the function returns non-void).
 ///   4. Build block-level regions from the control-dependence analysis:
@@ -35,7 +35,8 @@
 ///        create common output node.
 ///      - **Select**: create select opcode node with condition, true-value,
 ///        false-value children.
-///      - **VAArg**: create variable-argument node.
+///      - **VAArg**: create an indexed variable-argument node linked to its
+///        `va_list` operand.
 ///      - **Unsupported**: create Unknown node + emit diagnostic.
 ///   6. Refresh node regions so every node inherits its block's path condition.
 ///
@@ -948,6 +949,10 @@ static void buildRegions(GuardedValueFlowGraph &graph, Function &F,
   }
 }
 
+static void recordUnsupportedInstruction(GuardedValueFlowGraph &graph,
+                                         Function &F, Instruction &I,
+                                         StringRef detail);
+
 static bool modelIntrinsicCall(CallBase &call, GuardedValueFlowGraph &graph,
                                Function &F, bool &failed) {
   Function *callee = call.getCalledFunction();
@@ -994,8 +999,23 @@ static bool modelIntrinsicCall(CallBase &call, GuardedValueFlowGraph &graph,
     return true;
   }
   default:
-    if (!call.getType()->isVoidTy())
-      (void)findOrCreateValueNode(graph, &call, F);
+    if (!call.getType()->isVoidTy()) {
+      auto *result = findOrCreateValueNode(graph, &call, F);
+      auto *intrinsic_node = graph.createNode<GuardedValueFlowNode>(
+          GuardedValueFlowNode::Kind::Unknown, call.getType(), &graph,
+          call.getParent(), nullptr, &call);
+      intrinsic_node->setDescription(
+          (Twine("intrinsic.") + callee->getName()).str());
+      for (Value *arg : call.args())
+        intrinsic_node->addChild(
+            getOrCreateOperandRepresentation(graph, arg, F, failed));
+      result->addChild(intrinsic_node);
+    }
+    recordUnsupportedInstruction(
+        graph, F, call,
+        (Twine("intrinsic modeled conservatively: ") + callee->getName())
+            .str());
+    failed = true;
     return true;
   }
 }
@@ -1024,24 +1044,6 @@ static void recordUnsupportedInstruction(GuardedValueFlowGraph &graph,
                           Twine("Partially modeled instruction in function ") +
                               F.getName() + ": " + detail,
                           &I, I.getParent());
-}
-
-static bool isHardUnsupportedInstruction(const Instruction &I) {
-  switch (I.getOpcode()) {
-  case Instruction::Invoke:
-  case Instruction::LandingPad:
-  case Instruction::Resume:
-  case Instruction::IndirectBr:
-  case Instruction::ExtractValue:
-  case Instruction::InsertValue:
-  case Instruction::ShuffleVector:
-  case Instruction::AtomicRMW:
-  case Instruction::AtomicCmpXchg:
-  case Instruction::Fence:
-    return true;
-  default:
-    return false;
-  }
 }
 
 static bool buildInstruction(GuardedValueFlowGraph &graph, Instruction &I,
@@ -1116,15 +1118,24 @@ static bool buildInstruction(GuardedValueFlowGraph &graph, Instruction &I,
   case Instruction::AtomicRMW:
   case Instruction::AtomicCmpXchg:
   case Instruction::Fence: {
+    auto *unknown = findOrCreateUnknownInstructionNode(
+        graph, I, (Twine("unsupported.") + I.getOpcodeName()).str());
+    if (unknown) {
+      for (Value *operand : I.operands()) {
+        if (!isa<BasicBlock>(operand))
+          unknown->addChild(
+              getOrCreateOperandRepresentation(graph, operand, F, failed));
+      }
+    }
     (void)graph.createSite<GuardedValueFlowSite>(
         GuardedValueFlowSite::Kind::Unknown, &graph, &I);
     recordUnsupportedInstruction(
         graph, F, I,
-        (Twine("unsupported opcode requires lowering before GVFG construction: ") +
+        (Twine("unsupported opcode lowered to conservative dependencies: ") +
          I.getOpcodeName())
             .str());
     failed = true;
-    return false;
+    return true;
   }
   case Instruction::FNeg: {
     auto *result = findOrCreateValueNode(graph, &I, F);
@@ -1375,17 +1386,25 @@ static bool buildInstruction(GuardedValueFlowGraph &graph, Instruction &I,
           cond_node = findOrCreateSwitchCasePredicate(
               graph, si, guard_successor, F, failed);
           ConstantInt *case_value = nullptr;
+          unsigned matching_cases = 0;
           for (auto case_it = si->case_begin(); case_it != si->case_end();
                ++case_it) {
             if (case_it->getCaseSuccessor() == guard_successor) {
               case_value = case_it->getCaseValue();
-              break;
+              ++matching_cases;
             }
           }
+          bool includes_default = si->getDefaultDest() == guard_successor;
+          gsa::GuardKind guard_kind = gsa::GuardKind::Opaque;
+          if (matching_cases == 1 && !includes_default)
+            guard_kind = gsa::GuardKind::SwitchCase;
+          else if (matching_cases == 0 && includes_default)
+            guard_kind = gsa::GuardKind::SwitchDefault;
+          else
+            case_value = nullptr;
           cond = ConditionRef::fromGuard(
-              case_value ? gsa::GuardKind::SwitchCase
-                         : gsa::GuardKind::SwitchDefault,
-              incoming_bb, guard_successor, si->getCondition(), case_value);
+              guard_kind, incoming_bb, guard_successor, si->getCondition(),
+              case_value);
         }
       }
       // PHI incoming metadata keeps the immediate edge-local guard in addition
@@ -1439,13 +1458,25 @@ static bool buildInstruction(GuardedValueFlowGraph &graph, Instruction &I,
     return true;
   }
   case Instruction::VAArg: {
-    (void)findOrCreateValueNode(graph, &I, F);
+    auto *node = findOrCreateValueNode(graph, &I, F);
+    if (node) {
+      node->addChild(getOrCreateOperandRepresentation(
+          graph, I.getOperand(0), F, failed));
+      node->setIndex(graph.getNumVarArgument() - 1);
+    }
     return true;
   }
   default:
     failed = true;
-    (void)findOrCreateUnknownInstructionNode(
+    if (auto *unknown = findOrCreateUnknownInstructionNode(
         graph, I, (Twine("unsupported.") + I.getOpcodeName()).str());
+        unknown) {
+      for (Value *operand : I.operands()) {
+        if (!isa<BasicBlock>(operand))
+          unknown->addChild(
+              getOrCreateOperandRepresentation(graph, operand, F, failed));
+      }
+    }
     recordUnsupportedInstruction(
         graph, F, I,
         (Twine("unsupported opcode lowered to unknown: ") + I.getOpcodeName())
@@ -1506,18 +1537,6 @@ GuardedValueFlowGraphBuilderPass::buildGraph(Function &F) {
   auto graph = std::make_unique<GuardedValueFlowGraph>(&F);
   auto &cda = getAnalysis<gsa::ControlDependenceAnalysisPass>()
                   .getControlDependenceAnalysis(F);
-
-  for (Instruction &I : instructions(F)) {
-    if (!isHardUnsupportedInstruction(I))
-      continue;
-    recordBuilderDiagnostic(
-        *graph, GuardedValueFlowGraph::Diagnostic::Severity::Warning,
-        Twine("Skipping GVFG construction for function ") + F.getName() +
-            " because it contains unsupported instruction: " +
-            I.getOpcodeName(),
-        &I, I.getParent());
-    return nullptr;
-  }
 
   unsigned common_arg_index = 0;
   for (Argument &arg : F.args()) {

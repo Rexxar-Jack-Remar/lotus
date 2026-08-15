@@ -22,8 +22,9 @@
 ///   - Tracks pseudo-argument, pseudo-return, and summary-node indices.
 ///   - Emits diagnostics for partial or degraded graphs.
 ///   - Provides query helpers for downstream consumers:
-///     `getDirectDataDependencies`, `getEffectiveControlDependencies`,
-///     `getMemoryProducers`, `getResolvedCallTargets`.
+///     `getDirectDataDependencies`, `getDirectControlDependencies`,
+///     `getEffectiveControlRegion`, `getMemoryProducers`, and
+///     `getResolvedCallTargets`.
 ///
 /// **Region complementarity**: Two unit regions with the same condition node
 /// and opposite sense (true/false) are recognised as complementary; their
@@ -666,7 +667,14 @@ unsigned GuardedValueFlowGraph::getNumCommonArgument() const {
   return count;
 }
 
-unsigned GuardedValueFlowGraph::getNumVarArgument() const { return 0; }
+unsigned GuardedValueFlowGraph::getNumVarArgument() const {
+  unsigned count = 0;
+  for (const auto &node : nodes_) {
+    if (node->getKind() == GuardedValueFlowNode::Kind::VariableArgument)
+      ++count;
+  }
+  return count;
+}
 
 GuardedValueFlowNode *GuardedValueFlowGraph::getCommonArgument(unsigned idx) const {
   unsigned current = 0;
@@ -681,7 +689,14 @@ GuardedValueFlowNode *GuardedValueFlowGraph::getCommonArgument(unsigned idx) con
 }
 
 GuardedValueFlowNode *GuardedValueFlowGraph::getVarArgument(unsigned idx) const {
-  (void)idx;
+  unsigned current = 0;
+  for (const auto &node : nodes_) {
+    if (node->getKind() != GuardedValueFlowNode::Kind::VariableArgument)
+      continue;
+    if (current == idx)
+      return node.get();
+    ++current;
+  }
   return nullptr;
 }
 
@@ -834,12 +849,40 @@ GuardedValueFlowGraph::getDirectDataDependencies(
 }
 
 std::vector<GuardedValueFlowGraph::BlockCondition>
-GuardedValueFlowGraph::getEffectiveControlDependencies(
+GuardedValueFlowGraph::getDirectControlDependencies(
     const GuardedValueFlowNode *node) const {
   if (!node || !node->getParentBasicBlock())
     return {};
   auto conditions = getBlockConditions(node->getParentBasicBlock());
   return std::vector<BlockCondition>(conditions.begin(), conditions.end());
+}
+
+GuardedValueFlowRegionNode *
+GuardedValueFlowGraph::getEffectiveControlRegion(
+    const GuardedValueFlowNode *node) const {
+  return node ? node->getRegion() : nullptr;
+}
+
+std::vector<GuardedValueFlowGraph::BlockCondition>
+GuardedValueFlowGraph::getEffectiveControlDependencies(
+    const GuardedValueFlowNode *node) const {
+  return getDirectControlDependencies(node);
+}
+
+static GuardedValueFlowNode *
+stripAdapterCoercions(GuardedValueFlowNode *node) {
+  while (node && node->children().size() == 1) {
+    bool is_adapter_cast =
+        node->getKind() == GuardedValueFlowNode::Kind::CastOpcode &&
+        node->getDescription() == "adapter.cast";
+    bool is_adapter_coercion =
+        node->getKind() == GuardedValueFlowNode::Kind::Unknown &&
+        node->getDescription() == "adapter.coercion";
+    if (!is_adapter_cast && !is_adapter_coercion)
+      break;
+    node = node->children().front().target;
+  }
+  return node;
 }
 
 std::vector<GuardedValueFlowGraph::MemoryProducer>
@@ -863,14 +906,16 @@ GuardedValueFlowGraph::getMemoryProducers(
   }
 
   for (const auto &edge : memory_node->children()) {
-    GuardedValueFlowNode *producer_mem = edge.target;
+    GuardedValueFlowNode *linked_producer = edge.target;
+    GuardedValueFlowNode *producer_mem = stripAdapterCoercions(linked_producer);
     if (!producer_mem)
       continue;
 
     GuardedValueFlowNode *producer_value =
         producer_mem->children().empty()
             ? nullptr
-            : producer_mem->children().front().target;
+            : stripAdapterCoercions(
+                  producer_mem->children().front().target);
     bool is_summary =
         producer_value && producer_value->getKind() ==
                               GuardedValueFlowNode::Kind::CallSiteReturnSummary;
@@ -878,7 +923,7 @@ GuardedValueFlowGraph::getMemoryProducers(
                                             GuardedValueFlowNode::Kind::Unknown;
 
     result.push_back({producer_mem, producer_value,
-                      memory_node->getMatchingRegion(producer_mem),
+                      memory_node->getMatchingRegion(linked_producer),
                       edge.condition, edge.confidence, is_summary, is_unknown});
   }
 

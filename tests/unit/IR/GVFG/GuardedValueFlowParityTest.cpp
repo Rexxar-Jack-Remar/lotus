@@ -848,7 +848,7 @@ TEST_F(GuardedValueFlowParityTest, ModelsFNegWithoutDroppingTheGraph) {
 }
 
 TEST_F(GuardedValueFlowParityTest,
-       RejectsUnsupportedInstructionsByWithholdingGraphs) {
+       RetainsDegradedGraphsForUnsupportedInstructions) {
   const char *source = R"(
     define i32 @test({i32, i32} %pair) {
     entry:
@@ -864,7 +864,50 @@ TEST_F(GuardedValueFlowParityTest,
   ASSERT_NE(F, nullptr);
 
   auto pipeline = runBuilder(*module);
-  EXPECT_FALSE(pipeline.builder->hasGraphFor(*F));
+  ASSERT_TRUE(pipeline.builder->hasGraphFor(*F));
+  GuardedValueFlowGraph &graph = pipeline.builder->getGraph(*F);
+  auto *extract = &*F->getEntryBlock().begin();
+  auto *node = graph.findNode(extract);
+  ASSERT_NE(node, nullptr);
+  EXPECT_EQ(node->getKind(), GuardedValueFlowNode::Kind::Unknown);
+  ASSERT_EQ(node->children().size(), 1u);
+  EXPECT_EQ(node->children().front().target, graph.findNode(F->getArg(0)));
+  EXPECT_TRUE(graph.isDegraded());
+}
+
+TEST_F(GuardedValueFlowParityTest, RetainsDegradedGraphsForInvokeAndEH) {
+  const char *source = R"(
+    declare i32 @may_throw(i32)
+    declare i32 @__gxx_personality_v0(...)
+
+    define i32 @test(i32 %x) personality i32 (...)* @__gxx_personality_v0 {
+    entry:
+      %value = invoke i32 @may_throw(i32 %x)
+          to label %normal unwind label %exception
+    normal:
+      ret i32 %value
+    exception:
+      %landing = landingpad { i8*, i32 }
+          cleanup
+      resume { i8*, i32 } %landing
+    }
+  )";
+
+  auto module = parseModule(source);
+  ASSERT_NE(module, nullptr);
+  Function *F = module->getFunction("test");
+  ASSERT_NE(F, nullptr);
+
+  auto pipeline = runBuilder(*module);
+  ASSERT_TRUE(pipeline.builder->hasGraphFor(*F));
+  GuardedValueFlowGraph &graph = pipeline.builder->getGraph(*F);
+  auto *invoke = dyn_cast<InvokeInst>(&F->getEntryBlock().front());
+  ASSERT_NE(invoke, nullptr);
+  auto *node = graph.findNode(invoke);
+  ASSERT_NE(node, nullptr);
+  EXPECT_EQ(node->getKind(), GuardedValueFlowNode::Kind::Unknown);
+  EXPECT_FALSE(node->children().empty());
+  EXPECT_TRUE(graph.isDegraded());
 }
 
 } // namespace

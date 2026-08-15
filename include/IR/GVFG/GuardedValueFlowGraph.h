@@ -278,6 +278,12 @@ public:
   std::vector<GuardedValueFlowNode *>
   getDirectDataDependencies(const GuardedValueFlowNode *node) const;
   std::vector<BlockCondition>
+  getDirectControlDependencies(const GuardedValueFlowNode *node) const;
+  GuardedValueFlowRegionNode *
+  getEffectiveControlRegion(const GuardedValueFlowNode *node) const;
+  // Compatibility wrapper. Prefer getDirectControlDependencies() for the
+  // immediate guards or getEffectiveControlRegion() for the composed guard.
+  std::vector<BlockCondition>
   getEffectiveControlDependencies(const GuardedValueFlowNode *node) const;
   std::vector<MemoryProducer>
   getMemoryProducers(const GuardedValueFlowNode *node) const;

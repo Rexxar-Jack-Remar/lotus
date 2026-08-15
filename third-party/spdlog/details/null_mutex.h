@@ -12,14 +12,14 @@ namespace details {
 struct null_mutex {
     void lock() const {}
     void unlock() const {}
-    bool try_lock() const { return true; }
 };
 
 struct null_atomic_int {
     int value;
     null_atomic_int() = default;
 
-    explicit null_atomic_int(int new_value) : value(new_value) {}
+    explicit null_atomic_int(int new_value)
+        : value(new_value) {}
 
     int load(std::memory_order = std::memory_order_relaxed) const { return value; }
 

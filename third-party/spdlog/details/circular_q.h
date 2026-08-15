@@ -4,7 +4,10 @@
 // circular q view of std::vector.
 #pragma once
 
+#include <cassert>
 #include <vector>
+
+#include "spdlog/common.h"
 
 namespace spdlog {
 namespace details {
@@ -90,6 +93,8 @@ public:
     }
 
     size_t overrun_counter() const { return overrun_counter_; }
+
+    void reset_overrun_counter() { overrun_counter_ = 0; }
 
 private:
     // copy from other&& and reset it to disabled state

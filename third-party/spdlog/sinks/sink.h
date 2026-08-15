@@ -9,7 +9,7 @@
 namespace spdlog {
 
 namespace sinks {
-class sink {
+class SPDLOG_API sink {
 public:
     virtual ~sink() = default;
     virtual void log(const details::log_msg &msg) = 0;

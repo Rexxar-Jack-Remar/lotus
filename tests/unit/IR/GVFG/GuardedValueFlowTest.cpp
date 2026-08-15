@@ -145,6 +145,84 @@ TEST_F(GuardedValueFlowTest, AssignsDenseCommonArgumentIndices) {
   }
 }
 
+TEST_F(GuardedValueFlowTest, KeepsDuplicateEdgesBidirectionallyConsistent) {
+  const char *source = R"(
+    define void @test(i1 %cond) {
+    entry:
+      ret void
+    }
+  )";
+
+  auto module = parseModule(source);
+  ASSERT_NE(module, nullptr);
+  Function *F = module->getFunction("test");
+  ASSERT_NE(F, nullptr);
+
+  GuardedValueFlowGraph graph(F);
+  BasicBlock *entry = &F->getEntryBlock();
+  auto *parent = graph.createNode<GuardedValueFlowNode>(
+      GuardedValueFlowNode::Kind::SimpleOperand,
+      Type::getInt32Ty(context), &graph, entry);
+  auto *child = graph.createNode<GuardedValueFlowNode>(
+      GuardedValueFlowNode::Kind::SimpleOperand,
+      Type::getInt32Ty(context), &graph, entry);
+
+  ConditionRef first = ConditionRef::fromGuard(
+      gsa::GuardKind::BranchTrue, entry, entry, F->getArg(0));
+  ConditionRef second = ConditionRef::fromGuard(
+      gsa::GuardKind::BranchFalse, entry, entry, F->getArg(0));
+  parent->addChild(child, 0.25f, first);
+  parent->addChild(child, 0.75f, second);
+
+  ASSERT_EQ(parent->children().size(), 1u);
+  ASSERT_EQ(child->parents().size(), 1u);
+  EXPECT_FLOAT_EQ(parent->children().front().confidence, 0.75f);
+  EXPECT_FLOAT_EQ(child->parents().front().confidence, 0.75f);
+  EXPECT_EQ(parent->children().front().condition, second);
+  EXPECT_EQ(child->parents().front().condition, second);
+}
+
+TEST_F(GuardedValueFlowTest, MergesRepeatedProducerMatchingRegions) {
+  const char *source = R"(
+    define void @test(i1 %a, i1 %b) {
+    entry:
+      ret void
+    }
+  )";
+
+  auto module = parseModule(source);
+  ASSERT_NE(module, nullptr);
+  Function *F = module->getFunction("test");
+  ASSERT_NE(F, nullptr);
+
+  GuardedValueFlowGraph graph(F);
+  BasicBlock *entry = &F->getEntryBlock();
+  auto *load_mem = graph.createNode<GuardedValueFlowNode>(
+      GuardedValueFlowNode::Kind::LoadMemory,
+      Type::getInt32Ty(context), &graph, entry);
+  auto *producer = graph.createNode<GuardedValueFlowNode>(
+      GuardedValueFlowNode::Kind::StoreMemory,
+      Type::getInt32Ty(context), &graph, entry);
+  auto *cond_a = graph.createNode<GuardedValueFlowNode>(
+      GuardedValueFlowNode::Kind::SimpleOperand, Type::getInt1Ty(context),
+      &graph, entry, F->getArg(0));
+  auto *cond_b = graph.createNode<GuardedValueFlowNode>(
+      GuardedValueFlowNode::Kind::SimpleOperand, Type::getInt1Ty(context),
+      &graph, entry, F->getArg(1));
+  auto *region_a = graph.findOrCreateUnitRegion(
+      cond_a, true, entry, ConditionRef::none());
+  auto *region_b = graph.findOrCreateUnitRegion(
+      cond_b, true, entry, ConditionRef::none());
+
+  load_mem->addMatchingRegion(producer, region_a);
+  load_mem->addMatchingRegion(producer, region_b);
+
+  ASSERT_EQ(load_mem->getMatchingRegions().size(), 1u);
+  auto *merged = load_mem->getMatchingRegion(producer);
+  ASSERT_NE(merged, nullptr);
+  EXPECT_EQ(merged->getForm(), GuardedValueFlowRegionNode::Form::Or);
+}
+
 TEST_F(GuardedValueFlowTest, UsesDensePseudoInterfaceIndices) {
   const char *source = R"(
     define void @test() {
@@ -375,12 +453,14 @@ TEST_F(GuardedValueFlowTest, ExposesHighLevelQueryHelpersForClients) {
   ASSERT_NE(memory_producers.front().producer_value, nullptr);
   EXPECT_EQ(memory_producers.front().producer_value, graph.findNode(F->getArg(1)));
 
-  auto control_dependencies = graph.getEffectiveControlDependencies(load_node);
+  auto control_dependencies = graph.getDirectControlDependencies(load_node);
   EXPECT_TRUE(control_dependencies.empty());
+  EXPECT_EQ(graph.getEffectiveControlRegion(load_node),
+            graph.getAlwaysTrueRegion());
 }
 
 TEST_F(GuardedValueFlowTest,
-       DropsLinkWhenAdapterCannotCastBetweenLinkedTypes) {
+       PreservesLinkWhenAdapterCannotCastBetweenLinkedTypes) {
   const char *source = R"(
     define void @test() {
     entry:
@@ -407,13 +487,59 @@ TEST_F(GuardedValueFlowTest,
 
   auto *linked = LotusGuardedValueFlowAdapterPass::safeLink(
       graph, parent, child, 0.5f, ConditionRef::none());
-  EXPECT_EQ(linked, nullptr);
-  EXPECT_TRUE(parent->children().empty());
-  EXPECT_TRUE(child->parents().empty());
+  ASSERT_NE(linked, nullptr);
+  EXPECT_EQ(linked->getKind(), GuardedValueFlowNode::Kind::Unknown);
+  EXPECT_EQ(linked->getDescription(), "adapter.coercion");
+  ASSERT_EQ(parent->children().size(), 1u);
+  EXPECT_EQ(parent->children().front().target, linked);
+  ASSERT_EQ(linked->children().size(), 1u);
+  EXPECT_EQ(linked->children().front().target, child);
+  EXPECT_TRUE(graph.isDegraded());
 }
 
 TEST_F(GuardedValueFlowTest,
-       LeavesUnknownNonVoidIntrinsicsAsPlainValueNodesWithoutCallSites) {
+       MemoryProducerQueriesStripAdapterCoercions) {
+  const char *source = R"(
+    define void @test() {
+    entry:
+      ret void
+    }
+  )";
+
+  auto module = parseModule(source);
+  ASSERT_NE(module, nullptr);
+  Function *F = module->getFunction("test");
+  ASSERT_NE(F, nullptr);
+
+  GuardedValueFlowGraph graph(F);
+  BasicBlock *entry = &F->getEntryBlock();
+  StructType *aggregate_ty =
+      StructType::get(context, {Type::getInt32Ty(context),
+                                Type::getInt32Ty(context)});
+  auto *load_mem = graph.createNode<GuardedValueFlowNode>(
+      GuardedValueFlowNode::Kind::LoadMemory, Type::getInt32Ty(context),
+      &graph, entry);
+  auto *producer_mem = graph.createNode<GuardedValueFlowNode>(
+      GuardedValueFlowNode::Kind::StoreMemory, aggregate_ty, &graph, entry);
+  auto *producer_value = graph.createNode<GuardedValueFlowNode>(
+      GuardedValueFlowNode::Kind::SimpleOperand, aggregate_ty, &graph, entry);
+  producer_mem->addChild(producer_value);
+
+  auto *linked = LotusGuardedValueFlowAdapterPass::safeLink(
+      graph, load_mem, producer_mem);
+  ASSERT_NE(linked, nullptr);
+  load_mem->addMatchingRegion(linked, graph.getAlwaysTrueRegion());
+
+  auto producers = graph.getMemoryProducers(load_mem);
+  ASSERT_EQ(producers.size(), 1u);
+  EXPECT_EQ(producers.front().producer_memory, producer_mem);
+  EXPECT_EQ(producers.front().producer_value, producer_value);
+  EXPECT_FALSE(producers.front().is_summary);
+  EXPECT_FALSE(producers.front().is_unknown);
+}
+
+TEST_F(GuardedValueFlowTest,
+       PreservesOperandsOfUnknownNonVoidIntrinsics) {
   const char *source = R"(
     declare i32 @llvm.ctpop.i32(i32)
 
@@ -446,7 +572,79 @@ TEST_F(GuardedValueFlowTest,
   auto *value_node = graph.findNode(intrinsic_call);
   ASSERT_NE(value_node, nullptr);
   EXPECT_EQ(value_node->getKind(), GuardedValueFlowNode::Kind::SimpleOperand);
+  ASSERT_EQ(value_node->children().size(), 1u);
+  auto *intrinsic_node = value_node->children().front().target;
+  ASSERT_NE(intrinsic_node, nullptr);
+  EXPECT_EQ(intrinsic_node->getKind(), GuardedValueFlowNode::Kind::Unknown);
+  ASSERT_EQ(intrinsic_node->children().size(), 1u);
+  EXPECT_EQ(intrinsic_node->children().front().target,
+            graph.findNode(F->getArg(0)));
   EXPECT_EQ(graph.findCallSite(intrinsic_call), nullptr);
+  EXPECT_TRUE(graph.isDegraded());
+}
+
+TEST_F(GuardedValueFlowTest, ExposesVariableArgumentsWithStableIndices) {
+  const char *source = R"(
+    define i32 @test(i8* %ap) {
+    entry:
+      %first = va_arg i8* %ap, i32
+      %second = va_arg i8* %ap, i32
+      %sum = add i32 %first, %second
+      ret i32 %sum
+    }
+  )";
+
+  auto module = parseModule(source);
+  ASSERT_NE(module, nullptr);
+  Function *F = module->getFunction("test");
+  ASSERT_NE(F, nullptr);
+
+  auto pipeline = runBuilder(*module);
+  ASSERT_TRUE(pipeline.builder->hasGraphFor(*F));
+  GuardedValueFlowGraph &graph = pipeline.builder->getGraph(*F);
+
+  ASSERT_EQ(graph.getNumVarArgument(), 2u);
+  ASSERT_NE(graph.getVarArgument(0), nullptr);
+  ASSERT_NE(graph.getVarArgument(1), nullptr);
+  EXPECT_EQ(graph.getVarArgument(0)->getIndex(), 0u);
+  EXPECT_EQ(graph.getVarArgument(1)->getIndex(), 1u);
+  EXPECT_EQ(graph.getVarArgument(2), nullptr);
+  EXPECT_EQ(graph.getVarArgument(0)->children().front().target,
+            graph.findNode(F->getArg(0)));
+}
+
+TEST_F(GuardedValueFlowTest,
+       UsesOpaqueProvenanceForMultiCaseSwitchPhiEdges) {
+  const char *source = R"(
+    define i32 @test(i32 %x) {
+    entry:
+      switch i32 %x, label %other [
+        i32 1, label %merge
+        i32 2, label %merge
+      ]
+    other:
+      br label %merge
+    merge:
+      %v = phi i32 [ %x, %entry ], [ 0, %other ]
+      ret i32 %v
+    }
+  )";
+
+  auto module = parseModule(source);
+  ASSERT_NE(module, nullptr);
+  Function *F = module->getFunction("test");
+  ASSERT_NE(F, nullptr);
+
+  auto pipeline = runBuilder(*module);
+  ASSERT_TRUE(pipeline.builder->hasGraphFor(*F));
+  GuardedValueFlowGraph &graph = pipeline.builder->getGraph(*F);
+  auto *phi = dyn_cast<GuardedValueFlowPhiNode>(
+      graph.findNode(&*F->getBasicBlockList().back().begin()));
+  ASSERT_NE(phi, nullptr);
+  ASSERT_EQ(phi->incoming().size(), 2u);
+  EXPECT_EQ(phi->incoming().front().condition.getGuardKind(),
+            gsa::GuardKind::Opaque);
+  EXPECT_NE(phi->incoming().front().condition_node, nullptr);
 }
 
 TEST_F(GuardedValueFlowTest, PreservesImportedSemanticConditionIdentity) {

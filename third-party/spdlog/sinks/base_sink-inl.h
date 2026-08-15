@@ -8,16 +8,18 @@
 #endif
 
 #include <spdlog/common.h>
-#include <spdlog/details/pattern_formatter.h>
+#include <spdlog/pattern_formatter.h>
 
 #include <memory>
+#include <mutex>
 
 template <typename Mutex>
 SPDLOG_INLINE spdlog::sinks::base_sink<Mutex>::base_sink()
     : formatter_{details::make_unique<spdlog::pattern_formatter>()} {}
 
 template <typename Mutex>
-SPDLOG_INLINE spdlog::sinks::base_sink<Mutex>::base_sink(std::unique_ptr<spdlog::formatter> formatter)
+SPDLOG_INLINE spdlog::sinks::base_sink<Mutex>::base_sink(
+    std::unique_ptr<spdlog::formatter> formatter)
     : formatter_{std::move(formatter)} {}
 
 template <typename Mutex>
@@ -39,7 +41,8 @@ void SPDLOG_INLINE spdlog::sinks::base_sink<Mutex>::set_pattern(const std::strin
 }
 
 template <typename Mutex>
-void SPDLOG_INLINE spdlog::sinks::base_sink<Mutex>::set_formatter(std::unique_ptr<spdlog::formatter> sink_formatter) {
+void SPDLOG_INLINE
+spdlog::sinks::base_sink<Mutex>::set_formatter(std::unique_ptr<spdlog::formatter> sink_formatter) {
     std::lock_guard<Mutex> lock(mutex_);
     set_formatter_(std::move(sink_formatter));
 }
@@ -50,6 +53,7 @@ void SPDLOG_INLINE spdlog::sinks::base_sink<Mutex>::set_pattern_(const std::stri
 }
 
 template <typename Mutex>
-void SPDLOG_INLINE spdlog::sinks::base_sink<Mutex>::set_formatter_(std::unique_ptr<spdlog::formatter> sink_formatter) {
+void SPDLOG_INLINE
+spdlog::sinks::base_sink<Mutex>::set_formatter_(std::unique_ptr<spdlog::formatter> sink_formatter) {
     formatter_ = std::move(sink_formatter);
 }

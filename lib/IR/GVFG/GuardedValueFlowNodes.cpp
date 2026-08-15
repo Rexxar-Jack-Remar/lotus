@@ -26,6 +26,7 @@
 
 #include "IR/GVFG/GuardedValueFlowNodes.h"
 
+#include "IR/GVFG/GuardedValueFlowGraph.h"
 #include "IR/GVFG/GuardedValueFlowSites.h"
 
 #include <algorithm>
@@ -125,10 +126,27 @@ void GuardedValueFlowNode::addChild(GuardedValueFlowNode *child,
                                     float confidence, ConditionRef condition) {
   if (!child)
     return;
-  children_.push_back({child, confidence, condition});
+
+  auto child_it =
+      std::find_if(children_.begin(), children_.end(),
+                   [&](const Edge &edge) { return edge.target == child; });
   auto parent_it =
       std::find_if(child->parents_.begin(), child->parents_.end(),
                    [&](const Edge &edge) { return edge.target == this; });
+
+  if (child_it != children_.end()) {
+    child_it->confidence = confidence;
+    child_it->condition = condition;
+    if (parent_it == child->parents_.end()) {
+      child->parents_.push_back({this, confidence, condition});
+    } else {
+      parent_it->confidence = confidence;
+      parent_it->condition = condition;
+    }
+    return;
+  }
+
+  children_.push_back({child, confidence, condition});
   if (parent_it != child->parents_.end()) {
     parent_it->confidence = confidence;
     parent_it->condition = condition;
@@ -180,8 +198,14 @@ void GuardedValueFlowNode::addMatchingRegion(GuardedValueFlowNode *producer,
                                              ConditionRef provenance) {
   for (auto &existing : matching_regions_) {
     if (existing.producer == producer) {
-      existing.region = region;
-      existing.provenance = provenance;
+      if (existing.region && region && existing.region != region && graph_) {
+        existing.region = graph_->findOrCreateOrRegion(
+            existing.region, region, getParentBasicBlock());
+      } else if (!existing.region) {
+        existing.region = region;
+      }
+      if (existing.provenance != provenance)
+        existing.provenance = ConditionRef::none();
       return;
     }
   }

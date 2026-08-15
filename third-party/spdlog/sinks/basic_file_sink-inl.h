@@ -14,13 +14,22 @@ namespace spdlog {
 namespace sinks {
 
 template <typename Mutex>
-SPDLOG_INLINE basic_file_sink<Mutex>::basic_file_sink(const filename_t &filename, bool truncate) {
+SPDLOG_INLINE basic_file_sink<Mutex>::basic_file_sink(const filename_t &filename,
+                                                      bool truncate,
+                                                      const file_event_handlers &event_handlers)
+    : file_helper_{event_handlers} {
     file_helper_.open(filename, truncate);
 }
 
 template <typename Mutex>
 SPDLOG_INLINE const filename_t &basic_file_sink<Mutex>::filename() const {
     return file_helper_.filename();
+}
+
+template <typename Mutex>
+SPDLOG_INLINE void basic_file_sink<Mutex>::truncate() {
+    std::lock_guard<Mutex> lock(base_sink<Mutex>::mutex_);
+    file_helper_.reopen(true);
 }
 
 template <typename Mutex>

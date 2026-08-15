@@ -44,9 +44,9 @@ public:
   void getAnalysisUsage(AnalysisUsage &AU) const override;
   bool runOnModule(Module &M) override;
 
-  /// Type-safe edge insertion that may insert a cast node when the parent
-  /// and child type sizes differ (ensures the value-flow graph remains
-  /// well-typed).
+  /// Dependency-preserving edge insertion. Inserts a legal cast when possible
+  /// and an opaque coercion node plus diagnostic for incompatible/unknown
+  /// types.
   static GuardedValueFlowNode *
   safeLink(GuardedValueFlowGraph &graph, GuardedValueFlowNode *parent,
            GuardedValueFlowNode *child, float confidence = 1.0f,

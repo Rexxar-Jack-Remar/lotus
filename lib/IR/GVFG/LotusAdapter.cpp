@@ -26,9 +26,9 @@
 ///      return nodes grouped by access-path depth, enabling coarse-grained
 ///      inlining when the detailed interface exceeds configured limits.
 ///
-/// The `safeLink` utility automatically inserts a cast-opcode node when the
-/// parent and child type sizes differ, keeping the value-flow graph
-/// well-typed.
+/// The `safeLink` utility inserts a cast-opcode node for legal conversions and
+/// an opaque coercion node otherwise, so imported dependencies are never
+/// silently erased.
 
 #include "IR/GVFG/LotusAdapter.h"
 
@@ -107,6 +107,15 @@ static GuardedValueFlowOpcodeNode::OpcodeKind chooseCastOpcode(Type *src_ty,
 static BasicBlock *getEntryBlockOrNull(GuardedValueFlowGraph &graph) {
   Function *base = graph.getBaseFunction();
   return (base && !base->empty()) ? &base->getEntryBlock() : nullptr;
+}
+
+static void recordAdapterWarning(GuardedValueFlowGraph &graph,
+                                 const Twine &message,
+                                 Instruction *instruction = nullptr,
+                                 BasicBlock *block = nullptr) {
+  graph.addDiagnostic({GuardedValueFlowGraph::Diagnostic::Origin::Adapter,
+                       GuardedValueFlowGraph::Diagnostic::Severity::Warning,
+                       message.str(), instruction, block});
 }
 
 static BasicBlock *getFunctionEntryBlockOrNull(Function *func) {
@@ -851,6 +860,33 @@ static void populateLoadMemoryNode(
                                                         : nullptr);
 }
 
+static void populateUnknownLoadMemoryNode(
+    GuardedValueFlowGraph &graph, GuardedValueFlowNode *load_mem_node,
+    LoadInst *load) {
+  load_mem_node->clearChildren();
+  load_mem_node->clearMatchingRegions();
+
+  auto *unknown = graph.createNode<GuardedValueFlowNode>(
+      GuardedValueFlowNode::Kind::Unknown, load_mem_node->getType(), &graph,
+      load->getParent(), nullptr, load);
+  unknown->setDescription("memory.unknown");
+  auto *producer_mem = graph.createAnonymousStoreMemoryNode(
+      load_mem_node->getType(), load->getParent(), load,
+      "store.mem.unknown");
+  (void)LotusGuardedValueFlowAdapterPass::safeLink(graph, producer_mem,
+                                                   unknown);
+  auto *linked = LotusGuardedValueFlowAdapterPass::safeLink(
+      graph, load_mem_node, producer_mem);
+  if (linked)
+    load_mem_node->addMatchingRegion(linked, graph.getAlwaysTrueRegion());
+
+  recordAdapterWarning(
+      graph,
+      Twine("No reaching producer was available for load; using an unknown ") +
+          "memory producer",
+      load, load->getParent());
+}
+
 static mem_value_t importSummaryValues(IntraLotusAA &pta, Instruction *callsite,
                                        Function *callee,
                                        const mem_value_t &summary_values) {
@@ -996,8 +1032,12 @@ static void materializeLoadParity(GuardedValueFlowGraph &graph,
     pta.collectGuardedValueFlowLoadValues(load, load_values);
     if (load_values.empty())
       collectExactPointerStoreFallbacks(*pta.getFunc(), load, load_values);
-    populateLoadMemoryNode(graph, load_mem_node, load_values, load->getParent(),
-                           builder);
+    if (!load_values.empty()) {
+      populateLoadMemoryNode(graph, load_mem_node, load_values,
+                             load->getParent(), builder);
+    }
+    if (load_mem_node->children().empty())
+      populateUnknownLoadMemoryNode(graph, load_mem_node, load);
   }
 }
 
@@ -1499,10 +1539,8 @@ GuardedValueFlowNode *LotusGuardedValueFlowAdapterPass::safeLink(
 
   Type *src_ty = child->getType();
   Type *dst_ty = parent->getType();
-  if (!src_ty || !dst_ty)
-    return nullptr;
 
-  if (src_ty == dst_ty) {
+  if (src_ty && dst_ty && src_ty == dst_ty) {
     parent->addChild(child, confidence, condition);
     return child;
   }
@@ -1511,11 +1549,23 @@ GuardedValueFlowNode *LotusGuardedValueFlowAdapterPass::safeLink(
   // type mismatch introduced by imported memory or interface facts.
   auto opcode_kind = chooseCastOpcode(src_ty, dst_ty);
   if (opcode_kind == GuardedValueFlowOpcodeNode::OpcodeKind::Invalid) {
-    LLVM_DEBUG(dbgs() << "[gvfg-adapter] Unable to cast-link "
-                      << parent->getDescription() << " <- "
-                      << child->getDescription() << " in "
-                      << graph.getBaseFunction()->getName() << "\n");
-    return nullptr;
+    BasicBlock *coercion_block =
+        parent->getParentBasicBlock()
+            ? parent->getParentBasicBlock()
+            : (child->getParentBasicBlock() ? child->getParentBasicBlock()
+                                            : getEntryBlockOrNull(graph));
+    auto *coercion = graph.createNode<GuardedValueFlowNode>(
+        GuardedValueFlowNode::Kind::Unknown, dst_ty, &graph, coercion_block,
+        nullptr, parent->getDebugInstruction());
+    coercion->setDescription("adapter.coercion");
+    coercion->addChild(child);
+    parent->addChild(coercion, confidence, condition);
+    recordAdapterWarning(
+        graph,
+        Twine("Preserved dependency through an opaque adapter coercion: ") +
+            parent->getDescription() + " <- " + child->getDescription(),
+        parent->getDebugInstruction(), coercion_block);
+    return coercion;
   }
 
   BasicBlock *cast_block =

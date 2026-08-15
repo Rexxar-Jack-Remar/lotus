@@ -126,7 +126,7 @@ TEST_F(GuardedValueFlowSerializerTest, EmitsTextAndDotForAdaptedGraph) {
 }
 
 TEST_F(GuardedValueFlowSerializerTest,
-       RejectsUnsupportedInstructionsByWithholdingGraphs) {
+       SerializesDegradedGraphsForUnsupportedInstructions) {
   const char *source = R"(
     define i32 @test({i32, i32} %pair) {
     entry:
@@ -142,7 +142,9 @@ TEST_F(GuardedValueFlowSerializerTest,
   ASSERT_NE(F, nullptr);
 
   auto pipeline = runBuilder(*module);
-  EXPECT_FALSE(pipeline.builder->hasGraphFor(*F));
+  ASSERT_TRUE(pipeline.builder->hasGraphFor(*F));
+  GuardedValueFlowGraph &graph = pipeline.builder->getGraph(*F);
+  EXPECT_TRUE(graph.isDegraded());
 }
 
 } // namespace
