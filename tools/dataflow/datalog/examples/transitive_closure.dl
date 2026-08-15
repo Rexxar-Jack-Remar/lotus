@@ -1,0 +1,14 @@
+.decl edge(src: u64, dst: u64)
+.decl path(src: u64, dst: u64)
+.decl reaches_four()
+
+edge(1, 2).
+edge(1, 3).
+edge(2, 4).
+
+path(X, Y) :- edge(X, Y).
+path(X, Z) :- path(X, Y), path(Y, Z).
+reaches_four :- path(1, 4).
+
+.output path
+.output reaches_four

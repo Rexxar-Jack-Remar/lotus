@@ -2,15 +2,35 @@
 
 This document describes the current semantic contract and architecture of Lotus's
 native Datalog engine. It evolves together with the implementation.
-The public API is a strongly typed C++17 API. It is not a parser or a compatibility
-layer for Ascent's Rust macro syntax.
+The primary embedding API is strongly typed C++17. Reusable JSON, native Datalog,
+and finite Z3 fixedpoint frontends live in `lib/Dataflow/Datalog/Frontend` and are
+exposed by `Dataflow/Datalog/Frontend/Frontend.h`; all lower to the same Semantic
+IR. They are not compatibility layers for Ascent's Rust macro syntax.
+
+The frontend implementation is split by language (`Frontend/Json.cpp`,
+`Frontend/Lotus.cpp`, and `Frontend/Z3.cpp`), with format dispatch in
+`Frontend/Dispatch.cpp`. Every parser produces the data-only, source-aware
+`FrontendIR`; `Frontend/Lowering.cpp` validates it and constructs
+`SemanticProgram` directly. There is no JSON
+serialization/parsing round trip and no frontend class named `Program`.
+`SourceUnit` lets embedders compose schema, fact, and rule sources in any
+declaration order. Native `.include` directives use an injected `SourceResolver`,
+keeping filesystem and path policy outside the engine library.
+
+Public headers and implementation directories mirror each other for `Core`,
+`Frontend`, `Runtime`, and `Semantic`. Analyzer and planner implementation files
+live under `Core` because they implement `Program::compile()` and expose no
+separate public API. The two unavoidable cross-translation-unit private
+contracts are colocated with their consumers as `EngineInternal.h` and
+`Frontend/FrontendInternal.h`; there is no separate private-header directory.
 
 ## Architecture boundary
 
 Every program crosses the following boundary before it executes:
 
 ```text
-typed C++ API -> semantic IR -> analyzer -> physical RulePlan -> runtime
+typed C++ API ------------------------------> semantic IR -> analyzer -> RulePlan
+JSON / native Datalog / Z3 -> FrontendIR -----^                         -> runtime
 ```
 
 The template API only constructs typed terms and relations. Rules are immediately
@@ -25,7 +45,15 @@ lookup masks, and preprocessed head terms.
 
 A relation is a set of tuples. Inserting an existing tuple has no effect. Column
 types and arity are fixed when the relation is created. Values must support
-`operator==` and `std::hash`.
+`operator==` and `std::hash`. Equality must be an equivalence relation, equal
+values must have equal hashes, and both operations must be pure and non-throwing.
+Floating-point NaN values are rejected in relation keys because ordinary C++
+floating equality is not reflexive for NaN. Every column of a set relation is a
+key column; every column except the final lattice value is a key column in a
+lattice relation.
+
+Relations may have zero columns. Such a nullary predicate contains either no tuple
+or the single empty tuple and is useful for Boolean query results.
 
 Facts inserted through `Relation::insert` are base facts. Solver output is stored
 separately as derived state. A later `run()` after new base facts clears derived state
@@ -56,12 +84,23 @@ binding. A `where(...)` condition succeeds only when its boolean expression is t
 Expression terms are allowed in rule heads. Body relation terms are variables,
 wildcards, or constants; computed body constraints use `where(...)`.
 
+Native `Expr<T>` arithmetic has the semantics of the corresponding C++ operator,
+including the caller's responsibility not to trigger undefined signed arithmetic.
+The versioned JSON Semantic IR instead uses checked integer arithmetic and rejects
+division by zero, remainder by zero, integer overflow, and non-finite floating
+inputs or results with a structured evaluation error.
+
 ### Recursion
 
 Positive relation dependencies are condensed into strongly connected components.
 Acyclic SCCs execute once. Recursive SCCs execute to a least fixed point using
 `Total`, `Delta`, and `New` epochs. During an epoch, `Total` is immutable; facts are
 deduplicated and merged only at the epoch boundary.
+
+The engine does not guarantee that every valid program terminates. In particular,
+a recursive rule may generate an unbounded ascending chain of facts or lattice
+values. The v1 contract provides cooperative cancellation but does not yet define
+counter-based execution limits.
 
 For a recursive rule, the executor creates one semi-naive variant per recursive
 body atom. That occurrence reads `Delta`; earlier recursive occurrences read the
@@ -155,6 +194,18 @@ during a run fail with `std::logic_error`; load or update base facts between run
 Read-only relation access should likewise be coordinated by the embedding
 application.
 
+`CompiledProgram::run()` returns `RunStatus::Completed` or
+`RunStatus::Cancelled`. Cancellation is cooperative and is requested through the
+`CancellationToken` in `ExecutionOptions`. If a run is cancelled or an expression,
+reducer, or lattice operation throws, all derived state in the run's dirty SCC
+closure is discarded while base facts and unaffected stable SCCs remain visible.
+Exceptions are rethrown after cleanup. The same compiled program may then be run
+again safely.
+
+A compiled program is tied to the Context schema present at `compile()` time.
+Adding a relation or variable after compilation requires recompilation before the
+program may be run again. Injected schedulers must report at least one worker.
+
 Rule planning observes relation statistics at `compile()` time. For best join
 orders, load representative base facts before compiling; a later rerun preserves
 the compiled physical order even if cardinalities have changed substantially.
@@ -183,13 +234,17 @@ the compiled physical order even if cardinalities have changed substantially.
 | Negation | implemented | stratified anti-join |
 | Join planning | implemented | greedy observed-distinct cost estimate |
 | Parallel execution | implemented | BSP rules, reducers, coalesce, and merge |
+| Cooperative cancellation | implemented | dirty derived state is discarded on cancellation |
 | Runtime tracing | implemented | SCC, rule, and delta traces |
 
 ## CLI and external validation contract
 
-`lotus-datalog` consumes a JSON Semantic IR rather than Rust syntax. It emits
-canonical, sorted JSON rows plus execution statistics, so later differential and
-performance testing can be implemented as ordinary Python scripts without a
-dedicated C++ benchmark or `tests/differential` target. `lotus-datalog validate`
-performs parsing, type checking, grounding, dependency analysis, stratification,
-SCC construction, and planning without executing the fixed point.
+`lotus-datalog` consumes JSON Semantic IR version 1 rather than Rust syntax. Every
+program and every result carries `"schema_version": 1`. It emits canonical, sorted
+JSON rows plus execution statistics, so later differential and performance testing
+can be implemented as ordinary Python scripts without a dedicated C++ benchmark or
+`tests/differential` target. CLI failures use a machine-readable error envelope;
+portable arithmetic failures have category `evaluation` and a stable error code.
+`lotus-datalog validate` performs parsing, type checking, grounding, dependency
+analysis, stratification, SCC construction, and planning without executing the
+fixed point.

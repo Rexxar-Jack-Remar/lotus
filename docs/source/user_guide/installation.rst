@@ -20,9 +20,8 @@ Building Lotus
 
    git clone https://github.com/ZJU-PL/lotus
    cd lotus
-   mkdir build && cd build
-   cmake ..
-   make -j$(nproc)
+   cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Debug
+   cmake --build build -j
 
 .. note::
 
@@ -39,7 +38,7 @@ Options use a consistent ``LOTUS_*`` naming scheme.
 
 * ``-DLLVM_BUILD_PATH=/path/to/llvm/lib/cmake/llvm``: Only needed if CMake cannot
   find a supported LLVM automatically.
-* ``-DLOTUS_BUILD_TESTS=OFF``: Disable building tests (default: ON)
+* ``-DLOTUS_BUILD_TESTS=ON``: Build unit tests (default: OFF)
 * ``-DLOTUS_BUILD_EXAMPLES=ON``: Build examples (default: OFF)
 
 **Optional verifier integrations** (all OFF by default — opt-in due to heavyweight dependencies):
@@ -78,8 +77,13 @@ Typical configurations:
 
 .. code-block:: bash
 
-   # Lean local build
-   cmake -S . -B build -DLOTUS_BUILD_TESTS=OFF
+   # Lean local build (the defaults exclude tests and CLAM)
+   cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Debug
+
+   # Full build, including tests and CLAM
+   cmake -S . -B build-full -G Ninja \
+     -DLOTUS_BUILD_TESTS=ON \
+     -DLOTUS_ENABLE_CLAM=ON
 
    # Enable optional tool families
    cmake -S . -B build \

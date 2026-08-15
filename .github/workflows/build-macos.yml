@@ -35,6 +35,8 @@ jobs:
             -DLLVM_BUILD_PATH="/opt/homebrew/opt/llvm@14/lib/cmake/llvm" \
             -DZ3_DIR="/usr/local" \
             -DLOTUS_ENABLE_SEAHORN=OFF \
+            -DLOTUS_BUILD_TESTS=ON \
+            -DLOTUS_ENABLE_CLAM=ON \
             ..
           make -j$(nproc || sysctl -n hw.ncpu)
           make install

@@ -1,6 +1,5 @@
-#include "Dataflow/Datalog/ContextInternal.h"
-#include "Dataflow/Datalog/Internal.h"
-#include "Dataflow/Datalog/Program.h"
+#include "Dataflow/Datalog/EngineInternal.h"
+#include "Dataflow/Datalog/Core/Program.h"
 
 #include <algorithm>
 #include <any>
@@ -34,6 +33,8 @@ using internal::Row;
 using internal::RulePlan;
 
 struct CompiledProgram::Impl {
+  struct CancelledRun {};
+
   std::shared_ptr<Context::Impl> context;
   ExecutionPlan plan;
   ExecutionStats stats;
@@ -41,6 +42,7 @@ struct CompiledProgram::Impl {
     const ExecutionOptions &options;
   };
   ExecutionContext *execution = nullptr;
+  std::uint64_t compiled_schema_generation = 0;
   std::vector<std::size_t> completed_base_versions;
   bool has_completed_run = false;
   std::mutex trace_mutex;
@@ -63,6 +65,11 @@ struct CompiledProgram::Impl {
     if (!execution)
       throw std::logic_error("Datalog execution state is not active");
     return execution->options;
+  }
+
+  void cancellationPoint() const {
+    if (options().cancellation.isCancelled())
+      throw CancelledRun{};
   }
 
   RelationStorage &relation(RelationId id) {
@@ -103,6 +110,7 @@ struct CompiledProgram::Impl {
     RelationId relation_id = 0;
     const DeltaRows *delta_rows = nullptr;
     const std::vector<Row> *direct_rows = nullptr;
+    std::optional<KeyView> direct_key;
     std::size_t begin = 0;
     std::size_t end = 0;
 
@@ -234,6 +242,7 @@ struct CompiledProgram::Impl {
       AggregateForEach for_each = [&](const AggregateConsumer &consumer) {
         source_relation.forEachMatching(
             key, evaluation_stats, [&](const Row &row) {
+              cancellationPoint();
               matchRow(source, row, binding, [&] {
                 std::any value = aggregate.projection.evaluate(binding);
                 consumer(value);
@@ -275,6 +284,7 @@ struct CompiledProgram::Impl {
       const std::size_t end = matching_rows * (chunk + 1) / chunk_count;
       source_relation.forEachMatchingSlice(
           key, begin, end, [&](const Row &row) {
+            cancellationPoint();
             matchRow(source, row, chunk_binding, [&] {
               reducers[chunk].add(states[chunk],
                                   aggregate.projection.evaluate(chunk_binding));
@@ -320,6 +330,7 @@ struct CompiledProgram::Impl {
     traceRule(rule_index, delta_item);
     std::function<void(std::size_t)> evaluate_item =
         [&](std::size_t item_index) {
+          cancellationPoint();
           if (item_index == rule.body.size()) {
             Row row;
             row.reserve(rule.head.size());
@@ -346,6 +357,7 @@ struct CompiledProgram::Impl {
             const AtomPlan &atom = item.atom;
             bool found = false;
             auto test_row = [&](const Row &row) {
+              cancellationPoint();
               if (found)
                 return;
               matchRow(atom, row, binding, [&] { found = true; });
@@ -375,11 +387,21 @@ struct CompiledProgram::Impl {
 
           const AtomPlan &atom = item.atom;
           auto continue_with = [&](const Row &row) {
+            cancellationPoint();
             matchRow(atom, row, binding,
                      [&] { evaluate_item(item_index + 1); });
           };
 
           if (delta_item && *delta_item == item_index) {
+            if (delta->direct_key) {
+              relation(delta->relation_id)
+                  .forEachMatchingSlice(*delta->direct_key, delta->begin,
+                                        delta->end, [&](const Row &row) {
+                                          ++evaluation_stats.tuples_scanned;
+                                          continue_with(row);
+                                        });
+              return;
+            }
             for (std::size_t row_index = delta->begin; row_index < delta->end;
                  ++row_index) {
               ++evaluation_stats.tuples_scanned;
@@ -444,8 +466,10 @@ struct CompiledProgram::Impl {
   }
 
   DeltaMap mergeCandidates(CandidateMap candidates, Scheduler &scheduler) {
+    cancellationPoint();
     DeltaMap inserted;
     for (auto &[relation_id, rows] : candidates) {
+      cancellationPoint();
       RelationStorage &storage = relation(relation_id);
       std::vector<Row> coalesced =
           coalesceCandidates(storage, std::move(rows), scheduler);
@@ -461,6 +485,7 @@ struct CompiledProgram::Impl {
         inserted.emplace(relation_id, std::move(delta));
       }
     }
+    cancellationPoint();
     return inserted;
   }
 
@@ -502,6 +527,29 @@ struct CompiledProgram::Impl {
       }
 
       const AtomPlan &driver = rule.body[*driver_item].atom;
+      const bool can_use_driver_lookup = std::none_of(
+          driver.terms.begin(), driver.terms.end(), [](const auto &term) {
+            return term.use_in_lookup && term.is_variable;
+          });
+      if (can_use_driver_lookup) {
+        const KeyView key = lookupKey(driver, binding);
+        const std::size_t matching_rows =
+            relation(driver.relation).matchingCandidateCount(key, stats);
+        if (matching_rows == 0)
+          continue;
+        const std::size_t grain =
+            scheduler.workerCount() > 1
+                ? std::max<std::size_t>(1, options().parallel_grain_size)
+                : matching_rows;
+        for (std::size_t begin = 0; begin < matching_rows; begin += grain) {
+          tasks.push_back(
+              {rule_index, driver_item,
+               DeltaView{driver.relation, nullptr, nullptr, key, begin,
+                         std::min(matching_rows, begin + grain)}});
+        }
+        continue;
+      }
+
       const std::vector<Row> &rows = relation(driver.relation).rows();
       if (rows.empty())
         continue;
@@ -510,9 +558,10 @@ struct CompiledProgram::Impl {
               ? std::max<std::size_t>(1, options().parallel_grain_size)
               : rows.size();
       for (std::size_t begin = 0; begin < rows.size(); begin += grain) {
-        tasks.push_back({rule_index, driver_item,
-                         DeltaView{driver.relation, nullptr, &rows, begin,
-                                   std::min(rows.size(), begin + grain)}});
+        tasks.push_back(
+            {rule_index, driver_item,
+             DeltaView{driver.relation, nullptr, &rows, std::nullopt, begin,
+                       std::min(rows.size(), begin + grain)}});
       }
     }
 
@@ -595,6 +644,7 @@ struct CompiledProgram::Impl {
 
     std::size_t iteration = 0;
     while (hasRows(current_delta)) {
+      cancellationPoint();
       stats.peak_delta = std::max(stats.peak_delta, deltaSize(current_delta));
       traceDelta(iteration, current_delta);
       ++stats.fixpoint_iterations;
@@ -603,10 +653,12 @@ struct CompiledProgram::Impl {
       for (const auto &[relation_id, rows] : current_delta) {
         auto &hashes = delta_hashes[relation_id];
         hashes.reserve(rows.size());
-        for (std::size_t row_index = 0; row_index < rows.size(); ++row_index)
+        for (std::size_t row_index = 0; row_index < rows.size(); ++row_index) {
+          cancellationPoint();
           hashes[relation(relation_id)
                      .candidateHash(rows.row(relation(relation_id), row_index))]
               .push_back(row_index);
+        }
       }
       std::vector<EvaluationTask> tasks;
       for (std::size_t rule_index : scc.rules) {
@@ -629,7 +681,7 @@ struct CompiledProgram::Impl {
             tasks.push_back(
                 {rule_index, item_index,
                  DeltaView{item.atom.relation, &delta_it->second, nullptr,
-                           begin,
+                           std::nullopt, begin,
                            std::min(delta_it->second.size(), begin + grain)}});
           }
         }
@@ -669,9 +721,18 @@ struct CompiledProgram::Impl {
     traceDelta(iteration, current_delta);
   }
 
-  void run(const ExecutionOptions &options) {
+  RunStatus run(const ExecutionOptions &options) {
     ExecutionContext execution_context{options};
     ExecutionScope execution_scope(*this, execution_context);
+    if (context->schema_generation != compiled_schema_generation) {
+      throw std::logic_error(
+          "Datalog Context schema changed after compilation; recompile the "
+          "program");
+    }
+    if (options.scheduler && options.scheduler->workerCount() == 0) {
+      throw std::invalid_argument(
+          "Datalog Scheduler must report at least one worker");
+    }
     stats = {};
     stats.planned_reorders = plan.planned_reorders;
     stats.scc_count = plan.sccs.size();
@@ -705,7 +766,8 @@ struct CompiledProgram::Impl {
     if (std::none_of(dirty_scc.begin(), dirty_scc.end(),
                      [](bool dirty) { return dirty; })) {
       collectStorageStats();
-      return;
+      return options.cancellation.isCancelled() ? RunStatus::Cancelled
+                                                : RunStatus::Completed;
     }
 
     // Facts inserted through Relation::insert are base facts.  Rebuild every
@@ -719,35 +781,60 @@ struct CompiledProgram::Impl {
         relation(relation_id).discardDerived();
     }
 
-    Binding binding(plan.variable_count);
-    SerialScheduler serial_scheduler;
-    std::unique_ptr<ThreadScheduler> thread_scheduler;
-    Scheduler *scheduler = options.scheduler;
-    if (!scheduler && options.worker_count > 1) {
-      thread_scheduler =
-          std::make_unique<ThreadScheduler>(options.worker_count);
-      scheduler = thread_scheduler.get();
-    }
-    if (!scheduler)
-      scheduler = &serial_scheduler;
-    for (std::size_t scc_index = 0; scc_index < plan.sccs.size(); ++scc_index) {
-      if (!dirty_scc[scc_index])
-        continue;
-      const PlannedSCC &scc = plan.sccs[scc_index];
-      if (options.trace_scc) {
-        std::lock_guard<std::mutex> lock(trace_mutex);
-        traceStream() << "SCC " << scc_index << " stratum=" << scc.stratum
-                      << " recursive=" << (scc.recursive ? "yes" : "no")
-                      << " relations=";
-        for (RelationId relation_id : scc.relations)
-          traceStream() << relation(relation_id).definition().name << ' ';
-        traceStream() << '\n';
+    auto discard_dirty_derived = [&] {
+      for (std::size_t scc_index = 0; scc_index < plan.sccs.size();
+           ++scc_index) {
+        if (!dirty_scc[scc_index])
+          continue;
+        for (RelationId relation_id : plan.sccs[scc_index].relations)
+          relation(relation_id).discardDerived();
       }
-      if (scc.recursive)
-        runRecursive(scc, binding, *scheduler);
-      else
-        runNonRecursive(scc, binding, *scheduler);
+    };
+
+    try {
+      cancellationPoint();
+      Binding binding(plan.variable_count);
+      SerialScheduler serial_scheduler;
+      std::unique_ptr<ThreadScheduler> thread_scheduler;
+      Scheduler *scheduler = options.scheduler;
+      if (!scheduler && options.worker_count > 1) {
+        thread_scheduler =
+            std::make_unique<ThreadScheduler>(options.worker_count);
+        scheduler = thread_scheduler.get();
+      }
+      if (!scheduler)
+        scheduler = &serial_scheduler;
+      for (std::size_t scc_index = 0; scc_index < plan.sccs.size();
+           ++scc_index) {
+        cancellationPoint();
+        if (!dirty_scc[scc_index])
+          continue;
+        const PlannedSCC &scc = plan.sccs[scc_index];
+        if (options.trace_scc) {
+          std::lock_guard<std::mutex> lock(trace_mutex);
+          traceStream() << "SCC " << scc_index << " stratum=" << scc.stratum
+                        << " recursive=" << (scc.recursive ? "yes" : "no")
+                        << " relations=";
+          for (RelationId relation_id : scc.relations)
+            traceStream() << relation(relation_id).definition().name << ' ';
+          traceStream() << '\n';
+        }
+        if (scc.recursive)
+          runRecursive(scc, binding, *scheduler);
+        else
+          runNonRecursive(scc, binding, *scheduler);
+      }
+      cancellationPoint();
+    } catch (const CancelledRun &) {
+      discard_dirty_derived();
+      collectStorageStats();
+      return RunStatus::Cancelled;
+    } catch (...) {
+      discard_dirty_derived();
+      collectStorageStats();
+      throw;
     }
+
     completed_base_versions.clear();
     completed_base_versions.reserve(context->relations.size());
     for (const auto &storage : context->relations) {
@@ -755,6 +842,7 @@ struct CompiledProgram::Impl {
     }
     collectStorageStats();
     has_completed_run = true;
+    return RunStatus::Completed;
   }
 };
 
@@ -791,6 +879,7 @@ CompiledProgram Program::compile() const {
   }
   auto impl = std::make_unique<CompiledProgram::Impl>();
   impl->context = context_->impl_;
+  impl->compiled_schema_generation = context_->impl_->schema_generation;
   impl->plan = std::move(plan);
   impl->plan.relation_scc.assign(context_->impl_->relations.size(), 0);
   for (std::size_t scc_index = 0; scc_index < impl->plan.sccs.size();
@@ -820,10 +909,10 @@ CompiledProgram &
 CompiledProgram::operator=(CompiledProgram &&) noexcept = default;
 CompiledProgram::~CompiledProgram() = default;
 
-void CompiledProgram::run() { impl_->run(ExecutionOptions{}); }
+RunStatus CompiledProgram::run() { return impl_->run(ExecutionOptions{}); }
 
-void CompiledProgram::run(const ExecutionOptions &options) {
-  impl_->run(options);
+RunStatus CompiledProgram::run(const ExecutionOptions &options) {
+  return impl_->run(options);
 }
 
 const ExecutionStats &CompiledProgram::stats() const { return impl_->stats; }

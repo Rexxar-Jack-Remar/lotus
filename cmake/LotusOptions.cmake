@@ -1,9 +1,9 @@
 # Core build surfaces
 option(LOTUS_BUILD_EXAMPLES "Build examples" OFF)
-option(LOTUS_BUILD_TESTS "Build tests" ON)
+option(LOTUS_BUILD_TESTS "Build tests" OFF)
 
 # Optional analysis and verification integrations.
-option(LOTUS_ENABLE_CLAM "Enable CLAM abstract interpretation framework" ON)
+option(LOTUS_ENABLE_CLAM "Enable CLAM abstract interpretation framework" OFF)
 option(LOTUS_ENABLE_SEAHORN "Enable SeaHorn" OFF)
 option(LOTUS_ENABLE_SMACK
        "Enable SMACK LLVM-to-Boogie verifier frontend" OFF)

@@ -12,9 +12,8 @@
 ```bash
 git clone https://github.com/ZJU-PL/lotus
 cd lotus
-mkdir build && cd build
-cmake .. -DCMAKE_BUILD_TYPE=Debug
-make -j$(nproc)
+cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Debug
+cmake --build build -j
 ```
 
 Run tests:
@@ -31,9 +30,9 @@ Lotus exposes its build options through `cmake/LotusOptions.cmake` with a consis
 
 | Option | Default | Description |
 |--------|---------|-------------|
-| `LOTUS_BUILD_TESTS` | ON | Build unit tests |
+| `LOTUS_BUILD_TESTS` | OFF | Build unit tests |
 | `LOTUS_BUILD_EXAMPLES` | OFF | Build examples |
-| `LOTUS_ENABLE_CLAM` | ON | CLAM abstract interpretation |
+| `LOTUS_ENABLE_CLAM` | OFF | CLAM abstract interpretation |
 | `LOTUS_ENABLE_SEAHORN` | OFF | SeaHorn verification |
 | `LOTUS_ENABLE_SMACK` | OFF | SMACK verification |
 | `LOTUS_ENABLE_HORN_ICE` | OFF | Horn-ICE tools |
@@ -47,8 +46,12 @@ Lotus exposes its build options through `cmake/LotusOptions.cmake` with a consis
 ### Example Configurations
 
 ```bash
-# Minimal build (no tests, no CLAM)
-cmake -S . -B build -DLOTUS_BUILD_TESTS=OFF -DLOTUS_ENABLE_CLAM=OFF
+# Default lean development build (no tests or CLAM)
+cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Debug
+
+# Full build, including tests and CLAM
+cmake -S . -B build-full -G Ninja \
+  -DLOTUS_BUILD_TESTS=ON -DLOTUS_ENABLE_CLAM=ON
 
 # Enable dynamic alias analysis
 cmake -S . -B build -DLOTUS_ENABLE_DYNAA=ON

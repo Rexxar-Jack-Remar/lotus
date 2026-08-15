@@ -4,4 +4,5 @@ add_lotus_test_suite(datalog_tests
     SemanticTest.cpp
     ParallelTest.cpp
     ExtensionTest.cpp
-  LINK_LIBS LotusDatalog)
+    FrontendTest.cpp
+  LINK_LIBS LotusDatalogFrontend)

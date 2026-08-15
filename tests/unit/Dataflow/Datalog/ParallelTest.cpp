@@ -93,6 +93,62 @@ TEST(DatalogTest, SupportsInjectedScheduler) {
   EXPECT_GT(scheduler.calls, 0U);
 }
 
+TEST(DatalogTest, RejectsZeroWorkerScheduler) {
+  class ZeroWorkerScheduler final : public Scheduler {
+  public:
+    std::size_t workerCount() const override { return 0; }
+    void parallelFor(std::size_t,
+                     const std::function<void(std::size_t)> &) override {
+      ADD_FAILURE() << "zero-worker scheduler must not be invoked";
+    }
+  } scheduler;
+
+  context ctx;
+  auto input = ctx.relation<int>("input");
+  auto output = ctx.relation<int>("output");
+  auto x = ctx.var<int>("x");
+  input.insert(1);
+  program p(ctx);
+  p.rule(output(x), input(x));
+  auto compiled = p.compile();
+
+  ExecutionOptions options;
+  options.scheduler = &scheduler;
+  EXPECT_THROW(compiled.run(options), std::invalid_argument);
+  EXPECT_TRUE(output.rows().empty());
+}
+
+TEST(DatalogTest, CancellationDiscardsDerivedStateAndAllowsRerun) {
+  context ctx;
+  auto input = ctx.relation<int>("input");
+  auto output = ctx.relation<int>("output");
+  auto x = ctx.var<int>("x");
+  lotus::CancellationSource cancellation;
+  for (int value = 1; value <= 16; ++value)
+    input.insert(value);
+
+  program p(ctx);
+  p.rule(output(lift(
+             [&](int value) {
+               cancellation.cancel();
+               return value;
+             },
+             x)),
+         input(x));
+  auto compiled = p.compile();
+
+  ExecutionOptions options;
+  options.cancellation = cancellation.token();
+  options.worker_count = 4;
+  options.parallel_grain_size = 1;
+  EXPECT_EQ(compiled.run(options), RunStatus::Cancelled);
+  EXPECT_TRUE(output.rows().empty());
+
+  EXPECT_EQ(compiled.run(), RunStatus::Completed);
+  EXPECT_TRUE(output.contains(1));
+  EXPECT_TRUE(output.contains(16));
+}
+
 TEST(DatalogTest, EmitsSccRuleAndDeltaTrace) {
   context ctx;
   auto edge = ctx.relation<int, int>("edge");

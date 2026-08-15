@@ -1,4 +1,4 @@
-#include "Dataflow/Datalog/Scheduler.h"
+#include "Dataflow/Datalog/Runtime/Scheduler.h"
 
 #include <algorithm>
 #include <atomic>

@@ -142,6 +142,24 @@ TEST(DatalogTest, ParallelizesNonRecursiveRuleEvaluation) {
   EXPECT_GT(compiled.stats().parallel_rule_tasks, 1U);
 }
 
+TEST(DatalogTest, NonRecursiveConstantDriverUsesItsPlannedIndex) {
+  context ctx;
+  auto input = ctx.relation<int, int>("input");
+  auto output = ctx.relation<int>("output");
+  auto value = ctx.var<int>("value");
+  for (int key = 0; key < 1000; ++key)
+    input.insert(key, key + 1);
+
+  program p(ctx);
+  p.rule(output(value), input(777, value));
+  auto compiled = p.compile();
+  compiled.run();
+
+  EXPECT_TRUE(output.contains(778));
+  EXPECT_GT(compiled.stats().index_lookups, 0U);
+  EXPECT_LT(compiled.stats().tuples_scanned, 10U);
+}
+
 TEST(DatalogTest, ParallelizesReducibleAggregateStates) {
   context ctx;
   auto input = ctx.relation<int>("input");
@@ -426,6 +444,38 @@ TEST(DatalogTest, RunStateIsResetAfterExpressionFailure) {
   auto compiled = p.compile();
   EXPECT_THROW(compiled.run(), std::runtime_error);
   EXPECT_NO_THROW(compiled.run());
+  EXPECT_TRUE(output.contains(1));
+}
+
+TEST(DatalogTest, FailedRunRemovesPartialDerivedStateFromDirtySccs) {
+  context ctx;
+  auto input = ctx.relation<int>("input");
+  auto intermediate = ctx.relation<int>("intermediate");
+  auto output = ctx.relation<int>("output");
+  auto x = ctx.var<int>("x");
+  bool fail = true;
+  input.insert(1);
+
+  program p(ctx);
+  p.rule(intermediate(x), input(x));
+  p.rule(output(lift(
+             [&](int value) {
+               if (fail)
+                 throw std::runtime_error("expected expression failure");
+               return value;
+             },
+             x)),
+         intermediate(x));
+  auto compiled = p.compile();
+
+  EXPECT_THROW(compiled.run(), std::runtime_error);
+  EXPECT_TRUE(intermediate.rows().empty());
+  EXPECT_TRUE(output.rows().empty());
+  EXPECT_TRUE(input.contains(1));
+
+  fail = false;
+  EXPECT_EQ(compiled.run(), RunStatus::Completed);
+  EXPECT_TRUE(intermediate.contains(1));
   EXPECT_TRUE(output.contains(1));
 }
 

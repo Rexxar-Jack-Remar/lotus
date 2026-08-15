@@ -1,12 +1,12 @@
 add_library(LotusDatalog STATIC
-  Context.cpp
-  Rule.cpp
-  SemanticProgram.cpp
-  Analysis/Analyzer.cpp
-  Planner/Planner.cpp
+  Core/Context.cpp
+  Core/Rule.cpp
+  Core/Analyzer.cpp
+  Core/Planner.cpp
   Runtime/Executor.cpp
   Runtime/RelationStore.cpp
-  Runtime/Scheduler.cpp)
+  Runtime/Scheduler.cpp
+  Semantic/SemanticProgram.cpp)
 
 target_include_directories(LotusDatalog PUBLIC
   ${PROJECT_SOURCE_DIR}/include)
@@ -17,3 +17,21 @@ set_target_properties(LotusDatalog PROPERTIES
   CXX_STANDARD 17
   CXX_STANDARD_REQUIRED ON
   CXX_EXTENSIONS OFF)
+
+llvm_map_components_to_libnames(DATALOG_FRONTEND_LLVM_LIBS Support)
+
+add_library(LotusDatalogFrontend STATIC
+  Frontend/Dispatch.cpp
+  Frontend/Json.cpp
+  Frontend/Lowering.cpp
+  Frontend/Lotus.cpp
+  Frontend/Z3.cpp)
+
+target_link_libraries(LotusDatalogFrontend PUBLIC
+  LotusDatalog
+  ${DATALOG_FRONTEND_LLVM_LIBS})
+
+target_include_directories(LotusDatalogFrontend PUBLIC
+  ${PROJECT_SOURCE_DIR}/include)
+target_include_directories(LotusDatalogFrontend PRIVATE
+  ${PROJECT_SOURCE_DIR}/lib)

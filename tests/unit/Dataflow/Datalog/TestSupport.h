@@ -1,6 +1,6 @@
 #pragma once
 
-#include "Dataflow/Datalog/Datalog.h"
+#include "Dataflow/Datalog/Core/Program.h"
 
 #include <set>
 #include <string>

@@ -1,5 +1,6 @@
 #include "TestSupport.h"
 
+#include <limits>
 #include <memory>
 
 using namespace lotus::datalog;
@@ -400,6 +401,24 @@ TEST(DatalogTest, IncorporatesNewExtensionalFactsOnLaterRun) {
   EXPECT_TRUE(path.contains(1, 3));
 }
 
+TEST(DatalogTest, RejectsRunningAfterContextSchemaChanges) {
+  context ctx;
+  auto input = ctx.relation<int>("input");
+  auto output = ctx.relation<int>("output");
+  auto x = ctx.var<int>("x");
+  input.insert(1);
+
+  program p(ctx);
+  p.rule(output(x), input(x));
+  auto compiled = p.compile();
+  compiled.run();
+
+  auto unrelated = ctx.relation<int>("unrelated");
+  unrelated.insert(2);
+  EXPECT_THROW(compiled.run(), std::logic_error);
+  EXPECT_TRUE(output.contains(1));
+}
+
 TEST(DatalogTest, ReRunOnlyEvaluatesDependentSccBranches) {
   context ctx;
   auto left_input = ctx.relation<int>("left_input");
@@ -481,6 +500,19 @@ TEST(DatalogTest, EmptyInputsProduceNoDerivedFacts) {
   EXPECT_TRUE(result.rows().empty());
 }
 
+TEST(DatalogTest, SupportsTypedNullaryPredicates) {
+  context ctx;
+  auto ready = ctx.relation<>("ready");
+
+  EXPECT_FALSE(ready.contains());
+  ready.insert();
+  ready.insert();
+
+  EXPECT_TRUE(ready.contains());
+  ASSERT_EQ(ready.rows().size(), 1U);
+  EXPECT_EQ(ready.rows().front(), std::tuple<>());
+}
+
 TEST(DatalogTest, MultipleRulesFormSetUnion) {
   context ctx;
   auto left = ctx.relation<int>("left");
@@ -542,6 +574,25 @@ TEST(DatalogTest, RejectsDuplicateRelationNames) {
   ctx.relation<int>("duplicate");
 
   EXPECT_THROW(ctx.relation<std::string>("duplicate"), std::invalid_argument);
+}
+
+TEST(DatalogTest, RejectsNaNInRelationKeys) {
+  context ctx;
+  auto values = ctx.relation<double>("values");
+
+  EXPECT_THROW(values.insert(std::numeric_limits<double>::quiet_NaN()),
+               std::invalid_argument);
+  EXPECT_TRUE(values.rows().empty());
+}
+
+TEST(DatalogTest, RejectsNaNConstantsInRelationKeys) {
+  context ctx;
+  auto input = ctx.relation<double>("input");
+  auto output = ctx.relation<double>("output");
+
+  program p(ctx);
+  p.rule(output(1.0), input(std::numeric_limits<double>::quiet_NaN()));
+  EXPECT_THROW(p.compile(), CompileError);
 }
 
 } // namespace

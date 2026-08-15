@@ -1,0 +1,26 @@
+.decl group(id: i64)
+.decl value(group: i64, value: i64)
+.decl blocked(group: i64)
+.decl total(group: i64, value: i64)
+.decl visible(group: i64)
+.decl distance(node: u64, value: min<i64>)
+.decl edge(src: u64, dst: u64, weight: i64)
+
+group(1).
+group(2).
+value(1, 10).
+value(1, 20).
+value(2, 100).
+blocked(2).
+
+total(G, S) :- group(G), aggregate S = sum(V) : value(G, V).
+visible(G) :- group(G), not blocked(G), where G >= 0.
+
+edge(1, 2, 5).
+edge(2, 3, 7).
+distance(1, 0).
+distance(Y, D + W) :- distance(X, D), edge(X, Y, W).
+
+.output total
+.output visible
+.output distance

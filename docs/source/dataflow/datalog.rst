@@ -12,7 +12,7 @@ parallel evaluation.
 
 .. code-block:: cpp
 
-   #include "Dataflow/Datalog/Ascent.h"
+   #include "Dataflow/Datalog/Core/Program.h"
 
    using namespace lotus::datalog;
 
@@ -32,11 +32,11 @@ parallel evaluation.
    auto compiled = p.compile();
    ExecutionOptions options;
    options.worker_count = 4;
-   compiled.run(options);
+   RunStatus status = compiled.run(options);
 
-``Datalog.h`` and ``Ascent.h`` are umbrella headers. The API is also split into
-focused headers such as ``Context.h``, ``Relation.h``, ``Aggregate.h``,
-``Lattice.h``, ``Program.h``, and ``Scheduler.h``.
+``Core/Program.h`` is the entry point for the native C++ API. Lower-level APIs
+are exposed through focused headers under ``Core``, ``Runtime``, and
+``Semantic``; there is no catch-all umbrella header.
 
 The aggregate API provides collecting, streaming, and reducible factories.
 Reducible aggregators run with worker-local state. The lattice library includes
@@ -49,8 +49,9 @@ The current semantic and architecture reference is maintained in
 Command-line engine
 -------------------
 
-``lotus-datalog`` is the engine entry point for non-C++ clients. It consumes the
-same type-erased Semantic IR as JSON; it is not a benchmark-specific front-end.
+``lotus-datalog`` is the engine entry point for non-C++ clients. Native Datalog,
+Z3 fixedpoint input, and JSON all lower to the same type-erased Semantic IR; the
+runtime does not contain format-specific execution paths.
 
 .. code-block:: bash
 
@@ -58,9 +59,27 @@ same type-erased Semantic IR as JSON; it is not a benchmark-specific front-end.
    ./build/bin/lotus-datalog validate transitive-closure.json
    ./build/bin/lotus-datalog run transitive-closure.json --workers 4 --pretty
    ./build/bin/lotus-datalog schema | ./build/bin/lotus-datalog run -
+   ./build/bin/lotus-datalog run tools/dataflow/datalog/examples/transitive_closure.dl
+   ./build/bin/lotus-datalog run tools/dataflow/datalog/examples/z3_fixedpoint.smt2
 
-The JSON format supports set and lattice relations, facts, multiple rule heads,
-positive and negative atoms, filters, expressions, and built-in reducible
-aggregates. Output rows are sorted deterministically, making the CLI suitable for
-future Python differential and performance harnesses. The complete format is
-documented in ``tools/dataflow/datalog/README.md``.
+The ``.dl`` frontend covers the portable engine semantics: typed set and lattice
+relations, inline facts, nullary predicates, multiple heads, positive rules,
+stratified negation, filters and expressions, and the built-in aggregates. The Z3
+frontend supports the finite relational intersection: bit-vector or finite-domain
+sorts, relation and variable declarations, Horn rules, conjunction, stratified
+relation negation, and whole-relation queries. Format is detected automatically or
+chosen with ``--format auto|json|datalog|z3``.
+
+The reusable frontend API is declared in
+``Dataflow/Datalog/Frontend/Frontend.h`` and
+implemented by the ``LotusDatalogFrontend`` library under
+``lib/Dataflow/Datalog/Frontend``. JSON, Lotus Datalog, Z3, and dispatch live in
+separate translation units and produce a source-aware ``FrontendIR`` which lowers
+directly to ``SemanticProgram`` without a JSON round trip.
+``SourceUnit``/``executeInputs`` compose declarations, facts, and rules from
+multiple files; declarations may follow their uses. Native ``.include`` uses an
+injected ``SourceResolver`` so the library never chooses filesystem policy. The
+CLI contains no parser implementation and supplies a relative-path resolver.
+Output rows are sorted deterministically, making it suitable for future Python
+differential and performance harnesses. The complete syntax is documented in
+``tools/dataflow/datalog/README.md``.

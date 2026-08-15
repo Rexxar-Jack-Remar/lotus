@@ -1,0 +1,2 @@
+.decl edge(src: u64, dst: u64)
+.decl path(src: u64, dst: u64)

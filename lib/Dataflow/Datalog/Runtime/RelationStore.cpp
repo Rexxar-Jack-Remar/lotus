@@ -1,4 +1,4 @@
-#include "Dataflow/Datalog/Internal.h"
+#include "Dataflow/Datalog/EngineInternal.h"
 
 #include <algorithm>
 #include <limits>
@@ -558,6 +558,12 @@ void RelationStorage::validateRow(const Row &row) const {
       throw std::invalid_argument("fact column type does not match relation '" +
                                   definition_.name + "'");
     }
+    if (definition_.columns[i].validate)
+      definition_.columns[i].validate(row[i]);
+    const bool is_key = definition_.kind == RelationKind::Set ||
+                        i + 1 != definition_.columns.size();
+    if (is_key && definition_.columns[i].validate_key)
+      definition_.columns[i].validate_key(row[i]);
   }
 }
 

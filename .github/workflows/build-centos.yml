@@ -95,6 +95,8 @@ jobs:
                     -DLLVM_DIR="${LLVM_CMAKE_DIR}" \
                     -DZ3_DIR=/usr \
                     -DENABLE_SEAHORN=OFF \
+                    -DLOTUS_BUILD_TESTS=ON \
+                    -DLOTUS_ENABLE_CLAM=ON \
                     ..
 
               cmake --build . -j"$(nproc)"
