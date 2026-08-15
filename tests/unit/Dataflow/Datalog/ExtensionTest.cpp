@@ -6,6 +6,35 @@
 
 using namespace lotus::datalog;
 
+struct ThrowingMinimum {
+  int value = 0;
+  static bool throw_on_join;
+
+  bool joinMut(const ThrowingMinimum &other) {
+    if (other.value >= value)
+      return false;
+    value = other.value;
+    if (throw_on_join)
+      throw std::runtime_error("expected lattice failure");
+    return true;
+  }
+
+  friend bool operator==(const ThrowingMinimum &lhs,
+                         const ThrowingMinimum &rhs) {
+    return lhs.value == rhs.value;
+  }
+};
+
+bool ThrowingMinimum::throw_on_join = false;
+
+namespace std {
+template <> struct hash<ThrowingMinimum> {
+  std::size_t operator()(const ThrowingMinimum &value) const {
+    return std::hash<int>{}(value.value);
+  }
+};
+} // namespace std
+
 namespace {
 
 TEST(DatalogTest, SupportsRemainderUnaryAndLiftedExpressions) {
@@ -271,7 +300,8 @@ TEST(DatalogTest, SupportsParameterizedReducibleAggregatorInParallel) {
       x, "scaled-sum", [] { return 0; },
       [scale](int &state, const int &value) { state += scale * value; },
       [](int &state, const int &other) { state += other; },
-      [](int &state) { return std::vector<int>{state}; });
+      [](int &state) { return std::vector<int>{state}; },
+      ReducerProperties::parallel());
 
   program p(ctx);
   p.rule(output(result), aggregate(result, scaled_sum, input(x)));
@@ -283,6 +313,32 @@ TEST(DatalogTest, SupportsParameterizedReducibleAggregatorInParallel) {
 
   EXPECT_TRUE(output.contains(15150));
   EXPECT_GT(compiled.stats().parallel_aggregate_tasks, 1U);
+}
+
+TEST(DatalogTest, CustomReducerIsSerialUntilItDeclaresParallelSafety) {
+  context ctx;
+  auto input = ctx.relation<int>("input");
+  auto output = ctx.relation<int>("output");
+  auto x = ctx.var<int>("x");
+  auto result = ctx.var<int>("result");
+  for (int value = 1; value <= 100; ++value)
+    input.insert(value);
+
+  auto serial_sum = make_reducible_aggregator<int>(
+      x, "serial-sum", [] { return 0; },
+      [](int &state, const int &value) { state += value; },
+      [](int &state, const int &other) { state += other; },
+      [](int &state) { return std::vector<int>{state}; });
+  program p(ctx);
+  p.rule(output(result), aggregate(result, serial_sum, input(x)));
+  auto compiled = p.compile();
+  ExecutionOptions options;
+  options.worker_count = 4;
+  options.parallel_grain_size = 8;
+  compiled.run(options);
+
+  EXPECT_TRUE(output.contains(5050));
+  EXPECT_EQ(compiled.stats().parallel_aggregate_tasks, 0U);
 }
 
 TEST(DatalogTest, SupportsExtendedLatticeLibrary) {
@@ -324,6 +380,52 @@ TEST(DatalogTest, SupportsLatticeWithoutKeyColumns) {
 
   ASSERT_EQ(global_minimum.rows().size(), 1U);
   EXPECT_TRUE(global_minimum.contains(min_lattice<int>(3)));
+}
+
+TEST(DatalogTest, ThrowingLatticeJoinDoesNotCommitPartialState) {
+  context ctx;
+  auto input = ctx.relation<int, ThrowingMinimum>("input");
+  auto output = ctx.lattice<int, ThrowingMinimum>("output");
+  auto key = ctx.var<int>("key");
+  auto value = ctx.var<ThrowingMinimum>("value");
+  output.insert(1, ThrowingMinimum{10});
+  input.insert(1, ThrowingMinimum{5});
+
+  program p(ctx);
+  p.rule(output(key, value), input(key, value));
+  auto compiled = p.compile();
+  ThrowingMinimum::throw_on_join = true;
+  EXPECT_THROW(compiled.run(), std::runtime_error);
+  EXPECT_TRUE(output.contains(1, ThrowingMinimum{10}));
+
+  ThrowingMinimum::throw_on_join = false;
+  compiled.run();
+  EXPECT_TRUE(output.contains(1, ThrowingMinimum{5}));
+}
+
+TEST(DatalogTest, RunStateIsResetAfterExpressionFailure) {
+  context ctx;
+  auto input = ctx.relation<int>("input");
+  auto output = ctx.relation<int>("output");
+  auto x = ctx.var<int>("x");
+  bool throw_once = true;
+  input.insert(1);
+
+  program p(ctx);
+  p.rule(output(lift(
+             [&](int value) {
+               if (throw_once) {
+                 throw_once = false;
+                 throw std::runtime_error("expected expression failure");
+               }
+               return value;
+             },
+             x)),
+         input(x));
+  auto compiled = p.compile();
+  EXPECT_THROW(compiled.run(), std::runtime_error);
+  EXPECT_NO_THROW(compiled.run());
+  EXPECT_TRUE(output.contains(1));
 }
 
 } // namespace

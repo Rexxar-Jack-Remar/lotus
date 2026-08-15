@@ -10,12 +10,14 @@ layer for Ascent's Rust macro syntax.
 Every program crosses the following boundary before it executes:
 
 ```text
-typed C++ API -> semantic IR -> analyzer/execution plan -> runtime
+typed C++ API -> semantic IR -> analyzer -> physical RulePlan -> runtime
 ```
 
 The template API only constructs typed terms and relations. Rules are immediately
-lowered to type-erased `RuleIR`, `AtomIR`, `TermIR`, and `FilterIR` values. Runtime
-storage and rule evaluation do not depend on the public template expression tree.
+lowered to type-erased `RuleIR`, `AtomIR`, `TermIR`, and `FilterIR` values. Validation
+and stratification consume this semantic IR once; execution uses a lowered physical
+`RulePlan` with preclassified scan/filter/anti-lookup/aggregate operations, selected
+lookup masks, and preprocessed head terms.
 
 ## Language semantics
 
@@ -24,6 +26,17 @@ storage and rule evaluation do not depend on the public template expression tree
 A relation is a set of tuples. Inserting an existing tuple has no effect. Column
 types and arity are fixed when the relation is created. Values must support
 `operator==` and `std::hash`.
+
+Facts inserted through `Relation::insert` are base facts. Solver output is stored
+separately as derived state. A later `run()` after new base facts clears derived state
+from the first affected SCC onward and recomputes that suffix. This makes additive
+reruns correct for positive rules, negation, aggregates, and lattices; fact deletion
+is intentionally not part of the API.
+
+`CompiledProgram` retains the underlying context state and is therefore safe to run
+after the `Context` wrapper is destroyed. Fluent `Relation`, `Var`, and expression
+handles remain context-bound construction handles and should not outlive the
+wrapper that created them.
 
 ### Rules and grounding
 
@@ -51,18 +64,24 @@ Acyclic SCCs execute once. Recursive SCCs execute to a least fixed point using
 deduplicated and merged only at the epoch boundary.
 
 For a recursive rule, the executor creates one semi-naive variant per recursive
-body atom. That occurrence reads `Delta`; the remaining occurrences read `Total`.
+body atom. That occurrence reads `Delta`; earlier recursive occurrences read the
+pre-epoch total while later occurrences may read the total including delta. This
+leftmost-delta convention makes the variants disjoint instead of relying on final
+set deduplication to remove duplicate derivations.
 
 ### Indexes
 
 At an atom, columns containing constants or variables grounded by earlier body
-items form a runtime bitmask lookup key. Indexes are prepared by the planner and
-rebuilt when their relation version changes. Full-row masks use a specialized
-unique index; partial masks use multi-row buckets. An atom with no bound columns
-performs a full scan.
+items form a runtime bitmask lookup key. The planner's statistics catalog is
+separate from physical indexes: it observes distinct-key counts without installing
+an index, then the finalized `RulePlan` installs only its selected masks. Runtime
+indexes are hash buckets of row IDs and are maintained incrementally on row inserts
+and lattice updates. Lookups borrow binding cells through a zero-allocation key view
+and stream rows directly to the consumer; an atom with no bound columns performs a
+full scan.
 
-Join costs use observed distinct-key counts from the selected index, rather than a
-fixed heuristic based only on the number of bound columns. During execution,
+Join costs use observed distinct-key counts, rather than a fixed heuristic based
+only on the number of bound columns. During execution,
 variable bindings reference immutable relation cells and own only computed values,
 avoiding a `std::any` copy at every join step.
 
@@ -75,9 +94,10 @@ callback range without materializing all projected inputs. The compatibility
 merge, and finish operations for parallel execution.
 
 The built-in reducible aggregators are `sum`, `count`, `minimum`, `maximum`, and
-`mean`. `make_reducible_aggregator` constructs parameterized custom reducers that
-participate in parallel aggregation. Generic aggregators may emit zero, one, or
-multiple results.
+`mean`. `make_reducible_aggregator` constructs parameterized custom reducers. They
+run serially unless passed `ReducerProperties::parallel()`, which explicitly attests
+that `add`/`merge` are associative, commutative, deterministic, and safe to run in
+parallel. Generic aggregators may emit zero, one, or multiple results.
 
 ### Lattices
 
@@ -88,7 +108,10 @@ All candidates for a key are joined before that key enters the next delta.
 The standard library provides minimum, maximum, set-union, dual, product,
 bounded-set, and constant-propagation lattices. User-defined lattice values provide
 `bool joinMut(const T &candidate)`; values used through `DualLattice` additionally
-provide `meetMut`.
+provide `meetMut`. Lattice joins must be associative, commutative, and idempotent.
+The runtime evaluates joins on copies and commits them only after all parallel
+inspection tasks complete, so a throwing join cannot leave live rows or indexes
+partially updated.
 
 ### Negation
 
@@ -106,11 +129,14 @@ global join.
 The runtime accepts an injected `Scheduler`. `ThreadScheduler` uses a persistent
 worker pool and `SerialScheduler` provides deterministic single-thread execution.
 Non-recursive rules and recursive delta partitions both execute in parallel when
-there is enough work. Reducible aggregators use worker-local states followed by a
-deterministic merge; generic blocking aggregators remain serial. Epoch candidates
-are hash-partitioned for parallel set deduplication or per-key lattice joining.
-Existing lattice keys are updated in parallel before new rows are committed at the
-barrier.
+there is enough work. Only reducers that declare `ReducerProperties::parallel()`
+use worker-local states followed by a deterministic merge; generic and undeclared
+reducers remain serial. Epoch candidates are hash-partitioned for parallel set
+deduplication or per-key lattice joining.
+
+Expression lifts, hash/equality functions, and lattice joins must be pure with
+respect to the relation database. The type system cannot prove that host C++
+callables satisfy those laws, so they are part of the embedding contract.
 
 ## Explicit non-goals
 
@@ -130,7 +156,7 @@ barrier.
 | Conditions and head expressions | implemented | grounded pure expressions |
 | Positive recursion and SCCs | implemented | least fixed point |
 | Semi-naive execution | implemented | `Total` / `Delta` / `New` epochs |
-| Runtime bitmask indexes | implemented | unique/full and bucket/partial indexes |
+| Runtime bitmask indexes | implemented | selected at compile time; incrementally maintained |
 | Aggregation | implemented | stratified generic/reducible aggregators |
 | Lattice relations | implemented | joined values plus standard lattice library |
 | Negation | implemented | stratified anti-join |

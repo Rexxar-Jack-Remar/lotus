@@ -150,11 +150,30 @@ struct NegAtomIR {
   AtomIR atom;
 };
 
+// User reducers are serial by default.  Parallel evaluation is enabled only
+// when callers explicitly attest that partitioned add/merge is valid and that
+// execution order cannot affect the observable result.
+struct ReducerProperties {
+  bool associative = false;
+  bool commutative = false;
+  bool deterministic = false;
+  bool parallel_safe = false;
+
+  static constexpr ReducerProperties parallel() {
+    return {true, true, true, true};
+  }
+
+  constexpr bool canRunInParallel() const {
+    return associative && commutative && deterministic && parallel_safe;
+  }
+};
+
 struct ReducerIR {
   std::function<std::any()> make_state;
   std::function<void(std::any &, const std::any &)> add;
   std::function<void(std::any &, const std::any &)> merge;
   std::function<std::vector<std::any>(std::any &)> finish;
+  ReducerProperties properties;
 };
 
 using AggregateConsumer = std::function<void(const std::any &)>;

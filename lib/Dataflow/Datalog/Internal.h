@@ -3,6 +3,8 @@
 #include "Dataflow/Datalog/Datalog.h"
 
 #include <any>
+#include <array>
+#include <climits>
 #include <cstddef>
 #include <functional>
 #include <memory>
@@ -17,6 +19,19 @@
 namespace lotus::datalog::internal {
 
 using Row = std::vector<std::any>;
+
+// A lookup key borrows constant terms and binding cells.  It is deliberately
+// fixed-size: relation arity is already bounded by ColumnMask, so constructing
+// a key in the join loop must not allocate or copy std::any values.
+struct KeyView {
+  static constexpr std::size_t MAX_COLUMNS = sizeof(ColumnMask) * CHAR_BIT;
+
+  ColumnMask mask = 0;
+  std::array<const std::any *, MAX_COLUMNS> values{};
+  std::size_t size = 0;
+
+  void push(const std::any &value) { values[size++] = &value; }
+};
 
 void combineHash(std::size_t &seed, std::size_t value);
 
@@ -42,30 +57,29 @@ struct KeyEqual {
 
 class RuntimeIndex {
 public:
-  using BucketMap =
-      std::unordered_map<Row, std::vector<std::size_t>, KeyHash, KeyEqual>;
-  using UniqueMap = std::unordered_map<Row, std::size_t, KeyHash, KeyEqual>;
-
   RuntimeIndex(ColumnMask mask, const std::vector<ColumnType> &all_columns);
 
   void rebuild(const std::vector<Row> &rows, std::size_t version);
+  void append(const std::vector<Row> &rows, std::size_t row_index,
+              std::size_t version);
+  void update(const std::vector<Row> &rows, std::size_t row_index,
+              const Row &previous_row, std::size_t version);
   bool isCurrent(std::size_t version) const;
-  bool isUnique() const;
-  const std::vector<std::size_t> *lookup(const Row &key) const;
-  std::optional<std::size_t> lookupUnique(const Row &key) const;
+  const std::vector<std::size_t> *lookup(const KeyView &key) const;
+  bool matches(const Row &row, const KeyView &key) const;
   std::size_t bucketCount() const;
   std::size_t entryCount() const;
   std::size_t approximateMemoryBytes() const;
 
 private:
-  static std::vector<ColumnType>
-  selectedColumns(ColumnMask mask, const std::vector<ColumnType> &columns);
-  Row keyFor(const Row &row) const;
+  std::size_t hash(const Row &row) const;
+  std::size_t hash(const KeyView &key) const;
+  void erase(std::size_t key_hash, std::size_t row_index);
+  void insert(const std::vector<Row> &rows, std::size_t row_index);
 
   std::vector<std::size_t> columns_;
-  BucketMap buckets_;
-  UniqueMap unique_rows_;
-  bool unique_ = false;
+  std::vector<ColumnType> column_types_;
+  std::unordered_map<std::size_t, std::vector<std::size_t>> buckets_;
   std::size_t built_version_ = static_cast<std::size_t>(-1);
 };
 
@@ -83,36 +97,97 @@ public:
   const RelationIR &definition() const;
   const std::vector<Row> &rows() const;
 
-  std::optional<Row> insertAndGetChanged(Row row);
-  bool insert(Row row);
+  bool insertBase(Row row);
   bool contains(const Row &row) const;
   std::vector<Row> coalesce(std::vector<Row> candidates) const;
   std::size_t candidateHash(const Row &row) const;
-  BatchMergeResult mergeCoalesced(std::vector<Row> candidates,
-                                  Scheduler &scheduler, std::size_t grain_size);
-  std::size_t estimatedLookupCardinality(ColumnMask mask);
+  bool rowsEqual(const Row &lhs, const Row &rhs) const;
+  BatchMergeResult mergeDerivedCoalesced(std::vector<Row> candidates,
+                                         Scheduler &scheduler,
+                                         std::size_t grain_size);
+  void discardDerived();
+  std::size_t baseVersion() const;
+  std::size_t estimatedLookupCardinality(ColumnMask mask) const;
+  void ensureIndex(ColumnMask mask);
   std::size_t indexCount() const;
   std::size_t indexEntries() const;
   std::size_t indexMemoryBytes() const;
 
-  void forEachMatching(ColumnMask mask, const Row &key, ExecutionStats &stats,
+  void forEachMatching(const KeyView &key, ExecutionStats &stats,
                        const std::function<void(const Row &)> &callback);
-  std::vector<const Row *> matchingRows(ColumnMask mask, const Row &key,
-                                        ExecutionStats &stats);
+  std::size_t matchingCandidateCount(const KeyView &key, ExecutionStats &stats);
+  void forEachMatchingSlice(const KeyView &key, std::size_t begin,
+                            std::size_t end,
+                            const std::function<void(const Row &)> &callback);
 
 private:
   void validateRow(const Row &row) const;
   RuntimeIndex &getIndex(ColumnMask mask);
+  void appendRow(Row row);
+  void updateRow(std::size_t row_index, Row row);
+  void rebuildFromBase();
   Row latticeKey(const Row &row) const;
 
   RelationIR definition_;
   std::vector<Row> rows_;
   std::unordered_set<Row, RowHash, RowEqual> set_;
   std::unique_ptr<KeyMap> lattice_keys_;
+  std::vector<Row> base_rows_;
+  std::unordered_set<Row, RowHash, RowEqual> base_set_;
+  std::unique_ptr<KeyMap> base_lattice_keys_;
+  std::vector<Row> derived_rows_;
   std::unordered_map<ColumnMask, std::unique_ptr<RuntimeIndex>> indices_;
   std::mutex index_mutex_;
+  mutable std::mutex statistics_mutex_;
+  mutable std::unordered_map<ColumnMask, std::pair<std::size_t, std::size_t>>
+      lookup_estimates_;
   std::size_t version_ = 0;
+  std::size_t base_version_ = 0;
 };
+
+// Physical rule plans retain only the data needed by the executor. Semantic
+// RuleIR remains the validation and analysis boundary; it is lowered once at
+// compile time so the tuple loop does not repeatedly inspect semantic variants.
+struct AtomTermPlan {
+  bool is_variable = false;
+  VarId variable = 0;
+  bool anonymous = false;
+  bool use_in_lookup = false;
+  std::any constant;
+};
+
+struct AtomPlan {
+  RelationId relation = 0;
+  ColumnMask lookup_mask = 0;
+  std::vector<AtomTermPlan> terms;
+};
+
+struct HeadTermPlan {
+  enum class Kind { Variable, Constant, Expression };
+
+  Kind kind = Kind::Constant;
+  VarId variable = 0;
+  std::any constant;
+  ExprIR expression;
+};
+
+enum class OpCode { Scan, Filter, AntiLookup, Aggregate };
+
+struct PhysicalOp {
+  OpCode code = OpCode::Scan;
+  AtomPlan atom;
+  ExprIR filter;
+  AggregateIR aggregate;
+};
+
+struct RulePlan {
+  RelationId head_relation = 0;
+  std::vector<HeadTermPlan> head;
+  std::vector<PhysicalOp> body;
+};
+
+AtomPlan lowerAtomPlan(const AtomIR &atom, const std::vector<bool> &grounded);
+RulePlan lowerRulePlan(const RuleIR &rule);
 
 struct VariableDefinition {
   std::string name;
@@ -129,10 +204,13 @@ struct PlannedSCC {
 };
 
 struct ExecutionPlan {
-  std::vector<RuleIR> rules;
+  std::vector<RulePlan> rules;
   std::vector<PlannedSCC> sccs;
   std::size_t variable_count = 0;
   std::size_t planned_reorders = 0;
+  // Relation -> earliest SCC that consumes it.  This is used to invalidate
+  // only the affected suffix after new base facts arrive.
+  std::vector<std::size_t> first_consumer_scc;
 };
 
 struct DependencyEdge {

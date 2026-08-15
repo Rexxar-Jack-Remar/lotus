@@ -19,7 +19,7 @@ Context *detail::mergeContexts(Context *lhs, Context *rhs) {
   return lhs ? lhs : rhs;
 }
 
-Context::Context() : impl_(std::make_unique<Impl>()) {}
+Context::Context() : impl_(std::make_shared<Impl>()) {}
 Context::~Context() = default;
 
 RelationId Context::addRelation(
@@ -71,7 +71,7 @@ TermIR Context::freshWildcard(std::type_index type) {
 }
 
 void Context::insert(RelationId relation, std::vector<std::any> row) {
-  impl_->relations.at(relation)->insert(std::move(row));
+  impl_->relations.at(relation)->insertBase(std::move(row));
 }
 
 bool Context::contains(RelationId relation,

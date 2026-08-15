@@ -269,4 +269,94 @@ std::vector<RuleIR> planAndValidateRules(
   return rules;
 }
 
+AtomPlan lowerAtomPlan(const AtomIR &atom, const std::vector<bool> &grounded) {
+  AtomPlan result;
+  result.relation = atom.relation;
+  result.terms.reserve(atom.args.size());
+  for (std::size_t column = 0; column < atom.args.size(); ++column) {
+    const TermIR &term = atom.args[column];
+    AtomTermPlan planned_term;
+    if (term.kind == TermIR::Kind::Variable) {
+      planned_term.is_variable = true;
+      planned_term.variable = term.variable;
+      planned_term.anonymous = term.anonymous;
+      planned_term.use_in_lookup =
+          term.variable < grounded.size() && grounded[term.variable];
+    } else {
+      planned_term.constant = term.constant;
+      planned_term.use_in_lookup = true;
+    }
+    if (planned_term.use_in_lookup)
+      result.lookup_mask |= ColumnMask{1} << column;
+    result.terms.push_back(std::move(planned_term));
+  }
+  return result;
+}
+
+RulePlan lowerRulePlan(const RuleIR &rule) {
+  RulePlan result;
+  result.head_relation = rule.head.relation;
+  result.head.reserve(rule.head.args.size());
+  for (const TermIR &term : rule.head.args) {
+    HeadTermPlan planned_term;
+    if (term.kind == TermIR::Kind::Variable) {
+      planned_term.kind = HeadTermPlan::Kind::Variable;
+      planned_term.variable = term.variable;
+    } else if (term.kind == TermIR::Kind::Expression) {
+      planned_term.kind = HeadTermPlan::Kind::Expression;
+      planned_term.expression = term.expression;
+    } else {
+      planned_term.constant = term.constant;
+    }
+    result.head.push_back(std::move(planned_term));
+  }
+
+  result.body.reserve(rule.body.size());
+  std::vector<bool> grounded;
+  for (const BodyItemIR &item : rule.body) {
+    if (const auto *atom = std::get_if<AtomIR>(&item)) {
+      for (const TermIR &term : atom->args) {
+        if (term.kind == TermIR::Kind::Variable &&
+            term.variable >= grounded.size())
+          grounded.resize(term.variable + 1, false);
+      }
+    } else if (const auto *aggregate = std::get_if<AggregateIR>(&item)) {
+      for (const TermIR &term : aggregate->source.args) {
+        if (term.kind == TermIR::Kind::Variable &&
+            term.variable >= grounded.size())
+          grounded.resize(term.variable + 1, false);
+      }
+      if (aggregate->output_var >= grounded.size())
+        grounded.resize(aggregate->output_var + 1, false);
+    }
+  }
+  for (const BodyItemIR &item : rule.body) {
+    PhysicalOp operation;
+    if (const auto *atom = std::get_if<AtomIR>(&item)) {
+      operation.code = OpCode::Scan;
+      operation.atom = lowerAtomPlan(*atom, grounded);
+      for (const TermIR &term : atom->args) {
+        if (term.kind == TermIR::Kind::Variable)
+          grounded[term.variable] = true;
+      }
+    } else if (const auto *filter = std::get_if<FilterIR>(&item)) {
+      operation.code = OpCode::Filter;
+      operation.filter = filter->predicate;
+    } else if (const auto *negation = std::get_if<NegAtomIR>(&item)) {
+      operation.code = OpCode::AntiLookup;
+      operation.atom = lowerAtomPlan(negation->atom, grounded);
+    } else {
+      const auto &aggregate = std::get<AggregateIR>(item);
+      operation.code = OpCode::Aggregate;
+      operation.atom = lowerAtomPlan(aggregate.source, grounded);
+      operation.aggregate = aggregate;
+      if (aggregate.output_var >= grounded.size())
+        grounded.resize(aggregate.output_var + 1, false);
+      grounded[aggregate.output_var] = true;
+    }
+    result.body.push_back(std::move(operation));
+  }
+  return result;
+}
+
 } // namespace lotus::datalog::internal

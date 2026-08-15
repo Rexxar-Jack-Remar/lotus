@@ -53,6 +53,9 @@ public:
   void run(const ExecutionOptions &options);
   const ExecutionStats &stats() const;
 
+  // A compiled program retains the Context's internal storage, so it may be
+  // executed after the Context wrapper that produced it has been destroyed.
+
 private:
   struct Impl;
   explicit CompiledProgram(std::unique_ptr<Impl> impl);

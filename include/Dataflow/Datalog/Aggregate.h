@@ -78,7 +78,8 @@ public:
 
   template <typename MakeState, typename Add, typename Merge, typename Finish>
   AggregatorSpec(Expr<Input> projection, std::string name, MakeState make_state,
-                 Add add, Merge merge, Finish finish)
+                 Add add, Merge merge, Finish finish,
+                 ReducerProperties properties = {})
       : projection_(std::move(projection)), name_(std::move(name)) {
     using State = std::invoke_result_t<MakeState>;
     ReducerIR reducer;
@@ -97,6 +98,7 @@ public:
         results.emplace_back(std::move(result));
       return results;
     };
+    reducer.properties = properties;
     reducer_ = std::move(reducer);
     evaluator_ = [reducer = *reducer_](const AggregateForEach &for_each) {
       std::any state = reducer.make_state();
@@ -143,10 +145,10 @@ template <typename Output, typename Input, typename MakeState, typename Add,
 AggregatorSpec<Input, Output>
 make_reducible_aggregator(const Expr<Input> &projection, std::string name,
                           MakeState make_state, Add add, Merge merge,
-                          Finish finish) {
-  return AggregatorSpec<Input, Output>(projection, std::move(name),
-                                       std::move(make_state), std::move(add),
-                                       std::move(merge), std::move(finish));
+                          Finish finish, ReducerProperties properties = {}) {
+  return AggregatorSpec<Input, Output>(
+      projection, std::move(name), std::move(make_state), std::move(add),
+      std::move(merge), std::move(finish), properties);
 }
 
 template <typename T> AggregatorSpec<T, T> sum(const Expr<T> &projection) {
@@ -154,7 +156,8 @@ template <typename T> AggregatorSpec<T, T> sum(const Expr<T> &projection) {
       projection, "sum", [] { return T{}; },
       [](T &state, const T &value) { state += value; },
       [](T &state, const T &other) { state += other; },
-      [](T &state) { return std::vector<T>{state}; });
+      [](T &state) { return std::vector<T>{state}; },
+      ReducerProperties::parallel());
 }
 
 inline AggregatorSpec<int, std::size_t> count() {
@@ -162,7 +165,8 @@ inline AggregatorSpec<int, std::size_t> count() {
       Expr<int>::constant(0), "count", [] { return std::size_t{0}; },
       [](std::size_t &state, const int &) { ++state; },
       [](std::size_t &state, const std::size_t &other) { state += other; },
-      [](std::size_t &state) { return std::vector<std::size_t>{state}; });
+      [](std::size_t &state) { return std::vector<std::size_t>{state}; },
+      ReducerProperties::parallel());
 }
 
 template <typename T> AggregatorSpec<T, T> minimum(const Expr<T> &projection) {
@@ -182,7 +186,8 @@ template <typename T> AggregatorSpec<T, T> minimum(const Expr<T> &projection) {
       },
       [](State &state) {
         return state.value ? std::vector<T>{*state.value} : std::vector<T>{};
-      });
+      },
+      ReducerProperties::parallel());
 }
 
 template <typename T> AggregatorSpec<T, T> maximum(const Expr<T> &projection) {
@@ -202,7 +207,8 @@ template <typename T> AggregatorSpec<T, T> maximum(const Expr<T> &projection) {
       },
       [](State &state) {
         return state.value ? std::vector<T>{*state.value} : std::vector<T>{};
-      });
+      },
+      ReducerProperties::parallel());
 }
 
 template <typename T>
@@ -226,7 +232,8 @@ AggregatorSpec<T, double> mean(const Expr<T> &projection) {
           return std::vector<double>{};
         return std::vector<double>{
             static_cast<double>(state.sum / state.count)};
-      });
+      },
+      ReducerProperties::parallel());
 }
 
 class AggregateClause {

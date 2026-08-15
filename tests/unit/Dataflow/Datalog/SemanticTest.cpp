@@ -26,6 +26,26 @@ TEST(DatalogTest, EvaluatesStratifiedNegationAsAntiJoin) {
   EXPECT_EQ(asSet(root), (std::set<std::tuple<int>>{{1}}));
 }
 
+TEST(DatalogTest, ReRunRetractsNegatedResultsAfterNewBaseFacts) {
+  context ctx;
+  auto candidate = ctx.relation<int>("candidate");
+  auto blocked = ctx.relation<int>("blocked");
+  auto result = ctx.relation<int>("result");
+  auto x = ctx.var<int>("x");
+  candidate.insert(1);
+
+  program p(ctx);
+  p.rule(result(x), candidate(x) && neg(blocked(x)));
+  auto compiled = p.compile();
+  compiled.run();
+  ASSERT_TRUE(result.contains(1));
+
+  blocked.insert(1);
+  compiled.run();
+  EXPECT_FALSE(result.contains(1));
+  EXPECT_TRUE(result.rows().empty());
+}
+
 TEST(DatalogTest, PlannerMovesGroundingAtomBeforeNegation) {
   context ctx;
   auto person = ctx.relation<int>("person");
@@ -102,6 +122,30 @@ TEST(DatalogTest, CountAggregateProducesZeroForEmptyGroup) {
 
   EXPECT_TRUE(counts.contains(1, 1));
   EXPECT_TRUE(counts.contains(2, 0));
+}
+
+TEST(DatalogTest, ReRunReplacesAggregateResultsAfterNewBaseFacts) {
+  context ctx;
+  auto group = ctx.relation<int>("group");
+  auto value = ctx.relation<int, int>("value");
+  auto result = ctx.relation<int, std::size_t>("result");
+  auto key = ctx.var<int>("key");
+  auto count_value = ctx.var<std::size_t>("count_value");
+  group.insert(1);
+  value.insert(1, 10);
+
+  program p(ctx);
+  p.rule(result(key, count_value),
+         group(key) && aggregate(count_value, count(), value(key, _)));
+  auto compiled = p.compile();
+  compiled.run();
+  ASSERT_TRUE(result.contains(1, 1));
+
+  value.insert(1, 20);
+  compiled.run();
+  EXPECT_FALSE(result.contains(1, 1));
+  EXPECT_TRUE(result.contains(1, 2));
+  EXPECT_EQ(result.rows().size(), 1U);
 }
 
 TEST(DatalogTest, SupportsGenericBlockingAggregator) {

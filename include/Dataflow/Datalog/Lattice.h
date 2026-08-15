@@ -13,6 +13,12 @@
 
 namespace lotus::datalog {
 
+// Lattice values are copied before joinMut is invoked and committed only after
+// an epoch-wide merge succeeds. Implementations must nevertheless obey the
+// usual join laws (associativity, commutativity, and idempotence); otherwise
+// fixed-point and parallel results are not defined. joinMut may throw, but it
+// must not mutate objects other than *this or the supplied candidate.
+
 template <typename T> class MinLattice {
 public:
   MinLattice() = default;

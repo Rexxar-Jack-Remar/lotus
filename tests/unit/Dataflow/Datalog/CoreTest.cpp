@@ -1,5 +1,7 @@
 #include "TestSupport.h"
 
+#include <memory>
+
 using namespace lotus::datalog;
 
 namespace {
@@ -249,6 +251,23 @@ TEST(DatalogTest, ReRunningACompiledProgramIsIdempotent) {
 
   EXPECT_EQ(asSet(path), first);
   EXPECT_EQ(compiled.stats().inserted_facts, 0U);
+}
+
+TEST(DatalogTest, CompiledProgramKeepsContextStateAlive) {
+  std::unique_ptr<compiled_program> compiled;
+  {
+    context ctx;
+    auto input = ctx.relation<int>("input");
+    auto output = ctx.relation<int>("output");
+    auto x = ctx.var<int>("x");
+    input.insert(9);
+    program p(ctx);
+    p.rule(output(x), input(x));
+    compiled = std::make_unique<compiled_program>(p.compile());
+  }
+
+  EXPECT_NO_THROW(compiled->run());
+  EXPECT_EQ(compiled->stats().total_facts, 2U);
 }
 
 TEST(DatalogTest, RejectsCrossContextRules) {
