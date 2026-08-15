@@ -31,13 +31,14 @@ inline std::vector<Var> conditionVars(const T &condition) {
 template <typename L, typename A, typename S>
 inline std::vector<SearchMatches<L>>
 searchEclassesWithLimit(const S &searcher, const EGraph<L, A> &egraph,
-                        const std::vector<Id> &eclasses, size_t limit) {
+                        const std::vector<Id> &eclasses, size_t limit,
+                        const WorkControl *control) {
   std::vector<SearchMatches<L>> matches;
   for (Id eclass : eclasses) {
-    if (limit == 0) {
+    if (limit == 0 || (control && control->poll())) {
       break;
     }
-    auto found = searcher.searchEClassWithLimit(egraph, eclass, limit);
+    auto found = searcher.searchEClassWithLimit(egraph, eclass, limit, control);
     if (!found || found->substs.empty()) {
       continue;
     }
@@ -54,9 +55,9 @@ inline std::vector<Var> sortedUnique(std::vector<Var> vars) {
 }
 
 template <typename L, typename A>
-inline void validateRewriteBoundVars(
-    std::string_view name, const Searcher<L, A> &searcher,
-    const Applier<L, A> &applier) {
+inline void validateRewriteBoundVars(std::string_view name,
+                                     const Searcher<L, A> &searcher,
+                                     const Applier<L, A> &applier) {
   auto bound_vars = searcher.vars();
   for (const auto &var : applier.vars()) {
     if (std::find(bound_vars.begin(), bound_vars.end(), var) ==
@@ -80,19 +81,20 @@ public:
   virtual ~Searcher() = default;
 
   virtual std::optional<SearchMatches<L>>
-  searchEClassWithLimit(const EGraph<L, A> &egraph, Id eclass,
-                        size_t limit) const = 0;
+  searchEClassWithLimit(const EGraph<L, A> &egraph, Id eclass, size_t limit,
+                        const WorkControl *control = nullptr) const = 0;
 
   virtual std::optional<SearchMatches<L>>
   searchEClass(const EGraph<L, A> &egraph, Id eclass) const {
     return searchEClassWithLimit(egraph, eclass,
-                                 std::numeric_limits<size_t>::max());
+                                 std::numeric_limits<size_t>::max(), nullptr);
   }
 
   virtual std::vector<SearchMatches<L>>
-  searchWithLimit(const EGraph<L, A> &egraph, size_t limit) const {
-    return detail::searchEclassesWithLimit<L, A>(*this, egraph,
-                                                 egraph.classIds(), limit);
+  searchWithLimit(const EGraph<L, A> &egraph, size_t limit,
+                  const WorkControl *control = nullptr) const {
+    return detail::searchEclassesWithLimit<L, A>(
+        *this, egraph, egraph.classIds(), limit, control);
   }
 
   virtual std::vector<SearchMatches<L>>
@@ -122,17 +124,24 @@ public:
                                    const PatternAst<L> *match_ast,
                                    const Symbol &rule_name) const = 0;
 
-  virtual std::vector<Id> applyMatches(
-      EGraph<L, A> &egraph, const std::vector<SearchMatches<L>> &matches,
-      const Symbol &rule_name) const {
+  virtual std::vector<Id>
+  applyMatches(EGraph<L, A> &egraph,
+               const std::vector<SearchMatches<L>> &matches,
+               const Symbol &rule_name) const {
     std::vector<Id> ids;
+    size_t expected = 0;
+    for (const auto &match : matches) {
+      expected += match.substs.size();
+    }
+    ids.reserve(expected);
     for (const auto &match : matches) {
       const PatternAst<L> *match_ast = nullptr;
       if (egraph.areExplanationsEnabled()) {
-        match_ast = match.ast ? &*match.ast : nullptr;
+        match_ast = match.ast.get();
       }
       for (const auto &subst : match.substs) {
-        auto added = applyOne(egraph, match.eclass, subst, match_ast, rule_name);
+        auto added =
+            applyOne(egraph, match.eclass, subst, match_ast, rule_name);
         ids.insert(ids.end(), added.begin(), added.end());
       }
     }
@@ -150,14 +159,15 @@ public:
   explicit PatternSearcher(Pattern<L> pattern) : pattern_(std::move(pattern)) {}
 
   std::optional<SearchMatches<L>>
-  searchEClassWithLimit(const EGraph<L, A> &egraph, Id eclass,
-                        size_t limit) const override {
-    return pattern_.searchEClassWithLimit(egraph, eclass, limit);
+  searchEClassWithLimit(const EGraph<L, A> &egraph, Id eclass, size_t limit,
+                        const WorkControl *control = nullptr) const override {
+    return pattern_.searchEClassWithLimit(egraph, eclass, limit, control);
   }
 
-  std::vector<SearchMatches<L>> searchWithLimit(const EGraph<L, A> &egraph,
-                                                size_t limit) const override {
-    return pattern_.searchWithLimit(egraph, limit);
+  std::vector<SearchMatches<L>>
+  searchWithLimit(const EGraph<L, A> &egraph, size_t limit,
+                  const WorkControl *control = nullptr) const override {
+    return pattern_.searchWithLimit(egraph, limit, control);
   }
 
   std::vector<Var> vars() const override { return pattern_.vars(); }
@@ -207,14 +217,15 @@ public:
       : pattern_(std::move(pattern)) {}
 
   std::optional<SearchMatches<L>>
-  searchEClassWithLimit(const EGraph<L, A> &egraph, Id eclass,
-                        size_t limit) const override {
-    return pattern_.searchEClassWithLimit(egraph, eclass, limit);
+  searchEClassWithLimit(const EGraph<L, A> &egraph, Id eclass, size_t limit,
+                        const WorkControl *control = nullptr) const override {
+    return pattern_.searchEClassWithLimit(egraph, eclass, limit, control);
   }
 
-  std::vector<SearchMatches<L>> searchWithLimit(const EGraph<L, A> &egraph,
-                                                size_t limit) const override {
-    return pattern_.searchWithLimit(egraph, limit);
+  std::vector<SearchMatches<L>>
+  searchWithLimit(const EGraph<L, A> &egraph, size_t limit,
+                  const WorkControl *control = nullptr) const override {
+    return pattern_.searchWithLimit(egraph, limit, control);
   }
 
   std::vector<Var> vars() const override { return pattern_.vars(); }
@@ -304,17 +315,22 @@ public:
                                const std::vector<SearchMatches<L>> &matches,
                                const Symbol &rule_name) const override {
     std::vector<Id> ids;
+    size_t expected = 0;
+    for (const auto &match : matches) {
+      expected += match.substs.size();
+    }
+    ids.reserve(expected);
     for (const auto &match : matches) {
       const PatternAst<L> *match_ast = nullptr;
       if (egraph.areExplanationsEnabled()) {
-        match_ast = match.ast ? &*match.ast : nullptr;
+        match_ast = match.ast.get();
       }
       for (const auto &subst : match.substs) {
         if (!condition_(egraph, match.eclass, subst)) {
           continue;
         }
-        auto added = applier_->applyOne(egraph, match.eclass, subst,
-                                        match_ast, rule_name);
+        auto added = applier_->applyOne(egraph, match.eclass, subst, match_ast,
+                                        rule_name);
         ids.insert(ids.end(), added.begin(), added.end());
       }
     }
@@ -361,17 +377,22 @@ public:
                                const std::vector<SearchMatches<L>> &matches,
                                const Symbol &rule_name) const override {
     std::vector<Id> ids;
+    size_t expected = 0;
+    for (const auto &match : matches) {
+      expected += match.substs.size();
+    }
+    ids.reserve(expected);
     for (const auto &match : matches) {
       const PatternAst<L> *match_ast = nullptr;
       if (egraph.areExplanationsEnabled()) {
-        match_ast = match.ast ? &*match.ast : nullptr;
+        match_ast = match.ast.get();
       }
       for (const auto &subst : match.substs) {
         if (!condition_(egraph, match.eclass, subst)) {
           continue;
         }
-        auto added = applier_->applyOne(egraph, match.eclass, subst,
-                                        match_ast, rule_name);
+        auto added = applier_->applyOne(egraph, match.eclass, subst, match_ast,
+                                        rule_name);
         ids.insert(ids.end(), added.begin(), added.end());
       }
     }
@@ -421,9 +442,10 @@ public:
     return searcher_->search(egraph);
   }
 
-  std::vector<SearchMatches<L>> searchWithLimit(const EGraph<L, A> &egraph,
-                                                size_t limit) const {
-    return searcher_->searchWithLimit(egraph, limit);
+  std::vector<SearchMatches<L>>
+  searchWithLimit(const EGraph<L, A> &egraph, size_t limit,
+                  const WorkControl *control = nullptr) const {
+    return searcher_->searchWithLimit(egraph, limit, control);
   }
 
   std::vector<Id> apply(EGraph<L, A> &egraph,
@@ -464,8 +486,7 @@ public:
     this->validateBoundVars();
   }
 
-  Rewrite(Symbol name, Pattern<L> searcher,
-          ConditionalApplier<L, A> applier)
+  Rewrite(Symbol name, Pattern<L> searcher, ConditionalApplier<L, A> applier)
       : Rewrite(
             std::move(name),
             std::make_shared<PatternSearcher<L, A>>(std::move(searcher)),
@@ -494,8 +515,7 @@ inline Rewrite<L, A> makeRewrite(Symbol name, std::string_view lhs,
 }
 
 template <typename L, typename A = NoAnalysis<L>, typename C>
-inline Rewrite<L, A> makeConditionalRewrite(Symbol name,
-                                            std::string_view lhs,
+inline Rewrite<L, A> makeConditionalRewrite(Symbol name, std::string_view lhs,
                                             std::string_view rhs, C condition) {
   auto searcher = Pattern<L>::parse(lhs);
   auto bound_vars = searcher.vars();
@@ -506,15 +526,13 @@ inline Rewrite<L, A> makeConditionalRewrite(Symbol name,
       throw std::runtime_error("Rewrite condition refers to unbound variable");
     }
   }
-  return Rewrite<L, A>(
-      std::move(name), std::move(searcher),
-      ConditionalApplierT<L, A, std::decay_t<C>>(std::move(condition),
-                                                 Pattern<L>::parse(rhs)));
+  return Rewrite<L, A>(std::move(name), std::move(searcher),
+                       ConditionalApplierT<L, A, std::decay_t<C>>(
+                           std::move(condition), Pattern<L>::parse(rhs)));
 }
 
 template <typename L, typename A = NoAnalysis<L>>
-inline Rewrite<L, A> makeMultiRewrite(Symbol name,
-                                      MultiPattern<L> searcher,
+inline Rewrite<L, A> makeMultiRewrite(Symbol name, MultiPattern<L> searcher,
                                       MultiPattern<L> applier) {
   return Rewrite<L, A>(std::move(name), std::move(searcher),
                        std::move(applier));
@@ -552,9 +570,8 @@ makeConditionalRewriteBorrow(Symbol name, std::string_view lhs,
   }
   auto owned_searcher =
       std::make_shared<PatternSearcher<L, A>>(std::move(searcher));
-  auto applier =
-      std::make_shared<ConditionalApplierT<L, A, C>>(condition,
-                                                     Pattern<L>::parse(rhs));
+  auto applier = std::make_shared<ConditionalApplierT<L, A, C>>(
+      condition, Pattern<L>::parse(rhs));
   return RewriteBorrow<L, A>(std::move(name), std::move(owned_searcher),
                              std::move(applier));
 }

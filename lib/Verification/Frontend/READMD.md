@@ -5,7 +5,7 @@ This directory is the container for verification-language frontends.
 
 ## Boolean Program Frontend
 
-The active implementation lives in [`BooleanProgram/`](BooleanProgram/) and
+The active implementation lives alongside this document and
 contains the hand-written C++ parser plus lowering to the internal predicate
 relation representation in
 `lib/Dataflow/NPA/Domains/PredicateRelationDomain.cpp`.

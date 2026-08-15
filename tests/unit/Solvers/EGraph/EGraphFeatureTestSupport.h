@@ -26,8 +26,9 @@ struct BorrowedSearcher final : Searcher<SymbolLang> {
 
   std::optional<SearchMatches<SymbolLang>>
   searchEClassWithLimit(const EGraph<SymbolLang> &egraph, Id eclass,
-                        size_t limit) const override {
-    return pattern.searchEClassWithLimit(egraph, eclass, limit);
+                        size_t limit,
+                        const WorkControl *control = nullptr) const override {
+    return pattern.searchEClassWithLimit(egraph, eclass, limit, control);
   }
 
   std::vector<Var> vars() const override { return pattern.vars(); }
@@ -86,6 +87,26 @@ struct CountingCostFn : CostFunction<CountingCostFn, SymbolLang, size_t> {
     }
     return total;
   }
+};
+
+struct SharedCountingCostFn
+    : CostFunction<SharedCountingCostFn, SymbolLang, size_t> {
+  using Cost = size_t;
+
+  explicit SharedCountingCostFn(std::shared_ptr<size_t> calls)
+      : calls(std::move(calls)) {}
+
+  template <typename ChildCostFn>
+  Cost cost(const SymbolLang &node, ChildCostFn &&child_cost) {
+    ++*calls;
+    size_t total = 1;
+    for (Id child : node.children()) {
+      total += child_cost(child);
+    }
+    return total;
+  }
+
+  std::shared_ptr<size_t> calls;
 };
 
 } // namespace

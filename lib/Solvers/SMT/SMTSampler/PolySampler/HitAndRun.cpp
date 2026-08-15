@@ -85,15 +85,17 @@ bool hit_and_run_step(const std::vector<LinearConstraint> &constraints,
   std::uniform_int_distribution<int64_t> dist(t_low, t_high);
   int64_t t = dist(rng);
 
+  std::vector<int64_t> candidate = point;
   for (size_t i = 0; i < n; ++i) {
     __int128 next = static_cast<__int128>(point[i]) +
                     static_cast<__int128>(t) * direction[i];
     if (next < std::numeric_limits<int64_t>::min() ||
         next > std::numeric_limits<int64_t>::max())
       return false;
-    point[i] = static_cast<int64_t>(next);
+    candidate[i] = static_cast<int64_t>(next);
   }
 
+  point.swap(candidate);
   return true;
 }
 

@@ -1,7 +1,7 @@
 add_library(VerificationFrontend STATIC
-  BooleanProgram/BooleanProgram.cpp
-  BooleanProgram/BooleanProgramParser.cpp
-  BooleanProgram/PredicateProgramLowering.cpp
+  BooleanProgram.cpp
+  BooleanProgramParser.cpp
+  PredicateProgramLowering.cpp
 )
 
 target_link_libraries(VerificationFrontend

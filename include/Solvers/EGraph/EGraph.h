@@ -6,6 +6,9 @@
 #include "Solvers/EGraph/Subst.h"
 #include "Solvers/EGraph/UnionFind.h"
 
+#include <cassert>
+#include <cmath>
+
 #ifndef LOTUS_EGRAPH_ENABLE_JSON
 #define LOTUS_EGRAPH_ENABLE_JSON 1
 #endif
@@ -24,8 +27,6 @@ struct UnionEvent {
   Id left;
   Id right;
   Justification justification = Justification::congruence();
-  std::optional<std::string> left_expr;
-  std::optional<std::string> right_expr;
 };
 
 struct ExplanationConnection {
@@ -52,8 +53,10 @@ public:
   using Data = typename AnalysisT::Data;
   using Class = EClass<L, Data>;
 
-  EGraph() = default;
-  explicit EGraph(AnalysisT analysis) : analysis_(std::move(analysis)) {}
+  EGraph() { configureHashTables(); }
+  explicit EGraph(AnalysisT analysis) : analysis_(std::move(analysis)) {
+    configureHashTables();
+  }
 
   AnalysisT &analysis() { return analysis_; }
   const AnalysisT &analysis() const { return analysis_; }
@@ -61,38 +64,33 @@ public:
   std::vector<std::reference_wrapper<const Class>> classes() const {
     assertClean();
     std::vector<std::reference_wrapper<const Class>> out;
-    out.reserve(classes_.size());
-    for (const auto &[_, klass] : classes_) {
-      out.emplace_back(klass);
+    out.reserve(class_count_);
+    for (Id id : class_ids_) {
+      out.emplace_back(classAt(id));
     }
-    std::sort(out.begin(), out.end(), [](const auto &lhs, const auto &rhs) {
-      return lhs.get().id < rhs.get().id;
-    });
     return out;
   }
 
   std::vector<std::reference_wrapper<Class>> classesMut() {
     std::vector<std::reference_wrapper<Class>> out;
-    out.reserve(classes_.size());
-    for (auto &[_, klass] : classes_) {
-      out.emplace_back(klass);
+    out.reserve(class_count_);
+    for (auto &klass : classes_) {
+      if (klass) {
+        out.emplace_back(*klass);
+      }
     }
-    std::sort(out.begin(), out.end(), [](const auto &lhs, const auto &rhs) {
-      return lhs.get().id < rhs.get().id;
-    });
     return out;
   }
 
-  std::vector<Id> classesForOp(const typename L::Discriminant &op) const {
+  const std::vector<Id> &
+  classesForOp(const typename L::Discriminant &op) const {
     assertClean();
-    std::vector<Id> ids;
     auto it = classes_by_op_.find(op);
     if (it == classes_by_op_.end()) {
-      return ids;
+      static const std::vector<Id> empty;
+      return empty;
     }
-    ids.insert(ids.end(), it->second.begin(), it->second.end());
-    std::sort(ids.begin(), ids.end());
-    return ids;
+    return it->second;
   }
 
   const std::vector<L> &nodes() const { return nodes_; }
@@ -100,31 +98,20 @@ public:
 
   bool empty() const { return memo_.empty(); }
   bool clean() const { return clean_; }
-  size_t totalSize() const { return memo_.size(); }
-  size_t totalNumberOfNodes() const {
-    size_t total = 0;
-    for (const auto &[_, klass] : classes_) {
-      total += klass.nodes.size();
-    }
-    return total;
-  }
-  size_t numberOfClasses() const { return classes_.size(); }
+  size_t totalSize() const { return live_node_count_; }
+  size_t memoSize() const { return memo_.size(); }
+  size_t totalNumberOfNodes() const { return live_node_count_; }
+  size_t numberOfClasses() const { return class_count_; }
 
   Id find(Id id) const { return union_find_.find(id); }
   Id findMut(Id id) { return union_find_.findMut(id); }
 
-  Class &operator[](Id id) { return classes_.at(findMut(id)); }
-  const Class &operator[](Id id) const { return classes_.at(find(id)); }
+  Class &operator[](Id id) { return classAt(findMut(id)); }
+  const Class &operator[](Id id) const { return classAt(find(id)); }
 
-  std::vector<Id> classIds() const {
+  const std::vector<Id> &classIds() const {
     assertClean();
-    std::vector<Id> ids;
-    ids.reserve(classes_.size());
-    for (const auto &[id, _] : classes_) {
-      ids.push_back(id);
-    }
-    std::sort(ids.begin(), ids.end());
-    return ids;
+    return class_ids_;
   }
 
   EGraph withExplanationsEnabled() const {
@@ -147,6 +134,7 @@ public:
     copy.union_events_.clear();
     copy.explanation_nodes_.clear();
     copy.uncanonical_memo_.clear();
+    copy.original_node_ids_.clear();
     return copy;
   }
 
@@ -203,15 +191,15 @@ public:
 
   EGraph copyWithoutUnions(AnalysisT analysis) const {
     if (!explanations_enabled_) {
-      throw std::runtime_error(
-          "Use withExplanationsEnabled before copying an e-graph without unions");
+      throw std::runtime_error("Use withExplanationsEnabled before copying an "
+                               "e-graph without unions");
     }
     EGraph copy(std::move(analysis));
     std::vector<Id> ids;
     ids.reserve(nodes_.size());
     for (const auto &node : nodes_) {
-      ids.push_back(copy.add(node.mapChildren(
-          [&](Id child) { return ids.at(child.index()); })));
+      ids.push_back(copy.add(
+          node.mapChildren([&](Id child) { return ids.at(child.index()); })));
     }
     return copy;
   }
@@ -230,16 +218,25 @@ public:
     }
 
     std::unordered_map<std::pair<Id, Id>, Id, PairHash> product_map;
+    std::unordered_set<std::pair<Id, Id>, PairHash> visited_pairs;
     std::vector<std::pair<L, Id>> enodes;
 
-    for (const auto &class1 : classes()) {
-      for (const auto &class2 : other.classes()) {
-        intersectClasses(other, enodes, class1.get().id, class2.get().id,
-                         product_map);
+    for (const auto &[discriminant, left_ids] : classes_by_op_) {
+      auto right_it = other.classes_by_op_.find(discriminant);
+      if (right_it == other.classes_by_op_.end()) {
+        continue;
+      }
+      for (Id left : left_ids) {
+        for (Id right : right_it->second) {
+          if (visited_pairs.emplace(left, right).second) {
+            intersectClasses(other, enodes, left, right, product_map);
+          }
+        }
       }
     }
 
-    return fromEnodes(std::move(enodes), std::move(analysis));
+    return fromEnodes(std::move(enodes), std::move(analysis),
+                      UnresolvedPolicy::Drop);
   }
 
   void egraphUnion(const EGraph &other) {
@@ -357,12 +354,10 @@ public:
         }
       }
 
-      if (!exact) {
-        for (size_t i = 0; i < nodes_.size(); ++i) {
-          if (nodes_[i] == materialized) {
-            exact = Id::fromIndex(i);
-            break;
-          }
+      if (!exact && explanations_enabled_) {
+        auto it = original_node_ids_.find(materialized);
+        if (it != original_node_ids_.end()) {
+          exact = it->second;
         }
       }
 
@@ -395,8 +390,7 @@ public:
     return id;
   }
 
-  std::pair<Id, bool> uniteChecked(Id lhs, Id rhs,
-                                   const Symbol &reason = {}) {
+  std::pair<Id, bool> uniteChecked(Id lhs, Id rhs, const Symbol &reason = {}) {
     std::optional<Justification> justification;
     if (reason != Symbol()) {
       justification = Justification::ruleJustification(reason);
@@ -421,12 +415,15 @@ public:
     auto matches1 = pat1.search(*this);
     auto matches2 = pat2.search(*this);
 
+    std::unordered_set<Id> rhs_classes;
+    rhs_classes.reserve(matches2.size());
+    for (const auto &rhs : matches2) {
+      rhs_classes.insert(find(rhs.eclass));
+    }
     std::vector<Id> out;
     for (const auto &lhs : matches1) {
-      for (const auto &rhs : matches2) {
-        if (find(lhs.eclass) == find(rhs.eclass)) {
-          out.push_back(lhs.eclass);
-        }
+      if (rhs_classes.count(find(lhs.eclass))) {
+        out.push_back(lhs.eclass);
       }
     }
     return out;
@@ -436,7 +433,7 @@ public:
     return !equivs(expr1, expr2).empty();
   }
 
-  #if LOTUS_EGRAPH_ENABLE_JSON
+#if LOTUS_EGRAPH_ENABLE_JSON
   json11::Json toJson() const {
     if (!clean_) {
       EGraph copy = *this;
@@ -464,11 +461,11 @@ public:
       json11::Json::array parents_json;
       parents_json.reserve(klass.parents.size());
       for (Id parent : klass.parents) {
-        parents_json.emplace_back(static_cast<int>(parent.value()));
+        parents_json.emplace_back(static_cast<double>(parent.value()));
       }
 
       classes_json.emplace_back(json11::Json::object{
-          {"id", static_cast<int>(klass.id.value())},
+          {"id", static_cast<double>(klass.id.value())},
           {"nodes", std::move(class_nodes)},
           {"parents", std::move(parents_json)},
       });
@@ -477,14 +474,15 @@ public:
     json11::Json::object root{
         {"nodes", std::move(nodes_json)},
         {"classes", std::move(classes_json)},
-        {"memo_size", static_cast<int>(memo_.size())},
+        {"memo_size", static_cast<double>(memo_.size())},
         {"clean", clean_},
         {"explanations_enabled", explanations_enabled_},
     };
     return root;
   }
 
-  static EGraph fromJson(const json11::Json &json, AnalysisT analysis = AnalysisT()) {
+  static EGraph fromJson(const json11::Json &json,
+                         AnalysisT analysis = AnalysisT()) {
     std::string error;
     if (!json.is_object()) {
       throw std::runtime_error("EGraph JSON must be an object");
@@ -508,17 +506,18 @@ public:
           !id_it->second.is_number() || !nodes_it->second.is_array()) {
         throw std::runtime_error("EClass JSON missing id or nodes");
       }
-      Id class_id =
-          Id::fromIndex(static_cast<size_t>(id_it->second.int_value()));
+      Id class_id = idFromJson(id_it->second, "EClass id");
       for (const auto &node_json : nodes_it->second.array_items()) {
         enodes.emplace_back(nodeFromJson(node_json), class_id);
       }
     }
 
-    return fromEnodes(std::move(enodes), std::move(analysis));
+    return fromEnodes(std::move(enodes), std::move(analysis),
+                      UnresolvedPolicy::Reject);
   }
 
-  static EGraph parseJson(std::string_view text, AnalysisT analysis = AnalysisT()) {
+  static EGraph parseJson(std::string_view text,
+                          AnalysisT analysis = AnalysisT()) {
     std::string error;
     auto json = json11::Json::parse(std::string(text), error);
     if (!error.empty()) {
@@ -526,12 +525,24 @@ public:
     }
     return fromJson(json, std::move(analysis));
   }
-  #endif
+#endif
 
   RecExpr<L> idToExpr(Id id) const {
+    if (explanations_enabled_) {
+      return originalExpr(id);
+    }
+
+    std::unordered_map<Id, size_t> choices;
+    std::unordered_set<Id> visiting;
+    Id canonical = find(id);
+    if (!chooseFiniteNode(canonical, choices, visiting)) {
+      throw std::runtime_error(
+          "E-class has no finite expression representative");
+    }
+
     std::unordered_map<Id, Id> cache;
     RecExpr<L> expr;
-    idToExprInternal(expr, id, cache);
+    materializeFiniteExpr(expr, canonical, choices, cache);
     return expr;
   }
 
@@ -544,7 +555,7 @@ public:
 
   RecExpr<L> idToExprFlat(Id id) const {
     RecExpr<L> expr;
-    const auto &node = classes_.at(find(id)).nodes.front();
+    const auto &node = classAt(find(id)).nodes.front();
     expr.add(node);
     return expr;
   }
@@ -584,7 +595,7 @@ public:
 
   void setAnalysisData(Id id, Data data) {
     Id canonical = findMut(id);
-    auto &klass = classes_.at(canonical);
+    auto &klass = classAt(canonical);
     klass.data = std::move(data);
     analysis_pending_.extend(klass.parents);
     analysis_.modify(*this, canonical);
@@ -592,18 +603,20 @@ public:
 
   size_t rebuild() {
     size_t unions = processPending();
-    rebuildClasses();
+#ifndef NDEBUG
+    assertCongruenceInvariant();
+#endif
     clean_ = true;
     return unions;
   }
 
 private:
-  #if LOTUS_EGRAPH_ENABLE_JSON
+#if LOTUS_EGRAPH_ENABLE_JSON
   static json11::Json nodeToJson(const L &node) {
     json11::Json::array children;
     children.reserve(node.children().size());
     for (Id child : node.children()) {
-      children.emplace_back(static_cast<int>(child.value()));
+      children.emplace_back(static_cast<double>(child.value()));
     }
     return json11::Json::object{{"op", displayNode(node)},
                                 {"children", std::move(children)}};
@@ -627,7 +640,7 @@ private:
       if (!child_json.is_number()) {
         throw std::runtime_error("Node child must be numeric");
       }
-      children.push_back(Id::fromIndex(static_cast<size_t>(child_json.int_value())));
+      children.push_back(idFromJson(child_json, "Node child"));
     }
 
     auto node = LanguageOps<L>::fromOp(op_it->second.string_value(), children);
@@ -636,7 +649,22 @@ private:
     }
     return *node;
   }
-  #endif
+
+  static Id idFromJson(const json11::Json &json, std::string_view field) {
+    if (!json.is_number()) {
+      throw std::runtime_error(std::string(field) + " must be numeric");
+    }
+
+    double value = json.number_value();
+    constexpr double max_id =
+        static_cast<double>(std::numeric_limits<uint32_t>::max());
+    if (!std::isfinite(value) || value < 0.0 || std::floor(value) != value ||
+        value > max_id) {
+      throw std::runtime_error(std::string(field) + " is outside the Id range");
+    }
+    return Id(static_cast<uint32_t>(value));
+  }
+#endif
 
   template <typename SrcL, typename SrcA, typename DstL, typename DstA>
   friend struct LanguageMapper;
@@ -648,41 +676,121 @@ private:
     }
   }
 
+  void configureHashTables() {
+    memo_.max_load_factor(0.7f);
+    uncanonical_memo_.max_load_factor(0.7f);
+    original_node_ids_.max_load_factor(0.7f);
+    classes_by_op_.max_load_factor(0.7f);
+  }
+
+  bool hasClass(Id id) const {
+    return id.index() < classes_.size() && classes_[id.index()].has_value();
+  }
+
+  Class &classAt(Id id) { return classes_.at(id.index()).value(); }
+  const Class &classAt(Id id) const { return classes_.at(id.index()).value(); }
+
+  static void insertSortedUnique(std::vector<Id> &ids, Id id) {
+    auto position = std::lower_bound(ids.begin(), ids.end(), id);
+    if (position == ids.end() || *position != id) {
+      ids.insert(position, id);
+    }
+  }
+
+  static void eraseSorted(std::vector<Id> &ids, Id id) {
+    auto position = std::lower_bound(ids.begin(), ids.end(), id);
+    if (position != ids.end() && *position == id) {
+      ids.erase(position);
+    }
+  }
+
+  std::vector<Id> canonicalChildren(const std::vector<L> &nodes) {
+    std::vector<Id> children;
+    for (const auto &node : nodes) {
+      for (Id child : node.children()) {
+        children.push_back(findMut(child));
+      }
+    }
+    std::sort(children.begin(), children.end());
+    children.erase(std::unique(children.begin(), children.end()),
+                   children.end());
+    return children;
+  }
+
+  std::vector<typename L::Discriminant>
+  classDiscriminants(const std::vector<L> &nodes) const {
+    std::vector<typename L::Discriminant> discriminants;
+    for (const auto &node : nodes) {
+      auto discriminant = node.discriminant();
+      if (std::find(discriminants.begin(), discriminants.end(), discriminant) ==
+          discriminants.end()) {
+        discriminants.push_back(std::move(discriminant));
+      }
+    }
+    return discriminants;
+  }
+
+  void addClassToOp(const typename L::Discriminant &op, Id id) {
+    insertSortedUnique(classes_by_op_[op], id);
+  }
+
+  void removeClassFromOp(const typename L::Discriminant &op, Id id) {
+    auto found = classes_by_op_.find(op);
+    if (found == classes_by_op_.end()) {
+      return;
+    }
+    eraseSorted(found->second, id);
+    if (found->second.empty()) {
+      classes_by_op_.erase(found);
+    }
+  }
+
   void ensureNodeStorage(Id id, const L &node) {
     if (nodes_.size() != id.index()) {
       throw std::runtime_error("EGraph node storage out of sync");
     }
     nodes_.push_back(node);
     if (explanations_enabled_) {
+      original_node_ids_.try_emplace(node, id);
+    }
+    if (explanations_enabled_) {
       if (explanation_nodes_.size() != id.index()) {
         throw std::runtime_error("EGraph explanation node storage out of sync");
       }
       explanation_nodes_.push_back(ExplanationNode{
           {},
-          ExplanationConnection{
-              Justification::congruence(), false, id, id}});
+          ExplanationConnection{Justification::congruence(), false, id, id}});
     }
   }
 
   void makeExplanationLeader(Id node) {
-    auto next = explanation_nodes_.at(node.index()).parent_connection.next;
-    if (next == node) {
-      return;
+    std::vector<std::pair<Id, ExplanationConnection>> path;
+    for (Id current = node;;) {
+      auto connection =
+          explanation_nodes_.at(current.index()).parent_connection;
+      if (connection.next == current) {
+        break;
+      }
+      path.emplace_back(current, connection);
+      current = connection.next;
     }
 
-    makeExplanationLeader(next);
-    const auto node_connection =
-        explanation_nodes_.at(node.index()).parent_connection;
-    explanation_nodes_.at(next.index()).parent_connection =
-        ExplanationConnection{node_connection.justification,
-                              !node_connection.is_rewrite_forward, node, next};
+    for (auto it = path.rbegin(); it != path.rend(); ++it) {
+      Id current = it->first;
+      const auto &connection = it->second;
+      explanation_nodes_.at(connection.next.index()).parent_connection =
+          ExplanationConnection{connection.justification,
+                                !connection.is_rewrite_forward, current,
+                                connection.next};
+    }
   }
 
   void addExplanationNeighbor(Id lhs, Id rhs,
                               const Justification &justification,
                               bool forward) {
-    explanation_nodes_.at(lhs.index()).neighbors.push_back(
-        ExplanationConnection{justification, forward, rhs, lhs});
+    explanation_nodes_.at(lhs.index())
+        .neighbors.push_back(
+            ExplanationConnection{justification, forward, rhs, lhs});
   }
 
   void addAlternateRewrite(Id lhs, Id rhs, const Symbol &reason) {
@@ -690,12 +798,13 @@ private:
       return;
     }
     Justification justification = Justification::ruleJustification(reason);
-    explanation_nodes_.at(lhs.index()).neighbors.insert(
-        explanation_nodes_.at(lhs.index()).neighbors.begin(),
-        ExplanationConnection{justification, true, rhs, lhs});
-    explanation_nodes_.at(rhs.index()).neighbors.insert(
-        explanation_nodes_.at(rhs.index()).neighbors.begin(),
-        ExplanationConnection{justification, false, lhs, rhs});
+    explanation_nodes_.at(lhs.index())
+        .neighbors.insert(explanation_nodes_.at(lhs.index()).neighbors.begin(),
+                          ExplanationConnection{justification, true, rhs, lhs});
+    explanation_nodes_.at(rhs.index())
+        .neighbors.insert(
+            explanation_nodes_.at(rhs.index()).neighbors.begin(),
+            ExplanationConnection{justification, false, lhs, rhs});
   }
 
   void recordExplanation(Id lhs, Id rhs,
@@ -748,38 +857,63 @@ private:
     return id;
   }
 
+  enum class UnresolvedPolicy { Drop, Reject };
+
   static EGraph fromEnodes(std::vector<std::pair<L, Id>> enodes,
-                           AnalysisT analysis) {
+                           AnalysisT analysis,
+                           UnresolvedPolicy unresolved_policy) {
     EGraph egraph(std::move(analysis));
     std::unordered_map<Id, Id> ids;
+    std::unordered_map<Id, std::vector<size_t>> waiters;
+    std::vector<size_t> missing(enodes.size(), 0);
+    std::vector<bool> processed(enodes.size(), false);
+    std::deque<size_t> ready;
+    size_t remaining = enodes.size();
 
-    bool changed = true;
-    while (changed) {
-      changed = false;
-      for (const auto &[enode, id] : enodes) {
-        bool valid = true;
-        for (Id child : enode.children()) {
-          if (!ids.count(child)) {
-            valid = false;
-            break;
+    for (size_t i = 0; i < enodes.size(); ++i) {
+      std::vector<Id> dependencies(enodes[i].first.children().begin(),
+                                   enodes[i].first.children().end());
+      std::sort(dependencies.begin(), dependencies.end());
+      dependencies.erase(std::unique(dependencies.begin(), dependencies.end()),
+                         dependencies.end());
+      missing[i] = dependencies.size();
+      if (missing[i] == 0) {
+        ready.push_back(i);
+      }
+      for (Id child : dependencies) {
+        waiters[child].push_back(i);
+      }
+    }
+
+    while (!ready.empty()) {
+      size_t index = ready.front();
+      ready.pop_front();
+      if (processed[index]) {
+        continue;
+      }
+
+      const auto &[enode, external_id] = enodes[index];
+      L mapped = enode.mapChildren([&](Id child) { return ids.at(child); });
+      auto existing = egraph.lookupInternal(mapped);
+      Id added = existing ? *existing : egraph.add(mapped);
+      auto [it, inserted] = ids.try_emplace(external_id, added);
+      if (!inserted) {
+        egraph.unite(it->second, added);
+      } else if (auto waiting = waiters.find(external_id);
+                 waiting != waiters.end()) {
+        for (size_t dependent : waiting->second) {
+          if (missing[dependent] > 0 && --missing[dependent] == 0) {
+            ready.push_back(dependent);
           }
         }
-        if (!valid) {
-          continue;
-        }
-
-        L mapped = enode.mapChildren([&](Id child) { return ids.at(child); });
-        if (egraph.lookupInternal(mapped)) {
-          continue;
-        }
-
-        Id added = egraph.add(mapped);
-        auto [it, inserted] = ids.try_emplace(id, added);
-        if (!inserted) {
-          egraph.unite(it->second, added);
-        }
-        changed = true;
       }
+      processed[index] = true;
+      --remaining;
+    }
+
+    if (remaining > 0 && unresolved_policy == UnresolvedPolicy::Reject) {
+      throw std::runtime_error(
+          "EGraph input contains cyclic or unresolved e-node references");
     }
 
     return egraph;
@@ -789,21 +923,23 @@ private:
       const EGraph &other, std::vector<std::pair<L, Id>> &result, Id class1,
       Id class2,
       std::unordered_map<std::pair<Id, Id>, Id, PairHash> &product_map) const {
-    Id result_id = getProductId(class1, class2, product_map);
-    for (const auto &node1 : classes_.at(class1).nodes) {
-      for (const auto &node2 : other.classes_.at(class2).nodes) {
-        if (!node1.matches(node2)) {
-          continue;
+    const auto &left = classAt(class1);
+    const auto &right = other.classAt(class2);
+    std::optional<Id> result_id;
+    for (const auto &node1 : left.nodes) {
+      forEachMatchingNode(right, node1, [&](const L &node2) {
+        if (!result_id) {
+          result_id = getProductId(class1, class2, product_map);
         }
-
         auto merged = node1;
         for (size_t i = 0; i < node1.children().size(); ++i) {
           merged.childrenMut()[i] =
               getProductId(find(node1.children()[i]),
                            other.find(node2.children()[i]), product_map);
         }
-        result.emplace_back(std::move(merged), result_id);
-      }
+        result.emplace_back(std::move(merged), *result_id);
+        return true;
+      });
     }
   }
 
@@ -812,21 +948,34 @@ private:
     ensureNodeStorage(id, original);
 
     Class klass{id, {canonical}, AnalysisT::make(*this, original, id), {}};
-    for (Id child : canonical.children()) {
-      classes_.at(findMut(child)).parents.push_back(id);
-    }
+    klass.nodes_dirty = false;
 
-    classes_.emplace(id, std::move(klass));
+    if (classes_.size() <= id.index()) {
+      classes_.resize(id.index() + 1);
+    }
+    classes_[id.index()] = std::move(klass);
+    if (active_class_positions_.size() <= id.index()) {
+      active_class_positions_.resize(id.index() + 1,
+                                     std::numeric_limits<uint32_t>::max());
+    }
+    active_class_positions_[id.index()] =
+        static_cast<uint32_t>(active_class_ids_.size());
+    active_class_ids_.push_back(id);
+    ++class_count_;
+    for (Id child : canonicalChildren(classes_[id.index()]->nodes)) {
+      insertSortedUnique(classAt(child).parents, id);
+    }
+    addClassToOp(canonical.discriminant(), id);
     memo_[canonical] = id;
-    pending_.push_back(id);
+    ++live_node_count_;
     analysis_.modify(*this, id);
     return id;
   }
 
   Id addInstantiationNoncanonical(const PatternAst<L> &pat, const Subst &subst);
 
-  std::pair<Id, bool> uniteImpl(Id lhs, Id rhs,
-                                const std::optional<Justification> &justification) {
+  std::pair<Id, bool>
+  uniteImpl(Id lhs, Id rhs, const std::optional<Justification> &justification) {
     analysis_.preUnion(*this, lhs, rhs, justification);
 
     clean_ = false;
@@ -842,7 +991,11 @@ private:
       return {lhs_class, false};
     }
 
-    if (classes_.at(lhs_class).parents.size() < classes_.at(rhs_class).parents.size()) {
+    const auto &lhs_before = classAt(lhs_class);
+    const auto &rhs_before = classAt(rhs_class);
+    if (lhs_before.parents.size() < rhs_before.parents.size() ||
+        (lhs_before.parents.size() == rhs_before.parents.size() &&
+         lhs_before.nodes.size() < rhs_before.nodes.size())) {
       std::swap(lhs_class, rhs_class);
     }
 
@@ -850,12 +1003,20 @@ private:
     recordUnion(original_lhs, original_rhs, justification);
     union_find_.unite(lhs_class, rhs_class);
 
-    auto right_class = std::move(classes_.at(rhs_class));
-    classes_.erase(rhs_class);
-    auto &left_class = classes_.at(lhs_class);
+    auto right_class = std::move(classAt(rhs_class));
+    classes_[rhs_class.index()].reset();
+    size_t removed_position = active_class_positions_.at(rhs_class.index());
+    Id moved_id = active_class_ids_.back();
+    active_class_ids_[removed_position] = moved_id;
+    active_class_positions_[moved_id.index()] =
+        static_cast<uint32_t>(removed_position);
+    active_class_ids_.pop_back();
+    active_class_positions_[rhs_class.index()] =
+        std::numeric_limits<uint32_t>::max();
+    --class_count_;
+    auto &left_class = classAt(lhs_class);
 
-    pending_.insert(pending_.end(), right_class.parents.begin(),
-                    right_class.parents.end());
+    pending_.extend(right_class.parents);
     DidMerge did_merge =
         analysis_.merge(left_class.data, std::move(right_class.data));
     if (did_merge.left_changed) {
@@ -865,11 +1026,36 @@ private:
       analysis_pending_.extend(right_class.parents);
     }
 
-    left_class.nodes.insert(left_class.nodes.end(), right_class.nodes.begin(),
-                            right_class.nodes.end());
+    size_t left_parent_count = left_class.parents.size();
+    left_class.parents.reserve(left_parent_count + right_class.parents.size());
     left_class.parents.insert(left_class.parents.end(),
                               right_class.parents.begin(),
                               right_class.parents.end());
+    std::inplace_merge(left_class.parents.begin(),
+                       left_class.parents.begin() + left_parent_count,
+                       left_class.parents.end());
+    left_class.parents.erase(
+        std::unique(left_class.parents.begin(), left_class.parents.end()),
+        left_class.parents.end());
+
+    for (const auto &op : classDiscriminants(right_class.nodes)) {
+      removeClassFromOp(op, rhs_class);
+      addClassToOp(op, lhs_class);
+    }
+    for (Id child : canonicalChildren(right_class.nodes)) {
+      auto &parents = classAt(child).parents;
+      eraseSorted(parents, rhs_class);
+      insertSortedUnique(parents, lhs_class);
+    }
+
+    left_class.nodes.reserve(left_class.nodes.size() +
+                             right_class.nodes.size());
+    left_class.nodes.insert(left_class.nodes.end(),
+                            std::make_move_iterator(right_class.nodes.begin()),
+                            std::make_move_iterator(right_class.nodes.end()));
+    left_class.matching_nodes.reset();
+    left_class.nodes_dirty = true;
+    rebuild_pending_.insert(lhs_class);
 
     analysis_.modify(*this, lhs_class);
     return {lhs_class, true};
@@ -879,61 +1065,119 @@ private:
                    const std::optional<Justification> &justification) {
     if (explanations_enabled_) {
       union_events_.push_back(
-          {lhs, rhs, justification.value_or(Justification::congruence()),
-           tryIdToString(lhs), tryIdToString(rhs)});
-    }
-  }
-
-  std::optional<std::string> tryIdToString(Id id) const {
-    auto it = classes_.find(find(id));
-    if (it == classes_.end() || it->second.nodes.empty()) {
-      return std::nullopt;
-    }
-
-    try {
-      return idToExpr(id).toString();
-    } catch (...) {
-      return std::nullopt;
+          {lhs, rhs, justification.value_or(Justification::congruence())});
     }
   }
 
   void rebuildClasses() {
-    classes_by_op_.clear();
+    class_ids_ = active_class_ids_;
+    std::sort(class_ids_.begin(), class_ids_.end());
 
-    for (auto &[_, klass] : classes_) {
+    while (auto dirty_id = rebuild_pending_.pop()) {
+      Id owner = findMut(*dirty_id);
+      if (!hasClass(owner)) {
+        continue;
+      }
+      auto &klass = classAt(owner);
+      if (!klass.nodes_dirty) {
+        continue;
+      }
+
+      size_t old_size = klass.nodes.size();
       for (auto &node : klass.nodes) {
         canonicalizeInPlace(node);
       }
       std::sort(klass.nodes.begin(), klass.nodes.end());
       klass.nodes.erase(std::unique(klass.nodes.begin(), klass.nodes.end()),
                         klass.nodes.end());
+      live_node_count_ -= old_size - klass.nodes.size();
+      klass.rebuildMatchingIndex();
+      klass.nodes_dirty = false;
+    }
+  }
 
-      for (size_t i = 0; i < klass.nodes.size(); ++i) {
-        if (i == 0 || !klass.nodes[i - 1].matches(klass.nodes[i])) {
-          classes_by_op_[klass.nodes[i].discriminant()].insert(klass.id);
+  size_t repairCongruence() {
+    size_t unions = 0;
+    UniqueQueue<Id> dirty;
+    dirty.extend(pending_);
+    pending_.clear();
+
+    while (!dirty.empty() || !pending_.empty()) {
+      if (!pending_.empty()) {
+        dirty.extend(pending_);
+        pending_.clear();
+      }
+      auto dirty_id = dirty.pop();
+      if (!dirty_id) {
+        continue;
+      }
+
+      Id owner = findMut(*dirty_id);
+      if (!hasClass(owner)) {
+        continue;
+      }
+      classAt(owner).nodes_dirty = true;
+      rebuild_pending_.insert(owner);
+      std::vector<L> nodes = classAt(owner).nodes;
+
+      for (const auto &old_node : nodes) {
+        auto old = memo_.find(old_node);
+        if (old != memo_.end() && find(old->second) == owner) {
+          memo_.erase(old);
         }
       }
+
+      for (auto node : nodes) {
+        canonicalizeInPlace(node);
+        owner = findMut(owner);
+        auto [memo_it, inserted] = memo_.try_emplace(node, owner);
+        if (inserted) {
+          continue;
+        }
+        Id existing = findMut(memo_it->second);
+        if (existing == owner) {
+          continue;
+        }
+        auto [merged_owner, changed] =
+            uniteImpl(existing, owner, Justification::congruence());
+        memo_it->second = merged_owner;
+        owner = merged_owner;
+        unions += changed ? 1 : 0;
+      }
     }
+
+    if (explanations_enabled_) {
+      std::unordered_map<L, Id> explanation_memo;
+      explanation_memo.reserve(memo_.size());
+      for (const auto &[original_node, original] : original_node_ids_) {
+        L node = original_node;
+        canonicalizeInPlace(node);
+        auto live = memo_.find(node);
+        if (live == memo_.end()) {
+          continue;
+        }
+        if (find(original) == find(live->second)) {
+          explanation_memo.try_emplace(std::move(node), original);
+        }
+      }
+      for (const auto &[node, id] : memo_) {
+        explanation_memo.try_emplace(node, findMut(id));
+      }
+      memo_ = std::move(explanation_memo);
+    }
+    return unions;
   }
 
   size_t processPending() {
     size_t unions = 0;
-    while (!pending_.empty() || !analysis_pending_.empty()) {
-      while (!pending_.empty()) {
-        Id id = pending_.back();
-        pending_.pop_back();
+    bool repair_needed = !clean_ || !pending_.empty();
 
-        L node = nodes_.at(id.index());
-        canonicalizeInPlace(node);
-
-        auto existing = memo_.find(node);
-        if (existing != memo_.end()) {
-          auto [_, changed] =
-              uniteImpl(existing->second, id, Justification::congruence());
-          unions += changed ? 1u : 0u;
-        } else {
-          memo_[node] = id;
-        }
+    while (repair_needed || !analysis_pending_.empty()) {
+      if (repair_needed) {
+        unions += repairCongruence();
+        rebuildClasses();
+        pending_.clear();
+        repair_needed = false;
       }
 
       while (!analysis_pending_.empty()) {
@@ -941,63 +1185,123 @@ private:
         if (!class_id_opt) {
           break;
         }
-        Id class_id = *class_id_opt;
 
-        if (class_id.index() >= nodes_.size()) {
+        Id canonical = findMut(*class_id_opt);
+        if (!hasClass(canonical)) {
           continue;
         }
 
-        L node = nodes_[class_id.index()];
-        Id canonical = findMut(class_id);
-        auto it = classes_.find(canonical);
-        if (it == classes_.end()) {
-          continue;
+        auto nodes = classAt(canonical).nodes;
+        bool data_changed = false;
+        for (const auto &node : nodes) {
+          Data node_data = AnalysisT::remake(*this, node, canonical);
+          DidMerge did_merge =
+              analysis_.merge(classAt(canonical).data, std::move(node_data));
+          data_changed = data_changed || did_merge.left_changed;
         }
 
-        Data node_data = AnalysisT::remake(*this, node, canonical);
-        DidMerge did_merge =
-            analysis_.merge(it->second.data, std::move(node_data));
-        if (did_merge.left_changed) {
-          analysis_pending_.extend(it->second.parents);
+        if (data_changed) {
+          analysis_pending_.extend(classAt(canonical).parents);
           analysis_.modify(*this, canonical);
         }
       }
+
+      repair_needed = !pending_.empty();
     }
 
-    recomputeParents();
     return unions;
   }
 
-  void recomputeParents() {
-    for (auto &[_, klass] : classes_) {
-      klass.parents.clear();
+  bool chooseFiniteNode(Id id, std::unordered_map<Id, size_t> &choices,
+                        std::unordered_set<Id> &visiting) const {
+    Id canonical = find(id);
+    if (choices.count(canonical)) {
+      return true;
     }
-    for (auto &[id, klass] : classes_) {
-      for (const auto &node : klass.nodes) {
-        for (Id child : node.children()) {
-          classes_.at(findMut(child)).parents.push_back(id);
+    if (!visiting.insert(canonical).second) {
+      return false;
+    }
+
+    const auto &klass = classAt(canonical);
+    for (size_t index = 0; index < klass.nodes.size(); ++index) {
+      const auto &node = klass.nodes[index];
+      bool finite = true;
+      for (Id child : node.children()) {
+        if (!chooseFiniteNode(child, choices, visiting)) {
+          finite = false;
+          break;
         }
       }
+      if (finite) {
+        choices.emplace(canonical, index);
+        visiting.erase(canonical);
+        return true;
+      }
     }
+
+    visiting.erase(canonical);
+    return false;
   }
 
-  Id idToExprInternal(RecExpr<L> &expr, Id id,
-                      std::unordered_map<Id, Id> &cache) const {
-    auto it = cache.find(id);
-    if (it != cache.end()) {
+  Id materializeFiniteExpr(RecExpr<L> &expr, Id id,
+                           const std::unordered_map<Id, size_t> &choices,
+                           std::unordered_map<Id, Id> &cache) const {
+    Id canonical = find(id);
+    if (auto it = cache.find(canonical); it != cache.end()) {
       return it->second;
     }
 
-    const bool preserve_original = explanations_enabled_;
-    const auto &node =
-        preserve_original ? nodes_.at(id.index()) : classes_.at(find(id)).nodes.front();
+    const auto &node = classAt(canonical).nodes[choices.at(canonical)];
     auto materialized = node.mapChildren([&](Id child) {
-      return idToExprInternal(expr, preserve_original ? child : find(child), cache);
+      return materializeFiniteExpr(expr, child, choices, cache);
     });
     Id added = expr.add(materialized);
-    cache.emplace(id, added);
+    cache.emplace(canonical, added);
     return added;
   }
+
+#ifndef NDEBUG
+  void assertCongruenceInvariant() const {
+    std::unordered_map<L, Id> owners;
+    owners.reserve(totalNumberOfNodes());
+    std::vector<std::vector<Id>> expected_parents(classes_.size());
+    std::unordered_map<typename L::Discriminant, std::vector<Id>> expected_ops;
+
+    for (Id class_id : active_class_ids_) {
+      const auto &klass = classAt(class_id);
+      Id id = klass.id;
+      assert(find(id) == id);
+      for (auto node : klass.nodes) {
+        canonicalizeInPlace(node);
+        auto [it, inserted] = owners.emplace(node, id);
+        assert(inserted || find(it->second) == id);
+        for (Id child : node.children()) {
+          expected_parents[find(child).index()].push_back(id);
+        }
+        expected_ops[node.discriminant()].push_back(id);
+      }
+    }
+
+    assert(owners.size() == memo_.size());
+    for (const auto &[node, id] : memo_) {
+      auto it = owners.find(node);
+      assert(it != owners.end());
+      assert(find(it->second) == find(id));
+    }
+
+    for (Id id : active_class_ids_) {
+      auto &parents = expected_parents[id.index()];
+      std::sort(parents.begin(), parents.end());
+      parents.erase(std::unique(parents.begin(), parents.end()), parents.end());
+      assert(parents == classAt(id).parents);
+    }
+    for (auto &[_, ids] : expected_ops) {
+      std::sort(ids.begin(), ids.end());
+      ids.erase(std::unique(ids.begin(), ids.end()), ids.end());
+    }
+    assert(expected_ops == classes_by_op_);
+  }
+#endif
 
   Id originalExprInternal(RecExpr<L> &expr, Id id,
                           std::unordered_map<Id, Id> &cache) const {
@@ -1020,15 +1324,21 @@ private:
   AnalysisT analysis_;
   UnionFind union_find_;
   std::vector<L> nodes_;
+  std::unordered_map<L, Id> original_node_ids_;
   std::unordered_map<L, Id> memo_;
   std::unordered_map<L, Id> uncanonical_memo_;
-  std::vector<Id> pending_;
+  UniqueQueue<Id> pending_;
+  UniqueQueue<Id> rebuild_pending_;
   UniqueQueue<Id> analysis_pending_;
-  std::unordered_map<Id, Class> classes_;
-  std::unordered_map<typename L::Discriminant, std::unordered_set<Id>>
-      classes_by_op_;
+  std::vector<std::optional<Class>> classes_;
+  size_t class_count_ = 0;
+  std::vector<Id> active_class_ids_;
+  std::vector<uint32_t> active_class_positions_;
+  std::vector<Id> class_ids_;
+  std::unordered_map<typename L::Discriminant, std::vector<Id>> classes_by_op_;
   std::vector<UnionEvent> union_events_;
   std::vector<ExplanationNode> explanation_nodes_;
+  size_t live_node_count_ = 0;
   bool clean_ = false;
   bool explanations_enabled_ = false;
   bool optimize_explanation_lengths_ = true;
@@ -1064,6 +1374,8 @@ struct LanguageMapper {
     }
     result.data = mapData(src_eclass.data);
     result.parents = src_eclass.parents;
+    result.rebuildMatchingIndex();
+    result.nodes_dirty = false;
     return result;
   }
 
@@ -1079,18 +1391,32 @@ struct LanguageMapper {
       dst_egraph.memo_.emplace(mapNode(node), id);
     }
     dst_egraph.pending_ = src_egraph.pending_;
+    dst_egraph.rebuild_pending_ = src_egraph.rebuild_pending_;
     for (const auto &id : src_egraph.analysis_pending_) {
       dst_egraph.analysis_pending_.insert(id);
     }
     dst_egraph.clean_ = src_egraph.clean_;
+    dst_egraph.live_node_count_ = src_egraph.live_node_count_;
+    dst_egraph.active_class_ids_ = src_egraph.active_class_ids_;
+    dst_egraph.active_class_positions_ = src_egraph.active_class_positions_;
+    dst_egraph.class_ids_ = src_egraph.class_ids_;
     dst_egraph.explanations_enabled_ = false;
     dst_egraph.optimize_explanation_lengths_ = true;
 
-    for (const auto &[id, klass] : src_egraph.classes_) {
-      dst_egraph.classes_.emplace(id, mapEClass(klass));
+    dst_egraph.classes_.resize(src_egraph.classes_.size());
+    for (Id id : src_egraph.active_class_ids_) {
+      const auto &klass = src_egraph.classAt(id);
+      dst_egraph.classes_[id.index()] = mapEClass(klass);
     }
+    dst_egraph.class_count_ = src_egraph.class_count_;
     for (const auto &[discriminant, ids] : src_egraph.classes_by_op_) {
-      dst_egraph.classes_by_op_.emplace(mapDiscriminant(discriminant), ids);
+      auto &mapped_ids =
+          dst_egraph.classes_by_op_[mapDiscriminant(discriminant)];
+      mapped_ids.insert(mapped_ids.end(), ids.begin(), ids.end());
+    }
+    for (auto &[_, ids] : dst_egraph.classes_by_op_) {
+      std::sort(ids.begin(), ids.end());
+      ids.erase(std::unique(ids.begin(), ids.end()), ids.end());
     }
 
     return dst_egraph;
@@ -1118,10 +1444,10 @@ struct SimpleLanguageMapper final : LanguageMapper<SrcL, SrcA, DstL, DstA> {
   }
 
   typename DstA::Data mapData(const typename SrcA::Data &data) const override {
-    static_assert(std::is_constructible_v<typename DstA::Data,
-                                          typename SrcA::Data>,
-                  "SimpleLanguageMapper requires a constructible target "
-                  "analysis data conversion");
+    static_assert(
+        std::is_constructible_v<typename DstA::Data, typename SrcA::Data>,
+        "SimpleLanguageMapper requires a constructible target "
+        "analysis data conversion");
     return typename DstA::Data(data);
   }
 };

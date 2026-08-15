@@ -1,5 +1,7 @@
 #pragma once
 
+#include "Solvers/EGraph/Id.h"
+
 #include <algorithm>
 #include <cctype>
 #include <chrono>
@@ -28,7 +30,8 @@ namespace lotus::egraph {
 class Symbol {
 public:
   Symbol() = default;
-  Symbol(const char *text) : id_(intern(text ? std::string_view(text) : std::string_view())) {}
+  Symbol(const char *text)
+      : id_(intern(text ? std::string_view(text) : std::string_view())) {}
   Symbol(std::string text) : id_(intern(text)) {}
   Symbol(std::string_view text) : id_(intern(text)) {}
 
@@ -51,7 +54,9 @@ public:
   friend bool operator==(Symbol lhs, std::string_view rhs) {
     return lhs.view() == rhs;
   }
-  friend bool operator==(std::string_view lhs, Symbol rhs) { return rhs == lhs; }
+  friend bool operator==(std::string_view lhs, Symbol rhs) {
+    return rhs == lhs;
+  }
   friend bool operator==(Symbol lhs, const char *rhs) {
     return lhs.view() == std::string_view(rhs ? rhs : "");
   }
@@ -68,7 +73,7 @@ public:
 private:
   struct Table {
     std::mutex mu;
-    std::unordered_map<std::string, uint32_t> ids;
+    std::unordered_map<std::string_view, uint32_t> ids;
     std::deque<std::string> strings;
 
     Table() {
@@ -85,7 +90,7 @@ private:
   static uint32_t intern(std::string_view text) {
     Table &tbl = table();
     std::lock_guard<std::mutex> lock(tbl.mu);
-    auto it = tbl.ids.find(std::string(text));
+    auto it = tbl.ids.find(text);
     if (it != tbl.ids.end()) {
       return it->second;
     }
@@ -110,8 +115,8 @@ using Instant = std::chrono::steady_clock::time_point;
 inline Instant now() { return std::chrono::steady_clock::now(); }
 
 template <typename T> inline void hashCombine(size_t &seed, const T &value) {
-  seed ^= std::hash<T>{}(value) + 0x9e3779b97f4a7c15ULL + (seed << 6) +
-          (seed >> 2);
+  seed ^=
+      std::hash<T>{}(value) + 0x9e3779b97f4a7c15ULL + (seed << 6) + (seed >> 2);
 }
 
 struct PairHash {
@@ -185,12 +190,65 @@ public:
 
   bool empty() const { return queue_.empty(); }
   size_t size() const { return queue_.size(); }
+  void clear() {
+    queue_.clear();
+    set_.clear();
+  }
   auto begin() const { return queue_.begin(); }
   auto end() const { return queue_.end(); }
 
 private:
   std::unordered_set<T> set_;
   std::deque<T> queue_;
+};
+
+template <> class UniqueQueue<Id> {
+public:
+  void insert(Id value) {
+    if (present_.size() <= value.index()) {
+      present_.resize(value.index() + 1, false);
+    }
+    if (present_[value.index()]) {
+      return;
+    }
+    present_[value.index()] = true;
+    queue_.push_back(value);
+  }
+
+  template <typename It> void extend(It begin, It end) {
+    for (auto it = begin; it != end; ++it) {
+      insert(*it);
+    }
+  }
+
+  template <typename Range> void extend(const Range &range) {
+    extend(range.begin(), range.end());
+  }
+
+  std::optional<Id> pop() {
+    if (queue_.empty()) {
+      return std::nullopt;
+    }
+    Id value = queue_.front();
+    queue_.pop_front();
+    present_[value.index()] = false;
+    return value;
+  }
+
+  bool empty() const { return queue_.empty(); }
+  size_t size() const { return queue_.size(); }
+  void clear() {
+    for (Id id : queue_) {
+      present_[id.index()] = false;
+    }
+    queue_.clear();
+  }
+  auto begin() const { return queue_.begin(); }
+  auto end() const { return queue_.end(); }
+
+private:
+  std::vector<uint8_t> present_;
+  std::deque<Id> queue_;
 };
 
 } // namespace lotus::egraph

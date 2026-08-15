@@ -1,10 +1,10 @@
 add_library(Annotation STATIC
-    ExternalModRefTable.cpp
-    ExternalModRefTablePrinter.cpp
-    ExternalPointerTable.cpp
-    ExternalPointerTablePrinter.cpp
-    TaintConfigParser.cpp
-    TaintConfigManager.cpp
+    ModRef/ExternalModRefTable.cpp
+    ModRef/ExternalModRefTablePrinter.cpp
+    Pointer/ExternalPointerTable.cpp
+    Pointer/ExternalPointerTablePrinter.cpp
+    Taint/TaintConfigParser.cpp
+    Taint/TaintConfigManager.cpp
     APISpec.cpp
 )
 

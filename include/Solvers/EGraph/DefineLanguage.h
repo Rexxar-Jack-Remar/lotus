@@ -25,13 +25,15 @@ public:
 
   DynamicLang() = default;
   DynamicLang(Symbol op, std::vector<Id> children)
-      : op_(std::move(op)), children_(std::move(children)) {}
+      : op_(std::move(op)), children_(children.begin(), children.end()) {}
+  DynamicLang(Symbol op, std::initializer_list<Id> children)
+      : op_(std::move(op)), children_(children.begin(), children.end()) {}
 
   static DynamicLang leaf(Symbol op) { return DynamicLang(std::move(op), {}); }
 
   const Symbol &op() const { return op_; }
-  const std::vector<Id> &children() const { return children_; }
-  std::vector<Id> &childrenMut() { return children_; }
+  const llvm::SmallVector<Id, 2> &children() const { return children_; }
+  llvm::SmallVector<Id, 2> &childrenMut() { return children_; }
 
   Discriminant discriminant() const {
     return Discriminant{op_, children_.size()};
@@ -63,7 +65,7 @@ public:
 
 private:
   Symbol op_;
-  std::vector<Id> children_;
+  llvm::SmallVector<Id, 2> children_;
 };
 
 template <> struct LanguageOps<DynamicLang> {
@@ -123,13 +125,15 @@ public:
 
   DefinedLang() = default;
   DefinedLang(Symbol op, std::vector<Id> children)
-      : op_(std::move(op)), children_(std::move(children)) {}
+      : op_(std::move(op)), children_(children.begin(), children.end()) {}
+  DefinedLang(Symbol op, std::initializer_list<Id> children)
+      : op_(std::move(op)), children_(children.begin(), children.end()) {}
 
   static DefinedLang leaf(Symbol op) { return DefinedLang(std::move(op), {}); }
 
   const Symbol &op() const { return op_; }
-  const std::vector<Id> &children() const { return children_; }
-  std::vector<Id> &childrenMut() { return children_; }
+  const llvm::SmallVector<Id, 2> &children() const { return children_; }
+  llvm::SmallVector<Id, 2> &childrenMut() { return children_; }
 
   Discriminant discriminant() const {
     return Discriminant{op_, children_.size()};
@@ -161,7 +165,7 @@ public:
 
 private:
   Symbol op_;
-  std::vector<Id> children_;
+  llvm::SmallVector<Id, 2> children_;
 };
 
 template <typename Tag> struct LanguageOps<DefinedLang<Tag>> {
@@ -180,20 +184,19 @@ template <typename Tag> struct LanguageOps<DefinedLang<Tag>> {
 
 } // namespace lotus::egraph
 
-#define LOTUS_EGRAPH_DEFINE_LANGUAGE(NAME, BODY)                              \
-  struct NAME##Tag {                                                          \
-    static bool allows(::lotus::egraph::Symbol op, size_t arity) {            \
-      static const ::lotus::egraph::LanguageBuilder builder = [] {            \
-        ::lotus::egraph::LanguageBuilder b;                                   \
-        BODY                                                                  \
-        return b;                                                             \
-      }();                                                                    \
-      return builder.allows(op, arity);                                       \
-    }                                                                         \
-  };                                                                          \
+#define LOTUS_EGRAPH_DEFINE_LANGUAGE(NAME, BODY)                               \
+  struct NAME##Tag {                                                           \
+    static bool allows(::lotus::egraph::Symbol op, size_t arity) {             \
+      static const ::lotus::egraph::LanguageBuilder builder = [] {             \
+        ::lotus::egraph::LanguageBuilder b;                                    \
+        BODY return b;                                                         \
+      }();                                                                     \
+      return builder.allows(op, arity);                                        \
+    }                                                                          \
+  };                                                                           \
   using NAME = ::lotus::egraph::DefinedLang<NAME##Tag>
 
-#define LOTUS_EGRAPH_LANG_OP(OP, ARITY)                                       \
+#define LOTUS_EGRAPH_LANG_OP(OP, ARITY)                                        \
   b.op(::lotus::egraph::Symbol(OP), ARITY);
 
 template <> struct std::hash<lotus::egraph::DynamicLangDiscriminant> {
@@ -226,7 +229,8 @@ struct std::hash<lotus::egraph::DefinedLangDiscriminant<Tag>> {
 };
 
 template <typename Tag> struct std::hash<lotus::egraph::DefinedLang<Tag>> {
-  size_t operator()(const lotus::egraph::DefinedLang<Tag> &value) const noexcept {
+  size_t
+  operator()(const lotus::egraph::DefinedLang<Tag> &value) const noexcept {
     size_t seed = std::hash<lotus::egraph::Symbol>{}(value.op());
     for (lotus::egraph::Id child : value.children()) {
       lotus::egraph::hashCombine(seed, child);

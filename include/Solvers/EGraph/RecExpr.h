@@ -40,28 +40,74 @@ public:
   auto end() const { return items_.end(); }
 
   RecExpr extract(Id new_root) const {
-    std::unordered_map<Id, Id> cache;
+    std::vector<std::optional<Id>> cache(items_.size());
     RecExpr out;
-    extractInto(*this, out, new_root, cache);
+    std::vector<Id> stack{new_root};
+    while (!stack.empty()) {
+      Id current = stack.back();
+      if (cache[current.index()]) {
+        stack.pop_back();
+        continue;
+      }
+
+      const auto &node = (*this)[current];
+      bool ready = true;
+      for (Id child : node.children()) {
+        if (!cache[child.index()]) {
+          stack.push_back(child);
+          ready = false;
+          break;
+        }
+      }
+      if (!ready) {
+        continue;
+      }
+
+      auto copied =
+          node.mapChildren([&](Id child) { return *cache[child.index()]; });
+      cache[current.index()] = out.add(copied);
+      stack.pop_back();
+    }
     return out;
   }
 
   std::string toString() const { return toString(root()); }
 
   std::string toString(Id id) const {
-    const auto &node = (*this)[id];
-    const auto &children = nodeChildren(node);
-    if (children.empty()) {
-      return displayNode(node);
-    }
+    struct Frame {
+      Id id;
+      size_t next_child = 0;
+      bool opened = false;
+    };
 
-    std::vector<std::string> parts;
-    parts.reserve(children.size() + 1);
-    parts.push_back(displayNode(node));
-    for (Id child : children) {
-      parts.push_back(toString(child));
+    std::string text;
+    std::vector<Frame> stack{{id}};
+    while (!stack.empty()) {
+      auto &frame = stack.back();
+      const auto &node = (*this)[frame.id];
+      const auto &children = nodeChildren(node);
+      if (!frame.opened) {
+        frame.opened = true;
+        if (children.empty()) {
+          text += displayNode(node);
+          stack.pop_back();
+          continue;
+        }
+        text += '(';
+        text += displayNode(node);
+      }
+
+      if (frame.next_child < children.size()) {
+        Id child = children[frame.next_child++];
+        text += ' ';
+        stack.push_back(Frame{child});
+        continue;
+      }
+
+      text += ')';
+      stack.pop_back();
     }
-    return "(" + joinStrings(parts, " ") + ")";
+    return text;
   }
 
   static RecExpr parse(std::string_view input) {
@@ -72,19 +118,6 @@ public:
   }
 
 private:
-  static Id extractInto(const RecExpr &expr, RecExpr &out, Id id,
-                        std::unordered_map<Id, Id> &cache) {
-    if (auto it = cache.find(id); it != cache.end()) {
-      return it->second;
-    }
-    const auto &node = expr[id];
-    auto copied =
-        node.mapChildren([&](Id child) { return extractInto(expr, out, child, cache); });
-    Id added = out.add(copied);
-    cache.emplace(id, added);
-    return added;
-  }
-
   static Id buildFromSExp(RecExpr &expr, const SExp &sexp) {
     if (sexp.isAtom()) {
       auto node = LanguageOps<L>::fromOp(sexp.atom(), {});

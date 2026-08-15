@@ -65,18 +65,20 @@ public:
   }
 
   template <typename A>
-  std::vector<Subst> search(const EGraph<L, A> &egraph) const {
+  std::vector<Subst> search(const EGraph<L, A> &egraph,
+                            const WorkControl *control = nullptr) const {
     std::vector<Subst> out;
     for (const auto &match :
-         searchWithLimit(egraph, std::numeric_limits<size_t>::max())) {
+         searchWithLimit(egraph, std::numeric_limits<size_t>::max(), control)) {
       out.insert(out.end(), match.substs.begin(), match.substs.end());
     }
     return out;
   }
 
   template <typename A>
-  std::vector<SearchMatches<L>> searchWithLimit(const EGraph<L, A> &egraph,
-                                                size_t limit) const {
+  std::vector<SearchMatches<L>>
+  searchWithLimit(const EGraph<L, A> &egraph, size_t limit,
+                  const WorkControl *control = nullptr) const {
     if (clauses_.empty()) {
       throw std::runtime_error("empty multipattern");
     }
@@ -84,24 +86,19 @@ public:
       return {};
     }
 
-    std::vector<SearchMatches<L>> results;
-    for (Id eclass : egraph.classIds()) {
-      if (limit == 0) {
-        break;
-      }
-      auto found = searchEClassWithLimit(egraph, eclass, limit);
-      if (found && !found->substs.empty()) {
-        limit -= std::min(limit, found->substs.size());
-        results.push_back(std::move(*found));
-      }
+    if (clauses_.front().second.ast().size() == 1 &&
+        clauses_.front().second.ast().items().front().isVar()) {
+      throw std::runtime_error(
+          "Bare pattern variable cannot be first in multipattern");
     }
-    return results;
+    return program_->runEClassesWithLimit(egraph, egraph.classIds(), limit,
+                                          control, nullptr);
   }
 
   template <typename A>
   std::optional<SearchMatches<L>>
-  searchEClassWithLimit(const EGraph<L, A> &egraph, Id eclass,
-                        size_t limit) const {
+  searchEClassWithLimit(const EGraph<L, A> &egraph, Id eclass, size_t limit,
+                        const WorkControl *control = nullptr) const {
     if (clauses_.empty()) {
       throw std::runtime_error("empty multipattern");
     }
@@ -113,11 +110,11 @@ public:
       throw std::runtime_error(
           "Bare pattern variable cannot be first in multipattern");
     }
-    auto results = program_->runWithLimit(egraph, eclass, limit);
+    auto results = program_->runWithLimit(egraph, eclass, limit, control);
     if (results.empty()) {
       return std::nullopt;
     }
-    return SearchMatches<L>{eclass, std::move(results), std::nullopt};
+    return SearchMatches<L>{eclass, std::move(results), nullptr};
   }
 
   template <typename A> size_t nMatches(const EGraph<L, A> &egraph) const {
@@ -137,6 +134,7 @@ public:
           "Multipattern application does not support explanations");
     }
     std::vector<Id> added;
+    added.reserve(matches.size());
     for (const auto &match : matches) {
       Subst subst = match;
       for (size_t i = 0; i < clauses_.size(); ++i) {
@@ -192,6 +190,11 @@ public:
           "Multipattern application does not support explanations");
     }
     std::vector<Id> added;
+    size_t expected = 0;
+    for (const auto &match : matches) {
+      expected += match.substs.size();
+    }
+    added.reserve(expected);
     for (const auto &match : matches) {
       for (const auto &subst : match.substs) {
         Subst current = subst;

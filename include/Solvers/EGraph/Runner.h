@@ -6,6 +6,24 @@
 
 namespace lotus::egraph {
 
+namespace detail {
+
+inline size_t runnerSaturatingShiftLeft(size_t value, size_t shift) {
+  constexpr size_t digits = std::numeric_limits<size_t>::digits;
+  constexpr size_t limit = std::numeric_limits<size_t>::max();
+  if (shift >= digits || value > (limit >> shift)) {
+    return limit;
+  }
+  return value << shift;
+}
+
+inline size_t runnerSaturatingAdd(size_t lhs, size_t rhs) {
+  constexpr size_t limit = std::numeric_limits<size_t>::max();
+  return rhs > limit - lhs ? limit : lhs + rhs;
+}
+
+} // namespace detail
+
 enum class StopReasonKind {
   None,
   Saturated,
@@ -79,17 +97,24 @@ struct RunnerLimits {
   Duration time_limit = std::chrono::seconds(5);
   std::optional<Instant> start_time;
 
+  bool timeExceeded() const {
+    return start_time && now() - *start_time > time_limit;
+  }
+
   template <typename L, typename A>
   std::optional<StopReason> check(size_t iteration,
                                   const EGraph<L, A> &egraph) const {
     if (start_time) {
-      double elapsed = std::chrono::duration<double>(now() - *start_time).count();
-      if (now() - *start_time > time_limit) {
+      Instant current = now();
+      double elapsed =
+          std::chrono::duration<double>(current - *start_time).count();
+      if (current - *start_time > time_limit) {
         return StopReason::timeLimit(elapsed);
       }
     }
-    if (egraph.totalSize() > node_limit) {
-      return StopReason::nodeLimit(egraph.totalSize());
+    size_t size = egraph.totalSize();
+    if (size > node_limit) {
+      return StopReason::nodeLimit(size);
     }
     if (iteration >= iter_limit) {
       return StopReason::iterationLimit(iteration);
@@ -175,13 +200,15 @@ inline std::ostream &operator<<(std::ostream &os, const Report &report) {
      << "  Rebuilds: " << report.rebuilds << "\n"
      << "  Total time: " << report.total_time << "\n"
      << "    Search:  ("
-     << (report.total_time == 0.0 ? 0.0 : report.search_time / report.total_time)
+     << (report.total_time == 0.0 ? 0.0
+                                  : report.search_time / report.total_time)
      << ") " << report.search_time << "\n"
      << "    Apply:   ("
      << (report.total_time == 0.0 ? 0.0 : report.apply_time / report.total_time)
      << ") " << report.apply_time << "\n"
      << "    Rebuild: ("
-     << (report.total_time == 0.0 ? 0.0 : report.rebuild_time / report.total_time)
+     << (report.total_time == 0.0 ? 0.0
+                                  : report.rebuild_time / report.total_time)
      << ") " << report.rebuild_time;
   return os;
 }
@@ -194,18 +221,19 @@ public:
 
   virtual std::vector<SearchMatches<L>>
   searchRewrite(size_t, const EGraph<L, A> &egraph,
-                const Rewrite<L, A> &rewrite) {
-    return rewrite.search(egraph);
+                const Rewrite<L, A> &rewrite, const WorkControl *control) {
+    return rewrite.searchWithLimit(egraph, std::numeric_limits<size_t>::max(),
+                                   control);
   }
 
   virtual RunnerResult<std::vector<std::vector<SearchMatches<L>>>>
   searchRewrites(size_t iteration, const EGraph<L, A> &egraph,
                  const std::vector<Rewrite<L, A>> &rewrites,
-                 const RunnerLimits &limits) {
+                 const RunnerLimits &limits, const WorkControl *control) {
     std::vector<std::vector<SearchMatches<L>>> out;
     out.reserve(rewrites.size());
     for (const auto &rewrite : rewrites) {
-      out.push_back(searchRewrite(iteration, egraph, rewrite));
+      out.push_back(searchRewrite(iteration, egraph, rewrite, control));
       if (auto stop_reason = limits.check(iteration, egraph)) {
         return RunnerResult<std::vector<std::vector<SearchMatches<L>>>>::stop(
             *stop_reason);
@@ -217,8 +245,30 @@ public:
 
   virtual size_t applyRewrite(size_t, EGraph<L, A> &egraph,
                               const Rewrite<L, A> &rewrite,
-                              std::vector<SearchMatches<L>> matches) {
-    return rewrite.apply(egraph, matches).size();
+                              std::vector<SearchMatches<L>> matches,
+                              const WorkControl *control) {
+    constexpr size_t CHUNK_SIZE = 64;
+    size_t applied = 0;
+    std::vector<SearchMatches<L>> chunk_matches(1);
+    chunk_matches.front().substs.reserve(CHUNK_SIZE);
+    for (auto &match : matches) {
+      for (size_t begin = 0; begin < match.substs.size(); begin += CHUNK_SIZE) {
+        size_t end = std::min(begin + CHUNK_SIZE, match.substs.size());
+        auto &chunk = chunk_matches.front();
+        chunk.eclass = match.eclass;
+        chunk.ast = match.ast;
+        chunk.substs.clear();
+        for (size_t i = begin; i < end; ++i) {
+          chunk.substs.push_back(std::move(match.substs[i]));
+        }
+        applied = detail::runnerSaturatingAdd(
+            applied, rewrite.apply(egraph, chunk_matches).size());
+        if (control && control->poll()) {
+          return applied;
+        }
+      }
+    }
+    return applied;
   }
 };
 
@@ -278,31 +328,28 @@ public:
 
   std::vector<SearchMatches<L>>
   searchRewrite(size_t iteration, const EGraph<L, A> &egraph,
-                const Rewrite<L, A> &rewrite) override {
+                const Rewrite<L, A> &rewrite,
+                const WorkControl *control) override {
     auto &stats = ruleStats(rewrite.name());
     if (iteration < stats.banned_until) {
       return {};
     }
 
-    size_t threshold = stats.match_limit;
-    if (stats.times_banned < sizeof(size_t) * 8) {
-      threshold = threshold << stats.times_banned;
-    }
-    size_t search_limit =
-        threshold == std::numeric_limits<size_t>::max() ? threshold
-                                                        : threshold + 1;
-    auto matches = rewrite.searchWithLimit(egraph, search_limit);
+    size_t threshold = detail::runnerSaturatingShiftLeft(stats.match_limit,
+                                                         stats.times_banned);
+    size_t search_limit = threshold == std::numeric_limits<size_t>::max()
+                              ? threshold
+                              : threshold + 1;
+    auto matches = rewrite.searchWithLimit(egraph, search_limit, control);
     size_t total = 0;
     for (const auto &match : matches) {
-      total += match.substs.size();
+      total = detail::runnerSaturatingAdd(total, match.substs.size());
     }
     if (total > threshold) {
-      size_t ban_length = stats.ban_length;
-      if (stats.times_banned < sizeof(size_t) * 8) {
-        ban_length <<= stats.times_banned;
-      }
+      size_t ban_length = detail::runnerSaturatingShiftLeft(stats.ban_length,
+                                                            stats.times_banned);
       ++stats.times_banned;
-      stats.banned_until = iteration + ban_length;
+      stats.banned_until = detail::runnerSaturatingAdd(iteration, ban_length);
       return {};
     }
 
@@ -365,8 +412,8 @@ public:
   }
 
   template <typename Hook> Runner &withHook(Hook hook) {
-    hooks.push_back([hook = std::move(hook)](Runner &runner)
-                        mutable -> std::optional<std::string> {
+    hooks.push_back([hook = std::move(hook)](
+                        Runner &runner) mutable -> std::optional<std::string> {
       using Result = std::invoke_result_t<Hook &, Runner &>;
       if constexpr (std::is_same_v<Result, std::optional<std::string>>) {
         return hook(runner);
@@ -378,7 +425,8 @@ public:
         return result->str();
       } else {
         static_assert(std::is_same_v<Result, void>,
-                      "Runner hook must return std::optional<std::string> or std::optional<Symbol>");
+                      "Runner hook must return std::optional<std::string> or "
+                      "std::optional<Symbol>");
         return std::nullopt;
       }
     });
@@ -402,6 +450,11 @@ public:
 
   Runner &withExplanationLengthOptimization() {
     egraph = egraph.withExplanationLengthOptimization();
+    return *this;
+  }
+
+  Runner &withExplanationValidation(bool enabled = true) {
+    validate_explanations_ = enabled;
     return *this;
   }
 
@@ -450,7 +503,7 @@ public:
     out.stop_reason = stop_reason;
     out.egraph_nodes = egraph.totalNumberOfNodes();
     out.egraph_classes = egraph.numberOfClasses();
-    out.memo_size = egraph.totalSize();
+    out.memo_size = egraph.memoSize();
     for (const auto &iteration : iterations) {
       out.rebuilds += iteration.n_rebuilds;
       out.total_time += iteration.total_time;
@@ -525,8 +578,10 @@ private:
     std::vector<std::vector<SearchMatches<L>>> matches;
     Instant search_start = now();
     if (!result) {
-      auto search_result =
-          scheduler_->searchRewrites(iteration_index, egraph, rules, limits_);
+      WorkControl search_control{[&]() { return limits_.timeExceeded(); },
+                                 1024};
+      auto search_result = scheduler_->searchRewrites(
+          iteration_index, egraph, rules, limits_, &search_control);
       if (search_result) {
         matches = std::move(*search_result.value);
       } else {
@@ -538,9 +593,16 @@ private:
 
     Instant apply_start = now();
     if (!result) {
+      WorkControl apply_control{[&]() {
+                                  return limits_.timeExceeded() ||
+                                         egraph.totalSize() >
+                                             limits_.node_limit;
+                                },
+                                1};
       for (size_t i = 0; i < matches.size(); ++i) {
-        size_t applied = scheduler_->applyRewrite(
-            iteration_index, egraph, rules[i], std::move(matches[i]));
+        size_t applied =
+            scheduler_->applyRewrite(iteration_index, egraph, rules[i],
+                                     std::move(matches[i]), &apply_control);
         if (applied > 0) {
           iteration.applied[rules[i].name()] += applied;
         }
@@ -555,7 +617,8 @@ private:
 
     Instant rebuild_start = now();
     iteration.n_rebuilds = egraph.rebuild();
-    if (egraph.areExplanationsEnabled() && !checkEachExplain(egraph, rules)) {
+    if (validate_explanations_ && egraph.areExplanationsEnabled() &&
+        !checkEachExplain(egraph, rules)) {
       throw std::runtime_error("EGraph explanation consistency check failed");
     }
     iteration.rebuild_time =
@@ -580,6 +643,7 @@ private:
 
   RunnerLimits limits_;
   std::unique_ptr<RewriteScheduler<L, A>> scheduler_;
+  bool validate_explanations_ = false;
 };
 
 } // namespace lotus::egraph

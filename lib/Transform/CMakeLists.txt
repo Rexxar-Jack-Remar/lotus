@@ -19,6 +19,7 @@ add_library(CanaryTransform STATIC
         KillVarArgFn.cpp
         RemoveUnreachableBlocks.cpp
         StripLifetime.cpp
+        ExpandAssume.cpp
 )
 
 add_subdirectory(Nisse)

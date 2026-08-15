@@ -32,6 +32,20 @@ TEST(EGraphFeatureTest, ExtractorSupportsEggStyleMutableCostFunctionApi) {
   EXPECT_EQ(extractor.findBestCost(root), 21u);
   EXPECT_EQ(extractor.findBestNode(root).op(), "root");
 }
+
+TEST(EGraphFeatureTest, ExtractorUsesParentWorklistInsteadOfGlobalRescans) {
+  EGraph<SymbolLang> egraph;
+  Id root = egraph.addExpr(RecExpr<SymbolLang>::parse("(f (g (h (i (j a)))))"));
+  egraph.rebuild();
+
+  auto calls = std::make_shared<size_t>(0);
+  Extractor<SymbolLang, NoAnalysis<SymbolLang>, SharedCountingCostFn> extractor(
+      egraph, SharedCountingCostFn(calls));
+
+  EXPECT_EQ(*calls, egraph.totalSize());
+  EXPECT_EQ(extractor.findBest(root).second.toString(),
+            "(f (g (h (i (j a)))))");
+}
 TEST(EGraphFeatureTest, AstDepthCostRecMatchesEggStyleDepthMetric) {
   AstDepth<SymbolLang> depth;
   auto expr = RecExpr<SymbolLang>::parse("(f (g (h a)) b)");
@@ -62,6 +76,36 @@ TEST(EGraphFeatureTest,
   auto [cyclic_cost, cyclic_best] = extractor.findBest(a);
   EXPECT_EQ(cyclic_cost, 1u);
   EXPECT_EQ(cyclic_best.toString(), "a");
+}
+
+TEST(EGraphFeatureTest, ExtractorPreservesSharedSubexpressionsAsDag) {
+  EGraph<SymbolLang> egraph;
+  Id x = egraph.add(SymbolLang::leaf(Symbol("x")));
+  Id fx = egraph.add(SymbolLang(Symbol("f"), {x}));
+  Id root = egraph.add(SymbolLang(Symbol("pair"), {fx, fx}));
+  egraph.rebuild();
+
+  Extractor<SymbolLang> extractor(egraph);
+  auto [cost, best] = extractor.findBest(root);
+
+  EXPECT_EQ(cost, 5u);
+  EXPECT_EQ(best.size(), 3u);
+  EXPECT_EQ(best.toString(), "(pair (f x) (f x))");
+  EXPECT_EQ(best[best.root()].children()[0], best[best.root()].children()[1]);
+}
+
+TEST(EGraphFeatureTest, IdToExprSkipsRecursiveFrontNode) {
+  Symbol recursive_op("__id_to_expr_recursive_first__");
+  Symbol finite_op("__id_to_expr_finite_second__");
+  EGraph<SymbolLang> egraph;
+  Id finite = egraph.add(SymbolLang::leaf(finite_op));
+  Id recursive = egraph.add(SymbolLang(recursive_op, {finite}));
+  egraph.rebuild();
+  egraph.unite(finite, recursive);
+  egraph.rebuild();
+
+  ASSERT_EQ(egraph[finite].nodes.front().op(), recursive_op);
+  EXPECT_EQ(egraph.idToExpr(finite).toString(), finite_op.str());
 }
 TEST(EGraphFeatureTest, AnalysisPendingQueueDeduplicatesParentsLikeEgg) {
   DedupAnalysis::reset();

@@ -1,5 +1,7 @@
 #pragma once
 
+#include "llvm/ADT/SmallVector.h"
+
 #include "Solvers/EGraph/Id.h"
 #include "Solvers/EGraph/Util.h"
 
@@ -30,24 +32,26 @@ public:
       if (text.size() == 2) {
         throw std::runtime_error("Malformed numeric pattern variable");
       }
-      return fromU32(static_cast<uint32_t>(
-          std::stoul(std::string(text.substr(2)))));
+      return fromU32(
+          static_cast<uint32_t>(std::stoul(std::string(text.substr(2)))));
     }
     return Var(Symbol(text));
   }
 
   const Symbol &name() const { return name_; }
 
-  std::optional<uint32_t> asU32() const {
-    return numeric_;
-  }
+  std::optional<uint32_t> asU32() const { return numeric_; }
 
   friend bool operator==(const Var &lhs, const Var &rhs) {
     return lhs.name_ == rhs.name_;
   }
 
-  friend bool operator!=(const Var &lhs, const Var &rhs) { return !(lhs == rhs); }
-  friend bool operator<(const Var &lhs, const Var &rhs) { return lhs.name_ < rhs.name_; }
+  friend bool operator!=(const Var &lhs, const Var &rhs) {
+    return !(lhs == rhs);
+  }
+  friend bool operator<(const Var &lhs, const Var &rhs) {
+    return lhs.name_ < rhs.name_;
+  }
 
 private:
   Symbol name_;
@@ -102,7 +106,9 @@ public:
     throw std::runtime_error("Substitution variable not found");
   }
 
-  const std::vector<std::pair<Var, Id>> &bindings() const { return bindings_; }
+  const llvm::SmallVector<std::pair<Var, Id>, 3> &bindings() const {
+    return bindings_;
+  }
 
   friend bool operator==(const Subst &lhs, const Subst &rhs) {
     return lhs.bindings_ == rhs.bindings_;
@@ -113,7 +119,7 @@ public:
   }
 
 private:
-  std::vector<std::pair<Var, Id>> bindings_;
+  llvm::SmallVector<std::pair<Var, Id>, 3> bindings_;
 };
 
 } // namespace lotus::egraph

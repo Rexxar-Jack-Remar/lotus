@@ -69,17 +69,29 @@ template <typename L> struct Instruction {
 
 template <typename L> class Machine {
 public:
+  void reserve(size_t registers) {
+    regs_.reserve(registers);
+    ancestry_heads_.reserve(registers);
+    lookup_.reserve(registers);
+  }
+
   template <typename A, typename Yield>
   void run(const EGraph<L, A> &egraph,
            const std::vector<Instruction<L>> &instructions,
-           const Subst &subst_template, Yield &&yield_fn) {
+           const Subst &subst_template, const WorkControl *control,
+           Yield &&yield_fn) {
+    reject_cycles_ = !egraph.analysis().allowEMatchingCycles();
+    control_ = control;
     runFrom(egraph, instructions, 0, subst_template,
             std::forward<Yield>(yield_fn));
   }
 
   void seed(Id id) {
     regs_.clear();
+    ancestry_heads_.clear();
+    ancestry_nodes_.clear();
     regs_.push_back(id);
+    ancestry_heads_.push_back(NO_ANCESTOR);
   }
 
 private:
@@ -90,19 +102,46 @@ private:
     if (pc >= instructions.size()) {
       return yield_fn(*this, subst_template);
     }
+    if (control_ && control_->poll()) {
+      return false;
+    }
 
     const auto &inst = instructions[pc];
     switch (inst.kind) {
     case Instruction<L>::Kind::Bind: {
       const auto &klass = egraph[reg(inst.i)];
       return forEachMatchingNode(klass, inst.node, [&](const L &matched) {
+        const Id parent = egraph.find(reg(inst.i));
+        const size_t parent_head = ancestry_heads_.at(inst.i.value);
         if (regs_.size() > inst.out.value) {
           regs_.resize(inst.out.value);
+          ancestry_heads_.resize(inst.out.value);
         }
+        const size_t old_ancestry_size = ancestry_nodes_.size();
+        size_t child_head = NO_ANCESTOR;
+        if (reject_cycles_ && !matched.children().empty()) {
+          child_head = ancestry_nodes_.size();
+          ancestry_nodes_.push_back({parent, parent_head});
+        }
+        bool cyclic = false;
         for (Id child : matched.children()) {
           regs_.push_back(child);
+          Id canonical_child = egraph.find(child);
+          if (reject_cycles_ &&
+              (canonical_child == parent ||
+               ancestryContains(parent_head, canonical_child))) {
+            cyclic = true;
+          }
+          ancestry_heads_.push_back(child_head);
         }
-        return runFrom(egraph, instructions, pc + 1, subst_template, yield_fn);
+        if (cyclic) {
+          ancestry_nodes_.resize(old_ancestry_size);
+          return true;
+        }
+        bool keep_going =
+            runFrom(egraph, instructions, pc + 1, subst_template, yield_fn);
+        ancestry_nodes_.resize(old_ancestry_size);
+        return keep_going;
       });
     }
     case Instruction<L>::Kind::Compare:
@@ -134,8 +173,10 @@ private:
       for (Id id : egraph.classIds()) {
         if (regs_.size() > inst.out.value) {
           regs_.resize(inst.out.value);
+          ancestry_heads_.resize(inst.out.value);
         }
         regs_.push_back(id);
+        ancestry_heads_.push_back(NO_ANCESTOR);
         if (!runFrom(egraph, instructions, pc + 1, subst_template, yield_fn)) {
           return false;
         }
@@ -151,8 +192,30 @@ public:
   const std::vector<Id> &regs() const { return regs_; }
 
 private:
+  struct AncestryNode {
+    Id id;
+    size_t parent = NO_ANCESTOR;
+  };
+
+  static constexpr size_t NO_ANCESTOR = std::numeric_limits<size_t>::max();
+
+  bool ancestryContains(size_t head, Id id) const {
+    while (head != NO_ANCESTOR) {
+      const auto &node = ancestry_nodes_[head];
+      if (node.id == id) {
+        return true;
+      }
+      head = node.parent;
+    }
+    return false;
+  }
+
   std::vector<Id> regs_;
+  std::vector<size_t> ancestry_heads_;
+  std::vector<AncestryNode> ancestry_nodes_;
   std::vector<Id> lookup_;
+  bool reject_cycles_ = false;
+  const WorkControl *control_ = nullptr;
 };
 
 template <typename L> class Compiler {
@@ -234,7 +297,14 @@ private:
       }
       return;
     }
-    todo_nodes_[{id, reg}] = entry.node();
+    auto key = std::make_pair(id, reg);
+    for (auto &todo : todo_nodes_) {
+      if (todo.first == key) {
+        todo.second = entry.node();
+        return;
+      }
+    }
+    todo_nodes_.push_back({key, entry.node()});
   }
 
   void loadPattern(const PatternAst<L> &pattern) {
@@ -244,17 +314,19 @@ private:
     subtree_size_.reserve(pattern.size());
 
     for (const auto &entry : pattern.items()) {
-      std::unordered_set<Var> free;
+      std::vector<Var> free;
       size_t size = 0;
       if (entry.isVar()) {
-        free.insert(entry.var());
+        free.push_back(entry.var());
       } else {
         size = 1;
         for (Id child : entry.node().children()) {
-          free.insert(free_vars_.at(child.index()).begin(),
-                      free_vars_.at(child.index()).end());
+          const auto &child_vars = free_vars_.at(child.index());
+          free.insert(free.end(), child_vars.begin(), child_vars.end());
           size += subtree_size_.at(child.index());
         }
+        std::sort(free.begin(), free.end());
+        free.erase(std::unique(free.begin(), free.end()), free.end());
       }
       free_vars_.push_back(std::move(free));
       subtree_size_.push_back(size);
@@ -271,7 +343,7 @@ private:
   }
 
   std::pair<std::pair<Id, Reg<L>>, L> nextTodo() {
-    auto best = todo_nodes_.begin();
+    size_t best = 0;
     auto score = [&](const auto &entry) {
       Id id = entry.first.first;
       size_t index = id.index();
@@ -286,21 +358,21 @@ private:
           n_free == 0, n_free,
           -static_cast<long long>(subtree_size_.at(index)));
     };
-    for (auto it = todo_nodes_.begin(); it != todo_nodes_.end(); ++it) {
-      if (score(*it) > score(*best)) {
-        best = it;
+    for (size_t i = 1; i < todo_nodes_.size(); ++i) {
+      if (score(todo_nodes_[i]) > score(todo_nodes_[best])) {
+        best = i;
       }
     }
 
-    auto value = *best;
-    todo_nodes_.erase(best);
+    auto value = std::move(todo_nodes_[best]);
+    todo_nodes_.erase(todo_nodes_.begin() + best);
     return value;
   }
 
   std::unordered_map<Var, Reg<L>> v2r_;
-  std::vector<std::unordered_set<Var>> free_vars_;
+  std::vector<std::vector<Var>> free_vars_;
   std::vector<size_t> subtree_size_;
-  std::map<std::pair<Id, Reg<L>>, L> todo_nodes_;
+  std::vector<std::pair<std::pair<Id, Reg<L>>, L>> todo_nodes_;
   std::vector<Instruction<L>> instructions_;
   Reg<L> next_reg_{};
 };
@@ -330,7 +402,8 @@ public:
 
   template <typename A>
   std::vector<Subst> runWithLimit(const EGraph<L, A> &egraph, Id eclass,
-                                  size_t limit) const {
+                                  size_t limit,
+                                  const WorkControl *control = nullptr) const {
     if (!egraph.clean()) {
       throw std::runtime_error("Tried to search a dirty e-graph");
     }
@@ -339,21 +412,42 @@ public:
     }
 
     detail::Machine<L> machine;
+    machine.reserve(register_count_);
+    return runWithMachine(egraph, eclass, limit, control, machine);
+  }
+
+  template <typename A>
+  std::vector<SearchMatches<L>>
+  runEClassesWithLimit(const EGraph<L, A> &egraph,
+                       const std::vector<Id> &eclasses, size_t limit,
+                       const WorkControl *control,
+                       std::shared_ptr<const PatternAst<L>> ast) const {
+    std::vector<SearchMatches<L>> results;
+    detail::Machine<L> machine;
+    machine.reserve(register_count_);
+    for (Id eclass : eclasses) {
+      if (limit == 0 || (control && control->poll())) {
+        break;
+      }
+      auto substs = runWithMachine(egraph, eclass, limit, control, machine);
+      if (substs.empty()) {
+        continue;
+      }
+      limit -= std::min(limit, substs.size());
+      results.push_back(SearchMatches<L>{eclass, std::move(substs), ast});
+    }
+    return results;
+  }
+
+private:
+  template <typename A>
+  std::vector<Subst> runWithMachine(const EGraph<L, A> &egraph, Id eclass,
+                                    size_t limit, const WorkControl *control,
+                                    detail::Machine<L> &machine) const {
     machine.seed(eclass);
     std::vector<Subst> matches;
-    machine.run(egraph, instructions_, subst_template_,
+    machine.run(egraph, instructions_, subst_template_, control,
                 [&](const auto &machine_state, const Subst &template_subst) {
-                  if (!egraph.analysis().allowEMatchingCycles()) {
-                    const auto &regs = machine_state.regs();
-                    if (!regs.empty()) {
-                      for (size_t i = 1; i < regs.size(); ++i) {
-                        if (regs[i] == regs[0]) {
-                          return true;
-                        }
-                      }
-                    }
-                  }
-
                   Subst subst =
                       Subst::withCapacity(template_subst.bindings().size());
                   for (const auto &[var, reg_id] : template_subst.bindings()) {
@@ -365,13 +459,20 @@ public:
     return matches;
   }
 
-private:
   PatternProgram(std::vector<detail::Instruction<L>> instructions, Subst subst)
       : instructions_(std::move(instructions)),
-        subst_template_(std::move(subst)) {}
+        subst_template_(std::move(subst)) {
+    register_count_ = 1;
+    for (const auto &instruction : instructions_) {
+      register_count_ =
+          std::max(register_count_, static_cast<size_t>(instruction.out.value) +
+                                        instruction.node.children().size());
+    }
+  }
 
   std::vector<detail::Instruction<L>> instructions_;
   Subst subst_template_;
+  size_t register_count_ = 1;
 };
 
 } // namespace lotus::egraph

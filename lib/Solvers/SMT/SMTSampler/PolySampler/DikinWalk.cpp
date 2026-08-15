@@ -70,8 +70,17 @@ bool dikin_walk_step(const std::vector<LinearConstraint> &constraints,
         v = 1;
       else if (scaled < 0.0L && scaled > -1.0L)
         v = -1;
-      else
-        v = static_cast<int64_t>(std::llround(scaled));
+      else {
+        // std::llround has undefined behaviour when its result is outside
+        // int64_t. Round in floating point first, then validate the result.
+        long double rounded = std::round(scaled);
+        if (!std::isfinite(rounded) ||
+            rounded < static_cast<long double>(std::numeric_limits<int64_t>::min()) ||
+            rounded > static_cast<long double>(std::numeric_limits<int64_t>::max())) {
+          return false;
+        }
+        v = static_cast<int64_t>(rounded);
+      }
       direction[j] = v;
       if (v != 0)
         non_zero = true;
@@ -114,15 +123,17 @@ bool dikin_walk_step(const std::vector<LinearConstraint> &constraints,
   std::uniform_int_distribution<int64_t> dist(t_low, t_high);
   int64_t t = dist(rng);
 
+  std::vector<int64_t> candidate = point;
   for (size_t i = 0; i < n; ++i) {
     __int128 next = static_cast<__int128>(point[i]) +
                     static_cast<__int128>(t) * direction[i];
     if (next < std::numeric_limits<int64_t>::min() ||
         next > std::numeric_limits<int64_t>::max())
       return false;
-    point[i] = static_cast<int64_t>(next);
+    candidate[i] = static_cast<int64_t>(next);
   }
 
+  point.swap(candidate);
   return true;
 }
 

@@ -21,6 +21,27 @@ TEST(EGraphCoreTest, RebuildMergesCongruentParents) {
   EXPECT_EQ(egraph.find(fx), egraph.find(fy));
 }
 
+TEST(EGraphCoreTest, RebuildRepairsEveryNodeInMergedParentClass) {
+  EGraph<SymbolLang> egraph;
+
+  Id x = egraph.add(SymbolLang::leaf("x"));
+  Id y = egraph.add(SymbolLang::leaf("y"));
+  Id z = egraph.add(SymbolLang::leaf("z"));
+  Id fx = egraph.add(SymbolLang("f", {x}));
+  Id gy = egraph.add(SymbolLang("g", {y}));
+  Id gz = egraph.add(SymbolLang("g", {z}));
+
+  egraph.unite(fx, gy);
+  egraph.rebuild();
+  ASSERT_NE(egraph.find(fx), egraph.find(gz));
+
+  egraph.unite(z, y);
+  egraph.rebuild();
+
+  EXPECT_EQ(egraph.find(fx), egraph.find(gz));
+  EXPECT_EQ(egraph.totalSize(), egraph.memoSize());
+}
+
 TEST(EGraphCoreTest, LookupUsesCanonicalChildren) {
   EGraph<SymbolLang> egraph;
 

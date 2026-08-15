@@ -29,7 +29,7 @@ Pre-verification analysis passes:
 
 ## Frontend And Backend
 
-- [`Frontend/`](Frontend/) hosts verification frontends; [`Frontend/BooleanProgram/`](Frontend/BooleanProgram/) contains the current Boolean/predicate-program parsing and lowering implementation.
+- [`Frontend/`](Frontend/) hosts verification frontends, including the current Boolean/predicate-program parsing and lowering implementation.
 - [`Driver/`](Driver/) provides shared driver execution logic and result parsing.
 
 ## Verification Backends

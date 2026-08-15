@@ -19,8 +19,8 @@ namespace SMTSampler {
 
 BVValue::BVValue(uint64_t value, unsigned width)
     : width_(width), value_small_(0) {
-  if (width == 0 || width > 128) {
-    throw std::invalid_argument("BVValue width must be in [1, 128]");
+  if (width == 0 || width > 64) {
+    throw std::invalid_argument("BVValue width must be in [1, 64]");
   }
 
   if (width <= 64) {
@@ -31,10 +31,6 @@ BVValue::BVValue(uint64_t value, unsigned width)
     } else {
       value_small_ = value;
     }
-  } else {
-    // For width > 64, store as string (simplified implementation)
-    // In production, you'd use GMP or Z3's internal representation
-    value_large_ = std::to_string(value);
   }
 }
 
@@ -44,18 +40,16 @@ BVValue::BVValue(const z3::expr &bv_expr) {
   }
 
   width_ = bv_expr.get_sort().bv_size();
-
-  if (width_ <= 64) {
-    value_small_ = bv_expr.get_numeral_uint64();
-  } else {
-    // For wide bit-vectors, use string representation
-    value_large_ = bv_expr.get_decimal_string(10);
+  if (width_ == 0 || width_ > 64) {
+    throw std::invalid_argument("BVValue width must be in [1, 64]");
   }
+
+  value_small_ = bv_expr.get_numeral_uint64();
 }
 
 BVValue BVValue::from_signed(int64_t value, unsigned width) {
-  if (width == 0 || width > 128) {
-    throw std::invalid_argument("BVValue width must be in [1, 128]");
+  if (width == 0 || width > 64) {
+    throw std::invalid_argument("BVValue width must be in [1, 64]");
   }
 
   // Convert signed to unsigned representation
@@ -71,19 +65,10 @@ BVValue BVValue::from_signed(int64_t value, unsigned width) {
 }
 
 uint64_t BVValue::to_uint64() const {
-  if (width_ > 64) {
-    throw std::runtime_error(
-        "BVValue too wide for uint64_t (width=" + std::to_string(width_) + ")");
-  }
   return value_small_;
 }
 
 int64_t BVValue::to_int64() const {
-  if (width_ > 64) {
-    throw std::runtime_error(
-        "BVValue too wide for int64_t (width=" + std::to_string(width_) + ")");
-  }
-
   // Check if the value fits in int64_t when interpreted as signed
   if (width_ == 64) {
     // For 64-bit values, just reinterpret
@@ -103,19 +88,10 @@ int64_t BVValue::to_int64() const {
 }
 
 z3::expr BVValue::to_z3_expr(z3::context &ctx) const {
-  if (width_ <= 64) {
-    return ctx.bv_val(value_small_, width_);
-  } else {
-    // For wide bit-vectors, use string constructor
-    return ctx.bv_val(value_large_.value().c_str(), width_);
-  }
+  return ctx.bv_val(value_small_, width_);
 }
 
 bool BVValue::fits_int64() const {
-  if (width_ > 64) {
-    return false;
-  }
-
   if (width_ == 64) {
     // All 64-bit values fit when reinterpreted
     return true;
@@ -135,22 +111,13 @@ bool BVValue::fits_int64() const {
 }
 
 std::string BVValue::to_string() const {
-  if (width_ <= 64) {
-    return std::to_string(value_small_);
-  } else {
-    return value_large_.value();
-  }
+  return std::to_string(value_small_);
 }
 
 std::string BVValue::to_hex_string() const {
-  if (width_ <= 64) {
-    std::ostringstream oss;
-    oss << "0x" << std::hex << value_small_;
-    return oss.str();
-  } else {
-    // Simplified: just return decimal for wide values
-    return value_large_.value();
-  }
+  std::ostringstream oss;
+  oss << "0x" << std::hex << value_small_;
+  return oss.str();
 }
 
 // ============================================================================
@@ -158,6 +125,9 @@ std::string BVValue::to_hex_string() const {
 // ============================================================================
 
 BVRange BVRange::unsigned_full(unsigned width) {
+  if (width == 0 || width > 64) {
+    throw std::invalid_argument("BVRange width must be in [1, 64]");
+  }
   BVValue min(0, width);
   uint64_t max_val;
   if (width >= 64) {
@@ -170,8 +140,8 @@ BVRange BVRange::unsigned_full(unsigned width) {
 }
 
 BVRange BVRange::signed_full(unsigned width) {
-  if (width == 0) {
-    throw std::invalid_argument("Width must be > 0");
+  if (width == 0 || width > 64) {
+    throw std::invalid_argument("BVRange width must be in [1, 64]");
   }
 
   int64_t min_signed, max_signed;
@@ -196,25 +166,14 @@ BVRange::BVRange(BVValue min, BVValue max) : min_(min), max_(max) {
 }
 
 bool BVRange::is_empty() const {
-  if (!min_.fits_uint64() || !max_.fits_uint64()) {
-    // For wide values, we'd need proper comparison
-    return false;
-  }
   return min_.to_uint64() > max_.to_uint64();
 }
 
 bool BVRange::is_singleton() const {
-  if (!min_.fits_uint64() || !max_.fits_uint64()) {
-    return false;
-  }
   return min_.to_uint64() == max_.to_uint64();
 }
 
 Optional<uint64_t> BVRange::size() const {
-  if (!min_.fits_uint64() || !max_.fits_uint64()) {
-    return nullopt<uint64_t>();
-  }
-
   uint64_t min_val = min_.to_uint64();
   uint64_t max_val = max_.to_uint64();
 
@@ -237,10 +196,6 @@ Optional<uint64_t> BVRange::size() const {
 }
 
 template <typename RNG> BVValue BVRange::sample_uniform(RNG &rng) const {
-  if (!min_.fits_uint64() || !max_.fits_uint64()) {
-    throw std::runtime_error("Cannot sample from wide BVRange (width > 64)");
-  }
-
   uint64_t min_val = min_.to_uint64();
   uint64_t max_val = max_.to_uint64();
 

@@ -4,7 +4,7 @@ Verification Frontend
 BooleanProgram
 --------------
 
-**Location**: ``lib/Verification/Frontend/BooleanProgram/``
+**Location**: ``lib/Verification/Frontend/``
 
 **Status**: Internal/Experimental — not exposed via any production tool.
 

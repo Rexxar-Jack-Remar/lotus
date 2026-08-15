@@ -33,6 +33,7 @@
 #include <map>
 #include <set>
 #include <sstream>
+#include <string>
 #include <unordered_map>
 #include <unordered_set>
 #include <vector>
@@ -45,7 +46,18 @@
 // do NOT place "using namespace std" or "using namespace z3" here.
 // Each .cpp implementation file declares them locally as needed.
 
-// Forward declarations for sampler implementations
-class quick_sampler;
-struct interval_sampler;
-struct region_sampler;
+namespace lotus::SMTSampler {
+
+/// Run the DIMACS/CNF mutation sampler.
+void runQuickSampler(const std::string &input_file, int max_samples = 1000,
+                     double max_time_seconds = 30.0);
+
+/// Run the interval sampler on an SMT-LIB input file or directory.
+void runIntervalSampler(const std::string &input_path, int max_samples = 1000,
+                        double max_time_ms = 30000.0);
+
+/// Run the symbolic-abstraction region sampler on an SMT-LIB input file.
+void runRegionSampler(const std::string &input_file, int max_samples = 1000,
+                      double max_time_ms = 30000.0);
+
+} // namespace lotus::SMTSampler

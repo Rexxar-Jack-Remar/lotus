@@ -100,6 +100,7 @@ struct interval_sampler {
   z3::context c;
   z3::expr smt_formula;
   z3::expr_vector m_vars;
+  z3::solver validator;
 
   // B11: use int64_t for bounds to avoid truncation of wide bit-vectors.
   std::vector<int64_t> lower_bounds;
@@ -113,7 +114,7 @@ struct interval_sampler {
 
   interval_sampler(std::string &input, int max_samples, double max_time)
       : path(input), max_samples(max_samples), max_time(max_time),
-        smt_formula(c), m_vars(c) {
+        smt_formula(c), m_vars(c), validator(c) {
     auto seed = static_cast<uint64_t>(
         std::chrono::high_resolution_clock::now().time_since_epoch().count());
     rng.seed(seed);
@@ -301,21 +302,24 @@ struct interval_sampler {
   /**
    * @brief Verifies if the generated sample satisfies the original SMT formula.
    *
-   * B11: assignments are int64_t.
-   * B13: uniqueness check is O(1) via unordered_set.
+   * Candidate BV values are solver assumptions. This leaves every
+   * non-sampled symbol existentially free, rather than evaluating an
+   * arbitrary completed model.
    */
   bool check_random_model(std::vector<int64_t> &assignments) {
-    model rand_model(c);
+    if (assignments.size() != m_vars.size())
+      return false;
+    validator.push();
     for (unsigned i = 0; i < m_vars.size(); i++) {
-      z3::func_decl decl = m_vars[i].decl();
       unsigned sz = m_vars[i].get_sort().bv_size();
       // Use uint64_t to correctly represent the bit pattern.
       uint64_t uval = static_cast<uint64_t>(assignments[i]);
       z3::expr val_i = c.bv_val(uval, sz);
-      rand_model.add_const_interp(decl, val_i);
+      validator.add(m_vars[i] == val_i);
     }
-
-    if (!rand_model.eval(smt_formula, true).is_true())
+    bool is_sat = validator.check() == z3::sat;
+    validator.pop();
+    if (!is_sat)
       return false;
 
     // B13: O(1) uniqueness check.
@@ -342,14 +346,32 @@ struct interval_sampler {
       stop_reason.clear();
       input_file = file;
       parse_smt();
-      if (!smt_formula) {
+      if (!static_cast<bool>(smt_formula)) {
         log_error("Skipping file with parse failure: " + input_file);
         continue;
       }
       log_info("Parsed SMT input: " + input_file);
 
       m_vars = z3::expr_vector(c);
-      get_expr_vars(smt_formula, m_vars);
+      expr_vector all_vars(c);
+      get_expr_vars(smt_formula, all_vars);
+      for (unsigned i = 0; i < all_vars.size(); ++i) {
+        if (!all_vars[i].get_sort().is_bv())
+          continue;
+        if (all_vars[i].get_sort().bv_size() > 64) {
+          log_error("Skipping input with bit-vector wider than 64 bits: " +
+                    all_vars[i].decl().name().str());
+          m_vars = z3::expr_vector(c);
+          break;
+        }
+        m_vars.push_back(all_vars[i]);
+      }
+      if (m_vars.empty() && !all_vars.empty()) {
+        log_error("Skipping input without supported bit-vector variables");
+        continue;
+      }
+      validator.reset();
+      validator.add(smt_formula);
       log_info("Collected variables; computing bounds");
 
       auto bound_start = std::chrono::high_resolution_clock::now();
@@ -439,3 +461,13 @@ struct interval_sampler {
     of.close();
   }
 };
+
+namespace lotus::SMTSampler {
+
+void runIntervalSampler(const std::string &input_path, int max_samples,
+                        double max_time_ms) {
+  std::string mutable_path = input_path;
+  interval_sampler(mutable_path, max_samples, max_time_ms).run();
+}
+
+} // namespace lotus::SMTSampler

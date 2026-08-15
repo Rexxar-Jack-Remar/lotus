@@ -3,6 +3,8 @@
 #include "Solvers/EGraph/Id.h"
 #include "Solvers/EGraph/Util.h"
 
+#include <llvm/ADT/SmallVector.h>
+
 namespace lotus::egraph {
 
 template <typename L> struct LanguageOps;
@@ -28,13 +30,15 @@ public:
 
   SymbolLang() = default;
   SymbolLang(Symbol op, std::vector<Id> children)
-      : op_(std::move(op)), children_(std::move(children)) {}
+      : op_(std::move(op)), children_(children.begin(), children.end()) {}
+  SymbolLang(Symbol op, std::initializer_list<Id> children)
+      : op_(std::move(op)), children_(children.begin(), children.end()) {}
 
   static SymbolLang leaf(Symbol op) { return SymbolLang(std::move(op), {}); }
 
   const Symbol &op() const { return op_; }
-  const std::vector<Id> &children() const { return children_; }
-  std::vector<Id> &childrenMut() { return children_; }
+  const llvm::SmallVector<Id, 2> &children() const { return children_; }
+  llvm::SmallVector<Id, 2> &childrenMut() { return children_; }
 
   Discriminant discriminant() const {
     return SymbolLangDiscriminant{op_, children_.size()};
@@ -80,7 +84,7 @@ public:
 
 private:
   Symbol op_;
-  std::vector<Id> children_;
+  llvm::SmallVector<Id, 2> children_;
 };
 
 template <> struct LanguageOps<SymbolLang> {
@@ -94,8 +98,7 @@ template <> struct LanguageOps<SymbolLang> {
   }
 };
 
-template <typename L>
-inline std::string displayNode(const L &node) {
+template <typename L> inline std::string displayNode(const L &node) {
   return LanguageOps<L>::display(node);
 }
 
@@ -120,7 +123,8 @@ template <typename L> inline bool nodeMatches(const L &lhs, const L &rhs) {
 } // namespace lotus::egraph
 
 template <> struct std::hash<lotus::egraph::SymbolLangDiscriminant> {
-  size_t operator()(const lotus::egraph::SymbolLangDiscriminant &value) const noexcept {
+  size_t operator()(
+      const lotus::egraph::SymbolLangDiscriminant &value) const noexcept {
     size_t seed = std::hash<lotus::egraph::Symbol>{}(value.op);
     lotus::egraph::hashCombine(seed, value.arity);
     return seed;

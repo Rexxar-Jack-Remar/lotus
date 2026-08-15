@@ -164,5 +164,28 @@ TEST(EGraphFeatureTest, EGraphJsonParseRejectsMalformedInput) {
                std::runtime_error);
   EXPECT_THROW((void)EGraph<SymbolLang>::fromJson(json11::Json::object{}),
                std::runtime_error);
+  EXPECT_THROW(
+      (void)EGraph<SymbolLang>::parseJson(
+          "{\"classes\":["
+          "{\"id\":0,\"nodes\":[{\"op\":\"f\",\"children\":[1]}]},"
+          "{\"id\":1,\"nodes\":[{\"op\":\"g\",\"children\":[0]}]}]}"),
+      std::runtime_error);
+  EXPECT_THROW(
+      (void)EGraph<SymbolLang>::parseJson(
+          R"({"classes":[{"id":0.5,"nodes":[{"op":"a","children":[]}]}]})"),
+      std::runtime_error);
+#endif
+}
+
+TEST(EGraphFeatureTest, EGraphJsonAcceptsFullUnsignedIdRange) {
+#if !LOTUS_EGRAPH_ENABLE_JSON
+  GTEST_SKIP() << "JSON support disabled at compile time";
+#else
+  auto restored = EGraph<SymbolLang>::parseJson(
+      R"({"classes":[{"id":2147483648,"nodes":[{"op":"wide","children":[]}]}]})");
+  restored.rebuild();
+
+  EXPECT_EQ(restored.totalSize(), 1u);
+  EXPECT_TRUE(restored.lookup(SymbolLang::leaf("wide")).has_value());
 #endif
 }

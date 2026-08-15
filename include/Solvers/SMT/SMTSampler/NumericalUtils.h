@@ -8,7 +8,7 @@
  * to native C++ integer types.
  *
  * Key features:
- * - Support for arbitrary-width bit-vectors (1-128 bits)
+ * - Explicit support for native bit-vectors up to 64 bits
  * - Overflow-safe arithmetic operations
  * - Proper signed/unsigned semantics matching SMT-LIB
  * - Efficient representation for common cases (≤64 bits)
@@ -68,15 +68,15 @@ template <typename T> Optional<T> nullopt() { return Optional<T>(); }
 /**
  * @brief Represents a bit-vector value with arbitrary width.
  *
- * For widths ≤ 64, uses native uint64_t storage.
- * For widths > 64, uses Z3's arbitrary-precision representation.
+ * Uses native uint64_t storage. Widths greater than 64 are rejected; callers
+ * that need wider values must retain Z3 numerals or use multiprecision.
  */
 class BVValue {
 public:
   /**
    * @brief Constructs a BVValue from a native integer.
    * @param value The integer value (will be masked to width)
-   * @param width Bit-width (1-128)
+   * @param width Bit-width (1-64)
    */
   explicit BVValue(uint64_t value = 0, unsigned width = 64);
 
@@ -89,7 +89,7 @@ public:
   /**
    * @brief Constructs a BVValue from a signed integer.
    * @param value Signed integer value
-   * @param width Bit-width (1-128)
+   * @param width Bit-width (1-64)
    */
   static BVValue from_signed(int64_t value, unsigned width);
 
@@ -139,7 +139,6 @@ public:
 private:
   unsigned width_;
   uint64_t value_small_;              // Used when width_ <= 64
-  Optional<std::string> value_large_; // Used when width_ > 64 (decimal string)
 };
 
 /**

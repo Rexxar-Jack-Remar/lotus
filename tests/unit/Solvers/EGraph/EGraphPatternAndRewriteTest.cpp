@@ -86,6 +86,55 @@ TEST(EGraphFeatureTest, RewriteRespectsCyclePolicy) {
   ASSERT_EQ(applied.size(), 1u);
   EXPECT_EQ(egraph.totalSize(), 2u);
 }
+
+TEST(EGraphFeatureTest, CyclePolicyRejectsNestedCycles) {
+  EGraph<SymbolLang, NoCycleAnalysis> egraph;
+  Id a = egraph.add(SymbolLang::leaf("a"));
+  Id fa = egraph.add(SymbolLang("f", {a}));
+  Id ha = egraph.add(SymbolLang("h", {a}));
+  egraph.rebuild();
+
+  egraph.unite(a, fa);
+  egraph.rebuild();
+
+  auto pattern = Pattern<SymbolLang>::parse("(h (f ?x))");
+  auto matches = pattern.searchEClass(egraph, ha);
+  EXPECT_TRUE(!matches || matches->substs.empty());
+}
+
+TEST(EGraphFeatureTest, CyclePolicyAllowsSharedDagChildren) {
+  EGraph<SymbolLang, NoCycleAnalysis> egraph;
+  Id root = egraph.addExpr(RecExpr<SymbolLang>::parse("(pair (f a) (f a))"));
+  egraph.rebuild();
+
+  auto pattern = Pattern<SymbolLang>::parse("(pair (f ?x) (f ?x))");
+  auto matches = pattern.searchEClass(egraph, root);
+  ASSERT_TRUE(matches.has_value());
+  EXPECT_EQ(matches->substs.size(), 1u);
+}
+
+TEST(EGraphFeatureTest, LargeEClassMatchingDoesNotAssumeDiscriminantOrdering) {
+  EGraph<SymbolLang> egraph;
+  std::optional<Id> root;
+
+  for (size_t i = 0; i < 30; ++i) {
+    Id child = egraph.add(SymbolLang::leaf("x" + std::to_string(i)));
+    Id unary = egraph.add(SymbolLang("f", {child}));
+    Id binary = egraph.add(SymbolLang("f", {child, child}));
+    if (!root) {
+      root = unary;
+    } else {
+      egraph.unite(*root, unary);
+    }
+    egraph.unite(*root, binary);
+  }
+  egraph.rebuild();
+
+  auto pattern = Pattern<SymbolLang>::parse("(f ?x)");
+  auto matches = pattern.searchEClass(egraph, *root);
+  ASSERT_TRUE(matches.has_value());
+  EXPECT_EQ(matches->substs.size(), 30u);
+}
 TEST(EGraphFeatureTest, RunnerTreatsUnionOnlyRewriteAsProgress) {
   auto rule = makeRewrite<SymbolLang>("merge-a-b", "a", "b");
 
@@ -148,6 +197,15 @@ TEST(EGraphFeatureTest, RunnerBackoffDoNotBanDoesNotOverflowSearchLimit) {
   EXPECT_NE(runner.stop_reason.kind, StopReasonKind::Other);
   EXPECT_TRUE(runner.iterations.front().applied.empty());
 }
+
+TEST(EGraphFeatureTest, RunnerBackoffArithmeticSaturates) {
+  constexpr size_t limit = std::numeric_limits<size_t>::max();
+  EXPECT_EQ(detail::runnerSaturatingShiftLeft(limit, 1), limit);
+  EXPECT_EQ(detail::runnerSaturatingShiftLeft(limit / 2 + 1, 1), limit);
+  EXPECT_EQ(detail::runnerSaturatingShiftLeft(1, 1), 2u);
+  EXPECT_EQ(detail::runnerSaturatingAdd(limit, 1), limit);
+  EXPECT_EQ(detail::runnerSaturatingAdd(limit - 1, 1), limit);
+}
 TEST(EGraphFeatureTest, PatternSearchWithLimitUsesOperatorIndex) {
   EGraph<SymbolLang> egraph;
   egraph.addExpr(RecExpr<SymbolLang>::parse("(+ a b)"));
@@ -160,6 +218,27 @@ TEST(EGraphFeatureTest, PatternSearchWithLimitUsesOperatorIndex) {
 
   ASSERT_EQ(matches.size(), 1u);
   ASSERT_EQ(matches.front().substs.size(), 1u);
+}
+
+TEST(EGraphFeatureTest, PatternSearchCanBeCooperativelyStopped) {
+  EGraph<SymbolLang> egraph;
+  for (size_t i = 0; i < 32; ++i) {
+    Id leaf = egraph.add(SymbolLang::leaf("leaf" + std::to_string(i)));
+    egraph.add(SymbolLang("f", {leaf}));
+  }
+  egraph.rebuild();
+
+  size_t polls = 0;
+  WorkControl control{[&]() {
+                        ++polls;
+                        return true;
+                      },
+                      1};
+  auto matches = Pattern<SymbolLang>::parse("(f ?x)").searchWithLimit(
+      egraph, 100, &control);
+
+  EXPECT_TRUE(matches.empty());
+  EXPECT_GT(polls, 0u);
 }
 TEST(EGraphFeatureTest, RewriteBorrowSupportsBorrowedSearcher) {
   Pattern<SymbolLang> lhs = Pattern<SymbolLang>::parse("(+ ?a ?b)");
@@ -406,8 +485,10 @@ TEST(EGraphFeatureTest, SearchMatchesCarryPerMatchAstIntoSearcherResults) {
   auto rewrite = makeRewrite<SymbolLang>("strip-f", "(f ?x)", "?x");
   auto matches = rewrite.search(egraph);
   ASSERT_EQ(matches.size(), 2u);
+  const auto *shared_ast = matches.front().ast.get();
   for (const auto &match : matches) {
-    ASSERT_TRUE(match.ast.has_value());
+    ASSERT_TRUE(match.ast);
+    EXPECT_EQ(match.ast.get(), shared_ast);
     EXPECT_EQ(match.ast->toString(), "(f ?x)");
   }
 }

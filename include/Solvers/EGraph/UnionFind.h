@@ -18,13 +18,6 @@ public:
 
   Id find(Id current) const {
     while (current != parents_[current.index()]) {
-      current = parents_[current.index()];
-    }
-    return current;
-  }
-
-  Id findMut(Id current) {
-    while (current != parents_[current.index()]) {
       Id grandparent = parents_[parents_[current.index()].index()];
       parents_[current.index()] = grandparent;
       current = grandparent;
@@ -32,13 +25,15 @@ public:
     return current;
   }
 
+  Id findMut(Id current) { return find(current); }
+
   Id unite(Id root1, Id root2) {
     parents_[root2.index()] = root1;
     return root1;
   }
 
 private:
-  std::vector<Id> parents_;
+  mutable std::vector<Id> parents_;
 };
 
 } // namespace lotus::egraph

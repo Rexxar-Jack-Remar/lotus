@@ -28,15 +28,15 @@ set(FiTx_Framework_SOURCES
 )
 
 set(FiTx_Detector_SOURCES
-  ${FiTx_DIR}/Detector/DF_detector/DFUtils.cpp
-  ${FiTx_DIR}/Detector/Double_lock_detector/DLUtils.cpp
-  ${FiTx_DIR}/Detector/Double_unlock_detector/DULUtils.cpp
-  ${FiTx_DIR}/Detector/Leak_detector/LeakUtils.cpp
-  ${FiTx_DIR}/Detector/NullPtr_detector/NullPtr_Detector.cpp
-  ${FiTx_DIR}/Detector/Ref_count_detector/RefUtils.cpp
-  ${FiTx_DIR}/Detector/Ref_uncount_detector/UnrefUtils.cpp
-  ${FiTx_DIR}/Detector/UAF_detector/UAFUtils.cpp
-  ${FiTx_DIR}/Detector/UBI_detector/UBI_Detector.cpp
+  ${FiTx_DIR}/Detector/DFUtils.cpp
+  ${FiTx_DIR}/Detector/DLUtils.cpp
+  ${FiTx_DIR}/Detector/DULUtils.cpp
+  ${FiTx_DIR}/Detector/LeakUtils.cpp
+  ${FiTx_DIR}/Detector/NullPtr_Detector.cpp
+  ${FiTx_DIR}/Detector/RefUtils.cpp
+  ${FiTx_DIR}/Detector/UnrefUtils.cpp
+  ${FiTx_DIR}/Detector/UAFUtils.cpp
+  ${FiTx_DIR}/Detector/UBI_Detector.cpp
 )
 
 add_library(FiTxChecker STATIC

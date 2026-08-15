@@ -11,7 +11,7 @@
  *  B3  – solve() now propagates stop_requested back to sample(), which breaks
  *        out of the flip loop cleanly before any opt.pop() imbalance can occur.
  *  B4  – Empty clauses (produced by a DIMACS line containing only "0") are
- *        skipped instead of being added as mk_or({}) == false.
+ *        retained as false, as required by DIMACS.
  *  B5  – The CNF parser now breaks out of the literal-reading loop as soon as
  *        it reads the 0 terminator, preventing over-reading.
  *  B6  – The XOR recombination formula has been replaced with a correct
@@ -99,6 +99,8 @@ class quick_sampler {
   bool stop_requested = false;
   std::string stop_reason;
 
+  enum class SolveResult { Sat, Unsat, Unknown, Stop };
+
   std::mt19937 rng;
   std::uniform_int_distribution<int> bit_dist{0, 1};
 
@@ -129,6 +131,17 @@ public:
       log_error("Failed to parse CNF input: " + input_file);
       return;
     }
+
+    SolveResult formula_result = solve();
+    if (formula_result != SolveResult::Sat) {
+      if (formula_result == SolveResult::Unsat)
+        log_info("Formula is unsatisfiable");
+      else if (formula_result == SolveResult::Unknown)
+        log_warn("Could not determine formula satisfiability");
+      finish();
+      return;
+    }
+
     results_file.open(input_file + ".samples", std::ios::out | std::ios::trunc);
     if (!results_file.is_open()) {
       log_error("Failed to open output file: " + input_file + ".samples");
@@ -147,9 +160,14 @@ public:
         else
           sol.add(!literal(v));
       }
-      if (!solve()) {
+      SolveResult seed_result = solve();
+      if (seed_result != SolveResult::Sat) {
         sol.pop();
-        break;
+        if (seed_result == SolveResult::Stop)
+          break;
+        // An UNSAT/unknown projection says nothing about the unconditioned
+        // formula. Try another seed instead of ending sampling early.
+        continue;
       }
       z3::model m = sol.get_model();
       sol.pop();
@@ -179,7 +197,7 @@ public:
   /**
    * @brief Parses the input CNF file (DIMACS format).
    *
-   * B4: empty clauses (lines with only "0") are skipped.
+   * B4: empty clauses (lines with only "0") are retained as false.
    * B5: the literal-reading loop breaks on the 0 terminator.
    * QS-5: deduplication of independent variables is global across all
    *        "c ind" lines — indset is declared once outside the loop.
@@ -231,10 +249,8 @@ public:
           if (av > max_var)
             max_var = av;
         }
-        // B4: skip empty clauses (would make the formula trivially UNSAT).
-        if (clause.size() == 0)
-          continue;
-        exp.push_back(mk_or(clause));
+        // An empty DIMACS clause is false, not a no-op.
+        exp.push_back(clause.size() == 0 ? c.bool_val(false) : mk_or(clause));
       }
     }
     f.close();
@@ -297,7 +313,8 @@ public:
       else
         sol.add(literal(v));
 
-      if (solve()) {
+      SolveResult flip_result = solve();
+      if (flip_result == SolveResult::Sat) {
         z3::model new_model = sol.get_model();
         std::string new_string = model_string(new_model);
         if (initial_mutations.find(new_string) == initial_mutations.end()) {
@@ -336,8 +353,9 @@ public:
           for (auto &it : new_mutations)
             mutations[it.first] = it.second;
         }
-      } else if (!stop_requested) {
-        // Only mark as unsat if we didn't stop due to timeout/limit.
+      } else if (flip_result == SolveResult::Unsat) {
+        // Only blacklist variables proven UNSAT; unknown and stop outcomes
+        // must not change the search state.
         log_warn("Mutation unsat at index " + std::to_string(i));
         unsat_vars.insert(i);
       }
@@ -396,7 +414,7 @@ public:
     }
   }
 
-  bool solve() {
+  SolveResult solve() {
     struct timespec start;
     clock_gettime(CLOCK_REALTIME, &start);
     double elapsed = duration(&start_time, &start);
@@ -404,13 +422,13 @@ public:
       stop_requested = true;
       stop_reason = "timeout";
       log_info("Stopping: timeout");
-      return false;
+      return SolveResult::Stop;
     }
     if (samples >= max_samples) {
       stop_requested = true;
       stop_reason = "samples";
       log_info("Stopping: sample limit");
-      return false;
+      return SolveResult::Stop;
     }
 
     // B9: use sol.check() (plain solver) instead of opt.check().
@@ -420,9 +438,11 @@ public:
     solver_time += duration(&start, &end);
     solver_calls += 1;
 
-    if (result == z3::unknown)
+    if (result == z3::unknown) {
       log_warn("Solver returned unknown");
-    return result == z3::sat;
+      return SolveResult::Unknown;
+    }
+    return result == z3::sat ? SolveResult::Sat : SolveResult::Unsat;
   }
 
   /**
@@ -470,3 +490,12 @@ public:
     return e;
   }
 };
+
+namespace lotus::SMTSampler {
+
+void runQuickSampler(const std::string &input_file, int max_samples,
+                     double max_time_seconds) {
+  quick_sampler(input_file, max_samples, max_time_seconds).run();
+}
+
+} // namespace lotus::SMTSampler

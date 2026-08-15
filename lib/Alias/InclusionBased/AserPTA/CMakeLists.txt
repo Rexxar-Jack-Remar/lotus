@@ -1,10 +1,10 @@
 add_library(AserPTA STATIC
     PointerAnalysis/CMDOptions.cpp
     PointerAnalysis/Context/Context.cpp
-    PointerAnalysis/Model/DefaultHeapModel.cpp
-    PointerAnalysis/Model/DefaultLangModel.cpp
-    PointerAnalysis/Model/FieldSensitive/FSLayouts.cpp
-    PointerAnalysis/Model/MemModels.cpp
+    PointerAnalysis/Models/DefaultHeapModel.cpp
+    PointerAnalysis/Models/LanguageModel/DefaultLangModel/DefaultLangModel.cpp
+    PointerAnalysis/Models/MemoryModel/FieldSensitive/Layout/FSLayouts.cpp
+    PointerAnalysis/Models/MemoryModel/MemModels.cpp
     PointerAnalysis/Program/Program.cpp
     PointerAnalysis/Solver/PointsToSet.cpp
     PreProcessing/IRPreProcessor.cpp

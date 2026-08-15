@@ -3,7 +3,6 @@ add_library(VerificationTransform STATIC
   BreakCritLoops.cpp
   BreakInfiniteLoops.cpp
   DeleteUndefined.cpp
-  ExpandAssume.cpp
   FlattenLoops.cpp
   InitializeUninitialized.cpp
   InstrumentAlloc.cpp

@@ -116,7 +116,7 @@ static expr build_integer_linear_expr(const LinearExpression &lexpr,
  * - Returns std::nullopt if φ is unsatisfiable
  * - Returns std::nullopt if no valid integer value can be extracted
  * - Returns the maximum value (least upper bound) on success
- * - May return a sub-optimal value if max_iterations is exceeded
+ * - Returns std::nullopt if the fallback cannot prove an optimum
  *
  * @param phi The formula constraining the variables (bit-vector SMT formula)
  * @param lexpr The linear expression to maximize (Σ λ_i · ⟨⟨v_i⟩⟩)
@@ -164,8 +164,9 @@ std::optional<int64_t> alpha_lin_exp(const z3::expr &phi,
   }
 
   // Fallback: bounded ascending search using a plain solver when optimize
-  // returns unknown or non-numeral values. This ensures we still get a result
-  // even when optimization fails, though it may be less optimal.
+  // returns unknown or non-numeral values. A partial search result is never
+  // returned: callers turn this value into a hard abstract constraint, so a
+  // non-optimal upper bound would be an unsound under-approximation.
   solver sol(ctx);
   sol.set(p);
   sol.add(phi);
@@ -192,10 +193,15 @@ std::optional<int64_t> alpha_lin_exp(const z3::expr &phi,
     // Add constraint requiring expression to be greater than current best
     sol.add(int_expr > ctx.int_val(best));
     auto res = sol.check();
-    if (res != sat) {
-      // No better solution exists (UNSAT), so current best is optimal
+    if (res == unsat) {
+      // No better solution exists, so current best is optimal.
       sol.pop();
-      break;
+      return best;
+    }
+    if (res != sat) {
+      // Unknown does not prove that best is an upper bound.
+      sol.pop();
+      return std::nullopt;
     }
     // Found a better solution, update best and continue
     model m_new = sol.get_model();
@@ -203,14 +209,15 @@ std::optional<int64_t> alpha_lin_exp(const z3::expr &phi,
     auto v_int = SymAbs::to_int64(v_new);
     sol.pop(); // Restore state
     if (!v_int.has_value()) {
-      // Cannot extract integer value, stop search
-      break;
+      // Cannot establish a usable exact bound.
+      return std::nullopt;
     }
     best = v_int.value();
     ++iter;
   }
 
-  return best_opt.has_value() ? std::optional<int64_t>(best) : std::nullopt;
+  // Hitting the iteration budget also does not prove optimality.
+  return std::nullopt;
 }
 
 /**
