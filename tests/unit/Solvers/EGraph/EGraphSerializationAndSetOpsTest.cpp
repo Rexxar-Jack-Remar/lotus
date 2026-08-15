@@ -156,6 +156,28 @@ TEST(EGraphFeatureTest, EGraphJsonRoundTripsCoreShape) {
             restored.addExpr(RecExpr<SymbolLang>::parse("(f b)")));
 #endif
 }
+
+TEST(EGraphFeatureTest, TypedLanguageJsonPreservesAmbiguousVariants) {
+#if !LOTUS_EGRAPH_ENABLE_JSON
+  GTEST_SKIP() << "JSON support disabled at compile time";
+#else
+  EGraph<TypedPropLang> egraph;
+  egraph.add(TypedPropLang::makeBool(true));
+  egraph.add(TypedPropLang::makeTrueConstant());
+  egraph.rebuild();
+
+  auto json = egraph.toJson();
+  auto restored = EGraph<TypedPropLang>::fromJson(json);
+  restored.rebuild();
+
+  auto bool_id = restored.lookup(TypedPropLang::makeBool(true));
+  auto constant_id = restored.lookup(TypedPropLang::makeTrueConstant());
+  ASSERT_TRUE(bool_id.has_value());
+  ASSERT_TRUE(constant_id.has_value());
+  EXPECT_NE(restored.find(*bool_id), restored.find(*constant_id));
+#endif
+}
+
 TEST(EGraphFeatureTest, EGraphJsonParseRejectsMalformedInput) {
 #if !LOTUS_EGRAPH_ENABLE_JSON
   GTEST_SKIP() << "JSON support disabled at compile time";

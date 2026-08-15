@@ -26,7 +26,7 @@ template <typename L> struct ENodeOrVarDiscriminant {
 template <typename L> struct ENodeOrVar {
   std::variant<L, Var> value;
 
-  ENodeOrVar() = default;
+  ENodeOrVar() = delete;
   explicit ENodeOrVar(const L &node) : value(node) {}
   explicit ENodeOrVar(const Var &var) : value(var) {}
 
@@ -37,16 +37,14 @@ template <typename L> struct ENodeOrVar {
   const L &node() const { return std::get<L>(value); }
   L &node() { return std::get<L>(value); }
 
-  const auto &children() const {
-    using Children = std::decay_t<decltype(node().children())>;
-    static const Children empty;
+  llvm::ArrayRef<Id> children() const {
     if (isVar()) {
-      return empty;
+      return {};
     }
     return node().children();
   }
 
-  auto &childrenMut() {
+  llvm::MutableArrayRef<Id> childrenMut() {
     if (isVar()) {
       throw std::runtime_error("Pattern variable has no mutable children");
     }
@@ -86,7 +84,10 @@ template <typename L> struct ENodeOrVar {
 template <typename L> struct LanguageOps<ENodeOrVar<L>> {
   static std::optional<ENodeOrVar<L>> fromOp(std::string_view op,
                                              const std::vector<Id> &children) {
-    if (!op.empty() && op.front() == '?' && children.empty()) {
+    if (op.size() > 1 && op.front() == '?') {
+      if (!children.empty()) {
+        return std::nullopt;
+      }
       return ENodeOrVar<L>(Var::parse(op));
     }
     auto node = LanguageOps<L>::fromOp(op, children);
@@ -351,7 +352,8 @@ template <typename L> struct std::hash<lotus::egraph::ENodeOrVar<L>> {
       lotus::egraph::hashCombine(seed, value.var());
       return seed;
     }
-    lotus::egraph::hashCombine(seed, value.node());
+    seed ^= lotus::egraph::LanguageHash<L>{}(value.node()) +
+            0x9e3779b97f4a7c15ULL + (seed << 6) + (seed >> 2);
     return seed;
   }
 };

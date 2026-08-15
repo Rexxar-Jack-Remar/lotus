@@ -165,3 +165,86 @@ TEST(EGraphFeatureTest, DefineLanguageSurfaceConstrainsFromOp) {
   EXPECT_THROW((void)RecExpr<TestLang>::parse("z"), std::runtime_error);
   EXPECT_THROW((void)RecExpr<TestLang>::parse("(- x y)"), std::runtime_error);
 }
+
+TEST(EGraphFeatureTest, TypedLanguagePreservesVariantsAndPayloads) {
+  auto expr = RecExpr<TypedMathLang>::parse("(+ 41 (- pi))");
+  const auto &add = expr[expr.root()].getAdd();
+
+  ASSERT_TRUE(expr[add.ids[0]].isNumber());
+  EXPECT_EQ(expr[add.ids[0]].getNumber().value, 41);
+
+  const auto &neg = expr[add.ids[1]].getNeg();
+  ASSERT_TRUE(expr[neg.ids[0]].isPi());
+  EXPECT_EQ(expr.toString(), "(+ 41 (- pi))");
+}
+
+TEST(EGraphFeatureTest, TypedLanguageDistinguishesVariantsAndPayloadValues) {
+  auto one = TypedMathLang::makeNumber(1);
+  auto two = TypedMathLang::makeNumber(2);
+  auto neg = TypedMathLang::makeNeg({Id::fromIndex(0)});
+  auto sub = TypedMathLang::makeSub({Id::fromIndex(0), Id::fromIndex(1)});
+
+  EXPECT_EQ(one.discriminant(), two.discriminant());
+  EXPECT_TRUE(one.matches(TypedMathLang::makeNumber(1)));
+  EXPECT_FALSE(one.matches(two));
+  EXPECT_NE(neg.discriminant(), sub.discriminant());
+  EXPECT_EQ(LanguageHash<TypedMathLang>{}(one),
+            LanguageHash<TypedMathLang>{}(TypedMathLang::makeNumber(1)));
+}
+
+TEST(EGraphFeatureTest, TypedLanguageCodecsMatchRustFromStrSemantics) {
+  auto true_value = TypedValueCodec<bool>::parse("true");
+  auto false_value = TypedValueCodec<bool>::parse("false");
+  ASSERT_TRUE(true_value.has_value());
+  ASSERT_TRUE(false_value.has_value());
+  EXPECT_TRUE(*true_value);
+  EXPECT_FALSE(*false_value);
+  EXPECT_FALSE(TypedValueCodec<bool>::parse("1").has_value());
+
+  auto small = TypedValueCodec<int8_t>::parse("12");
+  ASSERT_TRUE(small.has_value());
+  EXPECT_EQ(static_cast<int>(*small), 12);
+  EXPECT_EQ(TypedValueCodec<int8_t>::display(*small), "12");
+
+  EXPECT_FALSE(TypedValueCodec<uint32_t>::parse("-1").has_value());
+  EXPECT_FALSE(TypedValueCodec<uint8_t>::parse("256").has_value());
+  EXPECT_EQ(TypedValueCodec<int32_t>::parse("+12"), 12);
+  EXPECT_EQ(TypedValueCodec<uint32_t>::parse("+12"), 12u);
+
+  auto expr = RecExpr<TypedPropLang>::parse("(~ true)");
+  ASSERT_TRUE(expr[expr.root()].isNot());
+  const Id child = expr[expr.root()].getNot().ids[0];
+  ASSERT_TRUE(expr[child].isBool());
+  EXPECT_TRUE(expr[child].getBool().value);
+  EXPECT_EQ(expr.toString(), "(~ true)");
+}
+
+TEST(EGraphFeatureTest, TypedLanguageSupportsVariadicAndDataOperators) {
+  auto list = RecExpr<TypedMathLang>::parse("(list 1 2 pi)");
+  EXPECT_TRUE(list[list.root()].isList());
+  EXPECT_EQ(list[list.root()].children().size(), 3u);
+
+  auto named = RecExpr<TypedMathLang>::parse("(foo 1 2)");
+  ASSERT_TRUE(named[named.root()].isNamedBinary());
+  EXPECT_EQ(named[named.root()].getNamedBinary().value, Symbol("foo"));
+
+  auto other = RecExpr<TypedMathLang>::parse("(call 1 2 3)");
+  ASSERT_TRUE(other[other.root()].isOther());
+  EXPECT_EQ(other[other.root()].getOther().value, Symbol("call"));
+  EXPECT_EQ(other[other.root()].children().size(), 3u);
+}
+
+TEST(EGraphFeatureTest, TypedLanguageRunsThroughEGraphAndMatcher) {
+  EGraph<TypedMathLang> egraph;
+  Id root = egraph.addExpr(RecExpr<TypedMathLang>::parse("(+ 0 (list 1 2 3))"));
+  egraph.rebuild();
+
+  auto matches = Pattern<TypedMathLang>::parse("(+ 0 ?tail)").search(egraph);
+  ASSERT_EQ(matches.size(), 1u);
+  ASSERT_EQ(matches.front().substs.size(), 1u);
+  EXPECT_EQ(egraph.find(matches.front().eclass), egraph.find(root));
+
+  const Id *tail = matches.front().substs.front().get(Var::parse("?tail"));
+  ASSERT_NE(tail, nullptr);
+  EXPECT_TRUE(egraph[*tail].nodes.front().isList());
+}

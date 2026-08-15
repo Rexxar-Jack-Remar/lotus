@@ -254,7 +254,7 @@ private:
     RecExpr<L> expr;
     std::unordered_map<Id, Id> materialized;
     materialized.reserve(slots_.size());
-    std::unordered_map<L, Id> enodes;
+    std::unordered_map<L, Id, LanguageHash<L>> enodes;
     enodes.reserve(slots_.size());
     std::vector<Id> stack{egraph_.find(eclass)};
 

@@ -28,7 +28,7 @@ template <typename L> struct Instruction {
   enum class Kind { Bind, Compare, Lookup, Scan };
 
   Kind kind = Kind::Scan;
-  L node{};
+  std::optional<L> node;
   std::vector<ENodeOrReg<L>> term;
   Reg<L> i{};
   Reg<L> j{};
@@ -109,8 +109,11 @@ private:
     const auto &inst = instructions[pc];
     switch (inst.kind) {
     case Instruction<L>::Kind::Bind: {
+      if (!inst.node) {
+        throw std::logic_error("Bind instruction is missing its language node");
+      }
       const auto &klass = egraph[reg(inst.i)];
-      return forEachMatchingNode(klass, inst.node, [&](const L &matched) {
+      return forEachMatchingNode(klass, *inst.node, [&](const L &matched) {
         const Id parent = egraph.find(reg(inst.i));
         const size_t parent_head = ancestry_heads_.at(inst.i.value);
         if (regs_.size() > inst.out.value) {
@@ -466,7 +469,9 @@ private:
     for (const auto &instruction : instructions_) {
       register_count_ =
           std::max(register_count_, static_cast<size_t>(instruction.out.value) +
-                                        instruction.node.children().size());
+                                        (instruction.node
+                                             ? instruction.node->children().size()
+                                             : 0));
     }
   }
 

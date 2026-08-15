@@ -3,11 +3,64 @@
 #include "Solvers/EGraph/Id.h"
 #include "Solvers/EGraph/Util.h"
 
+#include <llvm/ADT/ArrayRef.h>
 #include <llvm/ADT/SmallVector.h>
 
 namespace lotus::egraph {
 
-template <typename L> struct LanguageOps;
+template <typename L> struct LanguageOps {
+  static std::optional<L> fromOp(std::string_view op,
+                                 const std::vector<Id> &children) {
+    return L::fromOp(op, children);
+  }
+
+  static std::string display(const L &node) { return node.display(); }
+};
+
+template <typename L, typename = void> struct LanguageHash {
+  size_t operator()(const L &value) const
+      noexcept(noexcept(std::hash<L>{}(value))) {
+    return std::hash<L>{}(value);
+  }
+};
+
+template <typename L>
+struct LanguageHash<L,
+                    std::void_t<decltype(std::declval<const L &>().hash())>> {
+  size_t operator()(const L &value) const noexcept(noexcept(value.hash())) {
+    return value.hash();
+  }
+};
+
+template <typename L, typename = void> struct LanguageSerializationOps {
+  static std::optional<std::string_view> variantName(const L &) {
+    return std::nullopt;
+  }
+
+  static std::optional<L>
+  fromVariant(std::string_view, std::string_view,
+              const std::vector<Id> &) {
+    return std::nullopt;
+  }
+};
+
+template <typename L>
+struct LanguageSerializationOps<
+    L, std::void_t<decltype(std::declval<const L &>().variantName()),
+                   decltype(L::fromSerializedVariant(
+                       std::declval<std::string_view>(),
+                       std::declval<std::string_view>(),
+                       std::declval<const std::vector<Id> &>()))>> {
+  static std::optional<std::string_view> variantName(const L &node) {
+    return node.variantName();
+  }
+
+  static std::optional<L>
+  fromVariant(std::string_view variant, std::string_view op,
+              const std::vector<Id> &children) {
+    return L::fromSerializedVariant(variant, op, children);
+  }
+};
 
 struct SymbolLangDiscriminant {
   Symbol op;
@@ -102,8 +155,7 @@ template <typename L> inline std::string displayNode(const L &node) {
   return LanguageOps<L>::display(node);
 }
 
-template <typename L>
-inline auto nodeChildren(const L &node) -> const decltype(node.children()) & {
+template <typename L> inline decltype(auto) nodeChildren(const L &node) {
   return node.children();
 }
 

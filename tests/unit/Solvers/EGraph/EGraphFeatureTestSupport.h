@@ -140,6 +140,48 @@ struct DedupAnalysis {
 
 } // namespace
 
-LOTUS_EGRAPH_DEFINE_LANGUAGE(
-    TestLang, {LOTUS_EGRAPH_LANG_OP("+", 2) LOTUS_EGRAPH_LANG_OP("*", 2)
-                   LOTUS_EGRAPH_LANG_OP("x", 0) LOTUS_EGRAPH_LANG_OP("y", 0)});
+#define LOTUS_TEST_LANG_VARIANTS(V)                                            \
+  V(FIXED, Add, "+", 2)                                                        \
+  V(FIXED, Mul, "*", 2)                                                        \
+  V(CONSTANT, X, "x", _)                                                       \
+  V(CONSTANT, Y, "y", _)
+
+LOTUS_EGRAPH_DEFINE_TYPED_LANGUAGE(TestLang, LOTUS_TEST_LANG_VARIANTS);
+
+#define LOTUS_TYPED_MATH_VARIANTS(V)                                           \
+  V(CONSTANT, Pi, "pi", _)                                                     \
+  V(FIXED, Add, "+", 2)                                                        \
+  V(FIXED, Neg, "-", 1)                                                        \
+  V(FIXED, Sub, "-", 2)                                                        \
+  V(VARIADIC, List, "list", _)                                                 \
+  V(DATA, Number, _, int64_t)                                                  \
+  V(DATA_FIXED, NamedBinary, _, LOTUS_EGRAPH_TYPED_DATA(Symbol, 2))            \
+  V(DATA_VARIADIC, Other, _, Symbol)
+
+LOTUS_EGRAPH_DEFINE_TYPED_LANGUAGE_IN(lotus_test, TypedMathLang,
+                                      LOTUS_TYPED_MATH_VARIANTS);
+
+using TypedMathLang = lotus_test::TypedMathLang;
+
+#define LOTUS_TYPED_PROP_VARIANTS(V)                                           \
+  V(DATA, Bool, _, bool)                                                       \
+  V(CONSTANT, TrueConstant, "true", _)                                         \
+  V(FIXED, Not, "~", 1)
+
+namespace lotus_test {
+
+LOTUS_EGRAPH_DEFINE_TYPED_LANGUAGE(TypedPropLang,
+                                    LOTUS_TYPED_PROP_VARIANTS);
+
+} // namespace lotus_test
+
+using TypedPropLang = lotus_test::TypedPropLang;
+
+static_assert(!std::is_default_constructible_v<TypedMathLang>);
+static_assert(!std::is_default_constructible_v<TypedPropLang>);
+static_assert(!std::is_default_constructible_v<ENodeOrVar<TypedMathLang>>);
+static_assert(!lotus::egraph::detail::IsTypedLanguagePayload<double>::value);
+
+#undef LOTUS_TYPED_MATH_VARIANTS
+#undef LOTUS_TYPED_PROP_VARIANTS
+#undef LOTUS_TEST_LANG_VARIANTS

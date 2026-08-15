@@ -30,6 +30,21 @@ TEST(EGraphFeatureTest, PatternSearchHandlesRepeatedVariables) {
   EXPECT_TRUE(found_same);
   EXPECT_FALSE(found_mixed);
 }
+
+TEST(EGraphFeatureTest, PatternQuestionMarkOperatorsMatchEggParsingRules) {
+  auto variable = Pattern<TypedMathLang>::parse("?x");
+  ASSERT_TRUE(variable.ast()[variable.ast().root()].isVar());
+
+  auto question = Pattern<TypedMathLang>::parse("?");
+  const auto &question_root = question.ast()[question.ast().root()];
+  ASSERT_TRUE(question_root.isNode());
+  ASSERT_TRUE(question_root.node().isOther());
+  EXPECT_EQ(question_root.node().getOther().value, Symbol("?"));
+  EXPECT_TRUE(question_root.node().children().empty());
+
+  EXPECT_THROW((void)Pattern<TypedMathLang>::parse("(?x 1)"),
+               std::runtime_error);
+}
 TEST(EGraphFeatureTest, MultiPatternSearchFindsCompatibleClauses) {
   EGraph<SymbolLang> egraph;
   egraph.addExpr(RecExpr<SymbolLang>::parse("(f a b)"));

@@ -618,8 +618,12 @@ private:
     for (Id child : node.children()) {
       children.emplace_back(static_cast<double>(child.value()));
     }
-    return json11::Json::object{{"op", displayNode(node)},
+    json11::Json::object object{{"op", displayNode(node)},
                                 {"children", std::move(children)}};
+    if (auto variant = LanguageSerializationOps<L>::variantName(node)) {
+      object.emplace("variant", std::string(*variant));
+    }
+    return object;
   }
 
   static L nodeFromJson(const json11::Json &json) {
@@ -643,7 +647,18 @@ private:
       children.push_back(idFromJson(child_json, "Node child"));
     }
 
-    auto node = LanguageOps<L>::fromOp(op_it->second.string_value(), children);
+    std::optional<L> node;
+    auto variant_it = obj.find("variant");
+    if (variant_it != obj.end()) {
+      if (!variant_it->second.is_string()) {
+        throw std::runtime_error("Node variant must be a string");
+      }
+      node = LanguageSerializationOps<L>::fromVariant(
+          variant_it->second.string_value(), op_it->second.string_value(),
+          children);
+    } else {
+      node = LanguageOps<L>::fromOp(op_it->second.string_value(), children);
+    }
     if (!node) {
       throw std::runtime_error("Failed to decode node from JSON");
     }
@@ -1147,7 +1162,7 @@ private:
     }
 
     if (explanations_enabled_) {
-      std::unordered_map<L, Id> explanation_memo;
+      std::unordered_map<L, Id, LanguageHash<L>> explanation_memo;
       explanation_memo.reserve(memo_.size());
       for (const auto &[original_node, original] : original_node_ids_) {
         L node = original_node;
@@ -1262,7 +1277,7 @@ private:
 
 #ifndef NDEBUG
   void assertCongruenceInvariant() const {
-    std::unordered_map<L, Id> owners;
+    std::unordered_map<L, Id, LanguageHash<L>> owners;
     owners.reserve(totalNumberOfNodes());
     std::vector<std::vector<Id>> expected_parents(classes_.size());
     std::unordered_map<typename L::Discriminant, std::vector<Id>> expected_ops;
@@ -1324,9 +1339,9 @@ private:
   AnalysisT analysis_;
   UnionFind union_find_;
   std::vector<L> nodes_;
-  std::unordered_map<L, Id> original_node_ids_;
-  std::unordered_map<L, Id> memo_;
-  std::unordered_map<L, Id> uncanonical_memo_;
+  std::unordered_map<L, Id, LanguageHash<L>> original_node_ids_;
+  std::unordered_map<L, Id, LanguageHash<L>> memo_;
+  std::unordered_map<L, Id, LanguageHash<L>> uncanonical_memo_;
   UniqueQueue<Id> pending_;
   UniqueQueue<Id> rebuild_pending_;
   UniqueQueue<Id> analysis_pending_;
