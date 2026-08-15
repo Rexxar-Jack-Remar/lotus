@@ -70,14 +70,47 @@ struct CompiledProgram::Impl {
   }
 
   using CandidateMap = std::unordered_map<RelationId, std::vector<Row>>;
-  using DeltaMap = std::unordered_map<RelationId, std::vector<Row>>;
+  struct DeltaRows {
+    std::vector<std::size_t> set_row_ids;
+    std::vector<Row> lattice_rows;
+
+    bool empty() const { return set_row_ids.empty() && lattice_rows.empty(); }
+
+    std::size_t size() const {
+      return set_row_ids.size() + lattice_rows.size();
+    }
+
+    const Row &row(const RelationStorage &storage, std::size_t index) const {
+      if (storage.definition().kind == RelationKind::Set)
+        return storage.rows()[set_row_ids[index]];
+      return lattice_rows[index];
+    }
+
+    void append(DeltaRows rows) {
+      set_row_ids.insert(set_row_ids.end(),
+                         std::make_move_iterator(rows.set_row_ids.begin()),
+                         std::make_move_iterator(rows.set_row_ids.end()));
+      lattice_rows.insert(lattice_rows.end(),
+                          std::make_move_iterator(rows.lattice_rows.begin()),
+                          std::make_move_iterator(rows.lattice_rows.end()));
+    }
+  };
+  using DeltaMap = std::unordered_map<RelationId, DeltaRows>;
   using DeltaHashMap = std::unordered_map<
       RelationId, std::unordered_map<std::size_t, std::vector<std::size_t>>>;
 
   struct DeltaView {
-    const std::vector<Row> *rows = nullptr;
+    RelationId relation_id = 0;
+    const DeltaRows *delta_rows = nullptr;
+    const std::vector<Row> *direct_rows = nullptr;
     std::size_t begin = 0;
     std::size_t end = 0;
+
+    const Row &row(const RelationStorage &storage, std::size_t index) const {
+      if (delta_rows)
+        return delta_rows->row(storage, index);
+      return (*direct_rows)[index];
+    }
   };
 
   struct EvaluationTask {
@@ -267,7 +300,7 @@ struct CompiledProgram::Impl {
     if (bucket == hashes->second.end())
       return false;
     for (std::size_t row_index : bucket->second) {
-      const Row &delta_row = rows->second[row_index];
+      const Row &delta_row = rows->second.row(relation(relation_id), row_index);
       if (relation(relation_id).rowsEqual(row, delta_row))
         return true;
     }
@@ -350,7 +383,8 @@ struct CompiledProgram::Impl {
             for (std::size_t row_index = delta->begin; row_index < delta->end;
                  ++row_index) {
               ++evaluation_stats.tuples_scanned;
-              continue_with((*delta->rows)[row_index]);
+              continue_with(
+                  delta->row(relation(delta->relation_id), row_index));
             }
             return;
           }
@@ -419,9 +453,13 @@ struct CompiledProgram::Impl {
           std::move(coalesced), scheduler, options().parallel_grain_size);
       stats.parallel_tasks += merged.parallel_tasks;
       stats.parallel_merge_tasks += merged.parallel_tasks;
-      stats.inserted_facts += merged.changed.size();
-      if (!merged.changed.empty())
-        inserted.emplace(relation_id, std::move(merged.changed));
+      stats.inserted_facts += merged.changedCount();
+      if (!merged.empty()) {
+        DeltaRows delta;
+        delta.set_row_ids = std::move(merged.changed_row_ids);
+        delta.lattice_rows = std::move(merged.changed_lattice_rows);
+        inserted.emplace(relation_id, std::move(delta));
+      }
     }
     return inserted;
   }
@@ -472,9 +510,9 @@ struct CompiledProgram::Impl {
               ? std::max<std::size_t>(1, options().parallel_grain_size)
               : rows.size();
       for (std::size_t begin = 0; begin < rows.size(); begin += grain) {
-        tasks.push_back(
-            {rule_index, driver_item,
-             DeltaView{&rows, begin, std::min(rows.size(), begin + grain)}});
+        tasks.push_back({rule_index, driver_item,
+                         DeltaView{driver.relation, nullptr, &rows, begin,
+                                   std::min(rows.size(), begin + grain)}});
       }
     }
 
@@ -522,8 +560,18 @@ struct CompiledProgram::Impl {
   void runRecursive(const PlannedSCC &scc, Binding &binding,
                     Scheduler &scheduler) {
     DeltaMap current_delta;
-    for (RelationId relation_id : scc.relations)
-      current_delta[relation_id] = relation(relation_id).rows();
+    for (RelationId relation_id : scc.relations) {
+      RelationStorage &storage = relation(relation_id);
+      DeltaRows &delta = current_delta[relation_id];
+      if (storage.definition().kind == RelationKind::Set) {
+        delta.set_row_ids.reserve(storage.rows().size());
+        for (std::size_t row_index = 0; row_index < storage.rows().size();
+             ++row_index)
+          delta.set_row_ids.push_back(row_index);
+      } else {
+        delta.lattice_rows = storage.rows();
+      }
+    }
 
     CandidateMap base_candidates;
     for (std::size_t rule_index : scc.rules) {
@@ -542,9 +590,7 @@ struct CompiledProgram::Impl {
         mergeCandidates(std::move(base_candidates), scheduler);
     for (auto &[relation_id, rows] : base_delta) {
       auto &destination = current_delta[relation_id];
-      destination.insert(destination.end(),
-                         std::make_move_iterator(rows.begin()),
-                         std::make_move_iterator(rows.end()));
+      destination.append(std::move(rows));
     }
 
     std::size_t iteration = 0;
@@ -558,7 +604,8 @@ struct CompiledProgram::Impl {
         auto &hashes = delta_hashes[relation_id];
         hashes.reserve(rows.size());
         for (std::size_t row_index = 0; row_index < rows.size(); ++row_index)
-          hashes[relation(relation_id).candidateHash(rows[row_index])]
+          hashes[relation(relation_id)
+                     .candidateHash(rows.row(relation(relation_id), row_index))]
               .push_back(row_index);
       }
       std::vector<EvaluationTask> tasks;
@@ -581,7 +628,8 @@ struct CompiledProgram::Impl {
                begin += grain) {
             tasks.push_back(
                 {rule_index, item_index,
-                 DeltaView{&delta_it->second, begin,
+                 DeltaView{item.atom.relation, &delta_it->second, nullptr,
+                           begin,
                            std::min(delta_it->second.size(), begin + grain)}});
           }
         }
@@ -711,6 +759,12 @@ struct CompiledProgram::Impl {
 };
 
 CompiledProgram Program::compile() const {
+  std::unique_lock<std::mutex> lock(context_->impl_->execution_mutex,
+                                    std::try_to_lock);
+  if (!lock.owns_lock() || context_->impl_->running) {
+    throw std::logic_error(
+        "Datalog programs may not be compiled while a program is running");
+  }
   ExecutionPlan plan;
   std::vector<RuleIR> semantic_rules =
       planAndValidateRules(rules_, context_->impl_->relations,

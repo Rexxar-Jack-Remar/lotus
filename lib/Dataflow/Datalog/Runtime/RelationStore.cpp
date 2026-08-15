@@ -351,7 +351,8 @@ RelationStorage::BatchMergeResult RelationStorage::mergeDerivedCoalesced(
     inspect(0);
   }
 
-  result.changed.reserve(candidates.size());
+  result.changed_row_ids.reserve(candidates.size());
+  result.changed_lattice_rows.reserve(candidates.size());
   for (std::size_t index = 0; index < candidates.size(); ++index) {
     if (!changed[index])
       continue;
@@ -359,44 +360,44 @@ RelationStorage::BatchMergeResult RelationStorage::mergeDerivedCoalesced(
       if (set_.insert(candidates[index]).second) {
         appendRow(std::move(candidates[index]));
         has_derived_state_ = true;
-        result.changed.push_back(rows_.back());
+        result.changed_row_ids.push_back(rows_.size() - 1);
       }
       continue;
     }
     if (lattice_rows[index]) {
       updateRow(*lattice_rows[index], std::move(*proposals[index]));
       has_derived_state_ = true;
-      result.changed.push_back(rows_[*lattice_rows[index]]);
+      result.changed_lattice_rows.push_back(rows_[*lattice_rows[index]]);
       continue;
     }
     const std::size_t row_index = rows_.size();
     lattice_keys_->emplace(latticeKey(candidates[index]), row_index);
     appendRow(std::move(candidates[index]));
     has_derived_state_ = true;
-    result.changed.push_back(rows_.back());
+    result.changed_lattice_rows.push_back(rows_.back());
   }
   return result;
 }
 
 void RelationStorage::rebuildFromBase() {
-  rows_.clear();
+  rows_ = base_rows_;
   set_.clear();
-  if (lattice_keys_)
+  if (definition_.kind == RelationKind::Set) {
+    set_.reserve(rows_.size());
+    for (const Row &row : rows_)
+      set_.insert(row);
+  } else {
     lattice_keys_->clear();
+    lattice_keys_->reserve(rows_.size());
+    for (std::size_t row_index = 0; row_index < rows_.size(); ++row_index)
+      lattice_keys_->emplace(latticeKey(rows_[row_index]), row_index);
+  }
+
   ++version_;
+  std::lock_guard<std::mutex> lock(index_mutex_);
   for (auto &[mask, index] : indices_) {
     (void)mask;
     index->rebuild(rows_, version_);
-  }
-  for (const Row &row : base_rows_) {
-    if (definition_.kind == RelationKind::Set) {
-      set_.insert(row);
-      appendRow(row);
-      continue;
-    }
-    const std::size_t row_index = rows_.size();
-    lattice_keys_->emplace(latticeKey(row), row_index);
-    appendRow(row);
   }
 }
 

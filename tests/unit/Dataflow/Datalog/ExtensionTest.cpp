@@ -3,6 +3,7 @@
 #include <any>
 #include <atomic>
 #include <stdexcept>
+#include <string>
 
 using namespace lotus::datalog;
 
@@ -448,6 +449,28 @@ TEST(DatalogTest, RelationMutationDuringRunFailsSafely) {
   EXPECT_EQ(input.rows().size(), 1U);
 }
 
+TEST(DatalogTest, ProgramCompilationDuringRunFailsSafely) {
+  context ctx;
+  auto input = ctx.relation<int>("input");
+  auto output = ctx.relation<int>("output");
+  auto x = ctx.var<int>("x");
+  input.insert(1);
+
+  program p(ctx);
+  p.rule(output(lift(
+             [&p](int value) {
+               (void)p.compile();
+               return value;
+             },
+             x)),
+         input(x));
+  auto compiled = p.compile();
+
+  EXPECT_THROW(compiled.run(), std::logic_error);
+  EXPECT_TRUE(output.rows().empty());
+  EXPECT_NO_THROW(p.compile());
+}
+
 TEST(DatalogTest, FloatingPointSumIsSerialByDefault) {
   context ctx;
   auto input = ctx.relation<double>("input");
@@ -466,6 +489,27 @@ TEST(DatalogTest, FloatingPointSumIsSerialByDefault) {
   compiled.run(options);
 
   EXPECT_TRUE(output.contains(3.0));
+  EXPECT_EQ(compiled.stats().parallel_aggregate_tasks, 0U);
+}
+
+TEST(DatalogTest, NonCommutativeStringSumIsSerialByDefault) {
+  context ctx;
+  auto input = ctx.relation<std::string>("input");
+  auto output = ctx.relation<std::string>("output");
+  auto x = ctx.var<std::string>("x");
+  auto result = ctx.var<std::string>("result");
+  input.insert("first");
+  input.insert("second");
+
+  program p(ctx);
+  p.rule(output(result), aggregate(result, sum(x), input(x)));
+  auto compiled = p.compile();
+  ExecutionOptions options;
+  options.worker_count = 4;
+  options.parallel_grain_size = 1;
+  compiled.run(options);
+
+  EXPECT_TRUE(output.contains("firstsecond"));
   EXPECT_EQ(compiled.stats().parallel_aggregate_tasks, 0U);
 }
 

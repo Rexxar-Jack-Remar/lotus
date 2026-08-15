@@ -69,6 +69,10 @@ pre-epoch total while later occurrences may read the total including delta. This
 leftmost-delta convention makes the variants disjoint instead of relying on final
 set deduplication to remove duplicate derivations.
 
+Set-relation deltas hold canonical row IDs rather than copying tuple payloads.
+Lattice deltas retain value snapshots so an epoch observes each improvement that
+was produced for it.
+
 ### Indexes
 
 At an atom, columns containing constants or variables grounded by earlier body
@@ -99,10 +103,12 @@ run serially unless passed `ReducerProperties::parallel()`, which explicitly att
 that `add`/`merge` are associative, commutative, deterministic, and safe to run in
 parallel. Generic aggregators may emit zero, one, or multiple results.
 
-`sum<T>`, `minimum<T>`, and `maximum<T>` are parallel-capable for non-floating
-types. Floating-point reductions are serial by default because IEEE addition is
-not associative. `mean<T>` is serial by default for the same reason. For floating
-minimum/maximum, NaN is treated as missing whenever a numeric value exists.
+`sum<T>`, `minimum<T>`, and `maximum<T>` are parallel-capable only for integral
+types (except `bool`). Other types, including floating point and user-defined
+types, are serial by default unless an explicitly declared custom reducer attests
+to the required laws. `mean<T>` is serial by default because IEEE addition is not
+associative. For floating minimum/maximum, NaN is treated as missing whenever a
+numeric value exists.
 
 ### Lattices
 
@@ -144,9 +150,10 @@ respect to the relation database. The type system cannot prove that host C++
 callables satisfy those laws, so they are part of the embedding contract.
 
 One compiled context permits one active `run()` at a time. Concurrent calls are
-serialized. Relation/variable definition and `Relation::insert()` during a run fail
-with `std::logic_error`; load or update base facts between runs. Read-only relation
-access should likewise be coordinated by the embedding application.
+serialized. Compilation, relation/variable definition, and `Relation::insert()`
+during a run fail with `std::logic_error`; load or update base facts between runs.
+Read-only relation access should likewise be coordinated by the embedding
+application.
 
 Rule planning observes relation statistics at `compile()` time. For best join
 orders, load representative base facts before compiling; a later rerun preserves

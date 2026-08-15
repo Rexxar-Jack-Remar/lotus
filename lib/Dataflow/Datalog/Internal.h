@@ -88,8 +88,15 @@ public:
   using KeyMap = std::unordered_map<Row, std::size_t, KeyHash, KeyEqual>;
 
   struct BatchMergeResult {
-    std::vector<Row> changed;
+    std::vector<std::size_t> changed_row_ids;
+    std::vector<Row> changed_lattice_rows;
     std::size_t parallel_tasks = 0;
+
+    std::size_t changedCount() const {
+      return changed_row_ids.size() + changed_lattice_rows.size();
+    }
+
+    bool empty() const { return changedCount() == 0; }
   };
 
   explicit RelationStorage(RelationIR definition);

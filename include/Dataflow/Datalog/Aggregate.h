@@ -18,10 +18,18 @@ namespace lotus::datalog {
 
 namespace detail {
 
-template <typename T> constexpr ReducerProperties numericReducerProperties() {
-  if constexpr (std::is_floating_point_v<T>)
-    return {};
-  return ReducerProperties::parallel();
+template <typename T> constexpr ReducerProperties additiveReducerProperties() {
+  if constexpr (std::is_integral_v<T> &&
+                !std::is_same_v<std::remove_cv_t<T>, bool>)
+    return ReducerProperties::parallel();
+  return {};
+}
+
+template <typename T> constexpr ReducerProperties orderedReducerProperties() {
+  if constexpr (std::is_integral_v<T> &&
+                !std::is_same_v<std::remove_cv_t<T>, bool>)
+    return ReducerProperties::parallel();
+  return {};
 }
 
 template <typename T> bool preferMinimum(const T &candidate, const T &current) {
@@ -190,7 +198,7 @@ template <typename T> AggregatorSpec<T, T> sum(const Expr<T> &projection) {
       [](T &state, const T &value) { state += value; },
       [](T &state, const T &other) { state += other; },
       [](T &state) { return std::vector<T>{state}; },
-      detail::numericReducerProperties<T>());
+      detail::additiveReducerProperties<T>());
 }
 
 inline AggregatorSpec<int, std::size_t> count() {
@@ -220,7 +228,7 @@ template <typename T> AggregatorSpec<T, T> minimum(const Expr<T> &projection) {
       [](State &state) {
         return state.value ? std::vector<T>{*state.value} : std::vector<T>{};
       },
-      detail::numericReducerProperties<T>());
+      detail::orderedReducerProperties<T>());
 }
 
 template <typename T> AggregatorSpec<T, T> maximum(const Expr<T> &projection) {
@@ -241,7 +249,7 @@ template <typename T> AggregatorSpec<T, T> maximum(const Expr<T> &projection) {
       [](State &state) {
         return state.value ? std::vector<T>{*state.value} : std::vector<T>{};
       },
-      detail::numericReducerProperties<T>());
+      detail::orderedReducerProperties<T>());
 }
 
 template <typename T>
