@@ -25,6 +25,10 @@ Context::~Context() = default;
 RelationId Context::addRelation(
     std::string name, std::vector<ColumnType> columns, RelationKind kind,
     std::function<bool(std::any &, const std::any &)> lattice_join) {
+  std::unique_lock<std::mutex> lock(impl_->execution_mutex, std::try_to_lock);
+  if (!lock.owns_lock() || impl_->running)
+    throw std::logic_error("Datalog relation definitions may not change while "
+                           "a program is running");
   if (name.empty())
     throw std::invalid_argument("Datalog relation name must not be empty");
   if (!impl_->relation_names.insert(name).second)
@@ -44,6 +48,10 @@ RelationId Context::addRelation(
 
 VarId Context::addVariable(std::string name, std::type_index type,
                            bool anonymous) {
+  std::unique_lock<std::mutex> lock(impl_->execution_mutex, std::try_to_lock);
+  if (!lock.owns_lock() || impl_->running)
+    throw std::logic_error("Datalog variable definitions may not change while "
+                           "a program is running");
   if (!anonymous && name.empty())
     throw std::invalid_argument("Datalog variable name must not be empty");
   VarId id = impl_->variables.size();
@@ -71,6 +79,10 @@ TermIR Context::freshWildcard(std::type_index type) {
 }
 
 void Context::insert(RelationId relation, std::vector<std::any> row) {
+  std::unique_lock<std::mutex> lock(impl_->execution_mutex, std::try_to_lock);
+  if (!lock.owns_lock() || impl_->running)
+    throw std::logic_error(
+        "Datalog relations may not be mutated while a program is running");
   impl_->relations.at(relation)->insertBase(std::move(row));
 }
 

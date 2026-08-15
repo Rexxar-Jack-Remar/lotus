@@ -428,4 +428,45 @@ TEST(DatalogTest, RunStateIsResetAfterExpressionFailure) {
   EXPECT_TRUE(output.contains(1));
 }
 
+TEST(DatalogTest, RelationMutationDuringRunFailsSafely) {
+  context ctx;
+  auto input = ctx.relation<int>("input");
+  auto output = ctx.relation<int>("output");
+  auto x = ctx.var<int>("x");
+  input.insert(1);
+
+  program p(ctx);
+  p.rule(output(lift(
+             [input](int value) {
+               input.insert(value + 1);
+               return value;
+             },
+             x)),
+         input(x));
+  auto compiled = p.compile();
+  EXPECT_THROW(compiled.run(), std::logic_error);
+  EXPECT_EQ(input.rows().size(), 1U);
+}
+
+TEST(DatalogTest, FloatingPointSumIsSerialByDefault) {
+  context ctx;
+  auto input = ctx.relation<double>("input");
+  auto output = ctx.relation<double>("output");
+  auto x = ctx.var<double>("x");
+  auto result = ctx.var<double>("result");
+  input.insert(1.0);
+  input.insert(2.0);
+
+  program p(ctx);
+  p.rule(output(result), aggregate(result, sum(x), input(x)));
+  auto compiled = p.compile();
+  ExecutionOptions options;
+  options.worker_count = 4;
+  options.parallel_grain_size = 1;
+  compiled.run(options);
+
+  EXPECT_TRUE(output.contains(3.0));
+  EXPECT_EQ(compiled.stats().parallel_aggregate_tasks, 0U);
+}
+
 } // namespace

@@ -5,6 +5,7 @@
 #include "Dataflow/Datalog/SemanticIR.h"
 
 #include <any>
+#include <cmath>
 #include <cstddef>
 #include <functional>
 #include <optional>
@@ -14,6 +15,38 @@
 #include <vector>
 
 namespace lotus::datalog {
+
+namespace detail {
+
+template <typename T> constexpr ReducerProperties numericReducerProperties() {
+  if constexpr (std::is_floating_point_v<T>)
+    return {};
+  return ReducerProperties::parallel();
+}
+
+template <typename T> bool preferMinimum(const T &candidate, const T &current) {
+  if constexpr (std::is_floating_point_v<T>) {
+    // NaN is treated as a missing value when a numeric value is available.
+    if (std::isnan(candidate))
+      return false;
+    if (std::isnan(current))
+      return true;
+  }
+  return candidate < current;
+}
+
+template <typename T> bool preferMaximum(const T &candidate, const T &current) {
+  if constexpr (std::is_floating_point_v<T>) {
+    // NaN is treated as a missing value when a numeric value is available.
+    if (std::isnan(candidate))
+      return false;
+    if (std::isnan(current))
+      return true;
+  }
+  return current < candidate;
+}
+
+} // namespace detail
 
 template <typename T> class AggregateRange {
 public:
@@ -157,7 +190,7 @@ template <typename T> AggregatorSpec<T, T> sum(const Expr<T> &projection) {
       [](T &state, const T &value) { state += value; },
       [](T &state, const T &other) { state += other; },
       [](T &state) { return std::vector<T>{state}; },
-      ReducerProperties::parallel());
+      detail::numericReducerProperties<T>());
 }
 
 inline AggregatorSpec<int, std::size_t> count() {
@@ -176,18 +209,18 @@ template <typename T> AggregatorSpec<T, T> minimum(const Expr<T> &projection) {
   return AggregatorSpec<T, T>(
       projection, "minimum", [] { return State{}; },
       [](State &state, const T &value) {
-        if (!state.value || value < *state.value)
+        if (!state.value || detail::preferMinimum(value, *state.value))
           state.value = value;
       },
       [](State &state, const State &other) {
         if (other.value &&
-            (!state.value || std::less<T>{}(*other.value, *state.value)))
+            (!state.value || detail::preferMinimum(*other.value, *state.value)))
           state.value = other.value;
       },
       [](State &state) {
         return state.value ? std::vector<T>{*state.value} : std::vector<T>{};
       },
-      ReducerProperties::parallel());
+      detail::numericReducerProperties<T>());
 }
 
 template <typename T> AggregatorSpec<T, T> maximum(const Expr<T> &projection) {
@@ -197,18 +230,18 @@ template <typename T> AggregatorSpec<T, T> maximum(const Expr<T> &projection) {
   return AggregatorSpec<T, T>(
       projection, "maximum", [] { return State{}; },
       [](State &state, const T &value) {
-        if (!state.value || *state.value < value)
+        if (!state.value || detail::preferMaximum(value, *state.value))
           state.value = value;
       },
       [](State &state, const State &other) {
         if (other.value &&
-            (!state.value || std::less<T>{}(*state.value, *other.value)))
+            (!state.value || detail::preferMaximum(*other.value, *state.value)))
           state.value = other.value;
       },
       [](State &state) {
         return state.value ? std::vector<T>{*state.value} : std::vector<T>{};
       },
-      ReducerProperties::parallel());
+      detail::numericReducerProperties<T>());
 }
 
 template <typename T>
@@ -233,7 +266,7 @@ AggregatorSpec<T, double> mean(const Expr<T> &projection) {
         return std::vector<double>{
             static_cast<double>(state.sum / state.count)};
       },
-      ReducerProperties::parallel());
+      {});
 }
 
 class AggregateClause {

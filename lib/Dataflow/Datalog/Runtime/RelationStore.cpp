@@ -358,21 +358,21 @@ RelationStorage::BatchMergeResult RelationStorage::mergeDerivedCoalesced(
     if (definition_.kind == RelationKind::Set) {
       if (set_.insert(candidates[index]).second) {
         appendRow(std::move(candidates[index]));
-        derived_rows_.push_back(rows_.back());
+        has_derived_state_ = true;
         result.changed.push_back(rows_.back());
       }
       continue;
     }
     if (lattice_rows[index]) {
       updateRow(*lattice_rows[index], std::move(*proposals[index]));
-      derived_rows_.push_back(rows_[*lattice_rows[index]]);
+      has_derived_state_ = true;
       result.changed.push_back(rows_[*lattice_rows[index]]);
       continue;
     }
     const std::size_t row_index = rows_.size();
     lattice_keys_->emplace(latticeKey(candidates[index]), row_index);
     appendRow(std::move(candidates[index]));
-    derived_rows_.push_back(rows_.back());
+    has_derived_state_ = true;
     result.changed.push_back(rows_.back());
   }
   return result;
@@ -401,9 +401,9 @@ void RelationStorage::rebuildFromBase() {
 }
 
 void RelationStorage::discardDerived() {
-  if (derived_rows_.empty())
+  if (!has_derived_state_)
     return;
-  derived_rows_.clear();
+  has_derived_state_ = false;
   rebuildFromBase();
 }
 

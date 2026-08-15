@@ -400,6 +400,29 @@ TEST(DatalogTest, IncorporatesNewExtensionalFactsOnLaterRun) {
   EXPECT_TRUE(path.contains(1, 3));
 }
 
+TEST(DatalogTest, ReRunOnlyEvaluatesDependentSccBranches) {
+  context ctx;
+  auto left_input = ctx.relation<int>("left_input");
+  auto left_output = ctx.relation<int>("left_output");
+  auto right_input = ctx.relation<int>("right_input");
+  auto right_output = ctx.relation<int>("right_output");
+  auto x = ctx.var<int>("x");
+  left_input.insert(1);
+  right_input.insert(10);
+
+  program p(ctx);
+  p.rule(left_output(x), left_input(x));
+  p.rule(right_output(x), right_input(x));
+  auto compiled = p.compile();
+  compiled.run();
+
+  left_input.insert(2);
+  compiled.run();
+  EXPECT_TRUE(left_output.contains(2));
+  EXPECT_TRUE(right_output.contains(10));
+  EXPECT_EQ(compiled.stats().rule_evaluations, 1U);
+}
+
 TEST(DatalogTest, EvaluatesThreeRelationRecursiveScc) {
   context ctx;
   auto seed = ctx.relation<int>("seed");

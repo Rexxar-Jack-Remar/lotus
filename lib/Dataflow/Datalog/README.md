@@ -99,6 +99,11 @@ run serially unless passed `ReducerProperties::parallel()`, which explicitly att
 that `add`/`merge` are associative, commutative, deterministic, and safe to run in
 parallel. Generic aggregators may emit zero, one, or multiple results.
 
+`sum<T>`, `minimum<T>`, and `maximum<T>` are parallel-capable for non-floating
+types. Floating-point reductions are serial by default because IEEE addition is
+not associative. `mean<T>` is serial by default for the same reason. For floating
+minimum/maximum, NaN is treated as missing whenever a numeric value exists.
+
 ### Lattices
 
 A lattice relation maps a tuple key to one lattice value. Insertion for an existing
@@ -137,6 +142,15 @@ deduplication or per-key lattice joining.
 Expression lifts, hash/equality functions, and lattice joins must be pure with
 respect to the relation database. The type system cannot prove that host C++
 callables satisfy those laws, so they are part of the embedding contract.
+
+One compiled context permits one active `run()` at a time. Concurrent calls are
+serialized. Relation/variable definition and `Relation::insert()` during a run fail
+with `std::logic_error`; load or update base facts between runs. Read-only relation
+access should likewise be coordinated by the embedding application.
+
+Rule planning observes relation statistics at `compile()` time. For best join
+orders, load representative base facts before compiling; a later rerun preserves
+the compiled physical order even if cardinalities have changed substantially.
 
 ## Explicit non-goals
 

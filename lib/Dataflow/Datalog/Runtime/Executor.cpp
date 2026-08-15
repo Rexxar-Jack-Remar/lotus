@@ -4,6 +4,7 @@
 
 #include <algorithm>
 #include <any>
+#include <array>
 #include <iostream>
 #include <iterator>
 #include <memory>
@@ -46,11 +47,16 @@ struct CompiledProgram::Impl {
 
   struct ExecutionScope {
     Impl &impl;
+    std::unique_lock<std::mutex> context_lock;
     explicit ExecutionScope(Impl &impl, ExecutionContext &execution)
-        : impl(impl) {
+        : impl(impl), context_lock(impl.context->execution_mutex) {
+      impl.context->running = true;
       impl.execution = &execution;
     }
-    ~ExecutionScope() { impl.execution = nullptr; }
+    ~ExecutionScope() {
+      impl.execution = nullptr;
+      impl.context->running = false;
+    }
   };
 
   const ExecutionOptions &options() const {
@@ -65,8 +71,8 @@ struct CompiledProgram::Impl {
 
   using CandidateMap = std::unordered_map<RelationId, std::vector<Row>>;
   using DeltaMap = std::unordered_map<RelationId, std::vector<Row>>;
-  using DeltaHashMap =
-      std::unordered_map<RelationId, std::unordered_set<std::size_t>>;
+  using DeltaHashMap = std::unordered_map<
+      RelationId, std::unordered_map<std::size_t, std::vector<std::size_t>>>;
 
   struct DeltaView {
     const std::vector<Row> *rows = nullptr;
@@ -133,15 +139,16 @@ struct CompiledProgram::Impl {
 
   bool matchRow(const AtomPlan &atom, const Row &row, Binding &binding,
                 const std::function<void()> &continuation) {
-    std::vector<VarId> newly_bound;
+    std::array<VarId, KeyView::MAX_COLUMNS> newly_bound{};
+    std::size_t newly_bound_count = 0;
     for (std::size_t column = 0; column < atom.terms.size(); ++column) {
       const auto &term = atom.terms[column];
       const ColumnType &type =
           relation(atom.relation).definition().columns[column];
       if (!term.is_variable) {
         if (!type.equal(term.constant, row[column])) {
-          for (VarId variable : newly_bound)
-            binding[variable].reset();
+          for (std::size_t index = 0; index < newly_bound_count; ++index)
+            binding[newly_bound[index]].reset();
           return false;
         }
         continue;
@@ -149,19 +156,19 @@ struct CompiledProgram::Impl {
 
       if (binding[term.variable]) {
         if (!type.equal(*binding[term.variable], row[column])) {
-          for (VarId variable : newly_bound)
-            binding[variable].reset();
+          for (std::size_t index = 0; index < newly_bound_count; ++index)
+            binding[newly_bound[index]].reset();
           return false;
         }
       } else {
         binding[term.variable].bindReference(row[column]);
-        newly_bound.push_back(term.variable);
+        newly_bound[newly_bound_count++] = term.variable;
       }
     }
 
     continuation();
-    for (VarId variable : newly_bound)
-      binding[variable].reset();
+    for (std::size_t index = 0; index < newly_bound_count; ++index)
+      binding[newly_bound[index]].reset();
     return true;
   }
 
@@ -254,10 +261,13 @@ struct CompiledProgram::Impl {
                          const DeltaHashMap &delta_hashes) {
     auto rows = delta.find(relation_id);
     auto hashes = delta_hashes.find(relation_id);
-    if (rows == delta.end() || hashes == delta_hashes.end() ||
-        !hashes->second.count(relation(relation_id).candidateHash(row)))
+    if (rows == delta.end() || hashes == delta_hashes.end())
       return false;
-    for (const Row &delta_row : rows->second) {
+    auto bucket = hashes->second.find(relation(relation_id).candidateHash(row));
+    if (bucket == hashes->second.end())
+      return false;
+    for (std::size_t row_index : bucket->second) {
+      const Row &delta_row = rows->second[row_index];
       if (relation(relation_id).rowsEqual(row, delta_row))
         return true;
     }
@@ -547,8 +557,9 @@ struct CompiledProgram::Impl {
       for (const auto &[relation_id, rows] : current_delta) {
         auto &hashes = delta_hashes[relation_id];
         hashes.reserve(rows.size());
-        for (const Row &row : rows)
-          hashes.insert(relation(relation_id).candidateHash(row));
+        for (std::size_t row_index = 0; row_index < rows.size(); ++row_index)
+          hashes[relation(relation_id).candidateHash(rows[row_index])]
+              .push_back(row_index);
       }
       std::vector<EvaluationTask> tasks;
       for (std::size_t rule_index : scc.rules) {
@@ -618,21 +629,33 @@ struct CompiledProgram::Impl {
     stats.scc_count = plan.sccs.size();
     stats.relation_count = context->relations.size();
 
-    std::size_t first_dirty_scc = plan.sccs.size();
+    std::vector<bool> dirty_scc(plan.sccs.size(), false);
+    auto mark_dirty = [&](std::size_t root) {
+      std::vector<std::size_t> worklist{root};
+      while (!worklist.empty()) {
+        const std::size_t scc_index = worklist.back();
+        worklist.pop_back();
+        if (dirty_scc[scc_index])
+          continue;
+        dirty_scc[scc_index] = true;
+        for (std::size_t dependent : plan.scc_dependents[scc_index])
+          worklist.push_back(dependent);
+      }
+    };
     if (!has_completed_run) {
-      first_dirty_scc = 0;
+      std::fill(dirty_scc.begin(), dirty_scc.end(), true);
     } else {
       for (RelationId relation_id = 0; relation_id < context->relations.size();
            ++relation_id) {
         if (relation(relation_id).baseVersion() ==
             completed_base_versions[relation_id])
           continue;
-        first_dirty_scc =
-            std::min(first_dirty_scc, plan.first_consumer_scc[relation_id]);
+        mark_dirty(plan.relation_scc[relation_id]);
       }
     }
 
-    if (first_dirty_scc == plan.sccs.size()) {
+    if (std::none_of(dirty_scc.begin(), dirty_scc.end(),
+                     [](bool dirty) { return dirty; })) {
       collectStorageStats();
       return;
     }
@@ -641,8 +664,9 @@ struct CompiledProgram::Impl {
     // affected SCC from that base layer, retaining already-stable lower strata.
     // This is additive rerun support with correct retractions for negation and
     // aggregates, rather than pretending that all programs are monotone.
-    for (std::size_t scc_index = first_dirty_scc; scc_index < plan.sccs.size();
-         ++scc_index) {
+    for (std::size_t scc_index = 0; scc_index < plan.sccs.size(); ++scc_index) {
+      if (!dirty_scc[scc_index])
+        continue;
       for (RelationId relation_id : plan.sccs[scc_index].relations)
         relation(relation_id).discardDerived();
     }
@@ -658,8 +682,9 @@ struct CompiledProgram::Impl {
     }
     if (!scheduler)
       scheduler = &serial_scheduler;
-    for (std::size_t scc_index = first_dirty_scc; scc_index < plan.sccs.size();
-         ++scc_index) {
+    for (std::size_t scc_index = 0; scc_index < plan.sccs.size(); ++scc_index) {
+      if (!dirty_scc[scc_index])
+        continue;
       const PlannedSCC &scc = plan.sccs[scc_index];
       if (options.trace_scc) {
         std::lock_guard<std::mutex> lock(trace_mutex);
@@ -713,17 +738,23 @@ CompiledProgram Program::compile() const {
   auto impl = std::make_unique<CompiledProgram::Impl>();
   impl->context = context_->impl_;
   impl->plan = std::move(plan);
-  impl->plan.first_consumer_scc.assign(context_->impl_->relations.size(),
-                                       impl->plan.sccs.size());
+  impl->plan.relation_scc.assign(context_->impl_->relations.size(), 0);
   for (std::size_t scc_index = 0; scc_index < impl->plan.sccs.size();
        ++scc_index) {
     for (RelationId relation_id : impl->plan.sccs[scc_index].relations)
-      impl->plan.first_consumer_scc[relation_id] =
-          std::min(impl->plan.first_consumer_scc[relation_id], scc_index);
+      impl->plan.relation_scc[relation_id] = scc_index;
   }
-  for (std::size_t &scc_index : impl->plan.first_consumer_scc) {
-    if (scc_index == impl->plan.sccs.size())
-      scc_index = 0;
+  impl->plan.scc_dependents.resize(impl->plan.sccs.size());
+  for (const DependencyEdge &dependency : dependencies) {
+    const std::size_t source_scc = impl->plan.relation_scc[dependency.source];
+    const std::size_t target_scc = impl->plan.relation_scc[dependency.target];
+    if (source_scc != target_scc)
+      impl->plan.scc_dependents[source_scc].push_back(target_scc);
+  }
+  for (auto &dependents : impl->plan.scc_dependents) {
+    std::sort(dependents.begin(), dependents.end());
+    dependents.erase(std::unique(dependents.begin(), dependents.end()),
+                     dependents.end());
   }
   return CompiledProgram(std::move(impl));
 }

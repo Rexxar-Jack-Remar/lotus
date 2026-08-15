@@ -135,7 +135,7 @@ private:
   std::vector<Row> base_rows_;
   std::unordered_set<Row, RowHash, RowEqual> base_set_;
   std::unique_ptr<KeyMap> base_lattice_keys_;
-  std::vector<Row> derived_rows_;
+  bool has_derived_state_ = false;
   std::unordered_map<ColumnMask, std::unique_ptr<RuntimeIndex>> indices_;
   std::mutex index_mutex_;
   mutable std::mutex statistics_mutex_;
@@ -208,9 +208,10 @@ struct ExecutionPlan {
   std::vector<PlannedSCC> sccs;
   std::size_t variable_count = 0;
   std::size_t planned_reorders = 0;
-  // Relation -> earliest SCC that consumes it.  This is used to invalidate
-  // only the affected suffix after new base facts arrive.
-  std::vector<std::size_t> first_consumer_scc;
+  // The SCC dependency DAG covers positive, negative, and aggregate reads.
+  // Reruns invalidate only the transitive dependents of changed base facts.
+  std::vector<std::size_t> relation_scc;
+  std::vector<std::vector<std::size_t>> scc_dependents;
 };
 
 struct DependencyEdge {
