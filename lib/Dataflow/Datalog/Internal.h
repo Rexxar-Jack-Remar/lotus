@@ -44,12 +44,16 @@ class RuntimeIndex {
 public:
   using BucketMap =
       std::unordered_map<Row, std::vector<std::size_t>, KeyHash, KeyEqual>;
+  using UniqueMap = std::unordered_map<Row, std::size_t, KeyHash, KeyEqual>;
 
   RuntimeIndex(ColumnMask mask, const std::vector<ColumnType> &all_columns);
 
   void rebuild(const std::vector<Row> &rows, std::size_t version);
   bool isCurrent(std::size_t version) const;
+  bool isUnique() const;
   const std::vector<std::size_t> *lookup(const Row &key) const;
+  std::optional<std::size_t> lookupUnique(const Row &key) const;
+  std::size_t bucketCount() const;
   std::size_t entryCount() const;
   std::size_t approximateMemoryBytes() const;
 
@@ -60,12 +64,19 @@ private:
 
   std::vector<std::size_t> columns_;
   BucketMap buckets_;
+  UniqueMap unique_rows_;
+  bool unique_ = false;
   std::size_t built_version_ = static_cast<std::size_t>(-1);
 };
 
 class RelationStorage {
 public:
   using KeyMap = std::unordered_map<Row, std::size_t, KeyHash, KeyEqual>;
+
+  struct BatchMergeResult {
+    std::vector<Row> changed;
+    std::size_t parallel_tasks = 0;
+  };
 
   explicit RelationStorage(RelationIR definition);
 
@@ -76,12 +87,18 @@ public:
   bool insert(Row row);
   bool contains(const Row &row) const;
   std::vector<Row> coalesce(std::vector<Row> candidates) const;
+  std::size_t candidateHash(const Row &row) const;
+  BatchMergeResult mergeCoalesced(std::vector<Row> candidates,
+                                  Scheduler &scheduler, std::size_t grain_size);
+  std::size_t estimatedLookupCardinality(ColumnMask mask);
   std::size_t indexCount() const;
   std::size_t indexEntries() const;
   std::size_t indexMemoryBytes() const;
 
   void forEachMatching(ColumnMask mask, const Row &key, ExecutionStats &stats,
                        const std::function<void(const Row &)> &callback);
+  std::vector<const Row *> matchingRows(ColumnMask mask, const Row &key,
+                                        ExecutionStats &stats);
 
 private:
   void validateRow(const Row &row) const;

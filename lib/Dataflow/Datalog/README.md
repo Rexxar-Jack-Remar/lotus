@@ -1,6 +1,7 @@
-# Native C++ Datalog semantics
+# Native C++ Datalog engine
 
-This document freezes the semantic contract for Lotus's native Datalog engine.
+This document describes the current semantic contract and architecture of Lotus's
+native Datalog engine. It evolves together with the implementation.
 The public API is a strongly typed C++17 API. It is not a parser or a compatibility
 layer for Ascent's Rust macro syntax.
 
@@ -16,7 +17,7 @@ The template API only constructs typed terms and relations. Rules are immediatel
 lowered to type-erased `RuleIR`, `AtomIR`, `TermIR`, and `FilterIR` values. Runtime
 storage and rule evaluation do not depend on the public template expression tree.
 
-## Frozen language semantics
+## Language semantics
 
 ### Relations
 
@@ -55,19 +56,28 @@ body atom. That occurrence reads `Delta`; the remaining occurrences read `Total`
 ### Indexes
 
 At an atom, columns containing constants or variables grounded by earlier body
-items form a runtime bitmask lookup key. Indexes are created lazily and rebuilt when
-their relation version changes. An atom with no bound columns performs a full scan.
+items form a runtime bitmask lookup key. Indexes are prepared by the planner and
+rebuilt when their relation version changes. Full-row masks use a specialized
+unique index; partial masks use multi-row buckets. An atom with no bound columns
+performs a full scan.
+
+Join costs use observed distinct-key counts from the selected index, rather than a
+fixed heuristic based only on the number of bound columns. During execution,
+variable bindings reference immutable relation cells and own only computed values,
+avoiding a `std::any` copy at every join step.
 
 ### Aggregation
 
 Aggregation is stratified. An aggregate dependency requires the head stratum to be
-strictly greater than the input stratum. Generic blocking aggregators consume an
-input range. Reducible aggregators additionally expose local state, merge, and
-finish operations for parallel execution.
+strictly greater than the input stratum. `make_streaming_aggregator` exposes a
+callback range without materializing all projected inputs. The compatibility
+`make_aggregator` API collects a vector. Reducible aggregators expose local state,
+merge, and finish operations for parallel execution.
 
 The built-in reducible aggregators are `sum`, `count`, `minimum`, `maximum`, and
-`mean`. `make_aggregator` constructs a generic blocking aggregator that may emit
-zero, one, or multiple results.
+`mean`. `make_reducible_aggregator` constructs parameterized custom reducers that
+participate in parallel aggregation. Generic aggregators may emit zero, one, or
+multiple results.
 
 ### Lattices
 
@@ -75,8 +85,10 @@ A lattice relation maps a tuple key to one lattice value. Insertion for an exist
 key performs `join`; it produces new information only when the stored value changes.
 All candidates for a key are joined before that key enters the next delta.
 
-The standard library provides minimum, maximum, and set-union lattices. User-defined
-lattice values provide `bool joinMut(const T &candidate)`.
+The standard library provides minimum, maximum, set-union, dual, product,
+bounded-set, and constant-propagation lattices. User-defined lattice values provide
+`bool joinMut(const T &candidate)`; values used through `DualLattice` additionally
+provide `meetMut`.
 
 ### Negation
 
@@ -91,9 +103,14 @@ and `Delta`, write thread-local candidates, and merge after a barrier. Ordinary
 relations deduplicate candidates; lattice relations locally join by key before the
 global join.
 
-The runtime accepts an injected `Scheduler`. `ThreadScheduler` supplies the default
-`std::thread` implementation and `SerialScheduler` provides deterministic single-
-thread execution.
+The runtime accepts an injected `Scheduler`. `ThreadScheduler` uses a persistent
+worker pool and `SerialScheduler` provides deterministic single-thread execution.
+Non-recursive rules and recursive delta partitions both execute in parallel when
+there is enough work. Reducible aggregators use worker-local states followed by a
+deterministic merge; generic blocking aggregators remain serial. Epoch candidates
+are hash-partitioned for parallel set deduplication or per-key lattice joining.
+Existing lattice keys are updated in parallel before new rows are committed at the
+barrier.
 
 ## Explicit non-goals
 
@@ -113,19 +130,19 @@ thread execution.
 | Conditions and head expressions | implemented | grounded pure expressions |
 | Positive recursion and SCCs | implemented | least fixed point |
 | Semi-naive execution | implemented | `Total` / `Delta` / `New` epochs |
-| Runtime bitmask indexes | implemented | lazy indexes from bound columns |
+| Runtime bitmask indexes | implemented | unique/full and bucket/partial indexes |
 | Aggregation | implemented | stratified generic/reducible aggregators |
-| Lattice relations | implemented | one joined value per key |
+| Lattice relations | implemented | joined values plus standard lattice library |
 | Negation | implemented | stratified anti-join |
-| Join planning | implemented | greedy cardinality estimate |
-| Parallel execution | implemented | bulk-synchronous scheduler |
+| Join planning | implemented | greedy observed-distinct cost estimate |
+| Parallel execution | implemented | BSP rules, reducers, coalesce, and merge |
 | Runtime tracing | implemented | SCC, rule, and delta traces |
 
-## Differential-test contract
+## CLI and external validation contract
 
-Semantic parity tests should run equivalent programs in Rust Ascent and the C++
-engine, canonicalize tuple order, and compare results. The suite is grouped by
-relations, recursion, aggregation, lattices, negation, parallel execution, and
-invalid programs. The portable harness always checks the C++ output against a
-golden result and optionally builds the Rust runner when `LOTUS_ASCENT_SOURCE_DIR`
-points to an Ascent checkout.
+`lotus-datalog` consumes a JSON Semantic IR rather than Rust syntax. It emits
+canonical, sorted JSON rows plus execution statistics, so later differential and
+performance testing can be implemented as ordinary Python scripts without a
+dedicated C++ benchmark or `tests/differential` target. `lotus-datalog validate`
+performs parsing, type checking, grounding, dependency analysis, stratification,
+SCC construction, and planning without executing the fixed point.

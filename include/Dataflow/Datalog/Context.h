@@ -40,8 +40,8 @@ public:
   }
 
   template <typename... Ts> Relation<Ts...> lattice(std::string name) {
-    static_assert(sizeof...(Ts) >= 2,
-                  "lattice relations require at least one key and one value");
+    static_assert(sizeof...(Ts) >= 1,
+                  "lattice relations require a lattice value column");
     static_assert((std::is_copy_constructible_v<Ts> && ...),
                   "Datalog relation columns must be copy constructible");
     static_assert(sizeof...(Ts) <= sizeof(ColumnMask) * 8,

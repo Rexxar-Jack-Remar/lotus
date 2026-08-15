@@ -11,6 +11,7 @@
 #include <set>
 #include <stdexcept>
 #include <string>
+#include <type_traits>
 #include <typeindex>
 #include <unordered_map>
 #include <utility>
@@ -222,8 +223,8 @@ Value encodeValue(const std::any &value, TypeSpec type) {
     return std::any_cast<const std::int64_t &>(value);
   case ValueKind::U64: {
     const std::uint64_t integer = std::any_cast<const std::uint64_t &>(value);
-    if (integer > static_cast<std::uint64_t>(
-                      std::numeric_limits<std::int64_t>::max()))
+    if (integer >
+        static_cast<std::uint64_t>(std::numeric_limits<std::int64_t>::max()))
       return std::to_string(integer);
     return static_cast<std::int64_t>(integer);
   }
@@ -252,8 +253,7 @@ Value encodeValue(const std::any &value, TypeSpec type) {
   throw std::logic_error("unknown JSON Datalog type");
 }
 
-std::function<bool(std::any &, const std::any &)>
-latticeJoin(TypeSpec type) {
+std::function<bool(std::any &, const std::any &)> latticeJoin(TypeSpec type) {
   switch (type.kind) {
   case ValueKind::MinI64:
     return [](std::any &current, const std::any &candidate) {
@@ -327,13 +327,13 @@ struct DynamicExpr {
   ExprIR ir;
 };
 
-template <typename T>
-DynamicExpr constantExpr(TypeSpec type, T value) {
+template <typename T> DynamicExpr constantExpr(TypeSpec type, T value) {
   ExprIR expression;
   expression.type = type.typeIndex();
   expression.debug_name = "constant";
-  expression.evaluate =
-      [value = std::move(value)](const Binding &) { return std::any(value); };
+  expression.evaluate = [value = std::move(value)](const Binding &) {
+    return std::any(value);
+  };
   return {type, std::move(expression)};
 }
 
@@ -365,15 +365,15 @@ DynamicExpr binaryExpr(TypeSpec result_type, DynamicExpr lhs, DynamicExpr rhs,
                        Function function, std::string name) {
   ExprIR expression;
   expression.type = result_type.typeIndex();
-  expression.referenced_vars = detail::mergeReferences(
-      lhs.ir.referenced_vars, rhs.ir.referenced_vars);
+  expression.referenced_vars =
+      detail::mergeReferences(lhs.ir.referenced_vars, rhs.ir.referenced_vars);
   expression.debug_name = std::move(name);
-  expression.evaluate =
-      [left = std::move(lhs.ir), right = std::move(rhs.ir),
-       function = std::move(function)](const Binding &binding) {
-        return std::any(function(std::any_cast<L>(left.evaluate(binding)),
-                                 std::any_cast<R>(right.evaluate(binding))));
-      };
+  expression.evaluate = [left = std::move(lhs.ir), right = std::move(rhs.ir),
+                         function =
+                             std::move(function)](const Binding &binding) {
+    return std::any(function(std::any_cast<L>(left.evaluate(binding)),
+                             std::any_cast<R>(right.evaluate(binding))));
+  };
   return {result_type, std::move(expression)};
 }
 
@@ -384,11 +384,11 @@ DynamicExpr unaryExpr(TypeSpec result_type, DynamicExpr operand,
   expression.type = result_type.typeIndex();
   expression.referenced_vars = operand.ir.referenced_vars;
   expression.debug_name = std::move(name);
-  expression.evaluate =
-      [input = std::move(operand.ir),
-       function = std::move(function)](const Binding &binding) {
-        return std::any(function(std::any_cast<Input>(input.evaluate(binding))));
-      };
+  expression.evaluate = [input = std::move(operand.ir),
+                         function =
+                             std::move(function)](const Binding &binding) {
+    return std::any(function(std::any_cast<Input>(input.evaluate(binding))));
+  };
   return {result_type, std::move(expression)};
 }
 
@@ -400,8 +400,8 @@ DynamicExpr sameTypeBinary(TypeSpec type, DynamicExpr lhs, DynamicExpr rhs,
 }
 
 template <typename T, typename Function>
-DynamicExpr comparison(TypeSpec operand_type, DynamicExpr lhs,
-                       DynamicExpr rhs, Function function, StringRef name) {
+DynamicExpr comparison(TypeSpec operand_type, DynamicExpr lhs, DynamicExpr rhs,
+                       Function function, StringRef name) {
   (void)operand_type;
   return binaryExpr<T, T, bool>({ValueKind::Bool}, std::move(lhs),
                                 std::move(rhs), std::move(function),
@@ -427,9 +427,9 @@ public:
         for (const std::vector<std::any> &row : program_.rows(relation_id)) {
           Array encoded;
           for (std::size_t column = 0; column < row.size(); ++column)
-            encoded.push_back(encodeValue(row[column], relation.columns[column]));
-          std::string key =
-              llvm::formatv("{0}", Value(Array(encoded))).str();
+            encoded.push_back(
+                encodeValue(row[column], relation.columns[column]));
+          std::string key = llvm::formatv("{0}", Value(Array(encoded))).str();
           encoded_rows.emplace_back(std::move(key), std::move(encoded));
         }
         std::sort(encoded_rows.begin(), encoded_rows.end(),
@@ -449,20 +449,29 @@ public:
 
 private:
   static Object encodeStats(const ExecutionStats &stats) {
-    return Object{{"rule_evaluations", static_cast<std::int64_t>(stats.rule_evaluations)},
-                  {"tuples_scanned", static_cast<std::int64_t>(stats.tuples_scanned)},
-                  {"index_lookups", static_cast<std::int64_t>(stats.index_lookups)},
-                  {"inserted_facts", static_cast<std::int64_t>(stats.inserted_facts)},
-                  {"fixpoint_iterations", static_cast<std::int64_t>(stats.fixpoint_iterations)},
-                  {"planned_reorders", static_cast<std::int64_t>(stats.planned_reorders)},
-                  {"parallel_tasks", static_cast<std::int64_t>(stats.parallel_tasks)},
-                  {"scc_count", static_cast<std::int64_t>(stats.scc_count)},
-                  {"relation_count", static_cast<std::int64_t>(stats.relation_count)},
-                  {"total_facts", static_cast<std::int64_t>(stats.total_facts)},
-                  {"peak_delta", static_cast<std::int64_t>(stats.peak_delta)},
-                  {"index_count", static_cast<std::int64_t>(stats.index_count)},
-                  {"index_entries", static_cast<std::int64_t>(stats.index_entries)},
-                  {"index_memory_bytes", static_cast<std::int64_t>(stats.index_memory_bytes)}};
+    return Object{
+        {"rule_evaluations", static_cast<std::int64_t>(stats.rule_evaluations)},
+        {"tuples_scanned", static_cast<std::int64_t>(stats.tuples_scanned)},
+        {"index_lookups", static_cast<std::int64_t>(stats.index_lookups)},
+        {"inserted_facts", static_cast<std::int64_t>(stats.inserted_facts)},
+        {"fixpoint_iterations",
+         static_cast<std::int64_t>(stats.fixpoint_iterations)},
+        {"planned_reorders", static_cast<std::int64_t>(stats.planned_reorders)},
+        {"parallel_tasks", static_cast<std::int64_t>(stats.parallel_tasks)},
+        {"parallel_rule_tasks",
+         static_cast<std::int64_t>(stats.parallel_rule_tasks)},
+        {"parallel_merge_tasks",
+         static_cast<std::int64_t>(stats.parallel_merge_tasks)},
+        {"parallel_aggregate_tasks",
+         static_cast<std::int64_t>(stats.parallel_aggregate_tasks)},
+        {"scc_count", static_cast<std::int64_t>(stats.scc_count)},
+        {"relation_count", static_cast<std::int64_t>(stats.relation_count)},
+        {"total_facts", static_cast<std::int64_t>(stats.total_facts)},
+        {"peak_delta", static_cast<std::int64_t>(stats.peak_delta)},
+        {"index_count", static_cast<std::int64_t>(stats.index_count)},
+        {"index_entries", static_cast<std::int64_t>(stats.index_entries)},
+        {"index_memory_bytes",
+         static_cast<std::int64_t>(stats.index_memory_bytes)}};
   }
 
   void parse(const Object &root) {
@@ -549,7 +558,8 @@ private:
   }
 
   VariableSpec &variable(RuleScope &scope, StringRef name, TypeSpec type) {
-    std::string normalized = name.consume_front("$") ? name.str() : name.str();
+    name.consume_front("$");
+    const std::string normalized = name.str();
     if (normalized.empty())
       throw std::invalid_argument("variable name must not be empty");
     auto found = scope.variables.find(normalized);
@@ -568,8 +578,7 @@ private:
   }
 
   VariableSpec &findVariable(RuleScope &scope, StringRef name) {
-    if (name.consume_front("$")) {
-    }
+    name.consume_front("$");
     auto found = scope.variables.find(name.str());
     if (found == scope.variables.end())
       throw std::invalid_argument("unknown variable '" + name.str() + "'");
@@ -577,10 +586,12 @@ private:
   }
 
   void registerAtomVariables(const Object &atom, RuleScope &scope) {
-    const RelationSpec &relation = findRelation(requireString(atom, "relation"));
+    const RelationSpec &relation =
+        findRelation(requireString(atom, "relation"));
     const Array &args = requireArray(atom, "args");
     if (args.size() != relation.columns.size())
-      throw std::invalid_argument("atom arity mismatch for '" + relation.name + "'");
+      throw std::invalid_argument("atom arity mismatch for '" + relation.name +
+                                  "'");
     for (std::size_t column = 0; column < args.size(); ++column) {
       if (llvm::Optional<StringRef> string = args[column].getAsString()) {
         if (string->startswith("$") && string->size() > 1)
@@ -677,10 +688,12 @@ private:
 
   AtomIR parseAtom(const Object &atom, RuleScope &scope,
                    bool allow_expressions) {
-    const RelationSpec &relation = findRelation(requireString(atom, "relation"));
+    const RelationSpec &relation =
+        findRelation(requireString(atom, "relation"));
     const Array &args = requireArray(atom, "args");
     if (args.size() != relation.columns.size())
-      throw std::invalid_argument("atom arity mismatch for '" + relation.name + "'");
+      throw std::invalid_argument("atom arity mismatch for '" + relation.name +
+                                  "'");
     AtomIR result;
     result.relation = relation.id;
     result.relation_name = relation.name;
@@ -698,7 +711,8 @@ private:
       if (string->startswith("$") && string->size() > 1)
         expression = variableExpr(findVariable(scope, *string));
       else
-        expression = constantExpr<std::string>({ValueKind::String}, string->str());
+        expression =
+            constantExpr<std::string>({ValueKind::String}, string->str());
     } else if (llvm::Optional<bool> boolean = value.getAsBoolean()) {
       expression = constantExpr<bool>({ValueKind::Bool}, *boolean);
     } else if (llvm::Optional<std::int64_t> integer = value.getAsInteger()) {
@@ -706,8 +720,8 @@ private:
         expression = constantExpr<std::uint64_t>(
             *expected, static_cast<std::uint64_t>(*integer));
       } else if (expected && expected->kind == ValueKind::F64) {
-        expression = constantExpr<double>(*expected,
-                                          static_cast<double>(*integer));
+        expression =
+            constantExpr<double>(*expected, static_cast<double>(*integer));
       } else {
         expression = constantExpr<std::int64_t>({ValueKind::I64}, *integer);
       }
@@ -718,7 +732,8 @@ private:
         expression = variableExpr(findVariable(scope, *name));
       } else if (const Value *constant = object->get("const")) {
         if (!expected)
-          throw std::invalid_argument("expression const requires an expected type");
+          throw std::invalid_argument(
+              "expression const requires an expected type");
         expression = constantAnyExpr(
             *expected, parseConstant(*constant, *expected, "expression const"));
       } else {
@@ -733,7 +748,8 @@ private:
 
     if (expected && expression.type != *expected) {
       throw std::invalid_argument("expression type " + expression.type.name() +
-                                  " does not match expected " + expected->name());
+                                  " does not match expected " +
+                                  expected->name());
     }
     return expression;
   }
@@ -760,8 +776,9 @@ private:
 
   DynamicExpr makeUnary(StringRef operation, DynamicExpr operand) {
     if (operation == "!" && operand.type.kind == ValueKind::Bool) {
-      return unaryExpr<bool, bool>({ValueKind::Bool}, std::move(operand),
-                                   [](bool value) { return !value; }, "not");
+      return unaryExpr<bool, bool>(
+          {ValueKind::Bool}, std::move(operand),
+          [](bool value) { return !value; }, "not");
     }
     if (operation == "unary-" && operand.type.kind == ValueKind::I64) {
       return unaryExpr<std::int64_t, std::int64_t>(
@@ -769,9 +786,9 @@ private:
           [](std::int64_t value) { return -value; }, "unary-minus");
     }
     if (operation == "unary-" && operand.type.kind == ValueKind::F64) {
-      return unaryExpr<double, double>({ValueKind::F64}, std::move(operand),
-                                       [](double value) { return -value; },
-                                       "unary-minus");
+      return unaryExpr<double, double>(
+          {ValueKind::F64}, std::move(operand),
+          [](double value) { return -value; }, "unary-minus");
     }
     if (operation == "unary+")
       return operand;
@@ -854,7 +871,8 @@ private:
       return makeScalarBinary<std::uint64_t>(operation, std::move(lhs),
                                              std::move(rhs));
     case ValueKind::F64:
-      return makeScalarBinary<double>(operation, std::move(lhs), std::move(rhs));
+      return makeScalarBinary<double>(operation, std::move(lhs),
+                                      std::move(rhs));
     case ValueKind::String:
       return makeStringBinary(operation, std::move(lhs), std::move(rhs));
     case ValueKind::Bool:
@@ -870,51 +888,62 @@ private:
                                DynamicExpr rhs) {
     const TypeSpec type = lhs.type;
     if (operation == "+")
-      return sameTypeBinary<T>(type, std::move(lhs), std::move(rhs),
-                               [](T a, T b) { return a + b; }, operation);
+      return sameTypeBinary<T>(
+          type, std::move(lhs), std::move(rhs), [](T a, T b) { return a + b; },
+          operation);
     if (operation == "-")
-      return sameTypeBinary<T>(type, std::move(lhs), std::move(rhs),
-                               [](T a, T b) { return a - b; }, operation);
+      return sameTypeBinary<T>(
+          type, std::move(lhs), std::move(rhs), [](T a, T b) { return a - b; },
+          operation);
     if (operation == "*")
-      return sameTypeBinary<T>(type, std::move(lhs), std::move(rhs),
-                               [](T a, T b) { return a * b; }, operation);
+      return sameTypeBinary<T>(
+          type, std::move(lhs), std::move(rhs), [](T a, T b) { return a * b; },
+          operation);
     if (operation == "/")
-      return sameTypeBinary<T>(type, std::move(lhs), std::move(rhs),
-                               [](T a, T b) {
-                                 if (b == T{})
-                                   throw std::domain_error("division by zero");
-                                 return a / b;
-                               },
-                               operation);
+      return sameTypeBinary<T>(
+          type, std::move(lhs), std::move(rhs),
+          [](T a, T b) {
+            if (b == T{})
+              throw std::domain_error("division by zero");
+            return a / b;
+          },
+          operation);
     if (operation == "%") {
       if constexpr (std::is_integral_v<T>) {
-        return sameTypeBinary<T>(type, std::move(lhs), std::move(rhs),
-                                 [](T a, T b) {
-                                   if (b == T{})
-                                     throw std::domain_error("remainder by zero");
-                                   return a % b;
-                                 },
-                                 operation);
+        return sameTypeBinary<T>(
+            type, std::move(lhs), std::move(rhs),
+            [](T a, T b) {
+              if (b == T{})
+                throw std::domain_error("remainder by zero");
+              return a % b;
+            },
+            operation);
       }
     }
     if (operation == "==")
-      return comparison<T>(type, std::move(lhs), std::move(rhs),
-                           [](T a, T b) { return a == b; }, operation);
+      return comparison<T>(
+          type, std::move(lhs), std::move(rhs), [](T a, T b) { return a == b; },
+          operation);
     if (operation == "!=")
-      return comparison<T>(type, std::move(lhs), std::move(rhs),
-                           [](T a, T b) { return a != b; }, operation);
+      return comparison<T>(
+          type, std::move(lhs), std::move(rhs), [](T a, T b) { return a != b; },
+          operation);
     if (operation == "<")
-      return comparison<T>(type, std::move(lhs), std::move(rhs),
-                           [](T a, T b) { return a < b; }, operation);
+      return comparison<T>(
+          type, std::move(lhs), std::move(rhs), [](T a, T b) { return a < b; },
+          operation);
     if (operation == "<=")
-      return comparison<T>(type, std::move(lhs), std::move(rhs),
-                           [](T a, T b) { return a <= b; }, operation);
+      return comparison<T>(
+          type, std::move(lhs), std::move(rhs), [](T a, T b) { return a <= b; },
+          operation);
     if (operation == ">")
-      return comparison<T>(type, std::move(lhs), std::move(rhs),
-                           [](T a, T b) { return a > b; }, operation);
+      return comparison<T>(
+          type, std::move(lhs), std::move(rhs), [](T a, T b) { return a > b; },
+          operation);
     if (operation == ">=")
-      return comparison<T>(type, std::move(lhs), std::move(rhs),
-                           [](T a, T b) { return a >= b; }, operation);
+      return comparison<T>(
+          type, std::move(lhs), std::move(rhs), [](T a, T b) { return a >= b; },
+          operation);
     throw std::invalid_argument("unsupported numeric operation '" +
                                 operation.str() + "'");
   }
@@ -932,7 +961,8 @@ private:
                                      std::equal_to<std::string>{}, operation);
     if (operation == "!=")
       return comparison<std::string>(type, std::move(lhs), std::move(rhs),
-                                     std::not_equal_to<std::string>{}, operation);
+                                     std::not_equal_to<std::string>{},
+                                     operation);
     if (operation == "<")
       return comparison<std::string>(type, std::move(lhs), std::move(rhs),
                                      std::less<std::string>{}, operation);
@@ -959,19 +989,17 @@ private:
                                 operation.str() + "'");
   }
 
-  template <typename Input, typename Output, typename State,
-            typename MakeState, typename Add, typename Merge, typename Finish>
+  template <typename Input, typename Output, typename State, typename MakeState,
+            typename Add, typename Merge, typename Finish>
   void setReducer(AggregateIR &aggregate, MakeState make_state, Add add,
                   Merge merge, Finish finish) {
     ReducerIR reducer;
     reducer.make_state = [make_state] { return std::any(make_state()); };
     reducer.add = [add](std::any &state, const std::any &value) {
-      add(std::any_cast<State &>(state),
-          std::any_cast<const Input &>(value));
+      add(std::any_cast<State &>(state), std::any_cast<const Input &>(value));
     };
     reducer.merge = [merge](std::any &state, const std::any &other) {
-      merge(std::any_cast<State &>(state),
-            std::any_cast<const State &>(other));
+      merge(std::any_cast<State &>(state), std::any_cast<const State &>(other));
     };
     reducer.finish = [finish](std::any &state) {
       std::vector<Output> typed = finish(std::any_cast<State &>(state));
@@ -981,11 +1009,10 @@ private:
       return result;
     };
     aggregate.reducer = reducer;
-    aggregate.evaluate_range =
-        [reducer = std::move(reducer)](const std::vector<std::any> &values) {
+    aggregate.evaluate =
+        [reducer = std::move(reducer)](const AggregateForEach &for_each) {
           std::any state = reducer.make_state();
-          for (const std::any &value : values)
-            reducer.add(state, value);
+          for_each([&](const std::any &value) { reducer.add(state, value); });
           return reducer.finish(state);
         };
   }
@@ -1018,7 +1045,7 @@ private:
                                                      input_type);
     if (input_type.kind == ValueKind::F64)
       return configureNumericAggregate<double>(aggregate, operation,
-                                                input_type);
+                                               input_type);
     throw std::invalid_argument("aggregate '" + operation.str() +
                                 "' requires an i64 or f64 projection");
   }
@@ -1039,17 +1066,15 @@ private:
       setReducer<T, T, OptionalState<T>>(
           aggregate, [] { return OptionalState<T>{}; },
           [minimum](OptionalState<T> &state, const T &value) {
-            if (!state.value ||
-                (minimum ? std::less<T>{}(value, *state.value)
-                         : std::less<T>{}(*state.value, value)))
+            if (!state.value || (minimum ? std::less<T>{}(value, *state.value)
+                                         : std::less<T>{}(*state.value, value)))
               state.value = value;
           },
           [minimum](OptionalState<T> &state, const OptionalState<T> &other) {
             if (other.value &&
                 (!state.value ||
-                 (minimum
-                      ? std::less<T>{}(*other.value, *state.value)
-                      : std::less<T>{}(*state.value, *other.value))))
+                 (minimum ? std::less<T>{}(*other.value, *state.value)
+                          : std::less<T>{}(*state.value, *other.value))))
               state.value = other.value;
           },
           [](OptionalState<T> &state) {

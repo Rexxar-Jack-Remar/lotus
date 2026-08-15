@@ -47,17 +47,25 @@ bool KeyEqual::operator()(const Row &lhs, const Row &rhs) const {
 RuntimeIndex::RuntimeIndex(ColumnMask mask,
                            const std::vector<ColumnType> &all_columns)
     : buckets_(0, KeyHash{selectedColumns(mask, all_columns)},
-               KeyEqual{selectedColumns(mask, all_columns)}) {
+               KeyEqual{selectedColumns(mask, all_columns)}),
+      unique_rows_(0, KeyHash{selectedColumns(mask, all_columns)},
+                   KeyEqual{selectedColumns(mask, all_columns)}) {
   for (std::size_t i = 0; i < all_columns.size(); ++i) {
     if (mask & (ColumnMask{1} << i))
       columns_.push_back(i);
   }
+  unique_ = columns_.size() == all_columns.size();
 }
 
 void RuntimeIndex::rebuild(const std::vector<Row> &rows, std::size_t version) {
   buckets_.clear();
-  for (std::size_t row_index = 0; row_index < rows.size(); ++row_index)
-    buckets_[keyFor(rows[row_index])].push_back(row_index);
+  unique_rows_.clear();
+  for (std::size_t row_index = 0; row_index < rows.size(); ++row_index) {
+    if (unique_)
+      unique_rows_.emplace(keyFor(rows[row_index]), row_index);
+    else
+      buckets_[keyFor(rows[row_index])].push_back(row_index);
+  }
   built_version_ = version;
 }
 
@@ -65,12 +73,27 @@ bool RuntimeIndex::isCurrent(std::size_t version) const {
   return built_version_ == version;
 }
 
+bool RuntimeIndex::isUnique() const { return unique_; }
+
 const std::vector<std::size_t> *RuntimeIndex::lookup(const Row &key) const {
   auto it = buckets_.find(key);
   return it == buckets_.end() ? nullptr : &it->second;
 }
 
+std::optional<std::size_t> RuntimeIndex::lookupUnique(const Row &key) const {
+  auto it = unique_rows_.find(key);
+  if (it == unique_rows_.end())
+    return std::nullopt;
+  return it->second;
+}
+
+std::size_t RuntimeIndex::bucketCount() const {
+  return unique_ ? unique_rows_.size() : buckets_.size();
+}
+
 std::size_t RuntimeIndex::entryCount() const {
+  if (unique_)
+    return unique_rows_.size();
   std::size_t count = 0;
   for (const auto &[key, rows] : buckets_) {
     (void)key;
@@ -80,6 +103,15 @@ std::size_t RuntimeIndex::entryCount() const {
 }
 
 std::size_t RuntimeIndex::approximateMemoryBytes() const {
+  if (unique_) {
+    std::size_t bytes = unique_rows_.bucket_count() * sizeof(void *);
+    for (const auto &[key, row] : unique_rows_) {
+      (void)row;
+      bytes +=
+          sizeof(key) + key.size() * sizeof(std::any) + sizeof(std::size_t);
+    }
+    return bytes;
+  }
   std::size_t bytes = buckets_.bucket_count() * sizeof(void *);
   for (const auto &[key, rows] : buckets_) {
     bytes += sizeof(key) + key.size() * sizeof(std::any);
@@ -166,8 +198,18 @@ bool RelationStorage::contains(const Row &row) const {
 }
 
 std::vector<Row> RelationStorage::coalesce(std::vector<Row> candidates) const {
-  if (definition_.kind != RelationKind::Lattice)
-    return candidates;
+  if (definition_.kind != RelationKind::Lattice) {
+    std::unordered_set<Row, RowHash, RowEqual> unique(
+        0, RowHash{definition_.columns}, RowEqual{definition_.columns});
+    std::vector<Row> result;
+    result.reserve(candidates.size());
+    for (Row &candidate : candidates) {
+      validateRow(candidate);
+      if (unique.insert(candidate).second)
+        result.push_back(std::move(candidate));
+    }
+    return result;
+  }
 
   std::vector<ColumnType> key_columns(definition_.columns.begin(),
                                       definition_.columns.end() - 1);
@@ -183,6 +225,97 @@ std::vector<Row> RelationStorage::coalesce(std::vector<Row> candidates) const {
       definition_.lattice_join(result[it->second].back(), candidate.back());
   }
   return result;
+}
+
+std::size_t RelationStorage::candidateHash(const Row &row) const {
+  validateRow(row);
+  const std::size_t column_count =
+      definition_.kind == RelationKind::Lattice ? row.size() - 1 : row.size();
+  std::size_t seed = 0;
+  for (std::size_t column = 0; column < column_count; ++column)
+    combineHash(seed, definition_.columns[column].hash(row[column]));
+  return seed;
+}
+
+RelationStorage::BatchMergeResult
+RelationStorage::mergeCoalesced(std::vector<Row> candidates,
+                                Scheduler &scheduler, std::size_t grain_size) {
+  BatchMergeResult result;
+  if (candidates.empty())
+    return result;
+
+  for (const Row &candidate : candidates)
+    validateRow(candidate);
+
+  const std::size_t grain = std::max<std::size_t>(1, grain_size);
+  const std::size_t task_count = std::min(
+      scheduler.workerCount(), (candidates.size() + grain - 1) / grain);
+  std::vector<unsigned char> changed(candidates.size(), 0);
+  std::vector<std::optional<std::size_t>> lattice_rows(candidates.size());
+
+  auto inspect = [&](std::size_t task) {
+    const std::size_t begin = candidates.size() * task / task_count;
+    const std::size_t end = candidates.size() * (task + 1) / task_count;
+    if (definition_.kind == RelationKind::Set) {
+      for (std::size_t index = begin; index < end; ++index)
+        changed[index] = set_.find(candidates[index]) == set_.end();
+      return;
+    }
+
+    for (std::size_t index = begin; index < end; ++index) {
+      auto found = lattice_keys_->find(latticeKey(candidates[index]));
+      if (found == lattice_keys_->end()) {
+        changed[index] = 1;
+        continue;
+      }
+      lattice_rows[index] = found->second;
+      changed[index] = definition_.lattice_join(rows_[found->second].back(),
+                                                candidates[index].back());
+    }
+  };
+
+  if (task_count > 1) {
+    scheduler.parallelFor(task_count, inspect);
+    result.parallel_tasks += task_count;
+  } else {
+    inspect(0);
+  }
+
+  result.changed.reserve(candidates.size());
+  for (std::size_t index = 0; index < candidates.size(); ++index) {
+    if (!changed[index])
+      continue;
+    if (definition_.kind == RelationKind::Set) {
+      set_.insert(candidates[index]);
+      rows_.push_back(std::move(candidates[index]));
+      result.changed.push_back(rows_.back());
+      continue;
+    }
+    if (lattice_rows[index]) {
+      result.changed.push_back(rows_[*lattice_rows[index]]);
+      continue;
+    }
+    const std::size_t row_index = rows_.size();
+    Row key = latticeKey(candidates[index]);
+    rows_.push_back(std::move(candidates[index]));
+    lattice_keys_->emplace(std::move(key), row_index);
+    result.changed.push_back(rows_.back());
+  }
+  version_ += result.changed.size();
+  return result;
+}
+
+std::size_t RelationStorage::estimatedLookupCardinality(ColumnMask mask) {
+  if (mask == 0)
+    return std::max<std::size_t>(1, rows_.size());
+  std::lock_guard<std::mutex> lock(index_mutex_);
+  RuntimeIndex &index = getIndex(mask);
+  if (!index.isCurrent(version_))
+    index.rebuild(rows_, version_);
+  const std::size_t distinct = index.bucketCount();
+  if (distinct == 0)
+    return 1;
+  return std::max<std::size_t>(1, (rows_.size() + distinct - 1) / distinct);
 }
 
 std::size_t RelationStorage::indexCount() const { return indices_.size(); }
@@ -208,29 +341,52 @@ std::size_t RelationStorage::indexMemoryBytes() const {
 void RelationStorage::forEachMatching(
     ColumnMask mask, const Row &key, ExecutionStats &stats,
     const std::function<void(const Row &)> &callback) {
+  for (const Row *row : matchingRows(mask, key, stats))
+    callback(*row);
+}
+
+std::vector<const Row *> RelationStorage::matchingRows(ColumnMask mask,
+                                                       const Row &key,
+                                                       ExecutionStats &stats) {
+  std::vector<const Row *> result;
   if (mask == 0) {
+    result.reserve(rows_.size());
     for (const Row &row : rows_) {
       ++stats.tuples_scanned;
-      callback(row);
+      result.push_back(&row);
     }
-    return;
+    return result;
   }
 
   ++stats.index_lookups;
-  std::vector<std::size_t> matches;
+  const std::vector<std::size_t> *matches = nullptr;
+  std::optional<std::size_t> unique_match;
   {
     std::lock_guard<std::mutex> lock(index_mutex_);
     RuntimeIndex &index = getIndex(mask);
     if (!index.isCurrent(version_))
       index.rebuild(rows_, version_);
-    const std::vector<std::size_t> *found = index.lookup(key);
-    if (found)
-      matches = *found;
+    if (index.isUnique())
+      unique_match = index.lookupUnique(key);
+    else
+      matches = index.lookup(key);
   }
-  for (std::size_t row_index : matches) {
+  if (unique_match) {
     ++stats.tuples_scanned;
-    callback(rows_[row_index]);
+    result.push_back(&rows_[*unique_match]);
+    return result;
   }
+  if (!matches)
+    return result;
+
+  // Relation rows and indexes are immutable during an evaluation epoch, so the
+  // bucket remains valid after releasing the build mutex.
+  result.reserve(matches->size());
+  for (std::size_t row_index : *matches) {
+    ++stats.tuples_scanned;
+    result.push_back(&rows_[row_index]);
+  }
+  return result;
 }
 
 void RelationStorage::validateRow(const Row &row) const {

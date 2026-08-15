@@ -105,15 +105,21 @@ void ThreadScheduler::parallelFor(
     return;
   }
 
-  auto group = std::make_shared<TaskGroup>(task_count);
-  for (std::size_t task = 0; task < task_count; ++task) {
-    impl_->submit([group, task, &function] {
-      try {
-        function(task);
-      } catch (...) {
-        std::lock_guard<std::mutex> lock(group->mutex);
-        if (!group->failure)
-          group->failure = std::current_exception();
+  auto group = std::make_shared<TaskGroup>(workers);
+  auto next_task = std::make_shared<std::atomic<std::size_t>>(0);
+  for (std::size_t worker = 0; worker < workers; ++worker) {
+    impl_->submit([group, next_task, task_count, &function] {
+      while (true) {
+        const std::size_t task = next_task->fetch_add(1);
+        if (task >= task_count)
+          break;
+        try {
+          function(task);
+        } catch (...) {
+          std::lock_guard<std::mutex> lock(group->mutex);
+          if (!group->failure)
+            group->failure = std::current_exception();
+        }
       }
       if (group->remaining.fetch_sub(1) == 1)
         group->complete.notify_one();

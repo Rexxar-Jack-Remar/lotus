@@ -14,7 +14,86 @@ namespace lotus::datalog {
 using RelationId = std::size_t;
 using VarId = std::size_t;
 using ColumnMask = std::size_t;
-using Binding = std::vector<std::optional<std::any>>;
+
+// Body scans bind variables to immutable relation cells. Keeping a reference
+// here avoids copying a std::any (and often its heap allocation) at every join
+// step. Computed values, such as aggregate outputs, are owned by the slot
+// instead.
+class BindingSlot {
+public:
+  BindingSlot() = default;
+
+  BindingSlot(const BindingSlot &other) { copyFrom(other); }
+  BindingSlot &operator=(const BindingSlot &other) {
+    if (this != &other)
+      copyFrom(other);
+    return *this;
+  }
+
+  BindingSlot(BindingSlot &&other) noexcept { moveFrom(std::move(other)); }
+  BindingSlot &operator=(BindingSlot &&other) noexcept {
+    if (this != &other)
+      moveFrom(std::move(other));
+    return *this;
+  }
+
+  BindingSlot &operator=(const std::any &value) {
+    bindOwned(value);
+    return *this;
+  }
+
+  BindingSlot &operator=(std::any &&value) {
+    bindOwned(std::move(value));
+    return *this;
+  }
+
+  explicit operator bool() const { return value_ != nullptr; }
+  const std::any &operator*() const { return *value_; }
+
+  void bindReference(const std::any &value) {
+    owned_.reset();
+    value_ = &value;
+  }
+
+  void bindOwned(std::any value) {
+    owned_.emplace(std::move(value));
+    value_ = &*owned_;
+  }
+
+  void reset() {
+    owned_.reset();
+    value_ = nullptr;
+  }
+
+  bool ownsValue() const { return owned_.has_value(); }
+
+private:
+  void copyFrom(const BindingSlot &other) {
+    if (other.owned_) {
+      owned_ = other.owned_;
+      value_ = &*owned_;
+    } else {
+      owned_.reset();
+      value_ = other.value_;
+    }
+  }
+
+  void moveFrom(BindingSlot &&other) {
+    if (other.owned_) {
+      owned_ = std::move(other.owned_);
+      value_ = &*owned_;
+    } else {
+      owned_.reset();
+      value_ = other.value_;
+    }
+    other.reset();
+  }
+
+  std::optional<std::any> owned_;
+  const std::any *value_ = nullptr;
+};
+
+using Binding = std::vector<BindingSlot>;
 
 enum class DependencyKind {
   Positive,
@@ -78,14 +157,16 @@ struct ReducerIR {
   std::function<std::vector<std::any>(std::any &)> finish;
 };
 
+using AggregateConsumer = std::function<void(const std::any &)>;
+using AggregateForEach = std::function<void(const AggregateConsumer &consumer)>;
+
 struct AggregateIR {
   VarId output_var = 0;
   std::type_index output_type = typeid(void);
   AtomIR source;
   ExprIR projection;
   std::string name;
-  std::function<std::vector<std::any>(const std::vector<std::any> &)>
-      evaluate_range;
+  std::function<std::vector<std::any>(const AggregateForEach &)> evaluate;
   std::optional<ReducerIR> reducer;
 };
 

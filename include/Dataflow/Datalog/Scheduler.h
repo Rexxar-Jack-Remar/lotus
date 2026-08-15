@@ -15,6 +15,9 @@ struct ExecutionStats {
   std::size_t fixpoint_iterations = 0;
   std::size_t planned_reorders = 0;
   std::size_t parallel_tasks = 0;
+  std::size_t parallel_rule_tasks = 0;
+  std::size_t parallel_merge_tasks = 0;
+  std::size_t parallel_aggregate_tasks = 0;
   std::size_t scc_count = 0;
   std::size_t relation_count = 0;
   std::size_t total_facts = 0;

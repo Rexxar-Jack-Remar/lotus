@@ -3,6 +3,7 @@
 #include <cstdlib>
 #include <exception>
 #include <iostream>
+#include <stdexcept>
 #include <string>
 
 #include <llvm/Support/MemoryBuffer.h>
@@ -28,7 +29,8 @@ std::size_t parseSize(const char *value, const char *option) {
   char *end = nullptr;
   const unsigned long long parsed = std::strtoull(value, &end, 10);
   if (!end || *end != '\0' || parsed == 0)
-    throw std::invalid_argument(std::string(option) + " requires a positive integer");
+    throw std::invalid_argument(std::string(option) +
+                                " requires a positive integer");
   return static_cast<std::size_t>(parsed);
 }
 
@@ -60,8 +62,7 @@ int main(int argc, char **argv) {
   for (int index = 3; index < argc; ++index) {
     const std::string argument = argv[index];
     if (argument == "--workers" && index + 1 < argc) {
-      options.execution.worker_count =
-          parseSize(argv[++index], "--workers");
+      options.execution.worker_count = parseSize(argv[++index], "--workers");
     } else if (argument == "--grain-size" && index + 1 < argc) {
       options.execution.parallel_grain_size =
           parseSize(argv[++index], "--grain-size");

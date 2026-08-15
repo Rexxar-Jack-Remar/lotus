@@ -70,20 +70,14 @@ std::vector<VarId> atomVariables(const AtomIR &atom) {
 std::size_t estimateAtomCost(
     const AtomIR &atom, const std::vector<bool> &grounded,
     const std::vector<std::unique_ptr<RelationStorage>> &relations) {
-  std::size_t bound_columns = 0;
-  for (const TermIR &term : atom.args) {
+  ColumnMask mask = 0;
+  for (std::size_t column = 0; column < atom.args.size(); ++column) {
+    const TermIR &term = atom.args[column];
     if (term.kind == TermIR::Kind::Constant ||
         (term.kind == TermIR::Kind::Variable && grounded[term.variable]))
-      ++bound_columns;
+      mask |= ColumnMask{1} << column;
   }
-  if (bound_columns == atom.args.size())
-    return 1;
-  const std::size_t row_count =
-      std::max<std::size_t>(1, relations[atom.relation]->rows().size());
-  const std::size_t divisor = bound_columns >= sizeof(std::size_t) * 8
-                                  ? std::numeric_limits<std::size_t>::max()
-                                  : (std::size_t{1} << bound_columns);
-  return std::max<std::size_t>(1, row_count / divisor);
+  return relations[atom.relation]->estimatedLookupCardinality(mask);
 }
 
 void markAtomGrounded(const AtomIR &atom, std::vector<bool> &grounded) {
@@ -222,7 +216,7 @@ std::vector<RuleIR> planAndValidateRules(
         throw CompileError("aggregate output variable has inconsistent type");
       if (grounded[aggregate.output_var])
         throw CompileError("aggregate output variable is already grounded");
-      if (!aggregate.evaluate_range)
+      if (!aggregate.evaluate)
         throw CompileError("aggregate '" + aggregate.name +
                            "' has no evaluator");
 

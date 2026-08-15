@@ -15,19 +15,59 @@
 
 namespace lotus::datalog {
 
+template <typename T> class AggregateRange {
+public:
+  template <typename Function> void forEach(Function &&function) const {
+    for_each_([&](const std::any &value) {
+      function(std::any_cast<const T &>(value));
+    });
+  }
+
+  std::vector<T> collect() const {
+    std::vector<T> values;
+    forEach([&](const T &value) { values.push_back(value); });
+    return values;
+  }
+
+private:
+  explicit AggregateRange(const AggregateForEach &for_each)
+      : for_each_(for_each) {}
+
+  const AggregateForEach &for_each_;
+
+  template <typename Input, typename Output> friend class AggregatorSpec;
+};
+
 template <typename Input, typename Output> class AggregatorSpec {
 public:
   AggregatorSpec(
       Expr<Input> projection, std::string name,
       std::function<std::vector<Output>(const std::vector<Input> &)> evaluator)
       : projection_(std::move(projection)), name_(std::move(name)) {
-    evaluator_ = [evaluator = std::move(evaluator)](
-                     const std::vector<std::any> &values) {
+    evaluator_ = [evaluator =
+                      std::move(evaluator)](const AggregateForEach &for_each) {
       std::vector<Input> typed_values;
-      typed_values.reserve(values.size());
-      for (const std::any &value : values)
-        typed_values.push_back(std::any_cast<Input>(value));
+      for_each([&](const std::any &value) {
+        typed_values.push_back(std::any_cast<const Input &>(value));
+      });
       std::vector<Output> typed_results = evaluator(typed_values);
+      std::vector<std::any> results;
+      results.reserve(typed_results.size());
+      for (Output &result : typed_results)
+        results.emplace_back(std::move(result));
+      return results;
+    };
+  }
+
+  AggregatorSpec(
+      Expr<Input> projection, std::string name,
+      std::function<std::vector<Output>(const AggregateRange<Input> &)>
+          evaluator)
+      : projection_(std::move(projection)), name_(std::move(name)) {
+    evaluator_ = [evaluator =
+                      std::move(evaluator)](const AggregateForEach &for_each) {
+      AggregateRange<Input> range(for_each);
+      std::vector<Output> typed_results = evaluator(range);
       std::vector<std::any> results;
       results.reserve(typed_results.size());
       for (Output &result : typed_results)
@@ -58,10 +98,9 @@ public:
       return results;
     };
     reducer_ = std::move(reducer);
-    evaluator_ = [reducer = *reducer_](const std::vector<std::any> &values) {
+    evaluator_ = [reducer = *reducer_](const AggregateForEach &for_each) {
       std::any state = reducer.make_state();
-      for (const std::any &value : values)
-        reducer.add(state, value);
+      for_each([&](const std::any &value) { reducer.add(state, value); });
       return reducer.finish(state);
     };
   }
@@ -71,8 +110,7 @@ public:
 private:
   Expr<Input> projection_;
   std::string name_;
-  std::function<std::vector<std::any>(const std::vector<std::any> &)>
-      evaluator_;
+  std::function<std::vector<std::any>(const AggregateForEach &)> evaluator_;
   std::optional<ReducerIR> reducer_;
 
   template <typename In, typename Out>
@@ -88,6 +126,27 @@ AggregatorSpec<Input, Output> make_aggregator(const Expr<Input> &projection,
       projection, std::move(name),
       std::function<std::vector<Output>(const std::vector<Input> &)>(
           std::move(evaluator)));
+}
+
+template <typename Output, typename Input, typename Function>
+AggregatorSpec<Input, Output>
+make_streaming_aggregator(const Expr<Input> &projection, std::string name,
+                          Function evaluator) {
+  using Evaluator =
+      std::function<std::vector<Output>(const AggregateRange<Input> &)>;
+  return AggregatorSpec<Input, Output>(projection, std::move(name),
+                                       Evaluator(std::move(evaluator)));
+}
+
+template <typename Output, typename Input, typename MakeState, typename Add,
+          typename Merge, typename Finish>
+AggregatorSpec<Input, Output>
+make_reducible_aggregator(const Expr<Input> &projection, std::string name,
+                          MakeState make_state, Add add, Merge merge,
+                          Finish finish) {
+  return AggregatorSpec<Input, Output>(projection, std::move(name),
+                                       std::move(make_state), std::move(add),
+                                       std::move(merge), std::move(finish));
 }
 
 template <typename T> AggregatorSpec<T, T> sum(const Expr<T> &projection) {
@@ -203,7 +262,7 @@ AggregateClause aggregate(const Var<Output> &output,
   ir.source = source.ir();
   ir.projection = aggregator.projection_.lower();
   ir.name = aggregator.name_;
-  ir.evaluate_range = aggregator.evaluator_;
+  ir.evaluate = aggregator.evaluator_;
   ir.reducer = aggregator.reducer_;
   return AggregateClause(context, std::move(ir));
 }

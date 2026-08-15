@@ -1,0 +1,122 @@
+#include "TestSupport.h"
+
+#include <atomic>
+#include <sstream>
+
+using namespace lotus::datalog;
+
+namespace {
+
+TEST(DatalogTest, ParallelBspMatchesSerialTransitiveClosure) {
+  context ctx;
+  auto edge = ctx.relation<int, int>("edge");
+  auto path = ctx.relation<int, int>("path");
+  auto x = ctx.var<int>("x");
+  auto y = ctx.var<int>("y");
+  auto z = ctx.var<int>("z");
+  for (int value = 0; value < 40; ++value)
+    edge.insert(value, value + 1);
+
+  program p(ctx);
+  p.rule(path(x, y), edge(x, y));
+  p.rule(path(x, z), path(x, y) && edge(y, z));
+  auto compiled = p.compile();
+  ExecutionOptions options;
+  options.worker_count = 4;
+  options.parallel_grain_size = 2;
+  compiled.run(options);
+
+  EXPECT_TRUE(path.contains(0, 40));
+  EXPECT_EQ(path.rows().size(), 820U);
+  EXPECT_GT(compiled.stats().parallel_tasks, 1U);
+}
+
+TEST(DatalogTest, ParallelLatticeMergeCoalescesAcrossWorkers) {
+  context ctx;
+  auto edge = ctx.relation<int, int, int>("edge");
+  auto distance = ctx.lattice<int, int, min_lattice<int>>("distance");
+  auto source = ctx.var<int>("source");
+  auto middle = ctx.var<int>("middle");
+  auto target = ctx.var<int>("target");
+  auto weight = ctx.var<int>("weight");
+  auto current = ctx.var<min_lattice<int>>("current");
+  for (int weight_value = 100; weight_value >= 1; --weight_value)
+    edge.insert(1, 2, weight_value);
+  distance.insert(1, 1, min_lattice<int>(0));
+
+  program p(ctx);
+  p.rule(distance(source, target, current + weight),
+         distance(source, middle, current) && edge(middle, target, weight));
+  auto compiled = p.compile();
+  ExecutionOptions options;
+  options.worker_count = 4;
+  options.parallel_grain_size = 1;
+  compiled.run(options);
+
+  EXPECT_TRUE(distance.contains(1, 2, min_lattice<int>(1)));
+  EXPECT_EQ(distance.rows().size(), 2U);
+  EXPECT_GT(compiled.stats().parallel_merge_tasks, 1U);
+}
+
+TEST(DatalogTest, SupportsInjectedScheduler) {
+  class CountingScheduler final : public Scheduler {
+  public:
+    std::size_t workerCount() const override { return 2; }
+    void
+    parallelFor(std::size_t task_count,
+                const std::function<void(std::size_t)> &function) override {
+      calls += task_count;
+      for (std::size_t task = 0; task < task_count; ++task)
+        function(task);
+    }
+    std::size_t calls = 0;
+  } scheduler;
+
+  context ctx;
+  auto edge = ctx.relation<int, int>("edge");
+  auto path = ctx.relation<int, int>("path");
+  auto x = ctx.var<int>("x");
+  auto y = ctx.var<int>("y");
+  auto z = ctx.var<int>("z");
+  edge.insert(1, 2);
+  edge.insert(2, 3);
+  program p(ctx);
+  p.rule(path(x, y), edge(x, y));
+  p.rule(path(x, z), path(x, y) && edge(y, z));
+  auto compiled = p.compile();
+  ExecutionOptions options;
+  options.scheduler = &scheduler;
+  options.parallel_grain_size = 1;
+  compiled.run(options);
+
+  EXPECT_TRUE(path.contains(1, 3));
+  EXPECT_GT(scheduler.calls, 0U);
+}
+
+TEST(DatalogTest, EmitsSccRuleAndDeltaTrace) {
+  context ctx;
+  auto edge = ctx.relation<int, int>("edge");
+  auto path = ctx.relation<int, int>("path");
+  auto x = ctx.var<int>("x");
+  auto y = ctx.var<int>("y");
+  auto z = ctx.var<int>("z");
+  edge.insert(1, 2);
+  edge.insert(2, 3);
+  program p(ctx);
+  p.rule(path(x, y), edge(x, y));
+  p.rule(path(x, z), path(x, y) && edge(y, z));
+  auto compiled = p.compile();
+  std::ostringstream trace;
+  ExecutionOptions options;
+  options.trace_scc = true;
+  options.trace_rule = true;
+  options.trace_delta = true;
+  options.trace_stream = &trace;
+  compiled.run(options);
+
+  EXPECT_NE(trace.str().find("SCC"), std::string::npos);
+  EXPECT_NE(trace.str().find("rule"), std::string::npos);
+  EXPECT_NE(trace.str().find("iteration"), std::string::npos);
+}
+
+} // namespace

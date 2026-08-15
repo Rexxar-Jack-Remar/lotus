@@ -57,6 +57,9 @@ struct CompiledProgram::Impl {
     destination.tuples_scanned += source.tuples_scanned;
     destination.index_lookups += source.index_lookups;
     destination.parallel_tasks += source.parallel_tasks;
+    destination.parallel_rule_tasks += source.parallel_rule_tasks;
+    destination.parallel_merge_tasks += source.parallel_merge_tasks;
+    destination.parallel_aggregate_tasks += source.parallel_aggregate_tasks;
   }
 
   std::ostream &traceStream() {
@@ -115,7 +118,7 @@ struct CompiledProgram::Impl {
           return false;
         }
       } else {
-        binding[term.variable] = row[column];
+        binding[term.variable].bindReference(row[column]);
         newly_bound.push_back(term.variable);
       }
     }
@@ -146,22 +149,32 @@ struct CompiledProgram::Impl {
 
   std::vector<std::any>
   evaluateAggregate(const AggregateIR &aggregate,
-                    const std::vector<std::any> &values,
-                    Scheduler *aggregate_scheduler,
+                    const std::vector<const Row *> &matching_rows,
+                    Binding &binding, Scheduler *aggregate_scheduler,
                     ExecutionStats &evaluation_stats) {
+    auto evaluate_serial = [&] {
+      AggregateForEach for_each = [&](const AggregateConsumer &consumer) {
+        for (const Row *row : matching_rows) {
+          matchRow(aggregate.source, *row, binding, [&] {
+            std::any value = aggregate.projection.evaluate(binding);
+            consumer(value);
+          });
+        }
+      };
+      return aggregate.evaluate(for_each);
+    };
     if (!aggregate.reducer || !aggregate_scheduler ||
-        aggregate_scheduler->workerCount() <= 1 || values.empty()) {
-      return aggregate.evaluate_range(values);
-    }
+        aggregate_scheduler->workerCount() <= 1 || matching_rows.empty())
+      return evaluate_serial();
 
     const std::size_t grain =
         std::max<std::size_t>(1, active_options->parallel_grain_size);
     const std::size_t available_chunks =
-        (values.size() + grain - 1) / grain;
+        (matching_rows.size() + grain - 1) / grain;
     const std::size_t chunk_count =
         std::min(aggregate_scheduler->workerCount(), available_chunks);
     if (chunk_count <= 1)
-      return aggregate.evaluate_range(values);
+      return evaluate_serial();
 
     std::vector<ReducerIR> reducers(chunk_count, *aggregate.reducer);
     std::vector<std::any> states;
@@ -170,12 +183,18 @@ struct CompiledProgram::Impl {
       states.push_back(reducer.make_state());
 
     aggregate_scheduler->parallelFor(chunk_count, [&](std::size_t chunk) {
-      const std::size_t begin = values.size() * chunk / chunk_count;
-      const std::size_t end = values.size() * (chunk + 1) / chunk_count;
-      for (std::size_t index = begin; index < end; ++index)
-        reducers[chunk].add(states[chunk], values[index]);
+      Binding chunk_binding = binding;
+      const std::size_t begin = matching_rows.size() * chunk / chunk_count;
+      const std::size_t end = matching_rows.size() * (chunk + 1) / chunk_count;
+      for (std::size_t index = begin; index < end; ++index) {
+        matchRow(aggregate.source, *matching_rows[index], chunk_binding, [&] {
+          reducers[chunk].add(states[chunk],
+                              aggregate.projection.evaluate(chunk_binding));
+        });
+      }
     });
     evaluation_stats.parallel_tasks += chunk_count;
+    evaluation_stats.parallel_aggregate_tasks += chunk_count;
 
     for (std::size_t chunk = 1; chunk < chunk_count; ++chunk)
       reducers[0].merge(states[0], states[chunk]);
@@ -190,86 +209,80 @@ struct CompiledProgram::Impl {
     const RuleIR &rule = plan.rules[rule_index];
     ++evaluation_stats.rule_evaluations;
     traceRule(rule_index, delta_item);
-    std::function<void(std::size_t)> evaluate_item =
-        [&](std::size_t item_index) {
-          if (item_index == rule.body.size()) {
-            Row row;
-            row.reserve(rule.head.args.size());
-            for (const TermIR &term : rule.head.args) {
-              if (term.kind == TermIR::Kind::Variable)
-                row.push_back(*binding[term.variable]);
-              else if (term.kind == TermIR::Kind::Constant)
-                row.push_back(term.constant);
-              else
-                row.push_back(term.expression.evaluate(binding));
-            }
-            candidates[rule.head.relation].push_back(std::move(row));
+    std::function<void(std::size_t)> evaluate_item = [&](std::size_t
+                                                             item_index) {
+      if (item_index == rule.body.size()) {
+        Row row;
+        row.reserve(rule.head.args.size());
+        for (const TermIR &term : rule.head.args) {
+          if (term.kind == TermIR::Kind::Variable)
+            row.push_back(*binding[term.variable]);
+          else if (term.kind == TermIR::Kind::Constant)
+            row.push_back(term.constant);
+          else
+            row.push_back(term.expression.evaluate(binding));
+        }
+        candidates[rule.head.relation].push_back(std::move(row));
+        return;
+      }
+
+      const BodyItemIR &item = rule.body[item_index];
+      if (const auto *filter = std::get_if<FilterIR>(&item)) {
+        if (std::any_cast<bool>(filter->predicate.evaluate(binding)))
+          evaluate_item(item_index + 1);
+        return;
+      }
+
+      if (const auto *negation = std::get_if<NegAtomIR>(&item)) {
+        const AtomIR &atom = negation->atom;
+        bool found = false;
+        auto test_row = [&](const Row &row) {
+          if (found)
             return;
-          }
-
-          const BodyItemIR &item = rule.body[item_index];
-          if (const auto *filter = std::get_if<FilterIR>(&item)) {
-            if (std::any_cast<bool>(filter->predicate.evaluate(binding)))
-              evaluate_item(item_index + 1);
-            return;
-          }
-
-          if (const auto *negation = std::get_if<NegAtomIR>(&item)) {
-            const AtomIR &atom = negation->atom;
-            bool found = false;
-            auto test_row = [&](const Row &row) {
-              if (found)
-                return;
-              matchRow(atom, row, binding, [&] { found = true; });
-            };
-            auto [mask, key] = lookupKey(atom, binding);
-            relation(atom.relation)
-                .forEachMatching(mask, key, evaluation_stats, test_row);
-            if (!found)
-              evaluate_item(item_index + 1);
-            return;
-          }
-
-          if (const auto *aggregate = std::get_if<AggregateIR>(&item)) {
-            std::vector<std::any> values;
-            const AtomIR &source = aggregate->source;
-            auto collect_row = [&](const Row &row) {
-              matchRow(source, row, binding, [&] {
-                values.push_back(aggregate->projection.evaluate(binding));
-              });
-            };
-            auto [mask, key] = lookupKey(source, binding);
-            relation(source.relation)
-                .forEachMatching(mask, key, evaluation_stats, collect_row);
-            std::vector<std::any> results = evaluateAggregate(
-                *aggregate, values, aggregate_scheduler, evaluation_stats);
-            for (std::any &result : results) {
-              binding[aggregate->output_var] = std::move(result);
-              evaluate_item(item_index + 1);
-              binding[aggregate->output_var].reset();
-            }
-            return;
-          }
-
-          const AtomIR &atom = std::get<AtomIR>(item);
-          auto continue_with = [&](const Row &row) {
-            matchRow(atom, row, binding,
-                     [&] { evaluate_item(item_index + 1); });
-          };
-
-          if (delta_item && *delta_item == item_index) {
-            for (std::size_t row_index = delta->begin; row_index < delta->end;
-                 ++row_index) {
-              ++evaluation_stats.tuples_scanned;
-              continue_with((*delta->rows)[row_index]);
-            }
-            return;
-          }
-
-          auto [mask, key] = lookupKey(atom, binding);
-          relation(atom.relation)
-              .forEachMatching(mask, key, evaluation_stats, continue_with);
+          matchRow(atom, row, binding, [&] { found = true; });
         };
+        auto [mask, key] = lookupKey(atom, binding);
+        relation(atom.relation)
+            .forEachMatching(mask, key, evaluation_stats, test_row);
+        if (!found)
+          evaluate_item(item_index + 1);
+        return;
+      }
+
+      if (const auto *aggregate = std::get_if<AggregateIR>(&item)) {
+        const AtomIR &source = aggregate->source;
+        auto [mask, key] = lookupKey(source, binding);
+        std::vector<const Row *> matching_rows =
+            relation(source.relation).matchingRows(mask, key, evaluation_stats);
+        std::vector<std::any> results =
+            evaluateAggregate(*aggregate, matching_rows, binding,
+                              aggregate_scheduler, evaluation_stats);
+        for (std::any &result : results) {
+          binding[aggregate->output_var] = std::move(result);
+          evaluate_item(item_index + 1);
+          binding[aggregate->output_var].reset();
+        }
+        return;
+      }
+
+      const AtomIR &atom = std::get<AtomIR>(item);
+      auto continue_with = [&](const Row &row) {
+        matchRow(atom, row, binding, [&] { evaluate_item(item_index + 1); });
+      };
+
+      if (delta_item && *delta_item == item_index) {
+        for (std::size_t row_index = delta->begin; row_index < delta->end;
+             ++row_index) {
+          ++evaluation_stats.tuples_scanned;
+          continue_with((*delta->rows)[row_index]);
+        }
+        return;
+      }
+
+      auto [mask, key] = lookupKey(atom, binding);
+      relation(atom.relation)
+          .forEachMatching(mask, key, evaluation_stats, continue_with);
+    };
 
     evaluate_item(0);
   }
@@ -282,19 +295,48 @@ struct CompiledProgram::Impl {
     }
   }
 
-  DeltaMap mergeCandidates(CandidateMap candidates) {
+  std::vector<Row> coalesceCandidates(RelationStorage &storage,
+                                      std::vector<Row> rows,
+                                      Scheduler &scheduler) {
+    const std::size_t grain =
+        std::max<std::size_t>(1, active_options->parallel_grain_size);
+    const std::size_t shard_count =
+        std::min(scheduler.workerCount(), (rows.size() + grain - 1) / grain);
+    if (shard_count <= 1)
+      return storage.coalesce(std::move(rows));
+
+    std::vector<std::vector<Row>> shards(shard_count);
+    for (Row &row : rows) {
+      const std::size_t shard = storage.candidateHash(row) % shard_count;
+      shards[shard].push_back(std::move(row));
+    }
+    scheduler.parallelFor(shard_count, [&](std::size_t shard) {
+      shards[shard] = storage.coalesce(std::move(shards[shard]));
+    });
+    stats.parallel_tasks += shard_count;
+    stats.parallel_merge_tasks += shard_count;
+
+    std::vector<Row> result;
+    for (std::vector<Row> &shard : shards) {
+      result.insert(result.end(), std::make_move_iterator(shard.begin()),
+                    std::make_move_iterator(shard.end()));
+    }
+    return result;
+  }
+
+  DeltaMap mergeCandidates(CandidateMap candidates, Scheduler &scheduler) {
     DeltaMap inserted;
     for (auto &[relation_id, rows] : candidates) {
       RelationStorage &storage = relation(relation_id);
-      std::vector<Row> coalesced = storage.coalesce(std::move(rows));
-      for (Row &row : coalesced) {
-        std::optional<Row> changed =
-            storage.insertAndGetChanged(std::move(row));
-        if (changed) {
-          inserted[relation_id].push_back(std::move(*changed));
-          ++stats.inserted_facts;
-        }
-      }
+      std::vector<Row> coalesced =
+          coalesceCandidates(storage, std::move(rows), scheduler);
+      RelationStorage::BatchMergeResult merged = storage.mergeCoalesced(
+          std::move(coalesced), scheduler, active_options->parallel_grain_size);
+      stats.parallel_tasks += merged.parallel_tasks;
+      stats.parallel_merge_tasks += merged.parallel_tasks;
+      stats.inserted_facts += merged.changed.size();
+      if (!merged.changed.empty())
+        inserted.emplace(relation_id, std::move(merged.changed));
     }
     return inserted;
   }
@@ -342,8 +384,7 @@ struct CompiledProgram::Impl {
         continue;
       const std::size_t grain =
           scheduler.workerCount() > 1
-              ? std::max<std::size_t>(1,
-                                      active_options->parallel_grain_size)
+              ? std::max<std::size_t>(1, active_options->parallel_grain_size)
               : rows.size();
       for (std::size_t begin = 0; begin < rows.size(); begin += grain) {
         tasks.push_back(
@@ -360,21 +401,24 @@ struct CompiledProgram::Impl {
       const EvaluationTask &task = tasks.front();
       evaluateRule(task.rule_index, binding, task.delta_item, task.delta,
                    candidates, stats, &scheduler);
-      mergeCandidates(std::move(candidates));
+      mergeCandidates(std::move(candidates), scheduler);
       return;
     }
 
     std::vector<CandidateMap> task_candidates(tasks.size());
     std::vector<ExecutionStats> task_stats(tasks.size());
     const bool parallel_batch = scheduler.workerCount() > 1;
+    const bool coalesce_locally = tasks.size() >= scheduler.workerCount();
     scheduler.parallelFor(tasks.size(), [&](std::size_t task_index) {
       Binding task_binding(plan.variable_count);
       const EvaluationTask &task = tasks[task_index];
       evaluateRule(task.rule_index, task_binding, task.delta_item, task.delta,
                    task_candidates[task_index], task_stats[task_index]);
-      coalesceLocalLattices(task_candidates[task_index]);
+      if (coalesce_locally)
+        coalesceLocalLattices(task_candidates[task_index]);
       if (parallel_batch)
-        task_stats[task_index].parallel_tasks = 1;
+        task_stats[task_index].parallel_tasks =
+            task_stats[task_index].parallel_rule_tasks = 1;
     });
 
     CandidateMap candidates;
@@ -387,7 +431,7 @@ struct CompiledProgram::Impl {
                            std::make_move_iterator(rows.end()));
       }
     }
-    mergeCandidates(std::move(candidates));
+    mergeCandidates(std::move(candidates), scheduler);
   }
 
   void runRecursive(const PlannedSCC &scc, Binding &binding,
@@ -409,7 +453,8 @@ struct CompiledProgram::Impl {
         evaluateRule(rule_index, binding, std::nullopt, std::nullopt,
                      base_candidates, stats, &scheduler);
     }
-    DeltaMap base_delta = mergeCandidates(std::move(base_candidates));
+    DeltaMap base_delta =
+        mergeCandidates(std::move(base_candidates), scheduler);
     for (auto &[relation_id, rows] : base_delta) {
       auto &destination = current_delta[relation_id];
       destination.insert(destination.end(),
@@ -435,13 +480,16 @@ struct CompiledProgram::Impl {
           if (delta_it == current_delta.end() || delta_it->second.empty())
             continue;
           const std::size_t grain =
-              std::max<std::size_t>(1, active_options->parallel_grain_size);
+              scheduler.workerCount() > 1
+                  ? std::max<std::size_t>(1,
+                                          active_options->parallel_grain_size)
+                  : delta_it->second.size();
           for (std::size_t begin = 0; begin < delta_it->second.size();
                begin += grain) {
-            tasks.push_back({rule_index, item_index,
-                             DeltaView{&delta_it->second, begin,
-                                       std::min(delta_it->second.size(),
-                                                begin + grain)}});
+            tasks.push_back(
+                {rule_index, item_index,
+                 DeltaView{&delta_it->second, begin,
+                           std::min(delta_it->second.size(), begin + grain)}});
           }
         }
       }
@@ -450,14 +498,17 @@ struct CompiledProgram::Impl {
       std::vector<ExecutionStats> task_stats(tasks.size());
       const bool parallel_batch =
           scheduler.workerCount() > 1 && tasks.size() > 1;
+      const bool coalesce_locally = tasks.size() >= scheduler.workerCount();
       scheduler.parallelFor(tasks.size(), [&](std::size_t task_index) {
         Binding task_binding(plan.variable_count);
         const EvaluationTask &task = tasks[task_index];
         evaluateRule(task.rule_index, task_binding, task.delta_item, task.delta,
                      task_candidates[task_index], task_stats[task_index]);
-        coalesceLocalLattices(task_candidates[task_index]);
+        if (coalesce_locally)
+          coalesceLocalLattices(task_candidates[task_index]);
         if (parallel_batch)
-          task_stats[task_index].parallel_tasks = 1;
+          task_stats[task_index].parallel_tasks =
+              task_stats[task_index].parallel_rule_tasks = 1;
       });
 
       CandidateMap next_candidates;
@@ -471,7 +522,7 @@ struct CompiledProgram::Impl {
                              std::make_move_iterator(rows.end()));
         }
       }
-      current_delta = mergeCandidates(std::move(next_candidates));
+      current_delta = mergeCandidates(std::move(next_candidates), scheduler);
     }
     traceDelta(iteration, current_delta);
   }
