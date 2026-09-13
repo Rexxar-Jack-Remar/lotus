@@ -1,5 +1,6 @@
 #pragma once
 
+#include "Dataflow/APA/Domains/AffineExpression.h"
 #include "Dataflow/APA/Core/Options.h"
 #include "Dataflow/APA/Domains/AffineRelationDomain.h"
 
@@ -34,39 +35,6 @@ struct AffineBlockKey {
   }
 };
 
-struct AffineExpr {
-  bool top = true;
-  int64_t constant = 0;
-  std::unordered_map<const llvm::Value *, int64_t> terms;
-
-  bool operator==(const AffineExpr &other) const {
-    return top == other.top && constant == other.constant &&
-           terms == other.terms;
-  }
-};
-
-struct AffineEquality {
-  unsigned bitWidth = 0;
-  int64_t constant = 0;
-  std::unordered_map<const llvm::Value *, int64_t> terms;
-
-  bool operator==(const AffineEquality &other) const {
-    return bitWidth == other.bitWidth && constant == other.constant &&
-           terms == other.terms;
-  }
-};
-
-struct AffineState {
-  bool reachable = false;
-  std::unordered_map<const llvm::Value *, AffineExpr> values;
-  std::vector<AffineEquality> equalities;
-
-  bool operator==(const AffineState &other) const {
-    return reachable == other.reachable && values == other.values &&
-           equalities == other.equalities;
-  }
-};
-
 enum class InterAffineVocabularyMode { AllScalars, ObservableSlice };
 
 struct InterAffineEqualitiesOptions {
@@ -84,19 +52,15 @@ struct InterAffineEqualitiesOptions {
   std::size_t maxTrackedValues;
 };
 
-struct InterAffineEqualitiesResult {
+struct InterAffineEqualitiesResult : AffineResultContext {
   SolveStatus status = SolveStatus::Ok;
   std::size_t trackedValues = 0;
   std::map<AffineFunctionKey, AffineRelationDomain::value_type> summaries;
   std::map<AffineBlockKey, AffineRelationDomain::value_type> blockRelations;
 };
 
-InterAffineEqualitiesResult
-runInterElimAffineEqualities(llvm::Module &M,
-                             InterAffineEqualitiesOptions options =
-                                 InterAffineEqualitiesOptions());
-
-AffineState
-materializeAffineExpressions(const AffineRelationDomain::value_type &relation);
+InterAffineEqualitiesResult runInterElimAffineEqualities(
+    llvm::Module &M,
+    InterAffineEqualitiesOptions options = InterAffineEqualitiesOptions());
 
 } // namespace elimination

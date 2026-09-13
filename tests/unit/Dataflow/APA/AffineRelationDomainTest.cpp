@@ -4,11 +4,13 @@
 #include "TestUtils/LLVMHelpers.h"
 
 #include <algorithm>
+#include <stdexcept>
 #include <unordered_set>
 #include <vector>
 
 #include <llvm/IR/LLVMContext.h>
 #include <llvm/IR/Module.h>
+#include <llvm/Support/raw_ostream.h>
 #include <gtest/gtest.h>
 
 namespace {
@@ -97,6 +99,126 @@ Matrix multiply(const Matrix &lhs, const Matrix &rhs, unsigned bitWidth) {
 }
 
 } // namespace
+
+TEST(AffineRelationDomain, QueriesAgreeWithExhaustiveModularStates) {
+  using D = elimination::AffineRelationDomain;
+  using Side = elimination::AffineStateSide;
+  llvm::LLVMContext ctx;
+  auto module = parseModule(ctx, "define void @f(i3 %x) { ret void }");
+  ASSERT_NE(module, nullptr);
+  auto vocab = buildVocabulary(*module);
+  D::configure(&vocab);
+  const auto *x = module->getFunction("f")->getArg(0);
+  std::vector<D::value_type> relations = {D::zero(), D::top(), D::one()};
+  for (int coefficient = 0; coefficient < 8; ++coefficient) {
+    for (int constant = 0; constant < 8; ++constant) {
+      auto assignment =
+          D::makeAffineAssignment(x, constant, {{x, coefficient}});
+      relations.push_back(assignment);
+      relations.push_back(D::combine(assignment, D::one()));
+      relations.push_back(
+          D::extend(D::addPrecondition(D::one(), x, constant), assignment));
+    }
+  }
+  for (const auto &relation : relations) {
+    std::vector<std::pair<unsigned, unsigned>> states;
+    if (!D::isBottom(relation)) {
+      for (unsigned pre = 0; pre < 8; ++pre) {
+        for (unsigned post = 0; post < 8; ++post) {
+          bool satisfies = true;
+          for (const auto &row : relation.components.at(3).constraints)
+            satisfies &= dot(row, {llvm::APInt(3, pre), llvm::APInt(3, post),
+                                   llvm::APInt(3, 1)})
+                             .isZero();
+          if (satisfies)
+            states.emplace_back(pre, post);
+        }
+      }
+    }
+    for (auto side : {Side::Pre, Side::Post}) {
+      auto result = D::getConstant(relation, x, side);
+      auto value = [&](const std::pair<unsigned, unsigned> &state) {
+        return side == Side::Pre ? state.first : state.second;
+      };
+      bool unique =
+          !states.empty() &&
+          std::all_of(states.begin(), states.end(), [&](const auto &state) {
+            return value(state) == value(states.front());
+          });
+      ASSERT_EQ(result.has_value(), unique);
+      if (unique)
+        EXPECT_EQ(result->getZExtValue(), value(states.front()));
+    }
+    for (unsigned constant = 0; constant < 8; ++constant) {
+      const bool expected =
+          std::all_of(states.begin(), states.end(), [&](const auto &s) {
+            return ((s.second + 6 * s.first) % 8) == constant;
+          });
+      EXPECT_EQ(D::entails(relation, llvm::APInt(3, constant),
+                           {{x, llvm::APInt(3, 1), Side::Post},
+                            {x, llvm::APInt(3, 6), Side::Pre}}),
+                expected);
+    }
+  }
+}
+
+TEST(AffineRelationDomain, QueryValidationAndPrinting) {
+  using D = elimination::AffineRelationDomain;
+  llvm::LLVMContext ctx;
+  auto module = parseModule(ctx, "define void @f(i8 %x, i8 %y) { ret void }");
+  ASSERT_NE(module, nullptr);
+  auto vocab = buildVocabulary(*module);
+  D::configure(&vocab);
+  const auto *x = module->getFunction("f")->getArg(0);
+  const auto *y = module->getFunction("f")->getArg(1);
+  auto relation = D::extend(D::makeAffineAssignment(y, 1, {{x, 1}}),
+                            D::makeAffineAssignment(x, 41, {}));
+  auto constant = D::getConstant(relation, y);
+  ASSERT_TRUE(constant);
+  EXPECT_EQ(*constant, llvm::APInt(8, 42));
+  EXPECT_FALSE(D::getConstant(relation, nullptr));
+  EXPECT_THROW(D::entails(D::zero(), llvm::APInt(4, 0), {}),
+               std::invalid_argument);
+  EXPECT_THROW(
+      D::entails(D::one(), llvm::APInt(8, 0), {{nullptr, llvm::APInt(8, 1)}}),
+      std::invalid_argument);
+  EXPECT_TRUE(D::entails(D::top(), llvm::APInt(8, 0), {}));
+  EXPECT_FALSE(D::entails(D::top(), llvm::APInt(8, 1), {}));
+  std::string text;
+  llvm::raw_string_ostream out(text);
+  D::print(D::one(), out);
+  out.flush();
+  EXPECT_NE(text.find("pre(%x)"), std::string::npos);
+  EXPECT_NE(text.find("post(%x)"), std::string::npos);
+  EXPECT_NE(text.find("mod 2^8"), std::string::npos);
+  text.clear();
+  D::print(D::zero(), out);
+  D::print(D::top(), out);
+  out.flush();
+  EXPECT_EQ(text, "false\ntrue\n");
+}
+
+TEST(AffineRelationDomain, ConstantQueryRespectsMixedWidthsAndCongruences) {
+  using D = elimination::AffineRelationDomain;
+  llvm::LLVMContext ctx;
+  auto module = parseModule(ctx, "define void @f(i8 %x, i64 %y) { ret void }");
+  ASSERT_NE(module, nullptr);
+  auto vocab = buildVocabulary(*module);
+  D::configure(&vocab);
+  const auto *x = module->getFunction("f")->getArg(0);
+  const auto *y = module->getFunction("f")->getArg(1);
+  auto relation = D::makeAffineCongruenceAssignment(x, 8, 255, {});
+  auto constant = D::getConstant(relation, x);
+  ASSERT_TRUE(constant);
+  EXPECT_EQ(*constant, llvm::APInt(8, 255));
+  EXPECT_FALSE(
+      D::getConstant(D::makeAffineCongruenceAssignment(x, 7, 127, {}), x));
+  auto wide = D::makeAffineAssignment(y, -1, {});
+  ASSERT_TRUE(D::getConstant(wide, y));
+  EXPECT_EQ(*D::getConstant(wide, y), llvm::APInt::getAllOnes(64));
+  EXPECT_TRUE(
+      D::entails(wide, llvm::APInt::getAllOnes(64), {{y, llvm::APInt(64, 1)}}));
+}
 
 TEST(AffineRelationDomain, IdentityEqualsItself) {
   llvm::LLVMContext ctx;

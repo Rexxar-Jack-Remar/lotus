@@ -5,6 +5,7 @@
 
 set(APA_SOURCES
   Domains/AffineRelationDomain.cpp
+  Domains/AffineTransfer.cpp
   Passes/EliminationPasses.cpp
   Analyses/Intra/Reachability.cpp
   Analyses/Intra/ConstantPropagation.cpp

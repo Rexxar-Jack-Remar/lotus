@@ -1,11 +1,7 @@
 // Intraprocedural affine-equalities EAN client tests.
 //
-// The affine-relation framework is DISTRIBUTIVE (relational composition
-// distributes over the affine-hull join), so — unlike reachability/liveness —
-// the full Kleene EAN law profile should be sound here: EAN(safe), EAN(kleene),
-// and Greedy must all reproduce the Default facts exactly. This is the paper's
-// positive R1 (law-gated admissibility) case. We also pin the underlying
-// distributivity equation directly.
+// Assignments distribute over affine hull, but guards need not. The client
+// restricts requested profiles to prefix factoring and memoizes by input fact.
 
 #include "Dataflow/APA/Analyses/Intra/AffineEqualities.h"
 #include "Dataflow/APA/Domains/AffineRelationDomain.h"
@@ -107,9 +103,7 @@ void expectSameFacts(llvm::Function &F,
       elimination::runIntraElimAffineEqualities(&F, defaultOpts());
   const AffineEqualitiesResult Got =
       elimination::runIntraElimAffineEqualities(&F, O);
-  // Re-install the vocabulary (each run reconfigured with its own local copy).
-  auto Vocab = buildVocab(F);
-  D::configure(&Vocab);
+  auto scope = Got.scopedVocabulary();
   unsigned Idx = 0;
   for (auto &I : llvm::instructions(F)) {
     const auto *B = Base.tryIN(&I);
@@ -216,7 +210,7 @@ TEST(AffineEan, EanSafePreservesFacts) {
   expectSameFacts(*F, eanSafeOpts(), "EAN(safe)");
 }
 
-// The centerpiece: full Kleene is sound for the distributive affine client.
+// A full Kleene request is restricted to the client's supported laws.
 TEST(AffineEan, EanKleenePreservesFacts) {
   llvm::LLVMContext Ctx;
   auto M = lotus::unittest::parseModuleChecked(Ctx, kLoopFn);
@@ -251,8 +245,7 @@ TEST(AffineEan, MemoInterpreterMatchesTreeInterpreter) {
         elimination::runIntraElimAffineEqualities(F, Base);
     const AffineEqualitiesResult Memo =
         elimination::runIntraElimAffineEqualities(F, memo(Base));
-    auto Vocab = buildVocab(*F);
-    D::configure(&Vocab);
+    auto scope = Memo.scopedVocabulary();
     unsigned Idx = 0;
     for (auto &I : llvm::instructions(*F)) {
       const auto *T = Tree.tryIN(&I);

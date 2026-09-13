@@ -80,6 +80,8 @@ struct SolveDiagnostics final {
   ADTRejectionReason adt_rejection_reason = ADTRejectionReason::None;
   std::size_t star_iterations_total = 0;
   bool max_star_hit = false;
+  // A client removed requested EAN laws that its transfer semantics do not satisfy.
+  bool ean_laws_restricted = false;
   // Peak unique path-expression DAG nodes reachable from the WHOLE elimination
   // matrix at any point during construction (state elimination only). Populated
   // only when EliminationOptions::MeasurePeakNodes is set; 0 otherwise. This is

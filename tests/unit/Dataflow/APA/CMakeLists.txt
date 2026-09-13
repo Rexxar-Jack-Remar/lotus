@@ -8,6 +8,7 @@ add_lotus_test_suite(apa_tests
     EliminationInterproceduralTest.cpp
     InterStandardAnalysesTest.cpp
     AffineRelationDomainTest.cpp
+    AffineHardeningTest.cpp
     StandardDomainTest.cpp
     InterAffineCallAndControlFlowTest.cpp
     InterAffinePredicateTest.cpp

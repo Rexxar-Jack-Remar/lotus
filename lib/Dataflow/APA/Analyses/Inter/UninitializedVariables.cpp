@@ -9,7 +9,7 @@
 
 #include "Dataflow/APA/LLVM/InterProblem.h"
 #include "Dataflow/APA/Solver/ForwardInterSummarySolver.h"
-#include "FlowHelpers.h"
+#include "Dataflow/APA/Analyses/Inter/FlowHelpers.h"
 
 #include <algorithm>
 #include <iterator>

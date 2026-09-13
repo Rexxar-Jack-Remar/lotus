@@ -3,6 +3,7 @@
 
 #include <cstdint>
 #include <map>
+#include <optional>
 #include <unordered_map>
 #include <vector>
 
@@ -10,6 +11,7 @@
 
 namespace llvm {
 class Value;
+class raw_ostream;
 } // namespace llvm
 
 namespace elimination {
@@ -17,6 +19,14 @@ namespace elimination {
 using AffineRow = std::vector<llvm::APInt>;
 using AffineMatrix = std::vector<AffineRow>;
 using MOSTransformerSet = std::vector<AffineMatrix>;
+
+enum class AffineStateSide { Pre, Post };
+
+struct AffineQueryTerm {
+  const llvm::Value *value;
+  llvm::APInt coefficient;
+  AffineStateSide side = AffineStateSide::Post;
+};
 
 struct AffineRelationVocabulary {
   std::vector<const llvm::Value *> values;
@@ -38,6 +48,25 @@ struct AffineRelation {
   std::map<unsigned, AffineRelationComponent> components;
 
   bool operator==(const AffineRelation &other) const;
+};
+
+/// A symbolic value of an output expression on the relation's feasible inputs.
+/// Exact means constant + sum(terms) equals the requested expression for every
+/// transition. condition contains only pre-state constraints. Unknown includes
+/// non-functional expressions and modular equations with non-invertible pivots.
+struct AffineExpressionPrecondition {
+  enum class Status { Exact, Unknown, Unreachable };
+  Status status = Status::Unknown;
+  llvm::APInt constant{1, 0};
+  std::vector<std::pair<const llvm::Value *, llvm::APInt>> terms;
+  AffineRelation condition;
+};
+
+struct AffineCacheStatistics {
+  std::size_t normalizations = 0;
+  std::size_t normalizationHits = 0;
+  std::size_t compositions = 0;
+  std::size_t compositionHits = 0;
 };
 
 struct AffineGeneratorRelation {
@@ -82,6 +111,10 @@ public:
 
   static void configure(const AffineRelationVocabulary *vocabulary);
   static const AffineRelationVocabulary *getVocabulary();
+  /// Per-thread bounded caches; zero disables caching. Reconfiguration clears
+  /// entries so matrices are never reused across different vocabularies.
+  static void setCacheCapacity(std::size_t entries);
+  static AffineCacheStatistics cacheStatistics();
 
   static bool isTrackedValue(const llvm::Value *value);
   static unsigned bitWidthOf(const llvm::Value *value);
@@ -95,6 +128,31 @@ public:
   static bool equal(const value_type &lhs, const value_type &rhs);
   static bool isBottom(const value_type &relation);
   static bool contains(const value_type &lhs, const value_type &rhs);
+  /// Does sum(terms) == constant hold modulo 2^componentBitWidth()?
+  /// Coefficients and constant must have that width; values must be tracked.
+  /// Invalid queries throw std::invalid_argument, including on bottom.
+  /// Bottom entails every valid equation. Pre/post terms may be mixed.
+  static bool entails(const value_type &relation, const llvm::APInt &constant,
+                      const std::vector<AffineQueryTerm> &terms);
+  /// Return a uniquely determined value at its LLVM integer width, or nullopt
+  /// for an untracked value, bottom, or a nonconstant value. Queries use the
+  /// currently configured vocabulary, as do the other domain operations.
+  static std::optional<llvm::APInt>
+  getConstant(const value_type &relation, const llvm::Value *value,
+              AffineStateSide side = AffineStateSide::Post);
+  /// Print modular equations with explicit pre/post variable names.
+  static void print(const value_type &relation, llvm::raw_ostream &out);
+  /// Pull back constant + sum(terms); all terms use componentBitWidth().
+  static AffineExpressionPrecondition
+  expressionPrecondition(const value_type &relation,
+                         const llvm::APInt &constant,
+                         const std::vector<AffineQueryTerm> &terms);
+  /// Combine single-destination assignment relations as simultaneous writes.
+  /// Every RHS reads the same pre-state. Other post-state columns in each
+  /// assignment are existentially removed. Duplicate destinations are invalid.
+  static value_type
+  parallelAssign(const std::vector<std::pair<const llvm::Value *, value_type>>
+                     &assignments);
   static value_type meet(const value_type &lhs, const value_type &rhs);
   static value_type combine(const value_type &lhs, const value_type &rhs);
   static value_type join(const value_type &lhs, const value_type &rhs) {
@@ -152,9 +210,45 @@ public:
   static MOSRelation joinMOS(const MOSRelation &lhs, const MOSRelation &rhs);
 
 private:
-  static AffineRelationVocabulary Vocabulary;
-  static bool HasVocabulary;
-  static unsigned ConfiguredBitWidth;
+  static thread_local AffineRelationVocabulary Vocabulary;
+  static thread_local bool HasVocabulary;
+  static thread_local unsigned ConfiguredBitWidth;
+};
+
+/// Restore the calling thread's domain configuration on scope exit.
+class ScopedAffineVocabulary {
+public:
+  explicit ScopedAffineVocabulary(const AffineRelationVocabulary &vocabulary);
+  ~ScopedAffineVocabulary();
+  ScopedAffineVocabulary(const ScopedAffineVocabulary &) = delete;
+  ScopedAffineVocabulary &operator=(const ScopedAffineVocabulary &) = delete;
+
+private:
+  std::optional<AffineRelationVocabulary> previous;
+};
+
+/// Analysis results retain column meanings. LLVM values themselves remain
+/// owned by the caller's module, which must outlive queries on the result.
+struct AffineResultContext {
+  AffineRelationVocabulary vocabulary;
+  ScopedAffineVocabulary scopedVocabulary() const {
+    return ScopedAffineVocabulary(vocabulary);
+  }
+  std::optional<llvm::APInt>
+  getConstant(const AffineRelation &relation, const llvm::Value *value,
+              AffineStateSide side = AffineStateSide::Post) const {
+    auto scope = scopedVocabulary();
+    return AffineRelationDomain::getConstant(relation, value, side);
+  }
+  bool entails(const AffineRelation &relation, const llvm::APInt &constant,
+               const std::vector<AffineQueryTerm> &terms) const {
+    auto scope = scopedVocabulary();
+    return AffineRelationDomain::entails(relation, constant, terms);
+  }
+  void print(const AffineRelation &relation, llvm::raw_ostream &out) const {
+    auto scope = scopedVocabulary();
+    AffineRelationDomain::print(relation, out);
+  }
 };
 
 } // namespace elimination

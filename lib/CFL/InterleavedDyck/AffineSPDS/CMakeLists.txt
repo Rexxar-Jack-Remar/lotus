@@ -6,8 +6,6 @@ add_library(CanaryInterleavedDyckAffineSPDS STATIC
     Affine.cpp
     Observer.cpp
     Solver.cpp)
-target_include_directories(CanaryInterleavedDyckAffineSPDS PUBLIC
-    ${CMAKE_CURRENT_SOURCE_DIR}/../../../../include)
 target_link_libraries(CanaryInterleavedDyckAffineSPDS PUBLIC
     CanaryInterleavedDyckSPDS
     LLVMSupport)

@@ -345,6 +345,55 @@ All nine LLVM analyses also expose interprocedural entry points:
 - Sign analysis (`runInterElimSign`)
 - Affine equalities (`runInterElimAffineEqualities`)
 
+The affine domain also exposes queries independent of the solver:
+`getConstant(relation, value, side)` returns an optional `APInt` at the value's
+integer width. It projects away other variables before checking uniqueness;
+congruences that do not determine all bits of the LLVM value, and unreachable
+relations, do not produce constants.
+`entails(relation, constant, terms)` checks a modular equation whose terms can
+refer to `AffineStateSide::Pre` or `AffineStateSide::Post` (the default).
+All query coefficients and the constant must use `componentBitWidth()`;
+untracked terms or incompatible widths throw `std::invalid_argument`.
+Bottom entails every valid equation. `print(relation, stream)` displays the
+equations with explicit pre/post operands and their modulus.
+
+Both affine analysis results own their vocabulary. Use result-level
+`getConstant`, `entails`, and `print` to query old results after another analysis,
+or keep `auto scope = result.scopedVocabulary()` alive while calling domain
+operations or `materializeAffineExpressions`. The scope restores the previous
+configuration. LLVM modules must still outlive their results. Direct domain
+operations use a per-thread configuration.
+
+`expressionPrecondition(relation, constant, terms)` pulls back the expression
+`constant + sum(terms)` into an input expression and a feasible-input predicate.
+`Exact` means every transition has that expression value; `Unknown` covers
+non-functional outputs and non-invertible modular pivots; `Unreachable` means
+there are no transitions. This is not a general Boolean weakest-precondition
+operator. Even coefficients are never divided as if the coefficient ring were
+a field.
+
+The intra/inter clients share LLVM transfer construction in
+`Domains/AffineTransfer.cpp`, including casts, selects, predicates, and supported
+bitwise congruences. PHIs (including self-loop edges) and actual/formal binding
+are parallel assignments. Intra analysis treats ordinary calls conservatively
+by forgetting the result; inter analysis retains its own call/return protocol.
+
+Guarded affine relations do **not** generally distribute over affine hull.
+The intra client restricts EAN requests to prefix factorization, including when
+the caller requests the full Kleene profile, and reports
+`ean_laws_restricted` in solve diagnostics. Memo interpretation caches by
+expression **and input relation**, preserving ordinary interpretation's merge
+points. Every exhausted star reports `NonConvergentStar`, `max_star_hit`, and
+the iteration count, for all payload policies. A result with that status is
+incomplete; `ReturnLast` does not make it a sound final invariant.
+
+The domain caches Howell reductions and relational compositions per thread.
+`setCacheCapacity(0)` disables caching; the default is 128 entries per cache,
+with entries cleared on vocabulary changes. `cacheStatistics()` exposes
+requests and hits for each operation. Entries are bounded by count rather than
+bytes; clients with large vocabularies can lower the capacity. No cross-engine
+dependency or WALi runtime dependency is introduced.
+
 These clients reuse the same elimination machinery inside each procedure but
 define analysis-specific `callFlow`, `returnFlow`, and `callToRetFlow`
 semantics for argument passing, return-value transport, global facts, and

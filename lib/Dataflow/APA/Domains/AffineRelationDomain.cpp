@@ -1,20 +1,47 @@
 #include "Dataflow/APA/Domains/AffineRelationDomain.h"
 
 #include <algorithm>
+#include <stdexcept>
+#include <string>
 #include <unordered_set>
 
 #include <llvm/IR/Value.h>
+#include <llvm/Support/raw_ostream.h>
 
 namespace elimination {
 
-AffineRelationVocabulary AffineRelationDomain::Vocabulary{};
-bool AffineRelationDomain::HasVocabulary = false;
-unsigned AffineRelationDomain::ConfiguredBitWidth = 64;
+thread_local AffineRelationVocabulary AffineRelationDomain::Vocabulary{};
+thread_local bool AffineRelationDomain::HasVocabulary = false;
+thread_local unsigned AffineRelationDomain::ConfiguredBitWidth = 64;
 
 namespace {
 
 using Row = std::vector<llvm::APInt>;
 using Matrix = std::vector<Row>;
+
+thread_local std::size_t cacheCapacity = 128;
+thread_local AffineCacheStatistics cacheStats;
+thread_local std::unordered_map<std::string, Matrix> normalizationCache;
+thread_local std::unordered_map<std::string, AffineRelationComponent>
+    compositionCache;
+
+std::string matrixKey(const Matrix &rows, unsigned width) {
+  std::string key;
+  auto append = [&](uint64_t value) {
+    key.append(reinterpret_cast<const char *>(&value), sizeof(value));
+  };
+  append(width);
+  append(rows.size());
+  for (const auto &row : rows) {
+    append(row.size());
+    for (const auto &entry : row) {
+      append(entry.getBitWidth());
+      for (unsigned i = 0; i < entry.getNumWords(); ++i)
+        append(entry.getRawData()[i]);
+    }
+  }
+  return key;
+}
 
 unsigned numVarsFor(unsigned bitWidth) {
   auto *vocab = AffineRelationDomain::getVocabulary();
@@ -63,7 +90,7 @@ void subtractScaledRow(Row &row, const Row &pivot, const llvm::APInt &factor) {
     row[i] -= factor * pivot[i];
 }
 
-Matrix howellize(Matrix rows, unsigned bitWidth) {
+Matrix howellizeUncached(Matrix rows, unsigned bitWidth) {
   if (rows.empty())
     return rows;
   const size_t cols = rows.front().size();
@@ -129,6 +156,23 @@ Matrix howellize(Matrix rows, unsigned bitWidth) {
   return rows;
 }
 
+Matrix howellize(Matrix rows, unsigned bitWidth) {
+  ++cacheStats.normalizations;
+  if (!cacheCapacity)
+    return howellizeUncached(std::move(rows), bitWidth);
+  auto key = matrixKey(rows, bitWidth);
+  auto found = normalizationCache.find(key);
+  if (found != normalizationCache.end()) {
+    ++cacheStats.normalizationHits;
+    return found->second;
+  }
+  auto result = howellizeUncached(std::move(rows), bitWidth);
+  if (normalizationCache.size() >= cacheCapacity)
+    normalizationCache.clear();
+  normalizationCache.emplace(std::move(key), result);
+  return result;
+}
+
 AffineRelationComponent makeIdentityComponent(unsigned bitWidth) {
   AffineRelationComponent component;
   component.bitWidth = bitWidth;
@@ -153,12 +197,13 @@ AffineRelationComponent bottomComponent(unsigned bitWidth) {
 }
 
 bool componentIsBottom(const AffineRelationComponent &component) {
-  if (component.constraints.size() != 1)
-    return false;
-  const Row &row = component.constraints.front();
-  return std::all_of(row.begin(), row.end() - 1,
-                     [](const llvm::APInt &entry) { return entry.isZero(); }) &&
-         row.back().isOne();
+  for (const Row &row : component.constraints) {
+    if (!row.empty() && !row.back().isZero() &&
+        std::all_of(row.begin(), row.end() - 1,
+                    [](const llvm::APInt &entry) { return entry.isZero(); }))
+      return true;
+  }
+  return false;
 }
 
 AffineRelationComponent normalizeComponent(AffineRelationComponent component) {
@@ -168,13 +213,12 @@ AffineRelationComponent normalizeComponent(AffineRelationComponent component) {
     // A genuine contradiction is a row [0 … 0 | c] whose only nonzero entry is
     // the augmented (constant) term — the LAST column. Using a fixed 2*vars
     // index here mis-fires when normalizeComponent runs on the wider
-    // intermediate matrices built by composeComponent (3*vars+1) / joinComponent
-    // (4*vars+2), where column 2*vars is a middle variable, not the constant —
-    // turning a satisfiable inhomogeneous relation (e.g. v' = u + 1) into a
-    // false bottom. Anchor on the row's own last column instead.
-    if (!row.empty() &&
-        leadingIndex(row) == static_cast<int>(row.size()) - 1 &&
-        row.back().isOne()) {
+    // intermediate matrices built by composeComponent (3*vars+1) /
+    // joinComponent (4*vars+2), where column 2*vars is a middle variable, not
+    // the constant — turning a satisfiable inhomogeneous relation (e.g. v' = u
+    // + 1) into a false bottom. Anchor on the row's own last column instead.
+    if (!row.empty() && leadingIndex(row) == static_cast<int>(row.size()) - 1 &&
+        !row.back().isZero()) {
       return bottomComponent(component.bitWidth);
     }
   }
@@ -719,6 +763,9 @@ bool MOSRelation::operator==(const MOSRelation &other) const {
 
 void AffineRelationDomain::configure(
     const AffineRelationVocabulary *vocabulary) {
+  normalizationCache.clear();
+  compositionCache.clear();
+  cacheStats = {};
   if (vocabulary) {
     Vocabulary = *vocabulary;
     HasVocabulary = true;
@@ -740,6 +787,28 @@ void AffineRelationDomain::configure(
 
 const AffineRelationVocabulary *AffineRelationDomain::getVocabulary() {
   return HasVocabulary ? &Vocabulary : nullptr;
+}
+
+void AffineRelationDomain::setCacheCapacity(std::size_t entries) {
+  cacheCapacity = entries;
+  normalizationCache.clear();
+  compositionCache.clear();
+  cacheStats = {};
+}
+
+AffineCacheStatistics AffineRelationDomain::cacheStatistics() {
+  return cacheStats;
+}
+
+ScopedAffineVocabulary::ScopedAffineVocabulary(
+    const AffineRelationVocabulary &vocabulary) {
+  if (const auto *current = AffineRelationDomain::getVocabulary())
+    previous = *current;
+  AffineRelationDomain::configure(&vocabulary);
+}
+
+ScopedAffineVocabulary::~ScopedAffineVocabulary() {
+  AffineRelationDomain::configure(previous ? &*previous : nullptr);
 }
 
 bool AffineRelationDomain::isTrackedValue(const llvm::Value *value) {
@@ -802,9 +871,9 @@ AffineRelationDomain::value_type AffineRelationDomain::addStateConstraint(
   unsigned vars = numVarsFor(bitWidth);
   Row preRow = zeroRow(bitWidth, 2 * vars + 1);
   Row postRow = zeroRow(bitWidth, 2 * vars + 1);
-  preRow.back() = llvm::APInt(bitWidth, static_cast<uint64_t>(-constant), true);
+  preRow.back() = -llvm::APInt(bitWidth, static_cast<uint64_t>(constant), true);
   postRow.back() =
-      llvm::APInt(bitWidth, static_cast<uint64_t>(-constant), true);
+      -llvm::APInt(bitWidth, static_cast<uint64_t>(constant), true);
   for (const auto &term : terms) {
     if (!isTrackedValue(term.first))
       return relation;
@@ -829,7 +898,20 @@ AffineRelationDomain::value_type AffineRelationDomain::addPrecondition(
 }
 
 bool AffineRelationDomain::equal(const value_type &lhs, const value_type &rhs) {
-  return lhs == rhs;
+  if (isBottom(lhs) || isBottom(rhs))
+    return isBottom(lhs) && isBottom(rhs);
+  if (lhs == rhs)
+    return true;
+  if (lhs.components.size() != rhs.components.size())
+    return false;
+  for (const auto &entry : lhs.components) {
+    auto found = rhs.components.find(entry.first);
+    if (found == rhs.components.end() ||
+        normalizeComponent(entry.second).constraints !=
+            normalizeComponent(found->second).constraints)
+      return false;
+  }
+  return true;
 }
 
 bool AffineRelationDomain::isBottom(const value_type &relation) {
@@ -838,7 +920,7 @@ bool AffineRelationDomain::isBottom(const value_type &relation) {
   unsigned width = componentBitWidth();
   auto componentIt = relation.components.find(width);
   return componentIt != relation.components.end() &&
-         componentIsBottom(componentIt->second);
+         componentIsBottom(normalizeComponent(componentIt->second));
 }
 
 bool AffineRelationDomain::contains(const value_type &lhs,
@@ -848,6 +930,189 @@ bool AffineRelationDomain::contains(const value_type &lhs,
   if (isBottom(lhs))
     return isBottom(rhs);
   return equal(meet(lhs, rhs), rhs);
+}
+
+bool AffineRelationDomain::entails(const value_type &relation,
+                                   const llvm::APInt &constant,
+                                   const std::vector<AffineQueryTerm> &terms) {
+  const unsigned width = componentBitWidth();
+  const unsigned vars = numVarsFor(width);
+  if (constant.getBitWidth() != width)
+    throw std::invalid_argument("Affine query constant has incompatible width");
+  Row row = zeroRow(width, 2 * vars + 1);
+  row.back() = -constant;
+  for (const auto &term : terms) {
+    if (!isTrackedValue(term.value) || term.coefficient.getBitWidth() != width)
+      throw std::invalid_argument(
+          "Affine query has untracked value or incompatible width");
+    const unsigned offset = term.side == AffineStateSide::Post ? vars : 0;
+    row[offset + indexOf(term.value)] += term.coefficient;
+  }
+  if (isBottom(relation))
+    return true;
+  return rowInSpan(row, relation.components.at(width).constraints, width);
+}
+
+std::optional<llvm::APInt>
+AffineRelationDomain::getConstant(const value_type &relation,
+                                  const llvm::Value *value,
+                                  AffineStateSide side) {
+  if (!isTrackedValue(value) || isBottom(relation))
+    return std::nullopt;
+  const unsigned width = componentBitWidth();
+  const unsigned vars = numVarsFor(width);
+  const unsigned column =
+      indexOf(value) + (side == AffineStateSide::Post ? vars : 0);
+  const unsigned value_width = bitWidthOf(value) ? bitWidthOf(value) : width;
+  std::vector<unsigned> drop;
+  for (unsigned i = 0; i < 2 * vars; ++i)
+    if (i != column)
+      drop.push_back(i);
+  const auto projected =
+      projectAwayColumns(relation.components.at(width), drop, 2 * vars + 1);
+  for (const auto &row : projected.constraints) {
+    if (row[column].isZero())
+      continue;
+    const unsigned shift = rankOf(row[column]);
+    if (width - shift < value_width)
+      continue; // Only a congruence, not a unique LLVM value.
+    const auto odd = row[column].lshr(shift);
+    const auto result = (-row.back()).lshr(shift) * oddInverse(odd);
+    return result.zextOrTrunc(value_width);
+  }
+  return std::nullopt;
+}
+
+void AffineRelationDomain::print(const value_type &relation,
+                                 llvm::raw_ostream &out) {
+  if (isBottom(relation)) {
+    out << "false\n";
+    return;
+  }
+  const unsigned width = componentBitWidth();
+  const unsigned vars = numVarsFor(width);
+  const auto &rows = relation.components.at(width).constraints;
+  if (rows.empty()) {
+    out << "true\n";
+    return;
+  }
+  for (const auto &row : rows) {
+    bool first = true;
+    for (unsigned col = 0; col < 2 * vars; ++col) {
+      if (row[col].isZero())
+        continue;
+      if (!first)
+        out << " + ";
+      first = false;
+      out << row[col] << " * " << (col < vars ? "pre(" : "post(");
+      Vocabulary.values[col % vars]->printAsOperand(out, false);
+      out << ")";
+    }
+    if (first)
+      out << "0";
+    out << " = " << -row.back() << " (mod 2^" << width << ")\n";
+  }
+}
+
+AffineRelationDomain::value_type AffineRelationDomain::parallelAssign(
+    const std::vector<std::pair<const llvm::Value *, value_type>>
+        &assignments) {
+  if (assignments.empty())
+    return identity();
+  const unsigned width = componentBitWidth();
+  const unsigned vars = numVarsFor(width);
+  std::unordered_set<unsigned> destinations;
+  for (const auto &assignment : assignments) {
+    if (!isTrackedValue(assignment.first) ||
+        !destinations.insert(indexOf(assignment.first)).second)
+      throw std::invalid_argument(
+          "Parallel assignment has invalid or duplicate destination");
+  }
+  auto result = identity();
+  std::vector<unsigned> writes;
+  for (unsigned dest : destinations)
+    writes.push_back(vars + dest);
+  auto &component = result.components.at(width);
+  component = projectAwayColumns(component, writes, 2 * vars + 1);
+  result.identity = false;
+  for (const auto &assignment : assignments) {
+    if (isBottom(assignment.second))
+      return zero();
+    std::vector<unsigned> drop;
+    for (unsigned i = 0; i < vars; ++i)
+      if (i != indexOf(assignment.first))
+        drop.push_back(vars + i);
+    auto projected = projectAwayColumns(assignment.second.components.at(width),
+                                        drop, 2 * vars + 1);
+    component.constraints.insert(component.constraints.end(),
+                                 projected.constraints.begin(),
+                                 projected.constraints.end());
+  }
+  component = normalizeComponent(std::move(component));
+  return result;
+}
+
+AffineExpressionPrecondition AffineRelationDomain::expressionPrecondition(
+    const value_type &relation, const llvm::APInt &constant,
+    const std::vector<AffineQueryTerm> &terms) {
+  // Validate using the equation query; no solver or LLVM transfer is involved.
+  (void)entails(zero(), constant, terms);
+  AffineExpressionPrecondition result;
+  const unsigned width = componentBitWidth();
+  const unsigned vars = numVarsFor(width);
+  result.constant = llvm::APInt(width, 0);
+  result.condition = zero();
+  if (isBottom(relation)) {
+    result.status = AffineExpressionPrecondition::Status::Unreachable;
+    return result;
+  }
+  // Eliminate post variables from [post | expression | pre | constant].
+  Matrix rows;
+  for (const auto &row : relation.components.at(width).constraints) {
+    Row lifted = zeroRow(width, 2 * vars + 2);
+    for (unsigned i = 0; i < vars; ++i) {
+      lifted[i] = row[vars + i];
+      lifted[vars + 1 + i] = row[i];
+    }
+    lifted.back() = row.back();
+    rows.push_back(std::move(lifted));
+  }
+  Row expression = zeroRow(width, 2 * vars + 2);
+  expression[vars] = llvm::APInt(width, 1);
+  expression.back() = -constant;
+  for (const auto &term : terms) {
+    unsigned col = indexOf(term.value);
+    if (term.side == AffineStateSide::Pre)
+      col += vars + 1;
+    expression[col] -= term.coefficient;
+  }
+  rows.push_back(std::move(expression));
+  rows = howellize(std::move(rows), width);
+  result.condition = top();
+  for (const auto &row : rows) {
+    int lead = leadingIndex(row);
+    if (lead < 0 || static_cast<unsigned>(lead) < vars)
+      continue;
+    if (row[vars][0]) {
+      auto inverse = oddInverse(row[vars]);
+      result.constant = -row.back() * inverse;
+      for (unsigned i = 0; i < vars; ++i) {
+        auto coefficient = -row[vars + 1 + i] * inverse;
+        if (!coefficient.isZero())
+          result.terms.emplace_back(Vocabulary.values[i],
+                                    std::move(coefficient));
+      }
+      result.status = AffineExpressionPrecondition::Status::Exact;
+    }
+  }
+  // For Unknown, retain the feasible-input predicate as well (eliminate the
+  // expression instead of silently dropping its non-invertible equation).
+  std::vector<unsigned> outputs;
+  for (unsigned i = 0; i < vars; ++i)
+    outputs.push_back(vars + i);
+  result.condition.components.at(width) =
+      projectAwayColumns(relation.components.at(width), outputs, 2 * vars + 1);
+  return result;
 }
 
 AffineRelationDomain::value_type
@@ -890,7 +1155,7 @@ AffineRelationDomain::condCombine(bool phi, const value_type &t,
 
 AffineRelationDomain::value_type
 AffineRelationDomain::extend(const value_type &outer, const value_type &inner) {
-  if (outer.bottom || inner.bottom)
+  if (isBottom(outer) || isBottom(inner))
     return zero();
   if (outer.identity)
     return inner;
@@ -898,8 +1163,26 @@ AffineRelationDomain::extend(const value_type &outer, const value_type &inner) {
     return outer;
   value_type out;
   unsigned width = componentBitWidth();
-  out.components.emplace(width, composeComponent(outer.components.at(width),
-                                                 inner.components.at(width)));
+  ++cacheStats.compositions;
+  std::string key;
+  if (cacheCapacity) {
+    key = matrixKey(outer.components.at(width).constraints, width) +
+          matrixKey(inner.components.at(width).constraints, width);
+    auto found = compositionCache.find(key);
+    if (found != compositionCache.end()) {
+      ++cacheStats.compositionHits;
+      out.components.emplace(width, found->second);
+      return out;
+    }
+  }
+  auto component =
+      composeComponent(outer.components.at(width), inner.components.at(width));
+  if (cacheCapacity) {
+    if (compositionCache.size() >= cacheCapacity)
+      compositionCache.clear();
+    compositionCache.emplace(std::move(key), component);
+  }
+  out.components.emplace(width, std::move(component));
   return out;
 }
 
@@ -910,8 +1193,7 @@ AffineRelationDomain::extend_lin(const value_type &outer,
 }
 
 AffineRelationDomain::value_type
-AffineRelationDomain::subtract(const value_type &lhs,
-                               const value_type &rhs) {
+AffineRelationDomain::subtract(const value_type &lhs, const value_type &rhs) {
   if (isBottom(lhs) || isBottom(rhs))
     return lhs;
 
@@ -1129,12 +1411,12 @@ AffineRelationDomain::value_type AffineRelationDomain::makeAffineAssignment(
   unsigned idx = indexOf(dest);
   Row row = zeroRow(bitWidth, 2 * vars + 1);
   row[vars + idx] = llvm::APInt(bitWidth, 1);
-  row.back() = llvm::APInt(bitWidth, static_cast<uint64_t>(-constant), true);
+  row.back() = -llvm::APInt(bitWidth, static_cast<uint64_t>(constant), true);
   for (const auto &term : terms) {
     if (!isTrackedValue(term.first))
       return makeForget(dest);
-    row[indexOf(term.first)] =
-        llvm::APInt(bitWidth, static_cast<uint64_t>(-term.second), true);
+    row[indexOf(term.first)] -=
+        llvm::APInt(bitWidth, static_cast<uint64_t>(term.second), true);
   }
   relation.components[bitWidth].constraints.push_back(std::move(row));
   relation.components[bitWidth] =
@@ -1165,12 +1447,12 @@ AffineRelationDomain::makeAffineCongruenceAssignment(
   Row row = zeroRow(bitWidth, 2 * vars + 1);
   row[vars + idx] = scale;
   row.back() =
-      llvm::APInt(bitWidth, static_cast<uint64_t>(-constant), true) * scale;
+      -llvm::APInt(bitWidth, static_cast<uint64_t>(constant), true) * scale;
   for (const auto &term : terms) {
     if (!isTrackedValue(term.first))
       return makeForget(dest);
-    row[indexOf(term.first)] +=
-        llvm::APInt(bitWidth, static_cast<uint64_t>(-term.second), true) *
+    row[indexOf(term.first)] -=
+        llvm::APInt(bitWidth, static_cast<uint64_t>(term.second), true) *
         scale;
   }
 

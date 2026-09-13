@@ -1,5 +1,7 @@
 #pragma once
 
+// Common flow helpers for APA interprocedural clients.
+
 #include "llvm/IR/Function.h"
 #include "llvm/IR/Instructions.h"
 

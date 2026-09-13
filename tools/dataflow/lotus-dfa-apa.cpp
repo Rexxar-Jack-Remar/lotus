@@ -544,6 +544,12 @@ std::string formatTransfer(const elimination::NonNullEdgeTransfer &Transfer,
          formatTransfer(Transfer.Dst, ValueToId);
 }
 
+std::string formatTransfer(const elimination::AffineEdgeTransfer &Transfer,
+                           const ValueIdMap &ValueToId) {
+  return formatTransfer(Transfer.inst, ValueToId) + "->" +
+         formatTransfer(Transfer.succ, ValueToId);
+}
+
 template <typename ExprRefT>
 void formatPathExpr(raw_ostream &OS, const ExprRefT &Expr,
                     const ValueIdMap &ValueToId) {
@@ -603,6 +609,7 @@ void printSolveMetadata(raw_ostream &OS, const ResultT &Result) {
      << ", adt_reason=" << toString(Diag.adt_rejection_reason)
      << ", star_iters=" << Diag.star_iterations_total
      << ", max_star_hit=" << (Diag.max_star_hit ? "true" : "false")
+     << ", ean_laws_restricted=" << (Diag.ean_laws_restricted ? "true" : "false")
      << ", peak_nodes=" << Diag.peak_matrix_nodes << "\n";
 }
 
