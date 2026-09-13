@@ -34,10 +34,20 @@ add_lotus_targeted_test(interleaved_dyck_staged_bounds_test
     LINK_LIBS
         CanaryInterleavedDyckStagedBounds)
 
-add_lotus_targeted_test(interleaved_dyck_mutual_refinement_test
-    InterleavedDyckMutualRefinementTest.cpp
+add_lotus_targeted_test(interleaved_dyck_staged_bounds_engine_test
+    InterleavedDyckStagedBoundsEngineTest.cpp
     LINK_LIBS
-        CanaryInterleavedDyckMutualRefinement)
+        CanaryInterleavedDyckStagedBounds)
+
+if(TARGET lotus-cfl-interleaved-dyck-staged-bounds)
+    add_test(NAME interleaved_dyck_staged_bounds_cli_mutual_refinement
+        COMMAND $<TARGET_FILE:lotus-cfl-interleaved-dyck-staged-bounds>
+            --method mutual-refinement
+            ${CMAKE_SOURCE_DIR}/benchmarks/real-world/CFL/InterleavedDyck/taint/faketaobao.dot)
+    set_tests_properties(
+        interleaved_dyck_staged_bounds_cli_mutual_refinement PROPERTIES
+        PASS_REGULAR_EXPRESSION "mutual-refinement upper bound: 328")
+endif()
 
 add_lotus_test_suite(interleaved_dyck_unary_test
     SOURCES

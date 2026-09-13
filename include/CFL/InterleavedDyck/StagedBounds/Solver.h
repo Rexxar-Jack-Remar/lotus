@@ -19,13 +19,21 @@ using interleaved_dyck::Vertex;
 enum class Alphabet { Parenthesis, Bracket };
 enum class GrammarStrength { Classic, Parity };
 enum class BenchmarkKind { Taint, ValueFlow };
+enum class Method {
+  All,
+  Regularization,
+  Intersection,
+  Underapproximation,
+  MutualRefinement,
+  StrongerGrammar,
+  OnDemand,
+};
 
 struct Options {
+  /// Last method evaluated by the staged pipeline. `All` runs every method.
+  Method method = Method::All;
   /// The prototype and paper use two parity groups. Supported values are 1-4.
   unsigned parity_groups = 2;
-  /// On-demand refinement can be expensive because it checks unknown pairs
-  /// separately. It is enabled by default to reproduce the full pipeline.
-  bool run_on_demand = true;
   /// Reconstruct contributing edges from the saturated CFL relations instead
   /// of recording derivations eagerly. Disabled by default for compatibility.
   bool factorized_tracing = false;
@@ -78,7 +86,7 @@ public:
                            BenchmarkKind benchmark = BenchmarkKind::Taint,
                            bool factorized_tracing = false) const;
 
-  /// Reproduces the staged benchmark pipeline from the reference artifact.
+  /// Runs through the selected method in the reference-artifact pipeline.
   ApproximationResult analyze(const Graph &graph,
                               BenchmarkKind benchmark = BenchmarkKind::Taint,
                               const Options &options = {}) const;

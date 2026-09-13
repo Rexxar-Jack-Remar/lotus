@@ -17,9 +17,9 @@ The port retains the artifact's main stages:
 5. the stronger parity/endpoint grammar; and
 6. pairwise on-demand refinement.
 
-The implementation reuses Lotus's `CFL/InterleavedDyck/MutualRefinement` CNF saturation and
-derivation-tracing engine. Public graph, DOT parser, individual approximation,
-and full-pipeline APIs are split between
+The `CnfGrammar`, `CnfGraph`, and `CnfTypes` implementation supplies the SAS'23
+CNF saturation and derivation-tracing engine. Public graph, DOT parser,
+individual approximation, and full-pipeline APIs are split between
 `include/CFL/InterleavedDyck/Core/Graph.h` and
 `include/CFL/InterleavedDyck/StagedBounds/Solver.h`.
 
@@ -60,18 +60,20 @@ copy of its Go/Python sources. Its DOT benchmark inputs are stored under
 ```sh
 cmake --build build --target lotus-cfl-interleaved-dyck-staged-bounds
 build/bin/lotus-cfl-interleaved-dyck-staged-bounds \
-  --parity-groups 2 benchmarks/real-world/CFL/InterleavedDyck/taint/faketaobao.dot
+  --method mutual-refinement \
+  benchmarks/real-world/CFL/InterleavedDyck/taint/faketaobao.dot
 ```
 
-Use `--value-flow` for value-flow preprocessing, `--no-on-demand` to stop at
-the stronger grammar, `--print-lower` for certified reachable pairs, or
-`--print-final` for the final upper-bound candidates. The tool never adds
-reverse arcs.
+`--method` selects `regularization`, `intersection`, `underapproximation`,
+`mutual-refinement`, `stronger-grammar`, `on-demand`, or `all`. Use
+`--value-flow` for value-flow preprocessing, `--print-lower` for certified
+reachable pairs, or `--print-result` for the selected method's pairs. The tool
+never adds reverse arcs.
 
 ## Boundary with MutualRefinement
 
-`StagedBounds` is the domain-facing pipeline;
-`MutualRefinement` is one of its low-level engines.
+`StagedBounds` is the domain-facing pipeline; its `mutual_refinement` namespace
+contains the low-level CNF engine used by several stages.
 
 | Responsibility | `StagedBounds` | `MutualRefinement` |
 |---|---|---|
@@ -81,21 +83,20 @@ reverse arcs.
 | Result semantics | Named lower and upper bounds for interleaved Dyck | Grammar-relative reachability edges and traces |
 | Benchmark knowledge | Taint and value-flow modes | None |
 
-The dependency is one-way: `CanaryInterleavedDyckStagedBounds` links to both
-`CanaryInterleavedDyckCore` and `MutualRefinement`. The approximation module
-translates shared typed labels into the integer grammar/edge representation,
-invokes CFL saturation with tracing, and interprets the trace as an
-interleaved-Dyck refinement. The `MutualRefinement` library does not parse
-interleaved-Dyck labels, choose an approximation grammar, compute lower/upper
-bounds, or run the staged pipeline.
+The single `CanaryInterleavedDyckStagedBounds` library links to
+`CanaryInterleavedDyckCore`. The solver translates shared typed labels into the
+engine's integer grammar/edge representation, invokes CFL saturation with
+tracing, and interprets the trace as an interleaved-Dyck refinement. The nested
+engine does not parse typed labels, choose an approximation grammar, compute
+lower/upper bounds, or run the staged pipeline.
 
 ## Relationship to other Lotus CFL components
 
 This module is currently the concrete bridge among Lotus's related
 interleaved-Dyck implementations:
 
-- it directly links against [`MutualRefinement`](../MutualRefinement/README.md)
-  for CNF saturation, refinement, and derivation tracing;
+- its `mutual_refinement` engine provides CNF saturation and derivation
+  tracing;
 - [`InterleavedDyckGraphReduction`](../GraphReduction/README.md) offers a separate
   file-oriented graph-simplification approach. Its output can be reparsed by
   the shared core, but this pipeline does not invoke it automatically; and

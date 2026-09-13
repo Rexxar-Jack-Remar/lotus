@@ -1,13 +1,13 @@
 #pragma once
 
-#include "CFL/InterleavedDyck/MutualRefinement/CnfGrammar.h"
-#include "CFL/InterleavedDyck/MutualRefinement/Hasher.h"
+#include "CFL/InterleavedDyck/StagedBounds/CnfGrammar.h"
+#include "CFL/InterleavedDyck/StagedBounds/CnfTypes.h"
 
 #include <unordered_map>
 #include <unordered_set>
 #include <vector>
 
-namespace lotus::cfl::interleaved_dyck::mutual_refinement {
+namespace lotus::cfl::interleaved_dyck::staged_bounds::mutual_refinement {
 
 /* Graph on which CFL-reachability is run
  * The type Edge is an alias for std::tuple<int, int, int>,
@@ -62,4 +62,4 @@ private:
           EdgeHasher> *binaryRecord);
 };
 
-} // namespace lotus::cfl::interleaved_dyck::mutual_refinement
+} // namespace lotus::cfl::interleaved_dyck::staged_bounds::mutual_refinement

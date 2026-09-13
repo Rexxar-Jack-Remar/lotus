@@ -154,29 +154,6 @@ DOT graph and does not itself return the final reachability relation.
 * Explicit directed versus already-bidirected input mode
 * Private legacy summary representation under the ``lib`` subtree
 
-Mutual Refinement
------------------
-
-Grammar-agnostic CNF reachability and derivation tracing used by refinement
-experiments and by ``StagedBounds``.
-
-**Location**: ``lib/CFL/InterleavedDyck/MutualRefinement/``
-
-**Features**:
-
-* Integer-encoded ``CnfGrammar`` and ``CnfGraph`` representation
-* CFL saturation with unary and binary derivation records
-* Backward closure to contributing input edges
-* Opt-in factorized tracing that reconstructs contributing edges from the
-  saturated relations without recording derivations
-* Generic file-driven alternating-refinement experiment
-
-It does not own typed delimiter semantics, approximation grammars, benchmark
-preprocessing, or lower/upper-bound interpretation;
-those belong to
-``StagedBounds``.
-
 See also :doc:`classical`, :doc:`csindex`, :doc:`interleaved_dyck_unary`,
 :doc:`interleaved_dyck_staged_bounds`, :doc:`interleaved_dyck_graph_reduction`,
-:doc:`interleaved_dyck_mcfl`, and
-:doc:`interleaved_dyck_mutual_refinement`.
+:doc:`interleaved_dyck_mcfl`.

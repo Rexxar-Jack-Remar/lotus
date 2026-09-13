@@ -1,7 +1,6 @@
 add_subdirectory(Core)
 add_subdirectory(SPDS)
 add_subdirectory(AffineSPDS)
-add_subdirectory(MutualRefinement)
 add_subdirectory(GraphReduction)
 add_subdirectory(Unary)
 add_subdirectory(StagedBounds)

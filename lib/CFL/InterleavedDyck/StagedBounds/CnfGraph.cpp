@@ -1,7 +1,7 @@
-#include "CFL/InterleavedDyck/MutualRefinement/CnfGraph.h"
+#include "CFL/InterleavedDyck/StagedBounds/CnfGraph.h"
 
-#include "CFL/InterleavedDyck/MutualRefinement/CnfGrammar.h"
-#include "CFL/InterleavedDyck/MutualRefinement/Hasher.h"
+#include "CFL/InterleavedDyck/StagedBounds/CnfGrammar.h"
+#include "CFL/InterleavedDyck/StagedBounds/CnfTypes.h"
 
 #include <cstddef>
 #include <deque>
@@ -9,7 +9,7 @@
 #include <unordered_set>
 #include <vector>
 
-namespace lotus::cfl::interleaved_dyck::mutual_refinement {
+namespace lotus::cfl::interleaved_dyck::staged_bounds::mutual_refinement {
 
 void CnfGraph::reinit(int n,
                       const std::unordered_set<Edge, EdgeHasher> &edges) {
@@ -293,4 +293,4 @@ std::unordered_set<Edge, EdgeHasher> CnfGraph::runCFLReachabilityCore(
   return result;
 }
 
-} // namespace lotus::cfl::interleaved_dyck::mutual_refinement
+} // namespace lotus::cfl::interleaved_dyck::staged_bounds::mutual_refinement

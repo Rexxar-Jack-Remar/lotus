@@ -1,11 +1,11 @@
-#include "CFL/InterleavedDyck/MutualRefinement/Hasher.h"
+#include "CFL/InterleavedDyck/StagedBounds/CnfTypes.h"
 
 #include <cstddef>
 #include <functional>
 #include <tuple>
 #include <utility>
 
-namespace lotus::cfl::interleaved_dyck::mutual_refinement {
+namespace lotus::cfl::interleaved_dyck::staged_bounds::mutual_refinement {
 
 // This parameter can be adjusted.
 // The idea is that when the elements in the pair or triple are small integers,
@@ -25,4 +25,4 @@ IntTripleHasher::operator()(const std::tuple<int, int, int> &t) const {
       (static_cast<long long>(std::get<2>(t))));
 }
 
-} // namespace lotus::cfl::interleaved_dyck::mutual_refinement
+} // namespace lotus::cfl::interleaved_dyck::staged_bounds::mutual_refinement

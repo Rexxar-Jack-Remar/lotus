@@ -91,7 +91,6 @@ benchmarks. Public staged results omit reflexive pairs.
 
 MCFL belongs to the same interleaved-Dyck analysis family as
 [`InterleavedDyckGraphReduction`](../GraphReduction/README.md),
-[`MutualRefinement`](../MutualRefinement/README.md), and
 [Interleaved-Dyck Staged Bounds](../StagedBounds/README.md),
 but it has a distinct role:
 
@@ -99,9 +98,8 @@ but it has a distinct role:
   alphabets. Its reduced DOT output can be reloaded through the shared core,
   but using it before an MCFL grammar still requires the corresponding
   preservation argument; MCFL does not invoke it automatically.
-- `MutualRefinement` provides grammar-agnostic CNF saturation and derivation
-  tracing used by `StagedBounds`. MCFL instead saturates
-  multi-component nonterminals directly.
+- StagedBounds contains a mutual-refinement CNF saturation and derivation
+  tracing engine. MCFL instead saturates multi-component nonterminals directly.
 - Interleaved-Dyck Staged Bounds is a staged lower/upper-bound pipeline.
   MCFL's `G_d^circ` and `G_d^+` results are complementary, witness-producing
   underapproximations and are not currently wired into that pipeline.

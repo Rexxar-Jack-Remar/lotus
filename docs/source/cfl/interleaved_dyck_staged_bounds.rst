@@ -16,16 +16,17 @@ reachability over their union is sound but incomplete.
 ``lib/CFL/InterleavedDyck/StagedBounds/``
 
 The implementation is a native C++17 port of the staged algorithm from
-*A Better Approximation for Interleaved Dyck Reachability*. It reuses the
-``CFL/InterleavedDyck/MutualRefinement`` CNF saturation engine for reachability and derivation
-tracing and consumes the shared graph from ``CFL/InterleavedDyck/Core``.
+*A Better Approximation for Interleaved Dyck Reachability*. Its
+``staged_bounds::mutual_refinement`` engine provides CNF saturation and
+derivation tracing, while ``CFL/InterleavedDyck/Core`` provides the shared
+typed graph.
 
 Relationship to MutualRefinement
 --------------------------------
 
-``StagedBounds`` owns the domain-facing analysis policy, while
-``MutualRefinement`` supplies the integer-encoded CNF reachability and tracing
-engine used by some pipeline stages.
+``StagedBounds`` owns the domain-facing analysis policy. Its
+``mutual_refinement`` namespace supplies the integer-encoded CNF reachability
+and tracing engine; it is not a separate sibling analysis or library target.
 
 .. list-table:: Responsibility boundary
    :header-rows: 1
@@ -47,9 +48,9 @@ engine used by some pipeline stages.
      - Interleaved-Dyck lower and upper bounds
      - Grammar-relative reachability edges and derivations
 
-The dependency is one-way. ``MutualRefinement`` has no knowledge of DOT label
-conventions, taint/value-flow modes, approximation direction, or the staged
-interleaved-Dyck pipeline.
+The internal engine has no knowledge of DOT label conventions,
+taint/value-flow modes, approximation direction, or the enclosing staged
+pipeline.
 
 Graph Model
 -----------
@@ -138,8 +139,8 @@ Using the Solver
    Graph graph = Graph::parseDotFile("input.dot");
 
    Options options;
+   options.method = Method::All;
    options.parity_groups = 2;
-   options.run_on_demand = true;
    options.factorized_tracing = true; // opt-in lazy provenance reconstruction
 
    Solver solver;
@@ -180,8 +181,7 @@ Build and Test
 --------------
 
 The module builds as ``CanaryInterleavedDyckStagedBounds`` and links against
-``CanaryInterleavedDyckCore`` and
-``CanaryInterleavedDyckMutualRefinement``. Focused tests cover DOT
+``CanaryInterleavedDyckCore``. Focused tests cover DOT
 parsing, crossing delimiters, different-witness rejection, value-flow
 preprocessing, the complete staged pipeline, and component-local parity
 refinement:
@@ -193,9 +193,12 @@ refinement:
    cmake --build build --target interleaved_dyck_staged_bounds_test
    ctest --test-dir build -R interleaved_dyck_staged_bounds_test --output-on-failure
 
-The CLI exposes ``--value-flow``, ``--parity-groups N``, ``--no-on-demand``,
-``--factorized-tracing``, ``--print-lower``, and ``--print-final``. It
-preserves the directed input arcs exactly as parsed.
+The CLI exposes ``--method NAME`` for selecting ``regularization``,
+``intersection``, ``underapproximation``, ``mutual-refinement``,
+``stronger-grammar``, ``on-demand``, or ``all``. It also supports
+``--value-flow``, ``--parity-groups N``, ``--factorized-tracing``,
+``--print-lower``, and ``--print-result``. It preserves the directed input
+arcs exactly as parsed.
 
 Cost Considerations
 -------------------
@@ -203,7 +206,7 @@ Cost Considerations
 The solver materializes all reachable endpoint pairs and derivation traces.
 Large dense graphs can therefore require substantial time and memory.
 On-demand refinement additionally analyzes unknown pairs one at a time. Set
-``Options::run_on_demand`` to ``false`` when the stronger-grammar result is
+``Options::method`` to ``Method::StrongerGrammar`` when that result is
 sufficient and lower latency is more important than the final refinement.
 
 The default eager tracing stores unary and binary derivation records during
@@ -212,4 +215,4 @@ saturation, which can dominate memory on dense graphs. Setting
 reconstructs the contributing edges from the saturated relations instead,
 trading recomputation time for lower memory use.
 
-See also :doc:`interleaved_dyck_mutual_refinement` and :doc:`interleaved_dyck_graph_reduction`.
+See also :doc:`interleaved_dyck_graph_reduction`.

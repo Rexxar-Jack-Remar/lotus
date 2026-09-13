@@ -15,8 +15,7 @@ enables analysis of complex program properties using grammar-based constraints.
 
 **Tools**: ``lotus-cfl-classical``, ``lotus-cfl-alias``, ``lotus-cfl-vf``,
 ``lotus-cfl-foldability``, ``lotus-cfl-pocr``, ``lotus-cfl-staged``,
-``lotus-cfl-interleaved-dyck-mcfl``, ``lotus-cfl-interleaved-dyck-mutual-refinement``,
-``lotus-cfl-interleaved-dyck-staged-bounds``,
+``lotus-cfl-interleaved-dyck-mcfl``, ``lotus-cfl-interleaved-dyck-staged-bounds``,
 ``lotus-cfl-interleaved-dyck-unary``, ``lotus-cfl-interleaved-dyck-graph-reduction``,
 and CSR.
 
@@ -146,30 +145,6 @@ sanitizer-aware policy products live separately under ``CFL/CSIndex/SCS``.
    # Parallel tabulation with 4 threads
    ./build/bin/csr -p -j 4 input.graph
 
-Mutual Refinement of CFL Reachability
--------------------------------------
-
-Runs the SAS 2023 mutual-refinement algorithm over a grammar file and a DOT
-graph. The grammar file holds one or more ``{ ... }`` blocks whose first ``|``
-row names the start symbol and whose later rows encode epsilon, unary, or
-binary productions.
-
-**Binary**: ``lotus-cfl-interleaved-dyck-mutual-refinement``
-
-**Location**: ``tools/cfl/interleaved-dyck/mutual-refinement/lotus-cfl-interleaved-dyck-mutual-refinement.cpp``
-
-.. code-block:: bash
-
-   cmake --build build --target lotus-cfl-interleaved-dyck-mutual-refinement
-   build/bin/lotus-cfl-interleaved-dyck-mutual-refinement grammars.txt graph.dot refine
-
-The final argument selects ``naive`` (independent CFL saturation per grammar,
-then intersection) or ``refine`` (alternating refinement loop). Pass
-``--factorized-tracing`` after ``refine`` to reconstruct contributing edges
-from the saturated relations instead of eager derivation records. See
-:doc:`../../cfl/interleaved_dyck_mutual_refinement` for the library API and
-algorithm details.
-
 Interleaved-Dyck Staged Bounds
 ------------------------------
 
@@ -185,13 +160,13 @@ checks.
 .. code-block:: bash
 
    cmake --build build --target lotus-cfl-interleaved-dyck-staged-bounds
-   build/bin/lotus-cfl-interleaved-dyck-staged-bounds --parity-groups 2 \
-     --factorized-tracing graph.dot
+   build/bin/lotus-cfl-interleaved-dyck-staged-bounds \
+     --method mutual-refinement graph.dot
 
 Useful options include ``--value-flow`` for value-flow benchmark
-preprocessing, ``--no-on-demand`` to stop after the stronger grammar,
-``--print-lower``/``--print-final`` for the certified lower or final upper
-pairs, and ``-o FILE`` for file output. See
+preprocessing, ``--method`` to select one algorithm or the full pipeline,
+``--print-lower``/``--print-result`` for pair output, and ``-o FILE`` for file
+output. See
 :doc:`../../cfl/interleaved_dyck_staged_bounds` for the library API and
 algorithm details.
 
