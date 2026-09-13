@@ -1,6 +1,6 @@
-#include "CFL/InterleavedDyck/MutualRefinement/CnfGrammar.h"
-#include "CFL/InterleavedDyck/MutualRefinement/CnfGraph.h"
-#include "CFL/InterleavedDyck/MutualRefinement/Hasher.h"
+#include "CFL/InterleavedDyck/StagedBounds/CnfGrammar.h"
+#include "CFL/InterleavedDyck/StagedBounds/CnfGraph.h"
+#include "CFL/InterleavedDyck/StagedBounds/CnfTypes.h"
 
 #include <tuple>
 #include <unordered_map>
@@ -8,7 +8,7 @@
 
 #include <gtest/gtest.h>
 
-namespace lotus::cfl::interleaved_dyck::mutual_refinement {
+namespace lotus::cfl::interleaved_dyck::staged_bounds::mutual_refinement {
 namespace {
 
 using UnaryRecord =
@@ -119,4 +119,4 @@ TEST(MutualRefinementFactorizedTracingTest,
 }
 
 } // namespace
-} // namespace lotus::cfl::interleaved_dyck::mutual_refinement
+} // namespace lotus::cfl::interleaved_dyck::staged_bounds::mutual_refinement

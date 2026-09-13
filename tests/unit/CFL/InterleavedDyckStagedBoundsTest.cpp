@@ -87,6 +87,24 @@ TEST(InterleavedDyckStagedBoundsSolverTest,
 }
 
 TEST(InterleavedDyckStagedBoundsSolverTest,
+     MethodStopsAfterTheSelectedPipelineStage) {
+  Graph graph;
+  graph.addEdge(0, 1, Label::openParenthesis(0));
+  graph.addEdge(1, 2, Label::openBracket(0));
+  graph.addEdge(2, 3, Label::closeBracket(0));
+  graph.addEdge(3, 4, Label::closeParenthesis(0));
+
+  Options options;
+  options.method = Method::MutualRefinement;
+  const ApproximationResult result =
+      Solver{}.analyze(graph, BenchmarkKind::Taint, options);
+
+  EXPECT_TRUE(contains(result.mutual_refinement, 0, 4));
+  EXPECT_TRUE(result.stronger_grammar.empty());
+  EXPECT_TRUE(result.on_demand.empty());
+}
+
+TEST(InterleavedDyckStagedBoundsSolverTest,
      FullPipelineKeepsAConcreteBalancedPath) {
   Graph graph;
   graph.addEdge(0, 1, Label::openParenthesis(0));

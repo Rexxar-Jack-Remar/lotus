@@ -10,7 +10,6 @@ The same structure is mirrored by `include/CFL/InterleavedDyck`.
 | [`StagedBounds`](StagedBounds/README.md) | Projected languages, union-Dyck lower bounds, parity refinement, and on-demand checks | Certified lower bound and progressively tighter upper bounds |
 | [`LCL`](LCL/README.md) | POPL 2017 linear-conjunctive-language saturation with gray-node refinement | Sound upper bound for directed, typed interleaved Dyck |
 | [`MCFL`](MCFL/README.md) | Normal-form MCFG solver and the dimension-indexed `G_d` hierarchy | Exact for a supplied MCFG; underapproximation for generated Interleaved-Dyck grammars |
-| [`MutualRefinement`](MutualRefinement/README.md) | Integer CNF saturation and derivation tracing used by staged bounds | Grammar-relative reachability and contributing-edge closure |
 | [`GraphReduction`](GraphReduction/README.md) | PLDI 2020 file-oriented graph simplification | Reduced graph preserving the reduction's reachability property |
 
 ## Public namespaces
@@ -18,14 +17,18 @@ The same structure is mirrored by `include/CFL/InterleavedDyck`.
 ```text
 lotus::cfl::interleaved_dyck
 ├── unary
+├── spds
+├── affine_spds
 ├── staged_bounds
 ├── lcl
-├── mcfl
-└── mutual_refinement
+└── mcfl
 ```
 
 `Core` owns the types directly in `lotus::cfl::interleaved_dyck`; the other
 public modules use nested namespaces matching their directories.
+
+The SAS'23 mutual-refinement CNF engine is internal to `StagedBounds`, under
+`staged_bounds::mutual_refinement`; it is not a sibling analysis.
 
 ## Choosing an analysis
 

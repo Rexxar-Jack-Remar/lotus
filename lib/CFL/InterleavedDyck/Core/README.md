@@ -35,8 +35,8 @@ graph as supplied.
 
 ## Why grammars are not shared concrete classes
 
-`interleaved_dyck::mutual_refinement::CnfGrammar` represents an integer-encoded Chomsky-normal
-form grammar. `interleaved_dyck::mcfl::Grammar` represents variable-arity multiple-context-free
-predicates and tuple-producing rules. Neither is a subtype or lossless
-encoding of the other, so merging them would erase important invariants. They
-share the typed input graph through explicit adapters instead.
+`interleaved_dyck::staged_bounds::mutual_refinement::CnfGrammar` represents an
+integer-encoded Chomsky-normal-form grammar.
+`interleaved_dyck::mcfl::Grammar` represents variable-arity multiple-context-free
+predicates and tuple-producing rules. Neither is a subtype or lossless encoding
+of the other. They share the typed input graph through explicit adapters.

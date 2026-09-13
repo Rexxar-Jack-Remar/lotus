@@ -4,7 +4,7 @@
 #include <tuple>
 #include <utility>
 
-namespace lotus::cfl::interleaved_dyck::mutual_refinement {
+namespace lotus::cfl::interleaved_dyck::staged_bounds::mutual_refinement {
 
 struct IntPairHasher {
   std::size_t operator()(const std::pair<int, int> &p) const;
@@ -18,4 +18,4 @@ struct IntTripleHasher {
 using Edge = std::tuple<int, int, int>;
 using EdgeHasher = IntTripleHasher;
 
-} // namespace lotus::cfl::interleaved_dyck::mutual_refinement
+} // namespace lotus::cfl::interleaved_dyck::staged_bounds::mutual_refinement

@@ -1,13 +1,13 @@
 #pragma once
 
-#include "CFL/InterleavedDyck/MutualRefinement/Hasher.h"
+#include "CFL/InterleavedDyck/StagedBounds/CnfTypes.h"
 
 #include <unordered_map>
 #include <unordered_set>
 #include <utility>
 #include <vector>
 
-namespace lotus::cfl::interleaved_dyck::mutual_refinement {
+namespace lotus::cfl::interleaved_dyck::staged_bounds::mutual_refinement {
 
 /* Context-free grammar in Chomsky normal form
  * Symbols are encoded as integers */
@@ -42,4 +42,4 @@ struct CnfGrammar {
       binaryR;
 };
 
-} // namespace lotus::cfl::interleaved_dyck::mutual_refinement
+} // namespace lotus::cfl::interleaved_dyck::staged_bounds::mutual_refinement

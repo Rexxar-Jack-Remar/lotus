@@ -22,7 +22,6 @@ module. Interleaved-Dyck tools consistently use the
 | `lotus-cfl-interleaved-dyck-unary` | Run the adaptive or fixed-counter exact unary analysis |
 | `lotus-cfl-interleaved-dyck-staged-bounds` | Compute staged lower and upper bounds |
 | `lotus-cfl-interleaved-dyck-mcfl` | Run the dimension-indexed MCFL underapproximation hierarchy |
-| `lotus-cfl-interleaved-dyck-mutual-refinement` | Run the file-driven CNF refinement experiment |
 | `lotus-cfl-interleaved-dyck-graph-reduction.py` | Orchestrate the graph-reduction helpers |
 
 There are no compatibility headers, CMake target aliases, or legacy command
