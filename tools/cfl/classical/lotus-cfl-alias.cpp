@@ -31,7 +31,7 @@ void usage(std::ostream &stream) {
   stream << "Usage: lotus-cfl-alias [options] INPUT.{ll,bc}\n"
             "Options:\n"
             "  --solver sparse-set|sparse-bitvector|graspan|sqid|pearl|"
-            "skewed|transitive-closure|pocr|hpocr|focr\n"
+            "skewed|cat|iea|iea-ocr|transitive-closure|pocr|hpocr|focr\n"
             "  --engine grammar|pocr-aa|focr-aa\n"
             "  --focr-scc\n"
             "  --encoding pag|peg\n"

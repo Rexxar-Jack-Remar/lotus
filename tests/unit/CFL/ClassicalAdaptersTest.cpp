@@ -209,7 +209,8 @@ TEST(ClassicalAdaptersTest,
     for (SolverBackend backend :
          {SolverBackend::SparseSet, SolverBackend::SparseBitVector,
           SolverBackend::Graspan, SolverBackend::Sqid, SolverBackend::Pearl,
-          SolverBackend::Skewed, SolverBackend::TransitiveClosure,
+          SolverBackend::Skewed, SolverBackend::Cat, SolverBackend::Iea,
+          SolverBackend::IeaOcr, SolverBackend::TransitiveClosure,
           SolverBackend::Pocr, SolverBackend::HierarchicalPocr,
           SolverBackend::FullyOrdered, SolverBackend::EndpointQuotient}) {
       AliasClient alternate = AliasClient::fromConstraintGraph(graph, mode);
@@ -408,7 +409,8 @@ TEST(ClassicalAdaptersTest, PegResultsAreIndependentOfConstraintOrder) {
   for (SolverBackend backend :
        {SolverBackend::SparseSet, SolverBackend::SparseBitVector,
         SolverBackend::Graspan, SolverBackend::Sqid, SolverBackend::Pearl,
-        SolverBackend::Skewed, SolverBackend::TransitiveClosure,
+        SolverBackend::Skewed, SolverBackend::Cat, SolverBackend::Iea,
+        SolverBackend::IeaOcr, SolverBackend::TransitiveClosure,
         SolverBackend::Pocr, SolverBackend::HierarchicalPocr,
         SolverBackend::FullyOrdered}) {
     AliasConstraintGraph batch_graph = makeEmptyGraph();
@@ -647,6 +649,7 @@ TEST(ClassicalAdaptersTest, ValueFlowClientEncodesSvfgCallsAndReachability) {
   for (SolverBackend backend :
        {SolverBackend::SparseBitVector, SolverBackend::Graspan,
         SolverBackend::Sqid, SolverBackend::Pearl, SolverBackend::Skewed,
+        SolverBackend::Cat, SolverBackend::Iea, SolverBackend::IeaOcr,
         SolverBackend::TransitiveClosure, SolverBackend::Pocr,
         SolverBackend::HierarchicalPocr, SolverBackend::FullyOrdered}) {
     ValueFlowClient alternate = ValueFlowClient::fromSVFG(svfg);
@@ -1287,7 +1290,8 @@ TEST(ClassicalAdaptersTest, LlvmAliasAnalysisDrivesIndirectCallDiscovery) {
     for (SolverBackend backend :
          {SolverBackend::SparseSet, SolverBackend::SparseBitVector,
           SolverBackend::Graspan, SolverBackend::Sqid, SolverBackend::Pearl,
-          SolverBackend::Skewed, SolverBackend::TransitiveClosure,
+          SolverBackend::Skewed, SolverBackend::Cat, SolverBackend::Iea,
+          SolverBackend::IeaOcr, SolverBackend::TransitiveClosure,
           SolverBackend::Pocr, SolverBackend::HierarchicalPocr,
           SolverBackend::FullyOrdered, SolverBackend::EndpointQuotient}) {
       LLVMAliasOptions alternate_options;

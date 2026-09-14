@@ -82,6 +82,11 @@ add_lotus_targeted_test(SkewedTabulationEngineTest
     LINK_LIBS
         CanaryClassicalCFL)
 
+add_lotus_targeted_test(CatIeoceEngineTest
+    CatIeoceEngineTest.cpp
+    LINK_LIBS
+        CanaryClassicalCFL)
+
 add_lotus_targeted_test(ClassicalAdaptersTest ClassicalAdaptersTest.cpp
     LINK_LIBS
         CanaryClassicalCFLAliasClient
@@ -89,7 +94,8 @@ add_lotus_targeted_test(ClassicalAdaptersTest ClassicalAdaptersTest.cpp
 
 if(TARGET lotus-cfl-solve)
     foreach(classical_backend
-            sparse-set sparse-bitvector graspan sqid pearl skewed transitive-closure pocr hpocr
+            sparse-set sparse-bitvector graspan sqid pearl skewed cat iea iea-ocr
+            transitive-closure pocr hpocr
             focr endpoint-quotient)
         add_test(NAME classical_cfl_cli_${classical_backend}
             COMMAND $<TARGET_FILE:lotus-cfl-solve>
@@ -247,7 +253,8 @@ endif()
 
 if(TARGET lotus-cfl-vf)
     foreach(classical_backend
-            sparse-set sparse-bitvector graspan sqid pearl skewed transitive-closure pocr hpocr
+            sparse-set sparse-bitvector graspan sqid pearl skewed cat iea iea-ocr
+            transitive-closure pocr hpocr
             focr endpoint-quotient)
         add_test(NAME classical_cfl_vf_${classical_backend}
             COMMAND $<TARGET_FILE:lotus-cfl-vf>

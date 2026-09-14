@@ -6,6 +6,10 @@ add_library(CanaryClassicalCFL STATIC
     Core/Validation.cpp
     Solvers/SolverSession.cpp
     Solvers/ConstraintGrounding.cpp
+    Solvers/Engines/Common/Reachability.cpp
+    Solvers/Engines/Common/BatchSolverEngine.cpp
+    Solvers/Engines/CAT/ContextAwareTabulation.cpp
+    Solvers/Engines/IEOCE/IterativeEpoch.cpp
     Solvers/Engines/TransitiveClosure.cpp
     Solvers/Engines/POCR/ClientGrammars.cpp
     Solvers/Engines/POCR/FullyOrderedClosure.cpp

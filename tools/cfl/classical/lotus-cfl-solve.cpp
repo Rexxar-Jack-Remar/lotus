@@ -42,7 +42,8 @@ void usage(std::ostream &stream) {
       << "Usage: lotus-cfl-solve --grammar FILE --graph FILE [options]\n"
          "Options:\n"
          "  --solver sparse-set|sparse-bitvector|graspan|sqid|pearl|"
-         "skewed|transitive-closure|pocr|hpocr|focr|endpoint-quotient\n"
+         "skewed|cat|iea|iea-ocr|transitive-closure|pocr|hpocr|focr|"
+         "endpoint-quotient\n"
          "  --graph-mode plain|matrix|pag-matrix\n"
          "  --direction plain|reverse|bidirectional\n"
          "  --attribute-domain var:i=N,N,...  Variable-specific domain\n"
@@ -396,6 +397,21 @@ int main(int argc, char **argv) {
           << ",\"skewed_unary_applications\":"
           << stats.skewed_unary_applications
           << ",\"skewed_binary_join_pairs\":" << stats.skewed_binary_join_pairs
+          << ",\"batch_stored_facts\":" << stats.batch_stored_facts
+          << ",\"cat_graph_degree\":" << stats.cat_graph_degree
+          << ",\"cat_fully_pruned_attempts\":"
+          << stats.cat_fully_pruned_attempts
+          << ",\"cat_context_annotations\":" << stats.cat_context_annotations
+          << ",\"cat_rewrites\":" << stats.cat_rewrites
+          << ",\"ieoce_quotient_nodes\":" << stats.ieoce_quotient_nodes
+          << ",\"ieoce_epochs\":" << stats.ieoce_epochs
+          << ",\"ieoce_merged_nodes\":" << stats.ieoce_merged_nodes
+          << ",\"ieoce_graph_facts\":" << stats.ieoce_graph_facts
+          << ",\"ieoce_meg_edges\":" << stats.ieoce_meg_edges
+          << ",\"ieoce_meg_edges_removed\":" << stats.ieoce_meg_edges_removed
+          << ",\"ieoce_ordered_steps\":" << stats.ieoce_ordered_steps
+          << ",\"ieoce_ordinary_fallback\":"
+          << (stats.ieoce_ordinary_fallback ? "true" : "false")
           << ",\"endpoint_quotient_cells\":" << stats.endpoint_quotient_cells
           << ",\"endpoint_quotient_facts\":" << stats.endpoint_quotient_facts
           << ",\"endpoint_quotient_seed_facts\":"
@@ -484,6 +500,13 @@ int main(int argc, char **argv) {
           << " skewed_propagating_facts=" << stats.skewed_propagating_facts
           << " skewed_dynamic_pe_insertions="
           << stats.skewed_dynamic_pe_insertions
+          << " batch_stored_facts=" << stats.batch_stored_facts
+          << " cat_graph_degree=" << stats.cat_graph_degree
+          << " cat_fully_pruned_attempts=" << stats.cat_fully_pruned_attempts
+          << " ieoce_quotient_nodes=" << stats.ieoce_quotient_nodes
+          << " ieoce_epochs=" << stats.ieoce_epochs
+          << " ieoce_merged_nodes=" << stats.ieoce_merged_nodes
+          << " ieoce_meg_edges=" << stats.ieoce_meg_edges
           << " simplified_nodes=" << simplification_stats.reduced_nodes
           << " scc_nodes_merged=" << simplification_stats.scc_nodes_merged
           << " folded_nodes=" << simplification_stats.folded_nodes

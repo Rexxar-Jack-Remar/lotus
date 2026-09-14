@@ -631,6 +631,19 @@ ReachabilityStats AliasClient::solveToFixedPoint(
         current.skewed_promotions_to_indexed;
     aggregate.skewed_unary_applications += current.skewed_unary_applications;
     aggregate.skewed_binary_join_pairs += current.skewed_binary_join_pairs;
+    aggregate.batch_stored_facts = current.batch_stored_facts;
+    aggregate.cat_graph_degree = current.cat_graph_degree;
+    aggregate.cat_fully_pruned_attempts += current.cat_fully_pruned_attempts;
+    aggregate.cat_context_annotations += current.cat_context_annotations;
+    aggregate.cat_rewrites = current.cat_rewrites;
+    aggregate.ieoce_quotient_nodes = current.ieoce_quotient_nodes;
+    aggregate.ieoce_epochs += current.ieoce_epochs;
+    aggregate.ieoce_merged_nodes += current.ieoce_merged_nodes;
+    aggregate.ieoce_graph_facts = current.ieoce_graph_facts;
+    aggregate.ieoce_meg_edges = current.ieoce_meg_edges;
+    aggregate.ieoce_meg_edges_removed += current.ieoce_meg_edges_removed;
+    aggregate.ieoce_ordered_steps += current.ieoce_ordered_steps;
+    aggregate.ieoce_ordinary_fallback = current.ieoce_ordinary_fallback;
     aggregate.endpoint_quotient_cells = current.endpoint_quotient_cells;
     aggregate.endpoint_quotient_facts = current.endpoint_quotient_facts;
     aggregate.endpoint_quotient_seed_facts =

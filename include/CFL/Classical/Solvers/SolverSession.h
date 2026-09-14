@@ -71,6 +71,19 @@ struct ReachabilityStats {
   std::size_t skewed_promotions_to_indexed = 0;
   std::size_t skewed_unary_applications = 0;
   std::size_t skewed_binary_join_pairs = 0;
+  std::size_t batch_stored_facts = 0;
+  std::size_t cat_graph_degree = 0;
+  std::size_t cat_fully_pruned_attempts = 0;
+  std::size_t cat_context_annotations = 0;
+  std::size_t cat_rewrites = 0;
+  std::size_t ieoce_quotient_nodes = 0;
+  std::size_t ieoce_epochs = 0;
+  std::size_t ieoce_merged_nodes = 0;
+  std::size_t ieoce_graph_facts = 0;
+  std::size_t ieoce_meg_edges = 0;
+  std::size_t ieoce_meg_edges_removed = 0;
+  std::size_t ieoce_ordered_steps = 0;
+  bool ieoce_ordinary_fallback = false;
   std::size_t endpoint_quotient_cells = 0;
   std::size_t endpoint_quotient_facts = 0;
   std::size_t endpoint_quotient_seed_facts = 0;
@@ -110,6 +123,12 @@ enum class SolverBackend {
   Pearl,
   /// PLDI 2024 skewed tabulation with separate indexed and propagating facts.
   Skewed,
+  /// ICSE 2026 context-aware tabulation.
+  Cat,
+  /// OOPSLA 2024 iterative-epoch online cycle elimination.
+  Iea,
+  /// IEA with online cycle reduction and minimum-equivalent graphs.
+  IeaOcr,
   /// Classical worklist plus dedicated incremental closure only for symbols
   /// having a literal production A -> A A.
   TransitiveClosure,

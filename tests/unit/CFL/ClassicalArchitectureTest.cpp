@@ -893,6 +893,9 @@ TEST(ClassicalArchitectureTest, ParsesSolverBackendNames) {
   EXPECT_EQ(parseSolverBackend("sqid"), SolverBackend::Sqid);
   EXPECT_EQ(parseSolverBackend("pearl"), SolverBackend::Pearl);
   EXPECT_EQ(parseSolverBackend("skewed"), SolverBackend::Skewed);
+  EXPECT_EQ(parseSolverBackend("cat"), SolverBackend::Cat);
+  EXPECT_EQ(parseSolverBackend("iea"), SolverBackend::Iea);
+  EXPECT_EQ(parseSolverBackend("iea-ocr"), SolverBackend::IeaOcr);
   EXPECT_EQ(parseSolverBackend("pocr"), SolverBackend::Pocr);
   EXPECT_EQ(parseSolverBackend("hpocr"), SolverBackend::HierarchicalPocr);
   EXPECT_EQ(parseSolverBackend("focr"), SolverBackend::FullyOrdered);
@@ -1488,6 +1491,9 @@ TEST(ClassicalArchitectureTest, AllSolverBackendsProduceTheSameClosure) {
   EXPECT_EQ(solveWith(SolverBackend::Sqid, graph, grammar), baseline);
   EXPECT_EQ(solveWith(SolverBackend::Pearl, graph, grammar), baseline);
   EXPECT_EQ(solveWith(SolverBackend::Skewed, graph, grammar), baseline);
+  EXPECT_EQ(solveWith(SolverBackend::Cat, graph, grammar), baseline);
+  EXPECT_EQ(solveWith(SolverBackend::Iea, graph, grammar), baseline);
+  EXPECT_EQ(solveWith(SolverBackend::IeaOcr, graph, grammar), baseline);
   EXPECT_EQ(solveWith(SolverBackend::TransitiveClosure, graph, grammar),
             baseline);
   EXPECT_EQ(solveWith(SolverBackend::Pocr, graph, grammar), baseline);
@@ -1621,6 +1627,12 @@ TEST(ClassicalArchitectureTest, BackendsAgreeAcrossGeneratedSmallGraphs) {
         << "seed=" << seed;
     EXPECT_EQ(solveWith(SolverBackend::Skewed, graph, grammar), baseline)
         << "seed=" << seed;
+    EXPECT_EQ(solveWith(SolverBackend::Cat, graph, grammar), baseline)
+        << "seed=" << seed;
+    EXPECT_EQ(solveWith(SolverBackend::Iea, graph, grammar), baseline)
+        << "seed=" << seed;
+    EXPECT_EQ(solveWith(SolverBackend::IeaOcr, graph, grammar), baseline)
+        << "seed=" << seed;
     EXPECT_EQ(solveWith(SolverBackend::TransitiveClosure, graph, grammar),
               baseline)
         << "seed=" << seed;
@@ -1691,7 +1703,8 @@ TEST(ClassicalArchitectureTest,
     for (SolverBackend backend :
          {SolverBackend::SparseSet, SolverBackend::SparseBitVector,
           SolverBackend::Graspan, SolverBackend::Sqid, SolverBackend::Pearl,
-          SolverBackend::Skewed, SolverBackend::TransitiveClosure,
+          SolverBackend::Skewed, SolverBackend::Cat, SolverBackend::Iea,
+          SolverBackend::IeaOcr, SolverBackend::TransitiveClosure,
           SolverBackend::Pocr, SolverBackend::HierarchicalPocr,
           SolverBackend::FullyOrdered}) {
       EXPECT_EQ(solveWith(backend, graph, grammar), reference)
@@ -1833,7 +1846,8 @@ TEST(ClassicalArchitectureTest, RepeatedSolveDoesNotReseedNullableFacts) {
   for (SolverBackend backend :
        {SolverBackend::SparseSet, SolverBackend::SparseBitVector,
         SolverBackend::Graspan, SolverBackend::Sqid, SolverBackend::Pearl,
-        SolverBackend::Skewed, SolverBackend::TransitiveClosure,
+        SolverBackend::Skewed, SolverBackend::Cat, SolverBackend::Iea,
+        SolverBackend::IeaOcr, SolverBackend::TransitiveClosure,
         SolverBackend::Pocr, SolverBackend::HierarchicalPocr,
         SolverBackend::FullyOrdered}) {
     LabeledGraph graph;

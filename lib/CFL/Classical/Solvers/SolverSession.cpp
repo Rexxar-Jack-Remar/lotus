@@ -1,5 +1,6 @@
 #include "CFL/Classical/Solvers/SolverSession.h"
 
+#include "CFL/Classical/Solvers/Engines/Common/BatchSolverEngine.h"
 #include "CFL/Classical/Solvers/Engines/EndpointQuotient/EndpointQuotientEngine.h"
 #include "CFL/Classical/Solvers/Engines/PEARL/PearlEngine.h"
 #include "CFL/Classical/Solvers/Engines/POCR/FullyOrderedClosure.h"
@@ -26,6 +27,11 @@ namespace {
 
 bool isTransitiveRule(const BinaryRuleId &rule) {
   return rule.lhs == rule.first && rule.lhs == rule.second;
+}
+
+bool isBatchSolverBackend(SolverBackend backend) {
+  return backend == SolverBackend::Cat || backend == SolverBackend::Iea ||
+         backend == SolverBackend::IeaOcr;
 }
 
 struct WorkItem {
@@ -289,6 +295,15 @@ std::unique_ptr<Relation> createSolverRelation(SolverBackend backend,
   case SolverBackend::Skewed:
     return std::make_unique<engines::SkewedTabulationEngine>(grammar,
                                                              node_count);
+  case SolverBackend::Cat:
+    return std::make_unique<engines::BatchSolverEngine>(
+        grammar, node_count, engines::BatchEngineKind::Cat);
+  case SolverBackend::Iea:
+    return std::make_unique<engines::BatchSolverEngine>(
+        grammar, node_count, engines::BatchEngineKind::Iea);
+  case SolverBackend::IeaOcr:
+    return std::make_unique<engines::BatchSolverEngine>(
+        grammar, node_count, engines::BatchEngineKind::IeaOcr);
   case SolverBackend::TransitiveClosure:
     return std::make_unique<BitVectorClosureRelation>(transitive_symbols,
                                                       node_count);
@@ -322,6 +337,12 @@ const char *solverBackendName(SolverBackend backend) {
     return "pearl";
   case SolverBackend::Skewed:
     return "skewed";
+  case SolverBackend::Cat:
+    return "cat";
+  case SolverBackend::Iea:
+    return "iea";
+  case SolverBackend::IeaOcr:
+    return "iea-ocr";
   case SolverBackend::TransitiveClosure:
     return "transitive-closure";
   case SolverBackend::Pocr:
@@ -354,6 +375,15 @@ SolverBackend parseSolverBackend(std::string_view name) {
   }
   if (name == "skewed") {
     return SolverBackend::Skewed;
+  }
+  if (name == "cat") {
+    return SolverBackend::Cat;
+  }
+  if (name == "iea") {
+    return SolverBackend::Iea;
+  }
+  if (name == "iea-ocr") {
+    return SolverBackend::IeaOcr;
   }
   if (name == "transitive-closure") {
     return SolverBackend::TransitiveClosure;
@@ -420,6 +450,10 @@ public:
     if (backend_ == SolverBackend::Skewed) {
       skewed_engine_ =
           static_cast<engines::SkewedTabulationEngine *>(relation_.get());
+    }
+    if (isBatchSolverBackend(backend_)) {
+      batch_engine_ =
+          static_cast<engines::BatchSolverEngine *>(relation_.get());
     }
     if (backend_ == SolverBackend::EndpointQuotient) {
       eq_engine_ =
@@ -497,7 +531,7 @@ public:
     stats.input_edges = input_edges_;
 
     if (backend_ != SolverBackend::Pearl && backend_ != SolverBackend::Sqid &&
-        backend_ != SolverBackend::Skewed &&
+        backend_ != SolverBackend::Skewed && !isBatchSolverBackend(backend_) &&
         backend_ != SolverBackend::EndpointQuotient) {
       for (SymbolId symbol : grammar_.nullableSymbolIds()) {
         for (NodeId node = nullable_seeded_nodes_; node < graph_.vertexCount();
@@ -545,6 +579,27 @@ public:
       stats.skewed_promotions_to_indexed = skewed.promotions_to_indexed;
       stats.skewed_unary_applications = skewed.unary_applications;
       stats.skewed_binary_join_pairs = skewed.binary_join_pairs;
+    } else if (isBatchSolverBackend(backend_)) {
+      const engines::BatchSolverStatistics batch = batch_engine_->solve();
+      stats.classical_iterations += batch.attempts;
+      stats.processed_work_items += batch.work_items;
+      stats.duplicate_edges += batch.duplicate_attempts;
+      stats.added_edges += batch.derived_facts;
+      stats.peak_worklist_size =
+          std::max(stats.peak_worklist_size, batch.peak_worklist);
+      stats.batch_stored_facts = batch.stored_facts;
+      stats.cat_graph_degree = batch.cat_graph_degree;
+      stats.cat_fully_pruned_attempts = batch.cat_fully_pruned_attempts;
+      stats.cat_context_annotations = batch.cat_context_annotations;
+      stats.cat_rewrites = batch.cat_rewrites;
+      stats.ieoce_quotient_nodes = batch.ieoce_quotient_nodes;
+      stats.ieoce_epochs = batch.ieoce_epochs;
+      stats.ieoce_merged_nodes = batch.ieoce_merged_nodes;
+      stats.ieoce_graph_facts = batch.ieoce_graph_facts;
+      stats.ieoce_meg_edges = batch.ieoce_meg_edges;
+      stats.ieoce_meg_edges_removed = batch.ieoce_meg_edges_removed;
+      stats.ieoce_ordered_steps = batch.ieoce_ordered_steps;
+      stats.ieoce_ordinary_fallback = batch.ieoce_ordinary_fallback;
     } else if (backend_ == SolverBackend::EndpointQuotient) {
       const engines::EndpointQuotientStatistics eq = eq_engine_->solve();
       stats.classical_iterations += eq.binary_joins;
@@ -1154,6 +1209,13 @@ private:
   }
 
   bool insertInputFact(SymbolId symbol, NodeId source, NodeId target) {
+    if (isBatchSolverBackend(backend_)) {
+      if (!batch_engine_->add(symbol, source, target)) {
+        return false;
+      }
+      addCandidate(symbol, source, target, true);
+      return true;
+    }
     if (backend_ == SolverBackend::Skewed) {
       if (!skewed_engine_->add(symbol, source, target)) {
         return false;
@@ -1261,6 +1323,7 @@ private:
   std::unique_ptr<GraspanData> graspan_current_;
   std::unique_ptr<engines::SqidEngine> sqid_engine_;
   std::unique_ptr<engines::PearlEngine> pearl_engine_;
+  engines::BatchSolverEngine *batch_engine_ = nullptr;
   engines::SkewedTabulationEngine *skewed_engine_ = nullptr;
   engines::EndpointQuotientEngine *eq_engine_ = nullptr;
   std::size_t input_edges_ = 0;

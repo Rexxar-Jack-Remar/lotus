@@ -463,7 +463,8 @@ TEST(EndpointQuotientSessionTest, StreamingQueriesAreBackendIndependent) {
   for (auto backend :
        {SolverBackend::SparseSet, SolverBackend::SparseBitVector,
         SolverBackend::Graspan, SolverBackend::Sqid, SolverBackend::Pearl,
-        SolverBackend::Skewed, SolverBackend::TransitiveClosure,
+        SolverBackend::Skewed, SolverBackend::Cat, SolverBackend::Iea,
+        SolverBackend::IeaOcr, SolverBackend::TransitiveClosure,
         SolverBackend::Pocr, SolverBackend::HierarchicalPocr,
         SolverBackend::FullyOrdered, SolverBackend::EndpointQuotient}) {
     SCOPED_TRACE(solverBackendName(backend));
