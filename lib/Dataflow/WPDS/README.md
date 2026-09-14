@@ -126,6 +126,7 @@ The four existing client functions have compatible overloads taking
 --wpds-stats
 --wpds-verify-against-legacy
 --wpds-query-count=N
+--summary-only
 ```
 
 Query batches currently use a prepared liveness session and deterministic,

@@ -80,7 +80,7 @@ lotus-dfa-wpds --analysis=liveness --wpds-backend=wali-swpds \
 
 # Reuse one prepared WPDS model for ten distinct liveness boundary seeds
 lotus-dfa-wpds --analysis=liveness --wpds-backend=wali-swpds \
-  --wpds-query-count=10 --wpds-stats /path/to/file.bc
+  --wpds-query-count=10 --wpds-stats --summary-only /path/to/file.bc
 
 # Sparse fixed-seed Newton rounds (also: static, always_maybe, dense)
 lotus-dfa-npa --analysis=liveness --solver=newton \

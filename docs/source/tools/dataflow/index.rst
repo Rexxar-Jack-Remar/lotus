@@ -146,7 +146,8 @@ uninitialized-variable clients with a runtime-selected solver.
    lotus-dfa-wpds input.bc --analysis=liveness \
      --wpds-backend=wali-swpds --wpds-stats
    lotus-dfa-wpds input.bc --analysis=liveness \
-     --wpds-backend=wali-swpds --wpds-query-count=10 --wpds-stats
+     --wpds-backend=wali-swpds --wpds-query-count=10 --wpds-stats \
+     --summary-only
 
 The backend values are ``legacy``, ``wali-fwpds``, and ``wali-swpds``.
 ``--wpds-verify-against-legacy`` compares all materialized observations before
