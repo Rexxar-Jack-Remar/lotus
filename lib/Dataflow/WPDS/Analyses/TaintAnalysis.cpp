@@ -142,7 +142,18 @@ static GenKillTransformer *createTaintTransformer(Instruction *I) {
 }
 
 std::unique_ptr<mono::DataFlowResult> runTaintAnalysis(Module &module) {
-  InterProceduralDataFlowEngine engine;
+  return runTaintAnalysis(module, {});
+}
+
+std::unique_ptr<mono::DataFlowResult>
+runTaintAnalysis(Module &module, wpds::WPDSBackendOptions options) {
+  return runTaintAnalysis(module, options, nullptr, nullptr);
+}
+
+std::unique_ptr<mono::DataFlowResult>
+runTaintAnalysis(Module &module, wpds::WPDSBackendOptions options,
+                 wpds::WPDSBackendStatistics *statistics, std::string *error) {
+  InterProceduralDataFlowEngine engine(options);
   std::set<Value *> initial;
 
   // Mark main arguments as tainted (common assumption for CLI/CGI apps)
@@ -154,7 +165,15 @@ std::unique_ptr<mono::DataFlowResult> runTaintAnalysis(Module &module) {
     }
   }
 
-  return engine.runForwardAnalysis(module, createTaintTransformer, initial);
+  auto result =
+      engine.runForwardAnalysis(module, createTaintTransformer, initial);
+  if (statistics != nullptr) {
+    *statistics = engine.getLastBackendStatistics();
+  }
+  if (error != nullptr) {
+    *error = engine.getLastError();
+  }
+  return result;
 }
 
 void demoTaintAnalysis(Module &module) {

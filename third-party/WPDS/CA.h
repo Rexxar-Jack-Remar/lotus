@@ -43,6 +43,7 @@
 
 #include "common.h"
 #include "Traits.h"
+#include "HashMap.h"
 #include "UTIL.h"
 #include "catransition.h"
 #include "inst_counter.h"

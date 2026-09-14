@@ -113,8 +113,6 @@ namespace wali
         Agrow.setGeneration(Agrow.getGeneration() - 1);
         currentOutputWFA = 0;
 
-        cout << "Entry points found: " << syms.entryPoints.size() << "\n";
-        
         // Then run FWPDS post* on Agrow and get the InterGraph that it creates
         wfa::WFA postAgrow;
         poststarIGR(Agrow, postAgrow);
@@ -357,6 +355,5 @@ namespace wali
   } // namespace wpds
 
 } // namespace wali
-
 
 

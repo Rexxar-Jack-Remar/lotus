@@ -134,6 +134,26 @@ Output format:
    FUNC <name>
      bb<N> IN: <comma-separated value ids>
 
+lotus-dfa-wpds
+--------------
+
+Runs the WPDS liveness, constant-propagation, taint, and
+uninitialized-variable clients with a runtime-selected solver.
+
+.. code-block:: bash
+
+   lotus-dfa-wpds input.bc --analysis=liveness --wpds-backend=legacy
+   lotus-dfa-wpds input.bc --analysis=liveness \
+     --wpds-backend=wali-swpds --wpds-stats
+   lotus-dfa-wpds input.bc --analysis=liveness \
+     --wpds-backend=wali-swpds --wpds-query-count=10 --wpds-stats
+
+The backend values are ``legacy``, ``wali-fwpds``, and ``wali-swpds``.
+``--wpds-verify-against-legacy`` compares all materialized observations before
+printing a successful result. ``--wpds-query-count`` measures deterministic,
+distinct boundary seeds on one prepared liveness model; one-time preparation
+and cumulative query timings are reported separately.
+
 See also
 --------
 

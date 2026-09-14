@@ -13,6 +13,7 @@
 #define DATAFLOW_WPDS_CLIENTS_UNINITIALIZED_VARIABLES_ANALYSIS_H_
 
 #include "Dataflow/Mono/Support/Result.h"
+#include "Dataflow/WPDS/Backend.h"
 
 #include <memory>
 
@@ -47,6 +48,12 @@ void demoUninitializedVariablesAnalysis(llvm::Module &module);
  */
 std::unique_ptr<mono::DataFlowResult>
 runUninitializedVariablesAnalysis(llvm::Module &module);
+std::unique_ptr<mono::DataFlowResult>
+runUninitializedVariablesAnalysis(llvm::Module &module,
+                                  wpds::WPDSBackendOptions options);
+std::unique_ptr<mono::DataFlowResult> runUninitializedVariablesAnalysis(
+    llvm::Module &module, wpds::WPDSBackendOptions options,
+    wpds::WPDSBackendStatistics *statistics, std::string *error);
 
 /**
  * @brief Queries and displays analysis results for a specific instruction

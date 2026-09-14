@@ -11,19 +11,21 @@ supports may analyses over finite Value* fact sets. Instead of building an
 exploded super-graph using user-provided flow and edge functions, a weighted
 pushdown system is built whose rules are drawn from the user's analysis
 description. The analysis problem is solved using a stack automaton obtained by
-the post* or pre* algorithm using the WALi library
-(`third-party/WPDS`).
+the post* or pre* algorithm using the legacy `third-party/WPDS` implementation
+or the optional vendored WALi implementation.
 
 ## Directory Structure
 
 ```
 include/Dataflow/WPDS/
+├── Backend/                       # Neutral model/session interfaces
 ├── Core/                          # Public fact/weight/builder abstractions
 ├── Solver/                        # Public engine interface
 ├── Analyses/                       # Public client analysis wrappers
 └── InterProceduralDataFlow.h      # Umbrella header
 
 lib/Dataflow/WPDS/
+├── Backend/                       # Legacy and optional WALi adapters
 ├── Core/                          # Core abstractions
 │   ├── DataFlowFacts.cpp         # Fact domain implementation
 │   └── GenKillTransformer.cpp   # Semiring weight implementation
@@ -90,6 +92,47 @@ auto Result = Engine.runForwardAnalysis(
 auto FactsAfter = Engine.queryFactsAfterInstruction(SomeInst);
 auto SummaryBefore = Engine.querySummaryBeforeInstruction(SomeInst);
 ```
+
+## Selectable solver backends
+
+The legacy solver remains the default. Configure with
+`-DLOTUS_ENABLE_WALI_OPENNWA=ON` to enable the vendored WALi implementations,
+then select one programmatically:
+
+```cpp
+wpds::WPDSBackendOptions options;
+options.backend = wpds::WPDSBackendKind::WaliSWPDS;
+options.verifyAgainstLegacy = true;
+
+wpds::InterProceduralDataFlowEngine engine(options);
+auto prepared = engine.prepareForwardAnalysis(module, createTransformer);
+auto first = prepared->solve(seedA);
+auto second = prepared->solve(seedB); // reuses the prepared model
+auto contexts = prepared->solveContextAggregated(seedA);
+```
+
+`solve` retains the legacy exact-stack observation. The context-aggregated form
+matches a program-point symbol followed by any call-stack suffix. Explicitly
+requesting an unavailable backend or passing a legacy configuration-automaton
+callback to a WALi backend returns `nullptr` and records an actionable message
+in `getLastError()`.
+
+The four existing client functions have compatible overloads taking
+`WPDSBackendOptions`. The `lotus-dfa-wpds` tool accepts:
+
+```text
+--analysis=liveness|constant_prop|taint|uninitialized
+--wpds-backend=legacy|wali-fwpds|wali-swpds
+--wpds-stats
+--wpds-verify-against-legacy
+--wpds-query-count=N
+```
+
+Query batches currently use a prepared liveness session and deterministic,
+distinct boundary seeds drawn from the module. The other client analyses
+support runtime backend selection for one-shot runs. See
+[BACKEND_AUDIT.md](BACKEND_AUDIT.md) for the lowering, query, ownership, SWPDS
+lifecycle, concurrency, and compatibility contracts.
 
 ## References
 

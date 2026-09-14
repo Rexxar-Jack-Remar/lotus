@@ -7,9 +7,9 @@ Overview
 The **WPDS engine** in ``lib/Dataflow/WPDS`` solves distributive
 interprocedural data-flow problems by encoding them as
 **Weighted Pushdown Systems (WPDS)**.
-It leverages the WALi-style library (``third-party/WPDS``) to compute
-post*/pre* reachability over a pushdown system that models both
-control-flow and call/return behavior.
+It computes post*/pre* reachability with the legacy ``third-party/WPDS``
+implementation by default. Builds that enable ``LOTUS_ENABLE_WALI_OPENNWA``
+can select the vendored WALi FWPDS or SWPDS implementation at runtime.
 
 * **Location**: ``lib/Dataflow/WPDS``
 * **Core classes**: ``InterProceduralDataFlowEngine``,
@@ -30,6 +30,27 @@ engine:
 Clients typically provide a function
 ``GenKillTransformer *createTransformer(Instruction *I)`` which
 captures the effect of each instruction on the fact set.
+
+Backend selection and prepared sessions
+=======================================
+
+``WPDSBackendOptions::backend`` accepts ``Legacy``, ``WaliFWPDS``, or
+``WaliSWPDS``. The default remains ``Legacy``. An explicit WALi selection in a
+build without WALi fails with a diagnostic naming the enabling CMake option; it
+does not silently fall back.
+
+``prepareForwardAnalysis`` and ``prepareBackwardAnalysis`` lower the module and
+compile the chosen backend once. Calls to ``PreparedAnalysis::solve`` may then
+change the boundary fact seed while reusing that preparation. SWPDS performs
+its vendor ``preprocess()`` step once per prepared session. The prepared object,
+and any returned instruction-indexed result, require the LLVM module to remain
+alive.
+
+The normal solve retains the legacy exact-stack observation. Use
+``solveContextAggregated`` to accept a program-point symbol followed by any
+call-stack suffix and aggregate observations inside callees or recursive calls.
+``verifyAgainstLegacy`` independently solves the same frozen model and compares
+reachability and materialized fact values at every observation.
 
 Example Analyses
 ================
@@ -83,11 +104,6 @@ for certain classes of interprocedural problems.
 
 .. note::
 
-   **WALi-OpenNWA** (``third-party/WALi-OpenNWA/``) is a modern C++
-   reimplementation of the WPDS library. It provides an alternative WPDS
-   backend with modern C++ features. The existing
-   ``lib/Dataflow/WPDS/`` implementation (backed by
-   ``third-party/WPDS/``) continues to be the default. Build with
-   ``-DLOTUS_ENABLE_WALI_OPENNWA=ON`` to enable the WALi-OpenNWA
-   backend.
-
+   The public backend and prepared-session headers do not expose WALi types.
+   Caller-provided legacy configuration automata and witness queries remain
+   legacy-only expert interfaces.

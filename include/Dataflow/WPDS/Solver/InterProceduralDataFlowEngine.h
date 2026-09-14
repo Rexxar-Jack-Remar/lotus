@@ -2,8 +2,10 @@
 #define ANALYSIS_DATAFLOW_WPDS_INTERPROCEDURALDATAFLOWENGINE_H_
 
 #include "Dataflow/Mono/Support/Result.h"
+#include "Dataflow/WPDS/Backend.h"
 #include "Dataflow/WPDS/Core/GenKillTransformer.h"
 #include "Dataflow/WPDS/Core/MemoryObjectFact.h"
+#include "Dataflow/WPDS/PreparedAnalysis.h"
 #include "WPDS/CA.h"
 #include "WPDS/WPDS.h"
 #include "WPDS/key_source.h"
@@ -11,6 +13,7 @@
 #include "WPDS/ref_ptr.h"
 #include "WPDS/semiring.h"
 
+#include <cstdint>
 #include <functional>
 #include <map>
 #include <memory>
@@ -21,6 +24,11 @@
 #include <vector>
 
 namespace wpds {
+
+namespace backend {
+class Model;
+struct QueryResult;
+} // namespace backend
 
 /**
  * Engine for interprocedural dataflow analysis via weighted PDS (WPDS).
@@ -42,14 +50,19 @@ public:
     bool preserveIdentity = true;
     bool flowPointerArgumentsToReturn = true;
     bool flowGlobalsToReturn = false;
-    std::function<GenKillTransformer *(
-        CallBase *, const std::vector<Value *> &,
-        const std::vector<GlobalValue *> &)>
+    std::function<GenKillTransformer *(CallBase *, const std::vector<Value *> &,
+                                       const std::vector<GlobalValue *> &)>
         buildSummary;
   };
 
   InterProceduralDataFlowEngine();
+  explicit InterProceduralDataFlowEngine(WPDSBackendOptions options);
   ~InterProceduralDataFlowEngine() = default;
+
+  void setBackendOptions(WPDSBackendOptions options);
+  const WPDSBackendOptions &getBackendOptions() const;
+  const WPDSBackendStatistics &getLastBackendStatistics() const;
+  const std::string &getLastError() const;
 
   void setCalleeResolver(CalleeResolver resolver);
   void setExternalCallPolicy(ExternalCallPolicy policy);
@@ -97,15 +110,22 @@ public:
       const std::vector<Function *> &exitFunctions,
       const std::set<Value *> &initialFacts = {});
 
+  std::unique_ptr<PreparedAnalysis> prepareForwardAnalysis(
+      Module &m, const std::function<GenKillTransformer *(Instruction *)>
+                     &createTransformer);
+  std::unique_ptr<PreparedAnalysis> prepareBackwardAnalysis(
+      Module &m, const std::function<GenKillTransformer *(Instruction *)>
+                     &createTransformer);
+
   // Helper methods to query results
   const std::set<Value *> &getInSet(Instruction *inst) const;
   const std::set<Value *> &getOutSet(Instruction *inst) const;
   std::set<Value *> queryFactsBeforeInstruction(Instruction *inst) const;
   std::set<Value *> queryFactsAfterInstruction(Instruction *inst) const;
-  ::ref_ptr<GenKillTransformer> querySummaryBeforeInstruction(
-      Instruction *inst) const;
-  ::ref_ptr<GenKillTransformer> querySummaryAfterInstruction(
-      Instruction *inst) const;
+  ::ref_ptr<GenKillTransformer>
+  querySummaryBeforeInstruction(Instruction *inst) const;
+  ::ref_ptr<GenKillTransformer>
+  querySummaryAfterInstruction(Instruction *inst) const;
   wpds::wpds_key_t getProgramPointKeyBeforeInstruction(Instruction *inst) const;
   wpds::wpds_key_t getProgramPointKeyAfterInstruction(Instruction *inst) const;
 
@@ -128,13 +148,27 @@ public:
 #endif
 
 private:
+  std::unique_ptr<mono::DataFlowResult>
+  runAnalysis(Module &m,
+              const std::function<GenKillTransformer *(Instruction *)>
+                  &createTransformer,
+              const std::set<Value *> &initialFacts, bool isForward,
+              const std::vector<Function *> &roots, bool explicitRoots);
+
   std::unique_ptr<mono::DataFlowResult> runAnalysisWithAutomaton(
       Module &m,
       const std::function<GenKillTransformer *(Instruction *)>
           &createTransformer,
       const AutomatonBuilder &buildInitialCA, bool isForward);
 
-  // Convert LLVM Module to WPDS
+  std::unique_ptr<backend::Model>
+  buildModel(Module &m,
+             const std::function<GenKillTransformer *(Instruction *)>
+                 &createTransformer,
+             bool isForward);
+
+  // Convert LLVM Module directly to the legacy WPDS for the compatible
+  // caller-supplied automaton API.
   void buildWPDS(Module &m, wpds::WPDS<GenKillTransformer> &wpds,
                  const std::function<GenKillTransformer *(Instruction *)>
                      &createTransformer,
@@ -144,10 +178,12 @@ private:
   void buildInitialAutomaton(Module &m, wpds::CA<GenKillTransformer> &ca,
                              const std::set<Value *> &initialFacts,
                              bool isForward);
-  void buildSeedAutomatonForFunctions(
-      wpds::CA<GenKillTransformer> &ca, const std::vector<Function *> &functions,
-      const std::set<Value *> &initialFacts, bool useExitPoints);
-  ::ref_ptr<GenKillTransformer> querySummaryAtSymbol(wpds::wpds_key_t symbol) const;
+  void buildSeedAutomatonForFunctions(wpds::CA<GenKillTransformer> &ca,
+                                      const std::vector<Function *> &functions,
+                                      const std::set<Value *> &initialFacts,
+                                      bool useExitPoints);
+  ::ref_ptr<GenKillTransformer>
+  querySummaryAtSymbol(wpds::wpds_key_t symbol) const;
   std::set<Value *> queryFactsAtSymbol(wpds::wpds_key_t symbol) const;
   GenKillTransformer *buildUnknownCallSummary(CallBase *callInst, Module &m,
                                               bool isForward) const;
@@ -164,6 +200,8 @@ private:
   void extractResults(Module &m, wpds::CA<GenKillTransformer> &resultCA,
                       std::unique_ptr<mono::DataFlowResult> &result,
                       bool isForward);
+  void extractModelResults(const backend::QueryResult &backendResult,
+                           std::unique_ptr<mono::DataFlowResult> &result);
 
   // Map program elements to WPDS keys and vice versa
   std::map<Function *, wpds::wpds_key_t> functionToKey;
@@ -176,6 +214,16 @@ private:
   std::map<Instruction *, std::set<Value *>> localGenByInst;
   std::map<Instruction *, std::set<Value *>> localKillByInst;
 
+  std::map<Function *, std::uint32_t> modelFunctionEntry;
+  std::map<Function *, std::uint32_t> modelFunctionExit;
+  std::map<Instruction *, std::uint32_t> modelInstAfter;
+  std::map<Instruction *, std::uint32_t> modelInstBefore;
+  std::map<Instruction *, std::uint32_t> modelInstTransfer;
+  std::map<BasicBlock *, std::uint32_t> modelBasicBlock;
+  std::map<CallBase *, std::uint32_t> modelCallReturn;
+  std::map<Instruction *, GenKillValue> beforeSummaries;
+  std::map<Instruction *, GenKillValue> afterSummaries;
+
   // Maintain the dataflow result for the most recent analysis
   std::unique_ptr<mono::DataFlowResult> currentResult;
   std::unique_ptr<wpds::CA<GenKillTransformer>> lastResultCA;
@@ -183,6 +231,9 @@ private:
   std::optional<wpds::wpds_key_t> lastAcceptState;
   CalleeResolver calleeResolver;
   ExternalCallPolicy externalCallPolicy;
+  WPDSBackendOptions backendOptions;
+  WPDSBackendStatistics lastBackendStatistics;
+  std::string lastError;
 
   // Single WPDS control state shared by rules and the initial automaton
   wpds::wpds_key_t controlState;

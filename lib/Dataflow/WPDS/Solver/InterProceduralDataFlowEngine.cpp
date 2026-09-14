@@ -3,6 +3,9 @@
  * Author: rainoftime
  */
 #include "Dataflow/ControlFlow/InterCFG.h"
+#include "Dataflow/WPDS/Backend/Model.h"
+#include "Dataflow/WPDS/Backend/PreparedAnalysisImpl.h"
+#include "Dataflow/WPDS/Backend/PreparedBackend.h"
 #include "Dataflow/WPDS/InterProceduralDataFlow.h"
 #include "WPDS/CA.h"
 #include "WPDS/SaturationProcess.h"
@@ -10,7 +13,10 @@
 #include "WPDS/Witness.h"
 #endif
 #include "llvm/IR/CFG.h"
+#include "llvm/Support/raw_ostream.h"
 
+#include <atomic>
+#include <chrono>
 #include <optional>
 #include <sstream>
 #include <unordered_map>
@@ -55,8 +61,200 @@ static void filterFactsToInstructionScope(Instruction *inst,
   }
 }
 
+static GenKillTransformer *materializeLegacyWeight(const GenKillValue &value) {
+  switch (value.getKind()) {
+  case GenKillValue::Kind::One:
+    return GenKillTransformer::one();
+  case GenKillValue::Kind::Zero:
+    return GenKillTransformer::zero();
+  case GenKillValue::Kind::Bottom:
+    return GenKillTransformer::bottom();
+  case GenKillValue::Kind::Ordinary:
+    return GenKillTransformer::makeGenKillTransformer(
+        value.getKill(), value.getGen(), value.getFlow());
+  }
+  return GenKillTransformer::zero();
+}
+
+namespace {
+
+class EnginePreparedAnalysis final : public backend::PreparedAnalysisImpl {
+public:
+  EnginePreparedAnalysis(std::unique_ptr<backend::Model> model,
+                         std::unique_ptr<backend::PreparedBackend> selected,
+                         std::unique_ptr<backend::PreparedBackend> verification,
+                         std::vector<backend::StackSymbolId> roots,
+                         std::map<Instruction *, std::uint32_t> before,
+                         std::map<Instruction *, std::uint32_t> after,
+                         std::map<Instruction *, std::set<Value *>> localGen,
+                         std::map<Instruction *, std::set<Value *>> localKill,
+                         double loweringMilliseconds)
+      : model(std::move(model)), selected(std::move(selected)),
+        verification(std::move(verification)), roots(std::move(roots)),
+        before(std::move(before)), after(std::move(after)),
+        localGen(std::move(localGen)), localKill(std::move(localKill)),
+        loweringMilliseconds(loweringMilliseconds) {
+    sessionStatistics = this->selected->statistics();
+    sessionStatistics.loweringMilliseconds = loweringMilliseconds;
+  }
+
+  std::unique_ptr<mono::DataFlowResult>
+  solve(const std::set<Value *> &initialFacts) override {
+    return solveImpl(initialFacts, WPDSObservationKind::ExactStack);
+  }
+
+  std::unique_ptr<mono::DataFlowResult>
+  solveContextAggregated(const std::set<Value *> &initialFacts) override {
+    return solveImpl(initialFacts, WPDSObservationKind::StackPrefix);
+  }
+
+  std::unique_ptr<mono::DataFlowResult>
+  solveImpl(const std::set<Value *> &initialFacts,
+            WPDSObservationKind observation) {
+    error.clear();
+    backend::Query query;
+    query.operation = WPDSQueryKind::PostStar;
+    query.observation = observation;
+    query.initialState = 0;
+    query.roots = roots;
+    query.seed = GenKillValue::normalized(DataFlowFacts::EmptySet(),
+                                          DataFlowFacts(initialFacts));
+
+    backend::QueryResult result;
+    if (!selected->solve(query, result, error)) {
+      sessionStatistics = selected->statistics();
+      sessionStatistics.loweringMilliseconds = loweringMilliseconds;
+      return nullptr;
+    }
+    if (verification) {
+      backend::QueryResult reference;
+      std::string verificationError;
+      if (!verification->solve(query, reference, verificationError)) {
+        error = "legacy verification solve failed: " + verificationError;
+        return nullptr;
+      }
+      for (backend::StackSymbolId symbol = 1;
+           symbol < model->stackSymbolNames().size(); ++symbol) {
+        const auto actual = result.observations.find(symbol);
+        const auto expected = reference.observations.find(symbol);
+        const bool actualReachable =
+            actual != result.observations.end() && actual->second.reachable;
+        const bool expectedReachable =
+            expected != reference.observations.end() &&
+            expected->second.reachable;
+        const bool weightsMatch =
+            !actualReachable ||
+            (expectedReachable &&
+             DataFlowFacts::Eq(
+                 actual->second.summary.apply(DataFlowFacts::EmptySet()),
+                 expected->second.summary.apply(DataFlowFacts::EmptySet())));
+        if (actualReachable != expectedReachable || !weightsMatch) {
+          std::ostringstream details;
+          details << "WPDS backend verification mismatch at '"
+                  << model->stackSymbolName(symbol) << "' for poststar: "
+                  << "selected reachable=" << actualReachable;
+          if (actualReachable) {
+            details << " weight=";
+            actual->second.summary.print(details);
+          }
+          details << ", legacy reachable=" << expectedReachable;
+          if (expectedReachable) {
+            details << " weight=";
+            expected->second.summary.print(details);
+          }
+          error = details.str();
+          return nullptr;
+        }
+      }
+    }
+
+    auto output = std::make_unique<mono::DataFlowResult>();
+    auto findObservation =
+        [&](std::uint32_t symbol) -> const backend::Observation * {
+      auto it = result.observations.find(symbol);
+      return it == result.observations.end() ? nullptr : &it->second;
+    };
+    for (const auto &entry : after) {
+      Instruction *instruction = entry.first;
+      const backend::Observation *out = findObservation(entry.second);
+      if (out != nullptr && out->reachable) {
+        output->OUT(instruction) =
+            out->summary.apply(DataFlowFacts::EmptySet()).getFacts();
+      }
+      filterFactsToInstructionScope(instruction, output->OUT(instruction));
+
+      auto beforeIt = before.find(instruction);
+      if (beforeIt != before.end()) {
+        const backend::Observation *in = findObservation(beforeIt->second);
+        if (in != nullptr && in->reachable) {
+          output->IN(instruction) =
+              in->summary.apply(DataFlowFacts::EmptySet()).getFacts();
+        }
+        filterFactsToInstructionScope(instruction, output->IN(instruction));
+      }
+      auto gen = localGen.find(instruction);
+      if (gen != localGen.end()) {
+        output->GEN(instruction) = gen->second;
+        filterFactsToInstructionScope(instruction, output->GEN(instruction));
+      }
+      auto kill = localKill.find(instruction);
+      if (kill != localKill.end()) {
+        output->KILL(instruction) = kill->second;
+        filterFactsToInstructionScope(instruction, output->KILL(instruction));
+      }
+    }
+    sessionStatistics = selected->statistics();
+    sessionStatistics.loweringMilliseconds = loweringMilliseconds;
+    return output;
+  }
+
+  const WPDSBackendStatistics &statistics() const override {
+    return sessionStatistics;
+  }
+
+  const std::string &lastError() const override { return error; }
+
+private:
+  std::unique_ptr<backend::Model> model;
+  std::unique_ptr<backend::PreparedBackend> selected;
+  std::unique_ptr<backend::PreparedBackend> verification;
+  std::vector<backend::StackSymbolId> roots;
+  std::map<Instruction *, std::uint32_t> before;
+  std::map<Instruction *, std::uint32_t> after;
+  std::map<Instruction *, std::set<Value *>> localGen;
+  std::map<Instruction *, std::set<Value *>> localKill;
+  double loweringMilliseconds = 0.0;
+  WPDSBackendStatistics sessionStatistics;
+  std::string error;
+};
+
+} // namespace
+
 InterProceduralDataFlowEngine::InterProceduralDataFlowEngine()
     : controlState(str2key("q")) {}
+
+InterProceduralDataFlowEngine::InterProceduralDataFlowEngine(
+    WPDSBackendOptions options)
+    : backendOptions(options), controlState(str2key("q")) {}
+
+void InterProceduralDataFlowEngine::setBackendOptions(
+    WPDSBackendOptions options) {
+  backendOptions = options;
+}
+
+const WPDSBackendOptions &
+InterProceduralDataFlowEngine::getBackendOptions() const {
+  return backendOptions;
+}
+
+const WPDSBackendStatistics &
+InterProceduralDataFlowEngine::getLastBackendStatistics() const {
+  return lastBackendStatistics;
+}
+
+const std::string &InterProceduralDataFlowEngine::getLastError() const {
+  return lastError;
+}
 
 void InterProceduralDataFlowEngine::setCalleeResolver(CalleeResolver resolver) {
   calleeResolver = std::move(resolver);
@@ -72,10 +270,7 @@ InterProceduralDataFlowEngine::runForwardAnalysis(
     Module &m,
     const std::function<GenKillTransformer *(Instruction *)> &createTransformer,
     const std::set<Value *> &initialFacts) {
-  return runForwardAnalysisWithAutomaton(
-      m, createTransformer, [&](CA<GenKillTransformer> &ca) {
-        buildInitialAutomaton(m, ca, initialFacts, true);
-      });
+  return runAnalysis(m, createTransformer, initialFacts, true, {}, false);
 }
 
 std::unique_ptr<mono::DataFlowResult>
@@ -83,10 +278,7 @@ InterProceduralDataFlowEngine::runBackwardAnalysis(
     Module &m,
     const std::function<GenKillTransformer *(Instruction *)> &createTransformer,
     const std::set<Value *> &initialFacts) {
-  return runBackwardAnalysisWithAutomaton(
-      m, createTransformer, [&](CA<GenKillTransformer> &ca) {
-        buildInitialAutomaton(m, ca, initialFacts, false);
-      });
+  return runAnalysis(m, createTransformer, initialFacts, false, {}, false);
 }
 
 std::unique_ptr<mono::DataFlowResult>
@@ -103,10 +295,8 @@ InterProceduralDataFlowEngine::runForwardAnalysisFromEntries(
     const std::function<GenKillTransformer *(Instruction *)> &createTransformer,
     const std::vector<Function *> &entryFunctions,
     const std::set<Value *> &initialFacts) {
-  return runForwardAnalysisWithAutomaton(
-      m, createTransformer, [&](CA<GenKillTransformer> &ca) {
-        buildSeedAutomatonForFunctions(ca, entryFunctions, initialFacts, false);
-      });
+  return runAnalysis(m, createTransformer, initialFacts, true, entryFunctions,
+                     true);
 }
 
 std::unique_ptr<mono::DataFlowResult>
@@ -123,10 +313,259 @@ InterProceduralDataFlowEngine::runBackwardAnalysisFromExits(
     const std::function<GenKillTransformer *(Instruction *)> &createTransformer,
     const std::vector<Function *> &exitFunctions,
     const std::set<Value *> &initialFacts) {
-  return runBackwardAnalysisWithAutomaton(
-      m, createTransformer, [&](CA<GenKillTransformer> &ca) {
-        buildSeedAutomatonForFunctions(ca, exitFunctions, initialFacts, true);
-      });
+  return runAnalysis(m, createTransformer, initialFacts, false, exitFunctions,
+                     true);
+}
+
+std::unique_ptr<PreparedAnalysis>
+InterProceduralDataFlowEngine::prepareForwardAnalysis(
+    Module &m, const std::function<GenKillTransformer *(Instruction *)>
+                   &createTransformer) {
+  using Clock = std::chrono::steady_clock;
+  lastError.clear();
+  if (!isWPDSBackendAvailable(backendOptions.backend)) {
+    lastError = getWPDSBackendUnavailableReason(backendOptions.backend);
+    return nullptr;
+  }
+  auto loweringStart = Clock::now();
+  std::unique_ptr<backend::Model> model =
+      buildModel(m, createTransformer, true);
+  const double loweringMilliseconds =
+      std::chrono::duration<double, std::milli>(Clock::now() - loweringStart)
+          .count();
+
+  std::vector<backend::StackSymbolId> roots;
+  Function *mainFunction = m.getFunction("main");
+  if (mainFunction != nullptr && !mainFunction->isDeclaration()) {
+    roots.push_back(modelFunctionEntry.at(mainFunction));
+  } else {
+    for (const auto &entry : modelFunctionEntry) {
+      roots.push_back(entry.second);
+    }
+  }
+  std::unique_ptr<backend::PreparedBackend> selected = backend::prepareBackend(
+      *model, backendOptions, WPDSQueryKind::PostStar, roots, lastError);
+  if (!selected) {
+    return nullptr;
+  }
+  std::unique_ptr<backend::PreparedBackend> verification;
+  if (backendOptions.verifyAgainstLegacy &&
+      backendOptions.backend != WPDSBackendKind::Legacy) {
+    WPDSBackendOptions legacyOptions;
+    verification = backend::prepareBackend(
+        *model, legacyOptions, WPDSQueryKind::PostStar, roots, lastError);
+    if (!verification) {
+      return nullptr;
+    }
+  }
+
+  auto implementation = std::make_unique<EnginePreparedAnalysis>(
+      std::move(model), std::move(selected), std::move(verification), roots,
+      modelInstBefore, modelInstAfter, localGenByInst, localKillByInst,
+      loweringMilliseconds);
+  return std::unique_ptr<PreparedAnalysis>(
+      new PreparedAnalysis(std::move(implementation)));
+}
+
+std::unique_ptr<PreparedAnalysis>
+InterProceduralDataFlowEngine::prepareBackwardAnalysis(
+    Module &m, const std::function<GenKillTransformer *(Instruction *)>
+                   &createTransformer) {
+  using Clock = std::chrono::steady_clock;
+  lastError.clear();
+  if (!isWPDSBackendAvailable(backendOptions.backend)) {
+    lastError = getWPDSBackendUnavailableReason(backendOptions.backend);
+    return nullptr;
+  }
+  auto loweringStart = Clock::now();
+  std::unique_ptr<backend::Model> model =
+      buildModel(m, createTransformer, false);
+  const double loweringMilliseconds =
+      std::chrono::duration<double, std::milli>(Clock::now() - loweringStart)
+          .count();
+
+  std::vector<backend::StackSymbolId> roots;
+  for (const auto &exit : modelFunctionExit) {
+    roots.push_back(exit.second);
+  }
+  std::unique_ptr<backend::PreparedBackend> selected = backend::prepareBackend(
+      *model, backendOptions, WPDSQueryKind::PostStar, roots, lastError);
+  if (!selected) {
+    return nullptr;
+  }
+  std::unique_ptr<backend::PreparedBackend> verification;
+  if (backendOptions.verifyAgainstLegacy &&
+      backendOptions.backend != WPDSBackendKind::Legacy) {
+    WPDSBackendOptions legacyOptions;
+    verification = backend::prepareBackend(
+        *model, legacyOptions, WPDSQueryKind::PostStar, roots, lastError);
+    if (!verification) {
+      return nullptr;
+    }
+  }
+
+  auto implementation = std::make_unique<EnginePreparedAnalysis>(
+      std::move(model), std::move(selected), std::move(verification), roots,
+      modelInstBefore, modelInstAfter, localGenByInst, localKillByInst,
+      loweringMilliseconds);
+  return std::unique_ptr<PreparedAnalysis>(
+      new PreparedAnalysis(std::move(implementation)));
+}
+
+std::unique_ptr<mono::DataFlowResult>
+InterProceduralDataFlowEngine::runAnalysis(
+    Module &m,
+    const std::function<GenKillTransformer *(Instruction *)> &createTransformer,
+    const std::set<Value *> &initialFacts, bool isForward,
+    const std::vector<Function *> &roots, bool explicitRoots) {
+  using Clock = std::chrono::steady_clock;
+  lastError.clear();
+  lastResultCA.reset();
+  lastAcceptState = std::nullopt;
+  beforeSummaries.clear();
+  afterSummaries.clear();
+
+  if (!isWPDSBackendAvailable(backendOptions.backend)) {
+    lastError = getWPDSBackendUnavailableReason(backendOptions.backend);
+    currentResult.reset();
+    return nullptr;
+  }
+
+  auto loweringStart = Clock::now();
+  std::unique_ptr<backend::Model> model =
+      buildModel(m, createTransformer, isForward);
+  const double loweringMilliseconds =
+      std::chrono::duration<double, std::milli>(Clock::now() - loweringStart)
+          .count();
+
+  backend::Query query;
+  std::vector<backend::StackSymbolId> preprocessEntries;
+  query.operation = WPDSQueryKind::PostStar;
+  query.initialState = 0;
+  query.seed = GenKillValue::normalized(DataFlowFacts::EmptySet(),
+                                        DataFlowFacts(initialFacts));
+
+  if (explicitRoots) {
+    for (Function *function : roots) {
+      if (function == nullptr) {
+        continue;
+      }
+      auto &mapping = isForward ? modelFunctionEntry : modelFunctionExit;
+      auto it = mapping.find(function);
+      if (it == mapping.end()) {
+        lastError = "WPDS query root is not a defined function in the model";
+        currentResult.reset();
+        return nullptr;
+      }
+      query.roots.push_back(it->second);
+      preprocessEntries.push_back(it->second);
+    }
+  } else if (isForward) {
+    Function *mainFunction = m.getFunction("main");
+    if (mainFunction != nullptr && !mainFunction->isDeclaration()) {
+      query.roots.push_back(modelFunctionEntry.at(mainFunction));
+      preprocessEntries.push_back(modelFunctionEntry.at(mainFunction));
+    } else {
+      for (const auto &entry : modelFunctionEntry) {
+        query.roots.push_back(entry.second);
+        preprocessEntries.push_back(entry.second);
+      }
+    }
+  } else {
+    for (const auto &exit : modelFunctionExit) {
+      query.roots.push_back(exit.second);
+      preprocessEntries.push_back(exit.second);
+    }
+  }
+
+  std::unique_ptr<backend::PreparedBackend> prepared = backend::prepareBackend(
+      *model, backendOptions, query.operation, preprocessEntries, lastError);
+  if (!prepared) {
+    currentResult.reset();
+    return nullptr;
+  }
+
+  backend::QueryResult backendResult;
+  if (!prepared->solve(query, backendResult, lastError)) {
+    currentResult.reset();
+    return nullptr;
+  }
+
+  if (backendOptions.verifyAgainstLegacy &&
+      backendOptions.backend != WPDSBackendKind::Legacy) {
+    WPDSBackendOptions legacyOptions;
+    legacyOptions.backend = WPDSBackendKind::Legacy;
+    std::string verificationError;
+    std::unique_ptr<backend::PreparedBackend> reference =
+        backend::prepareBackend(*model, legacyOptions, query.operation,
+                                preprocessEntries, verificationError);
+    backend::QueryResult referenceResult;
+    if (!reference ||
+        !reference->solve(query, referenceResult, verificationError)) {
+      lastError = "legacy verification solve failed: " + verificationError;
+      currentResult.reset();
+      return nullptr;
+    }
+    for (backend::StackSymbolId symbol = 1;
+         symbol < model->stackSymbolNames().size(); ++symbol) {
+      const auto actual = backendResult.observations.find(symbol);
+      const auto expected = referenceResult.observations.find(symbol);
+      const bool actualReachable = actual != backendResult.observations.end() &&
+                                   actual->second.reachable;
+      const bool expectedReachable =
+          expected != referenceResult.observations.end() &&
+          expected->second.reachable;
+      const bool weightsMatch =
+          !actualReachable ||
+          (expectedReachable &&
+           DataFlowFacts::Eq(
+               actual->second.summary.apply(DataFlowFacts::EmptySet()),
+               expected->second.summary.apply(DataFlowFacts::EmptySet())));
+      if (actualReachable != expectedReachable || !weightsMatch) {
+        std::ostringstream details;
+        details << "WPDS backend verification mismatch at '"
+                << model->stackSymbolName(symbol) << "' for "
+                << toString(query.operation)
+                << ": selected reachable=" << actualReachable;
+        if (actualReachable) {
+          details << " weight=";
+          actual->second.summary.print(details);
+        }
+        details << ", legacy reachable=" << expectedReachable;
+        if (expectedReachable) {
+          details << " weight=";
+          expected->second.summary.print(details);
+        }
+        lastError = details.str();
+        currentResult.reset();
+        return nullptr;
+      }
+    }
+  }
+
+  currentResult = std::make_unique<mono::DataFlowResult>();
+  extractModelResults(backendResult, currentResult);
+  lastBackendStatistics = prepared->statistics();
+  lastBackendStatistics.loweringMilliseconds = loweringMilliseconds;
+
+  if (const auto *legacy = prepared->legacyResultAutomaton()) {
+    lastResultCA = std::make_unique<CA<GenKillTransformer>>(*legacy);
+    controlState = lastResultCA->initial_state();
+    if (lastResultCA->final_states().size() == 1) {
+      lastAcceptState = *lastResultCA->final_states().begin();
+    }
+    for (const auto &entry : modelInstTransfer) {
+      instToKey[entry.first] = prepared->legacyKeyForSymbol(entry.second);
+    }
+    for (const auto &entry : modelInstBefore) {
+      instPrevKey[entry.first] = prepared->legacyKeyForSymbol(entry.second);
+    }
+    for (const auto &entry : modelCallReturn) {
+      callReturnToKey[entry.first] = prepared->legacyKeyForSymbol(entry.second);
+    }
+  }
+  lastQuery = Query::poststar();
+  return std::make_unique<mono::DataFlowResult>(*currentResult);
 }
 
 std::unique_ptr<mono::DataFlowResult>
@@ -134,6 +573,14 @@ InterProceduralDataFlowEngine::runAnalysisWithAutomaton(
     Module &m,
     const std::function<GenKillTransformer *(Instruction *)> &createTransformer,
     const AutomatonBuilder &buildInitialCA, bool isForward) {
+  lastError.clear();
+  if (backendOptions.backend != WPDSBackendKind::Legacy) {
+    lastError = "caller-provided legacy configuration automata are supported "
+                "only by the legacy WPDS backend";
+    currentResult.reset();
+    return nullptr;
+  }
+
   // Model both directions as forward reachability over direction-specific
   // program graphs. This keeps interprocedural call/return wiring explicit.
   Semiring<GenKillTransformer> semiring(GenKillTransformer::one(), true);
@@ -181,18 +628,22 @@ InterProceduralDataFlowEngine::getOutSet(Instruction *inst) const {
   return currentResult->OUT(inst);
 }
 
-std::set<Value *>
-InterProceduralDataFlowEngine::queryFactsBeforeInstruction(
+std::set<Value *> InterProceduralDataFlowEngine::queryFactsBeforeInstruction(
     Instruction *inst) const {
+  if (currentResult) {
+    return currentResult->IN(inst);
+  }
   std::set<Value *> facts =
       queryFactsAtSymbol(getProgramPointKeyBeforeInstruction(inst));
   filterFactsToInstructionScope(inst, facts);
   return facts;
 }
 
-std::set<Value *>
-InterProceduralDataFlowEngine::queryFactsAfterInstruction(
+std::set<Value *> InterProceduralDataFlowEngine::queryFactsAfterInstruction(
     Instruction *inst) const {
+  if (currentResult) {
+    return currentResult->OUT(inst);
+  }
   std::set<Value *> facts =
       queryFactsAtSymbol(getProgramPointKeyAfterInstruction(inst));
   filterFactsToInstructionScope(inst, facts);
@@ -202,12 +653,22 @@ InterProceduralDataFlowEngine::queryFactsAfterInstruction(
 ::ref_ptr<GenKillTransformer>
 InterProceduralDataFlowEngine::querySummaryBeforeInstruction(
     Instruction *inst) const {
+  auto summary = beforeSummaries.find(inst);
+  if (summary != beforeSummaries.end()) {
+    return ::ref_ptr<GenKillTransformer>(
+        materializeLegacyWeight(summary->second));
+  }
   return querySummaryAtSymbol(getProgramPointKeyBeforeInstruction(inst));
 }
 
 ::ref_ptr<GenKillTransformer>
 InterProceduralDataFlowEngine::querySummaryAfterInstruction(
     Instruction *inst) const {
+  auto summary = afterSummaries.find(inst);
+  if (summary != afterSummaries.end()) {
+    return ::ref_ptr<GenKillTransformer>(
+        materializeLegacyWeight(summary->second));
+  }
   return querySummaryAtSymbol(getProgramPointKeyAfterInstruction(inst));
 }
 
@@ -231,17 +692,19 @@ InterProceduralDataFlowEngine::getProgramPointKeyAfterInstruction(
   return it != instToKey.end() ? it->second : WPDS_EPSILON;
 }
 
-void InterProceduralDataFlowEngine::buildWPDS(
-    Module &m, WPDS<GenKillTransformer> &wpds,
-    const std::function<GenKillTransformer *(Instruction *)>
-        &createTransformer,
+std::unique_ptr<backend::Model> InterProceduralDataFlowEngine::buildModel(
+    Module &m,
+    const std::function<GenKillTransformer *(Instruction *)> &createTransformer,
     bool isForward) {
+  using backend::ControlStateId;
+  using backend::StackSymbolId;
+
   ::dataflow::controlflow::LLVMIntraCFG intraCfg;
   std::unique_ptr<::dataflow::controlflow::LLVMInterCFG> interCfgStorage;
   if (calleeResolver) {
     interCfgStorage = std::make_unique<::dataflow::controlflow::LLVMInterCFG>(
-        &m, [this](Instruction *inst) -> std::vector<Function *> {
-          auto *call = dyn_cast<CallBase>(inst);
+        &m, [this](Instruction *instruction) -> std::vector<Function *> {
+          auto *call = dyn_cast<CallBase>(instruction);
           return call ? calleeResolver(call) : std::vector<Function *>{};
         });
   } else {
@@ -250,7 +713,18 @@ void InterProceduralDataFlowEngine::buildWPDS(
   }
   auto &interCfg = *interCfgStorage;
 
-  // Clear previous mappings
+  auto model = std::make_unique<backend::Model>();
+  const ControlStateId control = model->addControlState("q");
+
+  modelFunctionEntry.clear();
+  modelFunctionExit.clear();
+  modelInstAfter.clear();
+  modelInstBefore.clear();
+  modelInstTransfer.clear();
+  modelBasicBlock.clear();
+  modelCallReturn.clear();
+  localGenByInst.clear();
+  localKillByInst.clear();
   functionToKey.clear();
   functionExitToKey.clear();
   instToKey.clear();
@@ -258,304 +732,356 @@ void InterProceduralDataFlowEngine::buildWPDS(
   bbToKey.clear();
   callReturnToKey.clear();
   keyToInst.clear();
-  localGenByInst.clear();
-  localKillByInst.clear();
 
-  auto functionTag = [&](Function &F) -> std::string {
-    std::string fname = F.getName().str();
-    if (fname.empty()) {
-      fname = "anon";
+  std::map<Function *, std::size_t> functionNumbers;
+  std::size_t functionNumber = 0;
+  for (Function &function : m) {
+    if (!function.isDeclaration()) {
+      functionNumbers[&function] = functionNumber++;
     }
-    return fname + "_" + std::to_string((uintptr_t)&F);
-  };
-
-  auto bbTag = [&](Function &F, BasicBlock &BB) -> std::string {
-    std::string name = BB.getName().str();
-    if (name.empty()) {
-      name = "bb";
-    }
-    return functionTag(F) + "_bb_" + name + "_" +
-           std::to_string((uintptr_t)&BB);
-  };
-
-  auto instTag = [&](Function &F, Instruction &I) -> std::string {
-    std::string name = I.getName().str();
-    if (name.empty()) {
-      name = "inst";
-    }
-    return functionTag(F) + "_i_" + name + "_" + std::to_string((uintptr_t)&I);
-  };
-
-  auto retTag = [&](Function &F, Instruction &callI) -> std::string {
-    return functionTag(F) + "_ret_" + std::to_string((uintptr_t)&callI);
-  };
-
-  auto ensurePopRule = [&](wpds_key_t boundaryKey) {
-    wpds.add_rule(controlState, boundaryKey, controlState,
-                  GenKillTransformer::one());
-  };
-
-  auto getAfterKey = [&](Instruction *inst) -> wpds_key_t {
-    if (auto *callInst = dyn_cast_or_null<CallBase>(inst)) {
-      auto retIt = callReturnToKey.find(callInst);
-      if (retIt != callReturnToKey.end()) {
-        return retIt->second;
-      }
-    }
-    auto instIt = instToKey.find(inst);
-    return instIt != instToKey.end() ? instIt->second : WPDS_EPSILON;
-  };
-
-  // First pass: Create function entry and exit keys for all functions
-  for (auto &F : m) {
-    if (F.isDeclaration())
-      continue;
-
-    const std::string ftag = functionTag(F);
-    wpds_key_t funcEntry = new_str2key(("entry_" + ftag).c_str());
-    wpds_key_t funcExit = new_str2key(("exit_" + ftag).c_str());
-    functionToKey[&F] = funcEntry;
-    functionExitToKey[&F] = funcExit;
-
-    wpds.add_element_to_P(controlState);
   }
 
-  // Second pass: assign basic-block and instruction keys.
-  for (auto &F : m) {
-    if (F.isDeclaration())
-      continue;
+  auto functionTag = [&](Function &function) {
+    std::string name = function.getName().str();
+    if (name.empty()) {
+      name = "anonymous";
+    }
+    return "f" + std::to_string(functionNumbers.at(&function)) + "_" + name;
+  };
 
-    for (auto &BB : F) {
-      const std::string btag = bbTag(F, BB);
-      wpds_key_t bbKey = new_str2key(btag.c_str());
-      bbToKey[&BB] = bbKey;
-      wpds_key_t prevKey = bbKey;
-      for (auto &I : BB) {
-        const std::string itag = instTag(F, I);
-        wpds_key_t instKey = new_str2key(itag.c_str());
-        instToKey[&I] = instKey;
-        keyToInst[instKey] = &I;
-        instPrevKey[&I] = prevKey;
-        if (auto *callInst = dyn_cast<CallBase>(&I)) {
-          callReturnToKey[callInst] = new_str2key(retTag(F, I).c_str());
+  for (Function &function : m) {
+    if (function.isDeclaration()) {
+      continue;
+    }
+    const std::string tag = functionTag(function);
+    StackSymbolId entry = model->addStackSymbol("entry_" + tag);
+    StackSymbolId exit = model->addStackSymbol("exit_" + tag);
+    modelFunctionEntry[&function] = entry;
+    modelFunctionExit[&function] = exit;
+    model->addProcedureEntry(entry);
+  }
+
+  for (Function &function : m) {
+    if (function.isDeclaration()) {
+      continue;
+    }
+    std::size_t blockNumber = 0;
+    for (BasicBlock &block : function) {
+      const std::string blockTag =
+          functionTag(function) + "_bb" + std::to_string(blockNumber++);
+      StackSymbolId blockSymbol = model->addStackSymbol(blockTag);
+      modelBasicBlock[&block] = blockSymbol;
+      StackSymbolId previous = blockSymbol;
+      std::size_t instructionNumber = 0;
+      for (Instruction &instruction : block) {
+        const std::string instructionTag =
+            blockTag + "_i" + std::to_string(instructionNumber++);
+        StackSymbolId instructionSymbol = model->addStackSymbol(instructionTag);
+        modelInstTransfer[&instruction] = instructionSymbol;
+        modelInstAfter[&instruction] = instructionSymbol;
+        modelInstBefore[&instruction] = previous;
+        if (auto *call = dyn_cast<CallBase>(&instruction)) {
+          StackSymbolId returnSymbol =
+              model->addStackSymbol(instructionTag + "_return");
+          modelCallReturn[call] = returnSymbol;
+          modelInstAfter[&instruction] = returnSymbol;
+          previous = returnSymbol;
+        } else {
+          previous = instructionSymbol;
         }
-        prevKey = getAfterKey(&I);
       }
     }
   }
 
-  // Third pass: create direction-specific rules.
-  for (auto &F : m) {
-    if (F.isDeclaration()) {
+  auto afterSymbol = [&](Instruction *instruction) -> StackSymbolId {
+    auto it = modelInstAfter.find(instruction);
+    return it == modelInstAfter.end() ? backend::Epsilon : it->second;
+  };
+  auto popBoundary = [&](StackSymbolId symbol, const std::string &origin) {
+    model->addPopRule(control, symbol, control, GenKillValue::one(), origin);
+  };
+  auto instructionOrigin = [](Instruction &instruction) {
+    std::string text;
+    raw_string_ostream stream(text);
+    instruction.print(stream);
+    return stream.str();
+  };
+
+  for (Function &function : m) {
+    if (function.isDeclaration()) {
       continue;
     }
-
-    wpds_key_t funcEntry = functionToKey[&F];
-    wpds_key_t funcExit = functionExitToKey[&F];
-    BasicBlock &entryBB = F.getEntryBlock();
-    wpds_key_t entryBBKey = bbToKey[&entryBB];
+    const StackSymbolId functionEntry = modelFunctionEntry.at(&function);
+    const StackSymbolId functionExit = modelFunctionExit.at(&function);
+    BasicBlock &entryBlock = function.getEntryBlock();
+    const StackSymbolId entryBlockSymbol = modelBasicBlock.at(&entryBlock);
 
     if (isForward) {
-      wpds.add_rule(controlState, funcEntry, controlState, entryBBKey,
-                    GenKillTransformer::one());
+      model->addReplaceRule(control, functionEntry, control, entryBlockSymbol,
+                            GenKillValue::one(), "function entry");
     } else {
-      wpds.add_rule(controlState, entryBBKey, controlState, funcEntry,
-                    GenKillTransformer::one());
+      model->addReplaceRule(control, entryBlockSymbol, control, functionEntry,
+                            GenKillValue::one(), "function entry (reverse)");
     }
 
-    for (auto &BB : F) {
-      wpds_key_t bbKey = bbToKey[&BB];
-      if (!isForward && &BB != &entryBB) {
-        for (BasicBlock *pred : predecessors(&BB)) {
-          if (pred == nullptr || pred->getTerminator() == nullptr) {
+    for (BasicBlock &block : function) {
+      const StackSymbolId blockSymbol = modelBasicBlock.at(&block);
+      if (!isForward && &block != &entryBlock) {
+        for (BasicBlock *predecessor : predecessors(&block)) {
+          if (predecessor == nullptr ||
+              predecessor->getTerminator() == nullptr) {
             continue;
           }
-          wpds.add_rule(controlState, bbKey, controlState,
-                        getAfterKey(pred->getTerminator()),
-                        GenKillTransformer::one());
+          model->addReplaceRule(control, blockSymbol, control,
+                                afterSymbol(predecessor->getTerminator()),
+                                GenKillValue::one(), "CFG edge (reverse)");
         }
       }
 
-      for (auto &I : BB) {
-        wpds_key_t beforeKey = instPrevKey[&I];
-        wpds_key_t instKey = instToKey[&I];
-        wpds_key_t afterKey = getAfterKey(&I);
+      for (Instruction &instruction : block) {
+        const StackSymbolId before = modelInstBefore.at(&instruction);
+        const StackSymbolId transferAfter = modelInstTransfer.at(&instruction);
 
-        GenKillTransformer *transformer = createTransformer(&I);
-        if (!transformer) {
+        ::ref_ptr<GenKillTransformer> transformer(
+            createTransformer(&instruction));
+        if (!transformer.get_ptr()) {
           transformer = GenKillTransformer::one();
         }
-        localGenByInst[&I] = transformer->getGen().getFacts();
-        localKillByInst[&I] = transformer->getKill().getFacts();
+        localGenByInst[&instruction] = transformer->getGen().getFacts();
+        localKillByInst[&instruction] = transformer->getKill().getFacts();
+        const std::string origin = instructionOrigin(instruction);
 
         if (isForward) {
-          wpds.add_rule(controlState, beforeKey, controlState, instKey,
-                        transformer);
+          model->addReplaceRule(control, before, control, transferAfter,
+                                transformer->getValue(), origin);
         } else {
-          wpds.add_rule(controlState, instKey, controlState, beforeKey,
-                        transformer);
+          model->addReplaceRule(control, transferAfter, control, before,
+                                transformer->getValue(), origin);
         }
 
-        if (auto *callInst = dyn_cast<CallBase>(&I)) {
-          std::vector<Function *> callees;
-          if (calleeResolver) {
-            callees = calleeResolver(callInst);
-          } else {
-            callees = interCfg.getCalleesOfCallAt(callInst);
-          }
-
+        auto *call = dyn_cast<CallBase>(&instruction);
+        if (call != nullptr) {
+          const StackSymbolId after = modelCallReturn.at(call);
+          std::vector<Function *> callees =
+              calleeResolver ? calleeResolver(call)
+                             : interCfg.getCalleesOfCallAt(call);
           bool hasModeledCallee = false;
           bool hasUnmodeledCallee = callees.empty();
+          std::size_t calleeNumber = 0;
 
-          auto connectForwardReturnJoin = [&](wpds_key_t pathReturnKey,
-                                              GenKillTransformer *weight) {
-            wpds.add_rule(controlState, pathReturnKey, controlState, afterKey,
-                          weight ? weight : GenKillTransformer::one());
-          };
-          auto connectBackwardCallSite = [&](wpds_key_t pathCallKey,
-                                             GenKillTransformer *weight) {
-            wpds.add_rule(controlState, pathCallKey, controlState, instKey,
-                          weight ? weight : GenKillTransformer::one());
-          };
-
-          for (Function *calledFunc : callees) {
-            if (!calledFunc || calledFunc->isDeclaration() ||
-                functionToKey.find(calledFunc) == functionToKey.end()) {
+          for (Function *callee : callees) {
+            if (callee == nullptr || callee->isDeclaration() ||
+                modelFunctionEntry.count(callee) == 0) {
               hasUnmodeledCallee = true;
               continue;
             }
-
             hasModeledCallee = true;
-            wpds_key_t calledEntry = functionToKey[calledFunc];
-            wpds_key_t calledExit = functionExitToKey[calledFunc];
-
-            std::map<Value *, DataFlowFacts> actualToFormalFlow;
-            std::map<Value *, DataFlowFacts> formalToActualFlow;
-            unsigned argIdx = 0;
-            for (auto &formal : calledFunc->args()) {
-              if (argIdx < callInst->arg_size()) {
-                Value *actual = callInst->getArgOperand(argIdx);
-                actualToFormalFlow[actual].addFact(&formal);
-                formalToActualFlow[&formal].addFact(actual);
+            std::map<Value *, DataFlowFacts> actualToFormal;
+            std::map<Value *, DataFlowFacts> formalToActual;
+            unsigned argumentIndex = 0;
+            for (Argument &formal : callee->args()) {
+              if (argumentIndex < call->arg_size()) {
+                Value *actual = call->getArgOperand(argumentIndex);
+                actualToFormal[actual].addFact(&formal);
+                formalToActual[&formal].addFact(actual);
               }
-              argIdx++;
+              ++argumentIndex;
             }
 
-            std::map<Value *, DataFlowFacts> retToCallFlow;
-            std::map<Value *, DataFlowFacts> callToRetFlow;
-            if (!callInst->getType()->isVoidTy()) {
-              for (auto &calleeBB : *calledFunc) {
-                if (auto *retInst = dyn_cast<ReturnInst>(calleeBB.getTerminator())) {
-                  Value *rv = retInst->getReturnValue();
-                  if (rv == nullptr) {
-                    continue;
-                  }
-                  retToCallFlow[rv].addFact(callInst);
-                  callToRetFlow[callInst].addFact(rv);
+            std::map<Value *, DataFlowFacts> returnToCall;
+            std::map<Value *, DataFlowFacts> callToReturn;
+            if (!call->getType()->isVoidTy()) {
+              for (BasicBlock &calleeBlock : *callee) {
+                auto *returnInstruction =
+                    dyn_cast<ReturnInst>(calleeBlock.getTerminator());
+                if (returnInstruction == nullptr ||
+                    returnInstruction->getReturnValue() == nullptr) {
+                  continue;
                 }
+                Value *returnValue = returnInstruction->getReturnValue();
+                returnToCall[returnValue].addFact(call);
+                callToReturn[call].addFact(returnValue);
               }
             }
 
+            StackSymbolId pathContinuation = model->addStackSymbol(
+                model->stackSymbolName(after) + "_callee" +
+                std::to_string(calleeNumber++));
             if (isForward) {
-              wpds_key_t pathReturnKey =
-                  new_str2key(
-                      (retTag(F, I) + "_callee_" + functionTag(*calledFunc))
-                          .c_str());
-              wpds.add_rule(
-                  controlState, instKey, controlState, calledEntry, pathReturnKey,
-                  GenKillTransformer::makeGenKillTransformer(
-                      DataFlowFacts::EmptySet(), DataFlowFacts::EmptySet(),
-                      actualToFormalFlow));
-              ensurePopRule(calledExit);
-              connectForwardReturnJoin(
-                  pathReturnKey,
-                  GenKillTransformer::makeGenKillTransformer(
-                      DataFlowFacts::EmptySet(), DataFlowFacts::EmptySet(),
-                      retToCallFlow));
+              model->addPushRule(
+                  control, transferAfter, control,
+                  modelFunctionEntry.at(callee), pathContinuation,
+                  GenKillValue::normalized(DataFlowFacts::EmptySet(),
+                                           DataFlowFacts::EmptySet(),
+                                           actualToFormal),
+                  origin + " (call)");
+              popBoundary(modelFunctionExit.at(callee),
+                          origin + " (callee return)");
+              model->addReplaceRule(
+                  control, pathContinuation, control, after,
+                  GenKillValue::normalized(DataFlowFacts::EmptySet(),
+                                           DataFlowFacts::EmptySet(),
+                                           returnToCall),
+                  origin + " (return value)");
             } else {
-              wpds_key_t pathCallKey =
-                  new_str2key((retTag(F, I) + "_callee_back_" +
-                               functionTag(*calledFunc))
-                                  .c_str());
-              wpds.add_rule(
-                  controlState, afterKey, controlState, calledExit, pathCallKey,
-                  GenKillTransformer::makeGenKillTransformer(
-                      DataFlowFacts::EmptySet(), DataFlowFacts::EmptySet(),
-                      callToRetFlow));
-              ensurePopRule(calledEntry);
-              connectBackwardCallSite(
-                  pathCallKey,
-                  GenKillTransformer::makeGenKillTransformer(
-                      DataFlowFacts::EmptySet(), DataFlowFacts::EmptySet(),
-                      formalToActualFlow));
+              model->addPushRule(control, after, control,
+                                 modelFunctionExit.at(callee), pathContinuation,
+                                 GenKillValue::normalized(
+                                     DataFlowFacts::EmptySet(),
+                                     DataFlowFacts::EmptySet(), callToReturn),
+                                 origin + " (reverse call)");
+              popBoundary(modelFunctionEntry.at(callee),
+                          origin + " (reverse callee return)");
+              model->addReplaceRule(
+                  control, pathContinuation, control, transferAfter,
+                  GenKillValue::normalized(DataFlowFacts::EmptySet(),
+                                           DataFlowFacts::EmptySet(),
+                                           formalToActual),
+                  origin + " (reverse arguments)");
             }
           }
 
           if (hasUnmodeledCallee) {
-            wpds_key_t unknownKey = new_str2key(
-                (retTag(F, I) + (isForward ? "_unknown" : "_unknown_back"))
-                    .c_str());
+            StackSymbolId unknown = model->addStackSymbol(
+                model->stackSymbolName(after) + "_unknown");
+            ::ref_ptr<GenKillTransformer> summary(
+                buildUnknownCallSummary(call, m, isForward));
             if (isForward) {
-              wpds.add_rule(controlState, instKey, controlState, unknownKey,
-                            buildUnknownCallSummary(callInst, m, true));
-              connectForwardReturnJoin(unknownKey, GenKillTransformer::one());
+              model->addReplaceRule(control, transferAfter, control, unknown,
+                                    summary->getValue(),
+                                    origin + " (external)");
+              model->addReplaceRule(control, unknown, control, after,
+                                    GenKillValue::one(),
+                                    origin + " (external return)");
             } else {
-              wpds.add_rule(controlState, afterKey, controlState, unknownKey,
-                            buildUnknownCallSummary(callInst, m, false));
-              connectBackwardCallSite(unknownKey, GenKillTransformer::one());
+              model->addReplaceRule(control, after, control, unknown,
+                                    summary->getValue(),
+                                    origin + " (reverse external)");
+              model->addReplaceRule(control, unknown, control, transferAfter,
+                                    GenKillValue::one(),
+                                    origin + " (reverse external return)");
             }
           }
 
           if (isForward && (hasModeledCallee || hasUnmodeledCallee) &&
-              I.isTerminator()) {
-            for (auto *retSite : interCfg.getReturnSitesOfCallAt(callInst)) {
-              if (retSite == nullptr) {
-                continue;
+              instruction.isTerminator()) {
+            for (Instruction *returnSite :
+                 interCfg.getReturnSitesOfCallAt(call)) {
+              if (returnSite != nullptr &&
+                  modelBasicBlock.count(returnSite->getParent()) != 0) {
+                model->addReplaceRule(
+                    control, after, control,
+                    modelBasicBlock.at(returnSite->getParent()),
+                    GenKillValue::one(), origin + " (invoke return site)");
               }
-              auto bbIt = bbToKey.find(retSite->getParent());
-              if (bbIt == bbToKey.end()) {
-                continue;
-              }
-              wpds.add_rule(controlState, afterKey, controlState, bbIt->second,
-                            GenKillTransformer::one());
             }
           }
           continue;
         }
 
-        if (isa<ReturnInst>(&I)) {
+        if (isa<ReturnInst>(&instruction)) {
           if (isForward) {
-            wpds.add_rule(controlState, instKey, controlState, funcExit,
-                          GenKillTransformer::one());
+            model->addReplaceRule(control, transferAfter, control, functionExit,
+                                  GenKillValue::one(), "function return");
           } else {
-            wpds.add_rule(controlState, funcExit, controlState, instKey,
-                          GenKillTransformer::one());
+            model->addReplaceRule(control, functionExit, control, transferAfter,
+                                  GenKillValue::one(),
+                                  "function return (reverse)");
           }
-          continue;
         }
       }
 
       if (isForward) {
-        if (Instruction *terminator = BB.getTerminator()) {
-          wpds_key_t termKey = getAfterKey(terminator);
-          if (!isa<ReturnInst>(terminator) && !isa<CallBase>(terminator)) {
-            for (auto *succInst : intraCfg.getSuccsOf(
-                     terminator,
-                     ::dataflow::controlflow::FlowDirection::Forward)) {
-              if (succInst == nullptr) {
-                continue;
-              }
-              wpds.add_rule(controlState, termKey, controlState,
-                            bbToKey[succInst->getParent()],
-                            GenKillTransformer::one());
+        Instruction *terminator = block.getTerminator();
+        if (terminator != nullptr && !isa<ReturnInst>(terminator) &&
+            !isa<CallBase>(terminator)) {
+          for (Instruction *successor : intraCfg.getSuccsOf(
+                   terminator,
+                   ::dataflow::controlflow::FlowDirection::Forward)) {
+            if (successor != nullptr) {
+              model->addReplaceRule(control, afterSymbol(terminator), control,
+                                    modelBasicBlock.at(successor->getParent()),
+                                    GenKillValue::one(), "CFG edge");
             }
           }
         }
       }
     }
   }
+  return model;
 }
 
+void InterProceduralDataFlowEngine::buildWPDS(
+    Module &m, WPDS<GenKillTransformer> &legacyPds,
+    const std::function<GenKillTransformer *(Instruction *)> &createTransformer,
+    bool isForward) {
+  static std::atomic<std::uint64_t> nextSession{0};
+  const std::string prefix =
+      "lotus_wpds_compat_" + std::to_string(++nextSession) + "_";
+  std::unique_ptr<backend::Model> model =
+      buildModel(m, createTransformer, isForward);
+
+  std::vector<wpds_key_t> states;
+  states.reserve(model->controlStateNames().size());
+  for (const std::string &name : model->controlStateNames()) {
+    states.push_back(new_str2key((prefix + "p_" + name).c_str()));
+  }
+  std::vector<wpds_key_t> symbols(model->stackSymbolNames().size(),
+                                  WPDS_EPSILON);
+  for (backend::StackSymbolId id = 1; id < model->stackSymbolNames().size();
+       ++id) {
+    symbols[id] =
+        new_str2key((prefix + "g_" + model->stackSymbolName(id)).c_str());
+  }
+
+  controlState = states.front();
+  functionToKey.clear();
+  functionExitToKey.clear();
+  instToKey.clear();
+  instPrevKey.clear();
+  bbToKey.clear();
+  callReturnToKey.clear();
+  keyToInst.clear();
+
+  for (const auto &entry : modelFunctionEntry) {
+    functionToKey[entry.first] = symbols[entry.second];
+  }
+  for (const auto &entry : modelFunctionExit) {
+    functionExitToKey[entry.first] = symbols[entry.second];
+  }
+  for (const auto &entry : modelInstTransfer) {
+    instToKey[entry.first] = symbols[entry.second];
+    keyToInst[symbols[entry.second]] = entry.first;
+  }
+  for (const auto &entry : modelInstBefore) {
+    instPrevKey[entry.first] = symbols[entry.second];
+  }
+  for (const auto &entry : modelBasicBlock) {
+    bbToKey[entry.first] = symbols[entry.second];
+  }
+  for (const auto &entry : modelCallReturn) {
+    callReturnToKey[entry.first] = symbols[entry.second];
+  }
+
+  for (const backend::Rule &rule : model->rules()) {
+    GenKillTransformer *weight = materializeLegacyWeight(rule.weight);
+    switch (rule.kind) {
+    case backend::RuleKind::Pop:
+      legacyPds.add_rule(states[rule.fromState], symbols[rule.fromStack],
+                         states[rule.toState], weight);
+      break;
+    case backend::RuleKind::Replace:
+      legacyPds.add_rule(states[rule.fromState], symbols[rule.fromStack],
+                         states[rule.toState], symbols[rule.toStack1], weight);
+      break;
+    case backend::RuleKind::Push:
+      legacyPds.add_rule(states[rule.fromState], symbols[rule.fromStack],
+                         states[rule.toState], symbols[rule.toStack1],
+                         symbols[rule.toStack2], weight);
+      break;
+    }
+  }
+}
 void InterProceduralDataFlowEngine::buildInitialAutomaton(
     Module &m, CA<GenKillTransformer> &ca,
     const std::set<Value *> &initialFacts, bool isForward) {
@@ -752,13 +1278,56 @@ void InterProceduralDataFlowEngine::extractResults(
   }
 }
 
+void InterProceduralDataFlowEngine::extractModelResults(
+    const backend::QueryResult &backendResult,
+    std::unique_ptr<mono::DataFlowResult> &result) {
+  auto observation = [&](std::uint32_t symbol) -> const backend::Observation * {
+    auto it = backendResult.observations.find(symbol);
+    return it == backendResult.observations.end() ? nullptr : &it->second;
+  };
+
+  for (const auto &entry : modelInstAfter) {
+    Instruction *instruction = entry.first;
+    const backend::Observation *after = observation(entry.second);
+    if (after != nullptr && after->reachable) {
+      result->OUT(instruction) =
+          after->summary.apply(DataFlowFacts::EmptySet()).getFacts();
+      afterSummaries[instruction] = after->summary;
+    }
+    filterFactsToInstructionScope(instruction, result->OUT(instruction));
+
+    auto beforeSymbol = modelInstBefore.find(instruction);
+    if (beforeSymbol != modelInstBefore.end()) {
+      const backend::Observation *before = observation(beforeSymbol->second);
+      if (before != nullptr && before->reachable) {
+        result->IN(instruction) =
+            before->summary.apply(DataFlowFacts::EmptySet()).getFacts();
+        beforeSummaries[instruction] = before->summary;
+      }
+      filterFactsToInstructionScope(instruction, result->IN(instruction));
+    }
+
+    auto gen = localGenByInst.find(instruction);
+    if (gen != localGenByInst.end()) {
+      result->GEN(instruction) = gen->second;
+      filterFactsToInstructionScope(instruction, result->GEN(instruction));
+    }
+    auto kill = localKillByInst.find(instruction);
+    if (kill != localKillByInst.end()) {
+      result->KILL(instruction) = kill->second;
+      filterFactsToInstructionScope(instruction, result->KILL(instruction));
+    }
+  }
+}
+
 const wpds::CA<GenKillTransformer> *
 InterProceduralDataFlowEngine::getLastResultAutomaton() const {
   return lastResultCA.get();
 }
 
 ::ref_ptr<GenKillTransformer>
-InterProceduralDataFlowEngine::querySummaryAtSymbol(wpds::wpds_key_t symbol) const {
+InterProceduralDataFlowEngine::querySummaryAtSymbol(
+    wpds::wpds_key_t symbol) const {
   if (!lastResultCA || symbol == WPDS_EPSILON) {
     return ::ref_ptr<GenKillTransformer>(GenKillTransformer::zero());
   }
@@ -777,8 +1346,8 @@ InterProceduralDataFlowEngine::querySummaryAtSymbol(wpds::wpds_key_t symbol) con
   return lastResultCA->reglang_query(lang);
 }
 
-std::set<Value *>
-InterProceduralDataFlowEngine::queryFactsAtSymbol(wpds::wpds_key_t symbol) const {
+std::set<Value *> InterProceduralDataFlowEngine::queryFactsAtSymbol(
+    wpds::wpds_key_t symbol) const {
   auto summary = querySummaryAtSymbol(symbol);
   if (!summary.get_ptr() || summary->equal(GenKillTransformer::zero())) {
     return {};
@@ -807,8 +1376,8 @@ GenKillTransformer *InterProceduralDataFlowEngine::buildUnknownCallSummary(
   std::vector<GlobalValue *> globals = MemoryObjectFact::trackedGlobals(m);
 
   if (externalCallPolicy.buildSummary) {
-    if (GenKillTransformer *custom =
-            externalCallPolicy.buildSummary(callInst, pointerObjects, globals)) {
+    if (GenKillTransformer *custom = externalCallPolicy.buildSummary(
+            callInst, pointerObjects, globals)) {
       return custom;
     }
   }
@@ -827,7 +1396,8 @@ GenKillTransformer *InterProceduralDataFlowEngine::buildUnknownCallSummary(
 
   if (!callInst->getType()->isVoidTy()) {
     const bool mayFlowFromPointers =
-        externalCallPolicy.flowPointerArgumentsToReturn && !pointerObjects.empty();
+        externalCallPolicy.flowPointerArgumentsToReturn &&
+        !pointerObjects.empty();
     const bool mayFlowFromGlobals =
         externalCallPolicy.flowGlobalsToReturn && !globals.empty();
     const bool mayGenerateReturn = mayFlowFromPointers || mayFlowFromGlobals;
@@ -858,7 +1428,6 @@ GenKillTransformer *InterProceduralDataFlowEngine::buildUnknownCallSummary(
         }
       }
     }
-
   }
 
   return GenKillTransformer::makeGenKillTransformer(

@@ -115,6 +115,7 @@ namespace wali {
       // Pop weights
       {
         Timer timer("Pop Weights");
+        timer.measureAndReport = false;
         calculatePopWeights();
       }
 
@@ -412,6 +413,7 @@ namespace wali {
       set<Key> state_used_once; // we switch from intraq-regexp to pop-regexp after we've used the former once
 
       Timer *timer1 = new Timer("SWPDS: Setup");
+      timer1->measureAndReport = false;
 
       std::set<Key>::iterator set_it;
       // Build a map: state -> { incoming transition }
@@ -570,8 +572,7 @@ namespace wali {
       }
 
       // Build the worklist
-      int scc = ca_gr.runSCCdecomposition();
-      cout << "SWPDS: nSCC: " << scc << "\n";
+      ca_gr.runSCCdecomposition();
 
       for(set_it = states.begin(); set_it != states.end(); set_it++) {
         if(*set_it == init_state)
@@ -583,6 +584,7 @@ namespace wali {
       //post_igr->sem->printSemiringTime(cout) << "\n";
 
       Timer *timer = new Timer("SWPDS Saturation");
+      timer->measureAndReport = false;
       // Finally, we're all setup to run saturation
       while(!worklist.empty()) {
         // Get a state q
@@ -652,6 +654,7 @@ namespace wali {
       dag->executingPoststar(true);
 
       Timer *timer2 = new Timer("SWPDS: All Weights");
+      timer2->measureAndReport = false;
       // Start adding transitions to ca_out
       // Note: 
       // (1) We have to be careful about the mid-states added to ca_out

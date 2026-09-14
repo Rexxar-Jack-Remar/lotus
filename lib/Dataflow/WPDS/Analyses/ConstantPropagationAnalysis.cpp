@@ -116,7 +116,20 @@ createConstantPropagationTransformer(Instruction *I) {
 
 std::unique_ptr<mono::DataFlowResult>
 runConstantPropagationAnalysis(Module &module) {
-  InterProceduralDataFlowEngine engine;
+  return runConstantPropagationAnalysis(module, {});
+}
+
+std::unique_ptr<mono::DataFlowResult>
+runConstantPropagationAnalysis(Module &module,
+                               wpds::WPDSBackendOptions options) {
+  return runConstantPropagationAnalysis(module, options, nullptr, nullptr);
+}
+
+std::unique_ptr<mono::DataFlowResult>
+runConstantPropagationAnalysis(Module &module, wpds::WPDSBackendOptions options,
+                               wpds::WPDSBackendStatistics *statistics,
+                               std::string *error) {
+  InterProceduralDataFlowEngine engine(options);
   std::set<Value *> initial;
 
   // Arguments of main are varying
@@ -140,8 +153,15 @@ runConstantPropagationAnalysis(Module &module) {
     }
   }
 
-  return engine.runForwardAnalysis(module, createConstantPropagationTransformer,
-                                   initial);
+  auto result = engine.runForwardAnalysis(
+      module, createConstantPropagationTransformer, initial);
+  if (statistics != nullptr) {
+    *statistics = engine.getLastBackendStatistics();
+  }
+  if (error != nullptr) {
+    *error = engine.getLastError();
+  }
+  return result;
 }
 
 void demoConstantPropagationAnalysis(Module &module) {

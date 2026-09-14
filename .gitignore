@@ -1,4 +1,5 @@
 .claude
+*.mdclear
 .omx
 telemetry-id
 .sisyphus

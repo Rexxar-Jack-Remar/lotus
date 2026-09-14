@@ -2,7 +2,7 @@
 
 This directory contains command-line frontends for Lotus dataflow engines in
 `lib/Dataflow/`, including APA/elimination-style analyses, Mono analyses, IFDS
-analyses, NPA analyses, and a differential-testing driver.
+analyses, NPA analyses, WPDS analyses, and a differential-testing driver.
 
 ## Build
 
@@ -22,6 +22,7 @@ The binaries are written to `build/bin/`.
 | `lotus-dfa-mono` | Mono analysis driver | Runs Mono-based analyses on LLVM bitcode. |
 | `lotus-dfa-ifds` | IFDS analysis driver | Runs IFDS-based analyses with alias-analysis support when needed. |
 | `lotus-dfa-npa` | NPA analysis driver | Runs serial NPA intraprocedural and selected interprocedural analyses on LLVM bitcode. |
+| `lotus-dfa-wpds` | WPDS analysis driver | Selects the legacy, WALi FWPDS, or WALi SWPDS backend and reports stage statistics. |
 
 ## Diff testing (`lotus-dfa`)
 
@@ -72,6 +73,14 @@ lotus-dfa-ifds --analysis=taint --stdout /path/to/file.bc
 
 # NPA driver
 lotus-dfa-npa --analysis=liveness --solver=newton --stdout /path/to/file.bc
+
+# WPDS backend selection and cold-stage statistics
+lotus-dfa-wpds --analysis=liveness --wpds-backend=wali-swpds \
+  --wpds-stats /path/to/file.bc
+
+# Reuse one prepared WPDS model for ten distinct liveness boundary seeds
+lotus-dfa-wpds --analysis=liveness --wpds-backend=wali-swpds \
+  --wpds-query-count=10 --wpds-stats /path/to/file.bc
 
 # Sparse fixed-seed Newton rounds (also: static, always_maybe, dense)
 lotus-dfa-npa --analysis=liveness --solver=newton \

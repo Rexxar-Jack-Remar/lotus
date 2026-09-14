@@ -9,6 +9,7 @@
 #define DATAFLOW_WPDS_CLIENTS_TAINT_ANALYSIS_H_
 
 #include "Dataflow/Mono/Support/Result.h"
+#include "Dataflow/WPDS/Backend.h"
 
 #include <memory>
 
@@ -25,6 +26,11 @@
  * @return Analysis result containing IN/OUT/GEN/KILL sets for each instruction
  */
 std::unique_ptr<mono::DataFlowResult> runTaintAnalysis(llvm::Module &module);
+std::unique_ptr<mono::DataFlowResult>
+runTaintAnalysis(llvm::Module &module, wpds::WPDSBackendOptions options);
+std::unique_ptr<mono::DataFlowResult>
+runTaintAnalysis(llvm::Module &module, wpds::WPDSBackendOptions options,
+                 wpds::WPDSBackendStatistics *statistics, std::string *error);
 
 /**
  * @brief Demo function showing how to use the taint analysis

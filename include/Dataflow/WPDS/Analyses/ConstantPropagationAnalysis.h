@@ -10,6 +10,7 @@
 #define DATAFLOW_WPDS_CLIENTS_CONSTANT_PROPAGATION_ANALYSIS_H_
 
 #include "Dataflow/Mono/Support/Result.h"
+#include "Dataflow/WPDS/Backend.h"
 
 #include <memory>
 
@@ -23,6 +24,12 @@
  */
 std::unique_ptr<mono::DataFlowResult>
 runConstantPropagationAnalysis(llvm::Module &module);
+std::unique_ptr<mono::DataFlowResult>
+runConstantPropagationAnalysis(llvm::Module &module,
+                               wpds::WPDSBackendOptions options);
+std::unique_ptr<mono::DataFlowResult> runConstantPropagationAnalysis(
+    llvm::Module &module, wpds::WPDSBackendOptions options,
+    wpds::WPDSBackendStatistics *statistics, std::string *error);
 
 /**
  * @brief Demo function showing how to use the constant propagation analysis

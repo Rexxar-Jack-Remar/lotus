@@ -28,7 +28,7 @@ bool DataFlowFacts::operator==(const DataFlowFacts &other) const {
     return false;
   }
   if (is_universe) {
-    return true;
+    return facts == other.facts;
   }
   return facts == other.facts;
 }
@@ -166,9 +166,15 @@ bool DataFlowFacts::isEmpty() const {
   return facts.empty();
 }
 
+bool DataFlowFacts::isUniverse() const { return is_universe; }
+
 std::ostream &DataFlowFacts::print(std::ostream &os) const {
   if (is_universe) {
-    os << "DataFlowFacts{<universe>}";
+    os << "DataFlowFacts{<universe>";
+    if (!facts.empty()) {
+      os << " minus " << facts.size() << " fact(s)";
+    }
+    os << "}";
     return os;
   }
   os << "DataFlowFacts{";

@@ -115,9 +115,29 @@ void demoUninitializedVariablesAnalysis(Module &module) {
 
 std::unique_ptr<mono::DataFlowResult>
 runUninitializedVariablesAnalysis(Module &module) {
-  InterProceduralDataFlowEngine engine;
+  return runUninitializedVariablesAnalysis(module, {});
+}
+
+std::unique_ptr<mono::DataFlowResult>
+runUninitializedVariablesAnalysis(Module &module,
+                                  wpds::WPDSBackendOptions options) {
+  return runUninitializedVariablesAnalysis(module, options, nullptr, nullptr);
+}
+
+std::unique_ptr<mono::DataFlowResult> runUninitializedVariablesAnalysis(
+    Module &module, wpds::WPDSBackendOptions options,
+    wpds::WPDSBackendStatistics *statistics, std::string *error) {
+  InterProceduralDataFlowEngine engine(options);
   std::set<Value *> initial;
-  return engine.runForwardAnalysis(module, createUninitTransformer, initial);
+  auto result =
+      engine.runForwardAnalysis(module, createUninitTransformer, initial);
+  if (statistics != nullptr) {
+    *statistics = engine.getLastBackendStatistics();
+  }
+  if (error != nullptr) {
+    *error = engine.getLastError();
+  }
+  return result;
 }
 
 static void printValueSet(raw_ostream &OS, const std::set<Value *> &S) {

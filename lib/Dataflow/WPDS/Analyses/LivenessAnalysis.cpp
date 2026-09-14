@@ -75,9 +75,41 @@ static GenKillTransformer *createLivenessTransformer(Instruction *I) {
 }
 
 std::unique_ptr<mono::DataFlowResult> runLivenessAnalysis(Module &module) {
-  InterProceduralDataFlowEngine engine;
+  return runLivenessAnalysis(module, {});
+}
+
+std::unique_ptr<mono::DataFlowResult>
+runLivenessAnalysis(Module &module, wpds::WPDSBackendOptions options) {
+  return runLivenessAnalysis(module, options, nullptr, nullptr);
+}
+
+std::unique_ptr<mono::DataFlowResult>
+runLivenessAnalysis(Module &module, wpds::WPDSBackendOptions options,
+                    wpds::WPDSBackendStatistics *statistics,
+                    std::string *error) {
+  InterProceduralDataFlowEngine engine(options);
   std::set<Value *> initial; // Start with empty set (nothing live at exit)
-  return engine.runBackwardAnalysis(module, createLivenessTransformer, initial);
+  auto result =
+      engine.runBackwardAnalysis(module, createLivenessTransformer, initial);
+  if (statistics != nullptr) {
+    *statistics = engine.getLastBackendStatistics();
+  }
+  if (error != nullptr) {
+    *error = engine.getLastError();
+  }
+  return result;
+}
+
+std::unique_ptr<wpds::PreparedAnalysis>
+prepareLivenessAnalysis(Module &module, wpds::WPDSBackendOptions options,
+                        std::string *error) {
+  InterProceduralDataFlowEngine engine(options);
+  auto prepared =
+      engine.prepareBackwardAnalysis(module, createLivenessTransformer);
+  if (error != nullptr) {
+    *error = engine.getLastError();
+  }
+  return prepared;
 }
 
 void demoLivenessAnalysis(Module &module) {

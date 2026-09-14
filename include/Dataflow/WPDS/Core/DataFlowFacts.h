@@ -46,6 +46,7 @@ public:
   bool containsFact(Value *val) const;
   std::size_t size() const;
   bool isEmpty() const;
+  bool isUniverse() const;
 
   // Debug printing
   std::ostream &print(std::ostream &os) const;

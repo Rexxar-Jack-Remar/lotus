@@ -1,7 +1,7 @@
 #ifndef ANALYSIS_DATAFLOW_WPDS_GENKILLTRANSFORMER_H_
 #define ANALYSIS_DATAFLOW_WPDS_GENKILLTRANSFORMER_H_
 
-#include "Dataflow/WPDS/Core/DataFlowFacts.h"
+#include "Dataflow/WPDS/Core/GenKillValue.h"
 
 #include <map>
 #include <ostream>
@@ -15,7 +15,7 @@ namespace wpds {
  * domain. `combine()` conservatively joins alternative paths, and `extend()`
  * composes transformers in program order. Supports relational flow:
  *
- *   f(S) = (S \ Kill) U (U_{x in S \ Kill} Flow(x)) U Gen
+ *   f(S) = (S \ Kill) U (U_{x in S} Flow(x)) U Gen
  *
  * Corresponds to micro-functions / environment transformers over the fact
  * domain for may analyses. Must analyses are out of scope for this class.
@@ -58,6 +58,7 @@ public:
   const DataFlowFacts &getKill() const;
   const DataFlowFacts &getGen() const;
   const std::map<Value *, DataFlowFacts> &getFlow() const;
+  const GenKillValue &getValue() const;
 
   // Debug printing
   std::ostream &print(std::ostream &os) const;
@@ -66,13 +67,11 @@ public:
   int count;
 
 private:
-  DataFlowFacts kill;
-  DataFlowFacts gen;
-  std::map<Value *, DataFlowFacts> flow; // source fact -> generated facts
+  GenKillValue value;
 
   // Special constructor for one/zero/bottom
-  GenKillTransformer(const DataFlowFacts &k, const DataFlowFacts &g,
-                     const std::map<Value *, DataFlowFacts> &f, int);
+  explicit GenKillTransformer(const GenKillValue &value, int);
+  explicit GenKillTransformer(const GenKillValue &value);
 };
 
 } // namespace wpds

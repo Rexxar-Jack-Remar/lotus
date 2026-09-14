@@ -9,6 +9,8 @@
 #define DATAFLOW_WPDS_CLIENTS_LIVENESS_ANALYSIS_H_
 
 #include "Dataflow/Mono/Support/Result.h"
+#include "Dataflow/WPDS/Backend.h"
+#include "Dataflow/WPDS/PreparedAnalysis.h"
 
 #include <memory>
 
@@ -21,6 +23,16 @@
  * @return Analysis result containing IN/OUT/GEN/KILL sets for each instruction
  */
 std::unique_ptr<mono::DataFlowResult> runLivenessAnalysis(llvm::Module &module);
+std::unique_ptr<mono::DataFlowResult>
+runLivenessAnalysis(llvm::Module &module, wpds::WPDSBackendOptions options);
+std::unique_ptr<mono::DataFlowResult>
+runLivenessAnalysis(llvm::Module &module, wpds::WPDSBackendOptions options,
+                    wpds::WPDSBackendStatistics *statistics,
+                    std::string *error);
+std::unique_ptr<wpds::PreparedAnalysis>
+prepareLivenessAnalysis(llvm::Module &module,
+                        wpds::WPDSBackendOptions options = {},
+                        std::string *error = nullptr);
 
 /**
  * @brief Demo function showing how to use the liveness analysis

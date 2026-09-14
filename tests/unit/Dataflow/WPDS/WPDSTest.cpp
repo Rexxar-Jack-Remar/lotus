@@ -1,13 +1,19 @@
+#include "Dataflow/WPDS/Analyses/ConstantPropagationAnalysis.h"
 #include "Dataflow/WPDS/Analyses/LivenessAnalysis.h"
+#include "Dataflow/WPDS/Analyses/TaintAnalysis.h"
 #include "Dataflow/WPDS/Analyses/UninitializedVariablesAnalysis.h"
+#include "Dataflow/WPDS/Backend/Model.h"
+#include "Dataflow/WPDS/Backend/PreparedBackend.h"
 #include "Dataflow/WPDS/InterProceduralDataFlow.h"
 #include "TestUtils/LLVMHelpers.h"
 
+#include <random>
+
+#include <gtest/gtest.h>
 #include <llvm/IR/Constants.h>
 #include <llvm/IR/Instructions.h>
 #include <llvm/IR/LLVMContext.h>
 #include <llvm/IR/Type.h>
-#include <gtest/gtest.h>
 
 using namespace llvm;
 using namespace wpds;
@@ -217,6 +223,30 @@ protected:
     )");
   }
 
+  std::unique_ptr<Module> createRecursiveModule() {
+    return parseTestModule("recursive", R"(
+      @seed = global i32 0
+
+      define i32 @recur(i32 %n) {
+      entry:
+        %is_zero = icmp eq i32 %n, 0
+        br i1 %is_zero, label %base, label %step
+      step:
+        %dec = sub i32 %n, 1
+        %recursive_call = call i32 @recur(i32 %dec)
+        ret i32 %recursive_call
+      base:
+        ret i32 0
+      }
+
+      define i32 @main() {
+      entry:
+        %result = call i32 @recur(i32 2)
+        ret i32 %result
+      }
+    )");
+  }
+
   std::unique_ptr<Module> createUninitializedLoadValueModule() {
     return parseTestModule("uninit_load_value", R"(
       define i32 @main() {
@@ -343,6 +373,147 @@ TEST_F(WPDSTest, ExtendIsAssociativeAndHasIdentityAndZeroLaws) {
   EXPECT_TRUE(T1->combine(GenKillTransformer::zero())->equal(T1));
 }
 
+TEST_F(WPDSTest, GenKillValueMatchesItsFiniteDenotationExhaustively) {
+  auto *A = fact(61);
+  auto *B = fact(62);
+  std::vector<Value *> Universe = {A, B};
+  std::vector<DataFlowFacts> Inputs;
+  std::vector<GenKillValue> Transformers;
+
+  for (unsigned Mask = 0; Mask < 4; ++Mask) {
+    std::set<Value *> Facts;
+    for (unsigned Bit = 0; Bit < Universe.size(); ++Bit) {
+      if ((Mask & (1U << Bit)) != 0) {
+        Facts.insert(Universe[Bit]);
+      }
+    }
+    Inputs.emplace_back(Facts);
+  }
+  for (unsigned KillMask = 0; KillMask < 4; ++KillMask) {
+    for (unsigned GenMask = 0; GenMask < 4; ++GenMask) {
+      std::set<Value *> Kill;
+      std::set<Value *> Gen;
+      for (unsigned Bit = 0; Bit < Universe.size(); ++Bit) {
+        if ((KillMask & (1U << Bit)) != 0) {
+          Kill.insert(Universe[Bit]);
+        }
+        if ((GenMask & (1U << Bit)) != 0) {
+          Gen.insert(Universe[Bit]);
+        }
+      }
+      Transformers.push_back(
+          GenKillValue::normalized(DataFlowFacts(Kill), DataFlowFacts(Gen)));
+    }
+  }
+
+  auto SameDenotation = [&](const GenKillValue &Left,
+                            const GenKillValue &Right) {
+    for (const DataFlowFacts &Input : Inputs) {
+      if (!DataFlowFacts::Eq(Left.apply(Input), Right.apply(Input))) {
+        return false;
+      }
+    }
+    return true;
+  };
+
+  for (const GenKillValue &Left : Transformers) {
+    EXPECT_TRUE(SameDenotation(Left.extend(GenKillValue::one()), Left));
+    EXPECT_TRUE(SameDenotation(GenKillValue::one().extend(Left), Left));
+    EXPECT_TRUE(Left.extend(GenKillValue::zero()).equal(GenKillValue::zero()));
+    EXPECT_TRUE(GenKillValue::zero().extend(Left).equal(GenKillValue::zero()));
+    EXPECT_TRUE(SameDenotation(Left.combine(GenKillValue::zero()), Left));
+
+    for (const GenKillValue &Right : Transformers) {
+      for (const DataFlowFacts &Input : Inputs) {
+        EXPECT_TRUE(DataFlowFacts::Eq(Left.extend(Right).apply(Input),
+                                      Right.apply(Left.apply(Input))));
+        EXPECT_TRUE(DataFlowFacts::Eq(
+            Left.combine(Right).apply(Input),
+            DataFlowFacts::Union(Left.apply(Input), Right.apply(Input))));
+      }
+      for (const GenKillValue &Third : Transformers) {
+        EXPECT_TRUE(SameDenotation(Left.extend(Right).extend(Third),
+                                   Left.extend(Right.extend(Third))));
+        EXPECT_TRUE(
+            SameDenotation(Left.extend(Right.combine(Third)),
+                           Left.extend(Right).combine(Left.extend(Third))));
+        EXPECT_TRUE(
+            SameDenotation(Left.combine(Right).extend(Third),
+                           Left.extend(Third).combine(Right.extend(Third))));
+      }
+    }
+  }
+}
+
+TEST_F(WPDSTest, NoPathZeroIsDistinctFromReachableKillAll) {
+  auto *A = fact(63);
+  auto *B = fact(64);
+  GenKillValue KillAll(DataFlowFacts::UniverseSet(), DataFlowFacts::EmptySet());
+  GenKillValue GenerateB = GenKillValue::normalized(
+      DataFlowFacts::EmptySet(), DataFlowFacts(std::set<Value *>{B}));
+
+  EXPECT_FALSE(KillAll.equal(GenKillValue::zero()));
+  EXPECT_TRUE(KillAll.apply(DataFlowFacts(std::set<Value *>{A})).isEmpty());
+  EXPECT_TRUE(KillAll.extend(GenerateB)
+                  .apply(DataFlowFacts(std::set<Value *>{A}))
+                  .containsFact(B));
+  EXPECT_TRUE(
+      GenKillValue::zero().extend(GenerateB).equal(GenKillValue::zero()));
+}
+
+TEST_F(WPDSTest, RelationalGenKillValuesSatisfySemiringLaws) {
+  auto *A = fact(65);
+  auto *B = fact(66);
+  auto *C = fact(67);
+  std::vector<Value *> Universe = {A, B, C};
+  std::vector<DataFlowFacts> Inputs;
+  for (unsigned Mask = 0; Mask < 8; ++Mask) {
+    std::set<Value *> Facts;
+    for (unsigned Bit = 0; Bit < Universe.size(); ++Bit) {
+      if ((Mask & (1U << Bit)) != 0) {
+        Facts.insert(Universe[Bit]);
+      }
+    }
+    Inputs.emplace_back(Facts);
+  }
+
+  auto FlowValue = [](Value *From, std::initializer_list<Value *> To) {
+    std::map<Value *, DataFlowFacts> Flow;
+    Flow[From] = DataFlowFacts(std::set<Value *>(To.begin(), To.end()));
+    return GenKillValue::normalized(DataFlowFacts::EmptySet(),
+                                    DataFlowFacts::EmptySet(), Flow);
+  };
+  std::vector<GenKillValue> Values = {
+      GenKillValue::one(),
+      FlowValue(A, {B}),
+      FlowValue(B, {C}),
+      FlowValue(C, {A, B}),
+      GenKillValue::normalized(DataFlowFacts(std::set<Value *>{A}),
+                               DataFlowFacts::EmptySet()),
+      GenKillValue::normalized(DataFlowFacts::EmptySet(),
+                               DataFlowFacts(std::set<Value *>{C}))};
+
+  auto Same = [&](const GenKillValue &Left, const GenKillValue &Right) {
+    for (const DataFlowFacts &Input : Inputs) {
+      if (!DataFlowFacts::Eq(Left.apply(Input), Right.apply(Input))) {
+        return false;
+      }
+    }
+    return true;
+  };
+  for (const GenKillValue &X : Values) {
+    for (const GenKillValue &Y : Values) {
+      for (const GenKillValue &Z : Values) {
+        EXPECT_TRUE(Same(X.extend(Y).extend(Z), X.extend(Y.extend(Z))));
+        EXPECT_TRUE(
+            Same(X.extend(Y.combine(Z)), X.extend(Y).combine(X.extend(Z))));
+        EXPECT_TRUE(
+            Same(X.combine(Y).extend(Z), X.extend(Z).combine(Y.extend(Z))));
+      }
+    }
+  }
+}
+
 TEST_F(WPDSTest, UniverseSetSupportsSubtractionAndRemoval) {
   auto *A = fact(1);
   auto *B = fact(2);
@@ -383,6 +554,606 @@ TEST_F(WPDSTest, ForwardAnalysisRetainsResultForAccessorQueries) {
   EXPECT_EQ(Result->IN(Second), Engine.getInSet(Second));
   EXPECT_TRUE(containsFact(Result->OUT(First), SeedFact));
 }
+
+TEST_F(WPDSTest, BackendSelectionIsExplicitAndLegacyRemainsDefault) {
+  EXPECT_EQ(parseWPDSBackend("legacy"), WPDSBackendKind::Legacy);
+  EXPECT_EQ(parseWPDSBackend("wali-fwpds"), WPDSBackendKind::WaliFWPDS);
+  EXPECT_EQ(parseWPDSBackend("wali-swpds"), WPDSBackendKind::WaliSWPDS);
+  EXPECT_FALSE(parseWPDSBackend("auto").has_value());
+
+  InterProceduralDataFlowEngine DefaultEngine;
+  EXPECT_EQ(DefaultEngine.getBackendOptions().backend, WPDSBackendKind::Legacy);
+
+#ifndef LOTUS_ENABLE_WALI_OPENNWA
+  EXPECT_FALSE(isWPDSBackendAvailable(WPDSBackendKind::WaliFWPDS));
+  auto M = createLinearModule();
+  InterProceduralDataFlowEngine DisabledEngine(
+      {WPDSBackendKind::WaliFWPDS, false, false});
+  auto Result = DisabledEngine.runForwardAnalysis(
+      *M, [](Instruction *) { return GenKillTransformer::one(); });
+  EXPECT_EQ(Result, nullptr);
+  EXPECT_NE(DisabledEngine.getLastError().find("LOTUS_ENABLE_WALI_OPENNWA"),
+            std::string::npos);
+#else
+  EXPECT_TRUE(isWPDSBackendAvailable(WPDSBackendKind::WaliFWPDS));
+  EXPECT_TRUE(isWPDSBackendAvailable(WPDSBackendKind::WaliSWPDS));
+#endif
+}
+
+#ifdef LOTUS_ENABLE_WALI_OPENNWA
+TEST_F(WPDSTest, WaliBackendsMatchLegacyOnForwardAndBackwardGenKill) {
+  for (WPDSBackendKind Backend :
+       {WPDSBackendKind::WaliFWPDS, WPDSBackendKind::WaliSWPDS}) {
+    auto M = createLinearModule();
+    auto *Generated = fact(31);
+    auto *Killed = fact(32);
+    auto Transfer = [&](Instruction *I) -> GenKillTransformer * {
+      if (I->getName() == "first") {
+        return makeTransformer({Killed}, {Generated});
+      }
+      if (I->getName() == "second") {
+        return makeTransformer({Generated}, {Killed});
+      }
+      return GenKillTransformer::one();
+    };
+
+    InterProceduralDataFlowEngine Legacy;
+    auto Expected = Legacy.runForwardAnalysis(*M, Transfer, {Killed});
+    ASSERT_NE(Expected, nullptr);
+
+    InterProceduralDataFlowEngine Selected({Backend, false, true});
+    auto Actual = Selected.runForwardAnalysis(*M, Transfer, {Killed});
+    ASSERT_NE(Actual, nullptr) << Selected.getLastError();
+    for (Function &F : *M) {
+      for (BasicBlock &BB : F) {
+        for (Instruction &I : BB) {
+          EXPECT_EQ(Actual->IN(&I), Expected->IN(&I));
+          EXPECT_EQ(Actual->OUT(&I), Expected->OUT(&I));
+        }
+      }
+    }
+    EXPECT_EQ(Selected.getLastBackendStatistics().effectiveBackend, Backend);
+    EXPECT_EQ(Selected.getLastBackendStatistics().preparationCount, 1u);
+    EXPECT_EQ(Selected.getLastBackendStatistics().queryCount, 1u);
+
+    InterProceduralDataFlowEngine LegacyBackward;
+    Expected = LegacyBackward.runBackwardAnalysis(*M, Transfer, {Killed});
+    ASSERT_NE(Expected, nullptr);
+    InterProceduralDataFlowEngine SelectedBackward({Backend, false, true});
+    Actual = SelectedBackward.runBackwardAnalysis(*M, Transfer, {Killed});
+    ASSERT_NE(Actual, nullptr) << SelectedBackward.getLastError();
+    for (Function &F : *M) {
+      for (BasicBlock &BB : F) {
+        for (Instruction &I : BB) {
+          EXPECT_EQ(Actual->IN(&I), Expected->IN(&I));
+          EXPECT_EQ(Actual->OUT(&I), Expected->OUT(&I));
+        }
+      }
+    }
+  }
+}
+
+TEST_F(WPDSTest, WaliSelectionRejectsLegacyAutomatonCallbacksExplicitly) {
+  auto M = createLinearModule();
+  InterProceduralDataFlowEngine Engine(
+      {WPDSBackendKind::WaliFWPDS, false, false});
+  bool BuilderCalled = false;
+  auto Result = Engine.runForwardAnalysisWithAutomaton(
+      *M, [](Instruction *) { return GenKillTransformer::one(); },
+      [&](CA<GenKillTransformer> &) { BuilderCalled = true; });
+  EXPECT_EQ(Result, nullptr);
+  EXPECT_FALSE(BuilderCalled);
+  EXPECT_NE(Engine.getLastError().find("only by the legacy"),
+            std::string::npos);
+}
+
+TEST_F(WPDSTest, PreparedSessionsReuseOneModelForDistinctQueries) {
+  for (WPDSBackendKind Backend :
+       {WPDSBackendKind::Legacy, WPDSBackendKind::WaliFWPDS,
+        WPDSBackendKind::WaliSWPDS}) {
+    auto M = createLinearModule();
+    auto *A = fact(41);
+    auto *B = fact(42);
+    std::size_t instructionCount = 0;
+    for (Function &F : *M) {
+      for (BasicBlock &BB : F) {
+        instructionCount += BB.size();
+      }
+    }
+
+    std::size_t callbackCount = 0;
+    auto Transfer = [&](Instruction *I) -> GenKillTransformer * {
+      ++callbackCount;
+      if (I->getName() == "first") {
+        return makeTransformer({A}, {B});
+      }
+      if (I->getName() == "second") {
+        return makeTransformer({B}, {A});
+      }
+      return GenKillTransformer::one();
+    };
+
+    InterProceduralDataFlowEngine Engine(
+        {Backend, Backend != WPDSBackendKind::Legacy, true});
+    auto Prepared = Engine.prepareForwardAnalysis(*M, Transfer);
+    ASSERT_NE(Prepared, nullptr) << Engine.getLastError();
+    EXPECT_EQ(callbackCount, instructionCount);
+
+    auto ResultA = Prepared->solve({A});
+    ASSERT_NE(ResultA, nullptr) << Prepared->getLastError();
+    auto ResultB = Prepared->solve({B});
+    ASSERT_NE(ResultB, nullptr) << Prepared->getLastError();
+    auto ResultAAgain = Prepared->solve({A});
+    ASSERT_NE(ResultAAgain, nullptr) << Prepared->getLastError();
+    EXPECT_EQ(callbackCount, instructionCount);
+
+    for (Function &F : *M) {
+      for (BasicBlock &BB : F) {
+        for (Instruction &I : BB) {
+          EXPECT_EQ(ResultA->IN(&I), ResultAAgain->IN(&I));
+          EXPECT_EQ(ResultA->OUT(&I), ResultAAgain->OUT(&I));
+        }
+      }
+    }
+    EXPECT_EQ(Prepared->getStatistics().preparationCount, 1u);
+    EXPECT_EQ(Prepared->getStatistics().queryCount, 3u);
+    EXPECT_EQ(Prepared->getStatistics().effectiveBackend, Backend);
+    Prepared.reset();
+    auto *First = findInstInModule(*M, "first");
+    ASSERT_NE(First, nullptr);
+    EXPECT_EQ(ResultA->OUT(First), ResultAAgain->OUT(First));
+  }
+}
+
+TEST_F(WPDSTest, WaliPreparedSessionsRemainIsolatedWhenInterleaved) {
+  for (WPDSBackendKind Backend :
+       {WPDSBackendKind::WaliFWPDS, WPDSBackendKind::WaliSWPDS}) {
+    auto FirstModule = createLinearModule();
+    auto SecondModule = createBranchJoinModule();
+    auto *FirstSeed = fact(43);
+    auto *SecondSeed = fact(44);
+    InterProceduralDataFlowEngine FirstEngine({Backend, true, true});
+    InterProceduralDataFlowEngine SecondEngine({Backend, true, true});
+    auto Identity = [](Instruction *) { return GenKillTransformer::one(); };
+    auto FirstSession =
+        FirstEngine.prepareForwardAnalysis(*FirstModule, Identity);
+    auto SecondSession =
+        SecondEngine.prepareForwardAnalysis(*SecondModule, Identity);
+    ASSERT_NE(FirstSession, nullptr) << FirstEngine.getLastError();
+    ASSERT_NE(SecondSession, nullptr) << SecondEngine.getLastError();
+
+    auto FirstA = FirstSession->solve({FirstSeed});
+    auto Second = SecondSession->solve({SecondSeed});
+    auto FirstB = FirstSession->solve({FirstSeed});
+    ASSERT_NE(FirstA, nullptr) << FirstSession->getLastError();
+    ASSERT_NE(Second, nullptr) << SecondSession->getLastError();
+    ASSERT_NE(FirstB, nullptr) << FirstSession->getLastError();
+
+    auto *FirstInstruction = findInstInModule(*FirstModule, "first");
+    auto *JoinInstruction =
+        SecondModule->getFunction("main")->back().getTerminator();
+    ASSERT_NE(FirstInstruction, nullptr);
+    ASSERT_NE(JoinInstruction, nullptr);
+    EXPECT_EQ(FirstA->OUT(FirstInstruction), FirstB->OUT(FirstInstruction));
+    EXPECT_TRUE(containsFact(FirstB->OUT(FirstInstruction), FirstSeed));
+    EXPECT_TRUE(containsFact(Second->IN(JoinInstruction), SecondSeed));
+    EXPECT_FALSE(containsFact(Second->IN(JoinInstruction), FirstSeed));
+    EXPECT_EQ(FirstSession->getStatistics().preparationCount, 1u);
+    EXPECT_EQ(SecondSession->getStatistics().preparationCount, 1u);
+  }
+}
+
+TEST_F(WPDSTest, SyntheticPushPopModelSupportsPrestarAndPoststar) {
+  auto *A = fact(51);
+  auto *B = fact(52);
+  backend::Model Model;
+  auto Q = Model.addControlState("q");
+  auto Start = Model.addStackSymbol("start");
+  auto Call = Model.addStackSymbol("call");
+  auto CalleeEntry = Model.addStackSymbol("callee-entry");
+  auto CalleeExit = Model.addStackSymbol("callee-exit");
+  auto Continuation = Model.addStackSymbol("continuation");
+  auto Done = Model.addStackSymbol("done");
+  Model.addProcedureEntry(Start);
+  Model.addProcedureEntry(CalleeEntry);
+
+  GenKillValue GenerateA = GenKillValue::normalized(
+      DataFlowFacts::EmptySet(), DataFlowFacts(std::set<Value *>{A}));
+  GenKillValue KillAThenGenerateB = GenKillValue::normalized(
+      DataFlowFacts(std::set<Value *>{A}), DataFlowFacts(std::set<Value *>{B}));
+  Model.addReplaceRule(Q, Start, Q, Call, GenerateA, "generate a");
+  Model.addPushRule(Q, Call, Q, CalleeEntry, Continuation, GenKillValue::one(),
+                    "call");
+  Model.addReplaceRule(Q, CalleeEntry, Q, CalleeExit, KillAThenGenerateB,
+                       "callee body");
+  Model.addPopRule(Q, CalleeExit, Q, GenKillValue::one(), "return");
+  Model.addReplaceRule(Q, Continuation, Q, Done, GenKillValue::one(),
+                       "continuation");
+
+  for (WPDSBackendKind Backend :
+       {WPDSBackendKind::Legacy, WPDSBackendKind::WaliFWPDS,
+        WPDSBackendKind::WaliSWPDS}) {
+    for (WPDSQueryKind Operation :
+         {WPDSQueryKind::PostStar, WPDSQueryKind::PreStar}) {
+      SCOPED_TRACE(::testing::Message() << "operation=" << toString(Operation));
+      std::string Error;
+      WPDSBackendOptions Options{Backend, false, true};
+      auto Prepared = backend::prepareBackend(Model, Options, Operation,
+                                              {Start, CalleeEntry}, Error);
+      ASSERT_NE(Prepared, nullptr) << Error;
+
+      backend::Query Query;
+      Query.operation = Operation;
+      Query.initialState = Q;
+      Query.roots = {Operation == WPDSQueryKind::PostStar ? Start : Done};
+      Query.seed = GenKillValue::one();
+      backend::QueryResult Result;
+      backend::Query Invalid = Query;
+      Invalid.roots = {999999};
+      EXPECT_FALSE(Prepared->solve(Invalid, Result, Error));
+      EXPECT_FALSE(Error.empty());
+      Error.clear();
+      ASSERT_TRUE(Prepared->solve(Query, Result, Error)) << Error;
+
+      auto Observed = Result.observations.find(
+          Operation == WPDSQueryKind::PostStar ? Done : Start);
+      ASSERT_NE(Observed, Result.observations.end());
+      ASSERT_TRUE(Observed->second.reachable);
+      DataFlowFacts Facts =
+          Observed->second.summary.apply(DataFlowFacts::EmptySet());
+      EXPECT_FALSE(Facts.containsFact(A));
+      EXPECT_TRUE(Facts.containsFact(B));
+
+      backend::Query Alternate = Query;
+      Alternate.roots = {Operation == WPDSQueryKind::PostStar ? CalleeEntry
+                                                              : CalleeExit};
+      backend::QueryResult AlternateResult;
+      ASSERT_TRUE(Prepared->solve(Alternate, AlternateResult, Error)) << Error;
+      backend::QueryResult Repeated;
+      ASSERT_TRUE(Prepared->solve(Query, Repeated, Error)) << Error;
+      for (backend::StackSymbolId Symbol = 1;
+           Symbol < Model.stackSymbolNames().size(); ++Symbol) {
+        EXPECT_EQ(Result.observations.at(Symbol).reachable,
+                  Repeated.observations.at(Symbol).reachable);
+        if (Result.observations.at(Symbol).reachable) {
+          EXPECT_TRUE(Result.observations.at(Symbol).summary.semanticallyEqual(
+              Repeated.observations.at(Symbol).summary));
+        }
+      }
+      EXPECT_EQ(Prepared->statistics().preparationCount, 1u);
+      EXPECT_EQ(Prepared->statistics().queryCount, 3u);
+      EXPECT_EQ(Prepared->statistics().effectiveBackend, Backend);
+    }
+  }
+}
+
+TEST_F(WPDSTest, SyntheticRelationalWeightsComposeInExecutionOrder) {
+  auto *A = fact(53);
+  auto *B = fact(54);
+  auto *C = fact(55);
+  backend::Model Model;
+  auto Q = Model.addControlState("q");
+  auto Start = Model.addStackSymbol("start");
+  auto Middle = Model.addStackSymbol("middle");
+  auto Done = Model.addStackSymbol("done");
+  Model.addProcedureEntry(Start);
+
+  std::map<Value *, DataFlowFacts> FirstFlow;
+  FirstFlow[A] = DataFlowFacts(std::set<Value *>{B});
+  std::map<Value *, DataFlowFacts> SecondFlow;
+  SecondFlow[B] = DataFlowFacts(std::set<Value *>{C});
+  Model.addReplaceRule(Q, Start, Q, Middle,
+                       GenKillValue::normalized(DataFlowFacts::EmptySet(),
+                                                DataFlowFacts::EmptySet(),
+                                                FirstFlow),
+                       "a to b");
+  Model.addReplaceRule(Q, Middle, Q, Done,
+                       GenKillValue::normalized(DataFlowFacts::EmptySet(),
+                                                DataFlowFacts::EmptySet(),
+                                                SecondFlow),
+                       "b to c");
+
+  for (WPDSBackendKind Backend :
+       {WPDSBackendKind::Legacy, WPDSBackendKind::WaliFWPDS,
+        WPDSBackendKind::WaliSWPDS}) {
+    std::string Error;
+    auto Prepared = backend::prepareBackend(
+        Model, {Backend, false, true}, WPDSQueryKind::PostStar, {Start}, Error);
+    ASSERT_NE(Prepared, nullptr) << Error;
+    backend::Query Query;
+    Query.operation = WPDSQueryKind::PostStar;
+    Query.initialState = Q;
+    Query.roots = {Start};
+    Query.seed = GenKillValue::normalized(DataFlowFacts::EmptySet(),
+                                          DataFlowFacts(std::set<Value *>{A}));
+    backend::QueryResult Result;
+    ASSERT_TRUE(Prepared->solve(Query, Result, Error)) << Error;
+    const auto &Observation = Result.observations.at(Done);
+    ASSERT_TRUE(Observation.reachable);
+    DataFlowFacts Facts = Observation.summary.apply(DataFlowFacts::EmptySet());
+    EXPECT_TRUE(Facts.containsFact(A));
+    EXPECT_TRUE(Facts.containsFact(B));
+    EXPECT_TRUE(Facts.containsFact(C));
+  }
+}
+
+TEST_F(WPDSTest, CallAndReturnWeightsComposeInExecutionOrder) {
+  auto *A = fact(59);
+  GenKillValue GenerateA = GenKillValue::normalized(
+      DataFlowFacts::EmptySet(), DataFlowFacts(std::set<Value *>{A}));
+  GenKillValue KillA = GenKillValue::normalized(
+      DataFlowFacts(std::set<Value *>{A}), DataFlowFacts::EmptySet());
+  struct WeightCase {
+    GenKillValue Call;
+    GenKillValue Body;
+    GenKillValue Return;
+    bool ExpectedA;
+  };
+  std::vector<WeightCase> Cases = {
+      {GenerateA, KillA, GenKillValue::one(), false},
+      {GenKillValue::one(), GenerateA, KillA, false},
+      {KillA, GenKillValue::one(), GenerateA, true},
+  };
+
+  for (std::size_t CaseIndex = 0; CaseIndex < Cases.size(); ++CaseIndex) {
+    SCOPED_TRACE(::testing::Message() << "case=" << CaseIndex);
+    const WeightCase &Weights = Cases[CaseIndex];
+    backend::Model Model;
+    auto Q = Model.addControlState("q");
+    auto Start = Model.addStackSymbol("start");
+    auto Entry = Model.addStackSymbol("entry");
+    auto Exit = Model.addStackSymbol("exit");
+    auto Continuation = Model.addStackSymbol("continuation");
+    Model.addProcedureEntry(Start);
+    Model.addProcedureEntry(Entry);
+    Model.addPushRule(Q, Start, Q, Entry, Continuation, Weights.Call, "call");
+    Model.addReplaceRule(Q, Entry, Q, Exit, Weights.Body, "body");
+    Model.addPopRule(Q, Exit, Q, Weights.Return, "return");
+
+    for (WPDSBackendKind Backend :
+         {WPDSBackendKind::Legacy, WPDSBackendKind::WaliFWPDS,
+          WPDSBackendKind::WaliSWPDS}) {
+      SCOPED_TRACE(::testing::Message() << "backend=" << toString(Backend));
+      std::string Error;
+      auto Prepared = backend::prepareBackend(Model, {Backend, false, false},
+                                              WPDSQueryKind::PostStar,
+                                              {Start, Entry}, Error);
+      ASSERT_NE(Prepared, nullptr) << Error;
+      backend::Query Query;
+      Query.operation = WPDSQueryKind::PostStar;
+      Query.initialState = Q;
+      Query.roots = {Start};
+      Query.seed = GenKillValue::one();
+      backend::QueryResult Result;
+      ASSERT_TRUE(Prepared->solve(Query, Result, Error)) << Error;
+      const auto &Observed = Result.observations.at(Continuation);
+      ASSERT_TRUE(Observed.reachable);
+      EXPECT_EQ(
+          Observed.summary.apply(DataFlowFacts::EmptySet()).containsFact(A),
+          Weights.ExpectedA);
+    }
+  }
+}
+
+TEST_F(WPDSTest, DeterministicRandomModelsAgreeAcrossBackends) {
+  auto *A = fact(56);
+  auto *B = fact(57);
+  auto *C = fact(58);
+  std::vector<Value *> Facts = {A, B, C};
+  constexpr unsigned RandomSeed = 0x4c4f5455U;
+  std::mt19937 Random(RandomSeed);
+
+  auto RandomWeight = [&]() {
+    std::set<Value *> Kill;
+    std::set<Value *> Gen;
+    std::map<Value *, DataFlowFacts> Flow;
+    for (Value *Fact : Facts) {
+      if ((Random() & 3U) == 0) {
+        Kill.insert(Fact);
+      }
+      if ((Random() & 3U) == 0) {
+        Gen.insert(Fact);
+      }
+      std::set<Value *> Targets;
+      for (Value *Target : Facts) {
+        if ((Random() & 7U) == 0) {
+          Targets.insert(Target);
+        }
+      }
+      if (!Targets.empty()) {
+        Flow[Fact] = DataFlowFacts(Targets);
+      }
+    }
+    return GenKillValue::normalized(DataFlowFacts(Kill), DataFlowFacts(Gen),
+                                    Flow);
+  };
+
+  for (unsigned Case = 0; Case < 12; ++Case) {
+    SCOPED_TRACE(::testing::Message()
+                 << "random_seed=" << RandomSeed << " case=" << Case);
+    backend::Model Model;
+    auto Q = Model.addControlState("q");
+    auto Start = Model.addStackSymbol("start");
+    auto Call = Model.addStackSymbol("call");
+    auto Entry = Model.addStackSymbol("entry");
+    auto Body = Model.addStackSymbol("body");
+    auto Exit = Model.addStackSymbol("exit");
+    auto Continuation = Model.addStackSymbol("continuation");
+    auto Done = Model.addStackSymbol("done");
+    Model.addProcedureEntry(Start);
+    Model.addProcedureEntry(Entry);
+    Model.addReplaceRule(Q, Start, Q, Call, RandomWeight(), "start");
+    Model.addPushRule(Q, Call, Q, Entry, Continuation, RandomWeight(), "call");
+    Model.addReplaceRule(Q, Entry, Q, Body, RandomWeight(), "entry");
+    Model.addReplaceRule(Q, Body, Q, Exit, RandomWeight(), "body");
+    Model.addPopRule(Q, Exit, Q, RandomWeight(), "return");
+    Model.addReplaceRule(Q, Continuation, Q, Done, RandomWeight(), "done");
+    Model.addReplaceRule(Q, Start, Q, Done, RandomWeight(), "alternate");
+    GenKillValue Seed = RandomWeight();
+    std::vector<GenKillValue> AlgebraValues = {Seed};
+    for (const backend::Rule &Rule : Model.rules()) {
+      AlgebraValues.push_back(Rule.weight);
+    }
+    for (const GenKillValue &X : AlgebraValues) {
+      for (const GenKillValue &Y : AlgebraValues) {
+        for (const GenKillValue &Z : AlgebraValues) {
+          EXPECT_TRUE(
+              X.extend(Y).extend(Z).semanticallyEqual(X.extend(Y.extend(Z))));
+          EXPECT_TRUE(X.extend(Y.combine(Z))
+                          .semanticallyEqual(X.extend(Y).combine(X.extend(Z))));
+          EXPECT_TRUE(X.combine(Y).extend(Z).semanticallyEqual(
+              X.extend(Z).combine(Y.extend(Z))));
+        }
+      }
+    }
+    GenKillValue ConcreteContinuation = Seed;
+    for (unsigned RuleIndex = 0; RuleIndex < 5; ++RuleIndex) {
+      ConcreteContinuation =
+          ConcreteContinuation.extend(Model.rules()[RuleIndex].weight);
+    }
+    DataFlowFacts ConcreteContinuationFacts =
+        ConcreteContinuation.apply(DataFlowFacts::EmptySet());
+
+    for (WPDSQueryKind Operation :
+         {WPDSQueryKind::PostStar, WPDSQueryKind::PreStar}) {
+      SCOPED_TRACE(::testing::Message() << "operation=" << toString(Operation));
+      backend::Query Query;
+      Query.operation = Operation;
+      Query.initialState = Q;
+      Query.roots = {Operation == WPDSQueryKind::PostStar ? Start : Done};
+      Query.seed = Seed;
+      std::string Error;
+      auto Legacy =
+          backend::prepareBackend(Model, {}, Operation, {Start, Entry}, Error);
+      ASSERT_NE(Legacy, nullptr) << Error;
+      backend::QueryResult Expected;
+      ASSERT_TRUE(Legacy->solve(Query, Expected, Error)) << Error;
+      if (Operation == WPDSQueryKind::PostStar) {
+        DataFlowFacts LegacyContinuation =
+            Expected.observations.at(Continuation)
+                .summary.apply(DataFlowFacts::EmptySet());
+        EXPECT_TRUE(
+            DataFlowFacts::Eq(LegacyContinuation, ConcreteContinuationFacts))
+            << "legacy disagrees with concrete execution at continuation";
+      }
+
+      for (WPDSBackendKind Backend :
+           {WPDSBackendKind::WaliFWPDS, WPDSBackendKind::WaliSWPDS}) {
+        SCOPED_TRACE(::testing::Message() << "backend=" << toString(Backend));
+        auto Selected = backend::prepareBackend(
+            Model, {Backend, false, false}, Operation, {Start, Entry}, Error);
+        ASSERT_NE(Selected, nullptr) << Error;
+        backend::QueryResult Actual;
+        ASSERT_TRUE(Selected->solve(Query, Actual, Error)) << Error;
+        for (backend::StackSymbolId Symbol = 1;
+             Symbol < Model.stackSymbolNames().size(); ++Symbol) {
+          const auto &Left = Actual.observations.at(Symbol);
+          const auto &Right = Expected.observations.at(Symbol);
+          EXPECT_EQ(Left.reachable, Right.reachable)
+              << Model.stackSymbolName(Symbol);
+          if (Left.reachable && Right.reachable) {
+            DataFlowFacts LeftFacts =
+                Left.summary.apply(DataFlowFacts::EmptySet());
+            DataFlowFacts RightFacts =
+                Right.summary.apply(DataFlowFacts::EmptySet());
+            if (!DataFlowFacts::Eq(LeftFacts, RightFacts)) {
+              std::ostringstream Details;
+              LeftFacts.print(Details << " selected=");
+              RightFacts.print(Details << " legacy=");
+              Details << " selected_bits=" << LeftFacts.containsFact(A)
+                      << LeftFacts.containsFact(B) << LeftFacts.containsFact(C)
+                      << " legacy_bits=" << RightFacts.containsFact(A)
+                      << RightFacts.containsFact(B)
+                      << RightFacts.containsFact(C) << " rules=";
+              for (const backend::Rule &Rule : Model.rules()) {
+                Details << " [" << Rule.origin << " ";
+                Rule.weight.print(Details);
+                Details << "]";
+              }
+              ADD_FAILURE() << Model.stackSymbolName(Symbol) << Details.str();
+            }
+          }
+        }
+      }
+    }
+  }
+}
+
+TEST_F(WPDSTest, WaliBackendsMatchLegacyAcrossCallsAndRecursion) {
+  for (WPDSBackendKind Backend :
+       {WPDSBackendKind::WaliFWPDS, WPDSBackendKind::WaliSWPDS}) {
+    for (bool Backward : {false, true}) {
+      auto M = createRecursiveModule();
+      Value *Seed = M->getNamedGlobal("seed");
+      ASSERT_NE(Seed, nullptr);
+      InterProceduralDataFlowEngine Engine({Backend, true, true});
+      auto Prepared =
+          Backward
+              ? Engine.prepareBackwardAnalysis(
+                    *M, [](Instruction *) { return GenKillTransformer::one(); })
+              : Engine.prepareForwardAnalysis(*M, [](Instruction *) {
+                  return GenKillTransformer::one();
+                });
+      ASSERT_NE(Prepared, nullptr) << Engine.getLastError();
+      auto Result = Prepared->solveContextAggregated({Seed});
+      ASSERT_NE(Result, nullptr) << Prepared->getLastError();
+      auto *Call = findInstInModule(*M, "recursive_call");
+      ASSERT_NE(Call, nullptr);
+      EXPECT_TRUE(containsFact(Result->IN(Call), Seed));
+      EXPECT_TRUE(containsFact(Result->OUT(Call), Seed));
+    }
+  }
+}
+
+TEST_F(WPDSTest, ExistingWPDSAnalysisClientsSelectEitherWaliBackend) {
+  auto Compare = [](Module &M, const mono::DataFlowResult &Left,
+                    const mono::DataFlowResult &Right) {
+    for (Function &F : M) {
+      for (BasicBlock &BB : F) {
+        for (Instruction &I : BB) {
+          EXPECT_EQ(Left.IN(&I), Right.IN(&I));
+          EXPECT_EQ(Left.OUT(&I), Right.OUT(&I));
+          EXPECT_EQ(Left.GEN(&I), Right.GEN(&I));
+          EXPECT_EQ(Left.KILL(&I), Right.KILL(&I));
+        }
+      }
+    }
+  };
+
+  for (WPDSBackendKind Backend :
+       {WPDSBackendKind::WaliFWPDS, WPDSBackendKind::WaliSWPDS}) {
+    WPDSBackendOptions Options{Backend, true, true};
+    {
+      auto M = createLinearModule();
+      auto Legacy = runLivenessAnalysis(*M);
+      auto Selected = runLivenessAnalysis(*M, Options);
+      ASSERT_NE(Selected, nullptr);
+      Compare(*M, *Selected, *Legacy);
+    }
+    {
+      auto M = createLinearModule();
+      auto Legacy = runConstantPropagationAnalysis(*M);
+      auto Selected = runConstantPropagationAnalysis(*M, Options);
+      ASSERT_NE(Selected, nullptr);
+      Compare(*M, *Selected, *Legacy);
+    }
+    {
+      auto M = createLinearModule();
+      auto Legacy = runTaintAnalysis(*M);
+      auto Selected = runTaintAnalysis(*M, Options);
+      ASSERT_NE(Selected, nullptr);
+      Compare(*M, *Selected, *Legacy);
+    }
+    {
+      auto M = createLinearModule();
+      auto Legacy = runUninitializedVariablesAnalysis(*M);
+      auto Selected = runUninitializedVariablesAnalysis(*M, Options);
+      ASSERT_NE(Selected, nullptr);
+      Compare(*M, *Selected, *Legacy);
+    }
+  }
+}
+#endif
 
 TEST_F(WPDSTest, EngineStoresLocalGenKillInsteadOfPathSummaryEffects) {
   auto M = createLinearModule();

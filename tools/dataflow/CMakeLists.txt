@@ -1,4 +1,4 @@
-# Dataflow testing tools for Elimination, Mono, IFDS, and NPA engines.
+# Dataflow testing tools for Elimination, Mono, IFDS, NPA, and WPDS engines.
 
 llvm_map_components_to_libnames(LLVM_LINK_COMPONENTS
   IRReader
@@ -13,6 +13,7 @@ add_executable(lotus-dfa-apa lotus-dfa-apa.cpp ToolSupport.cpp)
 add_executable(lotus-dfa-mono lotus-dfa-mono.cpp ToolSupport.cpp)
 add_executable(lotus-dfa-ifds lotus-dfa-ifds.cpp ToolSupport.cpp)
 add_executable(lotus-dfa-npa lotus-dfa-npa.cpp ToolSupport.cpp)
+add_executable(lotus-dfa-wpds lotus-dfa-wpds.cpp ToolSupport.cpp)
 
 foreach(target lotus-dfa lotus-dfa-apa lotus-dfa-mono lotus-dfa-ifds)
   target_link_libraries(${target} PRIVATE
@@ -25,6 +26,12 @@ endforeach()
 target_link_libraries(lotus-dfa-npa PRIVATE
   NPADataFlow
   CanaryAliasAnalysisWrapper
+  ${LLVM_LINK_COMPONENTS}
+)
+
+target_link_libraries(lotus-dfa-wpds PRIVATE
+  WPDSDataFlow
+  wpds++
   ${LLVM_LINK_COMPONENTS}
 )
 
