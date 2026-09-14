@@ -77,17 +77,22 @@ add_lotus_targeted_test(EndpointQuotientEngineTest
     LINK_LIBS
         CanaryClassicalCFL)
 
+add_lotus_targeted_test(SkewedTabulationEngineTest
+    SkewedTabulationEngineTest.cpp
+    LINK_LIBS
+        CanaryClassicalCFL)
+
 add_lotus_targeted_test(ClassicalAdaptersTest ClassicalAdaptersTest.cpp
     LINK_LIBS
         CanaryClassicalCFLAliasClient
         CanaryClassicalCFLValueFlowClient)
 
-if(TARGET lotus-cfl-classical)
+if(TARGET lotus-cfl-solve)
     foreach(classical_backend
-            sparse-set sparse-bitvector graspan sqid pearl transitive-closure pocr hpocr
+            sparse-set sparse-bitvector graspan sqid pearl skewed transitive-closure pocr hpocr
             focr endpoint-quotient)
         add_test(NAME classical_cfl_cli_${classical_backend}
-            COMMAND $<TARGET_FILE:lotus-cfl-classical>
+            COMMAND $<TARGET_FILE:lotus-cfl-solve>
                 --grammar ${CMAKE_SOURCE_DIR}/tests/regress/CFL/Classical/chain.grammar
                 --graph ${CMAKE_SOURCE_DIR}/tests/regress/CFL/Classical/chain.txt
                 --solver ${classical_backend}
@@ -96,7 +101,7 @@ if(TARGET lotus-cfl-classical)
             PASS_REGULAR_EXPRESSION "\"relation_edges\":64")
 
         add_test(NAME classical_cfl_pocr_format_${classical_backend}
-            COMMAND $<TARGET_FILE:lotus-cfl-classical>
+            COMMAND $<TARGET_FILE:lotus-cfl-solve>
                 --grammar ${CMAKE_SOURCE_DIR}/tests/regress/CFL/Classical/pocr.grammar
                 --graph ${CMAKE_SOURCE_DIR}/tests/regress/CFL/Classical/pocr.graph
                 --solver ${classical_backend}
@@ -108,7 +113,7 @@ if(TARGET lotus-cfl-classical)
     endforeach()
 
     add_test(NAME classical_cfl_cli_infers_attributes
-        COMMAND $<TARGET_FILE:lotus-cfl-classical>
+        COMMAND $<TARGET_FILE:lotus-cfl-solve>
             --grammar ${CMAKE_SOURCE_DIR}/tests/regress/CFL/Classical/call.grammar
             --graph ${CMAKE_SOURCE_DIR}/tests/regress/CFL/Classical/call.txt
             --solver transitive-closure
@@ -117,7 +122,7 @@ if(TARGET lotus-cfl-classical)
         PASS_REGULAR_EXPRESSION "\"relation_edges\":3")
 
     add_test(NAME classical_cfl_cli_transitive_stats
-        COMMAND $<TARGET_FILE:lotus-cfl-classical>
+        COMMAND $<TARGET_FILE:lotus-cfl-solve>
             --grammar ${CMAKE_SOURCE_DIR}/tests/regress/CFL/Classical/chain.grammar
             --graph ${CMAKE_SOURCE_DIR}/tests/regress/CFL/Classical/chain.txt
             --solver transitive-closure
@@ -126,7 +131,7 @@ if(TARGET lotus-cfl-classical)
         PASS_REGULAR_EXPRESSION "\"transitive_instances\":1")
 
     add_test(NAME classical_cfl_cli_validate_only
-        COMMAND $<TARGET_FILE:lotus-cfl-classical>
+        COMMAND $<TARGET_FILE:lotus-cfl-solve>
             --grammar ${CMAKE_SOURCE_DIR}/tests/regress/CFL/Classical/call.grammar
             --graph ${CMAKE_SOURCE_DIR}/tests/regress/CFL/Classical/call.txt
             --validate-only)
@@ -134,7 +139,7 @@ if(TARGET lotus-cfl-classical)
         PASS_REGULAR_EXPRESSION "validation=ok")
 
     add_test(NAME classical_cfl_cli_graph_simplification
-        COMMAND $<TARGET_FILE:lotus-cfl-classical>
+        COMMAND $<TARGET_FILE:lotus-cfl-solve>
             --grammar ${CMAKE_SOURCE_DIR}/tests/regress/CFL/Classical/pocr.grammar
             --graph ${CMAKE_SOURCE_DIR}/tests/regress/CFL/Classical/pocr.graph
             --solver pocr
@@ -145,7 +150,7 @@ if(TARGET lotus-cfl-classical)
         PASS_REGULAR_EXPRESSION "\"simplified_nodes\":1")
 
     add_test(NAME classical_cfl_cli_count_symbols
-        COMMAND $<TARGET_FILE:lotus-cfl-classical>
+        COMMAND $<TARGET_FILE:lotus-cfl-solve>
             --grammar ${CMAKE_SOURCE_DIR}/tests/regress/CFL/Classical/pocr.grammar
             --graph ${CMAKE_SOURCE_DIR}/tests/regress/CFL/Classical/pocr.graph
             --solver pocr
@@ -166,7 +171,7 @@ if(TARGET lotus-cfl-classical)
                 string(REPLACE "-" "_" backend_name "${epoch_backend}")
                 add_test(
                     NAME classical_cfl_grammar_${pocr_client}${variant_name}_${backend_name}
-                    COMMAND $<TARGET_FILE:lotus-cfl-classical>
+                    COMMAND $<TARGET_FILE:lotus-cfl-solve>
                         --grammar
                         ${CMAKE_SOURCE_DIR}/tests/regress/CFL/Classical/pocr-${pocr_client}${grammar_variant}.grammar
                         --graph
@@ -242,7 +247,7 @@ endif()
 
 if(TARGET lotus-cfl-vf)
     foreach(classical_backend
-            sparse-set sparse-bitvector graspan sqid pearl transitive-closure pocr hpocr
+            sparse-set sparse-bitvector graspan sqid pearl skewed transitive-closure pocr hpocr
             focr endpoint-quotient)
         add_test(NAME classical_cfl_vf_${classical_backend}
             COMMAND $<TARGET_FILE:lotus-cfl-vf>
@@ -265,82 +270,10 @@ if(TARGET lotus-cfl-vf)
     endforeach()
 endif()
 
-if(TARGET lotus-cfl-foldability)
-    add_test(NAME classical_cfl_foldability
-        COMMAND $<TARGET_FILE:lotus-cfl-foldability>
-            --all
-            ${CMAKE_SOURCE_DIR}/tests/regress/CFL/Classical/foldability.rsm
-            ${CMAKE_SOURCE_DIR}/tests/regress/CFL/Classical/foldability.patterns)
-    set_tests_properties(classical_cfl_foldability PROPERTIES
-        PASS_REGULAR_EXPRESSION "foldable.*0;0;;;;;;")
-endif()
-
-if(TARGET lotus-cfl-pocr)
-    foreach(pocr_engine
-            std-aa gspan-aa gr-aa grgspan-aa pocr-aa focr-aa
-            std-vfa gspan-vfa gr-vfa grgspan-vfa pocr-vfa focr-vfa)
-        if(pocr_engine MATCHES "-aa$")
-            set(expected_engine_pairs 9)
-        else()
-            set(expected_engine_pairs 6)
-        endif()
-        add_test(NAME classical_cfl_engine_${pocr_engine}
-            COMMAND $<TARGET_FILE:lotus-cfl-pocr>
-                --engine ${pocr_engine}
-                --graph ${CMAKE_SOURCE_DIR}/tests/regress/CFL/Classical/pocr.graph
-                --query 0,2
-                --json-stats)
-        set_tests_properties(classical_cfl_engine_${pocr_engine} PROPERTIES
-            PASS_REGULAR_EXPRESSION
-            "\"result_pairs\":${expected_engine_pairs}")
-    endforeach()
-    add_test(NAME classical_cfl_engine_preprocessing
-        COMMAND $<TARGET_FILE:lotus-cfl-pocr>
-            --engine pocr-aa
-            --graph ${CMAKE_SOURCE_DIR}/tests/regress/CFL/Classical/pocr-aa.graph
-            --simplify-graph
-            --interdyck
-            --json-stats)
-    set_tests_properties(classical_cfl_engine_preprocessing PROPERTIES
-        PASS_REGULAR_EXPRESSION "\"folded_nodes\":")
-endif()
-
-if(TARGET lotus-cfl-staged)
-    add_test(NAME classical_cfl_engine_stg_standard_dyck
-        COMMAND $<TARGET_FILE:lotus-cfl-staged>
-            --grammar ${CMAKE_SOURCE_DIR}/tests/regress/CFL/Classical/stg-dyck.grammar
-            --graph ${CMAKE_SOURCE_DIR}/tests/regress/CFL/Classical/stg-dyck.graph
-            --mode standard-dyck
-            --summary Sum
-            --delimiter call_0,ret_0
-            --neutral s
-            --json-stats)
-    set_tests_properties(classical_cfl_engine_stg_standard_dyck PROPERTIES
-        PASS_REGULAR_EXPRESSION "\"start_edges\":16")
-
-    add_test(NAME classical_cfl_engine_stg_alias
-        COMMAND $<TARGET_FILE:lotus-cfl-staged>
-            --grammar ${CMAKE_SOURCE_DIR}/tests/regress/CFL/Classical/stg-alias.grammar
-            --graph ${CMAKE_SOURCE_DIR}/tests/regress/CFL/Classical/stg-alias.graph
-            --mode alias
-            --summary X
-            --open open
-            --close close
-            --reverse-forward Abar
-            --center Y
-            --backward B
-            --phase-l Abar=abar
-            --phase-l Y=y
-            --phase-l B=b
-            --json-stats)
-    set_tests_properties(classical_cfl_engine_stg_alias PROPERTIES
-        PASS_REGULAR_EXPRESSION "\"start_edges\":1")
-endif()
-
 get_property(cfl_registered_tests DIRECTORY PROPERTY TESTS)
 foreach(cfl_registered_test IN LISTS cfl_registered_tests)
     if(cfl_registered_test MATCHES
-       "^classical_cfl_(cli|alias|vf|foldability|engine|grammar)")
+       "^classical_cfl_(cli|alias|vf|grammar)")
         set_tests_properties(${cfl_registered_test} PROPERTIES
             LABELS "lotus;integration;cfl;cli"
             TIMEOUT ${LOTUS_UNIT_TEST_TIMEOUT}

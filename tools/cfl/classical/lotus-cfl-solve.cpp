@@ -39,10 +39,10 @@ struct Options {
 
 void usage(std::ostream &stream) {
   stream
-      << "Usage: lotus-cfl-classical --grammar FILE --graph FILE [options]\n"
+      << "Usage: lotus-cfl-solve --grammar FILE --graph FILE [options]\n"
          "Options:\n"
          "  --solver sparse-set|sparse-bitvector|graspan|sqid|pearl|"
-         "transitive-closure|pocr|hpocr|focr|endpoint-quotient\n"
+         "skewed|transitive-closure|pocr|hpocr|focr|endpoint-quotient\n"
          "  --graph-mode plain|matrix|pag-matrix\n"
          "  --direction plain|reverse|bidirectional\n"
          "  --attribute-domain var:i=N,N,...  Variable-specific domain\n"
@@ -381,6 +381,21 @@ int main(int argc, char **argv) {
           << ",\"focr_cycle_simplifications\":"
           << stats.fully_ordered_cycle_simplifications
           << ",\"graspan_epochs\":" << stats.graspan_epochs
+          << ",\"skewed_indexed_facts\":" << stats.skewed_indexed_facts
+          << ",\"skewed_propagating_facts\":" << stats.skewed_propagating_facts
+          << ",\"skewed_propagating_symbols\":"
+          << stats.skewed_propagating_symbols
+          << ",\"skewed_dynamic_eligible_symbols\":"
+          << stats.skewed_dynamic_eligible_symbols
+          << ",\"skewed_static_pe_insertions\":"
+          << stats.skewed_static_pe_insertions
+          << ",\"skewed_dynamic_pe_insertions\":"
+          << stats.skewed_dynamic_pe_insertions
+          << ",\"skewed_promotions_to_indexed\":"
+          << stats.skewed_promotions_to_indexed
+          << ",\"skewed_unary_applications\":"
+          << stats.skewed_unary_applications
+          << ",\"skewed_binary_join_pairs\":" << stats.skewed_binary_join_pairs
           << ",\"endpoint_quotient_cells\":" << stats.endpoint_quotient_cells
           << ",\"endpoint_quotient_facts\":" << stats.endpoint_quotient_facts
           << ",\"endpoint_quotient_seed_facts\":"
@@ -465,6 +480,10 @@ int main(int argc, char **argv) {
           << stats.fully_ordered_reachability_checks
           << " focr_tree_join_visits=" << stats.fully_ordered_tree_join_visits
           << " graspan_epochs=" << stats.graspan_epochs
+          << " skewed_indexed_facts=" << stats.skewed_indexed_facts
+          << " skewed_propagating_facts=" << stats.skewed_propagating_facts
+          << " skewed_dynamic_pe_insertions="
+          << stats.skewed_dynamic_pe_insertions
           << " simplified_nodes=" << simplification_stats.reduced_nodes
           << " scc_nodes_merged=" << simplification_stats.scc_nodes_merged
           << " folded_nodes=" << simplification_stats.folded_nodes

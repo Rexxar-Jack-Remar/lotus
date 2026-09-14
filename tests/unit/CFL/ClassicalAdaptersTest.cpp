@@ -209,9 +209,9 @@ TEST(ClassicalAdaptersTest,
     for (SolverBackend backend :
          {SolverBackend::SparseSet, SolverBackend::SparseBitVector,
           SolverBackend::Graspan, SolverBackend::Sqid, SolverBackend::Pearl,
-          SolverBackend::TransitiveClosure, SolverBackend::Pocr,
-          SolverBackend::HierarchicalPocr, SolverBackend::FullyOrdered,
-          SolverBackend::EndpointQuotient}) {
+          SolverBackend::Skewed, SolverBackend::TransitiveClosure,
+          SolverBackend::Pocr, SolverBackend::HierarchicalPocr,
+          SolverBackend::FullyOrdered, SolverBackend::EndpointQuotient}) {
       AliasClient alternate = AliasClient::fromConstraintGraph(graph, mode);
       alternate.solve(backend);
       EXPECT_TRUE(alternate.mayAlias(value, loaded))
@@ -408,8 +408,9 @@ TEST(ClassicalAdaptersTest, PegResultsAreIndependentOfConstraintOrder) {
   for (SolverBackend backend :
        {SolverBackend::SparseSet, SolverBackend::SparseBitVector,
         SolverBackend::Graspan, SolverBackend::Sqid, SolverBackend::Pearl,
-        SolverBackend::TransitiveClosure, SolverBackend::Pocr,
-        SolverBackend::HierarchicalPocr, SolverBackend::FullyOrdered}) {
+        SolverBackend::Skewed, SolverBackend::TransitiveClosure,
+        SolverBackend::Pocr, SolverBackend::HierarchicalPocr,
+        SolverBackend::FullyOrdered}) {
     AliasConstraintGraph batch_graph = makeEmptyGraph();
     batch_graph.addEdge(object, pointer, AliasConstraintEdgeKind::Addr);
     batch_graph.addEdge(value, pointer, AliasConstraintEdgeKind::Store);
@@ -518,7 +519,8 @@ TEST(ClassicalAdaptersTest, IncrementalGepExtendsAttributedGrammar) {
   EXPECT_TRUE(client.graph().hasEdge(base, field, "gep_9"));
 }
 
-TEST(ClassicalAdaptersTest, QuotientGrammarExtensionDoesNotMaterializeOldClosure) {
+TEST(ClassicalAdaptersTest,
+     QuotientGrammarExtensionDoesNotMaterializeOldClosure) {
   AliasConstraintGraph graph;
   const auto object = graph.addNode("object");
   const auto pointer = graph.addNode("pointer");
@@ -533,7 +535,8 @@ TEST(ClassicalAdaptersTest, QuotientGrammarExtensionDoesNotMaterializeOldClosure
   const auto stats = client.solve(SolverBackend::EndpointQuotient);
   EXPECT_EQ(stats.endpoint_quotient_seed_facts, client.graph().edgeCount());
   EXPECT_TRUE(client.mayValueAlias(pointer, alias));
-  EXPECT_EQ(client.addressTakenObjects(alias), std::vector<std::size_t>({object}));
+  EXPECT_EQ(client.addressTakenObjects(alias),
+            std::vector<std::size_t>({object}));
 
   graph.addEdge(alias, field, AliasConstraintEdgeKind::NormalGep, 17);
   AliasClient fresh = AliasClient::fromConstraintGraph(graph);
@@ -643,7 +646,7 @@ TEST(ClassicalAdaptersTest, ValueFlowClientEncodesSvfgCallsAndReachability) {
 
   for (SolverBackend backend :
        {SolverBackend::SparseBitVector, SolverBackend::Graspan,
-        SolverBackend::Sqid, SolverBackend::Pearl,
+        SolverBackend::Sqid, SolverBackend::Pearl, SolverBackend::Skewed,
         SolverBackend::TransitiveClosure, SolverBackend::Pocr,
         SolverBackend::HierarchicalPocr, SolverBackend::FullyOrdered}) {
     ValueFlowClient alternate = ValueFlowClient::fromSVFG(svfg);
@@ -1284,9 +1287,9 @@ TEST(ClassicalAdaptersTest, LlvmAliasAnalysisDrivesIndirectCallDiscovery) {
     for (SolverBackend backend :
          {SolverBackend::SparseSet, SolverBackend::SparseBitVector,
           SolverBackend::Graspan, SolverBackend::Sqid, SolverBackend::Pearl,
-          SolverBackend::TransitiveClosure, SolverBackend::Pocr,
-          SolverBackend::HierarchicalPocr, SolverBackend::FullyOrdered,
-          SolverBackend::EndpointQuotient}) {
+          SolverBackend::Skewed, SolverBackend::TransitiveClosure,
+          SolverBackend::Pocr, SolverBackend::HierarchicalPocr,
+          SolverBackend::FullyOrdered, SolverBackend::EndpointQuotient}) {
       LLVMAliasOptions alternate_options;
       alternate_options.encoding = encoding;
       alternate_options.backend = backend;

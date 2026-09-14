@@ -5,6 +5,7 @@
 #include "CFL/Classical/Solvers/Engines/POCR/FullyOrderedClosure.h"
 #include "CFL/Classical/Solvers/Engines/POCR/PairedTreeClosure.h"
 #include "CFL/Classical/Solvers/Engines/SQID/SqidEngine.h"
+#include "CFL/Classical/Solvers/Engines/Skewed/SkewedTabulationEngine.h"
 #include "CFL/Classical/Solvers/Engines/TransitiveClosure.h"
 
 #include <algorithm>
@@ -285,6 +286,9 @@ std::unique_ptr<Relation> createSolverRelation(SolverBackend backend,
   case SolverBackend::Sqid:
   case SolverBackend::Pearl:
     return createRelation(RelationBackend::SparseBitVectors, node_count);
+  case SolverBackend::Skewed:
+    return std::make_unique<engines::SkewedTabulationEngine>(grammar,
+                                                             node_count);
   case SolverBackend::TransitiveClosure:
     return std::make_unique<BitVectorClosureRelation>(transitive_symbols,
                                                       node_count);
@@ -316,6 +320,8 @@ const char *solverBackendName(SolverBackend backend) {
     return "sqid";
   case SolverBackend::Pearl:
     return "pearl";
+  case SolverBackend::Skewed:
+    return "skewed";
   case SolverBackend::TransitiveClosure:
     return "transitive-closure";
   case SolverBackend::Pocr:
@@ -345,6 +351,9 @@ SolverBackend parseSolverBackend(std::string_view name) {
   }
   if (name == "pearl") {
     return SolverBackend::Pearl;
+  }
+  if (name == "skewed") {
+    return SolverBackend::Skewed;
   }
   if (name == "transitive-closure") {
     return SolverBackend::TransitiveClosure;
@@ -407,6 +416,10 @@ public:
       }
       pearl_engine_ = std::make_unique<engines::PearlEngine>(
           grammar, *relation_, graph.vertexCount(), std::move(pearl_options));
+    }
+    if (backend_ == SolverBackend::Skewed) {
+      skewed_engine_ =
+          static_cast<engines::SkewedTabulationEngine *>(relation_.get());
     }
     if (backend_ == SolverBackend::EndpointQuotient) {
       eq_engine_ =
@@ -484,6 +497,7 @@ public:
     stats.input_edges = input_edges_;
 
     if (backend_ != SolverBackend::Pearl && backend_ != SolverBackend::Sqid &&
+        backend_ != SolverBackend::Skewed &&
         backend_ != SolverBackend::EndpointQuotient) {
       for (SymbolId symbol : grammar_.nullableSymbolIds()) {
         for (NodeId node = nullable_seeded_nodes_; node < graph_.vertexCount();
@@ -513,6 +527,24 @@ public:
           std::max(sqid.peak_in_worklist, sqid.peak_out_worklist);
     } else if (backend_ == SolverBackend::Graspan) {
       solveGraspan(stats);
+    } else if (backend_ == SolverBackend::Skewed) {
+      const engines::SkewedTabulationStatistics skewed =
+          skewed_engine_->solve();
+      stats.classical_iterations += skewed.attempts;
+      stats.processed_work_items += skewed.work_items;
+      stats.duplicate_edges += skewed.duplicate_attempts;
+      stats.added_edges += skewed.derived_facts;
+      stats.peak_worklist_size =
+          std::max(stats.peak_worklist_size, skewed.peak_worklist);
+      stats.skewed_indexed_facts = skewed.indexed_facts;
+      stats.skewed_propagating_facts = skewed.propagating_facts;
+      stats.skewed_propagating_symbols = skewed.propagating_symbols;
+      stats.skewed_dynamic_eligible_symbols = skewed.dynamic_eligible_symbols;
+      stats.skewed_static_pe_insertions = skewed.static_pe_insertions;
+      stats.skewed_dynamic_pe_insertions = skewed.dynamic_pe_insertions;
+      stats.skewed_promotions_to_indexed = skewed.promotions_to_indexed;
+      stats.skewed_unary_applications = skewed.unary_applications;
+      stats.skewed_binary_join_pairs = skewed.binary_join_pairs;
     } else if (backend_ == SolverBackend::EndpointQuotient) {
       const engines::EndpointQuotientStatistics eq = eq_engine_->solve();
       stats.classical_iterations += eq.binary_joins;
@@ -1122,6 +1154,13 @@ private:
   }
 
   bool insertInputFact(SymbolId symbol, NodeId source, NodeId target) {
+    if (backend_ == SolverBackend::Skewed) {
+      if (!skewed_engine_->add(symbol, source, target)) {
+        return false;
+      }
+      addCandidate(symbol, source, target, true);
+      return true;
+    }
     if (backend_ == SolverBackend::EndpointQuotient) {
       if (!eq_engine_->add(symbol, source, target)) {
         return false;
@@ -1222,6 +1261,7 @@ private:
   std::unique_ptr<GraspanData> graspan_current_;
   std::unique_ptr<engines::SqidEngine> sqid_engine_;
   std::unique_ptr<engines::PearlEngine> pearl_engine_;
+  engines::SkewedTabulationEngine *skewed_engine_ = nullptr;
   engines::EndpointQuotientEngine *eq_engine_ = nullptr;
   std::size_t input_edges_ = 0;
   std::size_t current_peak_worklist_size_ = 0;

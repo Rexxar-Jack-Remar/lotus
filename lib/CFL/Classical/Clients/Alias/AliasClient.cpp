@@ -618,6 +618,19 @@ ReachabilityStats AliasClient::solveToFixedPoint(
     aggregate.fully_ordered_cycle_simplifications +=
         current.fully_ordered_cycle_simplifications;
     aggregate.graspan_epochs += current.graspan_epochs;
+    aggregate.skewed_indexed_facts = current.skewed_indexed_facts;
+    aggregate.skewed_propagating_facts = current.skewed_propagating_facts;
+    aggregate.skewed_propagating_symbols = current.skewed_propagating_symbols;
+    aggregate.skewed_dynamic_eligible_symbols =
+        current.skewed_dynamic_eligible_symbols;
+    aggregate.skewed_static_pe_insertions +=
+        current.skewed_static_pe_insertions;
+    aggregate.skewed_dynamic_pe_insertions +=
+        current.skewed_dynamic_pe_insertions;
+    aggregate.skewed_promotions_to_indexed +=
+        current.skewed_promotions_to_indexed;
+    aggregate.skewed_unary_applications += current.skewed_unary_applications;
+    aggregate.skewed_binary_join_pairs += current.skewed_binary_join_pairs;
     aggregate.endpoint_quotient_cells = current.endpoint_quotient_cells;
     aggregate.endpoint_quotient_facts = current.endpoint_quotient_facts;
     aggregate.endpoint_quotient_seed_facts =

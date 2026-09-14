@@ -13,16 +13,15 @@ enables analysis of complex program properties using grammar-based constraints.
 
 **Location**: ``tools/cfl/``
 
-**Tools**: ``lotus-cfl-classical``, ``lotus-cfl-alias``, ``lotus-cfl-vf``,
-``lotus-cfl-foldability``, ``lotus-cfl-pocr``, ``lotus-cfl-staged``,
+**Tools**: ``lotus-cfl-solve``, ``lotus-cfl-alias``, ``lotus-cfl-vf``,
 ``lotus-cfl-interleaved-dyck-mcfl``, ``lotus-cfl-interleaved-dyck-staged-bounds``,
 ``lotus-cfl-interleaved-dyck-unary``, ``lotus-cfl-interleaved-dyck-graph-reduction``,
 and CSR.
 
-Classical CFL and Alias Analysis
---------------------------------
+Classical CFL solving and clients
+---------------------------------
 
-``lotus-cfl-classical`` runs a supplied grammar over a text, DOT, or JSON
+``lotus-cfl-solve`` runs a supplied grammar over a text, DOT, or JSON
 graph with the sparse-set, sparse-bitvector, Graspan, transitive-closure, POCR,
 hierarchical-POCR, fully ordered, PEARL, or Sqid backend.
 
@@ -38,8 +37,8 @@ labels.
 
 .. code-block:: bash
 
-   cmake --build build --target lotus-cfl-classical lotus-cfl-alias lotus-cfl-vf
-   build/bin/lotus-cfl-classical --grammar grammar.txt --graph graph.txt \
+   cmake --build build --target lotus-cfl-solve lotus-cfl-alias lotus-cfl-vf
+   build/bin/lotus-cfl-solve --grammar grammar.txt --graph graph.txt \
      --solver transitive-closure --json-stats
    build/bin/lotus-cfl-alias --encoding pag --solver sparse-bitvector \
      --check-annotations module.bc
@@ -50,26 +49,19 @@ Use ``--solver pocr``, ``--solver hpocr``, or ``--solver focr`` to select the
 ported POCR algorithm families. The same selectors are available to the alias
 and value-flow clients.
 
+Use ``--solver skewed`` to select PLDI 2024 skewed tabulation through the same
+complete-relation client interface.
+
 The hand-specialized engines are separate from those general grammar
 backends. Use ``lotus-cfl-alias --engine pocr-aa|focr-aa --encoding peg`` or
 ``lotus-cfl-vf --engine pocr-vfa|focr-vfa``. ``Clients/`` still contains only
 the alias and value-flow adapters; the implementations live under
 ``Solvers/Engines/``.
 
-``lotus-cfl-pocr`` drives the standard, Graspan, grammar-rewritten,
-rewritten-Graspan, POCR, and FOCR engine choices directly on POCR ``.peg`` and
-``.vfg`` files for artifact comparison, without creating another client layer.
-It exposes POCR's SCC, graph-folding, InterDyck-pruning, graph-output, and
-optional ECG-SCC controls directly.
-
-``lotus-cfl-foldability`` ports POCR's recursive-state-machine-guided
-foldability checker. The general driver also accepts POCR grammar/graph files
-directly and exposes unidirectional summarization, SCC elimination, graph
-folding, and inter-Dyck pruning.
-
-``lotus-cfl-staged`` runs the ISSTA 2024 Stg solver. It accepts explicit
-standard-Dyck, extended-Dyck, or Alias-CFP decomposition parameters and DNF
-regular productions for Phase L and Phase R.
+The general solver accepts POCR grammar/graph files and exposes
+unidirectional summarization, SCC elimination, graph folding, and inter-Dyck
+pruning. Specialized POCR, STG, and foldability components remain available
+through their C++ APIs and unit tests rather than dedicated executables.
 
 See :doc:`../../cfl/classical`, :doc:`../../cfl/pearl`,
 :doc:`../../cfl/stg`, and :doc:`../../cfl/sqid` for the complete algorithm,

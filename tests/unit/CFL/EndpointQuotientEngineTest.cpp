@@ -463,9 +463,9 @@ TEST(EndpointQuotientSessionTest, StreamingQueriesAreBackendIndependent) {
   for (auto backend :
        {SolverBackend::SparseSet, SolverBackend::SparseBitVector,
         SolverBackend::Graspan, SolverBackend::Sqid, SolverBackend::Pearl,
-        SolverBackend::TransitiveClosure, SolverBackend::Pocr,
-        SolverBackend::HierarchicalPocr, SolverBackend::FullyOrdered,
-        SolverBackend::EndpointQuotient}) {
+        SolverBackend::Skewed, SolverBackend::TransitiveClosure,
+        SolverBackend::Pocr, SolverBackend::HierarchicalPocr,
+        SolverBackend::FullyOrdered, SolverBackend::EndpointQuotient}) {
     SCOPED_TRACE(solverBackendName(backend));
     const auto &grammar = starGrammar();
     LabeledGraph graph;

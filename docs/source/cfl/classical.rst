@@ -97,6 +97,15 @@ Solver backends
    Implements OOPSLA 2026 adaptive and differential relation chaining with
    dual old/delta graph views. Select it with ``--solver sqid``.
 
+``Skewed``
+   Implements the PLDI 2024 skewed-tabulation worklist with separate indexed
+   (E) and propagating (PE) facts. Select it with ``--solver skewed``. The
+   general ``SolverSession`` backend preserves Lotus's complete-relation
+   contract and safely rebuilds after terminal-edge or isolated-node updates,
+   because old PE facts are not indexed as future join candidates. The engine
+   API also exposes the supplied conservative target-only static rewrite; it
+   is intentionally not enabled by the complete-relation backend.
+
 ``TransitiveClosure``
    Uses sparse bitvectors generally and a dedicated incremental forward/reverse
    bitvector closure for every production ``X -> X X``. Inserting ``u -> v``
@@ -206,14 +215,9 @@ common-dereference merging and FastDyck then use their own worklists, preserving
 the original phase boundaries.
 
 ``RecursiveStateMachine`` and ``FoldabilityChecker`` implement POCR's RSM
-transition semantics and node-pair foldability proof. The
-``lotus-cfl-foldability`` tool reads an RSM and a pattern file.
-
-``lotus-cfl-pocr`` runs the four hand-specialized engines directly on POCR
-``.peg``/``.vfg`` datasets and the standard, Graspan, grammar-rewritten, and
-rewritten-Graspan client engines. This is an engine driver; it does not
-introduce a third analysis client. It also exposes ``--scc``, ``--graph-folding``,
-``--interdyck``, ``--simplify-graph``, ``--graph-output``, and ``--focr-scc``.
+transition semantics and node-pair foldability proof. These utilities and the
+hand-specialized POCR engines remain available through their C++ APIs and unit
+tests.
 
 ``SolverOptions::unidirectional`` implements POCR's ``Insert``/``Follow``
 summarization discipline. All facts remain available as exact output, while
@@ -318,9 +322,8 @@ Command line
 
 .. code-block:: console
 
-   cmake --build build --target lotus-cfl-classical lotus-cfl-alias \
-     lotus-cfl-vf lotus-cfl-foldability lotus-cfl-pocr
-   build/bin/lotus-cfl-classical \
+   cmake --build build --target lotus-cfl-solve lotus-cfl-alias lotus-cfl-vf
+   build/bin/lotus-cfl-solve \
      --grammar grammar.txt --graph graph.txt --solver sparse-bitvector --json-stats
 
    build/bin/lotus-cfl-alias --solver sparse-bitvector --encoding pag \
@@ -335,19 +338,10 @@ Command line
    build/bin/lotus-cfl-vf --engine focr-vfa \
      --query main::source,main::sink module.bc
 
-   build/bin/lotus-cfl-pocr --engine pocr-aa --graph input.peg \
-     --query 10,20 --json-stats
-
-   build/bin/lotus-cfl-pocr --engine grgspan-aa --graph input.peg \
-     --json-stats
-
-   build/bin/lotus-cfl-pocr --engine focr-vfa --graph input.vfg \
-     --simplify-graph --focr-scc --graph-output reduced.vfg
-
-   build/bin/lotus-cfl-classical \
+   build/bin/lotus-cfl-solve \
      --grammar grammar.txt --graph graph.txt --solver pocr --json-stats
 
-   build/bin/lotus-cfl-classical \
+   build/bin/lotus-cfl-solve \
      --grammar pocr.cfg --graph input.peg --solver graspan \
      --unidirectional --simplification-flavor alias --simplify-graph
 

@@ -62,6 +62,15 @@ struct ReachabilityStats {
   std::size_t fully_ordered_critical_edge_removals = 0;
   std::size_t fully_ordered_cycle_simplifications = 0;
   std::size_t graspan_epochs = 0;
+  std::size_t skewed_indexed_facts = 0;
+  std::size_t skewed_propagating_facts = 0;
+  std::size_t skewed_propagating_symbols = 0;
+  std::size_t skewed_dynamic_eligible_symbols = 0;
+  std::size_t skewed_static_pe_insertions = 0;
+  std::size_t skewed_dynamic_pe_insertions = 0;
+  std::size_t skewed_promotions_to_indexed = 0;
+  std::size_t skewed_unary_applications = 0;
+  std::size_t skewed_binary_join_pairs = 0;
   std::size_t endpoint_quotient_cells = 0;
   std::size_t endpoint_quotient_facts = 0;
   std::size_t endpoint_quotient_seed_facts = 0;
@@ -99,6 +108,8 @@ enum class SolverBackend {
   Sqid,
   /// PEARL transitivity-aware multi-derivation.
   Pearl,
+  /// PLDI 2024 skewed tabulation with separate indexed and propagating facts.
+  Skewed,
   /// Classical worklist plus dedicated incremental closure only for symbols
   /// having a literal production A -> A A.
   TransitiveClosure,

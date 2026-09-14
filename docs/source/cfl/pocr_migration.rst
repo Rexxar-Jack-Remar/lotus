@@ -95,7 +95,7 @@ Clients and preprocessing
 
 ``RSM`` and ``GFPattern``
    Ported as ``RecursiveStateMachine``, ``NodePairPattern``, and
-   ``FoldabilityChecker``, with the ``lotus-cfl-foldability`` driver. The port
+   ``FoldabilityChecker``. The port
    implements the intended false-state and two-box enumeration guards instead
    of preserving the inverted/accumulating conditions in the artifact source.
 

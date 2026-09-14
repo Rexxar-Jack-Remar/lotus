@@ -153,7 +153,7 @@ General integration
 
 Inverse relations
    ``SolverOptions::pearl_inverse_relations`` or repeated
-   ``--pearl-inverse X,XBAR`` options in ``lotus-cfl-classical``. Pairing is
+   ``--pearl-inverse X,XBAR`` options in ``lotus-cfl-solve``. Pairing is
    explicit; symbol names are never guessed.
 
 The engine is not a wrapper around the generic solver. It owns the packed

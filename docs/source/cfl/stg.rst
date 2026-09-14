@@ -162,10 +162,9 @@ Public API
 Algorithm
    ``lib/CFL/Classical/Solvers/Engines/STG/StagedSolver.cpp``
 
-Driver
-   ``lotus-cfl-staged`` with ``standard-dyck``, ``extended-dyck``, and
-   ``alias`` modes. Repeated ``--phase-l`` and ``--phase-r`` definitions form
-   DNF alternatives.
+Integration
+   STG is exposed through ``StagedSolver`` and its decomposition helpers. It
+   has no dedicated command-line executable.
 
 Stg is separate from ``SolverBackend`` because a backend enum and an arbitrary
 CFG do not contain the CFP/decomposition information required by the paper.
