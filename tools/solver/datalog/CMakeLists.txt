@@ -1,6 +1,6 @@
-add_executable(lotus-datalog DatalogCli.cpp)
+add_executable(lotus-solver-datalog lotus-solver-datalog.cpp)
 
-target_link_libraries(lotus-datalog PRIVATE
+target_link_libraries(lotus-solver-datalog PRIVATE
   LotusDatalogFrontend)
 
-install(TARGETS lotus-datalog RUNTIME DESTINATION bin)
+install(TARGETS lotus-solver-datalog RUNTIME DESTINATION bin)

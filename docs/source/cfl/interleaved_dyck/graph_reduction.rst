@@ -51,4 +51,4 @@ details. They model intermediate color summaries and merge bookkeeping and
 therefore should not be unified with the immutable input representation in
 ``interleaved_dyck::Graph``.
 
-See also :doc:`cfl_components`.
+See also :doc:`/cfl/cfl_components`.

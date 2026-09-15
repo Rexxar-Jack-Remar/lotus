@@ -16,10 +16,12 @@ SMTSampler).
    smt
    wpds
    smtsampler
+   smtstabilizer
    symabs
    staub
    tuna
    stingx
+   egraph
    egraphs_simp
    fpsolve
    libsmt

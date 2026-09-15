@@ -91,6 +91,24 @@ Horn clauses (CHC), symbolic execution, and abstraction-refinement.
 
 For detailed documentation, see :doc:`seahorn/index`.
 
+SMACK – LLVM-to-Boogie Verification
+-----------------------------------
+
+SMACK translates LLVM bitcode into Boogie programs for verifier backends. The
+migrated SMACK implementation lives under ``third-party/verification/smack/``
+with the command-line frontend under ``tools/verifier/smack/``.
+
+**Binaries**: ``llvm2bpl``, ``extern-statics``  
+**Location**: ``tools/verifier/smack/``
+
+``llvm2bpl`` is the LLVM-to-Boogie translator and ``extern-statics``
+externalizes static functions; the ``smack`` frontend script and its helpers
+(``smack-doctor``, ``smack-svcomp-wrapper.sh``) are installed alongside them.
+
+**Build status**: built only when ``LOTUS_ENABLE_SMACK=ON``.
+
+For detailed documentation, see :doc:`../../verification/smack`.
+
 Horn-ICE – CHC Verification with Learning
 -----------------------------------------
 

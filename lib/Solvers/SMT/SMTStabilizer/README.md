@@ -15,7 +15,7 @@ Enable it when configuring Lotus:
 
 ```bash
 cmake -S . -B build -DLOTUS_ENABLE_SMT_STABILIZER=ON
-cmake --build build --target LotusSMTStabilizer lotus-smt-stabilizer
+cmake --build build --target LotusSMTStabilizer lotus-solver-smt-stabilizer
 ```
 
 If the dependencies are installed in non-standard prefixes, set `GMP_ROOT`
@@ -25,7 +25,7 @@ The integration provides:
 
 - `LotusSMTStabilizer`, a static library;
 - `Lotus::SMTStabilizer`, a CMake alias target;
-- `lotus-smt-stabilizer`, a command-line frontend;
+- `lotus-solver-smt-stabilizer`, a command-line frontend;
 - optional API tests in the Lotus `solver_tests` target.
 
 Public API headers are under

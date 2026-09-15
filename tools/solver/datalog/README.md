@@ -1,15 +1,15 @@
-# lotus-datalog
+# lotus-solver-datalog
 
-`lotus-datalog` is the command-line entry point for the native Lotus
+`lotus-solver-datalog` is the command-line entry point for the native Lotus
 Datalog/lattice engine. It accepts native Datalog syntax, a finite relational
 subset of Z3 fixedpoint syntax, or JSON Semantic IR. All three frontends lower to
 the same versioned Semantic IR and write deterministic JSON results.
 
 ```text
-lotus-datalog run <source...|-> [options]
-lotus-datalog explain <source...|-> [--analyze] [options]
-lotus-datalog validate <source...|-> [options]
-lotus-datalog schema
+lotus-solver-datalog run <source...|-> [options]
+lotus-solver-datalog explain <source...|-> [--analyze] [options]
+lotus-solver-datalog validate <source...|-> [options]
+lotus-solver-datalog schema
 ```
 
 `schema` prints a runnable transitive-closure example. `validate` performs all
@@ -92,14 +92,14 @@ points remain C++ API features.
 Run the checked-in example with:
 
 ```text
-lotus-datalog run tools/solver/datalog/examples/transitive_closure.dl --pretty
+lotus-solver-datalog run tools/solver/datalog/examples/transitive_closure.dl --pretty
 ```
 
 Several ordered source files may form one program. This allows declarations,
 facts, and rules to live in different files or directories:
 
 ```text
-lotus-datalog run \
+lotus-solver-datalog run \
   tools/solver/datalog/examples/multifile/schema.dl \
   tools/solver/datalog/examples/multifile/facts/graph.dl \
   tools/solver/datalog/examples/multifile/rules/reachability.dl
@@ -108,7 +108,7 @@ lotus-datalog run \
 The same example has an include-based entry point:
 
 ```text
-lotus-datalog run tools/solver/datalog/examples/multifile/main.dl
+lotus-solver-datalog run tools/solver/datalog/examples/multifile/main.dl
 ```
 
 Name and arity resolution runs after every source has been parsed, so declarations
@@ -144,7 +144,7 @@ interchange with simple μZ programs:
 For example:
 
 ```text
-lotus-datalog run tools/solver/datalog/examples/z3_fixedpoint.smt2 --pretty
+lotus-solver-datalog run tools/solver/datalog/examples/z3_fixedpoint.smt2 --pretty
 ```
 
 The frontend is not an SMT solver or a complete Z3 compatibility layer. Spacer,

@@ -57,5 +57,5 @@ command-line driver:
    build/bin/csr input.graph
 
 The driver supports GRAIL, PathTree, combined indexes, sequential tabulation,
-and parallel tabulation. See :doc:`../tools/cfl/index` for command-line
+and parallel tabulation. See :doc:`/tools/cfl/index` for command-line
 options.

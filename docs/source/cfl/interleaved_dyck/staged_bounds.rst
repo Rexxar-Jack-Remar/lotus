@@ -215,4 +215,4 @@ saturation, which can dominate memory on dense graphs. Setting
 reconstructs the contributing edges from the saturated relations instead,
 trading recomputation time for lower memory use.
 
-See also :doc:`interleaved_dyck_graph_reduction`.
+See also :doc:`/cfl/interleaved_dyck/graph_reduction`.

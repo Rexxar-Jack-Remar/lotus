@@ -17,10 +17,10 @@ namespace {
 
 void usage(llvm::raw_ostream &output) {
   output << "usage:\n"
-            "  lotus-datalog run <source...|-> [options]\n"
-            "  lotus-datalog explain <source...|-> [--analyze] [options]\n"
-            "  lotus-datalog validate <source...|-> [options]\n"
-            "  lotus-datalog schema\n\n"
+            "  lotus-solver-datalog run <source...|-> [options]\n"
+            "  lotus-solver-datalog explain <source...|-> [--analyze] [options]\n"
+            "  lotus-solver-datalog validate <source...|-> [options]\n"
+            "  lotus-solver-datalog schema\n\n"
             "options:\n"
             "  --format auto|json|datalog|z3\n"
             "  --workers N\n"

@@ -21,8 +21,10 @@ layout:
 ``Solvers/Engines/``
    Reusable relation engines. ``TransitiveClosure`` is the generic incremental
    closure engine. ``Engines/PEARL/``, ``Engines/POCR/``, ``Engines/SQID/``,
-   and ``Engines/STG/`` contain the paper algorithms; ``Engines/POCR/`` also
-   contains its specialized alias/value-flow engines and client grammars.
+   ``Engines/STG/``, ``Engines/Skewed/``, ``Engines/EndpointQuotient/``,
+   ``Engines/CAT/``, and ``Engines/IEOCE/`` contain the paper algorithms;
+   ``Engines/POCR/`` also contains its specialized alias/value-flow engines
+   and client grammars.
 
 ``Solvers/Preprocessing/``
    Graph simplification and RSM-guided foldability analysis.
@@ -105,6 +107,18 @@ Solver backends
    because old PE facts are not indexed as future join candidates. The engine
    API also exposes the supplied conservative target-only static rewrite; it
    is intentionally not enabled by the complete-relation backend.
+
+``Cat``
+   Implements ICSE 2026 context-aware tabulation with per-symbol usage
+   contexts and guarded transitivity rewrites. Select it with ``--solver cat``.
+
+``Iea``
+   Implements OOPSLA 2024 iterative-epoch online cycle elimination. Select it
+   with ``--solver iea``.
+
+``IeaOcr``
+   IEA with online cycle reduction and minimum-equivalent graphs. Select it
+   with ``--solver iea-ocr``.
 
 ``TransitiveClosure``
    Uses sparse bitvectors generally and a dedicated incremental forward/reverse
@@ -224,10 +238,12 @@ summarization discipline. All facts remain available as exact output, while
 only terminals, nullable seeds, and ``Insert`` symbols are indexed as future
 join candidates. Use ``--unidirectional`` in the general driver.
 
-See :doc:`pocr_migration` for the complete source-to-Lotus mapping and the
+See :doc:`/cfl/classical/pocr_migration` for the complete source-to-Lotus mapping and the
 algorithms intentionally merged with an existing implementation.
-See :doc:`pearl`, :doc:`stg`, and :doc:`sqid` for the papers, key ideas,
+See :doc:`/cfl/classical/pearl`, :doc:`/cfl/classical/stg`, and
+:doc:`/cfl/classical/sqid` for the papers, key ideas,
 published algorithms, Lotus adaptations, and validation boundaries.
+See :doc:`/cfl/classical/cat_ieoce` for the CAT and IEOCE engines.
 
 Adapters
 --------

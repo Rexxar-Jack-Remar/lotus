@@ -2,36 +2,37 @@ Solver Tools
 ============
 
 This page documents the command-line front-ends under ``tools/solver/``.
-``lotus-datalog`` is built by default, while ``owl`` requires
-``-DLOTUS_ENABLE_OWL=ON``. ``staub`` remains a source-present experimental
-tool; ``lotus-smt-stabilizer`` requires ``-DLOTUS_ENABLE_SMT_STABILIZER=ON``
-(GMP/MPFR). SMT↔LLVM translation is provided by TUNA under ``lib/Solvers/SMT/TUNA``.
+``lotus-solver-datalog`` is built by default, while ``lotus-solver-owl`` requires
+``-DLOTUS_ENABLE_OWL=ON``. ``lotus-solver-staub`` remains a source-present
+experimental tool; ``lotus-solver-smt-stabilizer`` requires
+``-DLOTUS_ENABLE_SMT_STABILIZER=ON`` (GMP/MPFR). SMT↔LLVM translation is provided
+by TUNA under ``lib/Solvers/SMT/TUNA``.
 
-lotus-datalog – Datalog Solver Front-End
-----------------------------------------
+lotus-solver-datalog – Datalog Solver Front-End
+-----------------------------------------------
 
 The native Datalog/lattice solver front-end accepts JSON Semantic IR, Lotus
 Datalog, and Z3 fixedpoint input. It validates or executes programs and emits
 canonical JSON relation rows and runtime statistics.
 
-**Binary**: ``lotus-datalog``
+**Binary**: ``lotus-solver-datalog``
 
 **Source**: ``tools/solver/datalog/``
 
 .. code-block:: bash
 
-   ./build/bin/lotus-datalog schema > program.json
-   ./build/bin/lotus-datalog validate program.json
-   ./build/bin/lotus-datalog run program.json --workers 4 --pretty
+   ./build/bin/lotus-solver-datalog schema > program.json
+   ./build/bin/lotus-solver-datalog validate program.json
+   ./build/bin/lotus-solver-datalog run program.json --workers 4 --pretty
 
-OWL – SMT/Model Checking Front-End
-----------------------------------
+lotus-solver-owl – SMT/Model Checking Front-End
+-----------------------------------------------
 
-``owl`` is the supported solver front-end currently built from this directory.
-It feeds SAT or SMT problems to the configured solver stack.
+``lotus-solver-owl`` is the supported solver front-end currently built from this
+directory. It feeds SAT or SMT problems to the configured solver stack.
 
-**Binary**: ``owl``  
-**Location**: ``tools/solver/owl.cpp``
+**Binary**: ``lotus-solver-owl``
+**Location**: ``tools/solver/lotus-solver-owl.cpp``
 
 **Build status**: built only when ``-DLOTUS_ENABLE_OWL=ON``.
 
@@ -39,25 +40,25 @@ It feeds SAT or SMT problems to the configured solver stack.
 
 .. code-block:: bash
 
-   ./build/bin/owl file.smt2
+   ./build/bin/lotus-solver-owl file.smt2
 
 **Example**:
 
 .. code-block:: bash
 
-   ./build/bin/owl examples/solver/example.smt2
+   ./build/bin/lotus-solver-owl examples/solver/example.smt2
 
 See :doc:`../../solvers/smt` for details about the solver stack.
 
-STAUB – Bounded-Theory Conversion Front-End
--------------------------------------------
+lotus-solver-staub – Bounded-Theory Conversion Front-End
+--------------------------------------------------------
 
-``staub`` rewrites unbounded SMT constraints into bounded encodings before
-translation or solving.
+``lotus-solver-staub`` rewrites unbounded SMT constraints into bounded encodings
+before translation or solving.
 
-**Binary**: ``staub`` (source present, not built by default)
+**Binary**: ``lotus-solver-staub`` (source present, not built by default)
 
-**Source**: ``tools/solver/staub.cpp``
+**Source**: ``tools/solver/lotus-solver-staub.cpp``
 
 This front-end is kept in the tree as an experimental source tool, not as a
 default-built binary.
@@ -66,8 +67,8 @@ Basic usage:
 
 .. code-block:: bash
 
-   ./build/bin/staub -s query.smt2 -i aix -o bounded.smt2
-   ./build/bin/staub -s query.smt2 -r 8,24 -o bounded.smt2
+   ./build/bin/lotus-solver-staub -s query.smt2 -i aix -o bounded.smt2
+   ./build/bin/lotus-solver-staub -s query.smt2 -r 8,24 -o bounded.smt2
 
 Important options:
 
@@ -78,24 +79,24 @@ Important options:
 - ``-i <N|aix|aix2>`` – integer bounding mode
 - ``-r <ebits,sbits|aix|aix4>`` – floating-point bounding mode
 
-lotus-smt-stabilizer – SMT Normalization Front-End
---------------------------------------------------
+lotus-solver-smt-stabilizer – SMT Normalization Front-End
+---------------------------------------------------------
 
-``lotus-smt-stabilizer`` normalizes SMT-LIB2 inputs to reduce runtime variance
-caused by syntactic mutations such as assertion reordering, symbol renaming,
-and commutative operand reordering.
+``lotus-solver-smt-stabilizer`` normalizes SMT-LIB2 inputs to reduce runtime
+variance caused by syntactic mutations such as assertion reordering, symbol
+renaming, and commutative operand reordering.
 
-**Binary**: ``lotus-smt-stabilizer`` (requires ``-DLOTUS_ENABLE_SMT_STABILIZER=ON``)
+**Binary**: ``lotus-solver-smt-stabilizer`` (requires ``-DLOTUS_ENABLE_SMT_STABILIZER=ON``)
 
-**Source**: ``tools/solver/smt-stabilizer.cpp``
+**Source**: ``tools/solver/lotus-solver-smt-stabilizer.cpp``
 
 Enable it when configuring Lotus (needs GMP, GMPXX, and MPFR):
 
 .. code-block:: bash
 
    cmake -S . -B build -DLOTUS_ENABLE_SMT_STABILIZER=ON
-   cmake --build build --target LotusSMTStabilizer lotus-smt-stabilizer
-   ./build/bin/lotus-smt-stabilizer query.smt2 > normalized.smt2
+   cmake --build build --target LotusSMTStabilizer lotus-solver-smt-stabilizer
+   ./build/bin/lotus-solver-smt-stabilizer query.smt2 > normalized.smt2
 
 Important options:
 

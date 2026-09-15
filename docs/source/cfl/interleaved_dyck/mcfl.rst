@@ -29,7 +29,7 @@ Choosing an MCFL API
 Exactness of ``interleaved_dyck::mcfl::Solver`` is relative to its input grammar. When the input
 grammar is ``G_d^circ`` or ``G_d^+``, the result remains an
 underapproximation of typed interleaved-Dyck reachability. Exact unary
-reachability lives in the independent :doc:`interleaved_dyck_unary` module.
+reachability lives in the independent :doc:`/cfl/interleaved_dyck/unary` module.
 
 Generic MCFL Solver
 -------------------
@@ -137,7 +137,7 @@ Shared typed graph adapter
 ``InterleavedDyckSolver`` accepts
 ``lotus::cfl::interleaved_dyck::Graph`` directly. The adapter converts typed
 labels to the generic MCFL terminal strings, allowing MCFL and
-:doc:`interleaved_dyck_staged_bounds` to consume one parsed benchmark graph.
+:doc:`/cfl/interleaved_dyck/staged_bounds` to consume one parsed benchmark graph.
 The generic ``interleaved_dyck::mcfl::Graph`` remains available for arbitrary client grammars
 whose terminals are not interleaved-Dyck labels.
 
@@ -159,7 +159,7 @@ cross-product expansion, ``--stats`` prints saturation counters, and
 
 The exact unary algorithms share the separate
 ``lotus-cfl-interleaved-dyck-unary`` executable documented in
-:doc:`interleaved_dyck_unary`.
+:doc:`/cfl/interleaved_dyck/unary`.
 
 Validation and Complexity
 -------------------------

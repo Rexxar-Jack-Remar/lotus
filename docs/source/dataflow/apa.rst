@@ -20,6 +20,10 @@ Main components
 - ``Core/`` defines generic problem, result, and option abstractions.
 - ``Solver/`` contains solver implementations such as state elimination,
   ADT-simple, and ADT-delayed solvers.
+- ``EAN/`` implements the equality-saturation optimizer for path-expression
+  DAGs: import, saturation, extraction, and export.
+- ``Baseline/TranslAPA/`` provides the TranslAPA baseline, a closed-form
+  Gen/Kill semiring fold over the elimination front-end's path expressions.
 - ``Domains/`` defines the abstract fact types and their lattice operations.
 - ``LLVM/`` bridges LLVM CFGs, dominance information, and call resolution to
   the generic APA problem interfaces.
@@ -213,7 +217,142 @@ Library-only availability
 The ``lotus-dfa-apa`` command-line tool currently uses the worklist-based
 ``InterEliminationSolver``. The summary solver is available as a
 library-only API. To use it, call the ``runInterSummaryElim*`` functions
-directly from your own pass or analysis driver.
+directly from your own pass or analysis driver. The tool also exposes the
+summary engines through the ``--inter-summary`` and ``--modular-inter``
+flags, which route interprocedural clients to ``ForwardInterSummarySolver``
+and the modular per-procedure solver respectively.
+
+EAN equality saturation
+-----------------------
+
+``EAN`` (namespace ``elimination::ean``) is the compiler-style optimizer pass
+between path-expression construction and interpretation. It imports a batch of
+path-expression roots ``R`` into a canonical e-graph, runs guarded and budgeted
+saturation, extracts the cheapest equivalent shared DAG under a cost model, and
+exports it back into a ``PathExprFactory``. The entry point lives in
+``include/Dataflow/APA/EAN/EAN.h``:
+
+.. code-block:: cpp
+
+  template <typename TransferT>
+  std::vector<typename PathExprFactory<TransferT>::Ref>
+  ean(const std::vector<typename PathExprFactory<TransferT>::Ref> &R,
+      const LawProfile &L, const CostModel &C, const Budget &B,
+      PathExprFactory<TransferT> &F, SaturationStats *stats = nullptr,
+      ExtractOptions opts = {});
+
+The pipeline has four stages:
+
+- ``Import`` (``Import.h``) canonicalizes the batch into an e-graph. Variadic
+  joins are flattened, deduplicated, and sorted; variadic sequences are
+  flattened but never reordered. Every input root maps to an e-class id, so the
+  original expression is always recoverable (root preservation).
+- ``Saturate`` (``Saturate.h``) runs the phased rewrite schedule Cleanup,
+  Factor, Star, Explore, each to local saturation, under the ``Budget`` bounds
+  on e-nodes, applied matches, rounds, wall-clock time, and consecutive rounds
+  without cost improvement. The driver is anytime: any stopping point yields a
+  valid extractable result.
+- ``Extract`` (``BatchExtract.h``) picks one e-node per e-class to minimize the
+  reuse-aware shared-DAG objective (Eq. 5), using a cycle-safe relaxation
+  followed by a reuse-refinement loop.
+- ``Export`` (``Export.h``) materializes the chosen representatives back into
+  the factory, recovering cross-root sharing through a memo keyed by canonical
+  e-class id. Atoms are re-exported verbatim and stay opaque to EAN.
+
+Rewrites are gated by a client-declared ``LawProfile`` (``LawProfile.h``):
+left/right distributivity, annihilation, Kleene-star laws, unfoldings, and
+sliding. Presets include ``kleeneAlgebra()``, ``flowAlgebra()``, and the
+universally-safe ``safeMinimal()`` (left distributivity only). The ``CostModel``
+(``CostModel.h``) supplies per-operator weights plus the Eq. 5 shared-DAG
+objective weights; presets are ``uniform()``, ``profiled()``, and ``dag()``.
+
+EAN is fail-safe. If anything throws, the result shape is wrong, or the
+optional monotone guard detects a larger output, ``ean()`` returns the original
+root batch unchanged. An invocation gate skips saturation entirely below a
+minimum unique-node threshold. The modular interprocedural solver uses EAN as
+an optional per-procedure post-pass (see below).
+
+TranslAPA baseline
+------------------
+
+``TranslAPA`` (namespace ``elimination::translapa``) is a baseline that keeps
+the elimination front-end verbatim and swaps only the interpreter. Instead of
+``SolverContext::eval``, which re-applies generic transfers and iterates
+``Star`` to a lattice fixpoint, it folds each node's path expression with the
+closed-form Gen/Kill semiring (paper §4) in a single memoized bottom-up pass.
+
+The reusable core is ``foldFillGenKill()`` (``Driver.h``). Given a solved
+result and a translator that maps transfer atoms to ``(Gen, Kill)`` pairs, it
+overwrites every node's IN fact with the semiring interpretation and returns
+the fold wall-clock time in microseconds. The timed variant
+``foldFillGenKillTimed()`` splits mechanical extraction from the per-query fold
+so the two costs are measured apart.
+
+The semiring (``GenKillSemiring.h``) represents a program property as a pair of
+fixed-width ``llvm::BitVector`` subsets of the finite fact universe, denoting
+the transfer function ``f(x) = Gen | (x & ~Kill)``. Composition is closed form:
+``seq`` unions the kills and subtracts the second kill from the first gen,
+``join`` unions gens and intersects kills, and ``star`` is O(1) with no
+iteration. This is the key contrast with the generic tree-walking interpreter.
+
+The mechanical translation (``AtomTranslator.h``) recovers each atom's
+``(Gen, Kill)`` by probing the client's own ``applyTransfer``: ``Gen = f({})``
+and fact ``d`` is killed iff ``d`` is not in ``f({d})``, so no per-client hand
+translation is required. A separable fast path uses two probes per atom instead
+of the general singleton probing.
+
+The fold interpreter (``FoldInterpreter.h``) memoizes on the ``Expr`` pointer,
+so cost is O(#unique DAG nodes) rather than a recursion over the expanded tree.
+Same path expression, different semantic function: that is the apples-to-apples
+comparison this baseline exists for.
+
+Modular interprocedural summary solver
+--------------------------------------
+
+The ``ModularInterSummaryBuilder`` (E6, milestone 3) is the modular counterpart
+of the monolithic ``ForwardInterSummarySolver`` described above. Instead of
+encoding the whole program as one global equation graph, it builds ONE
+entry-to-exit path-expression summary per reachable non-opaque procedure over
+that procedure's own CFG. Call sites become symbolic
+``SummaryCall(callsite, callee, retsite)`` atoms rather than inlined callee
+bodies, which keeps construction linear in program size: each summary is solved
+on a bounded per-procedure graph, never on the whole-program x context product
+that makes the monolithic solver blow up.
+
+Per-procedure summaries are solved with ``PathSummaryEquationSolver`` over
+``InterSummaryTransferAtom`` labels, which already handles intraprocedural loops
+via ``Star``. Each ``ProcSummary`` carries the entry-to-exit expression (a union
+over the procedure's exit points) plus an entry-to-node expression for every
+instruction. The builder reports aggregate ``DagStats`` before and after an
+optional per-procedure EAN or Greedy post-pass, mirroring the monolithic
+solver's Table VI/VII diagnostics.
+
+Recursion is deliberately deferred. A ``SummaryCall`` to a same-team procedure
+is an opaque placeholder during construction; closing recursive teams is an
+interpretation-time fixpoint (milestone 4) guided by the reverse-topological
+order and ``recursive`` flags in the returned ``CallGraphSCCResult``.
+
+The ``ModularInterSummaryDriver`` (milestone 4) interprets the summaries into
+IN/OUT facts with a context-insensitive, functional fixpoint over procedure
+entry facts: entry procedures start at the initial fact, callee entry facts
+accumulate via ``callFlow`` at their call sites, and the outer loop iterates
+until neither the entry facts nor the interpreter's recursion memo changes.
+Results use the empty context key, one IN per instruction. The interpreter
+evaluates a ``SummaryCall`` as ``In -> callFlow -> callee entry-to-exit ->
+returnFlow``, closing recursion with a memoized fixpoint that evaluates each
+``(callee, exit, input-fact)`` at most once per pass.
+
+The ``lotus-dfa-apa`` tool exposes the modular engine through the
+``--modular-inter`` flag (and the monolithic summary engine through
+``--inter-summary``); the worklist engine remains the default.
+
+Related engines
+^^^^^^^^^^^^^^^
+
+- See :doc:`wpds` for the WALi pushdown backends and :doc:`npa` for the
+  sparse Newton solver.
+- See :doc:`mono` and :doc:`ifds_ide` for the other dataflow engines.
+- See :doc:`../tools/dataflow/index` for the testing front-ends.
 
 Typical use cases
 -----------------

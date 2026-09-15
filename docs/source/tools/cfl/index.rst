@@ -2,7 +2,7 @@ CFL Tools
 =========
 
 This page documents the CFL-related tools under ``tools/cfl/``. For the
-underlying theory and components, see :doc:`../../cfl/cfl_components`.
+underlying theory and components, see :doc:`/cfl/cfl_components`.
 
 Overview
 --------
@@ -15,15 +15,18 @@ enables analysis of complex program properties using grammar-based constraints.
 
 **Tools**: ``lotus-cfl-solve``, ``lotus-cfl-alias``, ``lotus-cfl-vf``,
 ``lotus-cfl-interleaved-dyck-mcfl``, ``lotus-cfl-interleaved-dyck-staged-bounds``,
-``lotus-cfl-interleaved-dyck-unary``, ``lotus-cfl-interleaved-dyck-graph-reduction``,
-and CSR.
+``lotus-cfl-interleaved-dyck-unary``, ``lotus-cfl-interleaved-dyck-spds``,
+``lotus-cfl-interleaved-dyck-lcl``, ``lotus-cfl-interleaved-dyck-affine-spds``,
+``lotus-cfl-interleaved-dyck-graph-reduction``, and CSR.
 
 Classical CFL solving and clients
 ---------------------------------
 
 ``lotus-cfl-solve`` runs a supplied grammar over a text, DOT, or JSON
-graph with the sparse-set, sparse-bitvector, Graspan, transitive-closure, POCR,
-hierarchical-POCR, fully ordered, PEARL, or Sqid backend.
+graph. Select the engine with ``--solver``; the available backends include
+``sparse-set``, ``sparse-bitvector``, ``graspan``, ``transitive-closure``,
+``pocr``, ``hpocr``, ``focr``, ``pearl``, ``sqid``, ``skewed``,
+``endpoint-quotient``, ``cat``, ``iea``, and ``iea-ocr``.
 
 ``lotus-cfl-alias`` consumes LLVM IR or bitcode. It uses Aser as the constraint
 frontend but drives points-to propagation and indirect-call discovery through
@@ -52,6 +55,13 @@ and value-flow clients.
 Use ``--solver skewed`` to select PLDI 2024 skewed tabulation through the same
 complete-relation client interface.
 
+Use ``--solver cat`` for the ICSE 2026 context-aware tabulation engine, and
+``--solver iea`` or ``--solver iea-ocr`` for the OOPSLA 2024 iterative-epoch
+online cycle elimination variants (``iea-ocr`` additionally applies online
+cycle reduction and minimum-equivalent graphs). ``--solver endpoint-quotient``
+selects the grammar-indexed endpoint-quotient (GEQ) compressed exact engine.
+See :doc:`/cfl/classical/cat_ieoce` for the algorithm and API details.
+
 The hand-specialized engines are separate from those general grammar
 backends. Use ``lotus-cfl-alias --engine pocr-aa|focr-aa --encoding peg`` or
 ``lotus-cfl-vf --engine pocr-vfa|focr-vfa``. ``Clients/`` still contains only
@@ -63,8 +73,8 @@ unidirectional summarization, SCC elimination, graph folding, and inter-Dyck
 pruning. Specialized POCR, STG, and foldability components remain available
 through their C++ APIs and unit tests rather than dedicated executables.
 
-See :doc:`../../cfl/classical`, :doc:`../../cfl/pearl`,
-:doc:`../../cfl/stg`, and :doc:`../../cfl/sqid` for the complete algorithm,
+See :doc:`/cfl/classical/classical`, :doc:`/cfl/classical/pearl`,
+:doc:`/cfl/classical/stg`, and :doc:`/cfl/classical/sqid` for the complete algorithm,
 option, and API descriptions.
 
 MCFL: Multiple Context-Free Language Reachability
@@ -87,7 +97,7 @@ Useful options include ``--simple`` for the weaker ``G_d^circ`` grammar,
 ``--no-condense`` to disable cycle elimination, ``--stats`` for saturation
 counters, ``--artifact-compatible`` for exact condensed cross-product
 expansion, ``--print-pairs`` for the final relation, and ``-o FILE`` for file
-output. See :doc:`../../cfl/interleaved_dyck_mcfl` for the library API and
+output. See :doc:`/cfl/interleaved_dyck/mcfl` for the library API and
 algorithm details.
 
 CSR: Context-Sensitive Reachability
@@ -121,6 +131,8 @@ sanitizer-aware policy products live separately under ``CFL/CSIndex/SCS``.
 - ``-r`` – Evaluate tabulation algorithm
 - ``-p`` – Evaluate parallel tabulation algorithm
 - ``-j <N>`` – Number of threads for parallel tabulation (0 = auto)
+- ``-n <N>`` – Number of reachable/unreachable queries to generate (default 100 each)
+- ``-d <N>`` – Dimension for GRAIL labeling (default 2)
 - ``-g <file>`` – Generate queries and save to file
 - ``-q <file>`` – Load queries from file
 
@@ -159,7 +171,7 @@ Useful options include ``--value-flow`` for value-flow benchmark
 preprocessing, ``--method`` to select one algorithm or the full pipeline,
 ``--print-lower``/``--print-result`` for pair output, and ``-o FILE`` for file
 output. See
-:doc:`../../cfl/interleaved_dyck_staged_bounds` for the library API and
+:doc:`/cfl/interleaved_dyck/staged_bounds` for the library API and
 algorithm details.
 
 Unary Interleaved-Dyck Reachability
@@ -182,8 +194,82 @@ Useful options include ``--direct`` to skip quotient sparsification,
 overapproximation of the original directed graph), ``--shallow K`` for the
 adaptive-only shallow solve, ``--stats`` for construction and backend
 statistics, and ``--print-pairs`` to materialize non-reflexive component
-pairs. See :doc:`../../cfl/interleaved_dyck_unary` for the library API and
+pairs. See :doc:`/cfl/interleaved_dyck/unary` for the library API and
 algorithm details.
+
+LCL Reachability
+----------------
+
+Computes the POPL 2017 LCL upper bound for directed, typed interleaved-Dyck
+reachability on a DOT graph. A retained pair is may-reach rather than a
+certified balanced witness; absence proves unreachability in the supplied
+directed graph.
+
+**Binary**: ``lotus-cfl-interleaved-dyck-lcl``
+
+**Location**: ``tools/cfl/interleaved-dyck/lcl/lotus-cfl-interleaved-dyck-lcl.cpp``
+
+.. code-block:: bash
+
+   cmake --build build --target lotus-cfl-interleaved-dyck-lcl
+   build/bin/lotus-cfl-interleaved-dyck-lcl --query 0 3 graph.dot
+
+Useful options include ``--baseline`` for the Algorithm 1 white-node baseline,
+``--no-feasibility`` to disable the Section 5.3 endpoint filters,
+``--print-upper`` to print sorted upper-bound pairs, and
+``--max-summaries``/``--max-normalized-edges`` for hard limits (exceeding one
+throws rather than returning a partial upper bound). See
+:doc:`/cfl/interleaved_dyck/lcl` for the library API and algorithm
+details.
+
+SPDS Reachability
+-----------------
+
+Solves synchronized pushdown systems for balanced interleaved-Dyck
+reachability, supporting post*/pre* demand queries over a DOT graph.
+
+**Binary**: ``lotus-cfl-interleaved-dyck-spds``
+
+**Location**: ``tools/cfl/interleaved-dyck/spds/lotus-cfl-interleaved-dyck-spds.cpp``
+
+.. code-block:: bash
+
+   cmake --build build --target lotus-cfl-interleaved-dyck-spds
+   build/bin/lotus-cfl-interleaved-dyck-spds --all-pairs graph.dot
+
+Vertices are integer IDs. Query scopes include ``--all-pairs``,
+``--query SOURCE TARGET``, ``--source V`` (post*), ``--target V`` (pre*), and
+``--queries FILE``.
+``--call-prefix``/``--field-prefix`` allow pending calls or stores at a forward
+endpoint, and ``--max-states``/``--max-transitions``/``--max-updates`` bound
+each projection. Results are a sound upper bound; resource exhaustion exits
+with code 3 and yields no result. See
+:doc:`/cfl/interleaved_dyck/spds` for the library API and algorithm
+details.
+
+Affine SPDS Reachability
+------------------------
+
+Combines paired affine-weighted pushdown automata with SPDS reachability and
+reports affine separation certificates.
+
+**Binary**: ``lotus-cfl-interleaved-dyck-affine-spds``
+
+**Location**: ``tools/cfl/interleaved-dyck/affine-spds/lotus-cfl-interleaved-dyck-affine-spds.cpp``
+
+.. code-block:: bash
+
+   cmake --build build --target lotus-cfl-interleaved-dyck-affine-spds
+   build/bin/lotus-cfl-interleaved-dyck-affine-spds --query 0 3 graph.dot
+
+Select the comparison with ``--mode joint|independent|spds`` (``--identity``
+gives the Boolean SPDS specialization), request a separating affine equation
+with ``--certificate``, and emit machine-readable output with ``--json``.
+Exact endpoint histories can be pinned with ``--call-stack``/``--field-stack``,
+and a shared observer map can be loaded or dumped with
+``--observer``/``--dump-observer``. See
+:doc:`/cfl/interleaved_dyck/affine_spds` for the library API and algorithm
+details.
 
 Interleaved-Dyck Graph Reduction
 --------------------------------
@@ -212,5 +298,5 @@ compiled helpers ``lotus-cfl-interleaved-dyck-graphaux`` and
 ``lotus-cfl-interleaved-dyck-dkmerge`` performs the degree-based merge phase; the
 Python driver alternates both colors and removes proven-redundant edges. Pass
 ``--bidirected-input`` when the input already represents both directions. See
-:doc:`../../cfl/interleaved_dyck_graph_reduction` for the library API and algorithm
+:doc:`/cfl/interleaved_dyck/graph_reduction` for the library API and algorithm
 details.

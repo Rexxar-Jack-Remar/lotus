@@ -10,27 +10,30 @@ cmake -S . -B build -DCMAKE_BUILD_TYPE=Debug
 cmake --build build -j
 ```
 
-At the moment, `tools/solver/CMakeLists.txt` builds `owl` only when
-`-DLOTUS_ENABLE_OWL=ON`. The `staub.cpp` source remains in the tree as an
-experimental tool and is not wired into the default build yet.
+`lotus-solver-datalog` is built by default. `lotus-solver-owl` is built only when
+`-DLOTUS_ENABLE_OWL=ON`, and `lotus-solver-smt-stabilizer` only when
+`-DLOTUS_ENABLE_SMT_STABILIZER=ON`. The `lotus-solver-staub.cpp` source remains
+in the tree as an experimental tool and is not wired into the default build yet.
 
 ## Tools
 
 | Tool | Status | Purpose |
 | --- | --- | --- |
-| `owl` | built only when `LOTUS_ENABLE_OWL=ON` | Solves CNF and SMT-LIB2 inputs via the LIBSMT-based frontend. |
-| `staub` | source present, not built by default | Rewrites SMT formulas with abstract-interpretation-guided integer or floating-point widths. |
+| `lotus-solver-datalog` | built by default | Solves Datalog/lattice programs via the native, JSON, and Z3 fixedpoint frontends. |
+| `lotus-solver-owl` | built only when `LOTUS_ENABLE_OWL=ON` | Solves CNF and SMT-LIB2 inputs via the LIBSMT-based frontend. |
+| `lotus-solver-smt-stabilizer` | built only when `LOTUS_ENABLE_SMT_STABILIZER=ON` | Normalizes SMT-LIB2 inputs to reduce syntactic-mutation variance. |
+| `lotus-solver-staub` | source present, not built by default | Rewrites SMT formulas with abstract-interpretation-guided integer or floating-point widths. |
 
-## `owl`
+## `lotus-solver-owl`
 
-`owl` is the supported command-line entry in this directory.
+`lotus-solver-owl` is the SMT/SAT command-line entry in this directory.
 
 ```bash
 # Solve a CNF file
-build/bin/owl --cnf input.cnf
+build/bin/lotus-solver-owl --cnf input.cnf
 
 # Solve an SMT-LIB2 file with extra logging
-build/bin/owl --smt input.smt2 --verbose --stats
+build/bin/lotus-solver-owl --smt input.smt2 --verbose --stats
 ```
 
 Exit codes follow solver conventions: `10` for SAT, `20` for UNSAT, and other
@@ -38,8 +41,9 @@ non-zero values for error or unsupported states.
 
 ## Experimental tools
 
-- `staub.cpp` provides a width-selection and rewriting workflow for integer and
-  floating-point SMT formulas using options such as `-i`, `-r`, and `-l`.
+- `lotus-solver-staub.cpp` provides a width-selection and rewriting workflow for
+  integer and floating-point SMT formulas using options such as `-i`, `-r`, and
+  `-l`.
 
 These tools are useful as implementation references even when they are not part
 of the default binary set.
