@@ -18,7 +18,7 @@ The concurrency layer does not duplicate this solver. `FSMPTA` runs it over an
 SVFG augmented with fork/join and `ThreadMHPIndirectVF` edges. MSli supplies an
 optional filtered solve graph.
 
-This module contains Lotus-native migrations of both SVF pipelines:
+This module contains three flow-sensitive analyses:
 
 - `FlowSensitivePTA` implements the default exhaustive `fspta` analysis.
 - `VersionedFlowSensitivePTA` implements `vfspta` object prelabeling, meld
@@ -26,5 +26,13 @@ This module contains Lotus-native migrations of both SVF pipelines:
   updates, intrinsic memory definitions, footprint-equivalent object reuse,
   occurrence-weighted propagation, OTF delta-edge updates, and result
   persistence.
+- `ValueFlowPTA` implements the value-flow formulation of Li, Cifuentes, and
+  Keynes (ESEC/FSE 2011). It builds a field-insensitive value-flow graph
+  directly from LLVM IR, orders indirect-flow construction by object escape,
+  and applies Algorithm 2's store-plus-IDF sparse reaching-definition solve to
+  its interprocedural supergraph. It does not require a precomputed SVFG or
+  flow-insensitive pre-analysis.
 
 Select the versioned solver with `lotus-alias-fspta --analysis=vfspta`.
+Select the direct value-flow solver with
+`lotus-alias-fspta --analysis=vfpta`.

@@ -24,6 +24,7 @@ pages alongside an algorithm page when comparing analyses.
    seadsa
    fpa
    flowsensitive
+   valueflowpta
    lotusaa
    underapproxaa
    dynaa

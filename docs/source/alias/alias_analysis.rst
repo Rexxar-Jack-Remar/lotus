@@ -27,6 +27,8 @@ Choose the right analysis for your needs:
 
 - **LotusAA**: Flow-sensitive and field-sensitive
 - **FlowSensitivePTA**: Sparse flow-sensitive, inclusion-based
+- **ValueFlowPTA**: Flow-sensitive, field-insensitive analysis that builds and
+  solves value flows directly from LLVM IR
 - **Sea-DSA**: Unification-based, context-sensitive with heap cloning
 - **SparrowAA (1-CFA, 2-CFA)**: Context-sensitive, inclusion-based
 - **AserPTA (1-CFA, 2-CFA, Origin)**: Context-sensitive, inclusion-based
@@ -47,3 +49,4 @@ For detailed information about each analysis, see the corresponding documentatio
 * :doc:`dynaa` - Dynamic validation of static alias analysis results
 * :doc:`sraa` - Strict Relation Alias Analysis built on interprocedural range analysis
 * :doc:`flowsensitive` - Sparse flow-sensitive inclusion-based pointer analysis
+* :doc:`valueflowpta` - Direct value-flow-based flow-sensitive pointer analysis

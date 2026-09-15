@@ -119,9 +119,10 @@ sensitivities and solver algorithms.
 FlowSensitivePTA (lotus-alias-fspta)
 ------------------------------------
 
-Exhaustive sparse flow-sensitive pointer analysis. Builds the Lotus
-SVFG/MemorySSA from an ICFG and solves per-node memory ``IN``/``OUT`` state,
-with an optional object-versioned (``vfspta``) solver.
+Flow-sensitive pointer-analysis driver. The ``fspta`` and ``vfspta`` modes
+build the Lotus SVFG/MemorySSA from an ICFG and solve sparse memory state. The
+``vfpta`` mode instead builds a field-insensitive value-flow graph directly
+from LLVM IR.
 
 **Binary**: ``lotus-alias-fspta``  
 **Location**: ``tools/alias/lotus-alias-fspta.cpp``
@@ -134,13 +135,17 @@ with an optional object-versioned (``vfspta``) solver.
 
 **Key Options** (see also :doc:`../../alias/flowsensitive`):
 
-- ``--analysis=fspta|vfspta`` – Conventional sparse flow-sensitive analysis (default) or object-versioned analysis
-- ``--points-to-sets=mutable|hash-consed`` – Points-to set backend
-- ``--memory-partition=distinct|intra-disjoint|inter-disjoint`` – MemorySSA region partition strategy
+- ``--analysis=fspta|vfspta|vfpta`` – Conventional sparse (default),
+  object-versioned, or direct value-flow analysis
+- ``--points-to-sets=mutable|hash-consed`` – Points-to set backend for ``fspta``
+- ``--memory-partition=distinct|intra-disjoint|inter-disjoint`` – MemorySSA
+  region partition strategy for ``fspta`` and ``vfspta``
 - ``--print-pts`` – Print top-level points-to results
-- ``--print-memory`` – Print non-empty sparse memory facts
+- ``--print-memory`` – Print non-empty sparse memory facts (``fspta`` and
+  ``vfspta`` only)
 - ``--dump-stats`` – Print solver statistics (default on)
-- ``--dump-svfg=<file>`` – Write the initialized SVFG as a DOT file
+- ``--dump-svfg=<file>`` – Write the initialized SVFG as a DOT file (``fspta``
+  and ``vfspta`` only)
 - ``--validate-annotations`` – Validate ``__aser_alias__``/``__aser_no_alias__`` calls
 
 **Examples**:
@@ -152,6 +157,9 @@ with an optional object-versioned (``vfspta``) solver.
 
    # Object-versioned analysis with points-to output
    ./build/bin/lotus-alias-fspta input.bc --analysis=vfspta --print-pts
+
+   # Direct value-flow analysis
+   ./build/bin/lotus-alias-fspta input.bc --analysis=vfpta --print-pts
 
    # Hash-consed points-to sets and SVFG dump
    ./build/bin/lotus-alias-fspta input.bc --points-to-sets=hash-consed --dump-svfg=fspta.dot

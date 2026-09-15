@@ -29,8 +29,8 @@ See :doc:`../alias/alias_analysis` for detailed instructions and command example
 * **LotusAA** – Native alias analysis engine with interprocedural,
   flow-sensitive, and field-sensitive reasoning
   (``lib/Alias/InclusionBased/LotusAA``). See :doc:`../alias/lotusaa`.
-* **FlowSensitivePTA** – Sparse flow-sensitive inclusion-based pointer
-  analysis with an object-versioned solver variant
+* **FlowSensitivePTA** – Flow-sensitive inclusion-based pointer analyses with
+  conventional sparse, object-versioned, and direct value-flow solvers
   (``lib/Alias/InclusionBased/FlowSensitive``).
   See :doc:`../alias/flowsensitive`.
 * **DDA** – Demand-driven alias-analysis infrastructure that refines alias

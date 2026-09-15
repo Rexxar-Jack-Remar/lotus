@@ -38,7 +38,8 @@ Location
 Components
 ==========
 
-The module contains Lotus-native migrations of both SVF pipelines:
+The module contains three flow-sensitive analyses. The first two are
+Lotus-native migrations of the corresponding SVF pipelines:
 
 1. **FlowSensitivePTA** implements the default exhaustive ``fspta`` analysis.
    It is the thread-independent sparse solver described above.
@@ -51,13 +52,22 @@ The module contains Lotus-native migrations of both SVF pipelines:
    footprint-equivalent object reuse, occurrence-weighted propagation, OTF
    delta-edge updates, and result persistence.
 
+3. **ValueFlowPTA** implements the ``vfpta`` analysis described in
+   :doc:`valueflowpta`. It constructs a field-insensitive value-flow graph
+   directly from LLVM IR and discovers indirect flows in object escape order.
+
 Inputs
 ------
 
-Both solvers operate on the Lotus SVFG built from an ICFG. The driver builds
+The ``fspta`` and ``vfspta`` solvers operate on the Lotus SVFG built from an
+ICFG. The driver builds
 the ICFG with ``ICFGBuilder`` and the SVFG with ``SVFGBuilder``, enabling
 MemorySSA construction and a selectable memory-region partition strategy, then
 connects pre-analysis indirect calls before solving.
+
+The ``vfpta`` solver consumes an LLVM module directly. It builds a separate
+control graph and value-flow graph, so ``--dump-svfg`` and ``--print-memory``
+do not apply to that mode.
 
 The concurrency layer does not duplicate this solver. ``FSMPTA`` runs it over
 an SVFG augmented with fork/join and ``ThreadMHPIndirectVF`` edges, and MSli
@@ -72,21 +82,27 @@ The ``lotus-alias-fspta`` driver runs either solver on an LLVM bitcode module:
 
    ./build/bin/lotus-alias-fspta input.bc
    ./build/bin/lotus-alias-fspta input.bc --analysis=vfspta --print-pts
+   ./build/bin/lotus-alias-fspta input.bc --analysis=vfpta --print-pts
    ./build/bin/lotus-alias-fspta input.bc --points-to-sets=hash-consed --dump-stats
    ./build/bin/lotus-alias-fspta input.bc --dump-svfg=fspta.dot --print-memory
 
 Key options:
 
-* ``--analysis=fspta|vfspta`` – Select the conventional sparse flow-sensitive
-  solver (default) or the object-versioned solver.
-* ``--points-to-sets=mutable|hash-consed`` – Points-to set backend: mutable
-  ordered sets (default) or interned immutable sets with operation caching.
+* ``--analysis=fspta|vfspta|vfpta`` – Select the conventional sparse
+  flow-sensitive solver (default), object-versioned solver, or direct
+  value-flow solver.
+* ``--points-to-sets=mutable|hash-consed`` – Points-to set backend for
+  ``fspta``: mutable ordered sets (default) or interned immutable sets with
+  operation caching.
 * ``--memory-partition=distinct|intra-disjoint|inter-disjoint`` – MemorySSA
-  region partition strategy (default ``inter-disjoint``).
+  region partition strategy for ``fspta`` and ``vfspta`` (default
+  ``inter-disjoint``).
 * ``--print-pts`` – Print top-level points-to results.
-* ``--print-memory`` – Print non-empty sparse memory facts.
+* ``--print-memory`` – Print non-empty sparse memory facts (``fspta`` and
+  ``vfspta`` only).
 * ``--dump-stats`` – Print solver statistics (default on).
-* ``--dump-svfg=<file>`` – Write the initialized SVFG as a DOT file.
+* ``--dump-svfg=<file>`` – Write the initialized SVFG as a DOT file (``fspta``
+  and ``vfspta`` only).
 * ``--validate-annotations`` – Validate ``__aser_alias__``/``__aser_no_alias__``
   calls against the analysis result.
 
