@@ -39,6 +39,7 @@ Use `build/bin/<tool> --help` to see the full option set for a specific tool.
 | --- | --- | --- |
 | `lotus-alias-aser-aa` | Run AserPTA pointer analysis | Implemented by `tools/alias/lotus-alias-aser-aa.cpp`; inclusion-based analysis with selectable context sensitivity (`ci`, `1-cfa`, `2-cfa`, `origin`) and solver (`basic`, `wave`, `deep`). |
 | `lotus-alias-fspta` | Run flow-sensitive PTA | Selects conventional sparse (`fspta`), object-versioned (`vfspta`), or direct value-flow (`vfpta`) analysis. |
+| `lotus-alias-bootstrap` | Run bootstrapped flow/context-sensitive PTA | Supports explicit entry selection, context-joined output, refinement thresholds, and solver resource limits. |
 | `lotus-alias-sparrow-aa` | Run SparrowAA / Andersen analysis | Implemented by `tools/alias/lotus-alias-sparrow-aa.cpp`; flow-insensitive subset-based analysis with configurable call-site sensitivity via `--andersen-k-cs`. |
 | `lotus-alias-lotus-aa` | Run LotusAA | Implemented by `tools/alias/lotus-alias-lotus-aa.cpp`; native Lotus interprocedural pointer analysis, with LotusAA-specific output flags such as `-lotus-print-pts` and `-lotus-print-cg`. |
 | `lotus-alias-dyck-aa` | Run DyckAA | Implemented by `tools/alias/lotus-alias-dyck-aa.cpp`; unification-based analysis that can print call-graph statistics with `--print-cg`. |
@@ -62,6 +63,7 @@ build/bin/lotus-alias-fspta test.bc --print-pts --dump-stats
 build/bin/lotus-alias-fspta test.bc --points-to-sets=hash-consed
 build/bin/lotus-alias-fspta test.bc --analysis=vfpta --print-pts
 build/bin/lotus-alias-fspta test.bc --dump-svfg=fspta.dot --print-memory
+build/bin/lotus-alias-bootstrap test.bc --all-contexts --detailed-stats
 build/bin/lotus-alias-sparrow-aa test.bc --andersen-k-cs=1 --print-pts
 build/bin/lotus-alias-tpa test.bc --k-limit=1 --print-indirect-calls
 ```

@@ -173,9 +173,7 @@ Benchmark Modes
 
 The reference DOT corpus is stored in
 ``benchmarks/real-world/CFL/InterleavedDyck/taint`` and
-``benchmarks/real-world/CFL/InterleavedDyck/valueflow``. The supplied artifact
-did not contain a license file; see the benchmark README for provenance and
-redistribution notes.
+``benchmarks/real-world/CFL/InterleavedDyck/valueflow``. See the benchmark README for provenance and redistribution notes.
 
 Build and Test
 --------------

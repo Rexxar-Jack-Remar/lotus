@@ -18,8 +18,8 @@
 #include "Alias/InclusionBased/AserPTA/PreProcessing/Passes/RemoveExceptionHandlerPass.h"
 #include "TestUtils/LLVMHelpers.h"
 
-#include <gtest/gtest.h>
 #include <llvm/IR/Instructions.h>
+#include <gtest/gtest.h>
 
 using namespace llvm;
 using namespace aser;

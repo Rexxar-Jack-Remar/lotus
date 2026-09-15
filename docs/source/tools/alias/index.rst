@@ -164,6 +164,35 @@ from LLVM IR.
    # Hash-consed points-to sets and SVFG dump
    ./build/bin/lotus-alias-fspta input.bc --points-to-sets=hash-consed --dump-svfg=fspta.dot
 
+BootstrapAA (lotus-alias-bootstrap)
+-----------------------------------
+
+Bootstrapped flow- and context-sensitive points-to analysis. It combines a
+Steensgaard coarse partition, thresholded Andersen refinement, dependency
+slicing, and per-cluster input-state summary tabulation.
+
+**Binary**: ``lotus-alias-bootstrap``
+
+**Usage**:
+
+.. code-block:: bash
+
+   ./build/bin/lotus-alias-bootstrap [options] input.bc
+
+Key options:
+
+- ``--entry=<function>`` - Select a defined analysis entry (default ``main``)
+- ``--all-contexts`` - Print results joined across reachable contexts
+- ``--andersen-threshold=<N>`` - Refine coarse partitions larger than ``N``
+- ``--max-contexts=<N>`` - Bound input-state summary contexts per cluster
+- ``--max-steps=<N>`` - Bound refinement steps per cluster
+- ``--detailed-stats`` - Print partition, cluster, and per-cluster timing data
+
+Without ``--all-contexts``, the tool prints pointer-producing instructions in
+the entry activation. Resource-limit fallbacks are explicitly marked and make
+the tool exit with status 2. See :doc:`../../alias/bootstrap-aa` for API and
+model details.
+
 DFPA (dfpa)
 -----------
 

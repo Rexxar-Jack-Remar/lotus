@@ -13,7 +13,7 @@ Each input is a DOT graph whose edges use these labels:
 - `ob--N` / `cb--N`: opening/closing bracket of type `N`; and
 - `normal`: an unconstrained value-flow edge.
 
-The supplied artifact contains no license file. Keep that provenance in mind when redistributing the datasets.
+Keep that provenance in mind when redistributing the datasets.
 
 ## Shared Lotus input
 

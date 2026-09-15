@@ -29,6 +29,8 @@ Choose the right analysis for your needs:
 - **FlowSensitivePTA**: Sparse flow-sensitive, inclusion-based
 - **ValueFlowPTA**: Flow-sensitive, field-insensitive analysis that builds and
   solves value flows directly from LLVM IR
+- **BootstrapAA**: Flow- and context-sensitive analysis with bootstrapped
+  clustering and input-state-tabulated summaries
 - **Sea-DSA**: Unification-based, context-sensitive with heap cloning
 - **SparrowAA (1-CFA, 2-CFA)**: Context-sensitive, inclusion-based
 - **AserPTA (1-CFA, 2-CFA, Origin)**: Context-sensitive, inclusion-based
@@ -40,6 +42,7 @@ For detailed information about each analysis, see the corresponding documentatio
 
 * :doc:`allocaa` - Lightweight heuristic-based alias analysis
 * :doc:`aserpta` - High-performance pointer analysis with multiple context sensitivities
+* :doc:`bootstrap-aa` - Bootstrapped flow- and context-sensitive pointer analysis
 * :doc:`dyckaa` - Unification-based alias analysis with Dyck-CFL reachability
 * :doc:`seadsa` - Context-sensitive, field-sensitive alias analysis based on DSA
 * :doc:`sparrowaa` - Inclusion-based points-to analysis

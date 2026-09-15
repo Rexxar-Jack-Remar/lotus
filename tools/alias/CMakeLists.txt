@@ -22,6 +22,12 @@ target_link_libraries(lotus-alias-fspta PRIVATE
   ${LLVM_LINK_COMPONENTS}
 )
 
+add_executable(lotus-alias-bootstrap lotus-alias-bootstrap.cpp)
+target_link_libraries(lotus-alias-bootstrap PRIVATE
+  CanaryBootstrapAA
+  LLVMIRReader
+)
+
 # Sea-DSA Memory Graph Analysis Tool
 add_executable(lotus-alias-sea-dsa-dg lotus-alias-sea-dsa-dg.cpp)
 target_link_libraries(lotus-alias-sea-dsa-dg PRIVATE
