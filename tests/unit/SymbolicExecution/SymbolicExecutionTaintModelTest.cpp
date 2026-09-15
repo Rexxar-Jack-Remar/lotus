@@ -1,4 +1,4 @@
-#include "SymbolicExecution/TaintModel.h"
+#include "SymbolicExecution/Core/TaintModel.h"
 #include "TestUtils/LLVMHelpers.h"
 
 #include <llvm/IR/Instructions.h>

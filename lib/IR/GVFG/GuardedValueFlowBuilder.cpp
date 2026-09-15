@@ -1278,6 +1278,8 @@ static bool buildInstruction(GuardedValueFlowGraph &graph, Instruction &I,
     auto *node = findOrCreateValueNode(graph, &I, F);
     auto *site = graph.createSite<GuardedValueFlowAllocSite>(&graph, &I);
     node->addUseSite(site);
+    for (Value *operand : I.operands())
+      (void)getOrCreateOperandRepresentation(graph, operand, F, failed);
     return true;
   }
   case Instruction::GetElementPtr: {

@@ -27,28 +27,51 @@ The usual analysis flow is:
 7. Apply summaries, taint specifications, and memory API models while tracking
    bug traces.
 
+## Directory Layout
+
+Sources are grouped by architectural responsibility, under both
+`include/SymbolicExecution/` and `lib/SymbolicExecution/`:
+
+- `Core/`: the symbolic execution engine and its state/value abstractions.
+- `Solver/`: constraint representation, path-condition solving, and summary
+  solver pooling.
+- `Checks/`: query representation and bug-specific checking logic.
+- `Integration/`: adapters to LLVM/Lotus/GVFG.
+
+`Core` does not depend on `Checks`; `Checks` may inspect `Core` state and use
+`Solver` functionality; `Integration` sits at the outer boundary.
+
 ## Major Components
 
-- `AnalysisDriver.*`: coordinates whole-module execution, collects summaries,
-  and records bug traces.
-- `AnalysisState.*`, `AnalysisStateQuery.*`, `AnalysisStateSummary.*`,
-  `AnalysisStateTaint.*`, and `AnalysisStateUtils.*`: implement the symbolic
-  abstract state, including memory objects, path-sensitive value sets, summary
-  import/export, and taint-aware state updates.
-- `ProgramVar.*`: defines the stable symbolic variable layer used to name GVFG
-  nodes and analysis-introduced auxiliary values.
-- `PropertyValue.*`, `PropertyInteger.*`, and `PropertySym.*`: define the
-  scalar property domain used for offsets, sizes, comparisons, and symbolic
-  arithmetic.
-- `ConstraintRepr.*` and `PathCondSolver.*`: translate symbolic facts and path
-  predicates into SMT expressions and satisfiability checks.
-- `MemoryAPI.*` and `GVFGUtility.*`: provide allocation modeling, library
-  compatibility hooks, data-layout queries, function-order helpers, and access
-  to the active GVFG builder.
-- `TaintModel.*`: stores source, transfer, and sink specifications used when a
-  bug class depends on tainted data reaching sensitive program points.
-- `SymbolicExecutionWrapper.*`: integrates the subsystem with the legacy LLVM
-  pass pipeline and emits final bug reports.
+- `Core/AnalysisDriver.*`: coordinates whole-module execution, collects
+  summaries, and records bug traces.
+- `Core/AnalysisState.*`, `Core/AnalysisStateSummary.*`, and
+  `Core/AnalysisStateTaint.*`: implement the symbolic abstract state, including
+  memory objects, path-sensitive value sets, summary import/export, and
+  taint-aware state updates.
+- `Core/AnalysisSummary.*`: packages the interprocedural portion of a function's
+  state for reuse by callers.
+- `Core/SymbolicMemory.*`, `Core/GuardedValue.*`, `Core/CStringState.*`, and
+  `Core/TaintState.*`: access paths, abstract memory objects, guarded value
+  containers, C-string length state, and taint facts and traces.
+- `Core/ProgramVar.*`: defines the stable symbolic variable layer used to name
+  GVFG nodes and analysis-introduced auxiliary values.
+- `Core/PropertyValue.*`, `Core/PropertyInteger.*`, and `Core/PropertySym.*`:
+  define the scalar property domain used for offsets, sizes, comparisons, and
+  symbolic arithmetic.
+- `Solver/ConstraintRepr.*` and `Solver/PathCondSolver.*`: translate symbolic
+  facts and path predicates into SMT expressions and satisfiability checks.
+- `Solver/SummarySolverManager.*`: pools the solvers that own summary formulas.
+- `Core/MemoryAPI.*` and `Integration/GVFGUtility.*`: provide allocation
+  modeling, library compatibility hooks, data-layout queries, function-order
+  helpers, and access to the active GVFG builder.
+- `Core/TaintModel.*`: stores source, transfer, and sink specifications used
+  when a bug class depends on tainted data reaching sensitive program points.
+- `Checks/Query.*` and `Checks/AnalysisStateQuery.*`: represent numerical
+  queries and implement bug-specific query construction, inlining, evaluation,
+  and reporting.
+- `Integration/SymbolicExecutionWrapper.*`: integrates the subsystem with the
+  legacy LLVM pass pipeline and emits final bug reports.
 
 ## Key Concepts
 
@@ -79,8 +102,10 @@ evaluation alone describes.
 
 ## Headers
 
-Public interfaces live under `include/SymbolicExecution/`. New
-contributors usually want to start with `SymbolicExecutionWrapper.h`,
-`AnalysisDriver.h`, and `AnalysisState.h`, then read `ProgramVar.h`,
-`PropertyValue.h`, `PropertySym.h`, `GVFGUtility.h`, and `TaintModel.h` to see
-how symbolic values, utility shims, and taint specifications fit together.
+Public interfaces live under `include/SymbolicExecution/`, grouped into
+`Core/`, `Solver/`, `Checks/`, and `Integration/`. New contributors usually
+want to start with `Integration/SymbolicExecutionWrapper.h`,
+`Core/AnalysisDriver.h`, and `Core/AnalysisState.h`, then read
+`Core/ProgramVar.h`, `Core/PropertyValue.h`, `Core/PropertySym.h`,
+`Integration/GVFGUtility.h`, and `Core/TaintModel.h` to see how symbolic values,
+utility shims, and taint specifications fit together.

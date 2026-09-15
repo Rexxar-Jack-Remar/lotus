@@ -1,4 +1,4 @@
-#include "SymbolicExecution/GVFGUtility.h"
+#include "SymbolicExecution/Integration/GVFGUtility.h"
 #include "TestUtils/LLVMHelpers.h"
 
 #include <llvm/IR/Instructions.h>

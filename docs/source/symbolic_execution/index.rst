@@ -26,6 +26,24 @@ owns a full driver, symbolic state model, solver bridge, memory modeling layer,
 taint model, and LLVM pass wrapper. It is consumed by the checker framework
 through ``SymbolicExecutionWrapper``.
 
+Directory layout
+----------------
+
+Headers and implementations are grouped by architectural responsibility:
+
+* ``Core/`` – the symbolic execution engine and its fundamental state/value
+  abstractions (driver, ``AnalysisState``, ``AnalysisSummary``, symbolic memory,
+  guarded value sets, ``CStringState``, taint state, scalar properties).
+* ``Solver/`` – constraint representation and solver infrastructure
+  (``ConstraintRepr``, ``PathCondSolver``, ``SummarySolverManager``).
+* ``Checks/`` – query representation and bug-specific checking logic (the query
+  hierarchy and the per-bug query construction, inlining, and reporting).
+* ``Integration/`` – adapters to LLVM/Lotus/GVFG infrastructure
+  (``SymbolicExecutionWrapper``, ``GVFGUtility``).
+
+``Core`` does not depend on ``Checks``; ``Checks`` may inspect ``Core`` state and
+use ``Solver`` functionality, and ``Integration`` sits at the outer boundary.
+
 Core Components
 ---------------
 
@@ -66,10 +84,6 @@ Memory and control flow
   layout, and library function summaries.
 * ``GVFGUtility`` – Builds and queries the guarded value-flow graph that the
   engine walks.
-* ``InstResolver`` – Resolves instruction-level targets (call targets, memory
-  locations) during exploration.
-* ``DomTreePass`` – Dominator-tree reasoning used for reachability and join
-  handling.
 
 Taint and reporting
 ~~~~~~~~~~~~~~~~~~~
@@ -117,7 +131,7 @@ added to a pass pipeline like other Lotus passes:
 
 .. code-block:: cpp
 
-   #include "SymbolicExecution/SymbolicExecutionWrapper.h"
+   #include "SymbolicExecution/Integration/SymbolicExecutionWrapper.h"
 
    // Within a pass manager setup:
    auto *seWrapper = new SymbolicExecutionWrapperPass();

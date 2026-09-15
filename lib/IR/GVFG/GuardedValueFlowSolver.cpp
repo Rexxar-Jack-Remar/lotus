@@ -531,8 +531,16 @@ SMTExpr GuardedValueFlowSolver::encodeCastOpcodeNode(
 
 SMTExpr GuardedValueFlowSolver::encodeGEPOpcodeNode(
     const GuardedValueFlowOpcodeNode *node) {
+  if (node->children().empty())
+    return Factory->createBoolVal(true);
+
   SMTExpr base = getOrInsertExpr(node->children()[0].target);
-  SMTExpr computed = getOrInsertExpr(node->children()[1].target);
+  // A zero-offset GEP lowers to a single child because the builder's addChild
+  // deduplicates identical base/offset targets; in that case the computed
+  // address is the base itself.
+  SMTExpr computed = node->children().size() >= 2
+                         ? getOrInsertExpr(node->children()[1].target)
+                         : base;
   SMTExpr null_expr = Factory->createBitVecVal(0, base.getBitVecSize());
 
   return (getOrInsertExpr(node) ==

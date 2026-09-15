@@ -1,22 +1,27 @@
 set(CanarySymbolicExecution_SOURCES
-  AnalysisLimit.cpp
-  GVFGUtility.cpp
-  BigInteger.cpp
-  PropertyValue.cpp
-  PropertyInteger.cpp
-  PropertySym.cpp
-  ProgramVar.cpp
-  ConstraintRepr.cpp
-  PathCondSolver.cpp
-  TaintModel.cpp
-  MemoryAPI.cpp
-  AnalysisDriver.cpp
-  AnalysisState.cpp
-  AnalysisStateQuery.cpp
-  AnalysisStateSummary.cpp
-  AnalysisStateTaint.cpp
-  AnalysisStateUtils.cpp
-  SymbolicExecutionWrapper.cpp
+  Core/AnalysisLimit.cpp
+  Core/BigInteger.cpp
+  Core/PropertyValue.cpp
+  Core/PropertyInteger.cpp
+  Core/PropertySym.cpp
+  Core/ProgramVar.cpp
+  Core/SymbolicMemory.cpp
+  Core/GuardedValue.cpp
+  Core/CStringState.cpp
+  Core/TaintModel.cpp
+  Core/MemoryAPI.cpp
+  Core/AnalysisDriver.cpp
+  Core/AnalysisState.cpp
+  Core/AnalysisSummary.cpp
+  Core/AnalysisStateSummary.cpp
+  Core/AnalysisStateTaint.cpp
+  Solver/ConstraintRepr.cpp
+  Solver/PathCondSolver.cpp
+  Solver/SummarySolverManager.cpp
+  Checks/Query.cpp
+  Checks/AnalysisStateQuery.cpp
+  Integration/GVFGUtility.cpp
+  Integration/SymbolicExecutionWrapper.cpp
 )
 
 add_library(CanarySymbolicExecution STATIC ${CanarySymbolicExecution_SOURCES})

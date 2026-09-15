@@ -16,7 +16,7 @@
 #include "IR/GSA/GSA.h"
 #include "IR/GVFG/GuardedValueFlowBuilder.h"
 #include "IR/GVFG/LotusAdapter.h"
-#include "SymbolicExecution/SymbolicExecutionWrapper.h"
+#include "SymbolicExecution/Integration/SymbolicExecutionWrapper.h"
 
 #include <llvm/IR/LegacyPassManager.h>
 #include <llvm/IRReader/IRReader.h>
