@@ -36,6 +36,7 @@ public:
   QueryResult pointsToAllContexts(const llvm::Value &value,
                                   const llvm::Instruction &site,
                                   Point point = Point::Before);
+  void precomputeAll();
   bool mayAlias(const llvm::Value &lhs, const llvm::Value &rhs,
                 const llvm::Instruction &site, const CallContext &context = {});
 

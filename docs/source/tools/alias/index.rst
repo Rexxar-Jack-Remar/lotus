@@ -184,6 +184,12 @@ Key options:
 - ``--entry=<function>`` - Select a defined analysis entry (default ``main``)
 - ``--all-contexts`` - Print results joined across reachable contexts
 - ``--andersen-threshold=<N>`` - Refine coarse partitions larger than ``N``
+- ``--adaptive-threshold=<bool>`` - Enable observed-benefit threshold adaptation
+- ``--max-andersen-partition=<N>`` - Bound adaptive refinement input size
+- ``--max-andersen-work=<N>`` - Bound partition-by-hierarchy refinement work
+- ``--parallel-clusters=<bool>`` - Enable independent cluster workers
+- ``--threads=<N>`` - Set worker count; zero uses hardware concurrency
+- ``--precompute-clusters`` - Eagerly construct all cluster solvers
 - ``--max-contexts=<N>`` - Bound input-state summary contexts per cluster
 - ``--max-steps=<N>`` - Bound refinement steps per cluster
 - ``--detailed-stats`` - Print partition, cluster, and per-cluster timing data

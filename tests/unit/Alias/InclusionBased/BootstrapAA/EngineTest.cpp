@@ -236,6 +236,8 @@ void recursion() {
   path.insert(path.begin(), outer);
   CHECK(aa.pointsTo(p, ret, path).points_to == pts({a}));
   CHECK(aa.statistics().contexts < 40);
+  CHECK(aa.statistics().recursive_call_graph_sccs != 0);
+  CHECK(aa.statistics().scc_reschedules != 0);
 }
 void mutualRecursion() {
   Fixture f;
@@ -401,14 +403,85 @@ void overlapAndCoverage() {
      both = f.value();
   f.inst(Opcode::Join, both, {pa, pb});
   Id end = f.inst(Opcode::Return);
-  Analysis aa(f.p, refined());
+  Options parallel = refined();
+  parallel.parallelism = 2;
+  Analysis aa(f.p, parallel);
   unsigned occurrences = 0;
   for (const auto &cluster : aa.clusters())
     for (Id value : cluster)
       if (value == both)
         ++occurrences;
   CHECK(occurrences >= 2);
-  CHECK(aa.pointsTo(both, end).points_to == pts({a, b}));
+  const auto parallelResult = aa.pointsTo(both, end);
+  CHECK(parallelResult.points_to == pts({a, b}));
+  CHECK(aa.statistics().parallel_cluster_tasks >= 2);
+
+  Options serial = parallel;
+  serial.parallel_clusters = false;
+  Analysis reference(f.p, serial);
+  CHECK(reference.pointsTo(both, end).points_to == parallelResult.points_to);
+}
+void adaptiveAndersenThreshold() {
+  Fixture f;
+  Id first = f.object("first"), second = f.object("second");
+  std::vector<Id> firstGroup, secondGroup;
+  for (unsigned index = 0; index < 8; ++index)
+    firstGroup.push_back(f.addr(first));
+  for (unsigned index = 0; index < 5; ++index)
+    secondGroup.push_back(f.addr(second));
+  Id end = f.inst(Opcode::Return);
+
+  Options adaptive = refined();
+  adaptive.adaptive_andersen_threshold = true;
+  Analysis adjusted(f.p, adaptive);
+  CHECK(adjusted.pointsTo(firstGroup.front(), end).points_to == pts({first}));
+  CHECK(adjusted.statistics().andersen_runs != 0);
+  CHECK(adjusted.statistics().adaptive_refinement_rejections != 0);
+  CHECK(adjusted.statistics().adaptive_refinement_skips != 0);
+  CHECK(adjusted.statistics().effective_andersen_threshold >
+        adaptive.andersen_threshold);
+
+  Options fixed = adaptive;
+  fixed.adaptive_andersen_threshold = false;
+  Analysis reference(f.p, fixed);
+  CHECK(reference.pointsTo(secondGroup.front(), end).points_to ==
+        pts({second}));
+  CHECK(reference.statistics().adaptive_refinement_skips == 0);
+
+  Options guarded = adaptive;
+  guarded.max_andersen_partition_size = 0;
+  guarded.max_andersen_work = 4;
+  Analysis costGuarded(f.p, guarded);
+  CHECK(costGuarded.pointsTo(firstGroup.front(), end).points_to ==
+        pts({first}));
+  CHECK(costGuarded.statistics().adaptive_cost_skips == 2);
+  CHECK(costGuarded.statistics().andersen_runs == 0);
+}
+void parallelPrecompute() {
+  Fixture f;
+  std::vector<std::pair<Id, Id>> pointers;
+  for (unsigned index = 0; index < 6; ++index) {
+    const Id object = f.object("object");
+    pointers.emplace_back(f.addr(object), object);
+  }
+  const Id end = f.inst(Opcode::Return);
+
+  Options parallel = refined();
+  parallel.parallelism = 3;
+  Analysis analysis(f.p, parallel);
+  analysis.precomputeAll();
+  CHECK(analysis.statistics().evaluated_clusters == analysis.clusters().size());
+  CHECK(analysis.statistics().parallel_cluster_tasks >= 2);
+
+  Options serial = parallel;
+  serial.parallel_clusters = false;
+  Analysis reference(f.p, serial);
+  reference.precomputeAll();
+  for (const auto &[pointer, object] : pointers) {
+    CHECK(analysis.pointsTo(pointer, end).points_to == pts({object}));
+    CHECK(reference.pointsTo(pointer, end).points_to ==
+          analysis.pointsTo(pointer, end).points_to);
+  }
 }
 void limitsAndValidation() {
   Fixture f;
@@ -572,12 +645,18 @@ void differentialSlices() {
     Options sliced = refined();
     if (trial % 2 == 0)
       sliced.andersen_threshold = 60;
-    Analysis reference(f.p, mono), bootstrapped(f.p, sliced);
+    Options serial = sliced;
+    serial.parallel_clusters = false;
+    Analysis reference(f.p, mono), bootstrapped(f.p, sliced),
+        serialized(f.p, serial);
     for (Id pointer : pointers) {
       auto expected = reference.pointsTo(pointer, end),
-           actual = bootstrapped.pointsTo(pointer, end);
+           actual = bootstrapped.pointsTo(pointer, end),
+           serialResult = serialized.pointsTo(pointer, end);
       CHECK(expected.status == actual.status);
       CHECK(expected.points_to == actual.points_to);
+      CHECK(serialResult.status == actual.status);
+      CHECK(serialResult.points_to == actual.points_to);
     }
   }
 }
@@ -610,6 +689,10 @@ TEST(BootstrapEngineTest, PartialWriteIsWeak) { partialWriteIsWeak(); }
 TEST(BootstrapEngineTest, ParallelLoopPhis) { phiParallelLoop(); }
 TEST(BootstrapEngineTest, CyclicMemory) { cyclicMemory(); }
 TEST(BootstrapEngineTest, OverlappingCover) { overlapAndCoverage(); }
+TEST(BootstrapEngineTest, AdaptiveAndersenThreshold) {
+  adaptiveAndersenThreshold();
+}
+TEST(BootstrapEngineTest, ParallelPrecompute) { parallelPrecompute(); }
 TEST(BootstrapEngineTest, LimitsAndValidation) { limitsAndValidation(); }
 TEST(BootstrapEngineTest, SizedLoadsAndStores) { sizedLoadsAndStores(); }
 TEST(BootstrapEngineTest, NullableAllocationAndHavocResult) {

@@ -23,6 +23,18 @@ adapter recognizes common allocation and read-only interior-pointer functions,
 models ``realloc`` alternatives, resolves direct calls through aliases, and
 preserves zero-length memory intrinsics.
 
+Large partitions use a deterministic adaptive Andersen threshold based on the
+observed reduction in maximum cluster size. Refinements achieving less than a
+25% reduction are rejected in favor of the original Steensgaard partition.
+Adaptive partition-size and partition-by-hierarchy work guards prevent
+unbounded Andersen preprocessing on large coarse partitions.
+Function summaries are prioritized by a conservative call-graph SCC
+condensation, and independent clusters needed
+by a query can be constructed in parallel. Fixed-threshold and serial modes
+remain available for reproducibility. ``precomputeAll()`` and the
+``--precompute-clusters`` CLI option enable parallel eager evaluation of
+disjoint clusters; ``--all-contexts`` uses eager evaluation automatically.
+
 Build targets are ``CanaryBootstrapCore``, ``CanaryBootstrapAA``, and
 ``lotus-alias-bootstrap``. The integrated GTest target is
 ``bootstrap_aa_tests``.

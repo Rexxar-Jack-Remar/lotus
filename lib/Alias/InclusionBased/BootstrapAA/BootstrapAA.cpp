@@ -398,7 +398,8 @@ struct BootstrapAA::Impl {
       }
     } else if (const auto *gep =
                    llvm::dyn_cast<llvm::GetElementPtrInst>(&instruction)) {
-      if (gep->isInBounds() || gep->hasAllZeroIndices()) {
+      if (i.result != INVALID &&
+          (gep->isInBounds() || gep->hasAllZeroIndices())) {
         i.opcode = Opcode::Copy;
         i.operands = {valueId(*gep->getPointerOperand())};
       }
@@ -540,6 +541,7 @@ QueryResult BootstrapAA::pointsToAllContexts(const llvm::Value &value,
   return m_impl->analysis->pointsToAllContexts(m_impl->queryValue(value),
                                                m_impl->querySite(site), point);
 }
+void BootstrapAA::precomputeAll() { m_impl->analysis->precomputeAll(); }
 bool BootstrapAA::mayAlias(const llvm::Value &lhs, const llvm::Value &rhs,
                            const llvm::Instruction &site,
                            const CallContext &context) {

@@ -1,12 +1,17 @@
 #include "Alias/InclusionBased/BootstrapAA/Engine.h"
 
 #include <algorithm>
+#include <atomic>
 #include <chrono>
 #include <deque>
+#include <exception>
+#include <functional>
 #include <map>
+#include <mutex>
 #include <numeric>
 #include <set>
 #include <stdexcept>
+#include <thread>
 #include <tuple>
 
 namespace lotus {
@@ -324,7 +329,12 @@ void Program::validate() const {
         case Opcode::Load:
         case Opcode::Unknown:
           if (instruction.result == INVALID)
-            throw std::invalid_argument("pointer definition has no result");
+            throw std::invalid_argument(
+                "pointer definition has no result at normalized instruction " +
+                std::to_string(instruction.id) + " in function " +
+                function.name + " (opcode " +
+                std::to_string(static_cast<unsigned>(instruction.opcode)) +
+                ")");
           break;
         default:
           break;
@@ -1042,13 +1052,120 @@ class Solver {
   const Sets &m_upper;
   const Slice m_slice;
   const Options &m_options;
-  Statistics &m_stats;
+  Statistics m_stats;
   std::vector<std::unique_ptr<Record>> m_records;
   std::map<Key, std::size_t> m_keys;
-  std::deque<std::size_t> m_work;
+  std::map<std::size_t, std::deque<std::size_t>, std::greater<std::size_t>>
+      m_work;
   std::set<std::size_t> m_queued;
+  std::vector<Id> m_function_scc;
+  std::vector<std::size_t> m_function_rank;
   std::size_t m_steps = 0;
   bool m_failed = false;
+  void buildCallGraphSchedule() {
+    std::vector<std::vector<Id>> successors(m_program.functions.size());
+    forInstructions(m_program, [&](Id caller, const Instruction &instruction) {
+      if (instruction.opcode != Opcode::Call)
+        return;
+      const Targets targets =
+          callees(m_program, instruction,
+                  valueOf(m_program, m_upper, instruction.indirect_target));
+      for (Id callee : targets.functions)
+        if (std::find(successors[caller].begin(), successors[caller].end(),
+                      callee) == successors[caller].end())
+          successors[caller].push_back(callee);
+    });
+    std::vector<std::vector<Id>> predecessors(successors.size());
+    for (Id caller = 0; caller < successors.size(); ++caller)
+      for (Id callee : successors[caller])
+        predecessors[callee].push_back(caller);
+
+    std::vector<bool> visited(successors.size(), false);
+    std::vector<Id> postorder;
+    for (Id start = 0; start < successors.size(); ++start) {
+      if (visited[start])
+        continue;
+      std::vector<std::pair<Id, std::size_t>> dfs{{start, 0}};
+      visited[start] = true;
+      while (!dfs.empty()) {
+        auto &[function, next] = dfs.back();
+        if (next < successors[function].size()) {
+          const Id callee = successors[function][next++];
+          if (!visited[callee]) {
+            visited[callee] = true;
+            dfs.emplace_back(callee, 0);
+          }
+          continue;
+        }
+        postorder.push_back(function);
+        dfs.pop_back();
+      }
+    }
+
+    m_function_scc.assign(successors.size(), INVALID);
+    Id sccCount = 0;
+    for (auto it = postorder.rbegin(); it != postorder.rend(); ++it) {
+      if (m_function_scc[*it] != INVALID)
+        continue;
+      std::vector<Id> work{*it};
+      m_function_scc[*it] = sccCount;
+      while (!work.empty()) {
+        const Id function = work.back();
+        work.pop_back();
+        for (Id caller : predecessors[function])
+          if (m_function_scc[caller] == INVALID) {
+            m_function_scc[caller] = sccCount;
+            work.push_back(caller);
+          }
+      }
+      ++sccCount;
+    }
+
+    std::vector<std::vector<Id>> sccSuccessors(sccCount);
+    std::vector<std::size_t> sccSize(sccCount, 0);
+    std::vector<bool> recursive(sccCount, false);
+    for (Id caller = 0; caller < successors.size(); ++caller) {
+      const Id from = m_function_scc[caller];
+      ++sccSize[from];
+      for (Id callee : successors[caller]) {
+        const Id to = m_function_scc[callee];
+        if (from == to) {
+          recursive[from] = true;
+        } else if (std::find(sccSuccessors[from].begin(),
+                             sccSuccessors[from].end(),
+                             to) == sccSuccessors[from].end()) {
+          sccSuccessors[from].push_back(to);
+        }
+      }
+    }
+    for (Id scc = 0; scc < sccCount; ++scc)
+      recursive[scc] = recursive[scc] || sccSize[scc] > 1;
+
+    std::vector<std::size_t> indegree(sccCount, 0);
+    for (const auto &next : sccSuccessors)
+      for (Id successor : next)
+        ++indegree[successor];
+    std::deque<Id> work;
+    std::vector<std::size_t> rank(sccCount, 0);
+    for (Id scc = 0; scc < sccCount; ++scc)
+      if (indegree[scc] == 0)
+        work.push_back(scc);
+    while (!work.empty()) {
+      const Id scc = work.front();
+      work.pop_front();
+      for (Id successor : sccSuccessors[scc]) {
+        rank[successor] = std::max(rank[successor], rank[scc] + 1);
+        if (--indegree[successor] == 0)
+          work.push_back(successor);
+      }
+    }
+    m_function_rank.resize(successors.size());
+    for (Id function = 0; function < successors.size(); ++function)
+      m_function_rank[function] = rank[m_function_scc[function]];
+    m_stats.call_graph_sccs = sccCount;
+    m_stats.recursive_call_graph_sccs =
+        std::count(recursive.begin(), recursive.end(), true);
+  }
   State bottom() const {
     return State(m_program.values.size(), m_program.objects.size());
   }
@@ -1059,7 +1176,17 @@ class Solver {
   }
   void schedule(std::size_t context) {
     if (m_queued.insert(context).second)
-      m_work.push_back(context);
+      m_work[m_function_rank[m_records[context]->key.function]].push_back(
+          context);
+  }
+  std::size_t takeScheduled() {
+    auto first = m_work.begin();
+    const std::size_t context = first->second.front();
+    first->second.pop_front();
+    if (first->second.empty())
+      m_work.erase(first);
+    m_queued.erase(context);
+    return context;
   }
   std::size_t context(Key key) {
     auto it = m_keys.find(key);
@@ -1282,9 +1409,10 @@ class Solver {
 
 public:
   Solver(const Program &program, const Sets &upper, Slice slice,
-         const Options &options, Statistics &stats)
+         const Options &options)
       : m_program(program), m_upper(upper), m_slice(std::move(slice)),
-        m_options(options), m_stats(stats) {
+        m_options(options) {
+    buildCallGraphSchedule();
     m_stats.slice_values +=
         std::count(m_slice.values.begin(), m_slice.values.end(), true);
     m_stats.slice_objects +=
@@ -1303,14 +1431,16 @@ public:
           root.memory[o] = program.objects[o].initial;
       context(std::move(root));
       while (!m_work.empty()) {
-        std::size_t id = m_work.front();
-        m_work.pop_front();
-        m_queued.erase(id);
+        const std::size_t id = takeScheduled();
         Summary next = evaluate(id);
         if (m_records[id]->summary.join(next)) {
           ++m_stats.summary_updates;
-          for (std::size_t caller : m_records[id]->callers)
+          for (std::size_t caller : m_records[id]->callers) {
+            if (m_function_scc[m_records[caller]->key.function] ==
+                m_function_scc[m_records[id]->key.function])
+              ++m_stats.scc_reschedules;
             schedule(caller);
+          }
         }
       }
     } catch (const LimitReached &) {
@@ -1360,6 +1490,7 @@ public:
     }
     return result;
   }
+  const Statistics &statistics() const { return m_stats; }
 };
 } // namespace
 
@@ -1398,8 +1529,30 @@ struct Analysis::Impl {
       cover.emplace_back(program.values.size());
       std::iota(cover.back().begin(), cover.back().end(), 0);
     } else {
-      for (const auto &partition : coarse.partitions) {
-        if (partition.size() <= options.andersen_threshold) {
+      std::vector<std::vector<Id>> partitions = coarse.partitions;
+      if (options.adaptive_andersen_threshold)
+        std::stable_sort(partitions.begin(), partitions.end(),
+                         [](const auto &left, const auto &right) {
+                           return left.size() > right.size();
+                         });
+      std::size_t threshold = options.andersen_threshold;
+      for (const auto &partition : partitions) {
+        const bool workLimitExceeded =
+            options.max_andersen_work != 0 && !hierarchy.successors.empty() &&
+            partition.size() >
+                options.max_andersen_work / hierarchy.successors.size();
+        if (options.adaptive_andersen_threshold &&
+            ((options.max_andersen_partition_size != 0 &&
+              partition.size() > options.max_andersen_partition_size) ||
+             workLimitExceeded)) {
+          ++stats.adaptive_cost_skips;
+          cover.push_back(partition);
+          threshold = std::max(threshold, partition.size());
+          continue;
+        }
+        if (partition.size() <= threshold) {
+          if (partition.size() > options.andersen_threshold)
+            ++stats.adaptive_refinement_skips;
           cover.push_back(partition);
           continue;
         }
@@ -1408,10 +1561,10 @@ struct Analysis::Impl {
             relevant(program, coarse.upper, hierarchy, partition, true);
         Sets refined = inclusion(program, slice);
         std::map<Id, std::vector<Id>> inverse;
+        std::vector<std::vector<Id>> refinedCover;
         for (Id v : partition) {
-          upper[v] = refined[v];
           if (refined[v].empty()) {
-            cover.push_back({v});
+            refinedCover.push_back({v});
           } else if (refined[v].isTop()) {
             // Top appears in *every* inverse points-to set, including UNKNOWN.
             for (Id object = 0; object < program.objects.size(); ++object)
@@ -1423,9 +1576,40 @@ struct Analysis::Impl {
         }
         for (auto &cluster : inverse)
           if (!cluster.second.empty())
-            cover.push_back(std::move(cluster.second));
+            refinedCover.push_back(std::move(cluster.second));
+        std::size_t refinedLargest = 0;
+        for (const auto &cluster : refinedCover)
+          refinedLargest = std::max(refinedLargest, cluster.size());
+        if (!options.adaptive_andersen_threshold) {
+          for (Id value : partition)
+            upper[value] = refined[value];
+          cover.insert(cover.end(), refinedCover.begin(), refinedCover.end());
+          continue;
+        }
+        // Process partitions from largest to smallest. If refinement removes
+        // less than 25% of the largest cluster, stop paying that cost for all
+        // remaining smaller partitions. If it halves the largest cluster,
+        // lower the threshold and admit more refinements.
+        const long double retainedFraction =
+            partition.empty() ? 0.0L
+                              : static_cast<long double>(refinedLargest) /
+                                    static_cast<long double>(partition.size());
+        if (retainedFraction >= 0.75L) {
+          ++stats.adaptive_refinement_rejections;
+          cover.push_back(partition);
+          threshold = std::max(threshold, partition.size());
+        } else {
+          for (Id value : partition)
+            upper[value] = refined[value];
+          cover.insert(cover.end(), refinedCover.begin(), refinedCover.end());
+          if (retainedFraction <= 0.5L)
+            threshold = std::max<std::size_t>(1, threshold * 3 / 4);
+        }
       }
+      stats.effective_andersen_threshold = threshold;
     }
+    if (!options.enable_clustering)
+      stats.effective_andersen_threshold = options.andersen_threshold;
     // Canonicalize only; never split or truncate overlapping clusters by size.
     std::sort(cover.begin(), cover.end());
     cover.erase(std::unique(cover.begin(), cover.end()), cover.end());
@@ -1450,6 +1634,107 @@ struct Analysis::Impl {
             std::chrono::steady_clock::now() - preprocessingStart)
             .count();
   }
+  struct BuiltSolver {
+    std::size_t cluster = 0;
+    std::unique_ptr<Solver> solver;
+    double milliseconds = 0.0;
+  };
+  BuiltSolver buildSolver(std::size_t cluster) const {
+    const auto started = std::chrono::steady_clock::now();
+    BuiltSolver built;
+    built.cluster = cluster;
+    built.solver = std::make_unique<Solver>(program, upper,
+                                            relevant(program, upper, hierarchy,
+                                                     cover[cluster],
+                                                     options.enable_slicing),
+                                            options);
+    built.milliseconds = std::chrono::duration<double, std::milli>(
+                             std::chrono::steady_clock::now() - started)
+                             .count();
+    return built;
+  }
+  void mergeSolverStatistics(const Statistics &part) {
+    stats.slice_values += part.slice_values;
+    stats.slice_objects += part.slice_objects;
+    stats.contexts += part.contexts;
+    stats.context_cache_hits += part.context_cache_hits;
+    stats.context_cache_misses += part.context_cache_misses;
+    stats.maximum_contexts_per_cluster = std::max(
+        stats.maximum_contexts_per_cluster, part.maximum_contexts_per_cluster);
+    stats.summary_updates += part.summary_updates;
+    stats.steps += part.steps;
+    stats.call_graph_sccs =
+        std::max(stats.call_graph_sccs, part.call_graph_sccs);
+    stats.recursive_call_graph_sccs = std::max(stats.recursive_call_graph_sccs,
+                                               part.recursive_call_graph_sccs);
+    stats.scc_reschedules += part.scc_reschedules;
+  }
+  void ensureSolvers(const std::vector<std::size_t> &selected) {
+    std::vector<std::size_t> missing;
+    for (std::size_t cluster : selected)
+      if (!solvers[cluster])
+        missing.push_back(cluster);
+    if (missing.empty())
+      return;
+
+    std::vector<BuiltSolver> built(missing.size());
+    std::size_t workers = options.parallelism;
+    if (workers == 0)
+      workers = std::thread::hardware_concurrency();
+    workers = std::max<std::size_t>(1, std::min(workers, missing.size()));
+    if (!options.parallel_clusters)
+      workers = 1;
+    if (workers == 1) {
+      for (std::size_t index = 0; index < missing.size(); ++index)
+        built[index] = buildSolver(missing[index]);
+    } else {
+      stats.parallel_cluster_tasks += missing.size();
+      std::atomic<std::size_t> next{0};
+      std::exception_ptr failure;
+      std::mutex failureMutex;
+      std::vector<std::thread> threads;
+      threads.reserve(workers);
+      for (std::size_t worker = 0; worker < workers; ++worker) {
+        threads.emplace_back([&] {
+          while (true) {
+            const std::size_t index = next.fetch_add(1);
+            if (index >= missing.size())
+              return;
+            try {
+              built[index] = buildSolver(missing[index]);
+            } catch (...) {
+              std::lock_guard<std::mutex> lock(failureMutex);
+              if (!failure)
+                failure = std::current_exception();
+              return;
+            }
+          }
+        });
+      }
+      for (std::thread &thread : threads)
+        thread.join();
+      if (failure)
+        std::rethrow_exception(failure);
+    }
+
+    // Publish results and aggregate counters in cluster order, independently
+    // of worker completion order.
+    std::sort(built.begin(), built.end(),
+              [](const BuiltSolver &left, const BuiltSolver &right) {
+                return left.cluster < right.cluster;
+              });
+    for (BuiltSolver &part : built) {
+      stats.cluster_solve_milliseconds[part.cluster] = part.milliseconds;
+      mergeSolverStatistics(part.solver->statistics());
+      solvers[part.cluster] = std::move(part.solver);
+      ++stats.evaluated_clusters;
+    }
+  }
+  void precomputeAll() {
+    std::vector<std::size_t> selected(cover.size());
+    std::iota(selected.begin(), selected.end(), 0);
+    ensureSolvers(selected);
+  }
   QueryResult query(Id value, Id site, const Context *context_path,
                     Point point) {
     if (value >= program.values.size() || !sites.count(site))
@@ -1461,23 +1746,14 @@ struct Analysis::Impl {
           throw std::invalid_argument("context contains a non-call site");
       }
     }
-    QueryResult result;
+    std::vector<std::size_t> selected;
     for (std::size_t c = 0; c < cover.size(); ++c) {
-      if (!std::binary_search(cover[c].begin(), cover[c].end(), value))
-        continue;
-      if (!solvers[c]) {
-        ++stats.evaluated_clusters;
-        const auto started = std::chrono::steady_clock::now();
-        solvers[c] =
-            std::make_unique<Solver>(program, upper,
-                                     relevant(program, upper, hierarchy,
-                                              cover[c], options.enable_slicing),
-                                     options, stats);
-        stats.cluster_solve_milliseconds[c] =
-            std::chrono::duration<double, std::milli>(
-                std::chrono::steady_clock::now() - started)
-                .count();
-      }
+      if (std::binary_search(cover[c].begin(), cover[c].end(), value))
+        selected.push_back(c);
+    }
+    ensureSolvers(selected);
+    QueryResult result;
+    for (std::size_t c : selected) {
       QueryResult part = solvers[c]->query(value, site, context_path, point);
       if (part.status == QueryStatus::ResourceLimit) {
         ++stats.fallback_queries;
@@ -1503,6 +1779,7 @@ QueryResult Analysis::pointsTo(Id value, Id site, const Context &context,
 QueryResult Analysis::pointsToAllContexts(Id value, Id site, Point point) {
   return m_impl->query(value, site, nullptr, point);
 }
+void Analysis::precomputeAll() { m_impl->precomputeAll(); }
 bool Analysis::mayAlias(Id lhs, Id rhs, Id site, const Context &context) {
   QueryResult a = pointsTo(lhs, site, context),
               b = pointsTo(rhs, site, context);

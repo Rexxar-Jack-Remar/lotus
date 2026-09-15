@@ -170,6 +170,14 @@ private:
 
 struct Options {
   std::size_t andersen_threshold = 60;
+  bool adaptive_andersen_threshold = true;
+  // Zero disables this adaptive preprocessing cost guard.
+  std::size_t max_andersen_partition_size = 4096;
+  // Estimated partition-size x hierarchy-node budget; zero is unlimited.
+  std::size_t max_andersen_work = 4 * 1024 * 1024;
+  bool parallel_clusters = true;
+  // Zero selects hardware_concurrency. Values above one enable parallel work.
+  std::size_t parallelism = 0;
   // Resource exhaustion yields top plus an explicit status, never partial sets.
   std::size_t max_contexts = 4096;
   std::size_t max_steps = 1000000;
@@ -202,6 +210,10 @@ struct Statistics {
   std::size_t hierarchy_max_depth = 0;
   std::size_t hierarchy_cyclic_components = 0;
   std::size_t andersen_runs = 0;
+  std::size_t adaptive_refinement_skips = 0;
+  std::size_t adaptive_refinement_rejections = 0;
+  std::size_t adaptive_cost_skips = 0;
+  std::size_t effective_andersen_threshold = 0;
   std::size_t clusters = 0;
   std::size_t largest_cluster = 0;
   std::vector<std::size_t> cluster_sizes;
@@ -211,6 +223,10 @@ struct Statistics {
   std::size_t slice_values = 0;
   std::size_t slice_objects = 0;
   std::size_t evaluated_clusters = 0;
+  std::size_t parallel_cluster_tasks = 0;
+  std::size_t call_graph_sccs = 0;
+  std::size_t recursive_call_graph_sccs = 0;
+  std::size_t scc_reschedules = 0;
   std::size_t contexts = 0;
   std::size_t context_cache_hits = 0;
   std::size_t context_cache_misses = 0;
@@ -246,6 +262,8 @@ public:
                        Point point = Point::Before);
   QueryResult pointsToAllContexts(Id value, Id site,
                                   Point point = Point::Before);
+  // Eagerly construct every cluster solver, using configured parallelism.
+  void precomputeAll();
   // Conservative query helper. Unreachable is not used to prove disjointness.
   bool mayAlias(Id lhs, Id rhs, Id site, const Context &context = {});
   const Statistics &statistics() const;

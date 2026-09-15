@@ -22,8 +22,8 @@ The distinction is important:
 | Accurate per-cluster analysis | On-demand CFG fixed points with strong/weak memory updates and input-state-tabulated function summaries. Results are unioned over all clusters containing the queried pointer. |
 | Summary tuples, Definition 8 / Algorithms 4–5 | **Different representation:** a summary maps a projected entry state to possible exit memory and return values. No implementation of the paper's guarded backward tuple representation is claimed. |
 | FSCI/hierarchy dovetailing, Algorithm 2 | **Not implemented.** The forward solver resolves stores using the current flow/context-sensitive state instead. |
-| Recursive summary convergence | Dependency-driven fixed point across function/input-state records; no call-string depth cutoff. This does not explicitly schedule call-graph SCCs as the paper does. |
-| Parallel per-cluster execution | **Not implemented.** Query caches and statistics are single-threaded. |
+| Recursive summary convergence | Dependency-driven fixed point across function/input-state records, prioritized by an explicit conservative call-graph SCC condensation; no call-string depth cutoff. |
+| Parallel per-cluster execution | Missing clusters selected by a query are built by a bounded standard-thread worker set. Solver state and statistics are isolated and published deterministically. |
 
 The summary representation is a deliberate engineering adaptation, not a claim
 that it has the succinctness or performance reported for the paper's summaries.
@@ -49,6 +49,15 @@ The integrated version addresses the initial, contained gaps as follows:
    ``realloc``'s old/fresh/null alternatives, preserves zero-length intrinsics,
    resolves direct calls through aliases, and summarizes common read-only
    interior-pointer functions.
+6. Large partitions are processed largest-first. The Andersen threshold is
+   lowered after effective refinements. A refinement that reduces the largest
+   cluster by less than 25% is rejected, and the threshold is raised to skip
+   smaller partitions. Adaptive partition-size and partition-by-hierarchy work
+   guards avoid starting unbounded refinement work; all controls remain
+   selectable.
+7. Function summaries are scheduled by reverse call-graph-SCC priority, and
+   independent overlapping clusters are evaluated in parallel with deterministic
+   aggregation.
 
 ### Remaining paper-fidelity roadmap
 
@@ -61,9 +70,7 @@ The largest remaining differences are:
    These summaries are semantically useful, but can enumerate many projected
    memory states and do not carry guarded positive/negative points-to and alias
    constraints.
-3. Cluster solvers are evaluated serially. The independent-cluster parallelism
-   central to the paper's scalability argument is not used.
-4. No paper-benchmark reproduction currently measures summary size, speedup,
+3. No paper-benchmark reproduction currently measures summary size, speedup,
    or peak memory, although the required structural and timing counters are now
    exposed.
 
@@ -75,8 +82,7 @@ A paper-faithful implementation should proceed in dependency order:
    summary convergence from Algorithms 4 and 5.
 3. Keep the current input-state solver as a reference backend until guarded
    summaries agree on bounded programs, recursion, and indirect calls.
-4. Parallelize independent clusters with isolated caches and deterministic
-   result reduction, then evaluate the PLDI benchmarks.
+4. Evaluate the adaptive and parallel implementations on the PLDI benchmarks.
 
 Separate LLVM-model limitations affect soundness outside the documented input
 contract rather than fidelity to the paper: concurrent interference, signals,
@@ -151,6 +157,9 @@ for (Id object : result.points_to.objects()) {
 const SteensgaardHierarchy &hierarchy = analysis.hierarchy();
 // Components form a cycle-collapsed DAG; edges point toward one dereference.
 (void)hierarchy.depth;
+
+// Optional: eagerly build every cluster solver using configured parallelism.
+analysis.precomputeAll();
 ```
 
 An empty call context means **the entry activation**, not “any caller.” A
@@ -253,7 +262,8 @@ cluster; this cache is not thread-safe.
 ```sh
 ./build/bin/lotus-alias-bootstrap input.bc
 ./build/bin/lotus-alias-bootstrap --all-contexts \
-  --andersen-threshold=1 --max-contexts=4096 --max-steps=1000000 input.bc
+  --andersen-threshold=1 --threads=8 --max-contexts=4096 \
+  --max-steps=1000000 input.bc
 ```
 
 The default prints pointer-producing instructions in the entry activation,
@@ -261,6 +271,12 @@ after each instruction. `--all-contexts` deliberately unions contexts and prints
 all functions. The API above is the way to request a specific nonempty context.
 `--detailed-stats` prints partition and cluster size distributions plus
 per-cluster solve times; aggregate paper-oriented counters are always printed.
+`--adaptive-threshold=false` selects the fixed threshold policy, while
+`--parallel-clusters=false` selects deterministic serial cluster construction.
+`--max-andersen-partition=0` disables the adaptive refinement-size guard.
+`--max-andersen-work=0` disables the estimated refinement-work guard.
+`--precompute-clusters` eagerly evaluates disjoint as well as overlapping
+clusters; `--all-contexts` enables this automatically.
 Exit codes are 0 for completed queries, 1 for input/configuration errors, and 2
 when any printed query required a resource-limit fallback. Statistics go to
 standard error.
@@ -268,12 +284,14 @@ standard error.
 ## Validation
 
 The integrated LLVM-independent engine and LLVM 14 adapter build in Lotus. The
-GTest suite contains 25 engine groups and ten LLVM-facing groups; all pass. One
+GTest suite contains 27 engine groups and eleven LLVM-facing groups; all pass. One
 engine group compares sliced/clustered and monolithic configurations on 200
 deterministically generated programs. The CLI smoke test also passes on the
 included regression IR.
 
 The engine suite additionally passes with C++17, ``-Wall -Wextra -Wpedantic
 -Werror``, AddressSanitizer, and UndefinedBehaviorSanitizer. These checks are
-regression and metamorphic evidence, not a soundness proof or a reproduction of
-the paper's performance results.
+joined by ThreadSanitizer coverage of overlapping-cluster, eager-precompute,
+and differential parallel execution. These checks are regression and
+metamorphic evidence, not a soundness proof or a reproduction of the paper's
+performance results.

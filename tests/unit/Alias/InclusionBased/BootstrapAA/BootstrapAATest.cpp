@@ -66,6 +66,7 @@ void callsAndStackStores() {
     }
   )IR");
   BootstrapAA aa(*f.module, nullptr, options());
+  aa.precomputeAll();
   auto a = aa.objectId(*f.module->getNamedGlobal("a"));
   auto b = aa.objectId(*f.module->getNamedGlobal("b"));
   const auto &old = f.instruction("main", "old"),
@@ -286,6 +287,19 @@ void readOnlyInteriorPointerModel() {
   CHECK(aa.pointsTo(after, after, {}, Point::After).points_to ==
         PointsToSet(a));
 }
+void vectorPointerOperationsAreConservative() {
+  Fixture f(R"IR(
+    @a = global i8 0
+    define i32 @main() {
+      %addresses = getelementptr i8, i8* @a, <2 x i64> <i64 0, i64 1>
+      %element = extractelement <2 x i8*> %addresses, i32 0
+      ret i32 0
+    }
+  )IR");
+  BootstrapAA aa(*f.module, nullptr, options());
+  const auto &element = f.instruction("main", "element");
+  CHECK(aa.pointsTo(element, element, {}, Point::After).points_to.isTop());
+}
 } // namespace
 TEST(BootstrapAATest, CallsAndStackStores) { callsAndStackStores(); }
 TEST(BootstrapAATest, GlobalsAndExternalHavoc) { globalsAndExternalHavoc(); }
@@ -300,4 +314,7 @@ TEST(BootstrapAATest, ZeroLengthMemoryIntrinsic) {
 TEST(BootstrapAATest, GlobalAliasDirectCallee) { globalAliasDirectCallee(); }
 TEST(BootstrapAATest, ReadOnlyInteriorPointerModel) {
   readOnlyInteriorPointerModel();
+}
+TEST(BootstrapAATest, VectorPointerOperationsAreConservative) {
+  vectorPointerOperationsAreConservative();
 }

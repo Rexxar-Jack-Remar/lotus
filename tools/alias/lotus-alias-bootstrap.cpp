@@ -34,6 +34,30 @@ llvm::cl::opt<unsigned>
     Threshold("andersen-threshold", llvm::cl::init(60),
               llvm::cl::desc("Andersen refinement threshold"),
               llvm::cl::cat(BootstrapCategory));
+llvm::cl::opt<bool> AdaptiveThreshold(
+    "adaptive-threshold", llvm::cl::init(true),
+    llvm::cl::desc("Adapt the Andersen threshold from observed refinement"),
+    llvm::cl::cat(BootstrapCategory));
+llvm::cl::opt<unsigned> MaxAndersenPartition(
+    "max-andersen-partition", llvm::cl::init(4096),
+    llvm::cl::desc("Skip adaptive refinement above this size (zero disables)"),
+    llvm::cl::cat(BootstrapCategory));
+llvm::cl::opt<unsigned> MaxAndersenWork(
+    "max-andersen-work", llvm::cl::init(4 * 1024 * 1024),
+    llvm::cl::desc("Adaptive partition x hierarchy work budget"),
+    llvm::cl::cat(BootstrapCategory));
+llvm::cl::opt<bool> ParallelClusters(
+    "parallel-clusters", llvm::cl::init(true),
+    llvm::cl::desc("Evaluate independent query clusters in parallel"),
+    llvm::cl::cat(BootstrapCategory));
+llvm::cl::opt<bool>
+    PrecomputeClusters("precompute-clusters", llvm::cl::init(false),
+                       llvm::cl::desc("Eagerly construct all cluster solvers"),
+                       llvm::cl::cat(BootstrapCategory));
+llvm::cl::opt<unsigned> Threads(
+    "threads", llvm::cl::init(0),
+    llvm::cl::desc("Cluster worker count (zero uses hardware concurrency)"),
+    llvm::cl::cat(BootstrapCategory));
 llvm::cl::opt<unsigned>
     ContextLimit("max-contexts", llvm::cl::init(4096),
                  llvm::cl::desc("Maximum summary contexts per cluster"),
@@ -68,9 +92,16 @@ int main(int argc, char **argv) {
   try {
     lotus::bootstrap::Options options;
     options.andersen_threshold = Threshold;
+    options.adaptive_andersen_threshold = AdaptiveThreshold;
+    options.max_andersen_partition_size = MaxAndersenPartition;
+    options.max_andersen_work = MaxAndersenWork;
+    options.parallel_clusters = ParallelClusters;
+    options.parallelism = Threads;
     options.max_contexts = ContextLimit;
     options.max_steps = StepLimit;
     lotus::bootstrap::BootstrapAA analysis(*module, entry, options);
+    if (PrecomputeClusters || AllContexts)
+      analysis.precomputeAll();
     bool limited = false;
     for (const llvm::Function &function : *module) {
       if (!AllContexts && &function != entry)
@@ -117,12 +148,22 @@ int main(int argc, char **argv) {
                  << " hierarchy-depth=" << stats.hierarchy_max_depth
                  << " cyclic-components=" << stats.hierarchy_cyclic_components
                  << " andersen-runs=" << stats.andersen_runs
+                 << " adaptive-skips=" << stats.adaptive_refinement_skips
+                 << " adaptive-rejections="
+                 << stats.adaptive_refinement_rejections
+                 << " adaptive-cost-skips=" << stats.adaptive_cost_skips
+                 << " effective-threshold="
+                 << stats.effective_andersen_threshold
                  << " clusters=" << stats.clusters
                  << " largest-cluster=" << stats.largest_cluster
                  << " cover-memberships=" << stats.cover_memberships
                  << " overlapping-values=" << stats.overlapping_values
                  << " max-cover-memberships=" << stats.maximum_cover_memberships
                  << " evaluated-clusters=" << stats.evaluated_clusters
+                 << " parallel-tasks=" << stats.parallel_cluster_tasks
+                 << " call-graph-sccs=" << stats.call_graph_sccs
+                 << " recursive-sccs=" << stats.recursive_call_graph_sccs
+                 << " scc-reschedules=" << stats.scc_reschedules
                  << " contexts=" << stats.contexts
                  << " context-cache-hits=" << stats.context_cache_hits
                  << " context-cache-misses=" << stats.context_cache_misses
