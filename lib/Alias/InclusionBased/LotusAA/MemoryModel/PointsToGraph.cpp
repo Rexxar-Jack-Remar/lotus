@@ -941,6 +941,7 @@ void PTGraph::buildControlDependenceInfo() {
 
   control_dep_cache_.clear();
   unit_region_cache_.clear();
+  visited.clear();
 
   if (lotus_aa) {
     if (gsa::ControlDependenceAnalysis *cda =
@@ -1123,6 +1124,10 @@ path_cond_t PTGraph::getUnitRegion(BasicBlock *BB) {
   if (cache_it != unit_region_cache_.end())
     return cache_it->second;
 
+  // Control dependence can be cyclic
+  if (!visited.insert(BB).second)
+    return getEmptyCond();
+
   path_cond_t result = getEmptyCond();
   auto dep_it = control_dep_cache_.find(BB);
   if (dep_it != control_dep_cache_.end()) {
@@ -1135,6 +1140,7 @@ path_cond_t PTGraph::getUnitRegion(BasicBlock *BB) {
     }
   }
 
+  visited.erase(BB);
   unit_region_cache_[BB] = result;
   return result;
 }

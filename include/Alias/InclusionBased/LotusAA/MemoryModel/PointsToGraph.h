@@ -238,6 +238,7 @@ protected:
            std::map<BasicBlock *, path_cond_t, llvm_cmp>, llvm_cmp>
       bb_region_cache;
   std::map<BasicBlock *, path_cond_t, llvm_cmp> unit_region_cache_;
+  std::set<BasicBlock *, llvm_cmp> visited;
   std::map<BasicBlock *,
            std::map<BasicBlock *, path_cond_t, llvm_cmp>, llvm_cmp>
       control_dep_cache_;
