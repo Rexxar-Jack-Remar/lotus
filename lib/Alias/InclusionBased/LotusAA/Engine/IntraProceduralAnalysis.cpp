@@ -233,7 +233,7 @@ void IntraLotusAAConfig::setParam() {
 const int IntraLotusAA::PTR_TO_ESC_OBJ = -1;
 
 IntraLotusAA::IntraLotusAA(Function *F, LotusAA *lotus_aa)
-    : PTGraph(F, lotus_aa), func_obj(nullptr), func_new(nullptr),
+    : PTGraph(F, lotus_aa), func_obj(nullptr),
       is_PTA_computed(false), is_CG_computed(false),
       is_considered_as_library(false), is_timeout_found(false),
       inline_ap_depth(0), pts_setting(IntraLotusAAConfig::pts_setting),
@@ -274,9 +274,6 @@ IntraLotusAA::~IntraLotusAA() {
     kv.first->deleteValue();
   }
   func_pseudo_ret_cache.clear();
-
-  if (func_new)
-    func_new->deleteValue();
 
   for (mem_value_t *vals : summary_outputs) {
     delete vals;

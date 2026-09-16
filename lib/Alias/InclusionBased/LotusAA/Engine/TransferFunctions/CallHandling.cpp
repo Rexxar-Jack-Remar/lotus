@@ -184,15 +184,6 @@ void IntraLotusAA::processCall(CallBase *call) {
       continue;
     }
 
-    auto return_alias = lotus_aa->getSpecManager().getReturnAliasInfo(callee);
-    if (!call->getType()->isPointerTy() && !return_alias.empty()) {
-      if (!func_new) {
-        func_new = new Argument(PTGraph::DEFAULT_POINTER_TYPE);
-      }
-      addPointsTo(func_new, newObject(call, MemObject::CONCRETE), 0,
-                  callee_cond);
-    }
-
     IntraLotusAA *callee_result = lotus_aa->getPtGraph(callee);
 
     if (!callee_result || callee_result->is_considered_as_library) {
