@@ -1,0 +1,4 @@
+D sink node-b cp--cp.op
+A node-b sink op--cp.op
+A node-b sink op--cp.op
+D never-seen sink op--cp.op

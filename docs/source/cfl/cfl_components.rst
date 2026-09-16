@@ -36,6 +36,19 @@ See :doc:`/cfl/classical/pearl`, :doc:`/cfl/classical/stg`, and
 walkthroughs, and exact source mappings.
 See :doc:`/cfl/classical/cat_ieoce` for the CAT and IEOCE engines.
 
+Dynamic Bidirected Dyck Reachability
+------------------------------------
+
+Exact single-language Dyck reachability under insertions and deletions of
+complementary edge pairs. The POPL 2022 C++ algorithm retains degree-based
+merging, path compression, linked worklists, and acyclic splitting. Cyclic
+deletion safely recomputes the remaining graph.
+
+**Location**: ``include/CFL/DynamicDyck/``, ``lib/CFL/DynamicDyck/``
+
+See :doc:`/cfl/dynamic_dyck` for the reusable API, artifact formats, and
+cycle-correction details.
+
 Interleaved-Dyck Core
 ---------------------
 

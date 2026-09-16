@@ -1,3 +1,7 @@
+add_lotus_targeted_test(dynamic_dyck_test DynamicDyckTest.cpp
+    LINK_LIBS CanaryDynamicDyck)
+include(${CMAKE_SOURCE_DIR}/tests/regress/CFL/DynamicDyck/Tests.cmake)
+
 add_lotus_targeted_test(interleaved_dyck_lcl_test
     InterleavedDyckLCLTest.cpp
     LINK_LIBS

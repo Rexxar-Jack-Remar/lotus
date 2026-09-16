@@ -8,5 +8,6 @@ This section covers CFL-reachability and context-free language based analyses.
 
    cfl_components
    classical/index
+   dynamic_dyck
    indexing/index
    interleaved_dyck/index

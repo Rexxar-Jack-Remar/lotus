@@ -1,0 +1,2 @@
+node-a->sink[label="op--cp.op"]
+node-b->sink[label="op--cp.op"]

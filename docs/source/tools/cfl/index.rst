@@ -17,7 +17,7 @@ enables analysis of complex program properties using grammar-based constraints.
 ``lotus-cfl-interleaved-dyck-mcfl``, ``lotus-cfl-interleaved-dyck-staged-bounds``,
 ``lotus-cfl-interleaved-dyck-unary``, ``lotus-cfl-interleaved-dyck-spds``,
 ``lotus-cfl-interleaved-dyck-lcl``, ``lotus-cfl-interleaved-dyck-affine-spds``,
-``lotus-cfl-interleaved-dyck-graph-reduction``, and CSR.
+``lotus-cfl-interleaved-dyck-graph-reduction``, ``lotus-cfl-dynamic-dyck``, and CSR.
 
 Classical CFL solving and clients
 ---------------------------------
@@ -76,6 +76,28 @@ through their C++ APIs and unit tests rather than dedicated executables.
 See :doc:`/cfl/classical/classical`, :doc:`/cfl/classical/pearl`,
 :doc:`/cfl/classical/stg`, and :doc:`/cfl/classical/sqid` for the complete algorithm,
 option, and API descriptions.
+
+Dynamic Bidirected Dyck Reachability
+------------------------------------
+
+``lotus-cfl-dynamic-dyck`` consumes the original string-ID DOT records with
+``op--TYPE``/``cp--TYPE`` labels and an ``A``/``D`` edge update sequence. Each update
+operates on a complementary bidirected edge pair. It maintains exact
+single-language Dyck components, including cycle-safe deletion.
+
+.. code-block:: bash
+
+   cmake --build build --target lotus-cfl-dynamic-dyck
+   build/bin/lotus-cfl-dynamic-dyck --print-components initial.dot updates.seq
+   build/bin/lotus-cfl-dynamic-dyck --recompute initial.dot updates.seq
+
+The original artifact mode selectors ``0`` (recompute) and ``1`` (dynamic)
+are accepted before the two input paths. Default output preserves the original
+elapsed-seconds value and trailing space. Run the table scripts directly as
+``bash scripts/cfl/dynamic-dyck/gen_table3.sh`` or ``gen_table4.sh``; they resolve
+repository paths and accept a ``DYCK_REACH_BINARY`` override for other builds.
+See :doc:`/cfl/dynamic_dyck` for
+formats, edge-pair semantics, library usage, and deletion limitations.
 
 MCFL: Multiple Context-Free Language Reachability
 -------------------------------------------------
