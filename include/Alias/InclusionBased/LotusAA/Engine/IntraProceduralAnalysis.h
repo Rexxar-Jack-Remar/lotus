@@ -227,7 +227,6 @@ private:
 
   // Special objects
   MemObject *func_obj;
-  Argument *func_new;
   std::vector<mem_value_t *> summary_outputs;
   std::vector<std::set<Value *, llvm_cmp> *> summary_inputs;
   std::map<Value *, int, llvm_cmp> summary_inputs_idx;
