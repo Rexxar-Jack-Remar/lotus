@@ -78,6 +78,11 @@ LoadInst *IntraLotusAA::findImmediateMustAliasAnchor(LoadInst *load) {
   if (!load || !dom_tree)
     return nullptr;
 
+  // Ignore unreachable blocks. An unreachable block is dominated by
+  // every block, which can cause non-termination.
+  if (!dom_tree->isReachableFromEntry(load->getParent()))
+    return nullptr;
+
   LoadInst *best = nullptr;
   for (Instruction &instruction : instructions(*analyzed_func)) {
     auto *candidate = dyn_cast<LoadInst>(&instruction);
