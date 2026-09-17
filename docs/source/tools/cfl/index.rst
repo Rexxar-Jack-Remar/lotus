@@ -189,10 +189,10 @@ checks.
    build/bin/lotus-cfl-interleaved-dyck-staged-bounds \
      --method mutual-refinement graph.dot
 
-Useful options include ``--value-flow`` for value-flow benchmark
-preprocessing, ``--method`` to select one algorithm or the full pipeline,
-``--print-lower``/``--print-result`` for pair output, and ``-o FILE`` for file
-output. See
+Useful options include ``--analysis taint|value-flow`` to select the client
+analysis (default ``taint``), ``--method`` to select one algorithm or the
+full pipeline, ``--print-lower``/``--print-result`` for pair output, and
+``-o FILE`` for file output. See
 :doc:`/cfl/interleaved_dyck/staged_bounds` for the library API and
 algorithm details.
 

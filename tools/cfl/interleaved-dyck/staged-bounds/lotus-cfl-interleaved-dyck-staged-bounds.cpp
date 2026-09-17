@@ -24,8 +24,9 @@ struct CommandLine {
   std::string input;
   std::string output;
   approximation::Method method = approximation::Method::All;
+  approximation::BenchmarkKind analysis =
+      approximation::BenchmarkKind::Taint;
   unsigned parity_groups = 2;
-  bool value_flow = false;
   bool factorized_tracing = false;
   PrintedPairs printed_pairs = PrintedPairs::None;
 };
@@ -34,22 +35,49 @@ void usage(std::ostream &output) {
   output << "usage: lotus-cfl-interleaved-dyck-staged-bounds [options] "
             "<graph.dot>\n"
             "\n"
-            "Compute staged lower/upper typed interleaved-Dyck bounds.\n"
+            "Compute staged lower and upper bounds for typed interleaved-Dyck\n"
+            "reachability on a single DOT graph. Edges use op--N / cp--N for\n"
+            "parentheses, ob--N / cb--N for brackets, and normal for neutral\n"
+            "value-flow edges.\n"
             "\n"
             "options:\n"
-            "  --value-flow       use value-flow benchmark preprocessing\n"
-            "  --method NAME      regularization, intersection, "
-            "underapproximation,\n"
-            "                     mutual-refinement, stronger-grammar, "
-            "on-demand,\n"
-            "                     or all (default: all)\n"
-            "  --parity-groups N  parity groups, 1-4 (default: 2)\n"
+            "  --analysis NAME    client analysis: taint (default) or "
+            "value-flow.\n"
+            "                     taint uses the general regularization "
+            "automaton\n"
+            "                     derived from the bracket labels in each "
+            "graph\n"
+            "                     component. value-flow drops vertices "
+            "outside\n"
+            "                     bracket source-to-sink paths and applies "
+            "the\n"
+            "                     value-flow product transformation.\n"
+            "  --method NAME      last stage to run: regularization, "
+            "intersection,\n"
+            "                     underapproximation, mutual-refinement,\n"
+            "                     stronger-grammar, on-demand, or all "
+            "(default:\n"
+            "                     all). Stages run in the listed order.\n"
+            "  --parity-groups N  parity groups for the stronger grammar, 1-4\n"
+            "                     (default: 2). Larger values tighten the "
+            "upper\n"
+            "                     bound but grow the grammar to 4 * 2^N "
+            "states\n"
+            "                     per projection.\n"
             "  --factorized-tracing\n"
-            "                     reconstruct provenance from CFL closure\n"
+            "                     reconstruct provenance from the CFL closure\n"
+            "                     instead of recording derivations eagerly;\n"
+            "                     trades time for lower memory.\n"
             "  --print-lower      print certified lower-bound pairs\n"
             "  --print-result     print pairs produced by the selected method\n"
             "  -o FILE            write output to FILE\n"
-            "  -h, --help         show this help\n";
+            "  -h, --help         show this help\n"
+            "\n"
+            "A pair in the underapproximation is definitely reachable. A "
+            "pair\n"
+            "absent from the final upper bound is definitely unreachable. A\n"
+            "pair inside the final upper bound but outside the lower bound\n"
+            "remains unresolved.\n";
 }
 
 approximation::Method parseMethod(std::string_view text) {
@@ -77,6 +105,16 @@ approximation::Method parseMethod(std::string_view text) {
   throw std::invalid_argument("unknown method: " + std::string(text));
 }
 
+approximation::BenchmarkKind parseAnalysis(std::string_view text) {
+  if (text == "taint") {
+    return approximation::BenchmarkKind::Taint;
+  }
+  if (text == "value-flow") {
+    return approximation::BenchmarkKind::ValueFlow;
+  }
+  throw std::invalid_argument("unknown analysis: " + std::string(text));
+}
+
 unsigned parseUnsigned(std::string_view text, std::string_view option) {
   unsigned value = 0;
   const auto parsed =
@@ -96,8 +134,11 @@ CommandLine parseCommandLine(int argc, char **argv) {
       usage(std::cout);
       std::exit(0);
     }
-    if (argument == "--value-flow") {
-      result.value_flow = true;
+    if (argument == "--analysis") {
+      if (++i == argc) {
+        throw std::invalid_argument("missing value for --analysis");
+      }
+      result.analysis = parseAnalysis(argv[i]);
       continue;
     }
     if (argument == "--method") {
@@ -233,11 +274,8 @@ int main(int argc, char **argv) {
     options.factorized_tracing = command_line.factorized_tracing;
     const auto start = std::chrono::steady_clock::now();
     const approximation::ApproximationResult result =
-        approximation::Solver{}.analyze(
-            graph,
-            command_line.value_flow ? approximation::BenchmarkKind::ValueFlow
-                                    : approximation::BenchmarkKind::Taint,
-            options);
+        approximation::Solver{}.analyze(graph, command_line.analysis,
+                                        options);
     const auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
         std::chrono::steady_clock::now() - start);
 

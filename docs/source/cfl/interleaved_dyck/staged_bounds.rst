@@ -193,8 +193,9 @@ refinement:
 
 The CLI exposes ``--method NAME`` for selecting ``regularization``,
 ``intersection``, ``underapproximation``, ``mutual-refinement``,
-``stronger-grammar``, ``on-demand``, or ``all``. It also supports
-``--value-flow``, ``--parity-groups N``, ``--factorized-tracing``,
+``stronger-grammar``, ``on-demand``, or ``all``. ``--analysis NAME`` selects
+the client analysis: ``taint`` (default) or ``value-flow``. It also supports
+``--parity-groups N``, ``--factorized-tracing``,
 ``--print-lower``, and ``--print-result``. It preserves the directed input
 arcs exactly as parsed.
 

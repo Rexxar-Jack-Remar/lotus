@@ -4,8 +4,8 @@
 #include "llvm/IR/Instruction.h"
 
 #include "Dataflow/APA/APA.h"
-#include "Dataflow/APA/Domains/AffineTransfer.h"
 #include "Dataflow/APA/Domains/AffineRelationDomain.h"
+#include "Dataflow/APA/Domains/AffineTransfer.h"
 #include "Dataflow/APA/LLVM/ForwardProblem.h"
 
 namespace elimination {
