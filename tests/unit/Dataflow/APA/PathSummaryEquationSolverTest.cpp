@@ -1,4 +1,4 @@
-#include "Dataflow/APA/Solver/PathSummaryEquationSolver.h"
+#include "Dataflow/APA/Solver/Equations/Solver.h"
 
 #include <set>
 #include <string>
@@ -161,6 +161,74 @@ TEST(PathSummaryEquationSolver, ForwardPathDirectionComposesAfterSource) {
   EXPECT_TRUE(containsWord(Result, "entry", "s"));
   EXPECT_TRUE(containsWord(Result, "mid", "sa"));
   EXPECT_TRUE(containsWord(Result, "exit", "sab"));
+}
+
+TEST(PathSummaryEquationSolver,
+     OnlinePoliciesPreserveBothCompositionDirections) {
+  for (auto Direction :
+       {elimination::PathSummaryEquationDirection::ForwardPath,
+        elimination::PathSummaryEquationDirection::DependencyPrefix}) {
+    Graph G;
+    auto &E = G.exprs();
+    G.addNode("A", E.atom("a"));
+    G.addNode("B", E.atom("b"));
+    G.addNode("C", E.atom("c"));
+    G.addEdge("A", "B", E.atom("x"));
+    G.addEdge("B", "A", E.atom("y"));
+    G.addEdge("B", "C", E.atom("z"));
+    elimination::PathSummaryEquationOptions Opts;
+    Opts.Direction = Direction;
+    elimination::PathSummaryEquationSolver<std::string, std::string> Baseline(
+        G, Opts);
+    auto Reference = Baseline.solve();
+    for (auto Policy : {elimination::OrderingPolicy::Structural,
+                        elimination::OrderingPolicy::ExpressionAware,
+                        elimination::OrderingPolicy::StarRisk,
+                        elimination::OrderingPolicy::Hybrid,
+                        elimination::OrderingPolicy::ReversePostOrder,
+                        elimination::OrderingPolicy::Random,
+                        elimination::OrderingPolicy::MinDegree}) {
+      Opts.Ordering = Policy;
+      Opts.Order.RecordTrace = true;
+      elimination::PathSummaryEquationSolver<std::string, std::string> Solver(
+          G, Opts);
+      const auto Result = Solver.solve();
+      for (const auto &Key : {"A", "B", "C"}) {
+        ASSERT_NE(Result.lookup(Key), nullptr);
+        EXPECT_EQ(evalLanguage(*Result.lookup(Key), 6, 6),
+                  evalLanguage(*Reference.lookup(Key), 6, 6))
+            << Key;
+      }
+      EXPECT_EQ(Result.diagnostics().ordering.trace.size(), 2u);
+    }
+  }
+}
+
+TEST(PathSummaryEquationSolver, AggregatesRegionsAndKeepsGraphNodeIdentifiers) {
+  Graph G;
+  auto &E = G.exprs();
+  G.addNode("A", E.one());
+  G.addNode("B");
+  G.addNode("C");
+  G.addEdge("A", "A", E.atom("a"));
+  G.addEdge("A", "B", E.atom("b"));
+  G.addEdge("B", "C", E.atom("c"));
+  G.addEdge("C", "B", E.atom("d"));
+  elimination::PathSummaryEquationOptions Opts;
+  Opts.Direction = elimination::PathSummaryEquationDirection::ForwardPath;
+  Opts.Ordering = elimination::OrderingPolicy::Hybrid;
+  Opts.Order.RecordTrace = true;
+  elimination::PathSummaryEquationSolver<std::string, std::string> Solver(G,
+                                                                          Opts);
+  const auto R = Solver.solve();
+  const auto &D = R.diagnostics().ordering;
+  EXPECT_EQ(D.regions, 2u);
+  ASSERT_EQ(D.trace.size(), 3u);
+  std::set<std::size_t> Seen;
+  for (const auto &Step : D.trace)
+    Seen.insert(Step.node);
+  EXPECT_EQ(Seen, (std::set<std::size_t>{0, 1, 2}));
+  EXPECT_NE(D.trace.front().region, D.trace.back().region);
 }
 
 // Large cyclic SCC (> kDenseCyclicThreshold) forces the sparse min-fill

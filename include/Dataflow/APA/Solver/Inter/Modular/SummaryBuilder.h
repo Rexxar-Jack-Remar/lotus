@@ -5,9 +5,9 @@
 #include "Dataflow/APA/EAN/DagStats.h"
 #include "Dataflow/APA/EAN/EAN.h"
 #include "Dataflow/APA/EAN/Greedy.h"
-#include "Dataflow/APA/Solver/CallGraphSCC.h"
-#include "Dataflow/APA/Solver/InterSummaryTransfer.h"
-#include "Dataflow/APA/Solver/PathSummaryEquationSolver.h"
+#include "Dataflow/APA/Solver/Inter/CallGraph.h"
+#include "Dataflow/APA/Solver/Inter/Transfer.h"
+#include "Dataflow/APA/Solver/Equations/Solver.h"
 #include "Dataflow/ControlFlow/FlowDirection.h"
 
 #include <chrono>
@@ -74,6 +74,7 @@ public:
     std::size_t cyclicSccCount = 0;
     std::size_t genTimeUs = 0;  // build + solve every per-procedure equation graph
     std::size_t normTimeUs = 0; // per-procedure EAN/Greedy optimization (0 if off)
+    OrderingDiagnostics ordering;
   };
 
   ModularInterSummaryBuilder(ProblemTy &Problem, const i_t &ICF,
@@ -154,7 +155,10 @@ private:
       }
     }
 
-    PathSummaryEquationOptions Opts;
+    auto Opts = Options;
+    if (!Opts.Order.IsStarResultCached) {
+      Opts.Order.IsStarResultCached = [](const void *) { return false; };
+    }
     Opts.Direction = PathSummaryEquationDirection::ForwardPath;
     const auto GenStart = std::chrono::steady_clock::now();
     PathSummaryEquationSolver<n_t, atom_t> Solver(Graph, Opts);
@@ -169,6 +173,7 @@ private:
     Out.equationEdgeCount += Diag.edge_count;
     Out.sccCount += Diag.scc_count;
     Out.cyclicSccCount += Diag.cyclic_scc_count;
+    Out.ordering.append(Diag.ordering);
 
     for (const auto &KV : Solved.summaries()) {
       S.perNode.emplace(KV.first, KV.second);

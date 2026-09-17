@@ -1,5 +1,41 @@
 #include "InterAffineEqualitiesTestSupport.h"
 
+TEST(InterAffineEqualities, OnlineOrderingOptionsReachModuleProcedureSolver) {
+  llvm::LLVMContext Context;
+  auto M = parseModule(Context, R"(
+    define i32 @helper(i32 %x) {
+    entry:
+      %y = add i32 %x, 2
+      ret i32 %y
+    }
+    define i32 @main(i32 %a) {
+    entry:
+      %b = add i32 %a, 1
+      %r = call i32 @helper(i32 %b)
+      ret i32 %r
+    }
+  )");
+  ASSERT_NE(M, nullptr);
+  const auto Reference = elimination::runInterElimAffineEqualities(*M);
+  for (auto Policy : {elimination::OrderingPolicy::Structural,
+                      elimination::OrderingPolicy::ExpressionAware,
+                      elimination::OrderingPolicy::StarRisk, elimination::OrderingPolicy::Hybrid}) {
+    elimination::InterAffineEqualitiesOptions Opts;
+    Opts.ordering = Policy;
+    Opts.order.RecordTrace = true;
+    const auto R = elimination::runInterElimAffineEqualities(*M, Opts);
+    ASSERT_EQ(R.status, elimination::SolveStatus::Ok);
+    ASSERT_EQ(R.summaries.size(), Reference.summaries.size());
+    for (const auto &Summary : Reference.summaries) {
+      ASSERT_TRUE(R.summaries.count(Summary.first));
+      EXPECT_TRUE(elimination::AffineRelationDomain::equal(R.summaries.at(Summary.first),
+                                                          Summary.second));
+    }
+    EXPECT_GT(R.diagnostics.ordering.selected_nodes, 0u);
+    EXPECT_FALSE(R.diagnostics.ordering.trace.empty());
+  }
+}
+
 TEST(InterAffineEqualities, TransferSymbolicRelationsAcrossCall) {
   llvm::LLVMContext ctx;
   auto module = parseModule(ctx, R"(

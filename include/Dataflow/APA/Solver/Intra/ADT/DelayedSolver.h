@@ -1,7 +1,7 @@
 #ifndef DATAFLOW_APA_ENGINES_ADTDELAYEDSOLVER_H_
 #define DATAFLOW_APA_ENGINES_ADTDELAYEDSOLVER_H_
 
-#include "Dataflow/APA/Solver/SolverContext.h"
+#include "Dataflow/APA/Solver/Intra/Context.h"
 
 namespace elimination {
 namespace detail {
@@ -21,11 +21,11 @@ bool computeADTDelayedPathExpr(
         typename IntraEliminationSolverContext<AnalysisTypesT>::ADTNode *>
         &LeafOf) {
   if (!W) {
-    return Ctx.rejectADT(ADTRejectionReason::ADTConstructionFailed);
+    return Ctx.Structure.Reducible.rejectADT(ADTRejectionReason::ADTConstructionFailed);
   }
   if (W->Leaf) {
     W->UFExpr = Ctx.Exprs.one();
-    if (!W->Parent && Ctx.hasSelfLoop(R, W->FlowNode)) {
+    if (!W->Parent && Ctx.Structure.hasSelfLoop(R, W->FlowNode)) {
       W->UFExpr = Ctx.Exprs.star(
           Ctx.Exprs.atom(R.edgeTransfer(W->FlowNode, W->FlowNode)));
     }
@@ -55,27 +55,27 @@ bool computeADTDelayedPathExpr(
   for (const auto &E : W->F) {
     auto It = LeafOf.find(E.Src);
     if (It == LeafOf.end()) {
-      return Ctx.rejectADT(ADTRejectionReason::MissingADTLeaf);
+      return Ctx.Structure.Reducible.rejectADT(ADTRejectionReason::MissingADTLeaf);
     }
     if (E.Dst != R2) {
-      return Ctx.rejectADT(
+      return Ctx.Structure.Reducible.rejectADT(
           ADTRejectionReason::ForwardEdgeMissesIntervalEntry);
     }
     auto Edge = Ctx.Exprs.atom(R.edgeTransfer(E.Src, E.Dst));
-    X = Ctx.Exprs.unite(X, Ctx.Exprs.concat(Ctx.evalUF(It->second), Edge));
+    X = Ctx.Exprs.unite(X, Ctx.Exprs.concat(Ctx.Structure.evalUF(It->second), Edge));
   }
 
   auto Y = Ctx.Exprs.zero();
   for (const auto &E : W->B) {
     auto It = LeafOf.find(E.Src);
     if (It == LeafOf.end()) {
-      return Ctx.rejectADT(ADTRejectionReason::MissingADTLeaf);
+      return Ctx.Structure.Reducible.rejectADT(ADTRejectionReason::MissingADTLeaf);
     }
     if (E.Dst != R1) {
-      return Ctx.rejectADT(ADTRejectionReason::BackEdgeMissesIntervalEntry);
+      return Ctx.Structure.Reducible.rejectADT(ADTRejectionReason::BackEdgeMissesIntervalEntry);
     }
     auto Edge = Ctx.Exprs.atom(R.edgeTransfer(E.Src, E.Dst));
-    Y = Ctx.Exprs.unite(Y, Ctx.Exprs.concat(Ctx.evalUF(It->second), Edge));
+    Y = Ctx.Exprs.unite(Y, Ctx.Exprs.concat(Ctx.Structure.evalUF(It->second), Edge));
   }
 
   auto L = Ctx.Exprs.star(Ctx.Exprs.concat(X, Y));
@@ -85,14 +85,14 @@ bool computeADTDelayedPathExpr(
   // delayed representation stores only interval-entry to child-entry summaries.
   if (W->Left->Leaf) {
     const auto U = W->Left->FlowNode;
-    if (Ctx.hasSelfLoop(R, U)) {
+    if (Ctx.Structure.hasSelfLoop(R, U)) {
       L = Ctx.Exprs.concat(
           L, Ctx.Exprs.star(Ctx.Exprs.atom(R.edgeTransfer(U, U))));
     }
   }
   if (W->Right->Leaf) {
     const auto U = W->Right->FlowNode;
-    if (Ctx.hasSelfLoop(R, U)) {
+    if (Ctx.Structure.hasSelfLoop(R, U)) {
       RPref = Ctx.Exprs.concat(
           RPref, Ctx.Exprs.star(Ctx.Exprs.atom(R.edgeTransfer(U, U))));
     }
@@ -100,8 +100,8 @@ bool computeADTDelayedPathExpr(
 
   // Record the prefixes structurally. evalUF() later composes these links with
   // path compression when a concrete leaf result is requested.
-  Ctx.linkUpdate(W, W->Left, L);
-  Ctx.linkUpdate(W, W->Right, RPref);
+  Ctx.Structure.linkUpdate(W, W->Left, L);
+  Ctx.Structure.linkUpdate(W, W->Right, RPref);
   return true;
 }
 
@@ -117,12 +117,12 @@ bool solveADTDelayedWith(IntraEliminationSolverContext<AnalysisTypesT> &Ctx,
   std::unordered_map<n_t, int> TopoPos;
   std::vector<ADTNode *> LeafByPos;
   typename Context::LCATable Lca;
-  if (!Ctx.prepareADT(R, Root, LeafOf, TopoPos, LeafByPos, Lca)) {
+  if (!Ctx.Structure.prepareADT(R, Root, LeafOf, TopoPos, LeafByPos, Lca)) {
     return false;
   }
 
   // The root starts as its own representative with the empty-prefix identity.
-  Ctx.initUF(Root);
+  Ctx.Structure.initUF(Root);
   Root->UFParent = Root;
   Root->UFExpr = Ctx.Exprs.one();
 
@@ -138,10 +138,10 @@ bool solveADTDelayedWith(IntraEliminationSolverContext<AnalysisTypesT> &Ctx,
       continue;
     }
     auto *Leaf = It->second;
-    auto E = Ctx.evalUF(Leaf);
+    auto E = Ctx.Structure.evalUF(Leaf);
     Ctx.Results.ExprTo(N) = E;
-    if (!Ctx.Opts.EnableEAN) {
-      Ctx.Results.IN(N) = Ctx.eval(E, Init);
+    if (!Ctx.Opts.EnableEAN && !Ctx.Opts.EnableGreedy && !Ctx.Opts.InterpMemo) {
+      Ctx.Results.IN(N) = Ctx.Interpreter.eval(E, Init);
     }
   }
   return true;
@@ -162,7 +162,7 @@ bool solveADTDelayed(IntraEliminationSolverContext<AnalysisTypesT> &Ctx) {
   }
 
   typename Context::ComputedReducibleView View;
-  if (!Ctx.buildComputedReducibleView(View)) {
+  if (!Ctx.Structure.Reducible.buildComputedReducibleView(View)) {
     return false;
   }
   return solveADTDelayedWith(Ctx, View);

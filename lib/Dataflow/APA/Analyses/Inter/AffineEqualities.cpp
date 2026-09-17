@@ -6,7 +6,7 @@
 
 #include "Dataflow/APA/Domains/AffineTransfer.h"
 #include "Dataflow/APA/LLVM/InterProblem.h"
-#include "Dataflow/APA/Solver/InterSolver.h"
+#include "Dataflow/APA/Solver/Inter/ContextSolver.h"
 
 #include <algorithm>
 #include <unordered_set>
@@ -338,13 +338,21 @@ InterAffineEqualitiesResult runInterElimAffineEqualities(llvm::Module &M,
   if (options.verbose)
     llvm::errs() << "[inter-affine] tracked-values=" << Problem.vocabularySize()
                  << "\n";
-  Solver SolverInstance(Problem);
+  EliminationOptions ProcedureOptions;
+  ProcedureOptions.Method = EliminationMethod::ADTSimple;
+  if (options.ordering != OrderingPolicy::Default) {
+    ProcedureOptions.Method = EliminationMethod::StateElimination;
+  }
+  ProcedureOptions.Ordering = options.ordering;
+  ProcedureOptions.Order = options.order;
+  Solver SolverInstance(Problem, ProcedureOptions);
 
   InterAffineEqualitiesResult Out;
   Out.vocabulary = *D::getVocabulary();
   Out.trackedValues = Problem.vocabularySize();
   auto Status = SolverInstance.solve();
   Out.status = Status;
+  Out.diagnostics = SolverInstance.getDiagnostics();
 
   const ResultT *Result = SolverInstance.getResults();
   if (Result == nullptr)

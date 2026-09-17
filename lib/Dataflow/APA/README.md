@@ -45,6 +45,24 @@ include/Dataflow/APA/
 The current layout is the supported public header structure; there are no
 compatibility aliases for an older pre-reorg layout.
 
+The solver tree is grouped by responsibility, with no catch-all `Detail` directory:
+
+```text
+Solver/
+├── Intra/          # IntraSolver, run state, post-processing, ADT components
+├── Inter/          # Context-cached and expanded-ICFG solvers; Modular/ components
+├── Equations/      # Equation graph, options, results, and SCC scheduling
+├── Elimination/    # Shared dense/sparse kernels and reachable-DAG metrics
+├── Interpretation/ # Input-sensitive interpretation and semantic memoization
+├── Graph/          # Generic SCC algorithm
+└── Ordering/
+    ├── Policies/   # Structural, ExpressionAware, StarRisk, Hybrid; Baselines
+    ├── Policy.h    # Policy registration, requirements, and validation
+    ├── Signals.h   # Read-only local cost signals and cached metadata lookup
+    ├── Selector.h  # Dirty candidates and versioned heap; no policy formulas
+    └── StructuralModel.h # Legacy graph-only ordering simulation
+```
+
 The public and implementation trees are intentionally not exact mirrors.
 `include/Dataflow/APA/` also contains template implementations that must remain
 visible to clients, while `lib/Dataflow/APA/` contains only separately compiled
@@ -54,15 +72,15 @@ non-template implementations.
 
 - Framework umbrella: `#include "Dataflow/APA/APA.h"`
 - Minimal intraprocedural surface: `Core/Problem.h`, `Core/Result.h`,
-  `Solver/Solver.h`, `LLVM/ForwardProblem.h`
+  `Solver/Intra/IntraSolver.h`, `LLVM/ForwardProblem.h`
 - Minimal interprocedural surface: `Core/InterProblem.h`, `Core/InterResult.h`,
-  `Solver/InterSolver.h`
+  `Solver/Inter/ContextSolver.h`
 - Abstract domains: `Domains/*.h`
 - LLVM clients: `Analyses/Intra/*.h` and `Analyses/Inter/*.h`
 - Passes: `#include "Dataflow/APA/Passes/EliminationPasses.h"`
-- Internal engine headers: `Solver/SolverContext.h` and the concrete
+- Internal engine headers: `Solver/Intra/Context.h` and the concrete
   `*Solver.h` files are solver internals; downstream clients should normally
-  include only `Solver/Solver.h` or `Solver/InterSolver.h`.
+  include only `Solver/Intra/IntraSolver.h` or `Solver/Inter/ContextSolver.h`.
 
 ## References
 
@@ -175,6 +193,100 @@ LLVM instruction.
 
 ## Solver methods
 
+### Order-aware state elimination
+
+`EliminationOptions::Ordering` supports the draft's `Structural`,
+`ExpressionAware`, `StarRisk`, and `Hybrid` policies, plus `ReversePostOrder`,
+seeded `Random`, `MinDegree`, `MinFill`, and `Explicit` baselines.
+The historical `Default` and `CostAware` policies remain available unchanged.
+
+The new policies use the shared `Solver/Elimination/SparseSolver.h` engine. It removes
+each pivot from the live graph and back-substitutes its recorded equation to
+recover entry-to-node summaries at **every** program point. Online ordering requires
+`StateElimination`; incompatible ADT/ordering requests are rejected rather than
+silently changing engines. `PathSummaryEquationOptions`
+exposes the same `Ordering` and `Order` settings for both equation directions,
+the whole-program forward-summary solver, and the modular per-procedure builder.
+The separate interprocedural affine module driver exposes equivalent `ordering`
+and `order` fields in `InterAffineEqualitiesOptions`, forwarding them to its
+per-procedure solver without changing its historical ADT default.
+
+Policy scores follow the draft:
+
+- Structural: `|P| * |Q|`, excluding the pivot itself.
+- Expression-aware: sum of `size(in) + size(self) + size(out) + 2` over bypasses;
+  a zero/identity self-summary contributes zero.
+- Star-risk: capped normalized structural cost plus iteration exposure.
+- Hybrid: equal-weight capped normalized structural, expression, and iteration costs.
+
+Reachable-node counts are cached beside immutable DAG roots, with a configurable
+size cap. Construction warms the cache before scoring; scoring never traverses
+the DAG. Iteration exposure is zero for trivial self-summaries or a pre-memoized
+semantic star, otherwise the cached self-summary size. A syntactic hash-consed
+Star is **not** evidence that semantic iteration has been memoized. Clients may
+supply an immutable `Order.IsStarResultCached` snapshot keyed by the **operand**
+expression pointer. No callback means an ordinary uncached interpretation:
+Star-risk still uses iteration exposure, and Hybrid still uses all three signals.
+Strategies never silently degrade to Structural or omit requested terms. DAG sizes
+are always prepared for policies that require them; missing prepared metadata is
+an error. There are no signal-disabling/fallback flags.
+
+`Solver/Ordering/Selector.h` maintains dirty candidates and a versioned min-heap.
+Only pivot predecessors/successors are refreshed after each elimination. Ties
+use a stable reverse-postorder rank, then the input node index. Periodic heap
+compaction bounds obsolete entries. `Order.Incremental=false` enables full
+rescoring for differential validation and ablation.
+
+Example:
+
+```sh
+build/bin/lotus-dfa-apa input.bc --analysis=inter_reachable \
+  --ordering=hybrid --measure-peak --order-trace --stdout
+```
+
+The CLI uses `--inter-engine=context|expanded|modular` (default: `context`).
+The context solver builds expressions once per procedure/call-string pair and
+reinterprets them with a fresh input-sensitive memo whenever call/return facts
+change. Diagnostics expose pair/build/reuse counts and per-pair node/trace mappings.
+`expanded` retains the global instruction/context equation graph; `modular` is
+the functional/context-insensitive alternative, currently exposed for reachability.
+Other controls are `--order-{struct,expr,star}-cap`, `--order-size-cap`
+(0 means exact), `--order-full-rescore`, and `--order-seed`. Explicit permutations use
+`--ordering=explicit --order-explicit=0,1,...`; indices are local to the
+intraprocedural graph or each cyclic equation SCC, and must be complete and unique.
+Invalid normalization caps and permutations are rejected.
+
+For **order-only performance comparisons**, enable `--order-sparse` for every
+configuration, including Default/CostAware, so all use the same sparse engine.
+The sparse intraprocedural Default retains the historical pivot permutation;
+the sparse equation Default uses ascending local SCC indices. Do not attribute
+differences against the legacy full-matrix engine solely to ordering.
+
+Diagnostics include initial construction, elimination and back-substitution
+allocations, bypass counts, peak reachable live-summary DAG nodes/child edges,
+metadata/scoring/heap times, candidate refreshes, and opt-in per-step traces.
+Live-summary measurements include transient fill, recorded equations and completed
+query summaries, but exclude factory-only roots; they are **not physical RSS**.
+Separate `peak_active_*` metrics restrict roots to the current live graph.
+Back-substitution allocations are
+included in aggregate counts, not attributed to pivot traces. Ranking time is
+metadata time plus inclusive selector time; scoring/heap times are submetrics.
+Semantic-star time counts nested intervals only once. RSS and whole-analysis
+timings remain available in the CLI. Generic equation totals include the graph
+factory's input allocations; separate new-allocation deltas distinguish warm solves.
+
+The default normalization caps (64, 4096, 256) and DAG-size cap (1024) are
+engineering defaults, **not calibrated evaluation results**. Path languages are
+preserved under every order; fact equality additionally requires a
+language-invariant client interpretation. Non-distributive/guarded clients and
+bounded nonconvergent stars must not be assumed order-independent.
+
+`OnlineOrderTest.cpp` includes worked-score checks, randomized incremental/full
+differentials, exact bounded-language comparison against direct graph paths,
+and exhaustive four-node permutations for separate allocation/live-DAG oracles.
+These validate the mechanism; they do not replace the draft's real-program
+experiments, statistical analysis, or empirical cap calibration.
+
 Three elimination-style solvers are exposed via `elimination::EliminationOptions`:
 
 - `StateElimination` (default): generic **O(n³)** state-elimination over all nodes (Floyd–Warshall-style).
@@ -186,21 +298,12 @@ Three elimination-style solvers are exposed via `elimination::EliminationOptions
 - `NonConvergentStarPolicy = Fail | ReturnLast | ReturnIdentity`
 - `MaxStarIterations` (0 means use `Problem.maxStarIterations()`).
 
-The public facade `Solver/Solver.h` dispatches to one of three engine headers
-in `include/Dataflow/APA/Solver/`:
-
-- `SolverContext.h` (shared internals: reducible-view construction, ADT
-  building, expression evaluation)
-- `StateEliminationSolver.h`
-- `ADTSimpleSolver.h`
-- `ADTDelayedSolver.h`
-
-Roughly, the split is:
-
-- `Solver.h`: API surface and fallback policy
-- `StateEliminationSolver.h`: generic full-CFG elimination
-- `ADTSimpleSolver.h`: eager leaf-update ADT evaluation
-- `ADTDelayedSolver.h`: deferred prefix composition with union-find style links
+`Solver/Intra/IntraSolver.h` dispatches to `Intra/StateSolver.h`,
+`Intra/ADT/SimpleSolver.h`, or `Intra/ADT/DelayedSolver.h`. `Intra/Context.h`
+holds run state; `Intra/ADT/{Types,Reducibility,Decomposition}.h` owns structural
+construction; `Interpretation/FactInterpreter.h` owns interpretation, and
+`Intra/PostProcessing.h` owns EAN/Greedy integration. Equation scheduling uses
+the same shared `Elimination/{DenseClosure,SparseSolver}.h` kernels.
 
 For ADT-based methods, you can optionally implement
 `elimination::IntraReducibleEliminationProblem`
@@ -213,7 +316,7 @@ with entry first in topological order.
 
 ## Summary-equation graph solver
 
-`include/Dataflow/APA/Solver/PathSummaryEquationSolver.h` provides a generic
+`include/Dataflow/APA/Solver/Equations/Solver.h` provides a generic
 solver for left-linear path-summary equations:
 
 ```text
@@ -236,7 +339,7 @@ to an arbitrary intraprocedural analysis.
 `PathSummaryEquationSolver` also supports a forward-path mode for equations
 where a node summary is extended by outgoing transfer expressions. The forward
 interprocedural prototype in
-`include/Dataflow/APA/Solver/ForwardInterSummarySolver.h` uses that mode over
+`include/Dataflow/APA/Solver/Inter/ExpandedSolver.h` uses that mode over
 instruction/context nodes and labels interprocedural edges with
 `InterSummaryTransferAtom` values (`RawNormal`, `CallEntry`, `ReturnExit`, and
 `CallToRet`). This gives a real summary-substitution path for forward analyses:

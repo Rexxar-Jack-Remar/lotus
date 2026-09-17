@@ -2,7 +2,7 @@
 #define DATAFLOW_APA_SOLVER_MODULARINTERSUMMARYINTERPRETER_H_
 
 #include "Dataflow/APA/Core/InterResult.h"
-#include "Dataflow/APA/Solver/ModularInterSummarySolver.h"
+#include "Dataflow/APA/Solver/Inter/Modular/SummaryBuilder.h"
 
 #include <cstddef>
 #include <deque>
@@ -67,8 +67,10 @@ public:
       return evalExpr(Expr->R, Mid);
     }
     case expr_factory_t::Kind::Star: {
+      detail::ScopedNestedNanoseconds Timer(SemanticStarTimeNs, StarDepth);
       auto Cur = In;
       for (std::size_t I = 0; I < kMaxStarIterations; ++I) {
+        ++StarIterations;
         auto Next = Problem.join(In, evalExpr(Expr->L, Cur));
         if (Problem.equal(Next, Cur)) {
           return Cur;
@@ -82,6 +84,8 @@ public:
   }
 
   bool changedThisPass() const { return Changed; }
+  std::uint64_t semanticStarTimeNs() const { return SemanticStarTimeNs; }
+  std::size_t starIterations() const { return StarIterations; }
   void beginPass() {
     Changed = false;
     ++CurPass;
@@ -177,6 +181,9 @@ private:
   std::map<std::pair<f_t, n_t>, std::deque<Entry>> Tab;
   std::size_t CurPass = 0;
   bool Changed = false;
+  std::uint64_t SemanticStarTimeNs = 0;
+  std::size_t StarIterations = 0;
+  std::size_t StarDepth = 0;
 };
 
 } // namespace elimination

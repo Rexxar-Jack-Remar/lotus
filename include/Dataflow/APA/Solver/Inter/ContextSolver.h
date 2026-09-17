@@ -4,8 +4,8 @@
 #include "Dataflow/APA/Core/InterProblem.h"
 #include "Dataflow/APA/Core/InterResult.h"
 #include "Dataflow/APA/Core/Problem.h"
-#include "Dataflow/APA/Solver/InterSummaryTransfer.h"
-#include "Dataflow/APA/Solver/Solver.h"
+#include "Dataflow/APA/Solver/Inter/Interpreter.h"
+#include "Dataflow/APA/Solver/Intra/IntraSolver.h"
 #include "Dataflow/Mono/Core/CallStringContext.h"
 
 #include <deque>
@@ -60,6 +60,8 @@ public:
       : Problem(Problem), ProcedureOptions(ProcedureOptions) {}
 
   SolveStatus solve() {
+    Diagnostics = {};
+    LastStatus = SolveStatus::Ok;
     loadSeedFacts();
     const auto *ICF = Problem.getICFG();
     if (ICF == nullptr) {
@@ -75,6 +77,7 @@ public:
     LastBoundaries.clear();
     ActiveCalls.clear();
     SolvedContexts.clear();
+    SummaryCache.clear();
     std::deque<ProcedureContextKey> Worklist;
     std::set<ProcedureContextKey> InQueue;
 
@@ -116,16 +119,30 @@ public:
 
       const bool FirstSolve = SolvedContexts.insert(Key).second;
       const bool Changed = solveProcedureForContext(Key, *ICF);
+      if (LastStatus == SolveStatus::InvalidProblem ||
+          LastStatus == SolveStatus::NonConvergentStar) {
+        HaveResult = LastStatus != SolveStatus::InvalidProblem;
+        Result.setSolveStatus(LastStatus);
+        Result.setContextSolveDiagnostics(Diagnostics);
+        publishProcedureDiagnostics();
+        return LastStatus;
+      }
       if (Changed || FirstSolve)
         scheduleAdjacentProcedures(Key, *ICF, Enqueue);
     }
 
     Result.setSolveStatus(SolveStatus::Ok);
+    Diagnostics.procedure_context_count = SummaryCache.size();
+    Result.setContextSolveDiagnostics(Diagnostics);
+    publishProcedureDiagnostics();
     return LastStatus = SolveStatus::Ok;
   }
 
   const result_t *getResults() const { return HaveResult ? &Result : nullptr; }
   SolveStatus getLastStatus() const { return LastStatus; }
+  // Construction is counted once per procedure/context; interpretation and
+  // semantic iteration are accumulated over all fact-propagation epochs.
+  const SolveDiagnostics &getDiagnostics() const { return Diagnostics; }
 
 private:
   class ProcedureProblemAdapter final
@@ -204,15 +221,71 @@ private:
     LastBoundaries[Key] = EntryFact;
     ProcedureProblemAdapter Adapter(Problem, Function, Key.Ctx, Result, ICF,
                                     EntryFact);
-    IntraEliminationSolver<AnalysisTypesT> Solver(Adapter, ProcedureOptions);
-    auto Status = Solver.solve();
-    if (Status == SolveStatus::InvalidProblem) {
+    auto Cached = SummaryCache.find(Key);
+    if (Cached == SummaryCache.end()) {
+      auto BuildOptions = ProcedureOptions;
+      BuildOptions.InterpMemo =
+          true; // Build/normalize expressions, not boundary-specific facts.
+      IntraEliminationSolver<AnalysisTypesT> Builder(Adapter, BuildOptions);
+      const auto Status = Builder.solve();
+      const auto &D = Builder.getDiagnostics();
+      Diagnostics.ordering.append(D.ordering);
+      Diagnostics.gen_time_us += D.gen_time_us;
+      Diagnostics.norm_time_us += D.norm_time_us;
+      Diagnostics.peak_matrix_nodes =
+          std::max(Diagnostics.peak_matrix_nodes, D.peak_matrix_nodes);
+      if (Status == SolveStatus::InvalidProblem) {
+        LastStatus = Status;
+        return false;
+      }
+      Cached = SummaryCache
+                   .emplace(Key, CachedProcedure{Builder.getResults(),
+                                                 Adapter.nodes(),
+                                                 Adapter.entry(), D})
+                   .first;
+      ++Diagnostics.procedure_summary_builds;
+    } else {
+      ++Diagnostics.procedure_summary_reuses;
+      ++Cached->second.Diagnostics.procedure_summary_reuses;
+    }
+    Diagnostics.procedure_context_count = SummaryCache.size();
+
+    // External call/return facts are stable until all query facts have been
+    // evaluated. A fresh input-sensitive memo is used in each epoch so
+    // recursive callee updates cannot reuse stale facts from an earlier
+    // propagation pass.
+    auto InterpretOptions = ProcedureOptions;
+    InterpretOptions.MemoizeInterpretation = true;
+    bool Failed = false;
+    SolveDiagnostics Epoch;
+    detail::FactInterpreter<ProcedureProblemAdapter> Interpreter(
+        Adapter, InterpretOptions, Epoch, Failed);
+    auto ProcRes = Cached->second.Expressions;
+    const auto InterpStart = std::chrono::steady_clock::now();
+    for (auto Node : Cached->second.Nodes) {
+      ProcRes.IN(Node) = Interpreter.eval(ProcRes.ExprTo(Node), EntryFact);
+    }
+    Epoch.interp_time_us =
+        std::chrono::duration_cast<std::chrono::microseconds>(
+            std::chrono::steady_clock::now() - InterpStart)
+            .count();
+    Diagnostics.interp_time_us += Epoch.interp_time_us;
+    Diagnostics.star_iterations_total += Epoch.star_iterations_total;
+    Diagnostics.semantic_star_time_ns += Epoch.semantic_star_time_ns;
+    Diagnostics.max_star_hit |= Epoch.max_star_hit;
+    auto &PerPair = Cached->second.Diagnostics;
+    PerPair.interp_time_us += Epoch.interp_time_us;
+    PerPair.star_iterations_total += Epoch.star_iterations_total;
+    PerPair.semantic_star_time_ns += Epoch.semantic_star_time_ns;
+    PerPair.max_star_hit |= Epoch.max_star_hit;
+    PerPair.procedure_summary_builds = 1;
+    if (Failed) {
+      LastStatus = SolveStatus::NonConvergentStar;
       return false;
     }
 
     bool Changed = false;
-    const auto &ProcRes = Solver.getResults();
-    const auto Nodes = Adapter.nodes();
+    const auto &Nodes = Cached->second.Nodes;
     auto &Calls = ActiveCalls[Key];
     Calls.clear();
     for (auto Inst : Nodes) {
@@ -350,10 +423,26 @@ private:
   }
 
   ProblemTy &Problem;
+  struct CachedProcedure {
+    DataFlowResultT<n_t, fact_t, transfer_t> Expressions;
+    std::vector<n_t> Nodes;
+    n_t Boundary{};
+    SolveDiagnostics Diagnostics;
+  };
+  void publishProcedureDiagnostics() {
+    std::vector<ProcedureContextDiagnostics<K, n_t>> Records;
+    for (const auto &Pair : SummaryCache) {
+      Records.push_back({Pair.second.Boundary, Pair.first.Ctx,
+                         Pair.second.Nodes, Pair.second.Diagnostics});
+    }
+    Result.setProcedureContextDiagnostics(std::move(Records));
+  }
+  std::map<ProcedureContextKey, CachedProcedure> SummaryCache;
   EliminationOptions ProcedureOptions;
   result_t Result;
   bool HaveResult = false;
   SolveStatus LastStatus = SolveStatus::Ok;
+  SolveDiagnostics Diagnostics;
   std::unordered_map<n_t, fact_t> SeedFacts;
   std::map<ProcedureContextKey, std::set<CallLink>> IncomingCalls;
   std::map<ProcedureContextKey, fact_t> LastBoundaries;

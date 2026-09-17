@@ -4,8 +4,10 @@
 #include <cstddef>
 #include <functional>
 #include <memory>
+#include <optional>
 #include <type_traits>
 #include <unordered_map>
+#include <unordered_set>
 #include <utility>
 #include <vector>
 
@@ -30,6 +32,56 @@ public:
   };
 
   using Ref = std::shared_ptr<const Expr>;
+
+  // Dynamic allocations only: static Zero/One singleton nodes are excluded.
+  std::size_t allocationCount() const {
+    return Atoms.size() + AtomIndex.size() + Unions.size() + Concats.size() +
+           Stars.size();
+  }
+  std::size_t starAllocationCount() const { return Stars.size(); }
+
+  // Metadata lives beside immutable nodes, keyed by root and cap. Construction
+  // warms this cache; order scoring only reads it and never traverses the DAG.
+  std::optional<std::size_t>
+  cachedReachableNodeCount(const Ref &E, std::size_t Cap = 0) const {
+    auto It = Sizes.find(E.get());
+    if (It == Sizes.end()) {
+      return std::nullopt;
+    }
+    auto Count = It->second.Counts.find(Cap);
+    return Count == It->second.Counts.end()
+               ? std::nullopt
+               : std::optional<std::size_t>(Count->second);
+  }
+
+  std::size_t cacheReachableNodeCount(const Ref &E, std::size_t Cap = 0) const {
+    if (auto Count = cachedReachableNodeCount(E, Cap)) {
+      return *Count;
+    }
+    std::unordered_set<const Expr *> Seen;
+    std::vector<const Expr *> Pending;
+    if (E && !isZero(E)) {
+      Pending.push_back(E.get());
+    }
+    while (!Pending.empty() && (Cap == 0 || Seen.size() < Cap)) {
+      const auto *Node = Pending.back();
+      Pending.pop_back();
+      if (!Seen.insert(Node).second) {
+        continue;
+      }
+      if (Node->L) {
+        Pending.push_back(Node->L.get());
+      }
+      if (Node->R) {
+        Pending.push_back(Node->R.get());
+      }
+    }
+    auto &Entry = Sizes[E.get()];
+    Entry.Root =
+        E; // Prevent address reuse for roots imported from other factories.
+    Entry.Counts[Cap] = Seen.size();
+    return Seen.size();
+  }
 
   Ref zero() const {
     static const Ref Zero = std::make_shared<Expr>(Kind::Zero);
@@ -181,6 +233,11 @@ private:
   mutable std::unordered_map<BinaryKey, Ref, BinaryKeyHash> Unions;
   mutable std::unordered_map<BinaryKey, Ref, BinaryKeyHash> Concats;
   mutable std::unordered_map<const Expr *, Ref> Stars;
+  struct SizeEntry final {
+    Ref Root;
+    std::unordered_map<std::size_t, std::size_t> Counts;
+  };
+  mutable std::unordered_map<const Expr *, SizeEntry> Sizes;
 };
 
 } // namespace elimination

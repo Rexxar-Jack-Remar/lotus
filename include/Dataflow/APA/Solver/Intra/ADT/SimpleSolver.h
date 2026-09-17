@@ -1,7 +1,7 @@
 #ifndef DATAFLOW_APA_ENGINES_ADTSIMPLESOLVER_H_
 #define DATAFLOW_APA_ENGINES_ADTSIMPLESOLVER_H_
 
-#include "Dataflow/APA/Solver/SolverContext.h"
+#include "Dataflow/APA/Solver/Intra/Context.h"
 
 namespace elimination {
 namespace detail {
@@ -24,11 +24,11 @@ bool computeADTSimplePathExpr(
         typename IntraEliminationSolverContext<AnalysisTypesT>::ADTNode *>
         &LeafByPos) {
   if (!W) {
-    return Ctx.rejectADT(ADTRejectionReason::ADTConstructionFailed);
+    return Ctx.Structure.Reducible.rejectADT(ADTRejectionReason::ADTConstructionFailed);
   }
   if (W->Leaf) {
     W->SimpleExpr = Ctx.Exprs.one();
-    if (Ctx.hasSelfLoop(R, W->FlowNode)) {
+    if (Ctx.Structure.hasSelfLoop(R, W->FlowNode)) {
       W->SimpleExpr = Ctx.Exprs.star(
           Ctx.Exprs.atom(R.edgeTransfer(W->FlowNode, W->FlowNode)));
     }
@@ -59,10 +59,10 @@ bool computeADTSimplePathExpr(
   for (const auto &E : W->F) {
     auto It = LeafOf.find(E.Src);
     if (It == LeafOf.end()) {
-      return Ctx.rejectADT(ADTRejectionReason::MissingADTLeaf);
+      return Ctx.Structure.Reducible.rejectADT(ADTRejectionReason::MissingADTLeaf);
     }
     if (E.Dst != R2) {
-      return Ctx.rejectADT(
+      return Ctx.Structure.Reducible.rejectADT(
           ADTRejectionReason::ForwardEdgeMissesIntervalEntry);
     }
     auto Edge = Ctx.Exprs.atom(R.edgeTransfer(E.Src, E.Dst));
@@ -73,10 +73,10 @@ bool computeADTSimplePathExpr(
   for (const auto &E : W->B) {
     auto It = LeafOf.find(E.Src);
     if (It == LeafOf.end()) {
-      return Ctx.rejectADT(ADTRejectionReason::MissingADTLeaf);
+      return Ctx.Structure.Reducible.rejectADT(ADTRejectionReason::MissingADTLeaf);
     }
     if (E.Dst != R1) {
-      return Ctx.rejectADT(ADTRejectionReason::BackEdgeMissesIntervalEntry);
+      return Ctx.Structure.Reducible.rejectADT(ADTRejectionReason::BackEdgeMissesIntervalEntry);
     }
     auto Edge = Ctx.Exprs.atom(R.edgeTransfer(E.Src, E.Dst));
     Y = Ctx.Exprs.unite(Y, Ctx.Exprs.concat(It->second->SimpleExpr, Edge));
@@ -110,7 +110,7 @@ bool solveADTSimpleWith(IntraEliminationSolverContext<AnalysisTypesT> &Ctx,
   std::unordered_map<n_t, int> TopoPos;
   std::vector<ADTNode *> LeafByPos;
   typename Context::LCATable Lca;
-  if (!Ctx.prepareADT(R, Root, LeafOf, TopoPos, LeafByPos, Lca)) {
+  if (!Ctx.Structure.prepareADT(R, Root, LeafOf, TopoPos, LeafByPos, Lca)) {
     return false;
   }
 
@@ -129,8 +129,8 @@ bool solveADTSimpleWith(IntraEliminationSolverContext<AnalysisTypesT> &Ctx,
     }
     auto *Leaf = It->second;
     Ctx.Results.ExprTo(N) = Leaf->SimpleExpr;
-    if (!Ctx.Opts.EnableEAN) {
-      Ctx.Results.IN(N) = Ctx.eval(Leaf->SimpleExpr, Init);
+    if (!Ctx.Opts.EnableEAN && !Ctx.Opts.EnableGreedy && !Ctx.Opts.InterpMemo) {
+      Ctx.Results.IN(N) = Ctx.Interpreter.eval(Leaf->SimpleExpr, Init);
     }
   }
   return true;
@@ -151,7 +151,7 @@ bool solveADTSimple(IntraEliminationSolverContext<AnalysisTypesT> &Ctx) {
   }
 
   typename Context::ComputedReducibleView View;
-  if (!Ctx.buildComputedReducibleView(View)) {
+  if (!Ctx.Structure.Reducible.buildComputedReducibleView(View)) {
     return false;
   }
   return solveADTSimpleWith(Ctx, View);

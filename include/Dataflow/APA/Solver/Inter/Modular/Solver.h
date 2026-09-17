@@ -2,8 +2,8 @@
 #define DATAFLOW_APA_SOLVER_MODULARINTERSUMMARYDRIVER_H_
 
 #include "Dataflow/APA/Core/InterResult.h"
-#include "Dataflow/APA/Solver/ModularInterSummaryInterpreter.h"
-#include "Dataflow/APA/Solver/ModularInterSummarySolver.h"
+#include "Dataflow/APA/Solver/Inter/Modular/Interpreter.h"
+#include "Dataflow/APA/Solver/Inter/Modular/SummaryBuilder.h"
 
 #include <chrono>
 #include <cstddef>
@@ -36,7 +36,15 @@ public:
 
   result_t solve(const std::vector<f_t> &Entries, const fact_t &InitialFact) {
     builder_t Builder(Problem, ICF, Options);
-    auto Built = Builder.build(Entries);
+    typename builder_t::Result Built;
+    try {
+      Built = Builder.build(Entries);
+    } catch (const std::invalid_argument &) {
+      result_t Invalid;
+      Invalid.setMissingFactFallback(Problem.bottom());
+      Invalid.setSolveStatus(SolveStatus::InvalidProblem);
+      return Invalid;
+    }
     interp_t Interp(Problem, ICF, Built.summaries);
 
     const auto InterpStart = std::chrono::steady_clock::now();
@@ -76,7 +84,7 @@ public:
             .count());
 
     // Surface the same Table VI/VII diagnostics the whole-program summary solver
-    // reports, so `--modular-inter` prints [inter-summary]/[dagstats-*] and the
+    // reports, so `--inter-engine=modular` prints [inter-summary]/[dagstats-*] and the
     // Default<->EAN node reduction is directly observable.
     InterSummarySolveDiagnostics Diag;
     Diag.discovered_context_node_count = EmittedNodes;
@@ -88,6 +96,9 @@ public:
     Diag.gen_time_us = Built.genTimeUs;
     Diag.norm_time_us = Built.normTimeUs;
     Diag.interp_time_us = InterpUs;
+    Diag.semantic_star_time_ns = Interp.semanticStarTimeNs();
+    Diag.star_iterations_total = Interp.starIterations();
+    Diag.ordering = std::move(Built.ordering);
     Diag.summary_before = Built.summaryBefore;
     Diag.summary_after = Built.summaryAfter;
     Result.setSummarySolveDiagnostics(Diag);

@@ -28,6 +28,7 @@
 #include "Dataflow/APA/Analyses/Intra/ReachingDefinitions.h"
 #include "Dataflow/APA/Analyses/Intra/Sign.h"
 #include "Dataflow/APA/Analyses/Intra/UninitializedVariables.h"
+#include "Dataflow/APA/Solver/Ordering/Selector.h"
 #include "ToolSupport.h"
 
 #include <algorithm>
@@ -36,6 +37,7 @@
 #include <memory>
 #include <set>
 #include <sstream>
+#include <stdexcept>
 #include <string>
 #include <unordered_map>
 #include <unordered_set>
@@ -60,6 +62,8 @@
 #endif
 
 using namespace llvm;
+
+static bool HadSolveError = false;
 
 static cl::opt<std::string> InputFilename(cl::Positional, cl::desc("<bitcode>"),
                                           cl::Required);
@@ -106,8 +110,37 @@ static cl::opt<unsigned> AffineMaxTrackedOpt(
 // --- EAN / Order (evaluation) configuration ---------------------------------
 static cl::opt<std::string> OrderingOpt(
     "ordering",
-    cl::desc("Pivot order for state elimination: default|cost-aware"),
+    cl::desc("Pivot order: "
+             "default|cost-aware|structural|expr-aware|star-risk|hybrid|"
+             "rpo|random|min-degree|min-fill|explicit"),
     cl::init("default"));
+static cl::opt<double>
+    OrderStructCap("order-struct-cap", cl::init(64.0),
+                   cl::desc("Structural normalization cap (>0)"));
+static cl::opt<double>
+    OrderExprCap("order-expr-cap", cl::init(4096.0),
+                 cl::desc("Expression normalization cap (>0)"));
+static cl::opt<double>
+    OrderStarCap("order-star-cap", cl::init(256.0),
+                 cl::desc("Iteration normalization cap (>0)"));
+static cl::opt<unsigned>
+    OrderSizeCap("order-size-cap", cl::init(1024),
+                 cl::desc("Cached DAG-size cap (0 = exact)"));
+static cl::opt<bool>
+    OrderFullRescore("order-full-rescore", cl::init(false),
+                     cl::desc("Rescore all live candidates (ablation)"));
+static cl::opt<bool>
+    OrderTrace("order-trace", cl::init(false),
+               cl::desc("Emit candidate refreshes and elimination steps"));
+static cl::opt<bool>
+    OrderSparse("order-sparse", cl::init(false),
+                cl::desc("Use common sparse engine for baseline comparisons"));
+static cl::opt<unsigned long long>
+    OrderSeed("order-seed", cl::init(0),
+              cl::desc("Seed for randomized pivot order"));
+static cl::opt<std::string>
+    OrderExplicit("order-explicit", cl::init(""),
+                  cl::desc("Comma-separated local region indices"));
 static cl::opt<bool> EanOpt("ean", cl::desc("Run the EAN normalizer post-pass"),
                             cl::init(false));
 static cl::opt<bool>
@@ -160,16 +193,10 @@ static cl::opt<unsigned>
 static cl::opt<unsigned>
     WarmupOpt("warmup", cl::desc("Warmup runs per function before measuring"),
               cl::init(0));
-static cl::opt<bool> InterSummaryOpt(
-    "inter-summary",
-    cl::desc("Route interprocedural clients to the path-summary solver "
-             "(ForwardInterSummarySolver) so EAN/Greedy apply to summaries"),
-    cl::init(false));
-static cl::opt<bool> ModularInterOpt(
-    "modular-inter",
-    cl::desc("Route interprocedural reachable to the modular per-procedure "
-             "summary solver (E6, functional/context-insensitive)"),
-    cl::init(false));
+static cl::opt<std::string>
+    InterEngineOpt("inter-engine",
+                   cl::desc("Interprocedural model: context|expanded|modular"),
+                   cl::init("context"));
 static cl::opt<bool> MemoInterpOpt(
     "memo-interp",
     cl::desc("Affine client only: memoizing transformer interpreter "
@@ -226,11 +253,64 @@ std::uint64_t peakRssKb() {
 #endif
 }
 
+elimination::OrderingPolicy parseOrderingPolicy() {
+  using P = elimination::OrderingPolicy;
+  const std::pair<const char *, P> Policies[] = {
+      {"default", P::Default},
+      {"cost-aware", P::CostAware},
+      {"structural", P::Structural},
+      {"expr-aware", P::ExpressionAware},
+      {"expression-aware", P::ExpressionAware},
+      {"star-risk", P::StarRisk},
+      {"hybrid", P::Hybrid},
+      {"rpo", P::ReversePostOrder},
+      {"random", P::Random},
+      {"min-degree", P::MinDegree},
+      {"min-fill", P::MinFill},
+      {"explicit", P::Explicit}};
+  for (const auto &Entry : Policies) {
+    if (OrderingOpt == Entry.first) {
+      return Entry.second;
+    }
+  }
+  throw std::invalid_argument("unknown APA ordering policy: " + OrderingOpt);
+}
+
+elimination::OrderPolicyOptions buildOrderOpts() {
+  elimination::OrderPolicyOptions Opts;
+  Opts.StructuralCap = OrderStructCap;
+  Opts.ExpressionCap = OrderExprCap;
+  Opts.StarCap = OrderStarCap;
+  Opts.DAGSizeCap = OrderSizeCap;
+  Opts.Incremental = !OrderFullRescore;
+  Opts.RecordTrace = OrderTrace;
+  Opts.MeasureLiveNodes = MeasurePeakOpt;
+  Opts.UseSparseElimination = OrderSparse;
+  Opts.RandomSeed = OrderSeed;
+  if (!OrderExplicit.empty()) {
+    if (OrderExplicit.back() == ',') {
+      throw std::invalid_argument(
+          "APA explicit order must not end with a comma");
+    }
+    std::stringstream Input(OrderExplicit);
+    std::string Token;
+    while (std::getline(Input, Token, ',')) {
+      unsigned long long Index = 0;
+      if (Token.empty() || StringRef(Token).getAsInteger(10, Index)) {
+        throw std::invalid_argument(
+            "APA explicit order must contain unsigned indices");
+      }
+      Opts.ExplicitOrder.push_back(static_cast<std::size_t>(Index));
+    }
+  }
+  return Opts;
+}
+
 // Build EliminationOptions from the evaluation CLI flags.
 elimination::EliminationOptions buildElimOpts() {
   auto Opts = lotus::dataflow_tool::parseEliminationOptions(ElimMethodOpt);
-  if (OrderingOpt == "cost-aware")
-    Opts.Ordering = elimination::OrderingPolicy::CostAware;
+  Opts.Ordering = parseOrderingPolicy();
+  Opts.Order = buildOrderOpts();
   Opts.EnableEAN = EanOpt;
   Opts.EnableGreedy = GreedyOpt;
   Opts.EANLaws = (EanLawsOpt == "kleene")
@@ -258,6 +338,8 @@ elimination::EliminationOptions buildElimOpts() {
 // interprocedural path-summary solver from the same evaluation CLI flags.
 elimination::PathSummaryEquationOptions buildInterSummaryOpts() {
   elimination::PathSummaryEquationOptions Opts;
+  Opts.Ordering = parseOrderingPolicy();
+  Opts.Order = buildOrderOpts();
   auto &E = Opts.EAN;
   E.EnableEAN = EanOpt;
   E.EnableGreedy = GreedyOpt;
@@ -596,11 +678,61 @@ void formatPathExpr(raw_ostream &OS, const ExprRefT &Expr,
   }
 }
 
+void emitOrderingDiagnostics(raw_ostream &OS,
+                             const elimination::OrderingDiagnostics &D) {
+  if (D.regions == 0) {
+    return;
+  }
+  OS << "  [ordering] regions=" << D.regions << ", pivots=" << D.selected_nodes
+     << ", refreshes=" << D.score_refreshes
+     << ", stale=" << D.stale_heap_entries
+     << ", allocated=" << D.allocated_nodes
+     << ", initial_allocated=" << D.initial_allocated_nodes
+     << ", elimination_allocated=" << D.elimination_allocated_nodes
+     << ", backsubstitution_allocated=" << D.backsubstitution_allocated_nodes
+     << ", boundary_allocated=" << D.boundary_allocated_nodes
+     << ", star_allocated=" << D.allocated_stars << ", bypasses=" << D.bypasses
+     << ", peak_live_nodes=" << D.peak_live_nodes
+     << ", peak_live_edges=" << D.peak_live_edges
+     << ", peak_active_nodes=" << D.peak_active_nodes
+     << ", peak_active_edges=" << D.peak_active_edges
+     << ", metadata_ns=" << D.metadata_time_ns
+     << ", scoring_ns=" << D.scoring_time_ns << ", heap_ns=" << D.heap_time_ns
+     << ", ranking_ns=" << D.metadata_time_ns + D.selection_time_ns << "\n";
+  for (const auto &S : D.score_updates) {
+    OS << "  [order-score] region=" << S.region << ", step=" << S.step
+       << ", node=" << S.node << ", version=" << S.version
+       << ", structural=" << S.signals.structural
+       << ", expression=" << S.signals.expression << ", star=" << S.signals.star
+       << ", score=" << S.score << "\n";
+  }
+  for (const auto &S : D.trace) {
+    OS << "  [order-step] region=" << S.region << ", step=" << S.step
+       << ", node=" << S.node << ", structural=" << S.signals.structural
+       << ", expression=" << S.signals.expression << ", star=" << S.signals.star
+       << ", score=" << S.score << ", allocated=" << S.allocated_nodes
+       << ", star_allocated=" << S.allocated_stars
+       << ", live_nodes=" << S.live_nodes << ", live_edges=" << S.live_edges
+       << ", active_nodes=" << S.active_nodes
+       << ", active_edges=" << S.active_edges << ", bypasses=" << S.bypasses
+       << "\n";
+  }
+}
+
+template <typename ResultT> void recordSolveStatus(const ResultT &Result) {
+  if (Result.hasSolveMetadata()) {
+    HadSolveError |=
+        Result.solveStatus() == elimination::SolveStatus::InvalidProblem ||
+        Result.solveStatus() == elimination::SolveStatus::NonConvergentStar;
+  }
+}
+
 template <typename ResultT>
 void printSolveMetadata(raw_ostream &OS, const ResultT &Result) {
   if (!Result.hasSolveMetadata())
     return;
   const auto &Diag = Result.solveDiagnostics();
+  recordSolveStatus(Result);
   OS << "  [solver] status=" << toString(Result.solveStatus())
      << ", requested=" << toString(Diag.requested_method)
      << ", executed=" << toString(Diag.executed_method)
@@ -609,8 +741,11 @@ void printSolveMetadata(raw_ostream &OS, const ResultT &Result) {
      << ", adt_reason=" << toString(Diag.adt_rejection_reason)
      << ", star_iters=" << Diag.star_iterations_total
      << ", max_star_hit=" << (Diag.max_star_hit ? "true" : "false")
-     << ", ean_laws_restricted=" << (Diag.ean_laws_restricted ? "true" : "false")
-     << ", peak_nodes=" << Diag.peak_matrix_nodes << "\n";
+     << ", ean_laws_restricted="
+     << (Diag.ean_laws_restricted ? "true" : "false")
+     << ", peak_nodes=" << Diag.peak_matrix_nodes
+     << ", semantic_star_ns=" << Diag.semantic_star_time_ns << "\n";
+  emitOrderingDiagnostics(OS, Diag.ordering);
 }
 
 template <unsigned K, typename FactT, typename TransferT, typename NodeT>
@@ -620,7 +755,19 @@ void printSolveMetadata(
         &Result) {
   if (!Result.hasSolveMetadata())
     return;
+  recordSolveStatus(Result);
   OS << "  [solver] status=" << toString(Result.solveStatus()) << "\n";
+  if (Result.hasContextSolveDiagnostics()) {
+    const auto &D = Result.contextSolveDiagnostics();
+    OS << "  [context-summary] pairs=" << D.procedure_context_count
+       << ", builds=" << D.procedure_summary_builds
+       << ", reuses=" << D.procedure_summary_reuses
+       << ", gen_us=" << D.gen_time_us << ", norm_us=" << D.norm_time_us
+       << ", interp_us=" << D.interp_time_us
+       << ", semantic_star_ns=" << D.semantic_star_time_ns
+       << ", star_iters=" << D.star_iterations_total << "\n";
+    emitOrderingDiagnostics(OS, D.ordering);
+  }
 }
 
 template <typename ResultT>
@@ -771,6 +918,7 @@ void runTimedAnalysis(raw_ostream &OS, const FunctionView &View,
   // Final measured run is kept for the structural dump.
   const auto Start = std::chrono::steady_clock::now();
   auto Result = Run(View.Function, ElimOpts);
+  recordSolveStatus(Result);
   Sample(Result, static_cast<std::uint64_t>(
                      std::chrono::duration_cast<std::chrono::microseconds>(
                          std::chrono::steady_clock::now() - Start)
@@ -817,6 +965,7 @@ void runTimedInterproceduralAnalysis(raw_ostream &OS, Module &M,
                                      Printer &&PrintState) {
   const auto Start = std::chrono::steady_clock::now();
   auto Result = Run(Entry);
+  recordSolveStatus(Result);
   const auto Elapsed = std::chrono::duration_cast<std::chrono::microseconds>(
       std::chrono::steady_clock::now() - Start);
   const bool HasOutput = StdoutOpt || !OutDir.empty();
@@ -850,7 +999,9 @@ void emitInterSummaryDiagnostics(
      << ", eqn_edges=" << D.equation_edge_count << ", scc=" << D.scc_count
      << ", cyclic_scc=" << D.cyclic_scc_count << ", gen_us=" << D.gen_time_us
      << ", norm_us=" << D.norm_time_us << ", interp_us=" << D.interp_time_us
-     << "\n";
+     << ", semantic_star_ns=" << D.semantic_star_time_ns
+     << ", star_iters=" << D.star_iterations_total << "\n";
+  emitOrderingDiagnostics(OS, D.ordering);
   auto EmitStats = [&](const char *Tag, const elimination::ean::DagStats &S) {
     OS << "  [" << Tag << "] nodes=" << S.uniqueNodes
        << ", edges=" << S.uniqueEdges << ", tree=" << S.expandedTree
@@ -1215,34 +1366,37 @@ void runReachable(raw_ostream &OS, const FunctionView &View,
 }
 
 void runInterReachingDefinitions(raw_ostream &OS, Module &M, Function &Entry) {
-  if (InterSummaryOpt) {
+  if (InterEngineOpt == "expanded") {
     runInterSummaryReachingDefinitions(OS, M, Entry);
     return;
   }
   runSetInterAnalysis(OS, M, Entry, [](Function &F) {
-    return elimination::runInterElimReachingDefinitions(&F);
+    return elimination::runInterElimReachingDefinitions(
+        &F, nullptr, nullptr, nullptr, buildElimOpts());
   });
 }
 
 void runInterUninitialized(raw_ostream &OS, Module &M, Function &Entry) {
-  if (InterSummaryOpt) {
+  if (InterEngineOpt == "expanded") {
     runInterSummaryUninitialized(OS, M, Entry);
     return;
   }
   runSetInterAnalysis(OS, M, Entry, [](Function &F) {
-    return elimination::runInterElimUninitializedVariables(&F);
+    return elimination::runInterElimUninitializedVariables(
+        &F, nullptr, nullptr, nullptr, nullptr, buildElimOpts());
   });
 }
 
 void runInterConstantPropagation(raw_ostream &OS, Module &M, Function &Entry) {
-  if (InterSummaryOpt) {
+  if (InterEngineOpt == "expanded") {
     runInterSummaryConstantPropagation(OS, M, Entry);
     return;
   }
   runMapInterAnalysis(
       OS, M, Entry,
       [](Function &F) {
-        return elimination::runInterElimConstantPropagation(&F);
+        return elimination::runInterElimConstantPropagation(
+            &F, nullptr, nullptr, nullptr, nullptr, nullptr, buildElimOpts());
       },
       [&](const elimination::ConstantPropagationValue &Value) {
         return formatValueLatticeElement(Value);
@@ -1250,14 +1404,15 @@ void runInterConstantPropagation(raw_ostream &OS, Module &M, Function &Entry) {
 }
 
 void runInterAvailableExpressions(raw_ostream &OS, Module &M, Function &Entry) {
-  if (InterSummaryOpt) {
+  if (InterEngineOpt == "expanded") {
     runInterSummaryAvailableExpressions(OS, M, Entry);
     return;
   }
   runTimedInterproceduralAnalysis(
       OS, M, Entry,
       [](Function &F) {
-        return elimination::runInterElimAvailableExpressions(&F);
+        return elimination::runInterElimAvailableExpressions(&F, nullptr,
+                                                             buildElimOpts());
       },
       [&](const auto &Key, const auto &Result, const auto &) {
         std::vector<std::string> Expressions;
@@ -1273,38 +1428,41 @@ void runInterAvailableExpressions(raw_ostream &OS, Module &M, Function &Entry) {
 }
 
 void runInterLockset(raw_ostream &OS, Module &M, Function &Entry) {
-  if (InterSummaryOpt) {
+  if (InterEngineOpt == "expanded") {
     runInterSummaryLockset(OS, M, Entry);
     return;
   }
   runSetInterAnalysis(OS, M, Entry, [](Function &F) {
-    return elimination::runInterElimLockset(&F);
+    return elimination::runInterElimLockset(&F, nullptr, buildElimOpts());
   });
 }
 
 void runInterNonNull(raw_ostream &OS, Module &M, Function &Entry) {
-  if (InterSummaryOpt) {
+  if (InterEngineOpt == "expanded") {
     runInterSummaryNonNull(OS, M, Entry);
     return;
   }
   runSetInterAnalysis(OS, M, Entry, [](Function &F) {
-    return elimination::runInterElimNonNull(&F);
+    return elimination::runInterElimNonNull(&F, nullptr, nullptr, nullptr,
+                                            buildElimOpts());
   });
 }
 
 void runInterSign(raw_ostream &OS, Module &M, Function &Entry) {
-  if (InterSummaryOpt) {
+  if (InterEngineOpt == "expanded") {
     runInterSummarySign(OS, M, Entry);
     return;
   }
   runMapInterAnalysis(
       OS, M, Entry,
-      [](Function &F) { return elimination::runInterElimSign(&F); },
+      [](Function &F) {
+        return elimination::runInterElimSign(&F, nullptr, buildElimOpts());
+      },
       [](elimination::SignValue Value) { return formatSignValue(Value); });
 }
 
 void runInterReachable(raw_ostream &OS, Module &M, Function &Entry) {
-  if (ModularInterOpt) {
+  if (InterEngineOpt == "modular") {
     auto Opts = buildInterSummaryOpts();
     runInterSummaryAnalysis(
         OS, M, Entry,
@@ -1316,12 +1474,12 @@ void runInterReachable(raw_ostream &OS, Module &M, Function &Entry) {
         });
     return;
   }
-  if (InterSummaryOpt) {
+  if (InterEngineOpt == "expanded") {
     runInterSummaryReachable(OS, M, Entry);
     return;
   }
   runBoolInterAnalysis(OS, M, Entry, [](Function &F) {
-    return elimination::runInterElimReachability(&F);
+    return elimination::runInterElimReachability(&F, nullptr, buildElimOpts());
   });
 }
 
@@ -1331,7 +1489,14 @@ void runInterAffine(raw_ostream &OS, Module &M, Function & /*Entry*/) {
   Options.vocabulary = elimination::InterAffineVocabularyMode::ObservableSlice;
   Options.verbose = false;
   Options.maxTrackedValues = AffineMaxTrackedOpt;
+  Options.ordering = parseOrderingPolicy();
+  Options.order = buildOrderOpts();
   auto Result = elimination::runInterElimAffineEqualities(M, Options);
+  HadSolveError |= Result.status == elimination::SolveStatus::InvalidProblem ||
+                   Result.status == elimination::SolveStatus::NonConvergentStar;
+  emitOrderingDiagnostics(OS, Result.diagnostics.ordering);
+  OS << "  [semantic-star] time_ns=" << Result.diagnostics.semantic_star_time_ns
+     << ", iterations=" << Result.diagnostics.star_iterations_total << "\n";
   const auto Elapsed = std::chrono::duration_cast<std::chrono::microseconds>(
       std::chrono::steady_clock::now() - Start);
   OS << "  [profile] elapsed_us=" << Elapsed.count()
@@ -1375,6 +1540,26 @@ const AnalysisHandler Handlers[] = {
 int main(int argc, char **argv) {
   InitLLVM X(argc, argv);
   cl::ParseCommandLineOptions(argc, argv, "Elimination engine testing\n");
+  try {
+    const auto Policy = parseOrderingPolicy();
+    elimination::order::validateOrderOptions(
+        buildOrderOpts(), elimination::OrderingPolicy::Default, 0);
+    if (InterEngineOpt != "context" && InterEngineOpt != "expanded" &&
+        InterEngineOpt != "modular") {
+      throw std::invalid_argument("unknown interprocedural engine: " +
+                                  InterEngineOpt);
+    }
+    if (InterEngineOpt == "modular" && AnalysisOpt != "inter_reachable") {
+      throw std::invalid_argument(
+          "the modular CLI currently supports inter_reachable only");
+    }
+    if (OrderTrace) {
+      DumpProfileOpt = true;
+    }
+  } catch (const std::invalid_argument &Error) {
+    errs() << "error: " << Error.what() << "\n";
+    return 1;
+  }
 
   LLVMContext Context;
   SMDiagnostic Err;
@@ -1460,5 +1645,5 @@ int main(int argc, char **argv) {
   }
 
   OS << "[mem] peak_rss_kb=" << peakRssKb() << "\n";
-  return 0;
+  return HadSolveError ? 1 : 0;
 }

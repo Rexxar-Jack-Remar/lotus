@@ -2,9 +2,10 @@
 #define DATAFLOW_APA_ENGINES_SOLVER_H_
 
 #include "Dataflow/APA/Core/Options.h"
-#include "Dataflow/APA/Solver/ADTDelayedSolver.h"
-#include "Dataflow/APA/Solver/ADTSimpleSolver.h"
-#include "Dataflow/APA/Solver/StateEliminationSolver.h"
+#include "Dataflow/APA/Solver/Intra/ADT/DelayedSolver.h"
+#include "Dataflow/APA/Solver/Intra/ADT/SimpleSolver.h"
+#include "Dataflow/APA/Solver/Intra/PostProcessing.h"
+#include "Dataflow/APA/Solver/Intra/StateSolver.h"
 
 namespace elimination {
 
@@ -34,15 +35,20 @@ public:
   // reducibility assumptions do not hold; in that case we transparently fall
   // back to the generic state-elimination engine.
   SolveStatus solve() {
+    const auto AllocationStart = Ctx.Exprs.allocationCount();
+    const auto StarStart = Ctx.Exprs.starAllocationCount();
     SolveStatus S = solveImpl();
-    // Run a post-optimization pass once after a successful solve, before results
-    // are read. EAN and Greedy are mutually exclusive (EAN takes precedence).
+    // Include direct-edge construction for every engine, not merely the pivot
+    // loop. Normalization allocations belong to its separate post-pass stage.
+    Ctx.Diagnostics.ordering.allocated_nodes =
+        Ctx.Exprs.allocationCount() - AllocationStart;
+    Ctx.Diagnostics.ordering.allocated_stars =
+        Ctx.Exprs.starAllocationCount() - StarStart;
+    // Run a post-optimization pass once after a successful solve, before
+    // results are read. EAN and Greedy are mutually exclusive (EAN takes
+    // precedence).
     if (S != SolveStatus::InvalidProblem) {
-      if (Opts.EnableEAN) {
-        Ctx.applyEAN();
-      } else if (Opts.EnableGreedy) {
-        Ctx.applyGreedy();
-      }
+      detail::applyPostPass(Ctx);
     }
     return S;
   }
@@ -50,11 +56,21 @@ public:
   SolveStatus solveImpl() {
     UsedADT = false;
     LastStatus = SolveStatus::Ok;
+    Ctx.Results = result_t{};
+    Ctx.StarNonConvergent = false;
+    Ctx.Interpreter.resetMemo();
     Ctx.Diagnostics = {};
     Ctx.Diagnostics.requested_method = Opts.Method;
     Ctx.Diagnostics.executed_method = EliminationMethod::StateElimination;
 
-    if (Opts.Method == EliminationMethod::ADTSimple) {
+    const bool OrderedState =
+        usesOnlineElimination(Opts.Ordering) || Opts.Order.UseSparseElimination;
+    if (OrderedState && Opts.Method != EliminationMethod::StateElimination) {
+      // An incompatible request is an error, not an implicit engine change.
+      Ctx.Diagnostics.fallback_reason = FallbackReason::InvalidProblem;
+      return LastStatus = SolveStatus::InvalidProblem;
+    }
+    if (!OrderedState && Opts.Method == EliminationMethod::ADTSimple) {
       if (detail::solveADTSimple(Ctx)) {
         UsedADT = true;
         Ctx.Diagnostics.used_adt = true;
@@ -65,7 +81,7 @@ public:
       }
       Ctx.Diagnostics.fallback_reason = FallbackReason::ADTRejected;
     }
-    if (Opts.Method == EliminationMethod::ADTDelayed) {
+    if (!OrderedState && Opts.Method == EliminationMethod::ADTDelayed) {
       if (detail::solveADTDelayed(Ctx)) {
         UsedADT = true;
         Ctx.Diagnostics.used_adt = true;
@@ -77,7 +93,8 @@ public:
       Ctx.Diagnostics.fallback_reason = FallbackReason::ADTRejected;
     }
     Ctx.Diagnostics.executed_method = EliminationMethod::StateElimination;
-    if ((Opts.Method == EliminationMethod::ADTSimple ||
+    if (!OrderedState &&
+        (Opts.Method == EliminationMethod::ADTSimple ||
          Opts.Method == EliminationMethod::ADTDelayed) &&
         Ctx.Diagnostics.fallback_reason == FallbackReason::None) {
       Ctx.Diagnostics.fallback_reason = FallbackReason::ADTRejected;

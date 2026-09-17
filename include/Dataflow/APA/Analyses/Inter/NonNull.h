@@ -19,7 +19,8 @@ using InterNonNullResult =
 InterNonNullResult
 runInterElimNonNull(llvm::Function *Entry, llvm::AssumptionCache *AC = nullptr,
                     llvm::DominatorTree *DT = nullptr,
-                    const dataflow::controlflow::InterCFG *ICF = nullptr);
+                    const dataflow::controlflow::InterCFG *ICF = nullptr,
+    EliminationOptions Options = defaultContextOptions());
 
 InterNonNullResult
 runInterSummaryElimNonNull(llvm::Function *Entry,

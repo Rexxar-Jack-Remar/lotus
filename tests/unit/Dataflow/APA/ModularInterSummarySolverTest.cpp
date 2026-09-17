@@ -1,4 +1,4 @@
-#include "Dataflow/APA/Solver/ModularInterSummarySolver.h"
+#include "Dataflow/APA/Solver/Inter/Modular/SummaryBuilder.h"
 
 #include <functional>
 #include <unordered_map>

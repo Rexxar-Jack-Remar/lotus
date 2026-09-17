@@ -5,7 +5,7 @@
 
 #include "Dataflow/APA/Analyses/Inter/FlowHelpers.h"
 #include "Dataflow/APA/LLVM/InterProblem.h"
-#include "Dataflow/APA/Solver/ForwardInterSummarySolver.h"
+#include "Dataflow/APA/Solver/Inter/ExpandedSolver.h"
 
 #include <unordered_map>
 
@@ -176,7 +176,7 @@ private:
 
 InterLocksetResult
 runInterElimLockset(llvm::Function *Entry,
-                    const dataflow::controlflow::InterCFG *ICF) {
+                    const dataflow::controlflow::InterCFG *ICF, EliminationOptions Options) {
   InterLocksetResult Out;
   if (Entry == nullptr || Entry->isDeclaration()) {
     return Out;
@@ -192,7 +192,7 @@ runInterElimLockset(llvm::Function *Entry,
   InterElimLocksetProblem Problem(Entry, ICF);
   InterEliminationSolver<InterLocksetAnalysisTypes,
                          kDefaultInterElimLocksetCallStringLength>
-      Solver(Problem);
+      Solver(Problem, Options);
   auto Status = Solver.solve();
   if (const auto *Res = Solver.getResults()) {
     Out = *Res;

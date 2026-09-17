@@ -8,7 +8,7 @@
 #include "llvm/IR/IntrinsicInst.h"
 
 #include "Dataflow/APA/LLVM/InterProblem.h"
-#include "Dataflow/APA/Solver/ForwardInterSummarySolver.h"
+#include "Dataflow/APA/Solver/Inter/ExpandedSolver.h"
 #include "Dataflow/APA/Analyses/Inter/FlowHelpers.h"
 
 #include <algorithm>
@@ -369,7 +369,7 @@ private:
 
 InterUninitializedVariablesResult runInterElimUninitializedVariables(
     llvm::Function *Entry, llvm::AAResults *AA, llvm::AssumptionCache *AC,
-    llvm::DominatorTree *DT, const dataflow::controlflow::InterCFG *ICF) {
+    llvm::DominatorTree *DT, const dataflow::controlflow::InterCFG *ICF, EliminationOptions Options) {
   InterUninitializedVariablesResult Out;
   if (Entry == nullptr || Entry->isDeclaration()) {
     return Out;
@@ -386,7 +386,7 @@ InterUninitializedVariablesResult runInterElimUninitializedVariables(
   InterEliminationSolver<
       InterUninitializedVariablesAnalysisTypes,
       kDefaultInterElimUninitializedVariablesCallStringLength>
-      Solver(Problem);
+      Solver(Problem, Options);
   auto Status = Solver.solve();
   if (const auto *Res = Solver.getResults()) {
     Out = *Res;

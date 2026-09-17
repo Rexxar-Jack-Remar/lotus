@@ -1,6 +1,6 @@
 #include "Dataflow/APA/Analyses/Intra/AffineEqualities.h"
 
-#include "Dataflow/APA/Solver/Solver.h"
+#include "Dataflow/APA/Solver/Intra/IntraSolver.h"
 
 #include <chrono>
 #include <unordered_map>
@@ -140,6 +140,7 @@ private:
       return eval(expr->R, mid);
     }
     case Factory::Kind::Star: {
+      detail::ScopedNestedNanoseconds timer(diagnostics.semantic_star_time_ns, star_depth);
       auto current = in;
       const auto limit = options.MaxStarIterations
                              ? options.MaxStarIterations
@@ -164,6 +165,7 @@ private:
   const AffineProblem &problem;
   const EliminationOptions &options;
   SolveDiagnostics &diagnostics;
+  std::size_t star_depth = 0;
   bool failed = false;
   std::size_t entries = 0;
   std::unordered_map<const Factory::Expr *,

@@ -11,7 +11,7 @@
 
 #include "Dataflow/APA/Analyses/Inter/FlowHelpers.h"
 #include "Dataflow/APA/LLVM/InterProblem.h"
-#include "Dataflow/APA/Solver/ForwardInterSummarySolver.h"
+#include "Dataflow/APA/Solver/Inter/ExpandedSolver.h"
 
 #include <unordered_map>
 
@@ -425,7 +425,7 @@ private:
 InterConstantPropagationResult runInterElimConstantPropagation(
     llvm::Function *Entry, llvm::AAResults *AA, llvm::AssumptionCache *AC,
     llvm::DominatorTree *DT, llvm::TargetLibraryInfo *TLI,
-    const dataflow::controlflow::InterCFG *ICF) {
+    const dataflow::controlflow::InterCFG *ICF, EliminationOptions Options) {
   InterConstantPropagationResult Out;
   if (Entry == nullptr || Entry->isDeclaration()) {
     return Out;
@@ -441,7 +441,7 @@ InterConstantPropagationResult runInterElimConstantPropagation(
   InterElimConstantPropagationProblem Problem(Entry, AA, AC, DT, TLI, ICF);
   InterEliminationSolver<InterConstantPropagationAnalysisTypes,
                          kDefaultInterElimConstantPropagationCallStringLength>
-      Solver(Problem);
+      Solver(Problem, Options);
   auto Status = Solver.solve();
   if (const auto *Res = Solver.getResults()) {
     Out = *Res;

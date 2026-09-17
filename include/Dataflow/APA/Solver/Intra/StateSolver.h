@@ -2,8 +2,10 @@
 #define DATAFLOW_APA_ENGINES_STATEELIMINATIONSOLVER_H_
 
 #include "Dataflow/APA/EAN/DagStats.h"
-#include "Dataflow/APA/Solver/EliminationOrder.h"
-#include "Dataflow/APA/Solver/SolverContext.h"
+#include "Dataflow/APA/Solver/Ordering/StructuralModel.h"
+#include "Dataflow/APA/Solver/Intra/Context.h"
+#include "Dataflow/APA/Solver/Elimination/SparseSolver.h"
+#include "Dataflow/APA/Solver/Elimination/DenseClosure.h"
 
 #include <chrono>
 
@@ -116,8 +118,6 @@ void eliminateStateIntermediates(
   using Context = IntraEliminationSolverContext<AnalysisTypesT>;
   using transfer_t = typename Context::transfer_t;
   const auto N = Ctx.Nodes.size();
-  std::vector<typename Context::expr_ref_t> ColK(N);
-  std::vector<typename Context::expr_ref_t> RowK(N);
 
   // Opt-in RQ3 instrumentation: peak unique DAG nodes across the whole matrix.
   const bool Measure = Ctx.Opts.MeasurePeakNodes;
@@ -141,40 +141,14 @@ void eliminateStateIntermediates(
   };
 
   const auto Order = getStateEliminationOrder(Ctx);
-  measurePeak(); // initial (direct-edge) matrix
-  for (std::size_t ki = 0; ki < N; ++ki) {
-    const std::size_t k = Order[ki];
-    // Snapshot row/column k before mutating the matrix. This mirrors the
-    // standard state-elimination update:
-    //   M[i][j] |= M[i][k] . M[k][k]* . M[k][j]
-    for (std::size_t i = 0; i < N; ++i) {
-      ColK[i] = Ctx.Matrix[i][k];
-    }
-    for (std::size_t j = 0; j < N; ++j) {
-      RowK[j] = Ctx.Matrix[k][j];
-    }
-
-    const auto KStar = Ctx.Exprs.star(Ctx.Matrix[k][k]);
-    for (std::size_t i = 0; i < N; ++i) {
-      if (Context::expr_factory_t::isZero(ColK[i])) {
-        continue;
-      }
-      for (std::size_t j = 0; j < N; ++j) {
-        if (Context::expr_factory_t::isZero(RowK[j])) {
-          continue;
-        }
-        auto Via = Ctx.Exprs.concat(ColK[i], KStar);
-        Via = Ctx.Exprs.concat(Via, RowK[j]);
-        Ctx.Matrix[i][j] = Ctx.Exprs.unite(Ctx.Matrix[i][j], Via);
-      }
-    }
-    measurePeak(); // after eliminating k
-  }
+  closeDenseMatrix(Ctx.Matrix, Ctx.Exprs, Order, [&](std::size_t) { measurePeak(); });
 }
 
 template <typename AnalysisTypesT>
 bool materializeStateResults(
-    IntraEliminationSolverContext<AnalysisTypesT> &Ctx) {
+    IntraEliminationSolverContext<AnalysisTypesT> &Ctx,
+    const std::vector<typename IntraEliminationSolverContext<
+        AnalysisTypesT>::expr_ref_t> *Summaries = nullptr) {
   using Context = IntraEliminationSolverContext<AnalysisTypesT>;
   Ctx.Results = typename Context::result_t{};
   if (Ctx.Nodes.empty()) {
@@ -193,15 +167,15 @@ bool materializeStateResults(
   for (std::size_t j = 0; j < Ctx.Nodes.size(); ++j) {
     const auto &N = Ctx.Nodes[j];
     // Each remaining matrix entry summarizes all paths from entry to N.
-    auto E = Ctx.Matrix[EntryIdx][j];
+    auto E = Summaries ? (*Summaries)[j] : Ctx.Matrix[EntryIdx][j];
     Ctx.Results.ExprTo(N) = E;
     // Skip the interpretation when EAN or Greedy will re-optimize and
     // re-evaluate the whole batch afterwards (avoids a wasted eval), or when a
     // memoizing client interpreter (InterpMemo) will fill IN facts itself.
     if (!Ctx.Opts.EnableEAN && !Ctx.Opts.EnableGreedy && !Ctx.Opts.InterpMemo) {
-      typename Context::fact_t V = Ctx.eval(E, Init);
+      typename Context::fact_t V = Ctx.Interpreter.eval(E, Init);
       for (std::size_t r = 1; r < Reps; ++r) {
-        V = Ctx.eval(E, Init); // amortization measurement (RQ2)
+        V = Ctx.Interpreter.eval(E, Init); // amortization measurement (RQ2)
       }
       Ctx.Results.IN(N) = std::move(V);
     }
@@ -217,6 +191,71 @@ template <typename AnalysisTypesT>
 bool solveStateElimination(
     IntraEliminationSolverContext<AnalysisTypesT> &Ctx) {
   const auto GenStart = std::chrono::steady_clock::now();
+  if (usesOnlineElimination(Ctx.Opts.Ordering) ||
+      Ctx.Opts.Order.UseSparseElimination) {
+    using Context = IntraEliminationSolverContext<AnalysisTypesT>;
+    Ctx.Nodes = Ctx.Problem.nodes();
+    Ctx.Index.clear();
+    Ctx.Matrix.clear();
+    for (std::size_t I = 0; I < Ctx.Nodes.size(); ++I) {
+      if (!Ctx.Index.emplace(Ctx.Nodes[I], I).second) {
+        return false;
+      }
+    }
+    std::vector<typename Context::expr_ref_t> Base(Ctx.Nodes.size(),
+                                                   Ctx.Exprs.zero());
+    const auto Entry = Ctx.Index.find(Ctx.Problem.entry());
+    if (!Ctx.Nodes.empty() && Entry == Ctx.Index.end()) {
+      return false;
+    }
+    if (Entry != Ctx.Index.end()) {
+      Base[Entry->second] = Ctx.Exprs.one();
+    }
+    auto Options = Ctx.Opts.Order;
+    Options.MeasureLiveNodes |= Ctx.Opts.MeasurePeakNodes;
+    std::vector<typename Context::expr_ref_t> Summaries;
+    try {
+      auto Policy = Ctx.Opts.Ordering;
+      if (Policy == OrderingPolicy::Default) {
+        Options.ExplicitOrder = getStateEliminationOrder(Ctx);
+        Policy = OrderingPolicy::Explicit;
+      } else if (Policy == OrderingPolicy::CostAware) {
+        order::EliminationGraph Graph(Ctx.Nodes.size());
+        for (std::size_t I = 0; I < Ctx.Nodes.size(); ++I) {
+          for (const auto &Dst : Ctx.Problem.succs(Ctx.Nodes[I])) {
+            auto Target = Ctx.Index.find(Dst);
+            if (Target != Ctx.Index.end()) {
+              Graph.addEdge(I, Target->second);
+            }
+          }
+        }
+        Options.ExplicitOrder = order::computeCostAwareOrder(Graph);
+        Policy = OrderingPolicy::Explicit;
+      }
+      SparseElimination<typename Context::transfer_t> Solver(
+          Ctx.Exprs, std::move(Base), Policy, Options);
+      for (std::size_t I = 0; I < Ctx.Nodes.size(); ++I) {
+        for (const auto &Dst : Ctx.Problem.succs(Ctx.Nodes[I])) {
+          const auto Target = Ctx.Index.find(Dst);
+          if (Target != Ctx.Index.end()) {
+            Solver.addEdge(
+                I, Target->second,
+                Ctx.Exprs.atom(Ctx.Problem.edgeTransfer(Ctx.Nodes[I], Dst)));
+          }
+        }
+      }
+      Summaries = Solver.solve();
+      Ctx.Diagnostics.ordering = Solver.diagnostics();
+      Ctx.Diagnostics.peak_matrix_nodes = Solver.diagnostics().peak_live_nodes;
+    } catch (const std::invalid_argument &) {
+      return false;
+    }
+    Ctx.Diagnostics.gen_time_us += static_cast<std::size_t>(
+        std::chrono::duration_cast<std::chrono::microseconds>(
+            std::chrono::steady_clock::now() - GenStart)
+            .count());
+    return materializeStateResults(Ctx, &Summaries);
+  }
   buildStateEliminationMatrix(Ctx);
   eliminateStateIntermediates(Ctx);
   Ctx.Diagnostics.gen_time_us += static_cast<std::size_t>(

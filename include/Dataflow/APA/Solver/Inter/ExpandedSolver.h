@@ -6,8 +6,8 @@
 #include "Dataflow/APA/EAN/DagStats.h"
 #include "Dataflow/APA/EAN/EAN.h"
 #include "Dataflow/APA/EAN/Greedy.h"
-#include "Dataflow/APA/Solver/InterSummaryTransfer.h"
-#include "Dataflow/APA/Solver/PathSummaryEquationSolver.h"
+#include "Dataflow/APA/Solver/Inter/Interpreter.h"
+#include "Dataflow/APA/Solver/Equations/Solver.h"
 #include "Dataflow/ControlFlow/FlowDirection.h"
 #include "Dataflow/Mono/Core/CallStringContext.h"
 
@@ -83,6 +83,8 @@ public:
     std::size_t gen_time_us = 0;
     std::size_t norm_time_us = 0;
     std::size_t interp_time_us = 0;
+    std::uint64_t semantic_star_time_ns = 0;
+    std::size_t star_iterations_total = 0;
     ean::DagStats summary_before;
     ean::DagStats summary_after;
   };
@@ -92,6 +94,8 @@ public:
       : Problem(Problem), Options(Options) {}
 
   SolveStatus solve() {
+    DiagnosticsValue = {};
+    HaveResult = false;
     const auto *ICFPtr = Problem.getICFG();
     if (ICFPtr == nullptr ||
         Problem.direction() != dataflow::controlflow::FlowDirection::Forward) {
@@ -109,9 +113,19 @@ public:
     const auto GenStart = std::chrono::steady_clock::now();
     discoverEquationGraph();
     auto SolverOptions = Options;
+    if (!SolverOptions.Order.IsStarResultCached) {
+      // This interpreter starts fresh after construction: a known empty cache,
+      // unlike an absent metadata provider in the generic equation engine.
+      SolverOptions.Order.IsStarResultCached = [](const void *) { return false; };
+    }
     SolverOptions.Direction = PathSummaryEquationDirection::ForwardPath;
     PathSummaryEquationSolver<ContextKey, atom_t> Solver(Graph, SolverOptions);
-    auto Summary = Solver.solve();
+    typename PathSummaryEquationSolver<ContextKey, atom_t>::result_t Summary;
+    try {
+      Summary = Solver.solve();
+    } catch (const std::invalid_argument &) {
+      return LastStatus = SolveStatus::InvalidProblem;
+    }
     DiagnosticsValue.equation_graph = Summary.diagnostics();
     DiagnosticsValue.gen_time_us += static_cast<std::size_t>(
         std::chrono::duration_cast<std::chrono::microseconds>(
@@ -147,6 +161,9 @@ public:
     Out.gen_time_us = DiagnosticsValue.gen_time_us;
     Out.norm_time_us = DiagnosticsValue.norm_time_us;
     Out.interp_time_us = DiagnosticsValue.interp_time_us;
+    Out.semantic_star_time_ns = DiagnosticsValue.semantic_star_time_ns;
+    Out.star_iterations_total = DiagnosticsValue.star_iterations_total;
+    Out.ordering = DiagnosticsValue.equation_graph.ordering;
     Out.summary_before = DiagnosticsValue.summary_before;
     Out.summary_after = DiagnosticsValue.summary_after;
     return Out;
@@ -358,6 +375,7 @@ private:
 
   void evaluateSummaries(
       const PathSummaryEquationResult<ContextKey, atom_t> &Summary) {
+    const auto Start = std::chrono::steady_clock::now();
     if (!HaveInitialFact) {
       InitialFact = Problem.bottom();
     }
@@ -366,12 +384,18 @@ private:
       InterSummaryTransferEvaluator<AnalysisTypesT, K> Evaluator(
           Problem, *ICF, Result, Entry.first.Ctx);
       auto In = Evaluator.evaluateExpr(Entry.second, InitialFact);
+      DiagnosticsValue.semantic_star_time_ns += Evaluator.semanticStarTimeNs();
+      DiagnosticsValue.star_iterations_total += Evaluator.starIterations();
       Result.IN(Entry.first.Inst, Entry.first.Ctx) = In;
 
       auto Out = Problem.applyTransfer(
           Problem.edgeTransfer(Entry.first.Inst, n_t{}), In);
       Result.OUT(Entry.first.Inst, Entry.first.Ctx) = std::move(Out);
     }
+    DiagnosticsValue.interp_time_us += static_cast<std::size_t>(
+        std::chrono::duration_cast<std::chrono::microseconds>(
+            std::chrono::steady_clock::now() - Start)
+            .count());
   }
 
   ProblemTy &Problem;

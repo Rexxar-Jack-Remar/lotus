@@ -5,7 +5,7 @@
 #include "llvm/IR/Module.h"
 
 #include "Dataflow/APA/LLVM/InterProblem.h"
-#include "Dataflow/APA/Solver/ForwardInterSummarySolver.h"
+#include "Dataflow/APA/Solver/Inter/ExpandedSolver.h"
 
 #include <memory>
 #include <set>
@@ -166,7 +166,7 @@ private:
 
 InterAvailableExpressionsResult
 runInterElimAvailableExpressions(llvm::Function *Entry,
-                                 const dataflow::controlflow::InterCFG *ICF) {
+                                 const dataflow::controlflow::InterCFG *ICF, EliminationOptions Options) {
   InterAvailableExpressionsResult Out;
   if (Entry == nullptr || Entry->isDeclaration())
     return Out;
@@ -179,7 +179,7 @@ runInterElimAvailableExpressions(llvm::Function *Entry,
   InterAvailableExpressionsProblem Problem(Entry, ICF);
   InterEliminationSolver<InterAvailableExpressionsAnalysisTypes,
                          kDefaultInterElimAvailableExpressionsCallStringLength>
-      Solver(Problem);
+      Solver(Problem, Options);
   auto Status = Solver.solve();
   if (const auto *Result = Solver.getResults())
     Out = *Result;

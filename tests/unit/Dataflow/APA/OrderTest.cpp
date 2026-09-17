@@ -9,8 +9,8 @@
 //     (Floyd–Warshall closure is order-invariant); the non-distributive case
 //     is documented as an inherent APA caveat (like the EAN law profile).
 
-#include "Dataflow/APA/Solver/EliminationOrder.h"
-#include "Dataflow/APA/Solver/Solver.h"
+#include "Dataflow/APA/Solver/Intra/IntraSolver.h"
+#include "Dataflow/APA/Solver/Ordering/StructuralModel.h"
 
 #include <algorithm>
 #include <map>
@@ -38,17 +38,21 @@ namespace order = elimination::order;
 order::EliminationGraph makeHub(std::size_t P, std::size_t Q) {
   const std::size_t n = 1 + P + Q;
   order::EliminationGraph g(n);
-  for (std::size_t i = 1; i <= P; ++i) g.addEdge(i, 0);
-  for (std::size_t j = 0; j < Q; ++j) g.addEdge(0, 1 + P + j);
+  for (std::size_t i = 1; i <= P; ++i)
+    g.addEdge(i, 0);
+  for (std::size_t j = 0; j < Q; ++j)
+    g.addEdge(0, 1 + P + j);
   return g;
 }
 
 bool isPermutation(const std::vector<std::size_t> &o, std::size_t n) {
-  if (o.size() != n) return false;
+  if (o.size() != n)
+    return false;
   std::vector<std::size_t> s = o;
   std::sort(s.begin(), s.end());
   for (std::size_t i = 0; i < n; ++i)
-    if (s[i] != i) return false;
+    if (s[i] != i)
+      return false;
   return true;
 }
 
@@ -85,7 +89,8 @@ TEST(EliminationOrderCombinatorial, ChainNeverWorseThanIdentity) {
   // 0->1->2->3->4 chain.
   const std::size_t n = 5;
   order::EliminationGraph g(n);
-  for (std::size_t i = 0; i + 1 < n; ++i) g.addEdge(i, i + 1);
+  for (std::size_t i = 0; i + 1 < n; ++i)
+    g.addEdge(i, i + 1);
   auto ca = order::computeCostAwareOrder(g);
   ASSERT_TRUE(isPermutation(ca, n));
   EXPECT_LE(order::simulateCost(g, ca).totalProduct,
@@ -99,7 +104,8 @@ TEST(EliminationOrderCombinatorial, EmptyAndSingleton) {
   EXPECT_EQ(one[0], 0u);
 }
 
-// ------------------------------------------------------------ wiring domains --
+// ------------------------------------------------------------ wiring domains
+// --
 
 // Distributive reachability domain (meet = set union): pivot order cannot
 // change any client fact.
@@ -115,7 +121,8 @@ public:
       : Succs(std::move(S)) {}
   std::vector<int> nodes() const override {
     std::vector<int> Ns;
-    for (auto &kv : Succs) Ns.push_back(kv.first);
+    for (auto &kv : Succs)
+      Ns.push_back(kv.first);
     std::sort(Ns.begin(), Ns.end());
     return Ns;
   }
@@ -146,10 +153,10 @@ private:
 // A hub-shaped reachable CFG: entry 0 -> {1..P} -> hub H -> {sinks} -> exit.
 std::unordered_map<int, std::vector<int>> hubCFG(int P, int Q) {
   std::unordered_map<int, std::vector<int>> S;
-  const int H = 1 + P;              // hub id
-  const int firstSink = H + 1;      // sinks firstSink..firstSink+Q-1
+  const int H = 1 + P;         // hub id
+  const int firstSink = H + 1; // sinks firstSink..firstSink+Q-1
   S[0] = {};
-  for (int i = 1; i <= P; ++i) {    // entry fans out to sources, sources -> hub
+  for (int i = 1; i <= P; ++i) { // entry fans out to sources, sources -> hub
     S[0].push_back(i);
     S[i] = {H};
   }
@@ -207,7 +214,8 @@ public:
       : Succs(std::move(S)), Edge(std::move(E)) {}
   std::vector<int> nodes() const override {
     std::vector<int> Ns;
-    for (auto &kv : Succs) Ns.push_back(kv.first);
+    for (auto &kv : Succs)
+      Ns.push_back(kv.first);
     std::sort(Ns.begin(), Ns.end());
     return Ns;
   }
@@ -216,17 +224,25 @@ public:
     auto it = Succs.find(n);
     return it == Succs.end() ? std::vector<int>{} : it->second;
   }
-  int edgeTransfer(int Src, int Dst) const override { return Edge.at({Src, Dst}); }
+  int edgeTransfer(int Src, int Dst) const override {
+    return Edge.at({Src, Dst});
+  }
   fact_t applyTransfer(const int &T, const fact_t &In) const override {
-    if (T >= 0) return T;
-    if (In == BOT) return BOT;
-    if (In == TOP) return TOP;
+    if (T >= 0)
+      return T;
+    if (In == BOT)
+      return BOT;
+    if (In == TOP)
+      return TOP;
     return In % 2;
   }
   fact_t join(const fact_t &a, const fact_t &b) const override {
-    if (a == BOT) return b;
-    if (b == BOT) return a;
-    if (a == TOP || b == TOP) return TOP;
+    if (a == BOT)
+      return b;
+    if (b == BOT)
+      return a;
+    if (a == TOP || b == TOP)
+      return TOP;
     return a == b ? a : TOP;
   }
   bool equal(const fact_t &a, const fact_t &b) const override { return a == b; }
@@ -252,7 +268,78 @@ TEST(OrderWiring, NonDistributiveCostAwareStillSolves) {
   const auto &R = Cost.getResults();
   // A valid solution exists for every node; exact value is order-dependent for
   // this non-distributive client and is therefore not asserted against Default.
-  for (int n : {0, 1, 2, 3}) EXPECT_NE(R.tryIN(n), nullptr) << "node " << n;
+  for (int n : {0, 1, 2, 3})
+    EXPECT_NE(R.tryIN(n), nullptr) << "node " << n;
+}
+
+TEST(OrderWiring, OnlinePoliciesPreserveEveryPointIncludingUnreachableLoops) {
+  const std::unordered_map<int, std::vector<int>> Edges = {
+      {0, {0, 1, 2}}, {1, {2, 3}}, {2, {1, 3}}, {3, {}}, {4, {4}}};
+  ReachProblem Problem(Edges);
+  IntraEliminationSolver<ReachDomain> Baseline(Problem);
+  ASSERT_EQ(Baseline.solve(), elimination::SolveStatus::Ok);
+  for (auto Policy : {OrderingPolicy::Structural,
+                      OrderingPolicy::ExpressionAware, OrderingPolicy::StarRisk,
+                      OrderingPolicy::Hybrid, OrderingPolicy::ReversePostOrder,
+                      OrderingPolicy::MinDegree, OrderingPolicy::Random}) {
+    EliminationOptions Opts;
+    Opts.Ordering = Policy;
+    Opts.Order.RecordTrace = true;
+    Opts.MeasurePeakNodes = true;
+    IntraEliminationSolver<ReachDomain> Solver(Problem, Opts);
+    ASSERT_EQ(Solver.solve(), elimination::SolveStatus::Ok);
+    for (auto Node : Problem.nodes()) {
+      ASSERT_NE(Solver.getResults().tryIN(Node), nullptr);
+      EXPECT_EQ(*Solver.getResults().tryIN(Node),
+                *Baseline.getResults().tryIN(Node));
+      EXPECT_TRUE(Solver.getResults().ExprTo(Node) != nullptr);
+    }
+    EXPECT_EQ(Solver.getDiagnostics().ordering.trace.size(),
+              Problem.nodes().size());
+    EXPECT_GT(Solver.getDiagnostics().peak_matrix_nodes, 0u);
+    EXPECT_GT(Solver.getDiagnostics().semantic_star_time_ns, 0u);
+  }
+}
+
+TEST(OrderWiring, SparseBaselineAndLegacyOrderPreserveFacts) {
+  ReachProblem Problem(hubCFG(3, 3));
+  IntraEliminationSolver<ReachDomain> Baseline(Problem);
+  Baseline.solve();
+  for (auto Policy : {OrderingPolicy::Default, OrderingPolicy::CostAware}) {
+    EliminationOptions Opts;
+    Opts.Ordering = Policy;
+    Opts.Order.UseSparseElimination = true;
+    IntraEliminationSolver<ReachDomain> Solver(Problem, Opts);
+    ASSERT_EQ(Solver.solve(), elimination::SolveStatus::Ok);
+    for (auto Node : Problem.nodes()) {
+      EXPECT_EQ(*Solver.getResults().tryIN(Node),
+                *Baseline.getResults().tryIN(Node));
+    }
+    EXPECT_EQ(Solver.getDiagnostics().ordering.selected_nodes,
+              Problem.nodes().size());
+  }
+}
+
+TEST(OrderWiring, IncompatibleADTAndOnlineOrderingIsRejected) {
+  ReachProblem Problem({{0, {1}}, {1, {}}});
+  EliminationOptions Opts;
+  Opts.Method = elimination::EliminationMethod::ADTSimple;
+  Opts.Ordering = OrderingPolicy::Hybrid;
+  IntraEliminationSolver<ReachDomain> Solver(Problem, Opts);
+  ASSERT_EQ(Solver.solve(), elimination::SolveStatus::InvalidProblem);
+  EXPECT_FALSE(Solver.usedADT());
+  EXPECT_EQ(Solver.getDiagnostics().executed_method,
+            elimination::EliminationMethod::StateElimination);
+}
+
+TEST(OrderWiring, InvalidOnlineOptionsReportInvalidProblem) {
+  ReachProblem Problem({{0, {1}}, {1, {}}});
+  EliminationOptions Opts;
+  Opts.Ordering = OrderingPolicy::Explicit;
+  Opts.Order.ExplicitOrder = {0, 0};
+  IntraEliminationSolver<ReachDomain> Solver(Problem, Opts);
+  EXPECT_EQ(Solver.solve(), elimination::SolveStatus::InvalidProblem);
+  EXPECT_TRUE(Solver.getResults().nodes().empty());
 }
 
 } // namespace

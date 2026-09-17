@@ -115,3 +115,28 @@ TEST(EliminationTest, NonConvergentStarReturnIdentityPolicy) {
   ASSERT_NE(Res.tryIN(0), nullptr);
   EXPECT_NE(*Res.tryIN(0), 1);
 }
+
+TEST(EliminationTest, OnlinePoliciesPreserveStarLimitPolicies) {
+  for (auto Policy : {elimination::OrderingPolicy::Structural,
+                      elimination::OrderingPolicy::ExpressionAware,
+                      elimination::OrderingPolicy::StarRisk,
+                      elimination::OrderingPolicy::Hybrid}) {
+    for (auto StarPolicy : {elimination::OnNonConvergentStar::Fail,
+                            elimination::OnNonConvergentStar::ReturnLast,
+                            elimination::OnNonConvergentStar::ReturnIdentity}) {
+      NonConvergentProblem Problem;
+      elimination::EliminationOptions Opts;
+      Opts.Ordering = Policy;
+      Opts.MaxStarIterations = 3;
+      Opts.NonConvergentStarPolicy = StarPolicy;
+      elimination::IntraEliminationSolver<NonConvergentDomain> Solver(Problem,
+                                                                      Opts);
+      EXPECT_EQ(Solver.solve(),
+                StarPolicy == elimination::OnNonConvergentStar::Fail
+                    ? elimination::SolveStatus::NonConvergentStar
+                    : elimination::SolveStatus::Ok);
+      EXPECT_TRUE(Solver.getDiagnostics().max_star_hit);
+      EXPECT_EQ(Solver.getDiagnostics().star_iterations_total, 3u);
+    }
+  }
+}

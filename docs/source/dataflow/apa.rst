@@ -45,6 +45,54 @@ Main components
 
 - ``Passes/EliminationPasses.h`` exposes LLVM-pass integration.
 
+Order-aware elimination
+-----------------------
+
+``EliminationOptions`` and ``PathSummaryEquationOptions`` expose ``Ordering``
+and ``Order`` settings. The policies ``Structural``, ``ExpressionAware``,
+``StarRisk``, and ``Hybrid`` use live-graph sparse elimination, cached operand
+DAG sizes, and a dirty-candidate/versioned-heap selector. Removed equations are
+back-substituted so summaries remain available at every program point. These
+policies are supported in both equation directions, the forward-summary solver,
+and the modular summary builder. Module-scoped interprocedural affine equalities
+forwards ``InterAffineEqualitiesOptions::ordering`` and ``order`` to its
+per-procedure solver.
+
+.. code-block:: cpp
+
+  elimination::PathSummaryEquationOptions Options;
+  Options.Ordering = elimination::OrderingPolicy::Hybrid;
+  Options.Order.RecordTrace = true;
+  Options.Order.MeasureLiveNodes = true;
+  auto Result = elimination::runInterSummaryElimReachability(Entry, nullptr, Options);
+
+Use ``lotus-dfa-apa --ordering=hybrid --measure-peak --order-trace --stdout``
+to emit candidate scores, pivot traces, live-DAG statistics, allocations, and
+ranking costs. ``--inter-engine=context|expanded|modular`` selects the model.
+Context mode caches construction per procedure/call-string pair and reinterprets
+after external fact updates. ``--order-full-rescore`` checks incremental selection.
+Policies never omit signals or substitute Structural; no signal-disabling or
+metadata-fallback flags are provided.
+Additional baselines are ``rpo``, seeded ``random``, ``min-degree``, and complete
+local permutations via ``explicit --order-explicit=0,1,...``.
+
+Historical defaults are preserved. Use ``--order-sparse`` on **all** compared
+configurations to isolate ordering from the legacy full-matrix engine. Online
+ordering with an ADT engine is rejected rather than silently switching engines. The
+sparse equation baseline uses ascending local SCC indices; sparse intra Default
+keeps its historical permutation. Live-DAG counts include saved equations and query
+summaries, but exclude factory-only roots; active-graph counts are separate. Neither
+measures physical RSS. Nested semantic-star intervals are counted only once.
+
+Normalization caps and operand-size limits are configurable. Their defaults
+are untuned engineering values, not empirical results. Fact equivalence across
+orders requires a language-invariant interpretation; a lattice interface alone
+does not guarantee it. See ``lib/Dataflow/APA/README.md`` for policy formulas,
+semantic-cache snapshots, measurement scopes, and the responsibility-based header
+layout. Core strategies have separate ``Ordering/Policies/`` headers; signal
+collection and versioned selection are independent modules. No ``Detail`` directory
+or backward-compatibility headers are retained.
+
 Interprocedural Forward Summary Solver
 --------------------------------------
 
@@ -74,9 +122,9 @@ The resulting system of left-linear equations has the form:
 
 .. code-block:: text
 
-  X_u = base_u  U  (W_u,v . X_v)
+  X_v = base_v  U  (X_u . W_u,v)
 
-where ``base_u`` captures contributions from inter-SCC predecessors and
+where ``base_v`` captures contributions from inter-SCC predecessors and
 seed facts, and ``W_u,v`` are path expressions composed from the atom
 types above.
 
@@ -107,9 +155,9 @@ approach:
 | Cyclic call graphs handled by     | Cyclic SCCs use Floyd-Warshall-    |
 | re-enqueuing changed nodes        | style closure over path expressions|
 +-----------------------------------+------------------------------------+
-| ``lotus-dfa-apa`` tool uses this  | Library-only API, no tool frontend |
-| engine by default                 | (use the ``runInterSummaryElim*``  |
-|                                   | functions directly)                |
+| Context-cached tool default       | ``--inter-engine=expanded`` selects |
+| Build once, reinterpret facts     | the global equation model          |
+| after call/return fact updates    | (also available as a library API)  |
 +-----------------------------------+------------------------------------+
 
 Supported analyses
@@ -158,14 +206,14 @@ Key classes
   equation nodes by traversing the interprocedural CFG from seed facts,
   delegates to ``PathSummaryEquationSolver`` for solving, and evaluates
   the resulting summaries into ``InterDataFlowResultT`` facts. Lives in
-  ``include/Dataflow/APA/Solver/ForwardInterSummarySolver.h``.
+  ``include/Dataflow/APA/Solver/Inter/ExpandedSolver.h``.
 
 ``PathSummaryEquationSolver<KeyT, TransferT>``
   Generic engine that computes Tarjan SCCs on the equation graph, orders
   them by dependency, and solves them sequentially. Cyclic SCCs are solved
   with a Floyd-Warshall-style closure over path expressions using ``Star``,
   ``Concat``, and ``Union`` operators. Lives in
-  ``include/Dataflow/APA/Solver/PathSummaryEquationSolver.h``.
+  ``include/Dataflow/APA/Solver/Equations/Solver.h``.
 
 ``InterSummaryTransferAtom<AnalysisTypesT>``
   First-class atom that tags an edge as one of the four transfer kinds
@@ -214,13 +262,12 @@ recursive call-graph patterns.
 Library-only availability
 ^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-The ``lotus-dfa-apa`` command-line tool currently uses the worklist-based
-``InterEliminationSolver``. The summary solver is available as a
-library-only API. To use it, call the ``runInterSummaryElim*`` functions
-directly from your own pass or analysis driver. The tool also exposes the
-summary engines through the ``--inter-summary`` and ``--modular-inter``
-flags, which route interprocedural clients to ``ForwardInterSummarySolver``
-and the modular per-procedure solver respectively.
+The tool defaults to the context-cached ``InterEliminationSolver``. Each
+procedure/call-string pair's expressions are built once, then reinterpreted
+with a fresh input-sensitive memo when external facts change. Select the global
+equation model using ``--inter-engine=expanded``, or call
+``runInterSummaryElim*`` directly. ``--inter-engine=modular`` selects the
+functional/context-insensitive alternative for reachability.
 
 EAN equality saturation
 -----------------------
@@ -342,9 +389,8 @@ evaluates a ``SummaryCall`` as ``In -> callFlow -> callee entry-to-exit ->
 returnFlow``, closing recursion with a memoized fixpoint that evaluates each
 ``(callee, exit, input-fact)`` at most once per pass.
 
-The ``lotus-dfa-apa`` tool exposes the modular engine through the
-``--modular-inter`` flag (and the monolithic summary engine through
-``--inter-summary``); the worklist engine remains the default.
+The tool exposes this model using ``--inter-engine=modular`` and the expanded
+equation model using ``--inter-engine=expanded``. Context-cached mode is the default.
 
 Related engines
 ^^^^^^^^^^^^^^^

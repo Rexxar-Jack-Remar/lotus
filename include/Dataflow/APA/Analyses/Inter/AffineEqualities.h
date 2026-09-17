@@ -1,7 +1,7 @@
 #pragma once
 
-#include "Dataflow/APA/Domains/AffineExpression.h"
 #include "Dataflow/APA/Core/Options.h"
+#include "Dataflow/APA/Domains/AffineExpression.h"
 #include "Dataflow/APA/Domains/AffineRelationDomain.h"
 
 #include <cstddef>
@@ -50,11 +50,14 @@ struct InterAffineEqualitiesOptions {
   // Zero means unlimited. Values outside a bounded observable slice are
   // soundly treated as untracked/havoced.
   std::size_t maxTrackedValues;
+  OrderingPolicy ordering = OrderingPolicy::Default;
+  OrderPolicyOptions order;
 };
 
 struct InterAffineEqualitiesResult : AffineResultContext {
   SolveStatus status = SolveStatus::Ok;
   std::size_t trackedValues = 0;
+  SolveDiagnostics diagnostics;
   std::map<AffineFunctionKey, AffineRelationDomain::value_type> summaries;
   std::map<AffineBlockKey, AffineRelationDomain::value_type> blockRelations;
 };

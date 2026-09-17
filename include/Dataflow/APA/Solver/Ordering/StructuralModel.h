@@ -2,8 +2,7 @@
 #define DATAFLOW_APA_ENGINES_ELIMINATIONORDER_H_
 
 // Cost-aware elimination ordering for the state-elimination engine (paper's
-// "Order" configuration; §II Eq. 1 and §III.f "Composition with elimination
-// ordering").
+// "Order" configuration
 //
 // Eliminating a vertex k performs, for all i, j:
 //     M[i][j] |= M[i][k] · M[k][k]* · M[k][j].
@@ -11,9 +10,8 @@
 // predecessor–successor product deg_in(k) · deg_out(k): k contributes one
 // update per (predecessor, successor) pair and adds a fill edge i→j for each
 // such pair. Choosing the pivot order therefore controls peak construction
-// cost, but never the final all-pairs result (the k-loop is a Floyd–Warshall
-// closure: the set of paths — hence the semantics under any distributive
-// client algebra — is invariant to the order).
+// cost, but never the final path language. Equal interpretations additionally
+// require a language-invariant client algebra (e.g. a quantale).
 //
 // This header is a pure combinatorial model over a boolean elimination graph:
 // it never touches the expression matrix, so it is LLVM-free and unit-testable
