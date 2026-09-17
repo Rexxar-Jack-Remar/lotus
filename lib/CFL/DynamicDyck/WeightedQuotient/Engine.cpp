@@ -1,7 +1,7 @@
 // Direct port of upstream dynamic/DyckReach.cpp; see README.md.
-#include "CFL/DynamicDyck/Detail/Engine.h"
+#include "CFL/DynamicDyck/WeightedQuotient/Engine.h"
 
-#include "CFL/DynamicDyck/Detail/DotParser.h"
+#include "CFL/DynamicDyck/WeightedQuotient/DotParser.h"
 
 #include <cassert>
 #include <cstdlib>
@@ -14,7 +14,7 @@
 #include <unordered_map>
 #include <unordered_set>
 
-namespace lotus::cfl::dynamic_dyck::detail {
+namespace lotus::cfl::dynamic_dyck::weighted_quotient {
 void Engine::inc_weight(
     unsigned i, unsigned j, unsigned eid, CFLHashMap &merged_cm,
     unordered_map<string, In_FastDLL<unsigned>> &ColorInNodes) {
@@ -1268,4 +1268,4 @@ int Engine::arrayversion(bool inc_version, string init_dotfile,
   return 0;
 }
 
-} // namespace lotus::cfl::dynamic_dyck::detail
+} // namespace lotus::cfl::dynamic_dyck::weighted_quotient

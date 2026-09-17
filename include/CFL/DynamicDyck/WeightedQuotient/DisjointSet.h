@@ -3,7 +3,7 @@
 #include <iostream>
 #include <vector>
 
-namespace lotus::cfl::dynamic_dyck::detail {
+namespace lotus::cfl::dynamic_dyck::weighted_quotient {
 
 class DisjointSet {
 public:
@@ -47,4 +47,4 @@ public:
   }
 };
 
-} // namespace lotus::cfl::dynamic_dyck::detail
+} // namespace lotus::cfl::dynamic_dyck::weighted_quotient

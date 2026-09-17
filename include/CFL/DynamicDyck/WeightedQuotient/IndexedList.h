@@ -6,7 +6,7 @@
 #include <unordered_map>
 #include <utility>
 
-namespace lotus::cfl::dynamic_dyck::detail {
+namespace lotus::cfl::dynamic_dyck::weighted_quotient {
 template <typename T1>
 
 class In_FastDLL {
@@ -74,4 +74,4 @@ private:
   unsigned dll_size;
 };
 
-} // namespace lotus::cfl::dynamic_dyck::detail
+} // namespace lotus::cfl::dynamic_dyck::weighted_quotient

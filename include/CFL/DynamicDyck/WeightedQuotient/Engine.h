@@ -1,15 +1,15 @@
 #pragma once
 
-#include "CFL/DynamicDyck/Detail/Adjacency.h"
-#include "CFL/DynamicDyck/Detail/DisjointSet.h"
-#include "CFL/DynamicDyck/Detail/IndexedList.h"
+#include "CFL/DynamicDyck/WeightedQuotient/Adjacency.h"
+#include "CFL/DynamicDyck/WeightedQuotient/DisjointSet.h"
+#include "CFL/DynamicDyck/WeightedQuotient/IndexedList.h"
 
 #include <memory>
 #include <unordered_set>
 
 #include <sys/time.h>
 
-namespace lotus::cfl::dynamic_dyck::detail {
+namespace lotus::cfl::dynamic_dyck::weighted_quotient {
 // Original global state is owned by one engine instance.
 class Engine {
 public:
@@ -66,4 +66,4 @@ public:
                unordered_map<string, In_FastDLL<unsigned>> &colors,
                unordered_map<unsigned, list<unsigned>> &sets);
 };
-} // namespace lotus::cfl::dynamic_dyck::detail
+} // namespace lotus::cfl::dynamic_dyck::weighted_quotient

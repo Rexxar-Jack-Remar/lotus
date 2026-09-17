@@ -1,6 +1,5 @@
-#include "CFL/DynamicDyck/Solver.h"
-
-#include "CFL/DynamicDyck/Detail/Engine.h"
+#include "CFL/DynamicDyck/WeightedQuotient/Engine.h"
+#include "CFL/DynamicDyck/WeightedQuotient/WeightedQuotientSolver.h"
 
 #include <algorithm>
 #include <limits>
@@ -10,18 +9,19 @@
 
 namespace lotus::cfl::dynamic_dyck {
 
-class Solver::Impl {
+class WeightedQuotientSolver::Impl {
 public:
-  detail::Engine engine;
-  std::unique_ptr<detail::CFLHashMap> original, merged;
-  std::unordered_map<std::string, detail::In_FastDLL<unsigned>> colors;
+  weighted_quotient::Engine engine;
+  std::unique_ptr<weighted_quotient::CFLHashMap> original, merged;
+  std::unordered_map<std::string, weighted_quotient::In_FastDLL<unsigned>>
+      colors;
   std::unordered_map<unsigned, std::list<unsigned>> sets;
   std::unordered_map<Vertex, unsigned> node_ids;
   std::vector<Vertex> vertices;
 
   Impl()
-      : original(std::make_unique<detail::CFLHashMap>(0)),
-        merged(std::make_unique<detail::CFLHashMap>(0)) {
+      : original(std::make_unique<weighted_quotient::CFLHashMap>(0)),
+        merged(std::make_unique<weighted_quotient::CFLHashMap>(0)) {
     engine.arrayreach(*merged, colors, sets);
   }
 
@@ -41,9 +41,11 @@ public:
   }
 };
 
-Solver::Solver() : m_impl(std::make_unique<Impl>()) {}
+WeightedQuotientSolver::WeightedQuotientSolver()
+    : m_impl(std::make_unique<Impl>()) {}
 
-Solver::Solver(const Graph &graph) : Solver() {
+WeightedQuotientSolver::WeightedQuotientSolver(const Graph &graph)
+    : WeightedQuotientSolver() {
   for (Vertex vertex : graph.vertices)
     m_impl->addVertex(vertex);
   for (Edge edge : graph.edges) {
@@ -57,13 +59,17 @@ Solver::Solver(const Graph &graph) : Solver() {
   m_impl->engine.arrayreach(*m_impl->merged, m_impl->colors, m_impl->sets);
 }
 
-Solver::~Solver() = default;
-Solver::Solver(Solver &&) noexcept = default;
-Solver &Solver::operator=(Solver &&) noexcept = default;
+WeightedQuotientSolver::~WeightedQuotientSolver() = default;
+WeightedQuotientSolver::WeightedQuotientSolver(
+    WeightedQuotientSolver &&) noexcept = default;
+WeightedQuotientSolver &
+WeightedQuotientSolver::operator=(WeightedQuotientSolver &&) noexcept = default;
 
-bool Solver::addVertex(Vertex vertex) { return m_impl->addVertex(vertex); }
+bool WeightedQuotientSolver::addVertex(Vertex vertex) {
+  return m_impl->addVertex(vertex);
+}
 
-bool Solver::insertEdge(Edge edge) {
+bool WeightedQuotientSolver::insertEdge(Edge edge) {
   edge = edge.opening();
   m_impl->addVertex(edge.source);
   m_impl->addVertex(edge.target);
@@ -76,7 +82,7 @@ bool Solver::insertEdge(Edge edge) {
   return true;
 }
 
-bool Solver::deleteEdge(Edge edge) {
+bool WeightedQuotientSolver::deleteEdge(Edge edge) {
   edge = edge.opening();
   const auto source = m_impl->node_ids.find(edge.source),
              target = m_impl->node_ids.find(edge.target);
@@ -90,7 +96,7 @@ bool Solver::deleteEdge(Edge edge) {
   return true;
 }
 
-bool Solver::apply(const Update &update) {
+bool WeightedQuotientSolver::apply(const Update &update) {
   switch (update.kind) {
   case UpdateKind::Insert:
     return insertEdge(update.edge);
@@ -100,7 +106,7 @@ bool Solver::apply(const Update &update) {
   throw std::invalid_argument("invalid dynamic-Dyck update kind");
 }
 
-bool Solver::connected(Vertex source, Vertex target) const {
+bool WeightedQuotientSolver::connected(Vertex source, Vertex target) const {
   const auto first = m_impl->node_ids.find(source),
              second = m_impl->node_ids.find(target);
   return first != m_impl->node_ids.end() && second != m_impl->node_ids.end() &&
@@ -108,14 +114,14 @@ bool Solver::connected(Vertex source, Vertex target) const {
              m_impl->engine.resp->find(second->second);
 }
 
-Vertex Solver::representative(Vertex vertex) const {
+Vertex WeightedQuotientSolver::representative(Vertex vertex) const {
   const auto node = m_impl->node_ids.find(vertex);
   if (node == m_impl->node_ids.end())
     throw std::out_of_range("unknown dynamic-Dyck vertex");
   return m_impl->vertices[m_impl->engine.resp->find(node->second)];
 }
 
-std::vector<std::vector<Vertex>> Solver::components() const {
+std::vector<std::vector<Vertex>> WeightedQuotientSolver::components() const {
   std::vector<std::vector<Vertex>> result;
   for (const auto &set : m_impl->sets) {
     if (set.second.empty())
@@ -129,11 +135,11 @@ std::vector<std::vector<Vertex>> Solver::components() const {
   return result;
 }
 
-Graph Solver::graph() const {
+Graph WeightedQuotientSolver::graph() const {
   Graph result;
   result.vertices = m_impl->vertices;
   for (unsigned source = 0; source < result.vertices.size(); ++source) {
-    std::unordered_map<unsigned, detail::Matrix1> outgoing;
+    std::unordered_map<unsigned, weighted_quotient::Matrix1> outgoing;
     m_impl->original->CheckOutEdges(source, outgoing);
     for (const auto &target : outgoing)
       for (const auto &color : target.second.colors)
@@ -143,7 +149,7 @@ Graph Solver::graph() const {
   return result;
 }
 
-Statistics Solver::statistics() const {
+Statistics WeightedQuotientSolver::statistics() const {
   Statistics result;
   result.vertices = m_impl->vertices.size();
   result.edges = m_impl->original->GetEdgNum();

@@ -1,6 +1,6 @@
 #include "CFL/DynamicDyck/IO.h"
 
-#include "CFL/DynamicDyck/Detail/Engine.h"
+#include "CFL/DynamicDyck/WeightedQuotient/Engine.h"
 
 #include <algorithm>
 #include <unordered_map>
@@ -9,7 +9,7 @@ namespace lotus::cfl::dynamic_dyck {
 
 RunResult runFiles(bool dynamic, const std::string &initial_graph,
                    const std::string &update_sequence) {
-  detail::Engine engine;
+  weighted_quotient::Engine engine;
   engine.arrayversion(dynamic, initial_graph, update_sequence);
   RunResult result;
   result.elapsed_seconds = engine.elapsed;

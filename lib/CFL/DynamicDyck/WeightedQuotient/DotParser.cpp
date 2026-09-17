@@ -1,9 +1,9 @@
-#include "CFL/DynamicDyck/Detail/DotParser.h"
+#include "CFL/DynamicDyck/WeightedQuotient/DotParser.h"
 
 #include <fstream>
 #include <sstream>
 
-namespace lotus::cfl::dynamic_dyck::detail {
+namespace lotus::cfl::dynamic_dyck::weighted_quotient {
 pair<string, string> SimpleDotParser::ReturnNodePair(string &src,
                                                      const string &delimiter) {
   string from, to;
@@ -141,4 +141,4 @@ void SimpleDotParser::BuildMyHashTable(const string &infile,
   }
 }
 
-} // namespace lotus::cfl::dynamic_dyck::detail
+} // namespace lotus::cfl::dynamic_dyck::weighted_quotient

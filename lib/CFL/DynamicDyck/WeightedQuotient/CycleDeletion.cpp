@@ -1,10 +1,10 @@
-#include "CFL/DynamicDyck/Detail/Engine.h"
+#include "CFL/DynamicDyck/WeightedQuotient/Engine.h"
 
 #include <deque>
 #include <unordered_map>
 #include <unordered_set>
 
-namespace lotus::cfl::dynamic_dyck::detail {
+namespace lotus::cfl::dynamic_dyck::weighted_quotient {
 
 bool Engine::hasAffectedCycle(CFLHashMap &graph, unsigned source,
                               unsigned target) {
@@ -64,4 +64,4 @@ void Engine::rebuild(
   arrayreach(merged, colors, sets);
 }
 
-} // namespace lotus::cfl::dynamic_dyck::detail
+} // namespace lotus::cfl::dynamic_dyck::weighted_quotient

@@ -17,15 +17,15 @@ namespace lotus::cfl::dynamic_dyck {
 /// synchronously. Separate instances own all their state; concurrent access
 /// to the same instance requires synchronization because queries compress
 /// paths.
-class Solver {
+class WeightedQuotientSolver {
 public:
-  Solver();
-  explicit Solver(const Graph &graph);
-  ~Solver();
-  Solver(Solver &&) noexcept;
-  Solver &operator=(Solver &&) noexcept;
-  Solver(const Solver &) = delete;
-  Solver &operator=(const Solver &) = delete;
+  WeightedQuotientSolver();
+  explicit WeightedQuotientSolver(const Graph &graph);
+  ~WeightedQuotientSolver();
+  WeightedQuotientSolver(WeightedQuotientSolver &&) noexcept;
+  WeightedQuotientSolver &operator=(WeightedQuotientSolver &&) noexcept;
+  WeightedQuotientSolver(const WeightedQuotientSolver &) = delete;
+  WeightedQuotientSolver &operator=(const WeightedQuotientSolver &) = delete;
 
   bool addVertex(Vertex vertex);
 

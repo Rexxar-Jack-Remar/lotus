@@ -1,4 +1,4 @@
-#include "CFL/DynamicDyck/Solver.h"
+#include "CFL/DynamicDyck/WeightedQuotient/WeightedQuotientSolver.h"
 
 #include <algorithm>
 #include <limits>
@@ -78,7 +78,7 @@ std::vector<std::vector<bool>> oracle(const Graph &graph) {
   return relation;
 }
 
-void expectOracle(const Solver &solver, const Graph &graph) {
+void expectOracle(const WeightedQuotientSolver &solver, const Graph &graph) {
   const auto expected = oracle(graph);
   for (std::size_t source = 0; source < graph.vertices.size(); ++source)
     for (std::size_t target = 0; target < graph.vertices.size(); ++target)
@@ -99,7 +99,7 @@ void expectOracle(const Solver &solver, const Graph &graph) {
 }
 
 TEST(DynamicDyckTest, SupportsSparseVerticesAndIndependentInstances) {
-  Solver first, second;
+  WeightedQuotientSolver first, second;
   EXPECT_FALSE(first.connected(0, 0));
   EXPECT_TRUE(first.addVertex(-100));
   EXPECT_FALSE(first.addVertex(-100));
@@ -116,9 +116,9 @@ TEST(DynamicDyckTest, SupportsSparseVerticesAndIndependentInstances) {
   EXPECT_EQ(first.representative(-100), first.representative(23));
   EXPECT_EQ(first.statistics().vertices, 3U);
   const Graph exported = first.graph();
-  Solver reconstructed(exported);
+  WeightedQuotientSolver reconstructed(exported);
   EXPECT_EQ(first.components(), reconstructed.components());
-  Solver moved(std::move(first));
+  WeightedQuotientSolver moved(std::move(first));
   EXPECT_TRUE(moved.connected(-100, 23));
   reconstructed = std::move(moved);
   EXPECT_TRUE(reconstructed.deleteEdge({23, large, 17}));
@@ -127,7 +127,7 @@ TEST(DynamicDyckTest, SupportsSparseVerticesAndIndependentInstances) {
 }
 
 TEST(DynamicDyckTest, TreatsComplementaryDuplicatesAndMissingDeletionsAsNoOps) {
-  Solver solver;
+  WeightedQuotientSolver solver;
   EXPECT_TRUE(solver.insertEdge({0, 1, 0}));
   EXPECT_FALSE(solver.insertEdge({0, 1, 0}));
   EXPECT_FALSE(solver.insertEdge({1, 0, 0, Parenthesis::Close}));
@@ -149,7 +149,7 @@ TEST(DynamicDyckTest, TreatsComplementaryDuplicatesAndMissingDeletionsAsNoOps) {
 TEST(DynamicDyckTest, PropagatesAcyclicSplitsAndPreservesOtherWitnesses) {
   Graph graph{{0, 1, 2, 3, 4, 5},
               {{0, 2, 0}, {1, 2, 0}, {3, 0, 1}, {4, 1, 1}, {5, 2, 0}}};
-  Solver solver(graph);
+  WeightedQuotientSolver solver(graph);
   EXPECT_TRUE(solver.connected(3, 4));
   EXPECT_TRUE(solver.deleteEdge({1, 2, 0}));
   updateGraph(graph, {UpdateKind::Delete, {1, 2, 0}});
@@ -176,7 +176,7 @@ TEST(DynamicDyckTest, BreaksCyclicSupportAfterAnchorDeletion) {
                {1, 4, 1},
                {10, 12, 2},
                {11, 12, 2}}};
-  Solver solver(graph);
+  WeightedQuotientSolver solver(graph);
   EXPECT_TRUE(solver.connected(0, 1));
   EXPECT_TRUE(solver.connected(3, 4));
   EXPECT_TRUE(solver.deleteEdge({1, 2, 0}));
@@ -198,7 +198,7 @@ TEST(DynamicDyckTest, PropagatesDeletionThroughLongAcyclicChains) {
     graph.edges.push_back(
         {2 * level + 1, level + 1 == depth ? 2 * depth : 2 * level + 3, 0});
   }
-  Solver solver(graph);
+  WeightedQuotientSolver solver(graph);
   for (Vertex level = 0; level < depth; ++level)
     ASSERT_TRUE(solver.connected(2 * level, 2 * level + 1));
   ASSERT_TRUE(solver.deleteEdge({2 * depth - 1, 2 * depth, 0}));
@@ -216,7 +216,7 @@ void exhaustiveUpdates(const std::vector<Edge> &candidates) {
     for (std::size_t edge = 0; edge < candidates.size(); ++edge)
       if ((mask & (1U << edge)) != 0)
         graph.edges.push_back(candidates[edge]);
-    Solver solver(graph);
+    WeightedQuotientSolver solver(graph);
     expectOracle(solver, graph);
     for (std::size_t edge = 0; edge < candidates.size(); ++edge) {
       SCOPED_TRACE(::testing::Message() << "edge=" << edge);
@@ -258,7 +258,7 @@ TEST(DynamicDyckTest, MatchesCFLOracleThroughoutRandomMixedSequences) {
   for (unsigned seed : {7U, 42U, 123U, 9876U}) {
     std::mt19937 random(seed);
     Graph graph{{0, 1, 2, 3, 4, 5, 6}, {}};
-    Solver solver(graph);
+    WeightedQuotientSolver solver(graph);
     for (unsigned step = 0; step < 1000; ++step) {
       SCOPED_TRACE(::testing::Message() << "seed=" << seed << " step=" << step);
       Edge edge{static_cast<Vertex>(random() % 7),
@@ -280,7 +280,7 @@ TEST(DynamicDyckTest, ReadsArtifactFormatsAndRejectsMalformedInputs) {
   std::istringstream dot("digraph G {\n// comment\n-3;\n"
                          "0 -> 1 [ label = \"op--0\" ];\n"
                          "1->0[label=\"cp--0\"]\n2->1[label=\"op--0\"]\n}\n");
-  Solver solver(parseDot(dot));
+  WeightedQuotientSolver solver(parseDot(dot));
   EXPECT_EQ(solver.statistics().vertices, 4U);
   EXPECT_EQ(solver.statistics().edges, 2U);
   EXPECT_TRUE(solver.connected(0, 2));

@@ -8,7 +8,7 @@
 #include <utility>
 #include <vector>
 
-namespace lotus::cfl::dynamic_dyck::detail {
+namespace lotus::cfl::dynamic_dyck::weighted_quotient {
 using namespace std;
 
 struct Matrix1 {
@@ -219,4 +219,4 @@ private:
   // unsigned SizeAfterDel;
 };
 
-} // namespace lotus::cfl::dynamic_dyck::detail
+} // namespace lotus::cfl::dynamic_dyck::weighted_quotient

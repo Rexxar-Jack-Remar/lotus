@@ -1,12 +1,12 @@
 #pragma once
 
-#include "CFL/DynamicDyck/Detail/Adjacency.h"
+#include "CFL/DynamicDyck/WeightedQuotient/Adjacency.h"
 
 #include <string>
 #include <unordered_map>
 #include <utility>
 
-namespace lotus::cfl::dynamic_dyck::detail {
+namespace lotus::cfl::dynamic_dyck::weighted_quotient {
 class SimpleDotParser {
 public:
   SimpleDotParser() {};
@@ -39,4 +39,4 @@ public:
   }
 };
 
-} // namespace lotus::cfl::dynamic_dyck::detail
+} // namespace lotus::cfl::dynamic_dyck::weighted_quotient
