@@ -2,7 +2,7 @@ add_lotus_test_suite(ir_gvfg_tests
   SOURCES
     GuardedValueFlowTest.cpp
     GuardedValueFlowSerializerTest.cpp
-    GuardedValueFlowAdapterShapeTest.cpp
+    GuardedValueFlowWrapperShapeTest.cpp
     GuardedValueFlowParityTest.cpp
     GuardedValueFlowSolverTest.cpp
   LINK_LIBS

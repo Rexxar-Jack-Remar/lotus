@@ -15,7 +15,7 @@
 #include "CheckerReport.h"
 #include "IR/GSA/GSA.h"
 #include "IR/GVFG/GuardedValueFlowBuilder.h"
-#include "IR/GVFG/LotusAdapter.h"
+#include "IR/GVFG/LotusAAWrapper.h"
 #include "SymbolicExecution/Integration/SymbolicExecutionWrapper.h"
 
 #include <llvm/IR/LegacyPassManager.h>
@@ -102,7 +102,7 @@ int runSymExCheckerTool(const char *argv0) {
   PM.add(new gsa::GateAnalysisPass());
   PM.add(new LotusAA());
   PM.add(new lotus::gvfg::GuardedValueFlowGraphBuilderPass());
-  PM.add(new lotus::gvfg::LotusGuardedValueFlowAdapterPass());
+  PM.add(new lotus::gvfg::LotusAAWrapper());
   PM.add(new SymbolicExecutionWrapper());
   PM.run(*M);
   stats.emit();

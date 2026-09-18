@@ -1,7 +1,7 @@
-/// @file LotusAdapter.h
+/// @file LotusAAWrapper.h
 /// @brief Pass that populates a GuardedValueFlowGraph with LotusAA memory facts
 ///
-/// The adapter replaces placeholder load/store memory edges, materialises
+/// The wrapper replaces placeholder load/store memory edges, materialises
 /// call-boundary pseudo-interface nodes, attaches access-path summary nodes,
 /// imports cross-function path conditions, and records callee back-edge
 /// metadata.  It is the bridge between the structural builder and the
@@ -35,11 +35,11 @@ using llvm::StringRef;
 ///   - imports cross-function path conditions into region nodes
 ///   - records back-edge information on callsites
 ///   - links output point-to results for pseudo outputs
-class LotusGuardedValueFlowAdapterPass : public ModulePass {
+class LotusAAWrapper : public ModulePass {
 public:
   static char ID;
 
-  LotusGuardedValueFlowAdapterPass();
+  LotusAAWrapper();
 
   void getAnalysisUsage(AnalysisUsage &AU) const override;
   bool runOnModule(Module &M) override;
@@ -52,7 +52,7 @@ public:
            GuardedValueFlowNode *child, float confidence = 1.0f,
            ConditionRef condition = ConditionRef::none());
   StringRef getPassName() const override {
-    return "LotusGuardedValueFlowAdapterPass";
+    return "LotusAAWrapper";
   }
 
 private:
@@ -60,7 +60,7 @@ private:
                      LotusAA &lotus, GuardedValueFlowGraphBuilderPass &builder);
 };
 
-ModulePass *createLotusGuardedValueFlowAdapterPass();
+ModulePass *createLotusAAWrapper();
 
 } // namespace gvfg
 } // namespace lotus

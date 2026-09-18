@@ -23,7 +23,7 @@ in two layers:
 
 1. ``GuardedValueFlowGraphBuilderPass`` constructs the structural,
    intra-procedural graph directly from LLVM IR.
-2. ``LotusGuardedValueFlowAdapterPass`` optionally enriches that graph with
+2. ``LotusAAWrapper`` optionally enriches that graph with
    LotusAA-backed memory producers, imported path conditions, summary channels,
    and call-boundary metadata.
 
@@ -138,10 +138,10 @@ The construction pipeline is intentionally split:
   function and stores it in a per-module pass-managed cache.
 - ``GuardedValueFlowBuilder.h`` is a compatibility shim that aliases the newer
   builder pass name for older includes.
-- ``LotusGuardedValueFlowAdapterPass`` replaces placeholder memory edges with
+- ``LotusAAWrapper`` replaces placeholder memory edges with
   LotusAA-backed producers and materializes richer interprocedural interface and
   summary information.
-- ``LotusGuardedValueFlowAdapterPass::safeLink`` attaches dependencies while
+- ``LotusAAWrapper::safeLink`` attaches dependencies while
   preserving confidence and guard metadata.
 
 When LotusAA's must-kill optimization is enabled, the adapter receives only
@@ -203,7 +203,7 @@ Main headers
 - ``GuardedValueFlowSolver.h`` defines the SMT-backed feasibility solver and its
   dominator-aware variant.
 - ``GuardedValueFlowSerializer.h`` defines text and DOT export helpers.
-- ``LotusAdapter.h`` defines the LotusAA integration pass.
+- ``LotusAAWrapper.h`` defines the LotusAA integration pass.
 
 Use cases
 ---------

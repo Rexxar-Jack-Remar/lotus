@@ -10,8 +10,8 @@ add_lotus_test_suite(alias_lotusaa_tests
 
 add_lotus_test_suite(alias_gvfg_adapter_tests
   SOURCES
-    GVFGAdapterTest.cpp
-    GVFGAdapterSummaryInterfaceTest.cpp
+    GVFGWrapperTest.cpp
+    GVFGWrapperSummaryInterfaceTest.cpp
   LINK_LIBS
     CanaryGuardedValueFlow
     LotusAA

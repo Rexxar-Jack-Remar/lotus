@@ -17,7 +17,7 @@
 #include "Alias/InclusionBased/LotusAA/Engine/IntraProceduralAnalysis.h"
 #include "IR/GSA/GSA.h"
 #include "IR/GVFG/GuardedValueFlowGraph.h"
-#include "IR/GVFG/LotusAdapter.h"
+#include "IR/GVFG/LotusAAWrapper.h"
 #undef private
 
 using namespace llvm;
@@ -109,7 +109,7 @@ PipelineResult runPipeline(Module &M) {
   result.pm->add(new gsa::GateAnalysisPass());
   result.pm->add(result.lotus);
   result.pm->add(result.builder);
-  result.pm->add(new LotusGuardedValueFlowAdapterPass());
+  result.pm->add(new LotusAAWrapper());
   result.pm->run(M);
   return result;
 }

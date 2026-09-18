@@ -3,7 +3,7 @@
 #include "IR/GSA/GSA.h"
 #include "IR/GVFG/GuardedValueFlowGraph.h"
 #include "IR/GVFG/GuardedValueFlowSolver.h"
-#include "IR/GVFG/LotusAdapter.h"
+#include "IR/GVFG/LotusAAWrapper.h"
 #include "TestUtils/LLVMHelpers.h"
 
 #include <llvm/IR/InstIterator.h>
@@ -84,7 +84,7 @@ protected:
     pipeline.pm->add(new gsa::GateAnalysisPass());
     pipeline.pm->add(pipeline.lotus);
     pipeline.pm->add(pipeline.builder);
-    pipeline.pm->add(new LotusGuardedValueFlowAdapterPass());
+    pipeline.pm->add(new LotusAAWrapper());
     pipeline.pm->run(M);
     return pipeline;
   }

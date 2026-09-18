@@ -6,7 +6,7 @@ add_library(CanaryGuardedValueFlow STATIC
   GuardedValueFlowBuilder.cpp
   GuardedValueFlowSerializer.cpp
   GuardedValueFlowSolver.cpp
-  LotusAdapter.cpp
+  LotusAAWrapper.cpp
 )
 
 target_link_libraries(CanaryGuardedValueFlow PUBLIC

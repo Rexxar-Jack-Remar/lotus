@@ -1,5 +1,5 @@
 #include "IR/GVFG/GuardedValueFlowGraph.h"
-#include "IR/GVFG/LotusAdapter.h"
+#include "IR/GVFG/LotusAAWrapper.h"
 #include "TestUtils/LLVMHelpers.h"
 
 #include <llvm/IR/InstIterator.h>
@@ -56,7 +56,7 @@ protected:
     pipeline.pm->add(new gsa::GateAnalysisPass());
     pipeline.pm->add(pipeline.lotus);
     pipeline.pm->add(pipeline.builder);
-    pipeline.pm->add(new LotusGuardedValueFlowAdapterPass());
+    pipeline.pm->add(new LotusAAWrapper());
     pipeline.pm->run(M);
     return pipeline;
   }
@@ -485,7 +485,7 @@ TEST_F(GuardedValueFlowTest,
   auto *child = graph.createNode<GuardedValueFlowNode>(
       GuardedValueFlowNode::Kind::SimpleOperand, aggregate_ty, &graph, entry);
 
-  auto *linked = LotusGuardedValueFlowAdapterPass::safeLink(
+  auto *linked = LotusAAWrapper::safeLink(
       graph, parent, child, 0.5f, ConditionRef::none());
   ASSERT_NE(linked, nullptr);
   EXPECT_EQ(linked->getKind(), GuardedValueFlowNode::Kind::Unknown);
@@ -525,7 +525,7 @@ TEST_F(GuardedValueFlowTest,
       GuardedValueFlowNode::Kind::SimpleOperand, aggregate_ty, &graph, entry);
   producer_mem->addChild(producer_value);
 
-  auto *linked = LotusGuardedValueFlowAdapterPass::safeLink(
+  auto *linked = LotusAAWrapper::safeLink(
       graph, load_mem, producer_mem);
   ASSERT_NE(linked, nullptr);
   load_mem->addMatchingRegion(linked, graph.getAlwaysTrueRegion());

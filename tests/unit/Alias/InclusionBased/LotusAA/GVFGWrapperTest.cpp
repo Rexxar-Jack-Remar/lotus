@@ -1,4 +1,4 @@
-#include "GVFGAdapterTestSupport.h"
+#include "GVFGWrapperTestSupport.h"
 
 #include <llvm/IR/ValueSymbolTable.h>
 
@@ -832,7 +832,7 @@ TEST(GVFGAdapter, ReusesCanonicalFunctionSummaryNodesAcrossAdapterReruns) {
     GTEST_SKIP() << "LotusAA did not materialize summary buckets for this synthetic case";
 
   GuardedValueFlowGraph &graph = result.builder->getGraph(*callee);
-  LotusGuardedValueFlowAdapterPass adapter;
+  LotusAAWrapper adapter;
   ASSERT_TRUE(adapter.adaptFunction(graph, *callee_ptg, *result.lotus,
                                     *result.builder));
 
@@ -1017,7 +1017,7 @@ TEST(GVFGAdapter, FailsWhenSummaryInputBindingsAreIncomplete) {
   callee_it->second.erase(missing_binding);
 
   GuardedValueFlowGraph &graph = result.builder->getGraph(*caller);
-  LotusGuardedValueFlowAdapterPass adapter;
+  LotusAAWrapper adapter;
   EXPECT_FALSE(adapter.adaptFunction(graph, *caller_ptg, *result.lotus,
                                      *result.builder));
   EXPECT_TRUE(result.builder->hasGraphFor(*caller));

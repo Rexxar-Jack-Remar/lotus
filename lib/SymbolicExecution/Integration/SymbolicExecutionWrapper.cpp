@@ -15,7 +15,7 @@
 #include "Checker/Framework/BugReportMgr.h"
 #include "IR/GSA/GSA.h"
 #include "IR/GVFG/GuardedValueFlowGraph.h"
-#include "IR/GVFG/LotusAdapter.h"
+#include "IR/GVFG/LotusAAWrapper.h"
 #include "SymbolicExecution/Integration/GVFGUtility.h"
 
 #include <string>
@@ -312,7 +312,7 @@ void llvm::SymbolicExecutionWrapper::getAnalysisUsage(AnalysisUsage &AU) const {
   AU.addRequired<gsa::ControlDependenceAnalysisPass>();
   AU.addRequired<gsa::GateAnalysisPass>();
   AU.addRequired<lotus::gvfg::GuardedValueFlowGraphBuilderPass>();
-  AU.addRequired<lotus::gvfg::LotusGuardedValueFlowAdapterPass>();
+  AU.addRequired<lotus::gvfg::LotusAAWrapper>();
 }
 
 bool llvm::SymbolicExecutionWrapper::runOnModule(Module &M) {

@@ -1,4 +1,4 @@
-#include "GVFGAdapterTestSupport.h"
+#include "GVFGWrapperTestSupport.h"
 
 TEST(GVFGAdapter, LeavesSummaryInputMemoryEmptyWhenBindingsResolveToNoValues) {
   int old_ap_level = IntraLotusAAConfig::lotus_restrict_ap_level;
@@ -77,7 +77,7 @@ TEST(GVFGAdapter, LeavesSummaryInputMemoryEmptyWhenBindingsResolveToNoValues) {
     callee_it->second[summary_input].clear();
 
   GuardedValueFlowGraph &graph = result.builder->getGraph(*caller);
-  LotusGuardedValueFlowAdapterPass adapter;
+  LotusAAWrapper adapter;
   ASSERT_TRUE(adapter.adaptFunction(graph, *caller_ptg, *result.lotus,
                                     *result.builder));
   ASSERT_TRUE(result.builder->hasGraphFor(*caller));
@@ -138,7 +138,7 @@ TEST(GVFGAdapter, DoesNotCreateFunctionSummaryNodesForClearedSummaryBuckets) {
     GTEST_SKIP() << "LotusAA did not materialize summary output buckets for this synthetic case";
 
   GuardedValueFlowGraph &graph = result.builder->getGraph(*F);
-  LotusGuardedValueFlowAdapterPass adapter;
+  LotusAAWrapper adapter;
   ASSERT_TRUE(adapter.adaptFunction(graph, *ptg, *result.lotus, *result.builder));
   ASSERT_TRUE(result.builder->hasGraphFor(*F));
 
@@ -202,7 +202,7 @@ TEST(GVFGAdapter, FailsWhenPseudoInputBindingIsRemoved) {
   callee_it->second.erase(pseudo_inputs[0]);
 
   GuardedValueFlowGraph &graph = result.builder->getGraph(*caller);
-  LotusGuardedValueFlowAdapterPass adapter;
+  LotusAAWrapper adapter;
   EXPECT_FALSE(adapter.adaptFunction(graph, *caller_ptg, *result.lotus,
                                      *result.builder));
   EXPECT_TRUE(result.builder->hasGraphFor(*caller));
@@ -257,7 +257,7 @@ TEST(GVFGAdapter, FailsWhenPseudoOutputBindingIsRemoved) {
   callee_it->second[1] = nullptr;
 
   GuardedValueFlowGraph &graph = result.builder->getGraph(*caller);
-  LotusGuardedValueFlowAdapterPass adapter;
+  LotusAAWrapper adapter;
   EXPECT_FALSE(adapter.adaptFunction(graph, *caller_ptg, *result.lotus,
                                      *result.builder));
   EXPECT_TRUE(result.builder->hasGraphFor(*caller));
@@ -304,7 +304,7 @@ TEST(GVFGAdapter, FailsWhenPseudoInputIndicesAreMalformed) {
   callee_ptg->pseudo_input_indices[pseudo_inputs[1]] = 0;
 
   GuardedValueFlowGraph &graph = result.builder->getGraph(*caller);
-  LotusGuardedValueFlowAdapterPass adapter;
+  LotusAAWrapper adapter;
   EXPECT_FALSE(adapter.adaptFunction(graph, *caller_ptg, *result.lotus,
                                      *result.builder));
   EXPECT_TRUE(result.builder->hasGraphFor(*caller));
@@ -342,7 +342,7 @@ TEST(GVFGAdapter, KeepsPseudoArgumentsDistinctWhenInterfaceOverlapsFormal) {
   ASSERT_NE(common_arg, nullptr);
   EXPECT_EQ(common_arg->getKind(), GuardedValueFlowNode::Kind::CommonArgument);
 
-  LotusGuardedValueFlowAdapterPass adapter;
+  LotusAAWrapper adapter;
   ASSERT_TRUE(adapter.adaptFunction(graph, *ptg, *result.lotus, *result.builder));
 
   GuardedValueFlowNode *pseudo_arg = nullptr;
@@ -435,7 +435,7 @@ TEST(GVFGAdapter, UsesSummaryReturnProducerForUnprovenancedSummaryValue) {
   ret_vals.emplace_back(nullptr, nullptr, LocValue::SUMMARY_VALUE, 1.0f);
 
   GuardedValueFlowGraph &graph = result.builder->getGraph(*F);
-  LotusGuardedValueFlowAdapterPass adapter;
+  LotusAAWrapper adapter;
   ASSERT_TRUE(adapter.adaptFunction(graph, *ptg, *result.lotus, *result.builder));
 
   auto *pseudo_return = graph.getPseudoReturn(0);
@@ -485,7 +485,7 @@ TEST(GVFGAdapter, SafeLinkUsesEffectiveChildAndPreservesInvalidTypes) {
       graph.findOrCreateUnitRegion(cond, true, entry, ConditionRef::none());
   ASSERT_NE(region, nullptr);
 
-  auto *linked = LotusGuardedValueFlowAdapterPass::safeLink(
+  auto *linked = LotusAAWrapper::safeLink(
       graph, load_mem, store_mem, 0.75f, ConditionRef::none());
   ASSERT_NE(linked, nullptr);
   EXPECT_NE(linked, store_mem);
@@ -511,7 +511,7 @@ TEST(GVFGAdapter, SafeLinkUsesEffectiveChildAndPreservesInvalidTypes) {
   auto *scalar_child = graph.createNode<GuardedValueFlowNode>(
       GuardedValueFlowNode::Kind::SimpleOperand, Type::getInt32Ty(Ctx), &graph,
       entry, nullptr, ret);
-  auto *bridge = LotusGuardedValueFlowAdapterPass::safeLink(graph, aggregate_parent,
+  auto *bridge = LotusAAWrapper::safeLink(graph, aggregate_parent,
                                                             scalar_child);
   ASSERT_NE(bridge, nullptr);
   EXPECT_EQ(bridge->getKind(), GuardedValueFlowNode::Kind::Unknown);

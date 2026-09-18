@@ -1,7 +1,7 @@
-/// @file LotusAdapter.cpp
-/// @brief LotusAA adapter — populates a GVFG with pointer-analysis results
+/// @file LotusAAWrapper.cpp
+/// @brief LotusAA wrapper — populates a GVFG with pointer-analysis results
 ///
-/// For each function the adapter:
+/// For each function the wrapper:
 ///   1. **Memory matching**: walks every load-memory node, queries LotusAA's
 ///      per-function points-to results to find the set of store-memory nodes
 ///      that may reach it, and wires child edges with path-condition guards
@@ -30,7 +30,7 @@
 /// an opaque coercion node otherwise, so imported dependencies are never
 /// silently erased.
 
-#include "IR/GVFG/LotusAdapter.h"
+#include "IR/GVFG/LotusAAWrapper.h"
 
 #include "Alias/InclusionBased/LotusAA/Engine/IntraProceduralAnalysis.h"
 #include "IR/GVFG/ConditionRef.h"
@@ -51,7 +51,7 @@
 using namespace llvm;
 using namespace lotus::gvfg;
 
-#define DEBUG_TYPE "gvfg-lotus-adapter"
+#define DEBUG_TYPE "gvfg-lotus-aa-wrapper"
 
 namespace {
 
@@ -790,18 +790,18 @@ static GuardedValueFlowNode *ensureStoreMemoryNode(
   // values use anonymous memory nodes so multiple imported sentinels do not
   // overwrite one another in the keyed store-memory map.
   if (value == LocValue::UNDEF_VALUE) {
-    (void)LotusGuardedValueFlowAdapterPass::safeLink(
+    (void)LotusAAWrapper::safeLink(
         graph, mem_node,
         createSpecialProducerNode(graph, GuardedValueFlowNode::Kind::UndefValue,
                                   memory_type, bb, inst, "undef.value"));
   } else if (value == LocValue::SUMMARY_VALUE) {
     auto *summary_node = createSummaryProducerNode(
         graph, memory_type, bb, inst, summary_value_mode, summary_provenance);
-    (void)LotusGuardedValueFlowAdapterPass::safeLink(graph, mem_node,
+    (void)LotusAAWrapper::safeLink(graph, mem_node,
                                                      summary_node);
   } else {
     auto *value_node = resolveProducerValueNode(graph, value, memory_type, bb);
-    (void)LotusGuardedValueFlowAdapterPass::safeLink(graph, mem_node,
+    (void)LotusAAWrapper::safeLink(graph, mem_node,
                                                      value_node);
   }
 
@@ -835,7 +835,7 @@ static void linkMemoryValue(
       summary_value_mode, summary_provenance);
   if (!producer_mem)
     return;
-  auto *linked_producer = LotusGuardedValueFlowAdapterPass::safeLink(
+  auto *linked_producer = LotusAAWrapper::safeLink(
       graph, load_mem_node, producer_mem, item.confidence, cond);
   if (!linked_producer)
     return;
@@ -873,9 +873,9 @@ static void populateUnknownLoadMemoryNode(
   auto *producer_mem = graph.createAnonymousStoreMemoryNode(
       load_mem_node->getType(), load->getParent(), load,
       "store.mem.unknown");
-  (void)LotusGuardedValueFlowAdapterPass::safeLink(graph, producer_mem,
+  (void)LotusAAWrapper::safeLink(graph, producer_mem,
                                                    unknown);
-  auto *linked = LotusGuardedValueFlowAdapterPass::safeLink(
+  auto *linked = LotusAAWrapper::safeLink(
       graph, load_mem_node, producer_mem);
   if (linked)
     load_mem_node->addMatchingRegion(linked, graph.getAlwaysTrueRegion());
@@ -1056,7 +1056,7 @@ static void materializeStoreParity(GuardedValueFlowGraph &graph,
     auto *value_node = resolveProducerValueNode(
         graph, store->getValueOperand(), store->getValueOperand()->getType(),
         store->getParent());
-    (void)LotusGuardedValueFlowAdapterPass::safeLink(graph, mem_node,
+    (void)LotusAAWrapper::safeLink(graph, mem_node,
                                                      value_node);
   }
 }
@@ -1083,7 +1083,7 @@ materializeFunctionSummaryInterface(GuardedValueFlowGraph &graph,
           graph, bucket, source, summary_type, entry_block);
       auto *source_node = resolveFunctionSummarySourceNode(graph, source);
       if (source_node)
-        (void)LotusGuardedValueFlowAdapterPass::safeLink(graph, source_node,
+        (void)LotusAAWrapper::safeLink(graph, source_node,
                                                          summary_node);
       graph.registerSummaryArgumentNode(bucket, summary_node);
     }
@@ -1107,7 +1107,7 @@ materializeFunctionSummaryInterface(GuardedValueFlowGraph &graph,
           (Twine("summary.ret.mem.") + Twine(bucket)).str());
     }
 
-    (void)LotusGuardedValueFlowAdapterPass::safeLink(graph, summary_node,
+    (void)LotusAAWrapper::safeLink(graph, summary_node,
                                                      load_mem);
     populateLoadMemoryNode(graph, load_mem, *summary_bucket, entry_block,
                            builder, SummaryValueMode::OpaqueProducer);
@@ -1162,7 +1162,7 @@ materializeFunctionOutputs(GuardedValueFlowGraph &graph, IntraLotusAA &pta,
            Twine(ret_inst ? ret_inst->getParent()->getName()
                           : StringRef("entry")))
               .str());
-      auto *linked_ret = LotusGuardedValueFlowAdapterPass::safeLink(
+      auto *linked_ret = LotusAAWrapper::safeLink(
           graph, pseudo_return, load_mem);
       if (linked_ret)
         pseudo_return->addReturnValueSitePair(linked_ret, site);
@@ -1224,7 +1224,7 @@ static bool materializeCallsiteSummaryNodes(
             entry_block, nullptr, call);
         load_mem->setDescription(
             (Twine("call.input.summary.mem.") + Twine(bucket)).str());
-        (void)LotusGuardedValueFlowAdapterPass::safeLink(graph, summary_node,
+        (void)LotusAAWrapper::safeLink(graph, summary_node,
                                                          load_mem);
         populateLoadMemoryNode(graph, load_mem, summary_values[bucket],
                                entry_block, builder,
@@ -1273,7 +1273,7 @@ static bool materializeCallsiteSummaryNodes(
             call->getParent(), nullptr, call);
         load_mem->setDescription(
             (Twine("call.output.summary.mem.") + Twine(bucket)).str());
-        (void)LotusGuardedValueFlowAdapterPass::safeLink(graph, summary_node,
+        (void)LotusAAWrapper::safeLink(graph, summary_node,
                                                          load_mem);
 
         SummarySentinelProvenance summary_provenance{call, callee, bucket,
@@ -1409,7 +1409,7 @@ static bool materializeCallsiteInterfaces(
             &graph, call->getParent(), nullptr, call);
         load_mem->setDescription(
             (Twine("call.input.mem.") + Twine(raw_index)).str());
-        (void)LotusGuardedValueFlowAdapterPass::safeLink(graph, pseudo_input,
+        (void)LotusAAWrapper::safeLink(graph, pseudo_input,
                                                          load_mem);
         mem_value_t values = *binding_values;
         populateLoadMemoryNode(graph, load_mem, values, call->getParent(),
@@ -1474,7 +1474,7 @@ static bool materializeCallsiteInterfaces(
         auto *store_mem =
             ensureStoreMemoryNode(graph, pseudo_value, call,
                                   outputs[idx]->getType(), call->getParent());
-        (void)LotusGuardedValueFlowAdapterPass::safeLink(graph, store_mem,
+        (void)LotusAAWrapper::safeLink(graph, store_mem,
                                                          pseudo_output);
       }
     }
@@ -1523,15 +1523,15 @@ static void materializeCallsiteBackEdges(GuardedValueFlowGraph &graph,
 
 } // namespace
 
-char LotusGuardedValueFlowAdapterPass::ID = 0;
-static RegisterPass<LotusGuardedValueFlowAdapterPass>
-    Y("gvfg-lotus-adapter", "LotusAA to GuardedValueFlowGraph adapter", false,
+char LotusAAWrapper::ID = 0;
+static RegisterPass<LotusAAWrapper>
+    Y("gvfg-lotus-aa-wrapper", "LotusAA to GuardedValueFlowGraph wrapper", false,
       true);
 
-LotusGuardedValueFlowAdapterPass::LotusGuardedValueFlowAdapterPass()
+LotusAAWrapper::LotusAAWrapper()
     : ModulePass(ID) {}
 
-GuardedValueFlowNode *LotusGuardedValueFlowAdapterPass::safeLink(
+GuardedValueFlowNode *LotusAAWrapper::safeLink(
     GuardedValueFlowGraph &graph, GuardedValueFlowNode *parent,
     GuardedValueFlowNode *child, float confidence, ConditionRef condition) {
   if (!parent || !child)
@@ -1588,14 +1588,14 @@ GuardedValueFlowNode *LotusGuardedValueFlowAdapterPass::safeLink(
   return cast_node;
 }
 
-void LotusGuardedValueFlowAdapterPass::getAnalysisUsage(
+void LotusAAWrapper::getAnalysisUsage(
     AnalysisUsage &AU) const {
   AU.setPreservesAll();
   AU.addRequired<LotusAA>();
   AU.addRequired<GuardedValueFlowGraphBuilderPass>();
 }
 
-bool LotusGuardedValueFlowAdapterPass::runOnModule(Module &M) {
+bool LotusAAWrapper::runOnModule(Module &M) {
   auto &lotus = getAnalysis<LotusAA>();
   auto &builder = getAnalysis<GuardedValueFlowGraphBuilderPass>();
 
@@ -1609,7 +1609,7 @@ bool LotusGuardedValueFlowAdapterPass::runOnModule(Module &M) {
   return false;
 }
 
-bool LotusGuardedValueFlowAdapterPass::adaptFunction(
+bool LotusAAWrapper::adaptFunction(
     GuardedValueFlowGraph &graph, IntraLotusAA &pta, LotusAA &lotus,
     GuardedValueFlowGraphBuilderPass &builder) {
   auto fail = [&](const std::string &reason) {
@@ -1654,6 +1654,6 @@ bool LotusGuardedValueFlowAdapterPass::adaptFunction(
   return true;
 }
 
-ModulePass *lotus::gvfg::createLotusGuardedValueFlowAdapterPass() {
-  return new LotusGuardedValueFlowAdapterPass();
+ModulePass *lotus::gvfg::createLotusAAWrapper() {
+  return new LotusAAWrapper();
 }

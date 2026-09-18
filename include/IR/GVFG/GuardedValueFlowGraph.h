@@ -6,7 +6,7 @@
 /// sites, block-level path conditions, and interprocedural interface
 /// channels.  The structural builder (`GuardedValueFlowGraphBuilderPass`)
 /// creates this shape from LLVM IR, and the adapter
-/// (`LotusGuardedValueFlowAdapterPass`) later populates memory-producer
+/// (`LotusAAWrapper`) later populates memory-producer
 /// edges using pointer-analysis results.
 ///
 /// **Key collections** (all public via const accessors):
@@ -386,7 +386,7 @@ private:
 /// opcodes, phi nodes, load/store memory placeholders, block-level region
 /// nodes, and per-instruction sites.  Memory matching, interprocedural
 /// interface nodes, and imported path conditions are layered on later by
-/// `LotusGuardedValueFlowAdapterPass`.
+/// `LotusAAWrapper`.
 class GuardedValueFlowGraphBuilderPass : public ModulePass {
 public:
   static char ID;
@@ -401,7 +401,7 @@ public:
 
   // This pass only builds the structural intra-procedural graph. LotusAA memory
   // matches, imported path conditions, and interprocedural interface nodes are
-  // layered on later by LotusGuardedValueFlowAdapterPass.
+  // layered on later by LotusAAWrapper.
   bool hasGraphFor(const Function &F) const;
   GuardedValueFlowGraph &getGraph(const Function &F);
   void invalidateGraph(const Function &F);
