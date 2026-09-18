@@ -60,9 +60,14 @@ void TransferFunction::evalLoadNode(const ProgramPoint &pp,
   auto &ptrManager = globalState.getPointerManager();
   const auto *srcPtr = ptrManager.getPointer(ctx, loadNode.getSrc());
 
-  // If source pointer hasn't been seen yet, we can't load anything.
-  if (srcPtr == nullptr)
+  // Source pointer not available yet: can't load, but still propagate the
+  // incoming store to mem-level successors.
+  if (srcPtr == nullptr) {
+    // Register the dest so it stays queryable if the load is never evaluable.
+    ptrManager.getOrCreatePointer(ctx, loadNode.getDest());
+    addMemLevelSuccessors(pp, *localState, evalResult);
     return;
+  }
 
   // assert(srcPtr != nullptr && "LoadNode is evaluated before its src operand
   // becomes available");
