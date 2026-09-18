@@ -97,6 +97,21 @@ ForwardWorkList Initializer::runOnInitState(Store &&initStore) {
   auto pp = ProgramPoint(entryCtx, entryNode);
   LOG_DEBUG("TPA initializer: initial program point ready");
 
+  // Also enqueue entries of address-taken functions: external callers (e.g.
+  // qsort) may invoke them, so their bodies must be analyzed.
+  for (const auto *func : globalState.getSemiSparseProgram().addr_taken_funcs()) {
+    if (func == nullptr || func->isDeclaration())
+      continue;
+    const auto &cfg =
+        globalState.getSemiSparseProgram().getOrCreateCFGForFunction(*func);
+    const auto *node = cfg.getEntryNode();
+    if (node == nullptr)
+      continue;
+    auto fpp = ProgramPoint(entryCtx, node);
+    memo.update(fpp, initStore);
+    workList.enqueue(fpp);
+  }
+
   // Seed the memo table with the initial store
   memo.update(pp, std::move(initStore));
   LOG_DEBUG("TPA initializer: memo updated");
