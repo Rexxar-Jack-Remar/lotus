@@ -11,6 +11,7 @@ void initializeAnalysisPasses(llvm::PassRegistry &Registry) {
   llvm::initializeCallGraphWrapperPassPass(Registry);
   llvm::initializeDominatorTreeWrapperPassPass(Registry);
   llvm::initializeLoopInfoWrapperPassPass(Registry);
+  llvm::initializeSeaDsaAAWrapperPassPass(Registry);
 }
 
 } // namespace seadsa 
