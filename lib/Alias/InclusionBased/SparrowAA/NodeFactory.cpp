@@ -19,6 +19,7 @@
 #include <llvm/ADT/SmallVector.h>
 #include <llvm/Analysis/ValueTracking.h>
 #include <llvm/IR/Constants.h>
+#include <llvm/IR/GlobalAlias.h>
 #include <llvm/Support/raw_ostream.h>
 
 using namespace llvm;
@@ -224,6 +225,8 @@ NodeIndex AndersNodeFactory::getValueNodeForConstant(const llvm::Constant *c,
 
   if (isa<ConstantPointerNull>(c) || isa<UndefValue>(c))
     return getNullPtrNode();
+  else if (const GlobalAlias *ga = dyn_cast<GlobalAlias>(c))
+    return getValueNodeForConstant(ga->getAliasee(), ctx);
   else if (const GlobalValue *gv = dyn_cast<GlobalValue>(c))
     return getValueNodeFor(gv, ctx);
   else if (const ConstantExpr *ce = dyn_cast<ConstantExpr>(c)) {
@@ -293,6 +296,8 @@ NodeIndex AndersNodeFactory::getObjectNodeForConstant(const llvm::Constant *c,
 
   if (isa<ConstantPointerNull>(c))
     return getNullObjectNode();
+  else if (const GlobalAlias *ga = dyn_cast<GlobalAlias>(c))
+    return getObjectNodeForConstant(ga->getAliasee(), ctx);
   else if (const GlobalValue *gv = dyn_cast<GlobalValue>(c))
     return getObjectNodeFor(gv, ctx);
   else if (const ConstantExpr *ce = dyn_cast<ConstantExpr>(c)) {
