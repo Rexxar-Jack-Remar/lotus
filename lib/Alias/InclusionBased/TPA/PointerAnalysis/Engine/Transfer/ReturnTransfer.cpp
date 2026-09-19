@@ -31,6 +31,12 @@ TransferFunction::evalReturnValue(const context::Context *ctx,
     return std::make_pair(true, false);
 
   auto &ptrManager = globalState.getPointerManager();
+
+  // Register the call-site dest up front; its set may legitimately stay empty
+  // (e.g. varargs callee) but it must remain queryable.
+  const auto *dstPtr =
+      ptrManager.getOrCreatePointer(retSite.getContext(), dstVal);
+
   const auto *retPtr = ptrManager.getPointer(ctx, retVal);
   if (retPtr == nullptr)
     // Return value pointer not yet registered. Return (true, false)
@@ -48,8 +54,6 @@ TransferFunction::evalReturnValue(const context::Context *ctx,
     // Propagate the store but report no env change.
     return std::make_pair(true, false);
 
-  const auto *dstPtr =
-      ptrManager.getOrCreatePointer(retSite.getContext(), dstVal);
   return std::make_pair(true, env.weakUpdate(dstPtr, resSet));
 }
 
