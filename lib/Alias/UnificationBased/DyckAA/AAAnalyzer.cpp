@@ -769,10 +769,41 @@ void AAAnalyzer::handleInst(Instruction *Inst, DyckCallGraphNode *Parent) {
   case Instruction::Alloca:
     break;
   case Instruction::Fence:
-  case Instruction::AtomicRMW:
-  case Instruction::AtomicCmpXchg:
-    llvm_unreachable("please use -lower-atomic!");
-    exit(1);
+    break;
+  // Atomic instructions are modeled conservatively by their non-atomic
+  // counterparts (load/store), mirroring SparrowAA.
+  case Instruction::AtomicRMW: {
+    auto *AR = cast<AtomicRMWInst>(Inst);
+    Value *PtrOp = AR->getPointerOperand();
+    wrapValue(PtrOp);
+
+    // Load-like effect: the result is the old value in memory.
+    if (AR->getType()->isPointerTy())
+      addPtrTo(wrapValue(PtrOp), wrapValue(Inst));
+
+    // Store-like effect: the new value is written back to memory.
+    Value *ValOp = AR->getValOperand();
+    if (ValOp->getType()->isPointerTy())
+      addPtrTo(wrapValue(PtrOp), wrapValue(ValOp));
+
+    Mask |= (~0);
+  } break;
+  case Instruction::AtomicCmpXchg: {
+    auto *CX = cast<AtomicCmpXchgInst>(Inst);
+    Value *PtrOp = CX->getPointerOperand();
+    wrapValue(PtrOp);
+
+    // Store-like effect: the exchanged-in value may be written to memory.
+    Value *NewVal = CX->getNewValOperand();
+    if (NewVal->getType()->isPointerTy())
+      addPtrTo(wrapValue(PtrOp), wrapValue(NewVal));
+
+    // Load-like effect: the aggregate result may carry the old pointer, so a
+    // later ExtractValue can recover it.
+    addPtrTo(wrapValue(PtrOp), wrapValue(Inst));
+
+    Mask |= (~0);
+  } break;
   case Instruction::Load: {
     Value *LVal = Inst;
     Value *LAddress = Inst->getOperand(0);
