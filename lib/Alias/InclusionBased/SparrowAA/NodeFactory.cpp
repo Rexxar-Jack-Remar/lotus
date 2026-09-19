@@ -180,7 +180,7 @@ NodeIndex AndersNodeFactory::createVarargNode(const llvm::Function *f,
 NodeIndex AndersNodeFactory::getValueNodeFor(const Value *val,
                                              CtxKey ctx) const {
   if (const Constant *c = dyn_cast<Constant>(val))
-    if (!isa<GlobalValue>(c))
+    if (!isa<GlobalValue>(c) && isa<PointerType>(c->getType()))
       return getValueNodeForConstant(c, ctx);
 
   auto ctxIt = valueNodeMap.find(ctxKeyOrNull(ctx));
