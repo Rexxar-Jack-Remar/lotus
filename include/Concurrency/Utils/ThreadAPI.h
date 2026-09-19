@@ -29,6 +29,7 @@
 
 #include "Concurrency/ConcurrencyConfig.h"
 #include "Concurrency/LinuxKernel/LinuxKernelSemanticRegistry.h"
+#include "Concurrency/Runtime/RuntimeKind.h"
 #include "Concurrency/Utils/CUDA.h"
 #include "Concurrency/Utils/CppThreading.h"
 
@@ -60,17 +61,7 @@ using u32_t = unsigned;
 class ThreadAPI {
 
 public:
-  enum class RuntimeLibrary {
-    Unknown,
-    PThread,
-    OpenMP,
-    MPI,
-    Cpp,
-    CUDA,
-    LinuxKernel,
-    Hare,
-    Custom
-  };
+  using RuntimeLibrary = concurrency::runtime::RuntimeKind;
 
   enum class LockSemanticKind { None, Shared, Exclusive, Release };
   enum class LockOwnershipEffect {

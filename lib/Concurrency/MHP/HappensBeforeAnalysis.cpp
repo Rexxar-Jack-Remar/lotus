@@ -1,5 +1,6 @@
 #include "Concurrency/MHP/HappensBeforeAnalysis.h"
 
+#include "Concurrency/Utils/ThreadFlowGraph.h"
 #include "Alias/Infrastructure/AliasAnalysisWrapper/AliasAnalysisWrapper.h"
 #include "Concurrency/OpenMP/OpenMPSemantics.h"
 #include "Concurrency/Utils/ThreadMultiplicity.h"
@@ -591,7 +592,7 @@ AtomicLocationKey getExactAtomicLocation(const Instruction *inst) {
 } // namespace
 
 HappensBeforeAnalysis::HappensBeforeAnalysis(Module &module,
-                                             mhp::MHPAnalysis &mhp)
+                                             const mhp::IMHPAnalysis &mhp)
     : m_module(module), m_mhp(mhp), m_alias_analysis(mhp.getAliasAnalysis()) {}
 
 void HappensBeforeAnalysis::analyze() {
@@ -755,7 +756,7 @@ void HappensBeforeAnalysis::buildSynchronizesWith() {
   std::set<std::pair<const Instruction *, const Instruction *>> seen_sync_edges;
   ThreadAPI *threadAPI = ThreadAPI::getThreadAPI();
   auto hb_call_graph = std::make_unique<CallGraph>(m_module);
-  concurrency::ThreadMultiplicityAnalysis site_multiplicity(
+  ::concurrency::ThreadMultiplicityAnalysis site_multiplicity(
       m_module, hb_call_graph.get());
   const mhp::ThreadFlowGraph &tfg = m_mhp.getThreadFlowGraph();
   auto getSingleExecutionNode =
@@ -1782,20 +1783,20 @@ void HappensBeforeAnalysis::buildSynchronizesWith() {
   for (const auto &entry : semantics->getRelations()) {
     const OpenMP::Task *lhs = entry.first.first;
     const OpenMP::Task *rhs = entry.first.second;
-    const concurrency::Relation &relation = entry.second;
+    const ::concurrency::Relation &relation = entry.second;
     if (!lhs || !rhs || !lhs->task_create || !rhs->task_create) {
       continue;
     }
-    if (relation.kind == concurrency::RelationKind::MutuallyExclusive) {
+    if (relation.kind == ::concurrency::RelationKind::MutuallyExclusive) {
       ++omp_task_exclusion_relations;
       continue;
     }
-    if (relation.kind == concurrency::RelationKind::UnknownDueToModelGap) {
+    if (relation.kind == ::concurrency::RelationKind::UnknownDueToModelGap) {
       ++omp_task_unknown_relations;
       continue;
     }
-    if (relation.kind != concurrency::RelationKind::MustHappenBefore &&
-        relation.kind != concurrency::RelationKind::SelectiveHappenBefore) {
+    if (relation.kind != ::concurrency::RelationKind::MustHappenBefore &&
+        relation.kind != ::concurrency::RelationKind::SelectiveHappenBefore) {
       continue;
     }
 

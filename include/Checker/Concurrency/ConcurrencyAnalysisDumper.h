@@ -13,7 +13,7 @@
 
 #include "Concurrency/LockSet/LockSetAnalysis.h"
 #include "Concurrency/MHP/IMHPAnalysis.h"
-#include "Concurrency/Memory/EscapeAnalysis.h"
+#include "Concurrency/Thread/Sharing/EscapeAnalysis.h"
 #include "Concurrency/Utils/ThreadAPI.h"
 
 #include <llvm/IR/Module.h>

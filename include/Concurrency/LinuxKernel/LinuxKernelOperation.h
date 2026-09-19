@@ -251,6 +251,9 @@ enum class OperationKind {
   UNKNOWN
 };
 
+/// Returns a human-readable name for the given operation kind.
+std::string operationKindToString(OperationKind kind);
+
 // ============================================================================
 // Linux Kernel Operation Structure
 // ============================================================================

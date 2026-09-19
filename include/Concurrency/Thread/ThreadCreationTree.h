@@ -151,6 +151,18 @@ public:
       : base_(&base), tree_(&tree), scope_(scope) {}
 
   void analyze() override {}
+
+  const mhp::ThreadFlowGraph& getThreadFlowGraph() const override { return base_->getThreadFlowGraph(); }
+  size_t getAnalysisGeneration() const override { return base_->getAnalysisGeneration(); }
+  lotus::AliasAnalysisWrapper* getAliasAnalysis() const override { return base_->getAliasAnalysis(); }
+  const OpenMP::OpenMPSemantics* getOpenMPSemantics() const override { return base_->getOpenMPSemantics(); }
+  bool instructionMayExecuteMultipleTimes(const llvm::Instruction* inst) const override {
+    return base_->instructionMayExecuteMultipleTimes(inst);
+  }
+  bool joinEdgeMustOrderTarget(const mhp::SyncNode* join_node, const mhp::SyncNode* target_node) const override {
+    return base_->joinEdgeMustOrderTarget(join_node, target_node);
+  }
+
   bool mayHappenInParallel(const llvm::Instruction *lhs,
                            const llvm::Instruction *rhs) const override;
   bool isPrecomputedMHP(const llvm::Instruction *lhs,

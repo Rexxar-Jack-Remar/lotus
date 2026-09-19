@@ -20,7 +20,7 @@ location, which is a reasonable approximation when SeaDSA collapses globals.
 - Immutable Data: Distinguishes between reads and writes to ignore immutable
 shared data.
 */
-#include "Concurrency/Memory/StaticThreadSharingAnalysis.h"
+#include "Concurrency/Thread/Sharing/StaticThreadSharingAnalysis.h"
 
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/Analysis/CallGraph.h"

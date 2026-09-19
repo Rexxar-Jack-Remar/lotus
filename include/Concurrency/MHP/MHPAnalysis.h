@@ -22,10 +22,10 @@
 #define MHP_ANALYSIS_H
 
 #include "Alias/Infrastructure/AliasAnalysisWrapper/AliasAnalysisWrapper.h"
-#include "Concurrency/JoinTarget/JoinTargetAnalysis.h"
 #include "Concurrency/LockSet/LockSetAnalysis.h"
 #include "Concurrency/MHP/IMHPAnalysis.h"
 #include "Concurrency/OpenMP/OpenMPSemantics.h"
+#include "Concurrency/Thread/Join/JoinTargetAnalysis.h"
 #include "Concurrency/Utils/CppAtomics.h"
 #include "Concurrency/Utils/ThreadAPI.h"
 #include "Concurrency/Utils/ThreadFlowGraph.h"

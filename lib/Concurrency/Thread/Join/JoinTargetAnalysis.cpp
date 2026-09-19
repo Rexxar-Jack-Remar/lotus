@@ -3,7 +3,7 @@
  * @brief Join-target analysis facade and orchestration
  */
 
-#include "Concurrency/JoinTarget/JoinTargetAnalysis.h"
+#include "Concurrency/Thread/Join/JoinTargetAnalysis.h"
 
 #include "Alias/Infrastructure/AliasAnalysisWrapper/AliasAnalysisWrapper.h"
 

@@ -6,5 +6,6 @@ lotus_add_concurrency_sources(
   MPIProtocolAutomaton.cpp
   MPIRMAAnalysis.cpp
   MPIRankAnalysis.cpp
+  MPISemanticOp.cpp
   MPISemantics.cpp
 )

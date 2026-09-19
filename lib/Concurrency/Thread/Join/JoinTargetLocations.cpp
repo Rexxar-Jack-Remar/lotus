@@ -3,7 +3,7 @@
  * @brief Handle tracing and location resolution for join-target analysis
  */
 
-#include "Concurrency/JoinTarget/JoinTargetAnalysis.h"
+#include "Concurrency/Thread/Join/JoinTargetAnalysis.h"
 
 #include <deque>
 #include <set>

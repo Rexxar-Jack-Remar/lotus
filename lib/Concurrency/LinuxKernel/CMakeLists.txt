@@ -4,6 +4,7 @@ lotus_add_concurrency_sources(
   LinuxKernelLifetimeAnalysis.cpp
   LinuxKernelLockAnalysis.cpp
   LinuxKernelMemoryModel.cpp
+  LinuxKernelOperation.cpp
   LinuxKernelProcessModel.cpp
   LinuxKernelRCUAnalysis.cpp
   LinuxKernelSemanticRegistry.cpp

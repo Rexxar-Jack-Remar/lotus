@@ -1,4 +1,4 @@
-#include "Concurrency/Memory/StaticThreadSharingAnalysis.h"
+#include "Concurrency/Thread/Sharing/StaticThreadSharingAnalysis.h"
 
 #include "Alias/UnificationBased/seadsa/DsaAnalysis.hh"
 #include "Alias/UnificationBased/seadsa/InitializePasses.hh"

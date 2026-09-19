@@ -1,4 +1,4 @@
-#include "Concurrency/Memory/EscapeAnalysis.h"
+#include "Concurrency/Thread/Sharing/EscapeAnalysis.h"
 
 #include "TestUtils/LLVMHelpers.h"
 

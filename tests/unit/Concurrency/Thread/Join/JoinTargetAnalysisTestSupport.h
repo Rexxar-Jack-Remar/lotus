@@ -1,6 +1,6 @@
 #pragma once
 
-#include "Concurrency/JoinTarget/JoinTargetAnalysis.h"
+#include "Concurrency/Thread/Join/JoinTargetAnalysis.h"
 
 #include "TestUtils/LLVMHelpers.h"
 

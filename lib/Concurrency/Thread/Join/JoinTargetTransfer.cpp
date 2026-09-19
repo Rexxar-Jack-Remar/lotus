@@ -3,7 +3,7 @@
  * @brief State transfer and summary logic for join-target analysis
  */
 
-#include "Concurrency/JoinTarget/JoinTargetAnalysis.h"
+#include "Concurrency/Thread/Join/JoinTargetAnalysis.h"
 
 #include "Alias/Infrastructure/AliasAnalysisWrapper/AliasAnalysisWrapper.h"
 #include "Concurrency/Utils/CppThreading.h"
