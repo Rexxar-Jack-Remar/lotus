@@ -36,8 +36,8 @@ See :doc:`../alias/alias_analysis` for detailed instructions and command example
   (``lib/Alias/InclusionBased/LotusAA``). See :doc:`../alias/lotusaa`.
 * **FlowSensitivePTA** – Flow-sensitive inclusion-based pointer analyses with
   conventional sparse, object-versioned, and direct value-flow solvers
-  (``lib/Alias/InclusionBased/FlowSensitive``).
-  See :doc:`../alias/flowsensitive`.
+  (``lib/Alias/InclusionBased/FlowSensitive``). Includes ValueFlowPTA.
+  See :doc:`../alias/flowsensitive` and :doc:`../alias/valueflowpta`.
 * **DDA** – Demand-driven alias-analysis infrastructure that refines alias
   information on demand instead of materializing a full global solution
   (``lib/Alias/DemandDriven/DDA``). See :doc:`../alias/dda`.

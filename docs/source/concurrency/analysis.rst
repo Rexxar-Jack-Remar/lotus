@@ -39,19 +39,24 @@ Directory layout
 The source tree is grouped by subdirectory under ``include/Concurrency/`` and
 ``lib/Concurrency/``:
 
+- ``Runtime/``: ``APIRegistry``, ``RuntimeKind``, and language runtime abstractions
+- ``Thread/``: Core thread model and reasoning:
+  - ``ThreadModel``, ``ThreadModelBuilder``, and ``ThreadCreationTree``
+  - ``Join/``: ``JoinTargetAnalysis`` (previously ``JoinTarget/``)
+  - ``Sharing/``: ``EscapeAnalysis`` and ``StaticThreadSharingAnalysis`` (previously ``Memory/``)
 - ``Utils/``: ``ThreadAPI``, ``ThreadFlowGraph``, vector-clock utilities,
   RAII lock tracking, and language models for C++, OpenMP, MPI, and Linux kernel
   APIs
 - ``MHP/``: ``MHPAnalysis``, ``StaticVectorClockMHP``, and
-  ``HappensBeforeAnalysis``
+  ``HappensBeforeAnalysis`` (consumes abstract ``IMHPAnalysis``)
 - ``LockSet/``: ``LockSetAnalysis``
-- ``Memory/``: ``EscapeAnalysis`` and ``StaticThreadSharingAnalysis``
-- ``JoinTarget/``: ``JoinTargetAnalysis``
-- ``MPI/``: ``MPIAnalysis`` and its process, collective, rank, and RMA analyses
+- ``MPI/``: ``MPIAnalysis``, ``MPISemanticOp``, and its process, collective, rank, and RMA analyses
 - ``CUDA/``: ``CUDAAnalysis``, ``CUDAFunctionSummary``, ``CUDASemantics``, and
   ``PTXAnalyzer`` for GPU thread/block hierarchy reasoning
-- ``LinuxKernel/``: ``LinuxKernelAnalysis``, ``LinuxKernelLockAnalysis``, and
-  ``LinuxKernelRCUAnalysis`` for kernel concurrency primitives
+- ``OpenMP/``: ``OpenMPModel``, ``OpenMPSemantics``, ``OpenMPOpKind``,
+  ``OpenMPThreadModelLowering``, and ``OpenMPTaskGraph``
+- ``LinuxKernel/``: ``LinuxKernelAnalysis``, ``LinuxKernelLockAnalysis``,
+  ``LinuxKernelOperation``, and ``LinuxKernelRCUAnalysis`` for kernel concurrency primitives
 - ``ValueFlow/``: thread-aware sparse value-flow refinement
   (``ThreadAwareSVFG``, ``SparseValueFlowRefinement``,
   ``WholeProgramSparseRefinement``, ``FSMPTA``, and ``MultiStageSlicer``)
@@ -146,8 +151,8 @@ Essential for data race detection, deadlock detection, and precise MHP analysis.
 JoinTargetAnalysis
 ~~~~~~~~~~~~~~~~~~
 
-**File**: ``JoinTarget/JoinTargetAnalysis.cpp``,
-``JoinTarget/JoinTargetAnalysis.h``
+**File**: ``Thread/Join/JoinTargetAnalysis.cpp``,
+``Thread/Join/JoinTargetAnalysis.h``
 
 Computes which ``pthread_create`` sites may match a given ``pthread_join`` by
 reasoning about the joined thread handle. This is used to refine thread
@@ -157,7 +162,7 @@ termination effects beyond a simple name-based match.
 
 - Refining join reasoning when multiple thread handles may alias
 - Supporting more precise MHP pruning around thread termination
-- Providing a dedicated analysis for the ``JoinTarget/`` subdirectory that now
+- Providing a dedicated analysis for the ``Thread/Join/`` subdirectory that now
   exists in the source tree
 
 ThreadAPI
@@ -248,7 +253,7 @@ happens-before analyses.
 EscapeAnalysis
 ~~~~~~~~~~~~~~
 
-**File**: ``Memory/EscapeAnalysis.cpp``, ``Memory/EscapeAnalysis.h``
+**File**: ``Thread/Sharing/EscapeAnalysis.cpp``, ``Thread/Sharing/EscapeAnalysis.h``
 
 Determines which values escape their thread-local scope and become shared between
 threads. Essential for identifying which memory locations may be accessed by
@@ -283,7 +288,7 @@ clocks to efficiently track happens-before relationships and compute MHP pairs.
 StaticThreadSharingAnalysis
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-**File**: ``Memory/StaticThreadSharingAnalysis.cpp``, ``Memory/StaticThreadSharingAnalysis.h``
+**File**: ``Thread/Sharing/StaticThreadSharingAnalysis.cpp``, ``Thread/Sharing/StaticThreadSharingAnalysis.h``
 
 Analyzes which memory locations are shared between threads using static analysis.
 Combines escape analysis with thread flow information to identify shared memory.
@@ -438,7 +443,7 @@ Usage
 
    #include <Concurrency/MHP/MHPAnalysis.h>
    #include <Concurrency/LockSet/LockSetAnalysis.h>
-   #include <Concurrency/Memory/EscapeAnalysis.h>
+   #include <Concurrency/Thread/Sharing/EscapeAnalysis.h>
 
    llvm::Module &M = ...;
    

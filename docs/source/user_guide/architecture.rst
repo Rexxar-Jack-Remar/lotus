@@ -71,6 +71,9 @@ Core Components
    - **SMT Solver**: Z3-based reasoning for precise constraint solving
    - **BDD Solver**: CUDD-based symbolic set operations
    - **WPDS**: Weighted pushdown systems for interprocedural reachability
+   - **Datalog**: Native Datalog and lattice fixedpoint solver engine (``lib/Solvers/Datalog/``)
+   - **EGraph**: Equality saturation and e-graph rewriting engine (``lib/Solvers/EGraph/``)
+   - **SMTStabilizer**: Syntactic stabilization for SMT-LIB2 problems (``lib/Solvers/SMT/SMTStabilizer/``)
 
 5. **Abstract Interpretation** (``third-party/verification/clam/``, ``lib/Verification/SymAbsAI/``)
    
@@ -118,7 +121,11 @@ Core Components
    
    Context-Free Language reachability engines:
    
-   - **CSR**: graph indexing for CFL Reachability
+   - **Classical**: Context-aware tabulation (CAT), iterative-epoch (IEOCE), and skewed tabulation engines
+   - **InterleavedDyck**: Approximation frameworks for interleaved-Dyck reachability (staged bounds, MCFL, LCL, SPDS, affine SPDS, unary)
+   - **DynamicDyck**: Dynamic graph reachability maintaining Dyck properties across edge updates
+   - **CSIndex**: Graph indexing and query acceleration for CFL reachability
+   - **CSR**: Graph indexing for CFL Reachability
 
 Analysis Flow
 -------------

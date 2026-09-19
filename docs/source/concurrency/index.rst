@@ -45,20 +45,24 @@ Directory layout
 The source tree is grouped by subdirectory under ``include/Concurrency/`` and
 ``lib/Concurrency/``:
 
+- ``Runtime/``: ``APIRegistry``, ``RuntimeKind``, and language runtime abstractions
+- ``Thread/``: Core thread model and reasoning:
+  - ``Model/``: ``ThreadModel``, ``ThreadModelBuilder``, and ``ThreadCreationTree``
+  - ``Join/``: ``JoinTargetAnalysis`` (previously ``JoinTarget/``)
+  - ``Sharing/``: ``EscapeAnalysis`` and ``StaticThreadSharingAnalysis`` (previously ``Memory/``)
 - ``Utils/``: ``ThreadAPI``, ``ThreadFlowGraph``, vector-clock utilities,
   RAII lock tracking, and language models for C++, OpenMP, MPI, and Linux kernel
   APIs
 - ``MHP/``: ``MHPAnalysis``, ``StaticVectorClockMHP``, and
-  ``HappensBeforeAnalysis``
+  ``HappensBeforeAnalysis`` (decoupled to consume abstract ``IMHPAnalysis``)
 - ``LockSet/``: ``LockSetAnalysis``
-- ``Memory/``: ``EscapeAnalysis`` and ``StaticThreadSharingAnalysis``
-- ``JoinTarget/``: ``JoinTargetAnalysis``
-- ``MPI/``: ``MPIAnalysis`` and its process, collective, rank, and RMA analyses
+- ``MPI/``: ``MPIAnalysis``, ``MPISemanticOp``, and its process, collective, rank, and RMA analyses
 - ``CUDA/``: ``CUDAAnalysis``, ``CUDAFunctionSummary``, ``CUDASemantics``, and
   ``PTXAnalyzer``
-- ``OpenMP/``: ``OpenMPModel``, ``OpenMPSemantics``, and ``OpenMPTaskGraph``
-- ``LinuxKernel/``: ``LinuxKernelAnalysis``, ``LinuxKernelLockAnalysis``, and
-  ``LinuxKernelRCUAnalysis``
+- ``OpenMP/``: ``OpenMPModel``, ``OpenMPSemantics``, ``OpenMPOpKind``,
+  ``OpenMPThreadModelLowering``, and ``OpenMPTaskGraph``
+- ``LinuxKernel/``: ``LinuxKernelAnalysis``, ``LinuxKernelLockAnalysis``,
+  ``LinuxKernelOperation``, and ``LinuxKernelRCUAnalysis``
 
 ``Concurrency/MPI/`` models MPI communication in the SPMD setting. It complements
 the shared-memory analyses above, but it is not another thread library layered on

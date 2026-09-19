@@ -84,9 +84,6 @@ This enables a lightweight *adaptive* context-sensitivity strategy:
 The approach avoids the uniform k-CFA overhead by targeting context
 sensitivity only where it measurably improves precision.
 
-See ``lib/Alias/InclusionBased/SparrowAA/IDEA-ADAPTIVE-CS-VIA-HVN.md``
-for the full research proposal with examples and analysis.
-
 **Build/run**: Use ``--enable-hvn`` with the SparrowAA frontend to enable
 the HVN optimization pass.
 
