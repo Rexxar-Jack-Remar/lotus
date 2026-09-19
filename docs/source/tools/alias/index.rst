@@ -199,15 +199,6 @@ the entry activation. Resource-limit fallbacks are explicitly marked and make
 the tool exit with status 2. See :doc:`../../alias/bootstrap-aa` for API and
 model details.
 
-DFPA (dfpa)
------------
-
-Demand-refined function-pointer analysis for indirect-call resolution.
-The DFPA library is still available (``lib/Alias/Specialized/DFPA/``) but
-the standalone ``dfpa`` CLI frontend has been removed from the current tree.
-Use ``lotus-alias-call-graph`` with ``-cg-type=dfpa`` to invoke DFPA
-indirect-call resolution programmatically.
-
 Call Graph Construction (lotus-alias-call-graph)
 ------------------------------------
 
@@ -222,11 +213,11 @@ or call-graph analyses.
 .. code-block:: bash
 
    ./build/bin/lotus-alias-call-graph -cg-type=dyck input.bc
-   ./build/bin/lotus-alias-call-graph -cg-type=dfpa -emit-cg-as-json input.bc
+   ./build/bin/lotus-alias-call-graph -cg-type=lotus -emit-cg-as-json input.bc
 
 Key options:
 
-- ``-cg-type=dyck|lotus|dfpa|fpa-flta|fpa-mlta|fpa-mltadf|fpa-kelp|aserpta-ci|aserpta-1cfa|aserpta-2cfa``
+- ``-cg-type=dyck|lotus|fpa-flta|fpa-mlta|fpa-mltadf|fpa-kelp|aserpta-ci|aserpta-1cfa|aserpta-2cfa``
 - ``-emit-cg-as-dot`` or ``-emit-cg-as-json``
 - ``-o <file>`` – output destination
 - ``-S`` – compute graph statistics

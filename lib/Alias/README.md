@@ -61,7 +61,7 @@ This directory contains various alias analysis implementations and toolkits used
 - `UnificationBased/`: unification/CFL-style analyses such as `DyckAA` and
   `seadsa`.
 - `DemandDriven/`: on-demand query-driven analyses such as `DDA`.
-- `Specialized/`: targeted analyses such as `AllocAA`, `DFPA`, `FPA`, `SRAA`,
+- `Specialized/`: targeted analyses such as `AllocAA`, `FPA`, `SRAA`,
   `TypeQualifier`, and `UnderApproxAA`.
 - `Infrastructure/`: shared support layers such as `AliasAnalysisWrapper`,
   `PtsSet`, `Metrics`, and `Spec`.

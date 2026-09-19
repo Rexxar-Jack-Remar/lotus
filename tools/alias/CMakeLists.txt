@@ -90,7 +90,6 @@ target_link_libraries(lotus-alias-call-graph PRIVATE
   CanaryDyckAA
   LotusAA
   CanaryFPA
-  CanaryDFPA
   AserPTA
   CanaryAliasCLIUtils
   ${LLVM_LINK_COMPONENTS}

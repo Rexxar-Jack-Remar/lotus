@@ -10,7 +10,6 @@ add_subdirectory(InclusionBased/TPA)
 add_subdirectory(UnificationBased/DyckAA)
 add_subdirectory(UnificationBased/SeaDsa)
 add_subdirectory(Specialized/AllocAA)
-add_subdirectory(Specialized/DFPA)
 if(LOTUS_ENABLE_TYPE_QUALIFIER)
   add_subdirectory(Specialized/TypeQualifier)
 endif()
@@ -32,7 +31,6 @@ set(LOTUS_ALIAS_TEST_LIBS
     CanaryGuardedValueFlow
     CanaryAliasPtsSet
     CanaryAllocAA
-    CanaryDFPA
     CanaryUnderApproxAA
     CanaryDyckAA
     SeaDsaAnalysis

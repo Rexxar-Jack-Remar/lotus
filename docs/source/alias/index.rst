@@ -20,7 +20,6 @@ pages alongside an algorithm page when comparing analyses.
    bootstrap-aa
    cclyzeraa
    dda
-   dfpa
    dyckaa
    seadsa
    fpa

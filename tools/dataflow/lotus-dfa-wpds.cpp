@@ -2,12 +2,12 @@
 #include "llvm/Support/InitLLVM.h"
 #include "llvm/Support/raw_ostream.h"
 
+#include "Dataflow/Tooling/ToolSupport.h"
 #include "Dataflow/WPDS/Analyses/ConstantPropagationAnalysis.h"
 #include "Dataflow/WPDS/Analyses/LivenessAnalysis.h"
 #include "Dataflow/WPDS/Analyses/TaintAnalysis.h"
 #include "Dataflow/WPDS/Analyses/UninitializedVariablesAnalysis.h"
 #include "Dataflow/WPDS/Backend.h"
-#include "Dataflow/Tooling/ToolSupport.h"
 
 #include <memory>
 #include <set>
