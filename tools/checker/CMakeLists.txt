@@ -9,8 +9,6 @@ llvm_map_components_to_libnames(LLVM_LINK_COMPONENTS
 )
 
 add_executable(lotus-check
-  CheckerOptions.cpp
-  CheckerReport.cpp
   lotus-check-generic.cpp
   lotus-check-kint.cpp
   lotus-check-taint.cpp
@@ -25,6 +23,7 @@ add_executable(lotus-check
 target_link_libraries(lotus-check PRIVATE
   Annotation
   CanaryAliasAnalysisWrapper
+  CanaryCheckerTooling
   CanaryFuzzing
   CanaryKint
   CanarySymbolicExecution

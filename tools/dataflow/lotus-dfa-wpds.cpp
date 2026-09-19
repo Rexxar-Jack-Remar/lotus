@@ -7,7 +7,7 @@
 #include "Dataflow/WPDS/Analyses/TaintAnalysis.h"
 #include "Dataflow/WPDS/Analyses/UninitializedVariablesAnalysis.h"
 #include "Dataflow/WPDS/Backend.h"
-#include "ToolSupport.h"
+#include "Dataflow/Tooling/ToolSupport.h"
 
 #include <memory>
 #include <set>

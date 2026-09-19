@@ -1,5 +1,6 @@
 # Add subdirectories
 add_subdirectory(Framework)
+add_subdirectory(Tooling)
 add_subdirectory(KINT)
 add_subdirectory(Concurrency)
 add_subdirectory(Pulse)

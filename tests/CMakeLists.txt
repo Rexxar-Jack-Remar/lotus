@@ -15,6 +15,8 @@ add_definitions(-DCMAKE_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
 
 set(LOTUS_UNIT_TEST_TIMEOUT 60 CACHE STRING
     "Default timeout in seconds for Lotus unit tests registered with CTest")
+set(LOTUS_TEST_DISCOVERY_TIMEOUT 60 CACHE STRING
+    "Default timeout in seconds for the gtest_discover_tests POST_BUILD discovery step")
 
 # Add unit test subdirectory
 add_subdirectory(unit)

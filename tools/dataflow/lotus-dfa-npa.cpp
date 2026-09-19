@@ -23,7 +23,7 @@
 #include "Dataflow/NPA/Analyses/Intra/ReachingDefinitions.h"
 #include "Dataflow/NPA/LLVM/AnalysisSupport.h"
 #include "Dataflow/NPA/LLVM/BitVectorSolver.h"
-#include "ToolSupport.h"
+#include "Dataflow/Tooling/ToolSupport.h"
 
 #include <algorithm>
 #include <memory>

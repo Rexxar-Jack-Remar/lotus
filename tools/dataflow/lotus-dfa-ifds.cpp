@@ -13,7 +13,7 @@
 #include "Dataflow/IFDS/Analyses/IFDSReachingDefinitions.h"
 #include "Dataflow/IFDS/Analyses/IFDSUninitializedVariables.h"
 #include "Dataflow/IFDS/Solver/IFDSSolver.h"
-#include "ToolSupport.h"
+#include "Dataflow/Tooling/ToolSupport.h"
 
 #include <algorithm>
 #include <memory>

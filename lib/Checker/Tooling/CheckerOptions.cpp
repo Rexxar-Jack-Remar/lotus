@@ -1,4 +1,4 @@
-#include "CheckerOptions.h"
+#include "Checker/Tooling/CheckerOptions.h"
 
 #include "Checker/Framework/BugReportMgr.h"
 

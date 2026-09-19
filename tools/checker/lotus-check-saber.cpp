@@ -13,8 +13,8 @@
 #include "Checker/Saber/FileChecker.h"
 #include "Checker/Saber/LeakChecker.h"
 #include "Checker/Saber/SaberOptions.h"
-#include "CheckerOptions.h"
-#include "CheckerReport.h"
+#include "Checker/Tooling/CheckerOptions.h"
+#include "Checker/Tooling/CheckerReport.h"
 #include "Utils/LLVM/RecursiveTimer.h"
 
 #include <llvm/IRReader/IRReader.h>
