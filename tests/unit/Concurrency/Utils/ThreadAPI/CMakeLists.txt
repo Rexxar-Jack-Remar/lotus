@@ -1,4 +1,4 @@
-add_lotus_concurrency_test_suite(concurrency_thread_api_tests
+lotus_collect_test_sources(concurrency_tests
   ThreadAPITest.cpp
   ThreadAPICppTest.cpp
   ThreadAPICUDATest.cpp

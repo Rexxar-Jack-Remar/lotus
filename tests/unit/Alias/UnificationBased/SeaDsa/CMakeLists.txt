@@ -1,5 +1,1 @@
-add_lotus_test_suite(alias_seadsa_tests
-  SOURCES
-    SeaDsaFieldTypeTest.cpp
-  LINK_LIBS
-    SeaDsaAnalysis)
+lotus_collect_test_sources(alias_tests SeaDsaFieldTypeTest.cpp)

@@ -1,10 +1,6 @@
-add_lotus_test_suite(bootstrap_aa_tests
-  SOURCES
-    BootstrapAATest.cpp
-    EngineTest.cpp
-  LINK_LIBS
-    CanaryBootstrapAA)
-add_dependencies(bootstrap_aa_tests lotus-alias-bootstrap)
+lotus_collect_test_sources(alias_tests
+  BootstrapAATest.cpp
+  EngineTest.cpp)
 
 add_test(NAME bootstrap_aa_cli_smoke
   COMMAND $<TARGET_FILE:lotus-alias-bootstrap>

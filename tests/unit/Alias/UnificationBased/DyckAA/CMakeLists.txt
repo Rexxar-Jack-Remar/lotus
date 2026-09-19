@@ -1,5 +1,1 @@
-add_lotus_test_suite(alias_dyckaa_tests
-  SOURCES
-    DyckAATest.cpp
-  LINK_LIBS
-    CanaryDyckAA)
+lotus_collect_test_sources(alias_tests DyckAATest.cpp)

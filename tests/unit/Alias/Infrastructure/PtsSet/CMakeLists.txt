@@ -1,5 +1,1 @@
-add_lotus_test_suite(alias_ptsset_tests
-  SOURCES
-    PtsSetBackendTest.cpp
-  LINK_LIBS
-    CanaryAliasPtsSet)
+lotus_collect_test_sources(alias_tests PtsSetBackendTest.cpp)

@@ -1,51 +1,50 @@
-add_lotus_targeted_test(dynamic_dyck_test DynamicDyckTest.cpp
-    LINK_LIBS CanaryDynamicDyck)
-include(${CMAKE_SOURCE_DIR}/tests/regress/CFL/DynamicDyck/Tests.cmake)
+# Every CFL gtest source is collected into one binary so the shared CFL/Lotus
+# libraries are linked only once.
+lotus_collect_test_sources(cfl_tests
+  DynamicDyckTest.cpp
+  PrimaryComponentIntegrationTest.cpp
+  InterleavedDyckLCLTest.cpp
+  ClassicalCFLTest.cpp
+  InterleavedDyckSPDSTest.cpp
+  InterleavedDyckAffineSPDSTest.cpp
+  ClassicalArchitectureTest.cpp
+  SCSIndexTest.cpp
+  InterleavedDyckStagedBoundsTest.cpp
+  InterleavedDyckStagedBoundsEngineTest.cpp
+  InterleavedDyckUnaryAdaptiveTest.cpp
+  InterleavedDyckUnaryFixedCounterTest.cpp
+  InterleavedDyckComparisonTest.cpp
+  InterleavedDyckMCFLTest.cpp
+  EndpointQuotientEngineTest.cpp
+  SkewedTabulationEngineTest.cpp
+  CatIeoceEngineTest.cpp
+  ClassicalAdaptersTest.cpp)
 
-add_lotus_targeted_test(dynamic_dyck_primary_component_integration_test
-    PrimaryComponentIntegrationTest.cpp LINK_LIBS CanaryDynamicDyck)
 add_subdirectory(PrimaryComponent)
 
-add_lotus_targeted_test(interleaved_dyck_lcl_test
-    InterleavedDyckLCLTest.cpp
-    LINK_LIBS
-        CanaryInterleavedDyckLCL)
+add_lotus_collected_test_suite(cfl_tests
+  LINK_LIBS
+    CanaryDynamicDyck
+    CanaryInterleavedDyckLCL
+    CanaryInterleavedDyckSPDS
+    CanaryInterleavedDyckAffineSPDS
+    CanaryInterleavedDyckUnary
+    CanaryInterleavedDyckStagedBounds
+    CanaryInterleavedDyckMCFL
+    CanaryClassicalCFL
+    CanaryClassicalCFLAliasClient
+    CanaryClassicalCFLValueFlowClient
+    CanaryCSIndexSCS
+  COMPILE_DEFINITIONS
+    INTERLEAVED_DYCK_DATASET_DIR="${CMAKE_SOURCE_DIR}/benchmarks/real-world/CFL/InterleavedDyck/taint"
+    MCFL_DATASET_DIR="${CMAKE_SOURCE_DIR}/benchmarks/real-world/CFL/InterleavedDyck/taint")
+
+include(${CMAKE_SOURCE_DIR}/tests/regress/CFL/DynamicDyck/Tests.cmake)
+
 include(${CMAKE_SOURCE_DIR}/tests/regress/CFL/InterleavedDyck/LCL/Tests.cmake)
 
-add_lotus_targeted_test(ClassicalCFLTest ClassicalCFLTest.cpp
-    LINK_LIBS
-        CanaryClassicalCFL)
-
-add_lotus_targeted_test(interleaved_dyck_spds_test
-    InterleavedDyckSPDSTest.cpp
-    LINK_LIBS
-        CanaryInterleavedDyckSPDS)
 include(${CMAKE_SOURCE_DIR}/tests/regress/CFL/InterleavedDyck/SPDS/Tests.cmake)
-
-add_lotus_targeted_test(interleaved_dyck_affine_spds_test
-    InterleavedDyckAffineSPDSTest.cpp
-    LINK_LIBS
-        CanaryInterleavedDyckAffineSPDS)
 include(${CMAKE_SOURCE_DIR}/tests/regress/CFL/InterleavedDyck/AffineSPDS/Tests.cmake)
-
-add_lotus_targeted_test(ClassicalArchitectureTest
-    ClassicalArchitectureTest.cpp
-    LINK_LIBS
-        CanaryClassicalCFL)
-
-add_lotus_targeted_test(scs_index_test SCSIndexTest.cpp
-    LINK_LIBS
-        CanaryCSIndexSCS)
-
-add_lotus_targeted_test(interleaved_dyck_staged_bounds_test
-    InterleavedDyckStagedBoundsTest.cpp
-    LINK_LIBS
-        CanaryInterleavedDyckStagedBounds)
-
-add_lotus_targeted_test(interleaved_dyck_staged_bounds_engine_test
-    InterleavedDyckStagedBoundsEngineTest.cpp
-    LINK_LIBS
-        CanaryInterleavedDyckStagedBounds)
 
 if(TARGET lotus-cfl-interleaved-dyck-staged-bounds)
     add_test(NAME interleaved_dyck_staged_bounds_cli_mutual_refinement
@@ -71,48 +70,7 @@ if(TARGET lotus-cfl-interleaved-dyck-staged-bounds)
         PASS_REGULAR_EXPRESSION "mutual-refinement upper bound: 211")
 endif()
 
-add_lotus_test_suite(interleaved_dyck_unary_test
-    SOURCES
-        InterleavedDyckUnaryAdaptiveTest.cpp
-        InterleavedDyckUnaryFixedCounterTest.cpp
-    LINK_LIBS
-        CanaryInterleavedDyckUnary)
 
-add_lotus_targeted_test(interleaved_dyck_comparison_test
-    InterleavedDyckComparisonTest.cpp
-    LINK_LIBS
-        CanaryInterleavedDyckStagedBounds
-        CanaryInterleavedDyckMCFL
-        CanaryInterleavedDyckUnary)
-target_compile_definitions(interleaved_dyck_comparison_test PRIVATE
-    INTERLEAVED_DYCK_DATASET_DIR="${CMAKE_SOURCE_DIR}/benchmarks/real-world/CFL/InterleavedDyck/taint")
-
-add_lotus_targeted_test(interleaved_dyck_mcfl_test
-    InterleavedDyckMCFLTest.cpp
-    LINK_LIBS
-        CanaryInterleavedDyckMCFL)
-target_compile_definitions(interleaved_dyck_mcfl_test PRIVATE
-    MCFL_DATASET_DIR="${CMAKE_SOURCE_DIR}/benchmarks/real-world/CFL/InterleavedDyck/taint")
-
-add_lotus_targeted_test(EndpointQuotientEngineTest
-    EndpointQuotientEngineTest.cpp
-    LINK_LIBS
-        CanaryClassicalCFL)
-
-add_lotus_targeted_test(SkewedTabulationEngineTest
-    SkewedTabulationEngineTest.cpp
-    LINK_LIBS
-        CanaryClassicalCFL)
-
-add_lotus_targeted_test(CatIeoceEngineTest
-    CatIeoceEngineTest.cpp
-    LINK_LIBS
-        CanaryClassicalCFL)
-
-add_lotus_targeted_test(ClassicalAdaptersTest ClassicalAdaptersTest.cpp
-    LINK_LIBS
-        CanaryClassicalCFLAliasClient
-        CanaryClassicalCFLValueFlowClient)
 
 if(TARGET lotus-cfl-solve)
     foreach(classical_backend

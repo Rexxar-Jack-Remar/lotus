@@ -1,5 +1,1 @@
-add_lotus_test_suite(alias_typequalifier_tests
-  SOURCES
-    TypeQualifierTest.cpp
-  LINK_LIBS
-    TypeQualifier)
+lotus_collect_test_sources(alias_tests TypeQualifierTest.cpp)

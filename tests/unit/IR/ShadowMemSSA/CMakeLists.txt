@@ -1,6 +1,1 @@
-add_lotus_test_suite(ir_shadowmemssa_tests
-  SOURCES
-    IPOShadowMemSSATest.cpp
-  LINK_LIBS
-    CanaryShadowMemSSA
-    CanaryOptimizationIPO)
+lotus_collect_test_sources(ir_tests IPOShadowMemSSATest.cpp)

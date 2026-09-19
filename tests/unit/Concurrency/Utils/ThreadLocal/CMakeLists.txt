@@ -1,2 +1,2 @@
-add_lotus_concurrency_test_suite(concurrency_thread_local_tests
+lotus_collect_test_sources(concurrency_tests
   ThreadLocalAnalysisTest.cpp)

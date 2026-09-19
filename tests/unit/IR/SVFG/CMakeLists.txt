@@ -1,8 +1,5 @@
-add_lotus_test_suite(ir_svfg_tests
-  SOURCES
-    MemoryRegionPartitionerTest.cpp
-    SVFGMemorySSATest.cpp
-    SVFGMemorySSAInterproceduralTest.cpp
-    SVFGSerializerTest.cpp
-  LINK_LIBS
-    SVFG)
+lotus_collect_test_sources(ir_tests
+  MemoryRegionPartitionerTest.cpp
+  SVFGMemorySSATest.cpp
+  SVFGMemorySSAInterproceduralTest.cpp
+  SVFGSerializerTest.cpp)

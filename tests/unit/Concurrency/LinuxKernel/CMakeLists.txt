@@ -1,4 +1,4 @@
-add_lotus_concurrency_test_suite(concurrency_linux_kernel_tests
+lotus_collect_test_sources(concurrency_tests
   LinuxKernelAnalysisTest.cpp
   LinuxKernelSynchronizationTest.cpp
   LinuxKernelExecutionModelTest.cpp

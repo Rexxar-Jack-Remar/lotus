@@ -88,12 +88,23 @@ add_subdirectory(Profile)
 add_subdirectory(Purity)
 add_subdirectory(SCCP)
 
-add_lotus_collected_test_suite(analysis_misc_tests
+add_lotus_collected_test_suite(analysis_tests
   LINK_LIBS
     CanaryCFG
     CanaryICFG
+    CanaryICFGControlDependence
     CanaryMultiplicity
     CanaryParameterSummary
     CanaryProfile
     CanarySCCP
-    LLVMAnalysis)
+    CanaryDebugInfo
+    CanaryNullPointer
+    CanaryDyckAA
+    CanaryPurityAnalysis
+    CanaryShadowMemSSA
+    AliasSpecManager
+    Spectre
+    ConstantTimeVerify
+    CanaryNisse
+    LLVMAnalysis
+    LLVMTransformUtils)

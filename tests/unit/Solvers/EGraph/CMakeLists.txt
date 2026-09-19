@@ -1,12 +1,8 @@
-add_lotus_test_suite(solver_egraph_tests
-  SOURCES
-    EGraphCoreTest.cpp
-    EGraphSimpleTest.cpp
-    EGraphMathTest.cpp
-    EGraphPatternAndRewriteTest.cpp
-    EGraphExplanationTest.cpp
-    EGraphExtractorAndAnalysisTest.cpp
-    EGraphSerializationAndSetOpsTest.cpp
-  LINK_LIBS
-    LotusEGraph
-    ${Z3_LIBRARIES})
+lotus_collect_test_sources(solvers_tests
+  EGraphCoreTest.cpp
+  EGraphSimpleTest.cpp
+  EGraphMathTest.cpp
+  EGraphPatternAndRewriteTest.cpp
+  EGraphExplanationTest.cpp
+  EGraphExtractorAndAnalysisTest.cpp
+  EGraphSerializationAndSetOpsTest.cpp)

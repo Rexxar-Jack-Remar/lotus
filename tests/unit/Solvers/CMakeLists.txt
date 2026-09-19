@@ -12,9 +12,22 @@ if(LOTUS_ENABLE_SMT_STABILIZER)
       "SMT_STABILIZER_TEST_INPUT_DIR=\"${CMAKE_CURRENT_SOURCE_DIR}/SMTStabilizerInputs\"")
 endif()
 
-add_lotus_test_suite(solver_smt_tests
-  SOURCES ${LOTUS_SOLVER_SMT_TEST_SOURCES}
-  LINK_LIBS ${LOTUS_SOLVER_SMT_TEST_LIBS}
+lotus_collect_test_sources(solvers_tests ${LOTUS_SOLVER_SMT_TEST_SOURCES})
+
+# All solver test suites are linked into one binary.
+set(LOTUS_SOLVERS_TEST_LIBS
+    SMTSampler
+    SymAbs
+    LotusDatalogFrontend
+    LotusEGraph
+    ${Z3_LIBRARIES})
+if(LOTUS_ENABLE_SMT_STABILIZER)
+  list(APPEND LOTUS_SOLVERS_TEST_LIBS LotusSMTStabilizer)
+endif()
+
+add_lotus_collected_test_suite(solvers_tests
+  LINK_LIBS ${LOTUS_SOLVERS_TEST_LIBS}
   COMPILE_DEFINITIONS ${LOTUS_SOLVER_SMT_TEST_DEFINITIONS})
 
-add_custom_target(solver_tests DEPENDS solver_egraph_tests solver_smt_tests)
+# Preserve the established build entry point.
+add_custom_target(solver_tests DEPENDS solvers_tests)

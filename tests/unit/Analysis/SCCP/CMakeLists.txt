@@ -1,2 +1,2 @@
-lotus_collect_test_sources(analysis_misc_tests
+lotus_collect_test_sources(analysis_tests
   SCCPTest.cpp)
