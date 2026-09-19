@@ -7,6 +7,7 @@
 
 #include "Alias/InclusionBased/TPA/PointerAnalysis/Analysis/SemiSparsePointerAnalysis.h"
 
+#include "Alias/InclusionBased/TPA/Context/Context.h"
 #include "Alias/InclusionBased/TPA/PointerAnalysis/Analysis/GlobalPointerAnalysis.h"
 #include "Alias/InclusionBased/TPA/PointerAnalysis/Engine/GlobalState.h"
 #include "Alias/InclusionBased/TPA/PointerAnalysis/Engine/Initializer.h"
@@ -44,6 +45,16 @@ void SemiSparsePointerAnalysis::runOnProgram(const SemiSparseProgram &ssProg) {
       GlobalPointerAnalysis(ptrManager, memManager, ssProg.getTypeMap())
           .runOnModule(ssProg.getModule());
   LOG_INFO("Global pointer analysis completed");
+
+  // Register pointer args of every function (covers callbacks only entered by
+  // external code) so queries on them are well-defined.
+  for (const auto &func : ssProg.getModule()) {
+    for (const auto &arg : func.args()) {
+      if (arg.getType()->isPointerTy())
+        ptrManager.getOrCreatePointer(context::Context::getGlobalContext(),
+                                      &arg);
+    }
+  }
 
   LOG_INFO("Phase 2: Running data-flow analysis...");
   // Construct the global state that will be passed to transfer functions.
