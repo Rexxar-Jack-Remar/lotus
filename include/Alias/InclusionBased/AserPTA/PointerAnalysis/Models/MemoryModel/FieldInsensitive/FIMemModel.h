@@ -139,7 +139,8 @@ public:
   template <typename PT>
   void processInitializer(const llvm::GlobalVariable *gVar,
                           const llvm::Constant *initializer) {
-    if (initializer->isNullValue()) {
+    if (initializer->isNullValue() ||
+        llvm::isa<llvm::UndefValue>(initializer)) {
       // skip zero initializer ? does it matter?
       // if so, simply link it to null obj
     } else if (initializer->getType()->isSingleValueType()) {
