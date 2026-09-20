@@ -306,10 +306,31 @@ public:
     assert(ctxFunMap.empty() && ctxFunPtrMap.empty());
     const ctx *initialCtx = CT::getInitialCtx();
     llvm::Function *entryFun = llvmModule->getFunction(entryName);
+    if ((entryFun == nullptr || entryFun->isDeclaration()) && entryName == "main") {
+      for (const char *candidate : {"MAIN__", "MAIN_", "_start"}) {
+        if (auto *F = llvmModule->getFunction(candidate)) {
+          if (!F->isDeclaration()) {
+            entryFun = F;
+            this->entryName = F->getName();
+            break;
+          }
+        }
+      }
+      if (entryFun == nullptr || entryFun->isDeclaration()) {
+        for (const llvm::Function &F : *llvmModule) {
+          if (!F.isDeclaration() && !F.isIntrinsic()) {
+            entryFun = const_cast<llvm::Function *>(&F);
+            this->entryName = F.getName();
+            break;
+          }
+        }
+      }
+    }
     if (entryFun == nullptr || entryFun->isDeclaration()) {
       llvm::errs() << "Fatal Error: '" << entryName
                    << "' function cannot be found!\n";
-      exit(1);
+      throw std::invalid_argument("Fatal Error: '" + entryName.str() +
+                                  "' function cannot be found!");
     }
     // here do the initial call callgraph construction
     // main function has not call site

@@ -98,7 +98,27 @@ public:
     module_ = &module;
     const auto frontend_start = std::chrono::steady_clock::now();
     builder_ = std::make_unique<ConstraintBuilder>();
-    builder_->analyze(&module, options_.entry);
+    std::string entry = options_.entry;
+    if (entry == "main" && (!module.getFunction(entry) ||
+                            module.getFunction(entry)->isDeclaration())) {
+      for (const char *candidate : {"MAIN__", "MAIN_", "_start"}) {
+        if (auto *F = module.getFunction(candidate)) {
+          if (!F->isDeclaration()) {
+            entry = candidate;
+            break;
+          }
+        }
+      }
+      if (entry == "main") {
+        for (const llvm::Function &F : module) {
+          if (!F.isDeclaration() && !F.isIntrinsic()) {
+            entry = F.getName().str();
+            break;
+          }
+        }
+      }
+    }
+    builder_->analyze(&module, entry);
     frontend_time_microseconds_ =
         std::chrono::duration_cast<std::chrono::microseconds>(
             std::chrono::steady_clock::now() - frontend_start)

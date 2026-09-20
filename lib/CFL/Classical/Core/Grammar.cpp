@@ -460,12 +460,25 @@ void Grammar::loadFromText(const std::string &text,
     if (head.empty()) {
       throw std::invalid_argument("Production has an empty head");
     }
+    if (head.rfind("__lotus_generated_", 0) == 0) {
+      try {
+        next_nonterminal_id_ = std::max(
+            next_nonterminal_id_,
+            static_cast<unsigned>(std::stoul(head.substr(18))));
+      } catch (...) {}
+    }
     const auto alternatives = split(rule_text.substr(arrow_pos + 2), '|');
     for (const auto &alternative : alternatives) {
       auto rule = tokenize(alternative);
       for (std::string &token : rule) {
         if (isEpsilon(token)) {
           token = kEpsilonSymbol;
+        } else if (token.rfind("__lotus_generated_", 0) == 0) {
+          try {
+            next_nonterminal_id_ = std::max(
+                next_nonterminal_id_,
+                static_cast<unsigned>(std::stoul(token.substr(18))));
+          } catch (...) {}
         }
       }
       std::vector<std::string> production{head};
@@ -637,23 +650,10 @@ std::string Grammar::freshNonterminal() {
   while (true) {
     const std::string candidate =
         "__lotus_generated_" + std::to_string(++next_nonterminal_id_);
-    bool used = terminals_.count(candidate) != 0 ||
-                nonterminals_.count(candidate) != 0 ||
-                productions_.count(candidate) != 0;
-    if (!used) {
-      for (const auto &[_, rules] : productions_) {
-        for (const auto &rule : rules) {
-          if (std::find(rule.begin(), rule.end(), candidate) != rule.end()) {
-            used = true;
-            break;
-          }
-        }
-        if (used) {
-          break;
-        }
-      }
-    }
-    if (!used) {
+    if (terminals_.count(candidate) == 0 &&
+        nonterminals_.count(candidate) == 0 &&
+        productions_.count(candidate) == 0 &&
+        generated_nonterminals_.count(candidate) == 0) {
       nonterminals_.insert(candidate);
       generated_nonterminals_.insert(candidate);
       return candidate;
