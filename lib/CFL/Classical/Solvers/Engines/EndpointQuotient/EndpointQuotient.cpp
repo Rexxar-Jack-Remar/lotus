@@ -9,9 +9,12 @@
 #include <numeric>
 #include <stdexcept>
 #include <tuple>
+#include <type_traits>
 #include <unordered_map>
 #include <unordered_set>
 #include <utility>
+
+#include <llvm/ADT/SparseBitVector.h>
 
 namespace lotus {
 namespace cfl {
@@ -20,6 +23,8 @@ namespace {
 
 using Clock = std::chrono::steady_clock;
 using Lists = std::vector<std::vector<Id>>;
+using ClassId = std::uint32_t;
+using ClassLists = std::vector<std::vector<ClassId>>;
 
 static double milliseconds(Clock::time_point a, Clock::time_point b) {
   return std::chrono::duration<double, std::milli>(b - a).count();
@@ -43,12 +48,48 @@ template <class T> static void sortUnique(std::vector<T> &values) {
   values.erase(std::unique(values.begin(), values.end()), values.end());
 }
 
+static bool edgeLess(const Edge &lhs, const Edge &rhs) {
+  return std::tie(lhs.symbol, lhs.source, lhs.target) <
+         std::tie(rhs.symbol, rhs.source, rhs.target);
+}
+
+static bool edgeEqual(const Edge &lhs, const Edge &rhs) {
+  return lhs.symbol == rhs.symbol && lhs.source == rhs.source &&
+         lhs.target == rhs.target;
+}
+
+static std::vector<Edge> canonicalEdges(std::vector<Edge> edges) {
+  std::sort(edges.begin(), edges.end(), edgeLess);
+  edges.erase(std::unique(edges.begin(), edges.end(), edgeEqual), edges.end());
+  return edges;
+}
+
+static bool sameRules(const std::vector<Rule> &lhs,
+                      const std::vector<Rule> &rhs) {
+  if (lhs.size() != rhs.size())
+    return false;
+  for (Id i = 0; i < lhs.size(); ++i)
+    if (lhs[i].kind != rhs[i].kind || lhs[i].lhs != rhs[i].lhs ||
+        lhs[i].left != rhs[i].left || lhs[i].right != rhs[i].right)
+      return false;
+  return true;
+}
+
 struct VectorHash {
   std::size_t operator()(const std::vector<Id> &v) const noexcept {
     std::size_t h = v.size();
     for (Id x : v)
       h ^= std::hash<Id>{}(x) + std::size_t(0x9e3779b9U) + (h << 6) + (h >> 2);
     return h;
+  }
+};
+
+struct PairHash {
+  std::size_t operator()(const std::pair<Id, Id> &pair) const noexcept {
+    std::size_t hash = std::hash<Id>{}(pair.first);
+    hash ^= std::hash<Id>{}(pair.second) + std::size_t(0x9e3779b9U) +
+            (hash << 6) + (hash >> 2);
+    return hash;
   }
 };
 
@@ -101,15 +142,15 @@ struct Partition {
 // Each fine class belongs to exactly one coarse class. The grammar dependency
 // closure guarantees this refinement; checking all members in debug builds
 // catches mistakes that representative-only quotient constructions can hide.
-static Lists lift(const Partition &fine, const Partition &coarse) {
-  Lists result(coarse.members.size());
+static ClassLists lift(const Partition &fine, const Partition &coarse) {
+  ClassLists result(coarse.members.size());
   for (Id f = 0; f < fine.members.size(); ++f) {
     Id c = coarse.class_of[fine.members[f].front()];
 #ifndef NDEBUG
     for (Id v : fine.members[f])
       assert(coarse.class_of[v] == c);
 #endif
-    result[c].push_back(f);
+    result[c].push_back(static_cast<ClassId>(f));
   }
   return result;
 }
@@ -150,34 +191,138 @@ static Lists dependencyClosure(const Lists &dependencies,
 // Sparse relations do not allocate a hash table per row. Denser quotients
 // promote to a bounded bitmap, making duplicate publication a bit test.
 class CellSet {
-  struct Hash {
-    std::size_t operator()(const std::pair<Id, Id> &p) const {
-      return p.first ^ (p.second + std::size_t(0x9e3779b9U) + (p.first << 6) +
-                        (p.first >> 2));
+  struct Row {
+    Count size = 0;
+    llvm::SparseBitVector<> sparse;
+    std::vector<std::uint64_t> dense;
+
+    void promote(Id columns) {
+      dense.assign((columns + 63) / 64, 0);
+      for (unsigned column : sparse)
+        dense[column / 64] |= std::uint64_t(1) << (column % 64);
+      sparse = llvm::SparseBitVector<>();
+    }
+
+    bool insert(Id column, Id columns) {
+      if (!dense.empty()) {
+        auto &word = dense[column / 64];
+        const auto mask = std::uint64_t(1) << (column % 64);
+        const bool added = !(word & mask);
+        word |= mask;
+        size += added ? 1 : 0;
+        return added;
+      }
+      const bool added = sparse.test_and_set(column);
+      size += added ? 1 : 0;
+      constexpr Id MAX_DENSE_ROW_WORDS = 256;
+      if (added && columns && (columns + 63) / 64 <= MAX_DENSE_ROW_WORDS &&
+          size >= (columns + 127) / 128)
+        promote(columns);
+      return added;
+    }
+
+    bool contains(Id column) const {
+      return dense.empty() ? sparse.test(column)
+                           : (dense[column / 64] &
+                              (std::uint64_t(1) << (column % 64))) != 0;
+    }
+
+    template <class Visitor>
+    Count insertMany(const std::vector<ClassId> &columns, Id total_columns,
+                     Visitor visitor) {
+      if (columns.size() < 32) {
+        Count inserted = 0;
+        for (Id column : columns)
+          if (insert(column, total_columns)) {
+            visitor(column);
+            ++inserted;
+          }
+        return inserted;
+      }
+      if (!dense.empty()) {
+        Count inserted = 0;
+        for (Id column : columns) {
+          auto &word = dense[column / 64];
+          const auto mask = std::uint64_t(1) << (column % 64);
+          if (word & mask)
+            continue;
+          word |= mask;
+          visitor(column);
+          ++inserted;
+        }
+        size += inserted;
+        return inserted;
+      }
+
+      llvm::SparseBitVector<> candidates;
+      for (Id column : columns)
+        candidates.set(column);
+      llvm::SparseBitVector<> delta;
+      delta.intersectWithComplement(candidates, sparse);
+      const Count inserted = delta.count();
+      sparse |= delta;
+      size += inserted;
+      for (unsigned column : delta)
+        visitor(column);
+      constexpr Id MAX_DENSE_ROW_WORDS = 256;
+      if (inserted && total_columns &&
+          (total_columns + 63) / 64 <= MAX_DENSE_ROW_WORDS &&
+          size >= (total_columns + 127) / 128)
+        promote(total_columns);
+      return inserted;
+    }
+
+    template <class Visitor> void forEach(Visitor visitor) const {
+      if (dense.empty()) {
+        for (unsigned column : sparse)
+          visitor(column);
+        return;
+      }
+      for (Id word = 0; word < dense.size(); ++word) {
+        auto value = dense[word];
+        while (value) {
+          visitor(word * 64 + __builtin_ctzll(value));
+          value &= value - 1;
+        }
+      }
+    }
+
+    std::size_t payloadBytes() const {
+      return dense.capacity() * sizeof(std::uint64_t) +
+             (dense.empty() ? size * sizeof(unsigned) : 0);
     }
   };
+
   Id columns_ = 0;
   Id area_ = 0;
+  Count sparse_size_ = 0;
   std::vector<std::uint64_t> bits_;
-  std::unordered_set<std::pair<Id, Id>, Hash> sparse_;
+  std::vector<Row> sparse_rows_;
 
   void promote() {
     bits_.assign((area_ + 63) / 64, 0);
-    for (auto cell : sparse_) {
-      const Id bit = cell.first * columns_ + cell.second;
-      bits_[bit / 64] |= std::uint64_t(1) << (bit % 64);
-    }
-    decltype(sparse_)().swap(sparse_);
+    for (Id row = 0; row < sparse_rows_.size(); ++row)
+      sparse_rows_[row].forEach([&](Id column) {
+        const Id bit = row * columns_ + column;
+        bits_[bit / 64] |= std::uint64_t(1) << (bit % 64);
+      });
+    decltype(sparse_rows_)().swap(sparse_rows_);
   }
 
 public:
   void reset(Id rows, Id columns) {
     columns_ = columns;
+    area_ = 0;
+    sparse_size_ = 0;
+    bits_.clear();
+    sparse_rows_.clear();
     constexpr Id MAX_BITS = 8 * 1024 * 1024;
     if (columns && rows <= MAX_BITS / columns)
       area_ = rows * columns;
     if (area_ && area_ <= 4096)
       promote();
+    else
+      sparse_rows_.resize(rows);
   }
 
   bool insert(Id row, Id column) {
@@ -189,17 +334,43 @@ public:
       word |= mask;
       return added;
     }
-    const bool added = sparse_.emplace(row, column).second;
-    if (added && area_ && sparse_.size() >= (area_ + 127) / 128)
+    const bool added = sparse_rows_[row].insert(column, columns_);
+    sparse_size_ += added ? 1 : 0;
+    if (added && area_ && sparse_size_ >= (area_ + 127) / 128)
       promote();
     return added;
   }
 
   bool contains(Id row, Id column) const {
     if (bits_.empty())
-      return sparse_.count({row, column}) != 0;
+      return sparse_rows_[row].contains(column);
     const Id bit = row * columns_ + column;
     return bits_[bit / 64] & (std::uint64_t(1) << (bit % 64));
+  }
+
+  template <class Visitor>
+  Count insertMany(Id row, const std::vector<ClassId> &columns,
+                   Visitor visitor) {
+    if (!bits_.empty()) {
+      Count inserted = 0;
+      for (Id column : columns) {
+        const Id bit = row * columns_ + column;
+        auto &word = bits_[bit / 64];
+        const auto mask = std::uint64_t(1) << (bit % 64);
+        if (word & mask)
+          continue;
+        word |= mask;
+        visitor(column);
+        ++inserted;
+      }
+      return inserted;
+    }
+    const Count inserted =
+        sparse_rows_[row].insertMany(columns, columns_, visitor);
+    sparse_size_ += inserted;
+    if (inserted && area_ && sparse_size_ >= (area_ + 127) / 128)
+      promote();
+    return inserted;
   }
 
   bool isDense() const { return !bits_.empty(); }
@@ -219,8 +390,8 @@ public:
 
   template <class Visitor> void forEach(Visitor visitor) const {
     if (!isDense()) {
-      for (auto cell : sparse_)
-        visitor(cell.first, cell.second);
+      for (Id row = 0; row < sparse_rows_.size(); ++row)
+        sparse_rows_[row].forEach([&](Id column) { visitor(row, column); });
       return;
     }
     for (Id w = 0; w < bits_.size(); ++w) {
@@ -234,9 +405,11 @@ public:
   }
 
   std::size_t payloadBytes() const {
-    return bits_.capacity() * sizeof(std::uint64_t) +
-           sparse_.size() * sizeof(std::pair<Id, Id>) +
-           sparse_.bucket_count() * sizeof(void *);
+    std::size_t bytes = bits_.capacity() * sizeof(std::uint64_t) +
+                        sparse_rows_.capacity() * sizeof(Row);
+    for (const Row &row : sparse_rows_)
+      bytes += row.payloadBytes();
+    return bytes;
   }
 };
 
@@ -261,8 +434,10 @@ struct JoinRows {
 
 struct Relation {
   CellSet known;
-  Lists active_out;
-  Lists active_in;
+  ClassLists active_out;
+  ClassLists active_in;
+  ClassLists pending_out;
+  std::vector<bool> queued_rows;
   std::unique_ptr<JoinRows> join_rows;
   bool tried_join_rows = false;
 };
@@ -270,13 +445,13 @@ struct Relation {
 struct UnaryPlan {
   Id lhs;
   Id child;
-  std::shared_ptr<const Lists> rows;
-  std::shared_ptr<const Lists> columns;
+  std::shared_ptr<const ClassLists> rows;
+  std::shared_ptr<const ClassLists> columns;
 };
 
 struct Bridge {
-  Lists to_right;
-  Lists to_left;
+  ClassLists to_right;
+  ClassLists to_left;
   Count pairs = 0;
 };
 
@@ -284,8 +459,8 @@ struct BinaryPlan {
   Id lhs;
   Id left;
   Id right;
-  std::shared_ptr<const Lists> rows;
-  std::shared_ptr<const Lists> columns;
+  std::shared_ptr<const ClassLists> rows;
+  std::shared_ptr<const ClassLists> columns;
   // An interface edge (j,k) means Q_left[j] intersects P_right[k].
   // Numeric class ID equality has NO semantic meaning across partitions.
   std::shared_ptr<const Bridge> bridge;
@@ -300,9 +475,49 @@ struct Fact {
   Id column;
 };
 
+struct DeltaRow {
+  Id symbol;
+  Id row;
+};
+
+struct FactorView {
+  Id symbol = 0;
+  Id source_origin = 0;
+  Id target_origin = 0;
+  std::shared_ptr<const Partition> source;
+  std::shared_ptr<const Partition> target;
+  std::shared_ptr<const ClassLists> global_rows;
+  std::shared_ptr<const ClassLists> global_columns;
+  CellSet known;
+  ClassLists active_out;
+  ClassLists active_in;
+  ClassLists pending_out;
+  std::vector<bool> queued_rows;
+};
+
+struct FactorUnaryPlan {
+  Id lhs_view = 0;
+  Id child_view = 0;
+};
+
+struct FactorBinaryPlan {
+  Id lhs_view = 0;
+  Id left_view = 0;
+  Id right_view = 0;
+  std::shared_ptr<const Bridge> bridge;
+};
+
+struct FactorDeltaRow {
+  Id view = 0;
+  Id row = 0;
+};
+
 } // namespace
 
 void Problem::validate() const {
+  if (nodes > std::numeric_limits<ClassId>::max())
+    throw std::invalid_argument(
+        "endpoint quotient node count exceeds 32-bit class IDs");
   for (const Edge &e : edges)
     if (e.source >= nodes || e.target >= nodes || e.symbol >= symbols)
       throw std::invalid_argument("endpoint quotient edge ID out of range");
@@ -330,6 +545,8 @@ void Problem::validate() const {
 struct Solver::Impl {
   Problem problem;
   Options options;
+  std::vector<Rule> grammar_rules;
+  std::vector<Edge> seed_edges;
   bool solved = false;
   bool started = false;
   Statistics stats;
@@ -342,9 +559,27 @@ struct Solver::Impl {
   Lists unit_uses;
   Lists left_uses;
   Lists right_uses;
-  std::deque<Fact> worklist;
+  std::deque<DeltaRow> worklist;
+  Count pending_cells = 0;
+  const Impl *previous = nullptr;
+  Id join_index_words = 0;
+  std::vector<ClassId> bulk_values;
+  std::vector<std::uint32_t> bulk_marks;
+  std::uint32_t bulk_epoch = 0;
+  std::vector<FactorView> factor_views;
+  Lists symbol_factor_views;
+  std::map<std::tuple<Id, Id, Id>, Id> factor_view_ids;
+  std::vector<FactorUnaryPlan> factor_units;
+  std::vector<FactorBinaryPlan> factor_binaries;
+  Lists factor_unit_uses;
+  Lists factor_left_uses;
+  Lists factor_right_uses;
+  std::deque<FactorDeltaRow> factor_worklist;
+  Count factor_pending_cells = 0;
 
-  Impl(Problem p, Options o) : problem(std::move(p)), options(o) {
+  Impl(Problem p, Options o, const Impl *old = nullptr)
+      : problem(std::move(p)), options(o), grammar_rules(problem.rules),
+        seed_edges(canonicalEdges(problem.edges)), previous(old) {
     problem.validate();
     switch (options.partitions) {
     case PartitionMode::Grammar:
@@ -354,6 +589,17 @@ struct Solver::Impl {
     default:
       throw std::invalid_argument("endpoint quotient invalid partition mode");
     }
+    if (previous &&
+        (!previous->solved || previous->problem.symbols != problem.symbols ||
+         previous->problem.nodes > problem.nodes ||
+         previous->options.partitions != options.partitions ||
+         previous->options.factorized != options.factorized ||
+         !sameRules(previous->grammar_rules, grammar_rules) ||
+         !std::includes(seed_edges.begin(), seed_edges.end(),
+                        previous->seed_edges.begin(),
+                        previous->seed_edges.end(), edgeLess)))
+      throw std::invalid_argument(
+          "endpoint quotient incremental snapshot is incompatible");
   }
 
   void requireSolved() const {
@@ -478,6 +724,241 @@ struct Solver::Impl {
     build(last, atomic_in, targets);
   }
 
+  void refinePreviousPartitions() {
+    if (!previous)
+      return;
+    const Id old_nodes = previous->problem.nodes;
+    std::unordered_map<std::vector<Id>, std::shared_ptr<const Partition>,
+                       VectorHash>
+        partitions;
+    std::map<std::pair<Id, Id>, std::shared_ptr<const Partition>> refinements;
+    auto refine = [&](const std::shared_ptr<const Partition> &fresh,
+                      const std::shared_ptr<const Partition> &old) {
+      const std::pair<Id, Id> refinement_key{fresh->id, old->id};
+      const auto refined = refinements.find(refinement_key);
+      if (refined != refinements.end())
+        return refined->second;
+
+      Partition partition;
+      partition.class_of.reserve(problem.nodes);
+      std::unordered_map<std::pair<Id, Id>, Id, PairHash> classes;
+      classes.reserve(problem.nodes);
+      const Id new_node_class = old->members.size();
+      for (Id v = 0; v < problem.nodes; ++v) {
+        const std::pair<Id, Id> key{fresh->class_of[v], v < old_nodes
+                                                            ? old->class_of[v]
+                                                            : new_node_class};
+        const Id next = classes.size();
+        const auto [it, inserted] = classes.emplace(key, next);
+        if (inserted)
+          partition.members.emplace_back();
+        partition.class_of.push_back(it->second);
+        partition.members[it->second].push_back(v);
+      }
+      const auto found = partitions.find(partition.class_of);
+      std::shared_ptr<const Partition> result;
+      if (found != partitions.end()) {
+        result = found->second;
+      } else {
+        partition.id = stats.partitions_built++;
+        result = std::make_shared<const Partition>(std::move(partition));
+        partitions.emplace(result->class_of, result);
+      }
+      refinements.emplace(refinement_key, result);
+      return result;
+    };
+    for (Id a = 0; a < problem.symbols; ++a) {
+      sources[a] = refine(sources[a], previous->sources[a]);
+      targets[a] = refine(targets[a], previous->targets[a]);
+    }
+  }
+
+  void migratePreviousClosure() {
+    if (!previous)
+      return;
+    const Id old_nodes = previous->problem.nodes;
+    std::map<std::pair<Id, Id>, std::shared_ptr<const ClassLists>> child_maps;
+    auto getChildren = [&](const std::shared_ptr<const Partition> &fine,
+                           const std::shared_ptr<const Partition> &coarse) {
+      const std::pair<Id, Id> key{fine->id, coarse->id};
+      const auto found = child_maps.find(key);
+      if (found != child_maps.end())
+        return found->second;
+      auto children = std::make_shared<ClassLists>(coarse->members.size());
+      for (Id v = 0; v < old_nodes; ++v)
+        (*children)[coarse->class_of[v]].push_back(
+            static_cast<ClassId>(fine->class_of[v]));
+      for (auto &classes : *children)
+        sortUnique(classes);
+      child_maps.emplace(key, children);
+      return std::shared_ptr<const ClassLists>(std::move(children));
+    };
+    for (Id a = 0; a < problem.symbols; ++a) {
+      if (sources[a]->class_of == previous->sources[a]->class_of &&
+          targets[a]->class_of == previous->targets[a]->class_of) {
+        relations[a].known = previous->relations[a].known;
+        relations[a].active_out = previous->relations[a].active_out;
+        relations[a].active_in = previous->relations[a].active_in;
+        for (const auto &row : relations[a].active_out)
+          stats.cells += row.size();
+        continue;
+      }
+      const auto source_children =
+          getChildren(sources[a], previous->sources[a]);
+      const auto target_children =
+          getChildren(targets[a], previous->targets[a]);
+
+      for (Id old_row = 0; old_row < previous->relations[a].active_out.size();
+           ++old_row) {
+        for (Id old_column : previous->relations[a].active_out[old_row]) {
+          for (Id row : (*source_children)[old_row])
+            for (Id column : (*target_children)[old_column]) {
+              if (!relations[a].known.insert(row, column))
+                continue;
+              relations[a].active_out[row].push_back(column);
+              relations[a].active_in[column].push_back(row);
+              ++stats.cells;
+            }
+        }
+      }
+    }
+  }
+
+  Id addFactorView(Id symbol, Id source_origin, Id target_origin) {
+    const auto key = std::make_tuple(symbol, source_origin, target_origin);
+    const auto found = factor_view_ids.find(key);
+    if (found != factor_view_ids.end())
+      return found->second;
+    const Id id = factor_views.size();
+    FactorView view;
+    view.symbol = symbol;
+    view.source_origin = source_origin;
+    view.target_origin = target_origin;
+    view.source = sources[source_origin];
+    view.target = targets[target_origin];
+    view.known.reset(view.source->members.size(), view.target->members.size());
+    view.active_out.resize(view.source->members.size());
+    view.active_in.resize(view.target->members.size());
+    view.pending_out.resize(view.source->members.size());
+    view.queued_rows.resize(view.source->members.size());
+    factor_views.push_back(std::move(view));
+    factor_view_ids.emplace(key, id);
+    symbol_factor_views[symbol].push_back(id);
+    return id;
+  }
+
+  void buildFactorizedPlans(
+      const std::vector<std::pair<Id, Id>> &unary_rules,
+      const std::vector<std::tuple<Id, Id, Id>> &binary_rules) {
+    symbol_factor_views.resize(problem.symbols);
+    std::vector<bool> observed(problem.symbols, false);
+    for (const Edge &edge : problem.edges)
+      observed[edge.symbol] = true;
+    for (Id symbol = 0; symbol < problem.symbols; ++symbol)
+      if (observed[symbol])
+        addFactorView(symbol, symbol, symbol);
+
+    bool changed = true;
+    while (changed) {
+      changed = false;
+      for (const auto &[lhs, child] : unary_rules) {
+        const auto child_views = symbol_factor_views[child];
+        for (Id child_view : child_views) {
+          const auto &view = factor_views[child_view];
+          const auto before = factor_views.size();
+          addFactorView(lhs, view.source_origin, view.target_origin);
+          changed = changed || factor_views.size() != before;
+        }
+      }
+      for (const auto &[lhs, left, right] : binary_rules) {
+        const auto left_views = symbol_factor_views[left];
+        const auto right_views = symbol_factor_views[right];
+        for (Id left_view : left_views)
+          for (Id right_view : right_views) {
+            const auto before = factor_views.size();
+            addFactorView(lhs, factor_views[left_view].source_origin,
+                          factor_views[right_view].target_origin);
+            changed = changed || factor_views.size() != before;
+          }
+      }
+      constexpr Id MAX_FACTOR_VIEWS = 64 * 1024;
+      if (factor_views.size() > MAX_FACTOR_VIEWS)
+        throw std::runtime_error(
+            "endpoint quotient factorized view limit exceeded");
+    }
+
+    std::map<std::pair<Id, Id>, std::shared_ptr<const ClassLists>> lifts;
+    auto getLift = [&](const std::shared_ptr<const Partition> &fine,
+                       const std::shared_ptr<const Partition> &coarse) {
+      const std::pair<Id, Id> key{fine->id, coarse->id};
+      auto &entry = lifts[key];
+      if (!entry)
+        entry = std::make_shared<const ClassLists>(lift(*fine, *coarse));
+      return entry;
+    };
+    for (FactorView &view : factor_views) {
+      view.global_rows = getLift(sources[view.symbol], view.source);
+      view.global_columns = getLift(targets[view.symbol], view.target);
+    }
+
+    factor_unit_uses.resize(factor_views.size());
+    factor_left_uses.resize(factor_views.size());
+    factor_right_uses.resize(factor_views.size());
+    for (const auto &[lhs, child] : unary_rules)
+      for (Id child_view : symbol_factor_views[child]) {
+        const auto &view = factor_views[child_view];
+        const Id lhs_view = factor_view_ids.at(
+            std::make_tuple(lhs, view.source_origin, view.target_origin));
+        factor_unit_uses[child_view].push_back(factor_units.size());
+        factor_units.push_back({lhs_view, child_view});
+      }
+
+    std::map<std::pair<Id, Id>, std::shared_ptr<const Bridge>> bridges;
+    auto getBridge = [&](const std::shared_ptr<const Partition> &left,
+                         const std::shared_ptr<const Partition> &right) {
+      const std::pair<Id, Id> key{left->id, right->id};
+      auto &bridge = bridges[key];
+      if (bridge)
+        return bridge;
+      auto value = std::make_shared<Bridge>();
+      value->to_right.resize(left->members.size());
+      value->to_left.resize(right->members.size());
+      if (left == right) {
+        for (Id i = 0; i < left->members.size(); ++i) {
+          value->to_right[i].push_back(static_cast<ClassId>(i));
+          value->to_left[i].push_back(static_cast<ClassId>(i));
+        }
+        value->pairs = left->members.size();
+      } else {
+        std::vector<std::pair<Id, Id>> pairs;
+        pairs.reserve(problem.nodes);
+        for (Id node = 0; node < problem.nodes; ++node)
+          pairs.emplace_back(left->class_of[node], right->class_of[node]);
+        sortUnique(pairs);
+        value->pairs = pairs.size();
+        for (const auto &[l, r] : pairs) {
+          value->to_right[l].push_back(static_cast<ClassId>(r));
+          value->to_left[r].push_back(static_cast<ClassId>(l));
+        }
+      }
+      bridge = std::move(value);
+      return bridge;
+    };
+    for (const auto &[lhs, left, right] : binary_rules)
+      for (Id left_view : symbol_factor_views[left])
+        for (Id right_view : symbol_factor_views[right]) {
+          const auto &l = factor_views[left_view];
+          const auto &r = factor_views[right_view];
+          const Id lhs_view = factor_view_ids.at(
+              std::make_tuple(lhs, l.source_origin, r.target_origin));
+          const Id plan = factor_binaries.size();
+          factor_left_uses[left_view].push_back(plan);
+          factor_right_uses[right_view].push_back(plan);
+          factor_binaries.push_back(
+              {lhs_view, left_view, right_view, getBridge(l.target, r.source)});
+        }
+  }
+
   void prepare() {
     computeNullable();
     std::vector<std::pair<Id, Id>> unary_rules;
@@ -516,6 +997,7 @@ struct Solver::Impl {
     } else {
       buildPartitions({}, {});
     }
+    refinePreviousPartitions();
 
     unit_uses.resize(problem.symbols);
     left_uses.resize(problem.symbols);
@@ -526,15 +1008,22 @@ struct Solver::Impl {
                                targets[a]->members.size());
       relations[a].active_out.resize(sources[a]->members.size());
       relations[a].active_in.resize(targets[a]->members.size());
+      relations[a].pending_out.resize(sources[a]->members.size());
+      relations[a].queued_rows.resize(sources[a]->members.size());
+    }
+    migratePreviousClosure();
+    if (options.factorized) {
+      buildFactorizedPlans(unary_rules, binary_rules);
+      return;
     }
     using Key = std::pair<Id, Id>;
-    std::map<Key, std::shared_ptr<const Lists>> lifts;
+    std::map<Key, std::shared_ptr<const ClassLists>> lifts;
     auto getLift = [&](const std::shared_ptr<const Partition> &fine,
                        const std::shared_ptr<const Partition> &coarse) {
       const Key key{fine->id, coarse->id};
       auto &entry = lifts[key];
       if (!entry) {
-        entry = std::make_shared<const Lists>(lift(*fine, *coarse));
+        entry = std::make_shared<const ClassLists>(lift(*fine, *coarse));
         ++stats.lifts_built;
       }
       return entry;
@@ -591,37 +1080,127 @@ struct Solver::Impl {
     }
   }
 
+  void enqueuePublished(Id a, Id row, Id column) {
+    if (relations[a].join_rows)
+      relations[a].join_rows->know(row, column);
+    auto &relation = relations[a];
+    relation.pending_out[row].push_back(column);
+    if (!relation.queued_rows[row]) {
+      relation.queued_rows[row] = true;
+      worklist.push_back({a, row});
+    }
+    ++pending_cells;
+    ++stats.cells;
+    ++stats.worklist_pushes;
+    stats.peak_worklist = std::max(stats.peak_worklist, pending_cells);
+  }
+
   bool publish(Id a, Id row, Id column) {
     ++stats.insert_attempts;
     if (!relations[a].known.insert(row, column)) {
       ++stats.duplicate_inserts;
       return false;
     }
-    if (relations[a].join_rows)
-      relations[a].join_rows->know(row, column);
-    worklist.push_back({a, row, column});
-    ++stats.cells;
-    ++stats.worklist_pushes;
-    stats.peak_worklist =
-        std::max(stats.peak_worklist, static_cast<Count>(worklist.size()));
+    enqueuePublished(a, row, column);
     return true;
   }
 
-  void binaryJoin(BinaryPlan &plan, Id row, Id column) {
+  void projectFactorCell(Id view_id, Id row, Id column) {
+    const auto &view = factor_views[view_id];
+    auto &global = relations[view.symbol];
+    for (Id global_row : (*view.global_rows)[row])
+      for (Id global_column : (*view.global_columns)[column]) {
+        if (!global.known.insert(global_row, global_column))
+          continue;
+        global.active_out[global_row].push_back(
+            static_cast<ClassId>(global_column));
+        global.active_in[global_column].push_back(
+            static_cast<ClassId>(global_row));
+        ++stats.cells;
+      }
+  }
+
+  void enqueueFactorCell(Id view_id, Id row, Id column) {
+    auto &view = factor_views[view_id];
+    view.pending_out[row].push_back(static_cast<ClassId>(column));
+    if (!view.queued_rows[row]) {
+      view.queued_rows[row] = true;
+      factor_worklist.push_back({view_id, row});
+    }
+    ++factor_pending_cells;
+    ++stats.worklist_pushes;
+    stats.peak_worklist = std::max(stats.peak_worklist, factor_pending_cells);
+    projectFactorCell(view_id, row, column);
+  }
+
+  bool publishFactor(Id view_id, Id row, Id column) {
+    ++stats.insert_attempts;
+    if (!factor_views[view_id].known.insert(row, column)) {
+      ++stats.duplicate_inserts;
+      return false;
+    }
+    enqueueFactorCell(view_id, row, column);
+    return true;
+  }
+
+  Count publishFactorMany(Id view_id, Id row,
+                          const std::vector<ClassId> &columns) {
+    stats.insert_attempts += columns.size();
+    const Count inserted =
+        factor_views[view_id].known.insertMany(row, columns, [&](Id column) {
+          enqueueFactorCell(view_id, row, column);
+        });
+    stats.duplicate_inserts += columns.size() - inserted;
+    return inserted;
+  }
+
+  Count publishMany(Id a, Id row, const std::vector<ClassId> &columns) {
+    stats.insert_attempts += columns.size();
+    const Count inserted = relations[a].known.insertMany(
+        row, columns, [&](Id column) { enqueuePublished(a, row, column); });
+    stats.duplicate_inserts += columns.size() - inserted;
+    return inserted;
+  }
+
+  void beginBulkValues() {
+    bulk_values.clear();
+    if (++bulk_epoch == 0) {
+      std::fill(bulk_marks.begin(), bulk_marks.end(), 0);
+      ++bulk_epoch;
+    }
+  }
+
+  void addBulkValue(Id value) {
+    if (bulk_marks[value] == bulk_epoch)
+      return;
+    bulk_marks[value] = bulk_epoch;
+    bulk_values.push_back(value);
+  }
+
+  bool prepareBinaryOutput(BinaryPlan &plan, Id row, Id column) {
     ++stats.binary_joins;
-    if ((*plan.rows)[row].size() > 1 || (*plan.columns)[column].size() > 1) {
+    const auto &output_rows = (*plan.rows)[row];
+    const auto &output_columns = (*plan.columns)[column];
+    if (output_rows.size() > 1 || output_columns.size() > 1) {
       if (!plan.expanded_ready) {
         plan.expanded.reset(plan.rows->size(), plan.columns->size());
         plan.expanded_ready = true;
       }
       if (!plan.expanded.insert(row, column)) {
         ++stats.repeated_binary_outputs;
-        return;
+        return false;
       }
     }
+    addCount(stats.binary_propagations,
+             product(output_rows.size(), output_columns.size()));
+    return true;
+  }
+
+  void binaryJoin(BinaryPlan &plan, Id row, Id column) {
+    if (!prepareBinaryOutput(plan, row, column))
+      return;
     for (Id i : (*plan.rows)[row])
       for (Id j : (*plan.columns)[column]) {
-        ++stats.binary_propagations;
         if (publish(plan.lhs, i, j))
           ++stats.successful_binary_propagations;
       }
@@ -639,6 +1218,11 @@ struct Solver::Impl {
     if (!out_words || !in_words || rows > MAX_WORDS / out_words ||
         columns > MAX_WORDS / in_words)
       return;
+    const Id words = rows * out_words + 2 * columns * in_words;
+    constexpr Id MAX_TOTAL_JOIN_INDEX_WORDS = 1024 * 1024;
+    if (words > MAX_TOTAL_JOIN_INDEX_WORDS - join_index_words)
+      return;
+    join_index_words += words;
     r.join_rows = std::make_unique<JoinRows>(JoinRows{
         out_words, in_words, std::vector<std::uint64_t>(rows * out_words),
         std::vector<std::uint64_t>(columns * in_words),
@@ -649,7 +1233,7 @@ struct Solver::Impl {
         r.join_rows->activate(row, column);
   }
 
-  bool batchJoin(const BinaryPlan &plan, const Fact &f, bool from_left) {
+  bool canBatchJoin(const BinaryPlan &plan, bool from_left) {
     // Identical endpoint partitions make the lifts identities. Union active
     // rows (or columns) and subtract known output with word operations instead
     // of visiting every witness and attempting the same insertion repeatedly.
@@ -659,10 +1243,14 @@ struct Solver::Impl {
     const Id other = from_left ? plan.right : plan.left;
     prepareJoinRows(other);
     prepareJoinRows(plan.lhs);
+    return relations[other].join_rows && relations[plan.lhs].join_rows;
+  }
+
+  void batchJoin(BinaryPlan &plan, const Fact &f, bool from_left) {
+    const Id other = from_left ? plan.right : plan.left;
     const auto &input = relations[other].join_rows;
     auto &output = relations[plan.lhs];
-    if (!input || !output.join_rows)
-      return false;
+    assert(input && output.join_rows);
     const auto &middles = from_left ? plan.bridge->to_right[f.column]
                                     : plan.bridge->to_left[f.row];
     const Id words = from_left ? input->out_words : input->in_words;
@@ -688,62 +1276,265 @@ struct Solver::Impl {
         }
       }
     }
-    return true;
+  }
+
+  Count forwardJoinPairs(const BinaryPlan &plan, Id row,
+                         const std::vector<ClassId> &delta) const {
+    Count pairs = 0;
+    for (Id left_column : delta) {
+      for (Id middle : plan.bridge->to_right[left_column])
+        pairs += relations[plan.right].active_out[middle].size();
+      if (plan.right == plan.left) {
+        const auto &right_rows = plan.bridge->to_right[left_column];
+        if (std::binary_search(right_rows.begin(), right_rows.end(), row))
+          pairs += delta.size();
+      }
+    }
+    return pairs;
+  }
+
+  void bulkForwardJoin(BinaryPlan &plan, Id row,
+                       const std::vector<ClassId> &delta) {
+    beginBulkValues();
+    auto addOutput = [&](Id column) {
+      if (!prepareBinaryOutput(plan, row, column))
+        return;
+      for (Id output : (*plan.columns)[column])
+        addBulkValue(output);
+    };
+    for (Id left_column : delta) {
+      for (Id middle : plan.bridge->to_right[left_column])
+        for (Id column : relations[plan.right].active_out[middle])
+          addOutput(column);
+      if (plan.right == plan.left) {
+        const auto &right_rows = plan.bridge->to_right[left_column];
+        if (std::binary_search(right_rows.begin(), right_rows.end(), row))
+          for (Id column : delta)
+            addOutput(column);
+      }
+    }
+    std::sort(bulk_values.begin(), bulk_values.end());
+    for (Id output_row : (*plan.rows)[row])
+      stats.successful_binary_propagations +=
+          publishMany(plan.lhs, output_row, bulk_values);
+  }
+
+  Count backwardJoinPairs(const BinaryPlan &plan, Id row,
+                          const std::vector<ClassId> &delta) const {
+    Count left_cells = 0;
+    for (Id middle : plan.bridge->to_left[row])
+      left_cells += relations[plan.left].active_in[middle].size();
+    return product(left_cells, delta.size());
+  }
+
+  void bulkBackwardJoin(BinaryPlan &plan, Id row,
+                        const std::vector<ClassId> &delta) {
+    for (Id middle : plan.bridge->to_left[row])
+      for (Id source : relations[plan.left].active_in[middle]) {
+        beginBulkValues();
+        for (Id column : delta) {
+          if (!prepareBinaryOutput(plan, source, column))
+            continue;
+          for (Id output : (*plan.columns)[column])
+            addBulkValue(output);
+        }
+        std::sort(bulk_values.begin(), bulk_values.end());
+        for (Id output_row : (*plan.rows)[source])
+          stats.successful_binary_propagations +=
+              publishMany(plan.lhs, output_row, bulk_values);
+      }
+  }
+
+  void saturateFactorized() {
+    stats.input_edges = problem.edges.size();
+    for (const Edge &edge : problem.edges) {
+      const Id view_id = factor_view_ids.at(
+          std::make_tuple(edge.symbol, edge.symbol, edge.symbol));
+      const auto &view = factor_views[view_id];
+      const Id row = view.source->class_of[edge.source];
+      const Id column = view.target->class_of[edge.target];
+      if (publishFactor(view_id, row, column)) {
+        ++stats.seed_cells;
+        addCount(stats.seed_facts,
+                 product(view.source->members[row].size(),
+                         view.target->members[column].size()));
+      }
+    }
+
+    bulk_marks.resize(problem.nodes);
+    while (!factor_worklist.empty()) {
+      const FactorDeltaRow item = factor_worklist.front();
+      factor_worklist.pop_front();
+      auto &view = factor_views[item.view];
+      std::vector<ClassId> delta;
+      delta.swap(view.pending_out[item.row]);
+      view.queued_rows[item.row] = false;
+      factor_pending_cells -= delta.size();
+      stats.worklist_pops += delta.size();
+
+      for (Id plan_id : factor_unit_uses[item.view]) {
+        const auto &plan = factor_units[plan_id];
+        stats.unary_propagations += delta.size();
+        stats.successful_unary_propagations +=
+            publishFactorMany(plan.lhs_view, item.row, delta);
+      }
+
+      for (Id plan_id : factor_left_uses[item.view]) {
+        const auto &plan = factor_binaries[plan_id];
+        const auto &right = factor_views[plan.right_view];
+        beginBulkValues();
+        for (Id left_column : delta) {
+          for (Id middle : plan.bridge->to_right[left_column]) {
+            stats.binary_joins += right.active_out[middle].size();
+            for (Id column : right.active_out[middle])
+              addBulkValue(column);
+          }
+          if (plan.right_view == item.view) {
+            const auto &right_rows = plan.bridge->to_right[left_column];
+            if (std::binary_search(right_rows.begin(), right_rows.end(),
+                                   item.row)) {
+              stats.binary_joins += delta.size();
+              for (Id column : delta)
+                addBulkValue(column);
+            }
+          }
+        }
+        std::sort(bulk_values.begin(), bulk_values.end());
+        stats.binary_propagations += bulk_values.size();
+        stats.successful_binary_propagations +=
+            publishFactorMany(plan.lhs_view, item.row, bulk_values);
+      }
+
+      for (Id plan_id : factor_right_uses[item.view]) {
+        const auto &plan = factor_binaries[plan_id];
+        const auto &left = factor_views[plan.left_view];
+        for (Id middle : plan.bridge->to_left[item.row])
+          for (Id source : left.active_in[middle]) {
+            stats.binary_joins += delta.size();
+            stats.binary_propagations += delta.size();
+            stats.successful_binary_propagations +=
+                publishFactorMany(plan.lhs_view, source, delta);
+          }
+      }
+
+      for (Id column : delta) {
+        view.active_out[item.row].push_back(column);
+        view.active_in[column].push_back(static_cast<ClassId>(item.row));
+      }
+    }
   }
 
   void saturate() {
+    if (options.factorized) {
+      saturateFactorized();
+      return;
+    }
+    bulk_marks.resize(problem.nodes);
     stats.input_edges = problem.edges.size();
-    for (const Edge &e : problem.edges) {
-      Id i = sources[e.symbol]->class_of[e.source];
-      Id j = targets[e.symbol]->class_of[e.target];
-      if (publish(e.symbol, i, j)) {
-        ++stats.seed_cells;
-        addCount(stats.seed_facts,
-                 product(sources[e.symbol]->members[i].size(),
-                         targets[e.symbol]->members[j].size()));
-      }
+    std::vector<Fact> seeds;
+    seeds.reserve(problem.edges.size());
+    for (const Edge &e : problem.edges)
+      seeds.push_back({e.symbol, sources[e.symbol]->class_of[e.source],
+                       targets[e.symbol]->class_of[e.target]});
+    std::sort(seeds.begin(), seeds.end(), [](const Fact &lhs, const Fact &rhs) {
+      return std::tie(lhs.symbol, lhs.row, lhs.column) <
+             std::tie(rhs.symbol, rhs.row, rhs.column);
+    });
+    seeds.erase(std::unique(seeds.begin(), seeds.end(),
+                            [](const Fact &lhs, const Fact &rhs) {
+                              return lhs.symbol == rhs.symbol &&
+                                     lhs.row == rhs.row &&
+                                     lhs.column == rhs.column;
+                            }),
+                seeds.end());
+    for (const Fact &seed : seeds) {
+      ++stats.seed_cells;
+      addCount(stats.seed_facts,
+               product(sources[seed.symbol]->members[seed.row].size(),
+                       targets[seed.symbol]->members[seed.column].size()));
+      // New seed cells enter the delta worklist. Migrated seed cells remain
+      // counted above but were already saturated in the previous snapshot.
+      (void)publish(seed.symbol, seed.row, seed.column);
     }
     while (!worklist.empty()) {
-      // Copy before publishing: queue growth must not invalidate this event.
-      Fact f = worklist.front();
+      const DeltaRow item = worklist.front();
       worklist.pop_front();
-      ++stats.worklist_pops;
-      for (Id id : unit_uses[f.symbol]) {
-        const UnaryPlan &plan = units[id];
-        for (Id i : (*plan.rows)[f.row])
-          for (Id j : (*plan.columns)[f.column]) {
-            ++stats.unary_propagations;
-            if (publish(plan.lhs, i, j))
-              ++stats.successful_unary_propagations;
+      auto &relation = relations[item.symbol];
+      std::vector<ClassId> delta;
+      delta.swap(relation.pending_out[item.row]);
+      relation.queued_rows[item.row] = false;
+      pending_cells -= delta.size();
+      stats.worklist_pops += delta.size();
+
+      for (Id column : delta) {
+        const Fact fact{item.symbol, item.row, column};
+        for (Id id : unit_uses[fact.symbol]) {
+          const UnaryPlan &plan = units[id];
+          for (Id i : (*plan.rows)[fact.row])
+            for (Id j : (*plan.columns)[fact.column]) {
+              ++stats.unary_propagations;
+              if (publish(plan.lhs, i, j))
+                ++stats.successful_unary_propagations;
+            }
+        }
+      }
+
+      for (Id id : left_uses[item.symbol]) {
+        BinaryPlan &plan = binaries[id];
+        if (canBatchJoin(plan, true)) {
+          for (Id column : delta)
+            batchJoin(plan, {item.symbol, item.row, column}, true);
+          if (plan.right == item.symbol)
+            for (Id left_column : delta) {
+              const auto &right_rows = plan.bridge->to_right[left_column];
+              if (std::binary_search(right_rows.begin(), right_rows.end(),
+                                     item.row))
+                for (Id right_column : delta)
+                  binaryJoin(plan, item.row, right_column);
+            }
+          continue;
+        }
+        if (forwardJoinPairs(plan, item.row, delta) >= 64) {
+          bulkForwardJoin(plan, item.row, delta);
+          continue;
+        }
+        for (Id left_column : delta) {
+          for (Id middle : plan.bridge->to_right[left_column])
+            for (Id target : relations[plan.right].active_out[middle])
+              binaryJoin(plan, item.row, target);
+          if (plan.right == item.symbol) {
+            const auto &right_rows = plan.bridge->to_right[left_column];
+            if (std::binary_search(right_rows.begin(), right_rows.end(),
+                                   item.row))
+              for (Id right_column : delta)
+                binaryJoin(plan, item.row, right_column);
           }
+        }
       }
-      // Only popped events enter active adjacency. Thus each distinct pair
-      // joins at the later activation, independent of enqueue/derivation order.
-      // publish() changes known cells and the queue, never active adjacency.
-      for (Id id : left_uses[f.symbol]) {
+
+      for (Id id : right_uses[item.symbol]) {
         BinaryPlan &plan = binaries[id];
-        if (!batchJoin(plan, f, true))
-          for (Id middle : plan.bridge->to_right[f.column])
-            for (Id column : relations[plan.right].active_out[middle])
-              binaryJoin(plan, f.row, column);
-        // A cell used twice is absent from both active scans. Handle this
-        // diagonal of the *event pair space* exactly once, not once per node.
-        if (plan.right == f.symbol &&
-            std::binary_search(plan.bridge->to_right[f.column].begin(),
-                               plan.bridge->to_right[f.column].end(), f.row))
-          binaryJoin(plan, f.row, f.column);
+        if (canBatchJoin(plan, false)) {
+          for (Id column : delta)
+            batchJoin(plan, {item.symbol, item.row, column}, false);
+          continue;
+        }
+        if (backwardJoinPairs(plan, item.row, delta) >= 64) {
+          bulkBackwardJoin(plan, item.row, delta);
+          continue;
+        }
+        for (Id column : delta)
+          for (Id middle : plan.bridge->to_left[item.row])
+            for (Id source : relations[plan.left].active_in[middle])
+              binaryJoin(plan, source, column);
       }
-      for (Id id : right_uses[f.symbol]) {
-        BinaryPlan &plan = binaries[id];
-        if (!batchJoin(plan, f, false))
-          for (Id middle : plan.bridge->to_left[f.row])
-            for (Id row : relations[plan.left].active_in[middle])
-              binaryJoin(plan, row, f.column);
+
+      for (Id column : delta) {
+        relation.active_out[item.row].push_back(column);
+        relation.active_in[column].push_back(item.row);
+        if (relation.join_rows)
+          relation.join_rows->activate(item.row, column);
       }
-      relations[f.symbol].active_out[f.row].push_back(f.column);
-      relations[f.symbol].active_in[f.column].push_back(f.row);
-      if (relations[f.symbol].join_rows)
-        relations[f.symbol].join_rows->activate(f.row, f.column);
     }
   }
 
@@ -807,6 +1598,15 @@ struct Solver::Impl {
     Lists().swap(left_uses);
     Lists().swap(right_uses);
     decltype(worklist)().swap(worklist);
+    decltype(factor_views)().swap(factor_views);
+    Lists().swap(symbol_factor_views);
+    decltype(factor_view_ids)().swap(factor_view_ids);
+    decltype(factor_units)().swap(factor_units);
+    decltype(factor_binaries)().swap(factor_binaries);
+    Lists().swap(factor_unit_uses);
+    Lists().swap(factor_left_uses);
+    Lists().swap(factor_right_uses);
+    decltype(factor_worklist)().swap(factor_worklist);
     decltype(problem.edges)().swap(problem.edges);
     decltype(problem.rules)().swap(problem.rules);
     for (auto &relation : relations)
@@ -817,6 +1617,8 @@ struct Solver::Impl {
 
 Solver::Solver(Problem problem, Options options)
     : impl_(new Impl(std::move(problem), options)) {}
+Solver::Solver(Problem problem, const Solver &previous, Options options)
+    : impl_(new Impl(std::move(problem), options, previous.impl_.get())) {}
 Solver::~Solver() = default;
 Solver::Solver(Solver &&) noexcept = default;
 Solver &Solver::operator=(Solver &&) noexcept = default;
@@ -938,13 +1740,17 @@ Count Solver::countOffDiagonalUnion(std::vector<Id> symbols) const {
 
 std::size_t Solver::estimatedPayloadBytes() const {
   impl_->requireSolved();
-  auto listsBytes = [](const Lists &lists) {
-    std::size_t bytes = lists.capacity() * sizeof(std::vector<Id>);
+  auto listsBytes = [](const auto &lists) {
+    using List = typename std::decay_t<decltype(lists)>::value_type;
+    using Value = typename List::value_type;
+    std::size_t bytes = lists.capacity() * sizeof(List);
     for (const auto &list : lists)
-      bytes += list.capacity() * sizeof(Id);
+      bytes += list.capacity() * sizeof(Value);
     return bytes;
   };
   std::size_t bytes = sizeof(*this) + sizeof(Impl);
+  bytes += impl_->grammar_rules.capacity() * sizeof(Rule) +
+           impl_->seed_edges.capacity() * sizeof(Edge);
   bytes += (impl_->sources.capacity() + impl_->targets.capacity()) *
            sizeof(std::shared_ptr<const Partition>);
   bytes += impl_->nullable.capacity() / 8;

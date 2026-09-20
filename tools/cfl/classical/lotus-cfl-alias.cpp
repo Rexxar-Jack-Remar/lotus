@@ -31,9 +31,8 @@ void usage(std::ostream &stream) {
   stream << "Usage: lotus-cfl-alias [options] INPUT.{ll,bc}\n"
             "Options:\n"
             "  --solver sparse-set|sparse-bitvector|graspan|sqid|pearl|"
-            "skewed|cat|iea|iea-ocr|transitive-closure|pocr|hpocr|focr\n"
-            "  --engine grammar|pocr-aa|focr-aa\n"
-            "  --focr-scc\n"
+            "skewed|cat|iea|iea-ocr|transitive-closure|pocr|hpocr|focr|"
+            "endpoint-quotient\n"
             "  --encoding pag|peg\n"
             "  --entry FUNCTION\n"
             "  --max-callgraph-rounds N\n"
@@ -55,19 +54,6 @@ Options parseOptions(int argc, char **argv) {
     };
     if (argument == "--solver") {
       options.analysis.backend = parseSolverBackend(value());
-    } else if (argument == "--engine") {
-      const std::string selected = value();
-      if (selected == "grammar") {
-        options.analysis.specialized_backend.reset();
-      } else if (selected == "pocr-aa") {
-        options.analysis.specialized_backend =
-            engines::SpecializedPocrBackend::Pocr;
-      } else if (selected == "focr-aa") {
-        options.analysis.specialized_backend =
-            engines::SpecializedPocrBackend::Focr;
-      } else {
-        throw std::invalid_argument("Unknown alias engine: " + selected);
-      }
     } else if (argument == "--encoding") {
       const std::string selected = value();
       if (selected == "pag") {
@@ -77,8 +63,6 @@ Options parseOptions(int argc, char **argv) {
       } else {
         throw std::invalid_argument("Unknown encoding: " + selected);
       }
-    } else if (argument == "--focr-scc") {
-      options.analysis.simplify_focr_cycles = true;
     } else if (argument == "--entry") {
       options.analysis.entry = value();
     } else if (argument == "--max-callgraph-rounds") {
@@ -112,15 +96,6 @@ Options parseOptions(int argc, char **argv) {
     throw std::invalid_argument("An input LLVM module is required");
   }
   return options;
-}
-
-const char *engineName(const LLVMAliasOptions &options) {
-  if (!options.specialized_backend) {
-    return solverBackendName(options.backend);
-  }
-  return *options.specialized_backend == engines::SpecializedPocrBackend::Pocr
-             ? "pocr-aa"
-             : "focr-aa";
 }
 
 const llvm::Value *findNamedValue(const llvm::Module &module,
@@ -264,7 +239,7 @@ int main(int argc, char **argv) {
           checkAnnotations(*module, analysis);
     }
     if (options.json_stats) {
-      std::cout << "{\"solver\":\"" << engineName(options.analysis)
+      std::cout << "{\"solver\":\"" << solverBackendName(options.analysis.backend)
                 << "\",\"encoding\":\""
                 << (options.analysis.encoding == AliasEncodingMode::PAG ? "pag"
                                                                         : "peg")
@@ -287,12 +262,20 @@ int main(int argc, char **argv) {
                 << ",\"focr_cycle_simplifications\":"
                 << stats.fully_ordered_cycle_simplifications
                 << ",\"graspan_epochs\":" << stats.graspan_epochs
-                << ",\"specialized_reachability_pairs\":"
-                << stats.specialized_reachability_pairs
-                << ",\"specialized_matched_pairs\":"
-                << stats.specialized_matched_pairs
-                << ",\"specialized_critical_edges\":"
-                << stats.specialized_critical_edges
+                << ",\"eq_cells\":" << stats.endpoint_quotient_cells
+                << ",\"eq_insert_attempts\":"
+                << stats.endpoint_quotient_insert_attempts
+                << ",\"eq_duplicate_inserts\":"
+                << stats.endpoint_quotient_duplicate_inserts
+                << ",\"eq_binary_joins\":"
+                << stats.endpoint_quotient_binary_joins
+                << ",\"eq_binary_join_words\":"
+                << stats.endpoint_quotient_binary_join_words
+                << ",\"eq_preprocess_us\":"
+                << stats.endpoint_quotient_preprocess_us
+                << ",\"eq_saturation_us\":"
+                << stats.endpoint_quotient_saturation_us
+                << ",\"eq_count_us\":" << stats.endpoint_quotient_count_us
                 << ",\"annotation_total\":" << annotation_total
                 << ",\"annotation_failures\":" << annotation_failures
                 << ",\"frontend_us\":" << stats.frontend_time_microseconds
@@ -301,7 +284,8 @@ int main(int argc, char **argv) {
                 << ",\"discovery_us\":" << stats.client_discovery_microseconds
                 << ",\"solve_us\":" << stats.solve_time_microseconds << "}\n";
     } else {
-      std::cout << "solver=" << engineName(options.analysis) << " encoding="
+      std::cout << "solver=" << solverBackendName(options.analysis.backend)
+                << " encoding="
                 << (options.analysis.encoding == AliasEncodingMode::PAG ? "pag"
                                                                         : "peg")
                 << " nodes=" << stats.graph_nodes
@@ -317,7 +301,11 @@ int main(int argc, char **argv) {
                 << " focr_tree_join_visits="
                 << stats.fully_ordered_tree_join_visits
                 << " graspan_epochs=" << stats.graspan_epochs
-                << " specialized_pairs=" << stats.specialized_reachability_pairs
+                << " eq_cells=" << stats.endpoint_quotient_cells
+                << " eq_preprocess_us="
+                << stats.endpoint_quotient_preprocess_us
+                << " eq_saturation_us="
+                << stats.endpoint_quotient_saturation_us
                 << " annotation_total=" << annotation_total
                 << " annotation_failures=" << annotation_failures
                 << " frontend_us=" << stats.frontend_time_microseconds

@@ -38,8 +38,9 @@ struct EdgeKeyHash {
 
 class EndpointQuotientEngine::Impl {
 public:
-  Impl(const Grammar &grammar, std::size_t node_count)
+  Impl(const Grammar &grammar, std::size_t node_count, bool factorized)
       : grammar_(grammar), node_count_(node_count) {
+    options_.factorized = factorized;
     buildRules(base_);
     base_.symbols = grammar.symbolCount();
     for (const auto &symbol : grammar.countSymbols())
@@ -86,7 +87,11 @@ public:
     for (const EdgeKey &edge : edges_)
       problem.edges.push_back({edge.source, edge.symbol, edge.target});
 
-    auto next = std::make_unique<endpoint::Solver>(std::move(problem));
+    auto next =
+        snapshot_
+            ? std::make_unique<endpoint::Solver>(std::move(problem), *snapshot_,
+                                                 options_)
+            : std::make_unique<endpoint::Solver>(std::move(problem), options_);
     next->solve();
     const auto count = next->countOffDiagonalUnion(
         std::vector<Id>(count_symbols_.begin(), count_symbols_.end()));
@@ -232,6 +237,7 @@ private:
   }
 
   const Grammar &grammar_;
+  endpoint::Options options_;
   endpoint::Problem base_;
   std::unique_ptr<endpoint::Solver> snapshot_;
   bool dirty_ = true;
@@ -243,8 +249,9 @@ private:
 };
 
 EndpointQuotientEngine::EndpointQuotientEngine(const Grammar &grammar,
-                                               std::size_t node_count)
-    : impl_(new Impl(grammar, node_count)) {}
+                                               std::size_t node_count,
+                                               bool factorized)
+    : impl_(new Impl(grammar, node_count, factorized)) {}
 
 EndpointQuotientEngine::~EndpointQuotientEngine() = default;
 

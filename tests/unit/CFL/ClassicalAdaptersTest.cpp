@@ -136,29 +136,6 @@ TEST(ClassicalAdaptersTest,
   EXPECT_GT(stats.added_edges, 0u);
 }
 
-TEST(ClassicalAdaptersTest, SpecializedAliasEnginesLowerPagMemoryOperations) {
-  AliasConstraintGraph graph;
-  const auto slot_object = graph.addNode("slot_object");
-  const auto value_object = graph.addNode("value_object");
-  const auto pointer = graph.addNode("pointer");
-  const auto value = graph.addNode("value");
-  const auto loaded = graph.addNode("loaded");
-  graph.addEdge(slot_object, pointer, AliasConstraintEdgeKind::Addr);
-  graph.addEdge(value_object, value, AliasConstraintEdgeKind::Addr);
-  graph.addEdge(value, pointer, AliasConstraintEdgeKind::Store);
-  graph.addEdge(pointer, loaded, AliasConstraintEdgeKind::Load);
-
-  for (engines::SpecializedPocrBackend backend :
-       {engines::SpecializedPocrBackend::Pocr,
-        engines::SpecializedPocrBackend::Focr}) {
-    AliasClient client = AliasClient::fromConstraintGraph(graph);
-    EXPECT_NO_THROW(client.solveSpecialized(backend));
-    EXPECT_TRUE(client.mayAlias(value, loaded));
-    EXPECT_EQ(client.pointsTo(loaded),
-              std::vector<std::size_t>({value_object}));
-  }
-}
-
 TEST(ClassicalAdaptersTest, AliasClientResumesAfterIncrementalConstraint) {
   AliasConstraintGraph graph;
   const auto object = graph.addNode("object");
@@ -221,17 +198,6 @@ TEST(ClassicalAdaptersTest,
                 std::vector<std::size_t>({value_obj}))
           << solverBackendName(backend);
     }
-  }
-
-  for (engines::SpecializedPocrBackend backend :
-       {engines::SpecializedPocrBackend::Pocr,
-        engines::SpecializedPocrBackend::Focr}) {
-    AliasClient specialized =
-        AliasClient::fromConstraintGraph(graph, AliasEncodingMode::PEG);
-    const ReachabilityStats specialized_stats =
-        specialized.solveSpecialized(backend);
-    EXPECT_TRUE(specialized.mayAlias(value, loaded));
-    EXPECT_GT(specialized_stats.specialized_reachability_pairs, 0u);
   }
 }
 
@@ -655,16 +621,6 @@ TEST(ClassicalAdaptersTest, ValueFlowClientEncodesSvfgCallsAndReachability) {
     ValueFlowClient alternate = ValueFlowClient::fromSVFG(svfg);
     alternate.solve(backend);
     EXPECT_TRUE(alternate.hasFlow(1, 4)) << solverBackendName(backend);
-  }
-  for (engines::SpecializedPocrBackend backend :
-       {engines::SpecializedPocrBackend::Pocr,
-        engines::SpecializedPocrBackend::Focr}) {
-    ValueFlowClient alternate = ValueFlowClient::fromSVFG(svfg);
-    const ReachabilityStats specialized_stats =
-        alternate.solveSpecialized(backend);
-    EXPECT_TRUE(alternate.hasFlow(1, 4));
-    EXPECT_THROW(alternate.hasRealizableFlow(1, 2), std::logic_error);
-    EXPECT_GT(specialized_stats.specialized_reachability_pairs, 0u);
   }
 }
 
@@ -1302,21 +1258,6 @@ TEST(ClassicalAdaptersTest, LlvmAliasAnalysisDrivesIndirectCallDiscovery) {
       EXPECT_FALSE(alternate.mayAlias(x, y)) << solverBackendName(backend);
       EXPECT_TRUE(alternate.nodeForValue(target).has_value())
           << solverBackendName(backend);
-    }
-  }
-
-  for (AliasEncodingMode encoding :
-       {AliasEncodingMode::PAG, AliasEncodingMode::PEG}) {
-    for (engines::SpecializedPocrBackend backend :
-         {engines::SpecializedPocrBackend::Pocr,
-          engines::SpecializedPocrBackend::Focr}) {
-      LLVMAliasOptions specialized_options;
-      specialized_options.encoding = encoding;
-      specialized_options.specialized_backend = backend;
-      LLVMCFLAliasAnalysis specialized(specialized_options);
-      EXPECT_NO_THROW(specialized.analyze(*module));
-      EXPECT_FALSE(specialized.mayAlias(x, y));
-      EXPECT_TRUE(specialized.nodeForValue(target).has_value());
     }
   }
 }

@@ -281,7 +281,8 @@ using FullyOrderedClosureRelation =
 std::unique_ptr<Relation> createSolverRelation(SolverBackend backend,
                                                const Grammar &grammar,
                                                std::size_t node_count,
-                                               bool simplify_focr_cycles) {
+                                               bool simplify_focr_cycles,
+                                               bool factorized_endpoint) {
   const auto &transitive_symbols = grammar.transitiveSymbols();
   switch (backend) {
   case SolverBackend::SparseSet:
@@ -316,7 +317,8 @@ std::unique_ptr<Relation> createSolverRelation(SolverBackend backend,
         transitive_symbols, node_count, simplify_focr_cycles);
   case SolverBackend::EndpointQuotient:
     return std::make_unique<engines::EndpointQuotientEngine>(grammar,
-                                                             node_count);
+                                                             node_count,
+                                                             factorized_endpoint);
   }
   throw std::invalid_argument("Unknown CFL solver backend");
 }
@@ -411,7 +413,8 @@ public:
         unidirectional_(options.unidirectional),
         relation_(createSolverRelation(options.backend, grammar,
                                        graph.vertexCount(),
-                                       options.simplify_focr_cycles)),
+                                       options.simplify_focr_cycles,
+                                       options.endpoint_quotient_factorized)),
         expected_graph_version_(graph.mutationVersion()) {
     for (const GrammarIssue &issue : grammar.validate()) {
       if (issue.severity == GrammarIssueSeverity::Error) {

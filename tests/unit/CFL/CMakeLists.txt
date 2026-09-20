@@ -183,29 +183,6 @@ if(TARGET lotus-cfl-alias)
     set_tests_properties(classical_cfl_alias_indirect_call PROPERTIES
         PASS_REGULAR_EXPRESSION "\"callgraph_rounds\":2")
 
-    foreach(specialized_alias_engine pocr-aa focr-aa)
-        add_test(NAME classical_cfl_alias_${specialized_alias_engine}
-            COMMAND $<TARGET_FILE:lotus-cfl-alias>
-                --engine ${specialized_alias_engine}
-                --encoding peg
-                --check-annotations
-                --json-stats
-                ${CMAKE_SOURCE_DIR}/tests/regress/Alias/PTA/funptr-simple.ll)
-        set_tests_properties(
-            classical_cfl_alias_${specialized_alias_engine} PROPERTIES
-            PASS_REGULAR_EXPRESSION "annotation=pass")
-        add_test(NAME classical_cfl_alias_${specialized_alias_engine}_pag
-            COMMAND $<TARGET_FILE:lotus-cfl-alias>
-                --engine ${specialized_alias_engine}
-                --encoding pag
-                --check-annotations
-                --json-stats
-                ${CMAKE_SOURCE_DIR}/tests/regress/Alias/PTA/funptr-simple.ll)
-        set_tests_properties(
-            classical_cfl_alias_${specialized_alias_engine}_pag PROPERTIES
-            PASS_REGULAR_EXPRESSION "annotation=pass")
-    endforeach()
-
     set(classical_alias_annotation_cases
         funptr-simple
         array-varIdx
@@ -244,16 +221,6 @@ if(TARGET lotus-cfl-vf)
                 ${CMAKE_SOURCE_DIR}/tests/regress/CFL/Classical/value-flow.ll)
         set_tests_properties(classical_cfl_vf_${classical_backend} PROPERTIES
             PASS_REGULAR_EXPRESSION "flow=yes")
-    endforeach()
-    foreach(specialized_vf_engine pocr-vfa focr-vfa)
-        add_test(NAME classical_cfl_vf_${specialized_vf_engine}
-            COMMAND $<TARGET_FILE:lotus-cfl-vf>
-                --engine ${specialized_vf_engine}
-                --query main::seed,main::result
-                --json-stats
-                ${CMAKE_SOURCE_DIR}/tests/regress/CFL/Classical/value-flow.ll)
-        set_tests_properties(classical_cfl_vf_${specialized_vf_engine}
-            PROPERTIES PASS_REGULAR_EXPRESSION "flow=yes")
     endforeach()
 endif()
 

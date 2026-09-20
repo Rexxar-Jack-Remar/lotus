@@ -36,9 +36,6 @@ struct ReachabilityStats {
   std::size_t pocr_tree_edges = 0;
   std::size_t fully_ordered_critical_edges = 0;
   std::size_t candidate_relation_edges = 0;
-  std::size_t specialized_reachability_pairs = 0;
-  std::size_t specialized_matched_pairs = 0;
-  std::size_t specialized_critical_edges = 0;
 
   // Work performed by this solve call only.
   std::uint64_t classical_iterations = 0;
@@ -149,6 +146,8 @@ struct SolverOptions {
   bool unidirectional = false;
   /// Apply POCR's optional ECG SCC simplification in the FOCR backend.
   bool simplify_focr_cycles = false;
+  /// Preserve production-local endpoint factors in EndpointQuotient.
+  bool endpoint_quotient_factorized = true;
   /// Explicit X/Xbar pairs for PEARL's PackRR and paired propagation graphs.
   std::vector<std::pair<std::string, std::string>> pearl_inverse_relations;
 };

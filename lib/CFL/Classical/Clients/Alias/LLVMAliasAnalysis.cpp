@@ -207,15 +207,9 @@ public:
       return unknown_changed || calls_changed || constraints_changed ||
              supplemental_changed;
     };
-    if (options_.specialized_backend) {
-      statistics_ = client_->solveToFixedPoint(
-          *options_.specialized_backend, discover_constraints,
-          options_.max_callgraph_rounds, options_.simplify_focr_cycles);
-    } else {
-      statistics_ =
-          client_->solveToFixedPoint(options_.backend, discover_constraints,
-                                     options_.max_callgraph_rounds);
-    }
+    statistics_ =
+        client_->solveToFixedPoint(options_.backend, discover_constraints,
+                                   options_.max_callgraph_rounds);
     statistics_.frontend_time_microseconds = frontend_time_microseconds_;
     statistics_.client_initialization_microseconds =
         client_initialization_microseconds_;

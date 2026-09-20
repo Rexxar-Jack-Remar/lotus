@@ -62,16 +62,10 @@ cycle reduction and minimum-equivalent graphs). ``--solver endpoint-quotient``
 selects the grammar-indexed endpoint-quotient (GEQ) compressed exact engine.
 See :doc:`/cfl/classical/cat_ieoce` for the algorithm and API details.
 
-The hand-specialized engines are separate from those general grammar
-backends. Use ``lotus-cfl-alias --engine pocr-aa|focr-aa --encoding peg`` or
-``lotus-cfl-vf --engine pocr-vfa|focr-vfa``. ``Clients/`` still contains only
-the alias and value-flow adapters; the implementations live under
-``Solvers/Engines/``.
-
 The general solver accepts POCR grammar/graph files and exposes
 unidirectional summarization, SCC elimination, graph folding, and inter-Dyck
-pruning. Specialized POCR, STG, and foldability components remain available
-through their C++ APIs and unit tests rather than dedicated executables.
+pruning. STG and foldability components remain available through their C++
+APIs and unit tests rather than dedicated executables.
 
 See :doc:`/cfl/classical/classical`, :doc:`/cfl/classical/pearl`,
 :doc:`/cfl/classical/stg`, and :doc:`/cfl/classical/sqid` for the complete algorithm,

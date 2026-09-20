@@ -51,14 +51,15 @@ struct EndpointQuotientStatistics {
 /// stay symbolic. Input edges are deduplicated so repeated
 /// terminal insertions return false, matching the other session backends.
 ///
-/// The underlying quotient is static: adding a terminal edge followed by
-/// another `solve()` rebuilds the problem and re-derives the fixed point from
-/// scratch, rather than incrementally refining the previous partitions.
-/// Queries see the last completed solve; buffered updates become visible on
-/// the next solve. Traversal callbacks must not update or solve the engine.
+/// Adding terminal edges builds refined endpoint partitions, migrates the
+/// previous compressed closure as already-processed cells, and saturates only
+/// the delta. Queries see the last completed snapshot; buffered updates become
+/// visible on the next solve. Traversal callbacks must not update or solve the
+/// engine.
 class EndpointQuotientEngine final : public Relation {
 public:
-  EndpointQuotientEngine(const Grammar &grammar, std::size_t node_count);
+  EndpointQuotientEngine(const Grammar &grammar, std::size_t node_count,
+                         bool factorized = true);
   ~EndpointQuotientEngine() override;
   EndpointQuotientEngine(const EndpointQuotientEngine &) = delete;
   EndpointQuotientEngine &operator=(const EndpointQuotientEngine &) = delete;

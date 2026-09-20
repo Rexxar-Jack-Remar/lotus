@@ -23,8 +23,7 @@ layout:
    closure engine. ``Engines/PEARL/``, ``Engines/POCR/``, ``Engines/SQID/``,
    ``Engines/STG/``, ``Engines/Skewed/``, ``Engines/EndpointQuotient/``,
    ``Engines/CAT/``, and ``Engines/IEOCE/`` contain the paper algorithms;
-   ``Engines/POCR/`` also contains its specialized alias/value-flow engines
-   and client grammars.
+   ``Engines/POCR/`` also contains the client grammars.
 
 ``Solvers/Preprocessing/``
    Graph simplification and RSM-guided foldability analysis.
@@ -155,7 +154,9 @@ Solver backends
    products. Temporary join indexes and grammar plans are released after solving.
 
    The endpoint engine implements ``Relation`` directly. It buffers new input
-   facts and rebuilds its static quotient on the next ``solve()``. Until that
+   facts and builds refined partitions on the next ``solve()``. The previous
+   compressed closure is migrated into those partitions as already-processed
+   cells, so saturation visits only facts induced by the delta. Until that
    solve completes, queries see the previous snapshot (or an empty relation
    before the first solve). An unchanged solve performs no new solver work.
    Adding an isolated node also invalidates the snapshot, so nullable facts
@@ -229,9 +230,8 @@ common-dereference merging and FastDyck then use their own worklists, preserving
 the original phase boundaries.
 
 ``RecursiveStateMachine`` and ``FoldabilityChecker`` implement POCR's RSM
-transition semantics and node-pair foldability proof. These utilities and the
-hand-specialized POCR engines remain available through their C++ APIs and unit
-tests.
+transition semantics and node-pair foldability proof. These utilities remain
+available through their C++ APIs and unit tests.
 
 ``SolverOptions::unidirectional`` implements POCR's ``Insert``/``Follow``
 summarization discipline. All facts remain available as exact output, while
@@ -254,16 +254,14 @@ Adapter implementations are split by dependency:
    PAG and PEG encodings, ``AliasClient``, and ``solveToFixedPoint`` for
    alternating client-defined discovery with incremental saturation. PEG
    loads and stores added after solving are converted through existing or
-   reusable synthetic dereference nodes.
-   ``solveSpecialized(Pocr|Focr)`` selects the hand-specialized engine without
-   creating a generic ``SolverSession``. For PAG input, ``AliasClient`` lowers
+   reusable synthetic dereference nodes. For PAG input, ``AliasClient`` lowers
    ``load``/``store`` constraints in one structural pass, using indexed
    address-taken objects or one reusable synthetic dereference per pointer.
    Unknown raw terminals remain hard errors rather than being ignored.
 
 ``CanaryClassicalCFLValueFlowClient``
    SVFG preparation, value-flow encoding, ``ValueFlowClient``, and its
-   grammar-driven and specialized engine integration.
+   grammar-driven client integration.
 
 ``AserConstraintAdapter.h``
    A header-only converter from Lotus's native AserPTA constraint graph to the
@@ -308,12 +306,8 @@ Adapter implementations are split by dependency:
    the same-context summary relation ``A``. ``hasRealizableFlow`` queries
    ``R``, which additionally permits unmatched returns at the beginning and
    unmatched calls at the end while retaining callsite matching for balanced
-   pairs. General realizable queries require a grammar backend; the specialized
-   vertical-propagation engines expose balanced summaries only. The derived
-   relations are the sound union of the edge categories, not a path-feasibility
-   or memory-object proof.
-   ``solveSpecialized(Pocr|Focr)`` selects the native vertical-propagation
-   engine.
+   pairs. The derived relations are the sound union of the edge categories,
+   not a path-feasibility or memory-object proof.
 
 SVFG strong-update preparation requires explicit ``isSingleton`` metadata,
 nonrecursive stack ownership, and evidence that the LLVM store overwrites the
@@ -345,13 +339,7 @@ Command line
    build/bin/lotus-cfl-alias --solver sparse-bitvector --encoding pag \
      --check-annotations module.bc
 
-   build/bin/lotus-cfl-alias --engine pocr-aa --encoding peg \
-     --check-annotations module.bc
-
    build/bin/lotus-cfl-vf --solver transitive-closure \
-     --query main::source,main::sink module.bc
-
-   build/bin/lotus-cfl-vf --engine focr-vfa \
      --query main::source,main::sink module.bc
 
    build/bin/lotus-cfl-solve \

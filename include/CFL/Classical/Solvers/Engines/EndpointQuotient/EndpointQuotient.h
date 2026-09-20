@@ -54,6 +54,9 @@ enum class PartitionMode {
 
 struct Options {
   PartitionMode partitions = PartitionMode::Grammar;
+  /// Preserve production-local endpoint factors during saturation while
+  /// maintaining the exact symbol-global relation for public queries.
+  bool factorized = false;
 };
 
 struct SymbolStatistics {
@@ -100,6 +103,11 @@ struct Statistics {
 class Solver {
 public:
   explicit Solver(Problem problem, Options options = {});
+  /// Builds an updated exact snapshot for the same grammar and a monotone
+  /// superset of input edges. New endpoint partitions are refined by the
+  /// previous partitions, so old rectangles can be migrated without replaying
+  /// old grammar work.
+  Solver(Problem problem, const Solver &previous, Options options = {});
   ~Solver();
   Solver(Solver &&) noexcept;
   Solver &operator=(Solver &&) noexcept;

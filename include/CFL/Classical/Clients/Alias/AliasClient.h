@@ -1,6 +1,5 @@
 #pragma once
 
-#include "CFL/Classical/Solvers/Engines/POCR/SpecializedEngines.h"
 #include "CFL/Classical/Solvers/SolverSession.h"
 
 #include <cstddef>
@@ -78,18 +77,12 @@ public:
                       AliasEncodingMode mode = AliasEncodingMode::PAG);
 
   ReachabilityStats solve(SolverBackend backend = SolverBackend::SparseSet);
-  ReachabilityStats solveSpecialized(engines::SpecializedPocrBackend backend,
-                                     bool simplify_focr_cycles = false);
   /// Alternate solving with a client-supplied discovery policy. The callback
   /// may add nodes and constraints and returns true when it changed the input.
   ReachabilityStats solveToFixedPoint(
       SolverBackend backend,
       const std::function<bool(AliasClient &)> &discover_constraints,
       std::size_t max_rounds = 64);
-  ReachabilityStats solveToFixedPoint(
-      engines::SpecializedPocrBackend backend,
-      const std::function<bool(AliasClient &)> &discover_constraints,
-      std::size_t max_rounds = 64, bool simplify_focr_cycles = false);
   std::size_t addNode(const std::string &name);
   /// Add a constraint after construction. If solving has started, the same
   /// solver session is resumed on the next solve() call.
@@ -151,11 +144,9 @@ private:
   void rebuildGrammar();
   void rebuildPointsTo() const;
   void indexAddressTakenObjects(const std::vector<std::size_t> &pointers) const;
-  LabeledGraph buildSpecializedAliasGraph() const;
   bool pointsToOverlap(std::size_t lhs, std::size_t rhs) const;
   static bool locationsOverlap(const AbstractLocation &lhs,
                                const AbstractLocation &rhs);
-  void invalidateSpecializedEngines();
 
   struct State;
   std::unique_ptr<State> state_;
@@ -175,11 +166,6 @@ private:
   mutable bool address_objects_valid_ = false;
   std::unique_ptr<SolverSession> session_;
   std::optional<SolverBackend> backend_;
-  std::unique_ptr<engines::PocrAliasEngine> pocr_engine_;
-  std::unique_ptr<engines::FocrAliasEngine> focr_engine_;
-  std::unique_ptr<LabeledGraph> specialized_graph_;
-  std::optional<engines::SpecializedPocrBackend> specialized_backend_;
-  bool specialized_focr_cycles_ = false;
 };
 
 } // namespace lotus::cfl::classical

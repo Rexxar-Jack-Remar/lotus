@@ -60,23 +60,20 @@ Clients and preprocessing
 -------------------------
 
 ``StdAA``/``PocrAA``/``FocrAA``
-   ``StdAA`` remains the grammar-driven path. ``PocrAA`` and ``FocrAA`` are
-   native ``PocrAliasEngine`` and ``FocrAliasEngine`` implementations under
-   ``Solvers/Engines/POCR``. They preserve POCR's horizontal propagation,
-   symmetric ``V``/``M`` facts, dereference matching, attributed field
-   matching, and one-sided hybrid-tree or ECG traversal. ``AliasClient`` is
-   the sole alias client and selects these engines through
-   ``solveSpecialized``. Optional ECG cycle simplification is available for
-   ``FocrAliasEngine``.
+   The grammar-driven path covers all three. ``PocrAA`` and ``FocrAA`` are
+   expressed by ``SolverBackend::Pocr`` and ``SolverBackend::FullyOrdered``
+   running the standard alias client grammar, which preserves POCR's horizontal
+   propagation, symmetric ``V``/``M`` facts, dereference matching, and
+   attributed field matching. ``AliasClient`` is the sole alias client and
+   selects backends through ``solve``/``solveToFixedPoint``.
 
 ``StdVFA``/``PocrVFA``/``FocrVFA``
-   ``StdVFA`` remains the grammar-driven path. ``PocrVFA`` and ``FocrVFA`` are
-   native ``PocrValueFlowEngine`` and ``FocrValueFlowEngine`` implementations
-   under ``Solvers/Engines/POCR``. They preserve online reachability insertion
-   and vertical ``call_i A ret_i`` matching. ``ValueFlowClient`` is the sole
-   value-flow client and selects these engines through
-   ``solveSpecialized``. Optional ECG cycle simplification is available for
-   ``FocrValueFlowEngine``.
+   The grammar-driven path covers all three. ``PocrVFA`` and ``FocrVFA`` are
+   expressed by ``SolverBackend::Pocr`` and ``SolverBackend::FullyOrdered``
+   running the standard value-flow client grammar, which preserves online
+   reachability insertion and vertical ``call_i A ret_i`` matching.
+   ``ValueFlowClient`` is the sole value-flow client and selects backends
+   through ``solve``.
 
 ``SCCElimination``, ``PEGFold``, and ``IVFGFold``
    Ported by ``GraphSimplification`` using Lotus's non-recursive Tarjan utility,
@@ -118,8 +115,7 @@ Formats, relations, and controls
    Merged into ``FullyOrderedTransitiveClosure``. The pointer and bitset ECG
    variants do not warrant separate public algorithms. POCR's optional
    ``ecgscc`` path is controlled by ``SolverOptions::simplify_focr_cycles`` or
-   ``--focr-scc`` and is off by default, matching POCR. The same option applies
-   to both specialized FOCR engines.
+   ``--focr-scc`` and is off by default, matching POCR.
 
 ``CFLOpt::ucfl``
    Ported through ``SolverOptions::unidirectional`` and the grammar's
