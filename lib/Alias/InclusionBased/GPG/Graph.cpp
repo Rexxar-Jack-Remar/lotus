@@ -1,6 +1,6 @@
 #include "Alias/InclusionBased/GPG/Graph.h"
 
-#include "InternedReaching.h"
+#include "Alias/InclusionBased/GPG/InternedReaching.h"
 
 #include <algorithm>
 #include <deque>

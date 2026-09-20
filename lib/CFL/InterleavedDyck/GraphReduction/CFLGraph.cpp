@@ -1,4 +1,4 @@
-#include "Legacy/CFLGraph.h"
+#include "CFL/InterleavedDyck/GraphReduction/Legacy/CFLGraph.h"
 
 int CFLMatrix::DeleteAllEdgesAndJ(unsigned i, unsigned j) {
 

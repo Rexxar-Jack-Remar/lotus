@@ -1,7 +1,7 @@
 #ifndef CFLREACH_H
 #define CFLREACH_H
 
-#include "CFLGraph.h"
+#include "CFL/InterleavedDyck/GraphReduction/Legacy/CFLGraph.h"
 #include <algorithm>
 //#include <bitset>
 #include <fstream>

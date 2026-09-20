@@ -1,5 +1,5 @@
-#include "Legacy/CFLReach.h"
-#include "Legacy/FastDLL.h"
+#include "CFL/InterleavedDyck/GraphReduction/Legacy/CFLReach.h"
+#include "CFL/InterleavedDyck/GraphReduction/Legacy/FastDLL.h"
 // #include <bitset>
 // #include <deque>
 #include <fstream>
