@@ -2,9 +2,9 @@
  * @file RemoveExceptionHandlerPass.cpp
  * @brief Remove exception handling from functions.
  *
- * This pass removes exception handling by redirecting all invoke instructions'
- * unwind destinations to an unreachable basic block. This simplifies the IR
- * for pointer analysis, which doesn't need to model exception control flow.
+ * This pass removes exception handling by turning every invoke instruction into
+ * a plain call. This simplifies the IR for pointer analysis, which doesn't need
+ * to model exception control flow.
  *
  * @author peiming
  */
@@ -12,30 +12,14 @@
 
 #include "Alias/InclusionBased/AserPTA/Util/Log.h"
 
+#include <llvm/ADT/SmallVector.h>
 #include <llvm/IR/Function.h>
-#include <llvm/IR/IRBuilder.h>
 #include <llvm/IR/Instructions.h>
 #include <llvm/Transforms/Utils/BasicBlockUtils.h>
+#include <llvm/Transforms/Utils/Local.h>
 
 using namespace aser;
 using namespace llvm;
-
-/**
- * @brief Create an unreachable basic block for exception handlers.
- *
- * Creates a basic block containing only an unreachable instruction.
- * Used as the unwind destination for invoke instructions.
- *
- * @param F The function to add the block to
- * @return Pointer to the created unreachable basic block
- */
-static BasicBlock *createUnReachableBB(Function &F) {
-  auto *BB = BasicBlock::Create(F.getContext(), "aser.unreachable", &F);
-  IRBuilder<> builder(BB);
-  builder.CreateUnreachable();
-
-  return BB;
-}
 
 /**
  * @brief Initialize the RemoveExceptionHandlerPass.
@@ -51,34 +35,28 @@ bool RemoveExceptionHandlerPass::doInitialization(Module &M) {
 /**
  * @brief Run the RemoveExceptionHandlerPass on a function.
  *
- * Redirects all invoke instructions' unwind destinations to an unreachable
- * block, then eliminates unreachable blocks.
+ * Converts all invoke instructions to calls, then eliminates unreachable blocks.
  *
  * @param F The function to process
  * @return true if any changes were made, false otherwise
  */
 bool RemoveExceptionHandlerPass::runOnFunction(Function &F) {
-  bool changed = false;
-  BasicBlock *unReachableBB = nullptr;
+  SmallVector<InvokeInst *, 8> Invokes;
+  for (auto &BB : F)
+    for (auto &I : BB)
+      if (auto *invokeInst = dyn_cast<InvokeInst>(&I))
+        Invokes.push_back(invokeInst);
 
-  for (auto &BB : F) {
-    for (auto &I : BB) {
-      if (auto *invokeInst = dyn_cast<InvokeInst>(&I)) {
-        if (unReachableBB == nullptr) {
-          unReachableBB = createUnReachableBB(F);
-        }
+  if (Invokes.empty())
+    return false;
 
-        changed = true;
-        invokeInst->setUnwindDest(unReachableBB);
-      }
-    }
-  }
+  // An unwind destination must be a landingpad; drop the unwind edge instead.
+  for (auto *invokeInst : Invokes)
+    changeToCall(invokeInst);
 
-  if (changed) {
-    EliminateUnreachableBlocks(F);
-  }
+  EliminateUnreachableBlocks(F);
 
-  return changed;
+  return true;
 }
 
 char RemoveExceptionHandlerPass::ID = 0;
