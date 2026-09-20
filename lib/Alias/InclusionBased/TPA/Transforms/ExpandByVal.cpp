@@ -7,14 +7,19 @@
  * function argument attributes.
  *
  * NOTE: This is a simplified version for LLVM 14 migration.
- * Full implementation would need to handle actual copying of byval arguments.
+ * Byval arguments are copied into a callee-local slot before the
+ * attribute is dropped, and by-value semantics are preserved.
  *
  * @author rainoftime
  */
 #include "Alias/InclusionBased/TPA/Transforms/ExpandByVal.h"
 
 #include "llvm/IR/Attributes.h"
+#include "llvm/IR/Constants.h"
+#include "llvm/IR/DataLayout.h"
 #include "llvm/IR/Function.h"
+#include "llvm/IR/Instructions.h"
+#include "llvm/IR/Intrinsics.h"
 #include "llvm/IR/Module.h"
 
 #include <vector>
@@ -39,6 +44,11 @@ PreservedAnalyses ExpandByValPass::run(Module &M,
   bool modified = false;
 
   for (auto &func : M) {
+    // Leave external declarations alone: their ABI must match the libraries
+    // they are linked against, and rewriting their call sites would break it.
+    if (func.isDeclaration())
+      continue;
+
     auto attrs = func.getAttributes();
     bool funcModified = false;
 
@@ -66,6 +76,33 @@ PreservedAnalyses ExpandByValPass::run(Module &M,
       auto argAttrs = attrs.getParamAttrs(argIdx);
       if (argAttrs.hasAttribute(Attribute::ByVal) ||
           argAttrs.hasAttribute(Attribute::StructRet)) {
+        // Handle the actual copying of byval arguments: copy the incoming
+        // object into a callee-local slot and redirect all uses to it, so
+        // dropping the attribute does not make the callee alias the caller.
+        if (argAttrs.hasAttribute(Attribute::ByVal)) {
+          Argument *Arg = func.getArg(argIdx);
+          Type *byValTy = argAttrs.getByValType();
+          Module *mod = func.getParent();
+          LLVMContext &ctx = func.getContext();
+          Instruction *insertPt =
+              &*func.getEntryBlock().getFirstInsertionPt();
+
+          auto *slot =
+              new AllocaInst(byValTy, 0, Arg->getName() + ".byval", insertPt);
+          Arg->replaceAllUsesWith(slot);
+
+          Type *sizeTy = IntegerType::get(ctx, 64);
+          Type *tys[3] = {slot->getType(), Arg->getType(), sizeTy};
+          Function *memcpyFn =
+              Intrinsic::getDeclaration(mod, Intrinsic::memcpy, tys);
+          Value *args[4] = {
+              slot, Arg,
+              ConstantInt::get(
+                  sizeTy, mod->getDataLayout().getTypeAllocSize(byValTy)),
+              ConstantInt::getFalse(ctx)};
+          CallInst::Create(memcpyFn->getFunctionType(), memcpyFn, args, "",
+                           insertPt);
+        }
         argAttrs =
             argAttrs.removeAttribute(func.getContext(), Attribute::ByVal)
                 .removeAttribute(func.getContext(), Attribute::StructRet);
@@ -80,6 +117,16 @@ PreservedAnalyses ExpandByValPass::run(Module &M,
                              llvm::ArrayRef<llvm::AttributeSet>(newArgAttrs));
       func.setAttributes(newAttrs);
       modified = true;
+
+      // Keep in-module call sites consistent with the rewritten signature.
+      for (User *U : func.users())
+        if (auto *CB = dyn_cast<CallBase>(U))
+          for (unsigned argIdx = 0;
+               argIdx < CB->arg_size() && argIdx < func.arg_size();
+               ++argIdx) {
+            CB->removeParamAttr(argIdx, Attribute::ByVal);
+            CB->removeParamAttr(argIdx, Attribute::StructRet);
+          }
     }
   }
 
