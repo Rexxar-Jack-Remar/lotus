@@ -32,6 +32,9 @@ class SemiSparseProgram;
 } // namespace tpa
 
 namespace lotus {
+namespace gpg {
+class GPGAnalysisEngine;
+} // namespace gpg
 namespace analysis {
 class FlowDDA;
 using DemandDrivenAA = FlowDDA;
@@ -60,6 +63,9 @@ struct AAConfig {
 
     // TPA: Flow- and context-sensitive semi-sparse pointer analysis
     TPA,
+
+    // GPG: fully flow-, field-, and context-sensitive bottom-up analysis
+    GPG,
 
     // DDA: Demand-driven pointer analysis on SVFG
     DDA,
@@ -220,6 +226,11 @@ struct AAConfig {
   /// Selective: 0-CFA at direct calls, k-CFA at indirect calls.
   static AAConfig TPA_Selective(unsigned k = 1) {
     return {Implementation::TPA, ContextSensitivity::Adaptive, k, true,
+            Solver::Default};
+  }
+
+  static AAConfig GPG() {
+    return {Implementation::GPG, ContextSensitivity::Adaptive, 0, true,
             Solver::Default};
   }
 
@@ -391,6 +402,7 @@ private:
   std::unique_ptr<lotus::analysis::DemandDrivenAA> _dda_aa;
   std::unique_ptr<tpa::SemiSparsePointerAnalysis> _tpa_aa;
   std::unique_ptr<tpa::SemiSparseProgram> _tpa_program;
+  std::unique_ptr<lotus::gpg::GPGAnalysisEngine> _gpg_aa;
 
   llvm::AAResults *_llvm_aa;
   seadsa::SeaDsaAAResult *_seadsa_aa;
@@ -411,6 +423,7 @@ public:
                                                              unsigned kCFA = 0);
   static std::unique_ptr<AliasAnalysisWrapper> createTPA(llvm::Module &M,
                                                          unsigned kCFA = 0);
+  static std::unique_ptr<AliasAnalysisWrapper> createGPG(llvm::Module &M);
 };
 
 // ===== Utility Functions =====

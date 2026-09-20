@@ -27,6 +27,7 @@ target_link_libraries(CanaryAliasAnalysisWrapper
         SeaDsaAnalysis
         CanaryAllocAA
         CanaryUnderApproxAA
+        CanaryGPG
         FSCSPointerAnalysis
         TPATransforms
         TPAUtil

@@ -4,6 +4,20 @@ Alias Analysis Tools
 This page documents the command-line tools under ``tools/alias/``. For the
 underlying algorithms and architecture, see :doc:`../../alias/alias_analysis`.
 
+GPG (lotus-alias-gpg)
+---------------------
+
+Bottom-up generalized-points-to-graph analysis. The default ``fscs`` mode is
+flow-, field-, and fully context-sensitive; ``fics`` and ``fici`` reproduce
+the reference implementation's comparison variants.
+
+.. code-block:: bash
+
+   ./build/bin/lotus-alias-gpg --mode=fscs --print-pts \
+     --print-call-graph --print-modref input.bc
+
+See :doc:`../../alias/gpg` for architecture and options.
+
 SparrowAA (lotus-alias-sparrow-aa)
 -------------------
 

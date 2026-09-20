@@ -1,5 +1,6 @@
 # Alias Analysis Unit Tests
 
+add_subdirectory(InclusionBased/GPG)
 add_subdirectory(DemandDriven/DDA)
 add_subdirectory(InclusionBased/AserPTA)
 add_subdirectory(InclusionBased/BootstrapAA)
@@ -19,6 +20,7 @@ add_subdirectory(Infrastructure/PtsSet)
 # All alias-analysis test sources declared by the subdirectories above are
 # collected into one binary so the LLVM/Lotus libraries are linked only once.
 set(LOTUS_ALIAS_TEST_LIBS
+    CanaryGPG
     DDA
     AserPTA
     CanaryBootstrapAA

@@ -36,6 +36,7 @@ Lotus exposes its build options through `cmake/LotusOptions.cmake` with a consis
 | `LOTUS_ENABLE_SEAHORN` | OFF | SeaHorn verification |
 | `LOTUS_ENABLE_SMACK` | OFF | SMACK verification |
 | `LOTUS_ENABLE_HORN_ICE` | OFF | Horn-ICE tools |
+| `LOTUS_ENABLE_PDAAAL` | OFF | PDAAAL weighted PDS reachability library |
 | `LOTUS_ENABLE_DYNAA` | OFF | Dynamic alias-analysis tools |
 | `LOTUS_ENABLE_CFL` | OFF | CFL reachability |
 | `LOTUS_ENABLE_CSR` | OFF | CSR tools |
@@ -86,6 +87,7 @@ Boost is optional and only required when certain modules are enabled:
 - **CLAM** (`LOTUS_ENABLE_CLAM`) — abstract interpretation, JSON parsing (Boost 1.80+)
 - **CclyzerAA** (`LOTUS_USE_CCLYZER`) — alias analysis
 - **FPsolve** (`LOTUS_ENABLE_FPSOLVE`) — fixed-point solver; also requires GMP
+- **PDAAAL** (`LOTUS_ENABLE_PDAAAL`) — weighted PDS reachability; requires Boost headers (≥ 1.70)
 
 If all four are disabled, Boost will not be configured. Example:
 

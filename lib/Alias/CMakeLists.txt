@@ -1,4 +1,5 @@
 add_subdirectory(Infrastructure/Spec)
+add_subdirectory(InclusionBased/GPG)
 add_subdirectory(DemandDriven/DDA)
 add_subdirectory(UnificationBased/DyckAA)
 add_subdirectory(UnificationBased/seadsa)

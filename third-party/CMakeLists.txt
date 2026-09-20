@@ -28,4 +28,21 @@ if(LOTUS_ENABLE_SEAL)
   # Seal symbolic automata lifter for stateful systems.
   add_subdirectory(seal EXCLUDE_FROM_ALL)
 endif()
-# add_subdirectory(mde)
+if(LOTUS_ENABLE_PDAAAL)
+  # PDAAAL: weighted pushdown-system reachability (post*/pre*/dual*) from
+  # Aalborg University. Builds only the pdaaal library target; tests,
+  # benchmarks, and the stand-alone binary are suppressed. Its internal
+  # header-only dependencies (ptrie, PEGTL, Abseil, nlohmann_json) are
+  # fetched via FetchContent when PDAAAL_GetDependencies=ON (the default).
+  # PDAAAL also requires Boost headers; ensure Boost is configured beforehand
+  # (LOTUS_ENABLE_CLAM, LOTUS_ENABLE_SEAHORN, or LOTUS_DOWNLOAD_BOOST suffice,
+  # but callers that enable only PDAAAL must arrange Boost separately or rely
+  # on LOTUS_DOWNLOAD_BOOST).
+  set(PDAAAL_VERSION 1.1.0 CACHE STRING "PDAAAL library version" FORCE)
+  set(PDAAAL_BuildTests   OFF CACHE BOOL "Build PDAAAL unit tests"           FORCE)
+  set(PDAAAL_Build_Main   OFF CACHE BOOL "Build PDAAAL stand-alone binary"   FORCE)
+  set(PDAAAL_BuildBundle  OFF CACHE BOOL "Build PDAAAL as a bundled binary"  FORCE)
+  set(PDAAAL_BuildStatic  OFF CACHE BOOL "Build PDAAAL as a fully static binary" FORCE)
+  set(PDAAAL_GetDependencies ON CACHE BOOL "Fetch PDAAAL header-only deps via FetchContent" FORCE)
+  add_subdirectory(PDAAAL EXCLUDE_FROM_ALL)
+endif()

@@ -27,6 +27,7 @@
 #include "Alias/InclusionBased/AserPTA/PreProcessing/Passes/RemoveExceptionHandlerPass.h"
 #include "Alias/InclusionBased/AserPTA/PreProcessing/Passes/StandardHeapAPIRewritePass.h"
 #include "Alias/InclusionBased/AserPTA/Util/Log.h"
+#include "Alias/InclusionBased/GPG/Analysis.h"
 #include "Alias/InclusionBased/LotusAA/Engine/InterProceduralPass.h"
 #include "Alias/InclusionBased/LotusAA/Support/FunctionPointerResults.h"
 #include "Alias/Infrastructure/AliasAnalysisWrapper/CLIUtils.h"
@@ -53,6 +54,7 @@ static cl::OptionCategory CGCat("CallGraph");
 
 enum class CGType {
   DyckAA,
+  GPG,
   LotusAA,
   FPA_FLTA,
   FPA_MLTA,
@@ -67,6 +69,7 @@ static cl::opt<CGType> AnalysisType(
     "cg-type", cl::desc("Call-graph analysis type"),
     cl::values(
         clEnumValN(CGType::DyckAA, "dyck", "DyckAA"),
+        clEnumValN(CGType::GPG, "gpg", "GPG FSCS pointer analysis"),
         clEnumValN(CGType::LotusAA, "lotus", "LotusAA"),
         clEnumValN(CGType::FPA_FLTA, "fpa-flta", "FPA FLTA"),
         clEnumValN(CGType::FPA_MLTA, "fpa-mlta", "FPA MLTA"),
@@ -245,6 +248,21 @@ static void buildCGWithLotusAA(llvm::Module &M, llvm::CallGraph &CG) {
   }
 }
 
+static void buildCGWithGPG(llvm::Module &M, llvm::CallGraph &CG) {
+  lotus::gpg::GPGAnalysisEngine analysis(M);
+  analysis.run();
+  processDirectCalls(M, CG);
+  for (const auto &[call, targets] :
+       analysis.result().indirectCallTargets()) {
+    auto *non_const_call = const_cast<llvm::CallBase *>(call);
+    auto *caller = const_cast<llvm::Function *>(call->getFunction());
+    for (const llvm::Function *target : targets) {
+      addCallEdge(CG, caller, non_const_call,
+                  const_cast<llvm::Function *>(target));
+    }
+  }
+}
+
 // Build call graph using AserPTA (template for different context sensitivities)
 template <typename Context>
 static void buildCGWithAserPTAImpl(llvm::Module &M, llvm::CallGraph &CG) {
@@ -377,6 +395,9 @@ int main(int Argc, char *Argv[]) {
     switch (AnalysisType) {
     case CGType::DyckAA:
       buildCGWithDyckAA(*M, CG);
+      break;
+    case CGType::GPG:
+      buildCGWithGPG(*M, CG);
       break;
     case CGType::LotusAA:
       buildCGWithLotusAA(*M, CG);

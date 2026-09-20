@@ -1,13 +1,14 @@
 /**
  * @file AliasAnalysisConfigParser.cpp
  * @brief String parsing utilities for AAConfig
- * 
+ *
  * This file provides utility functions to parse string representations
  * of alias analysis configurations into AAConfig objects. This is useful
  * for command-line tools and configuration files.
  */
 
 #include "Alias/Infrastructure/AliasAnalysisWrapper/AliasAnalysisWrapper.h"
+
 #include <algorithm>
 #include <cctype>
 
@@ -17,10 +18,10 @@ namespace {
 
 /**
  * @brief Convert a string to lowercase
- * 
+ *
  * Helper function that creates a lowercase copy of the input string.
  * Used for case-insensitive string matching in the parser.
- * 
+ *
  * @param str Input string to convert
  * @return Lowercase copy of the input string
  */
@@ -34,32 +35,32 @@ std::string toLower(const std::string &str) {
 
 /**
  * @brief Parse a string representation into an AAConfig object
- * 
+ *
  * This function parses common string representations of alias analysis
  * configurations and returns the corresponding AAConfig. It supports a wide
  * variety of string formats for backward compatibility and ease of use.
- * 
+ *
  * Supported formats:
- * 
+ *
  * **SparrowAA (Andersen-style):**
  * - "andersen", "sparrow-aa", "sparrowaa" -> SparrowAA_NoCtx()
  * - "andersen-1cfa", "1cfa", "sparrow-aa-1cfa" -> SparrowAA_1CFA()
  * - "andersen-2cfa", "2cfa", "sparrow-aa-2cfa" -> SparrowAA_2CFA()
  * - "nocx", "noctx", "0cfa" -> SparrowAA_NoCtx()
- * 
+ *
  * **AserPTA:**
  * - "aser-pta", "aserpta" -> AserPTA_NoCtx()
  * - "aser-pta-1cfa" -> AserPTA_1CFA()
  * - "aser-pta-2cfa" -> AserPTA_2CFA()
  * - "aser-pta-origin" -> AserPTA_Origin()
- * 
+ *
  * **TPA:**
  * - "tpa", "tpa-0cfa" -> TPA_NoCtx()
  * - "tpa-1cfa" -> TPA_1CFA()
  * - "tpa-2cfa" -> TPA_2CFA()
  * - "tpa-3cfa" -> TPA_3CFA()
  * - "tpa-k" or "tpa-kcfa" (where k is a number) -> TPA_KCFA(k)
- * 
+ *
  * **Other analyses:**
  * - "dyck", "dyckaa" -> DyckAA()
  * - "cfl-anders", "cflanders" -> CFLAnders()
@@ -73,13 +74,14 @@ std::string toLower(const std::string &str) {
  * - "sraa" -> SRAA()
  * - "combined" -> Combined()
  * - "underapprox" -> UnderApprox()
- * 
+ *
  * @param str String representation of the alias analysis configuration
- * @param fallback Configuration to return if the string is unknown - MUST be explicitly specified.
- *                 This ensures users are aware of what fallback analysis will be used.
+ * @param fallback Configuration to return if the string is unknown - MUST be
+ * explicitly specified. This ensures users are aware of what fallback analysis
+ * will be used.
  * @return AAConfig corresponding to the string, or fallback if the string
  *         is not recognized
- * 
+ *
  * @note Matching is case-insensitive
  * @note If the string is empty or unrecognized, returns the fallback config
  * @note The fallback parameter is required - there is no default. This ensures
@@ -88,29 +90,31 @@ std::string toLower(const std::string &str) {
  *       "tpa-5" or "tpa-5cfa" to create TPA_KCFA(5)
  * @note This function is designed for command-line tools and configuration
  *       files where users specify analyses by name
- * 
+ *
  * @example
  * ```cpp
  * // Parse common formats - fallback MUST be explicitly specified
- * auto config1 = parseAAConfigFromString("andersen-1cfa", AAConfig::SparrowAA_NoCtx());
- * auto config2 = parseAAConfigFromString("tpa-2cfa", AAConfig::TPA_NoCtx());
- * auto config3 = parseAAConfigFromString("dyck", AAConfig::DyckAA());
- * 
+ * auto config1 = parseAAConfigFromString("andersen-1cfa",
+ * AAConfig::SparrowAA_NoCtx()); auto config2 =
+ * parseAAConfigFromString("tpa-2cfa", AAConfig::TPA_NoCtx()); auto config3 =
+ * parseAAConfigFromString("dyck", AAConfig::DyckAA());
+ *
  * // Custom k-CFA for TPA
  * auto config4 = parseAAConfigFromString("tpa-5cfa", AAConfig::TPA_NoCtx());
- * 
+ *
  * // With explicit fallback for unknown strings
  * auto config5 = parseAAConfigFromString("unknown", AAConfig::DyckAA());
  * ```
  */
-AAConfig lotus::parseAAConfigFromString(const std::string &str, const AAConfig &fallback) {
+AAConfig lotus::parseAAConfigFromString(const std::string &str,
+                                        const AAConfig &fallback) {
   std::string lower = toLower(str);
-  
+
   // SparrowAA variants
   if (lower == "andersen" || lower == "sparrow-aa" || lower == "sparrowaa" ||
       lower == "andersen-nocontext" || lower == "andersen-noctx" ||
-      lower == "andersen-0cfa" || lower == "andersen0" ||
-      lower == "nocx" || lower == "noctx" || lower == "0cfa") {
+      lower == "andersen-0cfa" || lower == "andersen0" || lower == "nocx" ||
+      lower == "noctx" || lower == "0cfa") {
     return AAConfig::SparrowAA_NoCtx();
   }
   if (lower == "andersen-1cfa" || lower == "andersen1" || lower == "1cfa" ||
@@ -121,7 +125,7 @@ AAConfig lotus::parseAAConfigFromString(const std::string &str, const AAConfig &
       lower == "sparrow-aa-2cfa" || lower == "sparrowaa-2cfa") {
     return AAConfig::SparrowAA_2CFA();
   }
-  
+
   // AserPTA variants
   if (lower == "aser-pta" || lower == "aserpta" || lower == "aser-pta-0cfa") {
     return AAConfig::AserPTA_NoCtx();
@@ -135,15 +139,19 @@ AAConfig lotus::parseAAConfigFromString(const std::string &str, const AAConfig &
   if (lower == "aser-pta-origin" || lower == "aserpta-origin") {
     return AAConfig::AserPTA_Origin();
   }
-  
+
   // DDA (demand-driven on SVFG)
   if (lower == "dda" || lower == "demand-driven" || lower == "demanddriven") {
     return AAConfig::DDA_NoCtx();
   }
-  
+
   // TPA variants
   if (lower == "tpa" || lower == "tpa-0cfa") {
     return AAConfig::TPA_NoCtx();
+  }
+
+  if (lower == "gpg" || lower == "gpg-aa" || lower == "gpg-fscs") {
+    return AAConfig::GPG();
   }
   if (lower == "tpa-1cfa") {
     return AAConfig::TPA_1CFA();
@@ -174,7 +182,7 @@ AAConfig lotus::parseAAConfigFromString(const std::string &str, const AAConfig &
       }
     }
   }
-  
+
   // Other analyses
   if (lower == "dyck" || lower == "dyckaa") {
     return AAConfig::DyckAA();
@@ -212,7 +220,7 @@ AAConfig lotus::parseAAConfigFromString(const std::string &str, const AAConfig &
   if (lower == "underapprox") {
     return AAConfig::UnderApprox();
   }
-  
+
   // Unknown string, return fallback
   return fallback;
 }
