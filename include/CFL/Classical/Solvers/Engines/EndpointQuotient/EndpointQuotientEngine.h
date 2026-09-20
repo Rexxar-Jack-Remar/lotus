@@ -6,8 +6,50 @@
 #include <cstddef>
 #include <cstdint>
 #include <memory>
+#include <vector>
 
 namespace lotus::cfl::classical::engines {
+
+/// Structural class of a strongly connected component in the grammar-symbol
+/// dependency graph.  These classes identify SCCs that can potentially use a
+/// cheaper staged evaluator instead of general CFL saturation.
+enum class EndpointQuotientSccClass : std::uint8_t {
+  Acyclic,
+  UnaryRecursive,
+  LeftLinear,
+  RightLinear,
+  Transitive,
+  General,
+};
+
+struct EndpointQuotientRuleStatistics {
+  std::size_t rule_id = 0;
+  std::size_t kind = 0;
+  std::size_t lhs = 0;
+  std::size_t left = 0;
+  std::size_t right = 0;
+  std::size_t delta_rows = 0;
+  std::size_t delta_cells = 0;
+  std::size_t joins = 0;
+  std::size_t propagations = 0;
+  std::size_t successful_propagations = 0;
+  std::size_t repeated_outputs = 0;
+  std::size_t join_word_operations = 0;
+};
+
+struct EndpointQuotientSccStatistics {
+  std::size_t scc_id = 0;
+  EndpointQuotientSccClass classification = EndpointQuotientSccClass::Acyclic;
+  std::size_t symbols = 0;
+  std::size_t rules = 0;
+  std::size_t delta_rows = 0;
+  std::size_t delta_cells = 0;
+  std::size_t joins = 0;
+  std::size_t propagations = 0;
+  std::size_t successful_propagations = 0;
+  std::size_t repeated_outputs = 0;
+  std::size_t join_word_operations = 0;
+};
 
 /// Exact fixed-point statistics reported by the endpoint-quotient engine.
 /// `logical_facts` counts concrete facts (seed plus inferred) without
@@ -37,9 +79,23 @@ struct EndpointQuotientStatistics {
   std::size_t partitions_built = 0;
   std::size_t bridges_built = 0;
   std::size_t lifts_built = 0;
+  std::size_t dependency_sccs = 0;
+  std::size_t acyclic_sccs = 0;
+  std::size_t unary_recursive_sccs = 0;
+  std::size_t transitive_sccs = 0;
+  std::size_t linear_sccs = 0;
+  std::size_t general_sccs = 0;
+  std::size_t max_scc_symbols = 0;
+  std::size_t max_scc_rules = 0;
+  std::size_t hottest_rule_id = 0;
+  std::size_t hottest_rule_joins = 0;
+  std::size_t hottest_scc_id = 0;
+  std::size_t hottest_scc_joins = 0;
   std::uint64_t preprocess_us = 0;
   std::uint64_t saturation_us = 0;
   std::uint64_t count_us = 0;
+  std::vector<EndpointQuotientRuleStatistics> per_rule;
+  std::vector<EndpointQuotientSccStatistics> per_scc;
 };
 
 /// Grammar-indexed endpoint-quotient (GEQ) engine adapter.
@@ -59,7 +115,7 @@ struct EndpointQuotientStatistics {
 class EndpointQuotientEngine final : public Relation {
 public:
   EndpointQuotientEngine(const Grammar &grammar, std::size_t node_count,
-                         bool factorized = true);
+                         bool factorized = false);
   ~EndpointQuotientEngine() override;
   EndpointQuotientEngine(const EndpointQuotientEngine &) = delete;
   EndpointQuotientEngine &operator=(const EndpointQuotientEngine &) = delete;

@@ -16,6 +16,8 @@ lotus_collect_test_sources(cfl_tests
   InterleavedDyckComparisonTest.cpp
   InterleavedDyckMCFLTest.cpp
   EndpointQuotientEngineTest.cpp
+  EndpointQuotientAdvancedTest.cpp
+  EndpointQuotientStagingTest.cpp
   SkewedTabulationEngineTest.cpp
   CatIeoceEngineTest.cpp
   ClassicalAdaptersTest.cpp)

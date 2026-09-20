@@ -590,6 +590,71 @@ ReachabilityStats AliasClient::solveToFixedPoint(
         current.endpoint_quotient_bridges_built;
     aggregate.endpoint_quotient_lifts_built +=
         current.endpoint_quotient_lifts_built;
+    aggregate.endpoint_quotient_dependency_sccs =
+        current.endpoint_quotient_dependency_sccs;
+    aggregate.endpoint_quotient_acyclic_sccs =
+        current.endpoint_quotient_acyclic_sccs;
+    aggregate.endpoint_quotient_unary_recursive_sccs =
+        current.endpoint_quotient_unary_recursive_sccs;
+    aggregate.endpoint_quotient_transitive_sccs =
+        current.endpoint_quotient_transitive_sccs;
+    aggregate.endpoint_quotient_linear_sccs =
+        current.endpoint_quotient_linear_sccs;
+    aggregate.endpoint_quotient_general_sccs =
+        current.endpoint_quotient_general_sccs;
+    aggregate.endpoint_quotient_max_scc_symbols =
+        current.endpoint_quotient_max_scc_symbols;
+    aggregate.endpoint_quotient_max_scc_rules =
+        current.endpoint_quotient_max_scc_rules;
+    if (aggregate.endpoint_quotient_per_rule.size() !=
+        current.endpoint_quotient_per_rule.size()) {
+      aggregate.endpoint_quotient_per_rule =
+          current.endpoint_quotient_per_rule;
+    } else {
+      for (std::size_t i = 0; i < current.endpoint_quotient_per_rule.size();
+           ++i) {
+        const auto &source = current.endpoint_quotient_per_rule[i];
+        auto &target = aggregate.endpoint_quotient_per_rule[i];
+        target.delta_rows += source.delta_rows;
+        target.delta_cells += source.delta_cells;
+        target.joins += source.joins;
+        target.propagations += source.propagations;
+        target.successful_propagations += source.successful_propagations;
+        target.repeated_outputs += source.repeated_outputs;
+        target.join_word_operations += source.join_word_operations;
+      }
+    }
+    if (aggregate.endpoint_quotient_per_scc.size() !=
+        current.endpoint_quotient_per_scc.size()) {
+      aggregate.endpoint_quotient_per_scc = current.endpoint_quotient_per_scc;
+    } else {
+      for (std::size_t i = 0; i < current.endpoint_quotient_per_scc.size();
+           ++i) {
+        const auto &source = current.endpoint_quotient_per_scc[i];
+        auto &target = aggregate.endpoint_quotient_per_scc[i];
+        target.delta_rows += source.delta_rows;
+        target.delta_cells += source.delta_cells;
+        target.joins += source.joins;
+        target.propagations += source.propagations;
+        target.successful_propagations += source.successful_propagations;
+        target.repeated_outputs += source.repeated_outputs;
+        target.join_word_operations += source.join_word_operations;
+      }
+    }
+    aggregate.endpoint_quotient_hottest_rule_joins = 0;
+    for (const auto &rule : aggregate.endpoint_quotient_per_rule) {
+      if (rule.joins > aggregate.endpoint_quotient_hottest_rule_joins) {
+        aggregate.endpoint_quotient_hottest_rule_joins = rule.joins;
+        aggregate.endpoint_quotient_hottest_rule_id = rule.rule_id;
+      }
+    }
+    aggregate.endpoint_quotient_hottest_scc_joins = 0;
+    for (const auto &scc : aggregate.endpoint_quotient_per_scc) {
+      if (scc.joins > aggregate.endpoint_quotient_hottest_scc_joins) {
+        aggregate.endpoint_quotient_hottest_scc_joins = scc.joins;
+        aggregate.endpoint_quotient_hottest_scc_id = scc.scc_id;
+      }
+    }
     ++aggregate.solver_rounds;
     if (!discover_constraints(*this)) {
       return aggregate;

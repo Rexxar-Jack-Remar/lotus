@@ -316,9 +316,8 @@ std::unique_ptr<Relation> createSolverRelation(SolverBackend backend,
     return std::make_unique<FullyOrderedClosureRelation>(
         transitive_symbols, node_count, simplify_focr_cycles);
   case SolverBackend::EndpointQuotient:
-    return std::make_unique<engines::EndpointQuotientEngine>(grammar,
-                                                             node_count,
-                                                             factorized_endpoint);
+    return std::make_unique<engines::EndpointQuotientEngine>(
+        grammar, node_count, factorized_endpoint);
   }
   throw std::invalid_argument("Unknown CFL solver backend");
 }
@@ -634,6 +633,34 @@ public:
       stats.endpoint_quotient_partitions_built = eq.partitions_built;
       stats.endpoint_quotient_bridges_built = eq.bridges_built;
       stats.endpoint_quotient_lifts_built = eq.lifts_built;
+      stats.endpoint_quotient_dependency_sccs = eq.dependency_sccs;
+      stats.endpoint_quotient_acyclic_sccs = eq.acyclic_sccs;
+      stats.endpoint_quotient_unary_recursive_sccs = eq.unary_recursive_sccs;
+      stats.endpoint_quotient_transitive_sccs = eq.transitive_sccs;
+      stats.endpoint_quotient_linear_sccs = eq.linear_sccs;
+      stats.endpoint_quotient_general_sccs = eq.general_sccs;
+      stats.endpoint_quotient_max_scc_symbols = eq.max_scc_symbols;
+      stats.endpoint_quotient_max_scc_rules = eq.max_scc_rules;
+      stats.endpoint_quotient_hottest_rule_id = eq.hottest_rule_id;
+      stats.endpoint_quotient_hottest_rule_joins = eq.hottest_rule_joins;
+      stats.endpoint_quotient_hottest_scc_id = eq.hottest_scc_id;
+      stats.endpoint_quotient_hottest_scc_joins = eq.hottest_scc_joins;
+      stats.endpoint_quotient_per_rule.reserve(eq.per_rule.size());
+      for (const auto &rule : eq.per_rule) {
+        stats.endpoint_quotient_per_rule.push_back(
+            {rule.rule_id, rule.kind, rule.lhs, rule.left, rule.right,
+             rule.delta_rows, rule.delta_cells, rule.joins, rule.propagations,
+             rule.successful_propagations, rule.repeated_outputs,
+             rule.join_word_operations});
+      }
+      stats.endpoint_quotient_per_scc.reserve(eq.per_scc.size());
+      for (const auto &scc : eq.per_scc) {
+        stats.endpoint_quotient_per_scc.push_back(
+            {scc.scc_id, static_cast<std::size_t>(scc.classification),
+             scc.symbols, scc.rules, scc.delta_rows, scc.delta_cells, scc.joins,
+             scc.propagations, scc.successful_propagations,
+             scc.repeated_outputs, scc.join_word_operations});
+      }
     } else if (backend_ == SolverBackend::HierarchicalPocr) {
       do {
         while (!primary_worklist_.empty()) {
@@ -1341,7 +1368,8 @@ private:
 
 SolverSession::SolverSession(LabeledGraph &graph, const Grammar &grammar,
                              SolverBackend backend)
-    : SolverSession(graph, grammar, SolverOptions{backend, false, false, {}}) {}
+    : SolverSession(graph, grammar,
+                    SolverOptions{backend, false, false, {}, false}) {}
 
 SolverSession::SolverSession(LabeledGraph &graph, const Grammar &grammar,
                              const SolverOptions &options)

@@ -1,9 +1,11 @@
 #include "CFL/Classical/Solvers/Engines/EndpointQuotient/EndpointQuotientEngine.h"
 
 #include "CFL/Classical/Solvers/Engines/EndpointQuotient/EndpointQuotient.h"
+#include "CFL/Classical/Solvers/Engines/EndpointQuotient/EndpointQuotientStaging.h"
 
 #include <algorithm>
 #include <stdexcept>
+#include <tuple>
 #include <unordered_set>
 #include <utility>
 
@@ -34,6 +36,80 @@ struct EdgeKeyHash {
   }
 };
 
+static bool edgeKeyLess(const EdgeKey &lhs, const EdgeKey &rhs) noexcept {
+  return std::tie(lhs.symbol, lhs.source, lhs.target) <
+         std::tie(rhs.symbol, rhs.source, rhs.target);
+}
+
+/// Monotone terminal input with a compact immutable prefix and a hash-indexed
+/// delta. Keeping every historical edge in an unordered_set made the engine
+/// retain the hash-node and bucket overhead for the entire session, even
+/// though only the edges added since the previous solve need O(1) lookup.
+///
+/// commit() is called only after the new solver snapshot and its derived counts
+/// have completed, so a throwing solve leaves both the last queryable snapshot
+/// and the complete buffered input unchanged.
+class MonotoneEdgeStore {
+public:
+  bool add(EdgeKey edge) {
+    if (std::binary_search(committed_.begin(), committed_.end(), edge,
+                           edgeKeyLess))
+      return false;
+    return pending_.emplace(std::move(edge)).second;
+  }
+
+  void appendTo(std::vector<endpoint::Edge> &result) const {
+    result.reserve(result.size() + size());
+    for (const EdgeKey &edge : committed_)
+      result.push_back({edge.source, edge.symbol, edge.target});
+    for (const EdgeKey &edge : pending_)
+      result.push_back({edge.source, edge.symbol, edge.target});
+  }
+
+  void commit() {
+    // Complete every potentially-throwing allocation before modifying the
+    // committed prefix. The merge itself uses the reserved tail as output and
+    // only no-throw assignments of this trivial key type.
+    std::vector<EdgeKey> delta;
+    delta.reserve(pending_.size());
+    decltype(pending_) empty_pending;
+    for (const EdgeKey &edge : pending_)
+      delta.push_back(edge);
+    std::sort(delta.begin(), delta.end(), edgeKeyLess);
+    const std::size_t old_size = committed_.size();
+    const std::size_t new_size = old_size + delta.size();
+    committed_.reserve(new_size);
+    committed_.resize(new_size);
+    // committed_ is sorted. Sorting only the usually-small delta followed by
+    // a backwards merge avoids re-sorting the historical input every round.
+    std::size_t left = old_size, right = delta.size(), output = new_size;
+    while (left && right) {
+      if (edgeKeyLess(delta[right - 1], committed_[left - 1]))
+        committed_[--output] = committed_[--left];
+      else
+        committed_[--output] = delta[--right];
+    }
+    while (right)
+      committed_[--output] = delta[--right];
+    // A callgraph round can temporarily make the delta table large. Release
+    // its buckets after commit rather than retaining that peak for the rest of
+    // the analysis.
+    pending_.swap(empty_pending);
+  }
+
+  std::size_t size() const { return committed_.size() + pending_.size(); }
+
+  std::size_t payloadBytes() const {
+    return committed_.capacity() * sizeof(EdgeKey) +
+           pending_.size() * sizeof(EdgeKey) +
+           pending_.bucket_count() * sizeof(void *);
+  }
+
+private:
+  std::vector<EdgeKey> committed_;
+  std::unordered_set<EdgeKey, EdgeKeyHash> pending_;
+};
+
 } // namespace
 
 class EndpointQuotientEngine::Impl {
@@ -43,6 +119,7 @@ public:
     options_.factorized = factorized;
     buildRules(base_);
     base_.symbols = grammar.symbolCount();
+    buildSccMetadata();
     for (const auto &symbol : grammar.countSymbols())
       count_symbols_.push_back(grammar.symbolId(symbol));
     std::sort(count_symbols_.begin(), count_symbols_.end());
@@ -59,7 +136,7 @@ public:
     if (symbol >= base_.symbols || source >= node_count_ ||
         target >= node_count_)
       throw std::out_of_range("Endpoint quotient input ID out of range");
-    const bool added = edges_.emplace(EdgeKey{symbol, source, target}).second;
+    const bool added = edges_.add(EdgeKey{symbol, source, target});
     dirty_ = dirty_ || added;
     return added;
   }
@@ -78,14 +155,18 @@ public:
       result.binary_join_words = 0;
       result.bridges_built = result.lifts_built = 0;
       result.preprocess_us = result.saturation_us = result.count_us = 0;
+      result.hottest_rule_joins = result.hottest_scc_joins = 0;
+      result.hottest_rule_id = result.hottest_scc_id = 0;
+      for (auto &rule : result.per_rule)
+        clearWork(rule);
+      for (auto &scc : result.per_scc)
+        clearWork(scc);
       stats_ = result;
       return stats_;
     }
     endpoint::Problem problem = base_;
     problem.nodes = node_count_;
-    problem.edges.reserve(edges_.size());
-    for (const EdgeKey &edge : edges_)
-      problem.edges.push_back({edge.source, edge.symbol, edge.target});
+    edges_.appendTo(problem.edges);
 
     auto next =
         snapshot_
@@ -98,6 +179,10 @@ public:
     auto result = collect(next->statistics());
     const auto previous = snapshot_ ? snapshot_->statistics().logical_facts : 0;
     result.derived_facts = result.logical_facts - previous;
+    // Commit input and result together. Everything above may throw, in which
+    // case the old snapshot and the pending delta remain available for query
+    // and retry with the same externally visible state as before this call.
+    edges_.commit();
     snapshot_ = std::move(next);
     count_symbol_edges_ = count;
     dirty_ = false;
@@ -156,8 +241,7 @@ public:
   std::size_t estimatedPayloadBytes() const {
     std::size_t bytes = sizeof(EndpointQuotientEngine) + sizeof(Impl) +
                         base_.rules.capacity() * sizeof(endpoint::Rule) +
-                        edges_.size() * sizeof(EdgeKey) +
-                        edges_.bucket_count() * sizeof(void *);
+                        edges_.payloadBytes();
     if (snapshot_)
       bytes += snapshot_->estimatedPayloadBytes();
     bytes += count_symbols_.capacity() * sizeof(SymbolId);
@@ -178,6 +262,18 @@ public:
   const EndpointQuotientStatistics &statistics() const { return stats_; }
 
 private:
+  static void clearWork(EndpointQuotientRuleStatistics &profile) {
+    profile.delta_rows = profile.delta_cells = profile.joins = 0;
+    profile.propagations = profile.successful_propagations = 0;
+    profile.repeated_outputs = profile.join_word_operations = 0;
+  }
+
+  static void clearWork(EndpointQuotientSccStatistics &profile) {
+    profile.delta_rows = profile.delta_cells = profile.joins = 0;
+    profile.propagations = profile.successful_propagations = 0;
+    profile.repeated_outputs = profile.join_word_operations = 0;
+  }
+
   void buildRules(endpoint::Problem &problem) const {
     for (const auto &[head, rules] : grammar_.productions()) {
       const Id lhs = grammar_.symbolId(head);
@@ -206,7 +302,42 @@ private:
     }
   }
 
-  static EndpointQuotientStatistics collect(const endpoint::Statistics &eq) {
+  void buildSccMetadata() {
+    const endpoint::StagingPlan plan = endpoint::buildStagingPlan(base_);
+    symbol_scc_ = plan.symbol_to_stage;
+    scc_metadata_.resize(plan.stages.size());
+    for (const auto &stage : plan.stages) {
+      auto &profile = scc_metadata_[stage.index];
+      profile.scc_id = stage.index;
+      profile.symbols = stage.symbols.size();
+      profile.rules = stage.rules.size();
+      switch (stage.kind) {
+      case endpoint::SccKind::Acyclic:
+        profile.classification = EndpointQuotientSccClass::Acyclic;
+        break;
+      case endpoint::SccKind::UnaryRegular:
+        profile.classification = EndpointQuotientSccClass::UnaryRecursive;
+        break;
+      case endpoint::SccKind::LeftLinear:
+        profile.classification = EndpointQuotientSccClass::LeftLinear;
+        break;
+      case endpoint::SccKind::RightLinear:
+        profile.classification = EndpointQuotientSccClass::RightLinear;
+        break;
+      case endpoint::SccKind::TransitiveSelf:
+        profile.classification = EndpointQuotientSccClass::Transitive;
+        break;
+      case endpoint::SccKind::General:
+        profile.classification = EndpointQuotientSccClass::General;
+        break;
+      }
+    }
+    rule_scc_.resize(base_.rules.size());
+    for (Id rule_id = 0; rule_id < base_.rules.size(); ++rule_id)
+      rule_scc_[rule_id] = symbol_scc_[base_.rules[rule_id].lhs];
+  }
+
+  EndpointQuotientStatistics collect(const endpoint::Statistics &eq) const {
     EndpointQuotientStatistics result;
     result.cells = eq.cells;
     result.logical_facts = eq.logical_facts;
@@ -233,6 +364,68 @@ private:
     result.preprocess_us = static_cast<std::uint64_t>(eq.preprocess_ms * 1000);
     result.saturation_us = static_cast<std::uint64_t>(eq.saturation_ms * 1000);
     result.count_us = static_cast<std::uint64_t>(eq.count_ms * 1000);
+
+    result.per_rule.reserve(base_.rules.size());
+    result.per_scc = scc_metadata_;
+    for (Id rule_id = 0; rule_id < base_.rules.size(); ++rule_id) {
+      const auto &rule = base_.rules[rule_id];
+      EndpointQuotientRuleStatistics profile;
+      profile.rule_id = rule_id;
+      profile.kind = static_cast<std::size_t>(rule.kind);
+      profile.lhs = rule.lhs;
+      profile.left = rule.left;
+      profile.right = rule.right;
+      if (rule_id < eq.per_rule.size()) {
+        const auto &work = eq.per_rule[rule_id];
+        profile.delta_rows = work.delta_rows;
+        profile.delta_cells = work.delta_cells;
+        profile.joins = work.joins;
+        profile.propagations = work.propagations;
+        profile.successful_propagations = work.successful_propagations;
+        profile.repeated_outputs = work.repeated_outputs;
+        profile.join_word_operations = work.join_word_operations;
+      }
+      result.per_rule.push_back(profile);
+      auto &scc = result.per_scc[rule_scc_[rule_id]];
+      scc.delta_rows += profile.delta_rows;
+      scc.delta_cells += profile.delta_cells;
+      scc.joins += profile.joins;
+      scc.propagations += profile.propagations;
+      scc.successful_propagations += profile.successful_propagations;
+      scc.repeated_outputs += profile.repeated_outputs;
+      scc.join_word_operations += profile.join_word_operations;
+      if (profile.joins > result.hottest_rule_joins) {
+        result.hottest_rule_joins = profile.joins;
+        result.hottest_rule_id = rule_id;
+      }
+    }
+    result.dependency_sccs = result.per_scc.size();
+    for (const auto &scc : result.per_scc) {
+      result.max_scc_symbols = std::max(result.max_scc_symbols, scc.symbols);
+      result.max_scc_rules = std::max(result.max_scc_rules, scc.rules);
+      if (scc.joins > result.hottest_scc_joins) {
+        result.hottest_scc_joins = scc.joins;
+        result.hottest_scc_id = scc.scc_id;
+      }
+      switch (scc.classification) {
+      case EndpointQuotientSccClass::Acyclic:
+        ++result.acyclic_sccs;
+        break;
+      case EndpointQuotientSccClass::UnaryRecursive:
+        ++result.unary_recursive_sccs;
+        break;
+      case EndpointQuotientSccClass::LeftLinear:
+      case EndpointQuotientSccClass::RightLinear:
+        ++result.linear_sccs;
+        break;
+      case EndpointQuotientSccClass::Transitive:
+        ++result.transitive_sccs;
+        break;
+      case EndpointQuotientSccClass::General:
+        ++result.general_sccs;
+        break;
+      }
+    }
     return result;
   }
 
@@ -242,9 +435,12 @@ private:
   std::unique_ptr<endpoint::Solver> snapshot_;
   bool dirty_ = true;
   std::vector<SymbolId> count_symbols_;
+  std::vector<Id> symbol_scc_;
+  std::vector<Id> rule_scc_;
+  std::vector<EndpointQuotientSccStatistics> scc_metadata_;
   std::size_t count_symbol_edges_ = 0;
   std::size_t node_count_ = 0;
-  std::unordered_set<EdgeKey, EdgeKeyHash> edges_;
+  MonotoneEdgeStore edges_;
   EndpointQuotientStatistics stats_;
 };
 

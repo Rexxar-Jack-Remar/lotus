@@ -1,5 +1,7 @@
 #include "CFL/Classical/Solvers/Engines/EndpointQuotient/EndpointQuotient.h"
 
+#include "CFL/Classical/Solvers/Engines/EndpointQuotient/EndpointQuotientStaging.h"
+
 #include <algorithm>
 #include <cassert>
 #include <chrono>
@@ -7,6 +9,7 @@
 #include <limits>
 #include <map>
 #include <numeric>
+#include <queue>
 #include <stdexcept>
 #include <tuple>
 #include <type_traits>
@@ -432,19 +435,37 @@ struct JoinRows {
   }
 };
 
-struct Relation {
+struct RelationPayload {
   CellSet known;
   ClassLists active_out;
   ClassLists active_in;
+};
+
+struct Relation {
+  std::shared_ptr<RelationPayload> payload =
+      std::make_shared<RelationPayload>();
   ClassLists pending_out;
   std::vector<bool> queued_rows;
   std::unique_ptr<JoinRows> join_rows;
   bool tried_join_rows = false;
+
+  bool insertKnown(Id row, Id column) {
+    if (payload->known.contains(row, column))
+      return false;
+    ensureUnique();
+    return payload->known.insert(row, column);
+  }
+
+  void ensureUnique() {
+    if (payload.use_count() != 1)
+      payload = std::make_shared<RelationPayload>(*payload);
+  }
 };
 
 struct UnaryPlan {
   Id lhs;
   Id child;
+  Id rule_id;
   std::shared_ptr<const ClassLists> rows;
   std::shared_ptr<const ClassLists> columns;
 };
@@ -459,6 +480,7 @@ struct BinaryPlan {
   Id lhs;
   Id left;
   Id right;
+  Id rule_id;
   std::shared_ptr<const ClassLists> rows;
   std::shared_ptr<const ClassLists> columns;
   // An interface edge (j,k) means Q_left[j] intersects P_right[k].
@@ -476,8 +498,17 @@ struct Fact {
 };
 
 struct DeltaRow {
+  Id stage;
   Id symbol;
   Id row;
+  Count sequence;
+};
+
+struct DeltaRowLater {
+  bool operator()(const DeltaRow &lhs, const DeltaRow &rhs) const {
+    return std::tie(lhs.stage, lhs.sequence) >
+           std::tie(rhs.stage, rhs.sequence);
+  }
 };
 
 struct FactorView {
@@ -498,18 +529,29 @@ struct FactorView {
 struct FactorUnaryPlan {
   Id lhs_view = 0;
   Id child_view = 0;
+  Id rule_id = 0;
 };
 
 struct FactorBinaryPlan {
   Id lhs_view = 0;
   Id left_view = 0;
   Id right_view = 0;
+  Id rule_id = 0;
   std::shared_ptr<const Bridge> bridge;
 };
 
 struct FactorDeltaRow {
+  Id stage = 0;
   Id view = 0;
   Id row = 0;
+  Count sequence = 0;
+};
+
+struct FactorDeltaRowLater {
+  bool operator()(const FactorDeltaRow &lhs, const FactorDeltaRow &rhs) const {
+    return std::tie(lhs.stage, lhs.sequence) >
+           std::tie(rhs.stage, rhs.sequence);
+  }
 };
 
 } // namespace
@@ -559,13 +601,15 @@ struct Solver::Impl {
   Lists unit_uses;
   Lists left_uses;
   Lists right_uses;
-  std::deque<DeltaRow> worklist;
+  std::priority_queue<DeltaRow, std::vector<DeltaRow>, DeltaRowLater> worklist;
+  Count work_sequence = 0;
   Count pending_cells = 0;
   const Impl *previous = nullptr;
   Id join_index_words = 0;
   std::vector<ClassId> bulk_values;
   std::vector<std::uint32_t> bulk_marks;
   std::uint32_t bulk_epoch = 0;
+  bool factorized_active = false;
   std::vector<FactorView> factor_views;
   Lists symbol_factor_views;
   std::map<std::tuple<Id, Id, Id>, Id> factor_view_ids;
@@ -574,12 +618,17 @@ struct Solver::Impl {
   Lists factor_unit_uses;
   Lists factor_left_uses;
   Lists factor_right_uses;
-  std::deque<FactorDeltaRow> factor_worklist;
+  std::priority_queue<FactorDeltaRow, std::vector<FactorDeltaRow>,
+                      FactorDeltaRowLater>
+      factor_worklist;
+  Count factor_work_sequence = 0;
   Count factor_pending_cells = 0;
+  StagingPlan staging_plan;
 
   Impl(Problem p, Options o, const Impl *old = nullptr)
       : problem(std::move(p)), options(o), grammar_rules(problem.rules),
-        seed_edges(canonicalEdges(problem.edges)), previous(old) {
+        seed_edges(canonicalEdges(problem.edges)), previous(old),
+        factorized_active(options.factorized) {
     problem.validate();
     switch (options.partitions) {
     case PartitionMode::Grammar:
@@ -796,10 +845,8 @@ struct Solver::Impl {
     for (Id a = 0; a < problem.symbols; ++a) {
       if (sources[a]->class_of == previous->sources[a]->class_of &&
           targets[a]->class_of == previous->targets[a]->class_of) {
-        relations[a].known = previous->relations[a].known;
-        relations[a].active_out = previous->relations[a].active_out;
-        relations[a].active_in = previous->relations[a].active_in;
-        for (const auto &row : relations[a].active_out)
+        relations[a].payload = previous->relations[a].payload;
+        for (const auto &row : relations[a].payload->active_out)
           stats.cells += row.size();
         continue;
       }
@@ -808,15 +855,17 @@ struct Solver::Impl {
       const auto target_children =
           getChildren(targets[a], previous->targets[a]);
 
-      for (Id old_row = 0; old_row < previous->relations[a].active_out.size();
+      for (Id old_row = 0;
+           old_row < previous->relations[a].payload->active_out.size();
            ++old_row) {
-        for (Id old_column : previous->relations[a].active_out[old_row]) {
+        for (Id old_column :
+             previous->relations[a].payload->active_out[old_row]) {
           for (Id row : (*source_children)[old_row])
             for (Id column : (*target_children)[old_column]) {
-              if (!relations[a].known.insert(row, column))
+              if (!relations[a].insertKnown(row, column))
                 continue;
-              relations[a].active_out[row].push_back(column);
-              relations[a].active_in[column].push_back(row);
+              relations[a].payload->active_out[row].push_back(column);
+              relations[a].payload->active_in[column].push_back(row);
               ++stats.cells;
             }
         }
@@ -825,7 +874,9 @@ struct Solver::Impl {
   }
 
   Id addFactorView(Id symbol, Id source_origin, Id target_origin) {
-    const auto key = std::make_tuple(symbol, source_origin, target_origin);
+    const auto source = sources[source_origin];
+    const auto target = targets[target_origin];
+    const auto key = std::make_tuple(symbol, source->id, target->id);
     const auto found = factor_view_ids.find(key);
     if (found != factor_view_ids.end())
       return found->second;
@@ -834,8 +885,8 @@ struct Solver::Impl {
     view.symbol = symbol;
     view.source_origin = source_origin;
     view.target_origin = target_origin;
-    view.source = sources[source_origin];
-    view.target = targets[target_origin];
+    view.source = std::move(source);
+    view.target = std::move(target);
     view.known.reset(view.source->members.size(), view.target->members.size());
     view.active_out.resize(view.source->members.size());
     view.active_in.resize(view.target->members.size());
@@ -847,9 +898,14 @@ struct Solver::Impl {
     return id;
   }
 
-  void buildFactorizedPlans(
-      const std::vector<std::pair<Id, Id>> &unary_rules,
-      const std::vector<std::tuple<Id, Id, Id>> &binary_rules) {
+  Id factorViewId(Id symbol, Id source_origin, Id target_origin) const {
+    return factor_view_ids.at(std::make_tuple(
+        symbol, sources[source_origin]->id, targets[target_origin]->id));
+  }
+
+  bool buildFactorizedPlans(
+      const std::vector<std::tuple<Id, Id, Id>> &unary_rules,
+      const std::vector<std::tuple<Id, Id, Id, Id>> &binary_rules) {
     symbol_factor_views.resize(problem.symbols);
     std::vector<bool> observed(problem.symbols, false);
     for (const Edge &edge : problem.edges)
@@ -861,7 +917,8 @@ struct Solver::Impl {
     bool changed = true;
     while (changed) {
       changed = false;
-      for (const auto &[lhs, child] : unary_rules) {
+      for (const auto &[lhs, child, rule_id] : unary_rules) {
+        (void)rule_id;
         const auto child_views = symbol_factor_views[child];
         for (Id child_view : child_views) {
           const auto &view = factor_views[child_view];
@@ -870,7 +927,8 @@ struct Solver::Impl {
           changed = changed || factor_views.size() != before;
         }
       }
-      for (const auto &[lhs, left, right] : binary_rules) {
+      for (const auto &[lhs, left, right, rule_id] : binary_rules) {
+        (void)rule_id;
         const auto left_views = symbol_factor_views[left];
         const auto right_views = symbol_factor_views[right];
         for (Id left_view : left_views)
@@ -881,10 +939,13 @@ struct Solver::Impl {
             changed = changed || factor_views.size() != before;
           }
       }
-      constexpr Id MAX_FACTOR_VIEWS = 64 * 1024;
-      if (factor_views.size() > MAX_FACTOR_VIEWS)
-        throw std::runtime_error(
-            "endpoint quotient factorized view limit exceeded");
+      constexpr Id MAX_FACTOR_VIEWS = 4 * 1024;
+      if (factor_views.size() > MAX_FACTOR_VIEWS) {
+        decltype(factor_views)().swap(factor_views);
+        Lists().swap(symbol_factor_views);
+        decltype(factor_view_ids)().swap(factor_view_ids);
+        return false;
+      }
     }
 
     std::map<std::pair<Id, Id>, std::shared_ptr<const ClassLists>> lifts;
@@ -904,13 +965,13 @@ struct Solver::Impl {
     factor_unit_uses.resize(factor_views.size());
     factor_left_uses.resize(factor_views.size());
     factor_right_uses.resize(factor_views.size());
-    for (const auto &[lhs, child] : unary_rules)
+    for (const auto &[lhs, child, rule_id] : unary_rules)
       for (Id child_view : symbol_factor_views[child]) {
         const auto &view = factor_views[child_view];
-        const Id lhs_view = factor_view_ids.at(
-            std::make_tuple(lhs, view.source_origin, view.target_origin));
+        const Id lhs_view =
+            factorViewId(lhs, view.source_origin, view.target_origin);
         factor_unit_uses[child_view].push_back(factor_units.size());
-        factor_units.push_back({lhs_view, child_view});
+        factor_units.push_back({lhs_view, child_view, rule_id});
       }
 
     std::map<std::pair<Id, Id>, std::shared_ptr<const Bridge>> bridges;
@@ -944,49 +1005,55 @@ struct Solver::Impl {
       bridge = std::move(value);
       return bridge;
     };
-    for (const auto &[lhs, left, right] : binary_rules)
+    for (const auto &[lhs, left, right, rule_id] : binary_rules)
       for (Id left_view : symbol_factor_views[left])
         for (Id right_view : symbol_factor_views[right]) {
           const auto &l = factor_views[left_view];
           const auto &r = factor_views[right_view];
-          const Id lhs_view = factor_view_ids.at(
-              std::make_tuple(lhs, l.source_origin, r.target_origin));
+          const Id lhs_view =
+              factorViewId(lhs, l.source_origin, r.target_origin);
           const Id plan = factor_binaries.size();
           factor_left_uses[left_view].push_back(plan);
           factor_right_uses[right_view].push_back(plan);
-          factor_binaries.push_back(
-              {lhs_view, left_view, right_view, getBridge(l.target, r.source)});
+          factor_binaries.push_back({lhs_view, left_view, right_view, rule_id,
+                                     getBridge(l.target, r.source)});
         }
+    return true;
   }
 
   void prepare() {
+    staging_plan = buildStagingPlan(problem);
     computeNullable();
-    std::vector<std::pair<Id, Id>> unary_rules;
-    std::vector<std::tuple<Id, Id, Id>> binary_rules;
-    for (const Rule &r : problem.rules) {
+    stats.per_rule.resize(problem.rules.size());
+    std::vector<std::tuple<Id, Id, Id>> unary_rules;
+    std::vector<std::tuple<Id, Id, Id, Id>> binary_rules;
+    for (Id rule_id = 0; rule_id < problem.rules.size(); ++rule_id) {
+      const Rule &r = problem.rules[rule_id];
       if (r.kind == Rule::Kind::Unary)
-        unary_rules.emplace_back(r.lhs, r.left);
+        unary_rules.emplace_back(r.lhs, r.left, rule_id);
       if (r.kind == Rule::Kind::Binary) {
-        binary_rules.emplace_back(r.lhs, r.left, r.right);
+        binary_rules.emplace_back(r.lhs, r.left, r.right, rule_id);
         // R_A = nullable(A)*I union R_A^+. Identity must never be represented
         // as a complete block: a multi-vertex diagonal is not a rectangle.
         if (nullable[r.right])
-          unary_rules.emplace_back(r.lhs, r.left);
+          unary_rules.emplace_back(r.lhs, r.left, rule_id);
         if (nullable[r.left])
-          unary_rules.emplace_back(r.lhs, r.right);
+          unary_rules.emplace_back(r.lhs, r.right, rule_id);
       }
     }
     sortUnique(unary_rules);
     sortUnique(binary_rules);
     Lists left_dependencies(problem.symbols),
         right_dependencies(problem.symbols);
-    for (auto r : unary_rules) {
-      left_dependencies[r.first].push_back(r.second);
-      right_dependencies[r.first].push_back(r.second);
+    for (const auto &[lhs, child, rule_id] : unary_rules) {
+      (void)rule_id;
+      left_dependencies[lhs].push_back(child);
+      right_dependencies[lhs].push_back(child);
     }
-    for (auto r : binary_rules) {
-      left_dependencies[std::get<0>(r)].push_back(std::get<1>(r));
-      right_dependencies[std::get<0>(r)].push_back(std::get<2>(r));
+    for (const auto &[lhs, left, right, rule_id] : binary_rules) {
+      (void)rule_id;
+      left_dependencies[lhs].push_back(left);
+      right_dependencies[lhs].push_back(right);
     }
     if (options.partitions == PartitionMode::Grammar) {
       std::vector<bool> observed(problem.symbols, false);
@@ -1004,17 +1071,18 @@ struct Solver::Impl {
     right_uses.resize(problem.symbols);
     relations.resize(problem.symbols);
     for (Id a = 0; a < problem.symbols; ++a) {
-      relations[a].known.reset(sources[a]->members.size(),
-                               targets[a]->members.size());
-      relations[a].active_out.resize(sources[a]->members.size());
-      relations[a].active_in.resize(targets[a]->members.size());
+      relations[a].payload->known.reset(sources[a]->members.size(),
+                                        targets[a]->members.size());
+      relations[a].payload->active_out.resize(sources[a]->members.size());
+      relations[a].payload->active_in.resize(targets[a]->members.size());
       relations[a].pending_out.resize(sources[a]->members.size());
       relations[a].queued_rows.resize(sources[a]->members.size());
     }
     migratePreviousClosure();
     if (options.factorized) {
-      buildFactorizedPlans(unary_rules, binary_rules);
-      return;
+      if (buildFactorizedPlans(unary_rules, binary_rules))
+        return;
+      factorized_active = false;
     }
     using Key = std::pair<Id, Id>;
     std::map<Key, std::shared_ptr<const ClassLists>> lifts;
@@ -1029,16 +1097,14 @@ struct Solver::Impl {
       return entry;
     };
     std::map<Key, std::shared_ptr<const Bridge>> bridges;
-    for (auto r : unary_rules) {
-      Id a = r.first, b = r.second;
+    for (const auto &[a, b, rule_id] : unary_rules) {
       if (a == b)
         continue;
       unit_uses[b].push_back(units.size());
-      units.push_back({a, b, getLift(sources[a], sources[b]),
+      units.push_back({a, b, rule_id, getLift(sources[a], sources[b]),
                        getLift(targets[a], targets[b])});
     }
-    for (auto r : binary_rules) {
-      Id a = std::get<0>(r), b = std::get<1>(r), c = std::get<2>(r);
+    for (const auto &[a, b, c, rule_id] : binary_rules) {
       const Key key{targets[b]->id, sources[c]->id};
       auto &bridge = bridges[key];
       if (!bridge) {
@@ -1073,6 +1139,7 @@ struct Solver::Impl {
       binaries.push_back({a,
                           b,
                           c,
+                          rule_id,
                           getLift(sources[a], sources[b]),
                           getLift(targets[a], targets[c]),
                           bridge,
@@ -1087,7 +1154,7 @@ struct Solver::Impl {
     relation.pending_out[row].push_back(column);
     if (!relation.queued_rows[row]) {
       relation.queued_rows[row] = true;
-      worklist.push_back({a, row});
+      worklist.push({staging_plan.symbol_to_stage[a], a, row, work_sequence++});
     }
     ++pending_cells;
     ++stats.cells;
@@ -1097,7 +1164,7 @@ struct Solver::Impl {
 
   bool publish(Id a, Id row, Id column) {
     ++stats.insert_attempts;
-    if (!relations[a].known.insert(row, column)) {
+    if (!relations[a].insertKnown(row, column)) {
       ++stats.duplicate_inserts;
       return false;
     }
@@ -1105,16 +1172,39 @@ struct Solver::Impl {
     return true;
   }
 
+  template <class Function>
+  void profileRule(Id rule_id, Count delta_cells, Function function) {
+    auto &profile = stats.per_rule.at(rule_id);
+    ++profile.delta_rows;
+    profile.delta_cells += delta_cells;
+    const Count joins = stats.binary_joins;
+    const Count propagations =
+        stats.unary_propagations + stats.binary_propagations;
+    const Count successful = stats.successful_unary_propagations +
+                             stats.successful_binary_propagations;
+    const Count repeated = stats.repeated_binary_outputs;
+    const Count words = stats.binary_join_words;
+    function();
+    profile.joins += stats.binary_joins - joins;
+    profile.propagations +=
+        stats.unary_propagations + stats.binary_propagations - propagations;
+    profile.successful_propagations += stats.successful_unary_propagations +
+                                       stats.successful_binary_propagations -
+                                       successful;
+    profile.repeated_outputs += stats.repeated_binary_outputs - repeated;
+    profile.join_word_operations += stats.binary_join_words - words;
+  }
+
   void projectFactorCell(Id view_id, Id row, Id column) {
     const auto &view = factor_views[view_id];
     auto &global = relations[view.symbol];
     for (Id global_row : (*view.global_rows)[row])
       for (Id global_column : (*view.global_columns)[column]) {
-        if (!global.known.insert(global_row, global_column))
+        if (!global.insertKnown(global_row, global_column))
           continue;
-        global.active_out[global_row].push_back(
+        global.payload->active_out[global_row].push_back(
             static_cast<ClassId>(global_column));
-        global.active_in[global_column].push_back(
+        global.payload->active_in[global_column].push_back(
             static_cast<ClassId>(global_row));
         ++stats.cells;
       }
@@ -1125,7 +1215,8 @@ struct Solver::Impl {
     view.pending_out[row].push_back(static_cast<ClassId>(column));
     if (!view.queued_rows[row]) {
       view.queued_rows[row] = true;
-      factor_worklist.push_back({view_id, row});
+      factor_worklist.push({staging_plan.symbol_to_stage[view.symbol], view_id,
+                            row, factor_work_sequence++});
     }
     ++factor_pending_cells;
     ++stats.worklist_pushes;
@@ -1156,7 +1247,17 @@ struct Solver::Impl {
 
   Count publishMany(Id a, Id row, const std::vector<ClassId> &columns) {
     stats.insert_attempts += columns.size();
-    const Count inserted = relations[a].known.insertMany(
+    if (relations[a].payload.use_count() != 1) {
+      bool has_new = false;
+      for (Id column : columns)
+        has_new = has_new || !relations[a].payload->known.contains(row, column);
+      if (!has_new) {
+        stats.duplicate_inserts += columns.size();
+        return 0;
+      }
+      relations[a].ensureUnique();
+    }
+    const Count inserted = relations[a].payload->known.insertMany(
         row, columns, [&](Id column) { enqueuePublished(a, row, column); });
     stats.duplicate_inserts += columns.size() - inserted;
     return inserted;
@@ -1208,10 +1309,11 @@ struct Solver::Impl {
 
   void prepareJoinRows(Id a) {
     auto &r = relations[a];
-    if (r.tried_join_rows || !r.known.isDense())
+    if (r.tried_join_rows || !r.payload->known.isDense())
       return;
     r.tried_join_rows = true;
-    const Id rows = r.active_out.size(), columns = r.active_in.size();
+    const Id rows = r.payload->active_out.size();
+    const Id columns = r.payload->active_in.size();
     const Id out_words = (columns + 63) / 64, in_words = (rows + 63) / 64;
     // Bound padded indexes too: a very skinny matrix must stay sparse here.
     constexpr Id MAX_WORDS = 128 * 1024;
@@ -1227,9 +1329,10 @@ struct Solver::Impl {
         out_words, in_words, std::vector<std::uint64_t>(rows * out_words),
         std::vector<std::uint64_t>(columns * in_words),
         std::vector<std::uint64_t>(columns * in_words)});
-    r.known.forEach([&](Id row, Id column) { r.join_rows->know(row, column); });
+    r.payload->known.forEach(
+        [&](Id row, Id column) { r.join_rows->know(row, column); });
     for (Id row = 0; row < rows; ++row)
-      for (Id column : r.active_out[row])
+      for (Id column : r.payload->active_out[row])
         r.join_rows->activate(row, column);
   }
 
@@ -1260,7 +1363,7 @@ struct Solver::Impl {
         ++stats.binary_join_words;
         const auto candidates = values[middle * words + w];
         const auto known =
-            from_left ? output.known.rowWord(f.row, w)
+            from_left ? output.payload->known.rowWord(f.row, w)
                       : output.join_rows->known_in[f.column * words + w];
         auto delta = candidates & ~known;
         const Count joins = __builtin_popcountll(candidates);
@@ -1283,7 +1386,7 @@ struct Solver::Impl {
     Count pairs = 0;
     for (Id left_column : delta) {
       for (Id middle : plan.bridge->to_right[left_column])
-        pairs += relations[plan.right].active_out[middle].size();
+        pairs += relations[plan.right].payload->active_out[middle].size();
       if (plan.right == plan.left) {
         const auto &right_rows = plan.bridge->to_right[left_column];
         if (std::binary_search(right_rows.begin(), right_rows.end(), row))
@@ -1304,7 +1407,7 @@ struct Solver::Impl {
     };
     for (Id left_column : delta) {
       for (Id middle : plan.bridge->to_right[left_column])
-        for (Id column : relations[plan.right].active_out[middle])
+        for (Id column : relations[plan.right].payload->active_out[middle])
           addOutput(column);
       if (plan.right == plan.left) {
         const auto &right_rows = plan.bridge->to_right[left_column];
@@ -1323,14 +1426,14 @@ struct Solver::Impl {
                           const std::vector<ClassId> &delta) const {
     Count left_cells = 0;
     for (Id middle : plan.bridge->to_left[row])
-      left_cells += relations[plan.left].active_in[middle].size();
+      left_cells += relations[plan.left].payload->active_in[middle].size();
     return product(left_cells, delta.size());
   }
 
   void bulkBackwardJoin(BinaryPlan &plan, Id row,
                         const std::vector<ClassId> &delta) {
     for (Id middle : plan.bridge->to_left[row])
-      for (Id source : relations[plan.left].active_in[middle]) {
+      for (Id source : relations[plan.left].payload->active_in[middle]) {
         beginBulkValues();
         for (Id column : delta) {
           if (!prepareBinaryOutput(plan, source, column))
@@ -1348,8 +1451,7 @@ struct Solver::Impl {
   void saturateFactorized() {
     stats.input_edges = problem.edges.size();
     for (const Edge &edge : problem.edges) {
-      const Id view_id = factor_view_ids.at(
-          std::make_tuple(edge.symbol, edge.symbol, edge.symbol));
+      const Id view_id = factorViewId(edge.symbol, edge.symbol, edge.symbol);
       const auto &view = factor_views[view_id];
       const Id row = view.source->class_of[edge.source];
       const Id column = view.target->class_of[edge.target];
@@ -1363,8 +1465,8 @@ struct Solver::Impl {
 
     bulk_marks.resize(problem.nodes);
     while (!factor_worklist.empty()) {
-      const FactorDeltaRow item = factor_worklist.front();
-      factor_worklist.pop_front();
+      const FactorDeltaRow item = factor_worklist.top();
+      factor_worklist.pop();
       auto &view = factor_views[item.view];
       std::vector<ClassId> delta;
       delta.swap(view.pending_out[item.row]);
@@ -1374,47 +1476,53 @@ struct Solver::Impl {
 
       for (Id plan_id : factor_unit_uses[item.view]) {
         const auto &plan = factor_units[plan_id];
-        stats.unary_propagations += delta.size();
-        stats.successful_unary_propagations +=
-            publishFactorMany(plan.lhs_view, item.row, delta);
+        profileRule(plan.rule_id, delta.size(), [&] {
+          stats.unary_propagations += delta.size();
+          stats.successful_unary_propagations +=
+              publishFactorMany(plan.lhs_view, item.row, delta);
+        });
       }
 
       for (Id plan_id : factor_left_uses[item.view]) {
         const auto &plan = factor_binaries[plan_id];
-        const auto &right = factor_views[plan.right_view];
-        beginBulkValues();
-        for (Id left_column : delta) {
-          for (Id middle : plan.bridge->to_right[left_column]) {
-            stats.binary_joins += right.active_out[middle].size();
-            for (Id column : right.active_out[middle])
-              addBulkValue(column);
-          }
-          if (plan.right_view == item.view) {
-            const auto &right_rows = plan.bridge->to_right[left_column];
-            if (std::binary_search(right_rows.begin(), right_rows.end(),
-                                   item.row)) {
-              stats.binary_joins += delta.size();
-              for (Id column : delta)
+        profileRule(plan.rule_id, delta.size(), [&] {
+          const auto &right = factor_views[plan.right_view];
+          beginBulkValues();
+          for (Id left_column : delta) {
+            for (Id middle : plan.bridge->to_right[left_column]) {
+              stats.binary_joins += right.active_out[middle].size();
+              for (Id column : right.active_out[middle])
                 addBulkValue(column);
             }
+            if (plan.right_view == item.view) {
+              const auto &right_rows = plan.bridge->to_right[left_column];
+              if (std::binary_search(right_rows.begin(), right_rows.end(),
+                                     item.row)) {
+                stats.binary_joins += delta.size();
+                for (Id column : delta)
+                  addBulkValue(column);
+              }
+            }
           }
-        }
-        std::sort(bulk_values.begin(), bulk_values.end());
-        stats.binary_propagations += bulk_values.size();
-        stats.successful_binary_propagations +=
-            publishFactorMany(plan.lhs_view, item.row, bulk_values);
+          std::sort(bulk_values.begin(), bulk_values.end());
+          stats.binary_propagations += bulk_values.size();
+          stats.successful_binary_propagations +=
+              publishFactorMany(plan.lhs_view, item.row, bulk_values);
+        });
       }
 
       for (Id plan_id : factor_right_uses[item.view]) {
         const auto &plan = factor_binaries[plan_id];
-        const auto &left = factor_views[plan.left_view];
-        for (Id middle : plan.bridge->to_left[item.row])
-          for (Id source : left.active_in[middle]) {
-            stats.binary_joins += delta.size();
-            stats.binary_propagations += delta.size();
-            stats.successful_binary_propagations +=
-                publishFactorMany(plan.lhs_view, source, delta);
-          }
+        profileRule(plan.rule_id, delta.size(), [&] {
+          const auto &left = factor_views[plan.left_view];
+          for (Id middle : plan.bridge->to_left[item.row])
+            for (Id source : left.active_in[middle]) {
+              stats.binary_joins += delta.size();
+              stats.binary_propagations += delta.size();
+              stats.successful_binary_propagations +=
+                  publishFactorMany(plan.lhs_view, source, delta);
+            }
+        });
       }
 
       for (Id column : delta) {
@@ -1425,7 +1533,7 @@ struct Solver::Impl {
   }
 
   void saturate() {
-    if (options.factorized) {
+    if (factorized_active) {
       saturateFactorized();
       return;
     }
@@ -1457,8 +1565,8 @@ struct Solver::Impl {
       (void)publish(seed.symbol, seed.row, seed.column);
     }
     while (!worklist.empty()) {
-      const DeltaRow item = worklist.front();
-      worklist.pop_front();
+      const DeltaRow item = worklist.top();
+      worklist.pop();
       auto &relation = relations[item.symbol];
       std::vector<ClassId> delta;
       delta.swap(relation.pending_out[item.row]);
@@ -1466,72 +1574,79 @@ struct Solver::Impl {
       pending_cells -= delta.size();
       stats.worklist_pops += delta.size();
 
-      for (Id column : delta) {
-        const Fact fact{item.symbol, item.row, column};
-        for (Id id : unit_uses[fact.symbol]) {
-          const UnaryPlan &plan = units[id];
-          for (Id i : (*plan.rows)[fact.row])
-            for (Id j : (*plan.columns)[fact.column]) {
-              ++stats.unary_propagations;
-              if (publish(plan.lhs, i, j))
-                ++stats.successful_unary_propagations;
-            }
-        }
+      for (Id id : unit_uses[item.symbol]) {
+        const UnaryPlan &plan = units[id];
+        profileRule(plan.rule_id, delta.size(), [&] {
+          for (Id column : delta)
+            for (Id i : (*plan.rows)[item.row])
+              for (Id j : (*plan.columns)[column]) {
+                ++stats.unary_propagations;
+                if (publish(plan.lhs, i, j))
+                  ++stats.successful_unary_propagations;
+              }
+        });
       }
 
       for (Id id : left_uses[item.symbol]) {
         BinaryPlan &plan = binaries[id];
-        if (canBatchJoin(plan, true)) {
-          for (Id column : delta)
-            batchJoin(plan, {item.symbol, item.row, column}, true);
-          if (plan.right == item.symbol)
-            for (Id left_column : delta) {
+        profileRule(plan.rule_id, delta.size(), [&] {
+          if (canBatchJoin(plan, true)) {
+            for (Id column : delta)
+              batchJoin(plan, {item.symbol, item.row, column}, true);
+            if (plan.right == item.symbol)
+              for (Id left_column : delta) {
+                const auto &right_rows = plan.bridge->to_right[left_column];
+                if (std::binary_search(right_rows.begin(), right_rows.end(),
+                                       item.row))
+                  for (Id right_column : delta)
+                    binaryJoin(plan, item.row, right_column);
+              }
+            return;
+          }
+          if (forwardJoinPairs(plan, item.row, delta) >= 64) {
+            bulkForwardJoin(plan, item.row, delta);
+            return;
+          }
+          for (Id left_column : delta) {
+            for (Id middle : plan.bridge->to_right[left_column])
+              for (Id target :
+                   relations[plan.right].payload->active_out[middle])
+                binaryJoin(plan, item.row, target);
+            if (plan.right == item.symbol) {
               const auto &right_rows = plan.bridge->to_right[left_column];
               if (std::binary_search(right_rows.begin(), right_rows.end(),
                                      item.row))
                 for (Id right_column : delta)
                   binaryJoin(plan, item.row, right_column);
             }
-          continue;
-        }
-        if (forwardJoinPairs(plan, item.row, delta) >= 64) {
-          bulkForwardJoin(plan, item.row, delta);
-          continue;
-        }
-        for (Id left_column : delta) {
-          for (Id middle : plan.bridge->to_right[left_column])
-            for (Id target : relations[plan.right].active_out[middle])
-              binaryJoin(plan, item.row, target);
-          if (plan.right == item.symbol) {
-            const auto &right_rows = plan.bridge->to_right[left_column];
-            if (std::binary_search(right_rows.begin(), right_rows.end(),
-                                   item.row))
-              for (Id right_column : delta)
-                binaryJoin(plan, item.row, right_column);
           }
-        }
+        });
       }
 
       for (Id id : right_uses[item.symbol]) {
         BinaryPlan &plan = binaries[id];
-        if (canBatchJoin(plan, false)) {
+        profileRule(plan.rule_id, delta.size(), [&] {
+          if (canBatchJoin(plan, false)) {
+            for (Id column : delta)
+              batchJoin(plan, {item.symbol, item.row, column}, false);
+            return;
+          }
+          if (backwardJoinPairs(plan, item.row, delta) >= 64) {
+            bulkBackwardJoin(plan, item.row, delta);
+            return;
+          }
           for (Id column : delta)
-            batchJoin(plan, {item.symbol, item.row, column}, false);
-          continue;
-        }
-        if (backwardJoinPairs(plan, item.row, delta) >= 64) {
-          bulkBackwardJoin(plan, item.row, delta);
-          continue;
-        }
-        for (Id column : delta)
-          for (Id middle : plan.bridge->to_left[item.row])
-            for (Id source : relations[plan.left].active_in[middle])
-              binaryJoin(plan, source, column);
+            for (Id middle : plan.bridge->to_left[item.row])
+              for (Id source : relations[plan.left].payload->active_in[middle])
+                binaryJoin(plan, source, column);
+        });
       }
 
+      if (!delta.empty())
+        relation.ensureUnique();
       for (Id column : delta) {
-        relation.active_out[item.row].push_back(column);
-        relation.active_in[column].push_back(item.row);
+        relation.payload->active_out[item.row].push_back(column);
+        relation.payload->active_in[column].push_back(item.row);
         if (relation.join_rows)
           relation.join_rows->activate(item.row, column);
       }
@@ -1544,16 +1659,16 @@ struct Solver::Impl {
       SymbolStatistics &s = stats.per_symbol[a];
       s.source_classes = sources[a]->members.size();
       s.target_classes = targets[a]->members.size();
-      for (Id i = 0; i < relations[a].active_out.size(); ++i) {
-        addCount(s.positive_cells, relations[a].active_out[i].size());
-        for (Id j : relations[a].active_out[i])
+      for (Id i = 0; i < relations[a].payload->active_out.size(); ++i) {
+        addCount(s.positive_cells, relations[a].payload->active_out[i].size());
+        for (Id j : relations[a].payload->active_out[i])
           addCount(s.positive_facts, product(sources[a]->members[i].size(),
                                              targets[a]->members[j].size()));
       }
       Count positive_diagonal = 0;
       if (sources[a] == targets[a]) {
         for (Id i = 0; i < sources[a]->members.size(); ++i)
-          if (relations[a].known.contains(i, i))
+          if (relations[a].payload->known.contains(i, i))
             addCount(positive_diagonal, sources[a]->members[i].size());
       } else if (s.positive_cells) {
         for (Id v = 0; v < problem.nodes; ++v)
@@ -1569,8 +1684,8 @@ struct Solver::Impl {
   }
 
   bool positiveContains(Id a, Id u, Id v) const {
-    return relations[a].known.contains(sources[a]->class_of[u],
-                                       targets[a]->class_of[v]);
+    return relations[a].payload->known.contains(sources[a]->class_of[u],
+                                                targets[a]->class_of[v]);
   }
 
   void solve() {
@@ -1609,8 +1724,14 @@ struct Solver::Impl {
     decltype(factor_worklist)().swap(factor_worklist);
     decltype(problem.edges)().swap(problem.edges);
     decltype(problem.rules)().swap(problem.rules);
-    for (auto &relation : relations)
+    for (auto &relation : relations) {
       relation.join_rows.reset();
+      ClassLists().swap(relation.pending_out);
+      std::vector<bool>().swap(relation.queued_rows);
+    }
+    decltype(bulk_values)().swap(bulk_values);
+    decltype(bulk_marks)().swap(bulk_marks);
+    staging_plan = {};
     solved = true;
   }
 };
@@ -1654,7 +1775,7 @@ bool Solver::visitSuccessors(Id a, Id source,
   if (source >= nodeCount())
     throw std::out_of_range("endpoint quotient source out of range");
   const Id row = impl_->sources[a]->class_of[source];
-  for (Id column : impl_->relations[a].active_out[row])
+  for (Id column : impl_->relations[a].payload->active_out[row])
     for (Id target : impl_->targets[a]->members[column])
       if (!visitor(target))
         return false;
@@ -1669,7 +1790,7 @@ bool Solver::visitPredecessors(Id a, Id target,
   if (target >= nodeCount())
     throw std::out_of_range("endpoint quotient target out of range");
   const Id column = impl_->targets[a]->class_of[target];
-  for (Id row : impl_->relations[a].active_in[column])
+  for (Id row : impl_->relations[a].payload->active_in[column])
     for (Id source : impl_->sources[a]->members[row])
       if (!visitor(source))
         return false;
@@ -1680,8 +1801,8 @@ bool Solver::visitPredecessors(Id a, Id target,
 bool Solver::visitFacts(Id a, const PairVisitor &visitor) const {
   impl_->requireSolved();
   impl_->requireSymbol(a);
-  for (Id row = 0; row < impl_->relations[a].active_out.size(); ++row)
-    for (Id column : impl_->relations[a].active_out[row])
+  for (Id row = 0; row < impl_->relations[a].payload->active_out.size(); ++row)
+    for (Id column : impl_->relations[a].payload->active_out[row])
       for (Id source : impl_->sources[a]->members[row])
         for (Id target : impl_->targets[a]->members[column])
           if (!visitor(source, target))
@@ -1722,7 +1843,7 @@ Count Solver::countOffDiagonalUnion(std::vector<Id> symbols) const {
     Id targets = 0;
     for (Id a : symbols) {
       const Id row = impl_->sources[a]->class_of[source];
-      for (Id column : impl_->relations[a].active_out[row])
+      for (Id column : impl_->relations[a].payload->active_out[row])
         for (Id target : impl_->targets[a]->members[column])
           if (marks[target] != stamp) {
             marks[target] = stamp;
@@ -1762,17 +1883,20 @@ std::size_t Solver::estimatedPayloadBytes() const {
         bytes += sizeof(Partition) + p->class_of.capacity() * sizeof(Id) +
                  listsBytes(p->members);
   bytes += impl_->relations.capacity() * sizeof(Relation);
+  std::unordered_set<const RelationPayload *> seen_payloads;
   for (const auto &r : impl_->relations)
-    bytes += r.known.payloadBytes() + listsBytes(r.active_out) +
-             listsBytes(r.active_in);
+    if (seen_payloads.insert(r.payload.get()).second)
+      bytes += r.payload->known.payloadBytes() +
+               listsBytes(r.payload->active_out) +
+               listsBytes(r.payload->active_in);
   return bytes;
 }
 
 void Solver::forEachPositiveRectangle(const RectangleVisitor &visitor) const {
   impl_->requireSolved();
   for (Id a = 0; a < impl_->problem.symbols; ++a)
-    for (Id i = 0; i < impl_->relations[a].active_out.size(); ++i)
-      for (Id j : impl_->relations[a].active_out[i])
+    for (Id i = 0; i < impl_->relations[a].payload->active_out.size(); ++i)
+      for (Id j : impl_->relations[a].payload->active_out[i])
         visitor(a, impl_->sources[a]->members[i],
                 impl_->targets[a]->members[j]);
 }

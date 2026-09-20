@@ -68,6 +68,19 @@ struct SymbolStatistics {
   Count diagonal_facts = 0;
 };
 
+/// Work attributed to one entry in Problem::rules.  The vector in Statistics
+/// is index-aligned with Problem::rules so adapters can attach grammar symbol
+/// names without making the core solver depend on Grammar.
+struct RuleStatistics {
+  Count delta_rows = 0;
+  Count delta_cells = 0;
+  Count joins = 0;
+  Count propagations = 0;
+  Count successful_propagations = 0;
+  Count repeated_outputs = 0;
+  Count join_word_operations = 0;
+};
+
 struct Statistics {
   Count input_edges = 0;
   Count seed_cells = 0;
@@ -97,6 +110,7 @@ struct Statistics {
   double saturation_ms = 0;
   double count_ms = 0;
   std::vector<SymbolStatistics> per_symbol;
+  std::vector<RuleStatistics> per_rule;
 };
 
 // All IDs are dense in [0,nodes) or [0,symbols). The problem is owned by value.

@@ -204,6 +204,87 @@ checkAnnotations(const llvm::Module &module,
   return {total, failures};
 }
 
+const char *endpointQuotientRuleKind(std::size_t kind) {
+  switch (kind) {
+  case 0:
+    return "epsilon";
+  case 1:
+    return "unary";
+  case 2:
+    return "binary";
+  default:
+    return "unknown";
+  }
+}
+
+const char *endpointQuotientSccClass(std::size_t classification) {
+  switch (classification) {
+  case 0:
+    return "acyclic";
+  case 1:
+    return "unary-recursive";
+  case 2:
+    return "left-linear";
+  case 3:
+    return "right-linear";
+  case 4:
+    return "transitive";
+  case 5:
+    return "general";
+  default:
+    return "unknown";
+  }
+}
+
+void printEndpointQuotientProfiles(std::ostream &stream,
+                                   const ReachabilityStats &stats) {
+  stream << ",\"eq_rule_profiles\":[";
+  bool first = true;
+  for (const auto &rule : stats.endpoint_quotient_per_rule) {
+    if (!first)
+      stream << ',';
+    first = false;
+    stream << "{\"id\":" << rule.rule_id << ",\"kind\":\""
+           << endpointQuotientRuleKind(rule.kind) << "\",\"lhs\":"
+           << rule.lhs << ",\"left\":" << rule.left << ",\"right\":"
+           << rule.right << ",\"delta_rows\":" << rule.delta_rows
+           << ",\"delta_cells\":" << rule.delta_cells << ",\"joins\":"
+           << rule.joins << ",\"propagations\":" << rule.propagations
+           << ",\"successful_propagations\":"
+           << rule.successful_propagations
+           << ",\"duplicate_propagations\":"
+           << (rule.propagations >= rule.successful_propagations
+                   ? rule.propagations - rule.successful_propagations
+                   : 0)
+           << ",\"repeated_outputs\":"
+           << rule.repeated_outputs << ",\"join_word_operations\":"
+           << rule.join_word_operations << '}';
+  }
+  stream << "],\"eq_scc_profiles\":[";
+  first = true;
+  for (const auto &scc : stats.endpoint_quotient_per_scc) {
+    if (!first)
+      stream << ',';
+    first = false;
+    stream << "{\"id\":" << scc.scc_id << ",\"class\":\""
+           << endpointQuotientSccClass(scc.classification)
+           << "\",\"symbols\":" << scc.symbols << ",\"rules\":"
+           << scc.rules << ",\"delta_rows\":" << scc.delta_rows
+           << ",\"delta_cells\":" << scc.delta_cells << ",\"joins\":"
+           << scc.joins << ",\"propagations\":" << scc.propagations
+           << ",\"successful_propagations\":"
+           << scc.successful_propagations
+           << ",\"duplicate_propagations\":"
+           << (scc.propagations >= scc.successful_propagations
+                   ? scc.propagations - scc.successful_propagations
+                   : 0)
+           << ",\"repeated_outputs\":"
+           << scc.repeated_outputs << ",\"join_word_operations\":"
+           << scc.join_word_operations << '}';
+  }
+  stream << ']';
+}
+
 } // namespace
 
 int main(int argc, char **argv) {
@@ -276,7 +357,32 @@ int main(int argc, char **argv) {
                 << ",\"eq_saturation_us\":"
                 << stats.endpoint_quotient_saturation_us
                 << ",\"eq_count_us\":" << stats.endpoint_quotient_count_us
-                << ",\"annotation_total\":" << annotation_total
+                << ",\"eq_dependency_sccs\":"
+                << stats.endpoint_quotient_dependency_sccs
+                << ",\"eq_acyclic_sccs\":"
+                << stats.endpoint_quotient_acyclic_sccs
+                << ",\"eq_unary_recursive_sccs\":"
+                << stats.endpoint_quotient_unary_recursive_sccs
+                << ",\"eq_transitive_sccs\":"
+                << stats.endpoint_quotient_transitive_sccs
+                << ",\"eq_linear_sccs\":"
+                << stats.endpoint_quotient_linear_sccs
+                << ",\"eq_general_sccs\":"
+                << stats.endpoint_quotient_general_sccs
+                << ",\"eq_max_scc_symbols\":"
+                << stats.endpoint_quotient_max_scc_symbols
+                << ",\"eq_max_scc_rules\":"
+                << stats.endpoint_quotient_max_scc_rules
+                << ",\"eq_hottest_rule_id\":"
+                << stats.endpoint_quotient_hottest_rule_id
+                << ",\"eq_hottest_rule_joins\":"
+                << stats.endpoint_quotient_hottest_rule_joins
+                << ",\"eq_hottest_scc_id\":"
+                << stats.endpoint_quotient_hottest_scc_id
+                << ",\"eq_hottest_scc_joins\":"
+                << stats.endpoint_quotient_hottest_scc_joins;
+      printEndpointQuotientProfiles(std::cout, stats);
+      std::cout << ",\"annotation_total\":" << annotation_total
                 << ",\"annotation_failures\":" << annotation_failures
                 << ",\"frontend_us\":" << stats.frontend_time_microseconds
                 << ",\"client_init_us\":"

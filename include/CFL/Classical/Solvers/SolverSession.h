@@ -13,6 +13,37 @@
 
 namespace lotus::cfl::classical {
 
+struct EndpointQuotientRuleProfile {
+  std::size_t rule_id = 0;
+  std::size_t kind = 0;
+  std::size_t lhs = 0;
+  std::size_t left = 0;
+  std::size_t right = 0;
+  std::size_t delta_rows = 0;
+  std::size_t delta_cells = 0;
+  std::size_t joins = 0;
+  std::size_t propagations = 0;
+  std::size_t successful_propagations = 0;
+  std::size_t repeated_outputs = 0;
+  std::size_t join_word_operations = 0;
+};
+
+struct EndpointQuotientSccProfile {
+  std::size_t scc_id = 0;
+  /// Numeric value of engines::EndpointQuotientSccClass. Kept numeric here to
+  /// avoid coupling the general session interface to a concrete engine.
+  std::size_t classification = 0;
+  std::size_t symbols = 0;
+  std::size_t rules = 0;
+  std::size_t delta_rows = 0;
+  std::size_t delta_cells = 0;
+  std::size_t joins = 0;
+  std::size_t propagations = 0;
+  std::size_t successful_propagations = 0;
+  std::size_t repeated_outputs = 0;
+  std::size_t join_word_operations = 0;
+};
+
 struct ReachabilityStats {
   // Session snapshots after this solve.
   std::size_t graph_nodes = 0;
@@ -102,6 +133,20 @@ struct ReachabilityStats {
   std::size_t endpoint_quotient_partitions_built = 0;
   std::size_t endpoint_quotient_bridges_built = 0;
   std::size_t endpoint_quotient_lifts_built = 0;
+  std::size_t endpoint_quotient_dependency_sccs = 0;
+  std::size_t endpoint_quotient_acyclic_sccs = 0;
+  std::size_t endpoint_quotient_unary_recursive_sccs = 0;
+  std::size_t endpoint_quotient_transitive_sccs = 0;
+  std::size_t endpoint_quotient_linear_sccs = 0;
+  std::size_t endpoint_quotient_general_sccs = 0;
+  std::size_t endpoint_quotient_max_scc_symbols = 0;
+  std::size_t endpoint_quotient_max_scc_rules = 0;
+  std::size_t endpoint_quotient_hottest_rule_id = 0;
+  std::size_t endpoint_quotient_hottest_rule_joins = 0;
+  std::size_t endpoint_quotient_hottest_scc_id = 0;
+  std::size_t endpoint_quotient_hottest_scc_joins = 0;
+  std::vector<EndpointQuotientRuleProfile> endpoint_quotient_per_rule;
+  std::vector<EndpointQuotientSccProfile> endpoint_quotient_per_scc;
 
   // Aggregates report how many solve calls they combine.
   std::size_t solver_rounds = 1;
@@ -146,10 +191,10 @@ struct SolverOptions {
   bool unidirectional = false;
   /// Apply POCR's optional ECG SCC simplification in the FOCR backend.
   bool simplify_focr_cycles = false;
-  /// Preserve production-local endpoint factors in EndpointQuotient.
-  bool endpoint_quotient_factorized = true;
   /// Explicit X/Xbar pairs for PEARL's PackRR and paired propagation graphs.
   std::vector<std::pair<std::string, std::string>> pearl_inverse_relations;
+  /// Preserve production-local endpoint factors in EndpointQuotient.
+  bool endpoint_quotient_factorized = false;
 };
 
 const char *solverBackendName(SolverBackend backend);
