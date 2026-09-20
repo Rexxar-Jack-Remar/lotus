@@ -27,8 +27,8 @@ using namespace llvm;
  * @brief Recursively lower memcpy for a specific type.
  *
  * Recursively processes struct and array types to generate GEP, load, and
- * store operations that copy the data. For pointer types, generates a
- * single load/store pair.
+ * store operations that copy the data. For pointer, scalar and vector types,
+ * generates a single load/store of the whole value.
  *
  * @param type The type to lower memcpy for
  * @param src Source pointer value
@@ -51,12 +51,17 @@ void LoweringMemCpyPass::lowerMemCpyForType(Type *type, Value *src, Value *dst,
   }
   case llvm::Type::ArrayTyID: {
     const auto *arrayType = static_cast<const ArrayType *>(type);
-    idx.push_back(ConstantInt::get(idxType, 0));
-    lowerMemCpyForType(arrayType->getElementType(), src, dst, idx, builder);
-    idx.pop_back();
+    for (int i = 0; i < arrayType->getNumElements(); i++) {
+      idx.push_back(ConstantInt::get(idxType, i));
+      lowerMemCpyForType(arrayType->getElementType(), src, dst, idx, builder);
+      idx.pop_back();
+    }
     break;
   }
-  case llvm::Type::PointerTyID: {
+  case llvm::Type::FixedVectorTyID:
+  case llvm::Type::ScalableVectorTyID:
+  default: {
+    // pointer, scalar or vector field: copy it as a single whole value.
     auto *srcGEP = builder.CreateGEP(src->getType()->getPointerElementType(),
                                      src, idx, "");
     auto *dstGEP = builder.CreateGEP(dst->getType()->getPointerElementType(),
@@ -67,16 +72,6 @@ void LoweringMemCpyPass::lowerMemCpyForType(Type *type, Value *src, Value *dst,
     builder.CreateStore(srcLoad, dstGEP, false);
     break;
   }
-  case llvm::Type::FixedVectorTyID:
-  case llvm::Type::ScalableVectorTyID: {
-    LOG_TRACE("Unhandled Vector Type. type={}", type);
-    // simple skip vector type
-    break;
-    // llvm_unreachable("vector type not handled");
-  }
-  default:
-    // non-pointer scalar type, make no difference to pointer analysis.
-    break;
   }
 }
 
