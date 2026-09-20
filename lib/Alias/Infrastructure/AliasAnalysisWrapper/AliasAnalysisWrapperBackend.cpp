@@ -22,9 +22,6 @@
 #include "Alias/UnificationBased/seadsa/SeaDsaAliasAnalysis.hh"
 
 #include <algorithm>
-#include <iterator>
-#include <set>
-#include <vector>
 
 #include <llvm/ADT/SmallVector.h>
 #include <llvm/Analysis/AliasAnalysis.h>
@@ -186,16 +183,31 @@ AliasResult AliasAnalysisWrapper::queryBackend(const Value *v1,
     return AliasResult::MayAlias;
   }
   if (_gpg_aa) {
-    std::set<const Value *> pts1 = _gpg_aa->result().allPointees(v1s);
-    std::set<const Value *> pts2 = _gpg_aa->result().allPointees(v2s);
-    if (pts1.empty() || pts2.empty())
+    const auto pts1 = _gpg_aa->result().allPointeeSet(v1s);
+    const auto pts2 = _gpg_aa->result().allPointeeSet(v2s);
+    const bool precise1 =
+        pts1.isComplete() && !pts1.containsUnknown() && !pts1.containsNull();
+    const bool precise2 =
+        pts2.isComplete() && !pts2.containsUnknown() && !pts2.containsNull();
+    if (!precise1 || !precise2)
       return AliasResult::MayAlias;
-    std::vector<const Value *> common;
-    std::set_intersection(pts1.begin(), pts1.end(), pts2.begin(), pts2.end(),
-                          std::back_inserter(common));
-    if (common.empty())
+
+    const auto &values1 = pts1.values;
+    const auto &values2 = pts2.values;
+    if (values1.empty() || values2.empty())
+      return AliasResult::MayAlias;
+
+    // Avoid materializing a third container for the common case. GPG's
+    // Value-level wrapper query joins its statement-specific facts across all
+    // program points, so set intersection is the conservative alias test.
+    const auto &smaller = values1.size() < values2.size() ? values1 : values2;
+    const auto &larger = values1.size() < values2.size() ? values2 : values1;
+    const bool intersects =
+        std::any_of(smaller.begin(), smaller.end(),
+                    [&larger](const Value *v) { return larger.count(v) != 0; });
+    if (!intersects)
       return AliasResult::NoAlias;
-    if (pts1.size() == 1 && pts2.size() == 1)
+    if (values1.size() == 1 && values2.size() == 1)
       return AliasResult::MustAlias;
     return AliasResult::MayAlias;
   }

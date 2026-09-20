@@ -1,6 +1,7 @@
 #include "Alias/InclusionBased/GPG/LLVMFrontend.h"
 
 #include <algorithm>
+#include <deque>
 #include <iterator>
 #include <utility>
 
@@ -55,10 +56,40 @@ bool isAggregate(const llvm::Type *type) {
 
 LLVMFrontend::LLVMFrontend(ProgramModel &model, const GPGConfig &config)
     : model_(model), config_(config) {
+  collectEntryReachableBlocks();
   collectGlobalInitializers();
 }
 
 std::vector<Access> LLVMFrontend::readAccesses(const llvm::Value *value) {
+  if (!value)
+    return {model_.access(model_.unknownLocation(), {})};
+
+  auto cached = read_access_cache_.find(value);
+  if (cached != read_access_cache_.end())
+    return refreshKLimiting(cached->second);
+
+  if (resolving_values_.count(value) != 0) {
+    markResolutionCycle(value);
+    return fallbackReadAccesses(value);
+  }
+
+  resolving_values_[value] = resolution_stack_.size();
+  resolution_stack_.push_back(value);
+  std::vector<Access> result = computeReadAccesses(value);
+  resolution_stack_.pop_back();
+  resolving_values_.erase(value);
+
+  if (result.empty())
+    result = fallbackReadAccesses(value);
+  std::set<Access> unique(result.begin(), result.end());
+  result.assign(unique.begin(), unique.end());
+  result = refreshKLimiting(std::move(result));
+  read_access_cache_[value] = result;
+  return result;
+}
+
+std::vector<Access>
+LLVMFrontend::computeReadAccesses(const llvm::Value *value) {
   if (!value)
     return {model_.access(model_.unknownLocation(), {})};
 
@@ -75,6 +106,55 @@ std::vector<Access> LLVMFrontend::readAccesses(const llvm::Value *value) {
   if (llvm::isa<llvm::UndefValue>(value) || llvm::isa<llvm::PoisonValue>(value))
     return {model_.access(model_.unknownLocation(), {})};
 
+  if (auto *alloca = llvm::dyn_cast<llvm::AllocaInst>(value))
+    return {model_.access(model_.objectLocation(alloca), {})};
+  if (auto *gep = llvm::dyn_cast<llvm::GetElementPtrInst>(value)) {
+    bool pointer_arithmetic = false;
+    std::vector<Indirection> path = gepPath(*gep, pointer_arithmetic);
+    std::vector<Access> result;
+    for (const Access &base : readAccesses(gep->getPointerOperand())) {
+      Access resolved = append(base, path);
+      if (pointer_arithmetic)
+        recordPointerArithmetic(resolved);
+      result.push_back(std::move(resolved));
+    }
+    return result;
+  }
+  if (auto *cast = llvm::dyn_cast<llvm::CastInst>(value)) {
+    if (cast->getType()->isPointerTy() &&
+        cast->getOperand(0)->getType()->isPointerTy())
+      return readAccesses(cast->getOperand(0));
+  }
+  if (auto *freeze = llvm::dyn_cast<llvm::FreezeInst>(value)) {
+    if (freeze->getType()->isPointerTy())
+      return readAccesses(freeze->getOperand(0));
+  }
+  if (auto *phi = llvm::dyn_cast<llvm::PHINode>(value)) {
+    if (phi->getType()->isPointerTy()) {
+      std::vector<Access> result;
+      for (unsigned index = 0; index < phi->getNumIncomingValues(); ++index) {
+        if (entry_reachable_blocks_.count(phi->getIncomingBlock(index)) == 0)
+          continue;
+        std::vector<Access> resolved =
+            readAccesses(phi->getIncomingValue(index));
+        result.insert(result.end(), resolved.begin(), resolved.end());
+      }
+      return result;
+    }
+  }
+  if (auto *select = llvm::dyn_cast<llvm::SelectInst>(value)) {
+    if (select->getType()->isPointerTy()) {
+      std::vector<Access> result = readAccesses(select->getTrueValue());
+      std::vector<Access> false_values = readAccesses(select->getFalseValue());
+      result.insert(result.end(), false_values.begin(), false_values.end());
+      return result;
+    }
+  }
+  if (auto *call = llvm::dyn_cast<llvm::CallBase>(value)) {
+    if (model_.findObjectLocation(call))
+      return {model_.access(model_.objectLocation(call), {})};
+  }
+
   if (auto *constant = llvm::dyn_cast<llvm::ConstantExpr>(value)) {
     if (constant->isCast())
       return readAccesses(constant->getOperand(0));
@@ -83,8 +163,12 @@ std::vector<Access> LLVMFrontend::readAccesses(const llvm::Value *value) {
       bool pointer_arithmetic = false;
       std::vector<Indirection> path = gepPath(*gep, pointer_arithmetic);
       std::vector<Access> result;
-      for (const Access &base : readAccesses(gep->getPointerOperand()))
-        result.push_back(append(base, path));
+      for (const Access &base : readAccesses(gep->getPointerOperand())) {
+        Access resolved = append(base, path);
+        if (pointer_arithmetic)
+          recordPointerArithmetic(resolved);
+        result.push_back(std::move(resolved));
+      }
       return result;
     }
   }
@@ -96,6 +180,68 @@ std::vector<Access> LLVMFrontend::readAccesses(const llvm::Value *value) {
   return {model_.access(model_.unknownLocation(), {})};
 }
 
+std::vector<Access>
+LLVMFrontend::fallbackReadAccesses(const llvm::Value *value) {
+  if (value && value->getType()->isPointerTy()) {
+    return {model_.access(model_.valueLocation(value),
+                          IndirectionList::dereferences(1))};
+  }
+  return {model_.access(model_.unknownLocation(), {})};
+}
+
+void LLVMFrontend::markResolutionCycle(const llvm::Value *value) {
+  auto found = resolving_values_.find(value);
+  if (found == resolving_values_.end())
+    return;
+  for (std::size_t index = found->second; index < resolution_stack_.size();
+       ++index) {
+    const llvm::Value *cyclic_value = resolution_stack_[index];
+    if (cyclic_value->getType()->isPointerTy()) {
+      model_.markRequiresKLimiting(model_.valueLocation(cyclic_value));
+    }
+  }
+}
+
+std::vector<Access>
+LLVMFrontend::refreshKLimiting(std::vector<Access> accesses) const {
+  for (Access &access : accesses)
+    access.k_limited |= model_.requiresKLimiting(access.location);
+  return accesses;
+}
+
+void LLVMFrontend::recordPointerArithmetic(const Access &access) {
+  auto &paths = pointer_arithmetic_paths_[access.location];
+  if (std::find(paths.begin(), paths.end(), access.indirections) == paths.end())
+    paths.push_back(access.indirections);
+}
+
+bool LLVMFrontend::isPointerArithmeticAccess(const Access &access) const {
+  auto found = pointer_arithmetic_paths_.find(access.location);
+  if (found == pointer_arithmetic_paths_.end())
+    return false;
+  return std::any_of(found->second.begin(), found->second.end(),
+                     [&](const IndirectionList &path) {
+                       return path.isPrefixOf(access.indirections);
+                     });
+}
+
+void LLVMFrontend::collectEntryReachableBlocks() {
+  for (llvm::Function &function : model_.module()) {
+    if (function.empty())
+      continue;
+    std::deque<const llvm::BasicBlock *> worklist;
+    worklist.push_back(&function.getEntryBlock());
+    while (!worklist.empty()) {
+      const llvm::BasicBlock *block = worklist.front();
+      worklist.pop_front();
+      if (!entry_reachable_blocks_.insert(block).second)
+        continue;
+      for (const llvm::BasicBlock *successor : llvm::successors(block))
+        worklist.push_back(successor);
+    }
+  }
+}
+
 Access LLVMFrontend::append(const Access &base,
                             const std::vector<Indirection> &suffix) const {
   IndirectionList path = base.indirections.append(
@@ -103,7 +249,7 @@ Access LLVMFrontend::append(const Access &base,
       base.k_limited ? config_.heap_indirection_limit : 0);
   Access result =
       model_.access(base.location, std::move(path), base.upward_exposed);
-  result.k_limited = base.k_limited;
+  result.k_limited |= base.k_limited;
   return result;
 }
 
@@ -111,11 +257,28 @@ Access LLVMFrontend::appendDereference(const Access &base) const {
   return append(base, {Indirection::dereference()});
 }
 
+std::optional<Access> LLVMFrontend::valueQueryAccess(const llvm::Value *value) {
+  if (!value)
+    return std::nullopt;
+  if (const MemoryLocation *location = model_.findValueLocation(value)) {
+    return model_.access(location->id, IndirectionList::dereferences(1));
+  }
+  if (const MemoryLocation *location = model_.findObjectLocation(value))
+    return model_.access(location->id, {});
+  if (value->getType()->isPointerTy()) {
+    return model_.access(model_.valueLocation(value),
+                         IndirectionList::dereferences(1));
+  }
+  return std::nullopt;
+}
+
 GPU LLVMFrontend::makeGPU(const Access &source, const Access &target,
                           const llvm::Instruction &instruction, GPUKind kind) {
   GPU result;
   result.source = source;
   result.target = target;
+  result.source.k_limited |= model_.requiresKLimiting(result.source.location);
+  result.target.k_limited |= model_.requiresKLimiting(result.target.location);
   result.statement = model_.statementId(&instruction);
   result.kind = kind;
   result.origin = &instruction;
@@ -127,23 +290,43 @@ GPU LLVMFrontend::makeGPU(const Access &source, const Access &target,
                     return step.kind == IndirectionKind::AnyField;
                   });
   const MemoryLocation *source_location = model_.getLocation(source.location);
-  result.flow_insensitive = source_location &&
-                            source_location->kind == LocationKind::SSA &&
-                            source.indirections.size() == 1;
+  const bool memory_snapshot =
+      llvm::isa<llvm::LoadInst>(instruction) ||
+      llvm::isa<llvm::AtomicCmpXchgInst>(instruction) ||
+      llvm::isa<llvm::AtomicRMWInst>(instruction) ||
+      llvm::isa<llvm::VAArgInst>(instruction);
+  const bool defines_ssa_value = source_location &&
+                                 source_location->kind == LocationKind::SSA &&
+                                 source_location->value == &instruction;
+  const bool summarized_source =
+      source_location && source_location->kind == LocationKind::Unknown;
+  const bool heap_points_to = source_location &&
+                              source_location->kind == LocationKind::Heap &&
+                              result.isPointsToEdge();
+  result.pointer_arithmetic = isPointerArithmeticAccess(result.source);
+  result.flow_insensitive =
+      !memory_snapshot &&
+      (defines_ssa_value || model_.isArrayAccess(result.source) ||
+       result.pointer_arithmetic || heap_points_to || summarized_source);
   result.provenance = next_gpu_provenance_++;
   if (source.indirections.size() > 1)
     result.queries.insert({source, QueryEndpoint::Source});
   if (!target.indirections.empty())
     result.queries.insert({target, QueryEndpoint::Target});
+  if (defines_ssa_value)
+    result.queries.insert({source, QueryEndpoint::Target});
   return result;
 }
 
 GPU LLVMFrontend::makeUseGPU(const Access &target,
-                             const llvm::Instruction &instruction) {
+                             const llvm::Instruction &instruction,
+                             const llvm::Value *original_value) {
   Access source =
       model_.access(model_.useLocation(), IndirectionList::dereferences(1));
   GPU result = makeGPU(source, target, instruction, GPUKind::Use);
   result.queries.insert({target, QueryEndpoint::Target});
+  if (std::optional<Access> original = valueQueryAccess(original_value))
+    result.queries.insert({*original, QueryEndpoint::Target});
   return result;
 }
 
@@ -192,7 +375,7 @@ void LLVMFrontend::addPointerOperandUses(GPB &block,
     if (!operand->getType()->isPointerTy())
       continue;
     for (const Access &target : readAccesses(operand))
-      block.gpus.insert(makeUseGPU(target, instruction));
+      block.gpus.insert(makeUseGPU(target, instruction, operand));
   }
 }
 
@@ -214,7 +397,10 @@ LLVMFrontend::translateInstruction(llvm::Instruction &instruction, GPBId id) {
     bool pointer_arithmetic = false;
     std::vector<Indirection> path = gepPath(*gep, pointer_arithmetic);
     for (const Access &base : readAccesses(gep->getPointerOperand())) {
-      GPU update = makeGPU(source, append(base, path), instruction);
+      Access target = append(base, path);
+      if (pointer_arithmetic)
+        recordPointerArithmetic(target);
+      GPU update = makeGPU(source, target, instruction);
       update.pointer_arithmetic = pointer_arithmetic;
       block.gpus.insert(std::move(update));
     }
@@ -228,7 +414,8 @@ LLVMFrontend::translateInstruction(llvm::Instruction &instruction, GPBId id) {
         update.flow_insensitive = false;
         block.gpus.insert(std::move(update));
       } else {
-        block.gpus.insert(makeUseGPU(target, instruction));
+        block.gpus.insert(
+            makeUseGPU(target, instruction, load->getPointerOperand()));
       }
     }
   } else if (auto *store = llvm::dyn_cast<llvm::StoreInst>(&instruction)) {
@@ -236,21 +423,29 @@ LLVMFrontend::translateInstruction(llvm::Instruction &instruction, GPBId id) {
     if (store->getValueOperand()->getType()->isPointerTy()) {
       for (const Access &destination : destinations) {
         Access source = appendDereference(destination);
-        for (const Access &target : readAccesses(store->getValueOperand()))
-          block.gpus.insert(makeGPU(source, target, instruction));
+        for (const Access &target : readAccesses(store->getValueOperand())) {
+          GPU update = makeGPU(source, target, instruction);
+          if (std::optional<Access> original =
+                  valueQueryAccess(store->getValueOperand())) {
+            update.queries.insert({*original, QueryEndpoint::Target});
+          }
+          block.gpus.insert(std::move(update));
+        }
       }
     } else {
       for (const Access &destination : destinations)
-        block.gpus.insert(
-            makeUseGPU(appendDereference(destination), instruction));
+        block.gpus.insert(makeUseGPU(appendDereference(destination),
+                                     instruction, store->getPointerOperand()));
     }
   } else if (auto *phi = llvm::dyn_cast<llvm::PHINode>(&instruction)) {
     if (!phi->getType()->isPointerTy())
       return std::nullopt;
     Access source = model_.access(model_.valueLocation(phi),
                                   IndirectionList::dereferences(1));
-    for (llvm::Value *incoming : phi->incoming_values()) {
-      for (const Access &target : readAccesses(incoming))
+    for (unsigned index = 0; index < phi->getNumIncomingValues(); ++index) {
+      if (entry_reachable_blocks_.count(phi->getIncomingBlock(index)) == 0)
+        continue;
+      for (const Access &target : readAccesses(phi->getIncomingValue(index)))
         block.gpus.insert(makeGPU(source, target, instruction));
     }
   } else if (auto *select = llvm::dyn_cast<llvm::SelectInst>(&instruction)) {
@@ -325,7 +520,8 @@ LLVMFrontend::translateInstruction(llvm::Instruction &instruction, GPBId id) {
     } else if (!callee) {
       block.kind = GPBKind::IndirectCall;
       for (const Access &target : readAccesses(call->getCalledOperand()))
-        block.gpus.insert(makeUseGPU(target, instruction));
+        block.gpus.insert(
+            makeUseGPU(target, instruction, call->getCalledOperand()));
     } else {
       // Unknown external bodies are modeled conservatively. Pointer results
       // may denote any location and pointer arguments may be modified.
@@ -454,6 +650,8 @@ GPG LLVMFrontend::buildInitialGPG(llvm::Function &function) {
   std::map<const llvm::BasicBlock *, GPBId> first;
   std::map<const llvm::BasicBlock *, GPBId> last;
   for (llvm::BasicBlock &basic_block : function) {
+    if (entry_reachable_blocks_.count(&basic_block) == 0)
+      continue;
     std::vector<GPBId> sequence;
     for (llvm::Instruction &instruction : basic_block) {
       std::optional<GPB> translated =
@@ -485,6 +683,8 @@ GPG LLVMFrontend::buildInitialGPG(llvm::Function &function) {
   if (!function.empty())
     graph.addEdge(graph.entry(), first[&function.getEntryBlock()]);
   for (llvm::BasicBlock &basic_block : function) {
+    if (entry_reachable_blocks_.count(&basic_block) == 0)
+      continue;
     if (llvm::succ_empty(&basic_block)) {
       graph.addEdge(last[&basic_block], graph.exit());
       continue;
@@ -512,13 +712,13 @@ GPG LLVMFrontend::buildInitialGPG(llvm::Function &function) {
         ++iterator;
     }
   }
-  GPUSet normalized_support;
-  for (const GPU &gpu : support) {
-    ReductionResult reduced =
-        reduceGPU(gpu, support, support, config_.heap_indirection_limit);
-    normalized_support.insert(reduced.reduced.begin(), reduced.reduced.end());
-  }
-  graph.setSupportGPUs(std::move(normalized_support));
+  // LLVM SSA definitions are immutable and therefore available as support
+  // facts independently of CFG order. Keep those facts indexed by their SSA
+  // source instead of eagerly reducing every fact against the whole support
+  // relation. Consumers already reduce transitively through supportGPUs();
+  // eager all-to-all normalization duplicates that work and is exponential on
+  // phi/select-heavy code.
+  graph.setSupportGPUs(std::move(support));
   graph.eliminateEmptyGPBs();
   addBoundaryDefinitions(graph, function);
   return graph;

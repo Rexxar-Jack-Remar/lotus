@@ -29,7 +29,11 @@ bool Indirection::operator==(const Indirection &other) const {
 }
 
 bool Indirection::operator<(const Indirection &other) const {
-  return std::tie(kind, field) < std::tie(other.kind, other.field);
+  if (kind != other.kind)
+    return kind < other.kind;
+  if (kind == IndirectionKind::Field)
+    return field < other.field;
+  return false;
 }
 
 IndirectionList::IndirectionList(std::vector<Indirection> elements,
@@ -72,9 +76,10 @@ bool IndirectionList::equivalentTo(const IndirectionList &other) const {
 }
 
 bool IndirectionList::doesNotExceed(const IndirectionList &other) const {
-  if (size() != other.size())
-    return size() < other.size();
-  return !summarized_ || other.summarized_;
+  // Desirability is defined solely in terms of indlist length (Appendix
+  // B.1).  Whether the last element summarizes an unbounded suffix does not
+  // make a k-limited list longer than another stored list of the same length.
+  return size() <= other.size();
 }
 
 IndirectionList IndirectionList::limited(std::vector<Indirection> elements,
@@ -108,7 +113,10 @@ IndirectionList::remaindersAfter(const IndirectionList &prefix,
     return {IndirectionList(std::move(suffix))};
 
   std::vector<IndirectionList> result;
-  const std::size_t expansion = std::max<std::size_t>(1, prefix.size());
+  // Appendix B.3 defines sigma to contain between zero and |prefix| dagger
+  // elements.  In particular, removing an empty prefix has one result, not
+  // two; that result retains the receiver's summary marker.
+  const std::size_t expansion = prefix.size();
   for (std::size_t count = 0; count <= expansion; ++count) {
     std::vector<Indirection> candidate = suffix;
     candidate.insert(candidate.end(), count, Indirection::anyField());

@@ -40,6 +40,18 @@ insensitive by default. SSA definitions remain immutable during blocking,
 which has the same role as the reference implementation's def-use-chain
 resolution.
 
+Relationship to the GCC implementation
+--------------------------------------
+
+The LLVM implementation preserves the original analysis pipeline rather than
+replacing it with a conventional Andersen solver. GIMPLE pointer assignments
+and calls correspond to GPUs produced from LLVM instructions, GCC basic blocks
+correspond to GPBs built from the LLVM CFG, and LLVM's SSA/use-def and
+dominator information replace the GCC-specific accessors used by blocking.
+The subsequent reaching-GPU, composition, reduction, coalescing, bottom-up
+summary, recursive-SCC, and call-graph-refinement phases retain the GPG
+structure.
+
 Usage
 -----
 
@@ -56,7 +68,18 @@ The supported modes are:
 
 Use ``--heap-k=N`` to select the heap indirection-list bound (default 3).
 ``--array-index-sensitive`` optionally distinguishes constant array indices.
+The following diagnostic options selectively disable optimization/analysis
+stages: ``--disable-blocking``, ``--disable-dead-gpu-elimination``, and
+``--disable-coalescing``. The normal faithful configuration leaves all three
+enabled. ``--print-stats`` is enabled by default and can be disabled with
+``--print-stats=false``.
 
 The analysis is also available as ``AAConfig::GPG()`` through
 ``AliasAnalysisWrapper`` and as ``--cg-type=gpg`` in
-``lotus-alias-call-graph``.
+``lotus-alias-call-graph``. The wrapper's Value-level points-to and alias APIs
+do not carry a program point, so they conservatively join GPG's
+statement-specific facts across all program points. Indirect-call queries keep
+their call-site-specific targets. If the joined result contains an abstract
+unknown or null target, the wrapper preserves that metadata and returns
+``MayAlias`` instead of deriving a strong answer from only the visible LLVM
+values.

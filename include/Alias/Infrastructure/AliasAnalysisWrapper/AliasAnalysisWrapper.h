@@ -107,6 +107,7 @@ struct AAConfig {
     KCallSite, // k-call-site sensitive (k-CFA)
     KOrigin,   // k-origin sensitive (AserPTA only)
     Adaptive,  // Adaptive context sensitivity (TPA only)
+    Full,      // Fully context-sensitive summaries (GPG only)
   };
 
   ContextSensitivity ctxSens;
@@ -230,7 +231,7 @@ struct AAConfig {
   }
 
   static AAConfig GPG() {
-    return {Implementation::GPG, ContextSensitivity::Adaptive, 0, true,
+    return {Implementation::GPG, ContextSensitivity::Full, 0, true,
             Solver::Default};
   }
 
@@ -349,10 +350,11 @@ public:
 
   bool getPointsToSet(const llvm::Value *ptr,
                       std::vector<const llvm::Value *> &ptsSet);
-  /// Get points-to set size only (for metrics). Supported by SparrowAA and TPA.
+  /// Get points-to set size only (for metrics). Supported by SparrowAA, TPA,
+  /// DDA, and GPG.
   bool getPointsToSetSize(const llvm::Value *ptr, size_t &outSize);
   /// Get possible callees for a call (direct or indirect). Supported by
-  /// SparrowAA and TPA.
+  /// SparrowAA, DyckAA, TPA, and GPG.
   void getIndirectCallTargets(llvm::CallBase *call,
                               std::vector<const llvm::Function *> &targets);
   bool getAliasSet(const llvm::Value *v,
@@ -441,6 +443,7 @@ public:
  * - "tpa", "tpa-0cfa" -> TPA_NoCtx
  * - "tpa-1cfa" -> TPA_1CFA
  * - "tpa-2cfa" -> TPA_2CFA
+ * - "gpg", "gpg-aa", "gpg-fscs" -> GPG
  * - "dyck", "dyckaa" -> DyckAA
  * - "cfl-anders", "cflanders" -> CFLAnders
  * - "cfl-steens", "cflsteens" -> CFLSteens

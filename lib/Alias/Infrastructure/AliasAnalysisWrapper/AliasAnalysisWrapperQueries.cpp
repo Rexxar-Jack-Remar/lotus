@@ -18,8 +18,6 @@
 #include "Alias/Infrastructure/AliasAnalysisWrapper/AliasAnalysisWrapper.h"
 #include "Alias/UnificationBased/DyckAA/DyckAliasAnalysis.h"
 
-#include <set>
-
 #include <llvm/ADT/SmallVector.h>
 #include <llvm/Analysis/AliasAnalysis.h>
 #include <llvm/Analysis/MemoryLocation.h>
@@ -218,7 +216,12 @@ bool AliasAnalysisWrapper::mayNull(const Value *v) {
  * @return true if the points-to set was successfully retrieved, false otherwise
  *
  * @note The ptsSet vector is cleared before being filled
- * @note Supported by: SparrowAA, TPA, DDA
+ * @note Supported by: SparrowAA, TPA, DDA, GPG
+ * @note GPG joins statement-specific points-to facts across program points
+ *       because this API does not carry an instruction/program-point argument.
+ *       It returns false when that projection contains unknown, null, or
+ *       otherwise unrepresentable targets rather than exposing a partial set
+ *       as complete.
  * @note Returns false if ptr is null, not a pointer type, or the backend
  *       is not available/initialized
  */
@@ -262,10 +265,13 @@ bool AliasAnalysisWrapper::getPointsToSet(const Value *ptr,
   if (_dda_aa && _initialized && _dda_aa->getPointsToSet(ptr, ptsSet))
     return true;
   if (_gpg_aa && _initialized) {
-    std::set<const Value *> points_to =
-        _gpg_aa->result().allPointees(ptr->stripPointerCasts());
-    ptsSet.assign(points_to.begin(), points_to.end());
-    return !ptsSet.empty();
+    const auto points_to =
+        _gpg_aa->result().allPointeeSet(ptr->stripPointerCasts());
+    if (!points_to.isComplete() || points_to.containsUnknown() ||
+        points_to.containsNull())
+      return false;
+    ptsSet.assign(points_to.values.begin(), points_to.values.end());
+    return true;
   }
   return false;
 }
@@ -302,8 +308,13 @@ bool AliasAnalysisWrapper::getPointsToSetSize(const Value *ptr,
     return false;
   }
   if (_gpg_aa) {
-    outSize = _gpg_aa->result().allPointees(ptr->stripPointerCasts()).size();
-    return outSize != 0;
+    const auto points_to =
+        _gpg_aa->result().allPointeeSet(ptr->stripPointerCasts());
+    if (!points_to.isComplete() || points_to.containsUnknown() ||
+        points_to.containsNull())
+      return false;
+    outSize = points_to.values.size();
+    return true;
   }
   return false;
 }

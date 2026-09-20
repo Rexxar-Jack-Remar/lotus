@@ -83,6 +83,24 @@ static bool containsAnyField(const IndirectionList &list) {
                      });
 }
 
+static bool definitelyDisjoint(const Access &lhs, const Access &rhs) {
+  if (!lhs.sameBase(rhs))
+    return false;
+
+  const auto &left = lhs.indirections.elements();
+  const auto &right = rhs.indirections.elements();
+  const std::size_t count = std::min(left.size(), right.size());
+  for (std::size_t index = 0; index < count; ++index) {
+    if (left[index].kind == IndirectionKind::Field &&
+        right[index].kind == IndirectionKind::Field &&
+        left[index].field != right[index].field)
+      return true;
+    if (!left[index].matches(right[index]))
+      return true;
+  }
+  return false;
+}
+
 CompositionResult composeGPU(const GPU &consumer, const GPU &producer,
                              CompositionKind kind, unsigned k_limit) {
   CompositionResult result;
@@ -180,30 +198,19 @@ bool potentialDependence(const GPU &consumer, const GPU &producer,
   if (definiteDependence(consumer, producer) != Dependence::None)
     return true;
 
-  if (consumer.source.sameBase(producer.source)) {
-    const auto &left = consumer.source.indirections.elements();
-    const auto &right = producer.source.indirections.elements();
-    const std::size_t count = std::min(left.size(), right.size());
-    for (std::size_t index = 0; index < count; ++index) {
-      if (left[index].kind == IndirectionKind::Field &&
-          right[index].kind == IndirectionKind::Field &&
-          left[index].field != right[index].field)
-        return false;
-      if (!left[index].matches(right[index]))
-        break;
-    }
-  }
-
   if (!consumer.isIndirect() && !producer.isIndirect())
     return false;
 
-  if (!compatible)
-    return true;
-
-  const bool def_def = compatible(consumer.source.type, producer.source.type);
-  const bool def_ref = compatible(consumer.source.type, producer.target.type);
-  const bool ref_def = compatible(consumer.target.type, producer.source.type);
-  return def_def || def_ref || ref_def;
+  // A dependence of `consumer` on `producer` can be a WaW through the two
+  // definitions, or a RaW through either access read by the consumer.  A
+  // producer-target/consumer-source match is the reverse (WaR) direction and
+  // must not be reported here; GPBs deliberately allow that ordering.
+  const auto may_overlap = [&](const Access &read_or_write) {
+    if (definitelyDisjoint(producer.source, read_or_write))
+      return false;
+    return !compatible || compatible(producer.source.type, read_or_write.type);
+  };
+  return may_overlap(consumer.source) || may_overlap(consumer.target);
 }
 
 namespace {
@@ -214,13 +221,18 @@ struct ReductionState {
 };
 
 GPUSet composeWithProducer(const GPU &consumer, const GPU &producer,
-                           unsigned k_limit, bool &valid, bool &desirable) {
+                           unsigned k_limit, bool &valid, bool &desirable,
+                           bool &postpone) {
   const CompositionResult ts =
       composeGPU(consumer, producer, CompositionKind::TargetSource, k_limit);
   const CompositionResult ss =
       composeGPU(consumer, producer, CompositionKind::SourceSource, k_limit);
   valid = ts.valid || ss.valid;
   desirable = ts.desirable || ss.desirable;
+  // Definition A.1 invokes TS and SS composition independently.  One
+  // successful composition must not hide that the other one was valid but
+  // undesirable and therefore has to be queued for a caller.
+  postpone = (ts.valid && !ts.desirable) || (ss.valid && !ss.desirable);
 
   if (ts.desirable && ss.desirable) {
     GPUSet both;
@@ -248,7 +260,13 @@ GPUSet composeWithProducer(const GPU &consumer, const GPU &producer,
 void GPUProducerIndex::add(const GPUSet &gpus) {
   for (const GPU &producer : gpus) {
     BaseKey key = {producer.source.location, producer.source.upward_exposed};
-    producers_[key].push_back(&producer);
+    auto &bucket = producers_[key];
+    const bool duplicate =
+        std::any_of(bucket.begin(), bucket.end(), [&](const GPU *candidate) {
+          return *candidate == producer;
+        });
+    if (!duplicate)
+      bucket.push_back(&producer);
   }
 }
 
@@ -288,15 +306,31 @@ ReductionResult reduceGPU(const GPU &consumer,
     if (!visited.insert({state.gpu, state.used}).second)
       continue;
 
+    // A producer hidden by a barrier may become adjacent only after one or
+    // more ordinary compositions.  Definition A.1 checks blocked producers
+    // for every w extracted from W, rather than only for the initial c.
+    for (const GPU *producer : unblocked.candidates(state.gpu)) {
+      if (available.contains(*producer))
+        continue;
+      bool valid = false;
+      bool desirable = false;
+      bool postpone = false;
+      (void)composeWithProducer(state.gpu, *producer, k_limit, valid, desirable,
+                                postpone);
+      if (valid)
+        result.queued.insert(*producer);
+    }
+
     bool progressed = false;
     for (const GPU *producer : available.candidates(state.gpu)) {
       if (state.used.count(producer) != 0)
         continue;
       bool valid = false;
       bool desirable = false;
-      GPUSet composed =
-          composeWithProducer(state.gpu, *producer, k_limit, valid, desirable);
-      if (valid && !desirable)
+      bool postpone = false;
+      GPUSet composed = composeWithProducer(state.gpu, *producer, k_limit,
+                                            valid, desirable, postpone);
+      if (postpone)
         result.queued.insert(*producer);
       if (composed.empty())
         continue;
@@ -310,17 +344,6 @@ ReductionResult reduceGPU(const GPU &consumer,
       result.reduced.insert(state.gpu);
   }
 
-  if (&available != &unblocked) {
-    for (const GPU *producer : unblocked.candidates(consumer)) {
-      if (available.contains(*producer))
-        continue;
-      bool valid = false;
-      bool desirable = false;
-      (void)composeWithProducer(consumer, *producer, k_limit, valid, desirable);
-      if (valid)
-        result.queued.insert(*producer);
-    }
-  }
   return result;
 }
 

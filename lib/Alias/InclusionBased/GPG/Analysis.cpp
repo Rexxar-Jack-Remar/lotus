@@ -639,7 +639,7 @@ void GPGAnalysisEngine::collectResult() {
   for (const MemoryLocation &location : model_.locations()) {
     if (location.id == 0)
       continue;
-    result_.registerLocation(location.id, location.value, location.name);
+    result_.registerLocation(location);
     if (location.value &&
         model_.locationForValue(location.value) == location.id)
       result_.registerValue(location.value, location.id);

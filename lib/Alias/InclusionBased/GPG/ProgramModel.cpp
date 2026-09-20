@@ -286,6 +286,34 @@ bool ProgramModel::typesCompatible(const llvm::Type *lhs,
   return false;
 }
 
+bool ProgramModel::isArrayAccess(const Access &access) const {
+  const MemoryLocation *location = getLocation(access.location);
+  const llvm::Type *type = location ? location->stored_type : nullptr;
+  for (const Indirection &step : access.indirections.elements()) {
+    if (!type)
+      return false;
+    if (step.kind == IndirectionKind::Dereference) {
+      type = stripOnePointer(type);
+      continue;
+    }
+
+    type = stripOnePointer(type);
+    if (type && (type->isArrayTy() || type->isVectorTy()))
+      return true;
+    if (step.kind == IndirectionKind::AnyField)
+      return false;
+    if (auto *structure = llvm::dyn_cast_or_null<llvm::StructType>(type)) {
+      if (step.field < 0 ||
+          static_cast<std::uint64_t>(step.field) >= structure->getNumElements())
+        return false;
+      type = structure->getElementType(static_cast<unsigned>(step.field));
+    } else {
+      return false;
+    }
+  }
+  return false;
+}
+
 bool ProgramModel::forcesWeakUpdate(LocationId id) const {
   const MemoryLocation *location = getLocation(id);
   if (!location)
@@ -298,10 +326,16 @@ bool ProgramModel::requiresKLimiting(LocationId id) const {
   const MemoryLocation *location = getLocation(id);
   if (!location)
     return true;
-  return location->kind == LocationKind::Heap ||
+  return explicitly_k_limited_locations_.count(id) != 0 ||
+         location->kind == LocationKind::Heap ||
          location->kind == LocationKind::Unknown ||
          location->kind == LocationKind::Formal ||
          (location->kind == LocationKind::Stack && location->address_escaped);
+}
+
+void ProgramModel::markRequiresKLimiting(LocationId id) {
+  if (getLocation(id))
+    explicitly_k_limited_locations_.insert(id);
 }
 
 bool ProgramModel::isFunction(LocationId id) const {

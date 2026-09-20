@@ -51,7 +51,7 @@ This directory contains various alias analysis implementations and toolkits used
 | **Unification-based** | DyckAA, seadsa |
 | **Flow-sensitive** | DDA, GPG, LotusAA, TPA |
 | **Context-sensitive** | SparrowAA, AserPTA, DDA (ContextDDA), GPG, LotusAA, seadsa, TPA |
-| **Field-sensitive** | AserPTA (optional), DDA, LotusAA, etc. |
+| **Field-sensitive** | AserPTA (optional), DDA, GPG, LotusAA, etc. |
 | **Specialized** | FPA (function pointers), UnderApproxAA (must-alias), Dynamic (runtime), SRAA (range-based) |
 
 ## Subdirectories
@@ -82,11 +82,16 @@ To compare pointer analyses (e.g. SparrowAA vs TPA vs AserPTA), use the built-in
 
 | Analysis | Points-to size | Indirect-call resolution |
 |----------|----------------|---------------------------|
-| SparrowAA, AserPTA, GPG | ✅ Full | ✅ |
+| SparrowAA, GPG | ✅ Full | ✅ |
+| AserPTA | ❌ Wrapper backend not integrated | ❌ Wrapper backend not integrated |
 | TPA | ✅ Size only | ✅ |
 | DyckAA, UnderApprox, CFL* | ❌ | ❌ |
 | Combined | ✅ (via Andersen) | ✅ (via Andersen) |
 
-LotusAA and FPA are separate tools and are not backends in `AliasAnalysisWrapper`; SeaDsa/AllocAA/etc. are not yet integrated in the wrapper. See [METRICS.md](METRICS.md) for the full support table.
+LotusAA and FPA are separate tools and are not backends in
+`AliasAnalysisWrapper`; AserPTA has a wrapper configuration but currently
+rejects initialization rather than silently falling back. SeaDsa/AllocAA/etc.
+are not yet integrated in the wrapper. See [METRICS.md](METRICS.md) for the
+full support table.
 
 - **High-level clients** (taint, use-after-free, ref-count) need more than alias/points-to (mod/ref, DFA, etc.) and live outside this metrics layer.

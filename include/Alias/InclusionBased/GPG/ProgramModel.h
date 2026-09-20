@@ -3,6 +3,7 @@
 #include "Alias/InclusionBased/GPG/GPU.h"
 
 #include <map>
+#include <set>
 #include <string>
 #include <vector>
 
@@ -70,8 +71,10 @@ public:
   const llvm::Type *typeAt(LocationId id,
                            const IndirectionList &indirections) const;
   bool typesCompatible(const llvm::Type *lhs, const llvm::Type *rhs) const;
+  bool isArrayAccess(const Access &access) const;
   bool forcesWeakUpdate(LocationId id) const;
   bool requiresKLimiting(LocationId id) const;
+  void markRequiresKLimiting(LocationId id);
   bool isFunction(LocationId id) const;
   const llvm::Function *asFunction(LocationId id) const;
 
@@ -90,6 +93,7 @@ private:
       context_locations_;
   std::map<const llvm::Instruction *, StatementId> statements_;
   std::vector<const llvm::Instruction *> instructions_;
+  std::set<LocationId> explicitly_k_limited_locations_;
   LocationId use_location_ = 0;
   LocationId unknown_location_ = 0;
   LocationId null_location_ = 0;

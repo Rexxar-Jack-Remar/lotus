@@ -3,6 +3,7 @@ add_library(CanaryGPG STATIC
   Graph.cpp
   GPU.cpp
   IndirectionList.cpp
+  InternedReaching.cpp
   LLVMFrontend.cpp
   ProgramModel.cpp
   Result.cpp

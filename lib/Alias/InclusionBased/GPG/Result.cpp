@@ -1,5 +1,7 @@
 #include "Alias/InclusionBased/GPG/Result.h"
 
+#include "Alias/InclusionBased/GPG/ProgramModel.h"
+
 #include <llvm/IR/Instructions.h>
 #include <llvm/IR/Value.h>
 
@@ -18,49 +20,82 @@ GPGResult::resolvedAccesses(const llvm::Instruction *instruction,
 std::set<const llvm::Value *>
 GPGResult::pointees(const llvm::Instruction *instruction,
                     const llvm::Value *pointer) const {
-  std::set<const llvm::Value *> result;
+  return pointeeSet(instruction, pointer).values;
+}
+
+PointeeSetResult GPGResult::pointeeSet(const llvm::Instruction *instruction,
+                                       const llvm::Value *pointer) const {
+  PointeeSetResult result;
   auto location_it = value_locations_.find(pointer);
   auto instruction_it = points_to_.find(instruction);
   if (location_it == value_locations_.end() ||
       instruction_it == points_to_.end())
     return result;
 
+  result.complete = true;
+  bool saw_query = false;
   for (const auto &[query, resolved] : instruction_it->second) {
     if (query.location != location_it->second)
       continue;
-    for (const Access &target : resolved) {
-      if (!target.indirections.empty())
-        continue;
-      auto value_it = location_values_.find(target.location);
-      if (value_it != location_values_.end() && value_it->second)
-        result.insert(value_it->second);
-    }
+    saw_query = true;
+    for (const Access &target : resolved)
+      addPointee(result, target);
   }
+  if (!saw_query)
+    result.complete = false;
   return result;
 }
 
 std::set<const llvm::Value *>
 GPGResult::allPointees(const llvm::Value *pointer) const {
-  std::set<const llvm::Value *> result;
+  return allPointeeSet(pointer).values;
+}
+
+PointeeSetResult GPGResult::allPointeeSet(const llvm::Value *pointer) const {
+  PointeeSetResult result;
   auto location_it = value_locations_.find(pointer);
   if (location_it == value_locations_.end())
     return result;
 
+  result.complete = true;
+  bool saw_query = false;
   for (const auto &[instruction, queries] : points_to_) {
     (void)instruction;
     for (const auto &[query, resolved] : queries) {
       if (query.location != location_it->second)
         continue;
-      for (const Access &target : resolved) {
-        if (!target.indirections.empty())
-          continue;
-        auto value_it = location_values_.find(target.location);
-        if (value_it != location_values_.end() && value_it->second)
-          result.insert(value_it->second);
-      }
+      saw_query = true;
+      for (const Access &target : resolved)
+        addPointee(result, target);
     }
   }
+  if (!saw_query)
+    result.complete = false;
   return result;
+}
+
+void GPGResult::addPointee(PointeeSetResult &result,
+                           const Access &target) const {
+  if (unknown_locations_.count(target.location) != 0) {
+    result.contains_unknown = true;
+    result.complete = false;
+    return;
+  }
+  if (null_locations_.count(target.location) != 0) {
+    result.contains_null = true;
+    return;
+  }
+  if (!target.indirections.empty()) {
+    result.complete = false;
+    return;
+  }
+
+  auto value_it = location_values_.find(target.location);
+  if (value_it == location_values_.end() || !value_it->second) {
+    result.complete = false;
+    return;
+  }
+  result.values.insert(value_it->second);
 }
 
 const std::set<const llvm::Function *> *
@@ -76,7 +111,17 @@ void GPGResult::clear() {
   location_values_.clear();
   location_names_.clear();
   value_locations_.clear();
+  unknown_locations_.clear();
+  null_locations_.clear();
   stats_ = {};
+}
+
+void GPGResult::registerLocation(const MemoryLocation &location) {
+  registerLocation(location.id, location.value, location.name);
+  if (location.kind == LocationKind::Unknown)
+    unknown_locations_.insert(location.id);
+  else if (location.kind == LocationKind::Null)
+    null_locations_.insert(location.id);
 }
 
 void GPGResult::registerLocation(LocationId id, const llvm::Value *value,

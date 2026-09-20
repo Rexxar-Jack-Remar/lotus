@@ -1,5 +1,7 @@
 #include "Alias/InclusionBased/GPG/Graph.h"
 
+#include "InternedReaching.h"
+
 #include <algorithm>
 #include <deque>
 #include <functional>
@@ -280,12 +282,7 @@ ReachingState GPG::computeReaching(bool use_blocking,
 
 ReachingPair GPG::analyzeReaching(const TypeCompatibility &compatible,
                                   unsigned k_limit) const {
-  ReachingPair result;
-  result.without_blocking =
-      computeReaching(false, nullptr, compatible, k_limit);
-  result.with_blocking =
-      computeReaching(true, &result.without_blocking, compatible, k_limit);
-  return result;
+  return analyzeReachingInterned(*this, compatible, k_limit);
 }
 
 bool GPG::strengthReduce(const TypeCompatibility &compatible, unsigned k_limit,

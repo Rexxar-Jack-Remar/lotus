@@ -83,16 +83,17 @@ static cl::opt<CGType> AnalysisType(
 
 static cl::opt<bool>
     EmitCGAsDot("emit-cg-as-dot",
-                cl::desc("Output call-graph as DOT (default: true)"),
-                cl::init(true), cl::cat(CGCat));
+                cl::desc("Output call graph as DOT (the default format)"),
+                cl::init(false), cl::cat(CGCat));
 static cl::opt<bool> EmitCGAsJson("emit-cg-as-json",
-                                  cl::desc("Output call-graph as JSON"),
+                                  cl::desc("Output call graph as JSON"),
                                   cl::cat(CGCat));
 static cl::opt<std::string>
     OutputFile("o", cl::desc("Output file (default: stdout)"), cl::init("-"),
                cl::cat(CGCat));
-static cl::opt<bool> EmitStats("S", cl::desc("Compute statistics"),
-                               cl::cat(CGCat));
+static cl::opt<bool>
+    EmitStats("S", cl::desc("Write call-graph statistics to standard error"),
+              cl::cat(CGCat));
 static cl::opt<std::string> IRFile(cl::Positional, cl::Required,
                                    cl::desc("<LLVM IR file>"), cl::cat(CGCat));
 static cl::opt<int> FPAMaxTypeLayer("fpa-max-type-layer",
@@ -111,12 +112,6 @@ struct DiagTimer {
                        .count() /
                    1000.0;
     llvm::errs() << Message << " (" << Elapsed << "s)\n";
-  }
-  double elapsed() const {
-    return std::chrono::duration_cast<std::chrono::milliseconds>(
-               std::chrono::steady_clock::now() - Start)
-               .count() /
-           1000.0;
   }
 };
 
@@ -154,6 +149,24 @@ static void processDirectCalls(llvm::Module &M, llvm::CallGraph &CG) {
         }
       }
     }
+  }
+}
+
+// LLVM's initial CallGraph represents an unresolved indirect call with an
+// edge to the external-calls node. Remove that placeholder before installing
+// precise GPG targets; otherwise statistics count one spurious callee for
+// every resolved indirect call.
+static void removeCallSiteEdges(llvm::CallGraph &CG, llvm::Function *Caller,
+                                llvm::CallBase *CS) {
+  auto *Node = Caller ? CG[Caller] : nullptr;
+  if (!Node || !CS)
+    return;
+
+  for (auto It = Node->begin(); It != Node->end();) {
+    if (It->first.hasValue() && It->first.getValue() == CS)
+      Node->removeCallEdge(It);
+    else
+      ++It;
   }
 }
 
@@ -252,8 +265,26 @@ static void buildCGWithGPG(llvm::Module &M, llvm::CallGraph &CG) {
   lotus::gpg::GPGAnalysisEngine analysis(M);
   analysis.run();
   processDirectCalls(M, CG);
-  for (const auto &[call, targets] :
-       analysis.result().indirectCallTargets()) {
+
+  // Strip LLVM's conservative external-node edge from every indirect call,
+  // including unresolved calls. GPG targets are added back below; calls with
+  // no target then correctly contribute zero resolved edges to statistics.
+  for (llvm::Function &function : M) {
+    if (function.isDeclaration())
+      continue;
+    for (llvm::BasicBlock &block : function) {
+      for (llvm::Instruction &instruction : block) {
+        auto *call = llvm::dyn_cast<llvm::CallBase>(&instruction);
+        if (!call ||
+            llvm::isa<llvm::Function>(
+                call->getCalledOperand()->stripPointerCastsAndAliases()))
+          continue;
+        removeCallSiteEdges(CG, &function, call);
+      }
+    }
+  }
+
+  for (const auto &[call, targets] : analysis.result().indirectCallTargets()) {
     auto *non_const_call = const_cast<llvm::CallBase *>(call);
     auto *caller = const_cast<llvm::Function *>(call->getFunction());
     for (const llvm::Function *target : targets) {
@@ -380,14 +411,16 @@ int main(int Argc, char *Argv[]) {
   cl::HideUnrelatedOptions(CGCat);
   cl::ParseCommandLineOptions(Argc, Argv, "Call Graph Construction Tool\n");
 
-  DiagTimer LoadingTm("Loading IR");
   llvm::LLVMContext Context;
   llvm::SMDiagnostic Err;
-  auto M = lotus::alias::tools::loadIRModule(IRFile, Context, Err, Argv[0]);
+  std::unique_ptr<llvm::Module> M;
+  {
+    DiagTimer Tm("Loading IR");
+    M = lotus::alias::tools::loadIRModule(IRFile, Context, Err, Argv[0]);
+  }
   if (!M) {
     return 1;
   }
-  llvm::errs() << "Loaded IR (" << LoadingTm.elapsed() << "s)\n";
 
   llvm::CallGraph CG(*M);
   {
@@ -427,12 +460,14 @@ int main(int Argc, char *Argv[]) {
     return *OS;
   };
 
-  if (EmitCGAsDot)
+  const bool EmitDefaultDot =
+      EmitCGAsDot.getNumOccurrences() == 0 && !static_cast<bool>(EmitCGAsJson);
+  if (EmitCGAsDot || EmitDefaultDot)
     printCGAsDot(CG, GetOS());
   if (EmitCGAsJson)
     printCGAsJson(CG, GetOS());
   if (EmitStats)
-    computeCGStats(CG, GetOS());
+    computeCGStats(CG, llvm::errs());
 
   return 0;
 }
@@ -452,18 +487,40 @@ static void computeCGStats(llvm::CallGraph &CG, llvm::raw_ostream &OS) {
   llvm::Module &M = CG.getModule();
   std::map<llvm::CallBase *, std::pair<size_t, bool>> CallSiteInfo;
 
+  // Seed every non-intrinsic call site so unresolved indirect calls remain
+  // visible with zero callees. Building this map only from graph edges loses
+  // precisely the unresolved sites that the statistic is meant to report.
+  for (llvm::Function &function : M) {
+    if (function.isDeclaration())
+      continue;
+    for (llvm::BasicBlock &block : function) {
+      for (llvm::Instruction &instruction : block) {
+        auto *call = llvm::dyn_cast<llvm::CallBase>(&instruction);
+        if (!call)
+          continue;
+        llvm::Value *called_value =
+            call->getCalledOperand()->stripPointerCastsAndAliases();
+        auto *direct_callee = llvm::dyn_cast<llvm::Function>(called_value);
+        if (direct_callee && direct_callee->isIntrinsic())
+          continue;
+        CallSiteInfo.emplace(call, std::make_pair(0, direct_callee == nullptr));
+      }
+    }
+  }
+
   for (auto &F : M) {
     if (F.isDeclaration())
       continue;
     if (auto *Node = CG[&F]) {
       for (auto &Record : *Node) {
-        if (auto *CS = dyn_cast<llvm::CallBase>(Record.first.getValue())) {
-          if (CallSiteInfo.find(CS) == CallSiteInfo.end()) {
-            CallSiteInfo[CS] = std::make_pair(
-                0, !llvm::isa<llvm::Function>(
-                       CS->getCalledOperand()->stripPointerCastsAndAliases()));
-          }
-          CallSiteInfo[CS].first++;
+        if (Record.first.hasValue()) {
+          auto *CS = dyn_cast<llvm::CallBase>(Record.first.getValue());
+          if (!CS)
+            continue;
+          auto site = CallSiteInfo.find(CS);
+          if (site != CallSiteInfo.end() && Record.second &&
+              Record.second->getFunction())
+            ++site->second.first;
         }
       }
     }

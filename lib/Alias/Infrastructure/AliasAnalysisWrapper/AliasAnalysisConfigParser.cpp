@@ -27,7 +27,10 @@ namespace {
  */
 std::string toLower(const std::string &str) {
   std::string result = str;
-  std::transform(result.begin(), result.end(), result.begin(), ::tolower);
+  std::transform(result.begin(), result.end(), result.begin(),
+                 [](unsigned char character) {
+                   return static_cast<char>(std::tolower(character));
+                 });
   return result;
 }
 
@@ -60,6 +63,9 @@ std::string toLower(const std::string &str) {
  * - "tpa-2cfa" -> TPA_2CFA()
  * - "tpa-3cfa" -> TPA_3CFA()
  * - "tpa-k" or "tpa-kcfa" (where k is a number) -> TPA_KCFA(k)
+ *
+ * **GPG:**
+ * - "gpg", "gpg-aa", "gpg-fscs" -> GPG()
  *
  * **Other analyses:**
  * - "dyck", "dyckaa" -> DyckAA()

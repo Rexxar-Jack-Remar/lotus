@@ -228,13 +228,17 @@ or call-graph analyses.
 
    ./build/bin/lotus-alias-call-graph -cg-type=dyck input.bc
    ./build/bin/lotus-alias-call-graph -cg-type=lotus -emit-cg-as-json input.bc
+   ./build/bin/lotus-alias-call-graph -cg-type=gpg -emit-cg-as-json input.bc
 
 Key options:
 
-- ``-cg-type=dyck|lotus|fpa-flta|fpa-mlta|fpa-mltadf|fpa-kelp|aserpta-ci|aserpta-1cfa|aserpta-2cfa``
+- ``-cg-type=gpg|dyck|lotus|fpa-flta|fpa-mlta|fpa-mltadf|fpa-kelp|aserpta-ci|aserpta-1cfa|aserpta-2cfa``
 - ``-emit-cg-as-dot`` or ``-emit-cg-as-json``
 - ``-o <file>`` – output destination
-- ``-S`` – compute graph statistics
+- ``-S`` – compute graph statistics and write them to standard error
+
+DOT is the default when no format option is present. Selecting JSON suppresses
+that implicit DOT output, so the output remains valid JSON.
 
 DyckAA (lotus-alias-dyck-aa)
 ----------------

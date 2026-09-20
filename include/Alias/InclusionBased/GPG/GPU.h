@@ -116,6 +116,9 @@ Dependence definiteDependence(const GPU &consumer, const GPU &producer);
 using TypeCompatibility =
     std::function<bool(const llvm::Type *, const llvm::Type *)>;
 
+// Checks unresolved RaW/WaW aliasing from producer to consumer. Potential
+// WaR is the reverse query and is deliberately excluded because a GPB's
+// read-before-write semantics preserves it during coalescing.
 bool potentialDependence(const GPU &consumer, const GPU &producer,
                          const TypeCompatibility &compatible);
 

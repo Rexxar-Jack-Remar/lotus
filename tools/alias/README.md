@@ -46,7 +46,7 @@ Use `build/bin/<tool> --help` to see the full option set for a specific tool.
 | `lotus-alias-dyck-aa` | Run DyckAA | Implemented by `tools/alias/lotus-alias-dyck-aa.cpp`; unification-based analysis that can print call-graph statistics with `--print-cg`. |
 | `lotus-alias-tpa` | Run TPA | Implemented by `tools/alias/lotus-alias-tpa.cpp`; semi-sparse, flow- and context-sensitive pointer analysis with optional prepass dumping and CFG `.dot` output. |
 | `lotus-alias-fpa` | Run function-pointer analysis | Implemented by `tools/alias/lotus-alias-fpa.cpp`; indirect-call target analysis with FLTA, MLTA, MLTA+DF, and KELP modes. |
-| `lotus-alias-call-graph` | Build a call graph with a selected backend | Implemented by `tools/alias/lotus-alias-call-graph.cpp`; supports `dyck`, `lotus`, several `fpa-*` modes, and `aserpta-*` modes. |
+| `lotus-alias-call-graph` | Build a call graph with a selected backend | Implemented by `tools/alias/lotus-alias-call-graph.cpp`; supports `gpg`, `dyck`, `lotus`, several `fpa-*` modes, and `aserpta-*` modes. |
 | `lotus-alias-sea-dsa-dg` | Dump Sea-DSA memory graphs | Implemented by `tools/alias/lotus-alias-sea-dsa-dg.cpp`; useful for inspecting per-function memory graphs and enabling graph emission with `--sea-dsa-dot`. |
 | `lotus-alias-seadsa-tool` | Run extended Sea-DSA utilities | Implemented by `tools/alias/lotus-alias-seadsa-tool.cpp`; includes memory-graph dumping and other Sea-DSA related driver options. |
 | `dynaa-instrument` | Instrument a program for dynamic alias logging | Built only with `LOTUS_ENABLE_DYNAA=ON`. |
@@ -95,8 +95,9 @@ build/bin/lotus-alias-dyck-aa test.bc --print-cg
   relative to the current working directory.
 - `lotus-alias-lotus-aa` prints only a completion message unless LotusAA-specific flags such
   as `-lotus-print-pts` or `-lotus-print-cg` are enabled.
-- `lotus-alias-call-graph` emits DOT by default and can also emit JSON with
-  `--emit-cg-as-json`.
+- `lotus-alias-call-graph` emits DOT when no format flag is supplied. Use
+  `--emit-cg-as-json` for JSON output. `-S` writes statistics to standard error
+  so the selected graph format remains valid on standard output or in `-o`.
 - Sea-DSA tooling depends on the Sea-DSA integration being available in the
   current build.
 
