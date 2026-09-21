@@ -13,7 +13,7 @@
 #include "llvm/Pass.h"
 #include "llvm/Transforms/IPO/PassManagerBuilder.h"
 
-#include "Checker/FiTx/Framework_IR/Analyzer.h"
+#include "Checker/FiTx/FrameworkIR/Analyzer.h"
 
 namespace ir_generator {
 /// LLVM FunctionPass that builds framework IR (fitx::Function with blocks

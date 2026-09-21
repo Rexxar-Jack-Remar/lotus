@@ -1,4 +1,4 @@
-#include "Checker/FiTx/Detector/UseBeforeInit_Detector.h"
+#include "Checker/FiTx/Detector/UseBeforeInitDetector.h"
 #include "Checker/FiTx/Frontend/State.h"
 
 namespace UseBeforeInitialization {

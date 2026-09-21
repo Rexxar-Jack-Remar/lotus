@@ -1,4 +1,4 @@
-#include "Checker/FiTx/Detector/DL_Detector.h"
+#include "Checker/FiTx/Detector/DoubleLockDetector.h"
 #include "Checker/FiTx/Detector/Lock.h"
 #include "Checker/FiTx/Frontend/State.h"
 

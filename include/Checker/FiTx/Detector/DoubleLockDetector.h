@@ -1,4 +1,4 @@
-/** @file DL_Detector.h @brief Double-lock detector for FiTx analysis. */
+/** @file DoubleLockDetector.h @brief Double-lock detector for FiTx analysis. */
 #pragma once
 
 #include "Checker/FiTx/Detector/Lock.h"

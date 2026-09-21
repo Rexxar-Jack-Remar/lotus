@@ -1,6 +1,6 @@
-/** @file Unref_Detector.h @brief Unref (missing decrement) detector for FiTx analysis. */
+/** @file UnreferenceCounterDetector.h @brief Unref (missing decrement) detector for FiTx analysis. */
 #pragma once
-#include "Checker/FiTx/Detector/Ref_count.h"
+#include "Checker/FiTx/Detector/RefCount.h"
 #include "Checker/FiTx/Frontend/State.h"
 
 #include <string>

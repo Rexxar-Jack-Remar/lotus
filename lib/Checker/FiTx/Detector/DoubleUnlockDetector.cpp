@@ -1,4 +1,4 @@
-#include "Checker/FiTx/Detector/DUL_Detector.h"
+#include "Checker/FiTx/Detector/DoubleUnlockDetector.h"
 #include "Checker/FiTx/Frontend/PropagationConstraint.h"
 
 class LockInUnlockConstraint : public fitx::StatefulConstraint {

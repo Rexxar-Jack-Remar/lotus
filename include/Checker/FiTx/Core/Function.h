@@ -2,7 +2,7 @@
 /// \brief FiTx function representation: CFG (blocks, edges), ordered blocks
 /// for analysis, and return-value tracking for summaries (paper §4.3).
 ///
-/// Built by Framework_IR::Analyzer from llvm::Function. Holds basic blocks,
+/// Built by FrameworkIR::Analyzer from llvm::Function. Holds basic blocks,
 /// init/return blocks, possible return assignments per block (for return-code
 /// aware propagation), and refcount/lifetime metadata.
 #pragma once

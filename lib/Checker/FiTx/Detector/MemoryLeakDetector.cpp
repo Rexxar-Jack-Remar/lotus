@@ -1,4 +1,4 @@
-#include "Checker/FiTx/Detector/Leak_Detector.h"
+#include "Checker/FiTx/Detector/MemoryLeakDetector.h"
 #include "Checker/FiTx/Detector/Alloc.h"
 #include "Checker/FiTx/Frontend/State.h"
 #include "Checker/FiTx/Frontend/StateTransition.h"

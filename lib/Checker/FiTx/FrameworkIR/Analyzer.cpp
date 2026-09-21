@@ -2,7 +2,7 @@
 // (basic blocks, ordered block list, call/store/load/ret instructions, return
 // assignments). No typestate; that is done by Frontend::Analyzer (paper
 // §4.2, 4.3).
-#include "Checker/FiTx/Framework_IR/Analyzer.h"
+#include "Checker/FiTx/FrameworkIR/Analyzer.h"
 
 #include "llvm/Analysis/LoopInfo.h"
 #include "llvm/IR/BasicBlock.h"
@@ -20,7 +20,7 @@
 #include "Checker/FiTx/Core/Instructions.h"
 #include "Checker/FiTx/Core/Utils.h"
 #include "Checker/FiTx/Core/Value.h"
-#include "Checker/FiTx/Framework_IR/Utils.h"
+#include "Checker/FiTx/FrameworkIR/Utils.h"
 
 namespace ir_generator {
 Analyzer::Analyzer() {}

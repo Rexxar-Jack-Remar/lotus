@@ -1,4 +1,4 @@
-#include "Checker/FiTx/Framework_IR/Utils.h"
+#include "Checker/FiTx/FrameworkIR/Utils.h"
 
 #include "llvm/IR/Instructions.h"
 

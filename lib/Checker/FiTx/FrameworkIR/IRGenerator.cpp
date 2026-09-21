@@ -1,7 +1,7 @@
 // FiTx IR builder: one FunctionPass per LLVM function; builds framework IR
 // (CFG + instructions) and stores in framework_ir_[Module]. Required by
 // FrameworkPass.
-#include "Checker/FiTx/Framework_IR/IRGenerator.h"
+#include "Checker/FiTx/FrameworkIR/IRGenerator.h"
 
 #include "llvm/Analysis/LoopInfo.h"
 #include "llvm/IR/Function.h"

@@ -172,11 +172,11 @@ public:
   void analyze() override;
 
   // Alias analysis used internally (also useful for other analyses/checkers).
-  lotus::AliasAnalysisWrapper *getAliasAnalysis() const {
+  lotus::AliasAnalysisWrapper *getAliasAnalysis() const override {
     return m_alias_analysis.get();
   }
 
-  const OpenMP::OpenMPSemantics *getOpenMPSemantics() const {
+  const OpenMP::OpenMPSemantics *getOpenMPSemantics() const override {
     return m_openmp_semantics.get();
   }
 
@@ -271,12 +271,12 @@ public:
   void printResults(llvm::raw_ostream &os) const override;
 
   // Component access for advanced users
-  const ThreadFlowGraph &getThreadFlowGraph() const { return *m_tfg; }
-  size_t getAnalysisGeneration() const { return m_analysis_generation; }
+  const ThreadFlowGraph &getThreadFlowGraph() const override { return *m_tfg; }
+  size_t getAnalysisGeneration() const override { return m_analysis_generation; }
   bool joinEdgeMustOrderTarget(const SyncNode *join_node,
-                               const SyncNode *target_node) const;
+                               const SyncNode *target_node) const override;
   bool instructionMayExecuteMultipleTimes(
-      const llvm::Instruction *inst) const {
+      const llvm::Instruction *inst) const override {
     return !m_thread_multiplicity ||
            m_thread_multiplicity->instructionMayExecuteMultipleTimes(inst);
   }

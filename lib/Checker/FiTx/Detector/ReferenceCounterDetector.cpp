@@ -1,4 +1,4 @@
-#include "Checker/FiTx/Detector/Ref_Detector.h"
+#include "Checker/FiTx/Detector/ReferenceCounterDetector.h"
 #include "Checker/FiTx/Frontend/State.h"
 #include "Checker/FiTx/Frontend/StateTransition.h"
 

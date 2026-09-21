@@ -1,4 +1,4 @@
-#include "Checker/FiTx/Detector/Unref_Detector.h"
+#include "Checker/FiTx/Detector/UnreferenceCounterDetector.h"
 
 namespace UnreferenceCounter {
   void defineStates(fitx::StateManager& manager) {

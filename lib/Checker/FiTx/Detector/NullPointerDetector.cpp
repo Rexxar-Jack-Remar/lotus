@@ -1,4 +1,4 @@
-#include "Checker/FiTx/Detector/NullPtr_Detector.h"
+#include "Checker/FiTx/Detector/NullPointerDetector.h"
 #include "Checker/FiTx/Frontend/State.h"
 
 namespace NullPointer {

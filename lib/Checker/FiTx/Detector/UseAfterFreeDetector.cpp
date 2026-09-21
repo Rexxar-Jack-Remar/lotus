@@ -1,6 +1,6 @@
 // UAF typestate definition: init, free, BUG (use-after-free). Transitions:
 // init -> free on call to free_funcs; free -> BUG on use (load); free -> init on store ANY.
-#include "Checker/FiTx/Detector/UAF_Detector.h"
+#include "Checker/FiTx/Detector/UseAfterFreeDetector.h"
 #include "Checker/FiTx/Frontend/State.h"
 
 namespace UseAfterFree {

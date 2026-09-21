@@ -1,4 +1,4 @@
-/** @file Leak_Detector.h @brief Memory leak detector for FiTx analysis. */
+/** @file UseAfterFreeDetector.h @brief Use-after-free detector for FiTx analysis. */
 #pragma once
 #include "Checker/FiTx/Detector/Alloc.h"
 #include "Checker/FiTx/Frontend/State.h"
@@ -6,6 +6,6 @@
 #include <string>
 #include <vector>
 
-namespace MemoryLeak {
+namespace UseAfterFree {
 void defineStates(fitx::StateManager &manager);
-} // namespace MemoryLeak
+} // namespace UseAfterFree

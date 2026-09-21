@@ -1,6 +1,6 @@
 // Double-free typestate: init -> free -> DF (bug). Transitions: Fun Arg (kfree),
 // Store ANY (e.g. malloc result stores over freed ptr). Paper Figure 3, Table 5.
-#include "Checker/FiTx/Detector/DF_Detector.h"
+#include "Checker/FiTx/Detector/DoubleFreeDetector.h"
 #include "Checker/FiTx/Core/Instructions.h"
 #include "Checker/FiTx/Frontend/PropagationConstraint.h"
 #include "Checker/FiTx/Frontend/State.h"
