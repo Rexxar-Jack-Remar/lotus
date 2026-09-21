@@ -8,6 +8,7 @@ import csv
 import json
 import os
 import re
+import resource
 import shlex
 import subprocess
 import sys
@@ -62,6 +63,7 @@ class RunResult:
   stderr: str
   stats: dict[str, str]
   log_path: Path
+  memory_limit_bytes: int | None
 
 
 def parse_arguments() -> argparse.Namespace:
@@ -101,6 +103,21 @@ def parse_integer(value: str | None) -> int | None:
     return int(value)
   except ValueError:
     return None
+
+
+def configured_memory_limit_bytes() -> int | None:
+  limit_gib = config.MEMORY_LIMIT_GIB
+  if limit_gib is None:
+    return None
+  return int(limit_gib * 1024**3)
+
+
+def is_memory_limit_failure(stderr: str) -> bool:
+  lowered = stderr.lower()
+  return any(
+      marker in lowered
+      for marker in ("std::bad_alloc", "cannot allocate memory", "memoryerror")
+  )
 
 
 def parse_program_stats(stdout: str) -> dict[str, str]:
@@ -153,6 +170,12 @@ def validate_experiments() -> list[dict[str, Any]]:
     raise ValueError("WARMUP_REPETITIONS cannot be negative")
   if config.TIMEOUT_SECONDS is not None and config.TIMEOUT_SECONDS <= 0:
     raise ValueError("TIMEOUT_SECONDS must be positive or None")
+  if config.MEMORY_LIMIT_GIB is not None and (
+      isinstance(config.MEMORY_LIMIT_GIB, bool)
+      or not isinstance(config.MEMORY_LIMIT_GIB, (int, float))
+      or config.MEMORY_LIMIT_GIB <= 0
+  ):
+    raise ValueError("MEMORY_LIMIT_GIB must be a positive number or None")
 
   experiments = list(config.EXPERIMENTS)
   names: set[str] = set()
@@ -216,6 +239,7 @@ def write_log(
     stream.write(f"Finished (UTC): {finished_at}\n")
     stream.write(f"Status: {result.status}\n")
     stream.write(f"Exit code: {result.exit_code}\n")
+    stream.write(f"Memory limit (bytes): {result.memory_limit_bytes}\n")
     stream.write(f"Wall time (seconds): {result.wall_time_seconds:.6f}\n")
     stream.write("\n===== STDOUT =====\n")
     stream.write(result.stdout)
@@ -239,6 +263,13 @@ def run_once(command: Sequence[str], log_path: Path) -> RunResult:
   stderr = ""
   exit_code: int | None = None
   status = "spawn-error"
+  memory_limit_bytes = configured_memory_limit_bytes()
+
+  def apply_memory_limit() -> None:
+    if memory_limit_bytes is not None:
+      resource.setrlimit(
+          resource.RLIMIT_AS, (memory_limit_bytes, memory_limit_bytes)
+      )
 
   try:
     process = subprocess.Popen(
@@ -249,12 +280,15 @@ def run_once(command: Sequence[str], log_path: Path) -> RunResult:
         encoding="utf-8",
         errors="replace",
         env=environment,
+        preexec_fn=apply_memory_limit if memory_limit_bytes is not None else None,
     )
     try:
       stdout, stderr = process.communicate(timeout=config.TIMEOUT_SECONDS)
       exit_code = process.returncode
       if exit_code == 0:
         status = "success"
+      elif memory_limit_bytes is not None and is_memory_limit_failure(stderr):
+        status = "memory-limit"
       elif exit_code is not None and exit_code < 0:
         status = f"signal-{abs(exit_code)}"
       else:
@@ -264,18 +298,22 @@ def run_once(command: Sequence[str], log_path: Path) -> RunResult:
       stdout, stderr = process.communicate()
       exit_code = process.returncode
       status = "timeout"
-  except OSError as error:
+  except (OSError, subprocess.SubprocessError) as error:
     stderr = f"failed to start process: {error}\n"
 
   elapsed = time.perf_counter() - start
+  stats = parse_program_stats(stdout)
+  if memory_limit_bytes is not None:
+    stats["runner memory limit (bytes)"] = str(memory_limit_bytes)
   result = RunResult(
       status=status,
       exit_code=exit_code,
       wall_time_seconds=elapsed,
       stdout=stdout,
       stderr=stderr,
-      stats=parse_program_stats(stdout),
+      stats=stats,
       log_path=log_path,
+      memory_limit_bytes=memory_limit_bytes,
   )
   write_log(log_path, command_text, started_at, utc_now(), result)
   return result
@@ -388,7 +426,9 @@ def run_experiment(
     )
     result = run_once(command, log_path)
     results.append(result)
-    if result.status != "success" and config.STOP_REPETITIONS_AFTER_FAILURE:
+    if result.status == "memory-limit" or (
+        result.status != "success" and config.STOP_REPETITIONS_AFTER_FAILURE
+    ):
       break
   return command, results
 
@@ -408,6 +448,7 @@ def main() -> int:
     print(f"Discovered {len(benchmarks)} DOT files.")
     print(f"Configured {len(experiments)} experiments per DOT file.")
     print(f"Measured repetitions: {config.MEASURED_REPETITIONS}")
+    print(f"Memory limit (GiB): {config.MEMORY_LIMIT_GIB}")
     print(f"CSV: {Path(config.OUTPUT_CSV).resolve()}")
     print(f"Logs: {Path(config.LOG_DIRECTORY).resolve()}")
     for benchmark in benchmarks:

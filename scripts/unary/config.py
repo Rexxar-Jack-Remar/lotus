@@ -33,6 +33,9 @@ COMMON_ARGUMENTS = ["--bidirect", "--stats"]
 WARMUP_REPETITIONS = 0
 MEASURED_REPETITIONS = 5
 TIMEOUT_SECONDS = 3600
+# Per-process virtual-address-space limit enforced with RLIMIT_AS on Linux.
+# Use None to disable the limit.
+MEMORY_LIMIT_GIB = 128
 STOP_REPETITIONS_AFTER_FAILURE = False
 
 # Output policy.
