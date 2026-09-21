@@ -4,7 +4,7 @@ add_library(CanaryNisse STATIC
         NissePass.cpp
         PRUE.cpp
         NissePlugin.cpp
-        prof.c
+        Prof.c
 )
 
 target_link_libraries(CanaryNisse

@@ -63,6 +63,6 @@ Notes
 -----
 
 ``CanaryNisse`` is built from ``Edge.cpp``, ``NisseAnalysis.cpp``,
-``NissePass.cpp``, ``PRUE.cpp``, ``NissePlugin.cpp``, and ``prof.c`` as defined
+``NissePass.cpp``, ``PRUE.cpp``, ``NissePlugin.cpp``, and ``Prof.c`` as defined
 in ``lib/Transform/Nisse/CMakeLists.txt``. ``NissePropagation.cpp`` currently
 serves as a standalone utility rather than part of the library target.

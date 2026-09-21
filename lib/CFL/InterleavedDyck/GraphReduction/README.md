@@ -48,7 +48,7 @@ Makefile, `dotfile/exp-2020`, or binaries in the current directory.
 - `CanaryInterleavedDyckGraphReduction` contains the low-level adjacency implementation;
   private fast-list and summary types live under `include/CFL/InterleavedDyck/GraphReduction/Legacy/`.
 - `GraphAux.cpp` performs one-color component construction.
-- `dkMerge.cpp` performs the degree-based merge phase.
+- `DkMerge.cpp` performs the degree-based merge phase.
 - `graph_simp.py` alternates both colors and removes proven-redundant edges.
 - `Legacy/` contains private artifact-era data structures under `include/CFL/InterleavedDyck/GraphReduction/Legacy/`.
   They are maintained for compatibility with the artifact-era reduction pipeline.
