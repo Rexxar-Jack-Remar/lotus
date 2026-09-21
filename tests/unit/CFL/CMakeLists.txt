@@ -20,6 +20,7 @@ lotus_collect_test_sources(cfl_tests
   EndpointQuotientStagingTest.cpp
   SkewedTabulationEngineTest.cpp
   CatIeoceEngineTest.cpp
+  CertCFLEngineTest.cpp
   ClassicalAdaptersTest.cpp)
 
 add_subdirectory(PrimaryComponent)
@@ -99,6 +100,14 @@ if(TARGET lotus-cfl-solve)
             classical_cfl_pocr_format_${classical_backend} PROPERTIES
             PASS_REGULAR_EXPRESSION "\"relation_edges\":8")
     endforeach()
+
+    add_test(NAME classical_cfl_cli_cert_cfl
+        COMMAND $<TARGET_FILE:lotus-cfl-solve>
+            --grammar ${CMAKE_SOURCE_DIR}/tests/regress/CFL/Classical/chain.grammar
+            --graph ${CMAKE_SOURCE_DIR}/tests/regress/CFL/Classical/chain.txt
+            --solver cert-cfl --json-stats)
+    set_tests_properties(classical_cfl_cli_cert_cfl PROPERTIES
+        PASS_REGULAR_EXPRESSION "\"relation_edges\":64")
 
     add_test(NAME classical_cfl_cli_infers_attributes
         COMMAND $<TARGET_FILE:lotus-cfl-solve>

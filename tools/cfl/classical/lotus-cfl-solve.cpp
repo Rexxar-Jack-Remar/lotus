@@ -43,7 +43,7 @@ void usage(std::ostream &stream) {
          "Options:\n"
          "  --solver sparse-set|sparse-bitvector|graspan|sqid|pearl|"
          "skewed|cat|iea|iea-ocr|transitive-closure|pocr|hpocr|focr|"
-         "endpoint-quotient\n"
+         "endpoint-quotient|cert-cfl\n"
          "  --graph-mode plain|matrix|pag-matrix\n"
          "  --direction plain|reverse|bidirectional\n"
          "  --attribute-domain var:i=N,N,...  Variable-specific domain\n"
@@ -412,6 +412,14 @@ int main(int argc, char **argv) {
           << ",\"ieoce_ordered_steps\":" << stats.ieoce_ordered_steps
           << ",\"ieoce_ordinary_fallback\":"
           << (stats.ieoce_ordinary_fallback ? "true" : "false")
+          << ",\"cert_cfl_levels\":" << stats.cert_cfl_levels
+          << ",\"cert_cfl_blocks\":" << stats.cert_cfl_blocks
+          << ",\"cert_cfl_peak_tiles\":" << stats.cert_cfl_peak_tiles
+          << ",\"cert_cfl_updates\":" << stats.cert_cfl_updates
+          << ",\"cert_cfl_promotions\":" << stats.cert_cfl_promotions
+          << ",\"cert_cfl_genuine_promotions\":" << stats.cert_cfl_genuine_promotions
+          << ",\"cert_cfl_sparse_fallback\":"
+          << (stats.cert_cfl_sparse_fallback ? "true" : "false")
           << ",\"endpoint_quotient_cells\":" << stats.endpoint_quotient_cells
           << ",\"endpoint_quotient_facts\":" << stats.endpoint_quotient_facts
           << ",\"endpoint_quotient_seed_facts\":"
@@ -507,6 +515,13 @@ int main(int argc, char **argv) {
           << " ieoce_epochs=" << stats.ieoce_epochs
           << " ieoce_merged_nodes=" << stats.ieoce_merged_nodes
           << " ieoce_meg_edges=" << stats.ieoce_meg_edges
+          << " cert_cfl_levels=" << stats.cert_cfl_levels
+          << " cert_cfl_blocks=" << stats.cert_cfl_blocks
+          << " cert_cfl_peak_tiles=" << stats.cert_cfl_peak_tiles
+          << " cert_cfl_updates=" << stats.cert_cfl_updates
+          << " cert_cfl_promotions=" << stats.cert_cfl_promotions
+          << " cert_cfl_genuine_promotions=" << stats.cert_cfl_genuine_promotions
+          << " cert_cfl_sparse_fallback=" << stats.cert_cfl_sparse_fallback
           << " simplified_nodes=" << simplification_stats.reduced_nodes
           << " scc_nodes_merged=" << simplification_stats.scc_nodes_merged
           << " folded_nodes=" << simplification_stats.folded_nodes

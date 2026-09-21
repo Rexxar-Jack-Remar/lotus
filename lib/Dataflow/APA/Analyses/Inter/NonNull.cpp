@@ -8,9 +8,9 @@
 #include "llvm/IR/IntrinsicInst.h"
 #include "llvm/IR/Module.h"
 
+#include "Dataflow/APA/Analyses/Inter/FlowHelpers.h"
 #include "Dataflow/APA/LLVM/InterProblem.h"
 #include "Dataflow/APA/Solver/Inter/ExpandedSolver.h"
-#include "Dataflow/APA/Analyses/Inter/FlowHelpers.h"
 
 #include <map>
 #include <memory>

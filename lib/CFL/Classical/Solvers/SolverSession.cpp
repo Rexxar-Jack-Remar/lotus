@@ -2,6 +2,7 @@
 
 #include "CFL/Classical/Solvers/Engines/Common/BatchSolverEngine.h"
 #include "CFL/Classical/Solvers/Engines/EndpointQuotient/EndpointQuotientEngine.h"
+#include "CFL/Classical/Solvers/Engines/CERT/CertCFLEngine.h"
 #include "CFL/Classical/Solvers/Engines/PEARL/PearlEngine.h"
 #include "CFL/Classical/Solvers/Engines/POCR/FullyOrderedClosure.h"
 #include "CFL/Classical/Solvers/Engines/POCR/PairedTreeClosure.h"
@@ -282,7 +283,8 @@ std::unique_ptr<Relation> createSolverRelation(SolverBackend backend,
                                                const Grammar &grammar,
                                                std::size_t node_count,
                                                bool simplify_focr_cycles,
-                                               bool factorized_endpoint) {
+                                               bool factorized_endpoint,
+                                               const engines::cert::Options &cert_options) {
   const auto &transitive_symbols = grammar.transitiveSymbols();
   switch (backend) {
   case SolverBackend::SparseSet:
@@ -318,6 +320,9 @@ std::unique_ptr<Relation> createSolverRelation(SolverBackend backend,
   case SolverBackend::EndpointQuotient:
     return std::make_unique<engines::EndpointQuotientEngine>(
         grammar, node_count, factorized_endpoint);
+  case SolverBackend::CertCFL:
+    return std::make_unique<engines::CertCFLEngine>(
+        grammar, node_count, cert_options);
   }
   throw std::invalid_argument("Unknown CFL solver backend");
 }
@@ -354,6 +359,8 @@ const char *solverBackendName(SolverBackend backend) {
     return "focr";
   case SolverBackend::EndpointQuotient:
     return "endpoint-quotient";
+  case SolverBackend::CertCFL:
+    return "cert-cfl";
   }
   return "unknown";
 }
@@ -401,6 +408,9 @@ SolverBackend parseSolverBackend(std::string_view name) {
   if (name == "endpoint-quotient") {
     return SolverBackend::EndpointQuotient;
   }
+  if (name == "cert-cfl") {
+    return SolverBackend::CertCFL;
+  }
   throw std::invalid_argument("Unknown solver: " + std::string(name));
 }
 
@@ -413,7 +423,8 @@ public:
         relation_(createSolverRelation(options.backend, grammar,
                                        graph.vertexCount(),
                                        options.simplify_focr_cycles,
-                                       options.endpoint_quotient_factorized)),
+                                       options.endpoint_quotient_factorized,
+                                       options.cert_cfl)),
         expected_graph_version_(graph.mutationVersion()) {
     for (const GrammarIssue &issue : grammar.validate()) {
       if (issue.severity == GrammarIssueSeverity::Error) {
@@ -460,6 +471,13 @@ public:
     if (backend_ == SolverBackend::EndpointQuotient) {
       eq_engine_ =
           static_cast<engines::EndpointQuotientEngine *>(relation_.get());
+    }
+    if (backend_ == SolverBackend::CertCFL) {
+      if (unidirectional_)
+        throw std::invalid_argument(
+            "CERT-CFL does not implement unidirectional Insert/Follow evaluation");
+      cert_engine_ =
+          static_cast<engines::CertCFLEngine *>(relation_.get());
     }
     if (unidirectional_) {
       candidate_relation_ = createRelation(RelationBackend::SparseBitVectors,
@@ -534,7 +552,8 @@ public:
 
     if (backend_ != SolverBackend::Pearl && backend_ != SolverBackend::Sqid &&
         backend_ != SolverBackend::Skewed && !isBatchSolverBackend(backend_) &&
-        backend_ != SolverBackend::EndpointQuotient) {
+        backend_ != SolverBackend::EndpointQuotient &&
+        backend_ != SolverBackend::CertCFL) {
       for (SymbolId symbol : grammar_.nullableSymbolIds()) {
         for (NodeId node = nullable_seeded_nodes_; node < graph_.vertexCount();
              ++node) {
@@ -602,6 +621,24 @@ public:
       stats.ieoce_meg_edges_removed = batch.ieoce_meg_edges_removed;
       stats.ieoce_ordered_steps = batch.ieoce_ordered_steps;
       stats.ieoce_ordinary_fallback = batch.ieoce_ordinary_fallback;
+    } else if (backend_ == SolverBackend::CertCFL) {
+      const auto cert = cert_engine_->solve();
+      stats.classical_iterations += cert.core.joins + cert.core.sparse_joins;
+      stats.processed_work_items +=
+          cert.core.queue_pops + cert.core.sparse_work_items;
+      stats.duplicate_edges += cert.duplicate_inputs +
+                               cert.core.sparse_duplicate_attempts;
+      stats.added_edges += cert.added_facts;
+      stats.peak_worklist_size =
+          std::max(stats.peak_worklist_size, cert.core.peak_queue);
+      stats.cert_cfl_levels = cert.core.levels;
+      stats.cert_cfl_blocks = cert.core.final_blocks;
+      stats.cert_cfl_peak_tiles = cert.core.peak_tiles;
+      stats.cert_cfl_updates = cert.core.updates;
+      stats.cert_cfl_promotions = cert.core.overlap_promotions;
+      stats.cert_cfl_genuine_promotions =
+          cert.core.genuine_cardinality_promotions;
+      stats.cert_cfl_sparse_fallback = cert.core.used_sparse_fallback;
     } else if (backend_ == SolverBackend::EndpointQuotient) {
       const engines::EndpointQuotientStatistics eq = eq_engine_->solve();
       stats.classical_iterations += eq.binary_joins;
@@ -691,6 +728,9 @@ public:
       if (eq_engine_) {
         stats.count_symbol_edges =
             eq_engine_->countOffDiagonalUnion(std::move(symbols));
+      } else if (cert_engine_) {
+        stats.count_symbol_edges =
+            cert_engine_->countOffDiagonalUnion(std::move(symbols));
       } else {
         // Deduplicate one source's union at a time instead of retaining every
         // counted pair or collecting whole relations into temporary vectors.
@@ -1239,6 +1279,10 @@ private:
   }
 
   bool insertInputFact(SymbolId symbol, NodeId source, NodeId target) {
+    if (cert_engine_) {
+      // Buffered input: do not also schedule the classical worklist.
+      return cert_engine_->add(symbol, source, target);
+    }
     if (isBatchSolverBackend(backend_)) {
       if (!batch_engine_->add(symbol, source, target)) {
         return false;
@@ -1356,6 +1400,7 @@ private:
   engines::BatchSolverEngine *batch_engine_ = nullptr;
   engines::SkewedTabulationEngine *skewed_engine_ = nullptr;
   engines::EndpointQuotientEngine *eq_engine_ = nullptr;
+  engines::CertCFLEngine *cert_engine_ = nullptr;
   std::size_t input_edges_ = 0;
   std::size_t current_peak_worklist_size_ = 0;
   std::size_t pending_derived_edges_ = 0;
@@ -1369,7 +1414,7 @@ private:
 SolverSession::SolverSession(LabeledGraph &graph, const Grammar &grammar,
                              SolverBackend backend)
     : SolverSession(graph, grammar,
-                    SolverOptions{backend, false, false, {}, false}) {}
+                    SolverOptions{backend, false, false, {}, false, {}}) {}
 
 SolverSession::SolverSession(LabeledGraph &graph, const Grammar &grammar,
                              const SolverOptions &options)

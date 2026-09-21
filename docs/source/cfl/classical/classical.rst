@@ -23,6 +23,7 @@ layout:
    closure engine. ``Engines/PEARL/``, ``Engines/POCR/``, ``Engines/SQID/``,
    ``Engines/STG/``, ``Engines/Skewed/``, ``Engines/EndpointQuotient/``,
    ``Engines/CAT/``, and ``Engines/IEOCE/`` contain the paper algorithms;
+   ``Engines/CERT/`` is the Lotus-native cardinality-certified engine.
    ``Engines/POCR/`` also contains the client grammars.
 
 ``Solvers/Preprocessing/``
@@ -163,6 +164,15 @@ Solver backends
    for that node appear after the next solve.
    Alias-client grammar extensions rebuild from the encoded input graph;
    they do not expand and reinsert the previous quotient closure as axioms.
+
+``CertCFL``
+   Select with ``--solver cert-cfl``. Cardinality-certified exact all-symbol
+   solving: universal-degree certificates and a finite threshold domain
+   promote dense blocks to exactness, with symbolic nullable identity.
+   ``observed`` must remain unset and ``unidirectional`` is rejected. The
+   kernel is available directly for selected-symbol observation contracts.
+   See :doc:`/cfl/classical/cert_cfl` for the promotion rules, resource
+   limits, and the completed-snapshot adapter contract.
 
 All backends return exactly the same grammar-relative relation. Tests compare
 their complete triples, not only start-symbol answers, against an independent

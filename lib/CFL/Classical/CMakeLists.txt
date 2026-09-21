@@ -19,6 +19,8 @@ add_library(CanaryClassicalCFL STATIC
     Solvers/Engines/EndpointQuotient/EndpointQuotientEngine.cpp
     Solvers/Engines/EndpointQuotient/EndpointQuotientStaging.cpp
     Solvers/Engines/SQID/SqidEngine.cpp
+    Solvers/Engines/CERT/CertCFL.cpp
+    Solvers/Engines/CERT/CertCFLEngine.cpp
     Solvers/Engines/Skewed/SkewedTabulation.cpp
     Solvers/Engines/Skewed/SkewedTabulationEngine.cpp
     Solvers/Engines/STG/StagedSolver.cpp

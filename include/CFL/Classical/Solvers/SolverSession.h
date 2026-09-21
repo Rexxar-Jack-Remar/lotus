@@ -1,6 +1,7 @@
 #pragma once
 
 #include "CFL/Classical/Core/Grammar.h"
+#include "CFL/Classical/Solvers/Engines/CERT/CertCFL.h"
 #include "CFL/Classical/Core/Graph.h"
 
 #include <cstddef>
@@ -148,6 +149,14 @@ struct ReachabilityStats {
   std::vector<EndpointQuotientRuleProfile> endpoint_quotient_per_rule;
   std::vector<EndpointQuotientSccProfile> endpoint_quotient_per_scc;
 
+  // CERT-CFL counters. Snapshot sizes persist on no-op solves.
+  std::size_t cert_cfl_levels = 0;
+  std::size_t cert_cfl_blocks = 0;
+  std::size_t cert_cfl_peak_tiles = 0;
+  std::uint64_t cert_cfl_updates = 0;
+  std::uint64_t cert_cfl_promotions = 0;
+  std::uint64_t cert_cfl_genuine_promotions = 0;
+  bool cert_cfl_sparse_fallback = false;
   // Aggregates report how many solve calls they combine.
   std::size_t solver_rounds = 1;
 };
@@ -182,6 +191,8 @@ enum class SolverBackend {
   FullyOrdered,
   /// Grammar-indexed endpoint-quotient (GEQ) compressed exact solving.
   EndpointQuotient,
+  /// Cardinality-certified, exact all-symbol CFL reachability.
+  CertCFL,
 };
 
 struct SolverOptions {
@@ -195,6 +206,8 @@ struct SolverOptions {
   std::vector<std::pair<std::string, std::string>> pearl_inverse_relations;
   /// Preserve production-local endpoint factors in EndpointQuotient.
   bool endpoint_quotient_factorized = false;
+  /// observed must be nullopt for the complete Relation contract.
+  engines::cert::Options cert_cfl{};
 };
 
 const char *solverBackendName(SolverBackend backend);

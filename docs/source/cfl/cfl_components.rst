@@ -10,9 +10,9 @@ Grammar-driven CFL reachability utilities and solver backends
 
 **Location**: ``include/CFL/Classical/``, ``lib/CFL/Classical/``. Both trees
 use ``Core/``, ``Solvers/Engines/`` (including ``PEARL/``, ``POCR/``,
-``SQID/``, ``STG/``, ``Skewed/``, ``EndpointQuotient/``, ``CAT/``, and
-``IEOCE/``), ``Solvers/Preprocessing/``, ``Clients/Alias/``, and
-``Clients/ValueFlow/``.
+``SQID/``, ``STG/``, ``Skewed/``, ``EndpointQuotient/``, ``CAT/``,
+``IEOCE/``, and ``CERT/``), ``Solvers/Preprocessing/``, ``Clients/Alias/``,
+and ``Clients/ValueFlow/``.
 The two client implementations consistently use ``AliasClient.*`` and
 ``ValueFlowClient.*`` filenames.
 
@@ -22,7 +22,8 @@ The two client implementations consistently use ``AliasClient.*`` and
 * Labeled graph construction for text, DOT, PAG, and PEG-style encodings
 * Sparse-set, sparse-bitvector, Graspan epoch/delta, transitive-specialized,
   POCR/hierarchical-POCR, and fully ordered edge-critical-graph backends
-* PEARL multi-derivation, Sqid relation chaining, and Stg staged solving
+* PEARL multi-derivation, Sqid relation chaining, Stg staged solving, and
+  CERT-CFL cardinality-certified solving
 * Native POCR grammar/graph input, unidirectional summarization, client graph
   simplification, and RSM-guided foldability checking
 * Incremental solver sessions for dynamically discovered terminal edges
@@ -35,6 +36,7 @@ See :doc:`/cfl/classical/pearl`, :doc:`/cfl/classical/stg`, and
 :doc:`/cfl/classical/sqid` for paper references, key ideas, algorithm
 walkthroughs, and exact source mappings.
 See :doc:`/cfl/classical/cat_ieoce` for the CAT and IEOCE engines.
+See :doc:`/cfl/classical/cert_cfl` for the CERT-CFL engine.
 
 Dynamic Bidirected Dyck Reachability
 ------------------------------------

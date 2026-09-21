@@ -5,9 +5,9 @@
 #include "llvm/IR/GlobalVariable.h"
 #include "llvm/IR/Instructions.h"
 
+#include "Dataflow/APA/Analyses/Inter/FlowHelpers.h"
 #include "Dataflow/APA/LLVM/InterProblem.h"
 #include "Dataflow/APA/Solver/Inter/ExpandedSolver.h"
-#include "Dataflow/APA/Analyses/Inter/FlowHelpers.h"
 
 #include <memory>
 #include <unordered_map>
