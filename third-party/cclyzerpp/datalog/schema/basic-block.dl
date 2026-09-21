@@ -1,0 +1,76 @@
+//------------------------------------
+// Basic Blocks (IDB) Entities
+//------------------------------------
+
+.type BasicBlock <: symbol
+.decl block(bb:BasicBlock)
+
+.decl block_predecessor(v0:symbol, v1:symbol)
+block_predecessors(bb0, bb1) :-
+  block_predecessor(e0, e1),
+  variable_is_label(e0),
+  variable_is_label(e1),
+  block_of_label(bb0, e0),
+  block_of_label(bb1, e1).
+
+.decl instr_bb_entry(v0:symbol, v1:symbol)
+instr_block(e0, bb) :-
+  instr_bb_entry(e0, e1),
+  instr(e0),
+  variable_is_label(e1),
+  block_of_label(bb, e1).
+
+// Every instr must be inside a single basic block
+.decl instr_block(instr:Instruction, bb:BasicBlock)
+
+schema_invalid_instr(Instr, __FILE__, __LINE__) :-
+   schema_sanity(),
+   instr(Instr),
+   !instr_block(Instr, _).
+
+// Basic block predicates
+.decl block_of_label(bb:BasicBlock, label:Variable)
+.decl block_predecessors(bb:BasicBlock, bbpred:BasicBlock)
+.decl block_first_instr(bb:BasicBlock, instr:Instruction)
+.decl block_last_instr(bb:BasicBlock, instr:Instruction)
+
+block(BB) :- block_of_label(BB, _).
+block_of_label(cat("block:", Label), Label) :-
+   variable_is_label(Label).
+
+block_first_instr(BB, First) :-
+   instr_block(First, BB),
+   !instr_successor(_, First).
+
+block_first_instr(BB2, First) :-
+   instr_successor(Last, First),
+   instr_block(Last, BB1),
+   instr_block(First, BB2),
+   BB1 != BB2.
+
+block_last_instr(BB1, Last) :-
+   instr_successor(Last, First),
+   instr_block(Last, BB1),
+   instr_block(First, BB2),
+   BB1 != BB2.
+
+block_last_instr(BB, Last) :-
+   instr_block(Last, BB),
+   !instr_successor(Last, _).
+
+
+//------------------------------------------------------------------------------
+// [Constraints]
+//
+// Two consecutive instrs must either belong to the same basic
+// block, or the first of the two should be classified as a terminator
+// instr.
+//------------------------------------------------------------------------------
+
+schema_invalid_instr(Instr, __FILE__, __LINE__) :-
+   schema_sanity(),
+   instr_successor(Instr, NextInstr),
+   instr_block(Instr, BB1),
+   instr_block(NextInstr, BB2),
+   !terminator_instr(Instr),
+   BB1 != BB2.

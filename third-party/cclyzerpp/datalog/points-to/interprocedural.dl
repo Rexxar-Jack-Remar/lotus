@@ -1,0 +1,241 @@
+//------------------------------------------------------------------------------
+//  [Interprocedural Logic]
+//------------------------------------------------------------------------------
+
+.decl func_by_location(?alloc: GlobalAllocation, ?callee: FunctionDecl)
+func_by_location(?alloc, ?callee) :-
+  global_allocation_by_func(?callee, ?alloc).
+
+.comp Callgraph {
+
+  //----------------------------------------------------------------------------
+  // "Input"/declared rules
+  //
+  // https://souffle-lang.github.io/components#input-rules
+  //----------------------------------------------------------------------------
+
+  .decl called_at_exit(func: FunctionDecl) inline
+  .decl func_pointer_operand_points_to(?aCtx: Context, ?alloc: Allocation, ?ctx: Context, ?operand: Operand) inline
+
+  .decl merge(?newCtx: Context, ?callerInstr: CallBase, ?callerCtx: Context)
+
+  //----------------------------------------------------------------------------
+  // "Output"/defined rules
+  //
+  // By convention, rules that begin with an underscore are internal
+  // implementation details, and should not be accessed outside the component.
+  //----------------------------------------------------------------------------
+
+  // Reachability
+
+  .decl reachable_context(?ctx: Context, ?func: FunctionDecl)
+  .decl reachable_func(func: FunctionDecl)
+  .decl reachable_instr(instr: Instruction)
+
+  reachable_context(?calleeCtx, ?callee) :-
+     callgraph_edge(?calleeCtx, ?callee, _, _).
+
+  reachable_func(?func) :-
+    reachable_context(_, ?func).
+
+  reachable_instr(Instr) :-
+    reachable_func(Func),
+    instr_func(Instr, Func).
+
+  // TODO: transition from startup to main?
+
+  reachable_context(?ctx, ?func) :-
+    ! insensitive(),
+    ( main_func(?func),
+      main_context(?ctx)
+    ; called_at_startup(?func),
+      startup_context(?ctx)
+    ; called_at_exit(?func),
+      exit_context(?ctx)
+    ).
+
+  reachable_context(?ctx, ?func) :-
+    insensitive(),
+    empty_context(?ctx),
+    ( main_func(?func)
+    ; called_at_startup(?func)
+    ; called_at_exit(?func)
+    ).
+
+  .decl reachable_store(?ctx: Context, ?toAddress: Operand, ?value: Operand)
+
+  reachable_store(?ctx, ?toAddress, ?value) :-
+    reachable_context(?ctx, ?instrFunc),
+    instr_func(?instr, ?instrFunc),
+    store_instr_value(?instr, ?value),
+    store_instr_address(?instr, ?toAddress).
+
+  .decl reachable_load(?ctx: Context, ?toVar: Variable, ?fromAdress: Operand)
+
+  reachable_load(?ctx, ?toVar, ?fromAddress) :-
+    reachable_context(?ctx, ?instrFunc),
+    instr_func(?instr, ?instrFunc),
+    load_instr_address(?instr, ?fromAddress),
+    instr_assigns_to(?instr, ?toVar).
+
+  // Callgraph
+
+  .decl callgraph_edge(?calleeCtx: Context, ?callee: FunctionDecl, ?callerCtx: Context, ?callerInstr: CallBase)
+
+  // Direct func calls
+
+  .decl _callgraph_edge_interim_direct_call(?callee: FunctionDecl, ?callerCtx: Context, ?callerInstr: CallBase)
+
+  _callgraph_edge_interim_direct_call(?callee, ?callerCtx, ?callerInstr)
+   :-
+     direct_call_instr(?callerInstr),
+     call_instr_fn_target(?callerInstr, ?callee),
+     instr_func(?callerInstr, ?instrFunc),
+     reachable_context(?callerCtx, ?instrFunc).
+
+  callgraph_edge(?calleeCtx, ?callee, ?callerCtx, ?callerInstr)
+   , context(?calleeCtx)
+   :-
+     _callgraph_edge_interim_direct_call(?callee, ?callerCtx, ?callerInstr),
+     merge(?calleeCtx, ?callerInstr, ?callerCtx).
+
+  .decl _callgraph_edge_interim_direct_invoke(?callee: FunctionDecl, ?callerCtx: Context, ?callerInstr: CallBase)
+
+  _callgraph_edge_interim_direct_invoke(?callee, ?callerCtx, ?callerInstr)
+   :-
+     direct_invoke_instr(?callerInstr),
+     invoke_instr_fn_target(?callerInstr, ?callee),
+     instr_func(?callerInstr, ?instrFunc),
+     reachable_context(?callerCtx, ?instrFunc).
+
+  callgraph_edge(?calleeCtx, ?callee, ?callerCtx, ?callerInstr)
+   , context(?calleeCtx)
+   :-
+     _callgraph_edge_interim_direct_invoke(?callee, ?callerCtx, ?callerInstr),
+     merge(?calleeCtx, ?callerInstr, ?callerCtx).
+
+
+  // Indirect func calls (via func pointers)
+
+  .decl _callgraph_edge_interim_indirect_call(?callee: FunctionDecl, ?callerCtx: Context, ?aCtx: Context, ?callerInstr: CallBase)
+
+  _callgraph_edge_interim_indirect_call(?callee, ?callerCtx, ?aCtx, ?callerInstr)
+   :-
+     indirect_call_instr(?callerInstr),
+     call_instr_func_operand(?callerInstr, ?funcOp),
+     func_pointer_operand_points_to(?aCtx, ?funcLoc, ?callerCtx, ?funcOp),
+     func_by_location(?funcLoc, ?callee),
+     func_ty(?callee, ?actualType),
+     operand_has_type(?funcOp, ?funcOpType),
+     pointer_type_has_component(?funcOpType, ?declaredType),
+     type_compatible(?actualType, ?declaredType).
+
+  callgraph_edge(?calleeCtx, ?callee, ?callerCtx, ?callerInstr)
+   , context(?calleeCtx)
+   :-
+     _callgraph_edge_interim_indirect_call(?callee, ?callerCtx, _, ?callerInstr),
+     merge(?calleeCtx, ?callerInstr, ?callerCtx).
+
+  .decl _callgraph_edge_interim_indirect_invoke(?callee: FunctionDecl, ?callerCtx: Context, ?aCtx: Context, ?callerInstr: CallBase)
+
+  // TODO(lb): Perhaps don't store the allocation context? Seems unused by
+  // callgraph_edge.
+  _callgraph_edge_interim_indirect_invoke(?callee, ?callerCtx, ?aCtx, ?callerInstr)
+   :-
+     invoke_instr(?callerInstr),
+     invoke_instr_func_operand(?callerInstr, ?funcOp),
+     func_pointer_operand_points_to(?aCtx, ?funcLoc, ?callerCtx, ?funcOp),
+     func_by_location(?funcLoc, ?callee),
+     func_ty(?callee, ?actualType),
+     operand_has_type(?funcOp, ?funcOpType),
+     pointer_type_has_component(?funcOpType, ?declaredType),
+     type_compatible(?actualType, ?declaredType).
+
+  callgraph_edge(?calleeCtx, ?callee, ?callerCtx, ?callerInstr)
+   , context(?calleeCtx)
+   :-
+     _callgraph_edge_interim_indirect_invoke(?callee, ?callerCtx, _, ?callerInstr),
+     merge(?calleeCtx, ?callerInstr, ?callerCtx).
+}
+
+//------------------------------------------------------------------------------
+//  Interprocedural Assignments
+//------------------------------------------------------------------------------
+
+// Actual argument of func call
+
+.decl actual_arg(?instr: CallBase, ?index: ArgumentIndex, ?argument: Operand)
+
+actual_arg(?invokeInstr, ?index, ?argument) :-
+  invoke_instr_arg(?invokeInstr, ?index, ?argument).
+
+actual_arg(?callInstr, ?index, ?argument) :-
+  call_instr_arg(?callInstr, ?index, ?argument).
+
+.decl func_returns_value(?retValue: Operand, ?inFunction: Function)
+
+func_returns_value(?retValue, ?inFunction) :-
+  ret_instr_operand(?retInsn, ?retValue),
+  instr_func(?retInsn, ?inFunction).
+
+.comp InterpAssignment {
+
+  //----------------------------------------------------------------------------
+  // "Input"/declared rules
+  //
+  // https://souffle-lang.github.io/components#input-rules
+  //----------------------------------------------------------------------------
+
+  .decl callgraph_edge(?calleeCtx: Context, ?callee: FunctionDecl, ?callerCtx: Context, ?callerInstr: CallBase) inline
+
+  //----------------------------------------------------------------------------
+  // "Output"/defined rules
+  //
+  // By convention, rules that begin with an underscore are internal
+  // implementation details, and should not be accessed outside the component.
+  //----------------------------------------------------------------------------
+
+  // Interprocedural assignment due to func call
+  .decl interp_assignment(?toCtx: Context, ?toVar: Variable, ?fromCtx: Context, ?fromValue: Operand)
+
+  // Actual argument to formal parameter `assignment`
+  interp_assignment(?calleeCtx, ?param, ?callerCtx, ?argument) :-
+    callgraph_edge(?calleeCtx, ?callee, ?callerCtx, ?callerInstr),
+    func_param(?callee, ?index, ?param),
+    actual_arg(?callerInstr, ?index, ?argument).
+
+  // Returned value to target variable `assignment`
+
+  interp_assignment(?callerCtx, ?toVar, ?calleeCtx, ?retValue) :-
+    callgraph_edge(?calleeCtx, ?callee, ?callerCtx, ?callerInstr),
+    func_returns_value(?retValue, ?callee),
+    instr_assigns_to(?callerInstr, ?toVar).
+
+  //------------------------------------------------------------------------------
+  //  Variadic Functions
+  //------------------------------------------------------------------------------
+
+  // `va_arg` instr
+  //
+  // TODO: model target-specific value `va_list` and calls to related
+  // LLVM intrinsic funcs. Right now this may produce nothing
+
+  .decl _va_arg_target(?toVar: Variable, ?argType: Type, ?callee: Function)
+
+  _va_arg_target(?toVar, ?argType, ?callee) :-
+    va_arg_instr(?vAArgInstr),
+    va_arg_instr_type(?vAArgInstr, ?argType),
+    instr_assigns_to(?vAArgInstr, ?toVar),
+    instr_func(?vAArgInstr, ?callee).
+
+  interp_assignment(?calleeCtx, ?toVar, ?callerCtx, ?argument) :-
+    _va_arg_target(?toVar, ?argType, ?callee),
+    func_ty(?callee, ?type),
+    func_type_has_varargs(?type),
+    func_type_nparams(?type, ?n),
+    callgraph_edge(?calleeCtx, ?callee, ?callerCtx, ?callerInstr),
+    actual_arg(?callerInstr, ?index, ?argument),
+    ?index >= ?n,
+    operand_has_type(?argument, ?argType).
+
+}

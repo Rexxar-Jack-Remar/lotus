@@ -12,8 +12,12 @@ option(LOTUS_ENABLE_SEAHORN "Enable SeaHorn" OFF)
 option(LOTUS_ENABLE_SMACK
        "Enable SMACK LLVM-to-Boogie verifier frontend" OFF)
 option(LOTUS_ENABLE_SVF "Enable SVF" OFF)
-option(LOTUS_USE_CCLYZER
+option(LOTUS_ENABLE_CCLYZER
        "Enable optional cclyzer++ alias analysis backend" OFF)
+if(DEFINED LOTUS_USE_CCLYZER)
+  set(LOTUS_ENABLE_CCLYZER ${LOTUS_USE_CCLYZER} CACHE BOOL
+      "Enable optional cclyzer++ alias analysis backend" FORCE)
+endif()
 
 # Optional in-tree components
 option(LOTUS_ENABLE_TYPE_QUALIFIER
@@ -89,7 +93,7 @@ function(lotus_print_build_summary)
   _lotus_summary_bool("Seal/Popeye" LOTUS_ENABLE_SEAL)
   _lotus_summary_bool("PDAAAL" LOTUS_ENABLE_PDAAAL)
   _lotus_summary_bool("SVF" LOTUS_ENABLE_SVF)
-  _lotus_summary_bool("Cclyzer++" LOTUS_USE_CCLYZER)
+  _lotus_summary_bool("Cclyzer++" LOTUS_ENABLE_CCLYZER)
   message(STATUS "  Advanced toggles:")
   _lotus_summary_bool("TypeQualifier" LOTUS_ENABLE_TYPE_QUALIFIER)
   _lotus_summary_bool("FPsolve" LOTUS_ENABLE_FPSOLVE)

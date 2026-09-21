@@ -1,0 +1,74 @@
+// http://llvm.org/docs/LangRef.html#phi-instr
+// keywords: index; instr
+
+.type PhiInstruction <: symbol
+.decl phi_instr(instr:PhiInstruction)
+
+instr(v) :- phi_instr(v).
+
+.decl phi_instr_type(instr:PhiInstruction, type:Type)
+.decl phi_instr_npairs(instr:PhiInstruction, total:number)
+.decl phi_instr_pair(instr:PhiInstruction, index:number, value:Operand, label:Variable)
+
+.decl phi_instr_pair_label(v0:symbol, v1:number, v2:symbol)
+.decl phi_instr_pair_value(v0:symbol, v1:number, v2:symbol)
+phi_instr_pair(v0, v1, v2, v3) :-
+   phi_instr_pair_value(v0, v1, v2),
+   phi_instr(v0),
+   operand(v2),
+   phi_instr_pair_label(v0, v1, v3),
+   variable(v3).
+
+//------------------------------------------------------------------------------
+// [Constraints]
+//
+// The ‘phi‘ instr takes a list of pairs as arguments,
+// with one pair for each predecessor basic block of the current block.
+//   (i)  Only values of first class type may be used as the value arguments
+//        to the PHI node.
+//   (ii) Only labels may be used as the label arguments.
+//------------------------------------------------------------------------------
+
+schema_invalid_instr(Instr, __FILE__, __LINE__) :-
+   schema_sanity(),
+   phi_instr(Instr),
+   !phi_instr_npairs(Instr, _).
+
+schema_invalid_instr(Instr, __FILE__, __LINE__) :-
+   schema_sanity(),
+   phi_instr(Instr),
+   phi_instr_type(Instr, Type),
+   !instr_returns_type(Instr, Type).
+
+schema_invalid_instr(Instr, __FILE__, __LINE__) :-
+   schema_sanity(),
+   phi_instr(Instr),
+   phi_instr_pair(Instr, _, Value, Label),
+   operand(Value),
+   !variable_is_label(Label).
+
+schema_invalid_instr(Instr, __FILE__, __LINE__) :-
+   schema_sanity(),
+   phi_instr(Instr),
+   phi_instr_pair(Instr, _, Value, Label),
+   variable(Label),
+   !operand_is_firstclass(Value).
+
+schema_invalid_instr(Instr, __FILE__, __LINE__) :-
+   schema_sanity(),
+   phi_instr_type(Instr, Type),
+   phi_instr_pair(Instr, _, Value, Label),
+   operand(Value),
+   variable(Label),
+   !operand_has_type(Value, Type).
+
+schema_invalid_instr(Instr, __FILE__, __LINE__) :-
+   schema_sanity(),
+   phi_instr_pair(Instr, Index, _, _),
+   Index < 0.
+
+schema_invalid_instr(Instr, __FILE__, __LINE__) :-
+   schema_sanity(),
+   phi_instr_npairs(Instr, Total),
+   phi_instr_pair(Instr, Index, _, _),
+   Index >= Total.

@@ -1,0 +1,142 @@
+// http://llvm.org/docs/LangRef.html#call-instr
+// keywords: instr
+
+.type CallInstruction <: symbol
+.decl call_instr(instr:CallInstruction)
+
+instr(v) :- call_instr(v).
+
+// Function operand: can be either a constant or a variable
+.decl call_instr_func_operand(instr:CallInstruction, op:Operand)
+
+// Resolved func of call instr. Initially empty.
+.decl call_instr_fn_target(instr:CallInstruction, func:FunctionDecl)
+
+// Eligible for tail call optimizations
+.decl call_instr_tail_opt(instr:CallInstruction)
+
+
+// If none is specified, the call defaults to using C
+// calling conventions.
+.decl call_instr_calling_conv(instr:CallInstruction, cc:CallingConvention)
+calling_convention(cc) :- call_instr_calling_conv(_, cc).
+
+.decl call_instr_arg(instr:CallInstruction, i:ArgumentIndex, arg:Operand)
+
+//---------------------------------------------------------------
+// [Direct and Indirect Call Instructions]
+//
+// Call-instrs are divided into direct calls
+// that provide a func name, and indirect calls
+// through a func pointer variable.
+//---------------------------------------------------------------
+
+.decl direct_call_instr(instr:CallInstruction)
+.decl indirect_call_instr(instr:CallInstruction)
+.decl asm_call_instr(instr:CallInstruction)
+
+direct_call_instr(Instr) :-
+   call_instr_func_operand(Instr, Constant),
+   constant(Constant), !inline_asm(Constant).
+
+indirect_call_instr(Instr) :-
+   call_instr_func_operand(Instr, Variable),
+   variable(Variable).
+
+asm_call_instr(Instr) :-
+   call_instr_func_operand(Instr, Constant),
+   inline_asm(Constant).
+
+//-----------------------------
+// Signature (func type)
+//-----------------------------
+
+.decl call_instr_fn_type(instr:CallInstruction, type:Type)
+.decl call_instr_return_type(instr:CallInstruction, type:Type)
+
+call_instr_fn_type(Instr, FnType) :-
+   call_instr_func_operand(Instr, FnOp),
+   operand_has_type(FnOp, PtrType),
+   pointer_type_has_component(PtrType, FnType),
+   func_type(FnType).
+
+call_instr_return_type(Instr, Type) :-
+   call_instr_fn_type(Instr, FnType),
+   func_type_return(FnType, Type).
+
+
+//------------------------------------------------------------------------------
+// [Constraints]
+//
+//  (1) The calling convention of the call must match the
+//      calling convention of the target func.
+//  (2) The type of the call instr is also the type of
+//      the return value. Functions that return no value are
+//      marked void.
+//  (3) The func type shall be the signature of the pointer
+//      to func value being invoked. The argument types must
+//      match the types implied by this signature.
+//  (4) All arguments must be of first class type.
+//------------------------------------------------------------------------------
+
+schema_invalid_instr(Instr, __FILE__, __LINE__) :-
+   schema_sanity(),
+   call_instr(Instr),
+   !call_instr_func_operand(Instr, _).
+
+schema_invalid_instr(Instr, __FILE__, __LINE__) :-
+   schema_sanity(),
+   call_instr(Instr),
+   !call_instr_fn_type(Instr, _).
+
+// cc compatibility
+//
+// TODO: this should be used to limit imprecision instead, and not be
+// a constraint
+//
+// schema_invalid_instr(Instr, __FILE__, __LINE__) :-
+//    schema_sanity(),
+//    call_instr_fn_target(Instr, Func),
+//    call_instr_calling_conv(Instr, CConv),
+//    !func_calling_conv(Func, CConv). // c2
+
+// Signature conformance
+schema_invalid_instr(Instr, __FILE__, __LINE__) :-
+   schema_sanity(),
+   call_instr_arg(Instr, Index, _),
+   call_instr_fn_type(Instr, FnType),
+   !func_type_param(FnType, Index, _),
+   !func_type_has_varargs(FnType).
+
+schema_invalid_instr(Instr, __FILE__, __LINE__) :-
+   schema_sanity(),
+   call_instr(Instr),
+   !call_instr_arg(Instr, Index, _),
+   call_instr_fn_type(Instr, FnType),
+   func_type_param(FnType, Index, _).
+
+schema_invalid_instr(Instr, __FILE__, __LINE__) :-
+   schema_sanity(),
+   call_instr_arg(Instr, Index, Arg),
+   call_instr_fn_type(Instr, FnType),
+   func_type_param(FnType, Index, ParamType),
+   !operand_has_type(Arg, ParamType). // c4
+
+
+schema_invalid_instr(Instr, __FILE__, __LINE__) :-
+   schema_sanity(),
+   call_instr_return_type(Instr, Type),
+   !void_type(Type),
+   !instr_returns_type(Instr, Type). // c3
+
+schema_invalid_instr(Instr, __FILE__, __LINE__) :-
+   schema_sanity(),
+   call_instr_return_type(Instr, Type),
+   void_type(Type),
+   instr_returns_type(Instr, _). // c3 vice versa
+
+// only first class arguments allowed
+schema_invalid_instr(Instr, __FILE__, __LINE__) :-
+   schema_sanity(),
+   call_instr_arg(Instr, _, Arg),
+   !operand_is_firstclass(Arg). // c5

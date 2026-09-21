@@ -11,6 +11,7 @@
  */
 
 #include "Alias/DemandDriven/DDA/FlowDDA.h"
+#include "Alias/InclusionBased/CclyzerAA/CclyzerAA.h"
 #include "Alias/InclusionBased/GPG/Analysis.h"
 #include "Alias/InclusionBased/SparrowAA/AndersenAA.h"
 #include "Alias/InclusionBased/TPA/PointerAnalysis/Analysis/SemiSparsePointerAnalysis.h"
@@ -144,6 +145,8 @@ AliasResult AliasAnalysisWrapper::queryBackend(const Value *v1,
   if (_underapprox_aa)
     return _underapprox_aa->mustAlias(v1, v2) ? AliasResult::MustAlias
                                               : AliasResult::NoAlias;
+  if (_cclyzer_aa && _cclyzer_aa->isInitialized())
+    return _cclyzer_aa->alias(mkLoc(v1s), mkLoc(v2s));
   if (_cflanders_result)
     return _cflanders_result->query(mkLoc(v1), mkLoc(v2));
   if (_cflsteens_result)

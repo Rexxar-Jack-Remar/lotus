@@ -60,7 +60,7 @@ Options use a consistent ``LOTUS_*`` naming scheme.
 * ``-DLOTUS_ENABLE_SMT_STABILIZER=ON``: Build the SMTStabilizer SMT-LIB
   normalization library and tool (needs GMP, GMPXX, and MPFR)
 * ``-DLOTUS_ENABLE_DYNAA=ON``: Build dynamic alias-analysis tools
-* ``-DLOTUS_USE_CCLYZER=ON``: Enable optional cclyzer++ alias analysis backend
+* ``-DLOTUS_ENABLE_CCLYZER=ON``: Enable optional cclyzer++ alias analysis backend
 * ``-DLOTUS_ENABLE_TYPE_QUALIFIER=ON``: Enable the TypeQualifier uninitialized-data checker
 * ``-DLOTUS_ENABLE_FPSOLVE=ON``: Build vendored FPsolve fixed-point solver
 * ``-DLOTUS_ENABLE_WALI_OPENNWA=ON``: Build the vendored WALi/OpenNWA library

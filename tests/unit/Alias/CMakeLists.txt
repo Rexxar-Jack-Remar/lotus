@@ -8,6 +8,7 @@ add_subdirectory(InclusionBased/FlowSensitive)
 add_subdirectory(InclusionBased/LotusAA)
 add_subdirectory(InclusionBased/SparrowAA)
 add_subdirectory(InclusionBased/TPA)
+add_subdirectory(InclusionBased/CclyzerAA)
 add_subdirectory(UnificationBased/DyckAA)
 add_subdirectory(UnificationBased/SeaDsa)
 add_subdirectory(Specialized/AllocAA)
@@ -36,6 +37,7 @@ set(LOTUS_ALIAS_TEST_LIBS
     CanaryUnderApproxAA
     CanaryDyckAA
     SeaDsaAnalysis
+    LotusCclyzerAA
     ${Z3_LIBRARIES})
 if(LOTUS_ENABLE_TYPE_QUALIFIER)
   list(APPEND LOTUS_ALIAS_TEST_LIBS TypeQualifier)

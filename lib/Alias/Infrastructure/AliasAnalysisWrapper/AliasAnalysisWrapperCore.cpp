@@ -10,6 +10,8 @@
  */
 
 #include "Alias/DemandDriven/DDA/FlowDDA.h"
+#include "Alias/InclusionBased/CclyzerAA/CclyzerAA.h"
+#include "Alias/InclusionBased/CclyzerAA/CclyzerAA.h"
 #include "Alias/InclusionBased/GPG/Analysis.h"
 #include "Alias/InclusionBased/SparrowAA/AndersenAA.h"
 #include "Alias/InclusionBased/TPA/Context/ContextPolicy.h"
@@ -288,6 +290,37 @@ void AliasAnalysisWrapper::initialize() {
         "CFLSteens");
     break;
 
+  case AAConfig::Implementation::CclyzerAA:
+    _initialized = initAA(
+        [this] {
+          lotus::cclyzer::CclyzerOptions opts;
+          if (_config.ctxSens == AAConfig::ContextSensitivity::KCallSite) {
+            switch (_config.kLimit) {
+            case 1:
+              opts.context = lotus::cclyzer::ContextKind::CallSite1;
+              break;
+            case 2:
+              opts.context = lotus::cclyzer::ContextKind::CallSite2;
+              break;
+            case 3:
+              opts.context = lotus::cclyzer::ContextKind::CallSite3;
+              break;
+            default:
+              opts.context = _config.kLimit > 0
+                                 ? lotus::cclyzer::ContextKind::CallSite1
+                                 : lotus::cclyzer::ContextKind::Insensitive;
+              break;
+            }
+          }
+          _cclyzer_aa = std::make_unique<lotus::cclyzer::CclyzerAA>(opts);
+          if (!_cclyzer_aa->run(*_module)) {
+            throw std::runtime_error(
+                "CclyzerAA execution failed or backend is unavailable");
+          }
+        },
+        _config.getName().c_str());
+    break;
+
   case AAConfig::Implementation::Combined: {
     // Truly "combined": initialize multiple backends and merge their answers.
     // Mark as initialized if at least one backend succeeds.
@@ -424,6 +457,15 @@ std::string AAConfig::getName() const {
 
   case Implementation::UnderApprox:
     oss << "UnderApprox";
+    break;
+
+  case Implementation::CclyzerAA:
+    oss << "CclyzerAA";
+    if (ctxSens == ContextSensitivity::KCallSite && kLimit > 0) {
+      oss << "(" << kLimit << "-CFA)";
+    } else {
+      oss << "(NoCtx)";
+    }
     break;
 
   case Implementation::Combined:

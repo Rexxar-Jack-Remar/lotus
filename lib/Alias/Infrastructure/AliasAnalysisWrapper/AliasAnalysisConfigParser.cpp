@@ -190,6 +190,16 @@ AAConfig lotus::parseAAConfigFromString(const std::string &str,
   }
 
   // Other analyses
+  if (lower == "cclyzer" || lower == "cclyzer-aa" || lower == "cclyzerpp" ||
+      lower == "cclyzeraa") {
+    return AAConfig::CclyzerAA_Default();
+  }
+  if (lower == "cclyzer-1cfa" || lower == "cclyzerpp-1cfa") {
+    return AAConfig::CclyzerAA_1CFA();
+  }
+  if (lower == "cclyzer-2cfa" || lower == "cclyzerpp-2cfa") {
+    return AAConfig::CclyzerAA_2CFA();
+  }
   if (lower == "dyck" || lower == "dyckaa") {
     return AAConfig::DyckAA();
   }

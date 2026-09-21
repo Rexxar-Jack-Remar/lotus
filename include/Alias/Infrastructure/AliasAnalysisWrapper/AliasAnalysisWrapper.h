@@ -39,6 +39,9 @@ namespace analysis {
 class FlowDDA;
 using DemandDrivenAA = FlowDDA;
 } // namespace analysis
+namespace cclyzer {
+class CclyzerAA;
+} // namespace cclyzer
 } // namespace lotus
 
 namespace lotus {
@@ -85,6 +88,9 @@ struct AAConfig {
 
     // UnderApprox: Under-approximate alias analysis
     UnderApprox,
+
+    // CclyzerAA: Datalog-based pointer analysis (cclyzer++)
+    CclyzerAA,
 
     // Combined: Multiple backends merged together
     Combined,
@@ -272,6 +278,21 @@ struct AAConfig {
             Solver::Default};
   }
 
+  static AAConfig CclyzerAA_Default() {
+    return {Implementation::CclyzerAA, ContextSensitivity::None, 0, true,
+            Solver::Default};
+  }
+
+  static AAConfig CclyzerAA_1CFA() {
+    return {Implementation::CclyzerAA, ContextSensitivity::KCallSite, 1, true,
+            Solver::Default};
+  }
+
+  static AAConfig CclyzerAA_2CFA() {
+    return {Implementation::CclyzerAA, ContextSensitivity::KCallSite, 2, true,
+            Solver::Default};
+  }
+
   static AAConfig Combined() {
     return {Implementation::Combined, ContextSensitivity::None, 0, true,
             Solver::Default};
@@ -405,6 +426,7 @@ private:
   std::unique_ptr<tpa::SemiSparsePointerAnalysis> _tpa_aa;
   std::unique_ptr<tpa::SemiSparseProgram> _tpa_program;
   std::unique_ptr<lotus::gpg::GPGAnalysisEngine> _gpg_aa;
+  std::unique_ptr<lotus::cclyzer::CclyzerAA> _cclyzer_aa;
 
   llvm::AAResults *_llvm_aa;
   seadsa::SeaDsaAAResult *_seadsa_aa;

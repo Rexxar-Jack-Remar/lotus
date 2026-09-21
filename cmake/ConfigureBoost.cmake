@@ -1,6 +1,6 @@
 # Handle Boost dependencies for SeaHorn, CLAM, and CclyzerAA
 # This file is only included when LOTUS_ENABLE_CLAM, LOTUS_ENABLE_SEAHORN,
-# LOTUS_ENABLE_SMACK, or LOTUS_USE_CCLYZER is ON.
+# LOTUS_ENABLE_SMACK, or LOTUS_ENABLE_CCLYZER is ON.
 # If all three are disabled, Boost is not configured.
 #
 # Modules that require Boost:

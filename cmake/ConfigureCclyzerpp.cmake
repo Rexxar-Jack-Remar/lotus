@@ -2,20 +2,28 @@
 # When enabled, builds the CclyzerAA wrapper library that uses cclyzerpp's
 # analysis. Does not integrate into AliasAnalysisWrapper.
 
-option(LOTUS_USE_CCLYZER "Enable optional cclyzer++ Datalog-based alias analysis backend" OFF)
+option(LOTUS_ENABLE_CCLYZER "Enable optional cclyzer++ Datalog-based alias analysis backend" OFF)
+if(DEFINED LOTUS_USE_CCLYZER)
+  set(LOTUS_ENABLE_CCLYZER ${LOTUS_USE_CCLYZER} CACHE BOOL
+      "Enable optional cclyzer++ Datalog-based alias analysis backend" FORCE)
+endif()
 
-set(CCLYZERPP_ROOT "" CACHE PATH "Path to cclyzer++ source tree (e.g. .../cclyzerpp-main)")
+set(CCLYZERPP_ROOT "" CACHE PATH "Path to cclyzer++ source tree (defaults to third-party/cclyzerpp)")
 
-if(NOT LOTUS_USE_CCLYZER)
+if(NOT LOTUS_ENABLE_CCLYZER)
   return()
 endif()
 
 if(NOT CCLYZERPP_ROOT OR NOT EXISTS "${CCLYZERPP_ROOT}/CMakeLists.txt")
-  message(WARNING
-    "LOTUS_USE_CCLYZER is ON but CCLYZERPP_ROOT is missing or invalid. "
-    "Set -DCCLYZERPP_ROOT=/path/to/cclyzerpp-main to enable CclyzerAA.")
-  set(LOTUS_USE_CCLYZER OFF PARENT_SCOPE)
-  return()
+  if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/third-party/cclyzerpp/CMakeLists.txt")
+    set(CCLYZERPP_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/third-party/cclyzerpp" CACHE PATH "Path to cclyzer++ source tree" FORCE)
+  else()
+    message(WARNING
+      "LOTUS_ENABLE_CCLYZER is ON but CCLYZERPP_ROOT is missing or invalid. "
+      "Set -DCCLYZERPP_ROOT=/path/to/cclyzerpp to enable CclyzerAA.")
+    set(LOTUS_ENABLE_CCLYZER OFF PARENT_SCOPE)
+    return()
+  endif()
 endif()
 
 # Soufflé is required by cclyzerpp (build-time: compile .dl -> .cpp; runtime: headers).
@@ -28,7 +36,7 @@ if(NOT SOUFFLE_BIN OR NOT SOUFFLE_INCLUDE)
   message(WARNING
     "cclyzerpp requires Soufflé. Set SOUFFLE_BIN and SOUFFLE_INCLUDE, "
     "or install souffle (e.g. package manager). Disabling CclyzerAA.")
-  set(LOTUS_USE_CCLYZER OFF PARENT_SCOPE)
+  set(LOTUS_ENABLE_CCLYZER OFF PARENT_SCOPE)
   return()
 endif()
 

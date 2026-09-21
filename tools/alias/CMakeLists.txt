@@ -104,6 +104,14 @@ target_link_libraries(lotus-alias-call-graph PRIVATE
   ${LLVM_LINK_COMPONENTS}
 )
 
+# CclyzerAA Datalog-based Pointer Analysis Tool
+add_executable(lotus-alias-cclyzer-aa lotus-alias-cclyzer-aa.cpp)
+target_link_libraries(lotus-alias-cclyzer-aa PRIVATE
+  LotusCclyzerAA
+  CanaryAliasCLIUtils
+  ${LLVM_LINK_COMPONENTS}
+)
+
 # Dynamic Alias Analysis tools (only built if LOTUS_ENABLE_DYNAA is enabled)
 if(LOTUS_ENABLE_DYNAA)
   add_subdirectory(dynaa)

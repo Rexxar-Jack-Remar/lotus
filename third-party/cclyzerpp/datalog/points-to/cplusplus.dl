@@ -1,0 +1,151 @@
+//------------------------------------------------------------------------------
+// Identify the new() func for C++
+//------------------------------------------------------------------------------
+
+.decl cxx_new_func(?func: FunctionDecl)
+
+// Consider only funcs with a single parameter of integer type, no
+// definition, and whose demangled name contains the keyword `new`
+
+cxx_new_func(?func),
+   heap_alloc_func(?func)
+ :-
+   func_signature(?func, ?signature),
+   func_ty(?func, ?fType),
+   contains("operator new", ?signature),
+   func_type_param(?fType, 0, ?type),
+   integer_type(?type),
+   func_type_nparams(?fType, 1),
+   !func_decl_to_defn(?func, _).
+
+// Introduce new heap allocation selector
+.decl heap_allocation_by_new(?insn: CallBase, ?heapAlloc: HeapAllocation)
+
+heap_allocation_by_new(?insn, ?heapAlloc) :-
+   cxx_new_func(?func),
+   ( call_instr_fn_target(?insn, ?func)
+   ; invoke_instr_fn_target(?insn, ?func) ),
+   heap_allocation_by_instr(?insn, ?heapAlloc).
+
+// Compute allocation size
+
+sized_alloc_instr(?insn, as(?size, Bytes)) :-
+   cxx_new_func(?func),
+   call_instr_fn_target(?insn, ?func),
+   call_instr_arg(?insn, 0, ?operand),
+   constant_to_int(?operand, ?size).
+
+sized_alloc_instr(?insn, as(?size, Bytes)) :-
+   cxx_new_func(?func),
+   invoke_instr_fn_target(?insn, ?func),
+   invoke_instr_arg(?insn, 0, ?operand),
+   constant_to_int(?operand, ?size).
+
+//------------------------------------------------------------------------------
+// [Constructor and Type]
+//
+// In order to infer the object type, we track the flow of the object
+// being created to some constructor. Intraprocedurally, there will only
+// be a single constructor being called, which will have the correct
+// type for the object.
+//------------------------------------------------------------------------------
+
+.comp CPlusPlus {
+
+  //----------------------------------------------------------------------------
+  // "Input"/declared rules
+  //
+  // https://souffle-lang.github.io/components#input-rules
+  //----------------------------------------------------------------------------
+
+  .decl allocation_type(?alloc:Allocation, ?type:Type) inline
+  .decl stripctx_operand_points_to(?alloc: Allocation, ?operand: Operand) inline
+
+  //----------------------------------------------------------------------------
+  // "Output"/defined rules
+  //
+  // By convention, rules that begin with an underscore are internal
+  // implementation details, and should not be accessed outside the component.
+  //----------------------------------------------------------------------------
+
+  // We have a direct call to a constructor func (associated with
+  // type `Type`) inside func `InFunction`, where `this` points to
+  // `Alloc`. Note that the latter may be initialized by many
+  // constructors, unless it is of a base type.
+  // TODO(lb): Remove "is_" prefix when upgrading Souffle
+  .decl is_init_by_ctor(?type: ClassType, ?ctor: FunctionDecl, ?inFunction: Function, ?alloc: Allocation)
+  is_init_by_ctor(?type, ?ctor, ?inFunction, ?alloc)
+  :-
+    ( call_instr_fn_target(?initInstr, ?ctor)
+    ; invoke_instr_fn_target(?initInstr, ?ctor) ),
+    class_type_constructor(?ctor, ?type),
+    instr_func(?initInstr, ?inFunction),
+    actual_arg(?initInstr, 0, ?this),
+    stripctx_operand_points_to(?alloc, ?this).
+
+  // In the case of inlined constructors, we mark the heap allocation as
+  // untyped and rely on the type back-propagation technique.
+
+  .decl untyped_allocation(?insn: CallBase, ?alloc: Allocation)
+  untyped_allocation(?insn, ?heapAlloc) :-
+    inlined_constructors(),
+    heap_allocation_by_new(?insn, ?heapAlloc).
+
+  //----------------------------------------------------
+  // Identify class instances based on inferred type
+  //----------------------------------------------------
+
+  .decl _class_instance(?alloc: BasicAllocation)
+  _class_instance(?alloc) :-
+    allocation_type(?alloc, ?type),
+    class_type(?type),
+    basic_allocation(?alloc).
+
+  .decl class_instance_constructor(?alloc: BasicAllocation, ?ctor: FunctionDecl)
+  class_instance_constructor(?alloc, ?ctor) :-
+    allocation_type(?alloc, ?type),
+    is_init_by_ctor(?type, ?ctor, _, ?alloc),
+    basic_allocation(?alloc).
+
+  //----------------------------------------------------
+  // Find vtable associated with given class instance
+  //----------------------------------------------------
+
+  .decl class_instance_vtable(?alloc: Allocation, ?vTable: VirtualTable)
+
+  class_instance_vtable(?alloc, ?vTable)
+  :-
+    class_instance_constructor(?alloc, ?ctor),
+    instr_func(?storeInsn, ?ctor),
+    store_instr_value(?storeInsn, ?value),
+    store_instr_address(?storeInsn, ?pointer),
+    stripctx_operand_points_to(?alloc, ?pointer),
+    constant(?value),
+    constant_contains_vptr(?vTable, ?value).
+
+}
+
+//----------------------------------------------------
+// C++ Type Compatibility
+//----------------------------------------------------
+
+// Allow a pointer to some subclass be used in the place of the pointer to the
+// superclass
+
+.decl _eligible_base_type(?superType: StructType, ?type: StructType)
+_eligible_base_type(?superType, ?type) :-
+   struct_type_field(?type, 0, ?unpaddedType),
+   struct_type_nfields(?unpaddedType, ?nFields),
+   type_compatible_up_to_field(?superType, ?unpaddedType, ?nFields - 1).
+
+.decl _type_expands_base_type(?superType: StructType, ?type: StructType)
+_type_expands_base_type(?superType, ?type) :-
+   _eligible_base_type(?superType, ?type)
+   ;
+   _eligible_base_type(?superType, ?intermType),
+   _type_expands_base_type(?intermType, ?type).
+
+type_compatible(?ptrActualType, ?ptrDeclaredType) :-
+   pointer_type_has_component(?ptrActualType, ?actualType),
+   pointer_type_has_component(?ptrDeclaredType, ?declaredType),
+   _type_expands_base_type(?declaredType, ?actualType).

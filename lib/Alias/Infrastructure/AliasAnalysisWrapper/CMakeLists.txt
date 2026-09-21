@@ -31,5 +31,6 @@ target_link_libraries(CanaryAliasAnalysisWrapper
         FSCSPointerAnalysis
         TPATransforms
         TPAUtil
+        LotusCclyzerAA
         ${alias_wrapper_llvm_libs}
 )

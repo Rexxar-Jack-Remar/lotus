@@ -12,6 +12,7 @@
  */
 
 #include "Alias/DemandDriven/DDA/FlowDDA.h"
+#include "Alias/InclusionBased/CclyzerAA/CclyzerAA.h"
 #include "Alias/InclusionBased/GPG/Analysis.h"
 #include "Alias/InclusionBased/SparrowAA/AndersenAA.h"
 #include "Alias/InclusionBased/TPA/PointerAnalysis/Analysis/SemiSparsePointerAnalysis.h"
@@ -202,6 +203,8 @@ bool AliasAnalysisWrapper::mayNull(const Value *v) {
     return true;
   if (_dyck_aa && _initialized)
     return _dyck_aa->mayNull(const_cast<Value *>(v));
+  if (_cclyzer_aa && _initialized)
+    return _cclyzer_aa->isNullPointer(v);
   return true;
 }
 
@@ -231,6 +234,8 @@ bool AliasAnalysisWrapper::getPointsToSet(const Value *ptr,
     return false;
   ptsSet.clear();
   if (_andersen_aa && _initialized && _andersen_aa->getPointsToSet(ptr, ptsSet))
+    return true;
+  if (_cclyzer_aa && _initialized && _cclyzer_aa->getPointsToSet(ptr, ptsSet))
     return true;
   if (_tpa_aa && _initialized) {
     const Value *stripped = ptr->stripPointerCasts();
@@ -335,6 +340,16 @@ void AliasAnalysisWrapper::getIndirectCallTargets(
     std::vector<const Value *> ptsSet;
     if (_andersen_aa->getPointsToSet(calledVal, ptsSet)) {
       for (const Value *v : ptsSet) {
+        if (const auto *F = dyn_cast<llvm::Function>(v))
+          targets.push_back(F);
+      }
+    }
+    return;
+  }
+  if (_cclyzer_aa && _initialized) {
+    std::vector<const Value *> cclyzerTargets;
+    if (_cclyzer_aa->getIndirectCallTargets(call, cclyzerTargets)) {
+      for (const Value *v : cclyzerTargets) {
         if (const auto *F = dyn_cast<llvm::Function>(v))
           targets.push_back(F);
       }

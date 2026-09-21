@@ -1,0 +1,41 @@
+//---------------------------------------------------------------------
+// [Global Allocations]
+//
+// Note that the type of a global allocation is readily available at
+// any case.
+//---------------------------------------------------------------------
+
+/// 1. Global variable allocations
+global_allocation(?alloc),
+global_allocation_by_variable(?gVar, ?alloc)
+ :-
+   global_var(?gVar),
+   global_var_name(?gVar, ?name),
+   ?alloc = cat("*global_alloc",?name).
+
+/// 2. Function Allocations
+global_allocation(?alloc),
+global_allocation_by_func(?func, ?alloc)
+ :-
+   (func(?func);
+   func_decl(?func),
+   !func_decl_to_defn(?func,_)),
+
+   func_name(?func, ?name),
+   ?alloc = cat("*global_alloc",?name).
+
+global_allocation_by_name(?globalName, ?alloc) :-
+   global_var_name(?global, ?globalName),
+   global_allocation_by_variable(?global, ?alloc).
+
+global_allocation_by_name(?globalName, ?alloc) :-
+   func_name(?global, ?globalName),
+   global_allocation_by_func(?global, ?alloc).
+
+static_allocation_type(?alloc, ?type) :-
+   global_allocation_by_func(?func, ?alloc),
+   func_ty(?func, ?type).
+
+static_allocation_type(?alloc, ?type) :-
+   global_allocation_by_variable(?gVar, ?alloc),
+   global_var_type(?gVar, ?type).
