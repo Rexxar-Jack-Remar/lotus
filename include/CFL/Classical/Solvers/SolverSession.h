@@ -149,14 +149,13 @@ struct ReachabilityStats {
   std::vector<EndpointQuotientRuleProfile> endpoint_quotient_per_rule;
   std::vector<EndpointQuotientSccProfile> endpoint_quotient_per_scc;
 
-  // CERT-CFL counters. Snapshot sizes persist on no-op solves.
+  // CERT-CFL counters. No-change solves are filtered by SolverSession.
   std::size_t cert_cfl_levels = 0;
   std::size_t cert_cfl_blocks = 0;
   std::size_t cert_cfl_peak_tiles = 0;
   std::uint64_t cert_cfl_updates = 0;
   std::uint64_t cert_cfl_promotions = 0;
   std::uint64_t cert_cfl_genuine_promotions = 0;
-  bool cert_cfl_sparse_fallback = false;
   // Aggregates report how many solve calls they combine.
   std::size_t solver_rounds = 1;
 };
@@ -230,6 +229,8 @@ public:
   std::size_t addNode(const std::string &name);
   bool addTerminalEdge(std::size_t source, std::size_t target,
                        const std::string &label);
+  /// Saturate pending changes. With no new node or fact, return the previous
+  /// relation sizes and zero work counters without dispatching a backend.
   ReachabilityStats solve();
   bool contains(std::size_t source, std::size_t target,
                 const std::string &label) const;

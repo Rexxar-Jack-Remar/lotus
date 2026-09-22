@@ -1580,7 +1580,8 @@ TEST(ClassicalArchitectureTest, RepeatedSolveDoesNotReseedNullableFacts) {
         SolverBackend::Skewed, SolverBackend::Cat, SolverBackend::Iea,
         SolverBackend::IeaOcr, SolverBackend::TransitiveClosure,
         SolverBackend::Pocr, SolverBackend::HierarchicalPocr,
-        SolverBackend::FullyOrdered}) {
+        SolverBackend::FullyOrdered, SolverBackend::EndpointQuotient,
+        SolverBackend::CertCFL}) {
     LabeledGraph graph;
     graph.addVertex("n0");
     SolverSession session(graph, grammar, backend);

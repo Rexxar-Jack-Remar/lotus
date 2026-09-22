@@ -194,37 +194,6 @@ BatchSolverStatistics collect(const ieoce::Result &result,
   return stats;
 }
 
-void clearOperationCounters(BatchSolverStatistics &stats) {
-  stats.derived_facts = 0;
-  stats.attempts = 0;
-  stats.successful_insertions = 0;
-  stats.duplicate_attempts = 0;
-  stats.work_items = 0;
-  stats.peak_worklist = 0;
-  stats.unary_applications = 0;
-  stats.binary_join_pairs = 0;
-  stats.cat_fully_pruned_attempts = 0;
-  stats.cat_incoming_only_insertions = 0;
-  stats.cat_outgoing_only_insertions = 0;
-  stats.cat_fully_indexed_insertions = 0;
-  stats.cat_unindexed_insertions = 0;
-  stats.cat_propagating_insertions = 0;
-  stats.cat_dynamic_insertions = 0;
-  stats.cat_promotions = 0;
-  stats.cat_context_annotations = 0;
-  stats.cat_universal_contexts = 0;
-  stats.ieoce_epochs = 0;
-  stats.ieoce_scc_passes = 0;
-  stats.ieoce_collapsed_components = 0;
-  stats.ieoce_merged_nodes = 0;
-  stats.ieoce_quotient_replays = 0;
-  stats.ieoce_meg_insertions = 0;
-  stats.ieoce_meg_edges_removed = 0;
-  stats.ieoce_transitive_updates = 0;
-  stats.ieoce_ordered_steps = 0;
-  stats.ieoce_ordered_prunes = 0;
-}
-
 } // namespace
 
 class BatchSolverEngine::Impl {
@@ -245,7 +214,6 @@ public:
       throw;
     }
     node_count_ = node_count;
-    dirty_ = true;
   }
 
   bool add(SymbolId symbol, NodeId source, NodeId target) {
@@ -264,16 +232,10 @@ public:
       known_edges_.erase(known.first);
       throw;
     }
-    dirty_ = true;
     return true;
   }
 
   BatchSolverStatistics solve() {
-    if (!dirty_) {
-      clearOperationCounters(stats_);
-      return stats_;
-    }
-
     common::Reachability next;
     BatchSolverStatistics next_stats;
     if (variant_ == BatchEngineKind::Cat) {
@@ -308,7 +270,6 @@ public:
 
     snapshot_ = std::move(next);
     pending_inputs_.clear();
-    dirty_ = false;
     stats_ = next_stats;
     return stats_;
   }
@@ -393,7 +354,6 @@ private:
   std::unordered_set<EdgeKey, EdgeKeyHash> known_edges_;
   std::unordered_set<EdgeKey, EdgeKeyHash> pending_inputs_;
   std::size_t node_count_ = 0;
-  bool dirty_ = true;
   BatchSolverStatistics stats_;
 };
 

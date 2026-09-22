@@ -163,10 +163,9 @@ private:
 Result solve(const Grammar &grammar, const Graph &graph,
              const Options &options = {});
 
-// Safe monotone-update adapter, NOT a paper-level incremental optimization.
-// Every changed batch is rebuilt from all terminal edges. This is required for
-// the chosen PE policy: an old PE fact must see terminal edges added later.
-// Unchanged solve() calls reuse the previous Result and return false.
+// Monotone-update adapter. Each solve rebuilds from all terminal edges because
+// the chosen PE policy requires old PE facts to see terminal edges added later.
+// SolverSession owns the shared no-change check.
 // Instances are not thread-safe; independent instances share no mutable state.
 class RebuildingSession {
 public:
@@ -174,8 +173,7 @@ public:
                              Options options = {});
   bool addNode(Node node);
   bool addTerminalEdge(Node source, Symbol symbol, Node target);
-  bool solve();
-  bool dirty() const { return dirty_; }
+  void solve();
   const Result &result() const;
   const Graph &baseGraph() const { return graph_; }
 
@@ -186,7 +184,6 @@ private:
   std::set<Node> known_nodes_;
   std::set<Fact> known_edges_;
   std::optional<Result> result_;
-  bool dirty_ = true;
 };
 
 } // namespace lotus::cfl::classical::skewed

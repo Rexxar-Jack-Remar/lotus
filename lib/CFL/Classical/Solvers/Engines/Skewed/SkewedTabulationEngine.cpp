@@ -105,19 +105,6 @@ skewed::Graph makeGraph(std::size_t node_count) {
   return graph;
 }
 
-void clearOperationCounters(SkewedTabulationStatistics &stats) {
-  stats.derived_facts = 0;
-  stats.static_pe_insertions = 0;
-  stats.dynamic_pe_insertions = 0;
-  stats.promotions_to_indexed = 0;
-  stats.attempts = 0;
-  stats.duplicate_attempts = 0;
-  stats.unary_applications = 0;
-  stats.binary_join_pairs = 0;
-  stats.work_items = 0;
-  stats.peak_worklist = 0;
-}
-
 } // namespace
 
 class SkewedTabulationEngine::Impl {
@@ -138,7 +125,6 @@ public:
     }
     snapshot_->ensureNodeCount(node_count);
     node_count_ = node_count;
-    snapshot_dirty_ = true;
   }
 
   bool add(SymbolId symbol, NodeId source, NodeId target) {
@@ -162,16 +148,11 @@ public:
       }
       throw;
     }
-    snapshot_dirty_ = true;
     return true;
   }
 
   SkewedTabulationStatistics solve() {
-    const bool rebuilt = session_.solve();
-    if (!rebuilt && !snapshot_dirty_) {
-      clearOperationCounters(stats_);
-      return stats_;
-    }
+    session_.solve();
 
     auto next = createRelation(RelationBackend::SparseBitVectors, node_count_);
     std::size_t derived_facts = 0;
@@ -193,7 +174,6 @@ public:
     next_stats.derived_facts = derived_facts;
     snapshot_ = std::move(next);
     pending_inputs_.clear();
-    snapshot_dirty_ = false;
     stats_ = next_stats;
     return stats_;
   }
@@ -254,7 +234,6 @@ private:
   std::unique_ptr<Relation> snapshot_;
   std::unordered_set<EdgeKey, EdgeKeyHash> pending_inputs_;
   std::size_t node_count_ = 0;
-  bool snapshot_dirty_ = true;
   SkewedTabulationStatistics stats_;
 };
 

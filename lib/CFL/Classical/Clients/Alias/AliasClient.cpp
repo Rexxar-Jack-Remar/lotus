@@ -690,6 +690,14 @@ ReachabilityStats AliasClient::solveToFixedPoint(
     aggregate.ieoce_meg_edges_removed += current.ieoce_meg_edges_removed;
     aggregate.ieoce_ordered_steps += current.ieoce_ordered_steps;
     aggregate.ieoce_ordinary_fallback = current.ieoce_ordinary_fallback;
+    aggregate.cert_cfl_levels += current.cert_cfl_levels;
+    aggregate.cert_cfl_blocks = current.cert_cfl_blocks;
+    aggregate.cert_cfl_peak_tiles =
+        std::max(aggregate.cert_cfl_peak_tiles, current.cert_cfl_peak_tiles);
+    aggregate.cert_cfl_updates += current.cert_cfl_updates;
+    aggregate.cert_cfl_promotions += current.cert_cfl_promotions;
+    aggregate.cert_cfl_genuine_promotions +=
+        current.cert_cfl_genuine_promotions;
     aggregate.endpoint_quotient_cells = current.endpoint_quotient_cells;
     aggregate.endpoint_quotient_facts = current.endpoint_quotient_facts;
     aggregate.endpoint_quotient_seed_facts =

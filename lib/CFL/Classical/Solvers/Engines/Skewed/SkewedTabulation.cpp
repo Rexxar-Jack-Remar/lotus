@@ -595,7 +595,6 @@ bool RebuildingSession::addNode(Node node) {
     known_nodes_.erase(inserted.first);
     throw;
   }
-  dirty_ = true;
   return true;
 }
 
@@ -633,22 +632,16 @@ bool RebuildingSession::addTerminalEdge(Node source, Symbol symbol,
       known_nodes_.erase(source);
     throw;
   }
-  dirty_ = true;
   return true;
 }
 
-bool RebuildingSession::solve() {
-  if (!dirty_)
-    return false;
-  // A failed solve leaves dirty_ true and does not publish a partial relation.
+void RebuildingSession::solve() {
   Result next = skewed::solve(grammar_, graph_, options_);
   result_ = std::move(next);
-  dirty_ = false;
-  return true;
 }
 
 const Result &RebuildingSession::result() const {
-  if (dirty_ || !result_)
+  if (!result_)
     throw std::logic_error("solve() is required before relation queries");
   return *result_;
 }

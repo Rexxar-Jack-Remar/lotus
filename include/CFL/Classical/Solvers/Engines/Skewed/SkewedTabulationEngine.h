@@ -20,7 +20,7 @@ struct SkewedTabulationStatistics : skewed::Stats {
 /// edges are deliberately absent from the indexed join relation. This makes
 /// late terminal additions exact without retaining an unsound incremental
 /// state. Queries continue to see the previous completed snapshot until the
-/// next successful solve.
+/// next successful solve. SolverSession filters unchanged calls.
 class SkewedTabulationEngine final : public Relation {
 public:
   SkewedTabulationEngine(const Grammar &grammar, std::size_t node_count);

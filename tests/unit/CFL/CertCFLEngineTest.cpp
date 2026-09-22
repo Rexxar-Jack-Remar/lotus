@@ -72,7 +72,7 @@ TEST(CertCFLSessionTest, MatchesSparseSetAndStreamsWithoutDuplicates) {
   }));
   EXPECT_EQ(calls, 1u);
 }
-TEST(CertCFLSessionTest, MonotoneUpdatesUseCompletedSnapshots) {
+TEST(CertCFLSessionTest, MonotoneUpdatesExtendCompletedState) {
   LabeledGraph graph; graph.addEdge("n0", "n1", "a");
   const auto &grammar = starGrammar();
   SolverSession session(graph, grammar, SolverBackend::CertCFL);
@@ -86,6 +86,7 @@ TEST(CertCFLSessionTest, MonotoneUpdatesUseCompletedSnapshots) {
   EXPECT_TRUE(session.contains(0, fresh, "S"));
   EXPECT_TRUE(session.contains(fresh, fresh, "S"));
   EXPECT_EQ(stats.added_edges, stats.relation_edges - oldCount);
+  EXPECT_EQ(stats.cert_cfl_levels, 1u);
   compareFresh(graph, grammar, session.relation());
   const auto noOp = session.solve();
   EXPECT_EQ(noOp.added_edges, 0u); EXPECT_EQ(noOp.processed_work_items, 0u);
@@ -99,13 +100,12 @@ TEST(CertCFLSessionTest, EmptyGraphAndNullableNodes) {
   EXPECT_TRUE(session.contains(node, node, "S"));
   compareFresh(graph, grammar, session.relation());
 }
-TEST(CertCFLSessionTest, BudgetFallbackRemainsExact) {
+TEST(CertCFLSessionTest, ActiveTileLimitThrows) {
   LabeledGraph graph; graph.addEdge("n0", "n1", "a"); graph.addEdge("n1", "n2", "a");
   SolverOptions options; options.backend = SolverBackend::CertCFL;
   options.cert_cfl.max_tiles = 1;
   SolverSession session(graph, starGrammar(), options);
-  EXPECT_TRUE(session.solve().cert_cfl_sparse_fallback);
-  compareFresh(graph, starGrammar(), session.relation());
+  EXPECT_THROW(session.solve(), engines::cert::ResourceLimit);
 }
 TEST(CertCFLSessionTest, CountSymbolsAreAnOffDiagonalUnion) {
   const auto grammar = Grammar::parseFromText(
@@ -127,18 +127,16 @@ TEST(CertCFLSessionTest, ExternalGraphMutationIsStillDetected) {
   SolverSession session(graph, starGrammar(), SolverBackend::CertCFL);
   graph.addVertex("outside"); EXPECT_THROW(session.solve(), std::logic_error);
 }
-TEST(CertCFLEngineTest, FailedSolvePreservesSnapshotAndPendingInput) {
+TEST(CertCFLEngineTest, ActiveTileLimitThrowsDuringUpdate) {
   const auto grammar = Grammar::parseFromText(
       "Start:\n S\nTerminal:\n a\nVariables:\n S\nProductions:\n S -> a;\n");
-  engines::cert::Options options; options.max_tiles = 1; options.max_sparse_facts = 2;
+  engines::cert::Options options; options.max_tiles = 2;
   engines::CertCFLEngine engine(grammar, 2, options);
-  const auto a = grammar.symbolId("a"), s = grammar.symbolId("S");
+  const auto a = grammar.symbolId("a");
   EXPECT_TRUE(engine.add(a, 0, 1)); engine.solve();
   EXPECT_EQ(engine.edgeCount(), 2u);
   EXPECT_TRUE(engine.add(a, 1, 0));
   EXPECT_THROW(engine.solve(), engines::cert::ResourceLimit);
-  EXPECT_EQ(engine.edgeCount(), 2u); EXPECT_TRUE(engine.contains(s, 0, 1));
-  EXPECT_FALSE(engine.contains(a, 1, 0)); EXPECT_FALSE(engine.add(a, 1, 0));
 }
 TEST(CertCFLSessionTest, NonterminalSeedsAreNotDiscarded) {
   const auto &grammar = starGrammar(); LabeledGraph graph;
@@ -155,7 +153,6 @@ TEST(CertCFLSessionTest, RandomizedIncrementalComparisons) {
     SCOPED_TRACE(trial); LabeledGraph graph;
     for (unsigned u = 0; u < 6; ++u) graph.addVertex("n" + std::to_string(u));
     SolverOptions options; options.backend = SolverBackend::CertCFL;
-    if (trial % 2 == 0) options.cert_cfl.max_tiles = 1;
     SolverSession session(graph, grammar, options);
     for (unsigned round = 0; round < 4; ++round) {
       SCOPED_TRACE(round);

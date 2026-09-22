@@ -27,12 +27,16 @@ graph; the differences are algorithmic.
 | `Sqid` | Relation chaining: adaptive and differential chaining over dual old/delta graph views. | Chenghang Shi et al., "Context-Free Language Reachability via Efficient Relation Chaining", OOPSLA 2026, DOI [10.1145/3798270](https://doi.org/10.1145/3798270). |
 | `Stg` | Staged solving: decomposes the grammar into a small matching CFG `L` and a regular part `R`, solving each stage separately. | Chenghang Shi et al., "Better Not Together: Staged Solving for Context-Free Language Reachability", ISSTA 2024, DOI [10.1145/3650212.3680346](https://doi.org/10.1145/3650212.3680346). |
 | `EndpointQuotient` | Grammar-indexed endpoint-quotient (GEQ) solver: exact least fixed point over endpoint partitions with symbolic nullable diagonals; SCC-classified staged evaluation. | New algorithm in Lotus. |
-| `CertCFL` | Cardinality-certified exact solving: universal-degree certificates, symbolic nullable identity, finite threshold domains, and partition refinement promote dense blocks to exactness; falls back to an exact sparse worklist under resource limits. | New algorithm in Lotus. |
+| `CertCFL` | Cardinality-certified exact solving: universal-degree certificates, symbolic nullable identity, compact sparse tiles, and monotone delta saturation refine blocks to exactness. | New algorithm in Lotus. |
 
 `Engines/Common/` provides shared infrastructure: `BatchSolverEngine` (a
 `Relation` adapter for the CAT and IEOCE variants), `Reachability` (the
 compressed result shared by the CAT/IEOCE/Skewed engines), `Tabulation`, and
 `InputBridge`.
+
+`SolverSession` owns the backend-independent pending-change check. A solve with
+no new node or fact returns zero work counters without entering SQID, CERT,
+endpoint-quotient, CAT/IEOCE, Skewed, or the classical worklist backends.
 
 ## Preprocessing
 

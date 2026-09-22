@@ -507,6 +507,7 @@ public:
     const SymbolId symbol = grammar_.symbolId(label);
     const bool inserted = insertInputFact(symbol, source, target);
     input_edges_ += inserted ? 1 : 0;
+    dirty_ = dirty_ || inserted;
     return inserted;
   }
 
@@ -528,12 +529,46 @@ public:
     if (candidate_relation_) {
       candidate_relation_->ensureNodeCount(graph_.vertexCount());
     }
+    dirty_ = true;
     return node;
   }
 
   ReachabilityStats solve() {
     validateGraphVersion();
     const auto start = std::chrono::steady_clock::now();
+    if (!dirty_) {
+      ReachabilityStats stats;
+      stats.graph_nodes = last_stats_.graph_nodes;
+      stats.base_graph_edges = last_stats_.base_graph_edges;
+      stats.grammar_symbols = last_stats_.grammar_symbols;
+      stats.grammar_terminals = last_stats_.grammar_terminals;
+      stats.grammar_nonterminals = last_stats_.grammar_nonterminals;
+      stats.grammar_productions = last_stats_.grammar_productions;
+      stats.grammar_nullable_symbols = last_stats_.grammar_nullable_symbols;
+      stats.grammar_transitive_symbols = last_stats_.grammar_transitive_symbols;
+      stats.input_edges = last_stats_.input_edges;
+      stats.relation_edges = last_stats_.relation_edges;
+      stats.start_symbol_edges = last_stats_.start_symbol_edges;
+      stats.count_symbol_edges = last_stats_.count_symbol_edges;
+      stats.relation_payload_bytes_estimate =
+          last_stats_.relation_payload_bytes_estimate;
+      stats.transitive_closure_instances =
+          last_stats_.transitive_closure_instances;
+      stats.transitive_relation_edges = last_stats_.transitive_relation_edges;
+      stats.transitive_payload_bytes_estimate =
+          last_stats_.transitive_payload_bytes_estimate;
+      stats.pocr_tree_roots = last_stats_.pocr_tree_roots;
+      stats.pocr_tree_nodes = last_stats_.pocr_tree_nodes;
+      stats.pocr_tree_edges = last_stats_.pocr_tree_edges;
+      stats.fully_ordered_critical_edges =
+          last_stats_.fully_ordered_critical_edges;
+      stats.candidate_relation_edges = last_stats_.candidate_relation_edges;
+      stats.solve_time_microseconds =
+          std::chrono::duration_cast<std::chrono::microseconds>(
+              std::chrono::steady_clock::now() - start)
+              .count();
+      return stats;
+    }
     const TransitiveCounters transitive_before = transitiveCounters();
     const PocrCounters pocr_before = pocrCounters();
     const FullyOrderedCounters fully_ordered_before = fullyOrderedCounters();
@@ -623,11 +658,9 @@ public:
       stats.ieoce_ordinary_fallback = batch.ieoce_ordinary_fallback;
     } else if (backend_ == SolverBackend::CertCFL) {
       const auto cert = cert_engine_->solve();
-      stats.classical_iterations += cert.core.joins + cert.core.sparse_joins;
-      stats.processed_work_items +=
-          cert.core.queue_pops + cert.core.sparse_work_items;
-      stats.duplicate_edges += cert.duplicate_inputs +
-                               cert.core.sparse_duplicate_attempts;
+      stats.classical_iterations += cert.core.joins;
+      stats.processed_work_items += cert.core.queue_pops;
+      stats.duplicate_edges += cert.core.duplicate_attempts;
       stats.added_edges += cert.added_facts;
       stats.peak_worklist_size =
           std::max(stats.peak_worklist_size, cert.core.peak_queue);
@@ -638,7 +671,6 @@ public:
       stats.cert_cfl_promotions = cert.core.overlap_promotions;
       stats.cert_cfl_genuine_promotions =
           cert.core.genuine_cardinality_promotions;
-      stats.cert_cfl_sparse_fallback = cert.core.used_sparse_fallback;
     } else if (backend_ == SolverBackend::EndpointQuotient) {
       const engines::EndpointQuotientStatistics eq = eq_engine_->solve();
       stats.classical_iterations += eq.binary_joins;
@@ -760,6 +792,8 @@ public:
         std::chrono::duration_cast<std::chrono::microseconds>(
             std::chrono::steady_clock::now() - start)
             .count();
+    dirty_ = false;
+    last_stats_ = stats;
     return stats;
   }
 
@@ -780,7 +814,10 @@ public:
     if (!grammar_.hasSymbol(label)) {
       throw std::invalid_argument("Unknown migrated relation symbol: " + label);
     }
-    return insertInputFact(grammar_.symbolId(label), source, target);
+    const bool inserted =
+        insertInputFact(grammar_.symbolId(label), source, target);
+    dirty_ = dirty_ || inserted;
+    return inserted;
   }
 
 private:
@@ -1405,6 +1442,8 @@ private:
   std::size_t current_peak_worklist_size_ = 0;
   std::size_t pending_derived_edges_ = 0;
   std::size_t nullable_seeded_nodes_ = 0;
+  bool dirty_ = true;
+  ReachabilityStats last_stats_;
   BitVectorClosureRelation *transitive_relation_ = nullptr;
   PocrClosureRelation *pocr_relation_ = nullptr;
   FullyOrderedClosureRelation *fully_ordered_relation_ = nullptr;

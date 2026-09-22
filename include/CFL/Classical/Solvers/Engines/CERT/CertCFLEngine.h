@@ -12,20 +12,17 @@ struct CertCFLStatistics {
   cert::Statistics core;
   std::size_t logical_facts = 0; // All symbols, including seed facts and epsilon.
   std::size_t seed_facts = 0;    // Distinct buffered seed facts, not epsilon.
-  // Growth of the completed snapshot, INCLUDING newly buffered input facts.
-  // This follows the endpoint-quotient engine's snapshot-growth convention.
+  // Growth of the completed relation, including newly buffered input facts.
   std::size_t added_facts = 0;
-  std::size_t duplicate_inputs = 0;
 };
 
 /// CERT-CFL adapter implementing Lotus's complete Relation interface.
 ///
 /// add() buffers monotone seed insertions, including migrated nonterminal facts.
-/// Queries see the last completed snapshot (empty before the first solve).
-/// New nodes/edges become visible only after solve(). A failed solve preserves
-/// the old snapshot and all buffered inputs; retrying is safe.
-///
-/// This version REBUILDS after updates; it does not implement delta reuse.
+/// Queries see the saturated relation (empty before the first solve). New
+/// nodes/edges become visible after solve(), which extends the relation in
+/// place from the buffered delta. A compressed result is materialized once
+/// before its first update.
 /// All grammar symbols are resolved because Relation permits arbitrary labels.
 /// Use cert::solve directly for a selected-symbol observation contract.
 /// Grammar rules are copied at construction, so no Grammar reference is kept.

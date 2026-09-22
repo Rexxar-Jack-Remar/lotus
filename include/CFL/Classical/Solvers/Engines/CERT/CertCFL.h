@@ -49,7 +49,6 @@ struct Problem {
   std::vector<Symbol> epsilon;
 };
 
-enum class LimitAction { SparseFallback, Throw };
 class ResourceLimit : public std::runtime_error {
 public:
   using std::runtime_error::runtime_error;
@@ -65,15 +64,13 @@ struct Options {
   // Exact seeds + symbolic identity suffice for symbols without any unary or
   // binary defining rules. Do not refine merely to rediscover input edges.
   bool keep_seed_symbols_explicit = true;
-  // A count of dense tile records, NOT a limit on total resident memory.
-  // Zero means unlimited. Each record is currently 24 bytes on 64-bit hosts.
-  std::size_t max_tiles = 4U * 1024U * 1024U;
+  // A count of active tile records, NOT a limit on total resident memory.
+  // Zero means unlimited. Large logical tile spaces are stored sparsely, so
+  // the limit applies to materialized records rather than the logical matrix.
+  std::size_t max_tiles = 0;
   std::size_t max_levels = 0;
   // Cumulative dense joins across all levels; zero means unlimited.
   std::uint64_t max_dense_joins = 0;
-  LimitAction on_limit = LimitAction::SparseFallback;
-  // Concrete facts, including identities, in sparse fallback; zero = unlimited.
-  std::size_t max_sparse_facts = 0;
 };
 struct Statistics {
   std::size_t levels = 0;
@@ -86,11 +83,8 @@ struct Statistics {
   std::uint64_t updates = 0;
   std::uint64_t overlap_promotions = 0;
   std::uint64_t genuine_cardinality_promotions = 0;
-  bool used_sparse_fallback = false;
-  std::size_t sparse_work_items = 0;
-  std::uint64_t sparse_joins = 0;
-  std::size_t sparse_facts = 0;
-  std::size_t sparse_duplicate_attempts = 0;
+  std::size_t duplicate_attempts = 0;
+  std::size_t facts = 0;
 };
 struct TileSummary {
   bool may = false; // Derivations containing at least one seed edge, not epsilon.
@@ -98,17 +92,18 @@ struct TileSummary {
   std::size_t in = 0;  // Universal incoming-degree LOWER bound.
 };
 
-// Immutable snapshot. Copying shares storage; concurrent const access is safe
-// provided callbacks do not concurrently mutate their own shared state.
+// Mutable monotone result. extend() adds node/seed deltas in place.
 class Result {
 public:
   using NodeVisitor = std::function<bool(Node)>;
   using EdgeVisitor = std::function<bool(const Seed &)>;
-  Result(const Result &) noexcept = default;
-  Result(Result &&) noexcept = default;
-  Result &operator=(const Result &) noexcept = default;
-  Result &operator=(Result &&) noexcept = default;
+  Result(const Result &) = delete;
+  Result(Result &&) noexcept;
+  Result &operator=(const Result &) = delete;
+  Result &operator=(Result &&) noexcept;
   ~Result();
+
+  void extend(const Problem &delta_problem, const Options &options = {});
 
   std::size_t nodeCount() const;
   std::size_t symbolCount() const;
@@ -129,8 +124,7 @@ public:
   std::size_t countOffDiagonalUnion(std::vector<Symbol> symbols) const;
   std::size_t estimatedPayloadBytes() const;
   const Statistics &statistics() const;
-  // Diagnostic access to sound summaries, including summaries of explicit seed
-  // symbols. After sparse fallback, blocks() is empty and tile() throws.
+  // Diagnostic access to sound summaries, including explicit seed symbols.
   const Partition &blocks() const;
   bool nullable(Symbol symbol) const;
   TileSummary tile(Symbol symbol, std::size_t source_block,
@@ -138,13 +132,11 @@ public:
 
 private:
   struct Impl;
-  explicit Result(std::shared_ptr<const Impl> impl);
-  std::shared_ptr<const Impl> impl_;
+  explicit Result(std::unique_ptr<Impl> impl);
+  std::unique_ptr<Impl> impl_;
   friend Result solve(const Problem &, const Options &);
 };
 
-// Strong exception guarantee: inputs are never changed. No partial result is
-// returned on allocation failure, invalid input, or a configured hard limit.
 Result solve(const Problem &problem, const Options &options = {});
 
 } // namespace lotus::cfl::classical::engines::cert

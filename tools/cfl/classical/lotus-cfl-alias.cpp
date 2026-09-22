@@ -346,6 +346,10 @@ int main(int argc, char **argv) {
                 << ",\"start_edges\":" << stats.start_symbol_edges
                 << ",\"callgraph_rounds\":" << stats.solver_rounds
                 << ",\"processed_items\":" << stats.processed_work_items
+                << ",\"classical_iterations\":"
+                << stats.classical_iterations
+                << ",\"duplicate_edges\":" << stats.duplicate_edges
+                << ",\"peak_worklist\":" << stats.peak_worklist_size
                 << ",\"transitive_pairs\":" << stats.transitive_propagated_pairs
                 << ",\"pocr_tree_nodes\":" << stats.pocr_tree_nodes
                 << ",\"pocr_traversal_steps\":" << stats.pocr_traversal_steps
@@ -368,6 +372,13 @@ int main(int argc, char **argv) {
                 << ",\"focr_cycle_simplifications\":"
                 << stats.fully_ordered_cycle_simplifications
                 << ",\"graspan_epochs\":" << stats.graspan_epochs
+                << ",\"cert_levels\":" << stats.cert_cfl_levels
+                << ",\"cert_blocks\":" << stats.cert_cfl_blocks
+                << ",\"cert_peak_tiles\":" << stats.cert_cfl_peak_tiles
+                << ",\"cert_updates\":" << stats.cert_cfl_updates
+                << ",\"cert_promotions\":" << stats.cert_cfl_promotions
+                << ",\"cert_genuine_promotions\":"
+                << stats.cert_cfl_genuine_promotions
                 << ",\"eq_cells\":" << stats.endpoint_quotient_cells
                 << ",\"eq_insert_attempts\":"
                 << stats.endpoint_quotient_insert_attempts
@@ -425,6 +436,9 @@ int main(int argc, char **argv) {
                 << " start_edges=" << stats.start_symbol_edges
                 << " callgraph_rounds=" << stats.solver_rounds
                 << " processed_items=" << stats.processed_work_items
+                << " classical_iterations=" << stats.classical_iterations
+                << " duplicate_edges=" << stats.duplicate_edges
+                << " peak_worklist=" << stats.peak_worklist_size
                 << " pocr_tree_nodes=" << stats.pocr_tree_nodes
                 << " pocr_traversal_steps=" << stats.pocr_traversal_steps
                 << " pocr_tree_join_visits=" << stats.pocr_tree_join_visits
@@ -439,6 +453,13 @@ int main(int argc, char **argv) {
                 << " focr_tree_join_visits="
                 << stats.fully_ordered_tree_join_visits
                 << " graspan_epochs=" << stats.graspan_epochs
+                << " cert_levels=" << stats.cert_cfl_levels
+                << " cert_blocks=" << stats.cert_cfl_blocks
+                << " cert_peak_tiles=" << stats.cert_cfl_peak_tiles
+                << " cert_updates=" << stats.cert_cfl_updates
+                << " cert_promotions=" << stats.cert_cfl_promotions
+                << " cert_genuine_promotions="
+                << stats.cert_cfl_genuine_promotions
                 << " eq_cells=" << stats.endpoint_quotient_cells
                 << " eq_preprocess_us="
                 << stats.endpoint_quotient_preprocess_us

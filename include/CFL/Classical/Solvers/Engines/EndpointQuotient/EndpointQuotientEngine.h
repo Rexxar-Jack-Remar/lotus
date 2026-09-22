@@ -124,8 +124,8 @@ public:
   /// Records a terminal input edge. Returns false when the edge was already
   /// buffered for the current session.
   bool add(SymbolId symbol, NodeId source, NodeId target) override;
-  /// Rebuilds after updates; otherwise returns zero work counters and the
-  /// existing snapshot's sizes. A failed solve preserves the previous result.
+  /// Saturates the buffered delta. SolverSession filters unchanged calls.
+  /// A failed solve preserves the previous result.
   EndpointQuotientStatistics solve();
   const EndpointQuotientStatistics &statistics() const;
 

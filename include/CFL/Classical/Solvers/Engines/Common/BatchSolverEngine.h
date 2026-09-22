@@ -59,6 +59,7 @@ struct BatchSolverStatistics {
 /// Changed input batches rebuild because CAT contexts and IEOCE quotient
 /// partitions are static snapshots. IEOCE answers remain compressed until a
 /// Relation traversal explicitly asks to enumerate their concrete facts.
+/// SolverSession filters unchanged calls before dispatch.
 class BatchSolverEngine final : public Relation {
 public:
   BatchSolverEngine(const Grammar &grammar, std::size_t node_count,

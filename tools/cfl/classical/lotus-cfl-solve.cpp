@@ -418,8 +418,6 @@ int main(int argc, char **argv) {
           << ",\"cert_cfl_updates\":" << stats.cert_cfl_updates
           << ",\"cert_cfl_promotions\":" << stats.cert_cfl_promotions
           << ",\"cert_cfl_genuine_promotions\":" << stats.cert_cfl_genuine_promotions
-          << ",\"cert_cfl_sparse_fallback\":"
-          << (stats.cert_cfl_sparse_fallback ? "true" : "false")
           << ",\"endpoint_quotient_cells\":" << stats.endpoint_quotient_cells
           << ",\"endpoint_quotient_facts\":" << stats.endpoint_quotient_facts
           << ",\"endpoint_quotient_seed_facts\":"
@@ -521,7 +519,6 @@ int main(int argc, char **argv) {
           << " cert_cfl_updates=" << stats.cert_cfl_updates
           << " cert_cfl_promotions=" << stats.cert_cfl_promotions
           << " cert_cfl_genuine_promotions=" << stats.cert_cfl_genuine_promotions
-          << " cert_cfl_sparse_fallback=" << stats.cert_cfl_sparse_fallback
           << " simplified_nodes=" << simplification_stats.reduced_nodes
           << " scc_nodes_merged=" << simplification_stats.scc_nodes_merged
           << " folded_nodes=" << simplification_stats.folded_nodes

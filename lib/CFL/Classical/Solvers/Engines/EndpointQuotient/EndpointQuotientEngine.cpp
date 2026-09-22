@@ -128,7 +128,6 @@ public:
   void ensureNodeCount(std::size_t node_count) {
     if (node_count > node_count_) {
       node_count_ = node_count;
-      dirty_ = true;
     }
   }
 
@@ -137,33 +136,10 @@ public:
         target >= node_count_)
       throw std::out_of_range("Endpoint quotient input ID out of range");
     const bool added = edges_.add(EdgeKey{symbol, source, target});
-    dirty_ = dirty_ || added;
     return added;
   }
 
   EndpointQuotientStatistics solve() {
-    if (!dirty_) {
-      // Cardinalities describe the snapshot; operation counters describe this
-      // call.
-      auto result = stats_;
-      result.derived_facts = 0;
-      result.binary_joins = result.bridge_pairs = result.worklist_pops = 0;
-      result.peak_worklist = result.insert_attempts = result.duplicate_facts =
-          0;
-      result.binary_propagations = result.successful_binary_propagations = 0;
-      result.repeated_binary_outputs = result.partitions_built = 0;
-      result.binary_join_words = 0;
-      result.bridges_built = result.lifts_built = 0;
-      result.preprocess_us = result.saturation_us = result.count_us = 0;
-      result.hottest_rule_joins = result.hottest_scc_joins = 0;
-      result.hottest_rule_id = result.hottest_scc_id = 0;
-      for (auto &rule : result.per_rule)
-        clearWork(rule);
-      for (auto &scc : result.per_scc)
-        clearWork(scc);
-      stats_ = result;
-      return stats_;
-    }
     endpoint::Problem problem = base_;
     problem.nodes = node_count_;
     edges_.appendTo(problem.edges);
@@ -185,7 +161,6 @@ public:
     edges_.commit();
     snapshot_ = std::move(next);
     count_symbol_edges_ = count;
-    dirty_ = false;
     stats_ = result;
     return stats_;
   }
@@ -262,18 +237,6 @@ public:
   const EndpointQuotientStatistics &statistics() const { return stats_; }
 
 private:
-  static void clearWork(EndpointQuotientRuleStatistics &profile) {
-    profile.delta_rows = profile.delta_cells = profile.joins = 0;
-    profile.propagations = profile.successful_propagations = 0;
-    profile.repeated_outputs = profile.join_word_operations = 0;
-  }
-
-  static void clearWork(EndpointQuotientSccStatistics &profile) {
-    profile.delta_rows = profile.delta_cells = profile.joins = 0;
-    profile.propagations = profile.successful_propagations = 0;
-    profile.repeated_outputs = profile.join_word_operations = 0;
-  }
-
   void buildRules(endpoint::Problem &problem) const {
     for (const auto &[head, rules] : grammar_.productions()) {
       const Id lhs = grammar_.symbolId(head);
@@ -433,7 +396,6 @@ private:
   endpoint::Options options_;
   endpoint::Problem base_;
   std::unique_ptr<endpoint::Solver> snapshot_;
-  bool dirty_ = true;
   std::vector<SymbolId> count_symbols_;
   std::vector<Id> symbol_scc_;
   std::vector<Id> rule_scc_;
