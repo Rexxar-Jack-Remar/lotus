@@ -1,6 +1,7 @@
 #include "CFL/Classical/Clients/Alias/AliasClient.h"
 
 #include "CFL/Classical/Core/Validation.h"
+#include "CFL/Classical/Solvers/Engines/POCR/ClientGrammars.h"
 
 #include <algorithm>
 #include <cctype>
@@ -65,6 +66,53 @@ std::string aliasReverseLabel(const AliasConstraintEdge &edge) {
   }
 
   throw std::logic_error("Invalid alias edge kind value");
+}
+
+std::string cflPegForwardLabel(const AliasConstraintEdge &edge) {
+  switch (edge.kind) {
+  case AliasConstraintEdgeKind::Addr:
+    // POCR's physical d edge runs from a pointer to its dereference.
+    return "dbar";
+  case AliasConstraintEdgeKind::Copy:
+  case AliasConstraintEdgeKind::VariantGep:
+    return "a";
+  case AliasConstraintEdgeKind::NormalGep:
+    if (edge.attribute.value_or(0) == 0) {
+      return "a";
+    }
+    return "f_" + std::to_string(
+                      edge.attribute.value_or(static_cast<std::uint32_t>(0)));
+  case AliasConstraintEdgeKind::Store:
+  case AliasConstraintEdgeKind::Load:
+  case AliasConstraintEdgeKind::MemoryTransfer:
+    throw std::logic_error("Constraint must be lowered before POCR encoding");
+  }
+  throw std::logic_error("Invalid alias edge kind value");
+}
+
+std::string cflPegReverseLabel(const AliasConstraintEdge &edge) {
+  switch (edge.kind) {
+  case AliasConstraintEdgeKind::Addr:
+    return "d";
+  case AliasConstraintEdgeKind::Copy:
+  case AliasConstraintEdgeKind::VariantGep:
+    return "abar";
+  case AliasConstraintEdgeKind::NormalGep:
+    if (edge.attribute.value_or(0) == 0) {
+      return "abar";
+    }
+    return "fbar_" + std::to_string(edge.attribute.value_or(
+                         static_cast<std::uint32_t>(0)));
+  case AliasConstraintEdgeKind::Store:
+  case AliasConstraintEdgeKind::Load:
+  case AliasConstraintEdgeKind::MemoryTransfer:
+    throw std::logic_error("Constraint must be lowered before POCR encoding");
+  }
+  throw std::logic_error("Invalid alias edge kind value");
+}
+
+bool isPegEncoding(AliasEncodingMode mode) {
+  return mode == AliasEncodingMode::PEG || mode == AliasEncodingMode::CFLPEG;
 }
 
 void addBidirectionalEdge(LabeledGraph &graph, std::size_t source,
@@ -368,6 +416,52 @@ LabeledGraph encodePegGraph(const AliasConstraintGraph &graph) {
   return encoded;
 }
 
+LabeledGraph encodeCflPegGraph(const AliasConstraintGraph &graph) {
+  LabeledGraph encoded;
+  for (const std::string &name : graph.nodeNames()) {
+    encoded.addVertex(name);
+  }
+
+  std::unordered_map<std::size_t, std::vector<std::size_t>> dereference_nodes;
+  for (const AliasConstraintEdge &edge : graph.edges()) {
+    if (edge.kind == AliasConstraintEdgeKind::Addr) {
+      dereference_nodes[edge.target].push_back(edge.source);
+    }
+  }
+  auto dereferences =
+      [&](std::size_t pointer) -> const std::vector<std::size_t> & {
+    auto &result = dereference_nodes[pointer];
+    if (result.empty()) {
+      const std::size_t dereference = encoded.addVertex(
+          "cfl_peg_deref_" + std::to_string(pointer) + "_synthetic");
+      addBidirectionalEdge(encoded, dereference, pointer, "dbar", "d");
+      result.push_back(dereference);
+    }
+    return result;
+  };
+
+  for (const AliasConstraintEdge &edge : graph.edges()) {
+    if (edge.kind == AliasConstraintEdgeKind::MemoryTransfer) {
+      continue;
+    }
+    if (edge.kind == AliasConstraintEdgeKind::Store) {
+      for (std::size_t dereference : dereferences(edge.target)) {
+        addBidirectionalEdge(encoded, edge.source, dereference, "a", "abar");
+      }
+      continue;
+    }
+    if (edge.kind == AliasConstraintEdgeKind::Load) {
+      for (std::size_t dereference : dereferences(edge.source)) {
+        addBidirectionalEdge(encoded, dereference, edge.target, "a", "abar");
+      }
+      continue;
+    }
+    addBidirectionalEdge(encoded, edge.source, edge.target,
+                         cflPegForwardLabel(edge), cflPegReverseLabel(edge));
+  }
+  return encoded;
+}
+
 Grammar buildPagGrammar(const AliasConstraintGraph &graph) {
   return Grammar::parseFromText(buildPagGrammarText(graph));
 }
@@ -376,8 +470,17 @@ Grammar buildPegGrammar(const AliasConstraintGraph &graph) {
   return Grammar::parseFromText(buildPegGrammarText(graph));
 }
 
+Grammar buildStandardAliasGrammar(const AliasConstraintGraph &graph) {
+  return engines::buildPocrClientGrammar(
+      engines::PocrClientGrammar::StandardAlias, encodeCflPegGraph(graph));
+}
+
 AliasClient AliasClient::fromConstraintGraph(const AliasConstraintGraph &graph,
                                              AliasEncodingMode mode) {
+  if (mode == AliasEncodingMode::CFLPEG) {
+    return AliasClient(encodeCflPegGraph(graph),
+                       buildStandardAliasGrammar(graph), graph, mode);
+  }
   if (mode == AliasEncodingMode::PEG) {
     return AliasClient(encodePegGraph(graph), buildPegGrammar(graph), graph,
                        mode);
@@ -393,11 +496,24 @@ AliasClient::AliasClient(LabeledGraph graph, Grammar grammar,
       constraints_(std::move(constraints)), mode_(mode),
       next_synthetic_dereference_(state_->graph.vertexCount()) {
   while (constraints_.nodeNames().size() < state_->graph.vertexCount()) {
-    constraints_.addNode("peg_internal_" +
+    constraints_.addNode("alias_internal_" +
                          std::to_string(constraints_.nodeNames().size()));
   }
+  solver_nodes_.resize(state_->graph.vertexCount());
+  std::iota(solver_nodes_.begin(), solver_nodes_.end(), 0);
   initializePegDereferences();
   initializeGepAttributes();
+  simplification_statistics_.original_nodes = state_->graph.vertexCount();
+  simplification_statistics_.original_edges = state_->graph.edgeCount();
+  simplification_statistics_.reduced_nodes = state_->graph.vertexCount();
+  simplification_statistics_.reduced_edges = state_->graph.edgeCount();
+  if (mode_ == AliasEncodingMode::CFLPEG) {
+    GraphSimplificationResult simplified = simplifyGraph(
+        state_->graph, {GraphSimplificationFlavor::Alias, true, true, false});
+    solver_nodes_ = simplified.representative;
+    simplification_statistics_ = simplified.statistics;
+    state_->graph = std::move(simplified.graph);
+  }
 }
 
 AliasClient::~AliasClient() = default;
@@ -408,6 +524,8 @@ AliasClient::AliasClient(AliasClient &&other) noexcept
       peg_dereferences_(std::move(other.peg_dereferences_)),
       next_synthetic_dereference_(other.next_synthetic_dereference_),
       gep_attributes_(std::move(other.gep_attributes_)),
+      solver_nodes_(std::move(other.solver_nodes_)),
+      simplification_statistics_(other.simplification_statistics_),
       grammar_dirty_(other.grammar_dirty_),
       points_to_(std::move(other.points_to_)),
       location_nodes_(std::move(other.location_nodes_)),
@@ -416,7 +534,8 @@ AliasClient::AliasClient(AliasClient &&other) noexcept
       address_objects_(std::move(other.address_objects_)),
       address_object_sources_(std::move(other.address_object_sources_)),
       address_objects_valid_(other.address_objects_valid_),
-      session_(std::move(other.session_)), backend_(std::move(other.backend_)) {}
+      session_(std::move(other.session_)), backend_(std::move(other.backend_)) {
+}
 
 AliasClient &AliasClient::operator=(AliasClient &&other) noexcept {
   if (this == &other) {
@@ -429,6 +548,8 @@ AliasClient &AliasClient::operator=(AliasClient &&other) noexcept {
   peg_dereferences_ = std::move(other.peg_dereferences_);
   next_synthetic_dereference_ = other.next_synthetic_dereference_;
   gep_attributes_ = std::move(other.gep_attributes_);
+  solver_nodes_ = std::move(other.solver_nodes_);
+  simplification_statistics_ = other.simplification_statistics_;
   grammar_dirty_ = other.grammar_dirty_;
   points_to_ = std::move(other.points_to_);
   location_nodes_ = std::move(other.location_nodes_);
@@ -449,6 +570,24 @@ const Grammar &AliasClient::grammar() const {
     const_cast<AliasClient *>(this)->rebuildGrammar();
   }
   return state_->grammar;
+}
+
+std::vector<std::pair<std::size_t, std::size_t>>
+AliasClient::addressEdges() const {
+  std::vector<std::pair<std::size_t, std::size_t>> result;
+  for (const AliasConstraintEdge &edge : constraints_.edges()) {
+    if (edge.kind == AliasConstraintEdgeKind::Addr) {
+      result.emplace_back(edge.source, edge.target);
+    }
+  }
+  return result;
+}
+
+std::size_t AliasClient::solverNode(std::size_t semantic_node) const {
+  if (semantic_node >= solver_nodes_.size()) {
+    throw std::out_of_range("Alias semantic node is out of range");
+  }
+  return solver_nodes_[semantic_node];
 }
 
 ReachabilityStats AliasClient::solve(SolverBackend backend) {
@@ -608,8 +747,7 @@ ReachabilityStats AliasClient::solveToFixedPoint(
         current.endpoint_quotient_max_scc_rules;
     if (aggregate.endpoint_quotient_per_rule.size() !=
         current.endpoint_quotient_per_rule.size()) {
-      aggregate.endpoint_quotient_per_rule =
-          current.endpoint_quotient_per_rule;
+      aggregate.endpoint_quotient_per_rule = current.endpoint_quotient_per_rule;
     } else {
       for (std::size_t i = 0; i < current.endpoint_quotient_per_rule.size();
            ++i) {
@@ -674,24 +812,23 @@ std::size_t AliasClient::addInternalNode(const std::string &name) {
   const std::size_t semantic_node = constraints_.addNode(name);
   if (session_) {
     const std::size_t graph_node = session_->addNode(name);
-    if (semantic_node != graph_node) {
-      throw std::logic_error("Alias semantic and encoded node IDs diverged");
-    }
-    return graph_node;
+    solver_nodes_.push_back(graph_node);
+    return semantic_node;
   }
   const std::size_t node = state_->graph.addVertex(name);
-  if (semantic_node != node) {
+  solver_nodes_.push_back(node);
+  if (mode_ != AliasEncodingMode::CFLPEG && semantic_node != node) {
     throw std::logic_error("Alias semantic and encoded node IDs diverged");
   }
-  return node;
+  return semantic_node;
 }
 
 bool AliasClient::addConstraint(std::size_t source, std::size_t target,
                                 AliasConstraintEdgeKind kind,
                                 std::optional<std::uint32_t> attribute,
                                 std::optional<std::uint32_t> modulus) {
-  if (source >= state_->graph.vertexCount() ||
-      target >= state_->graph.vertexCount()) {
+  if (source >= constraints_.nodeNames().size() ||
+      target >= constraints_.nodeNames().size()) {
     throw std::out_of_range("Alias constraint endpoint is out of range");
   }
   if (kind == AliasConstraintEdgeKind::NormalGep && !attribute) {
@@ -716,34 +853,43 @@ bool AliasClient::addConstraint(std::size_t source, std::size_t target,
   if (kind == AliasConstraintEdgeKind::MemoryTransfer) {
     return semantic_change;
   }
-  if (mode_ == AliasEncodingMode::PEG &&
-      kind == AliasConstraintEdgeKind::Store) {
+  if (isPegEncoding(mode_) && kind == AliasConstraintEdgeKind::Store) {
     bool changed = false;
     for (std::size_t dereference : ensurePegDereferences(target)) {
+      const char *forward = mode_ == AliasEncodingMode::CFLPEG ? "a" : "copy";
+      const char *reverse =
+          mode_ == AliasEncodingMode::CFLPEG ? "abar" : "copybar";
       changed =
-          addEncodedEdge(source, dereference, "copy", "copybar") || changed;
+          addEncodedEdge(source, dereference, forward, reverse) || changed;
     }
     return changed || semantic_change;
   }
-  if (mode_ == AliasEncodingMode::PEG &&
-      kind == AliasConstraintEdgeKind::Load) {
+  if (isPegEncoding(mode_) && kind == AliasConstraintEdgeKind::Load) {
     bool changed = false;
     for (std::size_t dereference : ensurePegDereferences(source)) {
+      const char *forward = mode_ == AliasEncodingMode::CFLPEG ? "a" : "copy";
+      const char *reverse =
+          mode_ == AliasEncodingMode::CFLPEG ? "abar" : "copybar";
       changed =
-          addEncodedEdge(dereference, target, "copy", "copybar") || changed;
+          addEncodedEdge(dereference, target, forward, reverse) || changed;
     }
     return changed || semantic_change;
   }
   if (kind == AliasConstraintEdgeKind::NormalGep && attribute &&
-      !state_->grammar.isTerminal("gep_" + std::to_string(*attribute))) {
+      !state_->grammar.isTerminal(
+          (mode_ == AliasEncodingMode::CFLPEG ? "f_" : "gep_") +
+          std::to_string(*attribute))) {
     registerGepAttributes({*attribute});
   }
   const AliasConstraintEdge edge{source, target, kind, attribute, modulus};
-  const std::string forward = aliasForwardLabel(edge);
-  const std::string reverse = aliasReverseLabel(edge);
+  const std::string forward = mode_ == AliasEncodingMode::CFLPEG
+                                  ? cflPegForwardLabel(edge)
+                                  : aliasForwardLabel(edge);
+  const std::string reverse = mode_ == AliasEncodingMode::CFLPEG
+                                  ? cflPegReverseLabel(edge)
+                                  : aliasReverseLabel(edge);
   const bool changed = addEncodedEdge(source, target, forward, reverse);
-  if (mode_ == AliasEncodingMode::PEG &&
-      kind == AliasConstraintEdgeKind::Addr) {
+  if (isPegEncoding(mode_) && kind == AliasConstraintEdgeKind::Addr) {
     auto &dereferences = peg_dereferences_[target];
     if (std::find(dereferences.begin(), dereferences.end(), source) ==
         dereferences.end()) {
@@ -779,13 +925,19 @@ bool AliasClient::addEncodedEdge(std::size_t source, std::size_t target,
     throw std::invalid_argument(
         "Constraint attribute was not present when the grammar was built");
   }
+  const std::size_t graph_source = solverNode(source);
+  const std::size_t graph_target = solverNode(target);
   if (!session_) {
-    const bool first = state_->graph.addEdge(source, target, forward);
-    const bool second = state_->graph.addEdge(target, source, reverse);
+    const bool first =
+        state_->graph.addEdge(graph_source, graph_target, forward);
+    const bool second =
+        state_->graph.addEdge(graph_target, graph_source, reverse);
     return first || second;
   }
-  const bool first = session_->addTerminalEdge(source, target, forward);
-  const bool second = session_->addTerminalEdge(target, source, reverse);
+  const bool first =
+      session_->addTerminalEdge(graph_source, graph_target, forward);
+  const bool second =
+      session_->addTerminalEdge(graph_target, graph_source, reverse);
   return first || second;
 }
 
@@ -800,17 +952,23 @@ AliasClient::ensurePegDereferences(std::size_t pointer) {
                            "_incremental_" +
                            std::to_string(next_synthetic_dereference_++);
   const std::size_t dereference = addInternalNode(name);
-  addEncodedEdge(dereference, pointer, "addr", "addrbar");
+  if (mode_ == AliasEncodingMode::CFLPEG) {
+    addEncodedEdge(dereference, pointer, "dbar", "d");
+  } else {
+    addEncodedEdge(dereference, pointer, "addr", "addrbar");
+  }
   dereferences.push_back(dereference);
   return dereferences;
 }
 
 void AliasClient::initializePegDereferences() {
   peg_dereferences_.clear();
-  if (mode_ != AliasEncodingMode::PEG) {
+  if (!isPegEncoding(mode_)) {
     return;
   }
-  for (const auto &[source, target] : state_->graph.edgesForLabel("addr")) {
+  const std::string label =
+      mode_ == AliasEncodingMode::CFLPEG ? "dbar" : "addr";
+  for (const auto &[source, target] : state_->graph.edgesForLabel(label)) {
     peg_dereferences_[target].push_back(source);
   }
 }
@@ -819,11 +977,13 @@ void AliasClient::initializeGepAttributes() {
   gep_attributes_.clear();
   gep_attributes_.insert(0);
   for (const auto &[label, _] : state_->graph.symbolPairs()) {
-    if (label.rfind("gep_", 0) != 0 || label.size() <= 4) {
+    const std::string prefix =
+        mode_ == AliasEncodingMode::CFLPEG ? "f_" : "gep_";
+    if (label.rfind(prefix, 0) != 0 || label.size() <= prefix.size()) {
       continue;
     }
-    if (const auto attribute =
-            parseAttributeValue(std::string_view(label).substr(4))) {
+    if (const auto attribute = parseAttributeValue(
+            std::string_view(label).substr(prefix.size()))) {
       gep_attributes_.insert(*attribute);
     }
   }
@@ -858,9 +1018,11 @@ void AliasClient::rebuildGrammar() {
     shape.addEdge(source, target, AliasConstraintEdgeKind::NormalGep,
                   attribute);
   }
-  Grammar extended_grammar = mode_ == AliasEncodingMode::PEG
-                                 ? buildPegGrammar(shape)
-                                 : buildPagGrammar(shape);
+  Grammar extended_grammar =
+      mode_ == AliasEncodingMode::CFLPEG
+          ? buildStandardAliasGrammar(shape)
+          : (mode_ == AliasEncodingMode::PEG ? buildPegGrammar(shape)
+                                             : buildPagGrammar(shape));
   const std::optional<SolverBackend> active_backend = backend_;
   session_.reset();
   state_->grammar = std::move(extended_grammar);
@@ -880,8 +1042,8 @@ bool AliasClient::mayAlias(std::size_t lhs, std::size_t rhs) const {
   if (!session_) {
     throw std::logic_error("solve() has not been called");
   }
-  if (lhs >= state_->graph.vertexCount() ||
-      rhs >= state_->graph.vertexCount()) {
+  if (lhs >= constraints_.nodeNames().size() ||
+      rhs >= constraints_.nodeNames().size()) {
     return false;
   }
   if (!points_to_valid_) {
@@ -898,11 +1060,11 @@ bool AliasClient::mayValueAlias(std::size_t lhs, std::size_t rhs) const {
   if (!session_) {
     throw std::logic_error("solve() has not been called");
   }
-  if (lhs >= state_->graph.vertexCount() ||
-      rhs >= state_->graph.vertexCount()) {
+  if (lhs >= constraints_.nodeNames().size() ||
+      rhs >= constraints_.nodeNames().size()) {
     return false;
   }
-  return session_->contains(lhs, rhs, "V");
+  return session_->contains(solverNode(lhs), solverNode(rhs), "V");
 }
 
 std::vector<std::size_t>
@@ -910,7 +1072,7 @@ AliasClient::addressTakenObjects(std::size_t ptr) const {
   if (!session_) {
     throw std::logic_error("solve() has not been called");
   }
-  if (ptr >= state_->graph.vertexCount()) {
+  if (ptr >= constraints_.nodeNames().size()) {
     return {};
   }
   indexAddressTakenObjects({ptr});
@@ -948,12 +1110,12 @@ AliasClient::matchingAddressTakenObjects(
   }
   std::unordered_map<std::size_t, std::vector<std::size_t>> result;
   for (std::size_t pointer : pointers) {
-    if (pointer >= state_->graph.vertexCount()) {
+    if (pointer >= constraints_.nodeNames().size()) {
       continue;
     }
     auto &objects = result[pointer];
     for (const auto &[object, address_pointer] : object_pointer_candidates) {
-      if (address_pointer < state_->graph.vertexCount() &&
+      if (address_pointer < constraints_.nodeNames().size() &&
           mayValueAlias(pointer, address_pointer)) {
         objects.push_back(object);
       }
@@ -971,7 +1133,7 @@ void AliasClient::indexAddressTakenObjects(
   }
   std::unordered_set<std::size_t> pending;
   for (std::size_t pointer : pointers) {
-    if (pointer < state_->graph.vertexCount() &&
+    if (pointer < constraints_.nodeNames().size() &&
         address_object_sources_.insert(pointer).second) {
       pending.insert(pointer);
     }
@@ -981,12 +1143,15 @@ void AliasClient::indexAddressTakenObjects(
   }
 
   std::unordered_map<std::size_t, std::vector<std::size_t>> objects_by_pointer;
-  for (const auto &[object, pointer] : state_->graph.edgesForLabel("addr")) {
-    objects_by_pointer[pointer].push_back(object);
+  for (const AliasConstraintEdge &edge : constraints_.edges()) {
+    if (edge.kind == AliasConstraintEdgeKind::Addr) {
+      objects_by_pointer[edge.target].push_back(edge.source);
+    }
   }
   std::unordered_map<std::size_t, std::set<std::size_t>> unique_objects;
   auto project_pair = [&](std::size_t source, std::size_t target) {
-    if (pending.count(source) == 0 || target >= state_->graph.vertexCount()) {
+    if (pending.count(source) == 0 ||
+        target >= constraints_.nodeNames().size()) {
       return;
     }
     const auto objects = objects_by_pointer.find(target);
@@ -998,10 +1163,19 @@ void AliasClient::indexAddressTakenObjects(
   };
 
   const SymbolId value_symbol = state_->grammar.symbolId("V");
-  for (NodeId source : pending)
+  std::vector<std::vector<std::size_t>> semantic_nodes_by_solver(
+      state_->graph.vertexCount());
+  for (std::size_t semantic = 0; semantic < solver_nodes_.size(); ++semantic) {
+    semantic_nodes_by_solver.at(solver_nodes_[semantic]).push_back(semantic);
+  }
+  for (NodeId source : pending) {
     session_->relation().forEachSuccessor(
-        value_symbol, source,
-        [&](NodeId target) { project_pair(source, target); });
+        value_symbol, solverNode(source), [&](NodeId graph_target) {
+          for (std::size_t target : semantic_nodes_by_solver[graph_target]) {
+            project_pair(source, target);
+          }
+        });
+  }
 
   for (auto &[pointer, objects] : unique_objects) {
     address_objects_[pointer] =
@@ -1013,7 +1187,7 @@ std::vector<std::size_t> AliasClient::pointsTo(std::size_t ptr) const {
   if (!session_) {
     throw std::logic_error("solve() has not been called");
   }
-  if (ptr >= state_->graph.vertexCount()) {
+  if (ptr >= constraints_.nodeNames().size()) {
     return {};
   }
   if (!points_to_valid_) {
@@ -1320,7 +1494,7 @@ void AliasClient::rebuildPointsTo() const {
   }
 
   const std::size_t pointer_count = points_to_.size();
-  std::size_t next_virtual_object = state_->graph.vertexCount();
+  std::size_t next_virtual_object = constraints_.nodeNames().size();
   for (std::size_t pointer = 0; pointer < pointer_count; ++pointer) {
     for (unsigned location_id : point_bits[pointer]) {
       points_to_[pointer].insert(locations[location_id]);

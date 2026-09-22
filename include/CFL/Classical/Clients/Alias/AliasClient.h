@@ -1,5 +1,6 @@
 #pragma once
 
+#include "CFL/Classical/Solvers/Preprocessing/GraphSimplification.h"
 #include "CFL/Classical/Solvers/SolverSession.h"
 
 #include <cstddef>
@@ -55,14 +56,21 @@ private:
 };
 
 enum class AliasEncodingMode {
+  /// Lotus's constraint-level PAG grammar.
   PAG,
+  /// Lotus's extended PEG grammar, including ArrayPath and Memcpy summaries.
   PEG,
+  /// The standard CFL alias PEG (a/d/f_i) plus client graph reductions.
+  /// This is the POCR artifact's analysis, not a compressed form of PEG.
+  CFLPEG,
 };
 
 LabeledGraph encodePagGraph(const AliasConstraintGraph &graph);
 LabeledGraph encodePegGraph(const AliasConstraintGraph &graph);
+LabeledGraph encodeCflPegGraph(const AliasConstraintGraph &graph);
 Grammar buildPagGrammar(const AliasConstraintGraph &graph);
 Grammar buildPegGrammar(const AliasConstraintGraph &graph);
+Grammar buildStandardAliasGrammar(const AliasConstraintGraph &graph);
 
 class AliasClient {
 public:
@@ -74,7 +82,7 @@ public:
 
   static AliasClient
   fromConstraintGraph(const AliasConstraintGraph &graph,
-                      AliasEncodingMode mode = AliasEncodingMode::PAG);
+                      AliasEncodingMode mode = AliasEncodingMode::CFLPEG);
 
   ReachabilityStats solve(SolverBackend backend = SolverBackend::SparseSet);
   /// Alternate solving with a client-supplied discovery policy. The callback
@@ -118,6 +126,11 @@ public:
 
   const LabeledGraph &graph() const;
   const Grammar &grammar() const;
+  /// Address-of constraints in semantic (pre-reduction) node IDs.
+  std::vector<std::pair<std::size_t, std::size_t>> addressEdges() const;
+  const GraphSimplificationStatistics &simplificationStatistics() const {
+    return simplification_statistics_;
+  }
 
 private:
   AliasClient(LabeledGraph graph, Grammar grammar,
@@ -142,6 +155,7 @@ private:
   void initializePegDereferences();
   void initializeGepAttributes();
   void rebuildGrammar();
+  std::size_t solverNode(std::size_t semantic_node) const;
   void rebuildPointsTo() const;
   void indexAddressTakenObjects(const std::vector<std::size_t> &pointers) const;
   bool pointsToOverlap(std::size_t lhs, std::size_t rhs) const;
@@ -155,6 +169,8 @@ private:
   std::unordered_map<std::size_t, std::vector<std::size_t>> peg_dereferences_;
   std::size_t next_synthetic_dereference_ = 0;
   std::set<std::uint32_t> gep_attributes_;
+  std::vector<std::size_t> solver_nodes_;
+  GraphSimplificationStatistics simplification_statistics_;
   bool grammar_dirty_ = false;
   mutable std::vector<std::set<AbstractLocation>> points_to_;
   mutable std::map<AbstractLocation, std::size_t> location_nodes_;

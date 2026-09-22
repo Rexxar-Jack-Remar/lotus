@@ -65,7 +65,11 @@ Clients and preprocessing
    running the standard alias client grammar, which preserves POCR's horizontal
    propagation, symmetric ``V``/``M`` facts, dereference matching, and
    attributed field matching. ``AliasClient`` is the sole alias client and
-   selects backends through ``solve``/``solveToFixedPoint``.
+   selects backends through ``solve``/``solveToFixedPoint``. The LLVM alias
+   adapter defaults every backend to the CFL-oriented PEG encoding and runs
+   direct SCC elimination plus PEG folding. Subsequent indirect-call
+   constraints are projected through the retained representative map and
+   solved incrementally without an unsound re-fold.
 
 ``StdVFA``/``PocrVFA``/``FocrVFA``
    The grammar-driven path covers all three. ``PocrVFA`` and ``FocrVFA`` are

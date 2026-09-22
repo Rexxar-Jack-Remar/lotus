@@ -49,8 +49,13 @@ labels.
      --query main::source,main::sink module.bc
 
 Use ``--solver pocr``, ``--solver hpocr``, or ``--solver focr`` to select the
-ported POCR algorithm families. The same selectors are available to the alias
-and value-flow clients.
+ported POCR algorithm families. The alias driver defaults every backend to the
+same ``cfl-peg`` client pipeline: the standard alias grammar, SCC elimination,
+and PEG folding. ``--encoding pag`` and ``--encoding peg`` explicitly select
+Lotus's distinct PAG grammar or extended PEG grammar (with ``ArrayPath`` and
+``Memcpy`` summaries). These modes do not compute identical grammar relations;
+``cfl-peg`` is not merely a compressed spelling of ``peg``. The same solver
+selectors are available to the value-flow client.
 
 Use ``--solver skewed`` to select PLDI 2024 skewed tabulation through the same
 complete-relation client interface.

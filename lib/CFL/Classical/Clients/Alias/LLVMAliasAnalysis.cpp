@@ -153,8 +153,7 @@ public:
         mapped_function_pointers.push_back(synchronizer_->mappedNode(pointer));
       }
       std::vector<std::pair<std::size_t, std::size_t>> function_addresses;
-      for (const auto &[object, pointer] :
-           client_->graph().edgesForLabel("addr")) {
+      for (const auto &[object, pointer] : client_->addressEdges()) {
         const auto source = synchronizer_->sourceNode(object);
         if (!source || *source >= graph->getNodeNum()) {
           continue;
@@ -207,9 +206,8 @@ public:
       return unknown_changed || calls_changed || constraints_changed ||
              supplemental_changed;
     };
-    statistics_ =
-        client_->solveToFixedPoint(options_.backend, discover_constraints,
-                                   options_.max_callgraph_rounds);
+    statistics_ = client_->solveToFixedPoint(
+        options_.backend, discover_constraints, options_.max_callgraph_rounds);
     statistics_.frontend_time_microseconds = frontend_time_microseconds_;
     statistics_.client_initialization_microseconds =
         client_initialization_microseconds_;

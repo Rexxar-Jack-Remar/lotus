@@ -32,8 +32,8 @@ void usage(std::ostream &stream) {
             "Options:\n"
             "  --solver sparse-set|sparse-bitvector|graspan|sqid|pearl|"
             "skewed|cat|iea|iea-ocr|transitive-closure|pocr|hpocr|focr|"
-            "endpoint-quotient\n"
-            "  --encoding pag|peg\n"
+            "endpoint-quotient|cert-cfl\n"
+            "  --encoding pag|peg|cfl-peg\n"
             "  --entry FUNCTION\n"
             "  --max-callgraph-rounds N\n"
             "  --query LHS,RHS\n"
@@ -60,6 +60,8 @@ Options parseOptions(int argc, char **argv) {
         options.analysis.encoding = AliasEncodingMode::PAG;
       } else if (selected == "peg") {
         options.analysis.encoding = AliasEncodingMode::PEG;
+      } else if (selected == "cfl-peg") {
+        options.analysis.encoding = AliasEncodingMode::CFLPEG;
       } else {
         throw std::invalid_argument("Unknown encoding: " + selected);
       }
@@ -236,6 +238,18 @@ const char *endpointQuotientSccClass(std::size_t classification) {
   }
 }
 
+const char *aliasEncodingName(const LLVMAliasOptions &options) {
+  switch (options.encoding) {
+  case AliasEncodingMode::PAG:
+    return "pag";
+  case AliasEncodingMode::PEG:
+    return "peg";
+  case AliasEncodingMode::CFLPEG:
+    return "cfl-peg";
+  }
+  return "unknown";
+}
+
 void printEndpointQuotientProfiles(std::ostream &stream,
                                    const ReachabilityStats &stats) {
   stream << ",\"eq_rule_profiles\":[";
@@ -301,6 +315,8 @@ int main(int argc, char **argv) {
 
     LLVMCFLAliasAnalysis analysis(options.analysis);
     const ReachabilityStats stats = analysis.analyze(*module);
+    const GraphSimplificationStatistics &simplification =
+        analysis.client().simplificationStatistics();
     if (!options.query_lhs.empty()) {
       const llvm::Value *lhs = findNamedValue(*module, options.query_lhs);
       const llvm::Value *rhs = findNamedValue(*module, options.query_rhs);
@@ -321,11 +337,11 @@ int main(int argc, char **argv) {
     }
     if (options.json_stats) {
       std::cout << "{\"solver\":\"" << solverBackendName(options.analysis.backend)
-                << "\",\"encoding\":\""
-                << (options.analysis.encoding == AliasEncodingMode::PAG ? "pag"
-                                                                        : "peg")
+                << "\",\"encoding\":\"" << aliasEncodingName(options.analysis)
                 << "\",\"nodes\":" << stats.graph_nodes
                 << ",\"base_edges\":" << stats.base_graph_edges
+                << ",\"grammar_symbols\":" << stats.grammar_symbols
+                << ",\"grammar_productions\":" << stats.grammar_productions
                 << ",\"relation_edges\":" << stats.relation_edges
                 << ",\"start_edges\":" << stats.start_symbol_edges
                 << ",\"callgraph_rounds\":" << stats.solver_rounds
@@ -334,6 +350,15 @@ int main(int argc, char **argv) {
                 << ",\"pocr_tree_nodes\":" << stats.pocr_tree_nodes
                 << ",\"pocr_traversal_steps\":" << stats.pocr_traversal_steps
                 << ",\"pocr_tree_join_visits\":" << stats.pocr_tree_join_visits
+                << ",\"preprocess_input_nodes\":"
+                << simplification.original_nodes
+                << ",\"preprocess_reduced_nodes\":"
+                << simplification.reduced_nodes
+                << ",\"scc_nodes_merged\":"
+                << simplification.scc_nodes_merged
+                << ",\"folded_nodes\":" << simplification.folded_nodes
+                << ",\"deref_nodes_merged\":"
+                << simplification.common_dereference_nodes_merged
                 << ",\"focr_critical_edges\":"
                 << stats.fully_ordered_critical_edges
                 << ",\"focr_reachability_checks\":"
@@ -391,11 +416,11 @@ int main(int argc, char **argv) {
                 << ",\"solve_us\":" << stats.solve_time_microseconds << "}\n";
     } else {
       std::cout << "solver=" << solverBackendName(options.analysis.backend)
-                << " encoding="
-                << (options.analysis.encoding == AliasEncodingMode::PAG ? "pag"
-                                                                        : "peg")
+                << " encoding=" << aliasEncodingName(options.analysis)
                 << " nodes=" << stats.graph_nodes
                 << " base_edges=" << stats.base_graph_edges
+                << " grammar_symbols=" << stats.grammar_symbols
+                << " grammar_productions=" << stats.grammar_productions
                 << " relation_edges=" << stats.relation_edges
                 << " start_edges=" << stats.start_symbol_edges
                 << " callgraph_rounds=" << stats.solver_rounds
@@ -403,6 +428,13 @@ int main(int argc, char **argv) {
                 << " pocr_tree_nodes=" << stats.pocr_tree_nodes
                 << " pocr_traversal_steps=" << stats.pocr_traversal_steps
                 << " pocr_tree_join_visits=" << stats.pocr_tree_join_visits
+                << " preprocess_input_nodes=" << simplification.original_nodes
+                << " preprocess_reduced_nodes=" << simplification.reduced_nodes
+                << " scc_nodes_merged="
+                << simplification.scc_nodes_merged
+                << " folded_nodes=" << simplification.folded_nodes
+                << " deref_nodes_merged="
+                << simplification.common_dereference_nodes_merged
                 << " focr_critical_edges=" << stats.fully_ordered_critical_edges
                 << " focr_tree_join_visits="
                 << stats.fully_ordered_tree_join_visits

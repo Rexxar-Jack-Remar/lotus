@@ -16,7 +16,7 @@ class Value;
 namespace lotus::cfl::classical {
 
 struct LLVMAliasOptions {
-  AliasEncodingMode encoding = AliasEncodingMode::PAG;
+  AliasEncodingMode encoding = AliasEncodingMode::CFLPEG;
   SolverBackend backend = SolverBackend::SparseBitVector;
   std::string entry = "main";
   std::size_t max_callgraph_rounds = 64;
