@@ -27,7 +27,7 @@ option(LOTUS_ENABLE_FPSOLVE
 option(LOTUS_ENABLE_WALI_OPENNWA
        "Build the vendored WALi/OpenNWA library under third-party/WALi-OpenNWA"
        OFF)
-option(LOTUS_ENABLE_CFL "Build CFL reachability solvers" OFF)
+option(LOTUS_ENABLE_CFL "Build CFL reachability solvers" ON)
 option(LOTUS_ENABLE_CSR
        "Build the indexing context-sensitive reachability solver" OFF)
 option(LOTUS_ENABLE_OWL "Build Owl SMT solver" OFF)

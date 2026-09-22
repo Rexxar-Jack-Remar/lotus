@@ -38,7 +38,7 @@ Lotus exposes its build options through `cmake/LotusOptions.cmake` with a consis
 | `LOTUS_ENABLE_HORN_ICE` | OFF | Horn-ICE tools |
 | `LOTUS_ENABLE_PDAAAL` | OFF | PDAAAL weighted PDS reachability library |
 | `LOTUS_ENABLE_DYNAA` | OFF | Dynamic alias-analysis tools |
-| `LOTUS_ENABLE_CFL` | OFF | CFL reachability |
+| `LOTUS_ENABLE_CFL` | ON | CFL reachability |
 | `LOTUS_ENABLE_CSR` | OFF | CSR tools |
 | `LOTUS_ENABLE_OWL` | OFF | OWL integration |
 | `LOTUS_DOWNLOAD_BOOST` | OFF | Auto-download Boost |
