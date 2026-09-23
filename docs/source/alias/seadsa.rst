@@ -36,7 +36,7 @@ Usage
    ./build/bin/lotus-alias-seadsa-tool --sea-dsa-dot --outdir results/ example.bc
 
 lotus-alias-sea-dsa-dg
-----------
+----------------------
 
 A simple tool for generating memory graphs using Sea-DSA analysis.
 
@@ -52,7 +52,7 @@ This tool provides a straightforward interface to the Sea-DSA analysis for
 generating memory graphs that can be visualized using Graphviz.
 
 lotus-alias-seadsa-tool
------------
+-----------------------
 
 Advanced Sea-DSA analysis tool with comprehensive memory graph analysis
 capabilities.

@@ -85,7 +85,7 @@ See :doc:`../ir/index` for builder APIs and code snippets.
   precise symbolic range analysis (``lib/IR/vSSA``). See :doc:`../ir/vssa`.
 
 Machine Learning Features
-------------------------
+-------------------------
 
 See :doc:`../ml/index` for ML feature extraction APIs.
 

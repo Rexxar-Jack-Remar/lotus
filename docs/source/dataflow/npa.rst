@@ -130,7 +130,7 @@ substantially faster than Kleene iteration, achieving linear rather than logarit
 convergence.
 
 LCFL Sub-Problems and Tensor-Product Regularization
---------------------------------------------------
+---------------------------------------------------
 
 When the semiring extend (multiplication) is **non-commutative**, the linearized
 system at each Newton round has the form of an **LCFL equation system**

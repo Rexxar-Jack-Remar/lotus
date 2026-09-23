@@ -75,7 +75,7 @@ Supported Platforms
 * Z3 4.11
 
 Publications
------------
+------------
 
 * **CAV 2026**: *Sound and Precise Symbolic Automata Model for Stateful Software Systems*.  
   Xinlong Wu, Ruiyu Zhou, Peisen Yao, and Qingkai Shi.  

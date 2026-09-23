@@ -1,5 +1,5 @@
 Machine Learning Features (CanaryML)
- ====================================
+====================================
 
 This section documents the machine learning feature extraction capabilities in Lotus,
 specifically the ``CanaryML`` library for memory-related feature extraction using Sea-DSA.
@@ -29,11 +29,13 @@ features for each call site in a module.
 **LLVM Pass Name**: ``-Pmem-ml-features``
 
 **Header**:
+
 .. code-block:: cpp
 
    #include "Analysis/FeatureExtraction/MemoryMLFeatures.h"
 
 **Basic Usage**:
+
 .. code-block:: cpp
 
    #include "Analysis/FeatureExtraction/MemoryMLFeatures.h"
@@ -52,7 +54,7 @@ features for each call site in a module.
                }
            }
        }
-    }
+   }
 
 **Command-Line Options**:
 
@@ -60,7 +62,7 @@ features for each call site in a module.
   Include expensive-to-compute memory access features.
 
 Features Extracted
------------------
+------------------
 
 The pass extracts two sets of features for each call site:
 
@@ -104,7 +106,7 @@ Output format::
       ...
 
 Analysis Dependencies
---------------------
+---------------------
 
 The pass requires the following LLVM analyses:
 
@@ -114,7 +116,7 @@ The pass requires the following LLVM analyses:
 - ``DsaLibFuncInfo``
 
 Integration Notes
-----------------
+-----------------
 
 The ``MemoryMLFeaturesPass`` is part of the ``previrt`` namespace and integrates
 Sea-DSA for memory modeling. It is particularly useful for:

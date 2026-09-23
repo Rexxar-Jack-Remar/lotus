@@ -26,7 +26,7 @@ Classical CFL solving and clients
 graph. Select the engine with ``--solver``; the available backends include
 ``sparse-set``, ``sparse-bitvector``, ``graspan``, ``transitive-closure``,
 ``pocr``, ``hpocr``, ``focr``, ``pearl``, ``sqid``, ``skewed``,
-``endpoint-quotient``, ``cat``, ``iea``, and ``iea-ocr``.
+``endpoint-quotient``, ``cert``, ``cat``, ``iea``, and ``iea-ocr``.
 
 ``lotus-cfl-alias`` consumes LLVM IR or bitcode. It uses Aser as the constraint
 frontend but drives points-to propagation and indirect-call discovery through
@@ -66,6 +66,10 @@ online cycle elimination variants (``iea-ocr`` additionally applies online
 cycle reduction and minimum-equivalent graphs). ``--solver endpoint-quotient``
 selects the grammar-indexed endpoint-quotient (GEQ) compressed exact engine.
 See :doc:`/cfl/classical/cat_ieoce` for the algorithm and API details.
+
+Use ``--solver cert`` to select the cardinality-certified exact all-symbol CFL
+reachability engine. See :doc:`/cfl/classical/cert_cfl` for architecture and
+options.
 
 The general solver accepts POCR grammar/graph files and exposes
 unidirectional summarization, SCC elimination, graph folding, and inter-Dyck

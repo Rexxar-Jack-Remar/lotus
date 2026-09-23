@@ -1,5 +1,5 @@
 Annotation Framework
-===================
+====================
 
 Lotus provides annotation frameworks for specifying and analyzing program behavior. The annotation system is organized into several components for tracking argument positions, modification/reference effects, pointer effects, and taint analysis.
 
@@ -23,6 +23,7 @@ The position tracking system provides abstractions for identifying function argu
 * **APosition** – Union type that can represent either an argument or return position
 
 **Usage**:
+
 .. code-block:: cpp
 
    #include <Annotation/ArgPosition.h>
@@ -60,6 +61,7 @@ Modification and reference behavior annotations track how functions access memor
 * **ExternalModRefTablePrinter** – Utility for printing mod/ref tables
 
 **Usage**:
+
 .. code-block:: cpp
 
    #include <Annotation/ModRef/ExternalModRefTable.h>
@@ -110,6 +112,7 @@ Pointer annotations specify how functions allocate, copy, or exit with pointers.
 * **ExternalPointerTablePrinter** – Utility for printing pointer tables
 
 **Usage**:
+
 .. code-block:: cpp
 
    #include <Annotation/Pointer/ExternalPointerTable.h>
@@ -167,6 +170,7 @@ Taint analysis annotations specify information flow and taint propagation throug
 * **TaintConfigManager** – Singleton manager for taint configurations with function name normalization
 
 **Usage**:
+
 .. code-block:: cpp
 
    #include <Annotation/Taint/TaintConfigManager.h>

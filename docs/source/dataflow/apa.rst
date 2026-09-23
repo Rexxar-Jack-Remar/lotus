@@ -1,5 +1,5 @@
 Algebraic Program Analysis (APA)
-=============================
+================================
 
 ``APA`` is Lotus's elimination-based dataflow analysis (or, "algebraic program analysis") framework.
 
@@ -155,8 +155,8 @@ approach:
 | Cyclic call graphs handled by     | Cyclic SCCs use Floyd-Warshall-    |
 | re-enqueuing changed nodes        | style closure over path expressions|
 +-----------------------------------+------------------------------------+
-| Context-cached tool default       | ``--inter-engine=expanded`` selects |
-| Build once, reinterpret facts     | the global equation model          |
+| Context-cached tool default       | ``--inter-engine=expanded``        |
+| Build once, reinterpret facts     | selects the global equation model  |
 | after call/return fact updates    | (also available as a library API)  |
 +-----------------------------------+------------------------------------+
 

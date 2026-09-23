@@ -17,14 +17,14 @@ Key Differences
 ----------------
 
 +----------------------+------------------------------------------+----------------------------------------+
-| Aspect               | ``lib/Solvers/SMT/SymAbs``               | ``lib/Verification/SymAbsAI``|
+| Aspect               | ``lib/Solvers/SMT/SymAbs``               | ``lib/Verification/SymAbsAI``          |
 +======================+==========================================+========================================+
-| **Input**            | SMT bit-vector formulas (Z3 expressions) | LLVM IR (program code)                |
+| **Input**            | SMT bit-vector formulas (Z3 expressions) | LLVM IR (program code)                 |
 +----------------------+------------------------------------------+----------------------------------------+
-| **Output**           | Abstract constraints (intervals,          | Abstract domain values for LLVM values |
+| **Output**           | Abstract constraints (intervals,         | Abstract domain values for LLVM values |
 |                      | octagons, etc.)                          |                                        |
 +----------------------+------------------------------------------+----------------------------------------+
-| **Approximation**    | Converts bit-vectors to linear integer    | Works directly with program semantics  |
+| **Approximation**    | Converts bit-vectors to linear integer   | Works directly with program semantics  |
 |                      | formulas                                 |                                        |
 +----------------------+------------------------------------------+----------------------------------------+
 | **Level**            | Formula-level abstraction algorithms     | Program-level abstract interpretation  |

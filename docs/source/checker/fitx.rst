@@ -84,7 +84,7 @@ Components
 * Each detector (e.g. ``DoubleFreeDetector.cpp``, ``UseAfterFreeDetector.cpp``, ``MemoryLeakDetector.cpp``, ``ReferenceCounterDetector.cpp``) defines a typestate FSM for one bug pattern (paper Section 4.1, Table 5; Section 5: DF, DL/DUL, ML, UAF, Ref).
 
 Bug Types
---------
+=========
 
 FiTx targets well-known patterns that are FiT-analysis findable (paper Table 2, Section 5):
 

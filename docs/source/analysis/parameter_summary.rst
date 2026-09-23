@@ -10,6 +10,7 @@ effects without re-analyzing callees.
 **Implementation**: ``lib/Analysis/ParameterSummary/``
 
 **Public API**:
+
 - ``lotus::analysis::parametersummary::computeParameterEffectSummaries``
   — compute summaries for all functions in a module
 

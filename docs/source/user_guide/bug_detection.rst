@@ -651,6 +651,6 @@ See Also
 
 - :doc:`tutorials` - Hands-on examples
 - :doc:`troubleshooting` - Common issues
-- :doc:`../tools/checker` - Detailed tool documentation
+- :doc:`../tools/checker/index` - Detailed tool documentation
 - :doc:`../checker/index` - Checker selection guide and engine documentation
 - :doc:`../developer/api_reference` - Programmatic usage

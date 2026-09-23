@@ -55,15 +55,12 @@ The analysis pipeline is organized as:
    - Canonicalizes GEPs, lowers ``memcpy``, normalizes heap APIs.
    - Removes exception handlers and inserts synthetic initializers.
 2. **Constraint Collection** (``PointerAnalysis/``)
-   - Extracts five core constraint types:
-     ``addr_of``, ``copy``, ``load``, ``store``, ``offset``.
+   - Extracts five core constraint types: ``addr_of``, ``copy``, ``load``, ``store``, ``offset``.
 3. **Constraint Graph Construction**
-   - Nodes: pointer nodes (CGPtrNode), object nodes (CGObjNode),
-     SCC nodes (CGSuperNode).
+   - Nodes: pointer nodes (CGPtrNode), object nodes (CGObjNode), SCC nodes (CGSuperNode).
 4. **Solving with Context**
    - Context models: ``NoCtx``, ``KCallSite<K>``, ``KOrigin<K>``.
-   - Solver choices: WavePropagation, DeepPropagation,
-     PartialUpdateSolver.
+   - Solver choices: WavePropagation, DeepPropagation, PartialUpdateSolver.
 
 Constraint Types
 ================

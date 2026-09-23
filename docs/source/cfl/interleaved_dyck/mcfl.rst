@@ -26,6 +26,7 @@ Choosing an MCFL API
      - Typed ``G_d^circ`` or ``G_d^+`` grammar
      - Sound underapproximation
      - Pair set and statistics per dimension
+
 Exactness of ``interleaved_dyck::mcfl::Solver`` is relative to its input grammar. When the input
 grammar is ``G_d^circ`` or ``G_d^+``, the result remains an
 underapproximation of typed interleaved-Dyck reachability. Exact unary
@@ -89,7 +90,7 @@ The result exposes:
    auto path = result.witness(0, 3);
 
 Interleaved-Dyck Underapproximation
-----------------------------------
+-----------------------------------
 
 ``buildInterleavedDyckGrammar`` creates either of the paper's rank-2 grammar
 families for any positive dimension:

@@ -1,5 +1,5 @@
 SMT Theory Arbitrage (STAUB)
-===========================
+============================
 
 This section documents the ``STAUB`` (SMT Theory Arbitrage, from Unbounded to Bounded)
 library for accelerating SMT solving of unbounded constraints.
@@ -36,11 +36,13 @@ SMTFormula (STAUB variant)
 The STAUB version of SMTFormula adds bound computation and transformation.
 
 **Header**:
+
 .. code-block:: cpp
 
    #include "Solvers/SMT/STAUB/SMTFormula.h"
 
 **Constructor**:
+
 .. code-block:: cpp
 
    STAUB::SMTFormula(
@@ -52,6 +54,7 @@ The STAUB version of SMTFormula adds bound computation and transformation.
    );
 
 **Methods**:
+
 - ``ToLLVM()`` - Generate LLVM IR function
 - ``LargestIntegerConstant()`` - Find maximum integer constant in formula
 - ``AbstractSingle()`` - Compute single-variable bounds
@@ -60,11 +63,12 @@ The STAUB version of SMTFormula adds bound computation and transformation.
 - ``ToSMTFloat()`` - Convert to floating-point SMT
 
 SMTNode (STAUB variant)
-~~~~~~~~~~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~~~~~~~~~
 
 Extended node class supporting STAUB's bound-aware operations.
 
 **Header**:
+
 .. code-block:: cpp
 
    #include "Solvers/SMT/STAUB/SMTNode.h"
@@ -75,11 +79,13 @@ STAUBUtil
 Utility functions for bound computation:
 
 **Header**:
+
 .. code-block:: cpp
 
    #include "Solvers/SMT/STAUB/STAUBUtil.h"
 
 **Functions**:
+
 - ``APMax()`` - Maximum of two APInt values
 - ``APPlus()`` - Addition with overflow-aware widening
 - ``APMult()`` - Multiplication with overflow-aware widening

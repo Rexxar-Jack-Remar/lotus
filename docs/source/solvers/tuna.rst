@@ -45,10 +45,10 @@ A planned machine-learning-based optimization framework under
 ``lib/Solvers/SMT/TUNA/TUNA-Learn/``. Currently a placeholder with no
 implementation.
 
+.. _tuna-build:
+
 Build
 -----
-
-.. _tuna-build:
 
 TUNA is not part of the default Lotus build. Build it from its own CMake
 project:

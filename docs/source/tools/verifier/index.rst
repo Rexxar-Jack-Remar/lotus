@@ -30,7 +30,7 @@ checking safety properties over LLVM bitcode.
 For detailed documentation, see :doc:`clam/index`.
 
 SymAbsAI – Symbolic Abstraction + Abstract Interpretation
-------------------------------------------
+----------------------------------------------------------
 
 SymAbsAI is a framework for static program analysis using symbolic abstraction
 to provide a flexible interface for designing program analyses in a

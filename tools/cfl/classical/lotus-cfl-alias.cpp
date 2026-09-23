@@ -32,7 +32,7 @@ void usage(std::ostream &stream) {
             "Options:\n"
             "  --solver sparse-set|sparse-bitvector|graspan|sqid|pearl|"
             "skewed|cat|iea|iea-ocr|transitive-closure|pocr|hpocr|focr|"
-            "endpoint-quotient|cert-cfl\n"
+            "endpoint-quotient|cert\n"
             "  --encoding pag|peg|cfl-peg\n"
             "  --entry FUNCTION\n"
             "  --max-callgraph-rounds N\n"

@@ -1,6 +1,6 @@
-===========================
-TPA: Flow- and Contex-Sensitive Pointer Analysis
-===========================
+=================================================
+TPA: Flow- and Context-Sensitive Pointer Analysis
+=================================================
 
 Overview
 ========
@@ -84,6 +84,7 @@ Core Components
    - **StorePruner**: Prunes unnecessary store information
    - **ExternalCallAnalysis**: Handles external function calls
    - **Transfer/**: Specialized transfer functions:
+
      - **AllocTransfer**: Memory allocation
      - **CopyTransfer**: Pointer assignments
      - **OffsetTransfer**: Field/array offset operations
@@ -183,6 +184,7 @@ The analysis follows this workflow:
 2. **Worklist Processing**:
    - Start from entry function with initial store
    - For each program point in worklist:
+
      - Evaluate transfer function
      - Update points-to information
      - Propagate to successors

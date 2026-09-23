@@ -360,7 +360,7 @@ const char *solverBackendName(SolverBackend backend) {
   case SolverBackend::EndpointQuotient:
     return "endpoint-quotient";
   case SolverBackend::CertCFL:
-    return "cert-cfl";
+    return "cert";
   }
   return "unknown";
 }
@@ -408,7 +408,7 @@ SolverBackend parseSolverBackend(std::string_view name) {
   if (name == "endpoint-quotient") {
     return SolverBackend::EndpointQuotient;
   }
-  if (name == "cert-cfl") {
+  if (name == "cert") {
     return SolverBackend::CertCFL;
   }
   throw std::invalid_argument("Unknown solver: " + std::string(name));

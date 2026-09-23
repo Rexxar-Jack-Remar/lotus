@@ -107,7 +107,7 @@ At a high level, an IFDS/IDE analysis is instantiated and solved as:
    solver.solve();
 
 Command-Line Tool: lotus-check --engine=taint
-=====================================
+=============================================
 
 The ``lotus-check --engine=taint`` frontend provides an interprocedural taint analysis using the
 IFDS framework.

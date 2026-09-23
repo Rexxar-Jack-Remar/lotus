@@ -536,7 +536,7 @@ would list all three accesses as steps.
 - Security analysis of concurrent code
 
 Limitations
-----------
+-----------
 
 - **Atomic Operations**: Limited support for fine-grained memory ordering
   (std::memory_order_relaxed, acquire, release, etc.). The ThreadAPI maps

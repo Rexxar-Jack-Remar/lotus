@@ -100,7 +100,7 @@ Algorithm
    ``CertCFLEngine.cpp``.
 
 Integration
-   ``SolverBackend::CertCFL`` and ``--solver cert-cfl`` in the classical,
+   ``SolverBackend::CertCFL`` and ``--solver cert`` in the classical,
    alias, and value-flow drivers.
 
 The adapter resolves **all grammar symbols** because ``Relation`` supports

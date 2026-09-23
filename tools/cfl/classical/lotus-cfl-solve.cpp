@@ -43,7 +43,7 @@ void usage(std::ostream &stream) {
          "Options:\n"
          "  --solver sparse-set|sparse-bitvector|graspan|sqid|pearl|"
          "skewed|cat|iea|iea-ocr|transitive-closure|pocr|hpocr|focr|"
-         "endpoint-quotient|cert-cfl\n"
+         "endpoint-quotient|cert\n"
          "  --graph-mode plain|matrix|pag-matrix\n"
          "  --direction plain|reverse|bidirectional\n"
          "  --attribute-domain var:i=N,N,...  Variable-specific domain\n"

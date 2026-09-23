@@ -545,7 +545,7 @@ Create ``security_policy.txt``:
 
 .. code-block:: cypher
 
-   # Check if secret data flows to network
+   // Check if secret data flows to network
    MATCH (secret:FUNC_ENTRY)-[:PARAMETER_OUT]->(secretRet:INST_RET)
    WHERE secret.name = 'get_secret_data'
    MATCH (network:FUNC_ENTRY)-[:PARAMETER_IN]->(networkParam:PARAM_FORMALIN)
@@ -553,7 +553,7 @@ Create ``security_policy.txt``:
    MATCH path = (secretRet)-[*]->(networkParam)
    RETURN path
    
-   # Check if authentication guards sensitive operations
+   // Check if authentication guards sensitive operations
    MATCH (auth:FUNC_ENTRY)-[:PARAMETER_OUT]->(authRet:INST_RET)
    WHERE auth.name = 'authenticate'
    MATCH (authRet)-[:CONTROLDEP_BR]->(check)

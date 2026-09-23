@@ -31,11 +31,13 @@ and equality reasoning in quantified formulas.
 - Efficient term lookup and matching
 
 **Header**:
+
 .. code-block:: cpp
 
    #include "Solvers/SMT/QuantSimp/EGraphsSimp.h"
 
 **Usage**:
+
 .. code-block:: cpp
 
    #include "Solvers/SMT/QuantSimp/EGraphsSimp.h"

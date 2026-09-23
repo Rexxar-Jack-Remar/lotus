@@ -79,6 +79,7 @@ Iterator utilities (``include/Utils/ADT/Iterator/``):
 * **UniquePtrIterator.h** - Iterator for unique pointers
 
 **Usage**:
+
 .. code-block:: cpp
 
    #include "Utils/ADT/DisjointSet.h"
@@ -163,6 +164,7 @@ Recommended ThreadPool patterns
 * ``TaskGroup::wait()`` is safe to call from worker tasks; workers help drain the pool instead of purely blocking.
 
 **Usage**:
+
 .. code-block:: cpp
 
    #include "Utils/Parallel/ThreadPool.h"
@@ -233,6 +235,7 @@ I/O Utilities
 * **StringUtils.h** - String formatting and manipulation
 
 **Usage**:
+
 .. code-block:: cpp
 
    #include "Utils/LLVM/IO/FileUtils.h"
@@ -248,6 +251,7 @@ Debugging and Profiling
 * **RecursiveTimer.h** - Recursive timing utilities
 
 **Usage**:
+
 .. code-block:: cpp
 
    #include "Utils/LLVM/Log.h"
@@ -286,6 +290,7 @@ Multi-threading
 * **ThreadPool.h** - Thread pool implementation for parallel execution
 
 **Usage**:
+
 .. code-block:: cpp
 
    #include "Utils/Parallel/ThreadPool.h"
@@ -302,6 +307,7 @@ Common Usage Patterns
 ---------------------
 
 **Timer with Timeout**:
+
 .. code-block:: cpp
 
    #include "Utils/Platform/Timer.h"
@@ -312,6 +318,7 @@ Common Usage Patterns
    }
 
 **Progress Reporting**:
+
 .. code-block:: cpp
 
    #include "Utils/Platform/ProgressBar.h"
@@ -322,6 +329,7 @@ Common Usage Patterns
    }
 
 **Thread Pool**:
+
 .. code-block:: cpp
 
    #include "Utils/Parallel/ThreadPool.h"
@@ -335,6 +343,7 @@ Common Usage Patterns
    }
 
 **String Formatting**:
+
 .. code-block:: cpp
 
    #include "Utils/LLVM/StringUtils.h"
@@ -342,6 +351,7 @@ Common Usage Patterns
                                 funcName.c_str(), count);
 
 **Logging**:
+
 .. code-block:: cpp
 
    #include "Utils/LLVM/Log.h"

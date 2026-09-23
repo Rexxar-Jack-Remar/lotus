@@ -551,9 +551,9 @@ Example query file (``security_policy.txt``):
 
 .. code-block:: cypher
 
-   # Security Policy Verification
+   // Security Policy Verification
    
-   # Check for direct flows from sources to sinks
+   // Check for direct flows from sources to sinks
    MATCH (sources:FUNC_ENTRY)-[:PARAMETER_OUT]->(sourceRet:INST_RET)
    WHERE sources.name = 'read' OR sources.name = 'recv'
    MATCH (sinks:FUNC_ENTRY)-[:PARAMETER_IN]->(sinkParam:PARAM_FORMALIN)
@@ -561,7 +561,7 @@ Example query file (``security_policy.txt``):
    MATCH path = (sourceRet)-[*]->(sinkParam)
    RETURN path
    
-   # Check sensitive operations are authorized
+   // Check sensitive operations are authorized
    MATCH (auth:FUNC_ENTRY)-[:PARAMETER_OUT]->(authRet:INST_RET)
    WHERE auth.name = 'checkAuth'
    MATCH (authRet)-[:CONTROLDEP_BR]->(check)
@@ -585,11 +585,11 @@ Best Practices
 
    .. code-block:: cypher
 
-      # Good
+      // Good
       MATCH (userInput:FUNC_ENTRY)-[:PARAMETER_OUT]->(inputRet:INST_RET)
       WHERE userInput.name = 'scanf'
       
-      # Bad
+      // Bad
       MATCH (x:FUNC_ENTRY)-[:PARAMETER_OUT]->(y:INST_RET)
       WHERE x.name = 'scanf'
 
@@ -615,7 +615,7 @@ Best Practices
 
    .. code-block:: cypher
 
-      # Policy: User input must be sanitized before database queries
+      // Policy: User input must be sanitized before database queries
       MATCH (input:FUNC_ENTRY)-[:PARAMETER_OUT]->(inputRet:INST_RET)
       WHERE input.name = 'getUserInput'
       MATCH (sanitize:FUNC_ENTRY)-[:PARAMETER_OUT]->(sanitizerRet:INST_RET)
@@ -634,13 +634,13 @@ Best Practices
 
    .. code-block:: cypher
 
-      # Step 1: Verify sources exist
+      // Step 1: Verify sources exist
       MATCH (n:FUNC_ENTRY) WHERE n.name = 'getInput' RETURN n
       
-      # Step 2: Verify sinks exist
+      // Step 2: Verify sinks exist
       MATCH (n:FUNC_ENTRY) WHERE n.name = 'system' RETURN n
       
-      # Step 3: Check flows
+      // Step 3: Check flows
       MATCH (input:FUNC_ENTRY)-[:PARAMETER_OUT]->(inputRet:INST_RET)
       WHERE input.name = 'getInput'
       MATCH (output:FUNC_ENTRY)-[:PARAMETER_IN]->(outputParam:PARAM_FORMALIN)
@@ -669,7 +669,7 @@ Limitations
 5. **Pointer Analysis**: Depends on underlying pointer analysis precision.
 
 Performance Tips
----------------
+----------------
 
 1. **Limit Path Length**: Use bounded variable-length patterns when possible:
 
@@ -682,10 +682,10 @@ Performance Tips
 
    .. code-block:: cypher
 
-      # Good
+      // Good
       MATCH (n:INST_FUNCALL) RETURN n
       
-      # Less efficient
+      // Less efficient
       MATCH (n) WHERE n:INST_FUNCALL RETURN n
 
 3. **Filter Early**: Apply WHERE clauses as early as possible:

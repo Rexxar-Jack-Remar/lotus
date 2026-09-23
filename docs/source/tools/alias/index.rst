@@ -19,7 +19,7 @@ the reference implementation's comparison variants.
 See :doc:`../../alias/gpg` for architecture and options.
 
 SparrowAA (lotus-alias-sparrow-aa)
--------------------
+----------------------------------
 
 Inclusion-based points-to analysis (flow-insensitive, context-insensitive, context-sensitive).
 
@@ -40,7 +40,7 @@ Inclusion-based points-to analysis (flow-insensitive, context-insensitive, conte
 - Note: this tool have some redundancies with aserpta, and reuses some header files from it (from context abstraction).
 
 TPA (lotus-alias-tpa)
----------
+---------------------
 
 Flow- and context-sensitive pointer analysis using semi-sparse representation
 with k-limiting support.
@@ -87,7 +87,7 @@ with k-limiting support.
    ./build/bin/lotus-alias-tpa -no-prepass -prepass-out preprocessed.bc input.bc
 
 AserPTA (lotus-alias-aser-aa)
------------------
+-----------------------------
 
 High-performance constraint-based pointer analysis with multiple context
 sensitivities and solver algorithms.
@@ -213,8 +213,34 @@ the entry activation. Resource-limit fallbacks are explicitly marked and make
 the tool exit with status 2. See :doc:`../../alias/bootstrap-aa` for API and
 model details.
 
+CclyzerAA (lotus-alias-cclyzer-aa)
+----------------------------------
+
+Datalog-based pointer analysis frontend backed by the in-tree vendored ``cclyzer++``
+engine using Soufflé.
+
+**Binary**: ``lotus-alias-cclyzer-aa`` (requires ``-DLOTUS_ENABLE_CCLYZER=ON``)
+**Location**: ``tools/alias/lotus-alias-cclyzer-aa.cpp``
+
+**Usage**:
+
+.. code-block:: bash
+
+   ./build/bin/lotus-alias-cclyzer-aa [options] input.bc
+
+Key options:
+
+- ``-analysis=subset|unification|debug`` – Analysis kind (default: ``subset``)
+- ``-context-sensitivity=insensitive|1-cfa|2-cfa|3-cfa|1-caller|2-caller`` – Context sensitivity mode
+- ``-print-pts`` – Print points-to sets for functions and global variables
+- ``-print-cg`` – Print resolved indirect call graph edges
+- ``-print-nulls`` – Print values identified as null pointers
+- ``-check-assertions`` – Verify Datalog consistency assertions
+
+See :doc:`../../alias/cclyzeraa` for architecture and C++ API details.
+
 Call Graph Construction (lotus-alias-call-graph)
-------------------------------------
+------------------------------------------------
 
 Unified call-graph construction tool that can drive several underlying pointer
 or call-graph analyses.
@@ -241,7 +267,7 @@ DOT is the default when no format option is present. Selecting JSON suppresses
 that implicit DOT output, so the output remains valid JSON.
 
 DyckAA (lotus-alias-dyck-aa)
-----------------
+----------------------------
 
 Unification-based alias analysis using Dyck-CFL reachability.
 
@@ -269,7 +295,7 @@ Unification-based alias analysis using Dyck-CFL reachability.
    ./build/bin/lotus-alias-dyck-aa -print-alias-set-info -dot-dyck-callgraph input.bc
 
 LotusAA (lotus-alias-lotus-aa)
-------------------
+------------------------------
 
 Lotus-specific, flow-sensitive and field-sensitive pointer analysis with
 on-the-fly call graph construction.

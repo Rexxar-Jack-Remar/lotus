@@ -1,5 +1,5 @@
 WPDS (Weighted Pushdown Systems)
-===============================
+================================
 
 Weighted pushdown system solvers used to model interprocedural control flow
 with stack-aware summaries.

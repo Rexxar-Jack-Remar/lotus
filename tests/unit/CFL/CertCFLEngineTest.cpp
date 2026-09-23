@@ -55,8 +55,8 @@ void compareFresh(const LabeledGraph &graph, const Grammar &grammar,
 } // namespace
 
 TEST(CertCFLSessionTest, BackendNameRoundTrips) {
-  EXPECT_EQ(parseSolverBackend("cert-cfl"), SolverBackend::CertCFL);
-  EXPECT_STREQ(solverBackendName(SolverBackend::CertCFL), "cert-cfl");
+  EXPECT_EQ(parseSolverBackend("cert"), SolverBackend::CertCFL);
+  EXPECT_STREQ(solverBackendName(SolverBackend::CertCFL), "cert");
 }
 TEST(CertCFLSessionTest, MatchesSparseSetAndStreamsWithoutDuplicates) {
   LabeledGraph graph;
