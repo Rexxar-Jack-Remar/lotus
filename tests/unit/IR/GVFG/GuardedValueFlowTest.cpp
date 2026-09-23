@@ -182,6 +182,67 @@ TEST_F(GuardedValueFlowTest, KeepsDuplicateEdgesBidirectionallyConsistent) {
   EXPECT_EQ(child->parents().front().condition, second);
 }
 
+TEST_F(GuardedValueFlowTest, RangeSnapshotsSupportNestedIteration) {
+  const char *source = R"(
+    declare void @first()
+    declare void @second()
+
+    define void @test(i32 %x) {
+    entry:
+      ret void
+    }
+  )";
+
+  auto module = parseModule(source);
+  ASSERT_NE(module, nullptr);
+  Function *F = module->getFunction("test");
+  Function *first = module->getFunction("first");
+  Function *second = module->getFunction("second");
+  ASSERT_NE(F, nullptr);
+  ASSERT_NE(first, nullptr);
+  ASSERT_NE(second, nullptr);
+
+  GuardedValueFlowGraph graph(F);
+  BasicBlock *entry = &F->getEntryBlock();
+  auto *common = graph.createNode<GuardedValueFlowNode>(
+      GuardedValueFlowNode::Kind::CommonArgument,
+      Type::getInt32Ty(context), &graph, entry, F->getArg(0));
+  auto *first_pseudo = graph.createNode<GuardedValueFlowNode>(
+      GuardedValueFlowNode::Kind::PseudoArgument,
+      Type::getInt32Ty(context), &graph, entry);
+  auto *second_pseudo = graph.createNode<GuardedValueFlowNode>(
+      GuardedValueFlowNode::Kind::PseudoArgument,
+      Type::getInt32Ty(context), &graph, entry);
+  auto *call = graph.createSite<GuardedValueFlowCallSite>(&graph, nullptr);
+  call->addCommonInput(common);
+  call->addPseudoInput(first, first_pseudo);
+  call->addPseudoInput(second, second_pseudo);
+
+  auto first_inputs = call->inputs(first);
+  auto second_inputs = call->inputs(second);
+  ASSERT_EQ(first_inputs.size(), 2u);
+  ASSERT_EQ(second_inputs.size(), 2u);
+  EXPECT_EQ(first_inputs[1].InputNode, first_pseudo);
+  EXPECT_EQ(second_inputs[1].InputNode, second_pseudo);
+
+  auto first_begin = call->input_begin(first);
+  auto first_end = call->input_end(first);
+  auto second_begin = call->input_begin(second);
+  auto second_end = call->input_end(second);
+  ASSERT_EQ(std::distance(first_begin, first_end), 2);
+  ASSERT_EQ(std::distance(second_begin, second_end), 2);
+  EXPECT_EQ((first_begin + 1)->InputNode, first_pseudo);
+  EXPECT_EQ((second_begin + 1)->InputNode, second_pseudo);
+
+  auto arguments = graph.arguments();
+  ASSERT_EQ(arguments.size(), 1u);
+  EXPECT_EQ(arguments.front(), common);
+  auto arg_begin = graph.arg_begin();
+  auto arg_end = graph.arg_end();
+  ASSERT_EQ(std::distance(arg_begin, arg_end), 1);
+  EXPECT_EQ(*arg_begin, common);
+}
+
 TEST_F(GuardedValueFlowTest, MergesRepeatedProducerMatchingRegions) {
   const char *source = R"(
     define void @test(i1 %a, i1 %b) {

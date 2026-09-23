@@ -65,7 +65,6 @@ static bool isResultLikeNode(const GuardedValueFlowNode *node) {
          isa<GuardedValueFlowCallOutputNode>(node) ||
          isa<GuardedValueFlowCallSummaryNode>(node) ||
          node->getKind() == GuardedValueFlowNode::Kind::SimpleOperand ||
-         node->getKind() == GuardedValueFlowNode::Kind::Unknown ||
          node->getKind() == GuardedValueFlowNode::Kind::UndefValue ||
          node->getKind() == GuardedValueFlowNode::Kind::LoadMemory ||
          node->getKind() == GuardedValueFlowNode::Kind::StoreMemory ||
@@ -363,14 +362,17 @@ SMTExpr GuardedValueFlowSolver::encodeOpcodeNode(
 
 SMTExpr GuardedValueFlowSolver::encodeBinaryOpcodeNode(
     const GuardedValueFlowOpcodeNode *node) {
-  SMTExpr lhs = getOrInsertExpr(node->children()[0].target);
+  assert(node->getNumOperands() >= 1 && "binary opcode has no lhs operand");
+  SMTExpr lhs = getOrInsertExpr(node->getOperand(0));
   SMTExpr rhs = Factory->createEmptySMTExpr();
   SMTExpr self = getOrInsertExpr(node);
   unsigned elem_num = getVectorElementCount(node->getType());
 
-  if (node->children().size() == 2) {
-    rhs = getOrInsertExpr(node->children()[1].target);
+  if (node->getNumOperands() == 2) {
+    rhs = getOrInsertExpr(node->getOperand(1));
   } else {
+    assert(node->hasIntConstant() &&
+           "single-operand binary opcode has no implicit constant");
     rhs = Factory->createBitVecVal(node->getIntConstant(), lhs.getBitVecSize());
   }
 
@@ -437,9 +439,10 @@ SMTExpr GuardedValueFlowSolver::encodeBinaryOpcodeNode(
 
 SMTExpr GuardedValueFlowSolver::encodeCompareOpcodeNode(
     const GuardedValueFlowOpcodeNode *node) {
+  assert(node->getNumOperands() == 2 && "compare opcode must be binary");
   SMTExpr self = getOrInsertExpr(node);
-  SMTExpr lhs = getOrInsertExpr(node->children()[0].target);
-  SMTExpr rhs = getOrInsertExpr(node->children()[1].target);
+  SMTExpr lhs = getOrInsertExpr(node->getOperand(0));
+  SMTExpr rhs = getOrInsertExpr(node->getOperand(1));
   unsigned elem_num = getVectorElementCount(node->getType());
 
   switch (static_cast<CmpInst::Predicate>(node->getCmpPredicate())) {
@@ -489,8 +492,9 @@ SMTExpr GuardedValueFlowSolver::encodeCompareOpcodeNode(
 
 SMTExpr GuardedValueFlowSolver::encodeCastOpcodeNode(
     const GuardedValueFlowOpcodeNode *node) {
+  assert(node->getNumOperands() == 1 && "cast opcode must be unary");
   SMTExpr self = getOrInsertExpr(node);
-  SMTExpr child = getOrInsertExpr(node->children()[0].target);
+  SMTExpr child = getOrInsertExpr(node->getOperand(0));
   unsigned elem_num = getVectorElementCount(node->getType());
   uint64_t origin_size = node->getCastSrcBits();
   uint64_t target_size = node->getCastDstBits();
@@ -531,15 +535,12 @@ SMTExpr GuardedValueFlowSolver::encodeCastOpcodeNode(
 
 SMTExpr GuardedValueFlowSolver::encodeGEPOpcodeNode(
     const GuardedValueFlowOpcodeNode *node) {
-  if (node->children().empty())
+  if (node->operands().empty())
     return Factory->createBoolVal(true);
 
-  SMTExpr base = getOrInsertExpr(node->children()[0].target);
-  // A zero-offset GEP lowers to a single child because the builder's addChild
-  // deduplicates identical base/offset targets; in that case the computed
-  // address is the base itself.
-  SMTExpr computed = node->children().size() >= 2
-                         ? getOrInsertExpr(node->children()[1].target)
+  SMTExpr base = getOrInsertExpr(node->getOperand(0));
+  SMTExpr computed = node->getNumOperands() >= 2
+                         ? getOrInsertExpr(node->getOperand(1))
                          : base;
   SMTExpr null_expr = Factory->createBitVecVal(0, base.getBitVecSize());
 
@@ -550,23 +551,26 @@ SMTExpr GuardedValueFlowSolver::encodeGEPOpcodeNode(
 
 SMTExpr GuardedValueFlowSolver::encodeSelectOpcodeNode(
     const GuardedValueFlowOpcodeNode *node) {
-  SMTExpr cond = getOrInsertExpr(node->children()[0].target);
-  SMTExpr true_value = getOrInsertExpr(node->children()[1].target);
-  SMTExpr false_value = getOrInsertExpr(node->children()[2].target);
+  assert(node->getNumOperands() == 3 && "select opcode must have 3 operands");
+  SMTExpr cond = getOrInsertExpr(node->conditionOperand());
+  SMTExpr true_value = getOrInsertExpr(node->trueValueOperand());
+  SMTExpr false_value = getOrInsertExpr(node->falseValueOperand());
   unsigned elem_num =
-      getVectorElementCount(node->children()[0].target->getType());
+      getVectorElementCount(node->conditionOperand()->getType());
   return getOrInsertExpr(node) ==
          cond.array_ite(true_value, false_value, elem_num);
 }
 
 SMTExpr GuardedValueFlowSolver::encodeExtractElementOpcodeNode(
     const GuardedValueFlowOpcodeNode *node) {
+  assert(node->getNumOperands() == 2 &&
+         "extractelement opcode must have 2 operands");
   SMTExpr self = getOrInsertExpr(node);
-  SMTExpr vec = getOrInsertExpr(node->children()[0].target);
-  const GuardedValueFlowNode *index_node = node->children()[1].target;
+  SMTExpr vec = getOrInsertExpr(node->vectorOperand());
+  const GuardedValueFlowNode *index_node = node->indexOperand();
   Value *index_value = index_node ? index_node->getLLVMValue() : nullptr;
   unsigned elem_num =
-      getVectorElementCount(node->children()[0].target->getType());
+      getVectorElementCount(node->vectorOperand()->getType());
 
   if (auto *constant_index = dyn_cast_or_null<ConstantInt>(index_value))
     return self == vec.array_elmt(elem_num, constant_index->getZExtValue());
@@ -581,13 +585,15 @@ SMTExpr GuardedValueFlowSolver::encodeExtractElementOpcodeNode(
 
 SMTExpr GuardedValueFlowSolver::encodeInsertElementOpcodeNode(
     const GuardedValueFlowOpcodeNode *node) {
+  assert(node->getNumOperands() == 3 &&
+         "insertelement opcode must have 3 operands");
   SMTExpr self = getOrInsertExpr(node);
-  SMTExpr vec = getOrInsertExpr(node->children()[0].target);
-  SMTExpr value = getOrInsertExpr(node->children()[2].target);
-  const GuardedValueFlowNode *index_node = node->children()[1].target;
+  SMTExpr vec = getOrInsertExpr(node->vectorOperand());
+  SMTExpr value = getOrInsertExpr(node->insertedValue());
+  const GuardedValueFlowNode *index_node = node->indexOperand();
   Value *index_value = index_node ? index_node->getLLVMValue() : nullptr;
 
-  Type *vec_type = node->children()[0].target->getType();
+  Type *vec_type = node->vectorOperand()->getType();
   unsigned elem_num = getVectorElementCount(vec_type);
   uint64_t vec_size = vec.getBitVecSize();
   uint64_t elem_size = vec_size / std::max(1u, elem_num);
@@ -622,10 +628,11 @@ SMTExpr GuardedValueFlowSolver::encodeInsertElementOpcodeNode(
 
 SMTExpr GuardedValueFlowSolver::encodeConcatOpcodeNode(
     const GuardedValueFlowOpcodeNode *node) {
+  assert(node->getNumOperands() != 0 && "concat opcode has no operands");
   SMTExpr lhs = getOrInsertExpr(node);
-  SMTExpr rhs = getOrInsertExpr(node->children()[0].target);
-  for (size_t idx = 1; idx < node->children().size(); ++idx) {
-    SMTExpr next = getOrInsertExpr(node->children()[idx].target);
+  SMTExpr rhs = getOrInsertExpr(node->getOperand(0));
+  for (unsigned idx = 1; idx < node->getNumOperands(); ++idx) {
+    SMTExpr next = getOrInsertExpr(node->getOperand(idx));
     rhs = rhs.basic_concat(next);
   }
   return lhs == rhs;
@@ -793,9 +800,9 @@ GuardedValueFlowSolver::_getDataDeps(const GuardedValueFlowNode *node,
         ret = SMTExprVec::merge(ret, gated.second);
       }
     } else if (auto *return_node = dyn_cast<GuardedValueFlowReturnNode>(node)) {
-      for (const auto &edge : return_node->children()) {
-        auto *child = edge.target;
-        auto *site = return_node->getReturnSite(child);
+      for (const auto &incoming : return_node->incomingReturns()) {
+        auto *child = incoming.value;
+        auto *site = incoming.site;
         BasicBlock *site_block = site && site->getInstruction()
                                      ? site->getInstruction()->getParent()
                                      : return_node->getParentBasicBlock();
@@ -834,6 +841,13 @@ GuardedValueFlowSolver::_getDataDeps(const GuardedValueFlowNode *node,
     } else if (isNonNullTerminalValue(node)) {
       ret.push_back(self != 0);
     }
+  } else if (node->getKind() == GuardedValueFlowNode::Kind::Unknown) {
+    // Preserve opaque dependencies for graph traversal without claiming that
+    // the unsupported operation's result equals one of its operands.
+    for (const auto &edge : node->children()) {
+      if (edge.target)
+        ret = SMTExprVec::merge(ret, _getDataDeps(edge.target, depth + 1));
+    }
   } else if (auto *opcode_node = dyn_cast<GuardedValueFlowOpcodeNode>(node)) {
     ret.push_back(encodeOpcodeNode(opcode_node));
     for (const auto &edge : node->children()) {
@@ -852,7 +866,9 @@ SMTExprVec GuardedValueFlowSolver::getDeps(const GuardedValueFlowNode *node,
   assert(node && (!child || child->containsParent(node)));
 
   SMTExprVec ret = Factory->createEmptySMTExprVec();
-  if (isa<GuardedValueFlowOpcodeNode>(node) || !child) {
+  if (node->getKind() == GuardedValueFlowNode::Kind::Unknown) {
+    ret = SMTExprVec::merge(_getDataDeps(node), ret);
+  } else if (isa<GuardedValueFlowOpcodeNode>(node) || !child) {
     if (auto *opcode_node = dyn_cast<GuardedValueFlowOpcodeNode>(node)) {
       if (opcode_node->getOpcodeKind() ==
               GuardedValueFlowOpcodeNode::OpcodeKind::Select &&
@@ -861,11 +877,14 @@ SMTExprVec GuardedValueFlowSolver::getDeps(const GuardedValueFlowNode *node,
         SMTExpr node_expr = getOrInsertExpr(node);
         SMTExpr child_expr = getOrInsertExpr(child);
         ret.push_back(node_expr == child_expr);
-        if (node->children()[1].target == child)
-          ret.push_back(getOrInsertExpr(node->children()[0].target) == 1);
-        else
-          ret.push_back(getOrInsertExpr(node->children()[0].target) == 0);
-        ret = SMTExprVec::merge(_getDataDeps(node->children()[0].target), ret);
+        bool is_true_value = opcode_node->trueValueOperand() == child;
+        bool is_false_value = opcode_node->falseValueOperand() == child;
+        if (is_true_value != is_false_value) {
+          ret.push_back(getOrInsertExpr(opcode_node->conditionOperand()) ==
+                        (is_true_value ? 1 : 0));
+        }
+        ret = SMTExprVec::merge(
+            _getDataDeps(opcode_node->conditionOperand()), ret);
       } else {
         ret = SMTExprVec::merge(_getDataDeps(node), ret);
       }
@@ -931,10 +950,12 @@ GuardedValueFlowSolver::getDepsPair(const GuardedValueFlowNode *node,
     if (opcode_node->getOpcodeKind() ==
             GuardedValueFlowOpcodeNode::OpcodeKind::Select &&
         child) {
-      if (node->children()[1].target == child)
-        ctrl.push_back(getOrInsertExpr(node->children()[0].target) == 1);
-      else
-        ctrl.push_back(getOrInsertExpr(node->children()[0].target) == 0);
+      bool is_true_value = opcode_node->trueValueOperand() == child;
+      bool is_false_value = opcode_node->falseValueOperand() == child;
+      if (is_true_value != is_false_value) {
+        ctrl.push_back(getOrInsertExpr(opcode_node->conditionOperand()) ==
+                       (is_true_value ? 1 : 0));
+      }
     }
   }
 

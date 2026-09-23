@@ -105,6 +105,7 @@ public:
     raw->node_id_ = next_node_id_++;
     nodes_.push_back(std::move(node));
     assignNodeRegion(raw);
+    compat_caches_dirty_ = true;
     return raw;
   }
 
@@ -202,20 +203,28 @@ public:
   GuardedValueFlowNode *getVarArgument(unsigned idx) const;
   std::vector<GuardedValueFlowNode *> getCommonArguments() const;
   std::vector<GuardedValueFlowReturnNode *> getReturnNodes() const;
+  /// Owning snapshots. Further graph queries cannot invalidate their
+  /// iterators; graph mutation does not change their contents.
+  std::vector<GuardedValueFlowNode *> arguments() const;
+  std::vector<GuardedValueFlowReturnNode *> returns() const;
   auto arg_begin() const {
-    refreshCompatCaches();
+    if (compat_caches_dirty_)
+      refreshCompatCaches();
     return compat_arg_nodes_.begin();
   }
   auto arg_end() const {
-    refreshCompatCaches();
+    if (compat_caches_dirty_)
+      refreshCompatCaches();
     return compat_arg_nodes_.end();
   }
   auto return_begin() const {
-    refreshCompatCaches();
+    if (compat_caches_dirty_)
+      refreshCompatCaches();
     return compat_return_nodes_.begin();
   }
   auto return_end() const {
-    refreshCompatCaches();
+    if (compat_caches_dirty_)
+      refreshCompatCaches();
     return compat_return_nodes_.end();
   }
   auto pseudo_return_begin() const {
@@ -375,6 +384,7 @@ private:
   std::vector<Diagnostic> diagnostics_;
   mutable std::vector<GuardedValueFlowNode *> compat_arg_nodes_;
   mutable std::vector<GuardedValueFlowReturnNode *> compat_return_nodes_;
+  mutable bool compat_caches_dirty_{true};
 
   void assignNodeRegion(GuardedValueFlowNode *node);
   void refreshCompatCaches() const;

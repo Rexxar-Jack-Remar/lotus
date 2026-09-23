@@ -42,6 +42,7 @@
 #include <llvm/IR/Instruction.h>
 #include <llvm/IR/Type.h>
 #include <llvm/IR/Value.h>
+#include <llvm/Support/Error.h>
 
 namespace lotus {
 namespace gvfg {
@@ -57,6 +58,7 @@ using llvm::Type;
 using llvm::Value;
 
 class GuardedValueFlowGraph;
+class GuardedValueFlowOpcodeNode;
 class GuardedValueFlowSite;
 class GuardedValueFlowReturnSite;
 class GuardedValueFlowRegionNode;
@@ -165,6 +167,11 @@ public:
     ConditionRef provenance;
   };
 
+  struct OperandUser {
+    const GuardedValueFlowOpcodeNode *user{nullptr};
+    unsigned operand_index{0};
+  };
+
   GuardedValueFlowNode(Kind kind, Type *type, GuardedValueFlowGraph *graph,
                        BasicBlock *block, Value *llvm_value = nullptr,
                        Instruction *dbg_inst = nullptr);
@@ -178,18 +185,24 @@ public:
   Instruction *getDebugInstruction() const { return dbg_inst_; }
   unsigned getNodeId() const { return node_id_; }
 
-  void addChild(GuardedValueFlowNode *child, float confidence = 1.0f,
-                ConditionRef condition = ConditionRef::none());
-  void clearChildren();
+  virtual void addChild(GuardedValueFlowNode *child, float confidence = 1.0f,
+                        ConditionRef condition = ConditionRef::none());
+  virtual void clearChildren();
   GuardedValueFlowNode *getChild(unsigned idx) const {
     assert(idx < children_.size() && "Invalid child index");
     return children_[idx].target;
   }
   ArrayRef<Edge> children() const { return children_; }
+  /// Set-like producer dependencies. Unlike opcode operands, this view is
+  /// deduplicated by producer node and carries no positional meaning.
+  ArrayRef<Edge> uniqueDataInputs() const { return children_; }
   unsigned getNumChildren() const {
     return static_cast<unsigned>(children_.size());
   }
   ArrayRef<Edge> parents() const { return parents_; }
+  /// Occurrence-preserving reverse opcode uses. A producer used twice by one
+  /// opcode appears twice with distinct operand indices.
+  std::vector<OperandUser> operandUsers() const;
   unsigned getNumParents() const {
     return static_cast<unsigned>(parents_.size());
   }
@@ -423,11 +436,25 @@ public:
 };
 
 /// Opcode node encoding arithmetic, logic, cast, GEP, select, and cmp
-/// operations.  When `hasIntConstant()` is true, the node carries a single
-/// implicit constant child instead of two explicit operands (used for
-/// address arithmetic like `gep.dynamic.offset = idx * sizeof(elem)`).
+/// operations.
+///
+/// Opcode operands are occurrences: they preserve LLVM operand order and
+/// multiplicity. The inherited `children()` / `uniqueDataInputs()` relation is
+/// deliberately set-like and remains suitable for dependency traversal. Thus
+/// `add x, x` has two operand uses but one unique data input.
+///
+/// When `hasIntConstant()` is true, the node carries one explicit operand and
+/// one implicit integer constant (used for address arithmetic such as
+/// `gep.dynamic.offset = idx * sizeof(elem)`).
 class GuardedValueFlowOpcodeNode : public GuardedValueFlowNode {
 public:
+  struct OperandUse {
+    GuardedValueFlowNode *producer{nullptr};
+    unsigned operand_index{0};
+    float confidence{1.0f};
+    ConditionRef condition;
+  };
+
   enum class OpcodeKind {
     Invalid,
     URem,
@@ -477,6 +504,39 @@ public:
         opcode_kind_(opcode_kind) {}
 
   OpcodeKind getOpcodeKind() const { return opcode_kind_; }
+  void addOperand(GuardedValueFlowNode *producer, float confidence = 1.0f,
+                  ConditionRef condition = ConditionRef::none());
+  llvm::Error setOperand(unsigned index, GuardedValueFlowNode *producer,
+                         float confidence = 1.0f,
+                         ConditionRef condition = ConditionRef::none());
+
+  /// Compatibility spelling. On opcode nodes a child is an operand
+  /// occurrence, so repeated calls with the same producer do not collapse.
+  void addChild(GuardedValueFlowNode *producer, float confidence = 1.0f,
+                ConditionRef condition = ConditionRef::none()) override {
+    addOperand(producer, confidence, condition);
+  }
+  void clearChildren() override;
+
+  ArrayRef<OperandUse> operands() const { return operands_; }
+  unsigned getNumOperands() const {
+    return static_cast<unsigned>(operands_.size());
+  }
+  GuardedValueFlowNode *getOperand(unsigned index) const {
+    assert(index < operands_.size() && "Invalid opcode operand index");
+    return operands_[index].producer;
+  }
+
+  // Typed positional accessors for the opcode families most prone to operand
+  // order mistakes.
+  GuardedValueFlowNode *conditionOperand() const { return getOperand(0); }
+  GuardedValueFlowNode *trueValueOperand() const { return getOperand(1); }
+  GuardedValueFlowNode *falseValueOperand() const { return getOperand(2); }
+  GuardedValueFlowNode *vectorOperand() const { return getOperand(0); }
+  GuardedValueFlowNode *insertedValue() const { return getOperand(1); }
+  GuardedValueFlowNode *indexOperand() const {
+    return getOperand(opcode_kind_ == OpcodeKind::InsertElement ? 2 : 1);
+  }
   void setCmpPredicate(int predicate) { cmp_predicate_ = predicate; }
   int getCmpPredicate() const { return cmp_predicate_; }
   void setCastWidths(uint64_t src_bits, uint64_t dst_bits) {
@@ -499,6 +559,7 @@ private:
   uint64_t cast_dst_bits_{0};
   bool has_int_constant_{false};
   int64_t int_constant_{0};
+  std::vector<OperandUse> operands_;
 
 public:
   static bool classof(const GuardedValueFlowNode *node) {
@@ -545,9 +606,15 @@ public:
   }
 };
 
-/// Return node (common or pseudo) with per-value return-site tracking.
+/// Return node (common or pseudo) with occurrence-preserving return tracking.
 class GuardedValueFlowReturnNode : public GuardedValueFlowNode {
 public:
+  struct ReturnIncoming {
+    GuardedValueFlowNode *value{nullptr};
+    GuardedValueFlowReturnSite *site{nullptr};
+    ConditionRef guard;
+  };
+
   GuardedValueFlowReturnNode(Kind kind, Type *type,
                              GuardedValueFlowGraph *graph, BasicBlock *block,
                              Value *llvm_value = nullptr)
@@ -555,13 +622,15 @@ public:
                              dyn_cast_or_null<Instruction>(llvm_value)) {}
 
   void addReturnValueSitePair(GuardedValueFlowNode *value_node,
-                              GuardedValueFlowReturnSite *site);
+                              GuardedValueFlowReturnSite *site,
+                              ConditionRef guard = ConditionRef::none());
+  ArrayRef<ReturnIncoming> incomingReturns() const { return incoming_returns_; }
+  void clearChildren() override;
   GuardedValueFlowReturnSite *
   getReturnSite(const GuardedValueFlowNode *value_node) const;
 
 private:
-  std::map<const GuardedValueFlowNode *, GuardedValueFlowReturnSite *>
-      return_sites_;
+  std::vector<ReturnIncoming> incoming_returns_;
 
 public:
   static bool classof(const GuardedValueFlowNode *node) {

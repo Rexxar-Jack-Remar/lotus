@@ -629,6 +629,7 @@ void GuardedValueFlowGraph::registerPseudoArgument(GuardedValueFlowNode *node) {
   if (pseudo_arguments_.size() <= node->getIndex())
     pseudo_arguments_.resize(node->getIndex() + 1, nullptr);
   pseudo_arguments_[node->getIndex()] = node;
+  compat_caches_dirty_ = true;
 }
 
 void GuardedValueFlowGraph::registerPseudoReturn(
@@ -638,6 +639,7 @@ void GuardedValueFlowGraph::registerPseudoReturn(
   if (pseudo_returns_.size() <= node->getIndex())
     pseudo_returns_.resize(node->getIndex() + 1, nullptr);
   pseudo_returns_[node->getIndex()] = node;
+  compat_caches_dirty_ = true;
 }
 
 GuardedValueFlowNode *
@@ -718,6 +720,22 @@ std::vector<GuardedValueFlowReturnNode *> GuardedValueFlowGraph::getReturnNodes(
   return result;
 }
 
+std::vector<GuardedValueFlowNode *> GuardedValueFlowGraph::arguments() const {
+  std::vector<GuardedValueFlowNode *> result;
+  for (const auto &node : nodes_) {
+    if (node->getKind() == GuardedValueFlowNode::Kind::CommonArgument)
+      result.push_back(node.get());
+  }
+  result.insert(result.end(), pseudo_arguments_.begin(),
+                pseudo_arguments_.end());
+  return result;
+}
+
+std::vector<GuardedValueFlowReturnNode *>
+GuardedValueFlowGraph::returns() const {
+  return getReturnNodes();
+}
+
 void GuardedValueFlowGraph::refreshCompatCaches() const {
   compat_arg_nodes_.clear();
   compat_return_nodes_.clear();
@@ -733,6 +751,7 @@ void GuardedValueFlowGraph::refreshCompatCaches() const {
     compat_return_nodes_.push_back(common);
   for (auto *node : pseudo_returns_)
     compat_return_nodes_.push_back(node);
+  compat_caches_dirty_ = false;
 }
 
 GuardedValueFlowNode *

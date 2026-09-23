@@ -124,6 +124,143 @@ TEST_F(GuardedValueFlowSolverTest, EncodesArithmeticValueFlow) {
   EXPECT_EQ(solver.check(), GuardedValueFlowSolver::SMTRT_Unsat);
 }
 
+TEST_F(GuardedValueFlowSolverTest, EncodesRepeatedOperandOccurrences) {
+  const char *source = R"(
+    define i32 @test(i1 %cond, i32 %x) {
+    entry:
+      %sum = add i32 %x, %x
+      %same = icmp eq i32 %x, %x
+      %selected = select i1 %cond, i32 %x, i32 %x
+      ret i32 %selected
+    }
+  )";
+
+  auto module = parseModule(source);
+  ASSERT_NE(module, nullptr);
+  Function *F = module->getFunction("test");
+  ASSERT_NE(F, nullptr);
+  auto pipeline = runBuilder(*module);
+  GuardedValueFlowGraph &graph = pipeline.builder->getGraph(*F);
+
+  auto find_named = [&](StringRef name) -> GuardedValueFlowNode * {
+    for (Instruction &I : instructions(*F)) {
+      if (I.getName() == name)
+        return graph.findNode(&I);
+    }
+    return nullptr;
+  };
+  auto *x = graph.findNode(F->getArg(1));
+  auto *sum = find_named("sum");
+  auto *same = find_named("same");
+  auto *selected = find_named("selected");
+  ASSERT_NE(x, nullptr);
+  ASSERT_NE(sum, nullptr);
+  ASSERT_NE(same, nullptr);
+  ASSERT_NE(selected, nullptr);
+
+  {
+    SMTFactory factory;
+    GuardedValueFlowSolver solver(factory, module->getDataLayout());
+    solver.addAll(solver.getDataDeps(sum));
+    solver.add(solver.getOrInsertExpr(x) == 4);
+    solver.add(solver.getOrInsertExpr(sum) != 8);
+    EXPECT_EQ(solver.check(), GuardedValueFlowSolver::SMTRT_Unsat);
+  }
+  {
+    SMTFactory factory;
+    GuardedValueFlowSolver solver(factory, module->getDataLayout());
+    solver.addAll(solver.getDataDeps(same));
+    solver.add(solver.getOrInsertExpr(same) != 1);
+    EXPECT_EQ(solver.check(), GuardedValueFlowSolver::SMTRT_Unsat);
+  }
+  {
+    SMTFactory factory;
+    GuardedValueFlowSolver solver(factory, module->getDataLayout());
+    solver.addAll(solver.getDataDeps(selected));
+    solver.add(solver.getOrInsertExpr(x) == 9);
+    solver.add(solver.getOrInsertExpr(selected) != 9);
+    EXPECT_EQ(solver.check(), GuardedValueFlowSolver::SMTRT_Unsat);
+  }
+}
+
+TEST_F(GuardedValueFlowSolverTest, UsesLLVMInsertElementOperandOrder) {
+  const char *source = R"(
+    define <2 x i32> @test(<2 x i32> %vec, i32 %value) {
+    entry:
+      %result = insertelement <2 x i32> %vec, i32 %value, i32 0
+      ret <2 x i32> %result
+    }
+  )";
+
+  auto module = parseModule(source);
+  ASSERT_NE(module, nullptr);
+  Function *F = module->getFunction("test");
+  ASSERT_NE(F, nullptr);
+  auto pipeline = runBuilder(*module);
+  GuardedValueFlowGraph &graph = pipeline.builder->getGraph(*F);
+  auto *insert = &F->getEntryBlock().front();
+  auto *result = graph.findNode(insert);
+  auto *value = graph.findNode(F->getArg(1));
+  ASSERT_NE(result, nullptr);
+  ASSERT_NE(value, nullptr);
+  auto *opcode = dyn_cast<GuardedValueFlowOpcodeNode>(result->getChild(0));
+  ASSERT_NE(opcode, nullptr);
+  ASSERT_EQ(opcode->getNumOperands(), 3u);
+  EXPECT_EQ(opcode->insertedValue(), value);
+  EXPECT_EQ(opcode->indexOperand()->getLLVMValue(), insert->getOperand(2));
+
+  SMTFactory factory;
+  GuardedValueFlowSolver solver(factory, module->getDataLayout());
+  solver.addAll(solver.getDataDeps(result));
+  solver.add(solver.getOrInsertExpr(value) == 1);
+  solver.add(solver.getOrInsertExpr(result).array_elmt(2, 0) != 1);
+  EXPECT_EQ(solver.check(), GuardedValueFlowSolver::SMTRT_Unsat);
+}
+
+TEST_F(GuardedValueFlowSolverTest,
+       OpaqueIntrinsicDependencyDoesNotImplyEquality) {
+  const char *source = R"(
+    declare i32 @llvm.ctpop.i32(i32)
+
+    define i32 @test(i32 %x) {
+    entry:
+      %result = call i32 @llvm.ctpop.i32(i32 %x)
+      ret i32 %result
+    }
+  )";
+
+  auto module = parseModule(source);
+  ASSERT_NE(module, nullptr);
+  Function *F = module->getFunction("test");
+  ASSERT_NE(F, nullptr);
+  auto pipeline = runBuilder(*module);
+  GuardedValueFlowGraph &graph = pipeline.builder->getGraph(*F);
+  auto *call = dyn_cast<CallBase>(&F->getEntryBlock().front());
+  ASSERT_NE(call, nullptr);
+  auto *result = graph.findNode(call);
+  auto *x = graph.findNode(F->getArg(0));
+  ASSERT_NE(result, nullptr);
+  ASSERT_NE(x, nullptr);
+  auto *opaque = result->getChild(0);
+  ASSERT_NE(opaque, nullptr);
+  ASSERT_EQ(opaque->getKind(), GuardedValueFlowNode::Kind::Unknown);
+
+  SMTFactory factory;
+  GuardedValueFlowSolver solver(factory, module->getDataLayout());
+  solver.addAll(solver.getDataDeps(result));
+  solver.add(solver.getOrInsertExpr(x) == 3);
+  solver.add(solver.getOrInsertExpr(result) != 3);
+  EXPECT_EQ(solver.check(), GuardedValueFlowSolver::SMTRT_Sat);
+
+  SMTFactory direct_factory;
+  GuardedValueFlowSolver direct_solver(direct_factory,
+                                       module->getDataLayout());
+  direct_solver.addAll(direct_solver.getDeps(opaque, x));
+  direct_solver.add(direct_solver.getOrInsertExpr(x) == 3);
+  direct_solver.add(direct_solver.getOrInsertExpr(opaque) != 3);
+  EXPECT_EQ(direct_solver.check(), GuardedValueFlowSolver::SMTRT_Sat);
+}
+
 TEST_F(GuardedValueFlowSolverTest, EnforcesControlDependenciesForControlledBlock) {
   const char *source = R"(
     define i32 @test(i1 %cond, i32 %x) {
