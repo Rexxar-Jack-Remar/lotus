@@ -128,5 +128,35 @@ TEST(SkewedTabulationSessionTest, AcceptsMigratedNonterminalAxioms) {
             0u);
 }
 
+TEST(SkewedTabulationSessionTest, HonorsProjectedTargetsAndFollowMetadata) {
+  const Grammar grammar = Grammar::parseFromText("Production:\n"
+                                                 "S\tP\tb\n"
+                                                 "P\ta\n\n"
+                                                 "Insert:\nS\n\n"
+                                                 "Follow:\nP\n\n"
+                                                 "Count:\nS\n");
+  LabeledGraph graph;
+  graph.addEdge("n0", "n1", "a");
+  graph.addEdge("n1", "n2", "b");
+
+  SolverOptions options;
+  options.backend = SolverBackend::Skewed;
+  options.skewed.scope = sk::Scope::TargetsOnly;
+  options.skewed.targets = {grammar.symbolId("S")};
+  options.skewed.propagating_symbols =
+      std::vector<sk::Symbol>{grammar.symbolId("P")};
+  SolverSession session(graph, grammar, options);
+  const ReachabilityStats stats = session.solve();
+
+  EXPECT_TRUE(
+      session.contains(graph.vertexId("n0"), graph.vertexId("n2"), "S"));
+  EXPECT_FALSE(
+      session.contains(graph.vertexId("n0"), graph.vertexId("n1"), "P"));
+  EXPECT_EQ(stats.skewed_propagating_symbols, 1u);
+  EXPECT_EQ(stats.skewed_propagating_facts, 1u);
+  EXPECT_EQ(stats.skewed_inserted_summary_edges, 1u);
+  EXPECT_EQ(stats.skewed_output_facts, 1u);
+}
+
 } // namespace
 } // namespace lotus::cfl::classical

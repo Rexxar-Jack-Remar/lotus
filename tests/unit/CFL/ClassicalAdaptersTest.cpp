@@ -190,7 +190,8 @@ TEST(ClassicalAdaptersTest,
           SolverBackend::Skewed, SolverBackend::Cat, SolverBackend::Iea,
           SolverBackend::IeaOcr, SolverBackend::TransitiveClosure,
           SolverBackend::Pocr, SolverBackend::HierarchicalPocr,
-          SolverBackend::FullyOrdered, SolverBackend::EndpointQuotient}) {
+          SolverBackend::FullyOrdered, SolverBackend::EndpointQuotient,
+          SolverBackend::CertCFL}) {
       AliasClient alternate = AliasClient::fromConstraintGraph(graph, mode);
       alternate.solve(backend);
       EXPECT_TRUE(alternate.mayAlias(value, loaded))
@@ -483,8 +484,7 @@ TEST(ClassicalAdaptersTest,
   EXPECT_EQ(client.baseObject(client.pointsTo(field).front()), object);
 }
 
-TEST(ClassicalAdaptersTest,
-     CflPegReductionsPreserveGeneratedSemanticQueries) {
+TEST(ClassicalAdaptersTest, CflPegReductionsPreserveGeneratedSemanticQueries) {
   for (std::uint64_t seed = 1; seed <= 128; ++seed) {
     std::uint64_t state = seed;
     auto next = [&]() {
@@ -509,8 +509,7 @@ TEST(ClassicalAdaptersTest,
           graph.addEdge(source, target, AliasConstraintEdgeKind::Copy);
           break;
         case 1:
-          graph.addEdge(source, target, AliasConstraintEdgeKind::NormalGep,
-                        0);
+          graph.addEdge(source, target, AliasConstraintEdgeKind::NormalGep, 0);
           break;
         case 2:
           graph.addEdge(source, target, AliasConstraintEdgeKind::NormalGep,
@@ -533,16 +532,14 @@ TEST(ClassicalAdaptersTest,
 
     LabeledGraph raw_graph = encodeCflPegGraph(graph);
     const Grammar raw_grammar = buildStandardAliasGrammar(graph);
-    SolverSession raw(raw_graph, raw_grammar,
-                      SolverBackend::SparseBitVector);
+    SolverSession raw(raw_graph, raw_grammar, SolverBackend::SparseBitVector);
     AliasClient reduced =
         AliasClient::fromConstraintGraph(graph, AliasEncodingMode::CFLPEG);
     raw.solve();
     reduced.solve(SolverBackend::SparseBitVector);
     for (std::size_t lhs = 0; lhs < nodes; ++lhs) {
       for (std::size_t rhs = 0; rhs < nodes; ++rhs) {
-        EXPECT_EQ(reduced.mayValueAlias(lhs, rhs),
-                  raw.contains(lhs, rhs, "V"))
+        EXPECT_EQ(reduced.mayValueAlias(lhs, rhs), raw.contains(lhs, rhs, "V"))
             << "seed=" << seed << " lhs=" << lhs << " rhs=" << rhs;
       }
     }
@@ -733,6 +730,27 @@ TEST(ClassicalAdaptersTest, ValueFlowClientEncodesSvfgCallsAndReachability) {
   const auto reachable = client.reachableFrom(1);
   EXPECT_NE(std::find(reachable.begin(), reachable.end(), 4), reachable.end());
   EXPECT_GT(stats.added_edges, 0u);
+
+  const LabeledGraph classical = encodeClassicalCflSVFG(svfg);
+  EXPECT_TRUE(classical.hasEdge(classical.vertexId("1"),
+                                classical.vertexId("2"), "call_1"));
+  EXPECT_TRUE(classical.hasEdge(classical.vertexId("3"),
+                                classical.vertexId("4"), "ret_1"));
+  EXPECT_TRUE(
+      classical.hasEdge(classical.vertexId("2"), classical.vertexId("5"), "a"));
+  EXPECT_TRUE(
+      classical.hasEdge(classical.vertexId("5"), classical.vertexId("3"), "a"));
+  EXPECT_FALSE(classical.hasEdge(classical.vertexId("2"),
+                                 classical.vertexId("1"), "callbar_1"));
+  const Grammar classical_grammar = buildClassicalCflVfgGrammar(svfg);
+  EXPECT_EQ(classical_grammar.startSymbol(), "A");
+  EXPECT_TRUE(classical_grammar.isCountSymbol("A"));
+  EXPECT_TRUE(classical_grammar.isTerminal("call_1"));
+  EXPECT_FALSE(classical_grammar.hasSymbol("direct"));
+  ValueFlowClient classical_client =
+      ValueFlowClient::fromSVFG(svfg, ValueFlowEncodingMode::ClassicalCFL);
+  classical_client.solve(SolverBackend::SparseBitVector);
+  EXPECT_TRUE(classical_client.hasFlow(1, 4));
 
   for (SolverBackend backend :
        {SolverBackend::SparseBitVector, SolverBackend::Graspan,
@@ -1371,7 +1389,8 @@ TEST(ClassicalAdaptersTest, LlvmAliasAnalysisDrivesIndirectCallDiscovery) {
           SolverBackend::Skewed, SolverBackend::Cat, SolverBackend::Iea,
           SolverBackend::IeaOcr, SolverBackend::TransitiveClosure,
           SolverBackend::Pocr, SolverBackend::HierarchicalPocr,
-          SolverBackend::FullyOrdered, SolverBackend::EndpointQuotient}) {
+          SolverBackend::FullyOrdered, SolverBackend::EndpointQuotient,
+          SolverBackend::CertCFL}) {
       LLVMAliasOptions alternate_options;
       alternate_options.encoding = encoding;
       alternate_options.backend = backend;

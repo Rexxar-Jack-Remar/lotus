@@ -163,8 +163,53 @@ Algorithm
    ``lib/CFL/Classical/Solvers/Engines/STG/StagedSolver.cpp``
 
 Integration
-   STG is exposed through ``StagedSolver`` and its decomposition helpers. It
-   has no dedicated command-line executable.
+   STG is exposed through ``StagedSolver`` and its decomposition helpers, and
+   through ``lotus-cfl-solve --solver stg --stg-spec FILE``.
+
+Command-line specification
+--------------------------
+
+Unlike the other backends, STG requires an explicit decomposition. The JSON
+root accepts ``phase_l_regular``, ``dyck_patterns``, ``alias_patterns``, and
+``phase_r`` arrays. Symbols are grammar names, not numeric IDs.
+
+A regular production is a DNF list of sequences:
+
+.. code-block:: json
+
+   {
+     "phase_r": [
+       {
+         "lhs": "S",
+         "alternatives": [
+           [ { "symbols": ["a", "Sum"], "kleene_star": true } ]
+         ]
+       }
+     ]
+   }
+
+A Dyck CFP uses explicit delimiter pairs:
+
+.. code-block:: json
+
+   {
+     "dyck_patterns": [
+       {
+         "summary": "Sum",
+         "body_symbols": ["s"],
+         "delimiters": [["call_0", "ret_0"]]
+       }
+     ]
+   }
+
+An Alias CFP object requires ``summary``, ``open``, ``close``,
+``reverse_forward``, ``center``, and ``backward`` fields. Its supporting
+regular equations go in ``phase_l_regular``. A complete invocation is:
+
+.. code-block:: console
+
+   build/bin/lotus-cfl-solve --solver stg --stg-spec decomposition.json \
+     --grammar grammar.cfg --graph graph.g --json-stats
 
 Stg is separate from ``SolverBackend`` because a backend enum and an arbitrary
 CFG do not contain the CFP/decomposition information required by the paper.

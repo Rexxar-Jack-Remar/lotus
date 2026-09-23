@@ -109,9 +109,9 @@ skewed::Graph makeGraph(std::size_t node_count) {
 
 class SkewedTabulationEngine::Impl {
 public:
-  Impl(const Grammar &grammar, std::size_t node_count)
+  Impl(const Grammar &grammar, std::size_t node_count, skewed::Options options)
       : imported_(importGrammar(grammar)),
-        session_(imported_.grammar, makeGraph(node_count)),
+        session_(imported_.grammar, makeGraph(node_count), std::move(options)),
         snapshot_(
             createRelation(RelationBackend::SparseBitVectors, node_count)),
         node_count_(node_count) {}
@@ -238,8 +238,9 @@ private:
 };
 
 SkewedTabulationEngine::SkewedTabulationEngine(const Grammar &grammar,
-                                               std::size_t node_count)
-    : impl_(std::make_unique<Impl>(grammar, node_count)) {}
+                                               std::size_t node_count,
+                                               skewed::Options options)
+    : impl_(std::make_unique<Impl>(grammar, node_count, std::move(options))) {}
 
 SkewedTabulationEngine::~SkewedTabulationEngine() = default;
 

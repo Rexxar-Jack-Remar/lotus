@@ -1,0 +1,15 @@
+{
+  "phase_r": [
+    {
+      "lhs": "S",
+      "alternatives": [
+        [
+          {
+            "symbols": ["a"],
+            "kleene_star": true
+          }
+        ]
+      ]
+    }
+  ]
+}

@@ -346,11 +346,40 @@ Command line
    build/bin/lotus-cfl-solve \
      --grammar grammar.txt --graph graph.txt --solver sparse-bitvector --json-stats
 
-   build/bin/lotus-cfl-alias --solver sparse-bitvector --encoding pag \
+   build/bin/lotus-cfl-alias --solver sparse-bitvector --encoding cfl-peg \
      --check-annotations module.bc
 
    build/bin/lotus-cfl-vf --solver transitive-closure \
      --query main::source,main::sink module.bc
+
+The LLVM frontends can also export their normalized CFL instance for replay by
+any graph-level backend:
+
+.. code-block:: console
+
+   build/bin/lotus-cfl-alias --encoding cfl-peg \
+     --dump-cfl-graph module.peg --dump-cfl-grammar alias.grammar module.bc
+
+   build/bin/lotus-cfl-vf --encoding classical-cfl \
+     --dump-cfl-graph module.vfg --dump-cfl-grammar value-flow.grammar module.bc
+
+   build/bin/lotus-cfl-solve --graph module.vfg \
+     --grammar value-flow.grammar --solver pocr --result-scope count
+
+The native value-flow encoding remains the default. ``classical-cfl`` projects
+all ordinary SVFG edges to ``a`` and preserves context with ``call_i`` and
+``ret_i``. The exported graph records isolated nodes, and the exported grammar
+preserves ``Insert``, ``Follow``, and ``Count`` metadata, so replay retains the
+same nullable and target-relation semantics.
+
+Alias encodings are intentionally distinct. ``cfl-peg`` is the recommended
+default and the interchange-compatible ``a/d/f_i`` analysis. ``pag`` keeps the
+constraint-level formulation for diagnostics and comparisons. ``peg`` is the
+Lotus extended grammar with ``ArrayPath`` and ``Memcpy`` summaries. Removing
+the latter two would discard different analysis semantics rather than merely
+remove duplicate serializations.
+
+.. code-block:: console
 
    build/bin/lotus-cfl-solve \
      --grammar grammar.txt --graph graph.txt --solver pocr --json-stats
@@ -358,6 +387,25 @@ Command line
    build/bin/lotus-cfl-solve \
      --grammar pocr.cfg --graph input.peg --solver graspan \
      --unidirectional --simplification-flavor alias --simplify-graph
+
+External graph/grammar datasets can select their declared ``Count`` relation
+without going through an LLVM frontend. Backends that support target-projected
+evaluation use that scope during solving; other backends compute their full
+relation and filter the reported output:
+
+.. code-block:: console
+
+   build/bin/lotus-cfl-solve \
+     --grammar benchmarks/real-world/CFL/Classical/grammars/aa.ecfg \
+     --graph benchmarks/real-world/CFL/Classical/spec2017/pegs/lbm.g \
+     --graph-mode plain \
+     --solver skewed --result-scope count --json-stats
+
+When a target-projected backend consumes a transformed grammar, its ``Follow``
+set supplies the exact propagating nonterminals. Default solver sessions remain
+all-symbol and therefore preserve the complete ``Relation`` contract used by
+the LLVM clients. Dataset-specific batch policy is kept outside the binary in
+``scripts/cfl/run_cfl_dataset.py``.
 
 Use ``--graph-mode plain|matrix|pag-matrix`` and
 ``--direction plain|reverse|bidirectional`` to state input semantics.

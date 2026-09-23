@@ -23,6 +23,8 @@ struct Options {
   bool json_stats = false;
   bool print_points_to = false;
   bool check_annotations = false;
+  std::string dump_cfl_graph;
+  std::string dump_cfl_grammar;
   std::string query_lhs;
   std::string query_rhs;
 };
@@ -33,10 +35,15 @@ void usage(std::ostream &stream) {
             "  --solver sparse-set|sparse-bitvector|graspan|sqid|pearl|"
             "skewed|cat|iea|iea-ocr|transitive-closure|pocr|hpocr|focr|"
             "endpoint-quotient|cert\n"
-            "  --encoding pag|peg|cfl-peg\n"
+            "  --encoding pag|peg|cfl-peg  Default: cfl-peg\n"
+            "      pag: constraint-level Lotus grammar\n"
+            "      peg: extended Lotus ArrayPath/Memcpy grammar\n"
+            "      cfl-peg: standard a/d/f_i interchange grammar\n"
             "  --entry FUNCTION\n"
             "  --max-callgraph-rounds N\n"
             "  --query LHS,RHS\n"
+            "  --dump-cfl-graph FILE\n"
+            "  --dump-cfl-grammar FILE\n"
             "  --print-points-to\n"
             "  --check-annotations\n"
             "  --json-stats\n";
@@ -77,6 +84,10 @@ Options parseOptions(int argc, char **argv) {
       }
       options.query_lhs = query.substr(0, comma);
       options.query_rhs = query.substr(comma + 1);
+    } else if (argument == "--dump-cfl-graph") {
+      options.dump_cfl_graph = value();
+    } else if (argument == "--dump-cfl-grammar") {
+      options.dump_cfl_grammar = value();
     } else if (argument == "--print-points-to") {
       options.print_points_to = true;
     } else if (argument == "--check-annotations") {
@@ -315,6 +326,12 @@ int main(int argc, char **argv) {
 
     LLVMCFLAliasAnalysis analysis(options.analysis);
     const ReachabilityStats stats = analysis.analyze(*module);
+    if (!options.dump_cfl_graph.empty()) {
+      analysis.client().graph().writeTextFile(options.dump_cfl_graph);
+    }
+    if (!options.dump_cfl_grammar.empty()) {
+      analysis.client().grammar().writeTextFile(options.dump_cfl_grammar);
+    }
     const GraphSimplificationStatistics &simplification =
         analysis.client().simplificationStatistics();
     if (!options.query_lhs.empty()) {
@@ -336,87 +353,75 @@ int main(int argc, char **argv) {
           checkAnnotations(*module, analysis);
     }
     if (options.json_stats) {
-      std::cout << "{\"solver\":\"" << solverBackendName(options.analysis.backend)
-                << "\",\"encoding\":\"" << aliasEncodingName(options.analysis)
-                << "\",\"nodes\":" << stats.graph_nodes
-                << ",\"base_edges\":" << stats.base_graph_edges
-                << ",\"grammar_symbols\":" << stats.grammar_symbols
-                << ",\"grammar_productions\":" << stats.grammar_productions
-                << ",\"relation_edges\":" << stats.relation_edges
-                << ",\"start_edges\":" << stats.start_symbol_edges
-                << ",\"callgraph_rounds\":" << stats.solver_rounds
-                << ",\"processed_items\":" << stats.processed_work_items
-                << ",\"classical_iterations\":"
-                << stats.classical_iterations
-                << ",\"duplicate_edges\":" << stats.duplicate_edges
-                << ",\"peak_worklist\":" << stats.peak_worklist_size
-                << ",\"transitive_pairs\":" << stats.transitive_propagated_pairs
-                << ",\"pocr_tree_nodes\":" << stats.pocr_tree_nodes
-                << ",\"pocr_traversal_steps\":" << stats.pocr_traversal_steps
-                << ",\"pocr_tree_join_visits\":" << stats.pocr_tree_join_visits
-                << ",\"preprocess_input_nodes\":"
-                << simplification.original_nodes
-                << ",\"preprocess_reduced_nodes\":"
-                << simplification.reduced_nodes
-                << ",\"scc_nodes_merged\":"
-                << simplification.scc_nodes_merged
-                << ",\"folded_nodes\":" << simplification.folded_nodes
-                << ",\"deref_nodes_merged\":"
-                << simplification.common_dereference_nodes_merged
-                << ",\"focr_critical_edges\":"
-                << stats.fully_ordered_critical_edges
-                << ",\"focr_reachability_checks\":"
-                << stats.fully_ordered_reachability_checks
-                << ",\"focr_tree_join_visits\":"
-                << stats.fully_ordered_tree_join_visits
-                << ",\"focr_cycle_simplifications\":"
-                << stats.fully_ordered_cycle_simplifications
-                << ",\"graspan_epochs\":" << stats.graspan_epochs
-                << ",\"cert_levels\":" << stats.cert_cfl_levels
-                << ",\"cert_blocks\":" << stats.cert_cfl_blocks
-                << ",\"cert_peak_tiles\":" << stats.cert_cfl_peak_tiles
-                << ",\"cert_updates\":" << stats.cert_cfl_updates
-                << ",\"cert_promotions\":" << stats.cert_cfl_promotions
-                << ",\"cert_genuine_promotions\":"
-                << stats.cert_cfl_genuine_promotions
-                << ",\"eq_cells\":" << stats.endpoint_quotient_cells
-                << ",\"eq_insert_attempts\":"
-                << stats.endpoint_quotient_insert_attempts
-                << ",\"eq_duplicate_inserts\":"
-                << stats.endpoint_quotient_duplicate_inserts
-                << ",\"eq_binary_joins\":"
-                << stats.endpoint_quotient_binary_joins
-                << ",\"eq_binary_join_words\":"
-                << stats.endpoint_quotient_binary_join_words
-                << ",\"eq_preprocess_us\":"
-                << stats.endpoint_quotient_preprocess_us
-                << ",\"eq_saturation_us\":"
-                << stats.endpoint_quotient_saturation_us
-                << ",\"eq_count_us\":" << stats.endpoint_quotient_count_us
-                << ",\"eq_dependency_sccs\":"
-                << stats.endpoint_quotient_dependency_sccs
-                << ",\"eq_acyclic_sccs\":"
-                << stats.endpoint_quotient_acyclic_sccs
-                << ",\"eq_unary_recursive_sccs\":"
-                << stats.endpoint_quotient_unary_recursive_sccs
-                << ",\"eq_transitive_sccs\":"
-                << stats.endpoint_quotient_transitive_sccs
-                << ",\"eq_linear_sccs\":"
-                << stats.endpoint_quotient_linear_sccs
-                << ",\"eq_general_sccs\":"
-                << stats.endpoint_quotient_general_sccs
-                << ",\"eq_max_scc_symbols\":"
-                << stats.endpoint_quotient_max_scc_symbols
-                << ",\"eq_max_scc_rules\":"
-                << stats.endpoint_quotient_max_scc_rules
-                << ",\"eq_hottest_rule_id\":"
-                << stats.endpoint_quotient_hottest_rule_id
-                << ",\"eq_hottest_rule_joins\":"
-                << stats.endpoint_quotient_hottest_rule_joins
-                << ",\"eq_hottest_scc_id\":"
-                << stats.endpoint_quotient_hottest_scc_id
-                << ",\"eq_hottest_scc_joins\":"
-                << stats.endpoint_quotient_hottest_scc_joins;
+      std::cout
+          << "{\"solver\":\"" << solverBackendName(options.analysis.backend)
+          << "\",\"encoding\":\"" << aliasEncodingName(options.analysis)
+          << "\",\"nodes\":" << stats.graph_nodes
+          << ",\"base_edges\":" << stats.base_graph_edges
+          << ",\"grammar_symbols\":" << stats.grammar_symbols
+          << ",\"grammar_productions\":" << stats.grammar_productions
+          << ",\"relation_edges\":" << stats.relation_edges
+          << ",\"start_edges\":" << stats.start_symbol_edges
+          << ",\"callgraph_rounds\":" << stats.solver_rounds
+          << ",\"processed_items\":" << stats.processed_work_items
+          << ",\"classical_iterations\":" << stats.classical_iterations
+          << ",\"duplicate_edges\":" << stats.duplicate_edges
+          << ",\"peak_worklist\":" << stats.peak_worklist_size
+          << ",\"transitive_pairs\":" << stats.transitive_propagated_pairs
+          << ",\"pocr_tree_nodes\":" << stats.pocr_tree_nodes
+          << ",\"pocr_traversal_steps\":" << stats.pocr_traversal_steps
+          << ",\"pocr_tree_join_visits\":" << stats.pocr_tree_join_visits
+          << ",\"preprocess_input_nodes\":" << simplification.original_nodes
+          << ",\"preprocess_reduced_nodes\":" << simplification.reduced_nodes
+          << ",\"scc_nodes_merged\":" << simplification.scc_nodes_merged
+          << ",\"folded_nodes\":" << simplification.folded_nodes
+          << ",\"deref_nodes_merged\":"
+          << simplification.common_dereference_nodes_merged
+          << ",\"focr_critical_edges\":" << stats.fully_ordered_critical_edges
+          << ",\"focr_reachability_checks\":"
+          << stats.fully_ordered_reachability_checks
+          << ",\"focr_tree_join_visits\":"
+          << stats.fully_ordered_tree_join_visits
+          << ",\"focr_cycle_simplifications\":"
+          << stats.fully_ordered_cycle_simplifications
+          << ",\"graspan_epochs\":" << stats.graspan_epochs
+          << ",\"cert_levels\":" << stats.cert_cfl_levels
+          << ",\"cert_blocks\":" << stats.cert_cfl_blocks
+          << ",\"cert_peak_tiles\":" << stats.cert_cfl_peak_tiles
+          << ",\"cert_updates\":" << stats.cert_cfl_updates
+          << ",\"cert_promotions\":" << stats.cert_cfl_promotions
+          << ",\"cert_genuine_promotions\":"
+          << stats.cert_cfl_genuine_promotions
+          << ",\"eq_cells\":" << stats.endpoint_quotient_cells
+          << ",\"eq_insert_attempts\":"
+          << stats.endpoint_quotient_insert_attempts
+          << ",\"eq_duplicate_inserts\":"
+          << stats.endpoint_quotient_duplicate_inserts
+          << ",\"eq_binary_joins\":" << stats.endpoint_quotient_binary_joins
+          << ",\"eq_binary_join_words\":"
+          << stats.endpoint_quotient_binary_join_words
+          << ",\"eq_preprocess_us\":" << stats.endpoint_quotient_preprocess_us
+          << ",\"eq_saturation_us\":" << stats.endpoint_quotient_saturation_us
+          << ",\"eq_count_us\":" << stats.endpoint_quotient_count_us
+          << ",\"eq_dependency_sccs\":"
+          << stats.endpoint_quotient_dependency_sccs
+          << ",\"eq_acyclic_sccs\":" << stats.endpoint_quotient_acyclic_sccs
+          << ",\"eq_unary_recursive_sccs\":"
+          << stats.endpoint_quotient_unary_recursive_sccs
+          << ",\"eq_transitive_sccs\":"
+          << stats.endpoint_quotient_transitive_sccs
+          << ",\"eq_linear_sccs\":" << stats.endpoint_quotient_linear_sccs
+          << ",\"eq_general_sccs\":" << stats.endpoint_quotient_general_sccs
+          << ",\"eq_max_scc_symbols\":"
+          << stats.endpoint_quotient_max_scc_symbols
+          << ",\"eq_max_scc_rules\":" << stats.endpoint_quotient_max_scc_rules
+          << ",\"eq_hottest_rule_id\":"
+          << stats.endpoint_quotient_hottest_rule_id
+          << ",\"eq_hottest_rule_joins\":"
+          << stats.endpoint_quotient_hottest_rule_joins
+          << ",\"eq_hottest_scc_id\":" << stats.endpoint_quotient_hottest_scc_id
+          << ",\"eq_hottest_scc_joins\":"
+          << stats.endpoint_quotient_hottest_scc_joins;
       printEndpointQuotientProfiles(std::cout, stats);
       std::cout << ",\"annotation_total\":" << annotation_total
                 << ",\"annotation_failures\":" << annotation_failures
@@ -444,8 +449,7 @@ int main(int argc, char **argv) {
                 << " pocr_tree_join_visits=" << stats.pocr_tree_join_visits
                 << " preprocess_input_nodes=" << simplification.original_nodes
                 << " preprocess_reduced_nodes=" << simplification.reduced_nodes
-                << " scc_nodes_merged="
-                << simplification.scc_nodes_merged
+                << " scc_nodes_merged=" << simplification.scc_nodes_merged
                 << " folded_nodes=" << simplification.folded_nodes
                 << " deref_nodes_merged="
                 << simplification.common_dereference_nodes_merged
@@ -461,10 +465,8 @@ int main(int argc, char **argv) {
                 << " cert_genuine_promotions="
                 << stats.cert_cfl_genuine_promotions
                 << " eq_cells=" << stats.endpoint_quotient_cells
-                << " eq_preprocess_us="
-                << stats.endpoint_quotient_preprocess_us
-                << " eq_saturation_us="
-                << stats.endpoint_quotient_saturation_us
+                << " eq_preprocess_us=" << stats.endpoint_quotient_preprocess_us
+                << " eq_saturation_us=" << stats.endpoint_quotient_saturation_us
                 << " annotation_total=" << annotation_total
                 << " annotation_failures=" << annotation_failures
                 << " frontend_us=" << stats.frontend_time_microseconds

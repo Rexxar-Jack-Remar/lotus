@@ -1,0 +1,21 @@
+Production:
+S	P
+S	S	A
+S	S	call_i
+P	A	P
+P	ret_i	P
+P
+A	A	A
+A	CA_i	ret_i
+A	a
+A
+CA_i	call_i	A
+
+Insert:
+P,	A,	S,	
+
+Follow:
+CA_i,	
+
+Count:
+S,	

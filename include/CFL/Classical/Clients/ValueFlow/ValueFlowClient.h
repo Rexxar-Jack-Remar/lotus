@@ -15,8 +15,18 @@ class SVFG;
 
 namespace lotus::cfl::classical {
 
+enum class ValueFlowEncodingMode {
+  /// Lotus-native balanced/realizable value-flow relations, including edge
+  /// kinds and their reverse labels.
+  Native,
+  /// Classical CFL interchange encoding: a, call_i, and ret_i.
+  ClassicalCFL,
+};
+
 LabeledGraph encodeSVFG(const lotus::analysis::SVFG &svfg);
 Grammar buildVfgGrammar(const lotus::analysis::SVFG &svfg);
+LabeledGraph encodeClassicalCflSVFG(const lotus::analysis::SVFG &svfg);
+Grammar buildClassicalCflVfgGrammar(const lotus::analysis::SVFG &svfg);
 
 /// Context-sensitive may-reach value-flow facade. Direct, indirect-memory,
 /// and may-happen-in-parallel input edges remain distinguishable in the
@@ -30,10 +40,13 @@ public:
   ValueFlowClient(const ValueFlowClient &) = delete;
   ValueFlowClient &operator=(const ValueFlowClient &) = delete;
 
-  static ValueFlowClient fromSVFG(const lotus::analysis::SVFG &svfg);
+  static ValueFlowClient
+  fromSVFG(const lotus::analysis::SVFG &svfg,
+           ValueFlowEncodingMode mode = ValueFlowEncodingMode::Native);
   static ValueFlowClient
   fromPreparedSVFG(lotus::analysis::SVFG &svfg,
-                   const SVFGPreparationOptions &options = {});
+                   const SVFGPreparationOptions &options = {},
+                   ValueFlowEncodingMode mode = ValueFlowEncodingMode::Native);
 
   ReachabilityStats solve(SolverBackend backend = SolverBackend::SparseSet);
   /// Backward-compatible spelling for hasBalancedFlow().

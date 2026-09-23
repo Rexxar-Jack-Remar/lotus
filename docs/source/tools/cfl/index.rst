@@ -25,7 +25,7 @@ Classical CFL solving and clients
 ``lotus-cfl-solve`` runs a supplied grammar over a text, DOT, or JSON
 graph. Select the engine with ``--solver``; the available backends include
 ``sparse-set``, ``sparse-bitvector``, ``graspan``, ``transitive-closure``,
-``pocr``, ``hpocr``, ``focr``, ``pearl``, ``sqid``, ``skewed``,
+``pocr``, ``hpocr``, ``focr``, ``pearl``, ``stg``, ``sqid``, ``skewed``,
 ``endpoint-quotient``, ``cert``, ``cat``, ``iea``, and ``iea-ocr``.
 
 ``lotus-cfl-alias`` consumes LLVM IR or bitcode. It uses Aser as the constraint
@@ -43,7 +43,7 @@ labels.
    cmake --build build --target lotus-cfl-solve lotus-cfl-alias lotus-cfl-vf
    build/bin/lotus-cfl-solve --grammar grammar.txt --graph graph.txt \
      --solver transitive-closure --json-stats
-   build/bin/lotus-cfl-alias --encoding pag --solver sparse-bitvector \
+   build/bin/lotus-cfl-alias --encoding cfl-peg --solver sparse-bitvector \
      --check-annotations module.bc
    build/bin/lotus-cfl-vf --solver transitive-closure \
      --query main::source,main::sink module.bc
@@ -60,6 +60,11 @@ selectors are available to the value-flow client.
 Use ``--solver skewed`` to select PLDI 2024 skewed tabulation through the same
 complete-relation client interface.
 
+Use ``--solver stg --stg-spec FILE`` for ISSTA 2024 staged solving. STG needs
+an explicit JSON decomposition because an arbitrary CFG does not uniquely
+identify its context-free pattern, delimiters, or regular phases. See
+:doc:`/cfl/classical/stg` for the schema.
+
 Use ``--solver cat`` for the ICSE 2026 context-aware tabulation engine, and
 ``--solver iea`` or ``--solver iea-ocr`` for the OOPSLA 2024 iterative-epoch
 online cycle elimination variants (``iea-ocr`` additionally applies online
@@ -71,10 +76,19 @@ Use ``--solver cert`` to select the cardinality-certified exact all-symbol CFL
 reachability engine. See :doc:`/cfl/classical/cert_cfl` for architecture and
 options.
 
-The general solver accepts POCR grammar/graph files and exposes
+The general solver accepts the vendored datasets under
+``benchmarks/real-world/CFL/Classical``, POCR grammar/graph files, and exposes
 unidirectional summarization, SCC elimination, graph folding, and inter-Dyck
-pruning. STG and foldability components remain available through their C++
-APIs and unit tests rather than dedicated executables.
+pruning. Foldability utilities remain available through their C++ APIs.
+Run ``python3 scripts/cfl/run_cfl_dataset.py --all-solvers --case lbm`` for a
+small cross-backend check over the vendored alias, value-flow, and taint
+instances. This includes ``cert``; STG remains separate because it requires an
+explicit decomposition specification.
+Select subsets with comma-separated or repeated ``--analysis``, ``--case``,
+and ``--solver`` options. ``--workers N`` runs independent solver processes in
+parallel and ``--timeout SECONDS`` applies a limit to each process. The driver
+emits success, failure, and timeout records as JSONL. ``Ctrl-C`` terminates all
+active solver process groups before the driver exits.
 
 See :doc:`/cfl/classical/classical`, :doc:`/cfl/classical/pearl`,
 :doc:`/cfl/classical/stg`, and :doc:`/cfl/classical/sqid` for the complete algorithm,

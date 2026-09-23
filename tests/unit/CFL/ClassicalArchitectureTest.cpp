@@ -261,6 +261,39 @@ TEST(ClassicalArchitectureTest, ParsesPocrGrammarAndAttributedEdgeLists) {
               0);
 }
 
+TEST(ClassicalArchitectureTest, ParsesLegacyBareAttributedLabels) {
+  const auto graph_path =
+      writeTemp("lotus_pocr_bare_attributes.peg",
+                "0\t1\tf\t7\n1\t0\tfbar\t7\n1\t2\tcall\t23\n2\t3\tret\t23\n");
+  const LabeledGraph graph = LabeledGraph::parseFromFile(
+      graph_path.string(),
+      GraphLoadOptions{GraphMode::Plain, EdgeDirection::Plain});
+
+  EXPECT_TRUE(graph.hasEdge(graph.vertexId("0"), graph.vertexId("1"), "f_7"));
+  EXPECT_TRUE(
+      graph.hasEdge(graph.vertexId("1"), graph.vertexId("0"), "fbar_7"));
+  EXPECT_TRUE(
+      graph.hasEdge(graph.vertexId("1"), graph.vertexId("2"), "call_23"));
+  EXPECT_TRUE(
+      graph.hasEdge(graph.vertexId("2"), graph.vertexId("3"), "ret_23"));
+}
+
+TEST(ClassicalArchitectureTest, WritesRoundTrippableGrammarInterchange) {
+  const Grammar grammar =
+      Grammar::parseFromText("Production:\nS\tA\tb\nA\ta\nA\n\n"
+                             "Insert:\nS,A\n\nFollow:\nA\n\nCount:\nS\n");
+  const auto path = std::filesystem::temp_directory_path() /
+                    "lotus_classical_grammar_roundtrip.grammar";
+  grammar.writeTextFile(path.string());
+  const Grammar reparsed = Grammar::parseFromFile(path.string());
+
+  EXPECT_EQ(reparsed.startSymbol(), "S");
+  EXPECT_EQ(reparsed.productionCount(), grammar.productionCount());
+  EXPECT_TRUE(reparsed.isInsertSymbol("S"));
+  EXPECT_TRUE(reparsed.isFollowSymbol("A"));
+  EXPECT_TRUE(reparsed.isCountSymbol("S"));
+}
+
 TEST(ClassicalArchitectureTest,
      BuildsExactStandardAndRewrittenPocrClientGrammars) {
   LabeledGraph graph;
@@ -623,6 +656,7 @@ TEST(ClassicalArchitectureTest, ParsesSolverBackendNames) {
   EXPECT_EQ(parseSolverBackend("graspan"), SolverBackend::Graspan);
   EXPECT_EQ(parseSolverBackend("sqid"), SolverBackend::Sqid);
   EXPECT_EQ(parseSolverBackend("pearl"), SolverBackend::Pearl);
+  EXPECT_EQ(parseSolverBackend("stg"), SolverBackend::Stg);
   EXPECT_EQ(parseSolverBackend("skewed"), SolverBackend::Skewed);
   EXPECT_EQ(parseSolverBackend("cat"), SolverBackend::Cat);
   EXPECT_EQ(parseSolverBackend("iea"), SolverBackend::Iea);
@@ -1699,6 +1733,7 @@ TEST(ClassicalArchitectureTest, WritesNormalizedGraphWithSourceMarkers) {
   LabeledGraph graph;
   const NodeId source = graph.addVertex("source");
   const NodeId target = graph.addVertex("target");
+  graph.addVertex("isolated");
   graph.markSource(source);
   graph.addEdge(source, target, "call_4");
   const auto path =
@@ -1708,6 +1743,8 @@ TEST(ClassicalArchitectureTest, WritesNormalizedGraphWithSourceMarkers) {
   const LabeledGraph loaded = LabeledGraph::parseFromFile(
       path.string(), GraphLoadOptions{GraphMode::Plain, EdgeDirection::Plain});
   EXPECT_TRUE(loaded.isSource(loaded.vertexId("source")));
+  EXPECT_EQ(loaded.vertexCount(), 3u);
+  EXPECT_FALSE(loaded.isSource(loaded.vertexId("isolated")));
   EXPECT_TRUE(loaded.hasEdge(loaded.vertexId("source"),
                              loaded.vertexId("target"), "call_4"));
 }

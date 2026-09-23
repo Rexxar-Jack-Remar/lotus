@@ -291,9 +291,21 @@ struct Compiled {
     std::vector<bool> protected_symbol(g.terminal.size(), false);
     for (Symbol s : out)
       protected_symbol[s] = true;
+    if (o.propagating_symbols) {
+      for (Symbol s : *o.propagating_symbols) {
+        if (s >= g.terminal.size() || g.terminal[s])
+          throw std::invalid_argument(
+              "a propagating symbol must be a declared nonterminal");
+        if (protected_symbol[s])
+          throw std::invalid_argument(
+              "a requested output cannot be a propagating symbol");
+        pn[s] = o.static_propagating_edges;
+      }
+    }
     for (std::size_t s = 0; s < g.terminal.size(); ++s) {
-      pn[s] =
-          !g.terminal[s] && !protected_symbol[s] && o.static_propagating_edges;
+      if (!o.propagating_symbols)
+        pn[s] = !g.terminal[s] && !protected_symbol[s] &&
+                o.static_propagating_edges;
       dynamic[s] = !g.terminal[s] && o.dynamic_transitive_edges;
     }
     std::vector<bool> has_transitive(g.terminal.size(), false);
@@ -307,10 +319,12 @@ struct Compiled {
         right[r.second].push_back(r);
         // Algorithm 2, PN test: the sibling is terminal and the LHS is
         // different from the candidate. Unary uses do not disqualify it.
-        if (!g.terminal[r.second] || r.lhs == r.first)
-          pn[r.first] = false;
-        if (!g.terminal[r.first] || r.lhs == r.second)
-          pn[r.second] = false;
+        if (!o.propagating_symbols) {
+          if (!g.terminal[r.second] || r.lhs == r.first)
+            pn[r.first] = false;
+          if (!g.terminal[r.first] || r.lhs == r.second)
+            pn[r.second] = false;
+        }
         // Algorithm 3, dynamic test: every binary use must be recursive in
         // its other operand. This is NOT merely "X has an X -> X X rule".
         if (r.lhs != r.second)

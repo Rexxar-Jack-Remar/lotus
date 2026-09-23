@@ -1,12 +1,15 @@
 #pragma once
 
 #include "CFL/Classical/Core/Grammar.h"
-#include "CFL/Classical/Solvers/Engines/CERT/CertCFL.h"
 #include "CFL/Classical/Core/Graph.h"
+#include "CFL/Classical/Solvers/Engines/CERT/CertCFL.h"
+#include "CFL/Classical/Solvers/Engines/STG/StagedSolver.h"
+#include "CFL/Classical/Solvers/Engines/Skewed/SkewedTabulation.h"
 
 #include <cstddef>
 #include <cstdint>
 #include <memory>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -100,6 +103,20 @@ struct ReachabilityStats {
   std::size_t skewed_promotions_to_indexed = 0;
   std::size_t skewed_unary_applications = 0;
   std::size_t skewed_binary_join_pairs = 0;
+  /// Indexed non-input facts retained by skewed tabulation. Propagating facts
+  /// are deliberately excluded because they are not inserted into the graph.
+  std::size_t skewed_inserted_summary_edges = 0;
+  /// Facts exported for the requested all-symbol or target-only scope.
+  std::size_t skewed_output_facts = 0;
+  std::size_t stg_phase_l_rounds = 0;
+  std::size_t stg_phase_l_regular_edges = 0;
+  std::size_t stg_dyck_path_edges = 0;
+  std::size_t stg_alias_forward_path_edges = 0;
+  std::size_t stg_alias_backward_path_edges = 0;
+  std::size_t stg_summary_edges = 0;
+  std::size_t stg_phase_r_productions = 0;
+  std::size_t stg_phase_r_edges = 0;
+  std::size_t stg_ordered_scc_propagations = 0;
   std::size_t batch_stored_facts = 0;
   std::size_t cat_graph_degree = 0;
   std::size_t cat_fully_pruned_attempts = 0;
@@ -171,6 +188,8 @@ enum class SolverBackend {
   Sqid,
   /// PEARL transitivity-aware multi-derivation.
   Pearl,
+  /// ISSTA 2024 staged solving with an explicit decomposition specification.
+  Stg,
   /// PLDI 2024 skewed tabulation with separate indexed and propagating facts.
   Skewed,
   /// ICSE 2026 context-aware tabulation.
@@ -207,6 +226,12 @@ struct SolverOptions {
   bool endpoint_quotient_factorized = false;
   /// observed must be nullopt for the complete Relation contract.
   engines::cert::Options cert_cfl{};
+  /// Defaults preserve SolverSession's complete all-symbol relation. Callers
+  /// may explicitly request a target-only skewed projection.
+  skewed::Options skewed{};
+  /// Required when backend is Stg because arbitrary CFGs do not determine a
+  /// unique context-free-pattern decomposition.
+  std::optional<engines::stg::StagedSpecification> stg;
 };
 
 const char *solverBackendName(SolverBackend backend);

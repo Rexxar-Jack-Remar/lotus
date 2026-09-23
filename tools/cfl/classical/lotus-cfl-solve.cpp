@@ -8,14 +8,24 @@
 #include <cstdlib>
 #include <fstream>
 #include <iostream>
+#include <iterator>
 #include <sstream>
 #include <stdexcept>
 #include <string>
 #include <vector>
 
+#include <llvm/Support/Error.h>
+#include <llvm/Support/JSON.h>
+
 using namespace lotus::cfl::classical;
 
 namespace {
+
+enum class ResultScope {
+  All,
+  Start,
+  Count,
+};
 
 struct Options {
   std::string grammar;
@@ -30,11 +40,13 @@ struct Options {
   bool validate_only = false;
   bool unidirectional = false;
   bool simplify_focr_cycles = false;
+  ResultScope result_scope = ResultScope::All;
   std::vector<std::pair<std::string, std::string>> pearl_inverse_relations;
   GraphSimplificationOptions simplification;
   std::string relation_output;
   std::string stats_output;
   std::string graph_output;
+  std::string stg_spec;
 };
 
 void usage(std::ostream &stream) {
@@ -42,7 +54,7 @@ void usage(std::ostream &stream) {
       << "Usage: lotus-cfl-solve --grammar FILE --graph FILE [options]\n"
          "Options:\n"
          "  --solver sparse-set|sparse-bitvector|graspan|sqid|pearl|"
-         "skewed|cat|iea|iea-ocr|transitive-closure|pocr|hpocr|focr|"
+         "skewed|stg|cat|iea|iea-ocr|transitive-closure|pocr|hpocr|focr|"
          "endpoint-quotient|cert\n"
          "  --graph-mode plain|matrix|pag-matrix\n"
          "  --direction plain|reverse|bidirectional\n"
@@ -57,6 +69,9 @@ void usage(std::ostream &stream) {
          "  --json-stats\n"
          "  --stats-output FILE\n"
          "  --unidirectional            Honor POCR Insert/Follow metadata\n"
+         "  --result-scope all|start|count\n"
+         "                              Select the reported CFL relation\n"
+         "  --stg-spec FILE             Explicit staged-decomposition JSON\n"
          "  --focr-scc                  Simplify FOCR critical-graph SCCs\n"
          "  --pearl-inverse X,XBAR      Pair inverse PEARL relations\n"
          "  --simplification-flavor alias|value-flow\n"
@@ -185,6 +200,21 @@ Options parseOptions(int argc, char **argv) {
       options.stats_output = value();
     } else if (argument == "--unidirectional") {
       options.unidirectional = true;
+    } else if (argument == "--result-scope") {
+      const std::string selected = value();
+      if (selected == "all") {
+        options.result_scope = ResultScope::All;
+      } else if (selected == "start") {
+        options.result_scope = ResultScope::Start;
+        options.start_only = true;
+      } else if (selected == "count") {
+        options.result_scope = ResultScope::Count;
+        options.count_only = true;
+      } else {
+        throw std::invalid_argument("Unknown result scope: " + selected);
+      }
+    } else if (argument == "--stg-spec") {
+      options.stg_spec = value();
     } else if (argument == "--focr-scc") {
       options.simplify_focr_cycles = true;
     } else if (argument == "--pearl-inverse") {
@@ -230,7 +260,183 @@ Options parseOptions(int argc, char **argv) {
   if (options.start_only && options.count_only) {
     throw std::invalid_argument("--start-only and --count-only are exclusive");
   }
+  if (!options.stg_spec.empty() && options.backend != SolverBackend::Stg) {
+    throw std::invalid_argument("--stg-spec requires --solver stg");
+  }
   return options;
+}
+
+std::string requiredString(const llvm::json::Object &object,
+                           llvm::StringRef key) {
+  const auto value = object.getString(key);
+  if (!value) {
+    throw std::invalid_argument("STG object requires string field '" +
+                                key.str() + "'");
+  }
+  return value->str();
+}
+
+SymbolId requiredSymbol(const llvm::json::Object &object, llvm::StringRef key,
+                        const Grammar &grammar) {
+  const std::string name = requiredString(object, key);
+  if (!grammar.hasSymbol(name)) {
+    throw std::invalid_argument("Unknown STG grammar symbol: " + name);
+  }
+  return grammar.symbolId(name);
+}
+
+std::vector<SymbolId> parseSymbolArray(const llvm::json::Array *array,
+                                       const Grammar &grammar,
+                                       const std::string &context) {
+  if (!array) {
+    throw std::invalid_argument(context + " requires a symbol array");
+  }
+  std::vector<SymbolId> symbols;
+  for (const llvm::json::Value &value : *array) {
+    const auto name = value.getAsString();
+    if (!name || !grammar.hasSymbol(name->str())) {
+      throw std::invalid_argument(context +
+                                  " contains an unknown/non-string symbol");
+    }
+    symbols.push_back(grammar.symbolId(name->str()));
+  }
+  return symbols;
+}
+
+engines::stg::RegularProduction
+parseRegularProduction(const llvm::json::Object &object,
+                       const Grammar &grammar) {
+  engines::stg::RegularProduction production;
+  production.lhs = requiredSymbol(object, "lhs", grammar);
+  const llvm::json::Array *alternatives = object.getArray("alternatives");
+  if (!alternatives) {
+    throw std::invalid_argument("STG regular production requires alternatives");
+  }
+  for (const llvm::json::Value &alternative_value : *alternatives) {
+    const llvm::json::Array *alternative = alternative_value.getAsArray();
+    if (!alternative) {
+      throw std::invalid_argument("STG alternative must be an atom array");
+    }
+    engines::stg::RegularSequence sequence;
+    for (const llvm::json::Value &atom_value : *alternative) {
+      const llvm::json::Object *atom = atom_value.getAsObject();
+      if (!atom) {
+        throw std::invalid_argument("STG regular atom must be an object");
+      }
+      engines::stg::RegularAtom parsed;
+      parsed.symbols =
+          parseSymbolArray(atom->getArray("symbols"), grammar, "STG atom");
+      parsed.kleene_star =
+          atom->getBoolean("kleene_star").getValueOr(false);
+      sequence.push_back(std::move(parsed));
+    }
+    production.alternatives.push_back(std::move(sequence));
+  }
+  return production;
+}
+
+std::vector<engines::stg::RegularProduction>
+parseRegularProductions(const llvm::json::Array *array, const Grammar &grammar,
+                        const char *section) {
+  std::vector<engines::stg::RegularProduction> productions;
+  if (!array) {
+    return productions;
+  }
+  for (const llvm::json::Value &value : *array) {
+    const llvm::json::Object *object = value.getAsObject();
+    if (!object) {
+      throw std::invalid_argument(std::string(section) +
+                                  " entries must be objects");
+    }
+    productions.push_back(parseRegularProduction(*object, grammar));
+  }
+  return productions;
+}
+
+engines::stg::StagedSpecification
+parseStgSpecification(const std::string &path, const Grammar &grammar) {
+  std::ifstream input(path);
+  if (!input) {
+    throw std::runtime_error("Failed to open STG specification: " + path);
+  }
+  const std::string text((std::istreambuf_iterator<char>(input)),
+                         std::istreambuf_iterator<char>());
+  auto parsed = llvm::json::parse(text);
+  if (!parsed) {
+    throw std::invalid_argument("Invalid STG JSON: " +
+                                llvm::toString(parsed.takeError()));
+  }
+  const llvm::json::Object *root = parsed->getAsObject();
+  if (!root) {
+    throw std::invalid_argument("STG specification root must be an object");
+  }
+
+  engines::stg::StagedSpecification specification;
+  specification.phase_l_regular = parseRegularProductions(
+      root->getArray("phase_l_regular"), grammar, "phase_l_regular");
+  specification.phase_r =
+      parseRegularProductions(root->getArray("phase_r"), grammar, "phase_r");
+
+  if (const llvm::json::Array *patterns = root->getArray("dyck_patterns")) {
+    for (const llvm::json::Value &value : *patterns) {
+      const llvm::json::Object *object = value.getAsObject();
+      if (!object) {
+        throw std::invalid_argument("STG Dyck pattern must be an object");
+      }
+      engines::stg::DyckCfp pattern;
+      pattern.summary = requiredSymbol(*object, "summary", grammar);
+      pattern.body_symbols = parseSymbolArray(object->getArray("body_symbols"),
+                                              grammar, "STG Dyck body");
+      const llvm::json::Array *delimiters = object->getArray("delimiters");
+      if (!delimiters) {
+        throw std::invalid_argument("STG Dyck pattern requires delimiters");
+      }
+      for (const llvm::json::Value &delimiter_value : *delimiters) {
+        const llvm::json::Array *delimiter = delimiter_value.getAsArray();
+        if (!delimiter || delimiter->size() != 2) {
+          throw std::invalid_argument("STG delimiter must be [open, close]");
+        }
+        const auto open = (*delimiter)[0].getAsString();
+        const auto close = (*delimiter)[1].getAsString();
+        if (!open || !close || !grammar.hasSymbol(open->str()) ||
+            !grammar.hasSymbol(close->str())) {
+          throw std::invalid_argument("STG delimiter uses an unknown symbol");
+        }
+        pattern.delimiters.push_back(
+            {grammar.symbolId(open->str()), grammar.symbolId(close->str())});
+      }
+      specification.dyck_patterns.push_back(std::move(pattern));
+    }
+  }
+
+  if (const llvm::json::Array *patterns = root->getArray("alias_patterns")) {
+    for (const llvm::json::Value &value : *patterns) {
+      const llvm::json::Object *object = value.getAsObject();
+      if (!object) {
+        throw std::invalid_argument("STG alias pattern must be an object");
+      }
+      specification.alias_patterns.push_back(
+          {requiredSymbol(*object, "summary", grammar),
+           requiredSymbol(*object, "open", grammar),
+           requiredSymbol(*object, "close", grammar),
+           requiredSymbol(*object, "reverse_forward", grammar),
+           requiredSymbol(*object, "center", grammar),
+           requiredSymbol(*object, "backward", grammar)});
+    }
+  }
+  if (specification.phase_l_regular.empty() &&
+      specification.dyck_patterns.empty() &&
+      specification.alias_patterns.empty() && specification.phase_r.empty()) {
+    throw std::invalid_argument("STG specification is empty");
+  }
+  return specification;
+}
+
+const char *resultScopeName(ResultScope scope) {
+  if (scope == ResultScope::All) {
+    return "all";
+  }
+  return scope == ResultScope::Count ? "count" : "start";
 }
 
 } // namespace
@@ -289,10 +495,40 @@ int main(int argc, char **argv) {
       return 0;
     }
 
-    SolverSession session(graph, grammar,
-                          SolverOptions{options.backend, options.unidirectional,
-                                        options.simplify_focr_cycles,
-                                        options.pearl_inverse_relations});
+    SolverOptions solver_options;
+    solver_options.backend = options.backend;
+    solver_options.unidirectional = options.unidirectional;
+    solver_options.simplify_focr_cycles = options.simplify_focr_cycles;
+    solver_options.pearl_inverse_relations = options.pearl_inverse_relations;
+    if (options.backend == SolverBackend::Stg) {
+      if (options.stg_spec.empty()) {
+        throw std::invalid_argument("--solver stg requires --stg-spec FILE");
+      }
+      solver_options.stg = parseStgSpecification(options.stg_spec, grammar);
+    }
+    if (options.backend == SolverBackend::Skewed &&
+        options.result_scope != ResultScope::All) {
+      solver_options.skewed.scope = skewed::Scope::TargetsOnly;
+      if (options.result_scope == ResultScope::Count) {
+        if (grammar.countSymbols().empty()) {
+          throw std::invalid_argument(
+              "Count result scope requires grammar Count metadata");
+        }
+        for (const std::string &symbol : grammar.countSymbols()) {
+          solver_options.skewed.targets.push_back(grammar.symbolId(symbol));
+        }
+      } else {
+        solver_options.skewed.targets.push_back(grammar.startSymbolId());
+      }
+      if (!grammar.followSymbols().empty()) {
+        std::vector<skewed::Symbol> propagating;
+        for (const std::string &symbol : grammar.followSymbols()) {
+          propagating.push_back(grammar.symbolId(symbol));
+        }
+        solver_options.skewed.propagating_symbols = std::move(propagating);
+      }
+    }
+    SolverSession session(graph, grammar, solver_options);
     const ReachabilityStats stats = session.solve();
     if (options.dump_relation) {
       std::ofstream relation_file;
@@ -329,12 +565,23 @@ int main(int argc, char **argv) {
     const auto total_us = std::chrono::duration_cast<std::chrono::microseconds>(
                               std::chrono::steady_clock::now() - total_start)
                               .count();
+    const std::size_t result_edges =
+        options.result_scope == ResultScope::Start
+            ? stats.start_symbol_edges
+            : (options.result_scope == ResultScope::Count
+                   ? stats.count_symbol_edges
+                   : stats.relation_edges);
+    const std::size_t inserted_summary_edges =
+        options.backend == SolverBackend::Skewed
+            ? stats.skewed_inserted_summary_edges
+            : stats.added_edges;
     std::ofstream stats_file;
     std::ostream &stats_output = *openOutput(options.stats_output, stats_file);
     if (options.json_stats) {
       stats_output
           << "{\"solver\":\"" << solverBackendName(options.backend)
-          << "\",\"nodes\":" << graph.vertexCount()
+          << "\",\"result_scope\":\"" << resultScopeName(options.result_scope)
+          << '"' << ",\"nodes\":" << graph.vertexCount()
           << ",\"base_edges\":" << stats.base_graph_edges
           << ",\"grammar_symbols\":" << stats.grammar_symbols
           << ",\"grammar_terminals\":" << stats.grammar_terminals
@@ -344,7 +591,9 @@ int main(int argc, char **argv) {
           << ",\"grammar_transitive\":" << stats.grammar_transitive_symbols
           << ",\"input_edges\":" << stats.input_edges
           << ",\"derived_edges\":" << stats.added_edges
+          << ",\"inserted_summary_edges\":" << inserted_summary_edges
           << ",\"relation_edges\":" << stats.relation_edges
+          << ",\"result_edges\":" << result_edges
           << ",\"start_edges\":" << stats.start_symbol_edges
           << ",\"count_edges\":" << stats.count_symbol_edges
           << ",\"checks\":" << stats.classical_iterations
@@ -397,6 +646,22 @@ int main(int argc, char **argv) {
           << ",\"skewed_unary_applications\":"
           << stats.skewed_unary_applications
           << ",\"skewed_binary_join_pairs\":" << stats.skewed_binary_join_pairs
+          << ",\"skewed_inserted_summary_edges\":"
+          << stats.skewed_inserted_summary_edges
+          << ",\"skewed_output_facts\":" << stats.skewed_output_facts
+          << ",\"stg_phase_l_rounds\":" << stats.stg_phase_l_rounds
+          << ",\"stg_phase_l_regular_edges\":"
+          << stats.stg_phase_l_regular_edges
+          << ",\"stg_dyck_path_edges\":" << stats.stg_dyck_path_edges
+          << ",\"stg_alias_forward_path_edges\":"
+          << stats.stg_alias_forward_path_edges
+          << ",\"stg_alias_backward_path_edges\":"
+          << stats.stg_alias_backward_path_edges
+          << ",\"stg_summary_edges\":" << stats.stg_summary_edges
+          << ",\"stg_phase_r_productions\":" << stats.stg_phase_r_productions
+          << ",\"stg_phase_r_edges\":" << stats.stg_phase_r_edges
+          << ",\"stg_ordered_scc_propagations\":"
+          << stats.stg_ordered_scc_propagations
           << ",\"batch_stored_facts\":" << stats.batch_stored_facts
           << ",\"cat_graph_degree\":" << stats.cat_graph_degree
           << ",\"cat_fully_pruned_attempts\":"
@@ -417,7 +682,8 @@ int main(int argc, char **argv) {
           << ",\"cert_cfl_peak_tiles\":" << stats.cert_cfl_peak_tiles
           << ",\"cert_cfl_updates\":" << stats.cert_cfl_updates
           << ",\"cert_cfl_promotions\":" << stats.cert_cfl_promotions
-          << ",\"cert_cfl_genuine_promotions\":" << stats.cert_cfl_genuine_promotions
+          << ",\"cert_cfl_genuine_promotions\":"
+          << stats.cert_cfl_genuine_promotions
           << ",\"endpoint_quotient_cells\":" << stats.endpoint_quotient_cells
           << ",\"endpoint_quotient_facts\":" << stats.endpoint_quotient_facts
           << ",\"endpoint_quotient_seed_facts\":"
@@ -473,13 +739,16 @@ int main(int argc, char **argv) {
     } else {
       stats_output
           << "solver=" << solverBackendName(options.backend)
+          << " result_scope=" << resultScopeName(options.result_scope)
           << " nodes=" << graph.vertexCount()
           << " base_edges=" << stats.base_graph_edges
           << " grammar_symbols=" << stats.grammar_symbols
           << " productions=" << stats.grammar_productions
           << " input_edges=" << stats.input_edges
           << " derived_edges=" << stats.added_edges
+          << " inserted_summary_edges=" << inserted_summary_edges
           << " relation_edges=" << stats.relation_edges
+          << " result_edges=" << result_edges
           << " start_edges=" << stats.start_symbol_edges
           << " count_edges=" << stats.count_symbol_edges
           << " checks=" << stats.classical_iterations
@@ -506,6 +775,12 @@ int main(int argc, char **argv) {
           << " skewed_propagating_facts=" << stats.skewed_propagating_facts
           << " skewed_dynamic_pe_insertions="
           << stats.skewed_dynamic_pe_insertions
+          << " skewed_inserted_summary_edges="
+          << stats.skewed_inserted_summary_edges
+          << " skewed_output_facts=" << stats.skewed_output_facts
+          << " stg_phase_l_rounds=" << stats.stg_phase_l_rounds
+          << " stg_summary_edges=" << stats.stg_summary_edges
+          << " stg_phase_r_edges=" << stats.stg_phase_r_edges
           << " batch_stored_facts=" << stats.batch_stored_facts
           << " cat_graph_degree=" << stats.cat_graph_degree
           << " cat_fully_pruned_attempts=" << stats.cat_fully_pruned_attempts
@@ -518,7 +793,8 @@ int main(int argc, char **argv) {
           << " cert_cfl_peak_tiles=" << stats.cert_cfl_peak_tiles
           << " cert_cfl_updates=" << stats.cert_cfl_updates
           << " cert_cfl_promotions=" << stats.cert_cfl_promotions
-          << " cert_cfl_genuine_promotions=" << stats.cert_cfl_genuine_promotions
+          << " cert_cfl_genuine_promotions="
+          << stats.cert_cfl_genuine_promotions
           << " simplified_nodes=" << simplification_stats.reduced_nodes
           << " scc_nodes_merged=" << simplification_stats.scc_nodes_merged
           << " folded_nodes=" << simplification_stats.folded_nodes

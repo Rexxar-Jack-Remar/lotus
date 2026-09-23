@@ -372,6 +372,69 @@ Grammar Grammar::parseFromText(const std::string &text,
   return grammar;
 }
 
+void Grammar::writeTextFile(const std::string &path) const {
+  if (!count_symbols_.empty() && count_symbols_.count(start_symbol_) == 0) {
+    throw std::logic_error(
+        "Grammar interchange requires the start symbol in Count metadata");
+  }
+  std::ofstream output(path);
+  if (!output) {
+    throw std::runtime_error("Failed to open grammar output file: " + path);
+  }
+
+  std::vector<std::string> heads;
+  heads.reserve(productions_.size());
+  for (const auto &[head, _] : productions_) {
+    heads.push_back(head);
+  }
+  std::sort(heads.begin(), heads.end());
+
+  output << "Production:\n";
+  for (const std::string &head : heads) {
+    auto rules = productions_.at(head);
+    std::sort(rules.begin(), rules.end());
+    for (const auto &rule : rules) {
+      output << head;
+      if (!(rule.size() == 1 && rule.front() == kEpsilonSymbol)) {
+        for (const std::string &symbol : rule) {
+          output << '\t' << symbol;
+        }
+      }
+      output << '\n';
+    }
+  }
+
+  auto write_symbols = [&](const char *section,
+                           const std::unordered_set<std::string> &symbols) {
+    std::vector<std::string> ordered(symbols.begin(), symbols.end());
+    std::sort(ordered.begin(), ordered.end());
+    output << '\n' << section << ":\n";
+    for (std::size_t index = 0; index < ordered.size(); ++index) {
+      if (index != 0) {
+        output << ',';
+      }
+      output << ordered[index];
+    }
+    output << '\n';
+  };
+  write_symbols("Insert", insert_symbols_);
+  write_symbols("Follow", follow_symbols_);
+  if (count_symbols_.empty()) {
+    output << "\nCount:\n" << start_symbol_ << '\n';
+  } else {
+    std::vector<std::string> counts(count_symbols_.begin(),
+                                    count_symbols_.end());
+    std::sort(counts.begin(), counts.end());
+    output << "\nCount:\n" << start_symbol_;
+    for (const std::string &symbol : counts) {
+      if (symbol != start_symbol_) {
+        output << ',' << symbol;
+      }
+    }
+    output << '\n';
+  }
+}
+
 void Grammar::loadFromText(const std::string &text,
                            const GrammarParseOptions &options) {
   const bool is_pocr = text.find("Productions:") == std::string::npos;
@@ -462,10 +525,11 @@ void Grammar::loadFromText(const std::string &text,
     }
     if (head.rfind("__lotus_generated_", 0) == 0) {
       try {
-        next_nonterminal_id_ = std::max(
-            next_nonterminal_id_,
-            static_cast<unsigned>(std::stoul(head.substr(18))));
-      } catch (...) {}
+        next_nonterminal_id_ =
+            std::max(next_nonterminal_id_,
+                     static_cast<unsigned>(std::stoul(head.substr(18))));
+      } catch (...) {
+      }
     }
     const auto alternatives = split(rule_text.substr(arrow_pos + 2), '|');
     for (const auto &alternative : alternatives) {
@@ -475,10 +539,11 @@ void Grammar::loadFromText(const std::string &text,
           token = kEpsilonSymbol;
         } else if (token.rfind("__lotus_generated_", 0) == 0) {
           try {
-            next_nonterminal_id_ = std::max(
-                next_nonterminal_id_,
-                static_cast<unsigned>(std::stoul(token.substr(18))));
-          } catch (...) {}
+            next_nonterminal_id_ =
+                std::max(next_nonterminal_id_,
+                         static_cast<unsigned>(std::stoul(token.substr(18))));
+          } catch (...) {
+          }
         }
       }
       std::vector<std::string> production{head};

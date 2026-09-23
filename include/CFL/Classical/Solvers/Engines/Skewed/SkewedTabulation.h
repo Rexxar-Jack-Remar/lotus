@@ -95,6 +95,11 @@ struct Options {
   std::vector<Symbol> targets;
   bool static_propagating_edges = true; // Algorithm 3, lines 13--14.
   bool dynamic_transitive_edges = true; // Algorithm 3, lines 15--16.
+  // When present, use exactly this set as the statically propagating
+  // nonterminals. Grammar adapters can map their Follow metadata here. An
+  // empty vector explicitly disables static PE; nullopt retains structural
+  // inference for grammars without that metadata.
+  std::optional<std::vector<Symbol>> propagating_symbols;
   // Zero means unlimited. Counts E entries + PE entries, not output pairs.
   // Exceeding this limit throws; no incomplete Result is returned.
   std::size_t max_fact_entries = 0;

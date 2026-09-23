@@ -23,7 +23,8 @@ struct SkewedTabulationStatistics : skewed::Stats {
 /// next successful solve. SolverSession filters unchanged calls.
 class SkewedTabulationEngine final : public Relation {
 public:
-  SkewedTabulationEngine(const Grammar &grammar, std::size_t node_count);
+  SkewedTabulationEngine(const Grammar &grammar, std::size_t node_count,
+                         skewed::Options options = {});
   ~SkewedTabulationEngine() override;
   SkewedTabulationEngine(const SkewedTabulationEngine &) = delete;
   SkewedTabulationEngine &operator=(const SkewedTabulationEngine &) = delete;

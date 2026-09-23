@@ -1,5 +1,6 @@
 #include "CFL/Classical/Clients/ValueFlow/ValueFlowClient.h"
 
+#include "CFL/Classical/Solvers/Engines/POCR/ClientGrammars.h"
 #include "IR/SVFG/SVFG.h"
 #include "IR/SVFG/SVFGBase.h"
 #include "IR/SVFG/SVFGEdge.h"
@@ -212,6 +213,43 @@ LabeledGraph encodeSVFG(const lotus::analysis::SVFG &svfg) {
   return encoded;
 }
 
+LabeledGraph encodeClassicalCflSVFG(const lotus::analysis::SVFG &svfg) {
+  LabeledGraph encoded;
+  for (const auto &[node_id, _] : svfg) {
+    encoded.addVertex(nodeName(node_id));
+  }
+  const CallSiteIds callsite_ids = buildCallSiteIds(svfg);
+
+  for (const auto &[_, node] : svfg) {
+    for (lotus::analysis::SVFGEdge *edge : node->getOutEdges()) {
+      if (!edge) {
+        continue;
+      }
+      const std::size_t source =
+          encoded.vertexId(nodeName(edge->getSrcNode()->getId()));
+      const std::size_t target =
+          encoded.vertexId(nodeName(edge->getDstNode()->getId()));
+      if (edge->isCallEdge()) {
+        encoded.addEdge(
+            source, target,
+            encodeCallLabel("call", callSiteId(callsite_ids, edge)));
+      } else if (edge->isRetEdge()) {
+        encoded.addEdge(source, target,
+                        encodeCallLabel("ret", callSiteId(callsite_ids, edge)));
+      } else if (lotus::analysis::isThreadMHPVFGEdge(edge->getEdgeKind()) ||
+                 lotus::analysis::isIndirectVFGEdge(edge->getEdgeKind()) ||
+                 lotus::analysis::isDirectVFGEdge(edge->getEdgeKind())) {
+        encoded.addEdge(source, target, "a");
+      } else {
+        throw std::invalid_argument(
+            "Unsupported SVFG edge in classical CFL value-flow encoding: " +
+            edge->toString());
+      }
+    }
+  }
+  return encoded;
+}
+
 Grammar buildVfgGrammar(const lotus::analysis::SVFG &svfg) {
   std::set<std::uint32_t> callsite_ids;
   const CallSiteIds ids = buildCallSiteIds(svfg);
@@ -262,9 +300,22 @@ Grammar buildVfgGrammar(const lotus::analysis::SVFG &svfg) {
       options);
 }
 
-ValueFlowClient ValueFlowClient::fromSVFG(const lotus::analysis::SVFG &svfg) {
-  LabeledGraph graph = encodeSVFG(svfg);
-  Grammar grammar = buildVfgGrammar(svfg);
+Grammar buildClassicalCflVfgGrammar(const lotus::analysis::SVFG &svfg) {
+  return engines::buildPocrClientGrammar(
+      engines::PocrClientGrammar::RewrittenValueFlow,
+      encodeClassicalCflSVFG(svfg));
+}
+
+ValueFlowClient ValueFlowClient::fromSVFG(const lotus::analysis::SVFG &svfg,
+                                          ValueFlowEncodingMode mode) {
+  LabeledGraph graph = mode == ValueFlowEncodingMode::ClassicalCFL
+                           ? encodeClassicalCflSVFG(svfg)
+                           : encodeSVFG(svfg);
+  Grammar grammar =
+      mode == ValueFlowEncodingMode::ClassicalCFL
+          ? engines::buildPocrClientGrammar(
+                engines::PocrClientGrammar::RewrittenValueFlow, graph)
+          : buildVfgGrammar(svfg);
   std::unordered_map<std::uint32_t, std::size_t> node_to_vertex;
   for (const auto &[node_id, _] : svfg) {
     node_to_vertex.emplace(node_id, graph.vertexId(nodeName(node_id)));
@@ -275,9 +326,10 @@ ValueFlowClient ValueFlowClient::fromSVFG(const lotus::analysis::SVFG &svfg) {
 
 ValueFlowClient
 ValueFlowClient::fromPreparedSVFG(lotus::analysis::SVFG &svfg,
-                                  const SVFGPreparationOptions &options) {
+                                  const SVFGPreparationOptions &options,
+                                  ValueFlowEncodingMode mode) {
   prepareSVFGForCFL(svfg, options);
-  return fromSVFG(svfg);
+  return fromSVFG(svfg, mode);
 }
 
 ValueFlowClient::ValueFlowClient(
@@ -297,7 +349,8 @@ ValueFlowClient::ValueFlowClient(ValueFlowClient &&other) noexcept
     : state_(std::move(other.state_)),
       node_to_vertex_(std::move(other.node_to_vertex_)),
       vertex_to_node_(std::move(other.vertex_to_node_)),
-      session_(std::move(other.session_)), backend_(std::move(other.backend_)) {}
+      session_(std::move(other.session_)), backend_(std::move(other.backend_)) {
+}
 
 ValueFlowClient &ValueFlowClient::operator=(ValueFlowClient &&other) noexcept {
   if (this == &other) {

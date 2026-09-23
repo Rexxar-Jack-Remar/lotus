@@ -59,6 +59,9 @@ public:
   static Grammar parseFromText(const std::string &text);
   static Grammar parseFromText(const std::string &text,
                                const GrammarParseOptions &options);
+  /// Write the normalized grammar in the line-oriented CFL interchange
+  /// format, including Insert/Follow/Count metadata.
+  void writeTextFile(const std::string &path) const;
 
   const std::string &startSymbol() const { return start_symbol_; }
   SymbolId startSymbolId() const { return start_symbol_id_; }
