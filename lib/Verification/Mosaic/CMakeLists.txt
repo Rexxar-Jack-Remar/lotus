@@ -14,6 +14,17 @@ target_include_directories(MosaicVerification PUBLIC
   $<INSTALL_INTERFACE:include>)
 target_link_libraries(MosaicVerification PUBLIC Z3::z3)
 
+# Z3_OP_RECURSIVE is missing from older system Z3 releases.
+include(CheckCXXSourceCompiles)
+set(CMAKE_REQUIRED_INCLUDES "${Z3_INCLUDE_DIR}")
+check_cxx_source_compiles(
+  "#include <z3.h>\nint main() { Z3_decl_kind kind = Z3_OP_RECURSIVE; return kind == Z3_OP_UNINTERPRETED; }"
+  LOTUS_Z3_HAS_OP_RECURSIVE)
+unset(CMAKE_REQUIRED_INCLUDES)
+if(LOTUS_Z3_HAS_OP_RECURSIVE)
+  target_compile_definitions(MosaicVerification PRIVATE LOTUS_Z3_HAS_OP_RECURSIVE)
+endif()
+
 install(TARGETS MosaicVerification DESTINATION lib)
 install(DIRECTORY ${CMAKE_SOURCE_DIR}/include/Verification/Mosaic
   DESTINATION include/Verification)

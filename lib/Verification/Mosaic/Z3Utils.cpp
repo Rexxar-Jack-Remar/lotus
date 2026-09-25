@@ -37,7 +37,13 @@ int64_t sign_extend(uint64_t raw, unsigned width) {
 
 bool is_uninterpreted_predicate(const z3::expr &e) {
   Z3_decl_kind kind = e.decl().decl_kind();
-  return kind == Z3_OP_UNINTERPRETED || kind == Z3_OP_RECURSIVE;
+  if (kind == Z3_OP_UNINTERPRETED)
+    return true;
+#ifdef LOTUS_Z3_HAS_OP_RECURSIVE
+  return kind == Z3_OP_RECURSIVE;
+#else
+  return false;
+#endif
 }
 
 int64_t get_signed_bv_lower_bound(unsigned bv_size) {
@@ -74,7 +80,15 @@ z3::expr get_bv_app_based_on_decl(z3::context &ctx,
   case Z3_OP_OR:
     return z3::mk_or(args);
   case Z3_OP_XOR:
-    return z3::mk_xor(args);
+    // Older Z3 C++ APIs do not provide a variadic mk_xor helper.
+    if (args.empty())
+      return ctx.bool_val(false);
+    {
+      z3::expr result = args[0];
+      for (unsigned i = 1; i < args.size(); ++i)
+        result = result != args[i];
+      return result;
+    }
   case Z3_OP_NOT:
     return !args[0];
   case Z3_OP_IMPLIES:
