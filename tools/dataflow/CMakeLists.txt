@@ -25,9 +25,11 @@ foreach(target lotus-dfa lotus-dfa-apa lotus-dfa-mono lotus-dfa-ifds)
 endforeach()
 
 target_link_libraries(lotus-dfa-npa PRIVATE
+  NPADataFlowDrivers
   NPADataFlow
   CanaryAliasAnalysisWrapper
   CanaryDataflowTooling
+  VerificationFrontend
   ${LLVM_LINK_COMPONENTS}
 )
 

@@ -20,3 +20,12 @@ outputs byte for byte.
 The BDD semantics and on-demand query engine live separately in
 `include/Dataflow/DemandAPA/`, with its entry point under
 `tools/dataflow/DemandAPA/`.
+
+`BooleanNPAProgram.cpp` converts the AST and lowered CFGs into predicate
+relation equations for `lotus-dfa-npa --input-format=boolean`. It models
+procedure calls with projected summaries so caller locals survive recursive
+calls. Assertion and abort paths get separate error summaries. The NPA
+predicate and tensor relation domains use CUDD; the Boolean program driver
+supports symbolic comparison of Kleene, SCC Newton, and tensor Newton results.
+Forward path equations also support reachability queries at source labels from
+a chosen entry procedure, including labels before infeasible suffixes.

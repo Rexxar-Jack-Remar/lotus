@@ -22,6 +22,9 @@ public:
     while (!eof()) {
       if (consumeKeyword("decl")) {
         program.globals.push_back(parseDecl());
+        while (consume(","))
+          program.globals.push_back(parseDecl());
+        expect(";");
       } else if (peekKeyword("dfs") || peekKeyword("void") ||
                  peekKeyword("bool")) {
         program.procedures.push_back(parseProcedure());
@@ -37,7 +40,6 @@ private:
   PredicateDecl parseDecl() {
     PredicateDecl decl;
     decl.name = parseIdentifierLike();
-    expect(";");
     return decl;
   }
 
@@ -156,7 +158,7 @@ private:
           const std::string target = parseIdentifierLike();
           expect(";");
           if (consumeKeyword("fi")) {
-            expect(";");
+            consume(";");
             stmt.kind = StatementKind::Branch;
             stmt.targets.push_back(target);
             return stmt;
@@ -178,7 +180,7 @@ private:
       if (consumeKeyword("else"))
         stmt.else_statements = parseNestedStatementList({"fi"});
       expectKeyword("fi");
-      expect(";");
+      consume(";");
       return stmt;
     }
     if (consumeKeyword("while")) {
@@ -187,7 +189,7 @@ private:
       expectKeyword("do");
       stmt.body_statements = parseNestedStatementList({"od"});
       expectKeyword("od");
-      expect(";");
+      consume(";");
       return stmt;
     }
     if (consumeKeyword("return")) {
@@ -391,9 +393,9 @@ private:
       expect("]");
       return BooleanExpr::makeChoose(std::move(lhs), std::move(rhs));
     }
-    if (consume("0"))
+    if (consumeKeyword("F") || consumeKeyword("false") || consume("0"))
       return BooleanExpr::makeConstant(false);
-    if (consume("1"))
+    if (consumeKeyword("T") || consumeKeyword("true") || consume("1"))
       return BooleanExpr::makeConstant(true);
     return BooleanExpr::makeVariable(parseIdentifierLike());
   }
@@ -520,11 +522,23 @@ private:
         ++scan;
       if (scan < input_.size())
         ++scan;
-      return scan < input_.size() ? input_[scan] : '\0';
+      while (scan < input_.size() &&
+             std::isspace(static_cast<unsigned char>(input_[scan])))
+        ++scan;
+      return scan + 1 < input_.size() && input_[scan] == ':' &&
+                     input_[scan + 1] == '='
+                 ? '\0'
+                 : (scan < input_.size() ? input_[scan] : '\0');
     }
     while (scan < input_.size() && isIdentifierChar(input_[scan]))
       ++scan;
-    return scan < input_.size() ? input_[scan] : '\0';
+    while (scan < input_.size() &&
+           std::isspace(static_cast<unsigned char>(input_[scan])))
+      ++scan;
+    return scan + 1 < input_.size() && input_[scan] == ':' &&
+                   input_[scan + 1] == '='
+               ? '\0'
+               : (scan < input_.size() ? input_[scan] : '\0');
   }
 
   std::string parseIdentifierLike() {

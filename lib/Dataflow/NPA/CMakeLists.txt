@@ -29,3 +29,7 @@ set(NPA_SOURCES
 
 add_library(NPADataFlow STATIC ${NPA_SOURCES})
 target_link_libraries(NPADataFlow PUBLIC CanaryCUDD)
+
+add_library(NPADataFlowDrivers STATIC
+  Tooling/NPALLVMDriver.cpp
+  Tooling/NPABooleanDriver.cpp)

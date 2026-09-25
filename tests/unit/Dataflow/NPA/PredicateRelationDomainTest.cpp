@@ -36,6 +36,7 @@ TEST(NPA, PredicateTensorTraitsDeclarePaperAdmissibility) {
 TEST(NPA, PredicateTensorTraitsValidatePaperLawsWhenConfigured) {
   D::configure(1);
   EXPECT_TRUE(npa::TensorSemiringTraits<D>::validate_paper_laws());
+  EXPECT_TRUE(TD::validatePaperLaws());
 }
 
 TEST(NPA, PredicateRelationMaterializeRejectsInfeasibleEnumeration) {
@@ -300,6 +301,7 @@ TEST(NPA, PredicateTensorProjectTSatisfiesLemma88Laws) {
 TEST(NPA, PredicateTensorTraitsValidatePaperLawsWithLocalPredicates) {
   D::configure(2, 1);
   EXPECT_TRUE(npa::TensorSemiringTraits<D>::validate_paper_laws());
+  EXPECT_TRUE(TD::validatePaperLaws());
 }
 
 TEST(NPA, PredicateTensorRegularizationSupportsProjectedLinearEquations) {

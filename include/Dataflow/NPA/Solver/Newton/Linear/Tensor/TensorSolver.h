@@ -319,12 +319,60 @@ template <class TD> struct TensorLeftLinearFragment {
   std::vector<std::pair<Symbol, V>> terms;
 };
 
+template <class TD>
+bool is_projected_tensor_expression(const E1<TD> &e,
+                                    const std::unordered_set<Symbol> &projected) {
+  if (!e)
+    return false;
+  if constexpr (!DomainHasProjectT<TD>::value) {
+    return false;
+  } else {
+    using K = typename Exp1<TD>::K;
+    switch (e->k) {
+    case K::Term:
+      return TD::equal(TD::projectT(e->c), e->c);
+    case K::Project:
+      return true;
+    case K::Hole:
+      return projected.count(e->sym) != 0;
+    case K::SeqR:
+    case K::Seq:
+      return TD::equal(TD::projectT(e->c), e->c) &&
+             is_projected_tensor_expression<TD>(e->t, projected);
+    case K::Add:
+    case K::Ndet:
+    case K::Cond:
+      return is_projected_tensor_expression<TD>(e->t1, projected) &&
+             is_projected_tensor_expression<TD>(e->t2, projected);
+    default:
+      return false;
+    }
+  }
+}
+
+template <class TD>
+std::unordered_set<Symbol> collect_projected_tensor_symbols(
+    const std::vector<std::pair<Symbol, E1<TD>>> &rhs) {
+  std::unordered_set<Symbol> projected;
+  bool changed = true;
+  while (changed) {
+    changed = false;
+    for (const auto &eqn : rhs) {
+      if (!projected.count(eqn.first) &&
+          is_projected_tensor_expression<TD>(eqn.second, projected))
+        changed |= projected.insert(eqn.first).second;
+    }
+  }
+  return projected;
+}
+
 template <class TD> struct TensorLeftLinearExtractor {
   using V = typename TD::value_type;
   using Frag = TensorLeftLinearFragment<TD>;
 
   static Optional<Frag> extract(const E1<TD> &e,
-                                bool allow_project_pushdown = false) {
+                                bool allow_project_pushdown = false,
+                                const std::unordered_set<Symbol> &projected = {}) {
     auto c = Exp1ConstEval<TD>::eval(e);
     if (c.has_value()) {
       Optional<Frag> out;
@@ -344,7 +392,7 @@ template <class TD> struct TensorLeftLinearExtractor {
       return out;
     }
     case K::SeqR: {
-      auto inner = extract(e->t, allow_project_pushdown);
+      auto inner = extract(e->t, allow_project_pushdown, projected);
       if (!inner.has_value())
         return {};
       Frag frag = *inner;
@@ -358,15 +406,19 @@ template <class TD> struct TensorLeftLinearExtractor {
     case K::Project: {
       if (!allow_project_pushdown)
         return {};
-      auto inner = extract(e->t, allow_project_pushdown);
+      auto inner = extract(e->t, allow_project_pushdown, projected);
       if (!inner.has_value())
         return {};
+      for (const auto &term : inner->terms) {
+        if (!projected.count(term.first))
+          return {};
+      }
       return project_fragment(*inner);
     }
     case K::Add:
     case K::Ndet: {
-      auto lhs = extract(e->t1, allow_project_pushdown);
-      auto rhs = extract(e->t2, allow_project_pushdown);
+      auto lhs = extract(e->t1, allow_project_pushdown, projected);
+      auto rhs = extract(e->t2, allow_project_pushdown, projected);
       if (!lhs.has_value() || !rhs.has_value())
         return {};
       Frag frag;
@@ -452,11 +504,12 @@ prepare_tensor_tarjan_input(bool verbose,
   prepared.fragments.reserve(rhs.size());
   prepared.topology.dependencies.resize(rhs.size());
   const auto validated = validate_linear_equation_system<TD>(rhs);
+  const auto projected = collect_projected_tensor_symbols<TD>(rhs);
 
   for (std::size_t i = 0; i < rhs.size(); ++i) {
     const auto &eqn = rhs[i];
     auto extracted = TensorLeftLinearExtractor<TD>::extract(
-        eqn.second, allow_project_pushdown);
+        eqn.second, allow_project_pushdown, projected);
     if (!extracted.has_value()) {
       if (verbose)
         std::cerr
@@ -586,9 +639,11 @@ std::vector<typename TD::value_type> instantiate_tensor_tarjan_labels(
     return labels;
   }
 
+  const auto projected = collect_projected_tensor_symbols<TD>(rhs);
+
   for (const auto &eqn : rhs) {
     auto extracted = TensorLeftLinearExtractor<TD>::extract(
-        eqn.second, allow_project_pushdown);
+        eqn.second, allow_project_pushdown, projected);
     if (!extracted.has_value())
       throw InvalidEquationSystemError(
           "cannot instantiate non-extractable tensor Tarjan input");

@@ -8,6 +8,8 @@
 namespace npa {
 
 struct NewtonRoundStat {
+  bool used_tensor = false;
+  bool tensor_fallback = false;
   int active_coordinates = 0;
   long queried_occurrences = 0;
   long retained_occurrences = 0;
@@ -41,6 +43,8 @@ struct Stat {
   int adaptive_scc_worklist_count = 0;
   int adaptive_scc_tensor_count = 0;
   int adaptive_scc_tensor_fallback_count = 0;
+  int tensor_rounds = 0;
+  int tensor_fallback_rounds = 0;
   bool domain_contract_checks_run = false;
   bool domain_contract_checks_failed = false;
   long indexed_derivative_occurrences = 0;

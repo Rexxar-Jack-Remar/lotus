@@ -2,11 +2,11 @@ add_library(VerificationFrontend STATIC
   BooleanProgram.cpp
   BooleanProgramParser.cpp
   PredicateProgramLowering.cpp
+  BooleanNPAProgram.cpp
 )
 
 target_link_libraries(VerificationFrontend
   PUBLIC
-  NPADataFlow
   LLVMSupport
 )
 if(LOTUS_ENABLE_BOOLEAN_PROGRAM_TOOLS)
