@@ -28,3 +28,13 @@ set(APA_SOURCES
 )
 
 add_library(APADataFlow STATIC ${APA_SOURCES})
+
+add_library(APADataFlowDrivers STATIC
+  Tooling/APAFormatting.cpp
+  Tooling/APADiagnostics.cpp
+  Tooling/APADriver.cpp
+)
+target_link_libraries(APADataFlowDrivers PUBLIC
+  APADataFlow
+  CanaryDataflowTooling
+)

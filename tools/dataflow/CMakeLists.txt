@@ -24,6 +24,10 @@ foreach(target lotus-dfa lotus-dfa-apa lotus-dfa-mono lotus-dfa-ifds)
   )
 endforeach()
 
+target_link_libraries(lotus-dfa-apa PRIVATE
+  APADataFlowDrivers
+)
+
 target_link_libraries(lotus-dfa-npa PRIVATE
   NPADataFlowDrivers
   NPADataFlow
