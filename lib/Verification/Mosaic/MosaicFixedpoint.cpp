@@ -233,7 +233,7 @@ static z3::expr evaluate_backwards(z3::expr const &q, z3::expr const &clause) {
 
   z3::expr new_q(ctx);
   z3::expr_vector new_q_args(ctx);
-  for (unsigned i = 0; i < body_pred.args().size(); ++i) {
+  for (unsigned i = 0; i < body_pred.num_args(); ++i) {
     z3::expr arg = body_pred.arg(i);
     assert(unknown_var_subs.find(arg) != unknown_var_subs.end() &&
            "Argument not found in unknown var substitutions");
@@ -652,7 +652,7 @@ z3::check_result MosaicFixedpoint::query(z3::expr &query) {
             current_solver->fp_solver.get_cover_delta(-1, p_decl);
         MOSAIC_DEBUG_MSG(OUT() << "Interpretation of " << p_decl.name() << ":\n"
                                << p_interp << std::endl);
-        p_interp = p_interp.substitute(p_expr.args());
+        p_interp = p_interp.substitute(utils::get_args(p_expr));
         MOSAIC_DEBUG_MSG(OUT() << "Substituted interpretation of "
                                << p_decl.name() << ":\n"
                                << p_interp << std::endl);

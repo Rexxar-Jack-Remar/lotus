@@ -51,7 +51,7 @@ z3::expr materializeQuery(z3::fixedpoint &fixedpoint,
   for (const z3::expr &conjunct : utils::get_conjuncts(body)) {
     if (!utils::is_uninterpreted_predicate(conjunct))
       continue;
-    for (const z3::expr &argument : conjunct.args()) {
+    for (const z3::expr &argument : utils::get_args(conjunct)) {
       if (argument.is_const())
         ordered_variables.push_back(argument);
     }
@@ -80,7 +80,7 @@ void registerRelations(const z3::expr &expression, z3::fixedpoint &fixedpoint,
     z3::func_decl relation = expression.decl();
     fixedpoint.register_relation(relation);
   }
-  for (const z3::expr &argument : expression.args())
+  for (const z3::expr &argument : utils::get_args(expression))
     registerRelations(argument, fixedpoint, registered);
 }
 

@@ -11,6 +11,13 @@
 
 namespace lotus::mosaic::utils {
 
+inline z3::expr_vector get_args(const z3::expr &expr) {
+  z3::expr_vector args(expr.ctx());
+  for (unsigned i = 0; i < expr.num_args(); ++i)
+    args.push_back(expr.arg(i));
+  return args;
+}
+
 template <typename S, typename T> bool any_of(S const &set, T const &p) {
   for (auto const &s : set)
     if (p(s))

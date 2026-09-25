@@ -110,7 +110,7 @@ public:
     assert(it == Theta.end() &&
            "PredicateMap: first predicate is already mapped");
     Theta.emplace(p2.decl(), p1);
-    dstVarMap.emplace(p2.decl(), p2.args());
+    dstVarMap.emplace(p2.decl(), utils::get_args(p2));
     return true;
   }
 

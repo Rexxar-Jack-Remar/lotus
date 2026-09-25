@@ -28,7 +28,8 @@ bool Int2BvTranslator::is_basic(const z3::expr &e) const {
 bool Int2BvTranslator::is_int_relation(const z3::expr &e) const {
   Z3_decl_kind f = e.decl().decl_kind();
   bool has_int_arg =
-      utils::any_of(e.args(), [&](z3::expr arg) { return arg.is_int(); });
+      utils::any_of(utils::get_args(e),
+                    [&](z3::expr arg) { return arg.is_int(); });
   return Z3_OP_LE <= f && f <= Z3_OP_GT && has_int_arg;
 }
 

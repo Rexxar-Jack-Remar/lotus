@@ -34,7 +34,8 @@ bool Bv2IntTranslator::is_casting(const z3::expr &e) const {
 bool Bv2IntTranslator::is_bv_relation(const z3::expr &e) const {
   Z3_decl_kind f = e.decl().decl_kind();
   bool has_bv_arg =
-      utils::any_of(e.args(), [&](z3::expr arg) { return arg.is_bv(); });
+      utils::any_of(utils::get_args(e),
+                    [&](z3::expr arg) { return arg.is_bv(); });
   return Z3_OP_ULEQ <= f && f <= Z3_OP_SGT && has_bv_arg;
 }
 
@@ -314,8 +315,8 @@ z3::expr Bv2IntTranslator::translate_bv(const z3::expr &e) {
     break;
   }
   case Z3_OP_BIT2BOOL: {
-    z3::parameter p(e, 0);
-    unsigned bit_index = p.get_int();
+    unsigned bit_index = static_cast<unsigned>(
+        Z3_get_decl_int_parameter(e.ctx(), e.decl(), 0));
     uint64_t divL = (uint64_t)1 << (bit_index);
     r = (umod(args[0] / ctx.int_val(divL), 1) == ctx.int_val(1));
     break;
@@ -410,8 +411,8 @@ z3::expr Bv2IntTranslator::translate_cast(const z3::expr &e) {
 
   // It's int2bv
   // Get the bv-size parameter
-  z3::parameter p(e, 0);
-  unsigned bv_size = p.get_int();
+  unsigned bv_size = static_cast<unsigned>(
+      Z3_get_decl_int_parameter(e.ctx(), e.decl(), 0));
 
   if (e.arg(0).is_numeral()) {
     return umod(e.arg(0), bv_size);

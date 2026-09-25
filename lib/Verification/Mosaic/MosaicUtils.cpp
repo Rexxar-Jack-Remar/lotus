@@ -298,7 +298,7 @@ static z3::expr evaluate_clause_vars_internal(z3::expr const &expr,
   if (expr.num_args() == 0)
     return expr;
 
-  z3::expr_vector args = expr.args();
+  z3::expr_vector args = utils::get_args(expr);
   z3::expr_vector new_args(expr.ctx());
   for (unsigned i = 0; i < args.size(); ++i) {
     z3::expr evaluated_arg =
