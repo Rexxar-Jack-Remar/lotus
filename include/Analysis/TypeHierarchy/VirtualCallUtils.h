@@ -11,6 +11,7 @@
 
 namespace llvm {
 class CallBase;
+class Constant;
 class Value;
 class Type;
 class Function;
@@ -56,5 +57,8 @@ bool isVirtualCall(const llvm::Instruction *Inst,
 
 bool isHeapAllocatingFunction(const llvm::Function *Fun) noexcept;
 bool isHeapAllocatingFunction(llvm::StringRef FunName) noexcept;
+
+const llvm::Function *walkConstInitPath(const llvm::Constant *Init,
+                                        llvm::ArrayRef<uint64_t> Indices);
 
 } // namespace lotus

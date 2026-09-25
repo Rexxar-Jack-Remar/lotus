@@ -1,8 +1,11 @@
 #include "Analysis/TypeHierarchy/CallGraphBuilder.h"
+#include "Analysis/CFG/ExternCallbackModel.h"
+#include "Analysis/CFG/GlobalCtorsDtorsModel.h"
 #include "Analysis/TypeHierarchy/DIBasedTypeHierarchy.h"
 #include "Analysis/TypeHierarchy/LLVMVFTableProvider.h"
 #include "Analysis/TypeHierarchy/Resolver.h"
 
+#include "llvm/ADT/DenseMap.h"
 #include "llvm/ADT/DenseSet.h"
 #include "llvm/IR/InstIterator.h"
 #include "llvm/IR/Instructions.h"
@@ -39,6 +42,7 @@ CallGraph buildCallGraph(const llvm::Module &M, Resolver &Res,
   CallGraph CG;
   llvm::DenseSet<const llvm::Function *> VisitedFunctions;
   llvm::SmallVector<const llvm::Function *, 16> Worklist;
+  llvm::DenseMap<const llvm::CallBase *, unsigned> IndirectCalls;
 
   for (const auto *F : EntryPoints) {
     if (F && !F->isDeclaration()) {
@@ -47,36 +51,67 @@ CallGraph buildCallGraph(const llvm::Module &M, Resolver &Res,
     }
   }
 
-  while (!Worklist.empty()) {
-    const auto *F = Worklist.pop_back_val();
+  auto ResolveAndAddDynamic = [&](const llvm::CallBase *Call) -> bool {
+    auto Targets = Res.resolveIndirectCall(Call);
+    auto &PrevCount = IndirectCalls[Call];
+    bool Changed = Targets.size() > PrevCount;
+    PrevCount = Targets.size();
 
-    for (const auto &I : llvm::instructions(F)) {
-      const auto *Call = llvm::dyn_cast<llvm::CallBase>(&I);
-      if (!Call) {
-        continue;
+    Res.handlePossibleTargets(Call, Targets);
+
+    for (const auto *Target : Targets) {
+      CG.addCallEdge(Call, Target);
+      if (!Target->isDeclaration() &&
+          VisitedFunctions.insert(Target).second) {
+        Worklist.push_back(Target);
+        Changed = true;
       }
+    }
+    return Changed;
+  };
 
-      const auto *DirectCallee = llvm::dyn_cast_or_null<llvm::Function>(
-          Call->getCalledOperand()->stripPointerCastsAndAliases());
+  bool RequiresFixpoint = Res.mutatesHelperAnalysisInformation();
+  bool FixpointReached = true;
 
-      if (DirectCallee) {
-        CG.addCallEdge(Call, DirectCallee);
-        if (!DirectCallee->isDeclaration() &&
-            VisitedFunctions.insert(DirectCallee).second) {
-          Worklist.push_back(DirectCallee);
+  do {
+    FixpointReached = true;
+    while (!Worklist.empty()) {
+      const auto *F = Worklist.pop_back_val();
+
+      for (const auto &I : llvm::instructions(F)) {
+        const auto *Call = llvm::dyn_cast<llvm::CallBase>(&I);
+        if (!Call) {
+          continue;
         }
-      } else {
-        auto Targets = Res.resolveIndirectCall(Call);
-        for (const auto *Target : Targets) {
-          CG.addCallEdge(Call, Target);
-          if (!Target->isDeclaration() &&
-              VisitedFunctions.insert(Target).second) {
-            Worklist.push_back(Target);
+
+        const auto *DirectCallee = llvm::dyn_cast_or_null<llvm::Function>(
+            Call->getCalledOperand()->stripPointerCastsAndAliases());
+
+        if (DirectCallee) {
+          CG.addCallEdge(Call, DirectCallee);
+          Resolver::FunctionSetTy DirectSet{DirectCallee};
+          Res.handlePossibleTargets(Call, DirectSet);
+          if (!DirectCallee->isDeclaration() &&
+              VisitedFunctions.insert(DirectCallee).second) {
+            Worklist.push_back(DirectCallee);
+            FixpointReached = false;
+          }
+        } else {
+          if (ResolveAndAddDynamic(Call)) {
+            FixpointReached = false;
           }
         }
       }
     }
-  }
+
+    if (RequiresFixpoint) {
+      for (auto [Call, _] : IndirectCalls) {
+        if (ResolveAndAddDynamic(Call)) {
+          FixpointReached = false;
+        }
+      }
+    }
+  } while (!FixpointReached && RequiresFixpoint);
 
   return CG;
 }
@@ -105,6 +140,33 @@ CallGraph buildCallGraph(const llvm::Module &M, CallGraphAnalysisType CGType,
 
   auto Res = Resolver::create(CGType, &M, VTP, TH);
   return buildCallGraph(M, *Res, EntryPointNames);
+}
+
+CallGraph buildCallGraphWithModels(
+    llvm::Module &M, CallGraphAnalysisType CGType,
+    llvm::ArrayRef<std::string> EntryPointNames,
+    bool IncludeGlobalCtorsDtors,
+    bool RewriteExternCallbacks) {
+  if (RewriteExternCallbacks) {
+    ExternCallbackModel::rewriteCalls(M);
+  }
+
+  std::vector<const llvm::Function *> Roots;
+  if (IncludeGlobalCtorsDtors) {
+    if (auto *GlobalModelFn =
+            GlobalCtorsDtorsModel::buildModel(M, EntryPointNames)) {
+      Roots.push_back(GlobalModelFn);
+    }
+  }
+
+  if (Roots.empty()) {
+    Roots = getEntryPoints(M, EntryPointNames);
+  }
+
+  LLVMVFTableProvider VTP(M);
+  DIBasedTypeHierarchy TH(M);
+  auto Res = Resolver::create(CGType, &M, &VTP, &TH);
+  return buildCallGraph(M, *Res, Roots);
 }
 
 } // namespace lotus

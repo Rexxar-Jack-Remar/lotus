@@ -31,6 +31,12 @@ CallGraph buildCallGraph(const llvm::Module &M, CallGraphAnalysisType CGType,
                          const DIBasedTypeHierarchy *TH = nullptr,
                          const LLVMVFTableProvider *VTP = nullptr);
 
+CallGraph buildCallGraphWithModels(
+    llvm::Module &M, CallGraphAnalysisType CGType = CallGraphAnalysisType::OTF,
+    llvm::ArrayRef<std::string> EntryPointNames = {"main"},
+    bool IncludeGlobalCtorsDtors = true,
+    bool RewriteExternCallbacks = true);
+
 std::vector<const llvm::Function *>
 getEntryPoints(const llvm::Module &M,
                llvm::ArrayRef<std::string> EntryPointNames = {"main"});

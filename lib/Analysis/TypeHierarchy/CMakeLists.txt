@@ -16,6 +16,7 @@ set(CanaryTypeHierarchy_SOURCES
   VTA/VTAResolver.cpp
   VTA/TypeAssignmentGraph.cpp
   VTA/TypePropagator.cpp
+  OTF/OTFResolver.cpp
 )
 add_library(CanaryTypeHierarchy STATIC ${CanaryTypeHierarchy_SOURCES})
-target_link_libraries(CanaryTypeHierarchy CanaryLLVMUtils)
+target_link_libraries(CanaryTypeHierarchy CanaryLLVMUtils CanaryCFG)

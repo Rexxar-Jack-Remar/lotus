@@ -3,6 +3,7 @@
 #include "Analysis/TypeHierarchy/CallGraph.h"
 #include "Analysis/TypeHierarchy/DIBasedTypeHierarchy.h"
 #include "Analysis/TypeHierarchy/LLVMVFTableProvider.h"
+#include "Analysis/TypeHierarchy/OTF/OTFResolver.h"
 #include "Analysis/TypeHierarchy/RTA/RTAResolver.h"
 #include "Analysis/TypeHierarchy/VTA/VTAResolver.h"
 #include "Analysis/TypeHierarchy/VirtualCallUtils.h"
@@ -104,7 +105,7 @@ Resolver::create(CallGraphAnalysisType Ty, const llvm::Module *M,
   case CallGraphAnalysisType::VTA:
     return std::make_unique<VTAResolver>(M, VTP, std::make_unique<RTAResolver>(M, VTP, TH));
   case CallGraphAnalysisType::OTF:
-    return std::make_unique<RTAResolver>(M, VTP, TH);
+    return std::make_unique<OTFResolver>(M, VTP, TH);
   case CallGraphAnalysisType::Invalid:
     llvm::report_fatal_error("Invalid callgraph algorithm specified");
   }
