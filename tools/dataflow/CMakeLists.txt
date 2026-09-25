@@ -44,3 +44,7 @@ target_link_libraries(lotus-dfa-ifds PRIVATE IFDS CanaryAliasAnalysisWrapper Can
 
 # Mono uses AliasAnalysisWrapper (IntraMonoConstantPropagation, IntraMonoUninitVariables)
 target_link_libraries(lotus-dfa-mono PRIVATE CanaryAliasAnalysisWrapper CanaryDataflowTooling)
+
+if(LOTUS_ENABLE_DEMAND_APA)
+  add_subdirectory(DemandAPA)
+endif()

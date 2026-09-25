@@ -40,6 +40,12 @@ option(LOTUS_ENABLE_SEAL
        "Build the Seal symbolic automata lifter under third-party/seal" OFF)
 option(LOTUS_ENABLE_PDAAAL
        "Build the vendored PDAAAL weighted PDS reachability library under third-party/PDAAAL" OFF)
+option(LOTUS_ENABLE_FLOW_CUTTER
+       "Build the vendored PACE 2017 treewidth and PACE 2020 treedepth tools" OFF)
+option(LOTUS_ENABLE_BOOLEAN_PROGRAM_TOOLS
+       "Build the Boolean-program grammar parser and normalizer" OFF)
+option(LOTUS_ENABLE_DEMAND_APA
+       "Build the independent OOPSLA artifact demand-driven APA executable" OFF)
 
 # Advanced toggles
 option(LOTUS_DOWNLOAD_BOOST "Download and build Boost if not found" ON)
@@ -92,6 +98,9 @@ function(lotus_print_build_summary)
   _lotus_summary_bool("Horn-ICE" LOTUS_ENABLE_HORN_ICE)
   _lotus_summary_bool("Seal/Popeye" LOTUS_ENABLE_SEAL)
   _lotus_summary_bool("PDAAAL" LOTUS_ENABLE_PDAAAL)
+  _lotus_summary_bool("FlowCutter" LOTUS_ENABLE_FLOW_CUTTER)
+  _lotus_summary_bool("Boolean program tools" LOTUS_ENABLE_BOOLEAN_PROGRAM_TOOLS)
+  _lotus_summary_bool("DemandAPA" LOTUS_ENABLE_DEMAND_APA)
   _lotus_summary_bool("SVF" LOTUS_ENABLE_SVF)
   _lotus_summary_bool("Cclyzer++" LOTUS_ENABLE_CCLYZER)
   message(STATUS "  Advanced toggles:")

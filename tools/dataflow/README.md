@@ -23,6 +23,7 @@ The binaries are written to `build/bin/`.
 | `lotus-dfa-ifds` | IFDS analysis driver | Runs IFDS-based analyses with alias-analysis support when needed. |
 | `lotus-dfa-npa` | NPA analysis driver | Runs serial NPA intraprocedural and selected interprocedural analyses on LLVM bitcode. |
 | `lotus-dfa-wpds` | WPDS analysis driver | Selects the legacy, WALi FWPDS, or WALi SWPDS backend and reports stage statistics. |
+| `lotus-demand-apa` | On-demand algebraic program analysis | Independent OOPSLA-586 graph-decomposition engine; enabled with `LOTUS_ENABLE_DEMAND_APA`. |
 
 ## Diff testing (`lotus-dfa`)
 
@@ -42,6 +43,10 @@ bitcode, run multiple engines, and compare their outputs to find discrepancies.
 
 The driver exposes the forward analyses implemented by APA and runs each
 selected engine that supports the requested analysis.
+
+`lotus-demand-apa` uses a separate input format and solver from `lotus-dfa-apa`.
+See [DemandAPA](../../lib/Dataflow/DemandAPA/README.md) for its dataset layout
+and invocation.
 
 ## Usage
 
