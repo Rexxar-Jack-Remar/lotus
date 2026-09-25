@@ -10,8 +10,7 @@
  * @ingroup Concurrency
  */
 
-#ifndef MPI_RMA_ANALYSIS_H
-#define MPI_RMA_ANALYSIS_H
+#pragma once
 
 #include "Concurrency/ConcurrencyRelation.h"
 #include "Concurrency/MPI/MPIProcessModel.h"
@@ -151,4 +150,3 @@ private:
 
 } // namespace mpi
 
-#endif // MPI_RMA_ANALYSIS_H

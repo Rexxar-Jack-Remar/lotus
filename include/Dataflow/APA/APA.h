@@ -1,5 +1,4 @@
-#ifndef DATAFLOW_APA_APA_H_
-#define DATAFLOW_APA_APA_H_
+#pragma once
 
 // Core framework API.
 #include "Dataflow/APA/Core/InterProblem.h"
@@ -17,4 +16,3 @@
 #include "Dataflow/APA/Solver/Inter/Transfer.h"
 #include "Dataflow/APA/Solver/Intra/IntraSolver.h"
 
-#endif // DATAFLOW_APA_APA_H_

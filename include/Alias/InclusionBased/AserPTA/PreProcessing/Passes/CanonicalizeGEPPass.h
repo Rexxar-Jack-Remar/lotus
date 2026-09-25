@@ -2,8 +2,7 @@
 // Created by peiming on 1/6/20.
 //
 
-#ifndef ASER_PTA_CANONICALIZEGEPPASS_H
-#define ASER_PTA_CANONICALIZEGEPPASS_H
+#pragma once
 
 #include <llvm/Pass.h>
 
@@ -41,4 +40,3 @@ public:
 
 } // namespace aser
 
-#endif // ASER_PTA_CANONICALIZEGEPPASS_H

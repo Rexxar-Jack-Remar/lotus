@@ -1,5 +1,4 @@
-#ifndef EGraphs_h
-#define EGraphs_h
+#pragma once
 
 #include <iostream>
 #include <map>
@@ -116,4 +115,3 @@ public:
 };
 } // namespace EGraphs
 
-#endif // EGraphs_h

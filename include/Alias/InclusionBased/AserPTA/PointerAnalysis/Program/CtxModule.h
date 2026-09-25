@@ -1,8 +1,7 @@
 //
 // Created by peiming on 10/30/19.
 //
-#ifndef ASER_PTA_CTXMODULE_H
-#define ASER_PTA_CTXMODULE_H
+#pragma once
 #include "Alias/InclusionBased/AserPTA/PointerAnalysis/Graph/CallGraph.h"
 
 #include <llvm/IR/Value.h>
@@ -442,4 +441,3 @@ public:
 
 } // namespace aser
 
-#endif

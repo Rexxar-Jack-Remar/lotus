@@ -1,6 +1,5 @@
 /** @file Query.h @brief Bug query hierarchy discharged against symbolic state. */
-#ifndef ANALYSIS_SYMBOLICEXECUTION_CHECKS_QUERY_H
-#define ANALYSIS_SYMBOLICEXECUTION_CHECKS_QUERY_H
+#pragma once
 
 #include "SymbolicExecution/Core/GuardedValue.h"
 #include "SymbolicExecution/Core/PropertyAllocator.h"
@@ -270,4 +269,3 @@ private:
 
 } // namespace SymbolicExecution
 
-#endif

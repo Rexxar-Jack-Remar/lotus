@@ -10,8 +10,7 @@
 //
 //===----------------------------------------------------------------------===//
 
-#ifndef LOTUS_VERIFICATION_SIFA_CALLGRAPH_H
-#define LOTUS_VERIFICATION_SIFA_CALLGRAPH_H
+#pragma once
 
 #include "llvm/ADT/ArrayRef.h"
 #include "llvm/IR/Function.h"
@@ -104,4 +103,3 @@ private:
 } // namespace sifa
 } // namespace lotus
 
-#endif // LOTUS_VERIFICATION_SIFA_CALLGRAPH_H

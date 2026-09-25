@@ -6,8 +6,7 @@
  * Author: rainoftime
  */
 
-#ifndef DATAFLOW_WPDS_CLIENTS_CONSTANT_PROPAGATION_ANALYSIS_H_
-#define DATAFLOW_WPDS_CLIENTS_CONSTANT_PROPAGATION_ANALYSIS_H_
+#pragma once
 
 #include "Dataflow/Mono/Support/Result.h"
 #include "Dataflow/WPDS/Backend.h"
@@ -38,4 +37,3 @@ std::unique_ptr<mono::DataFlowResult> runConstantPropagationAnalysis(
  */
 void demoConstantPropagationAnalysis(llvm::Module &module);
 
-#endif // DATAFLOW_WPDS_CLIENTS_CONSTANT_PROPAGATION_ANALYSIS_H_

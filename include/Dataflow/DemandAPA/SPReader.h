@@ -1,5 +1,4 @@
-#ifndef CPP_CODE_SPREADER_H
-#define CPP_CODE_SPREADER_H
+#pragma once
 
 #include "Dataflow/DemandAPA/ApaInstance.h"
 #include "Dataflow/DemandAPA/Reader.h"
@@ -126,4 +125,3 @@ public:
   }
 };
 
-#endif // CPP_CODE_SPREADER_H

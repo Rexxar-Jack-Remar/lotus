@@ -11,8 +11,7 @@
  * @ingroup Concurrency
  */
 
-#ifndef MPI_ANALYSIS_H
-#define MPI_ANALYSIS_H
+#pragma once
 
 #include "Concurrency/MPI/MPIAbstractState.h"
 #include "Concurrency/MPI/MPICollectiveAnalysis.h"
@@ -162,4 +161,3 @@ private:
 
 } // namespace mpi
 
-#endif // MPI_ANALYSIS_H

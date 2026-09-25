@@ -1,6 +1,5 @@
 /** @file PropertyValue.h @brief Abstract property value representation for symbolic analysis. */
-#ifndef ANALYSIS_SYMBOLICEXECUTION_PROPERTYVALUE_H
-#define ANALYSIS_SYMBOLICEXECUTION_PROPERTYVALUE_H
+#pragma once
 #include "llvm/IR/Instruction.h"
 #include "llvm/IR/Instructions.h"
 #include "llvm/IR/Value.h"
@@ -176,4 +175,3 @@ template <> struct hash<SymbolicExecution::PropertyValuePtr> {
 };
 } // namespace std
 
-#endif

@@ -9,8 +9,7 @@
  */
 // Modified by Xiang Zhang, 2026
 // Additional changes licensed under the MIT License
-#ifndef BZLA__BV_BITVECTOR_H
-#define BZLA__BV_BITVECTOR_H
+#pragma once
 
 #include <gmpxx.h>
 
@@ -2219,4 +2218,3 @@ std::ostream &operator<<(std::ostream &out, const BitVector &bv);
 
 /* -------------------------------------------------------------------------- */
 
-#endif

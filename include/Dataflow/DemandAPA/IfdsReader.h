@@ -1,5 +1,4 @@
-#ifndef CPP_CODE_IFDSREADER_H
-#define CPP_CODE_IFDSREADER_H
+#pragma once
 
 #include "Dataflow/DemandAPA/ApaInstance.h"
 #include "Dataflow/DemandAPA/Reader.h"
@@ -180,4 +179,3 @@ public:
   }
 };
 
-#endif

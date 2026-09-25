@@ -1,5 +1,4 @@
-#ifndef CPP_CODE_PREPREPROCESS_H
-#define CPP_CODE_PREPREPROCESS_H
+#pragma once
 
 template <class T> void Algorithm<T>::prePreprocess(ApaInstance<T> *inst) {
   Time = omp_get_wtime();
@@ -331,4 +330,3 @@ void Algorithm<T>::validateTDD() { // checking that the constructed td decomp.
   cout << "TDD is valid! with tredepth = " << treedepth << endl;
 }
 
-#endif // CPP_CODE_PREPREPROCESS_H

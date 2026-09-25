@@ -7,8 +7,7 @@
  * arrays into function calls, enabling more efficient handling of constant
  * array selection patterns.
  */
-#ifndef TRANSFORM_LOWERGLOBALCONSTANTARRAYSELECT_H
-#define TRANSFORM_LOWERGLOBALCONSTANTARRAYSELECT_H
+#pragma once
 
 #include <map>
 
@@ -63,4 +62,3 @@ private:
   void initialize(Function *F, ConstantDataArray *CDA);
 };
 
-#endif // TRANSFORM_LOWERGLOBALCONSTANTARRAYSELECT_H

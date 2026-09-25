@@ -9,8 +9,7 @@
  * @ingroup TypeQualifier
  */
 
-#ifndef UBIANALYSIS_HELPER_H
-#define UBIANALYSIS_HELPER_H
+#pragma once
 
 #include "Alias/Specialized/TypeQualifier/StructAnalyzer.h"
 
@@ -34,4 +33,3 @@ bool isCompatibleType(llvm::Type *T1, llvm::Type *T2,
 std::vector<std::string> strSplit(std::string &str, const std::string pattern);
 std::string getCurrentWorkingDir(void);
 
-#endif // UBIANALYSIS_HELPER_H

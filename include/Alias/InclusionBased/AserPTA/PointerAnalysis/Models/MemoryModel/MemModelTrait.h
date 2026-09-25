@@ -1,8 +1,7 @@
 //
 // Created by peiming on 10/22/19.
 //
-#ifndef ASER_PTA_MEMMODELTRAIT_H
-#define ASER_PTA_MEMMODELTRAIT_H
+#pragma once
 
 namespace aser {
 
@@ -20,5 +19,3 @@ template <typename MemModel> struct MemModelTrait {
 };
 
 } // namespace aser
-
-#endif

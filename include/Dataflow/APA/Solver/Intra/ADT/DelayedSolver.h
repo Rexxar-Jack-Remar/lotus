@@ -1,5 +1,4 @@
-#ifndef DATAFLOW_APA_ENGINES_ADTDELAYEDSOLVER_H_
-#define DATAFLOW_APA_ENGINES_ADTDELAYEDSOLVER_H_
+#pragma once
 
 #include "Dataflow/APA/Solver/Intra/Context.h"
 
@@ -171,4 +170,3 @@ bool solveADTDelayed(IntraEliminationSolverContext<AnalysisTypesT> &Ctx) {
 } // namespace detail
 } // namespace elimination
 
-#endif // DATAFLOW_APA_ENGINES_ADTDELAYEDSOLVER_H_

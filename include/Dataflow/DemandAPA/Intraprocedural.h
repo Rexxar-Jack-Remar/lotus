@@ -1,5 +1,4 @@
-#ifndef CPP_CODE_INTRAPROCEDURAL_H
-#define CPP_CODE_INTRAPROCEDURAL_H
+#pragma once
 
 #include "Dataflow/DemandAPA/CentroidPreprocessing.h"
 #include "Dataflow/DemandAPA/SameBagPreprocessing.h"
@@ -129,4 +128,3 @@ template <class T> unordered_map<ll, T> Algorithm<T>::getAllPairsAns(int p) {
   return ret;
 }
 
-#endif // CPP_CODE_INTRAPROCEDURAL_H

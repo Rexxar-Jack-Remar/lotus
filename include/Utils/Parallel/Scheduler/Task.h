@@ -1,5 +1,4 @@
-#ifndef LLVMUTILS_SCHEDULER_TASK_H
-#define LLVMUTILS_SCHEDULER_TASK_H
+#pragma once
 
 #include <functional>
 #include <memory>
@@ -160,4 +159,3 @@ public:
   static bool classof(const Task *T) { return T->getTaskKind() == TK_Custom; }
 };
 
-#endif // LLVMUTILS_SCHEDULER_TASK_H

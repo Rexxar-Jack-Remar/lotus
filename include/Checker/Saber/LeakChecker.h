@@ -5,8 +5,7 @@
 //
 //===----------------------------------------------------------------------===//
 
-#ifndef LEAKCHECKER_H_
-#define LEAKCHECKER_H_
+#pragma once
 
 #include "Checker/Saber/SaberCheckerAPI.h"
 #include "Checker/Saber/SrcSnkDDA.h"
@@ -53,4 +52,3 @@ protected:
 } // namespace analysis
 } // namespace lotus
 
-#endif

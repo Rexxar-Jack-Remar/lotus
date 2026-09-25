@@ -1,5 +1,4 @@
-#ifndef DATAFLOW_APA_EAN_COSTMODEL_H_
-#define DATAFLOW_APA_EAN_COSTMODEL_H_
+#pragma once
 
 // CostModel: per-operator weights (paper §III.D) plus the Eq. 5 shared-DAG
 // objective weights. This is plain data with NO e-graph/egg dependency, so it
@@ -58,4 +57,3 @@ struct CostModel {
 } // namespace ean
 } // namespace elimination
 
-#endif // DATAFLOW_APA_EAN_COSTMODEL_H_

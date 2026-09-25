@@ -1,5 +1,4 @@
-#ifndef TARJANSCC_HPP
-#define TARJANSCC_HPP
+#pragma once
 
 #include <cassert>
 #include <cstddef>
@@ -182,4 +181,3 @@ NodeType FindStronglyConnectedComponents(
                                          sccIndex, reverseTopologicalOrder);
 }
 
-#endif // TARJANSCC_HPP

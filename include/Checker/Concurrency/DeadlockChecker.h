@@ -1,6 +1,5 @@
 /** @file DeadlockChecker.h @brief Deadlock detection checker for concurrent programs. */
-#ifndef DEADLOCK_CHECKER_H
-#define DEADLOCK_CHECKER_H
+#pragma once
 
 #include "Concurrency/LockSet/LockSetAnalysis.h"
 #include "Checker/Concurrency/ConcurrencyBugReport.h"
@@ -75,4 +74,3 @@ private:
 
 } // namespace concurrency
 
-#endif // DEADLOCK_CHECKER_H

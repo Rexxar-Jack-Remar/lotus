@@ -3,8 +3,7 @@
 //
 
 // the pts data structure that also stores pointed by information
-#ifndef ASER_PTA_POINTEDBYPTS_H
-#define ASER_PTA_POINTEDBYPTS_H
+#pragma once
 
 #include "Alias/InclusionBased/AserPTA/PointerAnalysis/Solver/PointsTo/PTSTrait.h"
 #include "Alias/InclusionBased/AserPTA/Util/Util.h"
@@ -138,5 +137,3 @@ class PointedByPts {
 } // namespace aser
 
 DEFINE_PTS_TRAIT(aser::PointedByPts)
-
-#endif

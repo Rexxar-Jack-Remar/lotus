@@ -1,5 +1,4 @@
-#ifndef CPP_CODE_CENTROIDPREPROCESSING_H
-#define CPP_CODE_CENTROIDPREPROCESSING_H
+#pragma once
 
 template <class T> void Algorithm<T>::centroidPreprocessing() {
   Time = omp_get_wtime();
@@ -142,4 +141,3 @@ template <class T> void Algorithm<T>::checkIntraCorectness() {
   cout << "Centroid algorithm seems correct!!\n";
 }
 
-#endif // CPP_CODE_CENTROIDPREPROCESSING_H

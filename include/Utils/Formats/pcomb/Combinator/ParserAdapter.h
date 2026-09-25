@@ -1,5 +1,4 @@
-#ifndef PCOMB_PARSER_ADAPTER_H
-#define PCOMB_PARSER_ADAPTER_H
+#pragma once
 
 #include "Utils/Formats/pcomb/Parser/Parser.h"
 
@@ -47,4 +46,3 @@ auto rule(ParserA &&p, Converter &&c) {
 
 } // namespace pcomb
 
-#endif

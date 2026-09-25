@@ -11,8 +11,7 @@
 #include <llvm/IR/Module.h>
 #include <llvm/Pass.h>
 
-#ifndef ASER_PTA_PTAVERIFICATIONPASS_H
-#define ASER_PTA_PTAVERIFICATIONPASS_H
+#pragma once
 
 // check the correctness of the PTA by checking when it is true for
 // __aser_alias__ and __aser_no_alias__
@@ -148,4 +147,3 @@ template <typename PTA>
 static llvm::RegisterPass<aser::PTAVerificationPass<PTA>> PVP("", "", true,
                                                               true);
 
-#endif // ASER_PTA_PTAVERIFICATIONPASS_H

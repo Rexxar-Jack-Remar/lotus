@@ -6,8 +6,7 @@
 //
 //===----------------------------------------------------------------------===//
 
-#ifndef PATHALLOCATOR_H_
-#define PATHALLOCATOR_H_
+#pragma once
 
 #include "Checker/Saber/Z3Expr.h"
 #include "IR/SVFG/SVFG.h"
@@ -185,4 +184,3 @@ protected:
 } // namespace analysis
 } // namespace lotus
 
-#endif

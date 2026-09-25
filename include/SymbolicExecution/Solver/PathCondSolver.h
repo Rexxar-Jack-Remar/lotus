@@ -1,6 +1,5 @@
 /** @file PathCondSolver.h @brief Path condition solver using SMT or constraint propagation. */
-#ifndef ANALYSIS_SYMBOLICEXECUTION_PATHCONDSOLVER_H
-#define ANALYSIS_SYMBOLICEXECUTION_PATHCONDSOLVER_H
+#pragma once
 
 #include "SymbolicExecution/Core/BigInteger.h"
 #include "SymbolicExecution/Integration/GVFGUtility.h"
@@ -134,4 +133,3 @@ private:
   SMTExpr buildIntExpr(const BigInteger &I);
 };
 } // namespace SymbolicExecution
-#endif

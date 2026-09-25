@@ -1,5 +1,4 @@
-#ifndef NPA_LLVM_ANALYSIS_SUPPORT_H
-#define NPA_LLVM_ANALYSIS_SUPPORT_H
+#pragma once
 
 #include "Dataflow/NPA/Solver/Statistics.h"
 
@@ -57,4 +56,3 @@ struct AnalysisStatus {
 
 } // namespace npa
 
-#endif // NPA_LLVM_ANALYSIS_SUPPORT_H

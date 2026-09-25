@@ -4,8 +4,7 @@
 /// Provides an explicit call graph that omits address-taken functions,
 /// focusing on direct function calls only.
 
-#ifndef LT_CALL_GRAPH_H
-#define LT_CALL_GRAPH_H
+#pragma once
 
 #include <map>
 // #include <set>
@@ -267,4 +266,3 @@ private:
   void allReferencesDropped() { NumReferences = 0; }
 };
 
-#endif // LT_CALL_GRAPH_H

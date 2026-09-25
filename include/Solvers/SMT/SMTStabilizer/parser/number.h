@@ -27,8 +27,7 @@
 
 // Modified by Xiang Zhang, 2026
 // Additional changes licensed under the MIT License
-#ifndef NUMBER_HEADER
-#define NUMBER_HEADER
+#pragma once
 
 #include <gmp.h>
 #include <gmpxx.h>
@@ -435,4 +434,3 @@ class Number {
 };
 }  // namespace stabilizer::parser
 
-#endif

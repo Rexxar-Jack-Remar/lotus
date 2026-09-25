@@ -1,5 +1,4 @@
-#ifndef NPA_LLVM_FORWARD_INTER_ENGINE_H
-#define NPA_LLVM_FORWARD_INTER_ENGINE_H
+#pragma once
 
 #include "Dataflow/NPA/LLVM/AnalysisSupport.h"
 #include "Dataflow/NPA/NPA.h"
@@ -858,4 +857,3 @@ public:
 
 } // namespace npa
 
-#endif // NPA_LLVM_FORWARD_INTER_ENGINE_H

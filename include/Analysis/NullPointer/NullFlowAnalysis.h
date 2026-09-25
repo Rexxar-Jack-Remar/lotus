@@ -19,8 +19,7 @@
  */
 
 /** @file NullFlowAnalysis.h @brief Null flow analysis for tracking null propagation through program paths. */
-#ifndef NULLPOINTER_NULLFLOWANALYSIS_H
-#define NULLPOINTER_NULLFLOWANALYSIS_H
+#pragma once
 
 #include "Alias/UnificationBased/DyckAA/DyckAliasAnalysis.h"
 #include "Alias/UnificationBased/DyckAA/DyckVFG.h"
@@ -146,4 +145,3 @@ bool isContextInsensitiveGuaranteedNonNullValueForTesting(llvm::Value *V);
 } // namespace nullpointer
 } // namespace lotus
 
-#endif // NULLPOINTER_NULLFLOWANALYSIS_H

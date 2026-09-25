@@ -9,8 +9,7 @@
 
 // These are functions copy-pasted from the LLVM core source.
 
-#ifndef LLPECP_H
-#define LLPECP_H
+#pragma once
 
 #include <stdint.h>
 
@@ -32,4 +31,3 @@ Type *XXXFindElementAtOffset(Type *Ty, int64_t Offset,
 
 } // End namespace llvm
 
-#endif

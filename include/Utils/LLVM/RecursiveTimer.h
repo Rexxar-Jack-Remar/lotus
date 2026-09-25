@@ -16,8 +16,7 @@
  *  along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
-#ifndef SUPPORT_RECURSIVETIMER_H
-#define SUPPORT_RECURSIVETIMER_H
+#pragma once
 
 #include <chrono>
 #include <string>
@@ -100,4 +99,3 @@ public:
   Pass *done() { return new RecursiveTimerPass(TimerPtr); }
 };
 
-#endif // SUPPORT_RECURSIVETIMER_H

@@ -1,5 +1,4 @@
-#ifndef DATAFLOW_APA_SOLVER_INTERSOLVER_H_
-#define DATAFLOW_APA_SOLVER_INTERSOLVER_H_
+#pragma once
 
 #include "Dataflow/APA/Core/InterProblem.h"
 #include "Dataflow/APA/Core/InterResult.h"
@@ -458,4 +457,3 @@ private:
 
 } // namespace elimination
 
-#endif // DATAFLOW_APA_SOLVER_INTERSOLVER_H_

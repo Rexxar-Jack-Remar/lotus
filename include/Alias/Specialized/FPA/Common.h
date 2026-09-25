@@ -2,8 +2,7 @@
 // Created by prophe cheng on 2024/1/3.
 //
 
-#ifndef TYPEDIVE_COMMON_H
-#define TYPEDIVE_COMMON_H
+#pragma once
 
 #include <bitset>
 #include <chrono>
@@ -178,4 +177,3 @@ struct GlobalContext {
   CommonUtil util;
 };
 
-#endif // TYPEDIVE_COMMON_H

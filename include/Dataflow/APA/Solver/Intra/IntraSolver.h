@@ -1,5 +1,4 @@
-#ifndef DATAFLOW_APA_ENGINES_SOLVER_H_
-#define DATAFLOW_APA_ENGINES_SOLVER_H_
+#pragma once
 
 #include "Dataflow/APA/Core/Options.h"
 #include "Dataflow/APA/Solver/Intra/ADT/DelayedSolver.h"
@@ -129,4 +128,3 @@ private:
 
 } // namespace elimination
 
-#endif // DATAFLOW_APA_ENGINES_SOLVER_H_

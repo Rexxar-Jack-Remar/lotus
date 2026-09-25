@@ -20,8 +20,7 @@
  * OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE
  * OR OTHER DEALINGS IN THE SOFTWARE.
  */
-#ifndef LOTUS_ANALYSIS_LOOP_LOOPFOREST_H
-#define LOTUS_ANALYSIS_LOOP_LOOPFOREST_H
+#pragma once
 
 #include "Analysis/CFG/Dominator.h"
 #include "Analysis/Loop/LoopStructure.h"
@@ -115,4 +114,3 @@ private:
 } // namespace analysis
 } // namespace lotus
 
-#endif

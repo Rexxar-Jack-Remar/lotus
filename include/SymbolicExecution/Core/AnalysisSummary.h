@@ -1,6 +1,5 @@
 /** @file AnalysisSummary.h @brief Interprocedural function summary exported by symbolic execution. */
-#ifndef ANALYSIS_SYMBOLICEXECUTION_CORE_ANALYSISSUMMARY_H
-#define ANALYSIS_SYMBOLICEXECUTION_CORE_ANALYSISSUMMARY_H
+#pragma once
 
 #include "SymbolicExecution/Core/CStringState.h"
 #include "SymbolicExecution/Core/GuardedValue.h"
@@ -81,4 +80,3 @@ public:
 
 } // namespace SymbolicExecution
 
-#endif

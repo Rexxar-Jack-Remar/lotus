@@ -26,8 +26,7 @@
  */
 // Modified by Xiang Zhang, 2026
 // Additional changes licensed under the MIT License
-#ifndef _TYPES_H
-#define _TYPES_H
+#pragma once
 
 #include <string>
 #include <unordered_map>
@@ -628,4 +627,3 @@ NODE_KIND getNegatedKind(const NODE_KIND &nk);  // > -> <=, < -> >=, etc.
 NODE_KIND getOperKind(const std::string &s);
 }  // namespace stabilizer::parser
 
-#endif

@@ -97,8 +97,7 @@
  * ```
  */
 
-#ifndef ALLOC_AA_ALLOCAA_H_
-#define ALLOC_AA_ALLOCAA_H_
+#pragma once
 
 #include "Alias/Infrastructure/Spec/AliasSpecManager.h"
 #include "Utils/LLVM/SystemHeaders.h"
@@ -611,4 +610,3 @@ private:
   bool canPointToTheSameObject_Globals(Value *p1, Value *p2);
 };
 
-#endif // ALLOC_AA_ALLOCAA_H_

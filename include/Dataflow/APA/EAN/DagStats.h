@@ -1,5 +1,4 @@
-#ifndef DATAFLOW_APA_EAN_DAGSTATS_H_
-#define DATAFLOW_APA_EAN_DAGSTATS_H_
+#pragma once
 
 // Structural statistics of a hash-consed path-expression DAG (a batch of
 // PathExprFactory roots), for the EAN evaluation (paper Table VI). All measures
@@ -128,4 +127,3 @@ DagStats computeDagStats(
 } // namespace ean
 } // namespace elimination
 
-#endif // DATAFLOW_APA_EAN_DAGSTATS_H_

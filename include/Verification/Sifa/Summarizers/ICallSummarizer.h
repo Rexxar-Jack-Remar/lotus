@@ -8,8 +8,7 @@
 //
 //===----------------------------------------------------------------------===//
 
-#ifndef LOTUS_VERIFICATION_SIFA_SUMMARIZERS_ICALLSUMMARIZER_H
-#define LOTUS_VERIFICATION_SIFA_SUMMARIZERS_ICALLSUMMARIZER_H
+#pragma once
 
 #include <string>
 
@@ -26,4 +25,3 @@ public:
 } // namespace sifa
 } // namespace lotus
 
-#endif // LOTUS_VERIFICATION_SIFA_SUMMARIZERS_ICALLSUMMARIZER_H

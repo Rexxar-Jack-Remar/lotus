@@ -1,6 +1,5 @@
 /** @file PropertySym.h @brief Symbolic abstract property value for symbolic execution. */
-#ifndef ANALYSIS_SYMBOLICEXECUTION_PROPERTYSYM_H
-#define ANALYSIS_SYMBOLICEXECUTION_PROPERTYSYM_H
+#pragma once
 
 #include "SymbolicExecution/Core/BigInteger.h"
 #include "SymbolicExecution/Core/ProgramVar.h"
@@ -99,4 +98,3 @@ private:
   BigInteger offsets = 0;
 };
 } // namespace SymbolicExecution
-#endif

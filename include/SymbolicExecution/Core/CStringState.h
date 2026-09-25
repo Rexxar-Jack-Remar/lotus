@@ -1,6 +1,5 @@
 /** @file CStringState.h @brief C-string length tracking state for symbolic execution. */
-#ifndef ANALYSIS_SYMBOLICEXECUTION_CORE_CSTRINGSTATE_H
-#define ANALYSIS_SYMBOLICEXECUTION_CORE_CSTRINGSTATE_H
+#pragma once
 
 #include "SymbolicExecution/Core/GuardedValue.h"
 
@@ -60,4 +59,3 @@ private:
 
 } // namespace SymbolicExecution
 
-#endif

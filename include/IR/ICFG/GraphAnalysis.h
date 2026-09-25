@@ -4,8 +4,7 @@
 /// Provides functions for finding back edges, computing shortest paths,
 /// and reachability analysis on control flow graphs.
 
-#ifndef LT_GRAPH_ANALYSIS_H
-#define LT_GRAPH_ANALYSIS_H
+#pragma once
 
 #include "IR/ICFG/ICFG.h"
 
@@ -92,4 +91,3 @@ bool isReachableFrom(llvm::BasicBlock *from, llvm::BasicBlock *to,
                      const llvm::DominatorTree *DT, const llvm::LoopInfo *LI,
                      int &iterCount);
 
-#endif // LT_GRAPH_ANALYSIS_H

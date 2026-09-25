@@ -11,8 +11,7 @@
 //
 //===----------------------------------------------------------------------===//
 
-#ifndef LOTUS_VERIFICATION_SIFA_SYMABS_SIFASYMABSDOMAIN_H
-#define LOTUS_VERIFICATION_SIFA_SYMABS_SIFASYMABSDOMAIN_H
+#pragma once
 
 #include "Verification/Sifa/Cfg/Transition.h"
 #include "Verification/Sifa/Domain/AbstractDomain.h"
@@ -123,4 +122,3 @@ private:
 } // namespace sifa
 } // namespace lotus
 
-#endif // LOTUS_VERIFICATION_SIFA_SYMABS_SIFASYMABSDOMAIN_H

@@ -1,5 +1,4 @@
-#ifndef ANALYSIS_DATAFLOW_WPDS_BACKEND_H_
-#define ANALYSIS_DATAFLOW_WPDS_BACKEND_H_
+#pragma once
 
 #include <cstddef>
 #include <optional>
@@ -43,4 +42,3 @@ std::string getWPDSBackendUnavailableReason(WPDSBackendKind backend);
 
 } // namespace wpds
 
-#endif // ANALYSIS_DATAFLOW_WPDS_BACKEND_H_

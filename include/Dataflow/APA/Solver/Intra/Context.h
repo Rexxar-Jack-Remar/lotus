@@ -1,5 +1,4 @@
-#ifndef DATAFLOW_APA_ENGINES_SOLVERCONTEXT_H_
-#define DATAFLOW_APA_ENGINES_SOLVERCONTEXT_H_
+#pragma once
 
 #include "Dataflow/APA/Core/Options.h"
 #include "Dataflow/APA/Core/PathExpr.h"
@@ -78,4 +77,3 @@ public:
 } // namespace detail
 } // namespace elimination
 
-#endif // DATAFLOW_APA_ENGINES_SOLVERCONTEXT_H_

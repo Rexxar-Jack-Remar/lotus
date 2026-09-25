@@ -6,8 +6,7 @@
  * This pass consolidates multiple return statements in a function into a
  * single unified return block, simplifying control flow analysis.
  */
-#ifndef TRANSFORM_MERGERETURN_H
-#define TRANSFORM_MERGERETURN_H
+#pragma once
 
 #include <llvm/IR/Module.h>
 #include <llvm/IR/PassManager.h>
@@ -39,4 +38,3 @@ public:
   PreservedAnalyses run(Module &M, ModuleAnalysisManager &MAM);
 };
 
-#endif // TRANSFORM_MERGERETURN_H

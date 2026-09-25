@@ -1,8 +1,7 @@
 //
 // Created by peiming on 10/22/19.
 //
-#ifndef ASER_PTA_CONSGRAPHBUILDER_H
-#define ASER_PTA_CONSGRAPHBUILDER_H
+#pragma once
 
 #include "Alias/InclusionBased/AserPTA/PointerAnalysis/Graph/ConstraintGraph/ConstraintGraph.h"
 #include "Alias/InclusionBased/AserPTA/PointerAnalysis/Models/MemoryModel/MemModelTrait.h"
@@ -851,4 +850,3 @@ template <typename T1, typename T2> struct hash<pair<T1 *, T2 *>> {
 #undef MODEL
 #undef ALLOCATE
 
-#endif

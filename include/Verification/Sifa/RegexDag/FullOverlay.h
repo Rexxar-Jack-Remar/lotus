@@ -4,8 +4,7 @@
 //
 //===----------------------------------------------------------------------===//
 
-#ifndef LOTUS_VERIFICATION_SIFA_REGEXDAG_FULLOVERLAY_H
-#define LOTUS_VERIFICATION_SIFA_REGEXDAG_FULLOVERLAY_H
+#pragma once
 
 #include "Verification/Sifa/RegexDag/IDagOverlay.h"
 
@@ -40,4 +39,3 @@ public:
 } // namespace sifa
 } // namespace lotus
 
-#endif // LOTUS_VERIFICATION_SIFA_REGEXDAG_FULLOVERLAY_H

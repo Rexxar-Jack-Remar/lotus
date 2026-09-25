@@ -1,5 +1,4 @@
-#ifndef LLVMUTILS_SCHEDULER_PIPELINESCHEDULER_H
-#define LLVMUTILS_SCHEDULER_PIPELINESCHEDULER_H
+#pragma once
 
 #include "Utils/Parallel/Cancellation.h"
 #include "Utils/Parallel/Scheduler/Task.h"
@@ -202,4 +201,3 @@ public:
   void dumpStatus();
 };
 
-#endif // LLVMUTILS_SCHEDULER_PIPELINESCHEDULER_H

@@ -9,8 +9,7 @@
  * @author rainoftime
  */
 
-#ifndef __BVCLOCK_H__
-#define __BVCLOCK_H__
+#pragma once
 
 #include <cstddef>
 #include <ostream>
@@ -124,4 +123,3 @@ inline llvm::raw_ostream &operator<<(llvm::raw_ostream &os, const BVClock &vc) {
   return os << vc.to_string();
 }
 
-#endif

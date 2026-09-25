@@ -1,6 +1,5 @@
 /** @file TaintState.h @brief Taint facts and trace steps tracked by symbolic execution. */
-#ifndef ANALYSIS_SYMBOLICEXECUTION_CORE_TAINTSTATE_H
-#define ANALYSIS_SYMBOLICEXECUTION_CORE_TAINTSTATE_H
+#pragma once
 
 #include "SymbolicExecution/Core/GuardedValue.h"
 
@@ -67,4 +66,3 @@ public:
 
 } // namespace SymbolicExecution
 
-#endif

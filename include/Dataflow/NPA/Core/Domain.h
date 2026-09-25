@@ -1,5 +1,4 @@
-#ifndef NPA_CORE_DOMAIN_H
-#define NPA_CORE_DOMAIN_H
+#pragma once
 
 /**
  * \file
@@ -306,4 +305,3 @@ template <class D> inline long domain_max_linear_steps() {
 
 } // namespace npa
 
-#endif // NPA_CORE_DOMAIN_H

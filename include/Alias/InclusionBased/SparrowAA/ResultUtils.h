@@ -1,5 +1,4 @@
-#ifndef TCFS_SPARROW_AA_RESULT_UTILS_H
-#define TCFS_SPARROW_AA_RESULT_UTILS_H
+#pragma once
 
 #include <llvm/Support/raw_ostream.h>
 
@@ -41,4 +40,3 @@ void performAliasQueries(llvm::Module &M, AndersenAAResult &AAResult,
 
 } // namespace sparrow_aa
 
-#endif // TCFS_SPARROW_AA_RESULT_UTILS_H

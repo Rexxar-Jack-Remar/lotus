@@ -1,5 +1,4 @@
-#ifndef DATAFLOW_APA_TOOLING_APAFORMATTING_H_
-#define DATAFLOW_APA_TOOLING_APAFORMATTING_H_
+#pragma once
 
 #include "llvm/IR/Instruction.h"
 #include "llvm/IR/Module.h"
@@ -93,4 +92,3 @@ void formatPathExpr(llvm::raw_ostream &OS, const ExprRefT &Expr,
 
 }
 
-#endif

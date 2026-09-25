@@ -6,8 +6,7 @@
  * This file provides utilities for collecting and reporting statistics
  * about LLVM modules, such as instruction counts and pointer usage.
  */
-#ifndef SUPPORT_STATISTICS_H
-#define SUPPORT_STATISTICS_H
+#pragma once
 
 #include <llvm/IR/Module.h>
 
@@ -26,4 +25,3 @@ public:
   static void run(Module &);
 };
 
-#endif // SUPPORT_STATISTICS_H

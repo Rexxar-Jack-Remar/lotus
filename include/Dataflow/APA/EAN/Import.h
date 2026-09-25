@@ -1,5 +1,4 @@
-#ifndef DATAFLOW_APA_EAN_IMPORT_H_
-#define DATAFLOW_APA_EAN_IMPORT_H_
+#pragma once
 
 // Import: PathExprFactory<TransferT>::Ref DAG  ->  canonical e-graph.
 //
@@ -125,4 +124,3 @@ importCanonical(const std::vector<typename PathExprFactory<TransferT>::Ref> &R) 
 } // namespace ean
 } // namespace elimination
 
-#endif // DATAFLOW_APA_EAN_IMPORT_H_

@@ -1,5 +1,4 @@
-#ifndef DATAFLOW_APA_BASELINE_TRANSLAPA_ATOMTRANSLATOR_H_
-#define DATAFLOW_APA_BASELINE_TRANSLAPA_ATOMTRANSLATOR_H_
+#pragma once
 
 // TranslAPA baseline — mechanical Gen/Kill extraction (paper §3, §4.2).
 //
@@ -178,4 +177,3 @@ private:
 } // namespace translapa
 } // namespace elimination
 
-#endif // DATAFLOW_APA_BASELINE_TRANSLAPA_ATOMTRANSLATOR_H_

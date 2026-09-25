@@ -9,8 +9,7 @@
  * @ingroup TypeQualifier
  */
 
-#ifndef _CALL_GRAPH_H
-#define _CALL_GRAPH_H
+#pragma once
 
 #include "Alias/Specialized/TypeQualifier/IntGlobal.h"
 class CallGraphPass : public IterativeModulePass {
@@ -40,4 +39,3 @@ public:
   void fillCallGraphs();
 };
 
-#endif

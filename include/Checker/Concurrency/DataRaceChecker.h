@@ -1,7 +1,6 @@
 /** @file DataRaceChecker.h @brief Data race detection checker for concurrent
  * programs. */
-#ifndef DATA_RACE_CHECKER_H
-#define DATA_RACE_CHECKER_H
+#pragma once
 
 #include "Checker/Concurrency/ConcurrencyBugReport.h"
 #include "Concurrency/LockSet/LockSetAnalysis.h"
@@ -116,4 +115,3 @@ private:
 
 } // namespace concurrency
 
-#endif // DATA_RACE_CHECKER_H

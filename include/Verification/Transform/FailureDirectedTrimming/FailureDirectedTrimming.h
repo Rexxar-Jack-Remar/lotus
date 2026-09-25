@@ -15,8 +15,7 @@
  * The implementation is documented in:
  *   - lib/Verification/Transform/FailureDirectedTrimming/README.md
  */
-#ifndef VERIFICATION_FAILUREDIRECTEDTRIMMING_FAILUREDIRECTEDTRIMMING_H
-#define VERIFICATION_FAILUREDIRECTEDTRIMMING_FAILUREDIRECTEDTRIMMING_H
+#pragma once
 
 #include <llvm/IR/Module.h>
 #include <llvm/IR/PassManager.h>
@@ -33,4 +32,3 @@ public:
   PreservedAnalyses run(Module &M, ModuleAnalysisManager &MAM);
 };
 
-#endif // VERIFICATION_FAILUREDIRECTEDTRIMMING_FAILUREDIRECTEDTRIMMING_H

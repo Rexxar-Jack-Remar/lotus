@@ -1,8 +1,7 @@
 //
 // Created by peiming on 8/26/19.
 //
-#ifndef ASER_PTA_CONSTRAINTGRAPH_H
-#define ASER_PTA_CONSTRAINTGRAPH_H
+#pragma once
 
 #include "Alias/InclusionBased/AserPTA/PointerAnalysis/Graph/ConstraintGraph/CGObjNode.h"
 #include "Alias/InclusionBased/AserPTA/PointerAnalysis/Graph/ConstraintGraph/CGPtrNode.h"
@@ -262,5 +261,3 @@ struct DOTGraphTraits<const aser::ConstraintGraph<ctx>>
 } // namespace llvm
 
 #undef DEBUG_TYPE
-
-#endif

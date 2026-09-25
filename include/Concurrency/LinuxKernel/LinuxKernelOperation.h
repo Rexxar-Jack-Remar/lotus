@@ -10,8 +10,7 @@
  * @ingroup Concurrency
  */
 
-#ifndef LINUX_KERNEL_OPERATION_H
-#define LINUX_KERNEL_OPERATION_H
+#pragma once
 
 #include <cstdint>
 #include <map>
@@ -412,4 +411,3 @@ struct KernelThreadInfo {
 
 } // namespace kernel
 
-#endif // LINUX_KERNEL_OPERATION_H

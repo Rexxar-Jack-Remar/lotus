@@ -1,6 +1,5 @@
 
-#ifndef _PARALLEL_TABULATION_H
-#define _PARALLEL_TABULATION_H
+#pragma once
 
 #include "CFL/CSIndex/FLARE/ReachabilityQuery.h"
 #include "CFL/CSIndex/FLARE/Graph.h"
@@ -102,4 +101,3 @@ public:
 
 } // namespace lotus::cfl::cs_index::flare::tabulation
 
-#endif //_PARALLEL_TABULATION_H

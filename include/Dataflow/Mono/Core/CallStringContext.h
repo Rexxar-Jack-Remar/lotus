@@ -1,5 +1,4 @@
-#ifndef LOTUS_DATAFLOW_MONO_CORE_CALLSTRINGCONTEXT_H_
-#define LOTUS_DATAFLOW_MONO_CORE_CALLSTRINGCONTEXT_H_
+#pragma once
 
 #include "llvm/ADT/Hashing.h"
 #include "llvm/IR/Value.h"
@@ -132,4 +131,3 @@ template <typename N, unsigned K> struct hash<mono::CallStringCTX<N, K>> {
 
 } // namespace std
 
-#endif // LOTUS_DATAFLOW_MONO_CORE_CALLSTRINGCONTEXT_H_

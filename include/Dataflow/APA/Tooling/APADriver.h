@@ -1,5 +1,4 @@
-#ifndef DATAFLOW_APA_TOOLING_APADRIVER_H_
-#define DATAFLOW_APA_TOOLING_APADRIVER_H_
+#pragma once
 
 #include "llvm/ADT/ArrayRef.h"
 #include "llvm/ADT/StringRef.h"
@@ -81,4 +80,3 @@ int runApaDriver(llvm::Module &M, llvm::raw_ostream &OS, const APADriverOptions 
 
 }
 
-#endif

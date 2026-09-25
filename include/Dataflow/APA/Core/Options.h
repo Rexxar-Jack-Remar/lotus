@@ -1,5 +1,4 @@
-#ifndef DATAFLOW_ELIMINATION_CORE_OPTIONS_H_
-#define DATAFLOW_ELIMINATION_CORE_OPTIONS_H_
+#pragma once
 
 #include "Dataflow/APA/EAN/Budget.h"
 #include "Dataflow/APA/EAN/CostModel.h"
@@ -333,4 +332,3 @@ struct InterEANOptions final {
 
 } // namespace elimination
 
-#endif // DATAFLOW_ELIMINATION_CORE_OPTIONS_H_

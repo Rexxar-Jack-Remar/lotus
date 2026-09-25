@@ -1,5 +1,4 @@
-#ifndef FASTIFDS_ALGO_NEW_H
-#define FASTIFDS_ALGO_NEW_H
+#pragma once
 
 #include "Dataflow/DemandAPA/LCA.h"
 #include "Dataflow/DemandAPA/SCC.h"
@@ -291,4 +290,3 @@ public:
   }
 };
 
-#endif // FASTIFDS_ALGO_NEW_H

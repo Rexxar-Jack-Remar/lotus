@@ -1,5 +1,4 @@
-#ifndef NPA_NEWTON_LINEAR_SOLVERS_H
-#define NPA_NEWTON_LINEAR_SOLVERS_H
+#pragma once
 
 /**
  * \file
@@ -394,4 +393,3 @@ system_has_lcfl_structure(const std::vector<std::pair<Symbol, E1<D>>> &rhs) {
 
 } // namespace npa
 
-#endif // NPA_NEWTON_LINEAR_SOLVERS_H

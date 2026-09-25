@@ -27,8 +27,7 @@
  * graph type without any additional boilerplate.
  */
 
-#ifndef ANDERSEN_SPARSEBITVECTOR_GRAPH_H
-#define ANDERSEN_SPARSEBITVECTOR_GRAPH_H
+#pragma once
 
 #include "Alias/InclusionBased/SparrowAA/GraphTraits.h"
 #include "Alias/InclusionBased/SparrowAA/NodeFactory.h"
@@ -164,4 +163,3 @@ public:
   }
 };
 
-#endif

@@ -14,8 +14,7 @@
 ///
 ///===----------------------------------------------------------------------===//
 
-#ifndef OFFSET_H_
-#define OFFSET_H_
+#pragma once
 
 #include <cstdint>
 
@@ -201,4 +200,3 @@ template <> struct hash<Offset> {
 
 const Offset::type Offset::UNKNOWN = ~(static_cast<Offset::type>(0));
 
-#endif

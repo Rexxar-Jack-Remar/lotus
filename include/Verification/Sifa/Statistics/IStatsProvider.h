@@ -7,8 +7,7 @@
 //
 //===----------------------------------------------------------------------===//
 
-#ifndef LOTUS_VERIFICATION_SIFA_STATISTICS_ISTATSPROVIDER_H
-#define LOTUS_VERIFICATION_SIFA_STATISTICS_ISTATSPROVIDER_H
+#pragma once
 
 #include "Verification/Sifa/Statistics/SifaStats.h"
 
@@ -25,4 +24,3 @@ public:
 } // namespace sifa
 } // namespace lotus
 
-#endif // LOTUS_VERIFICATION_SIFA_STATISTICS_ISTATSPROVIDER_H

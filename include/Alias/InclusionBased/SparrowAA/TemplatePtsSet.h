@@ -45,8 +45,7 @@
  * the Andersen implementation.
  */
 
-#ifndef ANDERSEN_TEMPLATE_PTSSET_H
-#define ANDERSEN_TEMPLATE_PTSSET_H
+#pragma once
 
 #include "Alias/Infrastructure/PtsSet/BDDPtsSet.h"
 #include "Alias/InclusionBased/SparrowAA/PtsSet.h"
@@ -322,5 +321,3 @@ inline PtsSetImpl &RuntimePtsSet::activeImpl() {
   static PtsSetImpl impl = PtsSetImpl::SPARSE_BITVECTOR;
   return impl;
 }
-
-#endif // ANDERSEN_TEMPLATE_PTSSET_H

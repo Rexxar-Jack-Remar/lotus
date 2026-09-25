@@ -1,5 +1,4 @@
-#ifndef CPP_CODE_INTERPROCEDURAL_H
-#define CPP_CODE_INTERPROCEDURAL_H
+#pragma once
 
 template <class T> void Algorithm<T>::preprocessInterprocedural() {
   Time = omp_get_wtime();
@@ -535,4 +534,3 @@ template <class T> T Algorithm<T>::query(int u, int v) {
   return ans;
 }
 
-#endif // CPP_CODE_INTERPROCEDURAL_H

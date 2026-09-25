@@ -1,5 +1,4 @@
-#ifndef DATAFLOW_DEMAND_APA_SUPPORT_H_
-#define DATAFLOW_DEMAND_APA_SUPPORT_H_
+#pragma once
 
 #include "Dataflow/DemandAPA/DemandOmp.h"
 
@@ -187,4 +186,3 @@ public:
   }
 };
 
-#endif // DATAFLOW_DEMAND_APA_SUPPORT_H_

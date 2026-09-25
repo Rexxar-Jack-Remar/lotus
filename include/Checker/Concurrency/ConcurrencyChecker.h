@@ -1,7 +1,6 @@
 /** @file ConcurrencyChecker.h @brief Aggregate concurrency checker driver
  * orchestrating multiple analyses. */
-#ifndef CONCURRENCY_CHECKER_H
-#define CONCURRENCY_CHECKER_H
+#pragma once
 
 #include "Checker/Concurrency/AtomicityChecker.h"
 #include "Checker/Concurrency/CUDAChecker.h"
@@ -291,4 +290,3 @@ private:
 
 } // namespace concurrency
 
-#endif // CONCURRENCY_CHECKER_H

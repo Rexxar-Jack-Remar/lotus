@@ -10,8 +10,7 @@
  * @date 2026
  */
 
-#ifndef JOIN_TARGET_ANALYSIS_H
-#define JOIN_TARGET_ANALYSIS_H
+#pragma once
 
 #include "Concurrency/Thread/Join/JoinTargetState.h"
 #include "Concurrency/Utils/ThreadAPI.h"
@@ -199,4 +198,3 @@ private:
 
 } // namespace mhp
 
-#endif // JOIN_TARGET_ANALYSIS_H

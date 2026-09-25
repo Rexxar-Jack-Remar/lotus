@@ -1,6 +1,5 @@
 /** @file SymbolicMemory.h @brief Symbolic access paths and abstract memory objects. */
-#ifndef ANALYSIS_SYMBOLICEXECUTION_CORE_SYMBOLICMEMORY_H
-#define ANALYSIS_SYMBOLICEXECUTION_CORE_SYMBOLICMEMORY_H
+#pragma once
 
 #include "SymbolicExecution/Core/BigInteger.h"
 #include "SymbolicExecution/Core/ProgramVar.h"
@@ -140,4 +139,3 @@ template <> struct hash<SymbolicExecution::PTItem> {
 };
 } // namespace std
 
-#endif

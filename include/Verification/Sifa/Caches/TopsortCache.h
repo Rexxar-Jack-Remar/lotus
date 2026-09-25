@@ -4,8 +4,7 @@
 //
 //===----------------------------------------------------------------------===//
 
-#ifndef LOTUS_VERIFICATION_SIFA_CACHES_TOPSORTCACHE_H
-#define LOTUS_VERIFICATION_SIFA_CACHES_TOPSORTCACHE_H
+#pragma once
 
 #include "Verification/Sifa/RegexDag/RegexDag.h"
 
@@ -147,4 +146,3 @@ TopsortCache<L>::compute(const Dag &dag) {
 } // namespace sifa
 } // namespace lotus
 
-#endif // LOTUS_VERIFICATION_SIFA_CACHES_TOPSORTCACHE_H

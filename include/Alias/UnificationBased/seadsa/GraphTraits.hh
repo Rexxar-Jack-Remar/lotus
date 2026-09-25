@@ -1,5 +1,4 @@
-#ifndef __DSA_GRAPH_TRAITS_H
-#define __DSA_GRAPH_TRAITS_H
+#pragma once
 
 #include "Alias/UnificationBased/seadsa/Graph.hh"
 #include "llvm/ADT/GraphTraits.h"
@@ -156,4 +155,3 @@ namespace llvm {
   using nodes_iterator = seadsa::Graph::iterator;
 } // namespace llvm
 
-#endif

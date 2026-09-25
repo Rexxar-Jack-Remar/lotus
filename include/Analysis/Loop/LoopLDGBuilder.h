@@ -2,8 +2,7 @@
 /*
  * Copyright 2026 Lotus contributors
  */
-#ifndef LOTUS_ANALYSIS_LOOP_LOOPLDGBUILDER_H
-#define LOTUS_ANALYSIS_LOOP_LOOPLDGBUILDER_H
+#pragma once
 
 #include "Analysis/Loop/LoopDependenceGraph.h"
 #include "Analysis/Loop/LoopSCCDAG.h"
@@ -78,4 +77,3 @@ private:
 } // namespace analysis
 } // namespace lotus
 
-#endif

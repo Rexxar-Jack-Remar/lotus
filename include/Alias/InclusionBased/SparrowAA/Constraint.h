@@ -1,5 +1,4 @@
-#ifndef ANDERSEN_CONSTRAINT_H
-#define ANDERSEN_CONSTRAINT_H
+#pragma once
 
 #include "Alias/InclusionBased/SparrowAA/NodeFactory.h"
 
@@ -53,4 +52,3 @@ public:
   }
 };
 
-#endif

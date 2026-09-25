@@ -27,8 +27,7 @@
  *     Philipp Schubert and others
  *****************************************************************************/
 
-#ifndef LOTUS_ANALYSIS_TYPEHIERARCHY_TYPEHIERARCHY_H
-#define LOTUS_ANALYSIS_TYPEHIERARCHY_TYPEHIERARCHY_H
+#pragma once
 
 #include "llvm/Support/raw_ostream.h"
 #include <optional>
@@ -141,4 +140,3 @@ inline llvm::raw_ostream &operator<<(llvm::raw_ostream &OS,
 
 } // namespace lotus
 
-#endif

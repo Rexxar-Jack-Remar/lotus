@@ -1,5 +1,4 @@
-#ifndef SMTLIB2_SOLVER_H
-#define SMTLIB2_SOLVER_H
+#pragma once
 
 #include "llvm/ADT/APInt.h"
 #include "llvm/ADT/StringRef.h"
@@ -27,5 +26,3 @@ SolverProgram makeExternalSolverProgram(llvm::StringRef Path);
 SolverProgram makeInternalSolverProgram(int MainPtr(int argc, char **argv));
 
 std::unique_ptr<SMTLIBSolver> createZ3Solver(SolverProgram Prog, bool Keep);
-
-#endif // SMTLIB2_SOLVER_H

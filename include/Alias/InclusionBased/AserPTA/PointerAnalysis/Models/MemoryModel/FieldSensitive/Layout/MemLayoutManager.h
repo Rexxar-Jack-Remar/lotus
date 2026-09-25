@@ -2,8 +2,7 @@
 // Created by peiming on 12/18/19.
 //
 
-#ifndef ASER_PTA_MEMLAYOUTMANAGER_H
-#define ASER_PTA_MEMLAYOUTMANAGER_H
+#pragma once
 
 #include "Alias/InclusionBased/AserPTA/PointerAnalysis/Models/MemoryModel/FieldSensitive/Layout/ArrayLayout.h"
 #include "Alias/InclusionBased/AserPTA/PointerAnalysis/Models/MemoryModel/FieldSensitive/Layout/MemLayout.h"
@@ -185,4 +184,3 @@ public:
 
 } // namespace aser
 
-#endif // ASER_PTA_MEMLAYOUTMANAGER_H

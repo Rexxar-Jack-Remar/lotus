@@ -1,5 +1,4 @@
-#ifndef LOTUS_CFL_CLASSICAL_ENDPOINT_QUOTIENT_H
-#define LOTUS_CFL_CLASSICAL_ENDPOINT_QUOTIENT_H
+#pragma once
 
 #include <cstddef>
 #include <cstdint>
@@ -169,4 +168,3 @@ private:
 } // namespace cfl
 } // namespace lotus
 
-#endif

@@ -1,6 +1,5 @@
 /** @file PulseFormula.h @brief Symbolic formula representation for Pulse abstract values. */
-#ifndef CHECKER_PULSE_PULSEFORMULA_H
-#define CHECKER_PULSE_PULSEFORMULA_H
+#pragma once
 
 #include "Checker/Pulse/Core/PulseAbstractValue.h"
 
@@ -326,4 +325,3 @@ private:
 
 } // namespace pulse
 
-#endif // CHECKER_PULSE_PULSEFORMULA_H

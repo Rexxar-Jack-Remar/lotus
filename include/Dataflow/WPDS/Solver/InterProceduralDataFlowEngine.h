@@ -1,5 +1,4 @@
-#ifndef ANALYSIS_DATAFLOW_WPDS_INTERPROCEDURALDATAFLOWENGINE_H_
-#define ANALYSIS_DATAFLOW_WPDS_INTERPROCEDURALDATAFLOWENGINE_H_
+#pragma once
 
 #include "Dataflow/Mono/Support/Result.h"
 #include "Dataflow/WPDS/Backend.h"
@@ -241,4 +240,3 @@ private:
 
 } // namespace wpds
 
-#endif // ANALYSIS_DATAFLOW_WPDS_INTERPROCEDURALDATAFLOWENGINE_H_

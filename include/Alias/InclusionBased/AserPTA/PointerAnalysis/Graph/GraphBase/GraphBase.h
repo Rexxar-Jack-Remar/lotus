@@ -1,8 +1,7 @@
 //
 // Created by peiming on 8/14/19.
 //
-#ifndef ASER_PTA_GRAPHBASE_H
-#define ASER_PTA_GRAPHBASE_H
+#pragma once
 
 #include "Alias/InclusionBased/AserPTA/Util/Iterators.h"
 
@@ -359,5 +358,3 @@ struct GraphTraits<Inverse<aser::GraphBase<NodeType, EdgeType>>> {
 };
 
 } // namespace llvm
-
-#endif

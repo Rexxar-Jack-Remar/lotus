@@ -1,6 +1,5 @@
 /** @file PropertyAllocator.h @brief Allocator for abstract property values in symbolic execution. */
-#ifndef ANALYSIS_SYMBOLICEXECUTION_PROPERTYALLOCATOR_H
-#define ANALYSIS_SYMBOLICEXECUTION_PROPERTYALLOCATOR_H
+#pragma once
 
 #include "SymbolicExecution/Core/PropertyInteger.h"
 #include "SymbolicExecution/Core/PropertySym.h"
@@ -29,4 +28,3 @@ const Ty *CastProperty(const SymbolicExecution::PropertyValuePtr &Val) {
   return cast<Ty>(VPtr);
 }
 
-#endif

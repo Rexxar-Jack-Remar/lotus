@@ -1,3 +1,5 @@
+#pragma once
+
 #include "Solvers/SMT/STAUB/SMTNode.h"
 
 #ifndef PAIR

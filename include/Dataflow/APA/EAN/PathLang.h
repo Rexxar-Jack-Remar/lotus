@@ -1,5 +1,4 @@
-#ifndef DATAFLOW_APA_EAN_PATHLANG_H_
-#define DATAFLOW_APA_EAN_PATHLANG_H_
+#pragma once
 
 // PathLang: the e-graph-side representation of APA path expressions.
 //
@@ -222,4 +221,3 @@ template <> struct std::hash<::elimination::ean::PathNode> {
   }
 };
 
-#endif // DATAFLOW_APA_EAN_PATHLANG_H_

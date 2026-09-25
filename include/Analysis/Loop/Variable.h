@@ -20,8 +20,7 @@
  * OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE
  * OR OTHER DEALINGS IN THE SOFTWARE.
  */
-#ifndef LOTUS_ANALYSIS_LOOP_VARIABLE_H
-#define LOTUS_ANALYSIS_LOOP_VARIABLE_H
+#pragma once
 
 #include "Analysis/Loop/LoopCarriedDependencies.h"
 
@@ -111,4 +110,3 @@ private:
 } // namespace analysis
 } // namespace lotus
 
-#endif

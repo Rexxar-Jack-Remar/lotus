@@ -1,5 +1,4 @@
-#ifndef ESCAPE_ANALYSIS_H
-#define ESCAPE_ANALYSIS_H
+#pragma once
 
 #include <unordered_map>
 #include <unordered_set>
@@ -46,4 +45,3 @@ private:
 
 } // namespace lotus
 
-#endif // ESCAPE_ANALYSIS_H

@@ -1,5 +1,4 @@
-#ifndef DATAFLOW_APA_SOLVER_MODULARINTERSUMMARYDRIVER_H_
-#define DATAFLOW_APA_SOLVER_MODULARINTERSUMMARYDRIVER_H_
+#pragma once
 
 #include "Dataflow/APA/Core/InterResult.h"
 #include "Dataflow/APA/Solver/Inter/Modular/Interpreter.h"
@@ -193,4 +192,3 @@ private:
 
 } // namespace elimination
 
-#endif // DATAFLOW_APA_SOLVER_MODULARINTERSUMMARYDRIVER_H_

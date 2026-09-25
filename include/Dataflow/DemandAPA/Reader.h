@@ -1,5 +1,4 @@
-#ifndef DATAFLOW_DEMAND_APA_READER_H_
-#define DATAFLOW_DEMAND_APA_READER_H_
+#pragma once
 
 class reader {
 public:
@@ -194,4 +193,3 @@ public:
   }
 };
 
-#endif // DATAFLOW_DEMAND_APA_READER_H_

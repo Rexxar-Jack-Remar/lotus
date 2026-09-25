@@ -1,6 +1,5 @@
 /** @file PulseContradiction.h @brief Contradiction detection for Pulse abstract domains. */
-#ifndef CHECKER_PULSE_PULSECONTRADICTION_H
-#define CHECKER_PULSE_PULSECONTRADICTION_H
+#pragma once
 
 #include "Checker/Pulse/Core/PulseAbstractValue.h"
 #include "Checker/Pulse/Interproc/PulseSpecialization.h"
@@ -250,4 +249,3 @@ std::optional<Contradiction> checkAliasingWithAllAliases(
 
 } // namespace pulse
 
-#endif // CHECKER_PULSE_PULSECONTRADICTION_H

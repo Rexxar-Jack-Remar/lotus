@@ -4,8 +4,7 @@
  * @author Migrated from Symbiotic
  */
 
-#ifndef LOTUS_VERIFICATION_TRANSFORM_FIND_EXITS_H
-#define LOTUS_VERIFICATION_TRANSFORM_FIND_EXITS_H
+#pragma once
 
 #include "llvm/Pass.h"
 
@@ -43,4 +42,3 @@ public:
 } // namespace verification
 } // namespace lotus
 
-#endif // LOTUS_VERIFICATION_TRANSFORM_FIND_EXITS_H

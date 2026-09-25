@@ -1,5 +1,4 @@
-#ifndef STATIC_THREAD_SHARING_ANALYSIS_H
-#define STATIC_THREAD_SHARING_ANALYSIS_H
+#pragma once
 
 #include <map>
 #include <set>
@@ -86,4 +85,3 @@ private:
 
 } // namespace lotus
 
-#endif // STATIC_THREAD_SHARING_ANALYSIS_H

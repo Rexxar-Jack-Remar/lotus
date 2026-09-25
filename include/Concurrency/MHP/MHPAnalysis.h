@@ -18,8 +18,7 @@
  * @date 2025
  */
 
-#ifndef MHP_ANALYSIS_H
-#define MHP_ANALYSIS_H
+#pragma once
 
 #include "Alias/Infrastructure/AliasAnalysisWrapper/AliasAnalysisWrapper.h"
 #include "Concurrency/LockSet/LockSetAnalysis.h"
@@ -564,4 +563,3 @@ private:
 
 } // namespace mhp
 
-#endif // MHP_ANALYSIS_H

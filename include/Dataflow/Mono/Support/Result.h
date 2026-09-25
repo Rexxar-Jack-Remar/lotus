@@ -1,5 +1,4 @@
-#ifndef LOTUS_DATAFLOW_MONO_SUPPORT_RESULT_H_
-#define LOTUS_DATAFLOW_MONO_SUPPORT_RESULT_H_
+#pragma once
 
 #include "llvm/IR/Instruction.h"
 #include "llvm/IR/Value.h"
@@ -83,4 +82,3 @@ private:
 
 } // namespace mono
 
-#endif // LOTUS_DATAFLOW_MONO_SUPPORT_RESULT_H_

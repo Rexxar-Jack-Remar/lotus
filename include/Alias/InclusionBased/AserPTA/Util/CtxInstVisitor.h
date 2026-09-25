@@ -4,8 +4,7 @@
 // Modified from llvm::InstVisitor
 // instead of just visiting an instruction, it visit the instruction with
 // context
-#ifndef ASER_PTA_CTXINSTVISITOR_H
-#define ASER_PTA_CTXINSTVISITOR_H
+#pragma once
 
 #include "llvm/IR/Function.h"
 #include "llvm/IR/Instructions.h"
@@ -455,5 +454,3 @@ private:
 #undef DELEGATE
 
 } // namespace llvm
-
-#endif

@@ -1,5 +1,4 @@
-#ifndef _QUERY_H_
-#define _QUERY_H_
+#pragma once
 
 #include "CFL/CSIndex/FLARE/ReachabilityQuery.h"
 #include "CFL/CSIndex/FLARE/GraphAlgorithms.h"
@@ -359,4 +358,3 @@ public:
 
 } // namespace lotus::cfl::cs_index::flare
 
-#endif

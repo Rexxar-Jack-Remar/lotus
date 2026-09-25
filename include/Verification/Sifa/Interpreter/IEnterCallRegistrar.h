@@ -9,8 +9,7 @@
 //
 //===----------------------------------------------------------------------===//
 
-#ifndef LOTUS_VERIFICATION_SIFA_INTERPRETER_IENTERCALLREGISTRAR_H
-#define LOTUS_VERIFICATION_SIFA_INTERPRETER_IENTERCALLREGISTRAR_H
+#pragma once
 
 #include <string>
 
@@ -30,4 +29,3 @@ public:
 } // namespace sifa
 } // namespace lotus
 
-#endif // LOTUS_VERIFICATION_SIFA_INTERPRETER_IENTERCALLREGISTRAR_H

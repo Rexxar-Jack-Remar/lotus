@@ -1,5 +1,4 @@
-#ifndef ANALYSIS_DATAFLOW_WPDS_PREPAREDANALYSIS_H_
-#define ANALYSIS_DATAFLOW_WPDS_PREPAREDANALYSIS_H_
+#pragma once
 
 #include "Dataflow/WPDS/Backend.h"
 
@@ -51,4 +50,3 @@ private:
 
 } // namespace wpds
 
-#endif // ANALYSIS_DATAFLOW_WPDS_PREPAREDANALYSIS_H_

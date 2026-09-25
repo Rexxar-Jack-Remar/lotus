@@ -1,5 +1,4 @@
-#ifndef NPA_LCFL_DETECTOR_H
-#define NPA_LCFL_DETECTOR_H
+#pragma once
 
 /**
  * \file
@@ -52,4 +51,3 @@ private:
 
 } // namespace npa
 
-#endif // NPA_LCFL_DETECTOR_H

@@ -9,6 +9,8 @@
  * - Edge function composition memoization: Avoids redundant function compositions
  */
 
+#pragma once
+
 #include "Dataflow/ControlFlow/InterCFG.h"
 #include <llvm/IR/CFG.h>
 #include <llvm/Support/raw_ostream.h>

@@ -26,8 +26,7 @@
  */
 // Modified by Xiang Zhang, 2026
 // Additional changes licensed under the MIT License
-#ifndef PARSER_HEADER
-#define PARSER_HEADER
+#pragma once
 
 #include <cstddef>
 #include <memory>
@@ -3822,4 +3821,3 @@ typedef std::shared_ptr<Parser> ParserPtr;
 ParserPtr newParser();
 ParserPtr newParser(const std::string &filename);
 }  // namespace stabilizer::parser
-#endif

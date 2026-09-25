@@ -21,8 +21,7 @@
 /// isochronous pass.
 ///
 //===----------------------------------------------------------------------===//
-#ifndef LIF_TRANSFORM_LOOP_H
-#define LIF_TRANSFORM_LOOP_H
+#pragma once
 
 #include <llvm/ADT/DenseMap.h>
 #include <llvm/ADT/SmallPtrSet.h>
@@ -73,4 +72,3 @@ struct LoopWrapper {
 LoopWrapper wrapLoop(llvm::LoopInfo &LI, llvm::LLVMContext &Ctx);
 } // namespace lotus::lif::transform
 
-#endif

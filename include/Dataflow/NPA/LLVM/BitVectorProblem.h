@@ -1,5 +1,4 @@
-#ifndef NPA_BIT_VECTOR_PROBLEM_H
-#define NPA_BIT_VECTOR_PROBLEM_H
+#pragma once
 
 #include "Utils/LLVM/SystemHeaders.h"
 
@@ -34,4 +33,3 @@ struct BitVectorProblem {
 
 } // namespace npa
 
-#endif // NPA_BIT_VECTOR_PROBLEM_H

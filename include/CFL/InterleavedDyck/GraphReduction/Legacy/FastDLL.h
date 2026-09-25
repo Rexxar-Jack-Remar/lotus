@@ -1,5 +1,4 @@
-#ifndef FASTDLL_H
-#define FASTDLL_H
+#pragma once
 
 #include <iostream>
 #include <list>
@@ -76,4 +75,3 @@ private:
   unsigned dll_size;
 };
 
-#endif

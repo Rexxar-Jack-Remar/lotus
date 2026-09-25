@@ -27,8 +27,7 @@
 
 // Modified by Xiang Zhang, 2026
 // Additional changes licensed under the MIT License
-#ifndef _OPTIONS_H
-#define _OPTIONS_H
+#pragma once
 
 #include <unordered_map>
 
@@ -427,4 +426,3 @@ class GlobalOptions {
     }
 };
 }  // namespace stabilizer::parser
-#endif  // _OPTIONS_H

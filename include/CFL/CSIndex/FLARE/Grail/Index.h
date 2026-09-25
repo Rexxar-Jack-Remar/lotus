@@ -4,8 +4,7 @@ The software is provided on an as is basis for research purposes.
 There is no additional support offered, nor are the author(s)
 or their institutions liable under any circumstances.
 */
-#ifndef _BOX_H
-#define _BOX_H
+#pragma once
 
 #include "CFL/CSIndex/FLARE/ReachabilityQuery.h"
 #include "CFL/CSIndex/FLARE/Grail/ExceptionList.h"
@@ -252,4 +251,3 @@ public:
 
 } // namespace lotus::cfl::cs_index::flare::grail
 
-#endif

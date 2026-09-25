@@ -1,5 +1,4 @@
-#ifndef PCOMB_INPUT_STREAM_H
-#define PCOMB_INPUT_STREAM_H
+#pragma once
 
 #include <cassert>
 
@@ -45,4 +44,3 @@ public:
 
 } // namespace pcomb
 
-#endif

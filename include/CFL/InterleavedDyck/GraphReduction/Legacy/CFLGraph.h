@@ -1,5 +1,4 @@
-#ifndef CFLGRAPH_H
-#define CFLGRAPH_H
+#pragma once
 
 #include <bitset>
 //#include <deque>
@@ -244,4 +243,3 @@ private:
   // unsigned SizeAfterDel;
 };
 
-#endif

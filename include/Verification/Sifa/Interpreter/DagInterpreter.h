@@ -13,8 +13,7 @@
 //
 //===----------------------------------------------------------------------===//
 
-#ifndef LOTUS_VERIFICATION_SIFA_INTERPRETER_DAGINTERPRETER_H
-#define LOTUS_VERIFICATION_SIFA_INTERPRETER_DAGINTERPRETER_H
+#pragma once
 
 #include "llvm/IR/Function.h"
 
@@ -303,4 +302,3 @@ extern template class lotus::sifa::DagInterpreter<lotus::sifa::Transition,
 extern template class lotus::sifa::DagInterpreter<lotus::sifa::Transition,
                                                   lotus::sifa::SymAbsState>;
 
-#endif // LOTUS_VERIFICATION_SIFA_INTERPRETER_DAGINTERPRETER_H

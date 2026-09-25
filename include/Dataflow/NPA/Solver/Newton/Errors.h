@@ -1,5 +1,4 @@
-#ifndef NPA_NEWTON_ERRORS_H
-#define NPA_NEWTON_ERRORS_H
+#pragma once
 
 #include "Dataflow/NPA/Core/Domain.h"
 
@@ -53,4 +52,3 @@ inline void require_valid_newton_delta(const DomVal<D> &f_nu,
 
 } // namespace npa
 
-#endif // NPA_NEWTON_ERRORS_H

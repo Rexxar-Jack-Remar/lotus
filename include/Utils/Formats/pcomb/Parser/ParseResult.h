@@ -1,5 +1,4 @@
-#ifndef PCOMB_PARSE_RESULT_H
-#define PCOMB_PARSE_RESULT_H
+#pragma once
 
 #include "Utils/Formats/pcomb/InputStream/InputStream.h"
 
@@ -43,4 +42,3 @@ public:
 
 } // namespace pcomb
 
-#endif

@@ -2,8 +2,7 @@
  * Utility header-only library from https://github.com/agauniyal/rang
  */
 
-#ifndef RANG_DOT_HPP
-#define RANG_DOT_HPP
+#pragma once
 
 #if defined(__unix__) || defined(__unix) || defined(__linux__)
 #define OS_LINUX
@@ -485,5 +484,3 @@ inline void setControlMode(const control value) noexcept {
 #undef OS_LINUX
 #undef OS_WIN
 #undef OS_MAC
-
-#endif /* ifndef RANG_DOT_HPP */

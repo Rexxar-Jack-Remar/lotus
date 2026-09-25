@@ -9,8 +9,7 @@
 //
 //===----------------------------------------------------------------------===//
 
-#ifndef LOTUS_VERIFICATION_SIFA_FLUID_IFLUID_H
-#define LOTUS_VERIFICATION_SIFA_FLUID_IFLUID_H
+#pragma once
 
 namespace lotus {
 namespace sifa {
@@ -24,4 +23,3 @@ public:
 } // namespace sifa
 } // namespace lotus
 
-#endif // LOTUS_VERIFICATION_SIFA_FLUID_IFLUID_H

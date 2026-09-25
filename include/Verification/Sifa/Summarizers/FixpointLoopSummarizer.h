@@ -17,8 +17,7 @@
 //
 //===----------------------------------------------------------------------===//
 
-#ifndef LOTUS_VERIFICATION_SIFA_SUMMARIZERS_FIXPOINTLOOPSUMMARIZER_H
-#define LOTUS_VERIFICATION_SIFA_SUMMARIZERS_FIXPOINTLOOPSUMMARIZER_H
+#pragma once
 
 #include "Verification/Sifa/Caches/StarDagCache.h"
 #include "Verification/Sifa/Domain/AbstractDomain.h"
@@ -141,4 +140,3 @@ extern template class lotus::sifa::FixpointLoopSummarizer<
 extern template class lotus::sifa::FixpointLoopSummarizer<
     lotus::sifa::Transition, lotus::sifa::SymAbsState>;
 
-#endif // LOTUS_VERIFICATION_SIFA_SUMMARIZERS_FIXPOINTLOOPSUMMARIZER_H

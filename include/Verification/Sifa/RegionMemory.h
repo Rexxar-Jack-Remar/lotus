@@ -13,8 +13,7 @@
 //
 //===----------------------------------------------------------------------===//
 
-#ifndef LOTUS_VERIFICATION_SIFA_REGIONMEMORY_H
-#define LOTUS_VERIFICATION_SIFA_REGIONMEMORY_H
+#pragma once
 
 #include "llvm/IR/Function.h"
 #include "llvm/IR/GlobalVariable.h"
@@ -72,4 +71,3 @@ inline void resolvePointerToRegions(lotus::AliasAnalysisWrapper *AA,
 } // namespace sifa
 } // namespace lotus
 
-#endif

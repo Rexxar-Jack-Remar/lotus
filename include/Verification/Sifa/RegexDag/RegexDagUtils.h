@@ -5,8 +5,7 @@
 //
 //===----------------------------------------------------------------------===//
 
-#ifndef LOTUS_VERIFICATION_SIFA_REGEXDAG_REGEXDAGUTILS_H
-#define LOTUS_VERIFICATION_SIFA_REGEXDAG_REGEXDAGUTILS_H
+#pragma once
 
 #include "Utils/Algorithms/PathExpressions/Regex.h"
 #include "Verification/Sifa/Cfg/Transition.h"
@@ -148,4 +147,3 @@ singleSinkLocation(const RegexDag<Transition> &dag,
 } // namespace sifa
 } // namespace lotus
 
-#endif // LOTUS_VERIFICATION_SIFA_REGEXDAG_REGEXDAGUTILS_H

@@ -1,5 +1,4 @@
-#ifndef DATAFLOW_APA_SOLVER_INTERSUMMARYTRANSFER_H_
-#define DATAFLOW_APA_SOLVER_INTERSUMMARYTRANSFER_H_
+#pragma once
 
 #include "Dataflow/APA/Core/InterProblem.h"
 #include "Dataflow/APA/Core/InterResult.h"
@@ -148,4 +147,3 @@ struct hash<elimination::InterSummaryTransferAtom<AnalysisDomainTy>> {
 };
 } // namespace std
 
-#endif // DATAFLOW_APA_SOLVER_INTERSUMMARYTRANSFER_H_

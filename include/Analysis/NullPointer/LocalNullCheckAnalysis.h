@@ -17,8 +17,7 @@
  */
 
 /** @file LocalNullCheckAnalysis.h @brief Local (intra-procedural) null check analysis. */
-#ifndef NULLPOINTER_LOCALNULLCHECKANALYSIS_H
-#define NULLPOINTER_LOCALNULLCHECKANALYSIS_H
+#pragma once
 
 #include <set>
 #include <unordered_map>
@@ -103,4 +102,3 @@ bool allIncomingEdgesUnreachableForTesting(llvm::Function *F,
 } // namespace nullpointer
 } // namespace lotus
 
-#endif // NULLPOINTER_LOCALNULLCHECKANALYSIS_H

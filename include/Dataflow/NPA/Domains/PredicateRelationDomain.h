@@ -1,5 +1,4 @@
-#ifndef NPA_PREDICATE_RELATION_DOMAIN_H
-#define NPA_PREDICATE_RELATION_DOMAIN_H
+#pragma once
 
 #include "Dataflow/NPA/Core/Domain.h"
 
@@ -220,4 +219,3 @@ template <> struct TensorSemiringTraits<PredicateRelationDomain> {
 
 } // namespace npa
 
-#endif // NPA_PREDICATE_RELATION_DOMAIN_H

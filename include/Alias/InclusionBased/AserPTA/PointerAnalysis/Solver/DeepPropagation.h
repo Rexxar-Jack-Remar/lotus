@@ -2,8 +2,7 @@
 // Created by Yanze on 6/27/20.
 // Based on WavePropagation.h
 //
-#ifndef ASER_PTA_DEEPPROPAGATION_H
-#define ASER_PTA_DEEPPROPAGATION_H
+#pragma once
 
 #include "Alias/InclusionBased/AserPTA/PointerAnalysis/Graph/ConstraintGraph/SCCIterator.h"
 #include "Alias/InclusionBased/AserPTA/PointerAnalysis/Solver/SolverBase.h"
@@ -223,4 +222,3 @@ protected:
 
 } // namespace aser
 
-#endif

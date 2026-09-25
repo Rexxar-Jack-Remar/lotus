@@ -1,8 +1,7 @@
 //
 // Created by peiming on 11/13/19.
 //
-#ifndef ASER_PTA_DEFAULTEXTFUNCTIONS_H
-#define ASER_PTA_DEFAULTEXTFUNCTIONS_H
+#pragma once
 
 #include <llvm/IR/Function.h>
 
@@ -21,5 +20,3 @@ public:
 };
 
 } // namespace aser
-
-#endif

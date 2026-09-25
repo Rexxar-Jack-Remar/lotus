@@ -1,5 +1,4 @@
-#ifndef DATAFLOW_APA_ENGINES_STATEELIMINATIONSOLVER_H_
-#define DATAFLOW_APA_ENGINES_STATEELIMINATIONSOLVER_H_
+#pragma once
 
 #include "Dataflow/APA/EAN/DagStats.h"
 #include "Dataflow/APA/Solver/Ordering/StructuralModel.h"
@@ -268,4 +267,3 @@ bool solveStateElimination(
 } // namespace detail
 } // namespace elimination
 
-#endif // DATAFLOW_APA_ENGINES_STATEELIMINATIONSOLVER_H_

@@ -10,8 +10,7 @@
  * @ingroup Concurrency
  */
 
-#ifndef MPI_PROCESS_MODEL_H
-#define MPI_PROCESS_MODEL_H
+#pragma once
 
 #include "Concurrency/MPI/MPIAbstractState.h"
 #include "Concurrency/MPI/MPINormalization.h"
@@ -321,4 +320,3 @@ private:
 
 } // namespace mpi
 
-#endif // MPI_PROCESS_MODEL_H

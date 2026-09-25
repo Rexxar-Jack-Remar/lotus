@@ -1,5 +1,4 @@
-#ifndef __DSA_GLOBAL_HH_
-#define __DSA_GLOBAL_HH_
+#pragma once
 
 #include "llvm/ADT/StringRef.h"
 #include "llvm/IR/Function.h"
@@ -468,4 +467,3 @@ public:
   void runOnCallSite(const DsaCallSite &cs, Node &calleeN, Node &callerN);
 };
 } // namespace seadsa
-#endif

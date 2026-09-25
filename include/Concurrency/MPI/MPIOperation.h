@@ -10,8 +10,7 @@
  * @ingroup Concurrency
  */
 
-#ifndef MPI_OPERATION_H
-#define MPI_OPERATION_H
+#pragma once
 
 #include "Concurrency/ConcurrencyRelation.h"
 #include "Concurrency/MPI/MPINormalization.h"
@@ -601,4 +600,3 @@ struct MPIOperation {
 
 } // namespace mpi
 
-#endif // MPI_OPERATION_H

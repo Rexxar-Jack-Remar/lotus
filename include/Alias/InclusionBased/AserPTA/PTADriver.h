@@ -5,8 +5,7 @@
 // and runAnalysis function.
 //
 
-#ifndef ASER_PTA_PTADRIVER_H
-#define ASER_PTA_PTADRIVER_H
+#pragma once
 
 #include "Alias/InclusionBased/AserPTA/PointerAnalysis/PointerAnalysisPass.h"
 #include "Alias/InclusionBased/AserPTA/PreProcessing/Passes/CanonicalizeGEPPass.h"
@@ -83,4 +82,3 @@ void runAnalysis(llvm::Module &M, bool dumpStats = true) {
 
 } // namespace aser
 
-#endif // ASER_PTA_PTADRIVER_H

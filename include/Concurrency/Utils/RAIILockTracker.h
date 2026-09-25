@@ -10,8 +10,7 @@
  * @date 2026
  */
 
-#ifndef RAII_LOCK_TRACKER_H
-#define RAII_LOCK_TRACKER_H
+#pragma once
 
 #include <map>
 #include <set>
@@ -162,4 +161,3 @@ private:
 
 } // namespace RAIILock
 
-#endif // RAII_LOCK_TRACKER_H

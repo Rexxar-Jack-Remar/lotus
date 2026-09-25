@@ -2,8 +2,7 @@
 // Created by peiming on 2/26/20.
 //
 
-#ifndef ASER_PTA_IRPREPROCESSOR_H
-#define ASER_PTA_IRPREPROCESSOR_H
+#pragma once
 
 #include <llvm/IR/LegacyPassManager.h>
 #include <llvm/IR/Module.h>
@@ -20,4 +19,3 @@ public:
 
 } // namespace aser
 
-#endif // ASER_PTA_IRPREPROCESSOR_H

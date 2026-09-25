@@ -8,8 +8,7 @@
 //
 //===----------------------------------------------------------------------===//
 
-#ifndef LOTUS_VERIFICATION_SIFA_FLUID_STATSWRAPPERFLUID_H
-#define LOTUS_VERIFICATION_SIFA_FLUID_STATSWRAPPERFLUID_H
+#pragma once
 
 #include "Verification/Sifa/Fluid/IFluid.h"
 #include "Verification/Sifa/Statistics/SifaStats.h"
@@ -41,4 +40,3 @@ private:
 } // namespace sifa
 } // namespace lotus
 
-#endif // LOTUS_VERIFICATION_SIFA_FLUID_STATSWRAPPERFLUID_H

@@ -17,8 +17,7 @@
  */
 
 /** @file NullEquivalenceAnalysis.h @brief Null equivalence analysis for determining when values are equal to null. */
-#ifndef NULLPOINTER_NULLEQUIVALENCEANALYSIS_H
-#define NULLPOINTER_NULLEQUIVALENCEANALYSIS_H
+#pragma once
 
 #include <llvm/ADT/BitVector.h>
 #include <llvm/IR/Dominators.h>
@@ -42,4 +41,3 @@ public:
   Value *get(Value *);
 };
 
-#endif // NULLPOINTER_NULLEQUIVALENCEANALYSIS_H

@@ -5,8 +5,7 @@
  *  Description: Adapter interface for DyckAA used by NullPointer analyses
  */
 
-#ifndef NULLPOINTER_ALIASANALYSISADAPTER_H
-#define NULLPOINTER_ALIASANALYSISADAPTER_H
+#pragma once
 
 #include <llvm/IR/Instruction.h>
 #include <llvm/IR/Module.h>
@@ -57,5 +56,3 @@ public:
   bool mayNull(Value *V, Instruction *InstPoint,
                bool BeforeInstruction = false) override;
 };
-
-#endif // NULLPOINTER_ALIASANALYSISADAPTER_H

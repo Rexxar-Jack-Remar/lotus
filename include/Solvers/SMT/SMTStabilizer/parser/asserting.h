@@ -26,8 +26,7 @@
  */
 // Modified by Xiang Zhang, 2026
 // Additional changes licensed under the MIT License
-#ifndef ASSERTING_HEADER
-#define ASSERTING_HEADER
+#pragma once
 
 #include <iostream>
 
@@ -42,6 +41,4 @@
     } while (0)
 #else
 #define condAssert(cond, msg) ((void)0)
-#endif
-
 #endif

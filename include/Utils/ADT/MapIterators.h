@@ -16,8 +16,7 @@
  *  along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
-#ifndef SUPPORT_MAPITERATOR_H
-#define SUPPORT_MAPITERATOR_H
+#pragma once
 
 #include <iterator>
 #include <type_traits>
@@ -150,4 +149,3 @@ public:
   bool operator!=(const pair_value_iterator &PIt) const { return It != PIt.It; }
 };
 
-#endif

@@ -10,8 +10,7 @@
  * @author Lotus Analysis Framework
  */
 
-#ifndef UBIANALYSIS_QUALIFIERANALYSIS_H
-#define UBIANALYSIS_QUALIFIERANALYSIS_H
+#pragma once
 
 #include <llvm/Analysis/CallGraph.h>
 #include <llvm/IR/BasicBlock.h>
@@ -289,4 +288,3 @@ int64_t getGEPInstFieldNum(const llvm::GetElementPtrInst *gepInst,
                            const StructAnalyzer &structAnalyzer,
                            llvm::Module *module);
 
-#endif // PROJECT_QUALIFIERANALYSIS_H

@@ -1,5 +1,4 @@
-#ifndef _PATH_TREE_H
-#define _PATH_TREE_H
+#pragma once
 
 #include "CFL/CSIndex/FLARE/PathTree/WeightedGraphAlgorithms.h"
 #include "CFL/CSIndex/FLARE/GraphAlgorithms.h"
@@ -193,4 +192,3 @@ public:
 
 } // namespace lotus::cfl::cs_index::flare::path_tree
 
-#endif

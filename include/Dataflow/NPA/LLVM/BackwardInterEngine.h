@@ -1,5 +1,4 @@
-#ifndef NPA_LLVM_BACKWARD_INTER_ENGINE_H
-#define NPA_LLVM_BACKWARD_INTER_ENGINE_H
+#pragma once
 
 #include "Dataflow/NPA/LLVM/ForwardInterEngine.h"
 #include "Dataflow/NPA/NPA.h"
@@ -689,4 +688,3 @@ public:
 
 } // namespace npa
 
-#endif // NPA_LLVM_BACKWARD_INTER_ENGINE_H

@@ -16,8 +16,7 @@
  *  along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
-#ifndef DYCKAA_DYCKGRAPHNODE_H
-#define DYCKAA_DYCKGRAPHNODE_H
+#pragma once
 
 #include <map>
 #include <set>
@@ -128,4 +127,3 @@ private:
   void removeSource(DyckGraphNode *, void *Label);
 };
 
-#endif // DYCKAA_DYCKGRAPHNODE_H

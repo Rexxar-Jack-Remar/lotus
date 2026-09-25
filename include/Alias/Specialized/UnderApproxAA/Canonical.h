@@ -8,8 +8,7 @@
  * memory location, despite syntactic differences in the IR.
  */
 
-#ifndef UNDERAPPROX_CANONICAL_H
-#define UNDERAPPROX_CANONICAL_H
+#pragma once
 
 #include <llvm/IR/Operator.h>
 
@@ -190,4 +189,3 @@ bool isAllocationCall(const llvm::Value *V);
 bool checkSameAllocationSite(const llvm::Value *S1, const llvm::Value *S2);
 
 } // end namespace UnderApprox
-#endif

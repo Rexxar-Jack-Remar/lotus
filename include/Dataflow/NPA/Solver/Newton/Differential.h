@@ -1,5 +1,4 @@
-#ifndef NPA_DIFF_H
-#define NPA_DIFF_H
+#pragma once
 
 /**
  * \file
@@ -231,4 +230,3 @@ private:
 
 } // namespace npa
 
-#endif // NPA_DIFF_H

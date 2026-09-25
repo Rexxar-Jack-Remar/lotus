@@ -16,8 +16,7 @@
  *  along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
-#ifndef DYCKAA_DYCKMODREFANALYSIS_H
-#define DYCKAA_DYCKMODREFANALYSIS_H
+#pragma once
 
 #include "Alias/UnificationBased/DyckAA/DyckGraphNode.h"
 
@@ -70,4 +69,3 @@ public:
   bool count(Function *F) const { return Func2MR.count(F); }
 };
 
-#endif // DYCKAA_DYCKMODREFANALYSIS_H

@@ -14,8 +14,7 @@
  *   - PreAfterPhi[BB]: condition at block entry after PHIs (for edge transfer).
  *   - Summary: procedure summary Υ(prc) used at callsites (rule (6), Def. Procedure summary).
  */
-#ifndef VERIFICATION_FAILUREDIRECTEDTRIMMING_IMPL_H
-#define VERIFICATION_FAILUREDIRECTEDTRIMMING_IMPL_H
+#pragma once
 
 #include "Alias/Infrastructure/AliasAnalysisWrapper/AliasAnalysisWrapper.h"
 
@@ -319,4 +318,3 @@ bool wrapCallsInOriginalFunctions(Module &M, FunctionCallee AssumeFn,
 // -----------------------------------------------------------------------------
 bool runFailureDirectedTrimming(Module &M);
 
-#endif

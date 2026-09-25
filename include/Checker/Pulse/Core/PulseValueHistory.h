@@ -1,6 +1,5 @@
 /** @file PulseValueHistory.h @brief Value history tracking for Pulse abstract interpretation. */
-#ifndef CHECKER_PULSE_PULSEVALUEHISTORY_H
-#define CHECKER_PULSE_PULSEVALUEHISTORY_H
+#pragma once
 
 #include <cstddef>
 #include <memory>
@@ -326,4 +325,3 @@ public:
 
 } // namespace pulse
 
-#endif // CHECKER_PULSE_PULSEVALUEHISTORY_H

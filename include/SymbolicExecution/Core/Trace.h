@@ -1,6 +1,5 @@
 /** @file Trace.h @brief Bug trace steps collected during symbolic execution. */
-#ifndef ANALYSIS_SYMBOLICEXECUTION_CORE_TRACE_H
-#define ANALYSIS_SYMBOLICEXECUTION_CORE_TRACE_H
+#pragma once
 
 #include <llvm/IR/Instruction.h>
 #include <llvm/IR/Value.h>
@@ -28,4 +27,3 @@ public:
 
 } // namespace SymbolicExecution
 
-#endif

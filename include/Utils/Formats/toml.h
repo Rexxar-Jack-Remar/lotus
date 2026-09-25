@@ -1,5 +1,4 @@
-#ifndef TOML11_VERSION_HPP
-#define TOML11_VERSION_HPP
+#pragma once
 
 #define TOML11_VERSION_MAJOR 4
 #define TOML11_VERSION_MINOR 4
@@ -118,7 +117,6 @@ THE SOFTWARE.)";
 }
 
 } // namespace toml
-#endif // TOML11_VERSION_HPP
 #ifndef TOML11_FORMAT_HPP
 #define TOML11_FORMAT_HPP
 

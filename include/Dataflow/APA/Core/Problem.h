@@ -1,5 +1,4 @@
-#ifndef DATAFLOW_APA_CORE_PROBLEM_H_
-#define DATAFLOW_APA_CORE_PROBLEM_H_
+#pragma once
 
 #include "Dataflow/APA/Core/AbstractDomain.h"
 
@@ -96,4 +95,3 @@ public:
 
 } // namespace elimination
 
-#endif // DATAFLOW_APA_CORE_PROBLEM_H_

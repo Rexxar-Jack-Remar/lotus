@@ -14,8 +14,7 @@
 //
 //===----------------------------------------------------------------------===//
 
-#ifndef LOTUS_VERIFICATION_SIFA_DOMAIN_ABSTRACTDOMAIN_H
-#define LOTUS_VERIFICATION_SIFA_DOMAIN_ABSTRACTDOMAIN_H
+#pragma once
 
 #include <utility>
 
@@ -131,4 +130,3 @@ public:
 } // namespace sifa
 } // namespace lotus
 
-#endif // LOTUS_VERIFICATION_SIFA_DOMAIN_ABSTRACTDOMAIN_H

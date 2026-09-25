@@ -8,8 +8,7 @@
  * bug checking.
  */
 
-#ifndef CONCURRENCY_ANALYSIS_DUMPER_H
-#define CONCURRENCY_ANALYSIS_DUMPER_H
+#pragma once
 
 #include "Concurrency/LockSet/LockSetAnalysis.h"
 #include "Concurrency/MHP/IMHPAnalysis.h"
@@ -83,4 +82,3 @@ private:
 
 } // namespace concurrency
 
-#endif // CONCURRENCY_ANALYSIS_DUMPER_H

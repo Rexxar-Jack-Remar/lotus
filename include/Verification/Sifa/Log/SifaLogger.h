@@ -6,8 +6,7 @@
 //
 //===----------------------------------------------------------------------===//
 
-#ifndef LOTUS_VERIFICATION_SIFA_LOG_SIFALOGGER_H
-#define LOTUS_VERIFICATION_SIFA_LOG_SIFALOGGER_H
+#pragma once
 
 #include <string>
 
@@ -72,4 +71,3 @@ private:
 } // namespace sifa
 } // namespace lotus
 
-#endif // LOTUS_VERIFICATION_SIFA_LOG_SIFALOGGER_H

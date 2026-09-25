@@ -12,8 +12,7 @@
 //
 //===----------------------------------------------------------------------===//
 
-#ifndef LOTUS_VERIFICATION_SIFA_INTERPRETER_ICFGINTERPRETER_H
-#define LOTUS_VERIFICATION_SIFA_INTERPRETER_ICFGINTERPRETER_H
+#pragma once
 
 #include "llvm/IR/Module.h"
 
@@ -229,4 +228,3 @@ private:
 #include "Verification/Sifa/Cfg/Transition.h"
 extern template class lotus::sifa::IcfgInterpreter<bool>;
 
-#endif // LOTUS_VERIFICATION_SIFA_INTERPRETER_ICFGINTERPRETER_H

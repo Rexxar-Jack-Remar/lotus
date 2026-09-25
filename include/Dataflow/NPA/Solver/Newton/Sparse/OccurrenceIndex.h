@@ -1,5 +1,4 @@
-#ifndef NPA_NEWTON_SPARSE_OCCURRENCE_INDEX_H
-#define NPA_NEWTON_SPARSE_OCCURRENCE_INDEX_H
+#pragma once
 
 /**
  * \file
@@ -778,4 +777,3 @@ private:
 } // namespace detail
 } // namespace npa
 
-#endif // NPA_NEWTON_SPARSE_OCCURRENCE_INDEX_H

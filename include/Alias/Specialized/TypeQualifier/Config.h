@@ -10,8 +10,7 @@
  * @ingroup TypeQualifier
  */
 
-#ifndef UBIANALYSIS_CONFIG_H
-#define UBIANALYSIS_CONFIG_H
+#pragma once
 #include "Alias/Specialized/TypeQualifier/IntGlobal.h"
 
 #include <array>
@@ -244,4 +243,3 @@ llvm::Value *FindAlloc(llvm::Value *V) {
 }
 #endif
 
-#endif // UBIANALYSIS_CONFIG_H

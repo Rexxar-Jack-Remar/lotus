@@ -1,6 +1,5 @@
 /** @file GuardedValue.h @brief Path-condition-guarded containers for symbolic state. */
-#ifndef ANALYSIS_SYMBOLICEXECUTION_CORE_GUARDEDVALUE_H
-#define ANALYSIS_SYMBOLICEXECUTION_CORE_GUARDEDVALUE_H
+#pragma once
 
 #include "SymbolicExecution/Core/AnalysisLimit.h"
 #include "SymbolicExecution/Core/PropertyValue.h"
@@ -297,4 +296,3 @@ template <> struct hash<SymbolicExecution::Condition> {
 };
 } // namespace std
 
-#endif

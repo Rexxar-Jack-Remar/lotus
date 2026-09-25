@@ -1,5 +1,4 @@
-#ifndef DATAFLOW_APA_TOOLING_APADIAGNOSTICS_H_
-#define DATAFLOW_APA_TOOLING_APADIAGNOSTICS_H_
+#pragma once
 
 #include "llvm/IR/Function.h"
 #include "llvm/Support/raw_ostream.h"
@@ -276,4 +275,3 @@ void dumpProfile(llvm::raw_ostream &OS,
 
 }
 
-#endif

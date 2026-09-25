@@ -1,8 +1,7 @@
 // Dense-hash points-to set using llvm::DenseSet.
 //
 // This file is standalone and not wired into any analysis yet.
-#ifndef ANDERSEN_DENSE_HASH_PTSSET_H
-#define ANDERSEN_DENSE_HASH_PTSSET_H
+#pragma once
 
 #include <cstddef>
 #include <cstdint>
@@ -82,4 +81,3 @@ private:
   llvm::DenseSet<Index> set_;
 };
 
-#endif // ANDERSEN_DENSE_HASH_PTSSET_H

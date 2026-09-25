@@ -1,8 +1,7 @@
 //
 // Created by peiming on 11/2/19.
 //
-#ifndef ASER_PTA_CGOBJNODE_H
-#define ASER_PTA_CGOBJNODE_H
+#pragma once
 
 #include "Alias/InclusionBased/AserPTA/PointerAnalysis/Graph/ConstraintGraph/CGNodeBase.h"
 
@@ -62,5 +61,3 @@ public:
 };
 
 } // namespace aser
-
-#endif

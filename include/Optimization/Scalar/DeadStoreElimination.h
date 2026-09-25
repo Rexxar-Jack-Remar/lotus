@@ -14,8 +14,7 @@
 //
 //===----------------------------------------------------------------------===//
 
-#ifndef LLVM_TRANSFORMS_SCALAR_DEADSTOREELIMINATION_H
-#define LLVM_TRANSFORMS_SCALAR_DEADSTOREELIMINATION_H
+#pragma once
 
 #include "llvm/IR/PassManager.h"
 
@@ -32,4 +31,3 @@ public:
 
 } // end namespace llvm
 
-#endif // LLVM_TRANSFORMS_SCALAR_DEADSTOREELIMINATION_H

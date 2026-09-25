@@ -6,8 +6,7 @@
  * implementation lives in lib/Alias/Infrastructure/PtsSet/BDDPtsSet.cpp.
  */
 
-#ifndef ANDERSEN_BDDPTSSET_H
-#define ANDERSEN_BDDPTSSET_H
+#pragma once
 
 #include <cstdint>
 #include <memory>
@@ -81,4 +80,3 @@ private:
   mutable std::shared_ptr<std::vector<Index>> cache;
 };
 
-#endif // ANDERSEN_BDDPTSSET_H

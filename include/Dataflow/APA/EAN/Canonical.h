@@ -1,5 +1,4 @@
-#ifndef DATAFLOW_APA_EAN_CANONICAL_H_
-#define DATAFLOW_APA_EAN_CANONICAL_H_
+#pragma once
 
 // Canonical e-node builders shared by Import (raw DAG -> e-graph) and Factorize
 // (rewrite passes). These enforce the profile-relative canonical form (paper
@@ -98,4 +97,3 @@ inline Id star(Graph &g, Id sub) {
 } // namespace ean
 } // namespace elimination
 
-#endif // DATAFLOW_APA_EAN_CANONICAL_H_

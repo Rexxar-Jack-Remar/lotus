@@ -1,8 +1,7 @@
 //
 // Created by peiming on 10/22/19.
 //
-#ifndef ASER_PTA_DEFAULTLANGMODEL_H
-#define ASER_PTA_DEFAULTLANGMODEL_H
+#pragma once
 
 #include "Alias/InclusionBased/AserPTA/PointerAnalysis/Models/DefaultHeapModel.h"
 #include "Alias/InclusionBased/AserPTA/PointerAnalysis/Models/LanguageModel/DefaultLangModel/DefaultExtFunctions.h"
@@ -175,5 +174,3 @@ class LangModelTrait<DefaultLangModel<ctx, MemModel, PtsTy>>
           ctx, MemModel, PtsTy, DefaultLangModel<ctx, MemModel, PtsTy>>> {};
 
 } // namespace aser
-
-#endif

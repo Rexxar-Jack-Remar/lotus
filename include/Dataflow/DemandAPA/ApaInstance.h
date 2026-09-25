@@ -1,5 +1,4 @@
-#ifndef FASTIFDS_APAINSTANCE_H
-#define FASTIFDS_APAINSTANCE_H
+#pragma once
 
 #include "Dataflow/DemandAPA/Algebra.h"
 
@@ -87,4 +86,3 @@ public:
         weightCentroid(_weightCentroid), weightCallsG(_weightCallsG) {}
 };
 
-#endif // FASTIFDS_APAINSTANCE_H

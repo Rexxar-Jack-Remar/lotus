@@ -1,6 +1,5 @@
 /** @file SARIF.h @brief SARIF (Static Analysis Results Interchange Format) output for bug reports. */
-#ifndef SARIF_H
-#define SARIF_H
+#pragma once
 
 #include "Utils/Formats/cJSON.h"
 
@@ -173,4 +172,3 @@ private:
 
 } // namespace sarif
 
-#endif // SARIF_H

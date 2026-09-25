@@ -1,5 +1,4 @@
-#ifndef DATAFLOW_APA_EAN_GREEDY_H_
-#define DATAFLOW_APA_EAN_GREEDY_H_
+#pragma once
 
 // Greedy: the paper's "Greedy" configuration — Default plus deterministic local
 // simplification. It shares EAN's canonicalization (ACI/associativity
@@ -38,4 +37,3 @@ greedySimplify(const std::vector<typename PathExprFactory<TransferT>::Ref> &R,
 
 } // namespace elimination
 
-#endif // DATAFLOW_APA_EAN_GREEDY_H_

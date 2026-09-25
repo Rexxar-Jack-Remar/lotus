@@ -1,6 +1,5 @@
 /** @file TaintModel.h @brief Taint propagation model for symbolic-execution-based taint analysis. */
-#ifndef ANALYSIS_SYMBOLICEXECUTION_TAINTMODEL_H
-#define ANALYSIS_SYMBOLICEXECUTION_TAINTMODEL_H
+#pragma once
 
 #include "llvm/IR/Function.h"
 #include "llvm/IR/InstrTypes.h"
@@ -59,4 +58,3 @@ private:
   std::unordered_map<std::string, std::vector<int>> SinkFunctions;
 };
 
-#endif

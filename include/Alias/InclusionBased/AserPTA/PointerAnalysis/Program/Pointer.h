@@ -1,8 +1,7 @@
 //
 // Created by peiming on 11/1/19.
 //
-#ifndef ASER_PTA_POINTER_H
-#define ASER_PTA_POINTER_H
+#pragma once
 
 // represent pointers in programs
 #include <llvm/ADT/Hashing.h>
@@ -69,4 +68,3 @@ template <typename ctx> struct hash<aser::Pointer<ctx>> {
 
 } // namespace std
 
-#endif

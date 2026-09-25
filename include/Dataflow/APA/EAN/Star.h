@@ -1,5 +1,4 @@
-#ifndef DATAFLOW_APA_EAN_STAR_H_
-#define DATAFLOW_APA_EAN_STAR_H_
+#pragma once
 
 // Star-family rewrites (paper Table I, §III.C). M5 implements SLIDING:
 //
@@ -133,4 +132,3 @@ inline std::size_t slideRound(Graph &g, const LawProfile &L) {
 } // namespace ean
 } // namespace elimination
 
-#endif // DATAFLOW_APA_EAN_STAR_H_

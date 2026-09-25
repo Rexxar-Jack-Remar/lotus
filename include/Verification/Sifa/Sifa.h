@@ -13,8 +13,7 @@
 //
 //===----------------------------------------------------------------------===//
 
-#ifndef LOTUS_VERIFICATION_SIFA_SIFA_H
-#define LOTUS_VERIFICATION_SIFA_SIFA_H
+#pragma once
 
 #include "llvm/ADT/ArrayRef.h"
 
@@ -267,4 +266,3 @@ OctagonState analyzeToReturnWithOctagonDomain(const llvm::Function &F,
 } // namespace sifa
 } // namespace lotus
 
-#endif // LOTUS_VERIFICATION_SIFA_SIFA_H

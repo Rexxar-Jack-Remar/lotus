@@ -22,8 +22,7 @@
  *  `AndersGraphTraits` to remain graph-type-agnostic.
  */
 
-#ifndef ANDERSEN_GRAPHTRAITS_H
-#define ANDERSEN_GRAPHTRAITS_H
+#pragma once
 
 /**
  * @class MapValueIterator
@@ -106,4 +105,3 @@ template <class GraphType> class AndersGraphTraits {
   //   static NodeIterator node_end(const GraphType*)
 };
 
-#endif

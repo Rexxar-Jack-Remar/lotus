@@ -1,5 +1,4 @@
-#ifndef NPA_SOLVER_STATISTICS_H
-#define NPA_SOLVER_STATISTICS_H
+#pragma once
 
 #include "Dataflow/NPA/Solver/Options.h"
 
@@ -61,4 +60,3 @@ struct Stat {
 
 } // namespace npa
 
-#endif // NPA_SOLVER_STATISTICS_H

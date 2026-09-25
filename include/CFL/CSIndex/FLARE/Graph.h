@@ -1,5 +1,4 @@
-#ifndef _GRAPH_H
-#define _GRAPH_H
+#pragma once
 
 #include "CFL/CSIndex/FLARE/BitVector.h"
 
@@ -424,4 +423,3 @@ public:
 
 } // namespace lotus::cfl::cs_index::flare
 
-#endif

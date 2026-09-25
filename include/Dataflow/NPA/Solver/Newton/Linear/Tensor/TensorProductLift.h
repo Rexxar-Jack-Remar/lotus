@@ -1,5 +1,4 @@
-#ifndef NPA_CORE_TENSOR_PRODUCT_LIFT_H
-#define NPA_CORE_TENSOR_PRODUCT_LIFT_H
+#pragma once
 
 #include "Dataflow/NPA/Core/Domain.h"
 
@@ -186,4 +185,3 @@ private:
 
 } // namespace npa
 
-#endif // NPA_CORE_TENSOR_PRODUCT_LIFT_H

@@ -1,5 +1,4 @@
-#ifndef DATAFLOW_APA_EAN_SATURATE_H_
-#define DATAFLOW_APA_EAN_SATURATE_H_
+#pragma once
 
 // Saturate: the guarded, budgeted, anytime saturation driver (paper
 // Algorithm 1). It runs the phases [Cleanup, Factor, Star, Explore]; within a
@@ -162,4 +161,3 @@ SaturationStats saturate(Graph &g, const std::vector<Id> &roots,
 } // namespace ean
 } // namespace elimination
 
-#endif // DATAFLOW_APA_EAN_SATURATE_H_

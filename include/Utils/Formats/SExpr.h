@@ -7,8 +7,7 @@
 ///
 ///===----------------------------------------------------------------------===//
 
-#ifndef __SEXPR_H__
-#define __SEXPR_H__
+#pragma once
 
 #include <cassert>
 #include <initializer_list>
@@ -136,4 +135,3 @@ std::istream &operator>>(std::istream &is, SExpr &sexp);
 /// @return Reference to the output stream
 std::ostream &operator<<(std::ostream &os, const SExpr &sexp);
 
-#endif

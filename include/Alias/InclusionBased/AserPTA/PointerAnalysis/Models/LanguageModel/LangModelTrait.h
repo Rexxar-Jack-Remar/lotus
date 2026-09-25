@@ -1,8 +1,7 @@
 //
 // Created by peiming on 10/19/19.
 //
-#ifndef ASER_PTA_LANGMODELTRAIT_H
-#define ASER_PTA_LANGMODELTRAIT_H
+#pragma once
 
 #include <llvm/IR/LegacyPassManager.h>
 
@@ -59,5 +58,3 @@ template <typename Model> struct LangModelTrait {
 };
 
 } // namespace aser
-
-#endif

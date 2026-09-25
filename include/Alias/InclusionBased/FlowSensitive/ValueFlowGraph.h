@@ -1,5 +1,4 @@
-#ifndef LOTUS_ALIAS_INCLUSIONBASED_FLOWSENSITIVE_VALUEFLOWGRAPH_H
-#define LOTUS_ALIAS_INCLUSIONBASED_FLOWSENSITIVE_VALUEFLOWGRAPH_H
+#pragma once
 
 // An LLVM-independent implementation of the value-flow formulation in
 // Li, Cifuentes and Keynes, "Boosting the Performance of Flow-sensitive
@@ -132,4 +131,3 @@ private:
 };
 
 } // namespace lotus::alias::vfg
-#endif

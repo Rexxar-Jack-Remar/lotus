@@ -9,8 +9,7 @@
  * clocks following the transfer rules in the paper to answer MHP/HB queries.
  */
 
-#ifndef STATIC_VECTOR_CLOCK_MHP_H
-#define STATIC_VECTOR_CLOCK_MHP_H
+#pragma once
 
 #include "Concurrency/Thread/Join/JoinTargetAnalysis.h"
 #include "Concurrency/MHP/IMHPAnalysis.h"
@@ -356,4 +355,3 @@ private:
 
 } // namespace mhp
 
-#endif // STATIC_VECTOR_CLOCK_MHP_H

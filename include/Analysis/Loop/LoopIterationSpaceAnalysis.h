@@ -20,8 +20,7 @@
  * OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE
  * OR OTHER DEALINGS IN THE SOFTWARE.
  */
-#ifndef LOTUS_ANALYSIS_LOOP_LOOPITERATIONSPACEANALYSIS_H
-#define LOTUS_ANALYSIS_LOOP_LOOPITERATIONSPACEANALYSIS_H
+#pragma once
 
 #include "Analysis/Loop/InductionVariables.h"
 #include "Analysis/Loop/LoopDependenceGraph.h"
@@ -98,4 +97,3 @@ private:
 } // namespace analysis
 } // namespace lotus
 
-#endif

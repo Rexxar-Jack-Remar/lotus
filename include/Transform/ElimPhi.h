@@ -5,8 +5,7 @@
  * new LLVM IR is in non-SSA form
  */
 
-#ifndef H_ELIM_PHI_H
-#define H_ELIM_PHI_H
+#pragma once
 
 #include "llvm/IR/Function.h"
 #include "llvm/IR/Instructions.h"
@@ -36,5 +35,3 @@ private:
   void replacePHIAssign(BasicBlock *fromBB, BasicBlock *phiBB, BranchInst *,
                         unsigned);
 };
-
-#endif /* H_ELIM_PHI_H */

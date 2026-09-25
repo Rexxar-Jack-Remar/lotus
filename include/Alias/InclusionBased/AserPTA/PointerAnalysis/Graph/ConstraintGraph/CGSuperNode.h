@@ -1,8 +1,7 @@
 //
 // Created by peiming on 11/2/19.
 //
-#ifndef ASER_PTA_CGSUPERNODE_H
-#define ASER_PTA_CGSUPERNODE_H
+#pragma once
 
 // TODO: maybe merge SCC later?
 
@@ -91,5 +90,3 @@ public:
 };
 
 } // namespace aser
-
-#endif

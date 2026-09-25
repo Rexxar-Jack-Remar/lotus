@@ -1,5 +1,4 @@
-#ifndef DATAFLOW_APA_SOLVER_CALLGRAPHSCC_H_
-#define DATAFLOW_APA_SOLVER_CALLGRAPHSCC_H_
+#pragma once
 
 #include <algorithm>
 #include <cstddef>
@@ -195,4 +194,3 @@ private:
 
 } // namespace elimination
 
-#endif // DATAFLOW_APA_SOLVER_CALLGRAPHSCC_H_

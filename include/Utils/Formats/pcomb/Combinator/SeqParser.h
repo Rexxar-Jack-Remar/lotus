@@ -1,5 +1,4 @@
-#ifndef PCOMB_SEQ_PARSER_H
-#define PCOMB_SEQ_PARSER_H
+#pragma once
 
 #include "Utils/Formats/pcomb/Parser/Parser.h"
 
@@ -104,4 +103,3 @@ template <typename... Parsers> SeqParser<Parsers...> seq(Parsers &&...parsers) {
 
 } // namespace pcomb
 
-#endif

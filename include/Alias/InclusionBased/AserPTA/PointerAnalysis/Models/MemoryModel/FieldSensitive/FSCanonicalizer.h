@@ -2,8 +2,7 @@
 // Created by peiming on 1/2/20.
 //
 
-#ifndef ASER_PTA_FSCANONICALIZER_H
-#define ASER_PTA_FSCANONICALIZER_H
+#pragma once
 
 #include <llvm/IR/Instructions.h>
 #include <llvm/IR/Intrinsics.h>
@@ -19,4 +18,3 @@ public:
 
 } // namespace aser
 
-#endif // ASER_PTA_FSCANONICALIZER_H

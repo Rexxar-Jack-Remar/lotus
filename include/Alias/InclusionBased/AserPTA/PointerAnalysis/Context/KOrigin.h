@@ -2,8 +2,7 @@
 // Created by peiming on 11/19/19.
 //
 
-#ifndef ASER_PTA_KORIGIN_H
-#define ASER_PTA_KORIGIN_H
+#pragma once
 
 #include "Alias/InclusionBased/AserPTA/PointerAnalysis/Context/CtxTrait.h"
 #include "Alias/InclusionBased/AserPTA/PointerAnalysis/Context/KCallSite.h"
@@ -132,4 +131,3 @@ template <uint32_t K, uint32_t L> struct hash<aser::KOrigin<K, L>> {
 
 } // namespace std
 
-#endif // ASER_PTA_KORIGIN_H

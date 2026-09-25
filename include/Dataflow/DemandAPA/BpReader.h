@@ -1,5 +1,4 @@
-#ifndef CPP_CODE_BPREADER_H
-#define CPP_CODE_BPREADER_H
+#pragma once
 
 #include "Dataflow/DemandAPA/Algebra.h"
 #include "Dataflow/DemandAPA/Support.h"
@@ -1116,4 +1115,3 @@ public:
   }
 };
 
-#endif

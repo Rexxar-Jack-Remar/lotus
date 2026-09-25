@@ -1,5 +1,4 @@
-#ifndef __SEADSA_NAME_VALUES__HPP_
-#define __SEADSA_NAME_VALUES__HPP_
+#pragma once
 
 #include "llvm/ADT/StringRef.h"
 #include "llvm/IR/Function.h"
@@ -19,4 +18,3 @@ struct NameValues : public llvm::ModulePass {
 };
 } // namespace seadsa
 
-#endif

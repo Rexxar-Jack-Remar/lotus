@@ -1,5 +1,4 @@
-#ifndef DATAFLOW_APA_BASELINE_TRANSLAPA_GENKILLSEMIRING_H_
-#define DATAFLOW_APA_BASELINE_TRANSLAPA_GENKILLSEMIRING_H_
+#pragma once
 
 // TranslAPA baseline — Gen/Kill semiring (paper §4).
 //
@@ -112,4 +111,3 @@ private:
 } // namespace translapa
 } // namespace elimination
 
-#endif // DATAFLOW_APA_BASELINE_TRANSLAPA_GENKILLSEMIRING_H_

@@ -13,8 +13,7 @@
 // Created by prophe cheng on 2025/4/4.
 //
 
-#ifndef INDIRECTCALLANALYZER_MLTADFPASS_H
-#define INDIRECTCALLANALYZER_MLTADFPASS_H
+#pragma once
 
 #include "Alias/Specialized/FPA/Config.h"
 #include "Alias/Specialized/FPA/MLTAPass.h"
@@ -41,4 +40,3 @@ public:
   bool justifyUsers(Value *value, Value *curUser);
 };
 
-#endif // INDIRECTCALLANALYZER_MLTADFPASS_H

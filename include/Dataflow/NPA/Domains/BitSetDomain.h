@@ -1,5 +1,4 @@
-#ifndef NPA_BIT_SET_DOMAIN_H
-#define NPA_BIT_SET_DOMAIN_H
+#pragma once
 
 #include "Dataflow/NPA/Core/Domain.h"
 #include "Dataflow/NPA/Core/DomainExecution.h"
@@ -68,4 +67,3 @@ private:
 
 } // namespace npa
 
-#endif /* NPA_BIT_SET_DOMAIN_H */

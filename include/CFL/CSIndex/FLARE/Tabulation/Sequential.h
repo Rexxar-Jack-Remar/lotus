@@ -11,8 +11,7 @@
  * Creation Date: 2021/7/10
  * Modification History:
  **/
-#ifndef _TABULATION_H
-#define _TABULATION_H
+#pragma once
 
 #include "CFL/CSIndex/FLARE/ReachabilityQuery.h"
 #include "CFL/CSIndex/FLARE/Graph.h"
@@ -55,4 +54,3 @@ public:
 
 } // namespace lotus::cfl::cs_index::flare::tabulation
 
-#endif //_TABULATION_H

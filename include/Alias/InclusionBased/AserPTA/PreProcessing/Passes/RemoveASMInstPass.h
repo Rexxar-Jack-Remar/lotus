@@ -2,8 +2,7 @@
 // Created by peiming on 4/15/20.
 //
 
-#ifndef ASER_PTA_REMOVEASMINSTPASS_H
-#define ASER_PTA_REMOVEASMINSTPASS_H
+#pragma once
 
 #include <llvm/Pass.h>
 
@@ -19,4 +18,3 @@ public:
 
 } // namespace aser
 
-#endif // ASER_PTA_REMOVEASMINSTPASS_H

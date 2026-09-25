@@ -58,8 +58,7 @@
 // Provides high-level query interface for function specifications
 // used by various alias analyses (SparrowAA, AllocAA, LotusAA, etc.)
 
-#ifndef LOTUS_ALIAS_SPEC_ALIAS_SPEC_MANAGER_H
-#define LOTUS_ALIAS_SPEC_ALIAS_SPEC_MANAGER_H
+#pragma once
 
 #include "Annotation/APISpec.h"
 
@@ -466,4 +465,3 @@ std::optional<FunctionCategory> stringToCategory(const std::string &str);
 } // namespace alias
 } // namespace lotus
 
-#endif // LOTUS_ALIAS_COMMON_ALIAS_SPEC_MANAGER_H

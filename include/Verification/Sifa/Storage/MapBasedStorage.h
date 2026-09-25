@@ -6,8 +6,7 @@
 //
 //===----------------------------------------------------------------------===//
 
-#ifndef LOTUS_VERIFICATION_SIFA_STORAGE_MAPBASEDSTORAGE_H
-#define LOTUS_VERIFICATION_SIFA_STORAGE_MAPBASEDSTORAGE_H
+#pragma once
 
 #include "Verification/Sifa/Storage/ILoiStorage.h"
 
@@ -65,4 +64,3 @@ extern template class lotus::sifa::MapBasedStorage<const llvm::BasicBlock *,
 extern template class lotus::sifa::MapBasedStorage<const llvm::BasicBlock *,
                                                    lotus::sifa::SymAbsState>;
 
-#endif // LOTUS_VERIFICATION_SIFA_STORAGE_MAPBASEDSTORAGE_H

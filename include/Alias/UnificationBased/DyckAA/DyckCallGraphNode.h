@@ -16,8 +16,7 @@
  *  along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
-#ifndef DYCKAA_DYCKCALLGRAPHNODE_H
-#define DYCKAA_DYCKCALLGRAPHNODE_H
+#pragma once
 
 #include "Utils/ADT/MapIterators.h"
 
@@ -225,4 +224,3 @@ public:
   }
 };
 
-#endif // DYCKAA_DYCKCALLGRAPHNODE_H

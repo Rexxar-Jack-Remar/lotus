@@ -1,8 +1,7 @@
 //
 // Created by peiming on 9/16/19.
 //
-#ifndef ASER_PTA_WAVEPROPAGATION_H
-#define ASER_PTA_WAVEPROPAGATION_H
+#pragma once
 
 #include "Alias/InclusionBased/AserPTA/PointerAnalysis/Graph/ConstraintGraph/SCCIterator.h"
 #include "Alias/InclusionBased/AserPTA/PointerAnalysis/Solver/SolverBase.h"
@@ -135,5 +134,3 @@ protected:
 };
 
 } // namespace aser
-
-#endif

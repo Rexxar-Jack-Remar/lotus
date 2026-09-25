@@ -1,5 +1,4 @@
-#ifndef PCOMB_LAZY_PARSER_H
-#define PCOMB_LAZY_PARSER_H
+#pragma once
 
 #include "Utils/Formats/pcomb/Parser/Parser.h"
 
@@ -33,4 +32,3 @@ public:
 
 } // namespace pcomb
 
-#endif

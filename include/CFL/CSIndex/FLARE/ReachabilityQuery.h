@@ -2,8 +2,7 @@
 // Created by ShiQingkai on 2021/7/24.
 //
 
-#ifndef CS_INDEXING_ABSTRACTQUERY_H
-#define CS_INDEXING_ABSTRACTQUERY_H
+#pragma once
 
 namespace lotus::cfl::cs_index::flare {
 
@@ -39,4 +38,3 @@ public:
 
 } // namespace lotus::cfl::cs_index::flare
 
-#endif // CS_INDEXING_ABSTRACTQUERY_H

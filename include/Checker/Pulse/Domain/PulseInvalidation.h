@@ -1,6 +1,5 @@
 /** @file PulseInvalidation.h @brief Pointer invalidation tracking for Pulse analysis. */
-#ifndef CHECKER_PULSE_PULSEINVALIDATION_H
-#define CHECKER_PULSE_PULSEINVALIDATION_H
+#pragma once
 
 #include <string>
 
@@ -50,4 +49,3 @@ inline const char *invalidationKindString(InvalidationKind k) {
 
 } // namespace pulse
 
-#endif // CHECKER_PULSE_PULSEINVALIDATION_H

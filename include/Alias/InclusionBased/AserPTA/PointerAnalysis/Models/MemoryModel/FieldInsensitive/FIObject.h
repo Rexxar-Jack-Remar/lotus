@@ -1,8 +1,7 @@
 //
 // Created by peiming on 11/3/19.
 //
-#ifndef ASER_PTA_FIOBJECT_H
-#define ASER_PTA_FIOBJECT_H
+#pragma once
 
 #include "Alias/InclusionBased/AserPTA/PointerAnalysis/Context/CtxTrait.h"
 #include "Alias/InclusionBased/AserPTA/PointerAnalysis/Models/MemoryModel/AllocSite.h"
@@ -113,5 +112,3 @@ template <typename ctx> struct hash<aser::FIObject<ctx>> {
 };
 
 } // namespace std
-
-#endif

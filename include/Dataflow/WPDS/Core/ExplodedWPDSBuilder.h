@@ -1,5 +1,4 @@
-#ifndef ANALYSIS_DATAFLOW_WPDS_EXPLODEDWPDSBUILDER_H_
-#define ANALYSIS_DATAFLOW_WPDS_EXPLODEDWPDSBUILDER_H_
+#pragma once
 
 /**
  * Builder for the paper's "exploded supergraph" WPDS encoding (Section 4).
@@ -94,4 +93,3 @@ void buildExplodedWPDS(
 
 } // namespace wpds
 
-#endif // ANALYSIS_DATAFLOW_WPDS_EXPLODEDWPDSBUILDER_H_

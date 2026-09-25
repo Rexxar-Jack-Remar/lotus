@@ -1,5 +1,4 @@
-#ifndef LOTUS_LIB_DATAFLOW_WPDS_BACKEND_PREPAREDBACKEND_H_
-#define LOTUS_LIB_DATAFLOW_WPDS_BACKEND_PREPAREDBACKEND_H_
+#pragma once
 
 #include "Model.h"
 
@@ -35,4 +34,3 @@ prepareBackend(const Model &model, const WPDSBackendOptions &options,
 
 } // namespace wpds::backend
 
-#endif // LOTUS_LIB_DATAFLOW_WPDS_BACKEND_PREPAREDBACKEND_H_

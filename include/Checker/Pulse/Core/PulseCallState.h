@@ -1,6 +1,5 @@
 /** @file PulseCallState.h @brief Call state tracking for Pulse interprocedural analysis. */
-#ifndef CHECKER_PULSE_PULSECALLSTATE_H
-#define CHECKER_PULSE_PULSECALLSTATE_H
+#pragma once
 
 #include "Checker/Pulse/Core/PulseMemory.h"
 #include "Checker/Pulse/Core/PulseSubstitution.h"
@@ -262,4 +261,3 @@ public:
 
 } // namespace pulse
 
-#endif // CHECKER_PULSE_PULSECALLSTATE_H

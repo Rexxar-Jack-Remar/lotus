@@ -1,5 +1,4 @@
-#ifndef DATAFLOW_APA_EAN_EXPAND_H_
-#define DATAFLOW_APA_EAN_EXPAND_H_
+#pragma once
 
 // Expand: guarded expansion — the Explore-phase primitive (paper §III.C,
 // Table III). It is the REVERSE of factorization: distribute a JOIN that sits
@@ -204,4 +203,3 @@ inline std::size_t expandRound(Graph &g, const LawProfile &L,
 } // namespace ean
 } // namespace elimination
 
-#endif // DATAFLOW_APA_EAN_EXPAND_H_

@@ -2,8 +2,7 @@
 // Created by ahmed on 3/9/2023.
 //
 
-#ifndef CPP_CODE_SCC_H
-#define CPP_CODE_SCC_H
+#pragma once
 
 #include "Dataflow/DemandAPA/Support.h"
 
@@ -59,4 +58,3 @@ struct SCC {
   }
 };
 
-#endif // CPP_CODE_SCC_H

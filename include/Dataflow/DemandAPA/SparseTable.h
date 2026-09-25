@@ -2,8 +2,7 @@
 // Created by ahmed on 1/13/2022.
 //
 
-#ifndef FASTIFDS_SPARSETABLE_H
-#define FASTIFDS_SPARSETABLE_H
+#pragma once
 
 #include "Dataflow/DemandAPA/Support.h"
 
@@ -48,4 +47,3 @@ struct SparseTable {
   }
 };
 
-#endif // FASTIFDS_SPARSETABLE_H

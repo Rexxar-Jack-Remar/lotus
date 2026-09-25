@@ -1,5 +1,4 @@
-#ifndef DATAFLOW_DEMAND_APA_TREE_DECOMPOSITION_H_
-#define DATAFLOW_DEMAND_APA_TREE_DECOMPOSITION_H_
+#pragma once
 
 class TreeDec {
 public:
@@ -171,4 +170,3 @@ private:
   unordered_map<int, int> belonging_bag;
 };
 
-#endif // DATAFLOW_DEMAND_APA_TREE_DECOMPOSITION_H_

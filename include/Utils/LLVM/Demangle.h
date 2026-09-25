@@ -1,5 +1,4 @@
-#ifndef SUPPORT_DEMANGLE_H
-#define SUPPORT_DEMANGLE_H
+#pragma once
 
 #include <string>
 
@@ -35,4 +34,3 @@ std::string demangleWithCleanup(const std::string &mangledName);
 
 } // namespace DemangleUtils
 
-#endif // SUPPORT_DEMANGLE_H

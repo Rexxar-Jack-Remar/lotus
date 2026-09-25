@@ -3,8 +3,7 @@
  * \brief Pass for expanding assume intrinsics into explicit control flow
  * \author Adapted from pagai for Lotus framework
  */
-#ifndef LOTUS_TRANSFORM_EXPAND_ASSUME_H
-#define LOTUS_TRANSFORM_EXPAND_ASSUME_H
+#pragma once
 
 #include "llvm/IR/BasicBlock.h"
 #include "llvm/IR/Function.h"
@@ -106,4 +105,3 @@ public:
 
 } // namespace lotus
 
-#endif // LOTUS_TRANSFORM_EXPAND_ASSUME_H

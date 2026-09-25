@@ -23,8 +23,7 @@
 //
 //===----------------------------------------------------------------------===//
 
-#ifndef LLVM_PATH_NUMBERING_H
-#define LLVM_PATH_NUMBERING_H
+#pragma once
 
 #include <llvm/IR/BasicBlock.h>
 #include <llvm/IR/CFG.h>
@@ -306,5 +305,3 @@ private:
                    unsigned duplicateCount);
 };
 } // end namespace llvm
-
-#endif

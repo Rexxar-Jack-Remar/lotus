@@ -1,6 +1,5 @@
 /** @file PulseCheckerUtils.h @brief Utility functions for the Pulse checker framework. */
-#ifndef CHECKER_PULSE_PULSECHECKERUTILS_H
-#define CHECKER_PULSE_PULSECHECKERUTILS_H
+#pragma once
 
 #include "Checker/Pulse/Core/PulseFormula.h"
 
@@ -27,4 +26,3 @@ bool applyIntegerIcmpConstraint(PulseFormula &formula,
 } // namespace detail
 } // namespace pulse
 
-#endif

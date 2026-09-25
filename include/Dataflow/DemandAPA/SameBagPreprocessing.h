@@ -1,5 +1,4 @@
-#ifndef CPP_CODE_SAMEBAGPREPROCESSING_H
-#define CPP_CODE_SAMEBAGPREPROCESSING_H
+#pragma once
 
 template <class T> void Algorithm<T>::sameBagPreprocessing() {
   Time = omp_get_wtime();
@@ -106,4 +105,3 @@ template <class T> void Algorithm<T>::checkSameBagCorrectness() {
   cout << "Same-bag algorithm seems correct!!\n";
 }
 
-#endif // CPP_CODE_SAMEBAGPREPROCESSING_H

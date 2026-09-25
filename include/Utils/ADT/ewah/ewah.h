@@ -1,6 +1,5 @@
 // See LICENSE file for license information.
-#ifndef EWAH_H
-#define EWAH_H
+#pragma once
 
 #include <algorithm>
 #include <queue>
@@ -701,5 +700,3 @@ private:
 };
 } // namespace ewah
 #include "ewah-inl.h"
-
-#endif

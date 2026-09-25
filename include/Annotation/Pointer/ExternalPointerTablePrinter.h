@@ -1,5 +1,4 @@
-#ifndef TPA_EXTERNAL_POINTER_TABLE_PRINTER_H
-#define TPA_EXTERNAL_POINTER_TABLE_PRINTER_H
+#pragma once
 
 namespace llvm {
 class raw_ostream;
@@ -21,4 +20,3 @@ public:
 
 } // namespace annotation
 
-#endif

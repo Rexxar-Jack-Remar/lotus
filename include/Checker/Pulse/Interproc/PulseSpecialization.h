@@ -1,6 +1,5 @@
 /** @file PulseSpecialization.h @brief Function specialization for Pulse interprocedural analysis. */
-#ifndef CHECKER_PULSE_PULSESPECIALIZATION_H
-#define CHECKER_PULSE_PULSESPECIALIZATION_H
+#pragma once
 
 #include "Checker/Pulse/Domain/PulseDomain.h"
 #include "Checker/Pulse/Interproc/PulseSummary.h"
@@ -196,4 +195,3 @@ public:
 
 } // namespace pulse
 
-#endif // CHECKER_PULSE_PULSESPECIALIZATION_H

@@ -1,5 +1,4 @@
-#ifndef DATAFLOW_APA_LLVM_FORWARDPROBLEM_H_
-#define DATAFLOW_APA_LLVM_FORWARDPROBLEM_H_
+#pragma once
 
 #include "llvm/IR/Dominators.h"
 #include "llvm/IR/Function.h"
@@ -252,4 +251,3 @@ private:
 
 } // namespace elimination
 
-#endif // DATAFLOW_APA_LLVM_FORWARDPROBLEM_H_

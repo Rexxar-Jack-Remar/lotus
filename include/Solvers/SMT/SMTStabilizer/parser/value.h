@@ -27,8 +27,7 @@
 
 // Modified by Xiang Zhang, 2026
 // Additional changes licensed under the MIT License
-#ifndef VALUE_HEADER
-#define VALUE_HEADER
+#pragma once
 #include <memory>
 
 #include "interval.h"
@@ -210,4 +209,3 @@ std::shared_ptr<Value> newValue(const short &short_value);
 std::shared_ptr<Value> newValue(const char &char_value);
 
 }  // namespace stabilizer::parser
-#endif

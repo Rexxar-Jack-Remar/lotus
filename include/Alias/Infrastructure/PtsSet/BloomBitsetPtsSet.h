@@ -6,8 +6,7 @@
 // contains/intersect.
 //
 // This file is standalone and not wired into any analysis yet.
-#ifndef ANDERSEN_BLOOM_BITSET_PTSSET_H
-#define ANDERSEN_BLOOM_BITSET_PTSSET_H
+#pragma once
 
 #include <array>
 #include <cstddef>
@@ -323,4 +322,3 @@ private:
   std::array<std::uint64_t, kBloomWords> bloom_{};
 };
 
-#endif // ANDERSEN_BLOOM_BITSET_PTSSET_H

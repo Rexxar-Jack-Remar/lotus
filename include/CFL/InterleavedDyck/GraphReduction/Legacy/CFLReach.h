@@ -1,5 +1,4 @@
-#ifndef CFLREACH_H
-#define CFLREACH_H
+#pragma once
 
 #include "CFL/InterleavedDyck/GraphReduction/Legacy/CFLGraph.h"
 #include <algorithm>
@@ -324,4 +323,3 @@ void SimpleDotParser::BuildHashTable(const string &infile,
   }
 }
 
-#endif

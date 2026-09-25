@@ -28,8 +28,7 @@
 // Modified by Xiang Zhang, 2026
 // Additional changes licensed under the MIT License
 
-#ifndef DAG_HEADER
-#define DAG_HEADER
+#pragma once
 
 #include <algorithm>
 #include <array>
@@ -1340,4 +1339,3 @@ class NodeManager {
 };
 
 }  // namespace stabilizer::parser
-#endif

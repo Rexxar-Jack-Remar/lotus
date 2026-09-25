@@ -1,7 +1,6 @@
 /** @file BugReportMgr.h @brief Bug report manager for aggregating and
  * deduplicating checker results. */
-#ifndef CHECKER_REPORT_BUGREPORTMGR_H
-#define CHECKER_REPORT_BUGREPORTMGR_H
+#pragma once
 
 #include "Checker/Framework/BugReport.h"
 #include "Checker/Framework/BugTypes.h"
@@ -200,4 +199,3 @@ private:
   void sortByLocation(std::vector<BugReport *> &reports) const;
 };
 
-#endif // CHECKER_REPORT_BUGREPORTMGR_H

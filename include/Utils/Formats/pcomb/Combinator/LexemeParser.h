@@ -1,5 +1,4 @@
-#ifndef PCOMB_LEXEME_PARSER_H
-#define PCOMB_LEXEME_PARSER_H
+#pragma once
 
 #include "Utils/Formats/pcomb/Combinator/ParserAdapter.h"
 #include "Utils/Formats/pcomb/Combinator/TokenParser.h"
@@ -34,4 +33,3 @@ template <typename ParserA> auto bigstr(ParserA &&p) { return lexeme(p, '\0'); }
 
 } // namespace pcomb
 
-#endif

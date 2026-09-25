@@ -24,8 +24,7 @@
  *       vector.  Prefer `isEmpty()` for empty checks.
  */
 
-#ifndef ANDERSEN_PTSSET_H
-#define ANDERSEN_PTSSET_H
+#pragma once
 
 #include <llvm/ADT/SparseBitVector.h>
 
@@ -96,4 +95,3 @@ public:
   iterator end() const { return bitvec.end(); }
 };
 
-#endif

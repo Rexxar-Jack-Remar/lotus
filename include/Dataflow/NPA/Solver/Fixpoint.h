@@ -1,5 +1,4 @@
-#ifndef NPA_FIXPOINT_H
-#define NPA_FIXPOINT_H
+#pragma once
 
 /**
  * \file
@@ -88,4 +87,3 @@ Vec fix_vec(bool verbose, Vec init, F f) {
 
 } // namespace npa
 
-#endif // NPA_FIXPOINT_H

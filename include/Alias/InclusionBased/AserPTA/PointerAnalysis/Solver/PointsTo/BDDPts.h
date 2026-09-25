@@ -1,5 +1,4 @@
-#ifndef ASER_PTA_BDDPTS_H
-#define ASER_PTA_BDDPTS_H
+#pragma once
 
 #include "Alias/InclusionBased/AserPTA/PointerAnalysis/Solver/PointsTo/PTSTrait.h"
 #include "Alias/Infrastructure/PtsSet/BDDPtsSet.h"
@@ -234,4 +233,3 @@ inline bool BDDPts::VariantSet::operator|=(const VariantSet &other) {
 
 DEFINE_PTS_TRAIT(BDDPts)
 
-#endif

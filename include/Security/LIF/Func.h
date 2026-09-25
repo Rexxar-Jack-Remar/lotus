@@ -20,8 +20,7 @@
 /// isochronous pass.
 ///
 //===----------------------------------------------------------------------===//
-#ifndef LIF_TRANSFORM_FUNC_H
-#define LIF_TRANSFORM_FUNC_H
+#pragma once
 
 #include "Security/LIF/Cond.h"
 #include "Security/LIF/Loop.h"
@@ -175,4 +174,3 @@ FuncWrapper wrapFunc(llvm::Function &F, llvm::DenseSet<llvm::Value *> &Tainted,
                      llvm::FunctionAnalysisManager &FAM);
 } // namespace lotus::lif::transform
 
-#endif

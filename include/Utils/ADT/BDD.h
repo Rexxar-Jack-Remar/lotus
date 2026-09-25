@@ -34,8 +34,7 @@ haimcohen Exp $ FILE:  bdd.h DESCR: C,C++ User interface for the BDD package
   DATE:  (C) feb 1997
 *************************************************************************/
 
-#ifndef _BDD_H
-#define _BDD_H
+#pragma once
 
 /* Allow this headerfile to define C++ constructs if requested */
 #ifdef __cplusplus
@@ -840,6 +839,5 @@ extern bddstrmhandler bdd_strm_hook(bddstrmhandler);
 
 #endif /* CPLUSPLUS */
 
-#endif /* _BDD_H */
 
 /* EOF */

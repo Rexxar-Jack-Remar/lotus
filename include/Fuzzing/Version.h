@@ -1,6 +1,5 @@
 
-#ifndef _ANGORA_LLVM_VERSION_H
-#define _ANGORA_LLVM_VERSION_H
+#pragma once
 
 #define LLVM_VERSION(major, minor) ((major)*100 + (minor))
 #define LLVM_VERSION_CODE LLVM_VERSION(LLVM_VERSION_MAJOR, LLVM_VERSION_MINOR)
@@ -41,7 +40,5 @@
 
 #define LLVM_ADD_PARAM_ATTR(func, argno, attr)                                 \
   func->addAttribute(argno + 1, attr)
-
-#endif
 
 #endif

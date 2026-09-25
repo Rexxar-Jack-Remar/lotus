@@ -1,6 +1,5 @@
 /** @file PulseDisjunctiveDomain.h @brief Disjunctive abstract domain for Pulse analysis. */
-#ifndef CHECKER_PULSE_PULSEDISJUNCTIVEDOMAIN_H
-#define CHECKER_PULSE_PULSEDISJUNCTIVEDOMAIN_H
+#pragma once
 
 #include "Checker/Pulse/Domain/PulseDomain.h"
 
@@ -104,4 +103,3 @@ public:
 
 } // namespace pulse
 
-#endif // CHECKER_PULSE_PULSEDISJUNCTIVEDOMAIN_H

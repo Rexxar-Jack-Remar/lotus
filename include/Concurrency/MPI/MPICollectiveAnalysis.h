@@ -10,8 +10,7 @@
  * @ingroup Concurrency
  */
 
-#ifndef MPI_COLLECTIVE_ANALYSIS_H
-#define MPI_COLLECTIVE_ANALYSIS_H
+#pragma once
 
 #include "Concurrency/MPI/MPIProcessModel.h"
 #include "Concurrency/MPI/MPIProtocolAutomaton.h"
@@ -101,4 +100,3 @@ private:
 
 } // namespace mpi
 
-#endif // MPI_COLLECTIVE_ANALYSIS_H

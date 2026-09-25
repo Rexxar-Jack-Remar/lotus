@@ -1,5 +1,4 @@
-#ifndef CPP_CODE_TARJAN_H
-#define CPP_CODE_TARJAN_H
+#pragma once
 
 #include "Dataflow/DemandAPA/DemandOmp.h"
 #include "Dataflow/DemandAPA/RegEx.h"
@@ -575,4 +574,3 @@ public:
   }
 };
 
-#endif // CPP_CODE_TARJAN_H

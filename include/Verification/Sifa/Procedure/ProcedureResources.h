@@ -11,8 +11,7 @@
 //
 //===----------------------------------------------------------------------===//
 
-#ifndef LOTUS_VERIFICATION_SIFA_PROCEDURE_PROCEDURERESOURCES_H
-#define LOTUS_VERIFICATION_SIFA_PROCEDURE_PROCEDURERESOURCES_H
+#pragma once
 
 #include "Verification/Sifa/Cfg/Transition.h"
 #include "Verification/Sifa/Procedure/ProcedureGraph.h"
@@ -81,4 +80,3 @@ private:
 } // namespace sifa
 } // namespace lotus
 
-#endif // LOTUS_VERIFICATION_SIFA_PROCEDURE_PROCEDURERESOURCES_H

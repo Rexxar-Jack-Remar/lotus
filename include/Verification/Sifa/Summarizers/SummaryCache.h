@@ -9,8 +9,7 @@
 //
 //===----------------------------------------------------------------------===//
 
-#ifndef LOTUS_VERIFICATION_SIFA_SUMMARIZERS_SUMMARYCACHE_H
-#define LOTUS_VERIFICATION_SIFA_SUMMARIZERS_SUMMARYCACHE_H
+#pragma once
 
 #include <functional>
 #include <utility>
@@ -75,4 +74,3 @@ private:
 } // namespace sifa
 } // namespace lotus
 
-#endif // LOTUS_VERIFICATION_SIFA_SUMMARIZERS_SUMMARYCACHE_H

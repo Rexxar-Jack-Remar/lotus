@@ -1,8 +1,7 @@
 //
 // Created by peiming on 9/16/19.
 //
-#ifndef ASER_PTA_SCCITERATOR_H
-#define ASER_PTA_SCCITERATOR_H
+#pragma once
 
 #include "Alias/InclusionBased/AserPTA/PointerAnalysis/Graph/ConstraintGraph/ConstraintGraph.h"
 
@@ -369,4 +368,3 @@ SCCIterator<ctx, cons, reverse> scc_end(const ConstraintGraph<ctx> &G,
 
 } // namespace aser
 
-#endif

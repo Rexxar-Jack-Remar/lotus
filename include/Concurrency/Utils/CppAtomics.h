@@ -10,8 +10,7 @@
  * @date 2025-2026
  */
 
-#ifndef CPP_ATOMICS_H
-#define CPP_ATOMICS_H
+#pragma once
 
 #include <llvm/IR/Instruction.h>
 #include <llvm/IR/Value.h>
@@ -84,4 +83,3 @@ const char* memoryOrderToString(MemoryOrder order);
 
 } // namespace CppAtomics
 
-#endif // CPP_ATOMICS_H

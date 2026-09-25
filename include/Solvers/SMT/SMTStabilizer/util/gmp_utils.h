@@ -9,8 +9,7 @@
  */
 // Modified by Xiang Zhang, 2026
 // Additional changes licensed under the MIT License
-#ifndef BZLA_UTIL_GMP_UTILS_H_INCLUDED
-#define BZLA_UTIL_GMP_UTILS_H_INCLUDED
+#pragma once
 
 #include <gmpxx.h>
 
@@ -63,4 +62,3 @@ void mpz_mul_2exp_ull(mpz_t rop, const mpz_t op1, uint64_t op2);
 
 }  // namespace stabilizer::util
 
-#endif

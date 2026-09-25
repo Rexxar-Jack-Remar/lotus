@@ -4,8 +4,7 @@
 // translation units without ODR violations or duplicate-pass-registration
 // crashes.
 /** @file CodeMetrics.h @brief Code metrics collection from CFG analysis. */
-#ifndef ANALYSIS_CFG_CODEMETRICS_H
-#define ANALYSIS_CFG_CODEMETRICS_H
+#pragma once
 
 /*======================================================================*\
 |  "ComplexityMetrics" – one-stop shop for quick-and-dirty metrics       |
@@ -70,4 +69,3 @@ struct ComplexityLegacy : public llvm::FunctionPass {
   llvm::StringRef getPassName() const override { return "ComplexityLegacy"; }
 };
 
-#endif // ANALYSIS_CFG_CODEMETRICS_H

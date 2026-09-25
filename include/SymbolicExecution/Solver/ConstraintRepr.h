@@ -1,6 +1,5 @@
 /** @file ConstraintRepr.h @brief Constraint representation for symbolic execution path conditions. */
-#ifndef ANALYSIS_SYMBOLICEXECUTION_CONSTRAINT_REPR_H
-#define ANALYSIS_SYMBOLICEXECUTION_CONSTRAINT_REPR_H
+#pragma once
 
 #include "llvm/IR/BasicBlock.h"
 #include "llvm/IR/Function.h"
@@ -125,4 +124,3 @@ using Condition = SMTCondition;
 
 } // namespace SymbolicExecution
 
-#endif

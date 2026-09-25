@@ -1,7 +1,6 @@
 /** @file AnalysisDriver.h @brief Driver for orchestrating symbolic execution
  * analyses. */
-#ifndef ANALYSIS_SYMBOLICEXECUTION_ANALYSISDRIVER_H
-#define ANALYSIS_SYMBOLICEXECUTION_ANALYSISDRIVER_H
+#pragma once
 
 #include "SymbolicExecution/Core/AnalysisState.h"
 #include "SymbolicExecution/Core/AnalysisSummary.h"
@@ -53,4 +52,3 @@ private:
 
 } // namespace SymbolicExecution
 
-#endif

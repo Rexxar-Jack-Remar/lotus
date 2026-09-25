@@ -6,8 +6,7 @@
 //
 //===----------------------------------------------------------------------===//
 
-#ifndef LOTUS_VERIFICATION_SIFA_DOMAIN_OCTAGONMATRIX_H
-#define LOTUS_VERIFICATION_SIFA_DOMAIN_OCTAGONMATRIX_H
+#pragma once
 
 #include <cstddef>
 #include <limits>
@@ -149,4 +148,3 @@ private:
 } // namespace sifa
 } // namespace lotus
 
-#endif // LOTUS_VERIFICATION_SIFA_DOMAIN_OCTAGONMATRIX_H

@@ -10,8 +10,7 @@
 // for field-sensitive memory langModel
 // one memory block -> multiple static objects
 
-#ifndef ASER_PTA_FIMEMMODEL_H
-#define ASER_PTA_FIMEMMODEL_H
+#pragma once
 
 #include "Alias/InclusionBased/AserPTA/PointerAnalysis/Graph/ConstraintGraph/ConstraintGraph.h"
 #include "Alias/InclusionBased/AserPTA/PointerAnalysis/Models/MemoryModel/FieldInsensitive/FICanonicalizer.h"
@@ -254,5 +253,3 @@ struct MemModelTrait<FIMemModel<ctx>>
 };
 
 } // namespace aser
-
-#endif

@@ -15,8 +15,7 @@
  * @author rainoftime
  */
 
-#ifndef UTIL_RNG_H
-#define UTIL_RNG_H
+#pragma once
 
 /// @brief Mersenne Twister random number generator
 ///
@@ -84,4 +83,3 @@ public:
   bool getBool();
 };
 
-#endif

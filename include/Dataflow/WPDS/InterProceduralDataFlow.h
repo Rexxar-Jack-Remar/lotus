@@ -1,5 +1,4 @@
-#ifndef ANALYSIS_INTERPROCEDURALDATAFLOW_H_
-#define ANALYSIS_INTERPROCEDURALDATAFLOW_H_
+#pragma once
 
 /**
  * Umbrella header for WPDS-based interprocedural dataflow.
@@ -22,4 +21,3 @@
 #include "Dataflow/WPDS/Core/MemoryObjectFact.h"
 #include "Dataflow/WPDS/Solver/InterProceduralDataFlowEngine.h"
 
-#endif // ANALYSIS_INTERPROCEDURALDATAFLOW_H_

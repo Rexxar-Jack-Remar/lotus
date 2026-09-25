@@ -1,6 +1,5 @@
 /** @file SuppressionManager.h @brief Bug report suppression manager for filtering known false positives. */
-#ifndef CHECKER_REPORT_SUPPRESSIONMANAGER_H
-#define CHECKER_REPORT_SUPPRESSIONMANAGER_H
+#pragma once
 
 #include <map>
 #include <set>
@@ -154,4 +153,3 @@ private:
   Span parseSpan(const std::string &jsonValue);
 };
 
-#endif // CHECKER_REPORT_SUPPRESSIONMANAGER_H

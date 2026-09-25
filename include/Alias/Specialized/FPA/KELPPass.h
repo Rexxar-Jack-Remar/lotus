@@ -14,8 +14,7 @@
 // Created by prophe cheng on 2025/4/4.
 //
 
-#ifndef INDIRECTCALLANALYZER_KELPPASS_H
-#define INDIRECTCALLANALYZER_KELPPASS_H
+#pragma once
 
 #include "Alias/Specialized/FPA/MLTADFPass.h"
 
@@ -34,4 +33,3 @@ public:
   void analyzeIndCall(CallInst *CI, FuncSet *FS) override;
 };
 
-#endif // INDIRECTCALLANALYZER_KELPPASS_H

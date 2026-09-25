@@ -1,6 +1,5 @@
 /** @file PulseOptions.h @brief Configuration options for Pulse analysis framework. */
-#ifndef CHECKER_PULSE_PULSEOPTIONS_H
-#define CHECKER_PULSE_PULSEOPTIONS_H
+#pragma once
 
 namespace pulse {
 
@@ -20,4 +19,3 @@ inline void setDisableSMT(bool b) { disableSMTRef() = b; }
 } // namespace options
 } // namespace pulse
 
-#endif

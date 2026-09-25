@@ -1,5 +1,4 @@
-#ifndef CPP_CODE_FUNCTIONSUMMARIES_H
-#define CPP_CODE_FUNCTIONSUMMARIES_H
+#pragma once
 
 /*
  * Computing summaries of functions
@@ -321,4 +320,3 @@ template <class T> void Algorithm<T>::buildIncludedVars(RegEx *re) {
     includedVars[re].insert(-(re->eId + 7));
 }
 
-#endif // CPP_CODE_FUNCTIONSUMMARIES_H

@@ -1,6 +1,5 @@
 /** @file CFGReachability.h @brief CFG reachability analysis utilities. */
-#ifndef ANALYSIS_CFG_CFGREACHABILITY_H
-#define ANALYSIS_CFG_CFGREACHABILITY_H
+#pragma once
 
 #include <map>
 #include <memory>
@@ -98,4 +97,3 @@ private:
 
 using CFGReachabilityRef = std::shared_ptr<CFGReachability>;
 
-#endif // ANALYSIS_CFG_CFGREACHABILITY_H

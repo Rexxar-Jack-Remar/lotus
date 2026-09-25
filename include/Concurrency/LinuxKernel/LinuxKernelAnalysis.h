@@ -11,8 +11,7 @@
  * @ingroup Concurrency
  */
 
-#ifndef LINUX_KERNEL_ANALYSIS_H
-#define LINUX_KERNEL_ANALYSIS_H
+#pragma once
 
 #include "Concurrency/LinuxKernel/LinuxKernelConfig.h"
 #include "Concurrency/LinuxKernel/LinuxKernelExecutionGraph.h"
@@ -181,4 +180,3 @@ private:
 
 } // namespace kernel
 
-#endif // LINUX_KERNEL_ANALYSIS_H

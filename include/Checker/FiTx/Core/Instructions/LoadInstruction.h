@@ -1,4 +1,6 @@
 /** @file LoadInstruction.h @brief Load instruction representation for FiTx IR. */
+#pragma once
+
 #include "Checker/FiTx/Core/Instruction.h"
 #include "Checker/FiTx/Core/Value.h"
 #include "llvm/IR/Instruction.h"

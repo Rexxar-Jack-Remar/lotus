@@ -25,8 +25,7 @@
 //
 //===----------------------------------------------------------------------===//
 
-#ifndef LLVM_TRANSFORMS_RANGEANALYSIS_RANGEANALYSIS_H_
-#define LLVM_TRANSFORMS_RANGEANALYSIS_RANGEANALYSIS_H_
+#pragma once
 
 #include "llvm/ADT/DenseMap.h"
 #include "llvm/ADT/SmallPtrSet.h"
@@ -887,5 +886,3 @@ public:
 // Explicit instantiation declarations - definitions are in RangeAnalysis.cpp
 extern template char InterProceduralRA<Cousot>::ID;
 extern template char InterProceduralRA<CropDFS>::ID;
-
-#endif /* LLVM_TRANSFORMS_RANGEANALYSIS_RANGEANALYSIS_H_ */

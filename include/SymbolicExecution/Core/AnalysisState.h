@@ -1,6 +1,5 @@
 /** @file AnalysisState.h @brief Abstract state representation for symbolic execution. */
-#ifndef ANALYSIS_SYMBOLICEXECUTION_CORE_ANALYSISSTATE_H
-#define ANALYSIS_SYMBOLICEXECUTION_CORE_ANALYSISSTATE_H
+#pragma once
 
 #include "llvm/IR/Operator.h"
 
@@ -512,4 +511,3 @@ bool isPseudoArgVal(const ProgramValuePtr &V);
 
 } // namespace SymbolicExecution
 
-#endif

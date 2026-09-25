@@ -7,6 +7,8 @@
 //
 //===----------------------------------------------------------------------===//
 
+#pragma once
+
 #define HEAPTREEORDER 16
 #define HEAPTREEORDERLOG2 4
 

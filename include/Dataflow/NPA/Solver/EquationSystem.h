@@ -1,5 +1,4 @@
-#ifndef NPA_EQUATION_SYSTEM_H
-#define NPA_EQUATION_SYSTEM_H
+#pragma once
 
 /**
  * \file
@@ -274,4 +273,3 @@ IterationResult<State> iterate_until_stable(State initial, Step step,
 
 } // namespace npa
 
-#endif // NPA_EQUATION_SYSTEM_H

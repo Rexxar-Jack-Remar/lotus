@@ -1,5 +1,4 @@
-#ifndef SUMMARY_EDGE_H
-#define SUMMARY_EDGE_H
+#pragma once
 #include <algorithm>
 #include <fstream>
 #include <iostream>
@@ -324,4 +323,3 @@ unsigned root(unsigned id, SummaryGraph &sGraph) {
   // node.belongto = root(node)
 }
 
-#endif

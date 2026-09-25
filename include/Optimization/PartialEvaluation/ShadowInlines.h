@@ -9,6 +9,8 @@
 
 // Helper for shadow structures
 
+#pragma once
+
 template <typename T> class ImmutableArray {
 
   T *arr;

@@ -8,8 +8,7 @@
  *     Philipp Schubert and others
  *****************************************************************************/
 
-#ifndef LOTUS_ANALYSIS_TYPEHIERARCHY_VFTABLE_H
-#define LOTUS_ANALYSIS_TYPEHIERARCHY_VFTABLE_H
+#pragma once
 
 #include "llvm/Support/raw_ostream.h"
 
@@ -50,4 +49,3 @@ inline llvm::raw_ostream &operator<<(llvm::raw_ostream &OS,
 
 } // namespace lotus
 
-#endif

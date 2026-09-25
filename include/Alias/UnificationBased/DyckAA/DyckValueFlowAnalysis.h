@@ -16,8 +16,7 @@
  *  along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
-#ifndef ALIAS_DYCKAA_DYCKVALUEFLOWANALYSIS_H
-#define ALIAS_DYCKAA_DYCKVALUEFLOWANALYSIS_H
+#pragma once
 
 #include "Alias/UnificationBased/DyckAA/DyckVFG.h"
 
@@ -46,4 +45,3 @@ public:
   DyckVFG *getDyckVFGraph() const;
 };
 
-#endif // ALIAS_DYCKAA_DYCKVALUEFLOWANALYSIS_H

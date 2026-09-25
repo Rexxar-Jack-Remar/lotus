@@ -1,5 +1,4 @@
-#ifndef NPA_TENSOR_PRODUCT_H
-#define NPA_TENSOR_PRODUCT_H
+#pragma once
 
 /**
  * \file
@@ -879,4 +878,3 @@ solve_linear_tensor_impl(bool verbose,
 
 } // namespace npa
 
-#endif // NPA_TENSOR_PRODUCT_H

@@ -1,6 +1,5 @@
 /** @file ProgramVar.h @brief Program variable representation for symbolic execution analysis. */
-#ifndef ANALYSIS_SYMBOLICEXECUTION_PROGRAMVAR_H
-#define ANALYSIS_SYMBOLICEXECUTION_PROGRAMVAR_H
+#pragma once
 
 #include "llvm/IR/Instruction.h"
 #include "llvm/IR/Instructions.h"
@@ -265,4 +264,3 @@ template <> struct hash<SymbolicExecution::ProgramValuePtr> {
 
 } // namespace std
 
-#endif

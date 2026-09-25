@@ -1,5 +1,4 @@
-#ifndef NPA_GEN_KILL_TRANSFORMER_H
-#define NPA_GEN_KILL_TRANSFORMER_H
+#pragma once
 
 #include "Dataflow/NPA/Core/Domain.h"
 #include "Dataflow/NPA/Domains/SparseFactSet.h"
@@ -130,4 +129,3 @@ public:
 
 } // namespace npa
 
-#endif // NPA_GEN_KILL_TRANSFORMER_H

@@ -1,5 +1,4 @@
-#ifndef LOTUS_DATAFLOW_MONO_SOLVER_INTRASOLVER_H_
-#define LOTUS_DATAFLOW_MONO_SOLVER_INTRASOLVER_H_
+#pragma once
 
 #include "llvm/IR/CFG.h"
 #include "llvm/Support/raw_ostream.h"
@@ -395,4 +394,3 @@ using IntraMonoSolver_P =
 
 } // namespace mono
 
-#endif // LOTUS_DATAFLOW_MONO_SOLVER_INTRASOLVER_H_

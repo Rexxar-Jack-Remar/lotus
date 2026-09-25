@@ -6,8 +6,7 @@
 //
 //===----------------------------------------------------------------------===//
 
-#ifndef LOTUS_VERIFICATION_SIFA_INTERPRETER_ERRORONENTERCALL_H
-#define LOTUS_VERIFICATION_SIFA_INTERPRETER_ERRORONENTERCALL_H
+#pragma once
 
 #include "Verification/Sifa/Interpreter/IEnterCallRegistrar.h"
 
@@ -39,4 +38,3 @@ public:
 } // namespace sifa
 } // namespace lotus
 
-#endif // LOTUS_VERIFICATION_SIFA_INTERPRETER_ERRORONENTERCALL_H

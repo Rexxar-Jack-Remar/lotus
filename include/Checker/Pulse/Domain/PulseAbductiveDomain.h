@@ -1,6 +1,5 @@
 /** @file PulseAbductiveDomain.h @brief Abductive abstract domain for Pulse analysis. */
-#ifndef CHECKER_PULSE_PULSEABDUCTIVEDOMAIN_H
-#define CHECKER_PULSE_PULSEABDUCTIVEDOMAIN_H
+#pragma once
 
 #include "Checker/Pulse/Core/PulseFormula.h"
 #include "Checker/Pulse/Core/PulseMemory.h"
@@ -291,4 +290,3 @@ public:
 
 } // namespace pulse
 
-#endif // CHECKER_PULSE_PULSEABDUCTIVEDOMAIN_H

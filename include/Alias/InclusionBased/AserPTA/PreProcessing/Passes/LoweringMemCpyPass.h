@@ -2,8 +2,7 @@
 // Created by peiming on 1/22/20.
 //
 
-#ifndef ASER_PTA_LOWERINGMEMCPYPASS_H
-#define ASER_PTA_LOWERINGMEMCPYPASS_H
+#pragma once
 
 #include <llvm/IR/IRBuilder.h>
 #include <llvm/Pass.h>
@@ -33,4 +32,3 @@ public:
 
 } // namespace aser
 
-#endif // ASER_PTA_LOWERINGMEMCPYPASS_H

@@ -9,8 +9,7 @@
 //
 //===----------------------------------------------------------------------===//
 
-#ifndef LOTUS_UTILS_GENERAL_PATHEXPRESSIONS_PATHEXPRESSIONS_H
-#define LOTUS_UTILS_GENERAL_PATHEXPRESSIONS_PATHEXPRESSIONS_H
+#pragma once
 
 #include "Utils/Algorithms/PathExpressions/LabeledGraph.h"
 #include "Utils/Algorithms/PathExpressions/PathExpressionComputer.h"
@@ -18,4 +17,3 @@
 #include "Utils/Algorithms/PathExpressions/RegexToCompactTgf.h"
 #include "Utils/Algorithms/PathExpressions/RegexToTgf.h"
 
-#endif // LOTUS_UTILS_GENERAL_PATHEXPRESSIONS_PATHEXPRESSIONS_H

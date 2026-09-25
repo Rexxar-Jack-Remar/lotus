@@ -31,8 +31,7 @@ Documentation for C++ subprocessing library.
 @version 1.0.0
 */
 
-#ifndef SUBPROCESS_HPP
-#define SUBPROCESS_HPP
+#pragma once
 
 #include <algorithm>
 #include <cassert>
@@ -2262,5 +2261,3 @@ OutBuffer pipeline(Args&&... args)
 }
 
 } // namespace subprocess
-
-#endif // SUBPROCESS_HPP

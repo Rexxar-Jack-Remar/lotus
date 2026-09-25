@@ -1,8 +1,7 @@
 //
 // Created by peiming on 2/25/20.
 //
-#ifndef ASER_PTA_PARTIALUPDATESOLVER_H
-#define ASER_PTA_PARTIALUPDATESOLVER_H
+#pragma once
 
 #include "Alias/InclusionBased/AserPTA/PointerAnalysis/Graph/ConstraintGraph/SCCIterator.h"
 #include "Alias/InclusionBased/AserPTA/PointerAnalysis/Solver/SolverBase.h"
@@ -384,5 +383,3 @@ protected:
 //        true, true);
 
 } // namespace aser
-
-#endif // ASER_PTA_PARTIALUPDATESOLVER_H

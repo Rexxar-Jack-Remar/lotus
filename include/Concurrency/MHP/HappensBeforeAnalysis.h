@@ -1,5 +1,4 @@
-#ifndef HAPPENS_BEFORE_ANALYSIS_H
-#define HAPPENS_BEFORE_ANALYSIS_H
+#pragma once
 
 #include "Concurrency/MHP/IMHPAnalysis.h"
 #include "Concurrency/Utils/CppAtomics.h"
@@ -165,4 +164,3 @@ private:
 
 } // namespace lotus
 
-#endif // HAPPENS_BEFORE_ANALYSIS_H

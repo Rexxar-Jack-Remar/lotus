@@ -1,5 +1,4 @@
-#ifndef CPP_CODE_COMPARISON_H
-#define CPP_CODE_COMPARISON_H
+#pragma once
 
 template <class T> void Algorithm<T>::doComparison() {
   int maxQueries = 1000000;
@@ -125,4 +124,3 @@ template <class T> void Algorithm<T>::doComparison() {
   row.performanceRatio = row.BAR / row.OAR;
 }
 
-#endif // CPP_CODE_COMPARISON_H

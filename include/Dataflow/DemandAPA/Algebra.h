@@ -1,5 +1,4 @@
-#ifndef CPP_CODE_ALGEBRA_H
-#define CPP_CODE_ALGEBRA_H
+#pragma once
 
 #include "Dataflow/DemandAPA/RegEx.h"
 
@@ -356,4 +355,3 @@ void checkStats() {
   db(b.produced);
 }
 
-#endif // CPP_CODE_ALGEBRA_H

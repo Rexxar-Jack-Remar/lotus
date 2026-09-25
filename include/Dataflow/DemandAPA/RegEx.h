@@ -1,5 +1,4 @@
-#ifndef CPP_CODE_REGEX_H
-#define CPP_CODE_REGEX_H
+#pragma once
 
 class RegEx {
 public:
@@ -87,4 +86,3 @@ public:
           }*/
 };
 
-#endif // CPP_CODE_REGEX_H

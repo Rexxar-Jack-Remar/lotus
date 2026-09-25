@@ -1,6 +1,5 @@
 /** @file Query.h @brief Opaque query handle and guarded query set owned by symbolic state. */
-#ifndef ANALYSIS_SYMBOLICEXECUTION_CORE_QUERY_H
-#define ANALYSIS_SYMBOLICEXECUTION_CORE_QUERY_H
+#pragma once
 
 #include "SymbolicExecution/Core/AnalysisLimit.h"
 #include "SymbolicExecution/Core/GuardedValue.h"
@@ -68,4 +67,3 @@ public:
 
 } // namespace SymbolicExecution
 
-#endif

@@ -1,5 +1,4 @@
-#ifndef CPP_CODE_NAIVE_H
-#define CPP_CODE_NAIVE_H
+#pragma once
 
 template <class T> void Algorithm<T>::prepareNaive() {
   for (int p = 0; p < n_H; ++p)
@@ -66,4 +65,3 @@ template <class T> T Algorithm<T>::Inaive(RegEx *re, bool doCaching) {
     return ans;
 }
 
-#endif // CPP_CODE_NAIVE_H

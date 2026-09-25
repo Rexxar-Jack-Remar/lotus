@@ -9,8 +9,7 @@
 //
 //===----------------------------------------------------------------------===//
 
-#ifndef LOTUS_VERIFICATION_SIFA_DOMAIN_COMPOUNDDOMAIN_H
-#define LOTUS_VERIFICATION_SIFA_DOMAIN_COMPOUNDDOMAIN_H
+#pragma once
 
 #include "Verification/Sifa/Domain/AbstractDomain.h"
 
@@ -92,4 +91,3 @@ private:
 } // namespace sifa
 } // namespace lotus
 
-#endif // LOTUS_VERIFICATION_SIFA_DOMAIN_COMPOUNDDOMAIN_H

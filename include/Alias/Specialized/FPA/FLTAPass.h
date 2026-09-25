@@ -14,8 +14,7 @@
 // Created by prophe cheng on 2025/4/1.
 //
 
-#ifndef INDIRECTCALLANALYZER_FLTAPASS_H
-#define INDIRECTCALLANALYZER_FLTAPASS_H
+#pragma once
 
 #include "Alias/Specialized/FPA/CallGraphPass.h"
 
@@ -37,4 +36,3 @@ public:
   bool doInitialization(Module *M) override;
 };
 
-#endif // INDIRECTCALLANALYZER_FLTAPASS_H

@@ -1,5 +1,4 @@
-#ifndef NPA_BIT_VECTOR_SOLVER_H
-#define NPA_BIT_VECTOR_SOLVER_H
+#pragma once
 
 #include "Dataflow/NPA/Domains/BitSetDomain.h"
 #include "Dataflow/NPA/LLVM/BitVectorProblem.h"
@@ -40,4 +39,3 @@ public:
 
 } // namespace npa
 
-#endif // NPA_BIT_VECTOR_SOLVER_H

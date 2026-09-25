@@ -10,8 +10,7 @@
 //
 //===----------------------------------------------------------------------===//
 
-#ifndef LOTUS_VERIFICATION_SIFA_DOMAIN_TERMTOINTERVAL_H
-#define LOTUS_VERIFICATION_SIFA_DOMAIN_TERMTOINTERVAL_H
+#pragma once
 
 #include "llvm/IR/Constants.h"
 #include "llvm/IR/Instructions.h"
@@ -79,4 +78,3 @@ struct TermToInterval {
 } // namespace sifa
 } // namespace lotus
 
-#endif // LOTUS_VERIFICATION_SIFA_DOMAIN_TERMTOINTERVAL_H

@@ -2,8 +2,7 @@
 /*
  * Copyright 2026 Lotus contributors
  */
-#ifndef LOTUS_ANALYSIS_LOOP_SCALAREVOLUTIONREFERENCER_H
-#define LOTUS_ANALYSIS_LOOP_SCALAREVOLUTIONREFERENCER_H
+#pragma once
 
 #include "llvm/Analysis/ScalarEvolution.h"
 #include "llvm/Analysis/ScalarEvolutionExpressions.h"
@@ -142,4 +141,3 @@ private:
 
 } // namespace llvm
 
-#endif

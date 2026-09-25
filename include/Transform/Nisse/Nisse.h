@@ -21,8 +21,7 @@
 //
 //===----------------------------------------------------------------------===//
 
-#ifndef NISSE_H
-#define NISSE_H
+#pragma once
 
 #include "llvm/Analysis/LoopAnalysisManager.h"
 #include "llvm/Analysis/LoopInfo.h"
@@ -391,4 +390,3 @@ struct PruePass : public llvm::PassInfoMixin<PruePass> {
 
 } // namespace nisse
 
-#endif

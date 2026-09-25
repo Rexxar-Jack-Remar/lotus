@@ -5,8 +5,7 @@
  * Author: rainoftime
  */
 
-#ifndef DATAFLOW_WPDS_CLIENTS_LIVENESS_ANALYSIS_H_
-#define DATAFLOW_WPDS_CLIENTS_LIVENESS_ANALYSIS_H_
+#pragma once
 
 #include "Dataflow/Mono/Support/Result.h"
 #include "Dataflow/WPDS/Backend.h"
@@ -41,4 +40,3 @@ prepareLivenessAnalysis(llvm::Module &module,
  */
 void demoLivenessAnalysis(llvm::Module &module);
 
-#endif // DATAFLOW_WPDS_CLIENTS_LIVENESS_ANALYSIS_H_

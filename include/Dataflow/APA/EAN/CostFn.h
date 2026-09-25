@@ -1,5 +1,4 @@
-#ifndef DATAFLOW_APA_EAN_COSTFN_H_
-#define DATAFLOW_APA_EAN_COSTFN_H_
+#pragma once
 
 // PathCostFn: an egg-compatible cost function turning CostModel's per-operator
 // weights into a per-e-class best node/cost (the "profiled tree cost"). Split
@@ -43,4 +42,3 @@ struct PathCostFn
 } // namespace ean
 } // namespace elimination
 
-#endif // DATAFLOW_APA_EAN_COSTFN_H_

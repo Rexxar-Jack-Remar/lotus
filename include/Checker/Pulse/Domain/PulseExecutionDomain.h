@@ -1,6 +1,5 @@
 /** @file PulseExecutionDomain.h @brief Execution semantics domain for Pulse analysis. */
-#ifndef CHECKER_PULSE_PULSEEXECUTIONDOMAIN_H
-#define CHECKER_PULSE_PULSEEXECUTIONDOMAIN_H
+#pragma once
 
 #include "Checker/Pulse/Core/PulseValueHistory.h"
 #include "Checker/Pulse/Domain/PulseAbductiveDomain.h"
@@ -410,4 +409,3 @@ public:
 
 } // namespace pulse
 
-#endif // CHECKER_PULSE_PULSEEXECUTIONDOMAIN_H

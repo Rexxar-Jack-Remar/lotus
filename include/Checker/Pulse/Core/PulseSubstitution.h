@@ -1,6 +1,5 @@
 /** @file PulseSubstitution.h @brief Substitution utilities for Pulse symbolic formulas. */
-#ifndef CHECKER_PULSE_PULSESUBSTITUTION_H
-#define CHECKER_PULSE_PULSESUBSTITUTION_H
+#pragma once
 
 #include "Checker/Pulse/Domain/PulseDomain.h"
 
@@ -41,4 +40,3 @@ Address applySubstitution(const Substitution &subst, const Address &addr);
 
 } // namespace pulse
 
-#endif // CHECKER_PULSE_PULSESUBSTITUTION_H

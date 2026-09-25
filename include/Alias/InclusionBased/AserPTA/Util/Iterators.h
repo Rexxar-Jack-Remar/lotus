@@ -1,8 +1,7 @@
 //
 // Created by peiming on 11/8/19.
 //
-#ifndef ASER_PTA_ITERATORS_H
-#define ASER_PTA_ITERATORS_H
+#pragma once
 
 #include <iterator>
 #include <type_traits>
@@ -261,4 +260,3 @@ struct ConcatIteratorWithTag<Wrapped, 1, E> {
 
 } // namespace aser
 
-#endif

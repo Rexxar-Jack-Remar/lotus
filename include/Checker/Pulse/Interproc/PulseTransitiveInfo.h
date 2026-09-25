@@ -1,6 +1,5 @@
 /** @file PulseTransitiveInfo.h @brief Transitive callee information for Pulse interprocedural analysis. */
-#ifndef CHECKER_PULSE_PULSETRANSITIVEINFO_H
-#define CHECKER_PULSE_PULSETRANSITIVEINFO_H
+#pragma once
 
 #include <map>
 #include <set>
@@ -97,4 +96,3 @@ public:
 
 } // namespace pulse
 
-#endif // CHECKER_PULSE_PULSETRANSITIVEINFO_H

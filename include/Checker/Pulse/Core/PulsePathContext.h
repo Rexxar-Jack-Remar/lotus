@@ -1,6 +1,5 @@
 /** @file PulsePathContext.h @brief Path-sensitive context tracking for Pulse analysis. */
-#ifndef CHECKER_PULSE_PULSEPATHCONTEXT_H
-#define CHECKER_PULSE_PULSEPATHCONTEXT_H
+#pragma once
 
 #include <cstdint>
 
@@ -65,4 +64,3 @@ public:
 
 } // namespace pulse
 
-#endif // CHECKER_PULSE_PULSEPATHCONTEXT_H

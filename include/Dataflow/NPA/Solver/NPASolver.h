@@ -1,5 +1,4 @@
-#ifndef NPA_NPA_SOLVER_H
-#define NPA_NPA_SOLVER_H
+#pragma once
 
 /**
  * \file
@@ -805,4 +804,3 @@ public:
 
 } // namespace npa
 
-#endif // NPA_NPA_SOLVER_H

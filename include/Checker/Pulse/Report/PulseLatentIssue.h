@@ -1,6 +1,5 @@
 /** @file PulseLatentIssue.h @brief Latent issue tracking for deferred Pulse bug reporting. */
-#ifndef CHECKER_PULSE_PULSELATENTISSUE_H
-#define CHECKER_PULSE_PULSELATENTISSUE_H
+#pragma once
 
 #include "Checker/Pulse/Core/PulseValueHistory.h"
 #include "Checker/Pulse/Domain/PulseAbductiveDomain.h"
@@ -93,4 +92,3 @@ public:
 
 } // namespace pulse
 
-#endif // CHECKER_PULSE_PULSELATENTISSUE_H

@@ -20,8 +20,7 @@
  OR OTHER DEALINGS IN THE SOFTWARE.
  */
 /** @file MetadataEntry.h @brief Metadata entry representation for debug-information analysis. */
-#ifndef NOELLE_SRC_CORE_METADATA_MANAGER_METADATAENTRY_H_
-#define NOELLE_SRC_CORE_METADATA_MANAGER_METADATAENTRY_H_
+#pragma once
  
  #include "Utils/LLVM/SystemHeaders.h"
  
@@ -43,4 +42,3 @@
  
  } // namespace noelle
  
- #endif // NOELLE_SRC_CORE_METADATA_MANAGER_METADATAENTRY_H_

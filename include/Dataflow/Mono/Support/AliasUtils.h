@@ -1,5 +1,4 @@
-#ifndef LOTUS_DATAFLOW_MONO_SUPPORT_ALIASUTILS_H_
-#define LOTUS_DATAFLOW_MONO_SUPPORT_ALIASUTILS_H_
+#pragma once
 
 // Shared alias-classification utilities for monotone dataflow analyses.
 //
@@ -130,4 +129,3 @@ bool isAliasedInSet(const llvm::Value *V, const FactSet &Facts,
 } // namespace alias_utils
 } // namespace mono
 
-#endif // LOTUS_DATAFLOW_MONO_SUPPORT_ALIASUTILS_H_

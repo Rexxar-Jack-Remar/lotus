@@ -8,8 +8,7 @@
 //
 //===----------------------------------------------------------------------===//
 
-#ifndef LOTUS_VERIFICATION_SIFA_DOMAIN_INONRELATIONALVALUE_H
-#define LOTUS_VERIFICATION_SIFA_DOMAIN_INONRELATIONALVALUE_H
+#pragma once
 
 #include <concepts>
 
@@ -29,4 +28,3 @@ concept INonrelationalValue = requires(const V &a, const V &b) {
 } // namespace sifa
 } // namespace lotus
 
-#endif // LOTUS_VERIFICATION_SIFA_DOMAIN_INONRELATIONALVALUE_H

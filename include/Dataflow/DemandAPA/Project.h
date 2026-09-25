@@ -1,5 +1,4 @@
-#ifndef CPP_CODE_PROJECT_H
-#define CPP_CODE_PROJECT_H
+#pragma once
 
 // The project operators for every algebra are defined here because they need to
 // access internal data
@@ -68,4 +67,3 @@ bdd PAproject(int c, bdd Sigma) {
   return ans;
 }
 
-#endif // CPP_CODE_PROJECT_H

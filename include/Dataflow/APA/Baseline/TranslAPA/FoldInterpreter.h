@@ -1,5 +1,4 @@
-#ifndef DATAFLOW_APA_BASELINE_TRANSLAPA_FOLDINTERPRETER_H_
-#define DATAFLOW_APA_BASELINE_TRANSLAPA_FOLDINTERPRETER_H_
+#pragma once
 
 // TranslAPA baseline — memoized bottom-up fold over the path-expression DAG.
 //
@@ -90,4 +89,3 @@ makeFoldInterpreter(const SemiringT &S, AtomFn Atom) {
 } // namespace translapa
 } // namespace elimination
 
-#endif // DATAFLOW_APA_BASELINE_TRANSLAPA_FOLDINTERPRETER_H_

@@ -1,5 +1,4 @@
-#ifndef LOTUS_ALIAS_INCLUSIONBASED_FLOWSENSITIVE_VALUEFLOWPTA_H
-#define LOTUS_ALIAS_INCLUSIONBASED_FLOWSENSITIVE_VALUEFLOWPTA_H
+#pragma once
 
 #include "Alias/InclusionBased/FlowSensitive/ValueFlowGraph.h"
 
@@ -71,4 +70,3 @@ private:
 };
 
 } // namespace lotus::alias
-#endif

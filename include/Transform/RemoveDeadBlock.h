@@ -6,8 +6,7 @@
  * This pass removes basic blocks that are unreachable from the function
  * entry point, cleaning up the control flow graph.
  */
-#ifndef TRANSFORM_REMOVEDEADBLOCK_H
-#define TRANSFORM_REMOVEDEADBLOCK_H
+#pragma once
 
 #include <llvm/IR/Module.h>
 #include <llvm/IR/PassManager.h>
@@ -35,4 +34,3 @@ public:
   PreservedAnalyses run(Module &M, ModuleAnalysisManager &MAM);
 };
 
-#endif // TRANSFORM_REMOVEDEADBLOCK_H

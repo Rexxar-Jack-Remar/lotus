@@ -1,5 +1,4 @@
-#ifndef DATAFLOW_APA_ENGINES_ELIMINATIONORDER_H_
-#define DATAFLOW_APA_ENGINES_ELIMINATIONORDER_H_
+#pragma once
 
 // Cost-aware elimination ordering for the state-elimination engine (paper's
 // "Order" configuration
@@ -176,4 +175,3 @@ inline OrderCost simulateCost(const EliminationGraph &g0,
 } // namespace order
 } // namespace elimination
 
-#endif // DATAFLOW_APA_ENGINES_ELIMINATIONORDER_H_

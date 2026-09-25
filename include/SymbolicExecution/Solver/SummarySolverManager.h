@@ -1,6 +1,5 @@
 /** @file SummarySolverManager.h @brief Solver pool that owns solvers for function summaries. */
-#ifndef ANALYSIS_SYMBOLICEXECUTION_SOLVER_SUMMARYSOLVERMANAGER_H
-#define ANALYSIS_SYMBOLICEXECUTION_SOLVER_SUMMARYSOLVERMANAGER_H
+#pragma once
 
 #include "SymbolicExecution/Core/AnalysisLimit.h"
 #include "SymbolicExecution/Solver/PathCondSolver.h"
@@ -44,4 +43,3 @@ private:
 
 } // namespace SymbolicExecution
 
-#endif

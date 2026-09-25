@@ -1,5 +1,4 @@
-#ifndef __FBVCLOCK_H__
-#define __FBVCLOCK_H__
+#pragma once
 
 #include <cstddef>
 #include <cstdint>
@@ -127,4 +126,3 @@ inline llvm::raw_ostream &operator<<(llvm::raw_ostream &os,
   return os << c.to_string();
 }
 
-#endif

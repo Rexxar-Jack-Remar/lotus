@@ -16,8 +16,7 @@
  * along with this program. If not, see <https://www.gnu.org/licenses/>.
  */
 
-#ifndef ANATREE_H
-#define ANATREE_H
+#pragma once
 
 // 'assert(...)'
 #include <assert.h>
@@ -621,5 +620,3 @@ private:
     return find_node__rec(p->m_children[true], ++curr, end);
   }
 };
-
-#endif // ANATREE_H

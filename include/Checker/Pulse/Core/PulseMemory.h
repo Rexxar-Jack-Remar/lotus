@@ -1,6 +1,5 @@
 /** @file PulseMemory.h @brief Memory model for Pulse abstract interpretation. */
-#ifndef CHECKER_PULSE_PULSEMEMORY_H
-#define CHECKER_PULSE_PULSEMEMORY_H
+#pragma once
 
 #include "Checker/Pulse/Core/PulseAbstractValue.h"
 #include "Checker/Pulse/Core/PulseValueHistory.h"
@@ -162,4 +161,3 @@ public:
 
 } // namespace pulse
 
-#endif // CHECKER_PULSE_PULSEMEMORY_H

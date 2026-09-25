@@ -16,8 +16,7 @@
  *  along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
-#ifndef DYCKAA_DYCKHALFGRAPH_H
-#define DYCKAA_DYCKHALFGRAPH_H
+#pragma once
 
 #include "Alias/UnificationBased/DyckAA/DyckGraphNode.h"
 
@@ -108,4 +107,3 @@ private:
                           DyckGraphNode *, void *);
 };
 
-#endif // DYCKAA_DYCKHALFGRAPH_H

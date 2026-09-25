@@ -15,8 +15,7 @@
 //
 //===----------------------------------------------------------------------===//
 
-#ifndef LOTUS_VERIFICATION_SIFA_REGEXDAG_REGEXDAGNODE_H
-#define LOTUS_VERIFICATION_SIFA_REGEXDAG_REGEXDAGNODE_H
+#pragma once
 
 #include "Utils/Algorithms/PathExpressions/Regex.h"
 
@@ -104,4 +103,3 @@ private:
 #include "Verification/Sifa/Cfg/Transition.h"
 extern template class lotus::sifa::RegexDagNode<lotus::sifa::Transition>;
 
-#endif // LOTUS_VERIFICATION_SIFA_REGEXDAG_REGEXDAGNODE_H

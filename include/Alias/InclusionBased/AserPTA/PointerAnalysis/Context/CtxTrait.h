@@ -1,8 +1,7 @@
 //
 // Created by peiming on 8/14/19.
 //
-#ifndef ASER_PTA_CTXTRAIT_H
-#define ASER_PTA_CTXTRAIT_H
+#pragma once
 
 namespace aser {
 
@@ -12,4 +11,3 @@ template <typename ctx> class CtxTrait {
 
 } // namespace aser
 
-#endif

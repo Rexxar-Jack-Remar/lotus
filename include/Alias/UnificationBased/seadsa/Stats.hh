@@ -1,5 +1,4 @@
-#ifndef __DSA_STATS_HH_
-#define __DSA_STATS_HH_
+#pragma once
 
 #include "llvm/IR/Function.h"
 #include "llvm/IR/Module.h"
@@ -33,4 +32,3 @@ namespace seadsa {
   };
   
 } // namespace seadsa
-#endif 

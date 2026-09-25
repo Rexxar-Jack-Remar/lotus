@@ -1,5 +1,4 @@
-#ifndef ANALYSIS_DATAFLOW_WPDS_GENKILLTRANSFORMER_H_
-#define ANALYSIS_DATAFLOW_WPDS_GENKILLTRANSFORMER_H_
+#pragma once
 
 #include "Dataflow/WPDS/Core/GenKillValue.h"
 
@@ -76,4 +75,3 @@ private:
 
 } // namespace wpds
 
-#endif // ANALYSIS_DATAFLOW_WPDS_GENKILLTRANSFORMER_H_

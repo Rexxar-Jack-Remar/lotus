@@ -4,8 +4,7 @@
  * Modification History:
  */
 
-#ifndef PLANKTON_DASM_SYSTEM_H
-#define PLANKTON_DASM_SYSTEM_H
+#pragma once
 
 #include <cstring>
 
@@ -47,5 +46,3 @@ double random_real(double limit);
 double getElapsedTime();
 unsigned getMaxNumOfThread();
 double profileGetTime();
-
-#endif // PLANKTON_DASM_SYSTEM_H

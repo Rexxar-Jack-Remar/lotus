@@ -1,8 +1,7 @@
 //
 // Created by peiming on 4/2/20.
 //
-#ifndef ASER_PTA_HYBRIDCTX_H
-#define ASER_PTA_HYBRIDCTX_H
+#pragma once
 
 #include "Alias/InclusionBased/AserPTA/PointerAnalysis/Context/CtxTrait.h"
 
@@ -107,4 +106,3 @@ template <typename... Args> struct hash<aser::HybridCtx<Args...>> {
 };
 
 } // namespace std
-#endif // ASER_PTA_HYBRIDCTX_H

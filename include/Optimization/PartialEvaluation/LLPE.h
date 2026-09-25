@@ -7,8 +7,7 @@
 //
 //===----------------------------------------------------------------------===//
 
-#ifndef LLVM_HYPO_CONSTFOLD_H
-#define LLVM_HYPO_CONSTFOLD_H
+#pragma once
 
 #include "llvm/ADT/DenseMap.h"
 #include "llvm/ADT/DenseSet.h"
@@ -2368,4 +2367,3 @@ extern bool IHPSaveDOTFiles;
 
 } // namespace llvm
 
-#endif

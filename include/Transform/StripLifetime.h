@@ -1,5 +1,4 @@
-#ifndef TRANSFORM_STRIPLIFETIME_H
-#define TRANSFORM_STRIPLIFETIME_H
+#pragma once
 
 #include "llvm/IR/Module.h"
 #include "llvm/IR/PassManager.h"
@@ -12,4 +11,3 @@ struct StripLifetimePass : llvm::PassInfoMixin<StripLifetimePass> {
   llvm::PreservedAnalyses run(llvm::Module &M, llvm::ModuleAnalysisManager &);
 };
 
-#endif // TRANSFORM_STRIPLIFETIME_H

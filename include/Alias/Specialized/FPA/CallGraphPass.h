@@ -13,8 +13,7 @@
 // Created by prophe cheng on 2024/1/3.
 //
 
-#ifndef TYPEDIVE_ANALYZER_H
-#define TYPEDIVE_ANALYZER_H
+#pragma once
 
 #include "Alias/Specialized/FPA/Common.h"
 
@@ -83,4 +82,3 @@ public:
   bool isVirtualFunction(Function *F);
 };
 
-#endif // TYPEDIVE_ANALYZER_H

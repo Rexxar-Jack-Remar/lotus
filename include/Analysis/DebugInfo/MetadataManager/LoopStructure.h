@@ -20,8 +20,7 @@
  OR OTHER DEALINGS IN THE SOFTWARE.
  */
 /** @file LoopStructure.h @brief Loop structure metadata for debug-information analysis. */
-#ifndef NOELLE_SRC_CORE_LOOP_STRUCTURE_LOOPSTRUCTURE_H_
-#define NOELLE_SRC_CORE_LOOP_STRUCTURE_LOOPSTRUCTURE_H_
+#pragma once
  
  #include "Utils/LLVM/SystemHeaders.h"
  
@@ -114,4 +113,3 @@
  
  } // namespace noelle
  
- #endif // NOELLE_SRC_CORE_LOOP_STRUCTURE_LOOPSTRUCTURE_H_

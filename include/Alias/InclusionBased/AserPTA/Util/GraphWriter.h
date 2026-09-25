@@ -1,8 +1,7 @@
 //
 // Created by peiming on 9/3/19.
 //
-#ifndef ASER_PTA_GRAPHWRITER_H
-#define ASER_PTA_GRAPHWRITER_H
+#pragma once
 
 // a little modification on llvm build-in callgraph writer
 
@@ -289,5 +288,3 @@ void WriteGraphToFile(const std::string &graphName, const GraphType &graph,
 }
 
 } // namespace aser
-
-#endif

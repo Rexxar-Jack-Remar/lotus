@@ -1,5 +1,4 @@
-#ifndef DATAFLOW_APA_EAN_EAN_H_
-#define DATAFLOW_APA_EAN_EAN_H_
+#pragma once
 
 // EAN top-level entry point: the compiler-style optimizer pass between
 // path-expression construction and interpretation.
@@ -92,4 +91,3 @@ ean(const std::vector<typename PathExprFactory<TransferT>::Ref> &R,
 } // namespace ean
 } // namespace elimination
 
-#endif // DATAFLOW_APA_EAN_EAN_H_

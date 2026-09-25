@@ -1,5 +1,4 @@
-#ifndef FASTIFDS_LCA_H
-#define FASTIFDS_LCA_H
+#pragma once
 #include "Dataflow/DemandAPA/SparseTable.h"
 #include "Dataflow/DemandAPA/Support.h"
 
@@ -55,4 +54,3 @@ struct LCA {
   }
 };
 
-#endif // FASTIFDS_LCA_H

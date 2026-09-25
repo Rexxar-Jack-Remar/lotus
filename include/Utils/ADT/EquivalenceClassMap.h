@@ -7,8 +7,7 @@
  *     Florian Sattler and others
  *****************************************************************************/
 
-#ifndef PHASAR_UTILS_EQUIVALENCECLASSMAP_H
-#define PHASAR_UTILS_EQUIVALENCECLASSMAP_H
+#pragma once
 
 #include "llvm/ADT/DenseSet.h"
 #include "llvm/ADT/STLExtras.h"
@@ -306,4 +305,3 @@ private:
 
 } // namespace psr
 
-#endif

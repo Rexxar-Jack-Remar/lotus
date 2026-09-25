@@ -16,8 +16,7 @@
  *  along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
-#ifndef ALIAS_DyckAA_DYCKVFG_H
-#define ALIAS_DyckAA_DYCKVFG_H
+#pragma once
 
 #include "Analysis/CFG/CFGReachability.h"
 #include "Utils/ADT/MapIterators.h"
@@ -106,4 +105,3 @@ private:
   void buildLocalVFG(Function &);
 };
 
-#endif // ALIAS_DyckAA_DYCKVFG_H

@@ -1,5 +1,4 @@
-#ifndef NPA_CORE_SYMBOL_H
-#define NPA_CORE_SYMBOL_H
+#pragma once
 
 #include <cstddef>
 #include <functional>
@@ -15,4 +14,3 @@ template <class T> inline void hash_combine(std::size_t &hash, const T &value) {
 
 } // namespace npa
 
-#endif // NPA_CORE_SYMBOL_H

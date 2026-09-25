@@ -1,5 +1,4 @@
-#ifndef TCFS_ANDERSEN_AA_H
-#define TCFS_ANDERSEN_AA_H
+#pragma once
 
 #include "Alias/InclusionBased/SparrowAA/Andersen.h"
 
@@ -66,4 +65,3 @@ public:
   AndersenAAResult run(llvm::Module &M, llvm::ModuleAnalysisManager &MAM);
 };
 
-#endif

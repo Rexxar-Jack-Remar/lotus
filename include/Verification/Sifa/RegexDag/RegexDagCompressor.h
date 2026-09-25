@@ -9,8 +9,7 @@
 //
 //===----------------------------------------------------------------------===//
 
-#ifndef LOTUS_VERIFICATION_SIFA_REGEXDAG_REGEXDAGCOMPRESSOR_H
-#define LOTUS_VERIFICATION_SIFA_REGEXDAG_REGEXDAGCOMPRESSOR_H
+#pragma once
 
 #include "Verification/Sifa/RegexDag/RegexDag.h"
 
@@ -230,4 +229,3 @@ private:
 } // namespace sifa
 } // namespace lotus
 
-#endif // LOTUS_VERIFICATION_SIFA_REGEXDAG_REGEXDAGCOMPRESSOR_H

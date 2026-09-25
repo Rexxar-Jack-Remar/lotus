@@ -12,8 +12,7 @@
 //
 //===----------------------------------------------------------------------===//
 
-#ifndef LOTUS_VERIFICATION_SIFA_SUMMARIZERS_INTERPRETCALLSUMMARIZER_H
-#define LOTUS_VERIFICATION_SIFA_SUMMARIZERS_INTERPRETCALLSUMMARIZER_H
+#pragma once
 
 #include "llvm/IR/Module.h"
 
@@ -109,4 +108,3 @@ private:
 } // namespace sifa
 } // namespace lotus
 
-#endif // LOTUS_VERIFICATION_SIFA_SUMMARIZERS_INTERPRETCALLSUMMARIZER_H

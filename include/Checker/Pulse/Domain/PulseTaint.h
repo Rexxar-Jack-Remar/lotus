@@ -1,6 +1,5 @@
 /** @file PulseTaint.h @brief Taint tracking domain for Pulse analysis. */
-#ifndef CHECKER_PULSE_PULSETAINT_H
-#define CHECKER_PULSE_PULSETAINT_H
+#pragma once
 
 #include "Checker/Pulse/Core/PulseAbstractValue.h"
 #include "Checker/Pulse/Core/PulseValueHistory.h"
@@ -347,4 +346,3 @@ public:
 
 } // namespace pulse
 
-#endif // CHECKER_PULSE_PULSETAINT_H

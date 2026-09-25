@@ -1,5 +1,4 @@
-#ifndef DATAFLOW_APA_CORE_PATHEXPR_H_
-#define DATAFLOW_APA_CORE_PATHEXPR_H_
+#pragma once
 
 #include <cstddef>
 #include <functional>
@@ -242,4 +241,3 @@ private:
 
 } // namespace elimination
 
-#endif // DATAFLOW_APA_CORE_PATHEXPR_H_

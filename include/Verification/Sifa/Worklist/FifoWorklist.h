@@ -4,8 +4,7 @@
 //
 //===----------------------------------------------------------------------===//
 
-#ifndef LOTUS_VERIFICATION_SIFA_WORKLIST_FIFOWORKLIST_H
-#define LOTUS_VERIFICATION_SIFA_WORKLIST_FIFOWORKLIST_H
+#pragma once
 
 #include "Verification/Sifa/Worklist/IWorklistWithInputs.h"
 
@@ -88,4 +87,3 @@ private:
 } // namespace sifa
 } // namespace lotus
 
-#endif // LOTUS_VERIFICATION_SIFA_WORKLIST_FIFOWORKLIST_H

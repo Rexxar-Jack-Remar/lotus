@@ -6,8 +6,7 @@
 //
 //===----------------------------------------------------------------------===//
 
-#ifndef LOTUS_VERIFICATION_SIFA_REGEXDAG_IDAGOVERLAY_H
-#define LOTUS_VERIFICATION_SIFA_REGEXDAG_IDAGOVERLAY_H
+#pragma once
 
 #include "Verification/Sifa/RegexDag/RegexDag.h"
 
@@ -33,4 +32,3 @@ public:
 } // namespace sifa
 } // namespace lotus
 
-#endif // LOTUS_VERIFICATION_SIFA_REGEXDAG_IDAGOVERLAY_H

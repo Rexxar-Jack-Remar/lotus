@@ -1,5 +1,4 @@
-#ifndef NPA_CORE_TENSOR_SEMIRING_H
-#define NPA_CORE_TENSOR_SEMIRING_H
+#pragma once
 
 #include "Dataflow/NPA/Solver/Newton/Linear/Tensor/TensorProductLift.h"
 
@@ -173,4 +172,3 @@ template <class D> inline bool tensor_paper_laws_validated() {
 
 } // namespace npa
 
-#endif // NPA_CORE_TENSOR_SEMIRING_H

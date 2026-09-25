@@ -1,8 +1,7 @@
 //
 // Created by peiming on 8/14/19.
 //
-#ifndef ASER_PTA_CALLGRAPH_H
-#define ASER_PTA_CALLGRAPH_H
+#pragma once
 
 #include "Alias/InclusionBased/AserPTA/PointerAnalysis/Graph/GraphBase/GraphBase.h"
 #include "Alias/InclusionBased/AserPTA/PointerAnalysis/Program/CtxFunction.h"
@@ -194,5 +193,3 @@ struct DOTGraphTraits<const aser::CallGraph<ctx>>
 };
 
 } // namespace llvm
-
-#endif

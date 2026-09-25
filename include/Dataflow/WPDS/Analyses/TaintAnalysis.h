@@ -5,8 +5,7 @@
  * Author: rainoftime
  */
 
-#ifndef DATAFLOW_WPDS_CLIENTS_TAINT_ANALYSIS_H_
-#define DATAFLOW_WPDS_CLIENTS_TAINT_ANALYSIS_H_
+#pragma once
 
 #include "Dataflow/Mono/Support/Result.h"
 #include "Dataflow/WPDS/Backend.h"
@@ -41,4 +40,3 @@ runTaintAnalysis(llvm::Module &module, wpds::WPDSBackendOptions options,
  */
 void demoTaintAnalysis(llvm::Module &module);
 
-#endif // DATAFLOW_WPDS_CLIENTS_TAINT_ANALYSIS_H_

@@ -18,8 +18,7 @@
  * @ingroup Concurrency
  */
 
-#ifndef THREADAPI_H
-#define THREADAPI_H
+#pragma once
 
 #include "llvm/ADT/StringMap.h"
 #include "llvm/IR/Constants.h"
@@ -2003,4 +2002,3 @@ public:
   static TD_TYPE stringToType(llvm::StringRef name);
 };
 
-#endif // THREADAPI_H
