@@ -89,6 +89,10 @@ and ``--solver`` options. ``--workers N`` runs independent solver processes in
 parallel and ``--timeout SECONDS`` applies a limit to each process. The driver
 emits success, failure, and timeout records as JSONL. ``Ctrl-C`` terminates all
 active solver process groups before the driver exits.
+``--memory-limit-mb MB`` additionally applies a sampled per-process RSS cap on
+Linux and macOS; account for the worker count when choosing it.
+Use ``--resume --output FILE`` to continue only task keys missing from an
+interrupted JSONL run.
 
 See :doc:`/cfl/classical/classical`, :doc:`/cfl/classical/pearl`,
 :doc:`/cfl/classical/stg`, and :doc:`/cfl/classical/sqid` for the complete algorithm,

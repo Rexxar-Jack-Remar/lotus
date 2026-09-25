@@ -8,6 +8,7 @@ frontends; those remain separate end-to-end bitcode entry points.
 
 import argparse
 import concurrent.futures
+import ctypes
 import json
 import os
 import signal
@@ -72,24 +73,41 @@ STOP_REQUESTED = threading.Event()
 def terminate_process(process: subprocess.Popen, grace_seconds: float = 1.0) -> None:
     if process.poll() is not None:
         return
-    try:
+
+    def send(sig) -> None:
         if os.name == "posix":
-            os.killpg(process.pid, signal.SIGTERM)
-        else:
-            process.terminate()
+            try:
+                os.killpg(process.pid, sig)
+                return
+            except ProcessLookupError:
+                return
+            except (PermissionError, OSError):
+                # Some macOS process-group states reject killpg even though
+                # the direct child remains ours. Fall back to the child PID.
+                pass
+        try:
+            process.send_signal(sig)
+        except (ProcessLookupError, PermissionError, OSError):
+            pass
+
+    send(signal.SIGTERM)
+    try:
         process.wait(timeout=grace_seconds)
         return
-    except (ProcessLookupError, subprocess.TimeoutExpired):
+    except (ProcessLookupError, subprocess.TimeoutExpired, PermissionError):
         pass
     if process.poll() is not None:
         return
+    send(signal.SIGKILL)
     try:
-        if os.name == "posix":
-            os.killpg(process.pid, signal.SIGKILL)
-        else:
+        process.wait(timeout=grace_seconds)
+    except (ProcessLookupError, subprocess.TimeoutExpired, PermissionError):
+        # Last-resort direct kill; never let cleanup failure escape a worker.
+        try:
             process.kill()
-    except ProcessLookupError:
-        return
+            process.wait(timeout=grace_seconds)
+        except (ProcessLookupError, subprocess.TimeoutExpired, PermissionError):
+            pass
 
 
 def terminate_all_processes() -> None:
@@ -146,6 +164,11 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument("--output", type=Path)
     parser.add_argument(
+        "--resume",
+        action="store_true",
+        help="Append to --output and skip task keys already recorded there",
+    )
+    parser.add_argument(
         "--timeout",
         type=float,
         default=0.0,
@@ -154,6 +177,13 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument(
         "--workers", type=int, default=1, help="Concurrent solver processes"
+    )
+    parser.add_argument(
+        "--memory-limit-mb",
+        type=int,
+        default=0,
+        metavar="MB",
+        help="Per-run resident-memory limit; zero disables it",
     )
     parser.add_argument("--fail-fast", action="store_true")
     parser.add_argument("--validate-only", action="store_true")
@@ -166,6 +196,14 @@ def parse_args() -> argparse.Namespace:
         parser.error("--workers must be positive")
     if args.timeout < 0:
         parser.error("--timeout cannot be negative")
+    if args.memory_limit_mb < 0:
+        parser.error("--memory-limit-mb cannot be negative")
+    if args.memory_limit_mb > 0 and not (
+        sys.platform.startswith("linux") or sys.platform == "darwin"
+    ):
+        parser.error("--memory-limit-mb currently supports Linux and macOS")
+    if args.resume and not args.output:
+        parser.error("--resume requires --output")
     return args
 
 
@@ -232,6 +270,59 @@ def output_text(value) -> str:
     return value or ""
 
 
+def linux_resident_bytes(pid: int) -> Optional[int]:
+    try:
+        fields = Path(f"/proc/{pid}/statm").read_text().split()
+        return int(fields[1]) * os.sysconf("SC_PAGE_SIZE")
+    except (FileNotFoundError, IndexError, OSError, ValueError):
+        return None
+
+
+class DarwinProcTaskInfo(ctypes.Structure):
+    _fields_ = [
+        ("virtual_size", ctypes.c_uint64),
+        ("resident_size", ctypes.c_uint64),
+        ("total_user", ctypes.c_uint64),
+        ("total_system", ctypes.c_uint64),
+        ("threads_user", ctypes.c_uint64),
+        ("threads_system", ctypes.c_uint64),
+    ] + [(f"field_{index}", ctypes.c_int32) for index in range(12)]
+
+
+DARWIN_LIBPROC = None
+
+
+def darwin_resident_bytes(pid: int) -> Optional[int]:
+    global DARWIN_LIBPROC
+    try:
+        if DARWIN_LIBPROC is None:
+            DARWIN_LIBPROC = ctypes.CDLL("/usr/lib/libproc.dylib")
+            DARWIN_LIBPROC.proc_pidinfo.argtypes = [
+                ctypes.c_int,
+                ctypes.c_int,
+                ctypes.c_uint64,
+                ctypes.c_void_p,
+                ctypes.c_int,
+            ]
+            DARWIN_LIBPROC.proc_pidinfo.restype = ctypes.c_int
+        info = DarwinProcTaskInfo()
+        size = ctypes.sizeof(info)
+        read = DARWIN_LIBPROC.proc_pidinfo(
+            pid, 4, 0, ctypes.byref(info), size  # PROC_PIDTASKINFO
+        )
+        return info.resident_size if read == size else None
+    except (AttributeError, OSError):
+        return None
+
+
+def resident_bytes(pid: int) -> Optional[int]:
+    if sys.platform.startswith("linux"):
+        return linux_resident_bytes(pid)
+    if sys.platform == "darwin":
+        return darwin_resident_bytes(pid)
+    return None
+
+
 def run_task(
     task: Dict, args: argparse.Namespace, binary: Path
 ) -> Dict:
@@ -266,12 +357,18 @@ def run_task(
         args.validate_only,
     )
     record["command"] = command
+    record["memory_limit_mb"] = args.memory_limit_mb
     if args.dry_run:
         record["status"] = "dry-run"
         return record
 
     start = time.monotonic()
     process = None
+    stdout = ""
+    stderr = ""
+    peak_rss_bytes = 0
+    memory_observed = False
+    termination_status = None
     try:
         process = subprocess.Popen(
             command,
@@ -282,30 +379,30 @@ def run_task(
         )
         with ACTIVE_PROCESSES_LOCK:
             ACTIVE_PROCESSES.add(process)
-        if STOP_REQUESTED.is_set():
+        memory_limit_bytes = args.memory_limit_mb * 1024 * 1024
+        while process.poll() is None:
+            rss = resident_bytes(process.pid)
+            if rss is not None:
+                memory_observed = True
+                peak_rss_bytes = max(peak_rss_bytes, rss)
+                if memory_limit_bytes > 0 and rss > memory_limit_bytes:
+                    termination_status = "memory-limit"
+                    break
+            if STOP_REQUESTED.is_set():
+                termination_status = "interrupted"
+                break
+            if args.timeout > 0 and time.monotonic() - start >= args.timeout:
+                termination_status = "timeout"
+                break
+            time.sleep(0.05)
+
+        if termination_status:
             terminate_process(process)
-        stdout, stderr = process.communicate(
-            timeout=args.timeout if args.timeout > 0 else None
-        )
-    except subprocess.TimeoutExpired:
-        if process is not None:
-            terminate_process(process)
+        try:
+            stdout, stderr = process.communicate(timeout=1.0)
+        except subprocess.TimeoutExpired:
+            terminate_process(process, grace_seconds=0.2)
             stdout, stderr = process.communicate()
-        else:
-            stdout, stderr = "", ""
-        record.update(
-            {
-                "status": "timeout",
-                "exit_code": None,
-                "timeout_seconds": args.timeout,
-                "wall_seconds": time.monotonic() - start,
-            }
-        )
-        if stdout:
-            record["stdout"] = output_text(stdout).strip()
-        if stderr:
-            record["stderr"] = output_text(stderr).strip()
-        return record
     except OSError as error:
         record.update(
             {
@@ -320,6 +417,27 @@ def run_task(
         if process is not None:
             with ACTIVE_PROCESSES_LOCK:
                 ACTIVE_PROCESSES.discard(process)
+
+    record["peak_rss_bytes"] = peak_rss_bytes
+    record["peak_rss_mb"] = peak_rss_bytes / (1024 * 1024)
+    record["memory_monitor_available"] = memory_observed
+    if termination_status:
+        record.update(
+            {
+                "status": termination_status,
+                "exit_code": process.returncode,
+                "wall_seconds": time.monotonic() - start,
+            }
+        )
+        if termination_status == "timeout":
+            record["timeout_seconds"] = args.timeout
+        if termination_status == "memory-limit":
+            record["memory_limit_bytes"] = args.memory_limit_mb * 1024 * 1024
+        if stdout:
+            record["stdout"] = output_text(stdout).strip()
+        if stderr:
+            record["stderr"] = output_text(stderr).strip()
+        return record
 
     record.update(
         {
@@ -375,8 +493,29 @@ def main() -> int:
         parse_configuration(specification)
         for specification in (requested or DEFAULT_CONFIGURATIONS)
     ]
+    completed_keys = set()
+    if args.resume and args.output.exists():
+        with args.output.open(encoding="utf-8") as previous:
+            for line_number, line in enumerate(previous, 1):
+                try:
+                    record = json.loads(line)
+                except json.JSONDecodeError as error:
+                    raise SystemExit(
+                        f"invalid JSONL at {args.output}:{line_number}: {error}"
+                    )
+                completed_keys.add(
+                    (
+                        record.get("analysis"),
+                        record.get("benchmark"),
+                        record.get("solver"),
+                        record.get("grammar_variant"),
+                        record.get("requested_result_scope"),
+                    )
+                )
     destination = (
-        args.output.open("w", encoding="utf-8") if args.output else sys.stdout
+        args.output.open("a" if args.resume else "w", encoding="utf-8")
+        if args.output
+        else sys.stdout
     )
     tasks = []
     for analysis in analyses:
@@ -394,18 +533,43 @@ def main() -> int:
                         "grammar": grammar,
                     }
                 )
+    if completed_keys:
+        tasks = [
+            task
+            for task in tasks
+            if (
+                task["analysis"],
+                task["benchmark"],
+                task["solver"],
+                task["grammar_suffix"],
+                task["result_scope"],
+            )
+            not in completed_keys
+        ]
 
     failed = False
 
     executor = concurrent.futures.ThreadPoolExecutor(max_workers=args.workers)
     futures = []
+    future_tasks = {}
     interrupted = False
     try:
-        futures = [
-            executor.submit(run_task, task, args, binary) for task in tasks
-        ]
+        futures = [executor.submit(run_task, task, args, binary) for task in tasks]
+        future_tasks = dict(zip(futures, tasks))
         for future in concurrent.futures.as_completed(futures):
-            record = future.result()
+            try:
+                record = future.result()
+            except Exception as error:
+                task = future_tasks[future]
+                record = {
+                    "analysis": task["analysis"],
+                    "benchmark": task["benchmark"],
+                    "solver": task["solver"],
+                    "grammar_variant": task["grammar_suffix"],
+                    "requested_result_scope": task["result_scope"],
+                    "status": "driver-error",
+                    "error": repr(error),
+                }
             print(
                 json.dumps(record, sort_keys=True),
                 file=destination,

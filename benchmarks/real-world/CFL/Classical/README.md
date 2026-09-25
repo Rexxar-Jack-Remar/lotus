@@ -91,17 +91,27 @@ python3 scripts/cfl/run_cfl_dataset.py \
 # All three analyses, four concurrent processes, one-hour timeout per run.
 python3 scripts/cfl/run_cfl_dataset.py \
   --analysis alias,value-flow,taint --solver pocr,cert \
-  --workers 4 --timeout 3600 --output results.jsonl
+  --workers 4 --timeout 3600 --memory-limit-mb 8192 \
+  --output results.jsonl
 ```
 
 ``--workers`` defaults to one to avoid accidental memory oversubscription.
 ``--timeout`` is per solver process; zero disables it. Timed-out and failed
 runs are emitted as JSONL records, and the driver returns a non-zero status.
+``--memory-limit-mb`` sets a per-run resident-memory limit; zero disables it.
+The parent samples Linux ``/proc`` or macOS ``libproc`` and terminates a solver
+process group after its RSS crosses the limit. Sampling is periodic, so a run
+can briefly overshoot. This is not a global budget: aggregate RSS can still
+approach ``workers × memory-limit-mb``.
 ``--fail-fast``, ``--dry-run``, and ``--validate-only`` are available for
 automation and preflight checks. With multiple workers, JSONL records are
 written in completion order. Each solver runs in its own process group;
 pressing ``Ctrl-C`` terminates every active group, cancels queued work, and
 returns exit status 130 instead of leaving background solvers running.
+
+``--resume`` appends to an existing ``--output`` file and skips task keys that
+already have a JSONL record. This is useful after interruption or host-level
+resource pressure without rerunning completed or timed-out tasks.
 
 Run every generic backend, including ``cert``:
 
