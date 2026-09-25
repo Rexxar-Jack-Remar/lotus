@@ -16,6 +16,9 @@ add_subdirectory(symabs-ai)
 # Sifa (Symbolic Interpretation with Fluid Abstractions)
 add_subdirectory(sifa)
 
+# Mosaic theory-modular CHC solver
+add_subdirectory(mosaic)
+
 # CLAM tools (clam, clam-diff, clam-pp) (optional)
 if(LOTUS_ENABLE_CLAM)
     add_subdirectory(clam)

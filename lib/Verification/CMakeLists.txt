@@ -2,6 +2,7 @@ add_subdirectory(Backends)
 
 add_subdirectory(SymAbsAI)
 add_subdirectory(Sifa)
+add_subdirectory(Mosaic)
 add_subdirectory(PathProgram)
 add_subdirectory(Driver)
 # Frontend implementations live under lib/Verification/Frontend/.

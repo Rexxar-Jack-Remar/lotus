@@ -9,6 +9,7 @@ symbolic reasoning.
 | **Analysis** | Pre-verification module analyses such as module checking, instruction and loop classification, instruction counting, and test-target extraction. |
 | **Driver** | Common verification-driver interface and runner logic for invoking verification engines and normalizing results. |
 | **Frontend** | Frontend implementations for verification-oriented input languages; currently contains the Boolean/predicate-program frontend. |
+| **Mosaic** | Theory-modular CHC solving across fixed-size bit-vectors and integer arithmetic. See `Mosaic/README.md`. |
 | **Sifa** | Symbolic Interpretation with Fluid Abstractions: interprocedural symbolic interpretation over ICFG-style procedure graphs and regex-DAG summaries. See `Sifa/README.md`. |
 | **SymAbsAI** | SMT-backed abstract interpretation framework with reusable transfer semantics, fixpoint engines, and abstract domains. See `SymAbsAI/README.md`. |
 | **Transform** | IR transformations for verification, including CFG normalization, loop/control-flow rewriting, memory instrumentation, and nondeterminism injection. |
@@ -35,6 +36,7 @@ Pre-verification analysis passes:
 - **CLAM**: abstract interpretation with numerical domains and SeaDsa-based heap abstraction.
 - **Sifa**: symbolic interpretation with fluid abstractions, using SymAbsAI-style transfer functions.
 - **SymAbsAI**: reusable abstract interpretation framework with SMT-based symbolic abstraction.
+- **Mosaic**: bit-precise CHC satisfiability through coordinated bit-vector and integer Spacer instances.
 - **Seahorn**: Horn-clause-based verification.
 - **smack**: translation from LLVM IR to Boogie-based verification workflows.
 

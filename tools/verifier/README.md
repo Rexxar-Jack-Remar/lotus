@@ -12,7 +12,7 @@ cmake --build build -j
 
 Several verifier families are optional:
 
-- `lotus-verify-sifa` and `lotus-verify-symabs-ai` are configured by default.
+- `lotus-verify-sifa`, `lotus-verify-symabs-ai`, and `lotus-verify-mosaic` are configured by default.
 - CLAM tools are built only when `LOTUS_ENABLE_CLAM=ON`.
 - SeaHorn tools are built only when `LOTUS_ENABLE_SEAHORN=ON`.
 - `hice-dt` is built only when `LOTUS_ENABLE_HORN_ICE=ON`.
@@ -23,6 +23,7 @@ Several verifier families are optional:
 | --- | --- | --- |
 | `lotus-verify-sifa` | default | Symbolic Interpretation with Fluid Abstractions for reachability and invariant inference. |
 | `lotus-verify-symabs-ai` | default | Abstract-interpretation driver with configurable domains, fragmentation, and memory models. |
+| `lotus-verify-mosaic` | default | Parses Horn SMT-LIB2 files and solves them with Mosaic or Z3's bit-vector engine. |
 | `clam`, `clam-diff`, `clam-pp` | `LOTUS_ENABLE_CLAM=ON` | CLAM-based abstract interpretation, preprocessing, and JSON differencing. |
 | `seahorn`, `seapp`, `seainspect` | `LOTUS_ENABLE_SEAHORN=ON` | SeaHorn verification, preprocessing, and inspection tools. |
 | `hice-dt` | `LOTUS_ENABLE_HORN_ICE=ON` | ICE-style learning for Horn clauses / Boogie workflows. |
