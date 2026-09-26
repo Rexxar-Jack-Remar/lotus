@@ -13,8 +13,8 @@
  */
 
 #include "WPDS/WPDS.h"
-#include "WPDS/keys.h"
-#include "WPDS/semiring.h"
+#include "WPDS/Keys.h"
+#include "WPDS/Semiring.h"
 
 #include <functional>
 #include <set>

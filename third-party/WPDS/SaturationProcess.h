@@ -42,12 +42,12 @@
  */
 #ifndef wpds_SATURATION_PROCESS_H_
 #define wpds_SATURATION_PROCESS_H_
-#include "common.h"
+#include "Common.h"
 #include "CA.h"
+#include "MyAllocator.h"
+#include "RefPtr.h"
+#include "Semiring.h"
 #include "Traits.h"
-#include "myallocator.h"
-#include "ref_ptr.h"
-#include "semiring.h"
 #include <list>
 #include <map>
 #include <string>

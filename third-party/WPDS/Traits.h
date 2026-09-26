@@ -41,9 +41,9 @@
 #ifndef WPDS_TRAITS_GUARD
 #define WPDS_TRAITS_GUARD 1
 
-#include "ref_ptr.h"
-#include "common.h"
-#include "myallocator.h"
+#include "RefPtr.h"
+#include "Common.h"
+#include "MyAllocator.h"
 #include <list>
 #include <set>
 

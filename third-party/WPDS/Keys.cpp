@@ -37,75 +37,99 @@
 // (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 // OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 //////////////////////////////////////////////////////////////////////////////
-/*
- * $Id: KeyPair.h,v 1.5 2005-09-06 16:11:35 radu Exp $
- */
-#ifndef WPDS_UTIL_KEY_PAIR_H_
-#define WPDS_UTIL_KEY_PAIR_H_
-#include "Common.h"
-#include "HmHash.h"
-#include "Triple.h"
-#include <utility>  // std::pair
 
-#define combine_wpds_keys( k1,k2 ) ((k1) + 997*(k2))
-//#define combine_wpds_keys( k1,k2 ) (((k1) << sizeof(wpds_key_t) <<2)  | (k2))
+#include "Dictionary.h"
+#include "KeySource.h"
+#include "Keys.h"
+#include <cassert>
 
-namespace wpds {
 
-    namespace util {
+using namespace wpds;
 
-        typedef std::pair< wpds_key_t,wpds_key_t > KeyPair;
+static Dictionary& get_dict()
+{
+    // The static dictionary used by WPDS
+    static Dictionary thedict;
 
-        struct HashKeyPair
-        {
+    // create key for WPDS_EPSILON. Removing the static
+    // qualifier will cause major overhead
+    static wpds_key_t epskey UNUSED_VAR = thedict.add_item( new string_src("*") );
+    return thedict;
+}
 
-            wpds::hm_hash< wpds_size_t > hasher;
+wpds_size_t num_keys(void)
+{
+  return get_dict().num_keys();
+}
 
-            const wpds_size_t operator()( const KeyPair& kp ) const
-            {
-                return hasher( combine_wpds_keys( kp.first,kp.second ) );
-            }
+wpds_key_t create_key(key_source *x)
+{
+    return get_dict().add_item(x);
+}
 
-        };
+wpds_key_t str2key( const char* s ) 
+{
+    string_src *x = new string_src(s);
+    return get_dict().add_item(x); 
+}
 
-        struct EqualKeyPair
-        {
+wpds_key_t str2key( const std::string & s )
+{
+    return str2key( s.c_str() );
+}
 
-            const wpds_size_t operator()( const KeyPair& lhs,const KeyPair& rhs ) const
-            {
-                return ((lhs.first == rhs.first) && (lhs.second == rhs.second));
-            }
+wpds_key_t new_str2key( const char* s ) 
+{
+    string_src *x = new string_src(s);
+    return get_dict().add_new_item(x); 
+}
 
-        };
+wpds_key_t int2key(int i)
+{
+    int_src *item = new int_src(i);
+    return get_dict().add_item(item);
+}
 
-        typedef struct Triple< wpds_key_t,wpds_key_t,wpds_key_t > KeyTriple;
+std::ostream& printkey(wpds_key_t key, std::ostream& o)
+{
+    key_source *ks;
+    ks = get_dict().retrieve_item(key);
+    if (ks)
+        return ks->print(o);
+    else
+        return o;
+}
 
-        struct HashKeyTriple
-        {
+void showkey(wpds_key_t key, std::string &s)
+{
+    key_source *ks;
+    ks = get_dict().retrieve_item(key);
+    assert(ks);
+    ks->show(s);
+}
 
-            wpds::hm_hash< wpds_size_t > hasher;
+key_source *retrieve_item(wpds_key_t key)
+{
+    key_source *ks;
+    ks = get_dict().retrieve_item(key);
+    return ks;
+}
 
-            wpds_size_t operator()( const KeyTriple& kt ) const
-            {
-                wpds_size_t hashval = combine_wpds_keys( kt.first,kt.second );
-                return hasher( combine_wpds_keys( kt.third,hashval ) );
-            }
 
-        };
+void traverse_dict(void (*f)(key_source *))
+{
+    get_dict().traverse(f);
+}
 
-        struct EqualKeyTriple
-        {
+void clear_dict()
+{
+    get_dict().clear();
+    // readd WPDS_EPSILON
+    str2key( "*" );
+}
 
-            bool operator()( const KeyTriple& lhs, const KeyTriple& rhs ) const
-            {
-                return ((lhs.first == rhs.first) &&
-                        (lhs.second == rhs.second) &&
-                        (lhs.third == rhs.third));
-            }
-
-        };
-
-    } // namespace util
-
-} // namespace wpds
-#endif  // WPDS_UTIL_KEY_PAIR_H_
+/* Yo, Emacs!
+;;; Local Variables: ***
+;;; tab-width: 4 ***
+;;; End: ***
+*/

@@ -41,12 +41,12 @@
 #ifndef wpds_CA_H_
 #define wpds_CA_H_ 1
 
-#include "common.h"
-#include "Traits.h"
+#include "Common.h"
+#include "CATransition.h"
 #include "HashMap.h"
+#include "InstCounter.h"
+#include "Traits.h"
 #include "UTIL.h"
-#include "catransition.h"
-#include "inst_counter.h"
 #include <algorithm>
 #include <list>
 #include <set>

@@ -38,88 +38,82 @@
 // OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 //////////////////////////////////////////////////////////////////////////////
 /*
- * $Id: ERule.h,v 1.2 2005-09-06 16:11:35 radu Exp $
+ * $Id: confluence_functions.h,v 1.2 2005-09-06 16:11:35 radu Exp $
  */
-#ifndef wpds_ERULE_H_
-#define wpds_ERULE_H_
+#ifndef CONFLUENCE_FUNCTIONS_H_
+#define CONFLUENCE_FUNCTIONS_H_
 #include "RefPtr.h"
-#include "ConfluenceFunctions.h"
-#include "InstCounter.h"
-#include "Rule.h"
-#include "Semiring.h"
-#include "Traits.h"
-#include <iostream>
+#include <stdio.h>
 
-
-/* The Extended-Rule class. It just stores an extra confluence function object
- * of type BaseCF<CT>
- */
 
 namespace wpds {
-  template<typename T> class EWPDS;
+  template <typename SemiringData> class BaseCF {
 
-  template<typename T, typename CT> class ERule : public Rule<T> {
-
-    friend class EWPDS<T>;
-    friend class ref_ptr<ERule>;
-
-    friend std::ostream& operator <<(std::ostream &o, const ERule &r) {
-      return r.eprint(o);
-    }
-  private:
-    typedef ref_ptr<BaseCF<CT> > conf_fn_t;
-    typedef ref_ptr<T > sem_elem_t;
-    
   public:
-    /* Constructor/Destructor */
-    ERule(
-     T *t,
-     const wpds_key_t from_state = WPDS_EPSILON,
-     const wpds_key_t from_stack = WPDS_EPSILON,
-     const wpds_key_t to_state   = WPDS_EPSILON,
-     const wpds_key_t to_stack1  = WPDS_EPSILON,
-     const wpds_key_t to_stack2  = WPDS_EPSILON,
-     BaseCF<CT> *f = NULL
-     )
-      : Rule<T>(t,from_state,from_stack,to_state,to_stack1,to_stack2)
-      { cf = f;
-      //incRuleCount(); 
-      }
-    
-    ERule( 
-     const sem_elem_t& se_,
-     const wpds_key_t from_state = WPDS_EPSILON,
-     const wpds_key_t from_stack = WPDS_EPSILON,
-     const wpds_key_t to_state   = WPDS_EPSILON, 
-     const wpds_key_t to_stack1  = WPDS_EPSILON, 
-     const wpds_key_t to_stack2  = WPDS_EPSILON,
-     BaseCF<CT> *f = NULL
-     )
-      : Rule<T>(se_, from_state, from_stack, to_state, to_stack1, to_stack2)
-      { cf = f;
-      //incRuleCount(); 
-      }
-    
-    ~ERule() { 
-      //decRuleCount(); 
+    typedef ref_ptr<SemiringData> sem_elem_t;
+
+    BaseCF(SemiringData *sr = NULL) : count(0), sr_data(sr) { }
+
+    BaseCF(const BaseCF &that) : count(0), sr_data(that.sr_data.get_ptr()) { }
+
+    virtual SemiringData *apply_f(SemiringData *w1, SemiringData *w2) const {
+      assert(w1 != NULL && w2 != NULL);
+
+      if(sr_data.get_ptr() == NULL) return w1->extend(w2);
+      return w1->extend(sr_data->extend(w2));
     }
 
-    /*******************/
-    /* Getters         */
-    /*******************/  
-    const conf_fn_t& confluence_fn() const { return cf; }
-    
-    /*******************/
-    /* Others          */
-    /*******************/
-    std::ostream& eprint( std::ostream& o ) const {
-      Rule<T>::print(o);
-      if(cf.get_ptr() == NULL) return o;
-      return cf->print(o);
+    virtual BaseCF *parse_element(const char *s, SemiringData *sem) {
+      return new BaseCF(sem);
+    }
+
+    virtual std::ostream &print(std::ostream &o) {
+      o << "BaseCF[";
+      if(sr_data.get_ptr() == NULL) {
+    o <<"ONE";
+      } else {
+    sr_data->print(o);
+      }
+      o<< "]";
+      return o;
+    }
+
+    virtual ~BaseCF() { }
+
+    unsigned int count;
+  private:
+    sem_elem_t sr_data;
+
+  };
+
+
+  // Requires ConfluenceData::apply_f : SemiringData x SemiringData -> SemiringData
+  template <typename SemiringData, typename ConfluenceFnData> class ConfluenceFn : public BaseCF<SemiringData> {
+
+  public:
+    typedef ref_ptr<ConfluenceFnData> conf_fn_t;
+    typedef ref_ptr<SemiringData> sem_elem_t;
+
+    // The semiring element is for implementing a default action
+    ConfluenceFn(SemiringData *sr, ConfluenceFnData *cf = NULL) : cf_data(cf), sr_data(sr) { }
+
+    SemiringData *apply_f(SemiringData *w1,SemiringData *w2) const {
+      // Both should not be intended to be NULL
+      assert(cf_data.get_ptr() != NULL || sr_data.get_ptr() != NULL);
+      assert(w1 != NULL && w2 != NULL);
+
+      if(cf_data.get_ptr() != NULL) {
+    return cf_data->apply_f(w1,w2);
+      } else if(cf_data.get_ptr() == NULL && sr_data.get_ptr() == NULL) { 
+    return w1->extend(w2);
+      } else if(cf_data.get_ptr() == NULL) {
+    return w1->extend(sr_data->extend(w2)); // default action
+      }
     }
 
   private:
-    conf_fn_t cf;
+    conf_fn_t cf_data;
+    sem_elem_t sr_data;
   };
 } // namespace wpds
 

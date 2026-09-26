@@ -37,75 +37,22 @@
 // (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 // OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 //////////////////////////////////////////////////////////////////////////////
-/*
- * $Id: KeyPair.h,v 1.5 2005-09-06 16:11:35 radu Exp $
- */
-#ifndef WPDS_UTIL_KEY_PAIR_H_
-#define WPDS_UTIL_KEY_PAIR_H_
-#include "Common.h"
-#include "HmHash.h"
-#include "Triple.h"
-#include <utility>  // std::pair
 
-#define combine_wpds_keys( k1,k2 ) ((k1) + 997*(k2))
-//#define combine_wpds_keys( k1,k2 ) (((k1) << sizeof(wpds_key_t) <<2)  | (k2))
+#include "KeySource.h"
+#include "Keys.h"
 
-namespace wpds {
+using namespace wpds;
 
-    namespace util {
 
-        typedef std::pair< wpds_key_t,wpds_key_t > KeyPair;
+void key_pair_src::show(std::string & s) {
+    std::string s1, s2;
+    showkey(k1,s1);
+    showkey(k2,s2);
+    s = "^" + s1 + "~" + s2 + "^";
+}
 
-        struct HashKeyPair
-        {
-
-            wpds::hm_hash< wpds_size_t > hasher;
-
-            const wpds_size_t operator()( const KeyPair& kp ) const
-            {
-                return hasher( combine_wpds_keys( kp.first,kp.second ) );
-            }
-
-        };
-
-        struct EqualKeyPair
-        {
-
-            const wpds_size_t operator()( const KeyPair& lhs,const KeyPair& rhs ) const
-            {
-                return ((lhs.first == rhs.first) && (lhs.second == rhs.second));
-            }
-
-        };
-
-        typedef struct Triple< wpds_key_t,wpds_key_t,wpds_key_t > KeyTriple;
-
-        struct HashKeyTriple
-        {
-
-            wpds::hm_hash< wpds_size_t > hasher;
-
-            wpds_size_t operator()( const KeyTriple& kt ) const
-            {
-                wpds_size_t hashval = combine_wpds_keys( kt.first,kt.second );
-                return hasher( combine_wpds_keys( kt.third,hashval ) );
-            }
-
-        };
-
-        struct EqualKeyTriple
-        {
-
-            bool operator()( const KeyTriple& lhs, const KeyTriple& rhs ) const
-            {
-                return ((lhs.first == rhs.first) &&
-                        (lhs.second == rhs.second) &&
-                        (lhs.third == rhs.third));
-            }
-
-        };
-
-    } // namespace util
-
-} // namespace wpds
-#endif  // WPDS_UTIL_KEY_PAIR_H_
+/* Yo, Emacs!
+;;; Local Variables: ***
+;;; tab-width: 4 ***
+;;; End: ***
+*/

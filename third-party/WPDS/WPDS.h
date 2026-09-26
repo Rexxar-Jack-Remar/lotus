@@ -41,11 +41,11 @@
 #ifndef wpds_WPDS_
 #define wpds_WPDS_ 1
 
-#include "common.h"
+#include "Common.h"
 #include "HashMap.h"
+#include "RefPtr.h"
 #include "Rule.h"
 #include "UTIL.h"
-#include "ref_ptr.h"
 #include <algorithm>
 #include <iostream>
 #include <list>
@@ -54,9 +54,9 @@
 #ifdef SWPDS
 #   include "Schema.h"
 #endif // SWPDS
-#include "key_source.h"
-#include "keys.h"
-#include "semiring.h"
+#include "KeySource.h"
+#include "Keys.h"
+#include "Semiring.h"
 
 /*
  * The below are used in parsing rules and schemas

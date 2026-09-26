@@ -1,15 +1,5 @@
 # Examples CMakeLists.txt
 
-set(EXAMPLES
-  how-to/build-pdg/PDGExample.cpp
-  how-to/query-alias-info/PointerAnalysisExample.cpp
-)
-
-set(EXAMPLES_NAMES
-  PDGExample
-  PointerAnalysisExample
-)
-
 set(EXAMPLES_INCLUDE_DIR ${CMAKE_SOURCE_DIR}/include)
 
 # Get LLVM components needed for examples that don't get LLVM through dependencies
@@ -18,26 +8,24 @@ llvm_map_components_to_libnames(llvm_libs irreader analysis)
 # Set example binary output directory
 set(LOTUS_EXAMPLE_BIN_DIR ${CMAKE_BINARY_DIR}/bin/examples)
 
-# Add executables and include directories
-foreach(idx RANGE 0 1)
-  list(GET EXAMPLES_NAMES ${idx} example_name)
-  list(GET EXAMPLES ${idx} example_file)
-  add_executable(${example_name} ${example_file})
-  set_target_properties(${example_name} PROPERTIES
+function(lotus_add_example target_name source_file)
+  add_executable(${target_name} ${source_file})
+  set_target_properties(${target_name} PROPERTIES
       RUNTIME_OUTPUT_DIRECTORY ${LOTUS_EXAMPLE_BIN_DIR}
   )
-  target_include_directories(${example_name} PUBLIC ${EXAMPLES_INCLUDE_DIR})
-endforeach()
-
+  target_include_directories(${target_name} PUBLIC ${EXAMPLES_INCLUDE_DIR})
+endfunction()
 
 # PDGExample needs CanaryPDG, AliasAnalysisWrapper (for DataDependencyGraph), and LLVM libs
+lotus_add_example(PDGExample ir/PDGExample.cpp)
 target_link_libraries(PDGExample PRIVATE 
     CanaryPDG 
-    CanaryAliasAnalysisWrapper
+    CanaryAliasAnalysisWrapper 
     ${llvm_libs}
 )
 
 # PointerAnalysisExample needs AliasAnalysisWrapper and all its dependencies
+lotus_add_example(PointerAnalysisExample alias/PointerAnalysisExample.cpp)
 target_link_libraries(PointerAnalysisExample PRIVATE 
     CanaryAliasAnalysisWrapper 
     CanaryUnderApproxAA

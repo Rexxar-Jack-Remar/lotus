@@ -37,75 +37,58 @@
 // (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 // OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 //////////////////////////////////////////////////////////////////////////////
-/*
- * $Id: KeyPair.h,v 1.5 2005-09-06 16:11:35 radu Exp $
- */
-#ifndef WPDS_UTIL_KEY_PAIR_H_
-#define WPDS_UTIL_KEY_PAIR_H_
 #include "Common.h"
-#include "HmHash.h"
-#include "Triple.h"
-#include <utility>  // std::pair
-
-#define combine_wpds_keys( k1,k2 ) ((k1) + 997*(k2))
-//#define combine_wpds_keys( k1,k2 ) (((k1) << sizeof(wpds_key_t) <<2)  | (k2))
+#include "Dictionary.h"
 
 namespace wpds {
+    int rulesCount  = 0;
+    int transCount  = 0;
+    int bktsCount   = 0;
+    int mhCount     = 0;
 
-    namespace util {
+    std::ostream&
+    Query::print( std::ostream& out ) const
+    {
+        return (out << to_string());
+    }
 
-        typedef std::pair< wpds_key_t,wpds_key_t > KeyPair;
-
-        struct HashKeyPair
+    std::string
+    Query::to_string() const
+    {
+        switch( query )
         {
+            case WPDS_PRESTAR:      return "prestar";
+            case WPDS_POSTSTAR:     return "poststar";
+            case WPDS_BOTH:         return "both";
+            case WPDS_BASE:default: return "user";
+        }
+    }
 
-            wpds::hm_hash< wpds_size_t > hasher;
-
-            const wpds_size_t operator()( const KeyPair& kp ) const
-            {
-                return hasher( combine_wpds_keys( kp.first,kp.second ) );
-            }
-
-        };
-
-        struct EqualKeyPair
-        {
-
-            const wpds_size_t operator()( const KeyPair& lhs,const KeyPair& rhs ) const
-            {
-                return ((lhs.first == rhs.first) && (lhs.second == rhs.second));
-            }
-
-        };
-
-        typedef struct Triple< wpds_key_t,wpds_key_t,wpds_key_t > KeyTriple;
-
-        struct HashKeyTriple
-        {
-
-            wpds::hm_hash< wpds_size_t > hasher;
-
-            wpds_size_t operator()( const KeyTriple& kt ) const
-            {
-                wpds_size_t hashval = combine_wpds_keys( kt.first,kt.second );
-                return hasher( combine_wpds_keys( kt.third,hashval ) );
-            }
-
-        };
-
-        struct EqualKeyTriple
-        {
-
-            bool operator()( const KeyTriple& lhs, const KeyTriple& rhs ) const
-            {
-                return ((lhs.first == rhs.first) &&
-                        (lhs.second == rhs.second) &&
-                        (lhs.third == rhs.third));
-            }
-
-        };
-
-    } // namespace util
+    Query Query::BASE(WPDS_BASE);
+    Query Query::PRESTAR(WPDS_PRESTAR);
+    Query Query::POSTSTAR(WPDS_POSTSTAR);
+    Query Query::BOTH(WPDS_BOTH);
 
 } // namespace wpds
-#endif  // WPDS_UTIL_KEY_PAIR_H_
+
+#ifdef DBGWPDS
+int b_wpds_debug = 1;
+int b_wpds_parse_debug = 0;
+int b_dwpds_debug = 1;
+int b_readout = 1;
+int b_wpds_stat = 1;
+#else
+int b_wpds_debug = 0;
+int b_wpds_parse_debug = 0;
+int b_dwpds_debug = 0;
+int b_readout = 0;
+int b_wpds_stat = 0;
+#endif
+
+std::ostream * pWpdsErr = & std::cout;
+
+/* Yo, Emacs!
+;;; Local Variables: ***
+;;; tab-width: 4 ***
+;;; End: ***
+*/

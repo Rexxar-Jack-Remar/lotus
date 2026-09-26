@@ -42,14 +42,14 @@
 #define WITNESS_H
 
 
-#include "common.h"
+#include "Common.h"
 #include "HashMap.h"
+#include "InstCounter.h"
+#include "KeySource.h"
+#include "MyAllocator.h"
+#include "RefPtr.h"
+#include "Semiring.h"
 #include "UTIL.h"
-#include "inst_counter.h"
-#include "key_source.h"
-#include "myallocator.h"
-#include "ref_ptr.h"
-#include "semiring.h"
 #include <iostream>
 #include <list>
 #include <set>

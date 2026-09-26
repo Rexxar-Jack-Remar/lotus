@@ -3,7 +3,7 @@
 #include "WPDS/CA.h"
 #include "WPDS/SaturationProcess.h"
 #include "WPDS/WPDS.h"
-#include "WPDS/key_source.h"
+#include "WPDS/KeySource.h"
 
 #include <atomic>
 #include <chrono>

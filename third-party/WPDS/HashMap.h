@@ -42,9 +42,9 @@
  */
 #ifndef _HASH_MAP_H_
 #define _HASH_MAP_H_
-#include "hm_hash.h"
-#include "inst_counter.h"
-#include "myallocator.h"
+#include "HmHash.h"
+#include "InstCounter.h"
+#include "MyAllocator.h"
 #include <functional>
 #include <limits.h> // ULONG_MAX
 #include <utility>  // std::pair

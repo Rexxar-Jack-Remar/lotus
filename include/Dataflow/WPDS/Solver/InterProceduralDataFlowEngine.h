@@ -7,10 +7,10 @@
 #include "Dataflow/WPDS/PreparedAnalysis.h"
 #include "WPDS/CA.h"
 #include "WPDS/WPDS.h"
-#include "WPDS/key_source.h"
-#include "WPDS/keys.h"
-#include "WPDS/ref_ptr.h"
-#include "WPDS/semiring.h"
+#include "WPDS/KeySource.h"
+#include "WPDS/Keys.h"
+#include "WPDS/RefPtr.h"
+#include "WPDS/Semiring.h"
 
 #include <cstdint>
 #include <functional>
