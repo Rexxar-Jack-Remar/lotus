@@ -2,8 +2,7 @@
 // Created by peiming on 11/5/19.
 // Updated for modern LLVM compatibility
 //
-#ifndef ASER_PTA_CALLSITE_H
-#define ASER_PTA_CALLSITE_H
+#pragma once
 
 #include "Alias/InclusionBased/AserPTA/Util/Util.h"
 
@@ -109,4 +108,3 @@ public:
 
 } // namespace aser
 
-#endif

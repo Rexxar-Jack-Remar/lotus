@@ -7,8 +7,8 @@
 #include "Checker/Framework/SuppressionManager.h"
 #include "Checker/KINT/MKintPass.h"
 #include "Checker/KINT/Options.h"
-#include "CheckerOptions.h"
-#include "CheckerReport.h"
+#include "Checker/Tooling/CheckerOptions.h"
+#include "Checker/Tooling/CheckerReport.h"
 
 #include <llvm/IR/PassManager.h>
 #include <llvm/IRReader/IRReader.h>

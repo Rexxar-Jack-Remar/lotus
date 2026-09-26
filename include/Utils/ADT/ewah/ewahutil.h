@@ -1,6 +1,5 @@
 // See LICENSE file for license information.
-#ifndef EWAHUTIL_H
-#define EWAHUTIL_H
+#pragma once
 
 #include <algorithm>
 #include <cassert>
@@ -216,4 +215,3 @@ template <class uword> std::string toBinaryString(const uword w) {
   return convert.str();
 }
 } // namespace ewah
-#endif

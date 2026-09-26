@@ -1,5 +1,5 @@
 SMT (Satisfiability Modulo Theories)
-===================================
+====================================
 
 SMT solving infrastructure with Z3 integration and support for common theories.
 
@@ -63,25 +63,25 @@ formulas). It operates at the formula/solver level, not the program level.
 
 **Key Differences**:
 
-+------------------+------------------------------------------+----------------------------------------+
-| Aspect           | ``lib/Solvers/SMT/SymAbs``              | ``lib/Verification/SymAbsAI``|
-+==================+==========================================+========================================+
-| **Input**        | SMT bit-vector formulas (Z3 expressions) | LLVM IR (program code)                |
-+------------------+------------------------------------------+----------------------------------------+
-| **Output**       | Abstract constraints (intervals,         | Abstract domain values for LLVM values |
-|                  | octagons, etc.)                          |                                        |
-+------------------+------------------------------------------+----------------------------------------+
-| **Approximation**| Converts bit-vectors to linear integer   | Works directly with program semantics  |
-|                  | formulas                                 |                                        |
-+------------------+------------------------------------------+----------------------------------------+
-| **Level**        | Formula-level abstraction algorithms     | Program-level abstract interpretation  |
-+------------------+------------------------------------------+----------------------------------------+
-| **Integration**  | Standalone SMT formula processing        | Integrated LLVM pass with fixpoint     |
-|                  |                                          | engine                                 |
-+------------------+------------------------------------------+----------------------------------------+
-| **Use Case**     | Abstracting SMT formulas for constraint  | Static analysis and optimization of    |
-|                  | solving                                  | programs                               |
-+------------------+------------------------------------------+----------------------------------------+
++----------------------+------------------------------------------+----------------------------------------+
+| Aspect               | ``lib/Solvers/SMT/SymAbs``               | ``lib/Verification/SymAbsAI``          |
++======================+==========================================+========================================+
+| **Input**            | SMT bit-vector formulas (Z3 expressions) | LLVM IR (program code)                 |
++----------------------+------------------------------------------+----------------------------------------+
+| **Output**           | Abstract constraints (intervals,         | Abstract domain values for LLVM values |
+|                      | octagons, etc.)                          |                                        |
++----------------------+------------------------------------------+----------------------------------------+
+| **Approximation**    | Converts bit-vectors to linear integer   | Works directly with program semantics  |
+|                      | formulas                                 |                                        |
++----------------------+------------------------------------------+----------------------------------------+
+| **Level**            | Formula-level abstraction algorithms     | Program-level abstract interpretation  |
++----------------------+------------------------------------------+----------------------------------------+
+| **Integration**      | Standalone SMT formula processing        | Integrated LLVM pass with fixpoint     |
+|                      |                                          | engine                                 |
++----------------------+------------------------------------------+----------------------------------------+
+| **Use Case**         | Abstracting SMT formulas for constraint  | Static analysis and optimization of    |
+|                      | solving                                  | programs                               |
++----------------------+------------------------------------------+----------------------------------------+
 
 **Abstract Domains**:
 

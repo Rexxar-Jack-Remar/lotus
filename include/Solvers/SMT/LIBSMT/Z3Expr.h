@@ -1,7 +1,6 @@
 
 
-#ifndef Z3_EXAMPLE_Z3EXPR_H
-#define Z3_EXAMPLE_Z3EXPR_H
+#pragma once
 
 #include "z3++.h"
 
@@ -199,4 +198,3 @@ public:
   static Z3Expr OR(const Z3Expr &lhs, const Z3Expr &rhs);
 };
 
-#endif // Z3_EXAMPLE_Z3EXPR_H

@@ -5,8 +5,7 @@
  * managing pointer analysis configuration files for command-line tools.
  */
 
-#ifndef ALIAS_ALIASANALYSISWRAPPER_CLIUTILS_H
-#define ALIAS_ALIASANALYSISWRAPPER_CLIUTILS_H
+#pragma once
 
 #include <memory>
 #include <string>
@@ -77,4 +76,3 @@ void printLoadedConfigFiles(
 } // namespace alias
 } // namespace lotus
 
-#endif // ALIAS_ALIASANALYSISWRAPPER_CLIUTILS_H

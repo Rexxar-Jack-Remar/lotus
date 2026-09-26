@@ -1,5 +1,4 @@
-#ifndef _DWGRAPH_UTIL_H_
-#define _DWGRAPH_UTIL_H_
+#pragma once
 
 #include "CFL/CSIndex/FLARE/PathTree/WeightedGraph.h"
 
@@ -33,4 +32,3 @@ public:
 
 } // namespace lotus::cfl::cs_index::flare::path_tree
 
-#endif

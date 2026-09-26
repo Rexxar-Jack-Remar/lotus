@@ -8,8 +8,7 @@
 //
 //===----------------------------------------------------------------------===//
 
-#ifndef LOTUS_VERIFICATION_SIFA_PROCEDURE_PROCEDUREGRAPH_H
-#define LOTUS_VERIFICATION_SIFA_PROCEDURE_PROCEDUREGRAPH_H
+#pragma once
 
 #include "Utils/Algorithms/PathExpressions/LabeledGraph.h"
 #include "Verification/Sifa/Cfg/Transition.h"
@@ -131,4 +130,3 @@ private:
 } // namespace sifa
 } // namespace lotus
 
-#endif // LOTUS_VERIFICATION_SIFA_PROCEDURE_PROCEDUREGRAPH_H

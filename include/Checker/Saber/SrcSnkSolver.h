@@ -6,8 +6,7 @@
 //
 //===----------------------------------------------------------------------===//
 
-#ifndef SRC_SNK_SOLVER_H
-#define SRC_SNK_SOLVER_H
+#pragma once
 
 #include "Alias/DemandDriven/DDA/DPItem.h"
 #include "IR/SVFG/SVFG.h"
@@ -115,4 +114,3 @@ private:
 } // namespace analysis
 } // namespace lotus
 
-#endif

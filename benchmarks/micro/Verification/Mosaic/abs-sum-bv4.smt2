@@ -1,0 +1,35 @@
+; Signed two-loop property derived from Mosaic's abs-sum workload.
+(set-logic HORN)
+(define-sort Word () (_ BitVec 4))
+(declare-rel p (Word Word Word Word))
+(declare-rel q (Word Word Word Word))
+(declare-rel r (Word Word Word))
+(declare-rel fail ())
+(declare-var x Word)
+(declare-var y Word)
+(declare-var a Word)
+(declare-var i Word)
+
+(rule (=> (and (bvsgt x (_ bv0 4)) (bvsgt y (_ bv0 4)))
+          (p x (bvneg y) (_ bv0 4) (_ bv0 4))))
+(rule (=> (and (p x y a i) (bvslt i x))
+          (p x y (bvadd a (_ bv1 4)) (bvadd i (_ bv1 4)))))
+(rule (=> (and (p x y a i) (not (bvslt i x)))
+          (q x y a (_ bv0 4))))
+(rule (=> (and (q x y a i) (bvsgt i y))
+          (q x y (bvsub a (_ bv1 4)) (bvsub i (_ bv1 4)))))
+(rule (=> (and (q x y a i) (not (bvsgt i y))) (r x y a)))
+(rule
+  (=> (and
+        (r x y a)
+        (bvsge a (_ bv0 4))
+        (not
+          (bvsge
+            (bvmul (bvor (_ bv1 4)
+                         (ite (bvsge x (_ bv0 4))
+                              (_ bv0 4) (bvnot (_ bv0 4)))) x)
+            (bvmul (bvor (_ bv1 4)
+                         (ite (bvsge y (_ bv0 4))
+                              (_ bv0 4) (bvnot (_ bv0 4)))) y))))
+      fail))
+(query fail)

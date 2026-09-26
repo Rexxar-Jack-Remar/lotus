@@ -45,8 +45,7 @@
  */
 
 /** @file Dominator.h @brief Dominator analysis for control-flow graphs. */
-#ifndef NOELLE_SRC_CORE_DOMINATORS_H_
-#define NOELLE_SRC_CORE_DOMINATORS_H_
+#pragma once
 
 #include "Analysis/CFG/DominatorForest.h"
 #include "Analysis/CFG/DominatorNode.h"
@@ -93,5 +92,3 @@ public:
 };
 
 } // namespace noelle
-
-#endif // NOELLE_SRC_CORE_DOMINATORS_H_

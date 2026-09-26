@@ -1,6 +1,5 @@
 // See LICENSE file for license information.
-#ifndef RUNNINGLENGTHWORD_H_
-#define RUNNINGLENGTHWORD_H_
+#pragma once
 
 #include <iostream>
 
@@ -545,5 +544,3 @@ private:
   EWAHBoolArrayRawIterator<uword> *parent;
 };
 } // namespace ewah
-
-#endif /* RUNNINGLENGTHWORD_H_ */

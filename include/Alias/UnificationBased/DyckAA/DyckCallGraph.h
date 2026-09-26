@@ -16,8 +16,7 @@
  *  along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
-#ifndef DYCKAA_DYCKCALLGRAPH_H
-#define DYCKAA_DYCKCALLGRAPH_H
+#pragma once
 
 #include "Alias/UnificationBased/DyckAA/DyckCallGraphNode.h"
 #include "Utils/ADT/MapIterators.h"
@@ -166,4 +165,3 @@ struct GraphTraits<const DyckCallGraph *>
 };
 } // namespace llvm
 
-#endif // DYCKAA_DYCKCALLGRAPH_H

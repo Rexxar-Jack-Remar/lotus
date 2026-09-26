@@ -7,8 +7,7 @@
 //
 //===----------------------------------------------------------------------===//
 
-#ifndef LOTUS_VERIFICATION_SIFA_BLOCKTRANSFERPOLICY_H
-#define LOTUS_VERIFICATION_SIFA_BLOCKTRANSFERPOLICY_H
+#pragma once
 
 #include "llvm/IR/BasicBlock.h"
 
@@ -80,4 +79,3 @@ private:
 } // namespace sifa
 } // namespace lotus
 
-#endif // LOTUS_VERIFICATION_SIFA_BLOCKTRANSFERPOLICY_H

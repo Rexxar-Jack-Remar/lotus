@@ -26,13 +26,18 @@ See :doc:`../alias/alias_analysis` for detailed instructions and command example
 * **AserPTA** – Constraint-based pointer analysis with multiple context
   sensitivities, including k-callsite and k-origin (thread-creation)
   sensitivity (``lib/Alias/InclusionBased/AserPTA``).
+* **BootstrapAA** – Flow- and context-sensitive inclusion analysis using
+  Steensgaard partitioning, thresholded Andersen refinement, dependency
+  slicing, and input-state-tabulated summaries
+  (``lib/Alias/InclusionBased/BootstrapAA``). See
+  :doc:`../alias/bootstrap-aa`.
 * **LotusAA** – Native alias analysis engine with interprocedural,
   flow-sensitive, and field-sensitive reasoning
   (``lib/Alias/InclusionBased/LotusAA``). See :doc:`../alias/lotusaa`.
-* **FlowSensitivePTA** – Sparse flow-sensitive inclusion-based pointer
-  analysis with an object-versioned solver variant
-  (``lib/Alias/InclusionBased/FlowSensitive``).
-  See :doc:`../alias/flowsensitive`.
+* **FlowSensitivePTA** – Flow-sensitive inclusion-based pointer analyses with
+  conventional sparse, object-versioned, and direct value-flow solvers
+  (``lib/Alias/InclusionBased/FlowSensitive``). Includes ValueFlowPTA.
+  See :doc:`../alias/flowsensitive` and :doc:`../alias/valueflowpta`.
 * **DDA** – Demand-driven alias-analysis infrastructure that refines alias
   information on demand instead of materializing a full global solution
   (``lib/Alias/DemandDriven/DDA``). See :doc:`../alias/dda`.
@@ -80,7 +85,7 @@ See :doc:`../ir/index` for builder APIs and code snippets.
   precise symbolic range analysis (``lib/IR/vSSA``). See :doc:`../ir/vssa`.
 
 Machine Learning Features
-------------------------
+-------------------------
 
 See :doc:`../ml/index` for ML feature extraction APIs.
 

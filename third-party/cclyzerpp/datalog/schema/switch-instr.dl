@@ -1,0 +1,94 @@
+// http://llvm.org/docs/LangRef.html#switch-instr
+// keywords: terminator; instr
+
+.type SwitchInstruction <: symbol
+.decl switch_instr(instr:SwitchInstruction)
+
+instr(v) :- switch_instr(v).
+terminator_instr(v) :- switch_instr(v).
+
+.decl switch_instr_operand(instr:SwitchInstruction, value:Operand)
+.decl switch_instr_ncases(instr:SwitchInstruction, total:number)
+.decl switch_instr_case(instr:SwitchInstruction, index:number, constant:Constant, label:Variable)
+.decl switch_instr_default_label(instr:SwitchInstruction, label:Variable)
+
+.decl switch_instr_case_label(v0:symbol, v1:number, v2:symbol)
+.decl switch_instr_case_value(v0:symbol, v1:number, v2:symbol)
+switch_instr_case(v0, v1, v2, v3) :-
+   switch_instr_case_value(v0, v1, v2),
+   switch_instr(v0),
+   constant(v2),
+   switch_instr_case_label(v0, v1, v3),
+   variable(v3).
+
+//------------------------------------------------------------------------------
+// [Constraints]
+//
+// The ‘switch‘ instr uses three parameters:
+//  (i)   an integer comparison value ‘value‘,
+//  (ii)  a default ‘label‘ destination, and
+//  (iii) an array of pairs of comparison value constants
+//        and ‘label‘s.
+//
+// The table is not allowed to contain duplicate constant entries.
+//------------------------------------------------------------------------------
+
+
+schema_invalid_instr(Instr, __FILE__, __LINE__) :-
+   schema_sanity(),
+   switch_instr(Instr),
+   !switch_instr_ncases(Instr, _).
+
+schema_invalid_instr(Instr, __FILE__, __LINE__) :-
+   schema_sanity(),
+   switch_instr(Instr),
+   !switch_instr_default_label(Instr, _).
+
+schema_invalid_instr(Instr, __FILE__, __LINE__) :-
+   schema_sanity(),
+   switch_instr(Instr),
+   switch_instr_default_label(Instr, Label),
+   !variable_is_label(Label).
+
+schema_invalid_instr(Instr, __FILE__, __LINE__) :-
+   schema_sanity(),
+   switch_instr(Instr),
+   switch_instr_operand(Instr, Value),
+   operand_has_type(Value, Type),
+   !integer_type(Type).
+
+schema_invalid_instr(Instr, __FILE__, __LINE__) :-
+   schema_sanity(),
+   switch_instr(Instr),
+   switch_instr_case(Instr, _, Constant, Label),
+   constant(Constant),
+   !variable_is_label(Label).
+
+schema_invalid_instr(Instr, __FILE__, __LINE__) :-
+   schema_sanity(),
+   switch_instr(Instr),
+   switch_instr_case(Instr, _, Constant, Label),
+   variable(Label),
+   constant_has_type(Constant, Type),
+   !integer_type(Type).
+
+schema_invalid_instr(Instr, __FILE__, __LINE__) :-
+   schema_sanity(),
+   switch_instr(Instr),
+   switch_instr_case(Instr, Index1, Constant1, Label1),
+   switch_instr_case(Instr, Index2, Constant2, Label2),
+   Index1 != Index2,
+   variable(Label1),
+   variable(Label2),
+   constants_equal(Constant1, Constant2).
+
+schema_invalid_instr(Instr, __FILE__, __LINE__) :-
+   schema_sanity(),
+   switch_instr_case(Instr, Index, _, _),
+   Index < 0.
+
+schema_invalid_instr(Instr, __FILE__, __LINE__) :-
+   schema_sanity(),
+   switch_instr_ncases(Instr, Total),
+   switch_instr_case(Instr, Index, _, _),
+   Index >= Total.

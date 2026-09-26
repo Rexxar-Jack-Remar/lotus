@@ -1,6 +1,5 @@
 /** @file LockMismatchChecker.h @brief Lock mismatch detection checker for concurrent programs. */
-#ifndef LOCK_MISMATCH_CHECKER_H
-#define LOCK_MISMATCH_CHECKER_H
+#pragma once
 
 #include "Concurrency/LockSet/LockSetAnalysis.h"
 #include "Checker/Concurrency/ConcurrencyBugReport.h"
@@ -55,4 +54,3 @@ private:
 
 } // namespace concurrency
 
-#endif // LOCK_MISMATCH_CHECKER_H

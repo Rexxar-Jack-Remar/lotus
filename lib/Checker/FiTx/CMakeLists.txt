@@ -22,21 +22,21 @@ set(FiTx_Framework_SOURCES
   ${FiTx_DIR}/Frontend/Function.cpp
   ${FiTx_DIR}/Frontend/State.cpp
   ${FiTx_DIR}/Frontend/StateTransition.cpp
-  ${FiTx_DIR}/Framework_IR/Analyzer.cpp
-  ${FiTx_DIR}/Framework_IR/IRGenerator.cpp
-  ${FiTx_DIR}/Framework_IR/Utils.cpp
+  ${FiTx_DIR}/FrameworkIR/Analyzer.cpp
+  ${FiTx_DIR}/FrameworkIR/IRGenerator.cpp
+  ${FiTx_DIR}/FrameworkIR/Utils.cpp
 )
 
 set(FiTx_Detector_SOURCES
-  ${FiTx_DIR}/Detector/DFUtils.cpp
-  ${FiTx_DIR}/Detector/DLUtils.cpp
-  ${FiTx_DIR}/Detector/DULUtils.cpp
-  ${FiTx_DIR}/Detector/LeakUtils.cpp
-  ${FiTx_DIR}/Detector/NullPtr_Detector.cpp
-  ${FiTx_DIR}/Detector/RefUtils.cpp
-  ${FiTx_DIR}/Detector/UnrefUtils.cpp
-  ${FiTx_DIR}/Detector/UAFUtils.cpp
-  ${FiTx_DIR}/Detector/UBI_Detector.cpp
+  ${FiTx_DIR}/Detector/DoubleFreeDetector.cpp
+  ${FiTx_DIR}/Detector/DoubleLockDetector.cpp
+  ${FiTx_DIR}/Detector/DoubleUnlockDetector.cpp
+  ${FiTx_DIR}/Detector/MemoryLeakDetector.cpp
+  ${FiTx_DIR}/Detector/NullPointerDetector.cpp
+  ${FiTx_DIR}/Detector/ReferenceCounterDetector.cpp
+  ${FiTx_DIR}/Detector/UnreferenceCounterDetector.cpp
+  ${FiTx_DIR}/Detector/UseAfterFreeDetector.cpp
+  ${FiTx_DIR}/Detector/UseBeforeInitDetector.cpp
 )
 
 add_library(FiTxChecker STATIC

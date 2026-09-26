@@ -1,5 +1,4 @@
-#ifndef DATAFLOW_APA_EAN_BUDGET_H_
-#define DATAFLOW_APA_EAN_BUDGET_H_
+#pragma once
 
 // Budget and stop bookkeeping for the saturation driver (paper §III.C:
 // B = ⟨B_N, B_M, B_R, B_T, B_P⟩ bounding e-nodes, applied matches, rounds,
@@ -43,4 +42,3 @@ struct SaturationStats {
 } // namespace ean
 } // namespace elimination
 
-#endif // DATAFLOW_APA_EAN_BUDGET_H_

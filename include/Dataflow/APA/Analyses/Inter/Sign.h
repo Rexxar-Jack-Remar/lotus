@@ -16,7 +16,8 @@ using InterSignResult =
 
 InterSignResult
 runInterElimSign(llvm::Function *Entry,
-                 const dataflow::controlflow::InterCFG *ICF = nullptr);
+                 const dataflow::controlflow::InterCFG *ICF = nullptr,
+    EliminationOptions Options = defaultContextOptions());
 
 InterSignResult
 runInterSummaryElimSign(llvm::Function *Entry,

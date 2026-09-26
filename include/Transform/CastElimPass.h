@@ -1,5 +1,4 @@
-#ifndef __CAST_ELIM_PASS_H__
-#define __CAST_ELIM_PASS_H__
+#pragma once
 
 #include <llvm/IR/PassManager.h>
 
@@ -11,4 +10,3 @@ public:
                               llvm::FunctionAnalysisManager &FAM);
 };
 
-#endif

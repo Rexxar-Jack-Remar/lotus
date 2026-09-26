@@ -1,5 +1,4 @@
-#ifndef NPA_SOLVER_OPTIONS_H
-#define NPA_SOLVER_OPTIONS_H
+#pragma once
 
 #include "Dataflow/NPA/Core/Domain.h"
 
@@ -44,4 +43,3 @@ struct SolveOptions {
 
 } // namespace npa
 
-#endif // NPA_SOLVER_OPTIONS_H

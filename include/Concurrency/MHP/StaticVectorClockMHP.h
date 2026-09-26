@@ -9,10 +9,9 @@
  * clocks following the transfer rules in the paper to answer MHP/HB queries.
  */
 
-#ifndef STATIC_VECTOR_CLOCK_MHP_H
-#define STATIC_VECTOR_CLOCK_MHP_H
+#pragma once
 
-#include "Concurrency/JoinTarget/JoinTargetAnalysis.h"
+#include "Concurrency/Thread/Join/JoinTargetAnalysis.h"
 #include "Concurrency/MHP/IMHPAnalysis.h"
 #include "Concurrency/MHP/MHPAnalysis.h"
 #include "Concurrency/Utils/ThreadAPI.h"
@@ -90,7 +89,17 @@ public:
   /// Print debug information about the computed clocks and pairs.
   void printResults(llvm::raw_ostream &os) const override;
 
-  const ThreadFlowGraph &getThreadFlowGraph() const { return *m_tfg; }
+  const ThreadFlowGraph &getThreadFlowGraph() const override { return *m_tfg; }
+
+  size_t getAnalysisGeneration() const override { return m_conservative_mhp ? m_conservative_mhp->getAnalysisGeneration() : 0; }
+  lotus::AliasAnalysisWrapper *getAliasAnalysis() const override { return nullptr; }
+  const OpenMP::OpenMPSemantics *getOpenMPSemantics() const override { return nullptr; }
+  bool instructionMayExecuteMultipleTimes(const llvm::Instruction *inst) const override {
+    return m_conservative_mhp ? m_conservative_mhp->instructionMayExecuteMultipleTimes(inst) : false;
+  }
+  bool joinEdgeMustOrderTarget(const SyncNode *join_node, const SyncNode *target_node) const override {
+    return m_conservative_mhp ? m_conservative_mhp->joinEdgeMustOrderTarget(join_node, target_node) : false;
+  }
 
   static constexpr unsigned kCallContextLimit =
       2; // k-limiting for call strings
@@ -346,4 +355,3 @@ private:
 
 } // namespace mhp
 
-#endif // STATIC_VECTOR_CLOCK_MHP_H

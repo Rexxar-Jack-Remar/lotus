@@ -9,8 +9,7 @@
 //
 //===----------------------------------------------------------------------===//
 
-#ifndef LOTUS_UTILS_GENERAL_PATHEXPRESSIONS_REGEX_H
-#define LOTUS_UTILS_GENERAL_PATHEXPRESSIONS_REGEX_H
+#pragma once
 
 #include <cstddef>
 #include <functional>
@@ -279,4 +278,3 @@ template <typename L> struct Regex {
 } // namespace pathexpressions
 } // namespace lotus
 
-#endif // LOTUS_UTILS_GENERAL_PATHEXPRESSIONS_REGEX_H

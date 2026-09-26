@@ -4,8 +4,7 @@
  * @author Migrated from Symbiotic
  */
 
-#ifndef LOTUS_VERIFICATION_ANALYSIS_CLASSIFY_LOOPS_H
-#define LOTUS_VERIFICATION_ANALYSIS_CLASSIFY_LOOPS_H
+#pragma once
 
 #include "llvm/Analysis/LoopPass.h"
 
@@ -47,4 +46,3 @@ public:
 } // namespace verification
 } // namespace lotus
 
-#endif // LOTUS_VERIFICATION_ANALYSIS_CLASSIFY_LOOPS_H

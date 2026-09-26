@@ -13,8 +13,7 @@
  * - Wait synchronization for task completion
  * - Configurable number of worker threads
  */
-#ifndef SUPPORT_THREADPOOL_H
-#define SUPPORT_THREADPOOL_H
+#pragma once
 
 #include "Utils/ADT/MapIterators.h"
 #include "Utils/Parallel/Cancellation.h"
@@ -652,4 +651,3 @@ Accumulator ThreadPool::parallelReduce(Index Begin, Index End,
   return Init;
 }
 
-#endif

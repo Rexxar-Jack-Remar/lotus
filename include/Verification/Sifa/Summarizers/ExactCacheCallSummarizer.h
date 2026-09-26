@@ -9,8 +9,7 @@
 //
 //===----------------------------------------------------------------------===//
 
-#ifndef LOTUS_VERIFICATION_SIFA_SUMMARIZERS_EXACTCACHECALLSUMMARIZER_H
-#define LOTUS_VERIFICATION_SIFA_SUMMARIZERS_EXACTCACHECALLSUMMARIZER_H
+#pragma once
 
 #include "Verification/Sifa/Summarizers/ICallSummarizer.h"
 
@@ -46,4 +45,3 @@ private:
 } // namespace sifa
 } // namespace lotus
 
-#endif // LOTUS_VERIFICATION_SIFA_SUMMARIZERS_EXACTCACHECALLSUMMARIZER_H

@@ -42,12 +42,12 @@
  */
 #ifndef wpds_ERULE_H_
 #define wpds_ERULE_H_
-#include "../ref_ptr.h"
-#include "../Rule.h"
-#include "../Traits.h"
-#include "confluence_functions.h"
-#include "../inst_counter.h"
-#include "../semiring.h"
+#include "RefPtr.h"
+#include "ConfluenceFunctions.h"
+#include "InstCounter.h"
+#include "Rule.h"
+#include "Semiring.h"
+#include "Traits.h"
 #include <iostream>
 
 

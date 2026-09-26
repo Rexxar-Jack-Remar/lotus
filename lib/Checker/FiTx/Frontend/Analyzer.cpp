@@ -35,7 +35,7 @@
 #include "Checker/FiTx/Core/Casting.h"
 #include "Checker/FiTx/Core/Instructions.h"
 #include "Checker/FiTx/Core/Utils.h"
-#include "Checker/FiTx/Framework_IR/IRGenerator.h"
+#include "Checker/FiTx/FrameworkIR/IRGenerator.h"
 #include "Checker/FiTx/Frontend/Analyzer.h"
 #include "Checker/FiTx/Frontend/CommandlineArgs.h"
 #include "Checker/FiTx/Frontend/Function.h"

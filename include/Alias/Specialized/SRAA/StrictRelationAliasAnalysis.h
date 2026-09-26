@@ -1,5 +1,4 @@
-#ifndef __StrictRelationsAliasAnalysis_H__
-#define __StrictRelationsAliasAnalysis_H__
+#pragma once
 
 #include "llvm/ADT/SparseBitVector.h"
 #include "llvm/Analysis/AliasAnalysis.h"
@@ -421,5 +420,3 @@ public:
 ////////////////////////////////////////////////////////////////////////////////
 
 } // namespace
-
-#endif

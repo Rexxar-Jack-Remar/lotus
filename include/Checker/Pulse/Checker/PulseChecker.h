@@ -1,6 +1,5 @@
 /** @file PulseChecker.h @brief Main Pulse checker driver for abstract-interpretation-based bug detection. */
-#ifndef CHECKER_PULSE_PULSECHECKER_H
-#define CHECKER_PULSE_PULSECHECKER_H
+#pragma once
 
 #include "Checker/Pulse/Core/PulseValueHistory.h"
 #include "Checker/Framework/BugReport.h"
@@ -226,4 +225,3 @@ private:
 
 } // namespace pulse
 
-#endif // CHECKER_PULSE_PULSECHECKER_H

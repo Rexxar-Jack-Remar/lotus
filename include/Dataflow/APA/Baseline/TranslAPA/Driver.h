@@ -1,5 +1,4 @@
-#ifndef DATAFLOW_APA_BASELINE_TRANSLAPA_DRIVER_H_
-#define DATAFLOW_APA_BASELINE_TRANSLAPA_DRIVER_H_
+#pragma once
 
 // TranslAPA baseline — driver glue.
 //
@@ -152,4 +151,3 @@ FoldTimings foldFillGenKillTimed(
 } // namespace translapa
 } // namespace elimination
 
-#endif // DATAFLOW_APA_BASELINE_TRANSLAPA_DRIVER_H_

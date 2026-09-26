@@ -6,8 +6,7 @@
  * This pass identifies and removes function calls to functions that are
  * marked as noreturn, optimizing control flow and eliminating dead code.
  */
-#ifndef TRANSFORM_REMOVENORETFUNCTION_H
-#define TRANSFORM_REMOVENORETFUNCTION_H
+#pragma once
 
 #include <llvm/IR/Module.h>
 #include <llvm/IR/PassManager.h>
@@ -35,4 +34,3 @@ public:
   PreservedAnalyses run(Module &M, ModuleAnalysisManager &MAM);
 };
 
-#endif // TRANSFORM_REMOVENORETFUNCTION_H

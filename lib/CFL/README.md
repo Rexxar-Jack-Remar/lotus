@@ -6,6 +6,7 @@ Lotus groups its CFL-related implementations by problem family:
 |---|---|
 | [`Classical`](Classical/README.md) | Grammar-driven classical CFL reachability, solver engines, preprocessing, and analysis clients |
 | [`CSIndex`](CSIndex/README.md) | Extended-Dyck indexing for context-sensitive reachability |
+| [`DynamicDyck`](DynamicDyck/README.md) | Exact bidirected Dyck reachability under edge insertions and deletions |
 | [`InterleavedDyck`](InterleavedDyck/README.md) | Shared representations, exact special cases, bounds, underapproximations, refinement, and graph reduction for interleaved-Dyck reachability |
 
 The public header tree under `include/CFL` mirrors this organization. All
@@ -19,6 +20,7 @@ module. Interleaved-Dyck tools consistently use the
 
 | Tool | Purpose |
 |---|---|
+| `lotus-cfl-dynamic-dyck` | Process an initial graph and an edge update sequence |
 | `lotus-cfl-interleaved-dyck-unary` | Run the adaptive or fixed-counter exact unary analysis |
 | `lotus-cfl-interleaved-dyck-staged-bounds` | Compute staged lower and upper bounds |
 | `lotus-cfl-interleaved-dyck-mcfl` | Run the dimension-indexed MCFL underapproximation hierarchy |

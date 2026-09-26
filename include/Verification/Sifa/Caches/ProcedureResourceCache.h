@@ -10,8 +10,7 @@
 //
 //===----------------------------------------------------------------------===//
 
-#ifndef LOTUS_VERIFICATION_SIFA_CACHES_PROCEDURERESOURCECACHE_H
-#define LOTUS_VERIFICATION_SIFA_CACHES_PROCEDURERESOURCECACHE_H
+#pragma once
 
 #include "llvm/IR/Function.h"
 
@@ -80,4 +79,3 @@ private:
 } // namespace sifa
 } // namespace lotus
 
-#endif // LOTUS_VERIFICATION_SIFA_CACHES_PROCEDURERESOURCECACHE_H

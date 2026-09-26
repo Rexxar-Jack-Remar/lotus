@@ -1,5 +1,4 @@
-#ifndef DATAFLOW_APA_APA_H_
-#define DATAFLOW_APA_APA_H_
+#pragma once
 
 // Core framework API.
 #include "Dataflow/APA/Core/InterProblem.h"
@@ -11,10 +10,9 @@
 
 // Solver engines and LLVM adapters.
 #include "Dataflow/APA/LLVM/ForwardProblem.h"
-#include "Dataflow/APA/Solver/ForwardInterSummarySolver.h"
-#include "Dataflow/APA/Solver/InterSolver.h"
-#include "Dataflow/APA/Solver/InterSummaryTransfer.h"
-#include "Dataflow/APA/Solver/PathSummaryEquationSolver.h"
-#include "Dataflow/APA/Solver/Solver.h"
+#include "Dataflow/APA/Solver/Equations/Solver.h"
+#include "Dataflow/APA/Solver/Inter/ContextSolver.h"
+#include "Dataflow/APA/Solver/Inter/ExpandedSolver.h"
+#include "Dataflow/APA/Solver/Inter/Transfer.h"
+#include "Dataflow/APA/Solver/Intra/IntraSolver.h"
 
-#endif // DATAFLOW_APA_APA_H_

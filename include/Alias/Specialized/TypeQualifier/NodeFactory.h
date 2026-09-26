@@ -2,8 +2,7 @@
 // Created by ubuntu on 2/1/18.
 //
 
-#ifndef UBIANALYSIS_NODEFACTORY_H
-#define UBIANALYSIS_NODEFACTORY_H
+#pragma once
 
 #include "llvm/Analysis/ValueTracking.h"
 
@@ -329,4 +328,3 @@ public:
   void dumpNodePtrSetInfo(NodeIndex index, std::map<NodeIndex, AndersPtsSet> &,
                           std::set<NodeIndex> &, bool) const;
 };
-#endif

@@ -1,5 +1,4 @@
-#ifndef __DSA_INFO_HH_
-#define __DSA_INFO_HH_
+#pragma once
 
 #include "llvm/ADT/StringRef.h"
 #include "llvm/IR/Function.h"
@@ -248,4 +247,3 @@ public:
 };
 
 } // namespace seadsa
-#endif

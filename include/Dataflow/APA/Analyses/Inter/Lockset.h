@@ -16,7 +16,8 @@ using InterLocksetResult =
 
 InterLocksetResult
 runInterElimLockset(llvm::Function *Entry,
-                    const dataflow::controlflow::InterCFG *ICF = nullptr);
+                    const dataflow::controlflow::InterCFG *ICF = nullptr,
+    EliminationOptions Options = defaultContextOptions());
 
 InterLocksetResult
 runInterSummaryElimLockset(llvm::Function *Entry,

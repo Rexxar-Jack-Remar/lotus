@@ -38,10 +38,8 @@
  *   - Solver/Newton/Linear/Tensor/ : optional tensor backend
  *   - LLVM/                        : LLVM-specific analysis infrastructure
  *********************************************************************/
-#ifndef NPA_HPP
-#define NPA_HPP
+#pragma once
 
 #include "Dataflow/NPA/Solver/KleeneSolver.h"
 #include "Dataflow/NPA/Solver/NPASolver.h"
 
-#endif /* NPA_HPP */

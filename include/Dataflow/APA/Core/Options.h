@@ -1,12 +1,16 @@
-#ifndef DATAFLOW_ELIMINATION_CORE_OPTIONS_H_
-#define DATAFLOW_ELIMINATION_CORE_OPTIONS_H_
-
-#include <cstddef>
+#pragma once
 
 #include "Dataflow/APA/EAN/Budget.h"
 #include "Dataflow/APA/EAN/CostModel.h"
 #include "Dataflow/APA/EAN/ExtractOptions.h"
 #include "Dataflow/APA/EAN/LawProfile.h"
+
+#include <algorithm>
+#include <cstddef>
+#include <cstdint>
+#include <functional>
+#include <utility>
+#include <vector>
 
 namespace elimination {
 
@@ -19,17 +23,141 @@ enum class EliminationMethod {
   ADTDelayed,
 };
 
-// Pivot-order policy for the state-elimination engine (paper's "Order"
-// configuration). The order never changes the final all-pairs result (the
-// k-loop is a Floyd–Warshall closure), only the peak construction cost — see
-// Solver/EliminationOrder.h.
+// Ordering preserves path languages. Equal client facts additionally require
+// a language-invariant interpretation (e.g. a quantale), not merely a lattice.
 enum class OrderingPolicy {
-  // Baseline: reverse-topological order for reducible problems, identity
-  // otherwise (unchanged historical behavior).
+  // Baseline: reverse-topological order for reducible intra problems, identity
+  // otherwise (unchanged historical behavior). Sparse equation baseline: index.
   Default,
   // Cost-aware greedy minimum-product ordering that minimizes the
   // predecessor–successor product driving Eq. 1's intermediate growth.
   CostAware,
+  Structural,
+  ExpressionAware,
+  StarRisk,
+  Hybrid,
+  ReversePostOrder,
+  Random,
+  MinDegree,
+  MinFill,
+  Explicit,
+};
+
+inline bool usesOnlineElimination(OrderingPolicy Policy) {
+  return Policy != OrderingPolicy::Default &&
+         Policy != OrderingPolicy::CostAware;
+}
+
+struct OrderPolicyOptions final {
+  // Untuned engineering defaults, not experimentally calibrated paper values.
+  double StructuralCap = 64.0;
+  double ExpressionCap = 4096.0;
+  double StarCap = 256.0;
+  // 0 requests exact counts; a positive value bounds each metadata traversal.
+  std::size_t DAGSizeCap = 1024;
+  bool Incremental = true;
+  bool RecordTrace = false;
+  bool MeasureLiveNodes = false;
+  // Opt-in common sparse engine for baseline/order-only comparisons. Without
+  // this flag Default and legacy CostAware keep their historical algorithms.
+  bool UseSparseElimination = false;
+  std::uint64_t RandomSeed = 0;
+  // Local vertex indices; validated as a complete permutation for Explicit.
+  std::vector<std::size_t> ExplicitOrder;
+  // Optional read-only snapshot: true when the semantic star of this operand
+  // (Expr*, NOT a syntactic Star allocation) is already memoized. The snapshot
+  // must remain unchanged during a solve so local dirty marking stays valid.
+  // No callback denotes an ordinary uncached interpretation. It does NOT
+  // disable iteration exposure or change the selected strategy.
+  std::function<bool(const void *)> IsStarResultCached;
+};
+
+struct OrderSignals final {
+  double structural = 0.0;
+  double expression = 0.0;
+  double star = 0.0;
+  double fill = 0.0;
+};
+
+struct CandidateScoreSample final {
+  std::size_t region = 0;
+  std::size_t step = 0;
+  std::size_t node = 0;
+  std::size_t version = 0;
+  OrderSignals signals;
+  double score = 0.0;
+};
+
+struct EliminationStepTrace final {
+  std::size_t region = 0;
+  std::size_t step = 0;
+  std::size_t node = 0;
+  OrderSignals signals;
+  double score = 0.0;
+  std::size_t allocated_nodes = 0;
+  std::size_t allocated_stars = 0;
+  std::size_t live_nodes = 0;
+  std::size_t live_edges = 0;
+  std::size_t active_nodes = 0;
+  std::size_t active_edges = 0;
+  std::size_t bypasses = 0;
+};
+
+struct OrderingDiagnostics final {
+  std::size_t regions = 0;
+  std::size_t selected_nodes = 0;
+  std::size_t score_refreshes = 0;
+  std::size_t stale_heap_entries = 0;
+  std::size_t heap_compactions = 0;
+  std::size_t allocated_nodes = 0;
+  std::size_t initial_allocated_nodes = 0;
+  std::size_t elimination_allocated_nodes = 0;
+  std::size_t backsubstitution_allocated_nodes = 0;
+  std::size_t boundary_allocated_nodes = 0;
+  std::size_t allocated_stars = 0;
+  std::size_t bypasses = 0;
+  std::size_t peak_live_nodes = 0;
+  std::size_t peak_live_edges = 0;
+  std::size_t peak_active_nodes = 0;
+  std::size_t peak_active_edges = 0;
+  std::uint64_t metadata_time_ns = 0;
+  std::uint64_t scoring_time_ns = 0;
+  std::uint64_t heap_time_ns = 0;
+  // Inclusive selector work; scoring/heap times are submetrics, not additive.
+  std::uint64_t selection_time_ns = 0;
+  std::vector<CandidateScoreSample> score_updates;
+  std::vector<EliminationStepTrace> trace;
+
+  void append(const OrderingDiagnostics &Other) {
+    for (auto Sample : Other.score_updates) {
+      Sample.region += regions;
+      score_updates.push_back(std::move(Sample));
+    }
+    for (auto Step : Other.trace) {
+      Step.region += regions;
+      trace.push_back(std::move(Step));
+    }
+    regions += Other.regions;
+    selected_nodes += Other.selected_nodes;
+    score_refreshes += Other.score_refreshes;
+    stale_heap_entries += Other.stale_heap_entries;
+    heap_compactions += Other.heap_compactions;
+    allocated_nodes += Other.allocated_nodes;
+    initial_allocated_nodes += Other.initial_allocated_nodes;
+    elimination_allocated_nodes += Other.elimination_allocated_nodes;
+    backsubstitution_allocated_nodes += Other.backsubstitution_allocated_nodes;
+    boundary_allocated_nodes += Other.boundary_allocated_nodes;
+    allocated_stars += Other.allocated_stars;
+    bypasses += Other.bypasses;
+    peak_live_nodes = std::max(peak_live_nodes, Other.peak_live_nodes);
+    peak_live_edges = std::max(peak_live_edges, Other.peak_live_edges);
+    peak_active_nodes = std::max(peak_active_nodes, Other.peak_active_nodes);
+    peak_active_edges = std::max(peak_active_edges, Other.peak_active_edges);
+    metadata_time_ns += Other.metadata_time_ns;
+    scoring_time_ns += Other.scoring_time_ns;
+    heap_time_ns += Other.heap_time_ns;
+    selection_time_ns += Other.selection_time_ns;
+  }
 };
 
 enum class OnNonConvergentStar {
@@ -80,7 +208,8 @@ struct SolveDiagnostics final {
   ADTRejectionReason adt_rejection_reason = ADTRejectionReason::None;
   std::size_t star_iterations_total = 0;
   bool max_star_hit = false;
-  // A client removed requested EAN laws that its transfer semantics do not satisfy.
+  // A client removed requested EAN laws that its transfer semantics do not
+  // satisfy.
   bool ean_laws_restricted = false;
   // Peak unique path-expression DAG nodes reachable from the WHOLE elimination
   // matrix at any point during construction (state elimination only). Populated
@@ -95,6 +224,12 @@ struct SolveDiagnostics final {
   std::size_t gen_time_us = 0;
   std::size_t norm_time_us = 0;
   std::size_t interp_time_us = 0;
+  // Time inside semantic Star evaluation; nested intervals are counted once.
+  std::uint64_t semantic_star_time_ns = 0;
+  OrderingDiagnostics ordering;
+  std::size_t procedure_context_count = 0;
+  std::size_t procedure_summary_builds = 0;
+  std::size_t procedure_summary_reuses = 0;
 };
 
 struct EliminationOptions final {
@@ -102,6 +237,7 @@ struct EliminationOptions final {
   // Pivot-order policy for the state-elimination engine. Default preserves the
   // historical baseline order; CostAware selects the paper's "Order" policy.
   OrderingPolicy Ordering = OrderingPolicy::Default;
+  OrderPolicyOptions Order;
   OnNonConvergentStar NonConvergentStarPolicy = OnNonConvergentStar::Fail;
   // 0 means "use Problem.maxStarIterations()".
   std::size_t MaxStarIterations = 0;
@@ -150,7 +286,18 @@ struct EliminationOptions final {
   // compositional unit (e.g. the affine-equalities client); other clients must
   // not set it (their IN facts would be left empty). Default off.
   bool InterpMemo = false;
+  // Memoize (expression, input fact), not just expression, to preserve guarded
+  // and other non-distributive transfer semantics. Reset at each interpretation
+  // epoch when external call/return facts may have changed.
+  bool MemoizeInterpretation = false;
+  std::size_t InterpretationMemoBudget = 4096;
 };
+
+inline EliminationOptions defaultContextOptions() {
+  EliminationOptions Options;
+  Options.Method = EliminationMethod::ADTSimple;
+  return Options;
+}
 
 // EAN/Greedy post-optimization configuration for the interprocedural
 // path-summary solver (ForwardInterSummarySolver). Mirrors the EAN-relevant
@@ -185,4 +332,3 @@ struct InterEANOptions final {
 
 } // namespace elimination
 
-#endif // DATAFLOW_ELIMINATION_CORE_OPTIONS_H_

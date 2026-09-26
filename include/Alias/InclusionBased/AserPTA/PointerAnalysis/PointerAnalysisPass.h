@@ -3,8 +3,7 @@
 // Updated for LLVM 14 compatibility
 //
 
-#ifndef ASER_PTA_POINTERANALYSISPASS_H
-#define ASER_PTA_POINTERANALYSISPASS_H
+#pragma once
 
 #include "Alias/InclusionBased/AserPTA/Util/Log.h"
 
@@ -76,4 +75,3 @@ public:
 
 template <typename Solver> char PointerAnalysisPass<Solver>::ID = 0;
 
-#endif // ASER_PTA_POINTERANALYSISPASS_H

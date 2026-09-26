@@ -7,8 +7,7 @@
  * and phi structures, which can be useful for analysis tools that don't
  * handle select instructions directly.
  */
-#ifndef TRANSFORM_LOWERSELECT_H
-#define TRANSFORM_LOWERSELECT_H
+#pragma once
 
 #include <llvm/IR/Module.h>
 #include <llvm/IR/PassManager.h>
@@ -36,4 +35,3 @@ public:
   PreservedAnalyses run(Module &M, ModuleAnalysisManager &MAM);
 };
 
-#endif // TRANSFORM_LOWERSELECT_H

@@ -1,6 +1,5 @@
 /** @file PulseSummary.h @brief Procedure summary storage for Pulse interprocedural analysis. */
-#ifndef CHECKER_PULSE_PULSESUMMARY_H
-#define CHECKER_PULSE_PULSESUMMARY_H
+#pragma once
 
 #include "Checker/Pulse/Core/PulseFormula.h"
 #include "Checker/Pulse/Domain/PulseDomain.h"
@@ -235,4 +234,3 @@ public:
 
 } // namespace pulse
 
-#endif // CHECKER_PULSE_PULSESUMMARY_H

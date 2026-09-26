@@ -1,5 +1,4 @@
-#ifndef DATAFLOW_APA_DOMAINS_AFFINERELATIONDOMAIN_H_
-#define DATAFLOW_APA_DOMAINS_AFFINERELATIONDOMAIN_H_
+#pragma once
 
 #include <cstdint>
 #include <map>
@@ -253,4 +252,3 @@ struct AffineResultContext {
 
 } // namespace elimination
 
-#endif // DATAFLOW_APA_DOMAINS_AFFINERELATIONDOMAIN_H_

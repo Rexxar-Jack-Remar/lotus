@@ -26,8 +26,7 @@
  */
 // Modified by Xiang Zhang, 2026
 // Additional changes licensed under the MIT License
-#ifndef UTIL_HEADER
-#define UTIL_HEADER
+#pragma once
 
 #include <cstdint>
 #include <iomanip>
@@ -190,4 +189,3 @@ class ConversionUtils {
 };
 }  // namespace stabilizer::parser
 
-#endif

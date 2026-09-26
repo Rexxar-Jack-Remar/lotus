@@ -1,5 +1,4 @@
-#ifndef DATAFLOW_APA_CORE_INTERRESULT_H_
-#define DATAFLOW_APA_CORE_INTERRESULT_H_
+#pragma once
 
 #include "Dataflow/APA/Core/Options.h"
 #include "Dataflow/APA/EAN/DagStats.h"
@@ -29,8 +28,19 @@ struct InterSummarySolveDiagnostics final {
   std::size_t gen_time_us = 0;
   std::size_t norm_time_us = 0;
   std::size_t interp_time_us = 0;
+  std::uint64_t semantic_star_time_ns = 0;
+  std::size_t star_iterations_total = 0;
+  OrderingDiagnostics ordering;
   ean::DagStats summary_before;
   ean::DagStats summary_after;
+};
+
+template <unsigned K, typename NodeT> struct ProcedureContextDiagnostics final {
+  NodeT Boundary{};
+  mono::CallStringCTX<NodeT, K> Context;
+  std::vector<NodeT>
+      Nodes; // Local node index -> program point for pivot traces.
+  SolveDiagnostics Diagnostics;
 };
 
 template <unsigned K, typename FactT, typename TransferT,
@@ -109,13 +119,31 @@ public:
     return SummaryDiagnostics;
   }
 
+  void setContextSolveDiagnostics(const SolveDiagnostics &D) {
+    HasContextDiagnostics = true;
+    ContextDiagnostics = D;
+  }
+  bool hasContextSolveDiagnostics() const { return HasContextDiagnostics; }
+  const SolveDiagnostics &contextSolveDiagnostics() const {
+    return ContextDiagnostics;
+  }
+  void setProcedureContextDiagnostics(
+      std::vector<ProcedureContextDiagnostics<K, n_t>> Records) {
+    ProcedureDiagnostics = std::move(Records);
+  }
+  const auto &procedureContextDiagnostics() const {
+    return ProcedureDiagnostics;
+  }
+
 private:
   bool HasSolveMetadata = false;
   SolveStatus Status = SolveStatus::Ok;
   bool HasSummaryDiagnostics = false;
   InterSummarySolveDiagnostics SummaryDiagnostics;
+  bool HasContextDiagnostics = false;
+  SolveDiagnostics ContextDiagnostics;
+  std::vector<ProcedureContextDiagnostics<K, n_t>> ProcedureDiagnostics;
 };
 
 } // namespace elimination
 
-#endif // DATAFLOW_APA_CORE_INTERRESULT_H_

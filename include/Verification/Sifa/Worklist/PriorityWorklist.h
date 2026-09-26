@@ -6,8 +6,7 @@
 //
 //===----------------------------------------------------------------------===//
 
-#ifndef LOTUS_VERIFICATION_SIFA_WORKLIST_PRIORITYWORKLIST_H
-#define LOTUS_VERIFICATION_SIFA_WORKLIST_PRIORITYWORKLIST_H
+#pragma once
 
 #include "Verification/Sifa/Worklist/IWorklistWithInputs.h"
 
@@ -117,4 +116,3 @@ extern template class lotus::sifa::PriorityWorklist<
 extern template class lotus::sifa::PriorityWorklist<const llvm::Function *,
                                                     bool>;
 
-#endif // LOTUS_VERIFICATION_SIFA_WORKLIST_PRIORITYWORKLIST_H

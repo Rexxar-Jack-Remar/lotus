@@ -4,8 +4,7 @@
 //
 //===----------------------------------------------------------------------===//
 
-#ifndef LOTUS_VERIFICATION_SIFA_FLUID_NEVERFLUID_H
-#define LOTUS_VERIFICATION_SIFA_FLUID_NEVERFLUID_H
+#pragma once
 
 #include "Verification/Sifa/Fluid/IFluid.h"
 
@@ -27,4 +26,3 @@ public:
 extern template class lotus::sifa::NeverFluid<bool>;
 extern template class lotus::sifa::NeverFluid<lotus::sifa::SymAbsState>;
 
-#endif // LOTUS_VERIFICATION_SIFA_FLUID_NEVERFLUID_H

@@ -6,7 +6,7 @@ target_link_libraries(lotus-cfl-interleaved-dyck-graphaux
         CanaryInterleavedDyckGraphReduction)
 
 add_executable(lotus-cfl-interleaved-dyck-dkmerge
-    ${CMAKE_SOURCE_DIR}/lib/CFL/InterleavedDyck/GraphReduction/dkMerge.cpp)
+    ${CMAKE_SOURCE_DIR}/lib/CFL/InterleavedDyck/GraphReduction/DkMerge.cpp)
 target_link_libraries(lotus-cfl-interleaved-dyck-dkmerge
     PRIVATE
         CanaryInterleavedDyckGraphReduction)

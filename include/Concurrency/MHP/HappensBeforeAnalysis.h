@@ -1,7 +1,6 @@
-#ifndef HAPPENS_BEFORE_ANALYSIS_H
-#define HAPPENS_BEFORE_ANALYSIS_H
+#pragma once
 
-#include "Concurrency/MHP/MHPAnalysis.h"
+#include "Concurrency/MHP/IMHPAnalysis.h"
 #include "Concurrency/Utils/CppAtomics.h"
 
 #include <memory>
@@ -30,7 +29,7 @@ class AliasAnalysisWrapper;
  */
 class HappensBeforeAnalysis {
 public:
-  explicit HappensBeforeAnalysis(llvm::Module &module, mhp::MHPAnalysis &mhp);
+  explicit HappensBeforeAnalysis(llvm::Module &module, const mhp::IMHPAnalysis &mhp);
 
   void analyze();
 
@@ -137,7 +136,7 @@ private:
   const llvm::Value *traceSharedState(const llvm::Value *value) const;
 
   llvm::Module &m_module;
-  mhp::MHPAnalysis &m_mhp;
+  const mhp::IMHPAnalysis &m_mhp;
   lotus::AliasAnalysisWrapper *m_alias_analysis = nullptr;
   CppAtomics::CppMemoryModel m_cpp_memory_model =
       CppAtomics::CppMemoryModel::Cpp20AndLater;
@@ -165,4 +164,3 @@ private:
 
 } // namespace lotus
 
-#endif // HAPPENS_BEFORE_ANALYSIS_H

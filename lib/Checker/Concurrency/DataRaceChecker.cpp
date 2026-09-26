@@ -3,6 +3,8 @@
  * Author: rainoftime
  */
 #include "Checker/Concurrency/DataRaceChecker.h"
+#include "Concurrency/MHP/MHPAnalysis.h"
+#include "Concurrency/OpenMP/OpenMPSemantics.h"
 
 #include "Alias/Infrastructure/AliasAnalysisWrapper/AliasAnalysisWrapper.h"
 #include "Concurrency/MHP/HappensBeforeAnalysis.h"

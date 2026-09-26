@@ -1,5 +1,4 @@
-#ifndef ANALYSIS_DATAFLOW_WPDS_DATAFLOWFACTS_H_
-#define ANALYSIS_DATAFLOW_WPDS_DATAFLOWFACTS_H_
+#pragma once
 
 #include "Utils/LLVM/SystemHeaders.h"
 
@@ -58,4 +57,3 @@ private:
 
 } // namespace wpds
 
-#endif // ANALYSIS_DATAFLOW_WPDS_DATAFLOWFACTS_H_

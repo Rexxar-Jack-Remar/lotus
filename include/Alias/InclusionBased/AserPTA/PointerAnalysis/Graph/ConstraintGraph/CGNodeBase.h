@@ -1,8 +1,7 @@
 //
 // Created by peiming on 11/1/19.
 //
-#ifndef ASER_PTA_CGNODEBASE_H
-#define ASER_PTA_CGNODEBASE_H
+#pragma once
 
 #include "Alias/InclusionBased/AserPTA/PointerAnalysis/Graph/GraphBase/GraphBase.h"
 
@@ -370,4 +369,3 @@ public:
 
 } // namespace aser
 
-#endif

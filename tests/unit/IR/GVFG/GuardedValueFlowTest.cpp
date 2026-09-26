@@ -1,5 +1,5 @@
 #include "IR/GVFG/GuardedValueFlowGraph.h"
-#include "IR/GVFG/LotusAdapter.h"
+#include "IR/GVFG/LotusAAWrapper.h"
 #include "TestUtils/LLVMHelpers.h"
 
 #include <llvm/IR/InstIterator.h>
@@ -56,7 +56,7 @@ protected:
     pipeline.pm->add(new gsa::GateAnalysisPass());
     pipeline.pm->add(pipeline.lotus);
     pipeline.pm->add(pipeline.builder);
-    pipeline.pm->add(new LotusGuardedValueFlowAdapterPass());
+    pipeline.pm->add(new LotusAAWrapper());
     pipeline.pm->run(M);
     return pipeline;
   }
@@ -180,6 +180,67 @@ TEST_F(GuardedValueFlowTest, KeepsDuplicateEdgesBidirectionallyConsistent) {
   EXPECT_FLOAT_EQ(child->parents().front().confidence, 0.75f);
   EXPECT_EQ(parent->children().front().condition, second);
   EXPECT_EQ(child->parents().front().condition, second);
+}
+
+TEST_F(GuardedValueFlowTest, RangeSnapshotsSupportNestedIteration) {
+  const char *source = R"(
+    declare void @first()
+    declare void @second()
+
+    define void @test(i32 %x) {
+    entry:
+      ret void
+    }
+  )";
+
+  auto module = parseModule(source);
+  ASSERT_NE(module, nullptr);
+  Function *F = module->getFunction("test");
+  Function *first = module->getFunction("first");
+  Function *second = module->getFunction("second");
+  ASSERT_NE(F, nullptr);
+  ASSERT_NE(first, nullptr);
+  ASSERT_NE(second, nullptr);
+
+  GuardedValueFlowGraph graph(F);
+  BasicBlock *entry = &F->getEntryBlock();
+  auto *common = graph.createNode<GuardedValueFlowNode>(
+      GuardedValueFlowNode::Kind::CommonArgument,
+      Type::getInt32Ty(context), &graph, entry, F->getArg(0));
+  auto *first_pseudo = graph.createNode<GuardedValueFlowNode>(
+      GuardedValueFlowNode::Kind::PseudoArgument,
+      Type::getInt32Ty(context), &graph, entry);
+  auto *second_pseudo = graph.createNode<GuardedValueFlowNode>(
+      GuardedValueFlowNode::Kind::PseudoArgument,
+      Type::getInt32Ty(context), &graph, entry);
+  auto *call = graph.createSite<GuardedValueFlowCallSite>(&graph, nullptr);
+  call->addCommonInput(common);
+  call->addPseudoInput(first, first_pseudo);
+  call->addPseudoInput(second, second_pseudo);
+
+  auto first_inputs = call->inputs(first);
+  auto second_inputs = call->inputs(second);
+  ASSERT_EQ(first_inputs.size(), 2u);
+  ASSERT_EQ(second_inputs.size(), 2u);
+  EXPECT_EQ(first_inputs[1].InputNode, first_pseudo);
+  EXPECT_EQ(second_inputs[1].InputNode, second_pseudo);
+
+  auto first_begin = call->input_begin(first);
+  auto first_end = call->input_end(first);
+  auto second_begin = call->input_begin(second);
+  auto second_end = call->input_end(second);
+  ASSERT_EQ(std::distance(first_begin, first_end), 2);
+  ASSERT_EQ(std::distance(second_begin, second_end), 2);
+  EXPECT_EQ((first_begin + 1)->InputNode, first_pseudo);
+  EXPECT_EQ((second_begin + 1)->InputNode, second_pseudo);
+
+  auto arguments = graph.arguments();
+  ASSERT_EQ(arguments.size(), 1u);
+  EXPECT_EQ(arguments.front(), common);
+  auto arg_begin = graph.arg_begin();
+  auto arg_end = graph.arg_end();
+  ASSERT_EQ(std::distance(arg_begin, arg_end), 1);
+  EXPECT_EQ(*arg_begin, common);
 }
 
 TEST_F(GuardedValueFlowTest, MergesRepeatedProducerMatchingRegions) {
@@ -485,7 +546,7 @@ TEST_F(GuardedValueFlowTest,
   auto *child = graph.createNode<GuardedValueFlowNode>(
       GuardedValueFlowNode::Kind::SimpleOperand, aggregate_ty, &graph, entry);
 
-  auto *linked = LotusGuardedValueFlowAdapterPass::safeLink(
+  auto *linked = LotusAAWrapper::safeLink(
       graph, parent, child, 0.5f, ConditionRef::none());
   ASSERT_NE(linked, nullptr);
   EXPECT_EQ(linked->getKind(), GuardedValueFlowNode::Kind::Unknown);
@@ -525,7 +586,7 @@ TEST_F(GuardedValueFlowTest,
       GuardedValueFlowNode::Kind::SimpleOperand, aggregate_ty, &graph, entry);
   producer_mem->addChild(producer_value);
 
-  auto *linked = LotusGuardedValueFlowAdapterPass::safeLink(
+  auto *linked = LotusAAWrapper::safeLink(
       graph, load_mem, producer_mem);
   ASSERT_NE(linked, nullptr);
   load_mem->addMatchingRegion(linked, graph.getAlwaysTrueRegion());

@@ -6,7 +6,14 @@
 #include <llvm/IR/Instruction.h>
 #include <llvm/Support/raw_ostream.h>
 
+namespace lotus { class AliasAnalysisWrapper; }
+namespace lotus::concurrency::OpenMP { class OpenMPSemantics; }
+namespace OpenMP { class OpenMPSemantics; }
+
 namespace mhp {
+
+class ThreadFlowGraph;
+class SyncNode;
 
 using ThreadID = size_t;
 using InstructionSet = std::unordered_set<const llvm::Instruction *>;
@@ -16,6 +23,13 @@ public:
   virtual ~IMHPAnalysis() = default;
 
   virtual void analyze() = 0;
+
+  virtual const ThreadFlowGraph& getThreadFlowGraph() const = 0;
+  virtual size_t getAnalysisGeneration() const = 0;
+  virtual lotus::AliasAnalysisWrapper* getAliasAnalysis() const = 0;
+  virtual const OpenMP::OpenMPSemantics* getOpenMPSemantics() const = 0;
+  virtual bool instructionMayExecuteMultipleTimes(const llvm::Instruction* inst) const = 0;
+  virtual bool joinEdgeMustOrderTarget(const SyncNode* join_node, const SyncNode* target_node) const = 0;
 
   virtual bool mayHappenInParallel(const llvm::Instruction *i1,
                                    const llvm::Instruction *i2) const = 0;

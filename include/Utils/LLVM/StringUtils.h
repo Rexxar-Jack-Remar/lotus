@@ -9,8 +9,7 @@
  * - Text alignment and output utilities
  * - Ordinal suffix generation
  */
-#ifndef UTILS_STRINGUTILS_H
-#define UTILS_STRINGUTILS_H
+#pragma once
 
 #include <cstdio>
 #include <memory>
@@ -143,5 +142,3 @@ std::string to_binary_string(int n);
 
 // Bool to string
 inline const char *bool_to_string(bool b) { return b ? "true" : "false"; }
-
-#endif /* UTILS_STRINGUTILS_H */

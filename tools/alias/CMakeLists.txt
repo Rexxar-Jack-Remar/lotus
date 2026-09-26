@@ -22,6 +22,12 @@ target_link_libraries(lotus-alias-fspta PRIVATE
   ${LLVM_LINK_COMPONENTS}
 )
 
+add_executable(lotus-alias-bootstrap lotus-alias-bootstrap.cpp)
+target_link_libraries(lotus-alias-bootstrap PRIVATE
+  CanaryBootstrapAA
+  LLVMIRReader
+)
+
 # Sea-DSA Memory Graph Analysis Tool
 add_executable(lotus-alias-sea-dsa-dg lotus-alias-sea-dsa-dg.cpp)
 target_link_libraries(lotus-alias-sea-dsa-dg PRIVATE
@@ -48,6 +54,14 @@ target_link_libraries(lotus-alias-fpa PRIVATE
 add_executable(lotus-alias-lotus-aa lotus-alias-lotus-aa.cpp)
 target_link_libraries(lotus-alias-lotus-aa PRIVATE
   LotusAA
+  CanaryAliasCLIUtils
+  ${LLVM_LINK_COMPONENTS}
+)
+
+# GPG flow- and context-sensitive points-to analysis tool
+add_executable(lotus-alias-gpg lotus-alias-gpg.cpp)
+target_link_libraries(lotus-alias-gpg PRIVATE
+  CanaryGPG
   CanaryAliasCLIUtils
   ${LLVM_LINK_COMPONENTS}
 )
@@ -82,10 +96,18 @@ target_link_libraries(lotus-alias-tpa PRIVATE
 add_executable(lotus-alias-call-graph lotus-alias-call-graph.cpp)
 target_link_libraries(lotus-alias-call-graph PRIVATE
   CanaryDyckAA
+  CanaryGPG
   LotusAA
   CanaryFPA
-  CanaryDFPA
   AserPTA
+  CanaryAliasCLIUtils
+  ${LLVM_LINK_COMPONENTS}
+)
+
+# CclyzerAA Datalog-based Pointer Analysis Tool
+add_executable(lotus-alias-cclyzer-aa lotus-alias-cclyzer-aa.cpp)
+target_link_libraries(lotus-alias-cclyzer-aa PRIVATE
+  LotusCclyzerAA
   CanaryAliasCLIUtils
   ${LLVM_LINK_COMPONENTS}
 )

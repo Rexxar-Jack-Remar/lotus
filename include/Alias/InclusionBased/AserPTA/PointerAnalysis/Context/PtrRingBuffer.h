@@ -2,8 +2,7 @@
 // Created by peiming on 11/19/19.
 //
 
-#ifndef ASER_PTA_PTRRINGBUFFER_H
-#define ASER_PTA_PTRRINGBUFFER_H
+#pragma once
 
 #include <array>
 #include <cstdint>
@@ -92,4 +91,3 @@ public:
 
 } // namespace aser
 
-#endif // ASER_PTA_PTRRINGBUFFER_H

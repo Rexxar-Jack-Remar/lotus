@@ -1,6 +1,5 @@
 
-#ifndef SYSTEMHEADERS_H
-#define SYSTEMHEADERS_H
+#pragma once
 #include <deque>
 #include <list>
 #include <map>
@@ -55,4 +54,3 @@
 
 using namespace llvm;
 
-#endif

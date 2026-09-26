@@ -1,6 +1,5 @@
 /** @file PulseJoin.h @brief Join operations for Pulse abstract domains. */
-#ifndef CHECKER_PULSE_PULSEJOIN_H
-#define CHECKER_PULSE_PULSEJOIN_H
+#pragma once
 
 #include "Checker/Pulse/Core/PulsePathContext.h"
 #include "Checker/Pulse/Domain/PulseDomain.h"
@@ -138,4 +137,3 @@ private:
 
 } // namespace pulse
 
-#endif // CHECKER_PULSE_PULSEJOIN_H

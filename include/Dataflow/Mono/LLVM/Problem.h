@@ -1,5 +1,4 @@
-#ifndef LOTUS_DATAFLOW_MONO_LLVM_PROBLEM_H_
-#define LOTUS_DATAFLOW_MONO_LLVM_PROBLEM_H_
+#pragma once
 
 #include "llvm/ADT/ArrayRef.h"
 #include "llvm/IR/Function.h"
@@ -444,4 +443,3 @@ protected:
 
 } // namespace mono
 
-#endif // LOTUS_DATAFLOW_MONO_LLVM_PROBLEM_H_

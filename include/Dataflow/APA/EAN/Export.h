@@ -1,5 +1,4 @@
-#ifndef DATAFLOW_APA_EAN_EXPORT_H_
-#define DATAFLOW_APA_EAN_EXPORT_H_
+#pragma once
 
 // Export: canonical e-graph  ->  PathExprFactory<TransferT>::Ref.
 //
@@ -125,4 +124,3 @@ exportBatch(const ImportResult<TransferT> &imp, PathExprFactory<TransferT> &F,
 } // namespace ean
 } // namespace elimination
 
-#endif // DATAFLOW_APA_EAN_EXPORT_H_

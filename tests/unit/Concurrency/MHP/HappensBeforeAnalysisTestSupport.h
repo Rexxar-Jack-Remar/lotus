@@ -1,6 +1,7 @@
 #pragma once
 
 #include "Concurrency/MHP/HappensBeforeAnalysis.h"
+#include "Concurrency/MHP/MHPAnalysis.h"
 
 #include "TestUtils/LLVMHelpers.h"
 

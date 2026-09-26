@@ -1,5 +1,4 @@
-#ifndef DATAFLOW_APA_LLVM_INTERPROBLEM_H_
-#define DATAFLOW_APA_LLVM_INTERPROBLEM_H_
+#pragma once
 
 #include "llvm/IR/Function.h"
 #include "llvm/IR/Instructions.h"
@@ -112,4 +111,3 @@ protected:
 
 } // namespace elimination
 
-#endif // DATAFLOW_APA_LLVM_INTERPROBLEM_H_

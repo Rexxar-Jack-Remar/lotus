@@ -40,8 +40,7 @@
  OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE
  OR OTHER DEALINGS IN THE SOFTWARE.
  */
-#ifndef NOELLE_SRC_CORE_METADATA_MANAGER_METADATAMANAGER_H_
-#define NOELLE_SRC_CORE_METADATA_MANAGER_METADATAMANAGER_H_
+#pragma once
 
 #include "Analysis/DebugInfo/MetadataManager/LoopStructure.h"
 #include "Analysis/DebugInfo/MetadataManager/MetadataEntry.h"
@@ -282,5 +281,3 @@ private:
 };
 
 } // namespace noelle
-
-#endif // NOELLE_SRC_CORE_METADATA_MANAGER_METADATAMANAGER_H_

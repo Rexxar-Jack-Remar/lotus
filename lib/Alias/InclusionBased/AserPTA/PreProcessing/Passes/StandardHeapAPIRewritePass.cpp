@@ -98,6 +98,8 @@ static bool identifyOverridenHeapAPIs(Module &M, set<StringRef> &HeapAPIs) {
       builder.CreateRet(call);
 
       // inline them
+      F.removeFnAttr(Attribute::NoInline);
+      F.removeFnAttr(Attribute::OptimizeNone);
       F.addFnAttr(Attribute::AlwaysInline);
     }
 
@@ -139,6 +141,8 @@ static bool identifyOverridenHeapAPIs(Module &M, set<StringRef> &HeapAPIs) {
       builder.CreateRet(call);
 
       // mark the function as always inline
+      F.removeFnAttr(Attribute::NoInline);
+      F.removeFnAttr(Attribute::OptimizeNone);
       F.addFnAttr(Attribute::AlwaysInline);
       changed = true;
       continue;
@@ -192,6 +196,8 @@ static bool identifyOverridenHeapAPIs(Module &M, set<StringRef> &HeapAPIs) {
         Value *bitCast = builder.CreateBitCast(call, F.getReturnType());
         builder.CreateRet(bitCast);
 
+        F.removeFnAttr(Attribute::NoInline);
+        F.removeFnAttr(Attribute::OptimizeNone);
         F.addFnAttr(Attribute::AlwaysInline);
         changed = true;
         continue;

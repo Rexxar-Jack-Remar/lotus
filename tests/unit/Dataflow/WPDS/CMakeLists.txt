@@ -1,7 +1,3 @@
 # WPDS DataFlow Unit Tests
 
-add_lotus_test_suite(wpds_test
-  SOURCES WPDSTest.cpp
-  LINK_LIBS
-    WPDSDataFlow
-    wpds++)
+lotus_collect_test_sources(dataflow_tests WPDSTest.cpp)

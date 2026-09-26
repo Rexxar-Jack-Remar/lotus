@@ -19,8 +19,7 @@
 /// This file contains the declaration of the Taint analysis pass.
 ///
 //===----------------------------------------------------------------------===//
-#ifndef LIF_ANALYSIS_TAINT_H
-#define LIF_ANALYSIS_TAINT_H
+#pragma once
 
 #include <llvm/ADT/DenseSet.h>
 #include <llvm/IR/Module.h>
@@ -68,4 +67,3 @@ void taintFunction(llvm::Function &F, TaintedInfo &T,
                    llvm::FunctionAnalysisManager &FAM);
 }; // namespace lotus::lif::analysis
 
-#endif

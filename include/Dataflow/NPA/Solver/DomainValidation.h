@@ -1,5 +1,4 @@
-#ifndef NPA_SOLVER_DOMAIN_VALIDATION_H
-#define NPA_SOLVER_DOMAIN_VALIDATION_H
+#pragma once
 
 #include "Dataflow/NPA/Core/Domain.h"
 
@@ -131,4 +130,3 @@ inline void require_domain_contract(bool contract_ok) {
 
 } // namespace npa
 
-#endif // NPA_SOLVER_DOMAIN_VALIDATION_H

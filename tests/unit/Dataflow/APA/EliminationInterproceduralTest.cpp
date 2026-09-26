@@ -1,5 +1,5 @@
 #include "Dataflow/APA/LLVM/InterProblem.h"
-#include "Dataflow/APA/Solver/InterSolver.h"
+#include "Dataflow/APA/Solver/Inter/ContextSolver.h"
 #include "EliminationTestSupport.h"
 
 namespace {

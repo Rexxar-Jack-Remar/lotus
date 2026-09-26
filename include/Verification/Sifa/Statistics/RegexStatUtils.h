@@ -7,8 +7,7 @@
 //
 //===----------------------------------------------------------------------===//
 
-#ifndef LOTUS_VERIFICATION_SIFA_STATISTICS_REGEXSTATUTILS_H
-#define LOTUS_VERIFICATION_SIFA_STATISTICS_REGEXSTATUTILS_H
+#pragma once
 
 #include "Utils/Algorithms/PathExpressions/LabeledGraph.h"
 #include "Utils/Algorithms/PathExpressions/PathExpressionComputer.h"
@@ -124,4 +123,3 @@ RegexDag<L> regexToDag(SifaStats &stats,
 } // namespace sifa
 } // namespace lotus
 
-#endif // LOTUS_VERIFICATION_SIFA_STATISTICS_REGEXSTATUTILS_H

@@ -1,5 +1,4 @@
-#ifndef NPA_SPARSE_FACT_SET_H
-#define NPA_SPARSE_FACT_SET_H
+#pragma once
 
 #include <cstddef>
 #include <cstdint>
@@ -306,4 +305,3 @@ public:
 
 } // namespace npa
 
-#endif // NPA_SPARSE_FACT_SET_H

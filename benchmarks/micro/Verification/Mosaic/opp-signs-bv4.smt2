@@ -1,0 +1,16 @@
+; Signed arithmetic query derived from Mosaic's opp-signs workload.
+(set-logic HORN)
+(define-sort Word () (_ BitVec 4))
+(declare-rel p (Word Word Word))
+(declare-rel q (Word Word))
+(declare-rel fail ())
+(declare-var x Word)
+(declare-var a Word)
+(declare-var b Word)
+
+(rule (=> (bvsgt x (_ bv0 4)) (p x (_ bv0 4) (_ bv0 4))))
+(rule (=> (and (p x a b) (bvslt a x))
+          (p x (bvadd a (_ bv1 4)) (bvsub b (_ bv1 4)))))
+(rule (=> (and (p x a b) (not (bvslt a x))) (q a b)))
+(rule (=> (and (q a b) (not (bvslt (bvxor a b) (_ bv0 4)))) fail))
+(query fail)

@@ -1,4 +1,4 @@
-#include "Dataflow/APA/Solver/CallGraphSCC.h"
+#include "Dataflow/APA/Solver/Inter/CallGraph.h"
 
 #include <unordered_map>
 #include <vector>

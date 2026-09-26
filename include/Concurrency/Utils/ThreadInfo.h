@@ -1,7 +1,6 @@
 
 
-#ifndef THREADINFO_H
-#define THREADINFO_H
+#pragma once
 
 #include <list>
 #include <unordered_map>
@@ -58,4 +57,3 @@ private:
   static std::unordered_map<const llvm::CallBase *, size_t> ReversedTIDMap;
 };
 
-#endif // THREADINFO_H

@@ -5,8 +5,7 @@
  * @author Migrated from Symbiotic
  */
 
-#ifndef LOTUS_VERIFICATION_TRANSFORM_DELETE_UNDEFINED_H
-#define LOTUS_VERIFICATION_TRANSFORM_DELETE_UNDEFINED_H
+#pragma once
 
 #include "llvm/Pass.h"
 
@@ -49,4 +48,3 @@ public:
 } // namespace verification
 } // namespace lotus
 
-#endif // LOTUS_VERIFICATION_TRANSFORM_DELETE_UNDEFINED_H

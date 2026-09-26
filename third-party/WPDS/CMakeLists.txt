@@ -1,5 +1,5 @@
 # WPDS libraries
-set(WPDS_SRCS dictionary.cpp common.cpp keys.cpp key_source.cpp)
+set(WPDS_SRCS Dictionary.cpp Common.cpp Keys.cpp KeySource.cpp)
 set(WPDS_INCLUDE_DIRS ${CMAKE_CURRENT_SOURCE_DIR}/.. ${CMAKE_CURRENT_SOURCE_DIR})
 
 # Create libraries

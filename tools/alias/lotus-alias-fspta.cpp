@@ -1,14 +1,16 @@
 /**
  * @file lotus-alias-fspta.cpp
- * @brief Exhaustive sparse flow-sensitive pointer-analysis driver.
+ * @brief Driver for Lotus flow-sensitive pointer analyses.
  */
 #include "Alias/InclusionBased/FlowSensitive/FlowSensitivePTA.h"
+#include "Alias/InclusionBased/FlowSensitive/ValueFlowPTA.h"
 #include "Alias/InclusionBased/FlowSensitive/VersionedFlowSensitivePTA.h"
 #include "Alias/Infrastructure/AliasAnalysisWrapper/CLIUtils.h"
 #include "IR/ICFG/ICFGBuilder.h"
 #include "IR/SVFG/SVFGBuilder.h"
 
 #include <algorithm>
+#include <exception>
 #include <map>
 
 #include <llvm/IR/InstIterator.h>
@@ -26,9 +28,9 @@ using namespace lotus::analysis;
 namespace {
 enum class SetBackendOption { Mutable, HashConsed };
 enum class PartitionOption { Distinct, IntraDisjoint, InterDisjoint };
-enum class AnalysisOption { FlowSensitive, Versioned };
+enum class AnalysisOption { FlowSensitive, Versioned, ValueFlow };
 
-cl::OptionCategory FsptaCategory("Lotus exhaustive flow-sensitive PTA");
+cl::OptionCategory FsptaCategory("Lotus flow-sensitive pointer analyses");
 cl::opt<std::string> InputFilename(cl::Positional,
                                    cl::desc("<input bitcode file>"),
                                    cl::Required, cl::cat(FsptaCategory));
@@ -37,7 +39,9 @@ cl::opt<AnalysisOption> Analysis(
     cl::values(clEnumValN(AnalysisOption::FlowSensitive, "fspta",
                           "Conventional sparse flow-sensitive analysis"),
                clEnumValN(AnalysisOption::Versioned, "vfspta",
-                          "Object-versioned flow-sensitive analysis")),
+                          "Object-versioned flow-sensitive analysis"),
+               clEnumValN(AnalysisOption::ValueFlow, "vfpta",
+                          "Value-flow-based flow-sensitive analysis")),
     cl::init(AnalysisOption::FlowSensitive), cl::cat(FsptaCategory));
 cl::opt<SetBackendOption> SetBackend(
     "points-to-sets", cl::desc("Points-to set backend"),
@@ -98,19 +102,145 @@ void printValue(const Value *value, raw_ostream &os) {
   else
     value->printAsOperand(os, false);
 }
+
+int runValueFlowAnalysis(const Module &module) {
+  if (PrintMemory) {
+    errs() << "lotus-alias-fspta: --print-memory is unavailable for vfpta; "
+              "use --print-pts instead\n";
+    return 1;
+  }
+  if (!DumpSVFG.empty()) {
+    errs() << "lotus-alias-fspta: --dump-svfg is unavailable for vfpta, "
+              "which builds its own value-flow graph\n";
+    return 1;
+  }
+
+  ValueFlowPTA solver(module);
+  try {
+    solver.analyze();
+  } catch (const std::exception &error) {
+    errs() << "lotus-alias-fspta: vfpta failed: " << error.what() << "\n";
+    return 1;
+  }
+
+  if (PrintPointsTo) {
+    auto printPointsTo = [&](const Value *value) {
+      if (!value || !value->getType()->isPointerTy())
+        return;
+      outs() << "pts(";
+      printValue(value, outs());
+      outs() << ") = {";
+      bool first = true;
+      for (ValueFlowPTA::ObjectID object : solver.getPointsTo(value)) {
+        if (!first)
+          outs() << ", ";
+        first = false;
+        outs() << object << ":";
+        if (object == solver.getNullObjectId())
+          outs() << "<null>";
+        else if (object == solver.getUnknownObjectId())
+          outs() << "<unknown>";
+        else
+          printValue(solver.getObjectValue(object), outs());
+      }
+      outs() << "}\n";
+    };
+    for (const GlobalVariable &global : module.globals())
+      printPointsTo(&global);
+    for (const Function &function : module) {
+      printPointsTo(&function);
+      for (const Argument &argument : function.args())
+        printPointsTo(&argument);
+      if (!function.isDeclaration())
+        for (const Instruction &instruction : instructions(function))
+          printPointsTo(&instruction);
+    }
+  }
+
+  if (DumpStats) {
+    const auto &stats = solver.getStatistics();
+    outs() << "vfpta.objects=" << stats.objects << "\n"
+           << "vfpta.value-nodes=" << stats.valueNodes << "\n"
+           << "vfpta.control-blocks=" << stats.controlBlocks << "\n"
+           << "vfpta.call-graph-iterations=" << stats.callGraphIterations
+           << "\n"
+           << "vfpta.resolved-indirect-targets="
+           << stats.resolvedIndirectTargets << "\n"
+           << "vfpta.conservative-external-calls="
+           << stats.conservativeExternalCalls << "\n"
+           << "vfpta.object-traversals=" << stats.solver.objectTraversals
+           << "\n"
+           << "vfpta.indirect-flow-computations="
+           << stats.solver.indirectFlowComputations << "\n"
+           << "vfpta.indirect-edges=" << stats.solver.indirectEdges << "\n"
+           << "vfpta.strong-update-sites=" << stats.solver.strongUpdateSites
+           << "\n"
+           << "vfpta.projected-events=" << stats.solver.projectedEvents << "\n"
+           << "vfpta.expanded-control-flow-nodes="
+           << stats.solver.expandedControlFlowNodes << "\n"
+           << "vfpta.idf-nodes=" << stats.solver.iteratedDominanceFrontierNodes
+           << "\n"
+           << "vfpta.sparse-graph-nodes=" << stats.solver.sparseGraphNodes
+           << "\n"
+           << "vfpta.sparse-graph-edges=" << stats.solver.sparseGraphEdges
+           << "\n"
+           << "vfpta.used-weak-fallback="
+           << (stats.solver.usedWeakFallback ? "true" : "false") << "\n";
+    if (stats.solver.usedWeakFallback)
+      outs() << "vfpta.weak-fallback-reason=" << stats.solver.fallbackReason
+             << "\n";
+  }
+
+  std::size_t validations = 0;
+  std::size_t failures = 0;
+  if (ValidateAnnotations) {
+    for (const Function &function : module) {
+      for (const Instruction &instruction : instructions(function)) {
+        const auto *call = dyn_cast<CallBase>(&instruction);
+        const Function *callee = call ? call->getCalledFunction() : nullptr;
+        if (!callee || call->arg_size() < 2)
+          continue;
+        const bool expectAlias = callee->getName() == "__aser_alias__";
+        const bool expectNoAlias = callee->getName() == "__aser_no_alias__";
+        if (!expectAlias && !expectNoAlias)
+          continue;
+        ++validations;
+        const bool result =
+            solver.mayAlias(call->getArgOperand(0), call->getArgOperand(1));
+        if (result == expectAlias)
+          continue;
+        ++failures;
+        errs() << InputFilename << ": annotation mismatch in "
+               << function.getName() << ": expected "
+               << (expectAlias ? "alias" : "no-alias") << ", got "
+               << (result ? "alias" : "no-alias") << " for ";
+        printValue(call->getArgOperand(0), errs());
+        errs() << " and ";
+        printValue(call->getArgOperand(1), errs());
+        errs() << "\n";
+      }
+    }
+    outs() << "vfpta.validations=" << validations << "\n"
+           << "vfpta.validation-failures=" << failures << "\n";
+  }
+  return failures == 0 ? 0 : 2;
+}
 } // namespace
 
 int main(int argc, char **argv) {
   InitLLVM init(argc, argv);
   cl::HideUnrelatedOptions(FsptaCategory);
   cl::ParseCommandLineOptions(argc, argv,
-                              "Lotus exhaustive sparse flow-sensitive PTA\n");
+                              "Lotus flow-sensitive pointer analyses\n");
   LLVMContext context;
   SMDiagnostic diagnostic;
   std::unique_ptr<Module> module =
       loadIRModule(InputFilename, context, diagnostic, argv[0]);
   if (!module)
     return 1;
+
+  if (Analysis == AnalysisOption::ValueFlow)
+    return runValueFlowAnalysis(*module);
 
   ICFG icfg;
   ICFGBuilder icfgBuilder(&icfg);
@@ -154,21 +284,18 @@ int main(int argc, char **argv) {
         std::make_unique<FlowSensitivePTA>(*graph, std::move(solverConfig));
     solver->solve();
   }
-  auto queryPointsTo = [&](const Value *value)
-      -> std::optional<SVFGNodeBS> {
+  auto queryPointsTo = [&](const Value *value) -> std::optional<SVFGNodeBS> {
     return versionedSolver ? versionedSolver->pointsTo(value)
                            : solver->pointsTo(value);
   };
-  auto queryMemory = [&](const SVFGNode *node, uint32_t object,
-                         bool outgoing) {
+  auto queryMemory = [&](const SVFGNode *node, uint32_t object, bool outgoing) {
     if (!versionedSolver)
       return outgoing ? SVFGNodeBS(solver->memoryOut(node, object))
                       : SVFGNodeBS(solver->memoryIn(node, object));
-    const auto version = outgoing
-                             ? versionedSolver->getYield(node->getId(), object)
-                             : versionedSolver->getConsume(node->getId(), object);
-    return SVFGNodeBS(
-        versionedSolver->versionedPointsTo(object, version));
+    const auto version =
+        outgoing ? versionedSolver->getYield(node->getId(), object)
+                 : versionedSolver->getConsume(node->getId(), object);
+    return SVFGNodeBS(versionedSolver->versionedPointsTo(object, version));
   };
 
   if (PrintPointsTo) {
@@ -261,8 +388,7 @@ int main(int argc, char **argv) {
       outs() << "vfspta.nodes=" << stats.nodes << "\n"
              << "vfspta.node-processes=" << stats.nodeProcesses << "\n"
              << "vfspta.versioned-objects=" << stats.versionedObjects << "\n"
-             << "vfspta.equivalent-objects=" << stats.equivalentObjects
-             << "\n"
+             << "vfspta.equivalent-objects=" << stats.equivalentObjects << "\n"
              << "vfspta.versions=" << stats.versions << "\n"
              << "vfspta.versioned-facts=" << stats.versionedFacts << "\n"
              << "vfspta.version-propagations=" << stats.versionPropagations
@@ -271,10 +397,9 @@ int main(int argc, char **argv) {
              << "\n"
              << "vfspta.strong-updates=" << stats.strongUpdates << "\n"
              << "vfspta.weak-updates=" << stats.weakUpdates << "\n"
-             << "vfspta.indirect-call-edges=" << stats.indirectCallEdges
+             << "vfspta.indirect-call-edges=" << stats.indirectCallEdges << "\n"
+             << "vfspta.delta-version-updates=" << stats.deltaVersionUpdates
              << "\n"
-             << "vfspta.delta-version-updates="
-             << stats.deltaVersionUpdates << "\n"
              << "vfspta.relabelings=" << stats.relabelings << "\n";
     } else {
       const auto &stats = solver->statistics();
@@ -291,10 +416,8 @@ int main(int argc, char **argv) {
              << stats.strongUpdateExecutions << "\n"
              << "fspta.weak-update-executions=" << stats.weakUpdateExecutions
              << "\n"
-             << "fspta.indirect-call-edges=" << stats.indirectCallEdges
-             << "\n"
-             << "fspta.hash-consed-sets=" << stats.hashConsedUniqueSets
-             << "\n";
+             << "fspta.indirect-call-edges=" << stats.indirectCallEdges << "\n"
+             << "fspta.hash-consed-sets=" << stats.hashConsedUniqueSets << "\n";
     }
   }
   std::size_t validations = 0;
@@ -311,12 +434,11 @@ int main(int argc, char **argv) {
         if (!expectAlias && !expectNoAlias)
           continue;
         ++validations;
-        const auto result = versionedSolver
-                                ? versionedSolver->mayAlias(
-                                      call->getArgOperand(0),
-                                      call->getArgOperand(1))
-                                : solver->mayAlias(call->getArgOperand(0),
-                                                   call->getArgOperand(1));
+        const auto result =
+            versionedSolver ? versionedSolver->mayAlias(call->getArgOperand(0),
+                                                        call->getArgOperand(1))
+                            : solver->mayAlias(call->getArgOperand(0),
+                                               call->getArgOperand(1));
         if (!result || *result != expectAlias) {
           ++failures;
           errs() << InputFilename << ": annotation mismatch in "

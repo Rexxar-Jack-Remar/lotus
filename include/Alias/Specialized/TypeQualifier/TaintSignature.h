@@ -9,8 +9,7 @@
  * @ingroup TypeQualifier
  */
 
-#ifndef TAINT_SIGNATURE_H
-#define TAINT_SIGNATURE_H
+#pragma once
 #include "llvm/ADT/StringRef.h"
 #include "llvm/Support/SpecialCaseList.h"
 
@@ -32,4 +31,3 @@ public:
   bool isSensitiveStruct(StringRef StructId) const;
 };
 
-#endif

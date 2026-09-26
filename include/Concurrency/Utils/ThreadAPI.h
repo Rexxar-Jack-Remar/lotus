@@ -18,8 +18,7 @@
  * @ingroup Concurrency
  */
 
-#ifndef THREADAPI_H
-#define THREADAPI_H
+#pragma once
 
 #include "llvm/ADT/StringMap.h"
 #include "llvm/IR/Constants.h"
@@ -29,6 +28,7 @@
 
 #include "Concurrency/ConcurrencyConfig.h"
 #include "Concurrency/LinuxKernel/LinuxKernelSemanticRegistry.h"
+#include "Concurrency/Runtime/RuntimeKind.h"
 #include "Concurrency/Utils/CUDA.h"
 #include "Concurrency/Utils/CppThreading.h"
 
@@ -60,17 +60,7 @@ using u32_t = unsigned;
 class ThreadAPI {
 
 public:
-  enum class RuntimeLibrary {
-    Unknown,
-    PThread,
-    OpenMP,
-    MPI,
-    Cpp,
-    CUDA,
-    LinuxKernel,
-    Hare,
-    Custom
-  };
+  using RuntimeLibrary = concurrency::runtime::RuntimeKind;
 
   enum class LockSemanticKind { None, Shared, Exclusive, Release };
   enum class LockOwnershipEffect {
@@ -2012,4 +2002,3 @@ public:
   static TD_TYPE stringToType(llvm::StringRef name);
 };
 
-#endif // THREADAPI_H

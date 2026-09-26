@@ -13,6 +13,7 @@ This directory contains various alias analysis implementations and toolkits used
 | **DyckAA** | - | Unification-based | ❌ No | ❌ No | - | ❌ No | - |
 | **Dynamic** | - | Dynamic | - | - | - | ❌ No | Runtime analysis |
 | **FPA** | `lotus-alias-fpa` | Type-based | - | - | - | ❌ No | Function pointer analysis |
+| **GPG** | `lotus-alias-gpg` | Inclusion-based GPG summaries | ✅ Yes | ✅ Fully context-sensitive | ✅ Yes | ❌ No | Bottom-up GPG analysis with blocking, coalescing, recursion, and k-limited heap paths |
 | **LotusAA** | `lotus-alias-lotus-aa` | Inclusion-based | ✅ Yes | ✅ Yes | - | ❌ No | Native Lotus analysis; flow- and context-sensitive |
 | **seadsa** | `lotus-alias-sea-dsa-dg`, `lotus-alias-seadsa-tool` | Unification-based | ❌ No | ✅ Yes | - | ✅ Yes (SeaDsa) | Context-sensitive heap (heap cloning); Boost dependency removed |
 | **SRAA** | - | Range-based | ❌ No | ❌ No | - | ❌ No (based on CGO'17 paper) | Flow- and context-insensitive; upgraded to LLVM 14.x |
@@ -27,6 +28,7 @@ This directory contains various alias analysis implementations and toolkits used
 | **SparrowAA** | CI (context-insensitive), 1-CFA, 2-CFA |
 | **AserPTA** | CI, 1-CFA, 2-CFA, Origin-sensitive |
 | **DDA** | Flow-sensitive CI (`FlowDDA`), flow-sensitive CS (`ContextDDA`) |
+| **GPG** | FSCS (default), FICS, FICI |
 | **LotusAA** | Context-sensitive (details not specified) |
 | **seadsa** | Context-sensitive with heap cloning |
 | **TPA** | Context-sensitive with k-limiting |
@@ -44,12 +46,12 @@ This directory contains various alias analysis implementations and toolkits used
 
 | Characteristic | Analyses |
 |----------------|----------|
-| **Inclusion-based** | SparrowAA, AserPTA, LotusAA, TPA |
+| **Inclusion-based** | SparrowAA, AserPTA, GPG, LotusAA, TPA |
 | **Demand-driven** | DDA |
 | **Unification-based** | DyckAA, seadsa |
-| **Flow-sensitive** | DDA, LotusAA, TPA |
-| **Context-sensitive** | SparrowAA, AserPTA, DDA (ContextDDA), LotusAA, seadsa, TPA |
-| **Field-sensitive** | AserPTA (optional), DDA, LotusAA, etc. |
+| **Flow-sensitive** | DDA, GPG, LotusAA, TPA |
+| **Context-sensitive** | SparrowAA, AserPTA, DDA (ContextDDA), GPG, LotusAA, seadsa, TPA |
+| **Field-sensitive** | AserPTA (optional), DDA, GPG, LotusAA, etc. |
 | **Specialized** | FPA (function pointers), UnderApproxAA (must-alias), Dynamic (runtime), SRAA (range-based) |
 
 ## Subdirectories
@@ -57,11 +59,11 @@ This directory contains various alias analysis implementations and toolkits used
 `lib/Alias/` is now organized by higher-level taxonomy:
 
 - `InclusionBased/`: inclusion-style whole-program pointer analyses such as
-  `AserPTA`, `SparrowAA`, `LotusAA`, `TPA`, and `CclyzerAA`.
+  `AserPTA`, `GPG`, `SparrowAA`, `LotusAA`, `TPA`, and `CclyzerAA`.
 - `UnificationBased/`: unification/CFL-style analyses such as `DyckAA` and
   `seadsa`.
 - `DemandDriven/`: on-demand query-driven analyses such as `DDA`.
-- `Specialized/`: targeted analyses such as `AllocAA`, `DFPA`, `FPA`, `SRAA`,
+- `Specialized/`: targeted analyses such as `AllocAA`, `FPA`, `SRAA`,
   `TypeQualifier`, and `UnderApproxAA`.
 - `Infrastructure/`: shared support layers such as `AliasAnalysisWrapper`,
   `PtsSet`, `Metrics`, and `Spec`.
@@ -80,11 +82,16 @@ To compare pointer analyses (e.g. SparrowAA vs TPA vs AserPTA), use the built-in
 
 | Analysis | Points-to size | Indirect-call resolution |
 |----------|----------------|---------------------------|
-| SparrowAA, AserPTA | ✅ Full | ✅ |
+| SparrowAA, GPG | ✅ Full | ✅ |
+| AserPTA | ❌ Wrapper backend not integrated | ❌ Wrapper backend not integrated |
 | TPA | ✅ Size only | ✅ |
 | DyckAA, UnderApprox, CFL* | ❌ | ❌ |
 | Combined | ✅ (via Andersen) | ✅ (via Andersen) |
 
-LotusAA and FPA are separate tools and are not backends in `AliasAnalysisWrapper`; SeaDsa/AllocAA/etc. are not yet integrated in the wrapper. See [METRICS.md](METRICS.md) for the full support table.
+LotusAA and FPA are separate tools and are not backends in
+`AliasAnalysisWrapper`; AserPTA has a wrapper configuration but currently
+rejects initialization rather than silently falling back. SeaDsa/AllocAA/etc.
+are not yet integrated in the wrapper. See [METRICS.md](METRICS.md) for the
+full support table.
 
 - **High-level clients** (taint, use-after-free, ref-count) need more than alias/points-to (mod/ref, DFA, etc.) and live outside this metrics layer.

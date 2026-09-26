@@ -5,8 +5,7 @@
  * @author Migrated from Symbiotic
  */
 
-#ifndef LOTUS_VERIFICATION_TRANSFORM_INTERNALIZE_GLOBALS_H
-#define LOTUS_VERIFICATION_TRANSFORM_INTERNALIZE_GLOBALS_H
+#pragma once
 
 #include "llvm/Pass.h"
 
@@ -46,4 +45,3 @@ public:
 } // namespace verification
 } // namespace lotus
 
-#endif // LOTUS_VERIFICATION_TRANSFORM_INTERNALIZE_GLOBALS_H

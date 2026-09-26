@@ -10,8 +10,7 @@
  * @ingroup TypeQualifier
  */
 
-#ifndef UBIANALYSIS_COMMON_H
-#define UBIANALYSIS_COMMON_H
+#pragma once
 #include "Alias/Specialized/TypeQualifier/FunctionSummary.h"
 
 #include <llvm/Support/raw_ostream.h>
@@ -29,4 +28,3 @@
 #include <unordered_map>
 
 #define FUNCTION_TIMER()
-#endif // UBIANALYSIS_COMMON_H

@@ -15,8 +15,7 @@
     3. This notice may not be removed or altered from any source distribution.
 */
 
-#ifndef PDQSORT_H
-#define PDQSORT_H
+#pragma once
 
 #include <algorithm>
 #include <cstddef>
@@ -626,4 +625,3 @@ template <class Iter> inline void pdqsort_branchless(Iter begin, Iter end) {
 }
 
 #undef PDQSORT_PREFER_MOVE
-#endif

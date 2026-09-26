@@ -1,0 +1,22 @@
+; Signed absolute-value property derived from Mosaic's abs-ge workload.
+(set-logic HORN)
+(define-sort Word () (_ BitVec 4))
+(declare-rel p (Word Word Word))
+(declare-rel q (Word Word))
+(declare-rel fail ())
+(declare-var x Word)
+(declare-var y Word)
+(declare-var i Word)
+
+(rule (=> (and (not (= x (bvshl (_ bv1 4) (_ bv3 4))))
+               (= y (bvmul
+                      (bvor (_ bv1 4)
+                            (ite (bvsge x (_ bv0 4))
+                                 (_ bv0 4) (bvnot (_ bv0 4))))
+                      x)))
+          (p x y (_ bv0 4))))
+(rule (=> (and (p x y i) (bvslt i y))
+          (p x y (bvadd i (_ bv1 4)))))
+(rule (=> (and (p x y i) (not (bvslt i y))) (q x i)))
+(rule (=> (and (q x i) (not (bvsle x i))) fail))
+(query fail)

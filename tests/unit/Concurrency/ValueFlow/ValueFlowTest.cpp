@@ -1,4 +1,4 @@
-#include "Concurrency/MHP/IMHPAnalysis.h"
+#include "Concurrency/Utils/ThreadFlowGraph.h"#include "Concurrency/MHP/IMHPAnalysis.h"
 #include "Concurrency/Thread/ThreadCreationTree.h"
 #include "Concurrency/Utils/ThreadAPI.h"
 #include "Concurrency/ValueFlow/MultiStageSlicer.h"
@@ -19,6 +19,13 @@ namespace {
 class FixedMHP final : public mhp::IMHPAnalysis {
 public:
   explicit FixedMHP(bool parallel) : parallel_(parallel) {}
+
+  const mhp::ThreadFlowGraph& getThreadFlowGraph() const override { static mhp::ThreadFlowGraph dummy; return dummy; }
+  size_t getAnalysisGeneration() const override { return 0; }
+  lotus::AliasAnalysisWrapper* getAliasAnalysis() const override { return nullptr; }
+  const OpenMP::OpenMPSemantics* getOpenMPSemantics() const override { return nullptr; }
+  bool instructionMayExecuteMultipleTimes(const llvm::Instruction*) const override { return false; }
+  bool joinEdgeMustOrderTarget(const mhp::SyncNode*, const mhp::SyncNode*) const override { return false; }
 
   void analyze() override {}
   bool mayHappenInParallel(const Instruction *,

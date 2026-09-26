@@ -1,8 +1,7 @@
 //
 // Created by peiming on 11/2/19.
 //
-#ifndef ASER_PTA_CGPTRNODE_H
-#define ASER_PTA_CGPTRNODE_H
+#pragma once
 
 #include "Alias/InclusionBased/AserPTA/PointerAnalysis/Context/CtxTrait.h"
 #include "Alias/InclusionBased/AserPTA/PointerAnalysis/Graph/ConstraintGraph/CGNodeBase.h"
@@ -75,4 +74,3 @@ public:
 
 } // namespace aser
 
-#endif

@@ -7,8 +7,8 @@
 
 #include "Checker/Framework/BugReportMgr.h"
 #include "Checker/Framework/Subcommands.h"
-#include "CheckerOptions.h"
-#include "CheckerReport.h"
+#include "Checker/Tooling/CheckerOptions.h"
+#include "Checker/Tooling/CheckerReport.h"
 #include "Utils/LLVM/Demangle.h"
 
 #include <memory>

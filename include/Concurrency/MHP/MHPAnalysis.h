@@ -18,14 +18,13 @@
  * @date 2025
  */
 
-#ifndef MHP_ANALYSIS_H
-#define MHP_ANALYSIS_H
+#pragma once
 
 #include "Alias/Infrastructure/AliasAnalysisWrapper/AliasAnalysisWrapper.h"
-#include "Concurrency/JoinTarget/JoinTargetAnalysis.h"
 #include "Concurrency/LockSet/LockSetAnalysis.h"
 #include "Concurrency/MHP/IMHPAnalysis.h"
 #include "Concurrency/OpenMP/OpenMPSemantics.h"
+#include "Concurrency/Thread/Join/JoinTargetAnalysis.h"
 #include "Concurrency/Utils/CppAtomics.h"
 #include "Concurrency/Utils/ThreadAPI.h"
 #include "Concurrency/Utils/ThreadFlowGraph.h"
@@ -172,11 +171,11 @@ public:
   void analyze() override;
 
   // Alias analysis used internally (also useful for other analyses/checkers).
-  lotus::AliasAnalysisWrapper *getAliasAnalysis() const {
+  lotus::AliasAnalysisWrapper *getAliasAnalysis() const override {
     return m_alias_analysis.get();
   }
 
-  const OpenMP::OpenMPSemantics *getOpenMPSemantics() const {
+  const OpenMP::OpenMPSemantics *getOpenMPSemantics() const override {
     return m_openmp_semantics.get();
   }
 
@@ -271,12 +270,12 @@ public:
   void printResults(llvm::raw_ostream &os) const override;
 
   // Component access for advanced users
-  const ThreadFlowGraph &getThreadFlowGraph() const { return *m_tfg; }
-  size_t getAnalysisGeneration() const { return m_analysis_generation; }
+  const ThreadFlowGraph &getThreadFlowGraph() const override { return *m_tfg; }
+  size_t getAnalysisGeneration() const override { return m_analysis_generation; }
   bool joinEdgeMustOrderTarget(const SyncNode *join_node,
-                               const SyncNode *target_node) const;
+                               const SyncNode *target_node) const override;
   bool instructionMayExecuteMultipleTimes(
-      const llvm::Instruction *inst) const {
+      const llvm::Instruction *inst) const override {
     return !m_thread_multiplicity ||
            m_thread_multiplicity->instructionMayExecuteMultipleTimes(inst);
   }
@@ -564,4 +563,3 @@ private:
 
 } // namespace mhp
 
-#endif // MHP_ANALYSIS_H

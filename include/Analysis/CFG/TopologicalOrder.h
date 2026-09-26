@@ -1,6 +1,5 @@
 /** @file TopologicalOrder.h @brief Topological order computation for CFGs. */
-#ifndef __TOPOLOGICAL_ORDER__HH_
-#define __TOPOLOGICAL_ORDER__HH_
+#pragma once
 
 #include "llvm/IR/Function.h"
 #include "llvm/Pass.h"
@@ -63,4 +62,3 @@ public:
   llvm::StringRef getPassName() const override { return "TopologicalOrder"; }
 };
 
-#endif

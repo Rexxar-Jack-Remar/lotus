@@ -1,7 +1,6 @@
 // the basic framework for andersen-based algorithm, including common routines
 // override neccessary ones, and the call will be STATICALLY redirected to it
-#ifndef ASER_PTA_SOLVERBASE_H
-#define ASER_PTA_SOLVERBASE_H
+#pragma once
 
 #define DEBUG_TYPE "pta"
 #include "Alias/InclusionBased/AserPTA/PointerAnalysis/Graph/CallGraph.h"
@@ -598,4 +597,3 @@ bool SolverBase<LangModel, SubClass>::processCopy(CGNodeTy *src,
 
 #undef DEBUG_TYPE
 
-#endif

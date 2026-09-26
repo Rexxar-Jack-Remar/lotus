@@ -8,8 +8,7 @@
 //
 //===----------------------------------------------------------------------===//
 
-#ifndef LOTUS_VERIFICATION_SIFA_REGEXDAG_BACKWARDCLOSEDOVERLAY_H
-#define LOTUS_VERIFICATION_SIFA_REGEXDAG_BACKWARDCLOSEDOVERLAY_H
+#pragma once
 
 #include "Verification/Sifa/RegexDag/IDagOverlay.h"
 
@@ -101,4 +100,3 @@ private:
 extern template class lotus::sifa::BackwardClosedOverlay<
     lotus::sifa::Transition>;
 
-#endif // LOTUS_VERIFICATION_SIFA_REGEXDAG_BACKWARDCLOSEDOVERLAY_H

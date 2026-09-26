@@ -40,11 +40,12 @@
 
 #ifndef CA_INTERSECT_GUARD
 #define CA_INTERSECT_GUARD
-#include "common.h"
+#include "Common.h"
+#include "HashMap.h"
+#include "KeySource.h"
+#include "Keys.h"
+#include "RefPtr.h"
 #include "TransActionFunctor.h"
-#include "key_source.h"
-#include "keys.h"
-#include "ref_ptr.h"
 
 namespace wpds
 {

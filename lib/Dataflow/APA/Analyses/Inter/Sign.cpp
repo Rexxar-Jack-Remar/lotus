@@ -5,9 +5,9 @@
 #include "llvm/IR/GlobalVariable.h"
 #include "llvm/IR/Instructions.h"
 
-#include "Dataflow/APA/LLVM/InterProblem.h"
-#include "Dataflow/APA/Solver/ForwardInterSummarySolver.h"
 #include "Dataflow/APA/Analyses/Inter/FlowHelpers.h"
+#include "Dataflow/APA/LLVM/InterProblem.h"
+#include "Dataflow/APA/Solver/Inter/ExpandedSolver.h"
 
 #include <memory>
 #include <unordered_map>
@@ -317,7 +317,7 @@ private:
 } // namespace
 
 InterSignResult runInterElimSign(llvm::Function *Entry,
-                                 const dataflow::controlflow::InterCFG *ICF) {
+                                 const dataflow::controlflow::InterCFG *ICF, EliminationOptions Options) {
   InterSignResult Out;
   if (Entry == nullptr || Entry->isDeclaration())
     return Out;
@@ -330,7 +330,7 @@ InterSignResult runInterElimSign(llvm::Function *Entry,
   InterSignProblem Problem(Entry, ICF);
   InterEliminationSolver<InterSignAnalysisTypes,
                          kDefaultInterElimSignCallStringLength>
-      Solver(Problem);
+      Solver(Problem, Options);
   auto Status = Solver.solve();
   if (const auto *Result = Solver.getResults())
     Out = *Result;

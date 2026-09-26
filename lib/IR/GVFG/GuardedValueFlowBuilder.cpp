@@ -1091,8 +1091,11 @@ static bool buildInstruction(GuardedValueFlowGraph &graph, Instruction &I,
       return true;
     auto *value_node =
         getOrCreateOperandRepresentation(graph, I.getOperand(0), F, failed);
-    common_return->addChild(value_node);
-    common_return->addReturnValueSitePair(value_node, site);
+    auto *return_region = graph.findRegion(block);
+    common_return->addReturnValueSitePair(
+        value_node, site,
+        return_region ? return_region->getRegionCondition()
+                      : ConditionRef::none());
     return true;
   }
   case Instruction::Unreachable:
@@ -1278,6 +1281,8 @@ static bool buildInstruction(GuardedValueFlowGraph &graph, Instruction &I,
     auto *node = findOrCreateValueNode(graph, &I, F);
     auto *site = graph.createSite<GuardedValueFlowAllocSite>(&graph, &I);
     node->addUseSite(site);
+    for (Value *operand : I.operands())
+      (void)getOrCreateOperandRepresentation(graph, operand, F, failed);
     return true;
   }
   case Instruction::GetElementPtr: {

@@ -1,5 +1,4 @@
-#ifndef DATAFLOW_APA_DOMAINS_EXPRESSIONKEY_H_
-#define DATAFLOW_APA_DOMAINS_EXPRESSIONKEY_H_
+#pragma once
 
 #include "llvm/IR/InstrTypes.h"
 #include "llvm/IR/Instructions.h"
@@ -180,4 +179,3 @@ inline const llvm::Value *getLoadPointerOperand(const ExpressionKey &Key) {
 
 } // namespace elimination
 
-#endif // DATAFLOW_APA_DOMAINS_EXPRESSIONKEY_H_

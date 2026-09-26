@@ -4,8 +4,7 @@ The software is provided on an as is basis for research purposes.
 There is no additional support offered, nor are the author(s)
 or their institutions liable under any circumstances.
 */
-#ifndef _EXCEPTION_LIST_H
-#define _EXCEPTION_LIST_H
+#pragma once
 
 #include <iostream>
 #include <unordered_set>
@@ -70,4 +69,3 @@ public:
 
 } // namespace lotus::cfl::cs_index::flare::grail
 
-#endif

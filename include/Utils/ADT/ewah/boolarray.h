@@ -1,6 +1,5 @@
 // See LICENSE file for license information.
-#ifndef BOOLARRAY_H
-#define BOOLARRAY_H
+#pragma once
 
 #include <cassert>
 #include <iostream>
@@ -481,4 +480,3 @@ template <class uword> void BoolArray<uword>::append(const BoolArray &a) {
   sizeinbits += a.sizeinbits;
 }
 } // namespace ewah
-#endif

@@ -16,6 +16,7 @@ using namespace lotus::gvfg;
 
 void GuardedValueFlowCallSite::addCommonInput(GuardedValueFlowNode *node) {
   common_inputs_.push_back(node);
+  compat_inputs_caches_.clear();
   if (node)
     node->addUseSite(this);
 }
@@ -28,6 +29,7 @@ void GuardedValueFlowCallSite::addPseudoInput(Function *callee,
     node->addUseSite(this);
   }
   inputs.push_back(node);
+  compat_inputs_caches_.erase(callee);
 }
 
 void GuardedValueFlowCallSite::addPseudoOutput(Function *callee,

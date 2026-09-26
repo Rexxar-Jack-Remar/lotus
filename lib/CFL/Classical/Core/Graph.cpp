@@ -38,18 +38,22 @@ bool endsWith(const std::string &value, const std::string &suffix) {
 
 std::string attributedLabel(const std::string &label,
                             const std::string &attribute) {
-  if (!endsWith(label, "_i")) {
-    return label;
-  }
   if (attribute.empty()) {
-    return label.substr(0, label.size() - 1) + '0';
+    return endsWith(label, "_i") ? label.substr(0, label.size() - 1) + '0'
+                                 : label;
   }
   if (!std::all_of(attribute.begin(), attribute.end(),
                    [](unsigned char c) { return std::isdigit(c) != 0; })) {
     throw std::invalid_argument("Invalid attributed graph label: " + label +
                                 " " + attribute);
   }
-  return label.substr(0, label.size() - 1) + attribute;
+  if (endsWith(label, "_i")) {
+    return label.substr(0, label.size() - 1) + attribute;
+  }
+  // In a four-column edge, the fourth field is always the label attribute.
+  // A bare label therefore becomes the same canonical label as an `_i`
+  // placeholder (for example, both `call 7` and `call_i 7` become `call_7`).
+  return label + '_' + attribute;
 }
 
 bool looksLikeDotFile(const std::string &path) {
@@ -122,6 +126,17 @@ void LabeledGraph::writeTextFile(const std::string &path) const {
     output << vertexName(node) << '\t' << vertexName(node) << "\tsrc\n";
   }
   std::vector<LabeledEdge> ordered = edges();
+  std::vector<bool> incident(vertexCount(), false);
+  for (const LabeledEdge &edge : ordered) {
+    incident[edge.source] = true;
+    incident[edge.target] = true;
+  }
+  for (std::size_t node = 0; node < vertexCount(); ++node) {
+    if (!incident[node] && !isSource(node)) {
+      output << vertexName(node) << '\t' << vertexName(node)
+             << "\t__lotus_node__\n";
+    }
+  }
   std::sort(ordered.begin(), ordered.end(),
             [](const LabeledEdge &first, const LabeledEdge &second) {
               return std::tie(first.source, first.target, first.label) <
@@ -296,6 +311,9 @@ void LabeledGraph::loadFromTextFile(const std::string &path) {
     addVertex(tokens[1]);
     if (tokens[2] == "src") {
       markSource(vertexId(tokens[0]));
+      continue;
+    }
+    if (tokens[2] == "__lotus_node__") {
       continue;
     }
     addEdge(tokens[0], tokens[1],

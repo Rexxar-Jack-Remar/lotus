@@ -10,8 +10,7 @@
  * @ingroup Concurrency
  */
 
-#ifndef LINUX_KERNEL_OPERATION_H
-#define LINUX_KERNEL_OPERATION_H
+#pragma once
 
 #include <cstdint>
 #include <map>
@@ -251,6 +250,9 @@ enum class OperationKind {
   UNKNOWN
 };
 
+/// Returns a human-readable name for the given operation kind.
+std::string operationKindToString(OperationKind kind);
+
 // ============================================================================
 // Linux Kernel Operation Structure
 // ============================================================================
@@ -409,4 +411,3 @@ struct KernelThreadInfo {
 
 } // namespace kernel
 
-#endif // LINUX_KERNEL_OPERATION_H

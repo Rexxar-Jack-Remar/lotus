@@ -1,5 +1,4 @@
-#ifndef NPA_TAINT_TRANSFORMER_H
-#define NPA_TAINT_TRANSFORMER_H
+#pragma once
 
 #include "Dataflow/NPA/Core/Domain.h"
 #include "Dataflow/NPA/Domains/SparseFactSet.h"
@@ -248,4 +247,3 @@ private:
 
 } // namespace npa
 
-#endif // NPA_TAINT_TRANSFORMER_H

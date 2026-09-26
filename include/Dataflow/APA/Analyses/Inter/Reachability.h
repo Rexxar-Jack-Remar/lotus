@@ -16,7 +16,8 @@ using InterReachabilityResult =
 
 InterReachabilityResult
 runInterElimReachability(llvm::Function *Entry,
-                         const dataflow::controlflow::InterCFG *ICF = nullptr);
+                         const dataflow::controlflow::InterCFG *ICF = nullptr,
+    EliminationOptions Options = defaultContextOptions());
 
 InterReachabilityResult runInterSummaryElimReachability(
     llvm::Function *Entry, const dataflow::controlflow::InterCFG *ICF = nullptr,

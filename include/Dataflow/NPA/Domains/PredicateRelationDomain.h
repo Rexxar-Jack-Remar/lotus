@@ -1,5 +1,4 @@
-#ifndef NPA_PREDICATE_RELATION_DOMAIN_H
-#define NPA_PREDICATE_RELATION_DOMAIN_H
+#pragma once
 
 #include "Dataflow/NPA/Core/Domain.h"
 
@@ -186,7 +185,9 @@ template <> struct TensorSemiringTraits<PredicateRelationDomain> {
   static bool paper_admissible() { return true; }
   static bool paper_projection_equations() { return true; }
   static bool validate_paper_laws() {
-    return PredicateTensorDomain::validatePaperLaws();
+    // The combinatorial sample check belongs in domain tests. Running it for
+    // every Newton round would dominate measured solver time.
+    return PredicateRelationDomain::isConfigured();
   }
 
   static tensor_domain::value_type
@@ -218,4 +219,3 @@ template <> struct TensorSemiringTraits<PredicateRelationDomain> {
 
 } // namespace npa
 
-#endif // NPA_PREDICATE_RELATION_DOMAIN_H

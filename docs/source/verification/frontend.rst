@@ -1,5 +1,5 @@
 Verification Frontend
-====================
+=====================
 
 BooleanProgram
 --------------

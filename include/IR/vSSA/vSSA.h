@@ -9,6 +9,8 @@
 // Copyright (C) 2011-2012, 2014-2015	Victor Hugo Sperle Campos
 //
 //===----------------------------------------------------------------------===//
+#pragma once
+
 #include "llvm/ADT/DenseMap.h"
 #include "llvm/ADT/Statistic.h"
 #include "llvm/IR/CFG.h"

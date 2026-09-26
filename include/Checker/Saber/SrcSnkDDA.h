@@ -5,8 +5,7 @@
 //
 //===----------------------------------------------------------------------===//
 
-#ifndef SRCSNKANALYSIS_H_
-#define SRCSNKANALYSIS_H_
+#pragma once
 
 #include "Alias/DemandDriven/DDA/CxtDPItem.h"
 #include "Checker/Saber/ProgSlice.h"
@@ -239,4 +238,3 @@ protected:
 } // namespace analysis
 } // namespace lotus
 
-#endif

@@ -1,8 +1,7 @@
 //
 // Created by peiming on 11/3/19.
 //
-#ifndef ASER_PTA_FICANONICALIZER_H
-#define ASER_PTA_FICANONICALIZER_H
+#pragma once
 
 #include <llvm/IR/Instructions.h>
 #include <llvm/IR/Intrinsics.h>
@@ -19,5 +18,3 @@ public:
 };
 
 } // namespace aser
-
-#endif

@@ -17,9 +17,9 @@ Bug reports
 ```
 
 - **Core** (`Core/`): Value, Instruction, BasicBlock, Function (framework IR); ValueCollection, AliasValues (may-alias, store-based, intra-procedural); ValueTypeAlias (instruction-level).
-- **Framework_IR** (`Framework_IR/`): Builds framework IR from LLVM (IRGenerator, Analyzer); runs before FrameworkPass.
+- **FrameworkIR** (`FrameworkIR/`): Builds framework IR from LLVM (IRGenerator, Analyzer); runs before FrameworkPass.
 - **Frontend** (`Frontend/`): State, StateTransition (FSM and transition rules); Analyzer (CFG traversal, store/load/call/branch, alias); BasicBlockInformation, FunctionInformation (per-block and per-function state).
-- **Detector** (`Detector/`): Each checker (UAF, Leak, Double_lock, etc.) subclasses FrameworkPass, overrides `defineStates()`, and registers a StateManager with states and transitions (paper Table 5: Fun Arg, Store, Use, Alias).
+- **Detector** (`Detector/`): Each checker (UAF, Leak, DoubleLock, etc.) subclasses FrameworkPass, overrides `defineStates()`, and registers a StateManager with states and transitions (paper Table 5: Fun Arg, Store, Use, Alias).
 
 ## Typestate and Transitions (Paper §4.1, Table 5)
 
@@ -29,7 +29,7 @@ Bug reports
 
 ## Adding a New Checker
 
-1. Create a detector under `Detector/YourDetector/` (e.g. `Your_Detector.cpp`, `YourUtils.cpp`).
+1. Create a detector under `Detector/` (e.g. `YourDetector.h`, `YourDetector.cpp`).
 2. In `defineStates()`: create StateManager, define states (init, normal, bug), add transitions (FunctionArgTransitionRule, StoreValueTransitionRule, UseValueTransitionRule, AliasValueTransitionRule as needed).
 3. Add the detector's `defineStates` function to the explicit registry in
    `tools/checker/lotus-check-fitx.cpp`.

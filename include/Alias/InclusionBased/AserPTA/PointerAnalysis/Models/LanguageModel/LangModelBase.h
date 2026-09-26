@@ -2,8 +2,7 @@
 // Created by peiming on 1/16/20.
 //
 
-#ifndef ASER_PTA_LANGMODELBASE_H
-#define ASER_PTA_LANGMODELBASE_H
+#pragma once
 
 #include "Alias/InclusionBased/AserPTA/PointerAnalysis/Models/LanguageModel/ConsGraphBuilder.h"
 #include "Alias/InclusionBased/AserPTA/Util/Util.h"
@@ -291,4 +290,3 @@ public:
 };
 
 } // namespace aser
-#endif // ASER_PTA_LANGMODELBASE_H

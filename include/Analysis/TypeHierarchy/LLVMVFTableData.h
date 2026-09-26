@@ -8,8 +8,7 @@
  *     Maximilian Leo Huber and others
  *****************************************************************************/
 
-#ifndef LOTUS_ANALYSIS_TYPEHIERARCHY_LLVMVFTABLEDATA_H_
-#define LOTUS_ANALYSIS_TYPEHIERARCHY_LLVMVFTABLEDATA_H_
+#pragma once
 
 #include "llvm/Support/raw_ostream.h"
 
@@ -29,4 +28,3 @@ struct LLVMVFTableData {
 
 } // namespace lotus
 
-#endif // LOTUS_ANALYSIS_TYPEHIERARCHY_LLVMVFTABLEDATA_H_

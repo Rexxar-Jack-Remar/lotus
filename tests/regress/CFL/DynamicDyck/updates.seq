@@ -1,0 +1,5 @@
+# Split both components, then restore the anchor with a closing reverse.
+D 1 2 op--0
+A 2 1 cp--0
+A 1 2 op--0
+D 3 0 op--1

@@ -21,8 +21,7 @@
  * - allAliases(ap): find all access paths that must-alias ap
  */
 
-#ifndef UNDERAPPROX_ALIASGRAPH_H
-#define UNDERAPPROX_ALIASGRAPH_H
+#pragma once
 
 #include <cstdint>
 #include <utility>
@@ -169,4 +168,3 @@ private:
 
 } // end namespace UnderApprox
 
-#endif

@@ -7,8 +7,7 @@
  * types, instructions, and user-defined types.
  */
 
-#ifndef REPR_HPP
-#define REPR_HPP
+#pragma once
 
 #include <algorithm>
 #include <cctype>
@@ -429,4 +428,3 @@ template <typename T> void repr_stream(std::ostream &out, const T &x) {
 }
 } // namespace repr_impl
 
-#endif

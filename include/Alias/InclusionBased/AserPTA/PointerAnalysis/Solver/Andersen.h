@@ -1,8 +1,7 @@
 //
 // Created by peiming on 9/17/19.
 //
-#ifndef ASER_PTA_ANDERSEN_H
-#define ASER_PTA_ANDERSEN_H
+#pragma once
 
 #include "Alias/InclusionBased/AserPTA/PointerAnalysis/Solver/SolverBase.h"
 
@@ -85,5 +84,3 @@ protected:
 };
 
 } // namespace aser
-
-#endif

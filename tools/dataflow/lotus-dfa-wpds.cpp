@@ -2,12 +2,12 @@
 #include "llvm/Support/InitLLVM.h"
 #include "llvm/Support/raw_ostream.h"
 
+#include "Dataflow/Tooling/ToolSupport.h"
 #include "Dataflow/WPDS/Analyses/ConstantPropagationAnalysis.h"
 #include "Dataflow/WPDS/Analyses/LivenessAnalysis.h"
 #include "Dataflow/WPDS/Analyses/TaintAnalysis.h"
 #include "Dataflow/WPDS/Analyses/UninitializedVariablesAnalysis.h"
 #include "Dataflow/WPDS/Backend.h"
-#include "ToolSupport.h"
 
 #include <memory>
 #include <set>
@@ -31,6 +31,10 @@ static cl::opt<bool>
     StatisticsOpt("wpds-stats",
                   cl::desc("Print WPDS stage timings and model statistics"),
                   cl::init(false));
+static cl::opt<bool>
+    SummaryOnlyOpt("summary-only",
+                   cl::desc("Suppress per-instruction fact output"),
+                   cl::init(false));
 static cl::opt<bool> VerifyOpt(
     "wpds-verify-against-legacy",
     cl::desc("Compare every materialized observation with the legacy backend"),
@@ -175,18 +179,20 @@ int main(int argc, char **argv) {
 
   outs() << "[wpds:" << AnalysisOpt
          << " backend=" << wpds::toString(statistics.effectiveBackend) << "]\n";
-  lotus::dataflow_tool::forEachDefinedFunction(
-      *module, outs(), [&](const lotus::dataflow_tool::FunctionView &view) {
-        for (Instruction *instruction : view.OrderedInsts) {
-          outs() << "  " << view.ValueToId.at(instruction) << " IN: ";
-          lotus::dataflow_tool::formatValueSet(outs(), result->IN(instruction),
-                                               view.ValueToId);
-          outs() << " OUT: ";
-          lotus::dataflow_tool::formatValueSet(outs(), result->OUT(instruction),
-                                               view.ValueToId);
-          outs() << "\n";
-        }
-      });
+  if (!SummaryOnlyOpt) {
+    lotus::dataflow_tool::forEachDefinedFunction(
+        *module, outs(), [&](const lotus::dataflow_tool::FunctionView &view) {
+          for (Instruction *instruction : view.OrderedInsts) {
+            outs() << "  " << view.ValueToId.at(instruction) << " IN: ";
+            lotus::dataflow_tool::formatValueSet(
+                outs(), result->IN(instruction), view.ValueToId);
+            outs() << " OUT: ";
+            lotus::dataflow_tool::formatValueSet(
+                outs(), result->OUT(instruction), view.ValueToId);
+            outs() << "\n";
+          }
+        });
+  }
   if (StatisticsOpt) {
     printStatistics(outs(), statistics);
   }

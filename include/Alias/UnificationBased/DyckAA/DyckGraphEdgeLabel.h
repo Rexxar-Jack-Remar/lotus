@@ -16,8 +16,7 @@
  *  along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
-#ifndef DYCKAA_DYCKGRAPHEDGELABEL_H
-#define DYCKAA_DYCKGRAPHEDGELABEL_H
+#pragma once
 
 #include <map>
 #include <string>
@@ -94,4 +93,3 @@ public:
   }
 };
 
-#endif // DYCKAA_DYCKGRAPHEDGELABEL_H

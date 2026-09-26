@@ -247,13 +247,13 @@ the interpreter fallback.
 
 ## CLI and external validation contract
 
-`lotus-datalog` consumes JSON Semantic IR version 1 rather than Rust syntax. Every
+`lotus-solver-datalog` consumes JSON Semantic IR version 1 rather than Rust syntax. Every
 program and every result carries `"schema_version": 1`. It emits canonical, sorted
-JSON rows plus execution statistics. `lotus-datalog explain` and
-`lotus-datalog explain --analyze` expose estimated and actual plans, while
+JSON rows plus execution statistics. `lotus-solver-datalog explain` and
+`lotus-solver-datalog explain --analyze` expose estimated and actual plans, while
 `lotus-datalog-benchmark` provides deterministic storage, skew, proof-explosion,
 closure, and incremental workloads. CLI failures use a machine-readable error envelope;
 portable arithmetic failures have category `evaluation` and a stable error code.
-`lotus-datalog validate` performs parsing, type checking, grounding, dependency
+`lotus-solver-datalog validate` performs parsing, type checking, grounding, dependency
 analysis, stratification, SCC construction, and planning without executing the
 fixed point.

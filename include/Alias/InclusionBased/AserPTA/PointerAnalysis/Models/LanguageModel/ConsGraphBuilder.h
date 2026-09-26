@@ -1,8 +1,7 @@
 //
 // Created by peiming on 10/22/19.
 //
-#ifndef ASER_PTA_CONSGRAPHBUILDER_H
-#define ASER_PTA_CONSGRAPHBUILDER_H
+#pragma once
 
 #include "Alias/InclusionBased/AserPTA/PointerAnalysis/Graph/ConstraintGraph/ConstraintGraph.h"
 #include "Alias/InclusionBased/AserPTA/PointerAnalysis/Models/MemoryModel/MemModelTrait.h"
@@ -388,13 +387,11 @@ protected:
     auto aIt = CS.arg_begin();      // actual
     auto fIt = callee->arg_begin(); // formal
 
-    while (fIt != callee->arg_end()) {
+    while (fIt != callee->arg_end() && aIt != CS.arg_end()) {
       const llvm::Value *actual = *aIt;
       const llvm::Argument *formal = &*fIt;
-      // at least they should be pointer at the same time
-      assert(formal->getType()->isPointerTy() ==
-             actual->getType()->isPointerTy());
-      if (actual->getType()->isPointerTy()) {
+      if (formal->getType()->isPointerTy() &&
+          actual->getType()->isPointerTy()) {
         // Use getOrCreatePtrNode to ensure the pointer node exists
         // (it may not have been created yet when processing call graph)
         CGNodeTy *aNode =
@@ -413,8 +410,6 @@ protected:
       // TODO: handle var args function
       LOG_TRACE("var arg function not handled. function={}",
                 callee->getFunction()->getName().str());
-    } else {
-      assert(aIt == CS.arg_end());
     }
 
     // 2nd, link the return node
@@ -429,9 +424,10 @@ protected:
       return; // no need to handle this case
     }
 
-    if (callee->getFunction()->getReturnType()->isPointerTy()) {
+    if (callee->getFunction()->getReturnType()->isPointerTy() &&
+        callsite->getType()->isPointerTy()) {
       auto src = this->getRetNode(callee->getContext(), callee->getFunction());
-      auto dst = this->getPtrNode(caller->getContext(), callsite);
+      auto dst = this->getOrCreatePtrNode(caller->getContext(), callsite);
       consGraph->addConstraints(src, dst, Constraints::copy);
     }
   }
@@ -854,4 +850,3 @@ template <typename T1, typename T2> struct hash<pair<T1 *, T2 *>> {
 #undef MODEL
 #undef ALLOCATE
 
-#endif

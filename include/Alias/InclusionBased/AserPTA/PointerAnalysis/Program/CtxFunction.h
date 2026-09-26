@@ -1,8 +1,7 @@
 //
 // Created by peiming on 10/30/19.
 //
-#ifndef ASER_PTA_CTXFUNCTION_H
-#define ASER_PTA_CTXFUNCTION_H
+#pragma once
 
 #include "Alias/InclusionBased/AserPTA/PointerAnalysis/Program/CallSite.h"
 
@@ -164,5 +163,3 @@ public:
 };
 
 } // namespace aser
-
-#endif

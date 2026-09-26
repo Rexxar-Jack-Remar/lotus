@@ -2,8 +2,7 @@
 // This component parses spec files (e.g., config/ptr.spec, config/modref.spec)
 // into a structured representation consumable by different analyses.
 
-#ifndef LOTUS_SUPPORT_APISPEC_H
-#define LOTUS_SUPPORT_APISPEC_H
+#pragma once
 
 // Avoid including LLVM headers in the public header to keep dependencies light.
 namespace llvm {
@@ -164,4 +163,3 @@ inline bool isDataQualifier(QualifierKind q) {
 
 } // namespace lotus
 
-#endif // LOTUS_SUPPORT_APISPEC_H

@@ -134,6 +134,25 @@ TEST(EndpointQuotientCoreTest, NullableDiagonalStaysSymbolic) {
   EXPECT_FALSE(solver.contains(1, 0, 2));
 }
 
+TEST(EndpointQuotientCoreTest, IncrementalSnapshotRequiresMonotoneSameGrammar) {
+  const Problem original{
+      3, 2, {{0, 0, 1}}, {Rule::unary(1, 0), Rule::binary(1, 1, 1)}};
+  Solver previous(original);
+  previous.solve();
+
+  Problem extended = original;
+  extended.edges.push_back({1, 0, 2});
+  EXPECT_NO_THROW(Solver(std::move(extended), previous));
+
+  Problem removed = original;
+  removed.edges.clear();
+  EXPECT_THROW(Solver(std::move(removed), previous), std::invalid_argument);
+
+  Problem changed = original;
+  changed.rules.push_back(Rule::epsilon(1));
+  EXPECT_THROW(Solver(std::move(changed), previous), std::invalid_argument);
+}
+
 TEST(EndpointQuotientSessionTest, MatchesReferenceClosure) {
   const Grammar &grammar = starGrammar();
   LabeledGraph graph;
@@ -200,6 +219,40 @@ TEST(EndpointQuotientSessionTest, IncrementalTerminalEdgesResolve) {
       session.contains(graph.vertexId("n0"), graph.vertexId("n2"), "S"));
   EXPECT_TRUE(
       session.contains(graph.vertexId("n0"), graph.vertexId("n1"), "S"));
+}
+
+TEST(EndpointQuotientSessionTest,
+     IncrementalPartitionRefinementMatchesFreshClosure) {
+  const Grammar grammar = Grammar::parseFromText(
+      "Start:\n  S\nTerminal:\n  a b\nVariables:\n  S A B\nProductions:\n"
+      "  A -> a; B -> b; S -> S S | A | B | A B | <epsilon>;\n");
+  LabeledGraph graph;
+  for (Id node = 0; node < 8; ++node)
+    graph.addVertex("n" + std::to_string(node));
+  graph.addEdge(0, 1, "a");
+  graph.addEdge(2, 3, "a");
+  graph.addEdge(1, 4, "b");
+
+  SolverSession session(graph, grammar, SolverBackend::EndpointQuotient);
+  session.solve();
+  EXPECT_EQ(sessionEdges(session, grammar), referenceClosure(graph, grammar));
+
+  for (Id step = 0; step < 24; ++step) {
+    const NodeId source = (step * 3 + 1) % graph.vertexCount();
+    const NodeId target = (step * 5 + 2) % graph.vertexCount();
+    const std::string label = step % 2 == 0 ? "a" : "b";
+    if (!session.addTerminalEdge(source, target, label))
+      continue;
+    session.solve();
+    EXPECT_EQ(sessionEdges(session, grammar), referenceClosure(graph, grammar))
+        << "step=" << step;
+  }
+
+  const NodeId added = session.addNode("added");
+  session.addTerminalEdge(added, 0, "a");
+  session.addTerminalEdge(4, added, "b");
+  session.solve();
+  EXPECT_EQ(sessionEdges(session, grammar), referenceClosure(graph, grammar));
 }
 
 TEST(EndpointQuotientSessionTest, EmptyGraphWithNullableGrammar) {
@@ -327,46 +380,50 @@ TEST(EndpointQuotientCoreTest, RandomizedQueriesMatchConcreteFixedPoint) {
     for (auto mode :
          {endpoint::PartitionMode::Grammar, endpoint::PartitionMode::Global,
           endpoint::PartitionMode::Singleton}) {
-      SCOPED_TRACE(trial);
-      SCOPED_TRACE(static_cast<int>(mode));
-      Solver solver(p, {mode});
-      solver.solve();
-      EXPECT_EQ(solver.statistics().logical_facts, expected.size());
-      std::set<Fact> actual;
-      std::set<std::pair<Id, Id>> off_diagonal;
-      std::vector<Id> symbols;
-      for (Id a = 0; a < p.symbols; ++a) {
-        symbols.push_back(a);
-        endpoint::Count count = 0, diagonal = 0;
-        EXPECT_TRUE(solver.visitFacts(a, [&](Id u, Id v) {
-          EXPECT_TRUE(actual.emplace(a, u, v).second);
-          ++count;
-          diagonal += u == v;
-          if (u != v)
-            off_diagonal.emplace(u, v);
-          return true;
-        }));
-        EXPECT_EQ(solver.statistics().per_symbol[a].logical_facts, count);
-        EXPECT_EQ(solver.statistics().per_symbol[a].diagonal_facts, diagonal);
-        for (Id u = 0; u < p.nodes; ++u) {
-          std::set<Id> out, in;
-          solver.visitSuccessors(a, u, [&](Id v) {
-            EXPECT_TRUE(out.insert(v).second);
+      for (bool factorized : {false, true}) {
+        SCOPED_TRACE(trial);
+        SCOPED_TRACE(static_cast<int>(mode));
+        SCOPED_TRACE(factorized);
+        Solver solver(p, {mode, factorized});
+        solver.solve();
+        EXPECT_EQ(solver.statistics().logical_facts, expected.size());
+        std::set<Fact> actual;
+        std::set<std::pair<Id, Id>> off_diagonal;
+        std::vector<Id> symbols;
+        for (Id a = 0; a < p.symbols; ++a) {
+          symbols.push_back(a);
+          endpoint::Count count = 0, diagonal = 0;
+          EXPECT_TRUE(solver.visitFacts(a, [&](Id u, Id v) {
+            EXPECT_TRUE(actual.emplace(a, u, v).second);
+            ++count;
+            diagonal += u == v;
+            if (u != v)
+              off_diagonal.emplace(u, v);
             return true;
-          });
-          solver.visitPredecessors(a, u, [&](Id v) {
-            EXPECT_TRUE(in.insert(v).second);
-            return true;
-          });
-          for (Id v = 0; v < p.nodes; ++v) {
-            EXPECT_EQ(solver.contains(a, u, v), expected.count({a, u, v}) != 0);
-            EXPECT_EQ(out.count(v), expected.count({a, u, v}));
-            EXPECT_EQ(in.count(v), expected.count({a, v, u}));
+          }));
+          EXPECT_EQ(solver.statistics().per_symbol[a].logical_facts, count);
+          EXPECT_EQ(solver.statistics().per_symbol[a].diagonal_facts, diagonal);
+          for (Id u = 0; u < p.nodes; ++u) {
+            std::set<Id> out, in;
+            solver.visitSuccessors(a, u, [&](Id v) {
+              EXPECT_TRUE(out.insert(v).second);
+              return true;
+            });
+            solver.visitPredecessors(a, u, [&](Id v) {
+              EXPECT_TRUE(in.insert(v).second);
+              return true;
+            });
+            for (Id v = 0; v < p.nodes; ++v) {
+              EXPECT_EQ(solver.contains(a, u, v),
+                        expected.count({a, u, v}) != 0);
+              EXPECT_EQ(out.count(v), expected.count({a, u, v}));
+              EXPECT_EQ(in.count(v), expected.count({a, v, u}));
+            }
           }
+          EXPECT_EQ(solver.countOffDiagonalUnion(symbols), off_diagonal.size());
         }
-        EXPECT_EQ(solver.countOffDiagonalUnion(symbols), off_diagonal.size());
+        EXPECT_EQ(actual, expected);
       }
-      EXPECT_EQ(actual, expected);
     }
   }
 }
@@ -463,9 +520,10 @@ TEST(EndpointQuotientSessionTest, StreamingQueriesAreBackendIndependent) {
   for (auto backend :
        {SolverBackend::SparseSet, SolverBackend::SparseBitVector,
         SolverBackend::Graspan, SolverBackend::Sqid, SolverBackend::Pearl,
-        SolverBackend::TransitiveClosure, SolverBackend::Pocr,
-        SolverBackend::HierarchicalPocr, SolverBackend::FullyOrdered,
-        SolverBackend::EndpointQuotient}) {
+        SolverBackend::Skewed, SolverBackend::Cat, SolverBackend::Iea,
+        SolverBackend::IeaOcr, SolverBackend::TransitiveClosure,
+        SolverBackend::Pocr, SolverBackend::HierarchicalPocr,
+        SolverBackend::FullyOrdered, SolverBackend::EndpointQuotient}) {
     SCOPED_TRACE(solverBackendName(backend));
     const auto &grammar = starGrammar();
     LabeledGraph graph;

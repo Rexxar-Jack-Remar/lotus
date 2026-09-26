@@ -8,8 +8,7 @@
  * instructions. This covers remaining cases that may be left over after running
  * the built-in scalarizer pass.
  */
-#ifndef TRANSFORM_UNROLLVECTORS_H
-#define TRANSFORM_UNROLLVECTORS_H
+#pragma once
 
 #include <llvm/IR/Function.h>
 #include <llvm/IR/PassManager.h>
@@ -48,4 +47,3 @@ public:
   PreservedAnalyses run(Function &F, FunctionAnalysisManager &FAM);
 };
 
-#endif // TRANSFORM_UNROLLVECTORS_H

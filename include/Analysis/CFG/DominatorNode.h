@@ -20,8 +20,7 @@
  OR OTHER DEALINGS IN THE SOFTWARE.
  */
 /** @file DominatorNode.h @brief Dominator tree node representation. */
-#ifndef NOELLE_SRC_CORE_DOMINATORS_DOMINATORNODE_H_
-#define NOELLE_SRC_CORE_DOMINATORS_DOMINATORNODE_H_
+#pragma once
 
 #include "llvm/Analysis/PostDominators.h"
 
@@ -57,4 +56,3 @@ private:
 
 } // namespace noelle
 
-#endif // NOELLE_SRC_CORE_DOMINATORS_DOMINATORNODE_H_

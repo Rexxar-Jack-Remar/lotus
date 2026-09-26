@@ -8,8 +8,7 @@
 //
 //===----------------------------------------------------------------------===//
 
-#ifndef LOTUS_UTILS_GENERAL_PATHEXPRESSIONS_PATHEXPRESSIONCOMPUTER_H
-#define LOTUS_UTILS_GENERAL_PATHEXPRESSIONS_PATHEXPRESSIONCOMPUTER_H
+#pragma once
 
 #include "Utils/Algorithms/PathExpressions/LabeledGraph.h"
 #include "Utils/Algorithms/PathExpressions/Regex.h"
@@ -203,4 +202,3 @@ private:
 } // namespace pathexpressions
 } // namespace lotus
 
-#endif // LOTUS_UTILS_GENERAL_PATHEXPRESSIONS_PATHEXPRESSIONCOMPUTER_H

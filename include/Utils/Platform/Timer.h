@@ -1,5 +1,4 @@
-#ifndef UTILS_TIMER_H
-#define UTILS_TIMER_H
+#pragma once
 
 #include <functional>
 
@@ -43,5 +42,3 @@ public:
   // Check timeout and perform the corresponding actions
   void check();
 };
-
-#endif /* UTILS_TIMER_H */

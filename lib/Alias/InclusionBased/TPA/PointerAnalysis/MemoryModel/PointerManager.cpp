@@ -24,6 +24,53 @@ using namespace context;
 
 namespace tpa {
 
+// Resolve an extract to the pointer inserted into its aggregate/vector;
+// Undef if unresolved.
+const llvm::Value *resolveExtractedPointer(const llvm::Value *value) {
+  if (const auto *ev = llvm::dyn_cast<llvm::ExtractValueInst>(value)) {
+    const llvm::Value *agg = ev->getAggregateOperand();
+    while (agg != nullptr) {
+      if (const auto *iv = llvm::dyn_cast<llvm::InsertValueInst>(agg)) {
+        if (iv->getIndices() == ev->getIndices()) {
+          auto *ins = iv->getInsertedValueOperand()->stripPointerCasts();
+          if (ins->getType()->isPointerTy())
+            return ins;
+          break;
+        }
+        agg = iv->getAggregateOperand();
+        continue;
+      }
+      break;
+    }
+    return llvm::UndefValue::get(value->getType());
+  }
+
+  if (const auto *ee = llvm::dyn_cast<llvm::ExtractElementInst>(value)) {
+    const auto *idxC = llvm::dyn_cast<llvm::ConstantInt>(ee->getIndexOperand());
+    if (idxC != nullptr) {
+      const uint64_t targetIdx = idxC->getZExtValue();
+      const llvm::Value *vec = ee->getVectorOperand();
+      while (vec != nullptr) {
+        if (const auto *ie = llvm::dyn_cast<llvm::InsertElementInst>(vec)) {
+          const auto *ieIdxC = llvm::dyn_cast<llvm::ConstantInt>(ie->getOperand(2));
+          if (ieIdxC != nullptr && ieIdxC->getZExtValue() == targetIdx) {
+            auto *ins = ie->getOperand(1)->stripPointerCasts();
+            if (ins->getType()->isPointerTy())
+              return ins;
+            break;
+          }
+          vec = ie->getOperand(0);
+          continue;
+        }
+        break;
+      }
+    }
+    return llvm::UndefValue::get(value->getType());
+  }
+
+  return value;
+}
+
 // Helper to strip non-functional wrappers from an LLVM Value.
 // - Strips pointer casts (BitCast, GEP with 0 offset, etc.)
 // - Collapses trivial PHI nodes (single operand).
@@ -144,6 +191,17 @@ PointerManager::getPointersWithValue(const llvm::Value *val) const {
   PointerVector vec;
 
   val = canonicalizeValue(val);
+
+  // The CFG simplifier drops the Copy that models extractvalue/extractelement,
+  // so the result is never a Pointer; resolve it to the inserted pointer.
+  while (llvm::isa<llvm::ExtractValueInst>(val) ||
+         llvm::isa<llvm::ExtractElementInst>(val)) {
+    const llvm::Value *resolved = resolveExtractedPointer(val);
+    resolved = canonicalizeValue(resolved);
+    if (resolved == val)
+      break;
+    val = resolved;
+  }
 
   if (llvm::isa<llvm::ConstantPointerNull>(val))
     vec.push_back(nPtr);

@@ -8,8 +8,7 @@
  *     Philipp Schubert and others
  *****************************************************************************/
 
-#ifndef LOTUS_ANALYSIS_TYPEHIERARCHY_LLVMVFTABLE_H_
-#define LOTUS_ANALYSIS_TYPEHIERARCHY_LLVMVFTABLE_H_
+#pragma once
 
 #include "Analysis/TypeHierarchy/LLVMVFTableData.h"
 #include "Analysis/TypeHierarchy/VFTable.h"
@@ -98,4 +97,3 @@ public:
 
 } // namespace lotus
 
-#endif

@@ -20,8 +20,7 @@ Static Single Information (SSI) form = SSA + σ-functions
  *			- 4th: uses, upwards
  */
 
-#ifndef SSIFY_H_
-#define SSIFY_H_
+#pragma once
 
 #include "llvm/ADT/DenseSet.h"
 #include "llvm/ADT/SmallPtrSet.h"
@@ -414,4 +413,3 @@ private:
 
 } // namespace llvm
 
-#endif /* SSIFY_H_ */

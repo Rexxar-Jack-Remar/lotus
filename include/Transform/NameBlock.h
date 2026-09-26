@@ -6,8 +6,7 @@
  * This pass assigns meaningful names to basic blocks that don't have names,
  * improving code readability and debuggability.
  */
-#ifndef TRANSFORM_NAMEBLOCK_H
-#define TRANSFORM_NAMEBLOCK_H
+#pragma once
 
 #include <llvm/IR/Module.h>
 #include <llvm/IR/PassManager.h>
@@ -35,4 +34,3 @@ public:
   PreservedAnalyses run(Module &M, ModuleAnalysisManager &MAM);
 };
 
-#endif // TRANSFORM_NAMEBLOCK_H

@@ -3,8 +3,8 @@
 #include "Checker/Framework/ReportOptions.h"
 #include "Checker/Framework/Subcommands.h"
 #include "Checker/Framework/SuppressionManager.h"
-#include "CheckerOptions.h"
-#include "CheckerReport.h"
+#include "Checker/Tooling/CheckerOptions.h"
+#include "Checker/Tooling/CheckerReport.h"
 
 #include <cstddef>
 #include <string>

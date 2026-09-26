@@ -9,8 +9,7 @@
 //
 //===----------------------------------------------------------------------===//
 
-#ifndef LOTUS_VERIFICATION_SIFA_STATISTICS_SIFALOGGER_H
-#define LOTUS_VERIFICATION_SIFA_STATISTICS_SIFALOGGER_H
+#pragma once
 
 #include "llvm/Support/raw_ostream.h"
 
@@ -64,4 +63,3 @@ private:
 } // namespace sifa
 } // namespace lotus
 
-#endif // LOTUS_VERIFICATION_SIFA_STATISTICS_SIFALOGGER_H

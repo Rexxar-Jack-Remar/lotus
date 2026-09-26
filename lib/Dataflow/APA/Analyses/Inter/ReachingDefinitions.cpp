@@ -6,7 +6,7 @@
 
 #include "Dataflow/APA/Analyses/Inter/FlowHelpers.h"
 #include "Dataflow/APA/LLVM/InterProblem.h"
-#include "Dataflow/APA/Solver/ForwardInterSummarySolver.h"
+#include "Dataflow/APA/Solver/Inter/ExpandedSolver.h"
 
 #include <memory>
 
@@ -274,7 +274,7 @@ private:
 InterReachingDefinitionsResult
 runInterElimReachingDefinitions(llvm::Function *Entry, llvm::AAResults *AA,
                                 llvm::MemorySSA *MSSA,
-                                const dataflow::controlflow::InterCFG *ICF) {
+                                const dataflow::controlflow::InterCFG *ICF, EliminationOptions Options) {
   InterReachingDefinitionsResult Out;
   if (Entry == nullptr || Entry->isDeclaration()) {
     return Out;
@@ -290,7 +290,7 @@ runInterElimReachingDefinitions(llvm::Function *Entry, llvm::AAResults *AA,
   InterElimReachingDefinitionsProblem Problem(Entry, AA, MSSA, ICF);
   InterEliminationSolver<InterReachingDefinitionsAnalysisTypes,
                          kDefaultInterElimReachingDefinitionsCallStringLength>
-      Solver(Problem);
+      Solver(Problem, Options);
   auto Status = Solver.solve();
   if (const auto *Res = Solver.getResults()) {
     Out = *Res;

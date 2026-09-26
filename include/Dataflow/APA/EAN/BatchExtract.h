@@ -1,5 +1,4 @@
-#ifndef DATAFLOW_APA_EAN_BATCHEXTRACT_H_
-#define DATAFLOW_APA_EAN_BATCHEXTRACT_H_
+#pragma once
 
 // Reuse-aware batch extraction (paper §III.D, Algorithm 2): pick one e-node per
 // e-class to minimize the shared-DAG objective (Eq. 5), not the additive tree
@@ -287,4 +286,3 @@ inline double reuseAwareCost(Graph &g, const std::vector<Id> &roots,
 } // namespace ean
 } // namespace elimination
 
-#endif // DATAFLOW_APA_EAN_BATCHEXTRACT_H_

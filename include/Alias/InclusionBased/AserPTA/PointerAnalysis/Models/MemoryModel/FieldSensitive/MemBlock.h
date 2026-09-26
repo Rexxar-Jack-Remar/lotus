@@ -2,8 +2,7 @@
 // Created by peiming on 12/18/19.
 //
 
-#ifndef ASER_PTA_MEMBLOCK_H
-#define ASER_PTA_MEMBLOCK_H
+#pragma once
 
 #include "Alias/InclusionBased/AserPTA/PointerAnalysis/Models/MemoryModel/AllocSite.h"
 #include "Alias/InclusionBased/AserPTA/PointerAnalysis/Models/MemoryModel/FieldSensitive/FSObject.h"
@@ -247,4 +246,3 @@ public:
 
 } // namespace aser
 
-#endif // ASER_PTA_MEMBLOCK_H

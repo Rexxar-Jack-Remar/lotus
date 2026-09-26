@@ -92,7 +92,8 @@ encodeAserConstraintGraph(const aser::ConstraintGraph<Context> &source) {
 
 template <typename Context>
 AliasClient makeAliasClient(const aser::ConstraintGraph<Context> &source,
-                            AliasEncodingMode mode = AliasEncodingMode::PAG) {
+                            AliasEncodingMode mode =
+                                AliasEncodingMode::CFLPEG) {
   return AliasClient::fromConstraintGraph(encodeAserConstraintGraph(source),
                                           mode);
 }
@@ -100,7 +101,8 @@ AliasClient makeAliasClient(const aser::ConstraintGraph<Context> &source,
 template <typename Context, typename OffsetResolver>
 AliasClient makeAliasClient(const aser::ConstraintGraph<Context> &source,
                             OffsetResolver resolve_offset,
-                            AliasEncodingMode mode = AliasEncodingMode::PAG) {
+                            AliasEncodingMode mode =
+                                AliasEncodingMode::CFLPEG) {
   return AliasClient::fromConstraintGraph(
       encodeAserConstraintGraph(source, std::move(resolve_offset)), mode);
 }
@@ -108,7 +110,7 @@ AliasClient makeAliasClient(const aser::ConstraintGraph<Context> &source,
 template <typename Solver>
 AliasClient
 makeAliasClientFromSolver(const Solver &solver,
-                          AliasEncodingMode mode = AliasEncodingMode::PAG) {
+                          AliasEncodingMode mode = AliasEncodingMode::CFLPEG) {
   const auto *graph = solver.getConsGraph();
   if (!graph) {
     throw std::invalid_argument("Aser solver has no constructed graph");
@@ -119,7 +121,7 @@ makeAliasClientFromSolver(const Solver &solver,
 template <typename Solver, typename OffsetResolver>
 AliasClient
 makeAliasClientFromSolver(const Solver &solver, OffsetResolver resolve_offset,
-                          AliasEncodingMode mode = AliasEncodingMode::PAG) {
+                          AliasEncodingMode mode = AliasEncodingMode::CFLPEG) {
   const auto *graph = solver.getConsGraph();
   if (!graph) {
     throw std::invalid_argument("Aser solver has no constructed graph");

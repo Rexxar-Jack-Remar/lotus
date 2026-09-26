@@ -21,8 +21,7 @@
 ///
 //===----------------------------------------------------------------------===//
 
-#ifndef LIF_TRANSFORM_COND_H
-#define LIF_TRANSFORM_COND_H
+#pragma once
 
 #include "Security/LIF/Loop.h"
 
@@ -130,4 +129,3 @@ llvm::Value *fold(const Incoming &In, llvm::Instruction *Before,
                   const LoopWrapper &LW);
 } // namespace lotus::lif::transform
 
-#endif

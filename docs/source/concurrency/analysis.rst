@@ -39,19 +39,24 @@ Directory layout
 The source tree is grouped by subdirectory under ``include/Concurrency/`` and
 ``lib/Concurrency/``:
 
+- ``Runtime/``: ``APIRegistry``, ``RuntimeKind``, and language runtime abstractions
+- ``Thread/``: Core thread model and reasoning:
+  - ``ThreadModel``, ``ThreadModelBuilder``, and ``ThreadCreationTree``
+  - ``Join/``: ``JoinTargetAnalysis`` (previously ``JoinTarget/``)
+  - ``Sharing/``: ``EscapeAnalysis`` and ``StaticThreadSharingAnalysis`` (previously ``Memory/``)
 - ``Utils/``: ``ThreadAPI``, ``ThreadFlowGraph``, vector-clock utilities,
   RAII lock tracking, and language models for C++, OpenMP, MPI, and Linux kernel
   APIs
 - ``MHP/``: ``MHPAnalysis``, ``StaticVectorClockMHP``, and
-  ``HappensBeforeAnalysis``
+  ``HappensBeforeAnalysis`` (consumes abstract ``IMHPAnalysis``)
 - ``LockSet/``: ``LockSetAnalysis``
-- ``Memory/``: ``EscapeAnalysis`` and ``StaticThreadSharingAnalysis``
-- ``JoinTarget/``: ``JoinTargetAnalysis``
-- ``MPI/``: ``MPIAnalysis`` and its process, collective, rank, and RMA analyses
+- ``MPI/``: ``MPIAnalysis``, ``MPISemanticOp``, and its process, collective, rank, and RMA analyses
 - ``CUDA/``: ``CUDAAnalysis``, ``CUDAFunctionSummary``, ``CUDASemantics``, and
   ``PTXAnalyzer`` for GPU thread/block hierarchy reasoning
-- ``LinuxKernel/``: ``LinuxKernelAnalysis``, ``LinuxKernelLockAnalysis``, and
-  ``LinuxKernelRCUAnalysis`` for kernel concurrency primitives
+- ``OpenMP/``: ``OpenMPModel``, ``OpenMPSemantics``, ``OpenMPOpKind``,
+  ``OpenMPThreadModelLowering``, and ``OpenMPTaskGraph``
+- ``LinuxKernel/``: ``LinuxKernelAnalysis``, ``LinuxKernelLockAnalysis``,
+  ``LinuxKernelOperation``, and ``LinuxKernelRCUAnalysis`` for kernel concurrency primitives
 - ``ValueFlow/``: thread-aware sparse value-flow refinement
   (``ThreadAwareSVFG``, ``SparseValueFlowRefinement``,
   ``WholeProgramSparseRefinement``, ``FSMPTA``, and ``MultiStageSlicer``)
@@ -146,8 +151,8 @@ Essential for data race detection, deadlock detection, and precise MHP analysis.
 JoinTargetAnalysis
 ~~~~~~~~~~~~~~~~~~
 
-**File**: ``JoinTarget/JoinTargetAnalysis.cpp``,
-``JoinTarget/JoinTargetAnalysis.h``
+**File**: ``Thread/Join/JoinTargetAnalysis.cpp``,
+``Thread/Join/JoinTargetAnalysis.h``
 
 Computes which ``pthread_create`` sites may match a given ``pthread_join`` by
 reasoning about the joined thread handle. This is used to refine thread
@@ -157,7 +162,7 @@ termination effects beyond a simple name-based match.
 
 - Refining join reasoning when multiple thread handles may alias
 - Supporting more precise MHP pruning around thread termination
-- Providing a dedicated analysis for the ``JoinTarget/`` subdirectory that now
+- Providing a dedicated analysis for the ``Thread/Join/`` subdirectory that now
   exists in the source tree
 
 ThreadAPI
@@ -248,7 +253,7 @@ happens-before analyses.
 EscapeAnalysis
 ~~~~~~~~~~~~~~
 
-**File**: ``Memory/EscapeAnalysis.cpp``, ``Memory/EscapeAnalysis.h``
+**File**: ``Thread/Sharing/EscapeAnalysis.cpp``, ``Thread/Sharing/EscapeAnalysis.h``
 
 Determines which values escape their thread-local scope and become shared between
 threads. Essential for identifying which memory locations may be accessed by
@@ -283,7 +288,7 @@ clocks to efficiently track happens-before relationships and compute MHP pairs.
 StaticThreadSharingAnalysis
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-**File**: ``Memory/StaticThreadSharingAnalysis.cpp``, ``Memory/StaticThreadSharingAnalysis.h``
+**File**: ``Thread/Sharing/StaticThreadSharingAnalysis.cpp``, ``Thread/Sharing/StaticThreadSharingAnalysis.h``
 
 Analyzes which memory locations are shared between threads using static analysis.
 Combines escape analysis with thread flow information to identify shared memory.
@@ -438,7 +443,7 @@ Usage
 
    #include <Concurrency/MHP/MHPAnalysis.h>
    #include <Concurrency/LockSet/LockSetAnalysis.h>
-   #include <Concurrency/Memory/EscapeAnalysis.h>
+   #include <Concurrency/Thread/Sharing/EscapeAnalysis.h>
 
    llvm::Module &M = ...;
    
@@ -481,6 +486,36 @@ Usage
        }
      }
    }
+
+CUDA Concurrency Analysis
+~~~~~~~~~~~~~~~~~~~~~~~~
+
+**Files**: ``CUDA/CUDAAnalysis.cpp``, ``CUDA/CUDAAnalysisLaunch.cpp``,
+``CUDA/CUDASemantics.cpp``, ``CUDA/CUDAStreamAutomaton.cpp``,
+``CUDA/CUDASymbolicModel.cpp``, ``CUDA/CUDAMemoryModel.cpp``
+
+The CUDA concurrency module provides comprehensive PTX-level reasoning, thread/block 
+hierarchy analysis, and host-device synchronization modeling for GPU kernels.
+
+**Key Features**:
+
+- **Launch ABI Decoding**: Precisely decodes current CUDA Runtime, Extended (Ex), 
+  Cooperative, and Driver launch ABIs to extract grid dimensions, block dimensions, 
+  and shared memory allocations. Multi-device launches are recognized but currently 
+  modeled conservatively.
+- **Stream and Event Automata**: Implements CFG-aware stream/event frontiers. 
+  Accurately models stream/event creation, wait, synchronization, and non-blocking 
+  destruction semantics, correctly distinguishing between legacy, PTDS (Per-Thread 
+  Default Stream), and non-blocking streams.
+- **Hierarchical Race Analysis**: Detects CTA (Cooperative Thread Array) self-instance 
+  races and DMA hazards. It applies read/read filtering and strictly suppresses 
+  false positive races across block-barriers (e.g., ``__syncthreads()``, ``__syncwarp()``).
+- **Symbolic and Memory Modeling**: Employs canonical NVPTX address spaces 
+  (including cluster-shared AS7). Implements safe shift handling, modular truncation, 
+  and DataLayout-correct GEP offsets. 
+- **Summaries**: Computes device-callee memory summaries with launch-specific 
+  argument instantiation. Provides clean disabled/stale states when configuration 
+  discovery is incomplete.
 
 Data race detection: when we report
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -531,7 +566,7 @@ would list all three accesses as steps.
 - Security analysis of concurrent code
 
 Limitations
-----------
+-----------
 
 - **Atomic Operations**: Limited support for fine-grained memory ordering
   (std::memory_order_relaxed, acquire, release, etc.). The ThreadAPI maps

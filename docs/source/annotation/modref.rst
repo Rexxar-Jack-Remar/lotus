@@ -1,5 +1,5 @@
 ModRef Function Effect Specifications
-====================================
+=====================================
 
 The ``include/Annotation/ModRef/`` headers define the external mod/ref summary
 format used to model library functions for alias and checker pipelines.

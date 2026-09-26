@@ -1,5 +1,4 @@
-#ifndef NPA_EXPRESSIONS_H
-#define NPA_EXPRESSIONS_H
+#pragma once
 
 /**
  * \file
@@ -404,4 +403,3 @@ private:
 
 } // namespace npa
 
-#endif // NPA_EXPRESSIONS_H

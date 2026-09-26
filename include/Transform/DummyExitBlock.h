@@ -1,5 +1,4 @@
-#ifndef TRANSFORM_DUMMYEXITBLOCK_H
-#define TRANSFORM_DUMMYEXITBLOCK_H
+#pragma once
 
 #include "llvm/IR/Function.h"
 #include "llvm/IR/PassManager.h"
@@ -13,4 +12,3 @@ struct DummyExitBlockPass : llvm::PassInfoMixin<DummyExitBlockPass> {
                               llvm::FunctionAnalysisManager &);
 };
 
-#endif // TRANSFORM_DUMMYEXITBLOCK_H

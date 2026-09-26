@@ -8,9 +8,9 @@
 #include "llvm/IR/IntrinsicInst.h"
 #include "llvm/IR/Module.h"
 
-#include "Dataflow/APA/LLVM/InterProblem.h"
-#include "Dataflow/APA/Solver/ForwardInterSummarySolver.h"
 #include "Dataflow/APA/Analyses/Inter/FlowHelpers.h"
+#include "Dataflow/APA/LLVM/InterProblem.h"
+#include "Dataflow/APA/Solver/Inter/ExpandedSolver.h"
 
 #include <map>
 #include <memory>
@@ -294,7 +294,7 @@ private:
 InterNonNullResult
 runInterElimNonNull(llvm::Function *Entry, llvm::AssumptionCache *AC,
                     llvm::DominatorTree *DT,
-                    const dataflow::controlflow::InterCFG *ICF) {
+                    const dataflow::controlflow::InterCFG *ICF, EliminationOptions Options) {
   InterNonNullResult Out;
   if (Entry == nullptr || Entry->isDeclaration())
     return Out;
@@ -307,7 +307,7 @@ runInterElimNonNull(llvm::Function *Entry, llvm::AssumptionCache *AC,
   InterNonNullProblem Problem(Entry, AC, DT, ICF);
   InterEliminationSolver<InterNonNullAnalysisTypes,
                          kDefaultInterElimNonNullCallStringLength>
-      Solver(Problem);
+      Solver(Problem, Options);
   auto Status = Solver.solve();
   if (const auto *Result = Solver.getResults())
     Out = *Result;

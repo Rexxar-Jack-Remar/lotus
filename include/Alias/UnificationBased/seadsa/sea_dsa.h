@@ -1,5 +1,4 @@
-#ifndef _SEADSA__H_
-#define _SEADSA__H_
+#pragma once
 
 #include <stddef.h>
 
@@ -44,5 +43,4 @@ extern void sea_dsa_access(const void *p, unsigned offset);
 extern void sea_dsa_mk_seq(const void *p, unsigned sz);
 #ifdef __cplusplus
 }
-#endif
 #endif

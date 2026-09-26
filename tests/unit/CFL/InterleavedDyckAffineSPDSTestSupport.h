@@ -473,7 +473,7 @@ inline void recursiveStacks() {
 inline bool sameTransitions(const spds::Automaton<AffineSemiring> &a, const spds::Automaton<AffineSemiring> &b) {
   if(a.transitions().size()!=b.transitions().size())return false;
   for(const auto &entry:a.transitions()) {
-    auto found=b.findTransition(entry.edge);
+    const auto *found=b.findTransition(entry.edge);
     if(!found || found->weight!=entry.weight)return false;
   }
   return true;

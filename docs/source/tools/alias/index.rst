@@ -4,8 +4,22 @@ Alias Analysis Tools
 This page documents the command-line tools under ``tools/alias/``. For the
 underlying algorithms and architecture, see :doc:`../../alias/alias_analysis`.
 
+GPG (lotus-alias-gpg)
+---------------------
+
+Bottom-up generalized-points-to-graph analysis. The default ``fscs`` mode is
+flow-, field-, and fully context-sensitive; ``fics`` and ``fici`` reproduce
+the reference implementation's comparison variants.
+
+.. code-block:: bash
+
+   ./build/bin/lotus-alias-gpg --mode=fscs --print-pts \
+     --print-call-graph --print-modref input.bc
+
+See :doc:`../../alias/gpg` for architecture and options.
+
 SparrowAA (lotus-alias-sparrow-aa)
--------------------
+----------------------------------
 
 Inclusion-based points-to analysis (flow-insensitive, context-insensitive, context-sensitive).
 
@@ -26,7 +40,7 @@ Inclusion-based points-to analysis (flow-insensitive, context-insensitive, conte
 - Note: this tool have some redundancies with aserpta, and reuses some header files from it (from context abstraction).
 
 TPA (lotus-alias-tpa)
----------
+---------------------
 
 Flow- and context-sensitive pointer analysis using semi-sparse representation
 with k-limiting support.
@@ -73,7 +87,7 @@ with k-limiting support.
    ./build/bin/lotus-alias-tpa -no-prepass -prepass-out preprocessed.bc input.bc
 
 AserPTA (lotus-alias-aser-aa)
------------------
+-----------------------------
 
 High-performance constraint-based pointer analysis with multiple context
 sensitivities and solver algorithms.
@@ -119,9 +133,10 @@ sensitivities and solver algorithms.
 FlowSensitivePTA (lotus-alias-fspta)
 ------------------------------------
 
-Exhaustive sparse flow-sensitive pointer analysis. Builds the Lotus
-SVFG/MemorySSA from an ICFG and solves per-node memory ``IN``/``OUT`` state,
-with an optional object-versioned (``vfspta``) solver.
+Flow-sensitive pointer-analysis driver. The ``fspta`` and ``vfspta`` modes
+build the Lotus SVFG/MemorySSA from an ICFG and solve sparse memory state. The
+``vfpta`` mode instead builds a field-insensitive value-flow graph directly
+from LLVM IR.
 
 **Binary**: ``lotus-alias-fspta``  
 **Location**: ``tools/alias/lotus-alias-fspta.cpp``
@@ -134,13 +149,17 @@ with an optional object-versioned (``vfspta``) solver.
 
 **Key Options** (see also :doc:`../../alias/flowsensitive`):
 
-- ``--analysis=fspta|vfspta`` – Conventional sparse flow-sensitive analysis (default) or object-versioned analysis
-- ``--points-to-sets=mutable|hash-consed`` – Points-to set backend
-- ``--memory-partition=distinct|intra-disjoint|inter-disjoint`` – MemorySSA region partition strategy
+- ``--analysis=fspta|vfspta|vfpta`` – Conventional sparse (default),
+  object-versioned, or direct value-flow analysis
+- ``--points-to-sets=mutable|hash-consed`` – Points-to set backend for ``fspta``
+- ``--memory-partition=distinct|intra-disjoint|inter-disjoint`` – MemorySSA
+  region partition strategy for ``fspta`` and ``vfspta``
 - ``--print-pts`` – Print top-level points-to results
-- ``--print-memory`` – Print non-empty sparse memory facts
+- ``--print-memory`` – Print non-empty sparse memory facts (``fspta`` and
+  ``vfspta`` only)
 - ``--dump-stats`` – Print solver statistics (default on)
-- ``--dump-svfg=<file>`` – Write the initialized SVFG as a DOT file
+- ``--dump-svfg=<file>`` – Write the initialized SVFG as a DOT file (``fspta``
+  and ``vfspta`` only)
 - ``--validate-annotations`` – Validate ``__aser_alias__``/``__aser_no_alias__`` calls
 
 **Examples**:
@@ -153,20 +172,75 @@ with an optional object-versioned (``vfspta``) solver.
    # Object-versioned analysis with points-to output
    ./build/bin/lotus-alias-fspta input.bc --analysis=vfspta --print-pts
 
+   # Direct value-flow analysis
+   ./build/bin/lotus-alias-fspta input.bc --analysis=vfpta --print-pts
+
    # Hash-consed points-to sets and SVFG dump
    ./build/bin/lotus-alias-fspta input.bc --points-to-sets=hash-consed --dump-svfg=fspta.dot
 
-DFPA (dfpa)
------------
+BootstrapAA (lotus-alias-bootstrap)
+-----------------------------------
 
-Demand-refined function-pointer analysis for indirect-call resolution.
-The DFPA library is still available (``lib/Alias/Specialized/DFPA/``) but
-the standalone ``dfpa`` CLI frontend has been removed from the current tree.
-Use ``lotus-alias-call-graph`` with ``-cg-type=dfpa`` to invoke DFPA
-indirect-call resolution programmatically.
+Bootstrapped flow- and context-sensitive points-to analysis. It combines a
+Steensgaard coarse partition, thresholded Andersen refinement, dependency
+slicing, and per-cluster input-state summary tabulation.
+
+**Binary**: ``lotus-alias-bootstrap``
+
+**Usage**:
+
+.. code-block:: bash
+
+   ./build/bin/lotus-alias-bootstrap [options] input.bc
+
+Key options:
+
+- ``--entry=<function>`` - Select a defined analysis entry (default ``main``)
+- ``--all-contexts`` - Print results joined across reachable contexts
+- ``--andersen-threshold=<N>`` - Refine coarse partitions larger than ``N``
+- ``--adaptive-threshold=<bool>`` - Enable observed-benefit threshold adaptation
+- ``--max-andersen-partition=<N>`` - Bound adaptive refinement input size
+- ``--max-andersen-work=<N>`` - Bound partition-by-hierarchy refinement work
+- ``--parallel-clusters=<bool>`` - Enable independent cluster workers
+- ``--threads=<N>`` - Set worker count; zero uses hardware concurrency
+- ``--precompute-clusters`` - Eagerly construct all cluster solvers
+- ``--max-contexts=<N>`` - Bound input-state summary contexts per cluster
+- ``--max-steps=<N>`` - Bound refinement steps per cluster
+- ``--detailed-stats`` - Print partition, cluster, and per-cluster timing data
+
+Without ``--all-contexts``, the tool prints pointer-producing instructions in
+the entry activation. Resource-limit fallbacks are explicitly marked and make
+the tool exit with status 2. See :doc:`../../alias/bootstrap-aa` for API and
+model details.
+
+CclyzerAA (lotus-alias-cclyzer-aa)
+----------------------------------
+
+Datalog-based pointer analysis frontend backed by the in-tree vendored ``cclyzer++``
+engine using Soufflé.
+
+**Binary**: ``lotus-alias-cclyzer-aa`` (requires ``-DLOTUS_ENABLE_CCLYZER=ON``)
+**Location**: ``tools/alias/lotus-alias-cclyzer-aa.cpp``
+
+**Usage**:
+
+.. code-block:: bash
+
+   ./build/bin/lotus-alias-cclyzer-aa [options] input.bc
+
+Key options:
+
+- ``-analysis=subset|unification|debug`` – Analysis kind (default: ``subset``)
+- ``-context-sensitivity=insensitive|1-cfa|2-cfa|3-cfa|1-caller|2-caller`` – Context sensitivity mode
+- ``-print-pts`` – Print points-to sets for functions and global variables
+- ``-print-cg`` – Print resolved indirect call graph edges
+- ``-print-nulls`` – Print values identified as null pointers
+- ``-check-assertions`` – Verify Datalog consistency assertions
+
+See :doc:`../../alias/cclyzeraa` for architecture and C++ API details.
 
 Call Graph Construction (lotus-alias-call-graph)
-------------------------------------
+------------------------------------------------
 
 Unified call-graph construction tool that can drive several underlying pointer
 or call-graph analyses.
@@ -179,17 +253,21 @@ or call-graph analyses.
 .. code-block:: bash
 
    ./build/bin/lotus-alias-call-graph -cg-type=dyck input.bc
-   ./build/bin/lotus-alias-call-graph -cg-type=dfpa -emit-cg-as-json input.bc
+   ./build/bin/lotus-alias-call-graph -cg-type=lotus -emit-cg-as-json input.bc
+   ./build/bin/lotus-alias-call-graph -cg-type=gpg -emit-cg-as-json input.bc
 
 Key options:
 
-- ``-cg-type=dyck|lotus|dfpa|fpa-flta|fpa-mlta|fpa-mltadf|fpa-kelp|aserpta-ci|aserpta-1cfa|aserpta-2cfa``
+- ``-cg-type=gpg|dyck|lotus|fpa-flta|fpa-mlta|fpa-mltadf|fpa-kelp|aserpta-ci|aserpta-1cfa|aserpta-2cfa``
 - ``-emit-cg-as-dot`` or ``-emit-cg-as-json``
 - ``-o <file>`` – output destination
-- ``-S`` – compute graph statistics
+- ``-S`` – compute graph statistics and write them to standard error
+
+DOT is the default when no format option is present. Selecting JSON suppresses
+that implicit DOT output, so the output remains valid JSON.
 
 DyckAA (lotus-alias-dyck-aa)
-----------------
+----------------------------
 
 Unification-based alias analysis using Dyck-CFL reachability.
 
@@ -217,7 +295,7 @@ Unification-based alias analysis using Dyck-CFL reachability.
    ./build/bin/lotus-alias-dyck-aa -print-alias-set-info -dot-dyck-callgraph input.bc
 
 LotusAA (lotus-alias-lotus-aa)
-------------------
+------------------------------
 
 Lotus-specific, flow-sensitive and field-sensitive pointer analysis with
 on-the-fly call graph construction.

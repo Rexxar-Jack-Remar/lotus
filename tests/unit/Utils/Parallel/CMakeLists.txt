@@ -1,11 +1,8 @@
-add_lotus_test_suite(utils_parallel_tests
-  SOURCES
-    PipelineSchedulerTest.cpp
-    PipelineSchedulerTimeoutTest.cpp
-    ParallelSchedulerPassTest.cpp
-    ThreadSafeTest.cpp
-  LINK_LIBS
-    CanaryParallel)
+lotus_collect_test_sources(utils_tests
+  PipelineSchedulerTest.cpp
+  PipelineSchedulerTimeoutTest.cpp
+  ParallelSchedulerPassTest.cpp
+  ThreadSafeTest.cpp)
 
 add_executable(thread_pool_harness_test ThreadPoolHarnessTest.cpp)
 set_target_properties(thread_pool_harness_test PROPERTIES

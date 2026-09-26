@@ -4,17 +4,18 @@ add_subdirectory(ShadowMemSSA)
 add_subdirectory(GSA)
 add_subdirectory(SVFG)
 
-add_lotus_test_suite(ir_graph_view_tests
-  SOURCES
-    GraphViewTest.cpp
-  LINK_LIBS
-    CanaryICFG)
+# All IR test sources collected from the subdirectories above are linked into
+# one binary so the shared libraries are linked only once.
+lotus_collect_test_sources(ir_tests GraphViewTest.cpp)
 
-add_custom_target(ir_tests
-  DEPENDS
-    ir_pdg_tests
-    ir_gvfg_tests
-    ir_shadowmemssa_tests
-    ir_gsa_tests
-    ir_svfg_tests
-    ir_graph_view_tests)
+add_lotus_collected_test_suite(ir_tests
+  LINK_LIBS
+    CanaryICFG
+    CanaryPDG
+    CanaryAliasAnalysisWrapper
+    CanaryGSA
+    CanaryGuardedValueFlow
+    CanaryShadowMemSSA
+    CanaryOptimizationIPO
+    SVFG
+    ${Z3_LIBRARIES})

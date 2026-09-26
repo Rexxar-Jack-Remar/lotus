@@ -2,8 +2,7 @@
 // Created by peiming on 3/14/20.
 //
 
-#ifndef ASER_PTA_INSERTGLOBALCTORCALLPASS_H
-#define ASER_PTA_INSERTGLOBALCTORCALLPASS_H
+#pragma once
 
 #include <llvm/Pass.h>
 
@@ -19,4 +18,3 @@ public:
 
 } // namespace aser
 
-#endif // ASER_PTA_INSERTGLOBALCTORCALLPASS_H

@@ -1,6 +1,5 @@
 /** @file PulseTaintConfig.h @brief Taint configuration for Pulse taint analysis domain. */
-#ifndef CHECKER_PULSE_PULSETAINTCONFIG_H
-#define CHECKER_PULSE_PULSETAINTCONFIG_H
+#pragma once
 
 #include <map>
 #include <regex>
@@ -206,4 +205,3 @@ public:
 
 } // namespace pulse
 
-#endif // CHECKER_PULSE_PULSETAINTCONFIG_H

@@ -4,10 +4,10 @@ GVFG is a per-function IR for value-flow, memory-flow, and path-sensitive
 dependencies. It is built in two stages:
 
 1. The structural builder creates nodes and sites from LLVM IR.
-2. The optional LotusAA adapter enriches the graph with alias- and
+2. The optional LotusAA wrapper enriches the graph with alias- and
    memory-derived flow, summaries, and imported path facts.
 
-When LotusAA's must-kill optimization is enabled, the adapter receives only
+When LotusAA's must-kill optimization is enabled, the wrapper receives only
 the surviving roots of the incremental kill forest for each load. Conditional
 roots retain their `path_cond_t` provenance, so GVFG matching regions still
 represent the fallback blocking conditions for stores that cannot be killed

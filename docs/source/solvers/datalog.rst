@@ -50,18 +50,18 @@ The current semantic and architecture reference is maintained in
 Command-line engine
 -------------------
 
-``lotus-datalog`` is the engine entry point for non-C++ clients. Native Datalog,
+``lotus-solver-datalog`` is the engine entry point for non-C++ clients. Native Datalog,
 Z3 fixedpoint input, and JSON all lower to the same type-erased Semantic IR; the
 runtime does not contain format-specific execution paths.
 
 .. code-block:: bash
 
-   ./build/bin/lotus-datalog schema > transitive-closure.json
-   ./build/bin/lotus-datalog validate transitive-closure.json
-   ./build/bin/lotus-datalog run transitive-closure.json --workers 4 --pretty
-   ./build/bin/lotus-datalog schema | ./build/bin/lotus-datalog run -
-   ./build/bin/lotus-datalog run tools/solver/datalog/examples/transitive_closure.dl
-   ./build/bin/lotus-datalog run tools/solver/datalog/examples/z3_fixedpoint.smt2
+   ./build/bin/lotus-solver-datalog schema > transitive-closure.json
+   ./build/bin/lotus-solver-datalog validate transitive-closure.json
+   ./build/bin/lotus-solver-datalog run transitive-closure.json --workers 4 --pretty
+   ./build/bin/lotus-solver-datalog schema | ./build/bin/lotus-solver-datalog run -
+   ./build/bin/lotus-solver-datalog run tools/solver/datalog/examples/transitive_closure.dl
+   ./build/bin/lotus-solver-datalog run tools/solver/datalog/examples/z3_fixedpoint.smt2
 
 The ``.dl`` frontend covers the portable engine semantics: typed set and lattice
 relations, inline facts, nullary predicates, multiple heads, positive rules,

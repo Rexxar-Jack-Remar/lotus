@@ -1,6 +1,5 @@
 /** @file PulseLogger.h @brief Logging infrastructure for Pulse analysis. */
-#ifndef CHECKER_PULSE_PULSELOGGER_H
-#define CHECKER_PULSE_PULSELOGGER_H
+#pragma once
 
 #include <chrono>
 #include <map>
@@ -78,4 +77,3 @@ private:
 
 } // namespace pulse
 
-#endif // CHECKER_PULSE_PULSELOGGER_H

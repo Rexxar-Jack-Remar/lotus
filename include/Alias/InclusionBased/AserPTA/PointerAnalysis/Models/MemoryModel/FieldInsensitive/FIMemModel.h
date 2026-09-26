@@ -10,8 +10,7 @@
 // for field-sensitive memory langModel
 // one memory block -> multiple static objects
 
-#ifndef ASER_PTA_FIMEMMODEL_H
-#define ASER_PTA_FIMEMMODEL_H
+#pragma once
 
 #include "Alias/InclusionBased/AserPTA/PointerAnalysis/Graph/ConstraintGraph/ConstraintGraph.h"
 #include "Alias/InclusionBased/AserPTA/PointerAnalysis/Models/MemoryModel/FieldInsensitive/FICanonicalizer.h"
@@ -139,7 +138,8 @@ public:
   template <typename PT>
   void processInitializer(const llvm::GlobalVariable *gVar,
                           const llvm::Constant *initializer) {
-    if (initializer->isNullValue()) {
+    if (initializer->isNullValue() ||
+        llvm::isa<llvm::UndefValue>(initializer)) {
       // skip zero initializer ? does it matter?
       // if so, simply link it to null obj
     } else if (initializer->getType()->isSingleValueType()) {
@@ -253,5 +253,3 @@ struct MemModelTrait<FIMemModel<ctx>>
 };
 
 } // namespace aser
-
-#endif

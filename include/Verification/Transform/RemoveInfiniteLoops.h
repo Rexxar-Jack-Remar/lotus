@@ -4,8 +4,7 @@
  * @author Migrated from Symbiotic
  */
 
-#ifndef LOTUS_VERIFICATION_TRANSFORM_REMOVE_INFINITE_LOOPS_H
-#define LOTUS_VERIFICATION_TRANSFORM_REMOVE_INFINITE_LOOPS_H
+#pragma once
 
 #include "llvm/IR/PassManager.h"
 
@@ -36,4 +35,3 @@ public:
 } // namespace verification
 } // namespace lotus
 
-#endif // LOTUS_VERIFICATION_TRANSFORM_REMOVE_INFINITE_LOOPS_H

@@ -10,8 +10,7 @@
  * @ingroup Concurrency
  */
 
-#ifndef LINUX_KERNEL_WAIT_ANALYSIS_H
-#define LINUX_KERNEL_WAIT_ANALYSIS_H
+#pragma once
 
 #include "Concurrency/LinuxKernel/LinuxKernelOperation.h"
 #include "Concurrency/LinuxKernel/LinuxKernelProcessModel.h"
@@ -103,4 +102,3 @@ private:
 
 } // namespace kernel
 
-#endif // LINUX_KERNEL_WAIT_ANALYSIS_H

@@ -11,12 +11,12 @@
 #include "Checker/Framework/ReportOptions.h"
 #include "Checker/Framework/Subcommands.h"
 #include "Checker/Framework/SuppressionManager.h"
-#include "CheckerOptions.h"
-#include "CheckerReport.h"
+#include "Checker/Tooling/CheckerOptions.h"
+#include "Checker/Tooling/CheckerReport.h"
 #include "IR/GSA/GSA.h"
 #include "IR/GVFG/GuardedValueFlowBuilder.h"
-#include "IR/GVFG/LotusAdapter.h"
-#include "SymbolicExecution/SymbolicExecutionWrapper.h"
+#include "IR/GVFG/LotusAAWrapper.h"
+#include "SymbolicExecution/Integration/SymbolicExecutionWrapper.h"
 
 #include <llvm/IR/LegacyPassManager.h>
 #include <llvm/IRReader/IRReader.h>
@@ -102,7 +102,7 @@ int runSymExCheckerTool(const char *argv0) {
   PM.add(new gsa::GateAnalysisPass());
   PM.add(new LotusAA());
   PM.add(new lotus::gvfg::GuardedValueFlowGraphBuilderPass());
-  PM.add(new lotus::gvfg::LotusGuardedValueFlowAdapterPass());
+  PM.add(new lotus::gvfg::LotusAAWrapper());
   PM.add(new SymbolicExecutionWrapper());
   PM.run(*M);
   stats.emit();

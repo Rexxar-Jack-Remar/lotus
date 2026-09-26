@@ -1,5 +1,4 @@
-#ifndef DATAFLOW_APA_CORE_INTERPROBLEM_H_
-#define DATAFLOW_APA_CORE_INTERPROBLEM_H_
+#pragma once
 
 #include "Dataflow/ControlFlow/FlowDirection.h"
 #include "Dataflow/APA/Core/AbstractDomain.h"
@@ -116,4 +115,3 @@ private:
 
 } // namespace elimination
 
-#endif // DATAFLOW_APA_CORE_INTERPROBLEM_H_

@@ -1,5 +1,4 @@
-#ifndef PCOMB_STRING_PARSER_H
-#define PCOMB_STRING_PARSER_H
+#pragma once
 
 #include "Utils/Formats/pcomb/Parser/Parser.h"
 
@@ -34,4 +33,3 @@ inline StringParser str(const llvm::StringRef &s) { return StringParser(s); }
 
 } // namespace pcomb
 
-#endif

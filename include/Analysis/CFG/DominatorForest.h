@@ -22,8 +22,7 @@
  */
 /** @file DominatorForest.h @brief Dominator forest data structure for CFG
  * analysis. */
-#ifndef NOELLE_SRC_CORE_DOMINATORS_DOMINATORFOREST_H_
-#define NOELLE_SRC_CORE_DOMINATORS_DOMINATORFOREST_H_
+#pragma once
 
 #include "Analysis/CFG/DominatorNode.h"
 
@@ -112,4 +111,3 @@ private:
 
 } // namespace noelle
 
-#endif // NOELLE_SRC_CORE_DOMINATORS_DOMINATORFOREST_H_

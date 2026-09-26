@@ -1,7 +1,6 @@
 #pragma once
 
 #include "CFL/Classical/Clients/ValueFlow/SVFGPreparation.h"
-#include "CFL/Classical/Solvers/Engines/POCR/SpecializedEngines.h"
 #include "CFL/Classical/Solvers/SolverSession.h"
 
 #include <cstdint>
@@ -16,8 +15,18 @@ class SVFG;
 
 namespace lotus::cfl::classical {
 
+enum class ValueFlowEncodingMode {
+  /// Lotus-native balanced/realizable value-flow relations, including edge
+  /// kinds and their reverse labels.
+  Native,
+  /// Classical CFL interchange encoding: a, call_i, and ret_i.
+  ClassicalCFL,
+};
+
 LabeledGraph encodeSVFG(const lotus::analysis::SVFG &svfg);
 Grammar buildVfgGrammar(const lotus::analysis::SVFG &svfg);
+LabeledGraph encodeClassicalCflSVFG(const lotus::analysis::SVFG &svfg);
+Grammar buildClassicalCflVfgGrammar(const lotus::analysis::SVFG &svfg);
 
 /// Context-sensitive may-reach value-flow facade. Direct, indirect-memory,
 /// and may-happen-in-parallel input edges remain distinguishable in the
@@ -31,14 +40,15 @@ public:
   ValueFlowClient(const ValueFlowClient &) = delete;
   ValueFlowClient &operator=(const ValueFlowClient &) = delete;
 
-  static ValueFlowClient fromSVFG(const lotus::analysis::SVFG &svfg);
+  static ValueFlowClient
+  fromSVFG(const lotus::analysis::SVFG &svfg,
+           ValueFlowEncodingMode mode = ValueFlowEncodingMode::Native);
   static ValueFlowClient
   fromPreparedSVFG(lotus::analysis::SVFG &svfg,
-                   const SVFGPreparationOptions &options = {});
+                   const SVFGPreparationOptions &options = {},
+                   ValueFlowEncodingMode mode = ValueFlowEncodingMode::Native);
 
   ReachabilityStats solve(SolverBackend backend = SolverBackend::SparseSet);
-  ReachabilityStats solveSpecialized(engines::SpecializedPocrBackend backend,
-                                     bool simplify_focr_cycles = false);
   /// Backward-compatible spelling for hasBalancedFlow().
   bool hasFlow(std::uint32_t source_node, std::uint32_t target_node) const;
   bool hasBalancedFlow(std::uint32_t source_node,
@@ -66,10 +76,6 @@ private:
   std::vector<std::optional<std::uint32_t>> vertex_to_node_;
   std::unique_ptr<SolverSession> session_;
   std::optional<SolverBackend> backend_;
-  std::unique_ptr<engines::PocrValueFlowEngine> pocr_engine_;
-  std::unique_ptr<engines::FocrValueFlowEngine> focr_engine_;
-  std::optional<engines::SpecializedPocrBackend> specialized_backend_;
-  bool specialized_focr_cycles_ = false;
 
   bool contains(std::uint32_t source_node, std::uint32_t target_node,
                 const char *symbol) const;

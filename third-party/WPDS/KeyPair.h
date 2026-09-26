@@ -42,9 +42,9 @@
  */
 #ifndef WPDS_UTIL_KEY_PAIR_H_
 #define WPDS_UTIL_KEY_PAIR_H_
-#include "common.h"
+#include "Common.h"
+#include "HmHash.h"
 #include "Triple.h"
-#include "hm_hash.h"
 #include <utility>  // std::pair
 
 #define combine_wpds_keys( k1,k2 ) ((k1) + 997*(k2))

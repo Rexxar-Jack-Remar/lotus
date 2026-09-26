@@ -6,8 +6,7 @@
  * This file provides debugging macros and utilities for conditional
  * logging and debugging output.
  */
-#ifndef SUPPORT_DEBUG_H
-#define SUPPORT_DEBUG_H
+#pragma once
 
 #include <llvm/Support/raw_ostream.h>
 
@@ -34,4 +33,3 @@ bool isPopeyeCurrentDebugType(const char *Type);
 extern bool PopeyeDebugFlag;
 /// @}
 
-#endif // SUPPORT_DEBUG_H

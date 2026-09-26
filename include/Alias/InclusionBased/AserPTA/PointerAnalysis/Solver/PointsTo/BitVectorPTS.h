@@ -1,8 +1,7 @@
 //
 // Created by peiming on 9/9/19.
 //
-#ifndef ASER_PTA_BITVECTORPTS_H
-#define ASER_PTA_BITVECTORPTS_H
+#pragma once
 
 #include "Alias/InclusionBased/AserPTA/PointerAnalysis/Solver/PointsTo/PTSTrait.h"
 
@@ -132,4 +131,3 @@ private:
 } // namespace aser
 DEFINE_PTS_TRAIT(BitVectorPTS)
 
-#endif

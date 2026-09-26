@@ -1,5 +1,4 @@
-#ifndef PCOMB_MANY_PARSER_H
-#define PCOMB_MANY_PARSER_H
+#pragma once
 
 #include "Utils/Formats/pcomb/Parser/Parser.h"
 
@@ -57,4 +56,3 @@ auto many(ParserA &&p0, unsigned minOccurrence = 0) {
 
 } // namespace pcomb
 
-#endif

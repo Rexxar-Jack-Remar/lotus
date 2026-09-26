@@ -1,8 +1,7 @@
 //
 // Created by peiming on 10/22/19.
 //
-#ifndef ASER_PTA_PTSTRAIT_H
-#define ASER_PTA_PTSTRAIT_H
+#pragma once
 
 #include <cstddef>
 #include <cstdint>
@@ -148,4 +147,3 @@ template <typename Pts> struct PTSTrait {
     }                                                                          \
   };                                                                           \
   }
-#endif

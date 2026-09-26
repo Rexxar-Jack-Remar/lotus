@@ -1,5 +1,4 @@
-#ifndef PCOMB_ALT_PARSER_H
-#define PCOMB_ALT_PARSER_H
+#pragma once
 
 #include "Utils/Formats/pcomb/Parser/Parser.h"
 
@@ -84,4 +83,3 @@ template <typename... Parsers> AltParser<Parsers...> alt(Parsers &&...parsers) {
 
 } // namespace pcomb
 
-#endif

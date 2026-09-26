@@ -6,8 +6,7 @@
  * This file provides lightweight adapters for iterating over CFG vertices
  * and edges without relying on Boost.
  */
-#ifndef __LLVM_BGL_HPP_
-#define __LLVM_BGL_HPP_
+#pragma once
 
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/iterator_range.h"
@@ -80,4 +79,3 @@ inline std::size_t num_vertices(const Function &f) { return f.size(); }
 } // namespace bgl
 } // namespace llvm
 
-#endif

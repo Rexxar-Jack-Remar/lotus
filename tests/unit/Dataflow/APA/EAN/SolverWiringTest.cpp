@@ -10,7 +10,7 @@
 //
 // LLVM-free: uses toy AnalysisDomains directly on the generic solver.
 
-#include "Dataflow/APA/Solver/Solver.h"
+#include "Dataflow/APA/Solver/Intra/IntraSolver.h"
 
 #include <map>
 #include <set>

@@ -1,8 +1,7 @@
 //
 // Created by peiming on 10/22/19.
 //
-#ifndef ASER_PTA_ALLOCSITE_H
-#define ASER_PTA_ALLOCSITE_H
+#pragma once
 
 #include <llvm/IR/Operator.h>
 #include <llvm/IR/Value.h>
@@ -61,5 +60,3 @@ public:
 };
 
 } // namespace aser
-
-#endif

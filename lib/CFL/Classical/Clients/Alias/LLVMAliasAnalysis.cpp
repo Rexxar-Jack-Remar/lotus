@@ -98,7 +98,27 @@ public:
     module_ = &module;
     const auto frontend_start = std::chrono::steady_clock::now();
     builder_ = std::make_unique<ConstraintBuilder>();
-    builder_->analyze(&module, options_.entry);
+    std::string entry = options_.entry;
+    if (entry == "main" && (!module.getFunction(entry) ||
+                            module.getFunction(entry)->isDeclaration())) {
+      for (const char *candidate : {"MAIN__", "MAIN_", "_start"}) {
+        if (auto *F = module.getFunction(candidate)) {
+          if (!F->isDeclaration()) {
+            entry = candidate;
+            break;
+          }
+        }
+      }
+      if (entry == "main") {
+        for (const llvm::Function &F : module) {
+          if (!F.isDeclaration() && !F.isIntrinsic()) {
+            entry = F.getName().str();
+            break;
+          }
+        }
+      }
+    }
+    builder_->analyze(&module, entry);
     frontend_time_microseconds_ =
         std::chrono::duration_cast<std::chrono::microseconds>(
             std::chrono::steady_clock::now() - frontend_start)
@@ -133,8 +153,7 @@ public:
         mapped_function_pointers.push_back(synchronizer_->mappedNode(pointer));
       }
       std::vector<std::pair<std::size_t, std::size_t>> function_addresses;
-      for (const auto &[object, pointer] :
-           client_->graph().edgesForLabel("addr")) {
+      for (const auto &[object, pointer] : client_->addressEdges()) {
         const auto source = synchronizer_->sourceNode(object);
         if (!source || *source >= graph->getNodeNum()) {
           continue;
@@ -187,15 +206,8 @@ public:
       return unknown_changed || calls_changed || constraints_changed ||
              supplemental_changed;
     };
-    if (options_.specialized_backend) {
-      statistics_ = client_->solveToFixedPoint(
-          *options_.specialized_backend, discover_constraints,
-          options_.max_callgraph_rounds, options_.simplify_focr_cycles);
-    } else {
-      statistics_ =
-          client_->solveToFixedPoint(options_.backend, discover_constraints,
-                                     options_.max_callgraph_rounds);
-    }
+    statistics_ = client_->solveToFixedPoint(
+        options_.backend, discover_constraints, options_.max_callgraph_rounds);
     statistics_.frontend_time_microseconds = frontend_time_microseconds_;
     statistics_.client_initialization_microseconds =
         client_initialization_microseconds_;

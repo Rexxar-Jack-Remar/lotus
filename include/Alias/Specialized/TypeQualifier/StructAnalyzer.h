@@ -1,6 +1,5 @@
 
-#ifndef UBIANALYSIS_STRUCTANALYZER_H
-#define UBIANALYSIS_STRUCTANALYZER_H
+#pragma once
 
 #include <map>
 #include <set>
@@ -230,4 +229,3 @@ public:
   void printStructInfo() const;
 };
 
-#endif // UBIANALYSIS_STRUCTANALYZER_H

@@ -1,6 +1,5 @@
 /** @file BugTypes.h @brief Bug type enumerations for checker framework. */
-#ifndef INCLUDE_REPORT_BUGREPORT_BUGTYPES_H_
-#define INCLUDE_REPORT_BUGREPORT_BUGTYPES_H_
+#pragma once
 
 #include <string>
 
@@ -88,4 +87,3 @@ std::string to_string(BugClassification bc);
 #define GET_ABBREV_NAME(abbr, importance, classification, desc) abbr
 #define GET_DESC(abbr, importance, classification, desc) desc
 
-#endif /* CHECKER_REPORT_BUGTYPES_H */

@@ -9,8 +9,7 @@
  * Author: rainoftime
  */
 
-#ifndef DATAFLOW_WPDS_CLIENTS_UNINITIALIZED_VARIABLES_ANALYSIS_H_
-#define DATAFLOW_WPDS_CLIENTS_UNINITIALIZED_VARIABLES_ANALYSIS_H_
+#pragma once
 
 #include "Dataflow/Mono/Support/Result.h"
 #include "Dataflow/WPDS/Backend.h"
@@ -69,4 +68,3 @@ void queryAnalysisResults(llvm::Module &module,
                           const mono::DataFlowResult &result,
                           llvm::Instruction *targetInst);
 
-#endif // DATAFLOW_WPDS_CLIENTS_UNINITIALIZED_VARIABLES_ANALYSIS_H_

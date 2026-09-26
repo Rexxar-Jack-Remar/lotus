@@ -14,8 +14,8 @@
 // gain and the EAN gain (complementarity).
 
 #include "Dataflow/APA/EAN/DagStats.h"
-#include "Dataflow/APA/Solver/EliminationOrder.h"
-#include "Dataflow/APA/Solver/Solver.h"
+#include "Dataflow/APA/Solver/Ordering/StructuralModel.h"
+#include "Dataflow/APA/Solver/Intra/IntraSolver.h"
 
 #include <algorithm>
 #include <cmath>

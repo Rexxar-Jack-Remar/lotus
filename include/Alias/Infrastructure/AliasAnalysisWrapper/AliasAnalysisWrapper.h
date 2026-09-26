@@ -32,10 +32,16 @@ class SemiSparseProgram;
 } // namespace tpa
 
 namespace lotus {
+namespace gpg {
+class GPGAnalysisEngine;
+} // namespace gpg
 namespace analysis {
 class FlowDDA;
 using DemandDrivenAA = FlowDDA;
 } // namespace analysis
+namespace cclyzer {
+class CclyzerAA;
+} // namespace cclyzer
 } // namespace lotus
 
 namespace lotus {
@@ -61,6 +67,9 @@ struct AAConfig {
     // TPA: Flow- and context-sensitive semi-sparse pointer analysis
     TPA,
 
+    // GPG: fully flow-, field-, and context-sensitive bottom-up analysis
+    GPG,
+
     // DDA: Demand-driven pointer analysis on SVFG
     DDA,
 
@@ -79,6 +88,9 @@ struct AAConfig {
 
     // UnderApprox: Under-approximate alias analysis
     UnderApprox,
+
+    // CclyzerAA: Datalog-based pointer analysis (cclyzer++)
+    CclyzerAA,
 
     // Combined: Multiple backends merged together
     Combined,
@@ -101,6 +113,7 @@ struct AAConfig {
     KCallSite, // k-call-site sensitive (k-CFA)
     KOrigin,   // k-origin sensitive (AserPTA only)
     Adaptive,  // Adaptive context sensitivity (TPA only)
+    Full,      // Fully context-sensitive summaries (GPG only)
   };
 
   ContextSensitivity ctxSens;
@@ -223,6 +236,11 @@ struct AAConfig {
             Solver::Default};
   }
 
+  static AAConfig GPG() {
+    return {Implementation::GPG, ContextSensitivity::Full, 0, true,
+            Solver::Default};
+  }
+
   // DDA (demand-driven on SVFG)
   static AAConfig DDA_NoCtx() {
     return {Implementation::DDA, ContextSensitivity::None, 0, true,
@@ -257,6 +275,21 @@ struct AAConfig {
 
   static AAConfig UnderApprox() {
     return {Implementation::UnderApprox, ContextSensitivity::None, 0, true,
+            Solver::Default};
+  }
+
+  static AAConfig CclyzerAA_Default() {
+    return {Implementation::CclyzerAA, ContextSensitivity::None, 0, true,
+            Solver::Default};
+  }
+
+  static AAConfig CclyzerAA_1CFA() {
+    return {Implementation::CclyzerAA, ContextSensitivity::KCallSite, 1, true,
+            Solver::Default};
+  }
+
+  static AAConfig CclyzerAA_2CFA() {
+    return {Implementation::CclyzerAA, ContextSensitivity::KCallSite, 2, true,
             Solver::Default};
   }
 
@@ -338,10 +371,11 @@ public:
 
   bool getPointsToSet(const llvm::Value *ptr,
                       std::vector<const llvm::Value *> &ptsSet);
-  /// Get points-to set size only (for metrics). Supported by SparrowAA and TPA.
+  /// Get points-to set size only (for metrics). Supported by SparrowAA, TPA,
+  /// DDA, and GPG.
   bool getPointsToSetSize(const llvm::Value *ptr, size_t &outSize);
   /// Get possible callees for a call (direct or indirect). Supported by
-  /// SparrowAA and TPA.
+  /// SparrowAA, DyckAA, TPA, and GPG.
   void getIndirectCallTargets(llvm::CallBase *call,
                               std::vector<const llvm::Function *> &targets);
   bool getAliasSet(const llvm::Value *v,
@@ -391,6 +425,8 @@ private:
   std::unique_ptr<lotus::analysis::DemandDrivenAA> _dda_aa;
   std::unique_ptr<tpa::SemiSparsePointerAnalysis> _tpa_aa;
   std::unique_ptr<tpa::SemiSparseProgram> _tpa_program;
+  std::unique_ptr<lotus::gpg::GPGAnalysisEngine> _gpg_aa;
+  std::unique_ptr<lotus::cclyzer::CclyzerAA> _cclyzer_aa;
 
   llvm::AAResults *_llvm_aa;
   seadsa::SeaDsaAAResult *_seadsa_aa;
@@ -411,6 +447,7 @@ public:
                                                              unsigned kCFA = 0);
   static std::unique_ptr<AliasAnalysisWrapper> createTPA(llvm::Module &M,
                                                          unsigned kCFA = 0);
+  static std::unique_ptr<AliasAnalysisWrapper> createGPG(llvm::Module &M);
 };
 
 // ===== Utility Functions =====
@@ -428,6 +465,7 @@ public:
  * - "tpa", "tpa-0cfa" -> TPA_NoCtx
  * - "tpa-1cfa" -> TPA_1CFA
  * - "tpa-2cfa" -> TPA_2CFA
+ * - "gpg", "gpg-aa", "gpg-fscs" -> GPG
  * - "dyck", "dyckaa" -> DyckAA
  * - "cfl-anders", "cflanders" -> CFLAnders
  * - "cfl-steens", "cflsteens" -> CFLSteens

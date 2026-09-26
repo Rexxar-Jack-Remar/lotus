@@ -4,8 +4,7 @@ The software is provided on an as is basis for research purposes.
 There is no additional support offered, nor are the author(s)
 or their institutions liable under any circumstances.
 */
-#ifndef _TCSEstimator_H_
-#define _TCSEstimator_H_
+#pragma once
 
 #include "CFL/CSIndex/FLARE/Graph.h"
 
@@ -24,4 +23,3 @@ private:
 
 } // namespace lotus::cfl::cs_index::flare::grail
 
-#endif

@@ -9,8 +9,7 @@
  * @date 2025-2026
  */
 
-#ifndef THREAD_FLOW_GRAPH_H
-#define THREAD_FLOW_GRAPH_H
+#pragma once
 
 #include <map>
 #include <memory>
@@ -301,4 +300,3 @@ bool isThreadBoundaryNode(SyncNodeType type);
 
 } // namespace mhp
 
-#endif // THREAD_FLOW_GRAPH_H

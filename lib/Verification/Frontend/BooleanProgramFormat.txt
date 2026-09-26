@@ -1,0 +1,80 @@
+The format of the output is:
+
+A line containing four integers: "n_G n_H n_E n_V n_L"
+
+A line containing one integer: the error node
+
+A line of n_G integers: "procOfNode[0] procOfNode[1] .. procOfNode[n_G-1]" where procOfNode[i] is a procedure (in [0, n_H)) denoting the procedure that node i lies in.
+
+A line of n_V integers: "procOfVar[0] procOfVar[1] .. procOfVar[n_V-1]" where procOfVar[i] = -1 if i is a global variable and otherwise procOfVar[i] = p where p is the procedure in which i is a local variable.
+
+A line of n_H integers: "entryOf[0] entryOf[1] .. entryOf[n_H-1]" where entryOf[i] is the first statement (node) in procedure i.
+
+A line of n_H integers: "exitOf[0] exitOf[1] .. exitOf[n_H-1]" where exitOf[i] is the exit node in procedure i.
+
+A line of n_H integers: "return_num[0] return_num[1] .. return_num[n_H-1]" where return_num[i] is the number of arguments that procedure i returns.
+
+n_H lines, the i'th of them is of the form "n param_0 param_1 .. param_{n-1}", where n is the number of parameters that procedure i takes, and param_0 .. param_{n-1} is a list of variables (each is an integer in [0, n_V)) that denote those parameters in order.
+
+A line of n_H integers: "enforce[0] enforce[1] .. enforce[n_H-1]" where enforce[i] is the expresison in the enforce of procedure i (-1 if there is no enforce)
+
+A line of n_L integers: "dest[0] dest[1] .. dest[n_L-1]" where dest[i] is the node that should be executed after going to label i
+
+A line of n_L integers: "no_enforce[0] no_enforce[1] .. no_enforce[n_L-1]" where no_enforce[i] is  1 if the i'th label begins with the prefix "no_enforce" and 0 otherwise
+
+n_G lines, the i'th of them is Next(i) (-1 for exit and error nodes)
+
+
+n_G lines, the i'th of them is of the form "type <desc_type>", according to the following format:
+	- "exit" my_proc
+		for exit nodes
+	- "dead" num_of_vars var_id_0 var_id_1 ...
+		for dead nodes
+	- "call" proc_id num_of_expressions xp_id_0 xp_id_1 ...
+		for call nodes that call another procedure in the program
+	- "assign_call" num_of_vars var_id_0 var_id_1 ... proc_id num_of_expressions xp_id_0 xp_id_1 ...
+		something like x := banana(a,b,c)
+	- "parallel_assign" num_of_vars var_id_0 var_id_1 ... num_of_expressions xp_id_0 xp_id_1 ... oc
+		oc is an optional constraint, index of expression if there is one and -1 otherwise
+	- "assert" xp_id
+	- "assume" xp_id
+	- "constrain" xp_id
+	- "return" num_of_expressions xp_id_0 xp_id_1 ...
+	- "skip"
+	- "goto" label_num lbl_id_0 lbl_id_1 ...
+	- "while" xp_id first_node
+	- "if" cases_num xp_id_0 first_node_0 xp_id_1 first_node_1 ...
+		a list of the conditionals and first nested nodes. First conditional is for first node and so on. The condition for the last one may be -1, in which case it is just an else (not an else if)
+
+
+> n_E lines, the i'th of them is describing how to access the value of expression i, including references to its subexpressions (if any)
+	- "nondet"
+		like ? or *
+	- "choose" xp_id_1 xp_id_2
+	- "implies" xp_id_1 xp_id_2
+	- "or" xp_id_1 xp_id_2
+	- "xor" xp_id_1 xp_id_2
+	- "and" xp_id_1 xp_id_2
+	- "eq" xp_id_1 xp_id_2
+		==
+	- "neq" xp_id_1 xp_id_2
+		!=
+	- "not" xp_id
+	- "var" var_id
+	- "primed" var_id
+	- "int" num
+		just a number, I *think* its always 1 or 0, but didnt change just in case
+	- "true"
+	- "false"
+	I ommited the paranthesis as the parse tree is unique from this notation
+
+
+ m_G (the # of edges in CFGs, this includes interprocedural edges (call-to-start, start-to-return-site))
+
+ m_G lines containing the edges.
+
+
+
+ map<int,string> xp_rec;
+//type, procedure, var name
+map<int,pair<string,pair<int,string>>> xp_params;

@@ -4,8 +4,7 @@
  * @author Migrated from Symbiotic
  */
 
-#ifndef LOTUS_VERIFICATION_TRANSFORM_UNROLLING_H
-#define LOTUS_VERIFICATION_TRANSFORM_UNROLLING_H
+#pragma once
 
 #include "llvm/Analysis/LoopPass.h"
 
@@ -45,4 +44,3 @@ public:
 } // namespace verification
 } // namespace lotus
 
-#endif // LOTUS_VERIFICATION_TRANSFORM_UNROLLING_H

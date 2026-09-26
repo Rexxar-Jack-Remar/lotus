@@ -5,8 +5,7 @@
 //
 //===----------------------------------------------------------------------===//
 
-#ifndef PROGSLICE_H_
-#define PROGSLICE_H_
+#pragma once
 
 #include "Alias/DemandDriven/DDA/CxtDPItem.h"
 #include "Checker/Saber/SaberCondAllocator.h"
@@ -173,4 +172,3 @@ protected:
 } // namespace analysis
 } // namespace lotus
 
-#endif

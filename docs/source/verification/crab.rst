@@ -1,5 +1,5 @@
 CRAB - Abstract Interpretation Library
-=====================================
+======================================
 
 CRAB is the abstract interpretation library vendored in Lotus under
 ``third-party/crab/``. It provides the core abstract domains, fixpoint

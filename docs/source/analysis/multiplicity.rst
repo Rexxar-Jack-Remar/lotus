@@ -10,6 +10,7 @@ heap) as either *Unique* (executed at most once per program invocation) or
 **Implementation**: ``lib/Analysis/Multiplicity/``
 
 **Public API**:
+
 - ``lotus::analysis::multiplicity::classifyModuleMultiplicity``
   — classify all allocations in a module
 
@@ -21,12 +22,15 @@ multiplicity classification:
 
 - **Unique** — the allocation executes at most once per program run.
   Applies to:
+
   - All global variables (always Unique)
   - Stack allocations (alloca) in functions without loops
   - Heap allocations (malloc/calloc/realloc) in functions that are
     both loop-free and called from at most one call site
+
 - **Summary** — the allocation may execute multiple times.
   Applies to:
+
   - Allocations inside loop-bearing functions
   - Heap allocations in functions called from multiple call sites
 

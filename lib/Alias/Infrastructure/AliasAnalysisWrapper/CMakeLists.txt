@@ -27,8 +27,10 @@ target_link_libraries(CanaryAliasAnalysisWrapper
         SeaDsaAnalysis
         CanaryAllocAA
         CanaryUnderApproxAA
+        CanaryGPG
         FSCSPointerAnalysis
         TPATransforms
         TPAUtil
+        LotusCclyzerAA
         ${alias_wrapper_llvm_libs}
 )

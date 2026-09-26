@@ -14,8 +14,7 @@
 ///
 ///===----------------------------------------------------------------------===//
 
-#ifndef SUPPORT_PROGRESSBAR_H
-#define SUPPORT_PROGRESSBAR_H
+#pragma once
 
 #include <string>
 
@@ -75,4 +74,3 @@ private:
   void resize();
 };
 
-#endif // SUPPORT_PROGRESSBAR_H

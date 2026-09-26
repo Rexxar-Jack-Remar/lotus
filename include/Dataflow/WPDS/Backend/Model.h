@@ -1,5 +1,4 @@
-#ifndef LOTUS_LIB_DATAFLOW_WPDS_BACKEND_MODEL_H_
-#define LOTUS_LIB_DATAFLOW_WPDS_BACKEND_MODEL_H_
+#pragma once
 
 #include "Dataflow/WPDS/Backend.h"
 #include "Dataflow/WPDS/Core/GenKillValue.h"
@@ -81,4 +80,3 @@ struct QueryResult {
 
 } // namespace wpds::backend
 
-#endif // LOTUS_LIB_DATAFLOW_WPDS_BACKEND_MODEL_H_

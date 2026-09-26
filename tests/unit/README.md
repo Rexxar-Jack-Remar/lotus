@@ -41,7 +41,7 @@ ctest --test-dir build --output-on-failure
 
 Examples:
 
-- build one target: `cmake --build build --target analysis_misc_tests`
+- build one target: `cmake --build build --target analysis_tests`
 - run one case: `ctest --test-dir build -R CFGUtilitiesTest --output-on-failure`
 
 Every gtest case is discovered individually. Tests also carry a cost/dependency
@@ -61,6 +61,16 @@ once. A child directory can declare sources with
 `lotus_collect_test_sources(<suite> ...)`; the parent then creates the single
 binary with `add_lotus_collected_test_suite(<suite> ...)`. GTest discovery
 still registers every case independently.
+
+Each subsystem therefore builds one merged gtest binary: `alias_tests`,
+`analysis_tests`, `cfl_tests`, `concurrency_tests`, `dataflow_tests`,
+`ir_tests`, `solvers_tests`, `utils_tests`, `verification_tests`, plus the
+already merged `checker_tests`. Integration suites that need generated fixtures
+(`loop_analysis_tests`, `type_hierarchy_tests`) and standalone harness binaries
+with their own `main` remain separate. `concurrency_core_tests` and
+`solver_tests` are kept as aggregate build entry points. When adding tests,
+prefer collecting them into the matching subsystem binary instead of creating a
+new executable.
 
 ## Adding Tests
 

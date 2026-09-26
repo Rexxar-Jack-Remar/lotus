@@ -17,8 +17,7 @@
  *  along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
-#ifndef NULLPOINTER_NULLCHECKANALYSIS_H
-#define NULLPOINTER_NULLCHECKANALYSIS_H
+#pragma once
 
 #include <llvm/IR/Function.h>
 #include <llvm/Pass.h>
@@ -53,4 +52,3 @@ public:
   bool mayNull(Value *Ptr, Instruction *Inst);
 };
 
-#endif // NULLPOINTER_NULLCHECKANALYSIS_H

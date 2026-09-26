@@ -1,5 +1,4 @@
-#ifndef SEADSA_TYPE_UTILS
-#define SEADSA_TYPE_UTILS
+#pragma once
 
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/Support/raw_ostream.h"
@@ -75,4 +74,3 @@ private:
 
 } // namespace seadsa
 
-#endif // SEADSA_TYPE_UTILS

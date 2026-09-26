@@ -1,5 +1,4 @@
-#ifndef __DSA_ANALYSIS_HH_
-#define __DSA_ANALYSIS_HH_
+#pragma once
 
 #include "llvm/ADT/StringRef.h"
 #include "llvm/IR/Function.h"
@@ -72,4 +71,3 @@ llvm::Pass *createDsaPrintCallGraphStatsPass();
 llvm::Pass *createDsaCallGraphPrinterPass();
 } // namespace seadsa
 
-#endif

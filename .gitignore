@@ -43,6 +43,7 @@ fuzz/*.bc
 .core
 lib/Verification/seahorn/Support/GitSHA1.cc
 .cache
+docs/build_dummy/
 docs/build
 venv
 compile_commands.json

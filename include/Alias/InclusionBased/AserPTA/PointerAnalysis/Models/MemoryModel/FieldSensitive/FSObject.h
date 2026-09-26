@@ -2,8 +2,7 @@
 // Created by peiming on 12/19/19.
 //
 
-#ifndef ASER_PTA_FSOBJECT_H
-#define ASER_PTA_FSOBJECT_H
+#pragma once
 
 #include "Alias/InclusionBased/AserPTA/PointerAnalysis/Models/MemoryModel/AllocSite.h"
 
@@ -144,4 +143,3 @@ public:
 
 } // namespace aser
 
-#endif // ASER_PTA_FSOBJECT_H

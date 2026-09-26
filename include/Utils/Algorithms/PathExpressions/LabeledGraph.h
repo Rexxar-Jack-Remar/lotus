@@ -5,8 +5,7 @@
 //
 //===----------------------------------------------------------------------===//
 
-#ifndef LOTUS_UTILS_GENERAL_PATHEXPRESSIONS_LABELEDGRAPH_H
-#define LOTUS_UTILS_GENERAL_PATHEXPRESSIONS_LABELEDGRAPH_H
+#pragma once
 
 #include <cstddef>
 #include <functional>
@@ -129,4 +128,3 @@ private:
 } // namespace pathexpressions
 } // namespace lotus
 
-#endif // LOTUS_UTILS_GENERAL_PATHEXPRESSIONS_LABELEDGRAPH_H

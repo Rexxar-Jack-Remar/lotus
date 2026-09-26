@@ -16,7 +16,8 @@ using InterAvailableExpressionsResult =
 
 InterAvailableExpressionsResult runInterElimAvailableExpressions(
     llvm::Function *Entry,
-    const dataflow::controlflow::InterCFG *ICF = nullptr);
+    const dataflow::controlflow::InterCFG *ICF = nullptr,
+    EliminationOptions Options = defaultContextOptions());
 
 InterAvailableExpressionsResult runInterSummaryElimAvailableExpressions(
     llvm::Function *Entry, const dataflow::controlflow::InterCFG *ICF = nullptr,

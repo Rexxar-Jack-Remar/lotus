@@ -41,9 +41,9 @@
 #ifndef WPDS_SCHEMA_H_
 #define WPDS_SCHEMA_H_ 1
 
-#include "semiring.h"
+#include "Semiring.h"
+#include "Common.h"
 #include "UTIL.h"
-#include "common.h"
 #include <iostream>
 #include <string>
 

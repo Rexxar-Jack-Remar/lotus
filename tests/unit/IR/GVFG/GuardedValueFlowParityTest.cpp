@@ -1,6 +1,6 @@
 #include "Alias/InclusionBased/LotusAA/Engine/InterProceduralPass.h"
 #include "IR/GVFG/GuardedValueFlowGraph.h"
-#include "IR/GVFG/LotusAdapter.h"
+#include "IR/GVFG/LotusAAWrapper.h"
 #include "TestUtils/LLVMHelpers.h"
 
 #include <llvm/IR/InstIterator.h>
@@ -75,7 +75,7 @@ protected:
     pipeline.pm->add(new gsa::GateAnalysisPass());
     pipeline.pm->add(pipeline.lotus);
     pipeline.pm->add(pipeline.builder);
-    pipeline.pm->add(new LotusGuardedValueFlowAdapterPass());
+    pipeline.pm->add(new LotusAAWrapper());
     pipeline.pm->run(M);
     return pipeline;
   }
@@ -256,6 +256,117 @@ TEST_F(GuardedValueFlowParityTest, ModelsReturnPhiSelectAndOperationalSites) {
   EXPECT_TRUE(saw_compare_site);
   EXPECT_TRUE(saw_div_site);
   EXPECT_TRUE(saw_gep_site);
+}
+
+TEST_F(GuardedValueFlowParityTest,
+       PreservesOpcodeOperandOrderAndMultiplicity) {
+  const char *source = R"(
+    define i32 @test(i1 %cond, i32 %x) {
+    entry:
+      %sum = add i32 %x, %x
+      %same = icmp eq i32 %x, %x
+      %selected = select i1 %cond, i32 %x, i32 %x
+      %result = select i1 %same, i32 %sum, i32 %selected
+      ret i32 %result
+    }
+  )";
+
+  auto module = parseModule(source);
+  ASSERT_NE(module, nullptr);
+  Function *F = module->getFunction("test");
+  ASSERT_NE(F, nullptr);
+
+  auto pipeline = runBuilder(*module);
+  GuardedValueFlowGraph &graph = pipeline.builder->getGraph(*F);
+  auto opcode_for = [&](StringRef name) {
+    Instruction *inst = nullptr;
+    for (Instruction &I : instructions(*F)) {
+      if (I.getName() == name) {
+        inst = &I;
+        break;
+      }
+    }
+    GuardedValueFlowNode *value = graph.findNode(inst);
+    return value && value->getNumChildren() == 1
+               ? dyn_cast<GuardedValueFlowOpcodeNode>(value->getChild(0))
+               : nullptr;
+  };
+
+  auto *x_node = graph.findNode(F->getArg(1));
+  auto *add = opcode_for("sum");
+  auto *cmp = opcode_for("same");
+  auto *select = opcode_for("selected");
+  ASSERT_NE(x_node, nullptr);
+  ASSERT_NE(add, nullptr);
+  ASSERT_NE(cmp, nullptr);
+  ASSERT_NE(select, nullptr);
+
+  EXPECT_EQ(add->getNumOperands(), 2u);
+  EXPECT_EQ(add->getOperand(0), x_node);
+  EXPECT_EQ(add->getOperand(1), x_node);
+  EXPECT_EQ(add->uniqueDataInputs().size(), 1u);
+
+  EXPECT_EQ(cmp->getNumOperands(), 2u);
+  EXPECT_EQ(cmp->getOperand(0), x_node);
+  EXPECT_EQ(cmp->getOperand(1), x_node);
+  EXPECT_EQ(cmp->uniqueDataInputs().size(), 1u);
+
+  EXPECT_EQ(select->getNumOperands(), 3u);
+  EXPECT_EQ(select->trueValueOperand(), x_node);
+  EXPECT_EQ(select->falseValueOperand(), x_node);
+  EXPECT_EQ(select->uniqueDataInputs().size(), 2u);
+
+  auto operand_users = x_node->operandUsers();
+  auto count_use = [&](const GuardedValueFlowOpcodeNode *user,
+                       unsigned index) {
+    return std::count_if(
+        operand_users.begin(), operand_users.end(), [&](const auto &use) {
+          return use.user == user && use.operand_index == index;
+        });
+  };
+  EXPECT_EQ(count_use(add, 0), 1);
+  EXPECT_EQ(count_use(add, 1), 1);
+  EXPECT_EQ(count_use(cmp, 0), 1);
+  EXPECT_EQ(count_use(cmp, 1), 1);
+  EXPECT_EQ(count_use(select, 1), 1);
+  EXPECT_EQ(count_use(select, 2), 1);
+}
+
+TEST_F(GuardedValueFlowParityTest,
+       PreservesReturnOccurrencesForTheSameValue) {
+  const char *source = R"(
+    define i32 @test(i1 %cond, i32 %x) {
+    entry:
+      br i1 %cond, label %then, label %else
+    then:
+      ret i32 %x
+    else:
+      ret i32 %x
+    }
+  )";
+
+  auto module = parseModule(source);
+  ASSERT_NE(module, nullptr);
+  Function *F = module->getFunction("test");
+  ASSERT_NE(F, nullptr);
+  auto pipeline = runBuilder(*module);
+  GuardedValueFlowGraph &graph = pipeline.builder->getGraph(*F);
+  auto *common_return = graph.getCommonReturn();
+  auto *x = graph.findNode(F->getArg(1));
+  ASSERT_NE(common_return, nullptr);
+  ASSERT_NE(x, nullptr);
+
+  ASSERT_EQ(common_return->incomingReturns().size(), 2u);
+  EXPECT_EQ(common_return->children().size(), 1u);
+  EXPECT_EQ(common_return->children().front().target, x);
+  EXPECT_EQ(common_return->incomingReturns()[0].value, x);
+  EXPECT_EQ(common_return->incomingReturns()[1].value, x);
+  ASSERT_NE(common_return->incomingReturns()[0].site, nullptr);
+  ASSERT_NE(common_return->incomingReturns()[1].site, nullptr);
+  EXPECT_NE(common_return->incomingReturns()[0].site,
+            common_return->incomingReturns()[1].site);
+  EXPECT_NE(common_return->incomingReturns()[0].guard,
+            common_return->incomingReturns()[1].guard);
 }
 
 TEST_F(GuardedValueFlowParityTest,

@@ -1,6 +1,5 @@
 // See LICENSE file for license information.
-#ifndef EWAH_INL_H
-#define EWAH_INL_H
+#pragma once
 
 #include "ewah.h"
 
@@ -1676,4 +1675,3 @@ size_t EWAHBoolArray<uword>::sizeOnDisk(const bool savesizeinbits) const {
          sizeof(uword) * buffer.size();
 }
 } // namespace ewah
-#endif

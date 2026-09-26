@@ -1,6 +1,5 @@
 /** @file PulseReport.h @brief Bug report generation for Pulse checker analysis. */
-#ifndef CHECKER_PULSE_PULSEREPORT_H
-#define CHECKER_PULSE_PULSEREPORT_H
+#pragma once
 
 #include "Checker/Pulse/Report/PulseDiagnostic.h"
 
@@ -65,4 +64,3 @@ private:
 
 } // namespace pulse
 
-#endif // CHECKER_PULSE_PULSEREPORT_H

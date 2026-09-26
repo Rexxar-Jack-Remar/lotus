@@ -1,8 +1,7 @@
 //
 // Created by peiming on 8/14/19.
 //
-#ifndef ASER_PTA_UTIL_H
-#define ASER_PTA_UTIL_H
+#pragma once
 
 #include <queue>
 
@@ -144,5 +143,3 @@ bool isCompatibleCall(const llvm::Instruction *indirectCall,
                       const llvm::Function *target);
 
 } // namespace aser
-
-#endif

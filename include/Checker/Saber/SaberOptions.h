@@ -6,8 +6,7 @@
 //
 //===----------------------------------------------------------------------===//
 
-#ifndef SABER_OPTIONS_H
-#define SABER_OPTIONS_H
+#pragma once
 
 #include <llvm/Support/CommandLine.h>
 
@@ -28,4 +27,3 @@ extern bool SaberVerbose;
 } // namespace analysis
 } // namespace lotus
 
-#endif

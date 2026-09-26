@@ -8,8 +8,7 @@
 //
 //===----------------------------------------------------------------------===//
 
-#ifndef LOTUS_VERIFICATION_SIFA_SUMMARIZERS_ILOOPSUMMARIZER_H
-#define LOTUS_VERIFICATION_SIFA_SUMMARIZERS_ILOOPSUMMARIZER_H
+#pragma once
 
 #include "Utils/Algorithms/PathExpressions/Regex.h"
 
@@ -26,4 +25,3 @@ public:
 } // namespace sifa
 } // namespace lotus
 
-#endif // LOTUS_VERIFICATION_SIFA_SUMMARIZERS_ILOOPSUMMARIZER_H

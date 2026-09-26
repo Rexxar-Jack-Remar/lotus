@@ -26,8 +26,7 @@
  */
 // Modified by Xiang Zhang, 2026
 // Additional changes licensed under the MIT License
-#ifndef _SORT_H
-#define _SORT_H
+#pragma once
 
 #include <functional>
 #include <memory>
@@ -428,4 +427,3 @@ class SortManager {
 typedef std::shared_ptr<Sort> SortPtr;
 typedef std::shared_ptr<SortManager> SortManagerPtr;
 }  // namespace stabilizer::parser
-#endif

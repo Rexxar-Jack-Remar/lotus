@@ -1,4 +1,4 @@
-add_lotus_concurrency_test_suite(concurrency_cuda_tests
+lotus_collect_test_sources(concurrency_tests
   CUDAAnalysisTest.cpp
   CUDAOrderingAndMemoryTest.cpp
   CUDARuntimeAndUnifiedMemoryTest.cpp

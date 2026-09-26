@@ -1,5 +1,4 @@
-#ifndef __DSA_INITIALIZE_PASSES_HH_
-#define __DSA_INITIALIZE_PASSES_HH_
+#pragma once
 
 #include "llvm/InitializePasses.h"
 
@@ -22,4 +21,3 @@ void initializeAnalysisPasses(llvm::PassRegistry &Registry);
 
 } // namespace seadsa
 
-#endif

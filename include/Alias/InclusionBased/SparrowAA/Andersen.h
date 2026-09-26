@@ -64,8 +64,7 @@
 // runtime.
 //
 
-#ifndef TCFS_ANDERSEN_H
-#define TCFS_ANDERSEN_H
+#pragma once
 
 #include "Alias/InclusionBased/SparrowAA/Constraint.h"
 #include "Alias/InclusionBased/SparrowAA/ConstraintSnapshot.h"
@@ -303,4 +302,3 @@ public:
   friend class AndersenAAResult;
 };
 
-#endif

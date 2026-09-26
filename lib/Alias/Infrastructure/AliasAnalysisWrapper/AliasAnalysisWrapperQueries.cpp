@@ -1,7 +1,7 @@
 /**
  * @file AliasAnalysisWrapperQueries.cpp
  * @brief Public query interface methods
- * 
+ *
  * This file implements the public query methods of AliasAnalysisWrapper:
  * - query() - Main alias query interface (Value and MemoryLocation variants)
  * - mayAlias() - Convenience method for may-alias queries
@@ -11,11 +11,14 @@
  * - getAliasSet() - Get alias set for a value
  */
 
-#include "Alias/Infrastructure/AliasAnalysisWrapper/AliasAnalysisWrapper.h"
 #include "Alias/DemandDriven/DDA/FlowDDA.h"
+#include "Alias/InclusionBased/CclyzerAA/CclyzerAA.h"
+#include "Alias/InclusionBased/GPG/Analysis.h"
 #include "Alias/InclusionBased/SparrowAA/AndersenAA.h"
 #include "Alias/InclusionBased/TPA/PointerAnalysis/Analysis/SemiSparsePointerAnalysis.h"
+#include "Alias/Infrastructure/AliasAnalysisWrapper/AliasAnalysisWrapper.h"
 #include "Alias/UnificationBased/DyckAA/DyckAliasAnalysis.h"
+
 #include <llvm/ADT/SmallVector.h>
 #include <llvm/Analysis/AliasAnalysis.h>
 #include <llvm/Analysis/MemoryLocation.h>
@@ -27,112 +30,134 @@ using namespace lotus;
 namespace {
 /**
  * @brief Combine alias results from multiple sound alias analysis backends
- * 
- * Implements conservative merging of results from multiple backends, prioritizing
- * precision. See AliasAnalysisWrapperCore.cpp for detailed documentation.
- * 
+ *
+ * Implements conservative merging of results from multiple backends,
+ * prioritizing precision. See AliasAnalysisWrapperCore.cpp for detailed
+ * documentation.
+ *
  * @param Results Array of alias results from different backends
  * @return Combined alias result
  */
-llvm::AliasResult combineAliasResults(llvm::ArrayRef<llvm::AliasResult> Results) {
+llvm::AliasResult
+combineAliasResults(llvm::ArrayRef<llvm::AliasResult> Results) {
   bool SawNo = false, SawMust = false, SawPartial = false;
   for (auto R : Results) {
-    if (R == llvm::AliasResult::NoAlias) SawNo = true;
-    else if (R == llvm::AliasResult::MustAlias) SawMust = true;
-    else if (R == llvm::AliasResult::PartialAlias) SawPartial = true;
+    if (R == llvm::AliasResult::NoAlias)
+      SawNo = true;
+    else if (R == llvm::AliasResult::MustAlias)
+      SawMust = true;
+    else if (R == llvm::AliasResult::PartialAlias)
+      SawPartial = true;
   }
 
-  // Contradiction (shouldn't happen with sound analyses): fall back to MayAlias.
-  if (SawNo && SawMust) return llvm::AliasResult::MayAlias;
-  if (SawNo) return llvm::AliasResult::NoAlias;
-  if (SawMust) return llvm::AliasResult::MustAlias;
-  if (SawPartial) return llvm::AliasResult::PartialAlias;
+  // Contradiction (shouldn't happen with sound analyses): fall back to
+  // MayAlias.
+  if (SawNo && SawMust)
+    return llvm::AliasResult::MayAlias;
+  if (SawNo)
+    return llvm::AliasResult::NoAlias;
+  if (SawMust)
+    return llvm::AliasResult::MustAlias;
+  if (SawPartial)
+    return llvm::AliasResult::PartialAlias;
   return llvm::AliasResult::MayAlias;
 }
 } // namespace
 
 /**
  * @brief Query the alias relationship between two pointer values
- * 
+ *
  * Determines whether two pointer values may alias, must alias, or do not alias.
  * This is the primary query interface for alias analysis.
- * 
+ *
  * @param v1 First pointer value to check
  * @param v2 Second pointer value to check
  * @return AliasResult indicating the relationship:
  *         - NoAlias: The pointers definitely do not alias
  *         - MayAlias: The pointers may alias (conservative answer)
- *         - PartialAlias: The pointers partially alias (one is a subset of the other)
- *         - MustAlias: The pointers must alias (they always point to the same memory)
- * 
- * @note Returns NoAlias immediately if either value is null or not a pointer type.
- *       This is a fast-path optimization for invalid queries.
+ *         - PartialAlias: The pointers partially alias (one is a subset of the
+ * other)
+ *         - MustAlias: The pointers must alias (they always point to the same
+ * memory)
+ *
+ * @note Returns NoAlias immediately if either value is null or not a pointer
+ * type. This is a fast-path optimization for invalid queries.
  * @note The actual query is delegated to queryBackend() which routes to the
  *       appropriate backend based on the configuration.
  */
 AliasResult AliasAnalysisWrapper::query(const Value *v1, const Value *v2) {
-  if (!isValidPointerQuery(v1, v2)) 
-      return AliasResult::NoAlias;
+  if (!isValidPointerQuery(v1, v2))
+    return AliasResult::NoAlias;
   return queryBackend(v1, v2);
 }
 
 /**
  * @brief Query the alias relationship between two memory locations
- * 
+ *
  * Determines whether two memory locations may alias. This variant works with
  * MemoryLocation objects which include size information, making it more precise
  * than the Value-based query for some analyses.
- * 
+ *
  * @param loc1 First memory location to check
  * @param loc2 Second memory location to check
  * @return AliasResult indicating the relationship between the locations
- * 
+ *
  * @note In Combined mode, queries multiple backends (Andersen, DyckAA, LLVM AA)
  *       and merges their results conservatively.
  * @note Falls back to Value-based query if the backend doesn't support
  *       MemoryLocation queries directly.
  * @note Returns MayAlias if the wrapper is not initialized.
  */
-AliasResult AliasAnalysisWrapper::query(const MemoryLocation &loc1, const MemoryLocation &loc2) {
-  if (!_initialized) return AliasResult::MayAlias;
-  
+AliasResult AliasAnalysisWrapper::query(const MemoryLocation &loc1,
+                                        const MemoryLocation &loc2) {
+  if (!_initialized)
+    return AliasResult::MayAlias;
+
   // Check for null pointers in memory locations
   if (!loc1.Ptr || !loc2.Ptr) {
     // If either pointer is null, they can't alias
     return AliasResult::NoAlias;
   }
-  
+
   if (_config.impl == AAConfig::Implementation::Combined) {
     SmallVector<AliasResult, 3> Rs;
-    if (_andersen_aa) Rs.push_back(_andersen_aa->alias(loc1, loc2));
+    if (_andersen_aa)
+      Rs.push_back(_andersen_aa->alias(loc1, loc2));
     if (_dyck_aa) {
-      // stripPointerCasts() should not return null for valid pointers, but be defensive
+      // stripPointerCasts() should not return null for valid pointers, but be
+      // defensive
       auto *p1 = const_cast<Value *>(loc1.Ptr->stripPointerCasts());
       auto *p2 = const_cast<Value *>(loc2.Ptr->stripPointerCasts());
       if (p1 && p2) {
-        Rs.push_back(_dyck_aa->mayAlias(p1, p2) ? AliasResult::MayAlias : AliasResult::NoAlias);
+        Rs.push_back(_dyck_aa->mayAlias(p1, p2) ? AliasResult::MayAlias
+                                                : AliasResult::NoAlias);
       }
     }
-    if (_llvm_aa) Rs.push_back(_llvm_aa->alias(loc1, loc2));
+    if (_llvm_aa)
+      Rs.push_back(_llvm_aa->alias(loc1, loc2));
     // If no backends returned results, return conservative MayAlias
-    if (Rs.empty()) return AliasResult::MayAlias;
+    if (Rs.empty())
+      return AliasResult::MayAlias;
     return combineAliasResults(Rs);
   }
-  if (_andersen_aa) return _andersen_aa->alias(loc1, loc2);
-  if (_llvm_aa) return _llvm_aa->alias(loc1, loc2);
+  if (_andersen_aa)
+    return _andersen_aa->alias(loc1, loc2);
+  if (_llvm_aa)
+    return _llvm_aa->alias(loc1, loc2);
   return query(loc1.Ptr, loc2.Ptr);
 }
 
 /**
  * @brief Check if two pointer values may alias
- * 
+ *
  * Convenience method that returns true if the pointers may alias (i.e., the
- * query result is not NoAlias). This includes MayAlias, PartialAlias, and MustAlias.
- * 
+ * query result is not NoAlias). This includes MayAlias, PartialAlias, and
+ * MustAlias.
+ *
  * @param v1 First pointer value
  * @param v2 Second pointer value
  * @return true if the pointers may alias, false if they definitely do not alias
- * 
+ *
  * @note This is equivalent to: query(v1, v2) != AliasResult::NoAlias
  */
 bool AliasAnalysisWrapper::mayAlias(const Value *v1, const Value *v2) {
@@ -141,14 +166,14 @@ bool AliasAnalysisWrapper::mayAlias(const Value *v1, const Value *v2) {
 
 /**
  * @brief Check if two pointer values must alias
- * 
+ *
  * Convenience method that returns true only if the pointers must alias
  * (i.e., they always point to the same memory location).
- * 
+ *
  * @param v1 First pointer value
  * @param v2 Second pointer value
  * @return true if the pointers must alias, false otherwise
- * 
+ *
  * @note This is a stronger guarantee than mayAlias(). Only returns true
  *       when the analysis can prove MustAlias.
  */
@@ -158,13 +183,13 @@ bool AliasAnalysisWrapper::mustAlias(const Value *v1, const Value *v2) {
 
 /**
  * @brief Check if a pointer value may be null
- * 
+ *
  * Determines whether a pointer value might be null at runtime. This is useful
  * for null pointer analysis and safety checks.
- * 
+ *
  * @param v Pointer value to check
  * @return true if the pointer may be null, false if it is definitely not null
- * 
+ *
  * @note Returns false if v is null or not a pointer type
  * @note Returns true immediately for ConstantPointerNull values
  * @note Currently only DyckAA backend supports null analysis. If DyckAA is
@@ -172,35 +197,50 @@ bool AliasAnalysisWrapper::mustAlias(const Value *v1, const Value *v2) {
  * @note Conservative default: returns true if analysis cannot prove non-null
  */
 bool AliasAnalysisWrapper::mayNull(const Value *v) {
-  if (!v || !v->getType()->isPointerTy()) return false;
-  if (isa<ConstantPointerNull>(v)) return true;
-  if (_dyck_aa && _initialized) return _dyck_aa->mayNull(const_cast<Value *>(v));
+  if (!v || !v->getType()->isPointerTy())
+    return false;
+  if (isa<ConstantPointerNull>(v))
+    return true;
+  if (_dyck_aa && _initialized)
+    return _dyck_aa->mayNull(const_cast<Value *>(v));
+  if (_cclyzer_aa && _initialized)
+    return _cclyzer_aa->isNullPointer(v);
   return true;
 }
 
 /**
  * @brief Get the points-to set for a pointer value
- * 
+ *
  * Retrieves the set of all values that a pointer may point to. This is useful
  * for pointer analysis clients that need to know all possible targets.
- * 
+ *
  * @param ptr Pointer value to analyze
  * @param ptsSet Output parameter that will be filled with the points-to set
  * @return true if the points-to set was successfully retrieved, false otherwise
- * 
+ *
  * @note The ptsSet vector is cleared before being filled
- * @note Supported by: SparrowAA, TPA, DDA
+ * @note Supported by: SparrowAA, TPA, DDA, GPG
+ * @note GPG joins statement-specific points-to facts across program points
+ *       because this API does not carry an instruction/program-point argument.
+ *       It returns false when that projection contains unknown, null, or
+ *       otherwise unrepresentable targets rather than exposing a partial set
+ *       as complete.
  * @note Returns false if ptr is null, not a pointer type, or the backend
  *       is not available/initialized
  */
-bool AliasAnalysisWrapper::getPointsToSet(const Value *ptr, std::vector<const Value *> &ptsSet) {
-  if (!ptr || !ptr->getType()->isPointerTy()) return false;
+bool AliasAnalysisWrapper::getPointsToSet(const Value *ptr,
+                                          std::vector<const Value *> &ptsSet) {
+  if (!ptr || !ptr->getType()->isPointerTy())
+    return false;
   ptsSet.clear();
   if (_andersen_aa && _initialized && _andersen_aa->getPointsToSet(ptr, ptsSet))
     return true;
+  if (_cclyzer_aa && _initialized && _cclyzer_aa->getPointsToSet(ptr, ptsSet))
+    return true;
   if (_tpa_aa && _initialized) {
     const Value *stripped = ptr->stripPointerCasts();
-    if (!stripped) return false;
+    if (!stripped)
+      return false;
     tpa::PtsSet pts = _tpa_aa->getPtsSet(stripped);
     ptsSet.reserve(pts.size());
     for (const auto *memObj : pts) {
@@ -229,14 +269,25 @@ bool AliasAnalysisWrapper::getPointsToSet(const Value *ptr, std::vector<const Va
   }
   if (_dda_aa && _initialized && _dda_aa->getPointsToSet(ptr, ptsSet))
     return true;
+  if (_gpg_aa && _initialized) {
+    const auto points_to =
+        _gpg_aa->result().allPointeeSet(ptr->stripPointerCasts());
+    if (!points_to.isComplete() || points_to.containsUnknown() ||
+        points_to.containsNull())
+      return false;
+    ptsSet.assign(points_to.values.begin(), points_to.values.end());
+    return true;
+  }
   return false;
 }
 
-
-bool AliasAnalysisWrapper::getPointsToSetSize(const Value *ptr, size_t &outSize) {
-  if (!ptr || !ptr->getType()->isPointerTy()) return false;
+bool AliasAnalysisWrapper::getPointsToSetSize(const Value *ptr,
+                                              size_t &outSize) {
+  if (!ptr || !ptr->getType()->isPointerTy())
+    return false;
   outSize = 0;
-  if (!_initialized) return false;
+  if (!_initialized)
+    return false;
   if (_andersen_aa) {
     std::vector<const Value *> ptsSet;
     if (_andersen_aa->getPointsToSet(ptr, ptsSet)) {
@@ -247,7 +298,8 @@ bool AliasAnalysisWrapper::getPointsToSetSize(const Value *ptr, size_t &outSize)
   }
   if (_tpa_aa) {
     const Value *stripped = ptr->stripPointerCasts();
-    if (!stripped) return false;
+    if (!stripped)
+      return false;
     tpa::PtsSet pts = _tpa_aa->getPtsSet(stripped);
     outSize = pts.size();
     return true;
@@ -260,11 +312,20 @@ bool AliasAnalysisWrapper::getPointsToSetSize(const Value *ptr, size_t &outSize)
     }
     return false;
   }
+  if (_gpg_aa) {
+    const auto points_to =
+        _gpg_aa->result().allPointeeSet(ptr->stripPointerCasts());
+    if (!points_to.isComplete() || points_to.containsUnknown() ||
+        points_to.containsNull())
+      return false;
+    outSize = points_to.values.size();
+    return true;
+  }
   return false;
 }
 
-void AliasAnalysisWrapper::getIndirectCallTargets(CallBase *call,
-                                                  std::vector<const llvm::Function *> &targets) {
+void AliasAnalysisWrapper::getIndirectCallTargets(
+    CallBase *call, std::vector<const llvm::Function *> &targets) {
   targets.clear();
   if (!_initialized || !call)
     return;
@@ -279,6 +340,16 @@ void AliasAnalysisWrapper::getIndirectCallTargets(CallBase *call,
     std::vector<const Value *> ptsSet;
     if (_andersen_aa->getPointsToSet(calledVal, ptsSet)) {
       for (const Value *v : ptsSet) {
+        if (const auto *F = dyn_cast<llvm::Function>(v))
+          targets.push_back(F);
+      }
+    }
+    return;
+  }
+  if (_cclyzer_aa && _initialized) {
+    std::vector<const Value *> cclyzerTargets;
+    if (_cclyzer_aa->getIndirectCallTargets(call, cclyzerTargets)) {
+      for (const Value *v : cclyzerTargets) {
         if (const auto *F = dyn_cast<llvm::Function>(v))
           targets.push_back(F);
       }
@@ -308,28 +379,38 @@ void AliasAnalysisWrapper::getIndirectCallTargets(CallBase *call,
     return;
   }
   if (_tpa_aa) {
-    std::vector<const llvm::Function *> tpaCallees = _tpa_aa->getCallees(call, nullptr);
+    std::vector<const llvm::Function *> tpaCallees =
+        _tpa_aa->getCallees(call, nullptr);
     targets.assign(tpaCallees.begin(), tpaCallees.end());
+    return;
+  }
+  if (_gpg_aa) {
+    const auto *gpgTargets = _gpg_aa->result().callTargets(call);
+    if (gpgTargets)
+      targets.assign(gpgTargets->begin(), gpgTargets->end());
   }
 }
 
 /**
  * @brief Get the alias set for a value
- * 
+ *
  * Retrieves the set of all values that may alias with the given value. This
- * is useful for finding all values that might point to the same memory location.
- * 
+ * is useful for finding all values that might point to the same memory
+ * location.
+ *
  * @param v Pointer value to analyze
  * @param aliasSet Output parameter that will be filled with the alias set
  * @return true if the alias set was successfully retrieved, false otherwise
- * 
+ *
  * @note The aliasSet vector is cleared before being filled
  * @note Currently only supported by DyckAA backend
  * @note Returns false if v is null, not a pointer type, or DyckAA is not
  *       available/initialized
  */
-bool AliasAnalysisWrapper::getAliasSet(const Value *v, std::vector<const Value *> &aliasSet) {
-  if (!v || !v->getType()->isPointerTy()) return false;
+bool AliasAnalysisWrapper::getAliasSet(const Value *v,
+                                       std::vector<const Value *> &aliasSet) {
+  if (!v || !v->getType()->isPointerTy())
+    return false;
   aliasSet.clear();
   if (_dyck_aa && _initialized) {
     if (const auto *dyckSet = _dyck_aa->getAliasSet(const_cast<Value *>(v))) {
@@ -342,18 +423,20 @@ bool AliasAnalysisWrapper::getAliasSet(const Value *v, std::vector<const Value *
 
 /**
  * @brief Check if a pointer query is valid
- * 
+ *
  * Validates that both values are non-null and are pointer types. This is used
  * as a fast-path check before performing expensive alias queries.
- * 
+ *
  * @param v1 First value to check
  * @param v2 Second value to check
  * @return true if both values are valid pointers, false otherwise
- * 
+ *
  * @note This is a const method that performs basic type checking only.
  *       It does not verify that the values are from the same module or
  *       that the analysis is initialized.
  */
-bool AliasAnalysisWrapper::isValidPointerQuery(const Value *v1, const Value *v2) const {
-  return v1 && v2 && v1->getType()->isPointerTy() && v2->getType()->isPointerTy();
+bool AliasAnalysisWrapper::isValidPointerQuery(const Value *v1,
+                                               const Value *v2) const {
+  return v1 && v2 && v1->getType()->isPointerTy() &&
+         v2->getType()->isPointerTy();
 }

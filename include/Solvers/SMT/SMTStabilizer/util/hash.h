@@ -9,8 +9,7 @@
  */
 // Modified by Xiang Zhang, 2026
 // Additional changes licensed under the MIT License
-#ifndef BZLA_UTIL_HASH_H_INCLUDED
-#define BZLA_UTIL_HASH_H_INCLUDED
+#pragma once
 
 #include <cstdint>
 #include <functional>
@@ -35,4 +34,3 @@ struct hash<std::pair<uint64_t, uint64_t>> {
     size_t operator()(const std::pair<uint64_t, uint64_t> &p) const;
 };
 }  // namespace std
-#endif

@@ -9,8 +9,7 @@
 //
 //===----------------------------------------------------------------------===//
 
-#ifndef LOTUS_VERIFICATION_SIFA_FLUID_SIZELIMITFLUID_H
-#define LOTUS_VERIFICATION_SIFA_FLUID_SIZELIMITFLUID_H
+#pragma once
 
 #include "Verification/Sifa/Fluid/IFluid.h"
 
@@ -57,4 +56,3 @@ private:
 } // namespace sifa
 } // namespace lotus
 
-#endif // LOTUS_VERIFICATION_SIFA_FLUID_SIZELIMITFLUID_H

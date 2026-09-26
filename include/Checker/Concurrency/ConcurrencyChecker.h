@@ -1,7 +1,6 @@
 /** @file ConcurrencyChecker.h @brief Aggregate concurrency checker driver
  * orchestrating multiple analyses. */
-#ifndef CONCURRENCY_CHECKER_H
-#define CONCURRENCY_CHECKER_H
+#pragma once
 
 #include "Checker/Concurrency/AtomicityChecker.h"
 #include "Checker/Concurrency/CUDAChecker.h"
@@ -21,8 +20,8 @@
 #include "Concurrency/MHP/MHPAnalysis.h"
 #include "Concurrency/MHP/StaticVectorClockMHP.h"
 #include "Concurrency/MPI/MPIAnalysis.h"
-#include "Concurrency/Memory/EscapeAnalysis.h"
-#include "Concurrency/Memory/StaticThreadSharingAnalysis.h"
+#include "Concurrency/Thread/Sharing/EscapeAnalysis.h"
+#include "Concurrency/Thread/Sharing/StaticThreadSharingAnalysis.h"
 #include "Concurrency/OpenMP/OpenMPTaskGraph.h"
 #include "Concurrency/Utils/ThreadLocalAnalysis.h"
 #include "Concurrency/ValueFlow/WholeProgramSparseRefinement.h"
@@ -291,4 +290,3 @@ private:
 
 } // namespace concurrency
 
-#endif // CONCURRENCY_CHECKER_H

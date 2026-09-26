@@ -4,9 +4,9 @@ Optional wrapper around [cclyzer++](https://github.com/GaloisInc/cclyzerpp) Data
 
 ## Enabling
 
-1. Set **LOTUS_USE_CCLYZER=ON** and **CCLYZERPP_ROOT** to the cclyzer++ source tree:
+1. Set **LOTUS_ENABLE_CCLYZER=ON** (defaults to using the in-tree `third-party/cclyzerpp`):
    ```bash
-   cmake -DLOTUS_USE_CCLYZER=ON -DCCLYZERPP_ROOT=/path/to/cclyzerpp-main ...
+   cmake -DLOTUS_ENABLE_CCLYZER=ON ...
    ```
 2. Install **Soufflé** (compiler and headers). cclyzer++ compiles its Datalog to C++ at build time and links it in.
 

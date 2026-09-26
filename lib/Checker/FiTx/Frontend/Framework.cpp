@@ -30,7 +30,7 @@
 #include "Checker/FiTx/Core/Logs.h"
 #include "Checker/FiTx/Core/Value.h"
 #include "Checker/FiTx/Core/ValueTypeAlias.h"
-#include "Checker/FiTx/Framework_IR/IRGenerator.h"
+#include "Checker/FiTx/FrameworkIR/IRGenerator.h"
 #include "Checker/FiTx/Frontend/Analyzer.h"
 #include "Checker/FiTx/Frontend/Framework.h"
 #include "Checker/FiTx/Frontend/State.h"

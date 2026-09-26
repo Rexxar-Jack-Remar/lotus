@@ -10,8 +10,7 @@
 //
 //===----------------------------------------------------------------------===//
 
-#ifndef LOTUS_VERIFICATION_SIFA_DOMAIN_IABSTRACTSTATE_H
-#define LOTUS_VERIFICATION_SIFA_DOMAIN_IABSTRACTSTATE_H
+#pragma once
 
 #include <concepts>
 
@@ -30,4 +29,3 @@ concept IAbstractState = requires(const State &a, const State &b) {
 } // namespace sifa
 } // namespace lotus
 
-#endif // LOTUS_VERIFICATION_SIFA_DOMAIN_IABSTRACTSTATE_H

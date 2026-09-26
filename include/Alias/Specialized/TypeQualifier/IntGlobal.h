@@ -1,5 +1,4 @@
-#ifndef _INT_GLOBAL_H
-#define _INT_GLOBAL_H
+#pragma once
 
 #include "llvm/Support/CommandLine.h"
 
@@ -250,4 +249,3 @@ public:
 
 // getStringFromMD is defined in Annotation.h
 
-#endif

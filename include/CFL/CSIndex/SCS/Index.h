@@ -1,8 +1,8 @@
 #pragma once
 
 #include "CFL/CSIndex/FLARE/Grail/Index.h"
-#include "CFL/CSIndex/SCS/PolicyAutomaton.h"
 #include "CFL/CSIndex/SCS/Graph.h"
+#include "CFL/CSIndex/SCS/PolicyAutomaton.h"
 
 #include <cstddef>
 #include <cstdint>

@@ -10,8 +10,7 @@
 //
 //===----------------------------------------------------------------------===//
 
-#ifndef LOTUS_VERIFICATION_SIFA_DOMAIN_EXPLICITVALUEDOMAIN_H
-#define LOTUS_VERIFICATION_SIFA_DOMAIN_EXPLICITVALUEDOMAIN_H
+#pragma once
 
 #include "llvm/IR/BasicBlock.h"
 #include "llvm/IR/Constants.h"
@@ -625,4 +624,3 @@ private:
 } // namespace sifa
 } // namespace lotus
 
-#endif // LOTUS_VERIFICATION_SIFA_DOMAIN_EXPLICITVALUEDOMAIN_H

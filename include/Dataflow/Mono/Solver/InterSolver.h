@@ -1,5 +1,4 @@
-#ifndef LOTUS_DATAFLOW_MONO_SOLVER_INTERSOLVER_H_
-#define LOTUS_DATAFLOW_MONO_SOLVER_INTERSOLVER_H_
+#pragma once
 
 #include "llvm/IR/Instructions.h"
 #include "llvm/IR/Module.h"
@@ -397,4 +396,3 @@ using InterMonoSolver_P =
 
 } // namespace mono
 
-#endif // LOTUS_DATAFLOW_MONO_SOLVER_INTERSOLVER_H_

@@ -178,17 +178,37 @@ struct LoweredEdge {
 };
 
 struct LoweringResult {
+  std::string procedure;
   std::vector<std::string> predicates;
   std::unordered_map<std::string, unsigned> predicate_to_index;
   std::vector<LoweredNode> nodes;
+  std::unordered_map<std::string, std::string> label_aliases;
   std::vector<LoweredInstruction> instructions;
   std::vector<LoweredEdge> edges;
   std::string entry_label;
+  std::string normal_exit_label;
   std::vector<std::string> exit_labels;
+  std::vector<std::string> error_exit_labels;
 
   const LoweredNode *findNode(const std::string &label) const;
   const LoweredInstruction *findInstruction(const std::string &id) const;
   const LoweredEdge *findEdge(const std::string &from, const std::string &to) const;
+};
+
+struct PredicateProgramLayout {
+  std::vector<std::string> predicates;
+  unsigned global_count = 0;
+  unsigned argument_begin = 0;
+  unsigned argument_count = 0;
+  unsigned return_begin = 0;
+  unsigned return_count = 0;
+  unsigned local_begin = 0;
+  unsigned local_count = 0;
+};
+
+struct LoweredBooleanProgram {
+  PredicateProgramLayout layout;
+  std::vector<LoweringResult> procedures;
 };
 
 } // namespace frontend

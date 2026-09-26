@@ -1,5 +1,4 @@
-#ifndef PCOMB_TOKEN_PARSER_H
-#define PCOMB_TOKEN_PARSER_H
+#pragma once
 
 #include "Utils/Formats/pcomb/Parser/Parser.h"
 
@@ -59,4 +58,3 @@ auto token(ParserA &&p, const llvm::StringRef &w = " \t\n\v\f\r") {
 
 } // namespace pcomb
 
-#endif

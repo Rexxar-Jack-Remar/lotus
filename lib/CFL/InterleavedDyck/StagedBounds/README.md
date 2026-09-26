@@ -66,9 +66,9 @@ build/bin/lotus-cfl-interleaved-dyck-staged-bounds \
 
 `--method` selects `regularization`, `intersection`, `underapproximation`,
 `mutual-refinement`, `stronger-grammar`, `on-demand`, or `all`. Use
-`--value-flow` for value-flow preprocessing, `--print-lower` for certified
-reachable pairs, or `--print-result` for the selected method's pairs. The tool
-never adds reverse arcs.
+`--analysis taint|value-flow` to select the client analysis (default
+`taint`), `--print-lower` for certified reachable pairs, or `--print-result`
+for the selected method's pairs. The tool never adds reverse arcs.
 
 ## Boundary with MutualRefinement
 

@@ -1,8 +1,7 @@
 //
 // Created by peiming on 8/29/19.
 //
-#ifndef ASER_PTA_SINGLEINSTANCEOWNER_H
-#define ASER_PTA_SINGLEINSTANCEOWNER_H
+#pragma once
 
 #include <unordered_set>
 
@@ -69,5 +68,3 @@ public:
 };
 
 } // namespace aser
-
-#endif

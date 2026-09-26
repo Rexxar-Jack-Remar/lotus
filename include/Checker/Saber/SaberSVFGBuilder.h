@@ -5,8 +5,7 @@
 //
 //===----------------------------------------------------------------------===//
 
-#ifndef SABERSVFGBUILDER_H_
-#define SABERSVFGBUILDER_H_
+#pragma once
 
 #include "IR/ICFG/CallGraph.h"
 #include "IR/SVFG/SVFG.h"
@@ -90,4 +89,3 @@ protected:
 } // namespace analysis
 } // namespace lotus
 
-#endif

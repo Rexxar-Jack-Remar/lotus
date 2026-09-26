@@ -1,6 +1,5 @@
 /** @file PulseNonDisjunctiveDomain.h @brief Non-disjunctive abstract domain for Pulse analysis. */
-#ifndef CHECKER_PULSE_PULSENONDISJUNCTIVEDOMAIN_H
-#define CHECKER_PULSE_PULSENONDISJUNCTIVEDOMAIN_H
+#pragma once
 
 #include "Checker/Pulse/Domain/PulseDomain.h"
 
@@ -116,4 +115,3 @@ public:
 
 } // namespace pulse
 
-#endif // CHECKER_PULSE_PULSENONDISJUNCTIVEDOMAIN_H

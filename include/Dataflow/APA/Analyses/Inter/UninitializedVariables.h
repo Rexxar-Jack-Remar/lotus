@@ -21,7 +21,8 @@ using InterUninitializedVariablesResult = InterDataFlowResultT<
 InterUninitializedVariablesResult runInterElimUninitializedVariables(
     llvm::Function *Entry, llvm::AAResults *AA = nullptr,
     llvm::AssumptionCache *AC = nullptr, llvm::DominatorTree *DT = nullptr,
-    const dataflow::controlflow::InterCFG *ICF = nullptr);
+    const dataflow::controlflow::InterCFG *ICF = nullptr,
+    EliminationOptions Options = defaultContextOptions());
 
 InterUninitializedVariablesResult runInterSummaryElimUninitializedVariables(
     llvm::Function *Entry, llvm::AAResults *AA = nullptr,

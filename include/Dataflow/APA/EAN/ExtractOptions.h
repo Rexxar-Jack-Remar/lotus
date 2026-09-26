@@ -1,5 +1,4 @@
-#ifndef DATAFLOW_APA_EAN_EXTRACTOPTIONS_H_
-#define DATAFLOW_APA_EAN_EXTRACTOPTIONS_H_
+#pragma once
 
 // Knobs for reuse-aware batch extraction (paper Algorithm 2) and for how the
 // saturation driver measures its plateau signal.
@@ -53,4 +52,3 @@ struct ExtractOptions {
 } // namespace ean
 } // namespace elimination
 
-#endif // DATAFLOW_APA_EAN_EXTRACTOPTIONS_H_

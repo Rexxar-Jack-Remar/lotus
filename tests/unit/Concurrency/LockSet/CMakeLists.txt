@@ -1,4 +1,4 @@
-add_lotus_concurrency_test_suite(concurrency_lockset_tests
+lotus_collect_test_sources(concurrency_tests
   LockSetAnalysisTest.cpp
   LockSetCoreDataflowTest.cpp
   LockSetDeadlockTest.cpp

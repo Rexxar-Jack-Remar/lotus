@@ -13,8 +13,7 @@
 //
 //===----------------------------------------------------------------------===//
 
-#ifndef LOTUS_VERIFICATION_SIFA_INTERPRETER_REGEXINTERPRETER_H
-#define LOTUS_VERIFICATION_SIFA_INTERPRETER_REGEXINTERPRETER_H
+#pragma once
 
 #include "Utils/Algorithms/PathExpressions/Regex.h"
 #include "Verification/Sifa/Domain/AbstractDomain.h"
@@ -111,4 +110,3 @@ private:
 } // namespace sifa
 } // namespace lotus
 
-#endif // LOTUS_VERIFICATION_SIFA_INTERPRETER_REGEXINTERPRETER_H

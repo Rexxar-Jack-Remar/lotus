@@ -7,8 +7,7 @@
  * can simplify analysis by eliminating complex constant expressions that
  * may be difficult to handle in downstream passes.
  */
-#ifndef TRANSFORM_LOWERCONSTANTEXPR_H
-#define TRANSFORM_LOWERCONSTANTEXPR_H
+#pragma once
 
 #include <llvm/IR/Module.h>
 #include <llvm/IR/PassManager.h>
@@ -38,4 +37,3 @@ public:
   PreservedAnalyses run(Module &M, ModuleAnalysisManager &MAM);
 };
 
-#endif // TRANSFORM_LOWERCONSTANTEXPR_H

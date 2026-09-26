@@ -20,8 +20,7 @@
  * OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE
  * OR OTHER DEALINGS IN THE SOFTWARE.
  */
-#ifndef LOTUS_ANALYSIS_LOOP_LOOPSTRUCTURE_H
-#define LOTUS_ANALYSIS_LOOP_LOOPSTRUCTURE_H
+#pragma once
 
 #include "Analysis/DebugInfo/MetadataManager/LoopStructure.h"
 
@@ -35,4 +34,3 @@ using LoopStructure = noelle::LoopStructure;
 } // namespace analysis
 } // namespace lotus
 
-#endif

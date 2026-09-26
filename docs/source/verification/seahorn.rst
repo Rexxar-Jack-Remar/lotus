@@ -163,19 +163,25 @@ The SeaHorn framework is organized into the following subdirectories:
      Added in commit 909d6e9c.
 
 * **Transforms/** – LLVM IR transformations for verification
+
   * **Instrumentation/** – Property instrumentation
+
     * ``BufferBoundsCheck.cc``, ``FatBufferBoundsCheck.cc`` – Buffer bounds checking
     * ``NullCheck.cc`` – Null pointer checking
     * ``SimpleMemoryCheck.cc`` – Memory safety checks
     * ``MixedSemantics.cc`` – Mixed operational semantics
+
   * **Scalar/** – Scalar optimizations
+
     * ``CutLoops.cc`` – Loop cutting
     * ``LoopPeeler.cc`` – Loop peeling
     * ``LowerCstExpr.cc`` – Constant expression lowering
     * ``LowerGvInitializers.cc`` – Global variable initializer lowering
     * ``PromoteVerifierCalls.cc`` – Verifier call promotion
     * ``BackedgeCutter.cc`` – Backedge cutting
+
   * **Utils/** – Transformation utilities
+
     * ``DevirtFunctions.cc`` – Function devirtualization
     * ``ExternalizeFunctions.cc`` – Function externalization
     * ``Mem2Reg.cc`` – Memory-to-register promotion

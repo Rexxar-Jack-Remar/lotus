@@ -2,8 +2,7 @@
 // Created by prophe cheng on 2025/4/1.
 //
 
-#ifndef INDIRECTCALLANALYZER_MLTAPASS_H
-#define INDIRECTCALLANALYZER_MLTAPASS_H
+#pragma once
 
 #include "llvm/IR/Operator.h"
 
@@ -80,4 +79,3 @@ public:
   bool getDependentTypes(Type *Ty, int Idx, set<hashidx_t> &PropSet);
 };
 
-#endif // INDIRECTCALLANALYZER_MLTAPASS_H

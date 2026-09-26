@@ -1,6 +1,6 @@
 #pragma once
 
-#include "CFL/Classical/Solvers/Engines/POCR/SpecializedEngines.h"
+#include "CFL/Classical/Solvers/Preprocessing/GraphSimplification.h"
 #include "CFL/Classical/Solvers/SolverSession.h"
 
 #include <cstddef>
@@ -56,14 +56,21 @@ private:
 };
 
 enum class AliasEncodingMode {
+  /// Lotus's constraint-level PAG grammar.
   PAG,
+  /// Lotus's extended PEG grammar, including ArrayPath and Memcpy summaries.
   PEG,
+  /// The standard CFL alias PEG (a/d/f_i) plus client graph reductions.
+  /// This is the POCR artifact's analysis, not a compressed form of PEG.
+  CFLPEG,
 };
 
 LabeledGraph encodePagGraph(const AliasConstraintGraph &graph);
 LabeledGraph encodePegGraph(const AliasConstraintGraph &graph);
+LabeledGraph encodeCflPegGraph(const AliasConstraintGraph &graph);
 Grammar buildPagGrammar(const AliasConstraintGraph &graph);
 Grammar buildPegGrammar(const AliasConstraintGraph &graph);
+Grammar buildStandardAliasGrammar(const AliasConstraintGraph &graph);
 
 class AliasClient {
 public:
@@ -75,21 +82,15 @@ public:
 
   static AliasClient
   fromConstraintGraph(const AliasConstraintGraph &graph,
-                      AliasEncodingMode mode = AliasEncodingMode::PAG);
+                      AliasEncodingMode mode = AliasEncodingMode::CFLPEG);
 
   ReachabilityStats solve(SolverBackend backend = SolverBackend::SparseSet);
-  ReachabilityStats solveSpecialized(engines::SpecializedPocrBackend backend,
-                                     bool simplify_focr_cycles = false);
   /// Alternate solving with a client-supplied discovery policy. The callback
   /// may add nodes and constraints and returns true when it changed the input.
   ReachabilityStats solveToFixedPoint(
       SolverBackend backend,
       const std::function<bool(AliasClient &)> &discover_constraints,
       std::size_t max_rounds = 64);
-  ReachabilityStats solveToFixedPoint(
-      engines::SpecializedPocrBackend backend,
-      const std::function<bool(AliasClient &)> &discover_constraints,
-      std::size_t max_rounds = 64, bool simplify_focr_cycles = false);
   std::size_t addNode(const std::string &name);
   /// Add a constraint after construction. If solving has started, the same
   /// solver session is resumed on the next solve() call.
@@ -125,6 +126,11 @@ public:
 
   const LabeledGraph &graph() const;
   const Grammar &grammar() const;
+  /// Address-of constraints in semantic (pre-reduction) node IDs.
+  std::vector<std::pair<std::size_t, std::size_t>> addressEdges() const;
+  const GraphSimplificationStatistics &simplificationStatistics() const {
+    return simplification_statistics_;
+  }
 
 private:
   AliasClient(LabeledGraph graph, Grammar grammar,
@@ -149,13 +155,12 @@ private:
   void initializePegDereferences();
   void initializeGepAttributes();
   void rebuildGrammar();
+  std::size_t solverNode(std::size_t semantic_node) const;
   void rebuildPointsTo() const;
   void indexAddressTakenObjects(const std::vector<std::size_t> &pointers) const;
-  LabeledGraph buildSpecializedAliasGraph() const;
   bool pointsToOverlap(std::size_t lhs, std::size_t rhs) const;
   static bool locationsOverlap(const AbstractLocation &lhs,
                                const AbstractLocation &rhs);
-  void invalidateSpecializedEngines();
 
   struct State;
   std::unique_ptr<State> state_;
@@ -164,6 +169,8 @@ private:
   std::unordered_map<std::size_t, std::vector<std::size_t>> peg_dereferences_;
   std::size_t next_synthetic_dereference_ = 0;
   std::set<std::uint32_t> gep_attributes_;
+  std::vector<std::size_t> solver_nodes_;
+  GraphSimplificationStatistics simplification_statistics_;
   bool grammar_dirty_ = false;
   mutable std::vector<std::set<AbstractLocation>> points_to_;
   mutable std::map<AbstractLocation, std::size_t> location_nodes_;
@@ -175,11 +182,6 @@ private:
   mutable bool address_objects_valid_ = false;
   std::unique_ptr<SolverSession> session_;
   std::optional<SolverBackend> backend_;
-  std::unique_ptr<engines::PocrAliasEngine> pocr_engine_;
-  std::unique_ptr<engines::FocrAliasEngine> focr_engine_;
-  std::unique_ptr<LabeledGraph> specialized_graph_;
-  std::optional<engines::SpecializedPocrBackend> specialized_backend_;
-  bool specialized_focr_cycles_ = false;
 };
 
 } // namespace lotus::cfl::classical

@@ -2,8 +2,7 @@
 // Created by peiming on 1/16/20.
 //
 
-#ifndef ASER_PTA_DEFAULTHEAPMODEL_H
-#define ASER_PTA_DEFAULTHEAPMODEL_H
+#pragma once
 
 #include <set>
 
@@ -66,4 +65,3 @@ public:
 
 } // namespace aser
 
-#endif // ASER_PTA_DEFAULTHEAPMODEL_H

@@ -1,11 +1,11 @@
 # VASCO DataFlow Unit Tests
 
-add_lotus_test_suite(vasco_tests
-  SOURCES
-    VASCOTest.cpp
-    VASCOLLVMClientTest.cpp
-    VASCOAdditionalLLVMClientTest.cpp
-  LINK_LIBS VASCODataFlow)
+# VASCO DataFlow Unit Tests
+
+lotus_collect_test_sources(dataflow_tests
+  VASCOTest.cpp
+  VASCOLLVMClientTest.cpp
+  VASCOAdditionalLLVMClientTest.cpp)
 
 add_executable(vasco_parallel_harness_test VASCOParallelHarnessTest.cpp)
 set_target_properties(vasco_parallel_harness_test PROPERTIES

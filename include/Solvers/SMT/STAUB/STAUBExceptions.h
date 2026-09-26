@@ -1,3 +1,5 @@
+#pragma once
+
 namespace STAUB {
 class UnsupportedSMTOpException : public std::exception {
   std::string description;

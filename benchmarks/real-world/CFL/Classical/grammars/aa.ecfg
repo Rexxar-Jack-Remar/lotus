@@ -1,0 +1,22 @@
+Production:
+M	DV	d
+DV	dbar	V
+V	Abar	V
+V	V	A
+V	FV_i	f_i
+V	M
+V
+V	abar	V
+V	V	a
+FV_i	fbar_i	V
+A	a	M
+Abar	M	abar
+
+Insert:
+A,	V,	Abar,	
+
+Follow:
+FV_i,	M,	DV,	
+
+Count:
+V,	

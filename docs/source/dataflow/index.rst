@@ -7,6 +7,7 @@ This section covers data flow analysis engines and tools.
    :maxdepth: 2
 
    apa
+   demand_apa
    control_flow
    mono
    ifds_ide

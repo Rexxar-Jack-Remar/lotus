@@ -23,8 +23,7 @@
  * @date 2026
  */
 
-#ifndef LOCKSET_ANALYSIS_H
-#define LOCKSET_ANALYSIS_H
+#pragma once
 
 #include "Concurrency/Utils/RAIILockTracker.h"
 #include "Concurrency/Utils/ThreadAPI.h"
@@ -652,4 +651,3 @@ private:
 
 } // namespace mhp
 
-#endif // LOCKSET_ANALYSIS_H

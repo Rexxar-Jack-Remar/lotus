@@ -1,5 +1,4 @@
-#ifndef __BIT_VECTOR_HH
-#define __BIT_VECTOR_HH
+#pragma once
 
 #include <cstdint>
 #include <cstdlib>
@@ -75,4 +74,3 @@ inline bool BitVector::get(int64_t bit_idx) const {
 
 } // namespace lotus::cfl::cs_index::flare
 
-#endif

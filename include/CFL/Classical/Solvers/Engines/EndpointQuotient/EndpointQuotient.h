@@ -1,5 +1,4 @@
-#ifndef LOTUS_CFL_CLASSICAL_ENDPOINT_QUOTIENT_H
-#define LOTUS_CFL_CLASSICAL_ENDPOINT_QUOTIENT_H
+#pragma once
 
 #include <cstddef>
 #include <cstdint>
@@ -54,6 +53,9 @@ enum class PartitionMode {
 
 struct Options {
   PartitionMode partitions = PartitionMode::Grammar;
+  /// Preserve production-local endpoint factors during saturation while
+  /// maintaining the exact symbol-global relation for public queries.
+  bool factorized = false;
 };
 
 struct SymbolStatistics {
@@ -63,6 +65,19 @@ struct SymbolStatistics {
   Count positive_facts = 0;
   Count logical_facts = 0;
   Count diagonal_facts = 0;
+};
+
+/// Work attributed to one entry in Problem::rules.  The vector in Statistics
+/// is index-aligned with Problem::rules so adapters can attach grammar symbol
+/// names without making the core solver depend on Grammar.
+struct RuleStatistics {
+  Count delta_rows = 0;
+  Count delta_cells = 0;
+  Count joins = 0;
+  Count propagations = 0;
+  Count successful_propagations = 0;
+  Count repeated_outputs = 0;
+  Count join_word_operations = 0;
 };
 
 struct Statistics {
@@ -94,12 +109,18 @@ struct Statistics {
   double saturation_ms = 0;
   double count_ms = 0;
   std::vector<SymbolStatistics> per_symbol;
+  std::vector<RuleStatistics> per_rule;
 };
 
 // All IDs are dense in [0,nodes) or [0,symbols). The problem is owned by value.
 class Solver {
 public:
   explicit Solver(Problem problem, Options options = {});
+  /// Builds an updated exact snapshot for the same grammar and a monotone
+  /// superset of input edges. New endpoint partitions are refined by the
+  /// previous partitions, so old rectangles can be migrated without replaying
+  /// old grammar work.
+  Solver(Problem problem, const Solver &previous, Options options = {});
   ~Solver();
   Solver(Solver &&) noexcept;
   Solver &operator=(Solver &&) noexcept;
@@ -147,4 +168,3 @@ private:
 } // namespace cfl
 } // namespace lotus
 
-#endif

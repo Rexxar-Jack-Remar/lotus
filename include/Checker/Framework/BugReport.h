@@ -1,7 +1,6 @@
 /** @file BugReport.h @brief Bug report data structures for checker framework.
  */
-#ifndef CHECKER_REPORT_BUGREPORT_H
-#define CHECKER_REPORT_BUGREPORT_H
+#pragma once
 
 #include "Checker/Framework/BugTypes.h"
 #include "Utils/Formats/cJSON.h"
@@ -189,4 +188,3 @@ void printBugReport(const llvm::Instruction *BugInst,
                     const std::string &BugType,
                     const llvm::Value *RelatedValue = nullptr);
 
-#endif // CHECKER_REPORT_BUGREPORT_H

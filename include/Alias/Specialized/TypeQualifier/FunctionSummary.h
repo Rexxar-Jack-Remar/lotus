@@ -10,8 +10,7 @@
  * @ingroup TypeQualifier
  */
 
-#ifndef UBIANALYSIS_FUNCTIONSUMMARY_H
-#define UBIANALYSIS_FUNCTIONSUMMARY_H
+#pragma once
 #include "Alias/Specialized/TypeQualifier/Annotation.h"
 #include "Alias/Specialized/TypeQualifier/Common.h"
 #include "Alias/Specialized/TypeQualifier/PtsSet.h"
@@ -439,4 +438,3 @@ public:
     }
   }
 };
-#endif

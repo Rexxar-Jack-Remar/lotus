@@ -1,5 +1,4 @@
-#ifndef NPA_CORE_DOMAIN_EXECUTION_H
-#define NPA_CORE_DOMAIN_EXECUTION_H
+#pragma once
 
 #include <stdexcept>
 
@@ -98,4 +97,3 @@ private:
 
 } // namespace npa
 
-#endif // NPA_CORE_DOMAIN_EXECUTION_H

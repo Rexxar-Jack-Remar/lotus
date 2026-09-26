@@ -7,8 +7,7 @@
 //
 // Not thread-safe: the iterator compares by position, not container identity.
 // This file is standalone and not wired into any analysis yet.
-#ifndef ANDERSEN_CHUNKED_SPARSE_BITSET_PTSSET_H
-#define ANDERSEN_CHUNKED_SPARSE_BITSET_PTSSET_H
+#pragma once
 
 #include <algorithm>
 #include <array>
@@ -444,4 +443,3 @@ private:
   std::size_t size_ = 0;
 };
 
-#endif // ANDERSEN_CHUNKED_SPARSE_BITSET_PTSSET_H

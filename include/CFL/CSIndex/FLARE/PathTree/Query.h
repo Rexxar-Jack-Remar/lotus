@@ -1,5 +1,4 @@
-#ifndef _PATHTREE_QUERY_H_
-#define _PATHTREE_QUERY_H_
+#pragma once
 
 #include "CFL/CSIndex/FLARE/Index.h"
 
@@ -1134,4 +1133,3 @@ public:
 
 } // namespace lotus::cfl::cs_index::flare::path_tree
 
-#endif

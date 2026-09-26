@@ -7,22 +7,16 @@ set(TYPE_HIERARCHY_LL_DIR
 
 file(MAKE_DIRECTORY ${TYPE_HIERARCHY_LL_DIR})
 
-if(APPLE)
-  if(EXISTS /opt/homebrew/opt/llvm@14/bin/clang++)
-    set(TYPE_HIERARCHY_CLANGXX /opt/homebrew/opt/llvm@14/bin/clang++)
-  elseif(EXISTS /usr/local/opt/llvm@14/bin/clang++)
-    set(TYPE_HIERARCHY_CLANGXX /usr/local/opt/llvm@14/bin/clang++)
-  else()
-    execute_process(
-        COMMAND xcrun --sdk macosx --find clang++
-        OUTPUT_VARIABLE TYPE_HIERARCHY_CLANGXX
-        OUTPUT_STRIP_TRAILING_WHITESPACE)
-  endif()
-  execute_process(
-      COMMAND xcrun --sdk macosx --show-sdk-path
-      OUTPUT_VARIABLE TYPE_HIERARCHY_SYSROOT
-      OUTPUT_STRIP_TRAILING_WHITESPACE)
-  set(TYPE_HIERARCHY_CLANGXX_EXTRA_ARGS -isysroot ${TYPE_HIERARCHY_SYSROOT})
+if(APPLE AND EXISTS /opt/homebrew/opt/llvm@14/bin/clang++)
+  set(TYPE_HIERARCHY_CLANGXX /opt/homebrew/opt/llvm@14/bin/clang++)
+elseif(APPLE AND EXISTS /usr/local/opt/llvm@14/bin/clang++)
+  set(TYPE_HIERARCHY_CLANGXX /usr/local/opt/llvm@14/bin/clang++)
+elseif(EXISTS "${LOTUS_LLVM_TOOLS_BINARY_DIR}/clang++")
+  set(TYPE_HIERARCHY_CLANGXX "${LOTUS_LLVM_TOOLS_BINARY_DIR}/clang++")
+elseif(EXISTS "${LOTUS_LLVM_TOOLS_BINARY_DIR}/clang++-14")
+  set(TYPE_HIERARCHY_CLANGXX "${LOTUS_LLVM_TOOLS_BINARY_DIR}/clang++-14")
+elseif(EXISTS "${LLVM_TOOLS_BINARY_DIR}/clang++")
+  set(TYPE_HIERARCHY_CLANGXX "${LLVM_TOOLS_BINARY_DIR}/clang++")
 else()
   find_program(TYPE_HIERARCHY_CLANGXX
                NAMES clang++-14 clang++
@@ -30,6 +24,18 @@ else()
   if(NOT TYPE_HIERARCHY_CLANGXX)
     set(TYPE_HIERARCHY_CLANGXX ${CMAKE_CXX_COMPILER})
   endif()
+endif()
+
+if(APPLE)
+  execute_process(
+      COMMAND xcrun --sdk macosx --show-sdk-path
+      OUTPUT_VARIABLE TYPE_HIERARCHY_SYSROOT
+      OUTPUT_STRIP_TRAILING_WHITESPACE)
+  set(TYPE_HIERARCHY_CLANGXX_EXTRA_ARGS -isysroot ${TYPE_HIERARCHY_SYSROOT})
+  if(EXISTS /opt/homebrew/opt/llvm@14/include/c++/v1 AND NOT TYPE_HIERARCHY_CLANGXX MATCHES "llvm@14")
+    list(APPEND TYPE_HIERARCHY_CLANGXX_EXTRA_ARGS -nostdinc++ -isystem /opt/homebrew/opt/llvm@14/include/c++/v1)
+  endif()
+else()
   set(TYPE_HIERARCHY_CLANGXX_EXTRA_ARGS)
 endif()
 
@@ -58,7 +64,10 @@ set(TYPE_HIERARCHY_CASES
     type_hierarchy_19
     type_hierarchy_20
     type_hierarchy_21
-    type_hierarchy_22)
+    type_hierarchy_22
+    call_graph_cha_rta
+    call_graph_vta
+    call_graph_fnptr)
 
 set(TYPE_HIERARCHY_LL_OUTPUTS)
 foreach(case_name ${TYPE_HIERARCHY_CASES})
@@ -85,6 +94,7 @@ add_lotus_test_suite(type_hierarchy_tests
     DIBasedTypeHierarchyTransitiveReachabilityTest.cpp
     DIBasedTypeHierarchySerializationTest.cpp
     LLVMVFTableTest.cpp
+    CallGraphAlgorithmsTest.cpp
   LINK_LIBS CanaryTypeHierarchy
   COMPILE_DEFINITIONS
     LOTUS_TYPE_HIERARCHY_LL_DIR="${TYPE_HIERARCHY_LL_DIR}"

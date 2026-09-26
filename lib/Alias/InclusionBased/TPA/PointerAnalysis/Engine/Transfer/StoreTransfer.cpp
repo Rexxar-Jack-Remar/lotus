@@ -44,13 +44,17 @@ void TransferFunction::evalStore(const Pointer *dst, const Pointer *src,
 
   // Look up what 'src' points to (the value being stored)
   auto srcSet = env.lookup(src);
-  if (srcSet.empty())
+  if (srcSet.empty()) {
+    addMemLevelSuccessors(pp, *localState, evalResult);
     return;
+  }
 
   // Look up what 'dst' points to (the location being written to)
   auto dstSet = env.lookup(dst);
-  if (dstSet.empty())
+  if (dstSet.empty()) {
+    addMemLevelSuccessors(pp, *localState, evalResult);
     return;
+  }
 
   // Create a new Store for the output of this node
   auto &store = evalResult.getNewStore(*localState);
@@ -81,8 +85,12 @@ void TransferFunction::evalStoreNode(const ProgramPoint &pp,
   const auto *srcPtr = ptrManager.getPointer(ctx, storeNode.getSrc());
   const auto *dstPtr = ptrManager.getPointer(ctx, storeNode.getDest());
 
-  if (srcPtr == nullptr || dstPtr == nullptr)
+  // Pointers not registered yet: can't apply the store, but still propagate
+  // the incoming store to mem-level successors.
+  if (srcPtr == nullptr || dstPtr == nullptr) {
+    addMemLevelSuccessors(pp, *localState, evalResult);
     return;
+  }
 
   evalStore(dstPtr, srcPtr, pp, evalResult);
 }

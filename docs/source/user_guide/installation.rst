@@ -52,19 +52,21 @@ Options use a consistent ``LOTUS_*`` naming scheme.
 * ``-DLOTUS_ENABLE_HORN_ICE=ON``: Build ICE learning tools for CHC
 * ``-DLOTUS_ENABLE_SEAL=ON``: Build the Seal symbolic automata lifter (CAV 2026)
 
-**Optional in-tree tool families** (all OFF by default):
+**Optional in-tree tool families and components:**
 
-* ``-DLOTUS_ENABLE_CFL=ON``: Build CFL reachability solvers
-* ``-DLOTUS_ENABLE_CSR=ON``: Build the indexing context-sensitive reachability solver
-* ``-DLOTUS_ENABLE_OWL=ON``: Build the Owl SMT solver
+* ``-DLOTUS_ENABLE_CFL=OFF``: Disable CFL reachability solvers (default: ON)
+* ``-DLOTUS_ENABLE_CSR=ON``: Build the indexing context-sensitive reachability solver (default: OFF)
+* ``-DLOTUS_ENABLE_OWL=ON``: Build the Owl SMT solver (default: OFF)
 * ``-DLOTUS_ENABLE_SMT_STABILIZER=ON``: Build the SMTStabilizer SMT-LIB
-  normalization library and tool (needs GMP, GMPXX, and MPFR)
-* ``-DLOTUS_ENABLE_DYNAA=ON``: Build dynamic alias-analysis tools
-* ``-DLOTUS_USE_CCLYZER=ON``: Enable optional cclyzer++ alias analysis backend
-* ``-DLOTUS_ENABLE_TYPE_QUALIFIER=ON``: Enable the TypeQualifier uninitialized-data checker
-* ``-DLOTUS_ENABLE_FPSOLVE=ON``: Build vendored FPsolve fixed-point solver
+  normalization library and tool (needs GMP, GMPXX, and MPFR; default: OFF)
+* ``-DLOTUS_ENABLE_DYNAA=ON``: Build dynamic alias-analysis tools (default: OFF)
+* ``-DLOTUS_ENABLE_CCLYZER=ON``: Enable optional cclyzer++ alias analysis backend (default: OFF)
+* ``-DLOTUS_ENABLE_TYPE_QUALIFIER=ON``: Enable the TypeQualifier uninitialized-data checker (default: OFF)
+* ``-DLOTUS_ENABLE_FPSOLVE=ON``: Build vendored FPsolve fixed-point solver (default: OFF)
 * ``-DLOTUS_ENABLE_WALI_OPENNWA=ON``: Build the vendored WALi/OpenNWA library
-  and enable the runtime ``wali-fwpds`` and ``wali-swpds`` WPDS backends
+  and enable the runtime ``wali-fwpds`` and ``wali-swpds`` WPDS backends (default: OFF)
+* ``-DLOTUS_ENABLE_PDAAAL=ON``: Build the vendored PDAAAL weighted PDS reachability library
+  under third-party/PDAAAL (default: OFF)
 
 **Advanced toggles:**
 

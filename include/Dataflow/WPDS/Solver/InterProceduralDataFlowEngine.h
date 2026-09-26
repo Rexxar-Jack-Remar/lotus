@@ -1,5 +1,4 @@
-#ifndef ANALYSIS_DATAFLOW_WPDS_INTERPROCEDURALDATAFLOWENGINE_H_
-#define ANALYSIS_DATAFLOW_WPDS_INTERPROCEDURALDATAFLOWENGINE_H_
+#pragma once
 
 #include "Dataflow/Mono/Support/Result.h"
 #include "Dataflow/WPDS/Backend.h"
@@ -8,10 +7,10 @@
 #include "Dataflow/WPDS/PreparedAnalysis.h"
 #include "WPDS/CA.h"
 #include "WPDS/WPDS.h"
-#include "WPDS/key_source.h"
-#include "WPDS/keys.h"
-#include "WPDS/ref_ptr.h"
-#include "WPDS/semiring.h"
+#include "WPDS/KeySource.h"
+#include "WPDS/Keys.h"
+#include "WPDS/RefPtr.h"
+#include "WPDS/Semiring.h"
 
 #include <cstdint>
 #include <functional>
@@ -241,4 +240,3 @@ private:
 
 } // namespace wpds
 
-#endif // ANALYSIS_DATAFLOW_WPDS_INTERPROCEDURALDATAFLOWENGINE_H_

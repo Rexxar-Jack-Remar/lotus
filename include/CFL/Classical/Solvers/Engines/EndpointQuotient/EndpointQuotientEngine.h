@@ -6,8 +6,50 @@
 #include <cstddef>
 #include <cstdint>
 #include <memory>
+#include <vector>
 
 namespace lotus::cfl::classical::engines {
+
+/// Structural class of a strongly connected component in the grammar-symbol
+/// dependency graph.  These classes identify SCCs that can potentially use a
+/// cheaper staged evaluator instead of general CFL saturation.
+enum class EndpointQuotientSccClass : std::uint8_t {
+  Acyclic,
+  UnaryRecursive,
+  LeftLinear,
+  RightLinear,
+  Transitive,
+  General,
+};
+
+struct EndpointQuotientRuleStatistics {
+  std::size_t rule_id = 0;
+  std::size_t kind = 0;
+  std::size_t lhs = 0;
+  std::size_t left = 0;
+  std::size_t right = 0;
+  std::size_t delta_rows = 0;
+  std::size_t delta_cells = 0;
+  std::size_t joins = 0;
+  std::size_t propagations = 0;
+  std::size_t successful_propagations = 0;
+  std::size_t repeated_outputs = 0;
+  std::size_t join_word_operations = 0;
+};
+
+struct EndpointQuotientSccStatistics {
+  std::size_t scc_id = 0;
+  EndpointQuotientSccClass classification = EndpointQuotientSccClass::Acyclic;
+  std::size_t symbols = 0;
+  std::size_t rules = 0;
+  std::size_t delta_rows = 0;
+  std::size_t delta_cells = 0;
+  std::size_t joins = 0;
+  std::size_t propagations = 0;
+  std::size_t successful_propagations = 0;
+  std::size_t repeated_outputs = 0;
+  std::size_t join_word_operations = 0;
+};
 
 /// Exact fixed-point statistics reported by the endpoint-quotient engine.
 /// `logical_facts` counts concrete facts (seed plus inferred) without
@@ -37,9 +79,23 @@ struct EndpointQuotientStatistics {
   std::size_t partitions_built = 0;
   std::size_t bridges_built = 0;
   std::size_t lifts_built = 0;
+  std::size_t dependency_sccs = 0;
+  std::size_t acyclic_sccs = 0;
+  std::size_t unary_recursive_sccs = 0;
+  std::size_t transitive_sccs = 0;
+  std::size_t linear_sccs = 0;
+  std::size_t general_sccs = 0;
+  std::size_t max_scc_symbols = 0;
+  std::size_t max_scc_rules = 0;
+  std::size_t hottest_rule_id = 0;
+  std::size_t hottest_rule_joins = 0;
+  std::size_t hottest_scc_id = 0;
+  std::size_t hottest_scc_joins = 0;
   std::uint64_t preprocess_us = 0;
   std::uint64_t saturation_us = 0;
   std::uint64_t count_us = 0;
+  std::vector<EndpointQuotientRuleStatistics> per_rule;
+  std::vector<EndpointQuotientSccStatistics> per_scc;
 };
 
 /// Grammar-indexed endpoint-quotient (GEQ) engine adapter.
@@ -51,14 +107,15 @@ struct EndpointQuotientStatistics {
 /// stay symbolic. Input edges are deduplicated so repeated
 /// terminal insertions return false, matching the other session backends.
 ///
-/// The underlying quotient is static: adding a terminal edge followed by
-/// another `solve()` rebuilds the problem and re-derives the fixed point from
-/// scratch, rather than incrementally refining the previous partitions.
-/// Queries see the last completed solve; buffered updates become visible on
-/// the next solve. Traversal callbacks must not update or solve the engine.
+/// Adding terminal edges builds refined endpoint partitions, migrates the
+/// previous compressed closure as already-processed cells, and saturates only
+/// the delta. Queries see the last completed snapshot; buffered updates become
+/// visible on the next solve. Traversal callbacks must not update or solve the
+/// engine.
 class EndpointQuotientEngine final : public Relation {
 public:
-  EndpointQuotientEngine(const Grammar &grammar, std::size_t node_count);
+  EndpointQuotientEngine(const Grammar &grammar, std::size_t node_count,
+                         bool factorized = false);
   ~EndpointQuotientEngine() override;
   EndpointQuotientEngine(const EndpointQuotientEngine &) = delete;
   EndpointQuotientEngine &operator=(const EndpointQuotientEngine &) = delete;
@@ -67,8 +124,8 @@ public:
   /// Records a terminal input edge. Returns false when the edge was already
   /// buffered for the current session.
   bool add(SymbolId symbol, NodeId source, NodeId target) override;
-  /// Rebuilds after updates; otherwise returns zero work counters and the
-  /// existing snapshot's sizes. A failed solve preserves the previous result.
+  /// Saturates the buffered delta. SolverSession filters unchanged calls.
+  /// A failed solve preserves the previous result.
   EndpointQuotientStatistics solve();
   const EndpointQuotientStatistics &statistics() const;
 

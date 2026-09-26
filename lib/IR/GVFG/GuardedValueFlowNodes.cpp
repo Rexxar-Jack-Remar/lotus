@@ -31,6 +31,8 @@
 
 #include <algorithm>
 
+#include <llvm/Support/Errc.h>
+
 using namespace llvm;
 using namespace lotus::gvfg;
 
@@ -105,8 +107,8 @@ static bool isValueFlowParent(const GuardedValueFlowNode *node,
   case GuardedValueFlowOpcodeNode::OpcodeKind::Sub:
     return true;
   case GuardedValueFlowOpcodeNode::OpcodeKind::Select:
-    return !opcode_parent->children().empty() &&
-           opcode_parent->children().front().target != node;
+    return opcode_parent->getNumOperands() != 0 &&
+           opcode_parent->conditionOperand() != node;
   default:
     return enable_arithmetic_flow &&
            isArithmeticFlowOpcode(opcode_parent->getOpcodeKind());
@@ -169,10 +171,69 @@ void GuardedValueFlowNode::clearChildren() {
   children_.clear();
 }
 
+void GuardedValueFlowOpcodeNode::addOperand(GuardedValueFlowNode *producer,
+                                            float confidence,
+                                            ConditionRef condition) {
+  if (!producer)
+    return;
+  operands_.push_back({producer, static_cast<unsigned>(operands_.size()),
+                       confidence, condition});
+  GuardedValueFlowNode::addChild(producer, confidence, condition);
+}
+
+llvm::Error GuardedValueFlowOpcodeNode::setOperand(
+    unsigned index, GuardedValueFlowNode *producer, float confidence,
+    ConditionRef condition) {
+  if (!producer)
+    return llvm::createStringError(llvm::errc::invalid_argument,
+                                   "opcode operand producer is null");
+  if (index > operands_.size())
+    return llvm::createStringError(
+        llvm::errc::invalid_argument,
+        "opcode operand index %u is not contiguous (operand count %zu)",
+        index, operands_.size());
+  if (index == operands_.size()) {
+    addOperand(producer, confidence, condition);
+    return llvm::Error::success();
+  }
+
+  operands_[index] = {producer, index, confidence, condition};
+
+  // Rebuild only the set-like dependency projection. This keeps reverse uses
+  // consistent when the replaced producer is not referenced by another
+  // operand occurrence.
+  GuardedValueFlowNode::clearChildren();
+  for (const OperandUse &operand : operands_)
+    GuardedValueFlowNode::addChild(operand.producer, operand.confidence,
+                                   operand.condition);
+  return llvm::Error::success();
+}
+
+void GuardedValueFlowOpcodeNode::clearChildren() {
+  operands_.clear();
+  GuardedValueFlowNode::clearChildren();
+}
+
 bool GuardedValueFlowNode::containsParent(
     const GuardedValueFlowNode *parent) const {
   return std::any_of(parents_.begin(), parents_.end(),
                      [&](const Edge &edge) { return edge.target == parent; });
+}
+
+std::vector<GuardedValueFlowNode::OperandUser>
+GuardedValueFlowNode::operandUsers() const {
+  std::vector<OperandUser> result;
+  for (const Edge &parent_edge : parents_) {
+    auto *opcode = dyn_cast_or_null<GuardedValueFlowOpcodeNode>(
+        parent_edge.target);
+    if (!opcode)
+      continue;
+    for (const auto &operand : opcode->operands()) {
+      if (operand.producer == this)
+        result.push_back({opcode, operand.operand_index});
+    }
+  }
+  return result;
 }
 
 std::vector<GuardedValueFlowNode *>
@@ -241,14 +302,31 @@ void GuardedValueFlowPhiNode::addIncoming(GuardedValueFlowNode *value_node,
 }
 
 void GuardedValueFlowReturnNode::addReturnValueSitePair(
-    GuardedValueFlowNode *value_node, GuardedValueFlowReturnSite *site) {
-  return_sites_[value_node] = site;
+    GuardedValueFlowNode *value_node, GuardedValueFlowReturnSite *site,
+    ConditionRef guard) {
+  if (!value_node)
+    return;
+  incoming_returns_.push_back({value_node, site, guard});
+  if (std::none_of(children_.begin(), children_.end(), [&](const Edge &edge) {
+        return edge.target == value_node;
+      })) {
+    GuardedValueFlowNode::addChild(value_node, 1.0f, guard);
+  }
   if (site)
     addUseSite(site);
 }
 
+void GuardedValueFlowReturnNode::clearChildren() {
+  incoming_returns_.clear();
+  GuardedValueFlowNode::clearChildren();
+}
+
 GuardedValueFlowReturnSite *GuardedValueFlowReturnNode::getReturnSite(
     const GuardedValueFlowNode *value_node) const {
-  auto it = return_sites_.find(value_node);
-  return it == return_sites_.end() ? nullptr : it->second;
+  for (auto it = incoming_returns_.rbegin(); it != incoming_returns_.rend();
+       ++it) {
+    if (it->value == value_node)
+      return it->site;
+  }
+  return nullptr;
 }

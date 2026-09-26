@@ -10,8 +10,9 @@ Grammar-driven CFL reachability utilities and solver backends
 
 **Location**: ``include/CFL/Classical/``, ``lib/CFL/Classical/``. Both trees
 use ``Core/``, ``Solvers/Engines/`` (including ``PEARL/``, ``POCR/``,
-``SQID/``, and ``STG/``), ``Solvers/Preprocessing/``, ``Clients/Alias/``, and
-``Clients/ValueFlow/``.
+``SQID/``, ``STG/``, ``Skewed/``, ``EndpointQuotient/``, ``CAT/``,
+``IEOCE/``, and ``CERT/``), ``Solvers/Preprocessing/``, ``Clients/Alias/``,
+and ``Clients/ValueFlow/``.
 The two client implementations consistently use ``AliasClient.*`` and
 ``ValueFlowClient.*`` filenames.
 
@@ -21,7 +22,8 @@ The two client implementations consistently use ``AliasClient.*`` and
 * Labeled graph construction for text, DOT, PAG, and PEG-style encodings
 * Sparse-set, sparse-bitvector, Graspan epoch/delta, transitive-specialized,
   POCR/hierarchical-POCR, and fully ordered edge-critical-graph backends
-* PEARL multi-derivation, Sqid relation chaining, and Stg staged solving
+* PEARL multi-derivation, Sqid relation chaining, Stg staged solving, and
+  CERT-CFL cardinality-certified solving
 * Native POCR grammar/graph input, unidirectional summarization, client graph
   simplification, and RSM-guided foldability checking
 * Incremental solver sessions for dynamically discovered terminal edges
@@ -30,8 +32,24 @@ The two client implementations consistently use ``AliasClient.*`` and
 * End-to-end context-sensitive LLVM value-flow analysis over Lotus SVFGs
 * Strong-update-aware CFL preparation for Lotus SVFGs
 
-See :doc:`pearl`, :doc:`stg`, and :doc:`sqid` for paper references, key ideas,
-algorithm walkthroughs, and exact source mappings.
+See :doc:`/cfl/classical/pearl`, :doc:`/cfl/classical/stg`, and
+:doc:`/cfl/classical/sqid` for paper references, key ideas, algorithm
+walkthroughs, and exact source mappings.
+See :doc:`/cfl/classical/cat_ieoce` for the CAT and IEOCE engines.
+See :doc:`/cfl/classical/cert_cfl` for the CERT-CFL engine.
+
+Dynamic Bidirected Dyck Reachability
+------------------------------------
+
+Exact single-language Dyck reachability under insertions and deletions of
+complementary edge pairs. The POPL 2022 C++ algorithm retains degree-based
+merging, path compression, linked worklists, and acyclic splitting. Cyclic
+deletion safely recomputes the remaining graph.
+
+**Location**: ``include/CFL/DynamicDyck/``, ``lib/CFL/DynamicDyck/``
+
+See :doc:`/cfl/dynamic_dyck` for the reusable API, artifact formats, and
+cycle-correction details.
 
 Interleaved-Dyck Core
 ---------------------
@@ -55,7 +73,7 @@ the POPL 2022 fixed-counter exact baseline.
 **Location**: ``include/CFL/InterleavedDyck/Unary/``,
 ``lib/CFL/InterleavedDyck/Unary/``
 
-See :doc:`interleaved_dyck_unary` for both algorithms, their exactness boundary,
+See :doc:`/cfl/interleaved_dyck/unary` for both algorithms, their exactness boundary,
 and benchmark eligibility rules.
 
 Interleaved-Dyck Staged Bounds
@@ -128,7 +146,7 @@ Context-sensitive indexing for CFL reachability.
 
 The implementation is split into ``FLARE`` and ``SCS``. FLARE owns the
 extended-Dyck graph and indexing algorithms; SCS builds policy products and
-then reuses FLARE. See :doc:`csindex` for the public namespaces and directory
+then reuses FLARE. See :doc:`/cfl/indexing/csindex` for the public namespaces and directory
 layout.
 
 **Features**: Context-aware indexing algorithms for efficient CFL queries.
@@ -154,6 +172,8 @@ DOT graph and does not itself return the final reachability relation.
 * Explicit directed versus already-bidirected input mode
 * Private legacy summary representation under the ``lib`` subtree
 
-See also :doc:`classical`, :doc:`csindex`, :doc:`interleaved_dyck_unary`,
-:doc:`interleaved_dyck_staged_bounds`, :doc:`interleaved_dyck_graph_reduction`,
-:doc:`interleaved_dyck_mcfl`.
+See also :doc:`/cfl/classical/classical`, :doc:`/cfl/indexing/csindex`,
+:doc:`/cfl/interleaved_dyck/unary`,
+:doc:`/cfl/interleaved_dyck/staged_bounds`,
+:doc:`/cfl/interleaved_dyck/graph_reduction`,
+:doc:`/cfl/interleaved_dyck/mcfl`.

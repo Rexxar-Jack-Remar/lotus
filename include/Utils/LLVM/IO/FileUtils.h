@@ -1,5 +1,4 @@
-#ifndef FILEUTILS_H
-#define FILEUTILS_H
+#pragma once
 
 #include <string>
 
@@ -25,5 +24,3 @@ public:
   static std::string getFileNameFromPath(llvm::StringRef path,
                                          llvm::StringRef separator);
 };
-
-#endif // FILEUTILS_H

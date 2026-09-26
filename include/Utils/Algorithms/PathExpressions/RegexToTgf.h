@@ -7,8 +7,7 @@
 //
 //===----------------------------------------------------------------------===//
 
-#ifndef LOTUS_UTILS_GENERAL_PATHEXPRESSIONS_REGEXTOTGF_H
-#define LOTUS_UTILS_GENERAL_PATHEXPRESSIONS_REGEXTOTGF_H
+#pragma once
 
 #include "Utils/Algorithms/PathExpressions/Regex.h"
 
@@ -96,4 +95,3 @@ private:
 } // namespace pathexpressions
 } // namespace lotus
 
-#endif // LOTUS_UTILS_GENERAL_PATHEXPRESSIONS_REGEXTOTGF_H

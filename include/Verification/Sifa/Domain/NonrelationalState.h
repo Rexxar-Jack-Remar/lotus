@@ -7,8 +7,7 @@
 //
 //===----------------------------------------------------------------------===//
 
-#ifndef LOTUS_VERIFICATION_SIFA_DOMAIN_NONRELATIONALSTATE_H
-#define LOTUS_VERIFICATION_SIFA_DOMAIN_NONRELATIONALSTATE_H
+#pragma once
 
 #include "llvm/IR/Value.h"
 
@@ -95,4 +94,3 @@ private:
 } // namespace sifa
 } // namespace lotus
 
-#endif // LOTUS_VERIFICATION_SIFA_DOMAIN_NONRELATIONALSTATE_H

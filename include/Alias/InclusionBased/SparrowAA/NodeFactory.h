@@ -45,8 +45,7 @@
  * their `mergeTarget` field updated.
  */
 
-#ifndef ANDERSEN_NODE_FACTORY_H
-#define ANDERSEN_NODE_FACTORY_H
+#pragma once
 
 #include <vector>
 
@@ -240,4 +239,3 @@ public:
   void dumpRepInfo() const;
 };
 
-#endif

@@ -1,5 +1,4 @@
-#ifndef WRAPPED_INTERVAL_H
-#define WRAPPED_INTERVAL_H
+#pragma once
 
 #include <stdint.h>
 
@@ -43,5 +42,3 @@ wrapped_interval_iter_t wi_init_iter_values(wrapped_interval_t *interval);
 int wi_iter_get_next(wrapped_interval_iter_t *it, uint64_t *el);
 
 const char *op_to_string(optype op);
-
-#endif

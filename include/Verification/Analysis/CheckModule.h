@@ -4,8 +4,7 @@
  * @author Migrated from Symbiotic
  */
 
-#ifndef LOTUS_VERIFICATION_ANALYSIS_CHECK_MODULE_H
-#define LOTUS_VERIFICATION_ANALYSIS_CHECK_MODULE_H
+#pragma once
 
 #include "llvm/Pass.h"
 
@@ -42,4 +41,3 @@ public:
 } // namespace verification
 } // namespace lotus
 
-#endif // LOTUS_VERIFICATION_ANALYSIS_CHECK_MODULE_H

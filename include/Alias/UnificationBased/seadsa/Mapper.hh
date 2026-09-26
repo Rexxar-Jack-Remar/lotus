@@ -1,5 +1,4 @@
-#ifndef __DSA_MAPPER__HH_
-#define __DSA_MAPPER__HH_
+#pragma once
 
 #include "Alias/UnificationBased/seadsa/Graph.hh"
 
@@ -70,4 +69,3 @@ namespace seadsa
     void write (llvm::raw_ostream &o) const ;
   };
 } // namespace seadsa
-#endif

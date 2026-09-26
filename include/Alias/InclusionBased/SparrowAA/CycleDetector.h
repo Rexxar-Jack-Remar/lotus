@@ -51,8 +51,7 @@
  * work correctly even after dfsNum[node] has been lowered by back-edges.
  */
 
-#ifndef ANDERSEN_CYCLEDETECTOR_H
-#define ANDERSEN_CYCLEDETECTOR_H
+#pragma once
 
 #include "Alias/InclusionBased/SparrowAA/GraphTraits.h"
 
@@ -236,4 +235,3 @@ public:
   virtual void run() = 0;
 };
 
-#endif

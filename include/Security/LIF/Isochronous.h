@@ -21,8 +21,7 @@
 /// of instructions regardless of the inputs.
 ///
 //===----------------------------------------------------------------------===//
-#ifndef LIF_TRANSFORM_ISOCHRONOUS_H
-#define LIF_TRANSFORM_ISOCHRONOUS_H
+#pragma once
 
 #include <llvm/IR/Module.h>
 #include <llvm/IR/PassManager.h>
@@ -46,4 +45,3 @@ public:
 };
 } // namespace lotus::lif::transform
 
-#endif

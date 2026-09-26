@@ -380,9 +380,9 @@ PDG Query Issues
 
 .. code-block:: cypher
 
-   # Function names are case-sensitive
-   MATCH (n:FUNC_ENTRY) WHERE n.name = 'Main' RETURN n  # Wrong
-   MATCH (n:FUNC_ENTRY) WHERE n.name = 'main' RETURN n  # Correct
+   // Function names are case-sensitive
+   MATCH (n:FUNC_ENTRY) WHERE n.name = 'Main' RETURN n  // Wrong
+   MATCH (n:FUNC_ENTRY) WHERE n.name = 'main' RETURN n  // Correct
 
 2. Verify PDG was built:
 
@@ -404,10 +404,10 @@ PDG Query Issues
 
 .. code-block:: cypher
 
-   # Wrong
+   // Wrong
    MATCH (n:FUNC_ENTRY) WHERE n.name = main RETURN n
    
-   # Correct
+   // Correct
    MATCH (n:FUNC_ENTRY) WHERE n.name = 'main' RETURN n
 
 2. Use interactive mode to test:

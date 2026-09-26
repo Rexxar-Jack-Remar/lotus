@@ -16,8 +16,7 @@
  *  along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
-#ifndef DYCKAA_AAANALYZER_H
-#define DYCKAA_AAANALYZER_H
+#pragma once
 
 #include "Alias/UnificationBased/DyckAA/DyckCallGraph.h"
 #include "Alias/Infrastructure/Spec/AliasSpecManager.h"
@@ -127,4 +126,3 @@ private:
   DyckGraphNode *wrapValue(Value *);
 };
 
-#endif // DYCKAA_AAANALYZER_H

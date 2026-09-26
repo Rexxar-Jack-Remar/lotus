@@ -1,6 +1,5 @@
 /** @file PulseDiagnostic.h @brief Diagnostic types for Pulse checker bug reports. */
-#ifndef CHECKER_PULSE_PULSEDIAGNOSTIC_H
-#define CHECKER_PULSE_PULSEDIAGNOSTIC_H
+#pragma once
 
 #include "Checker/Pulse/Core/PulseAbstractValue.h"
 #include "Checker/Pulse/Core/PulseValueHistory.h"
@@ -221,4 +220,3 @@ public:
 
 } // namespace pulse
 
-#endif // CHECKER_PULSE_PULSEDIAGNOSTIC_H

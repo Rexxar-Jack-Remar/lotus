@@ -1,6 +1,5 @@
 /** @file ConcurrencyBugReport.h @brief Bug report types for concurrency checkers. */
-#ifndef CONCURRENCY_BUG_REPORT_H
-#define CONCURRENCY_BUG_REPORT_H
+#pragma once
 
 #include "Checker/Framework/BugTypes.h"
 
@@ -155,4 +154,3 @@ struct ConcurrencyBugReport {
 
 } // namespace concurrency
 
-#endif // CONCURRENCY_BUG_REPORT_H

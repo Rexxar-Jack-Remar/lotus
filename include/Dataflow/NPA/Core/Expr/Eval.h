@@ -1,5 +1,4 @@
-#ifndef NPA_EVAL_H
-#define NPA_EVAL_H
+#pragma once
 
 /**
  * \file
@@ -278,4 +277,3 @@ private:
 
 } // namespace npa
 
-#endif // NPA_EVAL_H

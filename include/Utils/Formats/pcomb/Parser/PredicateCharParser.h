@@ -1,5 +1,4 @@
-#ifndef PCOMB_PREDICATE_CHAR_PARSER_H
-#define PCOMB_PREDICATE_CHAR_PARSER_H
+#pragma once
 
 #include "Utils/Formats/pcomb/Parser/Parser.h"
 
@@ -75,4 +74,3 @@ inline PredicateCharParser<detail::CharRangePredicate> range(char l, char h) {
 
 } // namespace pcomb
 
-#endif

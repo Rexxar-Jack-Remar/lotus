@@ -97,6 +97,8 @@ public:
 /// channels, summary nodes, and callee-specific path conditions.
 class GuardedValueFlowCallSite : public GuardedValueFlowSite {
 public:
+  using CallInputSnapshot = std::vector<GuardedValueFlowCallSiteInput>;
+
   GuardedValueFlowCallSite(GuardedValueFlowGraph *graph, Instruction *inst)
       : GuardedValueFlowSite(Kind::CallSite, graph, inst) {}
 
@@ -163,6 +165,21 @@ public:
   unsigned getNumPseudoInputs(Function *callee) const;
   unsigned getNumPseudoOutputs(Function *callee) const;
 
+  /// Returns an owning, callee-specific snapshot. Nested iteration and later
+  /// calls for another callee cannot invalidate it.
+  CallInputSnapshot inputs(Function *callee) const {
+    CallInputSnapshot result;
+    result.reserve(common_inputs_.size() + getNumPseudoInputs(callee));
+    for (size_t idx = 0; idx < common_inputs_.size(); ++idx)
+      result.emplace_back(common_inputs_[idx], idx, true);
+    auto pseudo_it = pseudo_inputs_.find(callee);
+    if (pseudo_it != pseudo_inputs_.end()) {
+      for (size_t idx = 0; idx < pseudo_it->second.size(); ++idx)
+        result.emplace_back(pseudo_it->second[idx], idx, false);
+    }
+    return result;
+  }
+
 private:
   std::vector<Function *> callees_;
   std::vector<GuardedValueFlowNode *> common_inputs_;
@@ -176,26 +193,21 @@ private:
   std::set<Function *> back_edge_callees_;
   std::map<Function *, ConditionRef> callee_conditions_;
   std::map<Function *, GuardedValueFlowRegionNode *> callee_condition_regions_;
-  mutable std::vector<GuardedValueFlowCallSiteInput> compat_inputs_cache_;
+  mutable std::map<Function *, CallInputSnapshot> compat_inputs_caches_;
 
 public:
   auto input_begin(Function *callee) const {
-    compat_inputs_cache_.clear();
-    for (size_t idx = 0; idx < common_inputs_.size(); ++idx) {
-      compat_inputs_cache_.emplace_back(common_inputs_[idx], idx, true);
-    }
-    auto pseudo_it = pseudo_inputs_.find(callee);
-    if (pseudo_it != pseudo_inputs_.end()) {
-      for (size_t idx = 0; idx < pseudo_it->second.size(); ++idx) {
-        compat_inputs_cache_.emplace_back(pseudo_it->second[idx], idx, false);
-      }
-    }
-    return compat_inputs_cache_.begin();
+    auto [it, inserted] = compat_inputs_caches_.try_emplace(callee);
+    if (inserted)
+      it->second = inputs(callee);
+    return it->second.begin();
   }
 
   auto input_end(Function *callee) const {
-    (void)input_begin(callee);
-    return compat_inputs_cache_.end();
+    auto [it, inserted] = compat_inputs_caches_.try_emplace(callee);
+    if (inserted)
+      it->second = inputs(callee);
+    return it->second.end();
   }
 };
 

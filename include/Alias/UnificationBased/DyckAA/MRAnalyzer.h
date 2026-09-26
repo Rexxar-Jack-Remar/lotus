@@ -16,8 +16,7 @@
  *  along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
-#ifndef DYCKAA_MRANALYZER_H
-#define DYCKAA_MRANALYZER_H
+#pragma once
 
 #include "Alias/UnificationBased/DyckAA/DyckCallGraph.h"
 #include "Alias/UnificationBased/DyckAA/DyckGraph.h"
@@ -52,4 +51,3 @@ private:
   void runOnFunction(DyckCallGraphNode *);
 };
 
-#endif // DYCKAA_MRANALYZER_H

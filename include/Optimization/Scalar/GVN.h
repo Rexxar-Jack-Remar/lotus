@@ -12,8 +12,7 @@
 ///
 //===----------------------------------------------------------------------===//
 
-#ifndef LLVM_TRANSFORMS_SCALAR_GVN_H
-#define LLVM_TRANSFORMS_SCALAR_GVN_H
+#pragma once
 
 #include "llvm/ADT/DenseMap.h"
 #include "llvm/ADT/MapVector.h"
@@ -386,4 +385,3 @@ struct GVNSinkPass : PassInfoMixin<GVNSinkPass> {
 
 } // end namespace llvm
 
-#endif // LLVM_TRANSFORMS_SCALAR_GVN_H

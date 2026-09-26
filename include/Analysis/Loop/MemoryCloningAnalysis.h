@@ -2,8 +2,7 @@
 /*
  * Copyright 2026 Lotus contributors
  */
-#ifndef LOTUS_ANALYSIS_LOOP_MEMORYCLONINGANALYSIS_H
-#define LOTUS_ANALYSIS_LOOP_MEMORYCLONINGANALYSIS_H
+#pragma once
 
 #include "Analysis/Loop/LoopDependenceGraph.h"
 
@@ -118,4 +117,3 @@ private:
 } // namespace analysis
 } // namespace lotus
 
-#endif

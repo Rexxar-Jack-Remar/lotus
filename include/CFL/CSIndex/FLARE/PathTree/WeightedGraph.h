@@ -1,5 +1,4 @@
-#ifndef _DWGRAPH_H
-#define _DWGRAPH_H
+#pragma once
 
 #include <fstream>
 #include <iostream>
@@ -392,4 +391,3 @@ public:
 
 } // namespace lotus::cfl::cs_index::flare::path_tree
 
-#endif

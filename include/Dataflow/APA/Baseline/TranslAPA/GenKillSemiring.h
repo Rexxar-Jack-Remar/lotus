@@ -1,5 +1,4 @@
-#ifndef DATAFLOW_APA_BASELINE_TRANSLAPA_GENKILLSEMIRING_H_
-#define DATAFLOW_APA_BASELINE_TRANSLAPA_GENKILLSEMIRING_H_
+#pragma once
 
 // TranslAPA baseline — Gen/Kill semiring (paper §4).
 //
@@ -16,7 +15,7 @@
 // The composition rules (§4.3) are closed form; crucially star() is O(1) with
 // NO fixpoint iteration, which is the whole point of the algebraic baseline and
 // the key contrast with the framework's generic tree-walking interpreter
-// (Solver/SolverContext.h::eval, which iterates Star to a lattice fixpoint).
+// (Solver/Interpretation/FactInterpreter.h, which iterates Star to a lattice fixpoint).
 //
 // Orientation contract: seq(L, R) means "L applied first, then R", matching
 // PathExprFactory Concat semantics used by SolverContext::eval (Concat.L is
@@ -112,4 +111,3 @@ private:
 } // namespace translapa
 } // namespace elimination
 
-#endif // DATAFLOW_APA_BASELINE_TRANSLAPA_GENKILLSEMIRING_H_

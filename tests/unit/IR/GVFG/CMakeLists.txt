@@ -1,12 +1,6 @@
-add_lotus_test_suite(ir_gvfg_tests
-  SOURCES
-    GuardedValueFlowTest.cpp
-    GuardedValueFlowSerializerTest.cpp
-    GuardedValueFlowAdapterShapeTest.cpp
-    GuardedValueFlowParityTest.cpp
-    GuardedValueFlowSolverTest.cpp
-  LINK_LIBS
-    CanaryGSA
-    CanaryGuardedValueFlow
-    CanaryAliasAnalysisWrapper
-    ${Z3_LIBRARIES})
+lotus_collect_test_sources(ir_tests
+  GuardedValueFlowTest.cpp
+  GuardedValueFlowSerializerTest.cpp
+  GuardedValueFlowWrapperShapeTest.cpp
+  GuardedValueFlowParityTest.cpp
+  GuardedValueFlowSolverTest.cpp)

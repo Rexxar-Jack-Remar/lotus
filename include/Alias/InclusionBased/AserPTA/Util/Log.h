@@ -1,5 +1,4 @@
-#ifndef ASER_LOGGING_H
-#define ASER_LOGGING_H
+#pragma once
 
 #include <spdlog/spdlog.h>
 
@@ -11,4 +10,3 @@
 #define LOG_WARN(...) SPDLOG_WARN(__VA_ARGS__)
 #define LOG_ERROR(...) SPDLOG_ERROR(__VA_ARGS__)
 
-#endif

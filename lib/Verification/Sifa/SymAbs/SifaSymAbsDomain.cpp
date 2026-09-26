@@ -7,11 +7,11 @@
 
 #include "Verification/Sifa/Log/SifaLogger.h"
 #include "Verification/SymAbsAI/Core/Foundation/FragmentDecomposition.h"
-#include "Verification/SymAbsAI/Core/Integration/FunctionContext.h"
 #include "Verification/SymAbsAI/Core/Foundation/InstructionSemantics.h"
 #include "Verification/SymAbsAI/Core/Foundation/MemoryModel.h"
-#include "Verification/SymAbsAI/Core/Integration/ModuleContext.h"
 #include "Verification/SymAbsAI/Core/Foundation/ValueMapping.h"
+#include "Verification/SymAbsAI/Core/Integration/FunctionContext.h"
+#include "Verification/SymAbsAI/Core/Integration/ModuleContext.h"
 #include "Verification/SymAbsAI/Utils/Z3APIExtension.h"
 
 #include <stdexcept>

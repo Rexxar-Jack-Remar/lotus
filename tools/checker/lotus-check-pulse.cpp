@@ -14,8 +14,8 @@
 #include "Checker/Pulse/Report/PulseDiagnostic.h"
 #include "Checker/Pulse/Report/PulseLogger.h"
 #include "Checker/Pulse/Report/PulseOptions.h"
-#include "CheckerOptions.h"
-#include "CheckerReport.h"
+#include "Checker/Tooling/CheckerOptions.h"
+#include "Checker/Tooling/CheckerReport.h"
 
 #include <memory>
 #include <set>

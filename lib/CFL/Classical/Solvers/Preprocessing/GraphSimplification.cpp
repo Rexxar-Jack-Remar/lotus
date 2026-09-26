@@ -360,20 +360,49 @@ void foldGraph(const LabeledGraph &graph, GraphSimplificationFlavor flavor,
   }
 
   // PEGFold::mergeDeref is a separate dynamic phase after direct folding.
-  std::deque<std::size_t> check_nodes;
-  for (std::size_t node = 0; node < graph.vertexCount(); ++node) {
-    if (sets.find(node) == node) {
-      check_nodes.push_back(node);
+  // Maintain dereference targets per current equivalence class. Rebuilding
+  // normalizedEdges() for every selected node makes this phase O(VE log E)
+  // on real PEGs. When targets merge, only their outgoing classes can gain
+  // new dereference alternatives, so an indexed congruence worklist suffices.
+  std::unordered_map<std::size_t, std::vector<std::size_t>> dereference_targets;
+  for (const auto &[source, target, label] : initial_edges) {
+    if (isDereferenceLabel(label)) {
+      dereference_targets[sets.find(source)].push_back(target);
     }
   }
+  std::deque<std::size_t> check_nodes;
+  std::set<std::size_t> queued;
+  for (const auto &[source, _] : dereference_targets) {
+    check_nodes.push_back(source);
+    queued.insert(source);
+  }
+  auto schedule = [&](std::size_t node) {
+    node = sets.find(node);
+    if (queued.insert(node).second) {
+      check_nodes.push_back(node);
+    }
+  };
   while (!check_nodes.empty()) {
-    const std::size_t source = sets.find(check_nodes.front());
+    const std::size_t selected = check_nodes.front();
     check_nodes.pop_front();
-    std::set<std::size_t> targets;
-    for (const auto &[edge_source, edge_target, label] : normalizedEdges()) {
-      if (edge_source == source && isDereferenceLabel(label)) {
-        targets.insert(edge_target);
+    queued.erase(selected);
+    const std::size_t source = sets.find(selected);
+    if (source != selected) {
+      auto stale = dereference_targets.find(selected);
+      if (stale != dereference_targets.end()) {
+        std::vector<std::size_t> targets = std::move(stale->second);
+        dereference_targets.erase(stale);
+        auto &current = dereference_targets[source];
+        current.insert(current.end(), targets.begin(), targets.end());
       }
+    }
+    const auto outgoing = dereference_targets.find(source);
+    if (outgoing == dereference_targets.end()) {
+      continue;
+    }
+    std::set<std::size_t> targets;
+    for (std::size_t target : outgoing->second) {
+      targets.insert(sets.find(target));
     }
     if (targets.size() <= 1) {
       continue;
@@ -382,9 +411,18 @@ void foldGraph(const LabeledGraph &graph, GraphSimplificationFlavor flavor,
     for (std::size_t target : targets) {
       if (sets.mergeInto(target, representative)) {
         ++statistics.common_dereference_nodes_merged;
+        if (target != representative) {
+          auto merged = dereference_targets.find(target);
+          if (merged != dereference_targets.end()) {
+            std::vector<std::size_t> targets = std::move(merged->second);
+            dereference_targets.erase(merged);
+            auto &current = dereference_targets[representative];
+            current.insert(current.end(), targets.begin(), targets.end());
+          }
+        }
       }
     }
-    check_nodes.push_back(sets.find(representative));
+    schedule(representative);
   }
 }
 

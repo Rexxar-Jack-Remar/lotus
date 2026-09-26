@@ -2,8 +2,7 @@
 // Created by peiming on 12/18/19.
 //
 
-#ifndef ASER_PTA_MEMLAYOUT_H
-#define ASER_PTA_MEMLAYOUT_H
+#pragma once
 
 #include <map>
 
@@ -145,4 +144,3 @@ public:
 
 } // namespace aser
 
-#endif // ASER_PTA_MEMLAYOUT_H

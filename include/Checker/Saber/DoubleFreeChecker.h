@@ -5,8 +5,7 @@
 //
 //===----------------------------------------------------------------------===//
 
-#ifndef DOUBLEFREECHECKER_H_
-#define DOUBLEFREECHECKER_H_
+#pragma once
 
 #include "Checker/Saber/LeakChecker.h"
 
@@ -37,4 +36,3 @@ public:
 } // namespace analysis
 } // namespace lotus
 
-#endif

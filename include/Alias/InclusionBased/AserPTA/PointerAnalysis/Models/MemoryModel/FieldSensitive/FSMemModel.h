@@ -1,8 +1,7 @@
 //
 // Created by peiming on 12/18/19.
 //
-#ifndef ASER_PTA_FSMEMMODEL_H
-#define ASER_PTA_FSMEMMODEL_H
+#pragma once
 
 #include "Alias/InclusionBased/AserPTA/PointerAnalysis/Graph/ConstraintGraph/ConstraintGraph.h"
 #include "Alias/InclusionBased/AserPTA/PointerAnalysis/Models/MemoryModel/FieldSensitive/FSCanonicalizer.h"
@@ -648,4 +647,3 @@ template <typename ctx> struct MemModelTrait<FSMemModel<ctx>> {
 };
 
 } // namespace aser
-#endif // ASER_PTA_FSMEMMODEL_H

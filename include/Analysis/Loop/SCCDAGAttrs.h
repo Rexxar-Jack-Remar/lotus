@@ -2,8 +2,7 @@
 /*
  * Copyright 2026 Lotus contributors
  */
-#ifndef LOTUS_ANALYSIS_LOOP_SCCDAGATTRS_H
-#define LOTUS_ANALYSIS_LOOP_SCCDAGATTRS_H
+#pragma once
 
 #include "Analysis/Loop/LoopIterationSpaceAnalysis.h"
 #include "Analysis/Loop/LoopEnvironment.h"
@@ -269,4 +268,3 @@ private:
 } // namespace analysis
 } // namespace lotus
 
-#endif

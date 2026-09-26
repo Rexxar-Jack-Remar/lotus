@@ -25,6 +25,8 @@ The Checker Framework consists of several checker categories, all unified throug
 
 All checkers report bugs through the centralized ``BugReportMgr`` system, enabling unified output formats (JSON, SARIF) and consistent bug reporting across all analysis tools. The repository builds a single checker binary, ``lotus-check``; each invocation selects one engine with ``--engine=<name>``.
 
+.. _choosing-a-checker:
+
 Choosing a Checker
 ------------------
 
@@ -211,7 +213,7 @@ Components
 
 * ``frontend/Framework.cpp`` – Main FiTx pass; typestate-based daily development-friendly checkers (Suzuki et al., USENIX ATC 2024)
 * ``frontend/Analyzer.cpp`` – CFG-based typestate analysis with return-code aware state propagation
-* ``Framework_IR/Analyzer.cpp`` – IR builder; collects return values for function summaries
+* ``FrameworkIR/Analyzer.cpp`` – IR builder; collects return values for function summaries
 * ``Detector/`` – Typestate definitions per bug pattern
 
 **KINT Numerical Checkers** (``lib/Checker/KINT/``):

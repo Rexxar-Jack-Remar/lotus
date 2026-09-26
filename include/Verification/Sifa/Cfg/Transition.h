@@ -15,8 +15,7 @@
 //
 //===----------------------------------------------------------------------===//
 
-#ifndef LOTUS_VERIFICATION_SIFA_CFG_TRANSITION_H
-#define LOTUS_VERIFICATION_SIFA_CFG_TRANSITION_H
+#pragma once
 
 #include "llvm/IR/BasicBlock.h"
 #include "llvm/IR/Function.h"
@@ -152,4 +151,3 @@ template <> struct hash<lotus::sifa::Transition> {
 };
 } // namespace std
 
-#endif // LOTUS_VERIFICATION_SIFA_CFG_TRANSITION_H

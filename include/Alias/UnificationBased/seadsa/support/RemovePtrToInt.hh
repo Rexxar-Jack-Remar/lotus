@@ -1,5 +1,4 @@
-#ifndef SEADSA_REMOVE_PTR_TO_INT
-#define SEADSA_REMOVE_PTR_TO_INT
+#pragma once
 
 #include "llvm/IR/Function.h"
 #include "llvm/IR/Module.h"
@@ -24,4 +23,3 @@ public:
 llvm::Pass* createRemovePtrToIntPass();
 } // namespace seadsa
 
-#endif

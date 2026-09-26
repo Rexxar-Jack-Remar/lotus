@@ -1,5 +1,4 @@
-#ifndef DATAFLOW_APA_EAN_LAWPROFILE_H_
-#define DATAFLOW_APA_EAN_LAWPROFILE_H_
+#pragma once
 
 // LawProfile: the client-declared set of algebraic laws EAN is allowed to use
 // when rewriting path expressions (paper §III.B.c, Table I; requirement R1).
@@ -90,4 +89,3 @@ private:
 } // namespace ean
 } // namespace elimination
 
-#endif // DATAFLOW_APA_EAN_LAWPROFILE_H_

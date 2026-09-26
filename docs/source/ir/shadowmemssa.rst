@@ -58,6 +58,7 @@ These instructions provide information about memory operations:
 * ``shadow.mem.out(NodeID, TLVar, Idx, SingletonGlobal)`` – Output formal parameter
 
 Where:
+
 * **NodeID**: Unique identifier (i32) for memory regions
 * **TLVar**: Top-level variable (LLVM register) of pointer type
 * **Idx**: Parameter index for matching actual and formal parameters
@@ -75,6 +76,7 @@ shadow memory instructions related to actual parameters of a call instruction.
 * **Constructor**: ``ShadowMemSSACallSite(CallInst *ci, bool only_singleton)`` – Builds
   the call site representation by scanning backwards for shadow memory instructions
 * **Query Methods**:
+
   * ``numParams()`` – Returns the number of memory-related actual parameters
   * ``isRef(idx)`` – Checks if the idx-th parameter is read-only
   * ``isMod(idx)`` – Checks if the idx-th parameter is modified
@@ -91,6 +93,7 @@ Gathers memory SSA-related input/output formal parameters of a function.
   Builds the function representation by scanning exit blocks for shadow.mem.in
   instructions
 * **Query Methods**:
+
   * ``getInFormal(idx)`` – Returns the input formal parameter for the given index
     (returns null if not found)
   * ``getNumInFormals()`` – Returns the number of input formal parameters
@@ -102,6 +105,7 @@ Manages memory SSA information for all functions and call sites in a module.
 * **Constructor**: ``ShadowMemSSACallsManager(Module &M, Pass &P, bool only_singleton)`` –
   Builds memory SSA information for all functions and call sites in the module
 * **Query Methods**:
+
   * ``getFunction(Function *F)`` – Returns the ShadowMemSSAFunction for the given function
   * ``getCallSite(CallInst *CI)`` – Returns the ShadowMemSSACallSite for the given call
     instruction

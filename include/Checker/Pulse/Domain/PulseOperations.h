@@ -1,7 +1,6 @@
 
 /** @file PulseOperations.h @brief Abstract operations for Pulse domains (arithmetic, pointer, memory). */
-#ifndef CHECKER_PULSE_PULSEOPERATIONS_H
-#define CHECKER_PULSE_PULSEOPERATIONS_H
+#pragma once
 
 #include "Checker/Pulse/Core/PulseMemory.h"
 #include "Checker/Pulse/Domain/PulseAbductiveDomain.h"
@@ -182,4 +181,3 @@ public:
 
 } // namespace pulse
 
-#endif // CHECKER_PULSE_PULSEOPERATIONS_H

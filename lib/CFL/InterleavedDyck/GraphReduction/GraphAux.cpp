@@ -1,4 +1,4 @@
-#include "Legacy/SummaryEdge.h"
+#include "CFL/InterleavedDyck/GraphReduction/Legacy/SummaryEdge.h"
 #include "Utils/ADT/UnionFind.h"
 
 #include <iostream>

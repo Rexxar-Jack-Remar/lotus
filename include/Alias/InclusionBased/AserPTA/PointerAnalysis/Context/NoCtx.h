@@ -1,8 +1,7 @@
 //
 // Created by peiming on 11/19/19.
 //
-#ifndef ASER_PTA_NOCTX_H
-#define ASER_PTA_NOCTX_H
+#pragma once
 
 #include "Alias/InclusionBased/AserPTA/PointerAnalysis/Context/CtxTrait.h"
 
@@ -35,4 +34,3 @@ template <> struct CtxTrait<NoCtx> {
 
 } // namespace aser
 
-#endif // ASER_PTA_NOCTX_H

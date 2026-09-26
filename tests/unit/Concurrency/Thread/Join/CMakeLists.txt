@@ -1,0 +1,3 @@
+lotus_collect_test_sources(concurrency_tests
+  JoinTargetAnalysisTest.cpp
+  JoinTargetInterproceduralTest.cpp)

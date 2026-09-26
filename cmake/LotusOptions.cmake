@@ -12,8 +12,12 @@ option(LOTUS_ENABLE_SEAHORN "Enable SeaHorn" OFF)
 option(LOTUS_ENABLE_SMACK
        "Enable SMACK LLVM-to-Boogie verifier frontend" OFF)
 option(LOTUS_ENABLE_SVF "Enable SVF" OFF)
-option(LOTUS_USE_CCLYZER
+option(LOTUS_ENABLE_CCLYZER
        "Enable optional cclyzer++ alias analysis backend" OFF)
+if(DEFINED LOTUS_USE_CCLYZER)
+  set(LOTUS_ENABLE_CCLYZER ${LOTUS_USE_CCLYZER} CACHE BOOL
+      "Enable optional cclyzer++ alias analysis backend" FORCE)
+endif()
 
 # Optional in-tree components
 option(LOTUS_ENABLE_TYPE_QUALIFIER
@@ -23,7 +27,7 @@ option(LOTUS_ENABLE_FPSOLVE
 option(LOTUS_ENABLE_WALI_OPENNWA
        "Build the vendored WALi/OpenNWA library under third-party/WALi-OpenNWA"
        OFF)
-option(LOTUS_ENABLE_CFL "Build CFL reachability solvers" OFF)
+option(LOTUS_ENABLE_CFL "Build CFL reachability solvers" ON)
 option(LOTUS_ENABLE_CSR
        "Build the indexing context-sensitive reachability solver" OFF)
 option(LOTUS_ENABLE_OWL "Build Owl SMT solver" OFF)
@@ -34,6 +38,14 @@ option(LOTUS_ENABLE_HORN_ICE
        "Build ICE learning for CHC and Boogie" OFF)
 option(LOTUS_ENABLE_SEAL
        "Build the Seal symbolic automata lifter under third-party/seal" OFF)
+option(LOTUS_ENABLE_PDAAAL
+       "Build the vendored PDAAAL weighted PDS reachability library under third-party/PDAAAL" OFF)
+option(LOTUS_ENABLE_FLOW_CUTTER
+       "Build the vendored PACE 2017 treewidth and PACE 2020 treedepth tools" OFF)
+option(LOTUS_ENABLE_BOOLEAN_PROGRAM_TOOLS
+       "Build the Boolean-program grammar parser and normalizer" OFF)
+option(LOTUS_ENABLE_DEMAND_APA
+       "Build the independent OOPSLA artifact demand-driven APA executable" OFF)
 
 # Advanced toggles
 option(LOTUS_DOWNLOAD_BOOST "Download and build Boost if not found" ON)
@@ -85,8 +97,12 @@ function(lotus_print_build_summary)
   _lotus_summary_bool("SMACK" LOTUS_ENABLE_SMACK)
   _lotus_summary_bool("Horn-ICE" LOTUS_ENABLE_HORN_ICE)
   _lotus_summary_bool("Seal/Popeye" LOTUS_ENABLE_SEAL)
+  _lotus_summary_bool("PDAAAL" LOTUS_ENABLE_PDAAAL)
+  _lotus_summary_bool("FlowCutter" LOTUS_ENABLE_FLOW_CUTTER)
+  _lotus_summary_bool("Boolean program tools" LOTUS_ENABLE_BOOLEAN_PROGRAM_TOOLS)
+  _lotus_summary_bool("DemandAPA" LOTUS_ENABLE_DEMAND_APA)
   _lotus_summary_bool("SVF" LOTUS_ENABLE_SVF)
-  _lotus_summary_bool("Cclyzer++" LOTUS_USE_CCLYZER)
+  _lotus_summary_bool("Cclyzer++" LOTUS_ENABLE_CCLYZER)
   message(STATUS "  Advanced toggles:")
   _lotus_summary_bool("TypeQualifier" LOTUS_ENABLE_TYPE_QUALIFIER)
   _lotus_summary_bool("FPsolve" LOTUS_ENABLE_FPSOLVE)

@@ -6,5 +6,8 @@ set(CanaryCFG_SOURCES
   DominatorNode.cpp
   SortTopo.cpp
   TopologicalOrder.cpp
+  SparseControlFlow.cpp
+  GlobalCtorsDtorsModel.cpp
+  ExternCallbackModel.cpp
 )
 add_library(CanaryCFG STATIC ${CanaryCFG_SOURCES})

@@ -6,8 +6,7 @@
 //
 //===----------------------------------------------------------------------===//
 
-#ifndef LOTUS_VERIFICATION_SIFA_CACHES_STARDAGCACHE_H
-#define LOTUS_VERIFICATION_SIFA_CACHES_STARDAGCACHE_H
+#pragma once
 
 #include "Verification/Sifa/RegexDag/RegexDag.h"
 #include "Verification/Sifa/RegexDag/RegexDagCompressor.h"
@@ -75,4 +74,3 @@ StarDagCache<L>::computeDagOf(const RegexRef &regex) {
 } // namespace sifa
 } // namespace lotus
 
-#endif // LOTUS_VERIFICATION_SIFA_CACHES_STARDAGCACHE_H

@@ -1,5 +1,4 @@
-#ifndef __DSA_CALLSITE_HH_
-#define __DSA_CALLSITE_HH_
+#pragma once
 
 #include "llvm/IR/Function.h"
 #include "llvm/IR/InstrTypes.h"
@@ -106,4 +105,3 @@ public:
 };
 
 } // namespace seadsa
-#endif

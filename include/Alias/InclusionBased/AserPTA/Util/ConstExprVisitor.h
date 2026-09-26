@@ -1,8 +1,7 @@
 //
 // Created by peiming on 1/9/20.
 //
-#ifndef ASER_PTA_CONSTEXPRVISITOR_H
-#define ASER_PTA_CONSTEXPRVISITOR_H
+#pragma once
 
 #include "Alias/InclusionBased/AserPTA/Util/Log.h"
 
@@ -35,4 +34,3 @@ template <typename SC, typename RetVal = void> struct ConstExprVisitor {
 
 } // namespace aser
 
-#endif // ASER_PTA_CONSTEXPRVISITOR_H

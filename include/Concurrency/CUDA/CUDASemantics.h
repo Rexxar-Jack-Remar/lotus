@@ -4,6 +4,8 @@
 
 #include <llvm/IR/Instructions.h>
 
+#include <string>
+
 namespace concurrency::cuda {
 
 /// Semantic effect kinds for CUDA operations
@@ -65,6 +67,9 @@ const CUDASemanticDescriptor *lookupCUDASemantic(const llvm::CallBase *call);
 
 /// Convert effect kind to string
 const char *toString(CUDAEffectKind kind);
+
+/// Convert effect kind to a std::string (canonical string mapping)
+std::string cudaEffectToString(CUDAEffectKind kind);
 
 /// Convert family to string
 const char *toString(CUDASemanticFamily family);

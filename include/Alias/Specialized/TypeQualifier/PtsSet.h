@@ -1,5 +1,4 @@
-#ifndef UNIANALYSIS_PTSSET_H
-#define UNIANALYSIS_PTSSET_H
+#pragma once
 #include <llvm/ADT/SparseBitVector.h>
 
 class AndersPtsSet {
@@ -61,4 +60,3 @@ public:
   }
 };
 
-#endif // UNIANALYSIS_PTSSET_H

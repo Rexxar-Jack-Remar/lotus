@@ -28,7 +28,7 @@ enum class async_overflow_policy {
 
 namespace details {
 class thread_pool;
-}
+} // namespace details
 
 class SPDLOG_API async_logger final : public std::enable_shared_from_this<async_logger>,
                                       public logger {

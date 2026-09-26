@@ -3,9 +3,9 @@ add_library(CanaryDebugInfo STATIC
     MetadataManager/MetadataEntry.cpp
     MetadataManager/LoopStructure.cpp
     MetadataManager/MetadataManager.cpp
-    MetadataManager/MetadataManager_Module.cpp
-    MetadataManager/MetadataManager_Instruction.cpp
-    MetadataManager/MetadataManager_annotation.cpp
+    MetadataManager/MetadataManagerModule.cpp
+    MetadataManager/MetadataManagerInstruction.cpp
+    MetadataManager/MetadataManagerAnnotation.cpp
     UniqueIR/UniqueIRConstants.cpp
     UniqueIR/UniqueIRReader.cpp
     UniqueIR/UniqueIRMarker.cpp

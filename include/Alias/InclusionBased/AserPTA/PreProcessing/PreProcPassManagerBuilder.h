@@ -4,8 +4,7 @@
 #include <llvm/IR/LegacyPassManager.h>
 #include <llvm/Transforms/IPO/PassManagerBuilder.h>
 
-#ifndef ASER_PTA_PREPROCPASSMANAGERBUILDER_H
-#define ASER_PTA_PREPROCPASSMANAGERBUILDER_H
+#pragma once
 
 namespace aser {
 
@@ -30,4 +29,3 @@ public:
 
 } // namespace aser
 
-#endif // ASER_PTA_PREPROCPASSMANAGERBUILDER_H

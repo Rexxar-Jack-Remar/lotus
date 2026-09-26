@@ -1,3 +1,5 @@
+#pragma once
+
 #ifndef PAIR
 #define PAIR std::pair<APInt, unsigned>
 #endif

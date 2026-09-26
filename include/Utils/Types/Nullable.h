@@ -23,8 +23,7 @@
 ///
 ///===----------------------------------------------------------------------===//
 
-#ifndef PHASAR_UTILS_NULLABLE_H
-#define PHASAR_UTILS_NULLABLE_H
+#pragma once
 
 #include <optional>
 #include <type_traits>
@@ -85,4 +84,3 @@ unwrapNullable(std::optional<T> &Val) noexcept {
 }
 } // namespace psr
 
-#endif // PHASAR_UTILS_NULLABLE_H

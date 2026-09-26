@@ -1,5 +1,4 @@
-#ifndef NPA_TRANSFORMER_SUMMARY_H
-#define NPA_TRANSFORMER_SUMMARY_H
+#pragma once
 
 #include "Dataflow/NPA/Core/Domain.h"
 
@@ -303,4 +302,3 @@ private:
 
 } // namespace npa
 
-#endif // NPA_TRANSFORMER_SUMMARY_H

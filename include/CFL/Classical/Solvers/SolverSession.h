@@ -2,16 +2,51 @@
 
 #include "CFL/Classical/Core/Grammar.h"
 #include "CFL/Classical/Core/Graph.h"
+#include "CFL/Classical/Solvers/Engines/CERT/CertCFL.h"
+#include "CFL/Classical/Solvers/Engines/STG/StagedSolver.h"
+#include "CFL/Classical/Solvers/Engines/Skewed/SkewedTabulation.h"
 
 #include <cstddef>
 #include <cstdint>
 #include <memory>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <utility>
 #include <vector>
 
 namespace lotus::cfl::classical {
+
+struct EndpointQuotientRuleProfile {
+  std::size_t rule_id = 0;
+  std::size_t kind = 0;
+  std::size_t lhs = 0;
+  std::size_t left = 0;
+  std::size_t right = 0;
+  std::size_t delta_rows = 0;
+  std::size_t delta_cells = 0;
+  std::size_t joins = 0;
+  std::size_t propagations = 0;
+  std::size_t successful_propagations = 0;
+  std::size_t repeated_outputs = 0;
+  std::size_t join_word_operations = 0;
+};
+
+struct EndpointQuotientSccProfile {
+  std::size_t scc_id = 0;
+  /// Numeric value of engines::EndpointQuotientSccClass. Kept numeric here to
+  /// avoid coupling the general session interface to a concrete engine.
+  std::size_t classification = 0;
+  std::size_t symbols = 0;
+  std::size_t rules = 0;
+  std::size_t delta_rows = 0;
+  std::size_t delta_cells = 0;
+  std::size_t joins = 0;
+  std::size_t propagations = 0;
+  std::size_t successful_propagations = 0;
+  std::size_t repeated_outputs = 0;
+  std::size_t join_word_operations = 0;
+};
 
 struct ReachabilityStats {
   // Session snapshots after this solve.
@@ -36,9 +71,6 @@ struct ReachabilityStats {
   std::size_t pocr_tree_edges = 0;
   std::size_t fully_ordered_critical_edges = 0;
   std::size_t candidate_relation_edges = 0;
-  std::size_t specialized_reachability_pairs = 0;
-  std::size_t specialized_matched_pairs = 0;
-  std::size_t specialized_critical_edges = 0;
 
   // Work performed by this solve call only.
   std::uint64_t classical_iterations = 0;
@@ -62,6 +94,42 @@ struct ReachabilityStats {
   std::size_t fully_ordered_critical_edge_removals = 0;
   std::size_t fully_ordered_cycle_simplifications = 0;
   std::size_t graspan_epochs = 0;
+  std::size_t skewed_indexed_facts = 0;
+  std::size_t skewed_propagating_facts = 0;
+  std::size_t skewed_propagating_symbols = 0;
+  std::size_t skewed_dynamic_eligible_symbols = 0;
+  std::size_t skewed_static_pe_insertions = 0;
+  std::size_t skewed_dynamic_pe_insertions = 0;
+  std::size_t skewed_promotions_to_indexed = 0;
+  std::size_t skewed_unary_applications = 0;
+  std::size_t skewed_binary_join_pairs = 0;
+  /// Indexed non-input facts retained by skewed tabulation. Propagating facts
+  /// are deliberately excluded because they are not inserted into the graph.
+  std::size_t skewed_inserted_summary_edges = 0;
+  /// Facts exported for the requested all-symbol or target-only scope.
+  std::size_t skewed_output_facts = 0;
+  std::size_t stg_phase_l_rounds = 0;
+  std::size_t stg_phase_l_regular_edges = 0;
+  std::size_t stg_dyck_path_edges = 0;
+  std::size_t stg_alias_forward_path_edges = 0;
+  std::size_t stg_alias_backward_path_edges = 0;
+  std::size_t stg_summary_edges = 0;
+  std::size_t stg_phase_r_productions = 0;
+  std::size_t stg_phase_r_edges = 0;
+  std::size_t stg_ordered_scc_propagations = 0;
+  std::size_t batch_stored_facts = 0;
+  std::size_t cat_graph_degree = 0;
+  std::size_t cat_fully_pruned_attempts = 0;
+  std::size_t cat_context_annotations = 0;
+  std::size_t cat_rewrites = 0;
+  std::size_t ieoce_quotient_nodes = 0;
+  std::size_t ieoce_epochs = 0;
+  std::size_t ieoce_merged_nodes = 0;
+  std::size_t ieoce_graph_facts = 0;
+  std::size_t ieoce_meg_edges = 0;
+  std::size_t ieoce_meg_edges_removed = 0;
+  std::size_t ieoce_ordered_steps = 0;
+  bool ieoce_ordinary_fallback = false;
   std::size_t endpoint_quotient_cells = 0;
   std::size_t endpoint_quotient_facts = 0;
   std::size_t endpoint_quotient_seed_facts = 0;
@@ -83,7 +151,28 @@ struct ReachabilityStats {
   std::size_t endpoint_quotient_partitions_built = 0;
   std::size_t endpoint_quotient_bridges_built = 0;
   std::size_t endpoint_quotient_lifts_built = 0;
+  std::size_t endpoint_quotient_dependency_sccs = 0;
+  std::size_t endpoint_quotient_acyclic_sccs = 0;
+  std::size_t endpoint_quotient_unary_recursive_sccs = 0;
+  std::size_t endpoint_quotient_transitive_sccs = 0;
+  std::size_t endpoint_quotient_linear_sccs = 0;
+  std::size_t endpoint_quotient_general_sccs = 0;
+  std::size_t endpoint_quotient_max_scc_symbols = 0;
+  std::size_t endpoint_quotient_max_scc_rules = 0;
+  std::size_t endpoint_quotient_hottest_rule_id = 0;
+  std::size_t endpoint_quotient_hottest_rule_joins = 0;
+  std::size_t endpoint_quotient_hottest_scc_id = 0;
+  std::size_t endpoint_quotient_hottest_scc_joins = 0;
+  std::vector<EndpointQuotientRuleProfile> endpoint_quotient_per_rule;
+  std::vector<EndpointQuotientSccProfile> endpoint_quotient_per_scc;
 
+  // CERT-CFL counters. No-change solves are filtered by SolverSession.
+  std::size_t cert_cfl_levels = 0;
+  std::size_t cert_cfl_blocks = 0;
+  std::size_t cert_cfl_peak_tiles = 0;
+  std::uint64_t cert_cfl_updates = 0;
+  std::uint64_t cert_cfl_promotions = 0;
+  std::uint64_t cert_cfl_genuine_promotions = 0;
   // Aggregates report how many solve calls they combine.
   std::size_t solver_rounds = 1;
 };
@@ -99,6 +188,16 @@ enum class SolverBackend {
   Sqid,
   /// PEARL transitivity-aware multi-derivation.
   Pearl,
+  /// ISSTA 2024 staged solving with an explicit decomposition specification.
+  Stg,
+  /// PLDI 2024 skewed tabulation with separate indexed and propagating facts.
+  Skewed,
+  /// ICSE 2026 context-aware tabulation.
+  Cat,
+  /// OOPSLA 2024 iterative-epoch online cycle elimination.
+  Iea,
+  /// IEA with online cycle reduction and minimum-equivalent graphs.
+  IeaOcr,
   /// Classical worklist plus dedicated incremental closure only for symbols
   /// having a literal production A -> A A.
   TransitiveClosure,
@@ -110,6 +209,8 @@ enum class SolverBackend {
   FullyOrdered,
   /// Grammar-indexed endpoint-quotient (GEQ) compressed exact solving.
   EndpointQuotient,
+  /// Cardinality-certified, exact all-symbol CFL reachability.
+  CertCFL,
 };
 
 struct SolverOptions {
@@ -121,6 +222,16 @@ struct SolverOptions {
   bool simplify_focr_cycles = false;
   /// Explicit X/Xbar pairs for PEARL's PackRR and paired propagation graphs.
   std::vector<std::pair<std::string, std::string>> pearl_inverse_relations;
+  /// Preserve production-local endpoint factors in EndpointQuotient.
+  bool endpoint_quotient_factorized = false;
+  /// observed must be nullopt for the complete Relation contract.
+  engines::cert::Options cert_cfl{};
+  /// Defaults preserve SolverSession's complete all-symbol relation. Callers
+  /// may explicitly request a target-only skewed projection.
+  skewed::Options skewed{};
+  /// Required when backend is Stg because arbitrary CFGs do not determine a
+  /// unique context-free-pattern decomposition.
+  std::optional<engines::stg::StagedSpecification> stg;
 };
 
 const char *solverBackendName(SolverBackend backend);
@@ -143,6 +254,8 @@ public:
   std::size_t addNode(const std::string &name);
   bool addTerminalEdge(std::size_t source, std::size_t target,
                        const std::string &label);
+  /// Saturate pending changes. With no new node or fact, return the previous
+  /// relation sizes and zero work counters without dispatching a backend.
   ReachabilityStats solve();
   bool contains(std::size_t source, std::size_t target,
                 const std::string &label) const;

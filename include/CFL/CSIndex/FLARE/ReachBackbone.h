@@ -1,5 +1,4 @@
-#ifndef _REACH_BACKBONE_H_
-#define _REACH_BACKBONE_H_
+#pragma once
 
 #include "CFL/CSIndex/FLARE/GraphAlgorithms.h"
 
@@ -56,4 +55,3 @@ public:
 
 } // namespace lotus::cfl::cs_index::flare
 
-#endif

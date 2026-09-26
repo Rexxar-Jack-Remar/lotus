@@ -1,8 +1,7 @@
 //
 // Created by peiming on 11/19/19.
 //
-#ifndef ASER_PTA_KCALLSITE_H
-#define ASER_PTA_KCALLSITE_H
+#pragma once
 
 #include "Alias/InclusionBased/AserPTA/PointerAnalysis/Context/CtxTrait.h"
 #include "Alias/InclusionBased/AserPTA/PointerAnalysis/Context/PtrRingBuffer.h"
@@ -128,4 +127,3 @@ template <uint32_t K> struct hash<aser::KCallSite<K>> {
 
 } // namespace std
 
-#endif // ASER_PTA_KCALLSITE_H

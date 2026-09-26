@@ -9,8 +9,7 @@
 //
 //===----------------------------------------------------------------------===//
 
-#ifndef LOTUS_VERIFICATION_SIFA_SUMMARIZERS_TOPINPUTCALLSUMMARIZER_H
-#define LOTUS_VERIFICATION_SIFA_SUMMARIZERS_TOPINPUTCALLSUMMARIZER_H
+#pragma once
 
 #include "Verification/Sifa/Caches/ProcedureResourceCache.h"
 #include "Verification/Sifa/Cfg/Transition.h"
@@ -95,4 +94,3 @@ private:
 } // namespace sifa
 } // namespace lotus
 
-#endif // LOTUS_VERIFICATION_SIFA_SUMMARIZERS_TOPINPUTCALLSUMMARIZER_H

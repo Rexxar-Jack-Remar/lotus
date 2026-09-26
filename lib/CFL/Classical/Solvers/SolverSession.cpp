@@ -1,10 +1,13 @@
 #include "CFL/Classical/Solvers/SolverSession.h"
 
+#include "CFL/Classical/Solvers/Engines/CERT/CertCFLEngine.h"
+#include "CFL/Classical/Solvers/Engines/Common/BatchSolverEngine.h"
 #include "CFL/Classical/Solvers/Engines/EndpointQuotient/EndpointQuotientEngine.h"
 #include "CFL/Classical/Solvers/Engines/PEARL/PearlEngine.h"
 #include "CFL/Classical/Solvers/Engines/POCR/FullyOrderedClosure.h"
 #include "CFL/Classical/Solvers/Engines/POCR/PairedTreeClosure.h"
 #include "CFL/Classical/Solvers/Engines/SQID/SqidEngine.h"
+#include "CFL/Classical/Solvers/Engines/Skewed/SkewedTabulationEngine.h"
 #include "CFL/Classical/Solvers/Engines/TransitiveClosure.h"
 
 #include <algorithm>
@@ -25,6 +28,11 @@ namespace {
 
 bool isTransitiveRule(const BinaryRuleId &rule) {
   return rule.lhs == rule.first && rule.lhs == rule.second;
+}
+
+bool isBatchSolverBackend(SolverBackend backend) {
+  return backend == SolverBackend::Cat || backend == SolverBackend::Iea ||
+         backend == SolverBackend::IeaOcr;
 }
 
 struct WorkItem {
@@ -271,10 +279,12 @@ using PocrClosureRelation = ClosureRelation<engines::PocrTransitiveClosure>;
 using FullyOrderedClosureRelation =
     ClosureRelation<engines::FullyOrderedTransitiveClosure>;
 
-std::unique_ptr<Relation> createSolverRelation(SolverBackend backend,
-                                               const Grammar &grammar,
-                                               std::size_t node_count,
-                                               bool simplify_focr_cycles) {
+std::unique_ptr<Relation>
+createSolverRelation(SolverBackend backend, const Grammar &grammar,
+                     std::size_t node_count, bool simplify_focr_cycles,
+                     bool factorized_endpoint,
+                     const engines::cert::Options &cert_options,
+                     const skewed::Options &skewed_options) {
   const auto &transitive_symbols = grammar.transitiveSymbols();
   switch (backend) {
   case SolverBackend::SparseSet:
@@ -284,7 +294,20 @@ std::unique_ptr<Relation> createSolverRelation(SolverBackend backend,
   case SolverBackend::Graspan:
   case SolverBackend::Sqid:
   case SolverBackend::Pearl:
+  case SolverBackend::Stg:
     return createRelation(RelationBackend::SparseBitVectors, node_count);
+  case SolverBackend::Skewed:
+    return std::make_unique<engines::SkewedTabulationEngine>(
+        grammar, node_count, skewed_options);
+  case SolverBackend::Cat:
+    return std::make_unique<engines::BatchSolverEngine>(
+        grammar, node_count, engines::BatchEngineKind::Cat);
+  case SolverBackend::Iea:
+    return std::make_unique<engines::BatchSolverEngine>(
+        grammar, node_count, engines::BatchEngineKind::Iea);
+  case SolverBackend::IeaOcr:
+    return std::make_unique<engines::BatchSolverEngine>(
+        grammar, node_count, engines::BatchEngineKind::IeaOcr);
   case SolverBackend::TransitiveClosure:
     return std::make_unique<BitVectorClosureRelation>(transitive_symbols,
                                                       node_count);
@@ -296,8 +319,11 @@ std::unique_ptr<Relation> createSolverRelation(SolverBackend backend,
     return std::make_unique<FullyOrderedClosureRelation>(
         transitive_symbols, node_count, simplify_focr_cycles);
   case SolverBackend::EndpointQuotient:
-    return std::make_unique<engines::EndpointQuotientEngine>(grammar,
-                                                             node_count);
+    return std::make_unique<engines::EndpointQuotientEngine>(
+        grammar, node_count, factorized_endpoint);
+  case SolverBackend::CertCFL:
+    return std::make_unique<engines::CertCFLEngine>(grammar, node_count,
+                                                    cert_options);
   }
   throw std::invalid_argument("Unknown CFL solver backend");
 }
@@ -316,6 +342,16 @@ const char *solverBackendName(SolverBackend backend) {
     return "sqid";
   case SolverBackend::Pearl:
     return "pearl";
+  case SolverBackend::Stg:
+    return "stg";
+  case SolverBackend::Skewed:
+    return "skewed";
+  case SolverBackend::Cat:
+    return "cat";
+  case SolverBackend::Iea:
+    return "iea";
+  case SolverBackend::IeaOcr:
+    return "iea-ocr";
   case SolverBackend::TransitiveClosure:
     return "transitive-closure";
   case SolverBackend::Pocr:
@@ -326,6 +362,8 @@ const char *solverBackendName(SolverBackend backend) {
     return "focr";
   case SolverBackend::EndpointQuotient:
     return "endpoint-quotient";
+  case SolverBackend::CertCFL:
+    return "cert";
   }
   return "unknown";
 }
@@ -346,6 +384,21 @@ SolverBackend parseSolverBackend(std::string_view name) {
   if (name == "pearl") {
     return SolverBackend::Pearl;
   }
+  if (name == "stg") {
+    return SolverBackend::Stg;
+  }
+  if (name == "skewed") {
+    return SolverBackend::Skewed;
+  }
+  if (name == "cat") {
+    return SolverBackend::Cat;
+  }
+  if (name == "iea") {
+    return SolverBackend::Iea;
+  }
+  if (name == "iea-ocr") {
+    return SolverBackend::IeaOcr;
+  }
   if (name == "transitive-closure") {
     return SolverBackend::TransitiveClosure;
   }
@@ -361,6 +414,9 @@ SolverBackend parseSolverBackend(std::string_view name) {
   if (name == "endpoint-quotient") {
     return SolverBackend::EndpointQuotient;
   }
+  if (name == "cert") {
+    return SolverBackend::CertCFL;
+  }
   throw std::invalid_argument("Unknown solver: " + std::string(name));
 }
 
@@ -370,9 +426,10 @@ public:
        const SolverOptions &options)
       : graph_(graph), grammar_(grammar), backend_(options.backend),
         unidirectional_(options.unidirectional),
-        relation_(createSolverRelation(options.backend, grammar,
-                                       graph.vertexCount(),
-                                       options.simplify_focr_cycles)),
+        relation_(createSolverRelation(
+            options.backend, grammar, graph.vertexCount(),
+            options.simplify_focr_cycles, options.endpoint_quotient_factorized,
+            options.cert_cfl, options.skewed)),
         expected_graph_version_(graph.mutationVersion()) {
     for (const GrammarIssue &issue : grammar.validate()) {
       if (issue.severity == GrammarIssueSeverity::Error) {
@@ -408,9 +465,31 @@ public:
       pearl_engine_ = std::make_unique<engines::PearlEngine>(
           grammar, *relation_, graph.vertexCount(), std::move(pearl_options));
     }
+    if (backend_ == SolverBackend::Stg) {
+      if (!options.stg) {
+        throw std::invalid_argument(
+            "STG requires an explicit staged decomposition specification");
+      }
+      stg_engine_ = std::make_unique<engines::stg::StagedSolver>(
+          grammar, *relation_, *options.stg, graph.vertexCount());
+    }
+    if (backend_ == SolverBackend::Skewed) {
+      skewed_engine_ =
+          static_cast<engines::SkewedTabulationEngine *>(relation_.get());
+    }
+    if (isBatchSolverBackend(backend_)) {
+      batch_engine_ =
+          static_cast<engines::BatchSolverEngine *>(relation_.get());
+    }
     if (backend_ == SolverBackend::EndpointQuotient) {
       eq_engine_ =
           static_cast<engines::EndpointQuotientEngine *>(relation_.get());
+    }
+    if (backend_ == SolverBackend::CertCFL) {
+      if (unidirectional_)
+        throw std::invalid_argument("CERT-CFL does not implement "
+                                    "unidirectional Insert/Follow evaluation");
+      cert_engine_ = static_cast<engines::CertCFLEngine *>(relation_.get());
     }
     if (unidirectional_) {
       candidate_relation_ = createRelation(RelationBackend::SparseBitVectors,
@@ -440,6 +519,7 @@ public:
     const SymbolId symbol = grammar_.symbolId(label);
     const bool inserted = insertInputFact(symbol, source, target);
     input_edges_ += inserted ? 1 : 0;
+    dirty_ = dirty_ || inserted;
     return inserted;
   }
 
@@ -458,15 +538,55 @@ public:
     if (pearl_engine_) {
       pearl_engine_->ensureNodeCount(graph_.vertexCount());
     }
+    if (stg_engine_) {
+      stg_engine_->ensureNodeCount(graph_.vertexCount());
+    }
     if (candidate_relation_) {
       candidate_relation_->ensureNodeCount(graph_.vertexCount());
     }
+    dirty_ = true;
     return node;
   }
 
   ReachabilityStats solve() {
     validateGraphVersion();
     const auto start = std::chrono::steady_clock::now();
+    if (!dirty_) {
+      ReachabilityStats stats;
+      stats.graph_nodes = last_stats_.graph_nodes;
+      stats.base_graph_edges = last_stats_.base_graph_edges;
+      stats.grammar_symbols = last_stats_.grammar_symbols;
+      stats.grammar_terminals = last_stats_.grammar_terminals;
+      stats.grammar_nonterminals = last_stats_.grammar_nonterminals;
+      stats.grammar_productions = last_stats_.grammar_productions;
+      stats.grammar_nullable_symbols = last_stats_.grammar_nullable_symbols;
+      stats.grammar_transitive_symbols = last_stats_.grammar_transitive_symbols;
+      stats.input_edges = last_stats_.input_edges;
+      stats.relation_edges = last_stats_.relation_edges;
+      stats.start_symbol_edges = last_stats_.start_symbol_edges;
+      stats.count_symbol_edges = last_stats_.count_symbol_edges;
+      stats.relation_payload_bytes_estimate =
+          last_stats_.relation_payload_bytes_estimate;
+      stats.transitive_closure_instances =
+          last_stats_.transitive_closure_instances;
+      stats.transitive_relation_edges = last_stats_.transitive_relation_edges;
+      stats.transitive_payload_bytes_estimate =
+          last_stats_.transitive_payload_bytes_estimate;
+      stats.pocr_tree_roots = last_stats_.pocr_tree_roots;
+      stats.pocr_tree_nodes = last_stats_.pocr_tree_nodes;
+      stats.pocr_tree_edges = last_stats_.pocr_tree_edges;
+      stats.fully_ordered_critical_edges =
+          last_stats_.fully_ordered_critical_edges;
+      stats.candidate_relation_edges = last_stats_.candidate_relation_edges;
+      stats.skewed_inserted_summary_edges =
+          last_stats_.skewed_inserted_summary_edges;
+      stats.skewed_output_facts = last_stats_.skewed_output_facts;
+      stats.solve_time_microseconds =
+          std::chrono::duration_cast<std::chrono::microseconds>(
+              std::chrono::steady_clock::now() - start)
+              .count();
+      return stats;
+    }
     const TransitiveCounters transitive_before = transitiveCounters();
     const PocrCounters pocr_before = pocrCounters();
     const FullyOrderedCounters fully_ordered_before = fullyOrderedCounters();
@@ -483,8 +603,11 @@ public:
     stats.grammar_transitive_symbols = grammar_.transitiveSymbols().size();
     stats.input_edges = input_edges_;
 
-    if (backend_ != SolverBackend::Pearl && backend_ != SolverBackend::Sqid &&
-        backend_ != SolverBackend::EndpointQuotient) {
+    if (backend_ != SolverBackend::Pearl && backend_ != SolverBackend::Stg &&
+        backend_ != SolverBackend::Sqid && backend_ != SolverBackend::Skewed &&
+        !isBatchSolverBackend(backend_) &&
+        backend_ != SolverBackend::EndpointQuotient &&
+        backend_ != SolverBackend::CertCFL) {
       for (SymbolId symbol : grammar_.nullableSymbolIds()) {
         for (NodeId node = nullable_seeded_nodes_; node < graph_.vertexCount();
              ++node) {
@@ -502,6 +625,24 @@ public:
                                     pearl.fully_transitive_primary_edges;
       stats.duplicate_edges += pearl.duplicate_edges;
       stats.added_edges += pearl.derived_edges;
+    } else if (backend_ == SolverBackend::Stg) {
+      const std::size_t before = relation_->edgeCount();
+      const engines::stg::StagedStatistics staged = stg_engine_->solve();
+      const std::size_t after = relation_->edgeCount();
+      stats.added_edges += after >= before ? after - before : 0;
+      stats.processed_work_items +=
+          staged.phase_l_regular_edges + staged.dyck_path_edges +
+          staged.alias_forward_path_edges + staged.alias_backward_path_edges +
+          staged.phase_r_edges;
+      stats.stg_phase_l_rounds = staged.phase_l_rounds;
+      stats.stg_phase_l_regular_edges = staged.phase_l_regular_edges;
+      stats.stg_dyck_path_edges = staged.dyck_path_edges;
+      stats.stg_alias_forward_path_edges = staged.alias_forward_path_edges;
+      stats.stg_alias_backward_path_edges = staged.alias_backward_path_edges;
+      stats.stg_summary_edges = staged.summary_edges;
+      stats.stg_phase_r_productions = staged.phase_r_productions;
+      stats.stg_phase_r_edges = staged.phase_r_edges;
+      stats.stg_ordered_scc_propagations = staged.ordered_scc_propagations;
     } else if (backend_ == SolverBackend::Sqid) {
       const engines::SqidStatistics sqid = sqid_engine_->solve();
       stats.classical_iterations += sqid.chaining_products;
@@ -513,6 +654,65 @@ public:
           std::max(sqid.peak_in_worklist, sqid.peak_out_worklist);
     } else if (backend_ == SolverBackend::Graspan) {
       solveGraspan(stats);
+    } else if (backend_ == SolverBackend::Skewed) {
+      const engines::SkewedTabulationStatistics skewed =
+          skewed_engine_->solve();
+      stats.classical_iterations += skewed.attempts;
+      stats.processed_work_items += skewed.work_items;
+      stats.duplicate_edges += skewed.duplicate_attempts;
+      stats.added_edges += skewed.derived_facts;
+      stats.peak_worklist_size =
+          std::max(stats.peak_worklist_size, skewed.peak_worklist);
+      stats.skewed_indexed_facts = skewed.indexed_facts;
+      stats.skewed_propagating_facts = skewed.propagating_facts;
+      stats.skewed_propagating_symbols = skewed.propagating_symbols;
+      stats.skewed_dynamic_eligible_symbols = skewed.dynamic_eligible_symbols;
+      stats.skewed_static_pe_insertions = skewed.static_pe_insertions;
+      stats.skewed_dynamic_pe_insertions = skewed.dynamic_pe_insertions;
+      stats.skewed_promotions_to_indexed = skewed.promotions_to_indexed;
+      stats.skewed_unary_applications = skewed.unary_applications;
+      stats.skewed_binary_join_pairs = skewed.binary_join_pairs;
+      stats.skewed_inserted_summary_edges =
+          skewed.indexed_facts >= skewed.unique_base_edges
+              ? skewed.indexed_facts - skewed.unique_base_edges
+              : 0;
+      stats.skewed_output_facts = skewed.output_facts;
+    } else if (isBatchSolverBackend(backend_)) {
+      const engines::BatchSolverStatistics batch = batch_engine_->solve();
+      stats.classical_iterations += batch.attempts;
+      stats.processed_work_items += batch.work_items;
+      stats.duplicate_edges += batch.duplicate_attempts;
+      stats.added_edges += batch.derived_facts;
+      stats.peak_worklist_size =
+          std::max(stats.peak_worklist_size, batch.peak_worklist);
+      stats.batch_stored_facts = batch.stored_facts;
+      stats.cat_graph_degree = batch.cat_graph_degree;
+      stats.cat_fully_pruned_attempts = batch.cat_fully_pruned_attempts;
+      stats.cat_context_annotations = batch.cat_context_annotations;
+      stats.cat_rewrites = batch.cat_rewrites;
+      stats.ieoce_quotient_nodes = batch.ieoce_quotient_nodes;
+      stats.ieoce_epochs = batch.ieoce_epochs;
+      stats.ieoce_merged_nodes = batch.ieoce_merged_nodes;
+      stats.ieoce_graph_facts = batch.ieoce_graph_facts;
+      stats.ieoce_meg_edges = batch.ieoce_meg_edges;
+      stats.ieoce_meg_edges_removed = batch.ieoce_meg_edges_removed;
+      stats.ieoce_ordered_steps = batch.ieoce_ordered_steps;
+      stats.ieoce_ordinary_fallback = batch.ieoce_ordinary_fallback;
+    } else if (backend_ == SolverBackend::CertCFL) {
+      const auto cert = cert_engine_->solve();
+      stats.classical_iterations += cert.core.joins;
+      stats.processed_work_items += cert.core.queue_pops;
+      stats.duplicate_edges += cert.core.duplicate_attempts;
+      stats.added_edges += cert.added_facts;
+      stats.peak_worklist_size =
+          std::max(stats.peak_worklist_size, cert.core.peak_queue);
+      stats.cert_cfl_levels = cert.core.levels;
+      stats.cert_cfl_blocks = cert.core.final_blocks;
+      stats.cert_cfl_peak_tiles = cert.core.peak_tiles;
+      stats.cert_cfl_updates = cert.core.updates;
+      stats.cert_cfl_promotions = cert.core.overlap_promotions;
+      stats.cert_cfl_genuine_promotions =
+          cert.core.genuine_cardinality_promotions;
     } else if (backend_ == SolverBackend::EndpointQuotient) {
       const engines::EndpointQuotientStatistics eq = eq_engine_->solve();
       stats.classical_iterations += eq.binary_joins;
@@ -544,6 +744,34 @@ public:
       stats.endpoint_quotient_partitions_built = eq.partitions_built;
       stats.endpoint_quotient_bridges_built = eq.bridges_built;
       stats.endpoint_quotient_lifts_built = eq.lifts_built;
+      stats.endpoint_quotient_dependency_sccs = eq.dependency_sccs;
+      stats.endpoint_quotient_acyclic_sccs = eq.acyclic_sccs;
+      stats.endpoint_quotient_unary_recursive_sccs = eq.unary_recursive_sccs;
+      stats.endpoint_quotient_transitive_sccs = eq.transitive_sccs;
+      stats.endpoint_quotient_linear_sccs = eq.linear_sccs;
+      stats.endpoint_quotient_general_sccs = eq.general_sccs;
+      stats.endpoint_quotient_max_scc_symbols = eq.max_scc_symbols;
+      stats.endpoint_quotient_max_scc_rules = eq.max_scc_rules;
+      stats.endpoint_quotient_hottest_rule_id = eq.hottest_rule_id;
+      stats.endpoint_quotient_hottest_rule_joins = eq.hottest_rule_joins;
+      stats.endpoint_quotient_hottest_scc_id = eq.hottest_scc_id;
+      stats.endpoint_quotient_hottest_scc_joins = eq.hottest_scc_joins;
+      stats.endpoint_quotient_per_rule.reserve(eq.per_rule.size());
+      for (const auto &rule : eq.per_rule) {
+        stats.endpoint_quotient_per_rule.push_back(
+            {rule.rule_id, rule.kind, rule.lhs, rule.left, rule.right,
+             rule.delta_rows, rule.delta_cells, rule.joins, rule.propagations,
+             rule.successful_propagations, rule.repeated_outputs,
+             rule.join_word_operations});
+      }
+      stats.endpoint_quotient_per_scc.reserve(eq.per_scc.size());
+      for (const auto &scc : eq.per_scc) {
+        stats.endpoint_quotient_per_scc.push_back(
+            {scc.scc_id, static_cast<std::size_t>(scc.classification),
+             scc.symbols, scc.rules, scc.delta_rows, scc.delta_cells, scc.joins,
+             scc.propagations, scc.successful_propagations,
+             scc.repeated_outputs, scc.join_word_operations});
+      }
     } else if (backend_ == SolverBackend::HierarchicalPocr) {
       do {
         while (!primary_worklist_.empty()) {
@@ -574,6 +802,9 @@ public:
       if (eq_engine_) {
         stats.count_symbol_edges =
             eq_engine_->countOffDiagonalUnion(std::move(symbols));
+      } else if (cert_engine_) {
+        stats.count_symbol_edges =
+            cert_engine_->countOffDiagonalUnion(std::move(symbols));
       } else {
         // Deduplicate one source's union at a time instead of retaining every
         // counted pair or collecting whole relations into temporary vectors.
@@ -603,6 +834,8 @@ public:
         std::chrono::duration_cast<std::chrono::microseconds>(
             std::chrono::steady_clock::now() - start)
             .count();
+    dirty_ = false;
+    last_stats_ = stats;
     return stats;
   }
 
@@ -623,7 +856,10 @@ public:
     if (!grammar_.hasSymbol(label)) {
       throw std::invalid_argument("Unknown migrated relation symbol: " + label);
     }
-    return insertInputFact(grammar_.symbolId(label), source, target);
+    const bool inserted =
+        insertInputFact(grammar_.symbolId(label), source, target);
+    dirty_ = dirty_ || inserted;
+    return inserted;
   }
 
 private:
@@ -1122,6 +1358,27 @@ private:
   }
 
   bool insertInputFact(SymbolId symbol, NodeId source, NodeId target) {
+    if (cert_engine_) {
+      // Buffered input: do not also schedule the classical worklist.
+      return cert_engine_->add(symbol, source, target);
+    }
+    if (stg_engine_) {
+      return stg_engine_->addEdge(symbol, source, target);
+    }
+    if (isBatchSolverBackend(backend_)) {
+      if (!batch_engine_->add(symbol, source, target)) {
+        return false;
+      }
+      addCandidate(symbol, source, target, true);
+      return true;
+    }
+    if (backend_ == SolverBackend::Skewed) {
+      if (!skewed_engine_->add(symbol, source, target)) {
+        return false;
+      }
+      addCandidate(symbol, source, target, true);
+      return true;
+    }
     if (backend_ == SolverBackend::EndpointQuotient) {
       if (!eq_engine_->add(symbol, source, target)) {
         return false;
@@ -1222,11 +1479,17 @@ private:
   std::unique_ptr<GraspanData> graspan_current_;
   std::unique_ptr<engines::SqidEngine> sqid_engine_;
   std::unique_ptr<engines::PearlEngine> pearl_engine_;
+  std::unique_ptr<engines::stg::StagedSolver> stg_engine_;
+  engines::BatchSolverEngine *batch_engine_ = nullptr;
+  engines::SkewedTabulationEngine *skewed_engine_ = nullptr;
   engines::EndpointQuotientEngine *eq_engine_ = nullptr;
+  engines::CertCFLEngine *cert_engine_ = nullptr;
   std::size_t input_edges_ = 0;
   std::size_t current_peak_worklist_size_ = 0;
   std::size_t pending_derived_edges_ = 0;
   std::size_t nullable_seeded_nodes_ = 0;
+  bool dirty_ = true;
+  ReachabilityStats last_stats_;
   BitVectorClosureRelation *transitive_relation_ = nullptr;
   PocrClosureRelation *pocr_relation_ = nullptr;
   FullyOrderedClosureRelation *fully_ordered_relation_ = nullptr;
@@ -1235,7 +1498,8 @@ private:
 
 SolverSession::SolverSession(LabeledGraph &graph, const Grammar &grammar,
                              SolverBackend backend)
-    : SolverSession(graph, grammar, SolverOptions{backend, false, false, {}}) {}
+    : SolverSession(graph, grammar,
+                    SolverOptions{backend, false, false, {}, false, {}}) {}
 
 SolverSession::SolverSession(LabeledGraph &graph, const Grammar &grammar,
                              const SolverOptions &options)

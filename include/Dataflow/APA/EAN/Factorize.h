@@ -1,5 +1,4 @@
-#ifndef DATAFLOW_APA_EAN_FACTORIZE_H_
-#define DATAFLOW_APA_EAN_FACTORIZE_H_
+#pragma once
 
 // Factorize: variadic prefix/suffix factorization over JOIN e-classes
 // (paper §III.B.b; Table I left/right distributivity). This is the FACTOR-phase
@@ -268,4 +267,3 @@ inline std::size_t factorizeToFixpoint(Graph &g, const LawProfile &L,
 } // namespace ean
 } // namespace elimination
 
-#endif // DATAFLOW_APA_EAN_FACTORIZE_H_

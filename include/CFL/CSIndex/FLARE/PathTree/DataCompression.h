@@ -1,5 +1,4 @@
-#ifndef _DATA_COMPRESSION_H
-#define _DATA_COMPRESSION_H
+#pragma once
 
 #include <fstream>
 #include <iostream>
@@ -78,4 +77,3 @@ public:
 
 } // namespace lotus::cfl::cs_index::flare::path_tree
 
-#endif

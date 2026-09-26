@@ -1,8 +1,7 @@
 //
 // Created by peiming on 8/15/19.
 //
-#ifndef ASER_PTA_PROGRAMPOINT_H
-#define ASER_PTA_PROGRAMPOINT_H
+#pragma once
 
 #include <llvm/IR/Function.h>
 #include <llvm/IR/Instructions.h>
@@ -35,4 +34,3 @@ public:
 };
 
 } // namespace aser
-#endif

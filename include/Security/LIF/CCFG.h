@@ -20,8 +20,7 @@
 /// (CCFG), which is basically a CFG with its loops collapsed and without any
 /// back edges (i.e. acyclic).
 //===----------------------------------------------------------------------===//
-#ifndef LIF_TRANSFORM_CCFG_H
-#define LIF_TRANSFORM_CCFG_H
+#pragma once
 
 #include <variant>
 
@@ -103,4 +102,3 @@ void prettyPrint(Node *Entry, const llvm::LoopInfo &LI,
                  llvm::FunctionAnalysisManager &FAM);
 } // namespace lotus::lif::transform::CCFG
 
-#endif

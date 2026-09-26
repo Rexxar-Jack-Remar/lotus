@@ -28,8 +28,7 @@
 // Modified by Xiang Zhang, 2026
 // Additional changes licensed under the MIT License
 
-#ifndef INTERVAL_HEADER
-#define INTERVAL_HEADER
+#pragma once
 
 #include <vector>
 
@@ -187,5 +186,3 @@ inline Interval FullInterval = Interval(
     Number::negativeInfinity(), Number::positiveInfinity(), false, false);
 
 }  // namespace stabilizer::parser
-
-#endif

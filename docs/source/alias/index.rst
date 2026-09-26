@@ -17,13 +17,15 @@ pages alongside an algorithm page when comparing analyses.
    allocaa
    sparrowaa
    aserpta
+   bootstrap-aa
    cclyzeraa
    dda
-   dfpa
    dyckaa
    seadsa
    fpa
+   gpg
    flowsensitive
+   valueflowpta
    lotusaa
    underapproxaa
    dynaa

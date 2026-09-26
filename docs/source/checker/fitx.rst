@@ -69,7 +69,7 @@ Components
 * ``Analyzer.cpp`` – CFG-based typestate analysis: block-by-block state merge, transition application, return-code aware propagation from callee summaries (paper Section 4.2, 4.3).
 * ``State.h``, ``StateTransition.h`` – Typestate FSM: states, transitions, notification timing (IMMEDIATE, FUNCTION_END, END_OF_LIFE, MODULE_END).
 
-**Framework IR** (``lib/Checker/FiTx/Framework_IR/``):
+**Framework IR** (``lib/Checker/FiTx/FrameworkIR/``):
 
 * ``Analyzer.cpp`` – Builds the framework IR from LLVM: calls, stores, loads, returns; collects possible return values per basic block for **function summaries** and return-code aware propagation (paper Section 4.3).
 
@@ -81,10 +81,10 @@ Components
 
 **Detectors** (``lib/Checker/FiTx/Detector/``):
 
-* Each detector (e.g. ``DF_detector/``, ``UAF_detector/``, ``Leak_detector/``, ``Ref_count_detector/``) defines a typestate FSM for one bug pattern (paper Section 4.1, Table 5; Section 5: DF, DL/DUL, ML, UAF, Ref).
+* Each detector (e.g. ``DoubleFreeDetector.cpp``, ``UseAfterFreeDetector.cpp``, ``MemoryLeakDetector.cpp``, ``ReferenceCounterDetector.cpp``) defines a typestate FSM for one bug pattern (paper Section 4.1, Table 5; Section 5: DF, DL/DUL, ML, UAF, Ref).
 
 Bug Types
---------
+=========
 
 FiTx targets well-known patterns that are FiT-analysis findable (paper Table 2, Section 5):
 
@@ -119,7 +119,7 @@ Understanding the code
 
 **Analysis flow**
 
-1. **Framework IR** (``Framework_IR/Analyzer.cpp``): For each LLVM function, build a framework CFG (basic blocks, instructions as Call/Store/Load/Return). Collect possible return values per block (constants, call results) for building function summaries.
+1. **Framework IR** (``FrameworkIR/Analyzer.cpp``): For each LLVM function, build a framework CFG (basic blocks, instructions as Call/Store/Load/Return). Collect possible return values per block (constants, call results) for building function summaries.
 
 2. **Main pass** (``frontend/Framework.cpp``): For each typestate checker (StateManager), create an Analyzer and run ``analyze()``. The analyzer iterates over all framework functions in the module.
 
@@ -139,7 +139,7 @@ Understanding the code
 
 **Adding a new detector**
 
-1. Define states (init, intermediate, bug) and transitions in a ``define_states(StateManager&)`` (e.g. ``DFUtils.cpp``).
+1. Define states (init, intermediate, bug) and transitions in a ``defineStates(StateManager&)`` (e.g. ``DoubleFreeDetector.cpp``).
 2. Register Fun Arg / Store / Use / Alias transitions via ``TransitionManager``.
 3. Create a ``FrameworkPass`` subclass that overrides ``defineStates()`` and calls your ``define_states``; add it to ``FrameworkPass::passes``.
 

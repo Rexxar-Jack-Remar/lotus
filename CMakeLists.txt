@@ -3,7 +3,6 @@ project(lotus C CXX)
 
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
-#set(CMAKE_CXX_STANDARD 14)
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
@@ -59,9 +58,9 @@ endif()
 # Sea-DSA no longer requires Boost, so Boost is only needed for:
 # - SeaHorn (LOTUS_ENABLE_SEAHORN)
 # - CLAM (LOTUS_ENABLE_CLAM)
-# - CclyzerAA (LOTUS_USE_CCLYZER)
+# - CclyzerAA (LOTUS_ENABLE_CCLYZER)
 if(LOTUS_ENABLE_CLAM OR LOTUS_ENABLE_SEAHORN OR LOTUS_ENABLE_SMACK OR
-   LOTUS_USE_CCLYZER)
+   LOTUS_ENABLE_CCLYZER OR LOTUS_ENABLE_PDAAAL)
     include(cmake/ConfigureBoost.cmake)
 endif()
 
@@ -79,7 +78,7 @@ endif()
 
 # Optional cclyzer++ Datalog-based alias analysis (standalone backend, not in AliasAnalysisWrapper)
 # Note: CclyzerAA requires Boost, so Boost will be configured if this is enabled
-if (LOTUS_USE_CCLYZER)
+if (LOTUS_ENABLE_CCLYZER)
     include(cmake/ConfigureCclyzerpp.cmake)
 endif()
 

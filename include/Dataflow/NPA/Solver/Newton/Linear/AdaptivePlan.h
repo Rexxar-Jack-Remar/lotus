@@ -1,5 +1,4 @@
-#ifndef NPA_NEWTON_LINEAR_ADAPTIVE_PLAN_H
-#define NPA_NEWTON_LINEAR_ADAPTIVE_PLAN_H
+#pragma once
 
 #include <vector>
 
@@ -39,4 +38,3 @@ struct LinearExecutionPlan {
 } // namespace detail
 } // namespace npa
 
-#endif // NPA_NEWTON_LINEAR_ADAPTIVE_PLAN_H

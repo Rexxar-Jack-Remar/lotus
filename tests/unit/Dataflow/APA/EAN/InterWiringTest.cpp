@@ -19,7 +19,7 @@
 #include "Dataflow/APA/Core/InterResult.h"
 #include "Dataflow/APA/Core/Options.h"
 #include "Dataflow/APA/EAN/DagStats.h"
-#include "Dataflow/APA/Solver/ForwardInterSummarySolver.h"
+#include "Dataflow/APA/Solver/Inter/ExpandedSolver.h"
 
 #include <cstdint>
 #include <map>

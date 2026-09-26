@@ -1,5 +1,4 @@
-#ifndef _GRAPH_UTIL_H_
-#define _GRAPH_UTIL_H_
+#pragma once
 
 #include "CFL/CSIndex/FLARE/Graph.h"
 
@@ -71,4 +70,3 @@ public:
 
 } // namespace lotus::cfl::cs_index::flare
 
-#endif

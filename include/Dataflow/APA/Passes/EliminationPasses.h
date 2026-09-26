@@ -1,5 +1,4 @@
-#ifndef DATAFLOW_ELIMINATION_PASSES_ELIMINATIONPASSES_H_
-#define DATAFLOW_ELIMINATION_PASSES_ELIMINATIONPASSES_H_
+#pragma once
 
 #include "llvm/Pass.h"
 
@@ -149,4 +148,3 @@ private:
 
 } // namespace elimination
 
-#endif // DATAFLOW_ELIMINATION_PASSES_ELIMINATIONPASSES_H_

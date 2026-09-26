@@ -1,5 +1,4 @@
-#ifndef __UTIL_TREESTREAM_H__
-#define __UTIL_TREESTREAM_H__
+#pragma once
 
 #include <string>
 #include <vector>
@@ -60,4 +59,3 @@ public:
   void flush();
 };
 
-#endif

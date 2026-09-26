@@ -31,5 +31,4 @@ When to use it
 See also
 --------
 
-- See :doc:`dfpa` for a function-pointer focused demand-refined analysis tool.
 - See :doc:`dynaa` for dynamic validation of static aliasing results.

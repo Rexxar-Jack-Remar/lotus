@@ -1,5 +1,4 @@
-#ifndef TRANSFORM_KILLVARARGFN_H
-#define TRANSFORM_KILLVARARGFN_H
+#pragma once
 
 #include "llvm/IR/Module.h"
 #include "llvm/IR/PassManager.h"
@@ -12,4 +11,3 @@ struct KillVarArgFnPass : llvm::PassInfoMixin<KillVarArgFnPass> {
   llvm::PreservedAnalyses run(llvm::Module &M, llvm::ModuleAnalysisManager &);
 };
 
-#endif // TRANSFORM_KILLVARARGFN_H

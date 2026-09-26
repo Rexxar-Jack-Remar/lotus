@@ -1,5 +1,4 @@
-#ifndef ASER_PTA_POINTS_TO_SELECTOR_H
-#define ASER_PTA_POINTS_TO_SELECTOR_H
+#pragma once
 
 #include "Alias/InclusionBased/AserPTA/PointerAnalysis/Solver/PointsTo/BitVectorPTS.h"
 
@@ -9,4 +8,3 @@ using DefaultPtsTy = BitVectorPTS;
 
 } // namespace aser
 
-#endif

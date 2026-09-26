@@ -19,7 +19,8 @@ using InterReachingDefinitionsResult =
 InterReachingDefinitionsResult runInterElimReachingDefinitions(
     llvm::Function *Entry, llvm::AAResults *AA = nullptr,
     llvm::MemorySSA *MSSA = nullptr,
-    const dataflow::controlflow::InterCFG *ICF = nullptr);
+    const dataflow::controlflow::InterCFG *ICF = nullptr,
+    EliminationOptions Options = defaultContextOptions());
 
 InterReachingDefinitionsResult runInterSummaryElimReachingDefinitions(
     llvm::Function *Entry, llvm::AAResults *AA = nullptr,

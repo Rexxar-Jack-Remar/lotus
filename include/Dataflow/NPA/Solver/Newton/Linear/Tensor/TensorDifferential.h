@@ -1,5 +1,4 @@
-#ifndef NPA_TENSOR_DIFFERENTIAL_H
-#define NPA_TENSOR_DIFFERENTIAL_H
+#pragma once
 
 #include "Dataflow/NPA/Core/Expr/Eval.h"
 #include "Dataflow/NPA/Solver/Newton/Errors.h"
@@ -164,4 +163,3 @@ private:
 
 } // namespace npa
 
-#endif // NPA_TENSOR_DIFFERENTIAL_H

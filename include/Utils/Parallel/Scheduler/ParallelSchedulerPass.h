@@ -1,5 +1,4 @@
-#ifndef LLVMUTILS_SCHEDULER_PARALLELSCHEDULERPASS_H
-#define LLVMUTILS_SCHEDULER_PARALLELSCHEDULERPASS_H
+#pragma once
 
 #include <functional>
 #include <string>
@@ -90,4 +89,3 @@ public:
   void setEnableGC(bool Enable) { EnableGC = Enable; }
 };
 
-#endif // LLVMUTILS_SCHEDULER_PARALLELSCHEDULERPASS_H

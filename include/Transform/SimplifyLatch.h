@@ -6,8 +6,7 @@
  * This pass performs simplifications on loop latch blocks to optimize
  * loop structure and control flow.
  */
-#ifndef TRANSFORM_SIMPLIFYLATCH_H
-#define TRANSFORM_SIMPLIFYLATCH_H
+#pragma once
 
 #include <llvm/IR/Module.h>
 #include <llvm/IR/PassManager.h>
@@ -33,4 +32,3 @@ public:
   PreservedAnalyses run(Module &M, ModuleAnalysisManager &MAM);
 };
 
-#endif // TRANSFORM_SIMPLIFYLATCH_H

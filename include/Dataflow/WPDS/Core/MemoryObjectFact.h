@@ -1,5 +1,4 @@
-#ifndef ANALYSIS_DATAFLOW_WPDS_MEMORYOBJECTFACT_H_
-#define ANALYSIS_DATAFLOW_WPDS_MEMORYOBJECTFACT_H_
+#pragma once
 
 #include "Dataflow/WPDS/Core/DataFlowFacts.h"
 
@@ -117,4 +116,3 @@ public:
 
 } // namespace wpds
 
-#endif // ANALYSIS_DATAFLOW_WPDS_MEMORYOBJECTFACT_H_

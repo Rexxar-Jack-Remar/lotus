@@ -5,8 +5,7 @@
 //
 //===----------------------------------------------------------------------===//
 
-#ifndef FILECHECK_H_
-#define FILECHECK_H_
+#pragma once
 
 #include "Checker/Saber/LeakChecker.h"
 
@@ -41,4 +40,3 @@ public:
 } // namespace analysis
 } // namespace lotus
 
-#endif

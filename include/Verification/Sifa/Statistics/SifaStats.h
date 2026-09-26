@@ -7,8 +7,7 @@
 //
 //===----------------------------------------------------------------------===//
 
-#ifndef LOTUS_VERIFICATION_SIFA_STATISTICS_SIFASTATS_H
-#define LOTUS_VERIFICATION_SIFA_STATISTICS_SIFASTATS_H
+#pragma once
 
 #include <chrono>
 #include <cstddef>
@@ -135,4 +134,3 @@ private:
 } // namespace sifa
 } // namespace lotus
 
-#endif // LOTUS_VERIFICATION_SIFA_STATISTICS_SIFASTATS_H

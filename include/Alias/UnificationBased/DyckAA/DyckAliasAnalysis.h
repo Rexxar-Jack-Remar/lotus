@@ -28,8 +28,7 @@
  *  along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
-#ifndef ALIAS_DYCKAA_DYCKALIASANALYSIS_H
-#define ALIAS_DYCKAA_DYCKALIASANALYSIS_H
+#pragma once
 
 #include "Alias/UnificationBased/DyckAA/DyckCallGraph.h"
 #include "Alias/UnificationBased/DyckAA/DyckGraph.h"
@@ -106,4 +105,3 @@ private:
   void printAliasSetInformation();
 };
 
-#endif // ALIAS_DYCKAA_DYCKALIASANALYSIS_H

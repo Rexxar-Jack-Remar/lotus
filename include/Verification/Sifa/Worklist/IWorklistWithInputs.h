@@ -6,8 +6,7 @@
 //
 //===----------------------------------------------------------------------===//
 
-#ifndef LOTUS_VERIFICATION_SIFA_WORKLIST_IWORKLISTWITHINPUTS_H
-#define LOTUS_VERIFICATION_SIFA_WORKLIST_IWORKLISTWITHINPUTS_H
+#pragma once
 
 namespace lotus {
 namespace sifa {
@@ -25,4 +24,3 @@ public:
 } // namespace sifa
 } // namespace lotus
 
-#endif // LOTUS_VERIFICATION_SIFA_WORKLIST_IWORKLISTWITHINPUTS_H

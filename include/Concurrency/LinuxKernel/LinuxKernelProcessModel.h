@@ -10,8 +10,7 @@
  * @ingroup Concurrency
  */
 
-#ifndef LINUX_KERNEL_PROCESS_MODEL_H
-#define LINUX_KERNEL_PROCESS_MODEL_H
+#pragma once
 
 #include "Concurrency/LinuxKernel/LinuxKernelConfig.h"
 #include "Concurrency/LinuxKernel/LinuxKernelOperation.h"
@@ -171,4 +170,3 @@ private:
 
 } // namespace kernel
 
-#endif // LINUX_KERNEL_PROCESS_MODEL_H

@@ -8,6 +8,8 @@
  * - Suitable for small to medium programs or debugging
  */
 
+#pragma once
+
 #include "Utils/Platform/ProgressBar.h"
 
 #include <llvm/Support/raw_ostream.h>

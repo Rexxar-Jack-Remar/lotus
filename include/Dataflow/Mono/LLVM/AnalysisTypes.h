@@ -1,5 +1,4 @@
-#ifndef LOTUS_DATAFLOW_MONO_LLVM_ANALYSISTYPES_H_
-#define LOTUS_DATAFLOW_MONO_LLVM_ANALYSISTYPES_H_
+#pragma once
 
 #include "llvm/IR/Function.h"
 #include "llvm/IR/Instruction.h"
@@ -158,4 +157,3 @@ using InstructionSetAnalysisTypes =
 
 } // namespace mono
 
-#endif // LOTUS_DATAFLOW_MONO_LLVM_ANALYSISTYPES_H_

@@ -10,8 +10,7 @@
 //
 //===----------------------------------------------------------------------===//
 
-#ifndef LOTUS_VERIFICATION_SIFA_SUMMARIZERS_REUSESUPERSETCALLSUMMARIZER_H
-#define LOTUS_VERIFICATION_SIFA_SUMMARIZERS_REUSESUPERSETCALLSUMMARIZER_H
+#pragma once
 
 #include "Verification/Sifa/Domain/AbstractDomain.h"
 #include "Verification/Sifa/Statistics/SifaStats.h"
@@ -91,4 +90,3 @@ private:
 } // namespace sifa
 } // namespace lotus
 
-#endif // LOTUS_VERIFICATION_SIFA_SUMMARIZERS_REUSESUPERSETCALLSUMMARIZER_H

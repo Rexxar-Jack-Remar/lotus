@@ -1,12 +1,12 @@
 #include "CFL/Classical/Clients/ValueFlow/ValueFlowClient.h"
 
+#include "CFL/Classical/Solvers/Engines/POCR/ClientGrammars.h"
 #include "IR/SVFG/SVFG.h"
 #include "IR/SVFG/SVFGBase.h"
 #include "IR/SVFG/SVFGEdge.h"
 #include "IR/SVFG/SVFGNode.h"
 
 #include <algorithm>
-#include <chrono>
 #include <functional>
 #include <set>
 #include <stdexcept>
@@ -19,32 +19,6 @@ namespace lotus::cfl::classical {
 namespace {
 
 std::string nodeName(std::size_t id) { return std::to_string(id); }
-
-ReachabilityStats
-specializedStats(const engines::SpecializedPocrStatistics &source,
-                 const Grammar &grammar) {
-  ReachabilityStats result;
-  result.graph_nodes = source.graph_nodes;
-  result.base_graph_edges = source.graph_edges;
-  result.grammar_symbols = grammar.symbolCount();
-  result.grammar_terminals = grammar.terminals().size();
-  result.grammar_nonterminals = grammar.nonterminals().size();
-  result.grammar_productions = grammar.productionCount();
-  result.grammar_nullable_symbols = grammar.nullableSymbols().size();
-  result.grammar_transitive_symbols = grammar.transitiveSymbols().size();
-  result.input_edges = source.graph_edges;
-  result.relation_edges = source.reachability_pairs;
-  result.start_symbol_edges = source.value_or_flow_pairs;
-  result.classical_iterations = source.reachability_checks;
-  result.processed_work_items = source.processed_items;
-  result.duplicate_edges = source.duplicate_items;
-  result.added_edges = source.reachability_pairs;
-  result.specialized_reachability_pairs = source.reachability_pairs;
-  result.specialized_matched_pairs = source.matched_pairs;
-  result.specialized_critical_edges = source.critical_edges;
-  result.fully_ordered_cycle_simplifications = source.cycle_simplifications;
-  return result;
-}
 
 void addBidirectionalEdge(LabeledGraph &graph, std::size_t source,
                           std::size_t target, const std::string &forward,
@@ -239,6 +213,43 @@ LabeledGraph encodeSVFG(const lotus::analysis::SVFG &svfg) {
   return encoded;
 }
 
+LabeledGraph encodeClassicalCflSVFG(const lotus::analysis::SVFG &svfg) {
+  LabeledGraph encoded;
+  for (const auto &[node_id, _] : svfg) {
+    encoded.addVertex(nodeName(node_id));
+  }
+  const CallSiteIds callsite_ids = buildCallSiteIds(svfg);
+
+  for (const auto &[_, node] : svfg) {
+    for (lotus::analysis::SVFGEdge *edge : node->getOutEdges()) {
+      if (!edge) {
+        continue;
+      }
+      const std::size_t source =
+          encoded.vertexId(nodeName(edge->getSrcNode()->getId()));
+      const std::size_t target =
+          encoded.vertexId(nodeName(edge->getDstNode()->getId()));
+      if (edge->isCallEdge()) {
+        encoded.addEdge(
+            source, target,
+            encodeCallLabel("call", callSiteId(callsite_ids, edge)));
+      } else if (edge->isRetEdge()) {
+        encoded.addEdge(source, target,
+                        encodeCallLabel("ret", callSiteId(callsite_ids, edge)));
+      } else if (lotus::analysis::isThreadMHPVFGEdge(edge->getEdgeKind()) ||
+                 lotus::analysis::isIndirectVFGEdge(edge->getEdgeKind()) ||
+                 lotus::analysis::isDirectVFGEdge(edge->getEdgeKind())) {
+        encoded.addEdge(source, target, "a");
+      } else {
+        throw std::invalid_argument(
+            "Unsupported SVFG edge in classical CFL value-flow encoding: " +
+            edge->toString());
+      }
+    }
+  }
+  return encoded;
+}
+
 Grammar buildVfgGrammar(const lotus::analysis::SVFG &svfg) {
   std::set<std::uint32_t> callsite_ids;
   const CallSiteIds ids = buildCallSiteIds(svfg);
@@ -289,9 +300,22 @@ Grammar buildVfgGrammar(const lotus::analysis::SVFG &svfg) {
       options);
 }
 
-ValueFlowClient ValueFlowClient::fromSVFG(const lotus::analysis::SVFG &svfg) {
-  LabeledGraph graph = encodeSVFG(svfg);
-  Grammar grammar = buildVfgGrammar(svfg);
+Grammar buildClassicalCflVfgGrammar(const lotus::analysis::SVFG &svfg) {
+  return engines::buildPocrClientGrammar(
+      engines::PocrClientGrammar::RewrittenValueFlow,
+      encodeClassicalCflSVFG(svfg));
+}
+
+ValueFlowClient ValueFlowClient::fromSVFG(const lotus::analysis::SVFG &svfg,
+                                          ValueFlowEncodingMode mode) {
+  LabeledGraph graph = mode == ValueFlowEncodingMode::ClassicalCFL
+                           ? encodeClassicalCflSVFG(svfg)
+                           : encodeSVFG(svfg);
+  Grammar grammar =
+      mode == ValueFlowEncodingMode::ClassicalCFL
+          ? engines::buildPocrClientGrammar(
+                engines::PocrClientGrammar::RewrittenValueFlow, graph)
+          : buildVfgGrammar(svfg);
   std::unordered_map<std::uint32_t, std::size_t> node_to_vertex;
   for (const auto &[node_id, _] : svfg) {
     node_to_vertex.emplace(node_id, graph.vertexId(nodeName(node_id)));
@@ -302,9 +326,10 @@ ValueFlowClient ValueFlowClient::fromSVFG(const lotus::analysis::SVFG &svfg) {
 
 ValueFlowClient
 ValueFlowClient::fromPreparedSVFG(lotus::analysis::SVFG &svfg,
-                                  const SVFGPreparationOptions &options) {
+                                  const SVFGPreparationOptions &options,
+                                  ValueFlowEncodingMode mode) {
   prepareSVFGForCFL(svfg, options);
-  return fromSVFG(svfg);
+  return fromSVFG(svfg, mode);
 }
 
 ValueFlowClient::ValueFlowClient(
@@ -324,11 +349,8 @@ ValueFlowClient::ValueFlowClient(ValueFlowClient &&other) noexcept
     : state_(std::move(other.state_)),
       node_to_vertex_(std::move(other.node_to_vertex_)),
       vertex_to_node_(std::move(other.vertex_to_node_)),
-      session_(std::move(other.session_)), backend_(std::move(other.backend_)),
-      pocr_engine_(std::move(other.pocr_engine_)),
-      focr_engine_(std::move(other.focr_engine_)),
-      specialized_backend_(std::move(other.specialized_backend_)),
-      specialized_focr_cycles_(other.specialized_focr_cycles_) {}
+      session_(std::move(other.session_)), backend_(std::move(other.backend_)) {
+}
 
 ValueFlowClient &ValueFlowClient::operator=(ValueFlowClient &&other) noexcept {
   if (this == &other) {
@@ -340,18 +362,10 @@ ValueFlowClient &ValueFlowClient::operator=(ValueFlowClient &&other) noexcept {
   vertex_to_node_ = std::move(other.vertex_to_node_);
   session_ = std::move(other.session_);
   backend_ = std::move(other.backend_);
-  pocr_engine_ = std::move(other.pocr_engine_);
-  focr_engine_ = std::move(other.focr_engine_);
-  specialized_backend_ = std::move(other.specialized_backend_);
-  specialized_focr_cycles_ = other.specialized_focr_cycles_;
   return *this;
 }
 
 ReachabilityStats ValueFlowClient::solve(SolverBackend backend) {
-  if (specialized_backend_) {
-    throw std::invalid_argument(
-        "Cannot switch from a specialized value-flow engine to SolverSession");
-  }
   if (backend_ && *backend_ != backend) {
     throw std::invalid_argument(
         "Cannot change solver backend after a value-flow session has started");
@@ -362,53 +376,6 @@ ReachabilityStats ValueFlowClient::solve(SolverBackend backend) {
     backend_ = backend;
   }
   return session_->solve();
-}
-
-ReachabilityStats
-ValueFlowClient::solveSpecialized(engines::SpecializedPocrBackend backend,
-                                  bool simplify_focr_cycles) {
-  const auto start = std::chrono::steady_clock::now();
-  simplify_focr_cycles =
-      backend == engines::SpecializedPocrBackend::Focr && simplify_focr_cycles;
-  if (session_) {
-    throw std::invalid_argument(
-        "Cannot switch from SolverSession to a specialized value-flow engine");
-  }
-  if (specialized_backend_ && *specialized_backend_ != backend) {
-    throw std::invalid_argument(
-        "Cannot change specialized value-flow engine after solving started");
-  }
-  if (specialized_backend_ &&
-      specialized_focr_cycles_ != simplify_focr_cycles) {
-    throw std::invalid_argument(
-        "Cannot change FOCR cycle simplification after solving has started");
-  }
-  specialized_backend_ = backend;
-  specialized_focr_cycles_ = simplify_focr_cycles;
-  if (backend == engines::SpecializedPocrBackend::Pocr) {
-    if (!pocr_engine_) {
-      pocr_engine_ =
-          std::make_unique<engines::PocrValueFlowEngine>(state_->graph);
-    }
-    ReachabilityStats result =
-        specializedStats(pocr_engine_->solve(), state_->grammar);
-    result.solve_time_microseconds =
-        std::chrono::duration_cast<std::chrono::microseconds>(
-            std::chrono::steady_clock::now() - start)
-            .count();
-    return result;
-  }
-  if (!focr_engine_) {
-    focr_engine_ = std::make_unique<engines::FocrValueFlowEngine>(
-        state_->graph, simplify_focr_cycles);
-  }
-  ReachabilityStats result =
-      specializedStats(focr_engine_->solve(), state_->grammar);
-  result.solve_time_microseconds =
-      std::chrono::duration_cast<std::chrono::microseconds>(
-          std::chrono::steady_clock::now() - start)
-          .count();
-  return result;
 }
 
 bool ValueFlowClient::hasFlow(std::uint32_t source_node,
@@ -423,17 +390,13 @@ bool ValueFlowClient::hasBalancedFlow(std::uint32_t source_node,
 
 bool ValueFlowClient::hasRealizableFlow(std::uint32_t source_node,
                                         std::uint32_t target_node) const {
-  if (specialized_backend_) {
-    throw std::logic_error(
-        "General realizable value-flow queries require a grammar solver");
-  }
   return contains(source_node, target_node, "R");
 }
 
 bool ValueFlowClient::contains(std::uint32_t source_node,
                                std::uint32_t target_node,
                                const char *symbol) const {
-  if (!session_ && !specialized_backend_) {
+  if (!session_) {
     throw std::logic_error("solve() has not been called");
   }
   const auto source_it = node_to_vertex_.find(source_node);
@@ -441,12 +404,6 @@ bool ValueFlowClient::contains(std::uint32_t source_node,
   if (source_it == node_to_vertex_.end() ||
       target_it == node_to_vertex_.end()) {
     return false;
-  }
-  if (specialized_backend_) {
-    if (*specialized_backend_ == engines::SpecializedPocrBackend::Pocr) {
-      return pocr_engine_->hasFlow(source_it->second, target_it->second);
-    }
-    return focr_engine_->hasFlow(source_it->second, target_it->second);
   }
   return session_->contains(source_it->second, target_it->second, symbol);
 }
@@ -458,17 +415,13 @@ ValueFlowClient::reachableFrom(std::uint32_t source_node) const {
 
 std::vector<std::uint32_t>
 ValueFlowClient::realizableReachableFrom(std::uint32_t source_node) const {
-  if (specialized_backend_) {
-    throw std::logic_error(
-        "General realizable value-flow queries require a grammar solver");
-  }
   return reachableFromSymbol(source_node, "R");
 }
 
 std::vector<std::uint32_t>
 ValueFlowClient::reachableFromSymbol(std::uint32_t source_node,
                                      const char *symbol) const {
-  if (!session_ && !specialized_backend_) {
+  if (!session_) {
     throw std::logic_error("solve() has not been called");
   }
   const auto source_it = node_to_vertex_.find(source_node);
@@ -485,21 +438,9 @@ ValueFlowClient::reachableFromSymbol(std::uint32_t source_node,
       reachable.push_back(*node);
     }
   };
-  if (specialized_backend_) {
-    const auto pairs =
-        *specialized_backend_ == engines::SpecializedPocrBackend::Pocr
-            ? pocr_engine_->flowPairs()
-            : focr_engine_->flowPairs();
-    for (const auto &[source, target] : pairs) {
-      if (source == source_it->second) {
-        add_vertex(target);
-      }
-    }
-  } else {
-    const SymbolId flow_symbol = state_->grammar.symbolId(symbol);
-    session_->relation().forEachSuccessor(flow_symbol, source_it->second,
-                                          add_vertex);
-  }
+  const SymbolId flow_symbol = state_->grammar.symbolId(symbol);
+  session_->relation().forEachSuccessor(flow_symbol, source_it->second,
+                                        add_vertex);
   std::sort(reachable.begin(), reachable.end());
   return reachable;
 }

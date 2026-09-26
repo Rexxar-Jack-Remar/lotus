@@ -4,8 +4,7 @@
 //
 //===----------------------------------------------------------------------===//
 
-#ifndef LOTUS_VERIFICATION_SIFA_SYMABS_SIFASYMABSOPTIONS_H
-#define LOTUS_VERIFICATION_SIFA_SYMABS_SIFASYMABSOPTIONS_H
+#pragma once
 
 #include "Verification/Sifa/Log/SifaLogger.h"
 
@@ -73,4 +72,3 @@ struct SifaSymAbsOptions {
 } // namespace sifa
 } // namespace lotus
 
-#endif // LOTUS_VERIFICATION_SIFA_SYMABS_SIFASYMABSOPTIONS_H

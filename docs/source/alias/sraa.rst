@@ -37,9 +37,9 @@ Inputs / Outputs / Invariants
 * **Outputs:** Pairs of pointers classified as `NoAlias` (strictly proven) or `MayAlias`.
 * **Invariants:** symbolic expressions remain affine, constraints are monotone, and transformations preserve IR semantics.
 
--------------------------------------
+--------------------------------------
 Algorithmic Pipeline (High-Level View)
--------------------------------------
+--------------------------------------
 
 The analysis is structured as a pipeline:
 

@@ -1,5 +1,4 @@
-#ifndef NPA_KLEENE_SOLVER_H
-#define NPA_KLEENE_SOLVER_H
+#pragma once
 
 /**
  * \file
@@ -109,4 +108,3 @@ template <class D> struct KleeneSolver {
 
 } // namespace npa
 
-#endif // NPA_KLEENE_SOLVER_H

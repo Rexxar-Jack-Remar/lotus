@@ -1,0 +1,289 @@
+name: CI
+
+on:
+  push:
+    branches:
+    - main
+    - release*
+    tags:
+    - '*'
+  pull_request:
+
+env:
+  # Error on documentation warnings
+  SPHINXOPTS: "-W --keep-going"
+  # This will be empty on events that aren't pull requests.
+  ACTUAL_GITHUB_SHA_ON_PULL_REQUEST: "${{ github.event.pull_request.head.sha }}"
+  # TODO(#12, #113): Upgrade to Clang 15, LLVM 15.
+  #
+  # See also the matrix of the build job.
+  #
+  # NOTE[Clang+LLVM]: If the Clang version outstrips the LLVM version, the tests
+  # will error - we use Clang to compile test programs, and cclyzer++ must be
+  # able to read the bitcode it outputs. We currently only run tests with the
+  # most recent (matching) Clang/LLVM combination.
+  LLVM_MAJOR_VERSION: "14"
+  CLANG_VERSION: "14"
+  UBUNTU_VERSION: "22.04"
+  UBUNTU_NAME: "jammy"
+
+jobs:
+  doc:
+    runs-on: ubuntu-22.04
+    steps:
+    - uses: actions/checkout@v3
+
+    - uses: ammaraskar/sphinx-action@master
+      with:
+        docs-folder: "doc/"
+
+    - uses: peaceiris/actions-gh-pages@v3
+      if: ${{ github.ref == 'refs/heads/main' }}
+      with:
+        github_token: ${{ secrets.GITHUB_TOKEN }}
+        publish_dir: doc/build/html
+
+  build:
+    runs-on: ubuntu-22.04
+    strategy:
+      matrix:
+        include:
+        - clang_version: "12"
+          llvm_version: "10"
+          ubuntu_version: "20.04"
+          ubuntu_name: "focal"
+        - clang_version: "12"
+          llvm_version: "11"
+          ubuntu_version: "20.04"
+          ubuntu_name: "focal"
+        - clang_version: "12"
+          llvm_version: "12"
+          ubuntu_version: "20.04"
+          ubuntu_name: "focal"
+        - clang_version: "15"
+          llvm_version: "13"
+          ubuntu_version: "22.04"
+          ubuntu_name: "jammy"
+        - clang_version: "14"
+          llvm_version: "14"
+          ubuntu_version: "22.04"
+          ubuntu_name: "jammy"
+        - clang_version: "15"
+          llvm_version: "15"
+          ubuntu_version: "22.04"
+          ubuntu_name: "jammy"
+        # - clang_version: "16"
+        #   llvm_version: "16"
+        #   ubuntu_version: "22.04"
+        #   ubuntu_name: "jammy"
+    env:
+      LLVM_MAJOR_VERSION: ${{ matrix.llvm_version }}
+      CLANG_VERSION: ${{ matrix.llvm_version }}
+      UBUNTU_VERSION: ${{ matrix.ubuntu_version }}
+      UBUNTU_NAME: ${{ matrix.ubuntu_name }}
+    steps:
+    - uses: actions/checkout@v3
+
+    - name: Login to Packages Container registry
+      uses: docker/login-action@v2
+      with:
+        registry: ghcr.io
+        username: ${{ github.actor }}
+        password: ${{ secrets.GITHUB_TOKEN }}
+
+    - name: Build dev image
+      run: |
+        ./scripts/gha-docker-build "dev" "cclyzerpp-dev"
+
+    - name: Build
+      continue-on-error: ${{ matrix.llvm_version == 16 }}
+      run: |
+        # The `pull_request` event creates a merge commit, which means that
+        # `GITHUB_SHA` is not want we want: we need to do some additional
+        # sleuthing for these events to get the right commit.
+        if [[ "${GITHUB_EVENT_NAME}" == "pull_request" ]]; then
+          ref="${ACTUAL_GITHUB_SHA_ON_PULL_REQUEST}"
+        else
+          ref="${GITHUB_SHA}"
+        fi
+
+        docker run \
+          --rm \
+          --mount type=bind,src=$PWD,target=/work \
+          --workdir /work \
+          "ghcr.io/galoisinc/cclyzerpp-dev:${ref}" \
+          cmake \
+          -DLLVM_MAJOR_VERSION=${LLVM_MAJOR_VERSION} \
+          -G Ninja \
+          -B build \
+          -S .
+
+        docker run \
+          --rm \
+          --mount type=bind,src=$PWD,target=/work \
+          --workdir /work \
+          "ghcr.io/galoisinc/cclyzerpp-dev:${ref}" \
+          cmake --build build -j $(nproc)
+
+    - name: Upload build log
+      uses: actions/upload-artifact@v3
+      if: failure()
+      with:
+        name: "cmake-logs"
+        path: "build/CMakeFiles/*.log"
+        if-no-files-found: error
+
+    - name: Run tests
+      # See NOTE[Clang+LLVM]
+      if: ${{ env.LLVM_MAJOR_VERSION == 14 }}
+      run: |
+        # See previous comment
+        if [[ "${GITHUB_EVENT_NAME}" == "pull_request" ]]; then
+          ref="${ACTUAL_GITHUB_SHA_ON_PULL_REQUEST}"
+        else
+          ref="${GITHUB_SHA}"
+        fi
+
+        docker run \
+          --rm -v $(pwd):/work \
+          --workdir /work \
+          "ghcr.io/galoisinc/cclyzerpp-dev:${ref}" \
+          pytest -x -n=$(nproc)
+
+    - name: Package
+      continue-on-error: ${{ matrix.llvm_version == 16 }}
+      run: |
+        # See above comment
+        if [[ "${GITHUB_EVENT_NAME}" == "pull_request" ]]; then
+          ref="${ACTUAL_GITHUB_SHA_ON_PULL_REQUEST}"
+        else
+          ref="${GITHUB_SHA}"
+        fi
+
+        docker run \
+          --rm \
+          --mount type=bind,src=$PWD,target=/work \
+          --workdir /work \
+          "ghcr.io/galoisinc/cclyzerpp-dev:${ref}" \
+          cmake --build build -j $(nproc) --target deb
+
+    - name: Build dist image
+      continue-on-error: ${{ matrix.llvm_version == 16 }}
+      run: |
+        ./scripts/gha-docker-build "dist" "cclyzerpp-dist"
+
+  lint:
+    runs-on: ubuntu-22.04
+    steps:
+    - uses: actions/checkout@v3
+
+    - name: Build dev image
+      run: |
+        ./scripts/gha-docker-build "dev" "cclyzerpp-dev"
+
+    - name: Lint
+      run: |
+        # See comment above
+        if [[ "${GITHUB_EVENT_NAME}" == "pull_request" ]]; then
+          ref="${ACTUAL_GITHUB_SHA_ON_PULL_REQUEST}"
+        else
+          ref="${GITHUB_SHA}"
+        fi
+
+        docker run \
+          --rm \
+          --mount type=bind,src=$PWD,target=/work \
+          --workdir /work \
+          "ghcr.io/galoisinc/cclyzerpp-dev:${ref}" \
+          cmake \
+          -DCMAKE_BUILD_TYPE=RelWithDebInfo \
+          -DCLANG_VERSION=${CLANG_VERSION} \
+          -DLLVM_MAJOR_VERSION=${LLVM_MAJOR_VERSION} \
+          -DCMAKE_EXPORT_COMPILE_COMMANDS=1 \
+          -G Ninja \
+          -S . \
+          -B build
+
+        docker run \
+          --rm \
+          --env CLANG_VERSION=${CLANG_VERSION} \
+          --mount type=bind,src=$PWD,target=/work \
+          --workdir /work \
+          "ghcr.io/galoisinc/cclyzerpp-dev:${ref}" \
+          bash scripts/lint.sh
+
+  release:
+    runs-on: ubuntu-22.04
+    # Build on version tags or release branches
+    if: ${{ startsWith(github.ref, 'refs/tags/v') || startsWith(github.ref, 'refs/heads/release') }}
+    # Only push Docker images on actual releases
+    env:
+      PUSH: ${{ startsWith(github.event.ref, 'refs/tags/v') }}
+    permissions:
+      contents: write
+      packages: write
+    steps:
+
+    - uses: actions/checkout@v3
+
+    - name: Login to Packages Container registry
+      uses: docker/login-action@v2
+      with:
+        registry: ghcr.io
+        username: ${{ github.actor }}
+        password: ${{ secrets.GITHUB_TOKEN }}
+
+    - name: Build and push dev image
+      run: |
+        ./scripts/gha-docker-build "dev" "cclyzerpp-dev"
+
+    # TODO(lb): Reduce duplication with build job
+    - name: Build
+      run: |
+        if [[ "${GITHUB_EVENT_NAME}" == "pull_request" ]]; then
+          ref="${ACTUAL_GITHUB_SHA_ON_PULL_REQUEST}"
+        else
+          ref="${GITHUB_SHA}"
+        fi
+
+        docker run \
+          --rm \
+          --mount type=bind,src=$PWD,target=/work \
+          --workdir /work \
+          "ghcr.io/galoisinc/cclyzerpp-dev:${ref}" \
+          cmake -DLLVM_MAJOR_VERSION=${LLVM_MAJOR_VERSION} -G Ninja -B build -S .
+
+        docker run \
+          --rm \
+          --mount type=bind,src=$PWD,target=/work \
+          --workdir /work \
+          "ghcr.io/galoisinc/cclyzerpp-dev:${ref}" \
+          cmake --build build -j $(nproc)
+
+    - name: Package
+      run: |
+        # See above comment
+        if [[ "${GITHUB_EVENT_NAME}" == "pull_request" ]]; then
+          ref="${ACTUAL_GITHUB_SHA_ON_PULL_REQUEST}"
+        else
+          ref="${GITHUB_SHA}"
+        fi
+
+        docker run \
+          --rm \
+          --mount type=bind,src=$PWD,target=/work \
+          --workdir /work \
+          "ghcr.io/galoisinc/cclyzerpp-dev:${ref}" \
+          cmake --build build -j $(nproc) --target deb
+
+    - name: Build and push dist image
+      run: |
+        ./scripts/gha-docker-build "dist" "cclyzerpp-dist"
+
+    - uses: ncipollo/release-action@v1
+      if: ${{ startsWith(github.ref, 'refs/tags/v') }}
+      with:
+        artifacts: "build/*.deb"
+        body: "See [doc/changelog.rst](https://github.com/GaloisInc/cclyzerpp/blob/main/doc/changelog.rst)."
+        draft: true
+        token: ${{ secrets.GITHUB_TOKEN }}

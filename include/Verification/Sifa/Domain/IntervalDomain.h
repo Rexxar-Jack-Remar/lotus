@@ -9,8 +9,7 @@
 //
 //===----------------------------------------------------------------------===//
 
-#ifndef LOTUS_VERIFICATION_SIFA_DOMAIN_INTERVALDOMAIN_H
-#define LOTUS_VERIFICATION_SIFA_DOMAIN_INTERVALDOMAIN_H
+#pragma once
 
 #include "Verification/Sifa/BlockTransferPolicy.h"
 #include "Verification/Sifa/Cfg/Transition.h"
@@ -480,4 +479,3 @@ private:
 } // namespace sifa
 } // namespace lotus
 
-#endif // LOTUS_VERIFICATION_SIFA_DOMAIN_INTERVALDOMAIN_H

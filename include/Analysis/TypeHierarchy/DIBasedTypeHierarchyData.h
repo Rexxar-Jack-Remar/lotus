@@ -9,8 +9,7 @@
  *     Maximilian Leo Huber and others
  *****************************************************************************/
 
-#ifndef LOTUS_ANALYSIS_TYPEHIERARCHY_DIBASEDTYPEHIERARCHYDATA_H
-#define LOTUS_ANALYSIS_TYPEHIERARCHY_DIBASEDTYPEHIERARCHYDATA_H
+#pragma once
 
 #include "llvm/Support/Error.h"
 #include "llvm/Support/raw_ostream.h"
@@ -45,4 +44,3 @@ struct DIBasedTypeHierarchyData {
 
 } // namespace lotus
 
-#endif // LOTUS_ANALYSIS_TYPEHIERARCHY_DIBASEDTYPEHIERARCHYDATA_H

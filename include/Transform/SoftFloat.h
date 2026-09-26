@@ -7,8 +7,7 @@
  * library functions, enabling floating-point operations on targets without
  * native FPU support.
  */
-#ifndef TRANSFORM_SOFTFLOAT_H
-#define TRANSFORM_SOFTFLOAT_H
+#pragma once
 
 #include <llvm/IR/Function.h>
 #include <llvm/IR/PassManager.h>
@@ -42,4 +41,3 @@ public:
   PreservedAnalyses run(Function &F, FunctionAnalysisManager &FAM);
 };
 
-#endif // TRANSFORM_SOFTFLOAT_H

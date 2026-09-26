@@ -3,8 +3,7 @@
  * @brief Header for FunctionWrapper class
  */
 
-#ifndef FUNCTIONWRAPPER_H_
-#define FUNCTIONWRAPPER_H_
+#pragma once
 
 #include "IR/PDG/Core/Tree.h"
 #include "IR/PDG/Support/LLVMEssentials.h"
@@ -202,4 +201,3 @@ private:
 };
 } // namespace pdg
 
-#endif

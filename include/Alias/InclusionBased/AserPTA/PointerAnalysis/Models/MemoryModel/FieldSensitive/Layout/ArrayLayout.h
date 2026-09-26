@@ -2,8 +2,7 @@
 // Created by peiming on 1/3/20.
 //
 
-#ifndef ASER_PTA_ARRAYLAYOUT_H
-#define ASER_PTA_ARRAYLAYOUT_H
+#pragma once
 
 #include <cassert>
 #include <cstddef>
@@ -71,4 +70,3 @@ public:
 
 } // namespace aser
 
-#endif // ASER_PTA_ARRAYLAYOUT_H

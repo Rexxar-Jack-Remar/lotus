@@ -5,8 +5,7 @@
  * @copyright (c) 2017 Avast Software, licensed under the MIT license
  */
 
-#ifndef RETDEC_UTILS_FILTER_ITERATOR_H
-#define RETDEC_UTILS_FILTER_ITERATOR_H
+#pragma once
 
 #include <functional>
 #include <iterator>
@@ -123,5 +122,3 @@ private:
 };
 
 } // namespace retdec
-
-#endif

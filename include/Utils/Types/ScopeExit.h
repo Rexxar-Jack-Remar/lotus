@@ -11,8 +11,7 @@
  * MIT.
  */
 
-#ifndef RETDEC_UTILS_SCOPE_EXIT_H
-#define RETDEC_UTILS_SCOPE_EXIT_H
+#pragma once
 
 #include <utility>
 
@@ -95,4 +94,3 @@ auto operator+(ScopeExitGuardHelper /* unused */, Function &&f) {
 
 } // namespace lotus
 
-#endif

@@ -5,8 +5,7 @@
 //
 //===----------------------------------------------------------------------===//
 
-#ifndef SABERCHECKERAPI_H_
-#define SABERCHECKERAPI_H_
+#pragma once
 
 #include "IR/ICFG/ICFGNode.h"
 
@@ -146,4 +145,3 @@ public:
 } // namespace analysis
 } // namespace lotus
 
-#endif /* SABERCHECKERAPI_H_ */

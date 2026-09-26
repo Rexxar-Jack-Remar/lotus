@@ -1,5 +1,4 @@
-#ifndef LOTUS_DATAFLOW_MONO_CONTAINER_BITVECTORSET_H_
-#define LOTUS_DATAFLOW_MONO_CONTAINER_BITVECTORSET_H_
+#pragma once
 
 #include "llvm/ADT/BitVector.h"
 #include "llvm/ADT/DenseMap.h"
@@ -322,4 +321,3 @@ inline std::vector<llvm::Value *> getAllSSAValues(llvm::Function *F) {
 
 } // namespace mono
 
-#endif // LOTUS_DATAFLOW_MONO_CONTAINER_BITVECTORSET_H_

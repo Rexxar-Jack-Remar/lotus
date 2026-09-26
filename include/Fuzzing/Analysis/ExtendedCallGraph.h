@@ -1,3 +1,5 @@
+#pragma once
+
 #include <llvm/Analysis/CallGraph.h>
 #include <llvm/IR/PassManager.h>
 

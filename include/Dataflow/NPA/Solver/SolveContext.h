@@ -1,5 +1,4 @@
-#ifndef NPA_SOLVE_CONTEXT_H
-#define NPA_SOLVE_CONTEXT_H
+#pragma once
 
 /**
  * \file
@@ -251,4 +250,3 @@ inline void npa_note_adaptive_scc_tensor_fallback(int count = 1) {
 
 } // namespace npa
 
-#endif // NPA_SOLVE_CONTEXT_H

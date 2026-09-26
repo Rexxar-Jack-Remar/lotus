@@ -1,5 +1,4 @@
-#ifndef PCOMB_REGEX_PARSER_H
-#define PCOMB_REGEX_PARSER_H
+#pragma once
 
 #include "Utils/Formats/pcomb/Parser/Parser.h"
 
@@ -42,4 +41,3 @@ inline RegexParser regex(const llvm::StringRef &s) { return RegexParser(s); }
 
 } // namespace pcomb
 
-#endif

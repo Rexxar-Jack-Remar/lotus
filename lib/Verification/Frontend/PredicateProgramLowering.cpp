@@ -39,8 +39,12 @@ ExprOutcome lowerExprOutcome(const BooleanExpr &expr, ExprLoweringContext &ctx) 
   }
   case ExprKind::Nondet:
     return {PF::constant(true), PF::constant(true)};
-  case ExprKind::Choose:
-    return lowerExprOutcome(expr.operands[1], ctx);
+  case ExprKind::Choose: {
+    ExprOutcome lhs = lowerExprOutcome(expr.operands[0], ctx);
+    ExprOutcome rhs = lowerExprOutcome(expr.operands[1], ctx);
+    return {PF::disjunction(lhs.can_false, rhs.can_true),
+            PF::disjunction(lhs.can_true, rhs.can_false)};
+  }
   case ExprKind::Not: {
     ExprOutcome operand = lowerExprOutcome(expr.operands[0], ctx);
     return {operand.can_true, operand.can_false};
@@ -104,39 +108,59 @@ ExprOutcome lowerExprOutcome(const BooleanExpr &expr, ExprLoweringContext &ctx) 
 
 class LoweringBuilder {
 public:
-  LoweringBuilder(const BooleanProgram &program, const Procedure &procedure)
-      : program_(program), procedure_(procedure) {
+  LoweringBuilder(const BooleanProgram &program, const Procedure &procedure,
+                  const PredicateProgramLayout &layout)
+      : program_(program), procedure_(procedure), layout_(layout) {
+    result_.procedure = procedure_.name;
+    result_.predicates = layout_.predicates;
     for (size_t i = 0; i < program_.globals.size(); ++i) {
-      result_.predicates.push_back(program_.globals[i].name);
-      result_.predicate_to_index.emplace(program_.globals[i].name,
-                                         static_cast<unsigned>(i));
+      if (!result_.predicate_to_index
+               .emplace(program_.globals[i].name, static_cast<unsigned>(i))
+               .second)
+        throw std::invalid_argument("duplicate global predicate: " +
+                                    program_.globals[i].name);
     }
-    if (result_.predicates.empty()) {
-      throw std::invalid_argument(
-          "Boolean program must declare at least one predicate");
+    unsigned local_index = layout_.local_begin;
+    for (const auto &name : procedure_.parameters) {
+      if (!result_.predicate_to_index.emplace(name, local_index++).second)
+        throw std::invalid_argument("duplicate predicate: " + name);
     }
-    npa::PredicateRelationDomain::configure(
-        static_cast<unsigned>(result_.predicates.size()));
+    for (const auto &name : procedure_.locals) {
+      if (!result_.predicate_to_index.emplace(name, local_index++).second)
+        throw std::invalid_argument("duplicate predicate: " + name);
+    }
     registerStatementList(procedure_.statements, "__bp." + procedure_.name);
   }
 
   LoweringResult build() {
-    auto entry = lowerStatementList(procedure_.statements, std::nullopt);
-
     const std::string prefix = "__bp." + procedure_.name;
+    result_.normal_exit_label = prefix + ".exit";
+    ensureNode(result_.normal_exit_label);
+    result_.exit_labels.push_back(result_.normal_exit_label);
+    std::string fallthrough = result_.normal_exit_label;
+    if (procedure_.returns_bool) {
+      fallthrough = prefix + ".fallthrough";
+      std::vector<npa::PredicateUpdate> updates;
+      for (unsigned i = 0; i < procedure_.bool_width.value_or(1); ++i)
+        updates.push_back({layout_.return_begin + i, std::nullopt,
+                           std::nullopt});
+      emitPredicateEdge(fallthrough, result_.normal_exit_label,
+                        npa::PredicateRelationDomain::parallelAssign(updates),
+                        StatementKind::Return);
+    }
+    auto entry = lowerStatementList(procedure_.statements, fallthrough);
     if (procedure_.abortif.has_value()) {
       const std::string gate = prefix + ".abortif";
       const std::string abort_exit = prefix + ".abort";
-      auto abort_formula = lowerExprToPredicateFormula(
-          *procedure_.abortif, result_.predicate_to_index);
+      auto abort_condition = lowerCondition(*procedure_.abortif);
       emitPredicateEdge(gate, abort_exit,
-                        npa::PredicateRelationDomain::guard(abort_formula),
+                        npa::PredicateRelationDomain::guard(
+                            abort_condition.can_true),
                         StatementKind::Branch);
-      result_.exit_labels.push_back(abort_exit);
+      result_.error_exit_labels.push_back(abort_exit);
       emitPredicateToOptional(
           gate, entry,
-          npa::PredicateRelationDomain::guard(
-              npa::PredicateFormula::negate(abort_formula)),
+          npa::PredicateRelationDomain::guard(abort_condition.can_false),
           StatementKind::Branch);
       entry = gate;
     }
@@ -151,13 +175,33 @@ public:
       entry = gate;
     }
 
-    if (entry.has_value())
-      result_.entry_label = *entry;
+    result_.entry_label = prefix + ".entry";
+    std::vector<npa::PredicateUpdate> entry_updates;
+    for (unsigned i = 0; i < layout_.local_count; ++i) {
+      npa::PredicateUpdate update;
+      update.predicate = layout_.local_begin + i;
+      if (i < procedure_.parameters.size()) {
+        auto arg = npa::PredicateFormula::variable(layout_.argument_begin + i);
+        update.can_be_false = npa::PredicateFormula::negate(arg);
+        update.can_be_true = arg;
+      }
+      entry_updates.push_back(std::move(update));
+    }
+    emitPredicateEdge(result_.entry_label, *entry,
+                      npa::PredicateRelationDomain::parallelAssign(entry_updates),
+                      StatementKind::Assign);
 
     std::sort(result_.exit_labels.begin(), result_.exit_labels.end());
     result_.exit_labels.erase(
         std::unique(result_.exit_labels.begin(), result_.exit_labels.end()),
         result_.exit_labels.end());
+    std::sort(result_.error_exit_labels.begin(),
+              result_.error_exit_labels.end());
+    result_.error_exit_labels.erase(
+        std::unique(result_.error_exit_labels.begin(),
+                    result_.error_exit_labels.end()),
+        result_.error_exit_labels.end());
+    result_.label_aliases = canonical_labels_;
     return result_;
   }
 
@@ -186,7 +230,15 @@ private:
 
   std::string resolveLabel(const std::string &label) const {
     auto it = canonical_labels_.find(label);
-    return it == canonical_labels_.end() ? label : it->second;
+    if (it == canonical_labels_.end())
+      throw std::invalid_argument("unknown goto target: " + label);
+    return it->second;
+  }
+
+  ExprOutcome lowerCondition(const BooleanExpr &expr) const {
+    ExprLoweringContext ctx{result_.predicate_to_index,
+                            npa::PredicateVariableVersion::Current};
+    return lowerExprOutcome(expr, ctx);
   }
 
   void ensureNode(const std::string &label) {
@@ -281,10 +333,24 @@ private:
     case StatementKind::EndThread:
     case StatementKind::AtomicBegin:
     case StatementKind::AtomicEnd:
-    case StatementKind::Dead:
       emitPredicateToOptional(entry, continuation,
                               npa::PredicateRelationDomain::one(), stmt.kind);
       return entry;
+
+    case StatementKind::Dead: {
+      std::vector<npa::PredicateUpdate> updates;
+      for (const auto &name : stmt.dead_variables) {
+        auto it = result_.predicate_to_index.find(name);
+        if (it == result_.predicate_to_index.end() ||
+            it->second < layout_.local_begin)
+          throw std::invalid_argument("dead variable is not local: " + name);
+        updates.push_back({it->second, std::nullopt, std::nullopt});
+      }
+      emitPredicateToOptional(entry, continuation,
+                              npa::PredicateRelationDomain::parallelAssign(updates),
+                              stmt.kind);
+      return entry;
+    }
 
     case StatementKind::Print:
       if (continuation.has_value()) {
@@ -320,15 +386,35 @@ private:
 
     case StatementKind::Return:
       {
-        ensureNode(entry);
+        const unsigned expected = procedure_.returns_bool
+                                      ? procedure_.bool_width.value_or(1)
+                                      : 0;
+        if (!stmt.expressions.empty() && stmt.expressions.size() != expected)
+          throw std::invalid_argument("return width mismatch in " +
+                                      procedure_.name);
+        std::vector<npa::PredicateUpdate> updates;
+        for (unsigned i = 0; i < expected; ++i) {
+          npa::PredicateUpdate update;
+          update.predicate = layout_.return_begin + i;
+          if (!stmt.expressions.empty()) {
+            ExprLoweringContext ctx{result_.predicate_to_index,
+                                    npa::PredicateVariableVersion::Current};
+            auto outcome = lowerExprOutcome(stmt.expressions[i], ctx);
+            update.can_be_false = outcome.can_false;
+            update.can_be_true = outcome.can_true;
+          }
+          updates.push_back(std::move(update));
+        }
         LoweredInstruction instruction;
-        instruction.id = nextInstructionId(entry, entry);
+        instruction.id = nextInstructionId(entry, result_.normal_exit_label);
         instruction.kind = LoweredInstructionKind::Return;
         instruction.source_kind = stmt.kind;
         instruction.arguments = stmt.expressions;
+        instruction.relation =
+            npa::PredicateRelationDomain::parallelAssign(updates);
         appendInstruction(instruction);
+        appendEdge(entry, result_.normal_exit_label, instruction.id);
       }
-      result_.exit_labels.push_back(entry);
       return entry;
 
     case StatementKind::Goto:
@@ -340,24 +426,32 @@ private:
 
     case StatementKind::Assume:
     case StatementKind::Assert: {
-      auto formula =
-          lowerExprToPredicateFormula(stmt.expr, result_.predicate_to_index);
+      auto condition = lowerCondition(stmt.expr);
       emitPredicateToOptional(entry, continuation,
-                              npa::PredicateRelationDomain::guard(formula),
+                              npa::PredicateRelationDomain::guard(
+                                  condition.can_true),
                               stmt.kind);
+      if (stmt.kind == StatementKind::Assert) {
+        const std::string error_label =
+            "__bp." + procedure_.name + ".error";
+        emitPredicateEdge(
+            entry, error_label,
+            npa::PredicateRelationDomain::guard(condition.can_false),
+            stmt.kind);
+        result_.error_exit_labels.push_back(error_label);
+      }
       return entry;
     }
 
     case StatementKind::Branch: {
-      auto condition =
-          lowerExprToPredicateFormula(stmt.expr, result_.predicate_to_index);
+      auto condition = lowerCondition(stmt.expr);
       emitPredicateEdge(entry, resolveLabel(stmt.targets.front()),
-                        npa::PredicateRelationDomain::guard(condition),
+                        npa::PredicateRelationDomain::guard(
+                            condition.can_true),
                         stmt.kind);
       emitPredicateToOptional(
           entry, continuation,
-          npa::PredicateRelationDomain::guard(
-              npa::PredicateFormula::negate(condition)),
+          npa::PredicateRelationDomain::guard(condition.can_false),
           stmt.kind);
       return entry;
     }
@@ -378,10 +472,16 @@ private:
         return entry;
       }
 
+      if (stmt.assignment.lhs.size() != stmt.assignment.rhs.size())
+        throw std::invalid_argument("assignment width mismatch in " +
+                                    procedure_.name);
+
       std::vector<npa::PredicateUpdate> updates;
       updates.reserve(stmt.assignment.lhs.size());
       for (size_t i = 0; i < stmt.assignment.lhs.size(); ++i) {
         const auto &target = stmt.assignment.lhs[i];
+        if (target.name == "_")
+          continue;
         auto it = result_.predicate_to_index.find(target.name);
         if (it == result_.predicate_to_index.end()) {
           throw std::invalid_argument("assignment to unknown predicate: " +
@@ -420,29 +520,28 @@ private:
         auto branch_entry =
             lowerStatementList(stmt.elsif_branches[branch_index].second,
                                continuation);
-        auto branch_cond = lowerExprToPredicateFormula(
-            stmt.elsif_branches[branch_index].first, result_.predicate_to_index);
+        auto branch_cond =
+            lowerCondition(stmt.elsif_branches[branch_index].first);
         emitPredicateToOptional(cond_label, branch_entry,
-                                npa::PredicateRelationDomain::guard(branch_cond),
+                                npa::PredicateRelationDomain::guard(
+                                    branch_cond.can_true),
                                 stmt.kind);
         emitPredicateToOptional(
             cond_label, false_target,
-            npa::PredicateRelationDomain::guard(
-                npa::PredicateFormula::negate(branch_cond)),
+            npa::PredicateRelationDomain::guard(branch_cond.can_false),
             stmt.kind);
         false_target = cond_label;
       }
 
       auto then_entry = lowerStatementList(stmt.then_statements, continuation);
-      auto condition =
-          lowerExprToPredicateFormula(stmt.expr, result_.predicate_to_index);
+      auto condition = lowerCondition(stmt.expr);
       emitPredicateToOptional(entry, then_entry,
-                              npa::PredicateRelationDomain::guard(condition),
+                              npa::PredicateRelationDomain::guard(
+                                  condition.can_true),
                               stmt.kind);
       emitPredicateToOptional(
           entry, false_target,
-          npa::PredicateRelationDomain::guard(
-              npa::PredicateFormula::negate(condition)),
+          npa::PredicateRelationDomain::guard(condition.can_false),
           stmt.kind);
       return entry;
     }
@@ -453,15 +552,14 @@ private:
       if (!body_entry.has_value())
         body_entry = entry;
 
-      auto condition =
-          lowerExprToPredicateFormula(stmt.expr, result_.predicate_to_index);
+      auto condition = lowerCondition(stmt.expr);
       emitPredicateToOptional(entry, body_entry,
-                              npa::PredicateRelationDomain::guard(condition),
+                              npa::PredicateRelationDomain::guard(
+                                  condition.can_true),
                               stmt.kind);
       emitPredicateToOptional(
           entry, continuation,
-          npa::PredicateRelationDomain::guard(
-              npa::PredicateFormula::negate(condition)),
+          npa::PredicateRelationDomain::guard(condition.can_false),
           stmt.kind);
       return entry;
     }
@@ -472,6 +570,7 @@ private:
 
   const BooleanProgram &program_;
   const Procedure &procedure_;
+  const PredicateProgramLayout &layout_;
   LoweringResult result_;
   std::unordered_map<const Statement *, std::string> labels_;
   std::unordered_map<std::string, std::string> canonical_labels_;
@@ -489,12 +588,62 @@ npa::PredicateFormula lowerExprToPredicateFormula(
   return lowerExprOutcome(expr, ctx).can_true;
 }
 
+npa::PredicateUpdate lowerExprToPredicateUpdate(
+    const BooleanExpr &expr,
+    const std::unordered_map<std::string, unsigned> &predicate_to_index,
+    unsigned target) {
+  ExprLoweringContext ctx{predicate_to_index,
+                          npa::PredicateVariableVersion::Current};
+  auto outcome = lowerExprOutcome(expr, ctx);
+  return {target, outcome.can_false, outcome.can_true};
+}
+
 LoweringResult lowerToPredicateProgram(const BooleanProgram &program,
                                        const std::string &procedure_name) {
-  const Procedure *procedure = program.findProcedure(procedure_name);
-  if (!procedure)
-    throw std::invalid_argument("procedure not found: " + procedure_name);
-  return LoweringBuilder(program, *procedure).build();
+  auto lowered = lowerBooleanProgram(program);
+  for (auto &procedure : lowered.procedures) {
+    if (procedure.procedure == procedure_name)
+      return std::move(procedure);
+  }
+  throw std::invalid_argument("procedure not found: " + procedure_name);
+}
+
+LoweredBooleanProgram lowerBooleanProgram(const BooleanProgram &program) {
+  LoweredBooleanProgram lowered;
+  auto &layout = lowered.layout;
+  layout.global_count = static_cast<unsigned>(program.globals.size());
+  for (const auto &decl : program.globals)
+    layout.predicates.push_back(decl.name);
+  if (layout.predicates.empty()) {
+    layout.predicates.push_back("__bp.dummy");
+    layout.global_count = 1;
+  }
+  for (const auto &procedure : program.procedures) {
+    layout.argument_count = std::max<unsigned>(
+        layout.argument_count, procedure.parameters.size());
+    layout.return_count = std::max<unsigned>(
+        layout.return_count,
+        procedure.returns_bool ? procedure.bool_width.value_or(1) : 0);
+    layout.local_count = std::max<unsigned>(
+        layout.local_count,
+        procedure.parameters.size() + procedure.locals.size());
+  }
+  layout.argument_begin = static_cast<unsigned>(layout.predicates.size());
+  for (unsigned i = 0; i < layout.argument_count; ++i)
+    layout.predicates.push_back("__bp.arg." + std::to_string(i));
+  layout.return_begin = static_cast<unsigned>(layout.predicates.size());
+  for (unsigned i = 0; i < layout.return_count; ++i)
+    layout.predicates.push_back("__bp.return." + std::to_string(i));
+  layout.local_begin = static_cast<unsigned>(layout.predicates.size());
+  for (unsigned i = 0; i < layout.local_count; ++i)
+    layout.predicates.push_back("__bp.local." + std::to_string(i));
+
+  npa::PredicateRelationDomain::configure(
+      static_cast<unsigned>(layout.predicates.size()), layout.local_count);
+  for (const auto &procedure : program.procedures)
+    lowered.procedures.push_back(
+        LoweringBuilder(program, procedure, layout).build());
+  return lowered;
 }
 
 } // namespace frontend

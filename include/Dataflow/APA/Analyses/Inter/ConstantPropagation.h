@@ -22,7 +22,8 @@ InterConstantPropagationResult runInterElimConstantPropagation(
     llvm::Function *Entry, llvm::AAResults *AA = nullptr,
     llvm::AssumptionCache *AC = nullptr, llvm::DominatorTree *DT = nullptr,
     llvm::TargetLibraryInfo *TLI = nullptr,
-    const dataflow::controlflow::InterCFG *ICF = nullptr);
+    const dataflow::controlflow::InterCFG *ICF = nullptr,
+    EliminationOptions Options = defaultContextOptions());
 
 InterConstantPropagationResult runInterSummaryElimConstantPropagation(
     llvm::Function *Entry, llvm::AAResults *AA = nullptr,

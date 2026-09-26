@@ -9,8 +9,7 @@
 //
 //===----------------------------------------------------------------------===//
 
-#ifndef LOTUS_VERIFICATION_SIFA_SIFASYMABS_H
-#define LOTUS_VERIFICATION_SIFA_SIFASYMABS_H
+#pragma once
 
 #include "Verification/Sifa/SymAbs/SifaSymAbsOptions.h"
 
@@ -52,4 +51,3 @@ SymAbsState analyzeSymAbsToReturn(const llvm::Module &M,
 } // namespace sifa
 } // namespace lotus
 
-#endif // LOTUS_VERIFICATION_SIFA_SIFASYMABS_H

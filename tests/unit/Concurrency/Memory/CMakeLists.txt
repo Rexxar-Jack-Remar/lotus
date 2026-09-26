@@ -1,3 +1,0 @@
-add_lotus_concurrency_test_suite(concurrency_memory_tests
-  EscapeAnalysisTest.cpp
-  StaticThreadSharingAnalysisTest.cpp)

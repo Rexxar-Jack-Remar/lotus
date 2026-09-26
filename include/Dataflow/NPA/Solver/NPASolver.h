@@ -1,5 +1,4 @@
-#ifndef NPA_NPA_SOLVER_H
-#define NPA_NPA_SOLVER_H
+#pragma once
 
 /**
  * \file
@@ -434,6 +433,12 @@ solve_newton_linearized_system(bool verbose, const NewtonRoundSetup<D> &setup,
   using V = DomVal<D>;
   const bool use_tensor =
       setup.tensor_laws_validated && setup.has_lcfl_structure;
+  if (round_stats) {
+    round_stats->used_tensor =
+        linStrat == LinearStrategy::TensorProduct && use_tensor;
+    round_stats->tensor_fallback =
+        linStrat == LinearStrategy::TensorProduct && !use_tensor;
+  }
   if (linStrat == LinearStrategy::TensorProduct && verbose) {
     if (!TensorSemiringTraits<D>::available()) {
       std::cerr << "[tensor] tensor traits unavailable for domain; "
@@ -729,6 +734,8 @@ private:
         sparse_system ? static_cast<long>(sparse_system->occurrenceCount()) : 0;
     stats.newton_rounds = std::move(round_stats);
     for (const NewtonRoundStat &round : stats.newton_rounds) {
+      stats.tensor_rounds += round.used_tensor;
+      stats.tensor_fallback_rounds += round.tensor_fallback;
       stats.queried_derivative_occurrences += round.queried_occurrences;
       stats.retained_derivative_occurrences += round.retained_occurrences;
       stats.materialized_derivative_terms +=
@@ -797,4 +804,3 @@ public:
 
 } // namespace npa
 
-#endif // NPA_NPA_SOLVER_H

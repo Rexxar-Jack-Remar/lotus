@@ -50,10 +50,10 @@ constexpr std::string_view REWRITTEN_ALIAS = "Production:\n"
 
 constexpr std::string_view STANDARD_VALUE_FLOW = "Production:\n"
                                                  "A\tA\tA\n"
-                                                 "A\tCl_i\tret_i\n"
+                                                 "A\tCA_i\tret_i\n"
                                                  "A\ta\n"
                                                  "A\n"
-                                                 "Cl_i\tcall_i\tA\n"
+                                                 "CA_i\tcall_i\tA\n"
                                                  "Count:\n"
                                                  "A\n";
 
@@ -64,8 +64,8 @@ constexpr std::string_view REWRITTEN_VALUE_FLOW = "Production:\n"
                                                   "A\tA\tB\n"
                                                   "A\ta\n"
                                                   "A\n"
-                                                  "B\tCl_i\tret_i\n"
-                                                  "Cl_i\tcall_i\tA\n"
+                                                  "B\tCA_i\tret_i\n"
+                                                  "CA_i\tcall_i\tA\n"
                                                   "Count:\n"
                                                   "A\n";
 

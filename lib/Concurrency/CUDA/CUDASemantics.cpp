@@ -234,6 +234,10 @@ const char *toString(CUDAEffectKind kind) {
   return "Unknown";
 }
 
+std::string cudaEffectToString(CUDAEffectKind kind) {
+  return toString(kind);
+}
+
 const char *toString(CUDASemanticFamily family) {
   switch (family) {
   case CUDASemanticFamily::Unknown:

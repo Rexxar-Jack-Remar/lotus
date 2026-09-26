@@ -38,7 +38,7 @@ TEST(ClassicalAdaptersTest, AdaptsTheNativeAserConstraintGraph) {
   EXPECT_EQ(adapted.edges().front().source, lhs->getNodeID());
   EXPECT_EQ(adapted.edges().front().target, rhs->getNodeID());
 
-  AliasClient client = makeAliasClient(source);
+  AliasClient client = makeAliasClient(source, AliasEncodingMode::PAG);
   EXPECT_TRUE(
       client.graph().hasEdge(lhs->getNodeID(), rhs->getNodeID(), "copy"));
 
@@ -63,7 +63,7 @@ TEST(ClassicalAdaptersTest, SynchronizesLiveAserConstraintGrowth) {
       source.addCGNode<aser::CGPtrNode<aser::NoCtx>, TestPointsToStorage>();
   ASSERT_TRUE(source.addConstraints(first, second, aser::Constraints::copy));
 
-  AliasClient client = makeAliasClient(source);
+  AliasClient client = makeAliasClient(source, AliasEncodingMode::PAG);
   AserAliasSynchronizer<aser::NoCtx> synchronizer(source, client);
   bool extended = false;
   aser::CGPtrNode<aser::NoCtx> *third = nullptr;
@@ -121,7 +121,8 @@ TEST(ClassicalAdaptersTest,
   graph.addEdge(obj, ptr, AliasConstraintEdgeKind::Addr);
   graph.addEdge(ptr, alias, AliasConstraintEdgeKind::Copy);
 
-  AliasClient client = AliasClient::fromConstraintGraph(graph);
+  AliasClient client =
+      AliasClient::fromConstraintGraph(graph, AliasEncodingMode::PAG);
   EXPECT_THROW(client.mayAlias(ptr, alias), std::logic_error);
   EXPECT_THROW(client.pointsTo(alias), std::logic_error);
   const auto stats = client.solve();
@@ -134,29 +135,6 @@ TEST(ClassicalAdaptersTest,
   EXPECT_EQ(pts, std::vector<std::size_t>({obj}));
   EXPECT_EQ(std::find(pts.begin(), pts.end(), alias), pts.end());
   EXPECT_GT(stats.added_edges, 0u);
-}
-
-TEST(ClassicalAdaptersTest, SpecializedAliasEnginesLowerPagMemoryOperations) {
-  AliasConstraintGraph graph;
-  const auto slot_object = graph.addNode("slot_object");
-  const auto value_object = graph.addNode("value_object");
-  const auto pointer = graph.addNode("pointer");
-  const auto value = graph.addNode("value");
-  const auto loaded = graph.addNode("loaded");
-  graph.addEdge(slot_object, pointer, AliasConstraintEdgeKind::Addr);
-  graph.addEdge(value_object, value, AliasConstraintEdgeKind::Addr);
-  graph.addEdge(value, pointer, AliasConstraintEdgeKind::Store);
-  graph.addEdge(pointer, loaded, AliasConstraintEdgeKind::Load);
-
-  for (engines::SpecializedPocrBackend backend :
-       {engines::SpecializedPocrBackend::Pocr,
-        engines::SpecializedPocrBackend::Focr}) {
-    AliasClient client = AliasClient::fromConstraintGraph(graph);
-    EXPECT_NO_THROW(client.solveSpecialized(backend));
-    EXPECT_TRUE(client.mayAlias(value, loaded));
-    EXPECT_EQ(client.pointsTo(loaded),
-              std::vector<std::size_t>({value_object}));
-  }
 }
 
 TEST(ClassicalAdaptersTest, AliasClientResumesAfterIncrementalConstraint) {
@@ -209,9 +187,11 @@ TEST(ClassicalAdaptersTest,
     for (SolverBackend backend :
          {SolverBackend::SparseSet, SolverBackend::SparseBitVector,
           SolverBackend::Graspan, SolverBackend::Sqid, SolverBackend::Pearl,
-          SolverBackend::TransitiveClosure, SolverBackend::Pocr,
-          SolverBackend::HierarchicalPocr, SolverBackend::FullyOrdered,
-          SolverBackend::EndpointQuotient}) {
+          SolverBackend::Skewed, SolverBackend::Cat, SolverBackend::Iea,
+          SolverBackend::IeaOcr, SolverBackend::TransitiveClosure,
+          SolverBackend::Pocr, SolverBackend::HierarchicalPocr,
+          SolverBackend::FullyOrdered, SolverBackend::EndpointQuotient,
+          SolverBackend::CertCFL}) {
       AliasClient alternate = AliasClient::fromConstraintGraph(graph, mode);
       alternate.solve(backend);
       EXPECT_TRUE(alternate.mayAlias(value, loaded))
@@ -220,17 +200,6 @@ TEST(ClassicalAdaptersTest,
                 std::vector<std::size_t>({value_obj}))
           << solverBackendName(backend);
     }
-  }
-
-  for (engines::SpecializedPocrBackend backend :
-       {engines::SpecializedPocrBackend::Pocr,
-        engines::SpecializedPocrBackend::Focr}) {
-    AliasClient specialized =
-        AliasClient::fromConstraintGraph(graph, AliasEncodingMode::PEG);
-    const ReachabilityStats specialized_stats =
-        specialized.solveSpecialized(backend);
-    EXPECT_TRUE(specialized.mayAlias(value, loaded));
-    EXPECT_GT(specialized_stats.specialized_reachability_pairs, 0u);
   }
 }
 
@@ -408,8 +377,10 @@ TEST(ClassicalAdaptersTest, PegResultsAreIndependentOfConstraintOrder) {
   for (SolverBackend backend :
        {SolverBackend::SparseSet, SolverBackend::SparseBitVector,
         SolverBackend::Graspan, SolverBackend::Sqid, SolverBackend::Pearl,
-        SolverBackend::TransitiveClosure, SolverBackend::Pocr,
-        SolverBackend::HierarchicalPocr, SolverBackend::FullyOrdered}) {
+        SolverBackend::Skewed, SolverBackend::Cat, SolverBackend::Iea,
+        SolverBackend::IeaOcr, SolverBackend::TransitiveClosure,
+        SolverBackend::Pocr, SolverBackend::HierarchicalPocr,
+        SolverBackend::FullyOrdered}) {
     AliasConstraintGraph batch_graph = makeEmptyGraph();
     batch_graph.addEdge(object, pointer, AliasConstraintEdgeKind::Addr);
     batch_graph.addEdge(value, pointer, AliasConstraintEdgeKind::Store);
@@ -457,6 +428,122 @@ TEST(ClassicalAdaptersTest, GrammarBuildersMaterializeObservedAttributes) {
 
   EXPECT_NE(pag.binaryByFirst().find("Gepbar_3"), pag.binaryByFirst().end());
   EXPECT_NE(peg.binaryByFirst().find("gepbar_3"), peg.binaryByFirst().end());
+}
+
+TEST(ClassicalAdaptersTest,
+     CflPegPipelineUsesStandardGrammarEncodingAndReductions) {
+  AliasConstraintGraph graph;
+  const auto object = graph.addNode("object");
+  const auto pointer = graph.addNode("pointer");
+  const auto copy = graph.addNode("copy");
+  const auto field = graph.addNode("field");
+  graph.addEdge(object, pointer, AliasConstraintEdgeKind::Addr);
+  graph.addEdge(pointer, copy, AliasConstraintEdgeKind::Copy);
+  graph.addEdge(pointer, field, AliasConstraintEdgeKind::NormalGep, 8);
+
+  AliasClient client = AliasClient::fromConstraintGraph(graph);
+  EXPECT_TRUE(client.grammar().isTerminal("a"));
+  EXPECT_TRUE(client.grammar().isTerminal("d"));
+  EXPECT_TRUE(client.grammar().isTerminal("f_8"));
+  EXPECT_FALSE(client.grammar().hasSymbol("copy"));
+  EXPECT_TRUE(client.grammar().transitiveSymbols().count(
+      client.grammar().symbolId("A")));
+  EXPECT_LT(client.grammar().symbolCount(),
+            buildPagGrammar(graph).symbolCount());
+  EXPECT_LT(client.graph().vertexCount(), graph.nodeNames().size());
+  EXPECT_GT(client.simplificationStatistics().folded_nodes, 0u);
+
+  client.solve(SolverBackend::Pocr);
+  EXPECT_TRUE(client.mayAlias(pointer, copy));
+  EXPECT_EQ(client.pointsTo(field).size(), 1u);
+  EXPECT_EQ(client.baseObject(client.pointsTo(field).front()), object);
+}
+
+TEST(ClassicalAdaptersTest,
+     CflPegPipelineSupportsIncrementalSemanticNodesAndAttributes) {
+  AliasConstraintGraph graph;
+  const auto object = graph.addNode("object");
+  const auto pointer = graph.addNode("pointer");
+  const auto copy = graph.addNode("copy");
+  graph.addEdge(object, pointer, AliasConstraintEdgeKind::Addr);
+  graph.addEdge(pointer, copy, AliasConstraintEdgeKind::Copy);
+
+  AliasClient client =
+      AliasClient::fromConstraintGraph(graph, AliasEncodingMode::CFLPEG);
+  client.solve(SolverBackend::Pocr);
+  const std::size_t late = client.addNode("late");
+  EXPECT_EQ(late, 3u);
+  EXPECT_TRUE(client.addConstraint(copy, late, AliasConstraintEdgeKind::Copy));
+  const std::size_t field = client.addNode("field");
+  EXPECT_TRUE(client.addConstraint(late, field,
+                                   AliasConstraintEdgeKind::NormalGep, 16));
+  client.solve(SolverBackend::Pocr);
+
+  EXPECT_TRUE(client.mayAlias(pointer, late));
+  EXPECT_TRUE(client.grammar().isTerminal("f_16"));
+  EXPECT_EQ(client.baseObject(client.pointsTo(field).front()), object);
+}
+
+TEST(ClassicalAdaptersTest, CflPegReductionsPreserveGeneratedSemanticQueries) {
+  for (std::uint64_t seed = 1; seed <= 128; ++seed) {
+    std::uint64_t state = seed;
+    auto next = [&]() {
+      state = state * 6364136223846793005ULL + 1442695040888963407ULL;
+      return state;
+    };
+
+    AliasConstraintGraph graph;
+    constexpr std::size_t nodes = 6;
+    for (std::size_t node = 0; node < nodes; ++node) {
+      graph.addNode("n" + std::to_string(node));
+    }
+    graph.addEdge(0, 1, AliasConstraintEdgeKind::Addr);
+    graph.addEdge(2, 3, AliasConstraintEdgeKind::Addr);
+    for (std::size_t source = 0; source < nodes; ++source) {
+      for (std::size_t target = 0; target < nodes; ++target) {
+        if (source == target) {
+          continue;
+        }
+        switch (next() % 17) {
+        case 0:
+          graph.addEdge(source, target, AliasConstraintEdgeKind::Copy);
+          break;
+        case 1:
+          graph.addEdge(source, target, AliasConstraintEdgeKind::NormalGep, 0);
+          break;
+        case 2:
+          graph.addEdge(source, target, AliasConstraintEdgeKind::NormalGep,
+                        static_cast<std::uint32_t>((next() % 3 + 1) * 4));
+          break;
+        case 3:
+          graph.addEdge(source, target, AliasConstraintEdgeKind::VariantGep);
+          break;
+        case 4:
+          graph.addEdge(source, target, AliasConstraintEdgeKind::Store);
+          break;
+        case 5:
+          graph.addEdge(source, target, AliasConstraintEdgeKind::Load);
+          break;
+        default:
+          break;
+        }
+      }
+    }
+
+    LabeledGraph raw_graph = encodeCflPegGraph(graph);
+    const Grammar raw_grammar = buildStandardAliasGrammar(graph);
+    SolverSession raw(raw_graph, raw_grammar, SolverBackend::SparseBitVector);
+    AliasClient reduced =
+        AliasClient::fromConstraintGraph(graph, AliasEncodingMode::CFLPEG);
+    raw.solve();
+    reduced.solve(SolverBackend::SparseBitVector);
+    for (std::size_t lhs = 0; lhs < nodes; ++lhs) {
+      for (std::size_t rhs = 0; rhs < nodes; ++rhs) {
+        EXPECT_EQ(reduced.mayValueAlias(lhs, rhs), raw.contains(lhs, rhs, "V"))
+            << "seed=" << seed << " lhs=" << lhs << " rhs=" << rhs;
+      }
+    }
+  }
 }
 
 TEST(ClassicalAdaptersTest, MovingAliasClientPreservesSolvedSession) {
@@ -507,7 +594,8 @@ TEST(ClassicalAdaptersTest, IncrementalGepExtendsAttributedGrammar) {
   AliasConstraintGraph graph;
   const auto base = graph.addNode("base");
   const auto field = graph.addNode("field");
-  AliasClient client = AliasClient::fromConstraintGraph(graph);
+  AliasClient client =
+      AliasClient::fromConstraintGraph(graph, AliasEncodingMode::PAG);
   client.solve(SolverBackend::SparseBitVector);
 
   EXPECT_TRUE(
@@ -518,7 +606,8 @@ TEST(ClassicalAdaptersTest, IncrementalGepExtendsAttributedGrammar) {
   EXPECT_TRUE(client.graph().hasEdge(base, field, "gep_9"));
 }
 
-TEST(ClassicalAdaptersTest, QuotientGrammarExtensionDoesNotMaterializeOldClosure) {
+TEST(ClassicalAdaptersTest,
+     QuotientGrammarExtensionDoesNotMaterializeOldClosure) {
   AliasConstraintGraph graph;
   const auto object = graph.addNode("object");
   const auto pointer = graph.addNode("pointer");
@@ -533,7 +622,8 @@ TEST(ClassicalAdaptersTest, QuotientGrammarExtensionDoesNotMaterializeOldClosure
   const auto stats = client.solve(SolverBackend::EndpointQuotient);
   EXPECT_EQ(stats.endpoint_quotient_seed_facts, client.graph().edgeCount());
   EXPECT_TRUE(client.mayValueAlias(pointer, alias));
-  EXPECT_EQ(client.addressTakenObjects(alias), std::vector<std::size_t>({object}));
+  EXPECT_EQ(client.addressTakenObjects(alias),
+            std::vector<std::size_t>({object}));
 
   graph.addEdge(alias, field, AliasConstraintEdgeKind::NormalGep, 17);
   AliasClient fresh = AliasClient::fromConstraintGraph(graph);
@@ -641,24 +731,36 @@ TEST(ClassicalAdaptersTest, ValueFlowClientEncodesSvfgCallsAndReachability) {
   EXPECT_NE(std::find(reachable.begin(), reachable.end(), 4), reachable.end());
   EXPECT_GT(stats.added_edges, 0u);
 
+  const LabeledGraph classical = encodeClassicalCflSVFG(svfg);
+  EXPECT_TRUE(classical.hasEdge(classical.vertexId("1"),
+                                classical.vertexId("2"), "call_1"));
+  EXPECT_TRUE(classical.hasEdge(classical.vertexId("3"),
+                                classical.vertexId("4"), "ret_1"));
+  EXPECT_TRUE(
+      classical.hasEdge(classical.vertexId("2"), classical.vertexId("5"), "a"));
+  EXPECT_TRUE(
+      classical.hasEdge(classical.vertexId("5"), classical.vertexId("3"), "a"));
+  EXPECT_FALSE(classical.hasEdge(classical.vertexId("2"),
+                                 classical.vertexId("1"), "callbar_1"));
+  const Grammar classical_grammar = buildClassicalCflVfgGrammar(svfg);
+  EXPECT_EQ(classical_grammar.startSymbol(), "A");
+  EXPECT_TRUE(classical_grammar.isCountSymbol("A"));
+  EXPECT_TRUE(classical_grammar.isTerminal("call_1"));
+  EXPECT_FALSE(classical_grammar.hasSymbol("direct"));
+  ValueFlowClient classical_client =
+      ValueFlowClient::fromSVFG(svfg, ValueFlowEncodingMode::ClassicalCFL);
+  classical_client.solve(SolverBackend::SparseBitVector);
+  EXPECT_TRUE(classical_client.hasFlow(1, 4));
+
   for (SolverBackend backend :
        {SolverBackend::SparseBitVector, SolverBackend::Graspan,
-        SolverBackend::Sqid, SolverBackend::Pearl,
+        SolverBackend::Sqid, SolverBackend::Pearl, SolverBackend::Skewed,
+        SolverBackend::Cat, SolverBackend::Iea, SolverBackend::IeaOcr,
         SolverBackend::TransitiveClosure, SolverBackend::Pocr,
         SolverBackend::HierarchicalPocr, SolverBackend::FullyOrdered}) {
     ValueFlowClient alternate = ValueFlowClient::fromSVFG(svfg);
     alternate.solve(backend);
     EXPECT_TRUE(alternate.hasFlow(1, 4)) << solverBackendName(backend);
-  }
-  for (engines::SpecializedPocrBackend backend :
-       {engines::SpecializedPocrBackend::Pocr,
-        engines::SpecializedPocrBackend::Focr}) {
-    ValueFlowClient alternate = ValueFlowClient::fromSVFG(svfg);
-    const ReachabilityStats specialized_stats =
-        alternate.solveSpecialized(backend);
-    EXPECT_TRUE(alternate.hasFlow(1, 4));
-    EXPECT_THROW(alternate.hasRealizableFlow(1, 2), std::logic_error);
-    EXPECT_GT(specialized_stats.specialized_reachability_pairs, 0u);
   }
 }
 
@@ -1284,9 +1386,11 @@ TEST(ClassicalAdaptersTest, LlvmAliasAnalysisDrivesIndirectCallDiscovery) {
     for (SolverBackend backend :
          {SolverBackend::SparseSet, SolverBackend::SparseBitVector,
           SolverBackend::Graspan, SolverBackend::Sqid, SolverBackend::Pearl,
-          SolverBackend::TransitiveClosure, SolverBackend::Pocr,
-          SolverBackend::HierarchicalPocr, SolverBackend::FullyOrdered,
-          SolverBackend::EndpointQuotient}) {
+          SolverBackend::Skewed, SolverBackend::Cat, SolverBackend::Iea,
+          SolverBackend::IeaOcr, SolverBackend::TransitiveClosure,
+          SolverBackend::Pocr, SolverBackend::HierarchicalPocr,
+          SolverBackend::FullyOrdered, SolverBackend::EndpointQuotient,
+          SolverBackend::CertCFL}) {
       LLVMAliasOptions alternate_options;
       alternate_options.encoding = encoding;
       alternate_options.backend = backend;
@@ -1295,21 +1399,6 @@ TEST(ClassicalAdaptersTest, LlvmAliasAnalysisDrivesIndirectCallDiscovery) {
       EXPECT_FALSE(alternate.mayAlias(x, y)) << solverBackendName(backend);
       EXPECT_TRUE(alternate.nodeForValue(target).has_value())
           << solverBackendName(backend);
-    }
-  }
-
-  for (AliasEncodingMode encoding :
-       {AliasEncodingMode::PAG, AliasEncodingMode::PEG}) {
-    for (engines::SpecializedPocrBackend backend :
-         {engines::SpecializedPocrBackend::Pocr,
-          engines::SpecializedPocrBackend::Focr}) {
-      LLVMAliasOptions specialized_options;
-      specialized_options.encoding = encoding;
-      specialized_options.specialized_backend = backend;
-      LLVMCFLAliasAnalysis specialized(specialized_options);
-      EXPECT_NO_THROW(specialized.analyze(*module));
-      EXPECT_FALSE(specialized.mayAlias(x, y));
-      EXPECT_TRUE(specialized.nodeForValue(target).has_value());
     }
   }
 }

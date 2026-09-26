@@ -29,8 +29,7 @@
 //
 //===----------------------------------------------------------------------===//
 
-#ifndef LLVM_TRANSFORMS_SCALAR_LICM_H
-#define LLVM_TRANSFORMS_SCALAR_LICM_H
+#pragma once
 
 #include "llvm/Analysis/LoopInfo.h"
 #include "llvm/IR/PassManager.h"
@@ -83,4 +82,3 @@ public:
 };
 } // end namespace llvm
 
-#endif // LLVM_TRANSFORMS_SCALAR_LICM_H

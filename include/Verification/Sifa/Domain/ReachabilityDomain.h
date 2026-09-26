@@ -10,8 +10,7 @@
 //
 //===----------------------------------------------------------------------===//
 
-#ifndef LOTUS_VERIFICATION_SIFA_DOMAIN_REACHABILITYDOMAIN_H
-#define LOTUS_VERIFICATION_SIFA_DOMAIN_REACHABILITYDOMAIN_H
+#pragma once
 
 #include "Verification/Sifa/Domain/AbstractDomain.h"
 
@@ -67,4 +66,3 @@ public:
 } // namespace sifa
 } // namespace lotus
 
-#endif // LOTUS_VERIFICATION_SIFA_DOMAIN_REACHABILITYDOMAIN_H

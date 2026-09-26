@@ -10,8 +10,7 @@
 //
 //===----------------------------------------------------------------------===//
 
-#ifndef LOTUS_VERIFICATION_SIFA_DOMAIN_STATEBASEDDOMAIN_H
-#define LOTUS_VERIFICATION_SIFA_DOMAIN_STATEBASEDDOMAIN_H
+#pragma once
 
 #include "Verification/Sifa/Domain/AbstractDomain.h"
 #include "Verification/Sifa/Domain/IAbstractState.h"
@@ -33,4 +32,3 @@ public:
 } // namespace sifa
 } // namespace lotus
 
-#endif // LOTUS_VERIFICATION_SIFA_DOMAIN_STATEBASEDDOMAIN_H

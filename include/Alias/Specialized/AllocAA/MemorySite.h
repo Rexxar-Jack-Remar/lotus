@@ -62,8 +62,7 @@
  * implementations.
  */
 
-#ifndef ALLOC_AA_MEMORYSITE_H_
-#define ALLOC_AA_MEMORYSITE_H_
+#pragma once
 
 #include "Utils/LLVM/SystemHeaders.h"
 
@@ -330,4 +329,3 @@ struct MemoryReference {
   int32_t offsetInBits;
 };
 
-#endif // ALLOC_AA_MEMORYSITE_H_

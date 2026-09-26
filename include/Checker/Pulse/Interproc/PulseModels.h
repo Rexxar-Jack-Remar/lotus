@@ -1,6 +1,5 @@
 /** @file PulseModels.h @brief Modeled function specifications for Pulse interprocedural analysis. */
-#ifndef CHECKER_PULSE_PULSEMODELS_H
-#define CHECKER_PULSE_PULSEMODELS_H
+#pragma once
 
 #include "Checker/Pulse/Domain/PulseDomain.h"
 #include "Checker/Pulse/Domain/PulseOperations.h"
@@ -206,4 +205,3 @@ private:
 
 } // namespace pulse
 
-#endif // CHECKER_PULSE_PULSEMODELS_H

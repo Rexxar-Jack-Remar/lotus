@@ -1,8 +1,8 @@
 #include "Dataflow/APA/Analyses/Inter/Reachability.h"
 
 #include "Dataflow/APA/LLVM/InterProblem.h"
-#include "Dataflow/APA/Solver/ForwardInterSummarySolver.h"
-#include "Dataflow/APA/Solver/ModularInterSummaryDriver.h"
+#include "Dataflow/APA/Solver/Inter/ExpandedSolver.h"
+#include "Dataflow/APA/Solver/Inter/Modular/Solver.h"
 
 namespace elimination {
 namespace {
@@ -56,7 +56,7 @@ public:
 
 InterReachabilityResult
 runInterElimReachability(llvm::Function *Entry,
-                         const dataflow::controlflow::InterCFG *ICF) {
+                         const dataflow::controlflow::InterCFG *ICF, EliminationOptions Options) {
   InterReachabilityResult Out;
   if (Entry == nullptr || Entry->isDeclaration()) {
     return Out;
@@ -72,7 +72,7 @@ runInterElimReachability(llvm::Function *Entry,
   InterElimReachableProblem Problem(Entry, ICF);
   InterEliminationSolver<InterReachabilityAnalysisTypes,
                          kDefaultInterElimReachabilityCallStringLength>
-      Solver(Problem);
+      Solver(Problem, Options);
   auto Status = Solver.solve();
   if (const auto *Res = Solver.getResults()) {
     Out = *Res;

@@ -1,6 +1,5 @@
 /** @file AtomicityChecker.h @brief Atomicity violation checker for concurrent programs. */
-#ifndef ATOMICITY_CHECKER_H
-#define ATOMICITY_CHECKER_H
+#pragma once
 
 #include "Concurrency/LockSet/LockSetAnalysis.h"
 #include "Checker/Concurrency/ConcurrencyBugReport.h"
@@ -90,4 +89,3 @@ private:
 
 } // namespace concurrency
 
-#endif // ATOMICITY_CHECKER_H

@@ -1,5 +1,4 @@
-#ifndef DATAFLOW_APA_EAN_ATOMTABLE_H_
-#define DATAFLOW_APA_EAN_ATOMTABLE_H_
+#pragma once
 
 // AtomTable: a bijection between the opaque transfer atoms of a
 // PathExprFactory<TransferT> and the small integer ids that PathLang encodes
@@ -58,4 +57,3 @@ private:
 } // namespace ean
 } // namespace elimination
 
-#endif // DATAFLOW_APA_EAN_ATOMTABLE_H_

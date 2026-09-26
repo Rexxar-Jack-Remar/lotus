@@ -4,7 +4,6 @@
 #include "CFL/Classical/Solvers/Engines/POCR/ClientGrammars.h"
 #include "CFL/Classical/Solvers/Engines/POCR/FullyOrderedClosure.h"
 #include "CFL/Classical/Solvers/Engines/POCR/PairedTreeClosure.h"
-#include "CFL/Classical/Solvers/Engines/POCR/SpecializedEngines.h"
 #include "CFL/Classical/Solvers/Engines/SQID/SqidEngine.h"
 #include "CFL/Classical/Solvers/Engines/STG/StagedSolver.h"
 #include "CFL/Classical/Solvers/Engines/TransitiveClosure.h"
@@ -262,6 +261,39 @@ TEST(ClassicalArchitectureTest, ParsesPocrGrammarAndAttributedEdgeLists) {
               0);
 }
 
+TEST(ClassicalArchitectureTest, ParsesLegacyBareAttributedLabels) {
+  const auto graph_path =
+      writeTemp("lotus_pocr_bare_attributes.peg",
+                "0\t1\tf\t7\n1\t0\tfbar\t7\n1\t2\tcall\t23\n2\t3\tret\t23\n");
+  const LabeledGraph graph = LabeledGraph::parseFromFile(
+      graph_path.string(),
+      GraphLoadOptions{GraphMode::Plain, EdgeDirection::Plain});
+
+  EXPECT_TRUE(graph.hasEdge(graph.vertexId("0"), graph.vertexId("1"), "f_7"));
+  EXPECT_TRUE(
+      graph.hasEdge(graph.vertexId("1"), graph.vertexId("0"), "fbar_7"));
+  EXPECT_TRUE(
+      graph.hasEdge(graph.vertexId("1"), graph.vertexId("2"), "call_23"));
+  EXPECT_TRUE(
+      graph.hasEdge(graph.vertexId("2"), graph.vertexId("3"), "ret_23"));
+}
+
+TEST(ClassicalArchitectureTest, WritesRoundTrippableGrammarInterchange) {
+  const Grammar grammar =
+      Grammar::parseFromText("Production:\nS\tA\tb\nA\ta\nA\n\n"
+                             "Insert:\nS,A\n\nFollow:\nA\n\nCount:\nS\n");
+  const auto path = std::filesystem::temp_directory_path() /
+                    "lotus_classical_grammar_roundtrip.grammar";
+  grammar.writeTextFile(path.string());
+  const Grammar reparsed = Grammar::parseFromFile(path.string());
+
+  EXPECT_EQ(reparsed.startSymbol(), "S");
+  EXPECT_EQ(reparsed.productionCount(), grammar.productionCount());
+  EXPECT_TRUE(reparsed.isInsertSymbol("S"));
+  EXPECT_TRUE(reparsed.isFollowSymbol("A"));
+  EXPECT_TRUE(reparsed.isCountSymbol("S"));
+}
+
 TEST(ClassicalArchitectureTest,
      BuildsExactStandardAndRewrittenPocrClientGrammars) {
   LabeledGraph graph;
@@ -517,274 +549,6 @@ TEST(ClassicalArchitectureTest,
   EXPECT_EQ(actual, expected);
 }
 
-TEST(ClassicalArchitectureTest,
-     SpecializedAliasEnginesPerformHorizontalAndDyckPropagation) {
-  LabeledGraph graph;
-  for (std::size_t node = 0; node < 6; ++node) {
-    graph.addVertex("n" + std::to_string(node));
-  }
-  graph.addEdge(0, 1, "a");
-  graph.addEdge(0, 2, "d");
-  graph.addEdge(1, 3, "d");
-  graph.addEdge(0, 4, "f_7");
-  graph.addEdge(1, 5, "f_7");
-
-  PocrAliasEngine pocr(graph);
-  FocrAliasEngine focr(graph);
-  EXPECT_THROW(pocr.mayAlias(0, 1), std::logic_error);
-  const SpecializedPocrStatistics pocr_stats = pocr.solve();
-  const SpecializedPocrStatistics focr_stats = focr.solve();
-
-  EXPECT_TRUE(pocr.assignmentReachable(0, 1));
-  EXPECT_TRUE(focr.assignmentReachable(0, 1));
-  EXPECT_TRUE(pocr.mayAlias(0, 1));
-  EXPECT_TRUE(focr.mayAlias(0, 1));
-  EXPECT_TRUE(pocr.mayAlias(2, 3));
-  EXPECT_TRUE(focr.mayAlias(2, 3));
-  EXPECT_TRUE(pocr.mayAlias(4, 5));
-  EXPECT_TRUE(focr.mayAlias(4, 5));
-  const auto pocr_pairs = pocr.valuePairs();
-  const auto focr_pairs = focr.valuePairs();
-  const std::set<std::pair<NodeId, NodeId>> pocr_pair_set(pocr_pairs.begin(),
-                                                          pocr_pairs.end());
-  const std::set<std::pair<NodeId, NodeId>> focr_pair_set(focr_pairs.begin(),
-                                                          focr_pairs.end());
-  EXPECT_EQ(pocr_pair_set, focr_pair_set);
-  LabeledGraph grammar_graph = graph.transformed(EdgeDirection::Bidirectional);
-  const Grammar grammar = Grammar::parseFromText(
-      "Production:\n"
-      "V\tAbar\tV\nM\tDV\td\nDV\tdbar\tV\nV\tV\tA\n"
-      "V\tFV_i\tf_i\nV\tM\nV\nFV_i\tfbar_i\tV\n"
-      "A\tA\tA\nA\ta\tM\nA\ta\nA\n"
-      "Abar\tAbar\tAbar\nAbar\tM\tabar\nAbar\tabar\nAbar\n"
-      "Count:\nV\n",
-      inferGrammarAttributes(grammar_graph));
-  SolverSession grammar_solver(grammar_graph, grammar,
-                               SolverBackend::SparseBitVector);
-  grammar_solver.solve();
-  std::set<std::pair<NodeId, NodeId>> grammar_pairs;
-  for (const RelationEdge &edge :
-       grammar_solver.relation().edges(grammar.symbolId("V"))) {
-    grammar_pairs.insert({edge.source, edge.target});
-  }
-  EXPECT_EQ(pocr_pair_set, grammar_pairs);
-  EXPECT_GT(pocr_stats.matched_pairs, 0u);
-  EXPECT_GT(focr_stats.critical_edges, 0u);
-}
-
-TEST(ClassicalArchitectureTest,
-     SpecializedValueFlowEnginesPerformNestedVerticalPropagation) {
-  LabeledGraph graph;
-  for (std::size_t node = 0; node < 6; ++node) {
-    graph.addVertex("n" + std::to_string(node));
-  }
-  graph.addEdge(0, 1, "a");
-  graph.addEdge(2, 0, "call_7");
-  graph.addEdge(1, 3, "ret_7");
-  graph.addEdge(4, 2, "call_9");
-  graph.addEdge(3, 5, "ret_9");
-
-  PocrValueFlowEngine pocr(graph);
-  FocrValueFlowEngine focr(graph);
-  const SpecializedPocrStatistics pocr_stats = pocr.solve();
-  const SpecializedPocrStatistics focr_stats = focr.solve();
-
-  EXPECT_TRUE(pocr.hasFlow(0, 1));
-  EXPECT_TRUE(focr.hasFlow(0, 1));
-  EXPECT_TRUE(pocr.hasFlow(2, 3));
-  EXPECT_TRUE(focr.hasFlow(2, 3));
-  EXPECT_TRUE(pocr.hasFlow(4, 5));
-  EXPECT_TRUE(focr.hasFlow(4, 5));
-  const auto pocr_pairs = pocr.flowPairs();
-  const auto focr_pairs = focr.flowPairs();
-  const std::set<std::pair<NodeId, NodeId>> pocr_pair_set(pocr_pairs.begin(),
-                                                          pocr_pairs.end());
-  const std::set<std::pair<NodeId, NodeId>> focr_pair_set(focr_pairs.begin(),
-                                                          focr_pairs.end());
-  EXPECT_EQ(pocr_pair_set, focr_pair_set);
-  const Grammar grammar =
-      Grammar::parseFromText("Production:\nA\tA\tA\nA\tCA_i\tret_i\nA\ta\nA\n"
-                             "CA_i\tcall_i\tA\nCount:\nA\n",
-                             inferGrammarAttributes(graph));
-  LabeledGraph grammar_graph = graph;
-  SolverSession grammar_solver(grammar_graph, grammar,
-                               SolverBackend::SparseBitVector);
-  grammar_solver.solve();
-  std::set<std::pair<NodeId, NodeId>> grammar_pairs;
-  for (const RelationEdge &edge :
-       grammar_solver.relation().edges(grammar.symbolId("A"))) {
-    grammar_pairs.insert({edge.source, edge.target});
-  }
-  EXPECT_EQ(pocr_pair_set, grammar_pairs);
-  EXPECT_GT(pocr_stats.matched_pairs, 0u);
-  EXPECT_GT(focr_stats.critical_edges, 0u);
-}
-
-TEST(ClassicalArchitectureTest,
-     SpecializedFocrEnginesOptionallySimplifyCriticalGraphCycles) {
-  LabeledGraph alias_graph;
-  alias_graph.addEdge("n0", "n1", "a");
-  alias_graph.addEdge("n1", "n2", "a");
-  alias_graph.addEdge("n2", "n0", "a");
-  FocrAliasEngine alias_without_scc(alias_graph);
-  FocrAliasEngine alias_with_scc(alias_graph, true);
-  const auto alias_without_stats = alias_without_scc.solve();
-  const auto alias_with_stats = alias_with_scc.solve();
-  EXPECT_EQ(alias_with_scc.valuePairs(), alias_without_scc.valuePairs());
-  EXPECT_EQ(alias_without_stats.cycle_simplifications, 0u);
-  EXPECT_GT(alias_with_stats.cycle_simplifications, 0u);
-
-  LabeledGraph value_flow_graph;
-  value_flow_graph.addEdge("n0", "n1", "a");
-  value_flow_graph.addEdge("n1", "n2", "a");
-  value_flow_graph.addEdge("n2", "n0", "a");
-  FocrValueFlowEngine value_flow_without_scc(value_flow_graph);
-  FocrValueFlowEngine value_flow_with_scc(value_flow_graph, true);
-  const auto value_flow_without_stats = value_flow_without_scc.solve();
-  const auto value_flow_with_stats = value_flow_with_scc.solve();
-  EXPECT_EQ(value_flow_with_scc.flowPairs(),
-            value_flow_without_scc.flowPairs());
-  EXPECT_EQ(value_flow_without_stats.cycle_simplifications, 0u);
-  EXPECT_GT(value_flow_with_stats.cycle_simplifications, 0u);
-}
-
-TEST(ClassicalArchitectureTest,
-     SpecializedAliasEnginesMatchGrammarSemanticsOnGeneratedGraphs) {
-  for (std::size_t seed = 1; seed <= 32; ++seed) {
-    LabeledGraph physical;
-    for (std::size_t node = 0; node < 5; ++node) {
-      physical.addVertex("n" + std::to_string(node));
-    }
-    for (std::size_t source = 0; source < 5; ++source) {
-      for (std::size_t target = 0; target < 5; ++target) {
-        const std::size_t value = source * 31 + target * 17 + seed * 13;
-        if (source != target && value % 11 == 0) {
-          physical.addEdge(source, target, "a");
-        }
-        if (value % 13 == 0) {
-          physical.addEdge(source, target, "d");
-        }
-        if (value % 17 == 0) {
-          physical.addEdge(source, target, "f_0");
-        }
-      }
-    }
-
-    PocrAliasEngine pocr(physical);
-    FocrAliasEngine focr(physical);
-    FocrAliasEngine focr_scc(physical, true);
-    pocr.solve();
-    focr.solve();
-    focr_scc.solve();
-    const auto pocr_edges = pocr.valuePairs();
-    const auto focr_edges = focr.valuePairs();
-    const auto focr_scc_edges = focr_scc.valuePairs();
-    const std::set<std::pair<NodeId, NodeId>> pocr_pairs(pocr_edges.begin(),
-                                                         pocr_edges.end());
-    const std::set<std::pair<NodeId, NodeId>> focr_pairs(focr_edges.begin(),
-                                                         focr_edges.end());
-    const std::set<std::pair<NodeId, NodeId>> focr_scc_pairs(
-        focr_scc_edges.begin(), focr_scc_edges.end());
-
-    LabeledGraph grammar_graph =
-        physical.transformed(EdgeDirection::Bidirectional);
-    const Grammar grammar =
-        buildPocrClientGrammar(PocrClientGrammar::StandardAlias, grammar_graph);
-    SolverSession grammar_solver(grammar_graph, grammar,
-                                 SolverBackend::SparseBitVector);
-    grammar_solver.solve();
-    std::set<std::pair<NodeId, NodeId>> grammar_pairs;
-    for (const RelationEdge &edge :
-         grammar_solver.relation().edges(grammar.symbolId("V"))) {
-      grammar_pairs.insert({edge.source, edge.target});
-    }
-    EXPECT_EQ(pocr_pairs, grammar_pairs) << "seed=" << seed;
-    EXPECT_EQ(focr_pairs, grammar_pairs) << "seed=" << seed;
-    EXPECT_EQ(focr_scc_pairs, grammar_pairs) << "seed=" << seed;
-
-    const Grammar rewritten = buildPocrClientGrammar(
-        PocrClientGrammar::RewrittenAlias, grammar_graph);
-    LabeledGraph rewritten_graph = grammar_graph;
-    SolverSession rewritten_solver(rewritten_graph, rewritten,
-                                   SolverBackend::SparseBitVector);
-    rewritten_solver.solve();
-    std::set<std::pair<NodeId, NodeId>> rewritten_pairs;
-    for (const RelationEdge &edge :
-         rewritten_solver.relation().edges(rewritten.startSymbolId())) {
-      rewritten_pairs.insert({edge.source, edge.target});
-    }
-    EXPECT_EQ(rewritten_pairs, grammar_pairs) << "seed=" << seed;
-  }
-}
-
-TEST(ClassicalArchitectureTest,
-     SpecializedValueFlowEnginesMatchGrammarOnGeneratedGraphs) {
-  for (std::size_t seed = 1; seed <= 32; ++seed) {
-    LabeledGraph graph;
-    for (std::size_t node = 0; node < 5; ++node) {
-      graph.addVertex("n" + std::to_string(node));
-    }
-    for (std::size_t source = 0; source < 5; ++source) {
-      for (std::size_t target = 0; target < 5; ++target) {
-        const std::size_t value = source * 19 + target * 29 + seed * 7;
-        if (source != target && value % 11 == 0) {
-          graph.addEdge(source, target, "a");
-        }
-        if (value % 17 == 0) {
-          graph.addEdge(source, target, "call_0");
-        }
-        if (value % 19 == 0) {
-          graph.addEdge(source, target, "ret_0");
-        }
-      }
-    }
-
-    PocrValueFlowEngine pocr(graph);
-    FocrValueFlowEngine focr(graph);
-    FocrValueFlowEngine focr_scc(graph, true);
-    pocr.solve();
-    focr.solve();
-    focr_scc.solve();
-    const auto pocr_edges = pocr.flowPairs();
-    const auto focr_edges = focr.flowPairs();
-    const auto focr_scc_edges = focr_scc.flowPairs();
-    const std::set<std::pair<NodeId, NodeId>> pocr_pairs(pocr_edges.begin(),
-                                                         pocr_edges.end());
-    const std::set<std::pair<NodeId, NodeId>> focr_pairs(focr_edges.begin(),
-                                                         focr_edges.end());
-    const std::set<std::pair<NodeId, NodeId>> focr_scc_pairs(
-        focr_scc_edges.begin(), focr_scc_edges.end());
-
-    const Grammar grammar =
-        buildPocrClientGrammar(PocrClientGrammar::StandardValueFlow, graph);
-    LabeledGraph grammar_graph = graph;
-    SolverSession grammar_solver(grammar_graph, grammar,
-                                 SolverBackend::SparseBitVector);
-    grammar_solver.solve();
-    std::set<std::pair<NodeId, NodeId>> grammar_pairs;
-    for (const RelationEdge &edge :
-         grammar_solver.relation().edges(grammar.symbolId("A"))) {
-      grammar_pairs.insert({edge.source, edge.target});
-    }
-    EXPECT_EQ(pocr_pairs, grammar_pairs) << "seed=" << seed;
-    EXPECT_EQ(focr_pairs, grammar_pairs) << "seed=" << seed;
-    EXPECT_EQ(focr_scc_pairs, grammar_pairs) << "seed=" << seed;
-
-    const Grammar rewritten =
-        buildPocrClientGrammar(PocrClientGrammar::RewrittenValueFlow, graph);
-    LabeledGraph rewritten_graph = graph;
-    SolverSession rewritten_solver(rewritten_graph, rewritten,
-                                   SolverBackend::SparseBitVector);
-    rewritten_solver.solve();
-    std::set<std::pair<NodeId, NodeId>> rewritten_pairs;
-    for (const RelationEdge &edge :
-         rewritten_solver.relation().edges(rewritten.startSymbolId())) {
-      rewritten_pairs.insert({edge.source, edge.target});
-    }
-    EXPECT_EQ(rewritten_pairs, grammar_pairs) << "seed=" << seed;
-  }
-}
-
 TEST(ClassicalArchitectureTest, RejectsOutOfRangeGraphAttributes) {
   LabeledGraph graph;
   graph.addEdge("a", "b", "call_4294967296");
@@ -892,6 +656,11 @@ TEST(ClassicalArchitectureTest, ParsesSolverBackendNames) {
   EXPECT_EQ(parseSolverBackend("graspan"), SolverBackend::Graspan);
   EXPECT_EQ(parseSolverBackend("sqid"), SolverBackend::Sqid);
   EXPECT_EQ(parseSolverBackend("pearl"), SolverBackend::Pearl);
+  EXPECT_EQ(parseSolverBackend("stg"), SolverBackend::Stg);
+  EXPECT_EQ(parseSolverBackend("skewed"), SolverBackend::Skewed);
+  EXPECT_EQ(parseSolverBackend("cat"), SolverBackend::Cat);
+  EXPECT_EQ(parseSolverBackend("iea"), SolverBackend::Iea);
+  EXPECT_EQ(parseSolverBackend("iea-ocr"), SolverBackend::IeaOcr);
   EXPECT_EQ(parseSolverBackend("pocr"), SolverBackend::Pocr);
   EXPECT_EQ(parseSolverBackend("hpocr"), SolverBackend::HierarchicalPocr);
   EXPECT_EQ(parseSolverBackend("focr"), SolverBackend::FullyOrdered);
@@ -1486,6 +1255,10 @@ TEST(ClassicalArchitectureTest, AllSolverBackendsProduceTheSameClosure) {
   EXPECT_EQ(solveWith(SolverBackend::Graspan, graph, grammar), baseline);
   EXPECT_EQ(solveWith(SolverBackend::Sqid, graph, grammar), baseline);
   EXPECT_EQ(solveWith(SolverBackend::Pearl, graph, grammar), baseline);
+  EXPECT_EQ(solveWith(SolverBackend::Skewed, graph, grammar), baseline);
+  EXPECT_EQ(solveWith(SolverBackend::Cat, graph, grammar), baseline);
+  EXPECT_EQ(solveWith(SolverBackend::Iea, graph, grammar), baseline);
+  EXPECT_EQ(solveWith(SolverBackend::IeaOcr, graph, grammar), baseline);
   EXPECT_EQ(solveWith(SolverBackend::TransitiveClosure, graph, grammar),
             baseline);
   EXPECT_EQ(solveWith(SolverBackend::Pocr, graph, grammar), baseline);
@@ -1617,6 +1390,14 @@ TEST(ClassicalArchitectureTest, BackendsAgreeAcrossGeneratedSmallGraphs) {
         << "seed=" << seed;
     EXPECT_EQ(solveWith(SolverBackend::Pearl, graph, grammar), baseline)
         << "seed=" << seed;
+    EXPECT_EQ(solveWith(SolverBackend::Skewed, graph, grammar), baseline)
+        << "seed=" << seed;
+    EXPECT_EQ(solveWith(SolverBackend::Cat, graph, grammar), baseline)
+        << "seed=" << seed;
+    EXPECT_EQ(solveWith(SolverBackend::Iea, graph, grammar), baseline)
+        << "seed=" << seed;
+    EXPECT_EQ(solveWith(SolverBackend::IeaOcr, graph, grammar), baseline)
+        << "seed=" << seed;
     EXPECT_EQ(solveWith(SolverBackend::TransitiveClosure, graph, grammar),
               baseline)
         << "seed=" << seed;
@@ -1687,8 +1468,10 @@ TEST(ClassicalArchitectureTest,
     for (SolverBackend backend :
          {SolverBackend::SparseSet, SolverBackend::SparseBitVector,
           SolverBackend::Graspan, SolverBackend::Sqid, SolverBackend::Pearl,
-          SolverBackend::TransitiveClosure, SolverBackend::Pocr,
-          SolverBackend::HierarchicalPocr, SolverBackend::FullyOrdered}) {
+          SolverBackend::Skewed, SolverBackend::Cat, SolverBackend::Iea,
+          SolverBackend::IeaOcr, SolverBackend::TransitiveClosure,
+          SolverBackend::Pocr, SolverBackend::HierarchicalPocr,
+          SolverBackend::FullyOrdered}) {
       EXPECT_EQ(solveWith(backend, graph, grammar), reference)
           << "seed=" << seed << " backend=" << solverBackendName(backend);
     }
@@ -1828,8 +1611,11 @@ TEST(ClassicalArchitectureTest, RepeatedSolveDoesNotReseedNullableFacts) {
   for (SolverBackend backend :
        {SolverBackend::SparseSet, SolverBackend::SparseBitVector,
         SolverBackend::Graspan, SolverBackend::Sqid, SolverBackend::Pearl,
-        SolverBackend::TransitiveClosure, SolverBackend::Pocr,
-        SolverBackend::HierarchicalPocr, SolverBackend::FullyOrdered}) {
+        SolverBackend::Skewed, SolverBackend::Cat, SolverBackend::Iea,
+        SolverBackend::IeaOcr, SolverBackend::TransitiveClosure,
+        SolverBackend::Pocr, SolverBackend::HierarchicalPocr,
+        SolverBackend::FullyOrdered, SolverBackend::EndpointQuotient,
+        SolverBackend::CertCFL}) {
     LabeledGraph graph;
     graph.addVertex("n0");
     SolverSession session(graph, grammar, backend);
@@ -1947,6 +1733,7 @@ TEST(ClassicalArchitectureTest, WritesNormalizedGraphWithSourceMarkers) {
   LabeledGraph graph;
   const NodeId source = graph.addVertex("source");
   const NodeId target = graph.addVertex("target");
+  graph.addVertex("isolated");
   graph.markSource(source);
   graph.addEdge(source, target, "call_4");
   const auto path =
@@ -1956,6 +1743,8 @@ TEST(ClassicalArchitectureTest, WritesNormalizedGraphWithSourceMarkers) {
   const LabeledGraph loaded = LabeledGraph::parseFromFile(
       path.string(), GraphLoadOptions{GraphMode::Plain, EdgeDirection::Plain});
   EXPECT_TRUE(loaded.isSource(loaded.vertexId("source")));
+  EXPECT_EQ(loaded.vertexCount(), 3u);
+  EXPECT_FALSE(loaded.isSource(loaded.vertexId("isolated")));
   EXPECT_TRUE(loaded.hasEdge(loaded.vertexId("source"),
                              loaded.vertexId("target"), "call_4"));
 }

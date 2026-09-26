@@ -108,6 +108,7 @@ function(add_lotus_test_suite test_name)
     gtest_discover_tests(${test_name}
         TEST_PREFIX "${test_name}."
         WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
+        DISCOVERY_TIMEOUT ${LOTUS_TEST_DISCOVERY_TIMEOUT}
         PROPERTIES
             TIMEOUT ${test_timeout}
             LABELS "${labels_property}")

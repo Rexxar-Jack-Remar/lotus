@@ -1,6 +1,5 @@
 /** @file ConditionVariableChecker.h @brief Condition variable misuse checker for concurrent programs. */
-#ifndef CONDITION_VARIABLE_CHECKER_H
-#define CONDITION_VARIABLE_CHECKER_H
+#pragma once
 
 #include "Concurrency/LockSet/LockSetAnalysis.h"
 #include "Checker/Concurrency/ConcurrencyBugReport.h"
@@ -40,4 +39,3 @@ private:
 
 } // namespace concurrency
 
-#endif // CONDITION_VARIABLE_CHECKER_H

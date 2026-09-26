@@ -22,6 +22,7 @@
  */
 
 #include "Concurrency/MHP/MHPAnalysis.h"
+#include "Concurrency/OpenMP/OpenMPThreadModelLowering.h"
 
 #include <deque>
 

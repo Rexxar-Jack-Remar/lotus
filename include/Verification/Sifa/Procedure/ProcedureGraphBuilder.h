@@ -11,8 +11,7 @@
 //
 //===----------------------------------------------------------------------===//
 
-#ifndef LOTUS_VERIFICATION_SIFA_PROCEDURE_PROCEDUREGRAPHBUILDER_H
-#define LOTUS_VERIFICATION_SIFA_PROCEDURE_PROCEDUREGRAPHBUILDER_H
+#pragma once
 
 #include "Verification/Sifa/Procedure/ProcedureGraph.h"
 #include "Verification/Sifa/Statistics/SifaStats.h"
@@ -65,4 +64,3 @@ private:
 } // namespace sifa
 } // namespace lotus
 
-#endif // LOTUS_VERIFICATION_SIFA_PROCEDURE_PROCEDUREGRAPHBUILDER_H

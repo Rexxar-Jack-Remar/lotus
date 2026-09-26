@@ -9,8 +9,7 @@
  *     Fabian Schiebel and others
  *****************************************************************************/
 
-#ifndef LOTUS_ANALYSIS_TYPEHIERARCHY_DIBASEDTYPEHIERARCHY_H
-#define LOTUS_ANALYSIS_TYPEHIERARCHY_DIBASEDTYPEHIERARCHY_H
+#pragma once
 
 #include "llvm/ADT/BitVector.h"
 #include "llvm/ADT/DenseMap.h"
@@ -160,4 +159,3 @@ private:
 };
 } // namespace lotus
 
-#endif // LOTUS_ANALYSIS_TYPEHIERARCHY_DIBASEDTYPEHIERARCHY_H

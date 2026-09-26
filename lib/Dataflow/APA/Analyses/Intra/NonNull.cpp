@@ -8,7 +8,7 @@
 #include "Dataflow/APA/Analyses/Intra/NonNull.h"
 #include "Dataflow/APA/Core/Problem.h"
 #include "Dataflow/APA/LLVM/ForwardProblem.h"
-#include "Dataflow/APA/Solver/Solver.h"
+#include "Dataflow/APA/Solver/Intra/IntraSolver.h"
 #include "Dataflow/ControlFlow/IntraCFG.h"
 
 #include <deque>

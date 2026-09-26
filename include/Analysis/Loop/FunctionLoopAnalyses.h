@@ -20,8 +20,7 @@
  * OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE
  * OR OTHER DEALINGS IN THE SOFTWARE.
  */
-#ifndef LOTUS_ANALYSIS_LOOP_FUNCTIONLOOPANALYSES_H
-#define LOTUS_ANALYSIS_LOOP_FUNCTIONLOOPANALYSES_H
+#pragma once
 
 #include "Analysis/Loop/LoopContent.h"
 
@@ -114,4 +113,3 @@ private:
 } // namespace analysis
 } // namespace lotus
 
-#endif

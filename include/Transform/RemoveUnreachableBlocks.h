@@ -1,5 +1,4 @@
-#ifndef TRANSFORM_REMOVEUNREACHABLEBLOCKS_H
-#define TRANSFORM_REMOVEUNREACHABLEBLOCKS_H
+#pragma once
 
 #include "llvm/IR/Function.h"
 #include "llvm/IR/PassManager.h"
@@ -10,4 +9,3 @@ struct RemoveUnreachableBlocksPass
                               llvm::FunctionAnalysisManager &);
 };
 
-#endif // TRANSFORM_REMOVEUNREACHABLEBLOCKS_H
