@@ -34,6 +34,7 @@ struct CommandLine {
   bool add_reverse_edges = false;
   std::optional<std::size_t> shallow_threshold;
   bool stats = false;
+  bool phase_timing = false;
   bool print_pairs = false;
 };
 
@@ -50,6 +51,7 @@ void usage(std::ostream &output) {
          "                   result overapproximates the original graph\n"
          "  --shallow K      adaptive only: solve min(counter1,counter2) <= K\n"
          "  --stats          print construction and backend statistics\n"
+         "  --phase-timing   adaptive only: collect RQ2.2 phase times\n"
          "  --print-pairs    materialize non-reflexive component pairs\n"
          "  -o FILE          write output to FILE\n"
          "  -h, --help       show this help\n";
@@ -111,6 +113,10 @@ CommandLine parseCommandLine(int argc, char **argv) {
       result.stats = true;
       continue;
     }
+    if (argument == "--phase-timing") {
+      result.phase_timing = true;
+      continue;
+    }
     if (argument == "--print-pairs") {
       result.print_pairs = true;
       continue;
@@ -137,6 +143,14 @@ CommandLine parseCommandLine(int argc, char **argv) {
       result.shallow_threshold) {
     throw std::invalid_argument(
         "--shallow is available only with --algorithm adaptive");
+  }
+  if (result.algorithm == unary::Algorithm::FixedCounter &&
+      result.phase_timing) {
+    throw std::invalid_argument(
+        "--phase-timing is available only with --algorithm adaptive");
+  }
+  if (result.phase_timing && !result.stats) {
+    throw std::invalid_argument("--phase-timing requires --stats");
   }
   return result;
 }
@@ -222,6 +236,30 @@ void printAdaptiveResult(std::ostream &output, const CommandLine &command_line,
   if (command_line.stats) {
     const unary::AdaptiveStats &stats = result.stats();
     printExecution(output, stats.execution);
+    output << "Phase timing: "
+           << (stats.phase_timing.enabled ? "enabled" : "disabled") << '\n';
+    if (stats.phase_timing.enabled) {
+      const unary::AdaptivePhaseTiming &phase = stats.phase_timing;
+      output << "  phase projection (us): " << phase.projection_us << '\n'
+             << "  phase quotient sparsification (us): "
+             << phase.quotient_sparsification_us << '\n'
+             << "  phase decomposition (us): " << phase.decomposition_us
+             << '\n'
+             << "  phase vertical construction (us): "
+             << phase.vertical_construction_us << '\n'
+             << "  phase vertical solving (us): "
+             << phase.vertical_solving_us << '\n'
+             << "  phase horizontal construction (us): "
+             << phase.horizontal_construction_us << '\n'
+             << "  phase horizontal solving (us): "
+             << phase.horizontal_solving_us << '\n'
+             << "  phase parent-map labeling (us): "
+             << phase.parent_map_labeling_us << '\n'
+             << "  phase boundary unions (us): "
+             << phase.boundary_unions_us << '\n'
+             << "  phase output lifting (us): " << phase.output_lifting_us
+             << '\n';
+    }
     output << "  vertical/horizontal/merge (us): " << stats.vertical_us << '/'
            << stats.horizontal_us << '/' << stats.merge_us << '\n';
     printDyck(output, "vertical", stats.vertical_dyck);
@@ -311,6 +349,7 @@ int main(int argc, char **argv) {
     if (command_line.algorithm == unary::Algorithm::Adaptive) {
       unary::AdaptiveOptions options;
       options.sparsify = command_line.sparsify;
+      options.collect_phase_timing = command_line.phase_timing;
       if (command_line.add_reverse_edges) {
         options.input_policy =
             unary::BidirectedInputPolicy::AddMissingReverseEdges;
