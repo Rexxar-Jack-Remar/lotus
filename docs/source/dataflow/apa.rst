@@ -407,6 +407,11 @@ Typical use cases
 - Prototype intraprocedural dataflow problems over LLVM IR.
 - Drive differential-testing workflows for solver validation.
 
+Analysis Tooling & Evaluation
+-----------------------------
+
+The command-line driver (``lotus-dfa-apa``) logic is cleanly separated into reusable components under ``include/Dataflow/APA/Tooling/`` and ``lib/Dataflow/APA/Tooling/``. This isolation prevents the core APA analysis engines from being polluted with experiment-specific artifacts (like repetitive cycle timing, specific OS memory profiling tools, or hardcoded benchmark variants), offering a clean entry point for client applications.
+
 See also
 --------
 

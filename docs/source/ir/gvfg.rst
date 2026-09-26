@@ -50,6 +50,11 @@ edge can carry:
 - A ``confidence`` score for conservative or imported information.
 - A ``ConditionRef`` describing the guard under which that dependency holds.
 
+For opcode nodes, operands preserve order and multiplicity (accessible via typed 
+operand accessors like ``getOperand()`` and ``setOperand()``), while the general 
+``children()`` interface provides a deduplicated dependency view with occurrence-aware 
+reverse uses.
+
 The graph also records diagnostics via ``GuardedValueFlowGraph::Diagnostic`` so
 clients can detect degraded precision introduced by the builder or adapter.
 
